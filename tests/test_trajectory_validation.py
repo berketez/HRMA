@@ -30,14 +30,28 @@ from hrma.analysis.trajectory_analysis import TrajectoryAnalyzer
 G = 9.80665  # m/s^2 (hrma.constants.G_0 ile tutarlı)
 
 
-def _make_motor(thrust=3000.0, burn=5.0, mprop=8.0, isp=200.0):
-    return {
+def _make_motor(thrust=3000.0, burn=5.0, mprop=8.0, isp=None):
+    """Referans motor yükü.
+
+    ÖH D23 / P4B3-24 — ``isp`` ARTIK VARSAYILAN OLARAK VERİLMEZ. Eski
+    varsayılan (200,0 s) bu yükün impuls bütçesiyle çelişiyordu
+    (total_impulse / (m_p * g0) = 3000*5 / (8*9,80665) = 191,2 s değil,
+    parametreler değiştikçe bambaşka sayılar), yani yanma iki kez ve iki
+    farklı biçimde tarif ediliyordu. Çözücü bu çelişkiyi artık reddediyor
+    (fail-closed); Isp burada bir GİRDİ DEĞİL, entegre edilen bütçenin
+    türevidir ve verilmediğinde ondan türetilir. Testlerin ölçtüğü
+    sayıların hiçbiri değişmez (ölçüldü: isp 220/1/1e9 ile apoje BİT-AYNI).
+    Çelişkinin KENDİSİNİ sınayan test ``isp=`` ile açıkça geçebilir.
+    """
+    motor = {
         'thrust': thrust,
         'burn_time': burn,
         'total_impulse': thrust * burn,
-        'isp': isp,
         'propellant_mass_total': mprop,
     }
+    if isp is not None:
+        motor['isp'] = isp
+    return motor
 
 
 def _run(launch_angle=90.0, wind_speed=0.0, wind_direction=0.0,
@@ -46,11 +60,17 @@ def _run(launch_angle=90.0, wind_speed=0.0, wind_direction=0.0,
     ta.set_vehicle_parameters(mass_dry=mass_dry, diameter=diameter, drag_coefficient=cd0)
     if motor is None:
         motor = _make_motor()
+    # ÖH D22 / OH-D18-05: menzil/iniş ölçen bekçilerin bir kurtarma
+    # sistemine ihtiyacı var — paraşüt alanı verilmezse iniş fazı
+    # çözülmez ve ``range_distance`` yayımlanmaz. Bu dosya TIRMANIŞ ve
+    # rüzgâr fiziğini ölçüyor; alan eskiden modül sabitinden sessizce
+    # geliyordu, şimdi açıkça isteniyor (aynı 2,0 m², aynı sayılar).
     lp = {
         'launch_angle': launch_angle,
         'launch_altitude': 0.0,
         'wind_speed': wind_speed,
         'wind_direction': wind_direction,
+        'parachute_area': 2.0,
     }
     return ta.calculate_trajectory(motor, lp)
 

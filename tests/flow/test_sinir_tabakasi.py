@@ -693,11 +693,22 @@ class TestGercekLule:
         assert res['losses']['friction_loss_fraction_integral_bl'] is not None
 
     def test_sok_rejiminde_kesir_yayimlanmaz_kuvvet_yayimlanir(self):
-        res = NozzleFlow1D(chamber_pressure=6e5, chamber_temperature=3000.0,
+        # ÖH D19 / P15B4-09 — VAKA YENİDEN ÇAPALANDI (sözleşme aynen durur:
+        # şok rejiminde kesir yayımlanmaz, kuvvet yayımlanır). Eski çapa
+        # (P_c = 6 bar, eps = 25) Summerfield ölçütünü SAĞLIYORDU
+        # (P_e = 2 282,6 Pa < 0,40 x 101 325 = 40 530 Pa), yani gerçek akış
+        # orada ayrılır; merdiven artık ölçütü şok dalının önüne aldığı için
+        # o vaka 'separated'a düşüyor. Testin ölçtüğü şey şok bandındaki
+        # kesir/kuvvet sözleşmesi olduğundan vaka ölçütün SAĞLANMADIĞI
+        # gerçek şok bandına taşındı: gamma = 1,2 / eps = 1,15 ->
+        # P2/P1 = 2,1313 < 1/k = 2,50; şok bandı Pa/Pc (0,70070; 0,78390),
+        # ayrılma eşiği 0,82191; seçilen Pa/Pc = 0,73960.
+        res = NozzleFlow1D(chamber_pressure=1.37e5, chamber_temperature=3000.0,
                            gamma=1.2, molecular_weight=24.0,
-                           throat_diameter=0.05, expansion_ratio=25.0,
+                           throat_diameter=0.05, expansion_ratio=1.15,
                            ambient_pressure=101325.0).solve()
         assert res['regime']['type'] == NozzleFlow1D.REGIME_SHOCK
+        assert res['regime']['separation_criterion_met'] is False
         losses = res['losses']
         assert losses['friction_loss_fraction_integral_bl'] is None
         assert losses['friction_loss_delta_vs_default'] is None

@@ -32,6 +32,8 @@ import pytest
 import hrma.engines.combustion_analysis as combustion_analysis
 from hrma.visualization.visualization import (
     PALETTE,
+    PERF_SURFACE_CEILING_REFINE_STEPS,
+    _isp_surface_ceiling_cached,
     _isp_surface_solve_cached,
     _of_sweep_solve_cached,
     _combustion_of_sweep,
@@ -165,13 +167,29 @@ def test_trajectory_zaman_panelleri_eslesir_menzil_haric():
 # ---------------------------------------------------------------------------
 
 def test_gauge_barlari_palete_gecti():
+    """Gauge bar renkleri palete geçti (v2.5.5).
+
+    ÇEVRİLDİ — ÖH D22 / fea-cfd a2, P8B3-07. Test eskiden HER göstergenin
+    ``gauge.bar.color`` taşıdığını dayatıyordu; bu, referansı olmayan
+    hücrede bile iğne çizilmesini KİLİTLİYORDU — oysa o iğnenin konumu
+    değerin kendisinden türetiliyordu ve 1 N ile 1 MN aynı yerde duruyordu
+    (iğne kesri 0,833333 / 0,833333 / 0,833333, once_p8b3.json). Renk
+    kuralı korunur ama yalnız GERÇEKTEN gauge olan izler için sınanır;
+    referanssız hücre artık sayı-yalnız (``mode='number'``) döner.
+    """
     time_data = None
     motor = {'thrust': 1000.0, 'chamber_pressure': 30.0, 'mdot_total': 0.5,
-             'chamber_temperature': 3000.0, 'of_ratio': 6.0, 'isp': 220.0}
+             'chamber_temperature': 3000.0, 'of_ratio': 6.0, 'isp': 220.0,
+             # Referans serisi: gauge'un tam skalası buradan gelir.
+             'thrust_curve': {'time': [0.0, 1.0, 2.0],
+                              'thrust': [1200.0, 1000.0, 800.0],
+                              'pressure': [35.0, 30.0, 25.0],
+                              'mass_flow': [0.6, 0.5, 0.4]}}
     fig = _fig(create_real_time_dashboard(motor, time_data))
-    bars = [t['gauge']['bar']['color'] for t in fig['data']
-            if t.get('type') == 'indicator']
-    assert bars, 'gauge paneli kaldırılmış olamaz'
+    gostergeler = [t for t in fig['data'] if t.get('type') == 'indicator']
+    assert gostergeler, 'gösterge paneli kaldırılmış olamaz'
+    bars = [t['gauge']['bar']['color'] for t in gostergeler if t.get('gauge')]
+    assert bars, 'referansı olan hücrede gauge çizilmeli'
     for c in bars:
         assert str(c).lower() not in FORBIDDEN_GAUGE_COLORS, bars
 
@@ -214,10 +232,19 @@ def counting_solver(monkeypatch):
     monkeypatch.setattr(combustion_analysis.CombustionAnalyzer,
                         'analyze_combustion', fake)
     _isp_surface_solve_cached.cache_clear()
+    _isp_surface_ceiling_cached.cache_clear()
     _of_sweep_solve_cached.cache_clear()
     yield calls
     _isp_surface_solve_cached.cache_clear()
+    _isp_surface_ceiling_cached.cache_clear()
     _of_sweep_solve_cached.cache_clear()
+
+
+#: OH-D17-02 (ÖH D21 / fea-cfd a1): tarama tavanı artık ızgara örneğinin
+#: maksimumu değil, ızgara tepesi çevresinde AYNI çözücüyle inceltilmiş
+#: sonuçtur. Eksen başına maliyet: 2 açılış noktası + adım sayısı; iki
+#: eksen koşulur. Sayı burada ELLE yazılmaz, üreten sabitten türetilir.
+TAVAN_INCELTME_CAGRISI = 2 * (2 + PERF_SURFACE_CEILING_REFINE_STEPS)
 
 
 def test_isp_yuzeyi_ikinci_istekte_cozucuyu_cagirmaz(counting_solver):
@@ -226,7 +253,13 @@ def test_isp_yuzeyi_ikinci_istekte_cozucuyu_cagirmaz(counting_solver):
           'grid_n': 3}
     s1 = create_chamber_pressure_mixture_ratio_3d_surface(ed)
     n1 = counting_solver['n']
-    assert n1 == 9, '3x3 ızgara 9 çözüm demek'
+    # ÇEVRİLEN SAYI (OH-D17-02): 3x3 ızgara 9 çözümdür; üstüne tavan
+    # inceltmesi gelir. Bekçinin KORUDUĞU SÖZLEŞME değişmedi — ikinci
+    # istek çözücüyü HİÇ çağırmaz (aşağıdaki iddia) — yalnız ilk isteğin
+    # maliyeti beyanlı olarak arttı.
+    assert n1 == 9 + TAVAN_INCELTME_CAGRISI, (
+        f'3x3 ızgara 9 çözüm + tavan inceltmesi '
+        f'{TAVAN_INCELTME_CAGRISI} çözüm; ölçülen {n1}')
     # base_isp yalnız tasarım işareti — yüzey önbellekten gelmeli
     s2 = create_chamber_pressure_mixture_ratio_3d_surface(
         dict(ed, base_isp=999.0))
@@ -242,7 +275,7 @@ def test_isp_yuzeyi_farkli_girdi_yeniden_cozer(counting_solver):
     n1 = counting_solver['n']
     create_chamber_pressure_mixture_ratio_3d_surface(
         dict(ed, oxidizer_type='LOX'))
-    assert counting_solver['n'] == n1 + 9, (
+    assert counting_solver['n'] == n1 + 9 + TAVAN_INCELTME_CAGRISI, (
         'farklı oksitleyici yeni çözüm gerektirir (önbellek karışmasın)')
 
 
@@ -365,8 +398,12 @@ def test_app_js_sabit_export_boyutu_kalkti():
     assert 'width' not in block and 'height' not in block, (
         'sabit 700x500 dışa aktarım boyutu geri gelmiş')
     assert 'scale: 2' in block
-    # Parametrik çizim safePlotCreate üzerinden akar
-    assert "safePlotCreate('parametric_plot'" in src
+    # Parametrik çizim CANLI yolda (advanced.html satır içi betiği) safePlotCreate
+    # üzerinden akar. fix-32 (14 Eyl 2026): app.js'teki ölü kopya D30 panel a1'de
+    # söküldü; bekçi artık kullanıcının gerçekten koşturduğu şablonu ölçer.
+    adv = (APP_JS.parent.parent.parent / 'templates' / 'advanced.html').read_text(encoding='utf-8')
+    assert "safePlotCreate('parametric_plot'" in adv, 'canlı parametrik çizim safePlotCreate kullanmıyor'
+    assert not re.search(r"Plotly\.newPlot\('parametric_plot'", adv), 'advanced.html ham Plotly.newPlot ile çiziyor (dışa aktarım düzeltmesi kaçar)'
     assert not re.search(r"Plotly\.newPlot\('parametric_plot'", src)
 
 

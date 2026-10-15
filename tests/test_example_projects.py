@@ -99,23 +99,44 @@ def store_env(monkeypatch):
     monkeypatch.setenv('HRMA_PROJECTS_DIR', str(EXAMPLES_DIR))
 
 
-# Hesap sonuçları pahalı (sıvı ~5-10 s) — motor tipi başına BİR kez hesaplanır
+# Hesap sonuçları pahalı (sıvı ~5-10 s) — motor tipi ve YOL başına BİR kez
 _RESULTS = {}
 
 
+def _kos(client, motor_type, payload):
+    resp = client.post(ENDPOINTS[motor_type], json=payload, headers=HEADERS)
+    assert resp.status_code == 200, (
+        f'{ENDPOINTS[motor_type]} {resp.status_code}: '
+        + resp.get_data(as_text=True)[:400])
+    body = resp.get_json()
+    assert 'error' not in body, body.get('error')
+    return body
+
+
 def _fresh_results(client, motor_type):
+    """API YOLU: yalnız ``.hrma``nın taşıdığı alanlarla hesap."""
     if motor_type not in _RESULTS:
         doc = load_example_doc(motor_type)
         payload = calculate_payload(motor_type, doc['inputs']['fields'])
-        resp = client.post(ENDPOINTS[motor_type], json=payload,
-                           headers=HEADERS)
-        assert resp.status_code == 200, (
-            f'{ENDPOINTS[motor_type]} {resp.status_code}: '
-            + resp.get_data(as_text=True)[:400])
-        body = resp.get_json()
-        assert 'error' not in body, body.get('error')
-        _RESULTS[motor_type] = body
+        _RESULTS[motor_type] = _kos(client, motor_type, payload)
     return _RESULTS[motor_type]
+
+
+def _form_results(client, motor_type):
+    """FORM YOLU: KULLANICININ gördüğü hesap (ÖH D35 · OH-ON-03).
+
+    Örnek arayüze yüklendiğinde dosyada OLMAYAN alanlar şablonun kendi
+    ``value=`` varsayılanıyla kalır ve Hesapla'ya basılınca toplayıcı onları
+    da gönderir. Bu yüzden ürünün kullanıcıya GÖSTERDİĞİ sayı bu yolun
+    sayısıdır; özet bekçisi artık bunu ölçer.
+    """
+    anahtar = motor_type + '::form'
+    if anahtar not in _RESULTS:
+        from tests.support.form_defaults import form_yuku
+        doc = load_example_doc(motor_type)
+        _RESULTS[anahtar] = _kos(client, motor_type,
+                                 form_yuku(motor_type, doc['inputs']['fields']))
+    return _RESULTS[anahtar]
 
 
 # ---------------------------------------------------------------------------
@@ -245,13 +266,37 @@ def _summary_reference(motor_type, body):
     }
 
 
+#: Özet ⟷ taze hesap bağıl toleransı. ÖH D35 · OH-ON-03'te %25'ten
+#: indirildi: özet artık örneği üreten KOŞUMUN çıktısıdır (aynı sürüm, aynı
+#: yol), dolayısıyla eşitlik yuvarlamaya kadar beklenir. %25'lik eski bant
+#: KUSURU KORUYORDU — %14,8'lik gerçek kayma (16 Eylül, OH-D33) o bandın
+#: içinde kalıp bekçiyi yeşil bırakmıştı.
+OZET_BAGIL_TOLERANS = 0.005
+
+
 @pytest.mark.parametrize('motor_type', sorted(NAMES))
 def test_results_summary_is_not_fabricated(client, motor_type):
+    """Özet, KULLANICININ gördüğü hesapla aynı sayıyı söylemeli.
+
+    ÖH D35 · OH-ON-03 — BEKÇİ ÇEVRİLDİ (ÖLÇÜLDÜ 22 Eylül 2026,
+    ``docs/scofield/raw/OH/D35/onemli-kati-cad/a1/10_once.json``).
+
+    Bu bekçi API yolunu ölçüyordu: örneğin ``inputs.fields``ını doğrudan
+    hesap ucuna veriyordu. Kullanıcı ise örneği ARAYÜZE yükler ve Hesapla'ya
+    basar; dosyada olmayan alanlar sayfanın kendi ``value=`` varsayılanıyla
+    gönderilir. Katı örnekte bu 51 fazladan alan demekti ve yayımlanan sayı
+    ayrışıyordu: proje şeridi **Isp 140,109 s**, Hesapla **125,401 s**
+    (%-10,5); toplam itki 3306,767 ⟷ 2959,642 N·s. Bekçi API yolunu ölçtüğü
+    için kaymayı GÖRMÜYORDU — kusuru koruyan bekçi.
+
+    Artık ölçülen yol FORM yoludur ve tolerans %25'ten %0,5'e indirilmiştir
+    (özet, örneği üreten koşumun çıktısıdır; eşitlik beklenir).
+    """
     doc = load_example_doc(motor_type)
     summary = doc.get('results_summary')
     assert summary, 'örnekte results_summary olmalı (liste kartları için)'
-    reference = _summary_reference(motor_type, _fresh_results(client,
-                                                              motor_type))
+    reference = _summary_reference(motor_type, _form_results(client,
+                                                             motor_type))
     checked = 0
     for key, saved in summary.items():
         if key == 'computed_with_version' or key not in reference:
@@ -259,14 +304,87 @@ def test_results_summary_is_not_fabricated(client, motor_type):
         fresh = reference[key]
         assert isinstance(fresh, (int, float)) and math.isfinite(fresh), (
             f'{motor_type}.{key}: taze hesapta karşılık yok')
-        # Gevşek tolerans: model rekalibrasyonu özeti hemen kırmasın, ama
-        # elle yazılmış "güzel" sayı da saklanamasın.
-        assert math.isclose(saved, fresh, rel_tol=0.25, abs_tol=1e-9), (
-            f'{motor_type}.{key}: kayıtlı {saved} / taze {fresh} — özet '
-            'bayatlamış ya da elle yazılmış; örneği yeniden üretin '
-            '(examples/generate_examples.py)')
+        assert math.isclose(saved, fresh, rel_tol=OZET_BAGIL_TOLERANS,
+                            abs_tol=1e-9), (
+            f'{motor_type}.{key}: kayıtlı {saved} / FORM yolu {fresh} — '
+            'örneğin özeti kullanıcının gördüğü sayıyla ayrışıyor; örneği '
+            'yeniden üretin (examples/generate_examples.py)')
         checked += 1
     assert checked >= 3, 'özet en az üç sayısal büyüklük taşımalı'
+
+
+@pytest.mark.parametrize('motor_type', sorted(NAMES))
+def test_ozet_BU_SURUMLE_hesaplanmis(motor_type):
+    """results_summary'yi hangi sürüm ürettiyse o, bugünkü sürüm olmalı.
+
+    ÖLÇÜLDÜ (16 Eyl 2026, Berke turda yakaladı): paketle gelen üç örneğin
+    özeti 30-31 Temmuz'da, **2.6.26** ile hesaplanmıştı. Aradaki D30-D33
+    onarımları sayıları kaydırdı; 2.6.27'de yeniden üretince katı örneğin
+    tepe itkisi 1926,8 N'den 1641,9 N'ye (%-14,8), yanma süresi 2,024 s'den
+    2,323 s'ye (%+14,8) gitti. Yani kullanıcı proje şeridinde 1927 N görüp
+    Hesapla'ya bastığında 1642 N alıyordu: ürünün kendisiyle çelişen bir sayı.
+
+    Neden ÜSTTEKI bekçi yakalamadı: test_results_summary_is_not_fabricated
+    %25 bağıl toleransla karşılaştırıyor (gerekçesi: model rekalibrasyonunda
+    hemen kırmamak) ve `computed_with_version` alanını AÇIKÇA atlıyordu.
+    %14,8'lik kayma o bandın içinde kaldı; bekçi yeşil kalarak kusuru korudu
+    (bu depoda adı konmuş sınıf: kusuru koruyan bekçi).
+
+    Bu düğüm o boşluğu kapatır: sayısal tolerans kaba ağ olarak kalır,
+    sürüm damgası ise KESİN ölçüdür. Sürüm yükseldiğinde örnekler yeniden
+    üretilmelidir (examples/generate_examples.py).
+    """
+    import hrma
+    doc = load_example_doc(motor_type)
+    damga = (doc.get('results_summary') or {}).get('computed_with_version')
+    assert damga, f'{motor_type}: özet hangi sürümle hesaplandığını yazmıyor'
+    assert damga == hrma.__version__, (
+        f'{motor_type}: özet {damga} ile hesaplanmış, ürün {hrma.__version__} — '
+        'örnekleri yeniden üretin: python3 examples/generate_examples.py')
+
+
+#: README tablosunun andığı özet alanları (motor tipi -> alanlar). Tablo bu
+#: sayıları birebir yazar; bekçi de onları arar. Buraya alan eklenirse
+#: examples/README.md tablosuna da eklenmelidir.
+README_ALANLARI = {
+    'hybrid': ('isp_s', 'total_impulse_Ns'),
+    'solid': ('peak_thrust_N', 'burn_time_s', 'total_impulse_Ns', 'isp_s'),
+    'liquid': ('isp_s', 'isp_vacuum_s'),
+}
+
+
+def _tr_sayi(x):
+    """Türkçe ondalık ayracıyla, README'deki gibi üç haneli."""
+    return ('%.3f' % float(x)).replace('.', ',')
+
+
+def test_readme_tablosu_ozetlerle_ayni():
+    """examples/README.md tablosu .hrma özetleriyle AYNI sayıları yazmalı.
+
+    ÖLÇÜLDÜ (16 Eyl 2026): üç katman, üç ayrı sürüm. README tablosu **v2.6.25**
+    ile hesaplanmış sayıları taşıyordu, .hrma dosyaları **v2.6.26** ile, ürün
+    ise **2.6.27**'ydi. Katı örneğin tepe itkisi README'de 1,67 kN, dosyada
+    1926,8 N, üründe 1641,9 N görünüyordu.
+
+    Bu düğüm README'yi özete bağlar: örnekler yeniden üretilirse README de
+    güncellenmek zorundadır. Özeti ürüne bağlayan düğüm ayrıdır
+    (test_ozet_BU_SURUMLE_hesaplanmis), yani zincir README -> özet -> ürün
+    olarak kapanır.
+    """
+    import hrma
+    metin = (EXAMPLES_DIR / 'README.md').read_text(encoding='utf-8')
+    damga = '(v%s ile' % hrma.__version__
+    assert damga in metin, (
+        'README tablosu hangi sürümle ölçüldüğünü yazmıyor ya da sürüm eski: '
+        f'{damga!r} aranıyordu')
+    for motor_type, alanlar in sorted(README_ALANLARI.items()):
+        ozet = load_example_doc(motor_type)['results_summary']
+        for alan in alanlar:
+            assert alan in ozet, f'{motor_type}: özette {alan} yok'
+            sayi = _tr_sayi(ozet[alan])
+            assert sayi in metin, (
+                f'{motor_type}.{alan} = {sayi} README tablosunda yok; '
+                'örnekler yeniden üretildiyse README de güncellenmeli')
 
 
 if __name__ == '__main__':                  # pragma: no cover

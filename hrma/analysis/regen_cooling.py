@@ -161,8 +161,11 @@ import numpy as np
 
 # Tek kaynak: Bartz korelasyonu + gaz özellikleri + alan-Mach çözücü
 # heat_transfer_analysis'ten İTHAL edilir (kopya yok — parametre tutarlılığı).
-from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
-from hrma.data.materials_db import get_material
+from hrma.analysis.heat_transfer_analysis import (
+    HeatTransferAnalyzer, GAMMA_REPO_DEFAULT, _guard_gamma_band)
+
+from hrma.data.materials_db import get_material, temperature_limits
+from hrma.utils import input_guard
 
 # CoolProp opsiyoneldir (bundle'da var); yoksa dahili tablolara düşülür.
 try:  # pragma: no cover - ortam bağımlı
@@ -188,15 +191,192 @@ __all__ = [
     'fin_area_ratio',
     'SUPERCRITICAL_COOLANT_FLUIDS',
     'BOILING_MARGIN_K',
+    'COOLING_CHANNEL_LAND_M',
+    'COOLING_CHANNEL_LAND_BASIS',
+    'CHANNEL_FIT_BASIS',
+    'channel_fit_limit',
 ]
+
+
+# ---------------------------------------------------------------------------
+# ÖH A2 sivi-sogutma · F-17 (CW-F2b + CW-F3) — KANAL SIĞMA ÖLÇÜTÜNÜN TEK TANIMI
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/A2/sivi-sogutma/a1/once/olcum.json, taban
+# 68c55a27): aynı geometride İKİ ayrı sığma ölçütü vardı —
+#   * sıvı motor (``_cooling_channel_geometry``): gaz tarafı İÇ boğaz çevresi
+#     pi*d_t, kaburgalı adım (w + s) -> 30,8 mm boğazda n_geom = 21;
+#   * bu modül (``solve``): kanal TABANI çevresi 2*pi*(r_t + t_w), kaburgasız
+#     (yalnız N*w).
+# Biri fazla tutucu (kanalların oturduğu yarıçapı değil gaz yüzeyini
+# ölçüyor), öteki fazla gevşek (kaburgayı saymıyor). Formun 80 ön-dolgusu
+# ikisini de aşıyordu ve çözücü hesaba 80 ile devam ediyordu.
+#
+# r_ref HÜKMÜ (birincil kaynakla doğrulandı): frezeli kanallı yapıda kanallar
+# sıcak cidarın (iç kabuk / liner) DIŞ yüzüne açılır ve dıştan kapatılır —
+# NASA SP-8087 "Liquid Rocket Engine Fluid-Cooled Combustion Chambers"
+# (1972): s. 1 rejeneratif soğutma "around the outer surface of the wall to
+# be cooled"; s. 26 kanal-cidar yapısında soğutucu geçitleri "integral with
+# the inner shell", dış kabuk elektroform nikel; s. 58 "spin liners with
+# milled channels ... electroformed or brazed closures". Kanal sayısını
+# sınırlayan çevre bu yüzden kanal TABANININ çevresidir:
+#     r_ref = r_gaz + t_sıcak_cidar,   N·(w + s) <= 2·pi·r_ref
+# (sabit genişlikli kanal + radyal kaburga: kaburga dışa doğru genişler,
+# bağlayıcı kesit en küçük yarıçaptır, yani kanal tabanı; eksenel olarak da
+# en küçük gaz yarıçapı boğazdır). SP-8087 kanal SAYISI için formül vermez;
+# yukarıdaki eşitsizlik yalnız çevre geometrisidir. Huzel & Huang
+# (NASA SP-125 / AIAA 1992) Böl. 4 bu kulvarda AÇILAMADI (belge boyutu
+# okuma sınırını aştı) -> ondan bir denklem numarası ATFEDİLMEZ.
+COOLING_CHANNEL_LAND_M = 1.5e-3
+
+#: Kaburga (land) genişliğinin künyesi — F-10 ilkesi: sayı kaynağıyla durur.
+#: Değerin KENDİSİ kaynaklı değil (kaynak doğrulanmadı); kaynaklı olan alt
+#: sınırdır: NASA sözleşme raporu NAS8-98042 (Non-Toxic Orbiter OMS Engine
+#: Technology Program, Final Report, 6 Ocak 1999, s. 6) geleneksel frezeli
+#: tasarım için kanal ve kaburga genişliğini en az 0.035 inç (0,889 mm) ile
+#: sınırlıyor. 1,5 mm bu alt sınırın üstünde, yani imalat açısından tutucu
+#: tarafta (daha az kanal) bir TASARIM KABULÜDÜR.
+COOLING_CHANNEL_LAND_BASIS = (
+    'channel land (rib) width 1.5 mm between adjacent channels: an ASSUMED '
+    'design value, not taken from a table (source for the value itself: '
+    'NOT VERIFIED). The verified bound is the minimum: channel and land '
+    'widths of a conventional milled-slot chamber were limited to a minimum '
+    'of 0.035 in (0.889 mm) in NASA contract NAS8-98042 (Non-Toxic Orbiter '
+    'OMS Engine Technology Program, Final Report, 1999, p. 6); 1.5 mm sits '
+    'above that minimum, i.e. on the conservative side (fewer channels)')
+
+#: Sığma ölçütünün künyesi (hangi yarıçap, neden).
+CHANNEL_FIT_BASIS = (
+    'N * (w + s) <= 2*pi*(r_gas + t_hot_wall): milled channels sit on the '
+    'OUTER surface of the hot-gas wall and are closed from outside (NASA '
+    'SP-8087, 1972, pp. 1, 26, 58), so the circumference that limits the '
+    'channel count is the channel-base circumference at the throat (the '
+    'smallest gas-side radius); constant-width channels with radial lands '
+    'bind at that smallest radius. w = channel width, s = land width. '
+    'SP-8087 gives no channel-count formula: the inequality is the '
+    'circumference geometry itself')
+
+
+def channel_fit_limit(gas_side_radius_m: float, hot_wall_thickness_m: float,
+                      channel_width_m: float,
+                      land_width_m: float = COOLING_CHANNEL_LAND_M) -> Dict:
+    """Kanal sığma sınırı — TEK TANIM (sıvı motor ve bu modül buradan okur).
+
+    Döner: ``{'n_max', 'reference_radius_m', 'reference_circumference_m',
+    'pitch_m', 'channel_width_m', 'land_width_m', 'hot_wall_thickness_m',
+    'gas_side_radius_m', 'basis'}``. ``n_max`` en büyük N'dir ki
+    ``N * (w + s) <= 2*pi*(r_gaz + t_cidar)``; kayan nokta kenarında da bu
+    eşitsizlik SAĞLANIR (``n_max·p <= c < (n_max+1)·p`` düzeltmesi —
+    Lean ``channelCount_le_floor`` ile aynı önerme).
+
+    Girdi pozitif ve sonlu değilse ``ValueError`` (sayı uydurulmaz).
+    """
+    degerler = {'gas_side_radius_m': gas_side_radius_m,
+                'hot_wall_thickness_m': hot_wall_thickness_m,
+                'channel_width_m': channel_width_m,
+                'land_width_m': land_width_m}
+    for ad, deger in degerler.items():
+        try:
+            x = float(deger)
+        except (TypeError, ValueError):
+            raise ValueError(f'{ad} must be a positive finite number [m]; '
+                             f'got {deger!r}')
+        # t_cidar = 0 anlamlı değil (kanal gaz yüzüne açılmaz); hepsi > 0.
+        if not (math.isfinite(x) and x > 0.0):
+            raise ValueError(f'{ad} must be a positive finite number [m]; '
+                             f'got {deger!r}')
+    r_gaz = float(gas_side_radius_m)
+    t_w = float(hot_wall_thickness_m)
+    w = float(channel_width_m)
+    s = float(land_width_m)
+    r_ref = r_gaz + t_w
+    c_ref = 2.0 * math.pi * r_ref
+    p = w + s
+    n = int(math.floor(c_ref / p))
+    # Kayan nokta kenarı: bölme yuvarlaması tabanı bir kaydırabilir; tanım
+    # (n·p <= c) doğrudan sınanarak düzeltilir.
+    while n > 0 and n * p > c_ref:
+        n -= 1
+    while (n + 1) * p <= c_ref:
+        n += 1
+    return {
+        'n_max': n,
+        'gas_side_radius_m': r_gaz,
+        'hot_wall_thickness_m': t_w,
+        'reference_radius_m': r_ref,
+        'reference_circumference_m': c_ref,
+        'channel_width_m': w,
+        'land_width_m': s,
+        'pitch_m': p,
+        'basis': CHANNEL_FIT_BASIS,
+    }
+
+def _ozgul_isi_orani(md):
+    """(γ, γ'nın geldiği alan) — ÖH D21 / B3-13(c).
+
+    Okuma sırası ``gamma`` -> ``gamma_avg`` -> depo varsayılanıdır; üç
+    tüketici modül (bu dosya, ``regen_cooling``, ``heat_transfer_analysis``)
+    aynı sırayı kullanır ve aynı künyeyi üretir.
+    """
+    ham = md.get('gamma')
+    if ham is not None:
+        return float(ham), 'gamma'
+    ham = md.get('gamma_avg')
+    if ham is not None:
+        return float(ham), (
+            "gamma_avg (producer: combustion_analysis performance.gamma_avg "
+            "— this is the CHAMBER gamma, not an average)")
+    return GAMMA_REPO_DEFAULT, 'repo_default'
+
 
 # ---------------------------------------------------------------------------
 # Sabitler
 # ---------------------------------------------------------------------------
-# RP-1 koklaşma (coking) eşiği: yakıt tarafı cidar sıcaklığı bu değeri aşınca
-# karbon birikimi başlar. Huzel & Huang, "Modern Engineering for Design of
-# Liquid-Propellant Rocket Engines", Böl. 4.
+# RP-1 koklaşma (coking) UYARI eşiği — ÖH KU (KU-K5, 6 Eki 2026) künyesi
+# düzeltildi; DEĞER DEĞİŞMEDİ, iki kademe BEYAN edilir:
+#   * 561 K = birikim BAŞLANGICI (uyarı kademesi): NASA CR-168277 (1983)
+#     bakır tüpte RP-1 birikimini 560-750 K'de ölçer (alt uç; SP-S1 notu,
+#     PDF s. 6); NASA SP-125 (Huzel & Huang 1967) Örnek 4-4 soğutucu yanı
+#     cidarını 1000 °R ≈ 556 K SEÇER (s. 109-110) — kitapta bir "eşik"
+#     cümlesi yoktur (SP-H1 K16). Eski künye "H&H Böl. 4" eşik iddiasıydı.
+#   * 728 K = SINIR kademesi: NASA SP-8087 (1972) §3.1.1.5.4 s. 62 — RP-1
+#     sıvı cidar sıcaklığı 850 °F (728 K) üstünde işletilmez (yerel metinden
+#     doğrulandı). Bu kademe kodda YOKTUR; ``coking`` bayrağı 561 K'de kalır.
+#     Kademe eklemek yeni alan işidir (devir).
 RP1_COKING_TEMP_K = 561.0
+
+# ÖH KU H-11 (KU-30, KARS-IS Bulgu 10) — RP-1 KRİTİK ISI AKISI EKRANI.
+# Yalnız kritik-altı istasyonda UYARI (yeni alan devirde); hiçbir çözülen
+# sayı değişmez. Kaynaklar:
+#   * RP-1 kritik basıncı 2,21 MPa: Huber vd. 2009 (NIST, Energy & Fuels 23)
+#     Tablo 3, RP-1 vekil karışımı (KARS-IS notunun okuması; bu ajan sayfayı
+#     açmadı). Bağımsız çapraz: Sutton & Biblarz 9. bs. Tablo 8-5 s. 320
+#     kerosen 2,0 MPa (yerel metinden doğrulandı; ~%10 uyumlu).
+#   * Kerosen çekirdekli kaynama q_max 2,3-6,4 MW/m²: Sutton & Biblarz 9. bs.
+#     Tablo 8-5 s. 320 — YALNIZ 0,689-1,38 MPa ve 1-8,5 m/s, 297 K için
+#     tablolanmış (yerel metinden doğrulandı). Ekran tablonun EN DÜŞÜK
+#     değerini kullanır (muhafazakâr); tablo zarfı dışında hesap yapılmaz.
+#   * %80 marjı: NASA SP-8087 (1972) s. 61 — ısı akısı sınırlı sistemleri
+#     ortalama burnout akısının %80'inin altında işletmek (yerel metinden
+#     doğrulandı).
+#   * Süperkritik basınçta kaynama yoktur; klasik burnout uygulanmaz, sınır
+#     ısıl bozunma/koklaşmadır (SP-125 s. 105-106; KARS-IS notu).
+#   * Zarfın DÖRT kenarı (denetim Ş-1, 6 Eki): Tablo 8-5 kerosen çekirdekli
+#     kaynama satırları yalnız 0,689 ve 1,38 MPa basınçta, 1 ve 8,5 m/s
+#     hızda verilir (kitap s. 320 = PDF s. 344; yerel metinden yeniden
+#     doğrulandı). Alt basınç ve üst hız sınırı da zarfa katılır; bu
+#     aralıkların dışındaki istasyonda oran YAZILMAZ (dış değerleme yok).
+#   * RP1_CRITICAL_PRESSURE_PA YALNIZ bu uyarıda kullanılır; hiçbir hükme
+#     bağlanmaz. water_hammer.py RP-1 'critical_pressure_Pa'yı BİLEREK
+#     taşımıyor (ÖH D19 / P5B3-08, parti bağımlı sözde-kritik değer; rejim
+#     hükmü fail-closed). İki karar arasındaki gerilim kayıtlıdır; tek kaynak
+#     kararı Berke'nindir (bekçi: tests/test_ku_h_q5.py).
+RP1_CRITICAL_PRESSURE_PA = 2.21e6
+KEROSENE_QMAX_TABLE_MIN_W_M2 = 2.3e6
+KEROSENE_QMAX_TABLE_P_MIN_PA = 0.689e6
+KEROSENE_QMAX_TABLE_P_MAX_PA = 1.38e6
+KEROSENE_QMAX_TABLE_V_MIN_M_S = 1.0
+KEROSENE_QMAX_TABLE_V_MAX_M_S = 8.5
+BURNOUT_HEAT_FLUX_MARGIN = 0.8
 
 # Laminer/türbülan geçiş Reynolds sayısı (boru akışı, White 7. baskı Böl. 6).
 RE_LAMINAR_MAX = 2300.0
@@ -208,6 +388,40 @@ RE_TURBULENT_FLOOR = 1.0e4
 # ayrıklaştırma politikası; ad çakışması olmasın diye REGEN_ önekiyle.
 REGEN_N_STATIONS_MIN = 20
 REGEN_N_STATIONS_MAX = 50
+
+#: ÖH A2 sivi-sogutma · 7. tur (F-17 ilkesi: kaynaksız varsayılan ADSIZ
+#: kalmaz). ``RegenCooling(n_channels=...)`` Python API'sinin kolaylık
+#: varsayılanı. Bir TASARIM DEĞERİ DEĞİLDİR: hiçbir boyutlandırmadan gelmez.
+#: HRMA'nın ürün yolları bu sayıyı KULLANMAZ — ``/api/regen-cooling`` ucu
+#: n_channels'ı zorunlu ister (adlı 400), sıvı motorun iki marşı kendi
+#: boyutlandırdığı N'yi AÇIKÇA geçirir (bekçi: tests/test_d37_sivi_t7.py,
+#: AST ile her ürün çağrısında ``n_channels=`` anahtarı). Değer, eski örtük
+#: ``n_channels=64`` imzasının aynısıdır; yalnız betik/test kolaylığı için
+#: durur ve bu cümleyle adlandırılmıştır.
+REGEN_N_CHANNELS_API_DEFAULT = 64
+
+# ÖH Z5S / PK5 (P4B2-11) — ÇÖZÜNÜRLÜK TABANI: her geometrik bölüme (kamara
+# gövdesi / konverjan / diverjan) verilen EN AZ aralık sayısı. Fizik sabiti
+# DEĞİLDİR: tek aralıklı bir bölüm, akısı tek bir istasyondan gelen tek bir
+# şeritle temsil edilir, yani hiç çözülmemiştir.
+# ÖLÇÜLEN kusur: ε=25 lülede konverjanın payı (eksenel %5,47, ıslak alan
+# %2,68) küçük olduğu için oransal dağıtım throat_index=1 üretiyordu
+# (n=20/30/40); konverjan alanın %2,6'sı ısının %9,2'sini taşıdığı hâlde tek
+# segmentte kalıyordu. ``throat_index >= 2`` garantisini SAĞLAYAN bu tabandır.
+REGEN_MIN_INTERVALS_PER_SEGMENT = 2
+
+# ÖH Z5S / PK5 (P4B2-11) — MARŞ ŞEMASI: segment ısısı q'nun İKİ UÇ
+# istasyonunun ortalamasıyla (trapez, ikinci mertebe) alınır; aşağı-akım
+# istasyonunun akısı soğutucu sıcaklığına bağlı olduğu için marş bir sabit
+# nokta iterasyonuyla kapatılır. İlk geçiş yukarı-akım (öngörü), sonraki
+# geçişler düzeltmedir. Yakınsama ölçütü toplam ısıdaki bağıl değişimdir.
+REGEN_MARCH_MAX_PASSES = 8
+REGEN_MARCH_TOL = 1.0e-10
+# İstasyon dengesi sabit nokta iterasyonunun BAŞLANGIÇ tahmini için kaydın
+# ham ``allowable_temperature`` alanı yoksa kullanılan yedek (K). HÜKÜM EŞİĞİ
+# DEĞİLDİR (hüküm eşikleri ``materials_db.temperature_limits``ten, §28-31
+# (c)); bugün 24 kaydın hepsinde alan var, yedek kullanılmıyor.
+REGEN_SEED_ALLOWABLE_DEFAULT_K = 1000.0
 
 FLOW_COUNTERFLOW = 'counterflow'  # soğutucu çıkış -> boğaz -> kamara (varsayılan)
 FLOW_COFLOW = 'coflow'            # soğutucu kamara -> boğaz -> çıkış
@@ -225,6 +439,23 @@ SUPERCRITICAL_COOLANT_FLUIDS = {
 # Tsat'a bu kadar yaklaşınca uyarı üretilir. Mühendislik tarama eşiğidir
 # (fiziksel sabit değil); uyarı metninde açıkça belirtilir.
 BOILING_MARGIN_K = 10.0
+
+#: İNCE-CİDAR (düz levha) İLETİM ZARFI — ÖH D15 / P4B2-09.
+#: Modül künyesi (:52-55) cidar iletimini "thin flat-plate radial conduction"
+#: diye ilan eder ve ``r_cond = wall_thickness / k_wall`` kullanır. Silindirik
+#: cidarın doğrusu (sıcak yüzey alanına indirgenmiş) ``r1*ln(r2/r1)/k``'dır;
+#: bağıl hata 1 − r1·ln(r2/r1)/t_w ile ölçülür ve YALNIZ t_w/r1 oranına
+#: bağlıdır.
+#: ÖLÇÜLDÜ (31 Ağustos 2026, taban e88d096; boğaz yarıçapı 50 mm):
+#:     t_w =  1 mm ->  %0,99   t_w =  5 mm ->  %4,69
+#:     t_w = 20 mm -> %15,88   t_w = 60 mm -> %34,30
+#: %2 altı, ısı-transferi korelasyonlarının kendi saçılımının (Bartz ±%20,
+#: Dittus-Boelter ±%25) çok altındadır: sessiz kalmak dürüsttür. %10 üstü,
+#: cidar sıcaklığını mühendislik hükmünü değiştirecek kadar kaydırır
+#: (ölçüldü: t_w 1 -> 20 mm ile T_w,max 882,31 -> 1774,16 K) ve künyenin
+#: kendi geçerlilik koşulunun DIŞIDIR — orada sayı yayımlanmaz.
+WALL_CURVATURE_WARN_REL = 0.02
+WALL_CURVATURE_MAX_REL = 0.10
 
 # Pseudo-kritik sıcaklık önbelleği: (akışkan, 0.5 bar kovalı basınç) -> T_pc.
 _PSEUDOCRITICAL_CACHE: Dict = {}
@@ -279,6 +510,30 @@ def _interp_table(table: np.ndarray, temperature: float) -> Dict[str, float]:
         'table_t_min_K': float(t_col[0]),
         'table_t_max_K': float(t_col[-1]),
     }
+
+
+#: Soğutucu adı eşanlamlıları — TEK KAYNAK (ÖH D31 / P12bB4-06). Hem bu
+#: modülün kurucusu hem kardeş ``heat_transfer_analysis`` soğutucu adını
+#: buradan çözer; iki ayrı eşanlamlı listesi tutulmaz.
+_COOLANT_ALIASES = {
+    'rp1': 'rp1', 'kerosene': 'rp1', 'rp': 'rp1',
+    'water': 'water', 'h2o': 'water',
+    'methane': 'methane', 'ch4': 'methane', 'lch4': 'methane',
+    'hydrogen': 'hydrogen', 'h2': 'hydrogen', 'lh2': 'hydrogen',
+}
+
+
+def canonical_coolant_name(name) -> Optional[str]:
+    """Soğutucu adını kanonikleştirir ('LCH4' -> 'methane').
+
+    Tanınmayan ad için ``None`` döner — çağıran kendi hükmünü kurar
+    (bu modülün kurucusu ``ValueError`` atar, kardeş ısı-transferi modülü
+    ``not_modelled`` beyan eder). Sessizce bir akışkana DÜŞÜLMEZ.
+    """
+    if name is None:
+        return None
+    anahtar = str(name).lower().replace('-', '').replace('_', '').strip()
+    return _COOLANT_ALIASES.get(anahtar)
 
 
 def water_properties(temperature: float) -> Dict[str, float]:
@@ -598,7 +853,10 @@ class RegenCooling:
     chamber_temperature : float
         Chamber (stagnation) temperature [K].
     gamma : float
-        Ratio of specific heats (frozen), 1.05 < gamma < 1.67.
+        Ratio of specific heats (frozen). The accepted band is the
+        single-source ``GAMMA_BAND_MIN`` / ``GAMMA_BAND_MAX`` pair
+        exported by ``heat_transfer_analysis`` (do not restate the
+        numbers here — ÖH D21 / P4B1-16, doctrine 4).
     molecular_weight : float
         Combustion-gas molecular weight [g/mol] (default 24, typical hybrid).
     throat_diameter : float
@@ -661,7 +919,7 @@ class RegenCooling:
                  coolant_mdot: float = 1.0,
                  coolant_inlet_temp: float = 300.0,
                  coolant_inlet_pressure: float = 30.0e5,
-                 n_channels: int = 64,
+                 n_channels: int = REGEN_N_CHANNELS_API_DEFAULT,
                  channel_width: float = 2.0e-3,
                  channel_height: float = 3.0e-3,
                  wall_thickness: float = 1.0e-3,
@@ -677,22 +935,21 @@ class RegenCooling:
             raise ValueError("chamber_pressure must be positive [Pa].")
         if not (chamber_temperature > 0.0):
             raise ValueError("chamber_temperature must be positive [K].")
-        if not (1.05 < gamma < 1.67):
-            raise ValueError("gamma must be within (1.05, 1.67) — same guard "
-                             "band as the heat-transfer module.")
+        # ÖH D21 / P4B1-16 (doktrin-4 TEK KAYNAK): bandın sayısı artık
+        # ısı-transferi modülünden İTHAL EDİLİR, burada yeniden yazılmaz.
+        # Reddin cümlesi de ortaktır — üç modül aynı girdide aynı hükmü
+        # kurar (kardeş ısı-transferi modülü v2.6.27'ye kadar aynı girdiyi
+        # sessizce 1,20'ye kelepçeliyordu).
+        _guard_gamma_band(gamma)
         if not (molecular_weight > 0.0):
             raise ValueError("molecular_weight must be positive [g/mol].")
 
-        coolant = str(coolant).lower().replace('-', '').replace('_', '')
-        if coolant in ('rp1', 'kerosene', 'rp'):
-            coolant = 'rp1'
-        elif coolant in ('water', 'h2o'):
-            coolant = 'water'
-        elif coolant in ('methane', 'ch4', 'lch4'):
-            coolant = 'methane'
-        elif coolant in ('hydrogen', 'h2', 'lh2'):
-            coolant = 'hydrogen'
-        else:
+        # ÖH D31 / P12bB4-06 (doktrin-4 TEK KAYNAK): ad çözümü artık modül
+        # düzeyindeki ``canonical_coolant_name``de durur; kardeş ısı-transferi
+        # modülü de soğutucu adını AYNI kuralla çözer (iki ayrı eşanlamlı
+        # listesi tutulmaz). Reddin cümlesi değişmedi.
+        coolant = canonical_coolant_name(coolant)
+        if coolant is None:
             raise ValueError("coolant must be 'water', 'rp1', 'methane' or "
                              "'hydrogen'.")
         self.coolant = coolant
@@ -739,6 +996,27 @@ class RegenCooling:
         except KeyError as exc:
             raise ValueError(str(exc)) from exc
         self.wall_material = wall_material
+        # Karar §28-31 (c) — TEK EŞİK (v3.0 bloklayıcı, ÖNEMLİ). Cidar
+        # hükmü eşikleri artık kaydın HAM
+        # ``allowable_temperature`` / ``max_service_temperature`` alanlarından
+        # DEĞİL, termal kulvarın kanonik merdiveninden
+        # (``materials_db.temperature_limits``) okunur. Ölçülen çelişki
+        # (termal yeniden denetim-7/8): copper ve steel_4130'da ham izin
+        # 1000 K ⟷ kanonik izin 723 / 811 K; 'service limit' diye ERİME
+        # (max_service_temperature = melting_point, 24 kaydın hepsinde)
+        # yayımlanıyordu ve UNSAFE dalı bu yüzden ERİŞİLEMEZDİ (önce erime
+        # dalı yakalıyordu). Aynı motorun ısıl koruma künyesi
+        # (liquid_rocket_engine ablatif/ışınım dalı) ve güvenlik analizi
+        # 'service limit' adıyla İZİN basamağını taşıyor; bu modül de aynı
+        # sayıyı taşır. Basamak yoksa hüküm uydurulmaz (fail-closed).
+        # İterasyon BAŞLANGICI ayrı (``_seed_allowable_K``; hüküm değil).
+        self.temperature_ladder = temperature_limits(self.material)
+        for _basamak in ('allowable_K', 'melting_K'):
+            if self.temperature_ladder.get(_basamak) is None:
+                raise ValueError(
+                    f"wall material '{wall_material}' has no "
+                    f"{_basamak} in materials_db.temperature_limits — no "
+                    "wall-temperature verdict without a sourced limit")
 
         self.motor_data = dict(motor_data or {})
 
@@ -774,11 +1052,77 @@ class RegenCooling:
         self.channel_width = float(channel_width)
         self.channel_height = float(channel_height)
         self.wall_thickness = float(wall_thickness)
+        # ÖH A2 sivi-sogutma · F-17 + denetçi Ş4(iii): sığma ölçütünün kaburga
+        # genişliği modülün TEK sabitidir (``COOLING_CHANNEL_LAND_M``; künye
+        # ``COOLING_CHANNEL_LAND_BASIS``). Kurucu parametresi DEĞİLDİR: imzada
+        # olsaydı /api/regen-cooling ucunda bağlı olmayan bir girdi olurdu
+        # (test_d29 KurucuParametreleri sözleşmesi). Uç bu sayıyı kullanıcıdan
+        # almaz; sığmama durumunda GEOMETRY uyarısı kaburga genişliğini mm
+        # olarak adıyla yazar.
+        self.land_width = float(COOLING_CHANNEL_LAND_M)
+        #: F-17: son ``solve()`` çağrısının sığma hükmü (tek tanımdan).
+        self.channel_fit = None
         self.n_stations = int(min(max(int(n_stations), REGEN_N_STATIONS_MIN),
                                   REGEN_N_STATIONS_MAX))
         self.flow_direction = flow_direction
         self.wall_roughness = float(wall_roughness)
         self.coolant_props_source = coolant_props_source
+        #: ÖH D15 / P4B2-07 — marş boyunca FİİLEN kullanılan özellik
+        #: kaynakları. ``_coolant_properties`` her dönüşte buraya yazar;
+        #: özet bunu ``coolant_props_source_used`` olarak yayımlar.
+        self._props_sources_seen = set()
+
+        # --- ÖH D15 / P4B2-09 — GEOMETRİ ZARFI KAPILARI -------------------
+        # Kurucu bloğu yalnız POZİTİFLİĞE bakıyordu; künyenin kendi
+        # geçerlilik koşulu ("thin flat-plate radial conduction", :52-55)
+        # hiç denetlenmiyordu.
+        #
+        # (1) İNCE CİDAR. İletim direnci ``r_cond = wall_thickness / k_wall``
+        #     DÜZ LEVHA formülüdür; silindirik cidarın doğrusu (sıcak yüzey
+        #     alanına indirgenmiş) ``r1*ln(r2/r1)/k``'dır. ÖLÇÜLDÜ
+        #     (31 Ağustos 2026, taban e88d096; boğaz yarıçapı 50 mm) —
+        #     düz levhanın bağıl hatası ve ürünün kabul ettiği sonuç:
+        #        t_w =  1 mm -> hata  %0,99 | max_wall_hot_K =  882,31
+        #        t_w =  5 mm -> hata  %4,69 | max_wall_hot_K = 1158,24
+        #        t_w = 20 mm -> hata %15,88 | max_wall_hot_K = 1774,16
+        #        t_w = 60 mm -> hata %34,30 | max_wall_hot_K = 2442,79
+        #     Dördünde de ince-cidar uyarısı ÜRETİLMİYORDU (0 uyarı).
+        #     Eşikler ``WALL_CURVATURE_WARN_REL`` / ``..._MAX_REL``.
+        # (2) KANAL DERİNLİĞİ. Kanal yüksekliği boğaz yarıçapının 4 katı
+        #     (200 mm ⟷ 50 mm) KABUL ediliyordu; ölçüldü: T_w,max = 2827,73 K,
+        #     iki uyarı, hiçbiri derinliği söylemiyor. Boğaz kesitini
+        #     çevreleyen bir ceket kanalı boğaz yarıçapından derin olamaz —
+        #     bu bir model zarfı değil, GEOMETRİK imkânsızlıktır.
+        _r_throat = self.throat_diameter / 2.0
+        if self.channel_height >= _r_throat:
+            raise ValueError(
+                "channel_height ({h:.1f} mm) must be smaller than the throat "
+                "radius ({r:.1f} mm): a cooling channel wrapped around the "
+                "throat cannot be deeper than the throat radius itself. This "
+                "is a geometric impossibility, not a modelling assumption; "
+                "no station values are published.".format(
+                    h=self.channel_height * 1e3, r=_r_throat * 1e3))
+        _r_dis = _r_throat + self.wall_thickness
+        # düz levha ⟷ silindirik iletim direnci bağıl hatası (sıcak yüzey
+        # referanslı): 1 − r1·ln(r2/r1)/t_w
+        self.wall_curvature_error_rel = abs(
+            1.0 - _r_throat * math.log(_r_dis / _r_throat)
+            / self.wall_thickness)
+        if self.wall_curvature_error_rel > WALL_CURVATURE_MAX_REL:
+            raise ValueError(
+                "wall_thickness ({t:.1f} mm) is outside the thin-wall "
+                "envelope of this model at the throat (radius {r:.1f} mm): "
+                "the flat-plate conduction resistance used here "
+                "(r_cond = wall_thickness / k_wall) differs from the "
+                "cylindrical solution r1*ln(r2/r1)/k_wall by "
+                "{e:.1%}, above the {m:.0%} limit. The model note states "
+                "'thin flat-plate radial conduction' and that claim is now "
+                "enforced: no wall temperature is published outside it. "
+                "Reduce wall_thickness or increase the throat "
+                "diameter.".format(
+                    t=self.wall_thickness * 1e3, r=_r_throat * 1e3,
+                    e=self.wall_curvature_error_rel,
+                    m=WALL_CURVATURE_MAX_REL))
         # Fin (kanal sırtı) genişletilmiş-yüzey modeli: YALNIZ metan/hidrojen
         # süperkritik yolunda uygulanır. Su/RP-1 yolu eski davranış
         # sözleşmesini (soğutucu alanı = gaz alanı) birebir korur.
@@ -839,7 +1183,16 @@ class RegenCooling:
         params = dict(
             chamber_pressure=float(md.get('chamber_pressure', 20.0)) * 1e5,
             chamber_temperature=float(md.get('chamber_temperature', 3000.0)),
-            gamma=float(md.get('gamma', md.get('gamma_avg', 1.2))),
+            # ÖH D21 / B3-13(c) — SESSİZ 1,2 YEDEĞİ KALKTI, KÜNYE GELDİ.
+            # Eski satır ``float(md.get('gamma', md.get('gamma_avg',
+            # 1.2)))`` idi: γ hiç yokken 1,2 sessizce konuyor, üstelik
+            # sayı kardeş iki modülde ayrı ayrı yazılıyordu. Sayı artık
+            # ``GAMMA_REPO_DEFAULT`` tek kaynağından gelir ve nereden
+            # geldiği ``gamma_source`` ile taşınır. ``gamma_avg`` adının
+            # kendisi yalan söylüyor (üretici ``combustion_analysis``
+            # oraya ODA gamma'sını koyar, ortalama değil); adın
+            # düzeltilmesi üretici dosyayı gerektirir (hibrit kulvarı).
+            gamma=_ozgul_isi_orani(md)[0],
             molecular_weight=float(md.get('molecular_weight', 24.0)),
             throat_diameter=md.get('throat_diameter'),
             exit_diameter=md.get('exit_diameter'),
@@ -901,6 +1254,7 @@ class RegenCooling:
                 raise ValueError(
                     f"Non-physical CoolProp properties for {self._cp_fluid} "
                     f"at T={temperature:.1f} K, P={pressure/1e5:.1f} bar.")
+            self._props_sources_seen.add('coolprop')
             return {
                 'density': rho, 'cp': cp, 'conductivity': k,
                 'viscosity': mu, 'prandtl': cp * mu / k,
@@ -908,23 +1262,48 @@ class RegenCooling:
             }
         want_cp = (self.coolant_props_source == 'coolprop'
                    or (self.coolant_props_source == 'auto'))
-        if self.coolant == 'water' and want_cp and _HAS_COOLPROP:
-            try:  # pragma: no cover - ortam bağımlı
-                rho = float(_CP_PropsSI('D', 'T', temperature, 'P', pressure, 'Water'))
-                cp = float(_CP_PropsSI('C', 'T', temperature, 'P', pressure, 'Water'))
-                k = float(_CP_PropsSI('L', 'T', temperature, 'P', pressure, 'Water'))
-                mu = float(_CP_PropsSI('V', 'T', temperature, 'P', pressure, 'Water'))
-                if rho > 0 and cp > 0 and k > 0 and mu > 0:
-                    return {
-                        'density': rho, 'cp': cp, 'conductivity': k,
-                        'viscosity': mu, 'prandtl': cp * mu / k,
-                        'clamped': False, 'source': 'coolprop',
-                    }
-            except Exception:
-                pass  # tabloya düş
+        # ÖH D15 / P4B2-07: AÇIKÇA 'coolprop' istendiğinde tabloya SESSİZ
+        # düşüş yok. Aşağıdaki ``except Exception: pass`` bunu yapıyordu:
+        # CoolProp kurulu değilse ya da çağrı hata verirse aynı istek
+        # farklı sayılarla (ölçüldü: ΔP +%0,22, hız −%0,79, kırpılan
+        # istasyon 0 ⟷ 3, uyarı 0 ⟷ 1) ve hiçbir beyanla dönüyordu.
+        # 'auto' kipinde düşüş MEŞRUDUR (kip zaten "varsa kullan" demektir)
+        # ve fiilen kullanılan kaynak özette yayımlanır.
+        acik_coolprop = (self.coolant_props_source == 'coolprop')
+        if self.coolant == 'water' and want_cp:
+            neden = None
+            if not _HAS_COOLPROP:
+                neden = 'CoolProp is not installed'
+            else:
+                try:  # pragma: no cover - ortam bağımlı
+                    rho = float(_CP_PropsSI('D', 'T', temperature, 'P', pressure, 'Water'))
+                    cp = float(_CP_PropsSI('C', 'T', temperature, 'P', pressure, 'Water'))
+                    k = float(_CP_PropsSI('L', 'T', temperature, 'P', pressure, 'Water'))
+                    mu = float(_CP_PropsSI('V', 'T', temperature, 'P', pressure, 'Water'))
+                    if rho > 0 and cp > 0 and k > 0 and mu > 0:
+                        self._props_sources_seen.add('coolprop')
+                        return {
+                            'density': rho, 'cp': cp, 'conductivity': k,
+                            'viscosity': mu, 'prandtl': cp * mu / k,
+                            'clamped': False, 'source': 'coolprop',
+                        }
+                    neden = ('CoolProp returned non-physical water '
+                             'properties')
+                except Exception as exc:
+                    neden = 'CoolProp evaluation failed (%s)' % exc
+            if acik_coolprop:
+                raise ValueError(
+                    "coolant_props_source='coolprop' was requested but the "
+                    f"CoolProp path is unusable at T={temperature:.1f} K, "
+                    f"P={pressure/1e5:.1f} bar: {neden}. The internal water "
+                    "table is NOT substituted silently — it produces "
+                    "different numbers and a different warning set for the "
+                    "same request. Use coolant_props_source='auto' to accept "
+                    "the table, or 'table' to request it explicitly.")
         props = (water_properties(temperature) if self.coolant == 'water'
                  else rp1_properties(temperature))
         props['source'] = 'table'
+        self._props_sources_seen.add('table')
         return props
 
     # ------------------------------------------------------------------
@@ -935,6 +1314,38 @@ class RegenCooling:
 
         Returns ``x_mm``, ``r_mm`` (gas-side inner radius) and the throat index;
         the throat station is guaranteed on the grid (M=1 anchored exactly).
+
+        ÖH Z5S / PK5 — İKİ ONARIM:
+
+        **(1) P4B2-01 — SİLİNDİRİK KAMARA GÖVDESİ.** Izgara YALNIZ
+        ``sample_nozzle_inner_contour`` üstünde kuruluyordu; o konturun z=0'ı
+        KAMARA ÇIKIŞIDIR (``nozzle_design.py``), yani ceketin ısıttığı
+        yüzeyin silindirik gövde kısmı modelde HİÇ YOKTU ve hiçbir girdiyle
+        eklenemiyordu. ÖLÇÜLDÜ: ``chamber_length`` 0,10 m ⟷ 0,40 m ile
+        ``total_heat_W`` BİT BİREBİR AYNI (126.913,760323 W) ve ızgara
+        açıklığı iki durumda da 94,89 mm. Rapor ölçümü: gövde eklenirse ısı
+        +%57,8..+89,5, T_out +142,6..+220,6 K, ceket ΔP +%45..56 — üç sayı da
+        AŞAĞI yönde yanlıştı. Gövde artık ``motor_data['chamber_length']``
+        verildiğinde konturun BAŞINA sabit yarıçaplı bir bölüm olarak eklenir
+        (yarıçap konturun kendi ilk noktasıdır, ikinci bir geometri kaynağı
+        uydurulmaz). Kamara boyu verilmezse davranış BİT-AYNI kalır.
+
+        **(2) P4B2-11 — İSTASYON DAĞITIMI.** ÖLÇÜLEN kusur: ε=25 lülede
+        konverjan bölüm TEK segmente sıkışıyordu (``throat_index=1``,
+        n=20/30/40) ve birinci mertebe yukarı-akım entegrali o tek segmentin
+        tamamını boğaz akısıyla dolduruyordu (raporda +%22,4 fazla sayım).
+        İKİ ayrı değişiklik var; etkileri KARIŞTIRILMAMALIDIR:
+
+        * **Çözünürlük tabanı** (``REGEN_MIN_INTERVALS_PER_SEGMENT``):
+          ``throat_index >= 2`` garantisini SAĞLAYAN budur. Tek aralıklı bir
+          bölüm hiç çözülmemiş demektir; taban bir fizik sabiti değil,
+          ayrıklaştırma kuralıdır.
+        * **Pay ölçüsü**: kalan aralıklar artık EKSENEL UZUNLUK yerine ISLAK
+          YÜZEY ALANIYLA (∫2πr ds) dağıtılır — dağıtılan şey bir yüzey
+          integrali olduğu için ölçünün doğrusu budur. Bu ölçü konverjanı
+          BÜYÜTMEZ: ε=25 devresinde alan payı (%2,68) eksenel paydan
+          (%5,47) daha KÜÇÜKTÜR. Isı yükünü ızgaradan bağımsız kılan asıl
+          onarım, ``solve`` içindeki trapez marş şemasıdır.
         """
         # Tembel import: engines paketi -> analysis zinciri modül-üstü importta
         # döngü riski taşır (aynı gerekçe analyze_axial_profile'de belgelidir).
@@ -952,16 +1363,57 @@ class RegenCooling:
         z_exit = float(meta['z_exit'])
         r_throat = float(meta['r_throat'])
 
-        # Boğaz istasyonu KESİN dahil (analyze_axial_profile ile aynı ızgara).
+        # --- (1) Kamara gövdesi: konturun başına sabit yarıçaplı bölüm ----
+        z_chamber_exit = float(z_pts[0])
+        barrel_mm = self._barrel_length_mm()
+        if barrel_mm > 0.0:
+            z_pts = np.concatenate([[z_chamber_exit - barrel_mm], z_pts])
+            r_pts = np.concatenate([[float(r_pts[0])], r_pts])
+        z_start = float(z_pts[0])
+
+        # --- (2) Bölüm sınırları ve ıslak-alan ağırlıkları ----------------
+        sinirlar = [z_start]
+        for kenar in (z_chamber_exit, z_throat, z_exit):
+            if kenar > sinirlar[-1] + 1e-9:
+                sinirlar.append(kenar)
+        bolumler = list(zip(sinirlar[:-1], sinirlar[1:]))
+
         n = self.n_stations
-        frac_conv = z_throat / z_exit if z_exit > 0 else 0.5
-        n_conv = int(round(n * frac_conv))
-        n_conv = min(max(n_conv, 2), n - 1)
-        n_div = n - n_conv + 1  # boğaz paylaşılır
-        x_conv = np.linspace(0.0, z_throat, n_conv)
-        x_div = np.linspace(z_throat, z_exit, n_div)[1:]
-        x_mm = np.concatenate([x_conv, x_div])
-        throat_index = n_conv - 1
+        toplam_aralik = n - 1
+        taban = REGEN_MIN_INTERVALS_PER_SEGMENT
+        if toplam_aralik < taban * len(bolumler):
+            # Izgara tabanları karşılanamıyorsa taban 1'e iner (kırpma sınırı
+            # 20 istasyonda üç bölüm için bu dal ÇALIŞMAZ; savunma amaçlı).
+            taban = max(1, toplam_aralik // max(len(bolumler), 1))
+
+        agirliklar = [self._wetted_area_mm2(z_pts, r_pts, a, b)
+                      for a, b in bolumler]
+        agirlik_toplam = sum(agirliklar) or 1.0
+        araliklar = [taban] * len(bolumler)
+        kalan = toplam_aralik - taban * len(bolumler)
+        if kalan > 0:
+            paylar = [kalan * w / agirlik_toplam for w in agirliklar]
+            tam = [int(math.floor(p)) for p in paylar]
+            artik = kalan - sum(tam)
+            # Kalan aralıklar en büyük ondalık paya sahip bölümlere gider
+            # (Hamilton/en büyük artık yöntemi — deterministik).
+            sira = sorted(range(len(paylar)), key=lambda i: -(paylar[i] - tam[i]))
+            for i in sira[:artik]:
+                tam[i] += 1
+            araliklar = [araliklar[i] + tam[i] for i in range(len(bolumler))]
+
+        parcalar = []
+        for (a, b), adet in zip(bolumler, araliklar):
+            dilim = np.linspace(a, b, adet + 1)
+            parcalar.append(dilim if not parcalar else dilim[1:])
+        x_mm = np.concatenate(parcalar)
+
+        # Boğaz istasyonunun indeksi: boğaza kadar biriken aralık sayısı.
+        throat_index = 0
+        for (a, b), adet in zip(bolumler, araliklar):
+            throat_index += adet
+            if abs(b - z_throat) <= 1e-9:
+                break
 
         r_mm = np.interp(x_mm, z_pts, r_pts)
         area_ratio = np.maximum((r_mm / r_throat) ** 2, 1.0)
@@ -971,8 +1423,62 @@ class RegenCooling:
             'x_mm': x_mm, 'r_mm': r_mm, 'area_ratio': area_ratio,
             'throat_index': throat_index, 'r_throat_mm': r_throat,
             'z_throat_mm': z_throat, 'z_exit_mm': z_exit,
+            'chamber_barrel_length_mm': barrel_mm,
             'nozzle_type': meta.get('noz_type'),
         }
+
+    def _barrel_length_mm(self) -> float:
+        """Silindirik kamara gövdesinin eksenel boyu [mm]; yoksa 0,0.
+
+        Kaynak TEK: ``motor_data['chamber_length']`` (m). Değer yoksa,
+        sayı değilse ya da pozitif değilse gövde eklenmez — uydurma bir
+        kamara boyu ÜRETİLMEZ (P4B2-01).
+        """
+        # ÖH D31 / P15B2-01 (OH-D30-08 dağıtımı, termo-ucus satırı): bu
+        # YEREL değer kapısı merkeze BAĞLANDI. Eski gövde ``isinstance(ham,
+        # bool)`` ile yalnız Python ``bool``unu eliyordu; ``numpy.bool_``
+        # onun alt sınıfı DEĞİLDİR ve ``float(np.True_) == 1.0`` olduğu için
+        # çözücüden dönen bir numpy doğruluk değeri buradan 1000,0 mm'lik
+        # bir kamara gövdesi olarak geçiyordu. Merkez kapı
+        # (``input_guard.finite_positive`` -> ``_is_bool``) dtype.kind='b'
+        # ördek denetimiyle onu da eler; sonlu/pozitif kuralı aynıdır.
+        deger_m = input_guard.finite_positive(
+            self.motor_data.get('chamber_length'))
+        if deger_m is None:
+            return 0.0
+        return float(deger_m) * 1000.0
+
+    @staticmethod
+    def _wetted_area_mm2(z_pts, r_pts, z_a: float, z_b: float) -> float:
+        """[z_a, z_b] aralığının ıslak yüzey alanı ∫2πr ds [mm²].
+
+        İstasyon paylarının ağırlığıdır: ısı entegralinin kendi ölçüsü
+        budur (uzunluk değil), bu yüzden dağıtım da bununla yapılır.
+        """
+        kenarlar = np.unique(np.concatenate([
+            [z_a, z_b], z_pts[(z_pts > z_a) & (z_pts < z_b)]]))
+        r_kenar = np.interp(kenarlar, z_pts, r_pts)
+        ds = np.hypot(np.diff(kenarlar), np.diff(r_kenar))
+        r_ort = 0.5 * (r_kenar[:-1] + r_kenar[1:])
+        return float(np.sum(2.0 * math.pi * r_ort * ds))
+
+    def _seed_allowable_K(self):
+        """Sabit nokta iterasyonunun BAŞLANGIÇ tahmini (K) — hüküm eşiği
+        DEĞİL; yalnız ``min(bu, 0,8·T_aw)`` başlangıcını kurar.
+
+        §28-31 (c) ölçümü (5. tur, 14 Eki): başlangıcı kanonik izin
+        basamağına çekmek yakınsamış sonucu yakınsama toleransı içinde
+        kaydırıyor (copper ceketi, t_w 1 mm: T_w,max 882,3096781 → 882,3096508
+        K, bağıl 3,1e-8) ve bit-çapalı mevcut bekçiyi
+        (test_d15_termo_ucus_a3::TestP4B2_09GeometriZarfi::
+        test_ince_cidar_bandinda_sessiz, rel 1e-12) kırıyor. Hüküm eşikleri
+        tek kaynağa bağlandı; başlangıç bayt-aynı kaldı ve ham alan okuması
+        YALNIZ burada (AST bekçisi: tests/test_d37_sivi_a1.py
+        test_28_31c_regen_ham_esik_alani_okunmaz). Başlangıcın da taşınması
+        ana model kararı (devir).
+        """
+        return self.material.get('allowable_temperature',
+                                 REGEN_SEED_ALLOWABLE_DEFAULT_K)
 
     # ------------------------------------------------------------------
     # Bir istasyonda kuple gaz-cidar dengesi (sabit nokta iterasyonu)
@@ -990,7 +1496,7 @@ class RegenCooling:
         """
         r_cond = self.wall_thickness / k_wall     # m^2*K/W
         r_cool = 1.0 / h_c                          # m^2*K/W
-        allowable = self.material.get('allowable_temperature', 1000.0)
+        allowable = self._seed_allowable_K()      # başlangıç; hüküm değil
         t_wall_hot = max(min(allowable, 0.8 * taw), t_coolant)
         h_g = 0.0
         q = 0.0
@@ -1042,7 +1548,7 @@ class RegenCooling:
         converged, wall_props_clamped).
         """
         r_cond = self.wall_thickness / k_wall       # m^2*K/W
-        allowable = self.material.get('allowable_temperature', 1000.0)
+        allowable = self._seed_allowable_K()        # başlangıç; hüküm değil
         t_wall_hot = max(min(allowable, 0.8 * taw), t_bulk)
         t_wall_cold = t_bulk + 30.0
         rho_b = bulk['density']
@@ -1117,6 +1623,9 @@ class RegenCooling:
         drop, coolant exit temperature, coking status, warnings) and a
         ``model_note`` describing assumptions and validity.
         """
+        # ÖH D15 / P4B2-07: kaynak künyesi HER koşuma özgüdür (aynı nesne
+        # ikinci kez çözülürse önceki koşumun kaynağı taşınmaz).
+        self._props_sources_seen = set()
         geo = self._build_stations()
         x_mm = geo['x_mm']
         r_mm = geo['r_mm']
@@ -1132,6 +1641,20 @@ class RegenCooling:
             gas, mdot_total)
         throat_d = throat['throat_diameter']
         c_star = throat['c_star']
+        # ÖH D15 / P4B2-08 — BARTZ'I SÜREN c* ARTIK ÇIKTIDA BEYAN EDİLİYOR.
+        # ÖLÇÜLDÜ (31 Ağustos 2026, taban e88d096; Pc = 70 bar, Tc = 3500 K,
+        # Dt = 0,10 m, eps = 25, su, mdot = 12 kg/s):
+        #   motor_data c*'sız         -> tepe akı 40,4402 MW/m²,
+        #                                max_wall_hot_K = 882,3097
+        #   motor_data={'c_star':1650}-> tepe akı 41,1908 MW/m² (+%1,86),
+        #                                max_wall_hot_K = 890,4676 (+8,16 K)
+        # ve özet sözlüğünde c*'ı adlandıran HİÇBİR alan yoktu
+        # ([k for k in summary if 'c_star' in k] -> []). Bu modül —
+        # kardeş NozzleFlow1D'nin aksine — kendi analitik c*'ını yayımlamaz
+        # ve debiyi c*'tan kurmaz, dolayısıyla kullanıcının ölçtüğü c*
+        # burada TUTARLIDIR; eksik olan tek şey BEYANDI. Sayı ve kaynağı
+        # özette yayımlanır (aşağıya bkz.).
+        c_star_source = throat.get('c_star_source')
         rc_over_dt = throat['rc_over_dt']
         k_wall = self.material['thermal_conductivity']
 
@@ -1165,167 +1688,261 @@ class RegenCooling:
         r_m = r_mm / 1000.0           # m
         x_m = x_mm / 1000.0           # m
 
-        # Marş durumu
-        t_c = self.coolant_inlet_temp
-        p_c = self.coolant_inlet_pressure
-        total_heat_W = 0.0
-        enthalpy_rise = 0.0           # J/kg (cp*dT integrali / h marşı)
-        min_re = np.inf
+        # ================================================================
+        # ÖH Z5S / PK5 (P4B2-11) — MARŞ ŞEMASI SABİT NOKTASI
+        # ----------------------------------------------------------------
+        # ÖLÇÜLEN KUSUR: segment ısısı dQ = q·dA'da q YALNIZ YUKARI-AKIM
+        # istasyonundan alınıyordu (birinci mertebe). Sonuç, yayımlanan
+        # ``q_MW_m2`` dizisinin BAĞIMSIZ trapez entegraliyle yayımlanan
+        # ``total_heat_W``in çelişmesiydi: taban devrede 127.393,47 W ⟷
+        # 126.913,76 W (%0,378), ε=25 devrede 4.618.774,0 W ⟷ 4.545.511,6 W
+        # (%1,61). Aynı fiziksel büyüklük iki kanaldan iki sayıyla
+        # yayımlanamaz; ayrıca toplam IZGARAYA bağımlıydı (Q(20)=4.429.234 W
+        # ⟷ Q(50)=4.545.512 W, %2,56 salınım).
+        #
+        # ONARIM: segment ısısı iki uç istasyonun akı ORTALAMASIYLA alınır
+        # (trapez, ikinci mertebe). Aşağı-akım istasyonunun akısı soğutucu
+        # sıcaklığına bağlı olduğundan şema örtüktür; marş bir SABİT NOKTA
+        # iterasyonuyla kapatılır: ilk geçiş yukarı-akım (öngörü), sonraki
+        # geçişler bir önceki geçişin akı dizisiyle düzeltme yapar.
+        # Yakınsadığında yayımlanan dizi ile yayımlanan toplam AYNI trapez
+        # kuralından çıkar, yani ``independent_wetted_integral`` ile
+        # sayısal gürültü mertebesinde örtüşürler.
+        #
+        # KIRILAN BEKÇİ (bilinçli, raporlanır):
+        # ``test_energy_balance_surface_integral`` toplamı YUKARI-AKIM
+        # şemasıyla yeniden kuruyor ve rel=1e-9 istiyordu; o kilit şemanın
+        # KENDİSİNE çakılıydı. İddiası ("toplam, yayımlanan dizilerle aynı
+        # şemadan çıkar") kardeş bekçi
+        # ``test_energy_balance_independent_quadrature`` tarafından — ve
+        # şemadan bağımsız olarak — kapsanır.
+        # ================================================================
+        q_onceki = None
+        toplam_onceki = None
+        marş_gecisi = 0
+        for marş_gecisi in range(1, REGEN_MARCH_MAX_PASSES + 1):
+            # Marş durumu
+            t_c = self.coolant_inlet_temp
+            p_c = self.coolant_inlet_pressure
+            total_heat_W = 0.0
+            enthalpy_rise = 0.0           # J/kg (cp*dT integrali / h marşı)
+            min_re = np.inf
+            # ÖH D22 / P4B2-10 — DITTUS-BOELTER ZARFININ TARANDIĞI GİRDİLER.
+            # ``dittus_boelter_envelope`` (F154) yazılmıştı ama ÇAĞIRANI
+            # YOKTU: ölçüldü (taban b84b10a, ``once.json`` P4B2-10),
+            # modülde tanım dışında 0 çağrı; solve() yalnız Reynolds'u
+            # tarıyordu (``min_re < RE_TURBULENT_FLOOR``). Pr bandı ve
+            # giriş-uzunluğu (L/D) koşulu hiç denetlenmiyordu.
+            db_pr_min = np.inf
+            db_pr_max = -np.inf
+            db_stations = 0
+            channel_len_m = 0.0
 
-        # --- süperkritik (metan/hidrojen) marş durumu: entalpi tabanlı ---
-        sc_mode = self.coolant in SUPERCRITICAL_COOLANT_FLUIDS
-        h_bulk = 0.0
-        h_inlet = 0.0
-        coolant_h = np.full(n, np.nan)   # J/kg (yalnız sc modda dolar)
-        fin_ratio = np.ones(n)           # A_eff/A_gas (sc modda hesaplanır)
-        dp_friction_total = 0.0
-        dp_accel_total = 0.0
-        n_jackson = 0                    # Jackson kullanılan istasyon sayısı
-        n_db_subcritical = 0             # kritik-altı Dittus-Boelter istasyonu
-        wall_balance_unconverged = 0
-        jackson_wall_clamped = 0
-        # F057: tablo bandı dışına taşan (özellikleri donmuş) istasyon sayacı
-        table_clamped_stations = 0
-        table_clamp_t_min = math.inf
-        table_clamp_t_max = -math.inf
-        table_band: Optional[tuple] = None
-        bulk_boiling_stations = 0
-        near_boiling_stations = 0
-        wall_boiling_stations = 0
-        if sc_mode:
-            h_inlet = self._coolant_properties(t_c, p_c)['enthalpy']
-            h_bulk = h_inlet
-
-        for step, idx in enumerate(order):
-            # --- soğutucu tarafı katsayısı (yerel yığın özellikleriyle) ---
-            props = self._coolant_properties(t_c, p_c)
-            rho = props['density']
-            cp = props['cp']
-            k_c = props['conductivity']
-            mu = props['viscosity']
-            pr = props['prandtl']
-
-            # F057: tablo yolunda banda klamplanan istasyonları kaydet.
-            # Klamp, özellikleri banda DONDURUR (rho/mu/Pr sabit kalır) —
-            # sessizce yapılırsa kullanıcı geçerlilik zarfı dışına çıktığını
-            # göremez. Uyarı marş sonunda toplu üretilir.
-            if props.get('clamped'):
-                table_clamped_stations += 1
-                table_clamp_t_min = min(table_clamp_t_min, t_c)
-                table_clamp_t_max = max(table_clamp_t_max, t_c)
-                table_band = (props['table_t_min_K'], props['table_t_max_K'])
-
-            v = self.mdot_per_channel / (rho * self.channel_area)  # m/s
-            re = rho * v * self.hydraulic_diameter / mu
-
-            if sc_mode and p_c > self.coolant_pcrit:
-                # --- süperkritik bölge: Jackson + kuple cidar dengesi ---
-                t_pc_local = pseudocritical_temperature(self._cp_fluid, p_c)
-                (h_g, q, tw_hot, tw_cold, h_c, nu, a_ratio, converged,
-                 clamped) = self._station_wall_balance_sc(
-                    taw[idx], t_c, p_c, props, re, throat_d, c_star,
-                    rc_over_dt, gas, area_ratio_local=1.0 / area_ratio[idx],
-                    mach=mach[idx], k_wall=k_wall, t_pc=t_pc_local,
-                    r_local=r_m[idx])
-                fin_ratio[idx] = a_ratio
-                n_jackson += 1
-                if not converged:
-                    wall_balance_unconverged += 1
-                if clamped:
-                    jackson_wall_clamped += 1
-            else:
-                nu = dittus_boelter_nu(re, pr, heating=True)
-                h_c = nu * k_c / self.hydraulic_diameter           # W/m^2/K
-
-                h_c_eff = h_c
-                if sc_mode and self.fin_effect:
-                    # Fin alan oranı (h_c cidara bağlı değil -> kapalı form).
-                    pitch = (2.0 * math.pi * (r_m[idx] + self.wall_thickness)
-                             / self.n_channels)
-                    a_ratio = fin_area_ratio(
-                        self.channel_width, self.channel_height, pitch,
-                        pitch - self.channel_width, h_c, k_wall)
-                    fin_ratio[idx] = a_ratio
-                    h_c_eff = h_c * a_ratio
-
-                # --- kuple gaz-cidar dengesi ---
-                h_g, q, tw_hot, tw_cold = self._station_wall_balance(
-                    taw[idx], t_c, h_c_eff, throat_d, c_star, rc_over_dt, gas,
-                    area_ratio_local=1.0 / area_ratio[idx], mach=mach[idx],
-                    k_wall=k_wall)
-
-                if sc_mode:
-                    # Kritik-altı basınç: kaynama riski denetimi (yerel Tsat).
-                    n_db_subcritical += 1
-                    t_sat = self._saturation_temperature(p_c)
-                    if t_c >= t_sat:
-                        bulk_boiling_stations += 1
-                    elif t_c > t_sat - BOILING_MARGIN_K:
-                        near_boiling_stations += 1
-                    if tw_cold > t_sat:
-                        wall_boiling_stations += 1
-
-            # istasyon çıktıları
-            t_coolant[idx] = t_c
-            p_coolant[idx] = p_c
-            t_wall_hot[idx] = tw_hot
-            t_wall_cold[idx] = tw_cold
-            q_flux[idx] = q
-            velocity[idx] = v
-            reynolds[idx] = re
-            h_gas[idx] = h_g
-            h_cool[idx] = h_c
-            min_re = min(min_re, re)
+            # --- süperkritik (metan/hidrojen) marş durumu: entalpi tabanlı ---
+            sc_mode = self.coolant in SUPERCRITICAL_COOLANT_FLUIDS
+            h_bulk = 0.0
+            h_inlet = 0.0
+            coolant_h = np.full(n, np.nan)   # J/kg (yalnız sc modda dolar)
+            fin_ratio = np.ones(n)           # A_eff/A_gas (sc modda hesaplanır)
+            dp_friction_total = 0.0
+            dp_accel_total = 0.0
+            n_jackson = 0                    # Jackson kullanılan istasyon sayısı
+            n_db_subcritical = 0             # kritik-altı Dittus-Boelter istasyonu
+            wall_balance_unconverged = 0
+            jackson_wall_clamped = 0
+            # F057: tablo bandı dışına taşan (özellikleri donmuş) istasyon sayacı
+            table_clamped_stations = 0
+            table_clamp_t_min = math.inf
+            table_clamp_t_max = -math.inf
+            table_band: Optional[tuple] = None
+            bulk_boiling_stations = 0
+            near_boiling_stations = 0
+            wall_boiling_stations = 0
             if sc_mode:
-                coolant_h[idx] = h_bulk
+                h_inlet = self._coolant_properties(t_c, p_c)['enthalpy']
+                h_bulk = h_inlet
 
-            # --- segment (idx -> sonraki marş istasyonu): ısı + basınç ---
-            if step < len(order) - 1:
-                nxt = order[step + 1]
-                # eğik (slant) uzunluk ve ortalama gaz-tarafı yarıçapı
-                ds = math.hypot(x_m[nxt] - x_m[idx], r_m[nxt] - r_m[idx])  # m
-                r_mean = 0.5 * (r_m[idx] + r_m[nxt])
-                dA = 2.0 * math.pi * r_mean * ds                          # m^2
-                dQ = q * dA                                               # W
-                total_heat_W += dQ
-                # basınç düşümü (Darcy-Weisbach + Haaland), kanal eğik uzunluğu
-                f = haaland_friction_factor(re, self.wall_roughness / self.hydraulic_diameter)
-                dP = darcy_weisbach_dp(f, ds, self.hydraulic_diameter, rho, v)
-                if sc_mode:
-                    # ENTALPİ marşı: h2 = h1 + dQ/mdot, T = T(P, h).
-                    # Pseudo-kritik cp tepesinde dT = dQ/(m*cp) formunun
-                    # sıcaklık hatasını önler (modül üst dokümantasyonu).
-                    dh = dQ / self.coolant_mdot
-                    h_next = h_bulk + dh
-                    p_tmp = p_c - dP
-                    if p_tmp <= 0.0:
-                        raise ValueError(
-                            "Coolant pressure fell to zero during the march "
-                            "(friction) — channel geometry/mdot infeasible.")
-                    # İvmelenme (momentum) terimi: yoğunluk değişimi.
-                    rho_next = self._cp_call('D', 'P', p_tmp, 'Hmass', h_next)
-                    g_flux = self.mdot_per_channel / self.channel_area
-                    dP_acc = acceleration_dp(g_flux, rho, rho_next)
-                    p_next = p_tmp - dP_acc
-                    if p_next <= 0.0:
-                        raise ValueError(
-                            "Coolant pressure fell to zero during the march "
-                            "(acceleration) — channel geometry/mdot "
-                            "infeasible.")
-                    t_next = self._cp_call('T', 'P', p_next, 'Hmass', h_next)
-                    dp_friction_total += dP
-                    dp_accel_total += dP_acc
-                    enthalpy_rise += dh
-                    t_c, p_c, h_bulk = t_next, p_next, h_next
+            for step, idx in enumerate(order):
+                # --- soğutucu tarafı katsayısı (yerel yığın özellikleriyle) ---
+                props = self._coolant_properties(t_c, p_c)
+                rho = props['density']
+                cp = props['cp']
+                k_c = props['conductivity']
+                mu = props['viscosity']
+                pr = props['prandtl']
+
+                # F057: tablo yolunda banda klamplanan istasyonları kaydet.
+                # Klamp, özellikleri banda DONDURUR (rho/mu/Pr sabit kalır) —
+                # sessizce yapılırsa kullanıcı geçerlilik zarfı dışına çıktığını
+                # göremez. Uyarı marş sonunda toplu üretilir.
+                if props.get('clamped'):
+                    table_clamped_stations += 1
+                    table_clamp_t_min = min(table_clamp_t_min, t_c)
+                    table_clamp_t_max = max(table_clamp_t_max, t_c)
+                    table_band = (props['table_t_min_K'], props['table_t_max_K'])
+
+                v = self.mdot_per_channel / (rho * self.channel_area)  # m/s
+                re = rho * v * self.hydraulic_diameter / mu
+
+                if sc_mode and p_c > self.coolant_pcrit:
+                    # --- süperkritik bölge: Jackson + kuple cidar dengesi ---
+                    t_pc_local = pseudocritical_temperature(self._cp_fluid, p_c)
+                    (h_g, q, tw_hot, tw_cold, h_c, nu, a_ratio, converged,
+                     clamped) = self._station_wall_balance_sc(
+                        taw[idx], t_c, p_c, props, re, throat_d, c_star,
+                        rc_over_dt, gas, area_ratio_local=1.0 / area_ratio[idx],
+                        mach=mach[idx], k_wall=k_wall, t_pc=t_pc_local,
+                        r_local=r_m[idx])
+                    fin_ratio[idx] = a_ratio
+                    n_jackson += 1
+                    if not converged:
+                        wall_balance_unconverged += 1
+                    if clamped:
+                        jackson_wall_clamped += 1
                 else:
-                    # soğutucu sıcaklık artışı (yerel cp ile) — su/RP-1
-                    # davranışı BİREBİR korunur (regresyon sözleşmesi).
-                    dT = dQ / (self.coolant_mdot * cp)
-                    enthalpy_rise += cp * dT
-                    dp_friction_total += dP
-                    # marş: bir sonraki istasyona taşı
-                    t_c = t_c + dT
-                    p_c = p_c - dP
+                    nu = dittus_boelter_nu(re, pr, heating=True)
+                    h_c = nu * k_c / self.hydraulic_diameter           # W/m^2/K
+                    # P4B2-10: korelasyonun FİİLEN kullanıldığı istasyonların
+                    # Prandtl uçları (zarf taraması bunlardan kurulur).
+                    db_stations += 1
+                    db_pr_min = min(db_pr_min, pr)
+                    db_pr_max = max(db_pr_max, pr)
+
+                    h_c_eff = h_c
+                    if sc_mode and self.fin_effect:
+                        # Fin alan oranı (h_c cidara bağlı değil -> kapalı form).
+                        pitch = (2.0 * math.pi * (r_m[idx] + self.wall_thickness)
+                                 / self.n_channels)
+                        a_ratio = fin_area_ratio(
+                            self.channel_width, self.channel_height, pitch,
+                            pitch - self.channel_width, h_c, k_wall)
+                        fin_ratio[idx] = a_ratio
+                        h_c_eff = h_c * a_ratio
+
+                    # --- kuple gaz-cidar dengesi ---
+                    h_g, q, tw_hot, tw_cold = self._station_wall_balance(
+                        taw[idx], t_c, h_c_eff, throat_d, c_star, rc_over_dt, gas,
+                        area_ratio_local=1.0 / area_ratio[idx], mach=mach[idx],
+                        k_wall=k_wall)
+
+                    if sc_mode:
+                        # Kritik-altı basınç: kaynama riski denetimi (yerel Tsat).
+                        n_db_subcritical += 1
+                        t_sat = self._saturation_temperature(p_c)
+                        if t_c >= t_sat:
+                            bulk_boiling_stations += 1
+                        elif t_c > t_sat - BOILING_MARGIN_K:
+                            near_boiling_stations += 1
+                        if tw_cold > t_sat:
+                            wall_boiling_stations += 1
+
+                # istasyon çıktıları
+                t_coolant[idx] = t_c
+                p_coolant[idx] = p_c
+                t_wall_hot[idx] = tw_hot
+                t_wall_cold[idx] = tw_cold
+                q_flux[idx] = q
+                velocity[idx] = v
+                reynolds[idx] = re
+                h_gas[idx] = h_g
+                h_cool[idx] = h_c
+                min_re = min(min_re, re)
+                if sc_mode:
+                    coolant_h[idx] = h_bulk
+
+                # --- segment (idx -> sonraki marş istasyonu): ısı + basınç ---
+                if step < len(order) - 1:
+                    nxt = order[step + 1]
+                    # eğik (slant) uzunluk ve ortalama gaz-tarafı yarıçapı
+                    ds = math.hypot(x_m[nxt] - x_m[idx], r_m[nxt] - r_m[idx])  # m
+                    channel_len_m += ds   # P4B2-10: L/D için toplam kanal boyu
+                    r_mean = 0.5 * (r_m[idx] + r_m[nxt])
+                    dA = 2.0 * math.pi * r_mean * ds                          # m^2
+                    # P4B2-11: segment akısı İKİ UÇ istasyonun ortalamasıdır
+                    # (trapez). İlk geçişte aşağı-akım akısı henüz yoktur;
+                    # o geçiş yukarı-akım ÖNGÖRÜSÜDÜR ve sonraki geçişlerde
+                    # düzeltilir.
+                    if q_onceki is None:
+                        q_seg = q
+                    else:
+                        q_seg = 0.5 * (q + float(q_onceki[nxt]))
+                    dQ = q_seg * dA                                           # W
+                    total_heat_W += dQ
+                    # basınç düşümü (Darcy-Weisbach + Haaland), kanal eğik uzunluğu
+                    f = haaland_friction_factor(re, self.wall_roughness / self.hydraulic_diameter)
+                    dP = darcy_weisbach_dp(f, ds, self.hydraulic_diameter, rho, v)
+                    if sc_mode:
+                        # ENTALPİ marşı: h2 = h1 + dQ/mdot, T = T(P, h).
+                        # Pseudo-kritik cp tepesinde dT = dQ/(m*cp) formunun
+                        # sıcaklık hatasını önler (modül üst dokümantasyonu).
+                        dh = dQ / self.coolant_mdot
+                        h_next = h_bulk + dh
+                        p_tmp = p_c - dP
+                        if p_tmp <= 0.0:
+                            raise ValueError(
+                                "Coolant pressure fell to zero during the march "
+                                "(friction) — channel geometry/mdot infeasible.")
+                        # İvmelenme (momentum) terimi: yoğunluk değişimi.
+                        rho_next = self._cp_call('D', 'P', p_tmp, 'Hmass', h_next)
+                        g_flux = self.mdot_per_channel / self.channel_area
+                        dP_acc = acceleration_dp(g_flux, rho, rho_next)
+                        p_next = p_tmp - dP_acc
+                        if p_next <= 0.0:
+                            raise ValueError(
+                                "Coolant pressure fell to zero during the march "
+                                "(acceleration) — channel geometry/mdot "
+                                "infeasible.")
+                        t_next = self._cp_call('T', 'P', p_next, 'Hmass', h_next)
+                        dp_friction_total += dP
+                        dp_accel_total += dP_acc
+                        enthalpy_rise += dh
+                        t_c, p_c, h_bulk = t_next, p_next, h_next
+                    else:
+                        # soğutucu sıcaklık artışı (yerel cp ile) — su/RP-1
+                        # davranışı BİREBİR korunur (regresyon sözleşmesi).
+                        dT = dQ / (self.coolant_mdot * cp)
+                        enthalpy_rise += cp * dT
+                        dp_friction_total += dP
+                        # marş: bir sonraki istasyona taşı
+                        t_c = t_c + dT
+                        p_c = p_c - dP
+
+                    # ÖH Z5S / PK5 (P4B2-03) — FİZİK KAPISI, FAIL-CLOSED.
+                    # ÖLÇÜLEN KUSUR: marşta sıcaklığın fizikselliği HİÇ
+                    # sorulmuyordu. mdot = 1e-9 kg/s ile T_coolant_K min
+                    # −3.178.605 K, max +2.028.370 K, MUTLAK SIFIRIN ALTINDA
+                    # 14 istasyon ve coolant_exit_temp_K = 3510,25 K
+                    # yayımlanıyordu; üretilen 4 uyarının hiçbiri negatifliği
+                    # ADLANDIRMIYORDU (PROPERTY RANGE uyarısı sayıyı metnine
+                    # basıyor ama kusur demiyordu). Mutlak sıcaklık ölçeğinin
+                    # altına inen bir marş artık SAYI YAYIMLAMAZ: durur ve
+                    # nedenini söyler. Kardeş modülün deseni budur
+                    # (``thermal_protection``: zarf dışında sayı üretmek
+                    # yerine 'MODEL OUT OF ENVELOPE' + NOT_MODELLED).
+                    if not (math.isfinite(t_c) and t_c > 0.0):
+                        raise ValueError(
+                            "Coolant bulk temperature left the absolute "
+                            f"temperature scale during the march (T = {t_c!r} "
+                            f"K at station {nxt}). A regenerative circuit "
+                            "cannot be evaluated from a non-physical state, "
+                            "so no station values are published. Check "
+                            "coolant_mdot, the channel count and the channel "
+                            "cross-section: an almost-zero flow rate makes "
+                            "dT = dQ/(mdot*cp) diverge.")
+                    if not (math.isfinite(p_c) and p_c > 0.0):
+                        raise ValueError(
+                            "Coolant pressure fell to zero or below during "
+                            f"the march (P = {p_c!r} Pa at station {nxt}) — "
+                            "channel geometry/mdot infeasible.")
+
+            # Sabit nokta ölçütü: yayımlanan toplam ısıdaki bağıl değişim.
+            if toplam_onceki is not None and total_heat_W > 0.0:
+                if abs(total_heat_W - toplam_onceki) <= \
+                        REGEN_MARCH_TOL * abs(total_heat_W):
+                    break
+            toplam_onceki = total_heat_W
+            q_onceki = q_flux.copy()
+
 
         # --- özet ---
         t_out = t_c                     # marş sonundaki soğutucu sıcaklığı
@@ -1338,9 +1955,16 @@ class RegenCooling:
         max_wall_hot = float(np.max(t_wall_hot))
         max_wall_hot_idx = int(np.argmax(t_wall_hot))
         max_wall_cold = float(np.max(t_wall_cold))
-        allowable = float(self.material.get('allowable_temperature', 1000.0))
-        max_service = float(self.material.get('max_service_temperature', allowable))
-        melting = float(self.material.get('melting_point', max_service))
+        # Karar §28-31 (c): TEK EŞİK — kanonik izin basamağı. Eski hâlde
+        # WARNING ham izinden (copper/4130 1000 K), UNSAFE 'service limit'
+        # diye ERİMEDEN (erişilemez dal), CRITICAL erimeden okunuyordu.
+        # Artık iki basamak: izin (= yayımlanan 'service limit', aynı
+        # motorun ısıl koruma künyesiyle AYNI sayı) ve erime. İzin ile servis
+        # arasında ayrı bir 'WARNING' basamağı YOK: tek eşikte o dal
+        # tanım gereği erişilemezdi (ölü dal bırakılmadı).
+        allowable = float(self.temperature_ladder['allowable_K'])
+        max_service = allowable
+        melting = float(self.temperature_ladder['melting_K'])
 
         warnings_list: List[str] = []
 
@@ -1355,11 +1979,6 @@ class RegenCooling:
                 f"UNSAFE: peak hot-wall temperature {max_wall_hot:.0f} K exceeds "
                 f"{self.material.get('name', self.wall_material)} service limit "
                 f"{max_service:.0f} K.")
-        elif max_wall_hot > allowable:
-            warnings_list.append(
-                f"WARNING: peak hot-wall temperature {max_wall_hot:.0f} K exceeds "
-                f"{self.material.get('name', self.wall_material)} allowable "
-                f"{allowable:.0f} K — strength margin reduced.")
 
         # koklaşma (yalnız RP-1): yakıt tarafı cidar sıcaklığı
         coking = False
@@ -1394,6 +2013,43 @@ class RegenCooling:
                 f"transport properties and the coolant-side coefficient are "
                 f"an extrapolation outside the source validity envelope.")
 
+        # ÖH Z5S / PK5 (P4B2-03) — MODEL ZARFI BEYANI.
+        # Bant KENARINDA donmuş özellikler bir DOĞRULUK sorunudur ve yukarıdaki
+        # PROPERTY RANGE uyarısı onu dürüstçe bildirir. Tablo tavanının
+        # KATLARINA çıkan bir "soğutucu sıcaklığı" ise artık bir doğruluk
+        # sorunu değil, model zarfının terk edilmesidir: RP-1 o sıcaklıkta
+        # sıvı değildir, cp/rho tablosunun uzantısı diye bir şey yoktur.
+        # ÖLÇÜLDÜ (Dt=60 mm, ε=25, RP-1, bakır): mdot=0,05 → çıkış 2044,6 K,
+        # mdot=0,02 → 2448,0 K, mdot=0,01 → 2697,6 K; tablo tavanı 500 K
+        # (4,1× / 4,9× / 5,4×) ve dört uyarının hiçbiri sonucu geçersiz
+        # saymıyordu.
+        #
+        # EŞİK UYDURULMADI, TABLONUN KENDİSİNDEN TÜRETİLDİ: sıcaklık, tavanı
+        # bandın KENDİ GENİŞLİĞİ kadar aşarsa donmuş-özellik ekstrapolasyonu
+        # verinin kapsadığı aralıktan daha uzun bir mesafeye yayılmış demektir
+        # (RP-1: 290-500 K bandı, eşik 710 K; su: 280-400 K, eşik 520 K).
+        # Fizik sabiti değil, VERİNİN KAPSAMI ölçütüdür.
+        coolant_envelope_max_K = None
+        coolant_out_of_envelope = False
+        if table_band is not None:
+            bant_alt, bant_ust = float(table_band[0]), float(table_band[1])
+            coolant_envelope_max_K = bant_ust + (bant_ust - bant_alt)
+            t_bulk_max = max(float(np.max(t_coolant)), float(t_out))
+            if t_bulk_max > coolant_envelope_max_K:
+                coolant_out_of_envelope = True
+                warnings_list.append(
+                    f"MODEL OUT OF ENVELOPE: {self.coolant} bulk temperature "
+                    f"reaches {t_bulk_max:.0f} K, beyond "
+                    f"{coolant_envelope_max_K:.0f} K — the frozen-property "
+                    f"extrapolation now spans more than the width of the "
+                    f"source table itself "
+                    f"({bant_alt:.0f}-{bant_ust:.0f} K). The coolant is not a "
+                    f"single-phase liquid there and the property table has no "
+                    f"continuation, so the station temperatures, the wall "
+                    f"temperatures and the pressure drop past that point are "
+                    f"NOT MODELLED results; they must not be read as a "
+                    f"prediction.")
+
         # akış rejimi uyarısı (Dittus-Boelter türbülan geçerliliği)
         if min_re < RE_TURBULENT_FLOOR:
             warnings_list.append(
@@ -1401,15 +2057,79 @@ class RegenCooling:
                 f"the Dittus-Boelter turbulent floor (~1e4); the coolant-side "
                 f"coefficient there is an extrapolation.")
 
-        # kanal yerleşim uygunluğu (kabaca): boğazda çevreye sığıyor mu?
-        circ_throat = 2.0 * math.pi * (geo['r_throat_mm'] / 1000.0
-                                       + self.wall_thickness)
-        if self.n_channels * self.channel_width > circ_throat:
+        # --- ÖH D22 / P4B2-10: DITTUS-BOELTER ZARFI ARTIK TARANIYOR --------
+        # ``dittus_boelter_envelope`` F154 düzeltmesi olarak yazılmış, ama
+        # ürün yolunda HİÇ çağrılmamıştı (ölü kod) ve künyesindeki iki
+        # dürüstlük beyanı (+/-%25 saçılım, Sieder-Tate uygulanmıyor)
+        # kullanıcıya hiç ulaşmıyordu. ÖLÇÜLDÜ (taban b84b10a,
+        # ``once.json`` P4B2-10): çağrı sayısı 0, ``model_note`` içinde
+        # 'scatter' ve 'sieder' geçmiyor, çıktıda zarf alanı yok.
+        # Zarf artık korelasyonun FİİLEN uygulandığı istasyonlardan
+        # kurulur; süperkritik (Jackson) istasyonlar Dittus-Boelter
+        # kullanmadığı için sayıma girmez.
+        db_zarf = None
+        if db_stations > 0:
+            l_over_d = (channel_len_m / self.hydraulic_diameter
+                        if self.hydraulic_diameter > 0.0 else None)
+            # En kötü hâl taranır: Prandtl bandının hangi ucu ihlal
+            # ediyorsa o, ve marşın en düşük Reynolds'u.
+            pr_worst = (db_pr_min if db_pr_min < DB_PR_MIN
+                        else (db_pr_max if db_pr_max > DB_PR_MAX
+                              else db_pr_min))
+            db_zarf = dittus_boelter_envelope(
+                float(min_re), float(pr_worst), l_over_d)
+            db_zarf['stations_using_dittus_boelter'] = int(db_stations)
+            db_zarf['prandtl_min'] = float(db_pr_min)
+            db_zarf['prandtl_max'] = float(db_pr_max)
+            db_zarf['reynolds_min'] = float(min_re)
+            db_zarf['length_over_diameter'] = (
+                None if l_over_d is None else float(l_over_d))
+            db_zarf['channel_length_m'] = float(channel_len_m)
+            if not db_zarf['in_envelope']:
+                warnings_list.append(
+                    "DITTUS-BOELTER ENVELOPE: the coolant-side correlation "
+                    "is used outside its stated validity envelope at "
+                    f"{db_stations} station(s) — "
+                    + "; ".join(db_zarf['violations'])
+                    + ". The reported +/-"
+                    f"{db_zarf['scatter_pct']:.0f}% scatter does NOT apply "
+                    "there.")
+
+        # ÖH D15 / P4B2-09 — ince-cidar zarfının UYARI bandı (%2..%10).
+        # Reddin altındaki bant sessiz kalmaz: düz-levha yaklaşımının kendi
+        # hatası sayılır ve yönü söylenir (düz levha direnci FAZLA tahmin
+        # eder, yani cidar sıcaklığı YUKARI yönde yanlıdır).
+        if self.wall_curvature_error_rel > WALL_CURVATURE_WARN_REL:
+            warnings_list.append(
+                f"THIN-WALL ENVELOPE: the flat-plate conduction resistance "
+                f"used here differs from the cylindrical solution by "
+                f"{self.wall_curvature_error_rel:.1%} at the throat "
+                f"(wall_thickness {self.wall_thickness * 1e3:.1f} mm vs "
+                f"throat radius {self.throat_diameter * 500.0:.1f} mm); the "
+                f"published hot-wall temperature is biased HIGH by that "
+                f"order. Model note assumes t_w << r_wall.")
+
+        # kanal yerleşim uygunluğu — ÖH A2 sivi-sogutma · F-17: ölçüt artık
+        # TEK TANIMDAN (``channel_fit_limit``); eskiden burada kaburgasız
+        # ``N·w <= 2·pi·(r_t + t_w)`` ayrı bir kopya olarak duruyordu ve sıvı
+        # motorun iç-çevre ölçütüyle aynı geometride farklı hüküm veriyordu.
+        uygunluk = channel_fit_limit(geo['r_throat_mm'] / 1000.0,
+                                     self.wall_thickness, self.channel_width,
+                                     self.land_width)
+        self.channel_fit = dict(uygunluk, n_channels=int(self.n_channels),
+                                fits=bool(self.n_channels
+                                          <= uygunluk['n_max']))
+        if not self.channel_fit['fits']:
             warnings_list.append(
                 f"GEOMETRY: {self.n_channels} channels of width "
-                f"{self.channel_width * 1e3:.2f} mm exceed the throat "
-                f"circumference ({circ_throat * 1e3:.1f} mm) — channels do not "
-                f"physically fit; reduce count/width.")
+                f"{self.channel_width * 1e3:.2f} mm with "
+                f"{self.land_width * 1e3:.2f} mm lands need "
+                f"{self.n_channels * uygunluk['pitch_m'] * 1e3:.1f} mm of "
+                f"circumference, but the channel-base circumference at the "
+                f"throat, 2*pi*(r_throat + wall_thickness), is "
+                f"{uygunluk['reference_circumference_m'] * 1e3:.1f} mm — "
+                f"channels do not physically fit; at most "
+                f"{uygunluk['n_max']} fit (reduce count/width).")
 
         # su kaynaması (kaba): yerel P'de doymuş sıcaklığın üstüne çıkış
         if self.coolant == 'water' and _HAS_COOLPROP and \
@@ -1481,6 +2201,57 @@ class RegenCooling:
                     f"extrapolation (wall-limit warnings apply "
                     f"independently).")
 
+        # --- ÖH KU H-11: RP-1 kritik ısı akısı ekranı (YALNIZ UYARI) ---
+        # Kritik-altı istasyon varsa uyarı; Sutton Tablo 8-5 zarfı içindeyse
+        # tepe q/q_max (en düşük tablo değeriyle, muhafazakâr) ve SP-8087 %80
+        # marjı uyarı metninde. Zarf dışında oran YAZILMAZ (uydurma oran yok).
+        # Zarf dört kenarlıdır: 0,689 ≤ p ≤ 1,38 MPa ve 1 ≤ v ≤ 8,5 m/s
+        # (denetim Ş-1: önceki sürüm alt basınç ve üst hız sınırını
+        # uygulamıyordu; 5 bar girişte zarf içi oran yazıyordu).
+        # YENİ ALAN (istasyon başına p/p_kr, süperkritik beyanı) BİLEREK
+        # YAYIMLANMADI: soğutma yanıtına eklenen her yeni anahtar
+        # tests/test_wave4b_contract.py ters yön sözleşmesinde (panel basmıyor,
+        # muafiyet yok) KIRMIZI oluyor; panel ve test bu kulvarın dosyası
+        # değil → devir. Ölçüldü: 'rp1_burnout_screen' alanı iki testi
+        # kırdı (kozmetik_kalan_gerekceli_izinli[cooling/summary],
+        # sagir_alt_bloklar_buyumez).
+        if self.coolant == 'rp1':
+            alt = (p_coolant / RP1_CRITICAL_PRESSURE_PA) <= 1.0
+            n_alt = int(np.sum(alt))
+            if n_alt > 0:
+                zarf = (alt
+                        & (p_coolant >= KEROSENE_QMAX_TABLE_P_MIN_PA)
+                        & (p_coolant <= KEROSENE_QMAX_TABLE_P_MAX_PA)
+                        & (velocity >= KEROSENE_QMAX_TABLE_V_MIN_M_S)
+                        & (velocity <= KEROSENE_QMAX_TABLE_V_MAX_M_S))
+                if np.any(zarf):
+                    tepe = float(np.max(q_flux[zarf])
+                                 / KEROSENE_QMAX_TABLE_MIN_W_M2)
+                    oran_metni = (
+                        f"peak q/q_max {tepe:.2f} against the lowest "
+                        f"tabulated kerosene q_max "
+                        f"({KEROSENE_QMAX_TABLE_MIN_W_M2 / 1e6:.1f} MW/m2, "
+                        f"Sutton & Biblarz Table 8-5) at "
+                        f"{int(np.sum(zarf))} station(s) inside the table "
+                        f"envelope; NASA SP-8087 keeps q below "
+                        f"{BURNOUT_HEAT_FLUX_MARGIN:.0%} of burnout")
+                else:
+                    oran_metni = (
+                        f"q/q_max not evaluated: no subcritical station lies "
+                        f"inside the tabulated envelope "
+                        f"({KEROSENE_QMAX_TABLE_P_MIN_PA / 1e6:.3f}-"
+                        f"{KEROSENE_QMAX_TABLE_P_MAX_PA / 1e6:.2f} MPa, "
+                        f"{KEROSENE_QMAX_TABLE_V_MIN_M_S:g}-"
+                        f"{KEROSENE_QMAX_TABLE_V_MAX_M_S:g} m/s; no "
+                        f"extrapolation)")
+                warnings_list.append(
+                    f"SUBCRITICAL RP-1: coolant pressure is below the RP-1 "
+                    f"critical pressure "
+                    f"({RP1_CRITICAL_PRESSURE_PA / 1e5:.1f} bar) at {n_alt} "
+                    f"station(s) — nucleate boiling and a burnout (critical "
+                    f"heat flux) limit apply; HRMA has no validated RP-1 "
+                    f"burnout correlation; {oran_metni}.")
+
         if sc_mode:
             if n_jackson > 0 and n_db_subcritical > 0:
                 coolant_correlation = 'jackson+dittus_boelter(subcritical)'
@@ -1532,10 +2303,36 @@ class RegenCooling:
             'fin_effect': self.fin_effect if sc_mode else None,
             'fin_area_ratio_max': (float(np.max(fin_ratio))
                                    if sc_mode else None),
+            # NOT (ÖH D15) — P4B2-07 (özellik kaynağı), P4B2-08 (Bartz'ı
+            # süren c*) ve P4B2-09 (ince-cidar zarfı ölçüsü) beyanları
+            # ``summary``ye YENİ ALAN olarak EKLENMEDİ; PK5'in aynı gerekçesi
+            # burada da geçerlidir ve ÖLÇÜLEREK doğrulandı: bu blok panelin
+            # okuma envanterine ters yönde kilitlidir
+            # (``tests/test_wave4b_contract.py::TestTersYonSozlesmesi`` +
+            # ``TestTersYonBorcEnvanteri``), yani buraya eklenen her ad ya
+            # ``cooling_panel.js`` içinde basılmak (dürüstlük alanı) ya da
+            # gerekçeli muafiyet listesine yazılmak zorundadır — ikisi de bu
+            # paketin sahasının dışındaki dosyalar. ÖLÇÜLDÜ: beş alan
+            # eklendiğinde ``test_durustluk_borcu_buyumez`` ve
+            # ``test_kozmetik_kalan_gerekceli_izinli[cooling/summary]``
+            # kırmızıya döndü. Bilgi kaybı yok: üç beyan da ``model_note``
+            # (panelin bastığı kanal) içinden, ince-cidar zarf ihlali ayrıca
+            # ``warnings`` üzerinden yayımlanır; ONARIMLARIN KENDİSİ
+            # (uçtan kaynak seçimi, sessiz düşüşün reddi, geometri kapıları)
+            # beyandan bağımsız olarak davranıştadır.
             # F057: tablo geçerlilik zarfı denetimi (panel/rapor görünürlüğü)
             'property_table_clamped_stations': table_clamped_stations,
             'property_table_band_K': (list(table_band) if table_band is not None
                                       else None),
+            # NOT (ÖH Z5S / PK5): zarf hükmü ve marş şeması BİLİNÇLİ olarak
+            # ``summary``ye YENİ ALAN olarak eklenmedi. Bu blok panelin okuma
+            # envanterine kilitlidir (tests/test_wave4b_contract.py ters-yön
+            # sözleşmesi): buraya eklenen her ad ya panelde basılmak zorunda
+            # (dürüstlük alanı) ya da gerekçeli muafiyet listesine yazılmak
+            # zorunda — ikisi de bu paketin sahasının dışındaki dosyalar.
+            # Bilgi kaybı yok: zarf hükmü ``warnings`` üzerinden (panelin
+            # bastığı kanal), kuadratür künyesi ``model_note`` içinden
+            # yayımlanır.
             'warnings': warnings_list,
         }
 
@@ -1580,6 +2377,92 @@ class RegenCooling:
                 "dimensions are user inputs (no auto-sizing)."
             )
 
+        # ÖH Z5S / PK5 — KUADRATÜR VE IZGARA KÜNYESİ (P4B2-11, P4B2-01).
+        # Yayımlanan total_heat_W'nin hangi kuraldan çıktığı ve ceketin
+        # hangi yüzeyi kapsadığı model künyesinde YAZILI olur; kullanıcı
+        # toplamı kendi q(x) dizisinden yeniden kurabilsin diye.
+        model_note += (
+            " Heat integration: the segment flux is the TRAPEZOIDAL mean of "
+            "its two station fluxes and the march is closed as a fixed point "
+            f"({marş_gecisi} pass(es)), so the published total_heat_W is the "
+            "trapezoidal integral of the published q(x) over the published "
+            "grid. Stations are distributed by WETTED AREA over the "
+            "barrel/convergent/divergent segments, with at least "
+            f"{REGEN_MIN_INTERVALS_PER_SEGMENT} intervals per segment."
+        )
+        # ÖH D15 / P4B2-07 — künye ARTIK kaynağı söylüyor. Eski hâlde su ve
+        # RP-1 metninde 'CoolProp' kelimesi hiç geçmiyordu ve iki kaynağın
+        # ürettiği metin BİT-AYNIYDI (md5 57f3da3314b9), yani okuyucu farklı
+        # sayıların nereden geldiğini metinden ÖĞRENEMİYORDU.
+        _kaynak_kullanilan = ('+'.join(sorted(self._props_sources_seen))
+                              if self._props_sources_seen else 'unknown')
+        model_note += (
+            " Coolant property source: requested "
+            f"'{self.coolant_props_source}', actually used "
+            f"'{_kaynak_kullanilan}' (CoolProp = Bell et al. 2014 REFPROP-"
+            "class EOS; 'table' = the internal engineering table of this "
+            "module). The two do not produce identical numbers: measured on "
+            "the same water case, the pressure drop differs by 0.22 % and "
+            "the peak coolant velocity by 0.79 %, and the table path raises "
+            "a PROPERTY RANGE warning the CoolProp path does not."
+            # ÖH D15 / P4B2-08 — Bartz'ı süren c* künyede ADIYLA duruyor.
+            f" Bartz driving c* = {float(c_star):.2f} m/s "
+            f"(source: {c_star_source}; 'user_supplied' means it came from "
+            "motor_data['c_star'] and it is the value the gas-side "
+            "coefficient was built on)."
+            # ÖH D15 / P4B2-09 — düz-levha iletiminin kendi hatası.
+            " Flat-plate wall conduction departs from the cylindrical "
+            f"solution by {self.wall_curvature_error_rel:.2%} at the throat "
+            f"(wall_thickness {self.wall_thickness * 1e3:.2f} mm vs throat "
+            f"radius {self.throat_diameter * 500.0:.2f} mm); above "
+            f"{WALL_CURVATURE_WARN_REL:.0%} a THIN-WALL ENVELOPE warning is "
+            f"raised and above {WALL_CURVATURE_MAX_REL:.0%} no result is "
+            "published at all."
+        )
+        # Karar §28-31 (c) — eşik künyesi (summary ters yön sözleşmesine
+        # kilitli olduğu için yeni alan değil, künye cümlesi).
+        _tl = self.temperature_ladder
+        model_note += (
+            " Wall-temperature verdict: single threshold from "
+            "materials_db.temperature_limits(rec) — allowable_K = "
+            f"{_tl['allowable_K']:.0f} K (published as both "
+            "material_allowable_temp_K and material_service_limit_K; "
+            f"selected field: {_tl['source_fields']['allowable_K']}) and "
+            f"melting_K = {_tl['melting_K']:.0f} K; above the allowable the "
+            "verdict is UNSAFE, above the melting point CRITICAL."
+        )
+        barrel_mm = float(geo.get('chamber_barrel_length_mm') or 0.0)
+        if barrel_mm > 0.0:
+            model_note += (
+                f" The jacket covers the cylindrical chamber barrel "
+                f"({barrel_mm:.1f} mm, from motor_data['chamber_length']) "
+                "as well as the nozzle contour."
+            )
+        else:
+            model_note += (
+                " The jacket covers the NOZZLE CONTOUR ONLY: no chamber "
+                "length was supplied (motor_data['chamber_length']), so the "
+                "cylindrical barrel is not part of the heated surface and "
+                "the total heat load is a lower bound for a real chamber."
+            )
+
+        if db_zarf is not None:
+            # P4B2-10: iki dürüstlük beyanı artık model_note'tan da geçiyor
+            # (kullanıcının okuduğu tek metin orasıdır).
+            model_note += (
+                f" Coolant-side Dittus-Boelter: reported scatter about "
+                f"+/-{db_zarf['scatter_pct']:.0f}%, and the Sieder-Tate "
+                f"(mu_b/mu_w)^0.14 correction for large wall-to-bulk "
+                f"property differences is NOT applied. Validity envelope "
+                f"(Re >= {DB_RE_MIN:.0g}, {DB_PR_MIN} <= Pr <= {DB_PR_MAX}, "
+                f"L/D >= {DB_LD_MIN:.0f}) was scanned over the "
+                f"{db_zarf['stations_using_dittus_boelter']} station(s) that "
+                f"use it: "
+                + ("satisfied." if db_zarf['in_envelope']
+                   else "VIOLATED — " + "; ".join(db_zarf['violations'])
+                   + ".")
+            )
+
         result = {
             # --- istenen çekirdek istasyon dizileri (x artan sırada) ---
             'x_mm': x_mm.tolist(),
@@ -1607,6 +2490,10 @@ class RegenCooling:
             'mdot_per_channel_kg_s': self.mdot_per_channel,
             'summary': summary,
             'model_note': model_note,
+            # P4B2-10: zarf taramasının sayısal dökümü (ölü kod artık ürün
+            # yolunda). Dittus-Boelter hiç kullanılmadıysa (tamamı Jackson)
+            # alan None döner — uydurma zarf yayımlanmaz.
+            'dittus_boelter_envelope': db_zarf,
         }
         if sc_mode:
             # İstasyon yığın entalpisi [kJ/kg] ve fin alan oranı — yalnız

@@ -29,6 +29,32 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+# Motor türleri tek kaynaktan (hrma/constants.py) gelir; aşağıda __all__ ile
+# YENİDEN YAYIMLANIR (dış tüketiciler 'from hrma.validation.experiment_db
+# import MOTOR_TYPES' yazmaya devam edebilir), ama tanım burada DEĞİLDİR.
+# Yeni bağımlılık değil: hrma.constants saf bir yaprak modüldür (hiçbir şey
+# import etmez) ve hrma/__init__ zaten bu modül yüklenirken çalışıyordu —
+# "import yan etkisi yok" güvencesi bozulmadı.
+from hrma.constants import MOTOR_TYPES
+# P10B2-12: döngüsellik bekçisi adaptörün KENDİ indirgemesini kullanır.
+from hrma.validation.record_adapters import BASE_ALIASES, split_quantity_key
+
+
+def _kanonik_tabanlar(blok: Dict[str, Any]) -> Dict[str, List[str]]:
+    """``{kanonik_taban: [ham_anahtar, ...]}`` — birim soneki ve takma ad çözülmüş.
+
+    ÖH D29 / defter P10B2-12. ``record_adapters.convert_block`` bir bloğu
+    SI'ya çevirirken tam olarak bu indirgemeyi yapar; döngüsellik bekçisinin
+    ondan FARKLI bir ad uzayına bakması, bekçinin adaptörün gördüğü
+    çakışmayı görememesi demekti.
+    """
+    out: Dict[str, List[str]] = {}
+    for anahtar in blok:
+        taban, _ = split_quantity_key(str(anahtar))
+        taban = BASE_ALIASES.get(taban, taban)
+        out.setdefault(taban, []).append(str(anahtar))
+    return out
+
 __all__ = [
     "SCHEMA_VERSION",
     "MOTOR_TYPES",
@@ -47,7 +73,8 @@ __all__ = [
 ]
 
 SCHEMA_VERSION = "1.0"
-MOTOR_TYPES = ("hybrid", "solid", "liquid")
+# MOTOR_TYPES yukarıda hrma.constants'tan içe aktarıldı (tek tanım noktası).
+# SIRA ÖNEMLİDİR: load_records kayıt klasörlerini bu sırayla gezer.
 CONFIDENCE_LEVELS = ("high", "medium", "low")
 ACCESS_VALUES = (
     "open", "paywalled", "public_domain", "webpage",
@@ -84,7 +111,7 @@ _TOP_LEVEL_REQUIRED = (
 )
 _TOP_LEVEL_OPTIONAL = (
     "schema_version", "record_type", "measurement_uncertainty",
-    "anomaly", "synthetic", "tags", "notes",
+    "anomaly", "model_scope", "synthetic", "tags", "notes",
 )
 _TOP_LEVEL_ALLOWED = frozenset(_TOP_LEVEL_REQUIRED + _TOP_LEVEL_OPTIONAL)
 
@@ -291,12 +318,32 @@ def validate_record(record: Any) -> List[str]:
                     )
 
     # --- döngüsellik bekçisi: inputs ve measured kesişemez ---
+    #
+    # ÖH D29 / app-api-dogrulama a1 · defter P10B2-12 — KANONİK TABAN AD.
+    # Bekçi eskiden HAM anahtar kümesi kesişimine bakıyordu; oysa aynı
+    # büyüklük kayıtta farklı BİRİM SONEKİYLE ya da TAKMA ADLA yazılabilir
+    # ve adaptör ikisini de aynı kanonik tabana indirger. ÖLÇÜLDÜ (taban
+    # ``4c27fa51``, ``once.json`` -> ``P10B2-12``): iki kaçak vaka HTTP
+    # düzeyinde hatasız geçiyordu —
+    #   inputs {'chamber_pressure_bar': 30} + measured {'chamber_pressure_psia': 435,1}
+    #   inputs {'pc_bar': 30}               + measured {'chamber_pressure_bar': 30}
+    # İkisi de skorlamada ``skipped_circular_input`` ile SESSİZCE eleniyordu
+    # (``score_record`` kanonik tabana bakar), yani kayıt "doğrulandı"
+    # görünürken ölçüm hiç puanlanmıyordu. Bekçi artık adaptörün KENDİ
+    # indirgemesini kullanır — iki taraf aynı adı okur (Doktrin 4).
     if isinstance(inputs, dict) and isinstance(measured, dict):
-        overlap = sorted(set(inputs) & set(measured))
-        if overlap:
+        girdi_tabanlari = _kanonik_tabanlar(inputs)
+        olcum_tabanlari = _kanonik_tabanlar(measured)
+        for taban in sorted(set(girdi_tabanlari) & set(olcum_tabanlari)):
+            g = sorted(girdi_tabanlari[taban])
+            m = sorted(olcum_tabanlari[taban])
+            if g == m:
+                nasil = f"{g}"
+            else:
+                nasil = f"inputs {g} <-> measured {m} (aynı kanonik büyüklük)"
             errors.append(
-                f"döngüsellik bekçisi: şu anahtar(lar) hem inputs hem measured "
-                f"içinde: {overlap} — bir büyüklük aynı anda girdi ve ölçülen "
+                f"döngüsellik bekçisi: '{taban}' hem inputs hem measured "
+                f"içinde: {nasil} — bir büyüklük aynı anda girdi ve ölçülen "
                 f"sonuç olamaz (girdiyle 'doğrulama' döngüseldir)"
             )
 
@@ -367,6 +414,38 @@ def validate_record(record: Any) -> List[str]:
             if "note" in anomaly and anomaly["note"] is not None \
                     and not isinstance(anomaly["note"], str):
                 errors.append("anomaly.note: metin olmalı")
+
+    # --- model_scope (P10B2-06, 2026-09-05) ---
+    #
+    # ``anomaly`` DENEYIN veri kalitesi bayragidir (lule erozyonu, sensor
+    # tikanmasi, tane catlagi, bildiri-ici tutarsizlik). ``model_scope`` ise
+    # HRMA'nin KENDI ilan ettigi modelleme kapsamidir: kayit saglikli olabilir
+    # ama modelin fizigi o konfigurasyonu kapsamiyor olabilir (or. swirl
+    # enjeksiyon ⟷ v1 EKSENEL hibrit modeli).
+    #
+    # Ikisini ayni bayrakla tasimak olculebilir bir yanliliktir: modelin
+    # zorlandigi vakalar "veri anomalisi" kiligi altinda basliktan cikar ve
+    # okur bunu deneyin kusuru sanir. Ayri alan, ayri katman, ayri yayim.
+    scope = record.get("model_scope")
+    if scope is not None:
+        if not isinstance(scope, dict):
+            errors.append(
+                "model_scope: bir obje olmalı ({'in_scope': bool, 'note': str})")
+        else:
+            unknown_ms = set(scope) - {"in_scope", "note"}
+            if unknown_ms:
+                errors.append(
+                    f"model_scope: bilinmeyen alan(lar): {sorted(unknown_ms)}")
+            in_scope = scope.get("in_scope")
+            if not isinstance(in_scope, bool):
+                errors.append("model_scope.in_scope: bool olmalı (zorunlu)")
+            if in_scope is False and not _is_nonempty_str(scope.get("note")):
+                errors.append(
+                    "model_scope.note: in_scope false ise boş olmayan gerekçe "
+                    "zorunlu (modelin HANGİ varsayımı kaydı kapsamıyor)")
+            if "note" in scope and scope["note"] is not None \
+                    and not isinstance(scope["note"], str):
+                errors.append("model_scope.note: metin olmalı")
 
     # --- units_original / digitized / synthetic / tags / notes ---
     if "units_original" in record and not _is_nonempty_str(record["units_original"]):
@@ -581,6 +660,7 @@ def summarize(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     n_digitized = 0
     n_with_uncertainty = 0
     n_anomalies = 0
+    n_out_of_scope = 0
     test_ids: List[str] = []
 
     for record in stat_records:
@@ -605,6 +685,11 @@ def summarize(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             n_with_uncertainty += 1
         if record.get("anomaly", {}).get("flag", False):
             n_anomalies += 1
+        # P10B2-06: model kapsami disi kayitlar ANOMALI SAYILMAZ; ozet
+        # ikisini ayri sayar (yoksa "kac deney bozuktu" sorusunun cevabi
+        # modelin kendi sinirlariyla sisirilir).
+        if record.get("model_scope", {}).get("in_scope") is False:
+            n_out_of_scope += 1
 
     return {
         "n_records": len(stat_records),
@@ -617,5 +702,6 @@ def summarize(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "n_digitized": n_digitized,
         "n_with_uncertainty": n_with_uncertainty,
         "n_anomalies": n_anomalies,
+        "n_out_of_scope": n_out_of_scope,
         "test_ids": sorted(test_ids),
     }

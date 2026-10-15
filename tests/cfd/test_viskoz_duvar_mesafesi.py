@@ -16,6 +16,14 @@ yalnız-düğüm yaklaşımı YASAKTIR. Merdiven:
 (c) Gerçek ``AxisymGrid`` (conftest analitik lüle konturu): duvara komşu
     hücre sırasının mesafesi, hücre yarı-yüksekliği × yerel duvar açısı
     kosinüsüyle tutarlı — bant ÖLÇÜLEREK kilitli.
+(d) **[V2 EKİ]** SA'nın gerçekten ihtiyaç duyduğu iki kapalı form:
+    gerçek konturun 42,14° KONİK duvarına analitik mesafe ve BOĞAZ
+    YAYINA (daireye) analitik mesafe. Konik bekçi, yasak radyal
+    yaklaşımın (d = r_duvar(z) − r) hatasını 1/cos α = 1,3486 (yani
+    %34,86) olarak ÖLÇER; yay bekçisi, ızgara poliçizgisinin yaydan
+    sapmasının SEHİM (sagitta) olduğunu kapalı formla gösterir ve
+    ``wall_distance_field(grid, wall_polyline=...)`` seçeneğinin bu
+    sapmayı ızgara çözünürlüğünden AYIRDIĞINI ölçer.
 
 EŞİKLER ÖLÇÜMDEN (M4 Max, 2026-08-16, ölçüm betiği scratchpad'de):
   - Düz duvar maks mutlak hata: 0,0; 45° duvar maks göreli hata:
@@ -49,6 +57,40 @@ hrma/cfd/wall_distance.py dosyasına ait — sağlam sürüm
        sağlanır), test_girdi_denetimleri.
   Mutasyondan sonra dosya md5 12f920820b0354712703f5185e46f8d5 değerine
   bit-özdeş geri kondu (cp + md5 doğrulaması).
+
+V2 EKİNİN ÖLÇÜMLERİ (M4 Max, 2026-08-18)
+----------------------------------------
+  - Konik duvar (gerçek konturun ölçülen 42,14° yakınsak açısı): kesin
+    nokta-parça mesafesi analitik doğru mesafesiyle 2,09e-14 bağıl farkta;
+    YASAK radyal yaklaşımın oranı TAM 1/cos(42,14°) = 1,348603819 →
+    %34,86 hata (belge §5.5 uyarısının sayısal hâli).
+  - Boğaz yayı (R_c = 0,382·r_t = 9,55 mm): poliçizgi mesafesinin analitik
+    daire mesafesinden sapması SEHMİN kendisidir —
+    s = R_c(1 − cos(Δθ/2)); ölçülen oran 17/33/65/129 düğümde 1,000.
+    Sapma Δθ² ile küçülür (mertebe 2,00 ölçüldü).
+  - Gerçek lüle (120×24): ızgara poliçizgisi ile 80001 noktalı gerçek
+    kontur arasında 4,0133e-06 m fark — duvar sırası d ORTALAMASININ
+    (6,7281e-04 m) %0,597'si, EN KÜÇÜK d'sinin (5,2091e-04 m) %0,770'i
+    (ÖH defter P6B2-05: yüzde ile payda eşleştirildi). Aynı
+    ızgarada 1001 noktalı kontur 5,777e-08 m'ye iner (69× daha iyi,
+    bedava): d hatası AKIŞ ızgarasından ayrışır. Izgarayı sıklaştırmak
+    da işe yarar ama pahalıdır (ni = 120/240/480 → 4,01e-6/1,00e-6/
+    2,51e-7; mertebe 2).
+
+V2 EKİNİN MUTASYONLARI (ters-değiştirmeyle geri alındı, md5 birebir
+döndü; sağlam hrma/cfd/wall_distance.py md5 =
+8d9197407bdb6c8d7233150e8b712da8)
+  M8 ``wall_distance_field`` RADYAL farka döndürüldü — belgenin YASAK
+     dediği yaklaşım (mutant md5 3cf33f1edb68e37be9fd7b1d422c1a28)
+     → 3 KIRMIZI: test_gercek_izgara_duvar_sirasi_bandi,
+     test_konik_IZGARADA_alan_analitikle_ayni,
+     test_gercek_kontur_secenegi_izgaradan_ayrisir.
+     Saf geometri bekçileri YEŞİL kalır ve bu BEYANLIDIR: mutasyon alan
+     sarmalayıcısındadır, ``point_polyline_distance``ta değil — konik
+     bekçinin ızgara kanadı tam bu boşluk için yazılmıştır.
+  M9 izdüşüm kelepçesi kapatıldı (yalnız-düğüm yaklaşımına çöküş; mutant
+     md5 dd159f4885622a84505b916b62b38201) → 9 KIRMIZI (eski 5 bekçi +
+     yeni konik/konik-ızgara/yay/gerçek-kontur bekçilerinin dördü).
 """
 
 import numpy as np
@@ -57,7 +99,10 @@ import pytest
 from hrma.cfd.grid_axisym import build_grid_from_wall
 from hrma.cfd.wall_distance import point_polyline_distance, wall_distance_field
 
-from .conftest import LULE_L_CONV, LULE_L_DIV, LULE_NI, LULE_NJ, lule_duvar_yaricapi
+from .conftest import (
+    LULE_L_CONV, LULE_L_DIV, LULE_NI, LULE_NJ, LULE_R_THROAT,
+    lule_duvar_yaricapi,
+)
 
 # Ölçümden kilitlenen eşikler (docstring'de gerekçeleri)
 ANALITIK_ESIK = 1e-13
@@ -194,6 +239,147 @@ def test_gercek_izgara_saglik(lule_izgarasi):
     # j arttıkça (duvara yaklaştıkça) d azalır — H-tipi radyal sütunlarda
     # tekdüzelik beklenir (duvar tek taraflı sınır)
     assert np.all(np.diff(d_alan, axis=1) < 0.0)
+
+
+# ------------------------------------------- (d) V2: konik + boğaz yayı kapalı formu
+
+#: Gerçek konturun ÖLÇÜLEN maksimum yakınsak duvar açısı (tasarım belgesi
+#: §5.7: "yakınsak duvar açısı 42,14°'ye çıkıyor"). SA'nın d alanı tam
+#: burada radyal yaklaşımdan en çok ayrılır.
+KONIK_ACI_DERECE = 42.14
+#: Klasik boğaz yayı yarıçapı R_c = 0,382·r_t (belge §5.7'nin kendi sayısı).
+BOGAZ_YAY_ORANI = 0.382
+
+
+def test_konik_duvar_analitik_kapali_form():
+    """42,14° konik duvara mesafe: analitik doğru mesafesiyle makine eşit.
+
+    Kapalı form: p noktasının a'dan geçen ve birim yönü (cos α, sin α)
+    olan doğruya uzaklığı |(p − a) × yön| = |Δz sin α − Δr cos α|.
+    Ayrıca YASAK radyal yaklaşımın oranı 1/cos α'dır — ölçülür.
+    """
+    alfa = np.deg2rad(KONIK_ACI_DERECE)
+    z0, r0 = 0.0, 0.10
+    poly_z = np.linspace(0.0, 0.2, 25)
+    poly_r = r0 + np.tan(alfa) * (poly_z - z0)
+    p_z = np.linspace(0.03, 0.17, 401)
+    dikey = np.linspace(0.001, 0.02, 401)          # duvarın ALTINDA
+    p_r = (r0 + np.tan(alfa) * (p_z - z0)) - dikey
+
+    d = point_polyline_distance(p_z, p_r, poly_z, poly_r)
+    analitik = np.abs((p_z - z0) * np.sin(alfa)
+                      - (p_r - r0) * np.cos(alfa))
+    assert np.max(np.abs(d - analitik) / analitik) < ANALITIK_ESIK
+
+    # YASAK yol (d = r_duvar(z) − r) TAM 1/cos α kadar şişer
+    oran = dikey / d
+    assert np.max(np.abs(oran - 1.0 / np.cos(alfa))) < ANALITIK_ESIK
+    assert abs(float(np.mean(oran)) - 1.348603819) < 1e-9
+    assert float(np.mean(oran)) - 1.0 > 0.34        # %34'ten fazla hata
+
+
+def test_konik_IZGARADA_alan_analitikle_ayni():
+    """Aynı kapalı form ``wall_distance_field`` ALANI üstünde (uçtan uca).
+
+    Önceki bekçi saf geometriyi ölçer; bu bekçi SA'nın gerçekten
+    kullandığı yolu (ızgara → alan) ölçer ve mesafenin radyal farka
+    dönmesi mutasyonunu YAKALAR. Kapsam duvara komşu sıradır: daha
+    derin sıralarda en yakın nokta SONLU duvar parçasının UCU olur
+    (geometrik gerçek, kusur değil) ve sonsuz doğru formülü orada
+    geçerliliğini yitirir — ölçüldü: j = nj−1'de bağıl fark 3,9e-15,
+    j = nj−2'de 1,5e-02.
+    """
+    alfa = np.deg2rad(KONIK_ACI_DERECE)
+    L, r0 = 0.10, 0.02
+    z = np.linspace(0.0, L, 41)
+    grid = build_grid_from_wall(z, r0 + np.tan(alfa) * z, 10)
+    d = wall_distance_field(grid)
+    analitik = np.abs(grid.z_centers * np.sin(alfa)
+                      - (grid.r_centers - r0) * np.cos(alfa))
+    assert np.max(np.abs(d[:, -1] - analitik[:, -1])
+                  / analitik[:, -1]) < 1e-13
+    # Radyal (YASAK) yaklaşımın oranı ALANDA da tam 1/cos α
+    radyal = (np.interp(grid.z_centers, z, r0 + np.tan(alfa) * z)
+              - grid.r_centers)
+    oran = (radyal / d)[:, -1]
+    assert np.max(np.abs(oran - 1.0 / np.cos(alfa))) < 1e-12
+    # Eksene yakın sıralarda oran DÜŞER (ölçüldü: en küçük 1,058) — çünkü
+    # orada kesin mesafe artık dik ayak değil, parça UCU üstündendir.
+    assert float((radyal / d)[:, 0].min()) < 1.10
+    # Duvara komşu sırada mutlak sapma: SA'nın d²'sinde %82 hata demektir
+    assert (1.0 / np.cos(alfa)) ** 2 - 1.0 > 0.8
+
+
+def test_bogaz_yayi_sapmasi_sehim_kadar():
+    """Poliçizgi ↔ analitik daire: fark SEHİMDİR, R_c(1 − cos(Δθ/2)).
+
+    Boğaz yayı iç bükeydir; hücre merkezleri dairenin İÇİNDEDİR ve
+    daireye mesafe |R_c − |p − merkez|| kapalı formundadır. Kirişlerin
+    yaydan sapması sehimdir; bekçi hem oranı (≈1) hem de mertebeyi
+    (Δθ² ⇒ düğüm sayısı iki katına çıkınca dörtte bir) kilitler.
+    """
+    r_t = LULE_R_THROAT
+    R_c = BOGAZ_YAY_ORANI * r_t
+    merkez = (0.0, r_t + R_c)
+    ofset = 1.0e-5                                  # duvardan içeri [m]
+    farklar = []
+    for n in (17, 33, 65, 129):
+        th = np.linspace(-0.5, 0.5, n)
+        w_z = merkez[0] + R_c * np.sin(th)
+        w_r = merkez[1] - R_c * np.cos(th)
+        tq = np.linspace(-0.35, 0.35, 73)
+        q_z = merkez[0] + (R_c - ofset) * np.sin(tq)
+        q_r = merkez[1] - (R_c - ofset) * np.cos(tq)
+        d = point_polyline_distance(q_z, q_r, w_z, w_r)
+        analitik = np.abs(R_c - np.hypot(q_z - merkez[0], q_r - merkez[1]))
+        assert np.allclose(analitik, ofset, rtol=1e-12)   # kurgunun kontrolü
+        sehim = R_c * (1.0 - np.cos(0.5 * (th[1] - th[0])))
+        fark = float(np.max(np.abs(d - analitik)))
+        assert abs(fark / sehim - 1.0) < 0.02, (
+            f'n={n}: fark {fark!r}, sehim {sehim!r}')
+        farklar.append(fark)
+    mertebe = [np.log2(farklar[i] / farklar[i + 1])
+               for i in range(len(farklar) - 1)]
+    assert all(1.9 < m < 2.1 for m in mertebe), f'sehim mertebesi {mertebe}'
+    # Sapma, duvar-çözümlü ızgaranın ilk hücresi sınıfındadır: 17 düğümde
+    # sehim ofsetin %46'sı (yani d %46 yanlış olurdu)
+    assert farklar[0] / ofset > 0.4
+
+
+def test_gercek_kontur_secenegi_izgaradan_ayrisir(lule_izgarasi):
+    """``wall_polyline`` seçeneği d hatasını AKIŞ ızgarasından ayırır.
+
+    Izgaranın duvar çizgisi konturun kirişleridir; SA'nın d'si için
+    çağıran gerçek konturu (istediği sıklıkta) verebilmelidir. Bekçi
+    üçünü birden ölçer: (i) ince örneklemeye yakınsama mertebesi 2,
+    (ii) ızgara poliçizgisinin ÖLÇÜLEN sapması, (iii) 1001 noktalı
+    konturun aynı ızgarada 60×'ten iyi olması.
+    """
+    grid = lule_izgarasi
+    uzunluk = LULE_L_CONV + LULE_L_DIV
+
+    def kontur(n):
+        zz = np.linspace(0.0, uzunluk, n)
+        return zz, lule_duvar_yaricapi(zz)
+
+    referans = wall_distance_field(grid, kontur(80001))
+
+    sapma = [float(np.max(np.abs(wall_distance_field(grid, kontur(n))
+                                 - referans)))
+             for n in (1001, 5001, 20001)]
+    assert sapma[0] < 1.0e-7
+    mertebe = [np.log(sapma[i] / sapma[i + 1]) / np.log(5.0 if i == 0 else 4.0)
+               for i in range(len(sapma) - 1)]
+    assert all(1.9 < m < 2.1 for m in mertebe), f'örnekleme mertebesi {mertebe}'
+
+    izgara = wall_distance_field(grid)
+    izgara_sapmasi = float(np.max(np.abs(izgara - referans)))
+    assert 3.5e-6 < izgara_sapmasi < 4.5e-6          # ÖLÇÜLDÜ: 4,013e-06
+    assert izgara_sapmasi / izgara[:, -1].mean() > 0.005
+    assert izgara_sapmasi / sapma[0] > 60.0
+    # Varsayılan davranış DEĞİŞMEDİ: argümansız çağrı ızgara duvarıdır
+    assert np.array_equal(izgara, point_polyline_distance(
+        grid.z_centers, grid.r_centers, grid.Z[:, -1], grid.R[:, -1]))
 
 
 # ---------------------------------------------------------------- girdi denetimleri

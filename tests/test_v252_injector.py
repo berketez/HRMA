@@ -24,6 +24,9 @@ from hrma.visualization.visualization import (
     create_performance_plots, create_improved_motor_cross_section,
     create_improved_injector_design, resolve_injector_type,
 )
+# ÖH D25 / P16B1-45: beklenen varsayılan Cd TEK kaynaktan okunur — bekçi
+# sayıyı kendi metnine ikinci kez yazmaz.
+from hrma.engines.injector_design import default_discharge_coefficient
 
 # Ortak rapor sözleşmesi anahtarları (app.js bu adlarla okur)
 CONTRACT_KEYS = (
@@ -53,8 +56,14 @@ class TestUtilsContract:
         katsayısı bağımsız bir girdi DEĞİLDİR — Giffen–Muraszew çözümünden
         gelir (Cd = √((1−X)³/(1+X)); Lefebvre & McDonell Böl. 6, tipik simplex
         bandı 0.2-0.45). Bu yüzden swirl'de Cd artık GM değeridir ve
-        'discharge_coefficient_basis' alanıyla raporlanır; diğer tiplerde
-        yapıcının düz orifis Cd'si (0.7) korunur."""
+        'discharge_coefficient_basis' alanıyla raporlanır.
+
+        ÖH D25 / P16B1-45 — ÇEVRİLDİ. Bu düğüm ``== approx(0.7)`` ile
+        yapıcının ÇIPLAK varsayılanını kilitliyordu; kalemin kusuru tam
+        o literaldi (aynı /calculate yanıtında plaka 0,70, devre 0,78
+        yayımlıyordu ve plaka geometrisi künyesiz olandan türüyordu).
+        Sayı artık devrenin TEK kaynağından okunur ve KAZANILMAMIŞ
+        olduğu künyeyle taşınır; düğüm sabiti değil SÖZLEŞMEYİ kilitler."""
         r = _injector(injector_type).calculate()
         for key in CONTRACT_KEYS:
             assert key in r, f'{injector_type}: sözleşme anahtarı eksik: {key}'
@@ -62,7 +71,11 @@ class TestUtilsContract:
             assert 0.2 <= r['discharge_coefficient'] <= 0.45
             assert 'Giffen-Muraszew' in r['discharge_coefficient_basis']
         else:
-            assert r['discharge_coefficient'] == pytest.approx(0.7)
+            beklenen, _ = default_discharge_coefficient()
+            assert r['discharge_coefficient'] == pytest.approx(beklenen)
+            # Çağıran Cd vermedi: sayı kazanılmamıştır ve bunu SÖYLER.
+            assert r['discharge_coefficient_earned'] is False
+            assert 'NOT earned' in r['discharge_coefficient_basis']
         # Enjeksiyon alanı mm² ve pozitif; tüm tiplerde AYNI anahtar
         assert r['injection_area'] > 0
         assert r['weber_number'] > 0

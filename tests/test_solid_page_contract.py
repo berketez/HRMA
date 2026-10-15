@@ -66,14 +66,24 @@ def client():
 
 
 def mask_comments(text):
-    """JS blok/satır yorumlarını ve HTML yorumlarını boşlukla maskeler.
+    """Şablon/JS yorumlarını boşlukla maskeler (ofsetler korunur).
 
-    Ofsetler korunur. Proje stili gereği kod yorumları Türkçe'dir; dil
-    testi yalnız ekranda görünen metni kapsar.
+    Proje stili gereği kod yorumları Türkçe'dir; dil testi yalnız EKRANDA
+    GÖRÜNEN metni kapsar (bkz. modül başlığı, madde 6).
+
+    ÖH D26 / fix-25b: Jinja yorumu ``{# ... #}`` de maskelenir. Bu, bekçinin
+    iddiasını gevşetmez — kapsamını DOĞRU tanımlar: Jinja yorumunu şablon
+    motoru render sırasında SİLER, tarayıcıya hiç ulaşmaz. Ölçüldü
+    (test_client ile ``GET /solid``, 422 074 baytlık çıktı): ne yorum metni
+    ne de ``{#`` imi render çıktısında var. Eskiden bu desen maskesizdi;
+    D25 katı/arayüz kulvarı solid.html'e bir Jinja yorumu ekleyince
+    (OH-D23-08, durağan üç sınıf metninin kaldırılma gerekçesi) bekçi
+    GÖRÜNMEYEN bir metni "görünür Türkçe" sayıp yanlış alarm verdi.
     """
     def blank(m):
         return re.sub(r'[^\n]', ' ', m.group(0))
 
+    text = re.sub(r'\{#.*?#\}', blank, text, flags=re.S)
     text = re.sub(r'<!--.*?-->', blank, text, flags=re.S)
     text = re.sub(r'/\*.*?\*/', blank, text, flags=re.S)
     text = re.sub(r'(?m)^[ \t]*//[^\n]*', blank, text)
@@ -471,6 +481,30 @@ def test_solid_page_serves_catalog_markup(client):
     assert '/static/js/materials_catalog.js' in page
 
 
+def _alan_etiketi(html, field):
+    """``field`` alanına BAĞLI etiketin (``<label for="field">``) gövdesi.
+
+    ÖH D37 taban-onarım — BEKÇİ ÇEVRİLDİ. Kök commit 32e98e9a (ÖH D35 elle,
+    U-4: 261 form etiketi alanına bağlandı, ``label for=``) bütün etiketleri
+    ``<label for="…">`` yaptı; eski desen çıplak ``<label>`` aradığı için
+    hiçbir alanı bulamaz oldu.
+
+    Eski desen ayrıca KÖRDÜ (ölçüldü, 32e98e9a^ şablonu,
+    ``docs/scofield/raw/OH/D37/taban-onarim/a1/mutasyon.json``):
+    ``<label>(.*?)`` + ``re.S`` belgenin İLK etiketinden başlayıp hedef
+    girdiye kadar uzuyordu; yakalanan blok alan başına 12-45 etiket (13-47 KB)
+    içeriyordu ve alanın KENDİ ``(mm)``i silinince 15 alanın 14'ünde yine
+    geçiyordu (başka alanın ``(mm)``i yetiyordu). Yeni desen yalnız O alana
+    bağlı etiketi, kendi ``</label>``ına kadar okur (500-1100 bayt) ve aynı
+    mutasyonu 15/15 yakalar — kusur sınıfı aynı, ölçüm daha dar.
+    """
+    ad = re.escape(field)
+    m = re.search(
+        r'<label\b[^>]*\bfor="%s"[^>]*>((?:(?!</label>).)*)</label>\s*'
+        r'<input[^>]*\bid="%s"' % (ad, ad), html, re.S)
+    return m.group(1) if m else None
+
+
 def test_units_are_millimetres_for_small_lengths(html):
     """1 m altındaki mühendislik boyutları mm; büyük boyutlar (irtifa) metre."""
     mm_fields = ('web_thickness', 'outer_diameter', 'core_diameter',
@@ -479,13 +513,10 @@ def test_units_are_millimetres_for_small_lengths(html):
                  'throat_diameter', 'exit_diameter', 'star_radius',
                  'star_fillet', 'fin_width', 'fin_length')
     for field in mm_fields:
-        block = re.search(
-            r'<label>(.*?)</label>\s*<input[^>]*id="%s"' % re.escape(field),
-            html, re.S)
-        assert block, f'{field} etiketi bulunamadı'
-        assert '(mm)' in block.group(1), f'{field} etiketinde mm birimi yok'
+        block = _alan_etiketi(html, field)
+        assert block is not None, f'{field} etiketi bulunamadı'
+        assert '(mm)' in block, f'{field} etiketinde mm birimi yok'
 
     # İrtifa metre kalmalı (büyük boyut)
-    alt = re.search(r'<label>(.*?)</label>\s*<input[^>]*id="test_altitude"',
-                    html, re.S)
-    assert alt and '(m)' in alt.group(1)
+    alt = _alan_etiketi(html, 'test_altitude')
+    assert alt is not None and '(m)' in alt

@@ -49,6 +49,87 @@ if REPO_ROOT not in sys.path:
 from tools import iddia_lint  # noqa: E402
 
 
+# ---------------------------------------------------------------------------
+# BAĞIMSIZ KORPUS (P10B4-18)
+#
+# Bu liste ``iddia_lint.ALL_RULES``tan TÜRETİLMEZ. Satırlar iki kaynaktan
+# gelir ve her birinin kaynağı yanında yazılıdır:
+#
+#   * "ürün:"     — kampanyada ölçülmüş GERÇEK ürün satırı (açılış manşeti,
+#                   i18n bildirimi, motor docstring'i),
+#   * "kampanya:" — P4-P7 / fizik raporu ölçümlerinin ortaya çıkardığı iddia
+#                   sınıfının temsilcisi; bir kısmı bilinçli olarak TÜRKÇE
+#                   ya da sözcük sırası değişik varyanttır, çünkü kuralın
+#                   ezberi değil sınıfı yakalaması gerekir.
+#
+# Bir sınıf buraya eklenip kural yazılmazsa bekçi KIRMIZI olur — eski
+# totolojik listede bu mümkün değildi.
+BAGIMSIZ_POZITIF = [
+    ('Parametric Solvers &middot; NASA CEA Validated &middot; 3D Model',
+     'ürün: hrma/templates/index.html açılış manşeti'),
+    ("'hero.sub': 'Parametrik Çözücüler · NASA CEA Doğrulamalı · 3B Model',",
+     'ürün: hrma/static/js/i18n.js Türkçe manşet'),
+    ('"""NASA CEA verified propellant combinations (99.8% accuracy)"""',
+     'ürün: hrma/engines/liquid_rocket_engine.py docstring'),
+    ('# Regresyon katsayisi 46 deney noktasiyla deneyle dogrulandi.',
+     'kampanya: HTPB katsayısı HDPE satırından alınmış, −%47,6 sapma'),
+    ('# Korelasyon deneysel olarak doğrulanmıştır (Pizzarelli 2016).',
+     'kampanya: aynı sınıfın Türkçe varyantı'),
+    ("NOTE = 'Bartz correlation is accurate to within +/-20-30 percent'",
+     'kampanya: fizik raporu boğazda +%95 sapma ölçtü'),
+    ("SUMMARY = 'The chamber model is accurate to within 5% of test data.'",
+     'kampanya: hiçbir kod yolu bu bandı ölçmüyor'),
+    ('# Injector model experimentally verified on the cold-flow rig.',
+     'kampanya: doğrulama kampanyası koşmuyor'),
+    ('# Validated against experimental data from the 2016 campaign.',
+     'kampanya: doğrulama kampanyası koşmuyor'),
+    ("'uncertainty': '3-sigma coverage across the flight envelope',",
+     'kampanya: fizik raporu 3σ kapsamayı VERİ-İMKÂNSIZ ölçtü (n_eff ≤ 14)'),
+    ('# Wall heat flux verified by CFD at three mesh levels.',
+     'kampanya: P6 — yayımlanan kalıntı dondurulmuş operatörün'),
+    ('# Duvar isi akisi CFD ile doğrulandı.',
+     'kampanya: aynı sınıfın Türkçe varyantı'),
+    ("return {'verdict': 'Tasarım güvenlidir', 'sf': sf}",
+     'kampanya: P5/P7 — emniyet paneli 3600 K’de "acceptable" basıyordu'),
+    ("STATUS = 'The design is safe for the specified envelope.'",
+     'kampanya: "safe for operation" kuralının dışında kalan biçim'),
+    ('# Hesap NASA standartlarına uygun yöntemle yapilir.',
+     'kampanya: hiçbir kod yolu standart uygunluğu denetlemiyor'),
+    ("out['wall_thickness_source'] = 'measured'",
+     'kampanya: ölçülmemiş sayıyı "measured" künyesiyle sunma sınıfı'),
+    ("props['density_basis'] = 'user_supplied'",
+     'kampanya: P7 KRİTİK — 0,5 mm cidar sessizce 2,0 mm oldu, künye kaldı'),
+    ('# Density taken from the built-in propellant table (Ariane 5 heritage)',
+     'kampanya: P7 KRİTİK — n2o4 için 1200 kg/m³ künyesi, gerçek 1443'),
+    ("DOC = 'There is no doubt: the result is guaranteed to 3 sigma.'",
+     'kampanya: allow_if kaçağı (P10B4-03)'),
+    ("NOTE = 'No risk is guaranteed to stay below the limit.'",
+     'kampanya: allow_if kaçağının ikinci biçimi'),
+]
+
+#: NEGATİF korpus: kural kümesi genişledikçe MEŞRU cümleleri boğmamalı.
+#: "Her satırı yakala" diyen bir kural pozitif korpusu geçerdi; bu liste
+#: onu engeller.
+BAGIMSIZ_NEGATIF = [
+    ('# the Joukowsky peak is NOT guaranteed to be the upper bound',
+     'olumsuzlanmış garanti — muafiyetin MEŞRU kullanımı'),
+    ("out['wall_thickness_source'] = 'sized_by_hrma'",
+     'künye kazanım iddia etmiyor, kimin boyutlandırdığını söylüyor'),
+    ("assert 'herhangi bir standarda uygunluk beyanı değildir' in text",
+     'uygunluk REDDİ — hüküm değil sınır beyanı'),
+    ('# accuracy of the mesh refinement loop is reported as relative change',
+     'band iddiası yok (sayı yok)'),
+    ("def validate_inputs(payload): raise ValueError('negative pressure')",
+     'girdi doğrulama; "validated" iddiası değil'),
+    ('# combustion efficiency is clamped at 90 percent by max()',
+     'ölçüm notu — kelepçeyi ADIYLA söylüyor'),
+    ('# Bu deger emniyet katsayisi HEDEFIDIR, olculmus degildir.',
+     'dürüstlük notu — kazanılmamışlığı beyan ediyor'),
+    ("source = 'fluid_table' if rec else 'unavailable'",
+     'künye, kazanım iddiası taşımıyor'),
+]
+
+
 def _read(rel_path: str) -> str:
     with open(os.path.join(REPO_ROOT, rel_path), encoding='utf-8') as handle:
         return handle.read()
@@ -171,22 +252,72 @@ class TestLintAraci:
                 'AÇIK BORÇ kaydı kalmamış ama defterde bunun gerekçesi yok; '
                 'borçlar sessizce silinmiş olabilir')
 
-    @pytest.mark.parametrize('phrase', [
-        'NASA-grade accurate',
-        'validated NASA standards',
-        'NASA-standard methodologies',
-        'Professional-grade analysis',
-        'Acceptable for preliminary design',
-        'flight certified hardware',
-        'ready for manufacturing',
-        'MOTOR SAFE FOR OPERATION',
-        'a digital twin of the engine',
-        'NFPA-compliant design',
-    ])
-    def test_yasak_ifadeler_yakalaniyor(self, phrase, tmp_path):
+    @pytest.mark.parametrize('phrase,kaynak', BAGIMSIZ_POZITIF)
+    def test_yasak_ifadeler_yakalaniyor(self, phrase, kaynak, tmp_path):
+        """Kural listesinden DEĞİL, üründen/kampanyadan gelen örnekler.
+
+        P10B4-18: bu bekçi eskiden ``ALL_RULES``un kendi örneklerinden
+        alınmış 10 ifadeyi sınıyordu (10/10'u kural listesinin birebir
+        kopyasıydı), yani yalnız "kurallar hâlâ derleniyor mu" sorusunu
+        yanıtlıyordu; yeni bir iddia sınıfı için asla kırmızıya dönemezdi.
+        Ölçüm bunu 27 Ağustos 2026'da rakama çevirdi: kampanyanın ÖLÇÜMLE
+        kanıtladığı 15 iddia sınıfından 15'i araçtan kaçıyordu ve bekçi
+        yeşildi. Korpus artık ``BAGIMSIZ_POZITIF``tir — kaynağı her satırda
+        yazılıdır ve kural metinlerinden bağımsızlığı ayrıca sınanır
+        (``test_korpus_kural_listesinin_kopyasi_degil``).
+        """
         target = tmp_path / 'ornek.py'
-        target.write_text(f'# {phrase}\n', encoding='utf-8')
-        assert iddia_lint.scan_file(str(target)), phrase
+        target.write_text(phrase + '\n', encoding='utf-8')
+        assert iddia_lint.scan_file(str(target)), f'{phrase}  [{kaynak}]'
+
+    @pytest.mark.parametrize('phrase,kaynak', BAGIMSIZ_NEGATIF)
+    def test_mesru_ifadeler_isabet_saymiyor(self, phrase, kaynak, tmp_path):
+        """Negatif korpus: kural kümesi genişledikçe aşırı geniş olmamalı.
+
+        Pozitif korpus tek başına yetmez: "her satırı yakala" diyen bir
+        kural da onu yeşil geçerdi. Bu bekçi kuralların meşru cümleleri
+        boğmadığını ölçer.
+        """
+        target = tmp_path / 'ornek.py'
+        target.write_text(phrase + '\n', encoding='utf-8')
+        hits = iddia_lint.scan_file(str(target))
+        assert not hits, (f'{phrase}  [{kaynak}] -> '
+                          f'{[h.rule_id for h in hits]}')
+
+    def test_korpus_kural_listesinin_kopyasi_degil(self):
+        """Korpus bağımsızlığının MAKİNE ölçütü (P10B4-18).
+
+        Eski bekçinin kusuru "ifadeler kural listesinden alınmıştı"
+        cümlesiyle anlatılıyordu; o cümle bir daha sessizce yanlış olmasın
+        diye ölçüye bağlandı: hiçbir korpus satırı bir kuralın deseninin ya
+        da gerekçesinin içinde birebir geçmemeli.
+        """
+        kural_metni = ' '.join(
+            (r.pattern + ' ' + r.why + ' ' + (r.allow_if or ''))
+            for r in iddia_lint.ALL_RULES).lower()
+        kopya = [p for p, _k in BAGIMSIZ_POZITIF
+                 if p.strip().lower() in kural_metni]
+        assert not kopya, kopya
+
+    def test_kural_silinince_korpus_kirmiziya_doner(self, tmp_path):
+        """MUTASYON KANITI: kural düşerse bekçi gerçekten kırmızıya döner.
+
+        Dosyaya dokunulmaz; kural kümesi ``scan_file(rules=...)`` ile
+        daraltılır. Her korpus satırı için onu yakalayan kurallar çıkarılır
+        ve satırın artık HİÇ yakalanmadığı gösterilir. Böylece "bekçi yeşil"
+        ifadesi "kurallar bu sınıfı görüyor" anlamına gelir; kuralın
+        silinmesi sessiz kalmaz.
+        """
+        for phrase, kaynak in BAGIMSIZ_POZITIF:
+            target = tmp_path / 'mutasyon.py'
+            target.write_text(phrase + '\n', encoding='utf-8')
+            tutan = {f.rule_id for f in iddia_lint.scan_file(str(target))}
+            assert tutan, f'{phrase} [{kaynak}] hiçbir kuralla yakalanmadı'
+            kalan = tuple(r for r in iddia_lint.ALL_RULES
+                          if r.rule_id not in tutan)
+            assert not iddia_lint.scan_file(str(target), rules=kalan), (
+                f'{phrase} [{kaynak}]: {sorted(tutan)} kuralları '
+                f'silindiği hâlde hâlâ yakalanıyor — mutasyon kanıtı yok')
 
     def test_satir_ici_muafiyet_calisiyor(self, tmp_path):
         target = tmp_path / 'ornek.py'

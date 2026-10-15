@@ -169,7 +169,15 @@ modellemediklerini paket düzeyinde ilan eder (`QUASI1D_NOT_MODELLED`,
 | Rapor PDF | `/api/export-pdf/<report_type>`, `/api/export-chart-pdf` |
 | OpenRocket `.eng` (gerçek hesaplanan itki eğrisi) | `/api/export-eng`, `/api/export-openrocket` |
 | XLSX | `/api/export-xlsx` |
-| Tam paket ZIP (STL+STEP+DXF+PDF+.eng+geometri) | `/api/export-complete-zip`, `/api/generate-complete-package` |
+| Tam paket ZIP (STL+STEP+DXF+PDF+.eng+geometri) | `/api/export-complete-zip` |
+| Tam paket JSON (indirme bağlantıları + analiz blokları) — **yalnız API**, arayüz çağırmaz | `/api/generate-complete-package` |
+
+İki uç (`/api/export-cad`, `/api/generate-complete-package`) 2.6.27'de
+arayüze bağlı DEĞİLDİR ve emekli de edilmemiştir: ürün kararı ikisini
+"yalnız API" olarak bırakmaktır (changelog 2.6.27, "Yalnız API olarak
+yaşayan iki uç"). Ölçüm ve bekçi: `tests/test_d32_ihracat_a2.py`.
+`/api/generate-complete-package` gövdesinde `motor_data.motor_type`
+zorunludur; alan yoksa uç motoru hibrit varsayıp `port_diameter` ister.
 
 ---
 

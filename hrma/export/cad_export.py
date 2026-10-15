@@ -3,6 +3,7 @@ Real CAD File Generator for Liquid Rocket Propellant Tanks
 Generates STEP, STL, and DXF files compatible with CATIA/SolidWorks
 """
 
+import math
 import numpy as np
 import os
 import json
@@ -10,6 +11,8 @@ from typing import Dict, List, Tuple
 import tempfile
 import zipfile
 from datetime import datetime
+
+from hrma.utils.input_guard import finite_number
 
 
 def _hrma_version() -> str:
@@ -75,14 +78,14 @@ _AV_IDENTITY_RTOL = 1e-6
 
 
 def _as_float(value):
-    """Sayıya çevirir; çevrilemeyen ya da sonlu olmayan değer için ``None``."""
-    try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return None
-    if out != out or out in (float('inf'), float('-inf')):
-        return None
-    return out
+    """Sayıya çevirir; çevrilemeyen ya da sonlu olmayan değer için ``None``.
+
+    Kural burada YAZILMAZ; deponun değer katmanı kapısından okunur
+    (``input_guard.finite_number``, ÖH D28 / OH-D27-11). Eski elle yazılmış
+    gövde ``bool``u eliyemiyordu: ``float(True) == 1.0`` bir girdap
+    önleyici çapını 1,0 yapıyordu.
+    """
+    return finite_number(value)
 
 
 def normalize_anti_vortex_mm(av_config, tank_diameter_mm=None):
@@ -128,14 +131,46 @@ def normalize_anti_vortex_mm(av_config, tank_diameter_mm=None):
                      'in metres - converted to millimetres')
 
     # 2) İkincil ölçüt: sözlük birimini kendisi beyan ediyorsa ona uyulur.
+    declared = str(av_config.get('units', '')).strip().lower()
+    _BEYAN = {'mm': 'mm', 'millimetre': 'mm', 'millimeter': 'mm',
+              'm': 'm', 'metre': 'm', 'meter': 'm'}
+    beyan_birimi = _BEYAN.get(declared)
     if scale is None:
-        declared = str(av_config.get('units', '')).strip().lower()
-        if declared in ('mm', 'millimetre', 'millimeter'):
+        if beyan_birimi == 'mm':
             scale, solver_units = 1.0, 'mm'
             basis = 'unit taken from the declared "units" field of the source'
-        elif declared in ('m', 'metre', 'meter'):
+        elif beyan_birimi == 'm':
             scale, solver_units = 1000.0, 'm'
             basis = 'unit taken from the declared "units" field of the source'
+
+    # ÖH D24 / P9B2-23 — ÇELİŞKİ SESSİZ KAPATILMAZ.
+    # ÖLÇÜLDÜ (taban 88a29d3, ``once.json`` M6): sözlük ``units: "m"`` beyan
+    # ederken geometrik özdeşlik ``mm`` diyorsa çıktı, çelişkinin HİÇ
+    # yaşanmadığı (``units: "mm"``) sözlüğünkiyle BİREBİR aynıydı —
+    # ``unit_declaration_conflict`` alanı yok, ``unit_resolution_basis``
+    # yalnız özdeşliği anlatıyor. Yani kaynağın kendi içinde 1000 kat
+    # tutarsız olduğu, paketi alan imalatçıya HİÇBİR yerden söylenmiyordu.
+    #
+    # Özdeşlik ölçüm, beyan ise iddiadır: seçim ÖZDEŞLİKTE kalır (bir alanın
+    # adında taşıdığı ``_mm`` ile çapraz doğrulanmış sayı, serbest bir metin
+    # alanından güçlüdür). Değişen şey, çelişkinin ARTIK ADIYLA yayımlanması.
+    if (beyan_birimi is not None and solver_units is not None
+            and beyan_birimi != solver_units):
+        out['unit_declaration_conflict'] = {
+            'declared_units': av_config.get('units'),
+            'resolved_units': solver_units,
+            'resolved_by': 'solver geometric identity '
+                           '(diameter == 2 x vane_radial_length_mm)',
+            'detail': ('the source declares "%s" but its own geometry says '
+                       '"%s"; the measured identity was used and the '
+                       'declaration was NOT silently accepted. The source '
+                       'dictionary is internally inconsistent by a factor of '
+                       '1000 - check the producer before manufacturing.'
+                       % (av_config.get('units'), solver_units)),
+        }
+        basis = (basis + '; WARNING: this contradicts the source\'s own '
+                 '"units" declaration ("%s") - see '
+                 'unit_declaration_conflict' % (av_config.get('units'),))
 
     if scale is None:
         # 3) Ölçüt yok -> UYDURMA YOK. Ham değer korunur, çevrilmiş alanlar
@@ -190,6 +225,157 @@ def normalize_internal_structures(tank_config):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Tank CAD paketinin GİRDİ SÖZLEŞMESİ (ÖH Z5S / S7, defter P16B4-17)
+# ---------------------------------------------------------------------------
+#
+# ÖLÇÜLDÜ (28 Ağustos 2026, bu ağaçta):
+#
+#   POST /export_tank_cad {'tank_data': <calculate_liquid'in
+#                          feed_system.tanks bloğu>}
+#     -> HTTP 500  {"error": "CAD export error: 'dimensions'"}
+#
+# Yani ret gövdesi ham bir Python SÖZLÜK ANAHTARI sızdırıyor ve istemciye
+# hangi yapının beklendiğini SÖYLEMİYOR. Aynı koşunun ``propellant_tanks``
+# bloğu ise 200 + 46 KB ZIP üretiyor: uç ölü değil, sözleşmesi YAZILI DEĞİL.
+# ``feed_system.tanks`` makul görünen ama farklı şekilli bir kardeş blok
+# (``volume``/``pressure``/``material`` düz alanlar) ve kullanıcıya "yanlış
+# blok yolladın" denmiyordu.
+#
+# Sözleşme aşağıdaki üreticilerin GERÇEKTEN okuduğu alanlardan çıkarıldı
+# (bu dosyada: _generate_fallback_files, _generate_cad_instructions,
+# _generate_simple_stl, _generate_drawings, _generate_manufacturing_specs):
+TANK_CAD_REQUIRED_TANKS = ('oxidizer_tank', 'fuel_tank')
+#: Her tankın ``dimensions`` bloğunda SONLU ve POZİTİF olması gereken ölçüler
+#: (milimetre; ``propellant_tanks`` bunları ``* 1000`` ile yayımlar).
+TANK_CAD_REQUIRED_DIMENSIONS = ('diameter', 'length', 'wall_thickness')
+#: Tank STL mesh'inin çevresel bölüntü sayısı (ÖH D15 / defter P9B2-16).
+#: Eskiden ``30`` çağrı yerinde gömülüydü; tek yerde tanımlanır ki mesh
+#: yoğunluğu ile bekçinin beklediği üçgen sayısı ayrışmasın.
+TANK_MESH_RESOLUTION = 30
+#: Sözleşmenin geri kalanı: malzeme adı, basınç sınıfı ve iç yapı bloğu.
+#:
+#: ÖH D21 / defter P9B2-27 — ``pressure_rating`` EKLENDİ. Kapı, üreticilerin
+#: GERÇEKTEN okuduğu alanlardan çıkarılmıştı ama ``_generate_drawing_notes``
+#: gözden kaçmıştı. ÖLÇÜLDÜ (taban ``35aa279``): kapıdan GEÇEN bir gövde
+#: (``dimensions`` + ``structural.material`` + ``internal_structures`` tam)
+#: yine ham ``KeyError: 'pressure_rating'`` ile çöküyordu — yani sözleşme
+#: kapısı vardı ama sözleşmeyi eksik yazıyordu. Alan uydurma değildir:
+#: ``liquid_rocket_engine`` onu ``propellant_tanks[...]['structural']
+#: ['pressure_rating']`` olarak (bar) YAYIMLIYOR ve imalat notundaki
+#: "Pressure test to 1.5x design pressure" satırı onsuz anlamsızdır.
+TANK_CAD_REQUIRED_BLOCKS = (
+    ('structural', ('material', 'pressure_rating')),
+    ('internal_structures', ('slosh_baffles', 'anti_vortex_device')),
+)
+
+
+class TankCADDataError(ValueError):
+    """Tank CAD paketi ÜRETİLEMEZ: girdi sözleşmeyi karşılamıyor.
+
+    ÖH D21 / defter P9B2-27. Sözleşme kapısı (``tank_data_contract_problem``)
+    ÖNCE yalnız HTTP ucunda vardı; kütüphaneyi doğrudan çağıran bir tüketici
+    (paketleyici betikler, testler, gelecekteki uçlar) aynı eksik gövdeyle
+    ham ``KeyError('fuel_tank')`` alıyordu. Artık kapı ÜRETİCİNİN KENDİSİNDE:
+    hata Python anahtar adı değil, ucun kendi alan yolunu (``invalid_fields``)
+    taşır ve ``ValueError`` türevi olduğu için mevcut ``except ValueError ->
+    4xx`` dalları davranışını korur.
+    """
+
+    def __init__(self, code, fields):
+        self.code = code
+        self.fields = fields
+        adlar = ', '.join(
+            str(f.get('field')) for f in (fields or []) if isinstance(f, dict))
+        super().__init__(
+            'The tank CAD package is built from the solver block published '
+            "as 'propellant_tanks' (each tank carries 'dimensions', "
+            "'structural' and 'internal_structures'). Unusable or missing "
+            f'fields: {adlar or code}. No manufacturing file was generated.')
+
+
+def tank_data_contract_problem(tank_data):
+    """``tank_data`` imalat paketi üretmeye uygun mu?
+
+    Uygunsa ``None``; değilse ``(hata_kodu, eksik_alan_listesi)`` döner.
+    Alan adları NOKTA YOLUDUR (``oxidizer_tank.dimensions.diameter``) —
+    istemci hangi bloğu yollayacağını buradan okur. Python anahtar hatası
+    metni İSTEMCİYE ÇIKMAZ; ret, ucun kendi alan adlarıyla konuşur.
+
+    Fail-closed: eksik ölçüden imalat çizimi üretilmez. Eksik ölçüyü
+    ``0`` ya da üreteç varsayılanıyla doldurmak, kullanıcının hiç vermediği
+    bir tankın imalat paketini indirmesi demektir (aynı ilke:
+    ``step_export.generate_tank_step``'in 'refusing to emit a manufacturing
+    STEP built from generator defaults' reddi).
+    """
+    if not isinstance(tank_data, dict):
+        return 'invalid_tank_data', [{
+            'field': 'tank_data',
+            'reason': 'not_an_object',
+            'received_type': type(tank_data).__name__,
+        }]
+
+    problems = []
+    for tank in TANK_CAD_REQUIRED_TANKS:
+        block = tank_data.get(tank)
+        if not isinstance(block, dict):
+            problems.append({
+                'field': tank,
+                'reason': 'missing' if block is None else 'not_an_object',
+                'received_type': type(block).__name__,
+            })
+            continue
+
+        dims = block.get('dimensions')
+        if not isinstance(dims, dict):
+            problems.append({
+                'field': f'{tank}.dimensions',
+                'reason': 'missing' if dims is None else 'not_an_object',
+                'received_type': type(dims).__name__,
+            })
+        else:
+            for key in TANK_CAD_REQUIRED_DIMENSIONS:
+                raw = dims.get(key)
+                if raw is None:
+                    problems.append({'field': f'{tank}.dimensions.{key}',
+                                     'reason': 'missing'})
+                    continue
+                if isinstance(raw, bool):
+                    problems.append({'field': f'{tank}.dimensions.{key}',
+                                     'reason': 'not_a_number'})
+                    continue
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    problems.append({'field': f'{tank}.dimensions.{key}',
+                                     'reason': 'not_a_number'})
+                    continue
+                if not math.isfinite(value):
+                    problems.append({'field': f'{tank}.dimensions.{key}',
+                                     'reason': 'not_finite'})
+                elif value <= 0:
+                    problems.append({'field': f'{tank}.dimensions.{key}',
+                                     'reason': 'not_positive'})
+
+        for name, inner_keys in TANK_CAD_REQUIRED_BLOCKS:
+            inner = block.get(name)
+            if not isinstance(inner, dict):
+                problems.append({
+                    'field': f'{tank}.{name}',
+                    'reason': 'missing' if inner is None else 'not_an_object',
+                    'received_type': type(inner).__name__,
+                })
+                continue
+            for key in inner_keys:
+                if inner.get(key) is None:
+                    problems.append({'field': f'{tank}.{name}.{key}',
+                                     'reason': 'missing'})
+
+    if problems:
+        return 'invalid_tank_data', problems
+    return None
+
+
 class TankCADGenerator:
     """Professional CAD file generator for propellant tanks"""
     
@@ -198,25 +384,56 @@ class TankCADGenerator:
         self.tolerance = 0.01  # 0.01mm tolerance
         
     def generate_tank_cad(self, tank_data: Dict) -> str:
-        """Generate complete CAD package for propellant tanks"""
-        
+        """Tank imalat paketini üretir; yolu döndürür.
+
+        ÖH D21 / defter P9B2-27 — İKİ KUSUR BİRLİKTE ONARILDI.
+
+        1. **Ham ``KeyError`` gövdesi.** ÖLÇÜLDÜ (taban ``35aa279``,
+           ``once.json`` bölüm E): ``fuel_tank`` bloğu eksik bir gövdeyle bu
+           üretici ``KeyError: 'fuel_tank'``, ``wall_thickness`` eksikken
+           ``KeyError: 'wall_thickness'`` yükseltiyordu. Sözleşme kapısı
+           yalnız HTTP ucunda vardı; kütüphaneyi doğrudan çağıran tüketici
+           Python anahtar adıyla karşılaşıyordu. Kapı artık ÜRETİCİDE ve tek
+           kaynaktan (``tank_data_contract_problem``) okunuyor — uç kendi
+           422'sini üretmeye devam eder, davranışı değişmez.
+
+        2. **Başarısız yol bir kez daha deneniyordu.** ``except`` dalı, YENİ
+           bir yol denemiyordu: ``FREECAD_AVAILABLE`` yanlışken ``try``
+           içinde çağrılan fonksiyonun ta kendisini
+           (``_generate_fallback_files``) ikinci kez çağırıyordu. Aynı girdi
+           aynı kodda ikinci kez patlar; kazanılan tek şey, ilk denemenin
+           yarım yazdığı dosyaların üstüne ikinci bir yarım yazma turudur.
+           Yedek yol artık YALNIZ FreeCAD yolu denendi ve düştüyse çalışır.
+
+        Ayrıca (P9B2-14 ile aynı ilke): üretim başarısızsa çalışma dizini
+        ``/tmp``de bırakılmaz.
+        """
+        sorun = tank_data_contract_problem(tank_data)
+        if sorun is not None:
+            kod, alanlar = sorun
+            raise TankCADDataError(kod, alanlar)
+
         # Create temporary directory for CAD files
         # D10: /tmp birikmesi (ölçüldü: 77 dizin / 17 MB, temizlik yolu yok).
         # Dizin artık ortak çalışma alanı yardımcısından alınır; her açılışta
         # 24 saatten eski HRMA geçici dizinleri toplanır.
         from hrma.export.export_workspace import (
-            new_workspace, purge_stale_workspaces)
+            cleanup_workspace, new_workspace, purge_stale_workspaces)
         purge_stale_workspaces()
         temp_dir = new_workspace('tank_cad_')
-        
+
         try:
-            if FREECAD_AVAILABLE:
-                return self._generate_freecad_files(tank_data, temp_dir)
-            else:
+            if not FREECAD_AVAILABLE:
                 return self._generate_fallback_files(tank_data, temp_dir)
-        except Exception as e:
-            print(f"CAD generation error: {str(e)}")
-            return self._generate_fallback_files(tank_data, temp_dir)
+            try:
+                return self._generate_freecad_files(tank_data, temp_dir)
+            except Exception as e:
+                # FreeCAD yolu düştü -> BAŞKA bir yol denenir (yedek üretici).
+                print(f"CAD generation error (FreeCAD path): {str(e)}")
+                return self._generate_fallback_files(tank_data, temp_dir)
+        except BaseException:
+            cleanup_workspace(temp_dir)
+            raise
     
     def _generate_freecad_files(self, tank_data: Dict, output_dir: str) -> str:
         """Generate CAD files using FreeCAD"""
@@ -572,13 +789,31 @@ class TankCADGenerator:
                 # aşağıdaki except bunu STEP_NOT_AVAILABLE.txt notuna yazar —
                 # yani eksik veri artık Ø300×800 mm bir "imalat" tankına değil,
                 # açık bir ret beyanına dönüşür.
+                # ÖH D15 / defter P9B2-15: ``wall_thickness`` de GEÇİRİLİR.
+                # Geçirilmediği için tank STEP'i içi DOLU bir kütük olarak
+                # çiziliyordu (ölçüldü: 2844,64 kg ⟷ yayımlanan 47,62 kg =
+                # 59,7 kat) ve aynı paketteki ``*_geometry.json`` oymayı
+                # ZATEN tarif ediyordu. Alan
+                # ``TANK_CAD_REQUIRED_DIMENSIONS``te zorunlu olduğu için
+                # burada yedek üretilmez.
                 'fuel_tank': {
                     'diameter': tank_data['fuel_tank']['dimensions'].get('diameter'),
                     'length': tank_data['fuel_tank']['dimensions'].get('length'),
+                    'wall_thickness':
+                        tank_data['fuel_tank']['dimensions'].get('wall_thickness'),
+                    'volume': tank_data['fuel_tank']['dimensions'].get('volume'),
+                    'analysed_head_type': (tank_data['fuel_tank'].get(
+                        'pressure_vessel') or {}).get('head_type'),
                 },
                 'oxidizer_tank': {
                     'diameter': tank_data['oxidizer_tank']['dimensions'].get('diameter'),
                     'length': tank_data['oxidizer_tank']['dimensions'].get('length'),
+                    'wall_thickness':
+                        tank_data['oxidizer_tank']['dimensions'].get('wall_thickness'),
+                    'volume':
+                        tank_data['oxidizer_tank']['dimensions'].get('volume'),
+                    'analysed_head_type': (tank_data['oxidizer_tank'].get(
+                        'pressure_vessel') or {}).get('head_type'),
                 },
             }, out_dir=output_dir)
             exported_files.extend(step_files.values())
@@ -595,23 +830,36 @@ class TankCADGenerator:
         """Generate step-by-step CAD modeling instructions"""
         
         dimensions = tank_config['dimensions']
-        
+        from hrma.export.cad_visualization import (
+            TANK_FLAT_HEAD_DECLARATION, tank_shell_geometry_mm)
+        geo = tank_shell_geometry_mm(
+            'tank', dimensions['diameter'], dimensions['length'],
+            dimensions['wall_thickness'])
+
         return {
+            # ÖH V3 CAD A2 · H4: talimat, aynı paketteki STEP/STL'in çizdiği
+            # kabuğun AYNISINI tarif eder (tek kaynak
+            # ``cad_visualization.tank_shell_geometry_mm``). Eski talimat
+            # dış çapı D sayıp iki ucu AÇIK bir boru tarif ediyordu
+            # (iç silindir boy + 1 mm), STEP ise yarıküre başlık çiziyordu.
             'step1_outer_cylinder': {
-                'operation': 'Create cylinder',
-                'diameter': dimensions['diameter'],
-                'length': dimensions['length'],
-                'position': [0, 0, 0]
+                'operation': 'Create cylinder (outer envelope)',
+                'diameter': geo['outer_diameter_mm'],
+                'length': geo['outer_length_mm'],
+                'position': [geo['x_min_mm'], 0, 0],
+                'axis': '+X',
             },
             'step2_inner_cylinder': {
-                'operation': 'Create cylinder (for hollow)',
-                'diameter': dimensions['diameter'] - 2 * dimensions['wall_thickness'],
-                'length': dimensions['length'] + 1,
-                'position': [0, 0, -0.5]
+                'operation': 'Create cylinder (propellant cavity)',
+                'diameter': geo['inner_diameter_mm'],
+                'length': geo['inner_length_mm'],
+                'position': [0, 0, 0],
+                'axis': '+X',
             },
             'step3_boolean_cut': {
                 'operation': 'Boolean cut (outer - inner)',
-                'result': 'Hollow tank shell'
+                'result': ('Hollow tank shell with flat heads: '
+                           + TANK_FLAT_HEAD_DECLARATION),
             },
             'step4_baffles': {
                 'operation': 'Create slosh baffles',
@@ -632,61 +880,38 @@ class TankCADGenerator:
         }
     
     def _generate_simple_stl(self, tank_data: Dict, output_dir: str) -> List[str]:
-        """Generate simple STL files for visualization.
+        """Tank STL'leri — STEP ile AYNI kabuk, AYNI eksen (+X).
 
         Yazdığı dosyaların yollarını DÖNDÜRÜR (2026-08-03): dönüş değeri
         yoktu, çağıran da paket listesine ekleyemiyordu — dosyalar diske
         yazılıp ZIP'e hiç girmiyordu (bkz. ``_generate_fallback_files``).
+
+        ÖH V3 CAD A2 · H9 (karar §28-21 (b)). ÖLÇÜLDÜ (7 Eki CAD kontrolü,
+        sıvı + ``max_burn_duration = 30``): STL içi DOLU bir zarftı (156,6 L /
+        255,6 L; aynı paketteki STEP kabuğu 5,20 L / 7,23 L) ve ekseni Z'ydi
+        (STEP X) — 3B baskıda dolu blok çıkıyordu. Mesh artık STEP'in
+        döndürdüğü meridyen profilinin AYNISINDAN kurulur
+        (``cad_visualization.tank_shell_geometry_mm`` +
+        ``tank_shell_mesh_mm``): boşluk Ø D x L, cidar t dışarı, düz uçlar,
+        eksen +X. Kesit sayısı ``TANK_MESH_RESOLUTION``.
         """
+        from hrma.export.cad_visualization import (
+            tank_shell_geometry_mm, tank_shell_mesh_mm)
         written = []
         for tank_name, tank_config in [('oxidizer_tank', tank_data['oxidizer_tank']),
                                      ('fuel_tank', tank_data['fuel_tank'])]:
 
             dimensions = tank_config['dimensions']
             stl_file = os.path.join(output_dir, f"{tank_name}.stl")
-
-            # Generate simple cylindrical mesh
-            vertices, faces = self._generate_cylinder_mesh(
-                dimensions['diameter']/2,
-                dimensions['length'],
-                30  # resolution
-            )
-
-            # Write STL file
-            self._write_stl_file(stl_file, vertices, faces, tank_name)
+            geometri = tank_shell_geometry_mm(
+                tank_name, dimensions['diameter'], dimensions['length'],
+                dimensions['wall_thickness'])
+            mesh = tank_shell_mesh_mm(geometri, TANK_MESH_RESOLUTION)
+            self._write_stl_file(stl_file, mesh.vertices.tolist(),
+                                 mesh.faces.tolist(), tank_name)
             written.append(stl_file)
         return written
 
-    def _generate_cylinder_mesh(self, radius: float, height: float, resolution: int) -> Tuple[List, List]:
-        """Generate cylinder mesh vertices and faces"""
-        
-        vertices = []
-        faces = []
-        
-        # Generate vertices
-        for ring in range(resolution + 1):
-            z = (ring / resolution) * height
-            for point in range(resolution):
-                angle = (point / resolution) * 2 * np.pi
-                x = radius * np.cos(angle)
-                y = radius * np.sin(angle)
-                vertices.append([x, y, z])
-        
-        # Generate faces
-        for ring in range(resolution):
-            for point in range(resolution):
-                # Current quad vertices
-                v1 = ring * resolution + point
-                v2 = ring * resolution + ((point + 1) % resolution)
-                v3 = (ring + 1) * resolution + point
-                v4 = (ring + 1) * resolution + ((point + 1) % resolution)
-                
-                # Two triangles per quad
-                faces.append([v1, v2, v3])
-                faces.append([v2, v4, v3])
-        
-        return vertices, faces
-    
     def _write_stl_file(self, filename: str, vertices: List, faces: List, name: str):
         """Write STL file"""
         
@@ -864,22 +1089,33 @@ class TankCADGenerator:
         
         return zip_path
     
+    @staticmethod
+    def _tank_geometries(tank_data: Dict) -> Dict:
+        """İki tankın kabuk geometrisi — STEP/STL ile TEK kaynak (ÖH V3 CAD A2 · H4)."""
+        from hrma.export.cad_visualization import tank_shell_geometry_mm
+        return {
+            ad: tank_shell_geometry_mm(
+                ad, tank_data[ad]['dimensions']['diameter'],
+                tank_data[ad]['dimensions']['length'],
+                tank_data[ad]['dimensions']['wall_thickness'])
+            for ad in ('oxidizer_tank', 'fuel_tank')}
+
     def _create_front_view(self, tank_data: Dict) -> Dict:
-        """Create front view drawing data"""
+        """Create front view drawing data.
+
+        ÖH V3 CAD A2 · H4: zarf, çizilen kabuğun DIŞ zarfıdır (boşluk +
+        dışarı eklenen cidar); eskiden boşluk ölçüsü "outline" diye
+        yazılıyordu.
+        """
+        geo = self._tank_geometries(tank_data)
         return {
             'view_type': 'front',
-            'oxidizer_tank': {
-                'outline': 'cylinder',
-                'diameter': tank_data['oxidizer_tank']['dimensions']['diameter'],
-                'height': tank_data['oxidizer_tank']['dimensions']['length']
-            },
-            'fuel_tank': {
-                'outline': 'cylinder', 
-                'diameter': tank_data['fuel_tank']['dimensions']['diameter'],
-                'height': tank_data['fuel_tank']['dimensions']['length']
-            }
+            **{ad: {'outline': 'flat-ended cylinder',
+                    'diameter': g['outer_diameter_mm'],
+                    'height': g['outer_length_mm']}
+               for ad, g in geo.items()},
         }
-    
+
     def _create_side_view(self, tank_data: Dict) -> Dict:
         """Create side view drawing data.
 
@@ -906,20 +1142,23 @@ class TankCADGenerator:
         }
     
     def _extract_key_dimensions(self, tank_data: Dict) -> Dict:
-        """Extract key dimensions for drawings"""
+        """Extract key dimensions for drawings.
+
+        ÖH V3 CAD A2 · H4: "overall" ölçüler çizilen kabuğun DIŞ zarfıdır;
+        boyutlandırmanın D x L'si boşluktur (``cavity_*``). Eskiden boşluk
+        ölçüsü "overall" diye yazılıyordu.
+        """
+        from hrma.export.cad_visualization import TANK_FLAT_HEAD_DECLARATION
+        geo = self._tank_geometries(tank_data)
         return {
-            'oxidizer_tank': {
-                'overall_diameter': tank_data['oxidizer_tank']['dimensions']['diameter'],
-                'overall_length': tank_data['oxidizer_tank']['dimensions']['length'],
-                'wall_thickness': tank_data['oxidizer_tank']['dimensions']['wall_thickness']
-            },
-            'fuel_tank': {
-                'overall_diameter': tank_data['fuel_tank']['dimensions']['diameter'],
-                'overall_length': tank_data['fuel_tank']['dimensions']['length'],
-                'wall_thickness': tank_data['fuel_tank']['dimensions']['wall_thickness']
-            }
-        }
-    
+            ad: {'overall_diameter': g['outer_diameter_mm'],
+                 'overall_length': g['outer_length_mm'],
+                 'cavity_diameter': g['inner_diameter_mm'],
+                 'cavity_length': g['inner_length_mm'],
+                 'wall_thickness': g['wall_mm'],
+                 'heads': TANK_FLAT_HEAD_DECLARATION}
+            for ad, g in geo.items()}
+
     def _generate_drawing_notes(self, tank_data: Dict) -> List[str]:
         """Generate drawing notes"""
         return [

@@ -220,6 +220,16 @@ def test_mach_konturu_varsayimlari_baslikta_bildirir():
 # (c) Isi akisi: Pc ile olceklenir ve bogazda tepe yapar
 # ---------------------------------------------------------------------------
 
+#: Hesaplanan cidar akisi yuzeyinin AD ONEKI — iki bekci de bunu okur.
+#: ÖH D26 / fix-25b: onek eskiden 'Convective' idi. D23 fea-cfd a1
+#: (2dc2835) yuzeye Leckner gaz radyasyonunu ekledi; 'Convective' adi o
+#: gunden beri YANLIS olurdu (izde tasinim + radyasyon var) ve urun adi
+#: `Wall heat flux, heat-sink wall ({_flux_basis})` olarak duzeltildi.
+#: `_flux_basis` radyasyon terimi kurulamazsa "convection only ..." yazar
+#: (fail-closed adlandirma), bu yuzden bekci DEGISMEYEN oneki tutar.
+HESAPLANAN_AKI_ONEKI = 'Wall heat flux'
+
+
 def _design_flux(fig):
     line = [t for t in fig['data']
             if str(t.get('name', '')).startswith('Design flux')]
@@ -253,7 +263,7 @@ def test_isi_akisi_zamanla_azalir_ve_kacis_carpani_yok():
     fig = _fig(create_wall_heat_flux_waterfall_plot(
         dict(HEAT_INPUT, cooling_type='regenerative', material='copper')))
     surf = [t for t in fig['data'] if t.get('type') == 'surface'
-            and str(t.get('name', '')).startswith('Convective')]
+            and str(t.get('name', '')).startswith(HESAPLANAN_AKI_ONEKI)]
     assert surf, 'hesaplanan aki yuzeyi kaldirilmis olamaz'
     z = _z(surf[0])
     row = z[int(np.nanargmax(z[:, 0]))]
@@ -269,8 +279,12 @@ def test_isi_akisi_geometri_yoksa_uydurmaz():
     fig = _fig(create_wall_heat_flux_waterfall_plot(
         {'burn_time': 30, 'chamber_length': 0.5, 'nozzle_length': 0.1,
          'base_heat_flux': 2e6, 'critical_heat_flux': 4.0}))
+    # ÖH D26 / fix-25b: bu satir 'Convective' oneki ile VAKUM-DOGRU
+    # olmustu (D23 yeniden adlandirmasindan sonra hicbir iz o adla
+    # baslamiyor; urun aki UYDURSA BILE bekci gecerdi). Onek tek
+    # kaynaktan okunuyor, bekcinin disi geri takildi.
     assert not [t for t in fig['data']
-                if str(t.get('name', '')).startswith('Convective')]
+                if str(t.get('name', '')).startswith(HESAPLANAN_AKI_ONEKI)]
     text = ' '.join(a.get('text', '') for a in fig['layout']['annotations'])
     assert 'not available' in text
     # Kullanicinin girdigi referans duzlemleri KALIR (girdi olarak etiketli)

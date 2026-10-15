@@ -55,13 +55,27 @@
     if (!motorType && !isLanding) return;      // formulas vb. — şerit yok
 
     // Proje adı kuralı (sunucudaki beyaz listenin istemci aynası):
-    // [A-Za-z0-9 _.-] 1-80, nokta ile başlayamaz, nokta/boşluk ile bitemez
+    // [A-Za-z0-9 _.-] 1-80, nokta ile başlayamaz, nokta/boşluk ile bitemez,
+    // Windows'ta ayrılmış aygıt adı olamaz.
     var NAME_RE = /^[A-Za-z0-9 _.\-]{1,80}$/;
+    // ÖH D20 / P12aB4-16 — ÖLÇÜLDÜ (once.json): sunucunun reddettiği 22
+    // ayrılmış adın 22'si de istemci doğrulamasından geçiyordu; modal
+    // kapanıyor, POST gidiyor, sunucu 400 dönüyor ve kullanıcı adı baştan
+    // yazıyordu. Ayna eksikti. Liste sunucudaki `_WINDOWS_RESERVED`
+    // (hrma/utils/projects.py) ile birebir aynıdır; bekçi
+    // (tests/test_d20_electron_a1.py) iki listeyi her koşumda karşılaştırır,
+    // yani ayrışma sessizce yaşayamaz. Sunucu `stem.upper()` ile denetler:
+    // ayna da büyük/küçük harf ayrımı yapmaz.
+    var WINDOWS_RESERVED = ['CON', 'PRN', 'AUX', 'NUL',
+        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'];
     function validName(name) {
         if (typeof name !== 'string') return false;
         if (!NAME_RE.test(name)) return false;
         if (name.charAt(0) === '.') return false;
         if (/[. ]$/.test(name)) return false;
+        // Sunucu uzantısız gövdeye bakar (`stem`): '.hrma' eki burada yok.
+        if (WINDOWS_RESERVED.indexOf(name.toUpperCase()) !== -1) return false;
         return true;
     }
 
@@ -69,6 +83,60 @@
     // (güverte ad_f_* alanları ayrıca dock_overrides olarak ele alınır)
     var DYNAMIC_ROOTS = '#analysisDock, #sixDofPanel, #injectorPanel, '
         + '#transientPanel, #hrmaProjectBar, #hrmaProjectModal, #stepImportModal';
+
+    /* Sunucudan gelen hata/uyarı metni — TR kipinde çevrilir.
+     * ÖH D20 / P12aB4-15 — ÖLÇÜLDÜ (once.json): `I18N.serverText` ürünün
+     * başka yerlerinde (analysis_dock.js, fea_panel.js) kullanılıyordu ama bu
+     * dosyada 0 çağrı vardı; TR kipinde bildirimler "Kaydetme başarısız:
+     * Project name is a reserved device name" gibi yarı Türkçe çıkıyordu. */
+    function srv(text) {
+        return (window.I18N && window.I18N.serverText)
+            ? window.I18N.serverText(text) : text;
+    }
+
+    /* V3 KK 2. tur (REL D-5) — proje YÜKLEME uyarısı makine kodu +
+     * parametreyle gelir (hrma/utils/projects.py load_warning_records):
+     * metin i18n anahtarından kurulur (EN = TR). ÖLÇÜLDÜ (dal tabanı
+     * 1b4bbff7): eski sürüm uyarısı TR kipinde İngilizce basılıyordu.
+     * Parametreler HAM metin olarak yerleşir — sürüm kimliği ("2.6.26")
+     * bir ondalık sayı değildir, tf'nin sayı biçimlemesinden geçirilmez.
+     * Kod tanınmazsa, parametre düz metin/sonlu sayı değilse ya da sözlükte
+     * anahtar yoksa sunucu metni aynen (serverText) basılır: uydurma yok. */
+    var PROJE_UYARI_KODU = /^warn\.project\.[a-z_]+$/;
+    // Kayıtlar düz listeyle BİREBİR eşleşmezse hiçbiri kullanılmaz
+    // (fail-closed: yanlış kayıt yanlış metne gitmesin).
+    function yuklemeUyariKayitlari(data) {
+        var duz = Array.isArray(data.warnings) ? data.warnings : [];
+        return (Array.isArray(data.warning_records)
+                && data.warning_records.length === duz.length)
+            ? data.warning_records : null;
+    }
+    function yuklemeUyariMetni(metin, kayit) {
+        if (!kayit || typeof kayit !== 'object'
+            || typeof kayit.code !== 'string'
+            || !PROJE_UYARI_KODU.test(kayit.code)
+            || !kayit.params || typeof kayit.params !== 'object'
+            || !(window.I18N && window.I18N.has && window.I18N.has(kayit.code))) {
+            return srv(metin);
+        }
+        var p = kayit.params;
+        var gecerli = Object.keys(p).every(function (k) {
+            var v = p[k];
+            return typeof v === 'string'
+                || (typeof v === 'number' && isFinite(v));
+        });
+        if (!gecerli) return srv(metin);
+        var sablon = T(kayit.code, metin);
+        var eksik = false;
+        var sonuc = String(sablon).replace(/\{(\w+)\}/g, function (whole, ad) {
+            if (!Object.prototype.hasOwnProperty.call(p, ad)) {
+                eksik = true;
+                return whole;
+            }
+            return String(p[ad]);
+        });
+        return eksik ? srv(metin) : sonuc;
+    }
 
     var NEW_NAME_SS_KEY = 'hrma_pending_new_project';
 
@@ -78,14 +146,24 @@
         dirty: false,
         restoring: false,
         source: null,        // "STEP import (x.step)" gibi köken notu
+        /* ÖH D22 / P12aB4-24 — proje açıklaması. ÖLÇÜLDÜ (once.json K3):
+           `#motor_description` yalnız /hybrid'de var; /solid ve /liquid'de
+           açıklama HİÇ kaydedilemiyordu, oysa sunucu şeması `description`
+           kabul ediyor ve liste ucu geri veriyor. Açıklama artık sayfadan
+           BAĞIMSIZ bir yerde de durur: alanı olan sayfada alan kazanır,
+           olmayanda kayıt penceresindeki alan doldurur, açılan projede de
+           kaybolmaz. */
+        description: '',
     };
 
-    function escapeHtml(s) {
-        return String(s).replace(/[&<>"']/g, function (ch) {
-            return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
-                     '"': '&quot;', "'": '&#39;' }[ch];
-        });
-    }
+    // ÖH D21 / P12aB4-23 — `escapeHtml` KALDIRILDI. Ölçüldü: dosyada tek
+    // geçişi kendi tanım satırıydı (0 çağrı). Bu dosya bütün DOM'u
+    // `textContent` / `createElement` ile kurar, yani HTML gövdesine hiç
+    // dizge gömmez — kaçış işlevi gereksizdi. Ölü güvenlik yardımcısı,
+    // "burada kaçış yapılıyor" izlenimi vererek ileride ham innerHTML
+    // yazımını meşrulaştırabilirdi. HTML gövdesine metin gömen bir yol
+    // açılırsa kaçış O YOLLA birlikte geri gelir (bkz. import_ui.js, orada
+    // gerçek bir çağrı var).
 
     // Ana yol import_ui.js'tir (advanced/liquid/solid). Ana sayfada import_ui
     // yüklü DEĞİLDİR, bu yüzden aşağıdaki yedek çalışır. İki uygulama da AYNI
@@ -155,6 +233,16 @@
                 || type === 'radio') continue;
             if (el.closest && el.closest(DYNAMIC_ROOTS)) continue;
             if (el.id === 'langSelect') continue;
+            // ÖH D36 · A-3 — KÖKEN KAPILI ALAN. Sayfa bir alanı
+            // data-hrma-source-gate="1" ile işaretlediyse (hibrit tasarım
+            // paneli) değer yalnız köken damgası (data-hrma-source: user |
+            // project_file) taşıyorsa kaydedilir. ÖLÇÜLDÜ (a1/once.json S3):
+            // kayıt yükü dokunulmamış panelin 11 varsayılanını taşıyordu
+            // (wall_thickness 5, pressure_drop_percent 20 ...); geri
+            // yüklemede bunlar 'project_file' damgası alıp çözücüye
+            // kullanıcı verisi gibi gidecekti.
+            if (el.dataset && el.dataset.hrmaSourceGate === '1'
+                && !el.dataset.hrmaSource) continue;
             if (type === 'checkbox') {
                 fields[el.id] = !!el.checked;
             } else if (type === 'number') {
@@ -258,6 +346,23 @@
             put('isp_s', cr.isp_sea_level);
             put('isp_vacuum_s', cr.isp_vacuum);
             put('chamber_pressure_bar', cr.chamber_pressure);
+            // ÖH D37 · A1b dil-cozucu-nesri · CW-D4 — SIVI SATIRINDA It.
+            // ÖLÇÜLDÜ (a1/once.json CW-D4): sıvı özeti It'i HİÇ taşımıyordu;
+            // katı/hibrit satırında "It … N·s" varken sıvıda ne sayı ne de
+            // yokluğun nedeni vardı. Sıvı çözücüsü üst düzeyde toplam itki
+            // yayımlamaz; yayımladığı TEK toplam itki dışa aktarım özetindedir
+            // (openrocket.motor_summary.total_impulse, künye
+            // total_impulse_source = 'thrust_x_burn_time') ve yanma süresi
+            // verilmediğinde null'dır (burn_time_source = 'not_supplied').
+            // Burada sayı HESAPLANMAZ: yayımlanmışsa aynen taşınır, değilse
+            // çözücünün kendi künyesi taşınır ki satır yokluğun NEDENİNİ
+            // söyleyebilsin (sayı uydurulmaz).
+            var ors = (cr.openrocket && cr.openrocket.motor_summary) || {};
+            put('total_impulse_Ns', ors.total_impulse);
+            if (!('total_impulse_Ns' in out)
+                && cr.burn_time_source === 'not_supplied') {
+                out.burn_time_source = 'not_supplied';
+            }
         }
         if (!Object.keys(out).length) return null;
         if (typeof window.HRMA_VERSION === 'string') {
@@ -282,10 +387,13 @@
             name: name,
             inputs: inputs,
         };
+        /* Açıklamanın TEK türetildiği yer (P12aB4-24). Öncelik sayfadaki
+           alanındır (kullanıcı orada yazıyorsa en tazesi odur); alan yoksa
+           ya da boşsa proje şeridinin kendi tuttuğu metin kullanılır. */
         var descEl = document.getElementById('motor_description');
-        if (descEl && String(descEl.value).trim()) {
-            payload.description = String(descEl.value);
-        }
+        var desc = (descEl && String(descEl.value).trim())
+            ? String(descEl.value) : String(state.description || '');
+        if (desc.trim()) payload.description = desc;
         var summary = serializeResultsSummary();
         if (summary) payload.results_summary = summary;
         return payload;
@@ -387,6 +495,11 @@
         state.restoring = true;
         try {
             var inputs = doc.inputs || {};
+            // P12aB4-24: açıklama geri yüklenir — yoksa bir sonraki kayıtta
+            // sessizce SİLİNİYORDU (payload'a hiç girmediği için).
+            state.description = String(doc.description || '');
+            var descEl0 = document.getElementById('motor_description');
+            if (descEl0) descEl0.value = state.description;
             restoreUiState(inputs.ui_state);
             var skipped = restoreFields(inputs.fields);
             if (inputs.dynamic && inputs.dynamic.composition_rows) {
@@ -506,7 +619,10 @@
         return btn;
     }
 
-    // Ad soran modal (Save As / New) — onSubmit(name) yalnız geçerli adla çağrılır
+    /* Ad soran modal (Save As / New) — onSubmit(name, description) yalnız
+       geçerli adla çağrılır. ÖH D22 / P12aB4-24: sayfada `#motor_description`
+       YOKSA (ölçüldü: /solid, /liquid) açıklama alanı BURADA sorulur;
+       varsa sorulmaz — aynı veri iki yerde istenmez (tek kaynak). */
     function promptNameModal(titleText, defaultName, onSubmit) {
         var box = openModalShell(titleText);
         var label = document.createElement('div');
@@ -532,6 +648,27 @@
         err.style.cssText =
             'display:none; font-size:12px; color:var(--hd-red, #ff5d73); margin-bottom:10px;';
         err.textContent = T('proj.nameInvalid', 'Invalid project name — check the naming rule.');
+        // --- açıklama (yalnız sayfa alanı yokken) --------------------------
+        var sayfaDesc = document.getElementById('motor_description');
+        var descLabel = null, descIn = null;
+        if (!sayfaDesc) {
+            descLabel = document.createElement('div');
+            descLabel.style.cssText = 'font-size:13px; margin-bottom:6px;';
+            descLabel.textContent = T('proj.descLabel',
+                'Description (optional)');
+            descLabel.setAttribute('data-i18n', 'proj.descLabel');
+            descIn = document.createElement('textarea');
+            descIn.value = String(state.description || '');
+            descIn.rows = 2;
+            descIn.maxLength = 400;
+            descIn.style.cssText =
+                'width:100%; box-sizing:border-box; padding:9px 10px;' +
+                'font-size:13px; resize:vertical;' +
+                'background:var(--hd-inset, rgba(6,14,26,0.85));' +
+                'color:var(--hd-ink, #cfe8f2);' +
+                'border:1px solid var(--hd-line, rgba(0,229,255,0.14));' +
+                'border-radius:var(--hd-radius-sm, 8px); margin-bottom:12px;';
+        }
         var row = document.createElement('div');
         row.style.cssText = 'display:flex; gap:10px; justify-content:flex-end;';
         var okBtn = modalButton(T('common.ok', 'OK'), true);
@@ -540,11 +677,22 @@
         function submit() {
             var name = input.value.trim();
             if (!validName(name)) {
+                // ÖH D20 / P12aB4-16: red GEREKÇESİ adlandırılır. Ayrılmış
+                // aygıt adı kural metninde geçmiyor; genel "kurala bakın"
+                // uyarısı kullanıcıyı doğru düzeltmeye götürmüyordu.
+                err.textContent =
+                    (WINDOWS_RESERVED.indexOf(name.toUpperCase()) !== -1)
+                        ? T('proj.nameReserved',
+                            'This name is reserved by Windows for a device '
+                            + '(CON, PRN, AUX, NUL, COM1-9, LPT1-9) and cannot '
+                            + 'be used as a file name.')
+                        : T('proj.nameInvalid',
+                            'Invalid project name — check the naming rule.');
                 err.style.display = 'block';
                 return;
             }
             closeModal();
-            onSubmit(name);
+            onSubmit(name, descIn ? String(descIn.value) : null);
         }
         okBtn.onclick = submit;
         input.addEventListener('keydown', function (ev) {
@@ -556,6 +704,7 @@
         box.appendChild(input);
         box.appendChild(rule);
         box.appendChild(err);
+        if (descLabel) { box.appendChild(descLabel); box.appendChild(descIn); }
         box.appendChild(row);
         input.focus();
         input.select();
@@ -582,11 +731,33 @@
     // KAYDET / AÇ / YENİ akışları
     // ==================================================================
 
+    /* ÖH D22 / P12aB4-24 — sayfanın KENDİ motor adı kaynağı.
+       ÖLÇÜLDÜ: `#motor_name` girdisi yalnız /hybrid'de var; /solid ve
+       /liquid'de ad önerisi hep boşa düşüyordu. O iki sayfa adı zaten
+       üretiyor ve dışa aktarma yolunda kullanıyor (`_solidMotorName` /
+       `_liquidMotorName`); yeni bir kaynak UYDURULMAZ, var olan okunur.
+       Fail-closed: çağrı hata verirse ya da dize dönmezse öneri yapılmaz. */
+    var SAYFA_AD_KAYNAKLARI = ['_solidMotorName', '_liquidMotorName'];
+
+    function pageMotorName() {
+        for (var i = 0; i < SAYFA_AD_KAYNAKLARI.length; i++) {
+            var fn = window[SAYFA_AD_KAYNAKLARI[i]];
+            if (typeof fn !== 'function') continue;
+            try {
+                var v = fn();
+                if (typeof v === 'string' && v.trim()) return v.trim();
+            } catch (e) { /* sayfa henüz hesaplamadı: öneri yok */ }
+        }
+        return '';
+    }
+
     function defaultNameSuggestion() {
         var el = document.getElementById('motor_name');
         var candidate = el ? String(el.value).trim() : '';
         if (candidate && validName(candidate)) return candidate;
-        return state.name || '';
+        if (state.name) return state.name;
+        var sayfa = pageMotorName();
+        return validName(sayfa) ? sayfa : '';
     }
 
     async function doSave(name, overwrite) {
@@ -609,7 +780,7 @@
                 return;
             }
             console.error('HRMA project save failed:', err);
-            toast(TF('proj.saveFailed', { message: err.message },
+            toast(TF('proj.saveFailed', { message: srv(err.message) },
                      'Save failed: {message}'), 'err');
         }
     }
@@ -625,7 +796,11 @@
     function onSaveAs() {
         promptNameModal(T('proj.saveAsTitle', 'Save Project As'),
             defaultNameSuggestion(),
-            function (name) {
+            function (name, desc) {
+                // P12aB4-24: pencerede açıklama soruldu ise kayda o girer.
+                if (desc !== null && desc !== undefined) {
+                    state.description = String(desc);
+                }
                 doSave(name, name === state.savedName);
             });
     }
@@ -640,9 +815,14 @@
             });
         }
         if (state.dirty) {
+            // ÖH D20 / P12aB4-11: onay düğmesi nötr "TAMAM" idi; oysa bu
+            // yol kaydedilmemiş değişiklikleri ATIYOR ve devam edilince
+            // `state.dirty = false` ile tarayıcının kendi beforeunload
+            // koruması da susturuluyor. Yıkıcı eylem, iptal kadar açık
+            // adlandırılır (aynı dosyadaki `proj.btnOverwrite` deseni).
             confirmModal(T('proj.newTitle', 'New Project'),
                 T('proj.unsavedWarn', 'You have unsaved changes. Continue and discard them?'),
-                T('common.ok', 'OK'), start);
+                T('proj.btnDiscard', 'Discard changes'), start);
         } else {
             start();
         }
@@ -662,35 +842,71 @@
             state.name = doc.name || name;
             state.savedName = state.name;
             renderBar();
-            if (Array.isArray(data.warnings)) {
-                data.warnings.forEach(function (w) { console.warn('HRMA project:', w); });
-            }
+            // ÖH D17 / P12aB4-02: sunucunun ÜRETTİĞİ yükleme uyarıları (ör.
+            // "başka bir sürümle kaydedilmiş") yalnız console.warn'a
+            // basılıyordu; ekranda görünen tek şey yeşil "yüklendi"
+            // bildirimiydi. Uyarı sunucu tarafından kazanılmış bir hükümdür,
+            // kullanıcıdan saklanamaz — her uyarı ekrana da basılır ve
+            // başarı bildirimi bu durumda "uyarılarla yüklendi" der.
+            // V3 KK 2. tur (REL D-5): metin kod + parametreden (EN = TR).
+            var kayitlar = yuklemeUyariKayitlari(data);
+            var uyarilar = [];
+            (Array.isArray(data.warnings) ? data.warnings : []).forEach(function (w, i) {
+                if (w == null || w === '') return;
+                uyarilar.push(yuklemeUyariMetni(String(w),
+                                                kayitlar ? kayitlar[i] : null));
+            });
+            uyarilar.forEach(function (w) {
+                console.warn('HRMA project:', w);
+                toast(String(w), 'warn');
+            });
             try {
                 var url = location.pathname + '?project=' + encodeURIComponent(state.name);
                 history.replaceState(null, '', url);
             } catch (e) { /* dosya protokolü vb. */ }
-            toast(TF('proj.loaded', { name: state.name }, 'Project "{name}" loaded.'), 'ok');
+            toast(uyarilar.length
+                ? TF('proj.loadedWithWarnings', { name: state.name, n: uyarilar.length },
+                     'Project "{name}" loaded with {n} warning(s) — see above.')
+                : TF('proj.loaded', { name: state.name }, 'Project "{name}" loaded.'),
+                uyarilar.length ? 'warn' : 'ok');
         } catch (err) {
             console.error('HRMA project load failed:', err);
-            toast(TF('proj.loadFailed', { message: err.message },
+            toast(TF('proj.loadFailed', { message: srv(err.message) },
                      'Could not load project: {message}'), 'err');
         }
+    }
+
+    /* ÖH D21 / P12aB4-21 — ÖLÇÜLEN KUSUR: proje kartlarındaki sayılar
+       doğrudan `toFixed` ile basılıyordu, yani HER dilde nokta ondalık
+       ayırıcı. Ürünün geri kalanı TR kipinde virgül basar (I18N.number);
+       Türkçe ekranda aynı sayfada hem "207,1" hem "207.1" görünüyordu.
+       Biçim TEK KAYNAKTAN gelir: I18N.number. Sözlük motoru yüklenmemişse
+       (ör. çıplak birim testi) toFixed'e düşülür — sayı yine basılır. */
+    function nf(value, digits) {
+        return (window.I18N && window.I18N.number)
+            ? window.I18N.number(value, digits)
+            : value.toFixed(digits);
     }
 
     function summaryMini(summary) {
         if (!summary) return '';
         var bits = [];
         if (typeof summary.thrust_N === 'number' && isFinite(summary.thrust_N)) {
-            bits.push('F ' + summary.thrust_N.toFixed(0) + ' N');
+            bits.push('F ' + nf(summary.thrust_N, 0) + ' N');
         }
         if (typeof summary.peak_thrust_N === 'number' && isFinite(summary.peak_thrust_N)) {
-            bits.push('Fpk ' + summary.peak_thrust_N.toFixed(0) + ' N');
+            bits.push('Fpk ' + nf(summary.peak_thrust_N, 0) + ' N');
         }
         if (typeof summary.isp_s === 'number' && isFinite(summary.isp_s)) {
-            bits.push('Isp ' + summary.isp_s.toFixed(1) + ' s');
+            bits.push('Isp ' + nf(summary.isp_s, 1) + ' s');
         }
         if (typeof summary.total_impulse_Ns === 'number' && isFinite(summary.total_impulse_Ns)) {
-            bits.push('It ' + summary.total_impulse_Ns.toFixed(0) + ' N·s');
+            bits.push('It ' + nf(summary.total_impulse_Ns, 0) + ' N·s');
+        } else if (summary.burn_time_source === 'not_supplied') {
+            // CW-D4: It yok ve çözücü nedenini künyeledi → neden basılır,
+            // sayı basılmaz. Künye yoksa (eski kayıt) hiçbir şey eklenmez:
+            // nedeni bilinmeyen yokluğa neden uydurulmaz.
+            bits.push(T('proj.itNoBurnTime', 'It: burn time not supplied'));
         }
         return bits.join(' · ');
     }
@@ -714,9 +930,36 @@
             'font-family:var(--hd-mono, monospace); font-size:10.5px;' +
             'letter-spacing:0.08em; color:var(--hd-cyan, #00e5ff);' +
             'border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));' +
-            'border-radius:5px; padding:1px 7px; text-transform:uppercase;';
+            'border-radius:5px; padding:1px 7px;';
+        // ÖH D35 · OH-GT-33 — MAKİNE ADI CSS BÜYÜTMESİYLE BOZULUYORDU.
+        // ÖLÇÜLDÜ (a1/once.json M3_buyutme): rozet metni ham enum
+        // (`String(p.motor_type)` = "liquid") ve büyütme CSS'teydi; arayüz
+        // Türkçeyken CSS `i→İ` kuralını uyguluyor ve rozet "LİQUİD"
+        // yazıyordu (`tip_rozeti_tr_goruntu = "LİQUİD"`) — oysa bu, ucun
+        // kendi makine değeridir, Türkçe bir sözcük değildir.
+        // Büyütme CSS'ten JS'e alındı: `toUpperCase()` yerelden BAĞIMSIZDIR
+        // (ECMA-262 Unicode varsayılanı, i→I). Bozuk kaydın etiketi sözlükten
+        // gelir ve sözlükte ZATEN büyük yazılıdır (EN "CORRUPT", TR "BOZUK"),
+        // o yüzden ona harf dönüşümü uygulanmaz — Türkçe sözcüğü
+        // `toUpperCase()` ile büyütmek 'ı/İ' hatası üretirdi.
+        // ÖH D37 · A1b dil-cozucu-nesri · DV-LIQUID — ÖLÇÜLDÜ (a1/once.json
+        // DV-LIQUID): TR arayüzde rozet "LIQUID/SOLID/HYBRID" İngilizce
+        // kalıyordu. Tanınan üç motor tipi sözlük etiketiyle basılır;
+        // etiket sözlükte ZATEN büyük yazılıdır ('SIVI', 'HİBRİT') — Türkçe
+        // sözcüğe `toUpperCase()` UYGULANMAZ (OH-GT-33 dersi). Tanınmayan
+        // tip ham makine değeri olarak yerelden bağımsız büyütülür (eski
+        // davranış; uydurma etiket yok). Eşleme bilerek bu gövdenin İÇİNDE:
+        // bekçiler (test_d35_kabuk_2_a1) fonksiyon gövdesini söküp koşar.
+        var tipEtiketi = {
+            liquid: T('proj.typeLiquid', 'LIQUID'),
+            solid: T('proj.typeSolid', 'SOLID'),
+            hybrid: T('proj.typeHybrid', 'HYBRID')
+        };
         typeBadge.textContent = corrupt
-            ? T('proj.corrupt', 'CORRUPT') : String(p.motor_type || '?');
+            ? T('proj.corrupt', 'CORRUPT')
+            : (Object.prototype.hasOwnProperty.call(tipEtiketi, p.motor_type)
+                ? tipEtiketi[p.motor_type]
+                : String(p.motor_type || '?').toUpperCase());
         if (corrupt) typeBadge.style.color = 'var(--hd-red, #ff5d73)';
         row.appendChild(typeBadge);
         if (p.updated_at) {
@@ -736,6 +979,31 @@
             sum.textContent = mini;
             row.appendChild(sum);
         }
+        if (corrupt) {
+            // ÖH D23 / P17B4-05 — BOZUK SATIR ARTIK SESSİZ DEĞİL.
+            // ÖLÇÜLDÜ (P17 B4, canlı; `KIRIK JSON` satırına tıklandı):
+            // `toastlar: []`, `modal_acik: true`, URL değişmedi, form
+            // değişmedi. Satır `cursor:not-allowed` + `opacity:0.45` ile
+            // sönük çiziliyor, yani tıklama BİLEREK yutuluyordu; ama
+            // kullanıcı neden açılmadığını söyleyen tek satırı alamıyordu.
+            // Üstelik gerekçe ZATEN ÜRETİLİYOR: list_projects her bozuk
+            // girdiye `reason` (ve çoğuna `reason_kind`) yazıyor
+            // (hrma/utils/projects.py: 'unloadable file name: …',
+            // 'Project file does not match the schema: …', okunamayan
+            // dosya için ayrıştırıcı iletisi) — arayüz onu HİÇ basmıyordu.
+            // Cümleyi SUNUCU yazar, panel türetmez (uydurma yasak);
+            // gerekçe hiç gelmediyse bu da açıkça söylenir, sessiz
+            // kalınmaz (fail-closed).
+            row.setAttribute('data-corrupt', '1');
+            row.addEventListener('click', function () {
+                var neden = (typeof p.reason === 'string' && p.reason.trim())
+                    ? srv(p.reason.trim())
+                    : T('proj.corruptNoReason',
+                        'the server did not name a reason');
+                toast(TF('proj.corruptWhy', { name: p.name, reason: neden },
+                         '"{name}" cannot be opened: {reason}'), 'err');
+            });
+        }
         if (!corrupt) {
             row.addEventListener('click', function () {
                 closeModal();
@@ -750,10 +1018,11 @@
                     }
                 }
                 if (state.dirty) {
+                    // ÖH D20 / P12aB4-11 — bkz. onNew(): yıkıcı onay adlandırılır.
                     confirmModal(T('proj.openTitle', 'Open Project'),
                         T('proj.unsavedWarn',
                           'You have unsaved changes. Continue and discard them?'),
-                        T('common.ok', 'OK'), go);
+                        T('proj.btnDiscard', 'Discard changes'), go);
                 } else {
                     go();
                 }
@@ -783,7 +1052,7 @@
             projects.forEach(function (p) { box.appendChild(projectRow(p)); });
         } catch (err) {
             console.error('HRMA project list failed:', err);
-            status.textContent = TF('proj.listFailed', { message: err.message },
+            status.textContent = TF('proj.listFailed', { message: srv(err.message) },
                 'Could not load the project list: {message}');
             status.style.color = 'var(--hd-red, #ff5d73)';
         }
@@ -816,19 +1085,25 @@
 
         var label = document.createElement('span');
         label.style.cssText =
-            'color:var(--hd-ink-faint, #46606d); letter-spacing:0.1em;' +
+            'color:var(--hd-ink-faint, #6a8491); letter-spacing:0.1em;' +
             'text-transform:uppercase;';
         label.setAttribute('data-i18n', 'proj.label');
         label.textContent = T('proj.label', 'Project');
         bar.appendChild(label);
 
         var name = document.createElement('span');
-        name.style.cssText = 'color:var(--hd-cyan-soft, #6fd3e6); font-weight:600;';
+        name.style.cssText = 'color:var(--hd-cyan-soft, #3af2ff); font-weight:600;';
         bar.appendChild(name);
 
         var star = document.createElement('span');
         star.style.cssText = 'color:var(--hd-orange, #ff8c33); display:none;';
         star.textContent = '*';
+        // ÖH D21 / P12aB4-23: ipucu bir kez atanıyordu ve dil değişiminde
+        // eski dilde kalıyordu (renderBar yalnız star.style.display ile
+        // ilgileniyor). `data-i18n-title` I18N.apply'ın tazelediği kanaldır
+        // (i18n.js translateElement); ilk değer yine burada basılır ki
+        // sözlük geç yüklenirse düğüm boş kalmasın.
+        star.setAttribute('data-i18n-title', 'proj.dirtyHint');
         star.title = T('proj.dirtyHint', 'Unsaved changes');
         bar.appendChild(star);
 
@@ -941,7 +1216,40 @@
             a.href = target + '?project=' + encodeURIComponent(p.name);
             a.className = 'aux-link';
             var mini = summaryMini(p.results_summary);
-            a.textContent = p.name + ' [' + String(p.motor_type || '?').toUpperCase() + ']';
+            // ÖH D35 · OH-GT-33 — KULLANICININ YAZDIĞI AD BÜYÜTÜLMEZ.
+            // ÖLÇÜLDÜ (a1/once.json M3_buyutme): şeridin kabı `.aux-link`,
+            // index.html o sınıfa `text-transform: uppercase` veriyor
+            // (`index_aux_link_uppercase = true`) ve ad CSS'te büyütülüyordu:
+            //   "Example Liquid LOX-RP1 25kN"  → "EXAMPLE LİQUİD … 25KN"
+            //   "Example Solid KNDX BATES 75mm"→ "EXAMPLE SOLİD … 75MM"
+            // İki ayrı kayıp aynı anda: (a) SI simgeleri eziliyor — kN
+            // (kilonewton) → KN, mm (milimetre) → MM diye bir simge YOK;
+            // (b) Türkçe kipte `i→İ` kuralı kullanıcının yazdığı İngilizce
+            // ada uygulanıyor ("LİQUİD"). Ölçüm İngilizce kipte de bozulma
+            // gösterdi, yani bu yalnız bir `İ` sorunu değil.
+            // KARAR (ana model, ÖH D35): kullanıcının yazdığı ad ekranda
+            // YAZILDIĞI GİBİ durur. Tip rozeti ve özet parçası şeridin
+            // görsel düzenine uymayı sürdürür (rozet zaten JS'te, yerelden
+            // BAĞIMSIZ `toUpperCase` ile büyütülüyor).
+            a.textContent = '';
+            var adEl = document.createElement('span');
+            adEl.style.textTransform = 'none';
+            adEl.textContent = p.name;
+            a.appendChild(adEl);
+            var tipEl = document.createElement('span');
+            tipEl.style.textTransform = 'none';
+            // DV-LIQUID (ÖH D37 A1b): projectRow rozetiyle AYNI kural —
+            // tanınan tip sözlük etiketi, tanınmayan ham makine değeri.
+            var tipEtiketi = {
+                liquid: T('proj.typeLiquid', 'LIQUID'),
+                solid: T('proj.typeSolid', 'SOLID'),
+                hybrid: T('proj.typeHybrid', 'HYBRID')
+            };
+            tipEl.textContent = ' [' + (Object.prototype.hasOwnProperty.call(
+                    tipEtiketi, p.motor_type)
+                ? tipEtiketi[p.motor_type]
+                : String(p.motor_type || '?').toUpperCase()) + ']';
+            a.appendChild(tipEl);
             // T75 (2026-08-03): index.html'in `.aux-link { text-transform:
             // uppercase }` kuralı ŞERİDİN TAMAMINI büyütüyordu. ÖLÇÜLDÜ: DOM
             // metni "Isp 207.1 s · It 13428 N·s" doğruyken ekranda
@@ -1001,8 +1309,23 @@
     }
 
     function init() {
-        if (isLanding) buildRecentStrip();
-        else initDesignPage();
+        if (isLanding) {
+            buildRecentStrip();
+            // ÖH D21 / P12aB4-21 devamı: şerit bir kez kuruluyordu, dil
+            // değişince içindeki sayılar eski ayırıcıda kalıyordu (metin
+            // data-i18n taşımadığı için I18N.apply onlara erişemez).
+            // Şerit yeniden kurulur; uç yoksa/boşsa yine hiç görünmez.
+            if (window.I18N && window.I18N.onChange) {
+                window.I18N.onChange(function () {
+                    var eski = document.getElementById('hrmaRecentProjects');
+                    if (!eski) return;          // şerit hiç kurulmadıysa dokunma
+                    eski.parentNode.removeChild(eski);
+                    buildRecentStrip();
+                });
+            }
+        } else {
+            initDesignPage();
+        }
     }
 
     if (document.readyState === 'loading') {

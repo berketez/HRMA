@@ -33,6 +33,48 @@
     const ENDPOINT = '/api/correlation-report';
     const PANEL_ID = 'correlation';
 
+    /* ÖH D27 / P11B4-25 — DAĞILIM İSTATİSTİĞİNİN TANIM SINIRI.
+       ÖLÇÜLDÜ (a3/once.json + raw/P11/B4-repro-09.py, 212 kayıtlık gerçek
+       koşum): 26 hücrenin 12'sinde n = 1 ve o hücrelerde
+       |bias_percent| = rms_percent = median_ape_percent — üç "istatistik"
+       sütunu tek kaydın AYNI sayısı. Katı motor sayfasında en üstte
+       listelenen dört satırın dördü de n = 1 (hepsi tek deneyden) ve bunu
+       söyleyen hiçbir işaret yoktu; "RMS %20,3" bir dağılım istatistiği
+       gibi okunuyordu.
+
+       Sınır bir ayar eşiği DEĞİL, tanım gereğidir: karesel ortalama ve
+       medyan mutlak yüzde hata bir DAĞILIM ölçüsüdür, tek örnekten
+       türetilemez (çekirdek de aynı sınırı kullanır:
+       hrma/analysis/uncertainty.py:509 `if n < 2`). Tek kaydın işaretli
+       hatası anlamlıdır ve Bias sütununda basılır; dağılım sütunları
+       fail-closed olarak '—' gösterir — uydurma dağılım basılmaz. */
+    const DAGILIM_MIN_N = 2;
+
+    /* ÖH D27 / P11B4-26 — ŞİDDET AĞIRLIĞI TABLONUN KENDİ SAYILARINDAN.
+       ÖLÇÜLDÜ: koşturulmuş HTML'de renk işareti sayısı 0 — `hybrid
+       regression_rate` (bias −24,9, RMS 35,4) ile `hybrid c_star`
+       (bias +0,1, RMS 3,3) aynı gri monospace'te, görsel olarak ayırt
+       edilemiyordu.
+
+       Renk BANDI atılmıyor: `/api/correlation-report` bir eşik tablosu
+       YAYIMLAMIYOR ve panel eşik UYDURAMAZ (fail-closed; kardeş
+       validation panelinin 5/10/20 bandı ucun kendi
+       GRADE_THRESHOLDS_PCT'sinden gelir, bkz. P11B4-24). Ağırlık bunun
+       yerine tablonun KENDİ dağılımından türetilir: her hücrenin |bias|'ı
+       o katmandaki en büyük |bias|'a oranlanır ve o oranda bir çubuk
+       çizilir. Ölçek verinin kendisidir; dışarıdan hüküm eklenmez. */
+    function magnitudeBar(pct, enBuyuk) {
+        if (!Number.isFinite(pct) || !Number.isFinite(enBuyuk) || enBuyuk <= 0) {
+            return '';
+        }
+        const oran = Math.min(1, Math.abs(pct) / enBuyuk);
+        return '<span aria-hidden="true" style="display:inline-block;'
+            + 'vertical-align:middle;margin-right:6px;height:8px;'
+            + 'width:' + (2 + oran * 46).toFixed(1) + 'px;'
+            + 'background:var(--hd-cyan, #00e5ff);opacity:'
+            + (0.25 + oran * 0.65).toFixed(2) + ';border-radius:2px;"></span>';
+    }
+
     // [katman, başlık anahtarı, başlık EN, not anahtarı, not EN]
     const LAYER_SECTIONS = [
         ['low_confidence', 'panel.correlation.layerLow', 'Low-confidence records',
@@ -52,13 +94,16 @@
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // ÖH D31 · OH-D30-06 — kullanıcıya BASILAN sayılar U.num'dan geçer;
+    // CSS geometrisi (yukarıdaki piksel/opaklık toFixed'leri) GEÇMEZ,
+    // orada nokta zorunludur.
     function fmtPct(v) {
         return (typeof v === 'number' && isFinite(v))
-            ? ((v > 0 ? '+' : '') + v.toFixed(1)) : '—';
+            ? ((v > 0 ? '+' : '') + U.num(v, 1)) : '—';
     }
 
     function fmtAbsPct(v) {
-        return (typeof v === 'number' && isFinite(v)) ? v.toFixed(1) : '—';
+        return (typeof v === 'number' && isFinite(v)) ? U.num(v, 1) : '—';
     }
 
     // ------------------------------------------------------------------
@@ -200,7 +245,7 @@
         });
     }
 
-    function cellRowHtml(c) {
+    function cellRowHtml(c, enBuyukBias) {
         const page = window.AnalysisDock.getMotorType();
         const isPage = c.motor_type === page;
         const motorStyle = isPage
@@ -209,14 +254,32 @@
         const tip = T('panel.correlation.worstRecord', 'Worst record') + ': '
             + escapeHtml(String(c.worst_test_id || 'n/a'))
             + (typeof c.mape_percent === 'number' && isFinite(c.mape_percent)
-                ? (' | MAPE ' + c.mape_percent.toFixed(1) + '%') : '');
+                ? (' | MAPE ' + U.num(c.mape_percent, 1) + '%') : '');
+        // P11B4-25: dağılım sütunları yalnız n >= DAGILIM_MIN_N için basılır.
+        const dagilimVar = Number.isFinite(c.n) && c.n >= DAGILIM_MIN_N;
+        const tekKayitTip = T('panel.correlation.singleRecordTip',
+            'A single record: root-mean-square and median absolute percent '
+            + 'error are dispersion statistics and are undefined here. The '
+            + 'signed error of that one record is shown under Bias %.');
+        const hucre = function (deger) {
+            return dagilimVar
+                ? fmtAbsPct(deger)
+                : `<span title="${escapeHtml(tekKayitTip)}"
+                    style="color:var(--hd-ink-dim, #7d97a5);">—</span>`;
+        };
+        const nHucre = (c.n != null)
+            ? (dagilimVar ? String(c.n)
+                : `<span title="${escapeHtml(tekKayitTip)}"
+                    style="color:var(--hd-orange, #ff8c33);">${c.n}&#8202;&#9888;</span>`)
+            : '—';
         return `<tr title="${tip}">
             <td style="${U.TD} ${motorStyle}">${escapeHtml(c.motor_type)}</td>
             <td style="${U.TD}">${escapeHtml(c.quantity)}</td>
-            <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${c.n != null ? c.n : '—'}</td>
-            <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${fmtPct(c.bias_percent)}</td>
-            <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${fmtAbsPct(c.rms_percent)}</td>
-            <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${fmtAbsPct(c.median_ape_percent)}</td>
+            <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${nHucre}</td>
+            <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${
+                magnitudeBar(c.bias_percent, enBuyukBias)}${fmtPct(c.bias_percent)}</td>
+            <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${hucre(c.rms_percent)}</td>
+            <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${hucre(c.median_ape_percent)}</td>
         </tr>`;
     }
 
@@ -226,6 +289,14 @@
                 font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5);">
                 ${T('panel.correlation.noCells', 'No cells in this layer.')}</p>`;
         }
+        // P11B4-25/26: ölçek ve tek-kayıt sayısı TABLONUN KENDİ verisinden.
+        const enBuyukBias = cells.reduce(function (m, c) {
+            return Number.isFinite(c.bias_percent)
+                ? Math.max(m, Math.abs(c.bias_percent)) : m;
+        }, 0);
+        const tekKayitSayisi = cells.filter(function (c) {
+            return Number.isFinite(c.n) && c.n < DAGILIM_MIN_N;
+        }).length;
         const TH = U.TD + ' color:var(--hd-ink-dim, #7d97a5);'
             + ' font-family:var(--hd-mono); font-size:0.7rem;'
             + ' text-transform:uppercase; letter-spacing:0.06em;';
@@ -245,8 +316,22 @@
                     title="${T('panel.correlation.apeTip', 'Median absolute percent error')}">${
                     T('panel.correlation.colApe', 'Median APE %')}</th>
             </tr></thead>
-            <tbody>${orderCells(cells).map(cellRowHtml).join('')}</tbody>
-        </table>`;
+            <tbody>${orderCells(cells).map(function (c) {
+                return cellRowHtml(c, enBuyukBias);
+            }).join('')}</tbody>
+        </table>
+        ${tekKayitSayisi ? `<p style="font-family:var(--hd-mono, monospace);
+            font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5); margin:4px 0;">${
+            escapeHtml(U.tf('panel.correlation.singleRecordNote',
+                { n: tekKayitSayisi, min: DAGILIM_MIN_N },
+                '{n} cell(s) rest on a single record: dispersion statistics '
+                + 'need at least {min} and are shown as — there.'))}</p>` : ''}
+        <p style="font-family:var(--hd-mono, monospace); font-size:0.72rem;
+            color:var(--hd-ink-dim, #7d97a5); margin:4px 0;">${
+            escapeHtml(T('panel.correlation.barNote',
+                'Bar length is |bias| relative to the largest |bias| in this '
+                + 'table — a magnitude cue from the data itself, not a '
+                + 'pass/fail threshold (the endpoint publishes none).'))}</p>`;
     }
 
     function collapsibleLayerHtml(title, note, cells) {
@@ -292,7 +377,73 @@
                 style="color:var(--hd-cyan, #00e5ff);">${escapeHtml(shortHash)}</span>
             &nbsp;|&nbsp; ${T('panel.correlation.generatedIn', 'generated in')}
             ${(typeof data.generated_s === 'number' && isFinite(data.generated_s))
-                ? data.generated_s.toFixed(2) : '—'} s
+                ? U.num(data.generated_s, 2) : '—'} s
+        </div>` + skippedSummaryHtml(data.skipped_summary)
+             + raporMetniHtml(data.markdown);
+    }
+
+    /* ÖH D31 · P11B4-27 — 31 KB'LIK RAPOR METNİ ARTIK OKUNABİLİR.
+       ÖLÇÜLDÜ (a1/once.json · M9: `markdown_tuketimi = 1` ve o tek geçiş
+       dosyanın BAŞINDAKİ sözleşme YORUMU — yani üründe SIFIR tüketici):
+       uç `/api/correlation/report` yanıtında `markdown` alanıyla raporun
+       tam metnini gönderiyor (app.py:28885 `_cr.to_markdown(result)`) ve
+       bu metin her koşuda ağdan geçip tarayıcı belleğinde duruyor, ama
+       hiçbir yere basılmıyordu — ödenmiş bir yük, sıfır değer.
+       Yükü KESMEK uç sözleşmesi değişikliğidir (app-api-uc sahası);
+       panelin yapabileceği, ödenmiş yükü kullanıcıya AÇMAKTIR.
+       Metin UYDURULMAZ, ÖZETLENMEZ, biçimlenmez: sunucunun ürettiği
+       markdown aynen, katlanmış bir blokta gösterilir. Alan gelmezse
+       blok HİÇ kurulmaz. */
+    function raporMetniHtml(markdown) {
+        if (typeof markdown !== 'string' || !markdown.trim()) return '';
+        const bayt = markdown.length;
+        return `<details style="margin:8px 0;">
+            <summary style="cursor:pointer; font-size:0.78rem;
+                color:var(--hd-ink-dim, #7d97a5);">${escapeHtml(
+                // ÖH D32 / OH-D31-01: sözlüğe bağlandı
+                // (`panel.correlation.reportText`, EN+TR). Boyut yine
+                // metnin GERÇEK uzunluğundan hesaplanır.
+                U.tf('panel.correlation.reportText',
+                     { kb: U.num(bayt / 1024, 1) },
+                     'Full report text ({kb} KB, as produced by the server)'))
+            }</summary>
+            <pre style="white-space:pre-wrap; word-break:break-word;
+                max-height:340px; overflow:auto; font-size:0.72rem;
+                font-family:var(--hd-mono, monospace);
+                color:var(--hd-ink, #cfe8f2); margin:6px 0 0;
+                padding:8px; background:var(--hd-inset, rgba(0,0,0,0.25));
+                ">${escapeHtml(markdown)}</pre>
+        </details>`;
+    }
+
+    /* ÖH D26 / OH-B3-02 — RAPORUN NEYİ ATLADIĞI EKRANA İNER.
+       ÖLÇÜLDÜ (taban 7751531, ``a2/once.json``:
+       correlation_skipped_summary = 0): /api/correlation-report
+       `skipped_summary` yayımlıyor — RAPORA GİRMEYEN kayıtların özeti —
+       ve correlation_panel.js bu alanı hiç basmıyordu. Kullanıcı
+       "Correlation vs Experimental Database" tablosuna bakıp bunu
+       veritabanının TAMAMI sanıyordu; atlanan kayıtlar tablonun
+       kapsamını daraltıyor ama ekranda hiçbir izi yoktu.
+       tests/test_wave4a_contract.py bunu 'correlation' altında
+       xfail(strict) borç imiyle taşıyordu.
+
+       Sayılar SUNUCUDAN gelir; panel toplam UYDURMAZ — özet boşsa satır
+       hiç açılmaz, doluysa her kalem adıyla basılır. */
+    function skippedSummaryHtml(ozet) {
+        if (!ozet || typeof ozet !== 'object') return '';
+        const anahtar = Object.keys(ozet).sort();
+        if (!anahtar.length) return '';
+        const parca = anahtar.map(function (k) {
+            const v = ozet[k];
+            return escapeHtml(k) + ' ' + escapeHtml(
+                (v === null || v === undefined) ? '—'
+                    : (typeof v === 'object' ? JSON.stringify(v) : String(v)));
+        });
+        return `<div style="font-family:var(--hd-mono, monospace);
+                font-size:0.75rem; color:var(--hd-amber, #ffbe46);
+                margin:4px 0 8px;">
+            ${T('panel.correlation.skippedLabel',
+                'Skipped (not in this report)')}: ${parca.join(' · ')}
         </div>`;
     }
 
@@ -336,6 +487,13 @@
         endpoint: ENDPOINT,
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [],
+        // ÖH D24 / P11B2-11 — BOŞ GÖVDE BURADA MEŞRUDUR, BEYAN EDİLİR.
+        // ÖLÇÜLDÜ (P11 B2-repro-09): `/api/correlation-report` boş gövdeye
+        // HTTP 200 + 54.805 B (114 sayı) döner; rapor motor bağlamı
+        // istemeyen bir veritabanı özetidir. Güvertenin boş-gövde kapısı
+        // yalnız bu BEYANLA açılır — kardeş dört panel (comparative /
+        // uncertainty / validation / feed) beyan etmez, o yüzden kapalı.
+        allowsEmptyPayload: true,
         render: render,
     });
 

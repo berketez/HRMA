@@ -33,11 +33,13 @@
 # ---------------------------------------------------------------------------
 hrma/app.py | manufacturing_ready | 95ca3301f829 | MEŞRU: kaldırılan "Ready for manufacturing" kusurunu anlatan düzeltme yorumu.
 hrma/analysis/safety_limits.py | safe_for_operation | dd6d66257a0b | MEŞRU: kaldırılan fail-open "MOTOR SAFE FOR OPERATION" metnini anlatan yorum.
+hrma/app.py | builtin_table_claim | f0a0056a0196 | MEŞRU: ÖH D15 app-api kulvarının (P7B3-10) KAPATTIĞI kusuru birebir alıntılayan düzeltme yorumu — "ZZZ_NOT_A_PROPELLANT HTTP 200 + source: 'Built-in propellant table' dönüyordu". Satır iddiayı KURMUYOR, kaldırılan iddiayı anlatıyor; uç bugün 422 veriyor (tests/test_d15_app_api_a2.py::TestP7B310...::test_taninmayan_ad_reddedilir).
+hrma/app.py | builtin_table_claim | 0b07502c6b30 | MEŞRU: aynı onarımın KULLANICIYA dönen ret metni; iddiayı OLUMSUZLAYARAK anıyor — "the generic numbers this endpoint USED TO return carried a 'Built-in propellant table' plate for a record that does not exist". Uç artık 422 veriyor ve hiçbir özellik ikame etmiyor.
+hrma/templates/liquid.html | builtin_table_claim | 99caa9adeab2 | MEŞRU: ÖH D31 arayuz-panel a3'ün (OH-Z1-05) KAPATTIĞI kusuru birebir alıntılayan düzeltme yorumu — ölçülen kusur "alan hiç gönderilmeyince 70,85 ve kaynak 'built-in propellant table' (%1,043 sapma ve YANLIŞ künye)" idi. Satır JS YORUMUDUR, kullanıcıya hiçbir metin basmaz ve iddiayı KURMAZ; kaldırılan iddiayı anlatır. Bugünkü davranış fail-closed: çözüm gelmeyince makine dolumu alanı BOŞALTIR ve boş alan gövdeye konmaz (bekçiler: tests/test_d31_arayuz_panel_a3.py::TestOHZ105AkiskanOzellikleri test_toplayicida_sessiz_yedek_yok / test_cozulmeyen_halde_alan_temizleniyor). Satır içi IDDIA-LINT-MUAF işareti YERİNE buraya yazıldı: liquid.html bu dalgada (D32) arayuz-panel kulvarının sahasıdır, dokunulmadı.
 
 # ---------------------------------------------------------------------------
 # MEŞRU — "guarantee" matematiksel/olumsuz anlamda
 # ---------------------------------------------------------------------------
-hrma/analysis/heat_transfer_analysis.py | guaranteed | 37a77871fe51 | MEŞRU: kodun sağladığı alt sınırı anlatıyor (sıfır olmayan muhafazakâr ısıl yük), kullanıcıya verilen garanti değil.
 hrma/analysis/regen_cooling.py | guaranteed | 3b5fa0dd4c5c | MEŞRU: ızgara özelliği — boğaz istasyonunun M=1'e tam oturduğu sayısal güvence.
 hrma/analysis/uncertainty.py | guaranteed | 655bb838d32f | MEŞRU: Latin Hypercube'ün ispatlı özelliği; cümle zaten "but not zero ..." ile sınırını söylüyor.
 hrma/validation/experiment_db.py | guaranteed | b9d2ec4c76c7 | MEŞRU: veri şemasının sağladığı alan güvenceleri (SCHEMA.md), sonuç doğruluğu iddiası değil.
@@ -54,6 +56,8 @@ hrma/app.py | high_fidelity | 9cf03cbce7e4 | MEŞRU: hata mesajında kademe adı
 hrma/app.py | high_fidelity | 89b94c674fec | MEŞRU: kademe yolunun mevcut olup olmadığını anlatan docstring.
 hrma/app.py | high_fidelity | 84cf76d445ba | MEŞRU: panelin fidelity_used alanından kademeyi tespit ettiğini anlatan yorum.
 hrma/app.py | high_fidelity | cf003692dbd5 | MEŞRU: kademe kimliği ('high_fidelity') ile karşılaştırma.
+hrma/static/js/i18n_common.js | high_fidelity | 4c007a04b6a0 | MEŞRU: kademe ADI — belirsizlik işi rozetinin metni, çözücünün 'high_fidelity' kademesini adlandırır (ürün/paket sıfatı değil). ÖH D25 arayuz a3 sembol taraması, aşama-2'nin OH-D24-05 satırı.
+hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 347463b9e387 | MEŞRU: yukarıdaki anahtarın panel içindeki İngilizce yedek metni; aynı kademe adı, aynı gerekçe (ikizi i18n_common.js'te kayıtlı).
 hrma/analysis/kinetic_efficiency.py | high_fidelity | 5a15b861d655 | MEŞRU: kademeye ait kayıp bandının tanımı.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | f45191013b5c | MEŞRU: kademenin girdi şeması docstring'i.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | aa9bcf64c6bd | MEŞRU: kademe kullanılamadığında basılan durum mesajı.
@@ -113,3 +117,126 @@ packaging/release_notes_v2.5.0.md | high_fidelity | aefb4e5fc078 | MEŞRU: v2.5.
 packaging/release_notes_v2.5.0.md | guaranteed | 218468b029a2 | MEŞRU: sayısal sonuç garantisi değil, determinist yazılım davranışı (0. örnek = nominal vaka).
 packaging/release_notes_v2.5.1.md | digital_twin | df6eaa9f23d2 | MEŞRU: v2.5.1 TARİHSEL sürüm notu, o gün geçerli olan adlandırmayı anlatıyor; geriye dönük değiştirilmez.
 packaging/release_notes_v2.6.1.md | digital_twin | 849042d6154f | MEŞRU: v2.6.1 sürüm notu, KALDIRILAN ifadeyi alıntılıyor ("wording is now 'interactive 3D model'").
+
+# ---------------------------------------------------------------------------
+# 27 Ağustos 2026 — Scofield ÖH Z5S / P10-Z5S-E: KÜNYE YALANI kural sınıfı
+#
+# Ölçüm (docs/scofield/raw/P10/B4-repro-01.py, aynı gün): kampanyanın P4-P7'de
+# ÖLÇÜMLE kanıtladığı 15 iddia sınıfı tek dosyaya yazılıp taratıldı;
+# yakalanan 3, KAÇAN 15. Kaçanlar künye yalanı (`user_supplied`, `built-in
+# propellant table`), kazanılmamış doğruluk bandı (`accurate to within`),
+# deneysel/CEA/CFD doğrulama künyesi, sigma kapsama, Türkçe emniyet ve
+# uygunluk hükümleriydi; TÜRKÇE kural sayısı SIFIRDI.
+#
+# 10 yeni kural eklendi (iddia_lint.KUNYE_YALANI). Ağaçta 21 yeni isabet
+# çıktı: 11'i MEŞRU (kaldırılan kusuru anlatan yorum, olumsuz cümle, iki
+# dallı ve doğru künye), 10'u AÇIK BORÇ. Borçların sahibi BAŞKA dosyalardır
+# (i18n/şablon/motor) ve bu paket ürün koduna dokunmaz — borçlar bu yüzden
+# kayda alınıp GÖRÜNÜR kılındı, susturulmadı: python3 tools/iddia_lint.py --debt
+# ---------------------------------------------------------------------------
+
+# --- KAPANDI (borç ÖDENDİ, kayıt kaldırıldı) — ÖH D23 fix-20, 5 Eylül 2026
+# --- Açılış ekranı ve yardım metinlerindeki sekiz "NASA CEA doğrulamalı"
+# --- iddiası üründen SÖKÜLDÜ: commit 8e53817 (ÖH D21 arayuz a1, defter
+# --- P10B4-02) — index.html hero + i18n.js EN/TR + i18n_advanced.js 12
+# --- metin. Ürün artık yerel CEA tür tablosunda ARAMA yaptığını söylüyor
+# --- ("found in the local NASA CEA species table"), doğrulama iddia
+# --- etmiyor. Ölçüldü (fix-20): `tools.iddia_lint.scan()` içinde bu sekiz
+# --- karmanın hiçbiri artık üretilmiyor, cea_validated canlı isabeti 3
+# --- (ikisi MEŞRU + liquid_rocket_engine docstring borcu, aşağıda).
+# --- Kayıtlar D21 birleşmesinde silinmediği için envanter sekiz ÖLÜ satır
+# --- taşıyordu; ödenmiş borcu defterde tutmak envanteri yalancı yapar
+# --- (test_d15_bekci_cevirisi_a1::test_kayit_defterinde_olu_kayit_yok).
+hrma/engines/liquid_rocket_engine.py | cea_validated | 51b10a1069a5 | AÇIK BORÇ: `_set_propellant_properties` docstring'i "NASA CEA verified ... (99.8% accuracy)" diyor; ne doğrulama ne de %99,8 ölçülüyor.
+hrma/analysis/structural_analysis.py | provenance_label | 3f91515c99e6 | AÇIK BORÇ: `wall_thickness_source = 'user_supplied' if design_mode == 'verify'` — P7 KRİTİĞİ tam bu künyenin yalan çıkabildiğini ölçmüştü (0,5 mm cidar sessizce 2,0 mm oldu, künye değişmedi); künyenin doğruluğu bu pakette ÖLÇÜLMEDİ.
+
+# --- MEŞRU: kaldırılan kusuru anlatan / iddiayı olumsuzlayan satırlar
+hrma/data/nasa_realtime_validator.py | accuracy_band | d36724c3594d | MEŞRU: kaldırılan üç hükmü anlatan düzeltme yorumu; bandın DAR olduğunu söylüyor, doğruluk iddia etmiyor.
+hrma/app.py | experimental_validation | eb7658e4b59f | MEŞRU: doğrulama beyanının sınırını çizen yorum — "'deneyle doğrulandı' HİÇBİR YERDE ima edilmez".
+hrma/fea/bridge.py | safe_verdict_tr | a45e7b548017 | MEŞRU: hükmün GERİ ÇEKİLDİĞİNİ söyleyen metin — "yakınsamamış bir çözümden 'bu tasarım güvenlidir/değildir' hükmü çıkarılamaz".
+hrma/engines/liquid_rocket_engine.py | builtin_table_claim | e9f48b1b0e25 | MEŞRU: OLUMSUZ cümle — çiftin tabloda OLMADIĞINI söyleyen hata metni ("is not in the built-in combustion table").
+hrma/app.py | provenance_label | cd7bae586479 | MEŞRU: künyeyi ALINTILAYAN docstring (uç noktanın yanıt sözleşmesini anlatıyor).
+hrma/app.py | provenance_label | 41ee3371365a | MEŞRU: S4/P16B1-02'nin KALDIRDIĞI kusuru birebir alıntılayan yorum — 'peynir' malzemesinde künyenin 'user_supplied' yalanını ölçen kayıt; canlı künye değil, ölçüm tutanağı.
+
+# --- MEŞRU: künye iki dallı ve karşı dal ADIYLA yazılıyor; sessiz künye yok
+hrma/analysis/water_hammer.py | provenance_label | 9d4601e2bfaf | MEŞRU: dal yalnız kullanıcı gerçekten `vapor_pressure_Pa` gönderdiğinde giriliyor; karşı dal `fluid_table`/`unavailable`.
+hrma/app.py | builtin_table_claim | b20ff06fc73d | MEŞRU: künye DÜZELTMESİ — CoolProp kullanılmadığı hâlde "CoolProp" yazan kaynağı yerel tablo adıyla değiştiriyor.
+hrma/data/external_data_fetcher.py | builtin_table_claim | b33d76173c5f | MEŞRU: değer merkezî tablodan okunuyor ve künye referans sıcaklığı + provenance ile birlikte basılıyor.
+hrma/data/external_data_fetcher.py | builtin_table_claim | 9bd228aa10e3 | MEŞRU: aynı künye, ikinci yayım noktası.
+
+# --- ÖH D15 birleştirme (1 Eyl 2026, ana model): 7 kulvar main'e birleşince görünen 11 isabet ---
+hrma/analysis/heat_transfer_analysis.py | provenance_label | e7c78f0df3d0 | MEŞRU: künye alanı — c* kaynağını ADIYLA söylüyor ('user_supplied' = çağıranın verdiği değer; hüküm değil, kaynak beyanı; D15 termo-ucus).
+hrma/analysis/regen_cooling.py | provenance_label | 35456ee1eb36 | MEŞRU: hata metni içinde 'user_supplied' etiketinin ANLAMINI açıklayan cümle; kaynak beyanı, kazanılmış hüküm değil.
+hrma/engines/hybrid_rocket_engine.py | provenance_label | 23f1c3029846 | MEŞRU: künye — kullanıcı thrust_coefficient verdiyse CF_source='user_supplied', yoksa çözücü; iki dal adıyla (D15 hibrit B1-02).
+hrma/engines/liquid_rocket_engine.py | builtin_table_claim | 61d2bad52d50 | MEŞRU: yorum — kaldırılan kusuru (P3B1-01: tablo dışı çiftte 800/1200 uydurması + yanlış künye) anlatan ölçüm notu.
+hrma/engines/liquid_rocket_engine.py | cea_validated | cf6b86febf2a | MEŞRU: yorum başlığı — tablo satırları CEA koşumlarından türetildi; kayıt başına 'validated' alanı ayrıca taşınır (D15 sivi P3B1-01 taşıması).
+hrma/engines/liquid_rocket_engine.py | builtin_table_claim | fb54f548236f | MEŞRU: künye metni — yoğunluğun tür tablosundan (species density) geldiğini söyler; tablo dışı çiftte basılmaz (bekçi: test_d15_sivi_a1 p3b1_01_kunye).
+hrma/engines/liquid_rocket_engine.py | builtin_table_claim | 0fac7d94e663 | MEŞRU: yorum — eski koşulsuz künyenin kaldırıldığını anlatır (P3B1-01).
+hrma/engines/liquid_rocket_engine.py | builtin_table_claim | df646ea0cba9 | MEŞRU: künye ataması — yalnız çift tabloda ÇÖZÜLDÜĞÜNDE bu dala girilir (P3B1-01 kapısı); tablo dışı çift 422 (bekçi: test_d15_sivi_a1).
+hrma/engines/liquid_rocket_engine.py | builtin_table_claim | b7fecc3b186d | MEŞRU: künye ataması (oksitleyici) — aynı kapı, aynı bekçi (P3B1-01).
+hrma/engines/liquid_rocket_engine.py | builtin_table_claim | 1f7b1eeee5e1 | MEŞRU: künye metni — 'exact pair' tablo girdisi bulunduğunda basılır; kaynağın gerçekten o tablo olduğu bekçiyle ölçülü (P3B1-01).
+hrma/engines/liquid_rocket_engine.py | builtin_table_claim | 74391b28a60d | MEŞRU: kaynak etiketi — optimal O/F tablo satırından okunduğunda basılır, kullanıcı girdisi 'user input' ile ayrılır (P3B1-04 künyesi).
+hrma/static/js/i18n_advanced.js | builtin_table_claim | f74526f0e7de | MEŞRU: kaynak beyanı (iddia değil) — tooltip ürünün gerçek kaynak zincirini anlatıyor; external_data_fetcher.oxidizer_reference_density:280 aynı 'built-in propellant table' künyesini source alanında yayımlar, N2O CoolProp EOS ile çözülür; hâl P9B5-12 state_reason'la yapısal (FİX-6, D17 arayuz P12aB2-01 metni).
+hrma/templates/advanced.html | builtin_table_claim | f1783947ed8f | MEŞRU: aynı tooltip'in şablon yedeği (data-i18n=adv.tip.densityKgM) — gerekçe yukarıdaki i18n_advanced.js kaydıyla aynı (FİX-6).
+hrma/templates/solid.html | provenance_label | 9cc14caeb739 | MEŞRU: künye OKUNUYOR, yazılmıyor — D36 katı (e02027e4) kabuk/kapak geometrisi satırı sunucunun yayımladığı case_geometry.thickness_source'u karşılaştırıp beyanını seçiyor; 'user_supplied' değerini üreten ve doğrulayan solid_rocket_engine (hüküm-24)
+hrma/fea/structural_axisym.py | safe_verdict_tr | dfd574a06b19 | MEŞRU: yorum satırı — tepe (nodal) von Mises'in HÜKÜM OLMADIĞINI anlatır ('yalnız …güvenlidir/değildir' demek yeterli değildir; hüküm SCL lineerizasyonundan, D19 fea-cfd F4 OH-D16-01); iddia değil, olumsuzlama (fix-12).
+
+# ---------------------------------------------------------------------------
+# ÖH D22 · altyapi a1 · OH-Z5-08 — 'dogrulanmistir_tr' kuralının ilk taraması
+#
+# Kural bu dalgada eklendi (Türkçe edilgen kesin kip "-doğrulanmıştır").
+# Ağaçta 10 isabet üretti; onu da tek tek okundu ve sınıflandırıldı.
+# Kuralın kendi ölçümü: 9 pozitif sondanın 9'unu yakalıyor, 6 negatifte
+# 0 yanlış isabet (docs/scofield/raw/OH/D22/altyapi/a1/{once,sonra}.json).
+# ---------------------------------------------------------------------------
+
+# --- AÇIK BORÇ — kazanılmamış doğruluk/doğrulama hükmü, sahibi başka kulvar
+hrma/engines/combustion_analysis.py | dogrulanmistir_tr | e559d6cb7de5 | AÇIK BORÇ: "c* zaten yalnızca %0-1.5 içinde doğrulanmıştır" — CEA'ya karşı kazanılmış bir doğruluk BANDI iddiası; 'cea_validated' kuralının kendi gerekçesi bunun tersini ölçmüş (fakir karışımda −%2,8..−%5,9). Dosya ÖH D22'de ÖK-06 ile KİLİTLİ (kayan denge bölgesi); sahibi fizik kulvarıdır.
+hrma/engines/hybrid_rocket_engine.py | dogrulanmistir_tr | 15aaa1af306a | AÇIK BORÇ: "NASA CEA'ya %0-1.5 içinde doğrulanmıştır" — aynı sınıf doğruluk bandı iddiası, altı yakıt × üç oksitleyici için genelleniyor; depoda bu bandı ölçen bir kod yolu koşmuyor. Sahibi hibrit kulvarıdır.
+hrma/engines/liquid_rocket_engine.py | dogrulanmistir_tr | c73395159330 | AÇIK BORÇ: "14 gerçek motorun TESLİM verisine karşı doğrulanmıştır" — doğrulama KAMPANYASI iddiası; depoda 14 motorluk bir teslim-verisi karşılaştırması koşmuyor. Sahibi sıvı kulvarıdır.
+
+# --- MEŞRU — belge/kayıt doğrulaması ya da süreç beyanı (sayı hükmü değil)
+hrma/analysis/acoustic_modes.py | dogrulanmistir_tr | e41671dc83f4 | MEŞRU: doğrulanan şey bir SAYI değil, ATIF BAŞLIĞI — "bu depoda BELGE olarak doğrulanmıştır (docs/STANDART_ATIFLARI.md)". Kayıt defteri gerçekten var ve wrong-standard kuralları onun üstünde koşuyor.
+hrma/analysis/transient_ballistics.py | dogrulanmistir_tr | 8efc7de61031 | MEŞRU: doğrulanan şey eşiğin DOĞRULUĞU değil, kaynakta o eşiğin YAYIMLANDIĞI — "kaynakta '0,05' diye yayımlanmış bir eşik olarak doğrulanmıştır". Belgesel tespit.
+hrma/engines/hybrid_rocket_engine.py | dogrulanmistir_tr | b53484c3c8c5 | MEŞRU: bir SEMBOL TARAMASININ sonucunu anlatıyor ("2026-08-03 taraması: bu dosyada ignit*/valve/... yok"); doğrulanan şey kodun içeriği, motorun doğruluğu değil.
+hrma/export/pdf_generator.py | dogrulanmistir_tr | 3f8a88151377 | MEŞRU: atıf başlıklarının kayıt defterinde doğrulandığını söylüyor ve hemen yanında iddia_lint'in yanlış başlıkları yakaladığını anıyor; sayısal hüküm yok.
+hrma/fea/bridge.py | dogrulanmistir_tr | 8a6d72e06575 | MEŞRU: künye METNİ — "docstring'inde, kod okunarak doğrulanmıştır"; doğrulama yönteminin ADI (kod okuma) açıkça yazılı, kazanılmamış bir kampanya iddia edilmiyor.
+# ÖH V3 taban-b (14 Eki 2026): motor_viz3d.js | dogrulanmistir_tr | 4f716b1f712b
+# kaydı SİLİNDİ — kayıtlı satır ("Jet aeroakustiğinde yaygın olarak
+# doğrulanmıştır") 2385b923 (6 Eki, KU-25/H-4 plume görseli, Prandtl-Pack
+# bağıntısı yeniden yazıldı) ile ağaçtan kalktı; ölü kayıt envanteri yalancı yapar.
+packaging/release_notes_v2.5.5.md | dogrulanmistir_tr | 58de99a3ae7b | MEŞRU: SÜREÇ beyanı — "2511 otomatik testle doğrulanmıştır" ölçülebilir bir test sayısıdır ve o sürümün notunda yazılıdır; fiziksel doğruluk hükmü değil.
+
+# ---------------------------------------------------------------------------
+# ÖH D27 · fix-26a · 8 Eylül 2026 — D26 BİRLEŞMESİNİN GETİRDİĞİ TEK İSABET
+#
+# D26'nın 12 kulvarı ana ağaca birleşince kapı kırmızıya döndü: 89 isabetin
+# 88'i kayıtlıydı, 1'i kayıtsızdı. Kayıtsız isabet tek tek okundu; yeni bir
+# kural eklenmedi, var olan 'provenance_label' kuralı yeni doğan bir künye
+# satırını yakaladı. Sınıflandırma aşağıda.
+# ---------------------------------------------------------------------------
+hrma/engines/solid_rocket_engine.py | provenance_label | 3bdf3af3dd82 | MEŞRU: künye — İKİ DALIN ADI basılıyor (`'user_supplied' if kullanici_katsayisi else 'material_record'`); kullanıcı `erosion_factor` verdiyse boğaz erozyonu tahmini ONUN a_ref'iyle koşar, vermediyse malzeme kaydının yayımlanmış bandının muhafazakâr ucuyla. Kazanılmış hüküm yok, kaynak beyanı var — hybrid_rocket_engine CF_source (23f1c3029846) ve app.py chamber_material (f39ba6585404) kayıtlarıyla aynı sınıf. Satırı `fb3bb476` (ÖH D26 kati a2, defter P2B1-03/P2B3-03) doğurdu: erozyon tahmini artık çözücünün katsayısını ve kullanıcının lüle malzemesini İZLİYOR, bandı olmayan malzemede `coefficient_source: None` + `reason` ile fail-closed geri çekiliyor (tests/test_erosion.py::TestSolidEngineErosionField, borç imleri o commit'te söküldü).
+
+# ---------------------------------------------------------------------------
+# ÖH D28 · altyapi · a1 · 8 Eylül 2026 — KAPI BAĞLANIRKEN ÖLÇÜLEN TEK İSABET
+#
+# OH-D27-04 aracı yayın kapısına ve CI'a bağladı. Bağlamadan ÖNCE kapı kipi
+# ölçüldü (once.json): `--check` çıkış kodu 1, kayıtsız isabet 1. Yani araç
+# bugün KIRMIZI; kapıya "yeşil olduğu varsayılarak" bağlansaydı ilk yayın
+# denemesi durur, gerekçesi de görünmezdi. İsabet tek tek okunup hükme
+# bağlandı; yeni kural EKLENMEDİ, eşik GEVŞETİLMEDİ.
+# ---------------------------------------------------------------------------
+# ÖH D28 · fix-28a · 9 Eylül 2026 — BU KAYIT SÖKÜLDÜ (ölü kayıt).
+#
+# ÖLÇÜLDÜ: kayıt canlı bir isabete karşılık gelmiyordu
+# (test_d15_bekci_cevirisi_a1::test_kayit_defterinde_olu_kayit_yok kırmızı;
+# tarama 89 isabet, defter 90 satır, ölü 1). Sebep BİRLEŞME ETKİLEŞİMİDİR:
+# aynı isabeti iki kulvar iki ayrı yerde çözdü. `9563f338` (ÖH D27 fix-27a,
+# A2) sözcüğü KAYNAKTA düzeltip "kayıt defterine YAZILMADI" dedi; D28
+# altyapi a1 ise kendi dalında (taban `7cd08bcc`, orada sözcük hâlâ vardı)
+# aynı isabeti DEFTERE yazdı. İkisi ana ağaçta buluşunca defter satırı
+# öksüz kaldı. Satır silindi; hüküm kaybolmadı — gerekçenin kendisi
+# hybrid_rocket_engine.py'deki künye yorumunda duruyor ve orada
+# "oxidizer_depleted" ile ölçülü. Yeni kural EKLENMEDİ, eşik GEVŞETİLMEDİ:
+# tarama sonrası kayıtsız isabet 0, kayıtlı 89/89.
+# ---------------------------------------------------------------------------

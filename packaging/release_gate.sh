@@ -95,7 +95,7 @@ dmg_coz() {     # $1 = mount noktası
 }
 
 # ---------------------------------------------------------------------------
-baslik "1/8  Sürüm tutarlılığı"
+baslik "1/10  Sürüm tutarlılığı"
 # ---------------------------------------------------------------------------
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' hrma/__init__.py)"
 if [ -z "$VERSION" ]; then
@@ -125,7 +125,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "2/8  Git durumu"
+baslik "2/10  Git durumu"
 # ---------------------------------------------------------------------------
 if [ -n "$(git status --porcelain)" ]; then
     basarisiz "çalışma ağacı kirli — commit edilmemiş değişiklikle sürüm çıkmaz"
@@ -145,7 +145,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "3/8  Yapı ↔ commit zaman sırası"
+baslik "3/10  Yapı ↔ commit zaman sırası"
 # ---------------------------------------------------------------------------
 # v2.6.25'te yayınlanan ikili, temsil ettiği kaynaktan ÖNCE üretilmişti.
 # Ölçülen zaman damgaları (GitHub API, UTC):
@@ -245,7 +245,7 @@ fi
 koken_denetle "packaging/win/payload/app/BUILD_INFO.json" "Windows payload (exe'nin derlendiği ağaç)"
 
 # ---------------------------------------------------------------------------
-baslik "4/8  GitHub Actions (bu commit)"
+baslik "4/10  GitHub Actions (bu commit)"
 # ---------------------------------------------------------------------------
 # CI KONTROLÜ ATLANAMAZ (v2.6.25 yayınından çıkan ders).
 #
@@ -310,7 +310,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "5/8  Tam test takımı"
+baslik "5/10  Tam test takımı"
 # ---------------------------------------------------------------------------
 # Yalnız BU adım atlanabilir: yerel tam takım, CI'ın temiz makinede koştuğu
 # takımın aynısıdır. 3/6 yeşilse buradaki koşu fazladan bir doğrulamadır.
@@ -329,18 +329,65 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "6/8  Canlı duman testi — VARSAYILAN OLMAYAN portta"
+baslik "6/10  Canlı duman testi — VARSAYILAN OLMAYAN portta"
 # ---------------------------------------------------------------------------
 # v2.6.2'yi kullanılamaz yapan hata tam buradaydı: uygulama 8080 dışında bir
 # porta düştüğünde kendi sayfası kendi API'sinden 403 alıyordu. Bu kapı gerçek
 # bir sunucu ayağa kaldırır, tarayıcının yapacağı gibi Origin başlığı gönderir
 # ve gerçekten hesap yaptırır.
-PORT=8087
+# ÖH D18 / altyapi (P10B3-14). ÖLÇÜLDÜ (once_p10b3_14.json): port 8087
+# SABİTTİ (yedek port arayan tek satır yoktu) ve hazır-olma yoklaması yalnız
+# "biri cevap veriyor mu" diye soruyordu. İkisi birleşince kapı, 8087'de
+# duran YABANCI bir sunucuya (ya da bir önceki koşumdan kalmış eski sürüme)
+# bakıp "sunucu ayakta" hükmünü verebiliyordu — ve sonraki üç duman testi o
+# yabancı sunucuya istek atıyordu. Yayın kapısı için bu, ölçtüğünü sandığı
+# şeyi hiç ölçmemek demektir.
+#
+# Üç şey birden değişti:
+#   1) Port ÇEKİRDEKTEN alınır (0'a bağlan, verilen portu kullan) — sabit
+#      port çakışması diye bir şey kalmaz.
+#   2) Sunucu başlatılmadan ÖNCE o portun boş olduğu ölçülür; dolu ise kapı
+#      DÜŞER (sessizce başka porta kaçmak da yanlış olurdu: o zaman neyi
+#      ölçtüğümüz yine belirsizleşir).
+#   3) Hazır-olma döngüsü her turda KENDİ sürecinin yaşadığını sorar
+#      (kill -0). Süreç öldüyse kapı hemen düşer; cevabı veren başka bir
+#      süreç "sunucu ayakta" hükmünü ALAMAZ.
+PORT="$("$PY" - <<'PY'
+import socket
+s = socket.socket()
+s.bind(('127.0.0.1', 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+
+if [ -z "${PORT:-}" ]; then
+    basarisiz "duman testi portu seçilemedi"
+    PORT=8087
+fi
+
+if "$PY" - "$PORT" <<'PY'
+import socket
+import sys
+s = socket.socket()
+s.settimeout(1.0)
+sys.exit(0 if s.connect_ex(('127.0.0.1', int(sys.argv[1]))) == 0 else 1)
+PY
+then
+    basarisiz "duman testi portu ${PORT} BAŞKASI tarafından tutuluyor — kapı bu portta ölçüm YAPMAZ"
+fi
+
 "$PY" - "$PORT" <<'PY' &
 import logging
 import sys
 
 from hrma.app import app
+# Ürünle AYNI tavanlar (tek kaynak hrma/security/body_limit.py; '+ 1'
+# gerekçesi hrma/run.py waitress dalında: waitress `>=` ile reddeder).
+# İçe aktarma try DIŞINDA: başarısızsa duman sunucusu tavansız KALKMAZ
+# (ImportError 'waitress yok' dalına düşüp sessizce geçmez).
+from hrma.security.body_limit import (REQUEST_BODY_MAX_BYTES,
+                                      WAITRESS_CONNECTION_LIMIT)
 
 port = int(sys.argv[1])
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -349,7 +396,9 @@ try:
     # duman testi gerçek koşullara daha yakın olsun.
     from waitress import serve
     logging.getLogger('waitress').setLevel(logging.ERROR)
-    serve(app, host='127.0.0.1', port=port, threads=4, _quiet=True)
+    serve(app, host='127.0.0.1', port=port, threads=4, _quiet=True,
+          connection_limit=WAITRESS_CONNECTION_LIMIT,
+          max_request_body_size=REQUEST_BODY_MAX_BYTES + 1)
 except ImportError:
     # waitress yalnız paketleme ortamında zorunlu; geliştirme makinesinde
     # kurulu olmayabilir. Kapının amacı KÖKEN/PORT davranışını ölçmek,
@@ -361,7 +410,13 @@ SUNUCU_PID=$!
 trap 'kill $SUNUCU_PID 2>/dev/null || true' EXIT
 
 DUMAN_SONUC=1
+SUNUCU_OLDU=0
 for _ in $(seq 1 60); do
+    if ! kill -0 "$SUNUCU_PID" 2>/dev/null; then
+        # Cevap gelse bile o BİZİM sürecimiz değildir: kendi sunucumuz öldü.
+        SUNUCU_OLDU=1
+        break
+    fi
     if curl -sf "http://127.0.0.1:${PORT}/" -o /dev/null 2>/dev/null; then
         DUMAN_SONUC=0
         break
@@ -369,7 +424,9 @@ for _ in $(seq 1 60); do
     sleep 1
 done
 
-if [ "$DUMAN_SONUC" -ne 0 ]; then
+if [ "$SUNUCU_OLDU" -eq 1 ]; then
+    basarisiz "duman testi sunucusu (PID $SUNUCU_PID) ${PORT} portunda ÖLDÜ — cevap veren varsa o BİZİM sürecimiz değil"
+elif [ "$DUMAN_SONUC" -ne 0 ]; then
     basarisiz "sunucu ${PORT} portunda 60 sn içinde ayağa kalkmadı"
 else
     basarili "sunucu ${PORT} portunda ayakta"
@@ -503,7 +560,7 @@ kill $SUNUCU_PID 2>/dev/null || true
 trap - EXIT
 
 # ---------------------------------------------------------------------------
-baslik "7/8  macOS paket imzası"
+baslik "7/10  macOS paket imzası"
 # ---------------------------------------------------------------------------
 # v2.6.25 güncelleme çökmesi (2026-07-28): build_mac_app.sh içindeki codesign
 # hatayı `2>/dev/null || true` ile yutuyordu; paket İMZASIZ üretildi ve ÜÇ
@@ -573,7 +630,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-baslik "8/8  Paket içerik manifesti + boyut sapması"
+baslik "8/10  Paket içerik manifesti + boyut sapması"
 # ---------------------------------------------------------------------------
 # Kapının hiçbir adımı paketin İÇİNE bakmıyordu. İki ölçülmüş sonuç:
 #   a) Yayınlanan DMG mount edildi: Resources/app/examples YOK, tek .hrma yok.
@@ -593,38 +650,91 @@ if [ "$REPO_ORNEK" -lt 1 ]; then
     basarisiz "depoda örnek proje yok (examples/*.hrma) — manifest ölçüsü kurulamıyor"
 fi
 
+# ÖH D17 / altyapi — defter P10B3-13. Aşağıdaki manifest ÖLÇÜLDÜ: her dosyası
+# 0 BAYT, `data/` dizini BOMBOŞ bir sahte paket 6/6 GEÇİYORDU (HATA_SAYISI=0,
+# kanıt docs/scofield/raw/OH/D17/altyapi/a1/once.json). Sebep: altı sınamanın
+# beşi `-f`/`-d` ile VARLIĞA bakıyordu, oysa kapının yazılma gerekçesi olan
+# iki kaybın (examples/ yok, 526->383 MB bytecode) ikisi de NİCELİK kaybıydı.
+# Sınamalar artık içeriğe bakar: dosyalar için BAYT, dizinler için DOSYA
+# SAYISI, ön-derleme için .pyc SAYISI. Beklenen sayılar sabit yazılmaz;
+# depodaki karşılığından türetilir (aşağıdaki REPO_* değişkenleri).
+#
+# ÖH D19 / altyapi — Fable-D17 P10B3-13 ŞARTI. Taban ÇALIŞMA AĞACINDAN
+# (`find "$SRC/data" -type f`) DEĞİL GİT İNDEKSİNDEN alınır. Ölçüldü
+# (docs/scofield/raw/OH/D19/altyapi/a1/once_p10b3_13.json): aynı depoda
+# izlenen 32 dosya varken `find` bu ağaçta 35, ana ağaçta 338 sayıyor; fark
+# tamamen gitignore'lu ÇALIŞMA ZAMANI önbelleği (`data/propellant_cache/`,
+# yazan: hrma/data/web_propellant_api.py) ve 79 MB'lık `experimental_data.db`.
+# İkisi de derleme çıktısına GİRMEZ (build_mac_app.sh / build_win_payload.sh
+# `--exclude='experimental_data.db'`; önbellek zaten depoda yok), yani taban
+# pakete kopyalanan kümeden BÜYÜK olabiliyordu ve kapı YANLIŞ KIRMIZI
+# veriyordu. Ölçülen iki yol: (a) önbellekli ağaçta taban 32→87, paket 86 →
+# "data/ EKSİK"; (b) kapının 6/10 canlı duman testi paket derlendikten SONRA
+# önbelleğe yazınca taban 87→90, paket sabit 86 → yine "EKSİK".
+# `git ls-files` izlenen kümeyi verir: `experimental_data.db` ve
+# `propellant_cache/` izlenmez, dolayısıyla taban rsync'in kopyaladığı
+# kümenin ta kendisidir ve makineden makineye değişmez.
+# FAIL-CLOSED: git yoksa ya da $SRC bir depo değilse taban KAZANILMAMIŞTIR.
+REPO_DATA="$(git -C "$SRC" ls-files data 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${REPO_DATA:-0}" -lt 1 ]; then
+    basarisiz "depoda izlenen data/ dosyası yok (git -C \"$SRC\" ls-files data) — manifest içerik ölçüsü kurulamıyor"
+fi
+
 manifest_denetle() {   # $1 = app kökü (Resources ya da payload), $2 = ad
-    local kok="$1" ad="$2" ornek onderleme_app onderleme_libs
+    local kok="$1" ad="$2" ornek onderleme_app onderleme_libs paket_data
+    # Yardımcılar İŞLEVİN İÇİNDE tanımlı: `tests/test_paket_cikti_manifesti.py`
+    # bu işlevi betikten ÇIKARIP koşturuyor (kopyalamıyor). Dışarıda kalan bir
+    # yardımcı o çıkarımı kırar — ölçüldü ("dolu_dosya: command not found").
+    local ASGARI_BAYT="${ASGARI_BAYT:-64}"   # 1 baytlık yer tutucu da paketi açılamaz kılar
+    dolu_dosya() {   # $1 = yol ; var VE >= ASGARI_BAYT ise 0
+        local n
+        [ -f "$1" ] || return 1
+        n="$(wc -c < "$1" 2>/dev/null | tr -d ' ')"
+        [ -n "$n" ] && [ "$n" -ge "$ASGARI_BAYT" ]
+    }
+    dosya_bayt() {   # $1 = yol ; yoksa 0
+        [ -f "$1" ] && wc -c < "$1" 2>/dev/null | tr -d ' ' || echo 0
+    }
+    # FAIL-CLOSED: depo tabanı verilmemişse "yerinde" hükmü KAZANILMAMIŞTIR.
+    if [ -z "${REPO_DATA:-}" ]; then
+        basarisiz "$ad: REPO_DATA tabanı yok — data/ içerik ölçüsü kurulamıyor"
+        return
+    fi
     if [ ! -d "$kok/app" ]; then
         basarisiz "$ad: app/ dizini yok ($kok/app)"
         return
     fi
-    ornek="$(find "$kok/app/examples" -maxdepth 1 -name '*.hrma' 2>/dev/null | wc -l | tr -d ' ')"
+    ornek="$(find "$kok/app/examples" -maxdepth 1 -name '*.hrma' -size +0c 2>/dev/null | wc -l | tr -d ' ')"
     if [ "$ornek" = "$REPO_ORNEK" ] && [ "$ornek" -gt 0 ]; then
-        basarili "$ad: $ornek örnek proje (.hrma) pakette"
+        basarili "$ad: $ornek DOLU örnek proje (.hrma) pakette"
     else
-        basarisiz "$ad: örnek proje sayısı $ornek, depoda $REPO_ORNEK — examples/ pakete girmemiş"
+        basarisiz "$ad: dolu örnek proje sayısı $ornek, depoda $REPO_ORNEK — examples/ pakete girmemiş ya da içi boş"
     fi
-    [ -f "$kok/app/examples/generate_examples.py" ] \
-        && basarili "$ad: generate_examples.py pakette (örneklerin kaynağı)" \
-        || basarisiz "$ad: generate_examples.py yok — örneklerin nereden geldiği paketten okunamıyor"
-    [ -f "$kok/app/launcher.py" ] \
-        && basarili "$ad: launcher.py yerinde" \
-        || basarisiz "$ad: launcher.py YOK — paket açılamaz"
-    [ -f "$kok/app/hrma/app.py" ] \
-        && basarili "$ad: hrma/ paketi yerinde" \
-        || basarisiz "$ad: hrma/ yok ya da eksik (app.py bulunamadı)"
-    [ -d "$kok/app/data" ] \
-        && basarili "$ad: data/ yerinde" \
-        || basarisiz "$ad: data/ YOK — katalog dosyaları eksik"
-    # Ön-derleme: v2.6.25'te sessizce kaybolan şey buydu. Sayı BASILIR ki
-    # "var/yok" değil, ne kadar olduğu da kayda geçsin.
-    onderleme_app="$(find "$kok/app/hrma" -maxdepth 3 -type d -name '__pycache__' 2>/dev/null | wc -l | tr -d ' ')"
-    onderleme_libs="$(find "$kok/libs" -maxdepth 2 -type d -name '__pycache__' 2>/dev/null | wc -l | tr -d ' ')"
-    if [ "$onderleme_app" -gt 0 ] && [ "$onderleme_libs" -gt 0 ]; then
-        basarili "$ad: bytecode ön-derleme var (hrma $onderleme_app, libs $onderleme_libs __pycache__)"
+    dolu_dosya "$kok/app/examples/generate_examples.py" \
+        && basarili "$ad: generate_examples.py pakette ($(dosya_bayt "$kok/app/examples/generate_examples.py") B)" \
+        || basarisiz "$ad: generate_examples.py yok ya da boş ($(dosya_bayt "$kok/app/examples/generate_examples.py") B) — örneklerin nereden geldiği paketten okunamıyor"
+    dolu_dosya "$kok/app/launcher.py" \
+        && basarili "$ad: launcher.py yerinde ($(dosya_bayt "$kok/app/launcher.py") B)" \
+        || basarisiz "$ad: launcher.py YOK ya da boş ($(dosya_bayt "$kok/app/launcher.py") B) — paket açılamaz"
+    dolu_dosya "$kok/app/hrma/app.py" \
+        && basarili "$ad: hrma/ paketi yerinde (app.py $(dosya_bayt "$kok/app/hrma/app.py") B)" \
+        || basarisiz "$ad: hrma/ yok ya da eksik (app.py $(dosya_bayt "$kok/app/hrma/app.py") B)"
+    # data/: VARLIK değil DOSYA SAYISI. Boş bir data/ ile çıkan paket
+    # katalogsuz açılır ve "yerinde" hükmü kullanıcıyı yanıltır.
+    paket_data="$(find "$kok/app/data" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$paket_data" -ge "$REPO_DATA" ]; then
+        basarili "$ad: data/ yerinde ($paket_data dosya, depoda $REPO_DATA)"
     else
-        basarisiz "$ad: ön-derleme EKSİK (hrma $onderleme_app, libs $onderleme_libs) — ilk açılış dakikalarca sürer"
+        basarisiz "$ad: data/ EKSİK ($paket_data dosya, depoda $REPO_DATA) — katalog dosyaları pakete girmemiş"
+    fi
+    # Ön-derleme: v2.6.25'te sessizce kaybolan şey buydu. DİZİN sayısı değil
+    # .pyc SAYISI ölçülür — boş bir __pycache__ dizini ön-derleme değildir.
+    onderleme_app="$(find "$kok/app/hrma" -maxdepth 4 -name '*.pyc' -size +0c 2>/dev/null | wc -l | tr -d ' ')"
+    onderleme_libs="$(find "$kok/libs" -maxdepth 6 -name '*.pyc' -size +0c 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$onderleme_app" -gt 0 ] && [ "$onderleme_libs" -gt 0 ]; then
+        basarili "$ad: bytecode ön-derleme var (hrma $onderleme_app, libs $onderleme_libs .pyc)"
+    else
+        basarisiz "$ad: ön-derleme EKSİK (hrma $onderleme_app, libs $onderleme_libs .pyc) — ilk açılış dakikalarca sürer"
     fi
 }
 
@@ -713,6 +823,87 @@ boyut_karsilastir() {   # $1 = artefakt yolu, $2 = taban bayt, $3 = ad
 
 boyut_karsilastir "$DMG_YOL" "$DMG_TABAN" "DMG boyutu"
 boyut_karsilastir "$EXE_YOL" "$EXE_TABAN" "EXE boyutu"
+
+# ---------------------------------------------------------------------------
+baslik "9/10  Görsel tur (tarayıcı denetim turu)"
+# ÖH D17 / altyapi — defter P10B3-01, P10B3-02.
+#
+# `tools/browser_harness/` kendini "sürüm başına GÖRSEL kapı" diye tanıtıyor
+# ve var oluş gerekçesi şu: "Faz 6'da ELLE bulunan kusurların büyüğü hiçbir
+# birim testinin GÖRMEDİĞİ yerdeydi". ÖLÇÜLDÜ (once.json): `run_tour` /
+# `browser_harness` adı .sh/.yml/.yaml/.toml/Makefile dosyalarının HİÇBİRİNDE
+# geçmiyordu (0 isabet); kapı yazılmış ama KURULMAMIŞTI. `tur.py`nin 339
+# ifadesinden 269'u hiçbir testte çalışmıyordu, çünkü onu koşturan bir kapı
+# yoktu. Bu adım o bağlantıyı kurar.
+#
+# FAIL-CLOSED: playwright ya da tarayıcı yoksa adım ATLANMAZ, KALIR. "Görsel
+# olarak doğrulayamadım" bir geçiş gerekçesi değildir; kurulum komutu
+# gerekçenin içinde yazılıdır. Tur kendi sunucusunu alt süreç olarak başlatır
+# ve sonunda öldürür (run_tour.py: --base-url verilmezse).
+TUR_DIZINI="${TMPDIR:-/tmp}/hrma-gorsel-tur-$$"
+if ! "$PY" -c "import playwright" >/dev/null 2>&1; then
+    basarisiz "playwright kurulu değil — görsel tur koşturulamıyor. Kurulum: $PY -m pip install playwright && $PY -m playwright install chromium"
+else
+    mkdir -p "$TUR_DIZINI"
+    # ÖH D19 / altyapi — Fable-D17 P10B3-01 ŞARTI (TEK KAYNAK). Rapor adı
+    # burada SABİT YAZILMAZ: kapı `rapor.json` basıyordu, tur ise
+    # `tour_report.json` yazıyor (tools/browser_harness/run_tour.py:67,
+    # docstring: "Kapıya bağlayan betik bu adı bekler") — kırmızıda gösterilen
+    # yol var OLMAYAN bir dosyaydı, kullanıcı raporu bulamazdı. Ad artık
+    # üreticinin kendisinden okunur. FAIL-CLOSED: ad okunamazsa kapı kapanır,
+    # çünkü uydurma bir yol basmak beyanı yalanlar.
+    TUR_RAPOR_ADI="$("$PY" -c 'from tools.browser_harness.run_tour import RAPOR_ADI; print(RAPOR_ADI)' 2>/dev/null | tail -1)"
+    if [ -z "$TUR_RAPOR_ADI" ]; then
+        basarisiz "görsel tur rapor adı okunamadı (tools.browser_harness.run_tour.RAPOR_ADI) — kapı var olmayan bir yol basamaz"
+        TUR_RAPOR_ADI="RAPOR_ADI-OKUNAMADI"
+    fi
+    if "$PY" tools/browser_harness/run_tour.py --out "$TUR_DIZINI" >"$TUR_DIZINI/tur.log" 2>&1; then
+        TUR_KODU=0
+    else
+        TUR_KODU=$?
+    fi
+    if [ "$TUR_KODU" -eq 0 ]; then
+        basarili "görsel tur GEÇTİ (rapor: $TUR_DIZINI/$TUR_RAPOR_ADI)"
+    else
+        basarisiz "görsel tur KALDI (çıkış $TUR_KODU) — rapor: $TUR_DIZINI/$TUR_RAPOR_ADI, günlük: $TUR_DIZINI/tur.log"
+        tail -20 "$TUR_DIZINI/tur.log" 2>/dev/null | sed 's/^/      /'
+    fi
+fi
+
+baslik "10/10  İddia dili (kazanılmamış hüküm) kapısı"
+# ÖH D28 / altyapi — defter OH-D27-04 (kaynak: D27 altyapi a1, P10B4-01 borcu).
+#
+# ÖLÇÜLDÜ (once.json): `tools/iddia_lint.py` adı bu betikte 0, `.github/`
+# ağacında 0, `packaging/` ağacında 0 kez geçiyordu. Araç yazılmıştı ve 28
+# kuralı vardı, ama HİÇBİR yayın kapısına bağlı değildi: tek bağı testler ve
+# pre-commit kancasıydı. pre-commit yerel bir kolaylıktır — kurulmamış bir
+# geliştiricide sessizce yoktur ve yayın yolunda hiç çalışmaz. Yani "depo
+# kazanılmamış hükümleri makinece engeller" cümlesi YAYIN yolunda kimsenin
+# koşturmadığı bir araca dayanıyordu.
+#
+# Aynı ölçüm ikinci bir şey daha gösterdi: araç o an KIRMIZIYDI (çıkış kodu 1,
+# kayıtsız isabet 1 — D27 hibrit birleşmesinin getirdiği künye satırı). İsabet
+# kapıya bağlanmadan önce tek tek okunup `tools/iddia_lint_baseline.txt`e
+# gerekçesiyle yazıldı; kural gevşetilmedi, eşik yükseltilmedi.
+#
+# FAIL-CLOSED: araç çalışmazsa (import hatası, dosya yok) kapı ATLANMAZ,
+# KALIR. "Denetleyemedim" bir geçiş gerekçesi değildir. Kayıtsız isabet
+# varsa da kapı kapanır — kayıt defteri susturma aracı değil, envanterdir:
+# her satır ya "MEŞRU" gerekçesini ya "AÇIK BORÇ" etiketini taşır.
+IDDIA_CIKTI="$("$PY" tools/iddia_lint.py --check 2>&1)"
+IDDIA_KODU=$?
+IDDIA_OZET="$(printf '%s\n' "$IDDIA_CIKTI" | grep -m1 '^Toplam isabet' || true)"
+if [ "$IDDIA_KODU" -eq 0 ]; then
+    basarili "iddia dili kapısı GEÇTİ — ${IDDIA_OZET:-özet okunamadı}"
+    # AÇIK BORÇ sayısı kapıyı KAPATMAZ (borçlar bilinerek taşınıyor) ama
+    # görünmez de kalmaz: kaç tane olduğu her yayın koşumunda basılır.
+    IDDIA_BORC="$("$PY" tools/iddia_lint.py --debt 2>/dev/null | tail -1)"
+    printf "         %s\n" "${IDDIA_BORC:-AÇIK BORÇ: okunamadı}"
+else
+    basarisiz "iddia dili kapısı KALDI (çıkış $IDDIA_KODU) — kayıtsız iddia/başlık isabeti var. Tek tek okuyup ya düzelt ya da gerekçesiyle tools/iddia_lint_baseline.txt'e yaz: $PY tools/iddia_lint.py"
+    printf '%s\n' "$IDDIA_CIKTI" | head -20 | sed 's/^/      /'
+fi
+
 
 # ---------------------------------------------------------------------------
 printf "\n============================================\n"

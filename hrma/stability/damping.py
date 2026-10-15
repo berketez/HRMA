@@ -42,7 +42,23 @@ __all__ = [
     'nozzle_damping_quasi_steady',
     'damping_budget',
     'DAMPING_NOT_MODELLED',
+    'DAMPING_BUDGET_SIGNATURE_KEYS',
 ]
+
+#: ``damping_budget()`` çıktısının TANIYICI anahtar kümesi — TEK KAYNAK.
+#: Tüketiciler "bu sözlük tek bir bütçe mi, yoksa {mod etiketi: bütçe}
+#: eşlemesi mi" ayrımını BU kümeyle yapar. Tek bir anahtara ('terms')
+#: bakmak yetmez: 'terms' ADLI bir mod etiketi taşıyan eşleme de o kapıdan
+#: geçerdi (P6B4-12). Küme buradan okunduğu için imza değişirse tüketici de
+#: kendiliğinden ayak uydurur.
+#: (P6B4-12 ikinci yarı, ÖH D26 / fea-cfd a3: bu kümenin ilk tüketicisi
+#: ``response.critical_response_table``ti; o fonksiyon ürün tüketicisi
+#: SIFIR ölçüldüğü için kaldırıldı. Küme SİLİNMEZ — imza sözleşmesi
+#: kendi başına doğrudur ve ``damping_budget()`` çıktısını tanımanın tek
+#: kaynağıdır; motorların kendi mod döngüleri de bu imzaya bakar.)
+DAMPING_BUDGET_SIGNATURE_KEYS = frozenset({
+    'terms', 'total_damping_1_s', 'total_loss_1_s', 'not_modelled',
+})
 
 DAMPING_NOT_MODELLED = {
     'particle_damping': (
@@ -62,7 +78,12 @@ DAMPING_NOT_MODELLED = {
         'The nozzle admittance is taken in its QUASI-STEADY short-nozzle '
         'limit (imaginary part zero). Finite nozzle length and frequency '
         'dependence of the admittance are NOT modelled; at high frequency or '
-        'with a long convergent section the real part can differ.'),
+        'with a long convergent section the real part can differ. The term '
+        'is applied to LONGITUDINAL modes only and must not be carried over '
+        'to transverse modes: there the nozzle admittance can be '
+        'destabilizing (NASA SP-194, 1972, sec. 3.6.2, p. 163), and the '
+        'linearized nozzle theory has been verified only for longitudinal '
+        'oscillations (p. 165).'),
 }
 
 _NOZZLE_BASIS = (
@@ -154,7 +175,27 @@ def damping_budget(terms, extra_not_modelled=None):
         if not math.isfinite(val):
             raise ValueError(
                 f'Damping term {name!r} must be finite (got {value!r}).')
-        collected[name.strip()] = val
+        key = name.strip()
+        # P6B4-11 FAIL-CLOSED: aynı ada düşen ikinci terim SESSİZCE
+        # düşürülemez. Sözlük ataması çakışan terimin katkısını toplamdan
+        # yok ederdi (ölçüldü: iki 'nozzle' teriminde toplam -238,7669
+        # yerine -78,5224 yayımlanıyordu, kaybın %67,1'i) ve hiçbir uyarı
+        # üretmezdi — üstelik eksik sönüm R_crit'i EMNİYETSİZ yönde
+        # (düşük) kaydırır. Sessiz TOPLAMA da yapılmaz: iki ayrı
+        # mekanizmanın aynı ada düşmesi çağıranın adlandırma hatasıdır ve
+        # toplanırsa yayımlanan ``terms`` sözlüğü neyi topladığını artık
+        # söyleyemez. Doğru davranış: adı ayır.
+        if key in collected:
+            raise ValueError(
+                f'Damping term {key!r} is supplied twice '
+                f'({collected[key]!r} then {val!r}): the budget is keyed by '
+                'term name, so a repeated name would silently drop one '
+                'contribution from total_damping_1_s (and bias every R_crit '
+                'LOW). Give each mechanism its own name (e.g. '
+                '"nozzle_entrance", "nozzle_exit"); the two values are NOT '
+                'summed here, because the published "terms" mapping must '
+                'name exactly what it sums.')
+        collected[key] = val
 
     if not collected:
         raise ValueError(

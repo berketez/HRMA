@@ -454,6 +454,29 @@ FUEL_THERMAL_RECORDS = {
 }
 
 
+#: P6B4-13 — veritabanında alan-başına künye / referans sıcaklık aranırken
+#: kullanılan son ekler. Depo bu deseni zaten kullanıyor
+#: (``regression_source``, ``regression_basis``), yani sayım deponun kendi
+#: adlandırmasına bağlıdır, uydurma bir sözleşmeye değil.
+_DB_CITATION_SUFFIXES = ('_source', '_citation', '_basis', '_reference')
+_DB_TREF_SUFFIXES = ('_reference_temperature_K', '_T_ref_K',
+                     '_reference_temperature', '_T_ref')
+_DB_PHASE_SUFFIXES = ('_phase',)
+
+
+def _db_field_key(entry, field, suffixes):
+    """``entry`` içinde ``field`` için var olan ilk son-ek anahtarını döndürür.
+
+    Yoksa None. Sayım bu fonksiyondan geçtiği için "0" artık bir SABİT
+    değil, bir ÖLÇÜM sonucudur (P6B4-13).
+    """
+    for sfx in suffixes:
+        key = f'{field}{sfx}'
+        if key in entry and entry[key] not in (None, ''):
+            return key
+    return None
+
+
 def compare_with_propellant_database():
     """Bu tablo ile mevcut propellant_database c_p/k alanlarının FARK ÖLÇÜMÜ.
 
@@ -471,6 +494,13 @@ def compare_with_propellant_database():
     rows = {}
     unverified_db_fields = 0
     verified_new_fields = 0
+    # P6B4-13: bu iki sayaç eskiden SABİT 0'dı; rapor ise aynı nefeste
+    # "Measured live against hrma/data/propellant_database.py" diyordu.
+    # Sabit sayaç bir ÖLÇÜM DEĞİLDİR: veritabanı yarın alan-başına künye ya
+    # da T_ref kazansa rapor yine 0 der ve "eski tabloyu bağlayalım mı"
+    # kararının girdisi yanlış kalırdı. Artık ikisi de CANLI sayılıyor.
+    cited_db_fields = 0
+    tref_db_fields = 0
     for family, record in FUEL_THERMAL_RECORDS.items():
         entry = db.get(family, {})
         # Eski tablo birimleri (yorum satırlarından ölçüldü): specific_heat
@@ -486,8 +516,14 @@ def compare_with_propellant_database():
             'db_source_label': entry.get('source'),
             'db_specific_heat_J_kgK': old_cp_J_kgK,
             'db_thermal_conductivity_W_mK': old_k_W_mK,
-            'db_phase_declared': False,      # eski tablo faz etiketi taşımaz
-            'db_reference_temperature_declared': False,  # ve T_ref taşımaz
+            'db_phase_declared': _db_field_key(entry, 'specific_heat',
+                                               _DB_PHASE_SUFFIXES) is not None
+            or _db_field_key(entry, 'thermal_conductivity',
+                             _DB_PHASE_SUFFIXES) is not None,
+            'db_reference_temperature_declared': _db_field_key(
+                entry, 'specific_heat', _DB_TREF_SUFFIXES) is not None
+            or _db_field_key(entry, 'thermal_conductivity',
+                             _DB_TREF_SUFFIXES) is not None,
         }
         for slot, old_si in (('specific_heat', old_cp_J_kgK),
                              ('thermal_conductivity', old_k_W_mK)):
@@ -504,9 +540,21 @@ def compare_with_propellant_database():
             else:
                 row[f'new_{slot}'] = field.as_dict()
             if old_si is not None:
-                # Eski tablodaki HER c_p/k alanı künye/T_ref yönünden
-                # doğrulanmamış sayılır (blok-başına etiket, T_ref yok).
                 unverified_db_fields += 1
+                # CANLI SAYIM (P6B4-13): alan-başına künye ve referans
+                # sıcaklık, veritabanının KENDİ adlandırma deseniyle
+                # aranır — depo bu deseni zaten kullanıyor
+                # (``regression_source``, ``regression_basis``). Blok
+                # başına tek ``source`` etiketi alan-başına künye SAYILMAZ:
+                # hangi sayının nereden geldiğini söylemez.
+                kunye = _db_field_key(entry, slot, _DB_CITATION_SUFFIXES)
+                tref = _db_field_key(entry, slot, _DB_TREF_SUFFIXES)
+                row[f'db_{slot}_citation_key'] = kunye
+                row[f'db_{slot}_reference_temperature_key'] = tref
+                if kunye is not None:
+                    cited_db_fields += 1
+                if tref is not None:
+                    tref_db_fields += 1
         rows[family] = row
 
     return {
@@ -514,9 +562,26 @@ def compare_with_propellant_database():
         'summary': {
             'families_compared': len(rows),
             'db_cp_k_fields_present': unverified_db_fields,
-            'db_cp_k_fields_with_field_level_citation': 0,
-            'db_cp_k_fields_with_reference_temperature': 0,
+            'db_cp_k_fields_with_field_level_citation': cited_db_fields,
+            'db_cp_k_fields_with_reference_temperature': tref_db_fields,
+            'db_cp_k_fields_unverified': (unverified_db_fields
+                                          - min(cited_db_fields,
+                                                tref_db_fields)),
             'new_verified_fields': verified_new_fields,
+            'counter_basis': (
+                'The two citation counters are COUNTED LIVE, not constants '
+                '(P6B4-13): for every c_p/k field present in the database '
+                'the entry is probed for a field-level citation key '
+                + '/'.join(f'<field>{sfx}' for sfx in _DB_CITATION_SUFFIXES)
+                + ' and a reference-temperature key '
+                + '/'.join(f'<field>{sfx}' for sfx in _DB_TREF_SUFFIXES)
+                + '. The block-level "source" label is NOT counted as a '
+                'field-level citation: it does not say which number came '
+                'from where. The database already uses this naming pattern '
+                'elsewhere (regression_source, regression_basis), so a '
+                'later batch that adds the keys raises these counters '
+                'without touching this report. The key actually found (or '
+                'None) is published per field in rows[...].'),
         },
         'basis': (
             'Measured live against hrma/data/propellant_database.py (not a '

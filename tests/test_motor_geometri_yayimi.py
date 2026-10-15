@@ -85,8 +85,15 @@ def hibrit_yaniti(hibrit_govde):
 
 @pytest.fixture(scope='module')
 def kati_yaniti(client):
-    yuk = {'motor_name': 'geo-s', 'chamber_pressure': 40, 'thrust': 1500,
-           'burn_time': 3, 'grain_type': 'bates', 'outer_diameter': 100,
+    # ÖH D26 (defter P15B3-02, YÜKSEK) — GÖVDE DÜZELTİLDİ. ``thrust`` ve
+    # ``burn_time`` katı ucunda TASARIM NOKTASI HEDEFİDİR; bu katsayılarla
+    # (a=0,005 / n=0,35) BATES zarfının dışında kalıyor ve taban 7751531'de
+    # sessizce düşürülüp başlangıç geometrisinin eğrisi 200 ile
+    # yayımlanıyordu (yani hedef hiç etkili olmadı). Zarf kapısı fail-closed
+    # olduğundan gövde ZATEN ÖLÇÜLEN geometri kipine çevrildi; yanıt tasarım
+    # noktası bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148).
+    yuk = {'motor_name': 'geo-s', 'chamber_pressure': 40,
+           'grain_type': 'bates', 'chamber_diameter': 100,
            'core_diameter': 35, 'grain_length': 300, 'segments': 1,
            'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
            'chamber_temperature': 3000, 'c_star': 1550,
@@ -259,11 +266,14 @@ class TestSogutmaKanallariYayimi:
         assert blok['channel_height_m'] == pytest.approx(
             cool['channel_height_mm'] / 1000.0, rel=1e-9)
 
-        # Land boğazda türetilir: pi*d_t/n - w; yayımlandıysa pozitif ve
-        # hatveden küçük olmalı (aksi geometrik saçmalık).
+        # Land kanal TABANINDA türetilir (ÖH A2 sivi-sogutma F-17; Berke
+        # Sunum 2 onayı sonrası çeviri, denetçi Ş5.7): hatve = kanal tabanı
+        # çevresi / n, land = hatve - w; yayımlandıysa pozitif ve hatveden
+        # küçük olmalı (aksi geometrik saçmalık).
         if 'land_width_m' in blok:
-            d_t = sivi_yaniti['throat_diameter']  # m
-            hatve = math.pi * d_t / n
+            c_ref_m = (cool['channel_count_fit']['reference_circumference_mm']
+                       / 1000.0)
+            hatve = c_ref_m / n
             assert 0.0 < blok['land_width_m'] < hatve
             assert blok['land_width_m'] == pytest.approx(
                 hatve - blok['channel_width_m'], rel=1e-6)

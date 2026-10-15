@@ -147,7 +147,20 @@ FORBIDDEN_CLAIMS: Tuple[Rule, ...] = (
          'Derecelendirme iddiası: ölçülebilir bir karşılığı yok.'),
     Rule('guaranteed', r'\bguarantee[ds]?\b',
          'Garanti dili: sayısal sonuç için garanti verilemez.',
-         allow_if=r'(?i)\b(not|never|no|de[gğ]il|asla)\b[^.]{0,24}guarantee'),
+         # MUAFİYET İFADE KAPSAMLI (P10B4-03). Eski desen
+         #   \b(not|never|no|değil|asla)\b[^.]{0,24}guarantee
+         # olumsuzlamanın garanti sözcüğünü GERÇEKTEN kapsayıp kapsamadığına
+         # bakmıyordu, yalnız 24 karakterlik bir pencerede olumsuzlama sözcüğü
+         # arıyordu. Ölçülen kaçak: "There is no doubt: results are guaranteed
+         # to 3 sigma." — 'no doubt: results are guarantee' penceresi tuttuğu
+         # için isabet ÜRETİLMİYORDU. "no risk is guaranteed" aynı sınıftır.
+         # Yeni desen yalnız olumsuzlamanın doğrudan garanti eylemini yönettiği
+         # biçimleri muaf tutar; araya noktalama giremez (\w+ noktalama
+         # eşleşmez) ve en fazla iki sözcük girebilir.
+         allow_if=r'(?i)(?:\bno\s+guarantee[sd]?\b'
+                  r'|\bwithout\s+(?:any\s+)?guarantee'
+                  r'|\b(?:not|never)\s+(?:\w+\s+){0,2}guarantee[ds]?\b'
+                  r'|\bguarantee[ds]?\s+(?:de[gğ]ildir|edilmez|verilmez))'),
     Rule('high_fidelity', r'high[-\s]fidelity',
          'Sadakat iddiası: yalnız tanımlı bir çözüm kademesinin ADI olarak '
          'meşru; ürün/paket sıfatı olarak kullanılamaz.'),
@@ -182,7 +195,131 @@ WRONG_STANDARD_TITLES: Tuple[Rule, ...] = (
          '(Huzel & Huang, 2. baskı 1971).'),
 )
 
-ALL_RULES: Tuple[Rule, ...] = FORBIDDEN_CLAIMS + WRONG_STANDARD_TITLES
+# --------------------------------------------------------------------------
+# 3) KÜNYE YALANI ve KAZANILMAMIŞ DOĞRULUK/EMNİYET HÜKMÜ (P10B4-01)
+#
+# Ölçüm (27 Ağustos 2026, ``docs/scofield/raw/P10/B4-repro-01.py``):
+# kampanyanın P4-P7'de ÖLÇÜMLE kanıtladığı 15 iddia sınıfını temsil eden
+# satırlar tek dosyaya yazılıp ``scan_file`` çalıştırıldı; **yakalanan 3,
+# kaçan 15**. Yakalanan üçü (``NASA-grade``, ``digital twin``,
+# ``guaranteed``) aracın yazıldığı gün zaten bilinen sınıflardı. Yani araç,
+# kampanyanın kanıtladığı kusur sınıfını görmüyordu.
+#
+# Buradaki kurallar o boşluğu kapatır. İki tasarım kararı ölçüme dayanır:
+#
+# * Kurallar hem İNGİLİZCE hem TÜRKÇE biçimleri arar: ürünün Türkçe yüzü
+#   (``hrma/static/js/i18n*.js``) hiçbir eski kuralın kapsamında değildi.
+# * ``heritage`` ("Ariane 5 heritage" künyesi) için kural YAZILMADI:
+#   ölçüldü, ağaçta 17 isabet üretiyor ve bunların büyük çoğunluğu meşru
+#   malzeme/motor mirası atfı — kural sinyalden çok gürültü olurdu. Onun
+#   yerine künyenin ÖLÇÜLEBİLİR biçimi (``built-in ... table``) arandı.
+# --------------------------------------------------------------------------
+KUNYE_YALANI: Tuple[Rule, ...] = (
+    Rule('accuracy_band', r'accurate\s+to\s+within'
+                          r'|accuracy\s+(?:of|to|within)\s*[±+\-]?\s*\d'
+                          r'|do[gğ]ruluk\s+band[ıi]',
+         'Kazanılmamış doğruluk bandı: bandı ölçen bir kod yolu yok '
+         '(fizik raporu: boğazda +%95 sapma ölçüldü).'),
+    Rule('experimental_validation',
+         r'validated\s+against\s+(?:experimental|test|flight|measured)'
+         r'|experimentally\s+(?:verified|validated)'
+         r'|deneyle\s+do[gğ]rulan'
+         r'|deneysel\s+(?:olarak\s+)?do[gğ]rulan',
+         'Deneysel doğrulama künyesi: depoda doğrulama kampanyası koşmuyor.'),
+    Rule('cea_validated',
+         r'(?:NASA\s+)?CEA\s+(?:validated|verified)'
+         r'|CEA\s+[Dd]o[gğ]rulamal[ıi]'
+         r'|match\w*\s+(?:NASA\s+)?CEA\s+to\s+within'
+         r'|validated\s+(?:with|against)\s+(?:NASA\s+)?CEA'
+         r'|CEA\s+ile\s+do[gğ]ruland',
+         'CEA uyum künyesi: ölçüldü, HRMA c* fakir karışımda CEA’dan '
+         '−%2,8..−%5,9 sapıyor.'),
+    Rule('sigma_coverage', r'\d\s*[-\s]?sigma\s+coverage|\d\s*σ\s+kapsam',
+         'Sigma kapsama iddiası: fizik raporu bunu VERİ-İMKÂNSIZ ölçtü '
+         '(n_eff en iyi 14).'),
+    Rule('cfd_verified',
+         r'verified\s+by\s+CFD|CFD\s+(?:ile\s+)?do[gğ]ruland'
+         r'|mesh\s+independence\s+demonstrated',
+         'CFD doğrulama künyesi: yayımlanan kalıntı dondurulmuş operatörün, '
+         'CONVERGED rozeti şemayı temsil etmiyor.'),
+    Rule('safe_verdict_tr',
+         r'tasar[ıi]m\s+g[üu]venlidir|g[üu]venli\s+oldu[gğ]u\s+do[gğ]ruland',
+         'Türkçe emniyet hükmü: model emniyet kararı veremez '
+         '("safe for operation" kuralının Türkçe kardeşi).'),
+    Rule('safe_verdict_en',
+         r'design\s+is\s+safe|motor\s+is\s+safe'
+         r'|safe\s+for\s+(?:the\s+)?(?:specified|operating|flight)',
+         'Emniyet hükmü: "safe for operation" dışındaki kalıpları da kapsar.'),
+    Rule('standard_compliant_tr',
+         r'standart\w*\s+uygun(?:dur|\s+(?:hesap|y[öo]ntem|tasar[ıi]m|olarak))',
+         'Türkçe uygunluk hükmü: hiçbir kod yolu standart uygunluğu '
+         'denetlemiyor.'),
+    Rule('provenance_label',
+         r'_(?:source|basis|method|origin)\W{0,6}'
+         r'["\'](?:measured|validated|verified|earned|user_supplied|'
+         r'experimental|deneysel)["\']',
+         'Künye değeri sayının KAZANILDIĞINI söylüyor; künyenin doğruluğu '
+         'ölçülmeden yayımlanamaz (P7 KRİTİK: 0,5 mm kullanıcı cidarı '
+         'sessizce 2,0 mm oldu, künye "user_supplied" kaldı).'),
+    Rule('builtin_table_claim', r'built[-\s]in\s+\w+\s+table',
+         'Kaynak künyesi: değerin gerçekten o tablodan geldiği ölçülmeli '
+         '(P7 KRİTİK: n2o4 için 1200 kg/m³ "Ariane 5" künyesi, gerçek 1443).'),
+
+    # ------------------------------------------------------------------
+    # ÖH D22 · OH-Z5-08 — ÖLÇÜLEN ÜÇ DESEN BOŞLUĞU.
+    #
+    # Z5S gece filosu 9 satırlık bir sondayla ölçtü: aracın 25 kuralı bu
+    # dokuzun DOKUZUNU birden kaçırıyordu (once.json::OH-Z5-08, yakalanan=0),
+    # negatif korpusta ise yanlış isabet yoktu. Üç sınıf:
+    #
+    #  1. TÜRKÇE EDİLGEN KİP. Var olan kurallar Türkçe'yi yalnız ETKEN/sıfat
+    #     biçimlerinde arıyordu ('deneyle doğrulanan', 'CEA ile doğrulandı').
+    #     Ürünün Türkçe yüzünde asıl kullanılan kip ise "-mıştır"dır:
+    #     'CFD ile doğrulanmıştır' hiçbir kurala takılmıyordu.
+    #  2. BİTİŞİK SIFAT. 'verified by CFD' yakalanıyor, 'CFD-verified nozzle'
+    #     yakalanmıyordu — aynı iddianın sıfat hâli künyede daha sık geçer.
+    #  3. 'complies with <STANDART> standard'. Var olan 'code_compliant'
+    #     kuralı yalnız '<STD>-compliant' ve 'compliant with NFPA|OSHA|DOT'
+    #     biçimlerini arıyordu; 'complies with' fiili ve ASME/ISO/AIAA
+    #     kurumları listede yoktu.
+    #
+    # Üç desen de ÖLÇÜLDÜ: 9/9 pozitif yakalanıyor, 6 satırlık negatif
+    # korpusta 0 yanlış isabet (sonra.json::OH-Z5-08).
+    # ------------------------------------------------------------------
+    # 'kanıtlanmıştır' BİLEREK DIŞARIDA: ölçüldü, ürünün Türkçe yüzünde
+    # tasarım MİRASI anlamında geçiyor ("çarpışmalı enjektör basit ve
+    # kanıtlanmıştır" — i18n_pages.js:2162, uçuşta kanıtlanmış tasarım),
+    # HRMA'nın kendi sayısına dair bir doğruluk hükmü değil. Kural sinyalden
+    # çok gürültü üretirdi ('heritage' kuralının yazılmama gerekçesiyle aynı).
+    # KAPSAM BİLEREK DAR: yalnız -mIştIr EDİLGEN KESİN KİPİ. Ölçüldü —
+    # yalın geçmiş ("doğrulandı") ağaçta 70 satırda geçiyor ve bunların
+    # tamamı mühendislik YORUMU ("bu katsayı ölçümle doğrulandı"), yani
+    # geliştiriciye yazılmış bir kayıt; kullanıcıya verilen hüküm değil.
+    # Onları da yakalayan geniş desen 72 kayıtsız isabet üretip kapıyı
+    # gürültüyle kırmızıya çeviriyordu (once/sonra.json::OH-Z5-08_repo).
+    # İddia kipi olan "-mIştIr" ise ürün metninde hüküm gibi okunur.
+    Rule('dogrulanmistir_tr',
+         r'do[gğ]rulanm[ıi][sş]t[ıi]r|te[yi]it\s+edilmi[sş]tir',
+         'Türkçe edilgen doğrulama kipi: "-doğrulanmıştır/kanıtlanmıştır" '
+         'kazanılmış bir doğrulama kampanyası ister; depoda koşmuyor.',
+         # Olumsuz kip ("doğrulanmamıştır", "doğrulanamamıştır") muaftır.
+         allow_if=r'(?i)do[gğ]rulan(?:ma|ama)m[ıi][sş]'),
+    Rule('cfd_verified_sifat',
+         r'\bCFD[-\s]verified\b|\bCFD[-\s]validated\b'
+         r'|\bmesh[-\s]independent\b',
+         'Bitişik CFD doğrulama sıfatı: yayımlanan kalıntı dondurulmuş '
+         'operatörün; ağdan-bağımsızlık çalışması koşmuyor.'),
+    Rule('complies_with_standard',
+         r'compl(?:ies|y|ying)\s+with\s+(?:the\s+)?'
+         r'(?:NFPA|OSHA|DOT|ASME|ISO|AIAA|NASA|MIL)\b',
+         'Standart uygunluğu fiili: hiçbir kod yolu standart uygunluğunu '
+         'denetlemiyor ("code_compliant" kuralının fiil hâli).',
+         # Uygunluğun DENETLENMEDİĞİNİ söyleyen cümle muaftır.
+         allow_if=r'(?i)\b(?:not|never|no)\b[^.]{0,40}\bcompl'),
+)
+
+ALL_RULES: Tuple[Rule, ...] = (FORBIDDEN_CLAIMS + WRONG_STANDARD_TITLES
+                               + KUNYE_YALANI)
 _COMPILED: Dict[str, Tuple[re.Pattern, Optional[re.Pattern]]] = {
     rule.rule_id: (re.compile(rule.pattern, re.IGNORECASE),
                    re.compile(rule.allow_if) if rule.allow_if else None)
@@ -198,6 +335,31 @@ class Finding(NamedTuple):
     matched: str       # eşleşen ham metin
     line_hash: str     # satır metninin karması (kayıt anahtarı)
     line_text: str
+
+
+class Aklanan(NamedTuple):
+    """``allow_if`` muafiyetiyle isabet SAYILMAYAN satır.
+
+    P10B4-03: muafiyetin ne yuttuğu görünmezse, bir iddiayı bekçiden
+    kaçırmanın yolu cümleye olumsuzlama sözcüğü koymak kadar ucuz kalır.
+    Bu kayıt ``--aklananlar`` ile listelenir; sayısı özet satırında görünür.
+    """
+    path: str
+    line_no: int
+    rule_id: str
+    matched: str        # ana desenin yakaladığı metin
+    muafiyet: str       # allow_if deseninin yakaladığı metin
+    line_text: str
+
+
+def _derle(rules: Tuple[Rule, ...]
+           ) -> Dict[str, Tuple[re.Pattern, Optional[re.Pattern]]]:
+    """Kural kümesini derler. Varsayılan küme için hazır tablo kullanılır."""
+    if rules is ALL_RULES:
+        return _COMPILED
+    return {rule.rule_id: (re.compile(rule.pattern, re.IGNORECASE),
+                           re.compile(rule.allow_if) if rule.allow_if else None)
+            for rule in rules}
 
 
 def _line_hash(text: str) -> str:
@@ -235,7 +397,18 @@ def _iter_source_files(root: str) -> Iterable[str]:
             yield os.path.join(dirpath, name)
 
 
-def scan_file(abs_path: str) -> List[Finding]:
+def scan_file(abs_path: str,
+              rules: Optional[Tuple[Rule, ...]] = None,
+              aklananlar: Optional[List[Aklanan]] = None) -> List[Finding]:
+    """Tek dosyayı tarar.
+
+    ``rules``: varsayılan ``ALL_RULES``. Kural kümesini dışarıdan vermek
+    MUTASYON KANITI içindir (P10B4-18): bir kural listeden çıkarıldığında
+    bekçinin gerçekten kırmızıya döndüğü, dosyaya dokunmadan gösterilebilir.
+    ``aklananlar``: verilirse ``allow_if`` ile aklanan satırlar buraya eklenir.
+    """
+    rules = ALL_RULES if rules is None else tuple(rules)
+    derlenmis = _derle(rules)
     rel = os.path.relpath(abs_path, REPO_ROOT)
     try:
         with open(abs_path, encoding='utf-8') as handle:
@@ -254,13 +427,20 @@ def scan_file(abs_path: str) -> List[Finding]:
             continue
         if in_exempt_block or INLINE_EXEMPT in raw:
             continue
-        for rule in ALL_RULES:
-            pattern, allow = _COMPILED[rule.rule_id]
+        for rule in rules:
+            pattern, allow = derlenmis[rule.rule_id]
             match = pattern.search(raw)
             if not match:
                 continue
-            if allow is not None and allow.search(raw):
-                continue
+            if allow is not None:
+                muaf = allow.search(raw)
+                if muaf:
+                    if aklananlar is not None:
+                        aklananlar.append(Aklanan(
+                            path=rel, line_no=index, rule_id=rule.rule_id,
+                            matched=match.group(0), muafiyet=muaf.group(0),
+                            line_text=raw.strip()))
+                    continue
             findings.append(Finding(
                 path=rel, line_no=index, rule_id=rule.rule_id,
                 matched=match.group(0), line_hash=_line_hash(raw),
@@ -268,7 +448,9 @@ def scan_file(abs_path: str) -> List[Finding]:
     return findings
 
 
-def scan(root: Optional[str] = None) -> List[Finding]:
+def scan(root: Optional[str] = None,
+         rules: Optional[Tuple[Rule, ...]] = None,
+         aklananlar: Optional[List[Aklanan]] = None) -> List[Finding]:
     """Tara.
 
     ``root`` verilmezse varsayılan hedef kümesi taranır: kaynak ağacı
@@ -290,7 +472,8 @@ def scan(root: Optional[str] = None) -> List[Finding]:
             if gercek in gorulen:      # hedefler örtüşürse iki kez sayma
                 continue
             gorulen.add(gercek)
-            findings.extend(scan_file(path))
+            findings.extend(scan_file(path, rules=rules,
+                                      aklananlar=aklananlar))
     return findings
 
 
@@ -346,9 +529,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help='yalnız AÇIK BORÇ kayıtlarını listele')
     parser.add_argument('--emit-baseline', action='store_true',
                         help='mevcut isabetlerden kayıt taslağı bas')
+    parser.add_argument('--aklananlar', action='store_true',
+                        help='allow_if muafiyetiyle ELENEN satırları listele')
+    parser.add_argument('--check', action='store_true',
+                        help='KAPI kipi: yalnız özet bas, kayıtsız isabet '
+                             'varsa çıkış kodu 1')
     args = parser.parse_args(argv)
 
-    findings = scan(args.root)
+    aklananlar: List[Aklanan] = []
+    findings = scan(args.root, aklananlar=aklananlar)
     baseline = load_baseline()
 
     if args.emit_baseline:
@@ -364,7 +553,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f'\nAÇIK BORÇ: {len(debts)} kayıt')
         return 0
 
-    shown = findings if args.all else unbaselined(findings, baseline)
+    if args.aklananlar:
+        for a in aklananlar:
+            print(f'{a.path}:{a.line_no}  [{a.rule_id}] '
+                  f'"{a.matched}" muafiyet="{a.muafiyet}"\n'
+                  f'    satır : {a.line_text[:150]}')
+        print(f'\nallow_if ile AKLANAN satır: {len(aklananlar)}')
+        return 0
+
+    shown = [] if args.check else (
+        findings if args.all else unbaselined(findings, baseline))
     for finding in shown:
         print(_format(finding))
         print()
@@ -376,9 +574,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         kok = os.path.relpath(args.root, REPO_ROOT)
     print(f'Taranan kök : {kok}')
+    print(f'Kural sayısı: {len(ALL_RULES)}')
     print(f'Toplam isabet: {len(findings)}  '
           f'(kayıtlı {len(findings) - len(new_hits)}, '
-          f'kayıtsız {len(new_hits)}, açık borç {len(debts)})')
+          f'kayıtsız {len(new_hits)}, açık borç {len(debts)}, '
+          f'allow_if ile aklanan {len(aklananlar)})')
+    if new_hits:
+        print('KAPI KIRMIZI: kayıtsız isabet var.')
     return 1 if new_hits else 0
 
 

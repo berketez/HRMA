@@ -293,8 +293,8 @@ class TestIsentropicEfficiency:
     def test_definition_is_entropy_based(self, empirical):
         """eta = Δh / (Δh + T_e·Δs) — istasyon tablosundan birebir türemeli."""
         props = {
-            'chamber': {'enthalpy': 0.0, 'entropy': 8.0, 'temperature': 3300.0},
-            'exit': {'enthalpy': -2400.0, 'entropy': 8.2, 'temperature': 1500.0},
+            'chamber': {'enthalpy_kJ_kg': 0.0, 'entropy_kJ_kg_K': 8.0, 'temperature': 3300.0},
+            'exit': {'enthalpy_kJ_kg': -2400.0, 'entropy_kJ_kg_K': 8.2, 'temperature': 1500.0},
         }
         eta = empirical._calculate_isentropic_efficiency(props)
         expected = 2400.0 / (2400.0 + 1500.0 * 0.2)
@@ -303,49 +303,69 @@ class TestIsentropicEfficiency:
 
     def test_ideal_expansion_gives_unity(self, empirical):
         props = {
-            'chamber': {'enthalpy': 0.0, 'entropy': 8.0, 'temperature': 3300.0},
-            'exit': {'enthalpy': -2400.0, 'entropy': 8.0, 'temperature': 1500.0},
+            'chamber': {'enthalpy_kJ_kg': 0.0, 'entropy_kJ_kg_K': 8.0, 'temperature': 3300.0},
+            'exit': {'enthalpy_kJ_kg': -2400.0, 'entropy_kJ_kg_K': 8.0, 'temperature': 1500.0},
         }
         assert empirical._calculate_isentropic_efficiency(props) == pytest.approx(1.0)
 
     def test_negative_entropy_generation_is_capped_at_unity(self, empirical):
         """s_e < s_c fiziksel değil (model tutarsızlığı): üst sınır 1.0."""
         props = {
-            'chamber': {'enthalpy': 0.0, 'entropy': 8.0, 'temperature': 3300.0},
-            'exit': {'enthalpy': -2400.0, 'entropy': 7.5, 'temperature': 1500.0},
+            'chamber': {'enthalpy_kJ_kg': 0.0, 'entropy_kJ_kg_K': 8.0, 'temperature': 3300.0},
+            'exit': {'enthalpy_kJ_kg': -2400.0, 'entropy_kJ_kg_K': 7.5, 'temperature': 1500.0},
         }
         assert empirical._calculate_isentropic_efficiency(props) == 1.0
 
     def test_no_expansion_is_undefined_not_fabricated(self, empirical):
         props = {
-            'chamber': {'enthalpy': 0.0, 'entropy': 8.0, 'temperature': 3300.0},
-            'exit': {'enthalpy': 0.0, 'entropy': 8.0, 'temperature': 3300.0},
+            'chamber': {'enthalpy_kJ_kg': 0.0, 'entropy_kJ_kg_K': 8.0, 'temperature': 3300.0},
+            'exit': {'enthalpy_kJ_kg': 0.0, 'entropy_kJ_kg_K': 8.0, 'temperature': 3300.0},
         }
         assert empirical._calculate_isentropic_efficiency(props) == 1.0
 
     def test_lower_clip_at_08_is_gone(self, empirical):
         """Eski kod alt sınırı 0.8'e kırpıyordu; artık gerçek değer geçmeli."""
         props = {
-            'chamber': {'enthalpy': 0.0, 'entropy': 8.0, 'temperature': 3300.0},
-            'exit': {'enthalpy': -1000.0, 'entropy': 8.5, 'temperature': 1500.0},
+            'chamber': {'enthalpy_kJ_kg': 0.0, 'entropy_kJ_kg_K': 8.0, 'temperature': 3300.0},
+            'exit': {'enthalpy_kJ_kg': -1000.0, 'entropy_kJ_kg_K': 8.5, 'temperature': 1500.0},
         }
         eta = empirical._calculate_isentropic_efficiency(props)
         assert eta == pytest.approx(1000.0 / (1000.0 + 750.0), rel=1e-12)
         assert eta < 0.8
 
     def test_with_cantera_value_is_informative(self):
-        """Cantera varken verim 1.0'a çakılmamalı ve ε ile azalmalı.
+        """Cantera varken verim, istasyon tablosunun entropi üretimini ÖLÇER.
 
-        Ölçüldü (htpb/n2o O/F=6, Pc=20 bar): ε=4 -> 0.9314, ε=10 -> 0.8917,
-        ε=25 -> 0.8738, ε=60 -> 0.8669. Eski kurgu hepsinde 1.0 veriyordu.
+        ÇEVRİLDİ — ÖH D18 fizik-a1 / F1 (kalemler B3-05 + B3-02).
+        ESKİ İDDİA: ε=4 -> 0,9314, ε=10 -> 0,8917, ε=25 -> 0,8738,
+        ε=60 -> 0,8669 ve "ε ile azalmalı". Bu sayılar bir DONANIM kaybı
+        değildi (fonksiyonun kendi künyesi de böyle diyor): tablolanan
+        çıkış istasyonu tek-γ izentropik SICAKLIKTAN kuruluyor, entalpi
+        ise kayan-denge tabanından geliyordu; oran o TUTARSIZLIĞI ölçüyor
+        ve ε büyüdükçe tutarsızlık büyüdüğü için "azalıyordu" (yayımlanan
+        T_e'nin aynı p_e'deki denge sıcaklığından sapması ε=4'te +%5,25,
+        ε=40'ta +%28,13 — docs/scofield/raw/OH/D18/fizik/a1/once_f1.json).
+
+        F1'den sonra çıkış istasyonu oda izentropunun ta kendisidir, yani
+        s_çıkış = s_oda ve entropi üretimi sıfırdır: eta_s = 1 YAPI GEREĞİ.
+        Bekçi artık bunu kilitler ve istasyon tabanını da denetler (ampirik
+        yolun 1'e sabitlenmesiyle karışmasın diye). Entropi ÜRETEN bir
+        genişleme hâlâ 1'in altını verir — ``test_lower_clip_at_08_is_gone``
+        onu doğrudan sınıyor.
         """
         ca = CombustionAnalyzer()
         # Bağımlılık kapısı (parti 31 / T2-2): cantera YOKSA atla, KURULU ama
         # mekanizma zinciri yüklenemiyorsa KIRMIZI — ürün kusuru atlanamaz.
         kapi('cantera', ca.cantera_available, CANTERA_YOLU_KIRIK)
-        etas = [self._eta(ca, expansion_ratio=float(eps)) for eps in (4, 10, 25, 60)]
-        assert all(0.5 < e < 1.0 for e in etas), etas
-        assert all(a > b for a, b in zip(etas, etas[1:])), etas
+        for eps in (4, 10, 25, 60):
+            sonuc = ca.analyze_combustion(
+                {'htpb': 100.0}, 'n2o', 6.0, 20.0,
+                expansion_ratio=float(eps))
+            assert sonuc['conditions']['exit']['basis'] == \
+                'expansion_ratio_equilibrium', eps
+            eta = sonuc['performance']['thermodynamic_properties'][
+                'isentropic_efficiency']
+            assert eta == pytest.approx(1.0, rel=1e-6), (eps, eta)
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +405,15 @@ class TestAlevSicakligiKaynagiBeyanli:
         """
         oda = _oda(denge, 1.0)
         assert oda['temperature_source'] == 'equilibrium'
-        assert oda['T'] == pytest.approx(1137.5, abs=25.0), oda['T']
+        # ÇAPA BAĞIMSIZ KÂHİNLE YENİLENDİ — kitap uyum p1a / B16 (ÖNEMLİ,
+        # 6 Eki 2026): N₂O artık 293,15 K doymuş SIVI olarak yakılıyor
+        # (reaktan entalpisi −11,23 kJ/mol). Eski 1137,5 K gaz referansının
+        # sayısıydı. Yeni değer HRMA'dan DEĞİL, Cantera'nın doğrudan TP
+        # dengesi + kök araması ve CoolProp sıvı entalpisinden gelir
+        # (tests/test_kitap_p1a.py::TestCanteraKahini; ölçülen
+        # 1094,9666 K, HRMA 1094,9716 K). Tolerans ±25 K KORUNDU; ampirik
+        # zarfa uzaklık ayırt etmeye yeter.
+        assert oda['T'] == pytest.approx(1095.0, abs=25.0), oda['T']
         assert 'warning' not in oda, 'denge yolunda uyarı taşınmamalı'
 
     def test_of03_ampirik_zarf_beyanli(self, denge):
@@ -414,7 +442,30 @@ class TestAlevSicakligiKaynagiBeyanli:
         """
         oda = _oda(denge, 4.0)
         assert oda['temperature_source'] == 'equilibrium'
-        assert oda['T'] == pytest.approx(2821.1299938218, abs=0.5), oda['T']
+        # ÇAPA TÜRETİMLİ YENİLENDİ — ÖH D19 hibrit-a1 (kalem B3-12).
+        # Eski sayı, elemental ayrıştırmanın KÜTLE KORUMADIĞI koddan
+        # geliyordu: pay (atom kütleleri) ile payda (molekül ağırlığı)
+        # ayrı ayrı elle yazılıydı, HTPB'de Σ(kütle kesri)=1,001851852
+        # (+%0,1852) ve kullanıcının 6,0 dediği O/F dengeye 5,990270
+        # olarak giriyordu. D19'da molekül ağırlığı formülden ve
+        # _ATOMIC_MASS (IUPAC 2021) tablosundan TÜRETİLDİ; Σ=1,0 ve
+        # efektif O/F = istenen O/F oldu. Yeni sayı bu DOĞRU girdiden
+        # gelir; yön fiziksel olarak beklenendir (yakıt payı %0,185
+        # şişkinken karışım daha zengin görünüyordu, düzeltilince
+        # stokiyometriye yaklaşıp alev sıcaklığı yükseldi).
+        # Ölçüm: docs/scofield/raw/OH/D19/hibrit/a1/capa_yenileme.json
+        # Eski çapa 2821,1299938218 K -> yeni 2824,7424716612386 K
+        # (+3,6125 K, +%0,128). Eşik 0,5 K KORUNDU: sayısal gürültüye yer
+        # bırakır, yöntem değişikliğini yine yakalar.
+        # ÇAPA BAĞIMSIZ KÂHİNLE YENİLENDİ — kitap uyum p1a / B16 (ÖNEMLİ,
+        # 6 Eki 2026). N₂O giriş durumu 298 K ideal gazdan 293,15 K doymuş
+        # sıvıya geçti (RP-1311 §4.1). Eski 2824,7424716612386 K gaz
+        # referansının sayısıydı. Yeni çapa HRMA'nın kendi yolundan DEĞİL,
+        # Cantera'nın doğrudan TP dengesi + kök araması ve CoolProp sıvı
+        # entalpisinden alınan BAĞIMSIZ değerdir
+        # (tests/test_kitap_p1a.py::TestCanteraKahini): 2720,0317189114135 K;
+        # HRMA 2720,0305 K (fark 0,0012 K). Eşik 0,5 K KORUNDU.
+        assert oda['T'] == pytest.approx(2720.0317189114135, abs=0.5), oda['T']
 
     def test_cagiranin_dayattigi_sicaklik_denge_sayilmaz(self, denge):
         """chamber_temperature verildiğinde hiçbir alev çözümü yapılmaz."""

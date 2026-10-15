@@ -213,12 +213,48 @@ class TestHibritBeyanlariDogru:
             assert b['governing_load_case'] == 'unpressurized'
 
     def test_imalat_payi_merkezi_sabittir(self, hybrid):
+        """İmalat payı modül sabitidir ve kalınlığa NASIL girdiği beyanlıdır.
+
+        ÇEVİRİ (ÖH D15 birleşmesi, 1 Eyl 2026 — yapısal-sistem P5B1-08).
+        Bekçi eskiden tek bir özdeşlik soruyordu: ``tavsiye edilen = minimum
+        × pay``. O özdeşlik yalnız İNCE CİDAR rejiminde kurgusaldı. P5B1-08
+        ölçtü ki boyutlandırma (ince cidar t = P·r/σ) ile DEĞERLENDİRME
+        (t/r ≥ 0,1'de Lame kalın cidar tepe hoop'u) farklı formüllerden
+        geliyor ve HRMA'nın önerdiği cidar kendi hedefini tutturmuyordu
+        (3000 bar'da 5 kat sapma). Düzeltme: kalın cidar rejiminde iki
+        kalınlık da Lame'in KÖKÜNDEN alınır, dolayısıyla aralarındaki oran
+        artık 1,2 DEĞİLDİR (bu hibrit koşumda ölçülen 1,2282).
+
+        Bekçi gevşetilmedi, REJİME BAĞLANDI ve bir iddia KAZANDI:
+          · ince cidar kolunda eski özdeşlik AYNEN durur (rel=1e-9);
+          · kalın cidar kolunda özdeşlik yerine YÖN sınanır — Lame kökü
+            ince cidar değerinin ALTINA düşemez, yani pay malzemeyi
+            azaltamaz (fail-closed); üstelik hangi model boyutlandırdığı
+            ``sizing_stress_model`` ile ADIYLA yayımlanmak zorundadır,
+            böylece sessiz üçüncü bir rejim doğamaz.
+        """
         c = hybrid['structural_analysis']['chamber_analysis']
         assert c['manufacturing_allowance_factor'] == MANUFACTURING_ALLOWANCE_FACTOR
-        # Pay, tavsiye edilen kalınlıkla minimum kalınlık arasındaki oranın TA
-        # KENDİSİdir: beyan bunu iddia ediyor, ölçüyoruz.
-        assert c['recommended_thickness'] == pytest.approx(
-            c['minimum_thickness'] * MANUFACTURING_ALLOWANCE_FACTOR, rel=1e-9)
+        model = c['sizing_stress_model']
+        assert model in ('thin_wall', 'lame_thick_wall'), (
+            'boyutlandırma modeli beyansız/tanınmayan: %r' % (model,))
+        if model == 'thin_wall':
+            # Pay, tavsiye edilen kalınlıkla minimum kalınlık arasındaki
+            # oranın TA KENDİSİdir: beyan bunu iddia ediyor, ölçüyoruz.
+            assert c['recommended_thickness'] == pytest.approx(
+                c['minimum_thickness'] * MANUFACTURING_ALLOWANCE_FACTOR,
+                rel=1e-9)
+            return
+        assert c['recommended_thickness'] >= (
+            c['minimum_thickness'] * MANUFACTURING_ALLOWANCE_FACTOR
+            - 1e-9), (
+            'kalın cidar rejiminde tavsiye edilen kalınlık ince cidar '
+            'ölçeklemesinin ALTINA düştü — imalat payı malzeme EKSİLTMİŞ '
+            'olur (%r < %r × %r)' % (c['recommended_thickness'],
+                                     c['minimum_thickness'],
+                                     MANUFACTURING_ALLOWANCE_FACTOR))
+        assert c['recommended_thickness'] > c['minimum_thickness'], (
+            'pay uygulanmamış: tavsiye edilen kalınlık minimuma eşit')
 
     def test_tasarim_basinci_carpani_kullanici_SF_si_degildir(self):
         """Beyan "kullanıcının emniyet katsayısı değil" diyor; ölçüyoruz:

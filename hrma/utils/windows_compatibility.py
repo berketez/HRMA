@@ -97,18 +97,35 @@ class WindowsCompatibility:
             warnings.warn(f"DLL configuration error: {e}")
         
         # 6. Fix locale issues
-        try:
-            # Set locale to handle decimal points correctly
-            locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
-        except:
+        #
+        # AMAÇ: ondalık ayracını NOKTA'da tutmak. Sayılar arayüze ve dosyalara
+        # '3.14' diye yazılır; yerel ayar ondalık ayracını virgüle çevirirse
+        # ayrıştırma ve biçimleme bozulur.
+        #
+        # 2026-08-27 ölçümü: bu bloğun ÜÇÜNCÜ yedeği ``setlocale(LC_ALL, '')``
+        # idi — yani "kullanıcının kendi yerel ayarı". Türkçe/Almanca bir
+        # sistemde bu ayar ondalık ayracını VİRGÜL yapıyor (ölçüldü:
+        # tr_TR.UTF-8 → ',' ; de_DE.UTF-8 → ','), yani düzeltme kendi amacını
+        # tersine çeviriyordu. Son yedek artık 'C' (POSIX): tek başına
+        # ondalık ayracının nokta kalacağı GARANTİ edilen ayardır.
+        #
+        # Hiçbir aday tutmazsa yerel ayar DEĞİŞTİRİLMEZ ve durum beyan edilir;
+        # "ayarladık" denip virgüle düşmek sessiz veri bozulmasıdır.
+        for _aday in ('en_US.UTF-8', 'C.UTF-8', 'C'):
             try:
-                locale.setlocale(locale.LC_ALL, 'C.UTF-8')
-            except:
-                try:
-                    locale.setlocale(locale.LC_ALL, '')
-                except:
-                    warnings.warn("Could not set locale")
-        
+                locale.setlocale(locale.LC_ALL, _aday)
+            except locale.Error:
+                continue
+            fixes_applied.append(f"Locale set to {_aday} (decimal point '.')")
+            break
+        else:
+            warnings.warn(
+                "Could not set a decimal-point locale (tried en_US.UTF-8, "
+                "C.UTF-8, C); the system locale is left untouched. If it uses "
+                "a comma as the decimal separator, numeric formatting may "
+                "differ.")
+            fixes_applied.append("Locale NOT set (decimal separator unverified)")
+
         return fixes_applied
     
     def fix_file_paths(self, path: str) -> str:

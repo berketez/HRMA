@@ -1,26 +1,56 @@
 """Kademeli kinetik verim modülü (kinetic_efficiency) doğrulama testleri.
 
-El hesabı çapaları (sentetik yanma sonucu: Pc=20 bar, Tc=3200 K,
-rho_c=1.85 kg/m³, c*=1550 m/s, Isp_frozen=228 s, Isp_shifting=235 s,
-L*=1.0 m, boğaz çapı verilmedi):
+El hesabı çapaları — sentetik yanma sonucu: Pc = 20 bar, Tc = 3200 K,
+rho_c = 1,85 kg/m³, c* = 1550 m/s, Isp_frozen = 228 s,
+Isp_shifting = 235 s, boğaz çapı verilmedi. L* çağırana verilmezse
+``hrma.constants.L_STAR_DEFAULT_M`` = **1,2 m** kullanılır.
 
-  t_res   = L*·rho_c·c*/P_c = 1.0·1.85·1550/2e6      = 1.43375e-3 s
-  tau     = 1.5e-3·(20/20)²                            = 1.5e-3 s
-  Da      = 1.43375e-3/1.5e-3                          = 0.9558333
-  f       = Da/(1+Da)                                  = 0.488708
-  Isp_pred= 228 + f·(235-228)                          = 231.42096 s
-  gap_pct = (235-228)/235·100                          = 2.978723 %
-  loss    = (1-f)·gap_pct                              = 1.522992 %
-  bant    : f(5·Da)=0.826966 → lo=0.515418 %
-            f(Da/5)=0.160487 → hi=2.500704 %
+ÖH D21 bekci-cevirisi a1 (defter P13B3-09) — BU BAŞLIK BAYATTI, YENİLENDİ.
+Ölçüldü (``docs/scofield/raw/OH/D21/bekci-cevirisi/a1/once_statik.json``,
+``P13B3-09.docstring_bayat_sayilar``): başlık D18 fizik-a2 (F2 ≡ OH-D15-01)
+ÖNCESİNİN sekiz sayısını taşıyordu (L* = 1,0 m; 1,43375e-3; 0,9558333;
+0,488708; 231,42096; 1,522992; 0,515418; 2,500704) — yani dosyanın
+KENDİ çapalarıyla çelişiyordu. Sayılar aşağıda güncel değerleriyle
+yazılı; eski sayılar tarihsel iz olarak testlerin gövdesinde duruyor.
+
+  t_res   = L*·rho_c·c*/P_c = 1,2·1,85·1550/2e6      = 1,7205e-3 s
+  tau     = 1,5e-3·(20/20)²                           = 1,5e-3 s
+  Da      = 1,7205e-3/1,5e-3                          = 1,1470
+  f       = Da/(1+Da) = 1,1470/2,1470                 = 0,5342338
+  Isp_pred= 228 + f·(235−228)                         = 231,739637 s
+  gap_pct = (235−228)/235·100                         = 2,978723 %
+  kayıp   = (1−f)·gap_pct                             = 1,387389 %
+  bant    : lo = 0,442275 % , hi = 2,422908 %
+
+ÇAPALARIN BAĞIMSIZLIK KÜNYESİ (P13B3-09'un asıl iddiası). Kalem şunu
+söylüyordu: "sekiz el hesabı çapasının beşi ürünün kendi bağıntısının
+İKİNCİ YAZIMI; dışarıdan gelen tek sayı B3-01'de çıktıya göre seçilmiş
+TAU". Ölçüm bunu doğruladı ve niceledi (aynı JSON): 13 iddianın
+**2'si** BEKLENEN yanında ``res[...]`` okuyordu, yani kendi kendini
+sınıyordu; kalanların bir bölümü de ürünün bağıntısını yeniden
+yazıyordu. Bu dosyadaki çapaların KAPSAMI şudur ve fazlası
+İDDİA EDİLMEZ:
+
+  * BAĞIMSIZ olan: t_res, Da, f, Isp_pred, kayıp ve bant için yazılı
+    ONDALIK LİTERALLER — bunlar dört işlemle elde edilir ve ürünün
+    kodundan okunmaz; ürün bağıntısı değişirse kırmızıya döner.
+  * BAĞIMSIZ OLMAYAN: ``TAU_CHEM_REF_S`` = 1,5e-3 s. Bu sayı
+    literatürden değil, modelin çıktısı tipik kayıp bandına otursun
+    diye SEÇİLMİŞTİR (defter P13B3-01; ürünün kendi künyesi de
+    "approximate, calibration recommended" diyor). Dolayısıyla yukarıdaki
+    literaller ürünün İÇ TUTARLILIĞINI kilitler, kayıp seviyesinin
+    DIŞ DOĞRULUĞUNU kilitlemez.
+  * KİLİTLENEMEYEN: tipik %0,1-3 kayıp bandının ÜST ucu modelin
+    supremumunun (gap_pct = %2,978723) üstündedir, yani bir bekçi eşiği
+    olarak KULLANILAMAZ — kırılamayan iddia üretir. Bkz.
+    ``test_typical_loss_band_detects_tau_drift`` (ÖH Faz B adım B9,
+    defter P13B3-01).
 
 Fiziksel çapalar:
   * frozen ≤ predicted ≤ shifting (Bray frozen/shifting köşeleri)
   * büyük motor (yüksek Pc, büyük boğaz) → shifting'e yakınsama,
     küçük motor → frozen'a yakınsama (NASA SP-8120 kinetik kayıp eğilimi)
-  * tipik kinetik kayıp %0.1-3 bandı (JANNAF/TDK pratiği)
 """
-
 import numpy as np
 import pytest
 
@@ -139,37 +169,92 @@ class TestEngineeringLevel:
             characteristic_length=kw.get('l_star'),
             throat_diameter=kw.get('d_t'))
 
+    # ------------------------------------------------------------------
+    # ÖH D18 fizik-a2 (F2 ≡ OH-D15-01) YENİDEN ÇAPALAMA
+    #
+    # Bu blok ``characteristic_length=None`` ile koşar, yani ``DEFAULT_
+    # L_STAR_M`` kullanılır. O sabit **1,0 m** idi ve aynı büyüklüğün ikinci
+    # tanımı olan ``liquid_rocket_engine.L_STAR_DEFAULT_M`` = 1,2 m ile
+    # ÇELİŞİYORDU (aynı motorun kalış süresi modüle göre %20 farklıydı).
+    # Sabit ``hrma/constants.py``de TEK noktaya alındı ve değeri 1,2 m
+    # (Huzel & Huang SP-125 Tablo 4-1 genel aralığı 0,38-3,05 m'nin içi).
+    #
+    # Çapalar SİLİNMEDİ, TÜRETİLEREK taşındı — hepsi L*'a lineer bağlı:
+    #   t_res = L*·rho·c_star/p_c  ->  yeni/eski = 1,2/1,0 = 1,2 TAM
+    #   Da    = t_res/tau_chem     ->  aynı 1,2 katı
+    #   f     = Da/(1+Da)          ->  1,147/2,147 = 0,5342338
+    #   Isp   = 228 + f·(235-228)  ->  231,739637
+    #   kayıp = (235-Isp)/235·100  ->  %1,387389
+    # ------------------------------------------------------------------
+
     def test_residence_time_hand_calc(self):
         res = self._run()
-        # t_res = 1.0 · 1.85 · 1550 / 2e6 = 1.43375e-3 s (Sutton Eş. 8-9)
+        # t_res = 1.2 · 1.85 · 1550 / 2e6 = 1.7205e-3 s (Sutton Eş. 8-9)
+        # (eski çapa 1.43375e-3 s, L* = 1,0 m ile; oran tam 1,2)
         assert res['diagnostics']['residence_time_s'] == pytest.approx(
-            1.43375e-3, rel=1e-9)
+            1.7205e-3, rel=1e-9)
+        assert res['diagnostics']['residence_time_s'] == pytest.approx(
+            1.2 * 1.43375e-3, rel=1e-12)
 
     def test_damkohler_and_blend_hand_calc(self):
         res = self._run()
+        # Da eski 0.9558333 idi; L* 1,0 -> 1,2 olunca tam 1,2 katı
         assert res['diagnostics']['damkohler'] == pytest.approx(
-            0.9558333, rel=1e-6)
+            1.1470, rel=1e-6)
+        assert res['diagnostics']['damkohler'] == pytest.approx(
+            1.2 * 0.9558333, rel=1e-6)
+        # f = Da/(1+Da) = 1.147/2.147
         assert res['diagnostics']['blend_fraction'] == pytest.approx(
-            0.488708, rel=1e-4)
+            1.1470 / 2.1470, rel=1e-6)
 
     def test_predicted_isp_hand_calc(self):
         res = self._run()
-        assert res['isp_predicted'] == pytest.approx(231.42096, rel=1e-5)
+        # Isp = 228 + f·(235−228), f = 0.5342338 -> 231.739637
+        # (eski çapa 231.42096, f = 0.488708 ile)
+        assert res['isp_predicted'] == pytest.approx(231.739637, rel=1e-8)
+        assert res['isp_predicted'] == pytest.approx(
+            228.0 + (1.1470 / 2.1470) * 7.0, rel=1e-6)
 
     def test_loss_pct_hand_calc(self):
         res = self._run()
-        assert res['kinetic_loss_pct'] == pytest.approx(1.522992, rel=1e-4)
+        # kayıp = (235 − Isp)/235 · 100 (eski çapa %1.522992)
+        assert res['kinetic_loss_pct'] == pytest.approx(1.387389, rel=1e-5)
+        # ÖH D21 (P13B3-09): ESKİ ikinci iddia SAF TOTOLOJİYDİ —
+        # ``(235 − res['isp_predicted'])/235·100`` beklenen yanı
+        # ÇIKTIDAN kuruyordu, yani isp_predicted ne olursa olsun
+        # geçerdi (ölçüldü: once_statik.json, kendine_bakan=1).
+        # Yerine aynı özdeşlik BAĞIMSIZ literallerle yazıldı: iki alan
+        # arasındaki bağ korunur ama beklenen yan çıktıdan okunmaz.
+        assert res['kinetic_loss_pct'] == pytest.approx(
+            (235.0 - 231.739637) / 235.0 * 100.0, rel=1e-6)
+        # ...ve iki alanın BİRBİRİYLE tutarlılığı ayrı bir iddia olarak
+        # kalır (ürün ikisini ayrı ayrı uydurursa bu kırılır).
+        assert res['kinetic_loss_pct'] == pytest.approx(
+            (res['isp_shifting'] - res['isp_predicted'])
+            / res['isp_shifting'] * 100.0, rel=1e-12)
 
     def test_ordering_frozen_predicted_shifting(self):
         res = self._run()
         assert res['isp_frozen'] < res['isp_predicted'] < res['isp_shifting']
 
     def test_band_hand_calc_and_brackets_nominal(self):
+        """ÖH D18 fizik-a2: bant da L* ile taşındı (eski 0.515418/2.500704).
+
+        Bant tau_chem belirsizliğini taradığı için L*'a lineer DEĞİL, ama
+        nominal kaybı KUŞATMA iddiası aynen korunur ve daralma yönü
+        beklenendir: L* büyüdükçe kalış süresi uzar, kayıp ve bandın iki
+        ucu da aşağı iner.
+        """
         res = self._run()
         lo, hi = res['loss_band_pct']
-        assert lo == pytest.approx(0.515418, rel=1e-4)
-        assert hi == pytest.approx(2.500704, rel=1e-4)
+        assert lo == pytest.approx(0.442275, rel=1e-4)
+        assert hi == pytest.approx(2.422908, rel=1e-4)
+        # ÖH D21 (P13B3-09): kuşatma iddiası çıktıya bakıyordu; nominal
+        # kayıp da BAĞIMSIZ literalle kuşatılıyor (bant kayarsa kırmızı).
+        assert lo < 1.387389 < hi
         assert lo < res['kinetic_loss_pct'] < hi
+        # eski bantla karşılaştırma: iki uç da aşağı indi (L* büyüdü)
+        assert lo < 0.515418 and hi < 2.500704
 
     def test_large_motor_converges_to_shifting(self):
         # Pc=70 bar, D_t=0.4 m (rho ∝ Pc): Da ≈ 93.7 → f ≈ 0.989
@@ -197,10 +282,71 @@ class TestEngineeringLevel:
                   for d in (0.01, 0.02, 0.05, 0.1, 0.5)]
         assert all(a > b for a, b in zip(losses, losses[1:]))
 
-    def test_typical_jannaf_loss_band(self):
-        """Temsili motor JANNAF tipik kinetik kayıp bandına düşmeli (%0.1-3)."""
+    def test_typical_loss_band_detects_tau_drift(self):
+        """Temsili motorun kaybı ULAŞILABİLİR bir bandın içinde kalmalı.
+
+        (Eski adı ``test_typical_jannaf_loss_band``; ad da iddia ile
+        birlikte değişti — aşağıya bak.)
+
+        ÖH Faz B / adım B9 — defter P13B3-01 (orta, "yanlış-kilitliyor +
+        totolojik"). Eski iddia ``0.1 <= kayıp <= 3.0`` idi ve ÜST sınırı
+        **tanım gereği ulaşılamazdı**:
+
+          kayıp = (1 − f) · gap_pct,  f = Da/(1+Da) ∈ (0, 1)
+
+        yani kayıp, frozen/shifting açıklığına (``gap_pct``) yukarıdan
+        yaklaşır ama ona asla erişemez. Bu fikstürde
+        gap_pct = (235 − 228)/235 · 100 = **2,978723 %**, dolayısıyla 3,0
+        sınırı modelin supremumunun ÜSTÜNDE. Ölçüldü (2026-08-27, bu depo;
+        ``TAU_CHEM_REF_S`` bellekte oynatılarak, ürün koduna dokunmadan):
+
+          TAU ×0,1 → 0,282121 | ×1 → 1,522994 | ×2 → 2,015488
+          TAU ×5   → 2,500677 | ×10 → 2,718847 | ×100 → 2,950521
+          TAU ×1e4 → 2,978439 | ×1e9 → 2,978723  (supremum, hâlâ < 3,0)
+
+        Yani kalibrasyon sabiti bir milyar kat şişse bile eski üst sınır
+        yeşil kalıyordu; iddianın yukarı yönde bilgi içeriği SIFIRDI.
+
+        SEÇİLEN SINIR = **2,0 %**, gerekçesi ölçüm:
+          * P13'ün önerdiği ``≤ 2,9`` supremumun altındadır ama ölçüldü ki
+            ancak TAU **×35,21**'de kırmızıya döner — 10 katlık bir
+            kalibrasyon hatasını hâlâ geçirir, yani adımın kabul şartını
+            (TAU ×10 kırmızı) karşılamaz;
+          * ``2,0`` sınırı TAU **×1,9532**'de aşılır: modelin dışarıdan
+            çapası olmayan TEK sabitindeki (``TAU_CHEM_REF_S``) iki katlık
+            bir kaymayı görür. Bugünkü değer 1,522994 olduğundan sınırın
+            payı %31'dir — bıçak sırtı değil;
+          * ``0,1`` ALT sınırına DOKUNULMADI: H2 ölçtü ki alt yön zaten
+            canlı (TAU ×0,01 ve ×0,0001 bekçiyi düşürüyor).
+
+        Sınır ÜRÜNDEN İTHAL EDİLMEZ: yukarıdaki sayılar ölçülmüş literal
+        olarak burada durur (eşiği-kendinden-türetme yasağı). Bu bekçi
+        bilinçli olarak bugünkü kalibrasyonu kilitler; güncelleme
+        protokolü hata mesajındadır.
+
+        Kapsam notu — defter P13B3-09 (orta, ayrı kalem, B-3 işi): bu
+        dosyadaki sekiz "el hesabı" çapasının beşi ürünün kendi
+        bağıntısının ikinci yazımıdır ve dışarıdan gelen tek sayı,
+        B3-01'de çıktıya bakılarak seçilmiş olan TAU'dur. B9 o kalemi
+        çözmez; yalnız üst sınırın kırılabilir olmasını sağlar. Gerçek
+        çözüm, ölçülmüş bir JANNAF/TDK kinetik kayıp veri noktasının
+        ``data/validation/`` altına girmesi ve bandın ona çapalanmasıdır —
+        bugün o dizinde kinetik kayıp kaydı YOK (ölçüldü).
+        """
         res = self._run()
-        assert 0.1 <= res['kinetic_loss_pct'] <= 3.0
+        kayip = res['kinetic_loss_pct']
+        assert 0.1 <= kayip, (
+            f"kinetik kayıp {kayip!r} % — tipik alt sınırın (%0,1) altında")
+        assert kayip <= 2.0, (
+            f"kinetik kayıp {kayip!r} % — 2,0 % sınırının üstünde. Bu sınır "
+            "ölçülmüş bir çapadır: bugünkü nominal kayıp 1,522994 % ve sınır "
+            "TAU_CHEM_REF_S'in ×1,9532 kaymasında aşılıyor. GÜNCELLEME "
+            "PROTOKOLÜ: kalibrasyon sabiti gerçek bir statik ateşleme "
+            "verisiyle bilerek değiştirildiyse (a) yeni nominal kaybı ölç, "
+            "(b) bu literali ve yukarıdaki TAU merdivenini AYNI commit'te "
+            "yeniden yaz, (c) sınırı modelin supremumunun "
+            "(gap_pct = 2,978723 %) altında tut — yoksa iddia tanım gereği "
+            "ulaşılamaz hâle döner (defter P13B3-01)")
 
     def test_model_note_declares_calibration_status(self):
         res = self._run()

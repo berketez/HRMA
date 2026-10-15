@@ -67,8 +67,23 @@
                 throat_diameter_mm: 'throat_diameter',
                 exit_diameter_mm: 'exit_diameter',
                 chamber_diameter_mm: 'chamber_diameter',
-                chamber_length_mm: 'grain_length',
                 wall_thickness_mm: 'case_thickness',
+            },
+            // ÖH D17 / P12aB4-01: CAD'den okunan ODA boyu, katı sayfasındaki
+            // `#grain_length` (TEK propelan TANESİNİN eksenel boyu) alanına
+            // yazılıyordu. İkisi ayrı büyüklüktür — solid.html'in kendi çözümü
+            // oda boyunu tane boyundan `grain_length / 0.9` ile türetir, yani
+            // aralarında yapısal bir fark vardır ve çok segmentli (BATES)
+            // tanede fark segment sayısı kadar büyür. Ölçülen ürün etkisi:
+            // grain_length 500 → 560 mm toplam impulsü +%11,1 kaydırıyor.
+            // Katı sayfasında kazanılmış bir ODA BOYU alanı YOKTUR; eşleme
+            // kaldırıldı (fail-closed) ve reddin gerekçesi ekranda ADIYLA
+            // basılıyor — sessizce başka bir alana yazılmıyor.
+            refusals: {
+                chamber_length_mm: ['stepimp.refuseSolidChamberLen',
+                    'Not applied: this page has no chamber length field. The only '
+                    + 'length input is the grain length (one propellant grain), '
+                    + 'which is a different quantity — enter it yourself.'],
             },
             expansionField: null,
         },
@@ -91,11 +106,25 @@
         ['wall_thickness_mm', 'stepimp.fieldWall', 'Wall thickness (mm)'],
     ];
 
+    // ÖH D20 / P12aB4-13 — ÖLÇÜLDÜ (once.json): `--hd-yellow` HİÇBİR CSS
+    // dosyasında tanımlı değildi (0 tanım), yani "orta güven" rozeti her
+    // zaman yedek #ffd166'ya düşüyor ve ürünün "uyarı/sınırda" rolü için
+    // tanımladığı kehribardan (`--hd-amber`, results_hud.css:23;
+    // [data-state="marginal"] de onu kullanır) farklı bir sarıyla çiziliyordu.
+    // Tanımlı değişkene bağlandı; yedek de o değişkenin değeridir.
     var CONF_COLORS = {
         high: 'var(--hd-green, #2dd4a8)',
-        medium: 'var(--hd-yellow, #ffd166)',
+        medium: 'var(--hd-amber, #ffbe46)',
         low: 'var(--hd-orange, #ff8c33)',
     };
+
+    /* Sunucudan gelen hata metni — TR kipinde çevrilir (ÖH D20 / P12aB4-15).
+     * ÖLÇÜLDÜ (once.json): bu dosyada `I18N.serverText` çağrısı 0'dı; TR
+     * kipinde STEP hataları yarı Türkçe çıkıyordu. */
+    function srv(text) {
+        return (window.I18N && window.I18N.serverText)
+            ? window.I18N.serverText(text) : text;
+    }
 
     var lastFile = null;        // katı seçiminde yeniden POST için saklanır
     var lastData = null;
@@ -182,6 +211,17 @@
             + ' color:var(--hd-ink-dim, #7d97a5);">'
             + escapeHtml(T('stepimp.analyzing', 'ANALYZING STEP GEOMETRY…')) + '</div>';
         try {
+            // Boyut tavanı sunucudan (import_ui.js uploadSizeError; V3
+            // güvenlik 5. tur): aşan dosya GÖNDERİLMEZ, 413 gelirse ham
+            // gövde değil aynı i18n iletisi basılır.
+            var IU = window.HRMAImportUI;
+            var tooBig = (IU && IU.uploadSizeError)
+                ? IU.uploadSizeError('step', file.size) : null;
+            if (tooBig) {
+                body.innerHTML = errorHtml(TF('stepimp.failed', { message: tooBig },
+                    'STEP import failed: {message}'));
+                return;
+            }
             var form = new FormData();
             form.append('file', file, file.name);
             if (solidIndex !== undefined && solidIndex !== null) {
@@ -190,6 +230,13 @@
             var resp = await fetch('/api/import/step', { method: 'POST', body: form });
             var data = null;
             try { data = await resp.json(); } catch (e) { data = null; }
+            var tooLarge = (IU && IU.payloadTooLargeMessage)
+                ? IU.payloadTooLargeMessage('step', file.size, resp, data) : null;
+            if (tooLarge) {
+                body.innerHTML = errorHtml(TF('stepimp.failed', { message: tooLarge },
+                    'STEP import failed: {message}'));
+                return;
+            }
             if (resp.status === 501 || (data && data.error_kind === 'dependency_missing')) {
                 body.innerHTML = errorHtml(T('stepimp.depMissing',
                     'STEP analysis is not available in this installation — the CAD '
@@ -198,7 +245,7 @@
                 return;
             }
             if (!resp.ok || !data || data.error) {
-                var msg = (data && data.error) || ('HTTP ' + resp.status);
+                var msg = srv((data && data.error) || ('HTTP ' + resp.status));
                 body.innerHTML = errorHtml(TF('stepimp.failed', { message: msg },
                     'STEP import failed: {message}'));
                 return;
@@ -208,7 +255,8 @@
             renderResult(body, data, file);
         } catch (err) {
             console.error('HRMA STEP import failed:', err);
-            body.innerHTML = errorHtml(TF('stepimp.failed', { message: err.message },
+            body.innerHTML = errorHtml(TF('stepimp.failed',
+                { message: srv(err.message) },
                 'STEP import failed: {message}'));
         }
     }
@@ -332,6 +380,9 @@
             var s = sugg[key];
             var targetId = pageMap.fields[key] || null;
             var hasTarget = !!(targetId && document.getElementById(targetId));
+            // Adlı ret (ÖH D17 / P12aB4-01): bu sayfada alan yok VE nedeni
+            // "henüz kurulmadı" değil, "yakın görünen alan başka büyüklük".
+            var refusal = (pageMap.refusals && pageMap.refusals[key]) || null;
             var usableForEps = (!hasTarget && pageMap.expansionField
                 && (key === 'throat_diameter_mm' || key === 'exit_diameter_mm'));
             var conf = s ? String(s.confidence || 'low') : null;
@@ -362,8 +413,10 @@
                         + escapeHtml(T('stepimp.notFound', 'not found')) + '</span>')
                 + ((hasTarget || usableForEps)
                     ? ''
-                    : '<span style="color:var(--hd-ink-faint, #46606d);">'
-                        + escapeHtml(T('stepimp.noTargetShort', 'no form field on this page'))
+                    : '<span style="color:var(--hd-ink-dim, #7d97a5);">'
+                        + escapeHtml(refusal
+                            ? T(refusal[0], refusal[1])
+                            : T('stepimp.noTargetShort', 'no form field on this page'))
                         + '</span>')
                 + '</div></div>';
         });

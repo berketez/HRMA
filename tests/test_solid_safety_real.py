@@ -33,6 +33,7 @@ from hrma.engines.solid_rocket_engine import (
     SOLID_CASE_DESIGN,
     SOLID_CONDENSED_MASS_FRACTION,
     SOLID_GRAIN_MECHANICS,
+    THROAT_EROSION_SIGNIFICANT_AREA_GROWTH,
     SolidRocketEngine,
 )
 
@@ -420,17 +421,30 @@ class TestOverridesActuallyApply:
         çözünürlüklü diziden hesaplanır (a = 0.005 koşusu 220 örnektir, yani
         seyreltme eşiğinin altında kalır ve hiç seyreltilmez, buna rağmen
         çapası kayar — kaymanın sebebi A1-2'dir).
+
+        ÇAPA DÖRDÜNCÜ KEZ ÖLÇÜLDÜ (ÖH KİTAP p1b, B11 seçenek F; karar §28-36
+        Ş-3). Üç sayı da varsayılan 'apcp' kaydının GERİ ÇÖZÜLMÜŞ eski
+        dörtlüsünden (T_c 3614,8 K, c* 1598,2, γ 1,1986, M 28,0) türemişti;
+        kayıt artık NASA CEA denge dörtlüsünü taşıyor (tests/test_kitap_p1b.py
+        kâhini). Ölçülen yeni taban (önce main a6c7e755 → sonra):
+            varsayılan a : 3064,88 → 3089,80 N  (+%0,81)
+            a = 0.005    : 6739,13 → 6787,43 N  (+%0,72)
+            a = 0.005 tepe itki: 10811,99 → 10941,14 N (+%1,19)
+        Tepe itkideki kayma γ'nın tasarım noktasındaki C_F'ine aittir
+        (genleşme denge γ_s ile, ε +%12); F024/F068/A1-2 ayrıştırması aynen
+        geçerlidir (bu kayma onlardan bağımsızdır).
         """
         res = solid()
         # v2.5.2 (Codex bulgusu): impuls hesabi son adimi atliyordu; terminal
         # tukenis ornegi eklenince ortalama itki %0.18 kaymisti. O kapanis
         # davranisi hâlâ yerinde; asagidaki deger onun F024+F068+A1-2 hâli.
-        assert res['average_thrust'] == pytest.approx(3064.88, abs=0.5)
+        assert res['average_thrust'] == pytest.approx(3089.80, abs=0.5)
         legacy_a = solid(burn_rate_a=0.005)
-        assert legacy_a['average_thrust'] == pytest.approx(6739.13, abs=0.5)
+        assert legacy_a['average_thrust'] == pytest.approx(6787.43, abs=0.5)
         # F068 ve A1-2 tepe itkiye dokunmaz (tasarim basincinda CF ayni,
-        # akis ekli): bu deger uc surumdur degismedi.
-        assert legacy_a['max_thrust'] == pytest.approx(10811.99, abs=1.0)
+        # akis ekli): bu deger uc surumdur degismedi; B11 (CEA dörtlüsü)
+        # tasarım noktasının C_F'ini değiştirdi, çapa yeniden ölçüldü.
+        assert legacy_a['max_thrust'] == pytest.approx(10941.14, abs=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -568,8 +582,27 @@ class TestSafetyInputsAreUsed:
                 == via_kwarg['explosive_hazards']['explosive_class'])
 
     def test_unresolved_class_is_declared_not_silently_assumed(self):
+        """ÖH D35 / OH-ON-06 — BEKÇİ ÇEVRİLDİ (gerekçeli, GEVŞETME DEĞİL).
+
+        Bekçinin adı zaten doğruyu istiyordu: "declared, not silently
+        assumed". Ama iddiası eski davranışı — 'the conservative composite
+        class was assumed' cümlesini — kilitliyordu, yani BEYAN EDİLMİŞ bir
+        uydurmayı kabul ediyordu. Doktrin 1: beyan çözüm değildir.
+
+        Ölçüldü (``D35/onemli-pdf-guvenlik/a1/once.json``): o 'muhafazakâr'
+        varsayım MUHAFAZAKÂR DA DEĞİLDİ — ``composite`` (0,42) gerçek
+        N2O hibrit sınıfından (``hybrid_n2o``, 0,44555) DAHA DÜŞÜK eşdeğer
+        veriyor, yani yayımlanan emniyet mesafesi KISA tarafta kalıyordu.
+        İddia artık daha GÜÇLÜ: sınıf hiç yayımlanmaz.
+        """
         res = safety(propellant_type='some_unknown_mix')
-        assert 'conservative' in res['explosive_hazards']['explosive_class_basis']
+        patlama = res['explosive_hazards']
+        assert patlama.get('explosive_class') is None, (
+            'çözülemeyen sınıf hâlâ bir sınıf yayımlıyor: %r'
+            % patlama.get('explosive_class'))
+        assert patlama.get('tnt_equivalent_kg') is None
+        gerekce = patlama['explosive_verdict_withheld_because']
+        assert 'some_unknown_mix' in gerekce and 'motor_type' in gerekce
 
     def test_thrust_changes_the_restraint_requirement(self):
         low = safety({'thrust': 1000.0})
@@ -688,9 +721,20 @@ class TestErosiveReportMatchesTheSolver:
         assert report['erosive_enhancement_max_percent'] < 25.0
 
     def test_report_tracks_the_erosive_coefficient(self):
-        """k degistiginde raporlanan artis da degismeli (olu sabit degil)."""
-        weak = self._engine(erosive_k=0.0002)
-        strong = self._engine(erosive_k=0.02)
+        """k degistiginde raporlanan artis da degismeli (olu sabit degil).
+
+        ÖH D15 (ÖK-05, P2B1-02): bu bekçi eskiden ``erosive_k`` alanını
+        BEYANSIZ gönderiyordu ve böylece "form değeri yakıt tablosunu ezer"
+        davranışını kilitliyordu — kusurun ta kendisini. Oysa solid.html bu
+        alanı kullanıcı dokunmasa da her koşuda yolluyor (``|| 0.0002``) ve
+        APCP tablosunun kalibre değeri 0,0136; ezme, erozif-duyarlı motorda
+        tepe itkiyi gerçeğin %41,5 altında gösteriyordu. Bekçinin ASIL
+        iddiası ("rapor katsayıyı izler, ölü sabit değil") korunur; katsayı
+        artık kullanıcının BİLİNÇLİ girdisi olarak beyan edilerek verilir.
+        Beyansız form varsayılanının uygulanmadığı ayrıca sınanır.
+        """
+        weak = self._engine(erosive_k=0.0002, erosive_k_override=True)
+        strong = self._engine(erosive_k=0.02, erosive_k_override=True)
         r_weak = weak._calculate_erosive_effects(weak.calculate_thrust_curve())
         r_strong = strong._calculate_erosive_effects(
             strong.calculate_thrust_curve())
@@ -698,6 +742,10 @@ class TestErosiveReportMatchesTheSolver:
             'erosive_enhancement_max_percent']
         assert r_weak['erosive_coefficient_k'] == pytest.approx(0.0002)
         assert r_strong['erosive_coefficient_k'] == pytest.approx(0.02)
+        # Beyansız gelen form varsayılanı kalibre tabloyu EZEMEZ.
+        beyansiz = self._engine(erosive_k=0.0002)
+        assert beyansiz.erosive_burning_coeff == pytest.approx(
+            self._engine().erosive_burning_coeff, rel=0, abs=0)
 
     def test_port_diameter_effect_is_computed_not_the_word_moderate(self):
         """'Moderate' sabit metni yerine hesaplanmis geometrik carpan."""
@@ -728,7 +776,10 @@ class TestErosiveReportMatchesTheSolver:
 # koşuda backend'e gidiyor ama HİÇBİR YERDE okunmuyordu.
 # Kaynak: Thakre & Yang, 'Chemical Erosion of Graphite and Refractory Metal
 # Nozzles in Solid-Propellant Rocket Motors', J. Propulsion and Power 24(4),
-# 2008; Bartz 1957 (h_g ~ Pc^0.8); Geisler grafit bandı 0.05-0.25 mm/s.
+# 2008; Bartz 1957 (h_g ~ Pc^0.8); Geisler (JANNAF 1978, BATES) grafit
+# bandi — SAYISAL degeri tek tanim noktasi
+# transient_ballistics.GRAPHITE_A_REF_BAND_CITATION'dir (OH D27/OH-D25-27:
+# burada ikinci kez yazilmasi banda capali kalmayan bir kopya uretiyordu).
 # Model tek tanım noktasında: transient_ballistics.ThroatErosionModel.
 # ---------------------------------------------------------------------------
 class TestThroatErosionIsWired:
@@ -762,11 +813,101 @@ class TestThroatErosionIsWired:
         assert float(eroded['thrust'][-1]) < 0.5 * float(rigid['thrust'][-1])
 
     def test_rigid_throat_assumption_is_declared_not_silent(self):
-        """Erozyon kapaliyken varsayimin ADI raporda yazar."""
+        """Rijit varsayım BEYAN edilir VE kapalı/açık ayrımı ölçülebilir.
+
+        ÖH B6: eski hâli yalnız iki metin alanına bakıyordu; beyan doğru
+        olsa bile çözücünün erozyonu fiilen uygulayıp uygulamadığını
+        görmüyordu (defter P2B1-03). Beyan artık davranışla birlikte
+        sınanır: kapalı koşumda boğaz BİT-SABİT, açık koşumda aynı motor
+        ölçülebilir biçimde kımıldar.
+        """
         rigid = self._engine().calculate_thrust_curve()
         assert 'rigid-throat assumption' in rigid['throat_erosion']['basis']
         assert rigid['throat_erosion']['input_field'].startswith(
             'erosion_factor')
+        # Beyan davranışla örtüşmeli: rijit koşumda hiçbir gerileme YOK.
+        assert rigid['throat_erosion']['enabled'] is False
+        te = rigid['throat_erosion']
+        assert te['throat_area_final_m2'] == pytest.approx(
+            te['throat_area_initial_m2'], rel=1e-12)
+        assert te['throat_diameter_final_mm'] == pytest.approx(
+            te['throat_diameter_initial_mm'], rel=1e-12)
+        assert te['area_growth_fraction'] == pytest.approx(0.0, abs=1e-12)
+        # Aynı motor erozyon açılınca kımıldıyor (bağlaşım canlı).
+        eroded = self._engine(erosion_factor=0.15).calculate_thrust_curve()
+        assert eroded['throat_erosion']['area_growth_fraction'] > 1.0
+        assert float(eroded['pressure'][-1]) < float(rigid['pressure'][-1])
+
+    @pytest.mark.parametrize('a_ref', (0.001, 0.05, 0.15))
+    def test_outcome_tracks_the_erosion_coefficient(self, a_ref):
+        """Katsayı büyüdükçe boğaz daha çok açılır, Pc daha çok düşer.
+
+        ÖH B6 — bağlaşım bekçisi: erozyonun BİR kez kımıldadığını
+        göstermek yetmez (o, tek bir eşikle de sağlanır); çıktı katsayının
+        MONOTON fonksiyonu olmalı. Ölçülen (end-burner, APCP, Pc = 40 bar):
+          a_ref 0,001 -> alan x1,0205, yanma sonu Pc 38,771 bar
+          a_ref 0,05  -> alan x1,9551, yanma sonu Pc 14,260 bar
+          a_ref 0,15  -> alan x3,6439, yanma sonu Pc  5,472 bar
+        """
+        rigid = self._engine().calculate_thrust_curve()
+        zayif = self._engine(
+            erosion_factor=a_ref / 5.0).calculate_thrust_curve()
+        guclu = self._engine(erosion_factor=a_ref).calculate_thrust_curve()
+
+        def _oran(c):
+            return c['throat_area_final'] / c['throat_area']
+
+        assert _oran(rigid) == pytest.approx(1.0, rel=1e-12)
+        assert 1.0 < _oran(zayif) < _oran(guclu), (
+            f'a_ref {a_ref / 5.0:g} -> x{_oran(zayif):.4f}, '
+            f'{a_ref:g} -> x{_oran(guclu):.4f}')
+        # Performans çıktısı da aynı yönde: çok erozyon, düşük Pc.
+        assert float(guclu['pressure'][-1]) < float(zayif['pressure'][-1]) \
+            < float(rigid['pressure'][-1])
+        assert float(guclu['thrust'][-1]) < float(zayif['thrust'][-1])
+        # Çözücünün kullandığı katsayı kullanıcının verdiği katsayıdır.
+        assert self._engine(erosion_factor=a_ref)._throat_erosion_model() \
+            .a_ref_mm_s == pytest.approx(a_ref)
+
+    @pytest.mark.xfail(strict=True, reason=(
+        'ÖH defter P2B1-03 — çözücünün gerçek boğaz erozyonu yanıta '
+        'girmiyor: aynı motorun lüle geometrisi bloğu boğaz çapını rijit '
+        'tasarım değeriyle yayımlıyor. Ölçüldü (end-burner, a_ref=0,15): '
+        'çözücü d_t 7,664 -> 14,631 mm (+%90,9) diyor, _design_nozzle_'
+        'geometry bloğunun HİÇBİR alanı bu sayıyı taşımıyor'))
+    def test_nozzle_geometry_carries_the_solver_erosion(self):
+        """Erozyon açıkken geometri, çözücünün sonucunu taşımalı."""
+        eng = self._engine(erosion_factor=0.15)
+        curve = eng.calculate_thrust_curve()
+        d_final = float(curve['throat_erosion']['throat_diameter_final_mm'])
+        d_init = float(curve['throat_erosion']['throat_diameter_initial_mm'])
+        assert d_final > 1.5 * d_init          # koşum gerçekten eroze
+
+        geo = eng._design_nozzle_geometry()
+
+        def _alanlar(dugum, yol=''):
+            """(yol, sayı) çiftleri — yalnız BOĞAZ/EROZYON alanları."""
+            if isinstance(dugum, dict):
+                for k, v in dugum.items():
+                    yield from _alanlar(v, f'{yol}/{k}')
+            elif isinstance(dugum, (list, tuple)):
+                for i, v in enumerate(dugum):
+                    yield from _alanlar(v, f'{yol}[{i}]')
+            elif isinstance(dugum, (int, float)) and not isinstance(dugum,
+                                                                    bool):
+                yield yol, float(dugum)
+
+        # Birim körlüğüne düşmemek için arama BOĞAZ/EROZYON adlı
+        # alanlarla sınırlıdır: 'divergent_angle = 15.0' derece değeri
+        # 14,63 mm'ye sayısal olarak yakın ama aynı büyüklük DEĞİLDİR.
+        adaylar = {y: v for y, v in _alanlar(geo)
+                   if 'throat' in y.lower() or 'erosion' in y.lower()}
+        assert adaylar, 'geometri bloğunda hiç boğaz alanı yok'
+        assert any(abs(v - d_final) <= 0.01 * d_final
+                   for v in adaylar.values()), (
+            f'çözücü nihai boğaz çapı {d_final:.3f} mm; geometri bloğu '
+            f"{geo['throat_diameter']:.3f} mm yayımlıyor ve nihai çapı "
+            f'hiçbir boğaz alanında taşımıyor: {adaylar}')
 
     @pytest.mark.parametrize('overrides, code', [
         ({}, 'warn.solid.rigid_throat_assumption'),
@@ -778,21 +919,82 @@ class TestThroatErosionIsWired:
         """Uc durumun ucu de kullaniciya gorunur (sessiz kabul yok).
 
         0.001 mm/s solid.html varsayilanidir ve grafitin yayimlanmis
-        bandinin (0.05-0.15 mm/s) 50 kat altindadir -> sorgulanir.
+        bandinin ALT ucunun 50 kat altindadir -> sorgulanir. (Bandin
+        sayisal degeri burada TEKRAR YAZILMAZ; tek tanim noktasi
+        transient_ballistics.GRAPHITE_A_REF_BAND_CITATION — D19/P2B4-09.)
         """
         res = self._engine(**overrides).calculate_performance()
         codes = {w['code'] for w in (res.get('design_warnings') or [])}
         assert code in codes, sorted(codes)
 
-    def test_short_fat_throat_motor_is_not_nagged(self):
-        """Kisa yanma + buyuk bogazda rijit varsayim uyarisi CIKMAZ.
+    def test_rijit_bogaz_uyarisi_modelin_kendi_kestirimini_izliyor(self):
+        """Uyari, modelin KENDI kestirimini izler (sessizlik cakilmaz).
 
-        Uyari gurultu olmamali: BATES, Pc = 40 bar, t_b ~ 2.2 s, d_t ~ 45 mm
-        kosusunda ongorulen alan artisi esigin (%5) altinda kalir.
+        D19/P2B4-09 ile CEVRILDI. Onceki hali
+        (``test_short_fat_throat_motor_is_not_nagged``) bu motorda uyarinin
+        CIKMAMASINI cakiyordu; o sessizlik grafit varsayilaninin (0.15
+        mm/s) kendi kunyesindeki bandin ust ucunun %60'i olmasindan
+        geliyordu: ayni motorun ongorulen alan artisi 4,6% ile esigin (%5)
+        HEMEN ALTINDA kaliyordu. Katsayi kunyesine (Geisler 0.05-0.25)
+        cekilince ayni motor %7,7 veriyor ve uyari HAK EDILIYOR.
+
+        Yeni bekci sayiyi degil KURALI kilitler: uyari ancak ve ancak
+        modelin kendi kestirimi esigi asiyorsa cikar; ciktiginda da yuku
+        kendi icinde tutarlidir (artis, yayimlanan hiz/sure/capdan yeniden
+        hesaplanabilir).
+
+        OH D25 / P2B4-09 (Fable-D19 SARTI, 2. madde): burada bir
+        ``pytest.skip`` dali vardi — uyari cikmazsa test ATLANIYORDU, yani
+        kuralin "uyari yok => kestirim <= esik" yonu HIC sinanmiyordu
+        (fail-open). HEAD'de skip'e dusmuyordu ama esik ya da katsayi
+        degistigi an bekci SESSIZCE atlanmis olurdu. Dal kaldirildi: uyari
+        yoksa modelin kendi kestirimi (``ref.rate_mm_s(p_ort) * t_b`` ile
+        alan artisi) BAGIMSIZ hesaplanir ve esigin altinda oldugu cakilir.
+        Kural artik iki yonlu ve fail-closed.
         """
-        res = solid()
-        codes = {w['code'] for w in (res.get('design_warnings') or [])}
-        assert 'warn.solid.rigid_throat_assumption' not in codes
+        motor = SolidRocketEngine(chamber_diameter=100, grain_length=500,
+                                  core_diameter=30, chamber_pressure=40)
+        res = motor.calculate_performance()
+        uyarilar = [w for w in (res.get('design_warnings') or [])
+                    if w['code'] == 'warn.solid.rigid_throat_assumption']
+        assert len(uyarilar) <= 1
+
+        # Modelin KENDI kestirimi — uründen bagimsiz yeniden hesap.
+        ref = motor._nozzle_erosion_reference()
+        assert ref is not None, (
+            'grafit bogaz icin yayimlanmis erozyon modeli yok: kural '
+            'sinanamaz')
+        egri = res.get('thrust_curve') or {}
+        basinclar = egri.get('pressure') or []
+        p_ort = (sum(float(x) for x in basinclar) / len(basinclar)
+                 if basinclar else float(motor.P_c))
+        t_b = float(res['burn_time'])
+        r0_mm = float(res['throat_diameter']) / 2.0
+        kestirim = ((r0_mm + ref.rate_mm_s(p_ort) * t_b) / r0_mm) ** 2 - 1.0
+        esik_kesri = THROAT_EROSION_SIGNIFICANT_AREA_GROWTH
+
+        if not uyarilar:
+            # SART (2): sessizligin kendisi de sinanir.
+            assert kestirim <= esik_kesri, (
+                f'uyari BASILMADI ama modelin kendi kestirimi '
+                f'%{kestirim * 100:.2f} > esik %{esik_kesri * 100:.1f}: '
+                'sessizlik hak edilmemis (fail-open)')
+            return
+        assert kestirim > esik_kesri, (
+            f'uyari basildi ama bagimsiz kestirim %{kestirim * 100:.2f} <= '
+            f'esik %{esik_kesri * 100:.1f}')
+        p = uyarilar[0]['params']
+        esik = float(p['threshold_percent'])
+        artis = float(p['estimated_area_growth_percent'])
+        assert artis > esik, (
+            f'uyari basildi ama kestirim {artis}% <= esik {esik}%')
+        # Yuk kendi icinde tutarli: artis = ((r0+r_dot*t)/r0)^2 - 1
+        r0 = float(p['throat_diameter_mm']) / 2.0
+        dr = float(p['erosion_rate_mm_s']) * float(p['burn_time_s'])
+        beklenen = (((r0 + dr) / r0) ** 2 - 1.0) * 100.0
+        assert artis == pytest.approx(beklenen, abs=0.15), (
+            f'yayimlanan artis {artis}% ⟷ yayimlanan alanlardan yeniden '
+            f'hesaplanan {beklenen:.2f}%')
 
     def test_model_is_the_shared_one_not_a_copy(self):
         """Formul transient_ballistics'te tek yerde tanimli (CLAUDE.md k.11)."""
@@ -801,6 +1003,16 @@ class TestThroatErosionIsWired:
         model = eng._throat_erosion_model()
         assert isinstance(model, ThroatErosionModel)
         assert model.a_ref_mm_s == pytest.approx(0.15)
-        # r_dot = a_ref * (Pc/70 bar)^0.8
+        # r_dot = a_ref * (Pc/Pc_ref)^n
+        # ÇEVRİLDİ (ÖH D28 / OH-D27-15): üs ve referans basıncı burada ELLE
+        # yazılıydı ('0.8', '70 bar') — tam da bu bekçinin çaktığı "tek
+        # tanım noktası" kuralını kendisi çiğniyordu. İkisi de artık
+        # paylaşılan modelden okunur; kopya-olmama iddiası böylece üssü de
+        # kapsıyor (eskiden model üssünü değiştirse bekçi yeşil kalırdı).
+        import hrma.analysis.transient_ballistics as _tb
+        assert model.pc_ref_bar == pytest.approx(_tb.THROAT_EROSION_PC_REF_BAR)
+        assert model.exponent == pytest.approx(
+            _tb.THROAT_EROSION_PRESSURE_EXPONENT)
         assert model.rate_m_s(40e5) == pytest.approx(
-            0.15 * (40.0 / 70.0) ** 0.8 / 1000.0, rel=1e-12)
+            0.15 * (40.0 / _tb.THROAT_EROSION_PC_REF_BAR)
+            ** _tb.THROAT_EROSION_PRESSURE_EXPONENT / 1000.0, rel=1e-12)

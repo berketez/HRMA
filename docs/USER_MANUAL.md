@@ -1,13 +1,17 @@
 # HRMA User Manual
 
-HRMA (UZAYTEK Rocket Motor Analysis) is a desktop application for the
+HRMA (Rocket Motor Analysis) is a desktop application for the
 preliminary design and analysis of hybrid, solid, and liquid rocket motors.
 It runs a local Flask engine behind a native desktop window (pywebview) and
 presents results in a dark-themed web interface with an interactive 3D
 model, an Analysis Deck of engineering panels, and working CAD /
 drawing / report exports.
 
-This manual describes HRMA **v2.6.26**.
+This Markdown manual was last revised for HRMA **v2.6.26** and has not been
+updated for 3.0.0. The 3.0.0 changes are listed in
+[`CHANGELOG.md`](../CHANGELOG.md) and described in the v3.0 sections of the
+PDF user guides (`docs/user_guide/HRMA-User-Guide-EN.pdf`,
+`docs/user_guide/HRMA-Kullanma-Kilavuzu-TR.pdf`).
 
 **New in v2.6.26.** This release changes no physics; it connects inputs that
 were already on the screen but reached nothing, removes two fields that
@@ -529,6 +533,47 @@ app) or a temporary directory (source runs), and offered as downloads.
 | OpenRocket `.eng` | `/api/export-eng` | Uses the real computed thrust curve when a transient analysis has been run, otherwise the design-point curve |
 | Analysis report PDF | `/api/export-pdf/<type>` | Formatted report of inputs, results, and warnings |
 | Complete package ZIP | `/api/export-complete-zip` | STL + STEP + DXF + drawing PDF + `.eng` + geometry in one archive |
+
+### 9.1 When an export refuses (and why that is the feature)
+
+HRMA never fills a missing dimension with a generator default and then hands
+you a file called "manufacturing package". If the analysis result does not
+carry what a part needs, the export is refused with HTTP 422, the offending
+**field is named**, and no placeholder solid is written. The refusals you are
+most likely to meet:
+
+| Status in the 422 body | What it means | What to do |
+|---|---|---|
+| `no_exportable_artifacts` | Every generator refused this geometry, so the archive would be empty | Fix the field each generator names under `failed_generators`, then re-run the analysis |
+| `missing_export_geometry` / `unresolved_export_units` | No usable chamber/throat geometry, or a length whose unit cannot be earned | Run an analysis instead of posting a hand-built body |
+| `generators_disagree_on_parts` | The STL and STEP generators produced **different part lists** for the same motor, so the archive would describe two different machines | Re-run the analysis so both generators see the same injector/grain evidence; `only_in_stl` / `only_in_step` name the parts |
+| `tank_data_contract_problem` | A tank CAD request is missing a required block or field | Send the fields listed under `invalid_fields` (dot paths) |
+
+**Behaviour change (tank CAD).** The tank CAD generator now treats
+`structural.pressure_rating` as **required**, alongside `structural.material`
+and the tank dimensions. Nothing changes for results produced by the liquid
+engine analysis — it publishes the rating (in bar) and the manufacturing note
+already prints it. What changed is the failure mode for a **hand-built**
+`tank_data` payload that omits the field: it used to reach the generator and
+crash with a raw `KeyError: 'pressure_rating'` surfaced as HTTP 500, and it now
+returns **422** with `structural.pressure_rating` listed in `invalid_fields`.
+Scripts that posted such payloads and only checked for 500 should be updated to
+read `invalid_fields`.
+
+**Byte-reproducible comparisons.** DXF files carry per-file identifiers and a
+creation timestamp from the underlying `ezdxf` library, so two exports of the
+same motor are *not* byte-identical even though the drawing is. That is
+expected, and the timestamp in your file is real — HRMA does not stamp a fake
+fixed date to make files match. If you need to diff two exports, compare them
+through `hrma.export.drawing_generator.canonicalize_dxf_text`, which masks only
+those six library fields and leaves every geometry, layer, text and dimension
+line untouched.
+
+**STL download links expire.** The complete design package publishes
+`cad.stl_download_window_s`; the links live exactly that long and then return
+HTTP 410 rather than serving a stale file. The web interface prints the window
+and the expiry time next to the download confirmation, so a tab left open
+overnight tells you the links are dead before you click them.
 
 ## 10. Kinetic Fidelity Levels
 

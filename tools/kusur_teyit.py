@@ -11,6 +11,12 @@ Sonuç sınıfları:
 
 ``KAPALI``      Yaprak artık en az bir girdiyle oynuyor — kusur kapanmış.
 ``HALA_SABIT``  Yaprak hâlâ hiçbir girdiye tepki vermiyor — kusur açık.
+``YANKI``       Yaprak yanıtta VAR ama sarsım sınıflandırmasında ne "sabit"
+                ne "oynayan": yalnız yankı olarak oynuyor, ayna kopyası,
+                beyan yankısı ya da sayısal olmayan bir yaprak. Kusur
+                anlamında kapanmış SAYILMAZ; gerekçesiyle göze bakar.
+                (P10B4-11'e kadar bu kalemler yanlışlıkla ``YAPRAK_YOK``
+                hükmü alıyordu.)
 ``YAPRAK_YOK``  Yol yanıtta bulunamadı. Kalem bilinçli kaldırıldıysa
                 (uydurma blok söküldü, NOT_MODELLED yapıldı) bu MEŞRU bir
                 kapanıştır; ama otomatik "kapalı" sayılmaz, göze bakar.
@@ -38,8 +44,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
 
-VARSAYILAN_RAPOR = os.path.expanduser(
-    '~/HRMA-kurtarma/takim-raporlari/sabit-bulgular.json')
+from kampanya_defteri import (                       # noqa: E402
+    DefterHatasi, VARSAYILAN_DEFTER, kapsam_beyani)
+import kampanya_defteri                              # noqa: E402
+
+#: Defterin yolu TEK kaynaktan gelir (``tools/kampanya_defteri.py``).
+#: Eskiden burada depo DIŞI bir yol vardı ve o dosya kaybolmuştu; araç
+#: hiç koşamıyordu (P10B4-10).
+VARSAYILAN_RAPOR = VARSAYILAN_DEFTER
 VARSAYILAN_CIKTI = str(ROOT / 'docs' / 'dev' / 'kusur_teyit.json')
 
 #: Rapor grubu -> ölçülecek sayfa. Yankı grubu üç sayfaya da bakar.
@@ -61,17 +73,10 @@ def sayfa_of(grup: str) -> str | None:
 
 
 def kusurlari_yukle(rapor_yolu: str) -> list[dict]:
-    with open(rapor_yolu, encoding='utf-8') as f:
-        gruplar = json.load(f)
-    kusurlar = []
-    for grup in gruplar:
-        for kalem in grup.get('kalemler', []):
-            if kalem.get('sinif') != 'KUSUR':
-                continue
-            kayit = dict(kalem)
-            kayit['_grup'] = grup.get('grup', '')
-            kayit['_sayfa'] = sayfa_of(kayit['_grup'])
-            kusurlar.append(kayit)
+    """Defterin KUSUR kalemleri. FAIL-CLOSED (bkz. kampanya_defteri)."""
+    kusurlar = kampanya_defteri.kusurlari_yukle(rapor_yolu)
+    for kayit in kusurlar:
+        kayit['_sayfa'] = sayfa_of(kayit['_grup'])
     return kusurlar
 
 
@@ -133,10 +138,51 @@ def yakit_anahtarlari() -> list:
         return []
 
 
+def yanki_gerekcesi(yol: str, deger) -> str:
+    """``yanki`` kümesindeki bir yaprağın NEDEN orada olduğunu söyler.
+
+    Küme "artık" değil, ADLI bir sınıftır: aşağıdaki dört sebepten biri.
+    """
+    from tests.support import shake
+
+    if shake.is_declaration_echo(yol):
+        return 'beyan yankısı (kullanıcının gönderdiği sayının kopyası)'
+    if shake.canonical_echo_path(yol) is not None:
+        return 'ayna kopyası (kanonik motor.* yaprağıyla tekilleştirildi)'
+    if deger is None or isinstance(deger, bool) or not isinstance(
+            deger, (int, float)):
+        return 'sayısal olmayan yaprak (metin/etiket/None)'
+    return 'yalnız yankı olarak oynuyor (girdinin kendi kopyası)'
+
+
 def olc(sayfalar: list[str]) -> dict[str, dict]:
     """Her sayfa için sarsım ölçümünü koşar.
 
-    Döner: sayfa -> {'sabit': set(yol), 'tum_yapraklar': set(yol)}
+    Döner: sayfa -> {'sabit', 'oynayan', 'yanki', 'tum_yapraklar', 'ozet'}
+
+    YAPRAK EVRENİ (P10B4-11 düzeltmesi). Eski sürüm evreni
+    ``constant_outputs ∪ changed_paths`` diye kuruyordu. Bu İKİ kümenin
+    birleşimi taban yanıtın tamamı DEĞİLDİR:
+
+    * ``constant_outputs`` yankılar DAHİL hesaplanır (``ever_changed``) ve
+      yalnız SAYISAL yaprakları içerir;
+    * ``changed_paths`` yankıları ELER (``shake.run``: ``real = [p for p in
+      changed if not is_echo(...)]``).
+
+    Yani "yalnız yankı olarak oynayan" ve "sayısal olmayan" yapraklar iki
+    kümeye de girmiyordu; bir kusurun yolu onlardan biriyse hüküm
+    ``YAPRAK_YOK`` ("kaldırılmış olabilir") çıkıyordu — oysa yaprak yanıtta
+    değeriyle duruyor. Ölçüldü (27 Ağu 2026): sıvı sayfasında taban yanıtta
+    3.370 yaprak var, eski evren bunların 657'sini (%19,5) içermiyordu;
+    düşenler arasında ``.chamber_pressure``, ``.fuel_density``,
+    ``.mixture_ratio`` gibi canlı yapraklar vardı.
+
+    Kardeş araç bu tuzağı zaten yazılı olarak belgelemişti
+    (``tools/sabit_tarayici.py``: "DİKKAT — burada ``report.changed_paths``
+    KULLANILMAZ"); düzeltme buraya taşınmamıştı.
+
+    Doğru evren raporun kendisinde duruyor: ``report.baseline_leaves``
+    (taban koşunun DÜZ yaprak sözlüğü). Fazladan HTTP çağrısı gerekmiyor.
     """
     import wiring_map
     from hrma.app import app
@@ -149,11 +195,7 @@ def olc(sayfalar: list[str]) -> dict[str, dict]:
         else:
             report, *_ = wiring_map.measure_page(client, sayfa)
 
-        # Ölçümün gördüğü yaprakların tamamı, raporun kendisinden:
-        #   sabit kalanlar  U  en az bir alanla oynayanlar
-        # Fazladan HTTP çağrısı yapmaya gerek yok; ayrıca taban yükü burada
-        # yeniden kurmak (measure_page onu döndürmüyor) mantığı ikinci kez
-        # yazmak olurdu — magic number/ikinci tanım yasağının aynısı.
+        taban = dict(report.baseline_leaves)
         sabit = set(report.constant_outputs)
         oynayan: set[str] = set()
         for _alan, yollar in (report.changed_paths or {}).items():
@@ -172,10 +214,18 @@ def olc(sayfalar: list[str]) -> dict[str, dict]:
                     ek_not = (f'; propellant_type sarsımı {len(ek)} yaprağı '
                               f'sabit kümesinden çıkardı')
 
+        tum = set(taban) | sabit | oynayan
+        yanki = tum - sabit - oynayan
+
         sonuc[sayfa] = {
             'sabit': sabit,
-            'tum_yapraklar': sabit | oynayan,
-            'ozet': report.summary() + ek_not,
+            'oynayan': oynayan,
+            'yanki': yanki,
+            'taban_degerleri': taban,
+            'tum_yapraklar': tum,
+            'ozet': (f'{report.summary()}{ek_not}; yaprak evreni {len(tum)} '
+                     f'(sabit {len(sabit)}, oynayan {len(oynayan)}, '
+                     f'yankı/metin {len(yanki)})'),
         }
     return sonuc
 
@@ -193,21 +243,35 @@ def teyit_et(kusurlar: list[dict], olcum: dict[str, dict]) -> list[dict]:
         sayfalar = ([k['_sayfa']] if k.get('_sayfa') in olcum
                     else list(olcum))
         sabit_mi = False
-        var_mi = False
+        oynuyor_mu = False
+        yanki_mi = False
         nerede_sabit = []
+        yanki_neden = ''
         for s in sayfalar:
-            if yol in olcum[s]['tum_yapraklar']:
-                var_mi = True
             if yol in olcum[s]['sabit']:
                 sabit_mi = True
                 nerede_sabit.append(s)
+            if yol in olcum[s]['oynayan']:
+                oynuyor_mu = True
+            if yol in olcum[s]['yanki'] and not yanki_mi:
+                yanki_mi = True
+                yanki_neden = (
+                    f'{s}: ' + yanki_gerekcesi(
+                        yol, olcum[s]['taban_degerleri'].get(yol)))
 
         if sabit_mi:
             satirlar.append({**_temel(k), 'sonuc': 'HALA_SABIT',
                              'neden': 'sayfa(lar): ' + ', '.join(nerede_sabit)})
-        elif var_mi:
+        elif oynuyor_mu:
             satirlar.append({**_temel(k), 'sonuc': 'KAPALI',
                              'neden': 'yaprak üretiliyor ve girdiyle oynuyor'})
+        elif yanki_mi:
+            # ÜÇÜNCÜ KÜME (P10B4-11): yaprak yanıtta VAR ama sarsım
+            # sınıflandırmasında ne "sabit" ne "oynayan". Eskiden bu durum
+            # YAPRAK_YOK ("kaldırılmış olabilir") diye okunuyordu — yanlış
+            # hüküm. Artık adıyla raporlanır.
+            satirlar.append({**_temel(k), 'sonuc': 'YANKI',
+                             'neden': 'yaprak yanıtta VAR; ' + yanki_neden})
         else:
             satirlar.append({**_temel(k), 'sonuc': 'YAPRAK_YOK',
                              'neden': 'yol yanıtta yok — kaldırılmış olabilir, '
@@ -233,11 +297,18 @@ def main() -> int:
                     default='all')
     args = ap.parse_args()
 
-    if not os.path.exists(args.rapor):
-        print(f'Rapor bulunamadı: {args.rapor}', file=sys.stderr)
-        return 1
+    try:
+        kusurlar = kusurlari_yukle(args.rapor)
+        _gruplar, _kunye = kampanya_defteri.defteri_yukle(args.rapor)
+    except DefterHatasi as hata:
+        print(str(hata), file=sys.stderr)
+        print('ÖLÇEMEDİM — defter okunamadı, teyit yapılmıyor.',
+              file=sys.stderr)
+        return 3
+    beyan = kapsam_beyani(_kunye)
+    if beyan:
+        print(f'DEFTER KAPSAMI: {beyan}', file=sys.stderr)
 
-    kusurlar = kusurlari_yukle(args.rapor)
     sayfalar = (['hybrid', 'liquid', 'solid'] if args.sayfa == 'all'
                 else [args.sayfa])
 
@@ -256,7 +327,7 @@ def main() -> int:
 
     print()
     print('TEYİT SONUCU')
-    for ad in ('KAPALI', 'HALA_SABIT', 'YAPRAK_YOK', 'ELLE'):
+    for ad in ('KAPALI', 'HALA_SABIT', 'YANKI', 'YAPRAK_YOK', 'ELLE'):
         print(f'  {ad:12s} {sayim.get(ad, 0):3d}')
 
     acik = [s for s in satirlar if s['sonuc'] == 'HALA_SABIT']
@@ -266,7 +337,8 @@ def main() -> int:
             print(f'  {s["yol"]}')
             print(f'      eski değer: {str(s["eski_deger"])[:70]}  |  {s["neden"]}')
 
-    gozle = [s for s in satirlar if s['sonuc'] in ('YAPRAK_YOK', 'ELLE')]
+    gozle = [s for s in satirlar
+             if s['sonuc'] in ('YANKI', 'YAPRAK_YOK', 'ELLE')]
     if gozle:
         print(f'\nGÖZLE TEYİT GEREKENLER ({len(gozle)}):')
         for s in gozle:

@@ -28,6 +28,7 @@ sayıyla karşılaştıran totoloji YOKTUR.
 
 import hashlib
 import math
+import re
 import pathlib
 
 import pytest
@@ -329,16 +330,48 @@ def test_hibrit_mod_sekli_ortalamasi_GERCEK_pencereden(hibrit):
 
 
 def test_hibrit_esik_yalniz_boyuna_modlarda(hibrit):
-    """Enine/karma modlara sayı YAZILMAZ, gerekçesiyle listelenir."""
+    """Enine/karma modlara sayı YAZILMAZ, gerekçesiyle listelenir.
+
+    ÇEVRİLDİ (ÖH D26 / defter P4B4-14): bu satır eskiden listeyi
+    ``['1L','2L','3L','4L','5L','6L']`` diye SABİT yazıyordu. O altı sayı
+    fizikten değil, akustik havuzunun ``MAX_LONGITUDINAL_INDEX = 6``
+    KIRPMASINDAN geliyordu; yani bekçi, kusurun kendisini çapa yapmıştı ve
+    kırpma kalkınca kırmızı veriyordu. Testin GERÇEK iddiası ("eşik yalnız
+    boyuna modlara yazılır, enine/karma modlara yazılmaz") sayıdan
+    bağımsızdır ve burada o iddia sınanır: etiketler saf boyunadır, 1L'den
+    başlayarak KESİNTİSİZ ilerler, ve akustik tablosundaki boyuna modların
+    TAMAMINI kapsar (kırpma geri gelirse liste tabloyla ayrışır ve bu
+    satır yine kırmızı olur).
+    """
     _, sonuc = hibrit
     esik = sonuc['combustion_stability']['acoustic_response_threshold']
     etiketler = [s['label'] for s in esik['modes']]
-    assert etiketler == ['1L', '2L', '3L', '4L', '5L', '6L']
-    assert 'T' in ''.join(esik['transverse_modes_not_evaluated'])
+    assert etiketler, 'boyuna mod eşiği hiç yayımlanmamış'
+    assert all(re.fullmatch(r'\d+L', e) for e in etiketler), etiketler
+    assert [int(e.rstrip('L')) for e in etiketler] == list(
+        range(1, len(etiketler) + 1)), etiketler
+    tablodaki_boyuna = [m['label'] for m in sonuc['acoustic_modes']['modes']
+                        if re.fullmatch(r'\d+L', m['label'])]
+    assert set(etiketler) == set(tablodaki_boyuna), (
+        'eşik listesi akustik tablosundaki boyuna modlarla ayrışıyor: '
+        f'{sorted(set(tablodaki_boyuna) ^ set(etiketler))}')
     assert esik['transverse_modes_basis'].strip()
     # Enine modlar için hiçbir eşik sayısı yayımlanmıyor
     for etiket in esik['transverse_modes_not_evaluated']:
+        assert 'T' in etiket or 'R' in etiket
         assert etiket not in etiketler
+    # ÇEVRİLDİ (ÖH D26 / P4B4-14): eskiden bu satır enine modun "en düşük
+    # 10 mod" listesinde BULUNMASINA güveniyordu; o bulunuş fizik değil,
+    # 7L..14L'in kırpılmasının yan ürünüydü. Bu kavitede ilk on mod
+    # gerçekten saf boyunadır. İddia korunur ama doğru yerden sorulur:
+    # enine aday YOK OLMAZ, akustik raporunda ADIYLA durur ve eşik
+    # yazılmamış olması gerekçeli kalır.
+    hf = sonuc['acoustic_modes']['stability_report']['high_frequency']
+    en_dusuk_enine = hf['lowest_transverse_mode']
+    assert en_dusuk_enine is not None
+    assert 'T' in en_dusuk_enine['label'] or 'R' in en_dusuk_enine['label']
+    assert en_dusuk_enine['frequency_hz'] > 0
+    assert en_dusuk_enine['label'] not in etiketler
 
 
 def test_hibrit_eksik_kayip_terimleri_BEYANLI(hibrit):
@@ -407,10 +440,24 @@ def test_kati_bulk_modu_ve_cozucu_kapisi_AYNI_seyi_soyluyor(kati):
 def test_kati_n_bir_ustunde_UC_yol_da_ayni_seyi_soyluyor():
     """n >= 1: çekirdek 'unstable', çözücü kritik uyarı, koşu FAIL-CLOSED.
 
-    Üç yol da aynı fiziği söylemek zorundadır. Üçüncüsü (yakınsama kapısı)
-    performans sonucunu HİÇ üretmez, bu yüzden yayımlanan bir sonuçta bulk
-    hükmü zorunlu olarak 'stable'dır; bu görünüşteki sabitlik bloğun kendi
-    beyanındadır ve burada ölçülür.
+    Üç yol da aynı fiziği söylemek zorundadır. ÖLÇÜLEN nokta n = 1,0'dır ve
+    orada çözücü gerçekten yakınsamaz.
+
+    ÖH D15 a3 (P2B2-10) — BEKÇİ ÇEVRİLDİ. Bu testin son satırı künyede
+    "fails closed" ifadesini ŞART KOŞUYORDU ve künye tam olarak şunu
+    iddia ediyordu: "the solver already fails closed for n >= 1 ... it
+    simply never gets published". ÖLÇÜLDÜ (APCP, 100/500/30 mm, 40 bar):
+    a = 0,0005 & n = 1,30 TAM sonuç yayımlıyor (64 anahtar, ortalama itki
+    23524,77 N); a = 0,005'te hem n = 1,05 hem n = 1,30 yayımlanıyor.
+    Yani kapı n'e değil YAKINSAMAYA bağlı. Test bu YANLIŞ beyanı
+    çiviliyordu, düzeltilmesini engelliyordu. Docstring'in kendi
+    cümlesi de ("yayımlanan bir sonuçta bulk hükmü zorunlu olarak
+    'stable'dır") aynı yanlışı taşıyordu; ikisi de düzeltildi.
+
+    Testin ASIL amacı (üç yolun aynı fiziği söylemesi) korunuyor;
+    değişen tek şey, künyeden hangi cümlenin beklendiği — artık gerçekten
+    ne olduğu ("convergence gate, not an exponent gate") aranıyor ve
+    n >= 1'de YAYIMLANAN bir koşu da ayrıca ölçülüyor.
     """
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
     motor = SolidRocketEngine(burn_rate_n=1.0, **KATI_TABAN)
@@ -427,8 +474,23 @@ def test_kati_n_bir_ustunde_UC_yol_da_ayni_seyi_soyluyor():
     assert bulk['criterion_met'] is True
     assert bulk['growth_rate_1_s'] == pytest.approx(0.0, abs=1e-12)
     assert bulk['solver_gate_consistency']['consistent'] is True
-    # Beyan, yayımlanan sonuçtaki görünür sabitliği açıklıyor mu?
-    assert 'fails closed' in bulk['solver_gate_consistency']['basis']
+    # Beyan GERÇEĞİ söylüyor mu: kapı üsteli değil yakınsamayı kapıyor.
+    kunye = bulk['solver_gate_consistency']['basis']
+    assert 'CONVERGENCE gate, not an exponent gate' in kunye
+    assert 'already fails closed for n >= 1' not in kunye
+    assert 'never gets published' not in kunye
+
+    # (4) ve n >= 1'de YAYIMLANAN bir koşu gerçekten var: künyenin
+    # iddiası aynı sözlükten doğrulanabilir olmalı.
+    taban = dict(KATI_TABAN)
+    taban.update(burn_rate_a=0.0005, burn_rate_n=1.30)
+    yayimlanan = SolidRocketEngine(**taban).calculate_performance()
+    assert not yayimlanan.get('error'), 'a=0,0005 n=1,30 yayımlanmalıydı'
+    kapi2 = (yayimlanan['combustion_stability']['bulk_mode']
+             ['solver_gate_consistency'])
+    assert kapi2['published_with_criterion_met'] is True
+    assert kapi2['burn_rate_exponent'] == pytest.approx(1.30)
+    assert kapi2['consistent'] is True
 
 
 # ===========================================================================
@@ -471,14 +533,53 @@ def test_kati_ortalama_akis_machi_YAYIMLANIYOR(kati):
 
 
 def test_kati_qshod_kapisi_kapali_ve_VARSAYILAN_YOK(kati):
-    """(A, B) ve κ verilmedikçe hiçbir sayı yayımlanmaz."""
+    """κ verilmedikçe hüküm verilmez ve kapalı kapıdan sayı sızmaz.
+
+    ÖH D22 (defter P6B4-08) — BEKÇİ ÇEVRİLDİ. Bu bekçi eskiden
+    ``combustion_response_band``ın da HER ZAMAN eksik olmasını şart
+    koşuyordu. O şart, ölçülmüş bir kusuru kilitliyordu: ``bands.py``in
+    (384 satır) ve ``fuel_thermal.py``ın (531 satır) künyeli tabloları
+    ürün kodundan HİÇ çağrılmıyordu ve bant yalnız testlerden
+    atanabiliyordu. Bant artık motorun yakıtının katalog satırından
+    okunuyor (``_qshod_band_from_catalog``), yani kaynağı olan yakıtta
+    (apcp, pban) kapının BU anahtarı çözülür.
+
+    Bekçinin KORUDUĞU iki kural aynen duruyor ve burada sınanmaya devam
+    ediyor:
+      * κ (yakıtın termal yayınırlığı) ölçülen bir özelliktir, üretilmez;
+        verilmedikçe blok HÜKÜM VERMEZ,
+      * hüküm verilmeyen bloktan hiçbir SAYI çıkmaz (bandın (A, B)
+        aralıkları ve zarfı dâhil — künye ``_sayisiz_kunye`` ile metne
+        indirgenir).
+    Üçüncü kural — "kaynağı olmayan yakıtta bant UYDURULMAZ" — ayrı bir
+    bekçide, kaydı boş olan yakıtla ölçülür.
+    """
     _, sonuc = kati
     blok = sonuc['combustion_stability']['qshod_response_band']
     assert blok['status'] == 'NOT_EVALUATED'
-    assert any('combustion_response_band' in e for e in blok['missing_inputs'])
     assert 'propellant_thermal_diffusivity_m2_s' in blok['missing_inputs']
     assert not _sayi_yollari(blok), (
         f'kapalı kapıdan sayı sızdı: {_sayi_yollari(blok)}')
+    # Bant çözülmüş olsa bile künyesi metindir ve kaynağını söyler.
+    assert blok['band_source']['numeric_fields_withheld'] is True
+    assert blok['thermal_diffusivity_source']['status'] == 'declared_missing'
+
+
+def test_kati_kaynaksiz_yakitta_bant_UYDURULMAZ():
+    """ÖH D22 (P6B4-08): boş tablo satırı sessiz varsayılana dönüşmez.
+
+    ``kndx``in bant satırı BEYANLA boştur (kaynak arandı, bulunamadı).
+    Kapının bant anahtarı o yakıtta çözülmemeli ve blok bunu kaydın kendi
+    gerekçesiyle söylemelidir.
+    """
+    from hrma.engines.solid_rocket_engine import SolidRocketEngine
+
+    motor = SolidRocketEngine(propellant_type='kndx')
+    band, kunye = motor._qshod_band_from_catalog()
+    assert band is None
+    assert kunye['status'] == 'declared_empty'
+    assert kunye['missing_record']['status'] == 'not_found'
+    assert len(kunye['missing_record']['reason']) > 40
 
 
 def _kati_curve_stub(sonuc):

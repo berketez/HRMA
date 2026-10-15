@@ -13,6 +13,7 @@ yardımcılarını (veri URL çözümü, JS metinleri) sınayabilsin diye.
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import time
 from typing import Any, Dict, List, Optional, Sequence
@@ -89,9 +90,238 @@ JS_TUVAL = """
 }
 """.replace('__MIN_KENAR__', str(esikler.TUVAL_MIN_KENAR_PX))
 
+#: ÖH D27 / OH-D25-02(a) — sayfanın BEYAN ETTİĞİ tuvalinin KİMLİĞİ
+#: (``Sayfa.tuval_secici``). ``JS_TUVAL``dan farkı: "en büyük tuvali bul"
+#: sezgisi YOKTUR; beyan edilen seçici neyi gösteriyorsa o ölçülür. Seçici
+#: bir tuval göstermiyorsa hata döner (fail-closed) — sessizce başka bir
+#: tuvale kaymak, ölçülen yüzeyin adını yalan yapardı.
+#:
+#: PİKSELLER BURADAN OKUNMAZ. ``canvas.toDataURL()`` bir WebGL tuvalinde
+#: yalnız ``preserveDrawingBuffer: true`` verilmişse ya da çizimle AYNI
+#: görevde okunuyorsa dolu gelir (motor_viz3d.js:5423 bunu adıyla anıyor;
+#: launch_site_globe.js:311 bayrağı VERMİYOR). İlk denememiz tam bu tuzağa
+#: düştü ve ÖLÇÜLDÜ: küre ekranda çizili dururken toDataURL 1600×946'lık
+#: BOŞ bir PNG verdi (dolu_oran 0,0 / entropi 0,0 / benzersiz renk 0) ve
+#: denetim "3B tuval BOŞ" diye YANLIŞ kırmızı yaktı. Ölçüm artefaktını
+#: ürün kusuru diye yayımlamak, kusuru gizlemek kadar kötüdür. Piksel
+#: kanıtı bu yüzden Playwright'ın ELEMAN ekran görüntüsünden alınır: o,
+#: kullanıcının gördüğü BİRLEŞTİRİLMİŞ kareyi yakalar.
+JS_BEYANLI_TUVAL = """
+(c) => {
+  const el = document.querySelector(c.secici);
+  if (!el) return { hata: 'beyan edilen tuval seçicisi hiçbir şeyi göstermiyor: '
+                          + c.secici };
+  if (el.tagName !== 'CANVAS')
+    return { hata: 'beyan edilen seçici tuval değil (' + el.tagName + '): '
+                   + c.secici };
+  const r = el.getBoundingClientRect();
+  return { tuval_genislik: el.width, tuval_yukseklik: el.height,
+           ekran_genislik: Math.round(r.width),
+           ekran_yukseklik: Math.round(r.height) };
+}
+"""
+
 #: Görünen metin. Betik gövdeleri innerText'e girmez; aranan şey KULLANICININ
 #: gördüğü sızıntıdır.
-JS_SAYFA_METNI = "() => (document.body ? document.body.innerText : '')"
+#:
+#: ÖH D22 / P17B1-12 — ÖLÇÜLEN KUSUR: gövde yalnız ``document.body.innerText``
+#: idi. ``innerText`` TANIM GEREĞİ ``<input>`` / ``<select>`` / ``<textarea>``
+#: DEĞERLERİNİ içermez; yani turun bütün metin taraması (sızıntı denetimi
+#: dahil) ekranda duran FORM ALANLARINA yapısal olarak kördü. P17 turu üç
+#: sayfada 182 dolu alan saydı, bunların ayırt edici 8 değerinin taranan
+#: metinde geçme sayısı **0**du; nöbetçi değerle doğrulandı (``thrust``
+#: alanına 987654321 yazıldı → metinde False).
+#:
+#: Onarım: görünür form denetimlerinin KULLANICININ GÖRDÜĞÜ değeri metnin
+#: sonuna eklenir. Kapsam dar tutulur, çünkü amaç ekran yüzeyini ölçmektir:
+#:   - görünmeyen (offsetParent yok / display:none / görünürlük kapalı),
+#:     type="hidden" ve parola alanları ATLANIR,
+#:   - ``<select>`` için seçili SEÇENEK METNİ alınır (kullanıcı değeri değil
+#:     etiketi görür — çeviri sızıntısı da böyle yakalanır),
+#:   - onay/radyo kutusunun metni yoktur, işaretli olması metin değildir:
+#:     ATLANIR,
+#:   - boş değer eklenmez (boşluk sızıntı taramasına gürültü katmaz).
+#: Ayırıcı satır başıdır; sızıntı denetimi satır satır çalıştığı için alan
+#: değeri kendi satırında durur ve komşu cümleye yapışmaz.
+JS_SAYFA_METNI = """
+() => {
+  const govde = document.body ? document.body.innerText : '';
+  const parcalar = [];
+  const gorunur = (el) => {
+    if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return false;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  document.querySelectorAll('input, select, textarea').forEach((el) => {
+    const etiket = el.tagName;
+    const tip = (el.getAttribute('type') || '').toLowerCase();
+    if (tip === 'hidden' || tip === 'password'
+        || tip === 'checkbox' || tip === 'radio') return;
+    if (!gorunur(el)) return;
+    let deger = '';
+    if (etiket === 'SELECT') {
+      const s = el.selectedOptions && el.selectedOptions[0];
+      deger = s ? (s.textContent || '') : '';
+    } else {
+      deger = el.value == null ? '' : String(el.value);
+    }
+    deger = deger.trim();
+    if (deger) parcalar.push(deger);
+  });
+  return parcalar.length ? (govde + '\\n' + parcalar.join('\\n')) : govde;
+}
+"""
+
+#: ÖH Faz 0 — sayfa yerleşimi ölçümü: yatay taşma + görünür metin
+#: yapraklarının örtüşmesi. Metin yaprağı = DOĞRUDAN metin düğümü dolu,
+#: görünür, çizim kaplarının (canvas/svg/.js-plotly-plot altı) dışında bir
+#: eleman. Ata-torun çiftleri örtüşme sayılmaz (bir paragrafın kutusu kendi
+#: satır içi çocuğunu meşru olarak kapsar); kalan her metin⟂metin kesişimi
+#: eşiklerin üstündeyse yerleşim kusurudur. Eşikler ``esikler.py``den
+#: geçirilir; burada sayı YOKTUR.
+JS_YERLESIM = """
+(c) => {
+  const yapiskanlar = [];
+  try {
+    const de = document.documentElement;
+    const tasma = Math.max(0, de.scrollWidth - de.clientWidth);
+    const yapraklar = [];
+    const elemanlar = [];
+    let kirpildi = false;
+    const KIRPAN = new Set(['hidden', 'clip', 'auto', 'scroll']);
+    // ÖH D27 / OH-D26-13 — YAPIŞKAN KUTULAR.
+    // ``position:sticky`` bir elemanın ``getBoundingClientRect()``i, kutu
+    // YAPIŞMIŞKEN yerleşim (akış) konumunu değil BOYANDIĞI konumu döner.
+    // Ölçüm sayfa koordinatına ``+ window.scrollY`` ile çevrildiği için
+    // sonuç KAYDIRMAYA BAĞLI olur: aynı sayfa, aynı DOM, farklı kaydırma
+    // konumunda farklı örtüşme hükmü. Ölçüldü (once_canli.json, /hybrid,
+    // sistem Chrome 152): ``#ac_history_box`` scrollY=2101'de sayfa
+    // konumunu 23277, scrollY=23244'te 23931 bildiriyor (654 px fark) ve
+    // örtüşme sayısı 1 ⟷ 0 arasında zıplıyor — biri yanlış pozitif, öbürü
+    // yanlış negatif. Kutu yürüyüşten ÖNCE ``position:static``a alınır
+    // (yapışkan eleman akıştan ÇIKMAZ; static'te kutusu akıştaki yerinde
+    // durur, yalnız yapışma kaydırması kalkar), ölçüm bittiğinde satır içi
+    // stil AYNEN geri yazılır. Etkisizleştirilen eleman sayısı raporda
+    // ADIYLA durur: sessiz düzeltme yok.
+    for (const el of document.querySelectorAll('*')) {
+      const yst = getComputedStyle(el);
+      if (yst.position !== 'sticky' && yst.position !== '-webkit-sticky') continue;
+      yapiskanlar.push({ el: el, eski: el.style.position });
+      el.style.position = 'static';
+    }
+    // Yürüyüş, atalardan gelen KIRPMA dikdörtgenini (mutlak sayfa
+    // koordinatında) taşır: max-height:0 + overflow:hidden ile katlanmış
+    // bir blok, kutusu tam boy ölçülse de EKRANDA yoktur — kapalı
+    // <details> gövdesi ve <select> seçenekleri de öyle. İlk canlı koşum
+    // (26 Ağu, Faz 0) bu üç sınıfın sahte örtüşme ürettiğini gösterdi;
+    // bu yüzden yaprak kutusu kırpma ile KESİŞTİRİLEREK ölçülür.
+    const yurut = (el, kirpma) => {
+      if (!(el && el.nodeType === 1)) return;
+      const ad = el.tagName;
+      if (ad === 'SCRIPT' || ad === 'STYLE' || ad === 'NOSCRIPT'
+          || ad === 'CANVAS' || ad === 'SVG' || ad === 'svg'
+          || ad === 'SELECT' || ad === 'OPTION' || ad === 'OPTGROUP'
+          || ad === 'DATALIST'
+          || el.namespaceURI === 'http://www.w3.org/2000/svg') return;
+      if (el.classList && el.classList.contains('js-plotly-plot')) return;
+      const st = getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden'
+          || parseFloat(st.opacity || '1') === 0) return;
+      const r = el.getBoundingClientRect();
+      const mx = r.left + window.scrollX, my = r.top + window.scrollY;
+      if (KIRPAN.has(st.overflowX)) {
+        kirpma = { x1: Math.max(kirpma.x1, mx),
+                   x2: Math.min(kirpma.x2, mx + r.width),
+                   y1: kirpma.y1, y2: kirpma.y2 };
+      }
+      if (KIRPAN.has(st.overflowY)) {
+        kirpma = { x1: kirpma.x1, x2: kirpma.x2,
+                   y1: Math.max(kirpma.y1, my),
+                   y2: Math.min(kirpma.y2, my + r.height) };
+      }
+      let oz = '';
+      for (const dugum of el.childNodes) {
+        if (dugum.nodeType === 3) oz += dugum.textContent;
+      }
+      oz = oz.replace(/\\s+/g, ' ').trim();
+      if (oz) {
+        // Çok satıra sarılmış INLINE elemanın sınır kutusu, ilk satırın
+        // önündeki komşu etiketi de kapsar (satır kutularının birleşimi) —
+        // örtüşme SATIR PARÇALARI üstünden ölçülür (getClientRects), yoksa
+        // '<strong>etiket</strong> <span>uzun metin</span>' deseni sahte
+        // örtüşme üretir (ilk canlı koşumda ölçüldü).
+        let parcalar = [r];
+        if (st.display.indexOf('inline') === 0) {
+          const satirlar = el.getClientRects();
+          if (satirlar.length > 1) parcalar = Array.from(satirlar);
+        }
+        for (const parca of parcalar) {
+          if (yapraklar.length >= c.sinir) { kirpildi = true; break; }
+          const px = parca.left + window.scrollX;
+          const py = parca.top + window.scrollY;
+          const x1 = Math.max(px, kirpma.x1);
+          const y1 = Math.max(py, kirpma.y1);
+          const x2 = Math.min(px + parca.width, kirpma.x2);
+          const y2 = Math.min(py + parca.height, kirpma.y2);
+          if (x2 - x1 > 1 && y2 - y1 > 1) {
+            yapraklar.push({ m: oz.slice(0, 60), x: x1, y: y1,
+                             g: x2 - x1, k: y2 - y1 });
+            elemanlar.push(el);
+          }
+        }
+      }
+      if (ad === 'DETAILS' && !el.open) {
+        // Kapalı ayrıntı bloğunun ekrandaki tek parçası özetidir; gövdesi
+        // kutu ölçse de görünmez (Chromium content-visibility davranışı
+        // sürümden sürüme değişiyor — açıkça atlanır).
+        for (const cocuk of el.children) {
+          if (cocuk.tagName === 'SUMMARY') yurut(cocuk, kirpma);
+        }
+        return;
+      }
+      for (const cocuk of el.children) yurut(cocuk, kirpma);
+    };
+    yurut(document.body, { x1: -Infinity, y1: -Infinity,
+                           x2: Infinity, y2: Infinity });
+    const sira = yapraklar.map((v, i) => i).sort(
+      (a, b) => yapraklar[a].y - yapraklar[b].y);
+    const ortusmeler = [];
+    for (let s = 0; s < sira.length && ortusmeler.length < c.ornek; s++) {
+      const i = sira[s];
+      const A = yapraklar[i];
+      for (let t = s + 1; t < sira.length; t++) {
+        const j = sira[t];
+        const B = yapraklar[j];
+        if (B.y >= A.y + A.k) break;
+        const gx = Math.min(A.x + A.g, B.x + B.g) - Math.max(A.x, B.x);
+        const gy = Math.min(A.y + A.k, B.y + B.k) - Math.max(A.y, B.y);
+        if (gx <= 0 || gy <= 0) continue;
+        const alan = gx * gy;
+        const kucuk = Math.min(A.g * A.k, B.g * B.k);
+        if (alan < c.min_alan || alan < c.oran * kucuk) continue;
+        if (elemanlar[i].contains(elemanlar[j])
+            || elemanlar[j].contains(elemanlar[i])) continue;
+        ortusmeler.push({ a: A.m, b: B.m, alan: Math.round(alan),
+                          konum: [Math.round(Math.max(A.x, B.x)),
+                                  Math.round(Math.max(A.y, B.y))] });
+        if (ortusmeler.length >= c.ornek) break;
+      }
+    }
+    return { yatay_tasma_px: tasma, belge_genisligi: de.scrollWidth,
+             pencere_genisligi: de.clientWidth,
+             yaprak_sayisi: yapraklar.length, kirpildi: kirpildi,
+             yapiskan_etkisizlestirilen: yapiskanlar.length,
+             ortusmeler: ortusmeler };
+  } catch (hata) { return { hata: String(hata) }; }
+  finally {
+    // Ölçüm sayfayı DEĞİŞTİRMİŞ bırakamaz: turun sonraki adımları
+    // (tam sayfa görüntüsü) aynı sayfada koşuyor.
+    for (const y of yapiskanlar) y.el.style.position = y.eski;
+  }
+}
+"""
 
 #: Yanmayı arayüz düğmesi olmadan başlatma yolu. ``play()`` yanma bitmişse
 #: zamanı sıfırlar (motor_viz3d.js:2231), yani ölçümden hemen önce çağrılması
@@ -134,6 +364,35 @@ JS_FEA_PANEL_DURUMU = """
   const api = window[c.api] || null;
   let yuk = null;
   try { yuk = api ? api.payload : null; } catch (e) { yuk = null; }
+  // ÖH Faz 0 (P17 reçetesi): yükün yalnız VARLIĞI değil hüküm taşıyan
+  // İÇERİĞİ de kaydedilir — rozet⟷yük çaprazı ancak bununla kurulabilir.
+  // Diziler (mesh alanları, tarihçeler) atılır; yalnız skaler/hüküm
+  // blokları taşınır ki rapor şişmesin.
+  const yukOzeti = (function (y) {
+    if (!y || typeof y !== 'object') return null;
+    const kucult = function (v, derinlik) {
+      if (v === null) return null;
+      const t = typeof v;
+      if (t === 'number' || t === 'boolean' || t === 'string') return v;
+      if (Array.isArray(v) || t !== 'object' || derinlik >= 3) return undefined;
+      const kopya = {};
+      Object.keys(v).forEach(function (k) {
+        const kv = kucult(v[k], derinlik + 1);
+        if (kv !== undefined) kopya[k] = kv;
+      });
+      return kopya;
+    };
+    const secilen = {};
+    ['scalars', 'convergence', 'material_limits', 'time_step', 'energy',
+     'mesh_info', 'flags', 'limits', 'engine_layout', 'grain_type',
+     'symmetry_fraction'].forEach(function (k) {
+      if (k in y) {
+        const kv = kucult(y[k], 0);
+        if (kv !== undefined) secilen[k] = kv;
+      }
+    });
+    return secilen;
+  })(yuk);
   const rozetKabi = document.getElementById(c.rozet);
   const rozetler = rozetKabi
     ? Array.from(rozetKabi.querySelectorAll('[data-badge]')).map(function (b) {
@@ -167,6 +426,7 @@ JS_FEA_PANEL_DURUMU = """
     panel_gorunur: gorunur(panel, 1),
     api_var: !!api,
     yuk_var: !!yuk,
+    yuk_ozeti: yukOzeti,
     mesgul: gizliDegil(document.getElementById(c.mesgul)),
     cip_metni: cip ? (cip.textContent || '').replace(/\\s+/g, ' ').trim() : null,
     rozetler: rozetler,
@@ -312,26 +572,37 @@ JS_MERKEZ_KIRACI = """
   try { gecmis = (A && typeof A.history === 'function') ? A.history() : null; }
   catch (e) { gecmis = null; }
   const son = (gecmis && gecmis.length) ? gecmis[gecmis.length - 1] : null;
+  // ÖH D23 / P10B3-03 — yük okuyucusu artık BEYANA göre çalışır.
+  // Eskiden bu blok CFD'nin yük anahtarına ve alan adlarına GÖMÜLÜYDÜ;
+  // ikinci bir kiracı eklemek JS düzenlemeyi gerektiriyordu. Alan listesi
+  // ve dönüşümler `sayfalar.MerkezKiracisi.yuk_alanlari`ndan gelir.
+  const yol_izle = (kok, yol) => {
+    let d = kok;
+    const parcalar = String(yol).split('.');
+    for (let i = 0; i < parcalar.length; i++) {
+      if (d === null || d === undefined || typeof d !== 'object') return undefined;
+      d = d[parcalar[i]];
+    }
+    return d;
+  };
+  const donustur = (v, tur) => {
+    if (tur === 'mantiksal') return (typeof v === 'boolean') ? v : null;
+    if (tur === 'bool') return !!v;
+    if (tur === 'uzunluk') return Array.isArray(v) ? v.length : 0;
+    if (tur === 'dolu_deger') return v || null;
+    return (v === undefined) ? null : v;   // 'deger'
+  };
   let yuk = null;
-  if (son && son.ok && son.data && son.data.cfd) {
-    const cfd = son.data.cfd;
-    const sep = cfd.separation || {};
-    const inl = cfd.inlet_conditioning || {};
-    yuk = {
-      converged: (typeof cfd.converged === 'boolean') ? cfd.converged : null,
-      iterations: cfd.iterations,
-      kernel: cfd.kernel_backend || null,
-      judgment_confidence: sep.judgment_confidence || null,
-      separated: (typeof sep.separated === 'boolean') ? sep.separated : null,
-      bridge_refused: !!sep.bridge_refused,
-      budget_advisory: !!inl.budget_advisory,
-      budget_advisory_reasons: inl.budget_advisory_reasons || null,
-      contraction_ratio: inl.contraction_ratio,
-      alan_bloklu: !!cfd.field,
-      kalinti_noktalari: (cfd.residual_history && cfd.residual_history.iteration)
-        ? cfd.residual_history.iteration.length : 0,
-      resolution: (cfd.inputs && cfd.inputs.resolution) || null
-    };
+  const alanlar = c.yuk_alanlari || [];
+  if (son && son.ok && son.data && alanlar.length) {
+    const kok_yuk = c.yuk_anahtari ? son.data[c.yuk_anahtari] : son.data;
+    if (kok_yuk !== null && kok_yuk !== undefined) {
+      yuk = {};
+      for (let i = 0; i < alanlar.length; i++) {
+        const a = alanlar[i];
+        yuk[a[0]] = donustur(yol_izle(kok_yuk, a[1]), a[2]);
+      }
+    }
   }
   const kok = document.getElementById(c.kok);
   const cizimler = kok
@@ -379,6 +650,54 @@ JS_MERKEZ_KIRACI = """
 # Saf yardımcılar (tarayıcısız sınanabilir)
 # ---------------------------------------------------------------------------
 
+#: PNG imzası — IHDR başlığı imzadan hemen sonra gelir.
+_PNG_IMZASI = b'\x89PNG\r\n\x1a\n'
+
+
+def png_boyutu(yol: str) -> Optional[Dict[str, int]]:
+    """PNG dosyasının piksel boyutunu IHDR'den okur (bağımlılıksız).
+
+    ÖH D20 · P17B1-05: turun sakladığı tek insan-okur kanıt tam sayfa
+    PNG'ydi ve hiçbir denetim onun YÜKSEKLİĞİNE bakmıyordu. Yükseklik
+    ölçülmeden "kanıt saklandı" denemez. Okunamayan dosya için ``None``
+    döner (bozuk veriden ölçüm uydurulmaz).
+    """
+    try:
+        with open(yol, 'rb') as f:
+            bas = f.read(24)
+    except OSError:
+        return None
+    if len(bas) < 24 or not bas.startswith(_PNG_IMZASI):
+        return None
+    if bas[12:16] != b'IHDR':
+        return None
+    genislik = int.from_bytes(bas[16:20], 'big')
+    yukseklik = int.from_bytes(bas[20:24], 'big')
+    if genislik <= 0 or yukseklik <= 0:
+        return None
+    return {'genislik': genislik, 'yukseklik': yukseklik}
+
+
+def dosya_sha256(yol: str) -> Optional[str]:
+    """Dosya içeriğinin sha256'sı (ÖH D27 / OH-D25-02b).
+
+    Dilimli tam-sayfa kanıtında dilimlerin BİRBİRİNDEN FARKLI olduğunu
+    ölçmek için gerekir. Kalemin kökü tam buydu: ``full_page=True`` ile
+    istenen dev PNG'de tavanı aşan bant üst bandın BİREBİR tekrarıydı
+    (maks piksel farkı 0) ve hiçbir denetim bunu göremiyordu — dilimlerin
+    yükseklik toplamı doğruyken içerikleri aynı olabilir. Okunamayan dosya
+    için ``None`` döner; uydurma imza üretilmez.
+    """
+    h = hashlib.sha256()
+    try:
+        with open(yol, 'rb') as f:
+            for parca in iter(lambda: f.read(1 << 20), b''):
+                h.update(parca)
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
 def veri_url_baytlari(veri_url: Optional[str]) -> Optional[bytes]:
     """``data:image/png;base64,...`` dizesini ham baytlara çevirir.
 
@@ -399,6 +718,17 @@ def veri_url_baytlari(veri_url: Optional[str]) -> Optional[bytes]:
     # ``validate=False`` bozuk gövdeyi sessizce boş dizeye çevirir; boş bayt
     # dizisinden "ölçüm" üretilmesin diye burada durdurulur.
     return baytlar or None
+
+
+class _HesapsizSayfaBitti(Exception):
+    """Hesapsız sayfanın gezintisi TAMAMLANDI (kusur değil, akış sonu).
+
+    ÖH D21 / P17B1-16. ``gez()`` gövdesi tek bir ``try`` bloğudur; hesapsız
+    sayfada ölçüm erken biter ve geri kalan adımlar (3B, FEA, Merkez)
+    ATLANMALIDIR. ``return`` kullanılamaz: ``finally`` içindeki tam sayfa
+    görüntüsü ve ``_rapor`` çağrısı kaçırılırdı. Bu istisna akışı ``finally``
+    üzerinden düzgün kapatır ve ``self.hatalar``a HİÇBİR ŞEY yazmaz.
+    """
 
 
 def _kisalt(metin: Any, uzunluk: int = 400) -> str:
@@ -459,8 +789,11 @@ class SayfaGezgini:
         metin: Optional[str] = None
         fea: Dict[str, Any] = {}
         merkez: Dict[str, Any] = {}
+        yerlesim: Dict[str, Any] = {}
         plume_baslatma = 'yok'
-        goruntuler: Dict[str, Optional[str]] = {'tam_sayfa': None, 'uc_boyut': None}
+        goruntuler: Dict[str, Any] = {'tam_sayfa': None,
+                                      'tam_sayfa_px': None,
+                                      'uc_boyut': None}
 
         self.dinleyicileri_bagla()
         try:
@@ -476,6 +809,36 @@ class SayfaGezgini:
                 self.asamalar.append('ağ sessizliğine ulaşılamadı (devam edildi)')
             sureler['yukleme_s'] = time.time() - t0
             self.asamalar.append('sayfa açıldı: %s' % url)
+
+            # ÖH D21 / defter P17B1-16 — HESAPSIZ SAYFA DALI.
+            # ``/``, ``/formulas`` ve ``/launch-site`` sayfalarında hesap
+            # düğmesi, ``currentResults`` nesnesi, 3B sahne, FEA paneli ve
+            # Analiz Merkezi YOKTUR (ölçüldü). Bu dal onları aramaz —
+            # aramak, olmayan bir düğmeyi bekleyip akışı kesmek olurdu ve
+            # üç sayfa da "AKIŞ KESİLDİ" ile kırmızı yanardı. Geriye
+            # kullanıcının o sayfada gerçekten maruz kaldığı yüzey kalır:
+            # konsol, sızıntı, yerleşim, tam sayfa görüntüsü.
+            if not getattr(self.tanim, 'hesap_var', True):
+                self.asamalar.append(
+                    'hesapsız sayfa: hesap/3B/FEA/Merkez adımları ATLANDI '
+                    '(sayfada yoklar)')
+                # ÖH D27 / OH-D25-02(a) — HESAPSIZ ≠ TUVALSİZ.
+                # ``/launch-site``in küresi hesap akışına bağlı değildir ama
+                # sayfanın ASIL yüzeyidir; eski dal onu da atlıyordu.
+                if getattr(self.tanim, 'tuval_secici', ''):
+                    tuval_ham, piksel = self._beyanli_tuvali_olc(goruntuler)
+                metin = self.p.evaluate(JS_SAYFA_METNI)
+                try:
+                    yerlesim = self.p.evaluate(JS_YERLESIM, {
+                        'sinir': esikler.ORTUSME_TARAMA_UST_SINIRI,
+                        'min_alan': esikler.ORTUSME_MIN_KESISIM_PX2,
+                        'oran': esikler.ORTUSME_MIN_KESISIM_ORANI,
+                        'ornek': esikler.RAPOR_ORNEK_UST_SINIRI,
+                    }) or {}
+                except Exception as hata:
+                    yerlesim = {'hata': '%s: %s' % (type(hata).__name__,
+                                                    _kisalt(hata, 200))}
+                raise _HesapsizSayfaBitti()
 
             self._hesabi_tetikle(sureler)
             self._sahneyi_kurdur()
@@ -515,20 +878,160 @@ class SayfaGezgini:
             merkez = self._merkezi_kostur()
 
             metin = self.p.evaluate(JS_SAYFA_METNI)
+            # Yerleşim en SON ölçülür: FEA/Merkez koşumları sayfaya kap
+            # eklediği için taşma ve örtüşme, kullanıcının en dolu ekranda
+            # göreceği hâliyle ölçülmüş olur. Ölçüm istisnası akışı KESMEZ;
+            # hüküm katmanı boş ölçümü fail-closed kırmızıya çevirir.
+            try:
+                yerlesim = self.p.evaluate(JS_YERLESIM, {
+                    'sinir': esikler.ORTUSME_TARAMA_UST_SINIRI,
+                    'min_alan': esikler.ORTUSME_MIN_KESISIM_PX2,
+                    'oran': esikler.ORTUSME_MIN_KESISIM_ORANI,
+                    'ornek': esikler.RAPOR_ORNEK_UST_SINIRI,
+                }) or {}
+            except Exception as hata:
+                yerlesim = {'hata': '%s: %s' % (type(hata).__name__,
+                                                _kisalt(hata, 200))}
+        except _HesapsizSayfaBitti:
+            # Kusur değil, akışın DOĞAL sonu: hesapsız sayfanın ölçülecek
+            # her şeyi ölçüldü. ``self.hatalar`` boş kalır, dolayısıyla
+            # ``akis_tamam`` denetimi yeşildir.
+            pass
         except Exception as hata:
             self.hatalar.append('%s: %s' % (type(hata).__name__, _kisalt(hata, 600)))
             self.asamalar.append('AKIŞ KESİLDİ')
         finally:
             try:
-                yol = os.path.join(self.cikti_dizini, '%s_tam.png' % self.tanim.ad)
-                self.p.screenshot(path=yol, full_page=True)
-                goruntuler['tam_sayfa'] = yol
+                self._tam_sayfa_yakala(goruntuler)
             except Exception as hata:
                 self.hatalar.append('tam sayfa görüntüsü alınamadı: %s'
                                     % _kisalt(hata, 200))
 
         return self._rapor(sureler, viz, tuval_ham, piksel, metin,
-                           plume_baslatma, goruntuler, fea, merkez)
+                           plume_baslatma, goruntuler, fea, merkez, yerlesim)
+
+    def _beyanli_tuvali_olc(self, goruntuler: Dict[str, Any]):
+        """Sayfanın BEYAN ETTİĞİ tuvalini ölçer (ÖH D27 / OH-D25-02a).
+
+        ``(tuval_ham, piksel)`` döner. Hesap akışı olmayan bir sayfanın
+        tuvali de kullanıcının gördüğü yüzeydir: ``/launch-site``in küresi
+        siyah/boş çıksa tur bunu HİÇ görmüyordu (ölçüldü: ``tuval_kaynagi``
+        None, ``piksel`` {}).
+
+        FAIL-CLOSED: seçici beyan edildiyse tuvalin bulunamaması, hazır
+        olmaması ya da okunamaması KIRMIZIDIR — beyan edilmiş bir yüzeyin
+        ölçülememesi "sorun yok" değildir. Ölçüm istisnası akışı KESMEZ,
+        gerekçe ``tuval_ham['hata']``ya yazılır ve ``tuval_denetimi`` onu
+        basar.
+        """
+        secici = self.tanim.tuval_secici
+        tuval_ham: Dict[str, Any] = {'kaynak': 'beyanlı seçici: %s' % secici}
+        try:
+            hedef = self.p.locator(secici).first
+            hedef.wait_for(state='visible',
+                           timeout=esikler.VIZ_KURULUM_ZAMAN_ASIMI_MS)
+            kosul = getattr(self.tanim, 'tuval_hazir_kosulu', '')
+            if kosul:
+                # Sabit bir uyku YOK: çizimin GERÇEKTEN başladığı, sayfanın
+                # kendi ölçütüyle beklenir.
+                self.p.wait_for_function(
+                    kosul, timeout=esikler.VIZ_KURULUM_ZAMAN_ASIMI_MS)
+                self.asamalar.append('tuval hazır ölçütü sağlandı: %s' % kosul)
+            ham = self.p.evaluate(JS_BEYANLI_TUVAL, {'secici': secici}) or {}
+            tuval_ham.update(ham)
+            if ham.get('hata'):
+                return tuval_ham, {'hata': ham['hata']}
+            # Pikseller BİRLEŞTİRİLMİŞ kareden okunur (bkz. JS_BEYANLI_TUVAL
+            # notu: WebGL tuvalinde toDataURL boş gelir).
+            baytlar = hedef.screenshot(type='png')
+            tuval_ham['kaynak'] = ('eleman ekran görüntüsü (%s), %sx%s'
+                                   % (secici, ham.get('tuval_genislik'),
+                                      ham.get('tuval_yukseklik')))
+            self.asamalar.append(
+                'beyanlı tuval ölçüldü (%s): %sx%s'
+                % (secici, ham.get('tuval_genislik'), ham.get('tuval_yukseklik')))
+        except Exception as hata:
+            tuval_ham['hata'] = '%s: %s' % (type(hata).__name__,
+                                            _kisalt(hata, 200))
+            self.asamalar.append('beyanlı tuval ÖLÇÜLEMEDİ (%s): %s'
+                                 % (secici, tuval_ham['hata']))
+            return tuval_ham, {'hata': tuval_ham['hata']}
+        if baytlar:
+            yol = os.path.join(self.cikti_dizini, '%s_tuval.png' % self.tanim.ad)
+            with open(yol, 'wb') as dosya:
+                dosya.write(baytlar)
+            goruntuler['tuval'] = yol
+        return tuval_ham, denetimler.piksel_olcumu(baytlar)
+
+    def _tam_sayfa_yakala(self, goruntuler: Dict[str, Any]) -> None:
+        """Tam sayfa kanıtı — tavanı aşan sayfada DİLİMLİ yakalama.
+
+        ÖH D24 · OH-D21-11. ÖLÇÜLDÜ (D20 · P17B1-05 ve D21 · OH-D21-11):
+        ``full_page=True`` ile istenen PNG, sayfa Chromium'un 16.384 px'lik
+        tek-kare tavanını aşınca İSTENEN yükseklikte üretilir ama tavanı
+        aşan bant üst bandın BİREBİR tekrarıdır (maks piksel farkı 0).
+        ``/formulas`` 40.604 px: sayfanın %59,6'sı hiçbir koşumda
+        görüntülenmiyordu. D20 bunu doğru biçimde SAHTE KANIT sayıp kapıyı
+        kapattı; ama o gün kapı 6 sayfanın 4'ünde kırmızı kaldı ve turun
+        tek insan-okur kanıtı ÜRETİLEMEZ oldu.
+
+        Çözüm kapıyı gevşetmek değil, kanıtı GERÇEKTEN üretmektir: sayfa
+        tavanı aşıyorsa görüntü, her biri tavanın altında kalan ardışık
+        DİLİMLER hâlinde alınır (``clip`` sayfa koordinatlarındadır, yani
+        her dilim sayfanın FARKLI bir bandıdır — tekrar yok). Dilimler
+        bitişiktir ve toplamları sayfanın tamamını kaplar; denetim bunu
+        ``tam_sayfa_dilimleri`` üstünden ölçer.
+
+        Fail-closed: sayfa boyu okunamazsa dilimleme yapılmaz, tek kare
+        alınır ve denetim eski yolla (yükseklik ⟷ tavan) hüküm verir.
+        """
+        tavan = esikler.CHROMIUM_TEK_KARE_TAVANI_PX
+        try:
+            olcu = self.p.evaluate(
+                '() => ({ g: Math.max(document.documentElement.scrollWidth,'
+                ' document.body ? document.body.scrollWidth : 0),'
+                ' y: Math.max(document.documentElement.scrollHeight,'
+                ' document.body ? document.body.scrollHeight : 0) })')
+            sayfa_g = int(olcu['g'])
+            sayfa_y = int(olcu['y'])
+        except Exception:
+            sayfa_g = sayfa_y = 0
+        goruntuler['sayfa_boyu_px'] = (
+            {'genislik': sayfa_g, 'yukseklik': sayfa_y} if sayfa_y > 0 else None)
+
+        if sayfa_y <= 0 or sayfa_y <= tavan:
+            yol = os.path.join(self.cikti_dizini, '%s_tam.png' % self.tanim.ad)
+            self.p.screenshot(path=yol, full_page=True)
+            goruntuler['tam_sayfa'] = yol
+            # P17B1-05: kanıtın KENDİSİ ölçülür, yalnız yolu yazılmaz.
+            goruntuler['tam_sayfa_px'] = png_boyutu(yol)
+            goruntuler['tam_sayfa_dilimleri'] = None
+            return
+
+        # Dilim adımı: tavanın altında kalsın diye tavanın kendisi değil,
+        # ondan bir miktar küçük bir adım seçilir; cihaz piksel oranı 1'den
+        # büyükse üretilen PNG istenen CSS yüksekliğinden BÜYÜK olur ve tam
+        # tavan adımı tavanı aşardı. Ölçek `scale='css'` ile sabitlenir,
+        # adım da güvenli tarafta tutulur.
+        adim = tavan // 2
+        dilimler = []
+        i = 0
+        y0 = 0
+        while y0 < sayfa_y:
+            h = min(adim, sayfa_y - y0)
+            yol = os.path.join(self.cikti_dizini,
+                               '%s_tam_d%02d.png' % (self.tanim.ad, i))
+            self.p.screenshot(path=yol, full_page=True, scale='css',
+                              clip={'x': 0, 'y': y0,
+                                    'width': sayfa_g, 'height': h})
+            dilimler.append({'yol': yol, 'y0': y0, 'istenen_yukseklik': h,
+                             'px': png_boyutu(yol),
+                             'sha256': dosya_sha256(yol)})
+            y0 += h
+            i += 1
+        goruntuler['tam_sayfa'] = dilimler[0]['yol'] if dilimler else None
+        goruntuler['tam_sayfa_px'] = dilimler[0]['px'] if dilimler else None
+        goruntuler['tam_sayfa_dilimleri'] = dilimler
 
     def _hesabi_tetikle(self, sureler: Dict[str, float]) -> None:
         dugme = self.p.locator(self.tanim.hesapla_secici).first
@@ -645,6 +1148,8 @@ class SayfaGezgini:
         olcum['basladi'] = False
         olcum['_dayanak'] = {
             'yuk_var': 'window.%s.payload != null' % tanim.api_adi,
+            'yuk_ozeti': ('payload\'ın skaler/hüküm blokları (diziler atılır) '
+                          '— rozet⟷yük çaprazının ham girdisi'),
             'panel_gorunur': ('getComputedStyle(#%s).display + kutunun sıfır '
                               'olmaması' % tanim.panel_kimligi),
             'cizimler': ('kap görünürlüğü + .js-plotly-plot sınıfı + kap '
@@ -718,6 +1223,10 @@ class SayfaGezgini:
             'dugme': esikler.MERKEZ_KOSUM_DUGMESI_KIMLIGI,
             'durum': esikler.MERKEZ_DURUM_KIMLIGI,
             'min_kenar': esikler.MERKEZ_CIZIM_MIN_KENAR_PX,
+            # ÖH D23 / P10B3-03 — yük sözleşmesi kiracıdan gelir; JS gövdesi
+            # artık hiçbir kiracının alan adını BİLMEZ.
+            'yuk_anahtari': kiraci.yuk_anahtari,
+            'yuk_alanlari': [list(a) for a in kiraci.yuk_alanlari],
         }
 
     def _merkezi_kostur(self) -> Dict[str, Any]:
@@ -864,8 +1373,10 @@ class SayfaGezgini:
 
     # -- rapor ------------------------------------------------------------
     def _rapor(self, sureler, viz, tuval_ham, piksel, metin, plume_baslatma,
-               goruntuler, fea=None, merkez=None) -> Dict[str, Any]:
+               goruntuler, fea=None, merkez=None,
+               yerlesim=None) -> Dict[str, Any]:
         akis_tamam = not self.hatalar
+        hesap_var = getattr(self.tanim, 'hesap_var', True)
         liste = [
             denetimler.Denetim(
                 ad='akis_tamam', gecti=akis_tamam,
@@ -874,16 +1385,33 @@ class SayfaGezgini:
                 dayanak='gezinti adımlarının istisna kaydı',
                 olcum={'asamalar': self.asamalar, 'hatalar': self.hatalar},
                 esik={}),
-            denetimler.tuval_denetimi(piksel, kaynak=tuval_ham.get('kaynak', '')),
-            denetimler.plume_denetimi(viz, piksel),
+        ]
+        # ÖH D21 / P17B1-16: 3B tuval ve egzoz denetimleri YALNIZ hesap
+        # akışı olan sayfalarda üretilir. Hesapsız sayfada bunları üretmek
+        # HAYALET DENETİM olurdu: sayfada 3B sahne yok, "tuval boş" hükmü
+        # kusuru olmayan sayfayı kırmızıya boyar ve kapıyı okunamaz kılar.
+        # ÖH D27 / OH-D25-02(a): tuval denetimi artık "hesap akışı var mı"
+        # sorusuna değil "bu sayfanın ÖLÇÜLECEK bir tuvali var mı" sorusuna
+        # bağlı. ``/launch-site`` hesapsızdır ama küresi vardır; egzoz
+        # (plume) denetimi ise hesap akışına bağlı kalır — orada gerçekten
+        # yanma yoktur.
+        if hesap_var or getattr(self.tanim, 'tuval_secici', ''):
+            liste.append(denetimler.tuval_denetimi(
+                piksel, kaynak=tuval_ham.get('kaynak', '')))
+        if hesap_var:
+            liste.append(denetimler.plume_denetimi(viz, piksel))
+        liste.extend([
             denetimler.konsol_denetimi(self.kayitlar),
             denetimler.sizinti_denetimi(metin),
-        ]
+            denetimler.tam_sayfa_goruntusu_denetimi(goruntuler),
+        ])
+        liste.extend(denetimler.yerlesim_denetimleri(yerlesim))
         fea = fea or {}
         for tanim in getattr(self.tanim, 'fea_panelleri', ()):
             liste.extend(denetimler.fea_denetimleri(tanim, fea.get(tanim.ad)))
         merkez = merkez or {}
-        liste.extend(denetimler.merkez_denetimleri(self.tanim, merkez))
+        if hesap_var:
+            liste.extend(denetimler.merkez_denetimleri(self.tanim, merkez))
         return {
             'ad': self.tanim.ad,
             'url': self.temel_url + self.tanim.yol,
@@ -898,6 +1426,7 @@ class SayfaGezgini:
                 'fea': fea,
                 'merkez': merkez,
                 'plume_baslatma': plume_baslatma,
+                'yerlesim': yerlesim or {},
                 'http_hatalari': self.http_hatalari[:esikler.RAPOR_ORNEK_UST_SINIRI],
                 'http_hata_sayisi': len(self.http_hatalari),
             },
@@ -919,20 +1448,30 @@ PAKETLI_KANAL_ADI = '(paketli chromium)'
 def _tarayici_ac(pw, kanal: Optional[str], basli: bool):
     """İlk açılan Chromium yapısını döner; hepsi başarısızsa istisna yükseltir.
 
-    Hangi yapının kullanıldığı raporda saklanır: farklı sürücüler farklı
-    WebGL davranışı gösterebilir, hüküm okunurken bu bilinmeli.
+    ``(tarayici, kullanilan_kanal, denemeler)`` döner.
+
+    ÖH D20 · P17B1-07 — SESSİZ DÜŞÜŞ YOK. Paketli Chromium açılamayıp tur
+    sistem Chrome'una düştüğünde bu eskiden hiçbir yere yazılmıyordu: künye
+    yalnız KAZANAN kanalı taşıyordu, özet ise tarayıcıyı hiç anmıyordu.
+    Artık her deneme (açıldı/açılamadı + hata) kayda geçer; ``denetimler.
+    tarayici_denetimi`` bu kaydın varlığını ŞART koşar (fail-closed).
     """
-    denemeler = [kanal] if (kanal and kanal != 'auto') else list(KANAL_SIRASI)
+    sira = [kanal] if (kanal and kanal != 'auto') else list(KANAL_SIRASI)
+    denemeler: List[Dict[str, Any]] = []
     hatalar: List[str] = []
-    for k in denemeler:
+    for k in sira:
         baslat: Dict[str, Any] = {'headless': not basli}
         if k:
             baslat['channel'] = k
+        ad = k or PAKETLI_KANAL_ADI
         try:
             tarayici = pw.chromium.launch(**baslat)
-            return tarayici, (k or PAKETLI_KANAL_ADI)
+            denemeler.append({'kanal': ad, 'acildi': True, 'hata': None})
+            return tarayici, ad, denemeler
         except Exception as hata:
-            hatalar.append('%s -> %s' % (k or PAKETLI_KANAL_ADI, _kisalt(hata, 160)))
+            metin = _kisalt(hata, 160)
+            denemeler.append({'kanal': ad, 'acildi': False, 'hata': metin})
+            hatalar.append('%s -> %s' % (ad, metin))
     raise RuntimeError('Chromium açılamadı. Denenenler: %s' % ' | '.join(hatalar))
 
 
@@ -949,10 +1488,12 @@ def turu_kos(temel_url: str, sayfa_tanimlari: Sequence[Sayfa], cikti_dizini: str
     os.makedirs(cikti_dizini, exist_ok=True)
     raporlar: List[Dict[str, Any]] = []
     with sync_playwright() as pw:
-        tarayici, kullanilan = _tarayici_ac(pw, kanal, basli)
+        tarayici, kullanilan, denemeler = _tarayici_ac(pw, kanal, basli)
         kunye = {'motor': 'chromium', 'kanal': kullanilan,
                  'surum': tarayici.version, 'basli': bool(basli),
-                 '_dayanak': 'playwright Browser.version'}
+                 'istenen_kanal': kanal or 'auto',
+                 'denemeler': denemeler,
+                 '_dayanak': 'playwright Browser.version + açılış denemeleri'}
         try:
             for tanim in sayfa_tanimlari:
                 baglam = tarayici.new_context(viewport=esikler.GORUNTU_ALANI,

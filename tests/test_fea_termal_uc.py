@@ -43,10 +43,24 @@ sabit bir sayıya bağlanmamıştır.
 
 import contextlib
 import io
+import json
 
 import pytest
 
 THERMAL_ENDPOINT = '/api/fea/thermal'
+
+#: OH-D17-07 — KÖPRÜ REDDEDERSE ZARF DA REDDEDER.
+#: Bu bekçiler eskiden ``kod == 200`` diyordu: köprü NOT_MODELLED
+#: yayımlarken uç üst düzeyde ``status='success'`` + HTTP 200 veriyordu ve
+#: bu satırlar o kusuru KORUYORDU (ölçüldü, taban b84b10a,
+#: ``docs/scofield/raw/OH/D22/fea-cfd/a1/once_oh_d17_07.json``: 5/5 vakada
+#: zarf "başarılı" derken hiçbir sıcaklık alanı üretilmemişti). Yalnız
+#: zarfa bakan istemci reddi göremiyordu. Sözleşme artık fail-closed:
+#: girdi eksikliği (NOT_MODELLED) düzeltilebilir bir çağıran kusurudur →
+#: HTTP 422 + ``status='not_modelled'``; ``fea`` bloğu ve ``missing``
+#: listesi AYNEN durur.
+RED_HTTP_KODU = 422
+
 
 #: Redli (NOT_MODELLED / NOT_AVAILABLE) gövdede BULUNMAMASI zorunlu alanlar.
 #: Bunlardan biri görünürse çözüm koşmadan sonuç yayımlanmış demektir.
@@ -201,7 +215,7 @@ class TestProfilMotordanUydurulmuyor:
 
     def test_profilsiz_istek_reddediliyor(self, client, motor):
         kod, fea = kos(client, motor=motor, ambient_temperature_K=293.15)
-        assert kod == 200
+        assert kod == RED_HTTP_KODU
         assert fea['status'] == 'NOT_MODELLED'
         assert any('axial_profile' in str(m) for m in fea['missing']), \
             fea['missing']
@@ -226,7 +240,7 @@ class TestProfilMotordanUydurulmuyor:
             'throat_heat_flux_MW_m2': 5.0,
         }}
         kod, fea = kos(client, motor=skalerli, ambient_temperature_K=293.15)
-        assert kod == 200
+        assert kod == RED_HTTP_KODU
         assert fea['status'] == 'NOT_MODELLED', (
             'Boğaz skaleri bir h(z) profili yerine kullanıldı')
         assert 'fields' not in fea and 'scalars' not in fea
@@ -236,7 +250,7 @@ class TestProfilMotordanUydurulmuyor:
         eksik = {k: v for k, v in profil.items() if k != 'T_recovery'}
         kod, fea = kos(client, motor=motor, axial_profile=eksik,
                        ambient_temperature_K=293.15)
-        assert kod == 200
+        assert kod == RED_HTTP_KODU
         assert fea['status'] == 'NOT_MODELLED'
         assert any('T_recovery' in str(m) for m in fea['missing']), \
             fea['missing']
@@ -247,7 +261,7 @@ class TestProfilMotordanUydurulmuyor:
         kaydirilmis['x_mm'] = [x + 500.0 for x in profil['x_mm']]
         kod, fea = kos(client, motor=motor, axial_profile=kaydirilmis,
                        ambient_temperature_K=293.15)
-        assert kod == 200
+        assert kod == RED_HTTP_KODU
         assert fea['status'] == 'NOT_MODELLED'
         assert any('uyuşmuyor' in str(m) or 'ekseni' in str(m)
                    for m in fea['missing']), fea['missing']
@@ -258,7 +272,7 @@ class TestProfilMotordanUydurulmuyor:
         bozuk['h_g'] = [-1.0] * len(profil['h_g'])
         kod, fea = kos(client, motor=motor, axial_profile=bozuk,
                        ambient_temperature_K=293.15)
-        assert kod == 200
+        assert kod == RED_HTTP_KODU
         assert fea['status'] == 'NOT_MODELLED'
         for alan in REDDE_BULUNMAYACAK_ALANLAR:
             assert alan not in fea
@@ -272,7 +286,7 @@ class TestSinirKosullari:
     def test_ortam_sicakligi_zorunlu(self, client, motor, profil):
         """Hiçbir motor çözücüsü yayımlamaz; uydurulmaz, red edilir."""
         kod, fea = kos(client, motor=motor, axial_profile=profil)
-        assert kod == 200
+        assert kod == RED_HTTP_KODU
         assert fea['status'] == 'NOT_MODELLED'
         assert 'ambient_temperature_K' in fea['missing']
         for alan in REDDE_BULUNMAYACAK_ALANLAR:
@@ -312,20 +326,26 @@ class TestKapilarVeButceler:
     def test_yalniz_parametreli_govde_hukum_uretmiyor(self, client):
         """Motor alanı yok, yalnız mesh parametreleri var.
 
-        Uç, gövdenin kendisini son aday olarak deniyor (bkz.
-        ``_fea_pick_motor_results``); imza taşımadığı için köprü dürüst
-        NOT_MODELLED üretmeli — sıcaklık alanı ÜRETMEMELİ.
+        Z5S/S1 (P16B3-22 onarımı): merkezî gövde kapısı artık motor alanı
+        hiç olmayan gövdeyi adlı 4xx ile REDDEDİYOR — eski sözleşme
+        (gövdenin kendisi son aday denenip 200 + NOT_MODELLED) tarihe
+        karıştı. Bekçinin koruduğu şey aynı ve daha güçlü: imzasız gövdeden
+        sıcaklık alanı ÜRETİLMEZ; artık hüküm katmanına hiç inmiyor.
+        Kardeş bekçi (motor sözlüğü VAR ama imzasız → 200 + NOT_MODELLED)
+        sözleşmenin öbür yarısını aynen kilitlemeye devam ediyor.
         """
-        kod, fea = kos(client)
-        assert kod == 200
-        assert fea['status'] == 'NOT_MODELLED'
+        kod, govde = kos(client)
+        assert kod == 400, (
+            f'motor alanı olmayan gövde {kod} aldı — adlı ret bekleniyordu')
+        assert 'missing_motor_results' in json.dumps(govde), (
+            'ret gerekçesi adsız: ' + repr(govde)[:200])
         for alan in REDDE_BULUNMAYACAK_ALANLAR:
-            assert alan not in fea
+            assert alan not in (govde or {})
 
     def test_motor_imzasiz_sozluk_reddediliyor(self, client, profil):
         kod, fea = kos(client, motor={'foo': 1},
                        axial_profile=profil, ambient_temperature_K=293.15)
-        assert kod == 200
+        assert kod == RED_HTTP_KODU
         assert fea['status'] == 'NOT_MODELLED'
         assert fea['missing'], 'eksiğin adı söylenmiyor'
 

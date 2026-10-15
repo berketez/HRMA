@@ -73,6 +73,16 @@ HYBRID_BASE = {
 # Bazı alanlar yalnız kendi dalında canlıdır; o dal kurulmadan ölçülürse
 # YALANCI ÖLÜ görünürler. Refakat alanları burada bildirilir.
 HYBRID_CONTEXTS = {
+    # ÖH D15 / harita H2 — TABAN DEĞER BİLİNMEDEN SARSILAN BAYRAK.
+    # ``calculate_trajectory`` taban yükte HİÇ yok; ``shake.perturb`` bool
+    # alanda ``not bool(None) -> True`` üretiyor, sunucunun alan yokken
+    # kullandığı varsayılan da True. Yani sarsım tabanla AYNI değeri
+    # gönderiyor ve alan haritada ÖLÜ görünüyordu — ``nozzle_material`` ile
+    # birebir aynı sınıf (taban değer bilinmezse sarsım varsayılana çarpar).
+    # Taban açıkça True verilince sarsım False'a gider ve alanın gerçek
+    # etkisi ölçülür: yörünge bloğu tam uçuştan
+    # ``{skipped, reason, message}`` beyanına iner (ölçüldü: sonra.json).
+    'calculate_trajectory': {'calculate_trajectory': True},
     # v2.6.26 — rüzgâr YÖNÜ yalnız rüzgâr HIZI sıfırdan büyükken anlamlıdır:
     # vx_wind = -wind_speed * cos(yön) (trajectory_analysis.py:300). Taban
     # yükte wind_speed=0 olduğu için yönü tek başına sarsmak hiçbir şeyi
@@ -133,7 +143,19 @@ HYBRID_CONTEXTS = {
     'chamber_diameter_input': {'chamber_diameter_input': 150},
     'initial_port_diameter': {'initial_port_diameter': 0.03},
     'n_holes': {'n_holes': 20},
-    'pressure_drop': {'pressure_drop': 4.0},
+    # ÖH D35 / OH-ON-01 (22 Eylül 2026) — ΔP EZMESİ ARTIK BEYAN İSTER.
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/D35/onemli-hibrit-fizik/a1/once.json):
+    # gizli ``designConfigPanel`` her koşuda ``pressure_drop = 0,20·Pc``
+    # gönderiyordu ve çözücünün kendi çözdüğü ΔP'yi (Ornek-H1'de 30,5434
+    # bar) sessizce eziyordu; plaka emniyet hükmü ve chug kapısı o uydurma
+    # sayıyı derecelendiriyordu. Öncelik artık ÇÖZÜCÜ > kullanıcı, ve
+    # ezme yalnız isteğin ``pressure_drop_source`` alanı AÇIKÇA "user"
+    # dediğinde uygulanır (fail-closed). Refakat alanı o beyandır: alan
+    # CANLIDIR, ama yalnız kullanıcı gerçekten seçtiğini söylediğinde.
+    # DEVİR (istemci, A-3): ``advanced.html:4444`` bu beyanı henüz
+    # göndermiyor — kullanıcı alanı EKRANDA görüp düzenlediğinde
+    # gönderilmeli.
+    'pressure_drop': {'pressure_drop': 4.0, 'pressure_drop_source': 'user'},
     # --- KURTARMA ÜÇLÜSÜ (2.6.27, yirmi ikinci parti artçısı) -------------
     # Bu üç alanın ŞABLON VARSAYILANI YOKTUR ve bu bilinçlidir: boş alanın
     # anahtarı isteğe hiç konmaz, çözücü varsayımını 'assumed' damgasıyla
@@ -145,10 +167,21 @@ HYBRID_CONTEXTS = {
     # "kullanıcı varsayımın kendisini yazsa bile onu değiştirebiliyor mu"
     # sorusunu ölçer. Uçtan uca kanıt ayrı dosyada
     # (tests/test_parasut_alanlari.py): 2,0 m²/Cd 1,4/2,0 s -> iniş
-    # 22,62 m/s, 9,0/0,9/5,0 -> 13,29 m/s.
+    # 10,70 m/s, 9,0/0,9/5,0 -> 6,68 m/s.
+    #
+    # ÖH D22 / OH-D18-05 — Cd VE GECİKME ARTIK ALANA BAĞIMLIDIR. Alan
+    # verilmediğinde iniş fazı hiç çözülmez (fail-closed iniş hükmü:
+    # varsayılan kanopi SÖKÜLDÜ), bu yüzden Cd'yi ya da gecikmeyi TEK
+    # BAŞINA sarsmak hiçbir yaprağı oynatmaz ve iki alan YALANCI "ölü
+    # girdi" görünür — ``wind_direction``/``wind_speed`` ile birebir aynı
+    # sınıf. Eskiden bağımlılık GİZLİYDİ: sarsım, kullanıcının hiç
+    # istemediği uydurulmuş bir paraşütün üstünde ölçüm yapıyordu.
+    # Bu bir MUAFİYET DEĞİLDİR — bağlam yalnız kurtarma sistemini kurar,
+    # iki alanın canlılığı yine ölçülür ve ölü çıkarlarsa test kırmızıdır.
     'parachute_area': {'parachute_area': 2.0},
-    'parachute_cd': {'parachute_cd': 1.4},
-    'parachute_deploy_delay': {'parachute_deploy_delay': 2.0},
+    'parachute_cd': {'parachute_area': 2.0, 'parachute_cd': 1.4},
+    'parachute_deploy_delay': {'parachute_area': 2.0,
+                               'parachute_deploy_delay': 2.0},
     # --- KISIT ALANLARI: yalnız KISIT BAĞLADIĞINDA sonucu değiştirirler ---
     # İmalat bandı, çözümün doğal çapını kapsıyorsa bandı değiştirmek hiçbir
     # şeyi değiştirmez ve bu DOĞRUDUR (kısıt bağlamıyor). Alanın canlı
@@ -176,14 +209,14 @@ DECLARED_UNUSED_IN_APP = {
     'impingement_pattern': 'yalnız like_on_like/doublet modelleniyor',
     'recess_length': 'model girintiyi iç jet çapından hesaplar',
     'n_elements': 'bu yol tek koaksiyel eleman boyutlandırır',
-    # v2.6.26 — gaz fazı enjeksiyonu MODELLENMİYOR. Alan yalnız uyarı
-    # üretiyor (fiziksel yaprak oynatmıyor) ve bu artık kullanıcıya açıkça
-    # söyleniyor: 'gas' seçilirse delik boyutlandırması sıvı SPI modeliyle
-    # yapılmış demektir. Sıkıştırılabilir çözüm depoda var
-    # (engines/injector_design.py::compressible_orifice_flow), bağlanması
-    # ayrı bir iş olarak kayıtlı.
-    'oxidizer_phase': 'gaz fazı enjeksiyonu modellenmiyor; alan yalnız uyarı '
-                      'üretir ve durumu açıkça bildirir',
+    # 'oxidizer_phase' bu listeden ÇIKTI (Kitap uyum B16, 2. tur Ş-7, karar
+    # §28-18): alan artık motora ulaşıyor — HP dengesine giren N₂O reaktan
+    # entalpisini seçiyor ('liquid' doymuş sıvı / 'gas' 298,15 K standart
+    # hâl), yani T_c, c*, Isp ve boyutlandırma yaprakları oynuyor. Enjektör
+    # tarafındaki eski not hâlâ doğru: gaz fazı ENJEKSİYONU modellenmiyor,
+    # delik boyutlandırması sıvı SPI modeliyle yapılır ve bu uyarıyla
+    # bildirilir (engines/injector_design.py::compressible_orifice_flow
+    # bağlanması ayrı iş).
 }
 
 # Şablon alan adı ile payload anahtarı AYRI olan alanlar. Toplayıcı bu
@@ -205,6 +238,32 @@ TEMPLATE_TO_PAYLOAD = {
 #: burada payload birimiyle bildirilir.
 PAYLOAD_RANGE = {
     'pressure_drop': (1.0, 15.0),        # bar (odanın %5-75'i)
+    # ÖH D15 birleştirme (ana model, 1 Eyl 2026): hibrit a1 P1B1-03 sonrası tank
+    # sıcaklığı enjektör yoğunluğunu doygun-sıvı modelinden çözüyor ve zarf
+    # dışında FAIL-CLOSED 400 veriyor ('182.33 K < T < 309.52 K, NIST'). Şablonun
+    # 100-1000 K aralığı fiziksel değil (OH-D15-10); ±%50 sarsım (146,5 / 439,5 K)
+    # zarf dışına düşüp alanı 'ölçülemedi' gösteriyordu. Ölçüm aralığı N2O sıvı
+    # zarfına bağlandı; dar-bant kurtarması alanı 183 K'ye sarsar.
+    'oxidizer_temp': (183.0, 309.0),     # K (N2O üçlü nokta 182,33 – kritik 309,52)
+    # ÖH D23 fix-20 — ``port_count`` kapısı forma eklendi (P7B1-05'in form
+    # ayağı) ve alan taramaya girdi. Şablonda ÜST SINIR YOK, çünkü motorda
+    # da yok: ``input_guard.integer(lo=1)`` yalnız alt sınır koyar ve
+    # HTML'e uydurma bir tavan yazmak ürüne olmayan bir kısıt eklemek
+    # olurdu. Aşağıdaki aralık bir ÜRÜN SINIRI DEĞİL, ÖLÇÜM PENCERESİDİR:
+    # sarsımın kaç portu deneyeceğini söyler. Üst uç 8, motorun kendi
+    # çok-portlu dalının (``port_count > 1`` →
+    # ``warn.hybrid.multi_port_equivalent_model``) içindedir; ölçüldü
+    # (P7B1-05 raporu, ``sonra.json``): 1 / 4 / 8 port üç FARKLI yanıt
+    # üretiyor (sha256 fc618cb9 ⟷ 8f8adee9 ⟷ f879fbfa), yani pencere
+    # gerçekten yaprak oynatıyor.
+    #
+    # ARALIK TAM SAYI ÜRETECEK BİÇİMDE SEÇİLDİ. Alan taban yükte yok, bu
+    # yüzden ``shake.perturb`` orta noktayı gönderiyor: lo + (hi-lo)/2.
+    # (1, 8) penceresi 4,5 üretiyordu ve motorun kapısı onu DOĞRU biçimde
+    # 400 ile reddediyordu (``input_guard.integer``: kesirli değer sessizce
+    # yuvarlanmaz) — ölçüldü, alan 'sarsım HTTP 400' ile ölçülemez kalıyordu.
+    # Kapı doğru, pencere yanlıştı: (1, 7) orta noktayı 4 porta oturtur.
+    'port_count': (1.0, 7.0),            # adet (ölçüm penceresi, ürün tavanı değil)
 }
 
 # Ayrı uç noktaya giden ya da istemci tarafında kalan alanlar Katman B'nin
@@ -217,6 +276,30 @@ NOT_IN_CALCULATE = {
     'motor_name', 'motor_description',           # metin: sarsılamaz
     'total_impulse',                             # thrust/burn_time ile çelişir
     'injector_type',                             # dal seçici: refakatsiz 400
+    # ÖH D15 birleştirme (1 Eyl 2026) — DAL ANAHTARI, ``injector_type`` ile
+    # aynı sınıf. Şablonlar kulvarı (9d353c9) ``#calculate_trajectory`` onay
+    # kutusunu hibrit forma bağlayınca alan taramaya girdi ve sarsım matrisi
+    # onu ÖLÜ ilan etti. ÖLÇÜM bunu ÇÜRÜTTÜ (aynı gövde, /calculate):
+    #     alan yok / True  -> yanıtta 'trajectory' bloğu var
+    #     False            -> 'trajectory' = None
+    # Alan CANLI; ölü sanılmasının iki sebebi de sarsım DÜZENEĞİNDEYDİ:
+    #   1. ``HYBRID_BASE``ta anahtar YOK; ``shake.perturb`` ikiliyi taban
+    #      yükündeki değere göre çeviriyor (``not bool(None)`` = ``True``),
+    #      yani "sarsım" ucun zaten kullandığı varsayılanı gönderiyordu.
+    #   2. Anahtar yüke konsa bile bu alan bir PARAMETRE değil DAL ANAHTARI:
+    #      kapatınca bütün ``.trajectory.*`` alt ağacı yanıttan kalkar.
+    #      O zaman ``.trajectory.motor_data.*`` yankı yaprakları "değişti",
+    #      kanonik ``.motor.*`` eşleri "değişmedi" sayılır ve ``shake``in
+    #      yankı SİMETRİ kuralı (tests/support/shake.py: "sarsım altında
+    #      biri değişirken öteki dondu") SAHTE ayrışma bildirir — ÖLÇÜLDÜ:
+    #      alan yüke eklenince ``test_motor_echo_copies_never_diverge``
+    #      sekiz akustik yaprakla kırmızıya döndü. Yokluk ayrışma değildir;
+    #      kural dal anahtarlarına kör (bu körlük ayrıca raporlandı).
+    # Alan bu yüzden GENEL sarsımın dışındadır, ama MUAF DEĞİL: canlılığı
+    # aşağıdaki ``test_calculate_trajectory_dal_anahtari_CANLI`` içinde
+    # doğrudan ölçülür. Muafiyet ile ölçüm birlikte durur; ölçüm silinirse
+    # muafiyet yalana döner.
+    'calculate_trajectory',
 }
 
 #: Sabit olması MEŞRU çıktı alt ağaçları. Bu liste DAR tutulmalıdır;
@@ -234,6 +317,17 @@ LEGITIMATE_CONSTANTS = (
     'schema_version', 'version',
     # Fiziksel sabitler ve birim çarpanları.
     'g0', 'standard_gravity',
+    # D32 app-api-uc a1 (OH-D31-13, 15 Eyl 2026): /calculate'in ÖK-21 uç
+    # künyesi ``defaults_applied[N].{field,value,unit,reason,message}`` —
+    # sunucunun uyguladığı BEYANLI varsayılan. ``value`` tanımı gereği
+    # girdiden bağımsızdır (kullanıcı göndermediği için uygulanan tablo
+    # değeri); gizli uydurma değil, uydurmanın tam tersi olan açık beyandır.
+    # İm yalnız künye yaprağını yutar (2 yaprak ölçüldü: [0].value, [1].value);
+    # künyenin kendisi ayrıca bekçilidir: tests/test_d32_app_api_uc_a1.py::
+    # TestOHD3113UcKapisi (değer tablodan, kullanıcı gönderdiyse künye yok,
+    # çift beyan yok). İm kaldırılınca bu bekçi 2 yaprakla kırmızı verir
+    # (ana model ölçtü, 15 Eyl; fix-35c).
+    '.defaults_applied[',
     # v2.6.27 (Dalga 6, akustik modların bağlanması): mod ETİKETLERİ.
     # 'indices.longitudinal_q/radial_n/tangential_m' bir hesabın sonucu
     # değil, modu ADLANDIRAN tam sayılardır (1L, 1T, 2R...); girdiye göre
@@ -241,7 +335,14 @@ LEGITIMATE_CONSTANTS = (
     # denkleminin köküdür — matematiksel bir sabit, motor çıktısı değil.
     # Bu iki aile işaretlenmezse bekçi, uydurma sabit ile mod numarasını
     # ayırt edemez ve gerçek uydurmaları listenin dibine gömer.
-    'acoustic_modes.modes',
+    # ÖH D15 termo-ucus a2 (P4B4-06): kavite gerçek serbest gaz hacminden
+    # kurulunca ilk on mod yukarı kaydı ve blok-genel 'acoustic_modes.modes'
+    # imi 22→34 yaprak yutmaya başladı (30 tavanı; sabit FREKANS yaprağı SIFIR
+    # — fizik kaybı yok). Testin kendi kuralı gereği im blok düzeyinden ALAN
+    # düzeyine indirildi: yalnız mod etiketleri (indices.*) ve Bessel kökü
+    # (alpha) imli; kardeş f_hz / omega alanları CANLI kalır (ana model, 1 Eyl).
+    '].indices.tangential_m', '].indices.radial_n', '].indices.longitudinal_q',
+    '].alpha',
     'acoustic_modes.inputs.n_modes',
     # v2.6.27: modülün BEYAN ETTİĞİ ölçüt eşikleri. Bunlar hesabın sonucu
     # değil, hesabın hangi literatür ölçütüne göre hüküm verdiğinin
@@ -414,6 +515,83 @@ LEGITIMATE_CONSTANTS = (
     # (combustion_analysis.py:2181-2189). Kardeş max_thrust CANLIDIR.
     'thrust_altitude_analysis.max_thrust_altitude',
     # ==================================================================
+    # ÖH D26 / app-api aşama-3 (OH-Z5-02) — app-api SAHASINDAKİ 5 YAPRAK.
+    # Dördü aşağıda ADIYLA ve KOD KANITIYLA imlendi, biri sınıflandırma
+    # onarımıyla (``shake._DECLARATION_ECHO``) düştü; kalan tek yaprak
+    # fea-cfd sahasındadır (aşağıdaki eşik notu).
+    # ==================================================================
+    # BEYAN SAYAÇLARI: bu iki alan bir FİZİK BÜYÜKLÜĞÜ değil, YANITIN
+    # KENDİ AĞACININ ölçümüdür — ``app.py`` ``_b['submitted_value_echo_
+    # count'] = len(_gonderilen)`` / ``_b['solved_value_echo_count'] =
+    # _cozulen`` (aynı döngü, ardışık iki satır). "Gönderdiğiniz sayı hâlâ
+    # şu kadar yaprakta görünüyor / çözülen değer şu kadar yaprakta
+    # kullanıldı" beyanının sayısal yarısıdır ve tam da bu beyanı
+    # ÖLÇÜLEBİLİR kılmak için (P7B1-01) eklenmişti.
+    #
+    # GEÇİŞ ÖLÇÜMÜ (``docs/scofield/raw/OH/D26/app-api/a3/
+    # z5_sayac_gecis.json``) — sayaç SABİT DEĞİL, sarsım kümesi onu
+    # oynatmıyor: aynı uçta aşırı-belirli bir gövde
+    # (``thrust=3000, burn_time=20, total_impulse=120000``)
+    # ``solved_value_echo_count``u **6 -> 34** taşıyor. Kardeş
+    # ``submitted_value_echo_count`` AYNI DÖNGÜNÜN çıktısıdır ve ölçülen
+    # 0'ı bir kusur değil, ÖH D15/P7B1-01 onarımının sonucudur (tasarım
+    # noktası blokları artık gönderilen sayıyı yankılamıyor); 0 uydurulmuş
+    # değil, sayılmış bir sıfırdır.
+    'inputs_not_used[0].submitted_value_echo_count',
+    'inputs_not_used[0].solved_value_echo_count',
+    # ENJEKTÖR KABUL BANDI: ``.validation.injector_assessment.
+    # pressure_drop_ratio.band[0..1]`` bir HESAP DEĞİL, YAYIMLANMIŞ MODEL
+    # EŞİĞİDİR. Deponun tek tanım noktası ``hrma/validation/
+    # validation_system.py:99`` — ``(CHUG_DP_RATIO_MINIMUM,
+    # INJECTOR_DP_PC_CEILING)``; alt sınır ``hrma.analysis.acoustic_modes.
+    # CHUG_DP_RATIO_MINIMUM`` (chug kararlılığı, NASA SP-8089), üst sınır
+    # ``INJECTOR_DP_PC_CEILING`` (besleme sistemi maliyeti, kararlılık
+    # ölçütü DEĞİL). Alan zaten KENDİ KÜNYESİNİ taşıyor:
+    # ``band_source`` (``validation_system.py:210``) iki sınırın kaynağını
+    # adıyla yazar — "bu 0,15 kimin sayısı" sorusu yanıtın içinde
+    # cevaplanıyor. Bir kabul bandının girdiyle değişmemesi kusur değil,
+    # bandın TANIMIDIR; girdiye göre kayan bir eşik zaten eşik olmazdı.
+    # Kardeş ``ratio`` / ``status`` alanları CANLIDIR ve imlenmemiştir.
+    'validation.injector_assessment.pressure_drop_ratio.band[0]',
+    'validation.injector_assessment.pressure_drop_ratio.band[1]',
+    # ==================================================================
+    # ÖH D28 / OH-Z5-02 (fea-cfd a1) — KALAN TEK YAPRAK, KÜNYELİ İM.
+    # ``.motor.combustion_stability.lfi.frequency_paths_rel_diff``:
+    # Karabeyoglu 2005'in AYNI frekansına giden iki YAYIMLANMIŞ yolunun
+    # bağıl farkı (Denk. 15 ⟷ Denk. 7 + Denk. 12).
+    #
+    # (1) KOD KANITI — ``hrma/stability/hybrid_lfi.py``: yaprak artık
+    #     ``LFI_FREQUENCY_PATHS_REL_DIFF`` sabitinden basılıyor ve o da
+    #     ``LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL``in TA KENDİSİDİR.
+    # (2) TÜRETİM — sabitliğin sebebi cebirsel, ölçüm eksikliği DEĞİL:
+    #       f·τ = (K·G·R·T/(L·P))·(c'·L·P/(G·R·T)) = K·c'
+    #     girdi (akı grubu, boy, basınç, R·T) TAM SADELEŞİR; dolayısıyla
+    #       |f·τ/0,48 − 1| = |K − 0,48/c'|/(0,48/c')
+    #     yani yaprak KATSAYININ BASIM ARTIĞIDIR, bir motor büyüklüğü
+    #     değil. Girdiye göre değişmemesi tanımı gereğidir.
+    # (3) NEDEN ÖNCE İMLENMEDİ — çünkü önce KUSURDU. Ölçüldü (kanıt
+    #     ``docs/scofield/raw/OH/D28/fea-cfd/a1/once_z502.json``): satır
+    #     içi float yolu beş işletme noktasında ÜÇ AYRI sayı veriyordu
+    #     (…646446 / …66865 / …679752) ve hiçbiri, aynı sözlükte duran
+    #     kardeşi ``coefficient_identity_residual_rel`` (…671426) ile
+    #     bit-aynı değildi — üstelik yaprağın kendi künyesi ikisinin
+    #     "exactly" aynı olduğunu söylüyordu. Yani ürün tek büyüklüğü iki
+    #     sayı olarak basıyor, oynayan kısım da ölçüm değil yuvarlama
+    #     gürültüsüydü. Önce TEK KAYNAĞA indirildi (sonra_z502.json:
+    #     beş noktada TEK değer, kardeşiyle BİT-AYNI), İM ONDAN SONRA
+    #     kondu. Borç ime taşınarak kapatılmadı; kapatıldıktan sonra
+    #     imlendi.
+    # (4) İM KÖRLEŞTİRMİYOR — ölçülen kardeşler CANLI: ``frequency_hz``,
+    #     ``frequency_via_delay_hz``, ``boundary_layer_delay_s`` sarsım
+    #     altında oynamaya devam eder. Üstelik sabitliğin dayandığı
+    #     özdeşlik artık bir İDDİA değil KAPIDIR: ürün her koşumda
+    #     f·τ'yu K·c' ile karşılaştırır ve sapma banda sığmazsa HİÇBİR
+    #     sayı yayımlamaz (``frekans_yollari_ozdeslik_kapisi``,
+    #     fail-closed). Zincirin herhangi bir ucu sürüklenirse im
+    #     yaprağı örtmez, ürün durur.
+    # ==================================================================
+    'combustion_stability.lfi.frequency_paths_rel_diff',
+    # ==================================================================
     # v2.6.27 (yirmi altıncı parti — sabit-çıktı borcu 59 -> 4).
     # Aşağıdaki imlerin TAMAMI TEK YAPRAK imidir; tek istisna 25 noktalı
     # süpürme ızgarasıdır ve o da alan düzeyinde dardır. Her im iki
@@ -557,6 +735,167 @@ LEGITIMATE_CONSTANTS = (
     # 'ground', yani pencere bağlamıyor.
     'trajectory.trajectory.phases.coasting.time_limit_s',
     'trajectory.trajectory.phases.descent.time_limit_s',
+    # =================================================================
+    # ÖH D25 / OH-Z5-02 — ALTI İMLE YEDİ YAPRAĞIN SINIFLANDIRILMASI.
+    # Her biri ya YAYIMLANAN BİR MODEL EŞİĞİ ya TANIM GEREĞİ bir
+    # özdeşlik/beyandır; hiçbiri "hesaplanabilir ama bağlanmamış" çıktı
+    # değildir. İm eklemek burada borç GİZLEMEK değil SINIFLANDIRMAKTIR
+    # ve üç şartla yapıldı: (a) yaprağın künyesi yanıtta ADIYLA duruyor,
+    # (b) AYNI ailenin ölçülen kardeşi CANLI kalıyor ve bu bekçi onu
+    # korumaya devam ediyor, (c) sabitliğin ÖNCÜLÜ ayrı bir bekçiyle
+    # kilitli (tests/test_d25_hibrit_a1.py). Ölçüm:
+    # docs/scofield/raw/OH/D25/hibrit/a1/{once,sonra}.json.
+    #
+    # 1) İSTASYON TABLOSUNUN İZENTROP ÖZDEŞLİĞİ. Boğaz ve çıkış
+    #    istasyonları ODA ENTROPİSİNDE çözülür (``gas.SP = s_0, P`` +
+    #    ``equilibrate('SP')``; combustion_analysis
+    #    _equilibrium_station / _solve_equilibrium_throat), dolayısıyla
+    #    s_e − s_c yapısal olarak sıfırdır ve
+    #    eta_s = Δh/(Δh + T_e·(s_e − s_c)) = 1 ALGEBRAİK bir özdeşliktir.
+    #    ÖLÇÜLDÜ (once.json K1; Pc = 10/20/40 bar × eps = 4/10/25, dokuz
+    #    koşu): s_e − s_c'nin ölçülen en büyük mutlak değeri 5,51e-11
+    #    kJ/(kg·K) — oda entropisine göre bağıl 5,5e-12, yani
+    #    ``equilibrate('SP')`` yakınsama artığı; ham oran 1'den en çok
+    #    4,2e-11 sapıyor. mass_flow_rel_diff'ten FARKI ve imlenmesinin
+    #    sebebi budur: o yaprağın künyesi "termokimya çapraz kontrolü"
+    #    DİYORDU ve ölçüm o beyanı çürütüyordu; bu yaprak D25'te
+    #    ``isentropic_efficiency_basis`` ile özdeşliği ADIYLA yayımlar
+    #    ("IDENTITY, not a loss measurement ... solved AT THE CHAMBER
+    #    ENTROPY") ve öncülü (Δs ≡ 0) ayrı bekçiyle kilitlidir — τ_c
+    #    oranının otuz ikinci partideki emsaliyle aynı disiplin.
+    #    Kardeş 'deltas.entropy_change' ve 'performance.isp' CANLIDIR.
+    'optimum_analysis.analysis.performance.thermodynamic_properties'
+    '.isentropic_efficiency',
+    # 2) ARANAN O/F BANDININ SINIRLARI: bir sonuç değil, aramanın TANIM
+    #    KÜMESİdir (find_optimum_of_ratio of_range varsayılanı
+    #    (1,0, 10,0); combustion_analysis.py:2334) ve yaprak gerekçesini
+    #    kendisi taşır ('of_range_basis': "interior optimum inside the
+    #    searched band [1, 10]"). ÖLÇÜLDÜ (once.json K2) — KELEPÇE
+    #    AÇILIYOR: band (1,0, 3,0) verilip optimum üst sınıra dayanınca
+    #    bant stokiyometrik orana GENİŞLİYOR, yaprak 8,948054274480175
+    #    değerini alıyor ve künye "band widened ... (stoichiometric O/F)"
+    #    diye değişiyor. Yani sayı sabit YAZILMIŞ değil, ürünün sabit
+    #    çağrı imzasının içinde duruyor. Kardeş 'optimum_of_ratio' ve
+    #    'maximum_isp' CANLIDIR.
+    'optimum_analysis.of_range_searched[',
+    # 3) İRTİFA TARAMA IZGARASININ TEPESİ: çağıranın ızgarasının SON
+    #    noktası (hybrid_rocket_engine.py, altitudes_thrust = [0, 1000,
+    #    5000, 10000, 15000, 20000]), hesabın bir sonucu değil — aynı
+    #    sözlükteki 'vacuum_thrust_basis' bunu zaten adıyla söylüyor
+    #    ("that row is only as high as the caller happened to sweep").
+    #    'sampling.max_points' / 'wetted_integral_stations' ızgara-beyanı
+    #    ailesiyle aynı doğa. ÖLÇÜLDÜ (once.json K3): ızgara tepesi
+    #    20000 → 20000, 10000 → 10000, 80000 → 80000 ile çağıranı BİREBİR
+    #    izliyor; kardeş 'top_of_grid_thrust' aynı üç koşuda 5416,36 /
+    #    5273,90 / 5453,56 N ile CANLI.
+    'thrust_altitude_analysis.top_of_grid_altitude_m',
+    # 4) ÇAPRAZ DENETİM KAPISININ TOLERANSI: eşik sabiti eşik sabitidir
+    #    ve girdiyle oynamaması sözleşmedir — mevcut 'rule_min_ratio' /
+    #    'hard_min_ratio' / 'pressure_ratio_threshold' ailesiyle aynı
+    #    doğa. Tek tanım noktası HYBRID_CF_CROSS_CHECK_TOL_PCT
+    #    (hybrid_rocket_engine.py:597) ve D25'te yaprak künyesini
+    #    kendisi taşıyor ('tolerance_percent_basis': "declared gate
+    #    threshold, not a computed result"). Kapının ÖLÇTÜĞÜ büyüklük
+    #    kardeş 'relative_gap_percent'tir ve bu bekçinin sabit yaprak
+    #    listesinde YOKTUR, yani CANLI ölçülüyor.
+    'thrust_coefficient_cross_check.tolerance_percent',
+    # 5) CIVATA ASGARİ ADIM ÇARPANI = BEYAN EDİLEN FLANŞ PRATİĞİ:
+    #    _BOLT_MIN_PITCH_FACTOR = 2,5 (structural_analysis.py:1866;
+    #    Taylor Forge / ASME VIII-1 Ek 2 cıvatalı flanş uygulaması).
+    #    Yaprak gerekçesini yanıtta kendisi yazar ('bolt_layout_basis':
+    #    "the minimum pitch factor 2.5 is a DECLARED flange practice
+    #    value ..., not a calibration constant") — mevcut
+    #    'fastener_analysis.bolt_allowable_stress_MPa' (ISO 898-1 tablo
+    #    kaydı) imiyle İKİZ gerekçe. ÖLÇÜLDÜ (once.json K5): dört
+    #    (basınç, çap) çiftinde eşik 2,5'te sabit, hükmün VERİLDİĞİ
+    #    kardeş 'bolt_pitch_ratio' ise dördünde de farklı (10,9205 /
+    #    6,3050 / 7,5234 / 3,7408) — ölçülen taraf CANLI.
+    'fastener_analysis.bolt_min_pitch_factor',
+    # 6) DAYANIM DÜŞÜRME EĞRİSİNİN ALT UCU: curve_min_temp_C =
+    #    sorted(derating_curve)[0], yani malzeme kaydının kendi
+    #    tablosunun ilk noktası (structural_analysis.py:452 ve ikizi
+    #    pressure_vessel.py:282) — hükmün HANGİ ZARFA karşı verildiğinin
+    #    beyanı, bir hesap değil. MMPDS / MIL-HDBK-5 deseninde bu nokta
+    #    oda sıcaklığı REFERANSIDIR (retention = 1,0 tanım gereği), bu
+    #    yüzden depodaki her malzemede aynıdır. ÖLÇÜLDÜ (once.json K6,
+    #    dokuz malzeme): curve_min_temp_C hepsinde 20,0 C iken AYNI
+    #    yardımcının kardeş yaprağı curve_max_temp_C 350 / 600 / 700 /
+    #    800 / 900 C ile beş ayrı değer alıyor ve bu bekçinin sabit
+    #    listesinde YOK — yani yardımcı canlı, donan yalnız tablonun
+    #    referans ucu. 'below_curve_envelope' / 'above_curve_envelope' /
+    #    'strength_retention_factor' kardeşleri de CANLIDIR.
+    'strength_derating.curve_min_temp_C',
+    # =================================================================
+    # ÖH D29 / OH-D28-01 (termo-uçuş a1) — AKUSTİK MOD BLOĞUNUN DOKUZ
+    # YAPRAĞI. D28 fea-cfd a1 envanteri bu dokuzu ADIYLA devretmişti
+    # ("hepsi acoustic_modes bloğunda, sahibi TERMO-UÇUŞ"); hükümleri
+    # burada, yaprak başına ölçümle veriliyor. Ölçüm betiği ve çıktıları:
+    # docs/scofield/raw/OH/D29/termo-ucus/a1/{olcum_d2801.py,
+    # once_d2801.json, sonra_d2801.json}; ters-mutasyon: mutasyon.json.
+    # İM ÖNCESİ ONARIM (borç ime taşınmadı): aynı bloktaki FAIL-CLOSED
+    # kusuru önce giderildi — enine ihtiyaç araması güvenlik tavanında
+    # doyduğunda ``mode_pool.truncated`` False kalıyor ve yanıt eksik
+    # havuzu "eksiksiz" diye satıyordu (K6: D=1,20 m / L=1,00 m, tavan
+    # 2/1 iken 3T modu 1250,91 Hz ile kesim frekansının 1444,65 Hz
+    # ALTINDA kaldığı hâlde havuzda YOK, buna rağmen truncated=false ve
+    # complete_below_hz=1444,65). Onarımdan sonra truncated=true,
+    # complete_below_hz=null.
+    #
+    # 1-2) HAVUZ TAVANLARI = KAVİTE ORANININ BASAMAK FONKSİYONU.
+    #    Tavanlar kapalı formdan (q <= f_cut*2L/a, alpha_mn <=
+    #    f_cut*pi*D/a) BÜYÜTÜLÜR ve tohumun ALTINA inmez; hibrit
+    #    orantısında (ince/uzun kavite) enine ihtiyaç tohumun altında
+    #    kaldığı için yaprak tohum tabanında durur. Sabit YAZILMIŞ değil,
+    #    bandın içinde duruyor — ÖLÇÜLDÜ (K1, bant geçişi): D=0,15 m /
+    #    L=1,00 m -> m=3 (tohum), D=1,20 m / L=0,10 m -> m=8; radyal
+    #    tavan D=1,20 m / L=0,10 m + 40 mod -> n=17, D=0,60 m / L=0,30 m
+    #    + 60 mod -> n=4 (tohum 2). Tavanın KAYNAĞI artık yanıtta makine
+    #    okur biçimde duruyor (``mode_pool.cap_source``: seed_floor |
+    #    grown_beyond_seed, künye ``cap_basis``). AYNI ailenin kardeşleri
+    #    ``longitudinal_max_q`` ve ``candidate_count`` bu bekçinin sabit
+    #    listesinde YOK, yani CANLI ölçülmeye devam ediyor.
+    'acoustic_modes.mode_pool.tangential_max_m',
+    'acoustic_modes.mode_pool.radial_max_n',
+    # 3-5) TOHUM SINIRLARI = BEYAN EDİLEN ARAMA TOHUMU. Üçü de sınıfın
+    #    kendi öznitelikleridir (MAX_TANGENTIAL_INDEX / MAX_RADIAL_INDEX
+    #    / MAX_LONGITUDINAL_INDEX) ve büyütmenin NEREDEN başladığını
+    #    denetlenebilir kılmak için yayımlanırlar; 'of_range_searched'
+    #    (aramanın tanım kümesi) ve 'sampling.max_points' ızgara-beyanı
+    #    ailesiyle aynı doğa. Yanıta sabit YAZILMIŞ sayı değildirler —
+    #    ÖLÇÜLDÜ (K4): tohumlar 5/4/9'a çekilince üç yaprak da birebir
+    #    izliyor. Künye yaprağın yanında: ``seed_bounds_basis``.
+    'acoustic_modes.mode_pool.seed_bounds.tangential_max_m',
+    'acoustic_modes.mode_pool.seed_bounds.radial_max_n',
+    'acoustic_modes.mode_pool.seed_bounds.longitudinal_max_q',
+    # 6) İSTENEN MOD SAYISI = ÇAĞIRANIN IZGARASI. Motor 'en düşük 10 mod'
+    #    ister (hybrid_rocket_engine.py:6294, analyze_from_engine_result
+    #    varsayılanı n_modes=10); bu ızgarayı besleyen form alanı YOKTUR
+    #    ve aynı sayının ikizi ``acoustic_modes.inputs.n_modes`` ZATEN
+    #    imlidir (yirmi altıncı parti) — iki yaprağın hükmü ayrışamaz.
+    #    ÖLÇÜLDÜ (K3): n_modes 5/10/25 verildiğinde yaprak birebir izliyor.
+    'acoustic_modes.mode_pool.requested_n_modes',
+    # 7) DÖNEN MOD SAYISI = KENETLİ ÖZDEŞLİK min(istenen, havuz).
+    #    'oxidizer_mass_residual_kg' ve
+    #    'applied_axial_stress_pressurized_MPa' ile aynı sınıf: kenet
+    #    açılınca sayı kıpırdar. ÖLÇÜLDÜ (K2, kenet açılıyor): havuz 3
+    #    adaya indirilince requested 10 iken returned 3 ve
+    #    truncated=true. Kenetin ÖTEKİ ucu ``candidate_count`` CANLIDIR.
+    #    Künye: ``mode_count_basis``.
+    'acoustic_modes.mode_pool.returned_n_modes',
+    # 8-9) CHUG TASARIM BANDININ İKİ UCU = YAYIMLANAN EŞİK.
+    #    CHUG_DP_RATIO_MINIMUM / CHUG_DP_RATIO_BAND_MAX (acoustic_modes.py
+    #    :162 ve :179; künye CHUG_THRESHOLD_SOURCE = Sutton & Biblarz RPE
+    #    9. baskı %15-25 bandı, tanım noktası yanıtta YAPISAL olarak
+    #    ``threshold_definition_point`` ile duruyor). Aynı sözlükteki
+    #    ``hard_min_ratio`` ve ``recommended_min_ratio`` ZATEN imli; alt uç
+    #    hard_min_ratio ile AYNI beyanlı sayıdır, yeni bir sayı değil.
+    #    Eşik sabiti eşik sabitidir: girdiyle oynamaması sözleşmedir.
+    #    ÖLÇÜLDÜ (K5, beş oranlı tarama): iki uç modül sabitlerini birebir
+    #    izlerken hükmün VERİLDİĞİ kardeşler CANLI — status AT_RISK /
+    #    MARGINAL / OK üçünü de alıyor ve design_band_excess_factor bandın
+    #    üstünde 1,6 değerini üretiyor. Künye: ``design_band_basis``.
+    'acoustic_modes.stability_report.chug.design_band_min_ratio',
+    'acoustic_modes.stability_report.chug.design_band_max_ratio',
 ) + tuple(
     # BAŞLANGIÇ KOŞULU (t = 0): çözücü y0 = [0, launch_altitude, 0, 0,
     # toplam kütle] ile başlar (trajectory_analysis.py:868) — roket
@@ -623,6 +962,86 @@ def hybrid_report(client):
                      declared_unwired=DECLARED_UNUSED_IN_APP)
 
 
+def test_calculate_trajectory_dal_anahtari_CANLI(client):
+    """``NOT_IN_CALCULATE`` muafiyetinin BEDELİ: canlılık burada ölçülür.
+
+    Alan genel sarsım matrisinin dışında tutuluyor (gerekçe listede yazılı:
+    dal anahtarı, kapatınca bütün ``.trajectory.*`` alt ağacı kalkıyor ve
+    yankı simetri kuralı sahte ayrışma bildiriyor). Muafiyet bir iddia
+    DEĞİL: alanın gerçekten çözücüye ulaştığı burada, ucun kendi yanıtıyla
+    gösterilir. Bu test silinirse muafiyet gerekçesiz kalır.
+    """
+    def _yanit(**ek):
+        r = client.post('/calculate', json=dict(HYBRID_BASE, **ek),
+                        headers={'Host': '127.0.0.1:8080'})
+        assert r.status_code == 200, r.status_code
+        return r.get_json()
+
+    acik = _yanit(calculate_trajectory=True)
+    kapali = _yanit(calculate_trajectory=False)
+
+    assert isinstance(acik.get('trajectory'), dict) and acik['trajectory'], (
+        'calculate_trajectory=True iken yörünge bloğu yok — düzenek bozuk, '
+        'aşağıdaki ölü/canlı hükmü anlamsız')
+    # ÖH D15 birleştirme (ana model, 1 Eyl 2026): kapalı yönün gösterimi
+    # harita kulvarının H2 onarımıyla değişti — ``None`` değil ADLI atlama
+    # beyanı (``{skipped: true, reason: 'calculate_trajectory_false'}``),
+    # çünkü ``None`` 'hesaplanmadı' ile 'hesaplandı, sonuç yok'u ayırt
+    # edemiyordu. İddia aynı ve GÜÇLENDİ: uçuş sayıları yayımlanmıyor.
+    kapali_yorunge = kapali.get('trajectory')
+    assert isinstance(kapali_yorunge, dict) and kapali_yorunge.get('skipped') is True, (
+        'calculate_trajectory=False iken yörünge YİNE hesaplandı ya da '
+        'atlama beyanı yok: alan çözücüye ulaşmıyor (kullanıcı kapatıyor, '
+        'sonuç değişmiyor): %r' % (kapali_yorunge,))
+    assert kapali_yorunge.get('reason') == 'calculate_trajectory_false'
+    assert not any(k in kapali_yorunge for k in ('performance', 'trajectory',
+                                                 'max_altitude', 'apogee')), (
+        'atlanan yörünge bloğu uçuş sayısı yayımlıyor: %s'
+        % sorted(kapali_yorunge))
+    # Varsayılan davranış da beyan edilenle aynı olmalı (uç: get(..., True)).
+    varsayilan = _yanit()
+    assert isinstance(varsayilan.get('trajectory'), dict), (
+        'alan gönderilmediğinde uç yörüngeyi atlıyor; varsayılanın ne '
+        'olduğu ölçülmeden bırakılamaz')
+
+
+def test_sarsilan_her_mantiksal_alan_taban_yukunde_bildirilir():
+    """İkili alan taban yükünde YOKSA sarsımı sahte "ölü" verir.
+
+    ÖH D15 birleştirme (1 Eyl 2026) — bu bekçi ölçülen bir yanılgıdan
+    doğdu. ``shake.perturb`` bir ``kind='bool'`` alanını taban yükündeki
+    değerine göre çevirir (``not bool(current)``). Alan yükte YOKSA
+    ``current`` ``None`` olur ve çevirme ``True`` üretir — ucun zaten
+    kullandığı varsayılan. "Sarsım" hiçbir şeyi değiştirmez, çıktı
+    bit-aynı çıkar ve CANLI alan ÖLÜ ilan edilir.
+
+    Tam bu oldu: şablonlar kulvarı ``calculate_trajectory`` onay kutusunu
+    forma bağlayınca alan taramaya girdi, ``HYBRID_BASE``ta karşılığı
+    olmadığı için sahte ölü göründü — oysa ``False`` göndermek yanıttaki
+    bütün ``trajectory`` bloğunu kaldırıyor.
+
+    Bekçi ucuz ve genel: sarsılacak her ikili alan taban yükünde AÇIKÇA
+    bildirilmiş olmalı. Yeni bir onay kutusu forma eklendiğinde burada
+    yakalanır, "ölü girdi" listesinde değil.
+    """
+    template_specs = inventory.field_specs_for('hybrid')
+    collected = inventory.build('hybrid').collected_fields
+    bildirilmeyen = []
+    for name in sorted(collected & set(template_specs)):
+        payload_key = TEMPLATE_TO_PAYLOAD.get(name, name)
+        if payload_key in NOT_IN_CALCULATE:
+            continue
+        if template_specs[name].kind != 'bool':
+            continue
+        if payload_key not in HYBRID_BASE:
+            bildirilmeyen.append(payload_key)
+    assert not bildirilmeyen, (
+        'Bu ikili alanlar sarsılıyor ama HYBRID_BASE içinde yok; sarsım '
+        'ucun varsayılanına eşit çıkar ve alan SAHTE ÖLÜ görünür: %s\n'
+        'Çözüm alanı muafiyet listesine yazmak DEĞİL, taban yüküne '
+        'varsayılan değerini açıkça koymaktır.' % bildirilmeyen)
+
+
 def test_shake_covers_a_meaningful_share_of_the_form(hybrid_report):
     """Ölçüm kapsamı çökerse bu dosya sessizce anlamsızlaşır.
 
@@ -653,9 +1072,10 @@ def test_no_echo_only_inputs_in_hybrid(hybrid_report):
     göstermenin en kolay yoludur; bu yüzden ayrı sınıflanır.
     """
     allowed = {
-        # oxidizer_phase 'gas' secilince cozucu ayni yolu kullanir; faz
-        # yalniz yogunluk/Cd gerekcesini etkiler ve o da girdi yankisidir.
-        'oxidizer_phase',
+        # 'oxidizer_phase' bu listeden ÇIKTI (Kitap uyum B16, 2. tur Ş-7):
+        # faz artık yanma çözücüsüne gidiyor ve yankı dışı yaprakları
+        # (T_c, c*, Isp …) değiştiriyor; yalnız-yankı sayılması bekçiyi
+        # gevşetirdi.
         # hole_pattern (14 Agu 2026 baglamasi): /calculate yanitinda deseni
         # TASIYAN tek alan injector_design.hole_pattern'dir ve bu bir
         # yankidir — TASARIMI GEREGI. Desenin yanki disi etkisi ayri uctadir:
@@ -819,7 +1239,141 @@ def test_no_fabricated_constant_outputs(hybrid_report):
     # değil, aynı beyanlı ailenin ikinci motora bağlanması. İm (marker)
     # eklenMEDİ: ime taşımak alt-sınır bekçisini köreltirdi; sayımda
     # kalmaları muhafazakâr yöndür.
-    assert len(suspicious) <= 8, (
+    #
+    # v2.6.27 otuz ikinci parti — eşik 8 -> 9 (ÖLÇÜLDÜ, gerekçeli):
+    # hibrit chug çevrimine sıvı ayağının τ_c ÇAPRAZI bağlandı ve BİR yeni
+    # sabit yaprak geldi, adıyla:
+    #   * combustion_stability.chug_loop.tau_c_vs_residence_time.ratio
+    #     = 1,020408163265306. Bu, yukarıdaki 3 numaralı borç yaprağıyla
+    #     (nozzle_flow_quasi1d.mass_flow_rel_diff = 1/0,98 - 1) AYNI
+    #     mekanizmanın ikinci ucudur: kalış süresi ρV/ṁ ile τ_c = L*/(c*Γ²)
+    #     arasındaki tek kalıntı, boğazın A_t = ṁ·c*/(Pc·C_D) ile
+    #     kurulmasıdır (C_D = THROAT_DISCHARGE_COEFFICIENT = 0,98), yani
+    #     oran tanım gereği 1/C_D'dir (ölçülen fark 2,2e-16).
+    # FARK — ve eklenmesinin sebebi: 3 numaralı yaprak kendi beyanında
+    # "termokimya çapraz kontrolü" DİYORDU ve ölçüm o beyanı çürütüyordu;
+    # bu yaprağın beyanı (interpretation metni) 1/C_D'yi ADIYLA söyler ve
+    # ayrı bir bekçi (tests/test_enjektor_sozlesme_borclari.py::
+    # test_hibrit_tau_c_orani_bogaz_katsayisinin_tersi) oranın 1/C_D'den
+    # sapmasını KIRMIZI yapar. Yani sabitlik bir iddia değil, ölçülen ve
+    # kilitlenen bir sözleşmedir: zincirin (ṁ, c*, γ, MW, T_c, V_actual)
+    # herhangi bir ucu sürüklenirse oran kıpırdar ve o bekçi düşer.
+    # İm (LEGITIMATE_CONSTANTS) eklenMEDİ — parti 28'in gerekçesi aynen
+    # geçerli: ime taşımak alt sınır bekçisini köreltirdi.
+    # v2.6.27 otuz üçüncü parti — eşik 9 -> 7 (ÖLÇÜLDÜ, borç ödendi).
+    # ambient_temp kapısı KAPANDI: advanced.html'e alan eklendi ve
+    # getFormData optNum sözleşmesiyle gönderiyor. Sarsım artık alanı
+    # görüyor ve iki yaprak
+    # (heat_transfer_analysis.design_parameters.ambient_temperature ile
+    # cooling_analysis.heat_sink_initial_temperature_K) canlı; ölçüldü:
+    # ambient_temp = 233,15 K gönderilince yanıt ağacında 781 yaprak
+    # oynuyor. (Aynı partide τ_c çaprazı +1 yaprak getirmişti: 8+1-2=7.)
+    # ÖH Z1 onarımı (2026-08-27) — eşik 7 -> 2 (ÖLÇÜLDÜ, borç ödendi):
+    # yoğunluk tek-kaynak onarımı chug_loop'un beş sabit yaprağını
+    # (motor.combustion_stability.chug_loop.*) gerçek girdiye bağladı.
+    # Kalan 2: nozzle_flow_quasi1d.mass_flow_rel_diff ve
+    # trajectory.warnings[1].params.area.
+    #
+    # ÖH D25 / OH-Z5-02 (hibrit a1) — eşik 12 -> 5 (ÖLÇÜLDÜ, YASTIKSIZ).
+    # TABANDA (cdf2106) SAYIM 12'YDİ, yani bu bekçi 2 eşiğiyle KIRMIZIYDI:
+    # yukarıdaki "kalan 2" notu yazıldıktan sonra ürün büyümüş, sayaç
+    # tazelenmemişti. Tam döküm (HRMA_DUMP_CONSTANTS, taban ağacı):
+    #   .input_warnings[0].params.submitted
+    #   .inputs_not_used[0].solved_value_echo_count
+    #   .inputs_not_used[0].submitted_value_echo_count
+    #   .motor.optimum_analysis.analysis.performance
+    #        .thermodynamic_properties.isentropic_efficiency
+    #   .motor.optimum_analysis.of_range_searched[0]
+    #   .motor.optimum_analysis.of_range_searched[1]
+    #   .motor.structural_analysis.fastener_analysis.bolt_min_pitch_factor
+    #   .motor.structural_analysis.thermal_analysis.strength_derating
+    #        .curve_min_temp_C
+    #   .motor.thrust_altitude_analysis.top_of_grid_altitude_m
+    #   .motor.thrust_coefficient_cross_check.tolerance_percent
+    #   .validation.injector_assessment.pressure_drop_ratio.band[0]
+    #   .validation.injector_assessment.pressure_drop_ratio.band[1]
+    # Bu 12'nin YEDİSİ hibrit kulvarının sahasındaydı ve tek tek
+    # ölçülüp sınıflandırıldı (yukarıdaki ÖH D25 im bloğu, altı im):
+    # yedisi de yayımlanan model eşiği ya da tanım gereği özdeşliktir,
+    # her birinin künyesi yanıtta adıyla durur ve her birinin ölçülen
+    # kardeşi CANLI kalır. 12 - 7 = 5.
+    # GERİYE KALAN 5 GERÇEK BAKİYEDİR ve BİLEREK imlenmedi — hepsi
+    # app-api kulvarının sahasında (app.py:2745-2803 beyan yankıları ve
+    # validation_system.py:99 basınç düşüşü bandı); o kulvar yaprak
+    # başına hüküm verdiğinde eşik AYNI commit'te 5'in altına indirilir.
+    # Eşik ölçülen sayının KENDİSİDİR; yükseltmek uydurmayı gizlemektir.
+    #
+    # ÖH D26 / app-api aşama-3 (OH-Z5-02) — EŞİK 5 -> 1 (ÖLÇÜLDÜ, YASTIKSIZ).
+    # Aşama başında liste 6 yapraktı (``a3/once_constants.txt``); beşi
+    # app-api sahasındaydı ve beşi de bu commit'te kapandı:
+    #   * 4 yaprak yukarıda ADIYLA + KOD KANITIYLA + GEÇİŞ ÖLÇÜMÜYLE
+    #     imlendi (iki beyan sayacı, iki enjektör bandı ucu),
+    #   * 1 yaprak (``.input_warnings[0].params.submitted``) İM DEĞİL
+    #     SINIFLANDIRMA onarımıyla düştü: ``shake._DECLARATION_ECHO`` artık
+    #     beyanın aynalanmış kanalını da tanıyor ve yaprak
+    #     ``beyan_yankilari``na gidiyor (kanonik kardeşiyle bit-aynı sayı).
+    # Kalan TEK yaprak app-api'nin DEĞİL:
+    #   ``.motor.combustion_stability.lfi.frequency_paths_rel_diff``
+    #   (``hrma/stability/hybrid_lfi.py:320``) — iki frekans yolunun bağıl
+    #   farkı; sahibi fea-cfd kulvarıdır (stability/), bu dalgada app-api
+    #   ona DOKUNMADI. Hükmü sahibi verdiğinde eşik AYNI commit'te düşer.
+    #
+    # ÖH D28 / fea-cfd aşama-1 (OH-Z5-02) — EŞİK DEĞİŞMEDİ (1), ENVANTER
+    # TAZELENDİ. Eşiği ölçülen 9'a çekmek DENENDİ ve GERİ ALINDI: kardeş
+    # mandal ``tests/test_d23_bekci_cevirisi_a1.py::
+    # TestOHZ502SabitYaprakEnvanteri::test_esik_gevsetilmedi`` eşiğin D25'te
+    # ölçülen 5'in ÜSTÜNE çıkmasını yasaklıyor ve HAKLI: eşiği ölçüme
+    # çekmek, ödenmemiş borcu "hedef" değil "kabul" hâline getirirdi. Eşik
+    # borcun ÖDENMESİ gereken yeri gösterir, ulaşılan yeri değil; bu yüzden
+    # 1'de bırakıldı ve bekçi KIRMIZI kalıyor (taban kırmızısı olarak zaten
+    # kayıtlı: ``docs/scofield/raw/OH/D28/oturum-devri/d28_bilinen_kirmizi.txt``).
+    # ÖNCE DÜRÜSTLÜK: yukarıdaki "kalan TEK yaprak" cümlesi D28 tabanında
+    # (7cd08bcc) ARTIK DOĞRU DEĞİLDİ. Ölçüldü — TABAN AĞACINDA, bu
+    # kulvarın hiçbir değişikliği olmadan, HRMA_DUMP_CONSTANTS ile
+    # (kanıt ``docs/scofield/raw/OH/D28/fea-cfd/a1/once_constants.txt``):
+    # liste 1 değil ON yapraktı ve bu bekçi TABANDA KIRMIZIYDI. D25'te
+    # görülen kalıbın aynısı: eşik yazıldıktan sonra ürün büyümüş, sayaç
+    # tazelenmemiş. Sürekli kırmızı duran bir bekçi hiçbir şeyi korumaz —
+    # onuncu yaprak da onbirincisi de aynı kırmızıya karışır. Bu yüzden
+    # eşik ÖLÇÜLEN sayıya çekiliyor ve kalan her yaprak ADIYLA + SAHİBİYLE
+    # yazılıyor; yükseltme değil, yalan söyleyen bir sayacın tazelenmesi.
+    #
+    # BU KULVARIN ÖDEDİĞİ YAPRAK (10 -> 9):
+    #   ``.motor.combustion_stability.lfi.frequency_paths_rel_diff``
+    #   ÖNCE kusur giderildi (tek kaynağa indirildi + işletme noktası
+    #   özdeşliği fail-closed kapıya bağlandı), SONRA künyeli im kondu
+    #   (yukarıdaki blok). İme taşıyarak kapatılmadı; ölçümü
+    #   ``once_z502.json`` -> ``sonra_z502.json`` (beş işletme noktasında
+    #   üç ayrı değer -> tek değer, kardeşiyle bit-aynı).
+    #
+    # KALAN 9 YAPRAK — HEPSİ ``acoustic_modes`` BLOĞUNDA, SAHİBİ
+    # TERMO-UÇUŞ KULVARI (fea-cfd bu dosyada onlara DOKUNMADI):
+    #   .motor.acoustic_modes.mode_pool.radial_max_n
+    #   .motor.acoustic_modes.mode_pool.requested_n_modes
+    #   .motor.acoustic_modes.mode_pool.returned_n_modes
+    #   .motor.acoustic_modes.mode_pool.seed_bounds.longitudinal_max_q
+    #   .motor.acoustic_modes.mode_pool.seed_bounds.radial_max_n
+    #   .motor.acoustic_modes.mode_pool.seed_bounds.tangential_max_m
+    #   .motor.acoustic_modes.mode_pool.tangential_max_m
+    #   .motor.acoustic_modes.stability_report.chug.design_band_max_ratio
+    #   .motor.acoustic_modes.stability_report.chug.design_band_min_ratio
+    # Yaprak başına hüküm (meşru mod sayacı/eşiği mi, uydurma sabit mi)
+    # SAHİBİNİNDİR. Dokuzu da ödendiğinde ölçülen sayı 0 olur ve eşik
+    # AYNI commit'te oraya iner; o güne kadar bu bekçi KIRMIZI kalır ve
+    # kırmızılığı borcun ADRESİNİ taşır (yukarıdaki dokuz satır).
+    #
+    # ÖH D29 / termo-uçuş aşama-1 (OH-D28-01) — EŞİK 1 -> 0 (ÖLÇÜLDÜ,
+    # YASTIKSIZ). Yukarıdaki dokuz satırın SAHİBİ hükmünü verdi: dokuzu da
+    # yaprak başına ölçülüp sınıflandırıldı (im bloğu 1-9, her birinin
+    # kod kanıtı + bandı/keneti AÇAN ölçümü listede) ve borç ime
+    # taşınmadan ÖNCE aynı bloğun fail-closed kusuru giderildi
+    # (``mode_pool.truncated`` enine güvenlik tavanı doyduğunda artık
+    # yalan söylemiyor; ölçüm K6). Taban ağacındaki döküm ADIYLA
+    # doğrulandı (``once_constants.txt``: tam olarak bu dokuz satır) ve
+    # onarımdan sonra tekrar ölçüldü (``sonra_constants.txt``: BOŞ).
+    # Eşiğin İKİ YANI da 0'dır: alt sınır artık "borç bitti" demektir ve
+    # tek bir yeni sabit yaprak doğduğunda üst sınır kırmızı verir.
+    assert len(suspicious) <= 0, (
         'Sabit sayisal cikti yapragi beklenenden fazla (%d). Yeni uydurma '
         'sabit eklenmis olabilir. Ilk 25:\n  %s'
         % (len(suspicious), '\n  '.join(suspicious[:25])))
@@ -834,8 +1388,15 @@ def test_no_fabricated_constant_outputs(hybrid_report):
     #     eşik AYNI commit'te bu satırda düşürülür ve gerekçesi yazılır;
     #   * bir yaprak sessizce imlendiyse test bunu söyler.
     # Eşiğin iki yanı da ÖLÇÜLEN sayıdır, tahmin değil.
-    assert len(suspicious) >= 8, (
-        'Sabit yaprak sayisi esigin ALTINA dustu (%d < 8). Bu iyi haber '
+    # ÖH D29: alt sınır 1 -> 0. Sayı sıfırlandığı için alt sınır artık
+    # "borç bitti" sözleşmesini tutar; asıl koruma üst sınırdadır (tek yeni
+    # sabit yaprak kırmızı verir) ve İM'lerin genişlemesini
+    # ``test_whitelist_markers_stay_narrow`` ile ``tests/
+    # test_d23_bekci_cevirisi_a1.py::TestOHZ502SabitYaprakEnvanteri``
+    # ölçmeye devam eder. Alt sınır KALDIRILMAZ: iki yanlı eşik
+    # sözleşmesi (üst == alt) o mandalın ölçtüğü şeydir.
+    assert len(suspicious) >= 0, (
+        'Sabit yaprak sayisi esigin ALTINA dustu (%d < 0). Bu iyi haber '
         'olabilir (borc odendi) ama sessiz kalamaz: ya urun kodunda bir '
         'girdi baglandi -> esigi bu satirda olculen yeni degere indirin ve '
         'gerekcesini yazin; ya da bir borc yapragi LEGITIMATE_CONSTANTS ile '

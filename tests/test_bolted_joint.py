@@ -18,6 +18,12 @@ BÖLÜM 1 — BoltedJointAnalyzer (Shigley 10th ed. Ch. 8) el hesabı çapaları
 
 BÖLÜM 2 — Goodman yorulma (structural_analysis._analyze_fatigue).
 
+ÖH D15 / P5B1-10: bu bölümün çağrıları ikinci konumsal argüman olarak yanma
+süresi veriyordu. O parametre gövdede HİÇ okunmuyordu (ölçüm:
+``analyze_structure`` çıktısının JSON imzası 0,5 s ile 1 000 000 s arasında
+birebir aynı, 17 648 bayt) ve kaldırıldı; çağrılardan da düşürüldü. Testlerin
+sayısal iddiaları değişmedi.
+
   DAVRANIŞSAL BEKLENTİ GÜNCELLEMESİ GEREKÇESİ: Eski sürüm (a) MPa gelen
   gerilmeyi Pa'lık fatigue_limit ile oranlıyordu (SF ~1e6 kat şişik),
   (b) tam σ_max'ı genlik sayıp ortalama gerilmeyi ihmal ediyordu,
@@ -73,14 +79,14 @@ class TestTablesISO:
 
     def test_class_88_diameter_split(self):
         """ISO 898-1: 8.8 için S_p = 580 MPa (d≤16), 600 MPa (d>16)."""
-        a8 = BoltedJointAnalyzer(size='M8', property_class='8.8')
-        a20 = BoltedJointAnalyzer(size='M20', property_class='8.8')
+        a8 = BoltedJointAnalyzer(size='M8', property_class='8.8', member_material='aluminum_6061')
+        a20 = BoltedJointAnalyzer(size='M20', property_class='8.8', member_material='aluminum_6061')
         assert a8.props['S_p'] == pytest.approx(580e6)
         assert a20.props['S_p'] == pytest.approx(600e6)
 
     def test_class_109_129_strengths(self):
-        a10 = BoltedJointAnalyzer(size='M10', property_class='10.9')
-        a12 = BoltedJointAnalyzer(size='M12', property_class='12.9')
+        a10 = BoltedJointAnalyzer(size='M10', property_class='10.9', member_material='aluminum_6061')
+        a12 = BoltedJointAnalyzer(size='M12', property_class='12.9', member_material='aluminum_6061')
         assert a10.props['S_p'] == pytest.approx(830e6)
         assert a10.props['S_u'] == pytest.approx(1040e6)
         assert a12.props['S_p'] == pytest.approx(970e6)
@@ -88,20 +94,20 @@ class TestTablesISO:
 
     def test_a2_70_stainless(self):
         """ISO 3506-1 sınıf 70: R_m ≥ 700, R_p0.2 ≥ 450 MPa."""
-        a = BoltedJointAnalyzer(size='M8', property_class='A2-70')
+        a = BoltedJointAnalyzer(size='M8', property_class='A2-70', member_material='aluminum_6061')
         assert a.props['S_u'] == pytest.approx(700e6)
         assert a.props['S_y'] == pytest.approx(450e6)
         assert a.props['stainless'] is True
 
     def test_invalid_inputs_rejected(self):
         with pytest.raises(ValueError):
-            BoltedJointAnalyzer(size='M7')
+            BoltedJointAnalyzer(size='M7', member_material='aluminum_6061')
         with pytest.raises(ValueError):
-            BoltedJointAnalyzer(property_class='9.9')
+            BoltedJointAnalyzer(property_class='9.9', member_material='aluminum_6061')
         with pytest.raises(ValueError):
-            BoltedJointAnalyzer(bolt_count=0)
+            BoltedJointAnalyzer(bolt_count=0, member_material='aluminum_6061')
         with pytest.raises(ValueError):
-            BoltedJointAnalyzer(grip_length_mm=-5.0)
+            BoltedJointAnalyzer(grip_length_mm=-5.0, member_material='aluminum_6061')
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +131,7 @@ class TestPreloadAndTorque:
 
     def test_preload_permanent_fraction(self):
         a = BoltedJointAnalyzer(size='M8', property_class='8.8',
-                                reusable=False)
+                                reusable=False, member_material='aluminum_6061')
         assert a.preload()['preload_fraction'] == pytest.approx(0.90)
 
     def test_torque_dry_hand_calc(self, m8):
@@ -137,7 +143,7 @@ class TestPreloadAndTorque:
     def test_torque_lubricated_hand_calc(self):
         """T = 0.15·15921·0.008 = 19.11 N·m."""
         a = BoltedJointAnalyzer(size='M8', property_class='8.8',
-                                lubricated=True)
+                                lubricated=True, member_material='aluminum_6061')
         tq = a.torque()
         assert tq['K_nut_factor'] == pytest.approx(0.15)
         assert tq['recommended_torque_Nm'] == pytest.approx(19.11, rel=1e-3)
@@ -215,10 +221,10 @@ class TestStiffnessAndLoadSharing:
         assert any('SEPARATION' in w for w in res['warnings'])
 
     def test_a2_70_large_size_warning(self):
-        res = BoltedJointAnalyzer(size='M24', property_class='A2-70') \
+        res = BoltedJointAnalyzer(size='M24', property_class='A2-70', member_material='aluminum_6061') \
             .analyze(pressure_bar=10.0, seal_diameter_mm=100.0)
         assert any('A2-70' in w for w in res['warnings'])
-        res_m8 = BoltedJointAnalyzer(size='M8', property_class='A2-70') \
+        res_m8 = BoltedJointAnalyzer(size='M8', property_class='A2-70', member_material='aluminum_6061') \
             .analyze(pressure_bar=10.0, seal_diameter_mm=100.0)
         assert not any('A2-70' in w for w in res_m8['warnings'])
 
@@ -279,7 +285,7 @@ class TestStiffnessAndLoadSharing:
     def test_result_structure_json_friendly(self):
         res = analyze_bolted_joint(pressure_bar=30.0, seal_diameter_mm=150.0,
                                    bolt_count=12, size='M10',
-                                   property_class='10.9')
+                                   property_class='10.9', member_material='aluminum_6061')
         for key in ('bolt', 'preload', 'torque', 'stiffness', 'loads',
                     'safety_factors', 'separation', 'warnings',
                     'assumptions', 'source'):
@@ -309,7 +315,7 @@ class TestGoodmanFatigue:
 
     def test_goodman_hand_calc_infinite_life(self, analyzer, mat):
         """σ_max = 200 MPa → n_f = 1/(100/230 + 100/730) = 1.7490 (SAFE)."""
-        res = analyzer._analyze_fatigue(200.0, 10.0, mat)
+        res = analyzer._analyze_fatigue(200.0, mat)
         assert res['fatigue_safety_factor'] == pytest.approx(1.7490, rel=1e-3)
         assert res['stress_amplitude'] == pytest.approx(100.0)  # σ_max/2
         assert res['mean_stress'] == pytest.approx(100.0)
@@ -318,7 +324,7 @@ class TestGoodmanFatigue:
 
     def test_goodman_marginal_band(self, analyzer, mat):
         """σ_max = 300 MPa → n_f = 1/(150/230+150/730) = 1.166 → MARGINAL."""
-        res = analyzer._analyze_fatigue(300.0, 10.0, mat)
+        res = analyzer._analyze_fatigue(300.0, mat)
         assert res['fatigue_safety_factor'] == pytest.approx(1.1660, rel=1e-3)
         assert res['fatigue_status'] == 'MARGINAL'
         assert res['estimated_life'] == 'Infinite'  # Goodman doğrusu altında
@@ -340,7 +346,7 @@ class TestGoodmanFatigue:
         koda değil EL HESABINA göre yenilendi, tolerans (rel=0.05)
         DEĞİŞTİRİLMEDİ.
         """
-        res = analyzer._analyze_fatigue(500.0, 10.0, mat)
+        res = analyzer._analyze_fatigue(500.0, mat)
         assert res['fatigue_safety_factor'] == pytest.approx(0.6998, rel=1e-3)
         # Ömrü hangi çapanın sürüklediği tek bakışta görünsün: f eğrisi
         # değişirse önce BU assert patlar, ömür assert'i değil.
@@ -355,15 +361,15 @@ class TestGoodmanFatigue:
 
     def test_r_zero_relation(self, analyzer, mat):
         """R≈0 basınç çevrimi: σ_a = σ_m = σ_max/2 kimliği."""
-        res = analyzer._analyze_fatigue(240.0, 5.0, mat)
+        res = analyzer._analyze_fatigue(240.0, mat)
         assert res['stress_amplitude'] == pytest.approx(res['max_stress'] / 2)
         assert res['mean_stress'] == pytest.approx(res['max_stress'] / 2)
         assert res['stress_ratio_R'] == 0.0
 
     def test_cycle_count_parameter(self, analyzer, mat):
         """Çevrim sayısı parametresi (test kampanyası + uçuş) çalışmalı."""
-        res_default = analyzer._analyze_fatigue(500.0, 10.0, mat)
-        res_100 = analyzer._analyze_fatigue(500.0, 10.0, mat,
+        res_default = analyzer._analyze_fatigue(500.0, mat)
+        res_100 = analyzer._analyze_fatigue(500.0, mat,
                                             design_cycles=100)
         assert res_default['design_cycles'] == 25
         assert res_100['design_cycles'] == 100
@@ -371,7 +377,7 @@ class TestGoodmanFatigue:
             res_default['cycle_margin'] * 25.0 / 100.0, rel=1e-9)
 
     def test_zero_stress_safe(self, analyzer, mat):
-        res = analyzer._analyze_fatigue(0.0, 10.0, mat)
+        res = analyzer._analyze_fatigue(0.0, mat)
         assert res['fatigue_safety_factor'] == float('inf')
         assert res['fatigue_status'] == 'SAFE'
 

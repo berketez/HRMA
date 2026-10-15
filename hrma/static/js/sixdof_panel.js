@@ -42,6 +42,44 @@
     function T(key, fallback) {
         return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
     }
+
+    /* ÖH D35 / OH-GT-23 (22 Eylül 2026) — GEÇ GELEN SÖZLÜK ROZETİ
+       İNGİLİZCE BIRAKIYORDU.
+
+       ÖLÇÜLEN KUSUR: bu panelin bütün metinleri T()/TF() ile yazılıyor ve
+       karşılıkları i18n_common.js'te VAR ('sixdof.bandStable' ->
+       'KARARLI', 'sixdof.cgEstimated' -> '... Bileşen moduna geçin'). Ama
+       i18n_common.js hiçbir motor şablonunda <script> ile yüklenmiyor;
+       sayfaya analysis_dock.js ÇALIŞTIRMA ZAMANINDA enjekte ediyor
+       (analysis_dock.js:44-46). Panelin ilk çizimi (init -> setMode ->
+       updateLive) o sözlükten ÖNCE koşarsa rozet İngilizce fallback ile
+       innerHTML'e YAZILIR ve orada donar: I18N.register geç gelen sözlüğü
+       I18N.apply() ile ekrana yansıtır, ama apply YALNIZ `data-i18n`
+       taşıyan düğümleri tazeler — bu rozet birleşik bir metindir ve öyle
+       bir düğümü yoktur. I18N.onChange de yalnız dil DEĞİŞİMİNDE ateşler.
+       Sonuç ölçüldü (21 Eylül piksel turu): hibrit sayfada rozet
+       'SM 2.10 / 2.77 cal — STABLE (SLIGHTLY OVERSTABLE)', aynı sürümde
+       katı sayfada 'SM 5,20 / 6,20 cal — AŞIRI KARARLI'.
+
+       FAIL-CLOSED: sözlük hiç gelmezse geri çağrı HİÇ koşmaz (ekranda
+       İngilizce fallback kalır, uydurma bir Türkçe yazılmaz); yoklama
+       ~5 saniyede kendini kapatır ve zamanlayıcı bırakmaz. */
+    var SOZLUK_TANIK_ANAHTAR = 'sixdof.bandStable';
+
+    function sozlukGelinceCalistir(geriCagri) {
+        if (!window.I18N || typeof window.I18N.has !== 'function') return null;
+        if (window.I18N.has(SOZLUK_TANIK_ANAHTAR)) return null;   // zaten var
+        var deneme = 0;
+        var zamanlayici = setInterval(function () {
+            if (window.I18N.has(SOZLUK_TANIK_ANAHTAR)) {
+                clearInterval(zamanlayici);
+                try { geriCagri(); } catch (e) { /* çizim yoksa sessiz */ }
+            } else if (++deneme > 100) {              // ~5 sn, sonra bırak
+                clearInterval(zamanlayici);
+            }
+        }, 50);
+        return zamanlayici;
+    }
     function TF(key, params, fallback) {
         if (window.I18N && window.I18N.tf) return window.I18N.tf(key, params, fallback);
         return String(fallback).replace(/\{(\w+)\}/g, function (whole, name) {
@@ -62,11 +100,11 @@
     const COLORS = {
         red: 'var(--hd-red, #ff5d73)',
         green: 'var(--hd-green, #2dd4a8)',
-        yellow: 'var(--hd-yellow, #ffd166)',
+        yellow: 'var(--hd-amber, #ffbe46)',
         orange: 'var(--hd-orange, #ff8c33)',
         cyan: 'var(--hd-cyan, #00e5ff)',
-        blue: 'var(--hd-blue, var(--hd-cyan, #00e5ff))',
-        dim: 'var(--hd-ink-dim, #8899aa)',
+        blue: 'var(--hd-cyan, #00e5ff)',
+        dim: 'var(--hd-ink-dim, #7d97a5)',
     };
 
     // six_dof_trajectory.py ile paylaşılan sabitler (tek yerde tanım):
@@ -152,7 +190,24 @@
         return el ? parseFloat(el.value) : NaN;
     }
 
-    function fmt(v, n) { return isFinite(v) ? v.toFixed(n) : '--'; }
+    // ÖH D37 A1b panel-js · DV36-04 — EKRAN ONDALIĞI TEK KANALDAN.
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/A1b/panel-js/a1/once/olcum.json K5):
+    // TR sayfada 6-DOF rozetleri "FIRLATMA RAYI 5.00 m", "max_speed
+    // 641.1 m/s", "CNα 7.36 · CP 1.416 m" diye NOKTALI ondalık basıyordu
+    // (TR rozet metninde 4 noktalı ondalık; sayfanın geri kalanı virgül).
+    // Kök: ekran metni çıplak `.toFixed(` ile kuruluyordu; kanon
+    // `I18N.number` (TR virgül, EN nokta) atlanıyordu. Ekrana giden her
+    // sayı artık bu yardımcıdan geçer. MAKİNE kanalları BİLEREK dokunulmaz
+    // (SVG koordinat öznitelikleri, form `.value` yazımı, geliştirici
+    // `console.warn` karşılaştırması) — onlar ekran metni değildir ve
+    // virgül orada sözdizimini bozar. i18n.js yoksa nokta (eski davranış).
+    function sayiEkran(v, n) {
+        return (typeof window !== 'undefined' && window.I18N
+                && typeof window.I18N.number === 'function')
+            ? window.I18N.number(v, n) : v.toFixed(n);
+    }
+
+    function fmt(v, n) { return isFinite(v) ? sayiEkran(v, n) : '--'; }
 
     function escapeHtml(s) {
         return String(s).replace(/[&<>"']/g, function (ch) {
@@ -328,7 +383,11 @@
                 <label data-i18n="sixdof.thrustSource">${T('sixdof.thrustSource',
                     'Thrust source')}</label>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                    <select id="sd_thrust_src" style="max-width:280px;">
+                    <!-- ÖH D37 A1b panel-js · DV36-04: seçici en uzun
+                         seçeneğin metni kadar genişler (D36 OH-P-04 ölçümü:
+                         TR 378 px metin / 242 px alan, kesikti); dar ekranda
+                         kabın içinde kalır (max-width 100%). -->
+                    <select id="sd_thrust_src" style="width:auto; max-width:100%; flex:0 1 auto;">
                         <option value="auto" data-i18n="sixdof.srcAuto">${T('sixdof.srcAuto',
                             'Page result / form values (default)')}</option>
                         <option value="imported" data-i18n="sixdof.srcImported">${
@@ -376,7 +435,7 @@
             </div>` : '';
         return `
         <div class="panel" id="sixDofPanel" style="width:100%; grid-column: 1 / -1;">
-            <h2>▶ <span data-i18n="sixdof.title">${T('sixdof.title',
+            <h2><span data-i18n="sixdof.title">${T('sixdof.title',
                 'Flight Dynamics — 6-DOF Stability')}</span></h2>
             <div class="chart-explanation">
                 <strong data-i18n="common.whatThisShows">${T('common.whatThisShows',
@@ -1011,9 +1070,9 @@
         el.value = meta.prop_mass_kg.toFixed(3);
         el.style.borderColor = COLORS.orange;
         el.style.boxShadow = '0 0 0 1px ' + COLORS.orange;
-        el.title = TF('sixdof.propMassSuggested', { m: meta.prop_mass_kg.toFixed(3) },
+        el.title = TF('sixdof.propMassSuggested', { m: sayiEkran(meta.prop_mass_kg, 3) },
             'Propellant mass filled from the motor file ({m} kg) — please review.');
-        setMotorStatus(TF('sixdof.propMassSuggested', { m: meta.prop_mass_kg.toFixed(3) },
+        setMotorStatus(TF('sixdof.propMassSuggested', { m: sayiEkran(meta.prop_mass_kg, 3) },
             'Propellant mass filled from the motor file ({m} kg) — please review.'),
             COLORS.orange);
         updateLive();
@@ -1043,6 +1102,8 @@
         if (!window.HRMAImportUI) return;
         setMotorStatus(T('sixdof.importingMotor', 'IMPORTING MOTOR FILE…'));
         try {
+            // Dosya OKUNMADAN önce boyut tavanı (sunucudan; V3 güvenlik 5. tur)
+            window.HRMAImportUI.assertUploadSize('motor_file', file.size);
             const text = await window.HRMAImportUI.readFileAsText(file);
             const data = await window.HRMAImportUI.postMotorFile(text, file.name, null);
             adoptImportedMotors(data.motors || [], file.name);
@@ -1235,9 +1296,9 @@
             if (typeof hrmaVal !== 'number' || !isFinite(hrmaVal)) return;
             const diff = orVal !== 0 ? (hrmaVal - orVal) / Math.abs(orVal) * 100 : NaN;
             rows.push([labelText,
-                orVal.toFixed(digits) + ' ' + unit,
-                hrmaVal.toFixed(digits) + ' ' + unit,
-                isFinite(diff) ? ((diff >= 0 ? '+' : '') + diff.toFixed(1) + '%') : '--']);
+                sayiEkran(orVal, digits) + ' ' + unit,
+                sayiEkran(hrmaVal, digits) + ' ' + unit,
+                isFinite(diff) ? ((diff >= 0 ? '+' : '') + sayiEkran(diff, 1) + '%') : '--']);
         }
         addRow(T('sixdof.cmpApogee', 'Apogee'), sim.apogee_m, summary.apogee, 0, 'm');
         addRow(T('sixdof.cmpMaxVelocity', 'Max velocity'), sim.max_velocity_ms,
@@ -1300,7 +1361,32 @@
     // iki gösterge artık aynı sayıyı işaret eder.
     //
     // Saf fonksiyon: Plotly çağrısı yok, testten doğrudan koşturulabilir.
+    /* ÖH D27 a4 · P11B5-17 — ROZETTEKİ α_max İLE ÇİZİLEN TEPE AYRIŞIYOR.
+
+       ÖLÇÜLDÜ (a4/once.json, `p11b5_17_rozet_cizim_ayrisma_beyani` = 0):
+       önceki dalga rozetin değerini grafiğe kesikli YATAY ÇİZGİ olarak
+       koydu, ama iki sayının AYNI OLDUĞUNU hiç doğrulamadı. Onlar aynı
+       sayı DEĞİL: rozetin `summary.max_alpha_deg`i arka ucun kendi tam
+       hızlı çözüm dizisi üstünde ve KENDİ maskesiyle (v > %10 v_max ∧
+       t < t_apogee) ölçülür; panel ise YAYIMLANAN seriyi, üstüne bir de
+       `t > ALPHA_VALID_MIN_TIME_S` koşulunu ekleyerek tarar. P11 taraması
+       15 gerçekçi konfigürasyonun 6'sında ayrışma buldu (en büyüğü
+       %6,56): kesikli çizgi çizilen eğrinin ÜSTÜNDE havada kalıyor ve
+       kullanıcı grafikte hiç bulunmayan bir tepeyi okuyor.
+
+       Panel iki sayıdan birini ÖTEKİNE UYDURMAZ (ikisi de doğru, farklı
+       şeyleri ölçüyorlar); ayrışmayı SAYIYLA İLAN EDER. Tolerans bir
+       mühendislik eşiği değil, kayan nokta gürültü tabanıdır. */
     function _buildAlphaFigure(ser, summary) {
+        // ÖH D37 A1b panel-js · DV36-04 — grafik notunun ondalığı ekran
+        // kanonundan (`I18N.number`). Yardımcı BİLEREK bu gövdenin İÇİNDE:
+        // iki bekçi harness'ı (test_faz6_f8_motor, test_faz6_panel) gövdeyi
+        // dosyadan kesip node'da koşturuyor ve modül düzeyindeki
+        // fonksiyonları enjekte etmiyor (aşağıdaki `ayrisma` notuyla aynı
+        // gerekçe). Node'da `window` yoktur → nokta (eski davranış).
+        const notSayi = (v, n) => ((typeof window !== 'undefined'
+                && window.I18N && typeof window.I18N.number === 'function')
+            ? window.I18N.number(v, n) : v.toFixed(n));
         const t = (ser && ser.time) || [];
         const a = (ser && ser.alpha_deg) || [];
         const v = (ser && ser.speed) || [];
@@ -1412,9 +1498,9 @@
             note = 'q > 0: t > ' + ALPHA_VALID_MIN_TIME_S + ' s ∧ v > '
                 + Math.round(ALPHA_VALID_SPEED_FRACTION * 100) + '% v_max ∧ t < t_apogee'
                 + '  →  ' + xIn.length + '/' + (xIn.length + xOut.length)
-                + ', α_max = ' + (peakIn === null ? '--' : peakIn.toFixed(2)) + '°'
+                + ', α_max = ' + (peakIn === null ? '--' : notSayi(peakIn, 2)) + '°'
                 + '   |   q ≈ 0: ' + xOut.length + '/' + (xIn.length + xOut.length)
-                + ', α_max = ' + peakOut.toFixed(1) + '°';
+                + ', α_max = ' + notSayi(peakOut, 1) + '°';
             layout.annotations.push({
                 xref: 'paper', yref: 'paper', x: 0, y: -0.32,
                 xanchor: 'left', yanchor: 'top', showarrow: false,
@@ -1424,9 +1510,45 @@
             if (top !== null && peakOut > top) layout.yaxis.range = [0, top];
         }
 
+        // P11B5-17 — rozet çizgisi ile çizilen tepe aynı sayı mı?
+        // Ölçüm bilerek BU fonksiyonun içindedir: bekçiler
+        // (tests/test_faz6_f8_motor.py, tests/test_faz6_panel.py) gövdeyi
+        // dosyadan kesip node'da koşuyor ve modül düzeyindeki FONKSİYONLARI
+        // enjekte etmiyor — dışarıdaki bir yardımcıya başvurmak o iki
+        // bekçiyi ReferenceError ile kırardı (harness açığı, kusur değil).
+        const ayrisma = (function () {
+            // Kayan nokta gürültü tabanı (mühendislik eşiği DEĞİL). Tanımı
+            // bilerek burada, kesilen gövdenin İÇİNDE: iki bekçi harness'ı
+            // gövdeyi dosyadan kesip node'da koşuyor ve biri modül
+            // düzeyindeki sabitleri elle sayıyor.
+            const ALPHA_BADGE_PLOT_REL_TOL = 1e-9;
+            const f2 = (x) => typeof x === 'number' && isFinite(x);
+            if (!f2(badgeMax) || !f2(peakIn)) return null;
+            const olcek = Math.max(Math.abs(badgeMax), Math.abs(peakIn));
+            const rel = olcek > 0 ? Math.abs(badgeMax - peakIn) / olcek : 0;
+            return { badgeMax: badgeMax, plottedPeak: peakIn, rel: rel,
+                     diverges: rel > ALPHA_BADGE_PLOT_REL_TOL };
+        }());
+        if (ayrisma && ayrisma.diverges) {
+            const metin = 'badge α_max = ' + notSayi(ayrisma.badgeMax, 3)
+                + '° (endpoint mask, full-rate solution)  ≠  drawn in-window '
+                + 'peak = ' + notSayi(ayrisma.plottedPeak, 3)
+                + '° (published series, panel mask)  →  '
+                + notSayi(ayrisma.rel * 100, 2) + ' % apart; the dashed '
+                + 'line is NOT a point of the drawn curve.';
+            note = note ? (note + '\n' + metin) : metin;
+            layout.annotations.push({
+                xref: 'paper', yref: 'paper', x: 0, y: -0.46,
+                xanchor: 'left', yanchor: 'top', showarrow: false,
+                align: 'left', text: metin, font: { size: 10, color: '#ffd166' },
+            });
+            layout.margin = { b: 128 };
+        }
+
         return { traces: traces, layout: layout,
                  excludedCount: xOut.length, includedCount: xIn.length,
-                 excludedPeak: peakOut, includedPeak: peakIn, note: note };
+                 excludedPeak: peakOut, includedPeak: peakIn, note: note,
+                 badgePlotDivergence: ayrisma };
     }
 
     function drawAlphaPlot(div, ser, summary) {
@@ -1462,7 +1584,18 @@
         // Kural: sayı yoksa SAYI BASILMAZ; niçin olmadığı yazılır.
         // ==============================================================
         const numOf = (v) => (typeof v === 'number' && Number.isFinite(v)) ? v : null;
-        const fx = (v, d) => { const n = numOf(v); return n === null ? null : n.toFixed(d); };
+        // ÖH D37 A1b panel-js · DV36-04 (denetçi 2. tur, Ş1) — rozet
+        // ondalığı ekran kanonundan (`I18N.number`). Yardımcı BİLEREK bu
+        // bloğun İÇİNDE: tests/test_faz5_ui.py rozet bloğunu (numOf
+        // satırından rozet HTML'inin yazıldığı satıra kadar) dosyadan kesip
+        // node'da koşturuyor ve modül düzeyindeki `sayiEkran`ı enjekte etmiyor
+        // (`_buildAlphaFigure` içindeki `notSayi` emsali). Modül düzeyindeki
+        // `sayiEkran`a bağlanan ilk sürüm o harness'ta ReferenceError verdi
+        // (ölçüldü). Node'da `window` yoktur → nokta (eski davranış).
+        const rozetSayi = (v, n) => ((typeof window !== 'undefined'
+                && window.I18N && typeof window.I18N.number === 'function')
+            ? window.I18N.number(v, n) : v.toFixed(n));
+        const fx = (v, d) => { const n = numOf(v); return n === null ? null : rozetSayi(n, d); };
 
         let html;
         if (numOf(s.stable) === null && typeof s.stable !== 'boolean') {
@@ -1476,17 +1609,96 @@
         const apKm = fx(numOf(s.apogee) === null ? null : s.apogee / 1000, 2);
         const apT = fx(s.apogee_time, 1);
         if (apKm !== null && apT !== null) {
+            // ÖH D19 / P4B3-21 — APOJENİN DATUMU EKRANDA.
+            // Bu çözücünün apojesi SAHA ÜSTÜdür (AGL), kardeş 2B panelinin
+            // apojesi DENİZ SEVİYESİNDENdir. İkisi de "Apogee" başlığıyla
+            // gösterilince 1500 m'lik bir sahada 1500 m'lik sahte bir fark
+            // doğuyordu. Datum sunucudan gelir (`summary.apogee_datum`);
+            // AGL/MSL birim simgeleridir, yeni i18n anahtarı uydurulmaz ve
+            // çeviri kulvarının sahasına girilmez.
+            const apDatum = (s.apogee_datum === 'above_launch_site') ? ' AGL'
+                : (s.apogee_datum === 'mean_sea_level') ? ' MSL' : '';
             html += badge(TF('sixdof.badgeApogee', { km: apKm, t: apT },
-                             'APOGEE {km} km @ {t} s'), 'info');
+                             'APOGEE {km} km @ {t} s') + apDatum, 'info');
+            const apElev = numOf(s.launch_site_elevation_m);
+            const apMsl = numOf(s.apogee_msl_m);
+            if (s.apogee_datum === 'above_launch_site'
+                && apElev !== null && apElev > 0 && apMsl !== null) {
+                // ÖH D25 / P4B3-21 ŞARTI + OH-D24-15 — İKİNCİ APOJE ROZETİ
+                // ÇEVİRİ KANALINDAN GEÇER. Kardeş rozet (badgeApogee) zaten
+                // TF() ile veriliyordu; bu satır İngilizce sabit dizeydi, yani
+                // TR kullanıcıya İngilizce sızıyordu ve i18n süpürme bekçileri
+                // deseni göremiyordu. AGL/MSL/ASL birim simgeleridir, metnin
+                // içinde kalır; datum SUNUCUDAN gelir (`apogee_datum`).
+                html += badge(TF('sixdof.badgeApogeeMsl',
+                                 { m: fx(apElev, 0), km: fx(apMsl / 1000, 2) },
+                                 'SITE {m} m ASL \u2192 APOGEE {km} km MSL'),
+                              'info');
+            }
+        } else if (s.lifted_off === false) {
+            // ÖH D17 / P4B3-13 — KALKMAYAN ARAÇ. Genel "entegrasyon zirveye
+            // varmadan bitti" metni bu vakada YANLIŞTIR: entegrasyon bitti,
+            // araç hiç kalkmadı. Gerekçe SUNUCUDAN gelir
+            // (`summary.apogee_withheld_because`, T/W sayısını taşır); yeni
+            // bir i18n anahtarı uydurulmaz, çeviri kulvarının sahasına
+            // girilmez ve ekranda ham anahtar görünmez.
+            html += badge(String(s.apogee_withheld_because
+                                 || 'NO LIFTOFF — the vehicle never left the pad'),
+                          'err');
         } else {
             html += badge(T('sixdof.apogeeNotReported',
                             'APOGEE NOT REPORTED — the integration ended before '
                             + 'a peak was found'), 'warn');
         }
 
+        // ÖH D23 / P4B3-29 — HANGİ RAY BOYUYLA UÇTU?
+        // Ray boyu, ray çıkış hızının birinci mertebe girdisidir ve çözücüde
+        // ray fazı boyunca tutumu kilitler. Çözücü D21'den beri hangi sayıyı
+        // kullandığını (`rail_length_m`) ve o sayının bir ÖLÇÜ mü yoksa depo
+        // VARSAYILANI mı olduğunu (`rail_length_source`) yayımlıyor; uç bu
+        // dalgada iki alanı da özete taşıdı. Panel artık ikisini de basar:
+        // varsayılan kullanıldıysa kullanıcı bunu ekranda görür, sayı
+        // sessizce "benim verdiğim" sanılmaz. Sayı UYDURULMAZ — alanlar
+        // yoksa hiçbir şey basılmaz.
+        const railM = numOf(s.rail_length_m);
+        if (railM !== null) {
+            const railSrc = s.rail_length_source === 'supplied'
+                ? T('sixdof.railSupplied', 'supplied')
+                : T('sixdof.railDefault', 'endpoint default, not a measurement');
+            html += badge(T('sixdof.railLength', 'LAUNCH RAIL') + ' '
+                          + fx(railM, 2) + ' m (' + railSrc + ')',
+                          s.rail_length_source === 'supplied' ? 'info' : 'warn');
+        }
+
+        // ÖH D15 / P11B5-09 — BÜYÜKLÜK KAPISI YOK.
+        // ÖLÇÜLDÜ (once.json, gerçek /api/six-dof-analysis, thrust = 1e9 N,
+        // HTTP 200, status='success'):
+        //   summary.max_speed = 606.995.967,5 m/s = 2,025 c
+        //   summary.max_mach  = 2.214.535,54      -> ekranda NÖTR cyan
+        //   summary.apogee    = null              -> "APOGEE NOT REPORTED"
+        //   series.altitude son değeri = 2,41e11 m
+        // En açık saçmalık (hız) ekranda HİÇ yoktu: `max_speed` yalnız .ork
+        // karşılaştırma kartında basılıyor. Işık hızının iki katı bir sonuç
+        // "bilgi" rengiyle duruyordu.
+        //
+        // Kapı: hız fiziksel üst sınırı aşarsa koşum FİZİKSEL DEĞİLDİR —
+        // max_speed makine alan adıyla basılır ve hem o rozet hem Mach
+        // rozeti `err` olur. Sınırın altında eski nötr davranış korunur
+        // (aşırı düzeltme yok); alan yoksa hiçbir şey iddia edilmez.
+        // c: CODATA 2018 tanım değeri (SI, tam sayı) — yalnız burada kullanılır.
+        const C_LIGHT_M_S = 299792458;
+        const maxSpeed = numOf(s.max_speed);
+        const nonPhysical = (maxSpeed !== null && maxSpeed >= C_LIGHT_M_S);
+        if (maxSpeed !== null) {
+            html += badge('max_speed ' + rozetSayi(maxSpeed, 1) + ' m/s'
+                + (nonPhysical
+                    ? ' = ' + rozetSayi(maxSpeed / C_LIGHT_M_S, 3) + ' c' : ''),
+                nonPhysical ? 'err' : 'info');
+        }
         const mach = fx(s.max_mach, 2);
         if (mach !== null) {
-            html += badge(TF('sixdof.badgeMaxMach', { m: mach }, 'MAX MACH {m}'), 'info');
+            html += badge(TF('sixdof.badgeMaxMach', { m: mach }, 'MAX MACH {m}'),
+                          nonPhysical ? 'err' : 'info');
         }
         const alpha = fx(s.max_alpha_deg, 1);
         if (alpha !== null) {
@@ -1502,7 +1714,7 @@
             const smMax = Math.max(smFull, smEmpty);
             const smKind = smMin <= 1 ? 'err' : (smMax > 3 ? 'warn' : 'ok');
             html += badge(TF('sixdof.badgeMargin',
-                             { full: smFull.toFixed(2), empty: smEmpty.toFixed(2) },
+                             { full: rozetSayi(smFull, 2), empty: rozetSayi(smEmpty, 2) },
                              'MARGIN {full} / {empty} cal')
                 + (smMax > 3 ? ' — ' + T('sixdof.overStable', 'OVER-STABLE') : ''), smKind);
         }
@@ -1531,7 +1743,16 @@
             { x: ser.time, y: ser.mach, name: 'Mach', mode: 'lines', yaxis: 'y2',
               line: { width: 2, dash: 'dot' } },
         ], {
-            title: T('sixdof.chartAlt', 'Altitude & Mach vs Time (launch to apogee)'),
+            // Başlık "launch to apogee" diyor, rozet ise "APOGEE NOT
+            // REPORTED" — aynı ekranda iki gösterge çelişiyordu (ölçüldü:
+            // apogee=null, end_reason='time_limit'). Apoje yoksa iddia
+            // edilmez; başlık mevcut anahtarlardan + ucun kendi end_reason
+            // alanından kurulur (yeni çeviri anahtarı açılmadı).
+            title: (numOf(s.apogee) !== null)
+                ? T('sixdof.chartAlt', 'Altitude & Mach vs Time (launch to apogee)')
+                : (T('sixdof.sAltitude', 'Altitude [m]') + ' & Mach — '
+                   + T('transient.badgeEnd', 'END') + ': '
+                   + String(s.end_reason || '—').toUpperCase()),
             xaxis: { title: T('common.axis.timeS2', 'Time [s]') },
             yaxis: { title: T('sixdof.sAltitude', 'Altitude [m]'), rangemode: 'tozero' },
             yaxis2: { title: 'Mach', overlaying: 'y', side: 'right', rangemode: 'tozero' },
@@ -1656,7 +1877,7 @@
             // yuvarlama farkı alanda 3. haneden sonrasıdır.
             el.value = value.toFixed(digits);
             parts.push(fieldId + ' ← #' + (src[specKey] || '?')
-                       + ' = ' + value.toFixed(digits) + (unit ? ' ' + unit : ''));
+                       + ' = ' + sayiEkran(value, digits) + (unit ? ' ' + unit : ''));
         }
         // Tohumlanan alanlar YALNIZ GÖVDE tanımıdır: kuru kütle, gövde çapı,
         // Cd₀. İtici kütlesi BİLEREK tohumlanmaz — o, itki/yanma süresiyle
@@ -1803,16 +2024,21 @@
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(panel);
         // Dil değişince: sabit etiketler I18N.apply ile, şema/rozet/grafikler
         // saklanan sonuçla yeniden basılır.
-        if (window.I18N && window.I18N.onChange) {
-            window.I18N.onChange(function () {
-                updateLive();
-                if (lastRender) {
-                    try { render(lastRender.data, lastRender.usedCurve); }
-                    catch (e) { /* çizim yoksa sessiz */ }
-                }
-            });
+        function tazele() {
+            updateLive();
+            if (lastRender) {
+                try { render(lastRender.data, lastRender.usedCurve); }
+                catch (e) { /* çizim yoksa sessiz */ }
+            }
         }
+        if (window.I18N && window.I18N.onChange) window.I18N.onChange(tazele);
+        // ÖH D35 / OH-GT-23: sözlük panelden SONRA gelirse rozet/şema
+        // İngilizce fallback ile donuyordu — geldiği anda yeniden basılır.
+        sozlukGelinceCalistir(tazele);
     }
 
-    window.SixDofPanel = { init, run };
+    // `_sozlukGelinceCalistir` bekçi içindir (tests/test_d35_dil_safligi_a1.py):
+    // geç gelen sözlük davranışı DOM kurmadan ölçülebilsin diye dışa verilir.
+    window.SixDofPanel = { init, run,
+                           _sozlukGelinceCalistir: sozlukGelinceCalistir };
 })();

@@ -1,4 +1,4 @@
-HRMA — UZAYTEK Rocket Motor Analysis (Windows Installation)
+HRMA — Rocket Motor Analysis (Windows Installation)
 ===================================================================
 
 INSTALLATION:
@@ -34,5 +34,5 @@ UNINSTALL:
 Settings → Apps → HRMA → Uninstall
 (or Start menu → HRMA → Uninstall HRMA)
 
-If you run into problems, send this file to the UZAYTEK team:
+If you run into problems, open an issue at https://github.com/berketez/HRMA/issues and attach this file:
 Documents\HRMA\hrma_log.txt

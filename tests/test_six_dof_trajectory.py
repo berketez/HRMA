@@ -245,6 +245,13 @@ class TestMassProperties:
 
         Bileşen tablosu (UI Component modu) bu anahtarları gönderir; sessizce
         yok sayılırsa marj CG'den bağımsız kalırdı.
+
+        ÖH B-4 KAPSAM BEYANI (defter P4B3-07): bu bekçi CG'nin AÇIKÇA
+        verildiği kolu ölçer ve o kolda ürün doğrudur. VERİLMEDİĞİ kolu
+        (``x_cg_full=None`` → 0,55·L uydurulur, bayrak/uyarı yok) bu bekçi
+        hiç koşturmaz; o soruyu ``test_cg_verilmediginde_beyan_edilir``
+        sorar (xfail borç imi). 0,55·L sabitini rel=1e-12 ile çapalayan iki
+        kardeş bekçi ``tests/test_faz4_solver_kapisi.py``dedir (B-3 kümesi).
         """
         aero = _standard_rocket()
         base = SixDOFTrajectory(
@@ -263,6 +270,51 @@ class TestMassProperties:
         # Fallback (0.55·L / 0.50·L) devre dışı: verilen değerler korunmalı
         assert base.x_cg_full == pytest.approx(1.20)
         assert base.x_cg_empty == pytest.approx(1.10)
+
+    def test_cg_verilmediginde_beyan_edilir(self):
+        """CG uyduruluyorsa ya uyarı ya çıktı alanı bunu SÖYLEMELİ.
+
+        Kararlılık hükmü (``stable`` / ``static_margin_full``) doğrudan CG'ye
+        bağlıdır; hangi CG'nin kullanıldığı yayımlanmazsa tüketici hükmü
+        ölçüm sanır. Kardeş dürüstlük deseni aynı dosyada yazılı: enlem
+        verilmediğinde Coriolis kapanır VE ``warn.sixdof.coriolis_disabled_
+        no_latitude`` uyarısı üretilir.
+
+        ÖH Z5S / PK2 ONARILDI (defter P4B3-07) — xfail borç imi SÖKÜLDÜ.
+        ÖNCE: CG verilmediğinde çözücü 0,55·L / 0,50·L uyduruyor ve bunu
+        HİÇBİR yerde beyan etmiyordu — ne ``self.warnings``ta bir kod vardı
+        ne de ``solve()`` çıktısında x_cg alanı (ölçüldü: 24 anahtar, "cg"
+        geçen 0). Uydurulan CG ile static_margin_full=2,843 kalibre /
+        stable=True; gerçekçi kıçta-ağır CG 1,400 m ile 0,631 kalibre /
+        stable=False.
+        SONRA: 28 anahtar; ``x_cg_full`` / ``x_cg_empty`` / ``x_cg_source``
+        ('assumed_length_fraction') / ``x_cg_is_estimate`` yayımlanıyor.
+        SAYI DEĞİŞMEDİ (fizik aynı) — değişen yalnız künyedir.
+        KANAL: künye UYARI değil ALAN kanalından gider; gerekçe ürün
+        dosyasında yazılı (uç ``warnings``i döndürmüyor + her backend
+        ``warn.*`` kodu iki dilde sözlük karşılığı istiyor, sözlük bu
+        onarımın sahası dışında).
+        EKRAN AYAĞI KAPSAM DIŞI: /api/six-dof-analysis (app.py) sabit bir
+        ``summary`` anahtar listesi seçtiği için künye tüketiciye ulaşmıyor;
+        bu borç app.py zincirine devredildi.
+        """
+        aero = _standard_rocket()
+        solver = SixDOFTrajectory(
+            aero=aero, dry_mass=8.0, propellant_mass=4.0,
+            thrust=1200.0, burn_time=6.0, cd0=0.45)     # x_cg VERİLMEDİ
+        res = solver.solve(t_max=200.0)
+        assert solver.x_cg_full == pytest.approx(0.55 * aero.L)  # uydurulan
+
+        kodlar = [w.get('code', '') for w in (res.get('warnings') or [])
+                  if isinstance(w, dict)]
+        uyari_var = any('cg' in k.lower() or 'center_of_mass' in k.lower()
+                        for k in kodlar)
+        alan_var = any('cg' in k.lower() for k in res)
+        assert uyari_var or alan_var, (
+            f"stable={res['stable']}, static_margin_full="
+            f"{res['static_margin_full']:.3f} kalibre yayımlandı ama hükmün "
+            f'dayandığı CG ({solver.x_cg_full:.3f} m = 0,55·L uydurması) '
+            f'ne uyarıda ne çıktı alanında geçiyor (uyarı kodları: {kodlar})')
 
     def test_component_inertia_differs_from_uniform(self):
         """components verilince pitch ataleti bileşen toplamından kurulur."""
@@ -367,6 +419,20 @@ class TestPitchDamping:
     indükler → M = −q̄·S·C_Nα·l²·q/V; M = q̄·S·d·C_mq·(q·d/2V) ile
     eşitlenince 2 çarpanı çıkar. ÖLÇÜLDÜ: kod/analitik oranı tam 0.5000
     (α=0, q=1 rad/s, V=250 m/s, h=1000 m).
+
+    ÖH B-4 KAPSAM BEYANI (defter P4B3-01): bu bekçi DENİZ SEVİYESİ kolunda
+    koşar (``launch_altitude = 0``). Analitik referans eskiden yoğunluğu
+    ``_atmosphere(h + solver.launch_altitude)`` ile kuruyordu; o terim
+    fikstürde ÖLÜDÜR (0 m) ve bekçiye sahibi olmadığı bir kapsam
+    (saha rakımının atmosfere girmesi) görüntüsü veriyordu. ÖLÇÜLDÜ
+    (27 Ağu 2026, aynı kurulum, launch_altitude=2000 m): kodun uyguladığı
+    moment −5,562099576 N·m, ``_atmosphere(h + 2000)`` ile kurulan analitik
+    −4,549381341 N·m (%18,2 fark) — yani kod atmosferi SAHAYA GÖRE
+    yükseklikle çözüyor. Terim kaldırıldı, kapsam açıkça yazıldı; saha
+    rakımı sorusunun sahibi bekçi ``tests/test_launch_site.py::
+    test_sixdof_firlatma_sahasi_rakimi_cozume_girer`` (aynı defter kalemi
+    için xfail(strict) borç imi orada kuruludur — burada İKİNCİ kez
+    imlenmez).
     """
 
     @staticmethod
@@ -375,7 +441,8 @@ class TestPitchDamping:
         solver = SixDOFTrajectory(
             aero=_standard_rocket(), dry_mass=8.0, propellant_mass=4.0,
             thrust=1200.0, burn_time=6.0, cd0=0.45,
-            wind_speed=0.0, launch_elevation_deg=90.0, coriolis=False)
+            wind_speed=0.0, launch_elevation_deg=90.0, coriolis=False,
+            launch_altitude=0.0)
         solver._r0 = np.zeros(3)
         q = _quat_from_elevation_azimuth(90.0, 0.0)
         # Dik atış, hız tamamen +z → gövde ekseniyle hizalı, α = 0
@@ -390,15 +457,35 @@ class TestPitchDamping:
         return float(M_b[1]), solver, x_cg, m
 
     def test_matches_analytic_damping_moment(self):
-        """Uygulanan sönüm momenti analitik −q̄·S·C_Nα·l²·q/V ile birebir."""
+        """Uygulanan sönüm momenti analitik −q̄·S·C_Nα·l²·q/V ile birebir.
+
+        Kapsam: deniz seviyesi (sınıf başlığındaki ÖH B-4 beyanı). Ölü
+        ``+ launch_altitude`` terimi kaldırıldı; yerine ÖN KOŞUL açıkça
+        sınanıyor, böylece biri fikstürü rakımlı yaparsa bekçi sessizce
+        kapsam değiştirmek yerine ADIYLA durur.
+        """
         from hrma.analysis.six_dof_trajectory import _atmosphere
         V, h, q_rate = 250.0, 1000.0, 1.0
         M_code, solver, x_cg, _ = self._pitch_moment(q_rate, V=V, h=h)
         aero = solver.aero
-        rho, _ = _atmosphere(h + solver.launch_altitude)
-        arm = aero.x_cp - x_cg
+        assert solver.launch_altitude == 0.0, (
+            'bu bekçi yalnız deniz seviyesi kolunu ölçer; saha rakımının '
+            'atmosfere girmesi sorusu tests/test_launch_site.py::'
+            'test_sixdof_firlatma_sahasi_rakimi_cozume_girer bekçisinindir '
+            '(defter P4B3-01)')
+        rho, a_snd = _atmosphere(h)
+        # ÖH D24 / OH-D23-17 — analitik referans artık Mach'a bağlı çifti
+        # kullanır. F061 sönüm TÜREVİ (C_mq = −2·C_Nα·(l/d)²) DEĞİŞMEDİ;
+        # değişen, dinamiğin hangi (C_Nα, x_cp) ikilisini gördüğüdür:
+        # ``_derivatives`` D24'te ``aero.at_mach(M)`` çağırıyor (P4B3-23 a
+        # bağlandı). Referans M→0 ikilisinde bırakılırsa bu bekçi F061'i
+        # değil, artık YANLIŞ olan "Mach'tan bağımsız C_Nα" varsayımını
+        # kilitlerdi. ÖLÇÜLDÜ (V=250 m/s, h=1000 m → M=0,7442):
+        # kod −6,108562135329611 N·m, M→0 referansı −5,562099576495439.
+        cn_alpha_m, x_cp_m = aero.at_mach(V / a_snd)
+        arm = x_cp_m - x_cg
         M_analytic = -(0.5 * rho * V ** 2) * aero.S_ref * \
-            aero.cn_alpha * arm ** 2 * q_rate / V
+            cn_alpha_m * arm ** 2 * q_rate / V
         assert M_code == pytest.approx(M_analytic, rel=1e-12)
         # Eski (yarım) katsayı artık kabul edilmiyor
         assert M_code != pytest.approx(0.5 * M_analytic, rel=1e-6)

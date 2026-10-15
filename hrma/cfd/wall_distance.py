@@ -109,16 +109,45 @@ def point_polyline_distance(pz, pr, poly_z, poly_r):
     return np.sqrt(d2.min(axis=1)).reshape(pz.shape)
 
 
-def wall_distance_field(grid):
-    """Hücre merkezlerinden ızgara duvar poliçizgisine tam mesafe alanı.
+def wall_distance_field(grid, wall_polyline=None):
+    """Hücre merkezlerinden duvar poliçizgisine tam mesafe alanı.
 
     Args:
         grid: ``hrma.cfd.grid_axisym.AxisymGrid`` (ya da aynı alanları
             taşıyan nesne) — YALNIZ okunur: ``Z``, ``R`` köşeleri
             (duvar = son j sütunu) ve ``z_centers``, ``r_centers``.
+        wall_polyline: ``(z, r)`` demeti — GERÇEK konturun (ızgaradan
+            bağımsız, istenildiği kadar sık) örneklenmiş poliçizgisi.
+            None → ızgaranın kendi duvar köşe çizgisi kullanılır.
 
     Returns:
         d alanı, biçim (ni, nj) [m] — SA modelinin duvar mesafesi girdisi.
+
+    NEDEN İSTEĞE BAĞLI GERÇEK KONTUR (ölçüldü, 18 Ağu 2026)
+    -------------------------------------------------------
+    Izgaranın duvar çizgisi konturun KİRİŞLERİDİR; eğri duvarda kirişin
+    yaydan sapması sehim (sagitta) kadardır: s = R_c(1 − cos(Δθ/2)).
+    Ölçüm (boğaz yayı R_c = 0,382·r_t = 9,55 mm, r_t = 25 mm): 17 düğümde
+    sehim 4,66e-06 m ve poliçizgi mesafesinin analitik daire mesafesinden
+    sapması 4,66e-06 m — yani sapma sehmin TA KENDİSİ (oran 1,000; 33/65/
+    129 düğümde de 1,000). Bu, duvar-çözümlü SA ızgarasında ilk hücre
+    kalınlığı (~10⁻⁶ m) mertebesindedir, yani d'yi %100 yanıltabilir.
+    Gerçek konturun kendi örneklemesi ızgaradan sık olduğunda hata
+    ızgara çözünürlüğünden AYRIŞIR.
+
+    ÖLÇÜLEN vaka (conftest kosinüs lülesi, 120×24): ızgara poliçizgisi ile
+    20001 noktalı gerçek kontur arasındaki fark en çok 4,0133e-06 m
+    (80001 noktalı referansla 4,0133e-06 — dört hanede aynı). Bu farkın
+    duvar sırasının d'sine ORANI, hangi d'ye bölündüğüne göre değişir ve
+    İKİSİ DE yazılır (ÖH defter P6B2-05; eskiden ortalamanın payına
+    minimumun yüzdesi yazılıydı):
+      * d ORTALAMASINA (6,7281e-04 m) göre %0,597,
+      * duvar sırasının EN KÜÇÜK d'sine (5,2091e-04 m) göre %0,770.
+    Düzgün radyal dağılımda küçük, duvara kümelenmiş ızgarada BASKIN olur.
     """
+    if wall_polyline is None:
+        poly_z, poly_r = grid.Z[:, -1], grid.R[:, -1]
+    else:
+        poly_z, poly_r = wall_polyline
     return point_polyline_distance(grid.z_centers, grid.r_centers,
-                                   grid.Z[:, -1], grid.R[:, -1])
+                                   poly_z, poly_r)

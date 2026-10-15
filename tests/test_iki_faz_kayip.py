@@ -358,7 +358,19 @@ class TestDeclarations:
     def test_engine_coefficient_single_definition_point(self):
         # Magic-number bekçisi: merkez katsayı motor tarafındaki
         # TWO_PHASE_LOSS_COEFF'in TA KENDİSİ olmalı (tembel import).
-        engine = pytest.importorskip('hrma.engines.solid_rocket_engine')
+        #
+        # DEPO-İÇİ ``pytest.importorskip`` KALDIRILDI — P13B1-05, ÖH FAZ B-3
+        # (27 Ağustos 2026). Eski satır ``engine = pytest.importorskip(
+        # 'hrma.engines.solid_rocket_engine')`` idi. İthal DEPONUN KENDİSİNE
+        # bakıyor; "isteğe bağlı bağımlılık" gerekçesi burada geçerli değil.
+        # İmport tembel kalır (sınıfın kendisi ağır modülü toplama zamanında
+        # çekmesin diye) ama artık kırılırsa DÜRÜSTÇE kırmızı verir:
+        # ölçüldü (27 Ağustos 2026, ``hrma.engines.solid_rocket_engine``
+        # ithali bellekte kırılarak) — eski gövde "36 passed, 1 skipped",
+        # bu gövde "1 failed, 36 passed". Bu bekçi iki-faz kaybı merkez
+        # katsayısının TEK TANIM NOKTASI iddiasının tek kanıtıdır; sessizce
+        # kaybolamaz.
+        from hrma.engines import solid_rocket_engine as engine
         res = evaluate()
         assert res['diagnostics']['k_central'] == pytest.approx(
             engine.TWO_PHASE_LOSS_COEFF)

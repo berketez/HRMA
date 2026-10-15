@@ -32,11 +32,27 @@ from hrma.engines.liquid_rocket_engine import (
     LiquidRocketEngine,
     NOZZLE_TYPE_GEOMETRY,
     BURN_TIME_DEFAULT_S,
+    BURN_TIME_SOURCE_NOT_SUPPLIED,
+    BURN_TIME_SOURCE_TUTORIAL,
 )
 
 warnings.filterwarnings('ignore')
 
 PROPELLANT_DATA = {'rp1': {}, 'lox': {}, 'methane': {}}
+
+# --- ÖH D22 / OH-D20-05 · REFERANS ZİNCİRİ BANDI ---------------------------
+# Bu modüldeki taban kilidi (``test_no_overrides_keeps_the_reference_chain``)
+# artık MUTLAK bir sayı seçmez; bandı BAĞIL olarak buradan alır. Değerin
+# gerekçesi ölçümdür, tercih değil:
+#   * Yeniden üretilebilirlik: aynı süreçte üç koşuda kalıntı TAM 0
+#     (raw/OH/D22/sivi/a1/once_d2005.json) — deponun platform-float
+#     sözleşmesindeki gürültü tabanı 1e-12 bağıl.
+#   * Yakalaması ZORUNLU kayma: 9071a64'te ölçülen 298,4097 ⟷ 298,371
+#     farkı 1,3e-4 bağıldır. Band bunun ALTINDA olmak zorundadır.
+# 1e-5 bu iki sınırın ortasındadır: gürültü tabanının 1e7 katı (CEA'nın
+# Fortran çekirdeği platformlar arası bu mertebede oynayabilir) ve
+# yakalanması gereken kaymanın 13 katı altında.
+_ZINCIR_BAGIL_TOL = 1e-5
 
 # liquid.html collectAllParameters() ile aynı varsayılan değerler.
 FORM_DEFAULTS = dict(
@@ -228,13 +244,47 @@ def test_no_overrides_keeps_the_reference_chain():
     lülede çözülmesinden geliyor. Değişimin doğruluğa etkisi ölçüldü:
     gerçek motorlara karşı vakum Isp medAPE %8.9 -> %1.0
     (bkz. tests/test_correlation_guards.py).
+
+    ÖH D22 / OH-D20-05 — TOLERANS ARTIK TÜRETİLMİŞ VE ÇAPAYA BAĞLI.
+    ÖLÇÜLDÜ (raw/OH/D22/sivi/a1/once_d2005.json): bu ağaçta zincir
+    isp_sl = 298,3633726256625 veriyor ve aynı süreçte üç koşuda BİT-AYNI
+    kalıyor (yeniden üretilebilirlik kalıntısı tam 0). Eski bekçi ise
+    298,371 ± 1e-2 yazıyordu: gerçek değerle arası 0,0077, yani bandın
+    %77'si daha ilk günden tüketilmişti. Bu yüzden 9071a64'te ölçülen
+    298,4097 ⟷ 298,371 KAYMASI (0,0387 ≈ 1,3e-4 bağıl) bandı deldi ve
+    KIRMIZI verdi; 60cd341'de değer geri kaydığı için TESADÜFEN yeşile
+    döndü. Bir bekçinin yeşili tesadüfe kalamaz.
+
+    Yeni kural iki ayaklıdır:
+      1) Referans sayı bu ağaçta ÖLÇÜLEN değere yenilendi ve tolerans
+         BAĞIL bir bantla (``_ZINCIR_BAGIL_TOL``) türetilir — mutlak
+         sayı elle seçilmez.
+      2) Sayı zincirin kendi ÖZDEŞLİĞİNE de bağlanır
+         (Isp_sl = C_F(0 m)·c*/(g0·C_D), Sutton & Biblarz 9. baskı
+         Denk. 3-31). Üç sayı birlikte kayarsa magic-number ayağı
+         susardı; özdeşlik ayağı susmaz.
     """
     _, plain = run_engine(None)
-    assert plain['isp_sea_level'] == pytest.approx(298.371, abs=1e-2)
-    assert plain['isp_vacuum'] == pytest.approx(323.590, abs=1e-2)
-    assert plain['c_star'] == pytest.approx(1808.88, abs=1e-1)
-    assert plain['burn_time_source'].startswith('assumed')
-    assert plain['burn_time'] == BURN_TIME_DEFAULT_S
+    assert plain['isp_sea_level'] == pytest.approx(
+        298.3633726256625, rel=_ZINCIR_BAGIL_TOL)
+    assert plain['isp_vacuum'] == pytest.approx(
+        323.59539379053996, rel=_ZINCIR_BAGIL_TOL)
+    assert plain['c_star'] == pytest.approx(
+        1808.8846648268513, rel=_ZINCIR_BAGIL_TOL)
+    # ÖH D36 / LU-1 (Berke onaylı, ÇEVRİLEN BEKÇİ): override'sız motor
+    # yanma süresini ARTIK VARSAYMAZ. Eski iddia (``'assumed ...'`` künyesi
+    # + ``burn_time == BURN_TIME_DEFAULT_S``) kusurun kendisiydi; yeni iddia
+    # fail-closed yayım kapısıdır: süre yok -> alan yok, künye adıyla.
+    assert plain['burn_time_source'] == BURN_TIME_SOURCE_NOT_SUPPLIED
+    assert 'burn_time' not in plain
+
+    # --- ÇAPA AYAĞI: sayılar birbirine de bağlı olmalı -----------------
+    kimlik = plain['isp_identity']
+    assert kimlik['status'] == 'CLOSED', kimlik
+    beklenen = (kimlik['thrust_coefficient_sea_level'] * plain['c_star']
+                / (9.80665 * kimlik['throat_discharge_coefficient']))
+    assert plain['isp_sea_level'] == pytest.approx(
+        beklenen, rel=_ZINCIR_BAGIL_TOL)
 
 
 def test_out_of_range_input_warns_instead_of_silent_fallback():
@@ -331,11 +381,32 @@ def test_optimisation_map_matches_the_reported_design_point():
 
 
 def test_chamber_pressure_map_is_a_real_scan():
-    """Pc haritası sabit bir çarpandan değil, yeniden koşulan çözücüden gelmeli."""
+    """Pc haritası sabit bir çarpandan değil, yeniden koşulan çözücüden gelmeli.
+
+    ÖH D15 / sıvı a3 (P3B4-07) — BEKÇİ ÇEVRİLDİ. Eski iki iddia şunlardı:
+        assert len(set(pc_map['throat_diameter_vs_pc_mm'])) > 1
+        assert pc_map['thrust_vs_pc'][0] != pc_map['thrust_vs_pc'][-1]
+    İkisi BİRLİKTE kusurun kendisini ŞART KOŞUYORDU: boğaz çapının Pc ile
+    değişmesi SABİT İTKİ ailesini, itkinin Pc ile değişmesi SABİT DONANIM
+    ailesini gerektirir; iki eğri aynı motora ait olsaydı ikisi birden
+    sağlanamazdı. Testin adı ve niyeti ("sabit bir çarpandan gelmesin")
+    doğru, kabul ölçütü yanlıştı. Niyet korunuyor, ölçüt tek aileye
+    bağlanıyor: tarama gerçek (boğaz + ikinci ailenin itkisi değişiyor),
+    ama tek bir x noktasında iki farklı motor DURMUYOR.
+    """
     _, result = run_engine(dict(FORM_DEFAULTS))
     pc_map = result['performance_maps']['chamber_pressure_optimization']
+    # Gerçek tarama: boğaz çapı Pc ile değişiyor (sabit çarpan değil)
     assert len(set(pc_map['throat_diameter_vs_pc_mm'])) > 1
-    assert pc_map['thrust_vs_pc'][0] != pc_map['thrust_vs_pc'][-1]
+    # ... ve ikinci ailenin (sabit donanım) itkisi de gerçek bir taramadır
+    assert (pc_map['thrust_vs_pc_fixed_throat'][0]
+            != pc_map['thrust_vs_pc_fixed_throat'][-1])
+    # TEK AİLE: üst düzey itki eğrisi ailenin tanımı gereği sabittir
+    assert len(set(pc_map['thrust_vs_pc'])) == 1
+    # Her eğri kendi künyesini taşır (künyesiz eğri = okuyanın uydurması)
+    for anahtar in ('family', 'thrust_basis', 'throat_diameter_basis',
+                    'isp_basis', 'thrust_vs_pc_fixed_throat_basis'):
+        assert pc_map.get(anahtar)
 
 
 # ---------------------------------------------------------------------------
@@ -343,15 +414,55 @@ def test_chamber_pressure_map_is_a_real_scan():
 # ---------------------------------------------------------------------------
 
 def test_efficiency_breakdown_follows_the_nozzle_contour():
-    """Sapma kaybı nozul tipiyle (çıkış açısıyla) değişmeli."""
+    """Sapma kaybı nozul KONTURUYLA değişmeli — ama çan bağıntısı konik değil.
+
+    ÖH D18 / P3B2-07 ÇEVİRİSİ. Bu bekçi eskiden ÜÇ FARKLI kayıp değeri
+    istiyordu ('conical', 'bell_80', 'bell_60' -> 3 ayrı sayı). Bu iddia
+    yalnız verim dökümü lambda=(1+cos theta)/2 konik bağıntısını ÇAN
+    konturunun çıkış açısıyla değerlendirdiği için doğruydu; oysa
+    ``LiquidRocketEngine._divergence_efficiency`` docstring'i (ve Sutton &
+    Biblarz 9th ed.) o bağıntının çan konturunda GEÇERSİZ olduğunu yazar ve
+    Rao-optimize çan için yayımlanmış tek katsayıyı (LAMBDA_BELL = 0.985)
+    kullanır. Ölçüldü (docs/scofield/raw/OH/D18/sivi/a1/once.json): aynı
+    yanıtta lambda'nın ÜÇ değeri vardı — uygulanan 0.985000, bu dökümde
+    0.994508, irtifa satırlarında 0.982963. Üçü tek kaynağa bağlanınca iki
+    çan konturu AYNI lambda'yı taşır; bu bir gerileme değil, modelin kendi
+    hükmüdür. Bekçi bu yüzden çevrildi: konik ile çan AYRILMALI (kontur
+    duyarlılığı korunur), iki çan ise aynı yayımlanmış katsayıyı taşır.
+
+    ÖH D21 · OH-D20-02 — İKİNCİ ÇEVİRİ (bu satır neden değişti).
+    ------------------------------------------------------------------
+    D18'in çevirisi λ'yı TEK kaynağa bağlamakta haklıydı ama yan etkisi
+    şu oldu: ``bell_80`` (çıkış açısı 8,5°, %80 uzunluk) ile ``bell_60``
+    (çıkış açısı 12,0°, %60 uzunluk) AYIRT EDİLEMEZ hâle geldi ve bu
+    bekçi o ayırt edilemezliği ``losses['bell_80'] == losses['bell_60']``
+    ile KİLİTLEDİ. Ölçüldü (docs/scofield/raw/OH/D21/sivi/a1/once.json,
+    OH-D20-02): iki konturun teslim Isp'si birebir aynı (333,22373 s) —
+    kısa çanın daha çok sapma kaybettiği fiziği yanıtta hiç görünmüyordu.
+
+    Onarım sayı UYDURMAZ: yayımlanan LAMBDA_BELL kanonik %80 çan için
+    AYNEN korunur (bu yüzden ``bell_80`` sayısı DEĞİŞMEZ) ve başka bir çan
+    konturu, deponun kendi kullandığı Huzel & Huang SP-125 Böl. 1
+    eşdeğer-koni ORANIyla taşınır (aynı bağıntı
+    ``hrma/analysis/nozzle_flow_1d.py`` çan dalında zaten var).
+    Sonuç (sonra.json): bell_60 λ = 0,9730508, Isp 329,1813 s.
+    Bekçi bu yüzden bir kez daha çevrildi: iki çan artık AYRILMALI ve
+    KISA çan daha çok kaybetmeli. Bekçisi: tests/test_d21_sivi_a1.py
+    ``TestOHD2002CanLambdaKontura``.
+    """
     losses = {}
     for nozzle in ('conical', 'bell_80', 'bell_60'):
         _, result = run_engine(dict(FORM_DEFAULTS, nozzle_type=nozzle))
         losses[nozzle] = result['efficiency_breakdown'][
             'loss_breakdown']['divergence_loss']
-    assert len(set(losses.values())) == 3, losses
-    # lambda = (1+cos theta)/2 -> daha büyük çıkış açısı daha büyük kayıp
-    assert losses['conical'] > losses['bell_60'] > losses['bell_80']
+    # Konik dal kendi yarı açısıyla çözülür; çan dalı yayımlanmış katsayıyı
+    # referans %80 konturda AYNEN, öteki konturlarda eşdeğer-koni oranıyla
+    # taşır -> üç kontur da AYRI ve kısa çan daha çok kaybeder.
+    assert losses['conical'] != losses['bell_80'], losses
+    assert losses['bell_60'] > losses['bell_80'], losses
+    # lambda = (1+cos theta)/2 -> konik yarı açı 15 derece, referans çan
+    # katsayısı 0.985 -> konik kayıp %80 çandan büyük.
+    assert losses['conical'] > losses['bell_80']
 
 
 def test_efficiency_breakdown_is_not_the_old_fixed_table():
@@ -434,11 +545,23 @@ def test_propellant_mass_uses_the_entered_burn_time():
 
 
 def test_missing_burn_time_is_labelled_as_an_assumption():
+    """ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ): eksik süre artık VARSAYIM değil.
+
+    Eski iddia 'assumed 300 s burn' künyesini arıyordu; LU-1 (Cowork, Berke
+    onaylı) ile süre verilmezse hiçbir süre varsayılmaz: künye
+    ``not_supplied`` olur ve süreye bağlı kütle alanları YAYIMLANMAZ.
+    Varsayılan yalnız öğretici kipte ve kendi künyesiyle uygulanır.
+    """
     overrides = dict(FORM_DEFAULTS)
     overrides.pop('max_burn_duration')
     _, result = run_engine(overrides)
-    assert result['design_summary']['masses']['burn_time_source'].startswith(
-        'assumed')
+    masses = result['design_summary']['masses']
+    assert masses['burn_time_source'] == BURN_TIME_SOURCE_NOT_SUPPLIED
+    assert 'propellant_mass_kg' not in masses
+    assert 'burn_time_s' not in masses
+    _, ogretici = run_engine(dict(overrides, use_tutorial_defaults=True))
+    assert ogretici['burn_time'] == BURN_TIME_DEFAULT_S
+    assert ogretici['burn_time_source'] == BURN_TIME_SOURCE_TUTORIAL
 
 
 # ---------------------------------------------------------------------------

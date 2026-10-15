@@ -1,0 +1,2965 @@
+{
+  "schema_version": "1.0",
+  "case": "nozzle_back_massier_gier_1964",
+  "description_tr": "Back-Massier-Gier (JPL) soğutulmuş yakınsak-ıraksak konik lüle duvar ısı transferi deneyi — 2B eksenel simetrik viskoz CFD'nin (yol haritası V3+) BİRİNCİL doğrulama capası. JPL TR 32-415 Rev.1 (Şubat 1965) tarama PDF'inden ELLE (sayfa görüntüsünden gözle) çıkarıldı; dergi sürümü IJHMT 7(5) 1964, 549-568. Altı koşumun tam B-3 tablosu (q_w, T_w, T_e, h, rho_e*u_e, Re/in, St) ve dört koşumun B-2 duvar statik basınç dağılımı (32 tap) kayıttadır. Türbülanslı doğrulamaya uygun koşumlar: 262 (75,2 psia), 268 (150,6), 275/278 (≈254/251, YİNELEME çifti — tekrarlanabilirlik kanıtı). 266 (44,8) ve 288 (30,1) düşük basınçta LAMİNERLEŞME ve ıraksak kesitte AYRILMA içerir — tam türbülanslı RANS bu iki koşumu TUTTURAMAMALIDIR (raporun kendi bulgusu: ~75 psia altında h türbülanslı seviyenin altına iner).",
+  "discipline": "cfd_viscous_heat_transfer",
+  "inputs": {
+    "geometry": {
+      "_status": "PUBLISHED_HARDWARE",
+      "throat_diameter_in": 1.803,
+      "throat_area_in2": 2.552,
+      "throat_area_note_tr": "Fig. 3 dipnotu: A* = 2.552 in² (z/L = 0.603'te); r* = sqrt(A*/pi) = 0.90129 in; Şekil 5/11 etiketi r* = 0.9015/0.902 in — üç değer %0.03 içinde tutarlı",
+      "nozzle_axial_length_L_in": 5.925,
+      "throat_position_z_over_L": 0.603,
+      "convergent_half_angle_deg": 30.0,
+      "divergent_half_angle_deg": 15.0,
+      "contraction_area_ratio_text": 7.75,
+      "expansion_area_ratio": 2.68,
+      "nozzle_inlet_radius_R_in": 2.53,
+      "inlet_corner_curvature_radius_in": 1.42,
+      "throat_curvature_radius_in": 1.8,
+      "approach_pipe_diameter_in": 5.07,
+      "cooled_approach_lengths_in": [
+        0,
+        6,
+        12,
+        18
+      ],
+      "wall_thickness_in": 0.292,
+      "wall_material": "502-type stainless steel (lüle ve tapalar aynı kütükten)",
+      "geometry_inconsistency_note_tr": "Metindeki daralma oranı 7.75 ile künyedeki giriş yarıçapı R=2.53 in birbirini TAM tutmaz: (2.53/0.90129)^2 = 7.879. Analitik kurgu (silindir + r_i yayı + 30° koni + r_c yayı + 15° koni; boğaz z/L=0.603'e çapalı) tap tablosunu boğaz→çıkışta %0.25 içinde, yakınsak konide %1.2-2.8 eksik, tap 1'de (z/L=0.107, köşe yayı bölgesi) %5.4 eksik üretir. CFD konturu için TEK GÜVENİLİR çapa: aşağıdaki 32 tap (z/L, A/A*) tablosu + 22 tapa (plug) A/A* değerleri; analitik parametreler yalnız boğaz-ıraksak tarafta doğrudan kullanılabilir. Giriş bölgesi (z/L<0.107) tap verisiz — kurgu belirsizliği oradadır.",
+      "pressure_tap_stations": [
+        {
+          "tap": 1,
+          "z_over_L": 0.107,
+          "A_over_Astar": 7.001
+        },
+        {
+          "tap": 2,
+          "z_over_L": 0.222,
+          "A_over_Astar": 4.691
+        },
+        {
+          "tap": 3,
+          "z_over_L": 0.3396,
+          "A_over_Astar": 2.939
+        },
+        {
+          "tap": 4,
+          "z_over_L": 0.3401,
+          "A_over_Astar": 2.924
+        },
+        {
+          "tap": 5,
+          "z_over_L": 0.395,
+          "A_over_Astar": 2.255
+        },
+        {
+          "tap": 6,
+          "z_over_L": 0.455,
+          "A_over_Astar": 1.631
+        },
+        {
+          "tap": 7,
+          "z_over_L": 0.46,
+          "A_over_Astar": 1.561
+        },
+        {
+          "tap": 8,
+          "z_over_L": 0.506,
+          "A_over_Astar": 1.235
+        },
+        {
+          "tap": 9,
+          "z_over_L": 0.529,
+          "A_over_Astar": 1.135
+        },
+        {
+          "tap": 10,
+          "z_over_L": 0.554,
+          "A_over_Astar": 1.054
+        },
+        {
+          "tap": 11,
+          "z_over_L": 0.587,
+          "A_over_Astar": 1.0078
+        },
+        {
+          "tap": 12,
+          "z_over_L": 0.6018,
+          "A_over_Astar": 1.0012
+        },
+        {
+          "tap": 13,
+          "z_over_L": 0.642,
+          "A_over_Astar": 1.028
+        },
+        {
+          "tap": 14,
+          "z_over_L": 0.691,
+          "A_over_Astar": 1.176
+        },
+        {
+          "tap": 15,
+          "z_over_L": 0.706,
+          "A_over_Astar": 1.231
+        },
+        {
+          "tap": 16,
+          "z_over_L": 0.722,
+          "A_over_Astar": 1.297
+        },
+        {
+          "tap": 17,
+          "z_over_L": 0.741,
+          "A_over_Astar": 1.372
+        },
+        {
+          "tap": 18,
+          "z_over_L": 0.753,
+          "A_over_Astar": 1.423
+        },
+        {
+          "tap": 19,
+          "z_over_L": 0.771,
+          "A_over_Astar": 1.505
+        },
+        {
+          "tap": 20,
+          "z_over_L": 0.789,
+          "A_over_Astar": 1.582
+        },
+        {
+          "tap": 21,
+          "z_over_L": 0.802,
+          "A_over_Astar": 1.642
+        },
+        {
+          "tap": 22,
+          "z_over_L": 0.819,
+          "A_over_Astar": 1.716
+        },
+        {
+          "tap": 23,
+          "z_over_L": 0.838,
+          "A_over_Astar": 1.815
+        },
+        {
+          "tap": 24,
+          "z_over_L": 0.852,
+          "A_over_Astar": 1.866
+        },
+        {
+          "tap": 25,
+          "z_over_L": 0.869,
+          "A_over_Astar": 1.96
+        },
+        {
+          "tap": 26,
+          "z_over_L": 0.887,
+          "A_over_Astar": 2.049
+        },
+        {
+          "tap": 27,
+          "z_over_L": 0.9,
+          "A_over_Astar": 2.112
+        },
+        {
+          "tap": 28,
+          "z_over_L": 0.921,
+          "A_over_Astar": 2.21
+        },
+        {
+          "tap": 29,
+          "z_over_L": 0.932,
+          "A_over_Astar": 2.283
+        },
+        {
+          "tap": 30,
+          "z_over_L": 0.949,
+          "A_over_Astar": 2.379
+        },
+        {
+          "tap": 31,
+          "z_over_L": 0.965,
+          "A_over_Astar": 2.471
+        },
+        {
+          "tap": 32,
+          "z_over_L": 0.985,
+          "A_over_Astar": 2.574
+        }
+      ],
+      "thermocouple_plug_stations": [
+        {
+          "plug": "I24",
+          "z_over_L": 0.133,
+          "A_over_Astar": 6.39,
+          "circumferential_angle_deg": 330
+        },
+        {
+          "plug": "D25",
+          "z_over_L": 0.204,
+          "A_over_Astar": 5.05,
+          "circumferential_angle_deg": 30
+        },
+        {
+          "plug": "D34",
+          "z_over_L": 0.276,
+          "A_over_Astar": 3.86,
+          "circumferential_angle_deg": 150
+        },
+        {
+          "plug": "I23",
+          "z_over_L": 0.336,
+          "A_over_Astar": 2.98,
+          "circumferential_angle_deg": 280
+        },
+        {
+          "plug": "D26",
+          "z_over_L": 0.385,
+          "A_over_Astar": 2.37,
+          "circumferential_angle_deg": 80
+        },
+        {
+          "plug": "D35",
+          "z_over_L": 0.429,
+          "A_over_Astar": 1.88,
+          "circumferential_angle_deg": 200
+        },
+        {
+          "plug": "I22",
+          "z_over_L": 0.469,
+          "A_over_Astar": 1.48,
+          "circumferential_angle_deg": 315
+        },
+        {
+          "plug": "D28",
+          "z_over_L": 0.512,
+          "A_over_Astar": 1.23,
+          "circumferential_angle_deg": 45
+        },
+        {
+          "plug": "H37",
+          "z_over_L": 0.541,
+          "A_over_Astar": 1.1,
+          "circumferential_angle_deg": 155,
+          "note_tr": "kaynak dipnotu b: bu tapadan gelen veri şüpheli, tablolarda atlanmış"
+        },
+        {
+          "plug": "I20",
+          "z_over_L": 0.573,
+          "A_over_Astar": 1.02,
+          "circumferential_angle_deg": 300,
+          "note_tr": "kaynak dipnotu c: su tarafı duvar ısıl çifti hasarlı"
+        },
+        {
+          "plug": "D29",
+          "z_over_L": 0.603,
+          "A_over_Astar": 1.0,
+          "circumferential_angle_deg": 60
+        },
+        {
+          "plug": "F42",
+          "z_over_L": 0.634,
+          "A_over_Astar": 1.02,
+          "circumferential_angle_deg": 180
+        },
+        {
+          "plug": "I19",
+          "z_over_L": 0.664,
+          "A_over_Astar": 1.08,
+          "circumferential_angle_deg": 285
+        },
+        {
+          "plug": "D30",
+          "z_over_L": 0.693,
+          "A_over_Astar": 1.19,
+          "circumferential_angle_deg": 75
+        },
+        {
+          "plug": "F43",
+          "z_over_L": 0.717,
+          "A_over_Astar": 1.28,
+          "circumferential_angle_deg": 200
+        },
+        {
+          "plug": "I18",
+          "z_over_L": 0.75,
+          "A_over_Astar": 1.41,
+          "circumferential_angle_deg": 320
+        },
+        {
+          "plug": "D31",
+          "z_over_L": 0.782,
+          "A_over_Astar": 1.55,
+          "circumferential_angle_deg": 40
+        },
+        {
+          "plug": "F45",
+          "z_over_L": 0.825,
+          "A_over_Astar": 1.74,
+          "circumferential_angle_deg": 150,
+          "note_tr": "kaynak dipnotu c: su tarafı duvar ısıl çifti hasarlı"
+        },
+        {
+          "plug": "I17",
+          "z_over_L": 0.864,
+          "A_over_Astar": 1.94,
+          "circumferential_angle_deg": 275
+        },
+        {
+          "plug": "C16",
+          "z_over_L": 0.864,
+          "A_over_Astar": 1.94,
+          "circumferential_angle_deg": 320
+        },
+        {
+          "plug": "D33",
+          "z_over_L": 0.905,
+          "A_over_Astar": 2.14,
+          "circumferential_angle_deg": 85
+        },
+        {
+          "plug": "F46",
+          "z_over_L": 0.938,
+          "A_over_Astar": 2.41,
+          "circumferential_angle_deg": 205
+        }
+      ],
+      "station_source_ref": "tap tablosu: Tablo B-2 (rapor s.30-32); tapa tablosu: Şekil 3 (rapor s.3)"
+    },
+    "gas_model": {
+      "working_fluid": "metanolün iç yanmasıyla ısıtılmış basınçlı hava; metanol/hava kütle oranı küçük — ürünler yaklaşık HAVA kabul edilmiş (rapor, Bölüm I ve Ek B)",
+      "properties_source": "Keenan & Kaye, Gas Tables (1956) — viskozite, cp, Pr hava olarak",
+      "gamma_by_stagnation_temperature": {
+        "T_t0_1030R": 1.38,
+        "T_t0_1500R": 1.345,
+        "T_t0_2000R": 1.328
+      },
+      "gamma_source_ref": "Şekil 12 lejantı (rapor s.12); Şekil 6 (gamma=1.345, 1500°R)"
+    },
+    "selected_test_conditions": [
+      {
+        "test": 288,
+        "cooled_approach_length_in": 18,
+        "p_t_psia": 30.1,
+        "T_t0_R": 1511,
+        "mdot_lb_per_s": 1.009,
+        "theta_in": null,
+        "delta_star_in": null,
+        "phi_in": null,
+        "source_ref": "Tablo B-3 test başlığı",
+        "note_tr": "Giriş sınır tabaka kalınlıkları tabloda '—' (verilmemiş). LAMİNERLEŞME koşumu; ayrılma z/L=0.693'ten itibaren (B-3) / tap 14'ten itibaren (B-2)."
+      },
+      {
+        "test": 266,
+        "cooled_approach_length_in": 18,
+        "p_t_psia": 44.8,
+        "T_t0_R": 1503,
+        "mdot_lb_per_s": 1.555,
+        "theta_in": 0.07,
+        "delta_star_in": 0.06,
+        "phi_in": 0.043,
+        "source_ref": "Tablo B-3 test başlığı",
+        "note_tr": "Düşük basınç: h türbülanslı seviyenin altında; ayrılma B-3'te z/L=0.825'ten, B-2'de tap 21'den itibaren."
+      },
+      {
+        "test": 262,
+        "cooled_approach_length_in": 18,
+        "p_t_psia": 75.2,
+        "T_t0_R": 1518,
+        "mdot_lb_per_s": 2.557,
+        "theta_in": 0.06,
+        "delta_star_in": 0.057,
+        "phi_in": 0.031,
+        "source_ref": "Tablo B-3 test başlığı",
+        "note_tr": "Klasik orta koşum (rapor şekillerinin çoğu bu koşum üstüne). Ayrılma yalnız son istasyonda (z/L=0.938 / tap 30)."
+      },
+      {
+        "test": 268,
+        "cooled_approach_length_in": 18,
+        "p_t_psia": 150.6,
+        "T_t0_R": 1484,
+        "mdot_lb_per_s": 5.158,
+        "theta_in": 0.059,
+        "delta_star_in": 0.051,
+        "phi_in": 0.036,
+        "source_ref": "Tablo B-3 test başlığı",
+        "note_tr": "Tam türbülanslı; ayrılma yok. ANSYS VMFL044 resmi doğrulama vakasının koşullarına karşılık gelir (1e6 Pa / 825 K)."
+      },
+      {
+        "test": 278,
+        "cooled_approach_length_in": 18,
+        "p_t_psia": 250.7,
+        "T_t0_R": 1517,
+        "mdot_lb_per_s": 8.641,
+        "theta_in": 0.036,
+        "delta_star_in": 0.036,
+        "phi_in": 0.016,
+        "source_ref": "Tablo B-3 test başlığı",
+        "note_tr": "En yüksek basınç ailesi; 275'in YİNELEMESİ (rapor: 'duplicated and found reproducible')."
+      },
+      {
+        "test": 275,
+        "cooled_approach_length_in": 18,
+        "p_t_psia": 253.7,
+        "T_t0_R": 1513,
+        "mdot_lb_per_s": 9.165,
+        "theta_in": 0.038,
+        "delta_star_in": 0.038,
+        "phi_in": 0.015,
+        "source_ref": "Tablo B-3 test başlığı",
+        "note_tr": "DİKKAT: bu koşumun mdot değeri boğulmuş-debi çaprazını TUTMUYOR (bkz. consistency_checks.choked_mass_flow); istasyon verileri 278 ile ±%5 içinde uyumlu — şüphe yalnız başlıktaki mdot sayısında."
+      }
+    ],
+    "full_test_matrix_table_B1": [
+      {
+        "test": 319,
+        "p_t_psia": 35.9,
+        "T_t0_R": 1508,
+        "cooled_approach_length_in": 0
+      },
+      {
+        "test": 318,
+        "p_t_psia": 51.0,
+        "T_t0_R": 1509,
+        "cooled_approach_length_in": 0
+      },
+      {
+        "test": 315,
+        "p_t_psia": 74.6,
+        "T_t0_R": 1516,
+        "cooled_approach_length_in": 0
+      },
+      {
+        "test": 317,
+        "p_t_psia": 101.0,
+        "T_t0_R": 1510,
+        "cooled_approach_length_in": 0
+      },
+      {
+        "test": 316,
+        "p_t_psia": 124.4,
+        "T_t0_R": 1505,
+        "cooled_approach_length_in": 0
+      },
+      {
+        "test": 314,
+        "p_t_psia": 151.7,
+        "T_t0_R": 1506,
+        "cooled_approach_length_in": 0
+      },
+      {
+        "test": 312,
+        "p_t_psia": 179.7,
+        "T_t0_R": 1467,
+        "cooled_approach_length_in": 0
+      },
+      {
+        "test": 313,
+        "p_t_psia": 201.7,
+        "T_t0_R": 1517,
+        "cooled_approach_length_in": 0
+      },
+      {
+        "test": 242,
+        "p_t_psia": 45.0,
+        "T_t0_R": 1490,
+        "cooled_approach_length_in": 6
+      },
+      {
+        "test": 245,
+        "p_t_psia": 60.2,
+        "T_t0_R": 1513,
+        "cooled_approach_length_in": 6
+      },
+      {
+        "test": 246,
+        "p_t_psia": 75.2,
+        "T_t0_R": 1500,
+        "cooled_approach_length_in": 6
+      },
+      {
+        "test": 237,
+        "p_t_psia": 45.2,
+        "T_t0_R": 1531,
+        "cooled_approach_length_in": 12
+      },
+      {
+        "test": 235,
+        "p_t_psia": 60.2,
+        "T_t0_R": 1545,
+        "cooled_approach_length_in": 12
+      },
+      {
+        "test": 234,
+        "p_t_psia": 75.2,
+        "T_t0_R": 1527,
+        "cooled_approach_length_in": 12
+      },
+      {
+        "test": 300,
+        "p_t_psia": 30.0,
+        "T_t0_R": 1039,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 301,
+        "p_t_psia": 45.1,
+        "T_t0_R": 1035,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 303,
+        "p_t_psia": 75.2,
+        "T_t0_R": 1024,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 304,
+        "p_t_psia": 100.8,
+        "T_t0_R": 1036,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 305,
+        "p_t_psia": 125.6,
+        "T_t0_R": 1032,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 306,
+        "p_t_psia": 150.6,
+        "T_t0_R": 1028,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 308,
+        "p_t_psia": 175.8,
+        "T_t0_R": 1035,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 309,
+        "p_t_psia": 201.7,
+        "T_t0_R": 1029,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 310,
+        "p_t_psia": 226.7,
+        "T_t0_R": 1032,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 311,
+        "p_t_psia": 253.7,
+        "T_t0_R": 1030,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 288,
+        "p_t_psia": 30.1,
+        "T_t0_R": 1511,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 287,
+        "p_t_psia": 40.2,
+        "T_t0_R": 1508,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 266,
+        "p_t_psia": 44.8,
+        "T_t0_R": 1503,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 281,
+        "p_t_psia": 50.1,
+        "T_t0_R": 1514,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 280,
+        "p_t_psia": 55.1,
+        "T_t0_R": 1501,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 263,
+        "p_t_psia": 60.2,
+        "T_t0_R": 1536,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 262,
+        "p_t_psia": 75.2,
+        "T_t0_R": 1518,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 269,
+        "p_t_psia": 100.2,
+        "T_t0_R": 1511,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 267,
+        "p_t_psia": 134.8,
+        "T_t0_R": 1501,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 268,
+        "p_t_psia": 150.6,
+        "T_t0_R": 1484,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 271,
+        "p_t_psia": 175.0,
+        "T_t0_R": 1483,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 273,
+        "p_t_psia": 201.0,
+        "T_t0_R": 1507,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 277,
+        "p_t_psia": 225.7,
+        "T_t0_R": 1508,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 278,
+        "p_t_psia": 250.7,
+        "T_t0_R": 1517,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 275,
+        "p_t_psia": 253.7,
+        "T_t0_R": 1513,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 293,
+        "p_t_psia": 30.0,
+        "T_t0_R": 2001,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 294,
+        "p_t_psia": 49.9,
+        "T_t0_R": 2000,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 290,
+        "p_t_psia": 75.2,
+        "T_t0_R": 1989,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 296,
+        "p_t_psia": 101.2,
+        "T_t0_R": 2001,
+        "cooled_approach_length_in": 18
+      },
+      {
+        "test": 298,
+        "p_t_psia": 125.8,
+        "T_t0_R": 2007,
+        "cooled_approach_length_in": 18
+      }
+    ],
+    "boundary_layer_at_inlet_note_tr": "Sınır tabaka ölçümleri lüle girişinin 1.25 in YUKARISINDA (5.07 in çaplı soğutulmuş yaklaşım borusunda). 18 in yaklaşımda profiller türbülanslı (1/7 kuvvet yasası + Coles izi; Şekil 8-9); yaklaşımsız (l=0) profiller GEÇİŞ bölgesinde (Şekil 10). delta*/theta/phi tanımları boru içi akış integralleriyle (Denk. 4-6, R=2.53 in)."
+  },
+  "expected_outputs": {
+    "_status": "PUBLISHED_MEASUREMENT",
+    "heat_transfer_tables_B3": {
+      "units": {
+        "q_w": "BTU/(s·in²)",
+        "T_w": "°R",
+        "T_e": "°R",
+        "h": "1e-4 BTU/(s·in²·°F)",
+        "rho_e_u_e": "lb/(s·in²)",
+        "Re_per_in": "1e5 1/in",
+        "St": "1e-3 boyutsuz"
+      },
+      "flow_separation_marker": "FLOW_SEPARATION",
+      "null_meaning_tr": "null = kaynakta '—' (ör. z/L=0.541 tapası H37: veri şüpheli diye yayında atlanmış); uydurulmadı",
+      "test_288": [
+        {
+          "z_over_L": 0.133,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": null,
+          "h_1e-4_btu_per_s_in2_F": null,
+          "rho_e_u_e_lb_per_s_in2": null,
+          "Re_per_in_1e5": null,
+          "St_1e-3": null
+        },
+        {
+          "z_over_L": 0.204,
+          "q_w_btu_per_s_in2": 0.0509,
+          "T_w_R": 622,
+          "T_e_R": 1508,
+          "h_1e-4_btu_per_s_in2_F": 0.572,
+          "rho_e_u_e_lb_per_s_in2": 0.0764,
+          "Re_per_in_1e5": 0.35,
+          "St_1e-3": 2.87
+        },
+        {
+          "z_over_L": 0.276,
+          "q_w_btu_per_s_in2": 0.0569,
+          "T_w_R": 640,
+          "T_e_R": 1506,
+          "h_1e-4_btu_per_s_in2_F": 0.654,
+          "rho_e_u_e_lb_per_s_in2": 0.093,
+          "Re_per_in_1e5": 0.438,
+          "St_1e-3": 2.7
+        },
+        {
+          "z_over_L": 0.336,
+          "q_w_btu_per_s_in2": 0.0595,
+          "T_w_R": 650,
+          "T_e_R": 1502,
+          "h_1e-4_btu_per_s_in2_F": 0.692,
+          "rho_e_u_e_lb_per_s_in2": 0.123,
+          "Re_per_in_1e5": 0.578,
+          "St_1e-3": 2.2
+        },
+        {
+          "z_over_L": 0.385,
+          "q_w_btu_per_s_in2": 0.0637,
+          "T_w_R": 630,
+          "T_e_R": 1496,
+          "h_1e-4_btu_per_s_in2_F": 0.725,
+          "rho_e_u_e_lb_per_s_in2": 0.156,
+          "Re_per_in_1e5": 0.758,
+          "St_1e-3": 1.66
+        },
+        {
+          "z_over_L": 0.429,
+          "q_w_btu_per_s_in2": 0.075,
+          "T_w_R": 635,
+          "T_e_R": 1485,
+          "h_1e-4_btu_per_s_in2_F": 0.86,
+          "rho_e_u_e_lb_per_s_in2": 0.204,
+          "Re_per_in_1e5": 0.972,
+          "St_1e-3": 1.63
+        },
+        {
+          "z_over_L": 0.469,
+          "q_w_btu_per_s_in2": 0.0811,
+          "T_w_R": 644,
+          "T_e_R": 1465,
+          "h_1e-4_btu_per_s_in2_F": 0.943,
+          "rho_e_u_e_lb_per_s_in2": 0.259,
+          "Re_per_in_1e5": 1.28,
+          "St_1e-3": 1.41
+        },
+        {
+          "z_over_L": 0.512,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": 1415,
+          "h_1e-4_btu_per_s_in2_F": null,
+          "rho_e_u_e_lb_per_s_in2": 0.337,
+          "Re_per_in_1e5": 1.65,
+          "St_1e-3": null
+        },
+        {
+          "z_over_L": 0.541,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": 1370,
+          "h_1e-4_btu_per_s_in2_F": null,
+          "rho_e_u_e_lb_per_s_in2": 0.371,
+          "Re_per_in_1e5": 1.87,
+          "St_1e-3": null
+        },
+        {
+          "z_over_L": 0.573,
+          "q_w_btu_per_s_in2": 0.08,
+          "T_w_R": 634,
+          "T_e_R": 1310,
+          "h_1e-4_btu_per_s_in2_F": 0.937,
+          "rho_e_u_e_lb_per_s_in2": 0.386,
+          "Re_per_in_1e5": 2.02,
+          "St_1e-3": 0.938
+        },
+        {
+          "z_over_L": 0.603,
+          "q_w_btu_per_s_in2": 0.0733,
+          "T_w_R": 625,
+          "T_e_R": 1235,
+          "h_1e-4_btu_per_s_in2_F": 0.856,
+          "rho_e_u_e_lb_per_s_in2": 0.382,
+          "Re_per_in_1e5": 2.07,
+          "St_1e-3": 0.876
+        },
+        {
+          "z_over_L": 0.634,
+          "q_w_btu_per_s_in2": 0.0648,
+          "T_w_R": 624,
+          "T_e_R": 1165,
+          "h_1e-4_btu_per_s_in2_F": 0.763,
+          "rho_e_u_e_lb_per_s_in2": 0.361,
+          "Re_per_in_1e5": 2.02,
+          "St_1e-3": 0.833
+        },
+        {
+          "z_over_L": 0.664,
+          "q_w_btu_per_s_in2": 0.0532,
+          "T_w_R": 624,
+          "T_e_R": 1100,
+          "h_1e-4_btu_per_s_in2_F": 0.634,
+          "rho_e_u_e_lb_per_s_in2": 0.337,
+          "Re_per_in_1e5": 1.95,
+          "St_1e-3": 0.75
+        },
+        {
+          "z_over_L": 0.693,
+          "q_w_btu_per_s_in2": 0.0531,
+          "T_w_R": 625,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.717,
+          "q_w_btu_per_s_in2": 0.046,
+          "T_w_R": 602,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.75,
+          "q_w_btu_per_s_in2": 0.0742,
+          "T_w_R": 602,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.782,
+          "q_w_btu_per_s_in2": 0.0267,
+          "T_w_R": 715,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.825,
+          "q_w_btu_per_s_in2": 0.0199,
+          "T_w_R": 725,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.015,
+          "T_w_R": 701,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": 581,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.905,
+          "q_w_btu_per_s_in2": 0.0543,
+          "T_w_R": 671,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.938,
+          "q_w_btu_per_s_in2": 0.0229,
+          "T_w_R": 548,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        }
+      ],
+      "test_266": [
+        {
+          "z_over_L": 0.133,
+          "q_w_btu_per_s_in2": 0.0652,
+          "T_w_R": 636,
+          "T_e_R": 1502,
+          "h_1e-4_btu_per_s_in2_F": 0.752,
+          "rho_e_u_e_lb_per_s_in2": 0.0834,
+          "Re_per_in_1e5": 0.362,
+          "St_1e-3": 3.45
+        },
+        {
+          "z_over_L": 0.204,
+          "q_w_btu_per_s_in2": 0.0653,
+          "T_w_R": 631,
+          "T_e_R": 1500,
+          "h_1e-4_btu_per_s_in2_F": 0.749,
+          "rho_e_u_e_lb_per_s_in2": 0.109,
+          "Re_per_in_1e5": 0.493,
+          "St_1e-3": 2.63
+        },
+        {
+          "z_over_L": 0.276,
+          "q_w_btu_per_s_in2": 0.0544,
+          "T_w_R": 630,
+          "T_e_R": 1497,
+          "h_1e-4_btu_per_s_in2_F": 0.623,
+          "rho_e_u_e_lb_per_s_in2": 0.142,
+          "Re_per_in_1e5": 0.678,
+          "St_1e-3": 1.68
+        },
+        {
+          "z_over_L": 0.336,
+          "q_w_btu_per_s_in2": 0.0688,
+          "T_w_R": 658,
+          "T_e_R": 1494,
+          "h_1e-4_btu_per_s_in2_F": 0.816,
+          "rho_e_u_e_lb_per_s_in2": 0.182,
+          "Re_per_in_1e5": 0.884,
+          "St_1e-3": 1.73
+        },
+        {
+          "z_over_L": 0.385,
+          "q_w_btu_per_s_in2": 0.0803,
+          "T_w_R": 639,
+          "T_e_R": 1490,
+          "h_1e-4_btu_per_s_in2_F": 0.932,
+          "rho_e_u_e_lb_per_s_in2": 0.234,
+          "Re_per_in_1e5": 1.12,
+          "St_1e-3": 1.42
+        },
+        {
+          "z_over_L": 0.429,
+          "q_w_btu_per_s_in2": 0.0778,
+          "T_w_R": 636,
+          "T_e_R": 1480,
+          "h_1e-4_btu_per_s_in2_F": 0.901,
+          "rho_e_u_e_lb_per_s_in2": 0.304,
+          "Re_per_in_1e5": 1.48,
+          "St_1e-3": 1.14
+        },
+        {
+          "z_over_L": 0.469,
+          "q_w_btu_per_s_in2": 0.104,
+          "T_w_R": 659,
+          "T_e_R": 1455,
+          "h_1e-4_btu_per_s_in2_F": 1.24,
+          "rho_e_u_e_lb_per_s_in2": 0.39,
+          "Re_per_in_1e5": 1.91,
+          "St_1e-3": 1.22
+        },
+        {
+          "z_over_L": 0.512,
+          "q_w_btu_per_s_in2": 0.109,
+          "T_w_R": 673,
+          "T_e_R": 1405,
+          "h_1e-4_btu_per_s_in2_F": 1.33,
+          "rho_e_u_e_lb_per_s_in2": 0.503,
+          "Re_per_in_1e5": 2.45,
+          "St_1e-3": 1.03
+        },
+        {
+          "z_over_L": 0.541,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": 1365,
+          "h_1e-4_btu_per_s_in2_F": null,
+          "rho_e_u_e_lb_per_s_in2": 0.554,
+          "Re_per_in_1e5": 2.81,
+          "St_1e-3": null
+        },
+        {
+          "z_over_L": 0.573,
+          "q_w_btu_per_s_in2": 0.12,
+          "T_w_R": 668,
+          "T_e_R": 1295,
+          "h_1e-4_btu_per_s_in2_F": 1.49,
+          "rho_e_u_e_lb_per_s_in2": 0.58,
+          "Re_per_in_1e5": 3.02,
+          "St_1e-3": 0.99
+        },
+        {
+          "z_over_L": 0.603,
+          "q_w_btu_per_s_in2": 0.093,
+          "T_w_R": 660,
+          "T_e_R": 1225,
+          "h_1e-4_btu_per_s_in2_F": 1.14,
+          "rho_e_u_e_lb_per_s_in2": 0.576,
+          "Re_per_in_1e5": 3.13,
+          "St_1e-3": 0.779
+        },
+        {
+          "z_over_L": 0.634,
+          "q_w_btu_per_s_in2": 0.128,
+          "T_w_R": 678,
+          "T_e_R": 1140,
+          "h_1e-4_btu_per_s_in2_F": 1.62,
+          "rho_e_u_e_lb_per_s_in2": 0.548,
+          "Re_per_in_1e5": 3.08,
+          "St_1e-3": 1.17
+        },
+        {
+          "z_over_L": 0.664,
+          "q_w_btu_per_s_in2": 0.0804,
+          "T_w_R": 638,
+          "T_e_R": 1055,
+          "h_1e-4_btu_per_s_in2_F": 0.981,
+          "rho_e_u_e_lb_per_s_in2": 0.465,
+          "Re_per_in_1e5": 2.87,
+          "St_1e-3": 0.848
+        },
+        {
+          "z_over_L": 0.693,
+          "q_w_btu_per_s_in2": 0.0894,
+          "T_w_R": 653,
+          "T_e_R": 1000,
+          "h_1e-4_btu_per_s_in2_F": 1.13,
+          "rho_e_u_e_lb_per_s_in2": 0.43,
+          "Re_per_in_1e5": 2.62,
+          "St_1e-3": 1.06
+        },
+        {
+          "z_over_L": 0.717,
+          "q_w_btu_per_s_in2": 0.113,
+          "T_w_R": 672,
+          "T_e_R": 970,
+          "h_1e-4_btu_per_s_in2_F": 1.47,
+          "rho_e_u_e_lb_per_s_in2": 0.413,
+          "Re_per_in_1e5": 2.53,
+          "St_1e-3": 1.43
+        },
+        {
+          "z_over_L": 0.75,
+          "q_w_btu_per_s_in2": 0.127,
+          "T_w_R": 663,
+          "T_e_R": 945,
+          "h_1e-4_btu_per_s_in2_F": 1.65,
+          "rho_e_u_e_lb_per_s_in2": 0.389,
+          "Re_per_in_1e5": 2.43,
+          "St_1e-3": 1.72
+        },
+        {
+          "z_over_L": 0.782,
+          "q_w_btu_per_s_in2": 0.0821,
+          "T_w_R": 642,
+          "T_e_R": 920,
+          "h_1e-4_btu_per_s_in2_F": 1.04,
+          "rho_e_u_e_lb_per_s_in2": 0.368,
+          "Re_per_in_1e5": 2.33,
+          "St_1e-3": 1.14
+        },
+        {
+          "z_over_L": 0.825,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.0574,
+          "T_w_R": 606,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.042,
+          "T_w_R": 581,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.905,
+          "q_w_btu_per_s_in2": 0.025,
+          "T_w_R": 565,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        },
+        {
+          "z_over_L": 0.938,
+          "q_w_btu_per_s_in2": 0.0143,
+          "T_w_R": 540,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        }
+      ],
+      "test_262": [
+        {
+          "z_over_L": 0.133,
+          "q_w_btu_per_s_in2": 0.0834,
+          "T_w_R": 674,
+          "T_e_R": 1517,
+          "h_1e-4_btu_per_s_in2_F": 0.989,
+          "rho_e_u_e_lb_per_s_in2": 0.136,
+          "Re_per_in_1e5": 0.597,
+          "St_1e-3": 2.87
+        },
+        {
+          "z_over_L": 0.204,
+          "q_w_btu_per_s_in2": 0.0864,
+          "T_w_R": 674,
+          "T_e_R": 1515,
+          "h_1e-4_btu_per_s_in2_F": 1.03,
+          "rho_e_u_e_lb_per_s_in2": 0.174,
+          "Re_per_in_1e5": 0.822,
+          "St_1e-3": 2.26
+        },
+        {
+          "z_over_L": 0.276,
+          "q_w_btu_per_s_in2": 0.0801,
+          "T_w_R": 682,
+          "T_e_R": 1512,
+          "h_1e-4_btu_per_s_in2_F": 0.959,
+          "rho_e_u_e_lb_per_s_in2": 0.229,
+          "Re_per_in_1e5": 1.1,
+          "St_1e-3": 1.61
+        },
+        {
+          "z_over_L": 0.336,
+          "q_w_btu_per_s_in2": 0.102,
+          "T_w_R": 719,
+          "T_e_R": 1509,
+          "h_1e-4_btu_per_s_in2_F": 1.28,
+          "rho_e_u_e_lb_per_s_in2": 0.305,
+          "Re_per_in_1e5": 1.45,
+          "St_1e-3": 1.61
+        },
+        {
+          "z_over_L": 0.385,
+          "q_w_btu_per_s_in2": 0.134,
+          "T_w_R": 718,
+          "T_e_R": 1503,
+          "h_1e-4_btu_per_s_in2_F": 1.68,
+          "rho_e_u_e_lb_per_s_in2": 0.396,
+          "Re_per_in_1e5": 1.86,
+          "St_1e-3": 1.52
+        },
+        {
+          "z_over_L": 0.429,
+          "q_w_btu_per_s_in2": 0.151,
+          "T_w_R": 734,
+          "T_e_R": 1490,
+          "h_1e-4_btu_per_s_in2_F": 1.94,
+          "rho_e_u_e_lb_per_s_in2": 0.5,
+          "Re_per_in_1e5": 2.43,
+          "St_1e-3": 1.49
+        },
+        {
+          "z_over_L": 0.469,
+          "q_w_btu_per_s_in2": 0.216,
+          "T_w_R": 792,
+          "T_e_R": 1460,
+          "h_1e-4_btu_per_s_in2_F": 2.99,
+          "rho_e_u_e_lb_per_s_in2": 0.666,
+          "Re_per_in_1e5": 3.21,
+          "St_1e-3": 1.73
+        },
+        {
+          "z_over_L": 0.512,
+          "q_w_btu_per_s_in2": 0.22,
+          "T_w_R": 823,
+          "T_e_R": 1410,
+          "h_1e-4_btu_per_s_in2_F": 3.21,
+          "rho_e_u_e_lb_per_s_in2": 0.86,
+          "Re_per_in_1e5": 4.18,
+          "St_1e-3": 1.44
+        },
+        {
+          "z_over_L": 0.541,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": 1370,
+          "h_1e-4_btu_per_s_in2_F": null,
+          "rho_e_u_e_lb_per_s_in2": 0.938,
+          "Re_per_in_1e5": 4.72,
+          "St_1e-3": null
+        },
+        {
+          "z_over_L": 0.573,
+          "q_w_btu_per_s_in2": 0.262,
+          "T_w_R": 756,
+          "T_e_R": 1300,
+          "h_1e-4_btu_per_s_in2_F": 3.55,
+          "rho_e_u_e_lb_per_s_in2": 0.98,
+          "Re_per_in_1e5": 5.1,
+          "St_1e-3": 1.4
+        },
+        {
+          "z_over_L": 0.603,
+          "q_w_btu_per_s_in2": 0.231,
+          "T_w_R": 833,
+          "T_e_R": 1230,
+          "h_1e-4_btu_per_s_in2_F": 3.52,
+          "rho_e_u_e_lb_per_s_in2": 0.968,
+          "Re_per_in_1e5": 5.24,
+          "St_1e-3": 1.42
+        },
+        {
+          "z_over_L": 0.634,
+          "q_w_btu_per_s_in2": 0.206,
+          "T_w_R": 799,
+          "T_e_R": 1170,
+          "h_1e-4_btu_per_s_in2_F": 3.03,
+          "rho_e_u_e_lb_per_s_in2": 0.764,
+          "Re_per_in_1e5": 4.67,
+          "St_1e-3": 1.58
+        },
+        {
+          "z_over_L": 0.664,
+          "q_w_btu_per_s_in2": 0.2,
+          "T_w_R": 783,
+          "T_e_R": 1090,
+          "h_1e-4_btu_per_s_in2_F": 2.91,
+          "rho_e_u_e_lb_per_s_in2": 0.732,
+          "Re_per_in_1e5": 4.5,
+          "St_1e-3": 1.6
+        },
+        {
+          "z_over_L": 0.693,
+          "q_w_btu_per_s_in2": 0.176,
+          "T_w_R": 777,
+          "T_e_R": 1015,
+          "h_1e-4_btu_per_s_in2_F": 2.57,
+          "rho_e_u_e_lb_per_s_in2": 0.732,
+          "Re_per_in_1e5": 4.5,
+          "St_1e-3": 1.42
+        },
+        {
+          "z_over_L": 0.717,
+          "q_w_btu_per_s_in2": 0.169,
+          "T_w_R": 754,
+          "T_e_R": 990,
+          "h_1e-4_btu_per_s_in2_F": 2.41,
+          "rho_e_u_e_lb_per_s_in2": 0.705,
+          "Re_per_in_1e5": 4.4,
+          "St_1e-3": 1.39
+        },
+        {
+          "z_over_L": 0.75,
+          "q_w_btu_per_s_in2": 0.179,
+          "T_w_R": 728,
+          "T_e_R": 960,
+          "h_1e-4_btu_per_s_in2_F": 2.49,
+          "rho_e_u_e_lb_per_s_in2": 0.663,
+          "Re_per_in_1e5": 4.28,
+          "St_1e-3": 1.48
+        },
+        {
+          "z_over_L": 0.782,
+          "q_w_btu_per_s_in2": 0.154,
+          "T_w_R": 731,
+          "T_e_R": 930,
+          "h_1e-4_btu_per_s_in2_F": 2.16,
+          "rho_e_u_e_lb_per_s_in2": 0.628,
+          "Re_per_in_1e5": 4.1,
+          "St_1e-3": 1.41
+        },
+        {
+          "z_over_L": 0.825,
+          "q_w_btu_per_s_in2": 0.144,
+          "T_w_R": 704,
+          "T_e_R": 900,
+          "h_1e-4_btu_per_s_in2_F": 1.98,
+          "rho_e_u_e_lb_per_s_in2": 0.576,
+          "Re_per_in_1e5": 3.87,
+          "St_1e-3": 1.4
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.134,
+          "T_w_R": 707,
+          "T_e_R": 865,
+          "h_1e-4_btu_per_s_in2_F": 1.86,
+          "rho_e_u_e_lb_per_s_in2": 0.531,
+          "Re_per_in_1e5": 3.63,
+          "St_1e-3": 1.44
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.152,
+          "T_w_R": 692,
+          "T_e_R": 865,
+          "h_1e-4_btu_per_s_in2_F": 2.06,
+          "rho_e_u_e_lb_per_s_in2": 0.531,
+          "Re_per_in_1e5": 3.75,
+          "St_1e-3": 1.58
+        },
+        {
+          "z_over_L": 0.905,
+          "q_w_btu_per_s_in2": 0.12,
+          "T_w_R": 682,
+          "T_e_R": 830,
+          "h_1e-4_btu_per_s_in2_F": 1.61,
+          "rho_e_u_e_lb_per_s_in2": 0.486,
+          "Re_per_in_1e5": 3.54,
+          "St_1e-3": 1.36
+        },
+        {
+          "z_over_L": 0.938,
+          "q_w_btu_per_s_in2": 0.11,
+          "T_w_R": 639,
+          "T_e_R": "FLOW_SEPARATION",
+          "h_1e-4_btu_per_s_in2_F": "FLOW_SEPARATION",
+          "rho_e_u_e_lb_per_s_in2": "FLOW_SEPARATION",
+          "Re_per_in_1e5": "FLOW_SEPARATION",
+          "St_1e-3": "FLOW_SEPARATION"
+        }
+      ],
+      "test_268": [
+        {
+          "z_over_L": 0.133,
+          "q_w_btu_per_s_in2": 0.131,
+          "T_w_R": 754,
+          "T_e_R": 1483,
+          "h_1e-4_btu_per_s_in2_F": 1.79,
+          "rho_e_u_e_lb_per_s_in2": 0.242,
+          "Re_per_in_1e5": 1.12,
+          "St_1e-3": 2.82
+        },
+        {
+          "z_over_L": 0.204,
+          "q_w_btu_per_s_in2": 0.132,
+          "T_w_R": 751,
+          "T_e_R": 1481,
+          "h_1e-4_btu_per_s_in2_F": 1.8,
+          "rho_e_u_e_lb_per_s_in2": 0.316,
+          "Re_per_in_1e5": 1.59,
+          "St_1e-3": 2.22
+        },
+        {
+          "z_over_L": 0.276,
+          "q_w_btu_per_s_in2": 0.144,
+          "T_w_R": 789,
+          "T_e_R": 1478,
+          "h_1e-4_btu_per_s_in2_F": 2.08,
+          "rho_e_u_e_lb_per_s_in2": 0.441,
+          "Re_per_in_1e5": 2.23,
+          "St_1e-3": 1.8
+        },
+        {
+          "z_over_L": 0.336,
+          "q_w_btu_per_s_in2": 0.186,
+          "T_w_R": 880,
+          "T_e_R": 1475,
+          "h_1e-4_btu_per_s_in2_F": 3.13,
+          "rho_e_u_e_lb_per_s_in2": 0.601,
+          "Re_per_in_1e5": 2.97,
+          "St_1e-3": 2.03
+        },
+        {
+          "z_over_L": 0.385,
+          "q_w_btu_per_s_in2": 0.245,
+          "T_w_R": 866,
+          "T_e_R": 1470,
+          "h_1e-4_btu_per_s_in2_F": 3.98,
+          "rho_e_u_e_lb_per_s_in2": 0.782,
+          "Re_per_in_1e5": 3.79,
+          "St_1e-3": 1.82
+        },
+        {
+          "z_over_L": 0.429,
+          "q_w_btu_per_s_in2": 0.266,
+          "T_w_R": 888,
+          "T_e_R": 1457,
+          "h_1e-4_btu_per_s_in2_F": 4.49,
+          "rho_e_u_e_lb_per_s_in2": 1.01,
+          "Re_per_in_1e5": 4.85,
+          "St_1e-3": 1.71
+        },
+        {
+          "z_over_L": 0.469,
+          "q_w_btu_per_s_in2": 0.326,
+          "T_w_R": 954,
+          "T_e_R": 1434,
+          "h_1e-4_btu_per_s_in2_F": 6.23,
+          "rho_e_u_e_lb_per_s_in2": 1.32,
+          "Re_per_in_1e5": 6.38,
+          "St_1e-3": 1.82
+        },
+        {
+          "z_over_L": 0.512,
+          "q_w_btu_per_s_in2": 0.345,
+          "T_w_R": 974,
+          "T_e_R": 1385,
+          "h_1e-4_btu_per_s_in2_F": 6.9,
+          "rho_e_u_e_lb_per_s_in2": 1.68,
+          "Re_per_in_1e5": 8.4,
+          "St_1e-3": 1.58
+        },
+        {
+          "z_over_L": 0.541,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": 1345,
+          "h_1e-4_btu_per_s_in2_F": null,
+          "rho_e_u_e_lb_per_s_in2": 1.85,
+          "Re_per_in_1e5": 9.54,
+          "St_1e-3": null
+        },
+        {
+          "z_over_L": 0.573,
+          "q_w_btu_per_s_in2": 0.361,
+          "T_w_R": 959,
+          "T_e_R": 1285,
+          "h_1e-4_btu_per_s_in2_F": 7.18,
+          "rho_e_u_e_lb_per_s_in2": 1.94,
+          "Re_per_in_1e5": 10.3,
+          "St_1e-3": 1.42
+        },
+        {
+          "z_over_L": 0.603,
+          "q_w_btu_per_s_in2": 0.279,
+          "T_w_R": 915,
+          "T_e_R": 1210,
+          "h_1e-4_btu_per_s_in2_F": 5.17,
+          "rho_e_u_e_lb_per_s_in2": 1.94,
+          "Re_per_in_1e5": 10.6,
+          "St_1e-3": 1.04
+        },
+        {
+          "z_over_L": 0.634,
+          "q_w_btu_per_s_in2": 0.286,
+          "T_w_R": 891,
+          "T_e_R": 1120,
+          "h_1e-4_btu_per_s_in2_F": 5.14,
+          "rho_e_u_e_lb_per_s_in2": 1.81,
+          "Re_per_in_1e5": 10.3,
+          "St_1e-3": 1.13
+        },
+        {
+          "z_over_L": 0.664,
+          "q_w_btu_per_s_in2": 0.295,
+          "T_w_R": 891,
+          "T_e_R": 1045,
+          "h_1e-4_btu_per_s_in2_F": 5.4,
+          "rho_e_u_e_lb_per_s_in2": 1.6,
+          "Re_per_in_1e5": 9.8,
+          "St_1e-3": 1.36
+        },
+        {
+          "z_over_L": 0.693,
+          "q_w_btu_per_s_in2": 0.231,
+          "T_w_R": 850,
+          "T_e_R": 990,
+          "h_1e-4_btu_per_s_in2_F": 3.98,
+          "rho_e_u_e_lb_per_s_in2": 1.46,
+          "Re_per_in_1e5": 9.11,
+          "St_1e-3": 1.11
+        },
+        {
+          "z_over_L": 0.717,
+          "q_w_btu_per_s_in2": 0.241,
+          "T_w_R": 849,
+          "T_e_R": 965,
+          "h_1e-4_btu_per_s_in2_F": 4.21,
+          "rho_e_u_e_lb_per_s_in2": 1.4,
+          "Re_per_in_1e5": 8.91,
+          "St_1e-3": 1.23
+        },
+        {
+          "z_over_L": 0.75,
+          "q_w_btu_per_s_in2": 0.277,
+          "T_w_R": 830,
+          "T_e_R": 930,
+          "h_1e-4_btu_per_s_in2_F": 4.73,
+          "rho_e_u_e_lb_per_s_in2": 1.32,
+          "Re_per_in_1e5": 8.6,
+          "St_1e-3": 1.42
+        },
+        {
+          "z_over_L": 0.782,
+          "q_w_btu_per_s_in2": 0.215,
+          "T_w_R": 814,
+          "T_e_R": 900,
+          "h_1e-4_btu_per_s_in2_F": 3.6,
+          "rho_e_u_e_lb_per_s_in2": 1.24,
+          "Re_per_in_1e5": 8.22,
+          "St_1e-3": 1.19
+        },
+        {
+          "z_over_L": 0.825,
+          "q_w_btu_per_s_in2": 0.209,
+          "T_w_R": 778,
+          "T_e_R": 870,
+          "h_1e-4_btu_per_s_in2_F": 3.35,
+          "rho_e_u_e_lb_per_s_in2": 1.14,
+          "Re_per_in_1e5": 7.76,
+          "St_1e-3": 1.21
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.213,
+          "T_w_R": 804,
+          "T_e_R": 835,
+          "h_1e-4_btu_per_s_in2_F": 3.58,
+          "rho_e_u_e_lb_per_s_in2": 1.04,
+          "Re_per_in_1e5": 7.3,
+          "St_1e-3": 1.42
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.242,
+          "T_w_R": 787,
+          "T_e_R": 835,
+          "h_1e-4_btu_per_s_in2_F": 3.97,
+          "rho_e_u_e_lb_per_s_in2": 1.04,
+          "Re_per_in_1e5": 7.3,
+          "St_1e-3": 1.57
+        },
+        {
+          "z_over_L": 0.905,
+          "q_w_btu_per_s_in2": 0.189,
+          "T_w_R": 752,
+          "T_e_R": 805,
+          "h_1e-4_btu_per_s_in2_F": 2.95,
+          "rho_e_u_e_lb_per_s_in2": 0.958,
+          "Re_per_in_1e5": 6.83,
+          "St_1e-3": 1.27
+        },
+        {
+          "z_over_L": 0.938,
+          "q_w_btu_per_s_in2": 0.171,
+          "T_w_R": 707,
+          "T_e_R": 780,
+          "h_1e-4_btu_per_s_in2_F": 2.52,
+          "rho_e_u_e_lb_per_s_in2": 0.982,
+          "Re_per_in_1e5": 6.31,
+          "St_1e-3": 1.18
+        }
+      ],
+      "test_278": [
+        {
+          "z_over_L": 0.133,
+          "q_w_btu_per_s_in2": 0.169,
+          "T_w_R": 840,
+          "T_e_R": 1516,
+          "h_1e-4_btu_per_s_in2_F": 2.5,
+          "rho_e_u_e_lb_per_s_in2": 0.442,
+          "Re_per_in_1e5": 2.0,
+          "St_1e-3": 2.17
+        },
+        {
+          "z_over_L": 0.204,
+          "q_w_btu_per_s_in2": 0.204,
+          "T_w_R": 871,
+          "T_e_R": 1514,
+          "h_1e-4_btu_per_s_in2_F": 3.15,
+          "rho_e_u_e_lb_per_s_in2": 0.593,
+          "Re_per_in_1e5": 2.75,
+          "St_1e-3": 2.04
+        },
+        {
+          "z_over_L": 0.276,
+          "q_w_btu_per_s_in2": 0.255,
+          "T_w_R": 954,
+          "T_e_R": 1511,
+          "h_1e-4_btu_per_s_in2_F": 4.53,
+          "rho_e_u_e_lb_per_s_in2": 0.771,
+          "Re_per_in_1e5": 3.69,
+          "St_1e-3": 2.26
+        },
+        {
+          "z_over_L": 0.336,
+          "q_w_btu_per_s_in2": 0.258,
+          "T_w_R": 1014,
+          "T_e_R": 1508,
+          "h_1e-4_btu_per_s_in2_F": 5.15,
+          "rho_e_u_e_lb_per_s_in2": 1.02,
+          "Re_per_in_1e5": 4.84,
+          "St_1e-3": 1.94
+        },
+        {
+          "z_over_L": 0.385,
+          "q_w_btu_per_s_in2": 0.296,
+          "T_w_R": 946,
+          "T_e_R": 1502,
+          "h_1e-4_btu_per_s_in2_F": 5.2,
+          "rho_e_u_e_lb_per_s_in2": 1.33,
+          "Re_per_in_1e5": 6.22,
+          "St_1e-3": 1.4
+        },
+        {
+          "z_over_L": 0.429,
+          "q_w_btu_per_s_in2": 0.376,
+          "T_w_R": 1035,
+          "T_e_R": 1490,
+          "h_1e-4_btu_per_s_in2_F": 7.87,
+          "rho_e_u_e_lb_per_s_in2": 1.67,
+          "Re_per_in_1e5": 8.13,
+          "St_1e-3": 1.81
+        },
+        {
+          "z_over_L": 0.469,
+          "q_w_btu_per_s_in2": 0.393,
+          "T_w_R": 1063,
+          "T_e_R": 1460,
+          "h_1e-4_btu_per_s_in2_F": 8.77,
+          "rho_e_u_e_lb_per_s_in2": 2.24,
+          "Re_per_in_1e5": 10.8,
+          "St_1e-3": 1.51
+        },
+        {
+          "z_over_L": 0.512,
+          "q_w_btu_per_s_in2": 0.419,
+          "T_w_R": 1065,
+          "T_e_R": 1410,
+          "h_1e-4_btu_per_s_in2_F": 9.32,
+          "rho_e_u_e_lb_per_s_in2": 2.88,
+          "Re_per_in_1e5": 14.0,
+          "St_1e-3": 1.24
+        },
+        {
+          "z_over_L": 0.541,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": 1370,
+          "h_1e-4_btu_per_s_in2_F": null,
+          "rho_e_u_e_lb_per_s_in2": 3.14,
+          "Re_per_in_1e5": 15.9,
+          "St_1e-3": null
+        },
+        {
+          "z_over_L": 0.573,
+          "q_w_btu_per_s_in2": 0.435,
+          "T_w_R": 1085,
+          "T_e_R": 1300,
+          "h_1e-4_btu_per_s_in2_F": 10.6,
+          "rho_e_u_e_lb_per_s_in2": 3.28,
+          "Re_per_in_1e5": 17.1,
+          "St_1e-3": 1.25
+        },
+        {
+          "z_over_L": 0.603,
+          "q_w_btu_per_s_in2": 0.354,
+          "T_w_R": 1004,
+          "T_e_R": 1230,
+          "h_1e-4_btu_per_s_in2_F": 7.32,
+          "rho_e_u_e_lb_per_s_in2": 3.25,
+          "Re_per_in_1e5": 17.5,
+          "St_1e-3": 0.881
+        },
+        {
+          "z_over_L": 0.634,
+          "q_w_btu_per_s_in2": 0.379,
+          "T_w_R": 1045,
+          "T_e_R": 1170,
+          "h_1e-4_btu_per_s_in2_F": 8.73,
+          "rho_e_u_e_lb_per_s_in2": 2.56,
+          "Re_per_in_1e5": 15.6,
+          "St_1e-3": 1.36
+        },
+        {
+          "z_over_L": 0.664,
+          "q_w_btu_per_s_in2": 0.366,
+          "T_w_R": 1017,
+          "T_e_R": 1090,
+          "h_1e-4_btu_per_s_in2_F": 8.08,
+          "rho_e_u_e_lb_per_s_in2": 2.45,
+          "Re_per_in_1e5": 15.3,
+          "St_1e-3": 1.32
+        },
+        {
+          "z_over_L": 0.693,
+          "q_w_btu_per_s_in2": 0.292,
+          "T_w_R": 940,
+          "T_e_R": 1015,
+          "h_1e-4_btu_per_s_in2_F": 5.61,
+          "rho_e_u_e_lb_per_s_in2": 2.45,
+          "Re_per_in_1e5": 15.1,
+          "St_1e-3": 0.924
+        },
+        {
+          "z_over_L": 0.717,
+          "q_w_btu_per_s_in2": 0.347,
+          "T_w_R": 985,
+          "T_e_R": 990,
+          "h_1e-4_btu_per_s_in2_F": 7.38,
+          "rho_e_u_e_lb_per_s_in2": 2.36,
+          "Re_per_in_1e5": 14.8,
+          "St_1e-3": 1.27
+        },
+        {
+          "z_over_L": 0.75,
+          "q_w_btu_per_s_in2": 0.351,
+          "T_w_R": 942,
+          "T_e_R": 960,
+          "h_1e-4_btu_per_s_in2_F": 6.94,
+          "rho_e_u_e_lb_per_s_in2": 2.22,
+          "Re_per_in_1e5": 14.3,
+          "St_1e-3": 1.24
+        },
+        {
+          "z_over_L": 0.782,
+          "q_w_btu_per_s_in2": 0.287,
+          "T_w_R": 925,
+          "T_e_R": 930,
+          "h_1e-4_btu_per_s_in2_F": 5.56,
+          "rho_e_u_e_lb_per_s_in2": 2.1,
+          "Re_per_in_1e5": 13.7,
+          "St_1e-3": 1.08
+        },
+        {
+          "z_over_L": 0.825,
+          "q_w_btu_per_s_in2": 0.309,
+          "T_w_R": 917,
+          "T_e_R": 900,
+          "h_1e-4_btu_per_s_in2_F": 5.98,
+          "rho_e_u_e_lb_per_s_in2": 1.93,
+          "Re_per_in_1e5": 13.0,
+          "St_1e-3": 1.27
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.273,
+          "T_w_R": 916,
+          "T_e_R": 865,
+          "h_1e-4_btu_per_s_in2_F": 5.31,
+          "rho_e_u_e_lb_per_s_in2": 1.78,
+          "Re_per_in_1e5": 12.2,
+          "St_1e-3": 1.23
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.325,
+          "T_w_R": 899,
+          "T_e_R": 865,
+          "h_1e-4_btu_per_s_in2_F": 6.12,
+          "rho_e_u_e_lb_per_s_in2": 1.78,
+          "Re_per_in_1e5": 12.2,
+          "St_1e-3": 1.41
+        },
+        {
+          "z_over_L": 0.905,
+          "q_w_btu_per_s_in2": 0.231,
+          "T_w_R": 847,
+          "T_e_R": 830,
+          "h_1e-4_btu_per_s_in2_F": 4.01,
+          "rho_e_u_e_lb_per_s_in2": 1.63,
+          "Re_per_in_1e5": 11.4,
+          "St_1e-3": 1.02
+        },
+        {
+          "z_over_L": 0.938,
+          "q_w_btu_per_s_in2": 0.272,
+          "T_w_R": 814,
+          "T_e_R": 805,
+          "h_1e-4_btu_per_s_in2_F": 4.49,
+          "rho_e_u_e_lb_per_s_in2": 1.5,
+          "Re_per_in_1e5": 10.7,
+          "St_1e-3": 1.23
+        }
+      ],
+      "test_275": [
+        {
+          "z_over_L": 0.133,
+          "q_w_btu_per_s_in2": 0.174,
+          "T_w_R": 839,
+          "T_e_R": 1512,
+          "h_1e-4_btu_per_s_in2_F": 2.58,
+          "rho_e_u_e_lb_per_s_in2": 0.447,
+          "Re_per_in_1e5": 2.02,
+          "St_1e-3": 2.21
+        },
+        {
+          "z_over_L": 0.204,
+          "q_w_btu_per_s_in2": 0.202,
+          "T_w_R": 872,
+          "T_e_R": 1510,
+          "h_1e-4_btu_per_s_in2_F": 3.15,
+          "rho_e_u_e_lb_per_s_in2": 0.6,
+          "Re_per_in_1e5": 2.78,
+          "St_1e-3": 2.01
+        },
+        {
+          "z_over_L": 0.276,
+          "q_w_btu_per_s_in2": 0.255,
+          "T_w_R": 951,
+          "T_e_R": 1507,
+          "h_1e-4_btu_per_s_in2_F": 4.53,
+          "rho_e_u_e_lb_per_s_in2": 0.779,
+          "Re_per_in_1e5": 3.73,
+          "St_1e-3": 2.23
+        },
+        {
+          "z_over_L": 0.336,
+          "q_w_btu_per_s_in2": 0.254,
+          "T_w_R": 1006,
+          "T_e_R": 1504,
+          "h_1e-4_btu_per_s_in2_F": 5.03,
+          "rho_e_u_e_lb_per_s_in2": 1.04,
+          "Re_per_in_1e5": 4.9,
+          "St_1e-3": 1.87
+        },
+        {
+          "z_over_L": 0.385,
+          "q_w_btu_per_s_in2": 0.303,
+          "T_w_R": 953,
+          "T_e_R": 1498,
+          "h_1e-4_btu_per_s_in2_F": 5.44,
+          "rho_e_u_e_lb_per_s_in2": 1.34,
+          "Re_per_in_1e5": 6.3,
+          "St_1e-3": 1.44
+        },
+        {
+          "z_over_L": 0.429,
+          "q_w_btu_per_s_in2": 0.356,
+          "T_w_R": 1033,
+          "T_e_R": 1486,
+          "h_1e-4_btu_per_s_in2_F": 7.48,
+          "rho_e_u_e_lb_per_s_in2": 1.69,
+          "Re_per_in_1e5": 8.22,
+          "St_1e-3": 1.7
+        },
+        {
+          "z_over_L": 0.469,
+          "q_w_btu_per_s_in2": 0.388,
+          "T_w_R": 1066,
+          "T_e_R": 1456,
+          "h_1e-4_btu_per_s_in2_F": 8.8,
+          "rho_e_u_e_lb_per_s_in2": 2.26,
+          "Re_per_in_1e5": 10.9,
+          "St_1e-3": 1.5
+        },
+        {
+          "z_over_L": 0.512,
+          "q_w_btu_per_s_in2": 0.402,
+          "T_w_R": 1068,
+          "T_e_R": 1406,
+          "h_1e-4_btu_per_s_in2_F": 9.24,
+          "rho_e_u_e_lb_per_s_in2": 2.92,
+          "Re_per_in_1e5": 14.2,
+          "St_1e-3": 1.21
+        },
+        {
+          "z_over_L": 0.541,
+          "q_w_btu_per_s_in2": null,
+          "T_w_R": null,
+          "T_e_R": 1366,
+          "h_1e-4_btu_per_s_in2_F": null,
+          "rho_e_u_e_lb_per_s_in2": 3.17,
+          "Re_per_in_1e5": 16.0,
+          "St_1e-3": null
+        },
+        {
+          "z_over_L": 0.573,
+          "q_w_btu_per_s_in2": 0.427,
+          "T_w_R": 1088,
+          "T_e_R": 1297,
+          "h_1e-4_btu_per_s_in2_F": 10.6,
+          "rho_e_u_e_lb_per_s_in2": 3.32,
+          "Re_per_in_1e5": 17.3,
+          "St_1e-3": 1.24
+        },
+        {
+          "z_over_L": 0.603,
+          "q_w_btu_per_s_in2": 0.35,
+          "T_w_R": 1014,
+          "T_e_R": 1227,
+          "h_1e-4_btu_per_s_in2_F": 7.44,
+          "rho_e_u_e_lb_per_s_in2": 3.28,
+          "Re_per_in_1e5": 17.8,
+          "St_1e-3": 0.887
+        },
+        {
+          "z_over_L": 0.634,
+          "q_w_btu_per_s_in2": 0.365,
+          "T_w_R": 1052,
+          "T_e_R": 1167,
+          "h_1e-4_btu_per_s_in2_F": 8.62,
+          "rho_e_u_e_lb_per_s_in2": 2.59,
+          "Re_per_in_1e5": 15.8,
+          "St_1e-3": 1.32
+        },
+        {
+          "z_over_L": 0.664,
+          "q_w_btu_per_s_in2": 0.357,
+          "T_w_R": 1018,
+          "T_e_R": 1087,
+          "h_1e-4_btu_per_s_in2_F": 7.96,
+          "rho_e_u_e_lb_per_s_in2": 2.48,
+          "Re_per_in_1e5": 15.4,
+          "St_1e-3": 1.29
+        },
+        {
+          "z_over_L": 0.693,
+          "q_w_btu_per_s_in2": 0.288,
+          "T_w_R": 943,
+          "T_e_R": 1012,
+          "h_1e-4_btu_per_s_in2_F": 5.61,
+          "rho_e_u_e_lb_per_s_in2": 2.48,
+          "Re_per_in_1e5": 15.2,
+          "St_1e-3": 0.912
+        },
+        {
+          "z_over_L": 0.717,
+          "q_w_btu_per_s_in2": 0.342,
+          "T_w_R": 989,
+          "T_e_R": 987,
+          "h_1e-4_btu_per_s_in2_F": 7.41,
+          "rho_e_u_e_lb_per_s_in2": 2.39,
+          "Re_per_in_1e5": 14.9,
+          "St_1e-3": 1.26
+        },
+        {
+          "z_over_L": 0.75,
+          "q_w_btu_per_s_in2": 0.354,
+          "T_w_R": 948,
+          "T_e_R": 957,
+          "h_1e-4_btu_per_s_in2_F": 7.14,
+          "rho_e_u_e_lb_per_s_in2": 2.25,
+          "Re_per_in_1e5": 14.5,
+          "St_1e-3": 1.26
+        },
+        {
+          "z_over_L": 0.782,
+          "q_w_btu_per_s_in2": 0.292,
+          "T_w_R": 934,
+          "T_e_R": 928,
+          "h_1e-4_btu_per_s_in2_F": 5.8,
+          "rho_e_u_e_lb_per_s_in2": 2.12,
+          "Re_per_in_1e5": 13.9,
+          "St_1e-3": 1.11
+        },
+        {
+          "z_over_L": 0.825,
+          "q_w_btu_per_s_in2": 0.313,
+          "T_w_R": 923,
+          "T_e_R": 898,
+          "h_1e-4_btu_per_s_in2_F": 6.17,
+          "rho_e_u_e_lb_per_s_in2": 1.95,
+          "Re_per_in_1e5": 13.1,
+          "St_1e-3": 1.29
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.278,
+          "T_w_R": 921,
+          "T_e_R": 863,
+          "h_1e-4_btu_per_s_in2_F": 5.51,
+          "rho_e_u_e_lb_per_s_in2": 1.8,
+          "Re_per_in_1e5": 12.3,
+          "St_1e-3": 1.26
+        },
+        {
+          "z_over_L": 0.864,
+          "q_w_btu_per_s_in2": 0.323,
+          "T_w_R": 900,
+          "T_e_R": 863,
+          "h_1e-4_btu_per_s_in2_F": 6.15,
+          "rho_e_u_e_lb_per_s_in2": 1.8,
+          "Re_per_in_1e5": 12.3,
+          "St_1e-3": 1.4
+        },
+        {
+          "z_over_L": 0.905,
+          "q_w_btu_per_s_in2": 0.245,
+          "T_w_R": 855,
+          "T_e_R": 828,
+          "h_1e-4_btu_per_s_in2_F": 4.34,
+          "rho_e_u_e_lb_per_s_in2": 1.65,
+          "Re_per_in_1e5": 11.6,
+          "St_1e-3": 1.08
+        },
+        {
+          "z_over_L": 0.938,
+          "q_w_btu_per_s_in2": 0.276,
+          "T_w_R": 823,
+          "T_e_R": 803,
+          "h_1e-4_btu_per_s_in2_F": 4.67,
+          "rho_e_u_e_lb_per_s_in2": 1.51,
+          "Re_per_in_1e5": 10.8,
+          "St_1e-3": 1.27
+        }
+      ]
+    },
+    "wall_static_pressure_tables_B2": {
+      "quantity": "p/p_t (duvar statik / durma basıncı)",
+      "note_tr": "B-2 yalnız p_t ≤ 150.6 psia koşumları içerir (manometre sınırı). Rapor: ayrılma dışı bölgede p/p_t dağılımı basınçla ~değişmez; >150 psia için düşük basınç koşumlarının p/p_t'si kullanılmış.",
+      "test_288": [
+        {
+          "tap": 1,
+          "z_over_L": 0.107,
+          "A_over_Astar": 7.001,
+          "p_over_pt": 0.996
+        },
+        {
+          "tap": 2,
+          "z_over_L": 0.222,
+          "A_over_Astar": 4.691,
+          "p_over_pt": 0.991
+        },
+        {
+          "tap": 3,
+          "z_over_L": 0.3396,
+          "A_over_Astar": 2.939,
+          "p_over_pt": 0.976
+        },
+        {
+          "tap": 4,
+          "z_over_L": 0.3401,
+          "A_over_Astar": 2.924,
+          "p_over_pt": 0.976
+        },
+        {
+          "tap": 5,
+          "z_over_L": 0.395,
+          "A_over_Astar": 2.255,
+          "p_over_pt": 0.957
+        },
+        {
+          "tap": 6,
+          "z_over_L": 0.455,
+          "A_over_Astar": 1.631,
+          "p_over_pt": 0.907
+        },
+        {
+          "tap": 7,
+          "z_over_L": 0.46,
+          "A_over_Astar": 1.561,
+          "p_over_pt": 0.899
+        },
+        {
+          "tap": 8,
+          "z_over_L": 0.506,
+          "A_over_Astar": 1.235,
+          "p_over_pt": 0.787
+        },
+        {
+          "tap": 9,
+          "z_over_L": 0.529,
+          "A_over_Astar": 1.135,
+          "p_over_pt": 0.727
+        },
+        {
+          "tap": 10,
+          "z_over_L": 0.554,
+          "A_over_Astar": 1.054,
+          "p_over_pt": 0.643
+        },
+        {
+          "tap": 11,
+          "z_over_L": 0.587,
+          "A_over_Astar": 1.0078,
+          "p_over_pt": 0.503
+        },
+        {
+          "tap": 12,
+          "z_over_L": 0.6018,
+          "A_over_Astar": 1.0012,
+          "p_over_pt": 0.449
+        },
+        {
+          "tap": 13,
+          "z_over_L": 0.642,
+          "A_over_Astar": 1.028,
+          "p_over_pt": 0.337
+        },
+        {
+          "tap": 14,
+          "z_over_L": 0.691,
+          "A_over_Astar": 1.176,
+          "p_over_pt": 0.244,
+          "flow_separation_at_tap": true
+        },
+        {
+          "tap": 15,
+          "z_over_L": 0.706,
+          "A_over_Astar": 1.231,
+          "p_over_pt": 0.374
+        },
+        {
+          "tap": 16,
+          "z_over_L": 0.722,
+          "A_over_Astar": 1.297,
+          "p_over_pt": 0.368
+        },
+        {
+          "tap": 17,
+          "z_over_L": 0.741,
+          "A_over_Astar": 1.372,
+          "p_over_pt": 0.303
+        },
+        {
+          "tap": 18,
+          "z_over_L": 0.753,
+          "A_over_Astar": 1.423,
+          "p_over_pt": 0.405
+        },
+        {
+          "tap": 19,
+          "z_over_L": 0.771,
+          "A_over_Astar": 1.505,
+          "p_over_pt": 0.42
+        },
+        {
+          "tap": 20,
+          "z_over_L": 0.789,
+          "A_over_Astar": 1.582,
+          "p_over_pt": 0.366
+        },
+        {
+          "tap": 21,
+          "z_over_L": 0.802,
+          "A_over_Astar": 1.642,
+          "p_over_pt": 0.423
+        },
+        {
+          "tap": 22,
+          "z_over_L": 0.819,
+          "A_over_Astar": 1.716,
+          "p_over_pt": 0.446
+        },
+        {
+          "tap": 23,
+          "z_over_L": 0.838,
+          "A_over_Astar": 1.815,
+          "p_over_pt": 0.41
+        },
+        {
+          "tap": 24,
+          "z_over_L": 0.852,
+          "A_over_Astar": 1.866,
+          "p_over_pt": 0.443
+        },
+        {
+          "tap": 25,
+          "z_over_L": 0.869,
+          "A_over_Astar": 1.96,
+          "p_over_pt": 0.455
+        },
+        {
+          "tap": 26,
+          "z_over_L": 0.887,
+          "A_over_Astar": 2.049,
+          "p_over_pt": 0.445
+        },
+        {
+          "tap": 27,
+          "z_over_L": 0.9,
+          "A_over_Astar": 2.112,
+          "p_over_pt": 0.448
+        },
+        {
+          "tap": 28,
+          "z_over_L": 0.921,
+          "A_over_Astar": 2.21,
+          "p_over_pt": 0.452
+        },
+        {
+          "tap": 29,
+          "z_over_L": 0.932,
+          "A_over_Astar": 2.283,
+          "p_over_pt": 0.473
+        },
+        {
+          "tap": 30,
+          "z_over_L": 0.949,
+          "A_over_Astar": 2.379,
+          "p_over_pt": 0.452
+        },
+        {
+          "tap": 31,
+          "z_over_L": 0.965,
+          "A_over_Astar": 2.471,
+          "p_over_pt": 0.453
+        },
+        {
+          "tap": 32,
+          "z_over_L": 0.985,
+          "A_over_Astar": 2.574,
+          "p_over_pt": 0.448
+        }
+      ],
+      "test_266": [
+        {
+          "tap": 1,
+          "z_over_L": 0.107,
+          "A_over_Astar": 7.001,
+          "p_over_pt": 0.996
+        },
+        {
+          "tap": 2,
+          "z_over_L": 0.222,
+          "A_over_Astar": 4.691,
+          "p_over_pt": 0.991
+        },
+        {
+          "tap": 3,
+          "z_over_L": 0.3396,
+          "A_over_Astar": 2.939,
+          "p_over_pt": 0.976
+        },
+        {
+          "tap": 4,
+          "z_over_L": 0.3401,
+          "A_over_Astar": 2.924,
+          "p_over_pt": 0.976
+        },
+        {
+          "tap": 5,
+          "z_over_L": 0.395,
+          "A_over_Astar": 2.255,
+          "p_over_pt": 0.958
+        },
+        {
+          "tap": 6,
+          "z_over_L": 0.455,
+          "A_over_Astar": 1.631,
+          "p_over_pt": 0.907
+        },
+        {
+          "tap": 7,
+          "z_over_L": 0.46,
+          "A_over_Astar": 1.561,
+          "p_over_pt": 0.899
+        },
+        {
+          "tap": 8,
+          "z_over_L": 0.506,
+          "A_over_Astar": 1.235,
+          "p_over_pt": 0.791
+        },
+        {
+          "tap": 9,
+          "z_over_L": 0.529,
+          "A_over_Astar": 1.135,
+          "p_over_pt": 0.731
+        },
+        {
+          "tap": 10,
+          "z_over_L": 0.554,
+          "A_over_Astar": 1.054,
+          "p_over_pt": 0.65
+        },
+        {
+          "tap": 11,
+          "z_over_L": 0.587,
+          "A_over_Astar": 1.0078,
+          "p_over_pt": 0.508
+        },
+        {
+          "tap": 12,
+          "z_over_L": 0.6018,
+          "A_over_Astar": 1.0012,
+          "p_over_pt": 0.454
+        },
+        {
+          "tap": 13,
+          "z_over_L": 0.642,
+          "A_over_Astar": 1.028,
+          "p_over_pt": 0.344
+        },
+        {
+          "tap": 14,
+          "z_over_L": 0.691,
+          "A_over_Astar": 1.176,
+          "p_over_pt": 0.204
+        },
+        {
+          "tap": 15,
+          "z_over_L": 0.706,
+          "A_over_Astar": 1.231,
+          "p_over_pt": 0.196
+        },
+        {
+          "tap": 16,
+          "z_over_L": 0.722,
+          "A_over_Astar": 1.297,
+          "p_over_pt": 0.186
+        },
+        {
+          "tap": 17,
+          "z_over_L": 0.741,
+          "A_over_Astar": 1.372,
+          "p_over_pt": 0.173
+        },
+        {
+          "tap": 18,
+          "z_over_L": 0.753,
+          "A_over_Astar": 1.423,
+          "p_over_pt": 0.164
+        },
+        {
+          "tap": 19,
+          "z_over_L": 0.771,
+          "A_over_Astar": 1.505,
+          "p_over_pt": 0.158
+        },
+        {
+          "tap": 20,
+          "z_over_L": 0.789,
+          "A_over_Astar": 1.582,
+          "p_over_pt": 0.142
+        },
+        {
+          "tap": 21,
+          "z_over_L": 0.802,
+          "A_over_Astar": 1.642,
+          "p_over_pt": 0.218,
+          "flow_separation_at_tap": true
+        },
+        {
+          "tap": 22,
+          "z_over_L": 0.819,
+          "A_over_Astar": 1.716,
+          "p_over_pt": 0.28
+        },
+        {
+          "tap": 23,
+          "z_over_L": 0.838,
+          "A_over_Astar": 1.815,
+          "p_over_pt": 0.293
+        },
+        {
+          "tap": 24,
+          "z_over_L": 0.852,
+          "A_over_Astar": 1.866,
+          "p_over_pt": 0.291
+        },
+        {
+          "tap": 25,
+          "z_over_L": 0.869,
+          "A_over_Astar": 1.96,
+          "p_over_pt": 0.296
+        },
+        {
+          "tap": 26,
+          "z_over_L": 0.887,
+          "A_over_Astar": 2.049,
+          "p_over_pt": 0.299
+        },
+        {
+          "tap": 27,
+          "z_over_L": 0.9,
+          "A_over_Astar": 2.112,
+          "p_over_pt": 0.298
+        },
+        {
+          "tap": 28,
+          "z_over_L": 0.921,
+          "A_over_Astar": 2.21,
+          "p_over_pt": 0.3
+        },
+        {
+          "tap": 29,
+          "z_over_L": 0.932,
+          "A_over_Astar": 2.283,
+          "p_over_pt": 0.296
+        },
+        {
+          "tap": 30,
+          "z_over_L": 0.949,
+          "A_over_Astar": 2.379,
+          "p_over_pt": 0.309
+        },
+        {
+          "tap": 31,
+          "z_over_L": 0.965,
+          "A_over_Astar": 2.471,
+          "p_over_pt": 0.302
+        },
+        {
+          "tap": 32,
+          "z_over_L": 0.985,
+          "A_over_Astar": 2.574,
+          "p_over_pt": 0.304
+        }
+      ],
+      "test_262": [
+        {
+          "tap": 1,
+          "z_over_L": 0.107,
+          "A_over_Astar": 7.001,
+          "p_over_pt": 0.996
+        },
+        {
+          "tap": 2,
+          "z_over_L": 0.222,
+          "A_over_Astar": 4.691,
+          "p_over_pt": 0.991
+        },
+        {
+          "tap": 3,
+          "z_over_L": 0.3396,
+          "A_over_Astar": 2.939,
+          "p_over_pt": 0.977
+        },
+        {
+          "tap": 4,
+          "z_over_L": 0.3401,
+          "A_over_Astar": 2.924,
+          "p_over_pt": 0.977
+        },
+        {
+          "tap": 5,
+          "z_over_L": 0.395,
+          "A_over_Astar": 2.255,
+          "p_over_pt": 0.958
+        },
+        {
+          "tap": 6,
+          "z_over_L": 0.455,
+          "A_over_Astar": 1.631,
+          "p_over_pt": 0.91
+        },
+        {
+          "tap": 7,
+          "z_over_L": 0.46,
+          "A_over_Astar": 1.561,
+          "p_over_pt": 0.901
+        },
+        {
+          "tap": 8,
+          "z_over_L": 0.506,
+          "A_over_Astar": 1.235,
+          "p_over_pt": 0.789
+        },
+        {
+          "tap": 9,
+          "z_over_L": 0.529,
+          "A_over_Astar": 1.135,
+          "p_over_pt": 0.731
+        },
+        {
+          "tap": 10,
+          "z_over_L": 0.554,
+          "A_over_Astar": 1.054,
+          "p_over_pt": 0.638
+        },
+        {
+          "tap": 11,
+          "z_over_L": 0.587,
+          "A_over_Astar": 1.0078,
+          "p_over_pt": 0.508
+        },
+        {
+          "tap": 12,
+          "z_over_L": 0.6018,
+          "A_over_Astar": 1.0012,
+          "p_over_pt": 0.466
+        },
+        {
+          "tap": 13,
+          "z_over_L": 0.642,
+          "A_over_Astar": 1.028,
+          "p_over_pt": 0.345
+        },
+        {
+          "tap": 14,
+          "z_over_L": 0.691,
+          "A_over_Astar": 1.176,
+          "p_over_pt": 0.211
+        },
+        {
+          "tap": 15,
+          "z_over_L": 0.706,
+          "A_over_Astar": 1.231,
+          "p_over_pt": 0.203
+        },
+        {
+          "tap": 16,
+          "z_over_L": 0.722,
+          "A_over_Astar": 1.297,
+          "p_over_pt": 0.194
+        },
+        {
+          "tap": 17,
+          "z_over_L": 0.741,
+          "A_over_Astar": 1.372,
+          "p_over_pt": 0.18
+        },
+        {
+          "tap": 18,
+          "z_over_L": 0.753,
+          "A_over_Astar": 1.423,
+          "p_over_pt": 0.171
+        },
+        {
+          "tap": 19,
+          "z_over_L": 0.771,
+          "A_over_Astar": 1.505,
+          "p_over_pt": null
+        },
+        {
+          "tap": 20,
+          "z_over_L": 0.789,
+          "A_over_Astar": 1.582,
+          "p_over_pt": 0.148
+        },
+        {
+          "tap": 21,
+          "z_over_L": 0.802,
+          "A_over_Astar": 1.642,
+          "p_over_pt": 0.14
+        },
+        {
+          "tap": 22,
+          "z_over_L": 0.819,
+          "A_over_Astar": 1.716,
+          "p_over_pt": 0.133
+        },
+        {
+          "tap": 23,
+          "z_over_L": 0.838,
+          "A_over_Astar": 1.815,
+          "p_over_pt": 0.129
+        },
+        {
+          "tap": 24,
+          "z_over_L": 0.852,
+          "A_over_Astar": 1.866,
+          "p_over_pt": 0.12
+        },
+        {
+          "tap": 25,
+          "z_over_L": 0.869,
+          "A_over_Astar": 1.96,
+          "p_over_pt": 0.111
+        },
+        {
+          "tap": 26,
+          "z_over_L": 0.887,
+          "A_over_Astar": 2.049,
+          "p_over_pt": 0.105
+        },
+        {
+          "tap": 27,
+          "z_over_L": 0.9,
+          "A_over_Astar": 2.112,
+          "p_over_pt": 0.099
+        },
+        {
+          "tap": 28,
+          "z_over_L": 0.921,
+          "A_over_Astar": 2.21,
+          "p_over_pt": 0.092
+        },
+        {
+          "tap": 29,
+          "z_over_L": 0.932,
+          "A_over_Astar": 2.283,
+          "p_over_pt": 0.089
+        },
+        {
+          "tap": 30,
+          "z_over_L": 0.949,
+          "A_over_Astar": 2.379,
+          "p_over_pt": 0.178,
+          "flow_separation_at_tap": true
+        },
+        {
+          "tap": 31,
+          "z_over_L": 0.965,
+          "A_over_Astar": 2.471,
+          "p_over_pt": 0.166
+        },
+        {
+          "tap": 32,
+          "z_over_L": 0.985,
+          "A_over_Astar": 2.574,
+          "p_over_pt": 0.179
+        }
+      ],
+      "test_268": [
+        {
+          "tap": 1,
+          "z_over_L": 0.107,
+          "A_over_Astar": 7.001,
+          "p_over_pt": 0.997
+        },
+        {
+          "tap": 2,
+          "z_over_L": 0.222,
+          "A_over_Astar": 4.691,
+          "p_over_pt": 0.991
+        },
+        {
+          "tap": 3,
+          "z_over_L": 0.3396,
+          "A_over_Astar": 2.939,
+          "p_over_pt": 0.977
+        },
+        {
+          "tap": 4,
+          "z_over_L": 0.3401,
+          "A_over_Astar": 2.924,
+          "p_over_pt": 0.977
+        },
+        {
+          "tap": 5,
+          "z_over_L": 0.395,
+          "A_over_Astar": 2.255,
+          "p_over_pt": 0.958
+        },
+        {
+          "tap": 6,
+          "z_over_L": 0.455,
+          "A_over_Astar": 1.631,
+          "p_over_pt": 0.908
+        },
+        {
+          "tap": 7,
+          "z_over_L": 0.46,
+          "A_over_Astar": 1.561,
+          "p_over_pt": 0.9
+        },
+        {
+          "tap": 8,
+          "z_over_L": 0.506,
+          "A_over_Astar": 1.235,
+          "p_over_pt": 0.788
+        },
+        {
+          "tap": 9,
+          "z_over_L": 0.529,
+          "A_over_Astar": 1.135,
+          "p_over_pt": 0.728
+        },
+        {
+          "tap": 10,
+          "z_over_L": 0.554,
+          "A_over_Astar": 1.054,
+          "p_over_pt": 0.647
+        },
+        {
+          "tap": 11,
+          "z_over_L": 0.587,
+          "A_over_Astar": 1.0078,
+          "p_over_pt": 0.505
+        },
+        {
+          "tap": 12,
+          "z_over_L": 0.6018,
+          "A_over_Astar": 1.0012,
+          "p_over_pt": 0.461
+        },
+        {
+          "tap": 13,
+          "z_over_L": 0.642,
+          "A_over_Astar": 1.028,
+          "p_over_pt": 0.323
+        },
+        {
+          "tap": 14,
+          "z_over_L": 0.691,
+          "A_over_Astar": 1.176,
+          "p_over_pt": 0.207
+        },
+        {
+          "tap": 15,
+          "z_over_L": 0.706,
+          "A_over_Astar": 1.231,
+          "p_over_pt": 0.199
+        },
+        {
+          "tap": 16,
+          "z_over_L": 0.722,
+          "A_over_Astar": 1.297,
+          "p_over_pt": 0.19
+        },
+        {
+          "tap": 17,
+          "z_over_L": 0.741,
+          "A_over_Astar": 1.372,
+          "p_over_pt": 0.176
+        },
+        {
+          "tap": 18,
+          "z_over_L": 0.753,
+          "A_over_Astar": 1.423,
+          "p_over_pt": 0.167
+        },
+        {
+          "tap": 19,
+          "z_over_L": 0.771,
+          "A_over_Astar": 1.505,
+          "p_over_pt": 0.159
+        },
+        {
+          "tap": 20,
+          "z_over_L": 0.789,
+          "A_over_Astar": 1.582,
+          "p_over_pt": 0.145
+        },
+        {
+          "tap": 21,
+          "z_over_L": 0.802,
+          "A_over_Astar": 1.642,
+          "p_over_pt": 0.132
+        },
+        {
+          "tap": 22,
+          "z_over_L": 0.819,
+          "A_over_Astar": 1.716,
+          "p_over_pt": 0.128
+        },
+        {
+          "tap": 23,
+          "z_over_L": 0.838,
+          "A_over_Astar": 1.815,
+          "p_over_pt": 0.124
+        },
+        {
+          "tap": 24,
+          "z_over_L": 0.852,
+          "A_over_Astar": 1.866,
+          "p_over_pt": 0.116
+        },
+        {
+          "tap": 25,
+          "z_over_L": 0.869,
+          "A_over_Astar": 1.96,
+          "p_over_pt": 0.108
+        },
+        {
+          "tap": 26,
+          "z_over_L": 0.887,
+          "A_over_Astar": 2.049,
+          "p_over_pt": 0.101
+        },
+        {
+          "tap": 27,
+          "z_over_L": 0.9,
+          "A_over_Astar": 2.112,
+          "p_over_pt": 0.095
+        },
+        {
+          "tap": 28,
+          "z_over_L": 0.921,
+          "A_over_Astar": 2.21,
+          "p_over_pt": 0.088
+        },
+        {
+          "tap": 29,
+          "z_over_L": 0.932,
+          "A_over_Astar": 2.283,
+          "p_over_pt": 0.083
+        },
+        {
+          "tap": 30,
+          "z_over_L": 0.949,
+          "A_over_Astar": 2.379,
+          "p_over_pt": null
+        },
+        {
+          "tap": 31,
+          "z_over_L": 0.965,
+          "A_over_Astar": 2.471,
+          "p_over_pt": 0.074
+        },
+        {
+          "tap": 32,
+          "z_over_L": 0.985,
+          "A_over_Astar": 2.574,
+          "p_over_pt": 0.069
+        }
+      ]
+    },
+    "qualitative_findings_tr": [
+      "h en büyük değerini boğazın YUKARISINDA alır (kütle akısı maksimumu z/L≈0.58'de; ses çizgisi geometrik boğazın yukarısında).",
+      "p_t < ~75 psia'da h, türbülanslı sınır tabaka beklentisinin ALTINA düşer (kısmi laminerleşme) — giriş profili türbülanslı OLSA BİLE.",
+      "Boğaz civarında yerel kütle akısı 1B izantropik tahminden %15'e varan sapma gösterir (Şekil 7); boğaz hemen sonrası duvar basıncı 1B'den %30'a kadar sapar.",
+      "En ince giriş sınır tabakası (l=0, delta/R≈0.05) h'yi en kalına (l=18, delta/R≈0.25) göre ~%10 yükseltir.",
+      "Düşük basınçlarda ıraksak kesitte akış AYRILIR; ayrılma sonrası h belirgin düşer."
+    ]
+  },
+  "definitions": {
+    "q_w": "k·(T_a − T_b)/(r_a·ln(r_b/r_a)) — tapa içi iki ısıl çift arasında radyal iletim (Denk. 1); merkez + gaz tarafı çifti kullanılmış",
+    "h": "q_w/(T_aw − T_w) (Denk. 2). T_aw ADYABATİK DUVAR sıcaklığı — kurtarma çarpanı r = Pr^(1/3) (durma sıcaklığında değerlendirilen Pr ile): T_aw/T_t = (1 + Pr^(1/3)·(γ−1)/2·M²)/(1 + (γ−1)/2·M²). M, ÖLÇÜLEN p/p_t'den izantropik bağıntıyla.",
+    "h_in_separated_region": "AYRILMA bölgesinde h = q_w/(T_t0 − T_w) (T_aw bilinmediği için) — Şekil 11/15'in 45 psia eğrilerinde geçerli; B-3 tabloları ayrılma bölgesinde yalnız q_w ve T_w verir.",
+    "St": "h/(ρ_e·u_e·c_p_e) — özellikler sınır tabaka KENARINDAKİ STATİK sıcaklıkta (T_e); ρ_e·u_e ölçülen p/p_t'den",
+    "Re_per_in": "(ρ_e·u_e)/μ_e — birim uzunluk başına; Şekil 12'deki Re_D bunun yerel çap D ile çarpımı",
+    "T_e": "sınır tabaka kenarı STATİK sıcaklık (izantropik, γ = sabit, ölçülen p/p_t'den)",
+    "z_over_L": "z lüle girişinden eksenel uzaklık; L = 5.925 in"
+  },
+  "uncertainty": {
+    "published_max_error_h_pct": 8.0,
+    "published_max_error_h_condition_tr": "boğaz bölgesi, yüksek p_t ve T_t0 — bileşenler: ±%1 ısıl çift konumu (Kelvin köprüsü), ±%1.5 duvar içi sıcaklık ölçümü, ±%5 durma−duvar sıcaklık farkı, ±%0.5 çeşitli (Ek A sonu, rapor s.28)",
+    "published_max_error_h_worst_pct": 21.0,
+    "published_max_error_h_worst_condition_tr": "düşük p_t ve T_t0, lüle girişi civarı (komşu ısıl çift farkları en küçükken); rapor bunların MAKSİMUM hatalar olduğunu, gerçek doğruluğun muhtemelen çok daha iyi olduğunu söyler",
+    "reproducibility_pct": 2.0,
+    "reproducibility_note_tr": "testlerin çoğu yinelendi, ±%2 içinde tekrarlanabilir bulundu; 254 psia çifti (275/278) tablolarda İKİSİ BİRDEN verilmiştir",
+    "circumferential_variation_note_tr": "aynı z/L'de 55° içinde konumlanmış tapalar arasında çevresel h farkları gözlendi (Şekil 11'de aynı imle işaretli çiftler; z/L=0.864'te iki tapa)",
+    "wall_heat_flux_method_note_tr": "merkez+gaz tarafı çiftiyle hesaplanan toplam ısı yükü soğutucu kalorimetrisiyle %5 içinde; merkez+gaz çifti yerine merkez+su tarafı kullanılırsa q_w ort. ~%10 yüksek çıkıyordu (rapor, Bölüm III)"
+  },
+  "consistency_checks": {
+    "_status": "DERIVED_BY_US_NOT_PUBLISHED",
+    "note_tr": "Aşağıdakiler bizim sağlamalarımızdır (p39 A2); selfcheck.py bunların bir kısmını her koşuda yeniden türetir.",
+    "throat_radius_from_area": {
+      "r_star_in_from_Astar": 0.90129,
+      "r_star_in_from_Dstar": 0.9015,
+      "deviation_pct": 0.023
+    },
+    "choked_mass_flow": {
+      "method_tr": "mdot_1B = A*·p_t·sqrt(γ/(R_hava·T_t))·(2/(γ+1))^((γ+1)/(2(γ−1))); γ raporun kendi değerleri; R=287.05 J/kgK; Cd = mdot_tablo/mdot_1B",
+      "Cd_by_test": {
+        "288": 0.974,
+        "266": 1.006,
+        "262": 0.99,
+        "268": 0.986,
+        "278": 1.003,
+        "275": 1.05
+      },
+      "anomaly_tr": "Test 275 başlığındaki mdot = 9.165 lb/s boğulmuş-debi üst sınırını %5 AŞIYOR (Cd>1 fiziksel değil). Yinelemesi test 278 (250.7 psia, mdot=8.641) Cd=1.003 ile tutarlı; 275 ile 278'in istasyon verileri (h, St) birkaç yüzde içinde aynı. Hüküm: 275'in mdot SATIRI şüpheli (olası dizgi hatası); istasyon verileri sağlam. CFD debi çaprazında 278'in mdot'u kullanılmalı."
+    },
+    "h_equals_qw_over_Taw_minus_Tw": {
+      "method_tr": "test 262, M ölçülen p/p_t'den (en yakın B-2 tapı), γ=1.345, r=Pr^(1/3), Pr=0.689",
+      "stations": [
+        {
+          "z_over_L": 0.133,
+          "M": 0.077,
+          "T_aw_R": 1518,
+          "h_recomputed_1e-4": 0.988,
+          "h_table_1e-4": 0.989,
+          "deviation_pct": -0.1
+        },
+        {
+          "z_over_L": 0.512,
+          "M": 0.603,
+          "T_aw_R": 1508,
+          "h_recomputed_1e-4": 3.214,
+          "h_table_1e-4": 3.21,
+          "deviation_pct": 0.1
+        },
+        {
+          "z_over_L": 0.825,
+          "M": 1.982,
+          "T_aw_R": 1446,
+          "h_recomputed_1e-4": 1.94,
+          "h_table_1e-4": 1.98,
+          "deviation_pct": -2.0
+        },
+        {
+          "z_over_L": 0.905,
+          "M": 2.212,
+          "T_aw_R": 1437,
+          "h_recomputed_1e-4": 1.59,
+          "h_table_1e-4": 1.61,
+          "deviation_pct": -1.3
+        }
+      ],
+      "note_tr": "ses üstü istasyonlardaki %1-2 sapma, istasyon ile en yakın basınç tapının z/L farkından"
+    },
+    "St_equals_h_over_rhoue_cp": {
+      "method_tr": "test 262'nin 19 tam istasyonunda St ile h/(ρ_e·u_e·c_p(T_e)) karşılaştırıldı; c_p bizim hava tablomuzdan (Keenan-Kaye DEĞİL)",
+      "mean_deviation_pct": -0.5,
+      "min_deviation_pct": -4.3,
+      "max_deviation_pct": 5.6,
+      "note_tr": "sapma bandı c_p kaynağı farkıyla uyumlu; sistematik hata yok"
+    },
+    "mass_flux_vs_1d": {
+      "method_tr": "test 262: tablo ρ_e·u_e / (mdot/(A/A*·A*)); A/A* tapa (plug) tablosundan (3 anlamlı hane)",
+      "ratios": {
+        "z0.133": 0.867,
+        "z0.336": 0.907,
+        "z0.512": 1.056,
+        "z0.603": 0.966,
+        "z0.634": 0.789,
+        "z0.825": 1.0,
+        "z0.905": 1.038
+      },
+      "note_tr": "giriş tarafında <1 (kalın sınır tabaka + 2B etki), boğaz hemen sonrası 0.79 — raporun 'boğaz sonrası 1B'den ~%15 düşük' bulgusuyla aynı olgu (bizim 0.634 istasyonundaki %21, tapa A/A* yuvarlamasını (±%1) ve tam konumu içerir); ses üstü aşağı akışta 1'e döner"
+    },
+    "area_mach_vs_measured_p": {
+      "method_tr": "boğaz tapında (z/L=0.6018, A/A*=1.0012) ölçülen p/p_t = 0.449-0.466; 1B izantropik boğaz değeri (γ=1.345) 0.5354",
+      "note_tr": "fark FİZİKSELDİR: ses çizgisi geometrik boğazın yukarısında (kütle akısı maksimumu z/L≈0.58) — 1B doğrulama boğaz civarında bu sapmayı BEKLEMELİDİR"
+    },
+    "known_source_typo_candidates": [
+      {
+        "location": "test_268, z/L=0.938, rho_e_u_e_lb_per_s_in2",
+        "printed_value": 0.982,
+        "inferred_value": 0.882,
+        "evidence_tr": "Basılı 0.982 ile satır İÇ tutarsız: (a) kütle akısı genişleyen kesitte 0.958'den YÜKSELEMEZ; (b) Re/in 6.83→6.31 düşerken ρu artışı, T_e düşerken μ'nin %11 artmasını gerektirir — fiziksel değil; (c) 0.882 alınırsa ρu oranı (0.921) Re/in oranını (0.924) μ(T) ile tutarlı biçimde üretir; (d) St=1.18e-3 ancak 0.882 ile hava cp bandına oturur. Tabloda BASILI değer tutuldu (uydurma sıfır tolerans); CFD kıyasında bu hücre için 0.882 kullanılmalı ve bu not anılmalıdır. Sayfa görüntüsü iki büyütmede yeniden okundu — dizgi 0.982."
+      }
+    ]
+  },
+  "units": "psia, °R, in, lb/s, BTU/(s·in²), BTU/(s·in²·°F) — raporun orijinal birimleri; SI dönüşümü kayıtta YAPILMADI (dönüşüm çarpanları: 1 psia = 6894.757 Pa; T[K] = T[°R]/1.8; 1 in = 25.4 mm; 1 lb/s = 0.45359237 kg/s; 1 BTU/(s·in²) = 1.634246e6 W/m²; 1 BTU/(s·in²·°F) = 2.941611e6 W/(m²·K))",
+  "extraction_method_tr": "PDF taraması sayfa sayfa 300 dpi'ye rasterleştirilip GÖRÜNTÜDEN gözle okundu (pymupdf + kırpma); OCR metin katmanı yalnız sayfa BULMAK için kullanıldı, sayı okumada kullanılmadı. B-2'nin dört kolonu ve B-1 iki ayrı çözünürlükte iki kez okunup karşılaştırıldı. 44 testin 6'sı tam çıkarıldı; kalan 38 test kaynakta mevcut (Tablo B-1 listesi bu kayıtta) — ileride gerekirse aynı yöntemle çıkarılabilir.",
+  "source": {
+    "title": "Convective Heat Transfer in a Convergent-Divergent Nozzle (Revision No. 1), JPL Technical Report No. 32-415",
+    "author": "L. H. Back, P. F. Massier, H. L. Gier (Jet Propulsion Laboratory, CIT)",
+    "year": 1965,
+    "url_or_doi": "https://ntrs.nasa.gov/api/citations/19650010083/downloads/19650010083.pdf",
+    "ntrs_id": "19650010083",
+    "ntrs_distribution": "PUBLIC",
+    "sha256": "bf8d2961b2aecc53f08920e86a5b7dfc2d7efbde19d26599693fd48fffc6a198",
+    "size_bytes": 7620243
+  },
+  "secondary_source": {
+    "title": "Convective heat transfer in a convergent-divergent nozzle",
+    "author": "L. H. Back, P. F. Massier, H. L. Gier",
+    "year": 1964,
+    "url_or_doi": "Int. J. Heat Mass Transfer 7(5), 549-568; doi:10.1016/0017-9310(64)90052-3",
+    "note_tr": "dergi sürümü — tablolu Ek B YALNIZ TR 32-415'te; NTRS 19650026963 (sha256 46c0b115a679554ea7a6a1805a8dd188bdce27e6e85e434be946bdcfffe266cb, 1600162 bayt) dergi makalesinin daktilo taslağıdır, veri eki içermez"
+  },
+  "retrieved": "2026-08-18",
+  "confidence": "high",
+  "verification_note_tr": "Sayılar tablo GÖRÜNTÜLERİNDEN okundu; şekillerden EĞRİ OKUMA yapılmadı (tek istisna yok — geometri etiketleri r_i, r_c, r* şekil ÜZERİNDEKİ BASILI ETİKETLERDİR, eğri okuması değildir). Bilinen kaynak tuhaflıkları: (1) test 275'in mdot'u boğulmuş debiyle çelişir (bkz. consistency_checks) — 278 kullanılmalı; (2) z/L=0.864'te aynı ρ_e·u_e için iki farklı Re/in basılmıştır (262: 3.63/3.75; kaynakta böyle); (3) daralma oranı 7.75 ile R=2.53 çelişkisi geometry_inconsistency_note_tr'de; (4) Şekil 11 lejantındaki T_t0 değerleri B-1'den yer yer farklıdır (ör. test 303: şekilde 1039, B-1'de 1024) — TABLO esas alındı. CFD karşılaştırma kuralı: HRMA h'si bu kayıtla karşılaştırılırken h TANIMI AYNEN kurulmalı (T_aw, r=Pr^(1/3)); T_w sınır koşulu olarak B-3'ün ölçülen T_w dağılımı verilmelidir (duvar izotermal DEĞİL).",
+  "tags": [
+    "cfd_anchor",
+    "viscous",
+    "heat_transfer",
+    "nozzle",
+    "turbulent",
+    "laminarization",
+    "separation",
+    "primary_source",
+    "hand_extracted"
+  ]
+}

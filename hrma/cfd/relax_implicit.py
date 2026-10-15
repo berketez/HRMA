@@ -71,6 +71,38 @@ TOPLU ÇAĞRI SÖZLEŞMESİ: tüm i-kolonları solve_block_tridiag'a TEK çağr�
 verilir (implicit.py ÖLÇÜMÜ: kolon başına ~10-20× ucuz). Kolon-kolon
 döngü YASAK değil ama ölçülen israftır (mutasyon kanıtı testte).
 
+VİSKOZ KISIM — TAM BLOK (V1, belge §5.6: "viskoz kısmı: tam; yüksek AR'de
+baskın terim odur, yaklaşıklık burada pahalıya patlar")
+-----------------------------------------------------------------------
+j-yüzlerinin viskoz akı Jacobian'ı 4×4 blok olarak kurulur ve taşınım
+bloklarının ÜSTÜNE eklenir (``viscous_jacobian_blocks`` + ``line_implicit_
+delta(viscous_blocks=...)``). Kuruluş ve BEYANLI yaklaşıklıklar:
+
+- Yüz normal türevi ince-tabaka (thin-layer) biçiminde alınır:
+  (τ·n̂)_i = μ[∂u_i/∂n + (1/3) n_i ∂u_n/∂n], enerji satırı (τ·n̂)·ū + k ∂T/∂n
+  (Blazek 3. baskı §6.2.3; Pulliam & Chaussee'nin ince-tabaka Jacobian'ı).
+  Kalıntının KENDİSİ tam gerilme tensörünü kullanır (viscous.py, §5.3):
+  buradaki ince-tabaka biçimi YALNIZ sol taraftadır ve hüküm-nötrlük
+  sözleşmesi gereği meşrudur — kök kalıntının sıfırıyla tanımlıdır.
+  İhmal edilenin büyüklüğü VARSAYILMAZ, ÖLÇÜLÜR: sonlu-fark çaprazı
+  tests/cfd/test_viskoz_entegrasyon.py'de (bant ölçümden yazılıdır).
+- Normal türev ayrıklaştırması (q_R − q_L)/d, d = merkez-merkez
+  vektörünün NORMAL izdüşümü (duvarda merkez→yüz izdüşümü).
+- μ ve k yüzde iki hücrenin aritmetik ortalamasından (kalıntı yüz
+  SICAKLIĞINDAN hesaplar; fark Jacobian'da iz bırakmaz — yine ölçülü).
+- μ_t KANCASI (V3): SA açıkken iç j-yüzlerinde μ_eff = μ + μ_t ve
+  k_eff = cp(μ/Pr + μ_t/Pr_t) (viscous.py'nin kalıntı sözleşmesiyle aynı
+  yüz kuralı; duvar yüzü laminer kalır — ν̃_w = 0). mu_t=None (laminer)
+  yol bit-özdeştir.
+- Duvar yüzü: no-slip Dirichlet (u_yüz = 0) → blok yalnız KÖŞEGENE girer
+  ve yüksek AR'de baskın terimdir. Isıl kip 'adiabatic' ise sıcaklık
+  sütunu SIFIRDIR (∂q_w/∂U ≡ 0; q_w sınır koşuluyla tam sıfırdır).
+- Eksen yüzü: dönel alan geometrik olarak sıfır → terim kurulmaz.
+- i-yüzlerinin viskoz katkısı bu sistemde YOKTUR (üç-köşegen yapı i
+  bağlaşımını taşımaz); zaman adımı onu Δt üstünden taşır (steady.py
+  viskoz Δt'sinin i payı). Yüksek AR'de i-viskoz terimi j'ninkinin
+  (Δr/Δz)² katı küçüktür — bu oran koşum beyanında ÖLÇÜLÜ görünür.
+
 numba YOK (bu parti): saf NumPy — belgenin ölç-sonra-hızlandır ilkesi
 (§5.9); süreler V0 raporunda ölçüldü.
 """
@@ -78,11 +110,20 @@ numba YOK (bu parti): saf NumPy — belgenin ölç-sonra-hızlandır ilkesi
 import numpy as np
 
 from hrma.cfd.euler_core import cons_to_prim_axisym
+from hrma.cfd.gas_transport import effective_conductivity
 from hrma.cfd.implicit import solve_block_tridiag
 
-__all__ = ['convective_jacobian', 'line_implicit_delta', 'local_dt_axial']
+__all__ = ['convective_jacobian', 'line_implicit_delta', 'local_dt_axial',
+           'viscous_jacobian_blocks']
 
 _EYE4 = np.eye(4)
+
+#: İnce-tabaka gerilmesindeki hacimsel pay: (τ·n̂)_i = μ[∂u_i/∂n +
+#: STOKES_NORMAL_COEFF·n_i·∂u_n/∂n]. 1/3 = 1 − 2/3 (Stokes hipotezinin
+#: viscous_tensor.STOKES_BULK_COEFF'i ile aynı kökten; oradaki 2/3
+#: kalıntının tam tensöründe, buradaki 1/3 ince-tabaka indirgemesinde
+#: görünür — türetim modül docstring'inde).
+_THIN_LAYER_NORMAL_COEFF = 1.0 / 3.0
 
 
 def local_dt_axial(U, grid, gamma, cfl, area_i):
@@ -165,7 +206,182 @@ def convective_jacobian(w, n_hat, gamma):
     return A
 
 
-def line_implicit_delta(U, dudt, grid, geom, gamma, dt):
+def _primitive_transform(w, gamma, R):
+    """∂(u_z, u_r, T)/∂U dönüşümü, (..., 3, 4) — TAM (yaklaşıklık yok).
+
+    U = [ρ, ρu_z, ρu_r, E], p = (γ−1)(E − ρ(u_z²+u_r²)/2), T = p/(ρR).
+    Satırlar u_z, u_r, T; sütunlar U bileşenleri.
+    """
+    g1 = float(gamma) - 1.0
+    R = float(R)
+    rho, uz, ur, p = w[..., 0], w[..., 1], w[..., 2], w[..., 3]
+    inv_rho = 1.0 / rho
+    inv_rho_R = inv_rho / R
+    temp = p * inv_rho_R
+    ke = 0.5 * (uz * uz + ur * ur)
+    out = np.zeros(w.shape[:-1] + (3, 4))
+    out[..., 0, 0] = -uz * inv_rho
+    out[..., 0, 1] = inv_rho
+    out[..., 1, 0] = -ur * inv_rho
+    out[..., 1, 2] = inv_rho
+    out[..., 2, 0] = (g1 * ke / R - temp) * inv_rho
+    out[..., 2, 1] = -g1 * uz * inv_rho_R
+    out[..., 2, 2] = -g1 * ur * inv_rho_R
+    out[..., 2, 3] = g1 * inv_rho_R
+    return out
+
+
+def _thin_layer_matrix(n_hat, mu, k, uz_face, ur_face):
+    """İnce-tabaka viskoz akı katsayı matrisi G, (..., 4, 3).
+
+    Sütunlar (∂u_z/∂n, ∂u_r/∂n, ∂T/∂n) çarpanlarıdır, satırlar korunum
+    denklemleri; kütle satırı ÖZDEŞ SIFIRDIR (viskoz akı kütleye girmez —
+    viscous.py ile aynı sözleşme).
+
+        (τ·n̂)_z = μ[∂u_z/∂n + c·n_z·(n_z ∂u_z/∂n + n_r ∂u_r/∂n)]
+        (τ·n̂)_r = μ[∂u_r/∂n + c·n_r·(n_z ∂u_z/∂n + n_r ∂u_r/∂n)]
+        f_E     = (τ·n̂)·ū + k ∂T/∂n            (c = _THIN_LAYER_NORMAL_COEFF)
+    """
+    nz, nr = n_hat[..., 0], n_hat[..., 1]
+    c = _THIN_LAYER_NORMAL_COEFF
+    g_zz = mu * (1.0 + c * nz * nz)
+    g_zr = mu * (c * nz * nr)
+    g_rr = mu * (1.0 + c * nr * nr)
+    out = np.zeros(np.shape(g_zz) + (4, 3))
+    out[..., 1, 0] = g_zz
+    out[..., 1, 1] = g_zr
+    out[..., 2, 0] = g_zr
+    out[..., 2, 1] = g_rr
+    out[..., 3, 0] = uz_face * g_zz + ur_face * g_zr
+    out[..., 3, 1] = uz_face * g_zr + ur_face * g_rr
+    out[..., 3, 2] = k
+    return out
+
+
+def viscous_jacobian_blocks(U, grid, geom, grad_geom, gamma, R, transport, *,
+                            wall_thermal, T_wall=None, mu_t=None):
+    """j-yüzlerinin viskoz akı Jacobian blokları (modül docstring'i).
+
+    Args:
+        U: (ni, nj, 4) korunum durumu.
+        grid, geom, grad_geom: ızgara + euler_core/gradients ön-hesapları
+            (sürücü bir kez hesaplar).
+        gamma, R: gaz modeli (çözücünün değerleri; varsayılan yok).
+        transport: ``gas_transport.GasTransport`` — μ(T) ve k TEK kaynaktan.
+        wall_thermal: ``'isothermal'`` | ``'adiabatic'`` (viscous.py ile
+            AYNI sözleşme; varsayılan yok).
+        T_wall: izotermal duvar sıcaklığı [K] — skaler ya da (ni,).
+            Adyabatik kipte kullanılmaz (duvar sıcaklığı hücreden alınır).
+        mu_t: (ni, nj) türbülanslı viskozite [Pa·s] ya da ``None`` (V3
+            μ_t KANCASI). ``None`` → LAMİNER bloklar, bit-özdeş yol (tek
+            işlem eklenmez). Verilirse iç j-yüzlerinde μ_eff = μ + μ_t ve
+            k_eff = cp(μ/Pr + μ_t/Pr_t) — kalıntının kendi sözleşmesiyle
+            (viscous.py) aynı: yüz μ_t komşu hücrelerin aritmetik
+            ortalaması, DUVAR yüzünde μ_t = 0 (SA'nın ν̃_w = 0 Dirichlet
+            sözleşmesinin ayrık karşılığı; duvar bloğu laminer kalır).
+            ÖLÇÜLEN GEREKÇE: parti 38 KAPI vakasında μ_t/μ = 606'ya
+            çıkarken sol taraf laminer μ ile kuruluyordu — sönüm eksik
+            kalıyordu (o vakada kök sebep ızgara çıktı, ölçüm
+            tests/cfd/test_viskoz_entegrasyon.py; kanca yine de sol
+            tarafın fiziksel eksiğidir ve FD çaprazıyla bekçilidir).
+
+    Returns:
+        dict: ``inner_lo``/``inner_hi`` (ni, nj−1, 4, 4) iç j-yüzlerinin
+        alt/üst hücre blokları, ``wall`` (ni, 4, 4) duvar bloğu ve
+        ``declaration`` (yaklaşıklıkların beyanı).
+
+    Bloklar ``B = (|S|/d)·G·P`` biçimindedir; işaretler ve nereye
+    eklendikleri ``line_implicit_delta``'dadır (orada tek yerde).
+    """
+    g = float(gamma)
+    R = float(R)
+    w = cons_to_prim_axisym(U, g)
+    temp_cell = w[..., 3] / (w[..., 0] * R)
+    mu_cell = transport.viscosity(temp_cell)
+    prim = _primitive_transform(w, g, R)
+
+    # ---- iç j-yüzleri ----
+    n_f = geom['n_hat_j'][:, 1:-1]                       # (ni, nj-1, 2)
+    s_f = geom['area_j'][:, 1:-1]                        # (ni, nj-1)
+    d_vec = grad_geom['t_j'] * grad_geom['len_j'][..., None]   # merkez→merkez
+    d_n = np.abs(d_vec[..., 0] * n_f[..., 0] + d_vec[..., 1] * n_f[..., 1])
+    mu_f = 0.5 * (mu_cell[:, :-1] + mu_cell[:, 1:])
+    if mu_t is None:
+        mu_f_eff = mu_f
+        k_f = effective_conductivity(transport.cp, mu_f, transport.prandtl)
+    else:
+        mu_t = np.asarray(mu_t, dtype=float)
+        if mu_t.shape != (grid.ni, grid.nj):
+            raise ValueError(
+                f'mu_t biçimi ({grid.ni}, {grid.nj}) olmalı — gelen '
+                f'{mu_t.shape}. (Sürücü SA alanının μ_t hücre dizisini '
+                'geçirir; başka biçim bir bağlama hatasıdır.)')
+        if not np.all(np.isfinite(mu_t)) or np.any(mu_t < 0.0):
+            raise ValueError('mu_t sonlu ve negatif olmayan olmalı '
+                             '(SA-neg ν̃<0 bölgesinde μ_t = 0 yayımlar; '
+                             'negatif/NaN μ_t bir kusurdur).')
+        mu_t_f = 0.5 * (mu_t[:, :-1] + mu_t[:, 1:])
+        mu_f_eff = mu_f + mu_t_f
+        k_f = effective_conductivity(transport.cp, mu_f, transport.prandtl,
+                                     mu_t_f, transport.prandtl_turbulent)
+    uz_f = 0.5 * (w[:, :-1, 1] + w[:, 1:, 1])
+    ur_f = 0.5 * (w[:, :-1, 2] + w[:, 1:, 2])
+    g_f = _thin_layer_matrix(n_f, mu_f_eff, k_f, uz_f, ur_f)
+    olcek = (s_f / d_n)[..., None, None]
+    inner_lo = olcek * np.einsum('...ij,...jk->...ik', g_f, prim[:, :-1])
+    inner_hi = olcek * np.einsum('...ij,...jk->...ik', g_f, prim[:, 1:])
+
+    # ---- duvar yüzü: u_yüz = 0 (no-slip) → yalnız KÖŞEGEN katkısı ----
+    n_w = geom['wall_n_hat']                             # (ni, 2)
+    s_w = geom['area_j'][:, -1]
+    b_w = grad_geom['b_j_hi']                            # merkez → duvar yüzü
+    d_w = np.abs(b_w[..., 0] * n_w[..., 0] + b_w[..., 1] * n_w[..., 1])
+    if wall_thermal == 'adiabatic':
+        # ∂T/∂n ≡ 0 → ısı akısı U'ya BAĞLI DEĞİL: sıcaklık sütunu sıfır.
+        temp_w = temp_cell[:, -1]
+        k_w = np.zeros_like(temp_w)
+    else:
+        temp_w = np.broadcast_to(np.asarray(T_wall, dtype=float),
+                                 temp_cell[:, -1].shape)
+        k_w = effective_conductivity(transport.cp,
+                                     transport.viscosity(temp_w),
+                                     transport.prandtl)
+    mu_w = transport.viscosity(temp_w)
+    sifir = np.zeros_like(mu_w)
+    g_w = _thin_layer_matrix(n_w, mu_w, k_w, sifir, sifir)
+    wall = ((s_w / d_w)[..., None, None]
+            * np.einsum('...ij,...jk->...ik', g_w, prim[:, -1]))
+
+    return {
+        'inner_lo': inner_lo,
+        'inner_hi': inner_hi,
+        'wall': wall,
+        'declaration': {
+            '_source': 'hrma.cfd.relax_implicit.viscous_jacobian_blocks',
+            'form': ('thin-layer (wall-normal) viscous flux Jacobian, '
+                     'full 4x4 blocks; residual itself uses the FULL stress '
+                     'tensor (viscous.py) — approximation is left-hand side '
+                     'only (judgment-neutral)'),
+            'wall_thermal': wall_thermal,
+            'wall_temperature_derivative': (
+                'zero (adiabatic: q_w is a boundary condition)'
+                if wall_thermal == 'adiabatic'
+                else 'isothermal wall: T_wall fixed, cell T enters via P'),
+            'face_transport': 'arithmetic mean of adjacent cell mu, k',
+            'eddy_viscosity': (
+                'laminar blocks (mu_t=None)' if mu_t is None else
+                'mu_eff = mu + mu_t and k_eff = cp(mu/Pr + mu_t/Pr_t) on '
+                'inner j-faces (face mu_t = arithmetic mean of adjacent '
+                'cells, matching viscous.py); wall face stays laminar '
+                '(SA nu_tilde_wall = 0 -> mu_t = 0 at the wall) — V3 '
+                'mu_t hook'),
+            'i_face_viscous_terms': (
+                'not in the tridiagonal system (carried by the time step)'),
+        },
+    }
+
+
+def line_implicit_delta(U, dudt, grid, geom, gamma, dt, viscous_blocks=None):
     """Satır-örtük güncelleme adımı ΔU'yu döndürür (U'yu DEĞİŞTİRMEZ).
 
     Sistem (modül docstring'indeki kuruluş):
@@ -183,6 +399,10 @@ def line_implicit_delta(U, dudt, grid, geom, gamma, dt):
         gamma: gaz oranı (çağırandan; varsayılan yok).
         dt: (ni, nj) yerel zaman adımı (local_dt_axisym; örtük yolda CFL
             açık sınırın üstüne çıkabilir — ölçülen tavan steady.py'de).
+        viscous_blocks: ``viscous_jacobian_blocks`` çıktısı ya da None.
+            None → Euler yolu (bugünkü kod, bit-özdeş). Verilirse
+            j-yüzlerinin viskoz Jacobian'ı TAM blok olarak eklenir
+            (modül docstring'i: yüksek AR'de baskın terim).
 
     Returns:
         ΔU, (ni, nj, 4). U + ΔU çağıranın işidir.
@@ -261,6 +481,24 @@ def line_implicit_delta(U, dudt, grid, geom, gamma, dt):
 
     upper = a_minus                                   # satır j: ΔU_{j+1}
     lower = -a_plus                                   # satır j+1: ΔU_j
+
+    # --- viskoz j-akılarının TAM blok Jacobian'ı (belge §5.6) ---
+    # Viskoz akı Φ_yüz = (|S|/d)·G·(q_üst − q_alt) olduğundan (q = (u_z,
+    # u_r, T)), M = V/Δt − ∂net/∂U kuruluşunda köşegene ARTI, çapraz
+    # bloklara EKSİ girer. Duvar yüzü Dirichlet olduğundan yalnız köşegene
+    # düşer ve yüksek AR'de sistemin baskın terimidir. İşaret türetimi
+    # taşınım kısmıyla birebir aynı zincirdedir (net_j = +Φ_üst − Φ_alt;
+    # viskoz akı euler akısının TERSİ işaretle toplanır — viscous.py
+    # sözleşmesi).
+    if viscous_blocks is not None:
+        b_lo = viscous_blocks['inner_lo']
+        b_hi = viscous_blocks['inner_hi']
+        diag[:, :-1] += b_lo
+        diag[:, 1:] += b_hi
+        diag[:, -1] += viscous_blocks['wall']
+        upper = upper - b_hi
+        lower = lower - b_lo
+
     rhs = vol[..., None] * dudt
 
     return solve_block_tridiag(lower, diag, upper, rhs)

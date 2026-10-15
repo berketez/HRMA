@@ -34,16 +34,47 @@ dalgada yapılacak.
 
 import pytest
 
-step_export = pytest.importorskip('hrma.export.step_export')
+# DEPO-İÇİ ``pytest.importorskip`` KALDIRILDI — P13B1-05, ÖH FAZ B-3
+# (27 Ağustos 2026). Kardeşiyle (tests/test_step_durustluk_kapisi.py:32)
+# birebir aynı kusur: MODÜL DÜZEYİNDE depo-içi ithal atlaması. K8'in
+# gerekçesindeki "iki dosya" tam olarak bu ikisiydi; ithal kırıldığında bu
+# dosyanın 13 kalemi (11 passed + 2 xfailed) junit XML'de ``type`` alanı
+# OLMAYAN tek bir "collection skipped" satırına dönüşüp CI atlama
+# bütçesinden kayboluyordu.
+#
+# build123d kapısı DURUYOR (aşağıdaki ``pytestmark``): step_export modülü
+# build123d olmadan da ithal edilir; eksik olan yalnız üretim yoludur.
+#
+# ÖLÇÜLDÜ (ithal bellekte kırılarak, 27 Ağustos 2026):
+#   eski gövde -> "1 skipped"  (dosyanın tamamı sessizce yok olur)
+#   bu gövde   -> "1 error during collection" (dürüstçe kırmızı)
+from hrma.export import step_export
+from tests.bagimlilik_kapisi import kurulu_mu
 
+# Kapının KOŞULU da düzeltildi: eskiden ``BUILD123D_AVAILABLE`` bayrağına
+# bakıyordu ve o bayrak ``except Exception`` ile kuruluyor — build123d
+# KURULUYKEN OCC yüklemesi patlarsa da "build123d kurulu değil" diyerek
+# atlıyordu (YALAN gerekçe; depo tarayıcısı
+# test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust bu sınıfı kovalar).
+# Kurulum sorusu artık find_spec'e dayanır; "kurulu ama üretim yolu kapalı"
+# üçüncü durumunun bekçisi kardeş dosyadadır
+# (test_step_durustluk_kapisi.py::test_build123d_kuruluyken_step_uretim_
+# yolu_acik) — tek yerde durması yeterli, ürün bayrağı ortak.
 pytestmark = pytest.mark.skipif(
-    not getattr(step_export, 'BUILD123D_AVAILABLE', True),
-    reason='build123d kurulu değil (STEP üretimi atlanır)')
+    not kurulu_mu('build123d'),
+    reason='build123d kurulu değil (STEP üretimi atlanır; gerekçe '
+           'DOĞRULANDI: find_spec)')
 
 #: Testte üretilen tankların analiz (girdi) boyutları — mm.
+#: ``wall_thickness`` EKLENDİ (ÖH D15 / a2, defter P9B2-15): ürün sözleşmesi
+#: (``cad_export.TANK_CAD_REQUIRED_DIMENSIONS``) onu zorunlu sayıyor ve tank
+#: STEP'i artık gerçek bir KABUKTUR — cidarsız girdi fail-closed reddedilir.
+#: Bu dosyanın ölçtüğü şey DIŞ ZARFTIR; oyma dış zarfı değiştirmez, yani
+#: buradaki 1000× ve zarf bekçileri aynen geçerlidir.
 TANK_INPUT_MM = {
-    'fuel_tank': {'diameter': 300.0, 'length': 800.0},
-    'oxidizer_tank': {'diameter': 300.0, 'length': 900.0},
+    'fuel_tank': {'diameter': 300.0, 'length': 800.0, 'wall_thickness': 3.0},
+    'oxidizer_tank': {'diameter': 300.0, 'length': 900.0,
+                      'wall_thickness': 3.0},
 }
 
 
@@ -82,14 +113,21 @@ class TestTankStepGeometry:
 
     @pytest.mark.parametrize('key', sorted(TANK_INPUT_MM))
     def test_diameter_is_millimetres_not_metres(self, tank_files, key):
-        """Çap 1000× hatasına karşı KESİN bekçi: 300 mm girdi -> 300 mm zarf.
+        """Çap 1000× hatasına karşı KESİN bekçi: 300 mm girdi -> 306 mm zarf.
 
-        Çap, katı modelin enine zarfıdır ve analiz modeliyle BİREBİR aynıdır
-        (küre yarıçapı = silindir yarıçapı). Bu yüzden burada tam eşitlik
-        aranabilir; 1000× hata anında yakalanır.
+        ÖH V3 CAD A2 · H4 — ÇEVRİLDİ (12 Eki 2026, ana model izni, dört
+        koşul; rapor ``docs/scofield/raw/OH/V3/cad-duzeltme/rapor.md``
+        "Bölüm T"). Eski beklenti "enine zarf = girdi çapı" idi, yani D'yi
+        DIŞ çap sayıyordu. Karar §28-21 (b): CAD, boyutlandırmanın düz uçlu
+        modelini çizer; boyutlandırma D'yi itici BOŞLUĞUNUN çapı olarak kurar
+        (``V = π·D²·L/4``, basınçlı kap analizi ``inner_diameter_mm = D``)
+        ve cidar t dışarı eklenir. Kâhin bu tanım ve girdinin D, t'sidir:
+        enine zarf D + 2t. Zarf hâlâ girdiyle BİREBİR ilişkilidir; tam eşitlik
+        aranır ve 1000× hata anında yakalanır.
         """
         _x, y, z = _solid_size_mm(tank_files[key])
-        expected = TANK_INPUT_MM[key]['diameter']
+        girdi = TANK_INPUT_MM[key]
+        expected = girdi['diameter'] + 2 * girdi['wall_thickness']
         for axis, size in (('Y', y), ('Z', z)):
             assert size == pytest.approx(expected, rel=1e-6), (
                 f'{key} {axis} zarfı {size:.3f} mm — {expected:.1f} mm '
@@ -109,15 +147,22 @@ class TestTankStepGeometry:
         Bu test farkın BEKLENEN büyüklükte kalmasını sabitler: başlık modeli
         değişirse (ör. eliptik kapak, yarıküre kesişimi) burası kırmızıya
         döner ve kimse farkı sessizce büyütemez.
+
+        ÖH V3 CAD A2 · H4 — ÇEVRİLDİ (12 Eki 2026, ana model izni, dört
+        koşul; rapor ``docs/scofield/raw/OH/V3/cad-duzeltme/rapor.md``
+        "Bölüm T"). Yukarıdaki ölçüm (fark = bir çap) iki tam küre başlıklı
+        ESKİ katınındı. Karar §28-21 (b): CAD, boyutlandırmanın DÜZ UÇLU
+        modelini çizer (boşluk Ø D × L, cidar t gövdeye ve iki düz kapağa
+        dışarıdan eklenir). Kâhin bu tanım ve girdinin L, t'sidir: X − L = 2t.
         """
         x, _y, _z = _solid_size_mm(tank_files[key])
         body_mm = TANK_INPUT_MM[key]['length']
-        diameter_mm = TANK_INPUT_MM[key]['diameter']
+        wall_mm = TANK_INPUT_MM[key]['wall_thickness']
         overhang = x - body_mm
-        assert overhang == pytest.approx(diameter_mm, rel=1e-6), (
+        assert overhang == pytest.approx(2 * wall_mm, rel=1e-6), (
             f'{key}: katı zarfı {x:.1f} mm, analiz gövdesi {body_mm:.1f} mm; '
-            f'fark {overhang:.1f} mm — iki tam küre başlık için beklenen fark '
-            f'{diameter_mm:.1f} mm. Başlık geometrisi değişmiş olabilir.')
+            f'fark {overhang:.1f} mm — iki düz kapak için beklenen fark '
+            f'2 × {wall_mm:.1f} mm. Başlık geometrisi değişmiş olabilir.')
 
     @pytest.mark.parametrize('key', sorted(TANK_INPUT_MM))
     def test_no_dimension_is_absurdly_large(self, tank_files, key):

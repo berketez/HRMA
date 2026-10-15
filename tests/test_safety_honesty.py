@@ -22,7 +22,11 @@ ampirik olarak ölçüldü):
   MOTOR SAFE FOR OPERATION" dönüyordu; hiç kontrol koşmamışken bile.
 """
 
+import ast
 import json
+import math
+import pathlib
+import re
 
 import pytest
 
@@ -141,6 +145,82 @@ class TestGuidanceIsSourced:
         """
         assert 'evacuation_distance' in flat
 
+    def test_blast_distances_match_the_model_they_cite(self, analysis):
+        """TAŞINAN BEKÇİ (P5B2-05): kardeş iddia yalnız ``'evacuation_
+        distance' in flat`` diyor — atıflı modelin VARLIĞINI kilitliyor,
+        sayının o modele UYUP UYMADIĞINI değil.
+
+        ONARILDI (ÖH D26): BORÇ İMİ KALDIRILDI. Kusur (ölçüldü, D26 tabanı
+        7751531): elle yazılmış Z tablosu atıf verdiği bağıntıyla
+        uyuşmuyordu ve hepsi KISA taraftaydı — lethal %-12,7, minor_injury
+        %-20,9, property_damage %-52,8 (serious_injury %-0,9). Ürün artık
+        Z'yi tablodan okumuyor, Kinney-Graham'ın kendisinden çözüyor
+        (``safety_analysis.scaled_distance_for_overpressure``), bu yüzden
+        sapma yapısal olarak doğamaz. Bu bekçi bağıntıyı BAĞIMSIZ kurar:
+        ürünün sabitleri kaymışsa (ya da tablo geri gelmişse) burada
+        yakalanır.
+
+        Kinney & Graham serbest-hava küresel TNT bağıntısı burada bağımsız
+        olarak kurulur ve Z = 1 m/kg^(1/3) noktasında 1008 kPa vererek
+        doğrulanır (yayımlanan referans değer).
+        """
+        P0 = 101.325   # kPa
+
+        def kinney_graham_kpa(Z):
+            pay = 808.0 * (1.0 + (Z / 4.5) ** 2)
+            payda = math.sqrt((1.0 + (Z / 0.048) ** 2)
+                              * (1.0 + (Z / 0.32) ** 2)
+                              * (1.0 + (Z / 1.35) ** 2))
+            return P0 * pay / payda
+
+        def gereken_Z(p_kpa):
+            alt, ust = 0.05, 500.0
+            for _ in range(200):
+                orta = 0.5 * (alt + ust)
+                if kinney_graham_kpa(orta) > p_kpa:
+                    alt = orta
+                else:
+                    ust = orta
+            return 0.5 * (alt + ust)
+
+        # Bağıntının kendisi doğrulanır (bekçi kendi aracını sınar).
+        assert kinney_graham_kpa(1.0) == pytest.approx(1008.0, rel=0.01)
+
+        # ÖH D35 / OH-ON-06 (bekçi ÇEVRİLDİ, gerekçe): bu bekçinin
+        # KONUSU Kinney-Graham tutarlılığıdır, itici kimliği DEĞİL. Taban
+        # yükte kimlik yoktu ve TNT eşdeğeri ``propellant_type``ın
+        # ``'composite'`` VARSAYILANINDAN geliyordu — yani bekçi, konusu
+        # olmayan bir uydurmaya dayanıyordu. Varsayılan kalktığı için sınıf
+        # artık kazanılmıyor ve eksen adıyla geri çekiliyor. Bekçi
+        # GEVŞETİLMEDİ: kimlik AÇIKÇA verilir, ölçülen mesafeler yine
+        # bağıntının kendisiyle karşılaştırılır.
+        analysis = SafetyAnalyzer().analyze_comprehensive_safety(
+            motor_data=dict(MOTOR), propellant_mass=5,
+            propellant_type='hydrazine', facility_type='test_stand',
+            material='steel_4130', motor_type='liquid')
+        patlama = analysis['explosive_hazards']
+        assert patlama.get('explosive_verdict_withheld_because') is None, (
+            'kimlik verildiği hâlde patlayıcı ekseni geri çekildi')
+        W = float(patlama['tnt_equivalent_kg'])
+        assert W > 0
+        W13 = W ** (1.0 / 3.0)
+
+        sapan = {}
+        for ad, kayit in patlama['blast_distances'].items():
+            d = float(kayit['distance_m'])
+            hedef = float(kayit['overpressure_kpa'])
+            Z = d / W13
+            beklenen_d = gereken_Z(hedef) * W13
+            hata = 100.0 * (d / beklenen_d - 1.0)
+            if abs(hata) > 5.0:
+                sapan[ad] = (round(d, 2), round(beklenen_d, 2),
+                             round(kinney_graham_kpa(Z), 1), hedef,
+                             round(hata, 1))
+        assert not sapan, (
+            'yayımlanan mesafeler atıf verilen modele uymuyor — '
+            'seviye: (yayımlanan m, Kinney-Graham m, o mesafedeki kPa, '
+            f'hedef kPa, hata %): {sapan}')
+
 
 class TestNoCertificationVerdict:
     """Model, işletme emniyeti hükmü veremez."""
@@ -199,12 +279,91 @@ class TestSafetyLimitsHasNoUnreachableSurface:
 
     def test_live_entry_point_is_still_wired(self):
         """Tek canlı çağrı yeri kaybolmamalı — kaybolursa modül tümden ölür."""
-        import pathlib
         kaynak = (pathlib.Path(__file__).resolve().parents[1]
                   / 'hrma' / 'engines' / 'liquid_rocket_engine.py'
                   ).read_text(encoding='utf-8')
         assert 'safety.check_throat_diameter(' in kaynak, (
             'safety_limits modülünün üretimdeki TEK çağrı yeri kaybolmuş')
+
+    def test_kunye_call_site_address_resolves(self):
+        """ONARILDI (ÖH D26 / P5B2-23): künye bir ADRESTİR; adres çözülür.
+
+        BORÇ İMİ KALDIRILDI. Kusur (ölçüldü, D26 tabanı 7751531,
+        ``docs/scofield/raw/OH/D26/yapisal-sistem/a1/once.json``): künye
+        ``liquid_rocket_engine.py:2723`` diyordu, canlı çağrı **4719.**
+        satırdaydı — 1996 satır kayma; 2723. satırda duran şey
+        ``family=('pressure-fed' if basinc_besleme`` idi. Kayma iki kez
+        sessizce büyüdü (2723 -> 3137 -> 4719).
+
+        ONARIM SATIR NUMARASINI DÜZELTMEK DEĞİLDİR: satır numarası BAŞKA
+        bir dosyanın uzunluğuna bağlıdır ve o dosyaya yukarıdan tek satır
+        eklendiğinde künye yeniden yalan söyler. Adres SEMBOLE çevrildi
+        (sınıf + metot). Bu bekçi o sembolü ÇÖZER:
+
+        1. künye çağrı yerini sınıf+metot adıyla göstermeli,
+        2. o metot ``liquid_rocket_engine.py``de gerçekten bulunmalı,
+        3. ``safety.check_throat_diameter(`` çağrısı o metodun GÖVDESİNDE
+           olmalı,
+        4. dosyada tam olarak BİR canlı çağrı olmalı (künyenin "TEK canlı
+           giriş" cümlesinin kendisi),
+        5. künyeye yine de bir ``liquid_rocket_engine.py:<satır>`` atfı
+           yazılırsa o satır da çağrıyı göstermeli (eski bekçinin gücü
+           korunur; yalnız artık zorunlu değildir).
+        """
+        kok = pathlib.Path(__file__).resolve().parents[1]
+        kunye = (kok / 'hrma' / 'analysis' / 'safety_limits.py').read_text(
+            encoding='utf-8')
+        motor_yolu = kok / 'hrma' / 'engines' / 'liquid_rocket_engine.py'
+        kaynak = motor_yolu.read_text(encoding='utf-8')
+        satirlar = kaynak.splitlines()
+
+        # (4) TEK canlı çağrı
+        gercek = [i for i, satir in enumerate(satirlar, 1)
+                  if 'safety.check_throat_diameter(' in satir]
+        assert len(gercek) == 1, (
+            'künye "üretimde TEK canlı giriş" diyor ama çağrı '
+            f'{gercek} satırlarında bulundu')
+        cagri_satiri = gercek[0]
+
+        # (1) künyedeki sembolik adres
+        adaylar = sorted(set(re.findall(
+            r'LiquidRocketEngine\.([A-Za-z_][A-Za-z0-9_]*)', kunye)))
+        assert adaylar, (
+            'künye çağrı yerini SEMBOLLE göstermiyor — '
+            'LiquidRocketEngine.<metot> atfı yok')
+
+        # (2)+(3) sembol çözülür ve çağrı o metodun gövdesindedir
+        agac = ast.parse(kaynak)
+        yerler = {}
+        for dugum in ast.walk(agac):
+            if isinstance(dugum, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yerler.setdefault(dugum.name, []).append(
+                    (dugum.lineno, dugum.end_lineno or dugum.lineno))
+        cozulen = []
+        for ad in adaylar:
+            araliklar = yerler.get(ad)
+            assert araliklar, (
+                f'künye LiquidRocketEngine.{ad} diyor ama böyle bir metot '
+                'liquid_rocket_engine.py içinde YOK — adres çürümüş')
+            if any(bas <= cagri_satiri <= son for bas, son in araliklar):
+                cozulen.append(ad)
+        assert cozulen, (
+            f'künyenin gösterdiği metot(lar) {adaylar} canlı çağrıyı '
+            f'({cagri_satiri}. satır) İÇERMİYOR — adres yanlış metodu '
+            'gösteriyor')
+
+        # (5) satır numarası yazılmışsa o da doğru olmalı
+        atiflar = sorted({int(m) for m in re.findall(
+            r'liquid_rocket_engine\.py:(\d+)', kunye)})
+        yanlis = {}
+        for satir in atiflar:
+            icerik = satirlar[satir - 1] if 0 < satir <= len(satirlar) else ''
+            if 'check_throat_diameter(' not in icerik:
+                yanlis[satir] = icerik.strip()[:60]
+        assert not yanlis, (
+            f'künye {sorted(yanlis)} satırlarını gösteriyor ama çağrı '
+            f'{cagri_satiri}. satırda; gösterilen satırlarda duran şey: '
+            f'{yanlis}')
 
     def test_removed_dead_surface_did_not_come_back(self):
         import hrma.analysis.safety_limits as modul

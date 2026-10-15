@@ -48,6 +48,13 @@ PyYAML>=6.0
 # koşulabilir (üstteki ölçüm) ve iki yolun bit-özdeşliği zaten bekçilidir.
 numba>=0.59
 
+# sympy — D35 ÖNEMLİ kalemlerinin SEMBOLİK kanıt bekçisi (ÖH D37 fizik hazırlığı,
+# tests/test_d35_on_sembolik.py; 23 Eylül 2026). Bekçi sympy yoksa dondurulmuş
+# türetim çıktısıyla yine koşar; sympy kuruluysa türetimi CANLI yeniden yapar
+# (Kirchhoff plaka + ASME PG-52, izentropik alan oranı). Uygulama çalışma
+# zamanında sympy KULLANMAZ; yalnız test bağımlılığıdır.
+sympy>=1.12
+
 # NOT: build123d ve OCP (STEP export testleri) bu dosyada YOK — numpy>=2
 # istiyorlar, HRMA ise numpy<2 pinli; buraya konursa `pip install -r
 # requirements-dev.txt` numpy'yi 2.x'e yükseltir ve np.trapz kaybolur
@@ -57,3 +64,43 @@ numba>=0.59
 # kurulur, numpy pini hemen geri alınır ve 5 STEP test dosyası GERÇEKTEN
 # koşturulur; o iş sıfır-atlama denetimiyle biter, yani "atlandı" artık
 # başarı sayılmaz. Yerel kurulum için: pip install build123d
+
+# pytest-cov + coverage — KAPSAM KAPISI (ÖH D25 / defter P14H2-C1).
+#
+# P14 savcı raporu (H2 §e) "bu depoya bugün bir kapsam kapısı kurulamaz"
+# hükmünü vermişti: süit ``--cov`` altında 12 hayalet kırmızı veriyordu ve
+# D24 aşama-2 tam süiti kapsam altında koşmayı deneyip bütçeye sığdıramadı
+# (~52 test / 7 dk 40 sn).
+#
+# D25 aşama-1 ölçtü: sorun süitte değil ÇEKİRDEKTEydi
+# (docs/scofield/raw/OH/D25/altyapi/a1/olcum_cekirdek.json):
+#   varsayılan C izleyici : x1,54 - x2,09
+#   COVERAGE_CORE=sysmon  : x0,90 - x1,04
+# sysmon çekirdeği CPython 3.12'nin ``sys.monitoring``ini kullanır ve
+# coverage 7.10+ ile kararlıdır — bu yüzden alt sınır oradan pinlenir. Daha
+# eski bir coverage ``COVERAGE_CORE`` değerini SESSİZCE yok sayıp pahalı
+# izleyiciye düşer; kapı yavaşlar ve sökülür.
+#
+# Eşiğin TEK KAYNAĞI ``.coveragerc`` [report] fail_under'dır; iş akışları
+# ``--cov`` argümanını değersiz kullanır (kaynak listesi de aynı dosyada).
+pytest-cov>=7.0.0
+coverage>=7.10
+
+# Mühendislik aktarım paketi (ÖH D37 A7d / karar dosyası §18-§19, Berke 24 Eyl
+# "Hepsi") — paketin yazdığı biçimleri BAĞIMSIZ okuyucularla geri okuyan
+# bekçiler için. Uygulama çalışma zamanında KULLANILMAZ (paket yazıcıları saf
+# Python + numpy); yalnız test bağımlılığıdır.
+#   meshio             .vtu geri okuma (CAX4/CQUADX için KULLANILMAZ — A1 §4.4:
+#                      CAX4'ü okuyamıyor, CQUADX'i sessizce düşürüyor)
+#   pyvista            .vtu görsel/sayısal geri okuma (vtk çeker)
+#   pyNastran          Simcenter (NX) Nastran .bdf geri okuma (§19 lehçe kararı)
+#   ansys-mapdl-reader MAPDL blok .cdb geri okuma (Archive)
+# numpy uyumu ÖLÇÜLDÜ (24 Eyl, paket meta verisi): pyNastran 'numpy<2',
+# ansys-mapdl-reader 'numpy<3,>=1.16', meshio 'numpy>=1.20', pyvista
+# 'numpy>=1.21' — HRMA'nın numpy<2 piniyle ÇAKIŞMAZ; kuru koşu numpy 1.26.4 /
+# scipy 1.13.1'i değiştirmedi. Lisanslar: pyNastran BSD-3, cpylog BSD-3,
+# ansys-mapdl-reader/meshio/pyvista MIT.
+meshio>=5.3
+pyvista>=0.46
+pyNastran>=1.4.1
+ansys-mapdl-reader>=0.56

@@ -49,6 +49,14 @@ kayıt `experiment_db.ensure_valid_record`'dan geçmeden korelasyona giremez.
 
 ## Durum
 
+- [x] **Yayımlanmış-veri ayağı KAPANDI (2026-08-18, Berke kararı):** Nakka
+  Kappa kampanyasından 3 tam statik ateşleme kaydı
+  (`sol-nakka2000-kappa-{kdx002,ksb001,ksb002}`) → şema kapısı + korelasyon
+  koşusu + panel sözleşme kanıtı uçtan uca; bekçiler
+  `tests/test_f3_yayimlanmis_korelasyon.py`. Bu kayıtlar YAYIMLANMIŞ
+  LİTERATÜR imlidir, dış-kullanıcı sayılmaz.
 - [ ] Liste Ayberk'e gönderildi (Berke)
-- [ ] Veri geldi → `validation_records/` kaydı + doğrulayıcı
-- [ ] Korelasyon koşusu + `correlation_panel` → kapı #3 kapanış kanıtı
+- [ ] Veri geldi → `validation_records/` kaydı + doğrulayıcı (dış-kullanıcı
+  ayağı — ikinci kayıt)
+- [ ] Ayberk verisiyle korelasyon koşusu + `correlation_panel` → kapı #3'ün
+  dış-kullanıcı kanıtı

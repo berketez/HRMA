@@ -66,7 +66,15 @@ from typing import Dict, List, Optional
 import numpy as np
 from scipy.optimize import brentq
 
-from hrma.constants import G_0, R_UNIVERSAL, PA_PER_BAR
+from hrma.constants import G_0, R_UNIVERSAL, PA_PER_BAR, PSIA_PER_BAR
+# K-4 (V3 kararlılık 2. tur): CEA çağrıları köprünün TEK süreç kilidi ve
+# süreç başına yalıtılmış veri dizini altında (ikinci kilit YOK); kayıt
+# doğrulaması da köprüdeki tek tanımdan (CLAUDE.md §11).
+from hrma.engines.cea_bridge import (  # noqa: E402
+    _CEA_STATE_LOCK,
+    cea_record_alive as _cea_record_alive,
+    ensure_isolated_cea_data_dir,
+)
 
 # ---------------------------------------------------------------------------
 # SABİTLER — hepsi kaynaklı (uydurma denetimi kuralı).
@@ -95,37 +103,130 @@ TIT_UNCOOLED_LIMIT_K = 1100.0
 TIT_OX_RICH_LIMIT_K = 850.0
 
 # Enjektör ΔP oranları (ΔP/Pc).
-# Sıvı enjeksiyon: chug kararlılığı için 0.15-0.20 (NASA SP-8089
-# "Liquid Rocket Engine Injectors").
-INJECTOR_DP_FRAC_LIQUID_DEFAULT = 0.20
-# Sıcak gaz enjeksiyonu (türbin egzozu ana odaya): Huzel & Huang Ch. 4
-# enjektör ΔP kılavuzunun alt bandı; VARSAYIM olarak etiketlenir.
-INJECTOR_DP_FRAC_GAS_DEFAULT = 0.15
-# Ön yakıcı / GG enjektörü ΔP oranı (SP-8089 alt bandı, varsayım).
-INJECTOR_DP_FRAC_PREBURNER_DEFAULT = 0.15
+#
+# ÖH D20 / P4B4-18 — İKİNCİ SAYISAL TANIM KALDIRILDI. Bu satır chug
+# kararlılık kuralının 0,20'sini KENDİ literali olarak yazıyordu; oysa
+# ``acoustic_modes.CHUG_THRESHOLD_SOURCE`` kullanıcıya "bu çift (0,20 /
+# 0,15) HRMA'daki TEK sayısal tanımdır" diyor. ÖLÇÜLDÜ
+# (``once_p4b418.json`` A): adından bağımsız AST taraması chug/enjektör-ΔP
+# bağlamında 5 canlı literal buldu; bunlardan bu satır kuralın tanımıyla
+# AYNI büyüklüktür. Değer DEĞİŞMEDİ (0,20); değişen, ikinci tanım
+# noktasının kalkmasıdır — merkez kayarsa bu kopya geride kalırdı.
+#
+# Atıf da düzeltildi: acoustic_modes künyesi NASA SP-8089'u bandın DAYANAĞI
+# olmaktan bilerek geri çekiyor (belge doğrulandı, bandın o belgede sayfa
+# düzeyinde geçtiği doğrulanmadı). Buradaki eski yorum aynı atfı dayanak
+# gibi kullanıyordu.
+from hrma.analysis.acoustic_modes import (  # noqa: E402
+    CHUG_DP_RATIO_RECOMMENDED as _CHUG_DP_RATIO_RECOMMENDED)
 
-# Açık çevrim türbin basınç oranı varsayılanı: F-1 GG türbini PR 16.4
-# (Sutton 9th ed. Table 10-3 turbopump örnekleri); tipik GG türbinleri
-# 10-25 aralığındadır.
+# Sıvı enjeksiyon: chug kararlılığı tasarım kuralının TEK tanım noktası
+# (Sutton & Biblarz 9. baskı Böl. 8; NASA SP-194 Böl. 5-6).
+INJECTOR_DP_FRAC_LIQUID_DEFAULT = _CHUG_DP_RATIO_RECOMMENDED
+# --- ÖH D27 / OH-D26-07 — SICAK GAZ ΔP/Pc VARSAYILANI: TEK TANIM ----------
+#
+# ÖLÇÜLEN KUSUR (``docs/scofield/raw/OH/D27/sivi/a1/once.json``, OH-D26-07):
+# aynı sayı (0,15) bu dosyada İKİ kez YAZILIYDI ve iki yorum onu AYNI
+# kaynağa (Huzel & Huang enjektör ΔP kılavuzunun alt ucu) dayandırıyordu.
+# İki ad, iki literal, tek kural — merkez kayarsa biri geride kalırdı.
+# Sayı artık BİR kez yazılır; iki bağlam adı o tek tanımın TAKMA ADIDIR.
+# Değer DEĞİŞMEDİ (0,15).
+#
+# Bu sayı chug kuralına BAĞLANMAZ ve bağlanmamalıdır: chug bandının alt ucu
+# (``acoustic_modes.CHUG_DP_RATIO_MINIMUM``) SIVI enjeksiyonun besleme
+# kuplajı eşiğidir; buradaki oran sıcak GAZ enjeksiyonunun boyutlandırma
+# pratiğidir. Sayısal çakışma tesadüftür; önceki dalga ayrımı bilerek
+# kurmuştur ve bu dalga onu kaldırmaz. Ayrım
+# ``tests/test_stability_sivi.py`` ``SEMANTIK_DISI`` kaydında gerekçesiyle
+# yazılıdır — muafiyet gerekçesiz değildir.
+INJECTOR_DP_FRAC_HOT_GAS_BAND_LOW = 0.15
+#: Yukarıdaki tek tanımın künyesi. NASA SP-8089'a DAYANDIRILMAZ: o atıf
+#: ``acoustic_modes`` künyesinde sayfa düzeyinde doğrulanamadığı için geri
+#: çekilmiştir; burada da dayanak yapılmaz.
+INJECTOR_DP_FRAC_HOT_GAS_BAND_LOW_SOURCE = (
+    'Hot-gas and preburner injector pressure drop is sized at the lower end '
+    'of the classical injector dP guideline (Huzel & Huang, NASA SP-125, '
+    'Ch. 4 injector design). Labelled ASSUMPTION, approximate. This is NOT '
+    'the chug delta_P/Pc stability rule owned by '
+    'hrma.analysis.acoustic_modes: that rule governs LIQUID injection '
+    'feed-system coupling. The two numbers coincide numerically; they are '
+    'not the same quantity and neither is derived from the other.')
+# Sıcak gaz enjeksiyonu (türbin egzozu ana odaya): yukarıdaki tek tanımın
+# TAKMA ADI. Bu BAŞKA bir büyüklüktür (gaz enjeksiyonu), chug kuralına
+# BAĞLANMAZ.
+INJECTOR_DP_FRAC_GAS_DEFAULT = INJECTOR_DP_FRAC_HOT_GAS_BAND_LOW
+# Ön yakıcı / GG enjektörü ΔP oranı — ayrı bir boyutlandırma varsayımıdır,
+# chug kararlılık eşiği DEĞİLDİR. Eski yorum bu sayıyı NASA SP-8089'un
+# alt bandına dayandırıyordu; o atıf acoustic_modes künyesinde geri
+# çekildiği için burada da dayanak yapılmaz (Huzel & Huang Ch. 4 ön
+# yakıcı enjektör pratiği). Aynı tek tanımın TAKMA ADI.
+INJECTOR_DP_FRAC_PREBURNER_DEFAULT = INJECTOR_DP_FRAC_HOT_GAS_BAND_LOW
+
+# Açık çevrim türbin basınç oranı varsayılanı: F-1 GG türbini (Mark 10)
+# PR 16,3 — NASA SP-8110 (1974) Tablo I (s. 10; OCR okuması, satır "163").
+# KU-K3 (6 Eki 2026): eski künye F-1 PR'sini 16,4 diye Sutton 9. bs.
+# Tablo 10-3'e bağlıyordu; Sutton 9. bs. Tablo 10-3 (s. 394) gaz jeneratörü ⟷ ön yakıcı
+# karşılaştırmasıdır, F-1 verisi içermez. "Tipik GG türbinleri 10-25"
+# bandı için birincil künye bu turda doğrulanmadı. Değer DEĞİŞMEDİ.
 OPEN_CYCLE_TURBINE_PR_DEFAULT = 16.0
-# Tek gövdeli (çok sıralı impuls) türbinde pratik PR uyarı eşiği
-# (Huzel & Huang Ch. 6).
+# Tek gövdeli (çok sıralı impuls) türbinde pratik PR uyarı eşiği.
+# KU-K1/SP-H1 K31: eski künye "Huzel & Huang Ch. 6" idi; NASA SP-125
+# (1967) Böl. 6'da 25 eşiği YOK (s. 197'de yalnız PR = 20 örneği); AIAA
+# 1992 baskısı okunmadı. Kaynaksız pratik eşiktir; değer DEĞİŞMEDİ.
 OPEN_CYCLE_TURBINE_PR_WARN = 25.0
 
 # Staged combustion türbin PR fizik aralığı: türbin ana odaya boşaldığı
 # için PR küçük kalır (Sutton Ch. 6; denetim raporu Bölüm 2a).
 STAGED_PR_TYPICAL = (1.3, 2.2)
 # Kök arama aralığı (fizik aralığının dışına çıkılırsa uyarı üretilir).
+
+# --- ÖH D22 / OH-D20-04 · KADEMELİ POMPA BASMA BASINCININ KÜNYESİ ----------
+# Kademelenmiş yanmada (ve FFSC'de) tek bir pompa GÖVDESİ iki kademe taşır:
+# tüm debiyi ana oda zincirinin gerektirdiği basınca çıkaran ANA kademe ve
+# yalnız ön yakıcıya giden küçük payı ön yakıcı besleme basıncına çıkaran
+# BOOST kademesi (RS-25 HPOTP mimarisi; NASA SP-8107). Güç dengesi bunu
+# ZATEN doğru ayırıyordu (iki _pump_power_w terimi), ama yayımlanan tek
+# ``pump_discharge_*_bar`` alanı ikisinin MAKSİMUMUYDU ve bunu hiçbir yerde
+# söylemiyordu. ÖLÇÜLDÜ (250 kN, Pc=150, staged_combustion): oksitleyici
+# pompası ana kademede ~186 bar'a, boost kademesinde 248 bar'a basıyor;
+# yayımlanan tek basma basıncı 248 bar olduğu için aşağı akıştaki tek
+# kademeli basi (head) hesabı TÜM debiyi 248 bar'a çıkarıyormuş gibi
+# H = 2178,7 m veriyordu — çevrimin kendi güç ayrımıyla çelişen bir sayı.
+# Kademeler artık ADIYLA ve DEBİSİYLE yayımlanır; tüketici hangi debinin
+# hangi basınca çıktığını okuyabilir ve basıyı kendi kademesinden kurar.
+PUMP_STAGE_SPLIT_BASIS = (
+    'This pump body has TWO stages. main_stage_discharge_bar is the pressure '
+    'the FULL propellant flow (main_stage_mdot_kg_s) is raised to for the '
+    'main chamber chain; boost_stage_discharge_bar is reached by the '
+    'preburner share ONLY (boost_stage_mdot_kg_s). The single '
+    'pump_discharge_*_bar field is the MAXIMUM of the two and must NOT be '
+    'read as the pressure the whole flow sees - sizing a single-stage head '
+    'from it overstates the pump duty. The shaft power in this solution is '
+    'already the sum of the two stage powers (RS-25 HPOTP main+boost '
+    'architecture, NASA SP-8107).')
+
 PR_SOLVE_MIN, PR_SOLVE_MAX = 1.02, 4.0
 
-# Pompa verim varsayılanı (Sutton 9th ed. Table 10-3; ana pompalar 0.65-0.80).
+# Pompa verim varsayılanı. KU-K3 (6 Eki 2026): eski künye Sutton 9. bs.
+# Tablo 10-3'ü gösteriyordu ("ana pompalar 0.65-0.80"); o tablo (s. 394) GG ⟷ ön yakıcı
+# karşılaştırmasıdır, pompa verimi içermez. Doğru kıyas kaynakları:
+# NASA SP-8109 (1973) Tablo I (s. 26; 20 pompa, en iyi verim noktası
+# 0,55-0,81, medyan 0,69); NASA SP-8107 (1974) Tablo II (22 pompa,
+# %55-80, medyan %72); Sutton 9. bs. Tablo 10-1 (s. 370; SSME/LE-7 pompaları
+# %68-78,4) ve s. 386 ("çoğu %30-70"). 0,75 bu bantların üst çeyreğindedir;
+# değer DEĞİŞMEDİ (değer kararı B5/Ö-19, Berke).
 ETA_PUMP_DEFAULT = 0.75
 
 # Türbin verimi ÇEVRİM SINIFINA bağlıdır — tek bir sabit fiziksel değildir.
-# NASA SP-8110 "Liquid Rocket Engine Turbines" (1974), s. 17 ve fig. 13-14:
+# NASA SP-8110 "Liquid Rocket Engine Turbines" (1974), s. 15-18, Tablo I ve
+# Şekil 13-14 (KU-K3, 6 Eki 2026: eski künye "s. 17" idi; %35-65 cümlesi
+# s. 15'te başlar, s. 18'de biter):
 #   * Açık çevrim (gaz jeneratörü / tap-off): türbin YÜKSEK basınç oranında
-#     (egzoz atmosfere) çalışan kısmi-giriş impuls kademesidir; iki sıralı
-#     hız-bileşik türbinlerin ölçülen verimi %35-65 bandındadır.
+#     (egzoz atmosfere) çalışan impuls türbinidir — SP-8110 Tablo I'deki GG
+#     türbinlerinin çoğu tam girişli İKİ SIRALI HIZ-BİLEŞİK impulstur
+#     (kısmi giriş yalnız Agena'da; eski "kısmi-giriş impuls kademesi"
+#     nitelemesi genel olarak doğru değildi); iki sıralı hız-bileşik
+#     türbinlerin ölçülen verimi %35-65 bandındadır.
 #   * Kapalı çevrim (staged / full-flow staged / expander): türbin egzozu
 #     ana odaya boşaldığı için basınç oranı DÜŞÜK tutulur; bu da türbini
 #     "daha verimli hız-oranı bölgesinde" çalıştırır ve SP-8110'un birebir
@@ -145,12 +246,32 @@ ETA_PUMP_DEFAULT = 0.75
 # dolayısıyla açık çevrim Isp kaybı ~%30 artar (F-1 örneğinde Isp kaybı
 # 2.26 s -> ~2.7 s). Kullanıcı eta_turbine vererek bandın istediği yerinde
 # çalışabilir; varsayılan seçim F-1 sınıfı GG türbini pratiğiyle uyumludur
-# (Sutton 9th ed. Table 10-3).
+# (NASA SP-8110 Tablo I, F-1 Mark 10 satırı; KU-K3: eski künye Sutton 9. bs.
+# Tablo 10-3'tü, o tablo türbin verimi içermez).
 ETA_TURBINE_OPEN_DEFAULT = 0.65
-ETA_TURBINE_OPEN_BAND = (0.35, 0.65)   # NASA SP-8110 s.15-17 ölçülen bant
+ETA_TURBINE_OPEN_BAND = (0.35, 0.65)   # NASA SP-8110 s. 15-18 ölçülen bant
 ETA_TURBINE_CLOSED_DEFAULT = 0.78
 # Geriye dönük uyumluluk (eski tek-değer sabiti açık çevrim değerine eşittir).
 ETA_TURBINE_DEFAULT = ETA_TURBINE_OPEN_DEFAULT
+
+# D16/B4-08 — TURBOMAKİNE İZENTROPİK VERİMİNİN FİZİKSEL BANDI.
+# Yukarıdaki bantlar PRATİK bantlardır (hangi verim beklenir); bu ise
+# TANIMIN bandıdır (hangi verim var olabilir) ve tek kaynak olarak burada
+# durur. İzentropik verim η = (gerçek iş)/(izentropik iş) oranıdır (Sutton &
+# Biblarz 9. baskı Böl. 10 izentropik verim tanımı; pompa için aynı tanım,
+# Huzel & Huang Böl. 6):
+#   * η > 1 termodinamiğin İKİNCİ YASASINI ihlal eder — bir türbin
+#     izentropik (tersinir-adyabatik) genişlemeden fazla iş çıkaramaz.
+#   * η <= 0 bir turbomakine tarif etmez (sıfır verim iş üretmeyen bir
+#     makinedir, negatif verim işaret hatasıdır).
+# Üst uç 1,0 DAHİLDİR: kayıpsız ideal makine matematiksel limittir.
+# ÖLÇÜLDÜ (a2/once.json, B4-08): bu kapı yokken eta_turbine=5 ile türbin
+# çıkış sıcaklığı -1194,64 K çıkıyor, çözüm converged=True kalıyor ve TEK
+# BİR uyarı üretilmiyordu; eta_turbine=nan bütün yaprakları nan yapıyor,
+# yine converged=True; eta_turbine=inf çıkış sıcaklığını -inf yapıyor. Aynı
+# körlük eta_pump için de vardı (eta_pump=5 -> pompa gücü 579 kW, fiziksel
+# 3,88 MW; eta_pump=-0,3 sessizce 0 W).
+ETA_TURBOMACHINE_BAND = (0.0, 1.0)
 
 # Açık çevrim bleed oranı makullük sınırları: %25 üstü uyarı, %50 üstü
 # yakınsamadı kabul edilir (tarihsel GG motorlarında oran %1.5-7;
@@ -224,22 +345,37 @@ def _norm_ox(name: str) -> str:
 
 
 def _get_cea(fuel: str, oxidizer: str):
-    """Önbellekli CEA_Obj; RocketCEA yoksa None (sahte sayı üretmez)."""
+    """Önbellekli CEA_Obj; RocketCEA yoksa None (sahte sayı üretmez).
+
+    Önbellek isabetinde nesnenin kütüphane kaydı doğrulanır; kayıt
+    silinmişse (bkz. ``_cea_record_alive``) nesne yeniden kurulur — kurucu
+    kaydı yeniden açar. Sonuçlar CEA'nın kendi hesabıdır; yeniden kurulan
+    nesne aynı girdiye BİT-AYNI değeri verir (docs/scofield/raw/OH/V3/
+    kararlilik/rapor.md).
+    """
     key = (oxidizer, fuel)
-    if key in _CEA_CACHE:
-        return _CEA_CACHE[key]
-    try:
-        from rocketcea.cea_obj import CEA_Obj
-        obj = CEA_Obj(oxName=_CEA_OX[oxidizer], fuelName=_CEA_FUEL[fuel])
-    except Exception:
-        obj = None
-    _CEA_CACHE[key] = obj
-    return obj
+    with _CEA_STATE_LOCK:
+        if key in _CEA_CACHE:
+            cached = _CEA_CACHE[key]
+            if cached is None or _cea_record_alive(cached):
+                return cached
+        # K-4: kurucu veri dizinini ``pathPrefix``e dondurur
+        # (rocketcea/cea_obj.py:394) — önce bu sürecin yalıtılmış dizini
+        # sabitlenir; kurulum da kilit altında (Fortran COMMON durumu).
+        ensure_isolated_cea_data_dir()
+        try:
+            from rocketcea.cea_obj import CEA_Obj
+            obj = CEA_Obj(oxName=_CEA_OX[oxidizer], fuelName=_CEA_FUEL[fuel])
+        except Exception:
+            obj = None
+        _CEA_CACHE[key] = obj
+        return obj
 
 
 # BTU/(lbm·°R) -> J/(kg·K) (kesin dönüşüm, NIST birim tanımları).
 _BTU_LBM_R_TO_J_KG_K = 4186.8
-_BAR_TO_PSIA = 14.503773773
+#: P15B2-10: ondalık kopya değil, merkezden (kesin tanımlardan türetilir).
+_BAR_TO_PSIA = PSIA_PER_BAR
 
 
 def preburner_gas_properties(fuel: str, oxidizer: str, mr: float,
@@ -257,10 +393,14 @@ def preburner_gas_properties(fuel: str, oxidizer: str, mr: float,
     if cea is None:
         return None
     pc_psia = p_bar * _BAR_TO_PSIA
-    t_k = float(cea.get_Tcomb(Pc=pc_psia, MR=mr)) / 1.8  # °R -> K
-    mw, gamma_eq = cea.get_Chamber_MolWt_gamma(Pc=pc_psia, MR=mr, eps=2.0)
-    cp = float(cea.get_Chamber_Cp(Pc=pc_psia, MR=mr, eps=2.0,
-                                  frozen=1)) * _BTU_LBM_R_TO_J_KG_K
+    # K-4: Fortran COMMON durumu süreç-global; eşzamanlı çağrı sessiz yanlış
+    # sayı veriyordu (ölçüldü, rapor.md 2. tur) — köprünün kilidi altında.
+    with _CEA_STATE_LOCK:
+        t_k = float(cea.get_Tcomb(Pc=pc_psia, MR=mr)) / 1.8  # °R -> K
+        mw, gamma_eq = cea.get_Chamber_MolWt_gamma(Pc=pc_psia, MR=mr,
+                                                   eps=2.0)
+        cp = float(cea.get_Chamber_Cp(Pc=pc_psia, MR=mr, eps=2.0,
+                                      frozen=1)) * _BTU_LBM_R_TO_J_KG_K
     r_sp = R_UNIVERSAL / float(mw)
     gamma_fr = cp / max(cp - r_sp, 1e-6)
     return {
@@ -292,7 +432,8 @@ def solve_preburner_of(fuel: str, oxidizer: str, p_bar: float, tit_K: float,
     pc_psia = p_bar * _BAR_TO_PSIA
 
     def t_of(mr):
-        return float(cea.get_Tcomb(Pc=pc_psia, MR=mr)) / 1.8
+        with _CEA_STATE_LOCK:  # K-4: köprünün tek süreç kilidi
+            return float(cea.get_Tcomb(Pc=pc_psia, MR=mr)) / 1.8
 
     if mode == 'fuel_rich':
         lo, hi = FUEL_RICH_MR_BOUNDS[fuel]
@@ -390,8 +531,51 @@ def _turbine_work_real_gas(fluid: str, t_in_K: float, p_in_Pa: float,
     return dh, t_exit
 
 
+def _eta_gate(field: str, value) -> float:
+    """D16/B4-08 — izentropik verim girdi kapısı (FAIL-CLOSED).
+
+    ``ETA_TURBOMACHINE_BAND`` dışındaki bir verim için SESSİZ YEDEK YOKTUR:
+    alan adı ve gerekçesiyle ``ValueError`` yükselir. Çağıran katman
+    (``liquid_rocket_engine._solve_cycle_balance``) bu hatayı zaten
+    yakalayıp ``reason`` alanına yazıyor, yani kullanıcı reddin sebebini
+    görür; sayı UYDURULMAZ.
+    """
+    lo, hi = ETA_TURBOMACHINE_BAND
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f'{field} must be a number in the isentropic-efficiency band '
+            f'({lo}, {hi}], got {value!r}')
+    if not np.isfinite(v):
+        raise ValueError(
+            f'{field} must be a finite number in the isentropic-efficiency '
+            f'band ({lo}, {hi}], got {v!r}')
+    if not (lo < v <= hi):
+        raise ValueError(
+            f'{field} = {v:g} is outside the isentropic-efficiency band '
+            f'({lo}, {hi}]. Efficiency is the ratio of actual work to '
+            f'isentropic work: a value above {hi:g} would take more work out '
+            f'of a turbine than a reversible adiabatic expansion contains '
+            f'(second law), and a value at or below {lo:g} does not describe '
+            f'a turbomachine. Practical bands: turbines '
+            f'{ETA_TURBINE_OPEN_BAND[0]:g}-{ETA_TURBINE_OPEN_BAND[1]:g} open '
+            f'cycle / around {ETA_TURBINE_CLOSED_DEFAULT:g} closed cycle '
+            f'(NASA SP-8110), main pumps around {ETA_PUMP_DEFAULT:g} '
+            f'(NASA SP-8109 Table I; Sutton 9th ed. Table 10-1).')
+    return v
+
+
 def _pump_power_w(mdot: float, dp_bar: float, rho: float, eta: float) -> float:
-    """Pompa mil gücü [W]: P = ṁ·ΔP/(ρ·η) (Sutton Ch. 10)."""
+    """Pompa mil gücü [W]: P = ṁ·ΔP/(ρ·η) (Sutton Ch. 10).
+
+    ΔP <= 0 iken güç 0 döner. Bu bir HÜKÜM DEĞİL, kök arama dayanıklılığıdır:
+    kapalı çevrim PR kökü aranırken ara adımlarda çıkış basıncı geçici olarak
+    giriş basıncının altına düşebilir ve bağıntı orada anlamsızdır. Böyle bir
+    pompanın FİZİKSEL OLARAK OLANAKSIZ olduğu hükmü ``_pump_dict``te
+    kazanılır ve ``_pump_feasibility_gate`` çözümü reddeder — yani kırpma
+    artık sessiz kalmaz (D16/B4-09).
+    """
     return mdot * max(dp_bar, 0.0) * PA_PER_BAR / (max(rho, 1e-9)
                                                    * max(eta, 1e-3))
 
@@ -419,18 +603,58 @@ class CycleSolution:
     Tüm güçler W, basınçlar bar, debiler kg/s, sıcaklıklar K, Isp s.
     ``shafts`` mil başına pompa/türbin dökümüdür; ``power_residual_rel``
     |P_türbin − P_pompa| / P_pompa kapanma artığıdır (mil başına en kötüsü).
+
+    ÖH D20 / B4-10 — BU SAYININ NE OLDUĞU (ve ne OLMADIĞI) künyelenir.
+    Artık ``power_residual_basis`` ile birlikte yayımlanır. Ölçüldü (D20
+    a1/once.json ``B4_10.kosum``): türbinli beş çevrimin hepsinde artık
+    makine epsilonu mertebesinde (0,0 ... 2,4e-14) ve mil sözlüğündeki
+    yaprak güçlerinden yeniden hesaplanınca AYNI sayı çıkıyor. Sebebi
+    yapısaldır: türbin gücü, kök çözücü tarafından pompa gücüne EŞİTLENEREK
+    bulunur. Yani bu alan çözücünün kendi yakınsama artığıdır — bağımsız bir
+    çapraz denetim DEĞİLDİR ve "güç dengesi doğrulandı" diye okunamaz.
+    Basınç beslemeli çevrimde mil yoktur; alan ``None``dır.
     """
     cycle_type: str
     converged: bool = False
     iterations: int = 0
     pump_discharge_ox_bar: Optional[float] = None
     pump_discharge_fuel_bar: Optional[float] = None
+    #: ÖH D22 / OH-D20-04 — kademelenmiş pompanın ANA ve BOOST kademeleri.
+    #: ``pump_discharge_*_bar`` iki kademenin MAKSİMUMUdur; tüm debinin
+    #: çıkarıldığı basınç DEĞİLDİR ve tek başına okunursa öyle sanılır.
+    pump_stage_split: Optional[dict] = None
     pump_power_ox_W: float = 0.0
     pump_power_fuel_W: float = 0.0
     pump_power_total_W: float = 0.0
     turbine_power_total_W: float = 0.0
     turbine_mdot_total_kg_s: float = 0.0
-    power_residual_rel: float = float('nan')
+    # ÖH D31 · B4-10 — VARSAYILAN nan DEĞİL None.
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/D31/sivi/a1/once_b410.json): çevrim
+    # YAKINSAMAZSA (expander, rejeneratif ısı yetmediğinde:
+    # 'warn.cycle.expander_power_balance_infeasible', güç açığı 1,59 MW)
+    # erken dönüşler bu alana hiç dokunmuyordu ve alan dataclass
+    # varsayılanı olan ``nan`` ile YAYIMLANIYORDU. İki ayrı kusur:
+    #   (i) nan bir sayı gibi okunur — "artık ölçülemedi" demez, "artık
+    #       şudur" der; kapanmamış bir güç dengesi için hüküm kazanılmadı.
+    #   (ii) nan GEÇERLİ JSON DEĞİLDİR (ölçüldü: json.dumps(allow_nan=False)
+    #       -> "Out of range float values are not JSON compliant"); katı
+    #       ayrıştırıcı kullanan istemci yanıtın TAMAMINI reddeder.
+    # D20'nin B4-10 onarımı milsiz çevrimi (pressure_fed) None'a çekmişti;
+    # YAKINSAMAYAN çevrim o onarımın kapsama boşluğuydu. Varsayılan None
+    # olunca her erken dönüş kendiliğinden fail-closed olur.
+    power_residual_rel: Optional[float] = None
+    #: ÖH D20 / B4-10 — ``power_residual_rel``in dürüst künyesi. Kullanıcıya
+    #: dönük olduğu için İngilizce.
+    power_residual_basis: str = (
+        'closure residual of the shaft power balance, |P_turbine - P_pump| / '
+        'P_pump, worst shaft. It is the ROOT SOLVER\'s own convergence '
+        'residual, not an independent cross-check: the turbine power is '
+        'obtained by driving it to the required pump power, so a value at '
+        'machine epsilon means the solve converged, NOT that the cycle was '
+        'verified against a second model. null means no power balance was '
+        'closed: either the cycle has no shaft (pressure-fed) or the solve '
+        'did not converge - in both cases the residual is WITHHELD rather '
+        'than reported as a number.')
     shafts: List[Dict] = field(default_factory=list)
     preburners: List[Dict] = field(default_factory=list)
     main_chamber: Dict = field(default_factory=dict)
@@ -444,9 +668,25 @@ class CycleSolution:
     warnings: List[str] = field(default_factory=list)
     assumptions: List[str] = field(default_factory=list)
     not_modelled: List[str] = field(default_factory=list)
+    # D16/B4-09 — ΔP <= 0 ile yayımlanan pompaların hükmü. Boş liste
+    # "bütün pompalar fiziksel" demektir; dolu liste güç dengesinin
+    # KAPANMADIĞI anlamına gelir (converged=False ile birlikte gelir).
+    infeasible_pumps: List[Dict] = field(default_factory=list)
 
     def to_dict(self) -> Dict:
         return asdict(self)
+
+
+#: ÖH D31 · B4-10 — mil başına artığın künyesi (kullanıcıya dönük: İngilizce).
+#: ``CycleSolution.power_residual_basis`` üst düzeyin künyesidir; bu onun mil
+#: dökümündeki eşidir. İkisi de AYNI gerçeği söyler: sayı çözücünün kendi
+#: yakınsama artığıdır, ikinci bir modele karşı doğrulama DEĞİLDİR.
+SHAFT_RESIDUAL_BASIS = (
+    'closure residual of THIS shaft: |P_turbine - P_pump| / P_pump. It is '
+    'the root solver\'s own convergence residual, not an independent '
+    'cross-check - the turbine power is driven to the required pump power, '
+    'so a value at machine epsilon means the solve converged, NOT that the '
+    'shaft was verified against a second model.')
 
 
 def _flow_split(mdot: float, mr: float):
@@ -457,20 +697,78 @@ def _flow_split(mdot: float, mr: float):
 
 def _shaft_dict(name, pumps, turbine, pump_power, turbine_power):
     resid = abs(turbine_power - pump_power) / max(pump_power, 1e-9)
+    # ÖH D31 · B4-10 — KÜNYE SAYININ YANINDA.
+    # D20 onarımı künyeyi YALNIZ üst düzey çözüme koymuştu; ÖLÇÜLDÜ
+    # (once_b410.json): mil başına dökümde beş mil artığı ÇIPLAK
+    # yayımlanıyordu (staged 1, FFSC 2, GG 1, tap-off 1). Mil dökümünü
+    # okuyan kullanıcı 0.0'ı "çevrim doğrulandı" diye okur; oysa sayı
+    # çözücünün kendi yakınsama artığıdır. Künye aynı sözlükte durur.
     return {'name': name, 'pumps': pumps, 'turbine': turbine,
             'pump_power_W': pump_power, 'turbine_power_W': turbine_power,
-            'power_residual_rel': resid}
+            'power_residual_rel': resid,
+            'power_residual_basis': SHAFT_RESIDUAL_BASIS}
 
 
 def _pump_dict(propellant, mdot, inlet_bar, discharge_bar, power_w, eta,
                note=None):
+    dp = discharge_bar - inlet_bar
     d = {'propellant': propellant, 'mdot_kg_s': mdot,
          'inlet_pressure_bar': inlet_bar, 'discharge_pressure_bar': discharge_bar,
-         'dp_bar': discharge_bar - inlet_bar, 'power_W': power_w,
+         'dp_bar': dp, 'power_W': power_w,
          'efficiency': eta}
+    # D16/B4-09 — HÜKÜM, kırpma değil. ΔP <= 0 olan bir "pompa" akışkanı
+    # basıncı DÜŞÜREREK ilerletiyor demektir; böyle bir turbomakine yoktur.
+    # ÖLÇÜLDÜ (a2/once.json, B4-09): pompa girişi 200 bar / Pc 100 bar
+    # koşumunda iki pompa da ΔP = -78,0 bar ile yayımlanıyor, güçleri 0 W
+    # yazılıyor, türbin debisi 0 kg/s'e düşüyor ve çözüm converged=True
+    # kalıyordu — yani BEDAVA turbopompa "kapanan güç dengesi" olarak
+    # sunuluyordu. Hüküm burada kazanılır, ceza _pump_feasibility_gate'te
+    # kesilir.
+    d['dp_feasible'] = bool(dp > 0.0)
+    if not d['dp_feasible']:
+        d['dp_infeasible_basis'] = (
+            'the pump inlet pressure is at or above its discharge pressure, '
+            'so the required pressure rise is not positive. The shaft power '
+            'P = mdot*dP/(rho*eta) is therefore not defined for this pump '
+            'and the zero shown here is a floor, not a computed power. '
+            'Raise the chamber pressure, lower the pump inlet (tank) '
+            'pressure, or check the units of the inlet pressure you '
+            'supplied.')
     if note:
         d['note'] = note
     return d
+
+
+def _pump_feasibility_gate(sol: 'CycleSolution') -> 'CycleSolution':
+    """D16/B4-09 — yayımlanan her pompanın ΔP hükmü çözümü bağlar.
+
+    ``converged = True`` atandıktan SONRA, dönmeden hemen önce çağrılır:
+    milin herhangi bir pompası fiziksel olarak olanaksızsa güç dengesi
+    kapanmış SAYILMAZ (sessiz sıfır güç = yalancı kapanma). Uydurma sayı
+    üretilmez; büyüklük ``not_modelled`` ile geri çekilir.
+    """
+    olanaksiz = [p for shaft in (sol.shafts or [])
+                 for p in (shaft.get('pumps') or [])
+                 if not p.get('dp_feasible', True)]
+    if not olanaksiz:
+        return sol
+    sol.converged = False
+    # Hüküm YENİ BİR i18n anahtarı AÇMADAN yayımlanır: reddin gerekçesi hem
+    # pompa kaydının kendi ``dp_infeasible_basis`` veri alanında hem de
+    # çözümün ``infeasible_pumps`` listesindedir, geri çekilen büyüklük ise
+    # ``not_modelled`` etiketiyle işaretlidir. (Bu kulvarda i18n anahtar
+    # dosyası değiştirilemez; kodlu uyarı ui/i18n kulvarının kalemidir ve
+    # eklendiğinde bu blok tek satırla o koda geçebilir.)
+    sol.infeasible_pumps = [
+        {'propellant': p.get('propellant'),
+         'dp_bar': p.get('dp_bar'),
+         'inlet_pressure_bar': p.get('inlet_pressure_bar'),
+         'discharge_pressure_bar': p.get('discharge_pressure_bar'),
+         'basis': p.get('dp_infeasible_basis')}
+        for p in olanaksiz]
+    if 'power_balance' not in sol.not_modelled:
+        sol.not_modelled.append('power_balance')
+    return sol
 
 
 def _turbine_dict(mdot, tit, p_in_bar, pr, gas, eta, dh, power_w,
@@ -547,6 +845,12 @@ def solve_cycle(cycle_type: str,
     oxidizer = _norm_ox(oxidizer)
     if pc_bar <= 0 or mdot_total <= 0 or mr <= 0:
         raise ValueError('pc_bar, mdot_total and mr must be positive')
+    # D16/B4-08 — pompa verimleri her çevrimde okunur (pressure_fed dahil
+    # çağrı sözleşmesinin parçasıdır), o yüzden kapı burada, dallanmadan
+    # ÖNCE uygulanır. Türbin verimi varsayılan seçiminden sonra sınanır
+    # (None meşru bir girdidir: "sen seç" demektir).
+    eta_pump_ox = _eta_gate('eta_pump_ox', eta_pump_ox)
+    eta_pump_fuel = _eta_gate('eta_pump_fuel', eta_pump_fuel)
 
     sol = CycleSolution(cycle_type=cycle_type)
 
@@ -570,6 +874,9 @@ def solve_cycle(cycle_type: str,
                 sol.assumptions.append(_w(
                     'warn.cycle.turbine_eff_closed_assumed', 'info',
                     eta=eta_turbine))
+    else:
+        # D16/B4-08 — kullanıcının verdiği türbin verimi TANIM bandında mı?
+        eta_turbine = _eta_gate('eta_turbine', eta_turbine)
 
     if rho_ox is None:
         rho_ox = DENSITY_NBP_KG_M3[oxidizer]
@@ -604,7 +911,14 @@ def solve_cycle(cycle_type: str,
         sol.isp_mode = 'no_cycle_loss'
         sol.isp_loss_s = 0.0
         sol.isp_engine_s = isp_main_s
-        sol.power_residual_rel = 0.0
+        # ÖH D20 / B4-10 — BASINÇ BESLEMELİ ÇEVRİMDE KAPANACAK GÜÇ DENGESİ
+        # YOKTUR. Burada ``0.0`` yazılıydı ve kullanıcıya "türbin gücü ile
+        # pompa gücü tam örtüşüyor" diye okunan bir SAYI yayımlanıyordu;
+        # oysa bu çevrimde ne pompa ne türbin var (``sol.shafts`` BOŞ,
+        # ölçüldü: D20 a1/once.json ``B4_10.kosum.pressure_fed`` -> mil
+        # sayısı 0). Kazanılmamış hüküm yayımlanmaz: alan None kalır ve
+        # gerekçesi söylenir (fail-closed).
+        sol.power_residual_rel = None
         if tank_pressure_bar is None:
             sol.warnings.append(_w('warn.cycle.pressure_fed_no_tank_pressure', 'warning'))
             sol.converged = True
@@ -765,7 +1079,8 @@ def solve_cycle(cycle_type: str,
             sol.not_modelled.append('isp_loss')
             sol.warnings.append(_w('warn.cycle.open_cycle_isp_not_supplied', 'warning'))
         sol.converged = True
-        return sol
+        # D16/B4-09 — pompa ΔP hükmü çözümü bağlar (bkz. _pump_feasibility_gate).
+        return _pump_feasibility_gate(sol)
 
     # ------------------------------------------------------------------
     # STAGED COMBUSTION — tek ön yakıcı, kapalı çevrim.
@@ -849,6 +1164,22 @@ def solve_cycle(cycle_type: str,
                                             rho_ox, eta_pump_ox))
                     d_ox_report = max(disch_ox_main, d_ox_boost)
                     d_fuel_report = d_fuel
+                    # ÖH D22 / OH-D20-04: iki kademe AYRI da yayımlanır.
+                    sol.pump_stage_split = {
+                        'oxidizer': {
+                            'main_stage_discharge_bar': float(disch_ox_main),
+                            'main_stage_mdot_kg_s': float(m_ox_total),
+                            'boost_stage_discharge_bar': float(d_ox_boost),
+                            'boost_stage_mdot_kg_s': float(pb_ox),
+                        },
+                        'fuel': {
+                            'main_stage_discharge_bar': float(d_fuel),
+                            'main_stage_mdot_kg_s': float(m_fuel_total),
+                            'boost_stage_discharge_bar': None,
+                            'boost_stage_mdot_kg_s': None,
+                        },
+                        '_basis': PUMP_STAGE_SPLIT_BASIS,
+                    }
                 else:
                     d_ox = pb_feed + line_dp_ox_bar
                     d_fuel_boost = pb_feed + line_dp_fuel_bar + regen_dp_bar
@@ -865,6 +1196,23 @@ def solve_cycle(cycle_type: str,
                                             rho_fuel, eta_pump_fuel))
                     d_ox_report = d_ox
                     d_fuel_report = max(disch_fuel_main, d_fuel_boost)
+                    # ÖH D22 / OH-D20-04 — oksitleyici-zengin ön yakıcıda
+                    # bölünen taraf YAKIT pompasıdır (ayna görüntü).
+                    sol.pump_stage_split = {
+                        'oxidizer': {
+                            'main_stage_discharge_bar': float(d_ox),
+                            'main_stage_mdot_kg_s': float(m_ox_total),
+                            'boost_stage_discharge_bar': None,
+                            'boost_stage_mdot_kg_s': None,
+                        },
+                        'fuel': {
+                            'main_stage_discharge_bar': float(disch_fuel_main),
+                            'main_stage_mdot_kg_s': float(m_fuel_total),
+                            'boost_stage_discharge_bar': float(d_fuel_boost),
+                            'boost_stage_mdot_kg_s': float(pb_fuel),
+                        },
+                        '_basis': PUMP_STAGE_SPLIT_BASIS,
+                    }
                 p_avail = mdot_turb * _turbine_specific_work(gas, tit, pr,
                                                              eta_turbine)
                 return (p_avail, p_op + p_fp, p_op, p_fp, d_ox_report,
@@ -969,7 +1317,8 @@ def solve_cycle(cycle_type: str,
         sol.isp_loss_s = 0.0
         sol.isp_engine_s = isp_main_s
         sol.converged = True
-        return sol
+        # D16/B4-09 — pompa ΔP hükmü çözümü bağlar (bkz. _pump_feasibility_gate).
+        return _pump_feasibility_gate(sol)
 
     # ------------------------------------------------------------------
     # FFSC — iki mil, iki ön yakıcı, kapalı çevrim.
@@ -1222,7 +1571,8 @@ def solve_cycle(cycle_type: str,
         sol.isp_loss_s = 0.0
         sol.isp_engine_s = isp_main_s
         sol.converged = True
-        return sol
+        # D16/B4-09 — pompa ΔP hükmü çözümü bağlar (bkz. _pump_feasibility_gate).
+        return _pump_feasibility_gate(sol)
 
     # ------------------------------------------------------------------
     # EXPANDER — türbin gazı rejeneratif ceketten çıkan yakıt.
@@ -1385,6 +1735,7 @@ def solve_cycle(cycle_type: str,
         sol.isp_loss_s = 0.0
         sol.isp_engine_s = isp_main_s
         sol.converged = True
-        return sol
+        # D16/B4-09 — pompa ΔP hükmü çözümü bağlar (bkz. _pump_feasibility_gate).
+        return _pump_feasibility_gate(sol)
 
     raise AssertionError('unreachable')  # pragma: no cover

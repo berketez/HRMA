@@ -88,7 +88,14 @@ def strip_js_comments(src):
 
 
 def balanced(src, start):
-    """`start` konumundaki `{`/`(` ile eşleşen kapanışın indisini döndürür."""
+    """`start` konumundaki `{`/`(` ile eşleşen kapanışın indisini döndürür.
+
+    JS yorumları (`// ...` satır sonuna kadar, `/* ... */`) atlanır: yorum
+    içindeki kesme işareti ya da parantez sayaca girmez. (HS5 ölçümü, 14
+    Eki 2026: atlanmadığında şablondaki bir yorumdaki tek kesme işareti
+    sayacı tırnak kipine sokuyor, renderVehicleText kesimi gerçek sonunu
+    bulamayıp 841 -> 1597. satıra kadar uzanıyordu.)
+    """
     opener = src[start]
     closer = {'{': '}', '(': ')', '[': ']'}[opener]
     depth, i, quote = 0, start, None
@@ -100,6 +107,14 @@ def balanced(src, start):
                 continue
             if ch == quote:
                 quote = None
+        elif ch == '/' and src.startswith('//', i):
+            satir_sonu = src.find('\n', i)
+            i = len(src) if satir_sonu < 0 else satir_sonu
+            continue
+        elif ch == '/' and src.startswith('/*', i):
+            kapanis = src.find('*/', i + 2)
+            i = len(src) if kapanis < 0 else kapanis + 2
+            continue
         elif ch in '\'"`':
             quote = ch
         elif ch == opener:
@@ -535,7 +550,10 @@ def test_t74_tile_indicator_never_invents_a_number(tmp_path):
         sözlükten gelmeli (TR sözlüğü verilince 'karo' yazmalı)
     """
     src = read(LAUNCH_SITE_HTML)
-    body = (cut_function(src, 'fmtBytes') + '\n'
+    # ÖH D36 · OH-K-04: fmtBytes sayıyı artık fmtNum_ (I18N.number köprüsü)
+    # ile basıyor; köprü de gövdeye alınır (node'da window yok → toFixed'e düşer).
+    body = (cut_function(src, 'fmtNum_') + '\n'
+            + cut_function(src, 'fmtBytes') + '\n'
             + cut_function(src, 'renderTileUsage'))
     script = (
         'const dugum = {textContent: null};\n'

@@ -72,6 +72,48 @@ THERMAL_BASE = {
     'burn_time': 10, 'mdot_total': 1.0, 'wall_thickness': 0.005,
 }
 
+#: ÖH Faz B / B4 — ``/analyze_thermal_safety``in YOKLUK ekseni. Her vaka
+#: ``(etiket, gövde, bildirilmesi beklenen eksik alan adları)``. Alan listesi
+#: testin kendi ölçümüdür; ürün sabiti (``_THERMAL_SAFETY_POSITIVE_FIELDS``)
+#: ithal EDİLMEZ — sınanan şey tam da ürünün bu alanları uydurma hakkıdır.
+
+
+def _yokluk_vakalari():
+    vakalar = [('bos_govde', {}, set(THERMAL_BASE))]
+    for alan in sorted(THERMAL_BASE):
+        vakalar.append((
+            f'eksik_{alan}',
+            {k: v for k, v in THERMAL_BASE.items() if k != alan},
+            {alan}))
+        vakalar.append((
+            f'none_{alan}', dict(THERMAL_BASE, **{alan: None}), {alan}))
+        vakalar.append((
+            f'bos_dize_{alan}', dict(THERMAL_BASE, **{alan: ''}), {alan}))
+    return vakalar
+
+
+YOKLUK_VAKALARI = _yokluk_vakalari()
+
+
+def _isi_akisi(response):
+    """Yanıttan gaz tarafı ısı akısını çeker (ayırt edicilik ölçümü)."""
+    return (response.get_json()['thermal_analysis']['gas_side_analysis']
+            ['heat_flux'])
+
+
+def _bildirilen_eksikler(body):
+    """``missing_fields`` alanındaki adları küme olarak verir.
+
+    Depoda iki biçim var: düz ad listesi (``/calculate_solid``,
+    ``/api/thermal-protection``) ve sözlük listesi (``invalid_fields``).
+    İkisini de kabul eder; sınanan şey adın BİLDİRİLİP bildirilmediğidir.
+    """
+    ham = body.get('missing_fields')
+    if not ham:
+        return set()
+    return {p.get('field') if isinstance(p, dict) else p for p in ham}
+
+
 #: B6 ölçümünde kullanılan referans oda (normal girdi → HTTP 200 + hüküm).
 STRUCTURAL_BASE = {
     'chamber_pressure': 20.0, 'chamber_diameter': 0.1,
@@ -103,17 +145,68 @@ class TestFizikselGirdiKapisi:
         assert {p['field']: p['reason'] for p in problems} == {
             'a': 'must_be_positive', 'b': 'must_be_positive'}
 
+    # ÖH D32 fix-35d / OH-D31-10 — GEREKÇE KODU KANONU (ana model hükmü,
+    # 15 Eylül 2026). Bu paylaşımlı kapı ÜÇ AYRI soruyu tek ada
+    # ("not_a_number") topluyordu; kardeş kapılar
+    # (``_tasarim_hedefi_kapisi``, ``_form_band_kapisi``) ayrımı zaten
+    # yapıyordu, yani ürün aynı olgu için iki sözlük konuşuyordu (ölçüldü,
+    # ``docs/scofield/raw/OH/D32/fix35/d/once_dort_uc.json``). Kanon:
+    #
+    #   * ``bool``                       -> ``boolean_is_not_a_number``
+    #   * JSON SAYISI OLMAYAN değer      -> ``not_a_json_number``
+    #     (sayı-benzeri DİZE dâhil: ``'NaN'``, ``'-Infinity'``, ``'20.0'``;
+    #      tek kaynak ``input_guard.is_json_number``)
+    #   * JSON sayısı AMA sonlu değil    -> ``not_finite``
+    #
+    # ``not_a_number`` bu kapıda EMEKLİDİR. Bekçi GEVŞEMEDİ: eskiden dört
+    # değer tek ada düşüyordu, şimdi her biri kendi adıyla sınanıyor.
     def test_sonlu_olmayan_reddedilir(self):
-        for bad in ('NaN', float('nan'), float('inf'), '-Infinity'):
+        """SAYI olarak gelmiş ama sonlu olmayan değer -> ``not_finite``."""
+        for bad in (float('nan'), float('inf'), float('-inf')):
             problems = _collect_unphysical_fields({'a': bad}, positive=('a',))
             assert [p['reason'] for p in problems] == ['not_finite'], bad
+
+    def test_sonlu_olmayan_TEL_BICIMI_json_sayisi_degildir(self):
+        """``'NaN'`` bir DİZEDİR: sonluluk sorusuna hiç gelmez.
+
+        JSON'un ``NaN``/``Infinity`` diye bir sayı biçimi yoktur; istemci
+        bunları ancak dize olarak gönderebilir ve o zaman sorun sonluluk
+        değil TEL BİÇİMİDİR. İki soruyu ayırmak, kullanıcıya yapması
+        gerekeni doğru söyler (tipi düzelt, değeri değil).
+
+        KAPSAM (ölçülmüş, ADIYLA açık kalem — ÖH D32 fix-35d): bu PAYLAŞIMLI
+        kapı sayı-benzeri dizeyi (``'20.0'``) hâlâ OKUR ve kabul eder,
+        çünkü sözleşmesi ``input_guard.finite_number``dır ("bu değer sonlu
+        bir sayı olarak okunabilir mi?"), istek sınırındaki
+        ``is_json_number`` değil. Kardeş ``/calculate*`` uçları aynı tel
+        biçimini reddediyor. Bu AYRI bir karardır (kapıyı sıkmak
+        ``/analyze_thermal_safety``, ``/analyze_structural_safety`` ve
+        ``/api/six-dof-analysis`` uçlarının kabul yüzeyini daraltır) ve
+        ölçülmeden verilmez; burada YALNIZ gerekçe kodu kanonu sınanır,
+        kabul yüzeyi DEĞİL. Kalem D33 adayıdır ve raporda adıyla durur.
+        """
+        for bad in ('NaN', '-Infinity', 'Infinity'):
+            problems = _collect_unphysical_fields({'a': bad}, positive=('a',))
+            assert [p['reason'] for p in problems] == [
+                'not_a_json_number'], bad
 
     def test_sayi_olmayan_reddedilir(self):
         # Liste ölçülmüş vakadır: B6'da HTTP 500 "float() argument must be a
         # string or a real number, not 'list'" üretiyordu.
-        for bad in ([1, 2], 'abc', {'x': 1}, True):
+        for bad in ([1, 2], 'abc', {'x': 1}):
             problems = _collect_unphysical_fields({'a': bad}, positive=('a',))
-            assert [p['reason'] for p in problems] == ['not_a_number'], bad
+            assert [p['reason'] for p in problems] == [
+                'not_a_json_number'], bad
+
+    def test_mantiksal_deger_KENDI_adiyla_reddedilir(self):
+        """``True`` sayısal alanda kendi adıyla düşer.
+
+        ``float(True) == 1.0`` olduğu için bayrak bir bandın içine sessizce
+        düşebiliyordu; ayrı ad, kullanıcıya yapması gerekeni söyler.
+        Kardeş kapı ``_tasarim_hedefi_kapisi`` bu adı ZATEN kullanıyordu.
+        """
+        problems = _collect_unphysical_fields({'a': True}, positive=('a',))
+        assert [p['reason'] for p in problems] == ['boolean_is_not_a_number']
 
     def test_negatif_olmayan_alanda_sifir_gecerli(self):
         assert _collect_unphysical_fields({'a': 0}, non_negative=('a',)) == []
@@ -125,7 +218,12 @@ class TestFizikselGirdiKapisi:
         problems = _collect_unphysical_fields({'a': 7.0},
                                               ranges={'a': (0.0, 5.0)})
         assert problems[0]['reason'] == 'out_of_range'
-        assert problems[0]['allowed_range'] == [0.0, 5.0]
+        # ÖH D27 a2 / OH-D25-23 — BEKÇİ ÇEVRİLDİ: bu paylaşımlı kapı
+        # bandı artık deponun kanonik adıyla (``accepted_range``, 17
+        # site) yayımlıyor; eski ad (4 site) tek hamlede söküldü.
+        assert problems[0]['accepted_range'] == [0.0, 5.0]
+        assert 'allowed_range' not in problems[0], (
+            'eski ad geri geldi: aynı kavram iki adla yayımlanamaz')
 
     def test_finite_isaret_serbest_birakir(self):
         """Rakım eksi olabilir (Lut Gölü); yalnız sonluluk aranır."""
@@ -141,14 +239,141 @@ class TestFizikselGirdiKapisi:
 # ---------------------------------------------------------------------------
 
 class TestTermalGuvenlikHukmu:
-    """H3-B2: bozuk girdi risk seviyesini DÜŞÜREMEZ."""
+    """H3-B2: bozuk girdi risk seviyesini DÜŞÜREMEZ.
+
+    **ÖH Faz B / adım B4 (Tip-T) — kapsam YOKLUK eksenine genişletildi.**
+
+    Faz 5B'de kurulan kapı yalnız BOZUK SAYIyı tutuyordu (``NaN``, ``-1``,
+    ``0``). Savcı ölçümü (defter P13B2-03, **kritik**) ikinci ekseni açtı:
+    ucun **yokluğu** hiç tutmadığını. 27 Ağu 2026'da (HEAD ``344714d``)
+    yeniden ölçüldü:
+
+    ==============================  ====  ============  ==================
+    gövde                           HTTP  ``risk``      yanıt gövdesi
+    ==============================  ====  ============  ==================
+    sağlıklı taban                  200   HIGH          md5* ``0eea37ff``
+    ``{}`` (boş gövde)              200   HIGH          md5* ``0eea37ff``
+    tek alan eksik (7 alanın 7'si)  200   HIGH          md5* ``0eea37ff``
+    alan ``None``                   500   —             ham ``float()`` metni
+    alan ``""``                     500   —             ham ``float()`` metni
+    ==============================  ====  ============  ==================
+
+    (*) md5, ``json.dumps(..., sort_keys=True)`` kanonik biçimi üstünden
+    alındı; savcının ``08d81e162e5c``si başka bir kanonlaştırmanın aynı
+    özdeşliğidir. Aşağıdaki bekçi hash'e değil HAM BAYTA bakar.
+
+    Yani boş gövde ile sağlıklı taban **bit birebir aynı** yanıtı veriyor:
+    kullanıcının hiç vermediği bir motor için ``risk_level='HIGH'`` hükmü
+    basılıyor ve bunun uydurma olduğunu söyleyen bir beyan alanı yok
+    (``heat_flux`` ikisinde de 13 027 380,540100738). ``None``/``""``
+    kolunda ise ham Python istisna metni kullanıcıya kadar gidiyor.
+
+    Tüketici CANLI: ``hrma/static/js/panels/thermal_panel.js:496`` bu ucu
+    çağırıp ``data.thermal_analysis``ı (``:373``) panelde çiziyor.
+
+    Bu sınıftaki ``test_normal_girdi_hukum_uretir`` tek başına AYIRT EDEMEZ
+    (aynı iddia boş gövdede de yeşil); yanına girdiye-duyarlılık ve
+    boş-gövde-ayrımı bekçileri kondu. Beklenen fail-closed biçimi deponun
+    kendi sağlıklı deseni: ``/calculate_solid`` (``app.py:3701-3722``,
+    422 + ``missing_fields`` + ``required_fields``) ve aynı dosyadaki
+    ``/api/thermal-protection`` bekçileri (``test_bos_alan_500_degil_422``).
+    """
 
     def test_normal_girdi_hukum_uretir(self, client):
-        """Düzeltme öncesi/sonrası AYNI kalması gereken taban ölçüm."""
+        """Düzeltme öncesi/sonrası AYNI kalması gereken taban ölçüm.
+
+        UYARI (B4): bu iddia TEK BAŞINA ayırt edici değildir — bugün boş
+        gövde de aynı 200 + ``HIGH``ı üretiyor. Ayırt eden iddialar
+        ``test_hukum_gonderilen_girdiden_turer`` ve
+        ``test_bos_govde_saglikli_tabanin_ciktisini_uretemez``dir.
+        """
         response = client.post('/analyze_thermal_safety', json=THERMAL_BASE)
         assert response.status_code == 200
         safety = response.get_json()['thermal_analysis']['safety_analysis']
         assert safety['risk_level'] == 'HIGH'
+
+    def test_hukum_gonderilen_girdiden_turer(self, client):
+        """Hüküm GÖNDERİLEN motora bağlı olmalı (ayırt edici taban).
+
+        Ölçülen: Pc 20 bar → ``heat_flux`` 13 027 380,54 W/m²;
+        Pc 40 bar → 24 115 276,51 W/m². Uç sayısal olarak girdiye duyarlı;
+        eksik olan şey duyarlılık değil, YOKLUĞU tutan kapı.
+        """
+        taban = client.post('/analyze_thermal_safety', json=THERMAL_BASE)
+        farkli = client.post('/analyze_thermal_safety',
+                             json=dict(THERMAL_BASE, chamber_pressure=40))
+        assert taban.status_code == 200 and farkli.status_code == 200
+        assert taban.get_data() != farkli.get_data()
+        assert _isi_akisi(taban) != _isi_akisi(farkli)
+
+    # Z3 onarımı (2026-08-27): boş gövde artık 422 + missing_fields —
+    # P13B2-03 imi XPASS ile düştü.
+    def test_bos_govde_saglikli_tabanin_ciktisini_uretemez(self, client):
+        """Boş gövde, doldurulmuş gövdeyle AYNI hükmü üretemez.
+
+        Bu iddia P13B2-03'ün çekirdeğidir: savcı üç bağımsız ölçümde boş
+        gövde ⟷ sağlıklı taban yanıtlarını ``md5=08d81e162e5c`` ile bit
+        birebir aynı buldu (bu turda yeniden ölçüldü, ham gövdeler özdeş).
+        "Sağlıklı tabanla aynı çıktı" bir sağlık ölçütü DEĞİL, kusurun ta
+        kendisidir — o yüzden burada TERS yönde iddia edilir.
+        """
+        taban = client.post('/analyze_thermal_safety', json=THERMAL_BASE)
+        bos = client.post('/analyze_thermal_safety', json={})
+        assert bos.get_data() != taban.get_data(), (
+            'boş gövde sağlıklı tabanın yanıtını birebir üretiyor — '
+            'girdisi olmayan motor için güvenlik hükmü basılıyor')
+
+    # Z3 onarımı (2026-08-27): kapı YOKLUĞU da tutuyor (22/22 vaka 422 +
+    # alan adı; missing_field_groups 'biri yeterli' beyanıyla) — im düştü.
+    @pytest.mark.parametrize(
+        'govde,beklenen_eksikler',
+        [vaka[1:] for vaka in YOKLUK_VAKALARI],
+        ids=[vaka[0] for vaka in YOKLUK_VAKALARI])
+    def test_eksik_girdi_hukum_uretmez(self, client, govde,
+                                       beklenen_eksikler):
+        """Verilmeyen alan UYDURULMAZ: 422 + eksik alan ADIYLA.
+
+        Kapsam (22 vaka): boş gövde · 7 alanın her biri için tek-alan
+        eksikliği · ``None`` · ``""``. Bugünkü ürün ilk sekizinde 200 +
+        ``HIGH`` uyduruyor, son on dördünde ham ``float()`` istisnasıyla
+        500 veriyor.
+
+        Sözleşme deponun kendi desenidir: ``/calculate_solid`` ve
+        ``/api/thermal-protection`` eksik girdide 422 + ``missing_fields``
+        döner ve ham Python hatasını kullanıcıya SIZDIRMAZ.
+        """
+        response = client.post('/analyze_thermal_safety', json=govde)
+        assert response.status_code == 422, (
+            f'yokluk reddedilmeli; alınan HTTP {response.status_code}: '
+            f'{response.get_data(as_text=True)[:200]}')
+        body = response.get_json()
+        assert body['error'] == 'incomplete_thermal_input'
+        # Hüküm YOK: verilmeyen girdiden risk seviyesi çıkmaz.
+        assert 'thermal_analysis' not in body
+        assert beklenen_eksikler <= _bildirilen_eksikler(body), (
+            f'eksik alan adıyla bildirilmeli; beklenen {beklenen_eksikler}, '
+            f'gelen {body.get("missing_fields")}')
+        # Ham Python istisna metni kullanıcıya gitmez (aynı dosyadaki
+        # ``test_bos_alan_500_degil_422`` deseninin kardeşi).
+        metin = str(body)
+        assert 'float() argument' not in metin
+        assert 'could not convert string to float' not in metin
+
+    def test_govde_json_null_zaten_fail_closed(self, client):
+        """Gövde ``null`` iken merkezî kapı çalışıyor — TESCİL (sağlıklı).
+
+        B4 taramasında ölçüldü: gövde-düzeyi yokluk (``null``, boş gövde,
+        skaler) ``app.py:600`` ``_reject_malformed_json_body`` kapısında
+        400 + makine-okur kodla kapanıyor. Bu bekçi o davranışı bu rota
+        için çapalar (genel envanter genişletmesi ÖK-23'ün işi; burada
+        yalnız gevşememesi kilitlenir).
+        """
+        response = client.post('/analyze_thermal_safety', data='null',
+                               content_type='application/json')
+        assert response.status_code == 400
+        body = response.get_json()
+        assert body['error'] == 'body_not_an_object'
+        assert 'thermal_analysis' not in body
 
     @pytest.mark.parametrize('bozuk_deger', ['NaN', -1, 0])
     def test_bozuk_girdi_riski_dusuremez(self, client, bozuk_deger):
@@ -236,8 +461,11 @@ class TestYapisalGirdiKapisi:
         payload = dict(STRUCTURAL_BASE, chamber_pressure=[1, 2])
         response = client.post('/analyze_structural_safety', json=payload)
         assert response.status_code == 422
+        # ÖH D32 fix-35d / OH-D31-10: liste bir JSON SAYISI değildir; kanon
+        # ad merkezin adıdır (``input_guard.is_json_number``). HTTP sınıfı
+        # (422) ve kalemin özgün iddiası (500 DEĞİL) aynen duruyor.
         assert response.get_json()['invalid_fields'][0]['reason'] == \
-            'not_a_number'
+            'not_a_json_number'
 
     def test_eksik_alan_kapisi_korunur(self, client):
         """Faz 4B'nin ``incomplete_structural_input`` kapısı bozulmadı."""
@@ -418,9 +646,27 @@ class TestParametrikIsButcesi:
 
         Artık ilk noktanın ÖLÇÜLEN maliyetiyle öngörü yapılır ve istek
         bütçeyi aşacaksa saniyeler içinde reddedilir.
+
+        ÖH D27 / P16S1-02: gövdeye ``param_start`` + ``param_end`` EKLENDİ.
+        Testin iddiası değişmedi (aşırı tarama erken reddedilir); değişen,
+        ucun artık süpürme ARALIĞINI uydurmamasıdır — aralık verilmeyince
+        tarama hiç başlamıyor ve istek ``sweep_interval_not_supplied`` ile
+        dönüyor, yani bu gövde bütçe kapısına ulaşamıyordu. Aralık,
+        kalemin ölçtüğü sessiz yedeğin (``param_start`` 0,5 /
+        ``param_end`` 3,0) TA KENDİSİDİR, dolayısıyla test eskisiyle
+        birebir aynı taramayı ister.
+
+        ÖH D28 a1 / OH-D27-03: aynı gerekçeyle ``param_type`` de EKLENDİ.
+        Süpürme EKSENİNİN ADI da artık uydurulmuyor (gönderilmeyince 422
+        ``sweep_parameter_not_supplied``), o yüzden bu gövde bütçe
+        kapısına ulaşamıyordu. Yazılan ad, ucun eskiden sessizce düştüğü
+        yedeğin (``'of_ratio'``) TA KENDİSİDİR — testin iddiası
+        (aşırı tarama erken reddedilir) değişmedi.
         """
         response = client.post('/parametric-analysis',
-                               json={'param_steps': 100,
+                               json={'param_type': 'of_ratio',
+                                     'param_steps': 100,
+                                     'param_start': 0.5, 'param_end': 3.0,
                                      'time_budget_s': 0.5})
         assert response.status_code == 422
         body = response.get_json()

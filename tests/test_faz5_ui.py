@@ -273,7 +273,22 @@ def test_dock_dolu_formda_istek_gonderilir_ve_istege_bagli_alan_atlanir(tmp_path
     assert 'q_star_MJ_kg' not in body, (
         'boş bırakılan İSTEĞE BAĞLI alan gövdeye uydurma değerle kondu: %s'
         % body)
-    assert data['status'] == '', 'başarılı koşuda hata satırı kaldı'
+    # ÇEVRİLEN BEKÇİ — ÖH D35 · OH-GT-36 (22 Eylül 2026)
+    # ------------------------------------------------------------------
+    # Bu satır eskiden `data['status'] == ''` diyordu, yani BAŞARILI
+    # koşumda durum satırının BOŞ kalmasını ŞART KOŞUYORDU. İddianın
+    # niyeti "hata satırı kalmasın" idi; ama ölçüldüğünde (21 Eylül
+    # Cowork turu, U-1/SU-1/LU-3) bunun kullanıcıda karşılığı "hiçbir şey
+    # olmadı" oluyordu: "ÇALIŞIYOR…" siliniyor, yerine hiçbir şey
+    # konmuyordu. Yani bekçi kusuru KORUYORDU.
+    # Yeni sözleşme: başarı dalı bitiş iletisini basar (`ac.run.done`);
+    # iddia artık niyetin kendisini ölçer — satır DOLU ve satır bir HATA
+    # satırı DEĞİL.
+    assert data['status'], 'başarılı koşuda durum satırı boş kaldı (OH-GT-36)'
+    assert 'ERROR' not in data['status'].upper(), (
+        'başarılı koşuda hata satırı kaldı: %r' % data['status'])
+    assert 'Completed' in data['status'], (
+        'bitiş iletisi beklenen anahtardan gelmiyor: %r' % data['status'])
     assert data['rendered'] == 1
 
 
@@ -354,7 +369,16 @@ def test_chamber_temperature_arayuzden_gonderilmiyor():
     adv = read(TEMPLATES / 'advanced.html')
     start = adv.index('function getFormData()')
     end = adv.index('\n        }', start)
-    assert 'chamber_temperature' not in adv[start:end], (
+    govde = adv[start:end]
+    # ÖH D31 · arayuz-panel a3 (14 Eyl 2026): YORUMLAR DIŞARIDA.
+    # İddia "toplayıcı bu anahtarı GÖNDERMİYOR"dur; çıplak alt dize
+    # sınaması bunu "bu sözcük hiç geçmiyor"a çeviriyordu. D31 a2, ucun
+    # `FLOW_REQUIRED_FIELDS` sözleşmesini ANLATAN bir yorum bloğunu
+    # `getFormData` içine koyunca bekçi kırmızı verdi — oysa gönderilen
+    # anahtar yok. Yorumu silmek belgeyi öldürürdü; ölçüt daraltıldı.
+    govde = re.sub(r'/\*.*?\*/', '', govde, flags=re.S)
+    govde = re.sub(r'(?m)//.*$', '', govde)
+    assert 'chamber_temperature' not in govde, (
         'getFormData chamber_temperature gönderiyor; /calculate bu alanı '
         'sessizce yok sayar (ölçüldü: değer ne olursa olsun yanıt bit-aynı)')
 

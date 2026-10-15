@@ -47,12 +47,15 @@ import json
 import math
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
 
 import pytest
 
+from hrma.constants import MOTOR_TYPES
+from hrma.engines.liquid_rocket_engine import BURN_TIME_DEFAULT_S
 from hrma.export.motor_geometry import (
     liquid_results_to_motor_geometry,
     solid_results_to_motor_geometry,
@@ -66,7 +69,9 @@ EXAMPLES_DIR = REPO_ROOT / 'examples'
 # Uygulama yalnız geri döngü Host başlığına yanıt verir (DNS-rebinding kapısı)
 HEADERS = {'Host': '127.0.0.1:8080'}
 
-MOTOR_TYPES = ('hybrid', 'solid', 'liquid')
+# MOTOR_TYPES yukarıda hrma.constants'tan içe aktarıldı (tek tanım noktası;
+# bekçi: tests/test_sabit_tek_kaynak.py). Sıra buradaki parametrize kimliklerini
+# de belirlediği için sıralı demet olarak gelir.
 
 #: motor_type -> örnek proje adı / hesap ucu (test_example_projects ile aynı)
 NAMES = {
@@ -80,9 +85,14 @@ ENDPOINTS = {
     'liquid': '/calculate_liquid',
 }
 
-#: Bu bekçinin node içinde yüklediği paneller (fromResults'ı sayısal öneri
-#: üretenler). Sıra önemli: analysis_dock.js her zaman ÖNCE yüklenir.
-PANEL_FILES = [
+#: Elle liste döneminin kapsamı — TABAN olarak korunur. ÖH FAZ D / D3
+#: (defter **P13B4-06**): bu yedili, listenin KENDİ belgesindeki ölçüte
+#: (*"fromResults'ı sayısal öneri üretenler"*) uyan panellerin 7'sini
+#: kapsıyordu; ölçüldüğünde `fromResults` bildiren panel sayısı 13'tü ve
+#: en yoğun kullanıcı (`performance_panel.js`) listede yoktu. Aşağıdaki
+#: liste artık TÜRETİLMİŞtir; bu demet yalnız "türetme daralmasın"
+#: çapasıdır (bkz. :func:`test_panel_kapsami_turetilmis_ve_daralmadi`).
+TARIHSEL_PANEL_FILES = (
     'thermal_panel.js',
     'structural_panel.js',
     'safety_panel.js',
@@ -90,7 +100,134 @@ PANEL_FILES = [
     'joint_panel.js',
     'cooling_panel.js',
     'flow_panel.js',
-]
+)
+
+#: Bu bekçinin node içinde yüklediği paneller — **türetilmiş** (elle liste
+#: değil). İlacın emsali depoda yazılı: ``test_i18n_common.py`` içindeki
+#: ``PANEL_FILES = sorted(PANELS_DIR.glob('*.js'))``. Yeni bir panel
+#: eklendiğinde koşum takımına KENDİLİĞİNDEN girer.
+#: Sıra önemli: analysis_dock.js her zaman ÖNCE yüklenir. Tanım
+#: ``test_i18n_common.py``dakiyle BİREBİR aynı ifadedir (aynı ad, aynı
+#: türetme, aynı tip) — iki bekçi aynı panel kümesini görsün diye.
+PANEL_FILES = sorted(PANELS_DIR.glob('*.js'))
+
+
+# ---------------------------------------------------------------------------
+# Kapsam türetmesi — hangi panel `fromResults` BİLDİRİYOR?
+# ---------------------------------------------------------------------------
+# Depoda JS için tam bir AST ayrıştırıcısı yok (node_modules yok, acorn yok),
+# bu yüzden bildirim taraması iki katmanlıdır ve ikisi birbirini çaprazlar:
+#
+#   1. YAPISAL tarama (aşağıdaki iki yardımcı): yorumlar ve dize/şablon
+#      literalleri boşlukla doldurulduktan sonra `fromResults` yalnız TANIM
+#      konumunda (`fromResults:` / `fromResults(` / `fromResults =`) sayılır.
+#      Böylece cfd_panel.js:130'daki yorum bahsi gibi kayıtlar elenir.
+#   2. ÇALIŞMA ANI kayıt defteri (node): panel gerçekten yüklenir ve
+#      `typeof spec.fromResults === 'function'` sorulur.
+#
+# İkisi ayrışırsa bu bir bulgudur ve `test_bildirim_ve_kayit_ortusuyor`
+# kırmızı verir — "dosyada duruyor ama kaydolmuyor" sessizce geçemez.
+_STRING_RE = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|`(?:\\.|[^`\\])*`",
+                        re.S)
+_BLOCK_COMMENT_RE = re.compile(r'/\*.*?\*/', re.S)
+_FROM_RESULTS_TANIM_RE = re.compile(r'\bfromResults\s*[:(=]')
+#: Panel dosyasının hangi kayıt defterine kaydolduğu (Analiz Güvertesi mi,
+#: Analiz Merkezi mi). Bu bekçi yalnız Güverte'yi yükler.
+_DOCK_REGISTER_RE = re.compile(r'\bAnalysisDock\.register\s*\(')
+_CENTER_REGISTER_RE = re.compile(r'\bAnalysisCenter\.register\s*\(')
+
+
+def _js_kod_govdesi(src):
+    """JS kaynağından yorumları ve dize literallerini boşlukla siler.
+
+    TEK GEÇİŞLİ durum makinesi. Önceki iki fazlı süzgeç (satır satır
+    tırnak takibi + sonda ``re.S``li ``_STRING_RE``) ÖLÇÜLEN bir körlük
+    üretiyordu (defter **OH-B4-03**, ``once_ohb403.json``): satırda
+    kapanmayan bir kesme işareti (Türkçe yorumlardaki *"Merkez'in"*
+    gibi) satır tarayıcısında zararsız görünüyor, ama sondaki
+    ``_STRING_RE`` ``re.S`` ile o tırnaktan dosyanın ilerisindeki bir
+    sonraki tırnağa kadar HER ŞEYİ yutuyordu. ÖLÇÜLDÜ: 13 panelin
+    yalnız **9**'unda ``fromResults`` tanımı görülebiliyordu,
+    ``safety_panel.js``in %97'si, ``cfd_panel.js``in %94'ü,
+    ``stability_panel.js``in %96'sı kod gövdesinden düşüyordu ve Merkez
+    kiracısı sayısı **0** çıkıyordu — yani "Merkez kiracısı muafiyeti"
+    fiilen hiç işlemiyordu.
+
+    Bu sürümde yorum ve dize aynı geçişte tüketilir, dolayısıyla bir
+    yorumun içindeki kesme işareti tarayıcıya HİÇ ulaşmaz. Şablon
+    literalleri (`` ` ``) satır aşabildiği için çok satırlı; ``'``/``"``
+    literalleri JS'te satır sonunda kapanır (kaçışlı satır devamı
+    dışında), o yüzden kapanmamış tırnak satır sonunda bırakılır ve
+    kalan dosyayı kirletmez.
+
+    Konum (satır/sütun) korunur: silinen her karakterin yerine boşluk
+    konur, satır sonları olduğu gibi kalır.
+    """
+    n = len(src)
+    out = []
+    i = 0
+    while i < n:
+        ch = src[i]
+        if ch == '/' and i + 1 < n and src[i + 1] == '*':      # blok yorum
+            j = src.find('*/', i + 2)
+            j = n if j < 0 else j + 2
+            out.append(re.sub(r'[^\n]', ' ', src[i:j]))
+            i = j
+        elif ch == '/' and i + 1 < n and src[i + 1] == '/':    # satır yorumu
+            j = src.find('\n', i)
+            j = n if j < 0 else j
+            out.append(' ' * (j - i))
+            i = j
+        elif ch in '\'"`':                                     # dize/şablon
+            q = ch
+            j = i + 1
+            while j < n:
+                c = src[j]
+                if c == '\\':
+                    j += 2
+                    continue
+                if c == q:
+                    j += 1
+                    break
+                if c == '\n' and q != '`':
+                    break                # JS: '/" satır sonunda kapanır
+                j += 1
+            else:
+                j = n
+            out.append(re.sub(r'[^\n]', ' ', src[i:j]))
+            i = j
+        else:
+            out.append(ch)
+            i += 1
+    return ''.join(out)
+
+
+def _panel_bildirimleri():
+    """dosya adı -> (fromResults tanımı var mı, güverte kiracısı mı, merkez mi)."""
+    out = {}
+    for path in sorted(PANELS_DIR.glob('*.js')):
+        kod = _js_kod_govdesi(path.read_text(encoding='utf-8'))
+        out[path.name] = (
+            bool(_FROM_RESULTS_TANIM_RE.search(kod)),
+            bool(_DOCK_REGISTER_RE.search(kod)),
+            bool(_CENTER_REGISTER_RE.search(kod)),
+        )
+    return out
+
+
+PANEL_BILDIRIMLERI = _panel_bildirimleri()
+
+#: `fromResults` bildiren paneller (13 — ölçüldü, P13B4-06).
+FROMRESULTS_PANELLERI = tuple(sorted(
+    ad for ad, (fr, _dock, _mrk) in PANEL_BILDIRIMLERI.items() if fr))
+
+#: Bunların Analiz GÜVERTESİ'ne kaydolanları — bu bekçinin gerçek kapsamı.
+#: Kalan ikisi (`cfd_panel.js`, `stability_panel.js`) Analiz MERKEZİ
+#: kiracısıdır: `window.AnalysisCenter.register` çağırırlar, güverte kayıt
+#: defterine hiç girmezler. Bu ayrım da türetilmiştir (kaynakta hangi
+#: register çağrısının geçtiğine bakılır), elle muafiyet listesi değildir.
+DOCK_FROMRESULTS_PANELLERI = tuple(sorted(
+    ad for ad, (fr, dock, _mrk) in PANEL_BILDIRIMLERI.items() if fr and dock))
 
 # ---------------------------------------------------------------------------
 # Fiziksel bantlar — bu yazılımın kapsamındaki motorlar için. Bir hazne
@@ -180,19 +317,31 @@ function run(file) {
     vm.runInContext(code, sandbox, { filename: file });
 }
 
+// ÖH D25 · arayuz a3: units_constants.js panellerden ÖNCE (sayfanın
+// gerçek sırası; PA_PER_BAR tek kaynak, panel fail-closed fırlatır).
+run(path.join(staticDir, 'units_constants.js'));
 run(path.join(staticDir, 'analysis_dock.js'));
-panelList.split(',').forEach(function (name) {
-    run(path.join(staticDir, 'panels', name));
-});
 
 if (!sandbox.window.AnalysisDock) {
     console.log(JSON.stringify({ error: 'AnalysisDock yüklenmedi' }));
     process.exit(0);
 }
+
+// ÖH FAZ D / D3: hangi DOSYA hangi panel kimliğini kaydetti — dosya adından
+// kimlik TAHMİN etmek yerine ölçülür (kayıt defteri bu dosya yüklenirken
+// ne kadar büyüdü). Kapsam çaprazlaması buna dayanır.
+const registry = sandbox.window.AnalysisDock._registry;
+const byFile = {};
+panelList.split(',').forEach(function (name) {
+    const before = registry.length;
+    run(path.join(staticDir, 'panels', name));
+    byFile[name] = registry.slice(before).map(function (s) { return s.id; });
+});
+
 sandbox.window.AnalysisDock._setMotorType(motorType);
 
-const out = { motorType: motorType, panels: {} };
-sandbox.window.AnalysisDock._registry.forEach(function (spec) {
+const out = { motorType: motorType, panels: {}, byFile: byFile };
+registry.forEach(function (spec) {
     const rec = { fields: {}, selectOptions: {}, suggestions: {}, error: null };
     (spec.fields || []).forEach(function (f) {
         rec.fields[f[0]] = f[2];
@@ -231,7 +380,8 @@ def _run_harness(results, motor_type):
         with open(payload, 'w', encoding='utf-8') as fh:
             json.dump(results, fh)
         proc = subprocess.run(
-            ['node', harness, str(STATIC_JS), ','.join(PANEL_FILES),
+            ['node', harness, str(STATIC_JS),
+             ','.join(p.name for p in PANEL_FILES),
              payload, motor_type],
             capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, (
@@ -255,6 +405,17 @@ def _calculate_payload(motor_type, fields):
         data.setdefault('contraction_ratio', 0)
         data.setdefault('mass_flux_chamber', 0)
         data.setdefault('calculate_trajectory', False)
+    if motor_type == 'liquid':
+        # ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ, onemli2-sivi a2): örnek sıvı projesi
+        # yanma süresi taşımaz ve motor artık süre VARSAYMAZ; süre yoksa
+        # ``design_summary.masses.propellant_mass_kg`` yayımlanmaz.
+        # ``test_guvenlik_paneli_itergac_kutlesi_gercek[liquid]``in niyeti
+        # panelin ÇÖZÜCÜNÜN kütlesini önermesidir; kütle ancak süreli bir
+        # tasarımda vardır. Süre motorun kendi sabitinden AÇIKÇA verilir
+        # (sayı burada yazılmaz; sayılar LU-1 öncesiyle birebir aynı).
+        # Süre YOKKEN panelin 5 kg / 10 s varsayılanına düşmediği
+        # tests/test_d36_sivi_a2.py'de kilitli.
+        data.setdefault('max_burn_duration', BURN_TIME_DEFAULT_S)
     return data
 
 
@@ -308,6 +469,95 @@ def _sug(panel_suggestions, motor_type, panel_id):
     assert rec['error'] is None, (
         f'{panel_id}.fromResults ({motor_type}) hata verdi: {rec["error"]}')
     return rec
+
+
+# ---------------------------------------------------------------------------
+# 0a. Kapsamın kendisi — türetme daralmasın (ÖH FAZ D / D3)
+# ---------------------------------------------------------------------------
+class TestKapsamTuretmesi:
+    """`PANEL_FILES` elle liste değil, panel dizininin AYNASI olmalı.
+
+    Defter **P13B4-06**: eski elle liste, kendi belgesindeki ölçüte
+    (`fromResults` üreten paneller) uyanların 7'sini kapsıyordu; 6 panel
+    kapsam dışıydı ve en yoğun `fromResults` kullanıcısı olan
+    `performance_panel.js` de bunların arasındaydı.
+    """
+
+    def test_panel_kapsami_turetilmis_ve_daralmadi(self):
+        diskteki = {p.name for p in PANELS_DIR.glob('*.js')}
+        assert diskteki, 'panels/ altında hiç panel yok — yol mu değişti?'
+        kapsam = {p.name for p in PANEL_FILES}
+        assert kapsam == diskteki, (
+            'PANEL_FILES artık panel dizinini yansıtmıyor.\n'
+            '  yüklenen ama diskte yok  : %s\n'
+            '  diskte var ama yüklenmiyor: %s'
+            % (sorted(kapsam - diskteki), sorted(diskteki - kapsam)))
+        eksik = sorted(set(TARIHSEL_PANEL_FILES) - kapsam)
+        assert not eksik, (
+            'Türetme elle liste döneminin kapsamını DARALTTI — düşen panel: %s'
+            % eksik)
+
+    def test_fromresults_taramasi_yorum_bahsini_saymiyor(self):
+        """Tarama TANIM konumuna bakar; yorumdaki `fromResults` sayılmaz.
+
+        `cfd_panel.js:130` bir YORUM içinde `fromResults` diyor. Çıplak
+        kelime taraması bunu bildirim sanardı; yapısal tarama saymamalı.
+        Negatif kontrol olmadan tarama ölçüt değil, temenni olur.
+        """
+        ornek = ("//: en son tur (fromResults ölçtü)\n"
+                 "const s = 'fromResults: yok';\n"
+                 "const spec = { id: 'x' };\n")
+        assert not _FROM_RESULTS_TANIM_RE.search(_js_kod_govdesi(ornek)), \
+            'yapısal tarama yorumu/dizeyi bildirim sanıyor'
+        gercek = "const spec = { id: 'x', fromResults: function (r) { return {}; } };"
+        assert _FROM_RESULTS_TANIM_RE.search(_js_kod_govdesi(gercek)), \
+            'yapısal tarama gerçek bildirimi göremiyor'
+
+    def test_bildirim_ve_kayit_ortusuyor(self, panel_suggestions):
+        """Dosyada `fromResults` bildiren panel güvertede de öyle görünmeli.
+
+        İki katmanın (yapısal tarama ⟷ çalışma anı kayıt defteri) ayrışması
+        bulgudur: "dosyada duruyor ama kaydolmuyor" sessizce geçemez.
+        Güverte kayıt defterine hiç girmeyen `fromResults` sahibi ancak
+        Analiz MERKEZİ kiracısıysa (kaynakta `AnalysisCenter.register`)
+        mazur görülür — muafiyet elle ad listesi değil, türetilmiş ölçüt.
+        """
+        gorunmeyen = [ad for ad in FROMRESULTS_PANELLERI
+                      if not PANEL_BILDIRIMLERI[ad][1]
+                      and not PANEL_BILDIRIMLERI[ad][2]]
+        assert not gorunmeyen, (
+            '`fromResults` bildiren ama hiçbir kayıt defterine girmeyen '
+            'panel(ler): %s — bu paneller hiçbir bekçi tarafından '
+            'çalıştırılmıyor.' % gorunmeyen)
+        # Güverte kiracılarının HEPSİ node koşumunda GERÇEKTEN kaydolmalı.
+        # Kimlik dosya adından tahmin edilmez, koşumda ölçülür (byFile).
+        for motor_type in MOTOR_TYPES:
+            by_file = panel_suggestions[motor_type]['byFile']
+            kaydetmeyen = sorted(ad for ad in DOCK_FROMRESULTS_PANELLERI
+                                 if not by_file.get(ad))
+            assert not kaydetmeyen, (
+                f'{motor_type}: kaynağında `AnalysisDock.register` VE '
+                f'`fromResults` bulunan panel(ler) koşumda hiç kaydolmadı: '
+                f'{kaydetmeyen}')
+
+    def test_kapsanan_panellerin_fromresults_u_patlamiyor(self,
+                                                          panel_suggestions):
+        """Kapsama YENİ giren paneller de gerçek çözücü yanıtıyla çalışmalı.
+
+        Eski elle liste 7 paneli yüklüyordu; kalan güverte kiracılarının
+        `fromResults`'ı bu bekçide hiç çalıştırılmıyordu (P13B4-06). Artık
+        hepsi çalıştırılıyor ve istisna atan panel kırmızı verir.
+        """
+        hatalar = []
+        for motor_type in MOTOR_TYPES:
+            veri = panel_suggestions[motor_type]
+            for ad in DOCK_FROMRESULTS_PANELLERI:
+                for pid in veri['byFile'].get(ad, []):
+                    hata = veri['panels'][pid]['error']
+                    if hata:
+                        hatalar.append(f'{motor_type}/{ad}::{pid} -> {hata}')
+        assert not hatalar, ('fromResults gerçek çözücü yanıtında istisna '
+                             'attı:\n  ' + '\n  '.join(hatalar))
 
 
 # ---------------------------------------------------------------------------

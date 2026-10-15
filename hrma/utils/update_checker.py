@@ -131,16 +131,47 @@ _download_lock = threading.Lock()
 _download = {"state": "idle", "pct": 0, "path": "", "error": ""}
 
 
+#: Etiketin SÜRÜM ÇEKİRDEĞİ: noktayla ayrılmış ilk sayı dizisi.
+#: Ham ``\d+`` taraması yerine bunun kullanılmasının sebebi ölçülmüştür:
+#: 'HRMA-2.4.0-beta2' ham taramada [2,4,0,2] veriyor ve ön sürüm, kararlı
+#: 2.4.0'dan YENİ görünüyordu. Çekirdek eşleşmesi '2.4.0' okur, sondaki
+#: 'beta2' sürüm bileşeni sayılmaz.
+_VERSION_CORE_RE = re.compile(r"\d+(?:\.\d+)*")
+
+
 def parse_version(text):
-    """'v2.3.0', '2.3', 'HRMA-2.3.0-beta' gibi etiketlerden (2, 3, 0) üretir."""
-    nums = re.findall(r"\d+", text or "")
-    if not nums:
+    """'v2.3.0', '2.3', 'HRMA-2.3.0-beta' gibi etiketlerden (2, 3, 0) üretir.
+
+    Bileşen sayısı KIRPILMAZ: 'v2.6.27.1' → (2, 6, 27, 1). 2026-08-27
+    ölçümü: eski hâl ilk üç bileşene kırpıyordu, yani 2.6.27 kurulu
+    kullanıcıya 2.6.27.1 yama sürümü "yeni sürüm" olarak HİÇ duyurulmuyordu
+    (``is_newer('v2.6.27.1', '2.6.27')`` → False). En az üç bileşene sıfırla
+    tamamlanır ki '2.3' ile '2.3.0' aynı demeti üretsin.
+    """
+    m = _VERSION_CORE_RE.search(text or "")
+    if not m:
         return (0, 0, 0)
-    return tuple(int(n) for n in (nums + ["0", "0"])[:3])
+    parcalar = [int(n) for n in m.group(0).split(".")]
+    while len(parcalar) < 3:
+        parcalar.append(0)
+    return tuple(parcalar)
+
+
+def _same_length(a, b):
+    """İki sürüm demetini SIFIRLA aynı uzunluğa getirir.
+
+    Python demet karşılaştırması kısa demeti küçük sayar: ham hâlde
+    (2,6,27) < (2,6,27,0) çıkar ve '2.6.27.0' etiketi, kurulu '2.6.27'
+    sürümüne göre "yeni" görünürdü. Yama alanı yoksa sıfırdır.
+    """
+    n = max(len(a), len(b))
+    return (a + (0,) * (n - len(a)), b + (0,) * (n - len(b)))
 
 
 def is_newer(remote_tag, local_version=__version__):
-    return parse_version(remote_tag) > parse_version(local_version)
+    uzak, yerel = _same_length(parse_version(remote_tag),
+                               parse_version(local_version))
+    return uzak > yerel
 
 
 def pick_asset(assets, platform=None):
@@ -386,9 +417,40 @@ def _cleanup_stale_downloads(keep=""):
         pass
 
 
+def resolve_download_paths(name, base=None):
+    """Uzaktan gelen asset adından (geçici, kesin) indirme yollarını üretir.
+
+    ``name`` GitHub yanıtından/HTML parçasından gelir, yani UZAKTAN gelen bir
+    dizedir; doğrudan ``os.path.join``e verilemez. 2026-08-27 ölçümü:
+    ``'../../../Library/evil.dmg'`` adı ``~/Downloads`` ile birleştirilince
+    ``/Library/evil.dmg``e çözülüyordu — İndirilenler dizininin DIŞI.
+
+    İki katman (bkz. :func:`hrma.utils.input_guard.safe_join`):
+      1. Ad deponun merkezî süzgecinden geçer (yol ayracı ve ``..`` düşer),
+      2. Sonuç yolun İndirilenler dizini altında kaldığı ``realpath`` ile
+         DOĞRULANIR; kaçış varsa ``InputError`` (indirme başlamaz).
+
+    Uzantı korunur: süzgecin alfabesinde ``.`` vardır, ``HRMA-2.6.27.dmg``
+    aynen geçer.
+    """
+    from hrma.utils.input_guard import safe_join
+    d = base or _downloads_dir()
+    final_path = safe_join(d, name, default="HRMA-update")
+    tmp_path = safe_join(d, os.path.basename(final_path) + ".download",
+                         default="HRMA-update.download")
+    return tmp_path, final_path
+
+
 def _run_download(url, name, size, digest=""):
-    tmp_path = os.path.join(_downloads_dir(), name + ".download")
-    final_path = os.path.join(_downloads_dir(), name)
+    try:
+        tmp_path, final_path = resolve_download_paths(name)
+    except Exception as exc:      # InputError dâhil: ad güvenli yola çözülemedi
+        with _download_lock:
+            _download.update(
+                state="error", pct=0, path="",
+                error="unsafe installer file name: %s: %s"
+                      % (type(exc).__name__, exc))
+        return
     _cleanup_stale_downloads(keep=os.path.basename(tmp_path))
     try:
         import hashlib
@@ -434,16 +496,38 @@ def _run_download(url, name, size, digest=""):
             _download.update(state="error", error="%s: %s" % (type(exc).__name__, exc))
 
 
+def _headless():
+    """Başsız kip: test/CI/HRMA_HEADLESS altında masaüstü uygulaması AÇILMAZ.
+
+    ÖH fix-13 (3 Eyl 2026): ``/api/user-guide/open`` (app.py) aynı korumayı
+    taşıyordu, burası taşımıyordu — bir test koşumu sahte bir ``.dmg``'yi
+    Finder'a açtırıp Berke'nin masaüstünde "disk görüntüsü bozulmuş"
+    uyarısı çıkarabiliyordu (1 ve 3 Eyl'de görüldü). Karar TEK yerde.
+    """
+    return bool(os.environ.get("HRMA_HEADLESS")
+                or os.environ.get("PYTEST_CURRENT_TEST")
+                or os.environ.get("HRMA_TESTING"))
+
+
 def _open_installer(path):
-    """İndirilen dmg/exe'yi işletim sistemine açtırır (kurulumu kullanıcı yapar)."""
+    """İndirilen dmg/exe'yi işletim sistemine açtırır (kurulumu kullanıcı yapar).
+
+    Döner: ``{'opened': bool, 'reason': str}`` — başsız kipte açmaz ve bunu
+    ADIYLA söyler (sessiz düşüş yok); dosya yine Downloads'ta durur.
+    """
+    if _headless():
+        return {"opened": False, "reason": "headless", "path": path}
     try:
         if sys.platform == "darwin":
             import subprocess
             subprocess.Popen(["open", path])
         elif os.name == "nt":
             os.startfile(path)  # noqa: attribute yalnızca Windows'ta var
-    except Exception:
-        pass  # açılamazsa dosya yine de Downloads'ta duruyor
+        return {"opened": True, "reason": "launched", "path": path}
+    except Exception as exc:
+        # açılamazsa dosya yine de Downloads'ta duruyor
+        return {"opened": False, "reason": "%s: %s" % (type(exc).__name__, exc),
+                "path": path}
 
 
 def open_download_in_browser():
@@ -490,9 +574,16 @@ def start_install():
             return {"started": True, "mode": "auto", "log": launched.get("log")}
         plan = {"mode": "manual", "reason": launched.get("error", "helper failed")}
 
-    _open_installer(st["path"])
+    acilis = _open_installer(st["path"])
+    if not isinstance(acilis, dict):  # eski sözleşme / test yedeği
+        acilis = {"opened": True, "reason": "launched"}
+    # fix-13: manuel mod 'started' = kurucu teslim edildi (Downloads'ta);
+    # masaüstü açılışı ayrıca beyan edilir — başsız kipte opened=False,
+    # open_reason='headless' (sessiz "açıldı" yok).
     return {"started": True, "mode": "manual",
-            "reason": plan.get("reason"), "path": st["path"]}
+            "reason": plan.get("reason"), "path": st["path"],
+            "opened": bool(acilis.get("opened")),
+            "open_reason": acilis.get("reason")}
 
 
 def start_download():
@@ -507,6 +598,16 @@ def start_download():
         return {"started": False, "reason": "no suitable installer found for this platform",
                 "page_url": info.get("page_url")}
 
+    # Ön denetim: ad güvenli bir yola çözülemiyorsa indirme HİÇ başlamaz ve
+    # arayüze diskte oluşacak GERÇEK ad bildirilir (uzaktan gelen ham ad değil).
+    try:
+        _, hedef = resolve_download_paths(asset["name"])
+    except Exception as exc:
+        return {"started": False,
+                "reason": "unsafe installer file name: %s: %s"
+                          % (type(exc).__name__, exc),
+                "page_url": info.get("page_url")}
+
     with _download_lock:
         if _download["state"] == "downloading":
             return {"started": True, "already": True}
@@ -518,4 +619,5 @@ def start_download():
               asset.get("digest") or ""),
         daemon=True,
     ).start()
-    return {"started": True, "name": asset["name"], "size": asset.get("size") or 0}
+    return {"started": True, "name": os.path.basename(hedef),
+            "size": asset.get("size") or 0}

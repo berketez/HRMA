@@ -1,4 +1,4 @@
-HRMA — UZAYTEK Rocket Motor Analysis (macOS Installation)
+HRMA — Rocket Motor Analysis (macOS Installation)
 =================================================================
 
 INSTALLATION (2 steps):
@@ -37,5 +37,5 @@ USAGE:
   the icon to open it again.
 - Your CAD and drawing outputs are saved to Documents/HRMA.
 
-If you run into problems, send this file to the UZAYTEK team:
+If you run into problems, open an issue at https://github.com/berketez/HRMA/issues and attach this file:
 Library → Logs → HRMA.log

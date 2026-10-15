@@ -891,13 +891,21 @@ class TestCozucuPortAlaniAnlami:
                             np.cumsum(0.5 * (rb[1:] + rb[:-1]) * np.diff(t))])
         return A, w, m.D_core / 2.0
 
-    @pytest.mark.parametrize('grain_type', ['bates', 'star', 'wagon_wheel',
-                                            'finocyl'])
+    @pytest.mark.parametrize('grain_type', ['bates', 'finocyl'])
     def test_dairesel_esdeger_ailede_alan_webi_tekrar_eder(self, grain_type):
         """A_port = pi*(r_core+w)^2: yayımlanan alan, web geçmişinin
         taşıdığı bilgiyi tekrar eder (ölçülen sapma <= 0,031 mm, trapezin
-        payı). Yıldız/finocyl'de bu bir GEOMETRİ değil AKI modelidir —
-        gerçek kesit ofsetlenmiş poligondur, o yüzden kip kapalı kalır."""
+        payı). Finocyl'de bu bir GEOMETRİ değil AKI modelidir — akı en dar
+        (kanatçıksız) kesitte okunur, o yüzden kip kapalı kalır.
+
+        ÖH D15 (ÖK-05, P2B2-06): listede 'star' ve 'wagon_wheel' de vardı ve
+        bu bekçi onlar için dairesel eşdeğer kesiti ŞART KOŞUYORDU — yani
+        _port_flow_area'nın kendi gerekçesiyle (slotted'da dairesel
+        yaklaşıklık 'akıyı %30'a varan oranda şişirir') çelişen kusuru
+        kilitliyordu. Ölçülen şişme star'da 1,91×, wagon_wheel'de 2,73×'e
+        kadar çıkıyordu ve akı erozif çarpan üzerinden basınç/itki eğrisine
+        geri besleniyordu. İki tip artık gerçek poligon kesitini kullanıyor
+        ve aşağıdaki test_dairesel_olmayan_kesitler ile sınanıyor."""
         import numpy as np
         A, w, r0 = self._seri(grain_type, self.TABAN)
         dw = np.sqrt(A / np.pi) - r0
@@ -911,11 +919,31 @@ class TestCozucuPortAlaniAnlami:
         assert float(A.max() - A.min()) == 0.0
         assert float(A[0]) == pytest.approx(math.pi * 0.05 ** 2, rel=1e-12)
 
-    def test_slotted_kesiti_gercekten_dairesel_degil(self):
-        """Yarıklı tanede alan GERÇEK poligon alanıdır; eşdeğer yarıçap
-        r0+w'den ölçülebilir biçimde ayrışır (17,3 mm) — tek yarıçap
-        büyüterek çizmek uydurma olurdu."""
+    @pytest.mark.parametrize('grain_type', ['slotted', 'star',
+                                            'wagon_wheel'])
+    def test_dairesel_olmayan_kesitler_gercek_poligondan_gelir(self,
+                                                               grain_type):
+        """Yarıklı / yıldız / wagon tanede alan GERÇEK poligon alanıdır;
+        eşdeğer yarıçap r0+w'den ölçülebilir biçimde ayrışır — tek yarıçap
+        büyüterek çizmek uydurma olurdu.
+
+        ÖH D15 (P2B2-06): star ve wagon_wheel bu listeye onarımla girdi;
+        önce dairesel eşdeğer kesitle geçiyorlardı ve yayımlanan kütle akısı
+        1,75-2,73 kat şişikti.
+
+        ÖH D17 (P2B2-06 ŞART): D15 onarımıyla birlikte eşik 1e-2'den
+        1e-3'e (10 kat) gevşetilmişti, oysa GEVŞETMEYE GEREK YOKTU.
+        ÖLÇÜLDÜ (docs/scofield/raw/OH/D17/kati/a1/once.json, D=100 mm,
+        çekirdek 30 mm, L=500 mm; max|sqrt(A/pi) - r0 - w|):
+
+            slotted      0,017258 m
+            star         0,011572 m
+            wagon_wheel  0,015257 m
+
+        üçü de ESKİ 1e-2 eşiğini geçiyor. Eşik oraya geri alındı; dairesel
+        tiplerle ayrım (bates 3,5e-18 m, finocyl 6,9e-18 m) 1e15 kattır,
+        yani bekçi hâlâ 'gerçekten poligon mu?' sorusunu soruyor."""
         import numpy as np
-        A, w, r0 = self._seri('slotted', self.TABAN)
+        A, w, r0 = self._seri(grain_type, self.TABAN)
         dw = np.sqrt(A / np.pi) - r0
-        assert float(np.max(np.abs(dw - w))) > 1e-2
+        assert float(np.max(np.abs(dw - w))) > 1e-2, grain_type

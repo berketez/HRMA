@@ -30,6 +30,7 @@ Ayrıca: satır içi script'ler `node --check` geçer (node varsa) ve kullanıc�
 görünen Türkçe metin kalmamıştır (kod yorumları bilinçli olarak Türkçedir).
 """
 
+import ast
 import pathlib
 import re
 import shutil
@@ -164,10 +165,58 @@ def test_results_grid_absent(html):
 # ---------------------------------------------------------------------------
 # 2. Parite: rozetler / kesit açıklaması / uyarı paneli / exportlar
 # ---------------------------------------------------------------------------
+#: Rozet sınıfı ⟷ rozet metni sözleşmesi (ÖH D22 · P13B2-05). Her sınıf
+#: kendi metnini ZORUNLU kılar; hangi sınıfın ilk boyada durduğu ŞART
+#: DEĞİLDİR. Böylece rozet sınıfı ileride "status-unknown"a çevrilse de
+#: (P17B2-07 onarımı) bekçi bir DÜZELTMEyi kırmızıya çevirmez.
+ROZET_SINIF_METNI = {
+    'status-connected': ('Connected',),
+    'status-disconnected': ('Offline',),
+    'status-unknown': ('not checked',),
+}
+
+
 def test_database_status_badges_present(html):
-    assert 'class="database-status status-connected cea-status"' in html
-    assert 'class="database-status status-connected nist-status"' in html
+    """Rozetler var, iki durum da tanımlı ve sınıf ⟷ metin çelişmiyor.
+
+    ÇEVRİLDİ (ÖH D22 · P13B2-05). Eski hâli statik
+    ``class="database-status status-connected cea-status"`` dizesini ŞART
+    koşuyordu — yani hiçbir denetim koşmadan YEŞİL yanan rozeti. Kardeş
+    şablonlarda (advanced.html, solid.html) tam bu kusur P17B2-07 olarak
+    ölçüldü ve ÖH D21'de onarıldı; liquid.html onarımın dışında kaldı
+    ÇÜNKÜ bu bekçi kusuru kilitliyordu (``tests/test_d21_arayuz_a2.py``
+    ``ROZET_SABLONLARI`` bu yüzden yalnız iki şablon sayıyor).
+
+    Kilit kaldırıldı; yerine iki fail-closed iddia kondu:
+
+    1. Rozetler ve İKİ durum sınıfı da tanımlı olmalı (kaybolma bekçisi).
+    2. Bir rozetin İLAN ETTİĞİ sınıf ile YAZDIĞI metin çelişemez —
+       "status-unknown" taşıyıp "Connected" yazan ya da "status-connected"
+       taşıyıp "not checked" yazan rozet, hangi yönde olursa olsun
+       kullanıcıya yalan söyler.
+
+    Şablonun kendisi (``hrma/templates/liquid.html``) ÖH D22'de sivi ve
+    arayuz kulvarlarının sahasındadır; bu kulvar ürün dosyasına dokunmaz.
+    """
+    for sinif in ('cea-status', 'nist-status'):
+        assert 'class="database-status' in html, 'rozet kabı yok'
+        assert sinif in html, sinif
     assert '.status-connected' in html and '.status-disconnected' in html
+    rozetler = re.findall(
+        r'<span class="database-status ([^"]*)"[^>]*>([^<]*)</span>', html)
+    assert rozetler, 'sayfada hiç veri tabanı rozeti bulunamadı'
+    for siniflar, metin in rozetler:
+        durum = [d for d in ROZET_SINIF_METNI if d in siniflar]
+        assert len(durum) == 1, (siniflar, metin)
+        beklenen = ROZET_SINIF_METNI[durum[0]]
+        assert any(b in metin for b in beklenen), (
+            'rozet sınıfı %r ile metni %r çelişiyor (beklenen: %s)'
+            % (durum[0], metin, ' / '.join(beklenen)))
+        # Ters yön: başka bir durumun metnini taşıyamaz.
+        for baska, metinler in ROZET_SINIF_METNI.items():
+            if baska == durum[0]:
+                continue
+            assert not any(m in metin for m in metinler), (siniflar, metin)
 
 
 def test_database_status_is_fetched(html):
@@ -227,11 +276,21 @@ def test_excel_sheets_are_liquid_specific(html):
 
 
 def test_eng_export_uses_declared_burn_time(html):
-    """Sıvı motorda yanma süresi çözücüden gelmez; alan açıkça okunur."""
+    """ÖH D36 / LU-2 (ÇEVRİLEN BEKÇİ): .eng düğmesi çözücünün yanıtını gönderir.
+
+    Eski iddia ("yanma süresi çözücüden gelmez; alan açıkça okunur" +
+    istemcide ``total_impulse: thrust * burnTime``) Cowork LU-2'nin kusurunun
+    kendisiydi: düğme form alanından F x t ve mdot x t türetiyor, çözücünün
+    tank kartını göndermiyordu ve uç 400 s ile bile 422 veriyordu (ölçüm:
+    raw/OH/D36/onemli2-sivi/a1/once.json). Süre artık çözücüye girer
+    (LU-1) ve düğme o koşumun yanıtını olduğu gibi gönderir; istemci sayı
+    türetmez, formu yeniden okumaz.
+    """
     block = html[html.index('async function downloadLiquidEng'):]
     block = block[:block.index('async function exportLiquidExcel')]
-    assert "getElementById('max_burn_duration')" in block
-    assert 'total_impulse: thrust * burnTime' in block
+    assert "getElementById('max_burn_duration')" not in block
+    assert 'thrust * burnTime' not in block
+    assert 'Object.assign({}, cr, { motor_name: _liquidMotorName() })' in block
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +317,116 @@ def test_no_dead_plot_containers(html):
 # ---------------------------------------------------------------------------
 # 4. Sessiz veri kaybı: bağlanmamış alanlar dürüstçe işaretli
 # ---------------------------------------------------------------------------
+#: ``LiquidRocketEngine(...)`` çağrısına verilmesine rağmen bir İSTEK ALANI
+#: taşımayan anahtarlar. ``overrides=data`` bütün sözlüğü toptan geçirir; adı
+#: geçen tek bir alan değildir, bu yüzden alan sayımına girmez.
+_LIQUID_ALAN_DISI_KWARG = {'overrides'}
+
+
+def _istek_alanlari(dugum, fn):
+    """``dugum`` ifadesinin OKUDUĞU ``data['X']`` / ``data.get('X')`` adları.
+
+    Yerel değişkene uğrayan yol da çözülür: ``cooling_type=cooling_type``
+    gibi bir anahtar, aynı fonksiyonda ``cooling_type = data.get(
+    'cooling_type')`` ile kurulmuşsa alan ADI oradan okunur.
+
+    ÖH D15 birleştirme (1 Eyl 2026) — BU İŞLEV BEKÇİYİ ÇEVİRİYOR. Eskisi
+    çağrı METNİNDE ``data.get('X')`` deseni arıyor, bulamadığı üç adı da
+    ('thrust', 'chamber_pressure', 'mixture_ratio') elle beyaz listeye
+    yazıyordu. Sıvı kulvarının fail-closed soğutma kapısı (app.py
+    ``unsupported_cooling_type``, KAPI 1e) ``cooling_type``ı çağrıdan ÖNCE
+    bir yerele aldı — alan hâlâ çözücüye gidiyor, ama artık metinde
+    görünmüyor. Beyaz liste büyütmek kusuru gizlerdi: liste, alanın
+    gerçekten bağlı olduğunu DEĞİL yalnız testin onu affettiğini söyler.
+    Bu yüzden bağ artık AST ile İZLENİYOR; bir alan tümden düşerse bekçi
+    kırmızı yanar.
+
+    ÖH D27 / fix-26b — ÜÇÜNCÜ OKUMA BİÇİMİ (``f(data, 'alan', ...)``).
+    ÖLÇÜLDÜ (taban ``8abbe822``): ``cooling_type`` ve ``injector_type``
+    "hangi istek alanından beslendiği ÇÖZÜLEMEDİ" diye kırmızı veriyordu.
+    Sebep bir gerileme değil: D26 / sivi a1 (``e000be6e``, P16B3-02 kalan)
+    bu iki okumayı ``data.get(...)``tan alıp TEK KAYNAĞA, yani
+    ``_sivi_secim_varsayilani(data, 'cooling_type', ...)`` yardımcısına
+    taşıdı (ÖK-19 künyesi: varsayılana düşülünce ``defaults_applied``a
+    yazılıyor). Alan hâlâ okunuyor; değişen yalnız okumanın BİÇİMİDİR.
+    Çözücü GENEL desenle genişletildi, ad beyaz listesi YAZILMADI: ilk
+    konumsal argümanı ``data``, ikincisi DİZE SABİTİ olan her çağrı o
+    dizeyi bir istek alanı sayar. Alan tümden düşerse ad da düşer ve
+    bekçi yine kırmızı yanar (ters-mutasyon M9 bunu ölçtü).
+    """
+    adlar = set()
+    yerel_adlar = set()
+    for n in ast.walk(dugum):
+        if isinstance(n, ast.Name):
+            yerel_adlar.add(n.id)
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == 'get'
+                and isinstance(n.func.value, ast.Name)
+                and n.func.value.id == 'data' and n.args
+                and isinstance(n.args[0], ast.Constant)
+                and isinstance(n.args[0].value, str)):
+            adlar.add(n.args[0].value)
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and len(n.args) >= 2
+                and isinstance(n.args[0], ast.Name)
+                and n.args[0].id == 'data'
+                and isinstance(n.args[1], ast.Constant)
+                and isinstance(n.args[1].value, str)):
+            adlar.add(n.args[1].value)
+        if (isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name)
+                and n.value.id == 'data'
+                and isinstance(n.slice, ast.Constant)
+                and isinstance(n.slice.value, str)):
+            adlar.add(n.slice.value)
+    if adlar:
+        return adlar
+    # Yerele uğrayan yol: aynı fonksiyondaki atamalarını izle.
+    for hedef_ad in yerel_adlar:
+        if hedef_ad == 'data':
+            continue
+        for n in ast.walk(fn):
+            if not isinstance(n, (ast.Assign, ast.AnnAssign)):
+                continue
+            hedefler = (n.targets if isinstance(n, ast.Assign)
+                        else [n.target])
+            if not any(isinstance(t, ast.Name) and t.id == hedef_ad
+                       for t in hedefler):
+                continue
+            if n.value is None:
+                continue
+            adlar |= _istek_alanlari(n.value, ast.Module(body=[], type_ignores=[]))
+    return adlar
+
+
+def _liquid_engine_wired_fields():
+    """``calculate_liquid``ın ``LiquidRocketEngine``e GERÇEKTEN bağladığı alanlar."""
+    agac = ast.parse(APP_PY.read_text(encoding='utf-8'))
+    fn = None
+    cagri = None
+    for f in ast.walk(agac):
+        if not isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for n in ast.walk(f):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == 'LiquidRocketEngine'):
+                fn, cagri = f, n
+    assert cagri is not None, 'app.py içinde LiquidRocketEngine(...) çağrısı yok'
+    kullanilan = set()
+    cozulemeyen = []
+    for kw in cagri.keywords:
+        if kw.arg in _LIQUID_ALAN_DISI_KWARG or kw.arg is None:
+            continue
+        alanlar = _istek_alanlari(kw.value, fn)
+        if not alanlar:
+            cozulemeyen.append(kw.arg)
+        kullanilan |= alanlar
+    assert not cozulemeyen, (
+        'bu anahtarların hangi istek alanından beslendiği ÇÖZÜLEMEDİ, yani '
+        'bağ ölçülemiyor (sessizce "bağlı" saymak yerine söyleniyor): %s'
+        % sorted(cozulemeyen))
+    return kullanilan
+
+
 def test_solver_wired_list_matches_app_py(html):
     """Şablondaki 'çözücüye bağlı alanlar' listesi app.py imzasıyla aynı."""
     m = re.search(r'const SOLVER_WIRED_INPUT_IDS = \[(.*?)\];', html, re.S)
@@ -270,14 +439,11 @@ def test_solver_wired_list_matches_app_py(html):
     )
 
     # app.py gerçekten bu alanları mı okuyor?
-    app_src = APP_PY.read_text(encoding='utf-8')
-    call = re.search(r'engine = LiquidRocketEngine\((.*?)\n\s*\)', app_src, re.S)
-    assert call, 'app.py içinde LiquidRocketEngine(...) çağrısı bulunamadı'
-    used = set(re.findall(r"data\.get\('([^']+)'", call.group(1)))
-    used |= {'thrust', 'chamber_pressure', 'mixture_ratio'}  # yerel değişkenler
+    used = _liquid_engine_wired_fields()
     assert used == EXPECTED_WIRED_FIELDS, (
         'app.py artık farklı alanlar okuyor — liquid.html listesini güncelle.\n'
-        f'  app.py: {sorted(used)}'
+        f'  app.py: {sorted(used)}\n'
+        f'  şablon: {sorted(EXPECTED_WIRED_FIELDS)}'
     )
 
 
@@ -286,9 +452,21 @@ def test_unwired_inputs_are_marked(html):
     m = re.search(r'const UNWIRED_INPUT_IDS = \[(.*?)\];', html, re.S)
     assert m, 'UNWIRED_INPUT_IDS listesi bulunamadı'
     unwired = set(re.findall(r"'([^']+)'", m.group(1)))
-    # Görev metninde açıkça adı geçen üç alan mutlaka listede olmalı
-    for field in ('startup_sequence', 'min_throttle', 'throttle_response'):
+    # Görev metninde açıkça adı geçen alanlar mutlaka listede olmalı
+    for field in ('startup_sequence', 'throttle_response'):
         assert field in unwired, f'{field} bağlanmamış olduğu halde işaretlenmiyor'
+    # ÖH D15 · P12bB1-09 — BEKÇİ ÇEVRİLDİ. Bu satır 'min_throttle' alanının
+    # statik "Not wired to the solver yet" yaftasını KİLİTLİYORDU. Çözücü o
+    # alanı 2026-07'de kendi unwired_inputs() beyanından çıkardı (gerekçe
+    # liquid_rocket_engine.py:1573 civarında yazılı) ve alan bugün
+    # throttle_map.min_throttle_pct ile chug RİSK hükmünü çeviriyor
+    # (ölçüm: min_throttle 40 → chug_risk True, 80 → False;
+    #  docs/scofield/raw/OH/D15/sablonlar/a1/once.json). Hesaptan ÖNCE basılan
+    # yafta bu yüzden yalandı; testin eski hâli yalanı koruyordu.
+    assert 'min_throttle' not in unwired, (
+        'min_throttle çözücüye BAĞLI (chug risk hükmünü çeviriyor); '
+        'statik "bağlanmamış" yaftası yalan olur'
+    )
     # Bağlı alanlar YANLIŞLIKLA işaretlenmemeli
     assert not (unwired & EXPECTED_WIRED_FIELDS)
 
@@ -298,10 +476,19 @@ def test_unwired_inputs_are_marked(html):
 
 
 def test_export_only_input_is_labelled_separately(html):
-    """max_burn_duration çözücüyü etkilemez ama .eng exportunu besler."""
-    assert 'const EXPORT_ONLY_INPUTS' in html
-    assert 'max_burn_duration:' in html
-    assert 'markExportOnlyInputs();' in html
+    """ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ): max_burn_duration artık "yalnızca
+    dışa aktarım" diye işaretlenmez.
+
+    Eski iddia ("çözücüyü etkilemez ama .eng exportunu besler") 2026-07-19
+    denetiminden beri YANLIŞTI: çözücü süreyi itici kütlesine, tank kartına
+    ve toplam impulsa sokuyor (Cowork LU-1 madde 3). Yeni iddia: alanın
+    altına GERÇEK kapsam notu basılır ve eski "export only" işaretleyicisi
+    sayfada çağrılmaz.
+    """
+    assert 'const INPUT_SCOPE_NOTES' in html
+    assert 'markInputScopeNotes();' in html
+    assert 'markExportOnlyInputs();' not in html
+    assert 'const EXPORT_ONLY_INPUTS' not in html
 
 
 def test_solver_scope_note_present(html):
@@ -332,7 +519,15 @@ def test_all_plots_go_through_shared_renderer(html):
         f'{len(direct)} doğrudan Plotly.newPlot çağrısı var; hepsi liquidPlot()'
         ' üzerinden geçmeli (responsive + hovermode + min-height)'
     )
-    assert 'return Plotly.newPlot(el, traces, lay, cfg);' in html
+    # Tek çağrı liquidPlot'un GÖVDESİNDE olmalı. OH-P-17 (D34 piksel turu,
+    # 0f093fb7; defter OH-YENI.jsonl) çağrının sonuna kasıtlı olarak
+    # `.then(... Plotly.Plots.resize ...)` ekledi (gizli kapta 700 px
+    # varsayılanı → kabın gerçek genişliği); bu yüzden satır sonundaki ';'
+    # artık sözleşmenin parçası değil. Çağrının YERİ ve argümanları öyle.
+    body = html[html.index('function liquidPlot('):]
+    body = body[:body.index('function setNistStatus')]
+    assert 'return Plotly.newPlot(el, traces, lay, cfg)' in body, \
+        'tek Plotly.newPlot çağrısı liquidPlot gövdesinde değil'
 
 
 def test_shared_renderer_applies_quality_defaults(html):

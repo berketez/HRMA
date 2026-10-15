@@ -220,13 +220,31 @@ console.log(JSON.stringify({ runs: runs, usedKeys: usedKeys }));
 """
 
 
+#: Rozet bloğunun çağırdığı, bloğun DIŞINDA tanımlı ürün yardımcıları.
+#: D35 sayi-bicimi (8f9313ca) ekran sayılarını ``numTxt`` ile I18N kanonuna
+#: bağladı; düzenek bu yardımcıyı şablondan GERÇEK hâliyle keser (taklit
+#: yazılmaz — taklit ürünle ayrışır, bekçi körleşir).
+PRODUCT_HELPERS = ('numTxt',)
+
+
+def _product_helper(name):
+    """``liquid.html``'deki üst düzey yardımcının kaynağını döndürür."""
+    src = LIQUID_HTML.read_text(encoding='utf-8')
+    start = src.find('\n        function %s(' % name)
+    assert start != -1, 'liquid.html içinde %s() yok' % name
+    end = src.find('\n        }\n', start)
+    assert end != -1, '%s() kapanışı bulunamadı' % name
+    return src[start:end + len('\n        }\n')]
+
+
 def _run_badges(block, fields, responses):
     """Rozet bloğunu node'da çalıştırır; her koşu için DOM görüntüsü döner."""
     node = shutil.which('node')
+    helpers = '\n'.join(_product_helper(n) for n in PRODUCT_HELPERS)
     script = (HARNESS
               .replace('__FIELDS__', json.dumps(fields))
               .replace('__RESPONSES__', json.dumps(responses))
-              .replace('__BLOCK__', block))
+              .replace('__BLOCK__', helpers + '\n' + block))
     handle = tempfile.NamedTemporaryFile('w', suffix='.js', delete=False,
                                          encoding='utf-8')
     handle.write(script)

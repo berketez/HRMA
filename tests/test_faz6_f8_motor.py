@@ -43,6 +43,7 @@ import subprocess
 
 import numpy as np
 import pytest
+from hrma.utils.numeric_compat import trapezoid
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SIXDOF_JS = REPO_ROOT / 'hrma' / 'static' / 'js' / 'sixdof_panel.js'
@@ -440,8 +441,14 @@ def _trajectory(**recovery):
     analyzer.set_vehicle_parameters(mass_dry=8.0,
                                     diameter=2 * math.sqrt(0.008 / math.pi),
                                     drag_coefficient=0.5, length=2.0)
+    # ÖH D23 / P4B3-24: tutarsız 'isp' kaldırıldı (bekçi çevirisi). Yük
+    # yanmayı iki kez ve iki farklı biçimde tarif ediyordu (impuls
+    # bütçesinden türeyen Isp ile yazılı isp %1'den fazla ayrışıyor);
+    # çözücü artık çelişkiyi reddediyor. Isp bir GİRDİ değil, bütçenin
+    # türevidir ve anahtar yokken ondan türetilir — ölçülen sayılar
+    # değişmez (once.json P4B3_24: isp 220/1/1e9 -> apoje BİT-AYNI).
     motor = {'thrust': 3063.68, 'burn_time': 4.85,
-             'propellant_mass_total': 3.0, 'isp': 234.2,
+             'propellant_mass_total': 3.0,
              'total_impulse': 3063.68 * 4.85}
     params = {'launch_angle': 90, 'launch_rail_length': 5.0}
     params.update(recovery)
@@ -457,11 +464,19 @@ def test_t68_result_declares_the_recovery_system():
     çıkış ise 36,4 s — yani uçuş süresinin %97'si açıklanmayan bir modelden
     geliyordu.
     """
-    _analyzer, result = _trajectory()
+    # ÖH D22 / OH-D18-05 — ÇEVRİLEN BEKÇİ. Eski hâli paraşüt GÖNDERMEDEN
+    # ``deployed is True`` ve ``assumed == {area: True, ...}`` istiyordu,
+    # yani "kullanıcı kurtarma sistemi vermedi ama biz bir tane uydurup
+    # açtık" davranışını sözleşme olarak kilitliyordu. Testin ASIL konusu
+    # T68'dir: iniş bir paraşütle çözüldüyse bu ÜST DÜZEYDE söylenmeli.
+    # O yüzden paraşüt artık AÇIKÇA veriliyor (aynı 2,0 m², aynı sayılar);
+    # kilitlenen şey beyanın kendisi olmaya devam ediyor. Alan verilmediği
+    # hâli kardeş ``test_t68_missing_parachute_is_not_a_descent`` ölçer.
+    _analyzer, result = _trajectory(parachute_area=2.0)
     recovery = result['recovery']
     assert recovery['deployed'] is True
     assert recovery['descent_model'] == 'parachute'
-    assert recovery['assumed'] == {'area': True, 'cd': True,
+    assert recovery['assumed'] == {'area': False, 'cd': True,
                                    'deploy_delay': True}
     assert recovery['parachute_area_m2'] > 0 and recovery['parachute_cd'] > 0
     # İnişin uzunluğu ölçülebilir olmalı ve gerçekten çıkışı gölgelemeli
@@ -490,7 +505,9 @@ def test_t68_plot_marks_the_parachute_deployment():
     Ölçüldü (düzeltme öncesi): figürdeki hiçbir eğri adı, etiket ya da
     hover metni 'parachute'/'recovery' geçmiyordu.
     """
-    analyzer, result = _trajectory()
+    # ÖH D22 / OH-D18-05: açılma İŞARETÇİSİ ancak gerçek bir paraşüt varsa
+    # çizilir; alan açıkça veriliyor (grafik yolu değişmedi).
+    analyzer, result = _trajectory(parachute_area=2.0)
     figure = json.loads(analyzer.create_trajectory_plots(result))
     traces = {t.get('name'): t for t in figure['data'] if t.get('name')}
     assert 'Parachute deploy' in traces, sorted(traces)
@@ -503,14 +520,46 @@ def test_t68_plot_marks_the_parachute_deployment():
     assert phases['text'][-1] == 'Landing under parachute', phases['text']
 
 
+def test_t68_missing_parachute_is_not_a_descent():
+    """Paraşüt verilmediyse ne özet ne GRAFİK bir iniş iddia eder.
+
+    ÖH D22 / OH-D18-05. Kardeş ``test_t68_ballistic_run_does_not_claim_a_
+    parachute`` apojeye varmadan yere çarpan koşumu ölçer; bu bekçi
+    apojeye VARAN ama kurtarma sistemi verilmeyen koşumu ölçer — eskiden
+    tam da bu yolda 2,0 m²'lik uydurma kanopi devreye giriyordu.
+    """
+    analyzer, result = _trajectory()
+    recovery = result['recovery']
+    assert recovery['deployed'] is False
+    assert recovery['descent_model'] == 'NOT_MODELLED'
+    assert recovery['landing_velocity_m_s'] is None
+    assert recovery['parachute_area_m2'] is None
+    assert result['flight_status']['landing_unknown'] is True
+
+    figure = json.loads(analyzer.create_trajectory_plots(result))
+    traces = {t.get('name'): t for t in figure['data'] if t.get('name')}
+    assert 'Parachute deploy' not in traces, sorted(traces)
+    # Hesaplanmamış bir iniş grafikte İŞARETLENMEZ: seri apojede biter.
+    assert 'Landing' not in traces['Flight Phases']['text']
+    assert 'Landing under parachute' not in traces['Flight Phases']['text']
+    assert traces['Flight Phases']['text'][-1] == 'Apogee', \
+        traces['Flight Phases']['text']
+
+
 def test_t68_ballistic_run_does_not_claim_a_parachute():
     """Apojeye varılmadan yere çarpılırsa kurtarma sistemi İDDİA EDİLMEZ."""
     from hrma.analysis.trajectory_analysis import TrajectoryAnalyzer
     analyzer = TrajectoryAnalyzer()
     analyzer.set_vehicle_parameters(mass_dry=400.0, diameter=0.30,
                                     drag_coefficient=0.5, length=2.0)
+    # ÖH D23 / P4B3-24: tutarsız 'isp' kaldırıldı (bekçi çevirisi). Yük
+    # yanmayı iki kez ve iki farklı biçimde tarif ediyordu (impuls
+    # bütçesinden türeyen Isp ile yazılı isp %1'den fazla ayrışıyor);
+    # çözücü artık çelişkiyi reddediyor. Isp bir GİRDİ değil, bütçenin
+    # türevidir ve anahtar yokken ondan türetilir — ölçülen sayılar
+    # değişmez (once.json P4B3_24: isp 220/1/1e9 -> apoje BİT-AYNI).
     motor = {'thrust': 50.0, 'burn_time': 1.0, 'propellant_mass_total': 0.1,
-             'isp': 200.0, 'total_impulse': 50.0}
+             'total_impulse': 50.0}
     result = analyzer.calculate_trajectory(motor, {'launch_angle': 5.0})
     recovery = result['recovery']
     if recovery['deployed']:
@@ -532,25 +581,53 @@ def test_t24_grain_design_separates_geometric_and_burnt_web():
         inhibit_outer=False → geometrik 35,0 mm, tükenen 17,5 mm (iki cephe)
     Eskiden tek bir 'web_thickness_mm' vardı ve varsayılan (iki cepheli)
     yapılandırmada tükenen webin İKİ KATINI raporluyordu.
+
+    ÖH D15 a2 (P2B4-02) — SAYILARI ÇEVRİLDİ, GEREKÇE:
+    Bu bekçi ``web_burnout_mm``i 35,0 / 17,5 mm'ye ``rel=1e-9`` ile
+    kilitliyordu, yani GEOMETRİK idealleştirmeyi "tükenen web" diye
+    kilitliyordu. Alanın kendi künyesi ise "the thickness ACTUALLY consumed"
+    diyor. ÖLÇÜLDÜ (bu testin kendi motoru): fiilen tüketilen 34,980155 mm
+    (tek cephe) ve 17,478518 mm (iki cephe) — kilitlenen sabitler %0,057 ve
+    %0,123 yanlıştı. Aynı körlük end-burner'da 14,3 kata çıkıyordu
+    (35,0 mm yazılıp 500,06 mm tüketiliyordu).
+
+    Bekçinin ASIL iddiası (geometrik web ≠ tükenen web; dış yüzey de
+    yanıyorsa tükenen yaklaşık YARISI) KORUNUR ve ayrıca sayıyla sınanır;
+    sabitler yerine çözücünün kendi eğrisinden ölçülen integral kullanılır,
+    böylece bekçi bir daha idealleştirmeyi kilitleyemez.
     """
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
 
+    def _motor(inhibit_outer):
+        return SolidRocketEngine(grain_type='bates', chamber_diameter=100,
+                                 grain_length=500, core_diameter=30,
+                                 chamber_pressure=40,
+                                 overrides={'inhibit_outer': inhibit_outer})
+
     def _web(inhibit_outer):
-        engine = SolidRocketEngine(grain_type='bates', chamber_diameter=100,
-                                   grain_length=500, core_diameter=30,
-                                   chamber_pressure=40,
-                                   overrides={'inhibit_outer': inhibit_outer})
-        return engine.calculate_performance()['grain_design']
+        return _motor(inhibit_outer).calculate_performance()['grain_design']
+
+    def _tuketilen_mm(inhibit_outer):
+        curve = _motor(inhibit_outer).calculate_thrust_curve()
+        return float(trapezoid(np.asarray(curve['burn_rate'], float),
+                              np.asarray(curve['time'], float))) * 1000.0
 
     single = _web(True)
     double = _web(False)
     assert single['web_thickness_mm'] == pytest.approx(35.0, rel=1e-9)
-    assert single['web_burnout_mm'] == pytest.approx(35.0, rel=1e-9)
+    assert single['web_burnout_mm'] == pytest.approx(_tuketilen_mm(True),
+                                                     rel=1e-9)
     assert single['web_basis'] == 'single_sided'
     assert double['web_thickness_mm'] == pytest.approx(35.0, rel=1e-9)
-    assert double['web_burnout_mm'] == pytest.approx(17.5, rel=1e-9)
+    assert double['web_burnout_mm'] == pytest.approx(_tuketilen_mm(False),
+                                                     rel=1e-9)
     assert double['web_basis'] == 'two_sided'
     assert 'both faces' in double['web_basis_note']
+    # Asıl iddia SAYIYLA: iki cepheli tüketim tek cephelinin ~yarısıdır ve
+    # geometrik web ikisinde de 35,0 mm kalır (ayrım korunur).
+    assert double['web_burnout_mm'] == pytest.approx(
+        single['web_burnout_mm'] / 2.0, rel=0.01)
+    assert double['web_burnout_mm'] < double['web_thickness_mm'] * 0.6
 
 
 def test_t03_dry_mass_is_published_component_by_component():
@@ -563,8 +640,14 @@ def test_t03_dry_mass_is_published_component_by_component():
     engine = _solid_engine()
     masses = engine.calculate_performance()['design_summary']['masses']
     breakdown = masses['inert_breakdown']
+    # ÖH D18 (P2B4-04): 'liner_kg' bu listeye EKLENDİ. Liner kalınlığı
+    # kuru kütleye HİÇ girmiyordu (ölçüm: 0,1 / 5,0 / 50,0 mm liner için
+    # dry_mass_kg üçünde de 16,286993 kg), yani atalet kütlesi eksikti ve
+    # bu bekçi eksikliği göremiyordu — parçaların toplamı her zaman kendi
+    # toplamına eşittir. Aşağıya DUYARLILIK ayağı eklendi (aşağıdaki
+    # test_t03_kutle_liner_girdilerine_TEPKI_veriyor).
     parts = ('case_kg', 'closure_kg', 'nozzle_kg', 'insulation_kg',
-             'igniter_misc_kg')
+             'liner_kg', 'igniter_misc_kg')
     for key in parts:
         assert breakdown[key] >= 0.0, key
     assert sum(breakdown[k] for k in parts) == pytest.approx(
@@ -574,6 +657,67 @@ def test_t03_dry_mass_is_published_component_by_component():
                                                   rel=1e-12)
     assert breakdown['case_kg'] > 0.0
     assert 'Avionics are NOT part of the motor' in breakdown['basis']
+
+
+def test_t03_kutle_liner_girdilerine_TEPKI_veriyor():
+    """ÖH D18 (P2B4-04) — DUYARLILIK AYAĞI (kardeş bekçi totolojikti).
+
+    ÖLÇÜLDÜ (once.json, D=100 mm, yalıtım 20 mm):
+      liner_thickness 0,1 / 5,0 / 50,0 mm -> dry_mass_kg 16,286993 üçünde de
+      AYNI; liner kalemi yayımlanmıyordu bile.
+      liner_density  200 / 1200 / 3000 -> _dry_mass_breakdown.total_kg
+      11,7631 / 16,2870 / 24,4300 iken _calculate_dry_mass() üçünde de
+      16,2870 — İKİ YOL AYRIŞMIŞTI (%38'e kadar).
+    Bu test iki yarıyı da kilitler: (1) liner kalınlığı ve yoğunluğu kuru
+    kütleyi HAREKET ETTİRİR, (2) iki yol bit-aynı kalır.
+    """
+    def _kutle(t_liner, rho):
+        e = _solid_engine()
+        e.overrides['insulation_thickness'] = 20.0
+        e.overrides['liner_thickness'] = t_liner
+        e.overrides['liner_density'] = rho
+        e._apply_overrides()
+        d = e._dry_mass_breakdown()
+        return d, float(e._calculate_dry_mass())
+
+    ince, ince_toplam = _kutle(0.1, 1200.0)
+    kalin, kalin_toplam = _kutle(50.0, 1200.0)
+    assert kalin['liner_kg'] > 20 * ince['liner_kg'], (
+        'liner kalınlığı kütleye girmiyor: %r -> %r'
+        % (ince['liner_kg'], kalin['liner_kg']))
+    assert kalin_toplam > ince_toplam * 1.5, (ince_toplam, kalin_toplam)
+
+    hafif, hafif_toplam = _kutle(5.0, 200.0)
+    agir, agir_toplam = _kutle(5.0, 3000.0)
+    assert agir['liner_kg'] > 10 * hafif['liner_kg'], (
+        'liner yoğunluğu kütleye girmiyor: %r -> %r'
+        % (hafif['liner_kg'], agir['liner_kg']))
+    # İki yol AYRIŞAMAZ (kalemin ölçtüğü asıl çelişki).
+    for dokum, toplam in ((ince, ince_toplam), (kalin, kalin_toplam),
+                          (hafif, hafif_toplam), (agir, agir_toplam)):
+        assert dokum['total_kg'] == pytest.approx(toplam, rel=1e-12), (
+            'döküm %r ⟷ _calculate_dry_mass %r' % (dokum['total_kg'], toplam))
+
+
+def test_t03_kuru_kutle_100g_TABANINA_carpmiyor():
+    """ÖH D18 (P2B4-07) — beyansız 100 g tabanı söküldü.
+
+    ÖLÇÜLDÜ (once.json, bates APCP 40 bar, D/L/çekirdek = 10/10/3 mm):
+    dry_mass_kg = 0,100000 ⟷ inert_breakdown.total_kg = 0,084638 (+%18,15).
+    Kardeş bekçi tam bu çelişkiyi sınıyordu ama fikstürü Ø100/500 mm olduğu
+    için taban hiç devreye girmiyordu. Bu test KÜÇÜK motorda sorar.
+    """
+    from hrma.engines.solid_rocket_engine import SolidRocketEngine
+    e = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
+                          chamber_diameter=10.0, grain_length=10.0,
+                          core_diameter=3.0, chamber_pressure=40.0)
+    dokum = e._dry_mass_breakdown()
+    toplam = float(e._calculate_dry_mass())
+    assert toplam == pytest.approx(dokum['total_kg'], rel=1e-12), (
+        'kuru kütle bileşenlerinin toplamı değil: %r ⟷ %r'
+        % (toplam, dokum['total_kg']))
+    assert toplam < 0.1, (
+        'kuru kütle hâlâ 100 g tabanına oturuyor: %r' % toplam)
 
 
 def test_t03_breakdown_follows_the_case_design_inputs():

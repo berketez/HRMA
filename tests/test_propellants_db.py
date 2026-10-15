@@ -258,6 +258,38 @@ class TestEngineConsistency:
             if rec['c_star_basis'] == 'eq3-32':
                 assert rec['c_star'] == pytest.approx(ideal, rel=1e-3), key
 
+    def test_hicbir_kayit_kendi_beyaniyla_kimlik_denetiminden_muaf_degil(self):
+        """ÖH D17 (P2B1-01) — kusuru KORUYAN muafiyetin kapanışı.
+
+        Yukarıdaki test ``c_star_basis`` 'eq3-32'/'cea' değilse kaydı
+        ATLIYORDU; double_base ve black_powder 'engine-reference' taşıdığı
+        için c* ⟷ (gamma, T_c, M) tutarsızlıkları hiç ölçülmüyordu
+        (ölçülen: eski double_base −%15,64, black_powder −%16,47). Denetim
+        artık BEYANDAN değil FİZİKTEN geçiyor ve HER kayda uygulanıyor:
+        motorun tek denetim noktası ``_c_star_identity_audit``, eksikliği
+        kaydın kendi yoğuşmuş faz kütle kesriyle sınırlar.
+        """
+        from hrma.engines.solid_rocket_engine import _c_star_identity_audit
+        kotu = []
+        for key, rec in PROPELLANTS.items():
+            audit = _c_star_identity_audit(
+                key, rec['gamma'], rec['flame_temperature'],
+                rec['molecular_weight'], rec['c_star'])
+            if audit['status'] in ('unexplained_deficit',
+                                   'above_single_phase_ideal',
+                                   'not_evaluable'):
+                kotu.append((key, audit['status'],
+                             audit['deviation_percent']))
+        assert kotu == [], kotu
+
+    def test_kimlik_denetimi_eski_tutarsizligi_yakalar(self):
+        """Ölçüt ölü değil: kalemin ÖLÇÜLEN eski hâli reddediliyor."""
+        from hrma.engines.solid_rocket_engine import _c_star_identity_audit
+        eski = _c_star_identity_audit('double_base', 1.2612, 2789.3, 26.89,
+                                      1186.7)
+        assert eski['status'] == 'unexplained_deficit'
+        assert eski['deviation_percent'] == pytest.approx(-15.6439, abs=1e-3)
+
 
 class TestEndpoint:
     @pytest.fixture(scope='class')

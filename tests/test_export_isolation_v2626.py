@@ -24,13 +24,16 @@ import pytest
 
 HEADERS = {'Host': '127.0.0.1:8080'}
 
-BASE = {
-    'motor_type': 'hybrid', 'thrust': 5000, 'burn_time': 10,
-    'chamber_pressure': 20, 'tank_pressure': 50, 'of_ratio': 2.5,
-    'l_star': 1.0, 'expansion_ratio': 4.0, 'fuel_type': 'htpb',
-    'oxidizer_type': 'n2o', 'oxidizer_phase': 'liquid',
-    'oxidizer_density': 1220, 'chamber_temperature': 3000,
-}
+#: ÖH 15 Eki (ana model) — dört koşulla çevrildi: (1) eski fikstür
+#: soğutmasız HİBRİT motorlardı; çıplak cidarları yapısal geçerlilik dışında
+#: kaldığı için CADI'nin 14 Eki'de tek STL ucuna bağladığı imalat emniyet
+#: kapısı STL'i (doğru olarak) 422 ile reddediyor — testin ön koşulu
+#: (iki motor STL üretir) kayboldu; (2) kâhin: kapının kendi hükmü + ölçüm —
+#: örnek sıvı motor (rejeneratif soğutmalı) kapıdan geçer (200) ve iki itki
+#: düzeyi farklı STL verir; (3) tolerans yok; testin konusu (eşzamanlı iki
+#: dışa aktarım birbirinin geometrisini almaz) aynen; (4) rapor
+#: docs/scofield/raw/OH/V3/yayin/kapi/birlesik_supurme_15eki.md.
+ORNEK_SIVI = 'Example Liquid LOX-RP1 25kN'
 
 
 @pytest.fixture(scope='module')
@@ -39,17 +42,20 @@ def client():
     return app.test_client()
 
 
-def _solved(client, chamber_diameter_mm: int, name: str):
+def _solved(client, itki_carpani: float, name: str):
     """Gerçek bir çözüm üretir ve STL uç noktasının beklediği biçime getirir."""
-    payload = dict(BASE, chamber_diameter_input=chamber_diameter_mm,
+    import json
+    import pathlib
+    kok = pathlib.Path(__file__).resolve().parents[1]
+    alanlar = json.loads((kok / 'examples' / (ORNEK_SIVI + '.hrma')).read_text(
+        encoding='utf-8'))['inputs']['fields']
+    payload = dict(alanlar, thrust=float(alanlar['thrust']) * itki_carpani,
                    motor_name=name)
-    resp = client.post('/calculate', json=payload, headers=HEADERS)
+    resp = client.post('/calculate_liquid', json=payload, headers=HEADERS)
     assert resp.status_code == 200, resp.get_data(as_text=True)[:300]
-    motor = resp.get_json()['motor']
-    motor['motor_type'] = 'hybrid'
+    motor = resp.get_json()
+    motor['motor_type'] = 'liquid'
     motor['motor_name'] = name
-    motor.setdefault('port_diameter',
-                     motor.get('port_diameter_initial') or 0.03)
     return motor
 
 
@@ -65,15 +71,15 @@ def test_two_motors_produce_different_stl(client):
 
     Bu tutmazsa aşağıdaki yarış testi anlamsızdır (her şey aynı görünür).
     """
-    a = _stl_hash(client, _solved(client, 120, 'A'))
-    b = _stl_hash(client, _solved(client, 300, 'B'))
+    a = _stl_hash(client, _solved(client, 1.0, 'A'))
+    b = _stl_hash(client, _solved(client, 0.6, 'B'))
     assert a != b
 
 
 def test_concurrent_exports_do_not_contaminate_each_other(client):
     """Eşzamanlı iki istek birbirinin geometrisini almamalı."""
-    motor_a = _solved(client, 120, 'A')
-    motor_b = _solved(client, 300, 'B')
+    motor_a = _solved(client, 1.0, 'A')
+    motor_b = _solved(client, 0.6, 'B')
     ref_a = _stl_hash(client, motor_a)
     ref_b = _stl_hash(client, motor_b)
     assert ref_a != ref_b

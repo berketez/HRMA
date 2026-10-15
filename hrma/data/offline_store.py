@@ -23,6 +23,13 @@ Artik tum dizi surecler arasi ozel (exclusive) bir dosya kilidi altinda
 yurur ve kilit altinda dosya TAZE okunur (memo atlanir). get() de derin
 kopya dondurur; cagiran donen sozlugu degistirse bile sureç ici onbellek
 bozulmaz (ayni desen: hrma/engines/cea_bridge.py:399-402).
+
+Kayit YASI (P9B4-19): her kaydin yaninda ``timestamp`` durur ama ``get()``
+yalniz govdeyi donduruyordu — 39 gunluk paketli anlik goruntu ile 39
+dakikalik canli cekim tuketiciye birebir ayni gorunuyordu. ``get_entry()``
+govdeyi zaman damgasi, olculen yas ve kaydin hangi dosyadan (kullanici
+cache'i / paket anlik goruntusu) geldigi ile birlikte dondurur; damga
+okunamiyorsa yas UYDURULMAZ, ``age_available=False`` doner.
 """
 
 import copy
@@ -224,6 +231,64 @@ def _read_json(path: str, use_memo: bool = True) -> Optional[Dict]:
     return data
 
 
+def _yas_saniye(timestamp: Any) -> Optional[float]:
+    """Kaydin zaman damgasindan YASI [s]; okunamiyorsa None (uydurma yok).
+
+    Saat geriye alinmissa negatif yas cikabilir; 0'a kirpilir (ayni desen:
+    web_propellant_api._read_cache_record).
+    """
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        return None
+    try:
+        ts = datetime.fromisoformat(timestamp.strip())
+    except ValueError:
+        return None
+    return max(0.0, (datetime.now() - ts).total_seconds())
+
+
+def get_entry(key: str) -> Optional[Dict]:
+    """Kaydi YASIYLA BIRLIKTE don: veri + zaman damgasi + kaynak dosya.
+
+    P9B4-19 ONARIMI. ``put()`` her kaydin yanina ``timestamp`` yaziyordu ve
+    paketle gelen ``offline_snapshot.json``in 21 kaydinin HEPSI zaman damgasi
+    tasiyor; ama ``get()`` yalniz ``entry['data']``i donduruyordu. Damga
+    dosyada duruyor, cagirana HIC ULASMIYORDU: 39 gunluk paketli anlik
+    goruntu ile 39 dakikalik canli cekim tuketiciye BIREBIR AYNI gorunuyordu.
+    Kaynak kunyesi ancak yasla birlikte kazanilir (Z4'un kazanilmis-SF
+    sozlesmesinin veri katmanindaki esligi).
+
+    Donen sozluk:
+        data           -- kaydin govdesi (DERIN KOPYA)
+        timestamp      -- ISO 8601 dizesi ya da None (kayit tasimiyorsa)
+        age_seconds    -- olculen yas [s] ya da None (damga okunamiyorsa)
+        age_available  -- yas OLCULDU mu (False ise sayi UYDURULMAZ)
+        origin         -- 'user_cache' | 'bundled_snapshot'
+        origin_path    -- okundugu dosyanin yolu
+
+    Yas HESAPLANIR, tahmin edilmez: damga yoksa/okunmuyorsa ``age_seconds``
+    None kalir ve ``age_available`` False olur; cagiran "yasi bilinmiyor"
+    ile "yeni" arasindaki farki gorebilir.
+    """
+    for path, origin in ((user_cache_path(), 'user_cache'),
+                         (SNAPSHOT_PATH, 'bundled_snapshot')):
+        doc = _read_json(path)
+        if not doc:
+            continue
+        entry = (doc.get('entries') or {}).get(key)
+        if isinstance(entry, dict) and 'data' in entry:
+            damga = entry.get('timestamp')
+            yas = _yas_saniye(damga)
+            return {
+                'data': copy.deepcopy(entry['data']),
+                'timestamp': damga if isinstance(damga, str) else None,
+                'age_seconds': yas,
+                'age_available': yas is not None,
+                'origin': origin,
+                'origin_path': path,
+            }
+    return None
+
+
 def get(key: str) -> Optional[Dict]:
     """Anahtari once kullanici cache'inde, sonra snapshot'ta ara.
 
@@ -231,15 +296,12 @@ def get(key: str) -> Optional[Dict]:
     Bulgu: paylasilan mutable nesne donuyordu; cagiran donen sozlugu
     degistirdiginde surec ici onbellek de bozuluyordu (ayni desen dogru
     cozulmus hâliyle hrma/engines/cea_bridge.py:399-402'de mevcuttu).
+
+    Yalniz GOVDEYI dondurur (geriye donuk sozlesme degismedi). Kaydin
+    yasi da gerekiyorsa ``get_entry()`` kullanilir (P9B4-19).
     """
-    for path in (user_cache_path(), SNAPSHOT_PATH):
-        doc = _read_json(path)
-        if not doc:
-            continue
-        entry = (doc.get('entries') or {}).get(key)
-        if isinstance(entry, dict) and 'data' in entry:
-            return copy.deepcopy(entry['data'])
-    return None
+    entry = get_entry(key)
+    return None if entry is None else entry['data']
 
 
 def put(key: str, data: Dict) -> bool:

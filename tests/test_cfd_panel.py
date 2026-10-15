@@ -129,9 +129,21 @@ HIBRIT_GOVDE = {
     'oxidizer_type': 'n2o', 'expansion_ratio': 4.0, 'nozzle_type': 'conical',
     'chamber_material': 'steel_4130', 'wall_thickness': 5,
 }
+# ÖH D26 (defter P15B3-02, YÜKSEK) — GÖVDE DÜZELTİLDİ. Bu gövde eskiden
+# ``'thrust': 1500, 'burn_time': 3`` taşıyordu; ikisi katı ucunda TASARIM
+# NOKTASI HEDEFİDİR ve bu yanma hızı katsayılarıyla (a=0,005 / n=0,35) BATES
+# zarfının dışındadır (ulaşılabilir en küçük ortalama itki ≈285,82 N). Taban
+# 7751531'de uç, ulaşılamayan hedefi sessizce düşürüp başlangıç geometrisinin
+# eğrisini 200 ile yayımlıyordu: yani buradaki 1500 N HİÇBİR ZAMAN etkili
+# olmadı, bu dosyanın ölçtüğü motor her zaman 4312,736770254884 N /
+# 1,9963492719477878 s idi. Zarf kapısı fail-closed olunca o dal 422 döner.
+# Gövde bu yüzden ZATEN ÖLÇÜLEN kipe (geometri kipi) çevrildi ve
+# ``outer_diameter`` ucun okuduğu ada getirildi (uç zaten aynı 100 mm'yi
+# tohumluyordu). ÖLÇÜLDÜ (taban ağacında, iki gövde yan yana): yanıt tasarım
+# noktası bloğu dışında BİT-AYNI — sha16 4d1937768e61fc7c.
 KATI_GOVDE = {
-    'motor_name': 'cfd_panel', 'chamber_pressure': 40, 'thrust': 1500,
-    'burn_time': 3, 'grain_type': 'bates', 'outer_diameter': 100,
+    'motor_name': 'cfd_panel', 'chamber_pressure': 40,
+    'grain_type': 'bates', 'chamber_diameter': 100,
     'core_diameter': 35, 'grain_length': 300, 'segments': 1,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35, 'chamber_temperature': 3000,
     'c_star': 1550, 'propellant_density': 1800, 'propellant_type': 'apcp',
@@ -532,6 +544,28 @@ function dumpModel() {
         el.setAttribute('data-dirty', '1');
         out.editedFieldId = id;
     }
+    // ÇOKLU alan düzenlemesi (viskoz kip: kip + duvar sıcaklığı birlikte).
+    // SEÇİCİ ALANLAR: Merkez'in readForm'u `el.tagName === 'SELECT'`e
+    // bakıyor; taklit düğümlerin tagName'i YOKTUR (DOM innerHTML'den
+    // kuruluyor, düğümler onu öğrenemiyor) ve seçici alanlar bu yüzden
+    // parseFloat yoluna düşüp SESSİZCE düşüyordu. Hangi alanın seçici
+    // olduğu panelin KENDİ alan tanımından okunur (testte ikinci liste
+    // yazılmaz): f[3] bir dizi ise o alan bir seçicidir.
+    if (payload.editFields) {
+        out.editedFieldIds = {};
+        const secici = {};
+        (CP.spec.fields || []).forEach(function (f) {
+            if (Array.isArray(f[3])) secici[f[0]] = true;
+        });
+        Object.keys(payload.editFields).forEach(function (f) {
+            const id = AC._fieldDomId(payload.select[0], payload.select[1], f);
+            const el = document.getElementById(id);
+            el.value = payload.editFields[f];
+            if (secici[f]) el.tagName = 'SELECT';
+            el.setAttribute('data-dirty', '1');
+            out.editedFieldIds[f] = id;
+        });
+    }
     const runCount = payload.runs || 0;
     for (let i = 0; i < runCount; i++) {
         const p = AC.run();
@@ -559,6 +593,9 @@ function dumpModel() {
     // tablosuyla karşılaştırmak kendine bakan (kör) bir ölçüm olurdu.
     out.sceneMetricIds = CFD_METRICS.map(function (m) { return m.id; });
     out.reasonCodes = CP._reasonCodes;
+    // Panelin KENDİ kaynak beyanı sabiti (bekçi testte ikinci kopya yazmaz).
+    out.tWallSource = CP.T_WALL_SOURCE_FORM;
+    out.turbulenceDefault = CP.TURBULENCE_DEFAULT;
     out.activeMetric = CP._getFieldMetric();
     out.colorscales = {};
     CP._metrics.forEach(function (m) {
@@ -718,11 +755,32 @@ class TestKaynakHijyeni:
             f'panel.cfd.* dışında anahtar üretilmiş: {sorted(yabanci)}')
 
     def test_birim_cevrimi_tek_yerde(self, panel_code):
-        """Pa <-> bar çevrimi TEK sabitte (magic number koruması)."""
-        assert 'PA_PER_BAR = 1e5' in panel_code
-        # 1e5 yalnız o tanımda geçmeli; başka yerde çıplak sabit olmamalı.
-        assert panel_code.count('1e5') == 1, (
-            'bar çevrimi ikinci kez yazılmış — tek tanım yeri bozuldu')
+        """Pa <-> bar çevrimi TEK sabitte (magic number koruması).
+
+        ÖH D25 / OH-D24-05 — BEKÇİ ÇEVRİLDİ (kusuru koruyordu). Eski hâl
+        ``'PA_PER_BAR = 1e5' in panel_code`` diyordu, yani sabitin BU
+        DOSYADA durmasını ŞART koşuyordu. Ölçüldü (once.json): aynı tanım
+        dört JS dosyasındaydı (fea_panel, motor_viz_deck, panels/cfd_panel,
+        transient_panel) ve bu bekçi "tek yer"i dosya içiyle sınırladığı
+        için depo genelindeki dörtlemeyi göremiyordu — üstelik teke
+        indirmeyi yasaklıyordu. İddia GÜÇLENDİ: sayı depoda TEK dosyada
+        yaşar (units_constants.js) ve panel onu ORADAN okur.
+        """
+        # Panelde çıplak sayı KALMAMALI.
+        assert 'PA_PER_BAR = 1e5' not in panel_code, (
+            'panel bar çevrimini yeniden tanımlıyor — tek kaynak '
+            'units_constants.js')
+        assert panel_code.count('1e5') == 0, (
+            'bar çevrimi panelde çıplak sabit olarak yazılmış')
+        # Panel sabiti ortak modülden okumalı.
+        assert 'PA_PER_BAR' in panel_code and 'units_constants' in panel_code
+        # Tek kaynak dosyada tanım GERÇEKTEN var ve TEK.
+        ortak = (REPO_ROOT / 'hrma' / 'static' / 'js'
+                 / 'units_constants.js').read_text(encoding='utf-8')
+        # Künye metnindeki alıntı sayı TANIMI değildir: kod satırı sayılır.
+        kod = re.findall(r'^\s*(?:const|var|let)\s+PA_PER_BAR\s*=\s*1e5\s*;',
+                         ortak, re.M)
+        assert len(kod) == 1, kod
 
 
 # ---------------------------------------------------------------------------
@@ -1663,6 +1721,254 @@ def _sig6(v):
     if v == 0:
         return v
     return float('%.6g' % v)
+
+
+# ---------------------------------------------------------------------------
+# 12. VİSKOZ KATMAN (parti 40) — q_w / h_g (Bartz | CFD) / tau_w + c_f
+# ---------------------------------------------------------------------------
+# NE KİLİTLENİR
+#   * Viskoz alan YOKSA (Euler koşusu) katman HİÇ çizilmez ve NOT MODELLED
+#     çipi nedeni ADIYLA yazar — boş grafik ya da sıfır dizisi UYDURULMAZ.
+#   * y⁺ rozeti ucun ÖLÇTÜĞÜ koddan gelir ve rengi koda bağlıdır; log
+#     katmanındaki bir koşu YEŞİL basılamaz.
+#   * h_g grafiği İKİ KAYNAK taşır ve kaynak adı izin ADINDA geçer (renk tek
+#     taşıyıcı değil); fark alanı ikinci eksende çizilir.
+#   * "Duvar ısı akısı doğrulanmadı" rozeti q_w/h_g gösterilen ekranda
+#     GÖRÜNÜR ve künyesi ucun validation_basis cümlesidir.
+#   * body(): viskoz kip seçilmemişse gövdede viskoz alan YOKTUR; izotermal
+#     seçilip T_w boş bırakılırsa istek HİÇ gönderilmez.
+#
+# MUTASYON DÜŞÜNCESİ
+#   * filmFigure'dan Bartz izi düşerse -> test_hg_grafigi_IKI_kaynak_tasiyor.
+#   * y⁺ rozeti hep 'ok' rengiyle basılırsa -> test_log_katmani_yesil_basilmaz.
+#   * body() T_wall_source'u düşürürse -> test_govde_T_wall_source_tasiyor.
+#   * Euler yanıtında viskoz grafik çizilirse -> test_euler_kosusunda_viskoz_
+#     katman_cizilmez.
+
+
+@pytest.fixture(scope='module')
+def yanit_viskoz(client):
+    """GERÇEK viskoz koşu (laminer, izotermal duvar) — ~13 s ölçüldü."""
+    from tests.test_cfd_endpoint import viskoz_blok
+    r = _sessiz(client.post, UC, json=govde(
+        viscous=viskoz_blok(y_plus_target=1.0)))
+    assert r.status_code == 200, r.get_data(as_text=True)[:400]
+    return r.get_json()
+
+
+class TestViskozKatman:
+    @needs_node
+    def test_euler_kosusunda_viskoz_katman_cizilmez(self, tmp_path,
+                                                    motor_hibrit,
+                                                    yanit_yakinsayan):
+        """Viskoz koşu YOKSA q_w/h_g/tau_w grafiği de YOK; neden yazılı."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        for onek in ('cfd_qw_', 'cfd_hg_', 'cfd_tau_'):
+            assert cizim(out, onek) is None, f'{onek} çizilmiş'
+        html = gorunum(out)
+        assert 'data-cfd-chip="not-modelled"' in html
+        assert 'inviscid' in html.lower()
+        # INVISCID rozeti VAR ve yeşil DEĞİL
+        rz = [(k, m) for k, m in rozetler(html) if 'INVISCID' in m]
+        assert rz and rz[0][0] == 'dim', rz
+
+    @needs_node
+    def test_viskoz_kosuda_uc_grafik_de_cizilir(self, tmp_path, motor_hibrit,
+                                                yanit_viskoz):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_viskoz,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        v = yanit_viskoz['cfd']['viscous']
+        qw = cizim(out, 'cfd_qw_')
+        assert qw is not None
+        # ÇİZİLEN DİZİ YANITIN TA KENDİSİ (yumuşatma/örnekleme yok)
+        assert qw['traces'][0]['y'] == v['wall']['heat_flux_W_m2']
+        assert qw['traces'][0]['x'] == v['wall']['z_m']
+        tau = cizim(out, 'cfd_tau_')
+        assert tau is not None
+        assert tau['traces'][0]['y'] == v['wall']['shear_Pa']
+        cf = iz(tau, 'c_f')
+        assert cf is not None and cf['y'] == v['skin_friction']['c_f']
+        assert cf.get('yaxis') == 'y2'
+
+    @needs_node
+    def test_hg_grafigi_IKI_kaynak_tasiyor(self, tmp_path, motor_hibrit,
+                                           yanit_viskoz):
+        """İki eğri + fark alanı; kaynak adı izin ADINDA (renk tek taşıyıcı
+        değil) ve iki seri AYNI eksende çizilir."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_viskoz,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        v = yanit_viskoz['cfd']['viscous']
+        hg = cizim(out, 'cfd_hg_')
+        assert hg is not None
+        bartz = iz(hg, 'Bartz')
+        cfd_iz = iz(hg, 'cfd_viscous')
+        oran = iz(hg, 'difference field')
+        assert bartz is not None and cfd_iz is not None and oran is not None
+        assert bartz['y'] == v['bartz_comparison']['h_g_bartz']
+        assert cfd_iz['y'] == v['thermal_profile']['h_g']
+        assert oran['y'] == v['bartz_comparison']['ratio_cfd_over_bartz']
+        # AYNI EKSEN: ara değerleme yok
+        assert bartz['x'] == cfd_iz['x'] == v['wall']['z_m']
+        # Fark alanı ikinci eksende
+        assert oran.get('yaxis') == 'y2'
+        # Renk TEK taşıyıcı değil: iki eğrinin çizgi deseni ayrı
+        assert bartz['line'].get('dash') != cfd_iz['line'].get('dash')
+
+    @needs_node
+    def test_log_katmani_yesil_basilmaz(self, tmp_path, motor_hibrit,
+                                        yanit_viskoz):
+        """y⁺ rozeti ucun ÖLÇTÜĞÜ koddan gelir; log katmanı 'ok' olamaz."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_viskoz,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        kod = yanit_viskoz['cfd']['viscous']['y_plus_badge']['code']
+        html = gorunum(out)
+        rz = [(k, m) for k, m in rozetler(html) if 'max y+ =' in m]
+        assert rz, f'y+ rozeti basılmamış (kod {kod})'
+        beklenen = {'wall_resolved': 'ok', 'buffer_layer': 'warn',
+                    'log_layer': 'warn', 'unmeasured': 'dim'}[kod]
+        assert rz[0][0] == beklenen, (kod, rz)
+        # Bant ADI rozetin METNİNDE geçer
+        assert kod.split('_')[0].upper() in rz[0][1].upper()
+
+    @needs_node
+    def test_dogrulanmadi_rozeti_qw_ile_birlikte_gorunur(self, tmp_path,
+                                                         motor_hibrit,
+                                                         yanit_viskoz):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_viskoz,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        html = gorunum(out)
+        rz = [(k, m) for k, m in rozetler(html) if 'NOT VALIDATED' in m]
+        assert rz, 'doğrulanmadı rozeti yok'
+        assert rz[0][0] == 'warn'
+        # Künyesi ucun KENDİ cümlesi
+        anahtar = 'THE WALL HEAT FLUX IS NOT VALIDATED'
+        assert anahtar in yanit_viskoz['cfd']['viscous']['validation_basis']
+        assert esc_ile(anahtar) in html
+
+    @needs_node
+    def test_ayrilma_dort_uyesi_ekranda(self, tmp_path, motor_hibrit,
+                                        yanit_viskoz):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_viskoz,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        html = gorunum(out)
+        for uye in yanit_viskoz['cfd']['separation']['criteria']:
+            assert uye in html, f'{uye} üyesi ekranda yok'
+        assert 'model_dependent' in html, (
+            'CFD üyesinin güven etiketi ekranda yok — renk değil METİN '
+            'taşımalı')
+
+    @needs_node
+    def test_surtunme_uc_kaynak_yan_yana(self, tmp_path, motor_hibrit,
+                                         yanit_viskoz):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_viskoz,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        html = gorunum(out)
+        fr = yanit_viskoz['cfd']['viscous']['friction']
+        assert fr['friction_source'] in html
+        assert 'legacy_constant' in html
+        assert 'sutton_band' in html
+
+    @needs_node
+    def test_olculen_sure_cuzdani_ekranda(self, tmp_path, motor_hibrit,
+                                          yanit_viskoz):
+        """Sahte ilerleme yok; ÖLÇÜLEN en kötü süre yazılı."""
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_viskoz,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        html = gorunum(out)
+        cuzdan = yanit_viskoz['cfd']['viscous']['measured_worst_case_s']
+        assert cuzdan
+        for kip, arka in cuzdan.items():
+            assert kip in html
+            for b in arka:
+                assert b in html
+
+
+class TestViskozGovde:
+    """body(): viskoz alanların gövdeye NASIL girdiği."""
+
+    @needs_node
+    def test_kip_secilmemisse_govdede_viskoz_alan_yok(self, tmp_path,
+                                                      motor_hibrit,
+                                                      yanit_yakinsayan):
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
+                        response=yanit_yakinsayan,
+                        select=['nozzle_flow', 'cfd'], runs=1)
+        govde_json = out['fetchCalls'][0]['body']
+        assert 'viscous' not in govde_json
+
+    @needs_node
+    def test_govde_T_wall_source_tasiyor(self, tmp_path, motor_hibrit,
+                                         yanit_viskoz):
+        """İzotermal seçilince gövde uç sözleşmesinin İSTEDİĞİ üçlüyü taşır
+        ve T_wall_source GERÇEK kaynağı (form alanı) adlandırır."""
+        out = kos_panel(
+            tmp_path, motorType='hybrid', results=motor_hibrit,
+            response=yanit_viskoz, select=['nozzle_flow', 'cfd'],
+            editFields={'viscous_mode': 'isothermal',
+                        'viscous_T_wall_K': '1000'},
+            runs=1)
+        blok = out['fetchCalls'][0]['body']['viscous']
+        assert blok['enabled'] is True
+        assert blok['wall_thermal'] == 'isothermal'
+        assert blok['T_wall_K'] == 1000
+        assert blok['T_wall_source'] == out['tWallSource']
+        assert 'user' in blok['T_wall_source']
+        assert blok['turbulence'] == 'none'
+
+    @needs_node
+    def test_izotermal_secilip_T_wall_bossa_istek_gonderilmez(
+            self, tmp_path, motor_hibrit, yanit_viskoz):
+        out = kos_panel(
+            tmp_path, motorType='hybrid', results=motor_hibrit,
+            response=yanit_viskoz, select=['nozzle_flow', 'cfd'],
+            editFields={'viscous_mode': 'isothermal'}, runs=1)
+        assert out['fetchCalls'] == [], 'eksik T_w ile istek gönderildi'
+        assert out['history'] == [], 'gönderilmeyen istek geçmişe yazılmış'
+        durum = out['nodes']['ac_status']['text']
+        assert 'isothermal wall' in durum, (
+            f'eksik duvar sıcaklığı adıyla yazılmamış: {durum!r}')
+
+    @needs_node
+    def test_adiabatik_secilince_T_wall_gonderilmez(self, tmp_path,
+                                                    motor_hibrit,
+                                                    yanit_viskoz):
+        out = kos_panel(
+            tmp_path, motorType='hybrid', results=motor_hibrit,
+            response=yanit_viskoz, select=['nozzle_flow', 'cfd'],
+            editFields={'viscous_mode': 'adiabatic',
+                        'viscous_T_wall_K': '1000'}, runs=1)
+        blok = out['fetchCalls'][0]['body']['viscous']
+        assert blok['wall_thermal'] == 'adiabatic'
+        assert 'T_wall_K' not in blok, (
+            'adyabatik kipte T_wall gönderilmiş — uç bunu 400 ile reddeder')
+
+    def test_viskoz_alanlarin_sonlu_varsayilani_yok(self, panel_code):
+        """Duvar sıcaklığı UYDURULAMAZ: alanın varsayılanı boş dize."""
+        i = panel_code.find("['viscous_T_wall_K',")
+        assert i > 0, 'viscous_T_wall_K alanı bulunamadı'
+        parca = panel_code[i:i + 220]
+        assert "'', 'any'" in parca, parca
+        # Kip seçicisinin varsayılanı da BOŞ (Euler) olmalı: viskoz koşu
+        # sessizce açılmaz.
+        j = panel_code.find("['viscous_mode',")
+        assert j > 0
+        assert "'Wall model', ''," in panel_code[j:j + 80], \
+            panel_code[j:j + 80]
+
+
+def esc_ile(metin):
+    """Panelin HTML kaçışının aynısı (esc): & " < > sırasıyla."""
+    return (metin.replace('&', '&amp;').replace('"', '&quot;')
+            .replace('<', '&lt;').replace('>', '&gt;'))
 
 
 if __name__ == '__main__':

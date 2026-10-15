@@ -28,13 +28,36 @@ from hrma.analysis.structural_analysis import (
     STRUCTURAL_VERDICT_NOT_EVALUATED,
     StructuralAnalyzer,
 )
-from hrma.constants import vacuum_isp_ratio
+import math
+
+
+def _EMEKLI_AMPIRIK_FIT(epsilon: float, gamma: float = 1.22) -> float:
+    """``hrma.constants.vacuum_isp_ratio``in EMEKLİ ampirik gövdesi.
+
+    ÖH D22 · P10B3-16 — bu bekçi eskiden ``hrma.constants.vacuum_isp_ratio``i
+    çağırıyordu ve "yayımlanan oran ona YAKINSAMASIN" diyordu. O fonksiyon bu
+    dalgada ONARILDI: artık oda basıncını ZORUNLU alıyor ve tam izentropik Cf
+    oranını veriyor (raporun beş ölçüm noktasını %0,002 içinde üretir). Yani
+    bekçi, artık DOĞRU olan bir fonksiyondan uzak durulmasını istiyordu — yani
+    KUSURU KORUYAN bir bekçiye dönüşmüştü.
+
+    Bekçinin korumak istediği şey ise hâlâ geçerli: katı motorun oda
+    basıncını GÖRMEYEN eski ampirik çarpanı geri gelmemeli. O yüzden referans
+    artık emekli formülün BURADAKİ kopyasıdır — ürün koduna değil, kaldırılan
+    yola bağlıdır ve onarılan fonksiyonla birlikte kaymaz.
+
+    Emekli gövde (v2.6.27 öncesi ``constants.py``):
+        ratio = 0.953 + 0.0405*ln(eps) + 0.005*(gamma - 1.2)
+    """
+    return 0.953 + 0.0405 * math.log(max(float(epsilon), 1.0)) \
+        + 0.005 * (float(gamma) - 1.2)
 from hrma.data.materials_db import get_material
 from hrma.engines.solid_rocket_engine import (
     SOLID_CASE_DEFAULT_MATERIAL,
     SOLID_CASE_DESIGN,
     SolidRocketEngine,
 )
+from hrma.utils.numeric_compat import trapezoid
 
 SOLID_ENGINE_SOURCE = (Path(__file__).resolve().parents[1]
                        / 'hrma' / 'engines' / 'solid_rocket_engine.py')
@@ -204,7 +227,7 @@ class TestF2_2VakumIsp:
         r = e.calculate_performance()
         egri = e.calculate_thrust_curve()
         cf_vac = e._thrust_coefficient_vacuum()
-        i_vac = float(np.trapz(
+        i_vac = float(trapezoid(
             cf_vac * np.asarray(egri['pressure'], dtype=float) * 1e5
             * np.asarray(egri['throat_area_series'], dtype=float),
             egri['time']))
@@ -226,7 +249,7 @@ class TestF2_2VakumIsp:
         e = SolidRocketEngine(chamber_pressure=pc)
         r = e.calculate_performance()
         oran = r['isp_vacuum'] / r['isp_sea_level']
-        ampirik = vacuum_isp_ratio(r['expansion_ratio'], e.gamma)
+        ampirik = _EMEKLI_AMPIRIK_FIT(r['expansion_ratio'], e.gamma)
         sapma = 100.0 * abs(oran - ampirik) / oran
         assert sapma >= en_az_sapma_yuzde, (
             f'Pc={pc} bar: yayımlanan vakum oranı ampirik log-fite '
@@ -288,13 +311,25 @@ class TestF4_2YapisalHukum:
             sa['minimum_safety_factor_verdict_basis'])
 
     def test_uyari_asla_bastirilmiyor(self, analyzer):
-        """SF hedefi düşükse 'UNSAFE' bir TEHLİKE bildirimidir, geri çekilmez."""
+        """SF hedefi düşükse tehlike bildirimi GÖRÜNÜR kalır, geri çekilmez.
+
+        Z4 onarımı (2026-08-27): eski biçim hedefin EKOSUNU ana hükme
+        basıyordu (kusurun kendisi — P5B1-01). Yeni sözleşme: ana hüküm
+        kazanılmamışsa NOT_EVALUATED + withheld; hedef-türevi tehlike
+        ``design_target_assessment`` kanalında ADIYLA yayımlanır ve
+        SUSTURULMAZ. Ölçülen: dta.status UNSAFE / HIGH, hedef 2,0.
+        """
         r = analyzer.analyze_structure(REF_MOTOR, design_safety_factor=2.0)
         sa = r['safety_analysis']
         assert sa['binding_safety_factor_is_tautological'] is True
-        assert sa['status'] == 'UNSAFE'
-        assert sa['risk_level'] == 'HIGH'
-        assert sa['verdict_withheld'] is False
+        assert sa['binding_safety_factor_reads_back_target'] is True
+        assert sa['status'] == STRUCTURAL_VERDICT_NOT_EVALUATED
+        assert sa['verdict_withheld'] is True
+        dta = sa['design_target_assessment']
+        assert dta['status'] == 'UNSAFE'
+        assert dta['risk_level'] == 'HIGH'
+        assert dta['design_safety_factor_target'] == pytest.approx(2.0)
+        assert dta['target_derived_minimum_safety_factor'] == pytest.approx(2.0)
 
     def test_yalniz_hazne_cidari_yetmez_ve_bu_beyan_ediliyor(self, analyzer):
         """Eski kör nokta: lüle/kapak HEP 'size' modunda kalıyordu.
@@ -399,6 +434,126 @@ class TestF4_2YapisalHukum:
                        if np.isfinite(v)]
             assert sa['minimum_safety_factor'] == pytest.approx(
                 min(adaylar), rel=1e-9)
+
+
+# ===========================================================================
+# ÖH FAZ B (27 Ağustos 2026) — F4-2 ailesinin KÖR kaldığı iki eksen
+# ===========================================================================
+class TestF4_2TasinanBekciler:
+    """TAŞINAN BEKÇİLER — ``TestF4_2YapisalHukum``a DOKUNULMADI.
+
+    Yukarıdaki sınıf (iki yönlü bayrak sözleşmesi) mutasyonla tescil edilmiş
+    SAĞLIKLI desendir ve olduğu gibi durur. Kampanyanın ölçtüğü iki körlük o
+    sınıfın kapsamının DIŞINDA kaldığı için buraya, kardeş iddialar olarak
+    yazılır:
+
+    * ``P5B1-11`` — ``:350`` kapak kalınlığının ANALİZ bloğuna iletildiğini
+      doğruluyor; aynı kalınlığın KÜTLE hesabına iletilmediğini görmüyor.
+    * ``P5B1-17`` — ``:368`` totoloji haritasının YAYIMLANDIĞINI doğruluyor;
+      haritanın DOĞRU olup olmadığını sormuyor.
+
+    İkisi de yazıldıklarında ürün kusuru yüzünden kırmızıydı ve
+    ``xfail(strict=True)`` borç imiyle duruyordu. ÖH D15 birleştirmesinde
+    (1 Eyl 2026) İKİSİ DE ÖLÇÜLDÜ ve kusurların kapandığı görüldü; imler
+    kaldırıldı ve testler artık DOĞRU davranışı kilitliyor. Ölçümler her
+    testin kendi künyesinde durur.
+    """
+
+    # ÖH D15 birleştirme (1 Eyl 2026) — ``xfail(strict=True)`` BORÇ İMİ
+    # KALDIRILDI. İm ÖH defter P5B1-11'i anıyordu: "``_calculate_weight``
+    # kapak kalınlığını ``min(flat_head, dished_head)`` BOYUTLANDIRMA
+    # değerlerinden okuyor, değerlendirilen ``head_thickness_used_mm``
+    # alanını hiç okumuyor"; ölçümü de ``actual_end_cap_thickness`` =
+    # 2 / 20 / 50 mm için ``end_caps_weight`` ÜÇÜNDE DE 0,265554 kg,
+    # ``total_weight`` üçünde de 4,129509 kg idi.
+    #
+    # Kusur KAPANDI. Birleşik ağaçta aynı ölçüm (aynı REF_MOTOR, SF 3,0):
+    #     2 mm  -> end_caps 0,270393 kg · total 4,134348 kg
+    #    20 mm  -> end_caps 2,703932 kg · total 6,567887 kg
+    #    50 mm  -> end_caps 6,759830 kg · total 10,623785 kg
+    # Kütle kalınlıkla DOĞRUSAL (10 kat kalınlık -> 10 kat kapak kütlesi,
+    # 25 kat -> 25 kat), yani değerlendirilen kalınlık artık kütle hesabına
+    # da iletiliyor. Test bu davranışı kilitler; borç imi kalırsa ``strict``
+    # XPASS ile kırmızı yanar ve kusur geri dönerse kimse göremez.
+    @pytest.mark.parametrize('ince,kalin', [(0.002, 0.020), (0.002, 0.050)])
+    def test_kapak_kalinligi_kutle_hesabina_da_iletiliyor(self, analyzer,
+                                                          ince, kalin):
+        """Değerlendirilen kapak kalınlığı kütleyi de belirlemeli.
+
+        Kardeş bekçi (``:350``) argümanın ``end_cap_analysis``a ulaştığını
+        kilitliyor; kütle kalemi aynı argümanı görmüyor ve motorun toplam
+        kütlesi (dolayısıyla T/W) yanlış zemine oturuyor.
+        """
+        def _kos(t):
+            r = analyzer.analyze_structure(
+                REF_MOTOR, design_safety_factor=3.0,
+                actual_end_cap_thickness=t)
+            return r['end_cap_analysis'], r['weight_analysis']
+
+        ec_i, w_i = _kos(ince)
+        ec_k, w_k = _kos(kalin)
+        # Kontrol: argüman ANALİZ bloğuna gerçekten iletiliyor (kardeş iddia).
+        assert ec_i['head_thickness_used_mm'] == pytest.approx(ince * 1000)
+        assert ec_k['head_thickness_used_mm'] == pytest.approx(kalin * 1000)
+        assert ec_i['design_mode'] == ec_k['design_mode'] == 'verify'
+
+        oran = kalin / ince
+        assert w_k['end_caps_weight'] > w_i['end_caps_weight'], (
+            f'{ince * 1000:.0f} mm ve {kalin * 1000:.0f} mm kapak ({oran:.0f} '
+            f"kat) aynı kütleyi veriyor: {w_i['end_caps_weight']:.6f} kg — "
+            'kütle hesabı değerlendirilen kalınlığı okumuyor')
+        assert w_k['total_weight'] > w_i['total_weight']
+
+    # ÖH D15 birleştirme (1 Eyl 2026) — ``xfail(strict=True)`` BORÇ İMİ
+    # KALDIRILDI. İm, ÖH defter P5B1-17'yi anıyordu: "``safety_factor_is_
+    # tautological`` bayrağı YALNIZ ``design_mode=='size'``e bakıyor",
+    # ölçümü de şuydu — bayrak beş adayda da ``True`` iken sayılar
+    # Pc=40 bar'da {chamber_hoop 5,7600 · chamber_von_mises 6,6511 ·
+    # nozzle 4,8000 · end_cap 4,8000}, Pc=3000 bar'da {0,9741 · 0,5747 ·
+    # 4,8000 · 4,8000}; yani hazne adayları tasarımla HAREKET ediyordu.
+    #
+    # Kusur yapısal kulvarda KAPANDI. Birleşik ağaçta AYNI ölçüm yeniden
+    # alındı (aynı REF_MOTOR, SF hedefi 4,80, cidar verilmemiş):
+    #   Pc=40   bayrak {chamber_hoop True · chamber_von_mises True ·
+    #                   nozzle True · end_cap True · buckling_axial True}
+    #   Pc=3000 bayrak {chamber_hoop False · chamber_von_mises False ·
+    #                   nozzle True · end_cap True · buckling_axial False}
+    # Yani hareket eden adaylar artık "totolojik" İDDİA EDİLMİYOR; işaretli
+    # kalan ikisinin (nozzle, end_cap) sayısı iki koşuda da BİREBİR 4,8000 —
+    # gerçekten girdinin geri okunması. Test bu davranışı kilitler; borç imi
+    # kalırsa ``strict`` XPASS ile kırmızı yanar ve kapanan kusur geri
+    # dönerse bunu KİMSE görmez.
+    def test_totolojik_isaretli_aday_tasarimla_degismez(self, analyzer):
+        """Bayrağın kendi tanımı sınanır: totoloji, girdinin geri okunmasıdır.
+
+        İki koşu YALNIZ hazne basıncında ayrılır. Bir aday iki koşuda da
+        "totolojik" işaretliyse sayısı DEĞİŞEMEZ; değişiyorsa o sayı girdinin
+        geri okunması değildir ve bayrak fazla iddia ediyor demektir.
+        """
+        dusuk = analyzer.analyze_structure(
+            dict(REF_MOTOR, chamber_pressure=40.0),
+            design_safety_factor=4.8)['safety_analysis']
+        yuksek = analyzer.analyze_structure(
+            dict(REF_MOTOR, chamber_pressure=3000.0),
+            design_safety_factor=4.8)['safety_analysis']
+
+        h_d, h_y = (dusuk['safety_factor_is_tautological'],
+                    yuksek['safety_factor_is_tautological'])
+        ortak = [ad for ad in h_d if h_d[ad] and h_y.get(ad)]
+        assert ortak, 'iki koşuda da totolojik işaretli aday yok — düzenek bozuk'
+
+        sapan = {}
+        for ad in ortak:
+            a, b = dusuk['safety_factors'][ad], yuksek['safety_factors'][ad]
+            if not np.isfinite(a) or not np.isfinite(b):
+                continue
+            if abs(b - a) > 1e-9 * max(1.0, abs(a)):
+                sapan[ad] = (round(a, 4), round(b, 4))
+        assert not sapan, (
+            '"totolojik" işaretli adaylar tasarımla hareket ediyor '
+            f'(Pc 40 -> 3000 bar): {sapan} — bayrak yalnız design_mode\'a '
+            'bakıyor, sayının gerçekten girdinin geri okunması olup '
+            'olmadığına bakmıyor')
 
 
 if __name__ == '__main__':

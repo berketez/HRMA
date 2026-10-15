@@ -89,6 +89,14 @@ def mask_comments_and_style(text):
         return re.sub(r'[^\n]', ' ', match.group(0))
 
     text = re.sub(r'<!--.*?-->', blank, text, flags=re.S)
+    # ÖH D24 / fix-22 — JINJA YORUMU DA YORUMDUR. ``{# … #}`` bloğunu şablon
+    # motoru RENDER SIRASINDA siler; tarayıcıya hiç gitmez, yani "kullanıcıya
+    # görünen metin" değildir. D23 (arayuz a1 / P13B2-05) ``liquid.html``e
+    # ölçüm notunu bu biçimde yazınca bekçi yanlış pozitif verdi (ölçüldü:
+    # taban 88a29d3 — liquid.html:573, tek bulgu). Kapsam GENİŞLEMEDİ, yorum
+    # ailesi tamamlandı: HTML, CSS ve JS yorumları zaten maskeliydi.
+    # (Aynı onarım ÖH D24 arayuz a2 tarafından da bağımsız yapıldı; birleşmede fix-22 metni korundu.)
+    text = re.sub(r'\{#.*?#\}', blank, text, flags=re.S)
     text = re.sub(r'<style\b[^>]*>.*?</style>', blank, text, flags=re.S | re.I)
     text = re.sub(r'/\*.*?\*/', blank, text, flags=re.S)
 
@@ -321,6 +329,13 @@ TECH_TOKENS = (
     # iki dilde de aynı yazılır, çevrilirse yanlış olur. Uzun olan önce
     # (replace alt-dizi çalışır; 'tau_c' 'tau'dan önce elenmeli).
     'alpha_N', 'dP_inj', 'R_crit', 'tau_c', 'tau', 'Pc',
+    # ÖH D26 · arayuz a3: mesh.meta ALAN ADI. Uyarı metni kullanıcıya hangi
+    # yanıt alanına bakacağını söylüyor; alan adı ürünün kendi anahtarıdır
+    # (hrma/fea/mesh_axisym.py:942 "kalinlik_sapma_orani") ve TR metninde de
+    # AYNEN yazılmak zorundadır — Türkçeleştirilirse okuyucu o anahtarı
+    # yanıtta bulamaz. Kaçış avcısı 'kalinlik' kökünü haklı olarak şüpheli
+    # buluyordu; muafiyet yalnız bu tam simgeye verildi.
+    'kalinlik_sapma_orani',
 )
 
 # İki dilde aynı yazılan sık kelimeler (çeviri hatası değil).
@@ -764,13 +779,13 @@ check('api.members', ['t', 'tf', 'setLang', 'apply', 'applyTo', 'onChange', 'num
 check('api.defaultLang', I.lang === 'en', I.lang);
 check('api.languages', I.languages().indexOf('tr') >= 0, I.languages().join(','));
 
-check('t.knownKey', I.t('nav.home') === 'Home', I.t('nav.home'));
+check('t.knownKey', I.t('link.formulas') === 'Formula Reference', I.t('link.formulas'));
 check('t.unknownKeyReturnsKey', I.t('yok.olan.anahtar') === 'yok.olan.anahtar');
 check('t.unknownKeyUsesFallback', I.t('yok.olan', 'Fallback') === 'Fallback');
 I.register({ en: { 'only.en': 'English only' } }, 'test');
 I.setLang('tr');
 check('t.missingTrFallsBackToEn', I.t('only.en') === 'English only', I.t('only.en'));
-check('t.trTranslation', I.t('nav.home') === 'Ana Sayfa', I.t('nav.home'));
+check('t.trTranslation', I.t('link.formulas') === 'Formül Referansı', I.t('link.formulas'));
 I.setLang('en');
 
 const added = I.register({ en: { 'x.a': 'A', 'x.b': 'B' }, tr: { 'x.a': 'Aa', 'x.b': 'Bb' } }, 'i18n_test.js');
@@ -812,27 +827,28 @@ I.setLang('en');
 
 const El = w._dom.El;
 const root = new El('div');
-root.setAttribute('data-i18n', 'nav.home');
+root.setAttribute('data-i18n', 'link.formulas');
 const child = new El('span');
-child.setAttribute('data-i18n', 'nav.hybrid');
+child.setAttribute('data-i18n', 'link.launch_site');
 const input = new El('input');
-input.setAttribute('data-i18n-placeholder', 'nav.solid');
+input.setAttribute('data-i18n-placeholder', 'footer.tool');
 const titled = new El('a');
-titled.setAttribute('data-i18n-title', 'nav.liquid');
+titled.setAttribute('data-i18n-title', 'footer.developedBy');
 root.appendChild(child);
 root.appendChild(input);
 root.appendChild(titled);
 I.setLang('tr');
 I.applyTo(root);
-check('applyTo.rootItself', root.textContent === 'Ana Sayfa', root.textContent);
-check('applyTo.child', child.textContent === 'Hibrit Motor', child.textContent);
-check('applyTo.placeholder', input.getAttribute('placeholder') === 'Kati Yakitli Motor'
-    || input.getAttribute('placeholder').length > 0, input.getAttribute('placeholder'));
+check('applyTo.rootItself', root.textContent === 'Formül Referansı', root.textContent);
+check('applyTo.child', child.textContent === 'Fırlatma Sahası (3B Dünya)', child.textContent);
+check('applyTo.placeholder',
+    input.getAttribute('placeholder') === 'Profesyonel Roket İtki Tasarım Aracı',
+    input.getAttribute('placeholder'));
 check('applyTo.title', titled.getAttribute('title') && titled.getAttribute('title').length > 0,
     titled.getAttribute('title'));
 I.setLang('en');
 I.applyTo(root);
-check('applyTo.switchBack', child.textContent === 'Hybrid Motor', child.textContent);
+check('applyTo.switchBack', child.textContent === 'Launch Site (3D Earth)', child.textContent);
 check('applyTo.nullSafe', (function () { try { I.applyTo(null); return true; } catch (e) { return false; } })());
 
 let seen = [];
@@ -868,7 +884,7 @@ I.setLang('en');
 check('switcher.syncsOnSetLang', sel.value === 'en', sel.value);
 check('switcher.noContainerSafe', (function () { try { I.mountSwitcher(); return true; } catch (e) { return false; } })());
 
-check('has.true', I.has('nav.home') === true);
+check('has.true', I.has('link.formulas') === true);
 check('has.false', I.has('yok.olan') === false);
 
 I.setLang('tr');

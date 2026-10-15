@@ -149,11 +149,17 @@ class TestTuvalDenetimi:
         dizi[:, :, :3] = (17, 17, 34)          # opak arka plan
         dizi[:, :, 3] = 255
         uretec = np.random.default_rng(3)
-        dizi[40:80, 40:80, :3] = uretec.integers(0, 256, (40, 40, 3), dtype=np.uint8)
+        # ÖH D22 · P10B3-12: dolu bölge 40x40'tan 70x70'e büyütüldü. Testin
+        # KONUSU değişmedi (opak tuvalde arka plan baskın renkten çıkarılır);
+        # yalnız fikstür GERÇEK bir sahneyi temsil edecek kadar doldu. Eski
+        # 40x40 = %11,1 doluluk, canlı ölçümün (%41-49) dörtte biriydi ve
+        # yalnız eski gevşek eşikte (%2) "dolu" sayılıyordu.
+        dizi[25:95, 25:95, :3] = uretec.integers(0, 256, (70, 70, 3), dtype=np.uint8)
         olcum = denetimler.piksel_olcumu(png_baytlari(dizi))
         assert olcum['arkaplan_rengi'] == [17, 17, 34]
-        # 40x40 / 120x120 = %11,1 — kuantalama payıyla birlikte %10'un üstünde
-        assert olcum['dolu_oran'] > 0.10
+        # 70x70 / 120x120 = %34,0 — canlı ölçümün (%41-49) altında ama
+        # eşiğin (%20) üstünde
+        assert olcum['dolu_oran'] > 0.30
         assert denetimler.tuval_denetimi(olcum).gecti is True
 
     def test_olcum_alinamadiysa_denetim_kalir(self):
@@ -183,8 +189,28 @@ class TestPlumeDenetimi:
         assert hukum.kesinlik == 'dogrudan'
         assert 'drawRange' in hukum.dayanak
 
-    def test_tek_parcacik_bile_gecer(self):
-        assert denetimler.plume_denetimi(viz_olcumu(cizim_araligi=1)).gecti is True
+    def test_tek_parcacik_KALIR(self):
+        """ÖH D22 · P10B3-12 — BU BEKÇİ ÇEVRİLDİ (eski adı ``..._bile_gecer``).
+
+        Eski hâli ``cizim_araligi=1`` için ``gecti is True`` istiyordu ve
+        eşiğin 1 olmasını KİLİTLİYORDU. Ölçüldü: canlı egzoz aralığı 6 ayrı
+        turun 14 sayfa gözleminde 14/14 kez TAM 900. Yani "1 parçacık" bir
+        çalışma durumu değil, 900'den 1'e düşmüş bir GERİLEMEdir ve eski
+        bekçi tam olarak o gerilemenin geçmesini şart koşuyordu.
+
+        Eşik tavanın yarısına (450) çekildi; bekçi tersine çevrildi.
+        Kanalın VARLIĞI ise hâlâ ``test_cizim_araligi_sifirsa_kalir`` ile
+        sınanıyor — 0 ile 1 ayrımı kaybolmadı, ikisi de KALIR.
+        """
+        d = denetimler.plume_denetimi(viz_olcumu(cizim_araligi=1))
+        assert d.gecti is False, (
+            '900 parçacıktan 1 parçacığa gerileme kapıdan geçiyor: %s'
+            % d.ozet)
+
+    def test_canli_olculen_aralik_gecer(self):
+        """Gerçek sahne (14/14 gözlemde 900) geçmeye devam etmeli."""
+        assert denetimler.plume_denetimi(
+            viz_olcumu(cizim_araligi=900)).gecti is True
 
     def test_cizim_araligi_sifirsa_kalir(self):
         """Aralık 0 = egzoz HİÇ çizilmiyor. Gerekçesi ne olursa olsun KALIR."""
@@ -386,11 +412,60 @@ class TestTopluHukum:
 
 class TestSayfaTanimlari:
 
-    def test_sayfa_kumesi_test_envanteriyle_ayni(self):
-        """Sayfa eklenip iskeleye yazılmazsa denetim o sayfayı hiç görmez."""
+    def test_hesapli_sayfa_kumesi_test_envanteriyle_ayni(self):
+        """Sayfa eklenip iskeleye yazılmazsa denetim o sayfayı hiç görmez.
+
+        ÖH D21 / defter P17B1-16 — BEKÇİ ÇEVRİLDİ. Eskiden iddia
+        ``set(SAYFALAR) == set(PAGES)`` idi; ``PAGES`` yalnız FORM taşıyan
+        üç motor sayfasını sayar, dolayısıyla bu eşitlik turu üç sayfada
+        MEKANİK OLARAK KİLİTLİYORDU: ürünün diğer sayfalarını (``/``,
+        ``/formulas``, ``/launch-site``) tura eklemek testi kırardı ve
+        eklemeyen kimseyi uyarmazdı. Kilit doğru yerinden kuruldu: form
+        envanteri HESAPLI sayfalarla eşleşir, tur ise hepsini gezer.
+        """
         from tests.support.inventory import PAGES
-        assert set(sayfalar.SAYFALAR) == set(PAGES)
-        assert set(sayfalar.VARSAYILAN_SIRA) == set(PAGES)
+        hesapli = {ad for ad, t in sayfalar.SAYFALAR.items() if t.hesap_var}
+        assert hesapli == set(PAGES)
+        assert set(sayfalar.HESAPLI_SIRA) == set(PAGES)
+        # Tanımlı HER sayfa varsayılan turda gezilir: tanımlayıp sıraya
+        # yazmamak, sayfayı "denetleniyor" sanılan bir listeye koyup hiç
+        # açmamaktır.
+        assert set(sayfalar.VARSAYILAN_SIRA) == set(sayfalar.SAYFALAR)
+
+    def test_urunun_HER_html_sayfasi_ya_turda_ya_gerekceli_muaf(self):
+        """P17B1-16 mandalı: yeni bir sayfa sessizce denetim dışı kalamaz.
+
+        Ölçüm ``hrma.app``in kendi yönlendirme tablosundan yapılır, sabit
+        listeden değil. Bir sayfa eklenip tura yazılmazsa bu bekçi kırmızı
+        yanar; muafiyet ancak ADIYLA ve GEREKÇESİYLE yazılırsa geçerlidir.
+        """
+        import inspect
+
+        from hrma.app import app
+        html_yollari = set()
+        for kural in app.url_map.iter_rules():
+            if kural.arguments or 'GET' not in (kural.methods or set()):
+                continue
+            islev = app.view_functions.get(kural.endpoint)
+            if islev is None:
+                continue
+            try:
+                govde = inspect.getsource(islev)
+            except (OSError, TypeError):
+                continue
+            if 'render_template(' in govde:
+                html_yollari.add(str(kural.rule))
+        assert html_yollari, 'ürünün hiç HTML sayfası bulunamadı — ölçüm kırık'
+        gezilen = {t.yol for t in sayfalar.SAYFALAR.values()}
+        # BEYANLI MUAFİYET — ad + gerekçe. Boş: muaf tutulan iki eski sayfa
+        # (/simple, /uzaytek) sökümü: Berke 23 Eyl, dalga36/sokum.
+        MUAF = {}
+        acikta = sorted(html_yollari - gezilen - set(MUAF))
+        assert not acikta, (
+            'ürünün şu HTML sayfaları görsel turun DIŞINDA ve muafiyet '
+            'beyanı yok: %s — ya tools/browser_harness/sayfalar.py:'
+            'STATIK_SAYFALAR içine ekleyin ya da MUAF listesine gerekçesiyle '
+            'yazın. Denetlenmeyen sayfa, kusuru yayına kadar taşır.' % acikta)
 
     def test_yollar_uygulamada_gercekten_var(self):
         """``/hybrid`` yolu değişirse tur sessizce 404 gezmesin."""
@@ -564,8 +639,13 @@ class TestSunucuOmru:
 class TestRapor:
 
     def test_rapor_kalan_denetimleri_listeler(self):
+        # ÖH D20 · P17B1-07: künye ARTIK zorunlu — eksik künye rapor
+        # düzeyinde bir denetim daha kaldırır (fail-closed). Bu testin
+        # konusu sayfa denetimleri olduğu için künye tam verilir.
         rapor = run_tour.rapor_olustur(
-            'http://127.0.0.1:1', {'kaynak': 'harici'}, {'motor': 'chromium'},
+            'http://127.0.0.1:1', {'kaynak': 'harici'},
+            {'motor': 'chromium', 'kanal': 'chrome', 'surum': '141.0',
+             'denemeler': [{'kanal': 'chrome', 'acildi': True, 'hata': None}]},
             [sahte_sayfa('hybrid', [True, True]), sahte_sayfa('solid', [True, False])])
         assert rapor['gecti'] is False
         assert rapor['ozet']['gecen_sayfa'] == 1
@@ -619,3 +699,58 @@ class TestRapor:
     def test_rapor_adi_sabit(self):
         """Kapıya bağlanan betik bu adı bekler; sessizce değişmesin."""
         assert run_tour.RAPOR_ADI == 'tour_report.json'
+
+
+# ---------------------------------------------------------------------------
+# ÖH D37 · OH-D33-45 — piksel denetimlerinin KAYDI
+# ---------------------------------------------------------------------------
+# Denetimlerin kendisi tests/test_d37_piksel_bekci_a1.py'de sınanır. Burada
+# yalnız iskelenin sözleşmesine kayıt: ad listesi tek yerde, her hüküm
+# dayanak beyan eder, README her adı anar, rapor JSON'a serileşir.
+
+class TestPikselDenetimKaydi:
+
+    def _olcum(self):
+        return {'dil': 'tr', 'html_dil': 'tr', 'yaprak_sayisi': 1,
+                'kirpildi': False, 'blok_sayisi': 1,
+                'metinler': [{'tur': 'metin', 'm': 'Oda basıncı 20,5 bar',
+                              's': 'p', 'p': 'P1 div', 'muaf': '', 'u': False}],
+                'tasmalar': [], 'ebeveyn_asimlari': [],
+                'sayfa': {'fazla_px': 0, 'kaydirma_genisligi': 1440,
+                          'ic_genislik': 1440, 'suclular': [], 'suclu_sayisi': 0}}
+
+    def test_kayitli_adlar_uretilenlerle_ayni(self):
+        for olcum in (self._olcum(), None):
+            adlar = tuple(d.ad for d in denetimler.piksel_denetimleri(olcum, 'tr'))
+            assert adlar == denetimler.PIKSEL_DENETIM_ADLARI
+
+    def test_her_piksel_hukmu_dayanak_ve_esik_beyan_eder(self):
+        for olcum in (self._olcum(), None):
+            for hukum in denetimler.piksel_denetimleri(olcum, 'tr'):
+                sozluk = hukum.sozluk()
+                assert sozluk['dayanak'] and isinstance(sozluk['esik'], dict), hukum.ad
+                assert sozluk['kesinlik'] == 'dogrudan'
+
+    def test_temiz_olcum_yesil_olcumsuz_kirmizi(self):
+        assert all(d.gecti for d in denetimler.piksel_denetimleri(self._olcum(), 'tr'))
+        assert not any(d.gecti for d in denetimler.piksel_denetimleri(None, 'tr'))
+
+    def test_readme_her_piksel_denetimini_aniyor(self):
+        readme = (ROOT / 'tools' / 'browser_harness' / 'README.md').read_text(
+            encoding='utf-8')
+        for ad in denetimler.PIKSEL_DENETIM_ADLARI:
+            assert '`%s`' % ad in readme, ad
+
+    def test_piksel_raporu_json_serilesir(self):
+        from tools.browser_harness import run_piksel
+        kayit = {'sayfa': 'hybrid', 'dil': 'tr', 'genislik': '1440', 'gecti': True,
+                 'denetimler': [d.sozluk() for d in
+                                denetimler.piksel_denetimleri(self._olcum(), 'tr')]}
+        rapor = run_piksel.rapor_olustur(
+            'http://x', {}, {'kanal': 'chrome', 'surum': '1',
+                             'denemeler': [{'kanal': 'chrome', 'acildi': True}]},
+            [kayit])
+        json.dumps(rapor, ensure_ascii=False)
+        assert rapor['gecti'] is True
+        assert rapor['ozet']['denetim_bazinda']['piksel_dil_safligi'] == {
+            'gecen': 1, 'kalan': 0}

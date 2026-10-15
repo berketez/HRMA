@@ -34,6 +34,23 @@
     const ENDPOINT = '/api/validation/upload-csv';
     const PANEL_ID = 'validation';
 
+    // Yükleme boyut tavanı — tek uygulama import_ui.js'te (tavan sayfaya
+    // sunucudan gelir, bu dosyada sayı yok). Modül yüklenmemişse ön denetim
+    // yapılmaz; sunucu kapısı yine reddeder.
+    function uploadSizeError(kind, bytes) {
+        const IU = window.HRMAImportUI;
+        return (IU && IU.uploadSizeError) ? IU.uploadSizeError(kind, bytes) : null;
+    }
+    function payloadTooLargeMessage(kind, bytes, resp, data) {
+        const IU = window.HRMAImportUI;
+        return (IU && IU.payloadTooLargeMessage)
+            ? IU.payloadTooLargeMessage(kind, bytes, resp, data) : null;
+    }
+    function utf8ByteLength(text) {
+        const IU = window.HRMAImportUI;
+        return (IU && IU.utf8ByteLength) ? IU.utf8ByteLength(text) : null;
+    }
+
     const GRADE_KINDS = {
         excellent: 'ok',
         good: 'info',
@@ -49,7 +66,8 @@
             const tr = window.TransientPanel && window.TransientPanel.result;
             if (tr && tr.transient && Array.isArray(tr.transient.time)
                 && tr.transient.time.length > 3) {
-                return { time: tr.transient.time, thrust: tr.transient.thrust,
+                return { kind: 'transient',
+                         time: tr.transient.time, thrust: tr.transient.thrust,
                          source: T('panel.validation.srcTransient', 'transient analysis F(t)') };
             }
         } catch (e) { /* transient paneli yoksa sıradaki kaynak */ }
@@ -60,7 +78,8 @@
         const m = results ? U.motorDict(results) : null;
         if (m && m.transient && Array.isArray(m.transient.time)
             && m.transient.time.length > 3) {
-            return { time: m.transient.time, thrust: m.transient.thrust,
+            return { kind: 'transient',
+                     time: m.transient.time, thrust: m.transient.thrust,
                      source: T('panel.validation.srcStored', 'stored transient F(t)') };
         }
         // Katı motor düz sözlükte 'thrust' üretmiyor (ortalama/tepe ayrı);
@@ -68,7 +87,11 @@
         const thrust = results ? U.readThrust(results) : undefined;
         const burnTime = results ? U.readBurnTime(results) : undefined;
         if (Number.isFinite(thrust) && Number.isFinite(burnTime) && burnTime > 0) {
-            return { time: [0, burnTime], thrust: [thrust, thrust],
+            // ÖH D27 / P11B4-23 — BU EĞRİ ÖLÇÜM DEĞİL, İKİ NOKTALI
+            // TASARIM NOKTASIDIR. `kind` makine künyesidir: lejant ve
+            // sonuç bloğu bunu okuyup kullanıcıya SÖYLER (aşağıya bakınız).
+            return { kind: 'design_point',
+                     time: [0, burnTime], thrust: [thrust, thrust],
                      source: T('panel.validation.srcDesign', 'design point (constant thrust)') };
         }
         return null;
@@ -102,7 +125,7 @@
                     color:var(--hd-ink-dim, #7d97a5);"></span>
             </div>
             <div style="font-family:var(--hd-mono); font-size:0.7rem;
-                color:var(--hd-ink-faint, #46606d); margin-top:4px;"
+                color:var(--hd-ink-faint, #6a8491); margin-top:4px;"
                 data-i18n="panel.validation.motorFileHint">${T('panel.validation.motorFileHint',
                 'Motor thrust-curve files (.eng RASP / .rse RockSim) are imported and '
                 + 'compared automatically when selected.')}</div>
@@ -147,6 +170,17 @@
                 // /api/import/motor-file); diğer uzantılar CSV metni olarak
                 // textarea'ya yüklenir (mevcut davranış korunur).
                 const isMotorFile = /\.(eng|rse)$/i.test(file.name || '');
+                // Dosya OKUNMADAN önce boyut tavanı (sunucudan; V3 güvenlik
+                // 5. tur): aşan dosya okunmaz, gönderilmez.
+                const tooBig = uploadSizeError(isMotorFile ? 'motor_file' : 'csv',
+                                               file.size);
+                if (tooBig) {
+                    const st = document.getElementById('ad_status_' + PANEL_ID);
+                    if (st) st.textContent = U.tf('common.errorPrefix',
+                        { message: tooBig }, 'ERROR: {message}');
+                    ev.target.value = '';
+                    return;
+                }
                 const reader = new FileReader();
                 reader.onload = function () {
                     const text = String(reader.result || '');
@@ -206,13 +240,22 @@
         try {
             const body = { csv_text: csv };
             if (pred) body.predicted_curve = { time: pred.time, thrust: pred.thrust };
+            // Gönderilecek GÖVDE baytı tavanla (sunucudan) denetlenir:
+            // yapıştırılan metin ve tahmin eğrisi de gövdededir.
+            const payload = JSON.stringify(body);
+            const payloadBytes = utf8ByteLength(payload);
+            const tooBig = uploadSizeError('csv', payloadBytes);
+            if (tooBig) throw new Error(tooBig);
             const resp = await fetch(ENDPOINT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body: payload,
             });
             let data = null;
             try { data = await resp.json(); } catch (e) { data = null; }
+            const tooLarge = payloadTooLargeMessage('csv', payloadBytes,
+                                                    resp, data);
+            if (tooLarge) throw new Error(tooLarge);
             if (!resp.ok || !data || data.status === 'error') {
                 // CSV çözüldü ama karşılaştırma anlamsız (örtüşme yok vb.):
                 // backend 400 gövdesinde parsed taşır — yine de çizilir.
@@ -377,23 +420,55 @@
         refreshPredictionSourceLabel();
         const pred = predictedCurve();
         if (status) status.textContent = T('panel.validation.comparing', 'COMPARING…');
+        // V3 KK 2. tur (UPL devri): seçili motorun eğrisi de aynı upload-csv
+        // gövdesiyle gider; runValidation ile AYNI ortak denetimden geçer
+        // (import_ui.js uploadSizeError / payloadTooLargeMessage). ÖLÇÜLDÜ
+        // (dal tabanı 1b4bbff7): ön denetim yoktu ve sunucudan 413 düz metin
+        // gelince ekranda HİÇBİR ileti çıkmıyordu (data null → koşul düşüyor).
+        // Tavanı aşan gövde gönderilmez; seçilen motorun eğrisi
+        // karşılaştırmasız çizilir ve ileti durum satırına yazılır.
+        function sizeErrorOut(message) {
+            renderMotorResult(motor, null, pred);
+            if (status) {
+                status.textContent = U.tf('common.errorPrefix',
+                    { message: message }, 'ERROR: {message}');
+            }
+        }
         try {
             const body = {
                 csv_text: window.HRMAImportUI.csvFromCurve(motor.time, motor.thrust),
             };
             if (pred) body.predicted_curve = { time: pred.time, thrust: pred.thrust };
+            const payload = JSON.stringify(body);
+            const payloadBytes = utf8ByteLength(payload);
+            const tooBig = uploadSizeError('csv', payloadBytes);
+            if (tooBig) {
+                sizeErrorOut(tooBig);
+                return;
+            }
             const resp = await fetch(ENDPOINT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body: payload,
             });
             let data = null;
             try { data = await resp.json(); } catch (e) { data = null; }
+            const tooLarge = payloadTooLargeMessage('csv', payloadBytes,
+                                                    resp, data);
+            if (tooLarge) {
+                sizeErrorOut(tooLarge);
+                return;
+            }
             if (!resp.ok || !data || data.status === 'error') {
                 renderMotorResult(motor, null, pred);
                 if (status && data && data.error) {
                     status.textContent = U.tf('panel.validation.comparisonError',
                         { message: data.error }, 'COMPARISON ERROR: {message}');
+                } else if (status) {
+                    // Gövdesiz/çözülemeyen hata yanıtı: ham gövde basılmaz,
+                    // yalnız HTTP durum kodu (runValidation ile aynı biçim).
+                    status.textContent = U.tf('common.errorPrefix',
+                        { message: 'HTTP ' + resp.status }, 'ERROR: {message}');
                 }
                 return;
             }
@@ -427,9 +502,18 @@
             name: T('panel.validation.sUser', 'Your test data [N]'), line: { width: 2 },
         }];
         if (pred) {
+            // ÖH D27 / P11B4-23 — LEJANT EĞRİNİN NE OLDUĞUNU SÖYLER.
+            // ÖLÇÜLDÜ (a3/once.json): geçici rejim yokken panel iki noktalı
+            // DİKDÖRTGEN tasarım noktasını 'HRMA prediction [N]' adıyla
+            // çiziyordu; `pred.source` yalnız formun yanındaki alanda
+            // duruyor, grafiğe ve sonuç bloğuna HİÇ ulaşmıyordu. Kullanıcı
+            // gerçek atış verisini bir dikdörtgene karşı 'kötü uyum'
+            // damgalı görüyor, kıyas eğrisinin ne olduğunu okuyamıyordu.
             traces.push({
                 x: pred.time, y: pred.thrust, mode: 'lines',
-                name: T('panel.validation.sPredicted', 'HRMA prediction [N]'),
+                name: U.tf('panel.validation.sPredictedSrc',
+                           { source: pred.source || '' },
+                           'HRMA prediction [N] — {source}'),
                 line: { width: 2, dash: 'dash' },
             });
         }
@@ -451,44 +535,63 @@
         }, { responsive: true, displaylogo: false });
     }
 
-    function metricCards(metrics) {
-        function diffKind(pct) {
+    /* ÖH D27 / P11B4-24 — EŞİK TABLOSU ARTIK PANELE GÖMÜLÜ DEĞİL.
+       ÖLÇÜLDÜ (a3/once.json): `diffKind` 5/10/20 bandını KENDİ içinde
+       tutuyordu; uç aynı sayıları (GRADE_THRESHOLDS_PCT) yayımlamıyordu —
+       uçtaki eşik değişse rozetin hükmü ile kartların rengi sessizce
+       ayrışırdı. Band artık `comparison.grade_thresholds_pct` ile gelir.
+       İKİNCİ ÖLÇÜM: panel bandı ucun SKORLAMADIĞI üç metriğe de
+       uyguluyordu (tepe itki, ortalama itki, yanma süresi); ucun puanı
+       yalnız max(|impuls farkı|, NRMSE). Skora girmeyen kart artık
+       renklendirilmez — rengin arkasında bir hüküm yoksa renk atılmaz.
+       Uç bandı göndermezse hiçbir kart renklendirilmez (fail-closed:
+       panel band UYDURMAZ). */
+    function metricCards(metrics, bands, scored) {
+        function diffKind(pct, metrik) {
+            if (!bands || !Number.isFinite(pct)) return 'dim';
+            if (Array.isArray(scored) && scored.indexOf(metrik) < 0) return 'dim';
             const a = Math.abs(pct);
-            if (a <= 5) return 'ok';
-            if (a <= 10) return 'info';
-            if (a <= 20) return 'warn';
+            if (a <= bands.excellent) return 'ok';
+            if (a <= bands.good) return 'info';
+            if (a <= bands.fair) return 'warn';
             return 'err';
         }
+        const unscoredTip = T('panel.validation.unscoredTip',
+            'Not part of the agreement score (the score is '
+            + 'max(|impulse difference|, NRMSE)) — shown uncoloured.');
         return '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
             + U.statCard(T('panel.validation.cardTotalImpulse', 'TOTAL IMPULSE'),
                 U.fmt(metrics.total_impulse_user_ns, 1) + ' / '
                 + U.fmt(metrics.total_impulse_predicted_ns, 1), 'N·s',
-                diffKind(metrics.total_impulse_diff_pct),
+                diffKind(metrics.total_impulse_diff_pct, 'total_impulse_diff_pct'),
                 T('panel.validation.cardTotalImpulseTip',
                   'Measured / predicted — Sutton Eq. 2-1 (trapezoidal)'))
             + U.statCard(T('panel.validation.cardImpulseDiff', 'IMPULSE DIFF'),
                 (metrics.total_impulse_diff_pct >= 0 ? '+' : '')
                 + U.fmt(metrics.total_impulse_diff_pct, 1), '%',
-                diffKind(metrics.total_impulse_diff_pct), '')
+                diffKind(metrics.total_impulse_diff_pct, 'total_impulse_diff_pct'), '')
             + U.statCard(T('panel.validation.cardPeakThrust', 'PEAK THRUST'),
                 U.fmt(metrics.peak_thrust_user_n, 0) + ' / '
                 + U.fmt(metrics.peak_thrust_predicted_n, 0), 'N',
-                diffKind(metrics.peak_thrust_diff_pct),
-                T('panel.validation.measuredPredicted', 'Measured / predicted'))
+                diffKind(metrics.peak_thrust_diff_pct, 'peak_thrust_diff_pct'),
+                T('panel.validation.measuredPredicted', 'Measured / predicted')
+                    + ' — ' + unscoredTip)
             + U.statCard(T('panel.validation.cardMeanThrust', 'MEAN THRUST'),
                 U.fmt(metrics.mean_thrust_user_n, 0) + ' / '
                 + U.fmt(metrics.mean_thrust_predicted_n, 0), 'N',
-                diffKind(metrics.mean_thrust_diff_pct),
-                T('panel.validation.cardMeanThrustTip', 'F_avg = I_t / t_burn (NFPA 1125 convention)'))
+                diffKind(metrics.mean_thrust_diff_pct, 'mean_thrust_diff_pct'),
+                T('panel.validation.cardMeanThrustTip', 'F_avg = I_t / t_burn (NFPA 1125 convention)')
+                    + ' — ' + unscoredTip)
             + U.statCard(T('panel.validation.cardBurnTime', 'BURN TIME'),
                 U.fmt(metrics.burn_time_user_s, 2) + ' / '
                 + U.fmt(metrics.burn_time_predicted_s, 2), 's',
-                diffKind(metrics.burn_time_diff_pct),
-                T('panel.validation.cardBurnTimeTip', '5% of peak-thrust threshold (NFPA 1125)'))
+                diffKind(metrics.burn_time_diff_pct, 'burn_time_diff_pct'),
+                T('panel.validation.cardBurnTimeTip', '5% of peak-thrust threshold (NFPA 1125)')
+                    + ' — ' + unscoredTip)
             + U.statCard('RMSE', U.fmt(metrics.rmse_n, 1), 'N', 'dim',
                 T('panel.validation.rmseTip', 'Root-mean-square error over the common time window'))
             + U.statCard('NRMSE', U.fmt(metrics.nrmse_pct, 1), '%',
-                diffKind(metrics.nrmse_pct),
+                diffKind(metrics.nrmse_pct, 'nrmse_pct'),
                 T('panel.validation.nrmseTip', 'RMSE normalized by the predicted peak thrust'))
             + '</div>';
     }
@@ -507,13 +610,50 @@
                      '{n} data points parsed.')}</p>`;
         if (comparison) {
             const kind = GRADE_KINDS[comparison.grade] || 'dim';
+            // ÖH D27 / P11B4-24 — rozet ipucu da eşiği UÇTAN okur; band
+            // gelmezse sayı UYDURULMAZ, ipucu bandı hiç anmaz.
+            const bands = comparison.grade_thresholds_pct;
+            const gradeTip = bands
+                ? U.tf('panel.validation.gradeTipBands',
+                       { a: bands.excellent, b: bands.good, c: bands.fair },
+                       'Score buckets published by the endpoint: '
+                       + '{a}% / {b}% / {c}% (engineering judgment)')
+                : T('panel.validation.gradeTipNoBands',
+                    'The endpoint published no score buckets with this '
+                    + 'response; the cards are left uncoloured.');
             html += U.sectionTitle(T('panel.validation.secAgreement', 'Agreement With HRMA Prediction'))
                 + `<div style="margin:4px 0 8px;">${U.badge(
                     String(comparison.grade || '?').toUpperCase() + ' '
                         + T('panel.validation.agreementWord', 'AGREEMENT'),
-                    kind, T('panel.validation.gradeTip',
-                            'Score buckets: 5% / 10% / 20% (engineering judgment)'))}</div>`
-                + metricCards(comparison.metrics || {})
+                    kind, gradeTip)}</div>`
+                // ÖH D27 / P11B4-23 — KIYAS EĞRİSİNİN NE OLDUĞU SONUÇ
+                // BLOĞUNDA YAZAR. Ölçüldü: koşturulmuş sonuç bloğunda
+                // 'design point' dizesi 0 kez geçiyordu; `render` pred'i
+                // yalnız çizime veriyor, `pred.source`'u hiç okumuyordu.
+                // Geçici rejim yokken kıyas iki noktalı bir DİKDÖRTGENDİR
+                // ve 'POOR AGREEMENT' rozeti bu dikdörtgene karşıdır —
+                // kullanıcının ölçüm verisi ya da yük hücresi hakkında bir
+                // hüküm DEĞİLDİR. Uç böyle bir künye üretmiyorsa satır
+                // hiç çıkmaz (fail-closed).
+                + (pred && pred.source
+                    ? `<p style="font-family:var(--hd-mono); font-size:0.75rem;
+                        color:var(--hd-ink-dim, #7d97a5); margin:4px 0;">${
+                        U.esc(U.tf('panel.validation.predSource',
+                                   { source: pred.source },
+                                   'Prediction source: {source}'))}</p>` : '')
+                + (pred && pred.kind === 'design_point'
+                    ? U.listBlock(T('panel.validation.designPointHead',
+                        'The reference curve is a design point, not a computed transient'),
+                        [T('panel.validation.designPointNote',
+                           'No transient F(t) was available, so the comparison '
+                           + 'runs against a two-point rectangle built from the '
+                           + 'design thrust and burn time. A low grade here can '
+                           + 'mean the motor simply does not burn at constant '
+                           + 'thrust — run the transient analysis before reading '
+                           + 'it as a test-data or model problem.')], 'warn')
+                    : '')
+                + metricCards(comparison.metrics || {}, bands,
+                              comparison.scored_metrics)
                 + `<p style="font-size:0.82rem; color:var(--hd-ink, #cfe8f2);
                     margin:10px 0;">${comparison.assessment || ''}</p>`;
         } else {

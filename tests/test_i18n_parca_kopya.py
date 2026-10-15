@@ -26,21 +26,66 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 STATIC_JS = REPO / 'hrma' / 'static' / 'js'
 
-#: Fallback taşıyan kaynaklar. Yeni panel dosyası eklendiğinde buraya da
-#: eklenmelidir (test_i18n_common.py MODULE_FILES ile aynı disiplin).
-FALLBACK_SOURCES = [
-    STATIC_JS / 'fea_panel.js',
-    STATIC_JS / 'thermal_fea_panel.js',
-    REPO / 'hrma' / 'templates' / 'solid.html',
-    REPO / 'hrma' / 'templates' / 'advanced.html',
-    REPO / 'hrma' / 'templates' / 'liquid.html',
-]
+# ---------------------------------------------------------------------------
+# Kapsam — ÖH FAZ B-4 / FAZ D kuyruğu (elle liste → türetilmiş)
+# ---------------------------------------------------------------------------
+# Bu dosyanın kendi yorumu "test_i18n_common.py MODULE_FILES ile aynı
+# disiplin" diyordu; o disiplin FAZ D'de (D4) türetmeye geçti, burası elle
+# kaldı. İki elle liste (kaynaklar + sözlükler) ölçüldüğünde kapsamın
+# neredeyse tamamı dışarıda çıktı.
+#
+# ÖLÇÜM (2026-08-27, bu depo):
+#   * Elle 5 kaynak → 862 anahtar. Fallback TAŞIYAN dosya sayısı ise 39;
+#     türetilmiş kapsam 2.389 anahtar → **1.527 anahtar hiç denetlenmiyordu**
+#     (app.js 203, cfd_panel.js 144, sixdof_panel.js 101, … bug_report.js 22).
+#   * Elle 3 sözlük → depoda 8 sözlük dosyası var (hepsi ``I18N.register(``
+#     çağırıyor ve ``en:``/``tr:`` bölümlü); 5'i hiç taranmıyordu.
+#   * ``advanced.html`` elle listedeydi ama HASADA 0 anahtar veriyordu
+#     (P15B3-12'nin "katkı vermeyen üye" bulgusu). SEBEBİ ölçüldü: üye sahte
+#     DEĞİL, HASATÇI kördü — advanced.html çeviriyi ``T(...)`` ile değil
+#     ``i18nText(key, fallback)`` ile çağırıyor (``advanced.html:2473``) ve
+#     eski desen ``\bTF?\(`` bu adı görmüyordu. Çağrı adı kapsama alınınca
+#     aynı dosya **159 anahtar** veriyor. Yani üye düşmez, ölçüt düzelir.
+#   * Genişlemenin açtığı borç: YOK — 39 kaynak × 8 sözlükte parça-kopya
+#     kusuru 0 (elle kapsamda da 0'dı).
+#
+# Ölçütler (mekanik, elle muafiyet yok):
+#   kaynak  = fallback taşıyan (en az bir ``T``/``TF``/``i18nText`` çağrısı
+#             ikinci argümanı dize olan) dosya; sözlük kaynakları hariç.
+#   sözlük  = ``I18N.register(`` çağıran ve ``en:``/``tr:`` bölümü olan js.
 
-DICTS = [
-    STATIC_JS / 'i18n_common.js',
-    STATIC_JS / 'i18n_pages.js',
-    STATIC_JS / 'i18n_advanced.js',
-]
+#: Çeviri çağrısı adları — TEK TANIM. Yeni bir sarmalayıcı ad doğarsa
+#: buraya eklenir; ``test_cagri_adlari_kaynakta_gercekten_var`` bu listenin
+#: çürümesini engeller.
+CAGRI_ADLARI = ('T', 'TF', 'i18nText')
+_CAGRI_RE = re.compile(
+    r"\b(?:%s)\(\s*['\"]([\w.\-]+)['\"]\s*," % '|'.join(CAGRI_ADLARI))
+
+#: Kapsam adayları: üst düzey JS + panel JS + şablonlar.
+_ADAYLAR = (sorted(STATIC_JS.glob('*.js'))
+            + sorted((STATIC_JS / 'panels').glob('*.js'))
+            + sorted((REPO / 'hrma' / 'templates').glob('*.html')))
+
+
+def _sozluk_kaynagi(path):
+    """Dosya çeviri anahtarı TANIMLIYOR mu? (test_i18n_common.py ölçütü)"""
+    if path.suffix != '.js':
+        return False
+    s = path.read_text(encoding='utf-8')
+    if 'I18N.register(' not in s:
+        return False
+    en_m = re.search(r'^\s*en:\s*\{', s, re.M)
+    tr_m = re.search(r'^\s*tr:\s*\{', s, re.M)
+    return bool(en_m and tr_m and en_m.start() < tr_m.start())
+
+
+#: Anahtar TANIMLAYAN dosyalar — türetilmiş (ölçüldü: 8).
+DICTS = [p for p in _ADAYLAR if _sozluk_kaynagi(p)]
+
+#: Elle liste dönemlerinin kapsamı — TABAN (türetme daralırsa kırmızı).
+TARIHSEL_FALLBACK_SOURCES = ('fea_panel.js', 'thermal_fea_panel.js',
+                             'solid.html', 'advanced.html', 'liquid.html')
+TARIHSEL_DICTS = ('i18n_common.js', 'i18n_pages.js', 'i18n_advanced.js')
 
 
 def _string_literal(s, i):
@@ -105,13 +150,19 @@ def _skip_arg(s, i):
 
 
 def harvest_fallbacks(path):
-    """T('k', str) / TF('k', <arg>, str) çağrılarından anahtar→tam fallback.
+    """``T``/``TF``/``i18nText`` çağrılarından anahtar→tam fallback.
 
     Aynı anahtar birden çok yerde geçerse en UZUN fallback esas alınır
-    (kısa bağlam kopyaları uzun metni yanlışlamasın)."""
+    (kısa bağlam kopyaları uzun metni yanlışlamasın).
+
+    ÖH Faz B-4: çağrı adları ``CAGRI_ADLARI``dan gelir. Eski desen yalnız
+    ``T``/``TF`` arıyordu ve ``advanced.html``in 159 anahtarlık
+    ``i18nText(...)`` gövdesini HİÇ görmüyordu — dosya listede olduğu hâlde
+    hasada 0 katkı veriyordu (P15B3-12'nin "katkı vermeyen üye" ölçümünün
+    kökü)."""
     s = path.read_text(encoding='utf-8')
     out = {}
-    for m in re.finditer(r"\bTF?\(\s*['\"]([\w.\-]+)['\"]\s*,", s):
+    for m in _CAGRI_RE.finditer(s):
         key, i = m.group(1), m.end()
         for _ in range(3):          # en fazla 2 ara argüman
             while i < len(s) and s[i] in ' \t\n':
@@ -134,6 +185,17 @@ def harvest_fallbacks(path):
             else:
                 break
     return out
+
+
+def _fallback_kaynaklari(adaylar=None):
+    """Fallback TAŞIYAN, sözlük olmayan dosyalar (türetilmiş)."""
+    return [p for p in (_ADAYLAR if adaylar is None else adaylar)
+            if not _sozluk_kaynagi(p) and harvest_fallbacks(p)]
+
+
+#: Fallback taşıyan kaynaklar — TÜRETİLMİŞ (ölçüldü: 39 dosya, 2.389
+#: anahtar). Yeni panel/şablon kendiliğinden kapsama girer.
+FALLBACK_SOURCES = _fallback_kaynaklari()
 
 
 def dict_entries(path):
@@ -159,11 +221,65 @@ def dict_entries(path):
     return out
 
 
+def test_kapsam_turetilmis_ve_daralmamis():
+    """Kaynak ve sözlük kapsamı türetilir; elle liste dönemini KAPSAR.
+
+    ÖH Faz B-4 (FAZ D kuyruğu). İki yönlü kilit: daralma (ölçüt çürümesi,
+    çağrı adının değişmesi) kırmızı verir; genişleme serbesttir — yeni
+    panel/şablon/sözlük kendiliğinden taranır.
+
+    Ölçüldü (2026-08-27): kaynak 39 dosya / 2.389 anahtar (elle dönem 5
+    dosya / 862), sözlük 8 dosya (elle dönem 3).
+    """
+    kaynak_adlari = {p.name for p in FALLBACK_SOURCES}
+    assert set(TARIHSEL_FALLBACK_SOURCES) <= kaynak_adlari, (
+        'türetilmiş kaynak kapsamı elle liste döneminden DAR: kaybolan %s '
+        '— çağrı adı ölçütü (%s) çürümüş olabilir'
+        % (sorted(set(TARIHSEL_FALLBACK_SOURCES) - kaynak_adlari),
+           list(CAGRI_ADLARI)))
+    sozluk_adlari = {p.name for p in DICTS}
+    assert set(TARIHSEL_DICTS) <= sozluk_adlari, (
+        'türetilmiş sözlük kapsamı elle liste döneminden DAR: kaybolan %s'
+        % sorted(set(TARIHSEL_DICTS) - sozluk_adlari))
+    # Ölçüt ayırt ediyor mu (vakumlanma karşıtı): sözlükler kaynak
+    # kapsamının DIŞINDA, ve her aday kapsama girmiyor.
+    assert not (kaynak_adlari & sozluk_adlari), (
+        'bir dosya hem kaynak hem sözlük sayıldı: %s'
+        % sorted(kaynak_adlari & sozluk_adlari))
+    assert len(FALLBACK_SOURCES) < len(_ADAYLAR), (
+        'her aday kaynak sayıldı — ölçüt ayırt etmiyor')
+    # advanced.html'in katkısı ölçülür: elle liste döneminde 0 idi.
+    adv = next((p for p in FALLBACK_SOURCES if p.name == 'advanced.html'),
+               None)
+    assert adv is not None and len(harvest_fallbacks(adv)) > 100, (
+        'advanced.html hasadı yine küçük — i18nText çağrı adı kapsamdan '
+        'düşmüş olabilir (2026-08-27 ölçümü: 159 anahtar)')
+
+
+def test_cagri_adlari_kaynakta_gercekten_var():
+    """Çağrı adı listesi çürümesin: her ad en az bir kaynakta kullanılmalı.
+
+    ÖH Faz B-4. Ölü bir ad listede kalırsa zararsızdır; asıl tehlike
+    tersidir (kullanılan bir ad listede yok), ama o ancak bu bekçinin
+    tersi ölçülerek görülemez — bu yüzden burada listeyi CANLI tutuyoruz:
+    bir ad artık hiçbir kaynakta geçmiyorsa ya yeniden adlandırılmıştır
+    (yeni adı eklenmeli) ya da satır silinmelidir.
+    """
+    metinler = [p.read_text(encoding='utf-8') for p in FALLBACK_SOURCES]
+    for ad in CAGRI_ADLARI:
+        desen = re.compile(r"\b%s\(\s*['\"][\w.\-]+['\"]\s*," % re.escape(ad))
+        assert any(desen.search(m) for m in metinler), (
+            "çeviri çağrı adı %r hiçbir kaynakta geçmiyor — yeniden "
+            "adlandırılmışsa yeni adı CAGRI_ADLARI'na eklenmeli" % ad)
+
+
 def test_sozluk_girdisi_fallback_on_eki_degil():
     fallbacks = {}
     for p in FALLBACK_SOURCES:
         assert p.exists(), 'fallback kaynağı kayıp: %s' % p
-        fallbacks.update(harvest_fallbacks(p))
+        for k, v in harvest_fallbacks(p).items():
+            if k not in fallbacks or len(v) > len(fallbacks[k]):
+                fallbacks[k] = v
     assert len(fallbacks) > 100, (
         'fallback hasadı beklenenden küçük (%d) — tarayıcı desenleri '
         'kaynaklarla uyumsuz olabilir' % len(fallbacks))

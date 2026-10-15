@@ -220,7 +220,12 @@ class TestGasGasValidation:
     def test_p0_below_pc_raises(self):
         spec = _raptor_spec()
         spec['gas_ox']['P0_bar'] = 250.0  # < Pc=300
-        with pytest.raises(ValueError, match='oda basınc|ΔP'):
+        # ÖH D23 / P7B1-13: bekçi TÜRKÇE hata metnini kilitliyordu
+        # ('oda basınc|ΔP'). Backend sözleşmesi EN üretmektir
+        # (hrma/app.py:3956, :8299); desen çevrildi, KORUDUĞU SÖZLEŞME
+        # AYNI kaldı — P0 < Pc gövdesi hâlâ ValueError ile düşer.
+        with pytest.raises(ValueError,
+                           match='chamber pressure|dP <?='):
             design_injector(spec)
 
     def test_hybrid_motor_rejected(self):

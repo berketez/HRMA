@@ -206,6 +206,7 @@ from hrma.stability.chug import (                  # noqa: E402
     chug_neutral_frequency_hz,
     chug_neutral_tau_ratio,
     chug_rightmost_root,
+    chug_tau_sensitivity,
     feed_inertance_time_constant,
     sweep_feed_line_length,
 )
@@ -217,6 +218,9 @@ from hrma.stability.hybrid_lfi import (            # noqa: E402
     LFI_COEFFICIENT,
     LFI_DELAY_CONSTANT_C_PRIME,
     LFI_FREQUENCY_DELAY_COEFFICIENT,
+    LFI_FREQUENCY_PATHS_REL_DIFF,
+    LFI_FREQUENCY_PATHS_IDENTITY_TOL_REL,
+    frekans_yollari_ozdeslik_kapisi,
     RT_AV_M2_S2,
     assess_hybrid_lfi,
     boundary_layer_delay_s,
@@ -225,7 +229,6 @@ from hrma.stability.hybrid_lfi import (            # noqa: E402
 )
 from hrma.stability.response import (              # noqa: E402
     QSHODBand,
-    critical_response_table,
     critical_response_real,
     qshod_response,
     response_gain_uniform_chamber,
@@ -242,14 +245,18 @@ __all__ = [
     'bulk_mode_zero_lag',
     # chug
     'CHUG_GAIN_J_MAX', 'chug_neutral_tau_ratio', 'chug_neutral_frequency_hz',
-    'chug_rightmost_root', 'feed_inertance_time_constant', 'assess_chug',
+    'chug_rightmost_root', 'chug_tau_sensitivity',
+    'feed_inertance_time_constant', 'assess_chug',
     'sweep_feed_line_length',
     # hybrid LFI
     'RT_AV_M2_S2', 'LFI_COEFFICIENT', 'LFI_DELAY_CONSTANT_C_PRIME',
+    'LFI_FREQUENCY_PATHS_REL_DIFF',
+    'LFI_FREQUENCY_PATHS_IDENTITY_TOL_REL',
+    'frekans_yollari_ozdeslik_kapisi',
     'LFI_FREQUENCY_DELAY_COEFFICIENT', 'rt_av_for_oxidizer',
     'boundary_layer_delay_s', 'lfi_frequency_hz', 'assess_hybrid_lfi',
     # damping / response
     'nozzle_damping_quasi_steady', 'damping_budget',
     'QSHODBand', 'qshod_response', 'response_gain_uniform_chamber',
-    'critical_response_real', 'critical_response_table',
+    'critical_response_real',
 ]

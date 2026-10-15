@@ -51,6 +51,7 @@ import math
 from copy import deepcopy
 from typing import Dict, List, Optional, Tuple
 
+from hrma.constants import R_UNIVERSAL
 from hrma.data import burn_rate_db
 
 __all__ = [
@@ -59,6 +60,7 @@ __all__ = [
     'get_propellant', 'get_propellant_safe', 'list_propellants',
     'list_propellant_keys', 'build_propellants_view', 'resolve',
     'burn_rate_mps', 'cstar_from_thermo', 'mm_mpa_to_m_bar',
+    'PROPELLANT_FORM_FIELDS', 'propellant_form_values',
 ]
 
 # ---------------------------------------------------------------------------
@@ -71,7 +73,10 @@ __all__ = [
 PROPELLANT_REFERENCE_PRESSURE_BAR: float = 40.0
 
 # Evrensel gaz sabiti [J/(kmol*K)] — c* türetiminde kullanılır.
-UNIVERSAL_GAS_CONSTANT: float = 8314.462618
+# ÖH D18 / altyapi (P10B3-10): yerel literal KALKTI, merkezî tanımdan gelir.
+# Ad geriye uyum için korunur (bu modülü UNIVERSAL_GAS_CONSTANT adıyla
+# okuyan çağıranlar var); tanım noktası artık tek: hrma/constants.py.
+UNIVERSAL_GAS_CONSTANT: float = R_UNIVERSAL
 
 # r[mm/s] = a'*(P[MPa])^n  ->  r[m/s] = a*(P[bar])^n dönüşüm tabanı.
 BURN_RATE_MM_MPA_TO_M_BAR: float = 1000.0  # mm->m; 10**n çarpanı n'e bağlıdır
@@ -98,6 +103,16 @@ _PHYSICAL_RANGES: Dict[str, Tuple[float, float]] = {
     'burn_rate_a': (1e-5, 1e-1),           # m/s @ 1 bar
     'burn_rate_n': (-1.0, 1.0),            # -
 }
+
+#: İtici YOĞUNLUK bandının KAMUYA AÇIK adı (kg/m^3).
+#:
+#: ÖH D15 / defter P9B3-11: ``.eng`` (RASP) dışa aktarımı da bu banda
+#: ihtiyaç duyuyor — RASP başlığı motorun ZARFINI (çap x boy) ve YÜKLÜ
+#: İTİCİ KÜTLESİNİ birlikte yazar, dolayısıyla ikisi bir ima edilen bulk
+#: yoğunluk üretir. Band ikinci kez YAZILMAZ: doğrulayıcının kullandığı
+#: ``_PHYSICAL_RANGES['density']`` demetinin kendisi yayımlanır.
+PROPELLANT_DENSITY_RANGE_KG_M3: Tuple[float, float] = _PHYSICAL_RANGES[
+    'density']
 
 
 def mm_mpa_to_m_bar(a_mm_mpa: float, n: float) -> float:
@@ -135,13 +150,42 @@ def cstar_from_thermo(gamma: float, flame_temperature: float,
 
 # APCP referans seti TEK yerde tutulur; hem 'apcp' hem 'htpb_ap_al' aynı
 # fiziksel yakıtı (AP/Al/HTPB) tarif eder ve değerleri buradan alır —
-# iki kayıt arasında sayısal sapma yapısal olarak imkânsızdır.
+# iki kayıt arasında sayısal sapma yapısal olarak imkânsızdır. Motorun
+# 'apcp' tablosu da (solid_rocket_engine._set_propellant_properties) bu
+# kayıttan TÜRETİLİR; ikinci bir kopya yoktur (ÖH KİTAP p1b, B11).
+#
+# ÖH KİTAP p1b (B11, Ö-4) — SEÇENEK F (ana model kararı, 12 Eki 2026).
+# Eski dörtlü (T_c 3614,8 K; c* 1598,2 m/s; gamma 1,1986; M 28,0) c*'tan tek
+# gaz formülüyle GERİ ÇÖZÜLMÜŞ eşdeğer bir setti; T_c denge alev sıcaklığı
+# değildi (+215,15 K). Termokimya artık aynı bileşimin TEK bir NASA CEA
+# koşumundan gelir: AP 68 / Al 18 / HTPB R-45 14 (kütlece), Pc = 68,9 bar
+# (≈1000 psia), sonsuz kesitli hazne (Gordon & McBride, NASA RP-1311 Part I,
+# 1994, §6.1 ve Eş. 2.71-2.74, 6.11; RocketCEA 1.2.1 → CEA2). Kanıt:
+# docs/scofield/raw/OH/KITAP/p1b/kanit/cea_P1B_68.9bar_eps10_{denge,donmus}.out
+#   * flame_temperature, c_star, gamma, molecular_weight: KAYDIRMALI DENGE
+#     dörtlüsü (oda T 3399,65 K; CSTAR 1585,4 m/s; oda GAMMAs 1,1338;
+#     M(1/n) 27,829 kg/kmol, yoğuşkan faz dahil). Genleşme ve performans
+#     (c* özdeşliği, C_F, ε, çıkış sıcaklığı) bu dörtlüyle yapılır.
+#   * gamma_frozen_chamber: aynı koşumun DONMUŞ bileşimli oda GAMMAs'ı
+#     (1,1862). Motor onu YALNIZ "donmuş" bileşim formülü cp = γR/(γ−1)'in
+#     değerlendirildiği yerlerde kullanır (solid_rocket_engine.
+#     _frozen_gas_gamma): Bartz gaz özellikleri (cp, Pr = 4γ/(9γ−5)), ısıl
+#     analizin tepkime entalpisi ve iki faz modülünün gaz-yalnız gamma'sı
+#     (2. tur, karar §28-36 Ş-2 A). Denge γ_s reaksiyon ısısını ve yoğuşkan
+#     fazı içerir, bu formüllere girince cp'yi ×1,41 şişirir (rapor §3.1).
+#     Bartz taşınım özelliklerinin kendisi (Eucken Pr ⟷ CEA taşınım) ayrı
+#     kalemdir (rapor D-3, P4).
+#: APCP referans setinin CEA koşum basıncı [bar] (künye metni bundan
+#: türetilir; ≈1000 psia).
+_APCP_CEA_CHAMBER_PRESSURE_BAR: float = 68.9
+
 _APCP_REFERENCE: Dict[str, object] = {
     'density': 1810.0,
-    'c_star': 1598.2,
-    'gamma': 1.1986,
-    'flame_temperature': 3614.8,
-    'molecular_weight': 28.0,
+    'c_star': 1585.4,
+    'gamma': 1.1338,
+    'flame_temperature': 3399.65,
+    'molecular_weight': 27.829,
+    'gamma_frozen_chamber': 1.1862,
     # r[mm/s] = 5.0*(P[MPa])^0.35 -> motor konvansiyonu
     'burn_rate_a': mm_mpa_to_m_bar(5.0, 0.35),
     'burn_rate_n': 0.35,
@@ -149,6 +193,40 @@ _APCP_REFERENCE: Dict[str, object] = {
                       "stored here as r[m/s] = a*P[bar]^n. Typical AP/HTPB/Al "
                       "composite; [S&B] Ch. 12 burn-rate band."),
 }
+
+
+def _apcp_reference_source() -> str:
+    """'apcp' künye metni — sayılar ``_APCP_REFERENCE``'tan TÜRETİLİR.
+
+    ÖH KİTAP p1b (B11, 2. tur; denetim Ş-6, H-9): metin değerleri literal
+    olarak ikinci kez yazmaz; kayıt değişirse künye onu izler (bekçi:
+    tests/test_kitap_p1b.py::test_B11_kunye_metni_kayit_degerlerinden).
+    Özdeşlik sapması da kaydın kendi dörtlüsünden hesaplanır.
+    """
+    ref = _APCP_REFERENCE
+    ideal = cstar_from_thermo(ref['gamma'], ref['flame_temperature'],
+                              ref['molecular_weight'])
+    sapma_yuzde = 100.0 * (float(ref['c_star']) - ideal) / ideal
+    return (
+        'NASA CEA (Gordon & McBride, NASA RP-1311 Part I, 1994; '
+        'RocketCEA 1.2.1 / CEA2): AP 68 / Al 18 / HTPB R-45 14 wt%, '
+        f'Pc = {_APCP_CEA_CHAMBER_PRESSURE_BAR} bar, infinite-area chamber. '
+        'Shifting-equilibrium '
+        f"chamber T = {ref['flame_temperature']} K, "
+        f"c* = {ref['c_star']} m/s, gamma_s = {ref['gamma']}, "
+        f"M(1/n) = {ref['molecular_weight']} kg/kmol (condensed phase "
+        'included); the quartet meets the [S&B] Eq. 3-32 single-phase '
+        f'identity to {sapma_yuzde:.2f}% (two-phase). '
+        f"gamma_frozen_chamber = {ref['gamma_frozen_chamber']} is the "
+        'frozen-composition chamber gamma_s of the same run; the solver '
+        'uses it only where the frozen-composition formula cp = '
+        'gamma*R/(gamma-1) is evaluated: the Bartz gas properties (cp, Pr), '
+        'the reaction enthalpy of the thermal analysis and the gas-only '
+        'gamma of the two-phase loss module. Expansion and performance use '
+        'the equilibrium gamma_s. '
+        'One pressure only: the Tc dependence on motor pressure is '
+        'not modelled.')
+
 
 PROPELLANTS: Dict[str, Dict] = {
 
@@ -160,9 +238,7 @@ PROPELLANTS: Dict[str, Dict] = {
         family='composite',
         oxidizer='Ammonium perchlorate (NH4ClO4), ~68%',
         fuel='Aluminum ~18% + HTPB binder ~14%',
-        source=('[ENG] HRMA solid reference set (NASA CEA consistent, '
-                'Pc = 68.9 bar); thermochemistry satisfies [S&B] Eq. 3-32 '
-                'identity c* = sqrt(R*Tc)/Gamma exactly.'),
+        source=_apcp_reference_source(),
         notes=('Baseline composite used by the solver default. Burn-rate '
                'law is typical, not validated against HRMA records.'),
         engine_key='apcp',
@@ -177,7 +253,8 @@ PROPELLANTS: Dict[str, Dict] = {
         family='composite',
         oxidizer='Ammonium perchlorate (NH4ClO4), ~68%',
         fuel='Aluminum ~18% + HTPB binder ~14%',
-        source='[ENG] Shares the APCP reference set (identical formulation).',
+        source=('Shares the APCP reference set (identical formulation; '
+                'NASA CEA quartet and frozen chamber gamma, see "apcp").'),
         notes=('Composition-explicit key for the same propellant as "apcp"; '
                'values are shared by construction so the two entries can '
                'never drift apart.'),
@@ -283,20 +360,37 @@ PROPELLANTS: Dict[str, Dict] = {
         'burn_rate_a': 0.0,
         'burn_rate_n': 0.0,
         'burn_rate_ref': '',
-        'c_star': 912.4,
-        'gamma': 1.1308,
-        'flame_temperature': 1710.0,
-        'molecular_weight': 42.39,
+        'c_star': 915.9,
+        'gamma': 1.1220,
+        'flame_temperature': 1713.1,
+        'molecular_weight': 37.51,
         'source': ('Burn rate: [BRDB] regime fits (Nakka 1999/2001). '
-                   'Thermochemistry: [NAKKA] published KNDX equilibrium '
-                   'table (Tc, M, k); density from '
-                   "hrma/data/propellant_database.py entry 'kndx'."),
+                   'Thermochemistry: NASA CEA two-phase equilibrium, '
+                   'Pc = 1000 psia, O/F = 65/35, K2CO3 condensation '
+                   "included - the SAME basis and reference pressure the "
+                   "'knsu' record uses. Reactant enthalpies of formation: "
+                   'KNO3 from the CEA thermo.inp record KNO3(a) '
+                   '(Gurvich 1982 pt1 p407, dHf = -494.0 kJ/mol); '
+                   'alpha-D-glucose from the NIST Chemistry WebBook '
+                   '(dHf(solid) = -1271.1 kJ/mol, Cox & Pilcher 1970 '
+                   'reanalysis of Ponomarev & Migarskaya 1960). Density '
+                   "from hrma/data/propellant_database.py entry 'kndx'."),
         'notes': ('Burn-rate law is pressure-regime piecewise (plateau/mesa); '
                   'the single (a, n) pair shown here is the regime resolved '
                   'at the catalogue reference pressure - use '
-                  '/api/burn-rate/resolve for the design pressure.'),
+                  '/api/burn-rate/resolve for the design pressure. '
+                  'Thermochemistry re-derived in v2.6.27 (OH-D19-22): the '
+                  'previous set mixed a [NAKKA] table (Tc, M, k) with a c* '
+                  'produced by the single-phase Eq. 3-32 identity, so the '
+                  'declared condensed-phase fraction X_p = 0.44 could not '
+                  'be inside that c*. The CEA run reproduces the published '
+                  "'knsu' quadruple to 0.1%, and its KNDX flame temperature "
+                  'agrees with the [NAKKA] table to 0.2%; the molecular '
+                  'weight does not, because the two codes report it on '
+                  'different conventions - the catalogue now carries the '
+                  'CEA one throughout the sugar family.'),
         'engine_key': None,
-        'c_star_basis': 'eq3-32',
+        'c_star_basis': 'cea',
         'validated': True,
     },
 
@@ -310,24 +404,49 @@ PROPELLANTS: Dict[str, Dict] = {
         'burn_rate_a': 0.0,
         'burn_rate_n': 0.0,
         'burn_rate_ref': '',
-        'c_star': 908.1,
-        'gamma': 1.1361,
-        'flame_temperature': 1600.0,
-        'molecular_weight': 39.9,
-        'source': ('Burn rate: [BRDB] regime fits (Nakka 1999/2001). '
-                   'Thermochemistry and ideal density: [NAKKA] published '
-                   'KNSB equilibrium table.'),
+        'c_star': 911.3,
+        'gamma': 1.1279,
+        'flame_temperature': 1601.3,
+        'molecular_weight': 35.41,
+        'source': ('Burn rate: [BRDB] regime fits (Nakka 1999/2001). Ideal '
+                   'density: [NAKKA] published KNSB equilibrium table. '
+                   'Thermochemistry: NASA CEA two-phase equilibrium, '
+                   'Pc = 1000 psia, O/F = 65/35, K2CO3 condensation '
+                   "included - the SAME basis and reference pressure the "
+                   "'knsu' record uses. Reactant enthalpies of formation: "
+                   'KNO3 from the CEA thermo.inp record KNO3(a) '
+                   '(Gurvich 1982 pt1 p407, dHf = -494.0 kJ/mol); sorbitol '
+                   '(D-glucitol) from the NIST Chemistry WebBook '
+                   '(dHf(solid) = -1353.7 +/- 1.4 kJ/mol, Gerasimov, Blokh '
+                   '& Gubareva 1985).'),
         'notes': ('Same piecewise burn-rate caveat as KNDX. Density is the '
                   'ideal (void-free) value; cast grains typically reach '
-                  '94-97% of it.'),
+                  '94-97% of it. Thermochemistry re-derived in v2.6.27 '
+                  '(OH-D19-22) on the same CEA basis as KNDX and KNSU; the '
+                  'CEA flame temperature agrees with the [NAKKA] KNSB table '
+                  'to 0.1%, the molecular weight is reported on the CEA '
+                  'convention used across the sugar family.'),
         'engine_key': None,
-        'c_star_basis': 'eq3-32',
+        'c_star_basis': 'cea',
         'validated': True,
     },
 
     'knsu': {
         'key': 'knsu',
-        'name': 'KNSU - Potassium Nitrate/Sucrose 65/35',
+        # ÖH D34 · OH-GT-17 — AD YOĞUNLUK TABANINI SÖYLER.
+        # ÖLÇÜLDÜ (a1/once.json): bu satır ile 'sugar' satırının
+        # burn_rate_a, burn_rate_n, c_star, gamma,
+        # flame_temperature ve molecular_weight alanları BİREBİR
+        # aynı; tek gerçek fark yoğunluk (1889 ⟷ 1785, +%5,83) ve
+        # o fark seçim listesinde OKUNMUYORDU: bu satırın adı
+        # yalnız '65/35' diyordu, ötekininki '65/35' bile demiyordu.
+        # Kullanıcı iki satırdan birini seçerken itkiyi %5,83
+        # kaydıran kararı kör veriyordu. Ada SAYI YAZILMAZ (tek
+        # kaynak 'density' alanıdır), yalnız TABANIN ADI yazılır.
+        # Aynı iki ad hrma/engines/solid_rocket_engine.py'de de
+        # kuruluyordu; oradaki iki satır artık BU kaydı okuyor.
+        'name': 'KNSU - Potassium Nitrate/Sucrose 65/35 '
+                '(ideal/theoretical maximum density)',
         'family': 'sugar',
         'oxidizer': 'Potassium nitrate (KNO3), 65%',
         'fuel': 'Sucrose (C12H22O11), 35%',
@@ -354,7 +473,10 @@ PROPELLANTS: Dict[str, Dict] = {
 
     'sugar': {
         'key': 'sugar',
-        'name': 'KNSU - Potassium Nitrate/Sucrose (cast bulk density)',
+        # ÖH D34 · OH-GT-17 — kardeş satırla aynı bileşim (65/35)
+        # adında da yazılı; ayrım yoğunluk TABANINDA (bkz. 'knsu').
+        'name': 'KNSU - Potassium Nitrate/Sucrose 65/35 '
+                '(cast bulk density)',
         'family': 'sugar',
         'oxidizer': 'Potassium nitrate (KNO3), 65%',
         'fuel': 'Sucrose (C12H22O11), 35%',
@@ -417,7 +539,7 @@ PROPELLANTS: Dict[str, Dict] = {
         'burn_rate_n': 0.70,
         'burn_rate_ref': ("a' = 5.0 mm/s at 1 MPa, n = 0.70 "
                           "(r = a'*P[MPa]^n); typical, indicative only."),
-        'c_star': 1186.7,
+        'c_star': 1406.8,   # ÖH D15 P2B1-01: Eq. 3-32 (gamma, T_c, M) ideali 1406,774; eski 1186,7 tek fazlı kayıtta mazeretsiz -%15,64 idi
         'gamma': 1.2612,
         'flame_temperature': 2789.3,
         'molecular_weight': 26.89,
@@ -427,7 +549,12 @@ PROPELLANTS: Dict[str, Dict] = {
                   'strongly self-amplifying. Homogeneous propellant - '
                   'oxidizer and fuel are the same molecules.'),
         'engine_key': 'double_base',
-        'c_star_basis': 'engine-reference',
+        # ÖH D17 (P2B1-01): kayıt 'engine-reference' diyordu ve
+        # tests/test_propellants_db.py'nin kimlik denetimi bu beyanla kaydı
+        # ATLIYORDU (muafiyet). c* zaten Eq. 3-32 idealine çekilmişti
+        # (1406,8 ⟷ 1406,7742, +%0,0018), yani beyan BAYATTI; doğru adıyla
+        # yazıldı ve kayıt kimlik denetiminin İÇİNE girdi.
+        'c_star_basis': 'eq3-32',
         'validated': False,
     },
 
@@ -451,7 +578,13 @@ PROPELLANTS: Dict[str, Dict] = {
                   'ejection charges and small motors; heavy condensed-phase '
                   'products make measured c* far below the ideal value.'),
         'engine_key': 'black_powder',
-        'c_star_basis': 'engine-reference',
+        # ÖH D17 (P2B1-01): 'engine-reference' bir MUAFİYET etiketiydi —
+        # hiçbir test onu denetlemiyordu. Ölçülen c* tek fazlı Eq. 3-32
+        # idealinin (1131,6563 m/s) %16,4676 ALTINDA; bu eksiklik kaydın
+        # kendi yoğuşmuş faz kütle kesriyle (X_p = 0,55) sınırlıdır, yani
+        # AÇIKLANMIŞTIR. Etiket artık ölçüyü adlandırıyor ve
+        # _c_star_identity_audit ile denetleniyor.
+        'c_star_basis': 'measured-two-phase',
         'validated': False,
     },
 }
@@ -577,6 +710,86 @@ _validate_propellants()
 
 
 # ---------------------------------------------------------------------------
+# c* ⟷ (gamma, T_c, M) özdeşlik denetimi — ÖH Z5S / P9B4-18
+# ---------------------------------------------------------------------------
+# Bulgu: 'double_base' kaydının c*'ı kendi (gamma, T_c, M) üçlüsünün Eq. 3-32
+# ideal değerinin %15,64 ALTINDA. Modülün bu tür sapmalar için verdiği TEK
+# gerekçe (cstar_from_thermo docstring'i: "İki fazlı (Al2O3, K2CO3 yoğuşmalı)
+# yakıtlarda gerçek c* bunun ALTINDA kalır") bu kayda UYMUYOR: kaydın kendi
+# 'fuel'/'notes' alanları yakıtın HOMOJEN (tek fazlı nitrat esteri) olduğunu
+# söylüyor. Yani sapma vardı, gerekçesi yoktu ve okuyucu sapmayı hiç
+# göremiyordu — c* ve üçlü yan yana basılıyor, tutarlıymış gibi duruyordu.
+#
+# Onarım BEYAN düzeyinde: HİÇBİR SAYI DEĞİŞMEZ (c*, gamma, T_c, M aynı).
+# Sapma her kayıt için HESAPLANIP kayda iliştirilir (uydurulmuş değil,
+# kaydın kendi sayılarından türetilmiş), gerekçesi olmayan kayıt bunu
+# açıkça yazar. Alan kümesi tüm kayıtlarda aynı kalır (istemci sözleşmesi).
+_CSTAR_NOTLARI: Dict[str, str] = {
+    # ÖH D15 P2B1-01 (1 Eyl 2026): 'double_base' notu KALDIRILDI — c* 1186,7 → 1406,8
+    # (Eq. 3-32 ideali 1406,774; sapma %0,002). Sözlük bilerek boş bırakıldı:
+    # ileride beyanlı bir sapma doğarsa aynı kanaldan yayımlanır.
+}
+
+
+def _attach_cstar_identity_check() -> None:
+    """Her kayda ideal c* ve sapmasını iliştirir (türetilmiş, yazılmamış)."""
+    for key, rec in PROPELLANTS.items():
+        ideal = cstar_from_thermo(rec['gamma'], rec['flame_temperature'],
+                                  rec['molecular_weight'])
+        rec['c_star_ideal_mps'] = ideal
+        rec['c_star_ideal_deviation_pct'] = 100.0 * (
+            float(rec['c_star']) - ideal) / ideal
+        rec['c_star_deviation_note'] = _CSTAR_NOTLARI.get(key)
+
+
+_attach_cstar_identity_check()
+
+
+# ---------------------------------------------------------------------------
+# Donmuş oda gamma'sı alanı — ÖH KİTAP p1b (B11, seçenek F)
+# ---------------------------------------------------------------------------
+# 'gamma_frozen_chamber' bugün yalnız APCP referans setinde (_APCP_REFERENCE)
+# ölçülmüş bir değer taşır. İstemci sözleşmesi tüm kayıtların AYNI alan
+# kümesini taşımasını ister (test_z5s_katalog_kapilari::
+# test_kayit_sekli_tek_tip_kaldi); bu yüzden alan her kayda iliştirilir ve
+# ölçülmüş değeri olmayan kayıtta None'dır. None "ayrı donmuş değer yok"
+# demektir: motor o yakıtta Bartz gaz özelliklerini kaydın tek gamma'sından
+# türetir (bugünkü davranış, bit-özdeş). Değer UYDURULMAZ.
+#
+# Fail-closed denetim: değer varsa sayısal olmalı, gamma bandında kalmalı ve
+# kaydın denge gamma'sından KÜÇÜK olmamalı (kaydırmalı denge reaksiyon
+# ısısını cp'ye katar, izantropik üssü düşürür: γ_s,denge ≤ γ_s,donmuş;
+# RP-1311 Eş. 2.71-2.74).
+GAMMA_FROZEN_CHAMBER_FIELD: str = 'gamma_frozen_chamber'
+
+
+def _attach_frozen_chamber_gamma() -> None:
+    """Her kayda donmuş oda gamma'sı alanını iliştirir (yoksa None)."""
+    lo, hi = _PHYSICAL_RANGES['gamma']
+    for key, rec in PROPELLANTS.items():
+        value = rec.setdefault(GAMMA_FROZEN_CHAMBER_FIELD, None)
+        if value is None:
+            continue
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ValueError(
+                f"propellants_db record '{key}' field "
+                f"'{GAMMA_FROZEN_CHAMBER_FIELD}' must be numeric or None, "
+                f"got {type(value).__name__}")
+        if not (lo <= float(value) <= hi):
+            raise ValueError(
+                f"propellants_db record '{key}' field "
+                f"'{GAMMA_FROZEN_CHAMBER_FIELD}' = {value} is outside the "
+                f"physical range [{lo}, {hi}]")
+        if float(value) < float(rec['gamma']):
+            raise ValueError(
+                f"propellants_db record '{key}': frozen chamber gamma "
+                f"{value} is below the equilibrium gamma {rec['gamma']}")
+
+
+_attach_frozen_chamber_gamma()
+
+
+# ---------------------------------------------------------------------------
 # Genel API
 # ---------------------------------------------------------------------------
 
@@ -604,6 +817,44 @@ def get_propellant_safe(key: str) -> Optional[Dict]:
         return None
 
 
+#: Bir form sayfasının ön dolduracağı termokimya alanları (katalog alan
+#: adlarıyla). Katı sayfasının JS haritası (``solid.html``
+#: ``PROPELLANT_FIELD_MAP``) bu beş alanı aynı adlarla okur.
+PROPELLANT_FORM_FIELDS: Tuple[str, ...] = (
+    'density', 'flame_temperature', 'molecular_weight', 'gamma', 'c_star')
+
+
+def propellant_form_values(key: str) -> Dict[str, float]:
+    """Kaydın form ön doldurma sayıları — SALT OKUMA.
+
+    ÖH KİTAP p1b 4. tur (14 Eki 2026, CLAUDE.md §11): katı sayfası
+    ``APCP`` adını taşıyıp yoğunluk 1850, T_c 3200, M 28,5, γ 1,25,
+    c* 1550 diye KATALOGDA OLMAYAN beş sayı yazıyordu (ikinci literal
+    kopya). Sayfayı sunan görünüm bu sayıları artık buradan alır; şablon
+    sayı yazmaz. Değerler kaydın kendisidir (``get_propellant`` kopyası),
+    türetilmez, yuvarlanmaz.
+
+    Args:
+        key: kanonik anahtar ya da takma ad (``resolve`` kuralları).
+
+    Returns:
+        ``PROPELLANT_FORM_FIELDS`` alanı -> float. Kayıtta sonlu sayı
+        olmayan alan sözlüğe KONMAZ: sayfa o alanı boş bırakır, sayı
+        uydurulmaz.
+
+    Raises:
+        KeyError: bilinmeyen anahtar (sessiz boş sözlük yerine).
+    """
+    rec = get_propellant(key)
+    out: Dict[str, float] = {}
+    for alan in PROPELLANT_FORM_FIELDS:
+        deger = rec.get(alan)
+        if (isinstance(deger, (int, float)) and not isinstance(deger, bool)
+                and math.isfinite(float(deger))):
+            out[alan] = float(deger)
+    return out
+
+
 def list_propellant_keys(family: Optional[str] = None) -> List[str]:
     """Kanonik anahtarları (alias'sız) alfabetik döndürür.
 
@@ -626,10 +877,23 @@ def list_propellants(family: Optional[str] = None) -> List[Dict]:
 
 
 def build_propellants_view() -> Dict[str, Dict]:
-    """Kanonik + alias anahtarlı tam görünüm (taze kopyalar)."""
+    """Kanonik + alias anahtarlı tam görünüm — HER anahtar TAZE kopya.
+
+    ÖH Z5S / P9B4-20: docstring "taze kopyalar" diyordu ama alias anahtarı
+    kanonik kaydın AYNI nesnesini paylaşıyordu (``v['ap'] is v['apcp']``
+    -> True). Alias üzerinden yapılan tek bir yazma kanonik kaydı da
+    bozuyordu; çağıran taraf "kopya aldım" sanıyordu. Beyan ile davranış
+    burada davranış düzeltilerek birleştirildi.
+
+    NOT — materials_db.build_materials_view BİLEREK ters yönde çalışır
+    (alias kanonik kopyayla aynı nesnedir), çünkü orada KİMLİK TABANLI
+    ters arama yapan bir tüketici var (heat_transfer_analysis.material_name).
+    Bu modülün görünümünde öyle bir tüketici yok; paylaşım yalnız sessiz
+    bozulma riski üretiyordu.
+    """
     view = {k: deepcopy(rec) for k, rec in PROPELLANTS.items()}
     for alias, target in ALIASES.items():
-        view[alias] = view[target]
+        view[alias] = deepcopy(PROPELLANTS[target])
     return view
 
 

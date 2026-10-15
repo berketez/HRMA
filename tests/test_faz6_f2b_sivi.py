@@ -37,6 +37,7 @@ ve düzeni, /api/export-xlsx'e giden gövde, üretilen HTML). Yalnız teslim
 edilen HTML'in kendisi (alt sekme düğmesi) doğrudan sayfadan okunur.
 """
 
+import copy
 import json
 import pathlib
 import re
@@ -65,7 +66,9 @@ LIQUID_FORM = {
 }
 
 #: Sığmama uyarısının kodu (hrma/engines/liquid_rocket_engine.py::_cooling_channels).
-COOLING_FIT_CODE = 'warn.liquid.cooling_channels_do_not_fit'
+# ÖH A2 sivi-sogutma F-17 (Berke Sunum 2 onayı sonrası çeviri, denetçi
+# Ş5.2/5.3): tek sığma ölçütünün kodu; parametre adı n_geom -> n_max.
+COOLING_FIT_CODE = 'warn.liquid.cooling_channels_exceed_fit_limit'
 
 
 # ===========================================================================
@@ -316,9 +319,21 @@ if (senaryo === 'excel') {
 #: node bağlamına konacak sabitler (bağımlılık sırasıyla).
 JS_CONSTS = ['LIQUID_SIGFIG_DENSITY', 'LIQUID_SIGFIG_TRANSPORT',
              'LIQUID_DEC_TEMPERATURE_K', 'LIQUID_DEC_MIXTURE_RATIO',
-             'LIQUID_DEC_VELOCITY_MS']
+             'LIQUID_DEC_VELOCITY_MS',
+             # ÇEVRİLDİ (ÖH D15 birleşme etkileşimi, 1 Eylül 2026):
+             # `sablonlar` kulvarı liquid.html'e DERİN uyarı kanalını ekledi
+             # (LIQUID_DEEP_WARNING_PATHS + liquidDeepWarnings +
+             # liquidDeepIsCritical) ve `liquidCollectWarnings` artık onu
+             # çağırıyor. Koşum bağlamı bu üçünü taşımadığı için node
+             # 'liquidDeepWarnings is not defined' ile düşüyordu — yani T44
+             # bekçileri ÜRÜNÜ değil, eksik koşumu ölçüyordu. Kanal koşuma
+             # alındı; T44'ün iddiaları aynen duruyor.
+             'LIQUID_DEEP_WARNING_PATHS']
 
-JS_FUNCS = ['liquidSigFig', 'hrmaFmt', 'liquidWarnText', 'liquidCollectWarnings',
+JS_FUNCS = ['liquidSigFig', 'hrmaFmt', 'liquidWarnText',
+            # liquidCollectWarnings ikisini de ÇAĞIRIR: ondan ÖNCE gelmeli.
+            'liquidDeepWarnings', 'liquidDeepIsCritical',
+            'liquidCollectWarnings',
             '_liquidMotorName', 'exportLiquidExcel', 'createCylinderTrace',
             # antiVortexMm: T13 (2026-08-03) ile eklendi ve
             # createTankVisualization ondan ÖNCE gelmeli — girdap önleyicinin
@@ -351,6 +366,13 @@ def run_js(tmp_path, payload):
         '__TANKKART_LITERAL__',
         js_template_literal('internalsCard.innerHTML = ', src))
     parts = [JS_PRELUDE]
+    # ÖH D35 · OH-GT-25: sayfanın sayı biçimi artık ortak `numTxt`/`pctTxt`
+    # delegatörlerinden geçiyor (i18n.js kanonu). Bunlar sayfanın AMBİYANS
+    # bağımlılıklarıdır (T/TF/window gibi) ve düzenekte hazır olmalı.
+    # KOPYA YAZILMAZ: şablondan sökülürler, tek kaynak üründe kalır.
+    # `window.I18N` bu düzenekte yalnız `tf` taşıdığından delegatör eski
+    # `toFixed` dalına düşer; bu dosyanın sayısal iddiaları aynen geçerli.
+    parts += [js_function('numTxt', src), js_function('pctTxt', src)]
     parts += [js_const(name, src) for name in JS_CONSTS]
     parts += [js_function(name, src) for name in JS_FUNCS]
     parts.append(epilogue)
@@ -407,7 +429,7 @@ def test_t44_onkosul_cozucu_sigmama_uyarisini_uretiyor(cr):
     kayit = next(w for w in cr['input_warnings'] if w['code'] == COOLING_FIT_CODE)
     assert kayit['params']['n'] == 80
     # Geometrik üst sınır girilen sayıdan KÜÇÜK olmalı, yoksa uyarı anlamsız
-    assert kayit['params']['n_geom'] < kayit['params']['n']
+    assert kayit['params']['n_max'] < kayit['params']['n']
     assert cr['cooling_system']['cooling_channels'] == 80
 
 
@@ -426,7 +448,11 @@ def test_t44_geometry_sayfasi_kanal_satirinin_altina_uyariyi_yazar(tmp_path, cr)
     # geometrik üst sınır teslimatta okunabilmeli.
     kayit = next(w for w in cr['input_warnings'] if w['code'] == COOLING_FIT_CODE)
     assert '80' in not_satiri[1]
-    assert str(kayit['params']['n_geom']) in not_satiri[1]
+    # Sınır sayısı AYRI bir sayı olarak okunmalı: '28', '128.1 mm' içindeki
+    # alt dize sayılmaz (ölçüldü: n_max = 28 iken c_ref 128,1 mm; düz alt
+    # dize araması uyarı sınırı taşımasa da yeşil kalıyordu).
+    assert re.search(r'(?<![\d.,])%d(?![\d.,])' % kayit['params']['n_max'],
+                     not_satiri[1]), not_satiri[1]
     assert not_satiri[0], 'uyarı satırının önem etiketi boş'
 
 
@@ -443,12 +469,101 @@ def test_t44_uyari_sayfasi_ekrandaki_tum_uyarilari_tasir(tmp_path, cr):
     assert 'Throat diameter' in metin or 'throat' in metin.lower()
 
 
+def _derin_uyari_yollari():
+    """``LIQUID_DEEP_WARNING_PATHS`` — ÜRÜNÜN kendi listesinden okunur.
+
+    Liste testte KOPYALANMAZ: ürün yeni bir derin kanal eklerse bu yardımcı
+    onu kendiliğinden görür, "uyarısız koşum" kurgusu bir daha çürümez.
+    """
+    metin = js_const('LIQUID_DEEP_WARNING_PATHS')
+    yollar = re.findall(r"'([\w.]+)'", metin)
+    assert yollar, 'LIQUID_DEEP_WARNING_PATHS boş okundu'
+    return yollar
+
+
+def _turemis_uyari_bayraklari():
+    """``liquidDeepWarnings``in BAYRAK alanları — ÜRÜNDEN okunur.
+
+    ÖH D24 / fix-22. D23 (OH-D18-10) iki uyarıyı LİSTE kanalından değil
+    ucun kendi bayrak alanlarından TÜRETİYOR:
+
+        valve.capacity.regime_verified === false
+        pipe_materials.roughness_provenance === null
+
+    Bu adresler ``LIQUID_DEEP_WARNING_PATHS`` envanterinde YOKTUR (o liste
+    yalnız uyarı LİSTELERİNİ sayar), dolayısıyla listeyi boşaltmak koşumu
+    uyarısız yapmıyor. Alan adları testte KOPYALANMAZ: ürünün kendi
+    karşılaştırmalarından sökülür — üçüncü bir bayrak eklenirse "uyarısız
+    koşum" kurgusu kendiliğinden onu da kapsar.
+    """
+    govde = js_function('liquidDeepWarnings')
+    alanlar = sorted(set(re.findall(r'\.(\w+)\s*===\s*(?:false|null)', govde)))
+    assert alanlar, 'türeyen uyarı bayrağı okunamadı (desen mi değişti?)'
+    return alanlar
+
+
+def _bayraklari_sok(dugum, alanlar):
+    """``alanlar`` adlı anahtarları ağaçtan SİLER (değer UYDURULMAZ).
+
+    Silmek "doğrulandı" yazmaktan farklıdır: ürünün türetme dalı yalnız
+    bayrak AÇIKÇA olumsuzken (``false`` / ``null``) uyarı doğurur, alan
+    yoksa hiç girmez. Böylece fikstür ürüne yalan söylemez.
+    """
+    if isinstance(dugum, dict):
+        for ad in alanlar:
+            dugum.pop(ad, None)
+        for deger in dugum.values():
+            _bayraklari_sok(deger, alanlar)
+    elif isinstance(dugum, list):
+        for deger in dugum:
+            _bayraklari_sok(deger, alanlar)
+
+
+def _derin_kanali_bosalt(kok, yol):
+    """``a.b.c`` adresindeki listeyi boşaltır (yoksa dokunmaz)."""
+    parcalar = yol.split('.')
+    cur = kok
+    for ad in parcalar[:-1]:
+        if not isinstance(cur, dict) or ad not in cur:
+            return
+        cur[ad] = copy.deepcopy(cur[ad])
+        cur = cur[ad]
+    if isinstance(cur, dict) and isinstance(cur.get(parcalar[-1]), list):
+        cur[parcalar[-1]] = []
+
+
 def test_t44_uyari_yokken_bos_sayfa_eklenmez(tmp_path, cr):
-    """Uyarısız koşuda 'Warnings' sayfası HİÇ açılmaz (boş sayfa yok)."""
-    temiz = dict(cr)
+    """Uyarısız koşuda 'Warnings' sayfası HİÇ açılmaz (boş sayfa yok).
+
+    ÇEVRİLDİ (ÖH D15 birleşme etkileşimi, 1 Eylül 2026). "Uyarısız koşum"
+    eskiden ÜÇ üst düzey adı boşaltarak kuruluyordu (``input_warnings``,
+    ``warnings``, ``validation``). `sablonlar` kulvarı P12bB1-04'te DERİN
+    uyarı kanalını açtı: çözücü o üç adı zaten HİÇ üretmiyor, gerçek uyarılar
+    ``thermal_protection.station_march.warnings`` gibi adreslerde duruyor ve
+    artık ekrana da Excel'e de çıkıyor (7 kalem, biri "CRITICAL: … liner
+    failure"). Dolayısıyla üçünü boşaltmak koşumu uyarısız YAPMIYOR — bu
+    fikstürde 'Warnings' sayfası DOĞRU OLARAK açılıyordu.
+
+    İDDİA DEĞİŞMEDİ ("uyarı yoksa boş sayfa açılmaz"); kurgu düzeltildi:
+    derin kanallar da ürünün KENDİ yol listesinden okunarak boşaltılıyor.
+    Gevşetme değil sıkılaştırmadır — kanal listesi büyürse test onu izler.
+
+    İKİNCİ KEZ ÇEVRİLDİ (ÖH D24 / fix-22, D23 birleşme etkileşimi). D23
+    (OH-D18-10) besleme hattı uyarılarını LİSTE kanalından değil ucun
+    BAYRAK alanlarından türetmeye başladı (``regime_verified === false``,
+    ``roughness_provenance === null``); bu adresler kanal envanterinde yok,
+    dolayısıyla envanteri boşaltmak koşumu yine uyarısız YAPMIYORDU
+    (ölçüldü: taban kaydı-7 — 'Warnings' sayfası fuel_line + oxidizer_line
+    için DOĞRU olarak açılıyordu). Kurgu yine üründen okunarak genişletildi:
+    bayrak adları ``liquidDeepWarnings`` gövdesinden sökülüyor.
+    """
+    temiz = copy.deepcopy(dict(cr))
     temiz['input_warnings'] = []
     temiz['warnings'] = []
     temiz['validation'] = {}
+    for yol in _derin_uyari_yollari():
+        _derin_kanali_bosalt(temiz, yol)
+    _bayraklari_sok(temiz, _turemis_uyari_bayraklari())
     out = run_js(tmp_path, {'senaryo': 'excel', 'cr': temiz})
     adlar = [s['name'] for s in out['govde']['sheets']]
     assert 'Warnings' not in adlar, adlar
@@ -460,21 +575,68 @@ def test_t44_uyari_yokken_bos_sayfa_eklenmez(tmp_path, cr):
 # ===========================================================================
 # T45 — anlamlı basamak
 # ===========================================================================
+#: Ekranda "ham float" sayılan ondalık eşiği. TEK KAYNAK: aşağıdaki tarama
+#: deseni de, ön koşul da bu sayıdan türer (ÖH D22 · P13B3-12; önce üç
+#: taramada elden yazılıydı ve ön koşul BAŞKA bir sayıya — 10'a — bakıyordu).
+KUNYE_ONDALIK_ESIGI = 7
+#: Künye/kart taramasının deseni. Eşik değişirse üç tarama birlikte değişir.
+HAM_FLOAT_DESENI = r'\d+\.\d{%d,}' % KUNYE_ONDALIK_ESIGI
 
-def test_t45_onkosul_cozucu_degerleri_gercekten_uzun(cr):
-    """Kusurun ön koşulu: bu alanlar çözücüden 10+ ondalıkla geliyor."""
-    for key in ('chamber_temperature', 'optimal_mixture_ratio'):
-        ondalik = repr(float(cr[key])).split('.')[-1]
-        assert len(ondalik) >= 10, '%s zaten kısa: %r' % (key, cr[key])
-    hiz = cr['injection_system']['fuel_injection_velocity']
-    assert len(repr(float(hiz)).split('.')[-1]) >= 10, hiz
+
+def _ondalik_sayisi(deger):
+    """``repr(float(x))`` gösteriminin ondalık basamak adedi."""
+    return len(repr(float(deger)).split('.')[-1])
+
+
+def _kaynak_degeri_saglikli(ad, deger):
+    """T45'in ön koşulu — ÇEVRİLDİ (ÖH D22 · P13B3-12).
+
+    Eski hâli ``len(repr(float(x)).split('.')[-1]) >= 10`` ŞART koşuyordu.
+    Bu bekçi-yönü-ters bir iddiaydı: ürün değeri KAYNAĞINDA yuvarlarsa —
+    ki İSTENEN davranış budur — ön koşul kırmızıya dönüyor ve düzeltene
+    "geri al" diyordu.
+
+    Yeni hâl iddiayı ürünün KENDİ eşiğine bağlar ve iki dalın ikisini de
+    kapalı tutar:
+
+    * ``>= KUNYE_ONDALIK_ESIGI`` → kusurun ön koşulu CANLI; T45 taramaları
+      gerçekten bir şey sınıyor (vakumluk değil).
+    * ``<  KUNYE_ONDALIK_ESIGI`` → ürün kaynağında yuvarlamış; tarama
+      deseni bu değere zaten hiç takılamaz. Bu meşru hâlde de sessiz
+      geçilmez: değerin GERÇEK bir çözücü sayısı olduğu (sonlu ve sıfırdan
+      farklı) sınanır, böylece silinmiş/varsayılana düşmüş bir alan
+      "artık kısa" diye bekçiden sızamaz.
+    """
+    import math as _math
+    deger = float(deger)
+    assert _math.isfinite(deger), '%s sonlu değil: %r' % (ad, deger)
+    assert deger != 0.0, '%s sıfıra düşmüş (çözücü değeri değil): %r' % (
+        ad, deger)
+    return _ondalik_sayisi(deger) >= KUNYE_ONDALIK_ESIGI
+
+
+def test_t45_onkosul_cozucu_degerleri_saglikli(cr):
+    """Ön koşul: alanlar ya uzun (kusur canlı) ya da kaynakta yuvarlanmış.
+
+    Vakumluğu SESSİZ bırakmamak için hangi alanın hangi dalda olduğu
+    iddiaya yazılır; üçünün birden yuvarlanmış olması T45'in artık
+    kurgusal olduğunu söyler ama bir DÜZELTMEyi kırmızıya çevirmez.
+    """
+    alanlar = {
+        'chamber_temperature': cr['chamber_temperature'],
+        'optimal_mixture_ratio': cr['optimal_mixture_ratio'],
+        'fuel_injection_velocity':
+            cr['injection_system']['fuel_injection_velocity'],
+    }
+    canli = {ad: _kaynak_degeri_saglikli(ad, v) for ad, v in alanlar.items()}
+    assert set(canli) == set(alanlar), canli
 
 
 def test_t45_kunye_yuvarlanmis_deger_basar(tmp_path, cr):
     """Motor künyesinde 7+ ondalıklı ham sayı KALMAZ."""
     out = run_js(tmp_path, {'senaryo': 'kunye', 'cr': cr})
     html = out['html']
-    uzun = re.findall(r'\d+\.\d{7,}', html)
+    uzun = re.findall(HAM_FLOAT_DESENI, html)
     assert not uzun, 'künyede ham float: %s' % uzun[:5]
     # Değer kaybolmadı, yalnız yuvarlandı
     assert '3707 K' in html
@@ -484,7 +646,7 @@ def test_t45_kunye_yuvarlanmis_deger_basar(tmp_path, cr):
 def test_t45_altsistem_kartlarinda_ham_float_kalmadi(tmp_path, cr):
     """Enjeksiyon hızları da yuvarlanır (Fuel Vel / Ox Vel)."""
     out = run_js(tmp_path, {'senaryo': 'altsistem', 'cr': cr})
-    uzun = re.findall(r'\d+\.\d{7,}', out['html'])
+    uzun = re.findall(HAM_FLOAT_DESENI, out['html'])
     assert not uzun, 'alt sistem kartlarında ham float: %s' % uzun[:5]
     # Değer kaybolmadı: çözücünün hızı iki ondalıkla basılı
     for alan in ('fuel_injection_velocity', 'ox_injection_velocity'):
@@ -496,10 +658,10 @@ def test_t45_tank_ic_yapi_kartinda_ham_float_kalmadi(tmp_path, cr):
     """Tarama sayfanın TAMAMINDA yapıldı: emniyet valfi çapı da ham geliyordu."""
     ham = (cr['propellant_tanks']['oxidizer_tank']['internal_structures']
              ['instrumentation']['relief_valve']['diameter'])
-    assert len(repr(float(ham)).split('.')[-1]) >= 10, 'değer zaten kısa: %r' % ham
+    _kaynak_degeri_saglikli('relief_valve.diameter', ham)
     out = run_js(tmp_path, {'senaryo': 'tank_karti',
                             'tanklar': cr['propellant_tanks']})
-    uzun = re.findall(r'\d+\.\d{7,}', out['html'])
+    uzun = re.findall(HAM_FLOAT_DESENI, out['html'])
     assert not uzun, 'tank iç yapı kartında ham float: %s' % uzun[:5]
     assert '%.2f mm' % ham in out['html']
 

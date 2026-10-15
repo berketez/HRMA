@@ -263,7 +263,22 @@ class TestEnergyConservation:
         assert q == pytest.approx(6.0 * dh, rel=1e-9)
 
     def test_surface_integral_reconstruction(self):
-        # Q_toplam'ı q(x) ve ıslak alandan BAĞIMSIZ yeniden kur (counterflow).
+        """Q_toplam, yayımlanan q(x) ve ıslak alandan yeniden kurulur.
+
+        ÇEVİRİ (ÖH D15 / bekci-cevirisi, defter OH-Z5-15). Kardeş dosyadaki
+        ``test_energy_balance_surface_integral`` ile AYNI sınıf: PK5 paketi
+        P4B2-11'i onardı, segment ısısı artık birinci mertebe yukarı-akım
+        değil iki uç istasyonun akı ORTALAMASIDIR (trapez, sabit nokta
+        marşı). Bu bekçi eski şemayı yeniden uyguladığı için kırmızıya
+        döndü; PK5 kırılmayı beyan etti, teste dokunmadı. Burada bekçi
+        onarım sonrası şemaya çevriliyor.
+
+        ÖLÇÜLDÜ (metan devresi, bu depo, çeviriden önce): eski yukarı-akım
+        toplamı yayımlanan ``total_heat_W`` ile %1 mertebesinde çelişiyor;
+        yeni trapez marşı makine hassasiyetinde tutuyor. Sayılar
+        ``docs/scofield/raw/OH/D15/bekci-cevirisi/a1/olcum_once.txt``
+        içindedir.
+        """
         r = make_methane()
         res = r.solve()
         n = res['n_stations']
@@ -272,11 +287,22 @@ class TestEnergyConservation:
         q = np.array(res['q_MW_m2']) * 1e6
         order = list(range(n - 1, -1, -1))
         Q = 0.0
+        Q_upwind = 0.0
         for k in range(len(order) - 1):
             i, j = order[k], order[k + 1]
             ds = math.hypot(x_m[j] - x_m[i], r_m[j] - r_m[i])
-            Q += q[i] * 2.0 * math.pi * 0.5 * (r_m[i] + r_m[j]) * ds
-        assert Q == pytest.approx(res['summary']['total_heat_W'], rel=1e-9)
+            dA = 2.0 * math.pi * 0.5 * (r_m[i] + r_m[j]) * ds
+            Q += 0.5 * (q[i] + q[j]) * dA      # ürünün ŞU ANKİ şeması
+            Q_upwind += q[i] * dA              # onarımdan ÖNCEKİ şema
+        pub = res['summary']['total_heat_W']
+        assert Q == pytest.approx(pub, rel=1e-9), (
+            f'yayımlanan toplam {pub:.6f} W, yayımlanan dizilerin marş '
+            f'trapezi {Q:.6f} W — süperkritik devrede diziler ile toplam '
+            'AYRI şemadan çıkıyor')
+        assert abs(Q_upwind / pub - 1.0) > 1.0e-3, (
+            f'yukarı-akım toplamı {Q_upwind:.6f} W yayımlanan toplamla '
+            f'({pub:.6f} W) ayırt edilemiyor — P4B2-11 onarımı geri '
+            'alınmış olabilir')
 
     def test_exit_state_roundtrip(self):
         # T_out, (P_out, h_out) durumundan türetildi — CoolProp ile kapanmalı.

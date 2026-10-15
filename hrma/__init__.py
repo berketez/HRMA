@@ -1,11 +1,59 @@
 """
-HRMA - UZAYTEK Rocket Motor Analysis
+HRMA - Rocket Motor Analysis
 """
 
 import os
 import sys
 
-__version__ = "2.6.27"
+# ÖH D37 fea-hiz — BLAS İŞ PARÇACIĞI VARSAYILANI. Bu blok dosyanın en başında
+# durur: numpy/scipy İÇE AKTARILMADAN ÖNCE çalışmalıdır, çünkü OpenBLAS iş
+# parçacığı sayısını kütüphane yüklenirken ortamdan bir kez okur. Uygulamanın
+# üç giriş yolu da (packaging/launcher.py `_hrma_version`, hrma/run.py,
+# hrma/run_windows.py) numpy'den önce `hrma`yı içe aktarır.
+#
+# NEDEN: FEA seyrek çözücüleri (structural_axisym `spsolve`, thermal_axisym
+# `splu`, planar_grain `spsolve`) scipy'nin SuperLU'su üzerinden OpenBLAS'ı
+# çağırır. OpenBLAS varsayılanda çekirdek sayısı kadar iş parçacığı açar
+# (M4 Max: 14) ve işçiler eğirir. Kontrollü ölçüm (fea-hiz/a1, yüklü makine,
+# 5 tur): 8.450 serbestlikli yapısal `spsolve` medyan 1,92 s (en kötü 6,1 s)
+# ⟷ 1 iş parçacığıyla 0,095 s; düzlem 1,32 s (en kötü 13,0 s) ⟷ 0,12 s.
+# Hafif yükte (~5) de varsayılan 7× yavaş (0,263 ⟷ 0,038 s). 2 ve 4 iş
+# parçacığı 1'den hızlı değil, daha çok CPU yakıyor; çıktılar dört ayarda
+# bit-aynı. Bedeli: büyük YOĞUN BLAS (1500² matmul + solve) 1 iş
+# parçacığında yavaş (hafif yükte 3,3×, yüklüde 1,6×) — ürün yolunda böyle
+# işlem yok (yoğun çözümler 3×3 yama ve CFD m×m blok yığınları). Seçim
+# gerekçesi ve yan etkiler:
+# docs/scofield/raw/OH/D37/fea-hiz/a1/rapor.md.
+#
+# KAPSAM: yalnız OPENBLAS_NUM_THREADS yazılır. Kullanıcı OpenBLAS'ın okuduğu
+# değişkenlerden HERHANGİ birini koymuşsa hiçbir şey yazılmaz: OpenBLAS'ta
+# OPENBLAS_NUM_THREADS önceliklidir, kullanıcının OMP/GOTO değerinin yanına
+# yazmak o değeri ezerdi. OMP_NUM_THREADS BİLEREK yazılmaz: OpenMP havuzlarına
+# (ör. /calculate yolunda yüklenen sklearn libomp) ve alt süreçlere sızardı;
+# ölçümde OMP=1 CFD'yi değiştirmedi. VECLIB_MAXIMUM_THREADS yazılmaz: bu
+# kurulumda Accelerate yok, VECLIB=1 iki OpenBLAS havuzunu da değiştirmedi.
+# numpy bu dosyadan ÖNCE içe aktarılmışsa (numpy'yi önce yükleyen bir test
+# süreci, `python hrma/app.py`) ayar o süreçte ETKİSİZDİR (ölçüldü: 14 kalır);
+# yalnız ortam olarak alt süreçlere geçer.
+
+#: OpenBLAS iş parçacığı varsayılanı — TEK KAYNAK (ölçüm: fea-hiz/a1).
+BLAS_DEFAULT_THREADS = 1
+
+#: OpenBLAS'ın iş parçacığı sayısını okuduğu ortam değişkenleri.
+BLAS_THREAD_ENV_VARS = ("OPENBLAS_NUM_THREADS", "GOTO_NUM_THREADS",
+                        "OMP_NUM_THREADS")
+
+
+def _set_blas_thread_default() -> None:
+    """Kullanıcı bir OpenBLAS değişkeni koymadıysa varsayılanı yazar."""
+    if any(ad in os.environ for ad in BLAS_THREAD_ENV_VARS):
+        return
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", str(BLAS_DEFAULT_THREADS))
+
+
+_set_blas_thread_default()
+
+__version__ = "3.0.0"
 __author__ = "Berke Tezgöçen"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

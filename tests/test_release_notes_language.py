@@ -21,7 +21,27 @@ Yayımlanmış v2.6.25 gövdesi 16045 karakter ve Türkçe im 8072. indekste
 başlıyor; kırpma Türkçe bölümü tamamen atıyor, istemciye hiç ulaşmıyor.
 Sunucu bölümlere AYIRDIKTAN sonra kırpmadıkça (notes_tr / notes_en) hiçbir
 istemci düzeltmesi bunu kurtaramaz. Dosyadaki son bölüm o sözleşmeyi
-sınar ve yama uygulanınca KENDİLİĞİNDEN etkinleşir (o güne kadar skip).
+sınar.
+
+ÖH D24 / OH-D23-11 (a): bu künye eskiden son bölümün yama gelene
+kadar ATLANDIĞINI söylüyordu ve BAYATTI — o kapı ÖH D18 / P13B1-09
+ile kaldırılmıştı (kendini kapatan bekçi), sunucu yaması uygulandı.
+Ölçüldü (once_ohd23_11.json): ``split_notes_by_language`` var,
+koşullu kapılı test sayısı 0. Var olmayan bir kapıyı anlatan künye
+okuyucuya "bu bölüm belki atlanıyordur" dedirtir; bölüm ATLANMIYOR,
+sözleşme her koşumda SINANIYOR.
+
+ÖH D33-2 / OH-UC-13: buradaki 8 node bekçisi bir süre kırmızıydı ve
+kırmızıyı DOĞRUDAN doğuran şey SÜRÜCÜYDÜ — sahte DOM `<script src=…>`
+ögesini head'e alıp hiç çalıştırmıyordu, oysa `update_check.js` D30/OH-D21-06'dan beri
+ortak sözlüğü TALEP ÜZERİNE indirip pencereyi ancak o geri çağrımda
+çiziyor. Sürücü artık tarayıcı sözleşmesini taklit eder (ayrıntı
+`HARNESS_JS` künyesinde) ve sayfa modelini iki kiple sınar:
+`lazy` (launch_site/liquid/solid — ortak sözlük sayfada yok) ve
+`onceden` (index/formulas — sözlük sayfayla gelir). Sürücü düzelince
+ortaya çıkan GERÇEK ürün kusuru (`force` akışında pencerenin sözlük
+inmeden İngilizce çizilmesi) aynı dalgada onarıldı; davranış bekçisi
+`tests/test_d33_altyapi_a1.py`nin son bölümündedir.
 """
 
 import json
@@ -42,8 +62,19 @@ I18N_COMMON_JS = os.path.join(STATIC_JS, 'i18n_common.js')
 TR_LETTERS = re.compile(r'[çğıİöşüÇĞÖŞÜ]')
 MARKER = re.compile(r'<!--\s*HRMA-LANG:([a-z]{2})\s*-->', re.I)
 
-pytestmark = pytest.mark.skipif(shutil.which('node') is None,
-                                reason='node kurulu değil')
+#: ÖH D24 / OH-D23-11 (b): bu kapı MODÜL düzeyindeydi
+#: (``pytestmark``) ve node yoksa dosyadaki HER şeyi atlıyordu —
+#: node'a hiç dokunmayan 5 saf-Python sözleşme testi dâhil
+#: (ölçüm: once_ohd23_11.json ``node_GEREKTIRMEYEN_testler``).
+#: Bunların arasında P13B1-09'un "yama geri alınamaz" bekçisi de
+#: vardı: node kurulu olmayan bir makinede sunucu yaması sessizce
+#: geri alınabilirdi ve hiçbir test kırmızıya dönmezdi. Kapı artık
+#: yalnız node ÇALIŞTIRAN testlerin üstünde durur; saf-Python
+#: sözleşmesi her makinede sınanır (fail-closed).
+node_gerekir = pytest.mark.skipif(shutil.which('node') is None,
+                                  reason='node kurulu değil (bu test '
+                                         'update_check.js\'i gerçek node '
+                                         'içinde çalıştırır)')
 
 
 # ---------------------------------------------------------------------------
@@ -88,10 +119,61 @@ def test_yayin_notu_iki_dilli_kaynak_olarak_okunabiliyor():
 HARNESS_JS = r"""
 'use strict';
 const fs = require('fs');
+const path = require('path');
 const vm = require('vm');
 
-const [updateJs, i18nJs, i18nCommonJs, payloadPath, lang] = process.argv.slice(2);
+/* ÖH D33-2 · OH-UC-13 — SAHTE DOM ARTIK BETİK YÜKLER.
+   ÖLÇÜLDÜ (a1/once_ohuc13.json): bu sürücü `<script src=…>` ögesini
+   head'e alıyor ama HİÇ çalıştırmıyordu; ne `onload` ne `onerror`
+   ateşleniyordu (head_script_sayisi=1, onload_atesledi=false,
+   onerror_atesledi=false). ÖH D30 / OH-D21-06 ile `update_check.js`
+   ortak sözlüğü TALEP ÜZERİNE yüklemeye başlayınca (`sozlukHazir`)
+   pencere ancak o geri çağrımdan sonra çiziliyor; geri çağrım hiç
+   ateşlenmediği için 8 node bekçisi "modal açılmadı" diye kırmızıya
+   düşüyordu. Kusur üründe değil, sürücünün eksik tarayıcı taklidindeydi.
+
+   Tarayıcı sözleşmesi buraya taşındı: DOM'a giren `<script src>` kaynağı
+   GERÇEKTEN diskten okunur (Flask'ın `/static/js` yolunun karşılığı),
+   bağlamda çalıştırılır, sonra `onload` ateşlenir; dosya yoksa `onerror`.
+   Metin uydurulmaz — çalıştırılan dosya depodaki dosyanın ta kendisidir. */
+let STATIC_DIR = null;      // argv çözülünce dolar
+let VM_CTX = null;          // vm.createContext'ten sonra dolar
+const YUKLENEN = [];        // gerçekten çalıştırılan <script src> listesi
+
+function betigiYukle(el) {
+    const src = String(el.src || (el.getAttribute && el.getAttribute('src')) || '');
+    if (!src) return;
+    setTimeout(function () {
+        let kod = null, yol = null;
+        try {
+            yol = path.join(STATIC_DIR || '', src.replace(/^.*\/static\/js\//, ''));
+            kod = fs.readFileSync(yol, 'utf8');
+        } catch (e) { kod = null; }
+        if (kod === null || !VM_CTX) {
+            if (typeof el.onerror === 'function') el.onerror({ type: 'error', target: el });
+            return;
+        }
+        try {
+            vm.runInContext(kod, VM_CTX, { filename: path.basename(yol) });
+            YUKLENEN.push(src);
+            if (typeof el.onload === 'function') el.onload({ type: 'load', target: el });
+        } catch (e) {
+            if (typeof el.onerror === 'function') el.onerror({ type: 'error', target: el });
+        }
+    }, 0);
+}
+
+// --- ARGV BLOGU BASLANGIC (DOM sondası bu bloğu atlar) ---
+const [updateJs, i18nJs, i18nCommonJs, payloadPath, lang, sozlukKipiArg] =
+    process.argv.slice(2);
+// 'lazy'   : launch_site/liquid/solid — ortak sözlük sayfada YOK, pencere
+//            onu kendi ister (ÖH D30 / OH-D21-06'nın canlı yolu).
+// 'onceden': index/formulas — ortak sözlük sayfayla birlikte gelir,
+//            `sozlukHazir` erken dönüş dalını kullanır.
+const sozlukKipi = sozlukKipiArg || 'lazy';
+STATIC_DIR = path.dirname(i18nCommonJs);
 const info = JSON.parse(fs.readFileSync(payloadPath, 'utf8'));
+// --- ARGV BLOGU BITIS ---
 
 function El(tag) {
     this.nodeType = 1;
@@ -106,10 +188,20 @@ function El(tag) {
     this._listeners = {};
 }
 El.prototype.getAttribute = function (k) {
-    return Object.prototype.hasOwnProperty.call(this._attrs, k) ? this._attrs[k] : null;
+    if (Object.prototype.hasOwnProperty.call(this._attrs, k)) return this._attrs[k];
+    // `tag.src = …` biçiminde DOM ÖZELLİĞİNE yazılan URL alanları tarayıcıda
+    // özniteliğe de yansır; yalnız bu iki alan yansıtılır (id/className gibi
+    // her zaman dolu alanlar yansıtılsaydı `[id]` seçicisi her ögeyi tutardı).
+    if ((k === 'src' || k === 'href') && typeof this[k] === 'string') return this[k];
+    return null;
 };
 El.prototype.setAttribute = function (k, v) { this._attrs[k] = String(v); };
-El.prototype.appendChild = function (c) { this.children.push(c); return c; };
+El.prototype.appendChild = function (c) {
+    this.children.push(c);
+    // ÖH D33-2 · OH-UC-13: tarayıcıda DOM'a giren betik ÇALIŞIR.
+    if (c && c.tagName === 'SCRIPT') betigiYukle(c);
+    return c;
+};
 El.prototype.removeChild = function (c) {
     const i = this.children.indexOf(c);
     if (i >= 0) this.children.splice(i, 1);
@@ -127,14 +219,28 @@ El.prototype.descendants = function () {
     });
     return out;
 };
+/* ÖH D33-2 · OH-UC-13: seçici dilbilgisi `tag[attr]`den `[attr*="değer"]`e
+   genişletildi. ÖLÇÜLDÜ (once_ohuc13.json: secici_attr_contains_eslesti=false):
+   eski dilbilgisi `script[src*="i18n_common.js"]`i TANIMIYORDU; ürünün
+   "sözlük zaten sayfada" erken dönüş dalı bu seçiciye bağlı olduğu için o
+   dal hiçbir koşumda sınanamıyordu (bekçi körlüğü). */
 El.prototype.matches = function (sel) {
     const self = this;
     return String(sel).split(',').some(function (part) {
         part = part.trim();
-        const m = part.match(/^(\w+)?\[([\w-]+)\]$/);
+        const m = part.match(/^(\w+)?\[([\w-]+)(?:([*^$~|]?=)\s*"?([^"\]]*)"?)?\]$/);
         if (!m) return false;
         if (m[1] && self.tagName !== m[1].toUpperCase()) return false;
-        return self.getAttribute(m[2]) !== null;
+        const v = self.getAttribute(m[2]);
+        if (v === null || v === undefined) return false;
+        if (!m[3]) return true;                       // yalnız varlık sınaması
+        const hedef = m[4];
+        if (m[3] === '=') return v === hedef;
+        if (m[3] === '*=') return v.indexOf(hedef) >= 0;
+        if (m[3] === '^=') return v.indexOf(hedef) === 0;
+        if (m[3] === '$=') return hedef.length <= v.length &&
+                                  v.lastIndexOf(hedef) === v.length - hedef.length;
+        return false;                                  // ~= / |= kullanılmıyor
     });
 };
 El.prototype.querySelectorAll = function (sel) {
@@ -145,11 +251,12 @@ El.prototype.querySelectorAll = function (sel) {
 El.prototype.querySelector = function (sel) { return this.querySelectorAll(sel)[0] || null; };
 
 const body = new El('body');
+const head = new El('head');
 const document = {
     nodeType: 9,
     readyState: 'complete',
     documentElement: new El('html'),
-    head: new El('head'),
+    head: head,
     body: body,
     createElement: function (tag) { return new El(tag); },
     createTextNode: function (text) {
@@ -160,8 +267,11 @@ const document = {
     },
     addEventListener: function () {},
     dispatchEvent: function () { return true; },
-    querySelectorAll: function (sel) { return body.querySelectorAll(sel); },
-    querySelector: function (sel) { return body.querySelector(sel); }
+    // ÖH D33-2: sayfa betikleri <head>'te yaşar; arama gövdeyle sınırlı kalamaz.
+    querySelectorAll: function (sel) {
+        return head.querySelectorAll(sel).concat(body.querySelectorAll(sel));
+    },
+    querySelector: function (sel) { return document.querySelectorAll(sel)[0] || null; }
 };
 
 const store = { hrma_update_autocheck: 'off' };   // otomatik denetim kapalı: koşum belirlenimci
@@ -193,42 +303,68 @@ const win = {
 win.window = win;
 win.self = win;
 vm.createContext(win);
+VM_CTX = win;
 
-// Gerçek çeviri altyapısı — arayüz dili gerçekten kuruluyor
+// Her şablonun kendi yüklediği çeviri altyapısı
 vm.runInContext(fs.readFileSync(i18nJs, 'utf8'), win, { filename: 'i18n.js' });
-vm.runInContext(fs.readFileSync(i18nCommonJs, 'utf8'), win, { filename: 'i18n_common.js' });
-win.I18N.setLang(lang);
 
-vm.runInContext(fs.readFileSync(updateJs, 'utf8'), win, { filename: 'update_check.js' });
-win.hrmaCheckForUpdates(true);
+function sayfayiKur(devam) {
+    if (sozlukKipi !== 'onceden') { devam(); return; }
+    const s = document.createElement('script');
+    s.src = '/static/js/i18n_common.js';
+    s.onload = function () { devam(); };
+    s.onerror = function () { devam(); };
+    document.head.appendChild(s);
+}
 
-// fetch zinciri mikro görevlerde çözülür; birkaç tur bekle
-setTimeout(function () {
-    const modal = document.getElementById('hrma-update-modal');
-    if (!modal) {
-        console.log(JSON.stringify({ ok: false, reason: 'modal açılmadı', istekler: istekler }));
-        return;
-    }
-    const box = modal.children[0];
-    const metinler = box.descendants()
-        .concat(box.children)
-        .map(function (e) { return String(e.textContent || ''); })
-        .filter(function (s) { return s.trim().length > 0; });
-    metinler.sort(function (a, b) { return b.length - a.length; });
-    console.log(JSON.stringify({
-        ok: true,
-        lang: win.I18N.lang,
-        baslik: String(box.children[0].innerHTML || ''),
-        soru: String(box.children[1].innerHTML || ''),
-        notlar: metinler.length ? metinler[0] : '',
-        istekler: istekler
-    }));
-}, 20);
+sayfayiKur(function () {
+    win.I18N.setLang(lang);
+    vm.runInContext(fs.readFileSync(updateJs, 'utf8'), win, { filename: 'update_check.js' });
+    win.hrmaCheckForUpdates(true);
+
+    // Pencere, sözlük geldikten SONRA çizilir: sabit gecikme yerine bekle.
+    const bitis = Date.now() + 15000;
+    (function bekle() {
+        const modal = document.getElementById('hrma-update-modal');
+        if (!modal) {
+            if (Date.now() < bitis) { setTimeout(bekle, 10); return; }
+            console.log(JSON.stringify({ ok: false, reason: 'modal açılmadı',
+                                         istekler: istekler, yuklenen_betikler: YUKLENEN }));
+            return;
+        }
+        const box = modal.children[0];
+        const metinler = box.descendants()
+            .concat(box.children)
+            .map(function (e) { return String(e.textContent || ''); })
+            .filter(function (s) { return s.trim().length > 0; });
+        metinler.sort(function (a, b) { return b.length - a.length; });
+        console.log(JSON.stringify({
+            ok: true,
+            lang: win.I18N.lang,
+            sozluk_kipi: sozlukKipi,
+            baslik: String(box.children[0].innerHTML || ''),
+            soru: String(box.children[1].innerHTML || ''),
+            notlar: metinler.length ? metinler[0] : '',
+            istekler: istekler,
+            yuklenen_betikler: YUKLENEN
+        }));
+    })();
+});
 """
 
 
-def _pencereyi_ac(info, lang):
+#: Sayfa modeli — ortak sözlüğün (i18n_common.js) sayfaya nasıl geldiği.
+#: ÖLÇÜLDÜ (a1/once_ohuc13.json, şablon taraması): `update_check.js`i yükleyen
+#: 6 şablonun 3'ü (launch_site, liquid, solid) `i18n_common.js`i YÜKLEMEZ —
+#: pencere sözlüğü kendi ister (``lazy``); 3'ü (index, formulas, advanced)
+#: sayfayla birlikte getirir (``onceden``). İki yol da canlıdır, ikisi de
+#: sınanır.
+SOZLUK_KIPLERI = ('lazy', 'onceden')
+
+
+def _pencereyi_ac(info, lang, sozluk='lazy'):
     """update_check.js'i node içinde çalıştırır, açılan pencereyi döndürür."""
+    assert sozluk in SOZLUK_KIPLERI, sozluk
     with tempfile.TemporaryDirectory() as tmp:
         driver = os.path.join(tmp, 'driver.js')
         payload = os.path.join(tmp, 'payload.json')
@@ -238,8 +374,8 @@ def _pencereyi_ac(info, lang):
             json.dump(info, fh, ensure_ascii=False)
         proc = subprocess.run(
             [shutil.which('node'), driver, UPDATE_JS, I18N_JS, I18N_COMMON_JS,
-             payload, lang],
-            capture_output=True, text=True, timeout=120)
+             payload, lang, sozluk],
+            capture_output=True, text=True, timeout=180)
     assert proc.returncode == 0, 'node koşumu çöktü:\n%s' % proc.stderr
     sonuc = json.loads(proc.stdout.strip().splitlines()[-1])
     assert sonuc['ok'], 'güncelleme penceresi açılmadı: %s' % sonuc
@@ -258,6 +394,7 @@ def _bilgi(**ekstra):
 # ---------------------------------------------------------------------------
 # 2. biçim — GitHub API gövdesi, dil imleri yerinde
 # ---------------------------------------------------------------------------
+@node_gerekir
 def test_turkce_arayuzde_notlar_turkce_gelir():
     """Kullanıcının bildirdiği durum: soru Türkçe ise not da Türkçe olmalı."""
     sonuc = _pencereyi_ac(_bilgi(notes=NOTLAR), 'tr')
@@ -270,6 +407,7 @@ def test_turkce_arayuzde_notlar_turkce_gelir():
         % sonuc['notlar'][:400])
 
 
+@node_gerekir
 def test_ingilizce_arayuzde_notlar_ingilizce_gelir():
     sonuc = _pencereyi_ac(_bilgi(notes=NOTLAR), 'en')
     assert sonuc['lang'] == 'en'
@@ -279,6 +417,7 @@ def test_ingilizce_arayuzde_notlar_ingilizce_gelir():
         % sonuc['notlar'][:400])
 
 
+@node_gerekir
 def test_notlarda_dil_imi_kullaniciya_sizmaz():
     """<!--HRMA-LANG:tr--> gibi makine imleri metinde görünmemeli."""
     for lang in ('tr', 'en'):
@@ -296,6 +435,7 @@ def test_notlarda_dil_imi_kullaniciya_sizmaz():
 IMSIZ = MARKER.sub('', NOTLAR)
 
 
+@node_gerekir
 def test_imsiz_iki_dilli_govdede_de_turkce_secilir():
     """Kota yedeği (Atom) yolunda da Türkçe arayüz Türkçe not görmeli."""
     sonuc = _pencereyi_ac(_bilgi(notes=IMSIZ, source='page'), 'tr')
@@ -309,6 +449,7 @@ def test_imsiz_iki_dilli_govdede_de_turkce_secilir():
     assert BOLUM['tr'].splitlines()[0].strip() in notlar
 
 
+@node_gerekir
 def test_imsiz_govdede_ingilizce_arayuz_ingilizce_gorur():
     sonuc = _pencereyi_ac(_bilgi(notes=IMSIZ, source='page'), 'en')
     notlar = sonuc['notlar']
@@ -319,6 +460,7 @@ def test_imsiz_govdede_ingilizce_arayuz_ingilizce_gorur():
 # ---------------------------------------------------------------------------
 # 1. biçim — sunucu dile ayrılmış alan gönderirse o kazanır
 # ---------------------------------------------------------------------------
+@node_gerekir
 def test_sunucunun_ayirdigi_alan_kirpik_govdeyi_yener():
     """Sunucu kırpmadan ÖNCE bölerse istemci doğru dili göstermeli.
 
@@ -337,6 +479,7 @@ def test_sunucunun_ayirdigi_alan_kirpik_govdeyi_yener():
 # ---------------------------------------------------------------------------
 # Dürüst yedek: tek dilli not gizlenmez
 # ---------------------------------------------------------------------------
+@node_gerekir
 def test_tek_dilli_not_gizlenmez():
     """Eski/elle yazılmış tek dilli notlar Türkçe arayüzde de gösterilir.
 
@@ -349,6 +492,7 @@ def test_tek_dilli_not_gizlenmez():
         'tek dilli not bölünüp parçalanmış:\n%s' % sonuc['notlar'][:400])
 
 
+@node_gerekir
 def test_not_yoksa_pencere_yine_acilir():
     """Not gövdesi boş gelse bile güncelleme penceresi çalışmalı."""
     sonuc = _pencereyi_ac(_bilgi(notes=''), 'tr')
@@ -360,18 +504,40 @@ def test_not_yoksa_pencere_yine_acilir():
 # ---------------------------------------------------------------------------
 # Gövdeyi tek parça kırpmak Türkçe bölümü düşürüyor. Sunucu bölümlere
 # ayırdıktan sonra kırpınca (split_notes_by_language + notes_en/notes_tr)
-# aşağıdaki test kendiliğinden etkinleşir; o zamana dek atlanır.
+# aşağıdaki testler bu sözleşmeyi kilitler.
+#
+# ÖH D18 · P13B1-09 — BEKÇİ YÖNÜ TERSTİ (kendini kapatan bekçi).
+# Buradaki bekçi eskiden ``@pytest.mark.skipif(not SUNUCU_AYIRIYOR, …)``
+# ile korunuyordu. O kapı, tam da bekçinin koruduğu REGRESYON
+# gerçekleştiğinde (``split_notes_by_language`` kaybolduğunda) testi
+# KIRMIZI yapmak yerine ATLIYORDU: yani kusur ortaya çıkınca bekçi kendi
+# kendini kapatıyordu. Üstelik atlama gerekçesi ("sunucu yaması yok:
+# update_checker gövdeyi hâlâ tek parça kırpıyor") bugün YALANDI —
+# ölçüldü (D18): ``hasattr(update_checker, 'split_notes_by_language')``
+# True, dosya 12 geçti / 0 atlandı. Kapı, var olmayan bir geçmişi
+# beklerken gelecekteki gerilemeyi affediyordu.
+#
+# Kapı KALDIRILDI ve yerine ADLI bir sözleşme iddiası kondu: yamanın
+# varlığı artık bir ön koşul değil, SINANAN bir gerçektir.
 def _update_checker():
     from hrma.utils import update_checker
     return update_checker
 
 
-SUNUCU_AYIRIYOR = hasattr(_update_checker(), 'split_notes_by_language')
+def test_sunucu_dil_ayirma_yamasi_geri_alinamaz():
+    """``split_notes_by_language`` sözleşmenin parçasıdır, seçenek değil.
+
+    P13B1-09: bu iddia olmasaydı, işlevin kaldırılması aşağıdaki bekçiyi
+    kırmızıya değil ATLAMAYA düşürürdü — kusur sessizce geçerdi.
+    """
+    uc = _update_checker()
+    assert hasattr(uc, 'split_notes_by_language'), (
+        'update_checker.split_notes_by_language kayboldu: sunucu gövdeyi '
+        'yine tek parça kırpıyor, Türkçe bölüm istemciye ulaşmıyor '
+        '(v2.6.2 CORS hatasıyla aynı sınıf gerileme)')
+    assert callable(uc.split_notes_by_language)
 
 
-@pytest.mark.skipif(not SUNUCU_AYIRIYOR,
-                    reason='sunucu yaması yok: update_checker gövdeyi hâlâ '
-                           'tek parça kırpıyor, Türkçe bölüm istemciye ulaşmıyor')
 def test_sunucu_dil_bolumlerini_ayri_gonderir(monkeypatch):
     """check_for_update, notları dile ayırıp bölüm başına kırpmalı."""
     uc = _update_checker()

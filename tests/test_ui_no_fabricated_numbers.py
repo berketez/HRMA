@@ -36,8 +36,36 @@ Testler
 
 Yanlış pozitif çıkarsa kuralı gevşetmeyin; ya kodu düzeltin ya da
 :data:`ALLOWED` listesine **gerekçesiyle** ekleyin.
+
+JS KAPSAMI — ÖH D25 (defter **P11B2-12**)
+-----------------------------------------
+Bu bekçi doğru deseni arıyordu ama **yanlış dosyalarda**: yalnız
+``hrma/templates/*.html`` taranıyor, ``hrma/static/js/**/*.js`` hiç
+görülmüyordu (ölçüm: ``bekci_js_tariyor = 0``). Ekranın yarısı o
+betiklerden yazılır; P11B2-02/03/04'teki uydurmaların neden yıllarca
+ayakta kaldığının ölçülmüş açıklaması budur.
+
+Kapsam iki katmanda açıldı, ikisi de **glob ile türetilmiştir** (elle
+liste yok, sessizce daralamaz):
+
+* **Bütün betikler** (:data:`SCANNED_SCRIPTS`) — şablonlarla aynı iki
+  gösterim deseni: ``|| SAYI).toFixed(`` ve ``${...}`` yerleştirmesi
+  içinde sayısal yedek. Bunlar "sayı doğrudan ekrana gidiyor"
+  demektir ve hiçbir dosyada mazereti yoktur.
+* **Gösterim katmanı** (:data:`DISPLAY_LAYER`: ``app.js`` + panel
+  ailesi) — ek olarak **çözücü alanı yedeği**: ``motorData.x || 0``,
+  ``Number(job.progress) || 0`` gibi, öznesi bir ÇÖZÜCÜ ALANI olan
+  sayısal yedekler. ``depth || 0``, ``width || 1.4``,
+  ``container.clientHeight || 520`` gibi yerel değişken / tarayıcı
+  ölçüsü yedekleri kapsam dışıdır; ayrım mekaniktir
+  (bkz. :func:`_is_solver_field`), elle değil.
+
+Geriye kalan her çözücü-alanı yedeği :data:`JS_BEYAN` defterine
+**gerekçesiyle** yazılmak zorundadır; beyansız olan kırmızıdır ve
+defterde çürümüş (koda karşılığı kalmamış) kayıt da kırmızıdır.
 """
 
+import functools
 import os
 import pathlib
 import re
@@ -49,10 +77,26 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 TEMPLATES = REPO_ROOT / 'hrma' / 'templates'
-#: Bu bekçinin taradığı şablonlar. (Adı bilerek `PAGES` değil:
-#: test_i18n_pages.py / inventory.py içinde farklı içerikli bir
-#: `PAGES` var, tutarlılık kancası ikisini aynı sabit sanıyordu.)
-SCANNED_PAGES = ('solid.html', 'liquid.html', 'advanced.html')
+
+#: Kapsamın ELLE yazıldığı dönemin listesi — TABAN olarak korunur.
+#: (Adı bilerek `PAGES` değil: test_i18n_pages.py / inventory.py içinde
+#: farklı içerikli bir `PAGES` var, tutarlılık kancası ikisini aynı sabit
+#: sanıyordu.)
+#:
+#: ÖH FAZ D / D2 (defter **P13B4-09**): bu üçlü 8 şablonun 3'ünü tarıyordu;
+#: dışarıda kalan 5'i (formulas, index, launch_site, simple, uzaytek)
+#: bekçinin KENDİ ölçütüyle ölçüldüğünde temizdi — yani bugün kayıp yok,
+#: ama şablon eklendiğinde bekçi sessizce dar kalıyordu. Aşağıdaki liste
+#: artık TÜRETİLMİŞtir; bu demet yalnız "türetme daralmasın" iddiasının
+#: çapasıdır (bkz. :func:`test_taranan_sayfalar_turetilmis_ve_daralmadi`).
+TARIHSEL_SCANNED_PAGES = ('solid.html', 'liquid.html', 'advanced.html')
+
+#: Bu bekçinin taradığı şablonlar — **türetilmiş** (elle liste değil).
+#: İlacın emsali depoda yazılı: ``test_i18n_common.py`` içindeki
+#: ``PANEL_FILES = sorted(PANELS_DIR.glob('*.js'))``. Yeni bir şablon
+#: eklendiğinde kapsama KENDİLİĞİNDEN girer; kimsenin listeyi güncellemesi
+#: gerekmez ve unutulduğunda bekçi kör kalmaz.
+SCANNED_PAGES = tuple(sorted(p.name for p in TEMPLATES.glob('*.html')))
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +131,73 @@ INTERPOLATION = re.compile(r'\$\{([^{}]*)\}')
 INPUT_MARKERS = (
     'getElementById', 'querySelector', '.value', '.checked',
     'FormData', 'localStorage', 'sessionStorage', 'dataset.',
+)
+
+
+# ---------------------------------------------------------------------------
+# JS kapsamı (ÖH D25 / P11B2-12)
+# ---------------------------------------------------------------------------
+STATIC_JS = REPO_ROOT / 'hrma' / 'static' / 'js'
+
+#: Taranan BÜTÜN tarayıcı betikleri — glob ile türetilmiş, elle liste yok.
+SCANNED_SCRIPTS = tuple(sorted(
+    p.relative_to(REPO_ROOT).as_posix() for p in STATIC_JS.rglob('*.js')))
+
+#: Çözücü çıktısını ekrana YAZAN katman: ana denetleyici + panel ailesi.
+#: Desenler glob'dur; yeni bir panel eklendiğinde kapsama kendiliğinden
+#: girer (emsal: ``test_i18n_common.py`` içindeki ``PANELS_DIR.glob``).
+DISPLAY_LAYER_GLOBS = ('app.js', '*_panel.js', 'panels/*.js')
+DISPLAY_LAYER = tuple(sorted({
+    p.relative_to(REPO_ROOT).as_posix()
+    for desen in DISPLAY_LAYER_GLOBS for p in STATIC_JS.glob(desen)}))
+
+#: Öznesi bir nesne alanı olan sayısal yedek: ``a.b || 0``,
+#: ``Number(a.b.c) ?? 1``. Yalın değişken (``depth || 0``) ve fonksiyon
+#: dönüşü (``drawCount(n) || 5``) BİLEREK dışarıdadır — onlar çözücünün
+#: bir iddiası değil, yerel bir varsayılandır.
+SOLVER_FIELD_FALLBACK = re.compile(
+    r'(?:(?:Number|parseFloat|parseInt)\s*\(\s*)?'
+    r'(?P<ozne>[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)+)'
+    r'\s*\)?\s*(?:\|\||\?\?)\s*-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\b')
+
+#: Tarayıcının kendi ölçüleri — çözücü alanı DEĞİL. ``clientHeight || 520``
+#: bir tuval boyu varsayılanıdır, kullanıcıya bildirilen bir sayı değil.
+BROWSER_PROPS = frozenset({
+    'clientWidth', 'clientHeight', 'offsetWidth', 'offsetHeight',
+    'innerWidth', 'innerHeight', 'devicePixelRatio', 'pixelRatio',
+    'scrollX', 'scrollY', 'scrollTop', 'scrollLeft', 'length',
+})
+
+
+def _is_solver_field(ozne):
+    """``a.b`` biçimindeki özne bir ÇÖZÜCÜ ALANI mı?
+
+    Hayır dediğimiz üç sınıf: tek parçalı ad (yalın değişken), tarayıcı
+    ölçüsü (:data:`BROWSER_PROPS`) ve nesnenin kendi özel alanı
+    (``this._sayac``) — sonuncusu görünüm nesnesinin iç durumudur,
+    çözücünün yayımladığı bir değer değil.
+    """
+    parcalar = [x.strip() for x in ozne.split('.')]
+    if len(parcalar) < 2:
+        return False
+    if parcalar[-1] in BROWSER_PROPS:
+        return False
+    if parcalar[0] == 'this' and parcalar[1].startswith('_'):
+        return False
+    return True
+
+
+#: Gösterim katmanında KALAN çözücü-alanı yedekleri — her biri gerekçeli.
+#: Kayıt biçimi: ``(dosya, kod parçası, gerekçe)``. Parça TAM eşleşmedir
+#: (joker yok) ki liste sessizce genişlemesin; gerekçe boş olamaz ve
+#: koda karşılığı kalmayan kayıt kırmızı verir.
+JS_BEYAN = (
+    ('hrma/static/js/panels/validation_panel.js',
+     'mfres.selected_index || 0',
+     'Ekrana çıkan bir SAYI değil: içe aktarılan dosyadaki hangi motorun '
+     'seçili olduğunu tutan dizin. Uç bir seçim bildirmediğinde ilk motor '
+     'seçilir; bu bir ölçüm iddiası değil, arayüz durumudur (gerçek '
+     'seçim bildirildiğinde aynen kullanılır, 0 da meşru bir dizindir).'),
 )
 
 
@@ -201,6 +312,35 @@ def function_body(code, name):
     assert start >= 0, 'fonksiyon bulunamadı: %s' % name
     nxt = code.find('\n        function ', start + 1)
     return code[start:nxt if nxt > 0 else len(code)]
+
+
+# ---------------------------------------------------------------------------
+# 0) Kapsamın kendisi — türetme daralmasın (ÖH FAZ D / D2)
+# ---------------------------------------------------------------------------
+def test_taranan_sayfalar_turetilmis_ve_daralmadi():
+    """`SCANNED_PAGES` diskteki şablon kümesinin AYNISI olmalı.
+
+    İki yönlü iddia:
+
+    * **Altküme garantisi** — elle liste döneminin üç şablonu kapsamdan
+      düşemez (türetme daralırsa burası kırmızıdır).
+    * **Türetme gerçekten türetilmiş mi** — `templates/*.html` kümesiyle
+      birebir eşitlik. Biri elle bir süzgeç koyup listeyi yeniden
+      daraltırsa (ya da bir şablon glob'un göremeyeceği bir yere taşınırsa)
+      bekçi bunu söyler; sessiz daralma olmaz.
+    """
+    diskteki = {p.name for p in TEMPLATES.glob('*.html')}
+    assert diskteki, 'hrma/templates altında hiç şablon yok — yol mu değişti?'
+    assert set(SCANNED_PAGES) == diskteki, (
+        'SCANNED_PAGES artık şablon dizinini yansıtmıyor.\n'
+        '  taranan ama diskte yok : %s\n'
+        '  diskte var ama taranmıyor: %s'
+        % (sorted(set(SCANNED_PAGES) - diskteki),
+           sorted(diskteki - set(SCANNED_PAGES))))
+    eksik = sorted(set(TARIHSEL_SCANNED_PAGES) - set(SCANNED_PAGES))
+    assert not eksik, (
+        'Türetme elle liste döneminin kapsamını DARALTTI — düşen şablon: %s'
+        % eksik)
 
 
 # ---------------------------------------------------------------------------
@@ -434,3 +574,147 @@ def test_detector_catches_a_fabricated_sample():
     commented = "        // eski kalıp: ${(x.y || 96).toFixed(1)} idi\n        const a = 1;"
     assert not FALLBACK_TOFIXED.search(strip_js_comments(commented)), \
         'yorum temizleyici çalışmıyor'
+
+
+# ---------------------------------------------------------------------------
+# 7) JS KAPSAMI — ÖH D25 / P11B2-12
+# ---------------------------------------------------------------------------
+@functools.lru_cache(maxsize=None)
+def js_source(rel):
+    """(ham metin, yorumsuz gövde) — dosya başına bir kez."""
+    raw = (REPO_ROOT / rel).read_text(encoding='utf-8')
+    return raw, strip_js_comments(raw)
+
+
+def js_line(raw, offset):
+    return raw.count('\n', 0, offset) + 1
+
+
+def js_solver_field_hits(rel):
+    """Bir betikteki çözücü-alanı sayısal yedekleri.
+
+    Girdi toplayıcı satırları (ÖK-21: form varsayılanları) kapsam dışı;
+    kural şablon tarafındakiyle birebir aynıdır.
+    """
+    raw, code = js_source(rel)
+    satirlar = raw.split('\n')
+    bulunan = []
+    for m in SOLVER_FIELD_FALLBACK.finditer(code):
+        if not _is_solver_field(m.group('ozne')):
+            continue
+        ln = js_line(raw, m.start())
+        if _is_input_collector(satirlar[ln - 1]):
+            continue
+        bulunan.append((ln, ' '.join(m.group(0).split())))
+    return bulunan
+
+
+def test_js_kapsami_turetilmis_ve_bos_degil():
+    """Kapsam glob'dan gelir; kimse listeyi elle daraltamaz."""
+    assert SCANNED_SCRIPTS, 'hrma/static/js altında hiç betik yok — yol mu değişti?'
+    assert 'hrma/static/js/app.js' in SCANNED_SCRIPTS, (
+        'ana denetleyici (app.js) taranmıyor — P11B2-12 geri geldi.')
+    assert set(DISPLAY_LAYER) <= set(SCANNED_SCRIPTS)
+    assert 'hrma/static/js/app.js' in DISPLAY_LAYER
+    paneller = [f for f in DISPLAY_LAYER if f.endswith('_panel.js')]
+    assert len(paneller) >= 5, (
+        'panel ailesi kapsamdan düştü (%d dosya) — glob desenleri bozuldu mu?'
+        % len(paneller))
+
+
+@pytest.mark.parametrize('script', SCANNED_SCRIPTS)
+def test_js_no_numeric_fallback_before_tofixed(script):
+    """``(x.y || 96).toFixed(1)`` — betiklerde de yasak."""
+    raw, code = js_source(script)
+    offenders = []
+    for m in FALLBACK_TOFIXED.finditer(code):
+        snippet = code[max(0, m.start() - 90):m.end()].strip()
+        if snippet in ALLOWED:
+            continue
+        offenders.append('%s:%d  ...%s'
+                         % (script, js_line(raw, m.start()), snippet[-110:]))
+    assert not offenders, (
+        '%s: çözücü değeri vermediğinde SAYI UYDURAN gösterim var.\n  %s'
+        % (script, '\n  '.join(offenders)))
+
+
+@pytest.mark.parametrize('script', SCANNED_SCRIPTS)
+def test_js_no_numeric_fallback_in_interpolations(script):
+    """``${...}`` doğrudan innerHTML'e gider; içinde uydurma sayı olamaz."""
+    raw, code = js_source(script)
+    offenders = []
+    for m in INTERPOLATION.finditer(code):
+        expr = m.group(1)
+        if not NUM_FALLBACK.search(expr):
+            continue
+        if _is_input_collector(expr):
+            continue
+        if expr.strip() in ALLOWED:
+            continue
+        offenders.append('%s:%d  ${%s}'
+                         % (script, js_line(raw, m.start()), expr[:110]))
+    assert not offenders, (
+        '%s: ekrana yazılan ifadede sayısal yedek var:\n  %s'
+        % (script, '\n  '.join(offenders)))
+
+
+@pytest.mark.parametrize('script', DISPLAY_LAYER)
+def test_js_solver_field_fallback_beyansiz_kalmadi(script):
+    """Gösterim katmanında beyansız çözücü-alanı yedeği kalamaz."""
+    beyanli = {parca for dosya, parca, _ in JS_BEYAN if dosya == script}
+    offenders = ['%s:%d  %s' % (script, ln, metin)
+                 for ln, metin in js_solver_field_hits(script)
+                 if metin not in beyanli]
+    assert not offenders, (
+        '%s: öznesi bir çözücü alanı olan sayısal yedek BEYANSIZ.\n'
+        'Çözücü alanı vermediğinde bu sayı ekrana uydurma olarak çıkar.\n'
+        "Düzeltme: alanı denetleyip yoksa '—' / 'not computed' yazın; "
+        'gerçekten gösterim iddiası değilse JS_BEYAN defterine '
+        'GEREKÇESİYLE ekleyin ("test kırmızı oldu" gerekçe değildir).\n  %s'
+        % (script, '\n  '.join(offenders)))
+
+
+def test_js_beyan_defteri_curumemis():
+    """Defterdeki her kayıt hâlâ kodda olmalı ve gerekçe taşımalı."""
+    for dosya, parca, gerekce in JS_BEYAN:
+        assert dosya in DISPLAY_LAYER, (
+            'JS_BEYAN kaydı gösterim katmanında olmayan bir dosyayı '
+            'gösteriyor: %s' % dosya)
+        assert len(gerekce.strip()) >= 40, (
+            '%s :: %s — gerekçe yok ya da çok kısa. Beyan defteri, kuralı '
+            'gevşetme yeri değil; neden gösterim iddiası OLMADIĞI yazılır.'
+            % (dosya, parca))
+        bulunan = {metin for _, metin in js_solver_field_hits(dosya)}
+        assert parca in bulunan, (
+            'JS_BEYAN kaydı ÇÜRÜMÜŞ (kodda karşılığı yok): %s :: %s\n'
+            'Kod düzeldiyse kaydı SİLİN; defter kendiliğinden daralmaz.'
+            % (dosya, parca))
+
+
+def test_js_solver_alan_dedektoru_calisiyor():
+    """Negatif kontrol: dedektör ne yakalar, ne yakalamaz."""
+    yakalanmali = (
+        'const v = motorData.chamber_volume || 0;',
+        'attempted: (Number(kesikTarama.points_started) || 0),',
+        'const pct = Math.round(100 * (job.progress || 0));',
+        'String(analysis.total_configs ?? 0)',
+        'Math.sqrt(results.injector.n_holes || 1)',
+    )
+    for ornek in yakalanmali:
+        m = SOLVER_FIELD_FALLBACK.search(ornek)
+        assert m and _is_solver_field(m.group('ozne')), \
+            'çözücü-alanı dedektörü kör: %s' % ornek
+
+    yakalanmamali = (
+        'depth = depth || 0;',                       # yalın değişken
+        'var nDraw = drawCount(nOrif) || 5;',        # fonksiyon dönüşü
+        'var w = this.container.clientWidth || 800;',  # tarayıcı ölçüsü
+        'starCount: this._skyStarCount || 0,',       # nesnenin özel alanı
+        'var span = (f.t[j] - f.t[i]) || 1e-9;',     # sıfıra bölme koruması
+        "burn_time: parseFloat(document.getElementById('bt').value) || 2",
+    )
+    for ornek in yakalanmamali:
+        m = SOLVER_FIELD_FALLBACK.search(ornek)
+        assert not (m and _is_solver_field(m.group('ozne'))
+                    and not _is_input_collector(ornek)), \
+            'çözücü-alanı dedektörü yanlış pozitif verdi: %s' % ornek

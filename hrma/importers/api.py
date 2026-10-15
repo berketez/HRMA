@@ -17,6 +17,10 @@ Yanıt sözleşmesi upload-csv ucuyla tutarlıdır: başarıda
 ayrıştırma hatasında 400 + ``{"status": "error", "error": msg}``;
 boyut aşımında 413. Dosya adı yalnız uzantı beyaz listesi için kullanılır,
 hiçbir zaman dosya sistemi yoluna çevrilmez.
+
+Ayrıştırıcı bir hata SINIFI adı verdiğinde (``error_code``, bkz.
+``motor_file.error_result``) bu ad yanıtta aynen iletilir; böylece istemci
+ve bekçiler İngilizce hata METNİNE bağlanmadan sınıfı ayırt edebilir.
 """
 
 import base64
@@ -55,6 +59,19 @@ def _safe_filename(name):
         return ''
     base = name.replace('\\', '/').rsplit('/', 1)[-1].strip()
     return base[:200]
+
+
+def _parser_error_response(source, parsed, status=400):
+    """Ayrıştırıcı hata sözlüğünü uç yanıtına çevir (400 + kod).
+
+    ``error_code`` yalnız ayrıştırıcı verdiyse eklenir — uydurulmaz.
+    """
+    payload = {'status': 'error', 'source': source,
+               'error': parsed['error']}
+    code = parsed.get('error_code')
+    if code:
+        payload['error_code'] = code
+    return jsonify(payload), status
 
 
 def _payload_too_large(limit_bytes):
@@ -109,16 +126,14 @@ def import_motor_file():
         source = 'rasp_eng'
         motor = motor_file.parse_eng(content)
         if 'error' in motor:
-            return jsonify({'status': 'error', 'source': source,
-                            'error': motor['error']}), 400
+            return _parser_error_response(source, motor)
         motors = [motor]
         file_warnings = []
     else:
         source = 'rse'
         parsed = motor_file.parse_rse(content)
         if 'error' in parsed:
-            return jsonify({'status': 'error', 'source': source,
-                            'error': parsed['error']}), 400
+            return _parser_error_response(source, parsed)
         motors = parsed['motors']
         file_warnings = parsed['warnings']
 
@@ -202,7 +217,6 @@ def import_ork():
 
     result = ork_import.parse_ork(blob)
     if 'error' in result:
-        return jsonify({'status': 'error', 'source': 'ork',
-                        'error': result['error']}), 400
+        return _parser_error_response('ork', result)
     return jsonify({'status': 'success', 'filename': filename or None,
                     **result})

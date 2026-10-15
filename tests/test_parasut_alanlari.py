@@ -52,7 +52,10 @@ NODE = shutil.which('node')
 #: Şablon alan kimliği -> istek anahtarı (bu üçlüde ikisi aynı).
 ALANLAR = ('parachute_area', 'parachute_cd', 'parachute_deploy_delay')
 
-#: Çözücünün belgelenmiş varsayımları (trajectory_analysis.py sabitleri).
+#: Çözücünün belgelenmiş model değerleri (trajectory_analysis.py sabitleri).
+#: ÖH D22 / OH-D18-05: ALAN artık sessiz varsayılan DEĞİLDİR — verilmezse
+#: iniş fazı hiç çözülmez. Cd ve gecikme, alan verildiğinde uygulanan
+#: belgeli literatür değerleridir (Hoerner Cd_p ~ 1,4).
 VARSAYIM = {'parachute_area_m2': 2.0, 'parachute_cd': 1.4,
             'parachute_deploy_delay_s': 2.0}
 
@@ -236,16 +239,32 @@ def test_gecersiz_deger_gonderilmez(tmp_path, markup):
 # 2. Çözücü dikişi
 # ---------------------------------------------------------------------------
 
-def test_bos_birakilinca_varsayim_beyani_surer(taban_yanit):
-    """Anahtar gönderilmezse çözücü varsayımı sürdürür ve BEYAN eder."""
+def test_bos_birakilinca_inis_hukmu_geri_cekilir(taban_yanit):
+    """Anahtar gönderilmezse iniş HÜKMÜ yayımlanmaz (ÖH D22 / OH-D18-05).
+
+    ÇEVRİLEN BEKÇİ. Eski adı ``test_bos_birakilinca_varsayim_beyani_surer``
+    ve kusuru kilitliyordu: ``deployed is True``, üç varsayım sayısının
+    ``recovery`` bloğunda YAYIMLANMASI ve
+    ``warn.trajectory.parachute_area_assumed`` uyarısının varlığı ŞART
+    koşuluyordu. Yani "kullanıcı hiçbir kurtarma sistemi vermedi ama biz
+    yine de bir paraşüt uydurup iniş hızı yayımlıyoruz" davranışı bir
+    sözleşme olarak kilitliydi.
+
+    Bu dosyanın ASIL derdi (form -> istek -> çözücü kanalının canlı olması)
+    hiç zayıflamadı: ``test_dolu_deger_*`` ve ``test_inis_hizi_*`` bekçileri
+    onu ölçmeye devam ediyor. Değişen, kanalın BOŞ ucunda ne olduğudur.
+    """
     rec = taban_yanit['trajectory']['recovery']
-    assert rec['deployed'] is True
-    for anahtar, deger in VARSAYIM.items():
-        assert rec[anahtar] == pytest.approx(deger), (anahtar, rec[anahtar])
-    assert rec['assumed'] == {'area': True, 'cd': True, 'deploy_delay': True}
+    assert rec['deployed'] is False
+    assert rec['descent_model'] == 'NOT_MODELLED'
+    assert rec['reason'] == 'recovery_not_supplied'
+    assert 'parachute_area' in rec['landing_withheld_because']
+    # Uydurma sayıların HİÇBİRİ yayımlanmıyor.
+    for anahtar in VARSAYIM:
+        assert rec.get(anahtar) is None, (anahtar, rec.get(anahtar))
     kodlar = {w.get('code') for w in
               (taban_yanit['trajectory'].get('warnings') or [])}
-    assert 'warn.trajectory.parachute_area_assumed' in kodlar, kodlar
+    assert 'warn.trajectory.parachute_area_assumed' not in kodlar, kodlar
 
 
 def test_dolu_deger_kurtarma_blogunda_aynen_durur(dolu_yanit):
@@ -266,17 +285,28 @@ def test_dolu_deger_varsayim_damgasini_kaldirir(dolu_yanit):
     assert 'warn.trajectory.parachute_area_assumed' not in kodlar, kodlar
 
 
-def test_inis_hizi_gercekten_degisir(taban_yanit, dolu_yanit):
+def test_inis_hizi_gercekten_degisir(client, taban_yanit, dolu_yanit):
     """Üçlü SONUCU değiştirmeli — yoksa alan 'bağlandı' ama ölüdür.
 
-    Ölçüldü: 22,62 m/s -> 13,29 m/s (%41,2). ``landing_velocity`` bir
-    GÜVENLİK metriği olarak okunuyor; kullanıcının onu düzeltebilmesi bu
-    partinin bütün gerekçesi.
+    ÇEVRİLEN BEKÇİ. Eski hâli tabanı (paraşüt gönderilmeyen istek) bir
+    ÖLÇÜM UCU olarak kullanıyordu: 22,62 m/s -> 13,29 m/s. O 22,62 sayısı
+    uydurma alandan geliyordu (ÖH D22 / OH-D18-05), artık yayımlanmıyor.
+    Kanalın canlılığı iki DOLU uç arasında ölçülür — asıl soru zaten
+    "kullanıcının sayısı sonucu değiştiriyor mu?" idi.
     """
-    taban = taban_yanit['trajectory']['recovery']['landing_velocity_m_s']
-    dolu = dolu_yanit['trajectory']['recovery']['landing_velocity_m_s']
-    assert taban > 0 and dolu > 0
-    assert abs(dolu - taban) / taban > 0.1, (taban, dolu)
+    from tests.test_field_wiring_layer_b import HYBRID_BASE
+    assert taban_yanit['trajectory']['recovery'][
+        'landing_velocity_m_s'] is None, 'paraşütsüz iniş hızı yayımlandı'
+
+    resp = client.post('/calculate',
+                       json=dict(HYBRID_BASE, parachute_area=2.0,
+                                 parachute_cd=1.4, parachute_deploy_delay=2.0),
+                       headers=shake.HEADERS)
+    assert resp.status_code == 200
+    kucuk = resp.get_json()['trajectory']['recovery']['landing_velocity_m_s']
+    buyuk = dolu_yanit['trajectory']['recovery']['landing_velocity_m_s']
+    assert kucuk > 0 and buyuk > 0
+    assert abs(buyuk - kucuk) / kucuk > 0.1, (kucuk, buyuk)
 
 
 def test_bos_dize_tabanla_bit_ayni(client, taban_yanit):

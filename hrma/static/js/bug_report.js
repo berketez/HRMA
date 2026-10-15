@@ -28,7 +28,9 @@
  *      bile yalnız SAYISAL girdiler ve temizlenmiş konsol satırları eklenir.
  *      redact() ev dizini/kullanıcı adı, e-posta, dosya yolu ve uzun
  *      belirteç görünümlü dizileri kayıt anında siler — yani temizlenmemiş
- *      metin bellekte hiç tutulmaz.
+ *      metin bellekte hiç tutulmaz. COĞRAFİ KONUM (enlem/boylam) da
+ *      taşınmaz: isGeoField() onu dışarıda bırakır ve gövde çıkarılan alanı
+ *      ADIYLA beyan eder (ÖH D18 / P12aB5-05).
  *
  * Sürüm okuma: sayfalar sürümü aynı biçimde yayımlamıyor (index.html
  * window.HRMA_APP_VERSION, advanced.html window.HRMA_VERSION, formulas.html
@@ -278,15 +280,57 @@
     var PII_ID_RE =
         /(path|file|dir|folder|user|name|email|mail|token|key|secret|pass|project|author|note|comment|title|desc|address|phone)/i;
 
+    /* ÖH D18 / P12aB5-05 — COĞRAFİ KONUM HERKESE AÇIK KAYDA GİRMEZ.
+       Ölçüldü: /launch-site'ta `ls-lat = 28.6084`, `ls-lon = -80.6043`
+       (sayfanın gönderilen varsayılanı; kullanıcı kendi sahasını girdiğinde
+       kendi koordinatı) tanılama açıkken GitHub kaydına giriyordu.
+       `PII_ID_RE` bu kimlikleri görmüyor (desende lat/lon yok) ve değerler
+       sayısal olduğu için sayısal süzgeç de elemiyordu. Konum, sayfadaki en
+       kimliklendirici değerdir; fail-closed olarak DIŞARIDA BIRAKILIR ve
+       çıkarıldığı gövdede ADIYLA beyan edilir (sessiz düşürme yok).
+
+       Ölçüt BELİRTEÇ eşleşmesidir, alt dize değil: `ls-lat` ve `chamberLat`
+       yakalanır, `dilation` / `latch` / `relative` / `along` yakalanmaz.
+       Ölçüldü (6 ürün sayfası, 220 girdi): yanlış pozitif 0. */
+    var GEO_ID_TOKENS = {
+        lat: true, latitude: true, lon: true, lng: true, long: true,
+        longitude: true, coord: true, coords: true, coordinate: true,
+        coordinates: true, gps: true, geo: true
+    };
+
+    function _idTokens(id) {
+        return String(id)
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .split(/[^A-Za-z0-9]+/)
+            .filter(function (s) { return s !== ''; })
+            .map(function (s) { return s.toLowerCase(); });
+    }
+
+    function isGeoField(id) {
+        var t = _idTokens(id);
+        for (var i = 0; i < t.length; i++) {
+            if (GEO_ID_TOKENS[t[i]] === true) return true;
+        }
+        return false;
+    }
+
     function collectInputSummary(root) {
         var doc = root || global.document;
         if (!doc || !doc.querySelectorAll) {
             return { fields: [], basis: 'document.querySelectorAll yok',
-                     skipped_non_numeric: 0 };
+                     skipped_non_numeric: 0, eligible_total: 0,
+                     dropped_count: 0, truncated: false, withheld_geo: [] };
         }
         var nodes = doc.querySelectorAll('input');
         var fields = [];
         var skipped = 0;
+        /* ÖH D18 / P12aB5-04: sözleşmeyi geçen alan sayısı TAVANDAN bağımsız
+           sayılır. Eskiden döngü 60'ta `break` ediyordu, yani "kaç alan
+           vardı" bilgisi hiç doğmuyordu ve gövdedeki `(60)` başlığı toplam
+           gibi okunuyordu (ölçüldü: /hybrid'de 16, /solid'de 12, /liquid'de
+           1 alan beyansız düşüyordu). */
+        var eligible = 0;
+        var withheldGeo = [];
         for (var i = 0; i < nodes.length; i++) {
             var n = nodes[i];
             var id = String((n && (n.id || n.name)) || '');
@@ -301,11 +345,18 @@
             if (raw === '') { continue; }
             var num = Number(raw);
             if (!isFinite(num)) { skipped += 1; continue; }
-            fields.push({ id: id, value: num });
-            if (fields.length >= MAX_INPUT_FIELDS) break;
+            if (isGeoField(id)) { withheldGeo.push(id); continue; }
+            eligible += 1;
+            if (fields.length < MAX_INPUT_FIELDS) {
+                fields.push({ id: id, value: num });
+            }
         }
         return { fields: fields, basis: 'document.querySelectorAll("input")',
-                 skipped_non_numeric: skipped };
+                 skipped_non_numeric: skipped,
+                 eligible_total: eligible,
+                 dropped_count: eligible - fields.length,
+                 truncated: eligible > fields.length,
+                 withheld_geo: withheldGeo };
     }
 
     // -----------------------------------------------------------------------
@@ -380,8 +431,15 @@
         L.push('');
 
         var inputs = opts.inputs || collectInputSummary();
+        /* Başlıktaki sayı artık TAVAN değil, "listelenen / toplam". Toplam
+           bilinmiyorsa (dışarıdan enjekte edilmiş eski biçim) listelenen
+           sayı yazılır — uydurma yapılmaz. */
+        var inputTotal = (typeof inputs.eligible_total === 'number')
+            ? inputs.eligible_total : inputs.fields.length;
+        var inputDropped = Math.max(0, inputTotal - inputs.fields.length);
         L.push('#### ' + T('shell.bug.body.inputs', 'Numeric inputs')
-               + ' (' + inputs.fields.length + ')');
+               + ' (' + inputs.fields.length
+               + (inputDropped > 0 ? ' / ' + inputTotal : '') + ')');
         L.push('');
         if (!inputs.fields.length) {
             L.push('_' + T('shell.bug.body.inputsNone',
@@ -394,6 +452,34 @@
                 L.push('| ' + inputs.fields[i].id + ' | '
                        + inputs.fields[i].value + ' |');
             }
+        }
+        /* ÖH D18 / P12aB5-04 — KIRPMA BEYANI. Emsal aynı dosyada:
+           `_truncationNotice()` URL kırpmasını gövdeye yazıp
+           `warn.bugreport.body_truncated` kodunu döndürüyordu; alan listesi
+           kırpmasının karşılığı yoktu. Artık var — kaydı okuyan bakımcı
+           listenin tam olmadığını görüyor. */
+        if (inputDropped > 0) {
+            L.push('');
+            L.push('> ' + TF('shell.bug.body.inputsTruncated',
+                { shown: inputs.fields.length, total: inputTotal,
+                  dropped: inputDropped, limit: MAX_INPUT_FIELDS },
+                'Listed: the first {shown} of {total} numeric fields '
+                + '({dropped} not listed). The list is capped at {limit} '
+                + 'entries so the issue link stays inside the URL limit.'));
+            L.push('> `warn.bugreport.inputs_truncated`');
+        }
+        /* ÖH D18 / P12aB5-05 — GERİ TUTULAN KONUM BEYANI. Alan ADI yazılır,
+           DEĞERİ yazılmaz: bakımcı neyin eksik olduğunu bilir, koordinat
+           herkese açık kayda girmez. */
+        if (inputs.withheld_geo && inputs.withheld_geo.length) {
+            L.push('');
+            L.push('> ' + TF('shell.bug.body.inputsGeoWithheld',
+                { count: inputs.withheld_geo.length,
+                  ids: inputs.withheld_geo.join(', ') },
+                'Withheld: {count} geographic coordinate field(s) ({ids}). '
+                + 'The launch site position is not sent to a public issue — '
+                + 'describe the location in words if it matters.'));
+            L.push('> `warn.bugreport.geo_withheld`');
         }
         L.push('');
 

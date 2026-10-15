@@ -38,10 +38,20 @@ import ast
 import functools
 import pathlib
 import re
+import sys
+import textwrap
 
 import pytest
 
 from tests.bagimlilik_kapisi import kapi, kurulu_mu
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
+
+#: ÖH D26 / OH-D25-24 — node kapılı dosya ölçümünün TEK KAYNAĞI. Ölçüm bu
+#: bekçide de iş akışlarında da AYNI işlevden gelir; ikinci bir kopya
+#: olsaydı ikisi ayrışabilir ve bekçi ürünün ölçtüğünden başka bir sayıyı
+#: savunurdu.
+import node_kapisi_sayimi  # noqa: E402
 
 #: Depo kökü.
 DEPO_KOKU = pathlib.Path(__file__).resolve().parents[1]
@@ -54,11 +64,90 @@ TEST_DIZINI = DEPO_KOKU / 'tests'
 #: mesajları da bunu kullanır.
 BAGIMLILIK = 'build123d'
 
+# ---------------------------------------------------------------------------
+# CI'da kurulumu DOĞRULANMASI gereken bekçi bağımlılıkları (ÖH FAZ A / A3)
+# ---------------------------------------------------------------------------
+#: pip ile kurulan, bekçilerin dayandığı kütüphaneler.
+ZORUNLU_PAKETLER = ('cantera', 'CoolProp', 'numba', 'rocketcea')
+
+#: pip paketi OLMAYAN ama bekçilerin dayandığı CI araçları. Bunlar
+#: requirements dosyalarında ARANMAZ (orada olamazlar); yalnız iş akışında
+#: kurulumlarının doğrulanması şart koşulur.
+ZORUNLU_ARACLAR = ('node',)
+
+#: CI test işlerinde kurulumu doğrulanacak her şey.
+ZORUNLU_CI = ZORUNLU_PAKETLER + ZORUNLU_ARACLAR
+
+#: Test koşan CI işleri: (iş akışı dosyası, iş adı).
+CI_TEST_ISLERI = (('tests.yml', 'pytest'), ('release.yml', 'testler'))
+
+#: ÖDENMEMİŞ borçlar: (iş akışı, bağımlılık) -> defter gerekçesi. Bu çiftler
+#: ``xfail(strict=True)`` ile imlenir; borç ödendiğinde XPASS olur ve strict
+#: im KIRMIZI verir — yani bekçi kendi imini KALDIRTIR.
+#:
+#: ÖH D26 / OH-B2-01 — BOŞ. Tek borç ('release.yml', 'rocketcea') idi ve bu
+#: dalgada ÖDENDİ: `release.yml` `testler` işine tests.yml'deki eşinin aynısı
+#: eklendi (`rocketcea` ithali + `from rocketcea.cea_obj import CEA_Obj`).
+#: İmin kendi sözleşmesi gereği ödeme XPASS verip strict im kırmızıya döndü,
+#: bu yüzden im KALDIRILDI — borç imi kusuru değil kusurun ÖLÇÜLDÜĞÜNÜ imler;
+#: kusur gidince im de gider. Sözlük boş kalır ki yeni bir borç doğduğunda
+#: mekanizma yerinde olsun (test_borc_listesi_curumuyor onu da denetler).
+CI_DOGRULAMA_BORCLARI: dict[tuple[str, str], str] = {}
+
+
+#: Bir test dosyasını node'a KAPILI yapan deyim — TEK KAYNAK araçtadır.
+_NODE_KAPISI = node_kapisi_sayimi.NODE_KAPISI
+
+#: İş akışı YORUMLARINDAKİ "<N> test dosyası" iddiası. Satır içi arar
+#: (``[ ]*``): satır sonundan taşan yanlış eşleşme olmasın. ARTIK EŞLEŞME
+#: BEKLENMİYOR — bu kalıbın varlığı kusurdur (OH-D25-24).
+_YORUM_DOSYA_SAYISI = re.compile(r'(\d+)[ ]*test dosyası')
+
+#: İş akışının sayımı KAYNAKTAN türettiğini gösteren tek kaynak aracın adı.
+_SAYIM_ARACI = 'tools/node_kapisi_sayimi.py'
+
+
+@functools.lru_cache(maxsize=1)
+def node_kapili_test_dosyalari() -> frozenset:
+    """``node``a kapılı test dosyaları — TEK KAYNAK: sayım aracı."""
+    return node_kapisi_sayimi.node_kapili_test_dosyalari(DEPO_KOKU)
+
+
+def _kod_satirlari(komutlar: str) -> str:
+    """Kabuk/Python YORUM satırlarını atar — anmak yapmak değildir."""
+    return '\n'.join(s for s in komutlar.splitlines()
+                     if not s.lstrip().startswith('#'))
+
+
+def _ci_dogrulama_vakalari():
+    """(iş akışı, iş, bağımlılık) üçlüleri — her biri AYRI bekçi.
+
+    Tek toplu iddia KULLANILMIYOR: release.yml'nin rocketcea borcu (yukarıda)
+    tek testte toplansaydı xfail imi aynı testteki dokuz sağlam denetimi de
+    sessizleştirirdi. Kampanyanın ölçülmüş dersi — bir borç imi, yanındaki
+    sağlam iddiaları rehin alamaz.
+    """
+    for is_akisi, is_adi in CI_TEST_ISLERI:
+        for bagimlilik in ZORUNLU_CI:
+            gerekce = CI_DOGRULAMA_BORCLARI.get((is_akisi, bagimlilik))
+            imler = ([pytest.mark.xfail(strict=True, reason=gerekce)]
+                     if gerekce else [])
+            yield pytest.param(is_akisi, is_adi, bagimlilik, marks=imler,
+                               id=f'{is_akisi}-{bagimlilik}')
+
 #: ``step-export`` işinin koşturduğu ama build123d'ye KAPILI OLMAYAN dosyalar.
 #: Beyaz liste disiplini (BULGU_KAYIT_DEFTERI.md "Beyaz liste disiplini"):
 #: her girişin gerekçesi olmak zorundadır ve giriş listeden düşerse bu dosya
-#: kırılır. Şu an boş — kümedeki her dosya gerçekten kapılıdır.
-EK_DOSYALAR_GEREKCE: dict[str, str] = {}
+#: kırılır. Tek giriş: ÖH A2 sivi-sogutma denetçi Ş7 (4. tur, 29 Eyl).
+EK_DOSYALAR_GEREKCE: dict[str, str] = {
+    'tests/step_d37_sivi_a1.py': (
+        'YALNIZ bu işte koşan STEP uçtan uca bekçisi (montaj STEP metni). '
+        'Dosya bilerek test_*.py desenine uymaz: ana pytest işi (build123d '
+        'KURULU DEĞİL) onu toplamaz, bu yüzden importorskip taşımaz ve '
+        'kaynak tarayıcısı onu kapılı saymaz; ana işin ölçülmüş atlama '
+        'bütçesine +2 yazılmaz. build123d yoksa ATLAMAZ, HATA verir '
+        '(bu işin ortam teyidi zaten fail-closed).'),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -473,12 +562,67 @@ YALAN_GEREKCE_ISTISNALARI = {
 }
 
 
+#: "Kurulu mu?" sorusunu GERÇEKTEN yanıtlayan istisna tipleri.
+#:
+#: ÖH FAZ A / A2 (defter P13B1-01'in tarayıcı ayağı). Ölçülen kusur:
+#: ``except Exception`` bir KURULUM sorusu değildir — kütüphane KURULUYKEN
+#: ithal yolunun patlamasını (``OSError``: derlenmiş uzantı yok,
+#: ``RuntimeError``: başlatma hatası, ``AttributeError``: sürüm uyumsuzluğu)
+#: da yakalar ve hepsini "kurulu değil" bayrağına çevirir. P13/S1-savci
+#: §1.4a bunu iki farklı sabotajla ölçtü: ``RuntimeError`` ve ``OSError``
+#: sabotajları BİREBİR aynı sonucu verdi (1 failed, 30 passed, 31 skipped);
+#: yani gerekçe metni yalan söylerken sayı hiç kıpırdamıyordu.
+_KURULUM_ISTISNALARI = frozenset({'ImportError', 'ModuleNotFoundError'})
+
+
+def _istisna_adlari(isleyici: ast.ExceptHandler) -> list[str]:
+    """``except X:`` -> ``['X']`` · ``except (X, Y):`` -> ``['X', 'Y']``.
+
+    Çıplak ``except:`` ve çözülemeyen ifadeler ``''`` döndürür — bunlar
+    "her şeyi yutar" demektir ve kurulum sorusu SAYILMAZ.
+    """
+    tip = isleyici.type
+    if tip is None:
+        return ['']
+    parcalar = tip.elts if isinstance(tip, ast.Tuple) else [tip]
+    adlar: list[str] = []
+    for p in parcalar:
+        if isinstance(p, ast.Name):
+            adlar.append(p.id)
+        elif isinstance(p, ast.Attribute):
+            adlar.append(p.attr)
+        else:  # pragma: no cover - dinamik ifade; güvenli tarafta kal
+            adlar.append('')
+    return adlar
+
+
+def _kurulum_sorusu_mu(dugum: ast.Try) -> bool:
+    """Bu ``try/except`` bloğu bir KURULUM sorusu yanıtlıyor mu?
+
+    Şart: en az bir işleyici var ve işleyicilerin TAMAMI yalnız
+    ``ImportError``/``ModuleNotFoundError`` yakalıyor. Tek bir geniş işleyici
+    (``except Exception``, çıplak ``except:``, ``except OSError``) bloğun
+    tamamını kurulum sorusu olmaktan çıkarır: o bayrak artık "kurulu mu"
+    değil "ithal edilebildi mi" sorusunu yanıtlar ve ikisi AYNI ŞEY DEĞİLDİR.
+    """
+    if not dugum.handlers:
+        return False
+    return all(ad in _KURULUM_ISTISNALARI
+               for isleyici in dugum.handlers
+               for ad in _istisna_adlari(isleyici))
+
+
 def _import_bayraklari(modul_yolu: pathlib.Path) -> set[str]:
-    """Bir modülde ``try: import ... except ...:`` ile kurulan bayrak adları.
+    """Bir modülde ``try: import ... except ImportError:`` ile kurulan bayraklar.
 
     ``BUILD123D_AVAILABLE``, ``CANTERA_AVAILABLE``, ``_COOLPROP`` gibi
     adlar burada üretilir. Bunlar GERÇEK kurulum sorularıdır: gövdesinde
-    bir ``import`` bulunan bir ``try`` bloğunun atadığı adlardır.
+    bir ``import`` bulunan ve YALNIZ ithal istisnası yakalayan bir ``try``
+    bloğunun atadığı adlardır.
+
+    İstisna-tipi denetimi (A2) olmadan bu fonksiyon ``except Exception``
+    bayraklarını da onaylıyordu; sonuçta yalan gerekçe tarayıcısı, kusuru
+    ÖRTEN kapıyı "dürüst kurulum kapısı" sayıp geçiyordu.
     """
     try:
         agac = ast.parse(modul_yolu.read_text(encoding='utf-8'))
@@ -491,6 +635,8 @@ def _import_bayraklari(modul_yolu: pathlib.Path) -> set[str]:
         if not any(isinstance(g, (ast.Import, ast.ImportFrom))
                    for g in ast.walk(ast.Module(body=dugum.body,
                                                 type_ignores=[]))):
+            continue
+        if not _kurulum_sorusu_mu(dugum):
             continue
         for bolum in (dugum.body, *[h.body for h in dugum.handlers],
                       dugum.orelse):
@@ -665,6 +811,135 @@ class TestAtlamaGerekcesiDurust:
             f'tarayıcı dürüst kurulum kapılarını suçladı: {yanlis}')
 
 
+class TestIstisnaTipiDenetimi:
+    """A2 — ``except Exception`` bir KURULUM sorusu DEĞİLDİR (P13B1-01).
+
+    Yukarıdaki tarayıcı bir bayrağı "gerçek kurulum sorusu" saydığında o
+    bayrağa dayanan atlamayı DÜRÜST kabul eder. İstisna tipi denetlenmezse
+    ``except Exception`` ile kurulan bayrak da onaylanır ve tarayıcı tam da
+    kovaladığı kusuru (kütüphane KURULU, ithal yolu KIRIK -> yine de "kurulu
+    değil" diye atla) görmez hale gelir. Ölçüldü (ÖH FAZ A / A2, 27 Ağustos
+    2026): HEAD ağacında eski tarayıcı 1 dosya buluyordu, istisna-tipi
+    denetimiyle 3 — eklenen ikisi ``test_cea_bridge.py`` ve
+    ``test_combustion_cea_validation.py``'nin ``except Exception`` kapıları.
+
+    Bu sınıf denetimin KENDİSİNİ kilitler: sentetik kaynaklar üzerinde hem
+    yakalaması hem yakalamaMASI gereken vakalar sınanır.
+    """
+
+    @staticmethod
+    def _bayraklar(tmp_path, kaynak: str) -> set[str]:
+        yol = tmp_path / 'ornek_modul.py'
+        yol.write_text(textwrap.dedent(kaynak).lstrip(), encoding='utf-8')
+        return _import_bayraklari(yol)
+
+    # -- onaylanMAsı gereken (geniş yakalayıcı) -----------------------------
+    @pytest.mark.parametrize('yakalayici', [
+        'except Exception:',
+        'except BaseException:',
+        'except:',
+        'except OSError:',
+        'except (ImportError, OSError):',
+        'except (ImportError, Exception):',
+    ])
+    def test_genis_yakalayici_kurulum_sorusu_SAYILMAZ(self, tmp_path,
+                                                      yakalayici):
+        adlar = self._bayraklar(tmp_path, f'''
+            try:
+                import kutuphane
+                KUTUPHANE_VAR = True
+            {yakalayici}
+                KUTUPHANE_VAR = False
+        ''')
+        assert 'KUTUPHANE_VAR' not in adlar, (
+            f'`{yakalayici}` ile kurulan bayrak KURULUM sorusu sayıldı; oysa '
+            'kütüphane KURULUYKEN ithal yolu patladığında da False olur. '
+            'Bu bayrağa dayanan "kurulu değil" gerekçesi YALAN söyler '
+            '(P13B1-01; ölçüm: RuntimeError ve OSError sabotajları birebir '
+            'aynı 31 sessiz atlamayı üretti).')
+
+    # -- onaylanMAsı gereken (ithal istisnası) ------------------------------
+    @pytest.mark.parametrize('yakalayici', [
+        'except ImportError:',
+        'except ModuleNotFoundError:',
+        'except (ImportError, ModuleNotFoundError):',
+    ])
+    def test_ithal_istisnasi_kurulum_sorusu_SAYILIR(self, tmp_path,
+                                                    yakalayici):
+        adlar = self._bayraklar(tmp_path, f'''
+            try:
+                import kutuphane
+                KUTUPHANE_VAR = True
+            {yakalayici}
+                KUTUPHANE_VAR = False
+        ''')
+        assert 'KUTUPHANE_VAR' in adlar, (
+            f'`{yakalayici}` GERÇEK bir kurulum sorusudur; onaylanmazsa '
+            'dürüst kapılar yalancı biçimde suçlanır (yanlış kırmızı)')
+
+    def test_isleyicisiz_try_onaylanmaz(self, tmp_path):
+        """``try/finally`` bir soru sormaz; bayrak üretmemeli."""
+        adlar = self._bayraklar(tmp_path, '''
+            try:
+                import kutuphane
+                KUTUPHANE_VAR = True
+            finally:
+                pass
+        ''')
+        assert 'KUTUPHANE_VAR' not in adlar
+
+    def test_uctan_uca_yalan_gerekce_yakalaniyor(self, tmp_path, monkeypatch):
+        """Zincirin tamamı: sentetik dosya -> tarayıcı -> bulgu.
+
+        Yardımcıyı tek başına sınamak yetmez; ``_onayli_kapi_adlari`` ya da
+        ``_yalan_gerekceli_kapilar_ham`` bir gün onayı başka yoldan verirse
+        birim testi yeşil kalırken kapı yine açılır.
+        """
+        sahte_tests = tmp_path / 'tests'
+        sahte_tests.mkdir()
+        (sahte_tests / 'test_sahte_kapi.py').write_text(textwrap.dedent('''
+            import pytest
+
+            try:
+                from rocketcea.cea_obj import CEA_Obj
+                ROCKETCEA_AVAILABLE = True
+            except Exception:
+                ROCKETCEA_AVAILABLE = False
+
+            needs_cea = pytest.mark.skipif(
+                not ROCKETCEA_AVAILABLE,
+                reason="RocketCEA kurulu değil; testler atlanıyor.")
+        ''').lstrip(), encoding='utf-8')
+        # Dürüst karşı örnek: aynı dosya yapısı, ithal istisnasıyla.
+        (sahte_tests / 'test_durust_kapi.py').write_text(textwrap.dedent('''
+            import pytest
+
+            try:
+                import cantera
+                CANTERA_VAR = True
+            except ImportError:
+                CANTERA_VAR = False
+
+            needs_ct = pytest.mark.skipif(
+                not CANTERA_VAR, reason="cantera kurulu değil; atlanıyor.")
+        ''').lstrip(), encoding='utf-8')
+
+        monkeypatch.setattr(f'{__name__}.DEPO_KOKU', tmp_path)
+        monkeypatch.setattr(f'{__name__}.TEST_DIZINI', sahte_tests)
+        _yalan_gerekceli_kapilar_ham.cache_clear()
+        try:
+            bulgular = yalan_gerekceli_kapilar()
+        finally:
+            _yalan_gerekceli_kapilar_ham.cache_clear()
+
+        assert 'tests/test_sahte_kapi.py' in bulgular, (
+            'tarayıcı `except Exception` ile kurulmuş yalan gerekçeyi '
+            'GÖRMÜYOR — A2 istisna-tipi denetimi çürümüş olabilir')
+        assert 'tests/test_durust_kapi.py' not in bulgular, (
+            'tarayıcı `except ImportError` ile kurulmuş DÜRÜST kapıyı '
+            'suçladı (yanlış kırmızı)')
+
+
 class TestBekciBagimliliklariBildirilmis:
     """Bekçinin dayandığı kütüphane bir yerde BEYAN EDİLMİŞ olmalı.
 
@@ -674,8 +949,13 @@ class TestBekciBagimliliklariBildirilmis:
     olarak bu durumdaydı (parti 31 / T2-4).
     """
 
-    #: Ana `pytest` işinde kurulu OLMASI gereken bekçi bağımlılıkları.
-    ZORUNLU = ('cantera', 'CoolProp', 'numba')
+    #: Ana `pytest` işinde kurulu OLMASI gereken bekçi bağımlılıkları (pip).
+    #:
+    #: ``rocketcea`` ÖH FAZ A / A3 ile eklendi (defter P13B1-01): kaynaktan
+    #: derlenen (gfortran'a bağlı) bu paket sessizce kırılmaya en açık
+    #: bağımlılıktı ve kırıldığında 31 bekçi "kurulu değil" YALANIYLA
+    #: atlanıyordu.
+    ZORUNLU = ZORUNLU_PAKETLER
 
     def test_requirements_dosyalarinda_bildirilmis(self):
         metin = '\n'.join(
@@ -693,16 +973,152 @@ class TestBekciBagimliliklariBildirilmis:
             'koşmaz ve atlama sessiz kalır (Faz 5 / H5-4 dersi, parti 31 / '
             'T2-4 tekrarı)')
 
-    def test_ci_kurulumu_dogruluyor(self):
-        """Kurulum düşerse iş KIRILSIN — testler sessizce atlanmasın."""
-        for is_akisi, is_adi in (('tests.yml', 'pytest'),
-                                 ('release.yml', 'testler')):
-            komutlar = _is_komutlari(is_akisi, is_adi)
-            eksik = [k for k in self.ZORUNLU if k not in komutlar]
-            assert not eksik, (
-                f'{is_akisi} / {is_adi}: {eksik} kurulumu DOĞRULANMIYOR; '
-                'kurulum düşerse iş yeşil kalır ve bekçiler sessizce atlanır '
-                '(node ve PyYAML için aynı adım zaten var)')
+    @pytest.mark.parametrize('is_akisi,is_adi,bagimlilik',
+                             list(_ci_dogrulama_vakalari()))
+    def test_ci_kurulumu_dogruluyor(self, is_akisi, is_adi, bagimlilik):
+        """Kurulum düşerse iş KIRILSIN — testler sessizce atlanmasın.
+
+        Yorum satırları SAYILMAZ: bir kütüphaneyi ANMAK doğrulamak değildir
+        (aynı kural yukarıda requirements taramasında da uygulanıyor).
+        Ölçüldü (A3 mutasyonu, 27 Ağustos 2026): doğrulama adımından
+        ``rocketcea`` çıkarıldığında, adımın YORUMUNDA geçen 'rocketcea'
+        sözcüğü yüzünden bekçi yeşil kalıyordu — yani bekçi kurulumu değil
+        metni sınıyordu.
+        """
+        komutlar = _kod_satirlari(_is_komutlari(is_akisi, is_adi))
+        assert bagimlilik in komutlar, (
+            f'{is_akisi} / {is_adi}: `{bagimlilik}` kurulumu DOĞRULANMIYOR; '
+            'kurulum düşerse iş yeşil kalır ve bekçiler sessizce atlanır '
+            '(PyYAML için aynı adım zaten var)')
+
+    def test_zorunlu_kumeler_kesismiyor(self):
+        """Bir ad hem pip paketi hem CI aracı olamaz (liste çürümesi kapısı)."""
+        assert not set(ZORUNLU_PAKETLER) & set(ZORUNLU_ARACLAR)
+        assert set(ZORUNLU_CI) == set(ZORUNLU_PAKETLER) | set(ZORUNLU_ARACLAR)
+
+    def test_borc_listesi_curumuyor(self):
+        """Beyan edilen borcun adresi GERÇEK olmalı (uydurma borç yasak)."""
+        gecerli = {(w, d) for w, _ in CI_TEST_ISLERI for d in ZORUNLU_CI}
+        hayalet = sorted(set(CI_DOGRULAMA_BORCLARI) - gecerli)
+        assert not hayalet, (
+            f'CI_DOGRULAMA_BORCLARI hayalet adres taşıyor: {hayalet} — '
+            'listedeki çift artık üretilmiyor, im hiçbir şeyi imlemiyor')
+        gerekcesiz = [c for c, g in CI_DOGRULAMA_BORCLARI.items()
+                      if not (g or '').strip()]
+        assert not gerekcesiz, f'gerekçesiz borç imi: {gerekcesiz}'
+
+
+class TestNodeKapisiKilitli:
+    """P13B1-04 — node kapısını YORUM değil BEKÇİ kilitlesin.
+
+    ÖH D26 / OH-D25-24: başlıkta da artık SAYI yok. Sınıfın iddiaları
+    "yorumdaki sayı doğru mu" değil "sayı elle tutulmuyor ve her koşuda
+    kaynaktan üretiliyor mu" biçimindedir.
+
+    Ölçülen (P13/B1 + H1, bu partide yeniden ölçüldü): ``shutil.which('node')``
+    ile kapılı **67** test dosyası var; iki iş akışı da node'u kuruyor ve
+    doğruluyor, ama ``grep -rln "setup-node" tests/`` **0** sonuç veriyordu —
+    yani deponun en pahalı ölçülmüş dersi (2026-08-03: node kurulu değildi,
+    67 dosyanın bekçileri CI'da bir kez bile koşmamıştı) mekanik korumasız
+    bırakılmıştı. Kural yorumla tutuluyordu; yorum çürür, bekçi çürümez —
+    nitekim yorumun kendisi de çürümüştü ("30 test dosyası").
+    """
+
+    def test_tarayici_node_kapili_dosyalari_goruyor(self):
+        """Kapının kapısı: ölçüm boş dönerse aşağıdaki iddialar BOŞ geçer."""
+        dosyalar = node_kapili_test_dosyalari()
+        assert len(dosyalar) >= node_kapisi_sayimi.TABAN, (
+            f'node kapılı test dosyası ölçümü {len(dosyalar)} döndü; taban '
+            f'{node_kapisi_sayimi.TABAN} (P13 ölçümü 67 idi). Bu kadar büyük '
+            'bir düşüş ya gerçek bir kaldırma ya da ölçümün (regex) '
+            'bozulmasıdır — ikisi de sessiz kalamaz.')
+
+    @pytest.mark.parametrize('is_akisi', [w for w, _ in CI_TEST_ISLERI])
+    def test_is_akisi_node_kuruyor(self, is_akisi):
+        """`setup-node` adımı düşerse 67 dosyanın bekçisi SESSİZCE atlanır."""
+        metin = (ISAKISI_DIZINI / is_akisi).read_text(encoding='utf-8')
+        assert 'actions/setup-node' in metin, (
+            f'{is_akisi} içinde `actions/setup-node` adımı YOK. '
+            f'{len(node_kapili_test_dosyalari())} test dosyası node\'a '
+            'kapılıdır ve node yoksa hepsi KIRMIZI VERMEDEN atlanır — '
+            '2026-08-03 vakasının birebir tekrarı (defter P13B1-04).')
+
+    @pytest.mark.parametrize('is_akisi', [w for w, _ in CI_TEST_ISLERI])
+    def test_is_akisi_node_kurulumunu_dogruluyor(self, is_akisi):
+        """Kurulum adımı VAR ama işe yaramazsa da sessizlik doğar."""
+        metin = (ISAKISI_DIZINI / is_akisi).read_text(encoding='utf-8')
+        assert _NODE_KAPISI.search(metin), (
+            f'{is_akisi} node kurulumunu DOĞRULAMIYOR '
+            "(`shutil.which('node')` denetimi yok): setup-node bir gün "
+            'sessizce başarısız olursa iş yeşil kalır.')
+
+    @pytest.mark.parametrize('is_akisi', [w for w, _ in CI_TEST_ISLERI])
+    def test_yorumda_ELLE_yazilmis_dosya_sayisi_YOK(self, is_akisi):
+        """ÖH D26 / OH-D25-24 — sayı YORUMDA tutulamaz.
+
+        Bu bekçinin eski hâli "yorumdaki sayı ölçülene EŞİT olmalı" diyordu
+        ve doğru bir iddiaydı; ama onarımı her seferinde ELLE yapılıyordu ve
+        elle yapılan onarım bir sonraki birleşmede yeniden çürüyordu:
+
+            88 (D21) -> 92 (fix-20) -> 94 (fix-23) -> 97 (D26 tabanı)
+
+        Dördüncü çürümede kusurun sayının yanlışlığı DEĞİL sayının elle
+        tutulması olduğu hükme bağlandı: bir dosyayı ``node`` kapısına alan
+        kulvar, ilgisiz bir iş akışı yorumunu aynı commit'te güncellemek
+        zorunda kalıyordu. Artık iş akışlarında güncellenecek sayı YOKTUR;
+        sayıyı ``tools/node_kapisi_sayimi.py`` üretir ve iş akışı onu KOŞAR
+        (aşağıdaki bekçi). Bir sayı geri yazılırsa bu iddia KIRMIZI verir.
+        """
+        metin = (ISAKISI_DIZINI / is_akisi).read_text(encoding='utf-8')
+        iddialar = sorted({int(s) for s in _YORUM_DOSYA_SAYISI.findall(metin)})
+        assert not iddialar, (
+            f'{is_akisi} yorumunda ELLE yazılmış dosya sayısı var: {iddialar}. '
+            f'Bu sayı üç dalgada üst üste çürüdü; tek kaynak {_SAYIM_ARACI} '
+            'ölçümüdür. Sayıyı güncellemeyin — yorumdan KALDIRIN, iş akışı '
+            'zaten sayım adımını koşuyor.')
+
+    @pytest.mark.parametrize('is_akisi', [w for w, _ in CI_TEST_ISLERI])
+    def test_is_akisi_sayimi_KAYNAKTAN_turetiyor(self, is_akisi):
+        """Sayıyı kaldırmak yetmez — iş akışı onu ÜRETMELİ.
+
+        Yalnız "yorumda sayı olmasın" deseydik, sayıyı silmek bekçiyi
+        susturmanın en kolay yolu olurdu ve ölçüm CI'dan tamamen düşerdi.
+        Bu yüzden iki iddia birlikte durur: sayı elle YAZILMAZ ama her koşuda
+        kaynaktan TÜRETİLİR (ve taban altına düşerse iş kırılır).
+        """
+        metin = (ISAKISI_DIZINI / is_akisi).read_text(encoding='utf-8')
+        komutlar = _kod_satirlari(metin)
+        assert _SAYIM_ARACI in komutlar, (
+            f'{is_akisi} `{_SAYIM_ARACI}` sayım adımını KOŞMUYOR (yorumda '
+            'anmak koşmak değildir). Sayı yorumdan kaldırıldığına göre '
+            'ölçümün CI\'da gerçekten üretildiği tek kanıt bu adımdır.')
+
+    def test_sayim_araci_ile_bekci_AYNI_kumeyi_olcuyor(self):
+        """Tek kaynak gerçekten tek mi? Araç ile bekçi ayrışamaz.
+
+        Ayrışırlarsa iş akışı bir sayıyı, bekçi başka bir sayıyı savunur ve
+        ikisi de kendince yeşil kalır — bu dosyanın kovaladığı kusur sınıfının
+        ta kendisi.
+        """
+        assert (node_kapili_test_dosyalari()
+                == node_kapisi_sayimi.node_kapili_test_dosyalari(DEPO_KOKU))
+        assert node_kapisi_sayimi.TABAN >= 50, (
+            'taban 50\'nin altına çekilmiş — ölçüm çökse bile sessiz kalır')
+
+    def test_sayim_araci_taban_altinda_KIRMIZI_veriyor(self, tmp_path):
+        """Aracın fail-closed davranışı ölçülür (beyan değil, koşum).
+
+        Sentetik bir ağaçta node kapılı dosya YOKTUR: araç sıfır sayıp
+        tabanın altında kaldığı için sıfırdan farklı çıkış kodu vermeli.
+        Vermezse 2026-08-03 vakası (kapı sökülü, iş yeşil) geri döner.
+        """
+        (tmp_path / 'tests').mkdir()
+        (tmp_path / 'tests' / 'test_ornek.py').write_text(
+            'def test_bir():\n    assert True\n', encoding='utf-8')
+        assert node_kapisi_sayimi.main(['--kok', str(tmp_path)]) == 1
+        assert node_kapisi_sayimi.main([]) == 0, (
+            'gerçek depoda sayım tabanın altında — ön yüz kapısı sökülmüş '
+            'olabilir')
 
 
 class TestBagimlilikKapisiDavranisi:

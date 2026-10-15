@@ -297,11 +297,31 @@ class TestInjectorSingleSourceReachesTheSolid:
             panel['pressure_drop']), (
             f"ΔP {spec['pressure_drop_bar']} bar panelin "
             f"{panel['pressure_drop']} bar değeri değil")
-        # Diğer çözücünün ΔP'si gerçekten farklı olmalı ki bekçi anlamlı olsun
+        # --- ÖH D35 / OH-ON-01 · BEKÇİ ÇEVRİLDİ (gerekçeli) --------------
+        # Bu satır, iki çözücünün ΔP'sinin FARKLI olmasını ŞART koşuyordu
+        # ("bekçi kör kalır"). O şart, ayrışmanın kalıcı bir olgu olduğu
+        # varsayımına dayanıyordu ve kusuru koruyordu: aynı yanıtta iki
+        # enjektör planı bulunması kusurun TA KENDİSİYDİ (ölçüldü,
+        # docs/scofield/raw/OH/D35/onemli-hibrit-fizik/a1/once.json:
+        # devre 3 × Ø2,1115 mm / ΔP 30,5434 bar ⟷ panel 32 × Ø0,9055 mm /
+        # ΔP 4 bar; plaka emniyet hükmü ve chug kapısı yanlış planı
+        # derecelendiriyordu).
+        #
+        # Bekçinin ASIL iddiası korunuyor: melez yasağı (delik sayısı bir
+        # kaynaktan, ΔP başka kaynaktan alınamaz). Değişen yalnız
+        # uzlaşmanın YÖNÜ: iki blok artık AYNI planı anlatmak zorunda.
         if other.get('injection_pressure_drop_bar'):
-            assert not math.isclose(
+            assert math.isclose(
                 other['injection_pressure_drop_bar'], panel['pressure_drop'],
-                rel_tol=1e-3), 'iki çözücü aynı ΔP veriyor; bekçi kör kalır'
+                rel_tol=1e-6), (
+                'aynı yanıtta iki farklı ΔP var — OH-ON-01 geri gelmiş '
+                f"olabilir: devre {other['injection_pressure_drop_bar']} bar "
+                f"⟷ panel {panel['pressure_drop']} bar")
+            assert int(round(panel['n_holes'])) == int(
+                other['number_of_orifices']), (
+                'aynı yanıtta iki farklı delik sayısı var: '
+                f"panel {panel['n_holes']} ⟷ devre "
+                f"{other['number_of_orifices']}")
 
     def test_solid_drills_the_same_holes_as_the_drawing(self, run):
         """3B katının GERÇEKTEN açtığı delikler çizimdekiyle aynı olmalı.
@@ -325,40 +345,60 @@ class TestInjectorSingleSourceReachesTheSolid:
             spec['orifice_diameter_mm'])
 
         plate = dict(cad['assembly_meshes'])['Injector']
-        radius = motor['chamber_diameter'] / 2.0
-        thickness = 0.03  # _create_injector_head ile aynı
+        # ÖH D15 (defter P9B1-13) — BEKÇİ ÇEVRİLDİ. Eski hâli plakayı
+        # ``radius = D/2`` ve ``thickness = 0.03`` SABİTLERİYLE yeniden kuruyor,
+        # yani 30 mm'lik uydurma plakayı sözleşme hâline getiriyordu; onarım
+        # (plaka artık ``_injector_plate_design`` tek kaynağından gelir) bu
+        # testi kırardı. İddia korunuyor — delinen hacim çizimdeki desenle
+        # aynı olmalı — ama referans silindir ARTIK ÇİZİLEN plakadan okunur.
+        from hrma.export.cad_visualization import _injector_plate_design
+        plate_design = _injector_plate_design(motor, motor['chamber_diameter'])
+        radius = plate_design['radius_m']
+        thickness = plate_design['thickness_m']
+        assert radius and thickness, 'plaka tek kaynağı ölçü üretmeli'
         # AYNI fasetlemeye sahip delinmemiş referans (fasetleme hatası düşer)
         undrilled = trimesh.creation.cylinder(radius=radius, height=thickness)
         removed = undrilled.volume - plate.volume
 
         drilled = min(spec['n_orifices'], MESH_MAX_INJECTOR_ORIFICES)
         r_hole = spec['orifice_diameter_mm'] / 2000.0
-        expected = drilled * math.pi * r_hole ** 2 * (thickness + 0.001)
+        # ÖH D15 a1 devralma denetimi (ana model): sökülen hacim plaka
+        # kalınlığıyla SINIRLIDIR — delme silindiri +1 mm taşsa da plakadan
+        # yalnız t kadar malzeme çıkar. 30 mm plakada %3 olan fazlalık 3 mm
+        # plakada %33 olup testi yanlış kırmızıya düşürüyordu (34,3 ⟷ 46,1 mm³).
+        expected = drilled * math.pi * r_hole ** 2 * thickness
         assert removed == pytest.approx(expected, rel=0.05), (
             f'mesh {removed * 1e9:.1f} mm3 malzeme sökmüş; çizimdeki desen '
             f'({drilled} x d{spec["orifice_diameter_mm"]:.3f} mm) '
             f'{expected * 1e9:.1f} mm3 sökerdi — katı ile çizim farklı '
             f'enjektör anlatıyor')
 
-    def test_no_injector_data_means_no_holes_are_invented(self):
-        """İki kaynak da yoksa delik açılmaz — 8 delikli varsayılan uydurulmaz."""
-        import trimesh
+    def test_no_injector_data_means_no_plate_is_invented(self):
+        """Enjektör verisi yoksa DELİK DEĞİL, PLAKANIN KENDİSİ uydurulmaz.
 
+        ÖH D15 (defter P9B1-12 / P9B1-13) — BEKÇİ ÇEVRİLDİ (adı dâhil). Eski
+        hâli ``dict(cad['assembly_meshes'])['Injector']`` ile plakanın VARLIĞINI
+        ve 30 mm'lik kalınlığını sözleşme yapıyordu: enjektör yayımlamayan bir
+        koşuda bile montajda Ø100 x 30 mm çelik bir plaka olmasını şart
+        koşuyordu. Ölçüldü (31 Ağustos 2026, katı motor fikstürü): bu plaka
+        bildirilen kuru kütlenin %10,96'sıydı ve aynı koşuda çizimin HER alanı
+        "NOT AVAILABLE" diyordu. İddia güçlendirildi: parça hiç üretilmez.
+        """
         bare = {'chamber_diameter': 0.1, 'chamber_length': 0.4,
                 'throat_diameter': 0.02, 'exit_diameter': 0.05,
                 'mdot_ox': 1.0, 'oxidizer_density': 1200}
         designer = MotorCADDesigner()
         cad = _silent(designer.generate_3d_motor_assembly, bare)
         assert cad.get('technical_drawings'), 'CAD üretimi çökmemeli'
-        assert cad['technical_drawings']['injector']['orifice_count'] == \
-            NOT_AVAILABLE_SPEC
+        drawing = cad['technical_drawings']['injector']
+        assert drawing['orifice_count'] == NOT_AVAILABLE_SPEC
+        assert drawing['plate_thickness'] == NOT_AVAILABLE_SPEC
 
-        # Plakadan HİÇ malzeme sökülmemiş olmalı (delinmemiş referansla birebir)
-        plate = dict(cad['assembly_meshes'])['Injector']
-        undrilled = trimesh.creation.cylinder(radius=0.1 / 2, height=0.03)
-        assert plate.volume == pytest.approx(undrilled.volume, rel=1e-9), (
-            f'veri yokken plakadan {(undrilled.volume - plate.volume) * 1e9:.1f}'
-            ' mm3 sökülmüş — uydurma delik deseni açılmış')
+        assert 'Injector' not in dict(cad['assembly_meshes']), (
+            'enjektör yayımlamayan koşuda montaja plaka konmuş')
+        assert cad['performance_summary']['mass_breakdown'][
+            'injector_mass'] == 0.0
+        assert drawing['not_drawn_reason'], 'gerekçe adlandırılmalı'
 
 
 # ---------------------------------------------------------------------------
@@ -439,8 +479,10 @@ class TestMassBreakdownIsGeometryTimesDensity:
 
         motor = run['motor']
         breakdown = cad['performance_summary']['mass_breakdown']
+        # ÖH D29 (P15B4-12): cidar kalınlığı geometry_summary'de.
+        geo = cad['performance_summary']['geometry_summary']
         inner_r = motor['chamber_diameter'] / 2.0
-        outer_r = inner_r + breakdown['wall_thickness_mm'] / 1000.0
+        outer_r = inner_r + geo['wall_thickness_mm'] / 1000.0
         volume = math.pi * motor['chamber_length'] * (outer_r ** 2 - inner_r ** 2)
         density = get_material(
             motor['structural_analysis']['design_parameters']['material']

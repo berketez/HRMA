@@ -3,9 +3,56 @@ Gerçek Zamanlı Validasyon ve Uyarı Sistemi
 Rocket motor tasarım parametrelerinin doğruluğunu kontrol eder
 """
 
+import math
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional, Tuple
 import warnings
+
+# ÖH D29 / P15B2-01: deger katmani kapilarinin TEK KAYNAGI.
+from hrma.utils.input_guard import finite_positive
+
+# ---------------------------------------------------------------------------
+# Chug ΔP/Pc eşiği: TEK SAYISAL TANIM hrma/analysis/acoustic_modes.py'dedir.
+#
+# ÖH Z5S / P10-A (P10B2-14) — ÖLÇÜLDÜ: bu dosya eşiğin BEŞİNCİ bağımsız
+# kopyasını taşıyordu (``'pressure_drop_ratio': (0.10, 0.35)``) ve alt sınırı
+# tek kaynağın 0,15'iyle ÇELİŞİYORDU. Sonuç, iki ayrı doğruluk tanımıydı:
+# enjektör modülü 0,15-0,20'ye göre boyutlandırıyor, doğrulayıcı 0,10'a göre
+# hüküm veriyordu. Alt sınır artık ithal edilir; YENİ EŞİK İCAT EDİLMEZ.
+#
+# Üst sınır (0,35) chug ölçütü DEĞİLDİR: chug alt sınırı kararlılık
+# gerekçesiyle, üst sınır besleme basıncı/pompa işi (kütle bütçesi)
+# gerekçesiyle konur. acoustic_modes böyle bir tavan tanımlamaz, o yüzden
+# buradaki sayı KORUNUR ve gerekçesi adıyla beyan edilir — bir tavan
+# uydurmak da, chug alt sınırını tavan yerine kullanmak da yanlış olurdu.
+# ---------------------------------------------------------------------------
+from hrma.analysis.acoustic_modes import (
+    CHUG_DP_RATIO_MINIMUM,
+    CHUG_DP_RATIO_RECOMMENDED,
+)
+
+#: ΔP/Pc üst sınırı — kararlılık değil, besleme sistemi maliyeti ölçütü.
+#: (Sutton & Biblarz 9. baskı Böl. 8.5 / NASA SP-8089: tipik enjektör ΔP
+#: bandının üst ucu; bunun ötesinde tank/pompa işi artar, kararlılık kazancı
+#: yoktur.) Chug eşiğiyle AYNI ŞEY DEĞİLDİR, bu yüzden ayrı adı vardır.
+INJECTOR_DP_PC_CEILING = 0.35
+
+#: ``comprehensive_validation`` raporunda ölçülemeyen eksenin künyesi.
+DP_RATIO_AXIS = 'pressure_drop_ratio'
+
+
+def _finite_positive(value) -> Optional[float]:
+    """Sonlu ve pozitif bir sayıysa float, değilse ``None``.
+
+    ``bool`` sayı SAYILMAZ (``True`` 1,0'a çökerdi). "Verilmedi" ile "0"
+    ayrımı korunur: ikisi de ``None`` döner çünkü sıfır kamara basıncına
+    bölme zaten hüküm üretemez.
+
+    ÖH D29 / app-api-dogrulama a1 · defter P15B2-01 — MERKEZE BAĞLANDI:
+    kural ``hrma.utils.input_guard.finite_positive``tadır. Yerel kopya
+    ``numpy.bool_``u eleyemiyordu (merkez eler).
+    """
+    return finite_positive(value)
 
 
 def _w(code: str, severity: str = "warning", **params) -> Dict:
@@ -31,9 +78,33 @@ class ValidationSystem:
                 'lox_htpb': (220, 280),
             },
             'chamber_pressure': (5, 100),   # bar
+            # ÖH D33-3 · OH-D33-11 (Berke kararı, 16 Eylül 2026) — BANT
+            # DÜZELTİLDİ, GEVŞETİLMEDİ. ÖLÇÜLDÜ (kılavuz ekran turu,
+            # docs/scofield/raw/OH/KILAVUZ/ekran/kayit.json): sayfanın
+            # varsayılan O/F'si 7,5 (advanced.html:1728; kaynağı
+            # ``optimum_of_ratio`` referans tablosu, aynı sayı) eski üst uç
+            # 6,0'ın DIŞINDA kalıyordu, yani programı açıp hiçbir şeyi
+            # değiştirmeden hesap yapan HER kullanıcı "kullanılabilir
+            # aralığın dışında" uyarısı alıyordu. Karşı ölçüm: O/F 2,5'te bu
+            # uyarı susuyor ama c* 1331 m/s ⟷ (1350, 1650) bandı deliniyor;
+            # eski bantla İKİ bandı birden sağlayan O/F YOKTU.
+            #
+            # LİTERATÜR (kanıt: docs/scofield/raw/OH/D33-3/
+            # OH-D33-11_kanit_taslagi.md): N2O'nun özgül impulsu O/F 7-8'de
+            # TEPE yapar ve yaklaşık 4-12 bandında yüksek/düz kalır — itkinin
+            # ~2/3'ü N2O'nun ekzotermik ayrışmasından, ~1/3'ü yakıttaki
+            # oksijenle yanmadan gelir; bu yüzden depolanabilir oksitleyiciler
+            # (N2O, H2O2) YÜKSEK O/F'de optimize olur (LOX ~2).
+            #
+            # YÖN: bu bir tolerans büyütmesi DEĞİLDİR. Üst uç 6,0 → 12,0
+            # optimumu banda alır; ALT uç 0,5 → 4,0 ise bandı DARALTIR ve
+            # O/F 2,5 gibi aşırı yakıt-zengin tasarımlar ARTIK uyarı alır
+            # (eskiden sessizdi). Sayı teste gömülmez; tek kaynak burasıdır.
             'of_ratio': {
-                'n2o_htpb': (0.5, 6.0),
-                'n2o_paraffin': (1.0, 8.0),
+                'n2o_htpb': (4.0, 12.0),
+                # n2o_paraffin: tablo optimumu 8,0 tam ÜST KENARDA duruyordu;
+                # aynı literatür ailesi (depolanabilir oksitleyici platosu).
+                'n2o_paraffin': (4.0, 12.0),
             },
             'c_star': {
                 'n2o_htpb': (1350, 1650),  # m/s
@@ -46,13 +117,55 @@ class ValidationSystem:
         
         self.injector_limits = {
             'reynolds_number': (1000, 200000),
-            'pressure_drop_ratio': (0.10, 0.35),  # ΔP/Pc
+            # ΔP/Pc — alt sınır acoustic_modes'un TEK tanımından ithal;
+            # üst sınır ayrı gerekçeli (yukarıdaki modül başlığına bakınız).
+            'pressure_drop_ratio': (CHUG_DP_RATIO_MINIMUM,
+                                    INJECTOR_DP_PC_CEILING),
             'exit_velocity': (10, 100),           # m/s
-            'hole_diameter': (0.2, 5.0),          # mm
+            # ÖH D37 A2 hibrit · YB-03 (F-10 temizliği): ölü 'hole_diameter' (0,2/5,0) bandı KALDIRILDI — hiçbir yerde okunmuyordu, künyesi yoktu; delik çapı bandının tek kaynağı hrma.constants.ORIFICE_D_BAND_MM.
+        }
+        #: Bandın nereden geldiği — rapor bunu künye olarak taşır ki
+        #: kullanıcı "bu 0,15 kimin sayısı" sorusunu cevaplayabilsin.
+        self.injector_limit_sources = {
+            'pressure_drop_ratio': (
+                f'lower bound = hrma.analysis.acoustic_modes.'
+                f'CHUG_DP_RATIO_MINIMUM ({CHUG_DP_RATIO_MINIMUM:.2f}, chug '
+                f'stability, NASA SP-8089; recommended '
+                f'{CHUG_DP_RATIO_RECOMMENDED:.2f}); upper bound = '
+                f'INJECTOR_DP_PC_CEILING ({INJECTOR_DP_PC_CEILING:.2f}, feed '
+                f'system cost, not a stability criterion)'),
         }
         
         self.geometry_limits = {
-            'expansion_ratio': (4, 250),
+            # ÖH D35 / OH-ON-02 — SABİT (4, 250) BANDI KALDIRILDI.
+            #
+            # ÖLÇÜLDÜ (``docs/scofield/raw/OH/D35/onemli-hibrit-fizik/a1/
+            # once.json``): ürünün KENDİ tam adapte lülesi kendi bandının
+            # dışında sayılıyordu.
+            #   Pc = 20 bar, Pa = 1,013 bar, γ = 1,1457 -> ε = 3,9041,
+            #       çıkış basıncı = ortam (TAM ADAPTE) ama uyarı YANDI.
+            #   Pc =  5 bar (deniz seviyesi)            -> ε = 1,5310,
+            #       yine tam adapte, yine uyarı YANDI.
+            #   Pc = 20 bar, ε = 50 (AĞIR AŞIRI GENLEŞME, ayrılma var)
+            #                                            -> uyarı YANMADI.
+            # Yani bant, doğru lüleleri suçlayıp yanlış lüleyi geçiriyordu:
+            # deniz seviyesinde ε ≥ 4 için Pc ≳ 21-22 bar gerekir, dolayısıyla
+            # 20 bar ve altındaki HER deniz seviyesi motoru (kılavuzun demo
+            # motoru dâhil) yanlış uyarı alıyordu. OH-D33-11'in (O/F bandı)
+            # birebir kardeşi.
+            #
+            # YENİ BANT İCAT EDİLMEDİ: ε'nin makul olup olmadığı ORTAM
+            # BASINCINA göre belirlenir ve hüküm koşumun KENDİ Summerfield
+            # ekranından (``motor.nozzle_expansion_screen``) okunur — o ekran
+            # ε_ayrılma'yı izentropik alan-Mach bağıntısıyla (Sutton &
+            # Biblarz 9. baskı Eş. 3-25/3-26) çözer ve k = 0,40 sabitini
+            # ``hrma/flow/separation.py``den alır. Burada İKİNCİ bir ölçüt
+            # yazılmaz (tek kaynak).
+            #
+            # Geriye kalan tek SAYI, literatür bandı değil GEOMETRİ tabanıdır:
+            # yakınsak-ıraksak bir lülede ses-üstü çıkış için A_e/A_t > 1
+            # olmak zorundadır (aynı izentropik bağıntı M = 1'de ε = 1 verir).
+            'expansion_ratio_supersonic_floor': 1.0,
             'port_diameter_initial': (5, 100),    # mm
             'port_diameter_final': (10, 200),     # mm
             'chamber_length': (50, 2000),         # mm
@@ -98,10 +211,39 @@ class ValidationSystem:
 
         return warnings_list
     
-    def validate_injector_data(self, data: Dict) -> List[str]:
-        """İnjektör verilerini doğrula"""
+    def validate_injector_data(self, data: Dict,
+                               chamber_pressure: Optional[float] = None,
+                               assessment: Optional[Dict] = None) -> List[str]:
+        """İnjektör verilerini doğrula.
+
+        ``chamber_pressure`` [bar] ΔP/Pc ölçütünün paydasıdır ve ÇAĞIRANDAN
+        gelir; enjektör sözlüğünde de bulunabilir. ``assessment`` verilirse
+        eksen künyeleri oraya yazılır (hüküm verildi mi, hangi bantla,
+        paydanın kaynağı ne).
+
+        ÖH Z5S / P10-A (P10B2-04, KRİTİK) — ÖLÇÜLDÜ (28 Ağustos 2026,
+        ``olcum_once.json``): burada ``chamber_pressure = data.get(
+        'chamber_pressure', 20)`` yazıyordu ve ÇAĞIRAN sözlükte
+        (``injector_results``) böyle bir anahtar HİÇ yoktu. Yani ΔP/Pc oranı
+        HER KOŞUMDA uydurma 20 bar'a bölünüyordu:
+
+            Pc = 40 bar, ΔP = 8 bar  → gerçek oran 0,20 (SP-8089'un tam
+                                        önerdiği değer), basılan oran 0,40
+                                        → SAHTE ``dp_pc_high`` uyarısı
+            Pc = 10 bar, ΔP = 2 bar  → gerçek oran 0,20, basılan 0,10
+                                        (bandın tam kenarı) → gerçek chug
+                                        riski olan bir tasarımda SESSİZLİK
+
+        Payda artık uydurulmaz. Çözülemezse hüküm VERİLMEZ (fail-closed) ve
+        eksik alan ADIYLA beyan edilir; bir sayı icat edilip "geçti" denmez.
+        """
         warnings_list = []
-        
+        pc = _finite_positive(chamber_pressure)
+        pc_source = 'caller'
+        if pc is None:
+            pc = _finite_positive(data.get('chamber_pressure'))
+            pc_source = 'injector record' if pc is not None else None
+
         # Reynolds Number
         reynolds = data.get('reynolds_number', 0)
         re_limits = self.injector_limits['reynolds_number']
@@ -113,19 +255,50 @@ class ValidationSystem:
                 warnings_list.append(_w("warn.validation.reynolds_high", "warning",
                                         re=round(float(reynolds), 0), max=re_limits[1]))
         
-        # Pressure Drop
-        pressure_drop = data.get('pressure_drop', 0)
-        chamber_pressure = data.get('chamber_pressure', 20)
-        drop_ratio = pressure_drop / chamber_pressure if chamber_pressure > 0 else 0
+        # Pressure Drop — ΔP/Pc chug ölçütü (payda UYDURULMAZ)
         drop_limits = self.injector_limits['pressure_drop_ratio']
-        
-        if not (drop_limits[0] <= drop_ratio <= drop_limits[1]):
-            if drop_ratio < drop_limits[0]:
-                warnings_list.append(_w("warn.validation.dp_pc_low", "critical",
-                                        ratio=round(float(drop_ratio), 2), min=drop_limits[0]))
-            else:
-                warnings_list.append(_w("warn.validation.dp_pc_high", "warning",
-                                        ratio=round(float(drop_ratio), 2), max=drop_limits[1]))
+        pressure_drop = _finite_positive(data.get('pressure_drop'))
+        kunye = {
+            'axis': DP_RATIO_AXIS,
+            'band': [drop_limits[0], drop_limits[1]],
+            'band_source': self.injector_limit_sources[DP_RATIO_AXIS],
+        }
+        if pc is None or pressure_drop is None:
+            eksik = []
+            if pc is None:
+                eksik.append('chamber_pressure')
+            if pressure_drop is None:
+                eksik.append('pressure_drop')
+            kunye.update({
+                'status': 'not_evaluated',
+                'missing_inputs': eksik,
+                'reason': (
+                    'the injector pressure-drop ratio needs a finite positive '
+                    'chamber pressure [bar] and pressure drop [bar]; the '
+                    'verdict is withheld rather than computed against a '
+                    'substituted value'),
+                'ratio': None,
+                'chamber_pressure_bar': pc,
+                'pressure_drop_bar': pressure_drop,
+            })
+        else:
+            drop_ratio = pressure_drop / pc
+            kunye.update({
+                'status': 'evaluated',
+                'ratio': round(float(drop_ratio), 4),
+                'chamber_pressure_bar': pc,
+                'chamber_pressure_source': pc_source,
+                'pressure_drop_bar': pressure_drop,
+            })
+            if not (drop_limits[0] <= drop_ratio <= drop_limits[1]):
+                if drop_ratio < drop_limits[0]:
+                    warnings_list.append(_w("warn.validation.dp_pc_low", "critical",
+                                            ratio=round(float(drop_ratio), 2), min=drop_limits[0]))
+                else:
+                    warnings_list.append(_w("warn.validation.dp_pc_high", "warning",
+                                            ratio=round(float(drop_ratio), 2), max=drop_limits[1]))
+        if assessment is not None:
+            assessment[DP_RATIO_AXIS] = kunye
 
         # Exit Velocity
         exit_velocity = data.get('exit_velocity', 0)
@@ -137,8 +310,13 @@ class ValidationSystem:
 
         return warnings_list
     
-    def validate_geometry_data(self, data: Dict) -> List[str]:
-        """Geometri verilerini doğrula"""
+    def validate_geometry_data(self, data: Dict,
+                               assessment: Optional[Dict] = None) -> List[str]:
+        """Geometri verilerini doğrula.
+
+        ``assessment`` verilirse genleşme oranı ekseni künyesiyle oraya
+        yazılır (ÖH D35 / OH-ON-02) — ölçülmeyen eksen 'normal' basamaz.
+        """
         warnings_list = []
         
         # Port Diameters
@@ -167,15 +345,102 @@ class ValidationSystem:
             if d_port_final > d_chamber * 0.8:
                 warnings_list.append(_w("warn.validation.port_exceeds_chamber", "critical"))
 
-        # Expansion Ratio
-        expansion_ratio = data.get('expansion_ratio', 0)
-        exp_limits = self.geometry_limits['expansion_ratio']
-        if expansion_ratio > 0 and not (exp_limits[0] <= expansion_ratio <= exp_limits[1]):
-            warnings_list.append(_w("warn.validation.expansion_ratio_out_of_range", "warning",
-                                    eps=round(float(expansion_ratio), 1),
-                                    lo=exp_limits[0], hi=exp_limits[1]))
+        # --- Genleşme oranı: hüküm FİZİKTEN, sabit banttan DEĞİL --------
+        # (ÖH D35 / OH-ON-02 — gerekçe ``geometry_limits`` künyesinde.)
+        expansion_ratio = _finite_positive(data.get('expansion_ratio'))
+        if expansion_ratio is not None:
+            warnings_list.extend(self._genlesme_hukmu(
+                expansion_ratio, data, assessment))
 
         return warnings_list
+
+    #: Bu eksenin ``comprehensive_validation`` künyesindeki adı.
+    EXPANSION_AXIS = 'expansion_ratio'
+
+    def _genlesme_hukmu(self, eps: float, data: Dict,
+                        assessment: Optional[Dict]) -> List[Dict]:
+        """ε hükmü — koşumun KENDİ Summerfield ekranından okunur.
+
+        Hüküm sırası:
+          1. ε <= 1 → ses-üstü çıkış geometrik olarak imkânsız (KRİTİK).
+          2. Ekran çözülmüş → hüküm KAZANILMIŞTIR; ayrılma öngörüldüyse
+             uyarıyı motorun kendi zinciri basar
+             (``warn.hybrid.nozzle_flow_separation``) ve BURADA İKİNCİ KEZ
+             basılmaz (tek kaynak); künye hükmü taşır.
+          3. Ekran yok / çözülememiş → hüküm GERİ ÇEKİLİR ve nedeni adıyla
+             yazılır (fail-closed). Sabit bir banda düşülmez.
+        """
+        uyarilar: List[Dict] = []
+        taban = self.geometry_limits['expansion_ratio_supersonic_floor']
+        # Ölçüt SAYILARI burada KOPYALANMAZ (tek kaynak): Summerfield k'sı
+        # ve ayrılma basıncı aynı yanıttaki ``motor.nozzle_expansion_screen``
+        # bloğunda zaten yayımlıdır; ses-üstü tabanı geometriktir ve
+        # aşağıdaki künye metninde adıyla söylenir. İkinci bir kopya,
+        # sabit ikiye ayrıldığında sessizce ayrışırdı.
+        kunye = {
+            'axis': self.EXPANSION_AXIS,
+            'expansion_ratio': round(float(eps), 4),
+            'criterion_source': (
+                'run-specific Summerfield over-expansion screen '
+                '(motor.nozzle_expansion_screen carries the factor k, the '
+                'separation pressure and the separation-limit area ratio; k '
+                'is defined once in hrma/flow/separation.py and the '
+                'area-Mach relation is Sutton & Biblarz 9th ed. Eq. '
+                '3-25/3-26). No fixed literature band is applied: the '
+                'acceptable expansion ratio depends on the ambient pressure '
+                'of THIS run. The only fixed number here is the geometric '
+                'floor A_e/A_t > %g, below which a converging-diverging '
+                'nozzle cannot reach supersonic exit.' % taban),
+        }
+
+        if eps <= taban:
+            kunye.update({'status': 'evaluated', 'verdict': 'not_supersonic'})
+            uyarilar.append(_w('warn.validation.expansion_ratio_not_supersonic',
+                               'critical', eps=round(float(eps), 4),
+                               floor=taban))
+            if assessment is not None:
+                assessment[self.EXPANSION_AXIS] = kunye
+            return uyarilar
+
+        ekran = data.get('nozzle_expansion_screen')
+        ayrilma = (ekran.get('separation_predicted')
+                   if isinstance(ekran, dict) else None)
+        if not isinstance(ekran, dict) or ayrilma is None:
+            kunye.update({
+                'status': 'not_evaluated',
+                'verdict': None,
+                'missing_inputs': ['nozzle_expansion_screen'],
+                'reason': (
+                    'whether this expansion ratio is acceptable depends on '
+                    'the ambient pressure, the chamber pressure and gamma of '
+                    'this run; the over-expansion screen that solves it was '
+                    'not published, so the verdict is withheld rather than '
+                    'taken from a fixed band that does not know the ambient '
+                    'pressure'),
+            })
+            uyarilar.append(_w('warn.validation.expansion_ratio_not_evaluated',
+                               'warning', eps=round(float(eps), 4)))
+            if assessment is not None:
+                assessment[self.EXPANSION_AXIS] = kunye
+            return uyarilar
+
+        kunye.update({
+            'status': 'evaluated',
+            'separation_predicted': bool(ayrilma),
+            'verdict': ('over_expanded_separated' if ayrilma
+                        else 'attached_flow'),
+            'ambient_pressure_bar': ekran.get('ambient_pressure_bar'),
+            'exit_pressure_bar': ekran.get('exit_pressure_bar'),
+            'separation_limit_expansion_ratio': ekran.get(
+                'separation_limit_expansion_ratio'),
+        })
+        if ayrilma:
+            # Uyarı motorun kendi zincirinde ZATEN var; ikinci kopya
+            # basılmaz, nereye devredildiği künyede yazılıdır.
+            kunye['warning_issued_by'] = 'warn.hybrid.nozzle_flow_separation'
+        if assessment is not None:
+            assessment[self.EXPANSION_AXIS] = kunye
+        return uyarilar
     
     def check_sutton_biblarz_criteria(self, data: Dict) -> List[str]:
         """Sutton & Biblarz kitabından kritik tasarım kriterleri"""
@@ -226,24 +491,50 @@ class ValidationSystem:
     
     def comprehensive_validation(self, motor_data: Dict, injector_data: Dict, 
                                propellant_combo: str = 'n2o_htpb') -> Dict:
-        """Kapsamlı validasyon"""
+        """Kapsamlı validasyon.
+
+        ÖH Z5S / P10-A: ΔP/Pc ölçütünün paydası (kamara basıncı [bar]) artık
+        MOTOR sonuçlarından gelir. Enjektör sözlüğü kendi kamara basıncını
+        taşıyorsa o kazanır (çağıran açıkça koymuştur); yoksa motorunki
+        kullanılır. Hiçbiri yoksa o EKSEN ölçülmez ve rapor bunu ADIYLA
+        söyler — 'geçti' demez.
+        """
         all_warnings = []
-        
+        assessment: Dict = {}
+
+        pc = None
+        if isinstance(injector_data, dict):
+            pc = _finite_positive(injector_data.get('chamber_pressure'))
+        if pc is None and isinstance(motor_data, dict):
+            pc = _finite_positive(motor_data.get('chamber_pressure'))
+
         # Tüm validasyonları çalıştır
         all_warnings.extend(self.validate_performance_data(motor_data, propellant_combo))
-        all_warnings.extend(self.validate_injector_data(injector_data))
-        all_warnings.extend(self.validate_geometry_data(motor_data))
+        all_warnings.extend(self.validate_injector_data(
+            injector_data, chamber_pressure=pc, assessment=assessment))
+        all_warnings.extend(self.validate_geometry_data(
+            motor_data, assessment=assessment))
         all_warnings.extend(self.check_sutton_biblarz_criteria(motor_data))
-        
+
         # Kritik/uyarı ayrımı — ARTIK severity alanından (dil-bağımsız), eskiden
         # metin içindeki 'KRITIK'/'UYARI' string'inden parse ediliyordu.
         critical_warnings = [w for w in all_warnings if w.get('severity') == 'critical']
         regular_warnings = [w for w in all_warnings if w.get('severity') == 'warning']
 
+        # ÖLÇÜLMEYEN EKSEN 'NORMAL' BASAMAZ (fail-closed / sahte gösterge
+        # yasağı): girdisi olmadığı için hüküm verilemeyen bir eksen varken
+        # yeşil "normal" rozeti, kullanıcının hiç yapılmamış bir denetimi
+        # yapılmış sanmasıdır. Yeni i18n anahtarı İCAT EDİLMEZ (sözlük bu
+        # partinin dosyası değil): mevcut 'status.warnings' kodu kullanılır,
+        # eksik ekseni ADIYLA söyleyen künye ise makine-okur alanda taşınır.
+        withheld = sorted(ad for ad, k in assessment.items()
+                          if k.get('status') != 'evaluated')
+        assessment_complete = not withheld
+
         # Genel değerlendirme — status da i18n kodu ({code}); frontend TF ile çevirir.
         if critical_warnings:
             overall_status = _w("status.critical", "critical")
-        elif regular_warnings:
+        elif regular_warnings or withheld:
             overall_status = _w("status.warnings", "warning")
         else:
             overall_status = _w("status.normal", "info")
@@ -253,7 +544,12 @@ class ValidationSystem:
             'critical_warnings': critical_warnings,
             'regular_warnings': regular_warnings,
             'total_warnings': len(all_warnings),
-            'validation_passed': len(critical_warnings) == 0
+            'validation_passed': (len(critical_warnings) == 0
+                                  and assessment_complete),
+            # Hangi eksen NEYLE ölçüldü — hüküm kazanılmıştır, varsayılmamıştır.
+            'injector_assessment': assessment,
+            'assessment_complete': assessment_complete,
+            'axes_not_evaluated': withheld,
         }
 
 # Global instance

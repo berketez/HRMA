@@ -43,6 +43,7 @@ from hrma.engines.combustion_analysis import (
     OF_RATIO_MIN_EXCLUSIVE,
     CombustionAnalyzer,
 )
+from hrma.utils.numeric_compat import trapezoid
 
 
 # ---------------------------------------------------------------------------
@@ -125,10 +126,27 @@ class TestF41IsiTransferiGirdiKapisi:
             'throat_diameter', 'throat_area', 'mdot_total'}
 
     def test_tam_girdi_hala_calisir_ve_sayi_degismedi(self):
-        """Kapı, GEÇERLİ koşuyu bozmadı: ölçülen taban aynen duruyor."""
+        """Kapı, GEÇERLİ koşuyu bozmadı: ölçülen taban aynen duruyor.
+
+        ÇAPA YENİLENDİ (ÖH D15 fix-3 / taban geçişi, 1 Eyl 2026):
+        13.027.380,540100738 → 13.673.461,460390627 W/m² (+4,96 %).
+        DEĞİŞTİREN F4.1 GİRDİ KAPISI DEĞİL, ÖH Z5S / PK5'tir (defter
+        P4B1-03, commit bba33e4): tasarım akısı TEK TANIM NOKTASINA
+        çekildi (heat_transfer_analysis.py:887 ``_design_heat_flux``,
+        referans cidar :1543/:1781) ve Bartz katsayısı artık tasarım
+        akısıyla AYNI cidar sıcaklığında kuruluyor (:1661, :1730) —
+        eskiden gaz-yanı katsayı ile tasarım akısı iki farklı cidar
+        sıcaklığında kuruluyordu, bu da sigma düzeltmesini tutarsız
+        bırakıyordu. Bu fikstürde birleştirme akıyı YUKARI taşır (aynı
+        onarımın hibrit boğaz ışıma ayağı ise akıyı aşağı taşır —
+        tests/test_z5_rozet_dock.py::HIBRIT_BOGAZ_AKISI_W_M2; iki yön
+        aynı kökten gelir, işaret istasyonun durumuna bağlıdır).
+        Sayı ÖLÇÜLDÜ (iki bağımsız koşum bit-aynı); TOLERANS
+        DEĞİŞTİRİLMEDİ (rel=1e-9 aynen korundu).
+        """
         sonuc = HeatTransferAnalyzer().analyze_heat_transfer(dict(TAM_MOTOR))
         assert sonuc['gas_side_analysis']['heat_flux'] == pytest.approx(
-            13027380.540100738, rel=1e-9)
+            13673461.460390627, rel=1e-9)
 
     def test_her_zorunlu_alan_yayimlanan_sayiyi_HAREKET_ETTIRIR(self):
         """Kapı listesi çürüyemez: zorunlu her alan çıktıyı değiştirmeli.
@@ -268,7 +286,37 @@ class TestF45KarisimOraniKapisi:
         """Kapı fiziği değiştirmedi (ölçülen taban: ER=1,493977)."""
         sonuc = yanma.analyze_combustion({'htpb': 100.0}, 'N2O', 6.0, 20.0)
         assert sonuc['equivalence_ratio'] > 0.0
-        assert sonuc['equivalence_ratio'] == pytest.approx(1.493977, rel=1e-5)
+        # ÇAPA TÜRETİMLİ YENİLENDİ — ÖH D19 hibrit-a1 (kalem B3-12).
+        # Eski sayı, elemental ayrıştırmanın KÜTLE KORUMADIĞI koddan
+        # geliyordu: pay (atom kütleleri) ile payda (molekül ağırlığı)
+        # ayrı ayrı elle yazılıydı, HTPB'de Σ(kütle kesri)=1,001851852
+        # (+%0,1852) ve kullanıcının 6,0 dediği O/F dengeye 5,990270
+        # olarak giriyordu. D19'da molekül ağırlığı formülden ve
+        # _ATOMIC_MASS (IUPAC 2021) tablosundan TÜRETİLDİ; Σ=1,0 ve
+        # efektif O/F = istenen O/F oldu. Yeni sayı bu DOĞRU girdiden
+        # gelir; yön fiziksel olarak beklenendir (yakıt payı %0,185
+        # şişkinken karışım daha zengin görünüyordu, düzeltilince
+        # stokiyometriye yaklaşıp eşdeğerlik oranı 1e yaklaştı).
+        # Ölçüm: docs/scofield/raw/OH/D19/hibrit/a1/capa_yenileme.json
+        # Eski çapa ER=1,493977 -> D19'da 1,491342379080029 (-%0,176).
+        #
+        # ÇAPA İKİNCİ KEZ TÜRETİMLİ YENİLENDİ — ÖH D25 hibrit-a2, aynı
+        # kalem (B3-12) için Fable-D19 ŞART'ı. D19 PAYI (n_O2 ve yakıt
+        # molekül ağırlığı) tek kaynağa bağlamıştı; oksitleyici tarafındaki
+        # BÖLEN elle kalmıştı (N2O 0.3636), yani "pay tablodan, payda elle"
+        # kusuru küçülmüş biçimde sürüyordu. ÖLÇÜM (a2/once.json K1-K3;
+        # taban cdf2106):
+        #     N2O oksijen kesri  elle 0,3636 ⟷ M_O/M_N2O = 0,3635062367936746
+        #                        (+%0,0258; N2O -> N2 + 1/2 O2)
+        #     of_stoich(htpb/N2O) 8,948054274480175 -> 8,950362345633366
+        #     ER = of_stoich/6,0 = 1,491342379080029 -> 1,491727057605561
+        # Yön fizikseldir: bölen KÜÇÜLDÜĞÜ için aynı yakıt daha ÇOK N2O
+        # ister, stokiyometrik O/F büyür, φ = of_stoich/of ile ER büyür.
+        # Değişim +%0,0258 — rel=1e-5 toleransı KORUNDU (gevşetilmedi),
+        # yalnız çapa sayısı yenilendi.
+        # Ölçüm: docs/scofield/raw/OH/D25/hibrit/a2/{once,sonra}.json
+        assert sonuc['equivalence_ratio'] == pytest.approx(
+            1.491727057605561, rel=1e-5)
         # Elemental kütle kesirleri artık negatif olamaz.
         assert all(v >= 0.0
                    for v in sonuc['elemental_composition'].values())
@@ -402,7 +450,7 @@ class TestF31TekCdSozlesmesi:
         t = np.asarray(sol['time'], dtype=float)
         f = np.asarray(sol['thrust'], dtype=float)
         assert float(sol['total_impulse']) == pytest.approx(
-            float(np.trapz(f, t)), rel=1e-12)
+            float(trapezoid(f, t)), rel=1e-12)
 
 
 if __name__ == '__main__':

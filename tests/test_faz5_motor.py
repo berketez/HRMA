@@ -47,9 +47,20 @@ def client():
         yield c
 
 
+# ÖH D26 (defter P15B3-02, YÜKSEK) — GÖVDE DÜZELTİLDİ. Eskiden
+# ``'thrust': 1500, 'burn_time': 3`` taşıyordu; ikisi katı ucunda TASARIM
+# NOKTASI HEDEFİDİR ve bu yanma hızı katsayılarıyla (a=0,005 / n=0,35) BATES
+# zarfının dışındadır. Taban 7751531'de uç, ulaşılamayan hedefi sessizce
+# düşürüp başlangıç geometrisinin eğrisini 200 ile yayımlıyordu — yani
+# buradaki 1500 N hiçbir zaman etkili olmadı; bu dosyanın ölçtüğü motor her
+# zaman 4312,736770254884 N / 1,9963492719477878 s idi. Zarf kapısı
+# fail-closed olduğundan (hüküm kazanılmadıysa yayımlanmaz) gövde ZATEN
+# ÖLÇÜLEN kipe — geometri kipine — çevrildi ve ``outer_diameter`` ucun
+# okuduğu ada getirildi (uç zaten aynı 100 mm'yi tohumluyordu). ÖLÇÜLDÜ:
+# yanıt tasarım noktası bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148).
 SOLID_BASE = {
-    'motor_name': 'faz5', 'chamber_pressure': 40, 'thrust': 1500,
-    'burn_time': 3, 'grain_type': 'bates', 'outer_diameter': 100,
+    'motor_name': 'faz5', 'chamber_pressure': 40,
+    'grain_type': 'bates', 'chamber_diameter': 100,
     'core_diameter': 35, 'grain_length': 300, 'segments': 1,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35, 'chamber_temperature': 3000,
     'c_star': 1550, 'propellant_density': 1800,

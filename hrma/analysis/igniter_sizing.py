@@ -71,6 +71,8 @@ import math
 from typing import Dict, List, Optional
 
 from hrma.constants import R_UNIVERSAL
+# ÖH D23 / P5B4-16: sayısal girdi kapıları TEK KAYNAKTAN.
+from hrma.analysis._input_guards import require_positive
 
 __all__ = [
     'specific_gas_constant',
@@ -113,14 +115,34 @@ TRANSFER_EFFICIENCY_SOURCE = (
 
 # Torç debisinin ana debiye oranı için AKIL SAĞLIĞI taraması.
 TORCH_FLOW_FRACTION_SCREEN = (0.001, 0.10)
+
+# --- ÖH D23 / P5B4-14: ATEŞLEME PENCERESİ BU ORANDAN SADELEŞİR ------------
+# Eş. (1) E = mdot_main*t_win*cp*dT/eta_t ve Eş. (2) mdot_torch =
+# E/(eta_c*Q*t_win) art arda yazılınca t_win PAY VE PAYDADA aynen görünür:
+#     mdot_torch/mdot_main = cp*(T_ign - T_0) / (eta_transfer*eta_comb*Q)
+# yani oran ateşleme penceresinden CEBİRSEL OLARAK bağımsızdır. ÖLÇÜLDÜ
+# (``once.json`` P5B4-14): pencere 0,2 ms'ten 1,0 s'ye — 5000 kat —
+# taranınca oranın bağıl yayılımı 1,637e-16 (kayan-nokta gürültüsü).
+# Buna rağmen modül hem ``validity`` hem ``warnings`` kanalından
+# "check the ignition window" diyordu, yani kullanıcıyı sonucu HİÇ
+# değiştirmeyen parametreye yönlendiriyordu. Bandın dışına çıkan bir
+# kullanıcı pencereyi 50 kat kısaltsa bile oran zerre değişmezdi.
+TORCH_FRACTION_INVARIANCE = (
+    'NOTE: the ratio is ALGEBRAICALLY INDEPENDENT of the ignition window. '
+    'Combining E = mdot_main*t_window*cp*dT/eta_transfer with mdot_torch = '
+    'E/(eta_combustion*Q*t_window) cancels t_window exactly, leaving '
+    'mdot_torch/mdot_main = cp*(T_ign - T_0)/(eta_transfer*eta_combustion*'
+    'Q_torch). Changing the ignition window moves the total torch '
+    'propellant mass and the required energy, but NOT this fraction.')
 TORCH_FLOW_FRACTION_SOURCE = (
     'Screening band only: published torch igniters run at a small '
     'percentage of the main propellant flow (order of one percent). The '
     '0.1%-10% band here is a SANITY SCREEN on the energy balance, not a '
     'design rule and not a published requirement; falling outside it '
-    'usually means the ignition window, the transfer efficiency or the '
-    'torch heat release is unrealistic (Sutton & Biblarz 9th ed., '
-    'Ch. 8).')
+    'means one of the FOUR quantities that actually set the ratio is '
+    'unrealistic - the propellant specific heat, the ignition temperature '
+    'rise, the energy transfer efficiency or the torch heat release '
+    '(Sutton & Biblarz 9th ed., Ch. 8). ' + TORCH_FRACTION_INVARIANCE)
 
 # Piroteknik ateşleme basıncının çalışma basıncına oranı.
 IGNITION_PRESSURE_FRACTION_DEFAULT = 0.15
@@ -201,16 +223,10 @@ NOT_MODELLED = {
 # ===========================================================================
 # Saf yardımcılar (analitik, tek tek test edilebilir)
 # ===========================================================================
-def _require_positive(value, name: str, unit: str = '') -> float:
-    """Pozitif ve sonlu olma şartı; değilse İngilizce ValueError."""
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f'{name} must be a positive finite number {unit}')
-    if not math.isfinite(v) or v <= 0.0:
-        raise ValueError(
-            f'{name} must be a positive finite number {unit}; got {value!r}')
-    return v
+#: ÖH D23 / P5B4-16: TEK KAYNAK. Bu ad üç analiz modülünde birebir
+#: kopyalanmıştı; tanım artık ``hrma/analysis/_input_guards.py``tadır ve
+#: ``bool``u reddeder (ölçüm ve gerekçe o modülün docstring'inde).
+_require_positive = require_positive
 
 
 def specific_gas_constant(molecular_weight_g_mol: float) -> float:
@@ -275,13 +291,57 @@ def ignition_energy_required(*,
     }
 
 
+#: ÖH D24 / P5B4-34 — SERT BAŞLANGIÇ ÖLÇÜTÜ KAMARADAKİ GAZI SAYMIYORDU.
+#: ÖLÇÜLEN (taban ``88a29d3``, kanıt ``once_p5b434.json``): ölçüt yalnız
+#: gecikme boyunca BİRİKEN iticiyi sayıyordu. Kamarada ateşleme anında
+#: zaten bir gaz vardır (pürj, ullage, önceki denemeden kalan, ya da
+#: yalnızca atmosfer): 1 bar / 293 K'lik bir pürj sabit hacimde 3400 K'e
+#: ısınınca ideal gazda P0*T_flame/T0 = 11,6041 bar eder — Pc = 30 bar'lık
+#: bir motorda kamara basıncının %38,68'i, ve %15'lik sert-başlangıç
+#: payının (4,5 bar) İKİ BUÇUK KATI. Bu terim ölçütün dışında bırakılınca
+#: yayımlanan tepe basınç bir ALT SINIRDIR; 'within_window' hükmü de öyle.
+def pre_existing_gas_pressure(*,
+                              initial_pressure_Pa: float,
+                              initial_temperature_K: float,
+                              flame_temperature_K: float) -> float:
+    """Kamarada BULUNAN gazın T_flame'e ısınınca ulaştığı basınç [Pa].
+
+    Sabit hacim, sabit mol: ``P = P_0 * T_flame / T_0`` (ideal gaz).
+    Terim, biriken iticinin yanma basıncına EKLENİR (Dalton): iki gaz da
+    aynı serbest hacmi ve aynı son sıcaklığı paylaşır.
+    """
+    p_0 = _require_positive(initial_pressure_Pa, 'initial_pressure_Pa',
+                            '[Pa]')
+    t_0 = _require_positive(initial_temperature_K, 'initial_temperature_K',
+                            '[K]')
+    t_flame = _require_positive(flame_temperature_K, 'flame_temperature_K',
+                                '[K]')
+    return p_0 * t_flame / t_0
+
+
+class HardStartAllowanceExceeded(ValueError):
+    """Kamaradaki gaz TEK BAŞINA payı doldurmuş — güvenli pencere YOK.
+
+    Bu bir "0 saniye pencere" değildir: ateşleme gecikmesi sıfır olsa bile
+    tepe basınç payın üstündedir. Sayı kırpılmaz, hüküm verilmez.
+    """
+
+
 def hard_start_pressure(*,
                         main_mass_flow_kg_s: float,
                         ignition_delay_s: float,
                         free_volume_m3: float,
                         gas_molecular_weight_g_mol: float,
-                        flame_temperature_K: float) -> float:
-    """Birikmiş iticinin ani yanmasıyla oluşacak basınç [Pa] — Eş. (5)."""
+                        flame_temperature_K: float,
+                        chamber_initial_pressure_Pa: Optional[float] = None,
+                        chamber_initial_temperature_K: Optional[float] = None
+                        ) -> float:
+    """Ateşleme anında ulaşılan sabit-hacim basıncı [Pa] — Eş. (5).
+
+    ``chamber_initial_*`` çifti VERİLİRSE kamarada bulunan gazın katkısı
+    da eklenir (ÖH D24 / P5B4-34); verilmezse dönen sayı yalnız BİRİKEN
+    iticinin katkısıdır, yani gerçek tepe basıncın ALT SINIRIDIR.
+    """
     mdot = _require_positive(main_mass_flow_kg_s, 'main_mass_flow_kg_s',
                              '[kg/s]')
     t_delay = _require_positive(ignition_delay_s, 'ignition_delay_s', '[s]')
@@ -290,7 +350,14 @@ def hard_start_pressure(*,
                                 '[K]')
     r_gas = specific_gas_constant(gas_molecular_weight_g_mol)
     m_accum = mdot * t_delay
-    return m_accum * r_gas * t_flame / v_free
+    p_accum = m_accum * r_gas * t_flame / v_free
+    if (chamber_initial_pressure_Pa is None
+            or chamber_initial_temperature_K is None):
+        return p_accum
+    return p_accum + pre_existing_gas_pressure(
+        initial_pressure_Pa=chamber_initial_pressure_Pa,
+        initial_temperature_K=chamber_initial_temperature_K,
+        flame_temperature_K=t_flame)
 
 
 def safe_ignition_window_s(*,
@@ -298,8 +365,18 @@ def safe_ignition_window_s(*,
                            free_volume_m3: float,
                            gas_molecular_weight_g_mol: float,
                            flame_temperature_K: float,
-                           allowable_pressure_Pa: float) -> float:
-    """Güvenli ateşleme penceresi üst sınırı [s] — Eş. (5) tersine çözülür."""
+                           allowable_pressure_Pa: float,
+                           chamber_initial_pressure_Pa: Optional[
+                               float] = None,
+                           chamber_initial_temperature_K: Optional[
+                               float] = None) -> float:
+    """Güvenli ateşleme penceresi üst sınırı [s] — Eş. (5) tersine çözülür.
+
+    ÖH D24 / P5B4-34: ``chamber_initial_*`` verilirse kamaradaki gazın
+    payı ÖNCE düşülür; birikime kalan pay ``P_allow - P_pre``dir. Bu fark
+    sıfır ya da altındaysa ``HardStartAllowanceExceeded`` yükselir —
+    pencere sıfıra kırpılmaz, çünkü sorun pencerenin uzunluğu değildir.
+    """
     mdot = _require_positive(main_mass_flow_kg_s, 'main_mass_flow_kg_s',
                              '[kg/s]')
     v_free = _require_positive(free_volume_m3, 'free_volume_m3', '[m^3]')
@@ -308,6 +385,25 @@ def safe_ignition_window_s(*,
     p_allow = _require_positive(allowable_pressure_Pa,
                                 'allowable_pressure_Pa', '[Pa]')
     r_gas = specific_gas_constant(gas_molecular_weight_g_mol)
+    if (chamber_initial_pressure_Pa is not None
+            and chamber_initial_temperature_K is not None):
+        p_pre = pre_existing_gas_pressure(
+            initial_pressure_Pa=chamber_initial_pressure_Pa,
+            initial_temperature_K=chamber_initial_temperature_K,
+            flame_temperature_K=t_flame)
+        if p_pre >= p_allow:
+            raise HardStartAllowanceExceeded(
+                'the gas already in the chamber '
+                f'({chamber_initial_pressure_Pa / 1e5:.3f} bar at '
+                f'{chamber_initial_temperature_K:.0f} K) reaches '
+                f'{p_pre / 1e5:.4f} bar on its own when heated to '
+                f'{t_flame:.0f} K at constant volume, which already meets '
+                f'or exceeds the hard-start allowance '
+                f'({p_allow / 1e5:.4f} bar). No ignition delay is safe, '
+                'so no safe window was computed: purge to a lower '
+                'pressure, raise the allowance, or increase the free '
+                'volume.')
+        p_allow = p_allow - p_pre
     return p_allow * v_free / (r_gas * t_flame * mdot)
 
 
@@ -353,6 +449,10 @@ def pyrotechnic_charge_mass(*,
         'gas_mass_kg': float(m_gas),
         'gas_mass_fraction': float(gas_fraction),
         'specific_gas_constant_J_kg_K': float(r_gas),
+        # ÖH D23 / P5B4-15: şarj kütlesini T ile TERS ölçekleyen sayı
+        # (m_gas = P*V/(R*T)) artık yanıtta görünür; eskiden hesaba giriyor
+        # ama yayımlanmıyordu.
+        'gas_temperature_K': float(t_gas),
         'ignition_pressure_Pa': p_ign,
         '_basis': (
             'Free-volume pressurisation criterion: m_gas = '
@@ -387,10 +487,14 @@ def size_igniter(*,
                  ignition_pressure_fraction: Optional[float] = None,
                  charge_gas_molecular_weight_g_mol: Optional[float] = None,
                  charge_flame_temperature_K: Optional[float] = None,
+                 charge_gas_temperature_K: Optional[float] = None,
                  charge_condensed_mass_fraction: Optional[float] = None,
                  charge_heat_of_explosion_J_kg: Optional[float] = None,
                  charge_density_kg_m3: Optional[float] = None,
-                 charge_burn_time_s: Optional[float] = None) -> Dict:
+                 charge_burn_time_s: Optional[float] = None,
+                 chamber_initial_pressure_Pa: Optional[float] = None,
+                 chamber_initial_temperature_K: Optional[float] = None
+                 ) -> Dict:
     """Torç ya da piroteknik ateşleyiciyi boyutlandırır.
 
     Ortak yol: gerekli ateşleme enerjisi (1) ve — ana gaz özellikleri
@@ -399,7 +503,11 @@ def size_igniter(*,
     ``igniter_type='torch'``    -> ``torch_heat_release_J_kg`` ZORUNLU.
     ``igniter_type='pyrotechnic'`` -> şarj gaz özellikleri ve
     ``charge_condensed_mass_fraction`` ZORUNLU; ateşleme basıncı için
-    ``chamber_pressure_Pa`` gerekir.
+    ``chamber_pressure_Pa`` gerekir. ``charge_gas_temperature_K``
+    verilirse serbest-hacim ölçütünün T_gas'ı ODUR; verilmezse
+    ``charge_flame_temperature_K`` ikame edilir ve ikame hem
+    ``pyrotechnic.gas_temperature_source`` alanında hem ``validity``
+    listesinde ADIYLA ve YÖNÜYLE beyan edilir (ÖH D23 / P5B4-15).
 
     Zorunlu girdi eksikse sayı UYDURULMAZ: ilgili blok
     ``status='not_modelled'`` ile döner ya da ValueError yükselir.
@@ -434,47 +542,112 @@ def size_igniter(*,
             raise ValueError(
                 'hard_start_pressure_fraction must be positive and finite')
         p_allow = float(chamber_pressure_Pa) * frac
-        t_max = safe_ignition_window_s(
-            main_mass_flow_kg_s=main_mass_flow_kg_s,
-            free_volume_m3=v_free,
-            gas_molecular_weight_g_mol=main_gas_molecular_weight_g_mol,
-            flame_temperature_K=main_flame_temperature_K,
-            allowable_pressure_Pa=p_allow)
-        p_at_window = hard_start_pressure(
-            main_mass_flow_kg_s=main_mass_flow_kg_s,
-            ignition_delay_s=ignition_window_s,
-            free_volume_m3=v_free,
-            gas_molecular_weight_g_mol=main_gas_molecular_weight_g_mol,
-            flame_temperature_K=main_flame_temperature_K)
-        margin = t_max / float(ignition_window_s)
-        window = {
-            'status': 'computed',
-            'max_delay_s': float(t_max),
-            'requested_window_s': float(ignition_window_s),
-            'margin_ratio': float(margin),
-            'allowable_pressure_Pa': float(p_allow),
-            'hard_start_pressure_fraction': frac,
-            'accumulated_mass_at_window_kg': float(
-                float(main_mass_flow_kg_s) * float(ignition_window_s)),
-            'constant_volume_pressure_at_window_Pa': float(p_at_window),
-            'verdict': ('within_window' if margin >= 1.0
-                        else 'exceeds_window'),
-            '_basis': (
-                't_max = P_allow*V_free/(R*T_flame*mdot_main): the '
-                'ignition delay at which propellant accumulated in the '
-                'free volume would, burning at constant volume as an '
-                'ideal gas, reach the allowable pressure. '
-                + HARD_START_SOURCE),
-        }
-        if margin < 1.0:
-            warnings.append(
-                f'the requested ignition window '
-                f'({float(ignition_window_s) * 1e3:.0f} ms) exceeds the '
-                f'hard-start bound ({t_max * 1e3:.0f} ms): propellant '
-                'accumulating over that delay could, if it ignited all at '
-                f'once, reach {p_at_window / 1e5:.0f} bar against an '
-                f'allowance of {p_allow / 1e5:.0f} bar. Shorten the '
-                'window or reduce the propellant lead.')
+        # --- ÖH D24 / P5B4-34: kamarada BULUNAN gaz ----------------------
+        _on_gaz_verildi = (chamber_initial_pressure_Pa is not None
+                           and chamber_initial_temperature_K is not None)
+        if _on_gaz_verildi:
+            _p_pre = pre_existing_gas_pressure(
+                initial_pressure_Pa=chamber_initial_pressure_Pa,
+                initial_temperature_K=chamber_initial_temperature_K,
+                flame_temperature_K=main_flame_temperature_K)
+            on_gaz = {
+                'included': True,
+                'initial_pressure_Pa': float(chamber_initial_pressure_Pa),
+                'initial_temperature_K': float(
+                    chamber_initial_temperature_K),
+                'constant_volume_pressure_Pa': float(_p_pre),
+                'fraction_of_allowance': float(_p_pre / p_allow),
+                'basis': (
+                    'P_pre = P_0*T_flame/T_0 (constant volume, constant '
+                    'moles): the gas already in the chamber at ignition - '
+                    'purge, ullage or simply the atmosphere - is heated to '
+                    'the flame temperature too, and its partial pressure '
+                    'adds to the burning accumulated propellant (Dalton). '
+                    'It is subtracted from the allowance BEFORE the safe '
+                    'window is solved.'),
+            }
+        else:
+            on_gaz = {
+                'included': False,
+                'reason': (
+                    'chamber_initial_pressure_Pa and '
+                    'chamber_initial_temperature_K were not supplied, so '
+                    'the gas already in the chamber at ignition (purge, '
+                    'ullage, residual or atmosphere) is NOT counted. The '
+                    'peak pressure and the window below are therefore a '
+                    'LOWER BOUND on the pressure and an UPPER BOUND on '
+                    'the safe delay; the term is not small - 1 bar at '
+                    '293 K reaching 3400 K at constant volume is 11.6 bar '
+                    'on its own. No value was substituted, because a '
+                    'fabricated purge state would read as a measurement.'),
+            }
+        try:
+            t_max = safe_ignition_window_s(
+                main_mass_flow_kg_s=main_mass_flow_kg_s,
+                free_volume_m3=v_free,
+                gas_molecular_weight_g_mol=main_gas_molecular_weight_g_mol,
+                flame_temperature_K=main_flame_temperature_K,
+                allowable_pressure_Pa=p_allow,
+                chamber_initial_pressure_Pa=chamber_initial_pressure_Pa,
+                chamber_initial_temperature_K=(
+                    chamber_initial_temperature_K))
+        except HardStartAllowanceExceeded as _exc:
+            window = {
+                'status': 'no_safe_window',
+                'allowable_pressure_Pa': float(p_allow),
+                'hard_start_pressure_fraction': frac,
+                'pre_existing_gas': on_gaz,
+                'reason': str(_exc),
+            }
+            validity.append({
+                'field': 'safe_ignition_window',
+                'status': 'not_earned',
+                'message': str(_exc)})
+            warnings.append(str(_exc))
+            t_max = None
+        if t_max is not None:
+            p_at_window = hard_start_pressure(
+                main_mass_flow_kg_s=main_mass_flow_kg_s,
+                ignition_delay_s=ignition_window_s,
+                free_volume_m3=v_free,
+                gas_molecular_weight_g_mol=main_gas_molecular_weight_g_mol,
+                flame_temperature_K=main_flame_temperature_K,
+                chamber_initial_pressure_Pa=chamber_initial_pressure_Pa,
+                chamber_initial_temperature_K=chamber_initial_temperature_K)
+            margin = t_max / float(ignition_window_s)
+            window = {
+                'pre_existing_gas': on_gaz,
+                'status': 'computed',
+                'max_delay_s': float(t_max),
+                'requested_window_s': float(ignition_window_s),
+                'margin_ratio': float(margin),
+                'allowable_pressure_Pa': float(p_allow),
+                'hard_start_pressure_fraction': frac,
+                'accumulated_mass_at_window_kg': float(
+                    float(main_mass_flow_kg_s) * float(ignition_window_s)),
+                'constant_volume_pressure_at_window_Pa': float(p_at_window),
+                'verdict': ('within_window' if margin >= 1.0
+                            else 'exceeds_window'),
+                '_basis': (
+                    't_max = P_allow*V_free/(R*T_flame*mdot_main): the '
+                    'ignition delay at which propellant accumulated in the '
+                    'free volume would, burning at constant volume as an '
+                    'ideal gas, reach the allowable pressure. The allowance '
+                    'is first reduced by the pressure the gas ALREADY in the '
+                    'chamber (purge / ullage / residual / atmosphere) reaches '
+                    'when heated to the flame temperature, when that state is '
+                    'supplied; see pre_existing_gas. '
+                    + HARD_START_SOURCE),
+            }
+            if margin < 1.0:
+                warnings.append(
+                    f'the requested ignition window '
+                    f'({float(ignition_window_s) * 1e3:.0f} ms) exceeds the '
+                    f'hard-start bound ({t_max * 1e3:.0f} ms): propellant '
+                    'accumulating over that delay could, if it ignited all at '
+                    f'once, reach {p_at_window / 1e5:.0f} bar against an '
+                    f'allowance of {p_allow / 1e5:.0f} bar. Shorten the '
+                    'window or reduce the propellant lead.')
     else:
         missing = [n for n, v in (
             ('main_gas_molecular_weight_g_mol',
@@ -527,6 +700,14 @@ def size_igniter(*,
                 'chamber, throat and its own mixture ratio are NOT '
                 'modelled (see not_modelled.torch_internals). '
                 + TORCH_FLOW_FRACTION_SOURCE),
+            'flow_fraction_governed_by': [
+                'propellant_specific_heat_J_kg_K',
+                'propellant_ignition_temperature_K',
+                'initial_temperature_K',
+                'transfer_efficiency',
+                'torch_combustion_efficiency',
+                'torch_heat_release_J_kg'],
+            'flow_fraction_independent_of': ['ignition_window_s'],
         }
         lo, hi = TORCH_FLOW_FRACTION_SCREEN
         if not (lo <= fraction <= hi):
@@ -537,13 +718,18 @@ def size_igniter(*,
                     f'torch flow is {fraction * 100.0:.2f}% of the main '
                     f'flow, outside the sanity screen '
                     f'{lo * 100.0:g}%-{hi * 100.0:g}%. The energy balance '
-                    'itself is unchanged, but one of the inputs (ignition '
-                    'window, transfer efficiency or torch heat release) is '
-                    'likely unrealistic. ' + TORCH_FLOW_FRACTION_SOURCE)})
+                    'itself is unchanged, but one of the four quantities '
+                    'that set this ratio (propellant specific heat, '
+                    'ignition temperature rise, transfer efficiency, torch '
+                    'heat release) is likely unrealistic. '
+                    + TORCH_FLOW_FRACTION_SOURCE)})
             warnings.append(
                 f'torch flow fraction {fraction * 100.0:.2f}% of main flow '
                 'falls outside the sanity screening band; check the '
-                'ignition window and transfer efficiency.')
+                'transfer efficiency, the torch heat release and the '
+                'propellant heating demand cp*(T_ign - T_0). Changing the '
+                'ignition window will NOT move this fraction - it cancels '
+                'out of it.')
 
     else:  # pyrotechnic
         missing = [n for n, v in (
@@ -583,14 +769,57 @@ def size_igniter(*,
                            else 'default design choice (no '
                                 'ignition_pressure_fraction supplied)')
             p_ign = float(chamber_pressure_Pa) * frac_p
+            # --- ÖH D23 / P5B4-15: ALEV SICAKLIĞI GAZ SICAKLIĞI DEĞİLDİR --
+            # Serbest-hacim ölçütü m_gas = P_ign*V_free/(R*T_gas) ile
+            # çalışır ve T_gas boşluğu DOLDURAN gazın sıcaklığıdır. Eski
+            # kod buraya şarjın ADYABATİK ALEV sıcaklığını koyuyordu ve
+            # bunu hiçbir yerde söylemiyordu. Alev sıcaklığı T_gas'ın ÜST
+            # sınırıdır (gaz duvara ve soğuk kamara gazına ısı verir), kütle
+            # de 1/T ile gittiği için ikame şarjı KÜÇÜK gösterir — yani
+            # emniyetsiz yön. ÖLÇÜLDÜ (``once.json`` P5B4-15; V_free =
+            # 0,05 m3, P_c = 70 bar, frac = 0,15, MW = 25, X_cond = 0,30):
+            #     T = 2473 K (alev) ->  91,189109 g
+            #     T = 1500 K        -> 150,340444 g   (1,6487 kat)
+            #     T = 1000 K        -> 225,510666 g   (2,4730 kat)
+            # Kaldıraç 1,6-2,5 kat, yani tek bir isimlendirme kararı şarjı
+            # yarıya indiriyordu. Doğru sayı bu modülde HESAPLANAMAZ (ısı
+            # kaybı ve karışım modellenmiyor), o yüzden uydurulmaz: knob
+            # kullanıcıya verilir, ikame ADIYLA beyan edilir, kullanılan
+            # sayı yayımlanır ve yönü söylenir.
+            if charge_gas_temperature_K is not None:
+                t_gas_used = charge_gas_temperature_K
+                t_gas_source = 'user-supplied charge_gas_temperature_K'
+            else:
+                t_gas_used = charge_flame_temperature_K
+                t_gas_source = (
+                    'charge_flame_temperature_K substituted: no '
+                    'charge_gas_temperature_K was supplied, so the '
+                    'ADIABATIC FLAME temperature of the charge is used as '
+                    'the temperature of the gas filling the free volume. '
+                    'That is an UPPER bound on the real gas temperature '
+                    '(heat is lost to the walls and to the cold chamber '
+                    'gas), and since m_gas = P*V/(R*T) the charge mass '
+                    'scales as 1/T, so this substitution sizes the charge '
+                    'on the LOW - i.e. unsafe - side. Supply '
+                    'charge_gas_temperature_K to govern it: this module '
+                    'models neither the heat loss nor the mixing and will '
+                    'not invent a reduction factor.')
             pyro = pyrotechnic_charge_mass(
                 ignition_pressure_Pa=p_ign,
                 free_volume_m3=v_free,
                 gas_molecular_weight_g_mol=(
                     charge_gas_molecular_weight_g_mol),
-                gas_temperature_K=charge_flame_temperature_K,
+                gas_temperature_K=t_gas_used,
                 condensed_mass_fraction=charge_condensed_mass_fraction)
             pyro['status'] = 'sized'
+            pyro['gas_temperature_source'] = t_gas_source
+            pyro['charge_flame_temperature_K'] = float(
+                charge_flame_temperature_K)
+            if charge_gas_temperature_K is None:
+                validity.append({
+                    'field': 'pyrotechnic.gas_temperature_K',
+                    'status': 'substituted_input',
+                    'message': t_gas_source})
             pyro['ignition_pressure_fraction'] = frac_p
             pyro['ignition_pressure_source'] = frac_source
             if charge_density_kg_m3 is not None:

@@ -41,6 +41,24 @@
     var R_EARTH_M = 6371000.0;        // m — six_dof_trajectory.R_EARTH ile aynı
     var GLOBE_R = 100.0;              // sahne birimi: küre yarıçapı
     var M_PER_UNIT = R_EARTH_M / GLOBE_R;   // 1 sahne birimi kaç metre
+
+    /* ÖH D22 / OH-D18-10 — UÇUŞ İRTİFASININ DATUMU (tek tanım).
+       `setFlightPath` eskiden `series.altitude`ın SAHA ÜSTÜ (AGL) olduğunu
+       VARSAYIYORDU. Varsayım bugün doğru — çözücü aynı sözleşmeyi kendisi
+       yayımlıyor (six_dof_trajectory.py: `altitude_datum` /
+       `apogee_datum` = 'above_launch_site') — ama kod onu OKUMUYORDU;
+       datum bir gün değişirse çizim sessizce h0 kadar kayardı. Artık dizi
+       datumu okunur, TANINMAYAN bir datum FAIL-CLOSED reddedilir (yol
+       çizilmez, hata kancası ateşlenir) ve seçilen datum `_flight`e yazılır.
+       Sayı DEĞİŞMEZ: bugünkü tek üretici 'above_launch_site' gönderir ya da
+       hiç göndermez; ikisi de aynı yolu izler. */
+    var ALT_DATUM_AGL = 'above_launch_site';
+    var ALT_DATUM_MSL = 'mean_sea_level';
+    var ALT_DATUM_BILINEN = [ALT_DATUM_AGL, ALT_DATUM_MSL];
+    /* Alan yoksa uygulanan datum: üretici sözleşmesinin kendisi. Sessiz bir
+       yedek DEĞİL — adı ve kaynağı burada yazılıdır, `_flight.altSeriesDatum`
+       ile dışarı da verilir. */
+    var ALT_DATUM_VARSAYILAN = ALT_DATUM_AGL;
     // WGS84 (launch_site.py ile aynı türetilmiş sabitler)
     var WGS84_A = 6378137.0;
     var WGS84_E2 = 6.69437999014e-3;
@@ -49,9 +67,31 @@
     // (target) ölçülür, Dünya merkezinden DEĞİL. Yerel görünümde hedef yüzeydedir;
     // bu yüzden hedefe yakın zoom için min HEDEF mesafesi KÜÇÜK olmalı. Kürenin
     // içine dalmayı ayrı bir YÜZEY KİLİDİ (SURFACE_MIN_LEN) engeller.
-    var CTRL_MIN_TARGET = GLOBE_R * 0.004;   // hedefe ~2.5 km'ye kadar yaklaş
+    // 0,4 birim × 63.710 m = 25.484 m. Eski yorum "~2.5 km" diyordu, 10 kat
+    // yanlıştı (tasarım harita-detay §1).
+    var CTRL_MIN_TARGET = GLOBE_R * 0.004;   // hedefe ~25,5 km'ye kadar yaklaş
     var CTRL_MAX_TARGET = GLOBE_R * 6.0;     // en fazla uzaklaşma
     var SURFACE_MIN_LEN = GLOBE_R * 1.003;   // kamera merkezden en az bu kadar (yüzey kilidi)
+
+    /* ÖH harita-detay K2 — DİNAMİK NEAR DÜZLEMİ (tasarım §3.2).
+       Eskiden near sabit 0,01 birimdi (637 m) ve en yakın kamera yüzeyden
+       ~19-25 km uzakta duruyordu: derinlik çözünürlüğünün çoğu boş kalıyor,
+       tüm-Dünya görünümünde (d ~ 280 birim) Δz ~ d²/(near·2^24) ~ 0,47 birim
+       = ~30 km oluyordu; yüzeye yakın çizgiler küreyle çatışırdı. Artık her
+       karede near = clamp(0,3 · min(irtifa, hedef mesafesi), 1e-4, 1) birim.
+       Tasarımın formülü yalnız irtifayı kullanıyordu; hedef mesafesi EKLENDİ,
+       çünkü yerel görünümde hedef uçuş yolunun ortasıdır (yüzeyin üstünde) ve
+       yalnız irtifaya bağlı near yola yakın kamerada yolu kırpabilirdi. */
+    var NEAR_ORANI = 0.3;
+    var NEAR_MIN = 1e-4;
+    var NEAR_MAX = 1.0;
+
+    /* Web-mercator eşdeğer zoom: z_web = log2(Z_WEB_Z0_MPP / m/px).
+       156.543,03 m/px = 256 px karolu web haritasının z0'da ekvator çözünürlüğü
+       (2·π·6.378.137 m / 256). Natural Earth'ün `min_zoom` alanı bu ölçekle
+       anlamlıdır (tasarım §1). TEK TANIM: kare kancası yükündeki `zWeb`
+       buradan hesaplanır; vektör ve etiket modülleri kendi kopyasını tutmaz. */
+    var Z_WEB_Z0_MPP = 156543.03;
     // Yakın zoomda "doku detayı yok" notunun tetiklendiği kamera yüksekliği [m].
     // DİKKAT: bu YALNIZ uyarı notunun eşiğidir; karo yamalarının açıldığı eşik
     // ayrıdır (TILE_ACTIVE_ALT_M) ve ikisi bilerek farklı büyüklüktedir.
@@ -87,19 +127,181 @@
     // /api/tile üzerinden gelir (hrma/analysis/tile_cache.py); istemci yalnız
     // hangi karonun gerektiğini hesaplar, URL/host kurmaz.
     var TILE_LAYER = 'bluemarble';        // varsayılan statik katman (tile_cache allowlist)
-    var TILE_MIN_ZOOM = 4;                // z<4: taban yeterli, patch yüklenmez
+    // ÖH D21 / P12aB4-19 — KATMAN -> ATIF ANAHTARI. Atıf METNİ burada
+    // YAZILMAZ (o i18n sözlüğünün tek kaynağıdır ve çevrilir); burada yalnız
+    // HANGİ katmanın HANGİ künyeye ait olduğu durur. Katman değişip karşılığı
+    // burada tanımlı değilse atıf HİÇ basılmaz (fail-closed: başka katmanın
+    // künyesini göstermektense hiç göstermemek).
+    var TILE_ATTRIBUTION_KEY = { bluemarble: 'site.tileAttribution',
+                                 bm_local: 'site.tilePackagedAttribution' };
+    /* harita-detay K4 (F2; tasarım §3.4) — PAKETLİ ÇEVRİMDIŞI KATMAN.
+       NASA Blue Marble NG (Aralık 2004) z0-z5 WebP piramidi uygulamayla
+       gelir; sunucu onu ağa çıkmadan verir (tile_cache 'bm_local').
+       KAYNAK SIRASI (yalnız var olan çizilir, ince olan üstte):
+         1) GIBS 'bluemarble' z <= 7 — YALNIZ istenen z paketli tavanın
+            üstündeyse istenir (z <= tavan iken GIBS isteği atılmaz: aynı
+            2004 verisinin kopyası için dışarı istek gereksizdir); ağ
+            anahtarı (K5a) kapalıyken sunucu yalnız önbellekteki karoyu verir;
+         2) paketli 'bm_local' z <= tavan — HER ZAMAN, ağsız;
+         3) taban küre 4096.
+       Paketli katmanın tavanı (max_zoom) SUNUCUDAN okunur
+       (/api/tile/cache/status 'layers.packaged'); okunamazsa paketli katman
+       kullanılmaz (fail-closed) ve eski davranış (yalnız GIBS) sürer. */
+    var TILE_LAYER_PACKAGED = 'bm_local';
+    var TILE_SOURCE_PACKAGED = 'packaged';
+    var _paketliTavan = null;           // sunucudan (yoksa null)
+    // EBEVEYN YEDEĞİ: z düzeyindeki karo henüz çizilmemişse onu kapsayan
+    // daha kaba karo (aynı katmanda) LRU'da tutulur ve çizilmeye devam eder;
+    // zoom değişince taban dokuya düşüp geri gelen yanıp sönme biter.
+    // GIBS EPSG:4326 matrisi z <= 2'de düzensizdir (z0 2x1, z1 3x2): ebeveyn
+    // ilişkisi (x/2, y/2) yalnız ebeveyn z >= 3 iken geçerlidir.
+    var TILE_PARENT_MIN_ZOOM = 3;
+    // Doku büyütme notu (tasarım §4.1-4): ekran merkezindeki en ince çizilen
+    // dokunun m/px'i ekran m/px'inin bu katından kabaysa not açılır.
+    var TEXTURE_MAG_RATIO = 2;
+    // ÖH D21 / P12aB4-26 — YORUM DAVRANIŞI YANLIŞ ANLATIYORDU. Eski satır
+    // "z<4: taban yeterli, patch yüklenmez" diyordu; oysa kod ATLAMA değil
+    // KIRPMA yapıyor (`z = clamp(z, TILE_MIN_ZOOM, TILE_MAX_ZOOM)`), yani
+    // hesaplanan z 4'ün altına düşerse 4'e YUKARI çekilip karo yine isteniyor.
+    // ÖLÇÜLDÜ: kapının içinde (kamera < TILE_ACTIVE_ALT_M = 1.500 km) 600 px
+    // yükseklikte hesaplanan en küçük z zaten 5'tir (kapı sınırında
+    // 2.265 m/px -> z = round(log2(TILE_Z0_MPP/mpx)) = 5), yani bu alt sınır
+    // bugün hiç bağlamıyor. Sabit, kapı gevşetilirse istenecek en KABA karoyu
+    // adlandıran alt kırpma sınırıdır.
+    var TILE_MIN_ZOOM = 4;                // alt kırpma sınırı (atlama DEĞİL)
     var TILE_MAX_ZOOM = 7;                // bluemarble z0-7 (backend max_zoom ile aynı)
     var TILE_PATCH_R = 2;                 // merkez etrafı (2R+1)² blok (tipik 5×5)
     var TILE_PATCH_R_MAX = 3;             // hard cap → en fazla 7×7
     var TILE_PATCH_SEG = 8;              // yama S×S vertex (küresel eğrilik için)
-    var TILE_RADIUS = GLOBE_R * 1.0004;  // taban(GLOBE_R) üstü, sınırlar(1.001) altı → z-fighting yok
-    var TILE_LRU_MAX = 128;              // GPU bellek: üstündeki en eski mesh THREE dispose
+    // ÖH D17 / P12aB4-03 + P12aB4-06: karo kabuğunun z-fighting'i GEOMETRİK
+    // kaydırmayla çözülüyordu (GLOBE_R * 1.0004 = taban üstü 2.548,4 m). O
+    // kaydırma fiziksel değil salt bir çizim hilesiydi ve iki ürün kusuru
+    // doğuruyordu: (1) yüzeye çapalı işaretçiler (saha iğnesi 2.485 m, olay
+    // noktası 1.433 m) kabuğun ALTINDA kalıp karolar açıkken görünmüyordu;
+    // (2) saha seçim ışını TABAN küreye çarptığı için kullanıcının gördüğü
+    // karo yüzeyi ile seçilen enlem/boylam arasında Δr·tan(i) = 2.637 m
+    // (46° eğik bakışta) sabit kayma vardı. Kabuk artık taban küreyle AYNI
+    // yarıçapta; ayrım derinlik yanlılığıyla (polygonOffset) yapılıyor, yani
+    // sahnede sahte irtifa kalmıyor. Sınırlar (1.001) ve yer izi (1.0015)
+    // zaten üstte olduğu için etkilenmez.
+    var TILE_RADIUS = GLOBE_R;           // taban küreyle çakışık; ayrım polygonOffset ile
+    var TILE_DEPTH_BIAS = -1;            // polygonOffsetFactor/Units: karo tabanın ÖNÜNE
+    // GPU bellek: üstündeki en eski mesh THREE dispose edilir. ÖH harita-detay
+    // K2 (tasarım §3.4): 128 karo × 512²×4 B×4/3 (mipmap) = ~179 MB tavandı;
+    // 64 × 1,40 MB = ~90 MB. 5×5 yama + iki düzeylik ebeveyn yedeği için
+    // 25 + 25 + 7 = ~57 karo yeter.
+    var TILE_LRU_MAX = 64;
     var TILE_UPDATE_MS = 250;           // patch güncelleme kısması (her karede değil)
-    // WMTS EPSG:4326 (CRS84) karo matris geometrisi — tile_cache.py'nin
-    // AYNI formülünün istemci kopyası (hangi karo gerekiyor kararı için).
-    // İkisi değişirse birlikte güncellenmeli (rule#11 çapraz-referans).
+    // Negatif önbellek (ÖH D17 / P12aB4-04): başarısız karo hemen unutulmaz;
+    // üstel geri çekilmeyle beklenir, TILE_FAIL_MAX denemeden sonra hiç
+    // istenmez. 2s→4s→8s→16s→32s; en kötü hâlde karo başına 5 istek.
+    var TILE_FAIL_BACKOFF_MS = 2000;
+    var TILE_FAIL_MAX = 5;
     var TILE_Z0_MPP = 62617.5;          // ekvator m/px @ z0 (0.5625°/px · 111319.49 m/°)
-    function tileSpanDeg(z) { return 288.0 / Math.pow(2, z); }   // karo derecesi = 288/2^z
+
+    /* ÖH D26 / defter P5B4-30 — KARO MATRİS GEOMETRİSİ ARTIK SUNUCUDAN.
+       ÖLÇÜLDÜ (taban 7751531, ``a2/once.json``): burada
+       ``tileSpanDeg(z) = 288.0/Math.pow(2,z)`` ve
+       ``mw = Math.ceil(360.0/span), mh = Math.ceil(180.0/span)``
+       duruyordu; tile_cache.py aynı sayıyı TAMSAYI ceil ile üretiyordu.
+       Sayısal ayrışma z0-z7'de YOKTU (ölçüldü) — kusur sonuçta değil
+       SAHİPLİKTE: bu dosyanın kendi yorumu bunu itiraf ediyordu
+       ("tile_cache.py'nin AYNI formülünün istemci kopyası ... İkisi
+       değişirse birlikte güncellenmeli"). İki sahipli sayı er geç kayar;
+       kutup kırpma ve tarih çizgisi sarmalama kuralı da ikizlenmişti.
+
+       ARTIK: geometri ``/api/tile/cache/status`` gövdesindeki
+       ``tile_matrix`` alanından OKUNUR (önyükleme sözleşmesi).
+       FAIL-CLOSED: geometri yüklenmediyse karo İSTENMEZ — yanlış karo
+       istemektense hiç istememek doğrudur; altındaki Blue Marble taban
+       dokusu görünür kalır (kısmi yükleme zaten kabul edilen davranış). */
+    var _tileGeom = null;               // sunucudan gelen geometri (yoksa null)
+    var _tileGeomIstendi = false;
+
+    /* K5a — AĞ KAPISI (gizlilik; karar §28-33, tasarım §4.1-2).
+       Karo isteği kullanıcının BAKTIĞI bölgeyi sağlayıcıya (NASA GIBS)
+       söyler. Dış istek yalnız kullanıcı anahtarı AÇTIYSA gider; varsayılan
+       KAPALI. Kapının kendisi sunucudadır (tile_cache.resolve_tile): istek
+       rıza parametresini taşımıyorsa sunucu dışarı çıkmaz, önbellekte
+       olmayan karoya 403 verir. Rıza parametresinin adı ve değeri SUNUCUDAN
+       okunur (``/api/tile/cache/status`` ``network_opt_in``; burada kopyası
+       yok). Okunamazsa parametre eklenmez, yani kapı kapalı kalır.
+       Kalıcı ayar bu tarayıcının yerel deposundadır; okunamazsa KAPALI. */
+    var TILE_NETWORK_STORAGE_KEY = 'hrma_tile_network';
+    var TILE_NETWORK_ON = 'on';
+    var _tileAgRizasi = null;           // {param, value} sunucudan (yoksa null)
+    var _RIZA_DESENI = /^[a-z0-9_]{1,16}$/;
+
+    function tileAgAcik() {
+        try {
+            return !!global.localStorage
+                && global.localStorage.getItem(TILE_NETWORK_STORAGE_KEY) === TILE_NETWORK_ON;
+        } catch (e) { return false; }
+    }
+
+    function tileAgYaz(acik) {
+        try {
+            if (!global.localStorage) return;
+            if (acik === true) global.localStorage.setItem(TILE_NETWORK_STORAGE_KEY, TILE_NETWORK_ON);
+            else global.localStorage.removeItem(TILE_NETWORK_STORAGE_KEY);
+        } catch (e) { /* yazılamadı: tileAgAcik yine okur, açık sanılmaz */ }
+    }
+
+    function tileAgRizasiOku(d) {
+        var r = d && d.network_opt_in;
+        if (r && typeof r.param === 'string' && typeof r.value === 'string'
+                && _RIZA_DESENI.test(r.param) && _RIZA_DESENI.test(r.value)) {
+            _tileAgRizasi = { param: r.param, value: r.value };
+        }
+    }
+
+    //: Karo URL'si; rıza parametresi YALNIZ anahtar açık ve sözleşme
+    //: sunucudan okunmuşsa eklenir.
+    function tileUrl(layer, z, tx, ty) {
+        var url = '/api/tile/' + layer + '/' + z + '/' + tx + '/' + ty;
+        if (tileAgAcik() && _tileAgRizasi)
+            url += '?' + _tileAgRizasi.param + '=' + _tileAgRizasi.value;
+        return url;
+    }
+
+    function tileGeomYukle() {
+        if (_tileGeomIstendi) return;
+        _tileGeomIstendi = true;
+        fetch('/api/tile/cache/status').then(function (r) {
+            return r.ok ? r.json() : null;
+        }).then(function (d) {
+            if (d && d.tile_matrix && d.tile_matrix.levels) {
+                _tileGeom = d.tile_matrix;
+            }
+            tileAgRizasiOku(d);
+            paketliTavanOku(d);
+        }).catch(function () { /* çevrimdışı: geometri yok, karo istenmez */ });
+    }
+
+    //: Paketli katmanın tavanı sunucunun katman kataloğundan; kaynak türü
+    //: 'packaged' değilse ya da tavan geçerli bir tamsayı değilse null.
+    function paketliTavanOku(d) {
+        var k = d && d.layers && d.layers.packaged && d.layers.packaged[TILE_LAYER_PACKAGED];
+        var mz = k ? k.max_zoom : null;
+        if (k && k.source === TILE_SOURCE_PACKAGED && typeof mz === 'number'
+                && isFinite(mz) && mz >= 0 && Math.floor(mz) === mz && mz <= TILE_MAX_ZOOM)
+            _paketliTavan = mz;
+    }
+
+    //: z için {span, mw, mh} — sunucu yayımlamadıysa null (türetme YOK).
+    function tileLevel(z) {
+        if (!_tileGeom || !_tileGeom.levels) return null;
+        var lv = _tileGeom.levels[String(z)];
+        if (!lv) return null;
+        var span = lv.span_deg, mw = lv.matrix_width, mh = lv.matrix_height;
+        if (!(span > 0) || !(mw > 0) || !(mh > 0)) return null;
+        return { span: span, mw: mw, mh: mh };
+    }
+
+    function tileSpanDeg(z) {
+        var lv = tileLevel(z);
+        return lv ? lv.span : null;      // türetme yok: bilinmiyorsa null
+    }
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
     function deg2rad(d) { return d * Math.PI / 180.0; }
@@ -121,14 +323,20 @@
     // THREE.SphereGeometry varsayılan UV + equirectangular doku ile TUTARLI
     // türetilmiştir (doku sol kenarı = -180° boylam). Marker, sınır ve raycast
     // AYNI dönüşümü kullanır -> iç tutarlılık garanti.
-    function latLonToVec3(latDeg, lonDeg, radius) {
+    // ÖH harita-detay K2: dönüşümün TEK formülü latLonToXYZ'dir. Nesne
+    // üretmeden düz diziye yazar; vektör katmanları (~1,3 M köşe) bunu kullanır,
+    // Vector3 isteyen her yer latLonToVec3 üzerinden aynı formülü çağırır.
+    function latLonToXYZ(latDeg, lonDeg, radius, out, i) {
         var la = deg2rad(latDeg), lo = deg2rad(lonDeg);
         var cl = Math.cos(la);
-        return new global.THREE.Vector3(
-            radius * cl * Math.cos(lo),
-            radius * Math.sin(la),
-            -radius * cl * Math.sin(lo)
-        );
+        out[i] = radius * cl * Math.cos(lo);
+        out[i + 1] = radius * Math.sin(la);
+        out[i + 2] = -radius * cl * Math.sin(lo);
+        return out;
+    }
+    function latLonToVec3(latDeg, lonDeg, radius) {
+        var p = latLonToXYZ(latDeg, lonDeg, radius, [0, 0, 0], 0);
+        return new global.THREE.Vector3(p[0], p[1], p[2]);
     }
     function vec3ToLatLon(v) {
         var r = v.length();
@@ -202,6 +410,11 @@
         this._onTime = options.onTime || null;
         this._onReady = options.onReady || null;
         this._onError = options.onError || null;
+        // ÖH harita-detay K2: kare sonu dinleyicileri (addFrameListener).
+        this._frameListeners = [];
+        this._frame = null;           // yeniden kullanılan kare yükü
+        this._vectors = null;         // LaunchSiteVectors (yüklenemezse null)
+        this._vectorsReady = false;   // true iken eski 110m JSON bindirmesi gizli
         this._init();
     }
 
@@ -286,8 +499,11 @@
 
         // --- Küre (Blue Marble) ---
         var geo = new THREE.SphereGeometry(GLOBE_R, 96, 64);
+        // ÖH D21 / P12aB4-20: doku inmediğinde ekranda kalan TEK renk budur;
+        // srgb() atlandığı için ~#667c8d'ye açılıyor, "boş küre" koyu lacivert
+        // yerine gri-mavi görünüyordu. Specular de aynı malzemenin rengidir.
         var mat = new THREE.MeshPhongMaterial({
-            color: 0x223344, shininess: 6, specular: 0x111820
+            color: srgb(0x223344), shininess: 6, specular: srgb(0x111820)
         });
         this.globe = new THREE.Mesh(geo, mat);
         scene.add(this.globe);
@@ -302,6 +518,7 @@
 
         this._loadTexture();
         this._buildBorders();
+        this._buildVectorLOD();
         this._buildMarker();
         this._buildRaycaster();
 
@@ -314,7 +531,12 @@
         scene.add(this._tileGroup);
         this._tiles = new Map();        // anahtar layer:z:x:y -> {mesh,t,loading}
         this._tileNextT = 0;            // patch güncelleme kısma zamanı
+        // P5B4-30 — ÖNYÜKLEME SÖZLEŞMESİ: matris geometrisi sunucudan
+        // ÖNCEDEN istenir; ilk karo turuna kadar yanıt gelmiş olur.
+        // Gelmezse karo istenmez (fail-closed), tur yeniden ister.
+        tileGeomYukle();
         this._tileAnyFail = false;      // en az bir karo yüklenemedi (offline notu)
+        this._merkezDoku = null;        // ekran merkezindeki en ince çizilen karo {layer, z}
 
         this._bindEvents();
         this._resize();
@@ -388,7 +610,9 @@
         }, undefined, function () {
             // Doku yüklenemedi: mesh sahneye HİÇ eklenmez. Kozmetik katman
             // olduğu için kullanıcıya hata basılmaz; yıldızlar bağımsız yüklenir.
-            if (global.console) console.warn('LaunchSiteGlobe: Samanyolu dokusu yüklenemedi: ' + url);
+            // ÖH D21 / P12aB4-25: konsol metinleri ürünün varsayılan diliyle
+            // (İngilizce) tek dilde tutulur — ekran metni değildir, çevrilmez.
+            if (global.console) console.warn('LaunchSiteGlobe: Milky Way texture failed to load: ' + url);
         });
     };
 
@@ -410,13 +634,13 @@
             var dv = new DataView(buf);
             // Biçim: 4 bayt 'BSC1' + uint32 N + N x (float32 ra, dec, vmag),
             // little-endian. İmza tutmazsa YILDIZ ÇİZİLMEZ (uydurma yıldız yok).
-            if (buf.byteLength < 8) { self._warnStars(url, 'dosya başlığı bile yok'); return; }
+            if (buf.byteLength < 8) { self._warnStars(url, 'file has no header'); return; }
             var magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1),
                 dv.getUint8(2), dv.getUint8(3));
             if (magic !== 'BSC1') { self._warnStars(url, 'imza ' + magic); return; }
             var n = dv.getUint32(4, true);
             if (buf.byteLength < 8 + 12 * n) {
-                self._warnStars(url, 'dosya kesik (' + buf.byteLength + ' bayt, ' + n + ' kayıt)');
+                self._warnStars(url, 'file truncated (' + buf.byteLength + ' bytes, ' + n + ' records)');
                 return;
             }
             var groups = [], i;
@@ -455,12 +679,13 @@
             }
             self._skyStarCount = count;
         }).catch(function (e) {
-            self._warnStars(url, e && e.message ? e.message : 'okunamadı');
+            self._warnStars(url, e && e.message ? e.message : 'unreadable');
         });
     };
 
     LaunchSiteGlobe.prototype._warnStars = function (url, why) {
-        if (global.console) console.warn('LaunchSiteGlobe: yıldız katalogu kullanılamadı (' + url + '): ' + why);
+        // ÖH D21 / P12aB4-25 — bkz. _buildSky(): konsol tek dilde (İngilizce).
+        if (global.console) console.warn('LaunchSiteGlobe: star catalogue unavailable (' + url + '): ' + why);
     };
 
     // Gökyüzü durumu (arayüz epoch beyanı + otomatik test kancası).
@@ -518,11 +743,137 @@
                 });
                 group.add(new THREE.LineSegments(g, m));
             };
-            mkLines(layers.coastline, 0x8fd6ff, 0.34);
-            mkLines(layers.borders, 0xbfe6ff, 0.5);
+            // ÖH D21 / P12aB4-20: bu iki çağrı srgb() dönüşümünü ATLIYORDU;
+            // çıkış sRGB kodlandığı için ham hex lineer sayılıp ekranda
+            // açılıyordu (0x8fd6ff -> ~#c5ecff, 0xbfe6ff -> ~#e0f4ff), koyu
+            // okyanus üstünde kıyı/sınır ayrımı zayıflıyordu.
+            mkLines(layers.coastline, srgb(0x8fd6ff), 0.34);
+            mkLines(layers.borders, srgb(0xbfe6ff), 0.5);
+            // ÖH harita-detay K2: bu bindirme artık 110m YEDEĞİDİR. Vektör
+            // basamakları (launch_site_vectors.js) hazırsa gizli doğar; vektör
+            // varlıkları yüklenemez ya da sonradan bozulursa yeniden görünür.
+            group.visible = !self._vectorsReady;
             self.bordersGroup = group;
             self.scene.add(group);
         }).catch(function () { /* sınır bindirmesi opsiyonel; sessiz geç */ });
+    };
+
+    /* ÖH harita-detay K2 — VEKTÖR AYRINTI BASAMAKLARI (tasarım §3.1-3.2).
+       Natural Earth 110m/50m/10m çizgileri hrma/static/map/ altındaki HMV1
+       varlıklarından gelir; basamak, hücre ve ufuk ayıklaması
+       launch_site_vectors.js'tedir. Bu dosya yalnız sahneyi, koordinat
+       dönüşümünü ve renk dönüşümünü verir, kare kancasıyla besler.
+       YEDEK: modül yoksa, manifest ya da 110m ikilisi yüklenemezse ya da kanıtı
+       tutmazsa eski earth_borders.json bindirmesi (_buildBorders) ekranda
+       KALIR, yani görünüm bugünkünden kötüye gitmez. Sahte çizgi üretilmez. */
+    LaunchSiteGlobe.prototype._buildVectorLOD = function () {
+        var V = global.LaunchSiteVectors, self = this;
+        if (!V || this.opts.vectorDetail === false) return;
+        var v = new V({
+            THREE: global.THREE,
+            scene: this.scene,
+            latLonToXYZ: latLonToXYZ,
+            srgb: srgb,
+            globeRadius: GLOBE_R,
+            rEarthM: R_EARTH_M,
+            baseUrl: this.opts.mapBaseUrl || '/static/map/',
+            onReady: function () {
+                if (self._disposed) return;
+                self._vectorsReady = true;
+                if (self.bordersGroup) self.bordersGroup.visible = false;
+            },
+            onFail: function () {
+                // Yedeğe dön: eski 110m görünümü yeniden açılır.
+                self._vectorsReady = false;
+                if (self.bordersGroup) self.bordersGroup.visible = true;
+            }
+        });
+        this._vectors = v;
+        this.addFrameListener(function (f) { v.update(f); });
+        v.start();
+    };
+
+    // Vektör katmanının canlı durumu (etiket notu, kabul ölçümü, testler).
+    // Modül hiç kurulmadıysa yalnız yedeğin durumu döner; sayı uydurulmaz.
+    LaunchSiteGlobe.prototype.getVectorInfo = function () {
+        var legacy = !!(this.bordersGroup && this.bordersGroup.visible);
+        if (!this._vectors) return { durum: 'yok', legacyVisible: legacy };
+        var info = this._vectors.getInfo();
+        info.legacyVisible = legacy;
+        return info;
+    };
+
+    /* ÖH harita-detay K2 — KARE KANCASI (tasarım §3.3, "Kanca").
+       fn(f) her karenin sonunda, çizimden hemen önce çağrılır. Yük nesnesi
+       yeniden kullanılır (kare başına çöp üretilmez); saklanacaksa kopyalanmalı:
+         f.camera          THREE.PerspectiveCamera (salt okunur kullanılmalı)
+         f.target          controls.target (THREE.Vector3)
+         f.metersPerPixel  ekran merkezinde m/px (getScaleInfo ile aynı formül)
+         f.zWeb            log2(Z_WEB_Z0_MPP / metersPerPixel)
+         f.camAltitudeM    kameranın küre yüzeyinden yüksekliği [m]
+         f.size            {width, height} CSS piksel
+         f.globeRadius     küre yarıçapı [sahne birimi]
+         f.globalViewDist  'Tüm Dünya' düğmesinin (viewGlobe) kamera ile Dünya
+                           merkezi arası mesafesi [sahne birimi]; TEK kaynak
+                           globalViewDist(camera). Etiket modülü tüm Dünya
+                           tavanını buna da bağlar (ana model kararı K-2).
+       Dönüş: dinleyiciyi kaldıran işlev. Dinleyici hata atarsa çıkarılır ve
+       döngü sürer (bir katmanın hatası küreyi durdurmaz). */
+    LaunchSiteGlobe.prototype.addFrameListener = function (fn) {
+        if (typeof fn !== 'function') return function () {};
+        var list = this._frameListeners;
+        list.push(fn);
+        return function () {
+            var i = list.indexOf(fn);
+            if (i >= 0) list.splice(i, 1);
+        };
+    };
+
+    // Ekran merkezindeki m/px — getScaleInfo ve kare kancasının TEK formülü.
+    LaunchSiteGlobe.prototype._metersPerPixel = function () {
+        var dist = this.camera.position.distanceTo(this.controls.target);
+        var fov = deg2rad(this.camera.fov);
+        var vh = this.container.clientHeight || 600;
+        return (2 * dist * Math.tan(fov / 2)) / vh * M_PER_UNIT;
+    };
+
+    LaunchSiteGlobe.prototype._emitFrame = function () {
+        var list = this._frameListeners;
+        if (!list || !list.length) return;
+        var f = this._frame || (this._frame = { size: {} });
+        var mpp = this._metersPerPixel();
+        f.camera = this.camera;
+        f.target = this.controls.target;
+        f.metersPerPixel = mpp;
+        f.zWeb = Math.log2(Z_WEB_Z0_MPP / mpp);
+        f.camAltitudeM = this.camera.position.length() * M_PER_UNIT - R_EARTH_M;
+        f.size.width = this.container.clientWidth || 800;
+        f.size.height = this.container.clientHeight || 600;
+        f.globeRadius = GLOBE_R;
+        f.globalViewDist = globalViewDist(this.camera);
+        for (var i = list.length - 1; i >= 0; i--) {
+            try {
+                list[i](f);
+            } catch (e) {
+                // Konsol metni tek dilde, İngilizce (P12aB4-25).
+                list.splice(i, 1);
+                if (global.console && global.console.error)
+                    global.console.error('LaunchSiteGlobe: frame listener removed after error', e);
+            }
+        }
+    };
+
+    // Dinamik near (yukarıdaki NEAR_* açıklaması). %1'den küçük değişimde
+    // izdüşüm matrisi yeniden kurulmaz.
+    LaunchSiteGlobe.prototype._updateNear = function () {
+        var cam = this.camera;
+        var alt = cam.position.length() - GLOBE_R;
+        var dT = cam.position.distanceTo(this.controls.target);
+        var n = clamp(NEAR_ORANI * Math.min(alt, dT), NEAR_MIN, NEAR_MAX);
+        if (Math.abs(n - cam.near) > cam.near * 0.01) {
+            cam.near = n;
+            cam.updateProjectionMatrix();
+        }
     };
 
     // Ekran-sabit boyutlu işaretçiler: sahne birimi boyutu SABİT bir işaretçi
@@ -549,10 +900,18 @@
         var pin = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.0, 16), pinMat);
         pin.position.y = 0.5;
         grp.add(pin);
+        // Taban halkası yüzeyle çakışık durur; karo yaması da artık aynı
+        // yarıçapta olduğu için halka onun da ÖNÜNE yazılmalı (ÖH D17 /
+        // P12aB4-03). Yanlılık karo yamasınınkinden (TILE_DEPTH_BIAS) bir
+        // basamak daha güçlüdür.
         var ringMat = new THREE.MeshBasicMaterial({
-            color: srgb(0xff8c33), transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+            color: srgb(0xff8c33), transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+            polygonOffset: true,
+            polygonOffsetFactor: TILE_DEPTH_BIAS * 2,
+            polygonOffsetUnits: TILE_DEPTH_BIAS * 2 });
         var ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.66, 24), ringMat);
         ring.rotation.x = -Math.PI / 2;
+        ring.renderOrder = 2;                 // karo yamasından (1) sonra
         grp.add(ring);
         grp.visible = false;
         this.marker = grp;
@@ -748,31 +1107,69 @@
         this.clearFlightPath();
         if (!series || !series.time || !series.time.length) return;
         h0 = h0 || 0;
+        // ÖH D22 / OH-D18-10 — datum SÖZLEŞMESİ: varsayım değil, okuma.
+        var datum = series.altitude_datum || ALT_DATUM_VARSAYILAN;
+        if (ALT_DATUM_BILINEN.indexOf(datum) < 0) {
+            // FAIL-CLOSED: tanınmayan datumda yolu çizmek, h0 kadar yanlış
+            // bir uçuşu doğruymuş gibi göstermektir.
+            if (this._onError) this._onError('flight_altitude_datum_unknown');
+            return;
+        }
         var n = series.time.length;
         var lat = new Array(n), lon = new Array(n), alt = new Array(n);
-        // 6-DOF çözücü z=0'dan (deniz seviyesi) kalkar; series.altitude deniz
-        // seviyesi ÜSTÜ irtifadır (ENU yukarı bileşeni = altitude, saha
-        // rakımı h0 yalnız yatay eğrilik teriminde, etkisi ihmal edilebilir).
+        // ÖH D19 / P4B3-21 — DATUM DÜZELTİLDİ.
+        // Eski yorum "series.altitude deniz seviyesi ÜSTÜ irtifadır" diyor
+        // ve h0'ı düşey eksende ATIYORDU (`alt[i] = series.altitude[i]`).
+        // Oysa 6-DOF çözücüsü irtifayı FIRLATMA SAHASI ÜSTÜNDEN (AGL)
+        // yayımlar — bunu kendisi de söylüyor
+        // (`summary.apogee_datum = 'above_launch_site'`). Küre yüzeyi
+        // deniz seviyesidir; AGL bir irtifayı deniz seviyesi datumuna
+        // çizmek 1500 m'lik bir sahada uçuş yolunu araziye 1500 m
+        // gömüyordu (kalkış noktası dağın içinde başlıyordu).
+        // `enuToGeodetic` zaten h0 + up döndürüyor; artık ONU kullanıyoruz.
         for (var i = 0; i < n; i++) {
+            // `enuToGeodetic` üçüncü konum bileşenini SAHA ÜSTÜ 'up' olarak
+            // alır ve h0 + up döndürür; MSL bildiren bir dizi önce h0 kadar
+            // indirgenir (aynı sayı iki kez sayılmasın).
+            var up = (datum === ALT_DATUM_MSL)
+                ? (series.altitude[i] - h0) : series.altitude[i];
             var g = enuToGeodetic(lat0, lon0, h0,
                 series.north ? series.north[i] : 0,
                 series.east ? series.east[i] : 0,
-                series.altitude[i]);
-            lat[i] = g.lat; lon[i] = g.lon; alt[i] = series.altitude[i];
+                up);
+            lat[i] = g.lat; lon[i] = g.lon; alt[i] = g.alt;
         }
         this._flight = {
+            // `alt` DENİZ SEVİYESİ datumundadır (h0 + AGL); okuma bloğu ve
+            // apoje türetimi bu datumdan okur.
+            altDatum: ALT_DATUM_MSL,
+            // Girdi dizisinin datumu (okunan ya da sözleşme varsayılanı):
+            // tüketici hangi sözleşmeye göre çizildiğini görebilsin.
+            altSeriesDatum: datum,
             t: series.time.slice(), lat: lat, lon: lon, alt: alt,
             speed: series.speed ? series.speed.slice() : null,
             lat0: lat0, lon0: lon0, h0: h0,
-            apogee: null, apogeeIdx: 0, range: 0
+            apogee: null, apogeeIdx: 0, downrange: null, range: 0
         };
-        // Apoje + menzil türet (çözümden)
+        // Apoje türet (çözümden)
         var maxA = -1e9, ai = 0;
         for (var k = 0; k < n; k++) { if (alt[k] > maxA) { maxA = alt[k]; ai = k; } }
         this._flight.apogee = maxA; this._flight.apogeeIdx = ai;
-        var last = latLonToVec3(lat[n - 1], lon[n - 1], GLOBE_R);
+        // ÖH D18 / P12aB4-10 — YATAY MESAFE ARTIK NOKTA BAZLI.
+        // Eskiden yalnız TEK bir terminal sayı vardı (son nokta ile kalkış
+        // noktası arasındaki yüzey kirişi) ve canlı okuma bloğunda oynatım
+        // boyunca SABİT duruyordu: t = 0'da "Altitude 0 m" ile yan yana
+        // "Menzil 8,2 km" yazıyordu. Dizi burada bir kez kurulur (her karede
+        // Vector3 üretmemek için), terminal değer de AYNI diziden okunur —
+        // yani "anlık" ile "çözüm sonu" tek tanımdan gelir.
         var first = latLonToVec3(lat[0], lon[0], GLOBE_R);
-        this._flight.range = last.distanceTo(first) * M_PER_UNIT; // yüzey kirişi ~ menzil
+        var dr = new Array(n);
+        for (var di = 0; di < n; di++) {
+            dr[di] = latLonToVec3(lat[di], lon[di], GLOBE_R)
+                .distanceTo(first) * M_PER_UNIT;
+        }
+        this._flight.downrange = dr;
+        this._flight.range = dr[n - 1];   // yüzey kirişi, ÇÖZÜM SONUNDA
         this._buildFlightGeometry();
         this._playT = 0; this._playing = false;
         this._emitTime();
@@ -1073,43 +1470,124 @@
         var f = this._flight, n = f.t.length;
         var T = f.t[n - 1];
         var i = this._curIdx || 0;
+        // ÖH D18 / P12aB4-10: canlı (indise bağlı) ve terminal (tüm çözüm)
+        // alanlar artık ADLARIYLA ayrılıyor. `downrange` indisle değişir;
+        // `apogee`/`range` tüm çözümün özetidir ve tüketici onları AYRI bir
+        // "uçuş özeti" bloğunda basar — canlı satır kalıbında değil.
         this._onTime({
             t: this._playT, tMax: T, frac: T > 0 ? this._playT / T : 0,
             playing: this._playing,
             alt: f.alt[i], lat: f.lat[i], lon: f.lon[i],
+            // ÖH D22 / OH-D18-10 — `alt` ve `apogee` DENİZ SEVİYESİ
+            // datumundadır (çizim küre yüzeyinden ölçer). Çözücünün kendi
+            // apojesi ise SAHA ÜSTÜdür (`apogee_datum`). İki sayı aynı
+            // sözcükle ("İrtifa"/"Apoje") gösterilince 1500 m'lik bir sahada
+            // 1500 m'lik sahte bir fark doğuyordu. Kardeş alanlar TEK
+            // kaynaktan (alt − h0) türetilir; datum adı da yanlarında gider.
+            altDatum: f.altDatum, altAgl: f.alt[i] - f.h0,
+            siteElevation: f.h0,
             speed: f.speed ? f.speed[i] : null,
-            apogee: f.apogee, range: f.range
+            downrange: f.downrange ? f.downrange[i] : null,
+            apogee: f.apogee, apogeeAgl: f.apogee - f.h0, range: f.range
         });
     };
 
     // ---- Ölçek / kamera-yükseklik göstergesi -------------------------------
+    /* Ekrana GERÇEKTEN çizilmiş (mesh'i olan) karo sayısı — TEK TANIM.
+       Negatif önbellek girdileri ve başarısız karolar sayılmaz.
+       getScaleInfo() ile getTileInfo() aynı kaynaktan beslenir; yoksa iki
+       gösterge birbiriyle çelişebilir (ÖH D18 / P12aB4-07). */
+    LaunchSiteGlobe.prototype._drawnTileCount = function () {
+        var n = 0;
+        if (this._tiles) {
+            this._tiles.forEach(function (e) { if (e && e.mesh) n += 1; });
+        }
+        return n;
+    };
+
     LaunchSiteGlobe.prototype.getScaleInfo = function () {
-        var dist = this.camera.position.distanceTo(this.controls.target);
-        var fov = deg2rad(this.camera.fov);
-        var vh = this.container.clientHeight || 600;
-        var worldPerPx = (2 * dist * Math.tan(fov / 2)) / vh;   // sahne birimi/px
-        var mPerPx = worldPerPx * M_PER_UNIT;
+        var mPerPx = this._metersPerPixel();
         var camAltM = this.camera.position.length() * M_PER_UNIT - R_EARTH_M;
+        // ÖH D18 / P12aB4-07: "küresel doku ~9 km hücre" notu, ekranda
+        // GİBS karosu (~500 m) çizilmediği sürece doğrudur; karo çizilirken
+        // basılırsa ürün aynı anda 18 kat farklı iki çözünürlük beyan eder.
+        // ÖLÇÜLDÜ: 0-400 km bandında dört kamera yüksekliğinde de iki beyan
+        // yan yana duruyordu (karo kapısı 1.500 km, not kapısı 400 km).
+        // Not artık YALNIZ gerçekten taban dokusuna bakılırken çıkar;
+        // karolar çevrimdışı/başarısız olup düştüğünde geri gelir.
+        var tilesDrawn = this._drawnTileCount() > 0;
+        // harita-detay K4 (tasarım §4.1-4): büyütme notunun koşulu "karo
+        // çizildi mi" DEĞİL, "ekran merkezindeki en ince çizilen dokunun
+        // m/px'i > TEXTURE_MAG_RATIO x ekran m/px mi". Doku m/px'i z
+        // seçiminin kendi formülüdür (TILE_Z0_MPP / 2^z).
+        var mrk = tilesDrawn ? this._merkezDoku : null;
+        var texMpp = mrk ? TILE_Z0_MPP / Math.pow(2, mrk.z) : null;
         return {
             metersPerPixel: mPerPx,
             camAltitudeM: camAltM,
-            textureCoarse: camAltM < TEXTURE_NOTE_ALT_M
+            tilesDrawn: tilesDrawn,
+            textureCoarse: camAltM < TEXTURE_NOTE_ALT_M && !tilesDrawn,
+            textureLayer: mrk ? mrk.layer : null,
+            textureMpp: texMpp,
+            textureMagnified: !!(texMpp && mPerPx > 0 && texMpp > TEXTURE_MAG_RATIO * mPerPx)
         };
     };
 
     // ---- GIBS uydu karo yaması (patch mesh) --------------------------------
-    // Ön yüz durum kancası: patch aktif mi + attribution + herhangi bir karo
-    // başarısız oldu mu (offline notu). HTML/i18n bunu okuyarak "NASA GIBS —
-    // Blue Marble (~500 m)" atıfını ya da çevrimdışı notunu gösterir.
+    // Ön yüz durum kancası: patch aktif mi + atıf anahtarı + kaç karo düştü.
+    //
+    // ÖH D21 / P12aB4-19 — ÖLÇÜLEN KUSUR: bu blok "HTML/i18n bunu okuyarak …
+    // çevrimdışı notunu gösterir" diyordu ama iki alanın da GERÇEK tüketicisi
+    // yoktu: `attribution` hiçbir yerden okunmuyor (HTML sabit i18n metnini
+    // basıyordu — aynı cümlenin İKİ kaynağı), `anyFail` yalnız önbellek
+    // imzasının bir bitiydi ve ekranda çevrimdışı notu HİÇ görünmüyordu.
+    // Artık: atıf METNİ tek kaynakta (i18n sözlüğü) kalır, bu blok yalnız
+    // KATMANIN künye ANAHTARINI yayımlar; düşen karo sayısı canlı ölçümdür ve
+    // launch_site.html #ls-tile-offline notunu ona bağlar.
     LaunchSiteGlobe.prototype.getTileInfo = function () {
-        var active = !!(this._tiles && this._tiles.size > 0);
+        // ÖH D17 / P12aB4-04: negatif önbellek girdileri de Map'te durduğu
+        // için "kaç karo var" artık Map boyutu DEĞİL, ekrana gerçekten
+        // çizilmiş (mesh'i olan) karo sayısıdır. Başarısızlar ayrı sayılır;
+        // sayı uydurulmaz.
+        var cizilen = this._drawnTileCount(), basarisiz = 0;
+        if (this._tiles) {
+            this._tiles.forEach(function (e) {
+                if (e && !e.mesh && e.failed) basarisiz += 1;
+            });
+        }
+        // Künye, ekran merkezinde ÇİZİLEN katmanınkidir (paketli ya da
+        // GIBS); merkezde karo yoksa varsayılan (GIBS) katmanın anahtarı.
+        var katman = (cizilen > 0 && this._merkezDoku) ? this._merkezDoku.layer : TILE_LAYER;
         return {
-            active: active,
-            layer: TILE_LAYER,
-            attribution: 'NASA GIBS — Blue Marble Shaded Relief + Bathymetry (~500 m)',
+            active: cizilen > 0,
+            layer: katman,
+            // Metin değil ANAHTAR: çeviri tek kaynakta (i18n_launch_site.js).
+            attributionKey: TILE_ATTRIBUTION_KEY[katman] || null,
+            // Oturum boyunca yapışkan bayrak — önbellek imzası için.
             anyFail: !!this._tileAnyFail,
-            count: this._tiles ? this._tiles.size : 0
+            count: cizilen,
+            // Şu anki karo kümesinde düşen karo sayısı (canlı ölçüm; ekrandaki
+            // çevrimdışı notu buna bağlıdır, yapışkan bayrağa değil).
+            failedCount: basarisiz
         };
+    };
+
+    // K5a — ağ anahtarı (kalıcı, bu tarayıcıda; varsayılan KAPALI).
+    LaunchSiteGlobe.prototype.getTileNetwork = function () { return tileAgAcik(); };
+
+    // Anahtarı yazar ve GERÇEKTE kalan durumu döndürür (yazılamadıysa
+    // false). Açılınca düşmüş karoların negatif önbelleği temizlenir ki
+    // rızayla yeniden istensinler; kapanınca çizilmiş karolar kalır (yerel
+    // veridir, dış istek değildir).
+    LaunchSiteGlobe.prototype.setTileNetwork = function (acik) {
+        tileAgYaz(acik === true);
+        var simdi = tileAgAcik();
+        if (simdi && this._tiles) {
+            var silinecek = [];
+            this._tiles.forEach(function (e, k) { if (e && e.failed && !e.mesh) silinecek.push(k); });
+            for (var i = 0; i < silinecek.length; i++) this._tiles.delete(silinecek[i]);
+        }
+        return simdi;
     };
 
     // Kameranın baktığı bölgeye gereken karo bloğunu belirle, eksikleri yükle,
@@ -1136,8 +1614,26 @@
         if (this.controls.target.length() < 1e-3) return;
         var c = vec3ToLatLon(this.controls.target);
 
-        var span = tileSpanDeg(z);
-        var mw = Math.ceil(360.0 / span), mh = Math.ceil(180.0 / span);
+        // P5B4-30: geometri SUNUCUDAN. Yüklenmediyse bu turda karo
+        // istenmez (fail-closed) ve bir sonraki tur için istenir.
+        var lv = tileLevel(z);
+        if (!lv) { tileGeomYukle(); this._pruneTiles(); return; }
+        // K4 kaynak sırası: paketli katman (ağsız) her zaman, tavanına
+        // kırpılmış z'de; GIBS yalnız z paketli tavanın üstündeyse. Paketli
+        // tavan bilinmiyorsa (sunucu yayımlamadı) yalnız GIBS (eski yol).
+        if (_paketliTavan !== null) this._patchKatmani(TILE_LAYER_PACKAGED, Math.min(z, _paketliTavan), c);
+        if (_paketliTavan === null || z > _paketliTavan) this._patchKatmani(TILE_LAYER, z, c);
+        this._merkezDoku = this._merkezDokusu(c);
+        this._pruneTiles();
+    };
+
+    // Bir katmanın (layer) z düzeyinde merkez etrafı (2R+1)² karo bloğu:
+    // eksikleri yükle, mevcutları LRU'da tazele, çizilmemiş karonun
+    // ebeveynini (yedek) tut.
+    LaunchSiteGlobe.prototype._patchKatmani = function (layer, z, c) {
+        var lv = tileLevel(z);
+        if (!lv) return;
+        var span = lv.span, mw = lv.mw, mh = lv.mh;
         var cx = Math.floor((c.lon + 180.0) / span);
         var cy = Math.floor((90.0 - c.lat) / span);
         var R = Math.min(TILE_PATCH_R, TILE_PATCH_R_MAX);
@@ -1147,12 +1643,67 @@
             if (ty < 0 || ty >= mh) continue;             // kutup kırpma (singularity yok)
             for (var dx = -R; dx <= R; dx++) {
                 var tx = (((cx + dx) % mw) + mw) % mw;      // tarih çizgisi sarmalama
-                var key = TILE_LAYER + ':' + z + ':' + tx + ':' + ty;
-                if (this._tiles.has(key)) this._touchTile(key);
-                else this._buildTilePatch(TILE_LAYER, z, tx, ty);
+                var key = layer + ':' + z + ':' + tx + ':' + ty;
+                var entry = this._tiles.get(key);
+                if (entry && entry.failed) {
+                    // Negatif önbellek (ÖH D17 / P12aB4-04): geri çekilme
+                    // süresi dolmadan yeniden istenmez; TILE_FAIL_MAX denemeden
+                    // sonra retryAt = Infinity ile kalıcı olarak susar.
+                    if (performance.now() >= entry.retryAt) {
+                        this._tiles.delete(key);
+                        this._buildTilePatch(layer, z, tx, ty);
+                        var yeni = this._tiles.get(key);
+                        if (yeni) yeni.fails = entry.fails;
+                    } else {
+                        // ÖH D30 · OH-D19-27 — NEGATİF GİRDİ DE LRU'DA TAZELENİR.
+                        // ÖLÇÜLDÜ (a2/once.json: OHD1927_failed_lru_tazeleme = 0):
+                        // başarısız karo girdisi `_touchTile` görmüyordu, yani
+                        // Map'in insertion-order sırasında EN ESKİ kalıyordu ve
+                        // `_pruneTiles` cap aşımında İLK onu siliyordu. Girdi
+                        // silinince `fails` sayacı da gidiyor: kamera aynı
+                        // karoya bakmaya devam ederken deneme sayacı sıfırlanıp
+                        // TILE_FAIL_MAX susturması hiç devreye girmiyor, düşen
+                        // karo sonsuza dek yeniden isteniyordu. Geri çekilme
+                        // penceresi İÇİNDEki girdi de bakılan karo kümesinin
+                        // parçasıdır — dokunulur; yeniden istek YAPILMAZ
+                        // (retryAt kapısı yukarıdaki dalda durur).
+                        this._touchTile(key);
+                    }
+                } else if (entry) this._touchTile(key);
+                else this._buildTilePatch(layer, z, tx, ty);
+                var son = this._tiles.get(key);
+                if (!(son && son.mesh)) this._ebeveynTut(layer, z, tx, ty);
             }
         }
-        this._pruneTiles();
+    };
+
+    // Ebeveyn yedeği: çizilmemiş (yükleniyor/başarısız) karonun çizilmiş en
+    // yakın atasını LRU'da tazele (budanmasın, çizilmeye devam etsin). Yeni
+    // istek ATILMAZ; ata yalnız zaten çizilmişse tutulur.
+    LaunchSiteGlobe.prototype._ebeveynTut = function (layer, z, tx, ty) {
+        for (var pz = z - 1; pz >= TILE_PARENT_MIN_ZOOM; pz--) {
+            tx = Math.floor(tx / 2); ty = Math.floor(ty / 2);
+            var e = this._tiles.get(layer + ':' + pz + ':' + tx + ':' + ty);
+            if (e && e.mesh) { this._touchTile(layer + ':' + pz + ':' + tx + ':' + ty); return; }
+        }
+    };
+
+    // Ekran merkezini (c) kapsayan, ÇİZİLMİŞ en ince karo: {layer, z} ya da
+    // null. Not ve künye bunu söyler (en ince z önce; aynı z'de GIBS önce).
+    LaunchSiteGlobe.prototype._merkezDokusu = function (c) {
+        var katmanlar = [TILE_LAYER, TILE_LAYER_PACKAGED];
+        for (var z = TILE_MAX_ZOOM; z >= TILE_PARENT_MIN_ZOOM; z--) {
+            var lv = tileLevel(z);
+            if (!lv) continue;
+            var tx = (((Math.floor((c.lon + 180.0) / lv.span)) % lv.mw) + lv.mw) % lv.mw;
+            var ty = Math.floor((90.0 - c.lat) / lv.span);
+            if (ty < 0 || ty >= lv.mh) continue;
+            for (var i = 0; i < katmanlar.length; i++) {
+                var e = this._tiles.get(katmanlar[i] + ':' + z + ':' + tx + ':' + ty);
+                if (e && e.mesh) return { layer: katmanlar[i], z: z };
+            }
+        }
+        return null;
     };
 
     // Tek karo için kendi yama geometrisi + dokuyu backend'den yükle.
@@ -1161,7 +1712,7 @@
         var key = layer + ':' + z + ':' + tx + ':' + ty;
         // Rezervasyon (aynı karo iki kez yüklenmesin); mesh doku gelince eklenir.
         this._tiles.set(key, { mesh: null, t: performance.now(), loading: true });
-        var url = '/api/tile/' + layer + '/' + z + '/' + tx + '/' + ty;
+        var url = tileUrl(layer, z, tx, ty);
         new THREE.TextureLoader().load(url, function (tex) {
             if (self._disposed) { tex.dispose(); return; }
             var entry = self._tiles.get(key);
@@ -1170,13 +1721,34 @@
             tex.encoding = THREE.sRGBEncoding || tex.encoding;
             tex.anisotropy = Math.min(8, self.renderer.capabilities.getMaxAnisotropy());
             var mesh = self._makeTileMesh(z, tx, ty, tex);
+            // P5B4-30: geometri bilinmiyorsa yama kurulmadı — doku
+            // serbest bırakılır, sahte kutu çizilmez (fail-closed).
+            if (!mesh) { tex.dispose(); self._tiles.delete(key); return; }
             self._tileGroup.add(mesh);
             entry.mesh = mesh; entry.loading = false; entry.t = performance.now();
         }, undefined, function () {
             // Offline / GIBS erişilemez / 503 → SAHTE doku YOK, mesh EKLENMEZ.
             // Taban Blue Marble o hücrede görünür (kısmi yükleme kabul).
-            self._tiles.delete(key);
+            //
+            // ÖH D17 / P12aB4-04: anahtar Map'ten SİLİNİYORDU; 250 ms sonraki
+            // tarama aynı karoyu "hiç denenmemiş" sanıp yeniden istiyordu.
+            // Çevrimdışı ölçüm: 25 karo / 0,25 s = 100 istek/sn (~360.000/saat)
+            // ve sunucuda her istek 8 sn'lik bir dış GIBS denemesi açıyordu.
+            // Artık başarısızlık NEGATİF ÖNBELLEĞE yazılır: anahtar Map'te
+            // `failed` durumuyla kalır, üstel geri çekilme (backoff) süresi
+            // dolmadan yeniden istenmez ve deneme sayısı TILE_FAIL_MAX'te
+            // durur (o karo oturum boyunca bir daha istenmez).
             self._tileAnyFail = true;
+            if (self._disposed) { self._tiles.delete(key); return; }
+            var prev = self._tiles.get(key);
+            var tries = (prev && prev.fails ? prev.fails : 0) + 1;
+            self._tiles.set(key, {
+                mesh: null, loading: false, failed: true, fails: tries,
+                t: performance.now(),
+                retryAt: (tries >= TILE_FAIL_MAX)
+                    ? Infinity
+                    : performance.now() + TILE_FAIL_BACKOFF_MS * Math.pow(2, tries - 1),
+            });
         });
     };
 
@@ -1185,7 +1757,11 @@
     // bağımsız, iç tutarlı.
     LaunchSiteGlobe.prototype._makeTileMesh = function (z, tx, ty, tex) {
         var THREE = global.THREE;
+        // P5B4-30: açıklık sunucudan; bilinmiyorsa yama KURULMAZ (bir
+        // karo, geometrisi bilinmeden Dünya'nın hangi parçasını
+        // kapladığını söyleyemez — uydurma kutu çizilmez).
         var span = tileSpanDeg(z);
+        if (!(span > 0)) return null;
         var lonW = -180.0 + tx * span;
         var latN = 90.0 - ty * span;
         var latS = latN - span;
@@ -1214,9 +1790,22 @@
         geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
         geo.setIndex(idx);
         geo.computeVertexNormals();
+        // Karo yaması taban küreyle ÇAKIŞIK (TILE_RADIUS = GLOBE_R). Ayrım
+        // geometrik kaydırmayla değil derinlik yanlılığıyla yapılır: karo
+        // parçaları taban küreden bir tık öne yazılır, sahte irtifa üretilmez.
         var mat = new THREE.MeshPhongMaterial({
-            map: tex, shininess: 4, specular: 0x0a0e12 });   // headlight ile tutarlı
-        return new THREE.Mesh(geo, mat);
+            // ÖH D21 / P12aB4-20: specular DOKU değil DÜZ MALZEME RENGİDİR,
+            // dolayısıyla srgb() ondan da muaf değildir (ham hâlde ~#3a4450'ye
+            // açılıp parlaklığı kaldırıyordu). Doku (`map`) elbette çevrilmez.
+            map: tex, shininess: 4, specular: srgb(0x0a0e12),  // headlight ile tutarlı
+            polygonOffset: true,
+            polygonOffsetFactor: TILE_DEPTH_BIAS,
+            polygonOffsetUnits: TILE_DEPTH_BIAS });
+        var mesh = new THREE.Mesh(geo, mat);
+        // Taban küreden (varsayılan 0) sonra; ince z kaba z'den (ebeveyn
+        // yedeği) sonra çizilir: çakışık yüzeyde ince karo üstte kalır.
+        mesh.renderOrder = 1 + z;
+        return mesh;
     };
 
     // LRU: dokunulan karoyu Map'in sonuna taşı (insertion-order tazeleme).
@@ -1287,6 +1876,9 @@
             // yerel görünümde tek koruma budur.
             if (self.camera.position.length() < SURFACE_MIN_LEN)
                 self.camera.position.setLength(SURFACE_MIN_LEN);
+            // Kamera son konumunda: near'ı uyarla, sonra katmanları besle.
+            self._updateNear();
+            self._emitFrame();
             self.renderer.render(self.scene, self.camera);
         }
         loop();
@@ -1311,6 +1903,8 @@
         if (this._raf) cancelAnimationFrame(this._raf);
         this.clearFlightPath();
         this._clearTilePatches();        // GIBS karo mesh/doku GPU belleğini boşalt
+        this._frameListeners = [];       // kare kancaları (vektör, etiket)
+        if (this._vectors) { this._vectors.dispose(); this._vectors = null; }
         this._disposeSky();              // gök küresi + yıldız kovaları
         if (this.renderer) {
             this.renderer.dispose();
@@ -1321,6 +1915,8 @@
 
     // Dışa aç
     LaunchSiteGlobe.latLonToVec3 = latLonToVec3;
+    LaunchSiteGlobe.latLonToXYZ = latLonToXYZ;
+    LaunchSiteGlobe.Z_WEB_Z0_MPP = Z_WEB_Z0_MPP;
     LaunchSiteGlobe.vec3ToLatLon = vec3ToLatLon;
     LaunchSiteGlobe.enuToGeodetic = enuToGeodetic;
     LaunchSiteGlobe.gmstDeg = gmstDeg;

@@ -95,8 +95,21 @@ class TestKorumasizSilmeYok:
 
 class TestKaynakDerlenebilir:
     def test_hedefler_ayristirilabilir(self):
+        """ÇEVRİLDİ (ÖH D22 · P13B1-10): gövde İDDİASIZ VE VAKUMLUYDU.
+
+        ``_kaynaklar()`` yalnız DİSKTE OLAN hedefleri veriyor; hedef
+        dosyaların hepsi taşınsa/silinse döngü hiç dönmez ve test yeşil
+        kalırdı — "kaynaklar derlenebiliyor" derken hiçbir kaynağa
+        bakmamış olurdu. Artık hedeflerin gerçekten tarandığı iddiaya
+        yazılı.
+        """
+        taranan = []
         for p, s in _kaynaklar():
             ast.parse(s)
+            taranan.append(p)
+        eksik = [p for p in HEDEFLER if p not in taranan]
+        assert not eksik, 'hedef kaynak diskte yok: %s' % eksik
+        assert taranan, 'hiç kaynak taranmadı (vakumluk)'
 
 
 class TestGuvenliSilmeDavranisi:

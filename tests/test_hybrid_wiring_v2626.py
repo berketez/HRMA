@@ -227,10 +227,21 @@ class TestOptimumSearchSeesExpansionRatio:
             assert p_large < 0.5 * p_small, (
                 f'{path}: ε 4->16 çıkış basıncını {p_small} -> {p_large} '
                 f'yaptı; büyük genişlemede belirgin düşüş beklenir')
+        # ÇEVRİLDİ — ÖH D18 fizik-a1 / F1 (B3-02). Eski iddia: izentropik
+        # verim < 1 ve ε ile değişir. O "verim" bir donanım kaybı değil,
+        # TABLOLANAN çıkış istasyonunun entropi üretimiydi; ε büyüdükçe
+        # düşmesinin sebebi tek-γ T_e sapmasının ε ile büyümesiydi
+        # (+%5,25 → +%28,13; docs/scofield/raw/OH/D18/fizik/a1/once_f1.json).
+        # Çıkış istasyonu artık oda izentropunun üstünde olduğu için değer
+        # yapı gereği 1'dir. Kalemin ASIL iddiası — optimum O/F aramasının
+        # ε'yu GÖRMESİ — burada istasyon tabanı ve p_e üstünden korunuyor.
         eta_path = ('.motor.optimum_analysis.analysis.performance.'
                     'thermodynamic_properties.isentropic_efficiency')
-        assert leaf(small, eta_path) < 1.0
-        assert leaf(large, eta_path) != pytest.approx(leaf(small, eta_path))
+        assert leaf(small, eta_path) == pytest.approx(1.0, rel=1e-6)
+        assert leaf(large, eta_path) == pytest.approx(1.0, rel=1e-6)
+        basis_path = ('.motor.optimum_analysis.analysis.conditions.exit.basis')
+        assert leaf(small, basis_path) == 'expansion_ratio_equilibrium'
+        assert leaf(large, basis_path) == 'expansion_ratio_equilibrium'
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +275,91 @@ class TestStructuralSafetyFactorWiring:
         s_big = leaf(big, path + '.applied_axial_stress_unpressurized_MPa')
         assert s_small > 0.0 and s_big > s_small, (
             f'itki 5 -> 30 kN eksenel gerilmeyi {s_small} -> {s_big} yaptı')
+
+
+class TestYardimciCiktiAnaliziOldurmez:
+    """İsteğe bağlı bir dışa aktarım üretilemezse ANALİZ ölmez (ÖH D15).
+
+    ÖLÇÜLDÜ (1 Eyl 2026, birleşik ağaç, ``HYBRID_BASE`` + ``thrust=30000``):
+    ``/calculate`` HTTP **400** ``OpenRocketExportDataError`` dönüyordu.
+    .eng dürüstlük kapısı HAKLI olarak reddediyordu (RASP başlığı 202.505
+    kg/m3 dökme itergaç yoğunluğu ima ederdi), ama ret bütün isteği
+    düşürüyordu: kullanıcı isteğe bağlı bir OpenRocket dosyası yüzünden
+    emniyet katsayılarını, burkulmayı ve yörüngeyi birden kaybediyordu.
+
+    Aynı koşumda CAD çizimi TAM AYNI sebeple (hazne boyu 8,6 mm, çizim
+    bandı [0,02; 5] m) reddetti ama YAKALANDI — istek yaşadı. Asimetri
+    kusurdu; ``app.py``nin kendi yazılı ilkesi: "rapor üretilemezse
+    /calculate ASLA kırılmaz — ama SESSİZ de kalmaz".
+
+    Bu sınıf onarımın İKİ YARISINI DA kilitler: istek yaşar VE ret
+    gizlenmez. Sahte bir .eng yazılması da yasaktır.
+    """
+
+    RET_YUKU = {'thrust': 30000}
+
+    def test_eng_reddi_istegi_dusurmez(self, calc):
+        yanit = calc(**self.RET_YUKU)      # ``calc`` 200 olmayanı düşürür
+        assert leaf(yanit, '.motor.structural_analysis.buckling_analysis'
+                           '.axial_compression_force_N') == pytest.approx(
+                               30000.0)
+
+    def _reddedilen_kosu(self, monkeypatch):
+        """Kapıyı ZORLA ateşle ve /calculate gövdesinin openrocket bloğunu döndür.
+
+        ÖH D15 birleştirme etkileşimi (ana model, 1 Eyl 2026): bu sınıf
+        yazıldığında ``HYBRID_BASE + thrust=30000`` .eng kapısına takılıyordu
+        (RASP başlığı 202.505 kg/m³ ima ediyordu). Harita kulvarının H1a
+        onarımı (motor ``length_units='m'`` beyan ediyor, dışa aktarım birimi
+        büyüklükten TAHMİN ETMİYOR) o yanlış mm çöküşünü kaldırdı; ÖLÇÜLDÜ
+        (birleşik ağaç 18db972+): aynı yük artık geçerli bir .eng üretiyor.
+        Ret yolu bu yüzden gerçek yükle gözlenemez; kapı burada monkeypatch
+        ile ateşlenir (tests/test_d15_harita.py::TestH1bIhracatHatasiBeyanEdilir
+        ile aynı yöntem). Sözleşme TEK KAYNAK: harita kulvarının
+        ``eng_file=None + eng_error{...}`` şeması (/api/export-eng 422 gövdesiyle
+        aynı biçim); bu dosyanın ilk sürümündeki ``eng_file_status`` /
+        ``eng_file_withheld_reason`` adları aynı olguya ikinci ad olurdu,
+        birleştirmede kaldırıldı.
+        """
+        from hrma.app import app
+        from hrma.export import openrocket_integration as ORI
+
+        def _reddet(self_, *a, **k):
+            raise ORI.OpenRocketExportDataError(
+                ['propellant_mass_kg'],
+                {'propellant_mass_kg': 'enjekte edilmiş ölçüm arızası'},
+                what='.eng')
+        monkeypatch.setattr(ORI.OpenRocketExporter, 'export_motor_file',
+                            _reddet)
+        yanit = _silent(
+            app.test_client().post, '/calculate',
+            json=dict(HYBRID_BASE, **self.RET_YUKU),
+            headers={'Host': '127.0.0.1:8080'})
+        assert yanit.status_code == 200, (
+            '.eng reddi tüm isteği düşürdü (HTTP %s)' % yanit.status_code)
+        return leaf(yanit.get_json(), '.openrocket')
+
+    def test_ret_gerekcesiyle_YAYIMLANIR(self, monkeypatch):
+        orr = self._reddedilen_kosu(monkeypatch)
+        hata = orr.get('eng_error')
+        assert hata and hata.get('error') == 'missing_export_data', (
+            '.eng üretilemedi ama yanıt bunu SÖYLEMİYOR: %s' % sorted(orr))
+        assert 'propellant_mass_kg' in (hata.get('missing_fields') or []), (
+            'ret gerekçesi ucun kendi beyanını taşımıyor: %r' % (hata,))
+        assert 'propellant_mass_kg' in (hata.get('field_reasons') or {})
+
+    def test_sahte_eng_yazilmaz(self, monkeypatch):
+        """Boş/uydurma .eng KONMAZ — anahtar None taşır, dize taşımaz."""
+        orr = self._reddedilen_kosu(monkeypatch)
+        assert orr.get('eng_file') is None, (
+            'ret edilmiş .eng için yine de bir eng_file basıldı: %r'
+            % (orr.get('eng_file'),))
+
+    def test_uretilebilen_kosumda_eng_hala_var(self, calc):
+        """Ayırt edicilik: kapı var diye dosya her koşumda düşmüyor."""
+        orr = leaf(calc(), '.openrocket')
+        assert isinstance(orr.get('eng_file'), str) and orr['eng_file'].strip()
+        assert orr.get('eng_error') is None
 
 
 class TestFastenerAllowableFromStandard:
@@ -332,7 +428,10 @@ class TestFatigueEstimatedCycles:
         from hrma.analysis.structural_analysis import StructuralAnalyzer
 
         analyzer = StructuralAnalyzer()
-        args = dict(stress=200.0, burn_time=10.0,
+        # ÖH D15 / P5B1-10: ``burn_time`` ölü parametreydi ve kaldırıldı
+        # (analyze_structure çıktısı 0,5 s ile 1 000 000 s arasında birebir
+        # aynıydı); çağrıdan düşürüldü, sayısal iddia değişmedi.
+        args = dict(stress=200.0,
                     mat_props=analyzer.materials['steel_4130'])
         few = analyzer._analyze_fatigue(design_cycles=5, **args)
         many = analyzer._analyze_fatigue(design_cycles=500, **args)

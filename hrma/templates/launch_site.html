@@ -3,10 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- ÖH D28 / P12bB4-10 — ÖLÇÜLEN KUSUR: bu sayfa ürün sürümünü HİÇ
+         yayımlamıyordu (`app_version` geçiş sayısı = 0). `bug_report.js`in
+         `detectVersion()` zinciri sırayla `window.HRMA_APP_VERSION`,
+         `window.HRMA_VERSION` ve altbilgi kazımasını dener; bu sayfada
+         üçü de yoktu, dolayısıyla buradan açılan hata bildirimi
+         "sürüm: bilinmiyor" ile gidiyordu (ölçüldü: index 2.6.27,
+         formulas 2.6.27, launch_site None). `update_check.js` D21'de
+         eklenmişti ama karşılaştıracağı YEREL sürüm yoktu.
+         Sürüm `inject_app_version` bağlam işleyicisinden gelir
+         (app.py:2501) — sayfaya ikinci bir sürüm sabiti YAZILMAZ. -->
+    <script>window.HRMA_APP_VERSION = '{{ app_version }}';</script>
     <!-- i18n: çekirdek + bu sayfanın sözlüğü + kabuk (dil seçici/ayarlar).
          Yükleme sırası önemsiz (register kuyruğu var). -->
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/i18n_launch_site.js"></script>
+    <!-- V3 KK 3. tur (§28-50 (c)): araç künyesi SUNUCU cümlesidir; TR
+         karşılığı i18n_charts.js serverText sözlüğünde/desenlerinde (tek
+         kaynak). Yüklenmezse metin AYNEN. -->
+    <script src="/static/js/i18n_charts.js"></script>
     <script src="/static/js/i18n_shell.js"></script>
     <script src="/static/js/release_notes.js"></script>
     <script src="/static/js/user_guide.js"></script>
@@ -15,6 +30,28 @@
          panelinde "Hata bildir" bölümü hiç çizilmez. -->
     <script src="/static/js/bug_report.js"></script>
     <script src="/static/js/settings_panel.js"></script>
+    <!-- ÖH D21 / P12aB5-07 — ÖLÇÜLEN KUSUR: bu sayfa altı sayfa arasında
+         `update_check.js`i yüklemeyen TEK sayfaydı. Ayarlar > "Şimdi denetle"
+         yeni sürüm bulunca "güncelleme penceresi açılıyor" yazıyor ama
+         `window.hrmaCheckForUpdates` tanımsız olduğu için hiçbir şey
+         olmuyordu; kullanıcı güncellemenin başladığını sanıp bekliyordu.
+         i18n_common.js pencerenin metinlerini (update.* + common.ok)
+         taşır ve bu sayfada güverte (analysis_dock.js) yok, yani sözlüğü
+         kimse enjekte etmiyor.
+         ÖH D30 · OH-D21-06 — AÇILIŞ YÜKÜ SÖKÜLDÜ. ÖLÇÜLDÜ
+         (a2/once.json: OHD2106_i18n_common_bayt = 505.460): sözlük sayfa
+         açılışında indiriliyordu, oysa tek tüketicisi güncelleme
+         penceresi/toast'ıdır ve o pencere oturumların çoğunda hiç
+         açılmaz. `update_check.js` sözlüğü artık metin basmadan HEMEN
+         ÖNCE kendisi yüklüyor (`sozlukHazir`, analysis_dock.js:42
+         deseni); TR kipinde pencere yine çevrili açılır, açılış yükü
+         505 KB azalır. -->
+    <script src="/static/js/update_check.js"></script>
+    <!-- ÖH D21 / P12aB4-22: motor sayfası -> uçuş sahası köprüsü. Bu sayfa
+         köprünün OKUYAN ucudur ama betiği yüklemiyordu; bu yüzden depolama
+         anahtarını kendi kopyalamak zorunda kalmıştı (iki kaynak). Betik
+         yalnız window.FlightHandoff'u tanımlar, kendiliğinden iş yapmaz. -->
+    <script src="/static/js/flight_handoff.js"></script>
     <title data-i18n="site.title">Launch Site &amp; Flight Path</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -53,6 +90,38 @@
            bu kural WebGL hiç başlamadığı (tuval yok) durumu kapatır. */
         #ls-stage { position: relative; flex: 1; min-height: 0; background: var(--hd-bg0, #04070d); }
         #ls-globe { position: absolute; inset: 0; cursor: crosshair; }
+        /* ÖH harita-detay K3 — ŞEHİR VE ÜLKE ETİKETLERİ (tasarım §3.3).
+           Tuvalin üstünde DOM bindirmesi; tıklamayı geçirir (saha seçimi
+           raycast'i bozulmaz) ve panellerin altında kalır (z-index 20 > 10).
+           Konum, ölçü ve yazı tipi launch_site_labels.js içinde AYNI
+           geometri sabitlerinden yazılır: "çakışma yok" ölçümü ekrandaki
+           kutuya dayansın. Burada yalnız renk ve okunurluk gölgesi var.
+
+           Kar ve buz zemininde okunurluk (F1 denetimi Ş5, 14 Eki 2026):
+           açık renkli yazı Grönland, Antarktika, Alpler ve Anadolu karı
+           üstünde kayboluyordu (yalnız yumuşak gölge vardı). Şimdi koyu
+           bir kontur var: paint-order ile kontur dolgunun ARKASINA çizilir,
+           harf incelmez, yalnız dışa 1 px taşar. Konturu bilmeyen motorlar
+           için sekiz yönlü 1 px'lik keskin hale de vardır; ikisi birlikte
+           her zeminde kesintisiz bir kenar verir. Kontur ve hale metnin
+           yerleşim kutusunu değiştirmez (çakışma ölçümü aynı kalır). */
+        #ls-labels {
+            position: absolute; inset: 0; z-index: 10; overflow: hidden;
+            pointer-events: none; font-family: var(--hd-sans, sans-serif);
+            --ls-lbl-hale: rgba(4,10,18,0.92);
+        }
+        #ls-labels .ls-lbl { pointer-events: none; will-change: transform; color: #f2fbff;
+            -webkit-text-stroke: 2px var(--ls-lbl-hale); paint-order: stroke fill;
+            text-shadow: 1px 0 0 var(--ls-lbl-hale), -1px 0 0 var(--ls-lbl-hale),
+                0 1px 0 var(--ls-lbl-hale), 0 -1px 0 var(--ls-lbl-hale),
+                1px 1px 0 var(--ls-lbl-hale), -1px -1px 0 var(--ls-lbl-hale),
+                1px -1px 0 var(--ls-lbl-hale), -1px 1px 0 var(--ls-lbl-hale),
+                0 0 4px rgba(0,0,0,0.9); }
+        #ls-labels .ls-lbl-dot { box-sizing: border-box; border-radius: 50%;
+            background: #f2fbff; box-shadow: 0 0 0 1px var(--ls-lbl-hale), 0 0 3px rgba(0,0,0,0.9); }
+        #ls-labels .ls-lbl-capital .ls-lbl-dot { background: transparent; border: 2px solid #ffd27a; }
+        #ls-labels .ls-lbl-capital { color: #ffe7b0; }
+        #ls-labels .ls-lbl-country { color: rgba(170,226,240,0.92); }
 
         .ls-panel {
             position: absolute; z-index: 20;
@@ -126,7 +195,11 @@
 
         .ls-check { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 7px 0; color: var(--hd-ink, #cfe8f2); cursor: pointer; }
         .ls-check input { accent-color: var(--hd-cyan, #00e5ff); }
-        .ls-hint { font-size: 10.5px; color: var(--hd-ink-faint, #46606d); line-height: 1.5; margin-top: 3px; }
+        .ls-hint { font-size: 10.5px; color: var(--hd-ink-faint, #6a8491); line-height: 1.5; margin-top: 3px; overflow-wrap: anywhere; }
+        /* ÖH D23 / OH-D19-19: proje yükleme uyarısı varken künye
+           nötr griden çıkar. Renk TEK kanal değildir — alan adı
+           ('load_warnings: ') metnin içinde de duruyor. */
+        .ls-hint.ls-note-warn { color: var(--hd-orange, #ff8c33); }
 
         /* Zaman kaydırıcı + oynatım */
         .ls-player { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
@@ -169,14 +242,9 @@
         .ls-ev .t { font-family: var(--hd-mono, monospace); color: var(--hd-ink-dim, #7d97a5); margin-left: auto; }
 
         #ls-status { font-size: 11px; color: var(--hd-ink-dim, #7d97a5); margin-top: 6px; min-height: 14px; }
-        .ls-lang { display: flex; gap: 4px; }
-        .ls-lang button {
-            font-size: 11px; padding: 4px 9px; border-radius: 7px; cursor: pointer;
-            background: var(--hd-inset, rgba(6,14,26,0.85));
-            border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
-            color: var(--hd-ink, #cfe8f2);
-        }
-        .ls-lang button.on { border-color: var(--hd-cyan, #00e5ff); color: var(--hd-cyan-soft, #3af2ff); }
+        /* ÖH D35 · OH-GT-35 — sayfanın KENDİ EN/TR düğmeleri kaldırıldı;
+           dil TEK kanaldan (kabuk şeridi → Ayarlar → Dil) değişiyor.
+           `.ls-lang` kuralları da ölü koddu, birlikte silindi. */
     </style>
     <link rel="stylesheet" href="/static/css/fonts.css">
     <link rel="stylesheet" href="/static/css/theme.css">
@@ -189,15 +257,25 @@
             <div class="sub" data-i18n="site.subtitle">Pick any point on Earth, then watch the solved flight path</div>
         </div>
         <div class="spacer"></div>
-        <div class="ls-lang" id="ls-lang">
-            <button data-lang="en">EN</button>
-            <button data-lang="tr">TR</button>
-        </div>
+        <!-- ÖH D35 · OH-GT-35 — SAYFAYA ÖZEL DİL DÜĞMELERİ KALDIRILDI.
+             ÖLÇÜLDÜ (a1/once.json M5_dil_dugmeleri): bu sayfa dili kendi iki
+             düğmesiyle (`data_lang_dugme_sayisi = 2`) değiştiriyordu, ürünün
+             geri kalanı ise kabuk şeridindeki Ayarlar > Dil seçicisiyle
+             (settings_panel.js:587-606). Aynı ayarın iki ayrı kontrolü vardı
+             ve yalnız bu sayfada olanı şeritte duruyordu.
+             Kanal ÖLÇÜLDÜ: `i18n_shell.js` + `settings_panel.js` bu sayfada
+             YÜKLÜ (`kabuk_kanali_yukleniyor_mu = true`) ve Ayarlar bağlantısı
+             `#ls-topbar` şeridine enjekte ediliyor (release_notes.js:263,
+             `kabuk_serit_enjeksiyonu = true`) — yani kaldırılan düğmelerin
+             işlevi kaybolmaz, tek kanala iner. -->
         <a class="ls-link" href="/" data-i18n="site.back">Back to app</a>
     </div>
 
     <div id="ls-stage">
         <div id="ls-globe"></div>
+        <!-- ÖH harita-detay K3: şehir ve ülke etiketleri (Natural Earth).
+             Öğeleri launch_site_labels.js bir kez kurar ve yeniden kullanır. -->
+        <div id="ls-labels"></div>
         <div id="ls-cursor"><span data-i18n="site.cursorReadout">Cursor</span>: <b id="ls-cur-lat">--</b>, <b id="ls-cur-lon">--</b></div>
 
         <!-- SOL: saha seçimi + çözümü -->
@@ -297,6 +375,27 @@
                     <input id="ls-a-finspan" type="number" step="0.01" value="0.11">
                 </div>
             </div>
+            <!-- ÖH D28 / P12bB4-05 — ÖLÇÜLEN KUSUR: uçuş yükü, arayüzde HİÇ
+                 alanı olmayan sabit bir 6 m/s / 270° rüzgârı sessizce
+                 gönderiyordu. Ölçüldü (aynı araç, yalnız wind_speed
+                 değişiyor): yanal sürükleme 2.809,72 m ⟷ 1.213,28 m
+                 (2,32×), maksimum hücum açısı 0,1132° ⟷ 1,7437° (15,4×).
+                 Sağ paneldeki "Downrange" okuması ve "Vehicle is
+                 aerodynamically unstable" hükmü kullanıcının varlığından
+                 haberdar olmadığı bir yan rüzgâra bağlıydı. Rüzgâr artık
+                 kullanıcının GÖRDÜĞÜ ve DEĞİŞTİREBİLDİĞİ bir girdidir;
+                 varsayılan 0 (rüzgârsız) — sayfa kendiliğinden yanal
+                 yük uydurmaz. -->
+            <div class="ls-row">
+                <div class="ls-field">
+                    <label data-i18n="site.windSpeed">Wind speed (m/s)</label>
+                    <input id="ls-a-windspeed" type="number" step="0.5" min="0" value="0">
+                </div>
+                <div class="ls-field">
+                    <label data-i18n="site.windDir">Wind direction (deg)</label>
+                    <input id="ls-a-winddir" type="number" step="5" min="0" max="360" value="270">
+                </div>
+            </div>
             <div class="ls-row">
                 <div class="ls-field">
                     <label data-i18n="site.launchElevation">Launch elevation (deg)</label>
@@ -338,14 +437,15 @@
             <button class="ls-btn accent" id="ls-fly" data-i18n="site.launch">Fly this site</button>
 
             <div class="ls-player">
-                <button class="ls-iconbtn" id="ls-playpause" title="Play/Pause">&#9658;</button>
+                <button class="ls-iconbtn" id="ls-playpause" data-i18n-title="site.play"
+                        title="Play" aria-label="Play">&#9658;</button>
                 <input id="ls-time" type="range" min="0" max="1000" value="0" disabled>
                 <span id="ls-tlabel">0.0 s</span>
             </div>
             <div class="ls-btnrow">
-                <button class="ls-iconbtn" id="ls-reset" title="Reset" style="width:auto;flex:1" data-i18n="site.reset">Reset</button>
-                <button class="ls-iconbtn" id="ls-view-site" title="Zoom to site" style="width:auto;flex:1" data-i18n="site.viewSite">Zoom to site</button>
-                <button class="ls-iconbtn" id="ls-view-globe" title="Whole Earth" style="width:auto;flex:1" data-i18n="site.viewGlobe">View whole Earth</button>
+                <button class="ls-iconbtn" id="ls-reset" data-i18n-title="site.reset" title="Reset" style="width:auto;flex:1" data-i18n="site.reset">Reset</button>
+                <button class="ls-iconbtn" id="ls-view-site" data-i18n-title="site.viewSite" title="Zoom to site" style="width:auto;flex:1" data-i18n="site.viewSite">Zoom to site</button>
+                <button class="ls-iconbtn" id="ls-view-globe" data-i18n-title="site.viewGlobe" title="View whole Earth" style="width:auto;flex:1" data-i18n="site.viewGlobe">View whole Earth</button>
             </div>
 
             <label class="ls-check">
@@ -359,16 +459,37 @@
             </label>
 
             <div class="ls-sep"></div>
-            <div class="ls-kv"><span class="k" data-i18n="site.apogeeReadout">Apogee</span><span class="v" id="ls-apogee">--</span></div>
-            <div class="ls-kv"><span class="k" data-i18n="site.rangeReadout">Downrange</span><span class="v" id="ls-range">--</span></div>
+            <!-- ÖH D18 / P12aB4-10: CANLI OKUMA ile TÜM-ÇÖZÜM ÖZETİ ayrı
+                 bloklarda. Eskiden dört satır da aynı `.ls-kv` kalıbındaydı
+                 ve ikisi (Apoje, yatay mesafe) oynatım boyunca SABİT terminal
+                 değerlerdi: t = 0'da "Altitude 0 m" ile "Menzil 8,2 km" yan
+                 yana duruyor, üstlerinde de canlı zaman etiketi (#ls-tlabel)
+                 bulunuyordu. Canlı blok artık YALNIZ indise bağlı satırları
+                 taşır; yatay mesafenin anlık değeri çözümden nokta bazlı
+                 gelir (launch_site_globe.js `_flight.downrange`). -->
+            <h2 data-i18n="site.liveHead">Live readout (at the time above)</h2>
             <div class="ls-kv"><span class="k" data-i18n="site.alt">Altitude</span><span class="v" id="ls-alt">--</span></div>
             <div class="ls-kv"><span class="k" data-i18n="site.speedReadout">Speed</span><span class="v" id="ls-speed">--</span></div>
+            <div class="ls-kv"><span class="k" data-i18n="site.downrangeReadout">Downrange (now)</span><span class="v" id="ls-downrange">--</span></div>
+
+            <div class="ls-sep"></div>
+            <h2 data-i18n="site.summaryHead">Flight summary (whole solution)</h2>
+            <div class="ls-kv"><span class="k" data-i18n="site.apogeeReadout">Apogee</span><span class="v" id="ls-apogee">--</span></div>
+            <div class="ls-kv"><span class="k" data-i18n="site.rangeReadout">Downrange at end of solution</span><span class="v" id="ls-range">--</span></div>
 
             <div class="ls-sep"></div>
             <h2 data-i18n="site.legend">Legend</h2>
             <div class="ls-legend">
                 <div class="ls-chip"><span class="sw" style="background:#ff8c33"></span><span data-i18n="site.flightPathLabel">Flight path (solved 6-DOF)</span></div>
                 <div class="ls-chip dash"><span class="sw"></span><span data-i18n="site.groundTrackLabel">Ground track — Earth rotation NOT modelled</span></div>
+            </div>
+            <!-- ÖH D17 / P12aB3-08: çizilen yolun yörünge OLMADIĞI beyanı iki
+                 dilde de yazılıydı ama sayfada hiç basılmıyordu; Blue Marble
+                 üstünde bir uçuş yolu gören kullanıcı bunu hiçbir yerden
+                 okumuyordu. Artık lejantın altında basılıyor. -->
+            <div class="ls-hint" id="ls-ballistic" style="margin-top:6px">
+                <b data-i18n="site.ballistic">Ballistic flight — not an orbit</b>
+                <div data-i18n="site.ballisticHint">The path is a suborbital, ballistic trajectory: the vehicle does not enter orbit and falls back to the ground.</div>
             </div>
             <div style="margin-top:8px">
                 <div class="ls-hint" data-i18n="site.events">Events (derived from the solution)</div>
@@ -386,17 +507,111 @@
         <!-- Dürüstlük notları -->
         <div id="ls-notes">
             <div><span class="warn" data-i18n="site.earthRotNote">Earth rotation and Coriolis are not modelled in v1; the ground track is a flat-Earth projection.</span></div>
-            <div id="ls-texnote" style="margin-top:5px; display:none" data-i18n="site.textureNote">At close zoom the global texture/DEM (~9 km cells) holds no local terrain detail — no fake terrain is drawn.</div>
+            <!-- ÖH D28 / P12bB4-05 (ikinci ayak) — rüzgâr artık panelde
+                 sorulan bir girdi; geriye yükte sabit kalan BEŞ gövde
+                 ölçüsü kaldı (burun boyu/tipi, kanatçık kök/uç veteri,
+                 kanatçık oku, ray uzunluğu). Bunlar Barrowman statik
+                 marjına ve sayfanın bastığı kararlılık hükmüne giriyor
+                 ama kullanıcı yalnız kanatçık sayısını ve açıklığını
+                 görüyor. Sabitler UYDURMA değil (tipik amatör roket
+                 ölçüleri) ama BEYANSIZDI; adları ve değerleri artık
+                 ekranda yazıyor. -->
+            <!-- ÖH D33-KOLAY / P12bB4-05 (denetim ŞARTI): not artık
+                 `data-i18n` TAŞIMAZ. Sayılar metne gömülü değil, yükün
+                 okuduğu `LS_FIXED_AIRFRAME` nesnesinden yer tutucularla
+                 basılır (renderFixedAirframeNote). Gömülü sayı, nesne
+                 değişince sessizce yalana dönüşürdü. -->
+            <div style="margin-top:5px" id="ls-fixed-airframe-note"></div>
+            <!-- ÖH D18 / P12aB4-07: bu not, GIBS karosu (~500 m) çizilirken
+                 de basılıyordu; ekranda aynı anda 18 kat çelişen iki
+                 çözünürlük beyanı duruyordu. Kapı artık `getScaleInfo()`
+                 içinde çizilmiş karo sayısına bağlı (textureCoarse). -->
+            <div id="ls-texnote" style="margin-top:5px; display:none" data-i18n="site.textureNote">No satellite tile is drawn in this view: what you see is the global texture/DEM (~9 km cells), which holds no local terrain detail — no fake terrain is drawn.</div>
+            <!-- ÖH D23 / P17B2-14: ÖLÇÜLDÜ (P17 B2-tur-07, sayfa açıldı, küre
+                 6 s kuruldu): #ls-texnote ve #ls-tile-attr'ın İKİSİ de
+                 display:none; ekranda "~9 km" 0 kez, "~500 m" 0 kez. Yani
+                 kullanıcı ~9 km'lik bir doku üstünde geziniyor ve bunu
+                 söyleyen tek cümle GİZLİ. Sebep: texnote'un kapısı
+                 (camAltM < 400 km && !tilesDrawn) uzak kamerada kapalı,
+                 atıf kapısı da karo çizilmediği için kapalı — iki kapı
+                 arasında BEYANSIZ bir bölge kalıyordu.
+                 Üçüncü beyan o boşluğu kapatır: karo yokken ve kamera
+                 uzaktayken taban katmanının çözünürlüğü yazılır. Böylece
+                 her an TAM BİR çözünürlük beyanı görünür; ikisi asla
+                 birlikte çıkmaz (kapılar birbirini dışlar). -->
+            <div id="ls-basenote" style="margin-top:5px; display:none"
+                 data-i18n="site.baseTextureNote">Base layer: global texture/DEM (~9 km cells). No satellite tile is drawn at this range.</div>
+            <!-- harita-detay K4 (tasarım §4.1-4, §5.3-2, §5.3-3) — DOKU BÜYÜTME NOTU.
+                 Koşul karo çizildi mi DEĞİL: ekran merkezindeki en ince
+                 çizilen dokunun m/px değeri ekran m/px değerinin
+                 TEXTURE_MAG_RATIO katından kabaysa açılır (getScaleInfo
+                 textureMagnified). Sayılar çizilen katmanın z düzeyinden
+                 gelir; katman paketli ise doku tarihi de yazılır. Karo
+                 çizilmiyorsa yukarıdaki iki not konuşur; üçü birbirini dışlar. -->
+            <div id="ls-texmag" style="margin-top:5px; display:none"></div>
+            <!-- ÖH harita-detay K3 / tasarım §5.3-1 — VEKTÖR ÖLÇEĞİ NOTU.
+                 Ekranda m/px < VEKTOR_NOTU_MPP iken açılır. Ölçek sayısı
+                 ÇİZİLEN basamağın künyesinden (getVectorInfo().nominalScale)
+                 gelir; eski 110m yedeği çiziliyorsa 110 yazar. Ölçek
+                 belirlenemezse not hiç basılmaz (sayı uydurulmaz). -->
+            <div id="ls-vecnote" style="margin-top:5px; display:none"></div>
+            <!-- ÖH harita-detay K3 / tasarım §4.1-3, §5.3-4..6 — NATURAL EARTH
+                 ATFI VE ETİKET KÜNYESİ. Atıf, NE çizgileri ya da etiketleri
+                 ekrandayken görünür; künye (sürüm, sınır görünümü, şehir
+                 noktasının anlamı, ad yedeği) etiketler yüklendiyse eklenir.
+                 Sürüm ve sayılar varlığın kendi künyesinden okunur. -->
+            <div id="ls-ne-attr" style="margin-top:5px; display:none"></div>
             <!-- A2 — uydu karosu atfı ve önbellek yönetimi.
                  Karolar NASA GIBS'ten gelir ve diske kalıcı olarak yazılır;
                  kullanıcı hem kaynağı hem disk kullanımını görebilmeli. -->
+            <!-- ÖH D31 / P5B4-35 — AŞAĞIDAKİ GÖVDE METNİ HUKUKİ EMNİYET
+                 YEDEĞİDİR, ÜÇÜNCÜ BİR KOPYA DEĞİL. Künyenin GÖRÜNTÜ kaynağı
+                 tektir ve i18n sözlüğüdür (ÖH D21 / P12aB4-19): metin
+                 katmanın künye ANAHTARINDAN çevrilir, anahtarı olmayan
+                 katmanın künyesi hiç basılmaz. Bu düğümün gövdesinde yine de
+                 düz metin durur, çünkü NASA GIBS atfı bir LİSANS GEREĞİDİR:
+                 i18n betiği yüklenmeden (ya da yüklenemeden) önce harita
+                 künyesiz kalamaz. Yedek bu yüzden SİLİNMEZ; bedeli, kaynağa
+                 kilitli kalmasıdır — tests/test_d31_arayuz_i18n_a1.py
+                 ``test_yedek_govde_dugume_capali_ve_kaynakla_ayni`` gövdeyi
+                 DÜĞÜMDEN çıkarıp bu düğümün kendi ``data-i18n`` anahtarının
+                 EN değeriyle birebir karşılaştırır (D26'nın "metin dosyada
+                 bir yerde geçiyor mu" kilidi düğüme çapalı değildi).
+                 Üçüncü dize (hrma/analysis/tile_cache.py ``attribution``) bir
+                 API alanıdır — makine okunur sağlayıcı künyesi — ve o da aynı
+                 dosyadaki ``test_api_alani_kunye_anahtariyla_kilitli`` ile
+                 kaynağa bağlıdır. Metni buradan değiştirmek İSTİYORSAN önce
+                 i18n_launch_site.js'teki ``site.tileAttribution`` EN/TR
+                 çiftini değiştir; bu gövde onu takip eder. -->
             <div id="ls-tile-attr" style="margin-top:5px; display:none"
                  data-i18n="site.tileAttribution">NASA GIBS — Blue Marble Shaded Relief + Bathymetry (~500 m)</div>
+            <!-- ÖH D21 / P12aB4-19: küre modülü "çevrimdışı notu" yayımladığını
+                 BEYAN ediyordu (getTileInfo anyFail/attribution) ama notun
+                 ekranda hiçbir düğümü yoktu: karolar düştüğünde kullanıcı
+                 hiçbir şey görmüyordu. Not YALNIZ gerçekten düşen karo varken
+                 açılır (getTileInfo().failedCount canlı ölçümü); sayı
+                 uydurulmaz, karo düşmediyse not hiç çıkmaz. -->
+            <div id="ls-tile-offline" class="warn" style="margin-top:5px; display:none"
+                 data-i18n="site.tileOffline">Some satellite tiles could not be downloaded (offline, or the tile server is unreachable) — those areas show the packaged offline texture (~2 km) or the global base texture, not finer satellite imagery.</div>
             <div style="margin-top:6px; display:flex; align-items:center; gap:8px">
                 <button class="ls-iconbtn" id="ls-clear-tiles" style="width:auto; padding:0 10px"
                         data-i18n="site.clearTileCache">Clear map cache</button>
                 <span class="ls-hint" id="ls-tile-usage"></span>
             </div>
+            <!-- K5a — AĞ ANAHTARI (gizlilik; karar §28-33, tasarım §4.1-2).
+                 Karo isteği bakılan bölgeyi sağlayıcıya söyler; dış istek
+                 YALNIZ bu anahtar açıkken gider, varsayılan KAPALI. Kapı
+                 sunucudadır (tile_cache.resolve_tile, fail-closed); anahtar
+                 kalıcıdır (bu tarayıcının yerel deposu, okunamazsa kapalı).
+                 Metinler i18n sözlüğünden, textContent ile basılır. -->
+            <label class="ls-hint" style="margin-top:6px; display:flex; align-items:center; gap:6px">
+                <input type="checkbox" id="ls-tile-network">
+                <span data-i18n="site.tileNetworkToggle">Online satellite tiles (NASA GIBS)</span>
+            </label>
+            <div id="ls-tile-netwarn" class="warn" style="margin-top:3px; display:none"
+                 data-i18n="site.tileNetworkWarn">Online tiles are on: each tile request tells the provider (NASA GIBS) which area you are looking at.</div>
+            <div id="ls-tile-netoff" style="margin-top:3px; display:none"
+                 data-i18n="site.tileNetworkOffNote">Online tiles are off: no request leaves this computer. Areas not in the map cache show the packaged offline texture (~2 km) or the global base texture.</div>
             <!-- Gök küresi beyanı. Yıldızlar ve Samanyolu SAHNENİN İÇİNDEDİR
                  (kamerayla döner), ama yönelim sayfa açılış anına SABİTTİR ve
                  zaman kaynağı tarayıcı saatidir. İkisi de yazılmazsa kullanıcı
@@ -413,16 +628,99 @@
     </div>
 </div>
 
-<!-- Three.js (SABİT sürüm) -> OrbitControls -> küre modülü. Sıra ZORUNLU. -->
+<!-- Three.js (SABİT sürüm) -> OrbitControls -> vektör basamakları -> etiketler
+     -> küre modülü. Sıra ZORUNLU: küre kurulurken LaunchSiteVectors tanımlı
+     olmalı; değilse küre eski 110m sınır bindirmesiyle (earth_borders.json)
+     çalışır. LaunchSiteLabels küreye aşağıdaki sayfa betiği bağlar. -->
 <script src="/static/vendor/three-0.128.0.min.js"></script>
 <script src="/static/vendor/OrbitControls-0.128.0.js"></script>
+<script src="/static/js/launch_site_vectors.js"></script>
+<script src="/static/js/launch_site_labels.js"></script>
 <script src="/static/js/launch_site_globe.js"></script>
+{# ÖH D24 · P4B3-27 — hazır saha listesi TEK KAYNAKTAN (LAUNCH_SITE_PRESETS).
+   Veri Jinja ile SAYFAYA gömülür ama JS bloğunun İÇİNE değil: aşağıdaki
+   gömülü betik saf JavaScript kalmalı (tests/test_faz6_panel.py
+   ``node --check`` ile ayrıştırıyor). ``tojson`` `<`, `>`, `&`, `'`
+   karakterlerini kaçırdığı için script etiketi içinde güvenlidir. #}
+<script type="application/json" id="ls-presets-data">{{ launch_site_presets | tojson }}</script>
 <script>
 (function () {
     'use strict';
     var I18N = window.I18N;
     function t(k, fb) { return (I18N && I18N.t) ? I18N.t(k, fb) : (fb || k); }
+    /* Parametreli çeviri (ÖH D22 / OH-D18-10 datum ipucu). I18N yoksa yedek
+       metnin kendi yer tutucuları doldurulur — ham '{msl}' ekrana çıkmaz. */
+    function tf(k, params, fb) {
+        if (I18N && I18N.tf) return I18N.tf(k, params, fb);
+        return String(fb || k).replace(/\{(\w+)\}/g, function (m, ad) {
+            return (params && params[ad] != null) ? params[ad] : m;
+        });
+    }
     function el(id) { return document.getElementById(id); }
+    /* V3 KK 3. tur (§28-50 (c)) — sunucu cümlesi (araç künyesi, yükleme
+       uyarısı) aktif dile i18n_charts.js serverText ile çevrilir; eşleşme
+       yoksa metin AYNEN döner (uydurma çeviri yok). */
+    function srv(x) {
+        return (I18N && typeof I18N.serverText === 'function')
+            ? I18N.serverText(x) : x;
+    }
+    /* Proje yükleme uyarısı: uç DÜZ METİN listesi yayımlar (anahtar kümesi
+       sabit: tests/test_faz6_f5_app.py VEHICLE_EXTRA_KEYS). Metin, sunucu
+       şablonunun (projects._LOAD_WARNING_TEXT_EN = site.loadWarn* EN)
+       BİREBİR eşleşmesiyle parametrelerine ayrılır ve aktif dilin
+       şablonuna yerleştirilir. Parametre HAM yerleşir (sürüm dizgisi ondalık
+       değildir). Eşleşmeyen metin AYNEN kalır (fail-closed). */
+    var YUKLEME_UYARILARI = [
+        [/^Project was saved with app version (.+); current version is (.+)$/,
+         'site.loadWarnAppVersion', ['saved_version', 'current_version']],
+        [/^Project file is missing the '([^']+)' stamp$/,
+         'site.loadWarnMissingStamp', ['stamp']]
+    ];
+    function yuklemeUyarisiMetni(w) {
+        for (var i = 0; i < YUKLEME_UYARILARI.length; i++) {
+            var m = YUKLEME_UYARILARI[i][0].exec(w);
+            if (!m) continue;
+            var adlar = YUKLEME_UYARILARI[i][2];
+            var p = {};
+            for (var j = 0; j < adlar.length; j++) p[adlar[j]] = m[j + 1];
+            return String(t(YUKLEME_UYARILARI[i][1], w)).replace(/\{(\w+)\}/g,
+                function (butun, ad) {
+                    return Object.prototype.hasOwnProperty.call(p, ad) ? p[ad] : butun;
+                });
+        }
+        return w;
+    }
+
+    // ÖH D33-KOLAY / P12bB4-05 (denetim ŞARTI) — SABİT GÖVDE ÖLÇÜLERİ TEK
+    // KAYNAK. Bu beş ölçü Barrowman statik marjına, dolayısıyla sayfanın
+    // bastığı kararlılık hükmüne girer ama panelde SORULMAZ. Daha önce
+    // sayılar İKİ yerde yazılıydı: uçuş yükünde (gömülü değişmez) ve
+    // beyan notunun EN/TR metinlerinde (gömülü metin). İkisi ayrışırsa
+    // ekrandaki beyan sessizce yalan olur. Artık tek nesne; not da yükün
+    // OKUDUĞU değerlerden basılır (doktrin 4).
+    var LS_FIXED_AIRFRAME = {
+        nose_length: 0.50,
+        nose_type: 'ogive',
+        fin_root_chord: 0.20,
+        fin_tip_chord: 0.10,
+        fin_sweep: 0.08,
+        rail_length: 5
+    };
+
+    function renderFixedAirframeNote() {
+        var n = el('ls-fixed-airframe-note');
+        if (!n) return;
+        n.textContent = tf('site.fixedAirframeNote', {
+            nose: LS_FIXED_AIRFRAME.nose_length.toFixed(2),
+            root: LS_FIXED_AIRFRAME.fin_root_chord.toFixed(2),
+            tip: LS_FIXED_AIRFRAME.fin_tip_chord.toFixed(2),
+            sweep: LS_FIXED_AIRFRAME.fin_sweep.toFixed(2),
+            rail: String(LS_FIXED_AIRFRAME.rail_length)
+        }, 'Nose (ogive, {nose} m), fin root/tip chord ({root}/{tip} m), '
+           + 'fin sweep ({sweep} m) and rail length ({rail} m) are fixed in '
+           + 'this view and are not asked for: they enter the Barrowman '
+           + 'static margin and therefore the stability verdict above.');
+    }
 
     // ---- Küreyi başlat ----
     var globe = new window.LaunchSiteGlobe(el('ls-globe'), {
@@ -447,6 +745,40 @@
     globe.viewGlobe();
     // Hata ayıklama / otomatik test için küre örneğini aç (zararsız tutamak)
     window.launchGlobe = globe;
+
+    // ---- Şehir ve ülke etiketleri (ÖH harita-detay K3, tasarım §3.3) ----
+    // Küre iç durumuna dokunulmaz: kare kancasıyla beslenir. Varlık yoksa ya
+    // da kanıtı tutmazsa hiç etiket basılmaz (durum getInfo()'da).
+    var labels = null;
+    // Etiketin altına girmeyeceği sahne üstü kutular (z-index 20, etiket 10).
+    // ls-topbar bindirmenin ÜSTÜNDE durur, kutusu negatif y değerindedir: çapası üst
+    // kenara yakın etiketin üst yarısı orada kesiliyordu (F1 denetimi Ş2).
+    var LS_ETIKET_ENGELLERI = ['ls-topbar', 'ls-left', 'ls-right', 'ls-scalebar', 'ls-notes', 'ls-cursor'];
+    if (window.LaunchSiteLabels && el('ls-labels')) {
+        labels = new window.LaunchSiteLabels({
+            container: el('ls-labels'),
+            latLonToXYZ: window.LaunchSiteGlobe.latLonToXYZ,
+            baseUrl: '/static/map/',
+            getLang: function () { return (I18N && I18N.lang) || 'en'; },
+            // Paneller etiket katmanının üstünde durur: altlarına etiket
+            // basılmaz (yarısı görünen ad olmasın). Kutular bindirmeye göre.
+            getObstacles: function () {
+                var taban = el('ls-labels').getBoundingClientRect(), out = [];
+                LS_ETIKET_ENGELLERI.forEach(function (id) {
+                    var n = el(id);
+                    if (!n || n.offsetParent === null) return;
+                    var b = n.getBoundingClientRect();
+                    if (b.width > 0 && b.height > 0)
+                        out.push([b.left - taban.left, b.top - taban.top,
+                                  b.right - taban.left, b.bottom - taban.top]);
+                });
+                return out;
+            }
+        });
+        globe.addFrameListener(function (f) { labels.update(f); });
+        labels.start();
+    }
+    window.launchLabels = labels;
 
     // Gök küresinin hangi ana sabitlendiğini BEYAN ET. Yönelim bir kez
     // hesaplanır (GMST), sonra donar; saat metni dilden bağımsız olduğu için
@@ -479,8 +811,20 @@
     updateSkyNote();
 
     function setStatus(m) { el('ls-status').textContent = m || ''; }
-    function fmtLat(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'N' : 'S'); }
-    function fmtLon(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'E' : 'W'); }
+    // ÖH D36 · OH-K-04 — imleç ve süre okumaları TR'de de noktalı basıyordu
+    // (ölçüldü: "0.0 s", "28.608°N"); i18n.js'in I18N.number'ı (TR virgül,
+    // EN nokta) varsa o, yoksa eski yol. Girdi alanları (type=number) bu
+    // kuralın DIŞINDA kalır, onlar noktalı değer ister.
+    function fmtNum_(v, digits) {
+        var i18n = (typeof window !== 'undefined') ? window.I18N : undefined;
+        return (i18n && typeof i18n.number === 'function')
+            ? i18n.number(v, digits) : Number(v).toFixed(digits);
+    }
+    function fmtLat(v) { return fmtNum_(Math.abs(v), 3) + '°' + (v >= 0 ? 'N' : 'S'); }
+    function fmtLon(v) { return fmtNum_(Math.abs(v), 3) + '°' + (v >= 0 ? 'E' : 'W'); }
+    // Sürgünün ilk etiketi de aynı biçimden geçer (şablondaki "0.0 s" yer
+    // tutucusu TR'de "0,0 s" olur); çözüm gelince :1287 aynı yolu kullanır.
+    (function () { var e = el('ls-tlabel'); if (e) e.textContent = fmtNum_(0, 1) + ' s'; })();
 
     // =====================================================================
     // A1 — Uçurulan araç köprüsü
@@ -494,7 +838,6 @@
     //   example : aşağıdaki örnek araç. Artık VARSAYILAN DEĞİL; seçilirse
     //             rozetle işaretlenir, hesaplanmış bir motor sanılmasın.
     // =====================================================================
-    var HANDOFF_KEY = 'hrma.flight.lastVehicle';
     // T74 (2026-08-03) — motor_name normalde KULLANICI VERİSİDİR (kendi
     // motorunun adı) ve çevrilmez. Örnek aracın adı ise veri değil, YER
     // TUTUCUDUR; TR modda 'Example vehicle (örnek, hesaplanmış değil)' diye
@@ -552,13 +895,46 @@
         if (note) {
             var msg = currentVehicleNote
                 ? t(currentVehicleNote.key, currentVehicleNote.fallback) : '';
-            // Hibrit atıl kütlesi tahmindir (≈0.25·propelan) — kullanıcı bunu
-            // ölçülmüş bir değer sanmamalı.
-            if (v && v.engine_inert_mass_is_estimate) {
+            // ÖH defter P4B3-19 / P4B3-20 — ATIL KÜTLE KÜNYESİ ARTIK
+            // MODÜLÜN ÖLÇTÜĞÜ KÜNYEDİR, sabit cümle DEĞİL.
+            // ÖNCE: bu blok her tahminde SABİT 0,25 x propelan cümlesini
+            // basıyordu; ölçüldü (3 kN N2O/HTPB) gerçek oran 27,37x ve değer
+            // yapısal hesaptan geliyordu, yani ekrandaki cümlenin iki yarısı
+            // da yanlıştı. Sıvı kolda ise künye HİÇ basılmıyordu ve tankların
+            // dışarıda kaldığı (77,955 kg) hiçbir yerde görünmüyordu.
+            // SONRA: normalize katmanının ürettiği engine_inert_mass_note
+            // doğrudan basılır (kaynak: hrma/analysis/flight_vehicle.py).
+            // Künye yoksa yalnız tahmin bayrağı için sözlük metnine düşülür;
+            // cümle uydurulmaz.
+            var inertNote = (v && typeof v.engine_inert_mass_note === 'string'
+                && v.engine_inert_mass_note.trim()) ? v.engine_inert_mass_note.trim() : '';
+            if (inertNote) {
+                msg += (msg ? ' ' : '') + srv(inertNote);
+            } else if (v && v.engine_inert_mass_is_estimate) {
                 msg += (msg ? ' ' : '') + t('site.inertEstimate',
                     'Engine inert mass is an estimate (~0.25 x propellant), not a computed structure.');
             }
+            // --- ÖH D23 / OH-D19-19: PROJE YÜKLEME UYARILARI ------------
+            // ÖLÇÜLDÜ (once.json OH-D19-19): /api/flight-vehicle
+            // `source='project'` kolunda `vehicle.load_warnings` alanını
+            // YAYIMLIYOR (app.py, projects.load_project'ın ikinci dönüşü:
+            // şema damgası eksik / dosya sürümü tanınmıyor gibi kayıtlar)
+            // ama JS katmanında grep 0 idi — üretilen uyarılar HİÇBİR
+            // panelde basılmıyordu. Kullanıcı damgasız bir proje dosyasını
+            // yükleyip uçuşu çözüyor, sunucunun itirazını hiç görmüyordu.
+            // Cümleleri SUNUCU yazar (uydurma yok); panel yalnız taşır.
+            var yuklemeUyarilari = (v && Array.isArray(v.load_warnings))
+                ? v.load_warnings.filter(function (w) {
+                    return typeof w === 'string' && w.trim();
+                }) : [];
+            if (yuklemeUyarilari.length) {
+                msg += (msg ? ' ' : '') + 'load_warnings: '
+                    + yuklemeUyarilari.map(yuklemeUyarisiMetni).join(' · ');
+            }
             note.textContent = msg;
+            // Uyarı VARSA künye nötr kalmaz: renk kanalı tek başına yeter
+            // sayılmadığı için alan adı metinde de duruyor (yukarıda).
+            note.classList.toggle('ls-note-warn', yuklemeUyarilari.length > 0);
         }
     }
 
@@ -582,25 +958,39 @@
         renderVehicleText();
     }
 
+    // ÖH D21 / P12aB4-22 — köprünün KENDİ API'si kullanılır. Eskiden burada
+    // `var HANDOFF_KEY = 'hrma.flight.lastVehicle'` diye İKİNCİ bir anahtar
+    // sabiti duruyor ve localStorage doğrudan okunuyordu; flight_handoff.js
+    // içindeki `readLast`/`clear` ise hiç çağrılmıyordu (ölçüldü: 0 çağrı).
+    // Anahtar bir tarafta değişse köprü sessizce koparcaktı.
     function loadSessionVehicle(quiet) {
-        var raw = null;
-        try { raw = window.localStorage.getItem(HANDOFF_KEY); } catch (e) { raw = null; }
-        if (!raw) {
-            if (!quiet) applyVehicle(EXAMPLE_VEHICLE, 'site.noSessionVehicle',
-                'No motor calculated in this session yet — showing the example vehicle.');
-            return false;
-        }
-        try {
-            var doc = JSON.parse(raw);
-            var v = doc && (doc.vehicle || doc);
-            if (!v || !num_(v.thrust)) throw new Error('bad payload');
-            applyVehicle(v, 'site.sessionVehicleLoaded', 'Loaded from the last motor calculation.');
-            return true;
-        } catch (e) {
+        if (!window.FlightHandoff || !FlightHandoff.readLast) {
+            // FAIL-CLOSED: köprü betiği yüklenmediyse "hesap yapılmamış"
+            // denmez — okuyamadığımız söylenir.
             applyVehicle(EXAMPLE_VEHICLE, 'site.handoffUnreadable',
                 'Stored vehicle could not be read — showing the example vehicle.');
             return false;
         }
+        var durum = {};
+        var doc = FlightHandoff.readLast(durum);
+        if (durum.status === 'empty') {
+            if (!quiet) applyVehicle(EXAMPLE_VEHICLE, 'site.noSessionVehicle',
+                'No motor calculated in this session yet — showing the example vehicle.');
+            return false;
+        }
+        var v = doc && (doc.vehicle || doc);
+        if (durum.status === 'ok' && v && num_(v.thrust)) {
+            applyVehicle(v, 'site.sessionVehicleLoaded', 'Loaded from the last motor calculation.');
+            return true;
+        }
+        // Kayıt VAR ama kullanılamıyor: kullanıcıya söylenir ve bozuk kayıt
+        // temizlenir — yoksa aynı hata her açılışta yinelenirdi. Silinen şey
+        // kullanıcı verisi değil, son hesaptan türetilmiş kullanılamaz bir
+        // önbellek kaydıdır.
+        if (FlightHandoff.clear) FlightHandoff.clear();
+        applyVehicle(EXAMPLE_VEHICLE, 'site.handoffUnreadable',
+            'Stored vehicle could not be read — showing the example vehicle.');
+        return false;
     }
 
     function loadProjectList() {
@@ -621,25 +1011,55 @@
         }).catch(function () { /* çevrimdışı: liste boş kalır */ });
     }
 
+    // ÖH D30 · P12bB4-15 — UCUN KENDİ GEREKÇESİ EKRANA İNER.
+    // ÖLÇÜLDÜ (a3/once.json B4_15_*): bu işlev yanıtın HTTP durumunu hiç
+    // okumuyordu (http_durumu_okunuyor = 0) ve ucun kendi hata alanını
+    // (`error` / `message`) hiç basmıyordu (hata_metni_alandan = 0). Silinmiş
+    // bir proje seçmek ucu 500'e sokuyor; ekranda görünen tek şey "proje
+    // yeniden hesaplanamadı" cümlesiydi. Kullanıcı 500 (sunucu çöktü), 404
+    // (proje yok) ve iyi biçimli bir ret arasında AYRIM YAPAMIYORDU; aynı
+    // cümle üçünde de yazıyordu, üstelik hangi projenin düştüğü de yazmıyordu.
+    // Durum satırı artık ucun adını, HTTP durumunu, ucun kendi gerekçesini ve
+    // proje adını taşır — bunlar ALAN ADI ve KOD'dur, uydurma cümle değildir
+    // (aynı kalıp: solid.html 'efficiency_analysis.divergence_losses: ').
+    // Örnek araca düşüş yerinde kalır: bu davranış zaten künyeli ("showing
+    // the example vehicle") ve uçuş denetimleri seçim anında kapatılıyor.
+    function projeHataNedeni(durum, d, ad) {
+        var p = ['/api/flight-vehicle'];
+        p.push(durum ? ('HTTP ' + durum) : 'no HTTP response');
+        var e = d && (d.error || d.message);
+        if (typeof e === 'string' && e.trim()) p.push(e.trim());
+        else if (d === null) p.push('(no JSON body)');
+        p.push('project=' + String(ad));
+        return p.join(' · ');
+    }
+
     function loadProjectVehicle(name) {
         if (!name) return;
         setStatus(t('site.recomputing', 'Recomputing motor from project…'));
+        var httpDurum = 0;
         fetch('/api/flight-vehicle', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source: 'project', name: name })
-        }).then(function (r) { return r.json(); }).then(function (d) {
+        }).then(function (r) {
+            httpDurum = r.status;
+            // Gövde JSON değilse (500 HTML hata sayfası) zincir KOPMAZ;
+            // durum kodu yine de kullanıcıya ulaşır.
+            return r.json().catch(function () { return null; });
+        }).then(function (d) {
             if (d && d.status === 'success' && d.vehicle) {
                 applyVehicle(d.vehicle, 'site.projectVehicleLoaded',
                     'Recomputed from the saved project.');
-            } else {
-                applyVehicle(EXAMPLE_VEHICLE, 'site.projectLoadFailed',
-                    'Project could not be recomputed — showing the example vehicle.');
+                setStatus('');
+                return;
             }
-            setStatus('');
+            applyVehicle(EXAMPLE_VEHICLE, 'site.projectLoadFailed',
+                'Project could not be recomputed — showing the example vehicle.');
+            setStatus(projeHataNedeni(httpDurum, d, name));
         }).catch(function () {
             applyVehicle(EXAMPLE_VEHICLE, 'site.projectLoadFailed',
                 'Project could not be recomputed — showing the example vehicle.');
-            setStatus('');
+            setStatus(projeHataNedeni(httpDurum, null, name));
         });
     }
 
@@ -675,7 +1095,7 @@
     // ---- A2: karo önbelleği durumu + temizleme ----
     function fmtBytes(n) {
         if (!isFinite(n) || n <= 0) return '0 MB';
-        return (n / 1048576).toFixed(1) + ' MB';
+        return fmtNum_(n / 1048576, 1) + ' MB';
     }
     // T74 (2026-08-03) — göstergedeki ' tile' birimi İngilizce sabitti ve
     // metin textContent ile bir kez yazıldığı için dil değişiminde de
@@ -719,9 +1139,30 @@
     function watchTiles() {
         var info = (globe && globe.getTileInfo) ? globe.getTileInfo() : null;
         if (!info) return;
+        // ÖH D21 / P12aB4-19 — atıf METNİ artık modülün İngilizce sabitinden
+        // değil, modülün yayımladığı KATMAN ANAHTARINDAN gelir: künye tek
+        // kaynakta (i18n sözlüğü) durur ve katmanla birlikte değişir.
+        // FAIL-CLOSED: katmanın künye anahtarı tanımlı değilse atıf basılmaz
+        // (başka katmanın künyesi gösterilmez).
+        var attrEl = el('ls-tile-attr');
+        if (info.attributionKey
+                && attrEl.getAttribute('data-i18n') !== info.attributionKey) {
+            attrEl.setAttribute('data-i18n', info.attributionKey);
+            if (window.I18N && I18N.applyTo) I18N.applyTo(attrEl);
+        }
         // Atıf ekranda GIBS görüntüsü VARKEN zorunludur — ölçüt disk önbelleği
         // değil, o an çizilen karo kümesidir.
-        el('ls-tile-attr').style.display = info.active ? '' : 'none';
+        // K5a: anahtar açıkken sağlayıcı kullanılıyor demektir; atıf o an
+        // karo çizilmemiş olsa da görünür.
+        var agAcik = !!(globe.getTileNetwork && globe.getTileNetwork());
+        attrEl.style.display = ((info.active || agAcik) && info.attributionKey) ? '' : 'none';
+        // Çevrimdışı notu: yapışkan `anyFail` bayrağına DEĞİL, o anki karo
+        // kümesinde düşen karo sayısına bağlı (bayrak temizlenene dek açık
+        // kalırdı; not bayat kalmaz).
+        // K5a: anahtar kapalıyken düşen karonun nedeni ağ değil kapıdır;
+        // "indirilemedi" demek yanlış olur, kapı notu basılır.
+        el('ls-tile-offline').style.display = (info.failedCount > 0) && agAcik ? '' : 'none';
+        el('ls-tile-netoff').style.display = (info.failedCount > 0) && !agAcik ? '' : 'none';
         var sig = info.count + '|' + (info.anyFail ? 1 : 0);
         if (sig === tileSig) return;
         var now = Date.now();
@@ -760,47 +1201,97 @@
     });
     refreshTileUsage();
 
+    // K5a — ağ anahtarı. Durum küre modülünden okunur ve ona yazılır;
+    // ekrandaki kutu GERÇEKTE kalan durumu gösterir (yazılamadıysa kapalı).
+    var tileNetCb = el('ls-tile-network');
+    function renderTileNetwork() {
+        var acik = !!(globe && globe.getTileNetwork && globe.getTileNetwork());
+        tileNetCb.checked = acik;
+        el('ls-tile-netwarn').style.display = acik ? '' : 'none';
+    }
+    tileNetCb.addEventListener('change', function () {
+        if (globe && globe.setTileNetwork) globe.setTileNetwork(tileNetCb.checked === true);
+        renderTileNetwork();
+        watchTiles();
+    });
+    renderTileNetwork();
+
     // ---- Saha seçimi kontrolleri ----
     el('ls-apply').addEventListener('click', function () {
         var la = parseFloat(el('ls-lat').value), lo = parseFloat(el('ls-lon').value);
         if (isFinite(la) && isFinite(lo)) { globe.selectSite(la, lo, { frame: true }); }
     });
 
-    // Hazır saha kısayolları (küçük gömülü liste; kısıt değil).
+    // Hazır saha kısayolları (kısıt değil; kullanıcı koordinat da girebilir).
     // T73 (2026-08-03) — Everest girdisi 'Mount Everest (yüksek arazi)' yazıyordu:
-    // locale=en-US tarayıcıda yedi seçenekten altısı İngilizce, biri TÜRKÇE idi
-    // (liste i18n'den geçmediği için TR modunda da aynı satır görünüyordu).
-    // Diğer altısı özel ad; yalnız bu girdide betimleyici bir ek var, o yüzden
-    // ek artık İngilizce ve i18n anahtarına bağlı. Anahtar sözlükte yoksa
-    // I18N.t yedeğe düşer (İngilizce), yani sözlük eklenene kadar da doğru
-    // görünür. Dördüncü sütun = i18n anahtarı (yoksa metin sabittir).
-    var PRESETS = [
-        ['ksc', 'Kennedy Space Center LC-39A', 28.6084, -80.6043],
-        ['baikonur', 'Baikonur 1/5 (Gagarin Start)', 45.9200, 63.3422],
-        ['kourou', 'Kourou ELA-3', 5.2390, -52.7683],
-        ['mahia', 'Rocket Lab LC-1 (Mahia)', -39.2617, 177.8650],
-        ['esrange', 'Esrange (Kiruna)', 67.8931, 21.1043],
-        ['everest', 'Mount Everest (high terrain)', 27.9881, 86.9250, 'site.presetEverest'],
-        ['sinop', 'Sinop (TR)', 42.0231, 35.1531]
+    // locale=en-US tarayıcıda seçeneklerden biri TÜRKÇE idi (liste i18n'den
+    // geçmiyordu). Betimleyici ekler artık i18n anahtarına bağlı; anahtar
+    // sözlükte yoksa I18N.t yedeğe (İngilizce) düşer.
+    // ÖH D24 · P4B3-27 — anahtarlar artık i18n_launch_site.js'te TANIMLI
+    // (site.presetEverest / presetTerrainRef / presetApprox), yani TR
+    // modunda da çevrilirler; eskiden üçü de yedek metinle yaşıyordu.
+    // ÖH D24 · P4B3-27 — GÖMÜLÜ KOPYA KALDIRILDI, LİSTE SUNUCUDAN GELİR.
+    // ÖLÇÜLDÜ (taban 88a29d3, once.json P4B3-27): burada 7 kayıtlık ayrı
+    // bir liste duruyordu; Python'daki LAUNCH_SITE_PRESETS (14 kayıt, 2'si
+    // approx) ürün yolunda HİÇ okunmuyordu (okuyan dosya sayısı 0). İki
+    // liste bağımsız olduğu için koordinatları sessizce ayrışabilirdi ve
+    // 'approx' bayrağı ("tesis değil, bölge referansı") arayüze hiç
+    // ulaşmıyordu: 'Sinop (TR)' ekranda KSC LC-39A ile aynı biçimde
+    // duruyordu. Liste artık ``/launch-site`` rotasının verdiği tek
+    // kaynaktan gelir; approx kayıtlar etiketinde ayrılır.
+    //: Sunucunun gömdüğü liste. Eleman YOKSA kısayol menüsü boş kalır —
+    //: uydurma koordinat üretilmez (fail-closed).
+    var PRESETS = (function () {
+        var dugum = document.getElementById('ls-presets-data');
+        if (!dugum) return [];
+        try {
+            var v = JSON.parse(dugum.textContent);
+            return Array.isArray(v) ? v : [];
+        } catch (e) {
+            return [];
+        }
+    })();
+    // Arazi referansı — FIRLATMA SAHASI DEĞİLDİR, bu yüzden
+    // LAUNCH_SITE_PRESETS'te yoktur ve orada aranmamalıdır. Küre kamerasını
+    // yüksek araziye götürüp DEM okumasını sınamak için duruyor. Tek yerde
+    // yazılıdır (kopya değil), kendi etiketiyle ve kendi i18n anahtarıyla.
+    var TERRAIN_REFS = [
+        { id: 'everest', name: 'Mount Everest', latitude: 27.9881,
+          longitude: 86.9250, i18nKey: 'site.presetEverest', terrain: true }
     ];
-    function presetLabel(p) { return p[4] ? t(p[4], p[1]) : p[1]; }
+    function tumKisayollar() { return PRESETS.concat(TERRAIN_REFS); }
+    function presetLabel(p) {
+        var ad = p.i18nKey ? t(p.i18nKey, p.name) : p.name;
+        if (p.terrain) {
+            return ad + ' - ' + t('site.presetTerrainRef',
+                'terrain reference, not a launch site');
+        }
+        // approx = Python listesinin "gerçek bir tesis değil, bölge
+        // referansı" bayrağı. Ayrımı ekranda söylemezsek kullanıcı bunu
+        // gerçek bir pad sanır.
+        if (p.approx) {
+            return ad + ' - ' + t('site.presetApprox',
+                'area reference, not a launch facility');
+        }
+        return ad;
+    }
     // Dil değişince yalnız etiketleri tazele (seçim korunur).
     function relabelPresets() {
         var sel = el('ls-presets');
         if (!sel) return;
-        PRESETS.forEach(function (p, i) {
+        tumKisayollar().forEach(function (p, i) {
             var o = sel.options[i + 1];            // 0. seçenek '—'
-            if (o && o.value === p[0]) o.textContent = presetLabel(p);
+            if (o && o.value === p.id) o.textContent = presetLabel(p);
         });
     }
     (function fillPresets() {
         var sel = el('ls-presets');
         var opt0 = document.createElement('option');
         opt0.value = ''; opt0.textContent = '—'; sel.appendChild(opt0);
-        PRESETS.forEach(function (p) {
+        tumKisayollar().forEach(function (p) {
             var o = document.createElement('option');
-            o.value = p[0]; o.textContent = presetLabel(p);
-            o.dataset.lat = p[2]; o.dataset.lon = p[3];
+            o.value = p.id; o.textContent = presetLabel(p);
+            o.dataset.lat = p.latitude; o.dataset.lon = p.longitude;
             sel.appendChild(o);
         });
         sel.addEventListener('change', function () {
@@ -861,23 +1352,40 @@
         var body = {
             body_diameter: fieldNum('ls-a-bodydia', 0.15),
             body_length: fieldNum('ls-a-bodylen', 3.0),
-            nose_length: 0.5, nose_type: 'ogive',
+            nose_length: LS_FIXED_AIRFRAME.nose_length,
+            nose_type: LS_FIXED_AIRFRAME.nose_type,
             dry_mass: dryTotal,
             propellant_mass: num_(veh.propellant_mass) || 18,
             thrust: num_(veh.thrust) || 6500,
             burn_time: num_(veh.burn_time) || 7.5,
             cd0: fieldNum('ls-a-cd0', 0.45),
             fin_count: fieldNum('ls-a-fincount', 4),
-            fin_root_chord: 0.20, fin_tip_chord: 0.10,
-            fin_span: fieldNum('ls-a-finspan', 0.11), fin_sweep: 0.08,
+            fin_root_chord: LS_FIXED_AIRFRAME.fin_root_chord,
+            fin_tip_chord: LS_FIXED_AIRFRAME.fin_tip_chord,
+            fin_span: fieldNum('ls-a-finspan', 0.11),
+            fin_sweep: LS_FIXED_AIRFRAME.fin_sweep,
             launch_elevation_deg: fieldNum('ls-a-elev', 84),
             launch_azimuth_deg: fieldNum('ls-a-azim', 90),
-            rail_length: 5,
-            wind_speed: 6, wind_direction_deg: 270, t_max: 400,
+            rail_length: LS_FIXED_AIRFRAME.rail_length,
+            wind_speed: fieldNum('ls-a-windspeed', 0),
+            wind_direction_deg: fieldNum('ls-a-winddir', 270), t_max: 400,
             // B1 — Coriolis: çözücü saha enlemini alınca Dünya dönüşünü
             // modelleyebilir (düz-Dünya varsayımı kalkar).
             latitude_deg: la
         };
+        // ÖH defter P4B3-01 — SAHA RAKIMI ÇÖZÜCÜYE GEÇMELİ.
+        // Çözücü ve uç launch_altitude alanını zaten kabul ediyor
+        // (app.py /api/six-dof-analysis) ve atmosfer artık MUTLAK irtifadan
+        // okunuyor; ama bu sayfa değeri HİÇ göndermiyordu, yani sahayı
+        // resmen çözmüş olsa bile (Resolve → DEM rakımı) uçuş deniz
+        // seviyesinde hesaplanıyordu. Rakım UYDURULMAZ: yalnız saha
+        // çözümünden gelen gerçek sayı gönderilir; saha çözülmemişse alan
+        // hiç konmaz ve çözücü kendi 0,0 varsayılanında kalır.
+        var siteAltM = (globe && typeof globe._siteElevM === 'number'
+            && isFinite(globe._siteElevM)) ? globe._siteElevM : null;
+        if (siteAltM !== null) {
+            body.launch_altitude = siteAltM;
+        }
         // Gerçek itki eğrisi varsa sabit itki yerine o kullanılır.
         if (veh.thrust_curve && veh.thrust_curve.time && veh.thrust_curve.time.length) {
             body.thrust_curve = veh.thrust_curve;
@@ -933,13 +1441,44 @@
     });
 
     function updatePlayUI(s) {
-        el('ls-playpause').innerHTML = s.playing ? '&#10074;&#10074;' : '&#9658;';
+        var pp = el('ls-playpause');
+        pp.innerHTML = s.playing ? '&#10074;&#10074;' : '&#9658;';
+        // ÖH D20 / P12aB3-07: bu düğmenin GÖRÜNÜR tek yazısı ipucudur ve
+        // sabit İngilizce "Play/Pause" idi. Artık durumla birlikte anahtar da
+        // değişir; `data-i18n-title` sayesinde dil değişiminde I18N.apply
+        // yeniden basar, `aria-label` da aynı metni taşır.
+        var ppKey = s.playing ? 'site.pause' : 'site.play';
+        var ppText = t(ppKey, s.playing ? 'Pause' : 'Play');
+        pp.setAttribute('data-i18n-title', ppKey);
+        pp.title = ppText;
+        pp.setAttribute('aria-label', ppText);
         if (!el('ls-time').matches(':active'))
             el('ls-time').value = Math.round(s.frac * 1000);
-        el('ls-tlabel').textContent = s.t.toFixed(1) + ' s';
-        el('ls-alt').textContent = fmtKmM(s.alt);
-        if (s.speed != null) el('ls-speed').textContent = s.speed.toFixed(0) + ' m/s';
-        if (s.apogee != null) el('ls-apogee').textContent = fmtKmM(s.apogee);
+        el('ls-tlabel').textContent = fmtNum_(s.t, 1) + ' s';
+        // ÖH D22 / OH-D18-10 — "İrtifa" satırı ARTIK SAHA ÜSTÜ (AGL) okur.
+        // ÖLÇÜLEN KUSUR: `s.alt` küre geometrisinden gelir ve DENİZ SEVİYESİ
+        // datumundadır; 1500 m'lik bir sahada rampadaki roket için t = 0'da
+        // "1,5 km" yazıyordu. Çözücünün kendi irtifası ise saha üstüdür
+        // (six_dof_trajectory.py `altitude_datum`), yani aynı ekranda iki
+        // datum tek sözcükle karışıyordu. Sayı artık çözücüyle AYNI datumda;
+        // deniz seviyesi karşılığı ipucunda adıyla durur (kaybolmaz).
+        el('ls-alt').textContent = fmtKmM(s.altAgl != null ? s.altAgl : s.alt);
+        el('ls-alt').title = tf('site.altDatumTip',
+            { msl: fmtKmM(s.alt), site: fmtKmM(s.siteElevation || 0) },
+            'Above the launch site. Mean sea level: {msl} (site elevation {site}).');
+        if (s.speed != null) el('ls-speed').textContent = fmtNum_(s.speed, 0) + ' m/s';
+        // Canlı satır: indise bağlı yatay mesafe (ÖH D18 / P12aB4-10).
+        if (s.downrange != null) el('ls-downrange').textContent = fmtKmM(s.downrange);
+        // Tüm-çözüm özeti: kaydırıcıyla değişmez, ayrı blokta duruyor.
+        // Apoje de AYNI datumda okunur (çözücünün `apogee_datum` sözleşmesi).
+        if (s.apogee != null) {
+            el('ls-apogee').textContent =
+                fmtKmM(s.apogeeAgl != null ? s.apogeeAgl : s.apogee);
+            el('ls-apogee').title = tf('site.altDatumTip',
+                { msl: fmtKmM(s.apogee), site: fmtKmM(s.siteElevation || 0) },
+                'Above the launch site. Mean sea level: {msl} '
+                + '(site elevation {site}).');
+        }
         if (s.range != null) el('ls-range').textContent = fmtKmM(s.range);
     }
 
@@ -961,10 +1500,95 @@
                     ? ' · ' + t('site.burnoutFromInput', 'from input burn time')
                     : '');
             var tm = document.createElement('span'); tm.className = 't';
-            tm.textContent = e.t.toFixed(1) + ' s · ' + fmtKmM(e.alt);
+            tm.textContent = fmtNum_(e.t, 1) + ' s · ' + fmtKmM(e.alt);
             row.appendChild(dot); row.appendChild(name); row.appendChild(tm);
             box.appendChild(row);
         });
+    }
+
+    // ---- Vektör ölçeği notu + Natural Earth atfı ve künyesi ----
+    // ÖH harita-detay K3 (tasarım §5.3-1): not ekranda m/px bu eşiğin
+    // altındayken görünür.
+    var VEKTOR_NOTU_MPP = 500;
+    // Tasarım §5.3-1 GERÇEK KAYMA (harita-detay 5. tur, 14 Eki 2026): Natural
+    // Earth 10m dış kıyısı, Kennedy kıyısındaki GIBS BlueMarble 500m z7
+    // r27 c44 karosuna karşı piksel satırı başına ölçüldü (506 satır;
+    // kanıt docs/scofield/raw/OH/UI/harita-detay/t5/kayma/kayma.json).
+    // Değerler metre; ölçüm çözünürlüğü karonun enlem piksel boyudur.
+    var KIYI_KAYMASI_OLCUMU = { medyanM: 598, p90M: 1339, cozunurlukM: 489 };
+    // Sınır görünümü kodu -> künye metni anahtarı. Görünümü seçen TEK sabit
+    // K1 aracındadır (tools/build_map_detail_assets.py SINIR_GORUNUMU).
+    // Bilinmeyen kod HAM yazılır: görünüm beyanı uydurulmaz.
+    var SINIR_GORUNUMU_ANAHTARI = { varsayilan: 'site.boundaryViewDefault' };
+    var mapNoteSig = '';
+    // Çizilen basamağın ölçek paydası (milyon): '1:10m' -> '10'. Vektör
+    // basamakları yoksa ve eski 110m yedeği çiziliyorsa '110'. Belirsizse null.
+    function vectorScaleNumber(v) {
+        if (v && v.durum === 'hazir' && v.nominalScale) {
+            var m = /^1:(\d+)m$/.exec(String(v.nominalScale));
+            if (m) return m[1];
+        }
+        if (v && v.legacyVisible) return '110';
+        return null;
+    }
+    function renderMapNotes(force) {
+        var info = (globe.camera && globe.getScaleInfo) ? globe.getScaleInfo() : null;
+        var v = globe.getVectorInfo ? globe.getVectorInfo() : null;
+        var li = labels ? labels.getInfo() : null;
+        var olcek = vectorScaleNumber(v);
+        var notAcik = !!(info && olcek && info.metersPerPixel < VEKTOR_NOTU_MPP);
+        var etiketHazir = !!(li && li.durum === 'hazir' && li.kunye);
+        var cizgiNE = !!(v && (v.durum === 'hazir' || v.legacyVisible));
+        var dil = (I18N && I18N.lang) || 'en';
+        // HRK devri (4. tur): künye, Natural Earth verisine uygulanan ad ve
+        // sınır düzeltmelerini de söyler (karar §28-45). Sayılar modüllerin
+        // getInfo() çıktısından gelir (varlık künyesi); yoksa satır basılmaz.
+        // Bu yorumda kesme işareti YOK: şablon bekçisi tırnak sayar.
+        var sd = (v && v.durum === 'hazir') ? v.sinirDuzeltmesi : null;
+        var sig = [notAcik, olcek, etiketHazir, cizgiNE, dil, !!sd].join('|');
+        if (!force && sig === mapNoteSig) return;
+        mapNoteSig = sig;
+        var vn = el('ls-vecnote'), na = el('ls-ne-attr');
+        if (!vn || !na) return;
+        vn.style.display = notAcik ? 'block' : 'none';
+        vn.textContent = notAcik ? tf('site.vectorScaleNote', { scale: olcek },
+            'Border, coastline and river lines are generalised 1:{scale} million data '
+            + '(Natural Earth). At this range their positions can be off by hundreds of '
+            + 'metres up to kilometres.') + ' ' + tf('site.vectorShiftMeasured', {
+                res: fmtDist(KIYI_KAYMASI_OLCUMU.cozunurlukM),
+                median: fmtDist(KIYI_KAYMASI_OLCUMU.medyanM),
+                p90: fmtDist(KIYI_KAYMASI_OLCUMU.p90M)
+            }, 'Measured on the Kennedy coast against a NASA GIBS tile (about {res} per '
+               + 'pixel): median offset {median}, 90th percentile {p90}.') : '';
+        var parca = [];
+        if (cizgiNE || etiketHazir)
+            parca.push(t('site.neAttribution',
+                'Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.'));
+        if (etiketHazir && li.kunye.surum) {
+            var k = li.kunye, gorAnahtar = SINIR_GORUNUMU_ANAHTARI[k.sinirGorunumu];
+            parca.push(tf('site.labelsProvenance', {
+                version: k.surum,
+                view: gorAnahtar ? t(gorAnahtar, 'default (de facto) boundary view')
+                                 : String(k.sinirGorunumu)
+            }, 'Place and country names: Natural Earth {version}, {view}. A city dot marks '
+               + 'an administrative or population point, not the city limits; population '
+               + 'is not shown.'));
+            var yedek = k.adYedegi ? k.adYedegi[dil === 'tr' ? 'tr' : 'en'] : 0;
+            if (yedek > 0)
+                parca.push(tf('site.labelsFallback', { n: fmtNum_(yedek, 0) },
+                    '{n} places have no English name and are shown with their local name.'));
+            var ad = k.adDuzeltmesi;
+            if (ad && typeof ad.yer === 'number' && typeof ad.ulke === 'number'
+                && ad.yer + ad.ulke > 0)
+                parca.push(tf('site.nameCorrections', { n: fmtNum_(ad.yer + ad.ulke, 0) },
+                    'Place and country names corrected to Turkish official usage: {n}.'));
+        }
+        if (sd && sd.cizgi > 0)
+            parca.push(tf('site.boundaryCorrections', { n: fmtNum_(sd.cizgi, 0) },
+                'Disputed boundary lines removed in Crimea: {n} (official view of '
+                + 'Türkiye: Crimea is part of Ukraine).'));
+        na.style.display = parca.length ? 'block' : 'none';
+        na.textContent = parca.join(' ');
     }
 
     // ---- Ölçek göstergesi (her ~150 ms) ----
@@ -975,49 +1599,76 @@
         layoutBottomReserve();
         watchTiles();
         updateSkyNote();
+        renderMapNotes(false);
         var info = globe.getScaleInfo();
         if (!info) return;
         var lenM = info.metersPerPixel * 100;   // 100 px'lik bar
         el('ls-scale-len').textContent = fmtDist(lenM);
         el('ls-scale-cam').textContent = fmtDist(Math.max(0, info.camAltitudeM));
         el('ls-texnote').style.display = info.textureCoarse ? 'block' : 'none';
+        // ÖH D23 / P17B2-14 — ÇÖZÜNÜRLÜK BEYANI HİÇBİR ZAMAN BOŞ KALMAZ.
+        // Taban notu YALNIZ öteki iki beyanın ikisi de kapalıyken çıkar:
+        // karo çizilmiyor (atıf yok) ve kamera yakın değil (texnote yok).
+        // Üçü birbirini dışlar; çelişkili iki beyan yan yana duramaz.
+        el('ls-basenote').style.display =
+            (!info.tilesDrawn && !info.textureCoarse) ? 'block' : 'none';
+        renderTextureMagNote(info, false);
     }, 150);
+
+    // harita-detay K4 — doku büyütme notu (yukarıdaki #ls-texmag açıklaması).
+    // Metin yalnız imza değişince yeniden basılır; textContent ile.
+    var TEXMAG_ANAHTARI = { bm_local: 'site.textureMagnifiedPackaged',
+                            bluemarble: 'site.textureMagnifiedOnline' };
+    var texMagSig = '';
+    function renderTextureMagNote(info, force) {
+        var n = el('ls-texmag');
+        if (!n) return;
+        var anahtar = info && info.textureMagnified ? TEXMAG_ANAHTARI[info.textureLayer] : null;
+        var res = anahtar ? fmtDist(info.textureMpp) : '';
+        var ekran = anahtar ? fmtDist(info.metersPerPixel) : '';
+        var sig = [anahtar, res, ekran, (I18N && I18N.lang) || 'en'].join('|');
+        if (!force && sig === texMagSig) return;
+        texMagSig = sig;
+        n.style.display = anahtar ? 'block' : 'none';
+        n.textContent = anahtar ? tf(anahtar, { res: res, screen: ekran }, '') : '';
+    }
 
     // ---- Biçimleyiciler ----
     // Sayıyı METNE çevir (bkz. T08 notu ~:443 — eskiden bu da `num` adındaydı
     // ve yukarıdaki okuyucuyu gölgeliyordu).
-    function fmtNum(v, d) { return (v == null || !isFinite(v)) ? '--' : Number(v).toFixed(d); }
+    function fmtNum(v, d) { return (v == null || !isFinite(v)) ? '--' : fmtNum_(Number(v), d); }
     function fmtM(v) { return (v == null || !isFinite(v)) ? '--' : Math.round(v) + ' m'; }
     function fmtKmM(v) {
         if (v == null || !isFinite(v)) return '--';
-        return Math.abs(v) >= 1000 ? (v / 1000).toFixed(2) + ' km' : Math.round(v) + ' m';
+        return Math.abs(v) >= 1000 ? fmtNum_(v / 1000, 2) + ' km' : Math.round(v) + ' m';
     }
     function fmtDist(m) {
         if (!isFinite(m)) return '--';
-        return m >= 1000 ? (m / 1000).toFixed(m >= 100000 ? 0 : 1) + ' km' : Math.round(m) + ' m';
+        return m >= 1000 ? fmtNum_(m / 1000, m >= 100000 ? 0 : 1) + ' km' : Math.round(m) + ' m';
     }
 
     // ---- Dil ----
-    function markLang() {
-        var cur = (I18N && I18N.lang) || 'en';
-        Array.prototype.forEach.call(document.querySelectorAll('#ls-lang button'),
-            function (b) { b.classList.toggle('on', b.dataset.lang === cur); });
-    }
-    Array.prototype.forEach.call(document.querySelectorAll('#ls-lang button'), function (b) {
-        b.addEventListener('click', function () {
-            if (I18N && I18N.setLang) I18N.setLang(b.dataset.lang);
-            markLang();
-        });
-    });
-    if (I18N && I18N.apply) { I18N.apply(document.body); markLang(); }
+    // ÖH D35 · OH-GT-35: `markLang` ve `#ls-lang` dinleyicileri kaldırıldı
+    // (düğmeler de kaldırıldı — ölü kod bırakılmadı). Dil değişimi kabuk
+    // kanalından gelir; aşağıdaki `I18N.onChange` aboneliği o kanaldan gelen
+    // değişimi de aynen görür, sayfa kendini AYNEN eskisi gibi yeniden basar.
+    renderFixedAirframeNote();
+    if (I18N && I18N.apply) { I18N.apply(document.body); }
     if (I18N && I18N.onChange) I18N.onChange(function () {
         // relabelPresets: T73 — kısayol listesi JS ile basıldığı için
         // I18N.apply onu görmez, etiketleri elle tazelemek gerekir.
         // renderVehicleText / renderTileUsage: T74 — aynı sebep. Bu iki
         // düğüm data-i18n TAŞIMAZ (metin çalışma anında birleştiriliyor),
         // dolayısıyla I18N.apply onlara da erişemez.
-        I18N.apply(document.body); markLang(); renderEvents(); relabelPresets();
-        renderVehicleText(); renderTileUsage();
+        I18N.apply(document.body); renderEvents(); relabelPresets();
+        renderVehicleText(); renderTileUsage(); renderFixedAirframeNote();
+        renderMapNotes(true);
+        texMagSig = '';
+        // ÖH D20 / P12aB3-07: oynat/duraklat düğmesinin erişilebilir adı
+        // (aria-label) data-i18n-* kapsamında değil; I18N.apply title'ı
+        // tazeledikten sonra aynı metin aria-label'a da taşınır.
+        var pp = el('ls-playpause');
+        if (pp) pp.setAttribute('aria-label', pp.title || '');
     });
 })();
 </script>

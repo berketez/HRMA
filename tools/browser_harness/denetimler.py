@@ -555,6 +555,72 @@ def fea_cizim_denetimi(panel_adi: str, olcum: Optional[Dict[str, Any]],
                    dayanak=dayanak, olcum=olcum, esik=esik)
 
 
+_ROZET_ILK_SAYI = re.compile(r'-?\d+(?:[.,]\d+)?')
+
+
+def renk_durustlugu_kusurlari(rozetler: Sequence[Dict[str, Any]],
+                              kaynak: str) -> List[str]:
+    """RENK DÜRÜSTLÜĞÜ — kabul rengi yalnız oturmuş, olumlu bir hükme.
+
+    ÖH D20 · P17B1-03. Kural depoda zaten YAZILI ve ÇALIŞIYORDU ama
+    ``merkez_rozet_denetimi``in içine gömülüydü: dört rozet yolundan
+    (merkez/CFD, yapısal FEA, tane FEA, termal FEA) yalnız birine bağlıydı.
+    ``fea_rozet_denetimi``in dokümanı bunu açıkça yazıyordu: *"Rozetin RENGİ
+    ölçülür ve özete yazılır ama hükme girmez."* Sonuç: sıvı yapısal
+    panelinde ``NOT CONVERGED after 11 rounds`` ile yeşil bir kabul rozeti
+    yan yana durabiliyordu ve tur geçiyordu.
+
+    Kural artık ROZETİN KENDİ METNİNDEN türer, panelden değil — bu yüzden
+    yükün çaprazlanamadığı rozetlerde de (motorun kendi emniyet katsayısı,
+    yedeğe düşme beyanı, "ısı doğrulanmadı") çalışır:
+
+      1. Metninde olumsuz/eksik beyan çekirdeği geçen rozet kabul rengiyle
+         basılamaz (``esikler.KABUL_RENGI_YASAK_BEYANLAR``).
+      2. Sayısal hüküm ailelerinde (emniyet katsayısı, gerinim marjı)
+         rozetin İLK sayısı err eşiğinin altındaysa renk ``err``,
+         warn eşiğinin altındaysa en azından kabul rengi DEĞİL olmalıdır
+         (eşikler ürünün kendi eşikleriyle tek kaynaktan).
+
+    ``kaynak`` yalnız hata cümlesinde geçen yol adıdır (merkez/yapısal/…).
+    """
+    kabul = esikler.MERKEZ_KABUL_ROZET_SINIFI
+    kusurlar: List[str] = []
+    for r in rozetler or ():
+        metin = r.get('metin') or ''
+        tur = r.get('tur')
+        for cekirdek in esikler.KABUL_RENGI_YASAK_BEYANLAR:
+            if cekirdek in metin and tur == kabul:
+                kusurlar.append(
+                    '%s: rozet kendi metninde %r diyor ama KABUL rengiyle '
+                    'basılmış: %r' % (kaynak, cekirdek, _kirp(metin, 160)))
+                break
+        for cekirdekler, aile in esikler.ROZET_SAYISAL_HUKUM_AILELERI:
+            if not any(c in metin for c in cekirdekler):
+                continue
+            if any(c in metin for c in ('NOT PUBLISHED', 'YAYIMLANMADI')):
+                break
+            m = _ROZET_ILK_SAYI.search(metin)
+            if not m:
+                break
+            try:
+                deger = float(m.group(0).replace(',', '.'))
+            except ValueError:
+                break
+            err = getattr(esikler, aile + '_ERR_ESIGI')
+            warn = getattr(esikler, aile + '_WARN_ESIGI')
+            if deger < err and tur != 'err':
+                kusurlar.append(
+                    '%s: hüküm sayısı %g err eşiğinin (%g) altında ama renk '
+                    '%r: %r' % (kaynak, deger, err, tur, _kirp(metin, 160)))
+            elif deger < warn and tur == kabul:
+                kusurlar.append(
+                    '%s: hüküm sayısı %g kabul eşiğinin (%g) altında ama '
+                    'KABUL rengiyle basılmış: %r'
+                    % (kaynak, deger, warn, _kirp(metin, 160)))
+            break
+    return kusurlar
+
+
 def fea_rozet_denetimi(panel_adi: str, olcum: Optional[Dict[str, Any]],
                        beklenen_imzalar: Sequence[str],
                        yasak_imzalar: Sequence[str] = ()) -> Denetim:
@@ -562,13 +628,18 @@ def fea_rozet_denetimi(panel_adi: str, olcum: Optional[Dict[str, Any]],
 
     İmzalar ``esikler.ROZET_IMZALARI``da tanımlıdır ve her biri dil
     varyantları taşır; eşleşme "herhangi bir varyant" ile sağlanır.
-    Rozetin RENGİ (``data-badge``) ölçülür ve özete yazılır ama hükme
-    girmez: renk tasarım noktasının fiziğini anlatır (emniyet katsayısı,
-    yakınsama), arayüz kusurunu değil.
+    ÖH D20 · P17B1-03 — RENGİN HÜKME GİRMEDİĞİ DÖNEM KAPANDI. Renk artık
+    ``renk_durustlugu_kusurlari`` ile denetlenir: rozet kendi metninde
+    "yakınsamadı / yayımlanmadı / aşılıyor" diyorsa ya da hüküm sayısı err
+    eşiğinin altındaysa KABUL rengi (yeşil) basılamaz. Kural merkez (CFD)
+    kiracısıyla AYNI fonksiyondan gelir — dört rozet yolu tek kaynaktır.
     """
     ad = 'fea_%s_rozet' % panel_adi
     esik = {'beklenen_imzalar': list(beklenen_imzalar),
             'yasak_imzalar': list(yasak_imzalar),
+            'kabul_sinifi': esikler.MERKEZ_KABUL_ROZET_SINIFI,
+            'kabul_rengi_yasak_beyanlar':
+                list(esikler.KABUL_RENGI_YASAK_BEYANLAR),
             'imza_varyantlari': {
                 i: list(imza_varyantlari(i))
                 for i in list(beklenen_imzalar) + list(yasak_imzalar)}}
@@ -593,12 +664,16 @@ def fea_rozet_denetimi(panel_adi: str, olcum: Optional[Dict[str, Any]],
         if eslesen:
             geri_gelenler.append('%s → %r'
                                  % (imza, _kirp(eslesen[0].get('metin'), 160)))
-    if eksik or geri_gelenler:
+    # ÖH D20 · P17B1-03 — renk artık HÜKME GİRER (üç FEA yolunda da).
+    renk_kusurlari = renk_durustlugu_kusurlari(rozetler, 'fea/' + panel_adi)
+    if eksik or geri_gelenler or renk_kusurlari:
         parcalar = []
         if eksik:
             parcalar.append('beklenen imza YOK: %s' % '; '.join(eksik))
         if geri_gelenler:
             parcalar.append('YASAK imza ekranda: %s' % '; '.join(geri_gelenler))
+        if renk_kusurlari:
+            parcalar.append('RENK DÜRÜSTLÜĞÜ: %s' % '; '.join(renk_kusurlari))
         parcalar.append('%d rozet okundu: %s'
                         % (len(rozetler),
                            _kirp(' | '.join(r.get('metin', '') for r in rozetler),
@@ -613,9 +688,409 @@ def fea_rozet_denetimi(panel_adi: str, olcum: Optional[Dict[str, Any]],
                    dayanak=dayanak, olcum=olcum, esik=esik)
 
 
+# --- ÖH Faz 0: rozet ⟷ yük çaprazı (P17 savcı reçetesi, Kural D) -----------
+
+_CAPRAZ_SAYI_DESENI = re.compile(r'-?\d+(?:\.\d+)?')
+
+
+def _sayi_mi(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _sayi_spekleri(sayi: Any) -> List[Any]:
+    """``sayi`` alanını TEK biçime indirir: ``[(değer, basamak), ...]``.
+
+    Geriye uyum: eski tek beklenti ``(değer, basamak)`` ikilisiydi. ÖH D18'de
+    bir rozetin BİRDEN ÇOK sayısı çaprazlanabiliyor (``n/N`` sayacı, tur
+    sayısı + tolerans, son değişim + tolerans), o yüzden liste de kabul
+    edilir. İkisini ayırt etmek için ikinci öğenin tipine bakılır: skalerse
+    tek spek, değilse liste.
+    """
+    if sayi is None:
+        return []
+    if (isinstance(sayi, tuple) and len(sayi) == 2
+            and (_sayi_mi(sayi[1]) or isinstance(sayi[1], str))):
+        return [sayi]
+    return list(sayi)
+
+
+def _sayi_hedefi(deger: float, basamak: Any):
+    """(hedef değer, mutlak tolerans) — basamak kipine göre.
+
+    ``int``   → ürün ``fmt(v, n)`` ile basar: yarım son basamak toleransı.
+    ``'tam'`` → sayaç; TAM eşleşme (eşik/oran sayıları sayacı taklit edemesin).
+    ``'sigN'``→ ürün ``fmtSig(v, N)`` ile basar: N anlamlı basamak + bağıl pay.
+    """
+    if basamak == 'tam':
+        return float(deger), esikler.FEA_CAPRAZ_TAM_SAYI_TOLERANSI
+    if isinstance(basamak, str) and basamak.startswith('sig'):
+        n = int(basamak[3:])
+        hedef = float('%.*g' % (n, deger))
+        return hedef, (abs(hedef) * esikler.FEA_CAPRAZ_ANLAMLI_BAGIL_TOLERANS
+                       + 1e-15)
+    return round(deger, basamak), esikler.FEA_CAPRAZ_BASAMAK_TOLERANSI[basamak]
+
+
+def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Panelin yükünden EKRANDA olması gereken hüküm rozetlerini türetir.
+
+    Türetim ürünün kendi basım kurallarının BAĞIMSIZ (Python) aynasıdır:
+    yapısal/tane SF-renk eşikleri fea_panel.js:695/:1199, termal sınır
+    hükmü thermal_fea_panel.js:669-698. Ürün kuralı değişirse bu tablo ve
+    birim bekçileri kırmızı verir — sessiz ayrışma yok.
+
+    Her beklenti: ``metinler`` (dil varyantı çekirdekleri — herhangi biri),
+    ``haric`` (eşleşmeyi düşüren negatif bağlam), ``renk`` (data-badge
+    sınıfı) ve ``sayi`` = (değer, basamak) ya da bunlardan bir LİSTE (bir
+    rozette birden çok sayı çaprazlanabilir) ya da None.
+
+    ÖH D18 / P17B1-20 ŞART: çapraz artık yalnız HÜKÜM rozetlerini değil,
+    BİLGİ rozetlerinin sayılarını da sorar — ölçülen boşluk buydu (56
+    mutasyonun 31'i kaçıyordu, kaçanların çoğu sayaç bozmasıydı):
+      * ``flags`` bloğu → MESH DISTORTION eşiği + ``n/N`` sayacı, ELONGATED
+        ``n/N`` sayacı (fea_panel.js qualityBadges),
+      * ``convergence`` → CONVERGED "in {n} rounds to {pct}%" tur sayısı ve
+        yüzdesi,
+      * ``convergence.acceptance`` → ACCEPTANCE METRIC son değişim yüzdesi ve
+        toleransı; yanındaki PEAK vM rozetinin yüzdesi.
+    """
+    beklentiler: List[Dict[str, Any]] = []
+
+    def ekle(ad, metinler, renk, sayi=None, haric=()):
+        beklentiler.append({'ad': ad, 'metinler': tuple(metinler),
+                            'haric': tuple(haric), 'renk': renk, 'sayi': sayi})
+
+    s = yuk.get('scalars') if isinstance(yuk.get('scalars'), dict) else {}
+    conv = yuk.get('convergence') if isinstance(yuk.get('convergence'), dict) else None
+    flags = yuk.get('flags') if isinstance(yuk.get('flags'), dict) else None
+
+    def _yakinsama_sayilari(blok):
+        """CONVERGED / NOT CONVERGED rozetinin iki sayısı: tur + yüzde."""
+        spek = []
+        if _sayi_mi(blok.get('rounds')):
+            spek.append((blok['rounds'], 'tam'))
+        if _sayi_mi(blok.get('final_rel_change_pct')):
+            spek.append((blok['final_rel_change_pct'], 2))
+        return spek or None
+
+    def _kimlik_ve_ag_beklentileri():
+        """Her üç panelde ORTAK olan bilgi rozetleri: kimlik + ağ boyu.
+
+        ÖH D18 / P17B1-20: bunlar da hükümdür — ekran BAŞKA bir motorun ya da
+        BAŞKA boyuttaki bir ağın sonucunu gösteriyorsa rapor yalan söyler.
+        Ürün karşılıkları: fea_panel.js:714-719 (cidar), :1558-1571 (tane),
+        thermal_fea_panel.js:655-661 (termal).
+        """
+        if yuk.get('engine_layout'):
+            ekle('motor kimliği', ('ENGINE:', 'MOTOR:'), 'info')
+        if yuk.get('grain_type'):
+            spek = ([(yuk['symmetry_fraction'], 'tam')]
+                    if _sayi_mi(yuk.get('symmetry_fraction')) else None)
+            ekle('kesit kimliği', ('SECTION:', 'KESİT:'), 'info', sayi=spek)
+        ag = yuk.get('mesh_info') if isinstance(yuk.get('mesh_info'), dict) else None
+        if ag:
+            spek = []
+            if _sayi_mi(ag.get('n_elems')):
+                spek.append((ag['n_elems'], 'tam'))
+            if _sayi_mi(ag.get('n_nodes')):
+                spek.append((ag['n_nodes'], 'tam'))
+            if spek:
+                ekle('ağ boyu', ('MESH ',), 'info', sayi=spek,
+                     haric=('DISTORTION', 'BOZULMASI'))
+
+    def _kalite_beklentileri():
+        """``flags`` bloğunun aynası (fea_panel.js:418-435 qualityBadges).
+
+        Renk kuralı üründen: bayraklı eleman varsa 'warn', yoksa 'ok';
+        ölçülmediyse 'dim' beyanı. Uzama rozeti her zaman nötr 'info'.
+        """
+        if flags is None:
+            return
+        sayimlar = flags.get('counts') if isinstance(flags.get('counts'), dict) else {}
+        esik_blok = (flags.get('thresholds')
+                     if isinstance(flags.get('thresholds'), dict) else {})
+        olculen = (flags.get('measured')
+                   if isinstance(flags.get('measured'), dict) else {})
+        toplam = sayimlar.get('total')
+        if olculen.get('jacobian'):
+            spek = []
+            if _sayi_mi(esik_blok.get('scaled_jacobian_min')):
+                spek.append((esik_blok['scaled_jacobian_min'], 'sig4'))
+            if _sayi_mi(sayimlar.get('jacobian')):
+                spek.append((sayimlar['jacobian'], 'tam'))
+            if _sayi_mi(toplam):
+                spek.append((toplam, 'tam'))
+            ekle('ağ bozulması sayacı',
+                 ('MESH DISTORTION', 'MESH BOZULMASI'),
+                 'warn' if sayimlar.get('jacobian') else 'ok',
+                 sayi=spek or None,
+                 haric=('NOT PUBLISHED', 'YAYIMLANMADI'))
+        elif 'jacobian' in olculen:
+            ekle('ağ bozulması yayımlanmadı beyanı',
+                 ('MESH DISTORTION NOT PUBLISHED',
+                  'MESH BOZULMASI YAYIMLANMADI'), 'dim')
+        if olculen.get('aspect'):
+            spek = []
+            if _sayi_mi(esik_blok.get('aspect_ratio_max')):
+                spek.append((esik_blok['aspect_ratio_max'], 'sig4'))
+            if _sayi_mi(sayimlar.get('aspect')):
+                spek.append((sayimlar['aspect'], 'tam'))
+            if _sayi_mi(toplam):
+                spek.append((toplam, 'tam'))
+            ekle('uzamış eleman sayacı',
+                 ('ELONGATED ELEMENTS', 'UZAMIŞ ELEMANLAR'), 'info',
+                 sayi=spek or None)
+
+    if panel_adi == 'yapisal':
+        if 'min_safety_factor' in s:
+            sf = s['min_safety_factor']
+            if _sayi_mi(sf):
+                renk = ('err' if sf < esikler.FEA_SF_ERR_ESIGI
+                        else 'warn' if sf < esikler.FEA_SF_WARN_ESIGI else 'ok')
+                ekle('emniyet katsayısı hükmü',
+                     ('MIN SAFETY FACTOR', 'EN KÜÇÜK EMNİYET KATSAYISI'),
+                     renk, sayi=(sf, 2))
+            else:
+                ekle('emniyet katsayısı yayımlanmadı beyanı',
+                     ('SAFETY FACTOR NOT PUBLISHED',
+                      'EMNİYET KATSAYISI YAYIMLANMADI'), 'dim')
+        if _sayi_mi(s.get('von_mises_gauss_max_pa')):
+            ekle('tepe von Mises', ('PEAK von MISES', 'TEPE von MISES'),
+                 'info', sayi=(s['von_mises_gauss_max_pa'] / 1e6, 1))
+        if conv is not None and 'converged' in conv:
+            if conv['converged']:
+                ekle('yakınsama hükmü (yakınsadı)', ('CONVERGED', 'YAKINSADI'),
+                     'ok', sayi=_yakinsama_sayilari(conv),
+                     haric=('NOT CONVERGED', 'YAKINSAMADI'))
+            else:
+                ekle('yakınsama hükmü (yakınsamadı)',
+                     ('NOT CONVERGED', 'YAKINSAMADI'), 'warn',
+                     sayi=_yakinsama_sayilari(conv))
+        _kimlik_ve_ag_beklentileri()
+        _kalite_beklentileri()
+
+    elif panel_adi == 'termal':
+        if _sayi_mi(s.get('peak_wall_T_K')):
+            ekle('tepe cidar sıcaklığı', ('PEAK WALL T', 'TEPE CİDAR T'),
+                 'info', sayi=(s['peak_wall_T_K'], 0))
+        ml = yuk.get('material_limits')
+        ml = ml if isinstance(ml, dict) else None
+        if ml and (_sayi_mi(ml.get('allowable_temperature_K'))
+                   or _sayi_mi(ml.get('melting_point_K'))):
+            if ml.get('exceeds_melting') is True:
+                ekle('malzeme sınırı hükmü (erime aşıldı)',
+                     ('EXCEEDS MELTING POINT', 'ERİME NOKTASI AŞILIYOR'), 'err',
+                     sayi=((ml['melting_point_K'], 0)
+                           if _sayi_mi(ml.get('melting_point_K')) else None))
+            elif ml.get('exceeds_allowable') is True:
+                ekle('malzeme sınırı hükmü (izin aşıldı)',
+                     ('EXCEEDS ALLOWABLE', 'K AŞILIYOR'), 'warn',
+                     sayi=((ml['allowable_temperature_K'], 0)
+                           if _sayi_mi(ml.get('allowable_temperature_K')) else None))
+            elif ml.get('exceeds_allowable') is False:
+                ekle('malzeme sınırı hükmü (sınır içinde)',
+                     ('WITHIN ALLOWABLE', 'İÇİNDE'), 'ok',
+                     sayi=((ml['allowable_temperature_K'], 0)
+                           if _sayi_mi(ml.get('allowable_temperature_K')) else None))
+            else:
+                ekle('malzeme sınırı hükmü (izin yayımlanmadı)',
+                     ('ALLOWABLE NOT PUBLISHED', 'İZİN SINIRI YAYIMLANMAMIŞ'),
+                     'dim')
+        elif 'material_limits' in yuk:
+            ekle('malzeme sınırı hükmü (sınır kaydı yok)',
+                 ('MATERIAL LIMITS NOT PUBLISHED',
+                  'MALZEME SINIRLARI YAYIMLANMAMIŞ'), 'dim')
+        ts = yuk.get('time_step')
+        if isinstance(ts, dict) and 'converged' in ts:
+            if ts['converged']:
+                ekle('zaman adımı hükmü (yakınsadı)',
+                     ('TIME STEP CONVERGED', 'ZAMAN ADIMI YAKINSADI'), 'ok',
+                     haric=('TIME STEP NOT CONVERGED', 'ZAMAN ADIMI YAKINSAMADI'))
+            else:
+                ekle('zaman adımı hükmü (yakınsamadı)',
+                     ('TIME STEP NOT CONVERGED', 'ZAMAN ADIMI YAKINSAMADI'),
+                     'warn')
+        en = yuk.get('energy') if isinstance(yuk.get('energy'), dict) else None
+        if en is not None and _sayi_mi(en.get('residual_rel')):
+            # Ürün fmtExp = toExponential(1) ile basar (thermal_fea_panel.js:
+            # 102-104): '4.6e-15'. Sayı deseni mantis ile üssü AYRI okur, o
+            # yüzden ikisi de ayrı ayrı sorulur.
+            _m, _, _u = ('%.1e' % en['residual_rel']).partition('e')
+            ekle('enerji artığı', ('ENERGY RESIDUAL', 'ENERJİ ARTIĞI'), 'info',
+                 sayi=[(float(_m), 1), (float(_u), 'tam')])
+        _kimlik_ve_ag_beklentileri()
+
+    elif panel_adi == 'tane':
+        if 'strain_margin' in s:
+            m = s['strain_margin']
+            if _sayi_mi(m):
+                renk = ('err' if m < esikler.TANE_MARJ_ERR_ESIGI
+                        else 'warn' if m < esikler.TANE_MARJ_WARN_ESIGI else 'ok')
+                ekle('gerinim marjı hükmü', ('STRAIN MARGIN', 'GERİNİM MARJI'),
+                     renk, sayi=(m, 2),
+                     haric=('NOT PUBLISHED', 'YAYIMLANMADI'))
+            else:
+                ekle('gerinim marjı yayımlanmadı beyanı',
+                     ('STRAIN MARGIN NOT PUBLISHED', 'GERİNİM MARJI YAYIMLANMADI'),
+                     'dim')
+        if _sayi_mi(s.get('von_mises_gauss_max_mpa')):
+            ekle('tepe von Mises', ('PEAK von MISES', 'TEPE von MISES'),
+                 'info', sayi=(s['von_mises_gauss_max_mpa'], 3))
+        if _sayi_mi(s.get('max_bore_strain_pct')):
+            ekle('tepe port gerinimi', ('MAX BORE STRAIN',),
+                 'info', sayi=(s['max_bore_strain_pct'], 2))
+        acc = (conv or {}).get('acceptance')
+        if isinstance(acc, dict) and 'converged' in acc:
+            # ÖH D18 / P17B1-20 ŞART: son değişim ve tolerans ürünün kendi
+            # fmtSig(v, 4) kuralıyla basılıyor (fea_panel.js:1604-1615).
+            acc_spek = []
+            if _sayi_mi(acc.get('rel_change_pct')):
+                acc_spek.append((acc['rel_change_pct'], 'sig4'))
+            if _sayi_mi(acc.get('tol_pct')):
+                acc_spek.append((acc['tol_pct'], 'sig4'))
+            if acc['converged']:
+                ekle('kabul ölçütü hükmü (yakınsadı)',
+                     ('ACCEPTANCE METRIC', 'KABUL ÖLÇÜTÜ'), 'ok',
+                     sayi=acc_spek or None,
+                     haric=('NOT CONVERGED', 'YAKINSAMADI'))
+            else:
+                ekle('kabul ölçütü hükmü (yakınsamadı)',
+                     ('ACCEPTANCE METRIC', 'KABUL ÖLÇÜTÜ'), 'warn',
+                     sayi=acc_spek or None)
+            # Kabul bloğu yayımlandığında ürün vM'yi AYRI ve NÖTR basar
+            # (fea_panel.js:1616-1626); yüzdesi conv.final_rel_change_pct'tir.
+            if conv is not None and _sayi_mi(conv.get('final_rel_change_pct')):
+                ekle('tepe vM inceltme yüzdesi', ('PEAK vM', 'TEPE vM'),
+                     'info', sayi=[(conv['final_rel_change_pct'], 'sig4')])
+        elif conv is not None and 'converged' in conv:
+            if conv['converged']:
+                ekle('yakınsama hükmü (yakınsadı)', ('CONVERGED', 'YAKINSADI'),
+                     'ok', sayi=_yakinsama_sayilari(conv),
+                     haric=('NOT CONVERGED', 'YAKINSAMADI'))
+            else:
+                ekle('yakınsama hükmü (yakınsamadı)',
+                     ('NOT CONVERGED', 'YAKINSAMADI'), 'warn',
+                     sayi=_yakinsama_sayilari(conv))
+        _kimlik_ve_ag_beklentileri()
+        _kalite_beklentileri()
+
+    return beklentiler
+
+
+def fea_yuk_caprazi_denetimi(panel_adi: str,
+                             olcum: Optional[Dict[str, Any]]) -> Optional[Denetim]:
+    """EKRAN, YÜKÜ GÖSTERMELİDİR — rozet ⟷ yük çaprazı (fail-closed).
+
+    P17'nin ölçtüğü boşluk: tur FEA yükünün yalnız VARLIĞINI kaydediyordu
+    (``yuk_var``), İÇERİĞİNİ değil; hüküm rozetini silmek, sayısını bozmak
+    ve yeşile çevirmek 87 mutasyonun 80'inde turdan geçiyordu (%8 ayırt
+    edicilik). Bu denetim panelin kendi ``payload``ından türeyen hüküm
+    rozetlerinin metnini (sayısını) ve rengini yükle çaprazlar — savcı
+    ölçümünde ayırt edicilik %90,8, dürüst değişimde yanlış alarm 0/29
+    (raw/P17/S1-olcum-04.py).
+
+    FAIL-CLOSED: yük yayımlandığı hâlde tur içeriği kaydetmemişse ya da
+    içerikten tek hüküm bile türetilemiyorsa kapı KAPANIR — "kanal var
+    kapı yok" deseninin (P17B1-08 sınıfı) burada yaşamasına izin yok.
+    Panel/yük yoksa ``None`` döner: o kök zaten koşum denetiminde kırmızı,
+    hayalet kırmızı yasağı burada da geçerli.
+    """
+    if not olcum or not olcum.get('panel_var') or not olcum.get('yuk_var'):
+        return None
+    ad = 'fea_%s_yuk_caprazi' % panel_adi
+    dayanak = ('window.<panel>.payload içeriği (yuk_ozeti) ⟷ #<panel>_badges '
+               'rozet metni + data-badge rengi; eşikler ürün kuralının aynası '
+               '(fea_panel.js:695/:1199, thermal_fea_panel.js:669-698)')
+    esik = {'sf_err': esikler.FEA_SF_ERR_ESIGI,
+            'sf_warn': esikler.FEA_SF_WARN_ESIGI,
+            'marj_err': esikler.TANE_MARJ_ERR_ESIGI,
+            'marj_warn': esikler.TANE_MARJ_WARN_ESIGI,
+            'basamak_toleransi': dict(esikler.FEA_CAPRAZ_BASAMAK_TOLERANSI)}
+    yuk = olcum.get('yuk_ozeti')
+    if not isinstance(yuk, dict) or not yuk:
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('FAIL-CLOSED: yük yayımlandı (%s.payload dolu) ama tur '
+                  'İÇERİĞİNİ kaydetmemiş (yuk_ozeti boş) — rozet⟷yük çaprazı '
+                  'kurulamadı; kanal var kapı yok desenine izin verilmez'
+                  % olcum.get('api')),
+            dayanak=dayanak, olcum=olcum, esik=esik)
+    beklentiler = _capraz_beklentileri(panel_adi, yuk)
+    if not beklentiler:
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('FAIL-CLOSED: yük içeriğinden tek hüküm beklentisi bile '
+                  'türetilemedi (kaydedilen anahtarlar: %s) — panelin hüküm '
+                  'alanları yuk_ozeti süzgecinden geçmiyor olabilir'
+                  % ', '.join(sorted(yuk))),
+            dayanak=dayanak, olcum=olcum, esik=esik)
+
+    rozetler = olcum.get('rozetler') or []
+    ihlaller: List[str] = []
+    tutanlar: List[str] = []
+    for b in beklentiler:
+        adaylar = []
+        for r in rozetler:
+            metin = r.get('metin') or ''
+            if not any(cekirdek in metin for cekirdek in b['metinler']):
+                continue
+            if any(h in metin for h in b['haric']):
+                continue
+            adaylar.append(r)
+        if not adaylar:
+            ihlaller.append('YÜKTE VAR EKRANDA YOK: %s (aranan: %s)'
+                            % (b['ad'], ' | '.join(b['metinler'])))
+            continue
+        rozet = adaylar[0]
+        metin = rozet.get('metin') or ''
+        sorunlar = []
+        if rozet.get('tur') != b['renk']:
+            sorunlar.append('RENK yükle tutmuyor: beklenen %s, ekran %s'
+                            % (b['renk'], rozet.get('tur')))
+        spekler = _sayi_spekleri(b['sayi'])
+        if spekler:
+            ekran_sayilari = [float(x) for x in _CAPRAZ_SAYI_DESENI.findall(metin)]
+            # Beklenen her sayı ekrandan AYRI bir örneği TÜKETİR. Tüketimsiz
+            # ("var mı") arama, aynı sayının iki kez beklendiği rozetlerde
+            # delik bırakıyordu: `1024/1024` uzama sayacında bayraklı sayıyı
+            # 3'e çekmek, metinde kalan tek 1024 yüzünden "iki beklenti de
+            # karşılandı" sayılıyordu.
+            kalan = list(ekran_sayilari)
+            for deger, basamak in spekler:
+                hedef, tolerans = _sayi_hedefi(deger, basamak)
+                eslesen = next((i for i, x in enumerate(kalan)
+                                if abs(x - hedef) <= tolerans + 1e-12), None)
+                if eslesen is None:
+                    sorunlar.append('SAYI yükle tutmuyor: yük %s, ekran %s'
+                                    % (hedef, ekran_sayilari or '—'))
+                else:
+                    kalan.pop(eslesen)
+        if sorunlar:
+            ihlaller.append('%s → %s [%r]'
+                            % (b['ad'], '; '.join(sorunlar), _kirp(metin, 120)))
+        else:
+            tutanlar.append(b['ad'])
+    if ihlaller:
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('rozet⟷yük çaprazı TUTMADI (%d/%d beklenti): %s'
+                  % (len(ihlaller), len(beklentiler), ' — '.join(ihlaller))),
+            dayanak=dayanak, olcum=olcum, esik=esik)
+    return Denetim(
+        ad=ad, gecti=True,
+        ozet=('%d hüküm beklentisinin %d\'i ekranda ve yükle tutarlı '
+              '(metin+sayı+renk): %s'
+              % (len(beklentiler), len(tutanlar), ', '.join(tutanlar))),
+        dayanak=dayanak, olcum=olcum, esik=esik)
+
+
 def fea_denetimleri(panel_tanimi, olcum: Optional[Dict[str, Any]]) -> List[Denetim]:
-    """Tek bir FEA paneli için üç hüküm: koşum, çizim, rozet."""
-    return [
+    """Tek bir FEA paneli için hükümler: koşum, çizim, rozet (+ yük çaprazı).
+
+    Yük çaprazı yalnız yük yayımlanmışken üretilir (hayalet kırmızı yasağı:
+    yük yoksa kök zaten koşum denetiminde kırmızıdır).
+    """
+    liste = [
         fea_kosum_denetimi(panel_tanimi.ad, olcum),
         fea_cizim_denetimi(panel_tanimi.ad, olcum,
                            panel_tanimi.cizim_kimlikleri),
@@ -623,6 +1098,10 @@ def fea_denetimleri(panel_tanimi, olcum: Optional[Dict[str, Any]]) -> List[Denet
                            panel_tanimi.beklenen_imzalar,
                            panel_tanimi.yasak_imzalar),
     ]
+    capraz = fea_yuk_caprazi_denetimi(panel_tanimi.ad, olcum)
+    if capraz is not None:
+        liste.append(capraz)
+    return liste
 
 
 # ---------------------------------------------------------------------------
@@ -902,7 +1381,11 @@ def merkez_rozet_denetimi(kiraci_adi: str, olcum: Optional[Dict[str, Any]],
                 for i in (list(beklenen_imzalar) + list(yasak_imzalar)
                           + list(notr_imzalar)
                           + ['cfd_yakinsadi', 'cfd_ayrilma_yok',
-                             'cfd_butce_uyarisi', 'cfd_ayrilma_supheli'])}}
+                             'cfd_butce_uyarisi', 'cfd_ayrilma_supheli',
+                             # ÖH D26 / P17B1-14: koşullu viskoz çifti de
+                             # kanıta girsin — hangi varyantların arandığı
+                             # rapordan okunabilmeli.
+                             'cfd_viskozsuz_beyani', 'cfd_viskoz_kipi'])}}
     dayanak = ('#%s içindeki [data-cfd-badge] kutularının metni + renk sınıfı, '
                'kabın görünen metni ve koşum yükünün kendi alanları'
                % esikler.MERKEZ_GORUNTULEYICI_KOKU)
@@ -938,7 +1421,9 @@ def merkez_rozet_denetimi(kiraci_adi: str, olcum: Optional[Dict[str, Any]],
         elif imza_metinde_var(metin, imza):
             geri_gelenler.append('%s → panel metninde' % imza)
 
-    renk_kusurlari: List[str] = []
+    # ÖH D20 · P17B1-03 — metinden türeyen ortak kural (dört yolda aynı).
+    renk_kusurlari: List[str] = renk_durustlugu_kusurlari(
+        rozetler, 'merkez/' + kiraci_adi)
     kabul = esikler.MERKEZ_KABUL_ROZET_SINIFI
     if yuk.get('converged') is False:
         for r in imza_eslesen_rozetler(rozetler, 'cfd_yakinsadi'):
@@ -974,6 +1459,46 @@ def merkez_rozet_denetimi(kiraci_adi: str, olcum: Optional[Dict[str, Any]],
         elif ekranda and not ateslendi and yuk:
             kosullu_kusurlar.append(
                 'yanıtta olmayan %s rozeti ekranda (%s)' % (cumle, imza))
+
+    # --- ÖH D26 / P17B1-14 (Fable ŞARTI) — VİSKOZ KİP ÇİFTİ ----------------
+    # Ürünün kendi dalı (cfd_panel.js::viscousBadgesHtml):
+    #     if (!v.enabled)  -> badgeInviscid   ("INVISCID (Euler) — ...")
+    #     else             -> badgeViscousMode ("VISCOUS — turbulence ...")
+    # İki dalın DA bir beyanı vardır ve hangisinin doğru olduğu FİZİK değil
+    # YÜK sorusudur: `cfd.viscous.enabled`. Bu yüzden çift, koşullu beyan
+    # kuralıyla seçilir — biri BEKLENEN ise öteki YASAK'tır.
+    #
+    # Neden hem beklenen hem yasak: yalnız "beklenen"i sınamak yetmez.
+    # Ölçüldü (once_viskoz.json, taban 7751531): viskoz koşumda ekranda
+    # INVISCID dururken denetim YEŞİL veriyordu. Yani ürünün EN AĞIR beyanı
+    # ("duvar kayması yok, duvar ısı akısı yok") tersine dönmüş olsa bile
+    # harness bunu görmüyordu. Beyanın yokluğu kadar YANLIŞ beyanın varlığı
+    # da kusurdur.
+    #
+    # Yük hiç okunamadıysa (yuk boş) hüküm VERİLMEZ: hayalet kırmızı yasağı —
+    # koşulu bilinmeyen bir dal için iki rozetten hangisinin doğru olduğu
+    # söylenemez.
+    # Kural KENDİLİĞİNDEN kapsamlıdır: yalnız `viscous_enabled` yayımlayan
+    # kiracıda (CFD) çalışır; öteki kiracılarda alan yoktur -> None -> hüküm
+    # yok. Kiracı adına göre dallanmak gerekmez.
+    if yuk:
+        viskoz_acik = yuk.get('viscous_enabled')
+        if viskoz_acik is not None:
+            beklenen_dal, yasak_dal, cumle = (
+                ('cfd_viskoz_kipi', 'cfd_viskozsuz_beyani',
+                 'koşum VİSKOZ (viscous.enabled=true)')
+                if viskoz_acik else
+                ('cfd_viskozsuz_beyani', 'cfd_viskoz_kipi',
+                 'koşum VİSKOZSUZ (viscous.enabled=false)'))
+            if not imza_eslesen_rozetler(rozetler, beklenen_dal):
+                kosullu_kusurlar.append(
+                    '%s ama %s rozeti EKRANDA YOK (aranan: %s)'
+                    % (cumle, beklenen_dal,
+                       ' | '.join(imza_varyantlari(beklenen_dal))))
+            for r in imza_eslesen_rozetler(rozetler, yasak_dal):
+                kosullu_kusurlar.append(
+                    '%s ama TERS beyan ekranda: %s → %r'
+                    % (cumle, yasak_dal, _kirp(r.get('metin'), 160)))
 
     nan_isabetleri = [ad_ for ad_, kalip in _SIZINTI_DERLI
                       if ad_ == 'nan' and kalip.search(metin)]
@@ -1044,12 +1569,948 @@ def sayfa_hukmu(denetim_listesi: Iterable[Denetim]) -> bool:
     return bool(liste) and all(d.gecti for d in liste)
 
 
+def tam_sayfa_goruntusu_denetimi(
+        goruntuler: Optional[Dict[str, Any]]) -> Denetim:
+    """Turun sakladığı tek insan-okur kanıt GERÇEK mi? (P17B1-05)
+
+    Ölçülen (raw/P17/B1-tur-09.py): ``full_page=True`` ile alınan üç PNG'nin
+    üçü de Chromium'un 16.384 px'lik tek-kare tavanını aşıyordu ve tavanı
+    aşan bant üst bandın BİREBİR tekrarıydı (maks piksel farkı 0). Hibritte
+    sayfanın %52,5'i hiçbir koşumda görüntülenmemişti. Tur görüntüyü alıp
+    yolunu rapora yazıyor, YÜKSEKLİĞİNE hiç bakmıyordu.
+
+    FAIL-CLOSED: görüntü alınamadıysa ya da ölçülemediyse kapı kapanır —
+    ölçülmeyen kanıt "temiz" sayılmaz. Tavanı aşan görüntü de kapıyı
+    kapatır: adı "tam sayfa" olan ama yarısı tekrar olan bir dosya, kanıt
+    değil kanıt taklididir.
+    """
+    ad = 'tam_sayfa_goruntusu'
+    tavan = esikler.CHROMIUM_TEK_KARE_TAVANI_PX
+    esik = {'chromium_tek_kare_tavani_px': tavan}
+    dayanak = 'kaydedilen PNG dosyasının IHDR başlığından okunan yükseklik'
+    if not goruntuler or not goruntuler.get('tam_sayfa'):
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('FAIL-CLOSED: tam sayfa görüntüsü alınamadı — '
+                             'turun tek insan-okur kanıtı yok'),
+                       dayanak=dayanak, olcum=goruntuler or {}, esik=esik)
+    # ÖH D24 · OH-D21-11 — DİLİMLİ KANIT.
+    # Sayfa tavanı aşıyorsa tur artık tek kare değil, her biri tavanın
+    # altında kalan ardışık DİLİMLER üretir (tur.py::_tam_sayfa_yakala).
+    # Kapı gevşemez: dilimlerin BİTİŞİK olduğu ve toplamlarının sayfanın
+    # TAMAMINI kapladığı ölçülür; eksik ya da örtüşen dilim kanıt sayılmaz.
+    dilimler = goruntuler.get('tam_sayfa_dilimleri')
+    if dilimler:
+        sayfa = goruntuler.get('sayfa_boyu_px') or {}
+        sayfa_y = sayfa.get('yukseklik')
+        if not _sayi_mi(sayfa_y):
+            return Denetim(ad=ad, gecti=False,
+                           ozet=('FAIL-CLOSED: dilimli görüntü alındı ama '
+                                 'SAYFA BOYU ölçülmedi — kapsamın tamlığı '
+                                 'sınanamıyor'),
+                           dayanak=dayanak, olcum=goruntuler, esik=esik)
+        bekleniyor = 0
+        kapsanan = 0
+        imzalar: Dict[str, Any] = {}
+        for d in dilimler:
+            px = d.get('px') if isinstance(d, dict) else None
+            if not isinstance(px, dict) or not _sayi_mi(px.get('yukseklik')):
+                return Denetim(ad=ad, gecti=False,
+                               ozet=('FAIL-CLOSED: dilim kaydedildi (%s) ama '
+                                     'yüksekliği ÖLÇÜLMEDİ'
+                                     % ((d or {}).get('yol'),)),
+                               dayanak=dayanak, olcum=goruntuler, esik=esik)
+            if int(px['yukseklik']) > tavan:
+                return Denetim(ad=ad, gecti=False,
+                               ozet=('SAHTE KANIT: dilim %s %d px, tavan %d px'
+                                     % (d.get('yol'), px['yukseklik'], tavan)),
+                               dayanak=dayanak, olcum=goruntuler, esik=esik)
+            if int(d.get('y0', -1)) != bekleniyor:
+                return Denetim(ad=ad, gecti=False,
+                               ozet=('EKSİK KANIT: dilimler bitişik değil — '
+                                     '%s y0=%s, beklenen %d'
+                                     % (d.get('yol'), d.get('y0'), bekleniyor)),
+                               dayanak=dayanak, olcum=goruntuler, esik=esik)
+            # ÖH D26 / OH-D25-02 — dilimli dalda da ALT SINIR: sıfır
+            # yükseklikli dilim hiçbir şey kapsamaz. Sıfır boy dilimlerden
+            # oluşan bir küme, sayfa boyu da sıfır ölçüldüğünde
+            # `kapsanan == sayfa_y` eşitliğini sağlayıp GEÇİYORDU.
+            h = int(d.get('istenen_yukseklik') or 0)
+            if h <= 0 or int(px['yukseklik']) <= 0:
+                return Denetim(
+                    ad=ad, gecti=False,
+                    ozet=('SAHTE KANIT: dilim %s sıfır yükseklikli '
+                          '(istenen=%d, ölçülen=%d) — hiçbir bandı '
+                          'kapsamıyor' % (d.get('yol'), h,
+                                          int(px['yukseklik']))),
+                    dayanak=dayanak, olcum=goruntuler, esik=esik)
+            # ÖH D27 / OH-D25-02(b) — KAPSAM İSTENENDEN DEĞİL ÜRETİLENDEN
+            # sayılır. Toplam kapsam ``istenen_yukseklik``lerden
+            # hesaplanıyordu; tarayıcı daha KISA bir PNG üretirse kapsam
+            # iddiası şişer ve "sayfanın tamamı yakalandı" künyesi yalan
+            # olur. İki sayı eşit DEĞİLSE kanıt eksiktir.
+            if int(px['yukseklik']) != h:
+                return Denetim(
+                    ad=ad, gecti=False,
+                    ozet=('EKSİK KANIT: dilim %s %d px istendi ama %d px '
+                          'üretildi — kapsam iddiası üretilen görüntüyle '
+                          'uyuşmuyor' % (d.get('yol'), h, int(px['yukseklik']))),
+                    dayanak=dayanak, olcum=goruntuler, esik=esik)
+            # ÖH D27 / OH-D25-02(b) — TEKRAR BANT. Kalemin kökü buydu:
+            # tavanı aşan tek karede alt bant üst bandın BİREBİR tekrarıydı
+            # (maks piksel farkı 0). Dilimlerin yükseklikleri doğru olsa da
+            # içerikleri aynı olabilir; özet satırı "tekrar bant yok" diye
+            # KÜNYE BASIYORDU ama bunu hiç ölçmüyordu. Artık ölçülüyor.
+            imza = d.get('sha256')
+            if not imza:
+                return Denetim(
+                    ad=ad, gecti=False,
+                    ozet=('FAIL-CLOSED: dilim %s için içerik imzası (sha256) '
+                          'yok — bandın tekrar olup olmadığı sınanamıyor'
+                          % (d.get('yol'),)),
+                    dayanak=dayanak, olcum=goruntuler, esik=esik)
+            if imza in imzalar:
+                return Denetim(
+                    ad=ad, gecti=False,
+                    ozet=('SAHTE KANIT: dilim %s, %s ile BİREBİR aynı '
+                          '(sha256 %s) — tekrar bant kanıt değildir'
+                          % (d.get('yol'), imzalar[imza], imza[:16])),
+                    dayanak=dayanak, olcum=goruntuler, esik=esik)
+            imzalar[imza] = d.get('yol')
+            bekleniyor += h
+            kapsanan += h
+        if int(sayfa_y) <= 0:
+            return Denetim(
+                ad=ad, gecti=False,
+                ozet=('FAIL-CLOSED: sayfa boyu %d px ölçüldü — sıfır boylu '
+                      'sayfa görüntülenmiş sayılamaz' % int(sayfa_y)),
+                dayanak=dayanak, olcum=goruntuler, esik=esik)
+        if kapsanan != int(sayfa_y):
+            return Denetim(
+                ad=ad, gecti=False,
+                ozet=('EKSİK KANIT: dilimler sayfanın %d px\'ini kaplıyor, '
+                      'sayfa %d px — %d px hiç görüntülenmemiş'
+                      % (kapsanan, int(sayfa_y), int(sayfa_y) - kapsanan)),
+                dayanak=dayanak, olcum=goruntuler, esik=esik)
+        return Denetim(
+            ad=ad, gecti=True,
+            ozet=('tam sayfa %d px, tek kare tavanı %d px — kanıt %d bitişik '
+                  'dilimle TAM olarak yakalandı (%d ayrı içerik imzası: '
+                  'tekrar bant YOK)'
+                  % (int(sayfa_y), tavan, len(dilimler), len(imzalar))),
+            dayanak=('kaydedilen her dilimin IHDR yüksekliği (istenen '
+                     'yükseklikle eşitliği) + dilim başlangıçlarının '
+                     'bitişikliği + toplam kapsam + dilimlerin sha256 '
+                     'içerik imzalarının AYRIKLIĞI'),
+            olcum=goruntuler, esik=esik)
+
+    olcu = goruntuler.get('tam_sayfa_px')
+    if not isinstance(olcu, dict) or not _sayi_mi(olcu.get('yukseklik')):
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('FAIL-CLOSED: görüntü kaydedildi (%s) ama '
+                             'yüksekliği ÖLÇÜLMEDİ — kanıtın gerçekliği '
+                             'sınanamıyor' % goruntuler.get('tam_sayfa')),
+                       dayanak=dayanak, olcum=goruntuler, esik=esik)
+    yukseklik = int(olcu['yukseklik'])
+    # ÖH D26 / OH-D25-02 — ALT SINIR. Kapı yalnız TAVANI ölçüyordu: sıfır (ya
+    # da negatif) yükseklikli bir PNG "tek karede gerçekten yakalanabilir"
+    # hükmüyle GEÇİYORDU. Sıfır piksellik dosya kanıt değildir; tarayıcı
+    # görüntüyü alamadığında ya da kap henüz kurulmamışken üretilen bozuk
+    # dosya tam olarak böyle görünür. Fail-closed: ölçülen yükseklik pozitif
+    # DEĞİLSE kanıt yoktur.
+    if yukseklik <= 0:
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('SAHTE KANIT: tam sayfa görüntüsü %d px — sıfır yükseklikli '
+                  'dosya kanıt değildir (görüntü alınamamış ya da bozuk)'
+                  % yukseklik),
+            dayanak=dayanak, olcum=goruntuler, esik=esik)
+    if yukseklik > tavan:
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('SAHTE KANIT: tam sayfa görüntüsü %d px, Chromium tek kare '
+                  'tavanı %d px — tavanı aşan %d px (%.1f%%) üst bandın '
+                  'tekrarıdır, sayfanın o kadarı hiç görüntülenmemiştir'
+                  % (yukseklik, tavan, yukseklik - tavan,
+                     100.0 * (yukseklik - tavan) / yukseklik)),
+            dayanak=dayanak, olcum=goruntuler, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet=('tam sayfa görüntüsü %d px — tek karede gerçekten '
+                         'yakalanabilir (tavan %d px)' % (yukseklik, tavan)),
+                   dayanak=dayanak, olcum=goruntuler, esik=esik)
+
+
+def tarayici_denetimi(kunye: Optional[Dict[str, Any]]) -> Denetim:
+    """Tur HANGİ tarayıcıda koştu — beyan edildi mi? (P17B1-07)
+
+    Ölçülen: paketli Chromium hiç açılamıyordu (playwright sürücüsü 1181
+    isterken diskte 1208 vardı) ve tur SESSİZCE sistem Chrome'una düşüyordu;
+    raporun özeti tarayıcıyı hiç anmıyordu. Farklı yapılar farklı WebGL
+    davranışı gösterir — hüküm okunurken hangi yapının koştuğu bilinmeden
+    ekran kanıtı yorumlanamaz.
+
+    FAIL-CLOSED: künye yoksa, kanal/sürüm eksikse ya da DENEME KAYDI
+    tutulmamışsa kapı kapanır. Düşüş yasak değildir; SESSİZ düşüş yasaktır.
+    """
+    ad = 'tarayici_kunyesi'
+    esik = {'zorunlu_alanlar': ['kanal', 'surum', 'denemeler']}
+    dayanak = 'playwright Browser.version + açılış denemelerinin kaydı'
+    kimlik = kunye if isinstance(kunye, dict) else None
+    if not isinstance(kimlik, dict) or not kimlik:
+        return Denetim(ad=ad, gecti=False,
+                       ozet='FAIL-CLOSED: tarayıcı künyesi yok — turun hangi '
+                            'yapıda koştuğu bilinmiyor',
+                       dayanak=dayanak, olcum={}, esik=esik)
+    eksikler = [alan for alan in ('kanal', 'surum')
+                if not kimlik.get(alan)]
+    # ÖH D26 · P17B1-07(a) — Fable-D20 ŞARTI. Eski kural yalnız ANAHTARIN
+    # VARLIĞINA bakıyordu (``'denemeler' not in kimlik``); ölçüldü
+    # (docs/scofield/raw/OH/D26/arayuz/a4/{olcum.py,once.json}, taban ağacı
+    # üzerinde koşuldu): ``denemeler: []``,
+    # ``denemeler: None`` ve ``denemeler: {}`` künyeleri kapıdan GEÇİYOR ve
+    # özete "düşüş yok" yazıyordu — oysa boş/None kayıt, deneme kaydının hiç
+    # TUTULMADIĞI anlamına gelir; "kayıt yok" ile "düşüş yok" aynı şey
+    # değildir. Dahası ``denemeler: 'yok'`` (liste olmayan bir değer)
+    # ``AttributeError`` ile turu ÇÖKERTİYORDU. Artık liste DEĞİLSE ya da
+    # BOŞSA fail-closed: alan eksik sayılır.
+    if not isinstance(kimlik.get('denemeler'), list) or not kimlik['denemeler']:
+        eksikler.append('denemeler')
+    if eksikler:
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('FAIL-CLOSED: tarayıcı künyesinde eksik alan: %s'
+                             % ', '.join(eksikler)),
+                       dayanak=dayanak, olcum=kimlik, esik=esik)
+    dusenler = [d for d in (kimlik.get('denemeler') or [])
+                if not d.get('acildi')]
+    if dusenler:
+        return Denetim(
+            ad=ad, gecti=True,
+            ozet=('tarayıcı: %s %s — BEYANLI DÜŞÜŞ: önce denenip açılamayan '
+                  'yapı(lar): %s'
+                  % (kimlik.get('kanal'), kimlik.get('surum'),
+                     '; '.join('%s (%s)' % (d.get('kanal'),
+                                            _kirp(d.get('hata'), 120))
+                               for d in dusenler))),
+            dayanak=dayanak, olcum=kimlik, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet=('tarayıcı: %s %s (düşüş yok)'
+                         % (kimlik.get('kanal'), kimlik.get('surum'))),
+                   dayanak=dayanak, olcum=kimlik, esik=esik)
+
+
+def http_hata_denetimi(sayfa_kaydi: Optional[Dict[str, Any]]) -> Denetim:
+    """Sayfa yüklenirken ≥400 HTTP yanıtı geldi mi? (P17B1-08'in bekçisi.)
+
+    ÖLÇÜLEN KUSUR (a2/once.json M6): ``tur.py`` her ≥400 yanıtı
+    ``http_hatalari`` listesine yazıyor ve rapora hem örnekleri hem sayıyı
+    (``http_hata_sayisi``) basıyordu; ``denetimler.py`` içinde ``http_hata``
+    dizesinin isabet sayısı ise **0** idi. Yani kanal vardı, kapı yoktu:
+    turun kendi gördüğü bir HTTP 500 kapıyı kapatamıyordu. P12bB1-03'ün
+    ölçtüğü "CAD generation failed: unsupported operand type(s) for /:
+    'NoneType' and 'int'" (HTTP 500) tam bu kanaldan geçerdi.
+
+    FAIL-CLOSED: alan hiç yoksa ölçüm YAPILMAMIŞTIR ve denetim GEÇMEZ —
+    ölçülmemiş bir kanal, temiz bir kanal değildir.
+    """
+    kayit = sayfa_kaydi or {}
+    if 'http_hata_sayisi' not in kayit:
+        return Denetim(
+            ad='http_hata_yok', gecti=False,
+            ozet='HTTP hata sayacı bu sayfa kaydında YOK — ölçüm yapılmadı',
+            dayanak='tur.py http_hatalari -> rapor["http_hata_sayisi"]',
+            olcum={'http_hata_sayisi': None}, esik={'azami': 0})
+    sayi = kayit.get('http_hata_sayisi') or 0
+    ornekler = kayit.get('http_hatalari') or []
+    if sayi:
+        ilk = ornekler[0] if ornekler else {}
+        ozet = ('sayfa yüklenirken %d adet >=400 HTTP yanıtı alındı'
+                ' (ilki: %s %s)' % (sayi, ilk.get('durum', '?'),
+                                    _kirp(ilk.get('url', '?'), 120)))
+    else:
+        ozet = '>=400 HTTP yanıtı yok'
+    return Denetim(
+        ad='http_hata_yok', gecti=not sayi, ozet=ozet,
+        dayanak='tur.py http_hatalari -> rapor["http_hata_sayisi"]',
+        olcum={'http_hata_sayisi': sayi,
+               'ornekler': list(ornekler)[:5]},
+        esik={'azami': 0})
+
+
 def rapor_hukmu(rapor: Dict[str, Any]) -> bool:
-    """Tur raporunun tamamı geçti mi (sayfa listesi boşsa geçmez)."""
+    """Tur raporunun tamamı geçti mi (sayfa listesi boşsa geçmez).
+
+    ÖH D20 · P17B1-07: rapor DÜZEYİNDEKİ denetimler (tarayıcı künyesi) de
+    hükme girer — eskiden yalnız sayfa hükümleri okunuyordu, bu yüzden
+    tarayıcıyla ilgili hiçbir kural kapıyı kapatamazdı.
+
+    ÖH D21 · P17B1-08: ``http_hata_sayisi`` artık HÜKME GİRER. Sayaç
+    ``tur.py`` tarafından her sayfa kaydına yazılır; sıfırdan büyükse sayfa
+    denetimlerinin hepsi yeşil olsa bile kapı KAPANIR. Alanın hiç
+    bulunmadığı kayıtlar (fixture'lar) burada hükme sokulmaz — o kaydın
+    ölçülmemiş olduğunu söyleyen bekçi ``http_hata_denetimi``dir; onu sayfa
+    denetim listesine ekleyen taraf tur.py'dir.
+    """
     sayfalar = rapor.get('sayfalar') or []
-    return bool(sayfalar) and all(bool(s.get('gecti')) for s in sayfalar)
+    rapor_denetimleri = rapor.get('denetimler') or []
+    return (bool(sayfalar)
+            and all(bool(s.get('gecti')) for s in sayfalar)
+            and all(not (s.get('http_hata_sayisi') or 0) for s in sayfalar)
+            and all(bool(d.get('gecti')) for d in rapor_denetimleri))
 
 
 def cikis_kodu(rapor: Dict[str, Any]) -> int:
     """Kapı çıkış kodu: herhangi bir denetim kaldıysa 1."""
     return 0 if rapor_hukmu(rapor) else 1
+
+
+# ---------------------------------------------------------------------------
+# ÖH Faz 0 — sayfa yerleşimi (yatay taşma + metin örtüşmesi)
+# ---------------------------------------------------------------------------
+
+def yerlesim_tasma_denetimi(olcum: Optional[Dict[str, Any]]) -> Denetim:
+    """Sayfa görüntü alanını YATAY aşıyor mu? (P17B1-19'un bekçisi.)
+
+    Ölçülen vaka: hibrit sayfası 282 px yatay taşıyordu ve turda taşma
+    denetimi yoktu. Dikey kaydırma normaldir, YATAY kaydırma 1600 px'lik
+    turda bir yerleşim kusurudur. FAIL-CLOSED: ölçüm alınamadıysa kapı
+    kapanır — ölçülmeyen yerleşim "temiz" sayılmaz.
+    """
+    ad = 'yerlesim_yatay_tasma'
+    dayanak = 'documentElement.scrollWidth − clientWidth (tam belge)'
+    esik = {'tolerans_px': esikler.YATAY_TASMA_TOLERANS_PX,
+            'goruntu_alani': dict(esikler.GORUNTU_ALANI)}
+    if not olcum or olcum.get('hata') or not _sayi_mi(olcum.get('yatay_tasma_px')):
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('FAIL-CLOSED: yerleşim ölçülemedi (%s)'
+                             % ((olcum or {}).get('hata') or 'ölçüm sözlüğü yok')),
+                       dayanak=dayanak, olcum=olcum or {}, esik=esik)
+    tasma = olcum['yatay_tasma_px']
+    if tasma > esikler.YATAY_TASMA_TOLERANS_PX:
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('sayfa görüntü alanını %d px YATAY aşıyor (belge %s px, '
+                  'pencere %s px) — kullanıcı içeriğin bir bölümünü ancak '
+                  'yatay kaydırarak görür'
+                  % (tasma, olcum.get('belge_genisligi'),
+                     olcum.get('pencere_genisligi'))),
+            dayanak=dayanak, olcum=olcum, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet='yatay taşma yok (%d px ≤ %d px tolerans)'
+                        % (tasma, esikler.YATAY_TASMA_TOLERANS_PX),
+                   dayanak=dayanak, olcum=olcum, esik=esik)
+
+
+def yerlesim_ortusme_denetimi(olcum: Optional[Dict[str, Any]]) -> Denetim:
+    """Görünür METİN yaprakları birbirinin üstüne biniyor mu?
+
+    "İç içe geçmiş" ekran kusuru sınıfının makine bekçisi: aynı ata
+    zincirinde olmayan iki görünür metin kutusunun kesişimi hem alan hem
+    oran eşiğini aşıyorsa yerleşim bozuktur. Çizim kapları (canvas/svg/
+    Plotly altı) taramaya girmez — eksen etiketleri meşru olarak sıktır.
+    FAIL-CLOSED: ölçüm alınamadıysa kapı kapanır.
+    """
+    ad = 'yerlesim_metin_ortusmesi'
+    dayanak = ('görünür metin yapraklarının getBoundingClientRect kutuları; '
+               'ata-torun çiftleri ve çizim kapları dışarıda')
+    esik = {'min_kesisim_px2': esikler.ORTUSME_MIN_KESISIM_PX2,
+            'min_kesisim_orani': esikler.ORTUSME_MIN_KESISIM_ORANI,
+            'tarama_ust_siniri': esikler.ORTUSME_TARAMA_UST_SINIRI}
+    if not olcum or olcum.get('hata') or not isinstance(olcum.get('ortusmeler'), list):
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('FAIL-CLOSED: örtüşme ölçülemedi (%s)'
+                             % ((olcum or {}).get('hata') or 'ölçüm sözlüğü yok')),
+                       dayanak=dayanak, olcum=olcum or {}, esik=esik)
+    ortusmeler = olcum['ortusmeler']
+    kirpildi = ' (tarama %d yaprakta KIRPILDI — sayı alt sınırdır)' \
+        % esikler.ORTUSME_TARAMA_UST_SINIRI if olcum.get('kirpildi') else ''
+    if ortusmeler:
+        ornekler = '; '.join(
+            '%r ⟂ %r (%s px² @ %s)' % (_kirp(o.get('a'), 40), _kirp(o.get('b'), 40),
+                                        o.get('alan'), o.get('konum'))
+            for o in ortusmeler[:5])
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('%d metin çifti ÜST ÜSTE binmiş%s: %s'
+                  % (len(ortusmeler), kirpildi, ornekler)),
+            dayanak=dayanak, olcum=olcum, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet=('%d görünür metin yaprağında örtüşme yok%s'
+                         % (olcum.get('yaprak_sayisi', 0), kirpildi)),
+                   dayanak=dayanak, olcum=olcum, esik=esik)
+
+
+def yerlesim_denetimleri(olcum: Optional[Dict[str, Any]]) -> List[Denetim]:
+    """Sayfa düzeyi yerleşim hükümleri: yatay taşma + metin örtüşmesi."""
+    return [yerlesim_tasma_denetimi(olcum), yerlesim_ortusme_denetimi(olcum)]
+
+
+# ---------------------------------------------------------------------------
+# ÖH D37 · OH-D33-45 — OLUŞMUŞ PİKSEL denetimleri
+# ---------------------------------------------------------------------------
+# Girdi ``piksel.py::JS_PIKSEL``in ham ölçümüdür (metin yaprakları, taşan
+# kutular, ebeveyn aşımları, sayfa kaydırması). Eşik ve muafiyetlerin TEK
+# kaynağı ``esikler.py``dir; burada sayı ya da seçici YOKTUR. Beş denetim:
+#
+#   piksel_dil_safligi          (a) TR'de İngilizce cümle / EN'de Türkçe
+#   piksel_ondalik_tutarliligi  (b) aynı panelde virgül + nokta ondalık
+#   piksel_oge_tasmasi          (c1) scrollWidth > clientWidth + tol
+#   piksel_ebeveyn_asimi        (c2) çocuk kutusu ebeveyn kutusunu aşıyor
+#   piksel_yatay_kaydirma       (c3) belge görüntü alanından geniş
+#
+# Hepsi FAIL-CLOSED: ölçüm yoksa, hata taşıyorsa ya da (metin denetimlerinde)
+# yaprak listesi KIRPILDIYSA kapı kapanır — ölçülmemiş metin temiz sayılmaz.
+
+#: Piksel denetimlerinin adları, üretim SIRASIYLA. Kayıt tek yerde; bekçi
+#: (tests/test_browser_harness.py) ``piksel_denetimleri``nin bu sırayı
+#: ürettiğini sınar.
+PIKSEL_DENETIM_ADLARI = (
+    'piksel_dil_safligi',
+    'piksel_ondalik_tutarliligi',
+    'piksel_oge_tasmasi',
+    'piksel_ebeveyn_asimi',
+    'piksel_yatay_kaydirma',
+)
+
+_MAKINE_BELIRTECLERI = tuple(
+    (ad, re.compile(desen)) for ad, desen, _ in esikler.DIL_SAFLIGI_MAKINE_BELIRTECLERI)
+_ONDALIK_MUAF = tuple(
+    (ad, re.compile(desen)) for ad, desen, _ in esikler.ONDALIK_MUAF_DESENLERI)
+_ONDALIK_DESENLERI = {
+    'virgul': re.compile(esikler.ONDALIK_VIRGUL_DESENI),
+    'nokta': re.compile(esikler.ONDALIK_NOKTA_DESENI),
+}
+_GRUPLU_DESENLERI = {ayrac: re.compile(desen)
+                     for ayrac, desen in esikler.ONDALIK_GRUPLU_DESENLERI.items()}
+_BINLIK_DESENLERI = {dil: re.compile(desen)
+                     for dil, desen in esikler.ONDALIK_BINLIK_DESENLERI.items()}
+_ISLEV_SOZCUKLERI = frozenset(esikler.DIL_SAFLIGI_ISLEV_SOZCUKLERI)
+_TURKCE_HARFLER = frozenset(esikler.DIL_SAFLIGI_TURKCE_HARFLER)
+_EN_IMZA_HARFLERI = frozenset(esikler.DIL_SAFLIGI_EN_IMZA_HARFLERI)
+#: Sözcük (Unicode harf dizisi) ya da dizi kesici karakter.
+_SOZCUK_VEYA_KESICI = re.compile(
+    r"[^\W\d_]+|[%s]" % re.escape(esikler.DIL_SAFLIGI_DIZI_KESICILER))
+#: Makine belirteci metinden çıkarılırken yerine konan kesici: çıkarılan
+#: belirtecin iki yanındaki sözcükler TEK diziye yapışmasın.
+_KESICI = esikler.DIL_SAFLIGI_DIZI_KESICILER[0]
+_PANEL_DISI = '(panel dışı)'
+
+
+def _olcum_kusuru(olcum: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Ölçüm sözlüğü kullanılamazsa gerekçesini döner (yoksa ``None``)."""
+    if not isinstance(olcum, dict) or not olcum:
+        return 'ölçüm sözlüğü yok'
+    if olcum.get('hata'):
+        return 'ölçüm betiği hata verdi: %s' % _kirp(olcum.get('hata'), 200)
+    return None
+
+
+def makine_belirteclerini_ayikla(metin: str) -> Any:
+    """Metinden makine belirteçlerini (adres, dosya adı, alan adı…) çıkarır.
+
+    ``(temiz_metin, {ad: sayı})`` döner. Çıkarılan parçanın yerine dizi
+    KESİCİ konur: ``time_to_burnout`` alanı atılınca iki yanındaki sözcükler
+    birleşip sahte bir İngilizce dizi kurmasın. Sayım rapora yazılır:
+    muafiyet sessiz değildir.
+    """
+    sayim: Dict[str, int] = {}
+    temiz = metin or ''
+    for ad, desen in _MAKINE_BELIRTECLERI:
+        temiz, n = desen.subn(' %s ' % _KESICI, temiz)
+        if n:
+            sayim[ad] = sayim.get(ad, 0) + n
+    return temiz, sayim
+
+
+def ingilizce_diziler(metin: str) -> List[Dict[str, Any]]:
+    """TR sayfa metnindeki İngilizce cümle İMZALARI.
+
+    İmza: Türkçe harf taşımayan ARDIŞIK Latin sözcüklerden oluşan, en az
+    ``DIL_SAFLIGI_MIN_DIZI_SOZCUK`` sözcüklük ve içinde en az
+    ``DIL_SAFLIGI_MIN_ISLEV_SOZCUK`` İngilizce işlev sözcüğü (sözcük
+    sınırıyla, büyük/küçük harf duyarsız) bulunan dizi. Türkçe harfli
+    sözcük ve ``DIL_SAFLIGI_DIZI_KESICILER`` diziyi keser; sayı ve diğer
+    simgeler kesmez ("NOT CONVERGED after 11 rounds to 0.68%" tek dizidir).
+    Makine belirteçleri ÖNCEDEN ayıklanmış olmalıdır.
+    """
+    bulunan: List[Dict[str, Any]] = []
+    dizi: List[Any] = []
+
+    def kapat():
+        if len(dizi) >= esikler.DIL_SAFLIGI_MIN_DIZI_SOZCUK:
+            islev = [s for s, _, _ in dizi if s.lower() in _ISLEV_SOZCUKLERI]
+            if len(islev) >= esikler.DIL_SAFLIGI_MIN_ISLEV_SOZCUK:
+                bulunan.append({
+                    'dizi': metin[dizi[0][1]:dizi[-1][2]],
+                    'sozcuk_sayisi': len(dizi),
+                    'islev_sozcukleri': [s.lower() for s in islev],
+                })
+        dizi.clear()
+
+    for m in _SOZCUK_VEYA_KESICI.finditer(metin or ''):
+        parca = m.group(0)
+        if len(parca) == 1 and parca in esikler.DIL_SAFLIGI_DIZI_KESICILER:
+            kapat()
+        elif any(h in _TURKCE_HARFLER for h in parca):
+            kapat()
+        else:
+            dizi.append((parca, m.start(), m.end()))
+    kapat()
+    return bulunan
+
+
+def turkce_sozcukler(metin: str) -> List[str]:
+    """EN sayfa metnindeki Türkçe İMZA: ``DIL_SAFLIGI_EN_IMZA_HARFLERI``nden
+    (ç ğ ı ö ş ü ve büyükleri — a2'de ç/ö/ü eklendi) birini taşıyan
+    sözcükler. Hüküm ``turkce_imzasi_var``da verilir."""
+    return [m.group(0) for m in _SOZCUK_VEYA_KESICI.finditer(metin or '')
+            if any(h in _EN_IMZA_HARFLERI for h in m.group(0))]
+
+
+def turkce_imzasi_var(sozcukler: Sequence[str]) -> bool:
+    """Küçük harfle başlayan tek bir Türkçe harfli sözcük (Türkçe ekli
+    sözcük cümle içinde küçük harflidir: "Oda basıncı") YA DA en az
+    ``DIL_SAFLIGI_EN_MIN_TURKCE_SOZCUK`` Türkçe harfli sözcük. Tek, büyük
+    harfle başlayan yabancı ad ("Müller") imza DEĞİLDİR."""
+    if any(s[:1].islower() for s in sozcukler):
+        return True
+    return len(sozcukler) >= esikler.DIL_SAFLIGI_EN_MIN_TURKCE_SOZCUK
+
+
+def _metin_kayitlari(olcum: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [k for k in (olcum.get('metinler') or []) if isinstance(k, dict)]
+
+
+def _dil_on_kosulu(ad: str, dayanak: str, esik: Dict[str, Any],
+                   olcum: Optional[Dict[str, Any]],
+                   istenen_dil: str) -> Optional[Denetim]:
+    """Dil/ondalık denetimlerinin ortak fail-closed kapısı."""
+    kusur = _olcum_kusuru(olcum)
+    if kusur:
+        return Denetim(ad=ad, gecti=False, ozet='FAIL-CLOSED: %s' % kusur,
+                       dayanak=dayanak, olcum={}, esik=esik)
+    if istenen_dil not in esikler.PIKSEL_DILLERI:
+        return Denetim(ad=ad, gecti=False,
+                       ozet=('FAIL-CLOSED: bilinmeyen dil %r (geçerli: %s)'
+                             % (istenen_dil, ', '.join(esikler.PIKSEL_DILLERI))),
+                       dayanak=dayanak, olcum={}, esik=esik)
+    if olcum.get('dil') != istenen_dil:
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('FAIL-CLOSED: sayfa istenen dilde AÇILMADI — istenen %r, '
+                  'etkin I18N.lang %r; yanlış dilde ölçülen metin bu dilin '
+                  'hükmünü veremez' % (istenen_dil, olcum.get('dil'))),
+            dayanak=dayanak, olcum={'dil': olcum.get('dil'),
+                                    'html_dil': olcum.get('html_dil')},
+            esik=esik)
+    if olcum.get('kirpildi'):
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('FAIL-CLOSED: metin yaprağı listesi %d yaprakta KIRPILDI — '
+                  'ölçülmemiş metin temiz sayılmaz'
+                  % esikler.PIKSEL_YAPRAK_UST_SINIRI),
+            dayanak=dayanak, olcum={'yaprak_sayisi': olcum.get('yaprak_sayisi')},
+            esik=esik)
+    if olcum.get('kesik_birim_sayisi'):
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('FAIL-CLOSED: %d metin birimi %d karakterde KESİLDİ — '
+                  'ölçülmemiş kuyruk temiz sayılmaz'
+                  % (olcum['kesik_birim_sayisi'], esikler.PIKSEL_BIRIM_METIN_UST_SINIRI)),
+            dayanak=dayanak, olcum={'kesik_birim_sayisi': olcum['kesik_birim_sayisi']},
+            esik=esik)
+    if not isinstance(olcum.get('metinler'), list) or not olcum['metinler']:
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet='FAIL-CLOSED: görünür metin yaprağı ölçülmedi (liste boş)',
+            dayanak=dayanak, olcum={'yaprak_sayisi': olcum.get('yaprak_sayisi')},
+            esik=esik)
+    return None
+
+
+def dil_safligi_denetimi(olcum: Optional[Dict[str, Any]],
+                         istenen_dil: str) -> Denetim:
+    """(a) DİL SAFLIĞI — görünür metin sayfanın dilinde mi?
+
+    TR sayfada İngilizce cümle imzası (``ingilizce_diziler``), EN sayfada
+    Türkçe sözcük imzası (``turkce_imzasi_var``) KIRMIZIDIR. Muaf öğeler
+    (``esikler.PIKSEL_MUAF_SECICILER``) ve makine belirteçleri
+    (``esikler.DIL_SAFLIGI_MAKINE_BELIRTECLERI``) denetime girmez ama
+    ADIYLA sayılır. OH-D33-45'in (1) numaralı kusuru — anahtarı var,
+    içeriği İngilizce yer tutucu — tam bu imzayı üretir.
+    """
+    ad = 'piksel_dil_safligi'
+    dayanak = ('JS_PIKSEL metin yaprakları (doğrudan metin düğümleri + SVG '
+               '<text> + seçili <select> etiketi); görünürlük kırpma '
+               'dikdörtgeniyle; I18N.lang ile etkin dil')
+    esik = {'istenen_dil': istenen_dil,
+            'min_dizi_sozcuk': esikler.DIL_SAFLIGI_MIN_DIZI_SOZCUK,
+            'min_islev_sozcuk': esikler.DIL_SAFLIGI_MIN_ISLEV_SOZCUK,
+            'islev_sozcukleri': list(esikler.DIL_SAFLIGI_ISLEV_SOZCUKLERI),
+            'en_min_turkce_sozcuk': esikler.DIL_SAFLIGI_EN_MIN_TURKCE_SOZCUK,
+            'muaf_seciciler': [a for a, _, _ in esikler.PIKSEL_MUAF_SECICILER],
+            'makine_belirtecleri': [a for a, _, _ in
+                                    esikler.DIL_SAFLIGI_MAKINE_BELIRTECLERI]}
+    on = _dil_on_kosulu(ad, dayanak, esik, olcum, istenen_dil)
+    if on is not None:
+        return on
+    kusurlar: List[Dict[str, Any]] = []
+    muaf_sayim: Dict[str, int] = {}
+    belirtec_sayim: Dict[str, int] = {}
+    taranan = 0
+    for k in _metin_kayitlari(olcum):
+        if k.get('muaf'):
+            muaf_sayim[k['muaf']] = muaf_sayim.get(k['muaf'], 0) + 1
+            continue
+        taranan += 1
+        temiz, sayim = makine_belirteclerini_ayikla(str(k.get('m') or ''))
+        for a, n in sayim.items():
+            belirtec_sayim[a] = belirtec_sayim.get(a, 0) + n
+        if istenen_dil == 'tr':
+            isabetler = ingilizce_diziler(temiz)
+            if isabetler:
+                # Yaprak başına TEK kusur: bir yaprakta birden çok dizi
+                # varsa hepsi 'imzalar'da durur, kusur sayısı yaprak sayısıdır.
+                kusurlar.append({'secici': k.get('s'), 'panel': k.get('p') or _PANEL_DISI,
+                                 'tur': k.get('tur'), 'metin': _kirp(k.get('m'), 200),
+                                 'imza': isabetler[0]['dizi'],
+                                 'imzalar': [_kirp(x['dizi'], 120) for x in isabetler],
+                                 'islev_sozcukleri': sorted({w for x in isabetler
+                                                             for w in x['islev_sozcukleri']})})
+        else:
+            sozcukler = turkce_sozcukler(temiz)
+            if sozcukler and turkce_imzasi_var(sozcukler):
+                kusurlar.append({'secici': k.get('s'), 'panel': k.get('p') or _PANEL_DISI,
+                                 'tur': k.get('tur'), 'metin': _kirp(k.get('m'), 200),
+                                 'imza': ' '.join(sozcukler[:8])})
+    olcum_ozeti = {'dil': olcum.get('dil'), 'yaprak_sayisi': olcum.get('yaprak_sayisi'),
+                   'taranan_yaprak': taranan, 'muaf_yapraklar': muaf_sayim,
+                   'ayiklanan_makine_belirtecleri': belirtec_sayim,
+                   'kusur_sayisi': len(kusurlar),
+                   'kusurlar': kusurlar[:esikler.PIKSEL_RAPOR_KUSUR_UST_SINIRI]}
+    yon = ('TR sayfada İngilizce cümle imzası' if istenen_dil == 'tr'
+           else 'EN sayfada Türkçe sözcük imzası')
+    if kusurlar:
+        ornek = '; '.join('%s → %r' % (_kirp(x['secici'], 60), _kirp(x['imza'], 60))
+                          for x in kusurlar[:3])
+        return Denetim(ad=ad, gecti=False,
+                       ozet='%d yaprakta %s: %s' % (len(kusurlar), yon, ornek),
+                       dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet=('%d yaprak tarandı, %s yok (muaf %d yaprak: %s)'
+                         % (taranan, yon, sum(muaf_sayim.values()),
+                            ', '.join('%s=%d' % kv for kv in sorted(muaf_sayim.items()))
+                            or '-')),
+                   dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+
+
+def ondalik_sayilari(metin: str, dil: str, svg: bool = False) -> Dict[str, Any]:
+    """Metindeki ondalık sayıları ayraca göre ayırır.
+
+    Sıra: makine belirteçleri → ``ONDALIK_MUAF_DESENLERI`` (sürüm, bölüm
+    numarası, tarih, IP) → gruplu ondalıklar (``12.500,5`` ayracını kendi
+    söyler) → binlik ayraçlı tam sayılar (``belirsiz_binlik``:
+    ayraç binlik mi ondalık mı, metinden karar verilemez — sayılmaz,
+    RAPORLANIR) → virgül/nokta ondalıkları. Binlik deseni yalnız binlik
+    ayracını GERÇEKTEN kullanan kanalda uygulanır (``ONDALIK_BINLIK_KANALI``).
+    """
+    temiz, _ = makine_belirteclerini_ayikla(metin or '')
+    muaf: Dict[str, int] = {}
+    for ad, desen in _ONDALIK_MUAF:
+        temiz, n = desen.subn(' ', temiz)
+        if n:
+            muaf[ad] = n
+    gruplu: Dict[str, List[str]] = {}
+    for ayrac, desen in _GRUPLU_DESENLERI.items():
+        gruplu[ayrac] = desen.findall(temiz)
+        temiz = desen.sub(' ', temiz)
+    binlik: List[str] = []
+    kanal = esikler.ONDALIK_BINLIK_KANALI.get(dil, ())
+    if dil in _BINLIK_DESENLERI and (('svg' if svg else 'html') in kanal):
+        binlik = _BINLIK_DESENLERI[dil].findall(temiz)
+        temiz = _BINLIK_DESENLERI[dil].sub(' ', temiz)
+    return {'virgul': gruplu['virgul'] + _ONDALIK_DESENLERI['virgul'].findall(temiz),
+            'nokta': gruplu['nokta'] + _ONDALIK_DESENLERI['nokta'].findall(temiz),
+            'belirsiz_binlik': binlik, 'muaf': muaf}
+
+
+def anlamli_basamak(sayi_metni: str) -> int:
+    """'0,000123' → 3; '1,42412' → 6; '123,000' → 6 (kesirdeki sondaki
+    sıfırlar anlamlıdır). Ayraç virgül ya da nokta olabilir."""
+    rakamlar = re.sub(r'\D', '', sayi_metni or '')
+    return len(rakamlar.lstrip('0')) or (1 if rakamlar else 0)
+
+
+def ondalik_tutarliligi_denetimi(olcum: Optional[Dict[str, Any]],
+                                 istenen_dil: str) -> Denetim:
+    """(b) ONDALIK TUTARLILIĞI — ayraç sayfanın dilinde mi, panelde tek mi?
+
+    İki kırmızı yolu var:
+
+    1. **Yanlış ayraç** (a2 (f), ana model kararı): dili
+       ``ONDALIK_YANLIS_AYRAC_KIRMIZI_DILLER``de olan sayfada (TR) muaf
+       olmayan TEK bir noktalı ondalık bile KIRMIZIDIR — hedef TR noktalı
+       ondalık 0. Diğer dillerde (EN'de virgül) sayfa geneli sayısı
+       RAPORLANIR.
+    2. **Karışık panel**: grup birimi ``esikler.PIKSEL_PANEL_SECICI``ye uyan
+       HER atadır (a2 (g)): bir birim bütün panel/kart atalarına sayılır, her
+       kart kendi içindeki (iç kartlar dahil) sayıları görür — dış panel
+       virgüllü, iç kart noktalıysa dış panel karışıktır. Hiçbir panele
+       girmeyen metin "(panel dışı)" grubundadır. Bir grupta hem virgüllü
+       hem noktalı ondalık varsa KIRMIZI (OH-D33-43'ün kusuru: "her mesaj
+       tek başına kusursuz, kusur mesajlar ARASINDA").
+
+    Uyarı kaplarında ekran basamak sınırına dayanan sayılar (OH-D22-02)
+    RAPORLANIR, kapıyı kapatmaz. Form ``value=``, SVG öznitelikleri ve seçili
+    ``<select>`` etiketi ölçüme GİRMEZ (``ONDALIK_YAPISAL_MUAFIYETLER``).
+    """
+    ad = 'piksel_ondalik_tutarliligi'
+    dayanak = ('JS_PIKSEL metin birimleri (blok metni + SVG <text>); gruplar = '
+               'birimin BÜTÜN "%s" ataları (her kart ayrı, iç kartlar dahil)'
+               % esikler.PIKSEL_PANEL_SECICI)
+    esik = {'istenen_dil': istenen_dil,
+            'virgul_deseni': esikler.ONDALIK_VIRGUL_DESENI,
+            'nokta_deseni': esikler.ONDALIK_NOKTA_DESENI,
+            'muaf_desenleri': [a for a, _, _ in esikler.ONDALIK_MUAF_DESENLERI],
+            'yapisal_muafiyetler': list(esikler.ONDALIK_YAPISAL_MUAFIYETLER),
+            'panel_secici': esikler.PIKSEL_PANEL_SECICI,
+            'panel_gruplamasi': 'her panel/kart atası ayrı grup (iç kartlar dahil)',
+            'yanlis_ayrac_kirmizi_diller': list(esikler.ONDALIK_YANLIS_AYRAC_KIRMIZI_DILLER),
+            'ekran_anlamli_basamak': esikler.PIKSEL_EKRAN_ANLAMLI_BASAMAK}
+    on = _dil_on_kosulu(ad, dayanak, esik, olcum, istenen_dil)
+    if on is not None:
+        return on
+    dogru = 'virgul' if istenen_dil == 'tr' else 'nokta'
+    yanlis = 'nokta' if istenen_dil == 'tr' else 'virgul'
+    gruplar: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    yanlis_ayrac: List[Dict[str, Any]] = []
+    belirsiz: List[Dict[str, Any]] = []
+    muaf_sayim: Dict[str, int] = {}
+    uyari_basamak: List[Dict[str, Any]] = []
+    toplam = {'virgul': 0, 'nokta': 0}
+    for k in _metin_kayitlari(olcum):
+        if k.get('muaf'):
+            muaf_sayim['oge:' + k['muaf']] = muaf_sayim.get('oge:' + k['muaf'], 0) + 1
+            continue
+        if k.get('tur') not in ('metin', 'svg'):
+            continue
+        sayilar = ondalik_sayilari(str(k.get('m') or ''), istenen_dil,
+                                   svg=(k.get('tur') == 'svg'))
+        for a, n in sayilar['muaf'].items():
+            muaf_sayim['desen:' + a] = muaf_sayim.get('desen:' + a, 0) + n
+        kayit = {'secici': k.get('s'), 'tur': k.get('tur'),
+                 'metin': _kirp(k.get('m'), 160)}
+        if sayilar['belirsiz_binlik']:
+            belirsiz.append(dict(kayit, sayilar=sayilar['belirsiz_binlik']))
+        # a2 (g): birim BÜTÜN panel/kart atalarına sayılır (``pp``, en yakından
+        # en uzağa); ``pp`` taşımayan eski ölçümde en yakın panel.
+        paneller = [x for x in (k.get('pp') or []) if x] or [k.get('p') or _PANEL_DISI]
+        for panel in paneller:
+            gruplar.setdefault(panel, {'virgul': [], 'nokta': []})
+        for ayrac in ('virgul', 'nokta'):
+            if sayilar[ayrac]:
+                toplam[ayrac] += len(sayilar[ayrac])
+                for panel in paneller:
+                    gruplar[panel][ayrac].append(dict(kayit, sayilar=sayilar[ayrac]))
+        if sayilar[yanlis]:
+            yanlis_ayrac.append(dict(kayit, panel=k.get('p') or _PANEL_DISI,
+                                     sayilar=sayilar[yanlis]))
+        if k.get('u'):
+            for s in sayilar['virgul'] + sayilar['nokta']:
+                n = anlamli_basamak(s)
+                if n >= esikler.PIKSEL_EKRAN_ANLAMLI_BASAMAK:
+                    uyari_basamak.append(dict(kayit, sayi=s, anlamli_basamak=n))
+    karisik = []
+    for panel, g in gruplar.items():
+        if g['virgul'] and g['nokta']:
+            karisik.append({
+                'panel': panel,
+                'virgul_sayisi': sum(len(x['sayilar']) for x in g['virgul']),
+                'nokta_sayisi': sum(len(x['sayilar']) for x in g['nokta']),
+                'virgul_ornekleri': g['virgul'][:3],
+                'nokta_ornekleri': g['nokta'][:3]})
+    karisik.sort(key=lambda x: -(min(x['virgul_sayisi'], x['nokta_sayisi'])))
+    sinir = esikler.PIKSEL_RAPOR_KUSUR_UST_SINIRI
+    olcum_ozeti = {
+        'dil': olcum.get('dil'), 'dogru_ayrac': dogru,
+        'ondalik_sayisi': toplam, 'panel_sayisi': len(gruplar),
+        'karisik_panel_sayisi': len(karisik), 'karisik_paneller': karisik[:sinir],
+        'yanlis_ayracli_ondalik_sayisi': sum(len(x['sayilar']) for x in yanlis_ayrac),
+        'yanlis_ayracli_yapraklar': yanlis_ayrac[:sinir],
+        'belirsiz_binlik_sayisi': sum(len(x['sayilar']) for x in belirsiz),
+        'belirsiz_binlik_ornekleri': belirsiz[:sinir],
+        'muafiyetler': muaf_sayim,
+        'oh_d22_02_uyari_basamak': {
+            'esik_anlamli_basamak': esikler.PIKSEL_EKRAN_ANLAMLI_BASAMAK,
+            'sayi': len(uyari_basamak), 'ornekler': uyari_basamak[:sinir]},
+    }
+    yanlis_sayisi = olcum_ozeti['yanlis_ayracli_ondalik_sayisi']
+    yanlis_kirmizi = (istenen_dil in esikler.ONDALIK_YANLIS_AYRAC_KIRMIZI_DILLER
+                      and yanlis_sayisi > 0)
+    olcum_ozeti['yanlis_ayrac_kirmizi'] = yanlis_kirmizi
+    parcalar = []
+    if yanlis_kirmizi:
+        ornek = '; '.join('%s %r' % (_kirp(x['secici'], 50), x['sayilar'][0])
+                          for x in yanlis_ayrac[:3])
+        parcalar.append('%d birimde %d %s ayraçlı ondalık (%s hedefi 0): %s'
+                        % (len(yanlis_ayrac), yanlis_sayisi, yanlis,
+                           istenen_dil.upper(), ornek))
+    if karisik:
+        ornek = '; '.join('%s (virgül %d / nokta %d, ör. %r)'
+                          % (_kirp(x['panel'], 70), x['virgul_sayisi'], x['nokta_sayisi'],
+                             _kirp((x[yanlis + '_ornekleri'] or [{}])[0].get('metin'), 50))
+                          for x in karisik[:3])
+        parcalar.append('%d panelde virgül ve nokta ondalık KARIŞIK: %s'
+                        % (len(karisik), ornek))
+    if parcalar:
+        return Denetim(ad=ad, gecti=False, ozet=' — '.join(parcalar),
+                       dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+    rapor_notu = ('sayfa geneli %s ayraçlı ondalık %d (%s)'
+                  % (yanlis, yanlis_sayisi,
+                     'raporlanır, kapıyı kapatmaz'
+                     if istenen_dil not in esikler.ONDALIK_YANLIS_AYRAC_KIRMIZI_DILLER
+                     else 'hedef 0'))
+    return Denetim(ad=ad, gecti=True,
+                   ozet=('%d panelde ayraç karışıklığı yok (virgül %d, nokta %d) — %s'
+                         % (len(gruplar), toplam['virgul'], toplam['nokta'], rapor_notu)),
+                   dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+
+
+def _siniflara_gore(kayitlar: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+    sayim: Dict[str, int] = {}
+    for k in kayitlar:
+        sayim[k.get('sinif', '?')] = sayim.get(k.get('sinif', '?'), 0) + 1
+    return sayim
+
+
+def oge_tasmasi_denetimi(olcum: Optional[Dict[str, Any]]) -> Denetim:
+    """(c1) Metin taşıyan kutunun içeriği kutudan geniş mi?
+
+    ``scrollWidth > clientWidth + PIKSEL_TASMA_TOLERANS_PX``. Sınıflar
+    (``esikler.PIKSEL_TASMA_SINIFLARI``): ``tasan`` (overflow görünür →
+    metin kutunun dışına akar) KIRMIZI; ``kesilen`` (gizli/kırpık) başlığı
+    (title/aria-label) YOKSA kırmızı — kullanıcı kesilen metnin tamamına
+    hiçbir yoldan ulaşamaz; ``kaydirmali`` (auto/scroll) ve ``erisim_gizli``
+    (1 px'lik ekran okuyucu etiketi) tasarım gereğidir, raporlanır.
+    Muafiyet YOKTUR: künye taşması tam olarak OH-D33-44'ün kusuruydu.
+    """
+    ad = 'piksel_oge_tasmasi'
+    dayanak = ('JS_PIKSEL: metin taşıyan her blok kutusunun scrollWidth ⟷ '
+               'clientWidth farkı + computed overflow-x/text-overflow + '
+               'title/aria-label varlığı')
+    esik = {'tolerans_px': esikler.PIKSEL_TASMA_TOLERANS_PX,
+            'kirmizi_siniflar': list(esikler.PIKSEL_TASMA_KIRMIZI_SINIFLAR)}
+    kusur = _olcum_kusuru(olcum)
+    if kusur or not isinstance(olcum.get('tasmalar'), list):
+        return Denetim(ad=ad, gecti=False,
+                       ozet='FAIL-CLOSED: %s' % (kusur or 'taşma listesi ölçülmedi'),
+                       dayanak=dayanak, olcum={}, esik=esik)
+    tasmalar = olcum['tasmalar']
+    kirmizi = [t for t in tasmalar
+               if t.get('sinif') == 'tasan'
+               or (t.get('sinif') == 'kesilen' and not t.get('baslik'))]
+    kirmizi.sort(key=lambda t: -(t.get('fazla') or 0))
+    sinir = esikler.PIKSEL_RAPOR_KUSUR_UST_SINIRI
+    olcum_ozeti = {'blok_sayisi': olcum.get('blok_sayisi'),
+                   'tasma_sayisi': len(tasmalar), 'siniflar': _siniflara_gore(tasmalar),
+                   'kirmizi_sayisi': len(kirmizi), 'kirmizilar': kirmizi[:sinir],
+                   'bilgi': [t for t in tasmalar if t not in kirmizi][:sinir]}
+    if kirmizi:
+        ornek = '; '.join('%s %r +%s px (%s)' % (_kirp(t.get('s'), 60), _kirp(t.get('m'), 40),
+                                                 t.get('fazla'), t.get('sinif'))
+                          for t in kirmizi[:3])
+        return Denetim(ad=ad, gecti=False,
+                       ozet='%d metin kutusu TAŞIYOR: %s' % (len(kirmizi), ornek),
+                       dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet=('%s metin kutusunda taşma yok (bilgi: %s)'
+                         % (olcum.get('blok_sayisi'),
+                            ', '.join('%s=%d' % kv for kv in
+                                      sorted(_siniflara_gore(tasmalar).items())) or '-')),
+                   dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+
+
+def ebeveyn_asimi_denetimi(olcum: Optional[Dict[str, Any]]) -> Denetim:
+    """(c2) Metin taşıyan öğenin kutusu EBEVEYN kutusunu yatayda aşıyor mu?
+
+    Ebeveyn overflow görünür → ``tasan`` (çocuk çerçevenin dışına çıkar),
+    gizli → ``kirpilan`` (çocuğun bir kısmı görünmez); ikisi de KIRMIZI.
+    Ebeveyn kaydırmalıysa (auto/scroll) aşım tasarım gereğidir, ölçüme
+    girmez. Mutlak/sabit konumlu öğeler akış dışıdır (ölçüm betiği atlar;
+    sayfa kaydırmasına katkıları ``piksel_yatay_kaydirma``da görünür).
+    """
+    ad = 'piksel_ebeveyn_asimi'
+    dayanak = ('JS_PIKSEL: metin taşıyan blok/satır-içi-blok öğenin '
+               'getBoundingClientRect kutusu ⟷ ebeveyninin kutusu (yatay)')
+    esik = {'tolerans_px': esikler.PIKSEL_EBEVEYN_ASIM_TOLERANS_PX}
+    kusur = _olcum_kusuru(olcum)
+    if kusur or not isinstance(olcum.get('ebeveyn_asimlari'), list):
+        return Denetim(ad=ad, gecti=False,
+                       ozet='FAIL-CLOSED: %s' % (kusur or 'ebeveyn aşımı ölçülmedi'),
+                       dayanak=dayanak, olcum={}, esik=esik)
+    asimlar = sorted(olcum['ebeveyn_asimlari'], key=lambda t: -(t.get('fazla') or 0))
+    olcum_ozeti = {'asim_sayisi': len(asimlar), 'siniflar': _siniflara_gore(asimlar),
+                   'asimlar': asimlar[:esikler.PIKSEL_RAPOR_KUSUR_UST_SINIRI]}
+    if asimlar:
+        ornek = '; '.join('%s %r +%s px %s ebeveyn %s (%s)'
+                          % (_kirp(t.get('s'), 60), _kirp(t.get('m'), 30), t.get('fazla'),
+                             t.get('yon'), _kirp(t.get('ebeveyn'), 50), t.get('sinif'))
+                          for t in asimlar[:3])
+        return Denetim(ad=ad, gecti=False,
+                       ozet='%d öğe ebeveyn kutusunu AŞIYOR: %s' % (len(asimlar), ornek),
+                       dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+    return Denetim(ad=ad, gecti=True, ozet='ebeveyn kutusunu aşan metin öğesi yok',
+                   dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+
+
+def yatay_kaydirma_denetimi(olcum: Optional[Dict[str, Any]]) -> Denetim:
+    """(c3) Belge görüntü alanından geniş mi (yatay sayfa kaydırması)?
+
+    ``documentElement.scrollWidth − min(innerWidth, clientWidth)``
+    ``YATAY_TASMA_TOLERANS_PX``i (ana turla AYNI tolerans) aşarsa KIRMIZI.
+    Suçlu listesi, sağ kenarı görüntü alanını aşan ve hiçbir atası
+    tarafından kırpılmayan EN DERİN öğelerdir. ``visibility:hidden`` olan
+    suçlu ayrıca sayılır: DV-TOOLTIP deseni — gizli ipucu balonu yerleşimde
+    yer kaplar ve kullanıcı hiçbir şey görmeden sayfa yana kayar.
+    """
+    ad = 'piksel_yatay_kaydirma'
+    dayanak = ('JS_PIKSEL: documentElement.scrollWidth ⟷ innerWidth/'
+               'clientWidth + sağ kenarı görüntü alanını aşan, kırpılmayan '
+               'en derin öğeler')
+    esik = {'tolerans_px': esikler.YATAY_TASMA_TOLERANS_PX}
+    kusur = _olcum_kusuru(olcum)
+    sayfa = (olcum or {}).get('sayfa') if not kusur else None
+    if kusur or not isinstance(sayfa, dict) or not _sayi_mi(sayfa.get('fazla_px')):
+        return Denetim(ad=ad, gecti=False,
+                       ozet='FAIL-CLOSED: %s' % (kusur or 'sayfa genişliği ölçülmedi'),
+                       dayanak=dayanak, olcum={}, esik=esik)
+    fazla = sayfa['fazla_px']
+    olcum_ozeti = dict(sayfa)
+    if fazla > esikler.YATAY_TASMA_TOLERANS_PX:
+        kokler = sayfa.get('kok_suclular') or sayfa.get('suclular') or []
+        ornek = '; '.join('%s%s +%s px' % ('[GİZLİ] ' if s.get('gizli') else '',
+                                            _kirp(s.get('s'), 60), s.get('fazla'))
+                          for s in kokler[:3]) or 'suçlu öğe bulunamadı'
+        return Denetim(
+            ad=ad, gecti=False,
+            ozet=('sayfa %d px YATAY kayıyor (belge %s px, pencere %s px); %s kök '
+                  'suçlu, %d en derin suçlunun %d tanesi görünmez (DV-TOOLTIP); '
+                  'kökler: %s'
+                  % (fazla, sayfa.get('kaydirma_genisligi'), sayfa.get('ic_genislik'),
+                     sayfa.get('kok_suclu_sayisi', '?'),
+                     sayfa.get('suclu_sayisi') or 0, sayfa.get('gizli_suclu_sayisi') or 0,
+                     ornek)),
+            dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+    return Denetim(ad=ad, gecti=True,
+                   ozet='yatay sayfa kaydırması yok (%d px ≤ %d px)'
+                        % (fazla, esikler.YATAY_TASMA_TOLERANS_PX),
+                   dayanak=dayanak, olcum=olcum_ozeti, esik=esik)
+
+
+def piksel_denetimleri(olcum: Optional[Dict[str, Any]],
+                       istenen_dil: str) -> List[Denetim]:
+    """Bir (sayfa, dil, genişlik) ölçümünün beş piksel hükmü — sıra
+    ``PIKSEL_DENETIM_ADLARI``dır."""
+    return [dil_safligi_denetimi(olcum, istenen_dil),
+            ondalik_tutarliligi_denetimi(olcum, istenen_dil),
+            oge_tasmasi_denetimi(olcum),
+            ebeveyn_asimi_denetimi(olcum),
+            yatay_kaydirma_denetimi(olcum)]

@@ -235,9 +235,9 @@ def test_macos_yolu_dokunulmamis():
 # ---------------------------------------------------------------------------
 
 def test_appusermodelid_tek_kaynakta():
-    assert KAYNAK.count('UZAYTEK.HRMA') == 1, (
+    assert KAYNAK.count('BerkeTezgocen.HRMA') == 1, (
         'AppUserModelID dizgesi birden fazla yerde — tek sabitte durmalı')
-    assert re.search(r'^WIN_APP_USER_MODEL_ID\s*=\s*"UZAYTEK\.HRMA"',
+    assert re.search(r'^WIN_APP_USER_MODEL_ID\s*=\s*"BerkeTezgocen\.HRMA"',
                      KAYNAK, re.M), 'kimlik modül düzeyinde sabit değil'
     kimlik = _islev_kaynagi('_windows_app_identity')
     assert 'SetCurrentProcessExplicitAppUserModelID' in kimlik

@@ -40,8 +40,15 @@ ve tests/test_launch_site.py bunu kilitler.
 
 Modellenmeyenler (dürüst beyan — 'not_modelled')
 ------------------------------------------------
-* Coriolis ivmesi ve Dünya dönüşünün taşıma hızı: 6-DOF çözücü düz-Dünya
-  atalet çerçevesinde çalışır. `NOT_MODELLED` sözlüğünde beyan edilir.
+* Dünya dönüşünün TAŞIMA HIZI (frame carry-along, ekvatorda 465,1 m/s doğu):
+  atalet fırlatma hızı bütçesine girer, modellenmez.
+  `NOT_MODELLED['earth_rotation_transport_velocity']` ile beyan edilir.
+  DİKKAT — Coriolis ivmesi bu maddeye DAHİL DEĞİLDİR: 6-DOF çözücü
+  fırlatmaya çakılı DÖNEN teğet düzlemde çalışır ve serbest uçuşta
+  −2·Ω×v terimini ENTEGRE EDER (`six_dof_trajectory._coriolis_acceleration`).
+  Coriolis'in fiilen koştuğu koşullar `CORIOLIS_MODELLING` sözlüğündedir;
+  enlem verilmeyen çağrıda çözücü Coriolis'i KENDİLİĞİNDEN KAPATIR ve
+  `warn.sixdof.coriolis_disabled_no_latitude` uyarısını üretir.
 * Yerel gravite anomalileri (Bouguer/izostatik): WGS84 elipsoid NORMAL
   yerçekimi kullanılır; gerçek g bundan tipik olarak birkaç on mGal
   (1 mGal = 1e-5 m/s^2) sapar — yani ~1e-4 m/s^2 mertebesi, roket
@@ -63,6 +70,7 @@ import numpy as np
 
 from hrma.constants import (
     G_0,
+    ISA_TABLE_TOP_M,
     M_AIR,
     R_STAR_ICAO,
     isa_pressure,
@@ -105,14 +113,27 @@ ATTRIBUTION_LINES = {
 
 # Bilinçli olarak MODELLENMEYENLER. Bu sözlük API çıktısına konur ve
 # arayüzde gösterilir; "sessizce yok sayıldı" durumu oluşmaz.
+#
+# ÖH D18 / termo-ucus a1 (P4B3-17) — ANAHTAR ADI GERÇEĞE UYDURULDU.
+# ÖLÇÜLDÜ (``once.json`` K4, taban 9071a64): ``earth_rotation`` anahtarının
+# METNİ "Coriolis acceleration (2*Omega x v) IS integrated" diyordu ve o
+# metin ``/api/launch-site/resolve`` yanıtında ``not_modelled`` başlığı
+# altında yayımlanıyordu. Aynı dosyanın modül belgesi ise "6-DOF çözücü
+# düz-Dünya atalet çerçevesinde çalışır" diyordu: tek dosya, iki zıt beyan,
+# ve tüketici için hüküm YANLIŞ olan (modellenmiyor) taraftaydı.
+# Modellenmeyen şey Coriolis DEĞİL, Dünya dönüşünün TAŞIMA HIZIDIR; anahtar
+# artık onu adlandırır. Fiilen modellenen kısım ayrı bir sözlükte
+# (``CORIOLIS_MODELLING``) ve ``modelled`` başlığı altında yayımlanır —
+# "modellenmeyenler" listesinde modellenen bir şey durmaz.
 NOT_MODELLED = {
-    'earth_rotation': (
-        'The 6-DOF solver uses a launch-anchored ROTATING tangent-plane frame: '
-        'Coriolis acceleration (2*Omega x v) IS integrated during free flight, '
-        'and the centrifugal term is folded into WGS84 normal gravity. Only the '
-        'Earth-rotation TRANSPORT velocity (up to 465.1*cos(lat) m/s eastward, '
-        'the frame carry-along speed) remains out of scope; it affects the '
-        'inertial launch-velocity budget, not apogee or delta-v.'),
+    'earth_rotation_transport_velocity': (
+        "The Earth-rotation TRANSPORT velocity (up to 465.1*cos(lat) m/s "
+        'eastward, the speed at which the launch site itself is carried) is '
+        'NOT added to the vehicle state. It affects the inertial '
+        'launch-velocity budget, not apogee or delta-v in the '
+        'launch-anchored frame. Coriolis acceleration is a SEPARATE effect '
+        'and IS modelled - see the "modelled" block, key '
+        '"earth_rotation_coriolis".'),
     'gravity_anomaly': (
         'Local gravity anomalies (Bouguer / isostatic) are not modelled; WGS84 '
         'ellipsoidal NORMAL gravity is used.'),
@@ -121,12 +142,73 @@ NOT_MODELLED = {
         'day (optionally re-anchored to measured surface T/P).'),
 }
 
+# Bilinçli olarak MODELLENENLER — bir etkinin "modellenmeyenler" listesinde
+# durup metninde "modelleniyor" demesi (P4B3-17) bir daha olmasın diye
+# beyanın İKİ tarafı da adlandırılmıştır. Bu sözlük ``resolve_launch_site``
+# çıktısına ``modelled`` anahtarıyla konur.
+#
+# Her madde, etkiyi FİİLEN koşturan kodu adıyla gösterir ve hangi koşulda
+# koşmadığını söyler: "modelleniyor" demek "her çağrıda açık" demek
+# değildir; şart yazılmazsa beyan yine yalan olur.
+CORIOLIS_MODELLING = {
+    'earth_rotation_coriolis': (
+        'The 6-DOF solver (six_dof_trajectory.SixDOFTrajectory) integrates '
+        'the Coriolis acceleration a = -2*Omega x v_rel during FREE FLIGHT in '
+        'a launch-anchored ROTATING tangent-plane frame, and the centrifugal '
+        'term is folded into WGS84 normal gravity. CONDITION: it runs only '
+        'when a launch latitude is supplied - without one the solver disables '
+        'Coriolis and emits warn.sixdof.coriolis_disabled_no_latitude. The 2-D '
+        'planar solver (trajectory_analysis) does NOT model Coriolis at all.'),
+}
+
 # Dünya dönüş açısal hızı. Burada enleme bağlı doğu-atış TAŞIMA hızı
 # göstergesi (earth_rotation_speed) için kullanılır; taşıma hızı 6-DOF
-# fiziğine bağlanmaz (bkz. NOT_MODELLED['earth_rotation']). Coriolis ivmesi
+# fiziğine bağlanmaz (bkz. NOT_MODELLED['earth_rotation_transport_velocity']).
+# Coriolis ivmesi
 # ise six_dof_trajectory.py'de AYNI değerle (yerel OMEGA_EARTH) modellenir.
 # Kaynak: IERS Konvansiyonları 2010, ω_E = 7.292115e-5 rad/s.
 OMEGA_EARTH = 7.292115e-5  # rad/s
+
+
+# ---------------------------------------------------------------------------
+# TANIM KÜMELERİ — sessiz kırpma yerine ret (ÖH D19 / P4B3-18 kalan ayak)
+#
+# ÖLÇÜLDÜ (taban 60cd341, once.json K18): ``local_gravity(200, 0)`` ve
+# ``normal_gravity(200)`` istisna ATMADAN 9,832184937859008 m/s²
+# (kutup değeri) döndürüyordu; ``earth_rotation_speed(200)``
+# 2,857503442515346e-14 m/s (yani cos 90°) veriyordu. D18'de yalnız
+# ``resolve_launch_site`` kapatılmıştı: kütüphaneyi doğrudan çağıran her yol
+# (6-DOF ``g_surface``, düzlemsel yörünge, hibrit motorun saha bandı)
+# sessiz kırpmayı görmeye devam ediyordu. Kırpılmış enlem, sorulan enlem
+# DEĞİLDİR ve yerel g doğrudan enlemden çıkar.
+#
+# Aynı ölçümde rakım ayağı: ``local_gravity(45, 1e9)`` = 720.083,96 m/s²,
+# ``resolve_launch_site(39,9, 32,85, elevation_m=1e9)`` HTTP 200 ile
+# g = 719.745,08 m/s² ve ISA T = 186,946 K yayımlıyordu; ``elevation_m =
+# -1e6`` ise sessizce 0,0'a çekiliyordu (yalnız 'below_sea_level' uyarısı,
+# büyüklüğün imkânsızlığını söyleyen tek satır yok).
+#
+# Bantlar YENİ EŞİK İCAT ETMEZ:
+#   * enlem: WGS84 ondalık derece tanım kümesi [-90, 90],
+#   * saha rakımı: Dünya KATI YÜZEYİNİN kendi bandı; tek kaynak aşağıdaki
+#     ``SITE_ELEVATION_RANGE_M`` (hibrit motorun saha bandı da bunu
+#     kullanır — iki tanım yok),
+#   * yerel g'nin rakımı: serbest-hava açılımı (NIMA TR8350.2 Denk. 4-3)
+#     h/a'da KESİLMİŞ bir seridir; HRMA onu kendi atmosfer tablosunun
+#     tavanıyla sınırlar (``hrma.constants.ISA_TABLE_TOP_M`` = 84.852 m;
+#     orada karesel terim birimin 5,4e-7'si kadardır, 1e9 m'de ise
+#     73.700 katıdır).
+LATITUDE_RANGE_DEG = (-90.0, 90.0)
+
+#: Fırlatma sahasının meşru rakım bandı [m]. Alt uç -500 m (Ölü Deniz
+#: kıyısı -430 m'nin altında bir tampon değil, HRMA'nın kendi saha bandının
+#: D14'ten beri kullandığı alt ucu), üst uç 9.000 m (Everest 8.848,86 m).
+#: TEK KAYNAK: hibrit motorun ``LAUNCH_SITE_ELEVATION_RANGE_M``i bu adı
+#: içe aktarır.
+SITE_ELEVATION_RANGE_M = (-500.0, 9000.0)
+
+#: ``local_gravity`` serbest-hava açılımının geçerli rakım bandı [m].
+GRAVITY_ALTITUDE_RANGE_M = (SITE_ELEVATION_RANGE_M[0], ISA_TABLE_TOP_M)
 
 
 # ---------------------------------------------------------------------------
@@ -149,8 +231,13 @@ def normal_gravity(latitude_deg: float) -> float:
 
     Kaynak: NIMA TR8350.2 Denklem 4-1. Uçlar: ekvator 9.7803253359,
     kutup 9.8321849378 (aralık ~%0.53).
+
+    Bant dışı enlem KIRPILMAZ, ``LaunchSiteInputError`` ile reddedilir
+    (ÖH D19 / P4B3-18): kırpılmış enlem başka bir sahadır.
     """
-    phi = math.radians(_clamp_latitude(latitude_deg))
+    phi = math.radians(_require_band(
+        latitude_deg, 'latitude_deg', LATITUDE_RANGE_DEG, 'deg',
+        'the WGS84 decimal-degree domain'))
     s2 = math.sin(phi) ** 2
     return WGS84_GAMMA_E * (1.0 + WGS84_K * s2) / math.sqrt(1.0 - WGS84_E2 * s2)
 
@@ -166,11 +253,21 @@ def local_gravity(latitude_deg: float, altitude_m: float = 0.0) -> float:
 
     NOT: Bu YEREL g'dir. Isp/ideal-dV zincirine verilmez (bkz. modül
     başlığındaki KRİTİK AYRIM).
+
+    Enlem ve rakım bant dışıysa değer KIRPILMAZ, ``LaunchSiteInputError``
+    ile reddedilir (ÖH D19 / P4B3-18). Rakım bandı serbest-hava
+    açılımının kendi geçerlilik bandıdır
+    (``GRAVITY_ALTITUDE_RANGE_M``): 1e9 m'de bu seri 720.083,96 m/s²
+    gibi fiziksel olmayan bir sayı üretiyordu.
     """
-    phi = math.radians(_clamp_latitude(latitude_deg))
+    lat = _require_band(latitude_deg, 'latitude_deg', LATITUDE_RANGE_DEG,
+                        'deg', 'the WGS84 decimal-degree domain')
+    h = _require_band(altitude_m, 'altitude_m', GRAVITY_ALTITUDE_RANGE_M,
+                      'm', 'the validity band of the free-air expansion '
+                      '(NIMA TR8350.2 Eq. 4-3, truncated in h/a)')
+    phi = math.radians(lat)
     s2 = math.sin(phi) ** 2
-    h = float(altitude_m)
-    gamma = normal_gravity(latitude_deg)
+    gamma = normal_gravity(lat)
     term = (1.0
             - (2.0 / WGS84_A) * (1.0 + WGS84_F + WGS84_M - 2.0 * WGS84_F * s2) * h
             + (3.0 / WGS84_A ** 2) * h * h)
@@ -183,15 +280,65 @@ def earth_rotation_speed(latitude_deg: float) -> float:
         v = ω_E * R(φ) * cos(φ),  R(φ) = a / sqrt(1 − e² sin²φ)  (enine eğrilik)
 
     Ekvatorda ≈ 465.1 m/s. Doğuya atışta yörünge bütçesine katkı sağlar ama
-    v1'de fiziğe BAĞLANMAZ (NOT_MODELLED['earth_rotation']).
+    v1'de fiziğe BAĞLANMAZ
+    (NOT_MODELLED['earth_rotation_transport_velocity']). Coriolis İVMESİ ise
+    ayrı bir etkidir ve 6-DOF'ta modellenir (CORIOLIS_MODELLING).
+
+    Bant dışı enlem KIRPILMAZ, ``LaunchSiteInputError`` ile reddedilir
+    (ÖH D19 / P4B3-18).
     """
-    phi = math.radians(_clamp_latitude(latitude_deg))
+    phi = math.radians(_require_band(
+        latitude_deg, 'latitude_deg', LATITUDE_RANGE_DEG, 'deg',
+        'the WGS84 decimal-degree domain'))
     r_n = WGS84_A / math.sqrt(1.0 - WGS84_E2 * math.sin(phi) ** 2)
     return OMEGA_EARTH * r_n * math.cos(phi)
 
 
+class LaunchSiteInputError(ValueError):
+    """Saha girdisi TANIM KÜMESİNİN dışında — kırpma yerine ret.
+
+    ÖH D18 / termo-ucus a1 (P4B3-18, kütüphane ayağı). Alan adı ve gerekçe
+    makine-okurdur (``problems``); çağıran uç 500 değil 4xx üretebilsin
+    diye ``ValueError`` türevidir (kardeşi
+    :class:`hrma.analysis.trajectory_analysis.TrajectoryInputError`).
+    """
+
+    def __init__(self, message, problems=None):
+        super().__init__(message)
+        self.problems = problems or []
+
+
 def _clamp_latitude(latitude_deg: float) -> float:
     return max(-90.0, min(90.0, float(latitude_deg)))
+
+
+def _require_band(value, field: str, band, unit: str, what: str) -> float:
+    """Bant dışı değeri KIRPMAZ, adıyla reddeder (ÖH D19 / P4B3-18).
+
+    ``LaunchSiteInputError`` fırlatır; ``problems`` girdisi
+    ``resolve_launch_site``ın enlem kapısıyla AYNI sözleşmedir
+    (field / reason / value / accepted_range / unit), böylece uç katmanı
+    tek bir gövde biçimi yayımlar.
+    """
+    try:
+        sayi = float(value)
+    except (TypeError, ValueError):
+        raise LaunchSiteInputError(
+            f'{field} must be a finite number (got {value!r}); no value was '
+            'assumed.',
+            problems=[{'field': field, 'reason': 'not_a_number',
+                       'value': repr(value), 'accepted_range': list(band),
+                       'unit': unit}])
+    lo, hi = float(band[0]), float(band[1])
+    if not (math.isfinite(sayi) and lo <= sayi <= hi):
+        raise LaunchSiteInputError(
+            f'{field} = {sayi:g} {unit} is outside {what} [{lo:g}, {hi:g}]; '
+            'the value was NOT clamped and nothing was resolved (a clamped '
+            'input is a different input, with a different answer).',
+            problems=[{'field': field, 'reason': 'out_of_range',
+                       'value': sayi, 'accepted_range': [lo, hi],
+                       'unit': unit}])
+    return sayi
 
 
 def normalize_longitude(longitude_deg: float) -> float:
@@ -252,15 +399,43 @@ def dem_metadata() -> Optional[Dict]:
     return dict(dem['meta']) if dem else None
 
 
-def dem_cell_size_km(latitude_deg: float = 0.0) -> float:
-    """DEM hücresinin enlemdeki doğu-batı boyu [km] (ölçek göstergesi).
+def dem_cell_size_ns_km() -> float:
+    """DEM hücresinin KUZEY-GÜNEY boyu [km] — enlemden bağımsız.
 
-    Meridyen yayı: 1 derece ≈ π*a/180 (küresel yaklaşım, %0.5 içinde).
+    ÖH D22 / P4B3-26: doğu-batı boyunun yanında kuzey-güney boyu da adıyla
+    yayımlanır; ikisi yalnız kutup yakınında birbirinden ayrışır ve saha
+    kartındaki "hücre ne kadar kaba" sorusunun tam cevabı bu ikilidir.
     """
     dem = _load_dem()
     dlat = dem['dlat'] if dem else 1.0 / 12.0
+    return dlat * (math.pi * WGS84_A / 180.0 / 1000.0)
+
+
+def dem_cell_size_km(latitude_deg: float = 0.0) -> float:
+    """DEM hücresinin enlemdeki DOĞU-BATI boyu [km] (ölçek göstergesi).
+
+    Paralel yayı: 1 derece boylam ≈ (π*a/180)*cos(φ) (küresel yaklaşım,
+    %0.5 içinde). Meridyen yayı (kuzey-güney) için ``dem_cell_size_ns_km``.
+
+    DÜZELTME (ÖH D22 / P4B3-26)
+    ---------------------------
+    Eski satır iki hata taşıyordu:
+      1. Doğu-batı boyu için ENLEM adımı (``dlat``) kullanılıyordu; doğru
+         adım BOYLAM adımıdır (``dlon``). Bugünkü DEM'de ikisi de 1/12°
+         olduğu için sayısal fark YOKTU — kusur, DEM'in dlon'u değişince
+         sessizce yanlış boy yayımlanmasıydı (kural #11).
+      2. ``cos φ`` çarpanına 0,05 TABANI konmuştu. ÖLÇÜLDÜ (taban b84b10a,
+         ``once.json`` P4B3-26): φ = 89,9° için 0,463831 km yayımlanıyordu,
+         gerçek doğu-batı boyu 0,016191 km — 28,6 kat şişik. Taban, hücreyi
+         olduğundan çok daha kaba göstererek arazi belirsizliğinin ölçek
+         göstergesini bozuyordu. Meridyenler kutupta gerçekten birleşir;
+         sıfıra giden değer fiziksel gerçektir, uydurma taban değil.
+    """
+    dem = _load_dem()
+    dlon = dem['dlon'] if dem else 1.0 / 12.0
     deg_km = math.pi * WGS84_A / 180.0 / 1000.0
-    return dlat * deg_km * max(math.cos(math.radians(_clamp_latitude(latitude_deg))), 0.05)
+    return dlon * deg_km * math.cos(math.radians(
+        _clamp_latitude(latitude_deg)))
 
 
 def dem_elevation(latitude_deg: float, longitude_deg: float) -> Optional[Dict]:
@@ -306,6 +481,11 @@ def dem_elevation(latitude_deg: float, longitude_deg: float) -> Optional[Dict]:
         'neighbour_min_m': float(patch.min()),
         'neighbour_max_m': float(patch.max()),
         'cell_size_km': dem_cell_size_km(lat),
+        # P4B3-26: doğu-batı boyu enleme bağlıdır, kuzey-güney boyu değil;
+        # ikisi adıyla ayrılır (eskiden tek sayı vardı ve o da yanlış adımı
+        # kullanıyordu).
+        'cell_size_ew_km': dem_cell_size_km(lat),
+        'cell_size_ns_km': dem_cell_size_ns_km(),
         'source': 'dem_offline',
     }
 
@@ -439,6 +619,29 @@ def online_geocode(query: str, count: int = 8,
 # Koordinatlar kamuya açık, yayımlanmış pad/tesis konumlarıdır; 4 ondalık
 # (~11 m) yuvarlanmıştır. 'approx' işaretli kayıtlar tesis değil, şehir/bölge
 # referansıdır — sahanın kendisi değildir, kullanıcı ince ayar yapmalıdır.
+#
+# ÖH D23 / P4B3-27 — LİSTE HÂLÂ ÖLÜ (kalem KISMEN kapandı).
+#
+# ÖLÇÜLDÜ (taban ef527ae, ``once.json`` P4B3_27): 14 kayıtlık bu liste
+# hrma/ ağacında HİÇBİR yerden okunmuyor (okuyucu sayısı 0); arayüz kendi
+# ayrı 7 kayıtlık listesini taşıyor ve buradaki ``approx`` bayrağı ona hiç
+# ulaşmıyor — 'Sinop (TR)' gerçek bir pad olan 'Kourou ELA-3' ile aynı
+# biçimde listeleniyor.
+#
+# BU AŞAMADA KAPANAMADI, GEREKÇE ÖLÇÜLDÜ: listeyi bir uçtan yayımlamak
+# denendi (``/api/launch-site/presets``) ve GERİ ALINDI — arayüzün onu
+# tüketmesi gerekiyor, ``hrma/templates/launch_site.html`` ise bu dalgada
+# KARDEŞ DALDA (dalga23/arayuz) değiştirildiği için buradan dokunulamıyor.
+# Tüketicisiz uç, ``tests/test_d18_bekci_cevirisi_a1.py::
+# TestP13B208UcPanelEnvanteri`` bekçisinin adıyla yasakladığı şeydir:
+# "ürün yüzünün hiç çağırmadığı, yalnız testin tanımladığı uç". Yani
+# çözüm uç+arayüz TEK PARÇADIR ve ARAYÜZ KULVARINA aittir.
+#
+# BU AŞAMADA KAPANAN: iki Türkçe kayıt adındaki betimleyici ek kaldırıldı
+# ('... — bolge referansi' ASCII yazılmış Türkçeydi, kural #24 ihlali; üstelik
+# listenin geri kalanı İngilizceydi). Aynı hüküm arayüz tarafında da
+# verilmişti: betimleyici ek veri satırından çıkar, anlamı ``approx``
+# bayrağı taşır.
 LAUNCH_SITE_PRESETS = [
     {'id': 'ksc_lc39a', 'name': 'Kennedy Space Center LC-39A',
      'country': 'US', 'latitude': 28.6084, 'longitude': -80.6043, 'approx': False},
@@ -464,9 +667,9 @@ LAUNCH_SITE_PRESETS = [
      'country': 'IN', 'latitude': 13.7330, 'longitude': 80.2350, 'approx': False},
     {'id': 'jiuquan_43', 'name': 'Jiuquan LC-43',
      'country': 'CN', 'latitude': 40.9583, 'longitude': 100.2917, 'approx': False},
-    {'id': 'sinop_tr', 'name': 'Sinop (TR) — bolge referansi',
+    {'id': 'sinop_tr', 'name': 'Sinop (TR)',
      'country': 'TR', 'latitude': 42.0231, 'longitude': 35.1531, 'approx': True},
-    {'id': 'konya_tr', 'name': 'Konya (TR) — bolge referansi',
+    {'id': 'konya_tr', 'name': 'Konya (TR)',
      'country': 'TR', 'latitude': 37.8746, 'longitude': 32.4932, 'approx': True},
 ]
 
@@ -492,10 +695,55 @@ def resolve_launch_site(latitude_deg: float,
                     sessizce çevrimdışı yola düşer
     Döner: rakım, atmosfer, yerel g, kaynak etiketleri, belirsizlik, uyarılar.
     """
-    lat = _clamp_latitude(latitude_deg)
+    # ÖH D18 / termo-ucus a1 (P4B3-18) — KIRPMA YERİNE RET (KÜTÜPHANE AYAĞI).
+    #
+    # ÖLÇÜLDÜ (``once.json`` K5, taban 9071a64):
+    #   resolve_launch_site(200.0, 5000.0) -> HTTP yok, İSTİSNA YOK;
+    #   latitude_deg = 90,0 / longitude_deg = -40,0 ve g = 9,832184937859008
+    #   (kutup değeri) ile TAM bir saha dönüyordu; kırpmayı söyleyen tek alan
+    #   yoktu. ``/api/launch-site/resolve`` ucu bu bandı D15'te (P7B1-08)
+    #   kapattı, ama KAPI YALNIZ UÇTAYDI: kütüphaneyi doğrudan çağıran her
+    #   yol (hibrit motorun saha çözümü, yörünge katmanı, betikler) sessiz
+    #   kırpmayı görmeye devam ediyordu. Kırpılmış saha, sorulan saha
+    #   DEĞİLDİR ve yerel g doğrudan enlemden çıkar.
+    #
+    # Boylam AYRI muamele görür: boylam 360° PERİYODİKTİR, sarma tam ve
+    # tersinirdir (bilgi kaybı yok). Yine de sessiz kalmaz — sarma değeri
+    # fiilen değiştirdiyse uyarı üretilir.
+    _lat_ham = float(latitude_deg)
+    if not (-90.0 <= _lat_ham <= 90.0):
+        raise LaunchSiteInputError(
+            f"latitude_deg = {_lat_ham:g} deg is outside the WGS84 "
+            'decimal-degree domain [-90, 90]; the value was NOT clamped and '
+            'no site was resolved (a clamped site is a different site, with '
+            'a different local gravity).',
+            problems=[{'field': 'latitude_deg', 'reason': 'out_of_range',
+                       'value': _lat_ham, 'accepted_range': [-90.0, 90.0],
+                       'unit': 'degree'}])
+    lat = _lat_ham
+    # ---- RAKIM BANDI (ÖH D19 / P4B3-18 kalan ayak) ----------------------
+    # D15 (P7B1-08) enlem/boylam/sıcaklık/basınç kapılarını koydu ama
+    # ``elevation_m`` bandını AÇIKÇA devretmişti. ÖLÇÜLDÜ (once.json K18,
+    # taban 60cd341): elevation_m = 1e9 -> HTTP 200, g = 719.745,08 m/s²,
+    # ISA T = 186,946 K, uyarı YOK; elevation_m = -1e6 -> sessizce 0,0'a
+    # çekiliyor. Kullanıcının gönderdiği sayı yanıtta ya fiziksel olmayan
+    # bir g üretiyor ya da hiç görünmüyordu.
+    #
+    # Bant, Dünya KATI YÜZEYİNİN kendi bandıdır (SITE_ELEVATION_RANGE_M,
+    # tek kaynak). DEM/çevrimiçi kaynaktan gelen rakım zaten bu bandın
+    # içindedir; kapı YALNIZ kullanıcının elle verdiği değere uygulanır.
+    if elevation_m is not None:
+        elevation_m = _require_band(
+            elevation_m, 'elevation_m', SITE_ELEVATION_RANGE_M, 'm',
+            "Earth's solid-surface elevation band")
     lon = normalize_longitude(longitude_deg)
     warnings: list = []
     attribution: list = []
+    if abs(float(longitude_deg) - lon) > 1e-12:
+        warnings.append(
+            f'longitude_deg {float(longitude_deg):g} deg was wrapped to '
+            f'{lon:g} deg on the 360 deg period; the point is the same '
+            'meridian, but the value reported below is the wrapped one.')
 
     # ---- rakım ----
     elev_source = 'manual'
@@ -589,6 +837,7 @@ def resolve_launch_site(latitude_deg: float,
         'terrain_relief_min_m': neighbour_min,
         'terrain_relief_max_m': neighbour_max,
         'dem_cell_size_km': cell_km,
+        'dem_cell_size_ns_km': dem_cell_size_ns_km(),
         'pressure_sensitivity_pa_per_m': dpdh,
         'pressure_uncertainty_pa': (elev_uncertainty * dpdh
                                     if elev_uncertainty is not None else None),
@@ -610,6 +859,10 @@ def resolve_launch_site(latitude_deg: float,
         'online_weather': online_weather,
         'attribution': attribution,
         'not_modelled': dict(NOT_MODELLED),
+        # P4B3-17: beyanın MODELLENEN tarafı da adıyla yayımlanır. Aksi
+        # halde "listede yok" ile "modellenmiyor" karışır ve modellenen bir
+        # etkiyi anlatan metin modellenmeyenler başlığı altında durur.
+        'modelled': dict(CORIOLIS_MODELLING),
         'warnings': warnings,
     }
 

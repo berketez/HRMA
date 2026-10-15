@@ -98,8 +98,21 @@ SOLVER = {
     'expansion_ratio': 5.46, 'c_star': 1472.5,
 }
 
-#: /api/trajectory-analysis yanıtındaki `trajectory_data.recovery` bloğu —
-#: 8082 koşusunda ölçüldü (hiçbir paraşüt girdisi gönderilmemişti).
+#: /api/trajectory-analysis yanıtındaki `trajectory_data.recovery` bloğu.
+#:
+#: ÇEVRİLEN KÜNYE — ÖH D22 / OH-D18-05. Bu sözlük 8082 koşusunda ölçülmüştü
+#: ve künyesi "hiçbir paraşüt girdisi gönderilmemişti" diyordu; yani sekiz
+#: sayının tamamı (açılma anı, iniş süresi, ortalama iniş hızı, iniş hızı,
+#: 2,0 m² alan, Cd 1,4, 2,0 s gecikme ve üç ``assumed: True`` bayrağı)
+#: kullanıcının vermediği bir paraşütten türetilmişti. Ürün artık paraşüt
+#: verilmeden iniş fazını ÇÖZMÜYOR, dolayısıyla bu künye gerçek bir yanıtı
+#: temsil etmiyordu — panel koşumuna hâlâ olmayan bir inişi öğretiyordu.
+#:
+#: Yeni künye AYNI motorun paraşüt VERİLEN koşumundan alınmıştır (alan
+#: 2,0 m² açıkça gönderilir), bu yüzden sayılar bit-aynı kalır; değişen
+#: tek şey ``assumed.area`` bayrağıdır — çünkü alan artık gerçekten
+#: kullanıcıdan geliyor. Paraşütsüz koşumun panel davranışı ayrı bir
+#: künyeyle (``RECOVERY_YOK``) ölçülür.
 RECOVERY = {
     'deployed': True,
     'descent_model': 'parachute',
@@ -111,8 +124,31 @@ RECOVERY = {
     'parachute_area_m2': 2.0,
     'parachute_cd': 1.4,
     'parachute_deploy_delay_s': 2.0,
-    'assumed': {'area': True, 'cd': True, 'deploy_delay': True},
+    'assumed': {'area': False, 'cd': True, 'deploy_delay': True},
     'basis': 'parachute descent with the documented default recovery system',
+}
+
+#: Paraşüt GÖNDERİLMEYEN koşumun kurtarma bloğu (ÖH D22 / OH-D18-05).
+#: Sözleşme şekli ``RECOVERY`` ile aynıdır; sayılar yerine ``None`` ve
+#: hükmün neden geri çekildiğini söyleyen bir gerekçe taşır.
+RECOVERY_YOK = {
+    'deployed': False,
+    'descent_model': 'NOT_MODELLED',
+    'reason': 'recovery_not_supplied',
+    'deploy_time_s': None,
+    'descent_start_time_s': None,
+    'descent_duration_s': None,
+    'mean_descent_rate_m_s': None,
+    'descent_height_m': None,
+    'landing_velocity_m_s': None,
+    'parachute_area_m2': None,
+    'parachute_cd': None,
+    'parachute_deploy_delay_s': None,
+    'assumed': {'area': False, 'cd': False, 'deploy_delay': False},
+    'landing_withheld_because': (
+        'NOT_MODELLED: the descent was not solved because '
+        'launch_params["parachute_area"] (parachute PROJECTED area, m2) was '
+        'not supplied.'),
 }
 
 
@@ -226,7 +262,15 @@ def run_node(source):
 
 
 def harness(html, functions, body, extra=''):
-    parts = [STUB, extra]
+    # ÖH D35 · OH-GT-25: sayfanın sayı biçimlendiricileri artık ortak
+    # `numTxt`/`pctTxt` delegatörüne bağlı (i18n.js kanonu). Bu düzenek
+    # sayfanın AMBİYANS bağımlılıklarını taklit ediyor (T/TF/document/
+    # window) — delegatör de onlardan biri. KOPYA YAZILMAZ: bloğun
+    # kendisi sökülüp eklenir, yani tek kaynak sayfada kalır. `window`
+    # STUB'ta boş nesne olduğu için sözlük bulunamaz ve delegatör eski
+    # `toFixed` davranışına düşer; bu dosyanın sayısal iddiaları
+    # ("1.40", "447.8" …) AYNEN geçerlidir.
+    parts = [STUB, honest_formatters(html), extra]
     parts.extend(functions)
     parts.append(body)
     parts.append('bitir();')
@@ -553,7 +597,11 @@ def test_t68_recovery_summary_prints_the_solver_numbers_with_assumption_marks(ht
     """Panel çözücünün kurtarma sayılarını ve varsayım damgalarını basar."""
     body = r"""
 formuKur();
-renderRecoverySummary(REC, { parachute_area: null, parachute_cd: null,
+// ÖH D22 / OH-D18-05: künye ile gönderilen istek TUTARLI olmalı. Alan
+// artık uydurulmadığı için ``assumed.area=True`` üreten bir koşum YOKTUR;
+// künye alanın GÖNDERİLDİĞİ koşumdan alınmıştır, çağrı da öyle. Cd ve
+// gecikme hâlâ gönderilmiyor, dolayısıyla İKİ damga beklenir.
+renderRecoverySummary(REC, { parachute_area: 2, parachute_cd: null,
                              parachute_deploy_delay: null });
 const h = ELS['trajectory_recovery'].innerHTML;
 ok(h.indexOf('2.00') >= 0, 'paraşüt alanı basılmadı: ' + h);
@@ -561,11 +609,11 @@ ok(h.indexOf('1.40') >= 0, 'paraşüt Cd basılmadı');
 ok(h.indexOf('447.8') >= 0, 'iniş süresi basılmadı');
 ok(h.indexOf('12.35') >= 0, 'ortalama iniş hızı basılmadı');
 ok(h.indexOf('10.81') >= 0, 'yere çarpma hızı basılmadı');
-// Üçü de varsayım: üç damga da görünmeli
-ok((h.match(/\(assumed\)/g) || []).length === 3,
-   'varsayım damgaları eksik: ' + h);
-// Kullanıcı bir şey göndermediği için 'ulaşmadı' uyarısı ÇIKMAMALI
-ok(h.indexOf('did NOT reach') < 0, 'boş girdide haksız uyarı basıldı');
+// Cd ve gecikme varsayım, alan kullanıcıdan: İKİ damga görünmeli.
+ok((h.match(/\(assumed\)/g) || []).length === 2,
+   'varsayım damgaları beklenenden farklı: ' + h);
+// Gönderilen alan çözücüye ULAŞTI (2,00 m² künyede duruyor) -> uyarı yok
+ok(h.indexOf('did NOT reach') < 0, 'ulaşan girdide haksız uyarı basıldı');
 """
     proc = run_node(harness(html, [js_function(html, 'renderRecoverySummary')],
                             body, extra=RECOVERY_JS))

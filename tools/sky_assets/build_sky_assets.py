@@ -180,9 +180,22 @@ def _indir(url: str, hedef: Path, en_az_bayt: int, imza: bytes) -> Path:
     """
     hedef.parent.mkdir(parents=True, exist_ok=True)
     if hedef.exists() and hedef.stat().st_size >= en_az_bayt:
-        print('    önbellek: %s (%.2f MB)'
-              % (hedef.name, hedef.stat().st_size / 1e6))
-        return hedef
+        # ÖH D18 / altyapi (P10B4-13). ÖLÇÜLDÜ (once_p10b4_13.json): önbellek
+        # isabetinde bu dal YALNIZ BOYUTA bakıp erken dönüyordu; imza HİÇ
+        # sorulmuyordu ve docstring'in "tutmazsa dosyayı SİLER" iddiasının
+        # kod karşılığı yoktu. Sonuç: bir kez yarım/HTML inen dosya sonsuza
+        # dek "geçerli önbellek" sayılıyordu — ağ bir daha denenmiyordu.
+        # Artık önbellek de indirilen veriyle AYNI kanıtı vermek zorunda:
+        # imza tutmazsa dosya SİLİNİR ve akış yeniden indirmeye düşer.
+        with open(hedef, 'rb') as _f:
+            _bas = _f.read(max(len(imza), 8))
+        if _bas.startswith(imza):
+            print('    önbellek: %s (%.2f MB, imza doğrulandı)'
+                  % (hedef.name, hedef.stat().st_size / 1e6))
+            return hedef
+        print('    önbellek REDDEDİLDİ (imza tutmadı, ilk baytlar %r): %s '
+              '— siliniyor, yeniden indirilecek' % (_bas[:8], hedef.name))
+        hedef.unlink()
 
     print('    indiriliyor: %s' % url)
     istek = urllib.request.Request(url, headers={'User-Agent': 'HRMA-sky-asset-builder'})

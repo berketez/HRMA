@@ -36,7 +36,6 @@ from hrma.analysis.acoustic_modes import AcousticModeAnalyzer
 from hrma.stability import (
     QSHODBand,
     critical_response_real,
-    critical_response_table,
     damping_budget,
     nozzle_damping_quasi_steady,
     qshod_response,
@@ -431,33 +430,34 @@ def _acoustic_result():
         chamber_length=CY_LENGTH_M, n_modes=6)
 
 
-def test_r_crit_tablosu_akustik_moddan_beslenir():
-    """Mod tablosu ÜRETİLMEZ, acoustic_modes'tan okunur; her satırda eşik var."""
+# ---------------------------------------------------------------------------
+# P6B4-12 (ÖH D26 / fea-cfd a3) — ``critical_response_table`` KALDIRILDI.
+#
+# ÖLÇÜLDÜ (taban 7751531, docs/scofield/raw/OH/D26/fea-cfd/a3/once_a3.json):
+# fonksiyonun ÜRÜN TÜKETİCİSİ SIFIRDI — ``hrma/`` altında stability paketi
+# dışında hiçbir atıf yoktu. Motorlar mod tablosunu KENDİLERİ kurup satır
+# satır :func:`critical_response_real` çağırıyor (hybrid_rocket_engine.py,
+# solid_rocket_engine.py). Ana model hükmü: tüketici bağlanamıyorsa ölü kod
+# kaldırılır, TESTLERİ DE (yalan yüzey bırakılmaz).
+#
+# ÇEVRİLEN DÖRT BEKÇİ (gerekçe): test_r_crit_tablosu_akustik_moddan_beslenir,
+# test_r_crit_tablosunda_hukum_anahtari_yok, test_kunyesiz_literatur_bandi_
+# reddedilir, test_akustik_sonucu_yerine_rastgele_sozluk_reddedilir — dördü
+# de YALNIZ kalkan fonksiyonu çağırıyordu. Sınadıkları iki sözleşme YAŞIYOR
+# ve aşağıda CANLI ürün yolunun üstünde sınanıyor: (a) akustik yolda
+# 'verdict' anahtarı yok, (b) mod tablosu ikinci kez üretilmiyor.
+# ---------------------------------------------------------------------------
+
+
+def test_akustik_yolda_hukum_anahtari_yok_CANLI_YOL():
+    """Eşik satırı ve mod tablosu HÜKÜMSÜZ kalır (canlı ürün yolu)."""
     acoustic = _acoustic_result()
     nozzle = nozzle_damping_quasi_steady(
         CY_SOUND_SPEED_M_S, CY_LENGTH_M, CY_GAMMA_MIXTURE, CY_NOZZLE_MACH)
     budget = damping_budget([nozzle])
-    table = critical_response_table(acoustic, budget, _cy_gain())
-
-    assert len(table['modes']) == len(acoustic['modes'])
-    labels = [row['label'] for row in table['modes']]
-    assert labels == [mode['label'] for mode in acoustic['modes']]
-    for row in table['modes']:
-        assert row['critical_response_real'] == pytest.approx(
-            (CY_GAMMA_MIXTURE + 1.0) / CY_GAMMA_MIXTURE, rel=1e-12)
-        assert row['frequency_hz'] > 0.0
-        assert 'nozzle' in row['damping']
-    assert 'acoustic_modes' in table['mode_table_source']
-    assert table['interpretation'] == 'threshold_not_verdict'
-
-
-def test_r_crit_tablosunda_hukum_anahtari_yok():
-    """Akustik yolun ÇIKTISINDA 'verdict' anahtarı olursa test kırmızı."""
-    acoustic = _acoustic_result()
-    nozzle = nozzle_damping_quasi_steady(
-        CY_SOUND_SPEED_M_S, CY_LENGTH_M, CY_GAMMA_MIXTURE, CY_NOZZLE_MACH)
-    table = critical_response_table(acoustic, damping_budget([nozzle]),
-                                    _cy_gain())
+    satirlar = [critical_response_real(budget['total_damping_1_s'],
+                                       _cy_gain())
+                for _ in acoustic['modes']]
 
     def walk(node, path=''):
         if isinstance(node, dict):
@@ -468,28 +468,20 @@ def test_r_crit_tablosunda_hukum_anahtari_yok():
             for i, value in enumerate(node):
                 walk(value, f'{path}[{i}]')
 
-    walk(table)
-    assert 'verdict' not in table
+    walk(satirlar)
+    assert len(satirlar) == len(acoustic['modes'])
+    for satir in satirlar:
+        assert satir['interpretation'] == 'threshold_not_verdict'
+        assert satir['critical_response_real'] == pytest.approx(
+            (CY_GAMMA_MIXTURE + 1.0) / CY_GAMMA_MIXTURE, rel=1e-12)
     # Akustik modülün kendi çıktısı da hükümsüz kalmalı (o modül eşik verir).
     assert 'verdict' not in acoustic
 
 
-def test_kunyesiz_literatur_bandi_reddedilir():
-    """Kıyas bandı verilecekse KAYNAĞI zorunludur."""
-    acoustic = _acoustic_result()
-    nozzle = nozzle_damping_quasi_steady(
-        CY_SOUND_SPEED_M_S, CY_LENGTH_M, CY_GAMMA_MIXTURE, CY_NOZZLE_MACH)
-    budget = damping_budget([nozzle])
-    with pytest.raises(ValueError, match='source'):
-        critical_response_table(acoustic, budget, _cy_gain(),
-                                literature_band={'low': 1.0, 'high': 3.0})
-    table = critical_response_table(
-        acoustic, budget, _cy_gain(),
-        literature_band={'low': 1.0, 'high': 3.0, 'source': 'test citation'})
-    assert table['modes'][0]['literature_band']['source'] == 'test citation'
-
-
-def test_akustik_sonucu_yerine_rastgele_sozluk_reddedilir():
-    with pytest.raises(ValueError, match='AcousticModeAnalyzer'):
-        critical_response_table({'not': 'acoustic'},
-                                damping_budget({'nozzle': -10.0}), 100.0)
+def test_mod_tablosu_ikinci_kez_URETILMEZ():
+    """hrma.stability mod tablosu üreten bir yüzey YAYIMLAMAZ (tek kaynak)."""
+    import hrma.stability as st
+    assert 'critical_response_table' not in getattr(st, '__all__', []), (
+        "ölü tablo yüzeyi geri geldi — ürün tüketicisi ölçülmeden "
+        "yayımlanmamalı (P6B4-12)")
+    assert not hasattr(st, 'critical_response_table')

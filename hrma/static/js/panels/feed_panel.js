@@ -52,6 +52,84 @@
     ];
     const PRESS_MODES = [['regulated', 'Regulated', 'press.regulated'],
                          ['blowdown', 'Blowdown', 'press.blowdown']];
+    // ÖH D22 / OH-D18-09 — su koçu çalışma basıncının REFERANS DÜZLEMİ.
+    // Değerler ucun sözleşmesinden gelir: hrma/analysis/water_hammer.py
+    // WORKING_PRESSURE_REFERENCES = ('absolute', 'gauge'). Boş seçenek
+    // "verilmedi"dir ve panelin kullanıcı adına düzlem seçmediğini söyler.
+    const WH_PRESSURE_REFS = [
+        ['', 'Not specified (both planes checked)', 'panel.feed.wprUnspecified'],
+        ['absolute', 'Absolute', 'panel.feed.wprAbsolute'],
+        ['gauge', 'Gauge', 'panel.feed.wprGauge'],
+    ];
+
+    //: ÖH D33-2 / arayuz-panel a1 · kalem OH-D32-03 (defter zinciri
+    //: P7B2-23) — BÜYÜKLÜK EKSENİ BEYANI EKRANA İNER.
+    //: ÖLÇÜLDÜ (a1/once.json, bölüm K2): uç `size_envelope` altında YEDİ
+    //: çocuk yayımlıyor (canonical_radius_band_m, radius_band_status,
+    //: radius_gate_applied, bond_number, bond_number_status,
+    //: missing_input_for_bond_number, basis) ve bu dosyanın okuma
+    //: envanterinde (173 ad) ne blok adı ne de yedi çocuktan BİRİ
+    //: geçiyordu. Blok bir YOKLUK BEYANI taşır — "yarıçap bandı BEYAN
+    //: EDİLMEDİ", "Bond sayısı DEĞERLENDİRİLEMEDİ (eksik girdi: yüzey
+    //: gerilimi)" — yani girdi yankısı ya da SI ikizi değildir; kozmetik
+    //: muafiyet gerekçesi uydurulamazdı ve kayıt ADLI BORÇ olarak
+    //: tutuluyordu (tests/test_wave4b_contract.py::TERS_PANEL_BORCU,
+    //: ÖH D31 yapisal-sistem a1 / commit 50016273). Bu bağlama borcu öder.
+    //: Panel HİÇBİR sayı üretmez: bant yoksa yokluğunu ADIYLA yazar, bant
+    //: varsa ucun verdiği iki ucu olduğu gibi basar (fail-closed).
+    function sizeEnvelopeHtml(s) {
+        const z = s && s.size_envelope;
+        if (!z || typeof z !== 'object') return '';
+        const bant = z.canonical_radius_band_m;
+        //: `Number(null) === 0` TUZAĞI: null bir sayıya zorlanırsa 0
+        //: olur ve ekrana "0,000" diye UYDURMA bir sayı basılırdı
+        //: (Doktrin 1/6). Tip DE denetlenir, yalnız sonluluk değil.
+        const bantVar = Array.isArray(bant) && bant.length === 2
+            && typeof bant[0] === 'number' && Number.isFinite(bant[0])
+            && typeof bant[1] === 'number' && Number.isFinite(bant[1]);
+        const rows = [];
+        rows.push([
+            T('panel.feed.szBand', 'Canonical tank-radius band'),
+            (bantVar
+                ? U.fmt(bant[0], 3) + ' – ' + U.fmt(bant[1], 3) + ' m'
+                : T('panel.feed.szNoBand',
+                    'NOT DECLARED — this quantity has no canonical band in '
+                    + 'the product, and none is invented here'))
+            + '  ·  ' + U.esc(String(z.radius_band_status)),
+            T('panel.feed.szBandTip',
+              'This status string is the declaration made by the endpoint; '
+              + 'the panel does not classify it')]);
+        rows.push([
+            T('panel.feed.szGate', 'Radius gate applied to this run'),
+            z.radius_gate_applied === true
+                ? T('panel.feed.szGateOn', 'yes')
+                : T('panel.feed.szGateOff',
+                    'no — there is no band to apply, so no size was rejected')]);
+        rows.push([
+            T('panel.feed.szBond', 'Bond number Bo'),
+            //: `U.fmt` null/sonsuz değerde EM TİRE döner (analysis_dock.js);
+            //: sayı Number() ile ZORLANMAZ — `Number(null) === 0` olurdu ve
+            //: "Bond sayısı DEĞERLENDİRİLEMEDİ" diyen bir yükte ekrana
+            //: "0,000" basılırdı.
+            U.fmt(z.bond_number, 3)
+            + '  ·  ' + U.esc(String(z.bond_number_status)),
+            T('panel.feed.szBondTip',
+              'Bo separates the gravity-dominated slosh regime from the '
+              + 'surface-tension-dominated one')]);
+        if (z.missing_input_for_bond_number) {
+            rows.push([
+                T('panel.feed.szMissingInput', 'Missing input for Bo'),
+                U.esc(String(z.missing_input_for_bond_number))]);
+        }
+        let html = U.sectionTitle(T('panel.feed.secSizeEnvelope',
+            'Size envelope — what the endpoint could and could NOT judge'))
+            + U.kvTable(rows);
+        if (z.basis) {
+            html += U.listBlock(T('panel.feed.szBasis',
+                'Basis of the size-envelope declaration'), [z.basis], 'dim');
+        }
+        return html;
+    }
 
     // ---- Slosh render --------------------------------------------------
     function renderSlosh(data, root) {
@@ -147,10 +225,100 @@
             html += U.listBlock(T('panel.feed.coincidenceWarnings', 'Frequency-coincidence warnings'),
                                 s.coincidence_warnings, 'warn');
         }
+        // ÖH D27 / P11B4-22 — YÜKSEK ÇALKALANMA MODLARI VE SIVI KÜTLESİ.
+        // ÖLÇÜLDÜ (a3/once.json): uç `modes` (SLOSH_ROOTS kadar modun omega
+        // ve f_hz'si) ile `liquid_mass_kg`'ı yayımlıyor
+        // (hrma/analysis/slosh_analysis.py:529-531); panel İKİSİNİ DE hiç
+        // okumuyordu — ekranda yalnız 1. mod vardı. Yüksek modlar kontrol ve
+        // yapı frekanslarıyla çakışma denetiminin girdisidir. Uç alanı
+        // göndermezse satır HİÇ çıkmaz (fail-closed; panel mod UYDURMAZ).
+        if (Number.isFinite(s.liquid_mass_kg)) {
+            html += U.kvTable([[T('panel.feed.liquidMass', 'Liquid mass'),
+                U.fmt(s.liquid_mass_kg, 1) + ' kg',
+                T('panel.feed.liquidMassTip',
+                  'Total liquid mass in the tank; the slosh mass is a '
+                  + 'fraction of it')]]);
+        }
+        if (Array.isArray(s.modes) && s.modes.length) {
+            html += U.sectionTitle(T('panel.feed.secModes',
+                'Lateral slosh modes (NASA SP-106 / Dodge 2000)'))
+                + U.kvTable(s.modes.map(function (m) {
+                    return [U.tf('panel.feed.modeRow', { m: m.mode },
+                                 'Mode {m}'),
+                            U.fmt(m.f_hz, 3) + ' Hz'];
+                }));
+        }
+        html += sizeEnvelopeHtml(s);
         if (s.model_note) html += U.listBlock(T('common.modelAssumptions',
             'Model assumptions & limits'), [s.model_note], 'dim');
+        html += confidenceHtml(data, s);
         tail.innerHTML = html;
         root.appendChild(tail);
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (X_basis / X_source / X_status / X_model) okuyup ekrana DÜZ
+        // METİN döküyor, hükmünü (hesaplandı / sizin girdiniz / varsayım
+        // / modellenmedi) hiç vermiyordu — pano sınıflandırıcısı ölü
+        // katmandı. Defter ucun KENDİ beyanını ortak sınıflandırıcıdan
+        // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
+        U.source.ledgerInto(root, s, { deep: true });
+    }
+
+    /* ÖH D26 / OH-B3-02 — UCUN GÜVEN BEYANI EKRANA İNER.
+       ÖLÇÜLDÜ (taban 7751531, ``a2/once.json``: feed_confidence = 0):
+       /api/slosh-analysis ve /api/pressurant-sizing (regulated VE
+       blowdown) `confidence` alanını yayımlıyor — ucun kendi sonucuna ne
+       kadar güvendiğinin beyanı — ve feed_panel.js üç sekmenin hiçbirinde
+       basmıyordu. Kullanıcı çalkalanma frekansını ve gaz kütlesini tam
+       sayı gibi okuyordu; ucun "bu bir yaklaşımdır" demesi ekrana hiç
+       ulaşmıyordu. tests/test_wave4b_contract.py bu borcu ÜÇ ayrı imle
+       ('feed/slosh', 'feed/press_reg', 'feed/press_bd') taşıyordu.
+
+       Alan hem yanıtın üst katında hem alt blokta olabilir; ikisi de
+       yoksa satır HİÇ çıkmaz (fail-closed, panel güven UYDURMAZ). */
+    function confidenceHtml(data, blok) {
+        const c = (blok && blok.confidence !== undefined && blok.confidence !== null)
+            ? blok.confidence
+            : ((data && data.confidence !== undefined && data.confidence !== null)
+                ? data.confidence : null);
+        if (c === null) return '';
+        const metin = (typeof c === 'object') ? JSON.stringify(c) : String(c);
+        return U.kvTable([['confidence',
+            '<span style="font-family:var(--hd-mono); font-size:0.75rem;">'
+            + U.esc(metin) + '</span>']]);
+    }
+
+    /* ÖH D28 / arayuz a1 (OH-D27-16) — KÜTLEYİ ÖLÇEKLEYEN VARSAYIM EKRANDA.
+       ÖLÇÜLDÜ (a1/once.json, taban 7cd08bcc): D26 / yapisal-sistem a1
+       (`aabdcdcd`, P5B3-16) /api/pressurant-sizing yanıtına
+       `expulsion_efficiency` (boşaltma verimi η) ve `swept_volume_m3`
+       (η'nın uygulandığı süpürülen hacim) alanlarını ekledi; bu panelin
+       171 adlık okuma envanterinde İKİSİ DE 0 kez geçiyordu.
+       Basınçlandırıcı kütlesi η ile ÖLÇEKLENİR: panel kütleyi basıp
+       çarpanı basmayınca kullanıcı, gördüğü gaz kütlesinin hangi
+       boşaltma varsayımıyla çıktığını göremiyordu.
+
+       Değerler AYNEN basılır; alan yoksa satır HİÇ çıkmaz (fail-closed,
+       panel varsayılan bir verim UYDURMAZ). Etiketler makine adlarıdır —
+       `confidenceHtml` ile aynı kalıp: kullanıcı hangi yanıt alanını
+       okuduğunu birebir görür. */
+    function expulsionHtml(p) {
+        if (!p) return '';
+        const rows = [];
+        if (typeof p.expulsion_efficiency === 'number'
+                && Number.isFinite(p.expulsion_efficiency)) {
+            rows.push(['expulsion_efficiency',
+                U.fmt(p.expulsion_efficiency, 4)]);
+        }
+        if (typeof p.swept_volume_m3 === 'number'
+                && Number.isFinite(p.swept_volume_m3)) {
+            // Litre ikizi TÜRETİMDİR ve m³ değerinin YANINDA durur; ham
+            // sayı saklanmaz (panelin kendi kalıbı: bottle_water_volume_m3).
+            rows.push(['swept_volume_m3',
+                U.fmt(p.swept_volume_m3, 6) + ' m3 ('
+                + U.fmt(p.swept_volume_m3 * 1000, 2) + ' L)']);
+        }
+        return rows.length ? U.kvTable(rows) : '';
     }
 
     // ---- Pressurant render --------------------------------------------
@@ -166,10 +334,22 @@
             const iso = p.isothermal || {};
             const adia = p.adiabatic || {};
             const st = p.storage || {};
+            // ÖH D27 / P11B4-21 — KART İPUCU KENDİNİ YANLIŞ TANITIYORDU.
+            // ÖLÇÜLDÜ (a3/once.json): ipucu "Recommended (conservative,
+            // adiabatic bound) pressurant mass" diyordu; YANINDAKİ
+            // 'ADIABATIC BOUND' kartı 1,873 kat farklı bir sayı gösteriyor
+            // (4,128 kg ⟷ 2,204 kg) ve ucun KENDİ model notu bu sınırların
+            // "diagnostic bounds ... not the sizing basis" olduğunu yazıyor
+            // (hrma/analysis/pressurant_sizing.py:417-423). İpucu artık
+            // sayının GERÇEK dayanağını söyler; sınır kartlarının bu sayının
+            // dayanağı OLMADIĞINI da söyler.
             cards += U.statCard(T('panel.feed.cardDelivered', 'DELIVERED GAS'),
                 U.fmt(p.recommended_delivered_mass_kg, 3), 'kg', 'info',
                 T('panel.feed.cardDeliveredTip',
-                  'Recommended (conservative, adiabatic bound) pressurant mass'))
+                  'Gas delivered into the tank, from the closed-form energy '
+                  + 'balance that sizes the bottle (Sutton Ch. 6 / Huzel & '
+                  + 'Huang Ch. 5). The isothermal/adiabatic cards beside it '
+                  + 'are diagnostic bounds, NOT the basis of this number.'))
                 + U.statCard(T('panel.feed.cardIso', 'ISOTHERMAL BOUND'), U.fmt(iso.gas_mass_kg, 3), 'kg', 'dim',
                     T('panel.feed.cardIsoTip', 'Slow (dense-gas) minimum mass'))
                 + U.statCard(T('panel.feed.cardAdia', 'ADIABATIC BOUND'), U.fmt(adia.gas_mass_kg, 3), 'kg', 'dim',
@@ -202,8 +382,18 @@
         let html = '';
         if (p.model_note) html += U.listBlock(T('common.modelAssumptions',
             'Model assumptions & limits'), [p.model_note], 'dim');
+        html += expulsionHtml(p);   // OH-D27-16 (ÖH D28 / arayuz a1)
+        html += confidenceHtml(data, p);
         tail.innerHTML = html;
         root.appendChild(tail);
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (X_basis / X_source / X_status / X_model) okuyup ekrana DÜZ
+        // METİN döküyor, hükmünü (hesaplandı / sizin girdiniz / varsayım
+        // / modellenmedi) hiç vermiyordu — pano sınıflandırıcısı ölü
+        // katmandı. Defter ucun KENDİ beyanını ortak sınıflandırıcıdan
+        // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
+        U.source.ledgerInto(root, p, { deep: true });
     }
 
     // ---- Water hammer render ------------------------------------------
@@ -228,9 +418,30 @@
             + U.badge(T('panel.feed.badgeClosure', 'CLOSURE') + ': '
                 + String(w.closure_regime || '—').toUpperCase(), 'info')
             + '</div>';
+        // ÖH D15 / P11B4-20 — HÜKMÜN DAYANDIĞI SAYI EKRANDA YOKTU.
+        // ÖLÇÜLDÜ (once.json, gerçek /api/water-hammer, su/20 m/Ø25/t=2/20 bar,
+        // ṁ=12 kg/s): rozet UNSAFE (kırmızı), kartta PEAK PRESSURE 215,6 bar,
+        // PIPE MAWP 229,3 bar — ekrandaki iki sayı "sınırın içindeyiz" diyor.
+        // Ucun hükmü ise `design_peak_pressure_bar` = 411,1 bar'a dayanıyor
+        // (kolon ayrılması öngörülünce birleşme tepesi,
+        // `column_separation_peak_factor` = 2,0). O sayı hiçbir kartta yoktu.
+        //
+        // Kapı: uç yönetici tepeyi yayımlıyorsa HÜKÜM RENGİ o karta taşınır;
+        // Joukowsky tepesi kartta KALIR ama nötr (dim) olur — hükmü o sayı
+        // kazanmadı. Alan yoksa hiçbir şey değişmez (fail-closed, uydurma yok).
+        const govPeak = (typeof w.design_peak_pressure_bar === 'number'
+                         && isFinite(w.design_peak_pressure_bar))
+            ? w.design_peak_pressure_bar : null;
+        const govDiffers = (govPeak !== null
+            && typeof w.peak_pressure_bar === 'number'
+            && Math.abs(govPeak - w.peak_pressure_bar) > 1e-9);
         html += '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard(T('panel.feed.cardPeakP', 'PEAK PRESSURE'), U.fmt(w.peak_pressure_bar, 1), 'bar', kind,
+            + U.statCard(T('panel.feed.cardPeakP', 'PEAK PRESSURE'), U.fmt(w.peak_pressure_bar, 1), 'bar',
+                govDiffers ? 'dim' : kind,
                 T('panel.feed.cardPeakPTip', 'Working pressure + applied transient rise'))
+            + (govPeak === null ? '' : U.statCard('design_peak_pressure_bar',
+                U.fmt(govPeak, 1), 'bar', kind,
+                String(w.model_note || '')))
             + U.statCard(T('panel.feed.cardJoukowsky', 'JOUKOWSKY RISE'), U.fmt(w.joukowsky_pressure_rise_bar, 1), 'bar', 'dim',
                 T('panel.feed.cardJoukowskyTip', 'Instantaneous-closure rise ρ·a·Δv (Joukowsky 1898)'))
             + U.statCard(T('panel.feed.cardApplied', 'APPLIED RISE'), U.fmt(w.applied_pressure_rise_bar, 1), 'bar', 'info',
@@ -251,9 +462,44 @@
 
         const tail = document.createElement('div');
         let t = '';
+        // Yönetici tepeyi ÜRETEN alanlar makine yoluyla basılır (yeni çeviri
+        // anahtarı açılmadı). Alan yoksa satır HİÇ çıkmaz.
+        const govRows = [];
+        /* ÖH D26 / OH-B3-02 — KOLON AYRILMASI HÜKMÜNÜN DAYANDIĞI BUHAR
+           BASINCININ KAYNAĞI. ÖLÇÜLDÜ (taban 7751531, ``a2/once.json``:
+           feed_vapor_pressure_source = 0): /api/water-hammer
+           `vapor_pressure_source` yayımlıyor ve feed_panel.js basmıyordu.
+           Yukarıdaki `column_separation` satırı ekranda "kolon ayrıldı /
+           ayrılmadı" diyor; o hüküm akışkanın buhar basıncına dayanır ve
+           o sayının NEREDEN geldiği (tablo mu, korelasyon mu, sabit mi)
+           ekranda hiç yazmıyordu. tests/test_wave4b_contract.py bunu
+           'feed/water_hammer' altında xfail(strict) borç imiyle
+           taşıyordu. Uç ne yayımladıysa AYNEN basılır. */
+        [['design_peak_pressure_bar', govPeak, 1, ' bar'],
+         ['column_separation', w.column_separation, null, ''],
+         ['column_separation_peak_bar', w.column_separation_peak_bar, 1, ' bar'],
+         ['column_separation_peak_factor', w.column_separation_peak_factor, 2, ''],
+         ['downsurge_pressure_bar', w.downsurge_pressure_bar, 1, ' bar'],
+         ['vapor_pressure_source',
+          (w.vapor_pressure_source
+           || (data && data.vapor_pressure_source) || null), null, ''],
+         // Aynı kalem: hızın (dolayısıyla Joukowsky tepesinin) hangi
+         // girdiden geldiği. Ölçümde `vapor_pressure_source` ödendikten
+         // SONRA bekçi ikinci bir dürüstlük alanı gösterdi: `flow_source`.
+         ['flow_source',
+          (w.flow_source || (data && data.flow_source) || null), null, ''],
+        ].forEach(function (row) {
+            const v = row[1];
+            if (v === null || v === undefined) return;
+            const shown = (typeof v === 'number')
+                ? U.fmt(v, row[2]) + row[3] : U.esc(String(v));
+            govRows.push(['<span style="font-family:var(--hd-mono);'
+                + ' font-size:0.72rem;">' + row[0] + '</span>', shown]);
+        });
+        if (govRows.length) t += U.kvTable(govRows);
         if (w.recommendation) {
             t += '<p style="font-size:0.85rem; color:var(--hd-ink, #cfe8f2); margin:8px 0;">'
-                + w.recommendation + '</p>';
+                + U.esc(w.recommendation) + '</p>';
         }
         if (Array.isArray(w.warnings) && w.warnings.length) {
             t += U.listBlock(T('common.warnings', 'Warnings'), w.warnings, kind === 'err' ? 'err' : 'warn');
@@ -264,6 +510,14 @@
         }
         tail.innerHTML = t;
         root.appendChild(tail);
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (X_basis / X_source / X_status / X_model) okuyup ekrana DÜZ
+        // METİN döküyor, hükmünü (hesaplandı / sizin girdiniz / varsayım
+        // / modellenmedi) hiç vermiyordu — pano sınıflandırıcısı ölü
+        // katmandı. Defter ucun KENDİ beyanını ortak sınıflandırıcıdan
+        // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
+        U.source.ledgerInto(root, w, { deep: true });
     }
 
     // ------------------------------------------------------------------
@@ -339,6 +593,24 @@
                 ['line_id_mm', 'Line Inner Diameter (mm)', 25, 1, 'panel.feed.fLineId'],
                 ['wall_thickness_mm', 'Wall Thickness (mm)', 2, 0.1, 'common.f.wallThicknessMm'],
                 ['working_pressure_bar', 'Working Pressure (bar)', 20, 1, 'panel.feed.fWorkingPressure'],
+                // ÖH D22 / OH-D18-09 — ÇALIŞMA BASINCININ REFERANS DÜZLEMİ.
+                // D18'de (termo P4B4-09) modül bu sayıyı iki ZIT sözleşmeyle
+                // kullandığı için kapı kondu: düzlem verilmezse modül İKİ
+                // okumayı da değerlendirir, hüküm ikisinde AYRIŞIRSA
+                // ValueError -> HTTP 400 (water_hammer.py:776-830, fail-closed).
+                // ÖLÇÜLDÜ (raw/OH/D22/arayuz/a1/once.json M2, taban b84b10a):
+                // panelin su koçu sekmesinde 9 alan vardı ve
+                // `working_pressure_reference` feed_panel.js'te HİÇ geçmiyordu
+                // (`wpr_kaynakta_hic_gecmiyor: true`) — kullanıcı 400'ü alıyor
+                // ama çözecek alanı bulamıyordu.
+                // Varsayılan BİLEREK boştur: panel kullanıcı adına düzlem
+                // SEÇMEZ (sessiz varsayılan yasak). Boş seçenek `''` gönderir,
+                // uç `data.get(...) or None` ile bunu "verilmedi"ye çevirir
+                // (app.py:6777) ve modül iki düzlemi de sınar; hüküm ikisinde
+                // aynıysa yayımlanır, ayrışırsa 400 gelir ve kullanıcı bu
+                // alandan düzlemi seçerek hükmü kazanır.
+                ['working_pressure_reference', 'Working Pressure Reference', '',
+                 WH_PRESSURE_REFS, 'panel.feed.fWorkingPressureRef'],
                 ['mdot_kg_s', 'Mass Flow (kg/s)', 5, 0.1, 'panel.feed.fMassFlow'],
                 ['valve_closure_time_ms', 'Valve Closure Time (ms)', 50, 1, 'panel.feed.fValveTime'],
                 ['pipe_material', 'Pipe Material', 'ss_304', PIPE_MATERIALS, 'panel.feed.fPipeMaterial'],

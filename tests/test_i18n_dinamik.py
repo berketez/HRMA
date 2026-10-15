@@ -356,7 +356,17 @@ sandbox.MotorViz3D = {
 };
 
 vm.createContext(sandbox);
-for (const f of ['i18n.js', 'i18n_charts.js', 'motor_viz_deck.js']) {
+/* ÖH D27 · OH-D26-10 — YÜKLEME SIRASI ÜRÜNÜN AYNISI OLMALI.
+   ÖLÇÜLDÜ (a2/once.json `deck_harness_units_yukluyor` = 0): bu liste
+   `units_constants.js`i HİÇ yüklemiyordu, oysa motor_viz_deck.js:83
+   onu (D25/OH-D24-05 tek-kaynak kapısı) ZORUNLU kılıyor ve yokluğunda
+   -- doğru biçimde -- hata fırlatıyor. Sonuç: bu dosyadaki DÖRT test
+   setup hatasıyla düşüyordu. Kusur ÜRÜNDE DEĞİL düzenektedir; ürünün
+   iki şablonu da (liquid.html, solid.html) units_constants.js'i
+   motor_viz_deck.js'ten ÖNCE yüklüyor (`sablon_units_once` = 1/1) ve
+   bu sıra ayrıca tests/test_d27_arayuz_a2.py'de bekçiye bağlandı. */
+for (const f of ['units_constants.js', 'i18n.js', 'i18n_charts.js',
+                 'motor_viz_deck.js']) {
     vm.runInContext(fs.readFileSync(ROOT + '/' + f, 'utf8'), sandbox, { filename: f });
 }
 

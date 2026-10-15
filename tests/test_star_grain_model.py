@@ -17,6 +17,7 @@ pytest.importorskip('shapely')
 from shapely.geometry import Point
 
 from hrma.engines.solid_rocket_engine import SolidRocketEngine
+from hrma.utils.numeric_compat import trapezoid
 
 
 def _make(star_points=6, star_radius=15.0, **kw):
@@ -104,7 +105,7 @@ class TestMassConservationAllGrains:
             chamber_diameter=100, grain_length=500, core_diameter=30,
             chamber_pressure=40)
         curve = m.calculate_thrust_curve()
-        burned = np.trapz(curve['mass_flow'], curve['time'])
+        burned = trapezoid(curve['mass_flow'], curve['time'])
         available = m._propellant_volume() * m.rho_p
         assert available > 0
         # dt ayrıklaştırması + son adım kuyruğu için %2 tolerans

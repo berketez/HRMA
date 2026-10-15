@@ -120,6 +120,10 @@ def api_projects_load(name):
         'name': doc.get('name', name),
         'project': doc,
         'warnings': warnings,
+        # V3 KK 2. tur (REL D-5): aynı uyarıların makine kodu + parametresi
+        # (``warnings`` ile aynı sıra, birebir). Arayüz metni i18n
+        # anahtarıyla kurar (EN = TR); düz liste geriye uyumlu kalır.
+        'warning_records': project_store.load_warning_records(doc),
         'estimated': [],  # hiçbir alan tahminle doldurulmadı
     })
 

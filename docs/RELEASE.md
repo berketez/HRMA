@@ -11,7 +11,7 @@ The version lives in **one** place:
 
 ```python
 # hrma/__init__.py
-__version__ = "2.4.6"
+__version__ = "3.0.0"
 ```
 
 Every build script (`build_mac_app.sh`, `build_dmg.sh`,
@@ -133,6 +133,14 @@ applications on that platform.
 
 ## Version History (recent)
 
+- **v3.0.0** (2026-10-15): first release after 2.6.26 — the work announced in the application
+  as "2.6.27 (in development)" ships here; a separate 2.6.27 was never
+  published. Validity limits on published numbers and withheld verdicts
+  (thermal, structural), hybrid N₂O liquid inlet state, NASA CEA APCP
+  thermochemistry, CAD from the analysis geometry, detailed offline
+  launch-site map, security hardening. Details: `CHANGELOG.md` (TR + EN)
+  and `packaging/release_notes_v3.0.0.md`.
+- **v2.6.26 / v2.6.25 / v2.6.2**: see `packaging/release_notes_v*.md`.
 - **v2.4.6**: comparative analysis panel, Leckner gas-emissivity
   radiation, NHNE injector fallback fixes, real pintle/swirl cross-section
   drawings, warning panel in the UI, documentation overhaul, dead-route
@@ -147,6 +155,11 @@ applications on that platform.
 
 Release notes for shipped versions are kept in
 `packaging/release_notes_v*.md`.
+From v3.0.0 on, the cumulative change log is `CHANGELOG.md` at the
+repository root. The version gate (`packaging/release_gate.sh` step 1/10 and
+`.github/workflows/release.yml`) also requires the top entry of
+`hrma/data/changelog.json` and the file `packaging/release_notes_v<X.Y.Z>.md`
+to carry the same version.
 
 ## Support
 

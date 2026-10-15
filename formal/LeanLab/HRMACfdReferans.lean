@@ -513,6 +513,92 @@ theorem chokedMassFlow_derivation {γ P0 T0 R : ℝ} (hγ : 1 < γ)
       rw [hRq, hTq]]
   field_simp
 
+/-! ## 5. Kayma duvarı yıldız basıncı — iki-genişleme (TRRS) biçimi
+
+ÖH D37 A3a cfd-kok-a, F-05 (defter P6B1-10). `hrma/cfd/euler_core.py:
+wall_star_pressure_trrs`:
+
+```python
+taban = 1.0 + 0.5 * (g - 1.0) * np.asarray(M_n, dtype=float)
+return p * np.where(taban > 0.0, taban, 0.0) ** (2.0 * g / (g - 1.0))
+```
+
+Aynalanmış Riemann probleminin (sol `(ρ, u_n, p)`, sağ `(ρ, −u_n, p)`)
+iki-genişleme yaklaşımı (Toro, 3. bs., §4.3.2): `p* = p·[1 + (γ−1)M_n/2]^
+(2γ/(γ−1))`. Eski akustik biçim `p·(1 + γ·M_n)` idi ve `M_n < −1/γ`'da
+negatife geçiyordu (duvar emme uygular; D23 ölçümü). Burada iki şey
+kilitlenir: (i) TRRS biçimi vakum sınırına kadar KESİN POZİTİFTİR, (ii)
+akustik biçimin negatife geçtiği bölge tam olarak `γ·M_n < −1`'dir.
+Bölme içeren hipotezler çarpım biçiminde yazılır (`(γ−1)·M > −2` ⟺
+`M > −2/(γ−1)`, çünkü `γ > 1`).
+-/
+
+/-- TRRS duvar yıldız basıncı — kodun `p * taban ** (2g/(g−1))` ifadesi
+(`taban > 0` dalı). -/
+noncomputable def wallStarTR (γ p M : ℝ) : ℝ :=
+  p * (1 + (γ - 1) / 2 * M) ^ (2 * γ / (γ - 1))
+
+/-- Eski akustik biçim `p·(1 + γ·M)` (yalnız kıyas sütunu). -/
+def wallStarAcoustic (γ p M : ℝ) : ℝ := p * (1 + γ * M)
+
+/-- Taban `1 + (γ−1)M/2`, `(γ−1)·M > −2` iken pozitiftir. -/
+lemma wallStarTR_base_pos {γ M : ℝ} (hM : -2 < (γ - 1) * M) :
+    0 < 1 + (γ - 1) / 2 * M := by
+  have h : (γ - 1) / 2 * M = ((γ - 1) * M) / 2 := by ring
+  rw [h]
+  linarith
+
+/--
+**POZİTİFLİK.** `γ > 1`, `p > 0` ve `M > −2/(γ−1)` (çarpım biçimi
+`(γ−1)·M > −2`) iken TRRS yıldız basıncı kesin pozitiftir. Kararlı-hâl
+lülesinde duvar `M_n`'i sıfıra yakındır (ölçülen en negatif −0,252, sınır
+γ = 1,2'de −10); yani kod hiçbir gerçek koşuda vakum dalına düşmez ve
+duvar asla EMMEZ — eski biçimin `M_n < −1/γ` kusuru kapanmıştır.
+-/
+theorem wallStarTR_pos {γ p M : ℝ} (hγ : 1 < γ) (hp : 0 < p)
+    (hM : -2 < (γ - 1) * M) : 0 < wallStarTR γ p M := by
+  unfold wallStarTR
+  have hb : 0 < 1 + (γ - 1) / 2 * M := wallStarTR_base_pos hM
+  exact mul_pos hp (Real.rpow_pos_of_pos hb _)
+
+/-- Durgun duvarda (`M = 0`) TRRS basıncı statik basıncın kendisidir. -/
+theorem wallStarTR_at_rest {γ : ℝ} (p : ℝ) : wallStarTR γ p 0 = p := by
+  unfold wallStarTR
+  simp
+
+/-- Vakum sınırında (`(γ−1)·M = −2`) taban sıfırdır ve üs pozitif
+olduğundan yıldız basıncı TAM sıfırdır — kodun `np.where(taban > 0, taban,
+0)` kırpması bu değeri korur, negatife geçmez. -/
+theorem wallStarTR_at_vacuum {γ p M : ℝ} (hγ : 1 < γ)
+    (hM : (γ - 1) * M = -2) : wallStarTR γ p M = 0 := by
+  unfold wallStarTR
+  have hb : 1 + (γ - 1) / 2 * M = 0 := by
+    have h : (γ - 1) / 2 * M = ((γ - 1) * M) / 2 := by ring
+    rw [h, hM]
+    norm_num
+  have he : 2 * γ / (γ - 1) ≠ 0 := by
+    have h1 : (0:ℝ) < γ - 1 := by linarith
+    positivity
+  rw [hb, Real.zero_rpow he, mul_zero]
+
+/--
+**ESKİ KUSURUN TAM BÖLGESİ.** `p > 0` iken akustik biçim `p·(1 + γM)`
+negatiftir ⟺ `γ·M < −1` (yani `M < −1/γ`). D23 ölçümü (γ = 1,2,
+M_n = −1,25/γ → −5,0·10⁴ Pa) bu bölgenin içindedir; TRRS orada pozitiftir
+(`wallStarTR_pos`, çünkü −1,25 > −2).
+-/
+theorem wallStarAcoustic_neg_iff {γ p M : ℝ} (hp : 0 < p) :
+    wallStarAcoustic γ p M < 0 ↔ γ * M < -1 := by
+  unfold wallStarAcoustic
+  constructor
+  · intro h
+    by_contra hc
+    push_neg at hc
+    have : 0 ≤ p * (1 + γ * M) := mul_nonneg hp.le (by linarith)
+    linarith
+  · intro h
+    exact mul_neg_of_pos_of_neg hp (by linarith)
+
 end HRMA
 
 /-! ## Denetim: ispatların hangi aksiyomlara dayandığı
@@ -540,3 +626,7 @@ end HRMA
 #print axioms HRMA.hllcStar_momentum_rh
 #print axioms HRMA.hllcStar_energy_rh
 #print axioms HRMA.chokedMassFlow_derivation
+#print axioms HRMA.wallStarTR_pos
+#print axioms HRMA.wallStarTR_at_rest
+#print axioms HRMA.wallStarTR_at_vacuum
+#print axioms HRMA.wallStarAcoustic_neg_iff

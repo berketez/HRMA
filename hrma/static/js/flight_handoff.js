@@ -101,14 +101,40 @@
         });
     }
 
-    /* launch_site tarafı: son köprülenen aracı oku (yoksa null). */
-    function readLast() {
+    /* launch_site tarafı: son köprülenen aracı oku (yoksa null).
+     *
+     * ÖH D21 / P12aB4-22 — ÖLÇÜLEN KUSUR: bu fonksiyonun ürün tarafında HİÇ
+     * çağrısı yoktu; launch_site.html depolama anahtarını KENDİ yeniden
+     * bildirip (`var HANDOFF_KEY = ...`) doğrudan localStorage'a gidiyordu —
+     * aynı anahtarın iki kaynağı, biri değişirse köprü sessizce kopardı.
+     *
+     * Çağrıya bağlanabilmesi için tek eksik parça durum ayrımıydı: eski gövde
+     * "kayıt yok" ile "kayıt var ama çözülemedi" durumlarının İKİSİNDE de
+     * null dönüyordu ve tüketici bozuk kaydı "henüz hesap yapılmamış" diye
+     * raporlardı (sessiz yedek). `out` verilirse `out.status` doldurulur:
+     *   'empty'      — kayıt yok (temiz durum)
+     *   'unreadable' — kayıt var ama okunamadı/çözülemedi (depolama kapalı
+     *                  olması da buraya girer: "okunamadı" bilgisi doğrudur)
+     *   'ok'         — kayıt çözüldü
+     * Dönüş sözleşmesi değişmedi: kayıt ya da null.
+     */
+    function readLast(out) {
+        var durum = 'empty', kayit = null;
         try {
             var raw = window.localStorage.getItem(STORAGE_KEY);
-            return raw ? JSON.parse(raw) : null;
+            if (raw) {
+                try {
+                    kayit = JSON.parse(raw);
+                    durum = kayit ? 'ok' : 'unreadable';
+                } catch (e) {
+                    durum = 'unreadable';
+                }
+            }
         } catch (e) {
-            return null;
+            durum = 'unreadable';
         }
+        if (out) out.status = durum;
+        return durum === 'ok' ? kayit : null;
     }
 
     /* Köprüyü temizle (yeni saha/araç seçilince entegratör çağırabilir). */

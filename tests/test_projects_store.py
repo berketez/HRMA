@@ -282,9 +282,22 @@ class TestSizeLimit:
         assert not os.path.exists(os.path.join(store.projects_dir(), 'devasa.hrma'))
 
     def test_under_limit_accepted(self, proj_dir):
+        """ÇEVRİLDİ (ÖH D22 · P13B1-10): gövde İDDİASIZDI.
+
+        Üst sınırın ALTINDAKİ yük "kabul edildi" diyordu ama hiçbir şey
+        sınamıyordu: ``save_project`` istisna atmadan hiçbir şey YAZMASA
+        da test yeşil kalıyordu (kardeş test — sınırın üstü — dosyanın
+        YOKLUĞUNU sınıyor; bu test dosyanın VARLIĞINI sınamıyordu).
+        """
         payload = make_payload()
         payload['inputs']['ui_state'] = {'big': 'x' * 1000}
         store.save_project('normal boyut', payload)
+        yol = os.path.join(store.projects_dir(), 'normal boyut.hrma')
+        assert os.path.exists(yol), 'sınır altındaki yük kaydedilmedi'
+        with open(yol, encoding='utf-8') as f:
+            geri = json.load(f)
+        assert geri['inputs']['ui_state']['big'] == 'x' * 1000, (
+            'kaydedilen yük sessizce kırpılmış')
 
 
 # --- Listeleme --------------------------------------------------------------

@@ -1,6 +1,6 @@
 # HRMA Kurulum Paketleri Üretimi
 
-Uzaytek ekibi için tek tıkla kurulan paketler. Her iki paket de **internet
+Tek tıkla kurulan paketler. Her iki paket de **internet
 gerektirmez** — Python 3.12 runtime'ı ve TÜM bağımlılıklar (build123d/OCC,
 CoolProp, rocketcea, kaleido...) gömülüdür. Çıktılar `dist/` dizinine düşer
 (git'e girmez).

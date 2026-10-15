@@ -1,0 +1,3 @@
+# Bu dizindeki belgeler depoya KONMAZ (gerekçe: MANIFEST.md — telif + boyut).
+# fetch_sources.sh ile yeniden indirilir; özetler MANIFEST.md tablosundadır.
+*.pdf

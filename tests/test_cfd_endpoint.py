@@ -722,12 +722,141 @@ class TestIcTutarlilik:
     def test_yakinsayan_kosuda_korunum_butcesi_kapali(self, yanit_iyi):
         """Bu bir DOĞRULAMA değil, tutarlılık bekçisidir: çözücü yakınsadı
         dediyse kütle bütçesi de kapanmış olmalı (aksi hâlde hüküm ile
-        ölçüm çelişirdi)."""
+        ölçüm çelişirdi).
+
+        KAPSAM BEYANI — ÖH Faz B-4, defter P6B1-04 (orta). ``< 1e-6``
+        eşiği bir BÜYÜKLÜK kapısıdır, sayının KİMİN olduğunu sormaz:
+        nihai bütçe çağrısı ``slopes=_son_egimler`` ile yapılır
+        (``steady.py:877-881``) ve sınırlayıcı dondurulmuşsa bu, şemanın
+        değil DONMUŞ operatörün bütçesidir — P06 ölçümünde 1,09e5 kat
+        iyimser. Bu bekçi o gün de yeşil kalırdı. Kimlik ekseni iki yeni
+        bekçiye taşındı: :meth:`test_butce_semanin_operatorundendir`
+        (yeşil, fail-closed) ve :meth:`test_butce_kunyesi_hangi_operator`
+        (bugün xfail(strict))."""
         cfd = yanit_iyi['cfd']
         assert cfd['converged'] is True, cfd['convergence_basis']
         assert cfd['budget']['mass_balance_rel'] < 1e-6
         assert cfd['budget']['energy_balance_rel'] < 1e-6
         assert cfd['budget']['mass_flow_in_kg_s'] > 0.0
+
+    # -----------------------------------------------------------------
+    # ÖH FAZ B-4 — "YAYIMLANAN SAYI KİMİN?" (defter P6B1-04)
+    #
+    # ÖLÇÜM (2026-08-27, bu depo, Flask test client):
+    #   coarse  (60×12) : converged=True, it=2083, limiter_frozen_at_iter=
+    #                     None, freeze_count=0, mass_rel=1,65e-11
+    #   standard(120×24): converged=True, it=4505, limiter_frozen_at_iter=
+    #                     None, freeze_count=0, mass_rel=2,70e-11
+    # Yani P06'nın ölçtüğü "standard koşusu 1323'te donduruyor" davranışı
+    # BUGÜN CANLI DEĞİL (çözücü o günden beri değişti: V3 tetik/hüküm
+    # ayrımı + karakteristik giriş BC). Kanal duruyor, kapı yoktu: bu iki
+    # bekçi kapıyı koyar — biri sayıyı fail-closed çaprazlar, öteki
+    # künyeyi ister.
+    # -----------------------------------------------------------------
+
+    def test_butce_semanin_operatorundendir(self, yanit_iyi, yerel_cozum,
+                                            kontur_iyi):
+        """Yayımlanan korunum bütçesi, ŞEMANIN canlı operatörünün bütçesi
+        olmalı (fail-closed; dondurma ateşlerse KIRMIZI olur).
+
+        ÖH Faz B-4 — defter P6B1-04 (orta). Bekçi, ucun yayımladığı
+        ``budget.mass_balance_rel`` / ``energy_balance_rel`` sayılarını
+        ucun DIŞINDA, aynı ızgarayla ve ŞEMANIN kendi (canlı minmod)
+        eğimleriyle yeniden kurar. Bugün ikisi BİREBİR aynıdır çünkü
+        dondurma ateşlemiyor (``limiter_frozen_at_iter is None``);
+        dondurma ateşlediği gün nihai bütçe donmuş operatörün olur ve bu
+        bekçi kırmızıya döner — kanal artık kapılıdır.
+
+        Not: ``yerel_cozum`` ucun kendi ızgara kuralını (``_cfd_build_grid``)
+        çağırır; burada ızgara aritmetiği DEĞİL, bütçenin hangi operatörden
+        okunduğu ölçülür.
+
+        EŞİK GEREKÇESİ (ölçüldü 2026-08-27): ürünün bugünkü koşusunda iki
+        sayı birebir aynı (oran 1,000000×); dondurmanın ateşlediği kontrol
+        koşusunda (``line_implicit_j`` + erken tetik, donma 434.
+        iterasyonda) yayımlanan 9,872e-15 ↔ şema 4,550e-08, yani
+        **4,61e6 kat**. ``rel=1e-6`` bu iki mertebenin ortasında değil,
+        gürültü tarafındadır: kusur sinyali eşiğin 4,6 milyar katıdır.
+        """
+        from hrma.app import _cfd_build_grid
+        from hrma.cfd.euler_core import (precompute_geometry,
+                                         prim_to_cons_axisym, residual_axisym)
+
+        cfd = yanit_iyi['cfd']
+        grid, _z, _r = _cfd_build_grid(
+            np.asarray(kontur_iyi['points'], dtype=float),
+            cfd['grid']['ni'], cfd['grid']['nj'])
+        f = yerel_cozum['fields']
+        U = prim_to_cons_axisym(f['rho_kg_m3'], f['u_z_m_s'], f['u_r_m_s'],
+                                f['pressure_Pa'], GAZ['gamma'])
+        # slopes BİLEREK verilmez: soru "şemanın kendi eğimleriyle ne
+        # çıkar?"dır (ürün burada _son_egimler'i geçiriyor).
+        _r_final, aux = residual_axisym(
+            U, grid, GAZ['gamma'], GAZ['R_J_per_kgK'], GAZ['P0_Pa'],
+            GAZ['T0_K'], Pb=None, second_order=True,
+            geom=precompute_geometry(grid))
+        m_in, m_out = aux['mass_flow_in_kg_s'], aux['mass_flow_out_kg_s']
+        e_in, e_out = aux['energy_flux_in_W'], aux['energy_flux_out_W']
+        sema_mass = abs(m_in - m_out) / max(abs(m_in), 1e-300)
+        sema_energy = abs(e_in - e_out) / max(abs(e_in), 1e-300)
+        b = cfd['budget']
+        assert sema_mass == pytest.approx(b['mass_balance_rel'], rel=1e-6), (
+            f"yayımlanan kütle bütçesi {b['mass_balance_rel']:.6e}, şemanın "
+            f"canlı operatörüyle {sema_mass:.6e} "
+            f"(oran {sema_mass / max(b['mass_balance_rel'], 1e-300):.4g}×; "
+            f"limiter_frozen_at_iter={cfd['limiter_frozen_at_iter']!r}, "
+            f"freeze_count={cfd['limiter_freeze_count']!r}) — nihai bütçe "
+            "donmuş operatörden okunuyor (defter P6B1-04)")
+        assert sema_energy == pytest.approx(b['energy_balance_rel'],
+                                            rel=1e-6), (
+            f"yayımlanan enerji bütçesi {b['energy_balance_rel']:.6e}, "
+            f"şemanın canlı operatörüyle {sema_energy:.6e} (defter P6B1-04)")
+
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P6B1-04 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH D15 cfd-picard (OH-Z5-14) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/cfd/steady.py:1483 "OPERATÖR KÜNYESİ (ÖH
+    # defter P6B1-04)"; hrma/app.py:16145 "OPERATÖR KİMLİĞİ (ÖH
+    # defter P6B1-04)"
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P6B1-04 — ürün
+    # kusuru: nihai bütçe/kalıntı hangi operatörden okunduğunu beyan
+    # etmiyor; dondurma yalnız "oldu mu" olarak görünüyor. Faz B
+    # ürün onarımı YAPMAZ; bekçi borç imiyle yazılır, onarım dalgası
+    # bu imi kaldırır.
+    def test_butce_kunyesi_hangi_operator(self, yanit_iyi):
+        """Bütçe künyesi, sayının hangi operatörden geldiğini SÖYLEMELİ.
+
+        ÖH Faz B-4 — defter P6B1-04 (orta). Uç ``limiter_frozen_at_iter``
+        ve ``limiter_freeze_count`` yayımlıyor, yani dondurmanın OLDUĞU
+        görünüyor; ama ``budget._basis``ın tamamı akı tanımını anlatıyor ve
+        sayının donmuş eğimlerle mi canlı şemayla mı ölçüldüğünü hiçbir
+        yerde söylemiyor. ``convergence_basis`` ise dondurma dalında
+        "şema minmod" diyerek TERSİNİ ima ediyor (``steady.py:942-944``).
+        Ölçüldü (2026-08-27): ``budget._basis`` içinde "dondur"/"donmuş"/
+        "eğim"/"slope"/"frozen" geçen tek kelime YOK.
+
+        Kabul: künye ya sayının operatörünü adlandırır ("nihai bütçe
+        yürüyüşün son eğim sisteminden ölçüldü; dondurma varsa donmuş
+        operatörün bütçesidir") ya da ayrı bir alan (ör.
+        ``budget.slope_state``) bunu makine-okur biçimde yayımlar.
+        """
+        b = yanit_iyi['cfd']['budget']
+        metin = ' '.join(str(v) for v in b.values()).lower()
+        anahtarlar = ('dondur', 'donmuş', 'donmus', 'frozen', 'eğim',
+                      'egim', 'slope')
+        assert any(k in metin for k in anahtarlar), (
+            "budget künyesi nihai bütçenin hangi eğim sisteminden "
+            "ölçüldüğünü söylemiyor (aranan: %s); dondurma yalnız "
+            "limiter_frozen_at_iter=%r olarak görünüyor ve hüküm cümlesi "
+            "aynı koşuda 'şema minmod' diyor"
+            % (', '.join(anahtarlar), yanit_iyi['cfd']['limiter_frozen_at_iter']))
 
     def test_sureler_pozitif_ve_siralı(self, yanit_iyi):
         cfd = yanit_iyi['cfd']
@@ -1149,6 +1278,17 @@ class TestCozunurlukBeyani:
 
 class TestYakinsamayanKosu:
     def test_yakinsamayan_kosu_200_ve_durust(self, yanit_yakinsamayan):
+        """Oturmayan koşu 200 döner, sonucu gizlemez, gerekçe verir.
+
+        KAPSAM BEYANI — ÖH Faz B-4, defter P6B1-01 (yüksek).
+        ``'OTURMADI' in gerekce`` iddiası CÜMLEDE bir kelime arar, o
+        kelimenin DOĞRU BACAĞA yazıldığını sormaz. Ürün cümlesi iki ayrı
+        bacak için hüküm yazar ama ikisini de tek değişkenden
+        (``settled_ok`` = üçünün VE'si, ``steady.py:923``) okur; bacaklardan
+        biri oturmuşsa o da "OTURMADI" ilan edilir. Doğru sayılar
+        (``settle_bands``) çözücüde VARDIR ve kendi künyesi "hangisinin
+        engellediği buradan OKUNUR" der — ama uca hiç taşınmaz. İki eksen
+        aşağıdaki iki bekçiye taşındı (ikisi de bugün xfail(strict))."""
         cfd = yanit_yakinsamayan['cfd']
         assert cfd['converged'] is False
         # Sonuç GİZLENMEZ: alanlar ve bütçe yine gelir.
@@ -1158,6 +1298,134 @@ class TestYakinsamayanKosu:
         gerekce = cfd['convergence_basis']
         assert 'OTURMADI' in gerekce or 'DIVERGED' in gerekce
         assert cfd['iterations'] == cfd['max_iterations']
+
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P6B1-01 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH D15 cfd-picard (OH-Z5-14) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/cfd/steady.py:1424 'settle_bands' bloğu;
+    # hrma/app.py:16102-16110 bantlar uca taşınıyor
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P6B1-01 — ürün
+    # kusuru: bacak-bacak oturma bantları (settle_bands) uca
+    # taşınmıyor, dolayısıyla cümlenin bacak hükmü istemcide
+    # denetlenemiyor. Faz B ürün onarımı YAPMAZ; bekçi borç imiyle
+    # yazılır, onarım dalgası bu imi kaldırır.
+    def test_settle_bantlari_ucta_yayimlanir(self, yanit_yakinsamayan):
+        """Cümlenin bacak hükmü, uçtaki SAYILARLA denetlenebilir olmalı.
+
+        ÖH Faz B-4 — defter P6B1-01 (yüksek). Çözücü üç bacağın bandını
+        (``mass_flow_in`` / ``mass_flow_out`` / ``throat_mach``) ve
+        etkin ``settle_tol``ü hesaplıyor; ``settle_bands._basis`` bunu
+        açıkça "hangisinin engellediği buradan OKUNUR" diye ilan ediyor
+        (``steady.py:1091-1096``). Uç ise yalnız CÜMLEYİ taşıyor
+        (``app.py:9990``): istemci "boğaz Mach bandı OTURMADI" cümlesini
+        doğrulayamaz, çünkü boğaz Mach bandının sayısı yanıtta YOKTUR.
+        Ölçüldü (2026-08-27): ``cfd`` bloğunun 30 anahtarı içinde
+        ``settle_bands`` YOK; ``inputs`` yalnız ``settle_tol``ü yankılıyor.
+
+        Kabul: ``cfd`` bloğu bacak bantlarını (çözücünün ürettiği
+        değerlerle birebir) yayımlar.
+        """
+        cfd = yanit_yakinsamayan['cfd']
+        assert 'settle_bands' in cfd, (
+            'uç bacak bantlarını yayımlamıyor — "debi bandı OTURMADI, '
+            'boğaz Mach bandı OTURMADI" cümlesi istemcide denetlenemez '
+            '(yayımlanan anahtarlar: %s)' % sorted(cfd))
+        bantlar = cfd['settle_bands']
+        for bacak in ('mass_flow_in', 'mass_flow_out', 'throat_mach'):
+            assert bacak in bantlar and isinstance(
+                bantlar[bacak], (int, float)), (
+                    f'settle_bands.{bacak} sayısal olarak yayımlanmıyor')
+
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P6B1-01 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH D15 cfd-picard (OH-Z5-14) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/cfd/steady.py:1118-1125 "BACAK BACAK
+    # OTURMA (ÖH defter P6B1-01): hüküm ÜÇ bandın VE'sidir ama ..."
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P6B1-01 — ürün
+    # kusuru: iki bacağın hükmü tek VE'den (settled_ok) okunuyor,
+    # oturmuş bacak da "OTURMADI" ile suçlanıyor. Faz B ürün onarımı
+    # YAPMAZ; bekçi borç imiyle yazılır, onarım dalgası bu imi
+    # kaldırır.
+    def test_bacak_hukmu_oturmus_bacagi_suclamaz(self, kontur_iyi):
+        """Cümledeki her bacak hükmü, O BACAĞIN kendi bandından gelmeli.
+
+        ÖH Faz B-4 — defter P6B1-01 (yüksek). Cümlenin üreticisi
+        çözücüdür ve uç onu AYNEN taşır (``app.py:9990``; taşımanın
+        bit-aynılığı bu dosyadaki ``test_cozum_uc_disinda_bit_aynisiyla_
+        uretilebiliyor`` ailesinde ayrıca kilitli), bu yüzden vaka ucun
+        KENDİ ızgara kuralıyla (``_cfd_build_grid``) kurulup çözücüye
+        doğrudan veriliyor: uçtan ``settle_tol`` geçirilemiyor (girdi
+        sözleşmesinde yok), oysa kusur tam da o eşiğin bacak bantları
+        ARASINA düştüğü koşuda görünür.
+
+        VAKA KURULUMU (P06 B1-repro-01'in yöntemi): önce erişilemez
+        ``settle_tol`` ile bantlar ölçülür, sonra en küçük ve en büyük
+        bandın GEOMETRİK ORTASI eşik olarak verilip aynı yörünge yeniden
+        koşulur — böylece en az bir bacak oturmuş, en az biri oturmamış
+        olur. Ölçüldü (2026-08-27, coarse 60×12, 1000 iterasyon):
+        settle_tol 1,6443e-05; ``throat_mach`` bandı 3,592e-06 (OTURDU),
+        ``mass_flow_in`` 1,630e-05 (OTURDU), ``mass_flow_out`` 7,527e-05
+        (OTURMADI) — ürün cümlesi buna rağmen "boğaz Mach bandı OTURMADI"
+        yazıyor.
+        """
+        from hrma.app import CFD_RESOLUTION_LEVELS, _cfd_build_grid
+        from hrma.cfd.steady import solve_steady_axisym
+
+        ni, nj = CFD_RESOLUTION_LEVELS['coarse']
+        grid, _z, _r = _cfd_build_grid(
+            np.asarray(kontur_iyi['points'], dtype=float), ni, nj)
+        ortak = dict(P0=GAZ['P0_Pa'], T0=GAZ['T0_K'], gamma=GAZ['gamma'],
+                     R=GAZ['R_J_per_kgK'], Pb=None, max_iters=1000,
+                     tol_res=1e-14)
+        bacaklar = ('mass_flow_in', 'mass_flow_out', 'throat_mach')
+
+        # (1) Bantları erişilemez eşikle ölç (hüküm tetiklenmesin).
+        olcum = _sessiz(solve_steady_axisym, grid, settle_tol=1e-30, **ortak)
+        b0 = olcum['settle_bands']
+        tol = float(np.sqrt(min(b0[a] for a in bacaklar)
+                            * max(b0[a] for a in bacaklar)))
+        # (2) Aynı yörünge, eşik bantların ARASINDA.
+        sonuc = _sessiz(solve_steady_axisym, grid, settle_tol=tol, **ortak)
+        bant = sonuc['settle_bands']
+        oturan = {a: bant[a] < tol for a in bacaklar}
+        assert any(oturan.values()) and not all(oturan.values()), (
+            f'vaka bacakları ayırmıyor (bantlar {bant}, tol {tol:.4e}) — '
+            'bekçi yeniden kalibre edilmeli')
+
+        m = re.search(r'debi bandı \(giriş/çıkış, son \d+ iter\) '
+                      r'(OTURDU|OTURMADI), boğaz Mach bandı (OTURDU|OTURMADI)',
+                      sonuc['convergence_basis'])
+        assert m, ('hüküm cümlesinin bacak biçimi değişmiş — bekçi '
+                   'güncellenmeli: %s' % sonuc['convergence_basis'])
+        debi_hukmu, mach_hukmu = m.group(1), m.group(2)
+        debi_gercek = ('OTURDU' if (oturan['mass_flow_in']
+                                    and oturan['mass_flow_out'])
+                       else 'OTURMADI')
+        mach_gercek = 'OTURDU' if oturan['throat_mach'] else 'OTURMADI'
+        assert mach_hukmu == mach_gercek, (
+            f"boğaz Mach bacağı: cümle {mach_hukmu}, bandın kendisi "
+            f"{bant['throat_mach']:.4e} {'<' if oturan['throat_mach'] else '>='}"
+            f" settle_tol {tol:.4e} → {mach_gercek}. Hüküm iki bacağı tek "
+            f"VE'den (settled_ok) okuyor ve oturmuş bacağı suçluyor. "
+            f"Cümle: {sonuc['convergence_basis']}")
+        assert debi_hukmu == debi_gercek, (
+            f"debi bacağı: cümle {debi_hukmu}, bantlar giriş "
+            f"{bant['mass_flow_in']:.4e} / çıkış {bant['mass_flow_out']:.4e}, "
+            f"settle_tol {tol:.4e} → {debi_gercek}")
 
     def test_oturmamanin_sebebi_ACIK_butcedir(self, yanit_yakinsamayan):
         """Vakanın kendisi de beyanlı olmalı: koşu bir fizik kazasından
@@ -1485,3 +1753,544 @@ class TestIterasyonButcesi:
             np.asarray(cfd['wall_pressure']['pressure_Pa'], dtype=float),
             np.asarray(yanit_iyi['cfd']['wall_pressure']['pressure_Pa'],
                        dtype=float), rtol=0, atol=0)
+
+
+# ===========================================================================
+# §11 — VİSKOZ KİP (parti 40): opt-in, kapıları, beyanları, iki kaynak
+# ===========================================================================
+#
+# NE KİLİTLENİR
+#   1. OPT-IN BİT-AYNILIĞI: `viscous` bloğu yoksa/kapalıysa koşu bugünkü
+#      Euler yolunun bit-aynısıdır (duvar basıncı rtol=0 atol=0).
+#   2. UYDURMA VARSAYILAN YOK: `wall_thermal` eksikse 422, izotermalde
+#      `T_wall_K` + `T_wall_source` eksikse 422, adyabatikte T_wall_K 400,
+#      tanımsız türbülans 400. Her hata alanı ADIYLA söyler.
+#   3. y⁺ ROZETİ ÖLÇÜMDEN: rozet kodu yayımlanan bant kenarlarıyla ölçülen
+#      y⁺'ın KENDİSİNDEN yeniden üretilebilir; kenarlar deponun başka
+#      yerlerindeki değerlerle YAPISAL olarak bağlıdır (ikinci tanım yok).
+#   4. İKİ KAYNAK YAN YANA: h_g'nin Bartz ve CFD serileri AYNI eksende
+#      (ara değerleme YOK — z dizisi duvar ekseninin ta kendisi), ikisi de
+#      kaynak imiyle gelir ve fark alanı yayımlanan iki diziden yeniden
+#      hesaplanabilir.
+#   5. KÖPRÜ REDDİ YUTULMAZ: adyabatik koşuda h_g TANIMSIZDIR; uç köprünün
+#      cümlesini AYNEN taşır ve uydurma bir profil koymaz.
+#   6. SÜRTÜNME BİT-TUTARLI: blok wall_output.friction_thrust_loss'un
+#      doğrudan çağrısıyla anahtar anahtar aynıdır.
+#   7. VİSKOZ BÜTÇE: `viscous_energy_balance_rel` viskoz koşuda yayımlanır
+#      ve Euler biçiminden ÖLÇÜLEBİLİR ölçüde küçüktür (Euler biçimi viskoz
+#      koşuda EKSİK bir bütçedir — B1'in ölçtüğü kusur).
+#   8. RADYAL GEOMETRİ: alan bloğu düğüm yarıçaplarını taşır, satırları
+#      alan diliminin ta kendisidir ve `radial_uniform` bir ÖLÇÜMDÜR.
+#   9. DÜRÜSTLÜK ÇİZGİSİ: doğrulama beyanı "duvar ısı akısı DOĞRULANMADI"
+#      cümlesini taşır ve hiçbir yerde "deneyle doğrulandı" denmez.
+#
+# MUTASYON DÜŞÜNCESİ
+#   * `_cfd_y_plus_badge` hep 'wall_resolved' dönerse -> test_y_plus_rozeti_
+#     olculen_deger dendan_uretilebiliyor.
+#   * `wall_thermal` sessizce bir kipe düşerse -> test_viskoz_wall_thermal_
+#     eksikse_422.
+#   * Bartz serisi kendi ekseninde yayımlanıp ara değerlenirse ->
+#     test_bartz_ve_cfd_AYNI_eksende.
+#   * `viscous_energy_balance_rel` Euler alanının kopyası olursa ->
+#     test_viskoz_butce_euler_biciminden_AYRI.
+#   * Köprünün reddi yutulup boş profil konursa ->
+#     test_adiabatik_kosuda_hg_reddi_AYNEN_tasinir.
+
+VISKOZ_T_WALL = 1000.0
+VISKOZ_KAYNAK = 'test: bekçi vakası'
+
+
+def viskoz_blok(**degisiklik):
+    """İzotermal duvarlı laminer viskoz istek bloğu; None verilirse ÇIKARILIR."""
+    b = {'enabled': True, 'wall_thermal': 'isothermal',
+         'T_wall_K': VISKOZ_T_WALL, 'T_wall_source': VISKOZ_KAYNAK,
+         'turbulence': 'none'}
+    for k, v in degisiklik.items():
+        if v is None:
+            b.pop(k, None)
+        else:
+            b[k] = v
+    return b
+
+
+@pytest.fixture(scope='module')
+def yanit_viskoz(client, kontur_iyi):
+    """Laminer izotermal viskoz koşu (ölçüldü: ~13 s, 'coarse')."""
+    r = _sessiz(client.post, UC, json=govde(
+        nozzle_contour=kontur_iyi,
+        viscous=viskoz_blok(y_plus_target=1.0)))
+    assert r.status_code == 200, r.get_data(as_text=True)[:800]
+    return r.get_json()
+
+
+@pytest.fixture(scope='module')
+def yanit_viskoz_adiabatik(client, kontur_iyi):
+    """Adyabatik duvarlı viskoz koşu: h_g TANIMSIZ olan dal (~13 s)."""
+    r = _sessiz(client.post, UC, json=govde(
+        nozzle_contour=kontur_iyi,
+        viscous={'enabled': True, 'wall_thermal': 'adiabatic'}))
+    assert r.status_code == 200, r.get_data(as_text=True)[:800]
+    return r.get_json()
+
+
+class TestViskozOptIn:
+    """Viskoz kip AÇIK BİR SEÇİMDİR; kapalı yol bit-aynı kalır."""
+
+    def test_viskoz_bloksuz_kosu_enabled_false(self, yanit_iyi):
+        v = yanit_iyi['cfd']['viscous']
+        assert v['enabled'] is False
+        assert 'wall' not in v and 'thermal_profile' not in v
+        # Seçenekler ÇÖZÜCÜDEN gelir (uçta kopya liste yok)
+        from hrma.cfd.steady import TURBULENCE_MODELS
+        from hrma.cfd.viscous import WALL_THERMAL_MODES
+        assert v['turbulence_choices'] == list(TURBULENCE_MODELS)
+        assert v['wall_thermal_choices'] == list(WALL_THERMAL_MODES)
+
+    def test_viskoz_kapali_istek_bit_ayni(self, client, kontur_iyi,
+                                          yanit_iyi):
+        """`enabled: false` gönderen istek Euler koşusunun BİT-AYNISI."""
+        r = _sessiz(client.post, UC, json=govde(
+            nozzle_contour=kontur_iyi,
+            viscous={'enabled': False, 'wall_thermal': 'isothermal'}))
+        assert r.status_code == 200
+        cfd = r.get_json()['cfd']
+        assert cfd['viscous']['enabled'] is False
+        assert cfd['iterations'] == yanit_iyi['cfd']['iterations']
+        assert np.array_equal(
+            np.asarray(cfd['wall_pressure']['pressure_Pa'], dtype=float),
+            np.asarray(yanit_iyi['cfd']['wall_pressure']['pressure_Pa'],
+                       dtype=float))
+        # Euler koşusunda viskoz bütçe alanı YOKTUR (sıfır DEĞİL, None)
+        assert cfd['budget']['viscous_energy_balance_rel'] is None
+
+    def test_viskoz_wall_thermal_eksikse_422(self, client, kontur_iyi):
+        r = _sessiz(client.post, UC, json=govde(
+            nozzle_contour=kontur_iyi, viscous={'enabled': True}))
+        assert r.status_code == 422
+        j = r.get_json()
+        assert 'viscous.wall_thermal' in j['missing_fields']
+        gerekce = j['field_reasons']['viscous.wall_thermal']
+        assert 'NO DEFAULT' in gerekce
+        assert 'isothermal' in gerekce and 'adiabatic' in gerekce
+
+    def test_izotermal_iki_eslikcisi_de_zorunlu(self, client, kontur_iyi):
+        r = _sessiz(client.post, UC, json=govde(
+            nozzle_contour=kontur_iyi,
+            viscous=viskoz_blok(T_wall_K=None, T_wall_source=None)))
+        assert r.status_code == 422
+        eksik = r.get_json()['missing_fields']
+        assert 'viscous.T_wall_K' in eksik
+        assert 'viscous.T_wall_source' in eksik
+
+    def test_adiabatikte_T_wall_yasak(self, client, kontur_iyi):
+        r = _sessiz(client.post, UC, json=govde(
+            nozzle_contour=kontur_iyi,
+            viscous={'enabled': True, 'wall_thermal': 'adiabatic',
+                     'T_wall_K': 900.0}))
+        assert r.status_code == 400
+        j = r.get_json()
+        assert j['field'] == 'viscous.T_wall_K'
+        assert 'RESULT' in j['message']
+
+    def test_tanimsiz_turbulans_400(self, client, kontur_iyi):
+        r = _sessiz(client.post, UC, json=govde(
+            nozzle_contour=kontur_iyi,
+            viscous=viskoz_blok(turbulence='k_omega_sst')))
+        assert r.status_code == 400
+        j = r.get_json()
+        assert j['field'] == 'viscous.turbulence'
+        from hrma.cfd.steady import TURBULENCE_MODELS
+        for ad in TURBULENCE_MODELS:
+            assert ad in j['message']
+
+    def test_tanimsiz_wall_thermal_400(self, client, kontur_iyi):
+        r = _sessiz(client.post, UC, json=govde(
+            nozzle_contour=kontur_iyi,
+            viscous=viskoz_blok(wall_thermal='conjugate')))
+        assert r.status_code == 400
+        assert r.get_json()['field'] == 'viscous.wall_thermal'
+
+    def test_viscous_sozluk_degilse_400(self, client, kontur_iyi):
+        r = _sessiz(client.post, UC, json=govde(
+            nozzle_contour=kontur_iyi, viscous=True))
+        assert r.status_code == 400
+        assert r.get_json()['field'] == 'viscous'
+
+
+class TestViskozBeyanlari:
+    """Yanıttaki her viskoz sayı ÇÖZÜCÜNÜN ölçümü + BEYANI olmalı."""
+
+    def test_duvar_dizileri_tam_boyda_ve_JSON_yerli(self, yanit_viskoz):
+        cfd = yanit_viskoz['cfd']
+        v = cfd['viscous']
+        ni = cfd['grid']['ni']
+        w = v['wall']
+        for ad in ('z_m', 'r_m', 'area_m2', 'shear_Pa', 'heat_flux_W_m2',
+                   'temperature_K', 'cell_temperature_K', 'y_plus',
+                   'first_cell_m', 'normal_z', 'normal_r'):
+            dizi = w[ad]
+            assert isinstance(dizi, list) and len(dizi) == ni, ad
+            assert all(isinstance(x, float) for x in dizi), ad
+        # Duvar ekseni KESİN ARTAN (FEA köprüsünün sözleşmesi)
+        z = np.asarray(w['z_m'], dtype=float)
+        assert np.all(np.diff(z) > 0.0)
+        # İnceltme UYGULANMAZ: satır ni uzunluğunda, alan bloğu diliminden
+        # bağımsız (alan bloğu 'standard'ta inceltilir, duvar satırı asla).
+        assert 'not thinned' in w['_basis'] or 'NOT thinned' in w['_basis']
+
+    def test_duvar_normalleri_cozucunun_izgarasindan(self, yanit_viskoz,
+                                                     kontur_iyi):
+        """normal_z/_r ızgaranın 2π'li yüz vektörünün birim halidir."""
+        from hrma.app import _cfd_build_grid
+        cfd = yanit_viskoz['cfd']
+        grid, _z, _r = _cfd_build_grid(
+            np.asarray(kontur_iyi['points'], dtype=float),
+            cfd['grid']['ni'], cfd['grid']['nj'])
+        yuz = np.asarray(grid.face_j[:, -1], dtype=float)
+        alan = np.hypot(yuz[:, 0], yuz[:, 1])
+        nz = np.asarray(cfd['viscous']['wall']['normal_z'], dtype=float)
+        nr = np.asarray(cfd['viscous']['wall']['normal_r'], dtype=float)
+        assert np.allclose(nz, yuz[:, 0] / alan, rtol=1e-12, atol=0.0)
+        assert np.allclose(nr, yuz[:, 1] / alan, rtol=1e-12, atol=0.0)
+        assert np.allclose(np.hypot(nz, nr), 1.0, rtol=0, atol=1e-12)
+
+    def test_surtunme_iki_tanimi_izgarasiz_kurulabiliyor(self, yanit_viskoz):
+        """Yayımlanan normal + τ_w + alan ile SALT KAYMA biçimi ızgarasız
+        hesaplanabilir ve bloğun kendi sayısıyla örtüşür (B1'in devir
+        kaleminin ürün karşılığı — kaydedilmiş JSON'dan hesap)."""
+        v = yanit_viskoz['cfd']['viscous']
+        w = v['wall']
+        tau = np.asarray(w['shear_Pa'], dtype=float)
+        nr = np.asarray(w['normal_r'], dtype=float)
+        alan = np.asarray(w['area_m2'], dtype=float)
+        assert float(np.sum(tau * nr * alan)) == pytest.approx(
+            v['friction']['friction_force_tangential_N'], rel=1e-12)
+
+    def test_tasinim_beyani_kaynagiyla_geliyor(self, yanit_viskoz):
+        tr = yanit_viskoz['cfd']['viscous']['transport']
+        assert isinstance(tr, dict) and tr
+        kaynak = tr.get('sources') or {}
+        # μ, cp, Pr: hangisinin nereden geldiği ADLA durur
+        for ad in ('viscosity', 'cp', 'prandtl'):
+            assert kaynak.get(ad) in ('repo_chain', 'caller'), ad
+
+    def test_dogrulama_beyani_DENEYLE_DOGRULANDI_demiyor(self, yanit_viskoz):
+        v = yanit_viskoz['cfd']['viscous']
+        metin = v['validation_basis']
+        assert 'NOT VALIDATED' in metin
+        assert 'RESOLUTION result' in metin
+        assert 'Back, Massier & Gier 1964' in metin
+        assert 'nothing here may be read as ' in metin
+        # DÜRÜSTLÜK KİLİDİ: 'validated' kelimesinin viskoz bloktaki HER
+        # geçişi bir OLUMSUZLAMANIN içinde olmalı. Bir gün biri "validated
+        # against Back 1964" gibi olumlu bir cümle yazarsa bu bekçi kırmızıya
+        # düşer — bugün ölçülen geçişlerin hepsi olumsuzdur.
+        ham = json.dumps(v)
+        olumsuz = ('NOT VALIDATED', 'not validated', 'Neither number is a '
+                   'validated', 'read as \\"validated', 'IS NOT VALIDATED')
+        for m in re.finditer('validated', ham):
+            once = ham[max(0, m.start() - 70):m.start() + 10]
+            assert any(o in once for o in olumsuz), (
+                f'olumsuzlanmamış "validated" geçişi: ...{once}...')
+
+    def test_olculen_sure_cuzdani_yayimlaniyor(self, yanit_viskoz):
+        from hrma.app import (CFD_RESOLUTION_WORST_CASE_S,
+                              CFD_VISCOUS_WORST_CASE_S)
+        cfd = yanit_viskoz['cfd']
+        seviye = cfd['grid']['resolution']
+        cuzdan = cfd['viscous']['measured_worst_case_s']
+        assert cuzdan == CFD_VISCOUS_WORST_CASE_S.get(seviye)
+        assert cuzdan, 'viskoz cüzdan ÖLÇÜLMEDİ — seviyenin satırı boş'
+        euler = min(CFD_RESOLUTION_WORST_CASE_S[seviye].values())
+        for kip, arka in cuzdan.items():
+            assert arka, f'{kip} için ölçüm yok'
+            for b, sn in arka.items():
+                assert isinstance(sn, float) and sn > 0.0, (kip, b)
+                # Viskoz koşu Euler koşusundan PAHALIDIR (ölçüm bunu
+                # söylüyor; tersine dönerse tablo bayatlamış demektir)
+                assert sn > euler, (kip, b, sn, euler)
+        # Aynı sayı ızgara bloğunda da beyanlı (tek kaynak)
+        assert cfd['grid']['levels'][seviye]['viscous_worst_case_s'] == cuzdan
+
+
+class TestYPlusRozeti:
+    """Rozet ÖLÇÜMDEN türer ve bant kenarları deponun kendi değerleridir."""
+
+    def test_rozet_olculen_degerden_uretilebiliyor(self, yanit_viskoz):
+        v = yanit_viskoz['cfd']['viscous']
+        rozet = v['y_plus_badge']
+        y = float(v['y_plus']['achieved_max'])
+        assert rozet['y_plus_max'] == pytest.approx(y, rel=0, abs=0)
+        alt, ust = rozet['wall_resolved_edge'], rozet['log_layer_edge']
+        beklenen = ('wall_resolved' if y <= alt
+                    else ('buffer_layer' if y < ust else 'log_layer'))
+        assert rozet['code'] == beklenen
+        # Rozet metni bandın ADINI taşır (renk tek taşıyıcı değil)
+        assert str(rozet['code']).split('_')[0] in rozet['basis'].lower()
+
+    def test_bant_kenarlari_deponun_kendi_degerleri(self):
+        """İKİNCİ TANIM YOK: log kenarı deponun log-yasası bekçisinin
+        penceresinden, duvar-çözümlü kenarı çözücünün y⁺ döngüsünün
+        imzasındaki varsayılandan gelir. Biri kayarsa bu bekçi kırmızıya
+        düşer ve uç ile çözücü aynı ızgara hakkında zıt hüküm veremez."""
+        import inspect
+
+        from hrma.app import CFD_Y_PLUS_LOG_LAYER, CFD_Y_PLUS_WALL_RESOLVED
+        from hrma.cfd.steady import solve_with_y_plus_target
+        from tests.cfd.test_duz_levha_sa import LOG_PENCERE_Y_PLUS
+
+        assert CFD_Y_PLUS_LOG_LAYER == LOG_PENCERE_Y_PLUS[0]
+        imza = inspect.signature(solve_with_y_plus_target)
+        assert (CFD_Y_PLUS_WALL_RESOLVED
+                == imza.parameters['y_plus_target'].default)
+
+    def test_hedef_verilmediyse_oran_NaN_kalir(self, client, kontur_iyi):
+        """'bilinmiyor' ASLA 'tutturuldu' sayılmaz (çözücünün sözleşmesi)."""
+        r = _sessiz(client.post, UC, json=govde(
+            nozzle_contour=kontur_iyi, viscous=viskoz_blok()))
+        assert r.status_code == 200
+        y = r.get_json()['cfd']['viscous']['y_plus']
+        assert y['target'] is None
+        assert y['ratio_max_to_target'] is None      # sanitize: NaN -> None
+        assert y['fraction_within_target'] is None
+
+    def test_hedef_verilince_oran_dolu(self, yanit_viskoz):
+        y = yanit_viskoz['cfd']['viscous']['y_plus']
+        assert y['target'] == 1.0
+        assert y['ratio_max_to_target'] == pytest.approx(
+            y['achieved_max'] / y['target'], rel=1e-12)
+        # Izgara SESSİZCE değiştirilmedi: uç yeniden ızgaralama YAPMAZ
+        assert y['regrid_count'] == 0
+
+
+class TestBartzCfdIkiKaynak:
+    """İki seri YAN YANA, aynı eksende, ikisi de kaynak imiyle."""
+
+    def test_bartz_ve_cfd_AYNI_eksende(self, yanit_viskoz):
+        """Ara değerleme YOK: Bartz serisinin ekseni duvar ekseninin TA
+        KENDİSİDİR. Bartz kendi istasyon ızgarasında yayımlansaydı iki seri
+        farklı eksende olurdu ve fark alanı np.interp'e muhtaç kalırdı."""
+        v = yanit_viskoz['cfd']['viscous']
+        bz = v['bartz_comparison']
+        assert bz['available'] is True
+        assert bz['z_m'] == v['wall']['z_m']
+        assert len(bz['h_g_bartz']) == len(v['wall']['z_m'])
+        assert 'no second axis' in bz['_basis']
+
+    def test_iki_kaynak_da_ETIKETLI(self, yanit_viskoz):
+        v = yanit_viskoz['cfd']['viscous']
+        from hrma.cfd.wall_output import THERMAL_PROFILE_SOURCE
+        assert v['thermal_profile']['source'] == THERMAL_PROFILE_SOURCE
+        assert 'Bartz' in v['bartz_comparison']['_basis']
+        # Biri diğerinin yerine SESSİZCE geçmez
+        assert 'silently replaces' in v['bartz_comparison']['_basis']
+
+    def test_fark_alani_yayimlanan_iki_diziden_yeniden_kurulabiliyor(
+            self, yanit_viskoz):
+        v = yanit_viskoz['cfd']['viscous']
+        bz = v['bartz_comparison']
+        h_cfd = np.asarray(bz['h_g_cfd'], dtype=float)
+        h_b = np.asarray(bz['h_g_bartz'], dtype=float)
+        oran = np.asarray(bz['ratio_cfd_over_bartz'], dtype=float)
+        assert np.allclose(oran, h_cfd / h_b, rtol=1e-12, atol=0.0)
+        assert bz['ratio_min'] == pytest.approx(float(np.min(oran)), rel=1e-12)
+        assert bz['ratio_max'] == pytest.approx(float(np.max(oran)), rel=1e-12)
+        # CFD tarafı köprünün KENDİ h_g'sidir (ikinci hesap yok)
+        assert bz['h_g_cfd'] == v['thermal_profile']['h_g']
+
+    def test_oran_beyani_y_plus_rozetine_baglar(self, yanit_viskoz):
+        bz = yanit_viskoz['cfd']['viscous']['bartz_comparison']
+        assert 'y_plus_badge' in bz['ratio_basis']
+        assert 'RESOLUTION reading' in bz['ratio_basis']
+
+    def test_c_star_OLCULDU_ideal_formul_degil(self, yanit_viskoz):
+        cfd = yanit_viskoz['cfd']
+        bz = cfd['viscous']['bartz_comparison']
+        beklenen = (cfd['inputs']['P0_Pa'] * cfd['throat']['area_m2']
+                    / cfd['budget']['mass_flow_in_kg_s'])
+        assert bz['c_star_m_s'] == pytest.approx(beklenen, rel=1e-12)
+        assert 'MEASURED from this run' in bz['c_star_basis']
+
+
+def _sure_dus(*bloklar):
+    """``solution_basis.runtime_s`` alanlarını iki bloktan da düşer.
+
+    İki AYRI koşumun duvar saati eşit olamaz; bit-tutarlılık bekçisinin
+    ölçtüğü şey taşınan sayılar ve beyanlardır, ölçüm anının süresi değil.
+    Alanın VARLIĞI yine denetlenir (set eşitliği yukarıda).
+    """
+    for b in bloklar:
+        kunye = b.get('solution_basis')
+        if isinstance(kunye, dict):
+            b['solution_basis'] = {k: v for k, v in kunye.items()
+                                   if k != 'runtime_s'}
+
+
+class TestViskozKopruleri:
+    """Termal profil / sürtünme / c_f köprüleri: bit-tutarlı ya da REDLİ."""
+
+    def test_termal_profil_koprunun_bit_aynisi(self, yanit_viskoz,
+                                               kontur_iyi):
+        from hrma.app import _cfd_build_grid, sanitize_json_values
+        from hrma.cfd.steady import solve_steady_axisym
+        from hrma.cfd.wall_output import thermal_axial_profile
+        from hrma.cfd.gas_transport import resolve_gas_transport
+        from hrma.cfd.steady import ViscousOptions
+
+        cfd = yanit_viskoz['cfd']
+        grid, _z, _r = _cfd_build_grid(
+            np.asarray(kontur_iyi['points'], dtype=float),
+            cfd['grid']['ni'], cfd['grid']['nj'])
+        tr = resolve_gas_transport(gamma=GAZ['gamma'], T_ref=GAZ['T0_K'],
+                                   gas_constant=GAZ['R_J_per_kgK'])
+        opts = ViscousOptions(transport=tr, wall_thermal='isothermal',
+                              T_wall=VISKOZ_T_WALL,
+                              T_wall_source=VISKOZ_KAYNAK)
+        yerel = _sessiz(solve_steady_axisym, grid, P0=GAZ['P0_Pa'],
+                        T0=GAZ['T0_K'], gamma=GAZ['gamma'],
+                        R=GAZ['R_J_per_kgK'], Pb=None, viscous=opts,
+                        y_plus_target=1.0)
+        beklenen = sanitize_json_values(thermal_axial_profile(yerel))
+        alinan = dict(cfd['viscous']['thermal_profile'])
+        assert alinan.pop('available') is True
+        assert set(alinan) == set(beklenen)
+        # runtime_s İKİ KOŞUMUN DUVAR SAATİDİR ve eşit olması BEKLENMEZ;
+        # bit-tutarlılığın konusu taşınan SAYILAR ve BEYANLARDIR.
+        _sure_dus(alinan, beklenen)
+        for k in beklenen:
+            assert alinan[k] == beklenen[k], k
+
+    def test_surtunme_blogu_koprunun_bit_aynisi(self, yanit_viskoz,
+                                                kontur_iyi):
+        from hrma.app import _cfd_build_grid, sanitize_json_values
+        from hrma.cfd.gas_transport import resolve_gas_transport
+        from hrma.cfd.steady import ViscousOptions, solve_steady_axisym
+        from hrma.cfd.wall_output import friction_thrust_loss
+
+        cfd = yanit_viskoz['cfd']
+        grid, _z, _r = _cfd_build_grid(
+            np.asarray(kontur_iyi['points'], dtype=float),
+            cfd['grid']['ni'], cfd['grid']['nj'])
+        tr = resolve_gas_transport(gamma=GAZ['gamma'], T_ref=GAZ['T0_K'],
+                                   gas_constant=GAZ['R_J_per_kgK'])
+        opts = ViscousOptions(transport=tr, wall_thermal='isothermal',
+                              T_wall=VISKOZ_T_WALL,
+                              T_wall_source=VISKOZ_KAYNAK)
+        yerel = _sessiz(solve_steady_axisym, grid, P0=GAZ['P0_Pa'],
+                        T0=GAZ['T0_K'], gamma=GAZ['gamma'],
+                        R=GAZ['R_J_per_kgK'], Pb=None, viscous=opts,
+                        y_plus_target=1.0)
+        beklenen = sanitize_json_values(friction_thrust_loss(yerel, grid))
+        alinan = dict(cfd['viscous']['friction'])
+        assert alinan.pop('available') is True
+        assert set(alinan) == set(beklenen)
+        _sure_dus(alinan, beklenen)
+        for k in beklenen:
+            assert alinan[k] == beklenen[k], k
+
+    def test_adiabatik_kosuda_hg_reddi_AYNEN_tasinir(self,
+                                                     yanit_viskoz_adiabatik):
+        v = yanit_viskoz_adiabatik['cfd']['viscous']
+        tp = v['thermal_profile']
+        assert tp['available'] is False
+        assert 'ADYABATİK' in tp['reason']
+        assert 'TANIMSIZ' in tp['reason']
+        # Uydurma profil KONMAZ
+        assert 'h_g' not in tp and 'T_recovery' not in tp
+        # Bartz tarafı da tek başına "CFD cevabı" gibi sunulmaz
+        assert v['bartz_comparison']['available'] is False
+        assert 'wall temperature' in v['bartz_comparison']['reason']
+        # c_f de kenar Mach'ı olmadan uydurulmaz
+        assert v['skin_friction']['available'] is False
+        # Ama τ_w ölçüldü ve OLDUĞU GİBİ duruyor
+        assert len(v['wall']['shear_Pa']) == \
+            yanit_viskoz_adiabatik['cfd']['grid']['ni']
+        assert v['friction']['available'] is True
+
+    def test_c_f_yayimlanan_uc_diziden_kurulabiliyor(self, yanit_viskoz):
+        """c_f = τ_w / (0,5·γ·p_w·M_e²) — üç dizi de yanıtta."""
+        cfd = yanit_viskoz['cfd']
+        v = cfd['viscous']
+        sf = v['skin_friction']
+        assert sf['available'] is True
+        tau = np.asarray(v['wall']['shear_Pa'], dtype=float)
+        p_w = np.asarray(cfd['wall_pressure']['pressure_Pa'], dtype=float)
+        M_e = np.asarray(v['thermal_profile']['mach_edge'], dtype=float)
+        beklenen = tau / (0.5 * cfd['inputs']['gamma'] * p_w * M_e ** 2)
+        assert np.allclose(np.asarray(sf['c_f'], dtype=float), beklenen,
+                           rtol=1e-12, atol=0.0)
+        assert 'p_e = p_w' in sf['_basis']
+
+    def test_ayrilma_dorduncu_uyesi_viskoz_kosuda_ACIK(self, yanit_viskoz,
+                                                       yanit_iyi):
+        """CFD üyesi ancak τ_w varsa hüküm verir; Euler koşusunda KAPALI."""
+        crit_v = yanit_viskoz['cfd']['separation']['criteria']
+        crit_e = yanit_iyi['cfd']['separation']['criteria']
+        assert set(crit_v) == set(crit_e)
+        assert len(crit_v) == 4
+        assert crit_v['cfd_tau_w']['available'] is True
+        assert crit_e['cfd_tau_w']['available'] is False
+        assert crit_v['cfd_tau_w']['reliability'] == 'model_dependent'
+
+
+class TestViskozButceVeGeometri:
+    """Viskoz bütçe + radyal geometri bloğu."""
+
+    def test_viskoz_butce_euler_biciminden_AYRI(self, yanit_viskoz):
+        """Euler biçimi viskoz koşuda EKSİK bir bütçedir (duvar ısısı ve
+        sınır viskoz akıları onda yok). İki sayı KOPYA OLAMAZ."""
+        b = yanit_viskoz['cfd']['budget']
+        visk = b['viscous_energy_balance_rel']
+        euler = b['energy_balance_rel']
+        assert isinstance(visk, float) and visk >= 0.0
+        assert visk != euler
+        assert visk < euler, (
+            f'viskoz bütçe {visk:.3e}, Euler biçimi {euler:.3e} — viskoz '
+            'biçim tam bütçedir ve daha küçük kapanmalıydı')
+        assert 'TEK BAŞINA OKUNMAZ' in b['_basis']
+
+    def test_viskoz_butce_yayimlanan_dort_terimden_kurulabiliyor(
+            self, yanit_viskoz):
+        cfd = yanit_viskoz['cfd']
+        b = cfd['budget']
+        f = cfd['viscous']['boundary_viscous_flux']
+        kalan = (b['energy_flux_in_W'] - b['energy_flux_out_W']
+                 + f['outlet_energy_W'] - f['inlet_energy_W']
+                 - cfd['viscous']['wall_heat_W'])
+        assert (abs(kalan) / abs(b['energy_flux_in_W'])
+                == pytest.approx(b['viscous_energy_balance_rel'], rel=1e-9))
+
+    def test_radyal_geometri_alan_dilimini_izler(self, yanit_iyi):
+        cfd = yanit_iyi['cfd']
+        f = cfd['field']
+        rg = f['radial_geometry']
+        assert rg['shape'] == [f['shape'][0], cfd['grid']['nj'] + 1]
+        assert len(rg['r_nodes_m']) == len(f['z_m'])
+        # Blok indis listesini TEKRAR yayımlamaz (ikinci kaynak yok)
+        assert 'axial_indices' not in rg
+        # Eksende TAM 0,0, duvarda kolon duvar yarıçapı
+        for satir in rg['r_nodes_m']:
+            assert satir[0] == 0.0
+            assert satir[-1] > satir[-2] > 0.0
+
+    def test_radyal_duzgunluk_AD_degil_OLCUM(self, yanit_iyi):
+        rg = yanit_iyi['cfd']['field']['radial_geometry']
+        from hrma.cfd.grid_axisym import RADIAL_UNIFORM_REL_TOL
+        assert rg['radial_uniform_rel_tol'] == RADIAL_UNIFORM_REL_TOL
+        assert rg['radial_uniform'] is (
+            rg['radial_spacing_rel_dev_max'] <= RADIAL_UNIFORM_REL_TOL)
+        # Bugünkü yayın yolu DÜZGÜN ızgara kuruyor (kilit bilinçli)
+        assert rg['radial_uniform'] is True
+        assert rg['axial_node_planar'] is True
+
+    def test_radyal_geometri_ucun_izgarasinin_ta_kendisi(self, yanit_iyi,
+                                                         kontur_iyi):
+        from hrma.app import _cfd_build_grid, sanitize_json_values
+        from hrma.cfd.grid_axisym import radial_geometry_block
+        cfd = yanit_iyi['cfd']
+        grid, _z, _r = _cfd_build_grid(
+            np.asarray(kontur_iyi['points'], dtype=float),
+            cfd['grid']['ni'], cfd['grid']['nj'])
+        beklenen = sanitize_json_values(radial_geometry_block(
+            grid, axial_indices=cfd['field']['axial_indices']))
+        assert cfd['field']['radial_geometry'] == beklenen

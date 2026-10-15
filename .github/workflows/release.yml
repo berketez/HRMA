@@ -88,13 +88,13 @@ env:
 
 jobs:
   # ==========================================================================
-  # 1) SÜRÜM BAĞLANTISI  — packaging/release_gate.sh kapı 1/8'in aynası
+  # 1) SÜRÜM BAĞLANTISI  — packaging/release_gate.sh kapı 1/10'in aynası
   #
   # Ucuz ve hızlı olduğu için derleme işlerinden ÖNCE koşar: yanlış etiketlenmiş
   # bir ağaç için bir saatlik paketleme başlatmanın anlamı yok.
   # ==========================================================================
   surum-baglantisi:
-    name: Sürüm bağlantısı (kapı 1/8)
+    name: Sürüm bağlantısı (kapı 1/10)
     if: github.event_name != 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -164,14 +164,14 @@ jobs:
 
   # ==========================================================================
   # 2) TAM TEST TAKIMI + CANLI DUMAN TESTİ
-  #    kapı 5/8 (tam takım) ve kapı 6/8 (varsayılan olmayan portta duman)
+  #    kapı 5/10 (tam takım) ve kapı 6/10 (varsayılan olmayan portta duman)
   #
   # Bağımlılık kurulumu pahalı (rocketcea kaynaktan derleniyor), bu yüzden iki
   # kapı adımı TEK işte ama AYRI adımlarda koşar: hangisinin düştüğü
   # arayüzde tek bakışta görünür.
   # ==========================================================================
   testler:
-    name: Tam takım + duman (kapı 5/8, 6/8)
+    name: Tam takım + duman (kapı 5/10, 6/10)
     if: github.event_name != 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -190,9 +190,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gfortran
 
-      # Node.js ATLANAMAZ: 30 test dosyası ön yüz sözleşmelerini `node` ile
-      # doğruluyor ve node yoksa SESSİZCE atlıyor. tests.yml'de 2026-08-03'te
-      # düzeltildi; burada da olmazsa aynı kör nokta yayın hattında açık kalır.
+      # Node.js ATLANAMAZ: depodaki test dosyalarının büyük bir kısmı ön yüz
+      # sözleşmelerini `node` ile doğruluyor ve node yoksa SESSİZCE atlıyor.
+      # tests.yml'de 2026-08-03'te düzeltildi; burada da olmazsa aynı kör
+      # nokta yayın hattında açık kalır.
+      #
+      # SAYI BU YORUMDA YOKTUR (ÖH D26 / OH-D25-24): buradaki elle yazılmış
+      # "30" iddiası ölçüm 97 iken hâlâ 30 diyordu — bekçisi xfail(strict)
+      # borç imiyle açık bırakılmıştı. Sayı artık tek kaynaktan
+      # (`tools/node_kapisi_sayimi.py`) türetilir; aşağıdaki adım onu koşar.
       - name: Node.js (ön yüz sözleşme testleri için)
         uses: actions/setup-node@v4
         with:
@@ -213,61 +219,107 @@ jobs:
           node --version
           python -c "import shutil; assert shutil.which('node'), 'node PATH icinde yok — on yuz testleri sessizce atlanir'"
 
+      # ÖH D26 / OH-D25-24 — node kapılı dosya sayısı KAYNAKTAN türetilir
+      # (tests.yml'deki eşiyle aynı tek kaynak). Ölçüm tabanın altına
+      # düşerse yayın kapısı KIRILIR.
+      - name: Node kapılı test dosyası sayımı (kaynaktan türetilir)
+        run: python tools/node_kapisi_sayimi.py --liste
+
+      # ÖH D28 / altyapi — defter OH-D27-04. Kapı 10/10 ile AYNI araç, AYNI
+      # kip: yayın hattında da kazanılmamış hüküm/yanlış standart başlığı
+      # kayıtsız kalamaz. Ölçüldü (once.json): araç eskiden bu iş akışında 0
+      # kez geçiyordu. ATLANAMAZ ve fail-closed.
+      - name: İddia dili kapısı (kazanılmamış hüküm / yanlış standart başlığı)
+        run: |
+          python tools/iddia_lint.py --check
+          python tools/iddia_lint.py --debt | tail -1
+
       # Parti 31 / T2-2, T2-3, T2-4: cantera / CoolProp / numba bekçileri
       # "kurulu değil" gerekçesiyle atlıyordu ve gerekçe doğrulanmıyordu.
       # Testler artık "bağımlılık yok" ile "ürün yolu bozuk"u ayırıyor; bu
       # adım o ayrımın ön koşulunu (bağımlılık gerçekten kurulu) yayın
       # hattında da mekanik kılar. tests.yml'deki eşiyle aynı gerekçe.
-      - name: Bilimsel bağımlılıklar (cantera, CoolProp, numba) gerçekten kurulu mu
+      # ÖH D26 / OH-B2-01 — `rocketcea` BURAYA EKLENDİ. Borç imi (defter
+      # P13B1-01, tests/test_ci_kapsam_kapisi.py::CI_DOGRULAMA_BORCLARI)
+      # xfail(strict) ile açık duruyordu: yayın hattı rocketcea kurulumunu
+      # hiç doğrulamıyordu, yani CEA çaprazının 31 çapası doğrulanmadan
+      # paket çıkabilirdi. rocketcea kaynaktan (gfortran) derlenir ve asıl
+      # kırılan yer paketin kendisi değil DERLENMİŞ CEA uzantısıdır: `import
+      # rocketcea` geçerken `rocketcea.cea_obj` patlayabilir — sessiz
+      # atlamanın kökü tam olarak orası. tests.yml'deki eşiyle aynı gerekçe.
+      - name: Bilimsel bağımlılıklar (cantera, CoolProp, numba, rocketcea) gerçekten kurulu mu
         run: |
           python - <<'PY'
           import importlib
-          for ad in ('cantera', 'CoolProp', 'numba'):
+          for ad in ('cantera', 'CoolProp', 'numba', 'rocketcea'):
               m = importlib.import_module(ad)
               print(ad, getattr(m, '__version__', '?'))
+          from rocketcea.cea_obj import CEA_Obj
+          print('rocketcea.cea_obj OK', CEA_Obj)
           PY
 
       - name: Test paketi
         env:
           MPLBACKEND: Agg
           PYTHONPATH: .
+          # ÖH D25 / P14H2-C1 — ucuz kapsam çekirdeği (bkz. tests.yml aynı
+          # adım). Varsayılan C izleyici bu depoda x1,54-x2,09; sysmon
+          # x0,90-x1,04. Yayın kapısı tam süit koşar, o yüzden kapsam kapısı
+          # BURADA da geçerlidir: kapsam gerilemesiyle sürüm çıkamaz.
+          COVERAGE_CORE: sysmon
         run: |
-          pytest tests/ -q -rs --junitxml=pytest-report.xml
-
-      # Atlanan testler görünür olsun. Eşik UYGULANMAZ: bu işin atlama sayısı
-      # ölçülmedi, uydurma bir bütçe koymak yanlış olurdu. STEP/CAD kolunun
-      # SIFIR atlama bütçesi tests.yml'deki `step-export` işinde uygulanır ve
-      # bu iş akışı onun yeşilliğini aşağıda `ci-durumu` işinde arar.
-      - name: Atlama envanteri (bilgi amaçlı)
-        if: always()
-        run: |
-          python - <<'PY'
-          import os, xml.etree.ElementTree as ET
-          if not os.path.exists('pytest-report.xml'):
-              print('rapor yok'); raise SystemExit(0)
-          root = ET.parse('pytest-report.xml').getroot()
-          suite = root if root.tag == 'testsuite' else root.find('testsuite')
-          gercek = [tc for tc in suite.iter('testcase')
-                    if (tc.find('skipped') is not None
-                        and tc.find('skipped').get('type') == 'pytest.skip')]
-          print(f"toplam={suite.get('tests')} atlanan={len(gercek)}")
-          for tc in gercek:
-              print(f"  ATLANDI {tc.get('classname')}::{tc.get('name')} "
-                    f"-> {tc.find('skipped').get('message', '')[:120]}")
-          PY
+          pytest tests/ -q -rs --junitxml=pytest-report.xml \
+            --cov --cov-report=term-missing:skip-covered
 
       # ----------------------------------------------------------------------
-      # KAPI 6/8 AYNASI — canlı duman testi, VARSAYILAN OLMAYAN portta.
+      # ATLAMA KAPISI — ÖH D17 / altyapi (defter OH-B3-04).
+      #
+      # 2026-09-02'ye kadar burada `Atlama envanteri (bilgi amaçlı)` adımı
+      # duruyordu: tests.yml'nin ESKİ, kapısız sürümünün bayt kopyası. İki
+      # deliği vardı ve ikisi de ÖLÇÜLDÜ (docs/scofield/raw/OH/D17/altyapi/
+      # a1/once.json, sentetik junit'e karşı):
+      #   * eşik yok        -> 300 atlamada çıkış kodu 0 (YEŞİL)
+      #   * `type` alanı OLMAYAN modül düzeyi atlamayı hiç saymıyor
+      #                     -> 12 modül düştüğünde çıkış kodu 0 (YEŞİL)
+      #   * toplama çöktüğünde ("0 test") çıkış kodu 0 (YEŞİL)
+      # Yani shapely/CoolProp yayın ortamında düşüp bekçiler sessizce
+      # kaybolduğunda YAYIN KAPISI YEŞİL ÇIKIYORDU.
+      #
+      # Kapının gövdesi artık `tools/atlama_kapisi.py`dedir: bütçe sayısı TEK
+      # yerde yazılır, tests.yml'deki eşiyle drift'i `tests/
+      # test_d17_altyapi_a1.py` bekçisiyle mekanik olarak kilitlidir ve
+      # davranış yerelde de koşturulabilir (aynı bekçi sentetik junit'e karşı
+      # dört kaçış yolunu ölçer).
+      #
+      # Bütçe darwin/arm64'te ölçüldü; ubuntu'da birkaç kalem oynayabilir —
+      # oynarsa bu iş KIRMIZI verir ve sayı ORADAN sabitlenir (tests.yml'deki
+      # eşinin kendi talimatı). Eşik gevşetilmez; ölçüm güncellenir.
+      #
+      # ÖH D37 / YB-15 — "kanıt yok" atlaması AYRI SINIF. Yayın dalı docs'suz
+      # üretildiği için tests/support/kanit.py eksik kanıtı "kanıt yok: "
+      # önekli gerekçeyle atlar. Kapı bunları bütçeye ve "modül düzeyi sıfır"
+      # kuralına SAYMAZ, ayrı `kanit_atlamasi=N (docs'suz agac: ...)` satırı
+      # basar; ağaçta docs/scofield VARSA tek bir kanıt atlaması bile HATA.
+      # Önek kanit.py'den AST ile okunur; okunamazsa kapı KAPANIR. Kural bu
+      # adımda ayrıca yazılmaz: tek gövde tools/atlama_kapisi.py'dir.
+      # ----------------------------------------------------------------------
+      - name: Atlama bütçesi (ölçülmüş — tools/atlama_kapisi.py)
+        if: always()
+        run: |
+          python3 tools/atlama_kapisi.py pytest-report.xml
+
+      # ----------------------------------------------------------------------
+      # KAPI 6/10 AYNASI — canlı duman testi, VARSAYILAN OLMAYAN portta.
       #
       # v2.6.2'yi kullanılamaz yapan hata buradaydı: uygulama 8080 dışında bir
       # porta düştüğünde kendi sayfası kendi API'sinden 403 alıyordu ve hiçbir
       # test bunu yakalayamıyordu (test de kodun kör noktasını paylaşıyordu).
       #
-      # Yükler packaging/release_gate.sh 6/8 ile AYNI tutulur. `use_tutorial_
+      # Yükler packaging/release_gate.sh 6/10 ile AYNI tutulur. `use_tutorial_
       # defaults` kestirmesi BİLEREK kullanılmaz: ölçülen şey uygulamanın
       # gerçekten hesap yaptığı.
       # ----------------------------------------------------------------------
-      - name: Canlı duman testi (kapı 6/8)
+      - name: Canlı duman testi (kapı 6/10)
         # Kırmızı pytest bu adımı ATLATMAMALI: ikisi ayrı kapı adımı, ikisinin
         # sonucu da tek koşuda görünmeli. (İptalde koşmaz.)
         if: success() || failure()
@@ -286,13 +338,20 @@ jobs:
           import sys
 
           from hrma.app import app
+          # Ürünle AYNI tavanlar (tek kaynak hrma/security/body_limit.py;
+          # '+ 1': waitress `>=` ile reddeder, gerekçe hrma/run.py). İçe
+          # aktarma try DIŞINDA: başarısızsa sunucu tavansız KALKMAZ.
+          from hrma.security.body_limit import (REQUEST_BODY_MAX_BYTES,
+                                                WAITRESS_CONNECTION_LIMIT)
 
           port = int(sys.argv[1])
           logging.getLogger('werkzeug').setLevel(logging.ERROR)
           try:
               from waitress import serve
               logging.getLogger('waitress').setLevel(logging.ERROR)
-              serve(app, host='127.0.0.1', port=port, threads=4, _quiet=True)
+              serve(app, host='127.0.0.1', port=port, threads=4, _quiet=True,
+                    connection_limit=WAITRESS_CONNECTION_LIMIT,
+                    max_request_body_size=REQUEST_BODY_MAX_BYTES + 1)
           except ImportError:
               app.run(host='127.0.0.1', port=port, debug=False,
                       threaded=True, use_reloader=False)
@@ -324,13 +383,28 @@ jobs:
                      "burn_time":400,"chamber_pressure":50,"fuel_type":"rp1",
                      "oxidizer_type":"lox","mixture_ratio":2.3}'
 
+          # ÖH D23 / altyapi — defter P13B1-11. ÖLÇÜLDÜ (a2/once.json, taban
+          # ef527ae): bu adımın adı "gerçekten hesap yaptığı"nı sınadığını
+          # söylüyordu ama karar zincirinde GÖVDEYE bakan tek dal yoktu —
+          # 200 dönen boş bir gövde ("{}") ya da bir HTML sayfası kapıdan
+          # geçerdi; gövde yalnız HATA MESAJINDA, ilk 200 baytıyla anılıyordu.
+          # Artık her motorun yanıtı ADI KONMUŞ fizik alanları üstünden
+          # sınanır: alan var mı, sayı mı, sonlu mu, kesin pozitif mi.
+          # Alan yolları ÖLÇÜLEREK seçildi (canlı yanıt gövdeleri, 5 Eylül
+          # 2026): hibritte sayılar "motor" altında, katı ve sıvıda üst
+          # düzeydedir. Eşik YOKTUR — "pozitif ve sonlu"dan öteye geçmek
+          # kapıya beyan edilmemiş bir kabul ölçütü koymak olurdu.
+          ALAN_HIBRIT='motor.c_star,motor.throat_diameter,motor.chamber_temperature'
+          ALAN_KATI='c_star,throat_diameter,chamber_temperature'
+          ALAN_SIVI='c_star,throat_diameter,chamber_temperature'
+
           HATA=0
           for UC in "/calculate:hibrit" "/calculate_solid:katı" "/calculate_liquid:sıvı"; do
               YOL="${UC%%:*}"; AD="${UC##*:}"
               case "$YOL" in
-                  /calculate_solid)  YUK="$YUK_KATI" ;;
-                  /calculate_liquid) YUK="$YUK_SIVI" ;;
-                  *)                 YUK="$YUK_HIBRIT" ;;
+                  /calculate_solid)  YUK="$YUK_KATI"; ALANLAR="$ALAN_KATI" ;;
+                  /calculate_liquid) YUK="$YUK_SIVI";  ALANLAR="$ALAN_SIVI" ;;
+                  *)                 YUK="$YUK_HIBRIT"; ALANLAR="$ALAN_HIBRIT" ;;
               esac
               KOD="$(curl -s -o /tmp/duman_govde.json -w '%{http_code}' \
                      -X POST "http://127.0.0.1:${PORT}${YOL}" \
@@ -340,11 +414,22 @@ jobs:
               if [ "$KOD" = "403" ]; then
                   echo "KALDI  $AD motor: ${PORT} portunda 403 — v2.6.2 hatası GERİ GELDİ"
                   HATA=1
-              elif [ "$KOD" = "200" ]; then
-                  echo "GEÇTİ  $AD motor: ${PORT} portunda hesap yapıyor (200)"
-              else
+                  continue
+              fi
+              if [ "$KOD" != "200" ]; then
                   echo "KALDI  $AD motor: beklenmeyen HTTP $KOD ($(head -c 200 /tmp/duman_govde.json))"
                   HATA=1
+                  continue
+              fi
+              # GÖVDE HÜKMÜ — 200 tek başına "hesap yaptı" demek değildir.
+              GOVDE_HUKMU="$(python3 tools/duman_govde_kapisi.py \
+                             /tmp/duman_govde.json "$ALANLAR" 2>&1)"
+              GOVDE_KODU=$?
+              if [ "$GOVDE_KODU" -ne 0 ]; then
+                  echo "KALDI  $AD motor: HTTP 200 ama gövde hüküm taşımıyor — $GOVDE_HUKMU"
+                  HATA=1
+              else
+                  echo "GEÇTİ  $AD motor: ${PORT} portunda hesap yapıyor (200; $GOVDE_HUKMU)"
               fi
           done
           exit "$HATA"
@@ -358,9 +443,9 @@ jobs:
           if-no-files-found: ignore
 
   # ==========================================================================
-  # 3) CI DURUMU — packaging/release_gate.sh kapı 4/8'in aynası
+  # 3) CI DURUMU — packaging/release_gate.sh kapı 4/10'in aynası
   #
-  # Kapının 4/8 adımının TAMAMI burada koşamaz: bu iş akışının kendi koşusu
+  # Kapının 4/10 adımının TAMAMI burada koşamaz: bu iş akışının kendi koşusu
   # yayın anında "tamamlanmamış" görünür, yani kapının kuralını harfiyen
   # uygulasa kendi kendini kilitlerdi. Burada ölçülen şey `tests` iş akışının
   # BU SHA'daki durumudur — asıl kanıt odur, çünkü STEP/CAD kolunun 66 bekçisi
@@ -378,7 +463,7 @@ jobs:
   # tests.yml'ye bitmesi için makul süre tanınmış olsun.
   # ==========================================================================
   ci-durumu:
-    name: tests iş akışı bu SHA'da yeşil mi (kapı 4/8)
+    name: tests iş akışı bu SHA'da yeşil mi (kapı 4/10)
     if: github.event_name != 'release'
     needs: testler
     runs-on: ubuntu-latest
@@ -500,17 +585,17 @@ jobs:
         run: bash packaging/build_dmg.sh
 
       # ----------------------------------------------------------------------
-      # KAPI 3/8 + 7/8 AYNASI — köken kaydı ve imza, DMG'nin İÇİNDEN.
+      # KAPI 3/10 + 7/10 AYNASI — köken kaydı ve imza, DMG'nin İÇİNDEN.
       #
-      # 3/8: mtime hangi AĞAÇTAN derlendiğini söyleyemez (`touch` bile eski bir
+      # 3/10: mtime hangi AĞAÇTAN derlendiğini söyleyemez (`touch` bile eski bir
       #      paketi tazeler). BUILD_INFO.sha == etiketin SHA'sı olmak zorunda.
       #      CI'da bu bağ zaten güçlü — ikili etiketlenen ağaçtan bu koşuda
       #      doğuyor — ama ölçülmeden "güçlü" demek varsayımdır.
-      # 7/8: v2.6.25'te codesign hatası yutuluyordu ve ÜÇ SÜRÜM imzasız çıktı.
+      # 7/10: v2.6.25'te codesign hatası yutuluyordu ve ÜÇ SÜRÜM imzasız çıktı.
       #      Kullanıcıya giden şey diskteki .app değil DMG içeriğidir, o yüzden
-      #      sıkı doğrulama xattr'sız kopyada yapılır (gate 7/8 ile aynı yöntem).
+      #      sıkı doğrulama xattr'sız kopyada yapılır (gate 7/10 ile aynı yöntem).
       # ----------------------------------------------------------------------
-      - name: DMG köken kaydı + imza (kapı 3/8, 7/8)
+      - name: DMG köken kaydı + imza (kapı 3/10, 7/10)
         env:
           ETIKET_SHA: ${{ github.sha }}
         run: |
@@ -575,12 +660,15 @@ jobs:
           rm -rf "$SIKI"
 
           # --- Paket içerik manifesti ---------------------------------------
-          # packaging/release_gate.sh başlığı bir "8/8 paket içerik denetimi"
-          # anlatıyor ama betikte öyle bir adım YOK (başlıklar 1/8..7/8'de
-          # bitiyor — ölçüldü). Burada yerine geçen bir denetim iddia
-          # edilmiyor; yalnız ÖLÇÜLEN gerçek sayılar basılır ve örnek proje
-          # sayısı depoyla karşılaştırılır (yayınlanan v2.6.26 DMG'sinde tek
-          # bir .hrma yoktu — 2026-08-03 ölçümü).
+          # ÖH D28 / altyapi: bu yorum "betikte öyle bir adım YOK (başlıklar
+          # 1/8..7/8'de bitiyor — ölçüldü)" diyordu; ölçüm BAYATLAMIŞTI —
+          # `baslik "8/10  Paket içerik manifesti + boyut sapması"` betikte
+          # 2026-08-04'ten beri duruyor. Burada kapının TAMAMI koşmuyor:
+          # yalnız ÖLÇÜLEN gerçek sayılar basılır ve örnek proje sayısı
+          # depoyla karşılaştırılır (yayınlanan v2.6.26 DMG'sinde tek bir
+          # .hrma yoktu — 2026-08-03 ölçümü); kapının boyut SAPMASI eşiği bu
+          # iş akışında koşmaz. Beyanın kendisi tools/yayin_kapi_ozeti.py'de
+          # "KISMEN" olarak yazılıdır.
           echo "--- paket içerik manifesti (ölçülen) ---"
           echo "DMG boyutu     : $(du -h "$DMG" | cut -f1)"
           echo "Resources kökü : $(ls "$MNT/HRMA.app/Contents/Resources" | tr '\n' ' ')"
@@ -694,12 +782,12 @@ jobs:
       - name: Windows payload derle
         run: bash packaging/build_win_payload.sh
 
-      # KAPI 3/8 AYNASI — Windows tarafı.
+      # KAPI 3/10 AYNASI — Windows tarafı.
       # KAPSAM BEYANI (release_gate.sh ile aynı): doğrulanan şey exe ikilisi
       # DEĞİL, exe'nin üretildiği STAGING ağacıdır. NSIS arşivini açacak araç
       # her makinede yok. Aradaki farkı kapatan şey sıradır: payload bu koşuda
       # etiketlenen ağaçtan üretildi, exe de hemen ardından payload'dan.
-      - name: Payload köken kaydı (kapı 3/8, kapsam beyanlı)
+      - name: Payload köken kaydı (kapı 3/10, kapsam beyanlı)
         env:
           ETIKET_SHA: ${{ github.sha }}
         run: |
@@ -756,7 +844,7 @@ jobs:
   # yapılır ve o an `yayin-denetimi` işi (aşağıda) devreye girer.
   #
   # KAPIYI_ATLA=1 kullanılıyor ÇÜNKÜ kapının tamamı bir runner'da koşamaz
-  # (2/8 ayrık HEAD'de üst akış dalı bulamaz, 4/8 bu koşunun kendisini
+  # (2/10 ayrık HEAD'de üst akış dalı bulamaz, 4/10 bu koşunun kendisini
   # "tamamlanmamış" görüp kendini kilitler). Atlama SESSİZ DEĞİL: betik
   # gerekçeyi taslağın GÖVDESİNE yazar, yani "Publish" düğmesine basacak kişi
   # neyin koşup neyin koşmadığını orada görür.
@@ -828,7 +916,16 @@ jobs:
           # Bu metin taslağın GÖVDESİNE girer — "Publish" düğmesine basacak
           # kişinin okuyacağı tek kayıt budur. Neyin koşup neyin koşmadığı
           # burada açıkça yazılı olmalı.
-          GEREKCE="CI taslağı (.github/workflows/release.yml): artefaktlar etiketlenen ağaçtan bu koşuda üretildi. KOŞAN kapı adımları — 1/8 sürüm dizgileri; 3/8 köken kaydı (BUILD_INFO.sha == etiket SHA, hem DMG içinden hem Windows payload'dan, ağaç temiz); 5/8 tam test takımı; 6/8 canlı duman testi (8087 portu, üç motor türü, Origin başlıklı); 7/8 macOS imzası (--deep, DMG içeriği için --deep --strict); 4/8 karşılığı olarak 'tests' iş akışının bu SHA'da yeşil bittiği ayrı bir işte doğrulandı. KOŞMAYAN — 2/8 git durumu: etiket üzerinde ayrık HEAD'de üst akış dalı yoktur, yerine etiket SHA'sı ile derlenen ağacın SHA'sı karşılaştırıldı. Otomasyon paketin üretildiğini ve imzalı olduğunu kanıtlar, KURULUM DENEYİMİNİ kanıtlamaz: yayına çevirmeden önce en az bir artefaktı indirip kurun. Ayrıntı: docs/dev/yayin_otomasyonu.md"
+          # ÖH D28 / altyapi (OH-D27-04 havuzu) — bu metin ELLE YAZILMIYOR.
+          # Eski hâli kapının adım numaralarını dondurmuştu (1/8..7/8) ve
+          # kapı 9 adıma çıkınca beyan bayatladı: taslağı okuyan kişi kapı
+          # hakkında YANLIŞ bilgi alıyordu. Liste artık kapı betiğinin
+          # kendisinden türetilir; araç adımı tanımıyorsa "beyan edilmedi"
+          # der ve uydurmaz. FAIL-CLOSED: araç kırılırsa gövde yazılmaz.
+          if ! GEREKCE="$(python3 tools/yayin_kapi_ozeti.py --gerekce)"; then
+              echo "KALDI  yayın kapısı beyanı üretilemedi — taslak gövdesi uydurulmaz"
+              exit 1
+          fi
 
           TASLAK=1 KAPIYI_ATLA=1 KAPIYI_ATLA_GEREKCE="$GEREKCE" \
               bash packaging/publish_release.sh
@@ -844,16 +941,13 @@ jobs:
             echo
             echo "Artefaktlar etiketlenen ağaçtan bu koşuda üretildi."
             echo
-            echo "| Kapı adımı | Durum |"
-            echo "|---|---|"
-            echo "| 1/8 sürüm dizgileri | koştu |"
-            echo "| 2/8 git durumu | **koşmadı** — ayrık HEAD'de üst akış dalı yok; yerine etiket SHA ↔ derleme SHA karşılaştırıldı |"
-            echo "| 3/8 köken kaydı (BUILD_INFO.sha) | koştu (DMG içi + win payload) |"
-            echo "| 4/8 CI durumu | \`tests\` iş akışının bu SHA'daki sonucu ayrı işte ölçüldü |"
-            echo "| 5/8 tam test takımı | koştu |"
-            echo "| 6/8 canlı duman testi | koştu |"
-            echo "| 7/8 macOS imzası | koştu (--deep, DMG içeriği --deep --strict) |"
-            echo "| 8/8 paket içerik denetimi | release_gate.sh'ta **böyle bir adım yok** (başlıklar 1/8..7/8); yerine ölçülen içerik manifesti basıldı |"
+            # Tablo kapı betiğinden TÜRETİLİR (tools/yayin_kapi_ozeti.py):
+            # burada elle yazılmış adım numarası YOKTUR. Eski hâli 1/8..7/8
+            # diyordu ve "8/8 paket içerik denetimi | release_gate.sh'ta
+            # böyle bir adım yok" satırı ÖLÇÜMLE YANLIŞTI (adım 2026-08-04'te
+            # eklenmişti). Araç kırılırsa tablo uydurulmaz, hata basılır.
+            python3 tools/yayin_kapi_ozeti.py --tablo \
+              || echo "| (tablo üretilemedi) | \`tools/yayin_kapi_ozeti.py\` kırıldı — beyan uydurulmadı |"
             echo
             echo "**Yayına çevirme kararı insandadır.** https://github.com/${DEPO}/releases"
           } >> "$GITHUB_STEP_SUMMARY"

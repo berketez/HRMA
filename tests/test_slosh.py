@@ -31,7 +31,12 @@ class TestFundamentalRelations:
     def test_natural_frequency_hand_calc(self):
         m = CylindricalTankSlosh(**REF)
         omega, f = m.natural_frequency(1)
+        # KÜNYE (yerel): SP-106 Denk. 2.4 / Dodge 2000 — omega_1^2 =
+        # (lambda_1*g/R)*tanh(lambda_1*h/R) = (1,8412*9,81/0,5)*0,998733
+        # = 36,0786 -> omega_1 = 6,00655 rad/s. Modül docstring'indeki
+        # elle hesabın aynısı; ürün tanımı slosh_analysis.py:20 (Denk. 1).
         assert omega == pytest.approx(6.00655, rel=1e-4)
+        # KÜNYE (yerel): f_1 = omega_1/(2*pi) = 6,00655/6,28319 = 0,95597 Hz.
         assert f == pytest.approx(0.95597, rel=1e-4)
 
     def test_frequency_matches_closed_form(self):
@@ -43,10 +48,17 @@ class TestFundamentalRelations:
 
     def test_slosh_mass_ratio_hand_calc(self):
         m = CylindricalTankSlosh(**REF)
+        # KÜNYE (yerel): SP-106 eşdeğer mekanik model, Dodge 2000 Denk. 1.20
+        # (ürün: slosh_analysis.py:26-30, Denk. 2) — m1/m_liq =
+        # (2R/(lambda_1*h*(lambda_1^2-1)))*tanh(lambda_1*h/R)
+        # = (2*0,5/(1,8412*1,0*(1,8412^2-1)))*0,998733 = 0,226959.
         assert m.slosh_mass_ratio() == pytest.approx(0.226959, rel=1e-4)
 
     def test_pendulum_length_hand_calc(self):
         m = CylindricalTankSlosh(**REF)
+        # KÜNYE (yerel): eşdeğer sarkaç boyu l_1 = g_eff/omega_1^2 =
+        # 9,81/36,0786 = 0,271906 m (SP-106 / Dodge 2000 sarkaç eşdeğeri;
+        # omega_1^2 yukarıdaki çapanın ta kendisi).
         assert m.pendulum_length() == pytest.approx(0.271906, rel=1e-4)
 
     def test_pendulum_length_equals_g_over_omega2(self):
@@ -72,6 +84,9 @@ class TestAsymptotes:
         expected = 2.0 / (LAMBDA_1 ** 2 - 1.0)
         m = CylindricalTankSlosh(radius=0.5, fill_height=1e-4, g_eff=9.81)
         assert m.slosh_mass_ratio() == pytest.approx(expected, rel=1e-3)
+        # KÜNYE (yerel): sığ limit kapalı formu — tanh(x)->x için oran
+        # 2/(lambda_1^2-1) = 2/(1,8412^2-1) = 0,836814. lambda_1 = 1,8412
+        # J1'(x)=0'ın ilk kökü (SP-106 Tablo 2.1; slosh_analysis.py:71).
         assert expected == pytest.approx(0.836814, rel=1e-4)
 
     def test_deep_limit_mass_ratio_goes_to_zero(self):
@@ -123,8 +138,14 @@ class TestGEffScaling:
             2.0 * m1.natural_frequency(1)[0], rel=1e-9)
 
     def test_default_g_is_standard_gravity(self):
+        # KÜNYE (yerel): 9,80665 m/s^2 STANDART yerçekimi ivmesidir —
+        # CGPM 3. Genel Konferansı (1901) tanımı, ISO 80000-3 ve CODATA'da
+        # aynen geçer. Ölçülen bir büyüklük değil, TANIM sabiti.
         assert G0 == pytest.approx(9.80665, rel=1e-9)
         m = CylindricalTankSlosh(0.5, 1.0)
+        # KÜNYE (yerel): g_eff verilmediğinde modelin varsayılanı G0'dır
+        # (slosh_analysis.py, CylindricalTankSlosh.__init__) — aynı tanım
+        # sabiti, ikinci kez sınanıyor.
         assert m.g_eff == pytest.approx(9.80665, rel=1e-9)
 
 

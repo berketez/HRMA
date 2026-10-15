@@ -50,7 +50,9 @@ python tools/browser_harness/run_tour.py --out /tmp/tur --headed
 
 | Argüman | Anlamı |
 |---|---|
-| `--pages` | Virgülle ayrılmış sayfa listesi. Varsayılan `hybrid,solid,liquid`. Bilinmeyen ad **hata** verir (sessizce atlanmaz). |
+| `--pages` | Virgülle ayrılmış sayfa listesi. Varsayılan `hybrid,solid,liquid,index,formulas,launch-site` (ÖH D21 / P17B1-16: üç HESAPLI motor sayfası + ürünün üç HESAPSIZ sayfası). Bilinmeyen ad **hata** verir (sessizce atlanmaz). |
+
+**Hesaplı ⟷ hesapsız sayfa.** `sayfalar.Sayfa.hesap_var=False` olan sayfalarda (`/`, `/formulas`, `/launch-site`) hesap düğmesi, 3B sahne, FEA paneli ve Analiz Merkezi YOKTUR; tur bunları aramaz ve o sayfalar için tuval/egzoz/Merkez denetimi **üretmez** — hayalet denetim, kusuru olmayan sayfayı kırmızıya boyar. Geriye kullanıcının o sayfada gerçekten maruz kaldığı dört ölçüm kalır: konsol hatası, ekrana sızan iç değer, yerleşim taşması/örtüşmesi ve tam sayfa görüntüsünün sahte olup olmadığı.
 | `--out` | Zorunlu. Rapor ve ekran görüntüleri buraya yazılır. |
 | `--base-url` | Verilmezse `python -m hrma.run` alt süreç olarak başlatılır; boş bir port seçilir ve tur nasıl biterse bitsin süreç **öldürülür**. |
 | `--headed` | Tarayıcıyı görünür açar. |
@@ -96,13 +98,37 @@ argüman/sunucu hatasında `2`.
 | `fea_<panel>_kosum` | Koşum bitti mi, sonuç yayımlandı mı? | `window.<API>.payload` |
 | `fea_<panel>_cizim` | Beklenen çizimler ekranda mı? | Kap görünürlüğü + `.js-plotly-plot` + kaptaki `svg`/`canvas` |
 | `fea_<panel>_rozet` | Beklenen hüküm basıldı mı, eski kusur geri geldi mi? | `#<panel>_badges` içindeki `[data-badge]` metinleri |
+| `fea_<panel>_yuk_caprazi` | Ekran, yükü gösteriyor mu? Hüküm rozetlerinin sayısı ve rengi payload ile tutuyor mu? | `yuk_ozeti` (payload'ın skaler/hüküm blokları) ⟷ rozet metni + `data-badge` rengi |
+| `yerlesim_yatay_tasma` | Sayfa görüntü alanını yatay aşıyor mu? | `documentElement.scrollWidth − clientWidth` |
+| `yerlesim_metin_ortusmesi` | Görünür metinler üst üste binmiş mi? | Metin yapraklarının `getBoundingClientRect` kutuları (ata-torun ve çizim kapları hariç) |
 | `merkez_cerceve` | Analiz Merkezi kurulu mu, gri satırların nedeni yazılı mı? | `#analysisCenter` + üç sütun + `[data-ac-row]` durum/neden öznitelikleri |
 | `merkez_<kiraci>_kosum` | Kiracının koşumu koştu mu, yanıt bloğu geldi mi? | `AnalysisCenter.history()` son kaydı |
 | `merkez_<kiraci>_cizim` | Kiracının çizimleri ekranda mı? | `#ac_view_root` içindeki kapların görünürlüğü + `.js-plotly-plot` + `svg` |
 | `merkez_<kiraci>_rozet` | Beyanlar basıldı mı, renkler dürüst mü, emekli imza döndü mü? | `[data-cfd-badge]` metni + renk sınıfı + yükün kendi alanları |
 
-Sayfa başına: 5 temel + FEA paneli başına 3 + Merkez çerçevesi 1 + kiracı
-başına 3. Bugünkü toplam **39 denetim** (hibrit 15, katı 12, sıvı 12).
+Sayfa başına: 5 temel + 2 yerleşim + FEA paneli başına 4 (yük çaprazı
+yalnız yük yayımlanmışken üretilir) + Merkez çerçevesi 1 + kiracı başına 3.
+Bugünkü toplam **49 denetim** (hibrit 19, katı 15, sıvı 15).
+
+**ÖH Faz 0 genişlemesi (P17 savcı reçetesi, 26 Ağu 2026).** P17'nin
+ölçtüğü boşluk: tur FEA yükünün yalnız VARLIĞINI kaydediyordu, hüküm
+rozetini silmek/sayısını bozmak/yeşile çevirmek 87 mutasyonun 80'inde
+turdan geçiyordu (%8 ayırt edicilik). Üç ekleme bunu kapatır:
+
+* **Hüküm imzaları (Kural B):** SF, malzeme sınırı ve gerinim marjı hüküm
+  aileleri artık beklenen imza — rozeti SİLMEK imza katmanında yakalanır.
+* **Rozet ⟷ yük çaprazı (Kural D, fail-closed):** tur artık payload'ın
+  skaler/hüküm bloklarını da kaydeder (`yuk_ozeti`); hüküm rozetlerinin
+  sayısı ve rengi Python tarafında BAĞIMSIZ türetilip ekranla çaprazlanır
+  (savcı ölçümü: ayırt edicilik %90,8; 29 dürüst değişimde 0 yanlış
+  alarm — `raw/P17/S1-olcum-04.py`). Yük içeriği kaydedilmemişse kapı
+  KAPANIR: "kanal var kapı yok" desenine izin yok. Dürüst kırmızı GEÇER —
+  kural fiziği değil arayüzü cezalandırır (C adayının reddi: S1-olcum-03).
+* **Yerleşim denetimleri:** yatay taşma (P17B1-19'un bekçisi) + görünür
+  metin örtüşmesi ("iç içe geçmiş ekran" sınıfının makine bekçisi).
+
+Mutasyon kanıtları: `tests/test_gorsel_kapi_faz0.py` (sil / sayı boz /
+yeşile çevir kırmızı; dürüst değişim yeşil).
 
 Eşiklerin tamamı **tek dosyadadır**: `esikler.py`. Her sabitin yanında
 neden o değer olduğu yazılıdır ve **rapora da kopyalanır** (`esikler`
@@ -303,6 +329,93 @@ dizesi `CONVERGED`i içerir, `NO SEPARATION JUDGEMENT` de `NO SEPARATION`ı.
 aynı ekranda durdu — "uyarı hüküm değildir" cümlesinin canlı kanıtı. Katı
 5183 iterasyon (3,0 s), sıvı 2915 iterasyon (1,6 s) ve sıvıda ayrılma
 **öngörüldü** (ıraksak bölgenin %29,1'i). Üçünde de yasak imza yok.
+
+---
+
+## Piksel turu — oluşmuş sayfanın dili, ondalığı ve geometrisi (ÖH D37)
+
+Defter **OH-D33-45** (yüksek): 16 Eylül'de kılavuz ekran karelerinden üç
+kusur çıktı ve yukarıdaki denetimlerin hiçbiri görmemişti — yarım çeviri
+(anahtar var, Python'un doldurduğu yer tutucunun içeriği İngilizce), aynı
+panelde virgül ve nokta ondalık, künye taşması. Üçü de YALNIZ oluşmuş
+sayfada görünür. Piksel turu bunları ölçer.
+
+```bash
+# Üç motor sayfası × TR/EN × 1440x900/390x844, örnek proje + hesap sonrası
+python tools/browser_harness/run_piksel.py --out /tmp/piksel
+# Çalışan sunucuya bağlan, tek kombinasyon
+python tools/browser_harness/run_piksel.py --out /tmp/piksel \
+    --base-url http://127.0.0.1:8191 --pages liquid --langs tr --widths 390
+```
+
+Her kombinasyon **temiz** bir tarayıcı bağlamında açılır: dil, sayfa
+yüklenmeden önce ürünün kendi `localStorage` anahtarına (`hrma_lang`)
+yazılır ve sayfanın gerçekten o dilde açıldığı `I18N.lang`den okunur;
+sayfa `?project=<örnek>` ile açılır (`examples/*.hrma`), proje şeridi
+projeyi yükler, tur hesabı tetikler ve **yeni** sonuç nesnesini bekler.
+`--base-url` verilmezse `HRMA_PROJECTS_DIR` `<out>/projeler` yapılır:
+örnek tohumlama kullanıcının gerçek proje dizinine yazmaz.
+
+| Denetim | Sorusu | Kırmızı |
+|---|---|---|
+| `piksel_dil_safligi` | Görünür metin sayfanın dilinde mi? | TR'de İngilizce cümle imzası: Türkçe harf taşımayan ≥3 ardışık sözcük ve içinde ≥1 İngilizce işlev sözcüğü (the/is/are/with/from/of/to/and/this/was/for, sözcük sınırıyla; Türkçede de sözcük olan 'not' listede DEĞİL — a2). EN'de Türkçe imza: ç/ğ/ı/ö/ş/ü (ve büyükleri — a2'de ç/ö/ü eklendi) taşıyan küçük harfli sözcük ya da ≥2 böyle sözcük; tek, büyük harfli yabancı ad ("Müller") imza değil |
+| `piksel_ondalik_tutarliligi` | Ondalık ayracı sayfanın dilinde mi, panelde tek mi? | (1) TR sayfada muaf olmayan TEK bir noktalı ondalık (a2, ana model kararı: hedef 0); (2) bir `.panel`/`.card` içinde (iç kartlar dahil — her kart AYRI grup) hem `\d,\d` hem `\d.\d` ondalık. EN'de virgüllü ondalık sayısı ve uyarı kaplarında 6 anlamlı basamağa dayanan sayılar (OH-D22-02) RAPORLANIR |
+| `piksel_oge_tasmasi` | Metin kutusu içeriğinden dar mı? | `scrollWidth > clientWidth + 1`: overflow görünür (`tasan`) ya da gizli ve başlıksız (`kesilen`) |
+| `piksel_ebeveyn_asimi` | Metin öğesi ebeveyn kutusunu aşıyor mu? | Ebeveyn kaydırmalı değilken yatay aşım > 1 px |
+| `piksel_yatay_kaydirma` | Belge görüntü alanından geniş mi? | `scrollWidth − min(innerWidth, clientWidth) > 2 px` (ana turun toleransı). Suçlular kök ve en derin olarak listelenir; `visibility:hidden` suçlu **DV-TOOLTIP** diye sayılır |
+
+**Ölçüm (`piksel.py::JS_PIKSEL`).** Tek geçişte görünür her metin
+BİRİMİ, metin taşıyan blok kutuları, ebeveyn aşımları ve sayfa genişliği
+okunur. Dil ve ondalık birimi **blok metnidir** (a2): satır içi olmayan
+her öğenin kendi metni + satır içi torunlarının metni, belge sırasıyla —
+`<p>The pressure <b>is</b> below <i>the</i> limit</p>` tek cümledir;
+satır içi olmayan çocuk, `<br>` ve SVG birimi keser; SVG `<text>` ve
+seçili `<select>` etiketi ayrı birimdir. Görünürlük ana turun yerleşim
+ölçümüyle aynı ilkededir: `display:none` ve `opacity:0` atlanır, kapalı
+`<details>` yalnız özetini gösterir; her metin düğümünün satır kutuları
+atalardan gelen kırpma dikdörtgeniyle kesiştirilir (max-height:0
+akordeonun ve kaydırmalı kabın görünmeyen satırının metni ölçülmez).
+Birim metni `PIKSEL_BIRIM_METIN_UST_SINIRI` karakteri aşarsa kesik sayılır
+ve dil/ondalık denetimi fail-closed kalır.
+Sayfa kaydırması suçluları kırpan bir ataya (Plotly SVG'si, kaydırmalı
+tablo kabı) ya da sabit konuma takılan öğeleri SAYMAZ — onlar belgeyi
+kaydırmaz.
+
+**Muafiyet tek yerdedir** (`esikler.py`) ve her girdi gerekçelidir; muaf
+metin sessizce düşmez, denetimin ölçümüne ADIYLA sayılır:
+
+* öğe düzeyi (`PIKSEL_MUAF_SECICILER`): `code/pre/kbd/samp`, künye
+  sınıfları (TAM ad: `.hd-verdict-kunye`, `.hd-metric-note` — alt dize
+  seçicisi YOK, a2), `[data-machine]`,
+  açılmış çözücü künyesi (`details[id$=_basis]` gövdesi; `<summary>` muaf
+  DEĞİL), `[data-src-field]`;
+* metin düzeyi (`DIL_SAFLIGI_MAKINE_BELIRTECLERI`): adres, uzantılı dosya
+  adı, yol, alt çizgili alan adı, noktalı nitelik yolu, camelCase;
+* ondalık (`ONDALIK_MUAF_DESENLERI`): sürüm, bölüm/tablo/denklem
+  numarası, tarih, IP; Plotly'nin TR binlik tiki (`10.000`) `belirsiz_binlik`
+  sayılır, ondalık sayılmaz. Form `value=`, SVG öznitelikleri ölçüme hiç
+  girmez.
+* Geometri denetimleri muafiyet TANIMAZ: künye taşması tam olarak
+  OH-D33-44'ün kusuruydu.
+
+**Sözlük yarışı kipi** (`--dict-delay-ms 3000`): `/hybrid` ve `/liquid`
+şablonları ortak sözlüğü (`i18n_common.js`) `<script>` ile yüklemez,
+`analysis_dock.js` onu dinamik ekler. Sözlük geç kaydolursa JS'in o ana
+kadar `T()` ile bastığı metin İngilizce yedekte kalır ve dil değişmediği
+için yeniden basılmaz. Kip bu isteği bekletir; aralıklı kusuru her koşumda
+görünür kılar (ölçülen: `/hybrid` TR'de `#inj_dp_note` ve enjektör şeması
+etiketleri — bkz. `docs/scofield/raw/OH/D37/piksel-bekci/a1/rapor.md`).
+
+Rapor: `<out>/piksel_raporu.json` (kombinasyon başına beş denetim +
+`akis_tamam`, ölçülen ağacın commit'i, eşiklerin kopyası). Çıkış kodu
+run_tour ile aynı sözleşmededir. **Varsayılan kapı turu bu denetimleri
+koşturmaz**; ayrı kiptir (bağlama kararı Faz C / paketleme).
+
+**Sınırlar.** Yalnız ekranda görünen metin ölçülür: kapalı sekme,
+üzerine gelinince açılan ipucu balonu, `title`/`placeholder` öznitelikleri
+ve PDF dil denetimine girmez. İmza işlev sözcüğüne dayanır: işlev sözcüğü
+taşımayan kısa İngilizce etiket ("Chamber Pressure") yakalanmaz. Tur
+FEA/Merkez koşumlarını tetiklemez (yalnız hesap sonrası ekran).
 
 ---
 

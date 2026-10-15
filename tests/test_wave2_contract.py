@@ -161,26 +161,95 @@ class TestWallProfileContract:
                    for tw, tr in zip(t_wall, t_rec)), (
             "denge cidar sıcaklığı fiziksel bandın dışında")
 
-    def test_defaults_only_request_still_200(self, client):
-        """Boş gövde: endpoint varsayılanlarla çalışmalı (UI ön-dolgu yok)."""
+    def test_defaults_only_request_is_rejected_fail_closed(self, client):
+        """Boş gövde hüküm ÜRETMEZ; eksik alanlar ADIYLA söylenir.
+
+        ÇEVİRİ (ÖH D15 fix-3 / taban geçişi, 1 Eyl 2026). Bu bekçinin eski
+        hâli ``test_defaults_only_request_still_200`` idi ve gövdesi
+        "endpoint varsayılanlarla çalışmalı" diyordu: yani sekiz zorunlu
+        girdi HİÇ verilmemişken uydurulmuş bir cidar profilinin HTTP 200
+        ile yayımlanmasını SÖZLEŞME yapıyordu. Defter P4B1-02'nin kusur
+        tanımı tam olarak buydu ("boş gövde {} de aynı şekilde 200
+        dönüyor"). ÖH Z5S / PK5 (commit bba33e4) ucu fail-closed yaptı ve
+        kırılmayı beyan etti; KUSURU KORUYAN bekçi burada çevriliyor —
+        sözleşme 200 değil 422'dir. Kardeş çeviri:
+        ``tests/test_z5s_ham_500.py::test_wall_profile_bos_govde_fail_closed``
+        (defter OH-Z5-15).
+
+        ÖLÇÜLDÜ (bu depo, çeviriden önce): ``{}`` -> HTTP 422,
+        ``error='incomplete_wall_profile_input'``, ``missing_fields`` sekiz
+        ad taşıyor (chamber_pressure, chamber_temperature, chamber_diameter,
+        chamber_length, burn_time, throat_diameter, throat_area,
+        mdot_total) ve ``missing_field_groups`` boğaz ölçeği için
+        ``any_of`` üçlüsünü ADIYLA veriyor. Yanıtta ``wall_profile`` YOK.
+
+        Sınıfın "geçerli gövde 200 döner ve profil şema uyumludur" iddiası
+        kaybolmadı: yukarıdaki ``wall_profile`` fikstürüne dayanan
+        bekçiler (``test_wall_profile_schema``, ``test_mach_unity_at_throat``
+        vb.) onu tam girdiyle ölçmeye devam ediyor.
+        """
         r = client.post('/api/analysis/wall-profile', json={})
-        assert r.status_code == 200
+        assert r.status_code == 422, (
+            f'boş gövde {r.status_code} döndü — hüküm kazanılmadan '
+            'yayımlanıyor')
         body = r.get_json()
-        assert body['status'] == 'success'
-        profile = body['wall_profile']
-        n = len(profile['x_mm'])
-        assert all(len(profile[k]) == n for k in PROFILE_ARRAY_KEYS)
+        assert body.get('status') == 'error'
+        assert body.get('error') == 'incomplete_wall_profile_input', (
+            f"hata kodu {body.get('error')!r} — eksik girdi ADIYLA "
+            'söylenmiyor')
+        eksikler = body.get('missing_fields') or []
+        assert eksikler, 'hangi alanların eksik olduğu söylenmiyor'
+        assert 'chamber_pressure' in eksikler and 'burn_time' in eksikler, (
+            f'eksik alan listesi zorunlu adları taşımıyor: {eksikler}')
+        # Boğaz ölçeği üç uçtan biriyle kurulabilir: hangisi olduğu ADIYLA.
+        gruplar = body.get('missing_field_groups') or []
+        assert any(set(g.get('any_of') or ()) ==
+                   {'throat_diameter', 'throat_area', 'mdot_total'}
+                   for g in gruplar), (
+            f'boğaz ölçeği any_of grubu beyan edilmiyor: {gruplar}')
+        # Sayı uydurulmadığının kilidi: reddedilen istekte profil YOK.
+        assert 'wall_profile' not in body, (
+            'uç hem reddediyor hem profil yayımlıyor')
 
 
 # ---------------------------------------------------------------------------
 # 2. /api/advanced-performance-analysis — 200 + plot_data
 # ---------------------------------------------------------------------------
 
+#: ÖH D27 a4 / P7B4-11 — her analiz türü için ucun ÇİZİM İÇİN ihtiyaç
+#: duyduğu en küçük geometri. ``3d_surface`` boş gövdeyle de meşrudur (haçsız
+#: bir tarama yüzeyi çizer); öteki ikisi çizilen şeyin kendisini gerektirir.
+#: Tek kaynak: ``hrma.app._APA_REQUIRED_ANY_OF``.
+_APA_EN_KUCUK_GOVDE = {
+    '3d_surface': {},
+    'nozzle_mach': {'throat_area': 0.0012, 'expansion_ratio': 16.0},
+    'heat_flux': {'throat_area': 0.0012, 'expansion_ratio': 16.0,
+                  'burn_time': 30.0},
+}
+
+
 class TestAdvancedPerformanceAnalysis:
+    # --- ÇEVRİLDİ (ÖH D27 a4 / P7B4-11) — GEREKÇE -----------------------
+    #
+    # Bu bekçi ``{'analysis_type': X}`` — yani ÇİZİLECEK MOTORU HİÇ TARİF
+    # ETMEYEN — bir gövdenin 200 + dolu bir figür döndürmesini şart
+    # koşuyordu ve böylece kusurun KENDİSİNİ kilitliyordu: uç, figür
+    # modülünün ZORUNLU saydığı alanlara kendi sayılarını enjekte ediyordu
+    # (``throat_area=0,001`` m², ``expansion_ratio=16``, ``burn_time=30`` s
+    # …), figür de o uydurma alan oranını "Ae/At = 16.0" diye OLGU olarak
+    # basıyordu — üstelik aynı başlıkta γ/MW/Pc/Tc "Assumed (not supplied by
+    # this call)" diye dürüstçe listeleniyordu (ölçüm: ``docs/scofield/raw/
+    # OH/D27/app-api/a4/once.json`` K1).
+    #
+    # SÖZLEŞMENİN ÖZÜ DEĞİŞMEDİ ve burada AYNEN korunuyor: tanınan her tür
+    # 200 + geçerli bir Plotly figürü + ``analysis_info`` döndürür. Değişen
+    # tek şey, isteğin artık çizilecek şeyi TARİF ETMEK zorunda olmasıdır;
+    # tarif etmeyen istek 422 + alan adı alır (aşağıdaki ikinci bekçi).
     @pytest.mark.parametrize('analysis_type', ADVANCED_ANALYSIS_TYPES)
     def test_each_type_returns_plot_data(self, client, analysis_type):
         r = client.post('/api/advanced-performance-analysis',
-                        json={'analysis_type': analysis_type})
+                        json=dict(_APA_EN_KUCUK_GOVDE[analysis_type],
+                                  analysis_type=analysis_type))
         assert r.status_code == 200, (
             f"{analysis_type}: {r.status_code} döndü")
         body = r.get_json()
@@ -192,6 +261,17 @@ class TestAdvancedPerformanceAnalysis:
         assert isinstance(fig, dict) and fig.get('data'), (
             f"{analysis_type}: plot_data içinde 'data' izleri yok")
         assert 'analysis_info' in body, "analysis_info meta bloğu eksik"
+
+    @pytest.mark.parametrize('analysis_type', ['nozzle_mach', 'heat_flux'])
+    def test_tarif_edilmeyen_motor_cizilmez(self, client, analysis_type):
+        """P7B4-11: geometri gönderilmeyen istek FİGÜR ALMAZ, ad alır."""
+        r = client.post('/api/advanced-performance-analysis',
+                        json={'analysis_type': analysis_type})
+        assert r.status_code == 422, f'{analysis_type}: {r.status_code}'
+        body = r.get_json()
+        assert body['error'] == 'incomplete_figure_input'
+        assert body['missing_fields'], body
+        assert 'plot_data' not in body
 
     def test_unknown_type_rejected(self, client):
         r = client.post('/api/advanced-performance-analysis',

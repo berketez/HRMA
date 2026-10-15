@@ -125,7 +125,35 @@ def test_t07_son_port_inhibitor_duzenine_gore_degisir(istemci):
     # Çözücü tükenen web'i ve dayanağını yayımlamalı
     assert gd_tek.get('web_basis') == 'single_sided'
     assert gd_cift.get('web_basis') == 'two_sided'
-    assert gd_cift['web_burnout_mm'] == pytest.approx(gd_tek['web_burnout_mm'] / 2.0)
+
+    # ÇEVİRİ (ÖH D15 birleşmesi, 1 Eyl 2026 — katı a2 / P2B4-02).
+    # Bekçi eskiden `web_burnout_iki_cephe == web_burnout_tek_cephe / 2`
+    # BİREBİR eşitliğini soruyordu; o eşitlik `web_burnout_mm` GEOMETRİK
+    # formülden ((D - d)/2) geldiği sürece kurgusal olarak doğruydu.
+    # P2B4-02 alanı tek kaynağa bağladı: artık FİİLEN tüketilen kalınlık,
+    # yani çözülen eğri üzerinde ∫r dt. Modülün kendi künyesi de bunu
+    # söylüyor: "The three are different quantities and are NOT equal by
+    # construction." İki koşum farklı sürede (4,354 s / 2,393 s) ve farklı
+    # adımlarla entegre edildiği için yamuk kuralının artığı eşit değil.
+    #
+    # ÖLÇÜLDÜ (bu depo, bu yük): tek cephe 34,99722 mm (geometrik web
+    # 35,0 mm; eksik 0,00278 mm = %0,008) · iki cephe 17,48416 mm
+    # (hedef 17,5 mm; eksik 0,01584 mm = %0,091). En kötü artık %0,091.
+    #
+    # Bekçi bu yüzden GEVŞETİLMEDİ, MEKANİZMAYA BAĞLANDI: her iki koşum
+    # kendi geometrik hedefine %0,2 bandında oturmalı VE artık tek yönlü
+    # olmalı (tüketilen kalınlık hedefi AŞAMAZ — aşarsa çözücü var
+    # olmayan yakıt yakmış olur). İkinci iddia eski bekçide YOKTU.
+    gw = gd_tek['web_thickness_mm']          # geometrik web [mm]
+    assert gw == pytest.approx(35.0, rel=1e-12), 'geometrik web bayat'
+    assert gd_tek['web_burnout_mm'] == pytest.approx(gw, rel=2e-3)
+    assert gd_cift['web_burnout_mm'] == pytest.approx(gw / 2.0, rel=2e-3)
+    for gd, hedef in ((gd_tek, gw), (gd_cift, gw / 2.0)):
+        assert gd['web_burnout_mm'] <= hedef + 1e-9, (
+            'tüketilen web geometrik hedefi aştı (%r > %r) — var olmayan '
+            'yakıt yakılmış' % (gd['web_burnout_mm'], hedef))
+    assert gd_cift['web_burnout_mm'] / gd_tek['web_burnout_mm'] == \
+        pytest.approx(0.5, rel=2e-3), 'iki cepheli tükenme yarıda değil'
 
     p_tek = solid_results_to_motor_geometry(tek)['port_diameter_final'] * 1000
     p_cift = solid_results_to_motor_geometry(cift)['port_diameter_final'] * 1000

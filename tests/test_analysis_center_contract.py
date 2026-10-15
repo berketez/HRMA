@@ -219,8 +219,38 @@ AC_CLASSES = ['ac-row', 'ac-comp', 'ac-field']
 #: <style> bloğu içinde .ac- önekli seçici — kopya stil kuralının imzası.
 AC_RULE_RE = re.compile(r'\.ac-[a-zA-Z]')
 
-#: Üç motor sayfasının şablon dosyaları (PAGE_MOTOR_TYPE'ın dosya karşılığı).
-MOTOR_TEMPLATES = ['advanced.html', 'liquid.html', 'solid.html']
+# ---------------------------------------------------------------------------
+# Kapsam — ÖH FAZ B-4 / FAZ D kuyruğu (elle liste → türetilmiş)
+# ---------------------------------------------------------------------------
+# ``MOTOR_TEMPLATES`` 2026-08-27'ye kadar ELLE yazılmış üç dosyaydı. Aşağıdaki
+# ac-* kopya-stil bekçisi tam da "yeni bir sayfaya Merkez eklenip stilin
+# oraya kopyalanması" sürüklenmesini önlemek için var; elle liste bu senaryoda
+# TANIM GEREĞİ kör kalıyordu — yeni sayfa listeye elle eklenene kadar
+# taranmıyordu (D4'ün ``blowdown_panel.js`` vakasıyla aynı mekanizma: elle
+# liste ile türetmenin ARASINA düşen dosya hiçbir bekçi tarafından
+# görülmez).
+#
+# Ölçüt tek cümle: **Analiz Merkezi'ni YÜKLEYEN şablon** (yani ac-* elemanı
+# basabilecek sayfa) taranır. Ölçüt mekaniktir (şablon ``CENTER_SRC``
+# betiğine atıf yapıyor mu), elle muafiyet listesi yoktur.
+#
+# ÖLÇÜM (2026-08-27, bu depo): 8 şablonun 3'ü Merkez'i yüklüyor
+# (advanced/liquid/solid — elle listenin birebir aynısı); ``formulas.html``
+# güverteyi (analysis_dock.js) yüklüyor ama Merkez'i yüklemiyor, bu yüzden
+# ac-* kuralı ORADA aranmaz — ölçüt bunu kendiliğinden ayırıyor.
+
+def _merkez_sablonlari(sablon_dizini=TEMPLATES):
+    """Analiz Merkezi'ni yükleyen şablonların adları (türetilmiş)."""
+    return sorted(p.name for p in sablon_dizini.glob('*.html')
+                  if CENTER_SRC in p.read_text(encoding='utf-8'))
+
+
+#: Elle liste döneminin kapsamı — TABAN (türetme daralırsa kırmızı).
+TARIHSEL_MOTOR_TEMPLATES = ('advanced.html', 'liquid.html', 'solid.html')
+
+#: Üç motor sayfasının şablon dosyaları — TÜRETİLMİŞ (PAGE_MOTOR_TYPE'ın
+#: dosya karşılığı; yeni bir Merkez sayfası kendiliğinden kapsama girer).
+MOTOR_TEMPLATES = _merkez_sablonlari()
 
 CENTER_CSS_SRC = '/static/css/analysis_center.css'
 
@@ -246,12 +276,38 @@ class TestAcStyleSingleSource:
 
     Bu sınıf ölçülen gerçeği KİLİTLER: birisi şablon <style> bloklarına
     .ac-* kuralı kopyalarsa (görevin korkuttuğu sürüklenme) bekçi kırmızı
-    olur. Gün gelir stiller gerçekten CSS dosyasına taşınırsa (bu,
-    analysis_center.js'ten inline stillerin de sökülmesini gerektirir),
-    bu bekçi "dosya var + üç şablonda link + link theme.css'ten ÖNCE"
-    halefine çevrilir — sözleşme: theme.css sayfa stilinden sonra yüklenip
-    ezer (theme.css baş yorumu).
+    olur. KİMLİK stilleri için durum değişmedi (tek kaynak hâlâ
+    analysis_center.js inline stilleri); YERLEŞİM katmanı ise ayrı bir
+    dosyada yaşıyor ve 2026-08-18'de gerçek <link>'e geçti — ölü-link
+    bekçisinin halefi aşağıdaki ``TestLayoutCssLink``tir.
     """
+
+    def test_kapsam_turetilmis_ve_daralmamis(self):
+        """Kapsam kaynaktan türetilir ve elle liste dönemini KAPSAR.
+
+        ÖH Faz B-4 (FAZ D kuyruğu). İki yönlü kilit:
+          * türetme daralırsa (ölçüt bozulur, şablon adı değişir) elle
+            liste döneminin üç sayfası kaybolur → kırmızı;
+          * türetme genişlerse yeni sayfa kendiliğinden taranır (aşağıdaki
+            parametrik bekçi onun üstünde de koşar) — bu istenen davranış.
+
+        Ölçüldü (2026-08-27): 8 şablonun 3'ü Merkez'i yüklüyor.
+        """
+        turetilmis = _merkez_sablonlari()
+        assert set(TARIHSEL_MOTOR_TEMPLATES) <= set(turetilmis), (
+            'türetilmiş kapsam elle liste döneminden DAR: kaybolan %s '
+            '(türetilen: %s) — ölçüt (%r atfı) çürümüş olabilir'
+            % (sorted(set(TARIHSEL_MOTOR_TEMPLATES) - set(turetilmis)),
+               turetilmis, CENTER_SRC))
+        assert turetilmis == MOTOR_TEMPLATES, (
+            'modül yüklenirken türetilen liste ile şimdi türetilen liste '
+            'farklı — kaynak ağacı test koşumu sırasında değişmiş')
+        # Ölçütün vakumlanmadığı: Merkez'i yüklemeyen bir şablon var ve
+        # kapsam DIŞINDA (aksi hâlde "hepsi kapsamda" totolojisi olurdu).
+        tum = sorted(p.name for p in TEMPLATES.glob('*.html'))
+        assert set(turetilmis) < set(tum), (
+            'her şablon kapsama giriyor — ölçüt ayırt etmiyor, bekçi '
+            'vakumlanmış olabilir (şablonlar: %s)' % tum)
 
     @pytest.mark.parametrize('template', MOTOR_TEMPLATES)
     def test_templates_carry_no_inline_ac_rules(self, template):
@@ -276,12 +332,13 @@ class TestAcStyleSingleSource:
                 'tek-kaynak bekçisini yeni duruma taşı')
 
     @pytest.mark.parametrize('page', sorted(PAGE_MOTOR_TYPE))
-    def test_no_dead_center_css_link(self, client, page):
-        """Sayfa, var olmayan bir analysis_center.css'e link vermez.
+    def test_center_css_link_is_never_dead(self, client, page):
+        """Linkli CSS dosyası diskte VARDIR (ölü link = her yüklemede 404).
 
-        Taşıma yapılmadan böyle bir link her sayfa yüklemesinde 404 konsol
-        hatası üretir. Taşıma gününde link meşrulaşır; o zaman bu test
-        varlık + kaskad-sırası bekçisine çevrilir (sınıf yorumuna bakınız).
+        Parti 29'da bu bekçi "link YOKSA sorun yok" biçimindeydi (o gün
+        link gerçekten yoktu, dosyayı JS enjekte ediyordu). Link 2026-08-18
+        şablonlara girdi; koşul artık boş geçmiyor, ``TestLayoutCssLink``
+        linkin varlığını da ayrıca kilitliyor.
         """
         html = client.get(page).get_data(as_text=True)
         if CENTER_CSS_SRC in html:
@@ -289,6 +346,8 @@ class TestAcStyleSingleSource:
             assert css.exists(), (
                 f'{page}: {CENTER_CSS_SRC} linkli ama dosya yok — her '
                 'yüklemede 404')
+            assert client.get(CENTER_CSS_SRC).status_code == 200, (
+                f'{page}: {CENTER_CSS_SRC} linkli ama sunucu 200 dönmüyor')
 
 
 # ---------------------------------------------------------------------------
@@ -669,13 +728,46 @@ class TestGreyRowsAreDeclared:
         assert 'liquid' in row['reason'], (
             f'motor tipi nedeni motoru adlandırmıyor: {row["reason"]!r}')
 
-    def test_tenant_row_blocked_without_results(self, tmp_path):
+    def test_tenant_row_not_ready_without_results(self, tmp_path):
+        """Sonuç yokluğu GEÇİCİ durumdur; kalıcı uygulanamazlıkla aynı değil.
+
+        ÖH D23 / P17B3-08 — BEKÇİ ÇEVRİLDİ (doktrin 3).
+        Bu test eskiden ``row['state'] == 'blocked'`` diyordu ve tam da
+        kusuru KİLİTLİYORDU: "hesap henüz koşulmadı" ile "bu motorda hiç
+        geçerli değil" aynı ``blocked`` durumuna, dolayısıyla aynı gri
+        ``NOT APPLICABLE`` rozetine düşüyordu (ölçüldü: P17 B3 tur-02 —
+        hesaptan sonra aynı satır ``ready`` oluyor, yani geçiciydi).
+        Geçici durum artık ``not_ready``; gerekçenin adlandırılması
+        şartı DEĞİŞMEDİ ve aşağıda aynen sınanır.
+        """
         out = run_center(tmp_path, motorType='hybrid', results=None,
                          registerTenant=True)
         row = rows_of(out)[('nozzle_flow', 'cfd')]
-        assert row['state'] == 'blocked'
+        assert row['state'] == 'not_ready'
         assert 'calculation' in row['reason'] or 'hesap' in row['reason'], (
             f'sonuç yokluğu adlandırılmamış: {row["reason"]!r}')
+
+    def test_transient_and_permanent_states_differ(self, tmp_path):
+        """P17B3-08: iki farklı durum aynı rozeti giymez.
+
+        Kalıcı (motor tipi) ⟷ geçici (sonuç yok) satırlarının DURUMU da
+        ROZET METNİ de ayrışmalı; ayrım yalnız alt satırdaki gerekçe
+        cümlesinde kalmamalı.
+        """
+        kalici = run_center(tmp_path, motorType='liquid', results=SONUC)
+        gecici = run_center(tmp_path, motorType='hybrid', results=None,
+                            registerTenant=True)
+        k = rows_of(kalici)[('grain_section', 'planar_grain')]
+        g = rows_of(gecici)[('nozzle_flow', 'cfd')]
+        assert k['state'] == 'blocked'
+        assert g['state'] == 'not_ready'
+        assert k['state'] != g['state']
+        kh = kalici['nodes']['ac_tree']['html']
+        gh = gecici['nodes']['ac_tree']['html']
+        assert 'NOT APPLICABLE' in kh, 'kalıcı rozet metni kaybolmuş'
+        assert 'AWAITING RESULT' in gh, 'geçici rozet metni ekranda yok'
+        assert 'AWAITING RESULT' not in kh, (
+            'kalıcı satır geçici rozeti giyiyor')
 
     def test_tenant_applicability_reason_is_shown_verbatim(self, tmp_path):
         """Kiracının "bu sonuç X alanını taşımıyor" cümlesi ekrana AYNEN çıkar."""
@@ -838,9 +930,9 @@ TENANT_PANEL_FILES = [STATIC_JS / 'panels' / 'cfd_panel.js',
 @pytest.fixture(scope='module')
 def layout_css():
     assert LAYOUT_CSS.exists(), (
-        'analysis_center.css yok — analysis_center.js init() bu dosyayı '
-        '<link> olarak enjekte eder; dosya yoksa her sayfa yüklemesi 404 '
-        'konsol hatası üretir (A2 ölü-link bekçisinin çalışma-zamanı eşi)')
+        'analysis_center.css yok — üç motor şablonunun head\'i bu dosyaya '
+        '<link> veriyor; dosya yoksa her sayfa yüklemesi 404 konsol '
+        'hatası üretir (bkz. TestLayoutCssLink)')
     return read(LAYOUT_CSS)
 
 
@@ -934,19 +1026,6 @@ class TestLayoutStickyContract:
         assert 'class="ac-toc"' in center_code, (
             'içindekiler şeridi kabı .ac-toc sınıfını taşımıyor')
 
-    def test_center_injects_the_layout_css(self, center_code):
-        """Şablonlarda <link> yok (A2 tek-kaynak ölçümü + o partinin dosya
-        kapsamı); üç sayfanın tek kuraldan beslenmesi için linki init()
-        enjekte eder. Şablonlara gerçek <link> girdiği gün (A2 halef
-        bekçisi) bu bekçi 'enjeksiyon söküldü + üç şablonda link' halefine
-        çevrilir."""
-        assert CENTER_CSS_SRC in center_code, (
-            'analysis_center.js yerleşim CSS\'ini adreslemiyor — kurallar '
-            'hiçbir sayfada yüklenmez')
-        assert 'document.head' in center_code, (
-            'CSS linki head\'e enjekte edilmiyor')
-        assert LAYOUT_CSS.exists(), 'enjekte edilen dosya diskte yok — her sayfada 404'
-
     @pytest.mark.parametrize('template', MOTOR_TEMPLATES)
     def test_sticky_ancestors_carry_no_overflow(self, template):
         """Sticky'nin ölüm şartı: ATA elemanda overflow (visible dışı).
@@ -987,6 +1066,89 @@ class TestLayoutStickyContract:
         assert center_code.index('ac_columns') < center_code.index('ac_history_box'), (
             'geçmiş kutusu DOM\'da sütunların önüne taşınmış — K5c kararı '
             '(yapışkan-alt, sıfır DOM oynaması) bozulmuş')
+
+
+# ---------------------------------------------------------------------------
+# 6b. Yerleşim CSS'inin YÜKLENME YOLU (halef bekçi, 2026-08-18)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLEN DURUM (değişiklikten önce): üç sayfanın HTML'inde
+# '/static/css/analysis_center.css' geçmiyordu; dosya diskteydi ve 200
+# dönüyordu ama sayfaya YALNIZ analysis_center.js init() içindeki
+# injectLayoutCss() eliyle giriyordu. Bu köprü parti 29'un dosya
+# kapsamından doğmuştu (şablonlar o partide başka ajanındı) ve iki bedeli
+# vardı: (1) yerleşim kuralları JS çalışana kadar yok — Merkez'in ilk
+# çizimi stilsiz kadraja düşebilir; (2) kaskad sırası şablondan
+# okunamıyor, kural görünmez bir yerde yaşıyordu.
+#
+# HALEF SÖZLEŞME: link ÜÇ ŞABLONUN head'inde GERÇEKTİR ve theme.css'ten
+# ÖNCE gelir (tasarım sistemi yerleşim katmanını ezebilmeli —
+# analysis_center.css baş yorumu + theme.css baş yorumu); JS'te enjeksiyon
+# YOKTUR. Mutasyon iki yönlüdür: linki bir şablondan sökmek de,
+# enjeksiyonu JS'e geri koymak da kırmızı yakar.
+class TestLayoutCssLink:
+    #: Enjeksiyon köprüsünün kod imzaları (yorumsuz gövdede aranır).
+    INJECTION_SIGNS = ['injectLayoutCss', 'document.head']
+
+    @pytest.mark.parametrize('template', MOTOR_TEMPLATES)
+    def test_template_head_carries_the_link(self, template):
+        """Link ŞABLON dosyasının head'inde durur (sunucu tarafı değil)."""
+        html = read(TEMPLATES / template)
+        head = html[:html.lower().index('</head>')]
+        link = re.search(
+            r'<link[^>]+href="' + re.escape(CENTER_CSS_SRC) + r'"[^>]*>', head)
+        assert link, (
+            f'{template}: head\'de {CENTER_CSS_SRC} linki yok — yerleşim '
+            'kuralları yalnız JS çalıştıktan sonra gelir (parti 29 köprüsü)')
+        assert re.search(r'rel="stylesheet"', link.group(0)), (
+            f'{template}: {CENTER_CSS_SRC} linki rel="stylesheet" taşımıyor')
+
+    @pytest.mark.parametrize('template', MOTOR_TEMPLATES)
+    def test_link_comes_before_theme_css(self, template):
+        """Kaskad sözleşmesi: yerleşim katmanı theme.css'ten ÖNCE.
+
+        theme.css baş yorumu: "Her şablonun kendi inline <style> bloğundan
+        SONRA yüklenir; aynı özgüllükteki kurallar kaskad sırasıyla bunları
+        ezer." Yerleşim dosyası kimlik kuralı taşımaz (bekçi:
+        test_css_defines_no_identity_tokens), o yüzden tasarım sisteminin
+        ONU ezebilmesi gerekir — tersi kimliği yerleşime tabi kılardı.
+        """
+        html = read(TEMPLATES / template)
+        assert html.index(CENTER_CSS_SRC) < html.index('/static/css/theme.css'), (
+            f'{template}: yerleşim CSS\'i theme.css\'ten SONRA yükleniyor — '
+            'kaskad sözleşmesi ters döndü')
+
+    @pytest.mark.parametrize('page', sorted(PAGE_MOTOR_TYPE))
+    def test_rendered_page_serves_the_link(self, client, page):
+        """Sunulan sayfada link GERÇEKTEN var ve dosya 200 dönüyor."""
+        html = client.get(page).get_data(as_text=True)
+        assert CENTER_CSS_SRC in html, (
+            f'{page}: sunulan sayfada yerleşim CSS linki yok')
+        assert html.index(CENTER_CSS_SRC) < html.lower().index('</head>')
+        assert client.get(CENTER_CSS_SRC).status_code == 200
+
+    @pytest.mark.parametrize('sign', INJECTION_SIGNS)
+    def test_center_no_longer_injects_the_link(self, center_code, sign):
+        """Enjeksiyon köprüsü SÖKÜLDÜ.
+
+        Kalırsa aynı stil dosyası her sayfada iki kez adreslenir; daha
+        kötüsü, şablondaki link silinse bile kimse fark etmez — bu bekçi
+        de, link bekçisi de yeşil kalırdı.
+        """
+        assert sign not in center_code, (
+            f'analysis_center.js hâlâ CSS enjeksiyonu izi taşıyor ({sign}) '
+            '— şablon linki tek yol olmalı')
+
+    def test_center_no_longer_names_the_css_path(self, center_code):
+        """Yol dizgisi de kalmadı (yorum dışı gövdede): enjeksiyonun
+        yeniden dirilmesi için önce yol geri yazılmalı."""
+        assert CENTER_CSS_SRC not in center_code, (
+            'analysis_center.js gövdesinde yerleşim CSS yolu duruyor — '
+            'enjeksiyon kalıntısı')
+
+    def test_layout_css_file_exists(self):
+        assert LAYOUT_CSS.exists(), (
+            'analysis_center.css yok — üç şablondaki link ölü, her '
+            'yüklemede 404')
 
 
 @needs_node

@@ -34,6 +34,8 @@ import warnings
 import numpy as np
 import pytest
 
+from tests.support import serilestirme
+
 from hrma.constants import G_0
 from hrma.engines.hybrid_rocket_engine import (
     OX_TANK_LD_RATIO,
@@ -93,13 +95,47 @@ def test_a5_astar_boyutlari_gercek_akidan(saha_motor):
         Üç meşru hüküm vardır ve hangisinin çıkacağı GÖREVE bağlıdır
         (fikstür motoru değişirse hüküm değişebilir; bekçi sonucu değil
         sözleşmeyi kilitler):
-        1. zarf dışı      -> NOT_MODELLED + kalınlık None + model_valid False,
-        2. net ısınma yok -> NOT_MODELLED + kalınlık None + model_valid True
+        1. zarf dışı      -> NOT_MODELLED + kalınlık None + model_valid False
+           + 'MODEL OUT OF ENVELOPE' damgası,
+        2. net ısınma yok -> NOT_MODELLED + kalınlık None + model_valid False
+           + 'NO NET HEATING' damgası + gerileme 0 + blokaj 1,0
            (GÜNCELLEME 15 Ağu 2026: eskiden 'sized + 0,0 mm' idi. 0,0 mm bir
            tasarım değildir — gerileme sıfırken kalınlığı kasa/bond sıcaklık
            sınırı (iletim/char, SP-8093 pratiği) belirler ve modül onu
            modellemez; çekirdek artık bu rejimde kalınlık YAYIMLAMAZ),
         3. ablasyon       -> sized + bant içi hız + kalınlık özdeşliği.
+
+        ÇEVİRİ (ÖH D15 fix-3 / taban geçişi, 1 Eyl 2026) — HÜKÜM 2'DE
+        ``model_valid`` ARTIK False. Bu bekçinin eski hâli hüküm 2 için
+        ``model_valid is True`` istiyordu; ÖH Z5S / PK6 (defter P4B1-14,
+        commit f8269a5) ürünün hükmünü TERSİNE çevirdi: "hiçbir şey
+        modellenmediyse ``model_valid`` YEŞİL OLAMAZ"
+        (hrma/analysis/thermal_protection.py:829-834 —
+        ``gated_out = bool(reasons) or no_net`` ve
+        ``model_valid = (not reasons) and not gated_out``). Gerekçe:
+        ``model_valid``e bakan tüketici (protection_panel.js) kalınlığı
+        yayımlanmamış bir sonuç için geçerli-model işareti alıyordu; kardeş
+        bekçi ``tests/test_thermal_protection.py::
+        test_model_valid_is_not_green_when_nothing_was_modelled`` bunu ayrıca
+        kilitliyor. Eski iddia ürünle ÇELİŞTİĞİ için KUSURU KORUYAN bekçi
+        durumuna düşmüştü (ürün fail-closed'ı seçti, bekçi yeşili istiyordu)
+        ve çevrildi.
+
+        İki hüküm birbirine karışmasın diye ayırt edicilik BAŞKA eksene
+        taşındı ve GÜÇLENDİ: hüküm 2 artık damgasıyla (``NO NET HEATING``,
+        ``MODEL OUT OF ENVELOPE`` DEĞİL), sıfır gerilemesiyle ve blokaj
+        birimiyle tanınır.
+
+        ÖLÇÜLDÜ (bu fikstür, çeviriden önce — hibrit tasarım noktası
+        thrust=1000 N, burn_time=10 s, O/F=2,5, Pc=20 bar, saha 2000 m):
+        ``chamber_liner`` ve ``nozzle_entry_liner``ın ikisi de
+        ``recession_regime='no_net_heating'``, ``model_valid=False``,
+        ``thickness=None``, ``thickness_status='NOT_MODELLED'``,
+        ``recession_rate_mm_s=0.0``, ``total_recession_mm=0.0``,
+        ``blowing_blockage=1.0``,
+        ``blockage_basis='no blowing: the surface is not ablating, ...'``;
+        kamara istasyonunda T_recovery 1887,18 K < T_surface 2050 K, yani
+        ``q_conv_blocked=-150,92 kW/m²`` ve ``q_net=0,0 kW/m²``.
         """
         assert blok['flux_basis'] == 'surface_energy_balance'
         assert blok['h_gas_W_m2K'] > 0 and blok['T_surface_K'] > 0
@@ -112,9 +148,19 @@ def test_a5_astar_boyutlari_gercek_akidan(saha_motor):
             assert blok['thickness'] is None
             assert blok['validity_note']
             if blok['recession_regime'] == 'no_net_heating':
-                # Hüküm 2: model zarfın İÇİNDE, kalınlık dürüstçe yok.
-                assert blok['model_valid'] is True
+                # Hüküm 2: model zarfın İÇİNDE ama kalınlık MODELLENMEDİ.
+                # P4B1-14: modellenmemiş sonuç yeşil damga taşıyamaz.
+                assert blok['model_valid'] is False, (
+                    'no_net_heating dalında kalınlık YAYIMLANMIYOR '
+                    '(thickness_status=NOT_MODELLED, thickness=None) ama '
+                    'model_valid yeşil geldi — protection_panel.js bu '
+                    'bayrağa bakıp modellenmemiş sonucu geçerli sayar '
+                    '(defter P4B1-14)')
                 assert 'NO NET HEATING' in blok['validity_note']
+                # Hüküm 1 ile karışmasın: zarf ihlali damgası BURADA olmaz.
+                assert 'MODEL OUT OF ENVELOPE' not in blok['validity_note'], (
+                    'net-ısınma-yok rejimi zarf ihlali damgası taşıyor — '
+                    'iki ayrı hüküm tek metinde eriyor')
                 assert blok['recession_rate_mm_s'] == 0.0
                 assert blok['total_recession_mm'] == 0.0
                 # Üfleme yoksa blokaj da yoktur (psi = 1 zorunlu).
@@ -122,6 +168,8 @@ def test_a5_astar_boyutlari_gercek_akidan(saha_motor):
             else:
                 # Hüküm 1: zarf dışı.
                 assert blok['model_valid'] is False
+                assert 'MODEL OUT OF ENVELOPE' in blok['validity_note'], (
+                    'zarf dışı hüküm gerekçesini ADIYLA basmıyor')
             return
         assert blok['thickness_status'] == 'sized'
         assert blok['recession_regime'] == 'steady_ablation', (
@@ -378,9 +426,15 @@ def test_curuyen_beyanlar_sonucta_yok(saha_motor):
 
 
 def test_yeni_bloklar_json_serilestirilebilir(saha_motor, sahasiz_motor):
+    """ÇEVRİLDİ (ÖH D22 · P13B1-10): gövde İDDİASIZDI.
+
+    ``json.dumps(...)`` tek başına ne blokların VARLIĞINI ne gidiş–dönüş
+    kaybını ne de NaN/Infinity sızıntısını sınar. Ortak çekirdek üçünü de
+    kapatır (``tests/support/serilestirme.py``).
+    """
     for _, sonuc in (saha_motor, sahasiz_motor):
-        json.dumps({
+        serilestirme.json_capasi({
             'thermal_protection': sonuc['thermal_protection'],
             'launch_site_performance': sonuc['launch_site_performance'],
             'oxidizer_tank_slosh': sonuc['oxidizer_tank_slosh'],
-        })
+        }, 'hibrit yeni bloklar')

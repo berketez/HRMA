@@ -3,7 +3,10 @@
    --------------------------------------------------------------------
    POST /api/pressure-vessel-analysis sonucunu çizer:
    - Kod modu seçici: AIAA S-080 (uçuş) / ASME VIII Div 1 (yer)
-   - Başlık metriği: actual_burst_pressure_bar — "bu tank kaç barda patlar"
+   - Başlık metriği: actual_burst_pressure_bar — MODELLE TAHMİN EDİLEN kopma
+     basıncı (ÖH D31 / OH-D30-13: 'actual' adı ölçülmüş dayanım DEĞİLDİR;
+     min(Faupel 1956, ince cidar membran limiti) kestirimidir. Kart etiketi
+     ve ipucu bunu söyler; ucun künyesi actual_burst_pressure_basis)
    - Kartlar: gerekli kalınlık, MAWP, proof, hidrostatik test, burst
    - burst_margin PASS/MARGINAL/FAIL rozeti (status alanından)
    - Başlık (head) kalınlıkları tablosu, derating, warnings/assumptions
@@ -22,6 +25,20 @@
     // FALLBACK listesi — /api/materials kataloğu yüklenemezse kullanılır
     // (materials_db kanonik anahtarları; katalog gelirse 'shell' etiketli
     // tam liste bunun yerine geçer)
+    // ÖH D24 / OH-D23-03 — varsayılan malzeme: ÖNCE sunucunun ilan
+    // ettiği değer (materials_catalog.js -> /api/materials.
+    // default_structural_material). Katalog betiği hiç yüklenmemişse
+    // son çare ikiz sabit kullanılır; bu ikizin sunucudan AYRIŞMASI
+    // bekçiyle yasaktır (tests/test_d24_fix_asamasi.py, panel
+    // ikizlerini sunucu değeriyle EŞİTLER). Boş bırakmak seçenek
+    // değildir: cıvatalı bağlantı ucu member_material'ı ZORUNLU
+    // tutar (ÖH D15 / P5B1-05 fail-closed) ve panel varsayılan
+    // koşumda 400 alırdı.
+    var VARSAYILAN_MALZEME = (typeof window.HRMAMaterials !== 'undefined'
+        && window.HRMAMaterials.defaultStructuralMaterial)
+        ? window.HRMAMaterials.defaultStructuralMaterial()
+        : 'aluminum_6061';   /* ikiz — bekçi sunucuyla eşitler */
+
     var MATERIALS = [
         ['aluminum_6061', 'Aluminum 6061-T6'],
         ['steel_4130', 'Steel AISI 4130'],
@@ -57,11 +74,27 @@
         return 'info';
     }
 
-    function marginKind(m) {
+    /* ÖH D30 · P11B4-15 — KAZANILMAMIŞ YEŞİL.
+       ÖLÇÜLDÜ (a2/once.json: P11B4-15_marginKind_auto_sized_kapisi = 1 →
+       yalnız rozet; _hedef_geri_okumasi_beyani = 0): duvar kalınlığı
+       VERİLMEDİĞİNDE `pressure_vessel.py` cidarı `target_burst =
+       MARGINAL_BURST_MARGIN * p_burst_req` ile boyutlandırır
+       (pressure_vessel.py:811, MARGINAL_BURST_MARGIN = 1.2). Geri dönen
+       `burst_margin` bu yüzden ≈ 1,20'dir ve panelin eşiği tam orada
+       ("m < 1.2 → warn, değilse ok") durduğu için kart YEŞİL yanıyordu.
+       O yeşil bir DOĞRULAMA değil, boyutlandırıcının kendi hedefinin geri
+       okumasıdır — model kendi koyduğu hedefi kendi ölçüp geçti diyor.
+       (Kardeş desen: fea_panel `badgeEngineSfTautological`.)
+
+       Onarım: OLUMSUZ dallar (FAIL / MARGINAL) auto-sized durumda da
+       aynen basılır — onlar gerçek bilgidir. Kazanılmamış olan yalnız
+       ONAY yeşilidir: auto-sized iken 'ok' verilmez, kart nötr ('info')
+       kalır ve ipucunda nedeni yazar. Eşik SAYISI gevşetilmedi. */
+    function marginKind(m, autoSized) {
         if (m == null || !Number.isFinite(m)) return 'dim';
         if (m < 1.0) return 'err';
         if (m < 1.2) return 'warn';   // pressure_vessel.py MARGINAL eşiği
-        return 'ok';
+        return autoSized ? 'info' : 'ok';
     }
 
     function render(data, root) {
@@ -89,15 +122,34 @@
         head.innerHTML = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
             + badges + '</div>'
             + '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
+            // ÖH D31 / OH-D30-13 — DÜRÜST AD ÖNCE OKUNUR.
+            // Uç aynı sayıyı iki adla yayımlıyor: tarihsel
+            // `actual_burst_pressure_bar` ve dürüst
+            // `predicted_burst_pressure_bar`. Kart dürüst adı okur, eski
+            // ad yalnız GERİYE DÖNÜK yedektir (eski sürüm uçları). İpucu
+            // ucun KENDİ künyesini basar; metin panelde İCAT EDİLMEZ.
             + U.statCard(T('panel.vessel.cardBurst', 'Predicted burst pressure'),
-                U.fmt(d.actual_burst_pressure_bar, 1), 'bar', marginKind(d.burst_margin),
-                T('panel.vessel.cardBurstTip',
-                  'min(Faupel thick-wall, thin-wall plastic limit) — the pressure at which '
-                  + 'this vessel is predicted to rupture'))
+                U.fmt(Number.isFinite(d.predicted_burst_pressure_bar)
+                          ? d.predicted_burst_pressure_bar
+                          : d.actual_burst_pressure_bar, 1), 'bar',
+                marginKind(d.burst_margin, d.auto_sized),
+                d.actual_burst_pressure_basis
+                    || T('panel.vessel.cardBurstTip',
+                         'min(Faupel thick-wall, thin-wall plastic limit) — the pressure at which '
+                         + 'this vessel is predicted to rupture'))
             + U.statCard(T('panel.vessel.cardMargin', 'Burst margin'), U.fmt(d.burst_margin, 2),
-                T('panel.vessel.timesRequired', '× required'), marginKind(d.burst_margin),
-                U.tf('panel.vessel.cardMarginTip', { req: U.fmt(d.required_burst_pressure_bar, 1) },
-                     'Predicted burst / required burst ({req} bar)'))
+                T('panel.vessel.timesRequired', '× required'),
+                marginKind(d.burst_margin, d.auto_sized),
+                d.auto_sized
+                    ? U.tf('panel.vessel.cardMarginAutoTip',
+                           { req: U.fmt(d.required_burst_pressure_bar, 1) },
+                           'Predicted burst / required burst ({req} bar). No wall '
+                           + 'thickness was supplied, so the wall was sized to hit '
+                           + 'this very margin: the number reads back the sizing '
+                           + 'target and is not an independent verification.')
+                    : U.tf('panel.vessel.cardMarginTip',
+                           { req: U.fmt(d.required_burst_pressure_bar, 1) },
+                           'Predicted burst / required burst ({req} bar)'))
             + U.statCard(T('panel.vessel.cardReqThk', 'Required thickness'),
                 U.fmt(d.required_thickness_mm, 2), 'mm', null,
                 T('panel.vessel.cardReqThkTip', 'Code-required minimum wall thickness'))
@@ -120,8 +172,12 @@
         html += U.kvTable([
             [T('panel.vessel.meopInput', 'MEOP (input)'), U.fmt(inputs.meop_bar, 1) + ' bar'],
             [T('panel.vessel.proofPressure', 'Proof pressure (1.5 × MEOP)'),
-             U.fmt(d.proof_pressure_bar, 1) + ' bar',
-             T('panel.vessel.proofTip', 'AIAA S-080 proof factor')],
+             (d.proof_pressure_bar === null
+              || d.proof_pressure_bar === undefined)
+                 ? `<span style="color:var(--hd-ink-dim, #7d97a5);">—</span>`
+                 : U.fmt(d.proof_pressure_bar, 1) + ' bar',
+             d.proof_pressure_basis
+                 || T('panel.vessel.proofTip', 'AIAA S-080 proof factor')],
             [T('panel.vessel.hydroTest', 'Hydrostatic test (UG-99b)'),
              U.fmt(d.hydrostatic_test_pressure_bar, 1) + ' bar',
              '1.3 × MAWP × (S_test / S_design)'],
@@ -136,6 +192,15 @@
             [T('panel.vessel.burstThin', 'Burst — thin-wall plastic limit'),
              U.fmt(d.burst_thin_wall_bar, 1) + ' bar',
              T('panel.vessel.burstThinTip', 'P_b = 2·UTS·t/(D+t) — approximate')],
+            // OH-D30-13: iki korelasyonun MİNİMUMU olan yayımlanan sayı,
+            // künyesiyle birlikte merdivende de durur ki okuyucu "ölçülmüş
+            // dayanım" sanmasın.
+            [T('panel.vessel.burstPredicted',
+               'Burst — published prediction (min of the two above)'),
+             U.fmt(Number.isFinite(d.predicted_burst_pressure_bar)
+                       ? d.predicted_burst_pressure_bar
+                       : d.actual_burst_pressure_bar, 1) + ' bar',
+             d.actual_burst_pressure_basis || ''],
             [T('panel.vessel.allowableStress', 'Allowable stress S'),
              U.fmt(d.allowable_stress_MPa, 1) + ' MPa',
              T('panel.vessel.allowableTip', 'min(UTS/3.5, YS/1.5) — ASME Section II-D criteria')],
@@ -163,10 +228,44 @@
             ]);
         }
 
+        // ÖH D24 / OH-D23-03 — VARSAYILAN KÜNYESİ EKRANA İNER.
+        // Uç, ``material`` gönderilmediğinde kendi varsayılanını uygular ve
+        // bunu ``defaults_applied`` ile BEYAN eder. Beyanı kimse basmazsa
+        // beyan değildir: kullanıcı, kabın hangi malzemede boyutlandığını
+        // yine göremez. Alan yanıtta HİÇ yoksa (eski uç) blok basılmaz —
+        // olmayan bir beyan uydurulmaz. Boş liste beyanın KENDİSİDİR
+        // ("hiçbir alan varsayılandan gelmedi") ve gösterilir.
+        if (Array.isArray(d.defaults_applied)) {
+            var kunyeBasligi = T('panel.vessel.secDefaults',
+                'Inputs the endpoint filled from its own defaults');
+            if (d.defaults_applied.length) {
+                html += U.listBlock(kunyeBasligi,
+                    d.defaults_applied.map(function (k) {
+                        return (k && k.message)
+                            ? k.message
+                            : ((k && k.field) + ' = ' + (k && k.value));
+                    }), 'warn');
+            } else {
+                html += U.listBlock(kunyeBasligi,
+                    [T('panel.vessel.defaultsNone',
+                       'None - every input below came from this form.')],
+                    'dim');
+            }
+        }
+
         html += U.listBlock(T('common.warnings', 'Warnings'), d.warnings, 'warn');
         html += U.listBlock(T('common.assumptions', 'Assumptions'), d.assumptions, 'dim');
         mid.innerHTML = html;
         root.appendChild(mid);
+
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (X_basis / X_source / X_status / X_model) okuyup ekrana DÜZ
+        // METİN döküyor, hükmünü (hesaplandı / sizin girdiniz / varsayım
+        // / modellenmedi) hiç vermiyordu — pano sınıflandırıcısı ölü
+        // katmandı. Defter ucun KENDİ beyanını ortak sınıflandırıcıdan
+        // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
+        U.source.ledgerInto(root, d, { deep: true });
     }
 
     window.AnalysisDock.register({
@@ -182,7 +281,7 @@
             ['inner_diameter_mm', 'Inner Diameter (mm)', 150, 1, 'common.f.innerDiameterMm'],
             ['wall_thickness_mm', 'Wall Thickness (mm, blank = auto-size)', '', 0.1,
              'panel.vessel.fWallAuto'],
-            ['material', 'Material', 'aluminum_6061', MATERIALS, 'common.f.material'],
+            ['material', 'Material', VARSAYILAN_MALZEME, MATERIALS, 'common.f.material'],
             ['temperature_K', 'Design Temperature (K)', 293.15, 5, 'common.f.designTemperatureK'],
             ['weld_efficiency', 'Weld Joint Efficiency (UW-12)', '1.00', WELD_EFF,
              'panel.vessel.fWeld'],

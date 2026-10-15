@@ -20,12 +20,19 @@ hibrit İKİZİ burada kilitlenir. Bugünkü CI dersi (kanal var kapı yok sın�
       iş kaleminin dosya kümesi DIŞINDA — A3 raporunda defter kalemi).
       İlgili uçtan uca bekçi kablo çekilene kadar AÇIK SKIP ile bekler ve
       kablo çekilince kendiliğinden devreye girer (yalan yeşil yok).
+      ÖLÇÜLDÜ (27 Ağustos 2026, AST): kablo ÇEKİLMİŞ — ``/calculate``
+      hibrit kurucusu ``feed_line_length_m`` ve
+      ``feed_line_inner_diameter_mm`` anahtarlarını geçiriyor, uçtan uca
+      bekçi KOŞUYOR. Kablonun yönü ``FEED_LINE_KABLOSU_TAKILI_BEKLENEN``
+      ile DONDURULMUŞTUR: geri sökülürse bekçi sessizce skip'e düşmez,
+      KIRMIZI olur (ÖH defter P14M4-05b'nin ikizi, Faz B-1 devri).
 
 Mekanizma ayrımı (çift sayım yok): chug_loop oksitleyici besleme kuplajını
 bağlar; yakıt buharlaşma gecikmesi (LFI, Karabeyoglu) AYRI blokta ayrı
 kapsam etiketiyle durur — chug_loop.mechanism_scope bunu yazılı beyan eder.
 """
 
+import ast
 import copy
 import math
 import pathlib
@@ -386,7 +393,9 @@ BILINCLI_ISTISNALAR = {
 #: kapısız kanal = kırmızı) ve KÜÇÜLMEDEN buradan satır silinemez (kapı
 #: açıldıysa satır da silinmeli, yoksa test kırmızı).
 KAPISIZ_BILINEN = {
-    'ambient_temp',
+    # 'ambient_temp' — parti 33'te kapı AÇILDI (advanced.html + optNum;
+    # kanal ölçümü: 233,15 K → 781 yaprak; bekçisi
+    # tests/test_ambient_temp_kanali.py) ve satır kaldırıldı.
     'chamber_temperature',
     'gamma',
     'gas_constant',
@@ -401,23 +410,132 @@ def _calculate_isleyicisi():
     return src[bas:son]
 
 
+def _istek_okumalari(dugum, istek_adi):
+    """``<istek>.get('X')`` / ``<istek>['X']`` biçiminde okunan alan adları.
+
+    Alıcı ifadesinin ``Name`` olması ŞART DEĞİL: ``(data or {}).get('X')``
+    da sayılır (alıcı içinde istek adı geçiyorsa yeter). Bu gevşeklik
+    ölçülmüş bir kusurdan doğdu — aşağıdaki ``_motora_ulasan_anahtarlar``
+    künyesine bakın.
+    """
+    def alici_kullaniyor(n):
+        return any(isinstance(x, ast.Name) and x.id == istek_adi
+                   for x in ast.walk(n))
+
+    adlar = set()
+    for n in ast.walk(dugum):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == 'get' and n.args
+                and isinstance(n.args[0], ast.Constant)
+                and isinstance(n.args[0].value, str)
+                and alici_kullaniyor(n.func.value)):
+            adlar.add(n.args[0].value)
+        if (isinstance(n, ast.Subscript)
+                and isinstance(n.slice, ast.Constant)
+                and isinstance(n.slice.value, str)
+                and alici_kullaniyor(n.value)):
+            adlar.add(n.slice.value)
+    return adlar
+
+
 def _motora_ulasan_anahtarlar():
-    """/calculate içinde HybridRocketEngine(...) çağrısına giren data anahtarları."""
-    isleyici = _calculate_isleyicisi()
-    bas = isleyici.index('HybridRocketEngine(')
-    i = isleyici.index('(', bas)
-    derinlik = 0
-    son = i
-    for j in range(i, len(isleyici)):
-        if isleyici[j] == '(':
-            derinlik += 1
-        elif isleyici[j] == ')':
-            derinlik -= 1
-            if derinlik == 0:
-                son = j
-                break
-    govde = isleyici[i:son + 1]
-    return set(re.findall(r"data\.get\(\s*'([A-Za-z_0-9]+)'", govde))
+    """/calculate içinde HybridRocketEngine(...) çağrısına giren data anahtarları.
+
+    ÖH D15 (1 Eyl 2026) — TARAYICI ONARILDI. Eskisi çağrı METNİNDE
+    ``data.get('X')`` deseni arıyordu; ``test_yapisal_tarama_gercekten_
+    anahtar_goruyor`` negatif kontrolü tam bunun için yazılmıştı ("tarama
+    köreldiyse burada kırılır") ve KIRILDI: ``chamber_pressure`` artık
+    çağrıda görünmüyor.
+
+    Alan ölü DEĞİL, körelen taramaydı. app.py çağrıdan ÖNCE
+    ``chamber_pressure_input = _pc_varsayilan_kunyesi(data, ...)`` yapıyor
+    (P7B1-02, sessiz 20 bar varsayılanını BEYAN etmek için) ve o yardımcı
+    içinde okuma ``(data or {}).get('chamber_pressure')`` biçiminde —
+    yani ne çağrı gövdesinde ne de düz ``data.get`` deseninde.
+
+    Onarım desen genişletmek DEĞİL, bağı İZLEMEK: çağrı AST ile bulunur,
+    her anahtar için (a) doğrudan okuma, (b) ``data``yı alan modül
+    düzeyi bir yardımcıya yapılan çağrı, (c) aynı işlevdeki yerel atama
+    zinciri sırayla çözülür. Beklenen adı listeye elle yazmak kusuru
+    gizlerdi — negatif kontrolün varlık sebebi tam olarak budur.
+    """
+    agac = ast.parse(oku(APP_PY))
+    modul_fonksiyonlari = {
+        f.name: f for f in agac.body
+        if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    isleyici = cagri = None
+    for f in ast.walk(agac):
+        if not isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if f.name != 'calculate':
+            continue
+        for n in ast.walk(f):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == 'HybridRocketEngine'):
+                isleyici, cagri = f, n
+    assert cagri is not None, ('app.py içinde /calculate -> '
+                              'HybridRocketEngine(...) çağrısı bulunamadı')
+
+    def coz(dugum, derinlik=0):
+        adlar = _istek_okumalari(dugum, 'data')
+        if adlar or derinlik > 3:
+            return adlar
+        # (b) data'yı devralan modül düzeyi yardımcı
+        for n in ast.walk(dugum):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id in modul_fonksiyonlari):
+                yardimci = modul_fonksiyonlari[n.func.id]
+                parametreler = [a.arg for a in yardimci.args.args]
+                for sira, arg in enumerate(n.args):
+                    if (isinstance(arg, ast.Name) and arg.id == 'data'
+                            and sira < len(parametreler)):
+                        adlar |= _istek_okumalari(yardimci,
+                                                  parametreler[sira])
+        if adlar:
+            return adlar
+        # (b2) ÖH D32 app-api-uc a1 (OH-D31-13, 15 Eyl 2026) — TARAYICI
+        # İKİNCİ KEZ ONARILDI (ana model, fix-35c-2). Negatif kontrol yine
+        # kırıldı: ``of_ratio`` çağrıda ``of_ratio=_uc_yedegi('of_ratio')``
+        # oldu; ``_uc_yedegi`` calculate() İÇİNDE tanımlı bir kapanış ve
+        # ``data``yı gövdesinden okuyor, anahtar ise çağrıdaki DİZE
+        # LİTERALİ. (b) yalnız modül düzeyi yardımcıyı izliyordu. Kural:
+        # işleyicinin içinde tanımlı bir işlev hem ``data``ya hem o
+        # konumdaki parametresine dokunuyorsa, o konuma verilen dize
+        # literali okunan anahtardır. Beklenen adı listeye yazmak yerine
+        # bağ izlenir (negatif kontrolün varlık sebebi).
+        ic_fonksiyonlar = {
+            f.name: f for f in ast.walk(isleyici)
+            if isinstance(f, ast.FunctionDef) and f is not isleyici}
+        for n in ast.walk(dugum):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id in ic_fonksiyonlar):
+                continue
+            ic = ic_fonksiyonlar[n.func.id]
+            parametreler = [a.arg for a in ic.args.args]
+            adlar_ic = {m.id for m in ast.walk(ic) if isinstance(m, ast.Name)}
+            if 'data' not in adlar_ic:
+                continue
+            for sira, arg in enumerate(n.args):
+                if (isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                        and sira < len(parametreler)
+                        and parametreler[sira] in adlar_ic):
+                    adlar.add(arg.value)
+        if adlar:
+            return adlar
+        # (c) aynı işlevdeki yerel atama zinciri
+        for n in ast.walk(dugum):
+            if isinstance(n, ast.Name) and n.id != 'data':
+                for a in ast.walk(isleyici):
+                    if isinstance(a, ast.Assign) and any(
+                            isinstance(t, ast.Name) and t.id == n.id
+                            for t in a.targets):
+                        adlar |= coz(a.value, derinlik + 1)
+        return adlar
+
+    bulunan = set()
+    for kw in cagri.keywords:
+        bulunan |= coz(kw.value)
+    return bulunan
 
 
 def _form_ucunda_var(anahtar, html):
@@ -487,19 +605,128 @@ def test_stability_panel_include_analiz_merkezinin_altinda():
 # ===========================================================================
 # 8. Uçtan uca /calculate — kablo çekilince kendiliğinden devreye girer
 # ===========================================================================
+def _rota_dekoratoru(dugum, yol):
+    """``@app.route('<yol>', methods=[...])`` mi?"""
+    return (isinstance(dugum, ast.Call)
+            and isinstance(dugum.func, ast.Attribute)
+            and dugum.func.attr == 'route'
+            and dugum.args
+            and isinstance(dugum.args[0], ast.Constant)
+            and dugum.args[0].value == yol)
+
+
+def _hibrit_kurucu_anahtarlari():
+    """``/calculate``in ``HybridRocketEngine(...)`` çağrısının ANAHTAR adları.
+
+    ÖLÇÜLEN KUSUR (ÖH defter P14M4-05b — bu dosyadaki :501 yükleminin BİREBİR
+    İKİZİ, Faz B-1 devri): aşağıdaki dürüst skip eskiden ürün KAYNAK METNİNDE
+    alt dizge arıyordu (``'feed_line_length_m' not in _calculate_isleyicisi()``).
+    Alt dizge anahtarı bir YORUM SATIRINDA da bulur; kablo ile onu anlatan
+    yorum birlikte sökülünce yüklem sessizce yön değiştirir, bekçi skip'e
+    düşer ve süit hiçbir şey söylemeden yeşil kalır (P14 ölçümü: 9.250 testte
+    tek kırmızı yok, sayaç 1-skipped'te sabit).
+
+    Yeni yüklem YAPIya bakar: ``ast.Call`` -> ``keyword.arg``. Yorum artık
+    yüklemi besleyemez. Desen ``tests/test_enjektor_sozlesme_borclari.py``de
+    (B18 adımı) kuruldu, buraya kopyalanmıştır.
+
+    DİKKAT: bu yardımcı ``_motora_ulasan_anahtarlar()``ın YERİNE GEÇMEZ. O,
+    ``data.get('...')`` okumalarını sayar ve ``KAPISIZ_BILINEN`` iki yönlü
+    eşiğini besler (tescilli sağlıklı desen — dokunulmaz); bu ise kurucuya
+    giden kwarg ADlarını verir.
+    """
+    kaynak = oku(APP_PY)
+    agac = ast.parse(kaynak, filename=str(APP_PY))
+    for dugum in ast.walk(agac):
+        if not (isinstance(dugum, ast.FunctionDef)
+                and any(_rota_dekoratoru(d, '/calculate')
+                        for d in dugum.decorator_list)):
+            continue
+        for ic in ast.walk(dugum):
+            if (isinstance(ic, ast.Call) and isinstance(ic.func, ast.Name)
+                    and ic.func.id == 'HybridRocketEngine'):
+                return {k.arg for k in ic.keywords if k.arg}
+    raise AssertionError(
+        "app.py'de /calculate işleyicisinin HybridRocketEngine(...) çağrısı "
+        'bulunamadı — bu bekçinin çapası kaymış, önce çağrıyı bul.')
+
+
+#: İZLENEN KAPILAR — motorun atalet (ikinci mertebe) formuna geçmesi bu iki
+#: kurucu anahtarına bağlıdır.
+FEED_LINE_KAPILARI = ('feed_line_length_m', 'feed_line_inner_diameter_mm')
+
+#: KABLONUN BUGÜNKÜ DURUMU — ÖLÇÜLDÜ (27 Ağustos 2026, AST): ``/calculate``
+#: hibrit kurucusunun 39 kwarg'ı arasında iki kapı da VAR.
+#:
+#: Bu sabit yönü DONDURUR. Aşağıdaki uçtan uca bekçi "dürüst skip" desenini
+#: kullanır; skip tek başına bırakılırsa kablonun SÖKÜLMESİ süitte hiçbir
+#: kırmızı üretmez (yalnız sayaç 1-skipped'e kayar, dışarıdan görünmez —
+#: P14M4-05b'nin ölçtüğü tam mekanizma). Sökme bilerek yapıldıysa bu satır
+#: güncellenir ve gerekçesi yazılır.
+FEED_LINE_KABLOSU_TAKILI_BEKLENEN = True
+
+
+def test_feed_line_kablo_YONU_dondurulmus():
+    """Kablonun varlığı bir ÖLÇÜMdür; sessizce yön değiştiremez.
+
+    Yüklem app.py'nin YAPISINA bakar (``ast.Call`` -> ``keyword.arg``),
+    kaynak METNİNE değil: bir yorum satırı kabloyu var gösteremez.
+    """
+    anahtarlar = _hibrit_kurucu_anahtarlari()
+    takili = {a: (a in anahtarlar) for a in FEED_LINE_KAPILARI}
+    assert all(takili.values()) is FEED_LINE_KABLOSU_TAKILI_BEKLENEN, (
+        f'/calculate hibrit kurucusundaki besleme hattı kablosu beklenen '
+        f'yönde değil: {takili} (beklenen hepsi='
+        f'{FEED_LINE_KABLOSU_TAKILI_BEKLENEN}). Bu bir DAVRANIŞ '
+        'değişikliğidir: kullanıcının hat uzunluğu/çapı motora '
+        f'{"artık ulaşmıyor" if FEED_LINE_KABLOSU_TAKILI_BEKLENEN else "artık ulaşıyor"}'
+        ' ve chug çevrimi mertebe değiştiriyor. Bilerek yapıldıysa '
+        'FEED_LINE_KABLOSU_TAKILI_BEKLENEN güncellenir ve gerekçesi yazılır.')
+
+
+def test_kablo_yuklemi_yorumla_beslenemez():
+    """Negatif kontrol: yüklem AST'ye bakıyor, alt dizgeye değil.
+
+    ÖLÇÜLEN KUSUR (P14M4-05b): eski yüklem işleyicinin kaynak METNİNDE
+    ``'feed_line_length_m'`` alt dizgesini arıyordu; anahtarı ANAN bir yorum
+    satırı da bu aramayı geçiyordu. Burada iki yüklem AYNI kaynak üzerinde
+    karşılaştırılır: AST yüklemi yalnız gerçek kwarg'ları görmeli.
+    """
+    metin_yuklemi = 'feed_line_length_m' in _calculate_isleyicisi()
+    ast_yuklemi = 'feed_line_length_m' in _hibrit_kurucu_anahtarlari()
+    assert metin_yuklemi and ast_yuklemi, (
+        f'bugünkü ölçüm: metin={metin_yuklemi}, AST={ast_yuklemi} — ikisi de '
+        'doğru olmalıydı (kablo çekili)')
+    # Yorumla beslenme denemesi: kwarg'ı SÖKÜP adını yalnız yoruma bırakan
+    # bir kaynakta metin yüklemi hâlâ True, AST yüklemi False olmalıdır.
+    sahte = ('@app.route(\'/calculate\', methods=[\'POST\'])\n'
+             'def calculate():\n'
+             '    # feed_line_length_m kablosu geçici olarak söküldü\n'
+             '    return HybridRocketEngine(thrust=1.0)\n')
+    agac = ast.parse(sahte)
+    kwarglar = set()
+    for dugum in ast.walk(agac):
+        if (isinstance(dugum, ast.Call) and isinstance(dugum.func, ast.Name)
+                and dugum.func.id == 'HybridRocketEngine'):
+            kwarglar = {k.arg for k in dugum.keywords if k.arg}
+    assert 'feed_line_length_m' in sahte           # metin yüklemi kanardı
+    assert 'feed_line_length_m' not in kwarglar, (
+        'AST yüklemi de yoruma kandı — bu bekçi kendini silahsızlandırmış')
+
+
 def test_kapilar_calculate_ucundan_geciyor(istemci):
     """Dolu kapılar /calculate üzerinden çevrimi ikinci mertebeye geçirmeli.
 
-    DÜRÜST SKIP: app.py /calculate hibrit kurucusu feed_line_* anahtarlarını
-    henüz geçirmiyor (bu iş kaleminin dosya kümesi app.py'yi kapsamıyordu;
-    A3 raporunda defter kalemi + tek satırlık kablo tarifi). Kablo çekilince
-    bu bekçi otomatik devreye girer — skip koşulu app.py kaynağına bakar,
-    hafızaya değil.
+    DÜRÜST SKIP: kablo yoksa bu bekçi kendiliğinden devreye girmez. Skip
+    koşulu app.py'nin YAPISINA bakar (``ast.Call`` -> ``keyword.arg``),
+    kaynak metnine değil — bir yorum satırı yüklemi besleyemez (P14M4-05b).
+    Yön ayrıca ``test_feed_line_kablo_YONU_dondurulmus`` ile kilitlidir, yani
+    skip'in unutulması imkânsızdır.
     """
-    if 'feed_line_length_m' not in _calculate_isleyicisi():
+    if 'feed_line_length_m' not in _hibrit_kurucu_anahtarlari():
         pytest.skip(
             'app.py /calculate hibrit kurucusu feed_line_length_m/'
-            'feed_line_inner_diameter_mm anahtarlarını henüz geçirmiyor — '
+            'feed_line_inner_diameter_mm anahtarlarını geçirmiyor — '
             'defter kalemi (A3, 2026-08-17). Kablo: HybridRocketEngine('
             "..., feed_line_length_m=data.get('feed_line_length_m'), "
             "feed_line_inner_diameter_mm="

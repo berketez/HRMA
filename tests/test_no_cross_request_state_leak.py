@@ -84,6 +84,13 @@ class TestParachuteStateDoesNotLeak:
             f'sızıntısı. ilk={ilk} ikinci={ikinci}')
 
     def test_supplied_value_is_honoured_then_forgotten(self, client):
+        """Verilen alan uygulanır, sonraki isteğe TAŞINMAZ.
+
+        ÖH D22 / OH-D18-05 sonrası: "unutuldu"nun kanıtı artık
+        "varsayıma dönüldü" değil, "iniş hükmü yeniden geri çekildi".
+        Sızıntı olsaydı üçüncü istekte 9,0 m²'den türetilmiş bir iniş hızı
+        görünürdü; hüküm geri çekildiğine göre alan gerçekten unutulmuş.
+        """
         taban = _hibrit_taban()
 
         varsayilan = _inis(_sessiz_post(client, '/calculate', taban))
@@ -97,9 +104,9 @@ class TestParachuteStateDoesNotLeak:
             'kullanıcı değer verdiği hâlde "varsayıldı" bayrağı düşmedi'
         assert sonra == varsayilan, \
             'verilen değer sonraki isteğe sızdı'
-        assert sonra[3] is True, (
-            'varsayılan değere dönüldüğü hâlde "varsayıldı" bayrağı '
-            'kullanıcı vermiş gibi işaretli kaldı')
+        assert sonra[1] is None and sonra[0] is None, (
+            'paraşüt verilmeyen istekte iniş hükmü yayımlandı — sessiz '
+            'varsayılan geri gelmiş olabilir')
 
     def test_cd_alone_does_not_pin_area(self, client):
         """Bir anahtarı vermek DİĞERLERİNİ de sıfırlamalı.
@@ -107,6 +114,12 @@ class TestParachuteStateDoesNotLeak:
         Eski kod yalnız VERİLEN anahtarları varsayılana çekiyordu; bu yüzden
         bir istekte alan, sonrakinde Cd verilince alan hâlâ eski isteğinki
         kalıyordu.
+
+        ÖH D22 / OH-D18-05 sonrası iki ölçüm ayrıldı: alanın taşınmadığı
+        yalnız-Cd isteğinde (hüküm geri çekilir), Cd'nin gerçekten
+        uygulandığı ise alanın da verildiği bir istekte okunur. Eskiden tek
+        istek ikisini birden ölçebiliyordu çünkü eksik alan sessizce
+        uyduruluyordu.
         """
         taban = _hibrit_taban()
 
@@ -114,7 +127,13 @@ class TestParachuteStateDoesNotLeak:
         yalniz_cd = _inis(_sessiz_post(client, '/calculate',
                                        dict(taban, parachute_cd=0.9)))
 
-        assert yalniz_cd[2] == pytest.approx(0.9), 'verilen Cd uygulanmadı'
-        assert yalniz_cd[1] != pytest.approx(9.0), (
+        assert yalniz_cd[1] is None, (
             'önceki isteğin paraşüt ALANI bu isteğe taşındı — kısmi '
             'sıfırlama hatası')
+        assert yalniz_cd[0] is None, (
+            'alan verilmediği hâlde iniş hızı yayımlandı')
+
+        cd_ile = _inis(_sessiz_post(
+            client, '/calculate',
+            dict(taban, parachute_area=9.0, parachute_cd=0.9)))
+        assert cd_ile[2] == pytest.approx(0.9), 'verilen Cd uygulanmadı'

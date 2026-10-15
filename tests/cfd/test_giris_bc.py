@@ -72,6 +72,25 @@ BEKÇİLERİN KAPSAMI
       AYNEN geri gelir (tutarlılık), Riemann bandı yakınsamış çözümde
       ETKİN DEĞİLDİR, koşullanma kazancı eski eşlemeninkinden küçüktür,
   (g) beyan alanları (inlet_bc, inlet_bc_basis) yöntemi ve künyeyi taşır.
+
+ÇIKIŞ SINIRI — KASITLI GENİŞLETME (V2, viskoz devir kusuru #2)
+--------------------------------------------------------------
+Bu dosya giriş BC'sinin dosyasıdır; ÇIKIŞ çapası buraya bilerek eklendi:
+iki sınır koşulu aynı hayalet-durum makinesini (``euler_core``) paylaşır
+ve aynı "sessiz varsayılana düşme yok" sözleşmesine tabidir — ikisini
+ayrı dosyalara koymak o sözleşmeyi iki yerde yazmak olurdu.
+
+  (h) ses-altı çıkış çapası: VARSAYILAN ('extrapolate') bugünkü kodun
+      harfi harfine kendisidir (hayalet = iç durum, bit-özdeş),
+  (i) 'core_pressure' kipi YALNIZ Pb=None'da ve YALNIZ ses-altı
+      hücrelerde çalışır; çekirdek satırlar bit-aynı kalır,
+  (j) çapa KARAKTERİSTİK-TUTARLIDIR (Blazek §8.4): p imlenirken ρ ve u
+      giden dalgaların uyumluluk bağıntılarından türetilir — cebirsel
+      olarak sınanır,
+  (k) kolonda hiç süpersonik hücre yoksa çapa UYGULANMAZ (uydurma değer
+      yerine dışdeğerleme sürer, sürücü beyan eder),
+  (l) sürücü çapa kipinden BAĞIMSIZ olarak çıkıştaki ses-altı hücre
+      sayısını yayımlar: çapa kapalıyken kusur SESSİZ kalmaz.
 """
 
 import numpy as np
@@ -80,7 +99,13 @@ import pytest
 from hrma.cfd.euler_core import (
     INLET_BC_BASIS,
     INLET_BC_NAME,
+    OUTLET_ANCHOR_BASIS,
+    OUTLET_ANCHOR_CORE_PRESSURE,
+    OUTLET_ANCHOR_EXTRAPOLATE,
+    OUTLET_ANCHOR_MODES,
+    _outlet_state,
     inlet_state_from_stagnation,
+    outlet_subsonic_count,
     precompute_geometry,
     prim_to_cons_axisym,
     residual_axisym,
@@ -220,8 +245,17 @@ def test_merdiven_yakinsadi(giris_merdiveni, cr):
     """Her daralma oranı çözücü VARSAYILANLARIYLA (20000 tavan) oturur."""
     v = giris_merdiveni[cr]
     res = v['res']
-    assert res['converged'] is True, (
-        f"CR {cr} (giriş Mach {v['mach_giris']:.4f}) yakınsamadı: "
+    # ÇEVRİLDİ (ÖH D32 / OH-D31-15): çözücü AÇIK yolda donmuş
+    # operatörün sayısından artık hüküm VERMİYOR (converged=None,
+    # convergence_status='not_evaluated'; Berke kararı 15 Eyl 2026 §3
+    # seç. A; ölçüm docs/scofield/raw/OH/D32/fea-cfd/a2/once.json).
+    # Eski doğruluk iddiası KAZANILMAMIŞ hükmün yerinde durmasını
+    # şart koşuyordu — kusuru koruyan bekçi, yönü çevrildi. Korunan
+    # yasak duruyor: ÖLÇÜLMÜŞ yakınsamama/ıraksama iddiayı geçersiz
+    # kılar.
+    assert res['converged'] is not False, (
+        f"CR {cr} (giriş Mach {v['mach_giris']:.4f}) ÖLÇÜLMÜŞ olarak "
+        f"yakınsamadı: "
         f"{res['convergence_basis']} — son kalıntı "
         f"{res['residual_history'][-1]:.3e}, kalıntının ilk 3 giriş "
         f"kolonundaki payı {100 * float(np.sum(v['kolon_payi'][:3])):.2f}% "
@@ -274,9 +308,19 @@ def test_hibrit_sinifi_standart_cozunurlukte(giris_hibrit_standart):
     """
     v = giris_hibrit_standart
     res = v['res']
-    assert res['converged'] is True, (
-        f"CR {GIRIS_CR_HIBRIT} 120×24'te yakınsamadı: "
+    # ÇEVRİLDİ (ÖH D32 / OH-D31-15): çözücü AÇIK yolda donmuş
+    # operatörün sayısından artık hüküm VERMİYOR (converged=None,
+    # convergence_status='not_evaluated'; Berke kararı 15 Eyl 2026 §3
+    # seç. A; ölçüm docs/scofield/raw/OH/D32/fea-cfd/a2/once.json).
+    # Eski doğruluk iddiası KAZANILMAMIŞ hükmün yerinde durmasını
+    # şart koşuyordu — kusuru koruyan bekçi, yönü çevrildi. Korunan
+    # yasak duruyor: ÖLÇÜLMÜŞ yakınsamama/ıraksama iddiayı geçersiz
+    # kılar.
+    assert res['converged'] is not False, (
+        f"CR {GIRIS_CR_HIBRIT} 120×24'te ÖLÇÜLMÜŞ olarak yakınsamadı: "
         f"{res['convergence_basis']}")
+    assert res['convergence_status'] in ('converged', 'not_evaluated'), (
+        f"hüküm cinsi {res['convergence_status']!r}")
     assert res['mass_balance_rel'] < GIRIS_KUTLE_TOL
     rel = abs(res['mass_flow_out_kg_s'] - v['mdot_q1d']) / v['mdot_q1d']
     assert rel < GIRIS_DEBI_TOL, (
@@ -428,3 +472,188 @@ def test_beyan_alanlari_yontemi_adlandiriyor(giris_merdiveni):
         assert parca in beyan, f'künye eksik: {parca}'
     # Hüküm cümlesi de BC'yi adlandırmalı (panelin gördüğü metin budur)
     assert INLET_BC_NAME in res['convergence_basis']
+
+
+# ===========================================================================
+# (h)-(l) ÇIKIŞ SINIRI: ses-altı alt tabaka çapası (viskoz devir kusuru #2)
+# ===========================================================================
+
+def _cikis_kolonu(mach_n, p=None, gamma=GIRIS_GAMMA, R=GIRIS_R, T=2000.0):
+    """Verilen normal Mach profilinden çıkış kolonu (nj, 4) + normaller.
+
+    Normal saf +z alınır (çıkış düzlemi diktir): böylece bekçi geometri
+    değil SINIR KOŞULU MANTIĞINI ölçer.
+    """
+    mach_n = np.asarray(mach_n, dtype=float)
+    n = mach_n.size
+    if p is None:
+        p = np.linspace(1.0e5, 1.2e5, n)
+    p = np.asarray(p, dtype=float)
+    rho = p / (R * T)
+    a = np.sqrt(gamma * p / rho)
+    w = np.stack([rho, mach_n * a, np.zeros(n), p], axis=-1)
+    n_hat = np.tile(np.array([1.0, 0.0]), (n, 1))
+    return w, n_hat
+
+
+def test_cikis_varsayilan_dal_bugunku_kodun_HARFI_HARFINE_kendisi():
+    """extrapolate + Pb=None → hayalet = iç durum (tek ulp bile fark yok)."""
+    w, n_hat = _cikis_kolonu([2.5, 2.0, 1.4, 0.9, 0.4])
+    g = _outlet_state(w, n_hat, GIRIS_GAMMA, None)
+    assert np.array_equal(g, w), (
+        'varsayılan çıkış dalı değişmiş — Euler bit-özdeşlik sözleşmesi '
+        '(§11.3) bu dalın üstünde duruyor')
+    assert np.array_equal(
+        _outlet_state(w, n_hat, GIRIS_GAMMA, None,
+                      subsonic_anchor=OUTLET_ANCHOR_EXTRAPOLATE), w)
+
+
+def test_cikis_capasi_TAM_SUPERSONIK_kolonda_etkisiz():
+    """Ses-altı hücre yoksa çapa hiçbir şeyi değiştiremez (bit-aynı)."""
+    w, n_hat = _cikis_kolonu([2.5, 2.2, 1.9, 1.4, 1.05])
+    g = _outlet_state(w, n_hat, GIRIS_GAMMA, None,
+                      subsonic_anchor=OUTLET_ANCHOR_CORE_PRESSURE)
+    assert np.array_equal(g, w)
+    assert outlet_subsonic_count(w, n_hat, GIRIS_GAMMA) == 0
+
+
+def test_cikis_capasi_YALNIZ_ses_alti_satirlari_degistirir():
+    """Çekirdek (süpersonik) satırlar bit-aynı; ses-altı satırlar çapalı."""
+    mach_n = np.array([2.5, 2.2, 1.8, 1.2, 0.95, 0.6, 0.2])
+    w, n_hat = _cikis_kolonu(mach_n)
+    g = _outlet_state(w, n_hat, GIRIS_GAMMA, None,
+                      subsonic_anchor=OUTLET_ANCHOR_CORE_PRESSURE)
+    sup = mach_n >= 1.0
+    assert np.array_equal(g[sup], w[sup]), 'çekirdek satırlar değişti'
+    # Ses-altı satırların hepsi tabakanın KENARI (son süpersonik hücre,
+    # burada indis 3) basıncını taşır
+    assert np.all(g[~sup, 3] == w[3, 3])
+    assert np.all(g[~sup, 3] != w[~sup, 3]), 'vaka ayırt edici değil'
+    assert outlet_subsonic_count(w, n_hat, GIRIS_GAMMA) == int(np.sum(~sup))
+
+
+def test_cikis_capasi_karakteristik_TUTARLI_Blazek_bagintilari():
+    """ρ ve u serbest bırakılmaz: giden dalgaların uyumluluk bağıntıları.
+
+    ρ_b = ρ_i + (p_b − p_i)/c_i²   ve   u_b = u_i + n̂·(p_i − p_b)/(ρ_i c_i)
+    (Blazek §8.4). Yalnız p'yi değiştirip ρ,u'yu iç değerde bırakmak
+    hayalete sahte entropi/hız sıçraması yazardı — ölçülen bedeli
+    OUTLET_ANCHOR_BASIS'te.
+    """
+    mach_n = np.array([2.4, 1.6, 1.1, 0.8, 0.3])
+    w, n_hat = _cikis_kolonu(mach_n)
+    g = _outlet_state(w, n_hat, GIRIS_GAMMA, None,
+                      subsonic_anchor=OUTLET_ANCHOR_CORE_PRESSURE)
+    alt = mach_n < 1.0
+    c_i = np.sqrt(GIRIS_GAMMA * w[..., 3] / w[..., 0])
+    p_kenar = w[2, 3]
+    dp = p_kenar - w[alt, 3]
+    assert np.allclose(g[alt, 0], w[alt, 0] + dp / c_i[alt] ** 2,
+                       rtol=0.0, atol=0.0)
+    assert np.allclose(g[alt, 1],
+                       w[alt, 1] - dp / (w[alt, 0] * c_i[alt]),
+                       rtol=0.0, atol=0.0)
+    assert np.allclose(g[alt, 2], w[alt, 2], rtol=0.0, atol=0.0), (
+        'normal +z iken teğet bileşen değişmemeli')
+    # Tutarlılığın ANLAMI: hayaletin entropisi iç durumunkine LİNEER
+    # mertebede eşit kalır (yalnız p değiştirilseydi kalmazdı).
+    s_i = w[alt, 3] / w[alt, 0] ** GIRIS_GAMMA
+    s_b = g[alt, 3] / g[alt, 0] ** GIRIS_GAMMA
+    s_yalniz_p = p_kenar / w[alt, 0] ** GIRIS_GAMMA
+    assert np.all(np.abs(s_b / s_i - 1.0)
+                  < np.abs(s_yalniz_p / s_i - 1.0)), (
+        'karakteristik-tutarlı hayalet entropiyi daha az kaydırmalıydı')
+
+
+def test_cikis_capasi_TAM_SES_ALTI_kolonda_uygulanmaz_ve_dusmez():
+    """Hiç süpersonik hücre yoksa çapa değeri YOKTUR — uydurulmaz."""
+    mach_n = np.array([0.9, 0.7, 0.5, 0.2])
+    w, n_hat = _cikis_kolonu(mach_n)
+    g = _outlet_state(w, n_hat, GIRIS_GAMMA, None,
+                      subsonic_anchor=OUTLET_ANCHOR_CORE_PRESSURE)
+    assert np.array_equal(g, w), (
+        'çapasız kolonda hayalet dışdeğerleme olarak kalmalı')
+    # ses-altı CEP (çekirdekte) — eksene doğru en yakın süpersonik komşu
+    mach_c = np.array([2.0, 0.95, 1.5, 0.6])
+    w2, n2 = _cikis_kolonu(mach_c)
+    g2 = _outlet_state(w2, n2, GIRIS_GAMMA, None,
+                       subsonic_anchor=OUTLET_ANCHOR_CORE_PRESSURE)
+    assert g2[1, 3] == w2[0, 3], 'cep indis 0\'ın basıncını almalı'
+    assert g2[3, 3] == w2[2, 3], 'duvar satırı indis 2\'nin basıncını almalı'
+    assert np.array_equal(g2[0], w2[0]) and np.array_equal(g2[2], w2[2])
+
+
+@pytest.mark.parametrize('anchor', OUTLET_ANCHOR_MODES)
+def test_Pb_verildiginde_capa_kipi_sonucu_DEGISTIRMEZ(anchor):
+    """Pb dalı (bugünkü kural) her iki kipte BİT-AYNI — kapsam beyanı."""
+    mach_n = np.array([2.5, 1.6, 0.9, 0.4])
+    w, n_hat = _cikis_kolonu(mach_n)
+    pb = 5.0e4
+    g = _outlet_state(w, n_hat, GIRIS_GAMMA, pb, subsonic_anchor=anchor)
+    beklenen = np.array(w, copy=True)
+    beklenen[mach_n < 1.0, 3] = pb
+    assert np.array_equal(g, beklenen)
+
+
+def test_bilinmeyen_capa_kipi_REDDEDILIR():
+    w, n_hat = _cikis_kolonu([2.0, 0.5])
+    with pytest.raises(ValueError, match=r'subsonic_anchor .* tanımsız'):
+        _outlet_state(w, n_hat, GIRIS_GAMMA, None, subsonic_anchor='pb')
+    with pytest.raises(ValueError, match=r'subsonic_anchor .* tanımsız'):
+        _outlet_state(w, n_hat, GIRIS_GAMMA, 1e5, subsonic_anchor='')
+    assert OUTLET_ANCHOR_MODES == ('extrapolate', 'core_pressure')
+
+
+def test_kalinti_varsayilan_capayla_BIT_AYNI(giris_merdiveni):
+    """residual_axisym'e argüman EKLENMESİ varsayılan sonucu değiştirmedi."""
+    res = giris_merdiveni[GIRIS_CR_HIBRIT]
+    grid = res['grid']
+    U = prim_to_cons_axisym(
+        res['res']['fields']['rho_kg_m3'], res['res']['fields']['u_z_m_s'],
+        res['res']['fields']['u_r_m_s'], res['res']['fields']['pressure_Pa'],
+        GIRIS_GAMMA)
+    ortak = dict(Pb=GIRIS_PB, geom=precompute_geometry(grid))
+    r0, _ = residual_axisym(U, grid, GIRIS_GAMMA, GIRIS_R, GIRIS_P0,
+                            GIRIS_T0, **ortak)
+    r1, _ = residual_axisym(U, grid, GIRIS_GAMMA, GIRIS_R, GIRIS_P0,
+                            GIRIS_T0,
+                            outlet_subsonic_anchor=OUTLET_ANCHOR_EXTRAPOLATE,
+                            **ortak)
+    assert np.array_equal(r0, r1)
+
+
+def test_surucu_cikis_beyani_capa_kapaliyken_de_kusuru_GOSTERIR():
+    """outlet_bc bloğu: kip, ses-altı hücre sayısı, çapasızlık uyarısı."""
+    r_ch, l_conv = giris_kontur_parametreleri(GIRIS_CR_HIBRIT)
+    z_nodes = np.linspace(0.0, l_conv + GIRIS_L_DIV, 61)
+    grid = build_grid_from_wall(
+        z_nodes, giris_duvar_yaricapi(z_nodes, r_ch, l_conv), 12)
+    res = solve_steady_axisym(grid, GIRIS_P0, GIRIS_T0, GIRIS_GAMMA, GIRIS_R,
+                              Pb=None, max_iters=400)
+    ob = res['outlet_bc']
+    assert ob['subsonic_anchor'] == OUTLET_ANCHOR_EXTRAPOLATE
+    assert ob['Pb_Pa'] is None
+    assert ob['cells_total'] == grid.nj
+    assert 0 <= ob['subsonic_cells'] <= grid.nj
+    assert ob['_basis'] == OUTLET_ANCHOR_BASIS
+    for parca in ('Schlichting', 'Blazek', 'u_n − a', 'uydurma sabit',
+                  'TAŞIYAMAZ'):
+        assert parca in ob['_basis'], f'künye eksik: {parca}'
+    # Kayma duvarlı Euler koşusunda sınır tabakası YOKTUR: çıkış kolonu
+    # tam süpersoniktir, yani uyarı da olmamalı. (Uyarının ateşlediği
+    # yer viskoz koşudur — bekçisi test_viskoz_entegrasyon.py'de.)
+    assert ob['subsonic_cells'] == 0
+    assert ob['unanchored_warning'] is None
+    assert ob['anchored'] is False
+    assert res['inputs']['outlet_subsonic_anchor'] == OUTLET_ANCHOR_EXTRAPOLATE
+
+
+def test_surucu_bilinmeyen_capa_kipini_REDDEDER():
+    r_ch, l_conv = giris_kontur_parametreleri(GIRIS_CR_HIBRIT)
+    z_nodes = np.linspace(0.0, l_conv + GIRIS_L_DIV, 41)
+    grid = build_grid_from_wall(
+        z_nodes, giris_duvar_yaricapi(z_nodes, r_ch, l_conv), 8)
+    with pytest.raises(ValueError, match=r'outlet_subsonic_anchor'):
+        solve_steady_axisym(grid, GIRIS_P0, GIRIS_T0, GIRIS_GAMMA, GIRIS_R,
+                            Pb=None, max_iters=10,
+                            outlet_subsonic_anchor='core-pressure')

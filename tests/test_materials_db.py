@@ -96,10 +96,17 @@ class TestSchemaV252:
     """REQUIRED_FIELDS + tags + yeni kayıtlar (v2.5.2 genişletmesi)."""
 
     def test_required_fields_constant_matches_schema(self):
-        # Docstring'deki 18 alanın tamamı sabitte
-        assert len(REQUIRED_FIELDS) == 18
+        # ÖH D22 / defter P9B4-09 (ÇEVRİLEN BEKÇİ): bu sayı 18'de
+        # DONDURULMUŞTU ve şemanın büyümesini engelliyordu. Kalemin ölçülen
+        # kusuru tam olarak buydu: 18 zorunlu alanın hiçbiri kriyojenik/DBTT
+        # değildi, hüküm modül düzeyindeki bir kümede yaşıyordu ve katalogdaki
+        # 17 kayıt beyansız olarak "soğukta sünek kalır" sayılıyordu.
+        # Sayı 19'a çıkarıldı; alan adı ayrıca aranıyor ki bekçi yalnız
+        # "sayı" değil "hangi alan" sorusunu da sorsun.
+        assert len(REQUIRED_FIELDS) == 19
         for f in ('name', 'source', 'derating_curve',
-                  'thermal_conductivity', 'max_service_temperature'):
+                  'thermal_conductivity', 'max_service_temperature',
+                  'cryogenic_ductility'):
             assert f in REQUIRED_FIELDS
 
     def test_all_records_carry_required_fields(self):
@@ -172,10 +179,24 @@ class TestSchemaV252:
                     f"{key}.{curve_name} eksik/kısa")
                 for T, v in curve.items():
                     assert T > 0 and v > 0, f"{key}.{curve_name}[{T}]"
-            # k_curve oda sıcaklığı değeri sabit alanla tutarlı (±%5)
+            # ÖH D19 · P13B3-05 — ÖLÜ BANT ÜSTÜNDE GEVŞEK EŞİK ÇEVRİLDİ.
+            # Eski hâli ``rel=0.05`` idi ("±%5"). Ölçüldü (D19, taban
+            # 60cd341): k_curve'ü olan 3 malzemenin 3'ünde de iki alan
+            # BİT-ÖZDEŞ (fark = 0, ayrışan 0). Yani ilan edilen %5'lik bant
+            # bir kez bile sınanmadı — ama sınanmadığı hâlde YARIN iki
+            # kopyanın %5'e kadar ayrışmasını sessizce kabul edecekti.
+            # Burada karşılaştırılan şey bir hesap değil, AYNI KAYITTAKİ İKİ
+            # KOPYA (``k_curve`` oda sıcaklığı girdisi ⟷ ``thermal_
+            # conductivity`` skaleri). Kopyaların ayrışması bu kampanyanın
+            # kovaladığı kusur sınıfının ta kendisidir; band değil KİMLİK
+            # gerekir. Kayan nokta zinciri yok (iki sözlük okuması), bu
+            # yüzden depo gürültü tabanı 1e-12 platformlar arası güvenlidir.
             T0 = min(rec['k_curve'])
             assert rec['k_curve'][T0] == pytest.approx(
-                rec['thermal_conductivity'], rel=0.05), key
+                rec['thermal_conductivity'], rel=1e-12), (
+                f'{key}: k_curve[{T0}] = {rec["k_curve"][T0]} ile '
+                f'thermal_conductivity = {rec["thermal_conductivity"]} '
+                'ayrıştı — aynı kaydın iki kopyası tek sayı olmalı')
 
     def test_get_material_safe_alias_and_error(self):
         rec, key = get_material_safe('17-4PH')
@@ -197,44 +218,79 @@ class TestSchemaV252:
 
 
 class TestCadVisualizationParity:
-    """cad_visualization yerel tablosu merkezle çelişmemeli (v2.5.2)."""
+    """CAD katmanının malzeme sayıları merkezle çelişmemeli (v2.5.2).
 
-    def test_cad_material_table_matches_central_db(self):
+    ÖH D24 / P9B1-29 (BEKÇİ ÇEVRİLDİ). Bu sınıf eskiden
+    ``MotorCADDesigner().materials_db`` sözlüğünü merkezle karşılaştırıyordu.
+    ÖLÇÜLDÜ (taban 88a29d3, ``once.json`` M4, AST taraması): o sözlüğün ÜRÜN
+    kodunda **0 okuyucusu** vardı — tek okuyanı bu testti. Yani her
+    ``MotorCADDesigner()`` kurulumu, hiç okunmayan bir tablo için sekiz
+    ``get_material`` çağrısı yapıyor ve test yalnız kendisinin ayakta
+    tuttuğu bir yapıyı doğruluyordu (totolojik bekçi). Tablo ve onu kuran
+    ``_cad_material`` yardımcısı silindi.
+
+    Sınıfın GERÇEK iddiası korundu ve CANLI yola bağlandı: CAD katmanının
+    kullanıcıya yayımladığı malzeme spesifikasyonu
+    (``_generate_material_specifications``) merkezî ``materials_db``den
+    okunur ve 2026-07 keşfindeki çelişkiler (Inconel 1034 vs 1100 MPa,
+    grafit 2200 vs 1800 kg/m³) merkezde de geri gelmemelidir.
+    """
+
+    #: 2026-07 keşfinin çeliştiği kayıtlar. CAD katmanı bu anahtarları
+    #: merkezden okur; sayılar merkezde değişirse burası kırmızıya döner.
+    CELISKILI_KAYITLAR = {
+        'ss_304': ('density', 'yield_strength'),
+        'aluminum_6061': ('density', 'yield_strength'),
+        'inconel_718': ('density', 'yield_strength'),
+        'graphite': ('density', 'melting_point'),
+        'tungsten': ('density', 'melting_point'),
+        'copper': ('density', 'melting_point'),
+        'ss_316': ('density', 'yield_strength'),
+        'titanium_6al4v': ('density', 'yield_strength'),
+    }
+
+    def test_cad_katmani_merkezden_okuyor(self):
+        """CAD'in yayımladığı kamara malzemesi merkezî kaydın SAYISIDIR."""
         pytest.importorskip('trimesh')
         pytest.importorskip('plotly')
         from hrma.export.cad_visualization import MotorCADDesigner
-        d = MotorCADDesigner()
-        expected = {
-            ('chamber', 'steel_304'): 'ss_304',
-            ('chamber', 'aluminum_6061'): 'aluminum_6061',
-            ('chamber', 'inconel_718'): 'inconel_718',
-            ('nozzle', 'graphite'): 'graphite',
-            ('nozzle', 'tungsten'): 'tungsten',
-            ('nozzle', 'copper'): 'copper',
-            ('injector', 'stainless_steel'): 'ss_316',
-            ('injector', 'titanium'): 'titanium_6al4v',
-        }
-        for (group, local_key), db_key in expected.items():
-            entry = d.materials_db[group][local_key]
-            rec = get_material(db_key)
-            for field, value in entry.items():
-                if field == 'color':
-                    continue
-                assert value == rec[field], (
-                    f"cad {group}/{local_key}.{field} = {value} "
-                    f"!= central {db_key}.{field} = {rec[field]}")
+        rec = get_material('aluminum_6061')
+        spec = MotorCADDesigner()._generate_material_specifications({
+            'chamber_diameter': 0.1, 'chamber_length': 0.5,
+            'chamber_material': 'aluminum_6061',
+        })
+        blok = spec['chamber_material']
+        ozellik = blok['properties']
+        # Merkezî kaydın SAYILARI, CAD çıktısında birebir görünmeli.
+        assert ozellik['yield_strength'] == \
+            '%.0f MPa' % (rec['yield_strength'] / 1e6), ozellik
+        assert ozellik['density'] == \
+            '%.2f g/cm3' % (rec['density'] / 1000.0), ozellik
+        assert ozellik['melting_point'] == \
+            '%.0f K' % rec['melting_point'], ozellik
+        # Künye de merkezden gelir (metin uydurulmaz).
+        assert rec['source'][:30] in blok['source'], blok['source']
 
     def test_prior_conflicts_are_gone(self):
-        # 2026-07 keşfi: inconel yield 1034 vs 1100 MPa, grafit yoğunluk
-        # 2200 vs 1800 — yerel tablo artık merkezden okur.
+        """2026-07 çelişkileri merkezde de geri gelmedi."""
+        assert get_material('inconel_718')['yield_strength'] \
+            == pytest.approx(1100e6)
+        assert get_material('graphite')['density'] == pytest.approx(1800)
+
+    def test_cad_anahtarlarinin_HEPSI_merkezde_var(self):
+        """Silinen tablonun anahtarları merkezde çözülebilir olmalı."""
+        for db_key, alanlar in self.CELISKILI_KAYITLAR.items():
+            rec = get_material(db_key)
+            for alan in alanlar:
+                assert rec.get(alan) is not None, (db_key, alan)
+
+    def test_olu_tablo_geri_gelmedi(self):
+        """``materials_db`` tablosu ve ``_cad_material`` geri gelmesin."""
         pytest.importorskip('trimesh')
         pytest.importorskip('plotly')
-        from hrma.export.cad_visualization import MotorCADDesigner
-        d = MotorCADDesigner()
-        assert d.materials_db['chamber']['inconel_718']['yield_strength'] \
-            == pytest.approx(1100e6)
-        assert d.materials_db['nozzle']['graphite']['density'] \
-            == pytest.approx(1800)
+        from hrma.export import cad_visualization as cv
+        assert not hasattr(cv.MotorCADDesigner(), 'materials_db')
+        assert not hasattr(cv, '_cad_material')
 
 
 class TestLegacyValueParity:
@@ -257,7 +313,16 @@ class TestLegacyValueParity:
         assert m['specific_heat'] == pytest.approx(477)
         assert m['melting_point'] == pytest.approx(1705)
         assert m['allowable_temperature'] == pytest.approx(1000)
-        assert m['max_service_temperature'] == pytest.approx(2000)
+        # ÖH D16 / P9B4-14 — BEKÇİ ÇEVRİLDİ (ÖK-05).
+        # Bu satır eskiden 2000 K'yi kilitliyordu: yani kaydın KENDİ erime
+        # noktasının (1705 K) 295 K ÜSTÜNDEKİ bir servis klampını "eski ısı
+        # tablosuyla uyum" gerekçesiyle koruyordu. Eski tabloyla birebirlik
+        # FİZİKSEL DEĞİŞMEZİN üstünde tutulamaz: /calculate_liquid bu sayıyı
+        # `material_service_limit_K = 2000` diye doğrudan basıyordu ve o
+        # sıcaklıkta malzeme çoktan erimişti. Klamp erime noktasına indi;
+        # iddia da ona bağlandı (kayıttan türetilir, ikinci kez yazılmaz).
+        assert m['max_service_temperature'] == pytest.approx(m['melting_point'])
+        assert m['max_service_temperature'] == pytest.approx(1705)
 
     def test_generic_steel_and_copper_thermal_preserved(self):
         s = get_material('steel')
@@ -342,13 +407,34 @@ class TestAnalyzerIntegration:
         assert (r_4130['yield_safety_factor']
                 > r_alu['yield_safety_factor'])
 
-    def test_safety_analyzer_unknown_material_falls_back_to_4130(self):
-        from hrma.analysis.safety_analysis import SafetyAnalyzer
+    def test_safety_analyzer_unknown_material_is_rejected(self):
+        """ÖH D15 / P5B2-03 — BEKÇİ ÇEVRİLDİ (ÖK-05).
+
+        Bu test eskiden ``test_safety_analyzer_unknown_material_falls_back_
+        to_4130`` adıyla, bilinmeyen malzemenin SESSİZCE ``steel_4130``a
+        düşmesini ZORUNLU KILIYORDU (``assert r['material'] ==
+        'steel_4130'``). Yani kampanyanın KRİTİK P5B2-03 kalemini kilitleyen
+        bekçiydi: onarım yapılsa test kırmızıya dönerdi ve "onarım testleri
+        kırdı" diye geri alınırdı.
+
+        Ölçülen kusur (once.json): ``'aluminum6061'`` (tek alt çizgi
+        eksik) akma SF'yi 1,9643'ten 3,2857'ye çıkarıyor, hükmü UNSAFE
+        yönünden uzaklaştırıyordu. Yedeğin YÖNÜ emniyetsizdi.
+
+        Yeni sözleşme: çözülemeyen malzeme adı hüküm ÜRETMEZ, adıyla
+        reddedilir. Ucun karşılığı zaten HTTP 422
+        ``unresolved_material``dır (ölçüldü, aynı kanıt dosyası).
+        """
+        from hrma.analysis.safety_analysis import (SafetyAnalyzer,
+                                                   UnresolvedChamberMaterial)
         sa = SafetyAnalyzer()
         motor = {'chamber_pressure': 20.0, 'chamber_diameter': 0.1,
                  'wall_thickness': 0.005}
-        r = sa._analyze_structural_safety(motor, 'not_a_material')
-        assert r['material'] == 'steel_4130'
+        with pytest.raises(UnresolvedChamberMaterial) as hata:
+            sa._analyze_structural_safety(motor, 'not_a_material')
+        assert 'not_a_material' in str(hata.value)
+        # Tanınan ad hâlâ çalışır (onarım kapıyı tümden kapatmadı).
+        r = sa._analyze_structural_safety(motor, 'steel_4130')
         assert r['yield_strength_mpa'] == pytest.approx(460.0)
 
     def test_same_material_same_numbers_across_modules(self):

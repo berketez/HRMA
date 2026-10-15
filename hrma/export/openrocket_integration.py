@@ -3,12 +3,17 @@ OpenRocket Integration Module
 Export motor data to OpenRocket .eng format and create flight simulation files
 """
 
+import math
 import numpy as np
+# ÖH D26 / OH-D25-14: ``np.trapz`` NumPy 2.0'da ad alanından
+# KALDIRILDI (np.trapezoid); ad TEK YERDE çözülür.
+from hrma.utils.numeric_compat import trapezoid as _trapezoid
 import json
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 
 from hrma.constants import G_0, M_AIR, R_STAR_ICAO, isa_pressure, isa_temperature
+from hrma.utils.input_guard import finite_number, finite_positive
 
 # ---------------------------------------------------------------------------
 # .eng (RASP) üretim sabitleri — TEK tanım noktası (CLAUDE.md kural 11).
@@ -19,6 +24,17 @@ from hrma.constants import G_0, M_AIR, R_STAR_ICAO, isa_pressure, isa_temperatur
 ENG_ZERO_TERMINATOR_DT_S = 0.01
 # OpenRocket için yeterli çözünürlük (gerçek eğri bundan uzunsa seyreltilir).
 ENG_MAX_SAMPLES = 100
+
+# RASP motor satırının YAZILAN alan hassasiyeti — TEK tanım noktası.
+# Motor satırı bu ondalıklarla biçimlenir ve A12 kapısı da bunu okur:
+# dosyaya giren sayı, YAZILDIĞI HÂLİYLE sıfıra yuvarlanıyorsa o dosya
+# kodun kendi yasakladığı yer tutucu motordur (ÖH D16 / P16B4-15).
+ENG_HEADER_DECIMALS = {
+    'diameter_mm': 1,
+    'length_mm': 1,
+    'propellant_mass_kg': 3,
+    'loaded_mass_kg': 3,
+}
 
 # İtki eğrisinin hangi kaynaktan geldiği .eng yorum satırına yazılır; kullanıcı
 # dosyanın kendisine bakarak gerçek çözümü mü yoksa sabit itki varsayımını mı
@@ -68,7 +84,7 @@ MASS_SOURCE_LABELS = {
 # Ölçüm (2 Ağustos 2026, HEAD a7ff1e7): BOŞ bir ``motor_data`` sözlüğüyle
 # üretilen .eng dosyasının motor satırı şuydu —
 #
-#     M0-UZAYTEK-HRM-001 0.0 500.0 P 1.000 1.000 UZAYTEK
+#     M0-HRMA-001 0.0 500.0 P 1.000 1.000 HRMA
 #
 # yani ÇAPI SIFIR, boyu yer tutucu 500 mm, itici kütlesi imza varsayılanı
 # 1,000 kg ve sınıf harfi 10000 N·s varsayılanından gelen "M" olan bir motor.
@@ -129,10 +145,110 @@ AVERAGE_THRUST_SOURCE_LABELS = {
 # Toplam impulsun kaynağı; .eng sınıf harfi (A..O) bundan türer.
 TOTAL_IMPULSE_SOURCE_LABELS = {
     'total_impulse': 'total_impulse reported by the solver',
+    # ÖH Z5S / P9B3-16: hibrit çözücü TESLİM EDİLEN impulsu ayrı bir alanda
+    # yayımlıyor (``total_impulse_delivered_Ns`` = kendi eğrisinin integrali)
+    # ve bu modülde o alana HİÇ atıf yoktu. Ölçüm (27 Ağustos 2026, gerçek
+    # hibrit sonucu): total_impulse = 20000,0 N·s (istenen), delivered =
+    # 19950,385 N·s, dosyaya yazılan eğrinin integrali = 19960,339 N·s.
+    'total_impulse_delivered_Ns': ('total_impulse_delivered_Ns reported by the '
+                                   'solver (the impulse the burn actually '
+                                   'produced)'),
     'curve_integral': 'integral of the time-resolved thrust curve',
     'thrust_x_burn_time': 'average thrust x burn time',
     'none': 'total impulse NOT available',
 }
+
+# ---------------------------------------------------------------------------
+# RASP AD ALANI (ÖH Z5S / P9B3-18)
+# ---------------------------------------------------------------------------
+# RASP motor satırı BOŞLUKLA ayrılmış 7 alandır ve motor adı doğrudan 1. alana
+# giriyordu. ÖLÇÜLDÜ (27 Ağustos 2026, gerçek hibrit sonucu): ``'My Motor'``
+# adı satırı 8 alana, ``'HRMA HRM 001'`` 9 alana çıkarıyor; addaki bir
+# satır sonu ise dosyaya BAŞIBOŞ bir satır sokup motor satırını 1 alana
+# düşürüyordu. OpenRocket böyle bir dosyayı ya reddeder ya da alanları
+# kaydırarak okur (çap alanına adın ikinci kelimesi düşer).
+#
+# Kural: ad SİLİNMEZ ve UYDURULMAZ; yalnız RASP'ın istediği tek parçaya
+# indirilir (boşluk -> '_') ve değiştirildiyse .eng yorum satırında BEYAN
+# edilir — okuyan kişi dosyadaki adın kendi yazdığı ad olmadığını görür.
+MOTOR_NAME_WHITESPACE_REPLACEMENT = '_'
+
+# ---------------------------------------------------------------------------
+# GECİKME SONEKİ (UI openrocket-kose 2. tur, devir D2; 7 Ekim 2026)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (kurulu OpenRocket 24.12, kendi RASPMotorLoader'ı, başsız kip):
+# varsayılan ad 'HRMA-001' ile yazılan 'O167-HRMA-001' künyesi OpenRocket'te
+# 'O167-HRMA' olarak okundu. Neden: OpenRocket künyenin sonundaki
+# '-<rakamlar>' ya da '-P' parçasını GECİKME sanıp keser.
+#   info.openrocket.core.file.motor.AbstractMotorLoader.removeDelay
+#   (OpenRocket-24.12.jar, javap ile okundu): value.matches(".*-([0-9]+|[pP])$")
+#   ise value.substring(0, value.lastIndexOf('-')).
+# Künye '<sınıf><sayı>-<ad>' olduğu için kural adın kendisine de uygulanır:
+# ad '-001' ile bitiyorsa ya da tamamı '001' / 'P' ise OpenRocket o parçayı
+# siler. Ad bu yüzden son ayırıcısı '_' olacak biçimde yazılır ve değişiklik
+# .eng yorumunda BEYAN edilir (P9B3-18 deseni).
+#: Gecikme sanılan sonekin önündeki ayırıcının yerine yazılan karakter.
+MOTOR_NAME_DELAY_SEPARATOR_REPLACEMENT = '_'
+#: OpenRocket'in gecikme saydığı sonek: yalnız ASCII rakamlar ya da tek 'P'/'p'
+#: (Java düzenli ifadesindeki ``[0-9]+|[pP]``).
+OPENROCKET_DELAY_DIGITS = '0123456789'
+OPENROCKET_DELAY_PLUGGED = ('P', 'p')
+#: Ad verilmediğinde yazılan ad. Eski 'HRMA-001' OpenRocket'te 'HRMA'ya
+#: kırpılıyordu (yukarıdaki ölçüm); bu ad kırpılmaz.
+DEFAULT_MOTOR_NAME = 'HRMA_001'
+
+
+def _openrocket_delay_suffix(name: str) -> Optional[str]:
+    """Künyede adın ardından OpenRocket'in GECİKME diye keseceği parça.
+
+    Künye ``<önek>-<ad>`` biçimindedir; ad '-' içermiyorsa son parça adın
+    tamamıdır. Döner: kesilecek parça ya da ``None``.
+    """
+    son = name.rsplit('-', 1)[-1]
+    if son in OPENROCKET_DELAY_PLUGGED:
+        return son
+    if son and all(c in OPENROCKET_DELAY_DIGITS for c in son):
+        return son
+    return None
+
+
+def _sanitize_motor_name(raw) -> Tuple[str, Optional[str]]:
+    """Motor adını RASP'ın tek parçalı ad alanına indirger.
+
+    İki kural, ikisi de beyanlı:
+      * boşluk -> '_' (RASP ad alanı tek parçadır; P9B3-18);
+      * künyenin sonunda OpenRocket'in gecikme sanıp keseceği '-<rakamlar>'
+        ya da '-P' kalmaz: son ayırıcı '_' olur, ad '-' içermiyorsa başına
+        '_' eklenir (devir D2).
+
+    Döner: ``(temiz_ad, beyan|None)``. Beyan yalnız ad GERÇEKTEN değiştiyse
+    doludur; dokunulmayan adlarda dosya bit-aynı kalır.
+    """
+    metin = '' if raw is None else str(raw)
+    temiz = MOTOR_NAME_WHITESPACE_REPLACEMENT.join(metin.split())
+    nedenler = []
+    if temiz != metin:
+        nedenler.append(
+            f'the RASP name field is a single whitespace-separated token and '
+            f'the supplied name {metin!r} would have split the motor line '
+            f'into a different number of fields')
+    sonek = _openrocket_delay_suffix(temiz)
+    if sonek is not None:
+        govde = temiz[:len(temiz) - len(sonek)]
+        if govde.endswith('-'):
+            kirpilmis = govde[:-1]
+            temiz = kirpilmis + MOTOR_NAME_DELAY_SEPARATOR_REPLACEMENT + sonek
+        else:
+            kirpilmis = ''
+            temiz = MOTOR_NAME_DELAY_SEPARATOR_REPLACEMENT + temiz
+        nedenler.append(
+            f"OpenRocket's motor loader reads a trailing '-<digits>' or '-P' "
+            f"in the designation as an ejection delay and cuts it off "
+            f"(AbstractMotorLoader.removeDelay, OpenRocket 24.12), so the "
+            f"name would have been read as {kirpilmis!r}")
+    if not nedenler:
+        return temiz, None
+    return temiz, f'motor name written as {temiz!r} - ' + '; '.join(nedenler)
 
 # ---------------------------------------------------------------------------
 # BİRİM SÖZLEŞMESİ (2026-07-19 Codex denetimi, bulgu 1)
@@ -151,6 +267,12 @@ TOTAL_IMPULSE_SOURCE_LABELS = {
 # export_motor_summary çıktısına yazılır — sessiz tahmin yok.
 GEOMETRY_SOURCE_LABELS = {
     'motor_geometry': 'normalized motor_geometry block (SI, no unit inference)',
+    # ÖH D15 / harita H1a: beyanla çözülen geometri ile çıkarımla çözülen
+    # geometri AYNI künyeyi taşıyamaz. Çıkarım bir tahmindir ve eşiği aşan
+    # motorlarda ters döner (ölçüldü: 17,318 m kamara -> 17,3 mm); beyan
+    # tahmin değildir. Dosyayı okuyan bunları ayırt edebilmelidir.
+    'declared': ('top-level results with a length_units declaration '
+                 '(no unit inference)'),
     'inferred': 'top-level results; unit inferred from magnitude (see notes)',
     'missing': 'geometry not supplied; exporter placeholders used',
 }
@@ -220,6 +342,49 @@ EXPORTER_DEFAULT_SETTINGS = {
 # Örnek araç yalnız BİÇİM zorunluluğu olan yerde kullanılır: .ork XML'i bir
 # gövde boyu/çapı yazmak zorundadır (rüzgâr yer tutucusuyla aynı gerekçe).
 # Sayısal bir İDDİA olan apoje ise örnek araçtan ÜRETİLMEZ.
+# .ork şablonundaki gövde borusu et kalınlığı — TEK tanım noktası
+# (CLAUDE.md kural 11). Motor yuvasının gövdeye SIĞIP sığmadığı bu sayıdan
+# hesaplanır; iki yerde iki farklı kalınlık dolaşmasın (ÖH Z5S / P9B3-15).
+ORK_BODY_TUBE_WALL_M = 0.005
+
+#: .ork şablonunun ÖRNEK yapı geometrisi/malzemeleri — TEK TANIM NOKTASI.
+#:
+#: ÖH D15 / defter P9B3-14 — ÖLÇÜLEN KUSUR. XML bu 12 sayıyı kullanıcının
+#: GERÇEK aracı verildiğinde bile BEYANSIZ yazıyordu: dosyanın adı
+#: kullanıcınınkiydi (``<name>BERKE-1</name>``) ve XML'deki yorumlar yalnız
+#: çap/boy/rüzgâr/rampa için vardı. OpenRocket ağırlık merkezini, kararlılık
+#: payını ve apojeyi tam da bu sayılardan hesaplar; kullanıcı kendi roketini
+#: açtığını sanırken uydurma bir burun konisi ve kanat takımıyla uçuş
+#: simülasyonu koşuyordu. Modül aynı dosyada çap/boy için
+#: ``EXAMPLE value ... it is NOT your rocket`` notunu basmayı ZATEN biliyordu.
+#:
+#: Sözlük hem değeri hem de XML'e düşecek beyan metnini taşır. Çağıran
+#: ``rocket_params`` içinde aynı adla bir değer verirse O KULLANILIR ve o
+#: alan için beyan basılmaz (beyan kazanılarak kaldırılabilir).
+ORK_EXAMPLE_STRUCTURE = {
+    'nose_shape': ('OGIVE', 'nose cone shape'),
+    'nose_length': (0.3, 'nose cone length [m]'),
+    'nose_material': ('Fiberglass', 'nose cone material'),
+    'nose_density': (500.0, 'nose cone material density [kg/m3]'),
+    'nose_thickness': (0.003, 'nose cone wall thickness [m]'),
+    'body_material': ('Phenolic', 'body tube material'),
+    'body_density': (700.0, 'body tube material density [kg/m3]'),
+    'mount_material': ('Steel', 'motor mount material'),
+    'mount_density': (7850.0, 'motor mount material density [kg/m3]'),
+    'mount_thickness': (0.005, 'motor mount wall thickness [m]'),
+    'fin_root_chord': (0.15, 'fin root chord [m]'),
+    'fin_tip_chord': (0.05, 'fin tip chord [m]'),
+    'fin_height': (0.1, 'fin span (height) [m]'),
+    'fin_sweep_angle': (45.0, 'fin sweep angle [deg]'),
+    'fin_material': ('Fiberglass', 'fin material'),
+    'fin_density': (500.0, 'fin material density [kg/m3]'),
+    'fin_thickness': (0.003, 'fin thickness [m]'),
+}
+
+#: ``ORK_BODY_TUBE_WALL_M`` de beyan edilir; değeri yukarıdaki tabloda
+#: TEKRARLANMAZ, sabitin kendisinden okunur.
+ORK_EXAMPLE_BODY_WALL_LABEL = 'body tube wall thickness [m]'
+
 EXPORTER_EXAMPLE_VEHICLE = {
     'name': 'EXAMPLE ROCKET (not the user vehicle)',
     'dry_mass': 5.0,          # kg
@@ -254,7 +419,12 @@ VEHICLE_SOURCE_LABELS = {
 # korunur ve oradan içe aktarılır.
 from hrma.export.motor_geometry import (  # noqa: E402
     DIAMETER_SI_MAX_M, LENGTH_SI_MAX_M, THICKNESS_SI_MAX_M,
-    length_in_meters as _length_in_meters_shared)
+    length_in_meters as _length_in_meters_shared,
+    resolve_length_m as _resolve_length_m_shared)
+# ÖH D15 / P9B3-11: itici yoğunluk bandı deponun katalog doğrulayıcısıyla
+# AYNI demettir; ikinci bir sayı yazılmaz.
+from hrma.data.propellants_db import (  # noqa: E402
+    PROPELLANT_DENSITY_RANGE_KG_M3)
 
 # .eng başlığındaki 2. alanın ne olduğu: RASP formatında motor KASA (gövde)
 # çapıdır, boğaz çapı değil. Kasa dış çapı bulunamazsa hangi ölçünün yazıldığı
@@ -291,13 +461,70 @@ def _nested(data, *path):
     return node
 
 
+# ---------------------------------------------------------------------------
+# İKİ-FAZ (PARTİKÜL GECİKMESİ) DÜZELTME DURUMU — ÖH D33 / OH-D32-10
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (``docs/scofield/raw/OH/D33/ihracat/a1/once.json`` K2, taban
+# ``56f88e70``): katı motorun ``/calculate_solid`` gövdesi iki-faz düzeltme
+# DURUMUNU iki yerde yayımlıyor
+# (``detailed_analysis.performance_metrics.theoretical_vs_actual_isp`` ve
+# ``two_phase_loss``, değer ``not_applied_unverified``), ama AYNI yanıtın
+# ihracat ucu teslim Isp'sini (243,68589734650317 s) hiçbir durum alanı
+# olmadan aktarıyordu: ``export_motor_summary`` 0 alan, ``.eng`` künyesi
+# 0 satır, ``create_flight_simulation_data`` 0 alan. Hibrit ve sıvıda ise
+# çözücü hiç durum yayımlamıyor ve ihracat yine Isp teslim ediyordu
+# (226,0777826151255 s / 259,79323443105085 s).
+#
+# Durumun TANIM NOKTASI çözücüdedir
+# (``hrma.engines.solid_rocket_engine._two_phase_correction_state``, ÖH D32 /
+# OH-D31-17); burada İKİNCİ bir durum TÜRETİLMEZ — yalnız OKUNUR ve teslim
+# yüzeyine taşınır. Okunamıyorsa sessizce "düzeltme uygulanmış" ya da
+# "gerekmiyor" VARSAYILMAZ: eksikliğin kendisi adıyla beyan edilir
+# (fail-closed, doktrin 1).
+
+#: Çözücünün durumu yayımladığı yollar — TEK arama listesi. ``.eng``
+#: künyesi, motor özeti ve uçuş verisi AYNI listeden okur (doktrin 4).
+TWO_PHASE_STATE_PATHS = (
+    ('detailed_analysis', 'performance_metrics', 'theoretical_vs_actual_isp'),
+    ('two_phase_loss',),
+    ('performance_metrics', 'theoretical_vs_actual_isp'),
+    ('results', 'two_phase_loss'),
+    ('results', 'detailed_analysis', 'performance_metrics',
+     'theoretical_vs_actual_isp'),
+)
+
+#: Durum sözlüğünün alan adları — çözücüyle AYNI adlar (yeniden adlandırma
+#: yok; panel/PDF/API ile ihracat aynı anahtarı okur).
+TWO_PHASE_STATUS_FIELD = 'two_phase_correction_status'
+TWO_PHASE_VERIFIED_FIELD = 'two_phase_correction_verified'
+TWO_PHASE_BASIS_FIELD = 'two_phase_correction_status_basis'
+
+#: Çözücü hiçbir durum yayımlamadığında ihracat yüzeyinin BEYANI. Bu bir
+#: "sorun yok" hâli DEĞİLDİR: teslim edilen Isp'nin iki-faz düzeltmesi
+#: taşıyıp taşımadığı BİLİNMİYOR demektir (panelin 'NOT PUBLISHED BY THE
+#: SOLVER' bandıyla aynı hüküm).
+TWO_PHASE_STATUS_NOT_PUBLISHED = 'not_published_by_the_solver'
+
+
+def _two_phase_path_label(path) -> str:
+    return '.'.join(path)
+
+
+#: RASP başlığının ima ettiği bulk itici yoğunluğunun fiziksel ÜST sınırı
+#: (kg/m^3). Sayı burada YENİDEN YAZILMAZ: deponun itici katalog
+#: doğrulayıcısının kullandığı bandın üst ucudur (ÖH D15 / P9B3-11).
+PROPELLANT_DENSITY_MAX_KG_M3 = PROPELLANT_DENSITY_RANGE_KG_M3[1]
+
+
 def _finite_positive(value) -> Optional[float]:
-    """Sonlu ve pozitif float döndürür; aksi halde None."""
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return None
-    return f if (np.isfinite(f) and f > 0.0) else None
+    """Sonlu ve pozitif float döndürür; aksi halde None.
+
+    Kural merkezden okunur (``input_guard.finite_positive``, ÖH D28 /
+    OH-D27-11). Eski gövde ``bool``u eliyemiyordu ve ölçüldü ki
+    ``resolve_eng_inputs({'case_diameter': True})`` alanı "eksik" saymak
+    yerine ``.eng`` künyesine uydurma **1,0 m** gövde çapı yazıyordu.
+    """
+    return finite_positive(value)
 
 
 def _finite_number(value) -> Optional[float]:
@@ -308,11 +535,7 @@ def _finite_number(value) -> Optional[float]:
     ile karıştırırdı. İkisi ayrı şeydir: veri yok -> None, kullanıcı 0 yazdı
     -> 0.0.
     """
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return None
-    return f if np.isfinite(f) else None
+    return finite_number(value)
 
 
 def _air_density(altitude_m: float) -> float:
@@ -347,6 +570,80 @@ class OpenRocketExporter:
             'O': (20480.01, 40960.0)
         }
     
+    @staticmethod
+    def resolve_two_phase_correction(motor_data: Dict) -> Dict:
+        """Teslim edilen Isp'nin iki-faz düzeltme DURUMU — okunur, türetilmez.
+
+        ÖH D33 / OH-D32-10. Çözücünün yayımladığı durum
+        (``hrma.engines.solid_rocket_engine._two_phase_correction_state``,
+        tek tanım noktası) :data:`TWO_PHASE_STATE_PATHS` sırasıyla aranır ve
+        BULUNDUĞU YOL adıyla döner. Hiçbir yolda yoksa durum
+        :data:`TWO_PHASE_STATUS_NOT_PUBLISHED` olur ve künye hangi yolların
+        arandığını ADIYLA söyler — "düzeltme uygulandı" ya da "gerekmiyor"
+        SESSİZCE varsayılmaz (fail-closed, doktrin 1).
+
+        ``two_phase_correction_verified`` yalnız çözücü ``True`` yayımlarsa
+        ``True``dur; okunamayan durumda ``False``tur ("bilinmiyor" bir
+        doğrulama değildir).
+        """
+        md = motor_data if isinstance(motor_data, dict) else {}
+        for path in TWO_PHASE_STATE_PATHS:
+            blok = _nested(md, *path)
+            if not isinstance(blok, dict):
+                continue
+            durum = blok.get(TWO_PHASE_STATUS_FIELD)
+            if not isinstance(durum, str) or not durum:
+                continue
+            kunye = blok.get(TWO_PHASE_BASIS_FIELD)
+            return {
+                TWO_PHASE_STATUS_FIELD: durum,
+                TWO_PHASE_VERIFIED_FIELD: bool(
+                    blok.get(TWO_PHASE_VERIFIED_FIELD) is True),
+                TWO_PHASE_BASIS_FIELD: (
+                    kunye if isinstance(kunye, str) and kunye else
+                    'the solver published the status but no basis text'),
+                'two_phase_correction_source': _two_phase_path_label(path),
+            }
+        aranan = ', '.join(_two_phase_path_label(p)
+                           for p in TWO_PHASE_STATE_PATHS)
+        return {
+            TWO_PHASE_STATUS_FIELD: TWO_PHASE_STATUS_NOT_PUBLISHED,
+            TWO_PHASE_VERIFIED_FIELD: False,
+            TWO_PHASE_BASIS_FIELD: (
+                'This result publishes NO two-phase (particle-lag) correction '
+                'status, so the specific impulse handed over by this export '
+                'carries an UNKNOWN two-phase correction state: it is not '
+                'known whether a correction was applied, and no correction is '
+                'assumed here. Do not read the exported Isp (or the total '
+                'impulse / propellant mass pair that implies it) as a '
+                'verified delivered-performance claim. searched: '
+                + aranan + '.'),
+            'two_phase_correction_source': None,
+        }
+
+    @classmethod
+    def _two_phase_comment_lines(cls, motor_data: Dict) -> List[str]:
+        """``.eng`` künyesinin iki-faz satırları — özetle AYNI çözücüden.
+
+        RASP tüketicileri yorum satırını yok sayar; bu yüzden aynı hüküm
+        ``motor_summary`` ve ``flight_profile`` içinde MAKİNE-OKUR olarak da
+        durur (``eng_envelope_warning`` için verilen kararın aynısı).
+        """
+        durum = cls.resolve_two_phase_correction(motor_data)
+        satir = [
+            '; two-phase (particle-lag) correction of the delivered Isp: '
+            '%s (verified=%s)' % (durum[TWO_PHASE_STATUS_FIELD],
+                                  durum[TWO_PHASE_VERIFIED_FIELD])]
+        kaynak = durum.get('two_phase_correction_source')
+        if kaynak:
+            satir.append(';   status read from: %s' % kaynak)
+        # RASP yorumu TEK SATIRDIR: künye metnindeki bir satır sonu ikinci
+        # satırı ';' ile başlamayan bir gövde satırına çevirirdi ve dosyayı
+        # ayrıştırılamaz yapardı. Metin sıkıştırılır, kırpılmaz.
+        kunye = ' '.join(str(durum[TWO_PHASE_BASIS_FIELD]).split())
+        satir.append(';   %s' % kunye)
+        return satir
+
     def resolve_eng_inputs(self, motor_data: Dict) -> Dict:
         """.eng / .ork için kritik alanları çözer ve eksikleri raporlar.
 
@@ -401,6 +698,24 @@ class OpenRocketExporter:
                 'no time-resolved curve and no (thrust, burn_time) pair; a '
                 'thrust curve cannot be written without inventing one.')
 
+        # ÖH D36 / LU-1 + LU-2: sıvı çözücü yanma süresi verilmediğinde
+        # ``burn_time`` / ``propellant_mass_kg`` YAYIMLAMAZ ve bunu
+        # ``burn_time_source = 'not_supplied'`` ile ADIYLA söyler. Üç eksik
+        # alanın ortak kökü o zaman bu beyandır; kullanıcı "itici kütlesi
+        # çözülemedi" okuyup nedenini tahmin etmek zorunda kalmasın diye kök
+        # alan listenin başına kendi gerekçesiyle konur. Sayı üretilmez;
+        # yalnız neden adlandırılır (kapı zaten kapalıdır).
+        if (missing and str(md.get('burn_time_source') or '') == 'not_supplied'
+                and set(missing) & {'propellant_mass', 'total_impulse',
+                                    'thrust_curve'}):
+            missing.insert(0, 'burn_time')
+            reasons['burn_time'] = (
+                'the solver declared burn_time_source = "not_supplied": no '
+                'burn time was entered (max_burn_duration is empty) and none '
+                'is assumed, so the propellant mass, the total impulse and '
+                'the constant-thrust curve cannot be derived. Enter the '
+                'burn time and recalculate.')
+
         return {
             'ok': not missing,
             'missing_fields': missing,
@@ -416,7 +731,8 @@ class OpenRocketExporter:
             'thrust_source': thrust_source,
         }
 
-    def export_motor_file(self, motor_data: Dict, filename: str = None) -> str:
+    def export_motor_file(self, motor_data: Dict, filename: str = None,
+                          report: Dict = None) -> str:
         """
         Export motor data to OpenRocket .eng format
 
@@ -454,7 +770,7 @@ class OpenRocketExporter:
             resolved['propellant_mass'], resolved['total_impulse'],
             resolved['thrust_curve'], motor_data,
             thrust_source=resolved['thrust_source'], geometry=geometry,
-            resolved=resolved
+            resolved=resolved, report=report
         )
 
         # Save to file if filename provided
@@ -563,6 +879,72 @@ class OpenRocketExporter:
         """
         return {k: VEHICLE_SOURCE_LABELS.get(v, v) for k, v in (sources or {}).items()}
 
+    @staticmethod
+    def motor_mount_fit(mount_radius_m, vehicle: Dict,
+                        vehicle_sources: Dict = None) -> Dict:
+        """Motor yuvası gövde borusuna SIĞIYOR MU? (ÖH Z5S / P9B3-15)
+
+        ÖLÇÜLDÜ (27 Ağustos 2026, üç gerçek sonuç): .ork şablonu motor
+        yuvasının dış yarıçapını kasa çapından yazıyor, gövde borusunu ise
+        araçtan (araç verilmediyse ÖRNEK araçtan, Ø0,10 m) — ve ikisini
+        karşılaştıran hiçbir kapı yoktu:
+
+            hibrit yuva R = 0,0623 m,  gövde iç R = 0,0450 m -> SIĞMIYOR
+            katı   yuva R = 0,0822 m,  gövde iç R = 0,0450 m -> SIĞMIYOR
+            sıvı   yuva R = 0,0747 m,  gövde iç R = 0,0450 m -> SIĞMIYOR
+
+        OpenRocket böyle bir projeyi açar ve motoru gövdenin içindeymiş gibi
+        simüle eder. Sayı DEĞİŞTİRİLMEZ (gövdeyi büyütmek kullanıcının aracını
+        UYDURMAK olurdu); çelişki ADIYLA beyan edilir.
+
+        Döner: ölçüm sözlüğü (``fits`` çözülemiyorsa None).
+        """
+        sources = vehicle_sources or {}
+        mount_r = _finite_positive(mount_radius_m)
+        body_r = _finite_positive((vehicle or {}).get('diameter'))
+        body_r = body_r / 2.0 if body_r is not None else None
+        body_inner_r = (body_r - ORK_BODY_TUBE_WALL_M
+                        if body_r is not None else None)
+        fits = None
+        if mount_r is not None and body_inner_r is not None:
+            fits = bool(mount_r <= body_inner_r)
+        return {
+            'fits': fits,
+            'mount_outer_radius_m': mount_r,
+            'body_tube_outer_radius_m': body_r,
+            'body_tube_wall_m': ORK_BODY_TUBE_WALL_M,
+            'body_tube_inner_radius_m': body_inner_r,
+            'clearance_m': (None if fits is None else body_inner_r - mount_r),
+            'body_tube_source': sources.get('diameter'),
+            'body_tube_is_exporter_example':
+                sources.get('diameter') == 'exporter_example',
+        }
+
+    @classmethod
+    def _motor_mount_fit_notes(cls, fit: Dict) -> List[str]:
+        """Yuva/gövde ölçümünü .ork yorum satırlarına çevirir."""
+        if fit.get('fits') is None:
+            return ['motor mount fit NOT checked: the mount radius or the body '
+                    'tube diameter could not be resolved']
+        olcu = (f'motor mount outer radius {fit["mount_outer_radius_m"]:.4f} m '
+                f'vs body tube inner radius {fit["body_tube_inner_radius_m"]:.4f} m '
+                f'(outer {fit["body_tube_outer_radius_m"]:.4f} m minus '
+                f'{fit["body_tube_wall_m"]:.4f} m wall)')
+        if fit['fits']:
+            return [f'motor mount FITS the body tube: {olcu}']
+        notlar = [f'WARNING: THE MOTOR DOES NOT FIT THE BODY TUBE - {olcu}; '
+                  f'the mount sticks out by '
+                  f'{-fit["clearance_m"] * 1000.0:.1f} mm of radius']
+        if fit['body_tube_is_exporter_example']:
+            notlar.append('the body tube above is the EXAMPLE vehicle bundled '
+                          'with the exporter, not your rocket - size the '
+                          'airframe around the motor in OpenRocket')
+        else:
+            notlar.append('the body tube above is YOUR vehicle as supplied to '
+                          'this export - this template is geometrically '
+                          'inconsistent until one of the two is corrected')
+        return notlar
+
     def create_flight_simulation_data(self, motor_data: Dict, rocket_params: Dict = None,
                                       launch_params: Dict = None) -> Dict:
         """
@@ -628,6 +1010,11 @@ class OpenRocketExporter:
             'simulation_settings_source_labels': {
                 k: LAUNCH_SETTING_SOURCE_LABELS[v] for k, v in sources.items()
             },
+            # ÖH D33 / OH-D32-10 — apoje/Δv kestirimi Isp ile yapılır
+            # (``_calculate_flight_performance``); o Isp'nin iki-faz düzeltme
+            # durumu uçuş verisinde de MAKİNE-OKUR olarak durur.
+            'two_phase_correction': self.resolve_two_phase_correction(
+                motor_data),
         }
 
         return simulation_params
@@ -655,97 +1042,90 @@ class OpenRocketExporter:
             missing.append('isp')
         return missing
 
-    def generate_technical_report(self, motor_data: Dict) -> str:
-        """Generate technical report for OpenRocket documentation"""
-        
-        report = []
-        
-        # Header
-        report.append("UZAYTEK HYBRID ROCKET MOTOR")
-        report.append("OpenRocket Integration Report")
-        report.append("=" * 50)
-        report.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        report.append("")
-        
-        # Motor specifications
-        report.append("MOTOR SPECIFICATIONS:")
-        report.append("-" * 30)
-        total_impulse = motor_data.get('total_impulse', 0)
-        motor_class = self._get_motor_class(total_impulse)
-        # Geometri TEK yardımcıdan; ham alanlar mm/m karışıktır (bulgu 1)
-        geometry = self.resolve_geometry(motor_data)
+    # --- ÖH D24 / defter P9B3-24: ÖLÜ İKİZ SİLİNDİ -------------------------
+    #
+    # Burada 93 satırlık bir ``generate_technical_report(motor_data)`` vardı.
+    # ÖLÇÜLDÜ (``a2/once.json`` -> ``M1_P9B3_24``, taban 88a29d3):
+    #
+    #   ürün kodunda çağıran        : 0
+    #   uydurma varsayılan          : 4  (chamber_pressure, of_ratio,
+    #                                     c_star, cf -> ``get(ad, 0)``)
+    #   koşulsuz "✓" onayı          : 4
+    #
+    # Boş bir gövdeyle çağrıldığında bastığı satırlar (ölçülen çıktı)::
+    #
+    #     Chamber Pressure: 0.0 bar
+    #     O/F Ratio: 0.00
+    #     C* Efficiency: 0 m/s          <- KARAKTERİSTİK HIZ, VERİM DEĞİL
+    #     Thrust Coefficient: 0.000
+    #     ✓ .eng file format supported  (dördü de koşulsuz)
+    #
+    # İki ayrı yalan taşıyordu:
+    #   1. ``c_star`` [m/s] "C* Efficiency" başlığıyla basılıyordu. Deponun
+    #      CANLI yüzü (``templates/solid.html``) bu adı doğru büyüklüğe
+    #      bağlıyor: ``c_star_efficiency_percent`` [%]. Aynı ad, iki farklı
+    #      büyüklük.
+    #   2. Dört uyumluluk satırı, .eng üretimi hiç denenmeden "✓" işaretliydi.
+    #
+    # Ad, ``pdf_generator.PDFReportGenerator.generate_technical_report``
+    # (CANLI, ``/api/generate-report`` üzerinden çağrılan) ile aynı olduğu
+    # için tarama yaparken maskeleniyordu — savcının "ölü ikiz / ikiz ad
+    # maskesi" hükmü. Sembolün 0 ürün çağıranı olduğu için düzeltmek yerine
+    # SİLİNDİ: yalnız bekçisinin ayakta tuttuğu bir sembol kanıt üretmez
+    # (aynı gerekçe: D24 a1 / P9B1-28, P9B1-30).
+    #
+    # Bekçi: tests/test_d24_ihracat_a2.py::TestP9B324OluIkiz
+    # -----------------------------------------------------------------------
 
-        report.append(f"Designation: {self._designation(motor_data, geometry)}")
-        report.append(f"Motor Class: {motor_class}")
-        report.append(f"Total Impulse: {total_impulse:.0f} N·s")
-        report.append(f"Average Thrust: {motor_data.get('thrust', 0):.0f} N")
-        report.append(f"Burn Time: {motor_data.get('burn_time', 0):.1f} s")
-        report.append(f"Specific Impulse: {motor_data.get('isp', 0):.1f} s")
-        report.append("")
-        
-        # Physical dimensions
-        report.append("PHYSICAL DIMENSIONS:")
-        report.append("-" * 30)
-        def dim(label: str, key: str):
-            value = geometry.get(key)
-            if value is None:
-                report.append(f"{label}: not available")
-            else:
-                report.append(f"{label}: {value * 1000.0:.2f} mm")
+    def _get_motor_class(self, total_impulse) -> Optional[str]:
+        """Toplam impulstan sınıf harfi. Aralık boşluğu ve sessiz 'A' YOK.
 
-        dim("Throat Diameter", 'throat_diameter')
-        dim("Exit Diameter", 'exit_diameter')
-        dim("Chamber Diameter", 'chamber_diameter')
-        dim("Chamber Length", 'chamber_length')
-        dim("Case (body) Diameter", 'case_diameter')
-        report.append(f"Propellant Mass: {motor_data.get('propellant_mass_total', 0):.2f} kg")
-        report.append(f"Geometry source: "
-                      f"{GEOMETRY_SOURCE_LABELS.get(geometry.get('source'), 'unknown')}")
-        report.append("")
-        
-        # Performance characteristics
-        report.append("PERFORMANCE CHARACTERISTICS:")
-        report.append("-" * 30)
-        report.append(f"Chamber Pressure: {motor_data.get('chamber_pressure', 0):.1f} bar")
-        report.append(f"O/F Ratio: {motor_data.get('of_ratio', 0):.2f}")
-        report.append(f"C* Efficiency: {motor_data.get('c_star', 0):.0f} m/s")
-        report.append(f"Thrust Coefficient: {motor_data.get('cf', 0):.3f}")
-        report.append("")
-        
-        # OpenRocket compatibility
-        report.append("OPENROCKET COMPATIBILITY:")
-        report.append("-" * 30)
-        report.append("✓ .eng file format supported")
-        report.append("✓ Thrust curve data included")
-        report.append("✓ Motor mass properties calculated")
-        report.append("✓ Burn time profile generated")
-        report.append("")
-        
-        # Usage instructions
-        report.append("USAGE INSTRUCTIONS:")
-        report.append("-" * 30)
-        report.append("1. Export motor as .eng file")
-        report.append("2. Copy file to OpenRocket motor directory")
-        report.append("3. Load motor in OpenRocket simulation")
-        report.append("4. Configure rocket parameters")
-        report.append("5. Run flight simulation")
-        report.append("")
-        
-        return "\n".join(report)
-    
-    def _get_motor_class(self, total_impulse: float) -> str:
-        """Determine motor class from total impulse"""
-        
-        for motor_class, (min_impulse, max_impulse) in self.motor_classes.items():
-            if min_impulse <= total_impulse <= max_impulse:
+        ÖLÇÜLDÜ (ÖH Z5S / P9B3-17, onarım öncesi koşum): tablodaki aralıklar
+        birbirine DEĞMİYOR — A (1,26–2,50), B (2,51–5,00), ... arasındaki her
+        boşluğa düşen impuls metodun son satırındaki ``return 'A'`` ile
+        sessizce A sınıfı oluyordu:
+
+            2,505 N·s -> 'A'      5,005 N·s -> 'A'      20 480,005 N·s -> 'A'
+            0,0 N·s   -> 'A'     -5,0 N·s   -> 'A'      NaN            -> 'A'
+
+        Yani 20 kN·s'lik bir motor 2,5 N·s'lik bir oyuncakla aynı harfi
+        alıyordu ve bu harf hem ``_designation`` üzerinden .eng/.ork dosya
+        adına hem de API yanıtındaki ``motor_class`` alanına gidiyordu.
+
+        Onarım YENİ SAYI ÜRETMEZ: boşluklar tablonun KENDİ üst sınırlarıyla
+        kapatılır. Üst sınırlar tam ikiye katlanan 2,5·2ⁿ dizisidir; alt
+        sınırlar ise bunların 0,01'lik yuvarlama gösterimidir (2,51 = 2,50'nin
+        "hemen üstü"). Bu yüzden sınıflandırma yarı açık aralıkla yapılır:
+        ``önceki_üst < I <= üst``.
+
+        Tablonun KAPSAMADIĞI yerde harf iddia edilmez (fail-closed):
+          * sonlu olmayan / tablonun A alt sınırının altındaki impuls -> None
+            (NAR'ın 1/2A, 1/4A sınıfları bu tabloda taşınmıyor; "A" demek
+            ölçülmemiş bir iddiadır),
+          * O'nun üstü -> 'P+' ("P ve üzeri"; tablo orada bitiyor, tek bir
+            harf uydurulmaz — bu davranış değişmedi).
+        """
+        impulse = _finite_number(total_impulse)
+        if impulse is None:
+            return None
+        taban = min(low for low, _high in self.motor_classes.values())
+        if impulse < taban:
+            return None
+        for motor_class, (_low, high) in sorted(self.motor_classes.items(),
+                                                key=lambda kv: kv[1][1]):
+            if impulse <= high:
                 return motor_class
-        
-        # For very large motors
-        if total_impulse > 40960:
-            return 'P+'
-        
-        return 'A'  # Default
-    
+        return 'P+'
+
+    def motor_class_range(self, motor_class: Optional[str]):
+        """Bir sınıf harfinin tablodaki aralığı; bilinmeyen harfte ``None``.
+
+        Sınıf harfi .eng dosyasında bir İDDİADIR; okuyan kişi harfin hangi
+        impuls aralığını temsil ettiğini dosyanın içinde görebilmeli.
+        """
+        aralik = self.motor_classes.get(motor_class or '')
+        return tuple(aralik) if aralik else None
+
     @staticmethod
     def real_thrust_curve(motor_data: Dict):
         """Zaman-çözümlü GERÇEK itki eğrisini bulur.
@@ -829,7 +1209,7 @@ class OpenRocketExporter:
         t_real, f_real, _src = cls.real_thrust_curve(md)
         if t_real is not None and float(t_real[-1] - t_real[0]) > 0.0:
             span = float(t_real[-1] - t_real[0])
-            mean = float(np.trapz(np.clip(f_real, 0.0, None), t_real)) / span
+            mean = float(_trapezoid(np.clip(f_real, 0.0, None), t_real)) / span
             if np.isfinite(mean) and mean > 0.0:
                 return mean, 'curve_mean'
         return None, 'none'
@@ -849,9 +1229,17 @@ class OpenRocketExporter:
         if value is not None:
             return value, 'total_impulse'
 
+        # ÖH Z5S / P9B3-16: çözücünün TESLİM EDİLEN impulsu. Bu alan modülde
+        # hiç okunmuyordu; eğri integralinden ÖNCE gelir, çünkü çözücünün
+        # kendi zaman-adımlı çözümünden gelir (RASP için seyreltilmiş
+        # örneklemenin integralinden daha doğrudur).
+        delivered = _finite_positive(md.get('total_impulse_delivered_Ns'))
+        if delivered is not None:
+            return delivered, 'total_impulse_delivered_Ns'
+
         t_real, f_real, _src = cls.real_thrust_curve(md)
         if t_real is not None:
-            integral = float(np.trapz(np.clip(f_real, 0.0, None), t_real))
+            integral = float(_trapezoid(np.clip(f_real, 0.0, None), t_real))
             if np.isfinite(integral) and integral > 0.0:
                 return integral, 'curve_integral'
 
@@ -861,6 +1249,141 @@ class OpenRocketExporter:
             return avg_thrust * burn_time, 'thrust_x_burn_time'
 
         return None, 'none'
+
+    def impulse_audit(self, motor_data: Dict,
+                      thrust_curve: List[Tuple[float, float]] = None) -> Dict:
+        """Başlığa yazılan impuls ile DOSYAYA YAZILAN eğriyi karşılaştırır.
+
+        İki kalemin ortak ölçüm noktası (ÖH Z5S):
+
+        * **P9B3-16** — sınıf harfi ``total_impulse``tan geliyor, OpenRocket
+          ise dosyanın ALTINDAKİ eğriyi simüle ediyor. Ölçüldü (gerçek hibrit
+          sonucu, 27 Ağustos 2026): başlık 20 000,0 N·s, çözücünün teslim
+          ettiği 19 950,385 N·s, yazılan eğrinin integrali 19 960,339 N·s.
+          Üçü de dosyada yoktu; yalnız birincisi vardı.
+        * **P9B3-27** — negatif itki örnekleri hem eğriye hem integrale
+          BEYANSIZ sıfır olarak giriyordu (``np.clip(f, 0, None)`` ve
+          ``max(0.0, ...)``), dosya yine de kaynağını "integral of the
+          time-resolved thrust curve" diye yazıyordu. Ölçüldü (aynı motor,
+          son 12 örnek bilerek negatife çevrildi): ham integral 17 631,934
+          N·s, kenetlenmiş integral 19 960,339 N·s.
+
+        SAYI DEĞİŞTİRİLMEZ: kenetleme RASP biçiminin zorunluluğudur (negatif
+        itki yazılamaz), integral de değiştirilmez. Değişen tek şey dosyanın
+        SUSMASI: üç sayı da adıyla yazılır. EŞİK DE ÜRETİLMEZ — farklar her
+        zaman yüzdesiyle basılır, UYARI ise yalnız KATEGORİK bir çelişkide
+        (iki sayı farklı sınıf harfine düşüyorsa ya da negatif örnek
+        kenetlendiyse) çıkar.
+
+        Döner: ölçüm sözlüğü (hiçbir alan uydurulmaz; çözülemeyen None).
+        """
+        md = motor_data if isinstance(motor_data, dict) else {}
+        header, header_src = self.resolve_total_impulse(md)
+        if thrust_curve is None:
+            thrust_curve, _src = self.resolve_thrust_curve(md)
+
+        t_real, f_real, curve_key = self.real_thrust_curve(md)
+        negatif, en_negatif, ham, kenetli, ornek = 0, None, None, None, None
+        if t_real is not None:
+            maske = f_real < 0.0
+            negatif = int(maske.sum())
+            ornek = int(f_real.size)
+            if negatif:
+                en_negatif = float(f_real[maske].min())
+            ham = float(_trapezoid(f_real, t_real))
+            kenetli = float(_trapezoid(np.clip(f_real, 0.0, None), t_real))
+
+        yazilan = None
+        if thrust_curve:
+            yazilan = float(_trapezoid([p[1] for p in thrust_curve],
+                                     [p[0] for p in thrust_curve]))
+
+        harf_baslik = self._get_motor_class(header)
+        harf_yazilan = self._get_motor_class(yazilan)
+
+        def _sapma(deger):
+            if deger is None or header is None or header == 0.0:
+                return None
+            return (deger / header - 1.0) * 100.0
+
+        basis = md.get('total_impulse_basis')
+        return {
+            'header_Ns': header,
+            'header_source': header_src,
+            'class_letter_header': harf_baslik,
+            'class_letter_range_Ns': self.motor_class_range(harf_baslik),
+            'delivered_Ns': _finite_positive(md.get('total_impulse_delivered_Ns')),
+            'delivered_basis': (' '.join(str(basis).split()) if basis else None),
+            'delivered_percent_vs_header':
+                _sapma(_finite_positive(md.get('total_impulse_delivered_Ns'))),
+            'written_curve_Ns': yazilan,
+            'written_curve_percent_vs_header': _sapma(yazilan),
+            'class_letter_written_curve': harf_yazilan,
+            'class_letters_agree': (harf_baslik is not None
+                                    and harf_baslik == harf_yazilan),
+            'raw_curve_Ns': ham,
+            'clamped_curve_Ns': kenetli,
+            'curve_source': curve_key,
+            'curve_samples': ornek,
+            'negative_samples': negatif,
+            'most_negative_N': en_negatif,
+            'negative_samples_clamped': bool(negatif),
+        }
+
+    def _impulse_audit_lines(self, audit: Dict) -> List[str]:
+        """``impulse_audit`` ölçümünü .eng yorum satırlarına çevirir."""
+        lines: List[str] = []
+        harf = audit.get('class_letter_header')
+        aralik = audit.get('class_letter_range_Ns')
+        if harf and aralik:
+            lines.append(f'; class letter {harf} covers '
+                         f'{aralik[0]:.2f}..{aralik[1]:.2f} N-s')
+        elif audit.get('header_Ns') is not None:
+            lines.append('; class letter NOT asserted: the resolved impulse is '
+                         'outside this exporter\'s class table (it starts at '
+                         'A and ends at O)')
+
+        delivered = audit.get('delivered_Ns')
+        if delivered is not None and audit.get('header_source') != \
+                'total_impulse_delivered_Ns':
+            sapma = audit.get('delivered_percent_vs_header')
+            ek = f' ({sapma:+.3f}% vs the value above)' if sapma is not None else ''
+            lines.append(f'; solver-reported delivered impulse = '
+                         f'{delivered:.3f} N-s{ek}')
+        if audit.get('delivered_basis'):
+            lines.append('; delivered impulse basis (declared by the solver): '
+                         + audit['delivered_basis'][:240])
+
+        yazilan = audit.get('written_curve_Ns')
+        if yazilan is not None:
+            sapma = audit.get('written_curve_percent_vs_header')
+            ek = f' ({sapma:+.3f}% vs the value above)' if sapma is not None else ''
+            harf_y = audit.get('class_letter_written_curve')
+            lines.append(f'; the thrust curve written below integrates to '
+                         f'{yazilan:.3f} N-s{ek}'
+                         + (f' -> class {harf_y}' if harf_y else ''))
+            if not audit.get('class_letters_agree'):
+                lines.append(
+                    f'; WARNING: the class letter in the motor name comes from '
+                    f'the header impulse ({harf or "none"}), but the curve '
+                    f'written below falls in a DIFFERENT class '
+                    f'({harf_y or "none"}) - OpenRocket simulates the CURVE, '
+                    f'not the header value')
+
+        if audit.get('negative_samples'):
+            ham = audit.get('raw_curve_Ns')
+            kenetli = audit.get('clamped_curve_Ns')
+            lines.append(
+                f'; WARNING: {audit["negative_samples"]} of the '
+                f'{audit.get("curve_samples")} solved thrust samples are '
+                f'NEGATIVE (most negative {audit["most_negative_N"]:.1f} N). '
+                f'RASP cannot express negative thrust, so they are written as '
+                f'0.0 N: the curve below is CLAMPED, not the raw solution')
+            if ham is not None and kenetli is not None:
+                lines.append(
+                    f';   raw (unclamped) curve integral = {ham:.3f} N-s; '
+                    f'clamped curve integral = {kenetli:.3f} N-s')
+        return lines
 
     def resolve_thrust_curve(self, motor_data: Dict
                              ) -> Tuple[List[Tuple[float, float]], str]:
@@ -1026,6 +1549,42 @@ class OpenRocketExporter:
             'comment_lines': lines,
         }
 
+    #: ``resolve_inert_mass``ın aradığı alanlar — .eng beyanında ADIYLA
+    #: sayılır (CLAUDE.md kural 11: liste tek yerde tanımlı).
+    INERT_MASS_SEARCH_PATH = ('structural_analysis.weight_analysis.'
+                              'total_weight', 'dry_mass', 'motor_mass',
+                              'engine_mass', 'total_dry_mass', 'inert_mass',
+                              'case_mass')
+
+    @classmethod
+    def _structural_presence_lines(cls, motor_data: Dict) -> List[str]:
+        """Kuru kütle çözülemediğinde NEYİN eksik olduğunu ADIYLA yazar.
+
+        ÖH Z5S / P9B3-20. Eski metin "bu dışa aktarımda yapısal analiz yok"
+        diyordu; ölçüm bunun yanlış olduğunu gösterdi (katı ve sıvı gerçek
+        sonuçlarında yapısal analiz bloğu VAR). Yanlış beyan yerine ölçülen
+        durum yazılır: analiz var mı, hangi alt bloklarla, cidar çözülüyor mu
+        ve eksik olan hangi alan.
+        """
+        md = motor_data if isinstance(motor_data, dict) else {}
+        struct = md.get('structural_analysis')
+        lines = [';   searched: ' + ', '.join(cls.INERT_MASS_SEARCH_PATH)]
+        if not isinstance(struct, dict) or not struct:
+            lines.append(';   NOTE: this result carries no structural analysis '
+                         'block either - the case mass has not been computed '
+                         'anywhere in this export')
+            return lines
+        bloklar = ', '.join(sorted(k for k in struct if isinstance(k, str))[:6])
+        lines.append(f';   NOTE: a structural analysis IS present in this '
+                     f'result (blocks: {bloklar}) - what is missing is the '
+                     f'total mass it does not publish, not the analysis')
+        wall_m = cls._wall_thickness_m(md)
+        if wall_m is not None:
+            lines.append(f';   it does resolve a case wall thickness of '
+                         f'{wall_m * 1000.0:.2f} mm, but a wall alone is not a '
+                         f'mass (length and material density are needed)')
+        return lines
+
     @staticmethod
     def resolve_inert_mass(motor_data: Dict) -> Tuple[Optional[float], str]:
         """Motorun kuru (kasa/yapı) kütlesini GERÇEK analizden çözer.
@@ -1055,14 +1614,64 @@ class OpenRocketExporter:
     # ------------------------------------------------------------------
     # Geometri sözleşmesi — TEK yardımcı (2026-07-19 Codex bulgu 1 ve 2)
     # ------------------------------------------------------------------
+    #: İmalat çizimleri cidarı çözemediğinde ``.eng``in indiği eski merdiven.
+    #: Künye satırı bunu ADIYLA söyler — sessiz yedek yok.
+    _WALL_FALLBACK_LADDER_LABEL = (
+        'fallback ladder (cad_design.case_design / case_analysis / '
+        'chamber_structure / chamber_analysis recommendation) - the '
+        'manufacturing drawings could not resolve a drawn wall')
+
+    @staticmethod
+    def _drawn_wall(motor_data: Dict):
+        """İmalat çizimlerinin ÇİZDİĞİ cidar: ``(kalınlık_m|None, künye|None)``.
+
+        İçe aktarma fonksiyon içinde: ``cad_visualization`` plotly/trimesh
+        yükler ve ``.eng`` yolu bunu modül açılışında ödemek zorunda değildir
+        (``drawing_generator`` ve ``step_export`` de aynı deseni kullanır).
+        Modül yoksa (None, None) döner — çağıran kendi merdivenine iner, ama
+        SESSİZ bir yedek DEĞİL: sıra künyede adıyla yazılıdır.
+        """
+        try:
+            from hrma.export.cad_visualization import _chamber_wall_design
+            design = _chamber_wall_design(motor_data)
+        except Exception:
+            return None, None
+        if not isinstance(design, dict):
+            return None, None
+        thickness = _finite_positive(design.get('thickness_m'))
+        if thickness is None:
+            return None, None
+        return thickness, str(design.get('source') or '')
+
+    @staticmethod
+    def _wall_thickness_source(motor_data: Dict) -> str:
+        """``.eng`` yorum satırına düşecek cidar künyesi (P17S1-01)."""
+        _t, source = OpenRocketExporter._drawn_wall(motor_data)
+        return source or OpenRocketExporter._WALL_FALLBACK_LADDER_LABEL
+
     @staticmethod
     def _wall_thickness_m(motor_data: Dict) -> Optional[float]:
         """Kasa cidar kalınlığını [m] gerçek analizlerden çeker.
 
-        Aranan yerler (ilk bulunan kazanır): CAD kasa tasarımı, katı motor
-        kasa analizi, sıvı kamara yapısı, hibrit kamara analizi. '_mm' ekli
-        anahtarlar birimini beyan eder; diğerlerinde büyüklükten çıkarılır.
+        ÖH Z2 (defter P17S1-01, yüksek). Bu aday listesi ÇİZİLEN cidarı
+        (``wall_thickness_used_mm``) hiç tanımıyordu; hibritte doğrudan
+        ``chamber_analysis.recommended_thickness``e düşüyordu. Ölçüldü
+        (P17 turu, aynı oturumun iki dosyası): ``.eng`` başlığı kasa çapını
+        **97,9 mm**, aynı paketin STEP'i **90,03 mm** yazıyordu — ima edilen
+        cidarlar 8,935 ⟷ 5,000 mm. 27 Ağustos 2026'da yeniden ölçüldü:
+        ``.eng`` 184,3656 mm (öneri 15,9165 mm) ⟷ STEP 162,5327 mm
+        (as-designed 5,00 mm). Aynı motorun iki dosyası iki farklı motor
+        anlatıyordu.
+
+        Artık ÖNCE imalat zincirinin tek çözümleyicisi sorulur
+        (``cad_visualization._chamber_wall_design`` — DXF, STEP, STL, kesit
+        ve kütle dökümü aynı sayıyı oradan okur). O sayı yoksa aşağıdaki
+        eski merdiven yedek kalır.
         """
+        drawn, _source = OpenRocketExporter._drawn_wall(motor_data)
+        if drawn is not None:
+            return drawn
+
         explicit_mm = [
             _nested(motor_data, 'cad_design', 'case_design', 'wall_thickness'),
             _nested(motor_data, 'structural_analysis', 'case_analysis',
@@ -1096,8 +1705,23 @@ class OpenRocketExporter:
         Öncelik:
           1. `motor_geometry` bloğu — motor_geometry.py'de normalize edilmiş,
              birimi GARANTİ SI. Katı/sıvı yanıtlarında hazır gelir.
-          2. Üst seviye alanlar — birim beyan edilmediği için büyüklükten
-             çıkarılır (_length_in_meters).
+          2. ``length_units`` BEYANI ('m' / 'mm') — üretici birimini
+             söylüyorsa çıkarım YAPILMAZ (ÖH D15 / harita H1a).
+          3. Beyan da yoksa üst seviye alanlar büyüklükten çıkarılır
+             (_length_in_meters).
+
+        ÖH D15 / harita H1a — bu metot 2. adımı ATLIYORDU: ``length_units``
+        deponun her yerinde (motor_geometry, pdf_generator, step_export,
+        drawing_generator) okunan beyandır, yalnız burada okunmuyordu ve
+        çıkarım eşiği (LENGTH_SI_MAX_M = 5 m) tek otoriteydi. ÖLÇÜLDÜ
+        (once.json, HYBRID_BASE tek alan sarsımı): kamara boyu 5 m'yi aşan
+        tamamen geçerli hibrit tasarımlarda (of_ratio 1,25 -> 6,733 m;
+        fuel_density 460 -> 6,897 m; regression_n 0,2775 -> 17,318 m) uzunluk
+        "demek ki mm" sayılıp 1000'e bölünüyor, .eng RASP zarfı 17,3 mm
+        oluyor ve P9B3-11 yoğunluk kapısı 100.082 kg/m3 ima ettiği için
+        (doğru olarak) reddediyordu. Kusur kapıda değil, kapıya verilen
+        uzunluktaydı. Gövde tek kaynaktır: ``motor_geometry.resolve_length_m``
+        üç adımı da o modülde uygular; burada ikinci kez yazılmaz.
 
         Döner: throat/exit/chamber çapları, kamara boyu, .eng başlığı için
         kasa dış çapı, `source` (GEOMETRY_SOURCE_LABELS) ve okunan her alanın
@@ -1111,14 +1735,11 @@ class OpenRocketExporter:
         notes: List[str] = []
 
         def pick(key: str, si_max: float) -> Optional[float]:
-            if geo is not None:
-                value = _finite_positive(geo.get(key))
-                if value is not None:
-                    fields[key] = 'motor_geometry'
-                    return value
-            value, unit = _length_in_meters(md.get(key), si_max)
+            # Üç adımlı çözüm (motor_geometry -> length_units beyanı ->
+            # büyüklük çıkarımı) TEK yerde durur: motor_geometry modülü.
+            value, unit = _resolve_length_m_shared(md, key, si_max)
             fields[key] = unit
-            if unit == 'mm':
+            if unit in ('mm', 'declared:mm'):
                 notes.append(f'{key} read as mm ({float(md[key]):.4g})')
             return value
 
@@ -1154,7 +1775,12 @@ class OpenRocketExporter:
         if case_d is None and throat_d is not None:
             case_d, case_src = throat_d, 'throat'
 
-        source = 'motor_geometry' if geo else 'inferred'
+        if geo:
+            source = 'motor_geometry'
+        elif any(str(u).startswith('declared:') for u in fields.values()):
+            source = 'declared'
+        else:
+            source = 'inferred'
         if throat_d is None and chamber_d is None and chamber_l is None:
             source = 'missing'
 
@@ -1177,33 +1803,160 @@ class OpenRocketExporter:
     # duran bir "yedek değer üret" fonksiyonu kusurun geri gelme yoludur.
 
     def _designation(self, motor_data: Dict, geometry: Dict = None) -> str:
-        """`<sınıf><kasa çapı mm>-<motor adı>`.
+        """`<sınıf><ortalama itki N>-<motor adı>`.
 
-        Sınıf harfi TOPLAM İMPULSTAN gelir. Sayı eskiden boğaz çapıydı ve birim
-        karışıklığı yüzünden katı motorda 47927 çıkıyordu; artık ticari motor
-        adlandırmasıyla uyumlu olarak kasa çapıdır (mm).
+        Sınıf harfi TOPLAM İMPULSTAN gelir. Sayı ORTALAMA İTKİDİR (N, tamsayıya
+        yuvarlanmış): ortalama itki = toplam impuls / yanma süresi.
 
-        Faz 4B (bulgu A12): iki girdi de UYDURULMUYOR. Eskiden impuls yoksa
-        10000 N·s varsayılıp "M", kasa çapı yoksa 0 yazılıyordu; boş bir
-        sözlükten ``M0-UZAYTEK-HRM-001`` çıkıyordu. Değer yoksa ad
-        ``UNKNOWN-<motor adı>`` olur — dosya adında da güvenli, sınıf iddiası
-        taşımayan bir dize.
+        Kaynak (7 Ekim 2026'da web'den okundu):
+          * thrustcurve.org, "RASP Engine File Format", "The Header Line"
+            bölümü (https://www.thrustcurve.org/info/raspformat.html): ad
+            alanı "the common name of the motor; just the impulse class and
+            average thrust"; çap alanı ayrıca "the casing diameter in
+            millimeters".
+          * thrustcurve.org, "Motor Statistics" (https://www.thrustcurve.org/
+            info/motorstats.html): ortak ad "total impulse, represented by
+            the impulse class, and the average thrust" ile kurulur.
+        UI openrocket-kose 2. tur, devir D1 (ana model kararı, §28-18): sayı
+        eskiden KASA ÇAPIYDI (mm). Kasa çapı RASP başlığının kendi çap
+        alanında zaten yazılıdır; künyede iki kez durmaz. ÖLÇÜLDÜ: OpenRocket
+        24.12 katı örneği 'L85' gösteriyordu, ortalama itkisi ise 1300 N.
+
+        Değerler yanıtın kendi alanlarından gelir, uydurulmaz:
+          * toplam impuls: ``resolve_total_impulse`` (sınıf harfiyle AYNI
+            sayı; kaynağı .eng yorumunda "total impulse ... sets the class
+            letter" satırında yazılı);
+          * yanma süresi: çözücünün ``burn_time`` alanı; yoksa yazılan
+            zaman-çözümlü itki eğrisinin süresi (``real_thrust_curve``).
+        İkisinden biri yoksa ya da sayı 1 N'un altına yuvarlanıyorsa künye
+        ``UNKNOWN-<motor adı>`` olur (fail-closed; Faz 4B, bulgu A12: boş bir
+        sözlükten eskiden ``M0-HRMA-001`` çıkıyordu).
+
+        ``geometry`` parametresi çağıranlarla uyum için durur; künye artık
+        geometriye bakmaz.
         """
         md = motor_data if isinstance(motor_data, dict) else {}
-        geo = geometry if geometry is not None else self.resolve_geometry(md)
-        motor_name = md.get('motor_name', 'UZAYTEK-HRM-001')
+        # ÖH Z5S / P9B3-18 + devir D2: ad RASP'ın tek parçalı ad alanına
+        # indirilir ve OpenRocket'in gecikme sanıp keseceği sonek bırakılmaz.
+        # Değişiklik .eng yorumunda beyan edilir.
+        motor_name, _beyan = _sanitize_motor_name(
+            md.get('motor_name', DEFAULT_MOTOR_NAME))
         total_impulse, _src = self.resolve_total_impulse(md)
-        case_m = _finite_positive(geo.get('case_diameter'))
-        if total_impulse is None or case_m is None:
+        if total_impulse is None:
             return f"UNKNOWN-{motor_name}"
         motor_class = self._get_motor_class(total_impulse)
-        return f"{motor_class}{int(round(case_m * 1000.0))}-{motor_name}"
+        if motor_class is None:
+            # ÖH Z5S / P9B3-17: impuls tablonun dışında; harf UYDURULMAZ.
+            # Eskiden sessizce "A" yazılıyordu.
+            return f"UNKNOWN-{motor_name}"
+        burn_time = _finite_positive(md.get('burn_time'))
+        if burn_time is None:
+            t_real, _f_real, _key = self.real_thrust_curve(md)
+            if t_real is not None:
+                burn_time = _finite_positive(float(t_real[-1] - t_real[0]))
+        if burn_time is None:
+            return f"UNKNOWN-{motor_name}"
+        # Yarım yukarı yuvarlama (Python round() yarımları çifte yuvarlar).
+        average_thrust_n = int(math.floor(total_impulse / burn_time + 0.5))
+        if average_thrust_n < 1:
+            return f"UNKNOWN-{motor_name}"
+        return f"{motor_class}{average_thrust_n}-{motor_name}"
+
+    #: Beyan edilen tank hacminin ``system_summary`` toplamı ile tank
+    #: GEOMETRİSİNDEN hesaplanan toplamın uyuşması gereken bağıl pay.
+    #: İki temsil bu payın dışında ayrışıyorsa hacmin BİRİMİ okunamamış
+    #: demektir ve kapı fail-closed davranır (sayı yorumlanmaz).
+    TANK_VOLUME_CROSSCHECK_REL = 0.05
+
+    @classmethod
+    def _declared_propellant_volume_m3(cls, motor_data):
+        """İticiyi TUTTUĞU BEYAN EDİLEN hacim [m^3] — çözücünün kendi bloğu.
+
+        Döner: ``(hacim_m3|None, künye|None)``.
+
+        ÖH D15 birleşme etkileşimi (1 Eylül 2026). ``_eng_implied_bulk_density``
+        RASP başlığının zarfını ölçer; sıvı motorda o zarf KAMARADIR ve iticiyi
+        TUTMAZ (dosyanın kendi satırı da öyle diyor: "length field = chamber
+        length"). İticinin gerçekten durduğu hacmi çözücü ayrı bir blokta
+        BEYAN EDİYOR: ``propellant_tanks``. Bu metot o beyanı okur.
+
+        BİRİM VARSAYILMAZ, ÖLÇÜLÜR. ``system_summary.total_volume`` litre gibi
+        görünüyor; doğrulaması, aynı bloğun tank tank yayımladığı
+        ``dimensions.diameter`` / ``dimensions.length`` (mm) silindir
+        hacimleriyle karşılaştırmaktır. İki bağımsız temsil
+        ``TANK_VOLUME_CROSSCHECK_REL`` payı içinde uyuşmuyorsa None döner ve
+        çağıran fail-closed davranır.
+
+        ÖLÇÜLDÜ (1 Eylül 2026, /calculate_liquid 10 kN RP-1/LOX):
+          system_summary.total_volume = 1211,598534 L
+          geometri toplamı = pi/4(0,605138^2 x 1,512845)
+                           + pi/4(0,734012^2 x 1,835029) = 1,211599 m^3
+          bağıl fark 4e-7 -> litre okuması DOĞRULANDI.
+        """
+        md = motor_data if isinstance(motor_data, dict) else {}
+        tanks = md.get('propellant_tanks')
+        if not isinstance(tanks, dict):
+            return None, None
+
+        # (a) Tank tank GEOMETRİ toplamı — birimden bağımsız çapa.
+        geo_m3, adlar = 0.0, []
+        for ad in sorted(tanks):
+            blok = tanks.get(ad)
+            if not isinstance(blok, dict):
+                continue
+            dim = blok.get('dimensions')
+            if not isinstance(dim, dict):
+                continue
+            d_mm = _finite_positive(dim.get('diameter'))
+            l_mm = _finite_positive(dim.get('length'))
+            if d_mm is None or l_mm is None:
+                continue
+            geo_m3 += math.pi / 4.0 * (d_mm / 1000.0) ** 2 * (l_mm / 1000.0)
+            adlar.append(ad)
+        if not adlar or geo_m3 <= 0.0:
+            return None, None
+
+        # (b) Özetin toplamı litre okunur ve (a) ile ÇAPRAZLANIR.
+        ozet = tanks.get('system_summary')
+        if isinstance(ozet, dict):
+            v_l = _finite_positive(ozet.get('total_volume'))
+            if v_l is not None:
+                v_m3 = v_l / 1000.0
+                if abs(v_m3 - geo_m3) <= cls.TANK_VOLUME_CROSSCHECK_REL * geo_m3:
+                    return v_m3, (
+                        'propellant_tanks.system_summary.total_volume '
+                        f'({v_l:,.1f} L; cross-checked against the per-tank '
+                        f'cylinder geometry, relative difference '
+                        f'{abs(v_m3 - geo_m3) / geo_m3:.2e})')
+                # İki temsil ayrışıyor: birim okunamadı -> fail-closed.
+                return None, None
+        return geo_m3, ('propellant_tanks.' + '+'.join(adlar)
+                        + '.dimensions (cylinder geometry)')
+
+    @staticmethod
+    def _eng_implied_bulk_density(diameter_mm, length_mm, prop_mass_kg):
+        """RASP başlığının ima ettiği bulk itici yoğunluğu (kg/m^3).
+
+        Zarf = ``pi/4 * d^2 * L`` (RASP'ın 2. ve 3. alanları, mm). Alanların
+        biri sonlu-pozitif değilse ``None`` döner — o durumu zaten alan
+        bazlı kapı yakalar (ÖH D15 / P9B3-11).
+        """
+        d = _finite_positive(diameter_mm)
+        l = _finite_positive(length_mm)
+        m = _finite_positive(prop_mass_kg)
+        if d is None or l is None or m is None:
+            return None
+        hacim_m3 = math.pi / 4.0 * (d / 1000.0) ** 2 * (l / 1000.0)
+        if hacim_m3 <= 0:
+            return None
+        return m / hacim_m3
 
     def _create_eng_file(self, designation: str, diameter: float, length: float,
                         prop_mass: float, total_impulse: float,
                         thrust_curve: List[Tuple[float, float]], motor_data: Dict,
                         thrust_source: str = 'constant',
-                        geometry: Dict = None, resolved: Dict = None) -> str:
+                        geometry: Dict = None, resolved: Dict = None,
+                        report: Dict = None) -> str:
         """Create .eng file content.
 
         Dosya kendini beyan eder: itki eğrisinin, yüklü kütlenin ve (2026-07-19
@@ -1224,8 +1977,213 @@ class OpenRocketExporter:
                           ('total_impulse_Ns', total_impulse)):
             if _finite_positive(deger) is None:
                 gecersiz[ad] = f'value written to the header would be {deger!r}'
+                continue
+            # ÖH D16 / P16B4-15 — YUVARLAMA KAPISI.
+            # ÖLÇÜLDÜ (taban 6fde52b): ``propellant_mass = 1e-9`` kg ile uç
+            # HTTP 200 veriyor ve dosyaya şu satır giriyordu:
+            #     L100-FUZZBASE 100.0 300.0 P 0.000 0.000 HRMA
+            # Yani alan bazlı "sonlu ve pozitif" kapısı geçiliyor ama RASP
+            # başlığına YAZILAN sayı 0.000 oluyor — tam olarak bu modülün
+            # ret metninin yasakladığı ("a zero-diameter or default-mass
+            # motor would load in OpenRocket and look real") dosya. Kapı
+            # değeri kendi başına değil, YAZILDIĞI HÂLİYLE sınar.
+            basamak = ENG_HEADER_DECIMALS.get(ad)
+            if basamak is not None and round(float(deger), basamak) <= 0.0:
+                gecersiz[ad] = (
+                    f'the RASP header field is written with {basamak} '
+                    f'decimals, so {float(deger)!r} would appear in the file '
+                    f'as {float(deger):.{basamak}f} - a zero value in the '
+                    f'motor line. The header is the file: a field that is '
+                    f'zero as written IS a placeholder motor, regardless of '
+                    f'the unrounded value')
         if not thrust_curve:
             gecersiz['thrust_curve'] = 'no thrust samples to write'
+
+        # ÖH D15 / defter P9B3-11 — ZARF ile KÜTLE BİRBİRİNE BAKMIYORDU.
+        # Yukarıdaki kapı her alanı TEK BAŞINA "sonlu ve pozitif" diye
+        # sınıyor; oysa RASP başlığı çapı, boyu ve yüklü itici kütlesini
+        # AYNI SATIRA yazar ve üçü birlikte bir ima edilen bulk yoğunluk
+        # üretir. Kapı olmadığı için sıvı motorda ölçülen satır şuydu:
+        #
+        #   P+149-P9-LIQUID 149.3 98.0 P 1103.056 1103.056 HRMA
+        #   -> pi/4 * 0,1493^2 * 0,098 = 0,0017156 m^3
+        #   -> 1103,056 / 0,0017156 = 642.927 kg/m^3  (osmiyumun ~28 katı)
+        #
+        # Kök: ``length`` alanı KAMARA boyudur (bir alt satırda öyle
+        # beyan ediliyor), itici kütlesi ise TANK içeriğidir; sıvı motorda
+        # ikisi aynı hacme ait değildir. Dosya OpenRocket'a yüklenince bu
+        # kütle doğrudan apoje hesabına girer.
+        #
+        # Fail-closed: fiziksel olarak imkânsız bir motor satırı YAZILMAZ.
+        # Üst sınır uydurulmaz, deponun kendi itici yoğunluk bandının üst
+        # ucudur (``propellants_db.PROPELLANT_DENSITY_RANGE_KG_M3``, aynı
+        # demet katalog doğrulayıcısının kullandığı banttır). ALT sınır
+        # kapı DEĞİLDİR: kısmen dolu bir kasa fiziksel olarak mümkündür,
+        # imkânsız olan zarfın ALDIĞINDAN ÇOK itici taşımaktır.
+        #
+        # ÖH D15 BİRLEŞME ETKİLEŞİMİ (1 Eylül 2026) — KAPI DOĞRU HACME
+        # SORULUYOR. Yukarıdaki gerekçenin son cümlesi kapının kendi
+        # ölçümünü çürütüyordu: "RASP boyu KAMARA boyudur, itici kütlesi
+        # TANK içeriğidir, ikisi aynı hacme ait DEĞİLDİR". Karşılaştırılamaz
+        # olduğu SÖYLENEN iki büyüklüğün oranı, dosyanın yalan söylediğinin
+        # kanıtı olamaz.
+        #
+        # ÖLÇÜLDÜ (/calculate_liquid, 10 kN RP-1/LOX): kapıyı geçebilmek
+        # için RASP boyu alanının 40,86 m olması gerekiyordu — gerçek kamara
+        # boyunun 584 katı ve dosyanın kendi fiziksel boy bandının (50 mm -
+        # 5 m, tests/test_unit_contract.py) 8 katı dışında. Yani bu kapıyı
+        # HİÇBİR sıvı motor geçemez: fizik denetimi değil, sıvı .eng
+        # ihracatının toptan kaldırılmasıdır. Birleşmede ölçüldü: 15
+        # kazanılmış bekçi (kasa çapı = STEP çapı P17S1-01, RASP başlığı
+        # fiziksel bantta, geometri künyesi beyanlı, yer-tutucu beyanı,
+        # atıl kütle uyarısı) bu yüzden kırmızıya döndü.
+        #
+        # ONARIM (gevşetme DEĞİL): eşik AYNI (3.000 kg/m3, aynı tek kaynak),
+        # sorulan hacim düzeltildi. Üç durum ayrılır:
+        #   1. Zarf iticiyi TUTUYOR (katı/hibrit, gerçek kasa çapı) ->
+        #      eski davranış AYNEN: imkânsız yoğunluk -> DOSYA YAZILMAZ.
+        #   2. İtici AYRI TANKLARDA (çözücü ``propellant_tanks`` yayımlıyor)
+        #      -> yoğunluk BEYAN EDİLEN tank hacmine karşı ölçülür. O da
+        #      bandı aşarsa DOSYA YAZILMAZ (fail-closed korunur). Geçerse
+        #      dosya yazılır ve zarfın iticiyi tutMADIĞI, OpenRocket'ın
+        #      ağırlık merkezini/apojeyi bu yüzden YANLIŞ hesaplayacağı
+        #      sayılarıyla BEYAN EDİLİR.
+        #   3. Zarfın kendisi BEYAN EDİLMİŞ YER TUTUCU (kasa çapı yok, boğaz
+        #      /çıkış çapı yazılmış ya da kamara boyu yok) -> oran zaten yer
+        #      tutucuyu ölçer, iticiyi değil; dosya yazılır ve oran adıyla
+        #      not düşülür. Yer tutucu beyanı zaten başlıkta duruyor.
+        #
+        # ÖLÇÜM (aynı gün, üç motor + yalın gövde):
+        #   katı   Ø104,80 x 600,00 mm, 6,468 kg   -> 1.249,7 kg/m3  (geçer)
+        #   hibrit Ø127,46 x 959,05 mm, 8,834 kg   ->   721,9 kg/m3  (geçer)
+        #   sıvı   Ø103,19 x  69,99 mm, 1025,28 kg -> 1.751.494 kg/m3 zarfta,
+        #          tanklarda (1.211,60 L) 846,2 kg/m3 -> GEÇER, beyanlı
+        #   yalın  Ø20,00 x 300,00 mm, 2,000 kg    -> 21.220,7 kg/m3, çap
+        #          BEYAN EDİLMİŞ yer tutucudur (boğaz çapı) -> beyanlı
+        _yogunluk = self._eng_implied_bulk_density(diameter, length,
+                                                   prop_mass)
+        _zarf_beyani: List[str] = []
+        _zarf_kaydi = None
+        if _yogunluk is not None and _yogunluk > PROPELLANT_DENSITY_MAX_KG_M3:
+            _cap_kaynagi = geometry.get('case_diameter_source')
+            _yer_tutucu = (_cap_kaynagi in ('throat', 'exit')
+                           or geometry.get('chamber_length') is None)
+            _tank_m3, _tank_kunye = self._declared_propellant_volume_m3(
+                motor_data)
+            _tank_yogunluk = (prop_mass / _tank_m3
+                              if _tank_m3 is not None else None)
+            # SIRA ÖNEMLİ: tank beyanı VARSA hüküm ONA aittir. Tanklara
+            # da sığmayan kütle, çap yer tutucu olsa bile imkânsızdır ve
+            # dosya YAZILMAZ (yer tutucu dalı onu affetmemeli).
+            if _tank_m3 is not None and _tank_yogunluk is not None and \
+                    _tank_yogunluk <= PROPELLANT_DENSITY_MAX_KG_M3:
+                # (2) İtici ayrı tanklarda ve TANKLARA sığıyor: dosya yazılır,
+                # zarf-kütle ayrışması sayılarıyla BEYAN edilir. Susmak da
+                # yazmamak da okuyanı yanıltırdı; RASP biçiminde "itici
+                # başka yerde" diyecek bir alan yoktur, o yüzden yorum satırı.
+                # ÖH D17 / P9B3-11 (Fable-D15 ŞART) — MAKİNE-OKUR KAYIT.
+                # Aşağıdaki yorum satırları RASP tüketicileri tarafından yok
+                # sayılır; arayüz de onları okuyamaz. ÖLÇÜLDÜ (taban
+                # ``2426b4d``): ürün ağacında ``eng_envelope_warning`` adı
+                # HİÇ geçmiyordu (``git grep -c ... hrma/`` -> boş), yani
+                # zarf-kütle ayrışması yalnız .eng'in içinde, insan gözüne
+                # bakan bir cümle olarak duruyordu. Kayıt ``eng_error`` ile
+                # AYNI şemayı taşır (error/message + alan adları) ki iki uç
+                # tek biçim okusun; sayılar İKİNCİ KEZ HESAPLANMAZ, buradaki
+                # yerel değişkenlerden gelir.
+                _zarf_kaydi = {
+                    'error': 'propellant_outside_envelope',
+                    'message': (
+                        'The loaded propellant is not inside the envelope '
+                        'written on the RASP motor line; OpenRocket will '
+                        'place the mass inside the motor and compute the '
+                        'centre of gravity, the stability margin and the '
+                        'apogee from the wrong position.'),
+                    'envelope_diameter_mm': float(diameter),
+                    'envelope_length_mm': float(length),
+                    'propellant_mass_kg': float(prop_mass),
+                    'envelope_bulk_density_kg_m3': float(_yogunluk),
+                    'declared_tank_volume_m3': float(_tank_m3),
+                    'declared_tank_bulk_density_kg_m3': float(_tank_yogunluk),
+                    'declared_tank_source': _tank_kunye,
+                    'propellant_density_upper_bound_kg_m3': float(
+                        PROPELLANT_DENSITY_MAX_KG_M3),
+                    'case_diameter_source': _cap_kaynagi,
+                }
+                _zarf_beyani = [
+                    '; WARNING: the loaded propellant is NOT inside the '
+                    'envelope written on the motor line.',
+                    f';   RASP envelope {diameter:.1f} x {length:.1f} mm '
+                    f'would imply {_yogunluk:,.0f} kg/m3 for '
+                    f'{prop_mass:.3f} kg - physically impossible '
+                    f'(propellant band upper bound '
+                    f'{PROPELLANT_DENSITY_MAX_KG_M3:,.0f} kg/m3).',
+                    f';   The propellant is held in the tanks this analysis '
+                    f'sized: {_tank_kunye}',
+                    f';   -> {_tank_yogunluk:,.1f} kg/m3 in the declared tank '
+                    f'volume, which IS inside the band.',
+                    ';   OpenRocket places the loaded mass INSIDE the motor '
+                    'envelope, so the centre of gravity, the stability '
+                    'margin and the apogee it computes from this file are '
+                    'WRONG until you model the tanks as separate components.',
+                ]
+            elif _yer_tutucu and _tank_m3 is None:
+                # (3) Zarf beyan edilmiş yer tutucu: oran yer tutucuyu ölçer.
+                # (3) Yer tutucu dalı — aynı şema, farklı kod.
+                _zarf_kaydi = {
+                    'error': 'envelope_is_declared_placeholder',
+                    'message': (
+                        'The envelope written on the RASP motor line is a '
+                        'declared placeholder, not the measured case: the '
+                        'implied bulk density measures the placeholder, not '
+                        'the propellant.'),
+                    'envelope_diameter_mm': float(diameter),
+                    'envelope_length_mm': float(length),
+                    'propellant_mass_kg': float(prop_mass),
+                    'envelope_bulk_density_kg_m3': float(_yogunluk),
+                    'declared_tank_volume_m3': None,
+                    'declared_tank_bulk_density_kg_m3': None,
+                    'declared_tank_source': None,
+                    'propellant_density_upper_bound_kg_m3': float(
+                        PROPELLANT_DENSITY_MAX_KG_M3),
+                    'case_diameter_source': _cap_kaynagi,
+                }
+                _zarf_beyani = [
+                    f'; NOTE: the envelope written above implies '
+                    f'{_yogunluk:,.0f} kg/m3 for {prop_mass:.3f} kg, above '
+                    f'the {PROPELLANT_DENSITY_MAX_KG_M3:,.0f} kg/m3 '
+                    f'propellant band.',
+                    ';   That ratio measures the DECLARED PLACEHOLDER above, '
+                    'not the propellant mass: correct the envelope in '
+                    'OpenRocket and the ratio goes with it.',
+                ]
+            else:
+                # (1) Zarf iticiyi tutuyor (ya da tank beyanı okunamadı):
+                # eski fail-closed davranış AYNEN.
+                _tank_notu = ('' if _tank_m3 is None else
+                              f' The declared tank volume gives '
+                              f'{_tank_yogunluk:,.0f} kg/m3, still above the '
+                              f'band.')
+                gecersiz['propellant_mass_kg'] = (
+                    f'the RASP header would imply a bulk propellant density '
+                    f'of {_yogunluk:,.0f} kg/m3 (loaded propellant '
+                    f'{prop_mass:.3f} kg inside the declared envelope '
+                    f'{diameter:.1f} x {length:.1f} mm); the physical upper '
+                    f'bound for rocket propellants is '
+                    f'{PROPELLANT_DENSITY_MAX_KG_M3:,.0f} kg/m3. This run '
+                    f'declares no separate propellant tanks and the casing '
+                    f'diameter is not a placeholder, so the envelope IS the '
+                    f'volume that should hold this mass and the numbers '
+                    f'contradict each other; no motor file is written.'
+                    + _tank_notu)
+
+        # ÖH D17 / P9B3-11: kayıt ÇAĞIRANA taşınır. Paylaşılan bir
+        # örnek niteliği (``self.…``) KULLANILMAZ — bu modülün kendi notu
+        # istekler arasında durum taşımayı sızıntı sayar; ``report`` her
+        # istekte çağıranın açtığı TAZE sözlüktür.
+        if isinstance(report, dict):
+            report['eng_envelope_warning'] = _zarf_kaydi
+
         if gecersiz:
             raise OpenRocketExportDataError(
                 sorted(gecersiz), gecersiz, what='.eng')
@@ -1234,8 +2192,8 @@ class OpenRocketExporter:
 
         # Header comment
         lines.append(f"; {designation}")
-        lines.append(f"; UZAYTEK Rocket Motor")
-        lines.append(f"; Generated by UZAYTEK Analysis Software")
+        lines.append(f"; HRMA Rocket Motor")
+        lines.append(f"; Generated by HRMA - Rocket Motor Analysis")
         lines.append(f"; {datetime.now().strftime('%Y-%m-%d')}")
         _egri_etiketi = (
             _thrust_curve_label(motor_data.get('thrust_curve'))
@@ -1248,11 +2206,23 @@ class OpenRocketExporter:
             lines.append(f"; geometry note: {note}")
         lines.append(f"; diameter field = "
                      f"{CASE_DIAMETER_SOURCE_LABELS.get(geometry.get('case_diameter_source'), 'unknown')}")
+        # Cidar KÜNYESİ dosyanın içinde durur (P17S1-01): kasa çapı
+        # "oda + 2 x cidar" ile kurulduğunda hangi cidarın kullanıldığı
+        # okunmadan .eng ile STEP karşılaştırılamıyordu.
+        if geometry.get('case_diameter_source') == 'chamber_plus_wall':
+            wall_m = self._wall_thickness_m(motor_data)
+            if wall_m is not None:
+                lines.append(f"; wall used in the diameter field = "
+                             f"{wall_m * 1000.0:.2f} mm; "
+                             f"{self._wall_thickness_source(motor_data)}")
         if geometry.get('chamber_length') is None:
             lines.append("; length field = exporter placeholder; chamber length "
                          "NOT available in this export - correct it in OpenRocket")
         else:
             lines.append("; length field = chamber length (nozzle not included)")
+        # Zarf ⟷ yüklü kütle ayrışmasının BEYANI (ÖH D15 birleşme
+        # etkileşimi): sayılar zarf ve boy künyelerinin hemen ardında durur.
+        lines.extend(_zarf_beyani)
         throat_m = geometry.get('throat_diameter')
         if throat_m is not None:
             lines.append(f"; throat diameter: {throat_m * 1000.0:.2f} mm "
@@ -1278,10 +2248,24 @@ class OpenRocketExporter:
             lines.append(f"; total impulse ({total_impulse:.1f} N-s, sets the "
                          f"class letter): "
                          f"{TOTAL_IMPULSE_SOURCE_LABELS.get(impulse_src, impulse_src)}")
-        # Çözücü yanma süresini kendisi varsaydığını beyan ediyorsa (sıvı
-        # motorda ölçüldü: `burn_time_source` = "assumed 300 s burn"), o beyan
-        # dosyaya taşınır — hem itici kütlesi hem toplam impuls bu süreden
-        # türetilmiş olabilir ve okuyan kişi zinciri görmelidir.
+        # ÖH Z5S / P9B3-16 + P9B3-27: başlıktaki impuls, çözücünün teslim
+        # ettiği impuls ve DOSYAYA YAZILAN eğrinin integrali aynı sayı değil.
+        # Üçü de adıyla yazılır; negatif örnek kenetlendiyse bu da beyan
+        # edilir (eskiden dosya yalnız birinciyi yazıp susuyordu).
+        lines.extend(self._impulse_audit_lines(
+            self.impulse_audit(motor_data, thrust_curve)))
+        # ÖH Z5S / P9B3-18: ad RASP'ın tek parçalı alanına indirildiyse
+        # dosyadaki adın kullanıcının yazdığı ad OLMADIĞI söylenir.
+        _ad, ad_beyani = _sanitize_motor_name(
+            (motor_data or {}).get('motor_name', DEFAULT_MOTOR_NAME))
+        if ad_beyani:
+            lines.append('; ' + ad_beyani)
+        # Çözücünün yanma süresi künyesi dosyaya taşınır — hem itici kütlesi
+        # hem toplam impuls bu süreden türetilmiş olabilir ve okuyan kişi
+        # zinciri görmelidir. (ÖH D36 / LU-1: sıvı çözücü artık süreyi
+        # VARSAYMAZ; künye "user input (max burn duration)" ya da öğretici
+        # kipte "tutorial default (300 s, use_tutorial_defaults)" olur. Süre
+        # yoksa bu satıra hiç gelinmez: yukarıdaki kapı .eng'i adıyla reddeder.)
         burn_time_src = (motor_data or {}).get('burn_time_source')
         if burn_time_src:
             lines.append('; burn time basis (declared by the solver): '
@@ -1298,21 +2282,49 @@ class OpenRocketExporter:
         if inert_mass is not None:
             lines.append(f"; inert mass used: {inert_mass:.3f} kg")
         else:
+            # ÖH Z5S / P9B3-20: bu satır eskiden "(no structural analysis in
+            # this export)" diyordu. ÖLÇÜLDÜ (27 Ağustos 2026, gerçek katı ve
+            # sıvı sonuçları): yapısal analiz VAR (katıda case_analysis +
+            # grain_structural, sıvıda chamber_structure + closure_joint) ve
+            # cidar kalınlığı bile çözülüyor (4,65 mm / 2,00 mm) — eksik olan
+            # ANALİZ değil, o analizin yayımladığı TOPLAM KÜTLE. Dosya artık
+            # neyin eksik olduğunu doğru söylüyor.
             lines.append("; WARNING: loaded mass EXCLUDES motor case mass "
-                         "(no structural analysis in this export) - apogee "
-                         "will be overestimated until you set the case mass "
-                         "in OpenRocket")
+                         "- the inert (case/structure) mass could NOT be "
+                         "resolved from this result; apogee will be "
+                         "overestimated until you set the case mass in "
+                         "OpenRocket")
+            lines.extend(self._structural_presence_lines(motor_data))
         # H4-7: aynı sonuçta ikinci bir "kuru kütle" varsa fark dosyada yazar;
         # okuyan kişi hangi sayının OpenRocket'a gittiğini ve hangi kalemin
         # yaklaşım olduğunu görmeli (sessiz ayrışma yasak).
         reconciliation = self.dry_mass_reconciliation(motor_data)
         if reconciliation:
             lines.extend(reconciliation['comment_lines'])
+        # ÖH D33 / OH-D32-10: dosyanın taşıdığı toplam impuls / itici kütlesi
+        # çifti bir teslim Isp'si İMA EDER; o Isp'nin iki-faz düzeltme durumu
+        # burada YAZILI durur (yalnız API'de değil).
+        lines.extend(self._two_phase_comment_lines(motor_data))
         lines.append(";")
-        manufacturer = "UZAYTEK"
+        manufacturer = "HRMA"
         delays = "P"  # RASP: tıpalı motor (ejeksiyon yükü yok); "0" anında ateşleme demekti
 
-        motor_line = f"{designation} {diameter:.1f} {length:.1f} {delays} {prop_mass:.3f} {loaded_mass:.3f} {manufacturer}"
+        # NOT (ÖH D16 / P16B4-15): buraya ikinci bir "yüklü kütle sıfır
+        # olamaz" kapısı yazılmıştı ve ÖLÇÜLDÜ Kİ ULAŞILAMAZ —
+        # ``loaded_mass = prop_mass + inert`` ve ``resolve_inert_mass``
+        # negatif değer yayımlamıyor (``dry_mass = -1.0`` ile denendi: uç
+        # 200 + ``P 1.000 1.000`` verdi, yani inert yutuldu). Ulaşılamayan
+        # kapı, mutasyonla kanıtlanamayan bir koruma iddiasıdır; bu yüzden
+        # SÖKÜLDÜ. Koruma tek yerdedir: yukarıdaki alan kapısı, ve o kapı
+        # bu tablodan (ENG_HEADER_DECIMALS) beslendiği için yüklü kütle
+        # alanını da aynı hassasiyetle yazar.
+        _d = ENG_HEADER_DECIMALS
+        motor_line = (
+            f"{designation} "
+            f"{diameter:.{_d['diameter_mm']}f} "
+            f"{length:.{_d['length_mm']}f} {delays} "
+            f"{prop_mass:.{_d['propellant_mass_kg']}f} "
+            f"{loaded_mass:.{_d['loaded_mass_kg']}f} {manufacturer}")
         lines.append(motor_line)
         
         # Thrust curve data (RASP: ilk örnek t>0 ve F>0 olmalı)
@@ -1413,6 +2425,40 @@ class OpenRocketExporter:
             'altitude_at_burnout': altitude_at_burnout  # m
         }
     
+    @classmethod
+    def resolve_ork_structure(cls, rocket_params: Dict = None):
+        """.ork yapı alanlarını çözer ve ÖRNEK olanları BEYAN listesine yazar.
+
+        ÖH D15 / P9B3-14. ``(değerler, beyan_satırları)`` döner. Çağıran bir
+        alanı verdiyse o alan beyan listesine GİRMEZ (sayı artık kullanıcının
+        kendisidir); vermediyse XML bir sayı yazmak zorunda olduğu için örnek
+        yazılır ama örnek olduğu ADIYLA söylenir.
+        """
+        gelen = rocket_params if isinstance(rocket_params, dict) else {}
+        degerler = {}
+        beyanlar = []
+        ornek_alanlar = []
+        for ad, (varsayilan, etiket) in ORK_EXAMPLE_STRUCTURE.items():
+            verilen = gelen.get(ad)
+            if verilen not in (None, ''):
+                degerler[ad] = verilen
+                beyanlar.append(f'{ad}: {etiket} = {verilen} '
+                                f'(from the export request - user input)')
+            else:
+                degerler[ad] = varsayilan
+                ornek_alanlar.append(f'{ad} = {varsayilan}')
+        ornek_alanlar.append(
+            f'body_wall_thickness = {ORK_BODY_TUBE_WALL_M}')
+        beyanlar.append(
+            'EXAMPLE STRUCTURE - the following '
+            f'{len(ornek_alanlar)} airframe values are EXAMPLE values written '
+            'by the exporter because no value was supplied for them; they are '
+            'NOT your rocket. OpenRocket computes the centre of gravity, the '
+            'stability margin and the apogee FROM THEM, so replace them with '
+            'your own build before running a simulation: '
+            + '; '.join(ornek_alanlar))
+        return degerler, beyanlar
+
     def create_ork_project_template(self, motor_data: Dict, rocket_params: Dict = None,
                                     launch_params: Dict = None) -> str:
         """Create OpenRocket project template XML.
@@ -1428,7 +2474,7 @@ class OpenRocketExporter:
         # .ork dosyası da OpenRocket'ta doğrudan açılan, motor tanımı taşıyan
         # bir dosyadır: .eng ile AYNI kapıdan geçer (bulgu A12, madde 3).
         # Eskiden boş bir sözlükten motor yuvası 0,5 m x Ø0,1 m ve
-        # `<motor>M0-UZAYTEK-HRM-001</motor>` yazan geçerli bir proje çıkıyordu.
+        # `<motor>M0-HRMA-001</motor>` yazan geçerli bir proje çıkıyordu.
         resolved = self.resolve_eng_inputs(motor_data)
         if not resolved['ok']:
             raise OpenRocketExportDataError(
@@ -1476,6 +2522,13 @@ class OpenRocketExporter:
         mount_radius_m = resolved['case_diameter'] / 2.0
         rocket_params = vehicle
 
+        # ÖH Z5S / P9B3-15: motor yuvası gövde borusuna sığıyor mu? Üç gerçek
+        # motorda da sığmıyordu ve şablonda bunu söyleyen tek satır yoktu.
+        mount_fit = self.motor_mount_fit(mount_radius_m, vehicle,
+                                         vehicle_sources)
+        mount_notes_xml = '\n                    '.join(
+            f'<!-- {note} -->' for note in self._motor_mount_fit_notes(mount_fit))
+
         # --- Fırlatma koşulları: JSON ile AYNI çözücüden (P4) --------------
         settings, sources = self.resolve_launch_settings(launch_params)
         wind_xml = settings.get('wind_speed')
@@ -1506,9 +2559,15 @@ class OpenRocketExporter:
         conditions_notes_xml = '\n        '.join(
             f'<!-- {note} -->' for note in cond_notes)
 
+        # ÖH D15 / P9B3-14: gövde yapısının hangi sayısı kullanıcının, hangisi
+        # ihraç edicinin ÖRNEĞİ — XML'in kendi içinde yazılır.
+        yapi, yapi_notlari = self.resolve_ork_structure(rocket_params)
+        structure_notes_xml = '\n            '.join(
+            '<!-- ' + note.replace('--', '-') + ' -->' for note in yapi_notlari)
+
         # Simplified OpenRocket XML template
         xml_template = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<openrocket version="1.5" creator="UZAYTEK">
+<openrocket version="1.5" creator="HRMA">
     <rocket>
         <name>{rocket_params['name']}</name>
         {vehicle_notes_xml}
@@ -1518,13 +2577,14 @@ class OpenRocketExporter:
             <name>Stage 1</name>
             
             <!-- Nose Cone -->
+            {structure_notes_xml}
             <nosecone>
                 <name>Nose Cone</name>
-                <shape>OGIVE</shape>
-                <length>0.3</length>
+                <shape>{yapi['nose_shape']}</shape>
+                <length>{yapi['nose_length']}</length>
                 <aftradius>{rocket_params['diameter']/2}</aftradius>
-                <material type="bulk" density="500.0">Fiberglass</material>
-                <thickness>0.003</thickness>
+                <material type="bulk" density="{yapi['nose_density']}">{yapi['nose_material']}</material>
+                <thickness>{yapi['nose_thickness']}</thickness>
             </nosecone>
             
             <!-- Body Tube -->
@@ -1532,16 +2592,17 @@ class OpenRocketExporter:
                 <name>Body Tube</name>
                 <length>{rocket_params['length']}</length>
                 <outerradius>{rocket_params['diameter']/2}</outerradius>
-                <material type="bulk" density="700.0">Phenolic</material>
-                <thickness>0.005</thickness>
-                
+                <material type="bulk" density="{yapi['body_density']}">{yapi['body_material']}</material>
+                <thickness>{ORK_BODY_TUBE_WALL_M}</thickness>
+
                 <!-- Motor Mount -->
                 <motormount>
+                    {mount_notes_xml}
                     <name>Motor Mount</name>
                     <length>{mount_length_m}</length>
                     <outerradius>{mount_radius_m}</outerradius>
-                    <material type="bulk" density="7850.0">Steel</material>
-                    <thickness>0.005</thickness>
+                    <material type="bulk" density="{yapi['mount_density']}">{yapi['mount_material']}</material>
+                    <thickness>{yapi['mount_thickness']}</thickness>
                     <motorconfig>
                         <configid>default</configid>
                         <motor>{motor_designation}</motor>
@@ -1552,12 +2613,12 @@ class OpenRocketExporter:
                 <finset>
                     <name>Fins</name>
                     <fincount>{rocket_params.get('fin_count', 4)}</fincount>
-                    <rootchord>0.15</rootchord>
-                    <tipchord>0.05</tipchord>
-                    <height>0.1</height>
-                    <sweepangle>45.0</sweepangle>
-                    <material type="bulk" density="500.0">Fiberglass</material>
-                    <thickness>0.003</thickness>
+                    <rootchord>{yapi['fin_root_chord']}</rootchord>
+                    <tipchord>{yapi['fin_tip_chord']}</tipchord>
+                    <height>{yapi['fin_height']}</height>
+                    <sweepangle>{yapi['fin_sweep_angle']}</sweepangle>
+                    <material type="bulk" density="{yapi['fin_density']}">{yapi['fin_material']}</material>
+                    <thickness>{yapi['fin_thickness']}</thickness>
                 </finset>
             </bodytube>
         </stage>
@@ -1575,7 +2636,7 @@ class OpenRocketExporter:
     
     <!-- Simulation -->
     <simulation>
-        <name>UZAYTEK Motor Test</name>
+        <name>HRMA Motor Test</name>
         <flightconfiguration>default</flightconfiguration>
         <conditions>
             <configid>default</configid>
@@ -1590,15 +2651,45 @@ class OpenRocketExporter:
         
         return xml_template
     
-    def export_eng_file(self, motor_data: Dict, filename: str = None) -> str:
-        """Alias for export_motor_file for compatibility"""
-        return self.export_motor_file(motor_data, filename)
+    def export_eng_file(self, motor_data: Dict, filename: str = None,
+                        report: Dict = None) -> str:
+        """Alias for export_motor_file for compatibility.
+
+        ÖH D17 / P9B3-11: ``report`` OLDUĞU GİBİ geçirilir; takma ad,
+        asıl metodun sözleşmesini daraltmaz (daraltsaydı ``/api/export-eng``
+        zarf beyanını hiç göremezdi — ölçüldü).
+        """
+        return self.export_motor_file(motor_data, filename, report=report)
     
     def export_motor_summary(self, motor_data: Dict) -> Dict:
-        """Export motor summary data for OpenRocket integration"""
-        
-        total_impulse = motor_data.get('total_impulse', 10000)
+        """API yanıtındaki motor özeti — imza varsayılanları KALDIRILDI.
+
+        ÖH Z5S / P9B3-10. Modülün kendi belgesi "10000 N·s varsayılanı YOK"
+        diyor (bkz. ``resolve_total_impulse``), ama AYNI yanıtı üreten bu
+        metotta varsayılan hâlâ canlıydı. ÖLÇÜLDÜ (27 Ağustos 2026, onarım
+        öncesi): ``export_motor_summary({})`` ->
+
+            total_impulse = 10000, motor_class = 'M', average_thrust = 0,
+            burn_time = 0, propellant_mass = 0
+
+        Aynı istekte ``.eng`` yolu kapıyı işletip dosyayı ÜRETMİYOR
+        (``OpenRocketExportDataError``), özet ise 'M' sınıfı bir motor
+        bildiriyordu — tek yanıtın iki ucu birbiriyle çelişiyordu.
+
+        Artık her sayı .eng ile AYNI çözücülerden gelir; çözülemeyen alan
+        ``None`` kalır (0 N·s itki ya da 0 bar kamara basıncı da bir
+        İDDİADIR, "veri yok" değil) ve hangi alandan çözüldüğü ``*_source``
+        alanlarında yazar. Anahtar kümesi korunur: çağıran taraf KeyError
+        yemez.
+        """
+        md = motor_data if isinstance(motor_data, dict) else {}
+        total_impulse, impulse_source = self.resolve_total_impulse(md)
         motor_class = self._get_motor_class(total_impulse)
+        average_thrust, thrust_source = self.resolve_average_thrust(md)
+        propellant_mass, prop_source = self.resolve_propellant_mass(md)
+        isp = (_finite_positive(md.get('isp'))
+               or _finite_positive(md.get('specific_impulse'))
+               or _finite_positive(md.get('isp_sea_level')))
         geometry = self.resolve_geometry(motor_data)
         motor_designation = self._designation(motor_data, geometry)
         throat_mm = geometry.get('throat_diameter')
@@ -1607,23 +2698,72 @@ class OpenRocketExporter:
         return {
             'designation': motor_designation,
             'motor_class': motor_class,
+            'motor_class_range_Ns': self.motor_class_range(motor_class),
             'total_impulse': total_impulse,
-            'average_thrust': motor_data.get('thrust', 0),
-            'burn_time': motor_data.get('burn_time', 0),
-            'specific_impulse': motor_data.get('isp', 0),
-            'propellant_mass': motor_data.get('propellant_mass_total', 0),
+            'total_impulse_source': impulse_source,
+            'average_thrust': average_thrust,
+            'average_thrust_source': thrust_source,
+            'burn_time': _finite_positive(md.get('burn_time')),
+            'specific_impulse': isp,
+            'propellant_mass': propellant_mass,
+            'propellant_mass_source': prop_source,
             # mm — birim sözleşmesi resolve_geometry'de çözülür
             'throat_diameter': throat_mm * 1000.0 if throat_mm is not None else None,
             'case_diameter': case_mm * 1000.0 if case_mm is not None else None,
             'geometry_source': geometry.get('source'),
             'geometry_notes': geometry.get('notes'),
             'case_diameter_source': geometry.get('case_diameter_source'),
-            'chamber_pressure': motor_data.get('chamber_pressure', 0),
-            'of_ratio': motor_data.get('of_ratio', 0),
-            'manufacturer': 'UZAYTEK',
-            'certification_status': 'Experimental'
+            # 0 bar / 0 O-F de bir iddiadır: çözülemiyorsa alan boş kalır.
+            'chamber_pressure': _finite_positive(md.get('chamber_pressure')),
+            'of_ratio': _finite_positive(md.get('of_ratio')),
+            'manufacturer': 'HRMA',
+            'certification_status': 'Experimental',
+            # ÖH D33 / OH-D32-10 — teslim edilen ``specific_impulse``in
+            # iki-faz düzeltme DURUMU. Çözücüden OKUNUR (tek tanım noktası);
+            # yayımlanmamışsa eksiklik adıyla beyan edilir, sessizce
+            # "düzeltilmiş" sayılmaz.
+            **self.resolve_two_phase_correction(md),
         }
     
+    #: Pencere apojeye yetmediğinde AYNI entegrasyonun (aynı dt, aynı fizik)
+    #: kaç adım daha sürdürülebileceği. Adlandırılmış tavan: aşılırsa apoje
+    #: İDDİA EDİLMEZ (ÖH Z5S / P9B3-19).
+    APOGEE_CONTINUATION_MAX_STEPS = 20000
+
+    def _continue_to_apogee(self, dt, t0, state, curve_t, curve_f,
+                            dry_mass, prop_mass, ref_area, cd,
+                            total_impulse_curve):
+        """Pencere bittiğinde AYNI 1-DOF çözümü apojeye kadar sürdürür.
+
+        Yeni bir model DEĞİLDİR: adım büyüklüğü, ISA sürükleme yasası, kütle
+        tüketimi ve itki ara-değerlemesi ``generate_flight_profile``in ana
+        döngüsüyle birebir aynıdır; yalnız zaman ekseni uzar. Döndürülen
+        diziler DEĞİŞMEZ — bu yüzden apoje yakalanan koşumlarda çıktı
+        bit-aynı kalır.
+
+        Döner: ``(apoje_irtifa|None, apoje_zamani|None, adım, tavan_aşıldı)``
+        """
+        alt, vel, mass, _landed = state
+        t = float(t0)
+        for adim in range(1, int(self.APOGEE_CONTINUATION_MAX_STEPS) + 1):
+            t += dt
+            thrust = (float(np.interp(t, curve_t, curve_f, left=0.0, right=0.0))
+                      if curve_t.size else 0.0)
+            weight = mass * G_0
+            rho = _air_density(alt)
+            drag = 0.5 * rho * cd * ref_area * vel * abs(vel)
+            acceleration = (thrust - weight - drag) / mass if mass > 0 else -G_0
+            vel += acceleration * dt
+            alt += vel * dt
+            if total_impulse_curve > 0.0 and thrust > 0.0:
+                mass = max(dry_mass,
+                           mass - prop_mass * (thrust * dt) / total_impulse_curve)
+            if alt <= 0.0:
+                return 0.0, t, adim, False
+            if vel <= 0.0:
+                return alt, t, adim, False
+        return None, None, int(self.APOGEE_CONTINUATION_MAX_STEPS), True
+
     def generate_flight_profile(self, motor_data: Dict, rocket_params: Dict = None) -> Dict:
         """Generate flight profile data for OpenRocket simulation.
 
@@ -1680,6 +2820,13 @@ class OpenRocketExporter:
                 'max_acceleration': None,
                 'flight_time': None,
                 'burnout_time': None,
+                # ÖH Z5S / P9B3-19: apoje alanları başarılı yanıtla aynı
+                # şekilde taşınır (çağıran taraf KeyError yemesin).
+                'apogee_altitude': None,
+                'apogee_time': None,
+                'apogee_status': 'not_computed',
+                'max_altitude_is_apogee': False,
+                'apogee_continuation_steps': 0,
                 'rocket_parameters': vehicle,
                 'rocket_parameters_source': vehicle_sources,
                 'vehicle_is_exporter_example':
@@ -1735,7 +2882,7 @@ class OpenRocketExporter:
         current_altitude = 0.0
         mass = dry_mass + prop_mass
         # Kütle akışı gerçek eğrinin toplam impulsuna orantılı tüketilir.
-        total_impulse_curve = float(np.trapz(curve_f, curve_t)) if curve_t.size > 1 else 0.0
+        total_impulse_curve = float(_trapezoid(curve_f, curve_t)) if curve_t.size > 1 else 0.0
         ref_area = np.pi * (diameter_m / 2.0) ** 2
         cd = (_finite_positive(rocket_params.get('drag_coefficient'))
               or EXPORTER_EXAMPLE_VEHICLE['drag_coefficient'])
@@ -1778,6 +2925,68 @@ class OpenRocketExporter:
             acceleration_points.append(acceleration)
             thrust_points.append(thrust)
 
+        # ------------------------------------------------------------------
+        # APOJE GERÇEKTEN YAKALANDI MI? (ÖH Z5S / P9B3-19)
+        # ------------------------------------------------------------------
+        # ÖLÇÜLDÜ (27 Ağustos 2026, gerçek katı motor + 12 kg'lık araç):
+        # pencere 0..15,267 s (600 adım), tepe SON adımda (599/599) ve son
+        # adımdaki dikey hız hâlâ +111,81 m/s. Yani araç tırmanmaya devam
+        # ederken kesilen pencerenin son noktası ``max_altitude`` adıyla
+        # dönüyordu; yanıtın hiçbir yerinde apoje sözcüğü geçmiyordu.
+        #
+        # Onarım UYDURMA SAYI ÜRETMEZ: döndürülen diziler AYNEN kalır (apoje
+        # pencerede yakalandığında çıktı bit-aynıdır) ve apoje iddiası ayrı
+        # bir alanda, AYNI entegrasyon sürdürülerek ölçülür. Tavan aşılırsa
+        # apoje None kalır ve bu beyan edilir.
+        tirmandi = any(v > 0.0 for v in velocity_points)
+        zirve_idx = int(np.argmax(altitude_points))
+        apogee_altitude = None
+        apogee_time = None
+        apogee_steps = 0
+        if not tirmandi:
+            apogee_status = 'no_liftoff'
+            apogee_altitude = float(altitude_points[zirve_idx])
+            apogee_time = float(time_points[zirve_idx])
+        elif landed or velocity_points[-1] <= 0.0:
+            apogee_status = 'reached_in_window'
+            apogee_altitude = float(altitude_points[zirve_idx])
+            apogee_time = float(time_points[zirve_idx])
+        else:
+            dt_son = float(time_points[-1] - time_points[-2]) \
+                if time_points.size > 1 else 0.0
+            apogee_altitude, apogee_time, apogee_steps, tavan = \
+                self._continue_to_apogee(
+                    dt_son, float(time_points[-1]),
+                    (current_altitude, current_velocity, mass, landed),
+                    curve_t, curve_f, dry_mass, prop_mass, ref_area, cd,
+                    total_impulse_curve)
+            apogee_status = 'not_reached' if tavan else 'reached_after_window'
+
+        max_altitude_is_apogee = (apogee_status in ('reached_in_window',
+                                                    'no_liftoff'))
+
+        method = (
+            ('EXAMPLE VEHICLE (not the user rocket) - ' if ornek_arac else '')
+            + '1-DOF time-marched integration with ISA drag, using the '
+              'thrust curve above')
+        if apogee_status == 'reached_after_window':
+            method += (
+                f' - NOTE: the vehicle is still climbing at the last sample '
+                f'(v = {velocity_points[-1]:+.1f} m/s), so max_altitude is the '
+                f'highest point INSIDE the simulated window, NOT the apogee; '
+                f'continuing the same integration reaches apogee at '
+                f'{apogee_altitude:.1f} m (t = {apogee_time:.1f} s)')
+        elif apogee_status == 'not_reached':
+            method += (
+                f' - WARNING: the vehicle is still climbing at the last sample '
+                f'(v = {velocity_points[-1]:+.1f} m/s) and the apogee was NOT '
+                f'reached within {self.APOGEE_CONTINUATION_MAX_STEPS} further '
+                f'integration steps: max_altitude is a truncated window value, '
+                f'NOT the apogee, and no apogee is claimed')
+        elif apogee_status == 'no_liftoff':
+            method += (' - NOTE: the vehicle never leaves the pad in this '
+                       'model (thrust never exceeds weight)')
+
         return {
             'status': 'ok',
             'time_data': time_points.tolist(),
@@ -1791,11 +3000,14 @@ class OpenRocketExporter:
             'performance_summary_error': _flight_performance_error,
             'max_altitude': max(altitude_points),
             # İki apoje sayısı aynı yanıtta dönüyor; hangisinin hangi modelden
-            # geldiği artık açıkça yazılı (denetim bulgusu: 134x fark).
-            'max_altitude_method': (
-                ('EXAMPLE VEHICLE (not the user rocket) - ' if ornek_arac else '')
-                + '1-DOF time-marched integration with ISA drag, using the '
-                  'thrust curve above'),
+            # geldiği artık açıkça yazılı (denetim bulgusu: 134x fark). Üçüncü
+            # bir soru daha yanıtlanıyor (P9B3-19): bu sayı apoje MI?
+            'max_altitude_method': method,
+            'apogee_altitude': apogee_altitude,
+            'apogee_time': apogee_time,
+            'apogee_status': apogee_status,
+            'max_altitude_is_apogee': max_altitude_is_apogee,
+            'apogee_continuation_steps': apogee_steps,
             'max_velocity': max(velocity_points),
             'max_acceleration': max(acceleration_points),
             'flight_time': float(time_points[-1]),

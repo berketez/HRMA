@@ -75,8 +75,15 @@ __all__ = [
 #: sessiz yaklaşıklığa düşülmez.
 MACH_MAX = 50.0
 
-_MACH_EPS = 1e-9          # M=1 tekilliğinden kaçınma payı (brentq braketi)
-_BOUNDARY_RTOL = 1e-9     # rejim sınırı eşitlik toleransı (ölçü-sıfır rejimler)
+# P15B2-11: aşağıdaki iki sayı bir "gürültü tabanı" DEĞİL, iki ayrı ROLDÜR ve
+# ortak bir tabana indirgenemezler. Depoda aynı mertebede görünen öteki
+# paylarla (``flow/boundary_layer.py`` boyutsuz λ payı 1e-12,
+# ``importers/step_import.py`` mm cinsinden uzunluk tabanı) ORTAK SABİT
+# YOKTUR: boyutları farklıdır. Her biri rolüyle adlandırılır.
+_MACH_EPS = 1e-9          # [boyutsuz Mach] M=1 tekilliğinden kaçınma payı
+#                           (brentq braketinin alt ucu: 1 + _MACH_EPS)
+_BOUNDARY_RTOL = 1e-9     # [boyutsuz, BAĞIL] rejim sınırı eşitlik toleransı
+#                           (ölçü-sıfır rejimlerin sayısal komşuluğu)
 
 # Rejim adları depo genelinde TEK sözlükle anılır: değerler
 # hrma/analysis/nozzle_flow_1d.py'deki adlandırmayla bilinçli olarak

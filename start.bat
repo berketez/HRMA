@@ -77,25 +77,94 @@ if !PYMIN! geq 14 (
     exit /b 1
 )
 
-echo Checking pip installation...
-!PYTHON_CMD! -m pip --version >nul 2>&1
+REM ---------------------------------------------------------------------------
+REM OH D33 / P10B3-24 (WINDOWS YARISI) - bagimliliklar KULLANICININ GENEL
+REM Python'una kurulmaz.
+REM ---------------------------------------------------------------------------
+REM OLCULDU (D18 altyapi a1, once_p10b3_14.json): uc kaynak-kurulum yolunun
+REM ucu de kullanicinin genel Python'una kuruyordu. start.sh D18'de onarildi
+REM (proje ici .venv); Windows yolu ayni kusurla kaldi ve kalemin notu "kalan
+REM yari icin start.bat degisikligi gerekir" diyordu. Bu blok o yaridir.
+REM
+REM Uc sonucu vardi:
+REM   * HRMA'nin pinleri (numpy<2 ve ona gore derlenmis tekerlekler)
+REM     kullanicinin baska projelerini bozuyor, kullanicinin projeleri de
+REM     HRMA'yi bozuyordu;
+REM   * her acilista "pip install --upgrade pip" kosuyor, cevrimdisi makinede
+REM     gereksiz basarisizlik uretiyordu;
+REM   * ensurepip cagrisi, kullanici hic istemeden genel Python'u degistiriyordu.
+REM
+REM FAIL-CLOSED: sanal ortam kurulamiyorsa sessizce genel Python'a DONULMEZ -
+REM yanlis yere kurmak, hic kurmamaktan kotudur (start.sh ile ayni doktrin).
+
+REM venv modulu yoksa hic baslamayiz: genel Python'a ensurepip ile dokunmak
+REM yerine nedeni ve cozumu adiyla soyleriz.
+!PYTHON_CMD! -c "import venv" >nul 2>&1
 if errorlevel 1 (
-    echo Error: pip is not available!
-    echo Installing pip...
-    !PYTHON_CMD! -m ensurepip --upgrade
+    echo.
+    echo Error: the Python "venv" module is not available.
+    echo.
+    echo HRMA does not install its dependencies into your system Python:
+    echo its pins ^(numpy^<2 and the compiled wheels built against it^)
+    echo would collide with your other projects.
+    echo.
+    echo How to fix:
+    echo 1. Reinstall Python from https://www.python.org/downloads/
+    echo    ^(the official installer ships the venv module^)
+    echo 2. Or use the ready-made installer instead of the source tree:
+    echo    https://github.com/berketez/HRMA/releases/latest
+    echo.
+    pause
+    exit /b 1
+)
+
+set "VENV_DIR=%~dp0.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+set VENV_YENI=0
+
+if not exist "!VENV_PY!" (
+    echo Creating an isolated environment in .venv ...
+    !PYTHON_CMD! -m venv "!VENV_DIR!"
+    if errorlevel 1 (
+        echo.
+        echo Error: could not create the .venv virtual environment.
+        echo.
+        echo How to fix:
+        echo 1. Make sure you can write to this folder: %~dp0
+        echo 2. Or use the ready-made installer instead of the source tree:
+        echo    https://github.com/berketez/HRMA/releases/latest
+        echo.
+        pause
+        exit /b 1
+    )
+    set VENV_YENI=1
+)
+
+REM venv komutu hata dondurmese bile yorumlayici yerinde degilse duruyoruz;
+REM aksi halde bundan sonraki her komut sessizce bos bir yola giderdi.
+if not exist "!VENV_PY!" (
+    echo.
+    echo Error: .venv was created but the interpreter is missing:
+    echo   !VENV_PY!
+    echo Delete the .venv folder and run this script again.
+    echo.
+    pause
+    exit /b 1
 )
 
 echo Installing required packages...
 echo This may take a few minutes on first run...
 echo.
 
-REM Upgrade pip first
-!PYTHON_CMD! -m pip install --upgrade pip
+if "!VENV_YENI!"=="1" (
+    REM Yalniz ortam ILK kuruldugunda: eski pip bazi tekerlekleri cozemiyor.
+    REM Her acilista kosarsa cevrimdisi makinede gereksiz hata uretir.
+    "!VENV_PY!" -m pip install --upgrade pip
+)
 
-REM Install required packages.
 REM --prefer-binary: pip mumkun oldugunca wheel kullansin, sdist derlemesin
 REM (numpy meson build hatasinin ana sebebi kaynaktan derlemeye dusmesiydi).
-!PYTHON_CMD! -m pip install --prefer-binary -r requirements.txt
+"!VENV_PY!" -m pip install --prefer-binary -r requirements.txt
 
 if errorlevel 1 (
     echo.
@@ -121,13 +190,16 @@ echo.
 echo Press Ctrl+C in this window to stop the application
 echo.
 
-REM Start the application (try Windows-optimized version first)
+REM Start the application - bagimliliklarin KURULDUGU yorumlayiciyla (.venv).
+REM run_windows.py eksik paket gorurse kendisi de kurmaya calisir; artik o
+REM cagri da sys.executable olarak .venv'i gorur, kullanicinin genel
+REM Python'unu degil.
 if exist hrma\run_windows.py (
     echo Using Windows-optimized launcher...
-    !PYTHON_CMD! hrma\run_windows.py
+    "!VENV_PY!" hrma\run_windows.py
 ) else (
     echo Using standard launcher...
-    !PYTHON_CMD! hrma\run.py
+    "!VENV_PY!" hrma\run.py
 )
 
 REM Keep window open if there's an error

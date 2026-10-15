@@ -5,6 +5,11 @@ NASA CEA-style chemical equilibrium and performance calculations with Cantera in
 
 import copy
 import numpy as np
+# ÖH D31 / P15B2-01 — yerel değer kapıları merkezden okur (tek kural).
+from hrma.utils.input_guard import finite_number as _finite_number
+# ÖH D17 / P15B2-08: katı yakıt yoğunlukları TEK KAYNAK.
+from hrma.data.propellant_database import (
+    HYBRID_FUEL_DENSITY_KG_M3 as _FUEL_RHO)
 import json
 import logging
 import warnings
@@ -25,6 +30,13 @@ from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, BAR_PER_PA,
 
 logger = logging.getLogger(__name__)
 
+#: ÖH D20 / B3-13 — ``sea_level_isp`` künyesi (kullanıcıya dönük: İngilizce).
+_SEA_LEVEL_ISP_BASIS = (
+    'specific impulse of the h = 0 row of the altitude sweep. It is looked '
+    'up by altitude, NOT taken as the first row of the table: if the caller '
+    'does not ask for sea level, the field is null rather than reporting '
+    'some other altitude under the name "sea level".')
+
 # Kuru hava O2/N2 KÜTLE kesirleri (Ar ve eser gazlar N2'ye katılmıştır).
 # Kaynak: US Standard Atmosphere 1976 hacimsel bileşiminden
 # (x_O2=0.2095, M_hava=28.9645 g/mol) -> Y_O2 = 0.2095*31.9988/28.9645 = 0.2314
@@ -34,6 +46,210 @@ AIR_N2_MASS_FRACTION = 0.7686
 # Kuru hava O2/N2 MOL kesirleri (US Standard Atmosphere 1976; Ar N2'ye dahil)
 AIR_O2_MOLE_FRACTION = 0.21
 AIR_N2_MOLE_FRACTION = 0.79
+
+# ---------------------------------------------------------------------------
+# ÖH D21 / OH-D17-10 — γ FİZİKSEL KABUL BANDI, TEK ADLANDIRILMIŞ SABİT.
+#
+# Bant iki yerde ADSIZ literal olarak yazılıydı (analyze_combustion'ın oda
+# gamma'sı süzgeci ve _exit_pressure_from_expansion'ın ön kontrolü). İkisi
+# aynı fiziksel iddiayı taşıyor: özgül ısı oranı ideal gazda γ = c_p/c_v > 1
+# ve tek atomlu sınırda γ ≤ 5/3; 2.0 üst sınırı bu sınırın üstünde güvenli
+# bir kesme olarak seçilmiştir (Sutton & Biblarz 9. baskı Böl. 3; NASA
+# RP-1311 Part I §2). Adsız iki kopya birinin sessizce kaymasına açık
+# kapıydı — B3-09'un kenar_tol'ü ile aynı desen.
+GAMMA_PHYSICAL_MIN = 1.0
+GAMMA_PHYSICAL_MAX = 2.0
+
+#: ÖH D21 / P12bB3-02 — ÇÖZÜCÜNÜN ONURLANDIRDIĞI HİBRİT YAKIT KÜMESİ,
+#: TEK KAYNAK. Liste eskiden İKİ yerde yazılıydı: fonksiyon içi ``FUEL_KEYS``
+#: demeti ve reddin İngilizce metnindeki "Supported fuels: htpb, paraffin,
+#: ..." kopyası. İkisi elle senkron tutuluyordu; bekçi (D15/a2) desteklenen
+#: listeyi HATA METNİNDEN regex'le söküyordu, yani sözleşme insan cümlesine
+#: asılıydı. Artık hem elemental katkı dalı, hem red mesajı, hem de bekçi bu
+#: demeti okur. Üyelik ölçütü: yakıtın ``_REACTANT_FORMULAS`` içinde bir
+#: kimyasal formülü olması — formülü olmayan anahtar elemental katkı
+#: üretemez ve dengeyi çöple besler (fail-closed).
+SUPPORTED_HYBRID_FUEL_KEYS = ('htpb', 'paraffin', 'pe', 'pmma', 'abs', 'pla',
+                              'aluminum')
+
+#: ÖH D31 / P12bB3-02 — REDDİN GEREKÇESİ ADIYLA SÖYLENİR (TEK KAYNAK).
+#:
+#: ÖLÇÜLDÜ (D31 hibrit a1 ``once.json`` K2, taban 9d70e9ed): arayüzün yakıt
+#: menüsünde ``disabled`` duran DÖRT anahtarın (``carbon``, ``al2o3``,
+#: ``mixture``, ``custom``) dördü de bu çözücüde AYNI genel gerekçeyle
+#: (``unsupported_fuel_key``) ve AYNI cümleyle reddediliyordu — ayrı gerekçe
+#: sayısı **1**. Oysa dördü ÜÇ FARKLI şeydir ve kullanıcının yapabileceği iş
+#: de üçünde farklıdır:
+#:   * ``al2o3`` bir KATEGORİ hatasıdır — alüminyum oksit tam oksitlenmiştir,
+#:     yakıt tanesi değildir; egzozdaki yoğuşmuş fazdır. Veri beklemek
+#:     anlamsızdır, bu anahtar hiçbir zaman desteklenmeyecektir.
+#:   * ``carbon`` bir LİTERATÜR borcudur — hakemli bir karbon/grafit
+#:     regresyon korelasyonu arandı ve bulunamadı (Berke karar dosyası, Veri
+#:     eki B, 2026-09-14); ayrıca saf karbon polimerler gibi piroliz
+#:     etmediği için ``r = a·G^n`` ailesinin uygulanabilirliği de açıktır.
+#:   * ``mixture`` / ``custom`` bir SÖZLEŞME kararıdır — veri değil şema
+#:     eksiktir: kullanıcının karışımı hangi alanlarla tarif edeceği
+#:     tanımlanmamıştır. Bileşenler ayrı ayrı gönderilebilir.
+#:
+#: Gerekçe metinleri KULLANICIYA görünür (API yanıtı) -> İngilizce. Hiçbir
+#: satır yeni bir SAYI açmaz; yalnız reddin sebebini adlandırır (fail-closed
+#: korunur, doktrin 1).
+HYBRID_FUEL_REJECTION_REASONS = {
+    'al2o3': (
+        'not_a_fuel',
+        'Aluminium oxide is a fully oxidised combustion product, not a grain '
+        'fuel: it carries no heat of combustion as a hybrid fuel. This key '
+        'is a category error, not a missing-data item, and will not be '
+        'supported. Use "aluminum" for a metal additive.'),
+    'carbon': (
+        'no_peer_reviewed_correlation',
+        'No peer-reviewed r = a*G^n regression correlation was found for '
+        'carbon/graphite hybrid grains, and pure carbon does not pyrolyse '
+        'the way polymeric fuels do, so the applicability of that '
+        'correlation family is itself open. No coefficients are invented '
+        'here.'),
+    'mixture': (
+        'no_request_contract',
+        'Composite grains are a request-schema gap, not a data gap: this API '
+        'does not define how a mixture is described (which components, in '
+        'what mass fractions). Send the components you want as separate '
+        'supported fuel keys.'),
+    'custom': (
+        'no_request_contract',
+        'A user-defined fuel is a request-schema gap, not a data gap: this '
+        'API does not define which thermochemical fields a custom grain must '
+        'supply (formula, density, heat of formation, regression pair). '
+        'Nothing is assumed on your behalf.'),
+}
+
+
+def _unsupported_fuel_error(fuel_type):
+    """Desteklenmeyen yakıt anahtarı için ADLANDIRILMIŞ red (P12bB3-02).
+
+    TEK KAYNAK: her iki kapı da bu fonksiyonu çağırır; desteklenen liste ve
+    gerekçe tablosu elle senkron tutulan ikinci kopya taşımaz.
+    """
+    gerekce, aciklama = HYBRID_FUEL_REJECTION_REASONS.get(
+        fuel_type, ('unsupported_fuel_key', None))
+    metin = ("Unsupported fuel key '%s'. Supported fuels: %s."
+             % (fuel_type, ', '.join(SUPPORTED_HYBRID_FUEL_KEYS)))
+    if aciklama:
+        metin = '%s %s' % (metin, aciklama)
+    hata = ValueError(metin)
+    hata.field = 'fuel_type'
+    hata.reason = gerekce
+    hata.supported_fuels = list(SUPPORTED_HYBRID_FUEL_KEYS)
+    if aciklama:
+        hata.explanation = aciklama
+    return hata
+
+
+def gamma_is_physical(g) -> bool:
+    """γ fiziksel kabul bandında mı (GAMMA_PHYSICAL_MIN < γ < MAX).
+
+    ÖH D31 / P15B2-01 (OH-D30-08 dağıtımı, satır 31: bu sembol hibrit
+    kulvarına düştü). YEREL DEĞER KAPISI MERKEZE BAĞLANDI: sayı okuma
+    kuralı artık burada elle yazılmıyor, ``hrma.utils.input_guard
+    .finite_number`` merkezinden geliyor — "sonlu sayı mı?" sorusunun
+    deponun her yerinde TEK yanıtı olsun diye (``bool`` sayı sayılmaz,
+    NaN/inf sayı sayılmaz, çevrilemeyen değer sayı sayılmaz).
+    Band ölçütü (``GAMMA_PHYSICAL_MIN/MAX``) bu modülün kendi fiziğidir
+    ve olduğu gibi kaldı; DAVRANIŞ DEĞİŞMEDİ (ölçüldü: aynı 12 girdide
+    aynı 12 yanıt), değişen tek şey kuralın nereden geldiğidir.
+    """
+    parsed = _finite_number(g)
+    if parsed is None:
+        return False
+    return bool(GAMMA_PHYSICAL_MIN < parsed < GAMMA_PHYSICAL_MAX)
+
+
+# ---------------------------------------------------------------------------
+# ÖH D24 / P15B1-05 — İSTASYON TABLOSUNUN BİRİMLERİ, TEK KAYNAK.
+#
+# ÖLÇÜLDÜ (once.json K2, taban 2e4d81f): hibrit yanıtında ``enthalpy``,
+# ``entropy``, ``cp`` ve ``cv`` adları AYNI gövdede iki ayrı birimde
+# yayımlanıyordu ve fark tam 1000 kattı —
+#   motor.combustion_analysis.compositions.chamber.enthalpy
+#       = 1 605 035,2237607732            [J/kg]   (denge çözücüsünün ham SI çıktısı)
+#   motor.combustion_analysis.performance.thermodynamic_properties
+#       .stations.chamber.enthalpy = 1 605,0352237607733  [kJ/kg]
+# Aynı ikilik cp (1 609,44 ⟷ 1,60944), cv ve entropy (10 217,285 ⟷
+# 10,217285) için de vardı. Ad birimi taşımadığından iki gövde ayırt
+# edilemiyordu.
+#
+# ÇÖZÜM: kJ tabanlı istasyon tablosunun alan ADLARI birimi taşır
+# (``enthalpy_kJ_kg`` vb.). ``compositions`` tarafı denge çözücüsünün ham
+# SI çıktısıdır ve adı DEĞİŞMEZ (J/kg); artık aynı adı taşımadıkları için
+# çakışma yoktur. Birim dizgileri burada BİR KEZ yazılır.
+_STATION_UNITS = {
+    'enthalpy_kJ_kg': 'kJ/kg',
+    'entropy_kJ_kg_K': 'kJ/(kg*K)',
+    'gibbs_energy_kJ_kg': 'kJ/kg',
+    'cp_kJ_kg_K': 'kJ/(kg*K)',
+    'cv_kJ_kg_K': 'kJ/(kg*K)',
+    'gamma': '-',
+    'molecular_weight': 'kg/kmol',
+    'speed_of_sound': 'm/s',
+    'density': 'kg/m^3',
+    'temperature': 'K',
+    'pressure': 'bar',
+}
+
+# ---------------------------------------------------------------------------
+# ÖH D24 / P15B1-05 — ÇALIŞMA NOKTASI BEYANI (iki termokimya ağacı).
+#
+# ÖLÇÜLDÜ (once.json K2, taban 2e4d81f; htpb/n2o, O/F=6,0, Pc=20 bar):
+# hibrit yanıtı aynı iskeleti İKİ ağaçta yayımlıyor —
+#   motor.combustion_analysis.*          (273 sayısal yaprak)
+#   motor.optimum_analysis.analysis.*    (271 yaprak)
+# 271 ortak yolun 146'sı >%1, 43'ü >%10 ayrışıyor. Sebep TEK yaprakta:
+# ``inputs.of_ratio`` = 6,0 ⟷ 6,078564148225201.
+#
+# ÖNEMLİ — BU BİR HESAP HATASI DEĞİL, BEYAN EKSİĞİYDİ. İki ağaç kasıtlı
+# olarak FARKLI çalışma noktasındadır: birincisi kullanıcının TASARIM
+# O/F'si, ikincisi ``find_optimum_of_ratio``un bulduğu OPTİMUM O/F'de
+# yapılan DANIŞMA analizidir (bkz. hybrid_rocket_engine: "find_optimum_of_
+# ratio yalnız danışma amaçlıdır ve tasarım O/F'sini DEĞİŞTİRMEZ").
+# İkisini tek bir O/F kaynağına bağlamak — ilk bakışta "tek kaynak"
+# onarımı gibi görünse de — optimum aramasını YOK EDERDİ: ya danışma
+# tasarım noktasını tekrarlar (bilgi sıfır), ya da tasarım tablosu
+# kullanıcının istemediği bir O/F'de yayımlanır (yanlış). Kusur,
+# ağaçların çalışma noktasını İLAN ETMEMESİYDİ: ``chamber.temperature``
+# okuyan iki tüketici farklı sayı alıyor, ikisi de haklı oluyor ve fark
+# ancak of_ratio yaprağı okunarak görülebiliyordu. Onarım: her ağaç kendi
+# çalışma noktasını ADIYLA taşır.
+OPERATING_POINT_DESIGN = 'design_point'
+OPERATING_POINT_OPTIMUM_SEARCH = 'optimum_of_search_result'
+OPERATING_POINT_AS_REQUESTED = 'as_requested'
+
+_OPERATING_POINT_BASIS = {
+    OPERATING_POINT_DESIGN: (
+        'the O/F ratio requested by the caller (design point). This is the '
+        'operating point the motor is sized for.'),
+    OPERATING_POINT_OPTIMUM_SEARCH: (
+        'ADVISORY: the O/F ratio found by find_optimum_of_ratio, NOT the '
+        'design point. Numbers in this tree describe a hypothetical motor '
+        'at the Isp-optimal mixture ratio and differ from the design tree '
+        'accordingly; the design O/F is NOT changed by this search.'),
+    OPERATING_POINT_AS_REQUESTED: (
+        'the O/F ratio passed to analyze_combustion by the caller; the '
+        'caller did not declare which role this operating point plays.'),
+}
+
+#: ``compositions`` tarafının birimleri — denge çözücüsünün HAM SI çıktısı.
+#: İstasyon tablosuyla aynı büyüklükleri taşır ama 1000 kat farklı tabanda;
+#: bu sözlük o tabanı ADIYLA ilan eder.
+_COMPOSITION_UNITS = {
+    'enthalpy': 'J/kg',
+    'entropy': 'J/(kg*K)',
+    'cp': 'J/(kg*K)',
+    'cv': 'J/(kg*K)',
+    'gamma': '-',
+    'molecular_weight': 'kg/kmol',
+    'temperature': 'K',
+    'density': 'kg/m^3',
+}
+
 
 # ---------------------------------------------------------------------------
 # Optimum O/F arama önbelleği (v2.5.5 performans, davranış AYNI).
@@ -95,6 +311,88 @@ FLAME_T_BRACKET_K = (250.0, 5500.0)
 OF_RATIO_MIN_EXCLUSIVE = 0.0
 
 
+# ---------------------------------------------------------------------------
+# Oda basıncı / oda sıcaklığı girdi kapısı (ÖH D16, kalem B3-08)
+# ---------------------------------------------------------------------------
+# ÖLÇÜM (1 Eylül 2026, taban 6fde52b; htpb/N2O, O/F=6):
+#   chamber_pressure = -20.0  -> TAM sonuç yayımlandı: T_oda = 2132,0359 K,
+#     BOĞAZ BASINCI = -11,118412 bar (negatif MUTLAK basınç), oda yoğunluğu
+#     = -2,969325 kg/m³, c* = 1249,0271, isp = nan.
+#   chamber_pressure = nan    -> her yaprak nan (T, P_boğaz, c*, isp).
+#   chamber_pressure = inf    -> her yaprak inf.
+#   chamber_pressure = 0.0    -> ham ZeroDivisionError (temiz hata değil).
+#   chamber_temperature = -500.0 -> TAM sonuç: T_boğaz = -429,1845 K,
+#     oda yoğunluğu = -12,661414 kg/m³ (mutlak sıfırın ALTINDA sıcaklık).
+#   chamber_temperature = 0.0 -> ham ZeroDivisionError.
+#   chamber_temperature = nan -> her yaprak nan.
+# Aynı fonksiyonun of_ratio kapısı (F4-5) bu vakaların hepsini kendi alanı
+# için zaten reddediyordu; kapının kendi metni "no combustion result is
+# produced from an unreadable value" diyor. Aynı ilke Pc/T_c'ye uygulanmamıştı.
+#
+# BANDIN KAYNAĞI — TANIMIN KENDİSİ, uydurma eşik değil:
+#   * Oda basıncı MUTLAK basınçtır (Sutton & Biblarz, "Rocket Propulsion
+#     Elements", 9. baskı, Böl. 3: izentropik bağıntılar p_c/p_t mutlak
+#     basınç oranıdır). Mutlak basınç tanım gereği negatif olamaz; sıfır ise
+#     ortada genişletilecek bir gaz yoktur ve p_c/p_t oranı tanımsızdır.
+#   * Oda sıcaklığı MUTLAK (Kelvin) sıcaklıktır. Termodinamiğin üçüncü yasası
+#     gereği mutlak sıfırın altı yoktur; T = 0 K'de ρ = p/(R·T) tanımsızdır.
+# ÜST SINIR BİLEREK KONMADI: yayımlanmış, itici çiftinden bağımsız bir üst
+# kesme değeri yoktur; uydurma bir tavan bu deponun yasakladığı sahte sabit
+# olurdu. (FLAME_T_BRACKET_K bir ÇÖZÜCÜ parantezidir, girdi kapısı değildir.)
+#: Oda basıncının tanım gereği geçerli bandı (alt sınır DIŞLAYICI, bar).
+CHAMBER_PRESSURE_MIN_EXCLUSIVE_BAR = 0.0
+#: Oda sıcaklığının tanım gereği geçerli bandı (alt sınır DIŞLAYICI, K).
+CHAMBER_TEMPERATURE_MIN_EXCLUSIVE_K = 0.0
+
+
+def _dogrula_sonlu_pozitif(deger, alan_adi, birim, alt_sinir, gerekce):
+    """``deger``i sonlu ve ``alt_sinir``dan BÜYÜK olarak doğrular.
+
+    Kapı ``of_ratio`` kapısıyla (F4-5) aynı desendedir: okunamayan, sonsuz
+    ya da banda düşmeyen girdiden KISMİ SONUÇ YAYIMLANMAZ; ``ValueError``
+    yükselir ve çağıran uç bunu alan adıyla 422'ye çevirir.
+    """
+    try:
+        sayi = float(deger)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"{alan_adi} must be a finite number in {birim} "
+            f"(got {deger!r}); no combustion result is produced from an "
+            f"unreadable value")
+    if not np.isfinite(sayi):
+        raise ValueError(
+            f"{alan_adi} must be finite (got {sayi!r}); a non-finite value "
+            f"is not a measurement and every leaf of the combustion result "
+            f"would inherit it")
+    if sayi <= alt_sinir:
+        raise ValueError(
+            f"{alan_adi} must be greater than {alt_sinir} {birim} "
+            f"(got {sayi!r}). {gerekce}")
+    return sayi
+
+
+def _dogrula_oda_basinci(chamber_pressure):
+    """Oda basıncını sonlu-pozitif (mutlak, bar) olarak doğrular."""
+    return _dogrula_sonlu_pozitif(
+        chamber_pressure, 'chamber_pressure', 'bar',
+        CHAMBER_PRESSURE_MIN_EXCLUSIVE_BAR,
+        "Chamber pressure is an ABSOLUTE pressure (Sutton & Biblarz 9th ed., "
+        "Ch. 3: p_c/p_t is a ratio of absolute pressures); a non-positive "
+        "absolute pressure has no physical meaning and previously produced a "
+        "negative absolute throat pressure and a negative gas density.")
+
+
+def _dogrula_oda_sicakligi(chamber_temperature):
+    """Oda sıcaklığını sonlu-pozitif (mutlak, K) olarak doğrular."""
+    return _dogrula_sonlu_pozitif(
+        chamber_temperature, 'chamber_temperature', 'K',
+        CHAMBER_TEMPERATURE_MIN_EXCLUSIVE_K,
+        "Chamber temperature is an ABSOLUTE (Kelvin) temperature; nothing "
+        "exists below absolute zero and rho = p/(R*T) is undefined at T = 0. "
+        "A non-positive value previously produced a negative absolute throat "
+        "temperature and a negative gas density.")
+
+
 def _dogrula_karisim_orani(of_ratio):
     """``of_ratio``yu sonlu-pozitif olarak doğrular; değilse ``ValueError``.
 
@@ -120,6 +418,64 @@ def _dogrula_karisim_orani(of_ratio):
             f"physical meaning and previously produced negative elemental "
             f"mass fractions and a negative equivalence ratio.")
     return deger
+
+
+# --- ÖH D18 fizik-a1 / F1 (B3-05 + B3-02): kayan-denge istasyon çözücüsü ---
+# Sektör pratiği (NASA RP-1311 Part I §6.2.2 ve §6.3.3; RPA v2.3 kılavuzu
+# s.19): oda ve boğaz HER ZAMAN kimyasal denge (c* ve ṁ oradan gelir),
+# boğaz→çıkış referans genişleme "kayan denge" (shifting equilibrium).
+# Tek-γ izentropik bağıntı yalnız profil/ön tahmin içindir.
+#
+# Aşağıdaki sabitler çözücünün SAYISAL parametreleridir (fiziksel model
+# değil); tek kaynak burasıdır, çözücü dışında kullanılmazlar.
+EQ_STATION_SONIC_BRACKET = (0.30, 0.95)
+"""Boğaz basınç oranı p_t/p_c için güvenli arama aralığı.
+
+Tek-γ kritik oran 1,10 ≤ γ ≤ 1,40 için 0,528…0,581 arasındadır; kayan
+dengede sapma %2 mertebesindedir, dolayısıyla bu aralık her yanma gazını
+rahatça kapsar (P01 ``B3-repro-08.py`` aynı aralığı kullanıyordu).
+"""
+
+EQ_STATION_SOUND_SPEED_PERTURBATION = 1.001
+"""Denge ses hızı için basınç pertürbasyonu: n_s = dlnP/dlnρ|_s,eq.
+
+a_eq = sqrt(n_s·P/ρ). Donmuş γ değil DENGE üsteli kullanılır (RP-1311
+§6.3.3): ayrışan türlerin yeniden birleşmesi ses hızını düşürür.
+"""
+
+EQ_STATION_PARABOLIC_STEPS = (0.01, 0.001)
+"""Boğaz (maksimum kütle akısı) tepe aramasında bağıl adım dizisi.
+
+Boğaz koşulu v = a_eq ile G = ρ·v maksimumu ÖZDEŞTİR (RP-1311 §6.3.3:
+A/A_t minimumu ⇔ u = a). G(p) tepe civarında düzgün ve kuadratiktir, bu
+yüzden üç noktalı parabol tepe kestirimi kullanılır: her tur 3 denge
+çözümü. Tek-γ kritik orandan başlanır (bağıl hata ~%2), iki tur yeter —
+ÖLÇÜLDÜ: sonik artık |v/a − 1| ≈ 2e-6 (bkz. ``sonic_residual``, yanıtta
+beyan edilir). G tepe noktasında düz olduğundan p_t'deki 1e-6 hata c*'a
+O(1e-12) yansır. (Kök arama yerine tepe araması
+seçildi: a_eq'nun kendisi ikinci bir denge çözümü ister, tepe araması
+çağrı başına maliyeti yarıya indirir.)
+"""
+
+EQ_STATION_EXIT_SECANT_MAX_ITER = 24
+"""ε → p_e kesen (secant) çözümünde üst yineleme sınırı."""
+
+EQ_STATION_EXIT_REL_TOL = 1e-10
+"""ε → p_e çözümünün bağıl kapanış ölçütü (|ε_hesap/ε_hedef − 1|)."""
+
+EQ_STATION_EXIT_PRESSURE_FLOOR_PA = 1.0
+"""ε çözümünde çıkış basıncı tabanı [Pa] (~1e-5 bar).
+
+``_exit_pressure_from_expansion`` içindeki 1e-6 bar tabanıyla aynı
+gerekçe: mutlak sıfır basınç log/oran alan tüketicileri bozar.
+"""
+
+EQ_STATION_CACHE_MAX = 64
+"""Boğaz çözümü önbelleğinin üst sınırı (FIFO).
+
+Anahtar NİCEMLENMEZ (tam float): D16'da nicemlenmiş anahtar "kullanıcı
+girdiyi değiştiriyor, cevap değişmiyor" kusurunu doğurmuştu.
+"""
 
 
 class CombustionAnalyzer:
@@ -166,6 +522,11 @@ class CombustionAnalyzer:
         self.cantera_available = False
         self._mechanism_id = 'empirical'
         self._mechanism_T_ceiling_K = None
+        # ÖH D18 F1: boğaz (kayan-denge sonik nokta) çözümü önbelleği.
+        # Anahtar (bileşim dizgesi, T_c, P_c) TAM float'tır; ε ve çıkış
+        # basıncı anahtara GİRMEZ çünkü boğaz onlardan bağımsızdır — ε
+        # taraması ve irtifa taraması aynı izentropu yeniden çözmez.
+        self._eq_station_cache = {}
         if CANTERA_AVAILABLE:
             for mech_file in MECHANISM_CHAIN:
                 try:
@@ -188,17 +549,71 @@ class CombustionAnalyzer:
             logger.warning("Cantera kurulu değil; CombustionAnalyzer ampirik modellerle çalışacak.")
         
         # N2O/HTPB hibrit roket için özel propellant tanımları
+        #
+        # ÖH D16 / OH-Z1-01 — ``density_liquid`` ARTIK YOĞUNLUK KANALI DEĞİL.
+        # Bu sözlükten yalnız ``enthalpy_formation`` ve ``molecular_weight``
+        # okunuyor (ölçüldü: ``raw/OH/D16/sivi/a1/once.json``, depoda
+        # ``density_liquid`` için TEK ÜRÜN SİTESİ bu iki tanım satırıydı,
+        # tüketicisi 0). N2O satırındaki 1220 kg/m³ ise "20 °C" etiketiyle
+        # duruyordu ve o sayı N₂O'nun NORMAL KAYNAMA NOKTASI (184,67 K ≈
+        # −88 °C) değeridir; 20 °C'deki doymuş sıvı yoğunluğu 785,10 kg/m³
+        # (+%55,4 hata). Yani ölü alan yanlış bir sayı ÖĞRETİYORDU.
+        # Kardeş sözlükte (``data/external_data_fetcher._initialize_backup_
+        # data``) aynı kusur Z1'de AYNI biçimde kapatıldı: anahtar KORUNUR
+        # (şekil bozulmasın), değeri ``None`` olur, künyesi "tüketilmiyor"
+        # der. Yoğunluk TEK KAYNAKTAN gelir:
+        # ``data.external_data_fetcher.oxidizer_reference_density``.
+        #
+        # Kitap uyum B16 (Ö-1, §28; 6 Eki 2026) — N₂O GİRİŞ DURUMU.
+        # Aşağıdaki 'n2o' ``enthalpy_formation`` alanı GAZ referansıdır
+        # (298,15 K ideal gaz, +82,05 kJ/mol; durum etiketi
+        # ``propellant_database.N2O_ENTHALPY_FORMATION_STATE``) ve artık
+        # depodaki TEK TANIMA bağlıdır (``propellant_database.
+        # N2O_ENTHALPY_FORMATION_GAS_298K_KJ_MOL``; eskiden burada ikinci bir
+        # 82.05 literali vardı). HP dengesine giren değer bu alan DEĞİL,
+        # giriş durumundan türetilen atanmış entalpidir (RP-1311 §4.1;
+        # ``hrma/engines/oxidizer_inlet.py``; ``_calculate_reactant_enthalpy``
+        # N₂O dalı). Giriş durumu ``set_oxidizer_inlet_state`` ile verilir;
+        # verilmezse varsayılan 293,15 K doymuş sıvıdır (hibrit
+        # ``TANK_TEMPERATURE_DEFAULT_K``, tek kaynak).
+        from hrma.engines.oxidizer_inlet import (
+            N2O_ENTHALPY_FORMATION_GAS_298K_KJ_MOL as _N2O_HF_GAZ)
+        # None = varsayılan giriş durumu. Denge önbelleği giriş durumu başına
+        # AYRI tutulur (``set_oxidizer_inlet_state``): aynı istek iki farklı
+        # giriş entalpisiyle sorulursa bayat sonuç DÖNMEZ.
+        self._oxidizer_inlet_signature = None
+        self._oxidizer_inlet_request = (None, None)
+        self._equilibrium_caches_by_inlet = {None: self._equilibrium_cache}
         self.propellant_specs = {
             'n2o': {
                 'formula': 'N2O',
                 'molecular_weight': 44.013,  # g/mol
-                'density_liquid': 1220,  # kg/m³ (at 20°C)
-                'enthalpy_formation': 82.05  # kJ/mol
+                'density_liquid': None,  # TÜKETİLMİYOR (bkz. yukarıdaki not)
+                'enthalpy_formation': _N2O_HF_GAZ  # kJ/mol — GAZ, 298,15 K
+            },
+            # D15/P1B3-03 — SIVI oksijenin kriyojenik entalpisi. TEK KAYNAK:
+            # bu satır. NASA CEA'nın kendi LOX kartı (RocketCEA
+            # input_cards.py, 'LOX'): "oxid O2(L) O 2 / h,cal=-3102.
+            # t(k)=90.18 wt%=100." -> -3102 cal/mol x 4,184 J/cal
+            # = -12 978,768 J/mol = -12,978768 kJ/mol (= -405,60 kJ/kg).
+            # Gaz O2 için Hf = 0 (298,15 K referans hali) DOĞRUDUR ve ayrı
+            # daldadır; sıvı oksijeni gaz referansıyla yakmak, buharlaşma
+            # ısısını bedava enerji olarak sayar.
+            'lox': {
+                'formula': 'O2',
+                'molecular_weight': 31.9988,  # g/mol
+                'density_liquid': None,  # TÜKETİLMİYOR (bkz. yukarıdaki not)
+                'enthalpy_formation': -12.978768  # kJ/mol (CEA O2(L) kartı)
             },
             'htpb': {
                 'formula': 'C4H6',  # Simplified HTPB monomer
-                'molecular_weight': 54.09,  # g/mol
-                'density': 920,  # kg/m³
+                # ÖH D19 (kalem B3-12): elle yazılı 54.09 KALKTI, yukarıdaki
+                # 'formula' alanından türetiliyor (54.092 g/mol). Aynı dosyada
+                # HTPB üç ayrı ağırlıkla yazılıydı (54.09 / 54.0 / 54.0).
+                'molecular_weight': self._formula_molar_mass('htpb'),
+                # ÖH D20 / P15B2-08 (Fable-D17 ŞARTI): dört tüketicinin
+                # DÖRDÜ de merkezi kayıttan okur; çıplak literal kalmaz.
+                'density': _FUEL_RHO['htpb'],  # kg/m³
                 # CEA R-45 HTPB kartı (RocketCEA 'HTPB' FROM_RPL_DATA):
                 # +1200 cal/100 g = +50.2 kJ/kg -> C4H6 birimi başına +2.7 kJ/mol.
                 # Eski -125.0 kJ/mol '(estimated)' değeri -2311 kJ/kg demekti ve
@@ -211,7 +626,7 @@ class CombustionAnalyzer:
             'paraffin': {
                 'formula': 'C12H26',  # Typical paraffin wax
                 'molecular_weight': 170.33,  # g/mol
-                'density': 900,  # kg/m³
+                'density': _FUEL_RHO['paraffin'],  # kg/m³
                 # NIST WebBook: n-dodekan(l) ΔHf° = -350.9 kJ/mol. Eski -290.0
                 # değeri kaynaksızdı ve karışımı ~%1-1.5 fazla enerjik yapıyordu.
                 'enthalpy_formation': -350.9  # kJ/mol (NIST, n-dodekan sıvı)
@@ -224,32 +639,47 @@ class CombustionAnalyzer:
             'pe': {
                 'formula': 'C2H4',  # Polietilen tekrar birimi
                 'molecular_weight': 28.05,  # g/mol
-                'density': 940,  # kg/m³ (HDPE)
+                # ÖH D17 / P15B2-08: bu alan TÜKETİLMİYOR (denge çözümü
+                # yoğunluğu Cantera'dan alır) ama aynı adla üçüncü bir
+                # sayı taşıyordu (940 ⟷ 950 ⟷ 960). Tek kaynağa bağlandı.
+                'density': _FUEL_RHO['pe'],  # kg/m³ (HDPE)
                 'enthalpy_formation': -54.3  # kJ/mol (katı PE; NBS bomba kal. / CEA deck std)
             },
             'pmma': {
                 'formula': 'C5H8O2',  # PMMA tekrar birimi
                 'molecular_weight': 100.12,  # g/mol
-                'density': 1180,  # kg/m³
+                'density': _FUEL_RHO['pmma'],  # kg/m³
                 'enthalpy_formation': -446.3  # kJ/mol (MMA(l) -388.8 + polimerleşme -57.5)
             },
             'abs': {
                 'formula': 'C8H8',  # Kodun ABS yaklaşımı (~stiren); ΔHf° polistiren değeri
                 'molecular_weight': 104.15,  # g/mol
-                'density': 1050,  # kg/m³
+                'density': _FUEL_RHO['abs'],  # kg/m³
                 'enthalpy_formation': 33.8  # kJ/mol (amorf PS; stiren(l) +103.8 + polim. -70.0)
             },
             'pla': {
                 'formula': 'C3H4O2',  # PLA tekrar birimi
                 'molecular_weight': 72.06,  # g/mol
-                'density': 1240,  # kg/m³
+                # ÖH D20 / OH-D19-10: aynı sayı, ama artık merkezi
+                # kaynaklı kayıttan; motor tarafındaki 1250 düştü.
+                'density': _FUEL_RHO['pla'],  # kg/m³
                 'enthalpy_formation': -409.6  # kJ/mol (laktid(s) -792.0 üzerinden ROP)
             }
         }
         
-        # Standard enthalpies of formation (kJ/mol) at 298K - NIST-JANAF güncel değerleri
+        # Standart oluşum entalpileri (kJ/mol), 298 K. KULLANILMIYOR (ölü
+        # veri). KU H-13 / KITAP-2a H5 (6 Eki 2026) — eski yorum "NIST-JANAF
+        # güncel değerleri" diyordu; YANLIŞ. Değerler karışık kökenlidir ve
+        # JANAF 4. baskı (Chase 1998) ile birebir değildir: ör. OH 39,46 ⟷
+        # JANAF 4. bs. 38,99 (KITAP-2a notu) ⟷ RocketCEA thermo.inp 37,278
+        # (Ruscic 2002; yerelde okundu). ÖLÇÜLDÜ (taban 9842af22): depoda bu
+        # özniteliği okuyan satır YOK (grep: yalnız bu tanım) ve hibrit + sıvı
+        # örnek projeler FORM yoluyla koşulurken 3 CombustionAnalyzer
+        # örneğinde 0 erişim (erişim sayan sözlükle). Motor sayıları
+        # RocketCEA/CEA kartlarından ve ``propellant_specs``ten gelir. Silme
+        # kararı ayrı kalemdir (sözlük bu kulvarın satır bölgesini aşıyor).
         self.species_data = {
-            # Major combustion products (NIST 2023 değerleri)
+            # Major combustion products (çoğu JANAF değeriyle aynı; künyesiz)
             'CO2': {'Hf': -393.522, 'MW': 44.0095, 'phase': 'gas'},
             'CO': {'Hf': -110.527, 'MW': 28.0101, 'phase': 'gas'},
             'H2O': {'Hf': -241.826, 'MW': 18.01528, 'phase': 'gas'},
@@ -270,7 +700,10 @@ class CombustionAnalyzer:
             # Fuel components (propellant_specs ile aynı kaynaklar)
             'C12H26': {'Hf': -350.9, 'MW': 170.33, 'phase': 'liquid'},  # NIST n-dodekan(l)
             'AL': {'Hf': 0.0, 'MW': 26.98, 'phase': 'solid'},
-            'HTPB': {'Hf': 2.7, 'MW': 54.0, 'phase': 'solid'},  # CEA R-45 kartı (C4H6 birimi)
+            # ÖH D19 (kalem B3-12): elle yazılı 54.0 KALKTI — aynı C4H6
+            # birimi, aynı tek kaynak (propellant_specs ile birebir aynı sayı).
+            'HTPB': {'Hf': 2.7, 'MW': self._formula_molar_mass('htpb'),
+                     'phase': 'solid'},  # CEA R-45 kartı (C4H6 birimi)
         }
 
     def _mechanism_temperature_ceiling(self) -> Optional[float]:
@@ -298,7 +731,8 @@ class CombustionAnalyzer:
                           of_ratio: float, chamber_pressure: float,
                           chamber_temperature: float = None,
                           eta_c_star: Optional[float] = None,
-                          expansion_ratio: Optional[float] = None) -> Dict:
+                          expansion_ratio: Optional[float] = None,
+                          operating_point: Optional[str] = None) -> Dict:
         """
         Comprehensive combustion analysis
 
@@ -334,9 +768,30 @@ class CombustionAnalyzer:
                 bkz. ``OF_RATIO_MIN_EXCLUSIVE``). Kısmi sonuç YAYIMLANMAZ:
                 elemental bileşimden eşdeğerlik oranına kadar her yaprak bu
                 orandan türer.
+            ValueError: ``chamber_pressure`` sonlu-pozitif (mutlak, bar)
+                değilse ya da verilmişse ``chamber_temperature`` sonlu-pozitif
+                (mutlak, K) değilse — ÖH D16 kalemi B3-08; bkz.
+                ``CHAMBER_PRESSURE_MIN_EXCLUSIVE_BAR`` ve
+                ``CHAMBER_TEMPERATURE_MIN_EXCLUSIVE_K``. Kapıdan önce bu
+                girdiler negatif MUTLAK boğaz basıncı, mutlak sıfır altı
+                boğaz sıcaklığı ve negatif gaz yoğunluğu yayımlıyordu.
         """
-        # --- GİRDİ KAPISI (F4-5) — anahtar kurulmadan ÖNCE ----------------
+        # --- GİRDİ KAPISI (F4-5 + ÖH D16 B3-08) — anahtar kurulmadan ÖNCE -
         of_ratio = _dogrula_karisim_orani(of_ratio)
+        chamber_pressure = _dogrula_oda_basinci(chamber_pressure)
+        if chamber_temperature is not None:
+            chamber_temperature = _dogrula_oda_sicakligi(chamber_temperature)
+
+        # ÖH D24 / P15B1-05 — çalışma noktası etiketi. Bilinmeyen etiket
+        # SESSİZCE kabul edilmez: beyan alanının kendisi uydurma taşırsa
+        # beyan işe yaramaz (fail-closed).
+        _op_nokta = (OPERATING_POINT_AS_REQUESTED if operating_point is None
+                     else str(operating_point))
+        if _op_nokta not in _OPERATING_POINT_BASIS:
+            # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
+            raise ValueError(
+                "Unknown operating_point %r; expected one of %s."
+                % (operating_point, sorted(_OPERATING_POINT_BASIS)))
 
         # --- Memoizasyon (v2.5.0 UQ): anahtar eta_c_star İÇERMEZ, çünkü
         # eta yalnız iki türetilmiş alanı (eta_c_star, c_star_delivered)
@@ -375,8 +830,34 @@ class CombustionAnalyzer:
         # olarak AYRI örneklerdi: Pc örnekler arasında 18.98-20.00 bar, ε ise
         # 3.68-3.82 aralığında değişiyordu ve nicemleme komşu örnekleri aynı
         # cevaba bağlıyordu — belirsizlik yayılımının tam da ölçmesi gereken
-        # farkı siliyordu. Bedel ölçüldü: tek denge çözümü 0.027 s;
-        # test_hybrid_fast_budget_end_to_end 9.68 s / 60 s üst sınır.
+        # farkı siliyordu.
+        #
+        # --- BEDEL: ÖH D31 fizik-a1 / OH-D18-02 TAZE ÖLÇÜMÜ ----------------
+        # Yukarıdaki "9,68 s / 60 s" kaydı (Faz 4B, 2 Ağustos 2026) BAYATTI
+        # ve boşluğu 4,5 kat fazla gösteriyordu. Bugün ölçülen (14 Eylül
+        # 2026, taban 9d70e9ed, M4; betik + ham sayılar:
+        # docs/scofield/raw/OH/D31/fizik/a1/{olcum_d18_02.py, once_d18_02.
+        # json}, kanıt raporu rapor.md):
+        #   analyze_combustion tek çağrı  kayan denge 5,747 ms
+        #                                  tek-γ      3,677 ms  -> 1,563x
+        #                                  (çağrı başına 17 denge çözümü:
+        #                                   12 izentrop + 1 ses + 3 bileşim
+        #                                   + 1 oda)
+        #   25 noktalı O/F taraması       0,140 s ⟷ 0,091 s
+        #   625 noktalı ızgara kestirimi  3,50 s ⟷ 2,27 s (marj +1,23 s;
+        #                                  PARAMETRIC_TIME_BUDGET_DEFAULT_S
+        #                                  = 30 s'nin %4,1'i)
+        #   test_hybrid_fast_budget_end_to_end  44,05 s / 60 s üst sınır
+        #                                  (kayan denge KAPALI iken 23,77 s;
+        #                                   yani bütçenin 20,3 s'si bu
+        #                                   zincirin. Kalan boşluk 15,9 s)
+        # İstasyon önbelleği O/F taramasında İŞE YARAMIYOR (6 nokta -> 6
+        # hücre, isabet %0) — çünkü her noktada bileşim değişiyor. Çare
+        # olarak önerilen "nicemlenmiş anahtar" bu blokta ölçülerek
+        # REDDEDİLDİ ve karar iki bekçiyle kilitlendi
+        # (tests/test_d31_fizik_a1.py::test_oh_d18_02_*). Hız için doğruluk
+        # feda EDİLMEZ; bütçe kapısı zaten fail-closed'dır
+        # (parametric_time_budget_exceeded).
         cache_key = None
         if self.memoize:
             try:
@@ -403,6 +884,11 @@ class CombustionAnalyzer:
                     # değiştirdiği için anahtara GİRMELİDİR (v2.6.2/F034).
                     None if expansion_ratio is None
                     else float(expansion_ratio),
+                    # ÖH D24 / P15B1-05: çalışma noktası etiketi GÖVDEDE
+                    # yayımlandığı için anahtara da GİRMELİDİR — aynı O/F
+                    # iki farklı rolle sorulursa önbellek yanlış etiketi
+                    # geri verirdi.
+                    _op_nokta,
                 )
             except (TypeError, ValueError):
                 cache_key = None  # anahtarlanamayan girdi: önbelleksiz devam
@@ -442,9 +928,32 @@ class CombustionAnalyzer:
         )
 
         # Cantera'dan gerçek termodinamik değerleri al
-        if self.cantera_available and isinstance(chamber_composition, dict) and 'gamma' in chamber_composition:
+        #
+        # ÖH D16 / B3-08... (kalem B3-06) — KISA DEVRE KALDIRILDI.
+        # Eski koşul `self.cantera_available and ...` idi. Cantera kapalı
+        # (paketlenmiş/çevrimdışı/kırık kurulum) iken atom-dengesi yedeği
+        # KENDİ gamma'sını üretip sözlüğe koyuyor, aşağıdaki :2016-2039 dalı
+        # onu comp['gamma'] olarak okuyor ve c*/cf oradan geliyordu; ama bu
+        # satır o gamma'yı ATIP 1,25 sabitini kullanıyordu. Sonuç: AYNI
+        # yanıtta iki oda gamma'sı. ÖLÇÜLDÜ (1 Eylül 2026, taban 6fde52b;
+        # htpb/N2O O/F=6 Pc=20 bar eps=4, CANTERA_AVAILABLE=False):
+        #   compositions.chamber.gamma = performance.gamma_avg = 1,195914
+        #   boğaz basıncından geri çözülen gamma  = 1,250000  (+%4,5226)
+        #   boğaz sıcaklığından geri çözülen gamma = 1,250000
+        #   yayımlanan P_boğaz 11,098579 bar / T_boğaz 2979,6954 K /
+        #   P_çıkış 0,790319 bar — üçü de gamma_avg ile TUTARSIZ.
+        # Artık istasyon bağıntıları, yanıtta YAYIMLANAN gamma'nın ta
+        # kendisini kullanır; 1,25 yalnız hiç gamma üretilemediğinde kalır
+        # (o durumu `mechanism` alanı zaten 'empirical' diye bildirir).
+        # Cantera açıkken davranış DEĞİŞMEZ (çapa bit-aynı).
+        _oda_gamma = None
+        if isinstance(chamber_composition, dict):
+            _oda_gamma = chamber_composition.get('gamma')
+        if self.cantera_available and isinstance(chamber_composition, dict) \
+                and 'temperature' in chamber_composition:
             chamber_temperature = chamber_composition['temperature']
-            gamma_chamber = chamber_composition['gamma']
+        if _oda_gamma is not None and gamma_is_physical(_oda_gamma):
+            gamma_chamber = float(_oda_gamma)
         else:
             # Fallback: tipik yanma gazı gamma'sı (Sutton & Biblarz 9. baskı, Bölüm 3)
             gamma_chamber = 1.25
@@ -452,10 +961,41 @@ class CombustionAnalyzer:
         # Boğaz (kritik/choked) koşulları hesaplanan gamma'dan türetilir:
         # P_c/P_t = ((gamma+1)/2)^(gamma/(gamma-1)), T_t/T_c = 2/(gamma+1)
         # Sutton & Biblarz 9th ed., Eq. 3-20 ve 3-22
+        #
+        # --- ÖH D18 fizik-a1 / F1 (kalem B3-05) ---------------------------
+        # Bu tek-γ çifti artık YALNIZ BAŞLANGIÇ TAHMİNİDİR. Sektör (NASA
+        # RP-1311 Part I §6.2.2/§6.3.3; RPA v2.3 s.19) boğazı kimyasal
+        # DENGEDE çözer: izentrop üzerinde kütle akısı G = ρv maksimumu
+        # (⇔ v = a_eq). Eskiden boğaz istasyonu bu tek-γ bağıntısından
+        # geliyordu — tam da dosyanın ÇIKIŞ için gerekçesiyle reddettiği
+        # bağıntıdan. ÖLÇÜLDÜ (2 Eylül 2026, taban e726048; kayan-denge
+        # sonik nokta referansına göre, 5 yakıt çifti):
+        #     T_boğaz  −%0,95 … −%1,37   (30-50 K düşük)
+        #     ρ_boğaz  +%1,39 … +%1,97
+        #     v_boğaz  −%0,47 … −%0,92
+        #   ve aynı yanıt içindeki süreklilik özdeşliği c* = P_c/(ρ_t v_t)
+        #   KAPANMIYORDU: −%0,72 … −%1,02. (c*'ın kendisi kayan-denge
+        #   referansına %0,08 içinde doğruydu; tutarsız olan boğaz
+        #   istasyonuydu.) Ölçüm: docs/scofield/raw/OH/D18/fizik/a1/
+        #   {olcum_f1.py, once_f1.json}.
         throat_pressure = chamber_pressure / (
             ((gamma_chamber + 1.0) / 2.0) ** (gamma_chamber / (gamma_chamber - 1.0))
         )
         throat_temperature = chamber_temperature * 2.0 / (gamma_chamber + 1.0)
+        station_basis = 'single_gamma_chamber'
+        eq_stations = None
+        try:
+            _comp_str = self._elements_to_cantera_composition(elements)
+        except Exception:
+            _comp_str = None
+        if _comp_str:
+            eq_stations = self._solve_equilibrium_throat(
+                _comp_str, chamber_temperature, chamber_pressure,
+                throat_pressure)
+        if eq_stations is not None:
+            throat_pressure = eq_stations['bogaz']['P'] / 1e5
+            throat_temperature = eq_stations['bogaz']['T']
+            station_basis = 'shifting_equilibrium'
         throat_composition = self._calculate_equilibrium_composition(
             elements, throat_pressure, throat_temperature, 'throat'
         )
@@ -473,6 +1013,21 @@ class CombustionAnalyzer:
         # bağıntısından ε ve oda γ'sı ile çözülür (Sutton & Biblarz 9. baskı,
         # Eş. 3-14 + Eş. 3-7); verilmezse ISA deniz seviyesi çapası korunur ve
         # bu durum çıktıda 'exit_pressure_basis' ile dürüstçe bildirilir.
+        #
+        # --- ÖH D18 fizik-a1 / F1 (kalem B3-02) ---------------------------
+        # Tek-γ alan-Mach çözümü + tek-γ çıkış SICAKLIĞI artık yalnız
+        # başlangıç tahmini/geri dönüş yoludur. Kusur şuydu: çıkış HIZI
+        # kayan-dengeden (enerji denklemi), çıkış SICAKLIĞI ve ε ise
+        # reddedilen tek-γ bağıntısından geliyordu; ikisi
+        # _fixed_nozzle_altitude_sweep'te A_e = ṁR_eT_e/(P_e v_e) ile
+        # ÇARPILIYORDU. ÖLÇÜLDÜ (taban e726048, htpb/N2O O/F=6 Pc=20 bar;
+        # kayan-denge referansına göre):
+        #     ε= 2 → T_e +%0,27  | ε= 4 → +%5,25  | ε= 8 → +%11,55
+        #     ε=16 → T_e +%18,46 | ε=40 → +%28,13
+        #   ve aynı ε'da ürünün p_e'si denge hedefinden +%4,3…+%37,6 YÜKSEK,
+        #   v_e ise −%0,85…−%1,40 düşük. Yön: A_e ve vakum Isp iyimser.
+        # Artık ε DENGE ile boyutlandırılır (ε = G_t/G_e, süreklilik),
+        # ε verilmezse ISA deniz seviyesi basıncındaki DENGE durumu alınır.
         if expansion_ratio is not None and float(expansion_ratio) > 1.0:
             exit_pressure = self._exit_pressure_from_expansion(
                 float(expansion_ratio), gamma_chamber, chamber_pressure)
@@ -483,6 +1038,25 @@ class CombustionAnalyzer:
         exit_temperature = self._calculate_exit_temperature(
             chamber_temperature, chamber_pressure, exit_pressure, gamma=gamma_chamber
         )
+        eq_exit = None
+        if eq_stations is not None:
+            if exit_pressure_basis == 'expansion_ratio':
+                eq_exit = self._solve_equilibrium_exit(
+                    eq_stations, float(expansion_ratio), exit_pressure)
+            else:
+                # ε yok: çıkış basıncı ISA deniz seviyesine çapalı, ama
+                # istasyonun kendisi yine kayan-denge izentropundan gelir
+                # (tek-γ T_e hatası burada da giderilir).
+                eq_exit = self._equilibrium_isentrope_state(
+                    eq_stations['s0'], eq_stations['h0'], exit_pressure * 1e5)
+        if eq_exit is not None:
+            exit_pressure = eq_exit['P'] / 1e5
+            exit_temperature = eq_exit['T']
+            exit_pressure_basis = (
+                'expansion_ratio_equilibrium'
+                if station_basis == 'shifting_equilibrium'
+                and expansion_ratio is not None and float(expansion_ratio) > 1.0
+                else 'sea_level_default_equilibrium')
         exit_composition = self._calculate_equilibrium_composition(
             elements, exit_pressure, exit_temperature, 'exit'
         )
@@ -504,10 +1078,63 @@ class CombustionAnalyzer:
         #     - frozen: çıkış bileşimi oda bileşimine DONDURULUR,
         #     - shifting: çıkış basıncında denge YENİDEN çözülür (gamma çıkış
         #       dengesinden gelir, böylece tek-gamma fazla-genişleme hatası giderilir).
-        isp_frozen, isp_shifting, v_exit_shifting = self._calculate_frozen_shifting_isp(
-            elements, chamber_temperature, chamber_pressure, exit_pressure
-        )
-        if isp_shifting is not None:
+        #
+        # --- ÖH D18 fizik-a1 / F1: c*, boğaz hızı ve üçlü Isp yayını -------
+        # c* artık kapalı-form tek-γ ifadesinden DEĞİL, çözülen boğaz
+        # istasyonundan gelir: c* = P_c/(ρ_t v_t) (RP-1311 eş. 6.11). Böylece
+        # ṁ = P_c A_t/c* ile ṁ = ρ_t v_t A_t ÖZDEŞ olur (süreklilik kapanışı
+        # makine hassasiyetinde; bekçi: tests/test_d18_fizik_a1.py).
+        isp_ucluk = None
+        if eq_stations is not None:
+            # Tek-γ kapalı formu SİLİNMEZ, ayrı anahtarda yayımlanır: yarı-1B
+            # (kalorik mükemmel gaz) lüle çözücüsünün ürettiği ṁ tam olarak
+            # P_c·A_t/c*_tek-γ'dır, dolayısıyla iki gaz modelini karşılaştıran
+            # çapraz denetimin bilinen defter terimi budur
+            # (hybrid_rocket_engine.mass_flow_c_star_model_ratio).
+            performance['c_star_single_gamma'] = performance['c_star']
+            performance['c_star'] = eq_stations['c_star']
+            performance['velocities']['throat'] = eq_stations['bogaz']['v']
+            performance['throat_sound_speed'] = eq_stations['bogaz']['a']
+            performance['throat_mass_flux'] = eq_stations['bogaz']['G']
+            performance['throat_sonic_residual'] = (
+                eq_stations['sonic_residual'])
+            performance['c_star_basis'] = 'shifting_equilibrium_throat'
+            if eq_exit is not None:
+                isp_ucluk = self._equilibrium_reference_isp(
+                    eq_stations, eq_exit['P'], eq_exit['v'])
+        else:
+            performance['c_star_basis'] = 'single_gamma_closed_form'
+        performance['station_basis'] = station_basis
+
+        if isp_ucluk is not None:
+            # Üçlü yayın (CEA nfz kipleri). 'isp_frozen' anahtarı SEKTÖRÜN
+            # kötümser referansına (nfz=2, boğazda donmuş) bağlandı; odada
+            # donmuş (nfz=1) değer mutlak alt sınır olarak AYRI anahtarda
+            # yayımlanır. Kinetik verim bandı böylece frozen@throat–eq
+            # arasıdır (MIT 16.512 L14 SSME: 435 / 451 / 465 s).
+            performance.update(isp_ucluk)
+            performance['isp_frozen'] = isp_ucluk['isp_frozen_throat']
+            performance['isp_shifting'] = isp_ucluk['isp_equilibrium']
+            performance['isp'] = isp_ucluk['isp_equilibrium']
+            performance['velocities']['exit'] = eq_exit['v']
+            if performance['c_star'] > 0:
+                performance['cf'] = eq_exit['v'] / performance['c_star']
+            performance['isp_reference_basis'] = {
+                'isp_frozen': 'frozen_at_throat (CEA nfz=2)',
+                'isp_shifting': 'shifting_equilibrium (CEA equilibrium)',
+                'isp_frozen_chamber': 'frozen_at_chamber (CEA nfz=1, '
+                                      'absolute lower bound)',
+                'source': 'NASA RP-1311 Part I 6.2.2/6.3.3; RPA v2.3 p.19',
+            }
+            isp_frozen = performance['isp_frozen']
+            isp_shifting = performance['isp_shifting']
+            v_exit_shifting = eq_exit['v']
+        else:
+            isp_frozen, isp_shifting, v_exit_shifting = (
+                self._calculate_frozen_shifting_isp(
+                    elements, chamber_temperature, chamber_pressure,
+                    exit_pressure))
+        if isp_ucluk is None and isp_shifting is not None:
             performance['isp_frozen'] = isp_frozen
             performance['isp_shifting'] = isp_shifting
             # Mevcut 'isp' anahtarı gerçeğe daha yakın olan shifting-equilibrium
@@ -594,11 +1221,23 @@ class CombustionAnalyzer:
                 # Aynı dürüstlük deseni bu sözlükte zaten iki yerde var:
                 # conditions['exit']['basis'] ve compositions[station]['source'].
                 'chamber': dict(chamber_conditions),
-                'throat': {'P': throat_pressure, 'T': throat_temperature},
+                # 'basis' (ÖH D18 F1 / B3-05): boğaz istasyonunun MODELİ.
+                #   'shifting_equilibrium'  -> izentrop üzerinde kütle akısı
+                #                              maksimumu (v = a_eq), c* aynı
+                #                              istasyondan (RP-1311 §6.3.3),
+                #   'single_gamma_chamber'  -> Cantera yok/çözüm ıraksadı,
+                #                              tek-γ kritik oran bağıntısı
+                #                              (Sutton Eş. 3-20/3-22).
+                'throat': {'P': throat_pressure, 'T': throat_temperature,
+                           'basis': station_basis},
                 # 'basis': çıkış basıncının nereden geldiği (F034 dürüstlük
-                # alanı). 'expansion_ratio' = motorun gerçek ε'sından
-                # izentropik çözüm; 'sea_level_default' = ε verilmedi, ISA
-                # deniz seviyesi çapası kullanıldı (isp/cf o lülenin değeri).
+                # alanı; ÖH D18 F1 / B3-02 ile genişletildi).
+                #   'expansion_ratio_equilibrium' = ε kayan-denge
+                #       sürekliliğinden çözüldü (ε = G_t/G_e) — ANA YOL,
+                #   'sea_level_default_equilibrium' = ε verilmedi; basınç ISA
+                #       deniz seviyesine çapalı, istasyon yine kayan-dengeden,
+                #   'expansion_ratio' / 'sea_level_default' = denge çözücüsü
+                #       kullanılamadı, tek-γ alan-Mach bağıntısı (geri dönüş).
                 'exit': {'P': exit_pressure, 'T': exit_temperature,
                          'basis': exit_pressure_basis}
             },
@@ -611,7 +1250,16 @@ class CombustionAnalyzer:
                 'oxidizer_type': oxidizer_type,
                 'of_ratio': of_ratio,
                 'chamber_pressure': chamber_pressure,
-            }
+                # ÖH D24 / P15B1-05 — bu ağacın ÇALIŞMA NOKTASI. Aynı
+                # iskelet yanıtta iki kez yayımlanıyor (tasarım O/F ve
+                # danışma optimum O/F); hangisi olduğu artık okunabilir.
+                'operating_point': _op_nokta,
+                'operating_point_basis': _OPERATING_POINT_BASIS[_op_nokta],
+            },
+            # ÖH D24 / P15B1-05 — ``compositions`` HAM SI tabanındadır
+            # (J/kg); istasyon tablosu kJ tabanındadır ve alan adlarında
+            # birimi taşır. İki taban artık ad düzeyinde ayrıktır.
+            'composition_units': dict(_COMPOSITION_UNITS),
         }
 
         if cache_key is not None:
@@ -639,65 +1287,67 @@ class CombustionAnalyzer:
         oxidizer_mass_fraction = of_ratio / total_mass
         
         # Process fuel composition
+        #
+        # ÖH D19 (kalem B3-12): pay ve payda ARTIK AYNI KAYNAKTAN geliyor —
+        # _REACTANT_FORMULAS (formül) + _ATOMIC_MASS (IUPAC 2021). Eskiden
+        # her yakıt için atom kütleleri (12,01 / 1,01 / 16,00) ve molekül
+        # ağırlığı (54,0 / 170,33 / 104,15 / 72,06 / 28,05 / 100,12) ayrı
+        # ayrı elle yazılıydı; ikisi tutmadığı için kütle korunmuyordu
+        # (HTPB'de +%0,1852). Yaklaşım formülleri (C4H6, C12H26, C8H8,
+        # C3H4O2, C2H4, C5H8O2) DEĞİŞMEDİ, yalnız bölen türetiliyor.
         for fuel_type, percentage in fuel_composition.items():
             fuel_fraction = (percentage / 100.0) * fuel_mass_fraction
-            
-            if fuel_type == 'paraffin':
-                # C12H26 approximation
-                elements['C'] += fuel_fraction * 12 * 12.01 / 170.33
-                elements['H'] += fuel_fraction * 26 * 1.01 / 170.33
-            elif fuel_type == 'htpb':
-                # C4H6 approximation
-                elements['C'] += fuel_fraction * 4 * 12.01 / 54.0
-                elements['H'] += fuel_fraction * 6 * 1.01 / 54.0
-            elif fuel_type == 'aluminum':
-                elements['AL'] += fuel_fraction * 26.98 / 26.98
-            elif fuel_type == 'abs':
-                # ABS approximated as C8H8 (simplified)
-                elements['C'] += fuel_fraction * 8 * 12.01 / 104.15
-                elements['H'] += fuel_fraction * 8 * 1.01 / 104.15
-            elif fuel_type == 'pla':
-                # PLA approximated as C3H4O2
-                elements['C'] += fuel_fraction * 3 * 12.01 / 72.06
-                elements['H'] += fuel_fraction * 4 * 1.01 / 72.06
-                elements['O'] += fuel_fraction * 2 * 16.00 / 72.06
-            elif fuel_type == 'pe':
-                # Polyethylene C2H4
-                elements['C'] += fuel_fraction * 2 * 12.01 / 28.05
-                elements['H'] += fuel_fraction * 4 * 1.01 / 28.05
-            elif fuel_type == 'pmma':
-                # PMMA approximated as C5H8O2
-                elements['C'] += fuel_fraction * 5 * 12.01 / 100.12
-                elements['H'] += fuel_fraction * 8 * 1.01 / 100.12
-                elements['O'] += fuel_fraction * 2 * 16.00 / 100.12
+
+            if fuel_type in SUPPORTED_HYBRID_FUEL_KEYS:
+                formul = self._REACTANT_FORMULAS[fuel_type]
+                mw = self._formula_molar_mass(fuel_type)
+                for element, atom_count in formul.items():
+                    elements[element] += (
+                        fuel_fraction * atom_count
+                        * self._ATOMIC_MASS[element] / mw)
             else:
                 # Sessiz düşme YASAK (oksitleyici dalındaki gerekçeyle aynı):
                 # bilinmeyen yakıt elemental katkısız kalır ve denge çöp üretir.
                 # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
-                raise ValueError(
-                    f"Unsupported fuel key '{fuel_type}'. Supported fuels: "
-                    f"htpb, paraffin, pe, pmma, abs, pla, aluminum.")
+                # Alan adı ve kabul kümesi MAKİNE-OKUR biçimde taşınır
+                # (ÖH D21 / P12bB3-02): çağıran hangi ALANIN reddedildiğini
+                # metni ayrıştırmadan öğrenir. Metin İngilizcedir ve
+                # desteklenen liste tek kaynaktan (yukarıdaki demet)
+                # üretilir — elle senkron tutulan ikinci kopya yoktur.
+                # ÖH D31 / P12bB3-02: gerekçe ADIYLA (kategori hatası /
+                # literatür borcu / şema borcu) — TEK KAYNAK.
+                raise _unsupported_fuel_error(fuel_type)
 
         # Process oxidizer
-        if oxidizer_type.lower() == 'n2o':
-            # N2O
-            elements['N'] += oxidizer_mass_fraction * 2 * 14.01 / 44.01
-            elements['O'] += oxidizer_mass_fraction * 16.00 / 44.01
+        # ÖH D19 (kalem B3-12): yakıt dalıyla aynı tek kaynak. Hava kendi
+        # dalında kalır çünkü elemental katkısı formülden değil KÜTLE
+        # KESİRLERİNDEN (Y_O2 / Y_N2) türer.
+        if oxidizer_type.lower() in ('n2o', 'h2o2'):
+            anahtar = oxidizer_type.lower()
+            formul = self._REACTANT_FORMULAS[anahtar]
+            mw = self._formula_molar_mass(anahtar)
+            for element, atom_count in formul.items():
+                elements[element] += (
+                    oxidizer_mass_fraction * atom_count
+                    * self._ATOMIC_MASS[element] / mw)
         elif oxidizer_type.lower() in ('lox', 'gox', 'o2', 'oxygen'):
             # O2 (sıvı ya da gaz — elemental katkı aynı). 'gox' eskiden hiçbir
             # dala girmiyordu: elemental O=0 kalıyor, denge OKSİJENSİZ çözülüp
             # c*'ı ~%40 şişiriyordu (2026-07-18 korelasyon fizik incelemesi).
-            elements['O'] += oxidizer_mass_fraction * 2 * 16.00 / 32.00
-        elif oxidizer_type.lower() == 'h2o2':
-            # H2O2
-            elements['H'] += oxidizer_mass_fraction * 2 * 1.01 / 34.01
-            elements['O'] += oxidizer_mass_fraction * 2 * 16.00 / 34.01
+            # Saf O2'de pay/payda zaten sadeleşir (katkı tanım gereği 1,0).
+            elements['O'] += oxidizer_mass_fraction * (
+                2 * self._ATOMIC_MASS['O'] / self._formula_molar_mass('o2'))
         elif oxidizer_type.lower() == 'air':
             # Hava: elemental KÜTLE dengesi için KÜTLE kesirleri kullanılır
             # (Y_O2=0.2314, Y_N2=0.7686; US Standard Atmosphere 1976 bileşiminden).
             # Eski kodda mol kesirleri (0.21/0.79) kütle kesri gibi kullanılıyordu.
-            elements['O'] += oxidizer_mass_fraction * AIR_O2_MASS_FRACTION * 2 * 16.00 / 32.00
-            elements['N'] += oxidizer_mass_fraction * AIR_N2_MASS_FRACTION * 2 * 14.01 / 28.01
+            # Y_O2 + Y_N2 = 1 olduğu ve her iki tür de kendi molekül ağırlığına
+            # bölündüğü için toplam katkı yine tam olarak kütle kesridir.
+            _mw_n2 = 2 * self._ATOMIC_MASS['N']
+            elements['O'] += oxidizer_mass_fraction * AIR_O2_MASS_FRACTION * (
+                2 * self._ATOMIC_MASS['O'] / self._formula_molar_mass('o2'))
+            elements['N'] += oxidizer_mass_fraction * AIR_N2_MASS_FRACTION * (
+                2 * self._ATOMIC_MASS['N'] / _mw_n2)
         else:
             # Sessiz düşme YASAK: bilinmeyen anahtar elemental katkısız kalır
             # ve denge fiziksel olmayan sonuç üretir ('gox' bugı aylarca böyle
@@ -716,53 +1366,116 @@ class CombustionAnalyzer:
         # Calculate oxygen requirement for complete combustion
         oxygen_required = 0  # kg O2 per kg fuel
         
+        # ÖH D19 (kalem B3-12): stokiyometrik O2 katsayısı ve yakıtın molekül
+        # ağırlığı ARTIK ELLE YAZILMIYOR — ikisi de _REACTANT_FORMULAS'tan
+        # türetiliyor. Bu, HTPB'nin DÖRDÜNCÜ elle yazılmış molekül ağırlığını
+        # (54,0) kaldırır. Tam yanma stokiyometrisi CxHyOz için
+        #     n_O2 = x + y/4 - z/2
+        # (C -> CO2, H -> H2O, yakıttaki O ürün oksijenini karşılar); metalik
+        # alüminyum için 2 Al + 1,5 O2 -> Al2O3, yani Al başına 3/4 O2.
+        # DOĞRULAMA (türetilen ⟷ eski elle yazılan katsayı):
+        #   C12H26 18,5 ⟷ 18,5 | C4H6 5,5 ⟷ 5,5 | C8H8 10 ⟷ 10
+        #   C3H4O2 3 ⟷ 3 | C2H4 3 ⟷ 3 | C5H8O2 6 ⟷ 6 | Al 0,75 ⟷ 0,75
+        # Katsayılar birebir aynı; değişen yalnız bölenlerin tek kaynaktan
+        # gelmesidir (54,0 -> 54,092 vb.).
+        # ÖH D25 (kalem B3-12, a2): SESSİZ DÜŞME KALDIRILDI. Eskiden bu döngü
+        # tanımadığı yakıtı `continue` ile ATLIYOR, kardeş fonksiyon
+        # _calculate_elemental_composition ise AYNI anahtarı adıyla
+        # REDDEDİYORDU — tek modülde İKİ AYRI kabul kümesi (B3-12'nin "tek
+        # kaynak" kusurunun kabul-kümesi biçimi). ÖLÇÜLDÜ (once.json K6,
+        # taban cdf2106) — sessiz kol fiziksel olmayan sayı yayımlıyordu:
+        #     yakıt 'n2o'      -> of_stoich = −0,3635062367936746  (NEGATİF)
+        #     yakıt 'o2'       -> of_stoich = −1,0                 (NEGATİF)
+        #     yakıt 'h2o2'     -> of_stoich = −0,4703651437643323  (NEGATİF)
+        #     yakıt 'kerosene' -> of_stoich = 0                    (oksijensiz)
+        # (Oksitleyici formülleri de _REACTANT_FORMULAS'ta olduğu için
+        # z/2 terimi payı negatife çeviriyordu.) Kabul kümesi artık kardeş
+        # fonksiyonla TEK KAYNAKTAN (SUPPORTED_HYBRID_FUEL_KEYS) gelir.
+        # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
+        _mw_o2 = self._formula_molar_mass('o2')
         for fuel_type, percentage in fuel_composition.items():
             fuel_fraction = percentage / 100.0
-            
-            if fuel_type == 'paraffin':
-                # C12H26 + 18.5 O2 → 12 CO2 + 13 H2O
-                # MW_fuel = 170.33, MW_O2 = 32.0
-                oxygen_required += fuel_fraction * (18.5 * 32.0) / 170.33
-            elif fuel_type == 'htpb':
-                # C4H6 + 5.5 O2 → 4 CO2 + 3 H2O
-                # MW_fuel = 54.0, MW_O2 = 32.0
-                oxygen_required += fuel_fraction * (5.5 * 32.0) / 54.0
-            elif fuel_type == 'aluminum':
-                # 4 Al + 3 O2 → 2 Al2O3
-                # MW_Al = 26.98, MW_O2 = 32.0
-                oxygen_required += fuel_fraction * (3 * 32.0) / (4 * 26.98)
-            elif fuel_type == 'abs':
-                # C8H8 + 10 O2 → 8 CO2 + 4 H2O
-                oxygen_required += fuel_fraction * (10 * 32.0) / 104.15
-            elif fuel_type == 'pla':
-                # C3H4O2 + 3 O2 → 3 CO2 + 2 H2O
-                oxygen_required += fuel_fraction * (3 * 32.0) / 72.06
-            elif fuel_type == 'pe':
-                # C2H4 + 3 O2 → 2 CO2 + 2 H2O
-                oxygen_required += fuel_fraction * (3 * 32.0) / 28.05
-            elif fuel_type == 'pmma':
-                # C5H8O2 + 6 O2 → 5 CO2 + 4 H2O
-                oxygen_required += fuel_fraction * (6 * 32.0) / 100.12
-        
+
+            if fuel_type not in SUPPORTED_HYBRID_FUEL_KEYS:
+                # ÖH D31 / P12bB3-02: gerekçe ADIYLA (kategori hatası /
+                # literatür borcu / şema borcu) — TEK KAYNAK.
+                raise _unsupported_fuel_error(fuel_type)
+            formul = self._REACTANT_FORMULAS[fuel_type]
+            if formul.get('AL'):
+                # 2 Al + 1.5 O2 → Al2O3
+                n_o2 = 0.75 * formul['AL']
+            else:
+                n_o2 = (formul.get('C', 0)
+                        + formul.get('H', 0) / 4.0
+                        - formul.get('O', 0) / 2.0)
+            oxygen_required += (
+                fuel_fraction * n_o2 * _mw_o2
+                / self._formula_molar_mass(fuel_type))
+
+
         # Convert to oxidizer mass
+        #
+        # ÖH D25 (kalem B3-12, Fable-D19 ŞART): oksitleyicinin KULLANILABİLİR
+        # oksijen kütle kesri de ARTIK ELLE YAZILMIYOR. B3-12'nin kusur sınıfı
+        # "pay tablodan, payda elle"ydi; D19 payı (n_O2) ve yakıt molekül
+        # ağırlığını tek kaynağa bağladı ama oksitleyici tarafındaki bölen elle
+        # kalmıştı, yani aynı kusur küçülmüş biçimde sürüyordu. ÖLÇÜLDÜ
+        # (once.json K1/K2; taban cdf2106):
+        #     N2O  elle 0.3636 ⟷ tablodan 0,3635062367936746  (+%0,0258)
+        #     H2O2 elle 0.4704 ⟷ tablodan 0,4703651437643323  (+%0,0074)
+        #   of_stoich(htpb/N2O) 8,948054274480175 ⟷ 8,950362346... ,
+        #   yayımlanan ER 1,491342379080029 ⟷ 1,491727057... (−%0,0258).
+        # 14 yakıt×oksitleyici çiftinin 14'ü tablodan sapıyordu; şimdi 0.
+        #
+        # Boyut analizi: pay ve payda [g/mol], oran BOYUTSUZ kütle kesridir
+        # (kg kullanılabilir O2 / kg oksitleyici). oxygen_required [kg O2/kg
+        # yakıt] bu kesre bölününce [kg oksitleyici / kg yakıt] = O/F kalır.
         if oxidizer_type.lower() == 'n2o':
-            # N2O contains 36.36% oxygen by mass
-            oxidizer_required = oxygen_required / 0.3636
+            # N2O ayrışması:  N2O -> N2 + 1/2 O2  (Zucrow & Hoffman,
+            # "Gas Dynamics" Vol.1; Sutton & Biblarz, "Rocket Propulsion
+            # Elements" 9. baskı, hibrit oksitleyiciler bölümü). Azot N2
+            # olarak inert ayrıldığı için N2O'nun oksijeninin TAMAMI yakıt
+            # oksidasyonuna gider:
+            #     m_O2 / m_N2O = (1/2 · M_O2) / M_N2O = M_O / M_N2O
+            # Sadeleşme sayesinde tek atom kütlesi yeter; ikinci bir sayı
+            # doğmaz. (M_N2O = 44,013 g/mol, propellant_specs ile birebir.)
+            oxidizer_required = (
+                oxygen_required
+                / (self._ATOMIC_MASS['O'] / self._formula_molar_mass('n2o')))
         elif oxidizer_type.lower() in ('lox', 'gox', 'o2', 'oxygen'):
             # Saf oksijen (sıvı ya da gaz) — açık dal; sessiz else'e güvenilmez
             oxidizer_required = oxygen_required
         elif oxidizer_type.lower() == 'h2o2':
             # H2O2'de yakıt oksidasyonu için KULLANILABİLİR oksijen:
-            # 2 H2O2 -> 2 H2O + O2  =>  32.00 g O2 / (2 x 34.0147 g H2O2) = 0.4704
-            # (Toplam O kütle içeriği 0.9412'dir ama H, bir O atomunu H2O olarak
-            # bağladığından yakıta gitmez — eski 0.9412 katsayısı bu yüzden yanlıştı.)
-            oxidizer_required = oxygen_required / 0.4704
+            #     2 H2O2 -> 2 H2O + O2
+            # yani İKİ H2O2 molekülü başına BİR O2 açığa çıkar:
+            #     m_O2 / m_H2O2 = M_O2 / (2 · M_H2O2)
+            # (Toplam O kütle içeriği 0,9412'dir ama H, bir O atomunu H2O
+            # olarak bağladığından yakıta gitmez — eski 0.9412 katsayısı bu
+            # yüzden yanlıştı. Kaynak: Sutton & Biblarz, tek-itici/HTP
+            # ayrışma stokiyometrisi.)
+            oxidizer_required = (
+                oxygen_required
+                / (self._formula_molar_mass('o2')
+                   / (2.0 * self._formula_molar_mass('h2o2'))))
         elif oxidizer_type.lower() == 'air':
             # Hava O2 kütle kesri (US Standard Atmosphere 1976 bileşiminden)
             oxidizer_required = oxygen_required / AIR_O2_MASS_FRACTION
         else:
-            oxidizer_required = oxygen_required  # Default assumption
-        
+            # ÖH D25 (kalem B3-12, a2): SESSİZ VARSAYILAN KALDIRILDI. Eski
+            # kol tanımadığı HER oksitleyiciyi sessizce SAF OKSİJEN sayıyordu;
+            # ÖLÇÜLDÜ (once.json K6): 'n2o4', 'nitrous' ve BOŞ dizge için
+            # of_stoich = 3,253512534200991 — yani lox ile BİREBİR aynı sayı,
+            # oysa kardeş _calculate_elemental_composition üçünü de adıyla
+            # reddediyordu. Kabul kümesi artık iki fonksiyonda da aynıdır.
+            # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
+            hata = ValueError(
+                f"Unsupported oxidizer key '{oxidizer_type}'. Supported "
+                f"oxidizers: n2o, lox, gox/o2/oxygen, h2o2, air.")
+            hata.field = 'oxidizer_type'
+            hata.reason = 'unsupported_oxidizer_key'
+            raise hata
+
         return oxidizer_required
     
     def _estimate_flame_temperature(self, elements: Dict, pressure: float,
@@ -990,13 +1703,140 @@ class CombustionAnalyzer:
         return base_temp * factor * (
             1.0 + self._EMP_PRESSURE_COEFF * np.log(max(pressure, 1e-3)))
 
+    # ------------------------------------------------------------------
+    # Kitap uyum B16 (Ö-1, §28) — N₂O GİRİŞ DURUMU
+    # ------------------------------------------------------------------
+    def set_oxidizer_inlet_state(self, temperature_k=None, phase=None):
+        """N₂O oksitleyicinin giriş (enjektör) durumunu ayarlar.
+
+        Args:
+            temperature_k: giriş sıcaklığı [K]; ``None`` → hibrit motorun
+                ``TANK_TEMPERATURE_DEFAULT_K`` sabiti (293,15 K, tek kaynak).
+            phase: ``'liquid'`` (varsayılan, doymuş sıvı) ya da ``'gas'``
+                (298,15 K standart hâl ideal gaz — kalem öncesi davranışla
+                BİT-ÖZDEŞ).
+
+        Geçersiz giriş (bilinmeyen faz; sıvıda kritik nokta üstü, üçlü nokta
+        altı ya da sonlu olmayan sıcaklık) burada AÇIK HATAYLA reddedilir ve
+        durum DEĞİŞMEZ (fail-closed).
+
+        ÖNBELLEK: denge sonuçları giriş durumu başına AYRI sözlükte tutulur;
+        durum değişince ``_equilibrium_cache`` o durumun sözlüğüne geçer.
+        Böylece paylaşılan (UQ) bir analizör iki farklı giriş durumuyla
+        sorulsa da bayat sonuç vermez ve önceki durumun hücreleri kaybolmaz.
+        Boğaz istasyonu önbelleği (``_eq_station_cache``) fiziksel duruma
+        (bileşim, T_c, P_c) göre anahtarlıdır; giriş entalpisi T_c'yi
+        değiştirdiği için ayrı tutulması gerekmez.
+        """
+        from hrma.engines.oxidizer_inlet import (
+            default_inlet_temperature_k, inlet_state_signature)
+        T_istek = (default_inlet_temperature_k() if temperature_k is None
+                   else temperature_k)
+        imza = inlet_state_signature(T_istek, phase)  # doğrular; hata → çık
+        varsayilan = inlet_state_signature(default_inlet_temperature_k(), None)
+        if imza == varsayilan:
+            imza = None  # varsayılan durum tek hücrede (kurucudaki sözlük)
+        self._oxidizer_inlet_request = (temperature_k, phase)
+        if imza == self._oxidizer_inlet_signature:
+            return
+        self._equilibrium_caches_by_inlet[
+            self._oxidizer_inlet_signature] = self._equilibrium_cache
+        self._equilibrium_cache = self._equilibrium_caches_by_inlet.setdefault(
+            imza, {})
+        self._oxidizer_inlet_signature = imza
+
+    def oxidizer_inlet_is_default(self) -> bool:
+        """Giriş durumu varsayılan mı (293,15 K doymuş sıvı)."""
+        return self._oxidizer_inlet_signature is None
+
+    def oxidizer_inlet_state(self, oxidizer_type: str = 'n2o') -> Dict:
+        """HP dengesine giren oksitleyici giriş durumunun BEYANI.
+
+        N₂O için sıcaklık, faz, kullanılan oluşum entalpisi [kJ/mol], yöntem
+        ve kaynak döner (``oxidizer_inlet.n2o_inlet_state``). Diğer
+        oksitleyicilerde giriş durumu ayarlanamaz; sabit referans hâli
+        beyan edilir (sayı uydurulmaz, yalnız bugün kullanılanı söyler).
+        """
+        from hrma.engines.oxidizer_inlet import (
+            default_inlet_temperature_k, n2o_inlet_state)
+        ox_key = str(oxidizer_type or '').lower()
+        if ox_key == 'n2o':
+            if self._oxidizer_inlet_signature is None:
+                durum = n2o_inlet_state(default_inlet_temperature_k(), None)
+                durum['inlet_state_source'] = 'default'
+            else:
+                T_istek, faz = self._oxidizer_inlet_request
+                if T_istek is None:
+                    T_istek = default_inlet_temperature_k()
+                durum = n2o_inlet_state(T_istek, faz)
+                durum['inlet_state_source'] = 'configured'
+            return durum
+        sabit = {
+            'lox': ('liquid', 'NASA CEA O2(L) card at 90.18 K '
+                    '(RocketCEA input_cards.py LOX)'),
+            'gox': ('gas', 'standard-state reference element, 298.15 K'),
+            'o2': ('gas', 'standard-state reference element, 298.15 K'),
+            'oxygen': ('gas', 'standard-state reference element, 298.15 K'),
+            'h2o2': ('liquid', 'NIST Chemistry WebBook H2O2(l), 298.15 K'),
+            'air': ('gas', 'standard-state reference elements, 298.15 K'),
+        }.get(ox_key)
+        return {
+            'oxidizer': ox_key,
+            'status': 'fixed_reference' if sabit else 'not_modelled',
+            'phase': sabit[0] if sabit else None,
+            'source': sabit[1] if sabit else None,
+            'temperature_applied': False,
+            'reason': ('the inlet state is configurable only for N2O; this '
+                       'oxidizer is burned at the fixed reference state '
+                       'named in "source".' if sabit else
+                       'no reactant enthalpy is defined for this oxidizer.'),
+        }
+
+    def optimum_of_inlet_signature(self, oxidizer_type) -> tuple:
+        """``find_optimum_of_ratio`` önbellek anahtarının GİRİŞ İMZASI.
+
+        Kitap uyum B16, 2. tur (denetçi şartı Ş-5, karar §28-18). Modül
+        düzeyi ``_OPTIMUM_OF_CACHE`` bütün analizörlerce paylaşılır; HP
+        dengesine giren N₂O reaktan entalpisi analizörün giriş durumuna
+        bağlıdır, dolayısıyla optimum O/F de. Anahtar bu imzayı taşımazsa
+        farklı giriş durumlu iki istek AYNI anahtarla birbirinin sonucunu
+        okur.
+
+        1. turda bu, varsayılan dışı durumda önbelleği ``clear``/``update``
+        ile GEÇİCİ olarak boşaltan bir yalıtım bağlamıyla (``isolated_
+        optimum_of_cache``) çözülmüştü. O çözüm waitress ``threads=4``
+        (``hrma/run.py``) altında YARIŞA açıktı: yalıtım sürerken öteki
+        iş parçacığı boşaltılmış sözlüğü görüyor, bitişte geri konan yedek
+        o arada eklenmiş girdileri siliyor ya da yalıtılmış aramanın
+        sonucunu (aynı anahtarla) varsayılan duruma kalıcı sızdırabiliyordu.
+        Anahtara imza girince yalıtım GEREKSİZLEŞTİ ve KALDIRILDI: sözlük
+        artık yalnız ``in`` / ``[]`` / atama ile, farklı anahtarlarla
+        kullanılır.
+
+        İmza (N₂O): (faz, uygulanan sıcaklık [K], atanmış oluşum entalpisi
+        [kJ/mol]) — üçü de ``oxidizer_inlet_state`` beyanından, yani HP
+        dengesine FİİLEN giren değerden okunur. N₂O dışındaki
+        oksitleyicilerde giriş durumu ayarlanamaz; imza sabittir.
+        """
+        ox_key = str(oxidizer_type or '').lower()
+        if ox_key != 'n2o':
+            return ('fixed_reference',)
+        beyan = self.oxidizer_inlet_state('n2o')
+        return (beyan['phase'], float(beyan['temperature_K']),
+                float(beyan['formation_enthalpy_kJ_mol']))
+
     def _calculate_reactant_enthalpy(self, fuel_composition: Optional[Dict],
                                      oxidizer_type: Optional[str],
                                      of_ratio: Optional[float]) -> Optional[float]:
-        """Reaktan karışımının kütle bazlı oluşum entalpisini döndürür (J/kg, 298.15 K).
+        """Reaktan karışımının kütle bazlı oluşum entalpisini döndürür (J/kg).
 
         h = Y_yakit * sum(w_i * Hf_i/MW_i) + Y_oks * Hf_oks/MW_oks
         (Hf [kJ/mol], MW [g/mol] -> J/kg dönüşümü: *1e6/MW)
+
+        Yakıtlar 298,15 K oluşum entalpisiyle girer. Oksitleyici GİRİŞ
+        DURUMUYLA girer: LOX sıvı (CEA O2(L) kartı, 90,18 K), H₂O₂ sıvı
+        (298,15 K), N₂O ise ``set_oxidizer_inlet_state`` ile verilen durumla
+        (varsayılan 293,15 K doymuş sıvı; B16).
 
         Eksik veri varsa None döner (çağıran ampirik yola düşer).
         """
@@ -1005,12 +1845,45 @@ class CombustionAnalyzer:
 
         ox_key = oxidizer_type.lower()
         if ox_key == 'n2o':
-            spec = self.propellant_specs['n2o']
-            hf_ox, mw_ox = spec['enthalpy_formation'], spec['molecular_weight']
+            # Kitap uyum B16 (Ö-1) — SIVI N₂O ARTIK SIVI OLARAK YAKILIYOR.
+            # Burada eskiden ``spec['enthalpy_formation']`` (298,15 K ideal
+            # GAZ, +82,05 kJ/mol) DOĞRUDAN okunuyordu; tank sıcaklığı ve faz
+            # hiç girmiyordu. LOX dalının gerekçesi ("sıvıyı gaz referansıyla
+            # yakmak buharlaşma ısısını bedava enerji sayar") N₂O için aynen
+            # geçerlidir. ÖLÇÜLDÜ (KARS-TK bulgu 16, htpb/N₂O O/F 6, 30 bar,
+            # ε 5): 293 K doymuş sıvıda ΔfH 70,82 kJ/mol, T_c −66 K, c*
+            # −%1,43, Isp −%1,52; bağımsız NASA CEA ile −62 K, −%1,34,
+            # −%1,59. Önce/sonra ve kanıt paketi:
+            # docs/scofield/raw/OH/KITAP/p1a/rapor.md.
+            # 'gas' fazı eski değeri BİT-ÖZDEŞ verir (bekçi testi var).
+            hf_ox = self.oxidizer_inlet_state('n2o')[
+                'formation_enthalpy_kJ_mol']
+            mw_ox = self.propellant_specs['n2o']['molecular_weight']
         elif ox_key == 'lox':
-            # O2 referans hali Hf = 0 (NIST-JANAF); kriyojenik sıvının
-            # duyulur entalpi farkı ihmal edilmiştir (CEA'da ~ -0.4 MJ/kg).
-            hf_ox, mw_ox = 0.0, 31.9988
+            # D15/P1B3-03 — KRİYOJENİK ENTALPİ ARTIK DÜŞÜLÜYOR.
+            # Burada eskiden `hf_ox = 0.0` yazılıydı, yani SIVI oksijen
+            # 298,15 K'deki GAZ O2 referansıyla yakılıyordu; kodun kendi
+            # yorumu farkı ("CEA'da ~ -0.4 MJ/kg") biliyor ama ne
+            # düzeltiyor ne bildiriyordu.
+            #
+            # ÖLÇÜLDÜ (docs/scofield/raw/OH/D15/hibrit/a1/once2.json ->
+            # sonra2.json; aynı denge çözücüsü, tek fark reaktan entalpisi):
+            #     htpb/lox   O/F 2,1  Pc 30  T_c 3601,86 K  c* 1814,63 m/s
+            #     htpb/lox   O/F 2,5  Pc 50  T_c 3762,74 K  c* 1795,02 m/s
+            #     paraffin/lox O/F 2,4 Pc 40 T_c 3557,87 K  c* 1830,53 m/s
+            #     pe/lox     O/F 2,4  Pc 50  T_c 3612,03 K  c* 1821,00 m/s
+            # Bu değerler CEA sözleşmeli çözümün +41…+48,5 K ÜSTÜNDEYDİ
+            # (c* +%1,0…+1,1, Isp +%1,05…+1,21). Yön önemli: bu dosyanın
+            # kendi gerekçesi T_c'yi DÜŞÜK vermenin motor boyutlandırmada
+            # konservatif olduğunu söylüyor; LOX'ta tam tersi oluyordu —
+            # her LOX çiftinde T_c/c*/Isp sistematik olarak İYİMSERDİ ve
+            # yanıtta tek bir beyan yoktu. N2O kontrolü (+0,00 K)
+            # sapmanın kaynağının bu dal olduğunu tek başına gösteriyor.
+            #
+            # Sayı `propellant_specs['lox']`ten okunur (tek kaynak); GOX
+            # dalı bilerek ayrıdır, orada Hf = 0 doğrudur.
+            spec = self.propellant_specs['lox']
+            hf_ox, mw_ox = spec['enthalpy_formation'], spec['molecular_weight']
         elif ox_key in ('gox', 'o2', 'oxygen'):
             # Gaz O2, 298 K referans hali: Hf = 0 TAM doğrudur (lox'taki
             # kriyojenik yaklaşımdan farklı olarak duyulur düzeltme gerekmez).
@@ -1167,6 +2040,53 @@ class CombustionAnalyzer:
     # Atom kütleleri [g/mol] — IUPAC 2021 standart atom ağırlıkları
     _ATOMIC_MASS = {'C': 12.011, 'H': 1.008, 'O': 15.999,
                     'N': 14.007, 'AL': 26.982}
+
+    # --- ÖH D19 (kalem B3-12) — REAKTAN MOLEKÜL AĞIRLIĞI TEK KAYNAK ------
+    # Reaktanların elemental ayrıştırılmasında molekül ağırlığı ARTIK ELLE
+    # YAZILMIYOR; buradaki formülden ve yukarıdaki _ATOMIC_MASS tablosundan
+    # TÜRETİLİYOR. Kusur şuydu: pay (atom kütleleri) ile payda (molekül
+    # ağırlığı) ayrı ayrı elle yazıldığı için elemental kütle kesirleri 1'e
+    # KAPANMIYORDU. ÖLÇÜLDÜ (once.json, B3_12; taban 60cd341):
+    #     saf yakıt Σ(kütle kesri):
+    #       htpb 1,001851851851852 (+%0,1852)  <- 4·12,01/54,0 + 6·1,01/54,0
+    #       pe   1,000356506238859  | paraffin 1,000293547818940
+    #       pla  1,000138773244518  | abs      1,000096015362458
+    #       pmma 1,000099880143827  | aluminum 1,0 (tek atom, tanım gereği)
+    #     saf oksitleyici Σ: n2o 1,000227221085890 | h2o2 1,000294031167010
+    #                        air 1,000274401999012 | lox  1,0
+    #     dengeye giren efektif O/F (kullanıcı 6,0 istedi):
+    #       htpb+n2o 5,990270233491716 (−%0,1622)
+    #       htpb+lox 5,988909426987060 (−%0,1848)
+    # Yani kullanıcının gönderdiği O/F çözülen O/F DEĞİLDİ (girdi yankısı
+    # sınıfı). Ayrıca aynı dosyada HTPB üç molekül ağırlığıyla yazılıydı:
+    # propellant_specs 54,09 ⟷ elemental bölen 54,0 ⟷ species_data 54,0;
+    # dosyanın KENDİ atom kütleleriyle C4H6 = 54,092. Tek kaynak: formül.
+    # (Çapraz doğrulama: N2O için türetilen 44,013 propellant_specs'teki
+    # değerin BİREBİR aynısıdır — tablo IUPAC 2021 ile tutarlı.)
+    _REACTANT_FORMULAS = {
+        # Yakıtlar (yaklaşıklık notları _calculate_elemental_composition'da)
+        'paraffin': {'C': 12, 'H': 26},    # C12H26 yaklaşımı
+        'htpb': {'C': 4, 'H': 6},          # C4H6 monomer yaklaşımı
+        'aluminum': {'AL': 1},
+        'abs': {'C': 8, 'H': 8},           # C8H8 basitleştirmesi
+        'pla': {'C': 3, 'H': 4, 'O': 2},   # C3H4O2
+        'pe': {'C': 2, 'H': 4},            # C2H4
+        'pmma': {'C': 5, 'H': 8, 'O': 2},  # C5H8O2
+        # Oksitleyiciler
+        'n2o': {'N': 2, 'O': 1},
+        'o2': {'O': 2},
+        'h2o2': {'H': 2, 'O': 2},
+    }
+
+    @classmethod
+    def _formula_molar_mass(cls, species_key: str) -> float:
+        """Formülden molekül ağırlığı [g/mol] — reaktanlar için TEK KAYNAK.
+
+        Pay ve payda aynı tablodan geldiği için Σ(kütle kesri) tanım gereği
+        1,0'dır (kütle korunumu float yuvarlamasına kadar kapanır).
+        """
+        formul = cls._REACTANT_FORMULAS[species_key]
+        return sum(cls._ATOMIC_MASS[el] * n for el, n in formul.items())
 
     # Su-gaz kayması (water-gas shift) denge sabiti:
     #     CO + H2O <-> CO2 + H2 ,  K = (X_CO2·X_H2)/(X_CO·X_H2O)
@@ -1377,6 +2297,255 @@ class CombustionAnalyzer:
             },
         }
     
+    # ------------------------------------------------------------------
+    # ÖH D18 fizik-a1 / F1 — kayan-denge istasyon çözücüsü (B3-05 + B3-02)
+    # ------------------------------------------------------------------
+    def _equilibrium_isentrope_state(self, s_0: float, h_0: float,
+                                     P_pa: float) -> Dict:
+        """s = s_0 izentropunda P_pa basıncındaki kayan-denge akış durumu.
+
+        Döndürülen sözlük [SI]: P [Pa], T [K], rho [kg/m³], h [J/kg],
+        v [m/s], G [kg/(m²·s)] = rho·v.
+
+        Yöntem (NASA RP-1311 Part I §6.3.3; Sutton & Biblarz 9. baskı
+        Eş. 3-15b): h(P) izentropik denge çözümünden (Cantera ``SP`` +
+        ``equilibrate``) alınır, v = sqrt(2(h_0 − h)).
+
+        BOYUT SAĞLAMASI: [h] = J/kg = m²/s² ⇒ [sqrt(2Δh)] = m/s ✔;
+        [G] = (kg/m³)(m/s) = kg/(m²·s) ✔.
+        (Betik: ``docs/scofield/raw/OH/D18/fizik/a1/boyut.py``)
+        """
+        gas = self.gas
+        gas.SP = s_0, P_pa
+        gas.equilibrate('SP')
+        P0 = float(gas.P)
+        rho0 = float(gas.density)
+        h = float(gas.enthalpy_mass)
+        v = float(np.sqrt(2.0 * max(h_0 - h, 0.0)))
+        return {'P': P0, 'T': float(gas.T), 'rho': rho0, 'h': h, 'v': v,
+                'G': rho0 * v}
+
+    def _equilibrium_sound_speed(self, s_0: float, durum: Dict) -> float:
+        """``durum`` noktasında denge ses hızı a_eq [m/s].
+
+        n_s = ln(P₂/P₁)/ln(ρ₂/ρ₁) sabit entropide sonlu farkla alınır
+        (``EQ_STATION_SOUND_SPEED_PERTURBATION``); a = sqrt(n_s·P/ρ).
+        Donmuş γ DEĞİL denge üsteli kullanılır (RP-1311 §6.3.3).
+
+        BOYUT SAĞLAMASI: [n_s·P/ρ] = Pa·m³/kg = m²/s² ⇒ [a] = m/s ✔.
+        """
+        gas = self.gas
+        P0, rho0 = durum['P'], durum['rho']
+        gas.SP = s_0, P0 * EQ_STATION_SOUND_SPEED_PERTURBATION
+        gas.equilibrate('SP')
+        n_s = float(np.log(gas.P / P0) / np.log(gas.density / rho0))
+        return float(np.sqrt(max(n_s, 1e-9) * P0 / rho0))
+
+    def _solve_equilibrium_throat(self, comp_str: str, T_c: float,
+                                  P_c_bar: float,
+                                  p_t_guess_bar: float) -> Optional[Dict]:
+        """Oda dengesinden kayan-denge BOĞAZ istasyonunu çözer.
+
+        Boğaz, izentrop üzerinde kütle akısı G = ρ·v'nin MAKSİMUM olduğu
+        noktadır; bu, v = a_eq sonik koşuluyla özdeştir (RP-1311 §6.3.3:
+        A/A_t minimumu ⇔ u = a). Üç noktalı parabol tepe kestirimi
+        ``EQ_STATION_PARABOLIC_STEPS`` adımlarıyla daraltılır.
+
+        Döndürülen sözlük: ``s0``, ``h0``, ``T0``, ``P_c`` (Pa), ``Y0``
+        (oda denge bileşimi), ``bogaz`` (istasyon + ``a``), ``c_star``,
+        ``sonic_residual``.
+
+        c* TANIMI (RP-1311 eş. 6.11): c* = P_c·A_t/ṁ ve ṁ = ρ_t·v_t·A_t
+        ⇒ c* = P_c/(ρ_t·v_t). A_t sadeleşir, yani SÜREKLİLİK ÖZDEŞLİĞİ
+        yapı gereği kapanır. (ÖH D18 B3-05'in ölçtüğü −%0,72…−1,06 açığı
+        buradan geliyordu: eski kod c*'ı tek-γ kapalı formundan, boğaz
+        istasyonunu ise BAŞKA bir tek-γ bağıntısından alıyordu.)
+
+        Cantera yoksa ya da çözüm ıraksarsa ``None`` döner; çağıran tek-γ
+        yoluna düşer ve bunu ``conditions.throat.basis`` ile BEYAN eder.
+        """
+        if not self.cantera_available or self.gas is None:
+            return None
+        anahtar = (comp_str, float(T_c), float(P_c_bar))
+        onbellek = self._eq_station_cache.get(anahtar)
+        if onbellek is not None:
+            return onbellek
+        try:
+            gas = self.gas
+            P_c = float(P_c_bar) * 1e5
+            gas.TPY = float(T_c), P_c, comp_str
+            gas.equilibrate('TP')
+            h_0 = float(gas.enthalpy_mass)
+            s_0 = float(gas.entropy_mass)
+            T_0 = float(gas.T)
+            Y_0 = np.array(gas.Y, dtype=float)
+
+            alt = EQ_STATION_SONIC_BRACKET[0] * P_c
+            ust = EQ_STATION_SONIC_BRACKET[1] * P_c
+            p = float(np.clip(float(p_t_guess_bar) * 1e5, alt, ust))
+            for adim in EQ_STATION_PARABOLIC_STEPS:
+                x1, x2, x3 = [float(np.clip(p * (1.0 + k * adim), alt, ust))
+                              for k in (-1.0, 0.0, 1.0)]
+                if x1 >= x2 or x2 >= x3:
+                    break
+                y1, y2, y3 = [
+                    self._equilibrium_isentrope_state(s_0, h_0, x)['G']
+                    for x in (x1, x2, x3)]
+                payda = (x1 - x2) * (y2 - y3) - (x2 - x3) * (y1 - y2)
+                if not np.isfinite(payda) or abs(payda) < 1e-30:
+                    break
+                tepe = 0.5 * (((x1 * x1 - x2 * x2) * (y2 - y3)
+                               - (x2 * x2 - x3 * x3) * (y1 - y2)) / payda)
+                if not np.isfinite(tepe):
+                    break
+                yeni = float(np.clip(tepe, alt, ust))
+                kapandi = abs(yeni / p - 1.0) < 1e-12
+                p = yeni
+                if kapandi:
+                    break
+
+            bogaz = self._equilibrium_isentrope_state(s_0, h_0, p)
+            bogaz['a'] = self._equilibrium_sound_speed(s_0, bogaz)
+            if not (bogaz['G'] > 0.0 and bogaz['v'] > 0.0
+                    and np.isfinite(bogaz['T']) and bogaz['a'] > 0.0):
+                return None
+            sonuc = {
+                's0': s_0, 'h0': h_0, 'T0': T_0, 'P_c': P_c, 'Y0': Y_0,
+                'bogaz': bogaz,
+                'c_star': P_c / bogaz['G'],
+                # Sonik kapanış artığı |v/a − 1|: tepe araması yakınsadıysa
+                # ~1e-5 mertebesindedir. BEYAN edilir, gizlenmez.
+                'sonic_residual': abs(bogaz['v'] / bogaz['a'] - 1.0),
+            }
+            if len(self._eq_station_cache) >= EQ_STATION_CACHE_MAX:
+                self._eq_station_cache.pop(next(iter(self._eq_station_cache)))
+            self._eq_station_cache[anahtar] = sonuc
+            return sonuc
+        except Exception as exc:
+            logger.warning(
+                "Kayan-denge boğaz çözümü başarısız (%s); istasyonlar tek-γ "
+                "bağıntısından kurulacak ve bu durum conditions.throat.basis "
+                "ile bildirilecek.", exc)
+            return None
+
+    def _solve_equilibrium_exit(self, ist: Dict, expansion_ratio: float,
+                                p_e_guess_bar: float) -> Optional[Dict]:
+        """ε = A_e/A_t'den kayan-denge ÇIKIŞ istasyonunu çözer.
+
+        Süreklilikten ε = (ρ_t v_t)/(ρ_e v_e) = G_t/G_e; G_e(p) süpersonik
+        dalda p ile monoton arttığından ln p uzayında kesen (secant)
+        yöntemi kullanılır. Böylece A_e DENGE ile boyutlandırılır
+        (literatür raporu §2 madde 3), tek-γ ile değil.
+
+        BOYUT SAĞLAMASI: ε = [kg/(m²s)]/[kg/(m²s)] = 1 ✔.
+        """
+        h0, s0 = ist['h0'], ist['s0']
+        G_t = ist['bogaz']['G']
+        hedef = float(expansion_ratio)
+        log_ust = float(np.log(ist['bogaz']['P'] * (1.0 - 1e-9)))
+        log_alt = float(np.log(EQ_STATION_EXIT_PRESSURE_FLOOR_PA))
+
+        def artik(x_log):
+            d = self._equilibrium_isentrope_state(s0, h0, float(np.exp(x_log)))
+            if d['G'] <= 0.0:
+                return None, d
+            return float(np.log(G_t / d['G'] / hedef)), d
+
+        try:
+            x0 = float(np.clip(np.log(max(float(p_e_guess_bar) * 1e5,
+                                          EQ_STATION_EXIT_PRESSURE_FLOOR_PA)),
+                               log_alt, log_ust))
+            f0, _ = artik(x0)
+            if f0 is None:
+                return None
+            x1 = float(np.clip(x0 - 0.15, log_alt, log_ust))
+            if x1 == x0:
+                x1 = float(np.clip(x0 + 0.15, log_alt, log_ust))
+            f1, d1 = artik(x1)
+            if f1 is None:
+                return None
+            for _ in range(EQ_STATION_EXIT_SECANT_MAX_ITER):
+                if abs(f1) < EQ_STATION_EXIT_REL_TOL:
+                    break
+                if not np.isfinite(f1 - f0) or abs(f1 - f0) < 1e-15:
+                    break
+                x2 = float(np.clip(x1 - f1 * (x1 - x0) / (f1 - f0),
+                                   log_alt, log_ust))
+                if x2 == x1:
+                    break
+                f2, d2 = artik(x2)
+                if f2 is None:
+                    return None
+                x0, f0 = x1, f1
+                x1, f1, d1 = x2, f2, d2
+            if not (np.isfinite(f1) and abs(f1) < 1e-6):
+                logger.warning(
+                    "Kayan-denge ε çözümü kapanmadı (eps=%.4f, artık=%.3e); "
+                    "çıkış istasyonu tek-γ yoluna bırakılıyor.", hedef, f1)
+                return None
+            d1['expansion_ratio_closure'] = float(np.exp(f1))
+            return d1
+        except Exception as exc:
+            logger.warning(
+                "Kayan-denge çıkış çözümü başarısız (%s); çıkış istasyonu "
+                "tek-γ yoluna bırakılıyor.", exc)
+            return None
+
+    def _equilibrium_reference_isp(self, ist: Dict, P_e_pa: float,
+                                   v_e_eq: float) -> Optional[Dict]:
+        """Üçlü Isp yayını: denge / boğazda donmuş / odada donmuş.
+
+        Sektör kipleri (NASA CEA ``nfz``; RP-1311 Part II; RPA v2.3 s.19):
+          * ``equilibrium``       — tüm lülede kayan denge (üst referans),
+          * ``frozen_at_throat``  — CEA ``nfz=2``: oda+boğaz denge, boğazdan
+            sonra bileşim donmuş. SEKTÖRÜN kötümser referansı,
+          * ``frozen_at_chamber`` — CEA ``nfz=1``: oda bileşimi tüm lülede
+            donmuş. MUTLAK alt sınır (c* de donmuş olurdu), yalnız sınır
+            beyanı olarak yayımlanır.
+
+        Kinetik verim bandı ``frozen_at_throat``–``equilibrium`` arasıdır
+        (MIT 16.512 L14, SSME: 435 / 451 / 465 s).
+        """
+        try:
+            gas = self.gas
+            h0, s0 = ist['h0'], ist['s0']
+            bogaz = ist['bogaz']
+
+            # nfz=2 — boğaz denge bileşimini dondur, izentropik genişlet.
+            gas.SP = s0, bogaz['P']
+            gas.equilibrate('SP')
+            Y_t = np.array(gas.Y, dtype=float)
+            gas.TPY = float(gas.T), bogaz['P'], Y_t
+            gas.SP = s0, P_e_pa
+            v_ft = float(np.sqrt(2.0 * max(h0 - float(gas.enthalpy_mass), 0.0)))
+
+            # nfz=1 — oda denge bileşimini dondur (mutlak alt sınır).
+            gas.TPY = ist['T0'], ist['P_c'], ist['Y0']
+            gas.SP = s0, P_e_pa
+            v_fc = float(np.sqrt(2.0 * max(h0 - float(gas.enthalpy_mass), 0.0)))
+
+            # Gaz durumunu oda dengesine geri yükle (sonraki çağrılar temiz
+            # başlasın — mevcut _calculate_frozen_shifting_isp ile aynı desen).
+            gas.TPY = ist['T0'], ist['P_c'], ist['Y0']
+            gas.equilibrate('TP')
+
+            if not (v_e_eq >= v_ft >= v_fc > 0.0):
+                # Fiziksel sıralama bozulduysa yakınsama bozulmuştur; üçlü
+                # yayın YAPILMAZ (uydurma sıra yayımlamaktansa alan yok).
+                logger.warning(
+                    "Üçlü Isp sıralaması bozuk (eq=%.2f, nfz2=%.2f, nfz1=%.2f); "
+                    "referans yayını atlanıyor.", v_e_eq, v_ft, v_fc)
+                return None
+            return {
+                'isp_equilibrium': v_e_eq / G_0,
+                'isp_frozen_throat': v_ft / G_0,
+                'isp_frozen_chamber': v_fc / G_0,
+            }
+        except Exception as exc:
+            logger.warning(
+                "Üçlü Isp referansı hesaplanamadı (%s); yayın atlanıyor.", exc)
+            return None
+
     def _exit_pressure_from_expansion(self, expansion_ratio: float, gamma: float,
                                       chamber_pressure: float) -> float:
         """ε = Ae/At ve γ'dan izentropik çıkış basıncını (bar) çözer.
@@ -1395,7 +2564,7 @@ class CombustionAnalyzer:
         """
         eps = float(expansion_ratio)
         g = float(gamma)
-        if eps <= 1.0 or not (1.0 < g < 2.0):
+        if eps <= 1.0 or not gamma_is_physical(g):
             return isa_pressure(0.0) * BAR_PER_PA
 
         exponent = (g + 1.0) / (2.0 * (g - 1.0))
@@ -1524,33 +2693,22 @@ class CombustionAnalyzer:
         
         # Calculate average molecular weight (Cantera uyumlu)
         def calc_mw(composition):
-            if isinstance(composition, dict):
-                # Cantera formatı kontrolü
-                if 'molecular_weight' in composition:
-                    return composition['molecular_weight']
-                elif 'species' in composition:
-                    # Species bazlı hesaplama — KÜTLE kesirleriyle doğru karışım
-                    # MW formülü harmonik ortalamadır: MW_mix = 1 / sum(Y_i/MW_i).
-                    # (sum(Y_i*MW_i) yalnızca MOL kesirleriyle geçerlidir.)
-                    inv_mw_sum = 0.0
-                    y_total = 0.0
-                    for species, data in composition['species'].items():
-                        if isinstance(data, dict) and 'mass_fraction' in data:
-                            if species in self.species_data:
-                                inv_mw_sum += data['mass_fraction'] / self.species_data[species]['MW']
-                                y_total += data['mass_fraction']
-                    if inv_mw_sum > 0:
-                        # Kapsanmayan türler için y_total ile renormalize edilir
-                        return y_total / inv_mw_sum
-                    return 25.0  # Veri yoksa tipik yanma gazı MW'si
-                else:
-                    # Eski format
-                    mw = 0
-                    for species, fraction in composition.items():
-                        if species in self.species_data:
-                            mw += fraction * self.species_data[species]['MW']
-                    return max(mw, 25.0)  # Minimum MW
-            return 25.0  # Default MW
+            # ÖH D19 (kalem B3-11) — ÖLÜ SPECIES KOLU + UYDURMA MW=25 KALKTI.
+            # Bu fonksiyonun 'species' kolu ve 'eski format' kolu ÖLÇÜLMÜŞ
+            # BİÇİMDE ÖLÜYDÜ (sys.settrace, once.json B3_11: 0 satır; 8
+            # itici çifti, hem Cantera AÇIK hem KAPALI). Her iki bileşim
+            # üreticisi de 'molecular_weight' anahtarını doğrudan veriyor.
+            # Ölü kolların ucundaki `return 25.0` ("veri yoksa tipik yanma
+            # gazı MW'si") sessiz uydurmaydı: MW doğrudan R_c/R_t/R_e'ye ve
+            # oradan c*, Isp ve tüm istasyon özelliklerine giriyor.
+            # FAIL-CLOSED: alan yoksa sayı uydurulmaz, ADIYLA reddedilir.
+            if isinstance(composition, dict) and 'molecular_weight' in composition:
+                return composition['molecular_weight']
+            # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
+            raise ValueError(
+                "Combustion composition does not carry a solved "
+                "'molecular_weight'; the mixture gas constant is not "
+                "published from an assumed typical value.")
         
         MW_c = calc_mw(chamber_comp)
         MW_t = calc_mw(throat_comp)
@@ -1601,7 +2759,21 @@ class CombustionAnalyzer:
             'c_star': c_star,
             'cf': cf,
             'isp': isp,
+            # --- ÖH D22 / B3-13(c) · ADIN DOĞRUSU ÜRETİCİDE ---------------
+            # ``gamma_avg`` bir ORTALAMA DEĞİLDİR: yukarıda okunan
+            # ``thermo_props['stations']['chamber']['gamma']``, yani ODA
+            # gamma'sıdır (boğaz/çıkış istasyonları ayrı gamma taşır ve bu
+            # sayıya hiç girmez). D21 tüketici tarafını künyeye bağlamıştı
+            # ("this is the CHAMBER gamma, not an average"); doğru adı
+            # yayımlamak üreticinin işiydi ve bu ayak açılmamıştı.
+            # ``chamber_gamma`` doğru addır. ``gamma_avg`` KOPYA DEĞİL,
+            # aynı nesnenin geriye uyum takma adıdır: üç kardeş tüketici
+            # (nozzle_flow_1d, regen_cooling, heat_transfer_analysis) bu adı
+            # okur ve okuma sözleşmeleri D21'de zaten düzeltildi; adı tek
+            # hamlede kaldırmak onların künyeli yolunu kırardı.
+            'chamber_gamma': gamma,
             'gamma_avg': gamma,
+            'gamma_avg_deprecated_alias_of': 'chamber_gamma',
             'thermodynamic_properties': thermo_props
         }
     
@@ -1646,6 +2818,11 @@ class CombustionAnalyzer:
                 # farklı ε'lar aynı önbellek girdisini paylaşır.
                 None if expansion_ratio is None
                 else round(float(expansion_ratio), 4),
+                # Kitap uyum B16, 2. tur (Ş-5): GİRİŞ İMZASI. HP dengesine
+                # giren N₂O entalpisi analizörün giriş durumuna bağlıdır;
+                # imza anahtarda yoksa farklı giriş durumlu iki istek aynı
+                # girdiyi paylaşır (gerekçe: ``optimum_of_inlet_signature``).
+                self.optimum_of_inlet_signature(oxidizer_type),
             )
         except (TypeError, ValueError, AttributeError, IndexError):
             cache_key = None
@@ -1666,19 +2843,89 @@ class CombustionAnalyzer:
                 return 1000  # Large penalty for failed calculations
 
         # Optimize
-        result = minimize_scalar(negative_isp, bounds=of_range, method='bounded')
+        #
+        # ÖH D16 (kalem B3-09) — SINIRA DAYANAN NOKTA ARTIK "OPTİMUM" DİYE
+        # YAYIMLANMAZ. ÖLÇÜLDÜ (1 Eylül 2026, taban 6fde52b; htpb/hava,
+        # Pc=20 bar, varsayılan bant (1,0-10,0)):
+        #   yayımlanan optimum_of_ratio = 9,999929  (bandın ÜST KENARI)
+        #   yayımlanan maximum_isp      = 172,93944 s
+        #   gerçek optimum (bant 5-40)  = 14,035275 / 180,48780 s
+        # yani "optimum" gerçeğin 4,04 birim uzağındaydı ve Isp'yi 7,55 s
+        # (%4,18) EKSİK gösteriyordu; yanıtta bant/kenar beyanı yoktu
+        # (anahtarlar yalnız analysis / maximum_isp / optimum_of_ratio).
+        #
+        # BANDIN FİZİK KAYNAĞI (uydurma tavan değil): kimyasal roketlerde
+        # Isp optimumu STOKİYOMETRİK oranın ALTINDA, yakıtça zengin tarafta
+        # kalır — daha düşük ortalama molekül ağırlığı c*'ı yükseltir
+        # (Sutton & Biblarz, "Rocket Propulsion Elements", 9. baskı, Böl. 5;
+        # NASA SP-8087). Dolayısıyla stokiyometrik oran, aramanın doğal ve
+        # itici-çiftine özgü ÜST sınırıdır. Modül bu oranı zaten hesaplıyor
+        # (_calculate_stoichiometric_of), yani ikinci bir sabit doğmuyor.
+        of_lo, of_hi = float(of_range[0]), float(of_range[1])
+        result = minimize_scalar(negative_isp, bounds=(of_lo, of_hi),
+                                 method='bounded')
+        kenar_tol = 1.0e-3 * (of_hi - of_lo)
+        of_range_basis = (
+            f'interior optimum inside the searched band '
+            f'[{of_lo:.6g}, {of_hi:.6g}]')
+        if result.x >= of_hi - kenar_tol:
+            of_stoich = None
+            try:
+                of_stoich = float(self._calculate_stoichiometric_of(
+                    fuel_composition, oxidizer_type))
+            except Exception:
+                of_stoich = None
+            if (of_stoich is not None and np.isfinite(of_stoich)
+                    and of_stoich > of_hi):
+                genis_hi = of_stoich
+                result = minimize_scalar(negative_isp,
+                                         bounds=(of_lo, genis_hi),
+                                         method='bounded')
+                if result.x >= genis_hi - 1.0e-3 * (genis_hi - of_lo):
+                    of_range_basis = (
+                        f'CLAMPED at the stoichiometric ratio '
+                        f'{genis_hi:.6g}: the search band was widened from '
+                        f'[{of_lo:.6g}, {of_hi:.6g}] to [{of_lo:.6g}, '
+                        f'{genis_hi:.6g}] and the maximum still sits on the '
+                        f'upper bound, so this point is a BOUND, not an '
+                        f'interior optimum')
+                else:
+                    of_range_basis = (
+                        f'band widened from [{of_lo:.6g}, {of_hi:.6g}] to '
+                        f'[{of_lo:.6g}, {genis_hi:.6g}] (stoichiometric O/F) '
+                        f'because the maximum sat on the original upper '
+                        f'bound; the reported point is interior to the '
+                        f'widened band')
+                of_hi = genis_hi
+            else:
+                of_range_basis = (
+                    f'CLAMPED at the upper bound {of_hi:.6g}: the maximum '
+                    f'sits on the edge of the searched band and the '
+                    f'stoichiometric ratio does not lie above it, so this '
+                    f'point is a BOUND, not an interior optimum')
+        elif result.x <= of_lo + kenar_tol:
+            of_range_basis = (
+                f'CLAMPED at the lower bound {of_lo:.6g}: the maximum sits '
+                f'on the edge of the searched band, so this point is a '
+                f'BOUND, not an interior optimum')
 
         optimum_of = result.x
         max_isp = -result.fun
 
         # Get full analysis at optimum
+        # ÖH D24 / P15B1-05: bu ağaç DANIŞMA amaçlıdır ve tasarım O/F'sinde
+        # DEĞİL, bulunan optimum O/F'de durur. Etiket bunu gövdede ilan eder
+        # (eskiden fark yalnız inputs.of_ratio okunarak görülebiliyordu).
         optimum_analysis = self.analyze_combustion(
             fuel_composition, oxidizer_type, optimum_of, chamber_pressure,
-            expansion_ratio=eps)
+            expansion_ratio=eps,
+            operating_point=OPERATING_POINT_OPTIMUM_SEARCH)
 
         out = {
             'optimum_of_ratio': optimum_of,
             'maximum_isp': max_isp,
+            'of_range_searched': [of_lo, of_hi],
+            'of_range_basis': of_range_basis,
             'analysis': optimum_analysis
         }
         if cache_key is not None:
@@ -1810,7 +3057,8 @@ class CombustionAnalyzer:
 
         performance_data = []
         if not altitudes:
-            return {'altitude_performance': [], 'sea_level_isp': 0,
+            return {'altitude_performance': [], 'sea_level_isp': None,
+                    'sea_level_isp_basis': _SEA_LEVEL_ISP_BASIS,
                     'vacuum_isp': 0}
 
         v_exit = motor_data['performance']['velocities']['exit']  # m/s (SABIT, tasarim)
@@ -1860,7 +3108,19 @@ class CombustionAnalyzer:
 
         return {
             'altitude_performance': performance_data,
-            'sea_level_isp': performance_data[0]['isp'] if performance_data else 0,
+            # --- ÖH D20 / B3-13 · 'sea_level_isp' ARTIK DENİZ SEVİYESİ ----
+            # Burada ``performance_data[0]['isp']`` yazılıydı: listenin İLK
+            # SATIRI, hangi irtifa olursa olsun (vacuum_isp'nin F3-3 kusuruyla
+            # aynı sınıf — o, listenin EN ÜST satırını "vakum" diye
+            # yayımlıyordu ve düzeltilmişti; ikizi burada kalmıştı).
+            # Çağıran 5 km'den başlayan bir liste verdiğinde 5 km'nin Isp'si
+            # 'sea_level_isp' adıyla manşete, karşılaştırma paneline ve
+            # ürün özetine giriyordu. Artık irtifa = 0 satırı ARANIR;
+            # yoksa sayı UYDURULMAZ, None döner ve gerekçesi söylenir.
+            'sea_level_isp': next(
+                (satir['isp'] for satir in performance_data
+                 if float(satir.get('altitude', float('nan'))) == 0.0), None),
+            'sea_level_isp_basis': _SEA_LEVEL_ISP_BASIS,
             'vacuum_isp': vacuum_isp,
             #: Vakum Isp'sinin dayanağı: irtifa tablosundan OKUNMAZ, P_a = 0
             #: limitinden gelir; bu yüzden irtifa listesi kısalsa/uzasa bile
@@ -1880,121 +3140,88 @@ class CombustionAnalyzer:
                                           P_c: float, P_t: float, P_e: float) -> Dict:
         """Calculate detailed thermodynamic properties"""
         
-        def _species_mass_fractions(composition: Dict) -> Dict:
-            """Bileşim sözlüğünden {tür: kütle_kesri} çıkarır.
+        # --- ÖH D19 (kalem B3-11) — ÖLÜ KOLLAR KALKTI, FAIL-CLOSED KONDU ---
+        # Bu fonksiyonun içinde P01'in saydığı ~90 satırlık ölü kod vardı:
+        # _species_mass_fractions gövdesi, calc_enthalpy ve calc_entropy'nin
+        # "tür tablosundan elle topla" kolları ve istasyon döngüsünün
+        # MW=30 / gamma=1,25 fallback'i (beşincisi calc_mw'nin species kolu,
+        # _calculate_performance_parameters içinde).
+        #
+        # ÖLÇÜLDÜ (sys.settrace, once.json B3_11; 8 itici çifti, hem Cantera
+        # AÇIK hem KAPALI koşumda): beş blokta da ÇALIŞAN SATIR 0 — tek
+        # istisna _species_mass_fractions'ın `def` satırı, yani tanımın
+        # kendisi. Karşılaştırma: aynı koşuda bu dosyanın 755 satırı çalıştı.
+        # Sebep yapısal: her iki bileşim üreticisi de cp / cv / gamma /
+        # molecular_weight / enthalpy / entropy ve `species` sözlüğünü
+        # BİRLİKTE döndürüyor — Cantera KAPALIYKEN de (ölçülen anahtar
+        # listesi rapor.md'de).
+        #
+        # Asıl zarar satır sayısı değildi. (1) Ölü kollar UYDURMA SAYI
+        # üretiyordu: MW=30 kg/kmol, gamma=1,25, cp=1,0/1,4/1,2 kJ/(kg·K),
+        # s0=200 J/(mol·K), MW=25 — yani ulaşılabilir olsalardı sessiz
+        # varsayılan yayımlarlardı (FAIL-CLOSED doktrini bunu yasaklar).
+        # (2) MW=30/gamma=1,25 bloğunun yorumu ULAŞILAMAZ bir garanti
+        # veriyordu: "Böylece akış zincirindeki tüm fallback'ler TEK gamma
+        # kullanır" — B3-06 ölçümü bunun yanlış olduğunu göstermişti
+        # (Cantera'sız yolda 1,195914 ⟷ 1,25). Garantiyi doğrulayacak kod
+        # hiç çalışmadığı için garanti hiç sınanamıyordu.
+        #
+        # Ölü kollar silindi; yerlerine eksik alanı ADIYLA söyleyen hata
+        # kondu. Ürün davranışı değişmez (kollar ölçülmüş biçimde ölüydü);
+        # değişen, ileride bir üretici alanı düşürürse SESSİZ UYDURMA yerine
+        # ADLI RET alınmasıdır.
+        _GEREKLI_TERMO_ALANLAR = ('cp', 'cv', 'gamma', 'molecular_weight')
 
-            Cantera formatı iç içedir: {'species': {tür: {'mass_fraction': ...}},
-            'temperature': ..., 'gamma': ...}. Eski düz format ise doğrudan
-            {tür: kesir}. Eski kod düz format varsaydığından Cantera yolunda
-            hiçbir tür eşleşmiyor ve h = s = 0 dönüyordu (Bulgu 6).
-            """
-            if isinstance(composition.get('species'), dict):
-                return {sp: d.get('mass_fraction', 0.0)
-                        for sp, d in composition['species'].items()
-                        if isinstance(d, dict)}
-            return {sp: fr for sp, fr in composition.items()
-                    if isinstance(fr, (int, float))}
+        def _eksik_alanlar(composition, gerekli):
+            if not isinstance(composition, dict):
+                return list(gerekli)
+            return [k for k in gerekli if k not in composition]
 
-        # Standard enthalpies and entropies (simplified NASA polynomials)
         def calc_enthalpy(composition: Dict, temperature: float) -> float:
-            """Karisim entalpisini kJ/kg cinsinden hesaplar.
+            """Karışım entalpisi [kJ/kg] — ÇÖZÜLEN değerden doğrudan.
 
-            H-5 duzeltmesi: Eski kodda kJ/mol (h_f) ile kJ/kg (cp*dT) toplaniyor,
-            sonra yanlis carpan ile mass-weighted aliniyordu (boyut karmasasi).
+            Denge çözücüsünün karışım entalpisi (gas.enthalpy_mass, J/kg)
+            1000'e bölünerek kJ/kg'ye çevrilir; oluşum entalpisi dahildir.
 
-            Dogru formul (her tur SI/kJ/kg cinsinden tek tip):
-              h_f_per_kg = h_f [kJ/mol] / MW [g/mol] * 1000   ->  kJ/kg
-                         = h_f * 1000 / MW
-              h_sensible = cp [kJ/(kg*K)] * (T - 298.15) [K]   ->  kJ/kg
-              h_species  = h_f_per_kg + h_sensible             ->  kJ/kg
-              h_mix      = sum(mass_frac_i * h_species_i)      ->  kJ/kg
+            ÖH D19 (B3-11): buradaki "tür tablosundan elle topla" kolu
+            ÖLÇÜLMÜŞ BİÇİMDE ÖLÜYDÜ (0 satır, Cantera açık ve kapalı) ve
+            tür başına cp=1,0/1,4/1,2 kJ/(kg·K) gibi uydurma sabitler
+            taşıyordu. Silindi; alan yoksa artık ADLI RET veriliyor.
             """
-            # Cantera çözümü varsa gerçek karışım entalpisini doğrudan kullan
-            # (gas.enthalpy_mass, J/kg -> kJ/kg). Oluşum entalpisi dahildir,
-            # aşağıdaki basitleştirilmiş toplamla aynı referans tabanındadır.
-            if 'enthalpy' in composition and isinstance(composition.get('species'), dict):
+            if ('enthalpy' in composition
+                    and isinstance(composition.get('species'), dict)):
                 return composition['enthalpy'] / 1000.0
+            # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
+            raise ValueError(
+                "Combustion composition does not carry a solved mixture "
+                "enthalpy (required fields: 'enthalpy' and a 'species' "
+                "dict). Station enthalpy is not published from a "
+                "simplified per-species table with assumed heat "
+                "capacities.")
 
-            h_mix = 0.0  # kJ/kg
-            total_mass_frac = 0.0
 
-            for species, mass_frac in _species_mass_fractions(composition).items():
-                if species in self.species_data and mass_frac > 0:
-                    # NIST formation enthalpy (kJ/mol)
-                    h_f_kJ_per_mol = self.species_data[species]['Hf']
-                    # Molekuler agirlik (g/mol = kg/kmol)
-                    MW_g_per_mol = self.species_data[species]['MW']
-
-                    # Sicaklik bagimli ozgul isi (kJ/(kg*K), basitlestirilmis)
-                    if species in ['CO2', 'H2O', 'N2']:
-                        cp_kJ_per_kg_K = 1.0
-                    elif species in ['CO', 'H2']:
-                        cp_kJ_per_kg_K = 1.4
-                    else:
-                        cp_kJ_per_kg_K = 1.2
-
-                    # h_f [kJ/mol] / MW [g/mol] = kJ/g -> *1000 = kJ/kg... HAYIR.
-                    # Dogrusu: kJ/mol / (g/mol) = kJ/g, sonra *1 (kJ/g = MJ/kg) ->
-                    # ya da *1000 ile J/g = J/g != kJ/kg. Net: 1 kJ/g = 1000 kJ/kg.
-                    # h_f [kJ/mol] / MW [g/mol] * 1000 = kJ/kg dogrusu.
-                    h_formation_per_kg = h_f_kJ_per_mol * 1000.0 / MW_g_per_mol  # kJ/kg
-                    h_sensible = cp_kJ_per_kg_K * (temperature - 298.15)         # kJ/kg
-                    h_species = h_formation_per_kg + h_sensible                  # kJ/kg
-
-                    h_mix += mass_frac * h_species  # kJ/kg
-                    total_mass_frac += mass_frac
-
-            return h_mix / max(total_mass_frac, 0.001)  # kJ/kg
-        
         def calc_entropy(composition: Dict, temperature: float, pressure: float) -> float:
-            """Karışım entropisini kJ/(kg·K) cinsinden hesaplar.
+            """Karışım entropisi [kJ/(kg·K)] — ÇÖZÜLEN değerden doğrudan.
 
-            Birim zinciri TEK birimde tutulur: tüm terimler J/(kg·K) olarak
-            toplanır, sonda kJ/(kg·K)'ye çevrilir. Eski kodda s0 değerleri
-            kJ/(mol·K), basınç terimi J/(kg·K), etiket kJ/(kg·K) idi —
-            üç farklı birim toplanıyordu (Bulgu 5).
+            Denge çözücüsünün karışım entropisi (gas.entropy_mass,
+            J/(kg·K)) 1000'e bölünerek kJ/(kg·K)'ye çevrilir.
+
+            ÖH D19 (B3-11): buradaki "s0 tablosundan elle topla" kolu
+            ÖLÇÜLMÜŞ BİÇİMDE ÖLÜYDÜ (0 satır, Cantera açık ve kapalı) ve
+            tabloda olmayan tür için s0=200 J/(mol·K) uyduruyordu.
+            Silindi; alan yoksa artık ADLI RET veriliyor.
             """
-            # Cantera çözümü varsa gerçek karışım entropisini doğrudan kullan
-            # (gas.entropy_mass, J/(kg·K) -> kJ/(kg·K))
-            if 'entropy' in composition and isinstance(composition.get('species'), dict):
+            if ('entropy' in composition
+                    and isinstance(composition.get('species'), dict)):
                 return composition['entropy'] / 1000.0
+            # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
+            raise ValueError(
+                "Combustion composition does not carry a solved mixture "
+                "entropy (required fields: 'entropy' and a 'species' dict). "
+                "Station entropy is not published from a partial standard "
+                "entropy table with an assumed default for missing species.")
 
-            # Standart MOLAR entropiler s0 [J/(mol·K)], 298.15 K ve 1 bar
-            # Kaynak: NIST-JANAF Thermochemical Tables, 4. baskı (1998)
-            s0_molar = {
-                'CO2': 213.79, 'CO': 197.66, 'H2O': 188.84, 'H2': 130.68,
-                'N2': 191.61, 'O2': 205.15, 'OH': 183.74, 'NO': 210.76
-            }
 
-            s_mix = 0.0  # J/(kg·K)
-            total_mass_frac = 0.0
-
-            for species, mass_frac in _species_mass_fractions(composition).items():
-                if species in self.species_data and mass_frac > 0:
-                    MW = self.species_data[species]['MW']  # g/mol = kg/kmol
-
-                    # Molar -> kütle bazı: [J/(mol·K)] * 1000 [mol/kmol] / MW [kg/kmol]
-                    s0_mass = s0_molar.get(species, 200.0) * 1000.0 / MW  # J/(kg·K)
-
-                    # Tür bazlı cp (calc_enthalpy ile aynı basitleştirilmiş set, J/(kg·K))
-                    if species in ['CO2', 'H2O', 'N2']:
-                        cp_J = 1000.0
-                    elif species in ['CO', 'H2']:
-                        cp_J = 1400.0
-                    else:
-                        cp_J = 1200.0
-
-                    # s(T,P) = s0 + cp*ln(T/298.15) - (R_u/MW)*ln(P/P0), P0 = 1 bar
-                    # R_u/MW birimi J/(kg·K) — artık s0 ve cp ile aynı birimde.
-                    s_species = (s0_mass
-                                 + cp_J * np.log(temperature / 298.15)
-                                 - (self.R_universal / MW) * np.log(pressure / 1.0))
-
-                    s_mix += mass_frac * s_species
-                    total_mass_frac += mass_frac
-
-            return (s_mix / max(total_mass_frac, 0.001)) / 1000.0  # kJ/(kg·K)
-        
         def calc_gibbs_energy(enthalpy: float, entropy: float, temperature: float) -> float:
             """Calculate Gibbs free energy"""
             return enthalpy - temperature * entropy
@@ -2013,7 +3240,8 @@ class CombustionAnalyzer:
             s = calc_entropy(comp, T, P)
             g = calc_gibbs_energy(h, s, T)
 
-            if isinstance(comp, dict) and all(k in comp for k in ('cp', 'cv', 'gamma', 'molecular_weight')):
+            if isinstance(comp, dict) and all(
+                    k in comp for k in _GEREKLI_TERMO_ALANLAR):
                 # Cantera denge çözümünden GERÇEK termodinamik değerler.
                 # Eski kod bunları hesaplayıp atıyor, her istasyonda sabit
                 # cp=1200 / gamma=1.3003 kullanıyordu (Bulgu 4).
@@ -2027,27 +3255,46 @@ class CombustionAnalyzer:
                 R_mix = self.R_universal / comp['molecular_weight']  # J/(kg·K)
                 rho = comp.get('density', P * 1e5 / (R_mix * max(T, 1.0)))  # kg/m³
             else:
-                # Fallback (Cantera yokken): ideal gaz tutarlı set —
-                # MW=30 kg/kmol ve gamma=1.25 (tipik yanma gazı,
-                # Sutton & Biblarz 9. baskı, Bölüm 3) ile cp = gamma*R/(gamma-1).
-                # Böylece akış zincirindeki tüm fallback'ler TEK gamma kullanır.
-                MW_fallback = 30.0  # kg/kmol
-                R_mix = self.R_universal / MW_fallback  # J/(kg·K)
-                gamma_local = 1.25
-                cp_j = gamma_local * R_mix / (gamma_local - 1.0)  # ~1385.7 J/(kg·K)
-                cv_j = cp_j - R_mix
-                rho = P * 1e5 / (R_mix * max(T, 1.0))  # kg/m³
+                # ÖH D19 (kalem B3-11) — SESSİZ FALLBACK KALKTI.
+                # Burada MW=30 kg/kmol ve gamma=1,25 uyduruluyor, üstelik
+                # yorum "Böylece akış zincirindeki tüm fallback'ler TEK
+                # gamma kullanır" diye ULAŞILAMAZ bir garanti veriyordu
+                # (B3-06: Cantera'sız yolda 1,195914 ⟷ 1,25 ölçüldü).
+                # Blok ölçülmüş biçimde ÖLÜ (0 satır, Cantera açık/kapalı),
+                # bu yüzden ret ürün davranışını değiştirmez; değişen,
+                # bir gün bir üretici alan düşürürse uydurma yerine ADLI
+                # RET alınmasıdır.
+                eksik = _eksik_alanlar(comp, _GEREKLI_TERMO_ALANLAR)
+                # Hata metni KULLANICIYA gorunur (API yaniti) -> Ingilizce.
+                raise ValueError(
+                    "Combustion composition for station '%s' is missing the "
+                    "solved thermodynamic fields: %s. Station gamma, cp, "
+                    "density and speed of sound are not published from "
+                    "assumed values (the retired fallback assumed "
+                    "MW = 30 kg/kmol and gamma = 1.25)."
+                    % (station_name, ', '.join(eksik) or 'unknown'))
 
             # Speed of sound (güvenli sqrt)
             T_safe = max(T, 300)  # Minimum 300K sıcaklık sınırı
             a = np.sqrt(gamma_local * R_mix * T_safe)
 
+            # ÖH D24 / P15B1-05 — BİRİM ADIN İÇİNDE (1000× tuzağı kapatıldı).
+            # ÖLÇÜLDÜ (once.json K2, taban 2e4d81f): aynı yanıtta DÖRT ad
+            # iki ayrı birimde yayımlanıyordu ve fark TAM 1000 kattı —
+            #   compositions.chamber.enthalpy = 1 605 035,2237607732  J/kg
+            #   ...stations.chamber.enthalpy  =     1 605,0352237607733 kJ/kg
+            # (cp, cv, entropy için de aynı ikilik). Ad birim taşımadığı
+            # için iki gövde ayırt edilemiyordu; 'enthalpy' okuyan tüketici
+            # hangisine düştüğünü bilemiyordu. Bu blok kJ tabanlı olan
+            # taraftır, dolayısıyla ADI kJ'yi söyler. TEK AD yayımlanır
+            # (eski ad ikizi BIRAKILMADI — iki ad tuzağı sürdürürdü);
+            # birim dizgilerinin tek kaynağı aşağıdaki 'units' bloğudur.
             properties[station_name] = {
-                'enthalpy': h,  # kJ/kg
-                'entropy': s,   # kJ/kg·K
-                'gibbs_energy': g,  # kJ/kg
-                'cp': cp_j / 1000.0,       # kJ/kg·K
-                'cv': cv_j / 1000.0,       # kJ/kg·K
+                'enthalpy_kJ_kg': h,
+                'entropy_kJ_kg_K': s,
+                'gibbs_energy_kJ_kg': g,
+                'cp_kJ_kg_K': cp_j / 1000.0,
+                'cv_kJ_kg_K': cv_j / 1000.0,
                 'gamma': gamma_local,
                 # v2.6.2 fizik denetimi, bulgu F095: istasyon MW'si artık
                 # KAYDEDİLİYOR. R_mix zaten ondan türetiliyordu ama değerin
@@ -2061,29 +3308,83 @@ class CombustionAnalyzer:
             }
         
         # Calculate property changes
-        delta_h = properties['exit']['enthalpy'] - properties['chamber']['enthalpy']
-        delta_s = properties['exit']['entropy'] - properties['chamber']['entropy']
-        
+        delta_h = (properties['exit']['enthalpy_kJ_kg']
+                   - properties['chamber']['enthalpy_kJ_kg'])
+        delta_s = (properties['exit']['entropy_kJ_kg_K']
+                   - properties['chamber']['entropy_kJ_kg_K'])
+
         return {
             'stations': properties,
+            # ÖH D24 / P15B1-05 — birim dizgilerinin TEK KAYNAĞI. İstasyon
+            # alanları adlarında birimi taşır; bu blok makine tarafından
+            # okunabilir karşılığıdır (tüketici birimi tahmin etmez).
+            'station_units': dict(_STATION_UNITS),
             'deltas': {
-                'enthalpy_change': delta_h,      # kJ/kg
-                'entropy_change': delta_s,       # kJ/kg·K
+                'enthalpy_change_kJ_kg': delta_h,
+                'entropy_change_kJ_kg_K': delta_s,
                 'pressure_ratio': P_c / P_e,
                 'temperature_ratio': T_c / T_e
             },
             'isentropic_efficiency': self._calculate_isentropic_efficiency(properties),
+            # --- ÖH D25 / OH-Z5-02 · ÖZDEŞLİĞİN YANITTA BEYANI -----------
+            # Bu oran bir DONANIM kaybı ölçüsü değildir ve girdiyle
+            # oynamaması kusur DEĞİL, istasyon tablosunun kuruluşunun
+            # doğrudan sonucudur: boğaz ve çıkış istasyonları ODA
+            # ENTROPİSİNDE çözülür (``gas.SP = s_0, P`` + ``equilibrate
+            # ('SP')`` — _equilibrium_station / _solve_equilibrium_throat),
+            # yani s_e − s_c YAPISAL olarak sıfırdır ve
+            #     eta_s = Δh / (Δh + T_e·(s_e − s_c)) = Δh / Δh = 1
+            # ALGEBRAİK bir özdeşliktir.
+            # ÖLÇÜLDÜ (docs/scofield/raw/OH/D25/hibrit/a1/once.json, K1;
+            # Pc = 10/20/40 bar × eps = 4/10/25, dokuz koşu): s_e − s_c'nin
+            # en büyük mutlak değeri 5,51e-11 kJ/(kg·K) — oda entropisine
+            # göre bağıl 5,5e-12, yani ``equilibrate('SP')`` yakınsama
+            # artığı; ham oran 1'den en çok 4,2e-11 sapıyor.
+            # Sayı yine de bilgi taşır — istasyon zinciri bir gün oda
+            # izentropundan kayarsa oran 1'in ALTINA iner — bu yüzden
+            # kaldırılmaz, NE OLDUĞU adıyla yayımlanır. Aynı sözlükteki
+            # 'deltas.entropy_change' özdeşliğin ham kanıtını zaten taşır.
+            'isentropic_efficiency_basis': (
+                'IDENTITY, not a loss measurement: the throat and exit '
+                'stations are solved AT THE CHAMBER ENTROPY (Cantera SP + '
+                'equilibrate), so s_exit - s_chamber is structurally zero '
+                'and eta_s = dh/(dh + T_e*ds) collapses to 1 by '
+                'construction. Read it as a self-consistency residual of '
+                'the station table (a value below 1 would mean the station '
+                'chain drifted off the chamber isentrope), NOT as a '
+                'hardware efficiency: the delivered specific impulse comes '
+                'from performance.isp, not from this ratio.'),
             'flow_properties': {
-                'mass_averaged_gamma': sum(p['gamma'] for p in properties.values()) / 3,
-                'mass_averaged_cp': sum(p['cp'] for p in properties.values()) / 3,
+                # --- ÖH D20 / B3-13 · AD ↔ DAVRANIŞ -----------------------
+                # Bu üç alan 'mass_averaged_*' adını taşıyordu ama hiçbiri
+                # kütleyle ağırlıklandırılmıyor: üç istasyonun (oda/boğaz/
+                # çıkış) DÜZ ARİTMETİK ORTALAMASI alınıyor ve istasyonların
+                # kütle payı diye bir büyüklük bu sözlükte hiç yok (sabit
+                # geometrili nozulda üç istasyondan da AYNI ṁ geçer, yani
+                # kütle ağırlığı zaten tanımsızdır). Ad düzeltildi;
+                # ``/`` böleni de 3 sabitinden istasyon SAYISINA çevrildi
+                # (üç istasyon varsayımı sessizce gömülüydü).
+                # Depoda ürün tarafında tüketicisi yoktu (git grep
+                # 'mass_averaged' -- hrma/ tests/ -> yalnız bu üç satır).
+                'station_mean_gamma': (sum(p['gamma']
+                                           for p in properties.values())
+                                       / len(properties)),
+                'station_mean_cp_kJ_kg_K': (
+                    sum(p['cp_kJ_kg_K'] for p in properties.values())
+                    / len(properties)),
+                'station_mean_basis': (
+                    'unweighted arithmetic mean over the chamber/throat/exit '
+                    'stations of THIS expansion - not a mass-weighted '
+                    'average: the same mass flow passes every station of a '
+                    'fixed-geometry nozzle, so no mass weighting is defined.'),
                 # v2.6.2 fizik denetimi, bulgu F095: burada
                 # `sum(30.0 for _ in properties.values()) / 3` yazılıydı — yani
                 # istasyon sayısı kadar 30.0 toplanıp bölünüyordu; sonuç HER
                 # ZAMAN 30.0 ve hesaplanan bileşimle hiçbir ilgisi yok.
                 # Gerçek istasyon MW'leri aynı fonksiyonda zaten mevcut.
-                'mass_averaged_mw': (sum(p['molecular_weight']
-                                         for p in properties.values())
-                                     / len(properties))
+                'station_mean_mw': (sum(p['molecular_weight']
+                                        for p in properties.values())
+                                    / len(properties))
             }
         }
     
@@ -2144,10 +3445,10 @@ class CombustionAnalyzer:
         izentropik verim tanımı Sutton & Biblarz, "Rocket Propulsion
         Elements" 9. baskı Böl. 3 (ideal ve gerçek genişleme karşılaştırması).
         """
-        h_c = properties['chamber']['enthalpy']
-        h_e = properties['exit']['enthalpy']
-        s_c = properties['chamber']['entropy']
-        s_e = properties['exit']['entropy']
+        h_c = properties['chamber']['enthalpy_kJ_kg']
+        h_e = properties['exit']['enthalpy_kJ_kg']
+        s_c = properties['chamber']['entropy_kJ_kg_K']
+        s_e = properties['exit']['entropy_kJ_kg_K']
         T_e = properties['exit']['temperature']
 
         h_actual = h_c - h_e                       # kJ/kg
@@ -2210,7 +3511,33 @@ class CombustionAnalyzer:
 
         # Base performance at sea level
         base_isp = motor_data['performance']['isp']
-        burn_time = motor_data.get('burn_time', 10)                    # s
+        # ÖH D36 / onemli2-sivi a2 — SÜRE UYDURULMAZ. Eski satır
+        # ``motor_data.get('burn_time', 10)`` idi: süre verilmediğinde deniz
+        # seviyesi itkisi toplam impuls / 10 s olarak UYDURULUYOR ve bütün
+        # irtifa tablosu (itki, impuls verimi) o sayıdan kuruluyordu
+        # (ölçüldü, a2/once.json K5: 21 000 N·s impulsla 'burn_time' yokken
+        # base_thrust_sea_level = 2100,0 N, 10 s verilmişle BİT-AYNI). Süre
+        # yoksa tablo ÇİZİLMEZ ve nedeni adıyla döner (durum sözcüğü deponun
+        # hüküm sözcüğüdür: safety_analysis.THERMAL_VERDICT_NOT_EVALUATED ile
+        # aynı dize). Süre verildiğinde hesap aynen koşar; tek çağıran
+        # (hibrit motor) süreyi daima verir.
+        burn_time = motor_data.get('burn_time')                        # s
+        if burn_time is None or not float(burn_time) > 0.0:
+            return {
+                'status': 'NOT_EVALUATED',
+                'reason': (
+                    'burn time not supplied (motor_data has no positive '
+                    'burn_time) and no duration is assumed, so the sea-level '
+                    'thrust (total impulse / burn time) and the altitude '
+                    'table built on it were not computed. The previous code '
+                    'silently used 10 s here.'),
+                'thrust_altitude_data': [],
+                'input_total_impulse': total_impulse,
+                'base_thrust_sea_level': None,
+                'max_thrust': None,
+                'max_thrust_altitude': None,
+                'vacuum_thrust': None,
+            }
         base_thrust = total_impulse / burn_time                        # N (TESLİM EDİLEN)
         solver_mdot = motor_data.get('mdot_total')
         if solver_mdot is not None and float(solver_mdot) > 0.0:
@@ -2278,5 +3605,29 @@ class CombustionAnalyzer:
                 'top of the altitude sweep grid, not an optimum: thrust '
                 'increases monotonically with altitude for a fixed-geometry '
                 'nozzle, so the argmax always lands on the last grid point'),
-            'vacuum_thrust': thrust_data[-1]['thrust'] if thrust_data else 0
+            # --- D15/P1B3-01 · VAKUM İTKİSİ IZGARANIN UCU DEĞİLDİR -------
+            # ÖLÇÜLDÜ (docs/scofield/raw/OH/D15/hibrit/a3/once.json,
+            # B3_01): eski satır ``thrust_data[-1]['thrust']`` idi, yani
+            # tarama IZGARASININ SON SATIRI. Ürünün sabit ızgarasında
+            # (20 km) yayımlanan sayı 1109,9424 N, gerçek P_a=0 limiti ise
+            # 1116,2222 N -> 6,2798 N / %0,5626 düşük. Daha kötüsü sayı
+            # ÇAĞIRANIN ızgarasına bağlıydı: aynı motorda 10 km ızgarasında
+            # 1085,8992 N, 80 km ızgarasında 1116,2212 N (yayılım 30,32 N).
+            # Bu, kapanmış F3-3'ün (vacuum_isp) birebir ikiziydi; aynı
+            # sözlükteki kardeşler zaten doğrusunu yapıyordu
+            # (vacuum_total_impulse = meta['thrust_vacuum_n'] x burn_time).
+            # Artık alan gerçek vakum limitidir ve ızgaranın ucu, adı
+            # kendini söyleyen ayrı bir alanda durur.
+            'vacuum_thrust': meta['thrust_vacuum_n'],
+            'vacuum_thrust_basis': (
+                'true vacuum limit of this fixed-geometry nozzle at P_a = 0 '
+                '(F_vac = eta_v x mdot x v_e + P_e x A_e), taken from the '
+                'same sweep metadata that feeds vacuum_total_impulse. It is '
+                'NOT the last row of the altitude grid: that row is only as '
+                'high as the caller happened to sweep and is published '
+                'separately as top_of_grid_thrust.'),
+            'top_of_grid_thrust': (thrust_data[-1]['thrust']
+                                   if thrust_data else 0),
+            'top_of_grid_altitude_m': (thrust_data[-1]['altitude']
+                                       if thrust_data else None),
         }

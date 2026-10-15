@@ -12,7 +12,14 @@ tests/test_heat_transfer_validation.py.
 Key references:
   - Bartz, D.R. (1957), "A Simple Equation for Rapid Estimation of Rocket
     Nozzle Convective Heat Transfer Coefficients", Jet Propulsion 27(1).
-  - Sutton & Biblarz, "Rocket Propulsion Elements", 9th ed., Eq. 8-22 (Bartz).
+  - Bartz, D.R. (1965), "Turbulent Boundary-Layer Heat Transfer from
+    Rapidly Accelerating Flow of Rocket Combustion Gases and of Heated Air",
+    Advances in Heat Transfer 2 (JPL draft Dec. 1963, NTRS 19650013685),
+    Eqs. (48)-(50): (50) is the closed form implemented below, (49) the
+    property factor sigma.
+  - Sutton & Biblarz, "Rocket Propulsion Elements", 9th ed., Eq. 8-22,
+    p. 313: the algebraically equivalent property-ratio form (= Bartz
+    Eq. 48; it carries no curvature term).
   - NASA SP-8124, "Liquid Rocket Engine Self-Cooled Combustion Chambers".
   - Huzel & Huang, "Modern Engineering for Design of Liquid-Propellant
     Rocket Engines", AIAA, Chapter 4 (cooling).
@@ -28,19 +35,25 @@ IMPORTANT UNITS NOTE (g0 pitfall):
 
 import numpy as np
 import json
+import math
 import warnings
 from typing import Dict, List, Tuple, Optional
 
 from scipy.optimize import brentq
 
-from hrma.constants import STEFAN_BOLTZMANN
-from hrma.data.materials_db import build_materials_view
+from hrma.constants import G_0, R_UNIVERSAL, STEFAN_BOLTZMANN
+from hrma.data.materials_db import build_materials_view, temperature_limits
 # Malzeme kaydının YANITA konan biçimi (beyanlarıyla) — yapısal modülle TEK
 # ortak kaynak. İki modül aynı kaydı yayımladığı için metin tek yerde durur.
 from hrma.analysis.structural_analysis import published_material_record
 
-# Universal gas constant [J/(mol*K)] for frozen Cp / R_specific derivation.
-R_UNIVERSAL = 8314.462618  # J/(kmol*K) == J/(mol*K)*1000; here used with MW in g/mol
+# Universal gas constant for frozen Cp / R_specific derivation.
+# ÖH D18 / altyapi (P10B3-10): yerel 8314.462618 literali KALKTI; değer
+# hrma/constants.py'den gelir (CODATA 2018). constants.py "magic-number
+# tutarsızlıkları bu modül üzerinden önlenir" diyordu ama bu dosya kendi
+# kopyasını taşıyordu — değer aynıydı, yani kusur değil AYRIŞMAYA AÇIK
+# KAPIYDI. Birim yorumu korunur: J/(kmol*K) == J/(mol*K)*1000; burada MW
+# g/mol cinsinden kullanılır.
 
 
 def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
@@ -60,13 +73,38 @@ def _positive_length(value):
 
     Geometri alanlarında 0 / '' / None hepsi "VERİLMEDİ" demektir; bunları
     sayı sanmak (örn. ``dict.setdefault`` ile 0'ı geçerli kabul etmek) boğaz
-    yarıçapını sıfırlar. Örnekleyicinin ``_finite_positive``ı ile aynı hüküm.
+    yarıçapını sıfırlar.
+
+    ÖH D30 / termo-ucus a1 · defter OH-D29-06 (OH-D27-11 termo payı) —
+    KARAR ARTIK MERKEZDE. Bu ad yalnız modül içi bir takma addır; hüküm
+    :func:`hrma.utils.input_guard.finite_positive`'tedir (TEK KAYNAK,
+    CLAUDE.md kural #11). D28'de merkezîleştirme ENGELLİYDİ: karşılık
+    (``finite_positive``) ihracat kulvarının dalındaydı ve bu ağaçta
+    yoktu; engel birleşmeyle kalktı (ölçüldü: ``once.json`` K1).
+
+    ÖLÇÜLEN AYRIŞMA (``once.json`` K3, 18 prob): yerel tanım merkezden
+    **2 kararda** ayrışıyordu ve ikisi de aynı delikti — ``float(True)``
+    ``1.0``'dir. ``bool`` ve ``numpy.bool_`` bir ÖLÇÜ DEĞİLDİR (P5B4-16
+    hükmü). Ürün yüzeyinde ölçülen sonuç (``once.json`` K4): tüm zorunlu
+    ısı-analizi alanları ``True`` gönderildiğinde
+    ``missing_heat_transfer_inputs`` **5 alanın 5'ini de** "verilmiş"
+    sayıyordu — yani ``True`` bir hazne basıncı (1,0 Pa) ve bir hazne
+    çapı (1,0 m) yerine geçiyordu. Fail-closed ihlali (doktrin 1).
+
+    İÇE AKTARMA NEDEN GECİKTİRİLİR (ölçüldü, tahmin değil): bu modülü
+    ``hrma.engines.__init__`` içe aktarır. Modül düzeyinde ``hrma.utils``
+    istenirse paketin ``__init__``i ``hrma.utils.injector_design`` →
+    ``hrma.engines.*`` zincirini tetikler, ``hrma.engines.__init__`` de
+    YARIM yüklenmiş bu modülden ``HeatTransferAnalyzer``ı ister ve
+    ``ImportError`` alır. Ölçüm: ``import hrma.analysis
+    .trajectory_analysis`` taban ağacında **0** uyarı verirken modül
+    düzeyi içe aktarmayla **1** uyarı veriyordu ("Could not import some
+    engine modules") — yani motor paketi sessizce EKSİK yükleniyordu.
+    Çağrı anında zincir tamamlanmış olur; maliyet ``sys.modules``
+    aramasıdır ve bu kapı sıcak döngüde çağrılmaz.
     """
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return None
-    return f if (np.isfinite(f) and f > 0.0) else None
+    from hrma.utils import input_guard
+    return input_guard.finite_positive(value)
 
 
 # ----------------------------------------------------------------------
@@ -81,10 +119,198 @@ def _positive_length(value):
 DEFAULT_X_H2O = 0.25
 DEFAULT_X_CO2 = 0.15
 
+# --- Işıyan tür kompozisyonunun KÖKENİ (ÖH D17 / termo-ucus, P4B1-10 ŞARTı)
+# Köken etiketi DEĞER eşitliğinden kurulamaz. D15 onarımı etiketi
+# ``x == DEFAULT_X_H2O and y == DEFAULT_X_CO2`` karşılaştırmasından
+# üretiyordu; bu, kompozisyonu AÇIKÇA veren ama tesadüfen modül
+# varsayılanına eşit değer gönderen çağırana "bu senin girdin değil,
+# modül varsayılanı" diyordu (ölçüldü: once.json K1,
+# ``verildi_varsayilana_esit`` ve ``yalniz_x_H2O_verildi`` vakalarında
+# etiket 'module default ... no x_H2O/x_CO2 was supplied' — iki yanlış
+# köken). Köken, motor_data'da ANAHTARIN VERİLMİŞ olmasıdır; değeri
+# neye eşit olduğu kökeni değiştirmez.
+RADIATION_COMPOSITION_SOURCE_DEFAULT = (
+    'module default (hydrocarbon/N2O class) — no x_H2O/x_CO2 was '
+    'supplied with the motor data')
+RADIATION_COMPOSITION_SOURCE_CALLER = 'caller supplied x_H2O / x_CO2'
+
+
+def radiation_composition_source(has_x_h2o: bool, has_x_co2: bool) -> str:
+    """Köken etiketini (yalnız) anahtarların verilip verilmediğinden kurar.
+
+    TEK TANIM NOKTASI: hem ``analyze_heat_transfer`` hem
+    ``analyze_axial_profile`` hem de doğrudan çağrılan
+    ``_analyze_gas_side_heat_transfer`` bu işlevi kullanır; ikinci bir
+    etiket metni yazılmaz.
+
+    Kısmî hâl de dürüstçe adlandırılır: yalnız biri verilmişse etiket
+    hangisinin çağırandan, hangisinin modül varsayılanından geldiğini
+    ADIYLA söyler (eski etiket bu hâlde "ikisini de sen verdin" diyordu).
+    """
+    if has_x_h2o and has_x_co2:
+        return RADIATION_COMPOSITION_SOURCE_CALLER
+    if not has_x_h2o and not has_x_co2:
+        return RADIATION_COMPOSITION_SOURCE_DEFAULT
+    verilen, eksik = (('x_H2O', 'x_CO2') if has_x_h2o else ('x_CO2', 'x_H2O'))
+    return (f'caller supplied {verilen}; module default '
+            f'(hydrocarbon/N2O class) for {eksik}')
+
+
+def resolve_radiation_composition(motor_data: Dict) -> Tuple[float, float, str]:
+    """``motor_data`` -> ``(x_H2O, x_CO2, köken etiketi)``.
+
+    Anahtar YOK ya da açıkça ``None`` ise modül varsayılanı kullanılır ve
+    etiket bunu söyler; anahtar VARSA değer ne olursa olsun köken
+    çağırandır. Sayısal olmayan bir değer sessizce varsayılana DÜŞMEZ —
+    ``float()`` hatası çağırana çıkar (fail-closed).
+    """
+    ham_h2o = motor_data.get('x_H2O') if isinstance(motor_data, dict) else None
+    ham_co2 = motor_data.get('x_CO2') if isinstance(motor_data, dict) else None
+    var_h2o = ham_h2o is not None
+    var_co2 = ham_co2 is not None
+    x_h2o = float(ham_h2o) if var_h2o else DEFAULT_X_H2O
+    x_co2 = float(ham_co2) if var_co2 else DEFAULT_X_CO2
+    return x_h2o, x_co2, radiation_composition_source(var_h2o, var_co2)
+
 # Ortalama ışın uzunluğu katsayısı: L = 0.9 * D (silindirik hazne için
 # standart mühendislik yaklaşımı; Hottel ortalama ışın uzunluğu tablosu,
 # sonsuz silindir 0.95D, L/D~1 silindir 0.6-0.7D bandının üst-orta değeri).
 MEAN_BEAM_LENGTH_FACTOR = 0.9
+
+# Soğutucu tarafı tasarım sıcaklık farkları [K] — mühendislik kabulü,
+# literatür formülü DEĞİL (dürüstlük notu: bunlar boyutlandırma
+# kabulüdür; her biri A = Q/(h*dT) ifadesinde dT olarak kullanılır).
+#
+# ÖH Z5S / PK5 (P4B1-06): sözlük SINIFTAN MODÜL DÜZEYİNE taşındı; artık
+# "modelin gerçekten çözebildiği soğutma tipleri" listesinin TEK TANIM
+# NOKTASI budur ve uç kapıları da (hrma/app.py) buradan okur. Eskiden
+# tanınmayan tip sessizce doğal taşınıma düşüyordu: ``film`` /
+# ``ablative`` / ``radiation`` HTTP 200 alıyor, ``required_cooling_area =
+# 0,0 m²`` yayımlanıyor ve ``design_parameters.cooling_type`` kullanıcının
+# seçtiği tipi geri okuyordu — yani yanıt "film soğutma" yazıp doğal
+# taşınımın (h = 25 W/m²K) sayılarını basıyordu.
+COOLING_DESIGN_DELTA_T = {
+    'natural': 50.0,        # K (doğal taşınımda cidar-hava farkı)
+    'forced': 100.0,        # K (zorlanmış hava)
+    'regenerative': 100.0,  # K (cidar-soğutucu film farkı)
+}
+
+#: Modelin ÇÖZEBİLDİĞİ soğutma tipleri. Listede olmayan bir tip için ne
+#: soğutucu-tarafı katsayısı ne tasarım ΔT'si vardır; sayı ÜRETİLMEZ.
+SUPPORTED_COOLING_TYPES = tuple(COOLING_DESIGN_DELTA_T)
+
+#: Soğutucu akışkanın özgül ısısı [J/kg/K] — YALNIZ akışkanın KİMLİĞİ bu
+#: modülce biliniyorsa (ÖH D15, P4B1-05).
+#:
+#: Zorlanmış taşınımda soğutucu HAVADIR ve cp'si ortam koşullarında iyi
+#: bilinir. Rejeneratif soğutmada soğutucu MOTORUN KENDİ PROPELANIDIR
+#: (RP-1 ~2000, LH2 ~14300, metan ~3500 J/kg/K); bu modül propelan
+#: kimliğini almaz, dolayısıyla burada KAYDI YOKTUR ve uydurulmaz.
+#: v2.6.26'ya kadar rejeneratif dal SUYUN cp'sini (4180) varsayıyordu —
+#: 60 bar / 3400 K motorda soğutucu debisi propelan debisinin %127'si
+#: çıkıyor, künye alanı hiç yayımlanmıyordu.
+COOLANT_SPECIFIC_HEAT_J_KGK = {
+    'forced': 1005.0,   # kuru hava, 300 K (Incropera, Tablo A.4)
+}
+
+#: ``COOLANT_SPECIFIC_HEAT_J_KGK`` kayıtlarının kaynak künyesi.
+COOLANT_SPECIFIC_HEAT_SOURCE = {
+    'forced': ('dry air at 300 K, 1 atm — Incropera & DeWitt, '
+               'Fundamentals of Heat and Mass Transfer, Table A.4'),
+}
+
+#: Rejeneratif dalda cp'yi taşıyabilecek çağıran alanı (motor_data anahtarı).
+COOLANT_CP_INPUT_FIELD = 'coolant_specific_heat_J_kgK'
+
+#: Soğutma sınıfının BEYANLI sıralama göstergesi (ÖH Z5S / PK5, P4B1-20).
+#: Bu bir ÖLÇÜM DEĞİLDİR: ısı yüküne, hazne boyuna, malzemeye ve cidar
+#: kalınlığına duyarsızdır; yalnız üç soğutma sınıfını birbirine göre
+#: sıralar. Künyesi ``_cooling_efficiency_basis``te yazılıdır ve çıktıda
+#: ``cooling_efficiency_basis`` / ``cooling_efficiency_source`` alanlarıyla
+#: yayımlanır (kardeşleri ``heat_sink_*_basis`` ile aynı sözleşme).
+COOLING_EFFICIENCY_BY_TYPE = {
+    'natural': 0.3,
+    'forced': 0.6,
+    'regenerative': 0.9,
+}
+
+#: ``cooling_efficiency``in kaynak künyesi. Sayıların ardında bir literatür
+#: korelasyonu YOKTUR; bunu saklamak yerine yazıyoruz (kaynak beyanı).
+COOLING_EFFICIENCY_SOURCE = (
+    'HRMA internal ordering table (no literature correlation): the three '
+    'values 0.3 / 0.6 / 0.9 rank natural, forced and regenerative cooling '
+    'against each other and are not derived from a measurement or a '
+    'published correlation.')
+
+
+#: SOĞUTUCU TARAFI FİLM KATSAYISI — BEYAN EDİLEN TİPİK BANT (ÖH D31 / P12bB4-06).
+#: Bu üç sayı bir KORELASYON DEĞİLDİR. Soğutma kanalı geometrisi, soğutucu
+#: debisi ve soğutucunun kimliği verilmediğinde soğutucu tarafı ÇÖZÜLEMEZ;
+#: aşağıdaki değerler o durumda YALNIZ ``method='not_modelled'`` künyesiyle
+#: yayımlanır (ne olduğunu söyleyen bir tasarım kabulü, hesap değil).
+#: ÖLÇÜLDÜ (``once_p12bb406.json``, taban 9d70e9ed): dört ayrı kanal
+#: tasarımında (64x2x3 mm / 16x6x6 mm / aynı kanalda 8 kg/s / RP-1 40x3x4 mm)
+#: ürünün döndürdüğü değer 20.000 W/m²K'de SABİT kalıyordu; aynı girdilerde
+#: Dittus-Boelter 6.639,7 - 77.412,6 W/m²K veriyor (11,66x yayılım; ürün/DB
+#: oranı 0,2584 - 3,0122) ve cidar iç sıcaklığı dört tasarımda da 1062,03 K
+#: çıkıyordu — yani kanal tasarımı sonuca HİÇ girmiyordu.
+#: Bandın kaynakları:
+#:   - Huzel & Huang, "Modern Engineering for Design of Liquid-Propellant
+#:     Rocket Engines", AIAA Progress in Astronautics and Aeronautics
+#:     Vol. 147, Böl. 4: sıvı rejeneratif kanal tarafı tipik olarak
+#:     1e4-5e4 W/m²K.
+#:   - Incropera & DeWitt, "Fundamentals of Heat and Mass Transfer", 6. bs.,
+#:     Tablo 1.1: gazlarda doğal taşınım 2-25, zorlanmış taşınım
+#:     25-250 W/m²K.
+COOLANT_SIDE_DECLARED_TYPICAL = {
+    'natural': 25.0,
+    'forced': 100.0,
+    'regenerative': 20000.0,
+}
+
+#: ``COOLANT_SIDE_DECLARED_TYPICAL``in kaynak künyesi — çıktıda
+#: ``coolant_side_source`` alanıyla yayımlanır (kardeşi
+#: ``COOLING_EFFICIENCY_SOURCE`` ile aynı sözleşme).
+COOLANT_SIDE_DECLARED_SOURCE = (
+    'declared typical band, NOT a correlation: natural/forced from Incropera '
+    '& DeWitt 6th ed. Table 1.1 (free convection in gases 2-25, forced '
+    'convection in gases 25-250 W/m^2/K), regenerative from Huzel & Huang '
+    '(AIAA Vol. 147) Ch. 4 (liquid regenerative channels 1e4-5e4 W/m^2/K). '
+    'Channel geometry, coolant flow rate and coolant identity do not enter '
+    'this number.')
+
+#: Soğutucu tarafı KORELASYON yolunun istediği alanlar. Adlar kardeş
+#: ``hrma.analysis.regen_cooling`` modülünün okuduğu adlarla BİREBİR aynıdır
+#: (tek kaynak: aynı kanal iki modülde iki ayrı adla istenmez).
+#: ``channel_width`` / ``channel_height`` METRE, ``coolant_mdot`` kg/s.
+COOLANT_CHANNEL_REQUIRED_FIELDS = (
+    'n_channels', 'channel_width', 'channel_height', 'coolant_mdot',
+    'coolant',
+)
+
+#: Bu modülün soğutucu-tarafı korelasyonunu kurabildiği akışkanlar: özellik
+#: tabloları ``regen_cooling.water_properties`` / ``rp1_properties``
+#: (Incropera Tablo A.6 / "Huzel & Huang Ek" — ÖH KU, SP-H1 K50: NASA SP-125
+#: 1967'de Ek yok; RP-1 özellikleri Tablo 1-4 (s. 21'den sonra, sayfa no
+#: basılı değil) ve Tablo 6-3 s. 188; tablonun gerçek kaynağı sayfa
+#: düzeyinde doğrulanmadı). Metan ve hidrojen KRİTİK ÜSTÜ
+#: çalışır; orada Dittus-Boelter geçerli değildir (Jackson korelasyonu
+#: gerekir) ve o yol ``regen_cooling.RegenCooling`` çözücüsündedir — burada
+#: sayı ÜRETİLMEZ, ``not_modelled`` beyan edilir.
+COOLANT_SIDE_TABLE_FLUIDS = ('water', 'rp1')
+
+
+def is_supported_cooling_type(cooling_type) -> bool:
+    """``cooling_type`` modelin çözebildiği tiplerden mi?
+
+    Uç kapıları (``hrma/app.py``) bu işlevi çağırır; eşik listesi tek
+    yerde durur (parametre tutarlılığı kuralı). Harf büyüklüğü ve baş/son
+    boşluğu hoşgörür — ad çözümü kimliği değiştirmez, yalnız yazımı.
+    """
+    if cooling_type is None:
+        return False
+    return str(cooling_type).strip().lower() in COOLING_DESIGN_DELTA_T
+
 
 # Leckner (1972) toplam emisivite korelasyonu katsayı matrisleri.
 # Kaynak: B. Leckner, "Spectral and total emissivity of water vapor and
@@ -130,6 +356,55 @@ _LECKNER_T_LITERATURE_MAX = 2500.0  # K (Leckner 1972 bildirilen fit üst sını
 _LECKNER_PAL_MIN = 1e-4   # bar*cm
 _LECKNER_PAL_MAX = 1e3    # bar*cm
 
+#: ÖH Z5S / PK5 (P4B1-20) — RADYASYON MODELİ KÜNYESİ (yayımlanan metin).
+#: Yukarıdaki üç bilinçli sapma/kelepçe kod yorumlarında ayrıntılı yazılıydı
+#: ama ÇIKTIDA hiç görünmüyordu; radyasyon terimi tasarım akısının içine
+#: girdiği için kullanıcının okuduğu sayının bir parçasıdır ve künyesi de
+#: onunla birlikte yayımlanmalıdır.
+RADIATION_MODEL_BASIS = (
+    'Gas radiation uses the Leckner (1972) total-emissivity correlation as '
+    'tabulated by Modest, "Radiative Heat Transfer" 3rd ed. Table 10.4 '
+    '(Eq. 10.140-10.146). Form note (1): the pressure-correction '
+    'denominator is written A+B-1+P_E. This is NOT a departure from the '
+    'correlation: Howell\'s online appendix (Eqs. A.5/A.6) gives the same '
+    '+P_E denominator in an algebraically identical form; whether the '
+    'Modest page prints -P_E (which would put a pole near P_E ~ 2 bar) has '
+    'not been page-verified here. Two DELIBERATE departures from the source '
+    'are in effect and change the number: (2) the pressure '
+    'correction is clamped to the 0.3-2.0 band seen in the Leckner charts, '
+    'so far outside the fit it cannot diverge; (3) the gas temperature is '
+    f'clamped to {_LECKNER_T_MAX:.0f} K while the reported validity limit '
+    f'of the fit is about {_LECKNER_T_LITERATURE_MAX:.0f} K, i.e. a rocket '
+    'chamber is ALWAYS evaluated outside the published envelope. The clamp '
+    'direction is conservative (emissivity falls with temperature in this '
+    'band, so evaluating a hotter gas at the ceiling overstates the '
+    'radiative load), but the radiative flux is an engineering estimate '
+    'carrying roughly +/-25% uncertainty, not a precise value.')
+
+#: ÖH KU (KC-13, 6 Eki 2026) — GAZ TARAFI MODELİNİN SINIRLARI (BEYAN; sayı
+#: değişmez). Yayımlanan alan: ``heat_transfer_coefficients
+#: ['gas_side_model_limits']``. Kaynaklar:
+#:   * NASA SP-8124 (1977) s. 53: laminerleşme yerel Stanton sayısını 2-3 kat
+#:     düşürebilir; tipik olarak P_c·F < ~10^5 lbf²/in² motorlarda; s. 55:
+#:     kuramsal ölçüt K ≥ 3,3e-6 (Kays, ref. 98); s. 84: P_c·F < 200 000
+#:     lbf²/in² uygulamalarında dikkate alınmalı (yerel metinden doğrulandı).
+#:     Bu modülde itki girdisi YOK, bu yüzden P_c·F eleği HESAPLANMAZ.
+#:   * Kumakawa vd. 1991 NAL TR-1126T §3.3, §4: Ni kaplama ölçülen akıyı
+#:     Bartz'ın 0,7-0,8'ine, karbon birikimi %50'ye düşürüyor (ASYA notu;
+#:     bu ajan sayfayı doğrulamadı). KARI odaları ZrO2 TBC'li.
+GAS_SIDE_MODEL_LIMITS_BASIS = (
+    'Two gas-side effects are NOT modelled and both make the published '
+    'flux HIGH (conservative for the wall, misleading for validation): '
+    '(1) boundary-layer laminarization under strong acceleration - NASA '
+    'SP-8124 (1977) p. 53 reports local Stanton numbers 2-3x below the '
+    'turbulent value, typically for chamber pressure x thrust below about '
+    '1e5 lbf^2/in^2 (criterion K >= 3.3e-6, p. 55; consider it below 2e5, '
+    'p. 84); this module has no thrust input, so that screen is not '
+    'evaluated here; (2) wall coating and soot/carbon deposit resistance - '
+    'Kumakawa et al. 1991 (NAL TR-1126T) measured Ni-plated walls at '
+    '0.7-0.8 of Bartz and carbon deposits halving the flux; comparing this '
+    'uncoated result with a coated or sooted test chamber is biased high.')
+
 
 # ----------------------------------------------------------------------
 # Girdi kapısı (bebek-Scofield F4-1)
@@ -171,6 +446,58 @@ HEAT_TRANSFER_REQUIRED_FIELDS = (
 HEAT_TRANSFER_THROAT_SCALE_FIELDS = ('throat_diameter', 'throat_area',
                                      'mdot_total')
 
+# --- ÖZGÜL ISI ORANI BANDI (ÖH D21 / P4B1-16, doktrin-4 TEK KAYNAK) ------
+# Bu bant v2.6.27'ye kadar ÜÇ dosyada ayrı ayrı yazılıydı:
+#   heat_transfer_analysis.py :483   ``if not (1.05 < gamma < 1.67)``
+#   nozzle_flow_1d.py         :340   aynı bant, ama ``raise ValueError``
+#   regen_cooling.py          :715   aynı bant, ama ``raise ValueError``
+# ve ``hrma/cfd/gas_transport.py`` bandın SAHİBİ olarak bu dosyayı
+# gösteriyordu. Sayı artık burada bir kez tanımlanır; iki tüketici modül
+# onu ithal eder (ikisi de zaten bu modülü ithal ediyor, döngü yok).
+#
+# Bant, burada kullanılan donmuş-akış Bartz bağıntılarının
+# (Pr = 4γ/(9γ−5), cp = γR/(γ−1)) tanımlı kaldığı aralıktır: Pr'nin
+# γ = 5/9 ≈ 0,556 kutbu ve cp'nin γ = 1 kutbu alttan, tek atomlu gaz
+# sınırı γ = 5/3 ≈ 1,667 üstten sınırlar.
+GAMMA_BAND_MIN = 1.05
+GAMMA_BAND_MAX = 1.67
+
+#: γ HİÇ verilmediğinde kullanılan depo varsayılanı (tipik hidrokarbon /
+#: N2O yanma ürünü karışımı). Bu bir sessiz yedek DEĞİLDİR: çıktı
+#: ``gas['gamma_source'] == 'repo_default'`` künyesini taşır, yani
+#: çağıran hangi γ'nın nereden geldiğini okur.
+GAMMA_REPO_DEFAULT = 1.20
+#: Modül varsayılan molekül ağırlığı [g/mol] (çağıran MW ya da gaz sabiti
+#: vermezse; ÖH D37 A2-1 termal 7. tur — sabit adlandırıldı, değer aynı).
+MW_MODULE_DEFAULT_G_MOL = 24.0
+
+#: Bant dışı γ'nın ortak reddi (üç modül de AYNI cümleyi kurar).
+#: ÖLÇÜLDÜ (ÖH D21 / once.json K1, taban 35aa279): bu modül γ=1,02 ve
+#: γ=3,00 girdilerinin İKİSİNİ birden sessizce 1,20 yapıyor, üretilen
+#: uyarı sayısı 0, dönen sözlükte tek bir kelepçe künyesi yok — kardeş
+#: iki modül aynı girdide ValueError atarken.
+GAMMA_BAND_REJECTION = (
+    'gamma must be within ({lo}, {hi}) — outside that band the frozen '
+    'Bartz relations used here (Pr = 4g/(9g-5), cp = g*R/(g-1)) are not '
+    'defined. The supplied value {value!r} is NOT clamped to a default: '
+    'a heat-transfer verdict computed from a specific-heat ratio the '
+    'caller never asked for would be a fabricated number.')
+
+
+def _guard_gamma_band(value, field_name='gamma'):
+    """Bant dışı γ'yı REDDEDER (kelepçelemez) — ÖH D21 / P4B1-16.
+
+    ``nozzle_flow_1d`` ve ``regen_cooling`` bu bandı zaten reddediyordu;
+    bu modül aynı girdide sessizce 1,20'ye çekiyordu. Asimetri kalktı.
+    """
+    g = float(value)
+    if not (GAMMA_BAND_MIN < g < GAMMA_BAND_MAX):
+        raise ValueError(
+            GAMMA_BAND_REJECTION.format(
+                lo=GAMMA_BAND_MIN, hi=GAMMA_BAND_MAX, value=value)
+            + (" (field: %s)" % field_name))
+    return g
+
 
 class MissingHeatTransferInput(ValueError):
     """Isı analizi zorunlu girdisi eksik — hüküm üretilmedi.
@@ -190,6 +517,98 @@ class MissingHeatTransferInput(ValueError):
               'your behalf.')
 
 
+#: ``throat_diameter`` ile ``throat_area`` BİRLİKTE verildiğinde ikisinin
+#: aynı ÖLÇÜ sayılabilmesi için bağıl tolerans (ÖH D21 / P4B1-17).
+#: Aynı geometriden türeyen iki sayı ~1e-15 bağılda uyuşur; 6 anlamlı
+#: haneye yuvarlanmış bir çift ~1e-7'de kalır. Boşaltma katsayısı
+#: düzeltilmiş ETKİN alan ile geometrik alan arasındaki fark ise
+#: ölçüldüğünde %2,08 (once.json K2) — dört mertebe büyük, yani bu
+#: tolerans yuvarlamayı geçirir, iki AYRI ölçüyü geçirmez.
+THROAT_AREA_CONSISTENCY_REL_TOL = 1e-6
+
+
+class ConflictingHeatTransferInput(ValueError):
+    """İki girdi AYNI büyüklüğü ÇELİŞKİLİ söylüyor — hüküm üretilmedi.
+
+    ÖH D21 / P4B1-17. ``MissingHeatTransferInput`` ile aynı sözleşme
+    (``ValueError`` alt sınıfı, makine-okur alan listesi): uç katmanı
+    ``conflicting_fields``i 422 gövdesine aynen koyabilir.
+
+    ÖLÇÜLDÜ (once.json K2, taban 35aa279): ``throat_diameter=0,05`` ve
+    ``throat_area = 0,9796·π(d/2)²`` (tipik C_D düzeltmeli etkin alan)
+    birlikte verildiğinde modül alanı SESSİZCE geometrik değere yeniden
+    yazıyordu — çağıranın gönderdiği etkin alan %2,0825 bağıl kayarak
+    yok oluyor, dönen sözlükte hangi sayının kazandığını söyleyen tek bir
+    künye bulunmuyordu.
+    """
+
+    def __init__(self, conflicting_fields, detail=''):
+        self.conflicting_fields = list(conflicting_fields)
+        super().__init__(
+            'Two inputs describe the same quantity and disagree: '
+            + ', '.join(self.conflicting_fields)
+            + '. ' + detail
+            + ' Neither value is silently preferred: send only the one '
+              'that is authoritative for this analysis.')
+
+
+class UnresolvedMaterial(ValueError):
+    """Malzeme adı ``materials_db``de hiçbir kayda çözülmüyor (ÖH Z5S / S4).
+
+    ``MissingHeatTransferInput`` ile aynı sözleşme: ``ValueError`` alt
+    sınıfıdır (mevcut ``except ValueError`` / ``except Exception`` dalları
+    davranışlarını korur) ve makine-okur alanlar taşır.
+
+    NEDEN İSTİSNA, NEDEN SESSİZ YEDEK DEĞİL — ÖLÇÜLDÜ (28 Ağustos 2026):
+    bu sınıf yazılmadan önce satır
+
+        mat_props = self.materials.get(material, self.materials['steel'])
+
+    ham sözlük araması yapıyordu. ``materials_db``nin kendi çözümleyicisi
+    (``_resolve``) ``lower()`` uyguladığı için ``'STEEL_4130'`` orada
+    çözülüyor, BURADA çözülmüyordu. Sonuç, tek yanıtta iki malzemeydi:
+
+        design_parameters.material     = 'STEEL_4130'
+        material_properties.name       = 'Carbon steel (generic, A36-class)'
+        safety_analysis.risk_level     = 'HIGH'   (basılıyor)
+
+    ve erime emniyet katsayısı 0,5736 yerine 0,5965 oluyordu. Aynı sessiz
+    yedek ``'peynir'`` için de çalışıyor, yani HİÇ VAR OLMAYAN bir malzeme
+    için tam bir termal güvenlik hükmü yayımlanıyordu (P16B1-03, P16B3-03).
+
+    Yedek malzeme SEÇMEK bu modülün işi değildir: bu modülün bütün
+    sayıları (iletkenlik, erime marjı, termal gerilme) malzemeyle
+    ölçeklenir, dolayısıyla başka bir malzemenin sayısını basmak
+    kullanıcının sormadığı bir motoru yayımlamaktır.
+    """
+
+    def __init__(self, requested, available):
+        self.requested = requested
+        self.available = list(available)
+        super().__init__(
+            f"Unknown wall material {requested!r}: it does not resolve to a "
+            f'materials_db record. No property was substituted, because '
+            f'every heat transfer number scales with the material. '
+            f'Available: {", ".join(self.available)}')
+
+
+def resolve_material_key(material) -> str:
+    """Malzeme adını ``materials_db`` kanonik anahtarına çözer.
+
+    ``materials_db.get_material_safe`` ile AYNI kuralı kullanır (küçük
+    harfe indirme + ``ALIASES``); yeni takma ad İCAT ETMEZ. Çözülemeyen ad
+    ``UnresolvedMaterial`` yükseltir — sessiz yedek yoktur.
+    """
+    from hrma.data.materials_db import get_material_safe, list_materials
+    if material is None:
+        raise UnresolvedMaterial(material, list_materials())
+    try:
+        _rec, key = get_material_safe(str(material).strip())
+    except KeyError:
+        raise UnresolvedMaterial(material, list_materials()) from None
+    return key
+
+
 def _missing_heat_transfer_inputs(motor_data: Dict) -> List[str]:
     """Eksik zorunlu ısı-analizi girdilerinin ADLARI (yoksa boş liste).
 
@@ -206,13 +625,26 @@ def _missing_heat_transfer_inputs(motor_data: Dict) -> List[str]:
     return missing
 
 
+def missing_heat_transfer_inputs(motor_data: Dict) -> List[str]:
+    """``_missing_heat_transfer_inputs``ın uç katmanına açık adı (ÖH Z3).
+
+    Uç katmanı kapıyı KENDİ yeniden yazmasın diye vardır: ``/analyze_thermal_
+    safety`` ve ``/api/advanced-analysis`` isteği reddetmeden ÖNCE eksik alan
+    listesini buradan alır (P4B1-01'in kökü, kapının uçta kopyalanmasıydı).
+    Aynı listeyi ``MissingHeatTransferInput.missing_fields`` de taşır; tek
+    tanım noktası yukarıdaki özel işlevdir.
+    """
+    return _missing_heat_transfer_inputs(motor_data)
+
+
 class HeatTransferAnalyzer:
     """Heat transfer analysis for hybrid rocket motor chambers"""
 
     def __init__(self):
         # v2.6.27: merkezî tanımdan (hrma/constants.py) — yerel kopya kalktı.
         self.stefan_boltzmann = STEFAN_BOLTZMANN  # W/(m^2*K^4), CODATA 2018
-        self.g0 = 9.80665  # m/s^2 (standard gravity; NOT used in SI Bartz)
+        # ÖH D18 / altyapi (P10B3-10): merkezî tanımdan.
+        self.g0 = G_0  # m/s^2 (standard gravity; NOT used in SI Bartz)
 
         # Malzeme veritabanı — MERKEZİ kaynaktan (Dalga 0, 2026-07-14).
         # Eski yerel termal tablo hrma/data/materials_db.py'ye taşındı ve
@@ -249,16 +681,45 @@ class HeatTransferAnalyzer:
             (Bartz 1957; reproduced in Sutton & Biblarz 9th ed.)
         """
         # --- gamma / molecular weight / R_specific ---
-        gamma = motor_data.get('gamma', motor_data.get('gamma_avg', 1.20))
-        # guard against non-physical gamma
-        if not (1.05 < gamma < 1.67):
-            gamma = 1.20
+        #
+        # ÖH D21 / P4B1-16 — BANT DIŞI γ ARTIK REDDEDİLİR, KELEPÇELENMEZ.
+        # Eski iki satır ``if not (1.05 < gamma < 1.67): gamma = 1.20``
+        # idi. ÖLÇÜLDÜ (once.json K1, taban 35aa279): γ=1,02 ve γ=3,00
+        # girdilerinin İKİSİ de 1,20 dönüyordu (Pr 0,82759, cp 2078,62
+        # J/kgK — yani KULLANICININ VERMEDİĞİ bir gazın Bartz akısı),
+        # üretilen uyarı sayısı 0 idi ve dönen sözlükte kelepçeyi anan tek
+        # bir alan yoktu. Kardeş iki modül (``nozzle_flow_1d``:340,
+        # ``regen_cooling``:715) TAM AYNI girdide ValueError atıyordu:
+        # aynı ürün, aynı bant, iki ayrı hüküm. Asimetri kalktı, bandın
+        # sayısı da tek kaynağa (:GAMMA_BAND_MIN/MAX) taşındı.
+        #
+        # ÖH D21 / B3-13(c) — ``gamma_avg`` ADI: üretici
+        # ``combustion_analysis._calculate_performance`` bu alana
+        # ``thermo_props['stations']['chamber']['gamma']``ı, yani ODA
+        # gamma'sını koyar; ortalama DEĞİLDİR (ad↔davranış örtüşmüyor).
+        # Adın düzeltilmesi üreticiyi (hibrit kulvarının sahası)
+        # gerektirir; burada yapılabilen, hangi alandan okunduğunun
+        # künyeye yazılmasıdır (``gamma_source``).
+        _gamma_ham = motor_data.get('gamma')
+        if _gamma_ham is not None:
+            gamma_source = 'gamma'
+        else:
+            _gamma_ham = motor_data.get('gamma_avg')
+            gamma_source = (
+                # ÖH D21 / B3-13(c): ad yalan söylüyor, künye söylemesin.
+                "gamma_avg (producer: combustion_analysis performance."
+                "gamma_avg — this is the CHAMBER gamma, not an average)"
+                if _gamma_ham is not None else 'repo_default')
+        if _gamma_ham is None:
+            gamma = GAMMA_REPO_DEFAULT
+        else:
+            gamma = _guard_gamma_band(_gamma_ham, gamma_source.split(' ')[0])
         molecular_weight = motor_data.get('molecular_weight', None)  # g/mol
         R_specific = motor_data.get('gas_constant', None)            # J/(kg*K)
         if molecular_weight is None and R_specific is not None:
             molecular_weight = R_UNIVERSAL / R_specific
         if molecular_weight is None:
-            molecular_weight = 24.0  # g/mol, typical hybrid combustion product mix
+            molecular_weight = MW_MODULE_DEFAULT_G_MOL  # g/mol, typical hybrid combustion product mix
         if R_specific is None:
             R_specific = R_UNIVERSAL / molecular_weight
 
@@ -308,6 +769,11 @@ class HeatTransferAnalyzer:
 
         return {
             'gamma': gamma,
+            # ÖH D21 / P4B1-16 + B3-13(c): γ'nın GELDİĞİ alan. 'gamma' |
+            # 'gamma_avg (...)' | 'repo_default'. Bant dışı bir γ buraya
+            # hiç ulaşamaz (yukarıda reddedilir), yani bu künye asla
+            # "kelepçelenmiş" bir sayıyı örtmez.
+            'gamma_source': gamma_source,
             'molecular_weight': molecular_weight,
             'gas_constant': R_specific,
             'gas_cp': gas_cp,
@@ -377,6 +843,10 @@ class HeatTransferAnalyzer:
         # üretir ve roket haznesi basınçları tam o bölgeden geçer; +P_E
         # kutupsuzdur ve yüksek basınçta eps/eps_0 > 1 verir (çizgi
         # genişlemesi fiziğiyle tutarlı; codex GPT-5.5 çapraz teyitli).
+        # ÖH KU H-14 (YANMA Y2): +P_E paydası kaynaktan SAPMA değildir —
+        # Howell çevrimiçi ekleri Denk. A.5/A.6'daki Λ biçimi cebirsel olarak
+        # aynı +P_E paydasını verir. Modest 3. bs. sayfasının −P_E basıp
+        # basmadığı bu depoda sayfa düzeyinde doğrulanmadı.
         if species == 'h2o':
             P_E = p_total_bar + 2.56 * p_partial_bar / np.sqrt(t)
             pal_m = 13.2 * t ** 2
@@ -569,27 +1039,95 @@ class HeatTransferAnalyzer:
         # characteristic velocity c* [m/s]
         c_star = _positive_length(
             motor_data.get('c_star', motor_data.get('cstar', None)))
+        # ÖH D15 / P4B2-08 — c*'IN KAYNAĞI ARTIK KÜNYELİ.
+        # ``motor_data['c_star']`` sessizce Bartz akısını değiştiriyordu ve
+        # hiçbir tüketici bunu öğrenemiyordu (ölçüldü: NozzleFlow1D'de
+        # h_g(boğaz) 15 782,5 -> 16 148,1 W/m²K, +%2,32; RegenCooling'de
+        # tepe akı 40,440 -> 41,191 MW/m² ve max_wall_hot_K 882,31 ->
+        # 890,47 K, +8,16 K). Kaynak alanı burada üretilir; tüketiciler
+        # (nozzle_flow_1d kapısı, regen_cooling özeti) onu okur.
+        c_star_source = 'user_supplied'
+        c_star_ideal = None
         if c_star is None:
             num = np.sqrt(gamma * R * chamber_temperature)
             den = gamma * np.sqrt((2.0 / (gamma + 1.0)) ** ((gamma + 1.0) / (gamma - 1.0)))
             c_star = num / den
+            c_star_source = 'ideal_theory'
+            c_star_ideal = float(c_star)
+        else:
+            num = np.sqrt(gamma * R * chamber_temperature)
+            den = gamma * np.sqrt((2.0 / (gamma + 1.0)) ** ((gamma + 1.0) / (gamma - 1.0)))
+            c_star_ideal = float(num / den)
 
         # throat diameter [m]
         throat_diameter = _positive_length(motor_data.get('throat_diameter'))
         throat_area = _positive_length(motor_data.get('throat_area'))
-        if throat_diameter is not None:
+        # ÖH D21 / P4B1-17 — BİRLİKTE VERİLEN ÇAP+ALAN ARTIK SESSİZCE
+        # ÇÖZÜLMÜYOR. Eski kod ``if throat_diameter is not None`` diyerek
+        # alanı KOŞULSUZ olarak π(d/2)² ile yeniden yazıyordu; çağıranın
+        # gönderdiği ``throat_area`` okunmadan atılıyor ve bunu söyleyen
+        # tek bir künye üretilmiyordu. Bugün ürün yolunda etkisi yok
+        # (hibrit motor geometrik A_t gönderiyor, ikisi tutarlı), ama
+        # boşaltma katsayısı düzeltilmiş ETKİN alan gönderen her çağıranda
+        # sayı %2,08 sessizce kayıyordu (once.json K2).
+        throat_scale_source = None
+        if throat_diameter is not None and throat_area is not None:
+            _a_geo = float(np.pi * (throat_diameter / 2.0) ** 2)
+            _bagil = abs(float(throat_area) - _a_geo) / _a_geo
+            if _bagil > THROAT_AREA_CONSISTENCY_REL_TOL:
+                raise ConflictingHeatTransferInput(
+                    ['throat_diameter', 'throat_area'],
+                    detail=(
+                        'throat_diameter=%.6g m implies a geometric throat '
+                        'area of %.6g m2, but throat_area=%.6g m2 was also '
+                        'supplied (relative difference %.4g%%, tolerance '
+                        '%.0e). A discharge-coefficient corrected EFFECTIVE '
+                        'area and the geometric area are two different '
+                        'measurements and the Bartz mass flux scales with '
+                        'whichever one is used.'
+                        % (throat_diameter, _a_geo, float(throat_area),
+                           _bagil * 100.0,
+                           THROAT_AREA_CONSISTENCY_REL_TOL)))
+            throat_area = _a_geo
+            throat_scale_source = (
+                'throat_diameter (throat_area supplied too and agreed '
+                'within %.0e relative)' % THROAT_AREA_CONSISTENCY_REL_TOL)
+        elif throat_diameter is not None:
             throat_area = np.pi * (throat_diameter / 2.0) ** 2
+            throat_scale_source = 'throat_diameter'
         elif throat_area is not None:
             throat_diameter = 2.0 * np.sqrt(throat_area / np.pi)
+            throat_scale_source = 'throat_area'
         else:
             # A_t = mdot * c* / Pc  (continuity at choked throat)
             if mdot_total > 0 and chamber_pressure > 0:
                 throat_area = mdot_total * c_star / chamber_pressure
             else:
-                # last resort: assume throat ~ 0.3 * chamber diameter
-                chamber_diameter = motor_data.get('chamber_diameter', 0.1)
-                throat_area = np.pi * (0.3 * chamber_diameter / 2.0) ** 2
+                # --- BAŞPARMAK KURALI KALDIRILDI (ÖH D15, P4B1-09) --------
+                # Burada ``A_t = pi*(0,3*D_ch/2)^2`` duruyordu; üstelik
+                # ``chamber_diameter`` da yoksa İKİNCİ bir uydurmayla
+                # (``0,1`` m) tamamlanıyordu. Modülün KENDİ girdi kapısı
+                # (bu dosyanın :166-172 beyanı) tam bu kuralı adıyla anıp
+                # "kaynaksız bir 0,3 katsayısıyla boğaz uydurmak YASAK"
+                # diyordu — beyan yazılmış, tel çekilmemişti.
+                #
+                # ÖLÇÜLDÜ (31 Ağustos 2026, Python API):
+                #   analyze_axial_profile({'chamber_pressure':60,
+                #       'chamber_temperature':3400,'mdot_total':0})
+                #       -> throat_diameter_m = 0,03   (= 0,3 * 0,1)
+                #   aynı gövde + chamber_diameter=0,5 -> 0,15
+                # Boğaz çapı bütün profili (Bartz kütle akısı, q(x), h_g,
+                # T_wall) belirler; uydurma boğaz uydurma bir termal hüküm
+                # demektir. Sayı üretilmez, eksik alan ADIYLA söylenir.
+                raise MissingHeatTransferInput([
+                    'throat_diameter or throat_area or mdot_total (with a '
+                    'positive chamber_pressure) — the throat scale cannot be '
+                    'resolved and is NOT approximated from the chamber '
+                    'diameter'])
             throat_diameter = 2.0 * np.sqrt(throat_area / np.pi)
+            throat_scale_source = (
+                'mdot_total * c_star / chamber_pressure (continuity at the '
+                'choked throat)')
 
         # throat radius of curvature (for the (Dt/Rc)^0.1 term).
         # Typical converging-diverging nozzles: Rc ~ 0.5..2 * throat radius.
@@ -605,8 +1143,20 @@ class HeatTransferAnalyzer:
 
         return {
             'c_star': c_star,
+            # ÖH D15 / P4B2-08: 'user_supplied' -> yukarıdaki sayı
+            # motor_data['c_star'] (ya da 'cstar') alanından geldi;
+            # 'ideal_theory' -> Sutton & Biblarz Eq. 3-32 ile gamma, R ve
+            # T_c'den türetildi. ``c_star_ideal`` her iki hâlde de analitik
+            # değerdir (kıyas/kapı için).
+            'c_star_source': c_star_source,
+            'c_star_ideal': c_star_ideal,
             'throat_diameter': throat_diameter,
             'throat_area': throat_area,
+            # ÖH D21 / P4B1-17: boğaz ÖLÇEĞİNİN geldiği alan. Üç değer
+            # alır: 'throat_diameter' | 'throat_area' | continuity
+            # ifadesi. Çap+alan birlikte gelip UYUŞMAZLARSA buraya hiç
+            # ulaşılmaz (ConflictingHeatTransferInput atılır).
+            'throat_scale_source': throat_scale_source,
             'throat_radius_curvature': rc,
             'rc_over_dt': rc_over_dt,
             'throat_temperature': throat_temperature,
@@ -622,7 +1172,11 @@ class HeatTransferAnalyzer:
         """
         Bartz convective heat-transfer coefficient (SI-consistent, no g0).
 
-        Sutton & Biblarz 9th ed. Eq. 8-22 (Bartz 1957), SI form:
+        Bartz closed form, Bartz (1965) Eq. (50) with the property factor
+        of Eq. (49) (NTRS 19650013685; first published Bartz 1957, Jet
+        Propulsion 27(1):49-51), SI form. Sutton & Biblarz 9th ed. Eq. 8-22
+        (p. 313) is the algebraically equivalent property-ratio form
+        (= Bartz Eq. 48) without the curvature term:
 
           h_g = (0.026 / D_t^0.2)
                 * (mu^0.2 * cp / Pr^0.6)
@@ -631,7 +1185,8 @@ class HeatTransferAnalyzer:
                 * (A_t / A)^0.9
                 * sigma
 
-        with the boundary-layer property correction (Sutton Eq. 8-22):
+        with the boundary-layer property correction (Bartz 1965 Eq. 49; the
+        closed form of the Sutton Eq. 8-22 property ratios for mu ~ T^0.6):
 
           sigma = 1 / { [ 0.5*(Tw/Tc)*(1 + (g-1)/2 * M^2) + 0.5 ]^0.68
                         * [ 1 + (g-1)/2 * M^2 ]^0.12 }
@@ -673,24 +1228,301 @@ class HeatTransferAnalyzer:
         m2 = (gamma - 1.0) / 2.0 * mach_local ** 2
         return chamber_temperature * (1.0 + r * m2) / (1.0 + m2)
 
-    def _coolant_side_coefficient(self, motor_data: Dict, cooling_type: str) -> float:
+    # ==================================================================
+    # TASARIM AKISI — TEK TANIM NOKTASI (ÖH Z5S / PK5, P4B1-03)
+    # ------------------------------------------------------------------
+    # ÖLÇÜLEN KUSUR: aynı boğaz, aynı koşu, İKİ tasarım akısı ve İKİ h_g.
+    # ``analyze_heat_transfer`` gaz-yanı katsayıyı wall_guess =
+    # min(0,5·Tc, max_service·0,8) cidarında kuruyordu, ``analyze_axial_
+    # profile`` ise referans soğutulmuş cidar Tw_ref'te; radyasyon terimi de
+    # birinde HAZNE durgunluk koşullarında + hazne çapıyla, ötekinde YEREL
+    # statik durumda + yerel çapla hesaplanıyordu. Sapma (test fikstürü):
+    # h_g %10,26 (8.105,45 ⟷ 8.937,40 W/m²K), akı %7,03. İki değer İKİ AYRI
+    # tüketiciye gidiyordu (PDF + 3B görselleştirme ⟷ /api/analysis/
+    # wall-profile → termal FEA). Modülün kendi künyesi ise (analyze_axial_
+    # profile docstring'i) "throat-analiziyle AYNI korelasyon ve gaz
+    # özellikleri" diyordu.
+    #
+    # ONARIM: referans cidar sıcaklığı ve tasarım akısı artık AŞAĞIDAKİ İKİ
+    # işlevden çıkar; her iki kanal da (ve hazne bacağı da) bunları çağırır.
+    # Hangi kanalın "doğru" olduğuna karar verilmedi — YEREL statik durum
+    # seçildi, çünkü radyasyonu yayan gaz o istasyondaki gazdır ve boğaz
+    # akısının adı "throat_heat_flux"tır.
+    # ==================================================================
+    @staticmethod
+    def _design_reference_wall_temperature(allowable: float, taw: float,
+                                           ambient_temp: float) -> float:
+        """Tasarım akısının referans SOĞUTULMUŞ cidar sıcaklığı [K].
+
+        Malzemenin izin verilen sıcaklığı, ama Taw'ın ~%80'inden sıcak
+        değil (iyi soğutulmuş cidar her zaman Taw'ın altındadır) ve ortam
+        sıcaklığından soğuk değil. Daha DÜŞÜK referans cidar => daha
+        YÜKSEK (muhafazakâr) akı; bu yüzden akı sıfıra çökemez ve
+        yanma-delinme maskelenemez.
+        """
+        return max(min(float(allowable), 0.8 * float(taw)),
+                   float(ambient_temp))
+
+    def _design_heat_flux(self, *, h_gas: float, taw: float, t_wall: float,
+                          chamber_temperature: float, chamber_pressure: float,
+                          gamma: float, local_diameter: float,
+                          emissivity: float, x_H2O: float, x_CO2: float,
+                          mach_local: float) -> float:
+        """Tasarım ısı akısı q = q_taşınım + q_radyasyon [W/m²].
+
+        Radyasyon Leckner (1972) gaz emisivitesiyle YEREL STATİK durumda
+        hesaplanır (T_stat, p_stat izantropik bağıntıdan; ışın uzunluğu
+        yerel çaptan). Boğazda ``mach_local=1``, hazne gövdesinde
+        ``mach_local`` düşük, eksenel profilde istasyonun kendi Mach'ı.
+
+        Args:
+            h_gas: O istasyonun Bartz katsayısı [W/m²K].
+            taw: Kurtarma (adyabatik cidar) sıcaklığı [K].
+            t_wall: Akının değerlendirildiği cidar sıcaklığı [K].
+            chamber_temperature / chamber_pressure: Durgunluk koşulları
+                (K / Pa).
+            local_diameter: Ortalama ışın uzunluğunun türetildiği yerel çap [m].
+        """
+        m2 = 0.5 * (gamma - 1.0) * mach_local * mach_local
+        t_static = chamber_temperature / (1.0 + m2)
+        p_static_bar = (chamber_pressure / 1e5) * (1.0 + m2) ** (
+            -gamma / (gamma - 1.0))
+        beam_length = MEAN_BEAM_LENGTH_FACTOR * float(local_diameter)
+        q_conv = h_gas * (taw - t_wall)
+        q_rad = self._gas_radiation_flux(
+            t_static, t_wall, p_static_bar, beam_length,
+            x_H2O=x_H2O, x_CO2=x_CO2, wall_emissivity=emissivity)
+        return q_conv + max(q_rad, 0.0)
+
+    def _coolant_side_coefficient(self, motor_data: Dict, cooling_type: str,
+                                  coolant_bulk_temp: Optional[float] = None
+                                  ) -> float:
         """
         Soğutucu tarafı film katsayısı [W/(m^2*K)] — TEK merkezi kaynak.
 
-        Rejeneratif değer soğutma kanallarındaki yüksek hızlı sıvıyı yansıtır
-        (Huzel & Huang Böl. 4: kriyojenik/sıvı rejeneratif için tipik olarak
-        1e4-5e4 W/m^2/K); önceki 2000 W/m^2/K bir mertebe düşüktü ve cidarı
-        adyabatiğe yakın kilitliyordu. Hem throat-analizi hem eksenel profil
-        aynı değerleri kullanır (parametre tutarlılığı kuralı).
+        Sayının KENDİSİ ve NEREDEN geldiği ``_coolant_side_resolution``
+        tarafından çözülür; bu işlev yalnız değeri döndüren ince sarmaldır
+        (imza korunuyor: ``regen_cooling``, ``visualization`` ve testler
+        float bekliyor). Künyeyi (``method`` / ``source``) isteyen çağıran
+        doğrudan ``_coolant_side_resolution`` çağırır.
         """
-        h_coolant = motor_data.get('coolant_side_coefficient', None)
-        if h_coolant is not None:
-            return float(h_coolant)
-        if cooling_type == 'forced':
-            return 100.0     # zorlanmış hava soğutması
+        return self._coolant_side_resolution(
+            motor_data, cooling_type, coolant_bulk_temp=coolant_bulk_temp)['value']
+
+    def _coolant_side_resolution(self, motor_data: Dict, cooling_type: str,
+                                 coolant_bulk_temp: Optional[float] = None
+                                 ) -> Dict:
+        """
+        Soğutucu tarafı film katsayısı [W/(m^2*K)] + KÖKEN KÜNYESİ.
+
+        ÖH D31 / P12bB4-06 — ÖLÇÜLEN KUSUR: bu işlev soğutma rejimine göre
+        ÜÇ SABİT döndürüyordu ve kanal geometrisi, soğutucu debisi, soğutucu
+        kimliği sonuca HİÇ girmiyordu. Ölçüldü (``once_p12bb406.json``, taban
+        9d70e9ed): dört ayrı kanal tasarımında ürün 20.000 W/m²K'de sabit
+        kalırken Dittus-Boelter 6.639,7 - 77.412,6 W/m²K veriyordu (11,66x
+        yayılım) ve cidar iç sıcaklığı dördünde de 1062,03 K çıkıyordu.
+        ``/formulas`` §5.3 ise okuyucuya Re/Pr korelasyonu gösteriyordu.
+
+        ÜÇ YOL, HER BİRİ KÜNYELİ (sessiz sabit YOK):
+
+        1. ``user_supplied`` — çağıran ``motor_data['coolant_side_coefficient']``
+           verdiyse o sayı aynen kullanılır.
+        2. ``dittus_boelter`` — rejeneratif soğutmada kanal geometrisi
+           (``n_channels``, ``channel_width``, ``channel_height``), soğutucu
+           debisi (``coolant_mdot``), soğutucu kimliği (``coolant``) ve yığın
+           sıcaklığı çözülebiliyorsa katsayı GERÇEKTEN hesaplanır:
+
+               D_h = 2 w h / (w + h)            (dikdörtgen kanal)
+               G   = (mdot / N) / (w h)         [kg/(m^2 s)]
+               Re  = G D_h / mu,  Pr = cp mu / k
+               Nu  = 0,023 Re^0,8 Pr^0,4        (soğutucu ISINIYOR: n = 0,4)
+               h   = Nu k / D_h                 [W/(m^2 K)]
+
+           Kaynak: Incropera & DeWitt, "Fundamentals of Heat and Mass
+           Transfer", 6. bs., Eq. 8.60 (Dittus-Boelter); geçerlilik
+           Re >= 1e4, 0,6 <= Pr <= 160, L/D >= 10, bildirilen saçılım
+           yaklaşık ±%25. Korelasyon, Nusselt sayısı ve geçerlilik zarfı
+           kardeş ``regen_cooling`` modülünün TEK kaynağından ithal edilir
+           (``dittus_boelter_nu``, ``dittus_boelter_envelope``,
+           ``hydraulic_diameter_rect``, ``water_properties``,
+           ``rp1_properties``) — ikinci bir kopya yazılmaz.
+
+           BOYUT DENETİMİ: [G D_h / mu] = (kg/m²s · m)/(kg/(m·s)) = 1;
+           [cp mu / k] = (J/kgK · kg/(m·s))/(W/mK) = 1; [Nu k / D_h] =
+           (W/mK)/m = W/m²K. Üçü de boyutsuz/ doğru birimde.
+
+        3. ``not_modelled`` — yukarıdaki girdiler yoksa (ya da soğutucu
+           kritik üstü metan/hidrojen ise; orada Dittus-Boelter geçersizdir,
+           Jackson korelasyonu ``regen_cooling.RegenCooling`` çözücüsünde
+           durur) BEYAN EDİLEN TİPİK BANT döner
+           (``COOLANT_SIDE_DECLARED_TYPICAL``) ve künye bunun bir hesap
+           DEĞİL kabul olduğunu, hangi alanların eksik olduğunu ADIYLA
+           söyler. Sayı burada uydurulmaz: bandın kaynağı
+           ``COOLANT_SIDE_DECLARED_SOURCE``ta yazılıdır.
+
+        Döner: ``{'value': float, 'method': str, 'source': str,
+        'missing_fields': [...], 'detail': {...}}``.
+        """
+        md = motor_data or {}
+
+        # 1) Çağıranın verdiği değer — künyesiyle.
+        h_user = md.get('coolant_side_coefficient', None)
+        if h_user is not None:
+            return {
+                'value': float(h_user),
+                'method': 'user_supplied',
+                'source': 'motor_data["coolant_side_coefficient"] (caller-supplied)',
+                'missing_fields': [],
+                'detail': {},
+            }
+
+        # 2) Korelasyon yolu — YALNIZ rejeneratif (kanal içi zorlanmış
+        #    taşınım). 'natural' / 'forced' dış yüzey taşınımıdır; kanal
+        #    korelasyonu oraya uygulanmaz, uydurulmaz.
         if cooling_type == 'regenerative':
-            return 20000.0   # sıvı rejeneratif soğutma (Huzel & Huang)
-        return 25.0          # doğal taşınım (hava) — bilinmeyen tip dahil
+            cozum, eksik = self._coolant_side_dittus_boelter(
+                md, coolant_bulk_temp)
+            if cozum is not None:
+                return cozum
+        else:
+            eksik = [
+                "cooling_type='regenerative' (the duct-flow correlation "
+                'applies to regenerative channels only; natural/forced '
+                'convection on the outer surface is not modelled here)']
+
+        # 3) not_modelled — beyan edilen bant, ADIYLA.
+        deger = COOLANT_SIDE_DECLARED_TYPICAL.get(
+            cooling_type, COOLANT_SIDE_DECLARED_TYPICAL['natural'])
+        if cooling_type not in COOLANT_SIDE_DECLARED_TYPICAL:
+            eksik = list(eksik) + [
+                f'cooling_type={cooling_type!r} is not one of '
+                f'{sorted(COOLANT_SIDE_DECLARED_TYPICAL)}; the free-convection '
+                'band is reported']
+        return {
+            'value': float(deger),
+            'method': 'not_modelled',
+            'source': COOLANT_SIDE_DECLARED_SOURCE,
+            'missing_fields': list(eksik),
+            'detail': {},
+        }
+
+    def _coolant_side_dittus_boelter(self, md: Dict,
+                                     coolant_bulk_temp: Optional[float]
+                                     ) -> Tuple[Optional[Dict], List[str]]:
+        """Kanal-içi Dittus-Boelter çözümü ya da EKSİK ALAN listesi.
+
+        Döner: ``(cozum | None, eksik_alanlar)``. Bir alan eksikse, sıfır ya
+        da negatifse sayı ÜRETİLMEZ — çağıran ``not_modelled`` beyan eder.
+        """
+        # Geç (lazy) içe aktarma: ``regen_cooling`` bu modülü modül
+        # düzeyinde içe aktarır (``HeatTransferAnalyzer``, ``_guard_gamma_band``);
+        # tepe düzeyinde karşılıklı içe aktarma döngü kurardı.
+        from hrma.analysis.regen_cooling import (
+            canonical_coolant_name, dittus_boelter_envelope, dittus_boelter_nu,
+            hydraulic_diameter_rect, rp1_properties, water_properties,
+        )
+
+        eksik: List[str] = []
+
+        def _pozitif(ad):
+            ham = md.get(ad, None)
+            if ham is None:
+                eksik.append(ad)
+                return None
+            try:
+                deger = float(ham)
+            except (TypeError, ValueError):
+                eksik.append(f'{ad} (not a number: {ham!r})')
+                return None
+            if not math.isfinite(deger) or deger <= 0.0:
+                eksik.append(f'{ad} (must be finite and positive, got {ham!r})')
+                return None
+            return deger
+
+        n_channels = _pozitif('n_channels')
+        width = _pozitif('channel_width')       # m
+        height = _pozitif('channel_height')     # m
+        mdot = _pozitif('coolant_mdot')         # kg/s
+
+        akiskan_ham = md.get('coolant', md.get('coolant_fluid', None))
+        akiskan = (None if akiskan_ham is None
+                   else canonical_coolant_name(akiskan_ham))
+        if akiskan_ham is None:
+            eksik.append('coolant')
+        elif akiskan is None:
+            eksik.append(f'coolant (unrecognised fluid {akiskan_ham!r})')
+        elif akiskan not in COOLANT_SIDE_TABLE_FLUIDS:
+            eksik.append(
+                f'coolant={akiskan!r} is supercritical here; the Dittus-Boelter '
+                'duct correlation is not valid for it. Use '
+                'hrma.analysis.regen_cooling.RegenCooling (Jackson '
+                'supercritical correlation) for methane/hydrogen channels.')
+            akiskan = None
+
+        # Yığın sıcaklığı: soğutucu giriş sıcaklığı (kardeş modülün adı) ya
+        # da çağıranın verdiği ortam/soğutucu giriş sıcaklığı.
+        t_bulk = md.get('coolant_inlet_temp', None)
+        t_bulk_source = 'motor_data["coolant_inlet_temp"]'
+        if t_bulk is None:
+            t_bulk = coolant_bulk_temp
+            t_bulk_source = 'ambient_temp argument (documented as the coolant inlet temperature)'
+        if t_bulk is None:
+            eksik.append('coolant_inlet_temp')
+        else:
+            try:
+                t_bulk = float(t_bulk)
+            except (TypeError, ValueError):
+                eksik.append(f'coolant_inlet_temp (not a number: {t_bulk!r})')
+                t_bulk = None
+            if t_bulk is not None and not (math.isfinite(t_bulk) and t_bulk > 0.0):
+                eksik.append('coolant_inlet_temp (must be finite and positive)')
+                t_bulk = None
+
+        if eksik or None in (n_channels, width, height, mdot, t_bulk) or akiskan is None:
+            return None, eksik
+
+        d_h = hydraulic_diameter_rect(width, height)          # m
+        kanal_alani = width * height                          # m^2
+        mdot_kanal = mdot / n_channels                        # kg/s
+        mass_flux = mdot_kanal / kanal_alani                  # kg/(m^2 s)
+        props = (water_properties(t_bulk) if akiskan == 'water'
+                 else rp1_properties(t_bulk))
+        reynolds = mass_flux * d_h / props['viscosity']
+        prandtl = props['cp'] * props['viscosity'] / props['conductivity']
+        # Soğutucu ISINIYOR (cidardan akışkana ısı) -> n = 0,4.
+        nusselt = dittus_boelter_nu(reynolds, prandtl, heating=True)
+        h_coolant = nusselt * props['conductivity'] / d_h     # W/(m^2 K)
+        zarf = dittus_boelter_envelope(reynolds, prandtl)
+
+        return {
+            'value': float(h_coolant),
+            'method': 'dittus_boelter',
+            'source': ('Dittus-Boelter turbulent duct correlation, Incropera & '
+                       'DeWitt 6th ed. Eq. 8.60 (Nu = 0.023 Re^0.8 Pr^0.4); '
+                       'coolant transport properties from '
+                       'hrma.analysis.regen_cooling tables (water: Incropera '
+                       'Table A.6; RP-1: cited as a Huzel & Huang appendix '
+                       'compilation - NASA SP-125 (1967) has no appendix; its '
+                       'RP-1 properties are Table 1-4 (after p. 21, page '
+                       'number not printed) and Table 6-3, p. 188; table '
+                       'provenance not page-verified)'),
+            'missing_fields': [],
+            'detail': {
+                'coolant': akiskan,
+                'coolant_bulk_temperature_K': t_bulk,
+                'coolant_bulk_temperature_source': t_bulk_source,
+                'hydraulic_diameter_m': d_h,
+                'channel_mass_flux_kg_m2s': mass_flux,
+                'reynolds_number': reynolds,
+                'prandtl_number': prandtl,
+                'nusselt_number': nusselt,
+                'coolant_conductivity_W_mK': props['conductivity'],
+                'coolant_viscosity_Pa_s': props['viscosity'],
+                'coolant_cp_J_kgK': props['cp'],
+                'property_table_clamped': bool(props.get('clamped', False)),
+                'envelope': zarf,
+            },
+        }, []
 
     @staticmethod
     def _mach_from_area_ratio(area_ratio: float, gamma: float,
@@ -777,8 +1609,15 @@ class HeatTransferAnalyzer:
         # verilmiştir ve _resolve_throat_conditions onu kullanır.
         mdot_total = _positive_length(motor_data.get('mdot_total')) or 0.0  # kg/s
 
-        # Get material properties (steel_4130 now resolves directly)
-        mat_props = self.materials.get(material, self.materials['steel'])
+        # --- MALZEME KİMLİĞİ (ÖH Z5S / S4) -------------------------------
+        # Eskiden burada ham sözlük araması vardı ve çözülemeyen her ad
+        # SESSİZCE ``self.materials['steel']``e (A36 jenerik çelik)
+        # düşüyordu. Gerekçe ve ölçüm: ``UnresolvedMaterial`` docstring'i.
+        # Anahtar KANONİKLEŞTİRİLİR; ``design_parameters.material`` artık
+        # hesabın GERÇEKTEN kullandığı adı yazar, isteğin yankısını değil.
+        material_requested = material
+        material = resolve_material_key(material)
+        mat_props = self.materials[material]
 
         # Resolve gas properties + throat conditions (no hardcoding)
         gas = self._get_gas_properties(motor_data, chamber_temperature)
@@ -789,14 +1628,22 @@ class HeatTransferAnalyzer:
         # Calculate heat transfer coefficients (Bartz gas side)
         heat_transfer_coeffs = self._calculate_heat_transfer_coefficients(
             motor_data, mat_props, cooling_type, gas, throat,
-            chamber_pressure, chamber_temperature
+            chamber_pressure, chamber_temperature, ambient_temp=ambient_temp
         )
+
+        # Işıyan tür kesirleri KÖKENİYLE birlikte çözülür (tek tanım
+        # noktası ``resolve_radiation_composition``) — eksenel profille AYNI
+        # okuma (P4B1-03) ve AYNI köken kuralı (P4B1-10 ŞARTı).
+        x_h2o_frac, x_co2_frac, _komp_koken = resolve_radiation_composition(
+            motor_data)
 
         # Gas-side heat transfer (with energy-balance wall temperature)
         gas_side_analysis = self._analyze_gas_side_heat_transfer(
             chamber_pressure, chamber_temperature, chamber_diameter, chamber_length,
             mdot_total, heat_transfer_coeffs, gas, throat, mat_props,
-            wall_thickness, ambient_temp
+            wall_thickness, ambient_temp,
+            x_H2O=x_h2o_frac, x_CO2=x_co2_frac,
+            composition_source=_komp_koken
         )
 
         # F038: toplam ısı yükünü gerçek ıslak yüzey integraliyle değiştir
@@ -824,9 +1671,13 @@ class HeatTransferAnalyzer:
         # gradient of the wall analysis (v2.5.2), not from a hot-face rise.
         wall_gradient = (wall_analysis['inner_temperature']
                          - wall_analysis['outer_temperature'])
+        # ÖH P4B1-15: hazne yarıçapı da geçirilir — basınç argümanı artık
+        # gerçekten tüketilir (çember gerilmesi sigma = p*r/t).
         safety_analysis = self._analyze_thermal_safety(
             wall_analysis['max_temperature'], mat_props, wall_thickness,
-            chamber_pressure, wall_delta_T=wall_gradient
+            chamber_pressure, wall_delta_T=wall_gradient,
+            chamber_radius_m=(chamber_diameter / 2.0
+                              if chamber_diameter else None)
         )
         # Surface energy-balance + wall-clamp warnings.
         safety_analysis['warnings'] = (
@@ -841,6 +1692,17 @@ class HeatTransferAnalyzer:
             'wall_analysis': wall_analysis,
             'cooling_analysis': cooling_analysis,
             'safety_analysis': safety_analysis,
+            # ÖH D37 A2-1 / F-01 (CW-B3): İKİ TERMAL YOL, İKİ SORU — sözleşme
+            # dalga_plani.md A2-1 (faz-c-1 tüketir). Bu zincir yalnız DENGE
+            # yarısını doldurur; FEA yarısı /api/fea/thermal koşunca köprü
+            # AYNI blok şemasıyla doldurur (fea.thermal_paths_reconciliation)
+            # ve gap_K orada ölçülür. Burada FEA alanları None'dır:
+            # koşulmamış bir analizin sayısı UYDURULMAZ (fail-closed).
+            'thermal_paths_reconciliation': thermal_paths_reconciliation(
+                equilibrium_K=wall_analysis['max_temperature'],
+                burn_time_s=burn_time, mat_props=mat_props,
+                cooling_type=cooling_type,
+                coolant_side_h=heat_transfer_coeffs.get('coolant_side')),
             # v2.6.26 — AD CAKISMASI BEYAN EDILIYOR.
             # mat_props['safety_factor'] materials_db'nin bu malzeme icin
             # ONERDIGI tasarim katsayisidir (celik 4,0; inconel 3,0).
@@ -849,8 +1711,34 @@ class HeatTransferAnalyzer:
             # 'girdim yutuldu' diye okuyor. Deger dogru, sunum yaniltici.
             'material_properties': published_material_record(mat_props),
             'design_parameters': {
+                # ÖH Z5S / S4: hesabın GERÇEKTEN kullandığı kanonik anahtar.
+                # Eskiden burada isteğin ham yankısı vardı ve yanıt
+                # ``material: 'peynir'`` yazarken ``material_properties.name``
+                # A36 çeliğini gösteriyordu (tek yanıtta iki malzeme).
                 'material': material,
+                # İstenen ad kanonik anahtardan FARKLIYSA (harf büyüklüğü ya
+                # da takma ad) söylenir; aynıysa alan hiç konmaz, yani
+                # sağlıklı yolun gövdesi bit-aynı kalır.
+                **({'material_requested': material_requested}
+                   if str(material_requested) != material else {}),
                 'wall_thickness': wall_thickness * 1000,  # mm
+                # ÖH Z5S / PK5 (P4B1-18) — KÜNYE ASİMETRİSİ KAPANDI. Aynı
+                # sözlükteki ``ambient_temperature`` alanı, bir GİRDİ YANKISI
+                # olduğunu ve çağıran bir şey vermediğinde modülün kendi
+                # varsayılanında kaldığını anlatan ayrıntılı bir künyeyle
+                # geliyordu; ``wall_thickness`` AYNI yankı sınıfındadır
+                # (imza varsayılanı 5,0 mm) ama künyesi YOKTU. Alan panele
+                # doğrudan bağlı olduğu için (analysis_dock.js) kullanıcı
+                # 5,0 mm'yi kendi girdisi sanıyordu.
+                'wall_thickness_basis': (
+                    'wall thickness INPUT echoed back in millimetres, not a '
+                    'computed or sized thickness: it is the wall_thickness '
+                    'argument of the heat transfer analysis (request field '
+                    '"wall_thickness"). When the caller supplies nothing this '
+                    'module keeps its own default of 5.0 mm, which is why the '
+                    'value can be the same in every run. It sets the '
+                    'through-wall conduction resistance, so the equilibrium '
+                    'wall temperature and every thermal margin scale with it.'),
                 'cooling_type': cooling_type,
                 'ambient_temperature': ambient_temp,
                 # v2.6.26 — SABİT ÇIKTI BEYANI: bu bir GİRDİ YANKISIDIR,
@@ -1100,6 +1988,23 @@ class HeatTransferAnalyzer:
             },
         }
 
+    #: ÖH D28 a2 / P16B3-20 — EKSENEL PROFİL İSTASYON SAYISI BANDI.
+    #:
+    #: Bu iki sayı ``analyze_axial_profile`` gövdesinde ÇIPLAK yazılıydı
+    #: (``int(max(5, min(int(n_stations), 400)))``) ve dışarıdan okunamıyordu.
+    #: ÖLÇÜLDÜ (taban ``7cd08bcc``, ``a2/once.json`` K8): ``POST
+    #: /api/analysis/wall-profile`` gövdesine ``n_stations`` 0, −5 ve 3
+    #: gönderildiğinde ÜÇÜ DE HTTP 200 + 4 866 baytlık BİT-AYNI yanıt
+    #: veriyordu (``wall_profile.n_stations = 5``): alt sınır SESSİZCE
+    #: uygulanıyor, üç ayrı niyet tek sonuca çöküyordu.
+    #:
+    #: Sayılar DEĞİŞMEDİ — yalnız ADLANDIRILDI ki uç kapısı aynı bandı
+    #: KOPYALAMADAN uygulayabilsin (doktrin 4: tek kaynak). Kırpma burada
+    #: kalır (modülü doğrudan çağıran iç tüketiciler için savunma), ama
+    #: HTTP ucu artık bant dışını sessizce kırpmak yerine ADIYLA reddeder.
+    N_STATIONS_MIN = 5
+    N_STATIONS_MAX = 400
+
     def analyze_axial_profile(self, motor_data: Dict, n_stations: int = 40,
                               material: str = 'steel',
                               wall_thickness: float = 0.005,
@@ -1141,13 +2046,19 @@ class HeatTransferAnalyzer:
             ``contour_basis`` ekseni hangi konturdan aldığını ve hangi şekil
             alanının verilmediğini adıyla beyan eder.
         """
-        n_stations = int(max(5, min(int(n_stations), 400)))
+        n_stations = int(max(self.N_STATIONS_MIN,
+                             min(int(n_stations), self.N_STATIONS_MAX)))
 
         chamber_pressure = motor_data.get('chamber_pressure', 20.0) * 1e5  # Pa
         chamber_temperature = motor_data.get('chamber_temperature', 3000)  # K
         mdot_total = motor_data.get('mdot_total', 1.0)  # kg/s
 
-        mat_props = self.materials.get(material, self.materials['steel'])
+        # ÖH Z5S / S4: kardeş yolla AYNI çözümleyici — sessiz A36 yedeği
+        # burada da kalktı (ölçüldü: ``/api/analysis/wall-profile``
+        # ``material='inconel718'`` A36 profili basıyordu).
+        material_requested = material
+        material = resolve_material_key(material)
+        mat_props = self.materials[material]
         gas = self._get_gas_properties(motor_data, chamber_temperature)
         throat = self._resolve_throat_conditions(
             motor_data, chamber_pressure, chamber_temperature, gas, mdot_total
@@ -1192,13 +2103,22 @@ class HeatTransferAnalyzer:
         c_star = throat['c_star']
         rc_over_dt = throat['rc_over_dt']
         emissivity = mat_props.get('emissivity', 0.8)
-        # Işıyan tür kesirleri: kompozisyon verilmişse ondan, yoksa modül
-        # varsayılanı (DEFAULT_X_H2O/DEFAULT_X_CO2 — gerekçe sabitlerde).
-        x_h2o_frac = float(motor_data.get('x_H2O', DEFAULT_X_H2O))
-        x_co2_frac = float(motor_data.get('x_CO2', DEFAULT_X_CO2))
+        # Işıyan tür kesirleri: TEK TANIM NOKTASI
+        # (``resolve_radiation_composition``); ``analyze_heat_transfer`` ile
+        # aynı işlev, ikinci bir okuma kuralı yok. Köken etiketi BU blokta
+        # yayımlanmaz: ``thermal_fea/wall_profile`` bloğunu hiçbir panel
+        # okumuyor ve alanı buraya koymak ters-yön dürüstlük borcunu
+        # büyütürdü (tests/test_wave4b_contract.py::
+        # TestTersYonBorcEnvanteri ile ölçüldü). Künye kardeş blokta
+        # (``gas_side_analysis``) duruyor.
+        x_h2o_frac, x_co2_frac, _ = resolve_radiation_composition(motor_data)
         k_wall = mat_props['thermal_conductivity']
         allowable = mat_props.get('allowable_temperature', 1073)
-        h_coolant = self._coolant_side_coefficient(motor_data, cooling_type)
+        # ÖH D31 / P12bB4-06: soğutucu tarafı künyeli çözülür; boğaz
+        # analiziyle AYNI tek tanım (aynı girdide aynı sayı ve aynı köken).
+        _coolant = self._coolant_side_resolution(
+            motor_data, cooling_type, coolant_bulk_temp=ambient_temp)
+        h_coolant = _coolant['value']
         R_out = wall_thickness / k_wall + 1.0 / h_coolant  # m^2*K/W
 
         mach = np.empty(n_stations)
@@ -1216,10 +2136,10 @@ class HeatTransferAnalyzer:
             Taw = self._adiabatic_wall_temperature(chamber_temperature, gas, M)
             t_recovery[i] = Taw
 
-            # Referans soğutulmuş cidar (modülün tasarım-akısı felsefesi):
-            # malzeme izin sıcaklığı, ama Taw'ın ~%80'inden sıcak değil.
-            Tw_ref = min(allowable, 0.8 * Taw)
-            Tw_ref = max(Tw_ref, ambient_temp)
+            # Referans soğutulmuş cidar — TEK TANIM NOKTASI (P4B1-03);
+            # throat-analizi de aynı işlevi çağırır.
+            Tw_ref = self._design_reference_wall_temperature(
+                allowable, Taw, ambient_temp)
 
             h_i = self._bartz_coefficient(
                 throat_d, chamber_pressure, c_star, gas,
@@ -1231,20 +2151,18 @@ class HeatTransferAnalyzer:
 
             # Radyasyon: Leckner gaz emisivitesi (kara cisim DEĞİL). Yayan
             # gaz yerel STATİK sıcaklık/basınçta; ışın uzunluğu yerel çapla.
-            T_stat = chamber_temperature / (1.0 + 0.5 * (gamma - 1.0) * M * M)
-            p_stat_bar = (chamber_pressure / 1e5) * (
-                1.0 + 0.5 * (gamma - 1.0) * M * M
-            ) ** (-gamma / (gamma - 1.0))
-            beam_local = MEAN_BEAM_LENGTH_FACTOR * (2.0 * r_mm[i] / 1000.0)
+            # Hesabın kendisi ``_design_heat_flux``tadır — throat-analizi de
+            # AYNI işlevi çağırır (P4B1-03 tek tanım noktası).
+            d_local = 2.0 * r_mm[i] / 1000.0
 
             def gas_side_flux(Tw, h_local=None):
-                q_conv = (h_i if h_local is None else h_local) * (Taw - Tw)
-                q_rad = self._gas_radiation_flux(
-                    T_stat, Tw, p_stat_bar, beam_local,
-                    x_H2O=x_h2o_frac, x_CO2=x_co2_frac,
-                    wall_emissivity=emissivity,
-                )
-                return q_conv + max(q_rad, 0.0)
+                return self._design_heat_flux(
+                    h_gas=(h_i if h_local is None else h_local),
+                    taw=Taw, t_wall=Tw,
+                    chamber_temperature=chamber_temperature,
+                    chamber_pressure=chamber_pressure, gamma=gamma,
+                    local_diameter=d_local, emissivity=emissivity,
+                    x_H2O=x_h2o_frac, x_CO2=x_co2_frac, mach_local=M)
 
             # Tasarım akısı: referans soğutulmuş cidarda dondurulmuş h_i ile
             # (panelin ana güvenlik sayısı — davranışı korunur).
@@ -1290,6 +2208,13 @@ class HeatTransferAnalyzer:
         return {
             # İstenen çekirdek şema — tüm diziler eşit uzunlukta
             'x_mm': x_mm.tolist(),
+            # ÖH D15 / termo-ucus (P4B1-08): İSTASYON YARIÇAPI artık
+            # YAYIMLANIR. Tüketiciler (ıslak yüzey integrali, FEA köprüsü)
+            # yarıçapı ``r = r_t*sqrt(area_ratio)`` ile GERİ KURMAK zorunda
+            # kalıyordu; ``area_ratio`` KONTURUN kendi boğazına göre kurulmuş,
+            # ``r_t`` ise ÇÖZÜLEN boğaz (A_t = mdot*c*/Pc) olduğu için iki
+            # boğaz ayrıştığında yarıçaplar ölçekleniyor, eksen ölçeklenmiyordu.
+            'r_mm': r_mm.tolist(),
             'area_ratio': area_ratio.tolist(),      # A(x)/A_t (>= 1)
             'mach': mach.tolist(),
             'h_g': h_g.tolist(),                    # W/(m^2*K)
@@ -1303,7 +2228,22 @@ class HeatTransferAnalyzer:
             'throat_diameter_m': throat_d,
             'nozzle_type': kontur['noz_type'],
             'material': material,
+            **({'material_requested': material_requested}
+               if str(material_requested) != material else {}),
             'cooling_type': cooling_type,
+            # P12bB4-06: eksenel dengeye giren soğutucu-tarafı katsayısı ve
+            # KÖKENİ. Eskiden bu sayı hiç yayımlanmıyordu; tüketici cidar
+            # sıcaklığının hangi soğutma varsayımıyla çıktığını göremiyordu.
+            # ÖH D31 / P12bB4-06: soğutucu-tarafı katsayısı ve KÜNYESİ bu
+            # blokta YAYIMLANMAZ. Gerekçe kardeş ``resolve_radiation_composition``
+            # köken etiketiyle aynı: ``thermal_fea/wall_profile`` bloğunu
+            # hiçbir panel tek tek okumuyor (thermal_fea_panel.js bloğu
+            # /api/fea/thermal gövdesine AYNEN taşıyor), oraya alan koymak
+            # ters-yön dürüstlük borcunu büyütürdü
+            # (tests/test_wave4b_contract.py::TestTersYonSozlesmesi ile
+            # ölçülü sözleşme). Künye, panellerin okuduğu
+            # ``heat_transfer_coefficients`` bloğunda durur; bu eksen aynı
+            # ``_coolant_side_resolution`` tek tanımını okur.
             'wall_thickness_mm': wall_thickness * 1000.0,
             'n_stations': n_stations,
             # Eksenin geometri künyesi. Tüketici (FEA köprüsü) bu profili
@@ -1311,6 +2251,13 @@ class HeatTransferAnalyzer:
             # hangi şekil alanının VERİLMEDİĞİNİ buradan okur; eksen
             # uyuşmazlığı artık sessiz değil, adlı bir bilgidir.
             'contour_basis': kontur['basis'],
+            # ÖH D37 A2-1 termal 7. tur — karar §28-24 §2 (b): h(z)'nin
+            # dayandığı γ / MW / c*'ın KÖKENİ. Modül varsayılanına düşülen
+            # alan ``assumed_fields``te ADIYLA durur; FEA köprüsü bu listeyi
+            # okur ve dolu ise olumlu güvenlik hükmü VERMEZ (jenerik gazla
+            # başarı gösterilmez). Panel bloğu künyede okur (sağır değil).
+            'gas_properties_basis': axial_profile_gas_basis(
+                motor_data, gas, throat),
         }
 
     def _calculate_heat_transfer_coefficients(self, motor_data: Dict,
@@ -1318,13 +2265,21 @@ class HeatTransferAnalyzer:
                                            gas: Optional[Dict] = None,
                                            throat: Optional[Dict] = None,
                                            chamber_pressure: Optional[float] = None,
-                                           chamber_temperature: Optional[float] = None) -> Dict:
+                                           chamber_temperature: Optional[float] = None,
+                                           ambient_temp: float = 293.15) -> Dict:
         """
         Calculate heat transfer coefficients.
 
         Gas side now uses the Bartz throat correlation (physically correct for
         rocket nozzles) instead of the Dittus-Boelter pipe-flow correlation,
         which under-predicted h_g by ~4-15x in the unsafe direction.
+
+        ÖH Z5S / PK5 (P4B1-03): gaz-yanı katsayı artık TASARIM AKISININ
+        referans cidar sıcaklığında (``_design_reference_wall_temperature``)
+        kurulur. Eskiden burada ayrı bir ``wall_guess = min(0,5·Tc,
+        max_service·0,8)`` vardı ve eksenel profil aynı boğaz için farklı bir
+        h_g yayımlıyordu (ölçülen sapma %10,26). İki kanal artık aynı tek
+        tanımı okuyor.
         """
         # Backward-compatible resolution if called without the new args.
         if chamber_pressure is None:
@@ -1340,12 +2295,17 @@ class HeatTransferAnalyzer:
             )
 
         # --- Gas-side: Bartz at the throat (M=1, A_t/A=1) ---
-        # Use an estimated cooled-wall temperature for the first sigma estimate;
-        # the gas-side analysis later refines wall temperature via energy balance.
-        wall_guess = min(0.5 * chamber_temperature, mat_props.get('max_service_temperature', 2000) * 0.8)
+        # Referans SOĞUTULMUŞ cidar sıcaklığı: tasarım akısıyla AYNI tek
+        # tanım (P4B1-03). Denge cidarı aşağıdaki yüzey enerji dengesinde
+        # ayrıca çözülür ve h_g orada cidara bağlı olarak yeniden kurulur.
+        taw_throat = self._adiabatic_wall_temperature(
+            chamber_temperature, gas, mach_local=1.0)
+        wall_reference = self._design_reference_wall_temperature(
+            mat_props.get('allowable_temperature', 1073), taw_throat,
+            ambient_temp)
         h_gas = self._bartz_coefficient(
             throat['throat_diameter'], chamber_pressure, throat['c_star'],
-            gas, chamber_temperature, wall_guess, throat['rc_over_dt'],
+            gas, chamber_temperature, wall_reference, throat['rc_over_dt'],
             area_ratio_local=1.0, mach_local=1.0
         )
 
@@ -1366,30 +2326,65 @@ class HeatTransferAnalyzer:
         prandtl = gas['prandtl']
         nusselt = h_gas * throat_d / gas['gas_conductivity']
 
-        # --- Coolant side ---
-        h_coolant = self._coolant_side_coefficient(motor_data, cooling_type)
+        # --- Coolant side --- (ÖH D31 / P12bB4-06: KÖKEN KÜNYELİ)
+        # ``ambient_temp`` bu API'de soğutucu GİRİŞ sıcaklığı olarak
+        # belgelidir (bkz. ``analyze_heat_transfer`` docstring'i); korelasyon
+        # yolu yığın özelliklerini o sıcaklıkta okur.
+        coolant = self._coolant_side_resolution(
+            motor_data, cooling_type, coolant_bulk_temp=ambient_temp)
+        h_coolant = coolant['value']
 
         return {
             'gas_side': h_gas,
             'coolant_side': h_coolant,
+            # P12bB4-06: h_coolant'ın NASIL kurulduğu ARTIK yayımlanıyor.
+            # 'dittus_boelter' = kanal girdileriyle HESAPLANDI;
+            # 'not_modelled'   = beyan edilen tipik bant (hesap değil),
+            #                    eksik alanlar ``coolant_side_missing_fields``te;
+            # 'user_supplied'  = çağıranın verdiği sayı.
+            'coolant_side_method': coolant['method'],
+            'coolant_side_source': coolant['source'],
+            **({'coolant_side_missing_fields': coolant['missing_fields']}
+               if coolant['missing_fields'] else {}),
+            **({'coolant_side_detail': coolant['detail']}
+               if coolant['detail'] else {}),
+            # Korelasyon zarfı İHLAL edildiyse (Re < 1e4 gibi) bunu gömme:
+            # üst düzeyde adıyla yayımla — kardeş ``regen_cooling`` de aynı
+            # ihlali uyarı olarak yayımlar (asimetrik hüküm kurulmaz).
+            **({'coolant_side_envelope_violations':
+                coolant['detail']['envelope']['violations']}
+               if coolant['detail'].get('envelope', {}).get('violations')
+               else {}),
             'reynolds_number': reynolds,
             'prandtl_number': prandtl,
             'nusselt_number': nusselt,
             # extra diagnostics (additive, do not break existing consumers)
-            'correlation': 'Bartz (Sutton & Biblarz 9th ed. Eq. 8-22)',
+            'correlation': ('Bartz (Bartz 1965 Eqs. 48-50, closed form of '
+                            'Eq. 50; Sutton & Biblarz 9th ed. Eq. 8-22 is the '
+                            'equivalent property-ratio form)'),
+            # ÖH KU (KC-13 beyanı, sayı değişmez): gaz tarafı modelinin
+            # modellemediği iki etki ve yönleri.
+            'gas_side_model_limits': GAS_SIDE_MODEL_LIMITS_BASIS,
             'c_star': throat['c_star'],
             'throat_diameter': throat['throat_diameter'],
             'gas_viscosity': gas['gas_viscosity'],
             'gas_conductivity': gas['gas_conductivity'],
             'gas_cp': gas['gas_cp'],
             'gamma': gas['gamma'],
+            # P4B1-03: h_g'nin hangi cidar sıcaklığında kurulduğu ARTIK
+            # yayımlanıyor; eksenel profil aynı sayıyı okur.
+            'gas_side_reference_wall_temperature': wall_reference,
         }
 
     def _analyze_gas_side_heat_transfer(self, pressure: float, temperature: float,
                                       diameter: float, length: float, mdot: float,
                                       coeffs: Dict, gas: Dict, throat: Dict,
                                       mat_props: Dict, wall_thickness: float,
-                                      ambient_temp: float) -> Dict:
+                                      ambient_temp: float,
+                                      x_H2O: Optional[float] = None,
+                                      x_CO2: Optional[float] = None,
+                                      composition_source: Optional[str] = None
+                                      ) -> Dict:
         """
         Analyze gas-side heat transfer.
 
@@ -1421,34 +2416,65 @@ class HeatTransferAnalyzer:
         h_coolant = coeffs['coolant_side']
         k_wall = mat_props['thermal_conductivity']
         emissivity = mat_props.get('emissivity', 0.8)
-        max_service = mat_props.get('max_service_temperature', 2000)
-        allowable = mat_props.get('allowable_temperature', 1073)
-        melting_point = float(mat_props.get('melting_point', max_service))
+        # ÖH D37 A2-1 / F-01 + M2 — EŞİK MERDİVENİ TEK FONKSİYONDAN.
+        # Eski üç satır üç alanı ayrı ayrı okuyordu (max_service_temperature
+        # klampı, allowable_temperature, melting_point); uyarı eşiği
+        # steel_4130'da 1000 K (allowable) iken termal FEA ve ısı-yutucu
+        # 811 K (max_service_temp) diyordu — aynı motor, dört sayı
+        # (docs/tasarim/malzeme-tarama/A1_mevcut_durum.md §1.4). Uyarı
+        # eşiği artık merdivenin İZİN basamağı (allowable_K = min(allowable,
+        # max_service_temp)); kritik eşik min(clamp_K, melting_K) ile
+        # BİT-AYNI kalır (klamp 20/24 kayıtta erimeye eşit, P9B4-14).
+        _limits = temperature_limits(mat_props)
+        max_service = (_limits['clamp_K'] if _limits['clamp_K'] is not None
+                       else 2000.0)
+        allowable = (_limits['allowable_K'] if _limits['allowable_K']
+                     is not None else 1073.0)
+        melting_point = float(_limits['melting_K']
+                              if _limits['melting_K'] is not None
+                              else max_service)
 
         # Adiabatic wall (recovery) temperature at the throat (M=1).
         Taw = self._adiabatic_wall_temperature(temperature, gas, mach_local=1.0)
 
         # --- (A) DESIGN HEAT FLUX at a conservative reference cooled wall ---
-        # Reference wall temperature: the material allowable temperature, but not
-        # warmer than ~80% of Taw (a well-cooled wall is always below Taw). This
-        # guarantees a non-zero, conservative thermal load even if the modelled
-        # cooling is weak. Lower reference wall => higher (more conservative) q.
-        Tw_ref = min(allowable, 0.8 * Taw)
-        Tw_ref = max(Tw_ref, ambient_temp)
+        # Referans cidar sıcaklığı TEK TANIM NOKTASINDAN gelir (P4B1-03);
+        # eksenel profil de aynı işlevi çağırır.
+        # F-01/M2 KAPSAM NOTU: Tw_ref bir SINIR DENETİMİ değil, tasarım
+        # akısının hesaplandığı referans soğutulmuş cidar sözleşmesidir
+        # (``allowable_temperature`` kaydı; eksenel profil aynı alanı okur).
+        # Merdivene bağlansaydı her motorun h_g/q_MW'si kayardı (P7B3-30
+        # ölçümü: malzemeye göre 4,125 kat) — kilit olcut_kulvar.json K5.
+        Tw_ref = self._design_reference_wall_temperature(
+            mat_props.get('allowable_temperature', 1073), Taw, ambient_temp)
 
-        # Radyasyon: Leckner gaz emisivitesi (kara cisim DEĞİL). Muhafazakâr
-        # tasarım yükü felsefesine uygun olarak hazne koşulları kullanılır
-        # (T_g = Taw ~ T_c, p = P_c, L = 0.9*D_hazne); nozulda statik T/p
-        # düşer, yani bu seçim güvenli taraftadır.
-        p_total_bar = pressure / 1e5
-        beam_length = MEAN_BEAM_LENGTH_FACTOR * diameter
+        # Radyasyon: Leckner gaz emisivitesi (kara cisim DEĞİL), YEREL statik
+        # durumda ve yerel çapla (``_design_heat_flux``). ÖH Z5S / PK5
+        # (P4B1-03): eskiden bu bacak hazne durgunluk koşullarını ve hazne
+        # çapını kullanıyordu (T_g = Taw, p = P_c, L = 0,9·D_hazne), eksenel
+        # profil ise boğazda yerel statik durumu — aynı boğazın akısı bu
+        # yüzden iki değerle yayımlanıyordu. Işıma yapan gaz, o istasyondaki
+        # gazdır; alanın adı da "throat_heat_flux"tır.
+        # P4B1-10 ŞARTı: ``None`` = "verilmedi" (modül varsayılanı), bir
+        # sayı = "çağıran verdi" — DEĞERİ varsayılana eşit olsa bile. Köken
+        # etiketi çağıran katmandan geçirilmişse o kullanılır (motor_data'da
+        # anahtarın varlığını YALNIZ orası bilir); geçirilmemişse bu
+        # işlevin kendi argümanlarının varlığından kurulur.
+        x_h2o_frac = DEFAULT_X_H2O if x_H2O is None else float(x_H2O)
+        x_co2_frac = DEFAULT_X_CO2 if x_CO2 is None else float(x_CO2)
+        if composition_source is None:
+            composition_source = radiation_composition_source(
+                x_H2O is not None, x_CO2 is not None)
 
-        def gas_side_flux(Tw, h):
-            q_conv = h * (Taw - Tw)
-            q_rad = self._gas_radiation_flux(
-                Taw, Tw, p_total_bar, beam_length, wall_emissivity=emissivity
-            )
-            return q_conv + max(q_rad, 0.0)
+        def gas_side_flux(Tw, h, *, mach_local=1.0, local_diameter=None):
+            return self._design_heat_flux(
+                h_gas=h, taw=Taw, t_wall=Tw,
+                chamber_temperature=temperature, chamber_pressure=pressure,
+                gamma=gas['gamma'],
+                local_diameter=(throat['throat_diameter']
+                                if local_diameter is None else local_diameter),
+                emissivity=emissivity, x_H2O=x_h2o_frac, x_CO2=x_co2_frac,
+                mach_local=mach_local)
 
         throat_heat_flux = gas_side_flux(Tw_ref, h_gas)  # W/m^2 (real design load)
 
@@ -1503,6 +2529,16 @@ class HeatTransferAnalyzer:
         # 'warning' seviyesinde raporlanıyordu — güvensiz yön. Kritik eşik
         # artık min(max_service_temperature, melting_point) ile kurulur ve
         # erime ayrı, daha sert bir kodla bildirilir.
+        # F-01/M2: hükmün dayandığı merdiven, yanıtta ADIYLA durur.
+        threshold_ladder = {
+            'allowable_K': float(allowable),
+            'service_K': _limits['service_K'],
+            'melting_K': float(melting_point),
+            'critical_K': float(min(float(max_service), melting_point)),
+            'source': _limits['basis'],
+            # V3 KK (§28-31): hükmü veren aday ADIYLA (tek kaynak).
+            **allowable_governance(_limits),
+        }
         critical_limit = min(float(max_service), melting_point)
         wall_unphysical = False
         mat_name = material_name(mat_props, self.materials)
@@ -1546,7 +2582,11 @@ class HeatTransferAnalyzer:
             temperature, Tw_ref, throat['rc_over_dt'],
             area_ratio_local=area_ratio_chamber, mach_local=0.2
         )
-        chamber_heat_flux = gas_side_flux(Tw_ref, h_chamber)  # W/m^2 (design load)
+        # Hazne bacağı KENDİ yerel durumunda (M~0,2) ve KENDİ çapıyla
+        # (silindirik gövde) — aynı tek tanım, farklı istasyon (P4B1-03).
+        chamber_heat_flux = gas_side_flux(
+            Tw_ref, h_chamber, mach_local=0.2,
+            local_diameter=diameter)  # W/m^2 (design load)
 
         # Total heat rate: chamber flux over barrel area + throat flux over throat.
         # NOT (F038): bu ifade konverjan + diverjan nozul ıslak yüzeyini
@@ -1567,9 +2607,30 @@ class HeatTransferAnalyzer:
             'gas_temperature': temperature,          # K (stagnation/chamber)
             'adiabatic_wall_temperature': Taw,       # K (recovery temperature)
             'reference_wall_temperature': Tw_ref,    # K (cooled wall for design flux)
+            # ÖH Z5S / PK5 (P4B1-20, radyasyon ayağı): kaynaktan BİLİNÇLİ
+            # sapmalar ve mühendislik kelepçeleri kod yorumlarında yazılıydı
+            # ama ÇIKTIDA hiç beyan edilmiyordu. Radyasyon terimi tasarım
+            # akısının içine giriyor, yani kullanıcının gördüğü sayının bir
+            # parçası; künyesi de onunla birlikte yayımlanır.
+            'radiation_model_basis': RADIATION_MODEL_BASIS,
+            # ÖH D15 / termo-ucus (P4B1-10 kalıntısı): ışıyan tür mol
+            # kesirleri ARTIK YANITTA. Kalemin ana iddiası ("x_H2O/x_CO2 bu
+            # yolda SESSİZCE düşüyor, üç kompozisyonda akı bit-bit aynı")
+            # ölçümle ÇÜRÜTÜLDÜ — üç kompozisyon üç ayrı akı veriyor
+            # (35,5089 / 35,7942 / 35,2639 MW/m2). Ayakta kalan kusur
+            # beyandı: kompozisyon verilmediğinde kullanılan modül
+            # varsayılanları (DEFAULT_X_H2O / DEFAULT_X_CO2) yanıtta hiç
+            # görünmüyordu, yani kullanıcı hangi gazın ışıdığını okuyamıyordu.
+            'radiation_x_H2O': float(x_h2o_frac),
+            'radiation_x_CO2': float(x_co2_frac),
+            # ÖH D17 (P4B1-10 ŞARTı): etiket KÖKENDEN kurulur, değer
+            # eşitliğinden DEĞİL — bkz. ``radiation_composition_source``.
+            'radiation_composition_source': composition_source,
             'estimated_wall_temperature': T_wall,    # K (equilibrium, given cooling)
             'gas_side_coefficient': h_gas,           # W/m^2/K
             'wall_temperature_unphysical': wall_unphysical,
+            # F-01/M2: uyarı/kritik hükmünün dayandığı eşik merdiveni.
+            'threshold_ladder': threshold_ladder,
             'warnings': warnings_list,
         }
 
@@ -1636,13 +2697,38 @@ class HeatTransferAnalyzer:
                 wall_thickness=wall_thickness, ambient_temp=ambient_temp,
                 cooling_type=cooling_type
             )
-            r_throat = 0.5 * float(profile['throat_diameter_m'])       # m
             x = np.asarray(profile['x_mm'], dtype=float) / 1000.0      # m
-            r = r_throat * np.sqrt(np.asarray(profile['area_ratio'],
-                                              dtype=float))            # m
+            # --- YARIÇAPLAR KONTURDAN OKUNUR (ÖH D15, P4B1-08) -----------
+            # ÖLÇÜLEN KUSUR: burada yarıçap ``r = (D_t_çözülen/2) *
+            # sqrt(area_ratio)`` ile GERİ KURULUYORDU. ``area_ratio``
+            # KONTURUN kendi boğaz yarıçapına göre tanımlıdır; ``D_t_çözülen``
+            # ise A_t = mdot*c*/Pc'den gelir. İki boğaz ayrıştığında bütün
+            # yarıçaplar ölçekleniyor ama EKSEN (x) ölçeklenmiyordu — yani
+            # integral, geometrik olarak var olmayan bir yüzeyde alınıyordu.
+            #
+            # ÖLÇÜLDÜ (kontur boğaz yarıçapı 30,000 mm, çözülen 26,650 mm,
+            # ölçek 0,8883): ıslak lüle alanı modülün kurduğu 0,100876 m2
+            # <-> konturun kendisi 0,114891 m2 -> %12,20 EKSİK. Eksik ıslak
+            # alan eksik toplam yük, eksik soğutucu debisi ve eksik ısı
+            # yutucu kütlesi demektir (GÜVENSİZ yön).
+            #
+            # Profil artık istasyon yarıçaplarını ``r_mm`` ile YAYIMLIYOR;
+            # integral o tek geometri kaynağını okur. Alan başka bir yerde
+            # yeniden türetilmez.
+            r_pub = profile.get('r_mm')
+            if r_pub is None:
+                raise ValueError(
+                    "eksenel profil istasyon yarıçaplarını (r_mm) "
+                    "yayımlamıyor — ıslak yüzey integrali alanı yeniden "
+                    "türetmez")
+            r = np.asarray(r_pub, dtype=float) / 1000.0                # m
             q = np.asarray(profile['q_MW'], dtype=float) * 1e6         # W/m^2
             if x.size < 2:
                 raise ValueError("kontur en az 2 istasyon gerektirir")
+            if r.size != x.size:
+                raise ValueError(
+                    "eksen ve yarıçap dizileri aynı uzunlukta olmalı "
+                    f"(x={x.size}, r={r.size})")
 
             # Yamuk kuralı: eğik (slant) uzunluk ds ve ortalama yarıçap.
             ds = np.hypot(np.diff(x), np.diff(r))
@@ -1777,14 +2863,11 @@ class HeatTransferAnalyzer:
             'warnings': warnings_list
         }
 
-    # Soğutucu tarafı tasarım sıcaklık farkları [K] — mühendislik kabulü,
-    # literatür formülü DEĞİL (dürüstlük notu: bunlar boyutlandırma
-    # kabulüdür; her biri A = Q/(h*dT) ifadesinde dT olarak kullanılır).
-    _COOLING_DESIGN_DELTA_T = {
-        'natural': 50.0,        # K (doğal taşınımda cidar-hava farkı)
-        'forced': 100.0,        # K (zorlanmış hava)
-        'regenerative': 100.0,  # K (cidar-soğutucu film farkı)
-    }
+    # Soğutucu tarafı tasarım sıcaklık farkları [K] — TEK TANIM NOKTASI
+    # modül düzeyindeki ``COOLING_DESIGN_DELTA_T``tır (ÖH Z5S / PK5,
+    # P4B1-06). Sınıf niteliği ESKİ ADIN takma adı olarak korunur; iki
+    # kopya değil, aynı sözlüktür.
+    _COOLING_DESIGN_DELTA_T = COOLING_DESIGN_DELTA_T
     # Isı yutucu (heat-sink) tasarım sıcaklık artışı [K] — YALNIZ malzeme
     # kaydında sıcaklık sınırı bulunamazsa kullanılan yedek. v2.6.26'ya kadar
     # bu değer her malzeme ve her ortam sıcaklığı için SABİTTİ; oysa
@@ -1811,13 +2894,13 @@ class HeatTransferAnalyzer:
         """
         limits = []
         if mat_props:
-            for key in ('max_service_temp', 'allowable_temperature'):
-                try:
-                    value = float(mat_props.get(key) or 0.0)
-                except (TypeError, ValueError):
-                    continue
-                if value > 0.0:
-                    limits.append((value, key))
+            # F-01/M2: merdivenin izin basamağı = min(max_service_temp,
+            # allowable_temperature) — eskiden burada satır içi min alınıyordu;
+            # sayı BİT-AYNI, kaynak artık tek fonksiyon.
+            _tl = temperature_limits(mat_props)
+            if _tl['allowable_K'] is not None:
+                limits.append((float(_tl['allowable_K']),
+                               _tl['source_fields']['allowable_K']))
         t_start = float(ambient_temp) if ambient_temp else 293.15
         if not limits:
             return (self._HEAT_SINK_DELTA_T, float('nan'),
@@ -1845,13 +2928,14 @@ class HeatTransferAnalyzer:
         (1) YANLIŞ KATSAYI: rejeneratif dal gereken soğutma alanını
             A = Q/(2000*100) ile hesaplıyordu. 2000 W/m^2/K değeri eski
             sürümden kalmıştı; modülün MERKEZİ soğutucu-tarafı kaynağı
-            _coolant_side_coefficient rejeneratif için 20000 W/m^2/K
-            döndürür (Huzel & Huang Böl. 4: sıvı rejeneratif 1e4-5e4
-            W/m^2/K) ve kendi docstring'i 2000'in "bir mertebe düşük"
-            olduğunu zaten söylüyordu. Sonuç: kullanıcıya gösterilen
-            "gereken soğutma alanı" tam 10x FAZLA raporlanıyordu.
+            _coolant_side_coefficient ile çözülür. Sonuç: kullanıcıya
+            gösterilen "gereken soğutma alanı" tam 10x FAZLA raporlanıyordu.
             Artık üç dal da h'yi _coolant_side_coefficient'ten alır —
-            tek kaynak kuralı (natural 25 / forced 100 / regen 20000).
+            tek kaynak kuralı. ÖH D31 / P12bB4-06: o işlev artık kanal
+            girdileri verildiğinde Dittus-Boelter ile HESAPLIYOR, girdiler
+            yoksa COOLANT_SIDE_DECLARED_TYPICAL bandını 'not_modelled'
+            künyesiyle döndürüyor; bu blok h'nin kökenini
+            coolant_side_coefficient_method alanıyla yayımlar.
 
         (2) MALZEMEDEN BAĞIMSIZ cp: ısı yutucu kütlesi
             m = E/(460*200) ile, yani SEÇİLEN MALZEME ne olursa olsun
@@ -1872,21 +2956,79 @@ class HeatTransferAnalyzer:
         total_heat_energy = heat_rate * burn_time  # J
 
         # Cooling capacity requirements — h TEK merkezi kaynaktan.
-        h_cool = self._coolant_side_coefficient(motor_data, cooling_type)
-        delta_t = self._COOLING_DESIGN_DELTA_T.get(cooling_type)
-        if delta_t is None or h_cool <= 0.0:
-            required_surface_area = 0.0
+        _cool_res = self._coolant_side_resolution(
+            motor_data, cooling_type, coolant_bulk_temp=ambient_temp)
+        h_cool = _cool_res['value']
+        delta_t = COOLING_DESIGN_DELTA_T.get(cooling_type)
+        # ÖH Z5S / PK5 (P4B1-06) — FAIL-CLOSED: tanınmayan soğutma tipinde
+        # gerekli soğutma alanı HESAPLANAMAZ. Eskiden burada 0,0 m²
+        # yayımlanıyordu ve panel "0,00 m²" stat kartını çiziyordu; 3370 kW
+        # yükte "gereken soğutma alanı sıfır" cümlesi, hesabın yapılmadığı
+        # bilgisini "hiç soğutma gerekmiyor" hükmüne çeviriyordu. Sıfır bir
+        # ÖLÇÜM DEĞİLDİR: alan yayımlanmaz, yerine ADIYLA gerekçe konur.
+        cooling_type_recognized = delta_t is not None
+        cooling_area_withheld_because = None
+        if not cooling_type_recognized or h_cool <= 0.0:
+            required_surface_area = None
+            cooling_area_withheld_because = (
+                "The required cooling area is A = Q / (h * dT_design). This "
+                f"model has no design temperature difference for "
+                f"cooling_type={cooling_type!r}; supported types are "
+                + ', '.join(SUPPORTED_COOLING_TYPES)
+                + ". No area is published, because zero area would read as "
+                  "'no cooling needed'.")
         else:
             required_surface_area = heat_rate / (h_cool * delta_t)  # m^2
 
+        # --- SOĞUTUCU DEBİSİ (ÖH D15: P4B1-04 + P4B1-05) -----------------
+        #
+        # ESKİ KOD (ölçüldü, 60 bar / 3400 K / Q = 2121,6 kW):
+        #     forced:       mdot = Q / (1000 * 20)   -> 106,08 kg/s
+        #     regenerative: mdot = Q / (4180 * 50)   -> 10,15 kg/s
+        # İki kusur birlikte:
+        #   (P4B1-04) Aynı yanıtta İKİ tasarım ΔT'si vardı: yayımlanan
+        #     ``design_delta_T_K`` = COOLING_DESIGN_DELTA_T[tip] = 100 K
+        #     iken debi 20 K (zorlanmış) / 50 K (rejeneratif) ile
+        #     hesaplanıyordu. ``required_cooling_area`` GERÇEKTEN 100 K ile
+        #     hesaplandığı için alan 2×/5× küçük (GÜVENSİZ yön), debi ise
+        #     2×/5× büyük çıkıyordu. ΔT artık TEK KAYNAKTAN okunur.
+        #   (P4B1-05) cp gömülüydü ve rejeneratif dalda SUYUN cp'siydi
+        #     (4180 J/kg/K). Rejeneratif soğutucu motorun kendi propelanıdır
+        #     (RP-1 ~2000, LH2 ~14300); su varsayımı ölçülen vakada debiyi
+        #     propelan debisinin %127'sine çıkarıyor, üstelik yanıtta ne
+        #     akışkan adı ne cp ne de künye alanı bulunuyordu (aynı sözlükte
+        #     heat_sink_* kardeşlerinin ÜÇÜ de künyeliyken).
+        #
+        # FAIL-CLOSED: cp bilinmiyorsa debi YAYIMLANMAZ; hangi alanın
+        # eksik olduğu adıyla söylenir. Sıfır bir ölçüm değildir.
+        coolant_cp, coolant_cp_source, coolant_fluid = \
+            self._coolant_specific_heat(motor_data, cooling_type)
+        coolant_flow_withheld_because = None
         if cooling_type == 'natural':
-            coolant_flow_rate = 0  # No active cooling
-        elif cooling_type == 'forced':
-            coolant_flow_rate = heat_rate / (1000 * 20)  # kg/s (air, cp~1000, 20K)
-        elif cooling_type == 'regenerative':
-            coolant_flow_rate = heat_rate / (4180 * 50)  # kg/s (water, 50K rise)
+            # Doğal taşınımda dolaşan bir soğutucu YOKTUR: sıfır burada bir
+            # ölçümdür, eksik hesabın yerini tutan bir sayı değil.
+            coolant_flow_rate = 0.0
+        elif not cooling_type_recognized:
+            coolant_flow_rate = None
+            coolant_flow_withheld_because = (
+                "The coolant mass flow is mdot = Q / (cp * dT_design). This "
+                f"model has no design temperature difference for "
+                f"cooling_type={cooling_type!r}; supported types are "
+                + ', '.join(SUPPORTED_COOLING_TYPES) + '.')
+        elif coolant_cp is None:
+            coolant_flow_rate = None
+            coolant_flow_withheld_because = (
+                "The coolant mass flow is mdot = Q / (cp * dT_design) and "
+                "this model does not know the coolant's specific heat for "
+                f"cooling_type={cooling_type!r}: in regenerative cooling the "
+                "coolant is the ENGINE'S OWN PROPELLANT (RP-1 ~2000, LH2 "
+                "~14300, methane ~3500 J/kg/K), which this analyzer is not "
+                "given. Earlier versions assumed WATER (4180 J/kg/K) here "
+                "and published a flow rate larger than the propellant flow "
+                f"itself. Supply {COOLANT_CP_INPUT_FIELD!r} [J/kg/K] to get "
+                "the number; nothing is substituted.")
         else:
-            coolant_flow_rate = 0
+            coolant_flow_rate = heat_rate / (coolant_cp * delta_t)  # kg/s
 
         # Heat sink analysis (for passive cooling) — SEÇİLEN malzemenin cp'si.
         cp_wall = 460.0  # J/kg/K (çelik yedeği; mat_props verilmezse)
@@ -1913,7 +3055,23 @@ class HeatTransferAnalyzer:
             'heat_sink_mass': heat_sink_mass,  # kg
             # Teşhis (additive): boyutlandırmada kullanılan kabuller açıkta.
             'coolant_side_coefficient': h_cool,           # W/m^2/K
+            # P12bB4-06: gereken soğutma alanı bu h ile bölünüyor; h'nin
+            # hesap mı yoksa beyan edilen bant mı olduğu artık okunabilir.
+            'coolant_side_coefficient_method': _cool_res['method'],
+            'coolant_side_coefficient_source': _cool_res['source'],
             'design_delta_T_K': delta_t,                  # K (mühendislik kabulü)
+            # ÖH D15 (P4B1-04): debinin KULLANDIĞI ΔT ile yayımlanan ΔT
+            # aynı sayıdır — yankı, ikinci bir kabul değil. Alan adı
+            # ayrıdır ki tüketici "hangi ΔT ile bölündü?" sorusunu
+            # ters çözüm yapmadan sorabilsin.
+            'coolant_delta_T_K': delta_t,                 # K
+            # ÖH D15 (P4B1-05): soğutucunun kimliği ve cp'si künyeli.
+            'coolant_fluid': coolant_fluid,
+            'coolant_specific_heat_J_kgK': coolant_cp,    # J/kg/K
+            'coolant_specific_heat_source': coolant_cp_source,
+            **({'coolant_flow_rate_withheld_because':
+                coolant_flow_withheld_because}
+               if coolant_flow_withheld_because else {}),
             'heat_sink_specific_heat_J_kgK': cp_wall,     # J/kg/K
             'heat_sink_specific_heat_source': cp_source,
             'heat_sink_delta_T_K': heat_sink_delta_t,
@@ -1929,14 +3087,87 @@ class HeatTransferAnalyzer:
                 'heat_sink_delta_T_K (limit minus initial); the module '
                 'default 293.15 K applies when the caller supplies no '
                 'ambient temperature.'),
+            # ÖH Z5S / PK5 (P4B1-06): tipin TANINIP tanınmadığı adıyla söylenir;
+            # yankı alanı (design_parameters.cooling_type) kullanıcının dizesini
+            # geri okuduğu için "seçtiğim tip hesaba girdi" yanılsaması bu
+            # bayrak olmadan kırılamıyordu.
+            'cooling_type_recognized': cooling_type_recognized,
+            'supported_cooling_types': list(SUPPORTED_COOLING_TYPES),
+            **({'required_cooling_area_withheld_because':
+                cooling_area_withheld_because}
+               if cooling_area_withheld_because else {}),
             'cooling_efficiency': self._calculate_cooling_efficiency(cooling_type),
+            # ÖH Z5S / PK5 (P4B1-20): künye asimetrisi kapandı. Aynı sözlükteki
+            # üç kardeş alan (heat_sink_delta_T_basis,
+            # heat_sink_initial_temperature_basis,
+            # heat_sink_specific_heat_source) künye taşırken bu alanın eşi
+            # yoktu; arayüz ise TEK sayıyı "Cooling Effectiveness" olarak
+            # çiziyordu. Değerin ne olduğu (ve NE OLMADIĞI) artık yazılı.
+            'cooling_efficiency_basis': self._cooling_efficiency_basis(
+                cooling_type),
+            'cooling_efficiency_source': COOLING_EFFICIENCY_SOURCE,
             'recommendations': self._get_cooling_recommendations(cooling_type, heat_rate)
         }
 
+    @staticmethod
+    def _coolant_specific_heat(motor_data: Optional[Dict],
+                               cooling_type: str
+                               ) -> Tuple[Optional[float], Optional[str],
+                                          Optional[str]]:
+        """Soğutucunun cp'si [J/kg/K], kaynak künyesi ve akışkan adı.
+
+        Sıra: (1) çağıranın açıkça verdiği ``coolant_specific_heat_J_kgK``,
+        (2) akışkan kimliği MODELCE bilinen soğutma tipleri
+        (``COOLANT_SPECIFIC_HEAT_J_KGK``; bugün yalnız zorlanmış hava).
+        Hiçbiri yoksa ``(None, None, None)`` — çağıran fail-closed davranır.
+
+        Rejeneratif dalda kayıt YOKTUR: soğutucu motorun propelanıdır ve bu
+        modül propelan kimliğini almaz. Bir sayı uydurmak (v2.6.26'ya kadar
+        SUYUN 4180 J/kg/K'si) debiyi doğrudan ölçekler.
+        """
+        md = motor_data or {}
+        ham = md.get(COOLANT_CP_INPUT_FIELD)
+        if ham not in (None, ''):
+            try:
+                deger = float(ham)
+            except (TypeError, ValueError):
+                deger = None
+            if deger is not None and np.isfinite(deger) and deger > 0.0:
+                ad = md.get('coolant_fluid') or md.get('fuel_type')
+                return (deger, 'caller_supplied',
+                        str(ad) if ad else 'caller_supplied_coolant')
+        cp = COOLANT_SPECIFIC_HEAT_J_KGK.get(cooling_type)
+        if cp is not None:
+            return (float(cp), COOLANT_SPECIFIC_HEAT_SOURCE.get(cooling_type),
+                    'air' if cooling_type == 'forced' else cooling_type)
+        if cooling_type == 'natural':
+            return (None, None, 'ambient air (no circulated coolant)')
+        return (None, None, None)
+
     def _analyze_thermal_safety(self, max_temp: float, mat_props: Dict,
                               thickness: float, pressure: float,
-                              wall_delta_T: Optional[float] = None) -> Dict:
+                              wall_delta_T: Optional[float] = None,
+                              chamber_radius_m: Optional[float] = None
+                              ) -> Dict:
         """Analyze thermal safety margins.
+
+        ÖH ONARIMI (defter P4B1-15) — ``pressure`` ARTIK TÜKETİLİYOR.
+        Ölçüldü (2026-08-27, ``ast``): çağıran hazne basıncını dördüncü
+        konumlu argüman olarak geçiriyor, imza onu ``pressure`` adıyla
+        alıyor, gövde ise adı bir kez bile OKUMUYORDU — buna rağmen
+        yayımlanan alanın adı ``stress_safety_factor`` idi, yani AYNI
+        cidarın taşıdığı çember (basınç) gerilmesi hiç girmeden "gerilme
+        emniyet katsayısı" deniyordu. Makas basınçla açılıyordu (steel_4130,
+        5 mm cidar, D=100 mm): Pc 20 bar'da %1,1 → 500 bar'da %15,5 →
+        2000 bar'da %59,7 İYİMSER.
+
+        Artık ince-cidar çember gerilmesi sigma_hoop = p*r/t (Barlow /
+        Roark 9th ed. Böl. 13) termal gradyan gerilmesine LİNEER SÜPERPOZE
+        edilir ve ``stress_safety_factor`` bu BİRLEŞİK gerilmeden türetilir.
+        Yarıçap verilmediğinde çember terimi UYDURULMAZ: katsayı yalnız
+        termal kalır ve ``stress_safety_factor_basis`` künyesi bunu ADIYLA
+        söyler (fail-closed beyan; kardeş desen aynı modülde:
+        ``heat_sink_initial_temperature_basis``).
 
         FIX (v2.5.2): the thermal stress used to be built from hardcoded steel
         constants (alpha=12e-6, E=200e9, yield=250e6) AND from the fully
@@ -1959,8 +3190,14 @@ class HeatTransferAnalyzer:
         Roark's Formulas for Stress & Strain 9th ed. Ch. 16.
         """
 
-        allowable_temp = mat_props['allowable_temperature']
-        melting_point = mat_props['melting_point']
+        # F-01/M2: sıcaklık emniyet katsayısı merdivenin İZİN basamağına
+        # göre (allowable_K = min(allowable_temperature, max_service_temp));
+        # steel_4130'da 1000 → 811 K (ÖNEMLİ, önce/sonra tablosu).
+        _tl = temperature_limits(mat_props)
+        allowable_temp = (float(_tl['allowable_K']) if _tl['allowable_K']
+                          is not None else float(mat_props['allowable_temperature']))
+        melting_point = (float(_tl['melting_K']) if _tl['melting_K']
+                         is not None else float(mat_props['melting_point']))
 
         # Safety factors (guard against division by zero / negative temps)
         max_temp_safe = max(max_temp, 1.0)
@@ -1982,14 +3219,100 @@ class HeatTransferAnalyzer:
 
         thermal_stress = (elastic_modulus * thermal_expansion * delta_T_wall
                           / (2.0 * (1.0 - poisson_ratio)))
-        stress_safety_factor = yield_strength / thermal_stress if thermal_stress > 0 else 1e6
 
-        # Risk assessment
-        risk_level = 'LOW'
-        if temp_safety_factor < 1.5:
-            risk_level = 'HIGH'
-        elif temp_safety_factor < 2.0:
-            risk_level = 'MEDIUM'
+        # --- ÖH P4B1-15: ÇEMBER (BASINÇ) TERİMİ -------------------------
+        # BİRİM ÇAPASI (ölçüldü): `analyze_heat_transfer` motor sözlüğünden
+        # bar okuyup ``* 1e5`` ile PASCAL'a çevirir (:840) ve bu argümanı
+        # dördüncü konumda PASCAL olarak geçirir. Birim körlüğü bu
+        # kampanyanın tescilli tuzağıdır; sayı burada Pa kabul edilir ve
+        # künyeye bar olarak da yazılır.
+        try:
+            pressure_Pa = float(pressure)
+        except (TypeError, ValueError):
+            pressure_Pa = 0.0
+        pressure_bar = pressure_Pa / 1e5
+        radius_m = None
+        if chamber_radius_m is not None:
+            try:
+                radius_m = float(chamber_radius_m)
+            except (TypeError, ValueError):
+                radius_m = None
+        thickness_m = float(thickness) if thickness else 0.0
+
+        hoop_stress = 0.0
+        if (radius_m is not None and radius_m > 0.0 and thickness_m > 0.0
+                and pressure_Pa > 0.0):
+            hoop_stress = pressure_Pa * radius_m / thickness_m
+            stress_scope = 'thermal_gradient_plus_pressure_hoop'
+            stress_basis = (
+                'combined wall stress: thermal gradient '
+                'E*alpha*dT/(2*(1-nu)) [Timoshenko/Boley-Weiner/Roark Ch.16] '
+                'linearly superposed with the thin-wall pressure hoop '
+                'sigma = p*r/t [Barlow / Roark 9th ed. Ch.13], evaluated at '
+                'p = %.4g bar, r = %.5g m, t = %.5g m. The chamber pressure '
+                'this analysis receives IS consumed here; a thermal-only '
+                'factor would be optimistic and its name would over-claim.'
+                % (pressure_bar, radius_m, thickness_m))
+        else:
+            stress_scope = 'thermal_gradient_only'
+            _eksik = []
+            if radius_m is None or radius_m <= 0.0:
+                _eksik.append('chamber_radius_m')
+            if thickness_m <= 0.0:
+                _eksik.append('thickness')
+            if pressure_Pa <= 0.0:
+                _eksik.append('pressure')
+            stress_basis = (
+                'THERMAL GRADIENT ONLY: the pressure hoop term sigma = p*r/t '
+                'could not be formed because %s was not supplied, so it is '
+                'NOT invented. This factor therefore covers only the '
+                'through-wall thermal gradient and is OPTIMISTIC for the '
+                'same wall under pressure — read it together with the '
+                'structural analysis hoop safety factor.'
+                % ', '.join(_eksik))
+
+        combined_stress = thermal_stress + hoop_stress
+        stress_safety_factor = (yield_strength / combined_stress
+                                if combined_stress > 0 else 1e6)
+
+        # --- Risk hükmü (ÖH D15, P4B1-07) --------------------------------
+        #
+        # ESKİ KOD hükmü YALNIZ ``temp_safety_factor``tan türetiyordu;
+        # ``melting_safety_factor`` ve ``stress_safety_factor`` aynı sözlükte
+        # YAYIMLANIYOR ama hükme HİÇ girmiyordu. ÖLÇÜLDÜ (ss_316, cidar
+        # 5,0 mm, Tc = 1200 K, Pc = 2 bar, D_t = 200 mm, D_ch = 300 mm):
+        #   temperature_safety_factor = 2,0388  -> hüküm LOW
+        #   stress_safety_factor      = 0,5506  (cidar akmanın 1,82 katında)
+        #   melting_safety_factor     = 3,1238
+        # Yani akma dayanımının 1,8 katı gerilme altındaki cidara "DÜŞÜK
+        # RİSK" rozeti basılıyordu; tek işaret ``severity='warning'`` bir
+        # uyarıydı ve safety_panel.js rozet RENGİNİ risk_level'dan alıyor.
+        #
+        # Hüküm artık ÜÇ katsayının EN KÖTÜSÜNÜ alır (fail-closed): bir
+        # cidar hangi mekanizmadan giderse gitsin gider. Eşikler sıcaklık
+        # dalında AYNEN korundu (1,5 / 2,0) — sağlıklı motorun hükmü
+        # değişmez; erime ve gerilme dalları aynı eşiklerle eklendi
+        # (SF < 1 = dayanım aşıldı, SF < 1,5 kritik, < 2,0 marjinal).
+        # Kardeş modüldeki doğru desen: tests/test_scofield_kati.py:387.
+        _SIRA = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2}
+
+        def _seviye(sf):
+            if sf is None or not np.isfinite(sf):
+                return 'HIGH'
+            if sf < 1.5:
+                return 'HIGH'
+            if sf < 2.0:
+                return 'MEDIUM'
+            return 'LOW'
+
+        risk_drivers = {
+            'temperature_safety_factor': _seviye(temp_safety_factor),
+            'melting_safety_factor': _seviye(melting_safety_factor),
+            'stress_safety_factor': _seviye(stress_safety_factor),
+        }
+        risk_level = max(risk_drivers.values(), key=lambda s: _SIRA[s])
+        risk_governing = [ad for ad, sv in risk_drivers.items()
+                          if sv == risk_level]
 
         warnings_list = []
         if temp_safety_factor < 1.0:
@@ -2011,8 +3334,28 @@ class HeatTransferAnalyzer:
 
         return {
             'temperature_safety_factor': temp_safety_factor,
+            'temperature_safety_factor_basis': (
+                'allowable_K / T_max with allowable_K = '
+                'materials_db.temperature_limits(rec).allowable_K = '
+                'min(allowable_temperature, max_service_temp) (F-01/M2 single '
+                'ladder); before this change the bare allowable_temperature '
+                'record was used'),
+            'threshold_ladder': {
+                'allowable_K': allowable_temp,
+                'service_K': _tl['service_K'],
+                'melting_K': melting_point,
+                # V3 KK (§28-31): hükmü veren aday ADIYLA (tek kaynak).
+                **allowable_governance(_tl),
+            },
             'melting_safety_factor': melting_safety_factor,
             'stress_safety_factor': stress_safety_factor,
+            # ÖH P4B1-15 — katsayının KAPSAMI adıyla yayımlanır.
+            'stress_safety_factor_scope': stress_scope,
+            'stress_safety_factor_basis': stress_basis,
+            'pressure_hoop_stress_MPa': hoop_stress / 1e6,
+            'combined_stress_MPa': combined_stress / 1e6,
+            'stress_chamber_pressure_bar': pressure_bar,
+            'stress_chamber_radius_m': radius_m,
             'thermal_stress': thermal_stress / 1e6,  # MPa
             'thermal_stress_delta_T_K': delta_T_wall,
             'thermal_stress_properties': {
@@ -2022,6 +3365,16 @@ class HeatTransferAnalyzer:
                 'yield_strength_MPa': yield_strength / 1e6,
             },
             'risk_level': risk_level,
+            # ÖH D15 (P4B1-07): hükmün HANGİ katsayıdan çıktığı okunabilir.
+            'risk_level_drivers': risk_drivers,
+            'risk_level_governed_by': risk_governing,
+            'risk_level_basis': (
+                'The verdict is the WORST of the three published safety '
+                'factors (temperature, melting, combined thermal+pressure '
+                'stress), each graded with the same thresholds: '
+                'SF < 1.5 -> HIGH, SF < 2.0 -> MEDIUM, otherwise LOW. Until '
+                'v2.6.26 only the temperature factor was read, so a wall at '
+                '1.8x its yield stress could be published as LOW risk.'),
             'warnings': warnings_list,
             'recommendations': self._get_safety_recommendations(temp_safety_factor, thickness)
         }
@@ -2062,14 +3415,37 @@ class HeatTransferAnalyzer:
             for f in required
         }
 
-    def _calculate_cooling_efficiency(self, cooling_type: str) -> float:
-        """Calculate cooling system efficiency"""
-        efficiencies = {
-            'natural': 0.3,
-            'forced': 0.6,
-            'regenerative': 0.9
-        }
-        return efficiencies.get(cooling_type, 0.3)
+    def _calculate_cooling_efficiency(self, cooling_type: str):
+        """Soğutma sınıfının BEYANLI sıralama göstergesi (ölçüm değil).
+
+        ÖH Z5S / PK5 (P4B1-20). Değer ısı yükünden, hazne boyundan,
+        malzemeden ve cidar kalınlığından TAMAMEN bağımsızdır: soğutma
+        sınıfının kendisine iliştirilmiş bir sıralama sayısıdır. Tanınmayan
+        tipte artık doğal taşınımın 0,3'üne DÜŞÜLMEZ (o, sorulmamış bir
+        soğutmanın sayısını basmak olurdu); ``None`` döner ve gerekçesi
+        ``cooling_efficiency_basis``te yazılıdır.
+        """
+        return COOLING_EFFICIENCY_BY_TYPE.get(cooling_type)
+
+    @staticmethod
+    def _cooling_efficiency_basis(cooling_type: str) -> str:
+        """``cooling_efficiency`` künyesi — kardeşleriyle aynı sözleşme."""
+        if cooling_type in COOLING_EFFICIENCY_BY_TYPE:
+            return (
+                'CLASS-LEVEL ORDERING FIGURE, not a computed effectiveness: a '
+                'fixed number attached to the cooling class '
+                f'({cooling_type}) by this module, independent of the heat '
+                'load, chamber length, material and wall thickness. It is a '
+                'single chamber-average value; this model resolves NO zonal '
+                '(chamber / throat / nozzle) effectiveness, so any per-zone '
+                'breakdown built from it would be a copy, not a measurement. '
+                'Use required_cooling_area and the wall temperatures for '
+                'sizing decisions.')
+        return (
+            'WITHHELD: this module has no effectiveness figure for '
+            f'cooling_type={cooling_type!r}; supported types are '
+            + ', '.join(SUPPORTED_COOLING_TYPES)
+            + '. The natural-convection value is NOT substituted.')
 
     def _get_cooling_recommendations(self, cooling_type: str, heat_rate: float) -> List[str]:
         """Get cooling system recommendations"""
@@ -2114,6 +3490,451 @@ class HeatTransferAnalyzer:
             'warn.thermal.implement_temp_monitoring', 'info'))
 
         return recommendations
+
+
+# ===========================================================================
+# V3 KK (KAB devri 5, karar §28-31 tek izin basamağı) — HÜKMÜ VEREN İZİN
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (main fe18664e, /analyze_thermal_safety, örnek katı dock gövdesi):
+# 'steel' için aynı yanıtta material_properties.allowable_temperature 1073 K
+# ⟷ threshold_ladder.allowable_K 811 K; 'ss_304'te ikisi de 1073 K. İkisi
+# AYNI büyüklük DEĞİLDİR: birincisi malzeme kaydının ısıl izin ADAYI, ikincisi
+# hükmü veren basamak = min(allowable_temperature, max_service_temp)
+# ('steel'de max_service_temp 811 K, yapısal servis sınırı). Kusur, basamağın
+# hangi adaydan geldiğini söylememesiydi. Basamak artık adayları ve hükmü
+# vereni ADIYLA yayımlar. Tek kaynak materials_db.temperature_limits
+# (source_fields); yeni sayı üretilmez, eşik seçimi ve hüküm DEĞİŞMEZ.
+# Uzlaştırma bloğunun merdiveni (thermal_paths_reconciliation) sabit şemalı
+# sözleşmedir (dalga_plani A2-1) — ona dokunulmaz.
+# ===========================================================================
+ALLOWABLE_GOVERNANCE_BASIS = (
+    'allowable_K is the GOVERNING temperature limit: the lower of the two '
+    'candidates in the material record, allowable_temperature (thermal '
+    'allowable of the material) and max_service_temp (structural service '
+    'temperature). allowable_governed_by names the candidate that gives the '
+    'verdict; allowable_candidates_K lists both by name. '
+    'material_properties.allowable_temperature is the raw record value of '
+    'one candidate, not the verdict limit.')
+
+
+def allowable_governance(limits: Dict) -> Dict:
+    """Hükmü veren izin basamağının aday künyesi (tek tanım noktası).
+
+    ``limits`` = ``materials_db.temperature_limits(rec)`` dönüşü. Dönüş:
+    ``allowable_governed_by`` (seçilen alan adı ya da ``None``),
+    ``allowable_candidates_K`` ({alan: değer}) ve
+    ``allowable_governance_basis``. Aday yoksa ``None`` / boş sözlük döner —
+    uydurulmaz (fail-closed).
+    """
+    src = (limits or {}).get('source_fields') or {}
+    adaylar = src.get('allowable_candidates_K') or {}
+    return {
+        'allowable_governed_by': src.get('allowable_K'),
+        'allowable_candidates_K': {str(k): float(v)
+                                   for k, v in adaylar.items()},
+        'allowable_governance_basis': ALLOWABLE_GOVERNANCE_BASIS,
+    }
+
+
+# ===========================================================================
+# ÖH D37 A2-1 termal / F-01 — İKİ TERMAL YOLUN UZLAŞTIRMA BLOĞU (tek şema)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (DK kampanyası T7, docs/scofield/raw/OH/D37/dogrulama/termal/
+# rapor.md §b "CW-B3 uzlaştırma"): aynı motorda ana zincir 3368 K, termal FEA
+# 2582 K. Çelişki DEĞİL — iki sayı iki ayrı soruya cevap: ana zincir t → ∞
+# yüzey enerji dengesidir (dış direnç doğal taşınım 25 W/m²K, T_w T_aw'a
+# yapışır); FEA t = t_yanma sonundaki GEÇİCİ tepedir (dış yüzey adyabatik).
+# Aynı FEA 30/100/300 s'ye uzatılınca 2891/3224/3361 K → dengeye oturur.
+# Sınır koşulu eşdeğerliği de ÖLÇÜLDÜ (A2 termal a1, once/t7_ozet.json
+# dis_ortam_h25): 10 s'de dış yüzey h = 25 W/m²K ile adyabatik arasındaki
+# tepe farkı 0,012 K (Q_dış/Q_iç = 3,8e-4) — iki yolun farkı sınır
+# koşulundan DEĞİL, zaman penceresinden gelir.
+# Sözleşme (dalga_plani.md A2-1, faz-c-1 tüketir; alan adları SABİT):
+#   {equilibrium_K, fea_peak_K, fea_time_s, gap_K, question_equilibrium,
+#    question_fea, threshold_ladder{allowable_K, service_K, melting_K}}
+# ===========================================================================
+THERMAL_PATHS_QUESTION_EQUILIBRIUM = (
+    'steady-state (t -> infinity) surface energy balance at the throat: '
+    'q_gas(T_w) = (T_w - T_ambient)/(t_wall/k + 1/h_coolant); independent of '
+    'burn time; with no active cooling the wall pins to the recovery '
+    'temperature (warn.thermal.wall_pinned_adiabatic)')
+THERMAL_PATHS_QUESTION_FEA = (
+    'transient peak wall temperature at the end of the burn (t = burn_time) '
+    'from the axisymmetric conduction FEA (/api/fea/thermal), outer surface '
+    'adiabatic unless outer_ambient is supplied; extending the burn drives '
+    'this number towards the equilibrium answer')
+
+
+def thermal_paths_reconciliation(equilibrium_K=None, fea_peak_K=None,
+                                 fea_time_s=None, burn_time_s=None,
+                                 mat_props=None, cooling_type=None,
+                                 coolant_side_h=None, fea_status=None,
+                                 equilibrium_source=None,
+                                 fea_source=None) -> Dict:
+    """F-01 uzlaştırma bloğu — her iki üretici (ana zincir + FEA köprüsü)
+    AYNI fonksiyonla yazar; alan kümesi ikisinde de birebirdir.
+
+    Bilinmeyen yarı ``None`` kalır ve ``fea_status`` / ``equilibrium_source``
+    nedenini adıyla söyler; ``gap_K`` yalnız iki sayı da varken ölçülür.
+    """
+    def _f(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return f if math.isfinite(f) else None
+
+    eq = _f(equilibrium_K)
+    fe = _f(fea_peak_K)
+    ladder = None
+    if isinstance(mat_props, dict):
+        _tl = temperature_limits(mat_props)
+        ladder = {'allowable_K': _tl['allowable_K'],
+                  'service_K': _tl['service_K'],
+                  'melting_K': _tl['melting_K'],
+                  '_basis': _tl['basis']}
+    return {
+        'equilibrium_K': eq,
+        'equilibrium_source': (
+            equilibrium_source or
+            ('heat_transfer_analysis.wall_analysis.max_temperature (= '
+             'gas_side_analysis.estimated_wall_temperature, surface energy '
+             'balance)' if eq is not None else
+             'equilibrium wall temperature not available in this producer')),
+        'fea_peak_K': fe,
+        'fea_time_s': _f(fea_time_s),
+        'fea_status': (fea_status or ('ok' if fe is not None else
+                                      'not_run_in_this_chain')),
+        'fea_source': (fea_source or
+                       ('/api/fea/thermal (hrma.fea.bridge.run_thermal_from_'
+                        'motor)' if fe is not None else
+                        'the transient FEA is a separate run '
+                        '(/api/fea/thermal); its peak is filled by the FEA '
+                        'bridge into the same block, never here')),
+        'gap_K': (eq - fe) if (eq is not None and fe is not None) else None,
+        # Denetçi Ş7: künye SAYI taşımaz — eski metindeki '2582 K' F-02
+        # öncesi 16×4 sayısıydı ve yayımlanan tepe değişince bayatladı
+        # (ölçüm kanıtı rapor.md §B4'te durur, künyede değil).
+        'gap_basis': ('equilibrium_K - fea_peak_K; positive means the '
+                      'transient peak has not yet reached the steady-state '
+                      'balance within the burn; extending the FEA burn '
+                      'drives the gap towards zero (measured on the example '
+                      'hybrids)'),
+        'burn_time_s': _f(burn_time_s),
+        'question_equilibrium': THERMAL_PATHS_QUESTION_EQUILIBRIUM,
+        'question_fea': THERMAL_PATHS_QUESTION_FEA,
+        'boundary_conditions': {
+            'equilibrium_outer': (
+                f'coolant/outer side h = {coolant_side_h:g} W/m2K '
+                f'({cooling_type})' if _f(coolant_side_h) is not None else
+                'coolant/outer side coefficient of the equilibrium chain'),
+            'fea_outer': 'adiabatic unless outer_ambient is supplied',
+            'equivalence': (
+                'measured (A2 termal a1, T7 example, 10 s, 16x4 mesh): outer '
+                'h = 25 W/m2K vs adiabatic changes the FEA peak by 0.012 K '
+                '(Q_outer/Q_inner = 3.8e-4); the two paths differ by their '
+                'time window, not by the outer boundary condition'),
+        },
+        'threshold_ladder': ladder,
+        '_basis': ('F-01 (CW-B3): two thermal paths answer two different '
+                   'questions; both are published side by side with the '
+                   'single temperature-limit ladder (materials_db.'
+                   'temperature_limits). No number is substituted for a path '
+                   'that was not run.'),
+    }
+
+
+# ===========================================================================
+# ÖH D37 A2-1 termal / F-03 — BARTZ EKSENEL PROFİL GİRDİSİ MOTOR-AGNOSTİK
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (A2 termal a1 once/ozet.json, taban 68c55a27): /api/analysis/
+# wall-profile katı ve sıvı /calculate* çıktısıyla çağrılınca 422
+# incomplete_wall_profile_input (chamber_pressure, chamber_temperature,
+# chamber_diameter, chamber_length, burn_time, throat_diameter ... eksik) —
+# alanlar motor sözlüğünde VAR ama başka adla/başka birimle (sıvı düz
+# uzunluklar mm, katı düz uzunluklar mm; motor_geometry bloğu SI). Bartz
+# kontur boyunca motor-agnostiktir (Pc, c*, γ, MW, D_t, kontur); engel
+# fizik değil, girdinin motor tipine göre kurulmasıydı. Aşağıdaki kurucu
+# köprünün (hrma.fea.bridge) okuduğu AYNI yolları okur: malzeme ve cidar
+# kalınlığı FEA meshinin kullandığı alanlardan gelir (P7B3-30 zincir
+# uyuşması), uzunluklar motor_geometry SI bloğundan (birim tahmini yok).
+# Bulunamayan çekirdek alan UYDURULMAZ: ``missing`` doludur ve uç 422 verir.
+# ===========================================================================
+#: Kurucunun okuduğu yollar — motor tipi başına, ÖNCELİK sırasıyla.
+#: Değer (yol_demeti, ölçek): ölçek 1e-3 = mm → m.
+WALL_PROFILE_MOTOR_PATHS = {
+    'hybrid': {
+        'chamber_pressure': [(('chamber_pressure',), 1.0)],            # bar
+        'chamber_temperature': [(('chamber_temperature',), 1.0)],      # K
+        'chamber_diameter': [(('motor_geometry', 'chamber_diameter'), 1.0),
+                             (('chamber_diameter',), 1.0)],            # m
+        'chamber_length': [(('motor_geometry', 'chamber_length'), 1.0),
+                           (('chamber_length',), 1.0)],                # m
+        'burn_time': [(('burn_time',), 1.0)],                          # s
+        'mdot_total': [(('mdot_total',), 1.0)],                        # kg/s
+        'throat_diameter': [(('motor_geometry', 'throat_diameter'), 1.0),
+                            (('throat_diameter',), 1.0)],              # m
+        'exit_diameter': [(('motor_geometry', 'exit_diameter'), 1.0),
+                          (('exit_diameter',), 1.0)],                  # m
+        'expansion_ratio': [(('expansion_ratio',), 1.0)],
+        'gamma': [(('gamma',), 1.0)],
+        'molecular_weight': [(('molecular_weight',), 1.0)],
+        'c_star': [(('c_star',), 1.0)],
+        'material': [(('structural_analysis', 'design_parameters',
+                       'material'), None)],
+        'wall_thickness': [(('structural_analysis', 'chamber_analysis',
+                             'wall_thickness_used_mm'), 1e-3)],
+    },
+    'liquid': {
+        'chamber_pressure': [(('chamber_pressure',), 1.0)],
+        'chamber_temperature': [(('chamber_temperature',), 1.0)],
+        'chamber_diameter': [(('motor_geometry', 'chamber_diameter'), 1.0),
+                             (('chamber_diameter_mm',), 1e-3)],
+        'chamber_length': [(('motor_geometry', 'chamber_length'), 1.0),
+                           (('chamber_length_mm',), 1e-3)],
+        'burn_time': [(('burn_time',), 1.0)],
+        'mdot_total': [(('total_mass_flow',), 1.0)],
+        'throat_diameter': [(('motor_geometry', 'throat_diameter'), 1.0),
+                            (('throat_diameter_mm',), 1e-3)],
+        'exit_diameter': [(('motor_geometry', 'exit_diameter'), 1.0),
+                          (('exit_diameter_mm',), 1e-3)],
+        'expansion_ratio': [(('expansion_ratio',), 1.0)],
+        'gamma': [(('gamma',), 1.0)],
+        'molecular_weight': [(('molecular_weight',), 1.0)],
+        'c_star': [(('c_star',), 1.0)],
+        'material': [(('structural_analysis', 'chamber_structure',
+                       'material_key'), None)],
+        'wall_thickness': [(('structural_analysis', 'chamber_structure',
+                             'wall_thickness'), 1e-3)],
+    },
+    'solid': {
+        'chamber_pressure': [(('chamber_pressure',), 1.0)],
+        'chamber_temperature': [(('chamber_temperature',), 1.0)],
+        'chamber_diameter': [(('motor_geometry', 'chamber_diameter'), 1.0)],
+        'chamber_length': [(('motor_geometry', 'chamber_length'), 1.0)],
+        'burn_time': [(('burn_time',), 1.0)],
+        'mdot_total': [],                     # katı motor mdot yayımlamaz
+        'throat_diameter': [(('motor_geometry', 'throat_diameter'), 1.0)],
+        'exit_diameter': [(('motor_geometry', 'exit_diameter'), 1.0)],
+        'expansion_ratio': [(('expansion_ratio',), 1.0)],
+        # ÖH KİTAP p1b 3. tur (karar §28-47 Ş2-1 / D-F3; §28-36 Ş-7): katı
+        # yanıtın üst düzey ``gamma``sı GENLEŞME (denge) gamma'sıdır. Kayıt
+        # donmuş oda gamma'sı taşıdığında motorun Bartz zinciri o gazı
+        # kullanır ve yanıt çifti ``heat_transfer_analysis.
+        # bartz_gas_properties.axial_profile_gas`` altında yayımlar; profil
+        # Bartz'ı motorla AYNI (γ, M) çiftiyle kurar (R = R_u/M). Çift
+        # yoksa (None: Bartz gazı = genleşme gazı) önceki yol: yayımlanan
+        # gamma ve c* özdeşliğinden R. Yalnız gamma'yı yönlendirmek R'yi
+        # donmuş gamma'lı c* özdeşliğinden türetirdi (≈ +%3,3) — o yüzden
+        # iki alan birlikte okunur.
+        'gamma': [(('heat_transfer_analysis', 'bartz_gas_properties',
+                    'axial_profile_gas', 'gamma'), 1.0),
+                  (('gamma',), 1.0)],
+        'molecular_weight': [(('heat_transfer_analysis',
+                               'bartz_gas_properties', 'axial_profile_gas',
+                               'molecular_weight'), 1.0),
+                             (('molecular_weight',), 1.0)],
+        'c_star': [(('c_star',), 1.0)],
+        'material': [(('structural_analysis', 'case_analysis',
+                       'case_material'), None)],
+        'wall_thickness': [(('structural_analysis', 'case_analysis',
+                             'wall_thickness_mm'), 1e-3)],
+    },
+}
+#: Bartz için zorunlu çekirdek (uç kapısıyla aynı küme + boğaz ölçeği).
+WALL_PROFILE_CORE_FIELDS = HEAT_TRANSFER_REQUIRED_FIELDS
+WALL_PROFILE_THROAT_SCALE_FIELDS = ('throat_diameter', 'mdot_total')
+
+
+def _yol_oku(motor: Dict, yol):
+    cur = motor
+    for k in yol:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(k)
+    return cur
+
+
+#: ÖH D37 A2-1 termal 7. tur (karar §28-24 §2 b) — gaz özelliği kökeni
+#: sınıfları. ``GAS_SOURCE_ASSUMED`` sınıfındaki her alan modül
+#: varsayılanıdır: motorun hesap durumundan gelmez.
+GAS_SOURCE_SUPPLIED = 'supplied_by_caller'
+GAS_SOURCE_DERIVED = 'derived_from_supplied_gas_constant'
+GAS_SOURCE_ASSUMED = 'module_default'
+GAS_SOURCE_IDEAL = 'ideal_theory_from_gamma_mw_tc'
+
+
+def axial_profile_gas_basis(motor_data: Dict, gas: Dict,
+                            throat: Dict) -> Dict:
+    """Eksenel profilin γ / MW / c* kökeni (ÖH D37 A2-1 termal 7. tur).
+
+    Karar §28-24 §2 (A): termal FEA sınır koşulu motorun KENDİ gazından
+    kurulur; panel gönderemiyorsa (motor yayımlamıyorsa) sonuç jenerik
+    gazla BAŞARI göstermez. Bu işlev hangi alanın çağırandan geldiğini,
+    hangisinin modül varsayılanına düştüğünü ADIYLA yazar; sayı ÜRETMEZ,
+    yalnız ``_get_gas_properties`` / ``_resolve_throat_conditions``in
+    gerçekten kullandığı değerleri ve kökenlerini aynalar.
+
+    c* çağırandan gelmediyse ideal teoriden (γ, MW, T_c) türetilir; bu
+    motorun yayımladığı c* değildir (verim içermez) ve ``assumed_fields``
+    listesine girer — FEA hükmü verilmez (fail-closed).
+    """
+    gamma_src_ham = str(gas.get('gamma_source') or '')
+    if gamma_src_ham == 'repo_default':
+        gamma_src = GAS_SOURCE_ASSUMED
+    else:
+        gamma_src = GAS_SOURCE_SUPPLIED
+    if motor_data.get('molecular_weight') is not None:
+        mw_src = GAS_SOURCE_SUPPLIED
+    elif motor_data.get('gas_constant') is not None:
+        mw_src = GAS_SOURCE_DERIVED
+    else:
+        mw_src = GAS_SOURCE_ASSUMED
+    # c* çözümlemesiyle AYNI kural (``_resolve_throat_conditions``):
+    # çağıranın pozitif c_star / cstar alanı varsa o kullanılır.
+    cstar_src = (GAS_SOURCE_SUPPLIED
+                 if _positive_length(motor_data.get(
+                     'c_star', motor_data.get('cstar', None))) is not None
+                 else GAS_SOURCE_IDEAL)
+    kaynaklar = {'gamma': gamma_src, 'molecular_weight': mw_src,
+                 'c_star': cstar_src}
+    varsayilan = [ad for ad, k in kaynaklar.items()
+                  if k in (GAS_SOURCE_ASSUMED, GAS_SOURCE_IDEAL)]
+    return {
+        'gamma': {'value': float(gas['gamma']), 'source': gamma_src,
+                  'source_field': gamma_src_ham or None},
+        'molecular_weight': {'value': float(gas['molecular_weight']),
+                             'unit': 'g/mol', 'source': mw_src},
+        'c_star': {'value': float(throat['c_star']), 'unit': 'm/s',
+                   'source': cstar_src},
+        'assumed_fields': varsayilan,
+        'all_from_caller': not varsayilan,
+        '_basis': (
+            'gas properties that set the Bartz h_g(z) of this profile: '
+            "'supplied_by_caller' = taken verbatim from the request (the "
+            "motor's own computed state when the request is built from a "
+            "motor result); 'derived_from_supplied_gas_constant' = MW from "
+            "the supplied gas constant; 'module_default' = generic module "
+            f"value (gamma {GAMMA_REPO_DEFAULT:g}, MW "
+            f"{MW_MODULE_DEFAULT_G_MOL:g} g/mol); 'ideal_theory_from_gamma_"
+            "mw_tc' = ideal c* computed from gamma, MW and T_c, not the "
+            "motor's published c*. A non-empty assumed_fields list means "
+            "the profile does not describe the motor's own gas; the thermal "
+            'FEA bridge then withholds its positive safety verdict (ÖH D37 '
+            'A2-1, decision §28-24 §2 b).'),
+    }
+
+
+def wall_profile_inputs_from_motor(motor_results: Dict) -> Dict:
+    """Motor sonuç sözlüğünden ``/api/analysis/wall-profile`` gövdesi (F-03).
+
+    Dönüş::
+
+        {'layout': 'hybrid'|'liquid'|'solid'|None,
+         'inputs': {...düz gövde (SI; basınç bar)...},
+         'basis': {alan: 'yol [birim] (ölçek)'},        # okunan yol
+         'derived': {alan: '...'},                         # türetilenler
+         'missing': [...],                                # çekirdek eksik
+         'left_to_endpoint': [...]}                       # ucun varsayılanı
+
+    Uydurma yok: çekirdek alan bulunamazsa ``missing`` dolar ve çağıran
+    (uç) 422 verir. Malzeme ve cidar kalınlığı FEA köprüsünün mesh'i
+    kurduğu AYNI alanlardan okunur (zincirin iki ucu aynı cidar,
+    P7B3-30). Gaz molekül ağırlığı yayımlanmamışsa ``gas_constant`` c*
+    özdeşliğinden TÜRETİLİR (c* = √(R T_c/γ)·((γ+1)/2)^((γ+1)/(2(γ−1))) —
+    Sutton & Biblarz 9. bs. Eş. 3-32) ve bu ``derived`` altında yazılır.
+    """
+    from hrma.fea.bridge import detect_engine_layout   # tembel: döngü yok
+    out = {'layout': None, 'inputs': {}, 'basis': {}, 'derived': {},
+           'missing': [], 'left_to_endpoint': []}
+    if not isinstance(motor_results, dict):
+        out['missing'] = list(WALL_PROFILE_CORE_FIELDS) + [
+            ' or '.join(WALL_PROFILE_THROAT_SCALE_FIELDS)]
+        out['reason'] = 'motor_results is not a dict'
+        return out
+    layout = detect_engine_layout(motor_results)
+    out['layout'] = layout
+    if layout not in WALL_PROFILE_MOTOR_PATHS:
+        out['missing'] = list(WALL_PROFILE_CORE_FIELDS) + [
+            ' or '.join(WALL_PROFILE_THROAT_SCALE_FIELDS)]
+        out['reason'] = ('engine layout not recognised (no structural_analysis '
+                         'signature: chamber_analysis / chamber_structure / '
+                         'case_analysis)')
+        # Aranan yollar üç düzenin BİRLEŞİMİ — çağıran hangi alanı nereye
+        # koyacağını görsün (uydurma yok, yalnız adres).
+        out['searched_paths'] = {
+            alan: sorted({'.'.join(y) for hm in WALL_PROFILE_MOTOR_PATHS.values()
+                          for y, _ in hm.get(alan, [])})
+            for alan in set().union(*[set(hm) for hm in
+                                      WALL_PROFILE_MOTOR_PATHS.values()])}
+        return out
+    harita = WALL_PROFILE_MOTOR_PATHS[layout]
+    for alan, adaylar in harita.items():
+        for yol, olcek in adaylar:
+            v = _yol_oku(motor_results, yol)
+            if olcek is None:                      # metin alanı (malzeme)
+                if isinstance(v, str) and v.strip():
+                    out['inputs'][alan] = v.strip()
+                    out['basis'][alan] = '.'.join(yol)
+                    break
+                continue
+            f = _positive_length(v)
+            if f is None:
+                continue
+            out['inputs'][alan] = f * olcek
+            out['basis'][alan] = ('.'.join(yol)
+                                  + (' [mm] * 1e-3 -> m' if olcek == 1e-3
+                                     else ''))
+            break
+    # Lüle tipi ve yayımlanan kontur AYNEN (panelin yaptığı gibi).
+    na = motor_results.get('nozzle_angles')
+    nt = (na.get('nozzle_type') if isinstance(na, dict) else None) \
+        or motor_results.get('nozzle_type')
+    if isinstance(nt, str) and nt.strip():
+        out['inputs']['nozzle_type'] = nt.strip()
+        out['basis']['nozzle_type'] = ('nozzle_angles.nozzle_type'
+                                       if isinstance(na, dict)
+                                       and na.get('nozzle_type') else
+                                       'nozzle_type')
+    nc = motor_results.get('nozzle_contour')
+    if (isinstance(nc, dict) and isinstance(nc.get('points'), list)
+            and len(nc['points']) >= 2):
+        out['inputs']['nozzle_contour'] = nc
+        out['basis']['nozzle_contour'] = ('nozzle_contour (published, passed '
+                                          'verbatim — axis matches the FEA '
+                                          'bridge contour by construction)')
+    # Molekül ağırlığı yoksa c* özdeşliğinden R_specific.
+    inp = out['inputs']
+    if ('molecular_weight' not in inp and 'gas_constant' not in inp
+            and all(k in inp for k in ('c_star', 'gamma',
+                                       'chamber_temperature'))):
+        g = float(inp['gamma'])
+        if g > 1.0:
+            cs = float(inp['c_star'])
+            Tc = float(inp['chamber_temperature'])
+            gamma_term = ((g + 1.0) / 2.0) ** ((g + 1.0) / (g - 1.0))
+            R = g * cs * cs / (Tc * gamma_term)
+            if math.isfinite(R) and R > 0.0:
+                inp['gas_constant'] = R
+                out['derived']['gas_constant'] = (
+                    f'R_specific = gamma*c*^2/(T_c*((gamma+1)/2)^((gamma+1)/'
+                    f'(gamma-1))) from c_star={cs:g}, gamma={g:g}, T_c={Tc:g} '
+                    f'(c* identity, Sutton & Biblarz 9th ed. Eq. 3-32) = '
+                    f'{R:.4f} J/(kg K) -> MW = {R_UNIVERSAL / R:.4f} g/mol; '
+                    'the motor dict publishes no molecular_weight')
+    if 'molecular_weight' not in inp and 'gas_constant' not in inp:
+        out['left_to_endpoint'].append('molecular_weight')
+    for alan in ('material', 'wall_thickness'):
+        if alan not in inp:
+            out['left_to_endpoint'].append(alan)
+    out['missing'] = [k for k in WALL_PROFILE_CORE_FIELDS
+                      if _positive_length(inp.get(k)) is None]
+    if all(_positive_length(inp.get(k)) is None
+           for k in WALL_PROFILE_THROAT_SCALE_FIELDS):
+        out['missing'].append(' or '.join(WALL_PROFILE_THROAT_SCALE_FIELDS))
+    out['searched_paths'] = {alan: ['.'.join(y) for y, _ in adaylar]
+                             for alan, adaylar in harita.items()}
+    return out
 
 
 def material_name(mat_props: Dict, materials_db: Dict) -> str:

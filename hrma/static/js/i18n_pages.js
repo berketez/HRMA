@@ -2,7 +2,7 @@
    HRMA i18n sözlüğü — i18n_pages.js
    ---------------------------------------------------------------
    Katı yakıtlı motor (solid.html) ve sıvı yakıtlı motor (liquid.html)
-   sayfalarının TÜM kullanıcı metinleri. Anahtar önekleri:
+   sayfalarının kullanıcı metinleri. Anahtar önekleri:
 
      solid.*   katı yakıt sayfası
      liq.*     sıvı yakıt sayfası
@@ -21,18 +21,84 @@
        DXF) çevrilmez; yerleşik Türkçe karşılığı olan terimler çevrilir
        (chamber pressure -> oda basıncı, nozzle -> nozul, throat -> boğaz,
        regression rate -> regresyon hızı, safety factor -> emniyet katsayısı).
+
+   KAPSAM BEYANI — DÜRÜSTLENDİ, BORÇ ÖDENDİ (P12aB2-06)
+   ---------------------------------------------------------------
+   Bu başlık eskiden "TÜM kullanıcı metinleri" diyordu. ÖLÇÜM bunu
+   yalanlamıştı: iki şablonda T()/TF() ile HİÇ bağlanmamış, Türkçe kipte
+   İngilizce kalan görünür metinler vardı. Borcun tam dökümü ve ödendiği
+   dalga (ölçüm: raw/OH/D29/arayuz-i18n/a1/{once,sonra}.json, M1 —
+   bağlanmamış metin 6 -> 0):
+
+     liquid.html  <h3>Oxidizer Tank (${…})</h3>     ÖDENDİ (D27/D28)
+                                                    liq.js.oxidizer_tank_card
+     liquid.html  <h3>Fuel Tank (${…})</h3>         ÖDENDİ  liq.js.fuel_tank_card
+     liquid.html  '… perforated rings'              ÖDENDİ  liq.js.perforated_rings
+     liquid.html  '… radial vanes'                  ÖDENDİ  liq.js.radial_vanes
+     liquid.html  '… capacitive probes'             ÖDENDİ  liq.js.capacitive_probes
+     solid.html   'Success Rate (' + n + ' runs)'   ÖDENDİ  solid.js.mc_success_rate
+     liquid.html  'Trajectory could not be computed: '
+                                                    ÖDENDİ (D29 arayuz-i18n a1)
+                                        liq.js.trajectory_could_not_be_computed
+     liquid.html  'Detailed CAD generation failed: '
+                                                    ÖDENDİ (D29 arayuz-i18n a1)
+                                        liq.js.detailed_cad_generation_failed
+     liquid.html  row('Material')                   ÖDENDİ  liq.js.row_material
+     liquid.html  row('Coolant')                    ÖDENDİ  liq.js.row_coolant
+     liquid.html  row('Title')                      ÖDENDİ  liq.js.row_title
+     liquid.html  row('Status')                     ÖDENDİ  liq.js.row_status
+
+   Anahtar ve çağrı yeri AYNI ANDA indi: tüketicisi olmayan anahtarı
+   tests/test_i18n_pages.py::test_every_dictionary_key_is_used ölü çeviri
+   sayıp KIRMIZI verir. Bu yüzden anahtarlar peşinen açılmadı, her biri
+   kendi çağrı yeriyle birlikte yazıldı.
+
+   Borç kapandı ama başlık yine "TÜM" DEMEZ: bu dosya iki sayfanın
+   BİLİNEN kullanıcı metinlerini kapsar; kapsamın ölçüsü
+   tests/test_z5i18n_supurme.py::
+   test_bagsiz_ingilizce_metinler_defterdeki_sayidan_artmadi mandalıdır
+   (kart üreteçlerinde düz İngilizce dize = 0). Yeni bir düz dize
+   eklenirse mandal kırmızı verir. Sözlükte hazır durup çağrılmayan
+   anahtar da bırakılmadı; tarihsel örnek:
+     liq.msg.trajectory_data_could_not_be_retrieved
+   (ucun "veri alınamadı" hükmü — hesaplanamadı hükmünden AYRI bir
+   durumdur, ikisi ayrı anahtarla basılır).
 */
 (function (global) {
     'use strict';
 
     var DICT = {
         en: {
-            'liq.attr.blank_from_contraction': 'blank = computed from contraction ratio',
-            'liq.attr.gimbal_blank_min_3': 'e.g. 12 - min 3, blank: bolt loads skipped',
-            'liq.attr.gimbal_blank_no_bolt_loads': 'e.g. 600 - blank: bolt loads skipped',
+            /* OH-D33-48 - YER TUTUCU ALANA SIGAR, BEYAN IPUCUNDA DURUR.
+               Olculdu (Playwright, Chrome 140, 1440x900; bkz. bu dalganin
+               raporu): sivi sayfasinin girdi alanlari 286 piksel genisligi
+               olan tek-aralikli (monospace) 14px yazi tipiyle ciziliyor,
+               yani karakter basina 8,4 piksel -> alana EN COK 34 karakter
+               sigar. Bu blokta kisaltilan dizelerin tamami o butcenin
+               ustundeydi; kaybolan hicbir beyan yok, hepsi ilgili alanin
+               ipucu metninde (tooltip) zaten duruyor ya da oraya tasindi. */
+            'liq.attr.autofilled_table': 'auto-filled: propellant table',
+            'liq.attr.blank_from_contraction': 'blank = from contraction ratio',
+            'liq.attr.gimbal_blank_min_3': 'e.g. 12 - min 3, blank: no loads',
+            'liq.attr.gimbal_blank_no_bolt_loads': 'e.g. 600 - blank: no bolt loads',
             'liq.attr.gimbal_blank_not_analysed': 'e.g. 0.5 - blank: not analysed',
-            'liq.attr.gimbal_blank_pivot_plane': 'e.g. 0.3 - blank: ring at pivot (h = 0)',
+            'liq.attr.gimbal_blank_pivot_plane': 'e.g. 0.3 - blank: h = 0',
             'liq.attr.min_k': 'Min (K)',
+            'liq.attr.required_blank_422': 'required: blank = 422 refusal',
+            /* ÖH D29 / P12bB1-14 — SIVI MOTOR AKIŞ ŞEMASI KUTU ADLARI.
+               Ölçüldü (a2/once.json M11): şemanın sekiz kutu adı da
+               `label()` çağrısına düz İngilizce dize olarak giriyordu;
+               sayfanın geri kalanı iki dilde bağlıyken TR kipinde şemanın
+               TAMAMI İngilizce kalıyordu. `<br>` düzen içindir, çeviride
+               de korunur (kutu iki satır). */
+            'liq.diag.combustion_chamber': 'Combustion<br>Chamber',
+            'liq.diag.fuel_pump': 'Fuel<br>Pump',
+            'liq.diag.fuel_tank': 'Fuel<br>Tank',
+            'liq.diag.injector': 'Injector',
+            'liq.diag.nozzle': 'Nozzle',
+            'liq.diag.oxidizer_pump': 'Oxidizer<br>Pump',
+            'liq.diag.oxidizer_tank': 'Oxidizer<br>Tank',
+            'liq.diag.pressure_fed': 'Pressure<br>Fed',
             'liq.js.3d_engine_visualization': '3D Engine Visualization',
             'liq.js.altitude_performance_analysis': 'Altitude Performance Analysis',
             'liq.js.anti_vortex': 'Anti-Vortex:',
@@ -62,6 +128,7 @@
             'liq.js.density_label': 'Density:',
             'liq.js.cost_schedule': 'Cost & schedule:',
             'liq.js.design_summary': 'Design Summary',
+            'liq.js.detailed_cad_generation_failed': 'Detailed CAD generation failed: {error}',
             'liq.js.detailed_engineering_visualization_with_cross_se': 'Detailed engineering visualization with cross-section',
             'liq.js.diameter': 'Diameter:',
             'liq.js.dimethylhydrazine': 'Dimethylhydrazine',
@@ -81,6 +148,9 @@
             'liq.js.gimbal_axial_thrust': 'Axial Thrust:',
             'liq.js.gimbal_bolt_axial_share': 'Axial Share per Bolt:',
             'liq.js.gimbal_bolt_moment_max': 'Max Bolt Load (from moment):',
+            'liq.js.gimbal_bolt_net_compression': 'net compression, no bolt tension on this load path',
+            'liq.js.gimbal_bolt_net_compressive': 'Net Bolt Load (axial compressive; + tension / - compression):',
+            'liq.js.gimbal_bolt_net_tension': 'net tension',
             'liq.js.gimbal_bolt_shear': 'Shear per Bolt:',
             'liq.js.gimbal_bolt_tension_compressive': 'Max Bolt Tension (axial compressive):',
             'liq.js.gimbal_bolt_tension_tensile': 'Max Bolt Tension (axial tensile):',
@@ -118,6 +188,12 @@
             'liq.js.mass_flow': 'Mass Flow:',
             'liq.js.mass_fraction': 'Mass Fraction:',
             'liq.js.material': 'Material:',
+            // ÖH D28 · P12aB2-06 — tank kartındaki bağlanmamış metinler.
+            'liq.js.oxidizer_tank_card': 'Oxidizer Tank ({propellant})',
+            'liq.js.fuel_tank_card': 'Fuel Tank ({propellant})',
+            'liq.js.perforated_rings': '{n} perforated rings',
+            'liq.js.radial_vanes': '{n} radial vanes',
+            'liq.js.capacitive_probes': '{n} capacitive probes',
             'liq.js.materials': 'Materials:',
             'liq.js.methane': 'Methane',
             'liq.js.mixture_ratio': 'Mixture Ratio:',
@@ -145,12 +221,16 @@
             'liq.js.reliability': 'Reliability:',
             'liq.js.reliability_not_published': 'not published - HRMA has no turbopump reliability model',
             'liq.js.relief_valve': 'Relief Valve:',
+            'liq.js.row_coolant': 'Coolant',
+            'liq.js.row_material': 'Material',
+            'liq.js.row_status': 'Status',
+            'liq.js.row_title': 'Title',
             'liq.js.rpm': 'RPM:',
             'liq.js.safety_margin': 'Safety Margin:',
             'liq.js.slosh_baffles': 'Slosh Baffles:',
             'liq.js.source_label': 'Source:',
             'liq.js.space_application': 'Space Application:',
-            'liq.js.tank_internal_structures': 'Tank Internal Structures',
+            'liq.js.tank_internal_structures': 'Oxidizer Tank Internal Structures',
             'liq.js.tank_mass': 'Tank Mass:',
             'liq.js.tank_system_summary': 'Tank System Summary',
             'liq.js.throat_diameter': 'Throat Diameter:',
@@ -161,6 +241,7 @@
             'liq.js.total_propellant': 'Total Propellant:',
             'liq.js.total_tank_mass': 'Total Tank Mass:',
             'liq.js.total_volume': 'Total Volume:',
+            'liq.js.trajectory_could_not_be_computed': 'Trajectory could not be computed: {message}',
             'liq.js.trajectory_needs_results': 'Run an engine calculation first - the trajectory needs the computed thrust and specific impulse.',
             'liq.js.turbine_power': 'Turbine Power:',
             'liq.js.turbopump_system': 'Turbopump System',
@@ -243,11 +324,32 @@
             'liq.msg.expansion_ratio_ae_at': 'Expansion Ratio (Ae/At)',
             'liq.msg.export_downloaded': '{label} downloaded',
             'liq.msg.export_failed': '{label} export failed: {error}',
-            'liq.msg.export_only_note': 'Used only by the OpenRocket .eng export (burn time); it does not change the computed steady-state result.',
-            'liq.msg.export_only_openrocket_eng_burn_time': 'Export only (OpenRocket .eng burn time)',
             'liq.msg.export_tank_cad_files_step_stl': 'Export Tank CAD Files (STEP/STL)',
+            /* ÖH D36 · kulvar onemli2-sivi (a1 anahtarları, a2 turunda
+               i18n_common.js sözlüğünden taşındı; sayfa bunları T() ile
+               okur): isteğe bağlı işareti, süre/tank kartı, .eng durum
+               satırı, chug hâli, gimbal alan adı. */
+            'liq.ui.optional_mark': '(optional)',
+            'liq.js.burn_time_not_supplied': 'not published: burn time not supplied (fill "Maximum Burn Duration"; no default is assumed)',
+            'liq.js.propellant_tanks_title': 'Propellant Tanks',
+            'liq.js.tank_card_not_modelled': 'Propellant tanks were not sized: the burn time was not supplied and no default is assumed. Fill "Maximum Burn Duration" and recalculate.',
+            'liq.msg.eng_export_failed_detail': '.eng export failed: {error}',
+            'liq.msg.eng_file_downloaded': '.eng file downloaded',
+            'liq.msg.eng_not_generated_status': '.eng not generated: {detail}',
+            'liq.cyc.chug_state_risk': 'chug risk',
+            'liq.cyc.chug_state_marginal': 'marginal margin',
+            'liq.cyc.chug_state_ok': 'margin OK',
+            'liq.cyc.chug_state_not_evaluated': 'not evaluated (dP/Pc unresolved)',
+            'liq.cyc.chug_state_unknown': 'unknown state: {value}',
+            'liq.js.gimbal_unknown_field': 'unknown field: {field}',
+            /* ÖH D36 onemli2-sivi a1 ek denetçi şartı 3: .eng kapı satırı sözlük
+               cümlesi + alan etiketi ('Etiket (anahtar)'); sunucunun İngilizce
+               ret paragrafı satıra basılmaz. */
+            'liq.msg.eng_gate_fields_missing': 'the design result lacks {fields}; no placeholder motor is written',
+            'liq.js.eng_field_thrust_curve': 'Thrust Curve',
+            'liq.js.eng_gate_unlabelled_field': 'field without a label on this page: {field}',
             'liq.msg.failed_to_copy': 'Failed to copy:',
-            'liq.msg.failed_to_copy_data_check_console': 'Failed to copy data. Check console for details.',
+            'liq.msg.failed_to_copy_data_check_console': 'Could not copy to the clipboard. Copy the data from the window below.',
             'liq.msg.feed_line_drop_bar': 'Feed line drop (bar)',
             'liq.msg.feed_system_data': 'Feed system data:',
             'liq.msg.feed_system_mass_kg': 'Feed system mass (kg)',
@@ -292,12 +394,15 @@
             'liq.msg.losses_outside_budget': 'Not part of the overall efficiency product (design comparison only, excluded from the pie):',
             'liq.msg.main_valve_drop_bar': 'Main valve drop (bar)',
             'liq.msg.manufacturing_analysis': 'Manufacturing analysis:',
-            'liq.msg.manufacturing_specifications_n': '• Manufacturing specifications\n',
+            'liq.msg.manufacturing_specifications_n': '• Manufacturing checklist TEMPLATE (manufacturing_checklist_TEMPLATE.json) — a blank checklist, not a filled specification\n',
+            'liq.msg.material_allowable_temperature': 'material allowable temperature (station_march.material_allowable_K) = {value} K',
             'liq.msg.mixture_ratio_o_f': 'Mixture Ratio (O/F)',
             'liq.msg.mixture_ratio_o_f_2': 'Mixture ratio (O/F)',
             'liq.msg.mixture_ratio_optimization': 'Mixture Ratio Optimization',
             'liq.msg.motor_cross_section_could_not_be': 'Motor cross-section could not be drawn:',
+            'liq.msg.nasa_cea_check_failed': 'NASA CEA - status check failed',
             'liq.msg.nasa_cea_offline': 'NASA CEA Offline',
+            'liq.msg.nist_webbook_check_failed': 'NIST WebBook - status check failed',
             'liq.msg.nist_webbook_offline': 'NIST WebBook Offline',
             'liq.msg.nitrogen_tetroxide': 'Nitrogen Tetroxide',
             'liq.msg.no_results_to_analyze_please_run': 'No results to analyze. Please run calculations first.',
@@ -336,10 +441,10 @@
             'liq.msg.propellant_tank_data': 'Propellant tank data:',
             'liq.msg.propellant_tank_system_3d_cad_view': 'Propellant Tank System - 3D CAD View',
             'liq.msg.real_time_property_loading_error': 'Real-time property loading error:',
-            'liq.msg.safety_factor': 'Safety Factor',
+            'liq.msg.design_sf_target': 'Design Safety Factor target (read back, not a measurement)',
+            'liq.msg.hoop_sf_operating': 'Hoop SF on the drawn wall (operating pressure, pressure load only, yield at the hot-wall temperature)',
             'liq.msg.sea_level_isp': 'Sea Level Isp',
             'liq.msg.sea_level_isp_s': 'Sea-level Isp (s)',
-            'liq.msg.set_a_positive_maximum_burn_duration': 'Set a positive "Maximum Burn Duration" before exporting .eng',
             'liq.msg.sixdof_engine_coupled': 'Engine-coupled run: thrust {thrust} N, burn time = propellant {mprop} kg / engine mass flow {mdot} kg/s = {burn} s (total impulse {it} N·s, implied Isp {isp} s). The burn time is derived here, not read from the Burn Time field above: pairing the engine thrust with an unrelated burn time violates the rocket equation.',
             'liq.msg.sixdof_form_values': 'Running with the Thrust / Burn Time fields of this panel (engine coupling is off or the engine mass flow is not available). These two values are not checked against the propellant mass.',
             'liq.msg.sixdof_nozzle_wider_than_body': 'Geometry conflict: the nozzle exit diameter is {exit} mm but the vehicle body diameter is {body} mm — this airframe cannot carry this engine.',
@@ -379,6 +484,9 @@
             'liq.msg.unwired_fields_not_on_page': 'The solver reported inputs that this page does not display: {fields}',
             'liq.msg.unwired_informational': 'Reference only: not used by the solver',
             'liq.msg.unwired_note': 'Not yet wired to the solver: this value is recorded with the design but does not change the computed result.',
+            'liq.msg.fuel_density_other_fuel': 'Fuel density {rho} kg/m³ was entered by hand while the fuel was {prev}; the selected fuel is now {fuel}. The value is kept and sent as your input — check it.',
+            'liq.msg.fuel_density_table_value': 'Propellant table value for {fuel}: {table} kg/m³.',
+            'liq.msg.fuel_density_no_table_value': 'The propellant table has no state-resolved density for {fuel}.',
             'liq.msg.unwired_other': 'Declared by the solver as not used in this run (category: {category})',
             'liq.msg.unwired_transient': 'Startup/shutdown transients are not modelled yet',
             'liq.msg.vacuum_expansion_ratio': 'Vacuum Expansion Ratio',
@@ -423,7 +531,6 @@
             'liq.ui.altitude_profile_km_showing_ascent_trajectory': 'Altitude profile (km) showing ascent trajectory',
             'liq.ui.altitude_range_for_engine_operation_sea': 'Altitude range for engine operation. Sea level: full atmosphere, Space: vacuum. Affects nozzle design and performance optimization. Over-expansion at sea level reduces efficiency.',
             'liq.ui.aluminum_6061': 'Aluminum 6061',
-            'liq.ui.ambient_temperature_range': 'Ambient Temperature Range',
             'liq.ui.analysis_results': 'Analysis Results',
             'liq.ui.ask_ai_to_analyze_results': 'Ask AI to Analyze Results',
             'liq.ui.axial_cross_section_of_the_engine': 'Axial cross-section of the engine, drawn to scale from the solver geometry (all dimensions in mm)',
@@ -435,7 +542,10 @@
             'liq.ui.blue_cyan': 'Blue/Cyan:',
             'liq.ui.blue_line': 'Blue line:',
             'liq.ui.both_propellants_are_liquid_so_the': 'Both propellants are liquid, so the chamber is empty between the injector face and the throat',
-            'liq.ui.burn_time_s': 'Burn Time (s)',
+            // ÖH D17 / P12bB1-07 — yörünge panelindeki yanma süresi
+            // alanı bir GİRDİ değildir; motorun debisinden türetilir.
+            'liq.ui.burn_time_derived_from_mdot': 'Burn Time (s) \u2014 derived from \u1E45 (not an input)',
+            'liq.ui.burn_time_placeholder_derived': 'derived from mass flow',
             'liq.ui.calculate_engine_performance': 'Calculate Engine Performance',
             'liq.ui.calculating': 'Calculating...',
             'liq.ui.centerline': 'Centerline:',
@@ -459,7 +569,7 @@
             'liq.ui.color_coding': 'Color coding:',
             'liq.ui.combined_efficiency_of_turbine_and_pump': 'Combined efficiency of turbine and pump. Modern turbopumps: 65-85%. Higher efficiency reduces power requirements and improves overall engine performance.',
             'liq.ui.combustion_chamber_and_injector_assembly': 'Combustion chamber and injector assembly',
-            'liq.ui.combustion_chamber_operating_pressure_higher_pre': 'Combustion chamber operating pressure. Higher pressure improves Isp but increases complexity. Pressure-fed: 5-50 bar, Gas Generator: 50-150 bar, Staged Combustion: 150-300 bar.',
+            'liq.ui.combustion_chamber_operating_pressure_higher_pre': 'Combustion chamber operating pressure. Higher pressure improves Isp but increases complexity. Pressure-fed: 10-50 bar, Gas Generator: 50-150 bar, Staged Combustion: 150-300 bar. Accepted range: 10-500 bar. This field is a required design point: left blank, the request is refused by name (422 incomplete_input).',
             'liq.ui.combustion_chamber_shell_and_head_end': 'Combustion chamber shell and head end; hover shows wall thickness and bore diameter',
             'liq.ui.combustion_efficiency_c': 'Combustion Efficiency ηc',
             'liq.ui.combustion_stability_margin': 'Combustion Stability Margin',
@@ -526,6 +636,9 @@
             'liq.cyc.badge_realgas': 'Real-gas warning (Pc>300 bar, CEA ideal-gas)',
             'liq.cyc.cycle': 'Engine cycle',
             'liq.cyc.balance': 'Power balance',
+            'liq.cyc.critical': 'Cycle cannot close — critical',
+            'liq.cyc.status.converged': 'Converged',
+            'liq.cyc.status.not_converged': 'Power balance did not close',
             'liq.cyc.pump_ox': 'Ox pump discharge',
             'liq.cyc.pump_fuel': 'Fuel pump discharge',
             'liq.cyc.shaft_power': 'Turbopump shaft power',
@@ -571,9 +684,9 @@
             'liq.ui.fuel_and_oxidizer_mixing_method_impinging': 'Fuel and oxidizer mixing method. Impinging: jets collide for atomization, simple, proven. Coaxial: concentric streams, excellent for cryogenics, smooth combustion. Showerhead: many small holes, uniform distribution. Pintle: single point, throttleable.',
             'liq.ui.fuel_boiling_point': 'Fuel Boiling Point',
             'liq.ui.fuel_boiling_point_at_1_atm': 'Fuel boiling point at 1 atm. Critical for storage system design. RP-1: ~500K (room temp storable), LH2: 20.3K (cryogenic), Methane: 111.7K (moderate cryogenic), MMH: 360K, UDMH: 336K.',
-            'liq.ui.fuel_density_at_operating_temperature_rp': 'Fuel density at operating temperature. RP-1: 810, LH2: 71, Methane: 422, MMH: 874, UDMH: 791. Lower density fuels require larger tanks but may offer higher performance.',
+            'liq.ui.fuel_density_at_operating_temperature_rp': 'Fuel density at operating temperature. RP-1: 810, LH2: 71, Methane: 422, MMH: 874, UDMH: 791. Lower density fuels require larger tanks but may offer higher performance. Left blank, the value is auto-filled from the propellant table when the state solution resolves; if it does not resolve, the field stays empty.',
             'liq.ui.fuel_density_f': 'Fuel Density ρf',
-            'liq.ui.fuel_dynamic_viscosity_at_operating_temperature': 'Fuel dynamic viscosity at operating temperature. Affects injection pressure drop and atomization. RP-1: 0.0012, LH2: 0.000013, Methane: 0.00011, MMH: 0.00085. Lower viscosity improves injection.',
+            'liq.ui.fuel_dynamic_viscosity_at_operating_temperature': 'Fuel dynamic viscosity at operating temperature. Affects injection pressure drop and atomization. RP-1: 0.0012, LH2: 0.000013, Methane: 0.00011, MMH: 0.00085. Lower viscosity improves injection. Left blank, the value is auto-filled from the propellant table when the state solution resolves; if it does not resolve, the field stays empty.',
             'liq.ui.fuel_freezing_point': 'Fuel Freezing Point',
             'liq.ui.fuel_freezing_point_important_for_minimum': 'Fuel freezing point. Important for minimum operating temperature. RP-1: ~200K, LH2: 14K, Methane: 90.7K, MMH: 220K, UDMH: 216K. Must stay above this temperature during all operations.',
             'liq.ui.fuel_heat_capacity_cp': 'Fuel Heat Capacity Cp',
@@ -643,9 +756,11 @@
             'liq.ui.manufacturing': 'Manufacturing:',
             'liq.ui.manufacturing_and_simulation_files_generated_fro': 'Manufacturing and simulation files generated from the current solver geometry',
             'liq.ui.mass_breakdown': 'Mass breakdown:',
-            'liq.ui.mass_ratio_of_oxidizer_to_fuel': 'Mass ratio of oxidizer to fuel flow rates. Each propellant combination has an optimal ratio for maximum Isp. LOX/RP-1: 2.5-2.8, LOX/LH2: 5.5-6.0, LOX/Methane: 3.6-3.8. Engine can be optimized for different mission phases.',
+            'liq.ui.mass_ratio_of_oxidizer_to_fuel': 'Mass ratio of oxidizer to fuel flow rates. Each propellant combination has an optimal ratio for maximum Isp. LOX/RP-1: 2.5-2.8, LOX/LH2: 5.5-6.0, LOX/Methane: 3.6-3.8. Engine can be optimized for different mission phases. This field is a required design point: left blank, the request is refused by name (422 incomplete_input).',
             'liq.ui.material_specifications_and_assembly_sequence': 'Material specifications and assembly sequence',
             'liq.ui.max_ambient_temperature': 'Max Ambient Temperature',
+            'liq.ui.min_ambient_temperature': 'Min Ambient Temperature',
+            'liq.ui.minimum_throttle': 'Minimum Throttle',
             'liq.ui.maximum_allowable_hot_side_wall_temperature': 'Maximum allowable hot-side wall temperature. Limited by material properties and coking (for hydrocarbon fuels). Steel: 800K, Inconel: 1200K, Copper: 700K. Critical for engine life.',
             'liq.ui.maximum_burn_duration': 'Maximum Burn Duration',
             'liq.ui.maximum_continuous_operation_time_limited_by': 'Maximum continuous operation time. Limited by cooling system capacity, ablative liner life, or propellant supply. Regeneratively cooled: 300-600s, Ablative: 30-300s, affects mission design.',
@@ -676,7 +791,22 @@
             'liq.ui.multiple_trajectory_parameters_altitude_velocity': 'Multiple trajectory parameters (altitude, velocity, acceleration)',
             'liq.ui.n2o4_nitrogen_tetroxide': 'N2O4 (Nitrogen Tetroxide)',
             'liq.ui.nasa_cea_connected': 'NASA CEA Connected',
-            'liq.ui.nist_webbook_connected': 'NIST WebBook Connected',
+            'liq.ui.nist_webbook_reachable_local': 'NIST WebBook reachable - calculation data: ',
+            'liq.ui.nist_webbook_reachable_not_source': 'NIST WebBook reachable - not the source of the numbers used by this calculation',
+            'liq.ui.nist_webbook_reachable_undeclared': 'NIST WebBook reachable - the endpoint does not declare whether it supplied any number here',
+            // ÖH D23 / P13B2-05 — İLK BOYA ROZETİ HÜKÜM KAZANMADAN
+            // YEŞİL YANMAZ. liquid.html rozetleri sunucu denetimi
+            // (/api/database-status) daha KOŞMADAN "Connected"
+            // basıyordu; kardeş şablonda (solid.html) aynı kusur
+            // P17B2-07 olarak ölçülüp ÖH D21 dalgasında onarıldı.
+            // NOT (ÖH D23 a2): bu sözlük bloğundaki YORUMLARDA tek
+            // tırnak (kesme işareti) KULLANILMAZ. Sözlüğü ayrıştıran
+            // bekçiler (test_faz6_i18n::_lang_block) tırnak sayar ve
+            // yorumu ATLAMAZ; Türkçe ek kesmesi taşıyan tek bir yorum
+            // satırı EN bloğunun sonunu TR bloğunun içine kaydırır ve
+            // üç bekçi birden kırmızıya döner (a1 koşumunda ölçüldü).
+            'liq.ui.nasa_cea_not_checked': 'NASA CEA — not checked yet',
+            'liq.ui.nist_webbook_not_checked': 'NIST WebBook — not checked yet',
             'liq.ui.no_fuel_grain_or_liner': 'No fuel grain or liner:',
             'liq.ui.nozzle': 'Nozzle:',
             'liq.ui.nozzle_efficiency_expansion_efficiency_at_altitu': 'Nozzle efficiency - expansion efficiency at altitude',
@@ -702,9 +832,9 @@
             'liq.ui.optimal_range': 'Optimal range:',
             'liq.ui.oxidizer_boiling_point': 'Oxidizer Boiling Point',
             'liq.ui.oxidizer_boiling_point_at_1_atm': 'Oxidizer boiling point at 1 atm. LOX: 90.2K (cryogenic, requires active cooling), N2O4: 294K (room temperature storable). Affects ground support equipment complexity.',
-            'liq.ui.oxidizer_density_at_operating_temperature_lox': 'Oxidizer density at operating temperature. LOX: 1141, N2O4: 1443. Higher density oxidizers reduce tank volume and vehicle size, critical for spacecraft design.',
+            'liq.ui.oxidizer_density_at_operating_temperature_lox': 'Oxidizer density at operating temperature. LOX: 1141, N2O4: 1443. Higher density oxidizers reduce tank volume and vehicle size, critical for spacecraft design. Left blank, the value is auto-filled from the propellant table when the state solution resolves; if it does not resolve, the field stays empty.',
             'liq.ui.oxidizer_density_ox': 'Oxidizer Density ρox',
-            'liq.ui.oxidizer_dynamic_viscosity_at_operating_temperat': 'Oxidizer dynamic viscosity at operating temperature. LOX: 0.00019, N2O4: 0.00042. Higher viscosity increases injection pressure requirements and affects atomization quality.',
+            'liq.ui.oxidizer_dynamic_viscosity_at_operating_temperat': 'Oxidizer dynamic viscosity at operating temperature. LOX: 0.00019, N2O4: 0.00042. Higher viscosity increases injection pressure requirements and affects atomization quality. Left blank, the value is auto-filled from the propellant table when the state solution resolves; if it does not resolve, the field stays empty.',
             'liq.ui.oxidizer_freezing_point': 'Oxidizer Freezing Point',
             'liq.ui.oxidizer_freezing_point_lox_54_4k': 'Oxidizer freezing point. LOX: 54.4K, N2O4: 262K. Critical for thermal management system design and minimum operating temperature limits.',
             'liq.ui.oxidizer_injection_velocity': 'Oxidizer Injection Velocity',
@@ -736,7 +866,11 @@
             'liq.ui.performance_summary': 'Performance Summary',
             'liq.ui.pintle': 'Pintle',
             'liq.ui.pressure_at_turbopump_exit_or_tank': 'Pressure at turbopump exit or tank pressure for pressure-fed systems. Must overcome chamber pressure plus injection losses. Typically 1.2-1.5x chamber pressure.',
-            'liq.ui.pressure_drop_across_injector_as_percentage': 'Pressure drop across injector as percentage of chamber pressure. Higher ΔP improves mixing and stability but requires higher feed pressure. Typical: 15-25% for good performance.',
+            /* ÖH D37 A1b sivi-kati-form · CW-F1: besleme basıncının çevrime göre
+               anlamı (ölçüm: /calculate_liquid çevrim × alan tablosu). */
+            'liq.ui.feed_pressure_note_pressure_fed': 'Pressure-fed: this is the tank pressure. The solver sizes the propellant tanks and the feed-line and valve pressure budget from it and checks it against the pressure the chamber needs (tank pressure margin).',
+            'liq.ui.feed_pressure_note_turbopump': 'Turbopump cycle: this value is only a target pump discharge pressure. The solver computes the discharge pressure it needs and warns if this value is lower; the tanks are pressurised for pump NPSH only.',
+            'liq.ui.pressure_drop_across_injector_as_percentage': 'Absolute pressure drop across the injector, in BAR. Two modes: (1) leave the field EMPTY and HRMA sizes the drop from the chamber pressure itself; the answer stamps that value “auto (20% of Pc)”. (2) Type a number and it is used AS BAR, stamped “user override”. The solver accepts 0.2-200 bar (liquid_rocket_engine.py, _override_val ‘injector_pressure_drop’); anything outside that band is rejected. A larger drop improves mixing and combustion stability but demands a higher feed pressure.',
             'liq.ui.pressure_fed': 'Pressure-Fed',
             'liq.ui.pressure_of_hot_gas_entering_turbine': 'Pressure of hot gas entering turbine. For gas generators: 10-50% higher than pump discharge. For staged combustion: similar to main chamber pressure.',
             'liq.ui.pressurization_auto_default': 'Auto (default)',
@@ -805,7 +939,7 @@
             'liq.ui.target_mixture_ratio_o_f': 'Target Mixture Ratio (O/F)',
             'liq.ui.target_thrust': 'Target Thrust',
             'liq.ui.target_thrust_chamber_pressure': 'Target thrust, Chamber pressure',
-            'liq.ui.target_thrust_level_for_the_liquid': 'Target thrust level for the liquid engine. Small thrusters: 10-1000N, Medium engines: 1-100kN, Large boosters: 100kN-2MN (F-1). Determines engine size, mass flow, and cooling requirements.',
+            'liq.ui.target_thrust_level_for_the_liquid': 'Target thrust level for the liquid engine. Small thrusters: 100-1000N, Medium engines: 1-100kN, Large boosters: 100kN-2MN (F-1). Accepted range: 100 N - 10 MN. Determines engine size, mass flow, and cooling requirements. This field is a required design point: left blank, the request is refused by name (422 incomplete_input).',
             'liq.ui.target_thrust_to_weight_t_w': 'Target Thrust-to-Weight T/W',
             'liq.ui.technical_drawings_pdf': 'Technical drawings PDF:',
             'liq.ui.technical_drawings_pdf_2': 'Technical Drawings PDF',
@@ -815,7 +949,6 @@
             'liq.ui.the_liquid_oxidizer_component_lox_cryogenic': 'The liquid oxidizer component. LOX: cryogenic liquid oxygen (1141 kg/m³), high performance, requires insulation. N2O4: storable nitrogen tetroxide (1443 kg/m³), hypergolic with hydrazine fuels, toxic but widely used in spacecraft.',
             'liq.ui.theoretical_perfect_combustion_ratio_where_all': 'Theoretical perfect combustion ratio where all fuel and oxidizer are consumed. LOX/RP-1: 3.4, LOX/LH2: 8.0, LOX/Methane: 4.0. Actual engines run fuel-rich for cooling and performance.',
             'liq.ui.thermal_conductivity_f': 'Thermal Conductivity λf',
-            'liq.ui.throttle_range': 'Throttle Range',
             'liq.ui.throttle_response_time': 'Throttle Response Time',
             'liq.ui.throttling_o_f_strategy': 'Throttling O/F Strategy',
             'liq.ui.thrust_kn_decreases_with_altitude_due': 'Thrust (kN) - decreases with altitude due to back pressure',
@@ -863,10 +996,17 @@
             'liq.ui.y_axis': 'Y-axis:',
             'solid.attr.knsu_apcp_etc': 'KNSU, APCP, etc.',
             'solid.attr.catalog_value_unless_set': 'catalog value unless set',
+            'solid.attr.case_thickness_blank': 'blank = solver sizes it',
+            'solid.attr.two_phase_blank': 'blank = no user factor',
             'solid.fea.title': 'Grain Section FEA — Plane-Strain Stress and Bore Strain',
             'solid.fea.intro': 'A 2D plane-strain finite element run on the propellant grain cross-section of THIS design (star, finocyl and slotted ports are not axisymmetric, so the wall solver cannot see them). The section polygon is built on the server from the motor solver itself; the acceptance quantity is the bore surface STRAIN against the propellant strain capability. If an input is missing, nothing is drawn and the reason is named.',
             'solid.fea.run': 'Run grain section FEA',
             'solid.fea.busy': 'Running — the solver refines the section mesh until the peak stress stops changing; the duration is not known in advance.',
+            /* ÖH D23 / P17B1-18 + P17B4-07 — meşgul satırı artık geçen
+               süreyi ve süre sınırını yazar; zaman aşımı sessiz
+               düşmez, kendi adıyla beyan edilir. */
+            'solid.fea.busy_elapsed': 'Elapsed {s} s; the request is cancelled after {limit} s.',
+            'solid.fea.timeout': 'The grain FEA run was cancelled after {s} s without a reply from the solver. Nothing was computed. Try a coarser mesh, then run it again.',
             'solid.fea.show_mesh': 'Show mesh wireframe',
             'solid.fea.mesh_trace': 'Mesh ({n} elements)',
             'solid.fea.chart_vm': 'von Mises stress on the grain cross-section [MPa]',
@@ -886,6 +1026,12 @@
             'solid.fea.badge_slice': '1/{n} slice',
             'solid.fea.badge_mesh': 'MESH {elems} elements / {nodes} nodes',
             'solid.fea.badge_vm': 'PEAK von MISES {v} MPa (Gauss points)',
+            'solid.fea.badge_vm_nodal': 'MAP PEAK von MISES {v} MPa (nodal / SPR — this is the value the contour map and the convergence chart are drawn from)',
+            'solid.fea.badge_max_principal': 'PEAK MAX PRINCIPAL {v} MPa (nodal maximum of fields.max_principal_pa — the tensile quantity the grain fracture criterion is written in)',
+            'solid.fea.cancel': 'Cancel run',
+            'solid.fea.cancelled': 'You stopped the grain FEA run after {s} s. Nothing was computed and no result was changed.',
+            'solid.fea.badge_worst_quality': 'WORST ELEMENT — aspect ratio {ar} ({arX}x the threshold), scaled Jacobian {sj}',
+            'solid.fea.gauss_note': 'The headline peak stress is taken at the Gauss points of the elements; the contour map and the convergence chart show the stress recovered at the nodes, so the extreme value read off the map can differ from the headline number. Both are printed above. Neither is rescaled to match the other.',
             'solid.fea.badge_strain': 'MAX BORE STRAIN {v}% of {cap}% capability',
             'solid.fea.badge_margin': 'STRAIN MARGIN {v} (capability / peak strain)',
             'solid.fea.badge_margin_missing': 'STRAIN MARGIN NOT PUBLISHED (no strain capability record)',
@@ -917,6 +1063,12 @@
             'solid.js.additives': 'Additives:',
             'solid.js.aft_insulation': 'Aft closure / nozzle entry:',
             'solid.js.altitude_performance': 'Altitude Performance',
+            // ÖH D28 · P12bB2-14 — irtifa eğrisinin ε beyanı
+            'solid.js.altitude_eps_per_row': 'Each point on this curve belongs to a DIFFERENT nozzle: the solver re-expands the nozzle optimally for the ambient pressure of that altitude.',
+            'solid.js.altitude_eps_design': 'Your design is fixed at',
+            'solid.js.altitude_eps_clamped': 'Expansion ratio clamped',
+            'solid.js.altitude_eps_rows': 'rows',
+            'solid.js.altitude_eps_uncapped': 'uncapped optimum',
             'solid.js.assembly': 'Assembly:',
             'solid.js.atmospheric': 'Atmospheric',
             'solid.js.average_thrust_coefficient': 'Average Thrust Coefficient:',
@@ -976,6 +1128,16 @@
             'solid.js.igniter_burn_time': 'Burn time:',
             'solid.js.igniter_charge': 'Igniter Charge',
             'solid.js.ignition_pressure': 'Target ignition pressure:',
+            /* ÖH D29 / P12bB2-22 — ATEŞLEME EMNİYETİ TABLOSUNDA HESAPTAN
+               GELMEYEN İKİ SATIR. Ölçüldü (a2/once.json M8): dört satırın
+               ikisi (`ignition_system`, `minimum_safe_distance_m`) uçtan
+               geliyor, ikisi (KKD, yangın söndürme) SABİT metin — tabloda
+               ayırt edilemiyorlardı, genel-kılavuz künyesi sıfırdı.
+               Tavsiyenin kendisi yanlış değil, bu yüzden satır SİLİNMEZ;
+               kullanıcı hangi satırın KENDİ tasarımından çıktığını görsün
+               diye künyelenir (sahte veri değil, kaynağı beyan edilmemiş
+               veri sorunu). */
+            'solid.js.general_requirement_not_computed': 'general requirement - not computed from this design',
             'solid.js.ignition_safety': 'Ignition Safety',
             'solid.js.ignition_system': 'Ignition System:',
             'solid.js.inner_diameter': 'Inner Diameter:',
@@ -999,6 +1161,16 @@
             'solid.js.motor_assembly_properties': 'Motor Assembly Properties',
             'solid.js.nominal': 'Nominal',
             'solid.js.not_classified': 'not classified',
+            // V3 KK 3. tur (§28-50 (c)): çözücünün sınıf kodları (solid.html solidClassText).
+            'solid.js.class.low': 'Low',
+            'solid.js.class.medium': 'Medium',
+            'solid.js.class.high': 'High',
+            'solid.js.class.good': 'Good',
+            'solid.js.class.marginal': 'Marginal',
+            'solid.js.class.poor': 'Poor',
+            'solid.js.class.excellent': 'Excellent',
+            'solid.js.class.adequate': 'Adequate',
+            'solid.js.class.inadequate_service': 'Inadequate — case exceeds its service temperature',
             'solid.js.not_computed': 'not computed',
             'solid.js.not_sized': 'not sized by HRMA',
             'solid.js.not_tabulated': 'not tabulated',
@@ -1101,7 +1273,7 @@
             'solid.msg.export_downloaded': '{label} downloaded',
             'solid.msg.export_failed': '{label} export failed: {error}',
             'solid.msg.failed_to_copy': 'Failed to copy:',
-            'solid.msg.failed_to_copy_data_check_console': 'Failed to copy data. Check console for details.',
+            'solid.msg.failed_to_copy_data_check_console': 'Could not copy to the clipboard. Copy the data from the window below.',
             'solid.msg.fields_reset_to_catalogue_values': 'Fields reset to catalogue values',
             'solid.msg.final_burning_surface_cm2': 'Final burning surface (cm2)',
             'solid.msg.form_kg': 'Form (kg)',
@@ -1134,10 +1306,22 @@
             'solid.msg.monte_carlo_analysis_failed': 'Monte Carlo analysis failed',
             'solid.msg.monte_carlo_error': 'Monte Carlo error: ',
             'solid.msg.motor_case': 'Motor Case',
+            // ÖH D28 · P12bB2-19 — i18n boğazından geçmeyen kullanıcı metinleri
+            'solid.msg.nozzle': 'Nozzle',
+            'solid.js.error_prefix': 'Error',
+            'solid.js.computing': 'Computing...',
+            'solid.js.frequency_axis': 'Frequency',
+            'solid.js.eng_downloaded': '.eng file downloaded',
+            'solid.js.eng_export_error': '.eng export error',
+            'solid.js.mc_success_rate': 'Success Rate ({n} runs)',
+            'solid.js.mc_thrust': 'Thrust',
+            'solid.js.mc_failed_runs': '{n} runs did not converge (excluded from the statistics).',
             'solid.msg.motor_cross_section_could_not_be': 'Motor cross-section could not be drawn:',
             'solid.msg.motor_dry_mass': 'Motor dry mass',
             'solid.msg.motor_length': 'Motor Length',
+            'solid.msg.nasa_cea_check_failed': 'NASA CEA - status check failed',
             'solid.msg.nasa_cea_offline': 'NASA CEA Offline',
+            'solid.msg.nist_webbook_check_failed': 'NIST WebBook - status check failed',
             'solid.msg.nist_webbook_offline': 'NIST WebBook Offline',
             'solid.msg.no_results_to_analyze_please_run': 'No results to analyze. Please run calculations first.',
             'solid.msg.nozzle_length': 'Nozzle Length',
@@ -1159,6 +1343,18 @@
             'solid.msg.pressure_bar': 'Pressure (bar)',
             'solid.msg.propellant_applied': '{name} applied - {applied} field(s) filled',
             'solid.msg.propellant_grain': 'Propellant Grain',
+            // ÖH D28 · P12bB2-04 / -11 / -12 — çözücünün beyan katmanı.
+            'solid.msg.unwired_computed_by_solver': 'Computed by the solver; your value is not used',
+            'solid.msg.unwired_reported_not_double_counted': 'Reported as declared; not applied a second time',
+            'solid.msg.unwired_structural_output': 'Output of the structural analysis; your value is not used',
+            'solid.msg.unwired_test_bench_only': 'Test-bench parameter: describes the measurement chain, not the motor',
+            'solid.msg.unwired_geometry_not_modelled': 'This geometric detail is not modelled by the solver',
+            'solid.msg.unwired_catalogue_thermochemistry': 'Comes from the propellant catalogue thermochemistry; your value is not used',
+            'solid.msg.unwired_informational': 'Reference only: not used by the solver',
+            'solid.msg.unwired_other': 'Declared by the solver as not used in this run (category: {category})',
+            'solid.msg.clipped_input': 'Clipped by the solver: the computed result does NOT use the value you entered',
+            'solid.msg.assumed_default': 'No value supplied: the solver assumed its own default',
+            'solid.msg.divergence_not_published': 'The solver published no divergence loss for this run',
             'solid.msg.propellant_mass_kg': 'Propellant mass (kg)',
             'solid.msg.propellants_loaded': '{n} propellants loaded from the central catalogue.',
             'solid.msg.recovery_assumed': '(assumed)',
@@ -1241,7 +1437,11 @@
             // tutarlı — varsayılanlarda 500/100 = 5:1, tek segmentte 1,67:1.
             'solid.ui.axial_length_of_individual_propellant_grain': 'Total axial length of the propellant stack, not of a single segment. The solver splits this length across the segment count (each BATES segment is L / N long), so changing the segment count does not change the propellant mass. Longer stacks provide more total impulse but may cause combustion instability. Stack length to outer diameter ratio should typically be 3:1 to 8:1.',
             'solid.ui.bates_cylindrical': 'BATES (Cylindrical)',
-            'solid.ui.bates_neutral_star_progressive_end_burner': 'BATES (neutral), Star (progressive), End-burner (regressive)',
+            'solid.ui.burn_profile_awaiting': 'classified by the solver from the burn area history of this run - run the analysis to see it',
+            'solid.ui.burn_profile_neutral': 'neutral',
+            'solid.ui.burn_profile_progressive': 'progressive',
+            'solid.ui.burn_profile_regressive': 'regressive',
+            'solid.ui.burn_profile_unclassified': 'not classified for this run by the solver',
             'solid.ui.bates_star_wagon_wheel_or_end': 'BATES, Star, Wagon Wheel, or End-burner configuration',
             'solid.ui.blue_gradient': 'Blue gradient:',
             'solid.ui.bolt_property_class_iso_898_1': 'Bolt property class: 8.8 / 10.9 / 12.9 (ISO 898-1) or A2-70 stainless (ISO 3506-1). Sets proof strength and therefore the preload.',
@@ -1366,7 +1566,7 @@
             'solid.ui.free_volume_inside_the_motor_case': 'Free volume inside the motor case excluding propellant volume. Affects chamber pressure buildup and combustion dynamics. Include volume of forward and aft chambers.',
             'solid.ui.front_face': 'Front Face',
             'solid.ui.fuel': 'Fuel',
-            'solid.ui.geometric_configuration_of_the_solid_propellant': 'Geometric configuration of the solid propellant grain. BATES: cylindrical with core hole, neutral thrust. Star: star-shaped core for progressive thrust. Finocyl: fins for high burning surface. Wagon Wheel: multiple cores for regressive thrust. End Burner: burns from one end only.',
+            'solid.ui.geometric_configuration_of_the_solid_propellant': 'Geometric configuration of the solid propellant grain. BATES: cylinder with a central core port. Star: star-shaped core port. Finocyl: core port with fins for a larger burning surface. Wagon Wheel: multiple core ports. End Burner: no core port, burns from one end only. The thrust profile is NOT fixed by the shape alone (it also depends on the inhibitor layout and the port-to-throat ratio); this run\u0027s profile is classified by the solver and printed under \u0022Thrust Curve\u0022.',
             'solid.ui.grain_geometry': 'Grain geometry:',
             'solid.ui.grain_length': 'Grain Length',
             'solid.ui.grain_to_grain_gap': 'Grain-to-Grain Gap',
@@ -1385,7 +1585,7 @@
             'solid.ui.in_millimetres_mm': 'In millimetres (mm)',
             'solid.ui.inhibitor_coating': 'Inhibitor Coating',
             'solid.ui.initial_chamber_temperature_before_ignition_affe': 'Initial chamber temperature before ignition. Affects propellant burn rate and pressure buildup. Standard conditions: 298K (25°C). Cold weather reduces performance.',
-            'solid.ui.initial_diameter_of_the_central_core': 'Initial diameter of the central core hole (port diameter). Determines initial burning surface area and thrust profile. Smaller cores give progressive thrust, larger cores give regressive thrust.',
+            'solid.ui.initial_diameter_of_the_central_core': 'Initial diameter of the central core hole (port diameter). Determines initial burning surface area and thrust profile. Measured in this solver for a BATES grain with burning ends (10-60 mm cores): the end plateau is below the start plateau at every core (end/start 0.09-0.49) and a larger core falls off less, but the trend is not monotonic (0.11 at 10 mm, 0.09 at 15 mm, 0.21 at 30 mm, 0.49 at 60 mm). At 10 mm the solver classifies the curve as Progressive-Regressive (thrust rises first, then falls), so this is not a single class over the whole core range. The published shape class comes from thrust_profile_analysis.thrust_curve_type in the result, not from this hint.',
             'solid.ui.initial_temperature': 'Initial Temperature',
             'solid.ui.initial_wet_mass_kg': 'Initial (Wet) Mass (kg)',
             'solid.ui.inputs': 'Inputs:',
@@ -1432,7 +1632,12 @@
             'solid.ui.motor_specifications': 'Motor Specifications',
             'solid.ui.name': 'Name',
             'solid.ui.nasa_cea_connected': 'NASA CEA Connected',
-            'solid.ui.nist_webbook_connected': 'NIST WebBook Connected',
+            'solid.ui.nist_webbook_reachable_local': 'NIST WebBook reachable - calculation data: ',
+            'solid.ui.nist_webbook_reachable_not_source': 'NIST WebBook reachable - not the source of the numbers used by this calculation',
+            'solid.ui.nist_webbook_reachable_undeclared': 'NIST WebBook reachable - the endpoint does not declare whether it supplied any number here',
+            /* ÖH D21 / P17B2-07 — açılış rozetinin BAŞLANGIÇ metni. */
+            'solid.ui.nasa_cea_not_checked': 'NASA CEA — not checked yet',
+            'solid.ui.nist_webbook_not_checked': 'NIST WebBook — not checked yet',
             'solid.ui.nozzle': 'Nozzle',
             'solid.ui.nozzle_discharge_efficiency_cf': 'Nozzle Discharge Efficiency (Cf)',
             'solid.ui.nozzle_efficiency_n': 'Nozzle Efficiency ηn',
@@ -1464,7 +1669,7 @@
             'solid.ui.peak_thrust': 'Peak thrust:',
             'solid.ui.percentage_of_runs_that_meet_the': 'Percentage of runs that meet the thrust / Isp / peak-pressure acceptance criteria',
             'solid.ui.performance_analysis_dashboard': 'Performance Analysis Dashboard',
-            'solid.ui.performance_reduction_due_to_solid_particles': 'Performance reduction due to solid particles (alumina) in exhaust gas. Particles have lower expansion efficiency than gas. Typical values: 0.96-0.99.',
+            'solid.ui.performance_reduction_due_to_solid_particles': 'Performance reduction due to solid particles (alumina) in exhaust gas. Particles have lower expansion efficiency than gas. Typical values: 0.96-0.99. Left blank, the solver applies no user two-phase factor and declares that in isp_loss_breakdown.',
             'solid.ui.performance_summary': 'Performance Summary',
             'solid.ui.phenolic': 'Phenolic',
             'solid.ui.pick_a_propellant_row_to_load': 'Pick a propellant row to load its validated properties into the form below.',
@@ -1558,7 +1763,7 @@
             'solid.ui.velocity': 'Velocity:',
             'solid.ui.vertical_ascent_trajectory_driven_by_the': 'Vertical ascent trajectory driven by the motor thrust curve of this design',
             'solid.ui.wagon_wheel': 'Wagon Wheel',
-            'solid.ui.wall_thickness_of_motor_case_must': 'Wall thickness of motor case. Must be sufficient to withstand internal pressure with adequate safety factor. Calculated from hoop stress formula or specified directly.',
+            'solid.ui.wall_thickness_of_motor_case_must': 'Wall thickness of motor case. Must be sufficient to withstand internal pressure with adequate safety factor. Calculated from hoop stress formula or specified directly. Left blank, the solver sizes the wall itself from the Barlow thin-wall relation and declares that it did so.',
             'solid.ui.warnings': 'Warnings',
             'solid.ui.web_thickness': 'Web Thickness',
             'solid.ui.what_it_does': 'What it does:',
@@ -1570,15 +1775,29 @@
             'solid.ui.y_axis': 'Y-axis:',
             'solid.ui.yield_mpa': 'Yield (MPa)',
             'solid.ui.yield_strength_of_case_material_steel': 'Yield strength of case material. Steel: 200-400 MPa, Aluminum: 100-300 MPa, Composite: 300-800 MPa. Used for case stress analysis and wall thickness calculation.',
-            'solid.ui.yield_strength_y': 'Yield Strength σy'
+            'solid.ui.yield_strength_y': 'Yield Strength σy',
         },
         tr: {
+            /* OH-D33-48 - EN bloğundaki kardeş notu gör (ölçüm oradadır). */
+            'liq.attr.autofilled_table': 'otomatik: itici tablosundan',
             'liq.attr.blank_from_contraction': 'boş = daralma oranından hesaplanır',
-            'liq.attr.gimbal_blank_min_3': 'örn. 12 - en az 3, boş: cıvata yükleri atlanır',
-            'liq.attr.gimbal_blank_no_bolt_loads': 'örn. 600 - boş: cıvata yükleri atlanır',
+            'liq.attr.gimbal_blank_min_3': 'örn. 12 - en az 3, boş: yük yok',
+            'liq.attr.gimbal_blank_no_bolt_loads': 'örn. 600 - boş: cıvata yükü yok',
             'liq.attr.gimbal_blank_not_analysed': 'örn. 0.5 - boş: analiz edilmez',
-            'liq.attr.gimbal_blank_pivot_plane': 'örn. 0.3 - boş: halka pivot düzleminde (h = 0)',
+            'liq.attr.gimbal_blank_pivot_plane': 'örn. 0.3 - boş: h = 0',
             'liq.attr.min_k': 'En az (K)',
+            'liq.attr.required_blank_422': 'zorunlu: boş = 422 reddi',
+            /* ÖH D29 / P12bB1-14 — EN bloğundaki kardeş notu gör.
+               'Nozzle' -> 'Nozul' terim kanonuna uyar
+               (tests/test_z5i18n_supurme.py TERMS). */
+            'liq.diag.combustion_chamber': 'Yanma<br>Odası',
+            'liq.diag.fuel_pump': 'Yakıt<br>Pompası',
+            'liq.diag.fuel_tank': 'Yakıt<br>Tankı',
+            'liq.diag.injector': 'Enjektör',
+            'liq.diag.nozzle': 'Nozul',
+            'liq.diag.oxidizer_pump': 'Oksitleyici<br>Pompası',
+            'liq.diag.oxidizer_tank': 'Oksitleyici<br>Tankı',
+            'liq.diag.pressure_fed': 'Basınç<br>Beslemeli',
             'liq.js.3d_engine_visualization': '3B Motor Görselleştirmesi',
             'liq.js.altitude_performance_analysis': 'İrtifa Performansı Analizi',
             'liq.js.anti_vortex': 'Girdap Önleyici:',
@@ -1608,6 +1827,7 @@
             'liq.js.density_label': 'Yoğunluk:',
             'liq.js.cost_schedule': 'Maliyet ve termin:',
             'liq.js.design_summary': 'Tasarım Özeti',
+            'liq.js.detailed_cad_generation_failed': 'Ayrıntılı CAD üretimi başarısız: {error}',
             'liq.js.detailed_engineering_visualization_with_cross_se': 'Kesit görünümlü ayrıntılı mühendislik görselleştirmesi',
             'liq.js.diameter': 'Çap:',
             'liq.js.dimethylhydrazine': 'Dimetilhidrazin',
@@ -1627,6 +1847,9 @@
             'liq.js.gimbal_axial_thrust': 'Eksenel İtki:',
             'liq.js.gimbal_bolt_axial_share': 'Cıvata Başına Eksenel Pay:',
             'liq.js.gimbal_bolt_moment_max': 'En Büyük Cıvata Yükü (momentten):',
+            'liq.js.gimbal_bolt_net_compression': 'net bası, bu yük yolunda cıvatada çekme yok',
+            'liq.js.gimbal_bolt_net_compressive': 'Net Cıvata Yükü (eksenel basma; + çekme / - bası):',
+            'liq.js.gimbal_bolt_net_tension': 'net çekme',
             'liq.js.gimbal_bolt_shear': 'Cıvata Başına Kesme:',
             'liq.js.gimbal_bolt_tension_compressive': 'En Büyük Cıvata Çekmesi (eksenel basma):',
             'liq.js.gimbal_bolt_tension_tensile': 'En Büyük Cıvata Çekmesi (eksenel çekme):',
@@ -1664,6 +1887,12 @@
             'liq.js.mass_flow': 'Kütle Debisi:',
             'liq.js.mass_fraction': 'Kütle Oranı:',
             'liq.js.material': 'Malzeme:',
+            // ÖH D28 · P12aB2-06 — tank kartındaki bağlanmamış metinler.
+            'liq.js.oxidizer_tank_card': 'Oksitleyici Tankı ({propellant})',
+            'liq.js.fuel_tank_card': 'Yakıt Tankı ({propellant})',
+            'liq.js.perforated_rings': '{n} delikli halka',
+            'liq.js.radial_vanes': '{n} radyal kanatçık',
+            'liq.js.capacitive_probes': '{n} kapasitif prob',
             'liq.js.materials': 'Malzemeler:',
             'liq.js.methane': 'Metan',
             'liq.js.mixture_ratio': 'Karışım Oranı:',
@@ -1684,19 +1913,23 @@
             'liq.js.plotly_library_required_for_detailed_cad': 'Ayrıntılı CAD görselleştirmesi için Plotly kitaplığı gerekir',
             'liq.js.pressure_rating': 'Basınç Sınıfı:',
             'liq.js.propellant_label': 'Yakıt:',
-            'liq.js.propellant_mass': 'Yakıt Kütlesi:',
+            'liq.js.propellant_mass': 'İtici Kütlesi:',
             'liq.js.propellants': 'İticiler:',
             'liq.js.real_time_data': 'Gerçek Zamanlı Veri',
             'liq.js.real_time_propellant_data_integration': 'Gerçek zamanlı itici verisi bütünleşmesi',
             'liq.js.reliability': 'Güvenilirlik:',
             'liq.js.reliability_not_published': 'yayımlanmıyor - HRMA\'da turbopompa güvenilirlik modeli yok',
             'liq.js.relief_valve': 'Emniyet Vanası:',
+            'liq.js.row_coolant': 'Soğutucu',
+            'liq.js.row_material': 'Malzeme',
+            'liq.js.row_status': 'Durum',
+            'liq.js.row_title': 'Başlık',
             'liq.js.rpm': 'Devir/dak:',
             'liq.js.safety_margin': 'Emniyet Payı:',
             'liq.js.slosh_baffles': 'Çalkalanma Perdeleri:',
             'liq.js.source_label': 'Kaynak:',
             'liq.js.space_application': 'Uzay Uygulaması:',
-            'liq.js.tank_internal_structures': 'Tank İç Yapıları',
+            'liq.js.tank_internal_structures': 'Oksitleyici Tankı İç Yapıları',
             'liq.js.tank_mass': 'Tank Kütlesi:',
             'liq.js.tank_system_summary': 'Tank Sistemi Özeti',
             'liq.js.throat_diameter': 'Boğaz Çapı:',
@@ -1707,6 +1940,7 @@
             'liq.js.total_propellant': 'Toplam İtici:',
             'liq.js.total_tank_mass': 'Toplam Tank Kütlesi:',
             'liq.js.total_volume': 'Toplam Hacim:',
+            'liq.js.trajectory_could_not_be_computed': 'Yörünge hesaplanamadı: {message}',
             'liq.js.trajectory_needs_results': 'Önce motor hesabını çalıştırın - yörünge, hesaplanan itki ve özgül itkiye ihtiyaç duyar.',
             'liq.js.turbine_power': 'Türbin Gücü:',
             'liq.js.turbopump_system': 'Turbopompa Sistemi',
@@ -1789,11 +2023,28 @@
             'liq.msg.expansion_ratio_ae_at': 'Genleşme Oranı (Ae/At)',
             'liq.msg.export_downloaded': '{label} indirildi',
             'liq.msg.export_failed': '{label} dışa aktarımı başarısız: {error}',
-            'liq.msg.export_only_note': 'Yalnızca OpenRocket .eng çıktısında (yanma süresi) kullanılır; hesaplanan kararlı hâl değerini değiştirmez.',
-            'liq.msg.export_only_openrocket_eng_burn_time': 'Yalnızca dışa aktarım (OpenRocket .eng yanma süresi)',
             'liq.msg.export_tank_cad_files_step_stl': 'Tank CAD Dosyalarını Dışa Aktar (STEP/STL)',
+            /* ÖH D36 · kulvar onemli2-sivi (a1 anahtarları, TR; a2 turunda
+               i18n_common.js sözlüğünden taşındı). */
+            'liq.ui.optional_mark': '(isteğe bağlı)',
+            'liq.js.burn_time_not_supplied': 'yayımlanmadı: yanma süresi verilmedi ("Azami Yanma Süresi" alanını doldurun; varsayılan kabul edilmez)',
+            'liq.js.propellant_tanks_title': 'İtici Tankları',
+            'liq.js.tank_card_not_modelled': 'İtici tankları boyutlandırılmadı: yanma süresi verilmedi ve varsayılan kabul edilmez. "Azami Yanma Süresi" alanını doldurup yeniden hesaplayın.',
+            'liq.msg.eng_export_failed_detail': '.eng dışa aktarımı başarısız: {error}',
+            'liq.msg.eng_file_downloaded': '.eng dosyası indirildi',
+            'liq.msg.eng_not_generated_status': '.eng üretilmedi: {detail}',
+            'liq.cyc.chug_state_risk': 'chug riski',
+            'liq.cyc.chug_state_marginal': 'sınırda marj',
+            'liq.cyc.chug_state_ok': 'marj yeterli',
+            'liq.cyc.chug_state_not_evaluated': 'değerlendirilmedi (ΔP/Pc çözülemedi)',
+            'liq.cyc.chug_state_unknown': 'bilinmeyen durum: {value}',
+            'liq.js.gimbal_unknown_field': 'bilinmeyen alan: {field}',
+            /* ÖH D36 onemli2-sivi a1 ek denetçi şartı 3 (TR). */
+            'liq.msg.eng_gate_fields_missing': 'tasarım sonucunda {fields} yok; yer tutucu motor yazılmaz',
+            'liq.js.eng_field_thrust_curve': 'İtki Eğrisi',
+            'liq.js.eng_gate_unlabelled_field': 'bu sayfada etiketi tanımlanmamış alan: {field}',
             'liq.msg.failed_to_copy': 'Kopyalanamadı:',
-            'liq.msg.failed_to_copy_data_check_console': 'Veri kopyalanamadı. Ayrıntılar için konsolu inceleyin.',
+            'liq.msg.failed_to_copy_data_check_console': 'Panoya kopyalanamadı. Veriyi aşağıdaki pencereden kopyalayın.',
             'liq.msg.feed_line_drop_bar': 'Besleme hattı düşümü (bar)',
             'liq.msg.feed_system_data': 'Besleme sistemi verileri:',
             'liq.msg.feed_system_mass_kg': 'Besleme sistemi kütlesi (kg)',
@@ -1838,12 +2089,15 @@
             'liq.msg.losses_outside_budget': 'Toplam verim çarpımının parçası değil (yalnız tasarım karşılaştırması, pasta grafiğe girmez):',
             'liq.msg.main_valve_drop_bar': 'Ana vana düşümü (bar)',
             'liq.msg.manufacturing_analysis': 'Üretim analizi:',
-            'liq.msg.manufacturing_specifications_n': '• Üretim özellikleri\n',
+            'liq.msg.manufacturing_specifications_n': '• İmalat kontrol listesi ŞABLONU (manufacturing_checklist_TEMPLATE.json) — doldurulmamış şablon, hazır spesifikasyon değil\n',
+            'liq.msg.material_allowable_temperature': 'malzemenin izin verilen sıcaklığı (station_march.material_allowable_K) = {value} K',
             'liq.msg.mixture_ratio_o_f': 'Karışım Oranı (O/F)',
             'liq.msg.mixture_ratio_o_f_2': 'Karışım oranı (O/F)',
             'liq.msg.mixture_ratio_optimization': 'Karışım Oranı Optimizasyonu',
             'liq.msg.motor_cross_section_could_not_be': 'Motor kesiti çizilemedi:',
+            'liq.msg.nasa_cea_check_failed': 'NASA CEA - durum denetimi başarısız',
             'liq.msg.nasa_cea_offline': 'NASA CEA Çevrimdışı',
+            'liq.msg.nist_webbook_check_failed': 'NIST WebBook - durum denetimi başarısız',
             'liq.msg.nist_webbook_offline': 'NIST WebBook Çevrimdışı',
             'liq.msg.nitrogen_tetroxide': 'Diazot Tetroksit',
             'liq.msg.no_results_to_analyze_please_run': 'Yorumlanacak sonuç yok. Önce hesapları çalıştırın.',
@@ -1882,10 +2136,10 @@
             'liq.msg.propellant_tank_data': 'Yakıt tankı verileri:',
             'liq.msg.propellant_tank_system_3d_cad_view': 'Yakıt Tankı Sistemi - 3B CAD Görünümü',
             'liq.msg.real_time_property_loading_error': 'Gerçek zamanlı özellik yükleme hatası:',
-            'liq.msg.safety_factor': 'Emniyet Katsayısı',
+            'liq.msg.design_sf_target': 'Tasarım emniyet katsayısı hedefi (geri okunan, ölçüm değil)',
+            'liq.msg.hoop_sf_operating': 'Çizilen cidarda çember SF (işletme basıncı, yalnız basınç yükü, sıcak cidar sıcaklığında akma dayanımı)',
             'liq.msg.sea_level_isp': 'Deniz Seviyesi Isp',
             'liq.msg.sea_level_isp_s': 'Deniz seviyesi Isp (s)',
-            'liq.msg.set_a_positive_maximum_burn_duration': '.eng dosyasını dışa aktarmadan önce pozitif bir "Azami Yanma Süresi" girin',
             'liq.msg.sixdof_engine_coupled': 'Motora bağlı koşum: itki {thrust} N, yanma süresi = yakıt {mprop} kg / motor kütle debisi {mdot} kg/s = {burn} s (toplam impuls {it} N·s, buradan çıkan Isp {isp} s). Yanma süresi burada türetilir, yukarıdaki Yanma Süresi alanından okunmaz: motorun itkisini ilgisiz bir yanma süresiyle eşleştirmek roket denklemini çiğner.',
             'liq.msg.sixdof_form_values': 'Bu panelin İtki / Yanma Süresi alanlarıyla koşuluyor (motor bağlantısı kapalı ya da motorun kütle debisi yok). Bu iki değer yakıt kütlesine karşı denetlenmiyor.',
             'liq.msg.sixdof_nozzle_wider_than_body': 'Geometri çelişkisi: nozul çıkış çapı {exit} mm, oysa araç gövde çapı {body} mm — bu gövde bu motoru taşıyamaz.',
@@ -1925,6 +2179,9 @@
             'liq.msg.unwired_fields_not_on_page': 'Çözücü, bu sayfada gösterilmeyen girdiler bildirdi: {fields}',
             'liq.msg.unwired_informational': 'Yalnızca referans: çözücü kullanmıyor',
             'liq.msg.unwired_note': 'Çözücüye henüz bağlanmadı: bu değer tasarımla birlikte kaydedilir ama hesaplanan değeri değiştirmez.',
+            'liq.msg.fuel_density_other_fuel': 'Yakıt yoğunluğu {rho} kg/m³, yakıt {prev} iken elle girildi; seçili yakıt artık {fuel}. Değer korunuyor ve sizin girdiniz olarak gönderiliyor — denetleyin.',
+            'liq.msg.fuel_density_table_value': '{fuel} için itici tablosu değeri: {table} kg/m³.',
+            'liq.msg.fuel_density_no_table_value': 'İtici tablosunda {fuel} için hâl çözümlü yoğunluk yok.',
             'liq.msg.unwired_other': 'Çözücü bu koşuda kullanmadığını bildirdi (kategori: {category})',
             'liq.msg.unwired_transient': 'Başlatma/durdurma geçici rejimi henüz modellenmiyor',
             'liq.msg.vacuum_expansion_ratio': 'Vakum Genleşme Oranı',
@@ -1969,7 +2226,6 @@
             'liq.ui.altitude_profile_km_showing_ascent_trajectory': 'Tırmanış yörüngesini gösteren irtifa profili (km)',
             'liq.ui.altitude_range_for_engine_operation_sea': 'Motorun çalışacağı irtifa aralığı. Deniz seviyesi: tam atmosfer, uzay: vakum. Nozul tasarımını ve performans optimizasyonunu etkiler. Deniz seviyesinde aşırı genleşme verimi düşürür.',
             'liq.ui.aluminum_6061': 'Alüminyum 6061',
-            'liq.ui.ambient_temperature_range': 'Ortam Sıcaklığı Aralığı',
             'liq.ui.analysis_results': 'Analiz Sonuçları',
             'liq.ui.ask_ai_to_analyze_results': 'Sonuçları Yapay Zekâya Yorumlat',
             'liq.ui.axial_cross_section_of_the_engine': 'Çözücü geometrisinden ölçekli çizilen motorun eksenel kesiti (tüm ölçüler mm)',
@@ -1981,7 +2237,8 @@
             'liq.ui.blue_cyan': 'Mavi/Camgöbeği:',
             'liq.ui.blue_line': 'Mavi çizgi:',
             'liq.ui.both_propellants_are_liquid_so_the': 'Her iki itici de sıvı olduğundan enjektör yüzü ile boğaz arasındaki oda boştur',
-            'liq.ui.burn_time_s': 'Yanma Süresi (s)',
+            'liq.ui.burn_time_derived_from_mdot': 'Yanma Süresi (s) \u2014 \u1E45 üzerinden türetilir (girdi değildir)',
+            'liq.ui.burn_time_placeholder_derived': 'motorun debisinden türetilir',
             'liq.ui.calculate_engine_performance': 'Motor Performansını Hesapla',
             'liq.ui.calculating': 'Hesaplanıyor...',
             'liq.ui.centerline': 'Eksen çizgisi:',
@@ -1997,15 +2254,25 @@
             'liq.ui.chill_down_time': 'Soğutma Süresi',
             'liq.ui.coaxial_swirl': 'Eş Eksenli Girdaplı',
             'liq.ui.closure_bolt_class': 'Kapak Cıvata Sınıfı',
-            'liq.ui.closure_bolt_class_tip': 'Cıvata dayanım sınıfı: 8.8 / 10.9 / 12.9 (ISO 898-1) ya da A2-70 paslanmaz (ISO 3506-1). Kanıt dayanımını, dolayısıyla ön yükü belirler. Yalnız cıvata sayısı girildiğinde kullanılır.',
+            // P12aB2-12 (Z5 i18n): "proof strength" liquid'de "Kanıt dayanımı",
+            // solid'de "Proof gerilmesi" idi. İkincisi ayrıca TERİM KAYMASI:
+            // dayanım (strength) gerilmeye (stress) dönüşmüş. Ürün kanonu
+            // "proof" sözcüğünü ÇEVİRMEZ (panel.joint.proofLoad 'Proof yükü',
+            // panel.vessel.proofPressure 'Proof basıncı', panel.safety.pProof
+            // 'Proof testi'); dolayısıyla karşılık "proof dayanımı".
+            'liq.ui.closure_bolt_class_tip': 'Cıvata dayanım sınıfı: 8.8 / 10.9 / 12.9 (ISO 898-1) ya da A2-70 paslanmaz (ISO 3506-1). Proof dayanımını, dolayısıyla ön yükü belirler. Yalnız cıvata sayısı girildiğinde kullanılır.',
             'liq.ui.closure_bolt_count': 'Kapak Cıvata Sayısı',
             'liq.ui.closure_bolt_count_tip': 'Enjektör/kapak flanşını oda basıncına karşı tutan cıvata sayısı. Bilinmiyorsa boş bırakın - birleşim tahmin edilmek yerine "boyutlandırılmadı" olarak raporlanır. Kapak birleşiminin ayrılma ve kanıt emniyet katsayılarını belirler.',
             'liq.ui.closure_bolt_size': 'Kapak Cıvata Boyutu',
-            'liq.ui.closure_bolt_size_tip': 'Kapak cıvatalarının metrik normal diş boyutu (ISO 898-1 gerilme alanları). Yalnız cıvata sayısı girildiğinde kullanılır.',
+            // P12aB2-12 (Z5 i18n): İngilizcesi BİREBİR aynı olan bu ileti
+            // solid'de "metrik kaba diş ölçüsü", liquid'de "metrik normal diş
+            // boyutu" diye çevrilmişti. ISO 261 karşılığı "kaba diş"tir; iki
+            // sayfa artık tek cümleyi paylaşıyor.
+            'liq.ui.closure_bolt_size_tip': 'Kapak cıvatalarının metrik kaba diş boyutu (ISO 898-1 gerilme alanları). Yalnız cıvata sayısı girildiğinde kullanılır.',
             'liq.ui.color_coding': 'Renk kodlaması:',
             'liq.ui.combined_efficiency_of_turbine_and_pump': 'Türbin ve pompanın bileşik verimi. Modern turbopompalar: %65-85. Yüksek verim güç ihtiyacını azaltır ve motorun genel performansını iyileştirir.',
             'liq.ui.combustion_chamber_and_injector_assembly': 'Yanma odası ve enjektör montajı',
-            'liq.ui.combustion_chamber_operating_pressure_higher_pre': 'Yanma odasının çalışma basıncı. Yüksek basınç Isp\'yi artırır ama karmaşıklığı da artırır. Basınç beslemeli: 5-50 bar, gaz jeneratörlü: 50-150 bar, kademeli yanma: 150-300 bar.',
+            'liq.ui.combustion_chamber_operating_pressure_higher_pre': 'Yanma odasının çalışma basıncı. Yüksek basınç Isp\'yi artırır ama karmaşıklığı da artırır. Basınç beslemeli: 10-50 bar, gaz jeneratörlü: 50-150 bar, kademeli yanma: 150-300 bar. Kabul edilen aralık: 10-500 bar. Bu alan zorunlu bir tasarım noktasıdır: boş bırakılırsa istek adıyla reddedilir (422 incomplete_input).',
             'liq.ui.combustion_chamber_shell_and_head_end': 'Yanma odası kabuğu ve ön kapak; imleci tutunca cidar kalınlığı ve iç çap görünür',
             'liq.ui.combustion_efficiency_c': 'Yanma Verimi ηc',
             'liq.ui.combustion_stability_margin': 'Yanma Kararlılığı Payı',
@@ -2072,6 +2339,9 @@
             'liq.cyc.badge_realgas': 'Gerçek-gaz uyarısı (Pc>300 bar, CEA ideal-gaz)',
             'liq.cyc.cycle': 'Motor çevrimi',
             'liq.cyc.balance': 'Güç dengesi',
+            'liq.cyc.critical': 'Çevrim kapanmıyor — kritik',
+            'liq.cyc.status.converged': 'Yakınsadı',
+            'liq.cyc.status.not_converged': 'Güç dengesi kapanmadı',
             'liq.cyc.pump_ox': 'Oksitleyici pompa çıkışı',
             'liq.cyc.pump_fuel': 'Yakıt pompa çıkışı',
             'liq.cyc.shaft_power': 'Turbopompa mil gücü',
@@ -2117,9 +2387,9 @@
             'liq.ui.fuel_and_oxidizer_mixing_method_impinging': 'Yakıt ve oksitleyicinin karıştırılma yöntemi. Çarpışmalı: jetler çarpışarak atomize eder, basit ve kanıtlanmıştır. Eş eksenli: iç içe akışlar, kriyojenikler için çok uygun, düzgün yanma. Duş başlığı: çok sayıda küçük delik, düzgün dağılım. Pintle: tek nokta, kısılabilir.',
             'liq.ui.fuel_boiling_point': 'Yakıt Kaynama Noktası',
             'liq.ui.fuel_boiling_point_at_1_atm': '1 atm basınçta yakıtın kaynama noktası. Depolama sistemi tasarımı için kritiktir. RP-1: ~500 K (oda sıcaklığında depolanabilir), LH2: 20,3 K (kriyojenik), metan: 111,7 K (ılımlı kriyojenik), MMH: 360 K, UDMH: 336 K.',
-            'liq.ui.fuel_density_at_operating_temperature_rp': 'Çalışma sıcaklığında yakıt yoğunluğu. RP-1: 810, LH2: 71, metan: 422, MMH: 874, UDMH: 791. Düşük yoğunluklu yakıtlar daha büyük tank ister ama daha yüksek performans verebilir.',
+            'liq.ui.fuel_density_at_operating_temperature_rp': 'Çalışma sıcaklığında yakıt yoğunluğu. RP-1: 810, LH2: 71, metan: 422, MMH: 874, UDMH: 791. Düşük yoğunluklu yakıtlar daha büyük tank ister ama daha yüksek performans verebilir. Boş bırakılırsa değer, hâl çözümü sonuçlandığında itici tablosundan otomatik doldurulur; çözülmezse alan boş kalır.',
             'liq.ui.fuel_density_f': 'Yakıt Yoğunluğu ρf',
-            'liq.ui.fuel_dynamic_viscosity_at_operating_temperature': 'Çalışma sıcaklığında yakıtın dinamik viskozitesi. Enjeksiyon basınç düşümünü ve atomizasyonu etkiler. RP-1: 0,0012, LH2: 0,000013, metan: 0,00011, MMH: 0,00085. Düşük viskozite enjeksiyonu iyileştirir.',
+            'liq.ui.fuel_dynamic_viscosity_at_operating_temperature': 'Çalışma sıcaklığında yakıtın dinamik viskozitesi. Enjeksiyon basınç düşümünü ve atomizasyonu etkiler. RP-1: 0,0012, LH2: 0,000013, metan: 0,00011, MMH: 0,00085. Düşük viskozite enjeksiyonu iyileştirir. Boş bırakılırsa değer, hâl çözümü sonuçlandığında itici tablosundan otomatik doldurulur; çözülmezse alan boş kalır.',
             'liq.ui.fuel_freezing_point': 'Yakıt Donma Noktası',
             'liq.ui.fuel_freezing_point_important_for_minimum': 'Yakıtın donma noktası. En düşük çalışma sıcaklığı için önemlidir. RP-1: ~200 K, LH2: 14 K, metan: 90,7 K, MMH: 220 K, UDMH: 216 K. Tüm işlemler boyunca bu sıcaklığın üstünde kalınmalıdır.',
             'liq.ui.fuel_heat_capacity_cp': 'Yakıt Isı Sığası Cp',
@@ -2189,9 +2459,11 @@
             'liq.ui.manufacturing': 'Üretim:',
             'liq.ui.manufacturing_and_simulation_files_generated_fro': 'Güncel çözücü geometrisinden üretilen imalat ve simülasyon dosyaları',
             'liq.ui.mass_breakdown': 'Kütle dökümü:',
-            'liq.ui.mass_ratio_of_oxidizer_to_fuel': 'Oksitleyici debisinin yakıt debisine kütle oranı. Her itici çiftinin azami Isp veren bir optimum oranı vardır. LOX/RP-1: 2,5-2,8, LOX/LH2: 5,5-6,0, LOX/metan: 3,6-3,8. Motor farklı görev evrelerine göre iyileştirilebilir.',
+            'liq.ui.mass_ratio_of_oxidizer_to_fuel': 'Oksitleyici debisinin yakıt debisine kütle oranı. Her itici çiftinin azami Isp veren bir optimum oranı vardır. LOX/RP-1: 2,5-2,8, LOX/LH2: 5,5-6,0, LOX/metan: 3,6-3,8. Motor farklı görev evrelerine göre iyileştirilebilir. Bu alan zorunlu bir tasarım noktasıdır: boş bırakılırsa istek adıyla reddedilir (422 incomplete_input).',
             'liq.ui.material_specifications_and_assembly_sequence': 'Malzeme özellikleri ve montaj sırası',
             'liq.ui.max_ambient_temperature': 'Azami Ortam Sıcaklığı',
+            'liq.ui.min_ambient_temperature': 'Asgari Ortam Sıcaklığı',
+            'liq.ui.minimum_throttle': 'Asgari Kısma Düzeyi',
             'liq.ui.maximum_allowable_hot_side_wall_temperature': 'İzin verilen azami sıcak taraf cidar sıcaklığı. Malzeme özellikleri ve (hidrokarbon yakıtlarda) kokslaşma ile sınırlıdır. Çelik: 800 K, Inconel: 1200 K, bakır: 700 K. Motor ömrü için kritiktir.',
             'liq.ui.maximum_burn_duration': 'Azami Yanma Süresi',
             'liq.ui.maximum_continuous_operation_time_limited_by': 'Azami sürekli çalışma süresi. Soğutma sistemi kapasitesi, ablatif astar ömrü veya itici beslemesiyle sınırlıdır. Rejeneratif soğutmalı: 300-600 s, ablatif: 30-300 s; görev tasarımını etkiler.',
@@ -2222,7 +2494,11 @@
             'liq.ui.multiple_trajectory_parameters_altitude_velocity': 'Birden çok yörünge parametresi (irtifa, hız, ivme)',
             'liq.ui.n2o4_nitrogen_tetroxide': 'N2O4 (Diazot Tetroksit)',
             'liq.ui.nasa_cea_connected': 'NASA CEA Bağlandı',
-            'liq.ui.nist_webbook_connected': 'NIST WebBook Bağlandı',
+            'liq.ui.nist_webbook_reachable_local': 'NIST WebBook erişilebilir - hesabın verisi: ',
+            'liq.ui.nist_webbook_reachable_not_source': 'NIST WebBook erişilebilir - bu hesapta kullanılan sayıların kaynağı değil',
+            'liq.ui.nist_webbook_reachable_undeclared': 'NIST WebBook erişilebilir - uç, buraya bir sayı verip vermediğini beyan etmiyor',
+            'liq.ui.nasa_cea_not_checked': 'NASA CEA — henüz denetlenmedi',
+            'liq.ui.nist_webbook_not_checked': 'NIST WebBook — henüz denetlenmedi',
             'liq.ui.no_fuel_grain_or_liner': 'Yakıt bloğu veya astar yok:',
             'liq.ui.nozzle': 'Nozul:',
             'liq.ui.nozzle_efficiency_expansion_efficiency_at_altitu': 'Nozul verimi - irtifada genleşme verimi',
@@ -2248,9 +2524,9 @@
             'liq.ui.optimal_range': 'Optimum aralık:',
             'liq.ui.oxidizer_boiling_point': 'Oksitleyici Kaynama Noktası',
             'liq.ui.oxidizer_boiling_point_at_1_atm': '1 atm basınçta oksitleyicinin kaynama noktası. LOX: 90,2 K (kriyojenik, etkin soğutma ister), N2O4: 294 K (oda sıcaklığında depolanabilir). Yer destek ekipmanının karmaşıklığını etkiler.',
-            'liq.ui.oxidizer_density_at_operating_temperature_lox': 'Çalışma sıcaklığında oksitleyici yoğunluğu. LOX: 1141, N2O4: 1443. Yoğun oksitleyiciler tank hacmini ve araç boyutunu küçültür; uzay aracı tasarımında kritiktir.',
+            'liq.ui.oxidizer_density_at_operating_temperature_lox': 'Çalışma sıcaklığında oksitleyici yoğunluğu. LOX: 1141, N2O4: 1443. Yoğun oksitleyiciler tank hacmini ve araç boyutunu küçültür; uzay aracı tasarımında kritiktir. Boş bırakılırsa değer, hâl çözümü sonuçlandığında itici tablosundan otomatik doldurulur; çözülmezse alan boş kalır.',
             'liq.ui.oxidizer_density_ox': 'Oksitleyici Yoğunluğu ρox',
-            'liq.ui.oxidizer_dynamic_viscosity_at_operating_temperat': 'Çalışma sıcaklığında oksitleyicinin dinamik viskozitesi. LOX: 0,00019, N2O4: 0,00042. Yüksek viskozite enjeksiyon basıncı ihtiyacını artırır ve atomizasyon kalitesini etkiler.',
+            'liq.ui.oxidizer_dynamic_viscosity_at_operating_temperat': 'Çalışma sıcaklığında oksitleyicinin dinamik viskozitesi. LOX: 0,00019, N2O4: 0,00042. Yüksek viskozite enjeksiyon basıncı ihtiyacını artırır ve atomizasyon kalitesini etkiler. Boş bırakılırsa değer, hâl çözümü sonuçlandığında itici tablosundan otomatik doldurulur; çözülmezse alan boş kalır.',
             'liq.ui.oxidizer_freezing_point': 'Oksitleyici Donma Noktası',
             'liq.ui.oxidizer_freezing_point_lox_54_4k': 'Oksitleyicinin donma noktası. LOX: 54,4 K, N2O4: 262 K. Isıl yönetim sistemi tasarımı ve asgari çalışma sıcaklığı sınırları için kritiktir.',
             'liq.ui.oxidizer_injection_velocity': 'Oksitleyici Enjeksiyon Hızı',
@@ -2282,7 +2558,10 @@
             'liq.ui.performance_summary': 'Performans Özeti',
             'liq.ui.pintle': 'Pintle (iğneli)',
             'liq.ui.pressure_at_turbopump_exit_or_tank': 'Turbopompa çıkışındaki basınç veya basınç beslemeli sistemlerde tank basıncı. Oda basıncını ve enjeksiyon kayıplarını yenmelidir. Tipik olarak oda basıncının 1,2-1,5 katı.',
-            'liq.ui.pressure_drop_across_injector_as_percentage': 'Enjektördeki basınç düşümünün oda basıncına oranı. Yüksek ΔP karışımı ve kararlılığı iyileştirir ama daha yüksek besleme basıncı ister. İyi performans için tipik: %15-25.',
+            /* ÖH D37 A1b sivi-kati-form · CW-F1 (TR). */
+            'liq.ui.feed_pressure_note_pressure_fed': 'Basınç beslemeli: bu değer tank basıncıdır. Çözücü itici tanklarını ve besleme hattı ile vana basınç bütçesini bundan boyutlandırır ve odanın ihtiyaç duyduğu basınçla karşılaştırır (tank basıncı payı).',
+            'liq.ui.feed_pressure_note_turbopump': 'Turbopompalı çevrim: bu değer yalnızca hedef pompa çıkış basıncıdır. Çözücü ihtiyaç duyduğu çıkış basıncını kendisi hesaplar ve bu değer ondan düşükse uyarır; tanklar yalnızca pompa NPSH gereksinimi için basınçlandırılır.',
+            'liq.ui.pressure_drop_across_injector_as_percentage': 'Enjektördeki MUTLAK basınç düşümü, BAR cinsinden. İki kip vardır: (1) alanı BOŞ bırakırsanız HRMA düşümü oda basıncından kendisi boyutlandırır ve yanıtta o değeri “auto (20% of Pc)” künyesiyle damgalar; (2) bir sayı yazarsanız o sayı BAR olarak okunur ve “user override” damgasını alır. Çözücünün kabul bandı 0,2-200 bardır (liquid_rocket_engine.py, _override_val ‘injector_pressure_drop’); bandın dışı reddedilir. Büyük düşüm karışımı ve yanma kararlılığını iyileştirir ama besleme basıncını yükseltir.',
             'liq.ui.pressure_fed': 'Basınç Beslemeli',
             'liq.ui.pressure_of_hot_gas_entering_turbine': 'Türbine giren sıcak gazın basıncı. Gaz jeneratörlerinde pompa çıkışından %10-50 yüksektir. Kademeli yanmada ana oda basıncına yakındır.',
             'liq.ui.pressurization_auto_default': 'Otomatik (varsayılan)',
@@ -2351,7 +2630,7 @@
             'liq.ui.target_mixture_ratio_o_f': 'Hedef Karışım Oranı (O/F)',
             'liq.ui.target_thrust': 'Hedef İtki',
             'liq.ui.target_thrust_chamber_pressure': 'Hedef itki, oda basıncı',
-            'liq.ui.target_thrust_level_for_the_liquid': 'Sıvı motor için hedef itki düzeyi. Küçük iticiler: 10-1000 N, orta motorlar: 1-100 kN, büyük yardımcı roketler: 100 kN-2 MN (F-1). Motor boyutunu, kütle debisini ve soğutma gereksinimlerini belirler.',
+            'liq.ui.target_thrust_level_for_the_liquid': 'Sıvı motor için hedef itki düzeyi. Küçük iticiler: 100-1000 N, orta motorlar: 1-100 kN, büyük yardımcı roketler: 100 kN-2 MN (F-1). Kabul edilen aralık: 100 N - 10 MN. Motor boyutunu, kütle debisini ve soğutma gereksinimlerini belirler. Bu alan zorunlu bir tasarım noktasıdır: boş bırakılırsa istek adıyla reddedilir (422 incomplete_input).',
             'liq.ui.target_thrust_to_weight_t_w': 'Hedef İtki/Ağırlık Oranı T/W',
             'liq.ui.technical_drawings_pdf': 'Teknik çizimler PDF:',
             'liq.ui.technical_drawings_pdf_2': 'Teknik Çizimler PDF',
@@ -2361,7 +2640,6 @@
             'liq.ui.the_liquid_oxidizer_component_lox_cryogenic': 'Sıvı oksitleyici bileşeni. LOX: kriyojenik sıvı oksijen (1141 kg/m³), yüksek performans, yalıtım ister. N2O4: depolanabilir diazot tetroksit (1443 kg/m³), hidrazin yakıtlarıyla hipergolik, zehirli ama uzay araçlarında yaygın.',
             'liq.ui.theoretical_perfect_combustion_ratio_where_all': 'Tüm yakıt ve oksitleyicinin tükendiği kuramsal tam yanma oranı. LOX/RP-1: 3,4, LOX/LH2: 8,0, LOX/metan: 4,0. Gerçek motorlar soğutma ve performans için yakıtça zengin çalışır.',
             'liq.ui.thermal_conductivity_f': 'Isıl İletkenlik λf',
-            'liq.ui.throttle_range': 'Kısma Aralığı',
             'liq.ui.throttle_response_time': 'Kısma Tepki Süresi',
             'liq.ui.throttling_o_f_strategy': 'Kısmada O/F Stratejisi',
             'liq.ui.thrust_kn_decreases_with_altitude_due': 'İtki (kN) - geri basınç nedeniyle irtifayla azalır',
@@ -2409,10 +2687,14 @@
             'liq.ui.y_axis': 'Y ekseni:',
             'solid.attr.knsu_apcp_etc': 'KNSU, APCP vb.',
             'solid.attr.catalog_value_unless_set': 'boş bırakılırsa katalogdan çözülür',
+            'solid.attr.case_thickness_blank': 'boş = çözücü boyutlandırır',
+            'solid.attr.two_phase_blank': 'boş = kullanıcı katsayısı yok',
             'solid.fea.title': 'Tane Kesiti FEA — Düzlem Şekil Değiştirme Gerilmesi ve Port Gerinimi',
             'solid.fea.intro': 'BU tasarımın yakıt tanesi kesiti üstünde koşan 2B düzlem şekil değiştirme sonlu eleman analizi (star, finocyl ve yarıklı portlar eksenel simetrik değildir; cidar çözücüsü onları göremez). Kesit çokgeni sunucuda motor çözücüsünün kendisinden kurulur; kabul ölçütü, port yüzeyi GERİNİMİNİN yakıtın kopma uzamasıyla karşılaştırılmasıdır. Bir girdi eksikse hiçbir şey çizilmez ve nedeni adlandırılır.',
             'solid.fea.run': 'Tane kesiti FEA çalıştır',
             'solid.fea.busy': 'Koşuyor — çözücü, tepe gerilme değişmez olana kadar kesit mesh\'ini inceltir; süre önceden bilinmez.',
+            'solid.fea.busy_elapsed': 'Geçen süre {s} s; istek {limit} s sonra iptal edilir.',
+            'solid.fea.timeout': 'Kesit FEA koşumu, çözücüden yanıt gelmeden {s} s sonra iptal edildi. Hiçbir şey hesaplanmadı. Daha kaba bir mesh deneyip yeniden koşturun.',
             'solid.fea.show_mesh': 'Mesh tel-kafesini göster',
             'solid.fea.mesh_trace': 'Mesh ({n} eleman)',
             'solid.fea.chart_vm': 'Tane kesitinde von Mises gerilmesi [MPa]',
@@ -2432,6 +2714,12 @@
             'solid.fea.badge_slice': '1/{n} dilim',
             'solid.fea.badge_mesh': 'MESH {elems} eleman / {nodes} düğüm',
             'solid.fea.badge_vm': 'TEPE von MISES {v} MPa (Gauss noktaları)',
+            'solid.fea.badge_vm_nodal': 'HARİTA TEPE von MISES {v} MPa (düğüm / SPR — kontur haritası ile yakınsama grafiği bu değerden çizilir)',
+            'solid.fea.badge_max_principal': 'TEPE MAKS ASAL GERİLME {v} MPa (fields.max_principal_pa düğüm maksimumu — tane kopma ölçütünün yazıldığı çekme büyüklüğü)',
+            'solid.fea.cancel': 'Koşumu durdur',
+            'solid.fea.cancelled': 'Tane FEA koşumunu {s} s sonra siz durdurdunuz. Hiçbir şey hesaplanmadı, hiçbir sonuç değişmedi.',
+            'solid.fea.badge_worst_quality': 'EN KÖTÜ ELEMAN — en-boy oranı {ar} (eşiğin {arX} katı), ölçekli Jacobian {sj}',
+            'solid.fea.gauss_note': 'Manşetteki tepe gerilme elemanların Gauss noktalarından alınır; kontur haritası ile yakınsama grafiği ise düğümlerde geri kazanılan gerilmeyi gösterir, bu yüzden haritadan okunan uç değer manşetteki sayıdan farklı çıkabilir. İkisi de yukarıda basılıdır. Hiçbiri diğerine ölçeklenmez.',
             'solid.fea.badge_strain': 'MAKS PORT GERİNİMİ %{v} / kopma uzaması %{cap}',
             'solid.fea.badge_margin': 'GERİNİM MARJI {v} (kopma uzaması / tepe gerinim)',
             'solid.fea.badge_margin_missing': 'GERİNİM MARJI YAYIMLANMADI (kopma uzaması kaydı yok)',
@@ -2439,7 +2727,7 @@
             'solid.fea.badge_not_converged': '{n} turda YAKINSAMADI (son fark %{pct})',
             'solid.fea.badge_distortion': 'MESH BOZULMASI (ölçekli Jacobian < {sjMin}): {bad}/{total} eleman bayraklı',
             'solid.fea.badge_distortion_missing': 'MESH BOZULMASI YAYIMLANMADI (yanıtta ölçekli Jacobian yok; bozulma hükmü verilmez)',
-            'solid.fea.badge_elongated': 'UZAMIŞ ELEMANLAR (en-boy oranı > {arMax}): {bad}/{total} — ince ağ port konturu boyunca katmanlandığında beklenir, bozulma alarmı değildir',
+            'solid.fea.badge_elongated': 'UZAMIŞ ELEMANLAR (en-boy oranı > {arMax}): {bad}/{total} — port konturu çevresinde katmanlar hâlinde örülen İNCE YAKIT ETİNDE beklenir, bozulma alarmı değildir',
             'solid.fea.badge_acceptance_converged': 'KABUL ÖLÇÜTÜ ({q}) YAKINSADI — son değişim {pct} (tolerans %{tol})',
             'solid.fea.badge_acceptance_not_converged': 'KABUL ÖLÇÜTÜ ({q}) YAKINSAMADI — son değişim {pct} (tolerans %{tol})',
             'solid.fea.badge_vm_settled': 'TEPE vM %{pct} ile oturdu — inceltme sürücüsü, kabul dayanağı değil',
@@ -2461,8 +2749,14 @@
             'solid.js.3d_motor_visualization': '3B Motor Görselleştirmesi',
             'solid.js.ablative_insulation': 'Ablatif Kapak Yalıtımı',
             'solid.js.additives': 'Katkılar:',
-            'solid.js.aft_insulation': 'Arka kapak / lüle girişi:',
+            'solid.js.aft_insulation': 'Arka kapak / nozul girişi:',
             'solid.js.altitude_performance': 'İrtifa Performansı',
+            // ÖH D28 · P12bB2-14 — irtifa eğrisinin ε beyanı
+            'solid.js.altitude_eps_per_row': 'Bu eğrideki her nokta BAŞKA bir nozula aittir: çözücü nozulu o irtifanın ortam basıncına göre yeniden optimum genişletir.',
+            'solid.js.altitude_eps_design': 'Sizin tasarımınız şu değerde sabittir:',
+            'solid.js.altitude_eps_clamped': 'Genişleme oranı kırpıldı',
+            'solid.js.altitude_eps_rows': 'satır',
+            'solid.js.altitude_eps_uncapped': 'kırpılmamış optimum',
             'solid.js.assembly': 'Montaj:',
             'solid.js.atmospheric': 'Atmosferik',
             'solid.js.average_thrust_coefficient': 'Ortalama İtki Katsayısı:',
@@ -2522,6 +2816,7 @@
             'solid.js.igniter_burn_time': 'Yanma süresi:',
             'solid.js.igniter_charge': 'Ateşleyici Şarjı',
             'solid.js.ignition_pressure': 'Hedef ateşleme basıncı:',
+            'solid.js.general_requirement_not_computed': 'genel gereklilik - bu tasarımdan hesaplanmadı',
             'solid.js.ignition_safety': 'Ateşleme Güvenliği',
             'solid.js.ignition_system': 'Ateşleme Sistemi:',
             'solid.js.inner_diameter': 'İç Çap:',
@@ -2545,6 +2840,16 @@
             'solid.js.motor_assembly_properties': 'Motor Montaj Özellikleri',
             'solid.js.nominal': 'Anma değeri',
             'solid.js.not_classified': 'sınıflandırılmadı',
+            // V3 KK 3. tur (§28-50 (c)): çözücünün sınıf kodları (solid.html solidClassText).
+            'solid.js.class.low': 'Düşük',
+            'solid.js.class.medium': 'Orta',
+            'solid.js.class.high': 'Yüksek',
+            'solid.js.class.good': 'İyi',
+            'solid.js.class.marginal': 'Sınırda',
+            'solid.js.class.poor': 'Zayıf',
+            'solid.js.class.excellent': 'Mükemmel',
+            'solid.js.class.adequate': 'Yeterli',
+            'solid.js.class.inadequate_service': 'Yetersiz — kasa servis sıcaklığını aşıyor',
             'solid.js.not_computed': 'hesaplanmadı',
             'solid.js.not_sized': 'HRMA tarafından boyutlandırılmadı',
             'solid.js.not_tabulated': 'tabloda yok',
@@ -2561,9 +2866,12 @@
             'solid.js.pressure': 'Basınç:',
             'solid.js.pressure_oscillations': 'Basınç Salınımları:',
             'solid.js.pressure_safety': 'Basınç Güvenliği',
-            'solid.js.proof_safety_factor': 'Proof gerilmesi emniyet katsayısı:',
+            // P12aB2-12 (Z5 i18n): İngilizcesi 'Proof safety factor:' —
+            // "gerilmesi" sözcüğü çeviride EKLENMİŞTİ ve proof DAYANIMINI
+            // gerilmeye kaydırıyordu.
+            'solid.js.proof_safety_factor': 'Proof emniyet katsayısı:',
             'solid.js.propellant': 'Yakıt:',
-            'solid.js.propellant_mass': 'Yakıt Kütlesi:',
+            'solid.js.propellant_mass': 'İtici Kütlesi:',
             'solid.js.propellant_mixing': 'Yakıt Karıştırma:',
             'solid.js.propellant_mixture_requirements': 'Yakıt Karışımı Gereksinimleri',
             'solid.js.propellant_type': 'Yakıt Tipi:',
@@ -2651,7 +2959,7 @@
             'solid.msg.export_downloaded': '{label} indirildi',
             'solid.msg.export_failed': '{label} dışa aktarımı başarısız: {error}',
             'solid.msg.failed_to_copy': 'Kopyalanamadı:',
-            'solid.msg.failed_to_copy_data_check_console': 'Veri kopyalanamadı. Ayrıntılar için konsolu inceleyin.',
+            'solid.msg.failed_to_copy_data_check_console': 'Panoya kopyalanamadı. Veriyi aşağıdaki pencereden kopyalayın.',
             'solid.msg.fields_reset_to_catalogue_values': 'Alanlar katalog değerlerine döndürüldü',
             'solid.msg.final_burning_surface_cm2': 'Son yanma yüzeyi (cm2)',
             'solid.msg.form_kg': 'Formda (kg)',
@@ -2684,10 +2992,22 @@
             'solid.msg.monte_carlo_analysis_failed': 'Monte Carlo analizi başarısız',
             'solid.msg.monte_carlo_error': 'Monte Carlo hatası: ',
             'solid.msg.motor_case': 'Motor Gövdesi',
+            // ÖH D28 · P12bB2-19 — i18n boğazından geçmeyen kullanıcı metinleri
+            'solid.msg.nozzle': 'Nozul',
+            'solid.js.error_prefix': 'Hata',
+            'solid.js.computing': 'Hesaplanıyor...',
+            'solid.js.frequency_axis': 'Frekans',
+            'solid.js.eng_downloaded': '.eng dosyası indirildi',
+            'solid.js.eng_export_error': '.eng dışa aktarma hatası',
+            'solid.js.mc_success_rate': 'Başarı Oranı ({n} koşu)',
+            'solid.js.mc_thrust': 'İtki',
+            'solid.js.mc_failed_runs': '{n} koşu yakınsamadı (istatistiklerin dışında bırakıldı).',
             'solid.msg.motor_cross_section_could_not_be': 'Motor kesiti çizilemedi:',
             'solid.msg.motor_dry_mass': 'Motor kuru kütlesi',
             'solid.msg.motor_length': 'Motor Uzunluğu',
+            'solid.msg.nasa_cea_check_failed': 'NASA CEA - durum denetimi başarısız',
             'solid.msg.nasa_cea_offline': 'NASA CEA Çevrimdışı',
+            'solid.msg.nist_webbook_check_failed': 'NIST WebBook - durum denetimi başarısız',
             'solid.msg.nist_webbook_offline': 'NIST WebBook Çevrimdışı',
             'solid.msg.no_results_to_analyze_please_run': 'Yorumlanacak sonuç yok. Önce hesapları çalıştırın.',
             'solid.msg.nozzle_length': 'Nozul Uzunluğu',
@@ -2709,6 +3029,18 @@
             'solid.msg.pressure_bar': 'Basınç (bar)',
             'solid.msg.propellant_applied': '{name} uygulandı - {applied} alan dolduruldu',
             'solid.msg.propellant_grain': 'Yakıt Bloğu',
+            // ÖH D28 · P12bB2-04 / -11 / -12 — çözücünün beyan katmanı.
+            'solid.msg.unwired_computed_by_solver': 'Çözücü hesaplıyor; sizin girdiğiniz değer kullanılmıyor',
+            'solid.msg.unwired_reported_not_double_counted': 'Beyan edildiği gibi raporlanır; ikinci kez uygulanmaz',
+            'solid.msg.unwired_structural_output': 'Yapısal analizin çıktısı; sizin girdiğiniz değer kullanılmıyor',
+            'solid.msg.unwired_test_bench_only': 'Test düzeneği parametresi: ölçüm zincirini tanımlar, motoru değil',
+            'solid.msg.unwired_geometry_not_modelled': 'Bu geometrik ayrıntı çözücüde modellenmiyor',
+            'solid.msg.unwired_catalogue_thermochemistry': 'Yakıt kataloğunun termokimyasından gelir; sizin girdiğiniz değer kullanılmıyor',
+            'solid.msg.unwired_informational': 'Yalnızca referans: çözücü kullanmıyor',
+            'solid.msg.unwired_other': 'Çözücü bu koşuda kullanmadığını bildirdi (kategori: {category})',
+            'solid.msg.clipped_input': 'Çözücü kırptı: hesaplanan sonuç sizin girdiğiniz değeri KULLANMIYOR',
+            'solid.msg.assumed_default': 'Değer verilmedi: çözücü kendi varsayılanını kabul etti',
+            'solid.msg.divergence_not_published': 'Çözücü bu koşum için diverjans kaybı yayımlamadı',
             'solid.msg.propellant_mass_kg': 'Yakıt kütlesi (kg)',
             'solid.msg.propellants_loaded': 'Merkezî katalogdan {n} yakıt yüklendi.',
             'solid.msg.recovery_assumed': '(kabul edilen)',
@@ -2784,10 +3116,14 @@
             // T25 — bkz. EN bloğundaki ölçüm notu.
             'solid.ui.axial_length_of_individual_propellant_grain': 'Yakıt yığınının TOPLAM eksenel uzunluğu; tek bir segmentin boyu değildir. Çözücü bu uzunluğu segment sayısına böler (her BATES segmenti L / N boyundadır), bu yüzden segment sayısını değiştirmek yakıt kütlesini değiştirmez. Uzun yığınlar daha çok toplam impuls verir ama yanma kararsızlığına yol açabilir. Yığın uzunluğunun dış çapa oranı tipik olarak 3:1 ile 8:1 arasında olmalıdır.',
             'solid.ui.bates_cylindrical': 'BATES (Silindirik)',
-            'solid.ui.bates_neutral_star_progressive_end_burner': 'BATES (nötr), Yıldız (artan), Uç yanmalı (azalan)',
+            'solid.ui.burn_profile_awaiting': 'bu koşumun yanma alanı geçmişinden çözücü tarafından sınıflandırılır - görmek için analizi çalıştırın',
+            'solid.ui.burn_profile_neutral': 'nötr',
+            'solid.ui.burn_profile_progressive': 'artan',
+            'solid.ui.burn_profile_regressive': 'azalan',
+            'solid.ui.burn_profile_unclassified': 'çözücü bu koşum için sınıflandırmadı',
             'solid.ui.bates_star_wagon_wheel_or_end': 'BATES, yıldız, vagon tekerleği veya uç yanmalı düzen',
             'solid.ui.blue_gradient': 'Mavi geçiş:',
-            'solid.ui.bolt_property_class_iso_898_1': 'Cıvata kalite sınıfı: 8.8 / 10.9 / 12.9 (ISO 898-1) veya A2-70 paslanmaz (ISO 3506-1). Proof gerilmesini, dolayısıyla ön yükü belirler.',
+            'solid.ui.bolt_property_class_iso_898_1': 'Cıvata dayanım sınıfı: 8.8 / 10.9 / 12.9 (ISO 898-1) veya A2-70 paslanmaz (ISO 3506-1). Proof dayanımını, dolayısıyla ön yükü belirler.',
             'solid.ui.bulk_density_of_the_solid_propellant': 'Katı yakıtın yığın yoğunluğu. Tipik değerler: APCP: 1800-1900, KNSU: 1800-1900, kara barut: 1600-1700. Yüksek yoğunluk birim hacimde daha çok yakıt kütlesi sağlar.',
             'solid.ui.burn_profile': 'Yanma profili:',
             'solid.ui.burn_rate_coefficient_a': 'Yanma Hızı Katsayısı (a)',
@@ -2817,7 +3153,10 @@
             'solid.ui.chemical_name_and_formulation_of_the': 'Katı yakıtın kimyasal adı ve bileşimi (KNSU, APCP vb.). Yaygın tipler: yüksek performans için APCP, amatör kullanım için KNSU, geleneksel uygulamalar için kara barut.',
             'solid.ui.closure_bolt_class': 'Kapak Cıvata Sınıfı',
             'solid.ui.closure_bolt_count': 'Kapak Cıvata Sayısı',
-            'solid.ui.closure_bolt_size': 'Kapak Cıvata Ölçüsü',
+            // P12aB2-12 (Z5 i18n): 'Closure Bolt Size' iki sayfada iki adla
+            // çevriliyordu — liquid "Kapak Cıvata Boyutu", solid "…Ölçüsü".
+            // Kanon "Boyutu" (panel.joint.fBoltSize = 'Cıvata Boyutu').
+            'solid.ui.closure_bolt_size': 'Kapak Cıvata Boyutu',
             'solid.ui.closure_mass': 'Kapak Kütlesi',
             'solid.ui.coefficient_for_burn_rate_enhancement_at': 'Yüksek kütle akısında yanma hızı artışının katsayısı. Sıcak gaz akışından gelen taşınımlı ısı transferi nedeniyle artan yanma hızını hesaba katar.',
             'solid.ui.coefficient_of_variation_mean_a_lower': 'Değişim katsayısı (σ/ortalama) — küçük değer üretimin daha tutarlı olduğunu gösterir',
@@ -2878,12 +3217,12 @@
             'solid.ui.finocyl': 'Finocyl (kanatçıklı silindir)',
             'solid.ui.fraction_of_chamber_pressure_the_igniter': 'Yakıt tanesi devralmadan önce ateşleyicinin serbest hacimde ulaşması gereken oda basıncı oranı (NASA SP-8051 serbest hacim ölçütü). Bu hesaplanmış bir değer değil, tasarım seçimidir; ateşleyici şarj kütlesini belirler.',
             'solid.ui.igniter_pressure_fraction': 'Ateşleyici Hedef Basıncı',
-            'solid.ui.metric_coarse_thread_size_of_the': 'Kapak cıvatalarının metrik kaba diş ölçüsü (ISO 898-1 gerilme alanları). Yalnız cıvata sayısı verildiğinde kullanılır.',
+            'solid.ui.metric_coarse_thread_size_of_the': 'Kapak cıvatalarının metrik kaba diş boyutu (ISO 898-1 gerilme alanları). Yalnız cıvata sayısı girildiğinde kullanılır.',
             'solid.ui.number_of_bolts_holding_each_closure': 'Her kapağı oda basıncına karşı tutan cıvata sayısı. Bilinmiyorsa boş bırakın - bağlantı o zaman tahmin edilmek yerine "boyutlandırılmadı" diye raporlanır. Kapak bağlantısının ayrılma ve proof emniyet katsayılarını belirler.',
             'solid.ui.parachute_area_m2': 'Paraşüt Alanı (m2)',
             'solid.ui.parachute_cd': 'Paraşüt Cd Katsayısı',
             'solid.ui.parachute_deploy_delay_s': 'Apojeden Sonra Açılma Bekleme Süresi (s)',
-            'solid.ui.preview_unknown_grain': '"{type}" grain tipi için önizleme yok',
+            'solid.ui.preview_unknown_grain': '"{type}" yakıt bloğu tipi için önizleme yok',
             'solid.ui.preview_unavailable': 'Önizleme yok',
             'solid.ui.preview_star_min_points': 'Yıldız için en az 3 uç gerekir',
             'solid.ui.preview_star_label': 'Yıldız ({points} uç)',
@@ -2895,7 +3234,7 @@
             'solid.ui.preview_needs_slot_params': 'Yuva sayısını, genişliğini ve derinliğini girin',
             'solid.ui.preview_needs_diameters': 'Dış çap ve çekirdek çapını girin (çekirdek < dış)',
             'solid.ui.preview_finocyl_label': 'Finocyl ({count} kanatçık)',
-            'solid.ui.slotted_configuration': 'Yarıklı Grain Ayarları',
+            'solid.ui.slotted_configuration': 'Yarıklı Yakıt Bloğu Ayarları',
             'solid.ui.number_of_slots': 'Yarık Sayısı',
             'solid.ui.number_of_axial_slots_tooltip': 'Merkez porttan radyal olarak açılan boyuna yarık sayısı. Yarık arttıkça başlangıç yanma alanı büyür. Tipik aralık: 4-12.',
             'solid.ui.slot_width': 'Yarık Genişliği',
@@ -2909,7 +3248,7 @@
             'solid.ui.free_volume_inside_the_motor_case': 'Motor gövdesi içindeki, yakıt hacmi dışında kalan boş hacim. Oda basıncının yükselişini ve yanma dinamiğini etkiler. Ön ve arka bölmelerin hacmini de içerir.',
             'solid.ui.front_face': 'Ön Yüzey',
             'solid.ui.fuel': 'Yakıt',
-            'solid.ui.geometric_configuration_of_the_solid_propellant': 'Katı yakıt bloğunun geometrik düzeni. BATES: çekirdek delikli silindirik, nötr itki. Yıldız: artan itki için yıldız biçimli çekirdek. Finocyl: yüksek yanma yüzeyi için kanatçıklar. Vagon tekerleği: azalan itki için çoklu çekirdek. Uç yanmalı: yalnızca bir uçtan yanar.',
+            'solid.ui.geometric_configuration_of_the_solid_propellant': 'Katı yakıt bloğunun geometrik düzeni. BATES: merkezî çekirdek kanallı silindir. Yıldız: yıldız biçimli çekirdek kanalı. Finocyl: daha büyük yanma yüzeyi için kanatçıklı çekirdek kanalı. Vagon tekerleği: çoklu çekirdek kanalı. Uç yanmalı: çekirdek kanalı yok, yalnızca bir uçtan yanar. İtki profili yalnızca biçimle BELİRLENMEZ (inhibitör düzenine ve kanal/boğaz oranına da bağlıdır); bu koşumun profilini çözücü sınıflandırır ve \u0022İtki Eğrisi\u0022 altında basar.',
             'solid.ui.grain_geometry': 'Yakıt bloğu geometrisi:',
             'solid.ui.grain_length': 'Yakıt Bloğu Uzunluğu',
             'solid.ui.grain_to_grain_gap': 'Bloklar Arası Boşluk',
@@ -2928,7 +3267,7 @@
             'solid.ui.in_millimetres_mm': 'Milimetre (mm) cinsinden',
             'solid.ui.inhibitor_coating': 'Yanma Önleyici Kaplama',
             'solid.ui.initial_chamber_temperature_before_ignition_affe': 'Ateşleme öncesi oda sıcaklığı. Yakıtın yanma hızını ve basınç yükselişini etkiler. Standart koşullar: 298 K (25 °C). Soğuk hava performansı düşürür.',
-            'solid.ui.initial_diameter_of_the_central_core': 'Merkezî çekirdek deliğinin (port çapı) başlangıç çapı. Başlangıç yanma yüzey alanını ve itki profilini belirler. Küçük çekirdek artan, büyük çekirdek azalan itki verir.',
+            'solid.ui.initial_diameter_of_the_central_core': 'Merkezî çekirdek deliğinin (port çapı) başlangıç çapı. Başlangıç yanma yüzey alanını ve itki profilini belirler. Bu çözücüde uçları yanan BATES grain tipi için ÖLÇÜLEN (10-60 mm çekirdek): bitiş platosu her çekirdekte başlangıcın altındadır (bitiş/başlangıç 0,09-0,49) ve büyük çekirdek daha az azalır, ama eğilim monoton değildir (10 mm çekirdekte 0,11; 15 mm 0,09; 30 mm 0,21; 60 mm 0,49). 10 mm çekirdekte çözücü eğriyi Progressive-Regressive (önce yükselen, sonra düşen) sınıfına koyar; yani çekirdek aralığının tamamı tek bir sınıf değildir. Yayımlanan biçim sınıfı bu ipucundan değil sonuçtaki thrust_profile_analysis.thrust_curve_type alanından gelir.',
             'solid.ui.initial_temperature': 'Başlangıç Sıcaklığı',
             'solid.ui.initial_wet_mass_kg': 'Başlangıç (Islak) Kütle (kg)',
             'solid.ui.inputs': 'Girdiler:',
@@ -2975,7 +3314,11 @@
             'solid.ui.motor_specifications': 'Motor Özellikleri',
             'solid.ui.name': 'Ad',
             'solid.ui.nasa_cea_connected': 'NASA CEA Bağlandı',
-            'solid.ui.nist_webbook_connected': 'NIST WebBook Bağlandı',
+            'solid.ui.nist_webbook_reachable_local': 'NIST WebBook erişilebilir - hesabın verisi: ',
+            'solid.ui.nist_webbook_reachable_not_source': 'NIST WebBook erişilebilir - bu hesapta kullanılan sayıların kaynağı değil',
+            'solid.ui.nist_webbook_reachable_undeclared': 'NIST WebBook erişilebilir - uç, buraya bir sayı verip vermediğini beyan etmiyor',
+            'solid.ui.nasa_cea_not_checked': 'NASA CEA — henüz denetlenmedi',
+            'solid.ui.nist_webbook_not_checked': 'NIST WebBook — henüz denetlenmedi',
             'solid.ui.nozzle': 'Nozul',
             'solid.ui.nozzle_discharge_efficiency_cf': 'Nozul Boşalma Verimi (Cf)',
             'solid.ui.nozzle_efficiency_n': 'Nozul Verimi ηn',
@@ -3007,7 +3350,7 @@
             'solid.ui.peak_thrust': 'Tepe itki:',
             'solid.ui.percentage_of_runs_that_meet_the': 'İtki / Isp / tepe basınç kabul ölçütlerini sağlayan koşuların yüzdesi',
             'solid.ui.performance_analysis_dashboard': 'Performans Analizi Panosu',
-            'solid.ui.performance_reduction_due_to_solid_particles': 'Egzoz gazındaki katı parçacıkların (alümina) yol açtığı performans düşüşü. Parçacıkların genleşme verimi gazdan düşüktür. Tipik değerler: 0,96-0,99.',
+            'solid.ui.performance_reduction_due_to_solid_particles': 'Egzoz gazındaki katı parçacıkların (alümina) yol açtığı performans düşüşü. Parçacıkların genleşme verimi gazdan düşüktür. Tipik değerler: 0,96-0,99. Boş bırakılırsa çözücü kullanıcı iki-faz katsayısı uygulamaz ve bunu isp_loss_breakdown içinde beyan eder.',
             'solid.ui.performance_summary': 'Performans Özeti',
             'solid.ui.phenolic': 'Fenolik',
             'solid.ui.pick_a_propellant_row_to_load': 'Doğrulanmış özelliklerini aşağıdaki forma yüklemek için bir yakıt satırı seçin.',
@@ -3021,7 +3364,7 @@
             'solid.ui.prevents_burning_on_aft_end_face': 'Arka uç yüzeyinde yanmayı engeller. BATES yığınında uç yüzler AÇIK bırakılır: büyüyen çekirdek alanı ile küçülen uç alanı birbirini götürür, yanmayı nötr yapan budur (varsayılan blokta ölçüldü: Kn 160,6 -> 163,8, +%2,0). Dış yüzey kaplıyken iki ucu da kaplarsanız eğri ilerleyiciye döner (Kn 161,9 -> 242,1, +%49,5) — bunu yalnız bilerek istiyorsanız işaretleyin.',
             'solid.ui.prevents_burning_on_forward_end_face': 'Ön uç yüzeyinde yanmayı engeller. BATES yığınında uç yüzler AÇIK bırakılır: büyüyen çekirdek alanı ile küçülen uç alanı birbirini götürür, yanmayı nötr yapan budur (varsayılan blokta ölçüldü: Kn 160,6 -> 163,8, +%2,0). Dış yüzey kaplıyken iki ucu da kaplarsanız eğri ilerleyiciye döner (Kn 161,9 -> 242,1, +%49,5) — bunu yalnız bilerek istiyorsanız işaretleyin.',
             'solid.ui.prevents_burning_on_outer_cylindrical_surface': 'Dış silindirik yüzeyde yanmayı engeller. Çekirdekten yanan bloklarda genellikle kaplanır.',
-            'solid.ui.propellant_mass': 'Yakıt Kütlesi',
+            'solid.ui.propellant_mass': 'İtici Kütlesi',
             'solid.ui.propellant_mass_flow_chamber_pressure_distributi': 'Yakıt kütle debisi, oda basıncı dağılımı, itki ve basınç geçmişi ile yanma boyunca yanma alanı ve Kn.',
             'solid.ui.propellant_name_formulation': 'Yakıt Adı/Bileşimi',
             'solid.ui.r_m_s_a_x_p': 'r [m/s] = a x (P [bar])^n - çözücünün kullandığı gösterimin aynısı.',
@@ -3092,7 +3435,7 @@
             'solid.ui.velocity': 'Hız:',
             'solid.ui.vertical_ascent_trajectory_driven_by_the': 'Bu tasarımın motor itki eğrisiyle sürülen dikey tırmanış yörüngesi',
             'solid.ui.wagon_wheel': 'Vagon Tekerleği',
-            'solid.ui.wall_thickness_of_motor_case_must': 'Motor gövdesinin cidar kalınlığı. İç basıncı yeterli emniyet katsayısıyla taşıyacak kadar olmalıdır. Çevresel gerilme formülünden hesaplanır veya doğrudan girilir.',
+            'solid.ui.wall_thickness_of_motor_case_must': 'Motor gövdesinin cidar kalınlığı. İç basıncı yeterli emniyet katsayısıyla taşıyacak kadar olmalıdır. Çevresel gerilme formülünden hesaplanır veya doğrudan girilir. Boş bırakılırsa çözücü cidarı Barlow ince cidar bağıntısından kendisi boyutlandırır ve bunu beyan eder.',
             'solid.ui.warnings': 'Uyarılar',
             // T71 — bkz. solid.js.web_thickness
             'solid.ui.web_thickness': 'Et Kalınlığı',
@@ -3105,13 +3448,42 @@
             'solid.ui.y_axis': 'Y ekseni:',
             'solid.ui.yield_mpa': 'Akma (MPa)',
             'solid.ui.yield_strength_of_case_material_steel': 'Gövde malzemesinin akma dayanımı. Çelik: 200-400 MPa, alüminyum: 100-300 MPa, kompozit: 300-800 MPa. Gövde gerilme analizinde ve cidar kalınlığı hesabında kullanılır.',
-            'solid.ui.yield_strength_y': 'Akma Dayanımı σy'
+            'solid.ui.yield_strength_y': 'Akma Dayanımı σy',
         }
     };
 
     /* Dinamik (JS ile üretilen) metinler için kısa yollar. Sayfa şablonları
-       bunları T(...) / TF(...) olarak çağırır. i18n çekirdeği hiç yüklenmezse
-       İngilizce yedek metin döner, sayfa bozulmaz. */
+       bunları T(...) / TF(...) olarak çağırır.
+
+       YEDEK SÖZLEŞMESİNİN SINIRI — DÜRÜSTLENDİ (P12aB2-11, Z5 i18n)
+       ---------------------------------------------------------------
+       Eski yorum "i18n çekirdeği hiç yüklenmezse İngilizce yedek metin
+       döner, sayfa bozulmaz" diyordu. Bu YALNIZ i18n.js'in yokluğu için
+       doğrudur: aşağıdaki iki sarmalayıcı `global.I18N` yoksa yedek metni
+       döndürür ve sayfa çalışmayı sürdürür.
+
+       KARŞILANMAYAN durum, bu dosyanın KENDİSİNİN yüklenememesidir. O
+       zaman `global.T` hiç tanımlanmaz ve şablonlardaki her çağrı
+       ReferenceError atar. ÖLÇÜM (bu parti): solid.html 396 + liquid.html
+       470 = 866 çağrı korumasız; iki şablon da kendi T/TF'sini
+       tanımlamıyor (grep: 'function T (' / 'window.T =' → 0) ve ürünün
+       başka hiçbir dosyası `global.T` atamıyor (yalnız bu dosya, :3160).
+       Yükleme sırası da bunu kaçınılmaz kılıyor: liquid.html:9 /
+       solid.html'de i18n_pages.js ayrı bir <script> etiketiyle geliyor;
+       404, ağ kesintisi ya da bir sözdizim hatası tek başına sayfayı
+       susturur.
+
+       ÖDENDİ — ÖH D29 / arayuz-i18n a2. Onarım bu dosyanın İÇİNDEN
+       yapılamazdı (dosya yüklenmediğinde içindeki hiçbir satır çalışmaz),
+       bu yüzden sözleşme BİR KATMAN AŞAĞIYA indi: `global.T` / `global.TF`
+       artık ÇEKİRDEKTE, `i18n.js`'te tanımlıdır. Yükleme sırası bunu
+       mümkün kılar (liquid.html:8 / solid.html:8 i18n.js, :9
+       i18n_pages.js). Aşağıdaki iki kapı artık YALNIZ geri uyumluluk
+       içindir: çekirdek zaten tanımladığı için buradaki gövdeler normal
+       koşuda hiç çalışmaz, ama i18n.js'siz (yalnız bu dosyayı yükleyen)
+       bir sayfa kalırsa sözleşme yine karşılanır. Ölçüm ve bekçi:
+       docs/scofield/raw/OH/D29/arayuz-i18n/a2/{once,sonra}.json M5,
+       tests/test_d29_arayuz_i18n_a2.py::test_p12ab2_11_T_TF_cekirdekte_tanimli. */
     if (typeof global.T !== 'function') {
         global.T = function (key, fallback) {
             return (global.I18N && global.I18N.t) ? global.I18N.t(key, fallback) : fallback;

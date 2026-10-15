@@ -41,7 +41,10 @@ import numpy as np
 import pytest
 
 from hrma.engines.liquid_rocket_engine import (
+    BURN_TIME_DEFAULT_S,
     FEED_LINE_LENGTH_DEFAULT_M,
+    RELIEF_VALVE_SET_PRESSURE_FACTOR,
+    WATER_HAMMER_FLUID_KEY,
     LiquidRocketEngine,
 )
 
@@ -51,6 +54,13 @@ from hrma.engines.liquid_rocket_engine import (
 
 OFFLINE_PROPELLANTS = {'rp1': {}, 'lox': {}}
 
+# ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ, onemli2-sivi a2): motor yanma süresini ARTIK
+# VARSAYMAZ; süre verilmezse ``propellant_tanks`` ``not_modelled`` döner
+# ve bu dosyanın 17 düğümü ``KeyError 'oxidizer_tank'/'fuel_tank'`` ile düşüyordu. Ölçülen şey
+# (A2 çalkantı ve A3 basınçlı kap girdileri tank kartının kendisidir) SÜRESİ VERİLMİŞ bir tasarımdır; süre motorun kendi
+# sabitinden AÇIKÇA verilir (sayı burada yazılmaz), sayılar LU-1 öncesindeki
+# sessiz varsayımla birebir aynıdır. Süre yokken fail-closed hâl:
+# tests/test_d36_sivi_a1.py (tank kartı) ve test_d36_sivi_a2.py.
 BASE_OVERRIDES = dict(
     fuel_density=810, oxidizer_density=1141, mixture_ratio=2.3,
     combustion_efficiency=97, engine_cycle='gas_generator', feed_pressure=105,
@@ -60,6 +70,7 @@ BASE_OVERRIDES = dict(
     characteristic_length=1.2, chamber_material='inconel_718',
     cooling_type='regenerative', nozzle_expansion_ratio=12,
     nozzle_type='bell_80', safety_factor=2.5,
+    max_burn_duration=BURN_TIME_DEFAULT_S,
 )
 
 #: A4 + A6 kullanıcı girdileri (form/API alanları) — dolu koşu.
@@ -191,14 +202,26 @@ class TestA3PressureVessel:
 
     @pytest.mark.parametrize('tank_adi', ['oxidizer_tank', 'fuel_tank'])
     def test_girdiler_tank_kartinin_kendisi(self, wired, tank_adi):
-        """MEOP/çap/cidar/malzeme tank kartıyla BİREBİR aynı — iki kart
-        çelişemez (katıdaki tek-kaynak deseni)."""
+        """İşletme basıncı/çap/cidar/malzeme tank kartıyla BİREBİR aynı —
+        iki kart çelişemez (katıdaki tek-kaynak deseni).
+
+        Z5S/PK1 (ÖH defter P3B3-11) ÇEVİRİSİ: kap artık İŞLETME basıncında
+        değil EMNİYET VANASI AYARINDA nitelendiriliyor (ASME VIII Div.1
+        UG-134 mantığı). Tek-kaynak iddiası zayıflamadı, ADRES değiştirdi:
+        tank kartıyla birebir aynı olması gereken alan
+        ``operating_pressure_bar``; ``meop_bar`` ondan
+        ``RELIEF_VALVE_SET_PRESSURE_FACTOR`` katıyla TÜRER ve o türeme de
+        ayrıca kilitlidir. İki kart ayrışırsa iki satır birden düşer.
+        """
         tank = _tank(wired[1], tank_adi)
         v = tank['pressure_vessel']
         assert v['status'] in ('PASS', 'MARGINAL', 'FAIL')
         girdiler = v['inputs']
-        assert girdiler['meop_bar'] == pytest.approx(
+        assert v['operating_pressure_bar'] == pytest.approx(
             tank['structural']['pressure_rating'], rel=1e-9)
+        assert girdiler['meop_bar'] == pytest.approx(
+            v['operating_pressure_bar'] * RELIEF_VALVE_SET_PRESSURE_FACTOR,
+            rel=1e-9)
         assert girdiler['inner_diameter_mm'] == pytest.approx(
             tank['dimensions']['diameter'], rel=1e-9)
         assert girdiler['wall_thickness_mm'] == pytest.approx(
@@ -378,13 +401,31 @@ class TestA6WaterHammer:
         assert blok['working_pressure_bar'] >= sonuc['chamber_pressure']
 
     def test_tablosuz_itici_hatti_not_modelled(self):
-        """Hacimsel modülü tablolu olmayan itici (metan) hattı NOT_MODELLED
-        döner — bulk modül uydurulmaz; tablolu hat (LOX) yine hesaplanır."""
+        """Hacimsel modülü tablolu olmayan itici (etanol) hattı NOT_MODELLED
+        döner — bulk modül uydurulmaz; tablolu hat (LOX) yine hesaplanır.
+
+        ÖH D32 fix-35d — ÇAPA KAYMASI, İDDİA KORUNDU. Fikstür ``methane``
+        kullanıyordu; D31 sıvı a1 (P4B4-07 + OH-D27-08, hüküm-20) su koçu
+        akışkan haritasını 2 iticiden 7'ye çıkardı ve ``methane`` artık
+        BİRİNCİL KAYNAKLI bir kayıtla tabloda (``WATER_HAMMER_FLUID_KEY``).
+        Yani fikstürün "tablosuz" iticisi tablolu oldu ve bekçi ürünün
+        BİLİNÇLİ genişlemesini gerileme gibi gösteriyordu.
+
+        Onarım fikstürü GERÇEKTEN tablosuz bir yakıta taşır (``ethanol``:
+        haritada yok, kaynak künyesi de yok — uydurulmadı). Haritaya itici
+        EKLENMEDİ; iddia iki yönlü olarak aynen duruyor: tablosuz hat
+        NOT_MODELLED + eksik girdiyi ADIYLA söyler, tablolu hat (LOX)
+        hesaplanır ve kaynak künyesini taşır.
+        """
+        assert 'ethanol' not in WATER_HAMMER_FLUID_KEY, (
+            'fikstürün dayandığı boşluk kapandı: ethanol haritaya girmiş, '
+            'bekçiyi tablosuz KALAN bir iticiye taşıyın')
+        assert 'lox' in WATER_HAMMER_FLUID_KEY
         with contextlib.redirect_stdout(io.StringIO()):
             motor = LiquidRocketEngine(
                 thrust=25000, chamber_pressure=70, mixture_ratio=3.2,
-                fuel_type='methane', oxidizer_type='lox',
-                propellant_data={'methane': {}, 'lox': {}},
+                fuel_type='ethanol', oxidizer_type='lox',
+                propellant_data={'ethanol': {}, 'lox': {}},
                 overrides={'feed_line_wall_thickness': 1.5})
         drops = {
             'oxidizer_line': {'line_diameter_mm': 50.0,
@@ -396,8 +437,12 @@ class TestA6WaterHammer:
         }
         wh = motor._feed_water_hammer_analysis(drops, 3.0, False)
         assert wh['fuel_line']['status'] == 'NOT_MODELLED'
-        assert 'methane' in wh['fuel_line']['basis']
+        assert 'ethanol' in wh['fuel_line']['basis']
         assert wh['oxidizer_line']['status'] in ('SAFE', 'MARGINAL', 'UNSAFE')
+        # Tablolu hat yalnız "hesaplandı" demez, hangi kayıttan hesaplandığını
+        # da söyler (beyan zinciri): kaynak künyesi boş geçemez.
+        assert wh['oxidizer_line']['fluid'] == 'lox', wh['oxidizer_line']
+        assert wh['oxidizer_line'].get('density_source'), wh['oxidizer_line']
 
     def test_boru_malzemesi_varsayimi_beyanli(self, wired):
         """Boru malzemesi bir tasarım SEÇİMİ değil: verilmediyse paslanmaz

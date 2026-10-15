@@ -138,7 +138,23 @@ ECHO_CANONICAL_PREFIXES = (
 #: DAR TUTULDU: kardeş ``used_by_model`` alanı BİLEREK kapsam dışı —
 #: o çözücünün kendi sonucudur ve sabit kalırsa gerçekten şüphelidir;
 #: bekçi onu korumaya devam eder.
-_DECLARATION_ECHO = re.compile(r'\.inputs_not_used\[\d+\]\.submitted$')
+#: ÖH D26 / app-api a3 (OH-Z5-02): AYNALANMIŞ KANAL da aynı yaprakdır.
+#: ``app.py::_beyanlari_uyari_kanalina_yansit`` aynı beyanı ekrana basılan
+#: ``input_warnings`` kanalına kopyalar ve ``params.submitted`` alanına
+#: KULLANICININ GÖNDERDİĞİ sayının kendisini yazar. Desen yalnız kanonik
+#: yolu tanıdığı için aynası "uydurma sabit" diye sayılıyordu.
+#:
+#: GEÇİŞ ÖLÇÜMÜ (``a3/z5_yaprak_gecis.json``): ``chamber_temperature``
+#: 3000 -> 2600 sarsıldığında ``.input_warnings[0].params.submitted``
+#: 3000,0 -> 2600,0 KIPIRDIYOR ve kanonik kardeşiyle (
+#: ``.inputs_not_used[0].submitted``) BİREBİR aynı sayıyı taşıyor. Yani
+#: yaprak ölü değil; alan sarsılmadığı sürece donması tanımı gereğidir.
+#:
+#: DAR TUTULDU: yalnız ``params.submitted``. Kardeş ``params.used_by_model``
+#: (varsa) çözücünün kendi sonucudur ve KAPSAM DIŞIDIR.
+_DECLARATION_ECHO = re.compile(
+    r'(\.inputs_not_used\[\d+\]\.submitted'
+    r'|\.input_warnings\[\d+\]\.params\.submitted)$')
 
 
 def is_declaration_echo(path: str) -> bool:
@@ -172,6 +188,16 @@ def _bit_identical(a: Any, b: Any) -> bool:
     if isinstance(a, float) and math.isnan(a) and math.isnan(b):
         return True
     return a == b
+
+
+def bit_ayni(a: Any, b: Any) -> bool:
+    """``_bit_identical``in KAMUYA açık adı — kopya sözleşmesinin ölçütü.
+
+    v2.6.27 / P10B4-08: ``tools/sabit_siniflandirma.py`` bir ayna yaprağını
+    "kopya" sayıp sınıflandırmadan düşürmeden ÖNCE bit-aynılık istiyor.
+    Ölçüt burada tanımlıdır ve ikinci kez yazılmaz; araç bu adı çağırır.
+    """
+    return _bit_identical(a, b)
 
 
 def is_echo(path: str, field_name: str) -> bool:
@@ -229,8 +255,26 @@ class FieldSpec:
 
 
 def perturb(spec: FieldSpec, current: Any) -> Optional[Any]:
-    """Alanı BELİRGİN biçimde değiştir; değiştirilemiyorsa None."""
+    """Alanı BELİRGİN biçimde değiştir; değiştirilemiyorsa None.
+
+    ÖH D17 (bekci-cevirisi a1 — defter OH-D16-09, ikinci yarı). İKİLİ ALAN
+    TAHMİN EDİLMEZ. Eski kod ``not bool(current)`` yazıyordu; alan taban
+    yükünde YOKSA ``current`` ``None`` olur, çevirme ``True`` üretir ve bu
+    çoğu bayrakta ucun ZATEN kullandığı varsayılandır. "Sarsım" hiçbir şeyi
+    değiştirmez, çıktı bit-aynı çıkar ve CANLI alan sessizce ÖLÜ ilan
+    edilir — uydurma bir sarsım, uydurma bir hüküm.
+
+    Fail-closed: taban değer bilinmiyorsa alan sarsılamaz ve ``run`` bunu
+    ``unmeasurable`` olarak ADIYLA bildirir. Hibrit yolunda bu durumu
+    ``tests/test_field_wiring_layer_b.py::
+    test_sarsilan_her_mantiksal_alan_taban_yukunde_bildirilir`` zaten
+    kilitliyordu; katı/sıvı yolunda (``tools/wiring_map.py::measure_page``
+    yalnız ``choice`` alanlarını geri dolduruyor) kilit YOKTU. Artık kör
+    nokta sessiz değil.
+    """
     if spec.kind == 'bool':
+        if current is None:
+            return None
         return not bool(current)
 
     if spec.kind == 'choice':
@@ -312,6 +356,25 @@ class ShakeReport:
     #: haritası (tools/wiring_map.py) içindir — "bu sayı nereden geliyor"
     #: sorusunun cevabı burada duran ölçümdür, tahmin değil.
     changed_paths: Dict[str, List[str]] = field(default_factory=dict)
+    #: ÖH D17 — SEÇİM KAPSAMI (defter P10B4-06). ``perturb`` bir seçim
+    #: alanını TEK alternatifle sarsar. "Canlı" hükmü bu yüzden 1/N
+    #: ölçümüne dayanır ve tek başına yayımlanırsa "bütün seçenekler
+    #: sınandı" diye okunur. Alan başına ``{'toplam': N, 'denenen': k,
+    #: 'denenen_secenek': ...}`` burada ADIYLA durur; kapsam beyanı
+    #: hükümle birlikte yayımlanır.
+    secim_kapsami: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: ÖH D17 — ÜÇÜNCÜ HÂL: "kısmen ölçüldü" (defter P10B4-06). Ölçülen
+    #: (P10 B4): hibritte ``fuel_type``ın 11 seçeneğinden 4'ü (``carbon``,
+    #: ``al2o3``, ``mixture``, ``custom``) uçtan HTTP 400 dönüyor, buna
+    #: rağmen harita alanı düpedüz "canlı" gösteriyordu; ``unmeasurable``
+    #: boş, ``dead`` boştu. ``run(probe_all_options=True)`` ile bütün
+    #: seçenekler denenir ve 200 vermeyenler alan adı + durum koduyla
+    #: buraya yazılır: ``{alan: {'kirik': {secenek: durum}, 'toplam': N}}``.
+    #: ÖH D32 GÜNCELLEMESİ (577bb32d · OH-D31-05): ``al2o3`` şablondan
+    #: söküldü — yukarıdaki P10 B4 satırı TARİHÎ ölçümdür. Bugünkü nüfus
+    #: evren 10, kırık küme {carbon, mixture, custom}; yürürlükteki sayılar
+    #: tests/test_d17_bekci_cevirisi_a1.py modül başındaki tek kaynaktadır.
+    kismen_olculdu: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def summary(self) -> str:
         return (
@@ -322,7 +385,8 @@ class ShakeReport:
             f'{len(self.constant_outputs)} sabit cikti yapragi '
             f'({self.echo_constant_dedup} yanki tekillestirildi, '
             f'{len(self.beyan_yankilari)} beyan yankisi, '
-            f'{len(self.yanki_ayristi)} yanki ayristi)')
+            f'{len(self.yanki_ayristi)} yanki ayristi, '
+            f'{len(self.kismen_olculdu)} kismen olculdu)')
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +396,9 @@ class ShakeReport:
 def run(client, endpoint: str, baseline_payload: Dict[str, Any],
         specs: Iterable[FieldSpec],
         declared_unwired: Iterable[str] = (),
-        ignore_output_prefixes: Iterable[str] = ()) -> ShakeReport:
+        ignore_output_prefixes: Iterable[str] = (),
+        probe_all_options: bool = False,
+        probe_fields: Iterable[str] = ()) -> ShakeReport:
     """Sarsım matrisini koş.
 
     ``declared_unwired``: motorun "bu alanı kullanmıyorum" diye BEYAN ettiği
@@ -344,6 +410,21 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
     ``ignore_output_prefixes``: sabit olması MEŞRU çıktı yolları (sürüm
     numarası, birim etiketi, sabit metinler). Beyaz liste dar tutulmalı;
     genişletmek uydurmayı gizlemenin en kolay yoludur.
+
+    ``probe_all_options``: seçim alanlarının BÜTÜN seçeneklerini tek tek
+    dener (ÖH D17, defter P10B4-06). Kapalıyken (varsayılan) yalnız kapsam
+    BEYANI yazılır — hangi seçeneğin denendiği ve kaç seçenekten kaçının
+    denendiği ``secim_kapsami``da durur, böylece "canlı" hükmü 1/N ölçümü
+    olduğunu saklamaz. Açıkken 200 vermeyen seçenekler ``kismen_olculdu``
+    içine adıyla ve durum koduyla yazılır. Süpürme PAHALIDIR (alan başına
+    N-1 ek çağrı); ölçüm araçları kendi bütçelerine göre açar.
+
+    ``probe_fields``: süpürmenin ADIYLA açıldığı alanlar (ÖH D20, Fable-D17
+    ŞART'ı). ``probe_all_options`` bütçeye sığmadığında bile kırık seçeneği
+    BİLİNEN alanlar (ör. hibrit ``fuel_type``) süpürülür; maliyet o alanın
+    N-1 çağrısıyla sınırlı kalır. İkisi de kapalıysa yalnız kapsam BEYANI
+    yazılır ve harita "canlı (1/N denendi)" der — bu bir gevşetme değil,
+    ölçüm gücünün hükümle birlikte yayımlanmasıdır.
     """
     def call(payload):
         resp = client.post(endpoint, json=payload, headers=HEADERS)
@@ -358,18 +439,51 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
     report = ShakeReport(endpoint=endpoint, baseline_leaf_count=len(baseline),
                          baseline_leaves=dict(baseline))
     declared = set(declared_unwired)
+    # ÖH D20 / P10B4-06 (Fable-D17 ŞART'ı): süpürme ADIYLA açılabilir.
+    _supurulen = frozenset(probe_fields)
     ignore = tuple(ignore_output_prefixes)
     ever_changed: set = set()
+    # ÖH D15 / harita H2 — "KAYBOLDU" ile "AYRIŞTI" AYNI ŞEY DEĞİLDİR.
+    # ``differing_paths`` yaprağın YOK OLMASINI da "değişti" sayar (a != b,
+    # b yok). Kopya sözleşmesi geçişi ise değişim kümelerinin SİMETRİK
+    # olmasını ister; bir alan koca bir bloğu bilerek kaldırıyorsa
+    # (``calculate_trajectory=false`` -> ``.trajectory.motor_data.*`` hiç
+    # üretilmez) kopya "değişmiş", kanonik ``.motor.*`` ise yerinde kalmış
+    # görünür ve sözleşme SAHTE ihlal verir. Ölçüldü: bayrak haritaya
+    # bağlandığı anda 8+ ``.trajectory.motor_data.*`` yaprağı "bayat kopya
+    # şüphesi" diye işaretlendi — oysa hiçbiri bayat değildi, ilgili blok
+    # o koşuda HİÇ YOKTU. Simetri denetimi bu yüzden yalnız İKİ SNAPSHOT'TA
+    # DA VAR OLAN yaprakların değişimine bakar; kopyanın DEĞER olarak
+    # kanonikten ayrışması (asıl kovaladığımız kusur) aynen yakalanır.
+    ever_changed_present: set = set()
 
     for spec in specs:
         payload = dict(baseline_payload)
         payload.update(spec.context)
         payload.update(spec.companions)
 
-        new_value = perturb(spec, payload.get(spec.name))
+        mevcut = payload.get(spec.name)
+        new_value = perturb(spec, mevcut)
         if new_value is None:
-            report.unmeasurable[spec.name] = 'sarsilamadi (aralik/secenek yok)'
+            if spec.kind == 'bool' and mevcut is None:
+                # ÖH D17 / OH-D16-09: tahmin edilen "çevirme" sahte ölü
+                # üretiyordu. Artık ADIYLA ölçülemedi denir.
+                report.unmeasurable[spec.name] = (
+                    'ikili alan taban yukunde bildirilmemis; carpitma '
+                    'ucun varsayilanina esit cikacagi icin olculemez')
+            else:
+                report.unmeasurable[spec.name] = (
+                    'sarsilamadi (aralik/secenek yok)')
             continue
+
+        if spec.kind == 'choice':
+            # ÖH D17 / P10B4-06 — kapsam BEYANI hükümle birlikte yayımlanır.
+            report.secim_kapsami[spec.name] = {
+                'toplam': len(spec.options),
+                'denenen': 1,
+                'taban_secenek': mevcut,
+                'denenen_secenek': new_value,
+            }
 
         # Bağlam değiştiyse tabanı da o bağlamda al (adil karşılaştırma).
         if spec.context or spec.companions:
@@ -388,6 +502,8 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
 
         changed = differing_paths(context_base, shaken)
         ever_changed.update(changed)
+        ever_changed_present.update(
+            p for p in changed if p in context_base and p in shaken)
         real = [p for p in changed if not is_echo(p, spec.name)]
 
         if real:
@@ -400,6 +516,29 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
         else:
             if spec.name not in declared:
                 report.dead_inputs.append(spec.name)
+
+        # ÖH D17 / P10B4-06 — ÜÇÜNCÜ HÂL: kullanıcıya gösterilen seçenek
+        # hesabı düşürüyorsa alan "canlı" diye kapatılamaz.
+        if ((probe_all_options or spec.name in _supurulen)
+                and spec.kind == 'choice' and spec.options):
+            kirik = {}
+            denenen = 0
+            for secenek in spec.options:
+                if secenek == mevcut:
+                    continue
+                deneme = dict(payload)
+                deneme[spec.name] = secenek
+                _govde, _durum = call(deneme)
+                denenen += 1
+                if _govde is None:
+                    kirik[str(secenek)] = _durum
+            report.secim_kapsami[spec.name]['denenen'] = denenen
+            if kirik:
+                report.kismen_olculdu[spec.name] = {
+                    'toplam': len(spec.options),
+                    'denenen': denenen,
+                    'kirik': kirik,
+                }
 
     # --- Kopya sözleşmesi geçişi (v2.6.27) --------------------------------
     # Yankı öneki altındaki HER yaprak (sayı/metin fark etmez) kanonik
@@ -418,7 +557,8 @@ def run(client, endpoint: str, baseline_payload: Dict[str, Any],
         canon_value = baseline.get(canon, _MISSING)
         if canon_value is _MISSING or not _bit_identical(value, canon_value):
             report.yanki_ayristi.append(path)
-        elif (path in ever_changed) != (canon in ever_changed):
+        elif ((path in ever_changed_present)
+              != (canon in ever_changed_present)):
             report.yanki_ayristi.append(path)
     ayrisan = set(report.yanki_ayristi)
 

@@ -35,6 +35,7 @@ import pytest
 
 from hrma.app import app
 from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
+from hrma.engines.liquid_rocket_engine import BURN_TIME_DEFAULT_S
 from hrma.export.openrocket_integration import OpenRocketExporter
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -87,6 +88,15 @@ LIQUID_FIXTURE_GIRDI = {
     'mixture_ratio': 2.5,
     'fuel_type': 'rp1',
     'oxidizer_type': 'lox',
+    # ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ, onemli2-sivi a2): motor yanma süresini
+    # ARTIK VARSAYMAZ; süre verilmezse itici kütlesi yayımlanmaz ve .eng
+    # ÜRETİLMEZ (OpenRocketExportDataError: burn_time, propellant_mass, ...).
+    # Bu dosyanın .eng başlık bekçileri (4 düğüm, [liquid]) SÜRESİ VERİLMİŞ
+    # bir tasarımın dosyasını ölçer; süre motorun kendi sabitinden AÇIKÇA
+    # verilir (sayı burada yazılmaz), sayılar LU-1 öncesindeki sessiz
+    # varsayımla birebir aynıdır. Süre yokken .eng'in fail-closed hâli:
+    # tests/test_d36_sivi_a1.py (TestLU1YanmaSuresi).
+    'max_burn_duration': BURN_TIME_DEFAULT_S,
 }
 
 
@@ -324,26 +334,64 @@ downloadSolidEng().then(() => console.log(JSON.stringify(captured.motor_data)));
 @needs_node
 class TestPerformancePanelUnits:
 
+    # ÖH D33-2 / arayuz-panel a1 (kalem OH-D32-01) — KOŞUM ORTAMI GERÇEK
+    # GÜVERTEYE ÇEVRİLDİ. Bu harness eskiden yalnız ``t/tf/sectionTitle``
+    # taşıyan bir SAHTE ``ui`` kuruyordu; panel de bu yüzden uzunlukların
+    # birimini KENDİ İÇİNDE, elle yazılmış bir eşikle (``DIAMETER_SI_MAX_M
+    # = 1.0`` / ``LENGTH_SI_MAX_M = 5.0``) tahmin ediyordu. O eşikler
+    # doğrulayıcının kanonuyla (5,0 / 20,0 m) ÇELİŞİYORDU ve kanonik bandın
+    # içindeki meşru ölçüleri 1000 kat küçültüyordu (ölçüm:
+    # docs/scofield/raw/OH/D33-2/arayuz-panel/a1/once.json, bölüm K1).
+    # Panel artık birimi güvertenin MERKEZİ sözleşmesinden okuyor
+    # (``analysis_dock.js::readLengthM`` + motor tipine göre ÖLÇÜLMÜŞ
+    # ``LENGTH_UNITS``), yani harness'in de o güverteyi sağlaması gerekir.
+    # İDDİALAR DEĞİŞMEDİ — yalnız ortam, ürünün gerçek ortamı oldu.
     @staticmethod
-    def _suggestions(results, tmp_path, name):
+    def _suggestions(results, tmp_path, name, motor_type='hybrid'):
+        static_js = REPO_ROOT / 'hrma' / 'static' / 'js'
         script = f"""
 const fs = require('fs');
-let spec = null;
-global.window = {{ AnalysisDock: {{
-    ui: {{ t: (k, d) => d, tf: (k, p, d) => d, sectionTitle: () => '' }},
-    register: (s) => {{ spec = s; }},
-}} }};
+function El(tag) {{
+    this.tagName = String(tag || 'div').toUpperCase();
+    this.children = []; this.style = {{}}; this.dataset = {{}};
+    this._attrs = {{}}; this.innerHTML = ''; this.textContent = '';
+}}
+El.prototype.appendChild = function (c) {{ this.children.push(c); return c; }};
+El.prototype.setAttribute = function (k, v) {{ this._attrs[k] = String(v); }};
+El.prototype.getAttribute = function (k) {{
+    return Object.prototype.hasOwnProperty.call(this._attrs, k)
+        ? this._attrs[k] : null;
+}};
+El.prototype.querySelectorAll = function () {{ return []; }};
+El.prototype.querySelector = function () {{ return null; }};
+El.prototype.addEventListener = function () {{}};
+global.document = {{
+    head: new El('head'), body: new El('body'), readyState: 'complete',
+    createElement: function (t) {{ return new El(t); }},
+    querySelector: function () {{ return null; }},
+    querySelectorAll: function () {{ return []; }},
+    getElementById: function () {{ return null; }},
+    addEventListener: function () {{}},
+}};
+global.window = global;
+eval(fs.readFileSync({json.dumps(str(REPO_ROOT / 'hrma' / 'static' / 'js' / 'units_constants.js'))}, 'utf8'));
+eval(fs.readFileSync({json.dumps(str(REPO_ROOT / 'hrma' / 'static' / 'js' / 'analysis_dock.js'))}, 'utf8'));
+global.window.AnalysisDock._setMotorType({json.dumps(motor_type)});
 eval(fs.readFileSync({json.dumps(str(PERF_PANEL))}, 'utf8'));
+const spec = global.window.AnalysisDock._registry.filter(
+    function (x) {{ return x.id === 'performance'; }})[0];
+if (!spec) {{ throw new Error('performance paneli güverteye kaydolmadı'); }}
 const results = {json.dumps(results)};
 console.log(JSON.stringify(spec.fromResults(results)));
 """
+        assert static_js.is_dir()
         return _run_node(script, tmp_path, name)
 
     @pytest.mark.parametrize('motor_type', ['solid', 'liquid', 'hybrid'])
     def test_throat_area_and_chamber_length_are_physical(self, all_results,
                                                          tmp_path, motor_type):
         sug = self._suggestions(all_results[motor_type], tmp_path,
-                                f'perf_{motor_type}.js')
+                                f'perf_{motor_type}.js', motor_type)
         area = sug['throat_area']
         assert THROAT_AREA_BAND_M2[0] <= area <= THROAT_AREA_BAND_M2[1], \
             f'{motor_type}: boğaz alanı fiziksel bantta değil ({area} m2)'
@@ -356,14 +404,16 @@ console.log(JSON.stringify(spec.fromResults(results)));
         """Ham mm değeri metre sanılırsa alan 10^6 kat büyür."""
         raw = float(solid_results['throat_diameter'])       # mm
         bug_area = math.pi * raw * raw / 4.0                # ~1804 m2
-        sug = self._suggestions(solid_results, tmp_path, 'perf_solid_bug.js')
+        sug = self._suggestions(solid_results, tmp_path, 'perf_solid_bug.js',
+                                'solid')
         assert sug['throat_area'] < bug_area / 1e5
         assert sug['throat_area'] == pytest.approx(
             math.pi * (raw / 1000.0) ** 2 / 4.0, rel=1e-4)
 
     def test_liquid_chamber_length_is_not_the_mm_bug(self, liquid_results,
                                                      tmp_path):
-        sug = self._suggestions(liquid_results, tmp_path, 'perf_liquid_bug.js')
+        sug = self._suggestions(liquid_results, tmp_path, 'perf_liquid_bug.js',
+                                'liquid')
         assert sug['chamber_length'] == pytest.approx(
             liquid_results['chamber_length'] / 1000.0, rel=1e-6)
 
@@ -371,7 +421,8 @@ console.log(JSON.stringify(spec.fromResults(results)));
                                                       tmp_path):
         """Bulgu 4: sıvı mixture_ratio/isp_sea_level verir, panel of_ratio/isp
         okuyordu; işaretçiler sessizce 3.5 / 300 s'te kalıyordu."""
-        sug = self._suggestions(liquid_results, tmp_path, 'perf_liquid_of.js')
+        sug = self._suggestions(liquid_results, tmp_path, 'perf_liquid_of.js',
+                                'liquid')
         assert sug['optimal_of_ratio'] == pytest.approx(
             liquid_results['mixture_ratio'], rel=1e-9)
         assert sug['base_isp'] == pytest.approx(
@@ -384,7 +435,8 @@ console.log(JSON.stringify(spec.fromResults(results)));
                                                   motor_type):
         """Bulgu 6: Bartz çözücüsü Tc ve ṁ olmadan 3000 K / 1 kg/s'e düşüyordu."""
         results = all_results[motor_type]
-        sug = self._suggestions(results, tmp_path, f'perf_gas_{motor_type}.js')
+        sug = self._suggestions(results, tmp_path,
+                                f'perf_gas_{motor_type}.js', motor_type)
         assert sug['chamber_temperature'] == pytest.approx(
             results['chamber_temperature'], rel=1e-9)
         assert 0.01 < sug['mdot_total'] < 1e4

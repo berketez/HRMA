@@ -17,9 +17,37 @@
     --hd-ink: #cfe8f2;
     --hd-ink-strong: #eaf7fb;
     --hd-ink-dim: #7d97a5;
-    --hd-ink-faint: #46606d;
+    --hd-ink-faint: #6a8491;
     --hd-cyan: #00e5ff;
     --hd-cyan-soft: #3af2ff;
+    /* ÖH D31 · OH-D26-03 — AMBER ARTIK GERÇEK TOKEN.
+       ÖLÇÜLDÜ (docs/scofield/raw/OH/D31/arayuz-panel/a1/once.json · M4):
+       `--hd-amber` theme.css'te TANIMSIZDI (0 tanım) ve yalnız
+       results_hud.css:23'te yaşıyordu. Tanımsız olduğu için
+       tests/test_d20_electron_a1.py::test_yedek_hexler_tema_tokeninden_
+       ayrismiyor bekçisi o adı ATLIYOR (":286-288" muafiyeti) ve iki
+       panel yedeği ayrışık bir amber taşımaya devam ediyordu
+       (`#ffb454` — correlation_panel.js, flow_panel.js, advanced.html).
+       DEĞER UYDURULMADI: buraya yazılan `#ffbe46` ürünün KENDİ token
+       değeridir (results_hud.css:23, sixdof_panel.js, step_import_ui.js
+       üçü de bu değeri yedekliyordu) — görsel değişiklik yaratmaz,
+       yalnız muafiyeti kaldırır. */
+    --hd-amber: #ffbe46;
+    /* ÖH D32 · OH-D31-18 — AMBER AİLESİNİN ÜÇÜNCÜ DEĞERİ TOKENE ÇEKİLDİ.
+       ÖLÇÜLDÜ (docs/scofield/raw/OH/D32/arayuz-panel/a1/once.json · M6):
+       `#ffb347` hrma/ altında 3 yerde ÇIPLAK sabitti ve `--hd-amber`
+       ailesinin (#ffbe46) dışında duruyordu: kaynak-renk tasarım dilinin
+       "assumed / varsayım" ambersi (motor_viz3d.js:702 SOURCE_COLORS,
+       analysis_dock.js:442 SOURCE_COLORS, motor_viz3d.js CFD seyreltme
+       beyanı). RENK DEĞERİ DEĞİŞMEZ — buraya yazılan `#ffb347` ürünün
+       kendi değeridir; token katmanı yalnız o değerin TEK KAYNAĞINI
+       kurar (ana model 15 Eyl kararı, Berke'ye bildirildi).
+       NOT: iki `SOURCE_COLORS` tablosu bu tokeni `var()` ile OKUYAMAZ —
+       değerleri `canvas` `fillStyle`ına (motor_viz3d.js::textSprite) ve
+       `new THREE.Color(...)`a gidiyor, ikisi de CSS değişkeni çözmez.
+       O iki ayna bu tokenin değerine BEKÇİYLE kilitlendi:
+       tests/test_d32_arayuz_panel_a1.py::TestOHD3118AmberTokeni. */
+    --hd-amber-source: #ffb347;
     --hd-orange: #ff8c33;
     --hd-green: #2dd4a8;
     --hd-red: #ff5d73;
@@ -132,6 +160,19 @@ h1, h2, h3, h4, h5, h6 { color: var(--hd-ink-strong); }
     font-weight: 700;
     text-shadow: 0 0 24px rgba(0, 229, 255, 0.35);
 }
+/* ÖH D34 · OH-P-10 (piksel turu, 21 Eyl 2026): üst şeritteki sayfa başlığı
+   ("MOTOR ANALİZİ - Sıvı Çift İticili") 1440 px'te bile iki satıra kırılıyordu —
+   şablonların 24 px + buradaki 4 px harf aralığı + 8 bağlantılık menü aynı
+   satıra sığmıyor (hibrit-01-r00, kati-02-r00, sivi-01-r00). Üç sayfa da bu
+   kuralı paylaşır; başlık tek satırda kalır, gerekirse menü değil başlık
+   daralır. `.header h1` (giriş sayfası manşeti) bilerek dışarıda. */
+.navbar h1 {
+    font-size: 19px;
+    letter-spacing: 2px;
+    white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
+}
 
 .header p { color: var(--hd-ink-dim); letter-spacing: 1px; }
 
@@ -145,6 +186,17 @@ h1, h2, h3, h4, h5, h6 { color: var(--hd-ink-strong); }
     background: rgba(0, 229, 255, 0.1);
     color: var(--hd-cyan-soft);
     box-shadow: inset 0 0 0 1px var(--hd-line-strong);
+}
+/* ÖH D36 · OH-K-06 (kabuk turu, 22 Eyl 2026): dar ekranda (390 px) üç motor
+   sayfasının 8 bağlantılık menüsü tek satırda kalıp 924 px'e uzuyor, sayfa
+   944 px'e genişliyordu (ölçüldü: /hybrid, /solid, /liquid — hepsi 944);
+   şablonlar `.nav-links`i kendi içinde `display:flex` tanımlıyor, sarma yok.
+   Üç sayfa da bu dosyayı paylaşır: menü sarar, başlık tek satır zorunluluğu
+   dar ekranda kalkar. Formül sayfasının kendi kuralı da aynı sonucu verir. */
+@media (max-width: 768px) {
+    .navbar { flex-wrap: wrap; }
+    .navbar h1 { white-space: normal; }
+    .nav-links { flex-wrap: wrap; justify-content: center; gap: 6px 12px; }
 }
 
 /* ---------------- Panel / Kart ---------------- */
@@ -316,14 +368,20 @@ button:not([class]) {
 .data-table tr:hover, .spec-table tr:hover { background: rgba(0, 229, 255, 0.07); }
 
 /* ---------------- Sekmeler ---------------- */
+/* ÖH D22 / P12aB5-11 — ÖLÜ SEÇİCİLER SÖKÜLDÜ (ölçüm: once.json K4).
+   .safety-tabs / .safety-tab / .safety-tab-content: ürünün 193 üretici dosyasında sözcük sınırıyla arandı, HİÇ
+   bulunamadı — hiçbir zaman çizilmiyorlardı. (`safety-tabs` /
+   `safety-tab` bloğu Dalga-2'de safety_panel.js'e taşınmıştı;
+   tests/test_wave2_contract.py geri gelmemesini zaten bekliyor.) */
 
-.tabs, .safety-tabs {
+
+.tabs {
     background: rgba(6, 14, 24, 0.8);
     border: 1px solid var(--hd-line);
     border-radius: 10px;
 }
 
-.tab, .tab-button, .subtab-button, .sub-subtab-button, .safety-tab {
+.tab, .tab-button, .subtab-button, .sub-subtab-button {
     color: var(--hd-ink-dim);
     background: transparent;
     border-color: var(--hd-line);
@@ -331,13 +389,13 @@ button:not([class]) {
     transition: all 0.15s ease;
 }
 
-.tab:hover, .tab-button:hover, .subtab-button:hover, .sub-subtab-button:hover, .safety-tab:hover {
+.tab:hover, .tab-button:hover, .subtab-button:hover, .sub-subtab-button:hover {
     background: rgba(0, 229, 255, 0.08);
     color: var(--hd-ink);
 }
 
 .tab.active, .tab.active:hover,
-.tab-button.active, .subtab-button.active, .sub-subtab-button.active, .safety-tab.active {
+.tab-button.active, .subtab-button.active, .sub-subtab-button.active {
     background: linear-gradient(135deg, #0b3a4d 0%, #0e5468 100%);
     color: var(--hd-cyan-soft);
     box-shadow: inset 0 0 0 1px var(--hd-line-strong), 0 0 16px rgba(0, 229, 255, 0.2);
@@ -376,6 +434,20 @@ button:not([class]) {
     color: var(--hd-ink-faint);
 }
 
+/* ÖH D35 · OH-GT-34 — YER TUTUCU TÜRKÇE KİPTE İNGİLİZCE KALIYORDU.
+   ÖLÇÜLDÜ (a1/once.json M4_yer_tutucu): `en_kurali_var_mi = true`,
+   `tr_kurali_var_mi = false` — yani hesap öncesi her grafik kabı, arayüz
+   Türkçeyken bile "NO DATA — RUN ANALYSIS TO GENERATE THIS PLOT"
+   basıyordu. Metin CSS `content`inde yaşadığı için i18n sözlüğünden
+   GEÇMİYOR; `data-i18n` kanalı sözde-öğelere erişemez.
+   Kanal: i18n.js:544 her dil değişiminde `documentElement` üstüne
+   `lang` yazar (ölçüldü: `kok_lang_ayarlaniyor_mu = true`), dolayısıyla
+   kural seçicisi dil değişiminde kendiliğinden yeniden eşleşir; JS
+   gerekmez. İngilizce kural OLDUĞU GİBİ kalır (yalnız TR eklenir). */
+html[lang="tr"] .plot-container:empty::before {
+    content: 'VERİ YOK — GRAFİK İÇİN ANALİZİ ÇALIŞTIRIN';
+}
+
 .chart-explanation {
     background: rgba(6, 16, 28, 0.75);
     border: 1px solid rgba(0, 229, 255, 0.12);
@@ -399,16 +471,15 @@ button:not([class]) {
 .database-status { font-family: var(--hd-mono); }
 .status-connected { background: rgba(15, 110, 80, 0.25); color: #7ee8c9; }
 .status-disconnected { background: rgba(140, 30, 40, 0.25); color: #ff9ba3; }
+/* ÖH D30 · P12bB3-04 — koyu temada da iki başarısızlık yolunun rengi var.
+   .status-offline yedeğe düşüşü (uyarı), .status-error bağlantı hatasını
+   (başarısızlık) taşır; açık tema karşılıkları advanced.html içinde. */
+.status-offline { background: rgba(120, 80, 10, 0.28); color: #ffd9a0; }
+.status-error { background: rgba(140, 30, 40, 0.25); color: #ff9ba3; }
 
-.risk-level-critical { background: rgba(140, 30, 40, 0.25); color: #ff9ba3; }
-.risk-level-high { background: rgba(150, 70, 20, 0.25); color: #ffc394; }
-.risk-level-medium { background: rgba(130, 100, 20, 0.22); color: #ffe2a0; }
-.risk-level-low { background: rgba(15, 110, 80, 0.22); color: #9beed7; }
-
-.safety-metric { background: rgba(8, 18, 30, 0.7); border-radius: 10px; }
-.safety-metric.safe { background: rgba(15, 110, 80, 0.15); }
-.safety-metric.marginal { background: rgba(120, 80, 10, 0.15); }
-.safety-metric.unsafe { background: rgba(140, 30, 40, 0.18); }
+/* ÖH D22 / P12aB5-11 — ÖLÜ SEÇİCİLER SÖKÜLDÜ (ölçüm: once.json K4).
+   .risk-level-critical/-high/-medium/-low, .safety-metric: ürünün 193 üretici dosyasında sözcük sınırıyla arandı, HİÇ
+   bulunamadı — hiçbir zaman çizilmiyorlardı. */
 
 .loading { color: var(--hd-ink-dim); }
 .spinner {
@@ -457,6 +528,35 @@ pre, code { color: #9fe8d8; }
     color: var(--hd-ink);
 }
 
+/* ÖH D34 · OH-GT-12 — "VURGUSUZ KUTU" AYRIMI ÖZGÜLLÜKLE TAŞINIR.
+
+   Ürünün DEĞERLENDİRMEDİĞİ, yalnız örnekleme amaçlı bağıntılar
+   (`.formula-box.formula-illustrative`) hesaplanan bağıntılarla aynı
+   ağırlıkta okunmamalı. Ayrım `formulas.html`in satır içi `<style>`
+   bloğunda `.formula-illustrative` olarak yazılıydı ve P12bB4-12'de
+   "kural `.formula-box`tan SONRA duruyor" diye kilitlenmişti.
+
+   ÖLÇÜLDÜ (`docs/scofield/raw/OH/D34/kabuk-erisilebilirlik/a1/once.json`,
+   CSS basamağı özgüllük + kaynak sırasıyla çözülerek): eşleşen 13
+   bildirimin `border-left-style` kazananı `theme.css`in `.formula-box`
+   kuralı ve değeri `solid`. Yani KESİKLİ SOL ÇİZGİ SAYFADA HİÇ YOK.
+   Sebep satır içi bloktaki sıra değil, bu dosyanın satır içi stillerden
+   SONRA yüklenmesi: iki kural da (0,1,0) özgüllükte olduğu için sonra
+   yüklenen kazanıyor. Sıra bir daha ayrışmanın koşulu OLAMAZ.
+
+   Ayrım bu yüzden (0,2,0) özgüllükte, iki sınıfı birlikte seçen bir
+   kurala taşındı: hangi dosya önce yüklenirse yüklensin kazanır.
+   Kalan ayrışma ekseni opaklıktı (ölçüldü: 0,72 uygulanıyordu) — tek
+   eksen renk/parlaklık demektir, renk körü kullanıcı için ayrım yok;
+   kesikli kenar ikinci, renkten bağımsız eksendir (WCAG 1.4.1).
+
+   Yeni renk UYDURULMADI: `--hd-ink-faint` bu dosyanın kendi belirteci
+   (satır 20). Sınıf METİN EKLEMEZ, yalnız biçim verir. */
+.formula-box.formula-illustrative {
+    opacity: 0.72;
+    border-left: 3px dashed var(--hd-ink-faint);
+}
+
 .section {
     background: var(--hd-panel);
     border: 1px solid var(--hd-line);
@@ -486,7 +586,7 @@ pre, code { color: #9fe8d8; }
 /* Sekme içerik kutuları (advanced/liquid/solid varyantları).
    DİKKAT: display özelliğine dokunma — sekme mekaniği inline display kullanıyor */
 .tab-content, .analysis-tab-content, .tab-panel,
-.subtab-content, .sub-subtab-content, .safety-tab-content {
+.subtab-content, .sub-subtab-content {
     background: rgba(6, 14, 26, 0.6);
     color: var(--hd-ink);
 }
@@ -649,10 +749,20 @@ pre, code { color: #9fe8d8; }
 }
 .viz-chip { background: #060d18; padding: 12px 16px 11px 16px; }
 .viz-chip .k { font-size: 9.5px; letter-spacing: 2px; color: #4f7d8c; text-transform: uppercase; }
+/* ÖH D23 / P17B2-10 — SEMBOL BÜYÜTÜLMEZ.
+   Yukarıdaki uppercase kuralı çip başlığındaki ε (U+03B5) karakterini
+   Ε (U+0395, Yunan büyük epsilon) yapıyordu; ekranda okunan dize
+   `EXPANSION Ε 50.0` idi ve Ε çoğu yazı tipinde Latin E'den ayırt
+   edilemediği için genişleme oranının standart sembolü kayboluyordu.
+   Aynı kural P<sub>c</sub> alt indisini de düzleştiriyordu. Sembolleri
+   motor_viz_deck.js (sembolKoru) bu kaba sarar; büyütmeden muaftır. */
+.viz-chip .k .viz-sym { text-transform: none; }
 .viz-chip .v { font-size: 19px; color: #d9f6fc; margin-top: 3px; font-weight: 600; }
 .viz-chip .v small { font-size: 11px; color: #5d95a6; font-weight: 400; margin-left: 3px; }
 .viz-chip.hot .v { color: #ffb066; text-shadow: 0 0 14px rgba(255,140,60,0.5); }
-.viz-fallback-note { padding: 10px 20px; font-size: 11px; color: #63808d; }
+/* ÖH D22 / P12aB5-11 — ÖLÜ SEÇİCİLER SÖKÜLDÜ (ölçüm: once.json K4).
+   .viz-fallback-note: ürünün 193 üretici dosyasında sözcük sınırıyla arandı, HİÇ
+   bulunamadı — hiçbir zaman çizilmiyorlardı. */
 
 /* Tasarım modu paneli + ısı lejantı */
 .viz-design {
@@ -695,6 +805,27 @@ pre, code { color: #9fe8d8; }
 }
 .viz-heatlegend .lbl { display: flex; justify-content: space-between; color: #7d97a5; }
 .viz-heatlegend .tw { margin-top: 5px; color: #ffd9a8; }
+
+/* A1b faz-c-0 · K1b — 3B sahne PROBE satırı (motor_viz3d.js _probeRender).
+   Yalnız fare bir CFD hücresinin üstündeyken VAR; okuma yoksa öğe DOM'dan
+   kalkar (B1 sözleşme: alt şerit koşullu). Sol altta, CFD renk çubuğunun
+   hemen üstünde (dikey yer sahneden: `bottom` renk çubuğunun ölçülen
+   yüksekliğiyle yazılır; buradaki değer çubuksuz taban). Sayı KIRPILMAZ:
+   uzun satır sarar, taşma üç noktayla gizlenmez. Renkler tema tokeni. */
+.viz3d-probe {
+    position: absolute; left: 8px; bottom: 8px; z-index: 5;
+    max-width: calc(100% - 16px); box-sizing: border-box;
+    pointer-events: none; white-space: normal; overflow-wrap: anywhere;
+    font: 600 11px var(--hd-mono); letter-spacing: 0.3px; line-height: 1.45;
+    color: var(--hd-ink); background: var(--hd-panel);
+    border: 1px solid var(--hd-line-strong); border-radius: var(--hd-radius-sm);
+    padding: 5px 10px;
+}
+.viz3d-probe .viz3d-probe-metric { color: var(--hd-ink-dim); }
+.viz3d-probe .viz3d-probe-value { color: var(--hd-ink-strong); font-weight: 700; }
+.viz3d-probe .viz3d-probe-meta { color: var(--hd-ink); }
+.viz3d-probe .viz3d-probe-decl { color: var(--hd-amber-source); }
+.viz3d-probe .viz3d-probe-sep { color: var(--hd-ink-faint); }
 
 /* ==========================================================================
    Analiz güvertesi — E1 ızgara yerleşimi, E2 değişim rozeti, E3 kaynak çipi
@@ -754,3 +885,48 @@ pre, code { color: #9fe8d8; }
 }
 .ad-field-head label { margin-bottom: 0; }
 .ad-src-slot { display: inline-flex; align-items: center; }
+
+/* ÖH D35 · OH-GT-31 — GÜVERTE SEÇİCİLERİ SEÇİLİ SEÇENEĞİ KESİYORDU.
+   ÖLÇÜLDÜ (a1/once.json M1_secici_kesik): bölüm ızgarası
+   `minmax(170px, 1fr)` (tek değer, `grid_minmax_degerleri = [170]`);
+   select yatay dolgusu+oku düşülünce hücreye sığan metin ~20 karakter,
+   oysa güverte/merkez seçeneklerinin 64'ü (70 anahtarın) bu bütçeyi
+   aşıyor — "Ters yönlü (çıkıştan odaya)" (27), "Counterflow (exit →
+   chamber)" (28). `fieldHtml`in select dalında `title` YOKTU
+   (`fieldHtml_select_title_var_mi = false`), kırpma kuralı da yoktu
+   (`dock_select_ellipsis_kurali_var_mi = false`): metin kabın kenarında
+   ortasından kesiliyordu ve TAM metni okumanın HİÇBİR yolu yoktu.
+   İki eksen: (1) ızgara asgarisi 210 px (7 sütunluk en geniş bölüm
+   1440 px'te hâlâ tek satıra sığar: 7×210 + 6×10 = 1530 > 1440 → ızgara
+   kendiliğinden 6 sütuna düşer, taşma olmaz), (2) sığmayan metin üç
+   noktayla biter ve TAM metin `title` ipucundadır (JS tarafı).
+   DÜRÜSTLÜK NOTU: `text-overflow` bir `<select>` üstünde Chromium'da
+   uygulanır (ürünün kabuğu Electron), her tarayıcıda DEĞİL. Desteklemeyen
+   tarayıcıda metin yine kenardan kesilir — ama orada da TAM metin `title`
+   ipucundan okunur; asıl kurtarma odur, kırpma yalnız görgüdür. */
+.ad-field-head + select,
+.ad-field-head ~ select {
+    max-width: 100%;
+    text-overflow: ellipsis;
+}
+
+/* ÖH D35 · OH-GT-33 — BÜYÜTME BİRİM SİMGELERİNİ VE ÖZEL ADLARI BOZUYOR.
+   ÖLÇÜLDÜ (a1/once.json M3_buyutme): Analiz Merkezi alan etiketleri
+   `analysis_center.js::fieldHtml` içinde satır içi `text-transform:
+   uppercase` ile basılıyor (`merkez_etiket_uppercase = true`) ve CFD
+   koşum kartının 8 etiketi büyütmede ANLAM kaybediyor:
+     'Summerfield k [-] — isteğe bağlı' → 'SUMMERFİELD K [-] — İSTEĞE
+     BAĞLI'   (özel ad Summerfield→SUMMERFİELD, simge k→K)
+     'Ortam basıncı [Pa]'  → '… [PA]'   (Pa = pascal; PA diye bir SI
+                                         simgesi YOKTUR)
+   Yani Türkçe `i→İ` kuralı yabancı bir insan adına uygulanıyor ve
+   büyük/küçük harfi anlam taşıyan simgeler eziliyor. Bu bir ÇEVİRİ
+   sorunu değil, sunum katmanının metni bozmasıdır: sözlükteki metin
+   (i18n_common.js) DOĞRU yazılmış.
+   NEDEN CSS: etiketin kendi satırı `<label for=…>` — bu dalgada form
+   etiket satırlarına dokunulmuyor (ÖH D35 U-4 bağlama işi). Kural satır
+   içi stili ezmek zorunda olduğu için `!important` taşır; başka hiçbir
+   `!important` bu seçiciyle yarışmıyor.
+   NE DEĞİŞMEZ: etiketin mono yazı tipi, punto, harf aralığı ve rengi —
+   yalnız harf DÖNÜŞÜMÜ kalkar, metin sözlükte yazıldığı gibi görünür. */
+.ac-field > label { text-transform: none !important; }

@@ -32,8 +32,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
 
-VARSAYILAN_RAPOR = os.path.expanduser(
-    '~/HRMA-kurtarma/takim-raporlari/sabit-bulgular.json')
+from kampanya_defteri import (                       # noqa: E402
+    DefterHatasi, VARSAYILAN_DEFTER, kapsam_beyani)
+import kampanya_defteri                              # noqa: E402
+
+#: Defterin yolu TEK kaynaktan gelir (``tools/kampanya_defteri.py``).
+#: Eskiden burada depo DIŞI bir yol vardı
+#: (``~/HRMA-kurtarma/takim-raporlari/sabit-bulgular.json``); o dosya ve
+#: dizini 27 Ağustos 2026'da ölçüldüğünde YOKTU, yani tarayıcı referanssız
+#: koşuyordu (P10B4-10).
+VARSAYILAN_RAPOR = VARSAYILAN_DEFTER
 VARSAYILAN_CIKTI = str(ROOT / 'docs' / 'dev' / 'sabit_tarama.json')
 
 #: Şablonda alanı olmayan ama uç noktanın okuduğu anahtarlar.
@@ -107,7 +115,7 @@ def taban_yuk(page, wiring_map):
     return base
 
 
-def tara(page, client, wiring_map, shake, sessiz):
+def tara(page, client, wiring_map, shake, sessiz, report=None):
     """Sayfayı iki ölçümün BİRLEŞİMİYLE tarar.
 
     (1) wiring_map'in şablon güdümlü sarsımı — her alanı kendi min/max
@@ -123,11 +131,16 @@ def tara(page, client, wiring_map, shake, sessiz):
     ep = wiring_map.PAGES[page]['endpoint']
     base = taban_yuk(page, wiring_map)
 
-    with contextlib.redirect_stdout(sessiz):
-        if page == 'hybrid':
-            report, *_ = wiring_map.measure_hybrid(client)
-        else:
-            report, *_ = wiring_map.measure_page(client, page)
+    # ÖH D19 / P10B4-07: ``report`` dışarıdan verilebilir. Çağıran (ör.
+    # ``wiring_map.main``) şablon ölçümünü ZATEN koşmuşsa aynı ölçüm ikinci
+    # kez koşulmaz — sayı TEK KAYNAKTAN gelir ve hibritte ~250 sn'lik
+    # gereksiz tekrar ödenmez. Verilmezse burada ölçülür (eski davranış).
+    if report is None:
+        with contextlib.redirect_stdout(sessiz):
+            if page == 'hybrid':
+                report, *_ = wiring_map.measure_hybrid(client)
+            else:
+                report, *_ = wiring_map.measure_page(client, page)
     # DİKKAT — burada `report.changed_paths` KULLANILMAZ.
     # O alan yankıları (bir girdinin kendi çıktıdaki kopyası) bilerek eler;
     # amacı "bu girdi ölü mü" sorusudur. Sabit ÇIKTI taraması için yanlış
@@ -189,13 +202,27 @@ def tara(page, client, wiring_map, shake, sessiz):
             denemeler.append((k, v))
 
     oynayan = set()
+    # ÖH D23 · P15B3-09 — ERİYEN YAPRAĞIN KANITI ARTIK SAKLANIYOR.
+    # Bu döngü "hangi yaprak hangi sarsımda oynadı" bilgisini zaten
+    # üretiyordu; yalnız SAYISI (``eriyen``) döndürülüyor, adlar atılıyordu.
+    # Sınıflandırıcı ise AYNI yapraklara bakıp "neden sabit oldugu
+    # bilinmiyor" diyordu — kanal vardı, kapı yoktu. Ek maliyet SIFIR:
+    # yeni çağrı yapılmaz, var olan farkın kaynağı kaydedilir.
+    eriyen_kaynak: dict = {}
     basarisiz = 0
     for k, v in denemeler:
         d = call({**base, k: v})
         if not d:
             basarisiz += 1
             continue
-        oynayan.update(shake.differing_paths(taban, d))
+        farklar = shake.differing_paths(taban, d)
+        for yol in farklar:
+            if yol in sablon_sabit and yol not in eriyen_kaynak:
+                # İLK oynatan sarsım kaydedilir; deneme listesi sırası
+                # deterministiktir, dolayısıyla kanıt da deterministiktir.
+                eriyen_kaynak[yol] = {'anahtar': k, 'deger': v,
+                                      'taban_deger': base.get(k)}
+        oynayan.update(farklar)
 
     # Yalnız SAYISAL yapraklar aranır; metin/etiket alanları doğal olarak
     # sabittir ve onları "kusur" saymak gürültü üretir.
@@ -223,23 +250,37 @@ def tara(page, client, wiring_map, shake, sessiz):
                               and not isinstance(v, bool)),
         'oynayan_yaprak': len(oynayan),
         'sabit_yapraklar': sorted(sabit),
+        # ÖH D19 / P10B4-07 — ERİME ÖLÇÜMÜ. ``wiring_map``in ZAYIF sarsımla
+        # bulduğu "sabit" yaprakların kaçı GÜÇLÜ sarsımda oynuyor? Bu sayı
+        # olmadan "sabit" sayısı bir kapı ölçütü değildir (katıda 200/200
+        # eriyor, yani sayının tamamı ölçüm zayıflığı artifaktı).
+        'zayif_sarsim_sabit': len(sablon_sabit),
+        'eriyen': len(sablon_sabit & oynayan),
+        # ÖH D23 · P15B3-09 — eriyen yaprakların ADLARI ve her birini
+        # oynatan sarsım. Sınıflandırıcı (``tools/sabit_siniflandirma.py``)
+        # bu kanıtla "şablon körü" sınıfını verir: yaprak SABİT DEĞİLDİR,
+        # şablonun gönderdiği alanlar onu görmüyordur.
+        'eriyen_yapraklar': sorted(sablon_sabit & oynayan),
+        'eriyen_kaynak': eriyen_kaynak,
+        # Sarsımın kapsadığı payload anahtarları. Sınıflandırıcı bunu
+        # "bu adı taşıyan bir form alanı VAR MI" sorusunu ÖLÇEREK
+        # yanıtlamak için okur (``girdi_yankisi`` sınıfı, fail-closed).
+        'taban_anahtarlar': sorted(base),
     }
 
 
 def bilinen_yollar(rapor_yolu):
-    """Takım raporundaki kalemlerin yolları (kusur + meşru)."""
-    if not os.path.exists(rapor_yolu):
-        return set(), set()
-    with open(rapor_yolu, encoding='utf-8') as f:
-        gruplar = json.load(f)
-    kusur, mesru = set(), set()
-    for grup in gruplar:
-        for k in grup.get('kalemler', []):
-            yol = k.get('yol') or ''
-            if not yol.startswith('.'):
-                continue
-            (kusur if k.get('sinif') == 'KUSUR' else mesru).add(yol)
-    return kusur, mesru
+    """Defterdeki kalemlerin yolları (kusur + meşru) + defter künyesi.
+
+    FAIL-CLOSED (P10B4-12): eski sürüm dosya yoksa sessizce
+    ``set(), set()`` döndürüyordu; ardından ``main()``
+    "Takım raporunda GEÇMEYEN sabit yaprak: N" satırını sanki karşılaştırma
+    yapılmış gibi basıyor ve çıkış kodu 0 (temiz) oluyordu — yani her sabit
+    "YENİ" sayılırken araç kendini akladığını sanıyordu. Referansı kayıp bir
+    bekçinin hükmü "temiz" değil "ÖLÇEMEDİM"dir; okuma artık
+    ``kampanya_defteri`` üstünden yapılır ve dosya yoksa YÜKSELTİR.
+    """
+    return kampanya_defteri.bilinen_yollar(rapor_yolu)
 
 
 def main():
@@ -259,8 +300,23 @@ def main():
     sayfalar = (['hybrid', 'liquid', 'solid'] if args.sayfa == 'all'
                 else [args.sayfa])
 
-    kusur, mesru = bilinen_yollar(args.rapor)
-    sonuc = {'sayfalar': [], 'yeni_sabitler': []}
+    try:
+        kusur, mesru, kunye = bilinen_yollar(args.rapor)
+    except DefterHatasi as hata:
+        print(str(hata), file=sys.stderr)
+        print('ÖLÇEMEDİM — referans defteri okunamadı, hüküm verilmiyor.',
+              file=sys.stderr)
+        return 3
+
+    beyan = kapsam_beyani(kunye)
+    if beyan:
+        print(f'DEFTER KAPSAMI: {beyan}', file=sys.stderr)
+    print(f'Defter: {args.rapor}  '
+          f'({len(kusur)} kusur yolu, {len(mesru)} meşru yolu)',
+          file=sys.stderr)
+    sonuc = {'sayfalar': [], 'yeni_sabitler': [],
+             'defter': {'yol': args.rapor, 'kusur_yolu': len(kusur),
+                        'mesru_yolu': len(mesru), 'kapsam_beyani': beyan}}
 
     for page in sayfalar:
         print(f'{page} taranıyor...', file=sys.stderr)
@@ -287,7 +343,10 @@ def main():
         print(f"  {r['sayfa']:8s} sabit={len(r['sabit_yapraklar']):4d}  "
               f"yeni={len(r['yeni']):4d}")
     toplam_yeni = len(sonuc['yeni_sabitler'])
-    print(f"\nTakım raporunda GEÇMEYEN sabit yaprak: {toplam_yeni}")
+    print(f"\nDefterde GEÇMEYEN sabit yaprak: {toplam_yeni}"
+          f"  (defter: {len(kusur)} kusur / {len(mesru)} meşru yolu)")
+    if beyan:
+        print(f"  KAPSAM SINIRI: {beyan}")
 
     os.makedirs(os.path.dirname(args.cikti), exist_ok=True)
     with open(args.cikti, 'w', encoding='utf-8') as f:

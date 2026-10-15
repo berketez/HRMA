@@ -122,6 +122,11 @@ def rapor_olustur(temel_url: str, sunucu_kunyesi: Dict[str, Any],
         for s in sayfa_raporlari for d in s.get('denetimler', [])
         if not d.get('gecti')
     ]
+    tarayici_hukmu = denetimler.tarayici_denetimi(tarayici)
+    if not tarayici_hukmu.gecti:
+        kalan_denetimler.append({'sayfa': '(rapor)', 'denetim': tarayici_hukmu.ad,
+                                 'ozet': tarayici_hukmu.ozet,
+                                 'kesinlik': tarayici_hukmu.kesinlik})
     rapor = {
         'surum': RAPOR_SURUMU,
         'arac': 'tools/browser_harness/run_tour.py',
@@ -130,6 +135,15 @@ def rapor_olustur(temel_url: str, sunucu_kunyesi: Dict[str, Any],
         'sunucu': sunucu_kunyesi,
         'tarayici': tarayici,
         'esikler': esik_kunyesi(),
+        # ÖH D20 · P17B1-07 — rapor DÜZEYİNDE denetim: tarayıcı beyanı.
+        # ÖH D26 / OH-D25-02: denetim İKİ KEZ hesaplanıyordu (burada bir kez,
+        # yukarıda `tarayici_hukmu` için bir kez). İki çağrı bugün aynı
+        # sonucu veriyor ama iki AYRI nesnedir: biri değişip öteki
+        # değişmediğinde rapordaki hüküm ile kalan-denetim listesi
+        # AYRIŞABİLİR ve rapor kendi kendisiyle çelişir. Tek hesap, tek
+        # gerçek.
+        # (Aynı temizlik iki kulvarda ayrı yazıldı — altyapi OH-D25-02 + arayuz P17B1-07; birleşmede tek blok.)
+        'denetimler': [tarayici_hukmu.sozluk()],
         'sayfalar': sayfa_raporlari,
         'ozet': {
             'sayfa_sayisi': len(sayfa_raporlari),
@@ -150,6 +164,10 @@ def ozeti_yaz(rapor: Dict[str, Any], akis=None) -> None:
     yaz('=' * 72)
     yaz('  TARAYICI DENETİM TURU — %s' % rapor.get('temel_url'))
     yaz('=' * 72)
+    # ÖH D20 · P17B1-07 — özet artık TARAYICIYI ANIYOR; düşüş varsa yazıyor.
+    for d in rapor.get('denetimler', []):
+        yaz('%s%-16s %s' % ('  ok ' if d.get('gecti') else '  XX ',
+                            d.get('ad'), d.get('ozet')))
     for sayfa in rapor.get('sayfalar', []):
         durum = 'GEÇTİ' if sayfa.get('gecti') else 'KALDI'
         yaz('')

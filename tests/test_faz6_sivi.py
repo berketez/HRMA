@@ -587,14 +587,24 @@ class TestT47EnjektorDili:
             'var -> %r' % (tip, desc))
 
     @pytest.mark.parametrize('tip', INJ_TIPLERI)
-    def test_legacy_key_still_present_for_the_panel(self, tasarimlar, tip):
-        """``injector_panel.js:348`` hâlâ ``description_tr`` okuyor.
+    def test_legacy_key_removed_panel_reads_description(self, tasarimlar, tip):
+        """ÇEVRİLDİ — ÖH D30 / OH-D29-11 + P11B5-21.
 
-        Anahtar tüketici geçmeden kaldırılırsa panel açıklamayı hiç
-        göstermez; bekçi o sessiz kaybı yakalar.
+        Eski hâli ``description_tr == description`` diye mandallıyordu, yani
+        KUSURU KORUYORDU: alan adı Türkçe içerik vaat ediyor, gövdesi
+        bit-aynı İngilizce metin taşıyordu (yalan künye). Alan D30'da
+        söküldü ve tüketici (``injector_panel.js``) ``description``a
+        geçirildi; bekçi artık yalanın geri gelmediğini ve panelin doğru
+        anahtarı okuduğunu sınar.
         """
         pat = tasarimlar[tip]['pattern']
-        assert pat.get('description_tr') == pat.get('description')
+        assert 'description_tr' not in pat, (
+            '%s: yalan "_tr" alanı geri geldi' % tip)
+        assert pat.get('description'), '%s: açıklama boş' % tip
+        panel = (REPO_ROOT / 'hrma/static/js/injector_panel.js').read_text(
+            encoding='utf-8')
+        assert 'pattern.description_tr' not in panel
+        assert 'escText(dz.pattern.description)' in panel
 
     @pytest.mark.parametrize('tip', INJ_TIPLERI)
     def test_reference_entries_are_single_language(self, tasarimlar, tip):

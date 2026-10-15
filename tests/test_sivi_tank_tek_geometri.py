@@ -41,19 +41,48 @@ MUTASYON DÜŞÜNCELERİ (bu dosya neyi kilitliyor):
     test_cidar_beyani düşer.
   * Herhangi bir blok kendi tank hacmi/çapı/boyunu AYRI hesaplamaya
     başlarsa yapraklar tek kaynak kümesinden sapar -> yapısal tarama düşer.
+
+ÖH FAZ B (27 Ağustos 2026) — TAŞINAN BEKÇİLER, Z5S/PK1'de KAPANDI
+------------------------------------------------------------------
+Kampanya bu dosyanın üç düğümünü "kusuru koruyan bekçi" saydı: ölçtükleri
+şey TEK-DEĞERLİLİK (aynı değişkeni okuyan beş yer aynı sayıyı veriyor) iken
+kilitlenmesi gereken şey TEK-KAYNAKLILIK ve gereksinimle KARŞILAŞTIRMAdır.
+Taşınan iddialar bir gün ``xfail(strict=True)`` + defter kimliğiyle durdu;
+Z5S/PK1 onarım dalgası (aynı gün) dördünü de yeşile döndürdü ve imler
+söküldü. Kilitlenen sözleşmeler:
+
+  * ``P3B2-01`` — gereken tank basıncı soğutma ceketi ΔP'sini GÖRÜR
+    (``calculate_injector_design`` soğutma çözümünü argümanla alır).
+  * ``P3B3-13`` — çevrim çözücüsü tank basıncını A11'in tek tanım
+    noktasından (``_tank_pressure_bar``) okur, sabitten değil.
+  * ``P3B3-11`` — basınçlı kap EMNİYET VANASI AYARINDA nitelendirilir
+    (``meop_bar = operating_pressure_bar x RELIEF_VALVE_SET_PRESSURE_FACTOR``,
+    ASME VIII Div.1 UG-134 mantığı); işletme basıncı ayrı adla
+    (``operating_pressure_bar``) yanında durur ve tek kaynağı O taşır.
+    Bu yüzden bu dosyanın iki tek-kaynak bekçisi (``:test_turbopompali_
+    zincir_tek_deger``, ``:test_basinc_beslemeli_kart_kullanici_girdisini_
+    gorur``) MEOP'u artık çarpanla karşılaştırır — tek-kaynak iddiası
+    ``operating_pressure_bar`` satırında yaşamaya devam eder.
+  * ``P3B1-14`` — A3 kapanışında yasaklanan yer tutucular (c* = 1650 m/s,
+    Isp = 300 s) çalışan kodda YOK; ``test_kaynak_kodda_literal_yok``
+    deseni onlara da uygulandı (fail-closed karşılığı kondu).
 """
 
+import ast
 import contextlib
 import inspect
 import io
+import pathlib
 
 import numpy as np
 import pytest
 
 import hrma.analysis.pressurant_sizing as pressurant_sizing
 from hrma.engines.liquid_rocket_engine import (
+    BURN_TIME_DEFAULT_S,
     LiquidRocketEngine,
     PUMP_TANK_PRESSURE_DEFAULT_BAR,
+    RELIEF_VALVE_SET_PRESSURE_FACTOR,
     TANK_LD_RATIO,
     TANK_PROPELLANT_RESERVE_FACTOR,
     TANK_ULLAGE_FRACTION,
@@ -70,11 +99,22 @@ TABAN = dict(thrust=25000, chamber_pressure=70, mixture_ratio=2.3,
              propellant_data=PROPELLANT_DATA)
 
 
+#: ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ): motor yanma süresini ARTIK VARSAYMAZ;
+#: süre yoksa tank kartı ``not_modelled`` döner ve besleme hacimleri None
+#: olur. Bu dosyanın iddiaları (tek geometri, tek basınç, beyanlar) SÜRESİ
+#: VERİLMİŞ bir tasarım üzerinedir; eski sessiz varsayımla aynı sayılar
+#: çıksın diye süre açıkça, motorun kendi sabitinden verilir (sayı burada
+#: yazılmaz). Süre yokken kartın fail-closed hâli tests/test_d36_sivi_a1.py'de.
+SURE = {'max_burn_duration': BURN_TIME_DEFAULT_S}
+
+
 def _cift(overrides=None, **kwargs):
     kw = dict(TABAN)
     kw.update(kwargs)
+    ov = dict(SURE)
+    ov.update(overrides or {})
     with contextlib.redirect_stdout(io.StringIO()):
-        engine = LiquidRocketEngine(overrides=dict(overrides or {}), **kw)
+        engine = LiquidRocketEngine(overrides=ov, **kw)
         return engine, engine.calculate_performance()
 
 
@@ -91,6 +131,40 @@ def basincli():
     """Basınç beslemeli koşu — teşhiste %16.7'lik uyuşmazlığın senaryosu."""
     return _cift(overrides={'engine_cycle': 'pressure_fed',
                             'feed_pressure': 105})
+
+
+@pytest.fixture(scope='module')
+def turbo_ablatif():
+    """``turbo``nun ABLATİF kardeşi: soğutma ceketi ΔP'si SIFIRDIR.
+
+    P3B2-01'in ölçüm düzeneği. İki koşu yalnız soğutma tipinde ayrılır
+    (aynı itki, aynı Pc, aynı çevrim, aynı besleme basıncı), dolayısıyla
+    gereken YAKIT tank basıncındaki fark ceket ΔP farkının ta kendisi olmak
+    zorundadır — yakıt ceketten geçen soğutucudur.
+    """
+    return _cift(overrides={'engine_cycle': 'gas_generator',
+                            'feed_pressure': 105},
+                 cooling_type='ablative')
+
+
+@pytest.fixture(scope='module')
+def turbo_tek_tanim_yamali():
+    """``_tank_pressure_bar()`` bellekte 12,0 bara alınmış turbo koşu.
+
+    P3B3-13'ün parti raporundaki mutasyonun aynısı; ürün dosyasına
+    DOKUNULMAZ, alt sınıf yalnız bu testin belleğinde yaşar. Tek tanım
+    noktasını okuyan her tüketici 12,0 bara gitmek zorundadır.
+    """
+    class _TekTanimYamali(LiquidRocketEngine):
+        def _tank_pressure_bar(self):
+            return 12.0, 'MUTASYON (ÖH bekçisi): tek tanım noktası'
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        engine = _TekTanimYamali(
+            overrides=dict(SURE, engine_cycle='gas_generator',
+                           feed_pressure=105),
+            **TABAN)
+        return engine, engine.calculate_performance()
 
 
 def _tank(sonuc, ad):
@@ -232,15 +306,33 @@ class TestTankBasinciTekKaynak:
 
     def test_turbopompali_zincir_tek_deger(self, turbo):
         """Turbopompalı koşuda besleme kartı, ayrıntılı besleme, pompa
-        NPSH girdisi, tank kartı ve basınçlı kap MEOP'u aynı sayı: hepsi
-        PUMP_TANK_PRESSURE_DEFAULT_BAR.
+        NPSH girdisi, tank kartı ve basınçlı kabın İŞLETME basıncı aynı
+        sayı: hepsi PUMP_TANK_PRESSURE_DEFAULT_BAR.
 
         Mutasyon: _design_propellant_tanks'a `300000` Pa literal'i geri
         gelir ve sabit değişirse kart ile zincir ayrışır -> bu test düşer.
+
+        Z5S/PK1 (P3B3-11) ÇEVİRİSİ: kap artık İŞLETME basıncında değil
+        EMNİYET VANASI AYARINDA nitelendiriliyor, yani ``meop_bar`` tek
+        kaynağın ta kendisi değil onun
+        ``RELIEF_VALVE_SET_PRESSURE_FACTOR`` katıdır. Tek-kaynak iddiası
+        zayıflamadı, ADRES değiştirdi: aynı zincir artık
+        ``pressure_vessel['operating_pressure_bar']`` satırında kilitli ve
+        MEOP o sayıdan çarpanla TÜREDİĞİ için ayrıca kilitli — kap kartı
+        beslemeden ayrışırsa iki satır da düşer.
+
+        ÖH D18 fizik-a2 (F3) ÇEVİRİSİ: bu bekçi eskiden tek kaynağı
+        ``PUMP_TANK_PRESSURE_DEFAULT_BAR`` SABİTİNE bağlıyordu; bu, tank
+        basıncının NPSH gereksiniminden boyutlandırılmasını KİLİTLEYEN bir
+        iddiaydı (kusuru koruyan bekçi). Tek-kaynak iddiası zayıflamadı,
+        ÇAPASI değişti: sayı artık türetilir, ama HER blok AYNI türetilmiş
+        sayıyı taşımak zorundadır. Sayının sabite EŞİT OLMADIĞI da sınanır,
+        yani sabite geri dönülürse bu test yine düşer.
         """
         _, sonuc = turbo
-        beklenen = PUMP_TANK_PRESSURE_DEFAULT_BAR
-        assert sonuc['feed_system']['tank_pressure_bar'] == beklenen
+        beklenen = sonuc['feed_system']['tank_pressure_bar']
+        assert beklenen != PUMP_TANK_PRESSURE_DEFAULT_BAR, (
+            'tank basıncı NPSH gereksiniminden türetilmeli, sabit olmamalı')
         assert sonuc['detailed_feed_system']['tank_pressure_bar'] == beklenen
         for pompa in ('oxidizer_pump', 'fuel_pump'):
             tps = sonuc['detailed_feed_system']['turbopump_sizing'][pompa]
@@ -252,8 +344,112 @@ class TestTankBasinciTekKaynak:
             tank = _tank(sonuc, ad)
             assert tank['structural']['pressure_rating'] == pytest.approx(
                 beklenen, rel=1e-12)
-            assert tank['pressure_vessel']['inputs']['meop_bar'] == \
+            # Tek kaynak: kap kartının İŞLETME basıncı zincirin ta kendisi.
+            assert tank['pressure_vessel']['operating_pressure_bar'] == \
                 pytest.approx(beklenen, rel=1e-12)
+            # Nitelendirme basıncı ondan çarpanla türer (P3B3-11 sözleşmesi).
+            assert tank['pressure_vessel']['inputs']['meop_bar'] == \
+                pytest.approx(beklenen * RELIEF_VALVE_SET_PRESSURE_FACTOR,
+                              rel=1e-12)
+
+    # ÖH defter P3B2-01 — Z5S/PK1 onarımıyla yeşile döndü, xfail(strict) imi
+    # 27 Ağustos 2026'da söküldü. Kusur: gereken tank basıncı
+    # P_c + ΔP_enjektör + 8 bar çıplak paydı, soğutma ceketi ΔP'si formüle
+    # HİÇ girmiyordu (ölçüldü: rejeneratif 3,7685 bar / ablatif 0,0000 bar
+    # iken required_fuel_tank_pressure İKİSİNDE DE 93,4000 bar).
+    def test_gereken_tank_basinci_ceket_dp_sini_goruyor(self, turbo,
+                                                        turbo_ablatif):
+        """TAŞINAN BEKÇİ (P3B2-01): kardeş düğüm ``:233`` beş alanın AYNI
+        sayı olduğunu doğruluyordu; beşi de ``_tank_pressure_bar()``'ı okuduğu
+        için bu iddia yapı gereği doğrudur. Kilitlenmesi gereken şey teslim
+        edilen basıncın değil, GEREKEN basıncın modelidir.
+
+        İki koşu yalnız soğutma tipinde ayrılır; talep farkı ceket ΔP farkına
+        eşit olmalıdır. Mutasyon yönü: ceket terimi formüle eklenirse bu
+        bekçi yeşile döner (xfail kalkar), çıkarılırsa kırmızı kalır.
+        """
+        _, regen = turbo
+        _, abl = turbo_ablatif
+        r_inj, a_inj = regen['injection_system'], abl['injection_system']
+        r_dp = float(regen['cooling_system']['cooling_pressure_drop'])
+        a_dp = float(abl['cooling_system']['cooling_pressure_drop'])
+
+        # Kontrol: düzenek gerçekten YALNIZ ceket ΔP'sinde ayrışıyor.
+        assert r_dp > 0.0 and a_dp == 0.0, (
+            f'düzenek bozuldu: rejeneratif ΔP={r_dp}, ablatif ΔP={a_dp}')
+        assert a_inj['fuel_pressure_drop'] == pytest.approx(
+            r_inj['fuel_pressure_drop'], rel=1e-12)
+        assert a_inj['required_ox_tank_pressure'] == pytest.approx(
+            r_inj['required_ox_tank_pressure'], rel=1e-12), (
+            'oksitleyici ceketten geçmiyor; o taraf hareket etmemeli')
+
+        # Asıl iddia: talep, ceketin kendi yayımladığı ΔP kadar yükselmeli.
+        assert (r_inj['required_fuel_tank_pressure']
+                - a_inj['required_fuel_tank_pressure']) == pytest.approx(
+            r_dp - a_dp, rel=1e-6), (
+            'gereken yakıt tank basıncı soğutma ceketi ΔP\'sini görmüyor: '
+            f"rejeneratif {r_inj['required_fuel_tank_pressure']:.4f} bar, "
+            f"ablatif {a_inj['required_fuel_tank_pressure']:.4f} bar, "
+            f'ceket ΔP farkı {r_dp - a_dp:.4f} bar')
+
+    # ÖH defter P3B3-13 — Z5S/PK1 onarımıyla yeşile döndü, xfail(strict) imi
+    # 27 Ağustos 2026'da söküldü. Kusur: _solve_cycle_balance pompa emme
+    # basıncını PUMP_TANK_PRESSURE_DEFAULT_BAR sabitinden DOĞRUDAN okuyordu;
+    # tek tanım noktası 12,0 bara alınınca besleme kartı gidiyor ama
+    # inlet_pressure_bar 3,0 barda KALIYORDU (beyan :5570-5572 yanlıştı).
+    def test_cevrim_cozucusu_tank_basincini_tek_tanim_noktasindan_okur(
+            self, turbo_tek_tanim_yamali):
+        """TAŞINAN BEKÇİ (P3B3-13): ``:233`` tek-DEĞERLİLİĞİ ölçüyor, sabiti
+        doğrudan okuyan bir yol o iddiayı tanım gereği geçiyor. Tek-KAYNAKLILIK
+        ancak kaynak oynatılarak ölçülür.
+        """
+        motor, sonuc = turbo_tek_tanim_yamali
+        beklenen = motor._tank_pressure_bar()[0]
+        assert beklenen == 12.0, 'yama tutmadı — düzenek bozuk'
+        # Kontrol: tek tanım noktasını GERÇEKTEN okuyan tüketici onu izliyor.
+        assert sonuc['feed_system']['tank_pressure_bar'] == pytest.approx(
+            beklenen, rel=1e-12)
+
+        cyc = sonuc['detailed_feed_system']['engine_cycle_solution']
+        assert isinstance(cyc, dict) and cyc.get('shafts'), (
+            'çevrim çözümü koşmadı — düzenek bozuk')
+        emme = [(s.get('name'), p.get('propellant'),
+                 p.get('inlet_pressure_bar'))
+                for s in cyc['shafts'] for p in s.get('pumps', ())]
+        assert emme, 'çevrim çözümünde pompa kaydı yok — düzenek bozuk'
+        for _, itici, basinc in emme:
+            assert basinc == pytest.approx(beklenen, rel=1e-12), (
+                f'{itici} pompası emme basıncını tek tanım noktasından '
+                f'okumuyor: {basinc} bar (beklenen {beklenen} bar) — '
+                f'ölçülen tüm kayıtlar: {emme}')
+
+    # ÖH defter P3B3-11 — Z5S/PK1 onarımıyla yeşile döndü, xfail(strict) imi
+    # 27 Ağustos 2026'da söküldü. Kusur: MEOP olarak İŞLETME basıncı
+    # veriliyordu, emniyet vanası ise onun 1,10 katına ayarlıydı ve iki alan
+    # arasında çapraz denetim yoktu (ölçüldü: turbo 3,0000 / 3,3000; basınç
+    # beslemeli 105,0000 / 115,5000 — status=PASS hükmü %10 düşük zeminde).
+    # Aynı onarım bu sınıfın iki tek-kaynak bekçisini de çevirdi: MEOP artık
+    # çarpanlı, tek kaynak operating_pressure_bar satırında yaşıyor.
+    @pytest.mark.parametrize('senaryo', ['turbo', 'basincli'])
+    def test_meop_kendi_vana_ayarinin_altina_dusemez(self, senaryo, request):
+        """TAŞINAN BEKÇİ (P3B3-11): bu sınıf MEOP'un besleme zinciriyle AYNI
+        sayı olmasını şart koşuyordu — kusur tam olarak o eşitlikti. MEOP
+        tanım gereği emniyet vanasının açma basıncından küçük olamaz;
+        aksi hâlde kap, kendi vanası açılmadan önce ulaşacağı basınca göre
+        nitelendirilmemiş demektir.
+        """
+        _, sonuc = request.getfixturevalue(senaryo)
+        for ad in ('oxidizer_tank', 'fuel_tank'):
+            tank = _tank(sonuc, ad)
+            meop = tank['pressure_vessel']['inputs']['meop_bar']
+            vana = tank['internal_structures']['instrumentation'][
+                'relief_valve']['set_pressure']
+            # Kontrol: vana ayarı gerçekten kaynağın 1,1 katı (kardeş bekçi).
+            assert vana > 0
+            assert meop >= vana - 1e-9, (
+                f'{ad}: kap {meop:.4f} bar MEOP ile nitelendirilirken emniyet '
+                f'vanası {vana:.4f} barda açıyor — nitelendirme sistemin '
+                'ulaşabileceği basıncın altında kuruldu')
 
     def test_basinc_beslemeli_kart_kullanici_girdisini_gorur(self, basincli):
         """Basınç beslemeli çevrimde tank kartı kullanıcının feed_pressure
@@ -262,6 +458,11 @@ class TestTankBasinciTekKaynak:
         Mutasyon (teşhisin %16.7 uyuşmazlığı): eski `(P_c+5 bar) x 1.2`
         tahmini geri gelirse bu fikstürde kart 90.0 bar der ve düşer;
         cidar/kütle/MEOP/vana ayarı da o yanlış sayıdan türerdi.
+
+        Z5S/PK1 (P3B3-11) ÇEVİRİSİ: kullanıcı girdisinin görüldüğü iddiası
+        kap kartında artık ``operating_pressure_bar`` satırındadır (105,0);
+        ``meop_bar`` ondan ``RELIEF_VALVE_SET_PRESSURE_FACTOR`` katıyla
+        türer (115,5). Eski 90 bar tahmini geri gelirse İKİ satır da düşer.
         """
         _, sonuc = basincli
         assert sonuc['feed_system']['tank_pressure_bar'] == 105.0
@@ -271,8 +472,13 @@ class TestTankBasinciTekKaynak:
                 105.0, rel=1e-12), (
                 f'{ad}: kart besleme kartından ayrıştı — eski türetilmiş '
                 'tahmin (90 bar) geri mi geldi?')
+            assert tank['pressure_vessel']['operating_pressure_bar'] == \
+                pytest.approx(105.0, rel=1e-12), (
+                f'{ad}: kap kartının işletme basıncı kullanıcı girdisinden '
+                'ayrıştı — tek kaynak koptu')
             assert tank['pressure_vessel']['inputs']['meop_bar'] == \
-                pytest.approx(105.0, rel=1e-12)
+                pytest.approx(105.0 * RELIEF_VALVE_SET_PRESSURE_FACTOR,
+                              rel=1e-12)
 
     @pytest.mark.parametrize('senaryo', ['turbo', 'basincli'])
     def test_vana_ayari_tek_kaynaktan(self, senaryo, request):
@@ -285,8 +491,10 @@ class TestTankBasinciTekKaynak:
             assert vana['set_pressure'] == pytest.approx(
                 1.1 * kaynak, rel=1e-9)
 
+    # ÖH D18 fizik-a2 (F3): turbopompalı dalda künye artık sabitin ADINI
+    # değil, basıncın NASIL boyutlandığını söyler.
     @pytest.mark.parametrize('senaryo,anahtar', [
-        ('turbo', 'PUMP_TANK_PRESSURE_DEFAULT_BAR'),
+        ('turbo', 'NPSH requirement'),
         ('basincli', 'user feed pressure'),
     ])
     def test_basinc_kaynak_beyani(self, senaryo, anahtar, request):
@@ -313,6 +521,48 @@ class TestTankBasinciTekKaynak:
         assert '_tank_pressure_bar' in auto
         assert '3.0e5' not in auto, (
             'autogenous bloğuna 3.0e5 Pa literali geri geldi')
+
+    # ÖH defter P3B1-14 — Z5S/PK1 onarımıyla yeşile döndü, xfail(strict) imi
+    # 27 Ağustos 2026'da söküldü. Kusur: A3'ün yasakladığı yer tutucular
+    # çalışan kodda duruyordu (:1138 getattr(self,'c_star',1650.0), :2082
+    # F/(300*g0) ve deftere hiç girmemiş :8646 kardeşi F/(300*G_0)); üçü de
+    # erişilemez yollardaydı ama kurucu sırası değişirse SESSİZCE canlanırdı.
+    # Onarım fail-closed koydu (UnsupportedPropellantPairError). NOT: aşağıdaki
+    # tarama 'G_0' yazımını GÖRMEZ (yalnız ast.Attribute 'g0'); iki yazımı da
+    # kapsayan bekçi tests/test_z5s_sivi_tek_tanim.py::TestP3B1YerTutucular.
+    def test_a3_yer_tutucu_sabitleri_kaynak_kodda_kalmadi(self):
+        """Aynı kaynak-tarama deseni (yukarıdaki kardeş), A3'ün yasakladığı
+        yedek sabitlere uygulanır.
+
+        Tarama AST üzerindedir: docstring ve yorum içindeki ANMA serbesttir
+        (:104 ve :2427 kusurun kendisini anlatıyor), yasak olan yalnız
+        ÇALIŞAN koddaki sayıdır.
+        """
+        yol = pathlib.Path(inspect.getsourcefile(LiquidRocketEngine))
+        agac = ast.parse(yol.read_text(encoding='utf-8'))
+
+        def _sayi(dugum, deger):
+            return (isinstance(dugum, ast.Constant)
+                    and not isinstance(dugum.value, bool)
+                    and isinstance(dugum.value, (int, float))
+                    and float(dugum.value) == deger)
+
+        bulunan = []
+        for dugum in ast.walk(agac):
+            if _sayi(dugum, 1650.0):
+                bulunan.append((dugum.lineno, 'c* = 1650 m/s yer tutucusu'))
+            if isinstance(dugum, ast.BinOp) and isinstance(dugum.op, ast.Mult):
+                for a, b in ((dugum.left, dugum.right),
+                             (dugum.right, dugum.left)):
+                    if _sayi(a, 300.0) and isinstance(b, ast.Attribute) \
+                            and b.attr == 'g0':
+                        bulunan.append(
+                            (dugum.lineno, 'Isp = 300 s yer tutucusu '
+                                           '(F / (300 * g0))'))
+        assert not bulunan, (
+            'A3 kapanışında yasaklanan yer tutucular çalışan kodda duruyor '
+            f'({yol.name}): '
+            + '; '.join(f'{satir}: {ad}' for satir, ad in sorted(bulunan)))
 
 
 # ===========================================================================
@@ -427,7 +677,7 @@ class TestPressurantHacmi:
             motor = LiquidRocketEngine(
                 thrust=25000, chamber_pressure=70, mixture_ratio=3.0,
                 fuel_type='methane', oxidizer_type='lox',
-                propellant_data=PROPELLANT_DATA)
+                propellant_data=PROPELLANT_DATA, overrides=dict(SURE))
             blok = motor._autogenous_pressurization_summary()
         assert blok['status'] == 'ok'
         assert len(cagrilar) == 2

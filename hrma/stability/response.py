@@ -52,6 +52,11 @@ import math
 
 from hrma.stability import STABILITY_NOT_MODELLED, forbid_verdict_key
 from hrma.stability.chamber import _positive, _validate_gamma
+from hrma.stability.damping import DAMPING_BUDGET_SIGNATURE_KEYS
+
+#: P6B4-12 tek kaynak: bütçe imzası ``hrma.stability.damping``den okunur,
+#: burada YENİDEN TANIMLANMAZ.
+_DAMPING_BUDGET_KEYS = DAMPING_BUDGET_SIGNATURE_KEYS
 
 __all__ = [
     'QSHODBand',
@@ -153,6 +158,24 @@ class QSHODBand:
         """Bandın dört (A, B) köşesi — zarf taraması için."""
         return [(a, b) for a in self.a_range for b in self.b_range]
 
+    def degenerate_dimensions(self):
+        """Zarfın GENİŞLİĞİ OLMAYAN eksenleri (lo == hi) — P6B4-09.
+
+        Bir eksende kayıt tek bir çalışma noktası yayımlıyorsa o eksende
+        ORTADA ZARF YOKTUR: "içinde mi?" sorusu ölçü-sıfır bir eşitlik
+        testine iner ve pratikte HİÇBİR gerçek çalışma noktası tarafından
+        kazanılamaz. Ölçüldü (D25 a2, ``docs/scofield/raw/OH/D25/fea-cfd/
+        a2/once_a2.json`` → P6B4-09): üç QSHOD kaydının ÜÇÜNDE de sıcaklık
+        ekseni dejeneredir (3539 / 2160 / 2100 K) ve 1 ppm sapmada rozet
+        ``firm`` → ``extrapolated_low``a düşer.
+        """
+        eksenler = []
+        if self.pressure_range_Pa[0] >= self.pressure_range_Pa[1]:
+            eksenler.append('pressure_range_Pa')
+        if self.temperature_range_K[0] >= self.temperature_range_K[1]:
+            eksenler.append('temperature_range_K')
+        return tuple(eksenler)
+
     def envelope_check(self, pressure_Pa, temperature_K):
         """Çalışma noktası zarfın içinde mi? → (confidence, gerekçe)."""
         p = _positive('pressure_Pa', pressure_Pa)
@@ -174,6 +197,22 @@ class QSHODBand:
                 f'Operating point is OUTSIDE the validity envelope of the '
                 f'band ({"; ".join(outside)}); the band is still shown but '
                 f'flagged as extrapolated. Envelope source: {self.source}')
+        # P6B4-09 (fail-closed): ``firm`` ancak KAZANILMIŞ bir zarf
+        # denetiminden çıkabilir. Dejenere bir eksende zarf yoktur; oradan
+        # geçmek "içeride olmak" değil, tek noktaya bit-eşit çıkmaktır ve
+        # bu ölçüm değil rastlantıdır. Rozet o yüzden ``firm``e YÜKSELMEZ
+        # ve gerekçe dejenere ekseni ADIYLA söyler. Sayı SİLİNMEZ: bant
+        # gösterilmeye devam eder, yalnız güven iddiası geri çekilir.
+        dejenere = self.degenerate_dimensions()
+        if dejenere:
+            return CONFIDENCE_EXTRAPOLATED, (
+                f'The record publishes a SINGLE operating point on '
+                f'{", ".join(dejenere)} (lo == hi), so it carries no '
+                f'validity ENVELOPE on that axis: the operating point '
+                f'matched it exactly, which is a measure-zero coincidence '
+                f'rather than a passed envelope check. The band is still '
+                f'shown but its confidence is not raised to "firm". '
+                f'Envelope source: {self.source}')
         return CONFIDENCE_FIRM, (
             f'Operating point lies inside the validity envelope of the band '
             f'(formulation class "{self.formulation_class}", '
@@ -377,64 +416,29 @@ def critical_response_real(damping_total_1_s, response_gain_1_s):
     return forbid_verdict_key(payload, 'critical_response_real')
 
 
-def critical_response_table(acoustic_result, damping_budgets,
-                            response_gain_1_s, literature_band=None):
-    """Akustik mod tablosunun her satırı için R_crit (HÜKÜMSÜZ tablo).
-
-    Mod tablosu ÜRETİLMEZ: ``hrma.analysis.acoustic_modes`` çıktısı olduğu
-    gibi okunur (tek kaynak; o modül taşınmadı, değiştirilmedi).
-
-    Args:
-        acoustic_result: ``AcousticModeAnalyzer.analyze()`` çıktısı.
-        damping_budgets: tek bir bütçe sözlüğü (mod bağımsız, ör. yalnız lüle
-            terimi) ya da {mod etiketi: bütçe} eşlemesi.
-        response_gain_1_s: birim Re(R_p) başına kazanç [1/s].
-        literature_band: opsiyonel {'low', 'high', 'source'} kıyas bandı;
-            verilirse ``source`` ZORUNLUDUR (künyesiz bant kabul edilmez).
-
-    Returns:
-        dict: ``modes`` satırları + beyanlar; hiçbir yerde 'verdict' yok.
-    """
-    if not isinstance(acoustic_result, dict) or 'modes' not in acoustic_result:
-        raise ValueError(
-            'acoustic_result must be the dict returned by '
-            'AcousticModeAnalyzer.analyze() (it must carry a "modes" list).')
-    band = None
-    if literature_band is not None:
-        band = dict(literature_band)
-        if not band.get('source'):
-            raise ValueError(
-                'literature_band must carry a "source" citation; an '
-                'uncited comparison band is not published.')
-
-    rows = []
-    for mode in acoustic_result['modes']:
-        label = mode.get('label')
-        if isinstance(damping_budgets, dict) and 'terms' in damping_budgets:
-            budget = damping_budgets           # tek bütçe, tüm modlara
-        else:
-            budget = damping_budgets[label]    # mod başına bütçe
-        total = budget['total_damping_1_s']
-        row = critical_response_real(total, response_gain_1_s)
-        row['label'] = label
-        row['frequency_hz'] = mode.get('frequency_hz')
-        row['damping'] = dict(budget['terms'])
-        row['damping_not_modelled'] = list(budget['not_modelled'].keys())
-        if band is not None:
-            row['literature_band'] = band
-        rows.append(row)
-
-    payload = {
-        'modes': rows,
-        'response_gain_1_s': float(response_gain_1_s),
-        'mode_table_source': (
-            'Modes are read from hrma.analysis.acoustic_modes '
-            '(model: ' + str(acoustic_result.get('model')) + '); no second '
-            'mode table is produced here.'),
-        'interpretation': 'threshold_not_verdict',
-        'bias_basis': (
-            'Damping terms that are not modelled bias every R_crit LOW '
-            '(pessimistic): with more losses accounted for, a higher '
-            'combustion response would be needed to drive the mode.'),
-    }
-    return forbid_verdict_key(payload, 'critical_response_table')
+# ---------------------------------------------------------------------------
+# P6B4-12 (ÖH D26 / fea-cfd a3) — ``critical_response_table`` KALDIRILDI.
+#
+# ÖLÇÜLDÜ (taban 7751531, ``once_a3.json``): fonksiyonun ÜRÜN TÜKETİCİSİ
+# SIFIRDI. ``hrma/`` altında ``hrma/stability/`` paketi DIŞINDA hiçbir atıf
+# yoktu (tarama: hrma/**/*.py|js|html); tek atıflar kendi tanımı, paket
+# ``__init__``inin yeniden ihracı ve ``damping.py``deki bir yorum satırıydı.
+# Motorların gerçekten kullandığı yol AYRIDIR ve duruyor: hibrit ve katı
+# motorlar mod tablosunu KENDİLERİ kurup satır satır
+# :func:`critical_response_real` çağırıyor (hybrid_rocket_engine.py:6482,
+# solid_rocket_engine.py:6435). Yani bu fonksiyon aynı işin ikinci,
+# ÇAĞRILMAYAN kopyasıydı.
+#
+# ÖH D25 (fea-cfd a3) fonksiyonun künyeli kapısını onarmıştı (tek bütçe ⇄
+# mod başına eşleme ayrımı artık ``damping_budget()``in TAM imzasına
+# bakıyor, tek bir 'terms' anahtarına değil) ve o onarım DOĞRUYDU; ama
+# kalemin ikinci yarısı 'ürün tüketicisi yok' idi. Ana model hükmü
+# (D26 planı): tüketici bağlanamıyorsa ÖLÜ KOD KALDIRILIR, testleri de —
+# yalan yüzey bırakılmaz. Bağlamak arayüz kulvarının işi olurdu ve bu
+# kulvarın sahası değil; kaldırmak, hükümsüz bir eşik tablosunu
+# 'yayımlanıyormuş' gibi göstermekten dürüsttür.
+#
+# Kaldırılan davranışın tamamı :func:`critical_response_real` + çağıranın
+# kendi mod döngüsüyle elde edilir; hiçbir FİZİK kaybolmadı.
+# Bekçi: tests/test_d26_fea_cfd_a3.py::TestP6B412OluYuzeyKalkti
+# ---------------------------------------------------------------------------

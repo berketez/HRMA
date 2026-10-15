@@ -60,11 +60,51 @@ class TestDrawingPDF:
         assert len(data) > 50_000
 
 
+#: Enjektör panelinin TASARLANAN plaka kalınlığı [mm] — ÖH D32 / OH-D31-16.
+#: Ürün yolunda bu sayı kullanıcının enjektör panelinden gelir; HRMA onu
+#: TÜRETMEZ (``injector_plate_structural`` kalınlığı çağırandan alır ve
+#: ``plate_thickness_earned`` ile künyeler).
+_D32_PANEL_PLAKA_MM = 6.0
+
+
+def _d32_panel_plakali(sonuc, t_mm=_D32_PANEL_PLAKA_MM):
+    """Sonuca enjektör panelinin tasarlanan plakasını ekler.
+
+    ÖH D32 / OH-D31-16 — ÇEVRİLEN BEKÇİ GEREKÇESİ. Aşağıdaki bekçiler
+    STEP paketinde enjektör parçasının BULUNMASINI şart koşuyordu. O şart,
+    plaka kalınlığının kamaranın ÖN KAPAĞINDAN (ya da bir üreteç
+    sabitinden) türetildiği dönemden kalmaydı. ÖH D15 / P9B1-13 o ikameyi
+    ölçüp reddetti (mesh/gerçek plaka oranı 10,0x) ve kardeş üretici
+    ``cad_visualization`` plakayı ancak kalınlık YAYIMLANMIŞSA çiziyor.
+
+    Ölçüldü (taban dd1dcddc): bu dosyanın ham çözücü fikstürleri plaka
+    kalınlığı yayımlamıyor, dolayısıyla STL plakayı çizmiyordu; STEP ise
+    çiziyordu. Aynı motorun iki katı dosyası iki farklı makineyi
+    anlatıyordu ve ``/api/export-complete-zip`` paketi 422 ile
+    reddediyordu. D32'de STEP de aynı çözümleyiciye bağlandı.
+
+    Bekçilerin ASIL niyeti (gerçek çözüm verisiyle STEP üretimi kırılmaz;
+    üretilen parçalar geçerli ve dolu) KORUNUR: fikstür artık kalınlığın
+    KAZANILDIĞI koşuyu kurar. Kalınlığın YOKLUĞUNDA parçanın çizilmediği
+    ``tests/test_d32_ihracat_a1.py``de ayrıca sınanır.
+    """
+    r = dict(sonuc)
+    r['injector_results'] = {
+        'plate_structural': {
+            'status': 'analyzed',
+            'plate_thickness_mm': float(t_mm),
+            'material': 'stainless_steel_316',
+        },
+    }
+    return r
+
+
 class TestSTEP:
     def test_step_assembly_roundtrip(self, motor_results, tmp_path):
         b123d = pytest.importorskip('build123d')
         from hrma.export.step_export import generate_step_assembly
-        files = generate_step_assembly(motor_results, str(tmp_path))
+        files = generate_step_assembly(_d32_panel_plakali(motor_results),
+                                      str(tmp_path))
         assert set(files) == {'chamber', 'nozzle', 'fuel_grain',
                               'injector', 'assembly'}
         for k, p in files.items():
@@ -80,19 +120,46 @@ class TestSTEP:
 class TestSTLQuality:
     def test_injector_orifices_actually_drilled(self, motor_results):
         """manifold3d boolean'ı: delikler STL katısında GERÇEKTEN açık olmalı
-        (eski durum: boolean backend yokken delikler sessizce düşüyordu)."""
+        (eski durum: boolean backend yokken delikler sessizce düşüyordu).
+
+        ÇEVRİLDİ — ÖH D15 / a2, ÖK-05. Bu bekçi ``assert inj is not None`` ile
+        plakanın HER koşuda çizilmesini şart koşuyordu ve o şart, çizilen
+        plakanın 30 mm'lik bir ÜRETEÇ SABİTİ olduğu dönemden kalmaydı: fikstür
+        (ham ``HybridRocketEngine`` sonucu) plaka kalınlığını hiç yayımlamıyor
+        (ölçüldü, 31 Ağustos 2026: ``_injector_plate_design(...)['thickness_m']
+        is None``, gerekçe ``injector_plate_thickness_not_available``). ÖH D15
+        a1'in P9B1-13 onarımı uydurma plakayı kaldırdığı için bekçi KIRMIZI
+        oldu — yani kusuru koruyordu.
+
+        Bekçinin asıl niyeti (boolean gerçekten deliyor mu) KORUNUR, ama iki
+        dala ayrılır ve fail-closed dal da sınanır: plaka kalınlığı
+        çözülüyorsa mesh VAR + su geçirmez + delikli olmalı; çözülmüyorsa mesh
+        OLMAMALI ve gerekçe yayımlanmalıdır. Sayı uydurulan üçüncü bir hâl
+        kabul edilmez.
+        """
         pytest.importorskip('manifold3d')
-        import trimesh
-        from hrma.export.cad_visualization import MotorCADDesigner
+        from hrma.export.cad_visualization import (MotorCADDesigner,
+                                                   _injector_plate_design)
         designer = MotorCADDesigner()
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             cad = designer.generate_3d_motor_assembly(dict(motor_results))
         meshes = dict(cad['assembly_meshes'])
         inj = meshes.get('Injector') or meshes.get('injector')
+        plate = _injector_plate_design(motor_results)
+        t_m = plate.get('thickness_m')
+
+        if t_m is None:
+            assert inj is None, (
+                'plaka kalınlığı çözülemiyor ama enjektör mesh"i çizilmiş — '
+                'üreteç sabitinden plaka üretilmiş olabilir. Gerekçe: %s'
+                % plate.get('source'))
+            assert plate.get('source'), 'çizilmeme gerekçesi yayımlanmamış'
+            return
+
         assert inj is not None
         D_ch = float(motor_results['chamber_diameter'])
-        plate_vol = np.pi * (D_ch / 2) ** 2 * 0.03  # 30mm plaka
+        plate_vol = np.pi * (D_ch / 2) ** 2 * float(t_m)
         assert inj.volume < plate_vol * 0.999, 'orifis delikleri açılmamış'
         assert inj.is_watertight
 

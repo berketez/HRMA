@@ -18,6 +18,14 @@
     var U = window.AnalysisDock.ui;
     var T = U.t;                         // çeviri kısayolu
 
+    // Sunucudan gelen SERBEST METİN (gerekçe/beyan cümlesi): sözlükte
+    // karşılığı varsa Türkçe basılır, yoksa metin AYNEN döner (asla
+    // anahtar, asla boş). structural_panel / cfd_panel ile aynı yardımcı.
+    function SRV(text) {
+        return (window.I18N && window.I18N.serverText)
+            ? window.I18N.serverText(text) : text;
+    }
+
     // bolted_joint.py THREAD_STRESS_AREA_MM2 anahtarlarıyla birebir
     var SIZES = ['M4', 'M5', 'M6', 'M8', 'M10', 'M12', 'M14', 'M16',
                  'M18', 'M20', 'M22', 'M24'].map(function (s) { return [s, s]; });
@@ -32,6 +40,20 @@
     // FALLBACK listesi — /api/materials kataloğu yüklenemezse kullanılır
     // (sıkılan üye malzemesi; katalog gelirse 'bolt'+'structural' etiketli
     // tam liste bunun yerine geçer)
+    // ÖH D24 / OH-D23-03 — varsayılan malzeme: ÖNCE sunucunun ilan
+    // ettiği değer (materials_catalog.js -> /api/materials.
+    // default_structural_material). Katalog betiği hiç yüklenmemişse
+    // son çare ikiz sabit kullanılır; bu ikizin sunucudan AYRIŞMASI
+    // bekçiyle yasaktır (tests/test_d24_fix_asamasi.py, panel
+    // ikizlerini sunucu değeriyle EŞİTLER). Boş bırakmak seçenek
+    // değildir: cıvatalı bağlantı ucu member_material'ı ZORUNLU
+    // tutar (ÖH D15 / P5B1-05 fail-closed) ve panel varsayılan
+    // koşumda 400 alırdı.
+    var VARSAYILAN_MALZEME = (typeof window.HRMAMaterials !== 'undefined'
+        && window.HRMAMaterials.defaultStructuralMaterial)
+        ? window.HRMAMaterials.defaultStructuralMaterial()
+        : 'aluminum_6061';   /* ikiz — bekçi sunucuyla eşitler */
+
     var MEMBER_MATERIALS = [
         ['aluminum_6061', 'Aluminum 6061-T6'],
         ['steel', 'Steel (generic)'],
@@ -59,8 +81,111 @@
         return 'ok';
     }
 
+    // ==================================================================
+    // P11B4-09 — KART HÜKMÜ NOMİNAL DEĞİL YÖNETİCİ DEĞERDEN OKUNUR
+    // ==================================================================
+    // Ölçülen (docs/scofield/raw/OH/D15/ui-paneller/a2/b4_ONCE.json),
+    // panelin KENDİ varsayılanlarıyla (40 bar, 8×M8 8.8, 20 mm sıkma,
+    // Al 6061):
+    //   proof_SF            1,2157  (kartta, YEŞİL)  ⟷ proof_SF_min            0,9900
+    //   overload_factor_nL  3,4444  (kartta, YEŞİL)  ⟷ overload_factor_nL_min  0,8611
+    //   separation_factor_n0 6,6720 (kartta, YEŞİL)  ⟷ separation_factor_n0_min 5,0040
+    // Modülün kendi beyanı (`safety_factors.governing_basis`) hangisinin
+    // bağlayıcı olduğunu ADIYLA söylüyor: "proof/yield evaluated at
+    // maximum preload (+25%), separation at minimum preload (−25%) per
+    // NASA-STD-5020A Sec. 6.2 / Shigley Sec. 8-8". Yani ekrandaki üç
+    // yeşil kartın ikisinin ARKASINDAKİ bağlayıcı değer 1,0'ın ALTINDA
+    // ve o sayılar ekranda hiç yoktu (nL 0,861 hiçbir yerde SAYI olarak
+    // görünmüyordu).
+    //
+    // Kart artık: manşette NOMİNAL sayı, altında YÖNETİCİ sayı; RENK
+    // yöneticiden gelir. Sayı hesaplanmaz — ucun `*_min` alanı okunur;
+    // alan yoksa eski davranış (nominalden renk) korunur ve kartta
+    // yönetici satırı HİÇ çıkmaz (fail-closed, uydurma yok).
+    function yoneticiSf(sf, nominalAd, yoneticiAd) {
+        var nom = sf[nominalAd];
+        var yon = sf[yoneticiAd];
+        return {
+            nominal: nom,
+            yonetici: (typeof yon === 'number' && isFinite(yon)) ? yon : null,
+            // Hüküm bağlayıcı değerden okunur; yoksa nominalden.
+            hukum: (typeof yon === 'number' && isFinite(yon)) ? yon : nom,
+            ad: yoneticiAd,
+        };
+    }
+
+    // Kartın alt satırı: yönetici alanın ADI ve SAYISI. Yeni çeviri
+    // anahtarı açılmaz — makine alan adı veri olarak basılır.
+    function yoneticiNot(g) {
+        if (g.yonetici == null) return '';
+        return g.ad + ' ' + U.fmt(g.yonetici, 3);
+    }
+
+    /* P11B4-10 — bayrağın ÜÇ hâli ayrı ayrı okunur: ayrıldı / ayrılmadı /
+       uç söylemedi. Boolean olmayan değer "hayır"a çevrilmez (fail-closed). */
+    function ayrilmaImi(v) {
+        if (v === true) return 'YES';
+        if (v === false) return 'no';
+        return '—';
+    }
+
     function fmtKN(n) {
-        return (n == null || !Number.isFinite(n)) ? '—' : (n / 1e3).toFixed(2);
+        // ÖH D31 · OH-D30-06: biçim tek kaynaktan (I18N.number) — TR kipinde virgül.
+        return (n == null || !Number.isFinite(n)) ? '—' : U.num(n / 1e3, 2);
+    }
+
+    // ==================================================================
+    // Z5-C3 / P17B2-12 — ROZET ŞERİDİ GÖRÜNÜR HÂLE GETİRİLDİ
+    // ------------------------------------------------------------------
+    // ÖLÇÜLEN KUSUR (görsel tur): "üç rozetin ikisi ekranda YOK; görünen
+    // tek rozet sönük gri ve 1.164 px aşağıda". Ölçüldü (node koşumu,
+    // docs/scofield/raw/OH/Z5/c/olcum_c3_render_once.txt): üç rozet de
+    // ÜRETİLİYOR, sorun ÜRETİMDE değil YERLEŞİMDE ve ANLAMDA:
+    //   * şerit 10 alanlık formun ALTINDA, sayfanın ~1.164 px aşağısında
+    //     akıp gidiyor — kullanıcı hükmü görmek için kaydırmak zorunda;
+    //   * son iki rozet DURUM taşımıyordu (ikisi de düz 'info' cyan), yani
+    //     hüküm rengiyle künye rengi ayırt edilemiyordu;
+    //   * veri gelmese bile üçü de basılıyordu ("— × — class —"), yani
+    //     ölçülmemiş bir künye ölçülmüş gibi duruyordu.
+    //
+    // ARTIK: şerit panel gövdesinin ÜSTÜNE yapışır (position:sticky), üç
+    // rozet de GERÇEK durum renklerini taşır ve alanı olmayan rozet HİÇ
+    // BASILMAZ (fail-closed) — uydurma "—" künyesi yok.
+    // ==================================================================
+    var BADGE_STRIP_STYLE = 'display:flex; flex-wrap:wrap; gap:8px;'
+        + ' margin:0 0 8px; padding:8px 0; position:sticky; top:0; z-index:3;'
+        + ' background:var(--hd-panel, rgba(6,14,26,0.96));'
+        + ' border-bottom:1px solid var(--hd-line, rgba(0,229,255,0.14));';
+
+    // Cıvata künyesi rozeti: ÜÇ alanın üçü de gelmişse basılır.
+    function boltIdentityBadge(bolt) {
+        if (bolt.count == null || !bolt.size || !bolt.property_class) return '';
+        return U.badge(String(bolt.count) + ' × ' + String(bolt.size) + ' '
+            + T('panel.joint.classWord', 'class') + ' '
+            + String(bolt.property_class),
+            // Künye bir HÜKÜM değil, bir kimliktir: nötr ton (Z5-C2 ile
+            // aynı ilke — yeşil yalnız "geçti" demektir).
+            'info', bolt.strength_source || '');
+    }
+
+    // Cıvata gerilme hükmü rozeti: proof SF varsa GERÇEK durum rengiyle.
+    // (Eskiden bu hüküm yalnız kartta duruyordu; şeritte hiç yoktu.)
+    function proofBadge(sf) {
+        if (!Number.isFinite(sf.proof_SF)) return '';
+        // P11B4-09: rozetin RENGİ de bağlayıcı değerden okunur; sayı
+        // nominal kalır (ucun manşet alanı odur), renk hükmü taşır.
+        var gp = yoneticiSf(sf, 'proof_SF', 'proof_SF_min');
+        // ÇEVİRİ ANAHTARI NOTU (Z5-C, ana modele devir): bu etiketin
+        // anahtarı `panel.joint.badgeProof`, Z5 i18n paketi tarafından
+        // i18n_common.js'e İKİ DİLDE eklendi (EN 'BOLT STRESS' / TR 'CIVATA
+        // GERİLMESİ'). Bu paket i18n dosyalarına DOKUNMADI. Anahtarın tek
+        // tüketicisi burasıdır: bu satır makine dizesine çevrilirse anahtar
+        // ÖLÜR ve tests/test_i18n_common.py::test_every_dictionary_key_is_used
+        // kırmızıya döner — iki değişiklik BİRLİKTE yapılmalıdır.
+        return U.badge(T('panel.joint.badgeProof', 'BOLT STRESS') + ': '
+            + U.fmt(sf.proof_SF, 2), sfKind(gp.hukum, 1.2),
+            'safety_factors.proof_SF — S_p·A_t / F_bolt (Shigley Eq. 8-28)'
+            + (gp.yonetici != null ? ' — ' + yoneticiNot(gp) : ''));
     }
 
     function render(data, root) {
@@ -73,27 +198,40 @@
         var sf = j.safety_factors || {};
         var sep = j.separation || {};
 
-        // ---- Rozetler ----
+        // P11B4-09: hüküm bağlayıcı (kötü-durum) değerden okunur.
+        var gProof = yoneticiSf(sf, 'proof_SF', 'proof_SF_min');
+        var gNl = yoneticiSf(sf, 'overload_factor_nL', 'overload_factor_nL_min');
+        var gN0 = yoneticiSf(sf, 'separation_factor_n0', 'separation_factor_n0_min');
+        // Modülün kendi "hangisi yönetici" cümlesi; yoksa boş dize.
+        var govBasis = (typeof sf.governing_basis === 'string')
+            ? SRV(sf.governing_basis) : '';
+
+        // ---- Rozetler (fail-closed: alanı olmayan rozet basılmaz) ----
         var badges = '';
-        badges += sep.separated
-            ? U.badge(T('panel.joint.separated', 'JOINT SEPARATED'), 'err',
+        if (sep.separated === true) {
+            badges += U.badge(T('panel.joint.separated', 'JOINT SEPARATED'), 'err',
                 T('panel.joint.separatedTip',
-                  'External load exceeds the preload capacity — the joint opens'))
-            : U.badge(T('panel.joint.closed', 'JOINT CLOSED'), sfKind(sf.separation_factor_n0),
+                  'External load exceeds the preload capacity — the joint opens'));
+        } else if (sep.separated === false) {
+            badges += U.badge(T('panel.joint.closed', 'JOINT CLOSED'),
+                sfKind(gN0.hukum),
                 U.tf('panel.joint.n0Tip', { n0: U.fmt(sf.separation_factor_n0, 2) },
                      'Separation factor n0 = {n0}'));
-        badges += U.badge(
-            (bolt.count || '—') + ' × ' + (bolt.size || '—') + ' '
-            + T('panel.joint.classWord', 'class') + ' '
-            + (bolt.property_class || '—'), 'info', bolt.strength_source || '');
-        badges += U.badge(T('panel.joint.model', 'MODEL: SHIGLEY CH. 8'), 'info', j.source || '');
+        }
+        badges += proofBadge(sf);
+        badges += boltIdentityBadge(bolt);
+        if (j.source) {
+            badges += U.badge(T('panel.joint.model', 'MODEL: SHIGLEY CH. 8'),
+                              'info', j.source);
+        }
 
         var scatter = Array.isArray(tq.preload_scatter_band_N)
             ? tq.preload_scatter_band_N : [null, null];
 
         var head = document.createElement('div');
-        head.innerHTML = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + badges + '</div>'
+        head.innerHTML = (badges
+            ? '<div style="' + BADGE_STRIP_STYLE + '">' + badges + '</div>'
+            : '')
             + '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
             + U.statCard(T('panel.joint.cardTorque', 'Recommended torque'),
                 U.fmt(tq.recommended_torque_Nm, 1), 'N·m',
@@ -106,14 +244,16 @@
                 fmtKN(scatter[0]) + ' – ' + fmtKN(scatter[1]), 'kN', 'warn',
                 T('panel.joint.cardScatterTip',
                   'Torque-controlled tightening scatter band (Shigley Sec. 8-8)'))
-            + U.statCard(T('panel.joint.cardProofSf', 'Proof SF'), U.fmt(sf.proof_SF, 2), '',
-                sfKind(sf.proof_SF, 1.2), 'S_p·A_t / F_bolt (Shigley Eq. 8-28)')
+            + U.statCard(T('panel.joint.cardProofSf', 'Proof SF'),
+                U.fmt(gProof.nominal, 2), yoneticiNot(gProof),
+                sfKind(gProof.hukum, 1.2),
+                'S_p·A_t / F_bolt (Shigley Eq. 8-28) — ' + govBasis)
             + U.statCard(T('panel.joint.cardOverload', 'Overload factor n_L'),
-                U.fmt(sf.overload_factor_nL, 2), '',
-                sfKind(sf.overload_factor_nL, 1.2), 'Shigley Eq. 8-29')
+                U.fmt(gNl.nominal, 2), yoneticiNot(gNl),
+                sfKind(gNl.hukum, 1.2), 'Shigley Eq. 8-29 — ' + govBasis)
             + U.statCard(T('panel.joint.cardSeparation', 'Separation factor n0'),
-                U.fmt(sf.separation_factor_n0, 2), '',
-                sfKind(sf.separation_factor_n0), 'F_i / (P·(1−C)) — Shigley Eq. 8-30')
+                U.fmt(gN0.nominal, 2), yoneticiNot(gN0),
+                sfKind(gN0.hukum), 'F_i / (P·(1−C)) — Shigley Eq. 8-30 — ' + govBasis)
             + '</div>';
         root.appendChild(head);
 
@@ -136,8 +276,41 @@
                'F_m = F_i − (1−C)·P (Shigley Eq. 8-25) — ≤ 0 means separation')],
             [T('panel.joint.jointConstant', 'Joint constant C'), U.fmt(st.joint_constant_C, 3),
              st.model || ''],
+            /* ÖH D26 · P11B4-10 — AYRILMA BLOĞUNUN ÇİFTİ TEKİLLEŞİYORDU.
+
+               ÖLÇÜLDÜ (a3/once.json, taban 7751531): uç `separation`
+               bloğunda ALTI alan yayımlıyor, panel İKİSİNİ okuyordu —
+                 separated                          okunuyor
+                 separation_load_per_bolt_N         okunuyor
+                 separated_nominal_preload          0
+                 margin                             0
+                 margin_nominal                     0
+                 separation_load_per_bolt_nominal_N 0
+               Modülün kendi beyanı (`safety_factors.governing_basis`)
+               ayrılmanın MİNİMUM ön-yükte (−%25) değerlendirildiğini
+               söylüyor; nominal ön-yükteki karşılığı ise ayrı alanda
+               duruyor. İkisi AYNI ŞEY DEĞİLDİR ve ekranda tek sayı gibi
+               görünüyordu: kötü-durumda ayrılan bir bağlantı, nominalde
+               ayrılmıyor olabilir (`separated` ⟷ `separated_nominal_preload`)
+               ve kullanıcı hangi ön-yükte ne olduğunu okuyamıyordu.
+
+               Sayı türetilmez: ucun alanları YAN YANA basılır, makine
+               adlarıyla; alan yoksa em tire. */
             [T('panel.joint.separationLoad', 'Separation load per bolt'),
-             fmtKN(sep.separation_load_per_bolt_N) + ' kN'],
+             fmtKN(sep.separation_load_per_bolt_N) + ' kN'
+                + ' <span style="color:var(--hd-ink-dim, #7d97a5);">/ '
+                + fmtKN(sep.separation_load_per_bolt_nominal_N)
+                + ' kN</span>',
+             'separation_load_per_bolt_N (min preload, governing) / '
+                + 'separation_load_per_bolt_nominal_N'],
+            [T('panel.joint.separationMargin', 'Separation margin n_0'),
+             U.fmt(sep.margin, 3)
+                + ' <span style="color:var(--hd-ink-dim, #7d97a5);">/ '
+                + U.fmt(sep.margin_nominal, 3) + '</span>',
+             'margin (min preload, governing) / margin_nominal'],
+            [T('panel.joint.separatedPair', 'Separated? (min / nominal preload)'),
+             ayrilmaImi(sep.separated) + ' / ' + ayrilmaImi(sep.separated_nominal_preload),
+             'separated / separated_nominal_preload'],
         ]);
 
         html += U.sectionTitle(T('panel.joint.secBolt', 'Bolt Data'));
@@ -157,6 +330,14 @@
         html += U.listBlock(T('common.assumptions', 'Assumptions'), j.assumptions, 'dim');
         tail.innerHTML = html;
         root.appendChild(tail);
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (X_basis / X_source / X_status / X_model) okuyup ekrana DÜZ
+        // METİN döküyor, hükmünü (hesaplandı / sizin girdiniz / varsayım
+        // / modellenmedi) hiç vermiyordu — pano sınıflandırıcısı ölü
+        // katmandı. Defter ucun KENDİ beyanını ortak sınıflandırıcıdan
+        // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
+        U.source.ledgerInto(root, j, { deep: true });
     }
 
     window.AnalysisDock.register({
@@ -173,7 +354,7 @@
             ['size', 'Bolt Size', 'M8', SIZES, 'panel.joint.fBoltSize'],
             ['property_class', 'Property Class', '8.8', CLASSES, 'panel.joint.fPropertyClass'],
             ['grip_length_mm', 'Grip Length (mm)', 20, 1, 'panel.joint.fGripLength'],
-            ['member_material', 'Member Material', 'aluminum_6061', MEMBER_MATERIALS,
+            ['member_material', 'Member Material', VARSAYILAN_MALZEME, MEMBER_MATERIALS,
              'panel.joint.fMemberMaterial'],
             ['lubricated', 'Thread Condition', 'false', LUBRICATION, 'panel.joint.fThreadCondition'],
             ['reusable', 'Connection Type', 'true', REUSE, 'panel.joint.fConnectionType'],

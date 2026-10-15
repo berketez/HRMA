@@ -29,11 +29,70 @@ import os
 
 import pytest
 
-step_export = pytest.importorskip('hrma.export.step_export')
+# DEPO-İÇİ ``pytest.importorskip`` KALDIRILDI — P13B1-05, ÖH FAZ B-3
+# (27 Ağustos 2026). Eski satır ``step_export = pytest.importorskip(
+# 'hrma.export.step_export')`` idi ve MODÜL DÜZEYİNDEydi: modül kırılırsa
+# dosyanın tamamı toplama düzeyinde atlanıyor, junit XML'de ``type`` alanı
+# OLMAYAN tek bir "collection skipped" satırına dönüşüyor ve CI atlama
+# bütçesine HİÇ GÖRÜNMEDEN kayboluyordu (K8'in gerekçesi: "step_export
+# kırılsa iki dosya sessizce yok olur" — ikinci dosya
+# tests/test_tank_step_units.py).
+#
+# Modül DEPONUN KENDİSİdir; "isteğe bağlı bağımlılık" gerekçesi burada
+# geçerli değil. build123d'nin YOKLUĞU ayrı bir sorudur ve aşağıdaki
+# ``BUILD123D_AVAILABLE`` kapısıyla dürüstçe ele alınır — o kapı DURUYOR:
+# step_export build123d olmadan da ithal edilebilir (yalnız üretim yolu
+# RuntimeError verir, hrma/export/step_export.py:27-35).
+#
+# ÖLÇÜLDÜ (ithal bellekte kırılarak, 27 Ağustos 2026 — sabotajsız taban
+# bu dosyada 14 passed):
+#   eski gövde -> "1 skipped"; junit XML'de tek satır, ``type=None``,
+#                 ``message='collection skipped'`` — 14 bekçi RAPORDAN DÜŞER
+#                 ve toplanan sayısı 14 azalır, atlama sayısı 1 artar;
+#   bu gövde   -> "1 error during collection" (dürüstçe kırmızı).
+from hrma.export import step_export
+from tests.bagimlilik_kapisi import kurulu_mu
 
-_B123D_YOK = not getattr(step_export, 'BUILD123D_AVAILABLE', True)
+# ---------------------------------------------------------------------------
+# build123d kapısı — ÜÇ DURUMLU (tests/bagimlilik_kapisi.py'nin kuralı)
+# ---------------------------------------------------------------------------
+# Kapının koşulu ÖLÇÜMLE değişti (27 Ağustos 2026, P13B1-05'in yan etkisi):
+# eskiden ``step_export.BUILD123D_AVAILABLE`` bayrağına bakıyordu; o bayrak
+# ``except Exception`` ile kuruluyor (hrma/export/step_export.py:34), yani
+# build123d KURULUYKEN OCC yüklemesi patlarsa da False oluyor ve bekçi
+# "build123d kurulu değil" diye atlıyordu — YALAN gerekçe. Depo bu sınıfı
+# adlandırmış ve tarayıcısını yazmış durumda
+# (test_ci_kapsam_kapisi.py::TestAtlamaGerekcesiDurust); eski hâl ancak
+# ``importorskip`` sayesinde "kurulum sorusu" sayılıyordu, o kaldırılınca
+# tarayıcı kusuru gösterdi.
+#
+#   build123d KURULU DEĞİL            -> ATLA    (find_spec ile DOĞRULANIR)
+#   kurulu + üretim yolu AÇIK         -> KOŞ
+#   KURULU ama üretim yolu KAPALI     -> KIRMIZI (aşağıdaki bekçi; ürün kusuru)
+_B123D_KURULU = kurulu_mu('build123d')
 _kati_gerekli = pytest.mark.skipif(
-    _B123D_YOK, reason='build123d kurulu değil (STEP üretimi atlanır)')
+    not _B123D_KURULU,
+    reason='build123d kurulu değil (STEP üretimi atlanır; gerekçe '
+           'DOĞRULANDI: find_spec)')
+
+
+@pytest.mark.skipif(
+    not _B123D_KURULU,
+    reason='build123d kurulu değil (STEP üretimi atlanır; gerekçe '
+           'DOĞRULANDI: find_spec)')
+def test_build123d_kuruluyken_step_uretim_yolu_acik():
+    """Üçüncü durum: KURULU ama yol KAPALI — bu atlanamaz, ürün kusurudur.
+
+    Yukarıdaki kapı artık yalnız KURULUM sorusunu soruyor. Üretim yolunun
+    açıklığı ayrı bir bekçinin işi olmalı, yoksa OCC yüklemesi bozulduğunda
+    bu dosyanın bütün bekçileri "kütüphane yok" diyerek sessizce atlanır ve
+    kusur görünmez (parti 31 / T2-2'de cantera'da ölçülen desen).
+    """
+    assert getattr(step_export, 'BUILD123D_AVAILABLE', False), (
+        'build123d KURULU (find_spec buldu) ama hrma.export.step_export '
+        'onu yükleyemedi — BUILD123D_AVAILABLE False. Bu bir ÜRÜN/ORTAM '
+        'kusurudur, "kütüphane yok" gerekçesiyle atlanamaz. '
+        'Teşhis: `python -c "import build123d"` çıktısına bakın.')
 
 
 def _quiet(fn, *args, **kwargs):
@@ -64,6 +123,45 @@ def hybrid_results():
         fuel_type='paraffin', oxidizer_type='n2o', fuel_density=900,
         regression_a=1.17e-4, regression_n=0.62, expansion_ratio=0).calculate)
     r['motor_name'] = 'KAPI_HIBRIT'
+    return r
+
+
+#: Enjektör panelinin TASARLANAN plaka kalınlığı [mm] — ÖH D32 / OH-D31-16.
+#: Ürün yolunda bu sayı kullanıcının enjektör panelinden gelir; HRMA onu
+#: TÜRETMEZ (``injector_plate_structural`` kalınlığı çağırandan alır ve
+#: ``plate_thickness_earned`` ile künyeler).
+_D32_PANEL_PLAKA_MM = 6.0
+
+
+def _d32_panel_plakali(sonuc, t_mm=_D32_PANEL_PLAKA_MM):
+    """Sonuca enjektör panelinin tasarlanan plakasını ekler.
+
+    ÖH D32 / OH-D31-16 — ÇEVRİLEN BEKÇİ GEREKÇESİ. Aşağıdaki bekçiler
+    STEP paketinde enjektör parçasının BULUNMASINI şart koşuyordu. O şart,
+    plaka kalınlığının kamaranın ÖN KAPAĞINDAN (ya da bir üreteç
+    sabitinden) türetildiği dönemden kalmaydı. ÖH D15 / P9B1-13 o ikameyi
+    ölçüp reddetti (mesh/gerçek plaka oranı 10,0x) ve kardeş üretici
+    ``cad_visualization`` plakayı ancak kalınlık YAYIMLANMIŞSA çiziyor.
+
+    Ölçüldü (taban dd1dcddc): bu dosyanın ham çözücü fikstürleri plaka
+    kalınlığı yayımlamıyor, dolayısıyla STL plakayı çizmiyordu; STEP ise
+    çiziyordu. Aynı motorun iki katı dosyası iki farklı makineyi
+    anlatıyordu ve ``/api/export-complete-zip`` paketi 422 ile
+    reddediyordu. D32'de STEP de aynı çözümleyiciye bağlandı.
+
+    Bekçilerin ASIL niyeti (gerçek çözüm verisiyle STEP üretimi kırılmaz;
+    üretilen parçalar geçerli ve dolu) KORUNUR: fikstür artık kalınlığın
+    KAZANILDIĞI koşuyu kurar. Kalınlığın YOKLUĞUNDA parçanın çizilmediği
+    ``tests/test_d32_ihracat_a1.py``de ayrıca sınanır.
+    """
+    r = dict(sonuc)
+    r['injector_results'] = {
+        'plate_structural': {
+            'status': 'analyzed',
+            'plate_thickness_mm': float(t_mm),
+            'material': 'stainless_steel_316',
+        },
+    }
     return r
 
 
@@ -99,23 +197,50 @@ class TestTankKapisi:
             step_export.generate_tank_step({})
 
     def test_eksik_tank_kolu_reddedilir(self):
-        """Tek tank verilse bile eksik kol uydurulmaz — reddedilir."""
+        """Tek tank verilse bile eksik kol uydurulmaz — reddedilir.
+
+        FİKSTÜR TAMAMLANDI (ÖH D15 / a2, defter P9B2-15): verilen kol artık
+        ``wall_thickness`` de taşır. O alan ürün sözleşmesinde ZORUNLUDUR
+        (``cad_export.TANK_CAD_REQUIRED_DIMENSIONS``) ve onsuz tank STEP'i içi
+        DOLU bir kütük çiziliyordu (ölçüldü: 2844,64 kg ⟷ yayımlanan 47,62
+        kg). Cidar artık kendi gerekçesiyle reddedildiği için, eksik cidarlı
+        fikstürde ``fuel_tank`` önce takılıyor ve bu testin ölçmek istediği
+        EKSİK KOL reddi hiç ölçülemiyordu.
+        """
         with pytest.raises(ValueError, match='oxidizer_tank'):
             step_export.generate_tank_step(
-                {'fuel_tank': {'diameter': 300.0, 'length': 800.0}})
+                {'fuel_tank': {'diameter': 300.0, 'length': 800.0,
+                               'wall_thickness': 3.0}})
 
     def test_eksik_uzunluk_reddedilir(self):
         """Çap var boy yok: yarım ölçü de reddedilir, 800 mm uydurulmaz."""
         with pytest.raises(ValueError, match='refusing to emit'):
             step_export.generate_tank_step(
-                {'fuel_tank': {'diameter': 300.0},
+                {'fuel_tank': {'diameter': 300.0, 'wall_thickness': 3.0},
+                 'oxidizer_tank': {'diameter': 300.0, 'length': 900.0,
+                                   'wall_thickness': 3.0}})
+
+    def test_eksik_cidar_reddedilir(self):
+        """Cidar yoksa tank İÇİ DOLU çizilmez — reddedilir (P9B2-15).
+
+        Ölçüldü (31 Ağustos 2026, oksitleyici tankı Ø743,7556 / gövde
+        1859,3891 mm, Al 2024-T3): ``wall_thickness`` geometriye hiç
+        girmediği için çizilen katının hacmi 1 023 252 929 mm3 = **2844,64
+        kg**, aynı pakette yayımlanan tank kütlesi **47,62 kg** (59,7 kat).
+        Paketin kendi ``*_geometry.json``ı oymayı zaten tarif ediyordu.
+        """
+        with pytest.raises(ValueError, match='SOLID BILLET'):
+            step_export.generate_tank_step(
+                {'fuel_tank': {'diameter': 300.0, 'length': 800.0},
                  'oxidizer_tank': {'diameter': 300.0, 'length': 900.0}})
 
     def test_gercek_mm_veriyle_uretim_calisiyor(self, tmp_path):
         """Regresyon: gerçek mm ölçülerle tank STEP'i hâlâ üretilir."""
         files = step_export.generate_tank_step(
-            {'fuel_tank': {'diameter': 300.0, 'length': 800.0},
-             'oxidizer_tank': {'diameter': 300.0, 'length': 900.0}},
+            {'fuel_tank': {'diameter': 300.0, 'length': 800.0,
+                           'wall_thickness': 3.0},
+             'oxidizer_tank': {'diameter': 300.0, 'length': 900.0,
+                               'wall_thickness': 3.0}},
             out_dir=str(tmp_path))
         assert set(files) == {'fuel_tank', 'oxidizer_tank'}
         for key, path in files.items():
@@ -203,7 +328,8 @@ class TestGercekVeriRegresyonu:
     @pytest.fixture(scope='class')
     def liquid_step_files(self, liquid_results, tmp_path_factory):
         from hrma.export.motor_geometry import liquid_results_to_motor_geometry
-        geo = liquid_results_to_motor_geometry(liquid_results)
+        geo = _d32_panel_plakali(
+            liquid_results_to_motor_geometry(liquid_results))
         out = tmp_path_factory.mktemp('kapi_sivi_step')
         return _quiet(step_export.generate_step_assembly, geo,
                       out_dir=str(out), motor_type='liquid')
@@ -218,7 +344,8 @@ class TestGercekVeriRegresyonu:
 
     def test_gercek_hibrit_veriyle_step_uretilir(self, hybrid_results,
                                                  tmp_path):
-        files = _quiet(step_export.generate_step_assembly, hybrid_results,
+        files = _quiet(step_export.generate_step_assembly,
+                       _d32_panel_plakali(hybrid_results),
                        out_dir=str(tmp_path))
         assert set(files) == {'chamber', 'nozzle', 'fuel_grain',
                               'injector', 'assembly'}

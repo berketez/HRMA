@@ -169,12 +169,68 @@ def test_frontend_consumers_handle_code_dicts():
         # (dosya, sözlüğü çeviren ifadeyi içermesi beklenen işaret)
         ('hrma/static/js/analysis_dock.js', 'function warnText'),
         ('hrma/static/js/analysis_dock.js', 'warnText: warnText'),
-        ('hrma/static/js/panels/safety_panel.js', '.map(U.warnText)'),
+        # ÖH D15 birleştirme (1 Eyl 2026): burada ``.map(U.warnText)``
+        # aranıyordu. O DİZGE ARTIK İSTENMİYOR — gerekçe aşağıdaki
+        # ``test_warntext_dizi_indisiyle_cagrilmaz`` içinde ÖLÇÜLDÜ.
+        # Aranan iddia dizgenin kendisi değil: panel uyarı sözlüğünü
+        # çeviriden GEÇİRİYOR mu.
+        ('hrma/static/js/panels/safety_panel.js', 'U.warnText('),
         ('hrma/templates/solid.html', 'function localizeWarning'),
     ]
     for rel, needle in checks:
         text = (ROOT / rel).read_text(encoding='utf-8')
         assert needle in text, f'{rel} içinde beklenen tüketici kodu yok: {needle!r}'
+
+
+#: ``warnText`` referansını doğrudan bir dizi geri çağrısına veren biçimler.
+#: ``Array.prototype.map/forEach/flatMap`` geri çağrıya (eleman, İNDİS, dizi)
+#: geçirir; ``warnText(w, depth)`` ikinci argümanı ÖZYİNELEME DERİNLİĞİ sayar.
+_INDIS_SIZINTISI = re.compile(
+    r'\.(?:map|forEach|flatMap)\(\s*(?:U\.|AnalysisDock\.ui\.)?warnText\s*\)')
+
+
+def test_warntext_dizi_indisiyle_cagrilmaz():
+    """``.map(U.warnText)`` yasak — indis ``depth`` yerine geçiyor.
+
+    ÖLÇÜLDÜ (1 Eyl 2026, node içinde gerçek ``analysis_dock.js`` koşumu,
+    yedi elemanlı ``{code, params, fallback}`` listesi):
+
+        liste.map(U.warnText)
+          -> ['Device 0 required', ... 'Device 4 required',
+              'warn.safety.device_5', 'warn.safety.device_6']
+        liste.map(function (x) { return U.warnText(x); })
+          -> ['Device 0 required', ... 'Device 6 required']
+
+    Sebep ``analysis_dock.js``'in kendi koruması: ``if (depth > 4) return
+    w.code;`` — bozuk/döngüsel veriye karşı doğru bir korumadır, ama
+    ``map`` indisi ikinci argüman olarak geçince BEŞİNCİ elemandan sonrası
+    o dala düşer ve kullanıcı çevrilmiş metin yerine HAM ANAHTAR okur.
+    Yani bu biçim, bu dosyanın kilitlediği "[object Object]" kusurunun
+    kardeşidir: uzun uyarı listelerinde sessizce ham koda dönüşür.
+
+    Beş elemana kadar fark görünmediği için gözle yakalanamaz; bekçi bu
+    yüzden BİÇİMİ yasaklar, çıktıyı değil.
+    """
+    kusurlu = []
+    for yol in sorted((ROOT / 'hrma').rglob('*.js')):
+        metin = yol.read_text(encoding='utf-8')
+        for m in _INDIS_SIZINTISI.finditer(metin):
+            satir = metin[:m.start()].count('\n') + 1
+            kusurlu.append(f'{yol.relative_to(ROOT).as_posix()}:{satir}: '
+                           f'{m.group(0)}')
+    for ad in ('solid.html', 'liquid.html', 'hybrid.html', 'advanced.html'):
+        sayfa = ROOT / 'hrma' / 'templates' / ad
+        if not sayfa.exists():
+            continue
+        metin = sayfa.read_text(encoding='utf-8')
+        for m in _INDIS_SIZINTISI.finditer(metin):
+            satir = metin[:m.start()].count('\n') + 1
+            kusurlu.append(f'templates/{ad}:{satir}: {m.group(0)}')
+    assert not kusurlu, (
+        'warnText bir dizi geri çağrısına DOĞRUDAN verilmiş; dizi indisi '
+        'özyineleme derinliği sanılıyor ve 5. elemandan sonrası ham kod '
+        'basıyor. Sarmalayın: .map(function (x) { return U.warnText(x); })\n'
+        + '\n'.join(kusurlu))
 
 
 def test_frontend_translates_nested_warning_records():

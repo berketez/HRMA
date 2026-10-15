@@ -218,7 +218,7 @@ def test_deck_frame_button():
     src = _read(DECK)
     assert '_btn_frame' in src
     assert 'viz.snapshot()' in src
-    assert "T('viz.btnFrame', 'Frame')" in src
+    assert "T('viz.btnFrame', 'Save PNG')" in src
     assert 'a.download' in src
 
 

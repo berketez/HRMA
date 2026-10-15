@@ -258,7 +258,21 @@ def viz3d_uretilen_kodlar():
 
 @pytest.fixture(scope='module')
 def panel_metrics():
-    prelude = (bildirim(PANEL_JS, 'PA_PER_BAR', 'const') + '\n'
+    # ÖH D25 / OH-D24-05 — BEKÇİ ÇEVRİLDİ (kusuru koruyordu).
+    # Eski hâl PA_PER_BAR bildirimini cfd_panel.js'ten METİN olarak
+    # kesiyordu; ``[^;]+`` kalıbı gereği bu, sabitin panelde ÇIPLAK BİR
+    # LİTERAL olmasını ŞART koşuyordu — yani tek kaynağa taşımayı
+    # yapısal olarak yasaklıyordu (sabit dört JS dosyasında ayrı ayrı
+    # yaşıyordu). İddia aynen duruyor: FIELD_METRICS ölçeklerinin bar->Pa
+    # çevrimi doğru sayıyla kurulmuş olmalı. Sayı artık ÜRÜNÜN kendi tek
+    # kaynağından (units_constants.js) okunur; panelde kopyası kalırsa
+    # aşağıdaki 'tek kaynak' iddiası kırmızı olur.
+    panel_kaynak = _oku(PANEL_JS)
+    assert not re.search(r'const PA_PER_BAR = 1e5', panel_kaynak), (
+        'cfd_panel.js PA_PER_BAR sabitini yeniden tanımlıyor — tek kaynak '
+        'units_constants.js olmalı')
+    prelude = (bildirim(STATIC_JS / 'units_constants.js', 'PA_PER_BAR',
+                        'const') + '\n'
                + bildirim(PANEL_JS, 'FIELD_METRICS', 'const'))
     return js_degeri(prelude, 'FIELD_METRICS')
 

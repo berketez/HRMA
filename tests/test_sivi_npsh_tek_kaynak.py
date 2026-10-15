@@ -38,6 +38,7 @@ kendisini değil, ölçümün gösterdiği doğru sözleşmeyi korur.
 import contextlib
 import io
 import json
+import math
 import os
 import sys
 
@@ -169,9 +170,14 @@ class TestBuharBasinci:
         Mutasyon hedefi: yedek düşüşü uyarısız/beyansız yapılırsa (eski
         davranış) uyarı kaydı ve basis metni kaybolur — ikisi de aranır.
         """
+        # ÖH D31 · P4B4-07: örnek itici METAN'dan ETHANOL'e taşındı — metan
+        # artık su koçu / besleme tablosunda kayıtlıdır (birincil kaynaklı
+        # NIST WebBook girdisi), dolayısıyla 'kayıtsız itici' örneği olamaz.
+        # Motorun desteklediği çiftler arasında kaydı olmayan tek itici
+        # ethanol'dür. İddia değişmedi: yedek düşüşü SESSİZ olamaz.
         motor = _birim_motor()
         sonuc = motor._design_pump(2.0, 420.0, 100.0, 30.0,
-                                   propellant='methane', line=SENTETIK_HAT)
+                                   propellant='ethanol', line=SENTETIK_HAT)
         assert sonuc['vapor_pressure_Pa'] == pytest.approx(
             PUMP_NPSH_VAPOR_PRESSURE_BAR * PA_PER_BAR)
         assert 'record missing' in sonuc['vapor_pressure_source']
@@ -364,23 +370,86 @@ class TestDevirVeMil:
     def test_eski_devir_sinifi_geri_gelmedi(self, besleme):
         """Şişkin NPSH devirleri (yakıt 78 607 / oks 49 479) tarihe karıştı.
 
-        Ölçülen yeni sınıf (2026-08-15, bu depo): oks 35 855 rpm, yakıt
-        36 146 rpm. Bant birebir değil ±%20 pay ile kilitlenir — model
-        iyileştirmeleri bandı oynatabilir ama ESKİ sınıfa (>60 000 yakıt,
-        >45 000 oks) dönüş kırar.
+        ASIL İDDİA (hiç gevşemedi): ESKİ sınıfa dönüş — yakıt > 60 000,
+        oks > 45 000 rpm — kırar. Bu iki tavan 2026-08-15'ten beri AYNI.
+
+        ÇAPA YENİLENDİ (ÖH D26 / fix-25b). Eski çapa 2026-08-15 ölçümüydü
+        (oks 35 855 / yakıt 36 146, ±%20). O tarihten SONRA besleme-NPSH
+        zinciri BEŞ ayrı kulvarda bilinçli olarak değişti; çapa bayatladı:
+          * D15 sıvı a2 (23784aa, 31 Ağu) — P3B3-04: hat çapı artık HIZ
+            BANDINA göre seçiliyor; oks hattındaki 11,03 m/s tavan ihlali
+            kalktı. BASKIN SEBEP BUDUR.
+          * D18 fizik-a2 (94c96e5, 2 Eyl) — tank basıncı NPSH'e bağlandı.
+          * D18 sıvı a1 (b3fb65e, 2 Eyl) — P3B3-09 hat cinsi argümanı.
+          * D20 sıvı a1 (ef571cb, 3 Eyl) — hat çapı seçimi.
+          * D21 sıvı a1 (c4891b3, 4 Eyl) — OH-D20-09 TEK MARJ sözleşmesi
+            (SP-8107 1,25 çarpanı SP-8109 hız-yükü kuralının ÜSTÜNE
+            yığılmıyor) + P3B4-10 dejenere NPSH marjı.
+
+        DEĞİŞİM TÜRETİLDİ, "sayı oynatılmadı". Zincir:
+        NPSH_a = k_v·c_m²/(2g) (SP-8109 §3.2.1.2) ve
+        ω = ω_ss·(NPSH·g)^(3/4)/√Q  ⇒  devir ∝ c_m^1,5 (sabit Q'da).
+        Oks giriş hızı 11,03 → 5,717 m/s olunca beklenen devir
+        35 855·(5,717/11,03)^1,5 = 13 379 rpm; ÖLÇÜLEN 14 103,9 rpm
+        (sapma +%5,4 — kalanı tek-marj sözleşmesi ve Q değişimi).
+        Yani düşüş, bandın kendisinin onarımının DOĞRUDAN sonucudur.
+
+        YENİ ÇAPA (bu depo, D26 fix-25b): oks 14 103,9 / yakıt 51 380,2
+        rpm, aynı ±%20 payla (pay BÜYÜTÜLMEDİ). Oks artık yöneten pompa:
+        NPSH_a'sı hız-yükü tabanına oturuyor, yakıtta artı NPSH kalıyor.
+
+        UYARI (D26 sıvı kulvarına): yakıt devri çapadan +%42 yükseldi
+        (36 146 → 51 380) ve ESKİ sınıf tavanının (60 000) %86'sına
+        geldi. Kırmızı değil ama yön eski sınıfa DOĞRU; bir sonraki
+        besleme değişikliği bu tavanı zorlarsa bekçi kıracaktır.
         """
         oks = besleme['turbopump_analysis']['oxidizer_pump']
         yakit = besleme['turbopump_analysis']['fuel_pump']
-        assert 28000 < oks['rotational_speed'] < 43000, (
-            f"Oks devri {oks['rotational_speed']:.0f} rpm ölçülen bandın "
-            'dışında')
-        assert 28000 < yakit['rotational_speed'] < 44000, (
-            f"Yakıt devri {yakit['rotational_speed']:.0f} rpm ölçülen "
-            'bandın dışında')
+        # 1) ASIL İDDİA — eski şişkin sınıfa dönüş yok (tavanlar sabit).
+        assert oks['rotational_speed'] < 45000, (
+            f"Oks devri {oks['rotational_speed']:.0f} rpm ESKİ şişkin "
+            'sınıfa (>45 000) döndü')
+        assert yakit['rotational_speed'] < 60000, (
+            f"Yakıt devri {yakit['rotational_speed']:.0f} rpm ESKİ şişkin "
+            'sınıfa (>60 000) döndü')
+        # 2) YENİLENEN ÇAPA — ölçülen sınıf ±%20 (pay büyütülmedi).
+        assert 11283 < oks['rotational_speed'] < 16925, (
+            f"Oks devri {oks['rotational_speed']:.0f} rpm yenilenen "
+            'çapanın (14 103,9 ±%20) dışında')
+        assert 41104 < yakit['rotational_speed'] < 61656, (
+            f"Yakıt devri {yakit['rotational_speed']:.0f} rpm yenilenen "
+            'çapanın (51 380,2 ±%20) dışında')
         # Türbin oks miline boyutlanır.
         turbin = besleme['turbopump_analysis']['turbine']
         assert turbin['rotational_speed'] == pytest.approx(
             oks['rotational_speed'])
+
+    def test_devir_kendi_yayimladigi_tabandan_turetilebiliyor(self, besleme):
+        """Devir, kartın KENDİ yayımladığı NPSH ve debiden yeniden kurulur.
+
+        ÇAPA YENİLEMESİNİN BEKÇİSİ (ÖH D26 / fix-25b): yukarıdaki bant bir
+        SAYI çapasıdır ve model geliştikçe yine kayabilir. Bu test sayıyı
+        değil İLİŞKİYİ kilitler — kart hangi devri yayımlarsa yayımlasın,
+        o devir kendi künyesindeki tanımı sağlamak ZORUNDADIR:
+
+            NPSH_req = (ω·√Q / ω_ss)^(4/3) / g   (kartın npsh_required_basis
+            cümlesinin birebir kendisi)  ⇒  ω = ω_ss·(NPSH_req·g)^(3/4)/√Q
+
+        Böylece devir ile NPSH sessizce ayrışamaz (biri elle oynatılırsa
+        kırar) ve bant kayması bir daha "ölçülmemiş sayı" olarak geçmez.
+        """
+        for ad in ('oxidizer_pump', 'fuel_pump'):
+            p = besleme['turbopump_analysis'][ad]
+            omega_ss = float(p['suction_specific_speed_dimensionless'])
+            npsh_req = float(p['npsh_required'])
+            q = float(p['volumetric_flow_m3_s'])
+            omega = omega_ss * (npsh_req * G_0) ** 0.75 / q ** 0.5
+            rpm_turetilmis = omega * 60.0 / (2.0 * math.pi)
+            assert p['rotational_speed'] == pytest.approx(
+                rpm_turetilmis, rel=1e-3), (
+                f'{ad}: yayımlanan devir {p["rotational_speed"]:.1f} rpm, '
+                f'kendi NPSH/debi künyesinden türetilen {rpm_turetilmis:.1f} '
+                'rpm — devir ile NPSH ayrışmış')
 
     def test_mil_mimarisi_beyani_yayimlanir(self, besleme):
         """Devirler farklıysa dişli/çift-mil varsayımı SÖYLENMELİDİR."""

@@ -66,6 +66,12 @@
      converged=false → 'warn' + son kalıntı; ayrılma bloğu kendi
                                judgment_confidence='suspect' etiketiyle
                                ayrıca görünür.
+     converged=null  → 'warn' + "hüküm yayımlanmadı" (OH-D31-15): çözücü
+                               hükmü YARGILAMADI (convergence_status=
+                               'not_evaluated'); ayrılma bloğu bunu
+                               judgment_confidence='not_evaluated' ile
+                               taşır ve KABUL RENGİ (yeşil) verilmez.
+                               Bu bir "yakınsamadı" hükmü DEĞİLDİR.
      cfd bloğu yoksa → hüküm BEYAN EDİLMEZ (çerçeve "hüküm beyan edilmedi"
                                rozetini basar; buradan sahte 'ok' çıkmaz).
 
@@ -83,7 +89,31 @@
     //: ile aynı ad ve aynı değer). Motorların düz `chamber_pressure` alanı
     //: BAR taşır (ölçüldü: hibritte 20 → quasi1d P0_Pa 2 000 000; katıda
     //: 40 → 4 000 000); uç ise Pascal ister.
-    const PA_PER_BAR = 1e5;
+    // ÖH D25 / OH-D24-05 — TEK KAYNAK. Bu sayı burada TANIMLANMAZ:
+    // `static/js/units_constants.js` ön yüzün tek birim çevrim kaynağıdır
+    // (ölçüldü: aynı tanım dört JS dosyasındaydı). Modül yoksa sessiz bir
+    // yedek UYDURULMAZ — requirePaPerBar() hata fırlatır.
+    const PA_PER_BAR = (function () {
+        var g = (typeof window !== 'undefined') ? window : globalThis;
+        // Tarayıcı: <script src="/static/js/units_constants.js"> modülü
+        // window'a yazar. Node (bekçi koşumları panel dosyasını require
+        // eder): modül kardeş dosyadan çözülür. İKİ yolda da sayı TEK
+        // yerde yaşar; burada yeniden TANIMLANMAZ.
+        if (!g.HRMAUnits && typeof require === 'function') {
+            try { g.HRMAUnits = require('../units_constants.js').UNITS; } catch (e) { /* yok */ }
+            if (g.HRMAUnits && !g.HRMAUnits.requirePaPerBar) {
+                try {
+                    g.HRMAUnits.requirePaPerBar =
+                        require('../units_constants.js').requirePaPerBar;
+                } catch (e) { /* yok */ }
+            }
+        }
+        if (!g.HRMAUnits || !g.HRMAUnits.requirePaPerBar) {
+            throw new Error('units_constants.js must load before this panel: '
+                + 'PA_PER_BAR has a single source and is not re-declared here.');
+        }
+        return g.HRMAUnits.requirePaPerBar();
+    }());
 
     //: Evrensel gaz sabiti [J/(kmol·K)] — R = R_u / MW [g/mol] kuralının
     //: kaynağı motorun KENDİ beyanıdır: hibrit quasi1d bloğu
@@ -127,6 +157,20 @@
     //: En son GÖNDERİLEN kontur (duvar çizgisi ancak bununla eşleşen
     //: yanıtlarda çizilir; geçmişten gelen koşuya bugünkü kontur giydirilmez).
     let lastSentContour = null;
+    //: ÖH D36 / sahne-hud — 3B sahneye KENDİLİĞİNDEN gönderilmiş yanıtlar
+    //: (nesne kimliği). Bir yanıt ömründe EN FAZLA BİR KEZ kendiliğinden
+    //: gönderilir; yeniden çizildiğinde (büyüklük seçici, dil değişimi,
+    //: geçmiş şeridinde gezinme) ikinci kez gönderilmez: kullanıcı sahne
+    //: şeridinden KAPAT dediyse o karar korunur. Yeni koşum = yeni nesne =
+    //: yeniden bindirme.
+    //: a1 denetimi (docs/scofield/raw/OH/D36/sahne-hud/a1/rapor.md): ilk
+    //: sürüm TEK yuvalı kimlik tutuyordu; iki koşumdan sonra KAPAT denip
+    //: geçmişte eski ve yeni kayıt arasında gezinildiğinde alan her
+    //: dönüşte yeniden gönderiliyordu (ölçüldü: 2 yerine 5 gönderim).
+    //: WeakSet yükü tutmaz: Merkez'in geçmiş budaması (gecmisiBuda)
+    //: bırakılan yanıtı yine bellekten atabilir.
+    const autoBridgedCfds = (typeof WeakSet === 'function') ? new WeakSet() : null;
+    let lastAutoBridgedCfd = null;
     //: En son öneri turunun kaynak yolları (fromResults ölçtü) — ekranda
     //: "bu sayı motorun neresinden geldi" diye basılır.
     let lastSuggestion = null;
@@ -165,13 +209,53 @@
         return typeof v === 'number' && isFinite(v);
     }
 
+    // ÖH D31 · OH-D30-06 — BİÇİM TEK KAYNAKTAN. Bu panel ortak `U`
+    // nesnesini yakalamıyor (kendi T/TF delegatörleri var); aynı desenle
+    // I18N.number'a devreder (import_ui.js:171, project_bar.js:810).
+    // Sözlük motoru yoksa toFixed'e düşer: sayı UYDURULMAZ, yalnız
+    // ondalık ayracı yerelleşmez.
+    function _num(v, digits) {
+        return (window.I18N && window.I18N.number)
+            ? window.I18N.number(v, digits) : v.toFixed(digits);
+    }
     function fmt(v, digits) {
-        return isNum(v) ? v.toFixed(digits === undefined ? 3 : digits) : '—';
+        return isNum(v) ? _num(v, digits === undefined ? 3 : digits) : '—';
+    }
+
+    //: ÖH D25 · P11B3-14 — EM TİRE DİSİPLİNİ SAYISAL OLMAYAN YOLDA DA.
+    //: ÖLÇÜLDÜ (a3/once.json, taban cdf2106): panelin kendi beyanı
+    //: (yukarıdaki blok) "Alan YOKSA 'NaN' basmak yerine em tire konur"
+    //: diyor, ama bu kural yalnız sig()/fmt()/fmtAuto() yolunda
+    //: uygulanmıştı. Ham String()/şablon yolu aynı ekranda karışık
+    //: kullanılıyordu: yalnız {cfd:{converged:true}} taşıyan yükle panel
+    //: ekrana 10 kez 'undefined' bastı (kardeş üç FEA paneli aynı sınavda
+    //: 0 sızıntı verdi). txt() o yolun kapısıdır: değer YOKSA (undefined /
+    //: null / boş dize) em tire konur, VARSA olduğu gibi basılır — sayı
+    //: biçimlendirmesi YAPMAZ, yalnız yokluğu beyan eder.
+    function txt(v) {
+        if (v === undefined || v === null) return '—';
+        const s = String(v);
+        return s === '' ? '—' : s;
+    }
+
+    //: ÖH D36 / sahne-hud a2 — ÖNCEDEN BİÇİMLENMİŞ SAYI METNİNİN AYRACI.
+    //: ÖLÇÜLDÜ (raw/OH/D36/sahne-hud/a2/once.json, M3): Merkez CFD
+    //: görünümünde TR kipinde panelin KENDİ biçimlediği 31 sayı NOKTA
+    //: basıyordu; `fmt` (I18N.number) yolu virgüllü olduğu için aynı
+    //: hücrede iki ayraç okunuyordu ("43442.7 / 5,430"). `toExponential`
+    //: ve `String(sigFig(v))` çıktısı yalnız ayraç için i18n.js'in
+    //: `decimalText` kanalından geçer: basamak DEĞİŞMEZ, desene uymayan
+    //: metne dokunulmaz. Künye dökümleri (alan adı = değer satırları,
+    //: `sigRaw`) makinedir ve NOKTA kalır (D33-3 fix-38a ayrımı).
+    function decTxt(text) {
+        return (window.I18N && typeof window.I18N.decimalText === 'function')
+            ? window.I18N.decimalText(text) : text;
     }
 
     //: Çok küçük/çok büyük sayılar (kalıntı, korunum artığı) için üstel.
     function fmtExp(v, digits) {
-        return isNum(v) ? v.toExponential(digits === undefined ? 2 : digits) : '—';
+        return isNum(v)
+            ? decTxt(v.toExponential(digits === undefined ? 2 : digits)) : '—';
     }
 
     //: Büyüklüğü önceden bilinmeyen sayı (ör. duvar basıncı marjı).
@@ -183,7 +267,7 @@
         if (!isNum(v)) return '—';
         const mutlak = Math.abs(v);
         if (mutlak !== 0 && (mutlak >= 1e4 || mutlak < 1e-2)) {
-            return v.toExponential(digits === undefined ? 3 : digits);
+            return decTxt(v.toExponential(digits === undefined ? 3 : digits));
         }
         return fmt(v, digits === undefined ? 3 : digits);
     }
@@ -201,6 +285,10 @@
     //: tire konur: köprü hüküm vermediğinde (bridge_refused) bu alanların
     //: bir kısmı hiç gelmez ve "NaN" kullanıcıya sayı gibi görünürdü.
     function sig(value) {
+        return isNum(value) ? decTxt(String(sigFig(value))) : '—';
+    }
+    //: Künye (alan adı = değer) dökümü: makine kanalı, ayraç NOKTA.
+    function sigRaw(value) {
         return isNum(value) ? String(sigFig(value)) : '—';
     }
 
@@ -275,6 +363,18 @@
     //: girebilir, o yüzden satırı gri yapmaz (ama boşsa istek gönderilmez).
     const APPLICABILITY_FIELDS = ['P0_Pa', 'T0_K', 'gamma', 'R_J_per_kgK'];
 
+    //: T_wall'ın KAYNAK BEYANI. Uç izotermal duvarda `T_wall_source`u
+    //: ZORUNLU tutar (kaynağı olmayan sınır koşulu yayımlanmaz). Buradaki
+    //: metin bir uydurma değil, gerçeğin kendisidir: sayı Merkez'in form
+    //: alanından, yani kullanıcının elinden gelir. Motorun ölçtüğü ya da
+    //: termal FEA'nın çözdüğü bir duvar sıcaklığı olarak İMLENMEZ.
+    const T_WALL_SOURCE_FORM =
+        'user: Analysis Centre CFD panel form field (viscous_T_wall_K)';
+
+    //: Türbülans kipinin panel varsayılanı — laminer yol. Ucun ve
+    //: çözücünün varsayılanı da budur; panel ikinci bir kip icat etmez.
+    const TURBULENCE_DEFAULT = 'none';
+
     //: Alan etiketleri — eksik alan mesajı bunları ADIYLA yazar.
     const FIELD_LABELS = {
         P0_Pa: ['panel.cfd.fieldP0', 'Chamber stagnation pressure P0 [Pa]'],
@@ -285,6 +385,10 @@
         Pb_Pa: ['panel.cfd.fieldPb', 'Back pressure Pb [Pa] — optional'],
         separation_factor: ['panel.cfd.fieldK', 'Summerfield k [-] — optional'],
         resolution: ['panel.cfd.fieldResolution', 'Grid resolution'],
+        viscous_mode: ['panel.cfd.fieldViscousMode', 'Wall model'],
+        viscous_turbulence: ['panel.cfd.fieldTurbulence', 'Turbulence model'],
+        viscous_T_wall_K: ['panel.cfd.fieldTwall',
+                           'Wall temperature T_w [K] — isothermal wall only'],
     };
 
     function fieldLabel(id) {
@@ -385,8 +489,32 @@
                 + 'for any of them: {fields}. The request was NOT sent — this '
                 + 'panel does not invent a number in their place.'));
         }
+        // VİSKOZ KİP (opt-in): 'viscous_mode' boşsa gövdeye HİÇBİR viskoz
+        // alan konmaz ve koşu bugünkü Euler yolunun bit-aynısıdır.
+        const kip = String(v.viscous_mode || '');
+        if (kip === 'isothermal' && !isNum(v.viscous_T_wall_K)) {
+            throw new Error(TF('panel.cfd.missingWallTemp',
+                { field: fieldLabel('viscous_T_wall_K') },
+                'An isothermal wall needs its temperature: {field} is empty '
+                + 'and neither this panel nor the solver has a default for '
+                + 'it. The request was NOT sent.'));
+        }
         const body = {};
         REQUIRED_FIELDS.forEach(function (f) { body[f] = v[f]; });
+        if (kip) {
+            const viskoz = { enabled: true, wall_thermal: kip,
+                             turbulence: String(v.viscous_turbulence
+                                                || TURBULENCE_DEFAULT) };
+            if (kip === 'isothermal') {
+                viskoz.T_wall_K = v.viscous_T_wall_K;
+                // KAYNAK BEYANI: uç, T_wall'ın kaynağını ZORUNLU tutar.
+                // Buradaki metin uydurma değil GERÇEK kaynaktır — sayı bu
+                // formdan, kullanıcının elinden geldi. Motorun ölçtüğü bir
+                // duvar sıcaklığı DEĞİLDİR ve öyleymiş gibi imlenmez.
+                viskoz.T_wall_source = T_WALL_SOURCE_FORM;
+            }
+            body.viscous = viskoz;
+        }
         // İsteğe bağlı alanlar: boşsa GÖNDERİLMEZ (uç "verilmedi" hâlini
         // kendi beyanıyla işler — back_pressure_basis / separation_factor).
         if (isNum(v.Pb_Pa)) body.Pb_Pa = v.Pb_Pa;
@@ -405,13 +533,38 @@
         if (!cfd || typeof cfd !== 'object') return null;   // hüküm beyan edilmez
         if (typeof cfd.converged !== 'boolean') return null;
         if (cfd.converged) {
+            // ÖH D25 · P11B3-11 — SATIR HÜKMÜ AYRILMAYI GÖRÜR.
+            // ÖLÇÜLDÜ (a3/once.json, taban cdf2106): P_ambient = 5 bar ile
+            // koşulan ayrılan koşuda `separated = true`,
+            // `separated_length_fraction = 0,32139` (ıraksak boyun %32,1'i,
+            // 10 istasyon eşik altı), `judgment_confidence = 'firm'` iken
+            // Merkez satır hükmü {kind:'ok'} — YEŞİL "CONVERGED" idi.
+            // Ayrılma rozeti yalnız satır AÇILDIĞINDA görünüyordu, oysa
+            // Merkez'in satır listesi TARANARAK okunur. Emsal: panelin
+            // kendi rozet katmanı bu durumu zaten 'warn' basıyor
+            // (badgesHtml, ayrılma rozeti) — satır hükmü ondan ayrışamaz.
+            // Yakınsama HÜKMÜ değişmez (sayısal yakınsama gerçekten oldu);
+            // değişen RENK ve METİN: yeşil düşürülür ve nedeni satıra
+            // yazılır. Uydurma yok — oran ve hüküm ucun kendi alanları.
+            const sep = cfd.separation;
+            if (sep && sep.separated === true) {
+                return { kind: 'warn',
+                         key: 'panel.cfd.verdictConvergedSeparated',
+                         params: { iters: txt(cfd.iterations),
+                                   frac: isNum(sep.separated_length_fraction)
+                                       ? fmt(100 * sep.separated_length_fraction, 1)
+                                       : '—' },
+                         fallback: 'CONVERGED ({iters} iterations) — but FLOW '
+                                   + 'SEPARATION IS PREDICTED over {frac}% of '
+                                   + 'the divergent length' };
+            }
             return { kind: 'ok', key: 'panel.cfd.verdictConverged',
-                     params: { iters: cfd.iterations },
+                     params: { iters: txt(cfd.iterations) },
                      fallback: 'CONVERGED ({iters} iterations)' };
         }
         const son = cfd.residual_history ? cfd.residual_history.last : null;
         return { kind: 'warn', key: 'panel.cfd.verdictNotConverged',
-                 params: { res: fmtExp(son), iters: cfd.iterations },
+                 params: { res: fmtExp(son), iters: txt(cfd.iterations) },
                  fallback: 'NOT CONVERGED — residual {res} after {iters} '
                            + 'iterations' };
     }
@@ -507,6 +660,118 @@
                  r: pts.map(function (p) { return p[1]; }) };
     }
 
+    // ------------------------------------------------------------------
+    // VİSKOZ KATMAN (parti 40) — ucun `viscous` bloğunun görünüm modeli.
+    // HESAP YOK: her dizi yanıttan gelir, tek dönüşüm yoktur (q_w, τ_w,
+    // h_g, c_f zaten SI). Bir alan yükte YOKSA katman ÇİZİLMEZ ve nedeni
+    // ekrana yazılır — boş grafik ya da sıfır dizisi UYDURULMAZ.
+    // ------------------------------------------------------------------
+    function numArray(v) {
+        return Array.isArray(v) && v.length
+            && v.every(function (x) { return isNum(x); }) ? v : null;
+    }
+
+    function viscousModel(cfd) {
+        const v = cfd.viscous;
+        if (!v || typeof v !== 'object') return null;   // eski uç yanıtı
+        if (!v.enabled) {
+            return { enabled: false, basis: v._basis || '',
+                     worstCase: v.measured_worst_case_s || null,
+                     measuredRuns: Array.isArray(v.measured_runs)
+                         ? v.measured_runs : [],
+                     turbulenceChoices: v.turbulence_choices || [],
+                     wallThermalChoices: v.wall_thermal_choices || [] };
+        }
+        const w = v.wall || {};
+        const tp = v.thermal_profile || {};
+        const bz = v.bartz_comparison || {};
+        const sf = v.skin_friction || {};
+        const fr = v.friction || {};
+        return {
+            enabled: true,
+            turbulence: v.turbulence,
+            wallThermal: v.wall_thermal,
+            wallTempSource: v.T_wall_source,
+            badge: v.y_plus_badge || null,
+            yPlus: v.y_plus || {},
+            transport: v.transport || {},
+            validationBasis: v.validation_basis || '',
+            basis: v._basis || '',
+            worstCase: v.measured_worst_case_s || null,
+            measuredRuns: Array.isArray(v.measured_runs) ? v.measured_runs : [],
+            gridQuality: v.grid_quality || null,
+            wallHeatW: v.wall_heat_W,
+            boundaryFlux: v.boundary_viscous_flux || {},
+            wall: {
+                z: numArray(w.z_m) || [],
+                qw: numArray(w.heat_flux_W_m2),
+                tau: numArray(w.shear_Pa),
+                yPlus: numArray(w.y_plus),
+                Tw: numArray(w.temperature_K),
+                basis: w._basis || '',
+            },
+            thermal: {
+                available: !!tp.available,
+                reason: tp.reason || '',
+                hg: tp.available ? numArray(tp.h_g) : null,
+                x_mm: tp.available ? numArray(tp.x_mm) : null,
+                tRecovery: tp.available ? numArray(tp.T_recovery) : null,
+                source: tp.source || null,
+                tAwBasis: tp.t_aw_basis || null,
+                edgeSource: tp.edge_source || null,
+                recoveryRegime: tp.recovery_regime || null,
+                //: ÖH D29 · P11B3-22 — KÖPRÜNÜN KENDİ 'İYİMSER' BEYANI.
+                //: ÖLÇÜLDÜ (a3/once.json): `thermal_profile.not_modelled` ve
+                //: `friction.not_modelled` blokları (pürüzlülük / ışıma /
+                //: eşleşik cidar / duvar çözünürlüğü) yükte VAR, panelde
+                //: 0 kez okunuyordu; panel yalnız ÜST DÜZEY
+                //: `cfd.not_modelled` bloğunu basıyordu. Sürtünme kaybı
+                //: tablosu bu kayıtlar olmadan basılıyordu.
+                notModelled: (tp.not_modelled && typeof tp.not_modelled === 'object')
+                    ? tp.not_modelled : null,
+                basis: tp._basis || '',
+            },
+            bartz: {
+                available: !!bz.available,
+                reason: bz.reason || '',
+                z: bz.available ? numArray(bz.z_m) : null,
+                hg: bz.available ? numArray(bz.h_g_bartz) : null,
+                hgCfd: numArray(bz.h_g_cfd),
+                ratio: numArray(bz.ratio_cfd_over_bartz),
+                ratioMin: bz.ratio_min, ratioMax: bz.ratio_max,
+                ratioMean: bz.ratio_mean, ratioThroat: bz.ratio_at_throat,
+                ratioBasis: bz.ratio_basis || '',
+                cStar: bz.c_star_m_s, cStarBasis: bz.c_star_basis || '',
+                rcOverDt: bz.rc_over_dt,
+                basis: bz._basis || '',
+            },
+            skin: {
+                available: !!sf.available,
+                reason: sf.reason || '',
+                z: sf.available ? numArray(sf.z_m) : null,
+                cf: sf.available ? numArray(sf.c_f) : null,
+                basis: sf._basis || '',
+            },
+            friction: {
+                available: !!fr.available,
+                reason: fr.reason || '',
+                forceN: fr.friction_force_N,
+                forceTangentialN: fr.friction_force_tangential_N,
+                normalShare: fr.normal_stress_share,
+                fraction: fr.friction_loss_fraction,
+                source: fr.friction_source,
+                band: Array.isArray(fr.sutton_band) ? fr.sutton_band : null,
+                withinBand: fr.within_sutton_band,
+                legacy: fr.legacy_constant,
+                bandBasis: fr.band_comparison_basis || '',
+                policyBasis: fr.policy_basis || '',
+                //: P11B3-22 — sürtünme köprüsünün kendi modellenmeyenleri.
+                notModelled: (fr.not_modelled && typeof fr.not_modelled === 'object')
+                    ? fr.not_modelled : null,
+            },
+        };
+    }
+
     function viewModel(cfd) {
         const sep = cfd.separation || {};
         const wall = cfd.wall_pressure || {};
@@ -528,6 +793,37 @@
             shockBasis: cfd.shock_sensor_basis || '',
             limiterIter: cfd.limiter_frozen_at_iter,
             limiterCount: cfd.limiter_freeze_count,
+            // ÖZ-TUTARLILIK (ÖH defter D15-CFD-01 + OH-Z5-14): uç bu
+            // dürüstlük alanlarını yayımlıyordu, panel HİÇBİRİNİ
+            // basmıyordu — kullanıcı yayımlanan kalıntının kimin
+            // olduğunu, kapının hükmü geri çekip çekmediğini ve
+            // kalıntının PLATOda mı olduğunu ekranda göremiyordu.
+            // Sayılar yanıttan AYNEN taşınır; yokluk em-tire ile
+            // basılır, sıfırla DOLDURULMAZ.
+            convergenceStatus: cfd.convergence_status,
+            plateau: cfd.convergence_plateau || null,
+            settleBands: cfd.settle_bands || null,
+            // ÖH D28 / arayuz a1 (OH-D27-16) — HÜKMÜN DAYANAĞI EKRANDA.
+            // ÖLÇÜLDÜ (a1/once.json, taban 7cd08bcc): D26 / app-api a4
+            // (`e5882484`, P7B4-10) uca `time_integrator`,
+            // `time_integrator_basis` ve `convergence_history` (üç seri)
+            // ekledi; bu panelin 414 adlık okuma envanterinde ÜÇÜ DE 0
+            // kez geçiyordu. Kullanıcı "debi bandı OTURDU" hükmünü
+            // görüyor, hükmün hangi zaman ilerletme şemasıyla ve hangi
+            // seriden ölçüldüğünü göremiyordu. Alanlar AYNEN taşınır;
+            // panel ikinci bir aritmetik yazmaz, künye metnini yeniden
+            // yazmaz (SRV ile sunucudan geldiği belli olarak basılır).
+            timeIntegrator: cfd.time_integrator,
+            timeIntegratorBasis: cfd.time_integrator_basis || '',
+            convHistory: cfd.convergence_history || null,
+            selfConsistency: {
+                operator: cfd.residual_operator,
+                schemeResidual: cfd.scheme_residual_norm,
+                exceedsTol: cfd.scheme_residual_exceeds_tol,
+                blocksVerdict: cfd.scheme_residual_blocks_verdict,
+                rejections: cfd.picard_selfconsistency_rejections,
+                slope: cfd.slope_state || null,
+            },
             budget: cfd.budget || {},
             throat: cfd.throat || {},
             grid: cfd.grid || {},
@@ -557,6 +853,7 @@
             },
             sectionAverage: cfd.section_average || {},
             field: null,
+            viscous: viscousModel(cfd),
             wallLine: wallPolyline(cfd),
         };
         const x = transpose(field.z_m), y = transpose(field.r_m);
@@ -658,6 +955,58 @@
     // ------------------------------------------------------------------
     // Çizimler — hepsi yanıttan; hesap yok, yumuşatma yok, örnekleme yok.
     // ------------------------------------------------------------------
+    /* P11B3-24 — KOLON ORTALAMASI PROFİLİ ÇİZİLİR.
+       Uç `section_average` bloğunda z, Mach ve basınç dizilerini
+       yayımlıyordu; panel bloğu görünüm modeline alıyor, hiçbir yerde
+       kullanmıyordu. Duvar eğrisi (p_w) ile AYNI değildir: bu, kesitin
+       hacim ağırlıklı ortalamasıdır ve ucun kendi _basis cümlesi bunu
+       söyler. Sayı türetilmez, iki eksende olduğu gibi çizilir. */
+    function sectionAverageFigure(vm) {
+        const sa = vm.sectionAverage || {};
+        const z = numArray(sa.z_m) || [];
+        const mach = numArray(sa.mach);
+        const pPa = numArray(sa.pressure_Pa);
+        const traces = [];
+        if (mach) {
+            traces.push({
+                x: z, y: mach, mode: 'lines', type: 'scatter',
+                line: { width: 2, color: '#00e5ff' },
+                name: T('panel.cfd.traceSecMach',
+                        'section_average.mach (column average)'),
+            });
+        }
+        if (pPa) {
+            traces.push({
+                x: z, y: pPa.map(function (v) { return v / PA_PER_BAR; }),
+                mode: 'lines', type: 'scatter', yaxis: 'y2',
+                line: { width: 2, color: '#ff8c33' },
+                name: T('panel.cfd.traceSecP',
+                        'section_average.pressure (column average) [bar]'),
+            });
+        }
+        return {
+            traces: traces,
+            layout: {
+                title: T('panel.cfd.chartSectionAverage',
+                    'Section-averaged Mach and pressure (section_average)'),
+                xaxis: { title: T('panel.cfd.axisZ', 'Axial position z [m]') },
+                yaxis: { title: T('panel.cfd.axisSecMach',
+                                  'Section-average Mach [-]') },
+                yaxis2: { title: T('panel.cfd.axisSecP',
+                                   'Section-average pressure [bar]'),
+                          overlaying: 'y', side: 'right' },
+                height: 280, showlegend: true,
+                margin: { t: 40, r: 60, b: 50, l: 60 },
+            },
+        };
+    }
+
+    function sectionAverageVar(vm) {
+        const sa = vm.sectionAverage || {};
+        return Array.isArray(sa.z_m) && sa.z_m.length
+            && (Array.isArray(sa.mach) || Array.isArray(sa.pressure_Pa));
+    }
+
     function wallFigure(vm) {
         const traces = [{
             x: vm.wall.z, y: vm.wall.pBar, mode: 'lines+markers', type: 'scatter',
@@ -838,6 +1187,122 @@
         };
     }
 
+    // ------------------------------------------------------------------
+    // VİSKOZ ÇİZİMLER — hepsi yanıttaki dizilerin kendisi (dönüşüm yok).
+    // Renk TEK taşıyıcı değildir: her iz ayrıca çizgi DESENİ ve işaretçi
+    // SEMBOLÜ ile ayrılır ve adı efsanede yazılıdır (E3/WCAG deseni).
+    // ------------------------------------------------------------------
+    function wallHeatFigure(vm) {
+        const w = vm.viscous.wall;
+        return {
+            traces: [{
+                x: w.z, y: w.qw, mode: 'lines+markers', type: 'scatter',
+                line: { width: 2, color: '#ff8c33' },
+                marker: { size: 4, symbol: 'circle' },
+                name: T('panel.cfd.traceQw',
+                        'q_w (solver measurement, signed)'),
+            }],
+            layout: {
+                title: T('panel.cfd.chartQw',
+                         'Wall heat flux q_w(z) as the solver measured it'),
+                xaxis: { title: T('panel.cfd.axisZ', 'Axial position z [m]') },
+                yaxis: { title: T('panel.cfd.axisQw',
+                                  'Wall heat flux [W/m^2]') },
+                height: 280, showlegend: false,
+                margin: { t: 40, r: 12, b: 50, l: 80 },
+            },
+        };
+    }
+
+    //: h_g: İKİ KAYNAK YAN YANA + fark alanı (oran) ikinci eksende.
+    //: Kaynak etiketi izin ADINDA geçer — hangi eğrinin hangi model
+    //: olduğu renkten bağımsız okunur.
+    function filmFigure(vm) {
+        const v = vm.viscous;
+        const traces = [];
+        if (v.bartz.available && v.bartz.hg) {
+            traces.push({
+                x: v.bartz.z, y: v.bartz.hg, mode: 'lines', type: 'scatter',
+                line: { width: 2, color: '#00e5ff', dash: 'dash' },
+                name: T('panel.cfd.traceHgBartz',
+                        'h_g — source: Bartz correlation'),
+            });
+        }
+        if (v.thermal.available && v.thermal.hg) {
+            traces.push({
+                // Eksen METRE: profilin kendi x_mm dizisi MİLİMETREdir ve
+                // Bartz serisi metrede — ikisini aynı grafiğe koyarken
+                // duvar ekseninin (wall.z, metre) TA KENDİSİ kullanılır.
+                // Ara değerleme YOK: iki seri zaten aynı istasyonlarda.
+                x: v.wall.z, y: v.thermal.hg,
+                mode: 'lines+markers', type: 'scatter',
+                line: { width: 2, color: '#2dd4a8' },
+                marker: { size: 4, symbol: 'square' },
+                name: T('panel.cfd.traceHgCfd',
+                        'h_g — source: CFD (cfd_viscous)'),
+            });
+        }
+        if (v.bartz.ratio) {
+            traces.push({
+                x: v.bartz.z, y: v.bartz.ratio, mode: 'lines',
+                type: 'scatter', yaxis: 'y2',
+                line: { width: 2, color: '#7d97a5', dash: 'dot' },
+                name: T('panel.cfd.traceHgRatio',
+                        'difference field: h_g(CFD) / h_g(Bartz)'),
+            });
+        }
+        return {
+            traces: traces,
+            layout: {
+                title: T('panel.cfd.chartHg',
+                         'Gas-side film coefficient — two sources side by side'),
+                xaxis: { title: T('panel.cfd.axisZ', 'Axial position z [m]') },
+                yaxis: { title: T('panel.cfd.axisHg',
+                                  'h_g [W/(m^2 K)] (log scale)'),
+                         type: 'log' },
+                yaxis2: { title: T('panel.cfd.axisHgRatio',
+                                   'h_g(CFD) / h_g(Bartz) [-] (log)'),
+                          type: 'log', overlaying: 'y', side: 'right' },
+                height: 320,
+                legend: { orientation: 'h', y: -0.30 },
+                margin: { t: 40, r: 70, b: 70, l: 80 },
+            },
+        };
+    }
+
+    function shearFigure(vm) {
+        const v = vm.viscous;
+        const traces = [{
+            x: v.wall.z, y: v.wall.tau, mode: 'lines', type: 'scatter',
+            line: { width: 2, color: '#00e5ff' },
+            name: T('panel.cfd.traceTau', 'tau_w [Pa] (signed)'),
+        }];
+        if (v.skin.available && v.skin.cf) {
+            traces.push({
+                x: v.skin.z, y: v.skin.cf, mode: 'lines+markers',
+                type: 'scatter', yaxis: 'y2',
+                line: { width: 2, color: '#ff8c33', dash: 'dashdot' },
+                marker: { size: 4, symbol: 'diamond' },
+                name: T('panel.cfd.traceCf',
+                        'c_f = tau_w / (0.5 gamma p_w M_e^2)'),
+            });
+        }
+        return {
+            traces: traces,
+            layout: {
+                title: T('panel.cfd.chartShear',
+                         'Wall shear tau_w(z) and the skin friction coefficient'),
+                xaxis: { title: T('panel.cfd.axisZ', 'Axial position z [m]') },
+                yaxis: { title: T('panel.cfd.axisTau', 'tau_w [Pa]') },
+                yaxis2: { title: T('panel.cfd.axisCf', 'c_f [-]'),
+                          overlaying: 'y', side: 'right' },
+                height: 300,
+                legend: { orientation: 'h', y: -0.30 },
+                margin: { t: 40, r: 70, b: 70, l: 70 },
+            },
+        };
+    }
+
     function drawFigure(id, figure) {
         const el = document.getElementById(id);
         if (!el || !window.Plotly || typeof window.Plotly.react !== 'function') {
@@ -851,16 +1316,104 @@
     // ------------------------------------------------------------------
     // Rozet şeridi — her rozet BİR beyandır; künyesinde çözücünün cümlesi.
     // ------------------------------------------------------------------
+    //: y⁺ ROZETİNİN RENGİ: renk TEK taşıyıcı değildir (E3/WCAG deseni) —
+    //: bant adı rozetin METNİNDE geçer ve künyesinde ucun gerekçe cümlesi
+    //: durur. 'log_layer' ve 'buffer_layer' HÜKÜM DEĞİL, okuma uyarısıdır.
+    const Y_PLUS_BADGE_KIND = {
+        wall_resolved: 'ok', buffer_layer: 'warn',
+        log_layer: 'warn', unmeasured: 'dim',
+    };
+
+    function viscousBadgesHtml(vm) {
+        const v = vm.viscous;
+        if (!v) return '';                     // eski uç: viskoz alanı yok
+        if (!v.enabled) {
+            return badge(T('panel.cfd.badgeInviscid',
+                'INVISCID (Euler) — no wall shear, no wall heat flux'),
+                'dim', SRV(v.basis));
+        }
+        let html = badge(TF('panel.cfd.badgeViscousMode',
+            { turb: v.turbulence, wall: v.wallThermal },
+            'VISCOUS — turbulence {turb}, {wall} wall'), 'info',
+            SRV(v.basis));
+        const b = v.badge;
+        if (b && b.code) {
+            const metin = (b.code === 'wall_resolved')
+                ? TF('panel.cfd.badgeYPlusResolved',
+                    { y: fmtAuto(b.y_plus_max, 2) },
+                    'WALL RESOLVED — max y+ = {y}')
+                : (b.code === 'buffer_layer')
+                    ? TF('panel.cfd.badgeYPlusBuffer',
+                        { y: fmtAuto(b.y_plus_max, 2) },
+                        'FIRST CELL IN THE BUFFER LAYER — max y+ = {y}')
+                    : (b.code === 'log_layer')
+                        ? TF('panel.cfd.badgeYPlusLog',
+                            { y: fmtAuto(b.y_plus_max, 2) },
+                            'FIRST CELL IN THE LOG LAYER — max y+ = {y}, '
+                            + 'no wall function: q_w reads LOW')
+                        : T('panel.cfd.badgeYPlusUnmeasured',
+                            'y+ NOT MEASURED');
+            html += badge(metin, Y_PLUS_BADGE_KIND[b.code] || 'dim',
+                          SRV(b.basis));
+        }
+        // DOĞRULAMA ÇİZGİSİ (parti 39/A3): duvar ısı akısı DOĞRULANMADI.
+        // Bu rozet q_w/h_g gösterildiği her ekranda görünür ve künyesi ucun
+        // validation_basis cümlesinin TA KENDİSİDİR.
+        if (v.thermal.available || v.wall.qw) {
+            html += badge(T('panel.cfd.badgeHeatNotValidated',
+                'WALL HEAT FLUX NOT VALIDATED — read with the y+ badge'),
+                'warn', SRV(v.validationBasis));
+        }
+        if (!v.thermal.available && v.thermal.reason) {
+            html += badge(T('panel.cfd.badgeNoFilmCoeff',
+                'NO GAS-SIDE FILM COEFFICIENT — the bridge refused this run'),
+                'dim', SRV(v.thermal.reason));
+        }
+        return html;
+    }
+
     function badgesHtml(vm) {
         let html = '';
         if (vm.converged === true) {
-            html += badge(TF('panel.cfd.badgeConverged', { iters: vm.iterations },
+            html += badge(TF('panel.cfd.badgeConverged',
+                { iters: txt(vm.iterations) },
                 'CONVERGED — {iters} iterations'), 'ok', SRV(vm.convergenceBasis));
         } else if (vm.converged === false) {
             html += badge(TF('panel.cfd.badgeNotConverged',
-                { res: fmtExp(vm.residual.last), iters: vm.iterations },
+                { res: fmtExp(vm.residual.last), iters: txt(vm.iterations) },
                 'NOT CONVERGED — residual {res} after {iters} iterations'),
                 'warn', SRV(vm.convergenceBasis));
+        } else if (vm.converged === null
+                   && vm.convergenceStatus === 'not_evaluated') {
+            // HÜKÜM YARGILANMADI (ÖH defter OH-D31-15; Berke kararı
+            // 15 Eyl 2026 seç. A). Çözücü üç durumlu döner: true / false /
+            // null. null'da ESKİDEN buraya hiçbir dal düşmüyordu çünkü
+            // çözücü o hâlde bile `converged: true` yayımlıyordu ve panel
+            // YEŞİL 'CONVERGED' rozeti basıyordu — ölçüldü (once.json K1):
+            // §11.3'ün dört referansının ÜÇÜNDE şemanın kendi kalıntısı
+            // yayımlanandan 44,29 / 398,71 / 2,9e7 kat büyükken rozet
+            // 'ok' idi. Artık hüküm yokluğu ADIYLA basılır; renk 'warn',
+            // künyesi çözücünün kendi cümlesi (neden yargılanmadığını
+            // sayıyla söyler). Sahte 'ok' buradan ÇIKMAZ.
+            html += badge(T('panel.cfd.critNoVerdict', 'no verdict published'),
+                'warn', SRV(vm.convergenceBasis));
+        }
+        // PLATO ROZETİ (OH-Z5-14): "bütçeyi büyüt" ile "bu vaka
+        // sınıfında hedef ULAŞILAMAZ" ayrı şeylerdir. Çözücü ikincisini
+        // ÖLÇTÜYSE kullanıcı bunu rozette görür — yoksa tavanı büyütüp
+        // aynı duvara defalarca çarpardı. Rozet çözücünün kendi
+        // hükmündendir; panel plato KARARI VERMEZ.
+        if (vm.convergenceStatus === 'plateau') {
+            const pl = vm.plateau || {};
+            html += badge(TF('panel.cfd.badgePlateau',
+                { res: fmtExp(pl.plateau_residual, 3),
+                  tol: fmtExp(pl.target_residual, 2),
+                  span: String(pl.window_iterations == null
+                               ? '—' : pl.window_iterations) },
+                'RESIDUAL PLATEAU — the scheme residual stood at {res} '
+                + '(target {tol}) for {span} iterations; a bigger '
+                + 'iteration budget does not earn the verdict'),
+                'warn', SRV(pl.reason || ''));
         }
 
         const sep = vm.separation;
@@ -869,7 +1422,12 @@
         // gizlenmez — yalnız kabul rengi verilmez, çünkü oturmamış bir alana
         // uygulanmış ölçüt "temiz" değildir (aynı kural fea_panel'de ölçülmemiş
         // kalite ölçütü için de uygulanıyor).
-        const hukumKesin = !(sep && sep.judgment_confidence === 'suspect');
+        // OH-D31-15: KABUL RENGİ YALNIZ 'firm'e verilir. Eskiden kural
+        // "suspect DEĞİLSE yeşil" idi; köprü üçüncü bir etiket
+        // ('not_evaluated' — çözücü hükmü YARGILAMADI) döndürünce o kural
+        // yeşil basardı. Kural artık olumlu tarafı adlandırır: hüküm
+        // SAĞLAM değilse yeşil yok.
+        const hukumKesin = !!(sep && sep.judgment_confidence === 'firm');
         if (sep && sep.bridge_refused) {
             html += badge(T('panel.cfd.badgeSepRefused',
                 'NO SEPARATION JUDGEMENT — the bridge refused this solution'),
@@ -897,6 +1455,13 @@
             html += badge(T('panel.cfd.badgeSepSuspect',
                 'SEPARATION JUDGEMENT SUSPECT — the field it was applied to '
                 + 'did not settle'), 'warn', SRV(sep.judgment_basis || ''));
+        } else if (sep && sep.judgment_confidence === 'not_evaluated') {
+            // 'suspect' ÖLÇÜLMÜŞ bir yakınsamama hükmüne ayrılmıştır
+            // ("alan oturmadı"); bu dal ise "oturup oturmadığına
+            // BAKILMADI" der. İkisi aynı rozetle basılırsa panel
+            // ölçülmemiş bir hükmü ölçülmüş gibi gösterir.
+            html += badge(T('panel.cfd.critNoVerdict', 'no verdict published'),
+                'warn', SRV(sep.judgment_basis || ''));
         }
         if (sep && sep.reattachment_suspected) {
             html += badge(T('panel.cfd.badgeReattach',
@@ -936,18 +1501,47 @@
             }
             html += badge(metin, 'warn', SRV(vm.inlet._basis || ''));
         }
+        html += viscousBadgesHtml(vm);
         // Korunum artıkları RENKSİZ (info) yayımlanır: ucun yayımladığı bir
         // KABUL EŞİĞİ yok, panelin kendi eşiğini uydurması da yasak.
         html += badge(TF('panel.cfd.badgeMass',
             { v: fmtExp(vm.budget.mass_balance_rel) },
             'MASS IMBALANCE {v} (relative)'), 'info', SRV(vm.budget._basis || ''));
-        html += badge(TF('panel.cfd.badgeEnergy',
-            { v: fmtExp(vm.budget.energy_balance_rel) },
-            'ENERGY IMBALANCE {v} (relative)'), 'info',
-            SRV(vm.budget._basis || ''));
-        html += badge(TF('panel.cfd.badgeKernel', { backend: vm.kernel },
+        // ÖH D19 · P11B3-07 — VİSKOZ KOŞUNUN BÜTÇESİ ROZETTE.
+        // ÖLÇÜLDÜ (P11 B3-repro-10/12, taban 60cd341): viskoz koşuda rozet
+        // `energy_balance_rel` = 6,08e-04 basıyordu ve kullanıcı bunu bir
+        // korunum hatası sanıyordu; oysa ucun KENDİ künyesi "VİSKOZ
+        // KOŞUDA energy_balance_rel TEK BAŞINA OKUNMAZ … viskoz koşunun
+        // bütçesi viscous_energy_balance_rel alanıdır" diyor ve o alan
+        // 3,58e-10 (1.696.000 kat küçük). Fark korunum hatası değil,
+        // izotermal duvardan çıkan ısıdır (wall_heat_W farkın %100,56'sı).
+        // Panel o alanı hiç okumuyordu (grep: 0 eşleşme).
+        // Euler koşusunda alan None'dır (sıfır değil, YOK) — o dalda eski
+        // rozet aynen basılır, uydurma yapılmaz.
+        const viskozButce = isNum(vm.budget.viscous_energy_balance_rel)
+            ? vm.budget.viscous_energy_balance_rel : null;
+        if (viskozButce !== null) {
+            html += badge(TF('panel.cfd.badgeViscousEnergy',
+                { v: fmtExp(viskozButce) },
+                'ENERGY IMBALANCE {v} (relative, VISCOUS budget: wall heat '
+                + 'and boundary viscous fluxes included)'), 'info',
+                SRV(vm.budget._basis || ''));
+            html += badge(TF('panel.cfd.badgeEnergyEulerForm',
+                { v: fmtExp(vm.budget.energy_balance_rel) },
+                'EULER-FORM ENERGY RESIDUAL {v} — NOT the budget of a '
+                + 'viscous run: it compares Euler surface fluxes only, so '
+                + 'the wall heat and the viscous boundary fluxes are '
+                + 'missing from it'), 'dim',
+                SRV(vm.budget._basis || ''));
+        } else {
+            html += badge(TF('panel.cfd.badgeEnergy',
+                { v: fmtExp(vm.budget.energy_balance_rel) },
+                'ENERGY IMBALANCE {v} (relative)'), 'info',
+                SRV(vm.budget._basis || ''));
+        }
+        html += badge(TF('panel.cfd.badgeKernel', { backend: txt(vm.kernel) },
             'KERNEL {backend}'), 'info', SRV(vm.kernelBasis));
-        html += badge(TF('panel.cfd.badgeShock', { n: vm.shockColumns },
+        html += badge(TF('panel.cfd.badgeShock', { n: txt(vm.shockColumns) },
             'SHOCK SENSOR — {n} flagged columns'), 'info', SRV(vm.shockBasis));
         if (isNum(vm.limiterIter)) {
             html += badge(TF('panel.cfd.badgeLimiter',
@@ -1030,9 +1624,7 @@
             [T('panel.cfd.rowInletBc', 'Solver inlet boundary condition'),
              String(inlet.inlet_bc == null ? '—' : inlet.inlet_bc)],
             [T('panel.cfd.rowBudget', 'Iteration budget (effective / source)'),
-             String(vm.maxIterations) + ' / '
-                + String(vm.maxIterationsSource == null
-                         ? '—' : vm.maxIterationsSource)],
+             txt(vm.maxIterations) + ' / ' + txt(vm.maxIterationsSource)],
             [T('panel.cfd.rowBudgetAdvisory', 'Budget advisory for this run'),
              inlet.budget_advisory
                  ? T('panel.cfd.yes', 'yes') : T('panel.cfd.no', 'no')],
@@ -1091,6 +1683,545 @@
         return html;
     }
 
+    //: MODELLENMEDİ ÇİPİ — veri yoksa boş grafik ya da sıfır dizisi
+    //: çizilmez; katman HİÇ çizilmez ve nedeni ADIYLA yazılır.
+    function notModelledChip(text) {
+        return '<span data-cfd-chip="not-modelled" style="border:1px dashed '
+            + COLORS.dim + '; color:' + COLORS.dim + '; border-radius:6px;'
+            + ' padding:2px 9px; font-family:var(--hd-mono, monospace);'
+            + ' font-size:0.66rem; display:inline-block; margin:4px 4px 4px 0;">'
+            + esc(T('panel.cfd.chipNotModelled', 'NOT MODELLED')) + ' — '
+            + esc(SRV(text)) + '</span>';
+    }
+
+    //: P11B3-22 — bir ALT bloğun kendi 'modellenmedi' listesi. Başlık
+    //: mevcut çeviriden gelir, yanına bloğun ALAN ADI (makine verisi)
+    //: yazılır ki hangi köprünün beyanı olduğu karışmasın.
+    function altNotModelledHtml(ad, blok) {
+        if (!blok || typeof blok !== 'object' || !Object.keys(blok).length) {
+            return '';
+        }
+        return '<div data-cfd-block="not-modelled-' + esc(ad) + '"'
+            + ' style="margin-top:8px;">'
+            + '<strong style="font-size:0.7rem;'
+            + ' color:var(--hd-ink-dim, #7d97a5);">'
+            + esc(T('panel.cfd.declNotModelled', 'NOT MODELLED'))
+            + ' — ' + esc(ad) + '</strong>' + listBlock(blok) + '</div>';
+    }
+
+    //: Ayrılma ÖLÇÜTLERİ — dört üye yan yana. Üyeler ucun `separation.
+    //: criteria` sözlüğünden gelir; panel ölçütü YENİDEN HESAPLAMAZ ve
+    //: birini "asıl hüküm" diye öne çıkarmaz. Güven etiketi (reliability)
+    //: her satırda ADIYLA durur — 'model_dependent' bir uyarıdır, renk
+    //: değil METİN taşır.
+    function separationCriteriaHtml(vm) {
+        const sep = vm.separation || {};
+        const crit = sep.criteria;
+        if (!crit || typeof crit !== 'object') return '';
+        let html = sectionTitle('panel.cfd.secCriteria',
+            'Separation criteria — four members side by side');
+        const adlar = Object.keys(crit).sort();
+        //: P11B3-25 — üye başına konum `criteria_spread.separation_z_m`
+        //: sözlüğünde durur; panel yalnız `z_span_m` basıyordu.
+        //: Güven künyeleri üyeler arasında TEKRARLIDIR (ampirik üçlü
+        //: aynı cümleyi taşır); tabloyu şişirmemek için tekilleştirilip
+        //: tablonun ALTINDA bir kez basılır.
+        const guvenKunyeleri = {};
+        const yayilim = sep.criteria_spread || {};
+        const uyeKonum = (yayilim.separation_z_m
+                          && typeof yayilim.separation_z_m === 'object')
+            ? yayilim.separation_z_m : {};
+        const satirlar = adlar.map(function (ad) {
+            const m = crit[ad] || {};
+            let deger;
+            if (m.available === false) {
+                deger = T('panel.cfd.critUnavailable', 'not available') + ' — '
+                    + SRV(String(m.not_available_reason || ''));
+            } else if (m.separated === true) {
+                deger = TF('panel.cfd.critSeparated',
+                    { z: sig(m.separation_z_m) },
+                    'SEPARATED at z = {z} m');
+            } else if (m.separated === false) {
+                //: ÖH D33-2 / arayuz-panel a1 · kalem OH-FT-07 (Fable
+                //: TOPLU fea-cfd-03) — ÜYENİN KENDİ PAYI EM TİREYE DÜŞMEZ.
+                //: ÖLÇÜLDÜ (a1/once.json, bölüm K3): `cfd_tau_w` üyesinde
+                //: `margin_min` TANIMSIZDIR — şemanın margin'i ölçüt
+                //: niceliğinin EŞİĞİNE oranıdır ve bu üyenin eşiği
+                //: τ_w = 0'dır, yani sıfıra bölme (hrma/cfd/separation.py,
+                //: `margin_basis`). Üretici payı KENDİ adıyla
+                //: (`tau_wall_min_over_max_abs`) ve KRİTİK DEĞERİYLE
+                //: (`tau_wall_margin_critical_value` = 0; ampirik üyelerin
+                //: "1'in altı = ayrıldı" kuralı BU üyede geçmez)
+                //: yayımlıyor. Ölçüm: bu iki alanı okuyan JS dosyası
+                //: sayısı 0'dı ve yapışık bir koşuda ekranda
+                //: "attached (minimum margin —)" yazıyordu — üyenin
+                //: ölçtüğü 0,371 hiç görünmüyordu. Sayı UYDURULMAZ, iki
+                //: büyüklük aynı anahtarda TOPLANMAZ: pay kendi adıyla ve
+                //: kritik değeriyle basılır (fail-closed).
+                if (isNum(m.margin_min)) {
+                    deger = TF('panel.cfd.critAttached',
+                        { margin: fmtAuto(m.margin_min, 3) },
+                        'attached (minimum margin {margin})');
+                } else if (isNum(m.tau_wall_min_over_max_abs)) {
+                    /* ÖH D33-3 / fix-38b (ana model, 16 Eylül 2026): yer
+                       tutucu adları İngilizceleşti. TR değerdeki ``{deger}``
+                       ASCII kayması bekçisini (test_i18n.py::
+                       test_tr_values_have_no_ascii_slips) KIRMIZI yakıyordu —
+                       yanlış pozitif değil KAPSAM sorunu: bekçi kullanıcıya
+                       görünen metinde Türkçe karakter kaybı arıyor ve yer
+                       tutucu adını ondan ayıramıyor. Deponun kanonu zaten
+                       İngilizce ad ({name}/{value}/{limit}/{ratio}); bu anahtar
+                       istisnaydı. Ekrana basılan metin DEĞİŞMEDİ. */
+                    deger = TF('panel.cfd.critAttachedOwnRatio', {
+                        name: 'tau_wall_min_over_max_abs',
+                        value: fmtAuto(m.tau_wall_min_over_max_abs, 3),
+                        critical: (isNum(m.tau_wall_margin_critical_value)
+                            ? fmtAuto(m.tau_wall_margin_critical_value, 3)
+                            : T('panel.cfd.critNoCriticalValue',
+                                'not published')),
+                    }, 'attached ({name} = {value}; this member separates at '
+                       + '{critical}, NOT at 1)');
+                } else {
+                    deger = T('panel.cfd.critAttachedNoQuantity',
+                        'attached — this member publishes no margin quantity, '
+                        + 'and none is invented in its place');
+                }
+            } else {
+                deger = T('panel.cfd.critNoVerdict', 'no verdict published');
+            }
+            if (m.reliability) {
+                deger += '  [' + T('panel.cfd.critReliability', 'confidence')
+                    + ': ' + String(m.reliability) + ']';
+            }
+            if (m.validity_warning) {
+                deger += '  (' + SRV(String(m.validity_warning)) + ')';
+            }
+            //: ÖH D29 · P11B3-25 — ÜYENİN EŞİĞİ VE İSTASYONU DA DÜŞMEZ.
+            //: ÖLÇÜLDÜ (a3/once.json): `threshold_min_Pa`,
+            //: `threshold_max_Pa`, `separation_index`, `basis_kind` ve
+            //: `reliability_basis` yükte VAR, panelde 0 kez okunuyordu —
+            //: "dört üye yan yana" vaadi konumlar için tutuyor, EŞİKLER
+            //: için tutmuyordu. Sayılar olduğu gibi basılır, panel eşik
+            //: hesaplamaz; alan yoksa satır hiç yazılmaz.
+            const kunye = [];
+            if (m.basis_kind) kunye.push('basis_kind = ' + String(m.basis_kind));
+            if (isNum(m.threshold_min_Pa) || isNum(m.threshold_max_Pa)) {
+                kunye.push('threshold_Pa = '
+                    + (isNum(m.threshold_min_Pa) ? sigRaw(m.threshold_min_Pa) : '—')
+                    + ' … '
+                    + (isNum(m.threshold_max_Pa) ? sigRaw(m.threshold_max_Pa) : '—'));
+            }
+            if (isNum(m.separation_index)) {
+                kunye.push('separation_index = ' + m.separation_index);
+            }
+            if (isNum(uyeKonum[ad])) {
+                kunye.push('criteria_spread.separation_z_m = '
+                           + sigRaw(uyeKonum[ad]));
+            }
+            //: kvTable hücreyi KAÇIRIR (esc), o yüzden künye HTML
+            //: değil düz metin olarak eklenir.
+            if (kunye.length) deger += '  ·  ' + kunye.join('  ·  ');
+            if (m.reliability_basis) {
+                guvenKunyeleri[String(m.reliability_basis)] = true;
+            }
+            //: OH-FT-07 · ÖLÇÜM: `margin_basis` buraya EKLENMEDİ ve
+            //: bilerek eklenmedi. Önce eklenmişti; ters mutasyon (M3b,
+            //: a1/mutasyon_notu.md) bekçiyi KIRMIZI yakmadı ve sebebi
+            //: ölçüldü: ucun beyanı ZATEN ekranda — güvertenin değer
+            //: kaynağı künyesi (`AnalysisDock.ui.source.ledgerInto`,
+            //: bu dosyada satır ~2938, `deep: true`) `*_basis` alanlarını
+            //: tarıyor ve `margin_basis`i "NOT MODELLED" çipiyle metniyle
+            //: birlikte basıyor. İkinci kez basmak aynı uzun cümleyi tek
+            //: ekranda çoğaltmak olurdu; kusur BEYANIN YOKLUĞU değil,
+            //: ölçüt satırının kendi payını göstermemesiydi (yukarıda).
+            return [ad, deger];
+        });
+        html += kvTable(satirlar);
+        Object.keys(guvenKunyeleri).forEach(function (t) {
+            html += basisText(t);
+        });
+        const spread = sep.criteria_spread || {};
+        if (spread.unanimous === false) {
+            html += note(T('panel.cfd.critDisagree',
+                'The criteria DISAGREE. That is not an error: the three '
+                + 'empirical members are calibrated on turbulent experiments '
+                + 'and the CFD member reads this run\'s own wall shear. The '
+                + 'spread is published rather than hidden and no member is '
+                + 'promoted over the others.'), 'warn');
+        }
+        if (isNum(spread.z_span_m)) {
+            html += kvTable([[T('panel.cfd.rowCritSpan',
+                'Spread of the separation stations [m]'),
+                sig(spread.z_span_m)]]);
+        }
+        //: P11B3-25 — CFD üyesi ile deneysel üyeler arasındaki İŞARETLİ
+        //: fark da yükte var ve düşüyordu (pozitifse CFD daha geç ayrılma
+        //: gösterir). Alan adıyla basılır, yorum eklenmez.
+        if (isNum(spread.cfd_minus_empirical_m)) {
+            html += kvTable([['criteria_spread.cfd_minus_empirical_m [m]',
+                              sig(spread.cfd_minus_empirical_m)]]);
+        }
+        html += basisText(spread._basis);
+        html += basisText(sep.criteria_basis);
+        return html;
+    }
+
+    //: ÖH D25 · P11B3-10 — AYRILMANIN KENDİ 'MODELLENMEDİ' LİSTESİ.
+    //: ÖLÇÜLDÜ (a3/once.json, taban cdf2106): `separation.not_modelled`
+    //: 9 kalem taşıyor (yanal yükler / `side_loads` dahil) ve panel
+    //: ekranında bu listenin SIFIR kalemi görünüyordu — panel yalnız ÜST
+    //: DÜZEY `cfd.not_modelled` bloğunu basıyordu. Ayrılma öngören bir
+    //: koşuda kullanıcı "%32,1 ayrık" hükmünü görüyor ama bu hükmün yanal
+    //: yük, FSS/RSS ayrımı ve şok-sınır tabaka etkileşimini İÇERMEDİĞİNİ
+    //: göremiyordu. Hüküm ile hükmün KAPSAMI aynı ekranda durur.
+    //: AYRI İŞLEV: liste `separation.criteria` bloğuna BAĞLI DEĞİLDİR —
+    //: ölçüt üyeleri yayımlanmayan bir koşuda da ayrılma hükmü verilir ve
+    //: o hükmün kapsamı yine yazılmalıdır (ölçüldü: criteria taşımayan
+    //: yükte eski yerleşim listeyi hiç basmıyordu).
+    function separationNotModelledHtml(vm) {
+        const sep = vm.separation || {};
+        const yok = sep.not_modelled;
+        if (!yok || typeof yok !== 'object' || !Object.keys(yok).length) {
+            return '';
+        }
+        return '<div data-cfd-block="separation-not-modelled"'
+            + ' style="margin-top:8px;">'
+            + '<strong style="font-size:0.7rem;'
+            + ' color:var(--hd-ink-dim, #7d97a5);"'
+            + ' data-i18n="panel.cfd.sepNotModelled">'
+            + esc(T('panel.cfd.sepNotModelled',
+                    'NOT MODELLED BY THE SEPARATION JUDGEMENT ITSELF'))
+            + '</strong>' + listBlock(yok) + '</div>';
+    }
+
+    // ------------------------------------------------------------------
+    // VİSKOZ BÖLÜM — q_w / h_g (Bartz | CFD) / tau_w + c_f, y⁺ rozeti,
+    // sürtünme kaybının ÜÇ kaynağı, doğrulama beyanı.
+    // ------------------------------------------------------------------
+    //: ÖLÇÜLEN SÜRE CÜZDANI — uçtan geldiği gibi. Sahte ilerleme çubuğu
+    //: yok; ölçülmeyen hücre yükte YOKTUR ve burada da yazılmaz.
+    //: ÖH D25 · P11B3-09 — q_w'NUN OKUNMA ŞARTI EKRANDA.
+    //: ÖLÇÜLDÜ (a3/once.json, taban cdf2106): uç `viscous.grid_quality`
+    //: bloğunu HER KOŞUMDA yayımlıyor ve kendi künyesinde "gradyan
+    //: doğruluğu çarpıklıkla düşer ve bu, q_w iddiasının OKUNMA ŞARTIDIR"
+    //: diyor; panel bloğu görünüm modeline alıyor (`gridQuality`) ama
+    //: kaynakta o ad tam 1 kez — tanım satırında — geçiyordu: hiçbir
+    //: çizim, tablo ya da künye onu kullanmıyordu. q_w / h_g / c_f
+    //: grafiklerinin üçü ekranda, okuma şartı ekranda değildi.
+    //: HESAP YOK: her sayı yükten geldiği gibi basılır, eksik alan em
+    //: tire olur; panel çarpıklık için KENDİ eşiğini koymaz (ucun
+    //: yayımlanmış bir kabul eşiği yoktur), yalnız ucun _basis cümlesini
+    //: yanına yazar.
+    function gridQualityHtml(v) {
+        const gq = v.gridQuality;
+        if (!gq || typeof gq !== 'object') return '';
+        const satirlar = [
+            [T('panel.cfd.rowWallSkewMax',
+               'Max wall skew angle [deg] (at z [m])'),
+             fmtAuto(gq.max_wall_skew_deg, 3) + ' ('
+                + sig(gq.max_wall_skew_z_m) + ')'],
+            [T('panel.cfd.rowWallSkewMean', 'Mean wall skew angle [deg]'),
+             fmtAuto(gq.mean_wall_skew_deg, 3)],
+            [T('panel.cfd.rowAspectAtSkew',
+               'Aspect ratio at the most skewed wall cell'),
+             fmtAuto(gq.aspect_ratio_at_max_skew, 3)],
+            [T('panel.cfd.rowAspectMax',
+               'Max wall aspect ratio (wall face length / first cell thickness)'),
+             fmtAuto(gq.max_aspect_ratio, 3)],
+            [T('panel.cfd.rowAspectAngle',
+               'AR x wall angle change (the dynamic instability metric)'),
+             fmtAuto(gq.max_aspect_x_angle_change, 5) + ' ('
+                + sig(gq.max_aspect_x_angle_change_z_m) + ' m)'],
+            [T('panel.cfd.rowThroatAspect', 'Throat aspect ratio'),
+             fmtAuto(gq.throat_aspect_ratio, 4)],
+            [T('panel.cfd.rowCellVolumeRatio',
+               'Max radial neighbour cell volume ratio'),
+             fmtAuto(gq.max_cell_volume_ratio_j, 3)],
+            [T('panel.cfd.rowFirstCell',
+               'First cell thickness min / max [m]'),
+             sig(gq.first_cell_thickness_m_min) + ' / '
+                + sig(gq.first_cell_thickness_m_max)],
+        ];
+        let html = sectionTitle('panel.cfd.secGridQuality',
+            'Wall grid quality — the endpoint calls this the reading '
+            + 'condition of the q_w claim');
+        html += kvTable(satirlar);
+        html += basisText(gq._basis);
+        return html;
+    }
+
+    /* ÖH D26 · P11B3-24 — GÖRÜNÜM MODELİ ÜÇ BLOĞU KURUYOR, HİÇBİRİNİ
+       BASMIYORDU (ölü katman; a1'in `gridQuality` bulgusuyla aynı sınıf).
+
+       ÖLÇÜLDÜ (a3/once.json, taban 7751531): kaynakta (yorumsuz)
+         sectionAverage 1 · transport 2 · boundaryFlux 1
+       yani üç ad da YALNIZ tanım satırında geçiyordu; sunucu üçünü de
+       yayımlıyor (steady.py `section_average`, gas_transport
+       `declaration()`, app.py `boundary_viscous_flux`).
+
+       Neden önemli:
+        * `transport` — viskoz koşumun TAŞINIM KÜNYESİ: viskozite yasası
+          ve üsteli, μ_ref/T_ref, c_p, Pr ve Pr_t hangi kaynaktan geldi.
+          q_w ve c_f grafiklerinin üçü ekranda, hangi taşınım sabitleriyle
+          çözüldükleri ekranda değildi.
+        * `boundary_viscous_flux` — giriş/çıkış yüzeylerinden GEÇEN viskoz
+          enerji ve eksenel kuvvet: itki ve duvar ısısı defterinin kapanıp
+          kapanmadığı bu dört sayıyla okunur.
+        * `section_average` — kolon ortalaması Mach ve basınç profili.
+
+       HESAP YOK: her sayı yükten geldiği gibi basılır, eksik alan em tire
+       olur. Alan adları MAKİNE ADIYLA yazılır (yeni çeviri anahtarı
+       açmadan hangi sayının hangisi olduğu okunur). */
+    function transportHtml(v) {
+        const tr = v.transport;
+        if (!tr || typeof tr !== 'object' || !Object.keys(tr).length) return '';
+        const satirlar = [];
+        Object.keys(tr).forEach(function (ad) {
+            const deger = tr[ad];
+            if (deger === null || deger === undefined) {
+                satirlar.push([ad, '—']);
+            } else if (typeof deger === 'object') {
+                // Alt sözlükler (sources, citation, band) AYNEN, ad = değer.
+                satirlar.push([ad, esc(JSON.stringify(deger))]);
+            } else if (typeof deger === 'number') {
+                satirlar.push([ad, sigRaw(deger)]);
+            } else {
+                satirlar.push([ad, esc(String(deger))]);
+            }
+        });
+        let html = sectionTitle('panel.cfd.secTransport',
+            'Transport declaration of this viscous run — which constants '
+            + 'the wall heat and skin friction were solved with');
+        html += kvTable(satirlar);
+        return html;
+    }
+
+    function boundaryFluxHtml(v) {
+        const bf = v.boundaryFlux;
+        if (!bf || typeof bf !== 'object' || !Object.keys(bf).length) return '';
+        const satirlar = [
+            ['inlet_energy_W', sigRaw(bf.inlet_energy_W)],
+            ['outlet_energy_W', sigRaw(bf.outlet_energy_W)],
+            ['inlet_axial_force_N', sigRaw(bf.inlet_axial_force_N)],
+            ['outlet_axial_force_N', sigRaw(bf.outlet_axial_force_N)],
+        ];
+        let html = sectionTitle('panel.cfd.secBoundaryFlux',
+            'Viscous flux through the inlet and outlet faces — the closing '
+            + 'terms of the momentum and energy ledger');
+        html += kvTable(satirlar);
+        return html;
+    }
+
+    function viscousCostHtml(v) {
+        const wc = v.worstCase;
+        if (!wc || typeof wc !== 'object') return '';
+        const satirlar = [];
+        Object.keys(wc).forEach(function (kip) {
+            const arka = wc[kip] || {};
+            Object.keys(arka).forEach(function (b) {
+                satirlar.push([kip + ' / ' + b, fmt(arka[b], 1) + ' s']);
+            });
+        });
+        // GERÇEKLEŞEN maliyet en kötü hâlin YANINDA (ikisi ayrı şeydir).
+        (v.measuredRuns || []).forEach(function (r) {
+            satirlar.push([
+                TF('panel.cfd.rowMeasuredRun',
+                   { res: String(r.resolution), turb: String(r.turbulence) },
+                   'converged run — {res} / {turb}'),
+                fmt(r.wall_s, 1) + ' s, ' + String(r.iterations) + ' '
+                    + T('panel.cfd.iterationsWord', 'iterations')
+                    + ', y+ ' + fmt(r.y_plus_max, 1)]);
+        });
+        if (!satirlar.length) return '';
+        return sectionTitle('panel.cfd.secViscousCost',
+            'Measured worst-case runtime of the viscous mode at this '
+            + 'resolution') + kvTable(satirlar)
+            + note(T('panel.cfd.viscousCostNote',
+                'This is the MEASURED wall clock of a run that never '
+                + 'converges (it goes to the solver iteration ceiling), by '
+                + 'turbulence model and kernel backend. A converging run is '
+                + 'much shorter; no filling bar is drawn for either, because '
+                + 'the solver reports no intermediate state to draw one '
+                + 'from.'), 'dim');
+    }
+
+    function viscousHtml(vm, qwId, hgId, tauId) {
+        const v = vm.viscous;
+        if (!v) return '';
+        let html = sectionTitle('panel.cfd.secViscous',
+            'Viscous wall outputs (opt-in viscous run)');
+        if (!v.enabled) {
+            html += notModelledChip(T('panel.cfd.inviscidChip',
+                'this run is inviscid (Euler): there is no wall shear, no '
+                + 'wall heat flux and no boundary layer to draw'));
+            html += viscousCostHtml(v);
+            html += basisText(v.basis);
+            return html;
+        }
+        html += kvTable([
+            [T('panel.cfd.rowTurbulence', 'Turbulence model'),
+             String(v.turbulence)],
+            [T('panel.cfd.rowWallThermal', 'Wall thermal condition (source)'),
+             String(v.wallThermal) + ' ('
+                + String(v.wallTempSource == null ? '—' : v.wallTempSource)
+                + ')'],
+            [T('panel.cfd.rowYPlus', 'y+ max / mean / min'),
+             fmtAuto(v.yPlus.achieved_max, 3) + ' / '
+                + fmtAuto(v.yPlus.achieved_mean, 3) + ' / '
+                + fmtAuto(v.yPlus.achieved_min, 3)],
+            [T('panel.cfd.rowYPlusTarget', 'y+ target / fraction within it'),
+             (isNum(v.yPlus.target) ? sig(v.yPlus.target)
+                : T('panel.cfd.noTarget', 'not requested'))
+                + ' / ' + fmtAuto(v.yPlus.fraction_within_target, 3)],
+            [T('panel.cfd.rowWallHeat', 'Integrated wall heat [W]'),
+             sig(v.wallHeatW)],
+        ]);
+        if (v.badge) html += basisText(v.badge.basis);
+        // DOĞRULAMA ÇİZGİSİ: q_w/h_g gösterilen her ekranda AYNEN basılır.
+        html += basisText(v.validationBasis);
+
+        // 1) q_w(z)
+        if (v.wall.qw) {
+            html += plotBox(qwId, 280);
+        } else {
+            html += notModelledChip(T('panel.cfd.noQw',
+                'the response carries no wall heat flux array'));
+        }
+        // 2) h_g — İKİ KAYNAK
+        if ((v.thermal.available && v.thermal.hg)
+                || (v.bartz.available && v.bartz.hg)) {
+            html += plotBox(hgId, 320);
+            const satirlar = [];
+            if (v.thermal.available) {
+                satirlar.push([T('panel.cfd.rowHgSource',
+                    'CFD film coefficient — source tag'),
+                    String(v.thermal.source) + ', T_aw basis '
+                        + String(v.thermal.tAwBasis) + ', edge '
+                        + String(v.thermal.edgeSource) + ', '
+                        + String(v.thermal.recoveryRegime)]);
+            }
+            if (v.bartz.available) {
+                satirlar.push([T('panel.cfd.rowBartzSource',
+                    'Bartz side — measured c* / (R_c/D_t)'),
+                    sig(v.bartz.cStar) + ' m/s / ' + fmt(v.bartz.rcOverDt, 3)]);
+            }
+            if (isNum(v.bartz.ratioMin)) {
+                satirlar.push([T('panel.cfd.rowHgRatio',
+                    'h_g(CFD)/h_g(Bartz) — min / mean / max / at throat'),
+                    fmtAuto(v.bartz.ratioMin, 3) + ' / '
+                        + fmtAuto(v.bartz.ratioMean, 3) + ' / '
+                        + fmtAuto(v.bartz.ratioMax, 3) + ' / '
+                        + fmtAuto(v.bartz.ratioThroat, 3)]);
+                // ÖH D25 · P11B3-08 — TERSİ DE EKRANDA.
+                // ÖLÇÜLDÜ (a3/once.json, taban cdf2106): aynı ekranda hem
+                // ucun künyesi "the model UNDER-predicts q_w at the throat
+                // by a factor of 2-3" diyordu, hem de bu satır boğazda
+                // 0,0125 basıyordu — yani ÖLÇÜLEN eksiklik 1/0,0125 = 80
+                // KAT. "0,013" küçük bir sayı gibi okunuyor; kaç KAT
+                // düşük olduğu hiçbir yerde yazmıyordu. Soğutma
+                // boyutlandıran biri 80 kat düşük bir film katsayısı
+                // okurdu. Burada YENİ FİZİK YOK ve YENİ EŞİK YOK: aynı
+                // yayımlanan oranın ARİTMETİK TERSİ basılır (1/x), böylece
+                // ucun kendi künyesindeki "2-3 kat" ifadesiyle bu koşumun
+                // ölçüsü AYNI EKRANDA, AYNI BİRİMDE karşılaştırılabilir.
+                // Sıfır/negatif oranda ters alınmaz (em tire).
+                const ters = function (x) {
+                    return (isNum(x) && x > 0) ? fmtAuto(1 / x, 3) : '—';
+                };
+                satirlar.push([T('panel.cfd.rowHgRatioInverse',
+                    'h_g(Bartz)/h_g(CFD) — the same ratio inverted: how many '
+                    + 'times LOWER the CFD film coefficient is '
+                    + '(min / mean / max / at throat)'),
+                    ters(v.bartz.ratioMax) + ' / ' + ters(v.bartz.ratioMean)
+                        + ' / ' + ters(v.bartz.ratioMin) + ' / '
+                        + ters(v.bartz.ratioThroat)]);
+            }
+            if (satirlar.length) html += kvTable(satirlar);
+            // Boğazdaki oran 1'in ALTINDAYSA kaç kat düşük olduğu ayrıca
+            // cümleyle söylenir ve okuyucu ucun kendi künyesine (hemen
+            // altta basılan ratioBasis) yönlendirilir. Panel bir KABUL
+            // BANDI uydurmaz — bandı yalnız ucun künyesi beyan eder.
+            if (isNum(v.bartz.ratioThroat) && v.bartz.ratioThroat > 0
+                    && v.bartz.ratioThroat < 1) {
+                html += note(TF('panel.cfd.hgRatioInverseNote',
+                    { k: fmtAuto(1 / v.bartz.ratioThroat, 3) },
+                    'At the throat the CFD film coefficient is {k}x LOWER '
+                    + 'than the Bartz correlation. Read this against the '
+                    + 'y+ badge and the endpoint\'s own ratio basis printed '
+                    + 'below, which names the deficit band it measured '
+                    + 'against experiment; the panel adds no acceptance '
+                    + 'band of its own.'), 'warn');
+            }
+            if (!v.thermal.available && v.thermal.reason) {
+                html += notModelledChip(v.thermal.reason);
+            }
+            html += basisText(v.bartz.ratioBasis);
+            html += basisText(v.bartz.basis);
+            html += basisText(v.bartz.cStarBasis);
+            html += altNotModelledHtml('viscous.thermal_profile',
+                                       v.thermal.notModelled);
+        } else {
+            html += notModelledChip(v.thermal.reason || v.bartz.reason
+                || T('panel.cfd.noHg',
+                     'no gas-side film coefficient in this response'));
+            //: P11B3-22 — profil çizilemese de köprünün kendi beyanı
+            //: (varsa) basılır: reddin gerekçesi listeyi geçersiz kılmaz.
+            html += altNotModelledHtml('viscous.thermal_profile',
+                                       v.thermal.notModelled);
+        }
+        // 3) tau_w + c_f
+        if (v.wall.tau) {
+            html += plotBox(tauId, 300);
+            if (!v.skin.available && v.skin.reason) {
+                html += notModelledChip(v.skin.reason);
+            } else if (v.skin.available) {
+                html += basisText(v.skin.basis);
+            }
+        }
+        // 4) SÜRTÜNME KAYBI — ÜÇ KAYNAK YAN YANA (biri diğerinin yerine
+        //    geçmez; her satır kaynağını ADIYLA taşır).
+        if (v.friction.available) {
+            html += sectionTitle('panel.cfd.secFriction',
+                'Friction thrust loss — three sources side by side');
+            const bant = v.friction.band;
+            html += kvTable([
+                [String(v.friction.source),
+                 TF('panel.cfd.frictionMeasured',
+                    { n: sig(v.friction.forceN),
+                      f: fmtAuto(v.friction.fraction, 4) },
+                    '{n} N measured from tau_w, loss fraction {f}')],
+                ['legacy_constant',
+                 TF('panel.cfd.frictionLegacy', { f: sig(v.friction.legacy) },
+                    '{f} — the quasi-1D chain ledger constant (unchanged)')],
+                ['sutton_band',
+                 (bant ? fmt(bant[0], 3) + ' – ' + fmt(bant[1], 3) : '—')
+                    + ' — ' + (v.friction.withinBand
+                        ? T('panel.cfd.bandInside', 'this run falls INSIDE')
+                        : T('panel.cfd.bandOutside',
+                            'this run falls OUTSIDE (see the note)'))],
+                [T('panel.cfd.rowNormalShare',
+                   'Normal stress share of the axial force'),
+                 fmtAuto(v.friction.normalShare, 4)],
+            ]);
+            html += basisText(v.friction.bandBasis);
+            html += basisText(v.friction.policyBasis);
+            html += altNotModelledHtml('viscous.friction',
+                                       v.friction.notModelled);
+        } else if (v.friction.reason) {
+            html += notModelledChip(v.friction.reason);
+        }
+        // 5) IZGARA KALİTESİ — ucun "q_w'nun okunma şartı" dediği blok.
+        html += gridQualityHtml(v);
+        // 5b) P11B3-24 — taşınım künyesi ve sınır viskoz akıları.
+        html += transportHtml(v);
+        html += boundaryFluxHtml(v);
+        // 6) ÖLÇÜLEN SÜRE CÜZDANI — sahte ilerleme yok, ölçülen sayı var.
+        html += viscousCostHtml(v);
+        html += basisText(v.wall.basis);
+        html += basisText(v.basis);
+        return html;
+    }
+
     function declarationsHtml(vm) {
         let html = sectionTitle('panel.cfd.secDecl',
             'Declarations — not modelled, assumptions, inputs, grid');
@@ -1107,15 +2238,36 @@
 
         const inp = vm.inputs || {};
         const satirlar = [];
-        ['P0_Pa', 'T0_K', 'gamma', 'R_J_kgK', 'P_ambient_Pa', 'Pb_Pa',
-         'separation_factor', 'resolution', 'grid_ni', 'grid_nj',
-         'contour_field', 'contour_points', 'cfl_start', 'cfl_max',
-         'tol_res', 'settle_tol'].forEach(function (k) {
+        /* ÖH D26 / P11B3-18 — "INPUTS ECHOED BY THE ENDPOINT" BAŞLIĞI
+           YANKININ TAMAMINI GÖSTERMİYORDU.
+           ÖLÇÜLDÜ (taban 7751531, ``a2/once.json``): bu liste SABİT 16
+           anahtardı (`sabit_liste_uzunlugu` = 16), ucun yankıladığı girdi
+           sayısı ise 30. Yani `wall_bc`, `time_integrator`,
+           `initial_state` gibi ŞEMA SEÇİMLERİ sessizce düşüyordu —
+           üstelik başlığın kendisi "ucun yankıladığı girdiler" diyordu.
+           Kullanıcı bu tabloya bakıp "koşum bu girdilerle yapıldı"
+           sonucunu çıkarıyordu; oysa tablo, koşumu belirleyen bir kısım
+           alanı hiç göstermiyordu.
+
+           ARTIK: tablo ucun yankıladığı HER anahtarı gösterir. Bilinen
+           16 alan ÖNCE ve bu sırayla basılır (okuma düzeni korunur),
+           kalanlar ardından alfabetik gelir. Liste bir SÜZGEÇ değil,
+           yalnız SIRALAMA'dır: yeni bir alan eklenince tabloya kendi
+           kendine girer, sessizce düşmez. */
+        const EKO_SIRASI = ['P0_Pa', 'T0_K', 'gamma', 'R_J_kgK',
+            'P_ambient_Pa', 'Pb_Pa', 'separation_factor', 'resolution',
+            'grid_ni', 'grid_nj', 'contour_field', 'contour_points',
+            'cfl_start', 'cfl_max', 'tol_res', 'settle_tol'];
+        const kalan = Object.keys(inp).filter(function (k) {
+            return EKO_SIRASI.indexOf(k) === -1;
+        }).sort();
+        EKO_SIRASI.concat(kalan).forEach(function (k) {
             if (!(k in inp)) return;
             const v = inp[k];
             satirlar.push([k, v === null
                 ? T('panel.cfd.notSupplied', 'not supplied')
-                : (isNum(v) ? sig(v) : String(v))]);
+                : (isNum(v) ? sigRaw(v)
+                    : (typeof v === 'object' ? JSON.stringify(v) : String(v)))]);
         });
         html += '<div data-cfd-block="inputs" style="margin-top:8px;">'
             + '<strong style="font-size:0.7rem; color:var(--hd-ink-dim, #7d97a5);"'
@@ -1152,23 +2304,43 @@
         const seviyeSatir = Object.keys(seviye).map(function (ad) {
             const s = seviye[ad] || {};
             const w = s.worst_case_s || {};
+            // ÖH D36 / sahne-hud a2: satır TR ekranda İngilizce ("cells;
+            // worst case") ve süre NOKTALI basılıyordu (ölçüldü: a2/once.json
+            // M3/M4). Kalıp sözlükten (panel.cfd.levelRow), süre `sig`ten;
+            // sayı değişmez.
             return [ad + (ad === g.resolution ? ' *' : ''),
-                    s.ni + 'x' + s.nj + ' = ' + s.n_cells
-                        + ' cells; worst case '
-                        + Object.keys(w).map(function (b) {
-                            return b + ' ' + w[b] + ' s';
-                        }).join(', ')];
+                    TF('panel.cfd.levelRow',
+                       { ni: txt(s.ni), nj: txt(s.nj), n: txt(s.n_cells),
+                         cases: Object.keys(w).map(function (b) {
+                             return b + ' ' + sig(w[b]) + ' s';
+                         }).join(', ') },
+                       '{ni}x{nj} = {n} cells; worst case {cases}')];
         });
         html += sectionTitle('panel.cfd.secGrid',
             'Grid and the resolution whitelist (measured worst-case runtimes)');
         html += kvTable([
             [T('panel.cfd.rowResolution', 'Resolution used'),
-             String(g.resolution)],
+             txt(g.resolution)],
             [T('panel.cfd.rowCells', 'Cells (axial x radial)'),
-             g.ni + ' x ' + g.nj + ' = ' + g.n_cells],
+             txt(g.ni) + ' x ' + txt(g.nj) + ' = ' + txt(g.n_cells)],
             [T('panel.cfd.rowThroat', 'Throat: z, radius, section-average Mach'),
              sig(vm.throat.z_m) + ' m, ' + sig(vm.throat.radius_m) + ' m, '
                 + fmtAuto(vm.throat.mach_section_avg, 4)],
+            // --- ÖH D31 · P11B3-27 — BOĞAZ ALANI PANELDE ---------------
+            // ÖLÇÜLDÜ (a1/once.json · M8: `throat_area_m2 = 0`): uç
+            // `throat.area_m2` yayımlıyor (nozzle_flow_1d.py:1537) ve c*
+            // ölçümü ONU kullanıyor (app.py:23659 `A_t`), ama panel yalnız
+            // yarıçapı basıyordu. Kullanıcı c* = P0·A_t/mdot bağıntısını
+            // ekrandaki sayılarla DOĞRULAYAMIYORDU: yarıçaptan alanı
+            // kendisi türetmek zorundaydı ve o türetme (dairesel kesit
+            // varsayımı) ucun kullandığı alanla aynı olmak ZORUNDA değil.
+            // Alan gelmezse satır HİÇ basılmaz (alan uydurulmaz).
+            // ÖH D32 / OH-D31-01: sözlüğe bağlandı
+            // (`panel.cfd.rowThroatArea`, EN+TR).
+            [T('panel.cfd.rowThroatArea', 'Throat area A_t (used for c*)'),
+             (typeof vm.throat.area_m2 === 'number'
+              && isFinite(vm.throat.area_m2))
+                 ? (sig(vm.throat.area_m2) + ' m2') : '—'],
         ].concat(seviyeSatir));
         html += basisText(g._basis);
         return html;
@@ -1180,9 +2352,8 @@
         html += plotBox(plotId, 260);
         html += kvTable([
             [T('panel.cfd.rowIterations', 'Iterations / budget (source)'),
-             vm.iterations + ' / ' + vm.maxIterations + ' ('
-                + String(vm.maxIterationsSource == null
-                         ? '—' : vm.maxIterationsSource) + ')'],
+             txt(vm.iterations) + ' / ' + txt(vm.maxIterations) + ' ('
+                + txt(vm.maxIterationsSource) + ')'],
             [T('panel.cfd.rowResLast', 'Last residual (exact)'),
              fmtExp(vm.residual.last, 4)],
             [T('panel.cfd.rowResMin', 'Smallest residual (exact)'),
@@ -1192,6 +2363,11 @@
                 + sig(vm.budget.mass_flow_out_kg_s)],
             [T('panel.cfd.rowWallFlux', 'Wall mass flux [kg/s] (slip wall: 0)'),
              fmtExp(vm.budget.wall_mass_flux_kg_s, 3)],
+            // ÖH D28 / arayuz a1 (OH-D27-16) — ZAMAN İLERLETME YOLUNUN ADI.
+            // Yokluk em-tire ile basılır (txt), varsayılan bir şema adı
+            // UYDURULMAZ.
+            [T('panel.cfd.rowTimeIntegrator', 'Time integrator'),
+             txt(vm.timeIntegrator)],
         ]);
         if (vm.residual.decimated) {
             html += note(TF('panel.cfd.residualDecimated',
@@ -1203,7 +2379,179 @@
         }
         html += basisText(vm.convergenceBasis);
         html += basisText(vm.maxIterationsBasis);
+        // ÖH D28 / arayuz a1 (OH-D27-16): şemanın KÜNYESİ, adının hemen
+        // ardından. Metin ucun kendi beyanıdır, SRV ile aynen basılır.
+        html += basisText(vm.timeIntegratorBasis);
+        html += convergenceHistoryHtml(vm);
+        html += selfConsistencyHtml(vm);
         return html;
+    }
+
+    // ------------------------------------------------------------------
+    // HÜKMÜN DAYANDIĞI SERİLER (ÖH D28 / arayuz a1 — OH-D27-16)
+    //
+    // NEDEN VAR: uç `settle_bands` ile "debi bandı OTURDU / OTURMADI,
+    // boğaz Mach bandı OTURDU / OTURMADI" diye hüküm veriyor; D26 /
+    // app-api a4 (`e5882484`, P7B4-10) o hükmün DAYANDIĞI üç seriyi
+    // (mass_flow_in / mass_flow_out / throat_mach) `convergence_history`
+    // bloğuyla uca taşıdı — tam da istemci bandı KENDİ denetleyebilsin
+    // diye. Panel bloğu hiç okumuyordu: kullanıcı hükmü görüyor, hükmün
+    // ölçüldüğü eğriyi göremiyordu.
+    //
+    // Bu bölüm seriyi YENİDEN HESAPLAMAZ: seyreltmenin gizleyebileceği
+    // son değeri (`last`) ve seyreltme sayaçlarını ucun yayımladığı gibi
+    // basar, birimini ucun `unit` alanından alır, künyesini (`_basis`)
+    // AYNEN gösterir. Blok yoksa hiçbir satır çıkmaz (fail-closed).
+    // ------------------------------------------------------------------
+    function convergenceHistoryHtml(vm) {
+        const ch = vm.convHistory;
+        if (!ch || typeof ch !== 'object') return '';
+        const seriler = [
+            ['mass_flow_in', T('panel.cfd.serMassIn', 'Inlet mass flow')],
+            ['mass_flow_out', T('panel.cfd.serMassOut', 'Outlet mass flow')],
+            ['throat_mach', T('panel.cfd.serThroatMach', 'Throat Mach')],
+        ];
+        const rows = [];
+        const kunyeler = [];
+        seriler.forEach(function (p) {
+            const s = ch[p[0]];
+            if (!s || typeof s !== 'object') return;
+            const birim = s.unit ? ' ' + String(s.unit) : '';
+            rows.push([p[1] + ' — ' + p[0],
+                fmtAuto(s.last, 4) + birim + '  ('
+                + txt(s.n_returned) + '/' + txt(s.n_entries) + ' '
+                + T('panel.cfd.serPoints', 'points')
+                + (s.decimated ? ', ' + T('panel.cfd.serThinned', 'thinned')
+                               : '') + ')']);
+            if (s._basis) kunyeler.push(s._basis);
+        });
+        if (!rows.length) return '';
+        let html = sectionTitle('panel.cfd.secConvHistory',
+            'Series the settle-band verdict is measured on '
+            + '(last value, exact)');
+        html += kvTable(rows);
+        kunyeler.forEach(function (b) { html += basisText(b); });
+        return html;
+    }
+
+    // ------------------------------------------------------------------
+    // ÖZ-TUTARLILIK VE PLATO (ÖH defter D15-CFD-01, OH-Z5-14, OH-Z5-19)
+    //
+    // NEDEN VAR: uç `residual_operator`, `scheme_residual_norm`,
+    // `scheme_residual_exceeds_tol`, `scheme_residual_blocks_verdict`,
+    // `picard_selfconsistency_rejections`, `slope_state`, `settle_bands`
+    // ve (OH-Z5-14 ile) `convergence_status` + `convergence_plateau`
+    // yayımlıyordu; panel HİÇBİRİNİ basmıyordu. Kullanıcı "CONVERGED"
+    // ya da "NOT CONVERGED" rozetinin ARKASINDAKİ sayıyı — yayımlanan
+    // kalıntının şemanın kendi kalıntısı mı yoksa DONMUŞ eğim
+    // sisteminin kalıntısı mı olduğunu — göremiyordu. Bu bölüm o
+    // alanları OLDUĞU GİBİ basar: hesap yok, yuvarlama saklaması yok,
+    // eksik alan em-tire.
+    // ------------------------------------------------------------------
+    function selfConsistencyHtml(vm) {
+        const sc = vm.selfConsistency || {};
+        const sl = sc.slope || {};
+        const sb = vm.settleBands || {};
+        const faz = sb.refresh_phase_locked || {};
+        const pl = vm.plateau || {};
+        let html = sectionTitle('panel.cfd.secSelfConsistency',
+            'Self-consistency of the published residual (Picard gate)');
+        const rows = [
+            [T('panel.cfd.rowConvStatus', 'Convergence status'),
+             String(vm.convergenceStatus == null ? '—'
+                                                 : vm.convergenceStatus)],
+            [T('panel.cfd.rowResidualOperator',
+               'The published residual belongs to'),
+             String(sc.operator == null ? '—' : sc.operator)],
+            [T('panel.cfd.rowSchemeResidual',
+               'Scheme (live minmod) residual / tolerance'),
+             fmtExp(sc.schemeResidual, 4) + ' / ' + fmtExp(sl.tol_res, 2)],
+            [T('panel.cfd.rowSchemeExceeds', 'Scheme residual above tolerance'),
+             yesNo(sc.exceedsTol)],
+            [T('panel.cfd.rowGate', 'Self-consistency gate / rejections'),
+             String(sl.selfconsistency_gate == null
+                    ? T('panel.cfd.gateOff', 'not active')
+                    : sl.selfconsistency_gate)
+                + ' / ' + String(sc.rejections == null ? '—' : sc.rejections)],
+            [T('panel.cfd.rowBlocksVerdict',
+               'Verdict withheld by the gate'),
+             yesNo(sc.blocksVerdict)],
+            [T('panel.cfd.rowWalkOperator',
+               'Walk operator is the scheme itself'),
+             yesNo(sl.walk_operator_is_scheme)],
+            [T('panel.cfd.rowSlopeFreeze',
+               'Slopes frozen at iteration / refresh period'),
+             String(sl.frozen_at_iter == null ? '—' : sl.frozen_at_iter)
+                + ' / ' + String(sl.refresh_period == null
+                                 ? '—' : sl.refresh_period)],
+            [T('panel.cfd.rowSchemeBudget',
+               'Scheme mass / energy balance (relative)'),
+             fmtExp(sl.scheme_mass_balance_rel, 3) + ' / '
+                + fmtExp(sl.scheme_energy_balance_rel, 3)],
+            [T('panel.cfd.rowSettleBands',
+               'Settle bands in / out / throat Mach (window, tol)'),
+             fmtExp(sb.mass_flow_in, 3) + ' / ' + fmtExp(sb.mass_flow_out, 3)
+                + ' / ' + fmtExp(sb.throat_mach, 3)
+                + ' (' + String(sb.window == null ? '—' : sb.window) + ', '
+                + fmtExp(sb.tol, 2) + ')'],
+            [T('panel.cfd.rowPhaseBands',
+               'Phase-locked bands in / out / throat Mach (period)'),
+             (faz.active
+                ? (fmtExp(faz.mass_flow_in, 3) + ' / '
+                   + fmtExp(faz.mass_flow_out, 3) + ' / '
+                   + fmtExp(faz.throat_mach, 3) + ' ('
+                   + String(faz.period == null ? '—' : faz.period) + ')')
+                : T('panel.cfd.phaseInactive',
+                    'no refresh cycle on this path - not measured'))],
+        ];
+        html += kvTable(rows);
+        html += plateauHtml(pl);
+        html += basisText(sl._basis);
+        html += basisText(faz._basis);
+        return html;
+    }
+
+    //: PLATO BLOĞU — çözücünün plato hükmü ve onun DAYANDIĞI örnekler.
+    //: Plato "hüküm" değildir: hükümsüzlüğün CİNSİDİR ("bütçeyi
+    //: büyütmek geçmez"). Tespit edilmediyse çözücünün kendi gerekçesi
+    //: (neden yetmedi) basılır — sessizce boş bırakılmaz.
+    function plateauHtml(pl) {
+        if (!pl || typeof pl !== 'object') return '';
+        let html = sectionTitle('panel.cfd.secPlateau',
+            'Residual plateau (is a bigger iteration budget of any use?)');
+        html += kvTable([
+            [T('panel.cfd.rowPlateauDetected', 'Plateau detected'),
+             yesNo(pl.detected)],
+            [T('panel.cfd.rowPlateauResidual',
+               'Plateau residual / target'),
+             fmtExp(pl.plateau_residual, 4) + ' / '
+                + fmtExp(pl.target_residual, 2)],
+            [T('panel.cfd.rowPlateauWindow',
+               'Window [iterations] / relative spread / threshold'),
+             String(pl.window_iterations == null ? '—' : pl.window_iterations)
+                + ' / ' + fmtExp(pl.relative_spread, 3)
+                + ' / ' + fmtExp(pl.rel_tol, 2)],
+            [T('panel.cfd.rowPlateauSamples',
+               'Samples (iteration = scheme residual)'),
+             plateauSamplesText(pl.samples)],
+        ]);
+        if (pl.reason) html += basisText(pl.reason);
+        return html;
+    }
+
+    //: Örnek dizisi metne: uydurma nokta EKLENMEZ, dizi neyse o basılır.
+    function plateauSamplesText(samples) {
+        if (!Array.isArray(samples) || !samples.length) return '—';
+        return samples.map(function (s) {
+            return String(s[0]) + ' = ' + fmtExp(s[1], 4);
+        }).join(', ');
+    }
+
+    //: Üç durumlu evet/hayır: alan yoksa em-tire (false ile karıştırılmaz).
+    function yesNo(v) {
+        if (v === true) return T('panel.cfd.yes', 'yes');
+        if (v === false) return T('panel.cfd.no', 'no');
+        return '—';
     }
 
     // ------------------------------------------------------------------
@@ -1325,19 +2673,31 @@
 
     //: Başarılı bindirmenin beyanı — NE gösterildiği sahnenin KENDİ dönüş
     //: sözlüğünden okunur (panel hiçbir sayıyı yeniden hesaplamaz).
+    //: ÖH D37 A1c panel-dil · dil-sozluk Devir 3 + Devir 5 — yedek metinler
+    //: sözlüğün EN metniyle BİREBİR (eski yedek virgüllüydü); birimsiz
+    //: büyüklükte (Mach, sahnenin `unitLabel`i '') ayrı anahtar: eski yol
+    //: '{max} {unit} — …' şablonunda ham metne ÇİFT BOŞLUK bırakıyordu
+    //: (ölçüldü: once/olcum.json K4 '2.91214  — 60x12'; ekranda tarayıcı
+    //: tek boşluğa çöker, textContent okuyan tüketici çift görür).
     function viz3dOkLines(res) {
         const m = metricById(res.metric);
-        const satirlar = [TF('panel.cfd.viz3dShown',
-            { metric: m ? T(m.labelKey, m.labelFallback) : String(res.metric),
-              min: sig(res.range && res.range.min),
-              max: sig(res.range && res.range.max),
-              unit: String(res.unitLabel || ''),
-              shown: res.stations ? res.stations.shown : '—',
-              total: res.stations ? res.stations.total : '—',
-              nz: res.cells ? res.cells.axial : '—',
-              nr: res.cells ? res.cells.radial : '—' },
-            'The 3D section now carries {metric}: {min} … {max} {unit}, '
-            + '{nz}x{nr} solver cells over {shown} of {total} axial stations.')];
+        const birim = String(res.unitLabel || '').trim();
+        const alanlar = {
+            metric: m ? T(m.labelKey, m.labelFallback) : String(res.metric),
+            min: sig(res.range && res.range.min),
+            max: sig(res.range && res.range.max),
+            unit: birim,
+            shown: res.stations ? res.stations.shown : '—',
+            total: res.stations ? res.stations.total : '—',
+            nz: res.cells ? res.cells.axial : '—',
+            nr: res.cells ? res.cells.radial : '—' };
+        const satirlar = [birim
+            ? TF('panel.cfd.viz3dShown', alanlar,
+                'The 3D section now carries {metric}: {min} … {max} {unit} — '
+                + '{nz}x{nr} solver cells over {shown} of {total} axial stations.')
+            : TF('panel.cfd.viz3dShownNoUnit', alanlar,
+                'The 3D section now carries {metric}: {min} … {max} — '
+                + '{nz}x{nr} solver cells over {shown} of {total} axial stations.')];
         if (res.metric === 'pressure') {
             satirlar.push(T('panel.cfd.viz3dUnitNote',
                 'The 3D scene labels pressure in the payload unit (Pa); the '
@@ -1402,6 +2762,78 @@
         return html;
     }
 
+    //: Alanı sahneye bindirir; 2B'de seçili büyüklük yükte varsa 3B de
+    //: ONU gösterir (iki görünüm aynı büyüklüğe aynı rengi verir). Düğme
+    //: yolu ile otomatik yol AYNI işlevden geçer — ikinci bir gönderim
+    //: mantığı yazılmaz.
+    function sendToViz3d(cfd, vm) {
+        const V = window.MotorViz3D;
+        let res = V.setCfdField(cfd);
+        if (res && res.ok) {
+            const istenen = activeMetric(vm);
+            if (res.metric !== istenen) {
+                const ikinci = V.setCfdMetric(istenen);
+                if (ikinci && ikinci.ok) res = ikinci;
+            }
+        }
+        return res;
+    }
+
+    //: Sahnenin kabını görünüme kaydırır (ÖH D36 keşfedilebilirlik).
+    //: Sahne kabı sahnenin KENDİ beyanından okunur (MotorViz3D.get().
+    //: container); kap yoksa ya da tarayıcı kaydırmayı desteklemiyorsa
+    //: sessizce geçilir — kaydırma bir yan hizmettir, alanın kendisi değil.
+    function revealViz3d() {
+        const V = window.MotorViz3D;
+        const sahne = (V && typeof V.get === 'function') ? V.get() : null;
+        const kap = sahne && sahne.container;
+        if (kap && typeof kap.scrollIntoView === 'function') {
+            try {
+                kap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (e) { /* eski tarayıcı: seçeneksiz kaydırma da gereksiz */ }
+        }
+    }
+
+    //: ÖH D36 / sahne-hud — KOŞUM BİTİNCE ALAN SAHNEYE KENDİLİĞİNDEN.
+    //: ÖLÇÜLEN KUSUR (Berke 22 Eyl, "ANSYS gibi"; A3_gorev_ve_mimari.md G3):
+    //: yol vardı ama İKİ adımdı — kullanıcı CFD'yi koşturduktan sonra
+    //: ayrıca "3B sahnede göster"e basmak zorundaydı ve görsel turların
+    //: hiçbiri bu düğmeye ulaşmadı. Yanıt `field` bloğu taşıyorsa alan
+    //: artık çizimden hemen sonra sahneye gönderilir, sahne görünüme
+    //: kaydırılır ve durum satırı bunun KENDİLİĞİNDEN olduğunu söyler.
+    //: Sahte veri yok: alan yoksa bu yol hiç çağrılmaz (drawInto'daki
+    //: `vm.field` kapısı), sahne reddederse red adıyla yazılır, hazır
+    //: değilse (modül/WebGL yok) düğmeyle aynı gerekçe geçerlidir.
+    //: Kapatılabilir: sahne şeridindeki KAPAT ya da buradaki "3B sahneden
+    //: kaldır" alanı söker; aynı yanıt yeniden çizilse de, geçmişte başka
+    //: kayda gidip dönülse de geri GELMEZ (autoBridgedCfds).
+    //: Bekçi: tests/test_d36_sahne_a1.py
+    function autoViz3d(cfd, vm, statusId) {
+        if (!viz3dReadiness().ok) return false;
+        if (cfd === lastAutoBridgedCfd) return false;
+        if (autoBridgedCfds && autoBridgedCfds.has(cfd)) return false;
+        if (autoBridgedCfds) autoBridgedCfds.add(cfd);
+        lastAutoBridgedCfd = cfd;
+        const res = sendToViz3d(cfd, vm);
+        const durumEl = document.getElementById(statusId);
+        if (durumEl) {
+            const on = T('panel.cfd.viz3dAuto',
+                'The field was sent to the 3D scene automatically when the '
+                + 'run finished; the Close button in the scene strip removes '
+                + 'it, and "Show in the 3D scene" sends it again.');
+            if (res && res.ok) {
+                durumEl.textContent = on + ' ' + viz3dOkLines(res).join(' ');
+                durumEl.style.color = kindColor('ok');
+            } else {
+                durumEl.textContent = on + ' '
+                    + viz3dReasonText(res && res.reason);
+                durumEl.style.color = kindColor('warn');
+            }
+        }
+        if (res && res.ok) revealViz3d();
+        return true;
+    }
+
     //: Köprü düğmelerinin kablosu. Sahne dönüşü NE İSE o yazılır; "olmadı"
     //: gibi uydurma bir mesaj üretilmez.
     function bindViz3d(root, cfd, vm, btnId, clearId, statusId) {
@@ -1416,19 +2848,10 @@
         if (!viz3dReadiness().ok) return;
         if (goster && goster.addEventListener) {
             goster.addEventListener('click', function () {
-                const V = window.MotorViz3D;
-                let res = V.setCfdField(cfd);
-                if (res && res.ok) {
-                    // 2B'de seçili büyüklük yükte varsa 3B de ONU göstersin:
-                    // iki görünüm aynı büyüklüğe aynı rengi verir.
-                    const istenen = activeMetric(vm);
-                    if (res.metric !== istenen) {
-                        const ikinci = V.setCfdMetric(istenen);
-                        if (ikinci && ikinci.ok) res = ikinci;
-                    }
-                }
+                const res = sendToViz3d(cfd, vm);
                 if (res && res.ok) {
                     yaz(viz3dOkLines(res).join(' '), 'ok');
+                    revealViz3d();
                 } else {
                     yaz(viz3dReasonText(res && res.reason), 'warn');
                 }
@@ -1469,6 +2892,10 @@
         const viz3dBtnId = 'cfd_viz3d_show_' + drawSeq;
         const viz3dClearId = 'cfd_viz3d_clear_' + drawSeq;
         const viz3dStatusId = 'cfd_viz3d_status_' + drawSeq;
+        const qwId = 'cfd_qw_' + drawSeq;
+        const hgId = 'cfd_hg_' + drawSeq;
+        const tauId = 'cfd_tau_' + drawSeq;
+        const secAvgId = 'cfd_secavg_' + drawSeq;
 
         let html = '<div data-cfd-badges="1">' + badgesHtml(vm) + '</div>';
 
@@ -1476,6 +2903,15 @@
         html += sectionTitle('panel.cfd.secWall',
             'Wall pressure p_w(z) against the separation criterion');
         html += plotBox(wallId, 300);
+        // P11B3-24 — kolon ortalaması profili duvar eğrisinin ALTINDA,
+        // kendi kabında (ikisi AYNI şey değildir).
+        if (sectionAverageVar(vm)) {
+            html += sectionTitle('panel.cfd.secSectionAverage',
+                'Section averages along the axis — volume-weighted column '
+                + 'means published by the endpoint');
+            html += plotBox(secAvgId, 280);
+            html += basisText(vm.sectionAverage._basis);
+        }
         const sep = vm.separation || {};
         const sepRows = [
             [T('panel.cfd.rowThreshold', 'Threshold k*P_ambient [Pa]'),
@@ -1535,6 +2971,14 @@
                 + 'drawn.'), 'warn');
         }
 
+        // 2b) Ayrılma ölçütlerinin dört üyesi (viskoz koşuda CFD üyesi de
+        //     gelir; Euler koşusunda o üye kendi 'VİSKOZ DEĞİL' gerekçesiyle
+        //     kapalı görünür — panel hiçbirini uydurmaz)
+        html += separationCriteriaHtml(vm);
+        // 2b') Ayrılma hükmünün KENDİ kapsam beyanı (P11B3-10)
+        html += separationNotModelledHtml(vm);
+        // 2c) Viskoz duvar çıktıları
+        html += viscousHtml(vm, qwId, hgId, tauId);
         // 3) Yakınsama + bütçe
         html += convergenceHtml(vm, resId);
         // 4) Koşu öncesi giriş koşullandırma beyanı
@@ -1557,6 +3001,9 @@
             root.appendChild(uyari);
         } else {
             if (vm.wall.z.length) drawFigure(wallId, wallFigure(vm));
+            if (sectionAverageVar(vm)) {
+                drawFigure(secAvgId, sectionAverageFigure(vm));
+            }
             if (vm.field) {
                 try {
                     drawFigure(fieldId, fieldFigure(vm));
@@ -1573,6 +3020,16 @@
             if (vm.residual.iteration.length) {
                 drawFigure(resId, residualFigure(vm));
             }
+            // Viskoz çizimler: veri YOKSA kutu da yok, çizim de yok.
+            const vv = vm.viscous;
+            if (vv && vv.enabled) {
+                if (vv.wall.qw) drawFigure(qwId, wallHeatFigure(vm));
+                if ((vv.thermal.available && vv.thermal.hg)
+                        || (vv.bartz.available && vv.bartz.hg)) {
+                    drawFigure(hgId, filmFigure(vm));
+                }
+                if (vv.wall.tau) drawFigure(tauId, shearFigure(vm));
+            }
         }
 
         // Alan büyüklüğü değiştiricisi: aynı yanıt yeniden çizilir
@@ -1586,8 +3043,29 @@
         }
         if (vm.field) {
             bindViz3d(root, cfd, vm, viz3dBtnId, viz3dClearId, viz3dStatusId);
+            // ÖH D36: yanıt alan taşıyorsa sahneye KENDİLİĞİNDEN (tıklamasız).
+            autoViz3d(cfd, vm, viz3dStatusId);
         }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
+
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (X_basis / X_source / X_status / X_model) okuyup ekrana DÜZ
+        // METİN döküyor, hükmünü (hesaplandı / sizin girdiniz / varsayım
+        // / modellenmedi) hiç vermiyordu — pano sınıflandırıcısı ölü
+        // katmandı. Defter ucun KENDİ beyanını ortak sınıflandırıcıdan
+        // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
+        //
+        // NOT: bu modülde `U` MODÜL DÜZEYİNDE YOKTUR — iki ayrı
+        // fonksiyonun içinde yerel olarak alınır (satır 233, 2368).
+        // Pano burada da yerelden alınır; doğrudan `U` yazmak
+        // `drawInto`yu "U is not defined" ile düşürür ve panel
+        // bütünüyle hata metnine iner (ölçüldü: test_cfd_panel.py
+        // 11 test kırmızı).
+        const UD = window.AnalysisDock && window.AnalysisDock.ui;
+        if (UD && UD.source && UD.source.ledgerInto) {
+            UD.source.ledgerInto(root, cfd, { deep: true });
+        }
     }
 
     function render(data, root) {
@@ -1640,6 +3118,29 @@
              [['coarse', 'Coarse', 'panel.cfd.resCoarse'],
               ['standard', 'Standard', 'panel.cfd.resStandard']],
              'panel.cfd.fieldResolution'],
+            // VİSKOZ KİP — varsayılan KAPALI (Euler). Isıl duvar koşulu
+            // seçimin KENDİSİDİR: uçta varsayılanı yoktur çünkü izotermal
+            // ve adyabatik duvar FARKLI çözümlerdir. Tek bir seçici
+            // kullanılıyor ki "açık ama duvar koşulu seçilmemiş" gibi
+            // geçersiz bir birleşim ekrandan üretilemesin.
+            ['viscous_mode', 'Wall model', '',
+             [['', 'Inviscid (Euler) — default', 'panel.cfd.wallInviscid'],
+              ['isothermal', 'Viscous — isothermal wall',
+               'panel.cfd.wallIsothermal'],
+              ['adiabatic', 'Viscous — adiabatic wall',
+               'panel.cfd.wallAdiabatic']],
+             'panel.cfd.fieldViscousMode'],
+            ['viscous_turbulence', 'Turbulence model', 'none',
+             [['none', 'None (laminar)', 'panel.cfd.turbNone'],
+              ['sa_neg', 'Spalart-Allmaras (negative variant)',
+               'panel.cfd.turbSaNeg']],
+             'panel.cfd.fieldTurbulence'],
+            // SONLU VARSAYILAN YOK: duvar sıcaklığı uydurulamaz. Boş
+            // bırakılırsa ve izotermal duvar seçilmişse body() isteği
+            // GÖNDERMEZ ve eksiği adıyla yazar.
+            ['viscous_T_wall_K',
+             'Wall temperature T_w [K] — isothermal wall only', '', 'any',
+             'panel.cfd.fieldTwall'],
         ],
 
         fromResults: function (results) {
@@ -1680,8 +3181,18 @@
         _colorscale: metricColorscale,
         _viz3dReasonText: viz3dReasonText,
         _viz3dReadiness: viz3dReadiness,
+        // ÖH D36 bekçisi: otomatik köprünün son gönderdiği yanıtı okur
+        _lastAutoBridgedCfd: function () { return lastAutoBridgedCfd; },
         _sources: SUGGESTION_SOURCES,
+        _viscousModel: viscousModel,
+        _viscousBadges: viscousBadgesHtml,
+        // ÖH D19 · P11B3-07 bekçisi rozet kabını buradan okur
+        // (DOM'suz saf katman; _viscousBadges ile aynı desen).
+        _badgesHtml: badgesHtml,
+        _yPlusBadgeKinds: Y_PLUS_BADGE_KIND,
         PA_PER_BAR: PA_PER_BAR,
         R_UNIVERSAL: R_UNIVERSAL,
+        T_WALL_SOURCE_FORM: T_WALL_SOURCE_FORM,
+        TURBULENCE_DEFAULT: TURBULENCE_DEFAULT,
     };
 })();

@@ -28,6 +28,7 @@ Temizleyici YALNIZ bu modülün açtığı önek desenine (``HRMA_TEMP_PREFIXES`
 uyan dizinlere dokunur — kullanıcının başka dosyaları asla silinmez.
 """
 
+import io
 import os
 import shutil
 import tempfile
@@ -71,6 +72,71 @@ def cleanup_workspace(path):
         return False
     shutil.rmtree(path, ignore_errors=True)
     return not os.path.isdir(path)
+
+
+def workspace_of(path):
+    """``path``i barındıran HRMA çalışma dizini, ya da ``None``.
+
+    Üreticiler dosya YOLU döndürür (``.../hrma_dxf_ab12/motor_profile.dxf``);
+    silinecek olan o dosyanın dizinidir. Önek tanınmıyorsa ``None`` döner —
+    yani bu yardımcı asla projeye ait olmayan bir dizini işaret edemez.
+    """
+    if not path:
+        return None
+    p = os.path.abspath(path)
+    d = p if os.path.isdir(p) else os.path.dirname(p)
+    if os.path.basename(os.path.normpath(d)).startswith(HRMA_TEMP_PREFIXES):
+        return d
+    return None
+
+
+def cleanup_paths(*paths):
+    """``paths``i barındıran HRMA çalışma dizinlerini HEMEN siler.
+
+    Çıktı belleğe alındıysa (ör. ZIP ``BytesIO``ya kurulduysa) diskteki
+    dizinin yanıt bitene kadar durmasına gerek yoktur. Dönüş: silinen dizin
+    sayısı.
+    """
+    silinen = 0
+    gorulen = []
+    for p in paths:
+        d = workspace_of(p)
+        if d and d not in gorulen:
+            gorulen.append(d)
+            if cleanup_workspace(d):
+                silinen += 1
+    return silinen
+
+
+def detach_file(path):
+    """Üretilen dosyayı BELLEĞE alır, çalışma dizinini SİLER, tamponu döndürür.
+
+    ÖH D21 / defter P9B2-14. ÖLÇÜLDÜ (taban ``35aa279``, ``once.json`` bölüm
+    D): :func:`cleanup_workspace` ürün kodunda **hiç** çağrılmıyordu (tek
+    ``git grep`` isabeti bir docstring satırıydı) ve üç ihraç isteği
+    ``/tmp``te 3 dizin / 217.852 bayt bırakıyordu. Bunlar
+    :func:`purge_stale_workspaces`in 24 saatlik yaş kapısına takıldığı için
+    bir gün boyunca silinmiyordu — D10 yalnız YARIM kapanmıştı: temizleyici
+    yazılmış ama hiçbir yere bağlanmamıştı.
+
+    Neden "yanıt kapanınca sil" DEĞİL: ilk onarım ``Response.call_on_close``
+    kancasına bağlanmıştı; ÖLÇÜLDÜ ki kanca kaydediliyor ama çağrılmıyor
+    (Flask test istemcisinde ``resp.close()`` sonrası bile dizin yerinde
+    kalıyordu), yani temizlik yine kanıtlanamıyordu. Bu yol dosyayı akıtmak
+    yerine baytları alır: silme, gönderme anından ÖNCE ve KOŞULSUZ olur.
+    Uçların çoğu (``_zip_files``) zaten belleğe kurulmuş bir tampon
+    gönderiyor; bu yardımcı tek dosyalık uçları aynı desene getirir.
+
+    Windows'ta açık dosya silinemediği için "önce oku, sonra sil, sonra
+    gönder" sırası iki platformda da çalışan tek sıradır.
+
+    Returns: :class:`io.BytesIO` (imleç başta). Dizin tanınan önekte
+    değilse dosya yine okunur ama HİÇBİR ŞEY silinmez.
+    """
+    with open(path, 'rb') as fh:
+        data = fh.read()
+    cleanup_paths(path)
+    return io.BytesIO(data)
 
 
 def purge_stale_workspaces(max_age_s=STALE_WORKSPACE_MAX_AGE_S, root=None):

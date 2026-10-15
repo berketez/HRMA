@@ -91,8 +91,25 @@ def test_eksik_anahtarlarla_hata_firlatmaz(fn, data):
     assert len(fig.get("data", [])) > 0
 
 
-def test_pintle_tutarsiz_girdi_korunur():
-    # Pintle + gap gövde çapını aşarsa fonksiyon çökmeden ölçek düzeltmeli
-    fig = _parse(create_pintle_cross_section,
-                 {"outer_diameter": 30, "pintle_diameter": 40, "gap": 5})
-    assert len(fig["data"]) > 0
+def test_pintle_tutarsiz_girdi_reddedilir():
+    """ÇEVRİLEN BEKÇİ — P13B2-04 (ÖH D21 / fea-cfd a1).
+
+    Bu test 2026-07'de "fonksiyon çökmeden ölçek düzeltmeli" diye
+    yazılmıştı ve tam da kusuru KİLİTLİYORDU: gövde 30 mm ⟷ pintle 40 mm
+    ⟷ gap 5 mm üçlüsü fiziksel olarak kurulamaz (gövde, sarması gereken
+    50 mm'lik anülüsten küçük), ama figür sessizce ölçek düzeltip 4 iz +
+    19 anotasyon + 0 uyarı ile çiziyordu; üstelik etiketi "D_outer:
+    30.0 mm" derken çizilen dış çap 57,5 mm idi (ölçüm:
+    docs/scofield/raw/OH/D21/fea-cfd/a1/once_hizli.json).
+
+    Yeni sözleşme: ÜÇ SAYI DA çağırandan geldiyse ve birbirini tutmuyorsa
+    hüküm kazanılmamıştır — figür yayımlanmaz, ret gerekçesi üç sayıyı da
+    söyler. "Çökmeme" beklentisi korunuyor: ret ham bir TypeError/
+    ZeroDivisionError değil, adlandırılmış ValueError'dır.
+    """
+    with pytest.raises(ValueError) as ex:
+        create_pintle_cross_section(
+            {"outer_diameter": 30, "pintle_diameter": 40, "gap": 5})
+    m = str(ex.value)
+    assert "30.000" in m and "40.000" in m and "5.000" in m
+    assert "not physically realisable" in m

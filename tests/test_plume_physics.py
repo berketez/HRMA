@@ -118,8 +118,22 @@ class TestShockCellSpacing:
     """Prandtl-Pack: L_s = 1.306 * D_j * sqrt(Mj^2 - 1)"""
 
     def test_matches_the_published_relation(self):
+        """Bağımsız kâhin (KU-25 / H-10): beklenen değer readNozzleExit'in
+        kendi çıktısından (state['jetMach']) KURULMAZ — eski döngüsel kâhin
+        √(1 + Mj²) hatasını yakalayamıyordu. Mj ayrı yazılmış izantropik
+        yoldan (p0/pa), D_j kütle korunumundan (Wernet 2020 Denk. 4)."""
+        g, me, pe_pa = 1.1614, 2.5623, 0.9383 / 1.0
+        p0_pa = pe_pa * (1 + 0.5 * (g - 1) * me ** 2) ** (g / (g - 1))
+        mj = (2 / (g - 1) * (p0_pa ** ((g - 1) / g) - 1)) ** 0.5
+
+        def area_ratio(m):
+            return ((2 / (g + 1)) * (1 + 0.5 * (g - 1) * m * m)) \
+                ** ((g + 1) / (2 * (g - 1))) / m
+
+        d_j = 0.04317 * 1000 * (area_ratio(mj) / area_ratio(me)) ** 0.5
+        expected = 1.306 * d_j * (mj ** 2 - 1) ** 0.5
         state = _run_read_nozzle_exit(REAL_MOTOR)
-        expected = 1.306 * 0.04317 * 1000 * (state['jetMach'] ** 2 - 1) ** 0.5
+        assert state['jetMach'] == pytest.approx(mj, rel=1e-9)
         assert state['cellSpacingMm'] == pytest.approx(expected, rel=1e-6)
 
     def test_spacing_grows_with_jet_mach(self):

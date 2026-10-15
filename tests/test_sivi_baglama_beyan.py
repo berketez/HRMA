@@ -49,6 +49,7 @@ GERÇEKTEN ulaştığını (uç yanıtında, JSON'a serileşmiş hâlde) kilitle
 Sıvı için zaman çözücüsü YAZILMADI — bu bilinçli bir kapsam kararıdır.
 """
 
+import math
 import os
 import sys
 
@@ -59,6 +60,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from hrma.engines.liquid_rocket_engine import (          # noqa: E402
+    BURN_TIME_DEFAULT_S,
     CHAMBER_MATERIAL_DEFAULT,
     CHAMBER_MATERIAL_SOURCE_DEFAULT,
     CHAMBER_MATERIAL_SOURCE_REJECTED,
@@ -77,6 +79,16 @@ from hrma.engines.liquid_rocket_engine import (          # noqa: E402
 TABAN = dict(thrust=10000, chamber_pressure=100, mixture_ratio=2.5,
              fuel_type='rp1', oxidizer_type='lox',
              cooling_type='regenerative', injector_type='impinging')
+
+
+#: ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ, onemli2-sivi a2): motor yanma süresini
+#: ARTIK VARSAYMAZ. Süre verilmezse pasif ısıl koruma ``NOT_MODELLED``
+#: (eksik: burn_time) ve tank kartı ``not_modelled`` döner; bu dosyanın
+#: 5 düğümü (ablatif astar boyutu, ışınım dengesi bloğu, astar hükmünün
+#: uca taşınması, tank/hazne künye eşliği) SÜRESİ VERİLMİŞ bir tasarımı
+#: ölçer. Süre motorun kendi sabitinden AÇIKÇA verilir (sayı burada
+#: yazılmaz), sayılar LU-1 öncesindeki sessiz varsayımla birebir aynıdır.
+SURE = {'max_burn_duration': BURN_TIME_DEFAULT_S}
 
 
 def _cift(overrides=None, **kwargs):
@@ -111,18 +123,39 @@ def basincli():
 
 @pytest.fixture(scope='module')
 def ablatif():
-    return _kos(cooling_type='ablative')
+    return _kos(dict(SURE), cooling_type='ablative')
 
 
 @pytest.fixture(scope='module')
 def radyatif():
-    return _kos(cooling_type='radiative')
+    return _kos(dict(SURE), cooling_type='radiative')
+
+
+# ÖH D31 · P4B4-07 / OH-D27-08 — ÖRNEK İTİCİ METAN'DAN ETHANOL'E TAŞINDI.
+# Bu dosyanın 'tabloda kaydı OLMAYAN itici' örneği METAN'dı. D31'de su
+# koçu / besleme akışkan tablosu birincil kaynaklı beş yeni kayıtla
+# genişledi (lh2, methane, mmh, udmh, n2o4) ve METAN ARTIK TABLODA.
+# Eski vaka bu bekçilerin iddiasını ARTIK ÖLÇMÜYOR olurdu (kaydı olan
+# bir iticiyle 'kayıt uydurulmaz' denemez). ÖLÇÜLDÜ: motorun desteklediği
+# çiftler ethanol/lox, lh2/lox, methane/lox, mmh/n2o4, rp1/lox,
+# udmh/n2o4; bunlardan tabloda kaydı OLMAYAN tek itici ETHANOL'dür.
+# Bekçilerin İDDİALARI değişmedi, yalnız örnek itici taşındı.
+@pytest.fixture(scope='module')
+def tablosuz_yakit():
+    """Buhar basıncı tablosunda BULUNMAYAN yakıt (etanol)."""
+    return _kos(fuel_type='ethanol')
 
 
 @pytest.fixture(scope='module')
-def tablosuz_yakit():
-    """Buhar basıncı tablosunda BULUNMAYAN yakıt (metan)."""
-    return _kos(fuel_type='methane')
+def tanimsiz_sogutma():
+    """TANINMAYAN soğutma tipi — P3B4-09'un hiç kurulmamış dalı.
+
+    Meşru üç dal (rejeneratif / ablatif / radyatif) bu dosyada ayrı ayrı ve
+    iyi kilitli; kodda dördüncü bir dal (tanınmayan değer) YOKTUR, o yüzden
+    testi de yoktu. Ölçüldü: 'banana' / 'none' / '' değerlerinin üçü de aynı
+    yola düşüyor.
+    """
+    return _kos(cooling_type='banana')
 
 
 @pytest.fixture(scope='module')
@@ -169,7 +202,7 @@ class TestBeslemeAkiskaniKaydi:
 
     def test_tablosuz_itici_icin_kayit_uydurulmaz(self):
         engine = LiquidRocketEngine(**TABAN)
-        anahtar, kayit = engine._feed_fluid_record('methane')
+        anahtar, kayit = engine._feed_fluid_record('ethanol')
         assert (anahtar, kayit) == (None, None), (
             'Tabloda olmayan itici için kayıt üretilmemeli')
 
@@ -221,8 +254,99 @@ class TestTurbopompaBoyutlandirmaBaglamasi:
             assert pompa['vapor_pressure_source'], (
                 'Buhar basıncı kaynak künyesiz kullanılamaz')
         assert blok['turbine']['status'] == 'modelled'
-        assert blok['turbine']['mean_diameter_m'] > 0
         assert blok['turbine']['stage_count'] >= 1
+        assert blok['turbine']['pitch_speed_m_s'] > 0
+        # ÇEVRİLDİ (ÖH D15 birleşme, 1 Eylül 2026): eski satır
+        # ``mean_diameter_m > 0`` diyordu. Yapısal-sistem kulvarının
+        # **P5B3-04** onarımı kademe tavanında çapı GERİ ÇEKİYOR (``None``):
+        # kırpma varken u_pitch dışarıdan gelen zarftır, dolayısıyla
+        # D = 60·U/(pi·N) yalnız o zarfı tekrar eder (ölçüldü: üç motorda da
+        # pompa çark çapına bağıl fark 0,0). Pozitiflik şartı o FAIL-CLOSED
+        # geri çekmeyi yasaklıyordu, yani kapatılan kusuru talep ediyordu.
+        # Yeni sözleşme gevşek değil DAHA DAR: çap ya pozitiftir ya da geri
+        # çekilmiştir VE geri çekme adıyla, gerekçesiyle beyanlıdır.
+        d_ort = blok['turbine']['mean_diameter_m']
+        if d_ort is None:
+            assert blok['turbine']['mean_diameter_is_degenerate'] is True
+            assert any(k.get('field') == 'turbine_mean_diameter'
+                       and k.get('status') == 'withheld'
+                       for k in (blok['turbine'].get('validity') or [])), (
+                'çap geri çekildi ama validity kaydı yok — sessiz None')
+        else:
+            assert d_ort > 0
+            assert blok['turbine']['mean_diameter_is_degenerate'] is False
+
+    # ÖH defter P3B4-02 — Z5S/PK1 onarımıyla yeşile döndü, xfail(strict) imi
+    # 27 Ağustos 2026'da söküldü. Kusur: aynı türbin için aynı yanıtta iki uç
+    # hızı ve iki ortalama çap (kart 615,4852 m/s -> D = 0,32418 m ⟷
+    # boyutlandırma 0,06719 m, 4,824x; ne eşitlik ne ilan edilmiş oran).
+    # Onarım kartın geometri alanlarını boyutlandırma modülünden okutuyor;
+    # kartın kendi tek kademeli kestirimi blade_speed_single_stage_optimum_m_s
+    # adıyla ayrıca duruyor (sessiz ikame yok).
+    def test_turbin_ortalama_capi_kartin_uc_hiziyla_uyusur(self, taban):
+        """TAŞINAN BEKÇİ (P3B4-02): kardeş düğüm ``:191`` türbin için yalnız
+        ``mean_diameter_m > 0`` diyor — 11,979 m'yi de 0,0001 m'yi de
+        geçiren bir POZİTİFLİK denetimi.
+
+        Doğru desen bu dosyada ZATEN VAR: çark çapı için iki bağımsız
+        kestirim ayrı adlarla yayımlanıyor ve oranı bir alan olarak duruyor
+        ('TWO INDEPENDENT ESTIMATES'). Türbin uç hızına uygulanmamış.
+        """
+        besleme = taban['detailed_feed_system']
+        kart = besleme['turbopump_analysis']['turbine']
+        boyut = besleme['turbopump_sizing']['turbine']
+
+        # Kontrol: iki blok AYNI mil devrini kullanıyor (tek kaynak köprüsü).
+        assert boyut['shaft_speed_rpm'] == pytest.approx(
+            kart['rotational_speed'], rel=1e-9), (
+            'iki blok farklı devirde — karşılaştırma tabanı yok')
+
+        # ÇEVRİLDİ (ÖH D15 birleşme, 1 Eylül 2026): yapısal-sistem kulvarının
+        # **P5B3-04** onarımı kademe tavanında çapı GERİ ÇEKİYOR. Sözleşme
+        # "iki blok aynı ÇAPI verir"den "iki blok aynı HÜKMÜ verir"e çevrildi;
+        # iddia zayıflamadı, geri çekme dalı da adıyla kilitlendi. Ürün
+        # tarafında karar (kademe + pitch) ile türev (çap) ayrıldı —
+        # ölçüm ve gerekçe: _reconcile_turbine_geometry docstring'i.
+        d_boyut = boyut['mean_diameter_m']
+        if d_boyut is None:
+            assert kart['mean_diameter_m'] is None, (
+                'boyutlandırma çapı geri çekerken kart hâlâ bir çap '
+                'yayımlıyor — aynı türbin için ikinci geometri')
+            assert kart['mean_diameter_status'] == 'withheld_by_sizing'
+            # Yayımlanan çevre hızı hâlâ boyutlandırmanın kararıdır; kartın
+            # tek kademeli kestirimi onun YERİNE geçmiş olamaz.
+            assert float(kart['blade_tip_speed']) == pytest.approx(
+                float(boyut['pitch_speed_m_s']), rel=1e-12), (
+                'kart, boyutlandırmanın pitch hızını yayımlamıyor — geri '
+                'çekme kartın kendi kestirimine dönüşüne bahane olamaz')
+        else:
+            n = float(kart['rotational_speed'])
+            d_karttan = 60.0 * float(kart['blade_tip_speed']) / (math.pi * n)
+            d_boyut = float(d_boyut)
+            oran = d_karttan / d_boyut if d_boyut else float('inf')
+            assert d_boyut == pytest.approx(d_karttan, rel=1e-6), (
+                'aynı türbinin iki ortalama çapı: kartın uç hızından '
+                f'{d_karttan:.5f} m, boyutlandırma bloğundan {d_boyut:.5f} m '
+                f'({oran:.3f}x). İki kestirim yaşayacaksa İKİ AD, İKİ KÜNYE '
+                've oranın kendisi bir alan olmalı (çark çapı deseni)')
+
+    # ÖH defter P3B4-02'nin ikinci ekseni — Z5S/PK1 onarımıyla yeşile döndü,
+    # xfail(strict) imi 27 Ağustos 2026'da söküldü. Kusur: kart
+    # type = 'Single-stage axial' derken boyutlandırma bloğu stage_count = 3
+    # diyordu; tek yanıtta aynı türbin hem tek hem üç kademeliydi. Kademe
+    # sayısı bir TASARIM KARARIDIR, kart artık onu modülden okuyor.
+    def test_turbin_kademe_sayisi_iki_blokta_ayni(self, taban):
+        """Kademe sayısı bir TASARIM KARARIDIR; iki blok iki karar veremez."""
+        besleme = taban['detailed_feed_system']
+        kart = besleme['turbopump_analysis']['turbine']
+        boyut = besleme['turbopump_sizing']['turbine']
+        kart_tipi = str(kart['type']).lower()
+        kademe = int(boyut['stage_count'])
+        assert kademe >= 1
+        if 'single' in kart_tipi or 'tek' in kart_tipi:
+            assert kademe == 1, (
+                f"kart '{kart['type']}' diyor, boyutlandırma {kademe} kademe "
+                f"({boyut['arrangement']}) yayımlıyor")
 
     def test_iki_cark_capi_da_yayimlanir_biri_digerinin_yerine_gecmez(
             self, taban):
@@ -270,12 +394,12 @@ class TestTurbopompaBoyutlandirmaBaglamasi:
             'NOT_APPLICABLE bloğu sayı taşıyamaz')
 
     def test_buhar_basincsiz_itici_icin_npsh_uydurulmaz(self, tablosuz_yakit):
-        """Metan tabloda yok: yakıt pompası beyanla susar, oksitleyici çalışır."""
+        """Etanol tabloda yok: yakıt pompası beyanla susar, oksitleyici çalışır."""
         blok = tablosuz_yakit['detailed_feed_system']['turbopump_sizing']
         yakit = blok['fuel_pump']
         assert yakit['status'] == 'NOT_MODELLED'
         assert 'vapor_pressure' in yakit['required_inputs']
-        assert 'methane' in yakit['basis']
+        assert 'ethanol' in yakit['basis']
         assert set(yakit) == {'status', 'required_inputs', 'basis'}, (
             'NOT_MODELLED pompa bloğu yalnız gerekçe taşır')
         assert not _sayi_var_mi(yakit), 'Eksik girdiyle sayı üretilmiş'
@@ -403,6 +527,44 @@ class TestPasifIsilKorumaBaglamasi:
         assert not _sayi_var_mi({k: v for k, v in blok.items()
                                  if k != 'status'})
 
+    # ÖH defter P3B4-09 — Z5S/PK1 onarımıyla yeşile döndü, xfail(strict) imi
+    # 27 Ağustos 2026'da söküldü. Kusur: kapı 'not in (ablative, radiative)'
+    # olduğu için TANINMAYAN her dize NOT_APPLICABLE + "the wall is actively
+    # cooled ('X')" hükmüne düşüyordu (ölçüldü: 'banana' -> kanal 0, hız 0,0
+    # ama "aktif soğutuluyor" hükmü; 'none' ve '' de aynı). Onarım tanınan
+    # kümeleri cidar sıcaklığı tablosundan türetip kapıyı ona bağladı;
+    # tanınmayan değer artık NOT_MODELLED + option_not_recognised uyarısı.
+    def test_taninmayan_sogutma_tipinde_aktif_sogutma_hukmu_verilmez(
+            self, taban, tanimsiz_sogutma):
+        """TAŞINAN BEKÇİ (P3B4-09): kardeş düğüm ``:399`` 'actively cooled'
+        CÜMLESİNİN VARLIĞINI kilitliyor — cümlenin DOĞRU olup olmadığını
+        değil. Fikstürü rejeneratif olduğu için iddia orada doğrudur; aynı
+        kod yolu tanınmayan her değer için de aynı cümleyi üretir.
+
+        Kilitlenen sözleşme: "cidar aktif soğutuluyor, çözüm budur" hükmü
+        ancak FİİLEN aktif soğutma varsa verilebilir. Onarım hangi yoldan
+        gelirse gelsin (tanınmayan değeri reddetmek ya da hükmü koşula
+        bağlamak) bu bekçi yeşile döner.
+        """
+        def _hukum(sonuc):
+            blok = sonuc['thermal_protection']['passive_thermal_protection']
+            return (str(blok.get('reason') or ''),
+                    float(sonuc['cooling_system'].get('cooling_channels') or 0),
+                    float(sonuc['cooling_system'].get('coolant_velocity') or 0))
+
+        # Kontrol: MEŞRU rejeneratif dalda hüküm doğrudur (kanal + debi var).
+        gerekce, kanal, hiz = _hukum(taban)
+        assert 'actively cooled' in gerekce
+        assert kanal > 0 and hiz > 0, (
+            'düzenek bozuk: rejeneratif koşuda soğutma kanalı yok')
+
+        gerekce, kanal, hiz = _hukum(tanimsiz_sogutma)
+        if 'actively cooled' in gerekce:
+            assert kanal > 0 and hiz > 0, (
+                'tanınmayan soğutma tipinde "cidar aktif soğutuluyor" hükmü '
+                f'veriliyor ama fiilî soğutma yok (kanal={kanal:g}, '
+                f'hız={hiz:g} m/s). Yayımlanan gerekçe: {gerekce[:120]}')
+
     def test_blok_kendi_adresinde_yayimlanir_koku_kirletmez(
             self, taban, ablatif, radyatif):
         """Düzeltilen kusur: 'modelled' dal sonucu köke serpiyordu.
@@ -432,7 +594,7 @@ class TestPasifIsilKorumaBaglamasi:
         yanit = client.post('/calculate_liquid', json={
             'thrust': 10000, 'chamber_pressure': 100, 'mixture_ratio': 2.5,
             'fuel_type': 'rp1', 'oxidizer_type': 'lox',
-            'cooling_type': 'ablative',
+            'cooling_type': 'ablative', **SURE,
         })
         assert yanit.status_code == 200
         blok = yanit.get_json()['thermal_protection'][
@@ -493,19 +655,32 @@ class TestYapisalKaynakBeyani:
                 ({}, SAFETY_FACTOR_SOURCE_DEFAULT),
                 ({'safety_factor': 1.6}, SAFETY_FACTOR_SOURCE_USER),
                 ({'safety_factor': 99}, SAFETY_FACTOR_SOURCE_REJECTED)):
-            sonuc = _kos(overrides=overrides)
+            sonuc = _kos(overrides=dict(SURE, **overrides))
             hazne = sonuc['structural_analysis']['chamber_structure']
             tank = sonuc['propellant_tanks']['oxidizer_tank']['structural']
             assert hazne['safety_factor_source'] == beklenen
             assert tank['safety_factor_source'] == beklenen
 
     def test_katsayi_yalniz_etikete_degil_kalinliga_da_gider(self):
-        """Beyan doğru olsun diye sayının gerçekten kullanıldığı da ölçülür."""
-        yumusak = _kos(overrides={'safety_factor': 1.2})
-        sert = _kos(overrides={'safety_factor': 5.0})
+        """Beyan doğru olsun diye sayının gerçekten kullanıldığı da ölçülür.
+
+        ÖH D18 fizik-a2 (F2) ÇEVİRİSİ — ÇALIŞMA NOKTASI taşındı, iddia değil.
+        Yayımlanan kalınlık standart levha merdivenine YUVARLANIR
+        (``wall_thickness_source``); daralma oranı sabit 12,25'ten boğaz
+        çapı korelasyonuna geçince 10 kN'lık taban motorun hazne çapı
+        137 mm'den 67 mm'ye indi ve iki emniyet katsayısı (1,2 ve 5,0) AYNI
+        2,0 mm basamağına düştü — test artık kalınlığı değil merdiveni
+        ölçüyordu. İtki, gereksinimin merdivenden yukarıda kaldığı bir
+        noktaya (500 kN) taşındı; iddia aynen korunuyor.
+        """
+        yumusak = _kos(overrides={'safety_factor': 1.2}, thrust=500000)
+        sert = _kos(overrides={'safety_factor': 5.0}, thrust=500000)
         a = yumusak['structural_analysis']['chamber_structure']
         b = sert['structural_analysis']['chamber_structure']
-        assert b['required_wall_thickness'] > a['required_wall_thickness']
+        assert b['required_wall_thickness'] > a['required_wall_thickness'], (
+            'emniyet katsayısı kalınlığa gitmiyor: '
+            f"{a['required_wall_thickness']!r} -> "
+            f"{b['required_wall_thickness']!r}")
         assert b['allowable_stress'] < a['allowable_stress']
 
 

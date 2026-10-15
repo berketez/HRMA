@@ -20,6 +20,22 @@ Kütle politikası:
   malzeme yoğunluğu (``<material type="bulk" density>``) ile
   geometri × yoğunluk TAHMİNİ olarak aktarılır (``estimated: true``);
   yoğunluk dosyada yoksa tahmin YAPILMAZ, atlandığı raporlanır.
+- Kütle listesine NEGATİF ya da sonlu olmayan kütle GİRMEZ; üretecek bir
+  girdi (negatif uzunluk/yarıçap/kalınlık/yoğunluk, negatif beyan edilmiş
+  kütle) sessizce kabul edilmez.
+
+Fizik kapısı (Z5S/P0): ``<length>`` alanı dosyada var ama sonlu bir sayı
+değilse ya da negatifse dosya REDDEDİLİR (``error`` + ``error_code``);
+sessizce 0 m'ye düşürülmez. Ölçülen kusurlar: negatif uzunluk gövde
+kütlesini -0,379 kg yapıp toplamı 0,939 -> 0,182 kg'a düşürüyordu
+(P16B4-03); ``NaN`` uzunluk 1,2 m'lik tüpü sıfırlayıp roketi 1,5 -> 0,3 m
+yapıyordu (P16B4-04) — her ikisi de sıfır uyarıyla.
+
+``mapping_report`` sözleşmesi: ``skipped`` YALNIZ içe aktarılmayan
+BİLEŞENİ listeler. Geometrisi aktarılmış ama kütlesi tahmin edilememiş bir
+bileşen "atlanmış" değildir; bu boşluk ``warnings`` kanalından bildirilir.
+Böylece aynı bileşen hem ``mapped`` hem ``skipped`` listesinde görünmez
+(P16B4-05 iç çelişkisi).
 
 Güvenlik: DTD/ENTITY içeren XML reddedilir; ZIP açılırken yol traversal
 reddi ve açılmış toplam boyut sınırı (bomba koruması) uygulanır; hiçbir
@@ -36,12 +52,19 @@ import xml.etree.ElementTree as ET
 import xml.parsers.expat as expat
 
 import numpy as np
+# ÖH D26 / OH-D25-14: ``np.trapz`` NumPy 2.0'da ad alanından
+# KALDIRILDI (np.trapezoid); ad TEK YERDE çözülür.
+from hrma.utils.numeric_compat import trapezoid as _trapezoid
 
 from hrma.importers import motor_file
 
 try:
-    # defusedxml varsa ayrıştırıcı DTD/varlık/harici başvuruyu HİÇ çözmez;
-    # bekçi regex'ine bağımlılık kalmaz.
+    # defusedxml İSTEĞE BAĞLI ek katmandır, asıl kapı DEĞİL. requirements.txt
+    # ve paket listesinde YOK (V3 SG-2 / SG-01, ana model kararı: yeni
+    # bağımlılık eklenmez, §27-11). XXE'yi aşağıdaki üç katman kapatır ve
+    # defusedxml yokken de kapalı kaldığı ölçüldü (SG-0 poc/sonuc/
+    # sg_enjeksiyon.json; bekçi tests/test_v3_guvenlik.py). Kuruluysa
+    # ayrıştırıcı DTD/varlık/harici başvuruyu ayrıca hiç çözmez.
     from defusedxml.ElementTree import fromstring as _defused_fromstring
 except ImportError:  # pragma: no cover - paket yoksa expat sertleştirmesi devrede
     _defused_fromstring = None
@@ -51,6 +74,34 @@ except ImportError:  # pragma: no cover - paket yoksa expat sertleştirmesi devr
 # ~5:1 üzeri genişleme oranlarını da dolaylı olarak sınırlar.
 ORK_MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 ORK_ZIP_MAX_MEMBER_COUNT = 200
+
+# --- Fiziksel zarf (P9B5-16) ---
+#
+# ÖLÇÜLDÜ (ÖH D16/ihracat a2, taban 6fde52b): işaret kapıları vardı ama
+# BÜYÜKLÜK kapısı yoktu. ``<length>1e9</length>`` bir gövde tüpü
+#
+#     HTTP 200 · bileşen kütlesi 588.106.144,75 kg ·
+#     ``aero.body_length`` = 1.000.000.000,15 m · ``warnings`` = [ ]
+#
+# üretiyordu; ``<radius>1e9</radius>`` ise ``aero.body_diameter``a
+# 2.000.000.000 m ve 15.079.644.737 kg bileşen kütlesi yazıyordu. İkisi de
+# ``/api/six-dof-analysis`` sözleşmesine (BarrowmanAero) ve 6-DOF panelinin
+# kütle/ağırlık-merkezi tablosuna DOĞRUDAN giriyordu.
+#
+# Zarf, uçmuş en büyük araçlardan TÜRETİLİR ve cömerttir — işi fizik
+# parametresi olmak değil, saçmayı yakalamaktır:
+#   * uzunluk: uçmuş en uzun araç Starship/Super Heavy ~121 m (SpaceX),
+#     Saturn V 110,6 m, N1 105,3 m → tek BİLEŞEN için 200 m üst sınır
+#     her gerçek tasarımın kat kat üstünde.
+#   * yarıçap: en büyük gövde çapı N1 birinci kademe tabanı 17,0 m
+#     (yarıçap 8,5 m), Saturn V 10,06 m, Starship 9,0 m → 20 m yarıçap
+#     (40 m çap) üst sınırı aynı şekilde cömerttir.
+#
+# Bant TEK KAYNAKTIR: hem uzunluk kapısı hem yarıçap kapısı bu iki adı
+# okur, metinlerini de bu sayılardan üretir (elle yazılmış ikinci kopya
+# yok).
+ORK_COMPONENT_LENGTH_MAX_M = 200.0
+ORK_COMPONENT_RADIUS_MAX_M = 20.0
 
 # Serbest biçimli kanat taraması: kiriş uzunluğu örnekleme sayısı
 # (deterministik sayısal integral çözünürlüğü)
@@ -68,8 +119,14 @@ DIAMETER_DISTINCT_TOL_M = 1e-4
 # için bayt regex'i eşleşmiyor. Düzeltme üç katmanlıdır:
 #   1) ham bayt regex'i (ucuz, UTF-8/ASCII için hızlı ret),
 #   2) kodlama tespiti + metne çevirip metin regex'i (kodlamadan bağımsız),
-#   3) expat'ın KENDİ kodlama çözümüyle yapısal tarama (kesin katman),
-# ve ayrıştırma da DTD/varlık çözmeyen bir ayrıştırıcıyla yapılır.
+#   3) expat'ın KENDİ kodlama çözümüyle yapısal tarama (kesin katman).
+# Üç katmanın üçü de standart kütüphanedir ve her kurulumda vardır. Bunlardan
+# geçen belge DTD taşımaz; ayrıştırma defusedxml KURULUYSA onunla (ek katman,
+# forbid_dtd/forbid_entities/forbid_external), değilse CPython ElementTree ile
+# yapılır (o da harici varlığı diskten/ağdan çözmez). defusedxml
+# requirements'ta YOKTUR; paketli üründe bulunacağı varsayılmaz (V3 SG-2 /
+# SG-01 beyan düzeltmesi: eski cümle ayrıştırıcının her kurulumda DTD/varlık
+# çözmediğini ima ediyordu).
 _XML_FORBIDDEN = re.compile(rb'<!\s*(?:DOCTYPE|ENTITY)', re.IGNORECASE)
 _XML_FORBIDDEN_TEXT = re.compile(r'<!\s*(?:DOCTYPE|ENTITY)', re.IGNORECASE)
 
@@ -209,7 +266,12 @@ def _xml_yapisal_tarama(raw):
 
 
 def _xml_guvenlik_denetimi(raw):
-    """Üç katmanlı DTD/ENTITY bekçisi; reddedilirse hata mesajı döndür."""
+    """Üç katmanlı DTD/ENTITY bekçisi; reddedilirse hata mesajı döndür.
+
+    Katmanlar: ham bayt regex + kodlama-bağımsız metin regex + expat
+    yapısal tarama. defusedxml bu bekçinin parçası DEĞİLDİR; kuruluysa
+    ``_guvenli_xml_ayristir``'da ek katman olarak devreye girer.
+    """
     if _XML_FORBIDDEN.search(raw):
         return _XML_RED_MESAJI
     for metin in _xml_metinleri(raw):
@@ -237,20 +299,18 @@ def _guvenli_xml_ayristir(raw):
 # ---------------------------------------------------------------------------
 # Küçük yardımcılar
 # ---------------------------------------------------------------------------
-def _to_float(value):
-    """Metni float'a çevir; 'auto' ve sayısal olmayan değerlerde None."""
-    if value is None:
-        return None
-    s = str(value).strip()
-    if not s or s.lower().startswith('auto'):
-        return None
-    if ',' in s and '.' not in s:
-        s = s.replace(',', '.')
-    try:
-        v = float(s)
-    except ValueError:
-        return None
-    return v if np.isfinite(v) else None
+#: Metin -> float çevirisi TEK TANIMDIR: ``motor_file._to_float``.
+#:
+#: ÖH D28 / altyapi (defter OH-D27-11, altyapi payı). Burada ikinci bir
+#: uygulama duruyordu ve docstring'i ayrı bir davranış vaat ediyordu:
+#: "'auto' ve sayısal olmayan değerlerde None". ÖLÇÜLDÜ (33 vakalık
+#: korpus, ``once.json``/``sonra.json``): iki uygulama 33/33 vakada AYNI
+#: değeri döndürüyor, fark 0. ``'auto'`` dalı ÖLÜ KODDU — ``float('auto…')``
+#: zaten ``ValueError`` atıp ``None`` üretiyor. Yani ayrı tanım hiçbir
+#: davranış taşımıyor, yalnız iki kopyanın ayrışma riskini taşıyordu.
+#: ``motor_file`` bu modülde zaten ithal ediliyor (yukarıda), yeni bağımlılık
+#: doğmadı. Sözleşme ve sayılar DEĞİŞMEDİ.
+_to_float = motor_file._to_float
 
 
 def _child_float(elem, name):
@@ -260,6 +320,105 @@ def _child_float(elem, name):
 def _component_name(elem, fallback):
     name = elem.findtext('name')
     return name.strip() if name and name.strip() else fallback
+
+
+def _component_length(elem, field, tag, name, warnings, warn_missing=True):
+    """Bileşen uzunluğunu [m] fizik kapısından geçirerek çöz.
+
+    Dönen ikili: ``(length_m, None)`` ya da ``(None, hata_sözlüğü)``.
+
+    - Alan yoksa/boşsa 0 m kabul edilir; ``warn_missing`` ise bildirilir.
+    - Alan var ama sonlu bir sayı değilse (``NaN``, ``inf``, metin) ya da
+      negatifse dosya REDDEDİLİR. Sessiz 0'a düşürme, dosyada olmayan bir
+      geometriyi uydurmak demektir; negatif uzunluk ise hem negatif kütle
+      hem kaymış eksenel konum üretir.
+    """
+    raw = elem.findtext(field)
+    text = '' if raw is None else str(raw).strip()
+    if not text:
+        if warn_missing:
+            warnings.append(
+                f"{tag} '{name}': <{field}> is missing in the file; treated "
+                'as 0 m in the axial layout.')
+        return 0.0, None
+    value = _to_float(text)
+    if value is None:
+        return None, motor_file.error_result(
+            'unphysical_component_length',
+            f"{tag} '{name}': <{field}> is '{text[:40]}', which is not a "
+            'finite number. Component lengths must be finite, non-negative '
+            'metres; the file is rejected instead of silently importing '
+            '0 m.')
+    if value < 0:
+        return None, motor_file.error_result(
+            'unphysical_component_length',
+            f"{tag} '{name}': <{field}> is {value:g} m. Component lengths "
+            'must be non-negative: a negative length produces negative '
+            'component mass and shifts every axial position, so the file is '
+            'rejected.')
+    if value > ORK_COMPONENT_LENGTH_MAX_M:
+        return None, motor_file.error_result(
+            'unphysical_component_length',
+            f"{tag} '{name}': <{field}> is {value:g} m, above the "
+            f'{ORK_COMPONENT_LENGTH_MAX_M:g} m physical envelope for a '
+            'single component (the tallest vehicle ever flown is about '
+            '121 m overall). Such a value produces a geometry x density '
+            'mass and an axial layout that are not a rocket, so the file '
+            'is rejected instead of importing them into the 6-DOF '
+            'contract.')
+    if value == 0.0 and warn_missing:
+        warnings.append(f"{tag} '{name}': <{field}> is 0 m; the component "
+                        'contributes no axial length.')
+    return value, None
+
+
+def _check_component_radius(externals):
+    """Çözülmüş yarıçapları fiziksel zarftan geçir (P9B5-16).
+
+    Dönen: ``None`` (hepsi geçti) ya da hata sözlüğü.
+
+    Uzunluk kapısının SİMETRİĞİdir. Eskiden negatif yarıçap yalnız kütle
+    tahminini düşürüyordu (bileşen kütle listesinden sessizce çıkıyordu),
+    devasa yarıçap ise HİÇBİR kapıya takılmadan ``aero.body_diameter``a
+    yazılıyordu. Yarıçap, kütleden bağımsız olarak aero eşlemesine giren
+    bir GEOMETRİ alanıdır; oraya fizik-dışı bir sayı girerse dosya
+    reddedilir.
+    """
+    for ext in externals:
+        for key in ('fore_radius', 'aft_radius'):
+            radius = ext.get(key)
+            if radius is None:
+                continue
+            # Alan adı bileşenin KENDİ etiketinden gelir; komşudan
+            # miras alınmışsa (``auto``) o da adıyla söylenir.
+            alan = (ext.get('radius_fields') or {}).get(key)
+            if alan is None:
+                alan = ('aftradius' if key == 'aft_radius' else 'foreradius')
+                alan += " (resolved from a neighbour's 'auto' radius)"
+            if not np.isfinite(radius):
+                return motor_file.error_result(
+                    'unphysical_component_radius',
+                    f"{ext['tag']} '{ext['name']}': <{alan}> is {radius:g}, "
+                    'which is not a finite number. Component radii must be '
+                    'finite, non-negative metres; the file is rejected '
+                    'instead of importing the value into the aero mapping.')
+            if radius < 0:
+                return motor_file.error_result(
+                    'unphysical_component_radius',
+                    f"{ext['tag']} '{ext['name']}': <{alan}> is {radius:g} m. "
+                    'Component radii must be non-negative: a negative radius '
+                    'turns the thin-wall volume into a solid-rod volume and '
+                    'still reaches the aero mapping, so the file is '
+                    'rejected.')
+            if radius > ORK_COMPONENT_RADIUS_MAX_M:
+                return motor_file.error_result(
+                    'unphysical_component_radius',
+                    f"{ext['tag']} '{ext['name']}': <{alan}> is {radius:g} m, "
+                    f'above the {ORK_COMPONENT_RADIUS_MAX_M:g} m physical '
+                    'envelope for a single component (the widest stage ever '
+                    'flown is about 17 m across). The file is rejected '
+                    'instead of importing it into the 6-DOF contract.')
+    return None
 
 
 def _material_bulk_density(elem):
@@ -345,24 +504,28 @@ def _extract_from_zip(data):
     try:
         zip_file = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
-        return {'error': f'Corrupt ZIP archive: {exc}'}
+        return motor_file.error_result('corrupt_zip',
+                                       f'Corrupt ZIP archive: {exc}')
     infos = zip_file.infolist()
     if len(infos) > ORK_ZIP_MAX_MEMBER_COUNT:
-        return {'error': (
+        return motor_file.error_result('zip_member_limit', (
             f'ZIP archive contains {len(infos)} entries (limit '
-            f'{ORK_ZIP_MAX_MEMBER_COUNT}); import rejected.')}
+            f'{ORK_ZIP_MAX_MEMBER_COUNT}); import rejected.'))
     declared_total = 0
     for info in infos:
         norm = info.filename.replace('\\', '/')
         parts = norm.split('/')
         if norm.startswith('/') or re.match(r'^[A-Za-z]:', norm) \
                 or '..' in parts:
-            return {'error': (
-                f"Unsafe path in ZIP archive rejected: '{info.filename}'.")}
+            return motor_file.error_result('unsafe_zip_path', (
+                f"Unsafe path in ZIP archive rejected: "
+                f"'{info.filename}'."))
         declared_total += max(info.file_size, 0)
     if declared_total > ORK_MAX_UNCOMPRESSED_BYTES:
-        return {'error': ('ZIP archive expands beyond the allowed size '
-                          'limit (possible zip bomb); import rejected.')}
+        return motor_file.error_result(
+            'zip_bomb',
+            'ZIP archive expands beyond the allowed size limit (possible '
+            'zip bomb); import rejected.')
     names = [i.filename for i in infos if not i.is_dir()]
     ork_names = [n for n in names if n.lower().endswith('.ork')]
     target = next((n for n in ork_names
@@ -373,8 +536,9 @@ def _extract_from_zip(data):
         warnings.append(f"'rocket.ork' not found in the archive; using "
                         f"'{target}' instead.")
     if target is None:
-        return {'error': ("ZIP archive does not contain a 'rocket.ork' "
-                          'design file.')}
+        return motor_file.error_result(
+            'no_rocket_ork',
+            "ZIP archive does not contain a 'rocket.ork' design file.")
     budget = ORK_MAX_UNCOMPRESSED_BYTES
     try:
         xml_bytes = _read_member_bounded(zip_file, target, budget)
@@ -387,9 +551,10 @@ def _extract_from_zip(data):
                 rse_entries.append((name, raw.decode('utf-8',
                                                      errors='replace')))
     except _ZipSafetyError as exc:
-        return {'error': str(exc)}
+        return motor_file.error_result('zip_bomb', str(exc))
     except (zipfile.BadZipFile, zlib.error) as exc:
-        return {'error': f'Corrupt ZIP archive: {exc}'}
+        return motor_file.error_result('corrupt_zip',
+                                       f'Corrupt ZIP archive: {exc}')
     return {'xml': xml_bytes, 'rse': rse_entries, 'warnings': warnings}
 
 
@@ -446,10 +611,25 @@ def _freeform_to_trapezoid(points):
     # taraftan) örnekle — uç kiriş değeri korunur, integral doğru kalır.
     sample_ys = np.minimum(ys, span * (1.0 - 1e-9))
     chords = np.array([_polygon_chord(points, y) for y in sample_ys])
-    area = float(np.trapz(chords, ys))
+    area = float(_trapezoid(chords, ys))
     if area <= 0:
         return None
-    mac = float(np.trapz(chords ** 2, ys)) / area
+    mac = float(_trapezoid(chords ** 2, ys)) / area
+    # --- ÖH D24 / defter P9B5-34: HEDEF MAC'İN KENDİ ÇÖZÜNÜRLÜK TABANI -----
+    # ``mac`` bir integral DEĞERİ değil, ``FIN_SCANLINE_SAMPLES`` noktalı
+    # yamuk kuralının KESTİRİMİDİR. Aşağıdaki "MAC korunamadı" hükmü, bu
+    # kestirimle trapezin kapalı-form MAC'ini karşılaştırarak veriliyor;
+    # dolayısıyla kestirimin kendi hatasından küçük bir sapma HÜKÜM DEĞİL,
+    # GÜRÜLTÜDÜR. Taban uydurulmaz, ÖLÇÜLÜR: aynı integral yarı çözünürlükte
+    # bir kez daha alınır ve iki kestirimin farkı çözünürlük tabanı sayılır
+    # (yamuk kuralı h² ile yakınsadığı için gerçek hata bu farkın ~1/3'üdür;
+    # yani taban ~3 kat muhafazakârdır).
+    ys_kaba = ys[::2]
+    chords_kaba = chords[::2]
+    alan_kaba = float(_trapezoid(chords_kaba, ys_kaba))
+    mac_kaba = (float(_trapezoid(chords_kaba ** 2, ys_kaba)) / alan_kaba
+                if alan_kaba > 0 else mac)
+    mac_cozunurluk_tabani = abs(mac - mac_kaba)
     notes = []
     # Trapez kısıtları: cr+ct = 2A/s; MAC_trap = (2/3)(P^2 - cr*ct)/P
     chord_sum = 2.0 * area / span
@@ -463,8 +643,35 @@ def _freeform_to_trapezoid(points):
         # MAC bir trapezle korunamayacak kadar büyük: alan+açıklık korunur
         tip = 0.0
         root = chord_sum
-        notes.append('fin MAC could not be preserved exactly; area and '
-                     'span preserved with a triangular planform')
+        # --- ÖH D24 / defter P9B5-34: NOT KAZANILIR, KOŞULSUZ BASILMAZ -----
+        # ÖLÇÜLDÜ (``a2/once.json`` -> ``M6_P9B5_34``, taban 88a29d3): ÜÇGEN
+        # kanatta (uçta tek nokta) bu dal daima ateşleniyordu, çünkü üçgen
+        # dönüşümün SINIR halidir — ct = 0, cr = chord_sum, MAC = (2/3)·cr —
+        # ve ``tip`` yalnız kayan nokta artığı kadar negatife düşüyordu.
+        # Basılan not ise "MAC korunamadı" diyordu. Ölçülen gerçek:
+        #
+        #   üçgen (dik / süpürmeli): hedef MAC 0,10000019073 m
+        #                            trapez MAC 0,10000000000 m
+        #                            bağıl fark 1,9e-06  = tarama gürültüsü
+        #
+        # Yani MAC KORUNMUŞTU; sapmanın tamamı hedefin kendi tarama hatasıydı
+        # (513 noktalı yamuk kuralı). Not, dosyayı içe aktaran kullanıcıya
+        # olmayan bir bilgi kaybı bildiriyordu.
+        #
+        # Not artık ÖLÇÜLEREK kazanılır: trapezin kapalı-form MAC'i hedefle
+        # karşılaştırılır ve sapma yalnız hedefin ÖLÇÜLEN çözünürlük tabanını
+        # (+ kayan nokta yuvarlaması) aştığında bildirilir — ve o zaman
+        # SAYIYLA bildirilir. Gerçekten temsil edilemeyen bir dış çizgide
+        # (MAC > (2/3)·chord_sum, ör. elmas/içbükey kanat) dal aynen çalışır.
+        mac_trapez = (2.0 / 3.0) * root
+        sapma = abs(mac_trapez - mac)
+        tolerans = mac_cozunurluk_tabani + 8.0 * float(np.finfo(float).eps) * mac
+        if sapma > tolerans:
+            notes.append(
+                'fin MAC could not be preserved exactly; area and span '
+                'preserved with a triangular planform (target MAC '
+                f'{mac:.6g} m, achieved {mac_trapez:.6g} m, '
+                f'relative deviation {sapma / mac:.3g})')
     # Süpürme: uç hücum kenarı x konumu (en yüksek y'deki en küçük x)
     tip_candidates = [x for x, y in points if abs(y - span) <= 1e-9]
     sweep = min(tip_candidates) if tip_candidates else 0.0
@@ -475,16 +682,56 @@ def _freeform_to_trapezoid(points):
 # ---------------------------------------------------------------------------
 # Yapısal kütle tahminleri (dosyadaki yoğunlukla; yoksa tahmin YOK)
 # ---------------------------------------------------------------------------
+def _mass_not_estimated_warning(tag, name, note):
+    """Kütlesi tahmin edilemeyen bileşenin uyarı cümlesi — TEK tanım noktası.
+
+    ÖH D33 / OH-UC-10. ÖLÇÜLDÜ (``docs/scofield/raw/OH/D33/ihracat/a1/
+    once.json`` K3, taban ``56f88e70``): AYNI cümle iki ayrı f-string
+    bloğunda yazılıydı (kanat dalı ve gövde/dış bileşen dalı) ve gerileme
+    kilidi (``P9B5-17``,
+    ``tests/test_d23_ihracat_a1.py::TestP9B5_17MalzemeYogunluguEksik``) ile
+    ``tests/test_z5s_ice_aktarma_kapilari.py``\'nin kilidi YALNIZ dış
+    bileşen dalını tutuyordu ('Body' / 'Burun'). Kanat dalı bekçisizdi:
+    orada cümlenin sessizce değişmesi ya da düşmesi kimseyi kırmızıya
+    çevirmiyordu. İki dal artık aynı cümleyi BURADAN alır.
+
+    ``skipped`` listesine GİRMEZ: bileşenin geometrisi aero eşlemesine
+    girdi, yalnız kütlesi tahmin edilemedi (P16B4-05 mapped/skipped
+    çelişkisi). Boşluk ``warnings`` kanalından bildirilir.
+    """
+    return (f"{tag} '{name}': mass could not be estimated ({note}); the "
+            'component is absent from the mass list while its geometry is '
+            'used for the aero mapping.')
+
+
 def _estimate_structural_mass(tag, elem, geometry):
     """Geometri × dosya yoğunluğu kütle tahmini.
 
     Dönen: (mass_kg, yöntem_notu) ya da (None, atlama_nedeni).
+
+    Kapı: yoğunluk yoksa tahmin yapılmaz; yoğunluk VAR ama fizik-dışıysa
+    (<= 0) gerekçe bunu ADIYLA söyler — eskiden "dosyada yoğunluk yok"
+    deniyordu, yani ret doğruyken gerekçe yanlış alanı suçluyordu
+    (P16B4-05). Sonuç kütlesi sonlu ve pozitif olmak zorundadır: negatif
+    geometri girdisi kütle bütçesine negatif bileşen sokamaz (P16B4-03).
     """
     density = _material_bulk_density(elem)
-    if density is None or density <= 0:
+    if density is None:
         return None, ('no bulk material density in file; mass not '
                       'estimated (no fabricated defaults)')
+    if density <= 0:
+        return None, (f'material bulk density in file is {density:g} kg/m3, '
+                      'which is not physical; mass not estimated')
+    for key in ('radius', 'length', 'fore_radius', 'aft_radius',
+                'panel_area'):
+        value = geometry.get(key)
+        if value is not None and (not np.isfinite(value) or value < 0):
+            return None, (f'{key} in file is {value:g}, which is not '
+                          'physical; mass not estimated')
     thickness = _child_float(elem, 'thickness')
+    if thickness is not None and thickness < 0:
+        return None, (f'thickness in file is {thickness:g} m, which is not '
+                      'physical; mass not estimated')
     filled = (elem.findtext('filled') or '').strip().lower() == 'true'
     if tag == 'bodytube':
         radius = geometry.get('radius')
@@ -532,7 +779,12 @@ def _estimate_structural_mass(tag, elem, geometry):
         method = 'fin planform area x thickness x count x density'
     else:
         return None, f'no mass model for component type {tag}'
-    return float(volume * density), method
+    mass = float(volume * density)
+    if not np.isfinite(mass) or mass <= 0.0:
+        return None, (f'the geometry x density estimate evaluates to '
+                      f'{mass:g} kg, which is not a usable mass; mass not '
+                      'estimated')
+    return mass, method
 
 
 # ---------------------------------------------------------------------------
@@ -562,10 +814,12 @@ def parse_ork(data):
     if isinstance(data, str):
         data = data.encode('utf-8')
     if not isinstance(data, (bytes, bytearray)):
-        return {'error': 'ORK content must be provided as bytes.'}
+        return motor_file.error_result(
+            'not_bytes', 'ORK content must be provided as bytes.')
     data = bytes(data)
     if not data:
-        return {'error': 'The uploaded .ork file is empty.'}
+        return motor_file.error_result(
+            'empty_file', 'The uploaded .ork file is empty.')
 
     warnings = []
     mapped, approximated, skipped = [], [], []
@@ -581,33 +835,40 @@ def parse_ork(data):
         try:
             xml_bytes = _bounded_gunzip(data)
         except _ZipSafetyError as exc:
-            return {'error': str(exc)}
+            return motor_file.error_result('gzip_bomb', str(exc))
     else:
         xml_bytes = data
 
     guvenlik_reddi = _xml_guvenlik_denetimi(xml_bytes)
     if guvenlik_reddi is not None:
-        return {'error': guvenlik_reddi}
+        return motor_file.error_result('xml_security', guvenlik_reddi)
     try:
         root = _guvenli_xml_ayristir(xml_bytes)
     except ET.ParseError as exc:
-        return {'error': f'Invalid XML in .ork file: {exc}'}
+        return motor_file.error_result('invalid_xml',
+                                       f'Invalid XML in .ork file: {exc}')
     except ValueError as exc:
         # defusedxml'in DTD/varlık/harici başvuru reddi ValueError türevidir
         # (DefusedXmlException). Bekçi zaten yakalamış olmalı; bu dal
         # ayrıştırıcının son sözünü kullanıcıya aynı mesajla iletir.
         if type(exc).__module__.startswith('defusedxml'):
-            return {'error': _XML_RED_MESAJI}
-        return {'error': f'Invalid XML in .ork file: {exc}'}
+            return motor_file.error_result('xml_security',
+                                           _XML_RED_MESAJI)
+        return motor_file.error_result('invalid_xml',
+                                       f'Invalid XML in .ork file: {exc}')
     if root.tag != 'openrocket':
-        return {'error': ('Not an OpenRocket design file (root element '
-                          f'is <{root.tag}>, expected <openrocket>).')}
+        return motor_file.error_result('not_openrocket', (
+            'Not an OpenRocket design file (root element is '
+            f'<{root.tag}>, expected <openrocket>).'))
     rocket = root.find('rocket')
     if rocket is None:
-        return {'error': 'The file contains no <rocket> definition.'}
+        return motor_file.error_result(
+            'no_rocket_element',
+            'The file contains no <rocket> definition.')
     stages = rocket.findall('./subcomponents/stage')
     if not stages:
-        return {'error': 'The rocket has no stages.'}
+        return motor_file.error_result('no_stages',
+                                       'The rocket has no stages.')
     if len(stages) > 1:
         warnings.append(
             f'Multi-stage design: only the sustainer (first stage) was '
@@ -623,15 +884,21 @@ def parse_ork(data):
     running_x = 0.0
     stage_children = sustainer.find('subcomponents')
     if stage_children is None:
-        return {'error': 'The sustainer stage has no components.'}
+        return motor_file.error_result(
+            'no_stage_components',
+            'The sustainer stage has no components.')
     for elem in stage_children:
         tag = elem.tag
         if tag in ('nosecone', 'bodytube', 'transition'):
-            length = _child_float(elem, 'length') or 0.0
+            name = _component_name(elem, tag)
+            length, length_error = _component_length(elem, 'length', tag,
+                                                     name, warnings)
+            if length_error is not None:
+                return length_error
             externals.append({
                 'elem': elem, 'tag': tag, 'start': running_x,
                 'length': length,
-                'name': _component_name(elem, tag),
+                'name': name,
             })
             running_x += length
         elif tag in _SKIP_TAGS:
@@ -641,8 +908,10 @@ def parse_ork(data):
             skipped.append(f"{tag} '{_component_name(elem, tag)}': "
                            'unrecognized component type')
     if not externals:
-        return {'error': ('No axial components (nose cone / body tube) '
-                          'found in the sustainer stage.')}
+        return motor_file.error_result(
+            'no_axial_components',
+            'No axial components (nose cone / body tube) found in the '
+            'sustainer stage.')
     body_length = running_x
 
     # --- Yarıçap çözümü ('auto' değerler komşudan) ---
@@ -651,13 +920,21 @@ def parse_ork(data):
         if tag == 'nosecone':
             ext['fore_radius'] = 0.0
             ext['aft_radius'] = _child_float(elem, 'aftradius')
+            ext['radius_fields'] = {'fore_radius': None,
+                                    'aft_radius': 'aftradius'}
         elif tag == 'bodytube':
             radius = _child_float(elem, 'radius')
             ext['fore_radius'] = radius
             ext['aft_radius'] = radius
+            # Gövde tüpünde iki yarıçap da TEK alandan gelir: mesaj
+            # dosyanın gerçekten taşıdığı etiketi suçlamalı.
+            ext['radius_fields'] = {'fore_radius': 'radius',
+                                    'aft_radius': 'radius'}
         else:  # transition
             ext['fore_radius'] = _child_float(elem, 'foreradius')
             ext['aft_radius'] = _child_float(elem, 'aftradius')
+            ext['radius_fields'] = {'fore_radius': 'foreradius',
+                                    'aft_radius': 'aftradius'}
     for i, ext in enumerate(externals):  # ileri geçiş: önceki komşudan
         if ext['fore_radius'] is None and i > 0:
             ext['fore_radius'] = externals[i - 1]['aft_radius']
@@ -669,6 +946,12 @@ def parse_ork(data):
             ext['aft_radius'] = externals[i + 1]['fore_radius']
         if ext['fore_radius'] is None and ext['tag'] == 'bodytube':
             ext['fore_radius'] = ext['aft_radius']
+
+    # P9B5-16: yarıçaplar çözüldü; aero eşlemesine girmeden ÖNCE fiziksel
+    # zarftan geçerler (uzunluk kapısının simetriği).
+    radius_error = _check_component_radius(externals)
+    if radius_error is not None:
+        return radius_error
 
     diameters = []
     for ext in externals:
@@ -743,17 +1026,48 @@ def parse_ork(data):
                 if sweep is None:
                     warnings.append(f"finset '{name}': sweep length "
                                     'missing; fin_sweep left unset.')
-                if None in (root_chord, span) or not count:
-                    warnings.append(f"finset '{name}': incomplete geometry; "
-                                    'skipped.')
+                # ÖH D23 / defter P9B5-26 — EKSİK ``tipchord`` ARTIK
+                # SESSİZCE 0 OLMUYOR.
+                #
+                # ÖLÇÜLDÜ (taban ``ef527ae``, ``once.json`` bölümü P9B5-26;
+                # 3 kanat, kök 0,20 m, uç 0,10 m, açıklık 0,10 m, kalınlık
+                # 3 mm, ρ = 1850 kg/m³):
+                #
+                #     tipchord VAR  -> toplam kütle 1,115909 kg
+                #     tipchord YOK  -> toplam kütle 1,032659 kg  (-%7,46)
+                #     warnings      -> ['nosecone ... nose_type left unset.']
+                #
+                # Yani planform alanını doğrudan belirleyen bir ölçü dosyada
+                # yokken ``tip_chord = 0.0`` UYDURULUYOR, kanat kütlesi
+                # düşüyor ve ``warnings`` bunu HİÇ anmıyordu (kalemde ölçülen
+                # gerçek kanat kaybı -%33). Kardeş alan ``sweeplength``
+                # eksikken DOĞRU davranıyor: uydurmuyor, alanı boş bırakıyor
+                # ve uyarıyor.
+                #
+                # ``tipchord`` ``sweeplength``ten farklıdır: yamuk alanının
+                # (b·(c_r+c_t)/2) İKİ zorunlu ölçüsünden biridir, isteğe bağlı
+                # bir yerleşim parametresi değil. OpenRocket ucu sivri kanadı
+                # da ``<tipchord>0.0</tipchord>`` yazarak AÇIKÇA bildirir;
+                # etiketin YOKLUĞU "sivri kanat" demek değil, ölçünün
+                # bilinmediği demektir. Bu yüzden kalan zorunlu ölçülerle
+                # (``rootchord``, ``height``, ``fincount``) AYNI kapıya
+                # bağlandı: sayı uydurulmaz, kanat takımı atlanır ve
+                # gerekçesi adıyla bildirilir (fail-closed).
+                if None in (root_chord, tip_chord, span) or not count:
+                    _eksik = [ad for ad, deger in
+                              (('rootchord', root_chord),
+                               ('tipchord', tip_chord),
+                               ('height', span),
+                               ('fincount', count or None))
+                              if deger is None]
+                    _detay = (' (missing: ' + ', '.join(_eksik) + ')'
+                              if _eksik else '')
+                    warnings.append(f"finset '{name}': incomplete geometry"
+                                    f'{_detay}; skipped. No substitute '
+                                    'dimension is invented.')
                     skipped.append(f"trapezoidfinset '{name}': incomplete "
-                                   'geometry')
+                                   f'geometry{_detay}')
                     continue
-                if tip_chord is None:
-                    tip_chord = 0.0
-                    approximated.append(
-                        f"trapezoidfinset '{name}': tip chord missing in "
-                        'file; treated as 0 (pointed fin)')
                 panel_area = span * (root_chord + tip_chord) / 2.0
                 mapped.append(f"trapezoidfinset '{name}': {count} fins, "
                               'root/tip/span/sweep')
@@ -794,7 +1108,12 @@ def parse_ork(data):
             mass, note = _estimate_structural_mass(
                 elem.tag, elem, {'panel_area': panel_area, 'count': count})
             if mass is None:
-                skipped.append(f"{elem.tag} '{name}' mass: {note}")
+                # 'skipped' YALNIZ içe aktarılmayan bileşen içindir; bu
+                # kanat aero eşlemesine girdi, yalnız kütlesi tahmin
+                # edilemedi. Boşluk warnings kanalından bildirilir
+                # (P16B4-05 mapped/skipped çelişkisi).
+                warnings.append(
+                    _mass_not_estimated_warning(elem.tag, name, note))
             else:
                 components.append({
                     'name': name, 'mass_kg': mass,
@@ -827,7 +1146,10 @@ def parse_ork(data):
         mass, note = _estimate_structural_mass(ext['tag'], ext['elem'],
                                                geometry)
         if mass is None:
-            skipped.append(f"{ext['tag']} '{ext['name']}' mass: {note}")
+            # Bileşen 'skipped' DEĞİL: geometrisi aero eşlemesine girdi,
+            # yalnız kütlesi tahmin edilemedi (P16B4-05).
+            warnings.append(
+                _mass_not_estimated_warning(ext['tag'], ext['name'], note))
         else:
             components.append({
                 'name': ext['name'], 'mass_kg': mass,
@@ -847,13 +1169,33 @@ def parse_ork(data):
                       for child in parent}
         for elem in ext['elem'].iter('masscomponent'):
             name = _component_name(elem, 'mass component')
-            mass = _child_float(elem, 'mass')
+            raw_mass = elem.findtext('mass')
+            mass_text = '' if raw_mass is None else str(raw_mass).strip()
+            mass = _to_float(mass_text)
             if mass is None:
-                warnings.append(f"mass component '{name}': mass value "
-                                'missing; skipped.')
-                skipped.append(f"masscomponent '{name}': no mass value")
+                # Gerekçe alanın gerçek durumunu söyler: alan yok mu, yoksa
+                # var ama sonlu sayı değil mi (NaN/inf/metin).
+                reason = ('no mass value' if not mass_text
+                          else f"mass value '{mass_text[:40]}' is not a "
+                               'finite number')
+                warnings.append(f"mass component '{name}': {reason}; "
+                                'skipped.')
+                skipped.append(f"masscomponent '{name}': {reason}")
                 continue
-            length = _child_float(elem, 'packedlength') or 0.0
+            if mass < 0:
+                return motor_file.error_result(
+                    'unphysical_component_mass',
+                    f"mass component '{name}': <mass> is {mass:g} kg. "
+                    'Component masses must be non-negative; the file is '
+                    'rejected instead of importing a negative mass into the '
+                    'budget.')
+            # packedlength yoksa uyarı üretilmez: extent'i olmayan bir nokta
+            # kütle biçim gereği geçerlidir (0 m uydurma değil, tanım).
+            length, length_error = _component_length(
+                elem, 'packedlength', 'mass component', name, warnings,
+                warn_missing=False)
+            if length_error is not None:
+                return length_error
             start, pos_approx = _resolve_axial_offset(
                 elem, ext['start'], ext['length'], length, warnings,
                 f"mass component '{name}'")

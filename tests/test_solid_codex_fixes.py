@@ -27,9 +27,11 @@ import numpy as np
 import pytest
 
 from hrma.engines.solid_rocket_engine import (
+    SOLID_CASE_MATERIAL_EXTRA,
     SOLID_COST_PARAMS,
     SolidRocketEngine,
 )
+from hrma.utils.numeric_compat import trapezoid
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +146,8 @@ def test_impulse_and_burn_time_converge_in_dt(grain_type):
     coarse = eng.calculate_thrust_curve(dt=0.05)
     fine = eng.calculate_thrust_curve(dt=0.002)
 
-    imp_coarse = float(np.trapz(coarse['thrust'], coarse['time']))
-    imp_fine = float(np.trapz(fine['thrust'], fine['time']))
+    imp_coarse = float(trapezoid(coarse['thrust'], coarse['time']))
+    imp_fine = float(trapezoid(fine['thrust'], fine['time']))
     t_coarse = float(coarse['time'][-1])
     t_fine = float(fine['time'][-1])
 
@@ -168,7 +170,7 @@ def test_end_burner_impulse_is_dt_independent():
     imps = []
     for dt in (0.05, 0.01, 0.002):
         c = eng.calculate_thrust_curve(dt=dt)
-        imps.append(float(np.trapz(c['thrust'], c['time'])))
+        imps.append(float(trapezoid(c['thrust'], c['time'])))
     assert max(imps) - min(imps) <= 1e-3 * max(imps)
 
 
@@ -179,7 +181,7 @@ def test_mass_conservation_after_burnout_closure(grain_type):
     """Kapanış kütle korunumunu bozmamalı: ∫mdot dt ≈ geometrik yakıt kütlesi."""
     eng = _engine(grain_type)
     curve = eng.calculate_thrust_curve(dt=0.002)
-    m_integral = float(np.trapz(curve['mass_flow'], curve['time']))
+    m_integral = float(trapezoid(curve['mass_flow'], curve['time']))
     m_geometric = eng._propellant_volume() * eng.rho_p
     assert m_integral == pytest.approx(m_geometric, rel=0.02), (
         f"{grain_type}: kütle korunumu bozuldu "
@@ -272,9 +274,22 @@ def test_composite_case_is_not_silently_steel():
     assert rho_composite < 0.5 * rho_steel, (
         f"Kompozit kasa çelik yoğunluğunda ({rho_composite:.0f} kg/m3) — "
         "get_material sessizce çeliğe düşüyor olabilir.")
-    # Yoğunluk projenin TEK tanım noktasıyla (maliyet tablosu) tutarlı
+    # ÖH D21 a1 (P2B1-12) — BEKÇİ ÇEVRİLDİ. Bu satır eskiden
+    #   rho_composite == SOLID_COST_PARAMS['case_materials']['composite'][0]
+    # diyordu, yani kompozit yoğunluğunu MALİYET tablosunun yoğunluk
+    # sütununa bağlıyordu. Ölçüldü ki o sütun ürün kodunda hiç okunmuyordu
+    # (tek tüketici yalnız fiyatı alıyor) — bekçi böylece YANILTICI ATFI
+    # sabitliyor, ölü sütunun kaldırılmasını da imkânsız kılıyordu. Sütun
+    # kaldırıldı; kompozit yoğunluğunun tek tanım noktası artık kaydın
+    # kendisidir ve bekçi ORAYA bağlanır. Sayı değişmedi (1600 kg/m3).
     assert rho_composite == pytest.approx(
-        SOLID_COST_PARAMS['case_materials']['composite'][0])
+        SOLID_CASE_MATERIAL_EXTRA['composite']['density'])
+    # Maliyet tablosu artık YOĞUNLUK TAŞIMAZ: yalnız USD/kg. Sütun geri
+    # eklenirse aynı kavram iki yerde iki kayıt olur.
+    assert all(isinstance(v, (int, float))
+               for v in SOLID_COST_PARAMS['case_materials'].values()), (
+        "SOLID_COST_PARAMS['case_materials'] yalnız USD/kg taşımalı; "
+        "yoğunluk sütunu geri gelmiş görünüyor (P2B1-12).")
     assert composite._calculate_dry_mass() < steel._calculate_dry_mass()
 
 

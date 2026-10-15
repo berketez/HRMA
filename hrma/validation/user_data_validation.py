@@ -26,6 +26,14 @@ Kullanıcıya görünen tüm metinler İngilizce'dir (UI kuralı).
 import re
 
 import numpy as np
+# ÖH D26 / OH-D25-14: ``np.trapz`` NumPy 2.0'da ad alanından
+# KALDIRILDI (np.trapezoid); ad TEK YERDE çözülür.
+from hrma.utils.numeric_compat import trapezoid as _trapezoid
+
+from hrma.constants import G_0
+# P10B2-16: bağıl fark yüzdesinin TEK tanım noktası (referans ADIYLA verilir).
+from hrma.validation._relative import (
+    REFERENCE_MEASUREMENT, relative_difference_pct)
 
 # ---------------------------------------------------------------------------
 # CSV başlık eşleme tabloları — normalize edilmiş (küçük harf, TR harfleri
@@ -39,13 +47,109 @@ THRUST_ALIASES = frozenset({
     'thrust', 'f', 'itki', 'force', 'kuvvet', 'thrustn', 'fn', 'load',
     'forcen', 'thrustforce',
 })
+# ---------------------------------------------------------------------------
+# BİRİM → SI ÇARPANI — TEK KAYNAK (P10B2-05, ÖH D16/app-api)
+#
+# Önceki davranış iki yerde iki türlüydü: AYRI birim satırı (``s;kgf``)
+# görüldüğünde "SI dışı" uyarısı basılıyor ama dönüşüm yapılmıyordu; aynı
+# bilgi BAŞLIK PARANTEZİNDE (``Thrust (kgf)``) geldiğinde ise
+# ``_normalize_token`` parantezi atıyor ve birim SESSİZCE kayboluyordu —
+# 100 kgf tepe veren gerçek eğri 100 N sayılıyor, hüküm "excellent" yerine
+# "poor" çıkıyordu (ölçüldü: toplam impuls farkı -%89,8).
+#
+# Artık İKİ YOL DA aynı tablodan okur ve KULLANICININ BEYAN ETTİĞİ birim
+# fiilen SI'ya çevrilir. Beyan tek başına çözüm değildir: sayı düzeltilir,
+# künye (``units``) yalnız neyin okunduğunu ve hangi çarpanın uygulandığını
+# söyler.
+#
+# Çarpanlar: NIST SP 811 (lbf = 4,448 221 615 260 5 N tam tanım),
+# CGPM 1901 standart yerçekimi g_n = 9,806 65 m/s² (kgf).
+# ---------------------------------------------------------------------------
+_TIME_UNIT_FACTORS = {
+    's': 1.0, 'sec': 1.0, 'secs': 1.0, 'seconds': 1.0,
+    'ms': 1e-3,
+}
+_THRUST_UNIT_FACTORS = {
+    'n': 1.0, 'newton': 1.0, 'newtons': 1.0,
+    'kn': 1e3,
+    'lbf': 4.4482216152605,
+    'kgf': G_0,   # kgf TANIMI 1 kg x g_0 (ÖH P10B3-10, tek kaynak)
+}
 # Birim satırı tespiti için tipik birim tokenları
-_UNIT_TOKENS = frozenset({
-    's', 'sec', 'secs', 'seconds', 'ms', 'n', 'newton', 'newtons',
-    'kn', 'lbf', 'kgf',
-})
-# SI dışı birim uyarısı (dönüşüm YAPILMAZ — kullanıcı bilgilendirilir)
-_NON_SI_UNIT_TOKENS = frozenset({'ms', 'kn', 'lbf', 'kgf'})
+_UNIT_TOKENS = frozenset(_TIME_UNIT_FACTORS) | frozenset(_THRUST_UNIT_FACTORS)
+# SI dışı birim = çarpanı 1 olmayan token (tablodan TÜRETİLİR, ikinci kez
+# elle yazılmaz)
+_NON_SI_UNIT_TOKENS = frozenset(
+    ad for tablo in (_TIME_UNIT_FACTORS, _THRUST_UNIT_FACTORS)
+    for ad, carpan in tablo.items() if carpan != 1.0)
+# Künyede kullanılan okunur birim adları
+_SI_UNIT_NAME = {'time': 's', 'thrust': 'N'}
+_UNIT_FACTOR_TABLE = {'time': _TIME_UNIT_FACTORS,
+                      'thrust': _THRUST_UNIT_FACTORS}
+
+
+#: P10B2-05 ŞARTI (Fable-D16) — parantez içeriği boşluk içeriyorsa ya da
+#: harf dışı karakter taşıyorsa birim beyanı sayılmaz
+#: (``'Thrust (peak run 3)'`` yanlış alarm üretmesin diye).
+#:
+#: ÖH D20 / P10B2-05 ŞARTI (Fable-D18) — TAVAN TABLODAN TÜRETİLİR.
+#: ÖLÇÜLDÜ (taban 14acd1d, ``docs/scofield/raw/OH/D20/app-api/a1/once.json``):
+#: elle yazılmış ``6`` tavanı, tanınan birimlerin en uzunundan
+#: (``'newtons'``/``'seconds'``, 7 karakter) KISAYDI ve delik açıyordu —
+#: ``'Thrust (kilonewton)'``, ``'Thrust (poundforce)'``, ``'Time (minutes)'``
+#: üçünde de ``declared_raw=None``, ``source='assumed (no unit declared)'``,
+#: uyarı 0. Yani beyan VARKEN ürün "hiç birim beyan edilmedi" diyordu ve
+#: ``'minutes'`` 60× sessiz hataya dönüşüyordu. Boşluk + yalnız-harf kuralı
+#: yanlış alarmı zaten kestiği için tavanın tek işi "makul bir birim ADI ne
+#: kadar uzun olabilir" sorusudur; bu yüzden tablonun kendi maksimumunun
+#: ÜSTÜNDE tutulur ve tablo büyürse kendiliğinden büyür (tek kaynak: tavan
+#: bir daha tanınan bir birimin kendi uzunluğunun altına düşemez).
+_UNIT_RAW_MAX_LEN = max(16, max(len(_t) for _t in _UNIT_TOKENS) + 1)
+
+
+def _birim_ham_token(ham):
+    """Parantez/hücre içeriğini birim ADAYI alfa token'a indirger.
+
+    Tanınmayan birimi FAIL-CLOSED bildirebilmek için gerekir: kullanıcı
+    ``'lbs'`` yazdıysa ürün "hiç birim beyan edilmedi" DİYEMEZ. Birim
+    adayı sayılma ölçütü dar tutulur — boşluksuz, yalnız harf, en fazla
+    ``_UNIT_RAW_MAX_LEN`` karakter (tavan tablodan türetilir; yukarıya bak).
+    """
+    if ham is None:
+        return None
+    s = str(ham).strip()
+    if not s or any(ch.isspace() for ch in s):
+        return None
+    token = _normalize_token(s)
+    if not token or not token.isalpha() or len(token) > _UNIT_RAW_MAX_LEN:
+        return None
+    return token
+
+
+def _header_unit_beyani(field):
+    """``(tanınan token | None, ham birim adayı | None)``.
+
+    ``'Thrust (kgf)'`` -> ``('kgf', 'kgf')`` · ``'Thrust (lbs)'`` ->
+    ``(None, 'lbs')`` · ``'Thrust'`` -> ``(None, None)``.
+    ``_normalize_token`` bu parantezi ATAR (başlık eşlemesi birimden
+    bağımsız kalsın diye); burada aynı parantez OKUNUR.
+    """
+    if field is None:
+        return None, None
+    eslesme = re.findall(r'[\(\[\{]([^\)\]\}]*)[\)\]\}]', str(field))
+    ham_aday = None
+    for ham in eslesme:
+        token = _normalize_token(ham)
+        if token in _UNIT_TOKENS:
+            return token, token
+        if ham_aday is None:
+            ham_aday = _birim_ham_token(ham)
+    return None, ham_aday
+
+
+def _header_unit_token(field):
+    """Başlık parantezindeki TANINAN birim; tanınmıyorsa ``None``."""
+    return _header_unit_beyani(field)[0]
 
 # Yanma süresi eşiği: tepe itkinin %5'i (NFPA 1125 konvansiyonu, üstte kaynak)
 BURN_TIME_THRESHOLD_FRACTION = 0.05
@@ -59,6 +163,106 @@ GRADE_THRESHOLDS_PCT = {
     'good': 10.0,
     'fair': 20.0,
 }
+
+
+# ---------------------------------------------------------------------------
+# KANONİK SATIR BANDI (ÖH D32 / P7B4-23 + OH-D31-12)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (D32 app-api-uc a2, ``once.json`` K1-K3; bu makine, taban
+# ``dd1dcddc``): ``/api/validation/upload-csv`` satır ekseninde SINIRSIZDI.
+# 600 000 satırlık gövde (11,34 MiB) HTTP 200 veriyor, 0,696 s sürüyor ve
+# 8,42 MiB yanıt üretiyor; ne uçta ne ayrıştırıcıda okunan bir satır sayısı
+# bandı vardı. Tek sınır ``MAX_CONTENT_LENGTH`` (32 MiB) BAYT tavanıdır ve
+# ölçülen 18,0 bayt/satır ile ~1,86 MİLYON satıra denk düşer (K3) — yani
+# satır ekseninde fiilen koruma yoktu.
+#
+# ALT UÇ yeni bir karar değildir: ``parse_thrust_csv`` zaten en az 2
+# (zaman, itki) satırı istiyordu; sayı gövdenin içinde ve kullanıcı hata
+# metninde İKİ yerde yazılıydı, artık YALNIZ burada durur (doktrin 4).
+#
+# ÜST UÇ bir BÜTÇEDİR, fiziksel sabit değildir — ve deponun kendi bütçe
+# yöntemiyle seçilmiştir (``app.py``, XLSX bütçe bloğu: "sınırların dayanağı
+# bu makinede ölçüldü", sessiz kırpma yerine açık ret). 100 000 satır:
+#
+#   * deponun tek yanıtta taşımayı ZATEN kabul ettiği seri uzunluğudur
+#     (``XLSX_MAX_ROWS_PER_SHEET``; 50 000 satır × 10 sütun → 1,4 s / 263 MB
+#     ölçümüyle seçilmişti). Sayı oradan İTHAL EDİLMEZ: o tavan bir çalışma
+#     sayfasının biçim bütçesidir, bu tavan bir ölçüm kaydının uzunluğudur;
+#     ikisini tek sabite bağlamak sahte bir tek-kaynak olurdu. Ölçülen
+#     maliyetleri ayrı ayrı yazılı: bu uçta 100 000 satır 0,113 s ve
+#     1,32 MiB yanıt (K1).
+#   * ürünün KENDİ zarfının çok üstündedir: modellenebilen en uzun yanma
+#     ``motor_validation.CANONICAL_LIMITS['burn_time']['max']`` = 300 s
+#     olduğuna göre bu tavan, 300 s'lik kesintisiz bir ateşlemede ~333 Hz,
+#     30 s'lik tipik bir ateşlemede ~3,3 kHz örnekleme demektir. Meşru
+#     hiçbir static-fire kaydı kesilmez.
+#
+# Aşım SESSİZCE KIRPILMAZ (doktrin 1): uç, hangi sınırın hangi değerle
+# aşıldığını söyleyen makine-okur bir ret döndürür.
+#: Ayrıştırıcının ÇÖZEBİLDİĞİ en az veri satırı (eğri iki noktadan başlar).
+THRUST_CSV_MIN_ROWS = 2
+
+#: Tek yükte kabul edilen en çok veri satırı (yukarıdaki ölçüm).
+THRUST_CSV_MAX_ROWS = 100_000
+
+#: Bandın kendisi — tüketiciler (uç, bekçi, panel) bunu okur.
+THRUST_CSV_ROW_BAND = (THRUST_CSV_MIN_ROWS, THRUST_CSV_MAX_ROWS)
+
+#: Başlık araması bu kadar satır içinde yapılır (``parse_thrust_csv``ın
+#: kendi penceresi; sayı orada ikinci kez yazılmaz).
+THRUST_CSV_HEADER_SEARCH_LINES = 5
+
+#: Veri OLMAYAN satır payı: başlık penceresi + hemen ardındaki birim satırı.
+#: Ayrıştırmadan ÖNCEKİ kaba sayımın bandı yanlışlıkla aşmaması için bu pay
+#: düşülür — yani kapı, kesin olarak bandın dışında olan yükleri kapatır.
+THRUST_CSV_MAX_NON_DATA_LINES = THRUST_CSV_HEADER_SEARCH_LINES + 1
+
+
+def candidate_data_rows(text):
+    """Ayrıştırmadan ÖNCE veri satırı adayı sayısı (ÜST sınır).
+
+    Boş satırlar sayılmaz; başlık/birim payı düşülür. Gerçek veri satırı
+    sayısı (``parse_thrust_csv`` sonrası ``n_points``) bundan KÜÇÜK ya da
+    eşittir — sayısal olmayan satırlar ve tekrar eden zaman damgaları
+    ayıklandığı için. Kapı bu üst sınıra bakar, dolayısıyla banda sığan
+    hiçbir dosya yanlışlıkla reddedilmez.
+    """
+    if not isinstance(text, str):
+        return 0
+    dolu = sum(1 for satir in text.splitlines() if satir.strip())
+    return max(0, dolu - THRUST_CSV_MAX_NON_DATA_LINES)
+
+
+def thrust_csv_row_band_error(row_count, field='csv_rows'):
+    """Satır bandı aşıldıysa makine-okur ret künyesi, aşılmadıysa ``None``.
+
+    Künye biçimi deponun kendi bütçe sözleşmesidir (``app.py``
+    ``_xlsx_budget_error``): ``limit`` / ``maximum`` / ``requested``. Uca
+    özgü ``field`` + ``reason`` çifti ÖK-21 ret biçimini taşır, ``error``
+    ise BU UCUN kendi sözleşmesindeki gibi kullanıcıya gösterilebilir
+    İngilizce cümledir (panel ``data.error``’u ekrana basar).
+    """
+    try:
+        n = int(row_count)
+    except (TypeError, ValueError):
+        return None
+    if n <= THRUST_CSV_MAX_ROWS:
+        return None
+    return {
+        'status': 'error',
+        'error': (
+            f'The uploaded thrust record has more than '
+            f'{THRUST_CSV_MAX_ROWS} data rows ({n} counted). This endpoint '
+            f'accepts {THRUST_CSV_MIN_ROWS} to {THRUST_CSV_MAX_ROWS} rows '
+            f'per upload; nothing was truncated. Decimate or trim the '
+            f'record to the firing window and upload it again.'),
+        'reason': 'row_band_exceeded',
+        'field': field,
+        'limit': 'data_rows',
+        'minimum': THRUST_CSV_MIN_ROWS,
+        'maximum': THRUST_CSV_MAX_ROWS,
+        'requested': n,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +323,11 @@ def parse_thrust_csv(text):
     - TR ondalık virgülü: ``;``, tab veya boşluk ayraçlı dosyalarda ``0,5``
       → 0.5. Virgül ayraçlı dosyada satır alan sayısı beklenenin tam iki
       katıysa alan çiftleri ondalık olarak birleştirilir (Excel TR tuzağı).
-    - Başlıktan hemen sonra gelen birim satırı ("s;N" gibi) atlanır;
-      SI dışı birim görülürse uyarı üretilir (dönüşüm yapılmaz).
+    - Birim beyanı İKİ yoldan okunur ve İKİSİ DE aynı çarpan tablosundan
+      geçer (P10B2-05): başlık parantezi ("Thrust (kgf)") ve başlıktan
+      hemen sonraki birim satırı ("s;kgf"). SI dışı beyan edilen sütun
+      fiilen SI'ya ÇEVRİLİR ve çevrim uyarıyla + ``units`` künyesiyle
+      bildirilir. Beyan yoksa çevrim de yoktur (SI varsayılır).
     - Boş satırlar ve sayısal olmayan satırlar uyarıyla atlanır.
     - Başlıksız iki sütunlu sayısal dosya kabul edilir (uyarıyla:
       1. sütun zaman [s], 2. sütun itki [N] varsayılır).
@@ -134,8 +341,9 @@ def parse_thrust_csv(text):
     -------
     dict
         ``{'time': np.ndarray, 'thrust': np.ndarray, 'warnings': [str],
-        'n_points': int}`` — zaman artan sırada, tekrar eden zaman damgaları
-        ayıklanmış.
+        'n_points': int, 'units': dict}`` — zaman artan sırada, tekrar eden
+        zaman damgaları ayıklanmış; ``units`` her sütun için beyan edilen
+        birimi, uygulanan çarpanı ve beyanın kaynağını taşır.
 
     Raises
     ------
@@ -159,11 +367,16 @@ def parse_thrust_csv(text):
     # Virgül ayraçta virgül aynı zamanda ondalık olamaz; diğerlerinde olur
     decimal_comma_ok = delimiter != ','
 
-    # --- Başlık arama (ilk 5 satır içinde) ---
+    # --- Başlık arama (pencere: THRUST_CSV_HEADER_SEARCH_LINES) ---
     time_col = thrust_col = None
     header_line_idx = None
     data_start = 0
-    for idx in range(min(5, len(lines))):
+    # {'time'|'thrust': (token|None, kaynak|None, ham beyan|None)}
+    # P10B2-05 (+ ŞARTI): ham beyan, TANINMAYAN birimi bildirmek için.
+    birim_beyani = {'time': (None, None, None),
+                    'thrust': (None, None, None)}
+    for idx in range(min(THRUST_CSV_HEADER_SEARCH_LINES,
+                         len(lines))):
         fields = _split(lines[idx], delimiter)
         norms = [_normalize_token(f) for f in fields]
         # Sayısal satırsa başlık yok demektir
@@ -179,6 +392,12 @@ def parse_thrust_csv(text):
             header_line_idx = idx
             data_start = idx + 1
             expected_fields = len(fields)
+            # P10B2-05: başlık parantezindeki birim ARTIK okunuyor.
+            # `_normalize_token` onu eşleme için atar; burada beyan olarak
+            # saklanır ve aşağıda SI'ya çevrilir.
+            for _rol, _sutun in (('time', t_col), ('thrust', f_col)):
+                _tok, _ham = _header_unit_beyani(fields[_sutun])
+                birim_beyani[_rol] = (_tok, 'header', _ham)
             break
         warnings.append(
             f"Line {idx + 1} ('{lines[idx][:40]}') is neither a recognized "
@@ -201,14 +420,33 @@ def parse_thrust_csv(text):
         numeric = [_to_float(f, decimal_comma_ok) for f in fields]
         if all(v is None for v in numeric) and any(n in _UNIT_TOKENS
                                                    for n in norms if n):
-            non_si = sorted({n for n in norms if n in _NON_SI_UNIT_TOKENS})
-            if non_si:
-                warnings.append(
-                    f"Unit row suggests non-SI units ({', '.join(non_si)}); "
-                    "values are used as-is. Expected seconds and newtons.")
-            else:
-                warnings.append(
-                    f"Unit row ('{lines[data_start]}') skipped.")
+            # P10B2-05: birim satırı da BAŞLIK PARANTEZİYLE aynı tablodan
+            # okunur; satır daha açık bir beyandır, başlık parantezini ezer.
+            for rol, sutun in (('time', time_col), ('thrust', thrust_col)):
+                if sutun is None or sutun >= len(norms) or not norms[sutun]:
+                    continue
+                satir_tok = norms[sutun]
+                onceki_tok, _onceki_kaynak, onceki_ham = birim_beyani[rol]
+                onceki_beyan = onceki_tok or onceki_ham
+                if satir_tok in _UNIT_FACTOR_TABLE[rol]:
+                    yeni_beyan = (satir_tok, 'unit row', satir_tok)
+                else:
+                    # P10B2-05 ŞARTI: satırdaki TANINMAYAN birim de bir
+                    # beyandır; sessizce "beyan yok"a düşmez.
+                    ham = _birim_ham_token(satir_tok)
+                    if ham is None:
+                        continue
+                    yeni_beyan = (None, 'unit row', ham)
+                yeni_ad = yeni_beyan[0] or yeni_beyan[2]
+                if onceki_beyan and onceki_beyan != yeni_ad:
+                    warnings.append(
+                        f"{rol.capitalize()} unit is declared twice and the "
+                        f"two declarations disagree: header says "
+                        f"'{onceki_beyan}', unit row says '{yeni_ad}'. The "
+                        f"unit row was used.")
+                birim_beyani[rol] = yeni_beyan
+            warnings.append(
+                f"Unit row ('{lines[data_start]}') skipped.")
             data_start += 1
 
     # --- Veri satırları ---
@@ -248,11 +486,11 @@ def parse_thrust_csv(text):
         warnings.append(
             f"Skipped {skipped} non-numeric or malformed data row(s).")
 
-    if len(t_values) < 2:
+    if len(t_values) < THRUST_CSV_MIN_ROWS:
         raise ValueError(
-            "Could not parse thrust data: at least 2 numeric (time, thrust) "
-            "rows are required. Check that the file is a CSV with columns "
-            "like 'time,thrust' (seconds, newtons).")
+            f"Could not parse thrust data: at least {THRUST_CSV_MIN_ROWS} "
+            "numeric (time, thrust) rows are required. Check that the file "
+            "is a CSV with columns like 'time,thrust' (seconds, newtons).")
 
     t_arr = np.asarray(t_values, dtype=float)
     f_arr = np.asarray(f_values, dtype=float)
@@ -276,19 +514,85 @@ def parse_thrust_csv(text):
         warnings.append("Negative thrust values present — check load-cell "
                         "tare/offset. Values were kept as-is.")
 
+    # --- P10B2-05: BEYAN EDİLEN BİRİMİ SI'YA ÇEVİR --------------------
+    # Kullanıcı birimi başlıkta ya da birim satırında AÇIKÇA yazdıysa sayı
+    # düzeltilir; beyan tek başına bırakılmaz. Beyan yoksa hiçbir varsayım
+    # yapılmaz (SI kabul edilir — modülün belgelenmiş sözleşmesi) ve künye
+    # bunu 'assumed' diye söyler: uydurma çevrim yok.
+    birim_kunyesi = {}
+    for rol, dizi in (('time', t_arr), ('thrust', f_arr)):
+        token, kaynak, ham_beyan = birim_beyani[rol]
+        carpan = _UNIT_FACTOR_TABLE[rol].get(token) if token else None
+        if carpan is None:
+            # P10B2-05 ŞARTI (Fable-D16) — TANINMAYAN BİRİM FAIL-CLOSED.
+            # ÖLÇÜLDÜ (taban 9071a64, once_a1.json): "Thrust (lbs)" /
+            # "Thrust (lb)" / "Time (min)" başlıklarında künye
+            # ``declared: null`` + ``source: 'assumed (no unit declared)'``
+            # basıyor ve TEK uyarı bile çıkmıyordu — yani kullanıcı birimi
+            # AÇIKÇA yazmışken ürün "hiç birim beyan edilmedi" diyordu.
+            # 100 lbs (=444,82 N) sessizce 100 N sayılıyordu (4,45×).
+            # Artık beyan varsa sayı çevrilmese bile SUSULMAZ: uyarı basılır
+            # ve künye ``declared_raw`` ile neyin okunduğunu söyler.
+            beyan_adi = token or ham_beyan
+            if beyan_adi is None:
+                birim_kunyesi[rol] = {
+                    'declared': None,
+                    'declared_raw': None,
+                    'assumed_si_unit': _SI_UNIT_NAME[rol],
+                    'factor_applied': 1.0,
+                    'source': 'assumed (no unit declared)',
+                }
+                continue
+            bilinenler = ', '.join(sorted(_UNIT_FACTOR_TABLE[rol]))
+            warnings.append(
+                f"{(kaynak or 'header').capitalize()} declares "
+                f"{rol} unit '{beyan_adi}' — not recognized; known {rol} "
+                f"units: {bilinenler}. Values were used as-is (no "
+                f"conversion) and are treated as "
+                f"{_SI_UNIT_NAME[rol]}.")
+            birim_kunyesi[rol] = {
+                'declared': None,
+                'declared_raw': beyan_adi,
+                'assumed_si_unit': _SI_UNIT_NAME[rol],
+                'factor_applied': 1.0,
+                'source': f'{kaynak or "header"} (unrecognized)',
+            }
+            continue
+        if carpan != 1.0:
+            dizi *= carpan
+            warnings.append(
+                f"{rol.capitalize()} column declared in '{token}' "
+                f"({kaynak}); values were converted to "
+                f"{_SI_UNIT_NAME[rol]} (x{carpan:g}).")
+        birim_kunyesi[rol] = {
+            'declared': token,
+            'declared_raw': token,
+            'assumed_si_unit': _SI_UNIT_NAME[rol],
+            'factor_applied': carpan,
+            'source': kaynak,
+        }
+
     return {
         'time': t_arr,
         'thrust': f_arr,
         'warnings': warnings,
         'n_points': int(len(t_arr)),
+        # Hangi birimin okunduğu ve hangi çarpanın uygulandığı ürün yüzüne
+        # taşınır (/api/validation/upload-csv 'parsed.units').
+        'units': birim_kunyesi,
     }
 
 
 # ---------------------------------------------------------------------------
 # Karşılaştırma
 # ---------------------------------------------------------------------------
-def _as_curve(curve, label):
-    """(t, F) çiftine indirger: dict ({'time','thrust'}) veya 2'li dizi."""
+def _curve_parts(curve, label):
+    """Eğri yükünün ham (time, thrust) parçalarını verir — ÇEVİRMEDEN.
+
+    Anahtar çözümü (``time``/``t``/``time_s``, ``thrust``/``F``/
+    ``thrust_n``, ya da 2'li dizi) BURADA bir kez yazılıdır; hem
+    ``_as_curve`` hem de ``curve_point_count`` bunu okur (doktrin 4).
+    """
     if isinstance(curve, dict):
         t = curve.get('time', curve.get('t', curve.get('time_s')))
         f = curve.get('thrust', curve.get('F', curve.get('thrust_n')))
@@ -302,6 +606,32 @@ def _as_curve(curve, label):
             raise ValueError(
                 f"{label} curve must be a dict with 'time'/'thrust' or a "
                 "(time, thrust) pair of arrays.")
+    return t, f
+
+
+def curve_point_count(curve):
+    """Eğri yükünün nokta sayısı (ÜST sınır), çözülemezse ``0``.
+
+    ÖH D32 / P7B4-23 ikinci ayağı: ``/api/validation/upload-csv`` JSON
+    biçiminde ``predicted_curve`` dizisi de alıyor ve bu eksende hiçbir
+    bant yoktu (ÖLÇÜLDÜ: 300 000 nokta HTTP 200). Sayım diziyi ``numpy``a
+    ÇEVİRMEDEN yapılır — korumak istediğimiz belleği ölçüm sırasında
+    harcamamak için. Çözülemeyen yük ``0`` döner: bandın işi değildir,
+    ``_as_curve`` onu kendi 400'üyle karşılar (fail-closed korunur).
+    """
+    try:
+        t, f = _curve_parts(curve, 'Curve')
+    except ValueError:
+        return 0
+    try:
+        return max(len(t), len(f))
+    except TypeError:
+        return 0
+
+
+def _as_curve(curve, label):
+    """(t, F) çiftine indirger: dict ({'time','thrust'}) veya 2'li dizi."""
+    t, f = _curve_parts(curve, label)
     t = np.asarray(t, dtype=float)
     f = np.asarray(f, dtype=float)
     if t.ndim != 1 or f.ndim != 1 or len(t) != len(f):
@@ -351,9 +681,39 @@ def _burn_window(t, f, threshold_fraction):
     return t_start, t_end, t_end - t_start
 
 
-def _pct_diff(user_value, predicted_value):
-    """Tahmine göre yüzde fark: (user - predicted) / predicted * 100."""
-    return (user_value - predicted_value) / predicted_value * 100.0
+#: Bu modülün yüzde farklarında PAYDA rolü — **KANON: ÖLÇÜM**.
+#:
+#: ÖH D30 / defter OH-D28-12 + P10B2-16 (ana model kararı, hüküm-18,
+#: 9 Eylül 2026). D29'da formül tek tanım noktasına alınmış ama İKİ payda
+#: yan yana bırakılmıştı: kardeş modül ``correlation_runner`` ÖLÇÜME,
+#: bu modül TAHMİNE bölüyordu. ÖLÇÜLDÜ (``once.json`` ->
+#: ``OH-D28-12+P10B2-16``, taban ``ab7cf68b``): aynı çift (ölçülen 1000,
+#: tahmin 1100) koşucuda ``+10,0000 %``, burada ``-9,0909 %`` veriyordu —
+#: İŞARET ZIT, büyüklük 0,909 puan farklı. Bir kullanıcı aynı iki sayıyı
+#: aynı ürünün iki ekranında görüp iki farklı cevap alıyordu.
+#:
+#: KANON ÖLÇÜMDÜR: ASME V&V 20-2009 Böl. 2 karşılaştırma hatasını
+#: ``E = S - D`` tanımlar ve deneysel veriye (``D``) normalize eder; burada
+#: ``D`` kullanıcının static-fire ölçümü, ``S`` HRMA tahminidir. Metroloji
+#: geleneğinde payda BİLİNEN büyüklüktür, modelin çıktısı değil.
+#:
+#: BU BİR SÖZLEŞME DEĞİŞİKLİĞİDİR (sürüm notuna girer): yayımlanan
+#: ``*_diff_pct`` alanlarının İŞARETİ ve büyüklüğü kayar. Alanların ANLAMI
+#: da netleşir: "tahmin ölçümden ne kadar sapıyor" (pozitif = tahmin
+#: ölçümden büyük). Payda rolü ``diff_pct_reference`` künyesiyle
+#: yayımlandığı için tüketici bunu koddan değil VERİDEN okur.
+PCT_DIFF_REFERENCE = REFERENCE_MEASUREMENT
+
+
+def _pct_diff(measured_value, predicted_value):
+    """Kanonik bağıl fark: ``(tahmin - ölçüm) / ölçüm * 100``.
+
+    Argüman sırası çağıranların okunabilirliği için (ölçülen, tahmin)
+    olarak KORUNDU; payda rolünü :data:`PCT_DIFF_REFERENCE` belirler ve
+    merkeze anahtar sözcükle verilir, yani sıra bir sözleşme taşımaz.
+    """
+    return relative_difference_pct(predicted_value, measured_value,
+                                   reference=PCT_DIFF_REFERENCE)
 
 
 def compare(user_curve, predicted_curve,
@@ -383,8 +743,9 @@ def compare(user_curve, predicted_curve,
     - Toplam impuls her eğrinin KENDİ zaman aralığında yamuk kuralıyla
       alınır (Sutton Eq. 2-1); RMSE ise iki eğrinin ÖRTÜŞEN aralığında
       ortak ızgaraya ``numpy.interp`` ile indirgenerek hesaplanır.
-    - Yüzde farklar HRMA tahminine görelidir (pozitif = kullanıcı verisi
-      tahminden büyük).
+    - Yüzde farklar ÖLÇÜME görelidir (ASME V&V 20-2009 kanonu; pozitif =
+      HRMA tahmini ölçülen değerden büyük). Payda rolü yanıtta
+      ``diff_pct_reference`` künyesiyle yayımlanır.
     """
     t_u, f_u = _as_curve(user_curve, 'User')
     t_p, f_p = _as_curve(predicted_curve, 'Predicted')
@@ -403,8 +764,8 @@ def compare(user_curve, predicted_curve,
     rmse = float(np.sqrt(np.mean((fu_i - fp_i) ** 2)))
 
     # Tekil eğri metrikleri
-    impulse_u = float(np.trapz(f_u, t_u))
-    impulse_p = float(np.trapz(f_p, t_p))
+    impulse_u = float(_trapezoid(f_u, t_u))
+    impulse_p = float(_trapezoid(f_p, t_p))
     peak_u = float(np.max(f_u))
     peak_p = float(np.max(f_p))
     if impulse_p <= 0 or peak_p <= 0:
@@ -464,9 +825,11 @@ def compare(user_curve, predicted_curve,
                   "configuration used for the prediction.")
 
     assessment = (
-        f"{grade.capitalize()} agreement: total impulse differs by "
+        f"{grade.capitalize()} agreement: the predicted total impulse "
+        f"differs from the measured value by "
         f"{metrics['total_impulse_diff_pct']:+.1f}% "
-        f"({impulse_u:.1f} vs {impulse_p:.1f} N·s), peak thrust by "
+        f"(measured {impulse_u:.1f} vs predicted {impulse_p:.1f} "
+        f"N·s), peak thrust by "
         f"{metrics['peak_thrust_diff_pct']:+.1f}%, burn time by "
         f"{metrics['burn_time_diff_s']:+.2f} s. RMSE over the common time "
         f"window is {rmse:.1f} N ({nrmse_pct:.1f}% of predicted peak). "
@@ -477,4 +840,21 @@ def compare(user_curve, predicted_curve,
         'grade': grade,
         'assessment': assessment,
         'overlap': {'t_start': t0, 't_end': t1},
+        # ÖH D27 / P11B4-24 — EŞİK TABLOSU UÇTAN YAYIMLANIR.
+        # ÖLÇÜLDÜ (docs/scofield/raw/OH/D27/arayuz/a3/once.json): panelin
+        # `diffKind`'ı 5/10/20 bandını KENDİ içinde tutuyordu; uç aynı
+        # sayıları yayımlamıyordu. İki kaynak bugün eşit, ama buradaki eşik
+        # değişince rozetin hükmü ile kartların rengi sessizce ayrışırdı.
+        # `scored_metrics` ise skorun NEYE baktığını söyler: puan yalnız
+        # max(|impuls farkı|, NRMSE) — tepe/ortalama itki ve yanma süresi
+        # farkları skora GİRMEZ, o yüzden aynı bantla renklendirilemez.
+        'grade_thresholds_pct': dict(GRADE_THRESHOLDS_PCT),
+        'scored_metrics': ['total_impulse_diff_pct', 'nrmse_pct'],
+        # OH-D28-12 + P10B2-16: '*_diff_pct' alanlarının PAYDASI.
+        # D30'dan itibaren KANON tektir: payda ÖLÇÜMdür ve kardeş uç
+        # (korelasyon koşucusu) ile AYNI roldür. Alan yayımlanmaya devam
+        # eder ki tüketici hangi sözleşmeyi okuduğunu koddan değil VERİDEN
+        # bilsin — künyenin kaybolması, kanonun sessizce geri kaymasına
+        # kapı açardı.
+        'diff_pct_reference': PCT_DIFF_REFERENCE,
     }

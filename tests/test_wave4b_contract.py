@@ -21,7 +21,9 @@ Kapsam (test_client — sunucuya port BAĞLANMAZ). Dört yeni endpoint, üç
        - fill_sweep dizileri (doluluk eğrisi) tutarlı uzunlukta.
      400: eksik radius/fill_height, negatif geometri.
   3. POST /api/pressurant-sizing: regulated + blowdown 200 + şema; Sutton Böl. 6:
-       - regulated izotermal m = P_tank·V_p/(R·T0); adiabatik > izotermal
+       - regulated izotermal m = P_tank·V_p/(R·T0)/η_boşaltma (η varsayılanı
+         ÖH D27 / P5B3-16'dan beri EXPULSION_EFFICIENCY_DEFAULT = 0,95);
+         adiabatik > izotermal
          (soğuk gaz yoğun → çok kütle); recommended = adiabatik sınır;
          bottle_count = ceil(V_bottle/50 L).
        - blowdown P_final = P0·(V_u0/(V_u0+V_p))^n; B = P0/P_final;
@@ -388,11 +390,19 @@ class TestPressurantContract:
         tabanı değildir. Bu yüzden test yeni sözleşmeyi sınıyor:
         teslim = depolanan − kalıntı ve iki teşhis sınırının arasında.
         """
+        from hrma.analysis.pressurant_sizing import (
+            EXPULSION_EFFICIENCY_DEFAULT)
         R = press_reg['R_specific']
         T0 = press_reg['isothermal']['final_temperature_K']
         p_tank = PRESS_REGULATED_INPUT['tank_pressure'] * 1e5
         v_p = PRESS_REGULATED_INPUT['propellant_volume']
-        m_iso_hand = p_tank * v_p / (R * T0)
+        # ÖH D27 / P5B3-16: el hesabı artık boşaltma verimini de içerir —
+        # ullage gazı V_p değil V_p/η süpürür. η uçtan geçirilmediği için
+        # modülün ORTAK varsayılanı okunur (sayı ikinci kez YAZILMAZ).
+        assert press_reg['expulsion_efficiency'] == pytest.approx(
+            EXPULSION_EFFICIENCY_DEFAULT, rel=1e-12), (
+            "uç, modülün ortak boşaltma verimi varsayılanını kullanmıyor")
+        m_iso_hand = p_tank * v_p / (R * T0) / EXPULSION_EFFICIENCY_DEFAULT
         assert press_reg['isothermal']['gas_mass_kg'] == pytest.approx(
             m_iso_hand, rel=1e-9), "izotermal kütle el hesabıyla uyuşmuyor"
         assert (press_reg['adiabatic']['gas_mass_kg']
@@ -693,3 +703,904 @@ class TestWave4bJsSyntax:
                               capture_output=True, text=True, timeout=60)
         assert proc.returncode == 0, (
             f"node --check başarısız: {path}\n{proc.stderr[:500]}")
+
+
+# ===========================================================================
+# 8. ÖH FAZ C — TERS YÖN SÖZLEŞMESİ (uç yayımlar, panel BASIYOR mu?)
+# ===========================================================================
+#
+# Mekanizma ve gerekçe `tests/test_wave3_contract.py` §8 ile AYNIdır
+# (kopya desen; ortak modül açmak paket sahipliğini böler). §6'nın ileri
+# yönü SIZINTIyı, buradaki ters yön KAYIP'ı kapatır.
+# Defter: P13B4-01, P13B4-02, P11B5-02.
+#
+# Bu dosya, P13B4-01'in 16 sözleşmesiz panelinden ALTISINI kapsama alır:
+# cfd, fea, thermal_fea, sixdof, injector, settings.
+
+REPO_STATIC_JS = REPO_ROOT / 'hrma' / 'static' / 'js'
+
+DURUSTLUK_TAM = frozenset({
+    'unconservative', 'model_valid', 'valid', 'validity', 'confidence',
+    'fallback', 'warning', 'warnings', 'assumption', 'assumptions',
+    'verdict', 'skipped', 'missing', 'not_modelled', 'source', 'basis',
+    'note', 'notes',
+})
+DURUSTLUK_SONEK = ('_basis', '_status', '_note', '_notes', '_source',
+                   '_valid', '_validity', '_regime')
+DURUSTLUK_ONEK = ('warning', 'assumption', 'exceeds', 'unconservative',
+                  'skipped', 'missing', 'not_modelled', 'verdict',
+                  'defaults')
+DURUSTLUK_ICEREN = ('withheld', 'confidence', 'validity', 'fallback',
+                    'disclaimer', 'unconservative', 'not_modelled',
+                    'clamped')
+
+
+def _durustluk_alani(ad):
+    """Bu alan adı bir DÜRÜSTLÜK beyanı mı? (kalıplar ürün taramasından)"""
+    return (ad in DURUSTLUK_TAM
+            or ad.endswith(DURUSTLUK_SONEK)
+            or ad.startswith(DURUSTLUK_ONEK)
+            or any(parca in ad for parca in DURUSTLUK_ICEREN))
+
+
+# --- OH-B3-06 incelmesi (mekanizma ve gerekçe wave3 §8 ile AYNI) -----------
+# Defterin ÖRNEĞİ tam da bu dosyada doğdu: `injector_panel.js`
+# `T('common.warnings')` yazıyor, bu yüzden ters yön enjektör ucunun
+# `warnings`/`assumptions` alanlarını "panel basıyor" sayıyordu. İncelme
+# maskeyi kaldırınca ölçüm: panel `dz.warnings_tr`/`dz.assumptions_tr`
+# okuyor, uç ise `warnings`/`assumptions` yayımlıyor — kanal ÖLÜ.
+I18N_ANAHTAR_DIZGESI = re.compile(
+    r"""(['"])(?:common|panel|solid|fea[A-Za-z]*)\.[A-Za-z0-9_.]*\1""")
+
+
+def _envanter_metinden(metin):
+    """Bir JS METNİNDEN okunan alan adları (i18n anahtarları düşülmüş)."""
+    metin = I18N_ANAHTAR_DIZGESI.sub('""', metin)
+    return (set(re.findall(r'\.([A-Za-z_]\w*)', metin))
+            | set(re.findall(r'\[\s*[\'"]([A-Za-z_]\w*)[\'"]\s*\]', metin)))
+
+
+def _okuma_envanteri(*js_yollari):
+    """Panelin OKUDUĞU alan adları (`x.alan` + `x['alan']`, takma ad üstü).
+
+    Cömertliğin tek istisnası i18n anahtarlarıdır (OH-B3-06 incelmesi).
+    """
+    envanter = set()
+    for rel in js_yollari:
+        yol = REPO_STATIC_JS / Path(rel)
+        assert yol.exists(), f"panel dosyası yok: {yol}"
+        envanter |= _envanter_metinden(yol.read_text(encoding='utf-8'))
+    return envanter
+
+
+def _ters_alanlar(payload, envanter):
+    return sorted(set(payload) - envanter)
+
+
+def _sagir_alt_bloklar(payload, envanter):
+    """Adı DA çocuklarının HİÇBİRİ de okunmayan alt bloklar."""
+    sagir = {}
+    for ad in set(payload) - envanter:
+        deger = payload[ad]
+        cocuk = set()
+        if isinstance(deger, dict):
+            cocuk = set(deger)
+        elif isinstance(deger, list) and deger and isinstance(deger[0], dict):
+            cocuk = set(deger[0])
+        if cocuk and not (cocuk & envanter):
+            sagir[ad] = len(cocuk)
+    return sagir
+
+
+# --- C3: bu dosyaya düşen sözleşmesiz panellerin uç yükleri ---------------
+# Konturlar UYDURULMAZ: motorların `results['nozzle_contour']` bloğuyla
+# AYNI üreticiden (hrma.engines.nozzle_design.sample_nozzle_inner_contour)
+# alınır, yalnız mm -> m çevrilir (kalıp: tests/test_cfd_endpoint.py,
+# tests/test_fea_endpoint.py).
+
+CFD_GAS_INPUT = {'P0_Pa': 2.0e6, 'T0_K': 3000.0, 'gamma': 1.2,
+                 'R_J_per_kgK': 350.0, 'P_ambient_Pa': 20000.0}
+FEA_MESH_INPUT = {'n_axial0': 12, 'n_radial0': 4, 'max_rounds': 2}
+FEA_PLANAR_INPUT = {'grain_type': 'bates', 'propellant_type': 'apcp',
+                    'outer_diameter_mm': 100.0, 'core_diameter_mm': 30.0,
+                    'chamber_pressure_bar': 40.0, 'max_rounds': 2}
+WALL_PROFILE_INPUT = {
+    'chamber_pressure': 40.0, 'chamber_temperature': 3000.0,
+    'chamber_diameter': 0.1, 'chamber_length': 0.5, 'burn_time': 10.0,
+    'mdot_total': 1.0, 'throat_diameter': 0.03, 'exit_diameter': 0.075,
+    'expansion_ratio': 6.25, 'nozzle_type': 'conical',
+    'material': 'steel_4130', 'wall_thickness': 0.005,
+}
+SIXDOF_INPUT = {'dry_mass': 20.0, 'propellant_mass': 10.0,
+                'thrust': 3000.0, 'burn_time': 5.0}
+INJECTOR_INPUT = {'motor_type': 'liquid', 'injector_type': 'impinging_doublet',
+                  'mdot_ox': 1.2, 'mdot_fuel': 0.5, 'rho_ox': 1141.0,
+                  'rho_fuel': 810.0, 'Pc_bar': 20.0}
+LOCAL_HOST = {'Host': '127.0.0.1:8080'}
+
+
+def _kontur_noktalari(chamber_diameter=0.050, throat_diameter=0.030,
+                      exit_diameter=0.075):
+    from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+    pts, _meta = sample_nozzle_inner_contour({
+        'chamber_diameter': chamber_diameter,
+        'throat_diameter': throat_diameter,
+        'exit_diameter': exit_diameter,
+        'nozzle_angles': {'nozzle_type': 'conical',
+                          'convergent_half_angle_deg': 30,
+                          'divergent_half_angle_deg': 15},
+    })
+    return [[float(z) / 1000.0, float(r) / 1000.0] for z, r in pts]
+
+
+def _fea_motor_sonucu(chamber_pressure=30.0):
+    """Hibrit sonuç BİÇİMİNDE, alanları gerçek kaynaklardan gelen sözlük
+    (köprünün hibrit alan haritası; tests/test_fea_endpoint.py kalıbı)."""
+    return {
+        'chamber_pressure': chamber_pressure,
+        'chamber_length': 0.35,
+        'nozzle_contour': {'points': _kontur_noktalari(chamber_diameter=0.10)},
+        'structural_analysis': {
+            'chamber_analysis': {'wall_thickness_used_mm': 3.0,
+                                 'design_mode': 'verify'},
+            'design_parameters': {'material': 'ss_304'},
+            'material_properties': {'yield_strength': 215e6},
+        },
+    }
+
+
+@pytest.fixture(scope='module')
+def cfd_body(client):
+    return _post_ok(client, '/api/cfd/nozzle',
+                    dict(CFD_GAS_INPUT,
+                         nozzle_contour={'points': _kontur_noktalari()}))
+
+
+@pytest.fixture(scope='module')
+def fea_structural(client):
+    return _post_ok(client, '/api/fea/structural',
+                    dict(FEA_MESH_INPUT,
+                         motor_results=_fea_motor_sonucu()))['fea']
+
+
+@pytest.fixture(scope='module')
+def fea_planar(client):
+    return _post_ok(client, '/api/fea/planar-grain', FEA_PLANAR_INPUT)['fea']
+
+
+@pytest.fixture(scope='module')
+def wall_profile(client):
+    return _post_ok(client, '/api/analysis/wall-profile',
+                    WALL_PROFILE_INPUT)['wall_profile']
+
+
+@pytest.fixture(scope='module')
+def fea_thermal(client, wall_profile):
+    """``/api/fea/thermal`` gövdesi — bu vaka KÖPRÜNÜN REDDİDİR.
+
+    Gövde profili ``wall_profile`` adıyla gönderiyor; uç ``axial_profile``
+    bekler, dolayısıyla köprü NOT_MODELLED üretir. Ters-yön envanteri tam
+    da bu red gövdesini tarar (dürüstlük borcu red yolunda da ölçülür), o
+    yüzden GÖVDE VE YÜK DEĞİŞTİRİLMEDİ — envanterin ölçtüğü şey aynı kaldı
+    (ÖK-22: sağlıklı envanter gevşetilmez).
+
+    OH-D17-07 (ÖH D22): eskiden ``_post_ok`` ile çağrılıyordu ve HTTP 200
+    dayatıyordu; bu, "köprü reddederken zarf success der" kusurunu KORUYAN
+    satırdı. Zarf artık reddi kendi yüzünde de söylüyor (422 +
+    ``status='not_modelled'``); ``fea`` bloğu AYNEN duruyor.
+    """
+    r = client.post('/api/fea/thermal',
+                    json=dict(FEA_MESH_INPUT, wall_profile=wall_profile,
+                              motor_results=_fea_motor_sonucu(
+                                  chamber_pressure=40.0)))
+    assert r.status_code == 422, (
+        '/api/fea/thermal red vakası 422 dönmedi: '
+        f'{r.status_code} — {r.get_data(as_text=True)[:300]}')
+    govde = r.get_json()
+    assert govde['status'] == 'not_modelled'
+    assert govde['fea']['status'] == 'NOT_MODELLED'
+    return govde['fea']
+
+
+@pytest.fixture(scope='module')
+def sixdof_body(client):
+    return _post_ok(client, '/api/six-dof-analysis', SIXDOF_INPUT)
+
+
+@pytest.fixture(scope='module')
+def injector_design(client):
+    return _post_ok(client, '/api/injector-design', INJECTOR_INPUT)['design']
+
+
+# --- DONDURULMUŞ yük: /api/update/check AĞA ÇIKAR -------------------------
+# `hrma/utils/update_checker.check_for_update` GitHub API'sine (yoksa
+# yayın sayfasına) HTTP isteği atar. Bu sözleşme dosyaları ağsızdır
+# ("test_client — sunucuya port BAĞLANMAZ"), o yüzden uç burada
+# koşturulmaz. Anahtar kümesi ölçüm anlık görüntüsü DEĞİL, ürünün KENDİ
+# şema beyanıdır (check_for_update docstring'i: "Dönen sözlük her zaman
+# aynı şemadadır: {available, current, latest, notes, page_url, asset,
+# error, error_kind, source}") ve 27 Ağu 2026 canlı koşumuyla birebir
+# doğrulandı. Sınırı: uç yeni alan eklerse bu bekçi görmez.
+UPDATE_CHECK_SEMASI = {
+    'available': None, 'current': None, 'latest': None, 'notes': None,
+    'page_url': None, 'asset': None, 'error': None, 'error_kind': None,
+    'source': None,
+}
+
+
+TERS_MUAFIYET = {
+    'cooling/ust': (('panels/cooling_panel.js',), {
+        'n_stations': 'ağ çözünürlüğü — panel istasyon EĞRİLERİNİ çiziyor',
+        'throat_index': 'boğaz istasyonunun indisi — grafikte im olarak '
+                        'kullanılabilirdi; gerekçe ÖLÇÜLMEDİ',
+        'x_exit_mm': 'eksen sınırı — panel `x_mm` dizisini çiziyor',
+        'r_mm': 'ham kontur dizisi — panel cidar/soğutucu eğrilerini çiziyor',
+        'area_ratio': 'ham istasyon dizisi — bkz. `r_mm`',
+        'mach': 'ham istasyon dizisi — bkz. `r_mm`',
+        'velocity_m_s': 'ham istasyon dizisi — bkz. `r_mm`',
+        'reynolds': 'ham istasyon dizisi — bkz. `r_mm`',
+        'T_recovery_K': 'ham istasyon dizisi — panel `q_MW_m2` yükünü çiziyor',
+        'h_gas_W_m2K': 'ham istasyon dizisi — bkz. `T_recovery_K`',
+        'h_coolant_W_m2K': 'ham istasyon dizisi — bkz. `T_recovery_K`',
+        # ÖH D16 (bekci-cevirisi/a1, OH-B4-07): gerekçe ARTIK MAKİNEYLE
+        # SINANIYOR. Ölçüt panelin OKUMA envanteri DEĞİL panel KAYNAĞIDIR:
+        # bu iki ad cooling_panel.js'de yanıt alanı olarak değil FORM ALANI
+        # tanımı olarak geçer (['channel_width', 'Channel Width (mm)', ...]),
+        # yani kullanıcı bunları gerçekten girer.
+        'channel_area_mm2': 'kanal geometrisi türevi — girdi (`channel_width`'
+                            '/`channel_height`) kullanıcıdan, panelin form '
+                            'alanları üzerinden geliyor',
+        'hydraulic_diameter_mm': 'kanal geometrisi türevi — bkz. '
+                                 '`channel_area_mm2`',
+        'mdot_per_channel_kg_s': 'kanal başı debi — panel toplam debiyi '
+                                 'girdiden biliyor',
+        'nozzle_type': 'girdi yankısı — lüle tipi',
+    }),
+    'cooling/summary': (('panels/cooling_panel.js',), {
+        'coolant_inlet_temp_K': 'girdi yankısı — soğutucu giriş sıcaklığı',
+        'coolant_cp_mean_J_kgK': 'ortalama özısı — panel ΔT ve toplam ısıyı '
+                                 'basıyor',
+        # ÖH D16 (bekci-cevirisi/a1, OH-B4-07): eski gerekçe önce "panel
+        # `total_heat_kW` basıyor" diyor, sonra kendini "kW ikizi de
+        # basılmıyor" diye çürütüyordu. ÖLÇÜLDÜ: cooling_panel.js İKİSİNİ
+        # de basmıyor ('total_heat' dizgesi dosyada hiç geçmiyor).
+        'total_heat_W': 'SI ikizi — panel `total_heat_kW` ikizini de '
+                        'basmıyor (ölçüldü); ısı ekseni istasyon q '
+                        'eğrisiyle veriliyor, toplam ısı P11 borcudur',
+        'total_heat_kW': 'bkz. `total_heat_W`',
+        'coolant_exit_pressure_bar': 'çıkış basıncı — panel toplam basınç '
+                                     'düşüşünü basıyor',
+        'pressure_drop_friction_bar': 'basınç düşüşü bileşeni — panel '
+                                      'toplamı basıyor',
+        'pressure_drop_acceleration_bar': 'bkz. `pressure_drop_friction_bar`',
+        'coolant_inlet_enthalpy_J_kg': 'entalpi marşı ara büyüklüğü',
+        'coolant_exit_enthalpy_J_kg': 'entalpi marşı ara büyüklüğü',
+        'coolant_critical_pressure_bar': 'akışkanın kritik nokta verisi — '
+                                         'özellik tablosu bilgisi',
+        'coolant_critical_temperature_K':
+            'bkz. `coolant_critical_pressure_bar`',
+        'coolant_pseudocritical_T_K': 'bkz. `coolant_critical_pressure_bar`',
+        'supercritical_pressure': 'süperkritik rejim bayrağı — panel '
+                                  'koklaşma bayrağını basıyor; gerekçe '
+                                  'ÖLÇÜLMEDİ',
+        'coolant_correlation': 'kullanılan korelasyon adı — panelde geçmiyor; '
+                               'gerekçe ÖLÇÜLMEDİ',
+        'property_table_band_K': 'özellik tablosunun geçerli bandı — '
+                                 'kırpma sayacı (`property_table_clamped_'
+                                 'stations`) bu blokta DÜRÜSTLÜK borcu',
+        'fin_effect': 'kanatçık verimi düzeltmesi — ara büyüklük',
+        'fin_area_ratio_max': 'kanatçık alan oranı — ara büyüklük',
+        'max_wall_cold_K': 'soğuk cidar tepe sıcaklığı — panel SICAK cidar '
+                           'tepe değerini ve marjını basıyor',
+    }),
+    'feed/slosh': (('panels/feed_panel.js',), {
+        'g_eff': 'girdi yankısı — etkin yerçekimi',
+        'omega1': 'açısal frekans — panel `f1_hz` (Hz) basıyor',
+        'liquid_mass_kg': 'sıvı kütlesi — panel çalkalanma kütle ORANINI '
+                          'basıyor',
+        'modes': 'yüksek mod listesi — panel 1. modu basıyor',
+    }),
+    'feed/press_reg': (('panels/feed_panel.js',), {
+        'gamma': 'gaz özelliği — panel gaz ADINI basıyor',
+        'R_specific': 'gaz özelliği — bkz. `gamma`',
+        'storage_pressure': 'girdi yankısı — depolama basıncı',
+        'collapse_factor': 'çökme faktörü — adyabatik/izotermal ikilisinin '
+                           'ara büyüklüğü',
+    }),
+    'feed/press_bd': (('panels/feed_panel.js',), {
+        # NOT: blowdown kipi `gamma` yayımlamıyor (politropik `n` var);
+        # bu satırın regulated'dan kopyalanmış hâlini
+        # `test_muafiyet_listesi_olu_satir_tasimaz` yakaladı.
+        'R_specific': 'gaz özelliği — panel gaz ADINI basıyor',
+        'initial_temperature_K': 'girdi yankısı — başlangıç sıcaklığı',
+        'initial_ullage_volume': 'girdi yankısı — başlangıç ullage hacmi',
+        'final_ullage_volume': 'türev hacim — panel blowdown oranını basıyor',
+        'expelled_volume': 'türev hacim — bkz. `final_ullage_volume`',
+        'gas_mass_ideal_gas_kg': 'ideal gaz ikizi — panel gerçek gaz '
+                                 'kütlesini basıyor',
+        'real_gas': 'gerçek gaz düzeltmesi bayrağı — panelde geçmiyor; '
+                    'gerekçe ÖLÇÜLMEDİ',
+        'real_gas_model': 'gerçek gaz modeli adı — bkz. `real_gas`',
+        'compressibility_factor_initial': 'sıkıştırılabilirlik çarpanı — '
+                                          'gerçek gaz ara büyüklüğü',
+        'compressibility_factor_final':
+            'bkz. `compressibility_factor_initial`',
+        # ÖH D15 birleşmesi (1 Eyl 2026) — yapısal-sistem P5B3-12 ile geldi.
+        'compressibility_factor_final_resolved':
+            'son durum Z\'sinin GERÇEKTEN çözülüp çözülmediğini söyleyen '
+            'bayrak (False ise yayımlanan 1,0 ideal gaz düşüşüdür). '
+            'Nitelediği sayının KENDİSİ de ekranda değil '
+            '(bkz. `compressibility_factor_final`), dolayısıyla bayrağın '
+            'tek başına niteleyeceği bir şey yok. Gerçek gaz künyesinin '
+            'tamamı (Z çifti + `real_gas` + `real_gas_model` + bu bayrak) '
+            'ekran dışıdır; ayrı bir kalem olarak kaydedildi.',
+    }),
+    'feed/water_hammer': (('panels/feed_panel.js',), {
+        'inputs': 'girdi yankısı bloğu — panel kullanıcının formunu '
+                  'zaten gösteriyor',
+        'flow_velocity_m_s': 'girdi yankısı — akış hızı',
+        'valve_closure_time_ms': 'girdi yankısı — vana kapanma süresi',
+        'delta_v_m_s': 'hız değişimi — Joukowsky girdisinin kendisi',
+        'critical_closure_time_s': 'kritik kapanma süresi (2L/a) — panel '
+                                   'dalga hızını ve tepe basıncı basıyor',
+        'wave_speed_rigid_m_s': 'rijit boru dalga hızı ikizi — panel esnek '
+                                'boru değerini basıyor',
+        'elasticity_reduction_factor': 'esneklik düzeltme çarpanı — ara '
+                                       'büyüklük',
+        'joukowsky_pressure_rise_Pa': 'SI ikizi — panel bar sürümünü basıyor',
+        'applied_pressure_rise_Pa': 'SI ikizi — bkz. '
+                                    '`joukowsky_pressure_rise_Pa`',
+        'peak_pressure_Pa': 'SI ikizi — panel `peak_pressure_bar` basıyor',
+        'downsurge_pressure_Pa': 'SI ikizi — bkz. `downsurge_pressure_bar`',
+        'downsurge_pressure_bar': 'geri dalga basıncı — panel tepe basıncı '
+                                  've hükmü basıyor; gerekçe ÖLÇÜLMEDİ',
+        'design_peak_pressure_bar': 'tasarım tepe basıncı — bkz. '
+                                    '`downsurge_pressure_bar`',
+        'mass_flow_kg_s': 'debi — girdiden (hız + kesit) türetiliyor',
+        # ÖH D18 / termo-ucus a1 (P4B4-09/-10) — İKİ YENİ KÜNYE BLOĞU.
+        # İkisi de HÜKMÜN DAYANAĞIDIR, hükmün kendisi değil; panelin
+        # bastığı sayıyı (peak_pressure_bar, status) nitelendirirler.
+        # Ekrana yeni bir SAYI eklenmedi.
+        'working_pressure_reference':
+            'çalışma basıncının referans düzlemi künyesi (P4B4-09) — '
+            'modül aynı sayıyı kolon ayrılmasında MUTLAK, hoop sınıfında '
+            'GÖSTERGE olarak kullanıyordu. Blok, hükmün düzlemden '
+            'BAĞIMSIZ olduğunu gösterir; düzleme bağlı olsaydı yanıt hiç '
+            'üretilmezdi (fail-closed). Panel hüküm/tepe basıncı basıyor',
+        'flow_cross_check':
+            'iki debi girdisinin çapraz kontrol künyesi (P4B4-10) — yalnız '
+            'mdot_kg_s ve flow_velocity_m_s BİRLİKTE gönderildiğinde dolu; '
+            'ikisi çelişseydi yanıt hiç üretilmezdi. Panel tek debi alanı '
+            'gösteriyor',
+        'column_separation': 'kolon ayrılması bayrağı — panelde geçmiyor; '
+                             'kaynağı (`vapor_pressure_source`) bu blokta '
+                             'DÜRÜSTLÜK borcu olarak imli',
+        'column_separation_peak_bar': 'bkz. `column_separation`',
+        'column_separation_peak_factor': 'bkz. `column_separation`',
+        'vapor_pressure_Pa': 'buhar basıncı — bkz. `column_separation`',
+        'vapor_pressure_bar': 'buhar basıncı — bkz. `column_separation`',
+        'vapor_pressure_ref_K': 'buhar basıncı referans sıcaklığı — bkz. '
+                                '`column_separation`',
+        'model': 'model adı — panel hükmü (`status`) ve basınçları basıyor',
+    }),
+    'cfd': (('panels/cfd_panel.js',), {
+        # ÖH D19 / P7B3-30 kardeşi P7B4-09: çözücünün çıkış sınır ölçümü
+        # (subsonic_cells / cells_total / anchored / unanchored_warning /
+        # _basis) uca AYNEN taşındı. Panel bu bloğu ayrı bir kutu olarak
+        # ÇİZMİYOR; ölçümün kullanıcıya ulaşan yüzü, panelin ZATEN bastığı
+        # `inputs.back_pressure_basis` cümlesidir (cfd_panel.js:1674) —
+        # o cümle artık ölçülen ses-altı hücre sayısını ve çözücünün kendi
+        # ÇAPASIZ uyarısını harfiyen taşıyor (tests/test_d19_app_api_a1.py
+        # ::TestP7B409CikisBeyaniOlcumdenOkunur). Blok, makine-okur dayanak
+        # olarak yayımlanıyor: istemci cümleyi ayrıştırmadan denetleyebilsin.
+        'outlet_bc': 'çözücünün çıkış sınır ölçümü — panel ayrı kutu '
+                     'çizmiyor; kullanıcıya ulaşan yüzü panelin bastığı '
+                     '`inputs.back_pressure_basis` cümlesidir (P7B4-09), '
+                     'blok makine-okur dayanak olarak yayımlanır',
+    }),
+    'fea/structural': (('fea_panel.js',), {
+        'input_field': 'köprünün hangi istek alanını kullandığı — tanı '
+                       'alanı; panel çözüm alanlarını basıyor',
+        # ÖH D37 A2-1 termal 7. tur (ana model izni) — B2-CP.
+        'consumed_paths': 'B2-CP makine sözleşmesi — köprünün okuduğu '
+                          'motor yolları (path / purpose / unit / '
+                          'consumer); tüketici kulvar K3s (A7b k3s-durum, '
+                          'BAYAT tespiti), ekran kartı değil; sayı bit-aynı',
+        # v3 fea-yuk (OH-DK-04): yük modeli künyesi — iç basınç dağılımı,
+        # γ alanı, kapalı uç kuvveti, kuvvet dengesi, kapsam (yalnız
+        # basınç). Makine-okur künye; hüküm etkisi
+        # meta.hukum.geri_cekme_gerekceleri'nde (kuvvet_dengesi_tutmadi).
+        # Panelde ayrı kart bu sürümde YOK (paneller kulvar kapsamı dışı;
+        # devir: fea_panel.js sahibi).
+        'load_model': 'OH-DK-04 yük modeli künyesi (dağılım, γ alanı, uç '
+                      'kuvveti ve uygulama yeri, kuvvet dengesi, kapsam); '
+                      'makine-okur; hüküm etkisi meta.hukum.'
+                      'geri_cekme_gerekceleri (kuvvet_dengesi_tutmadi)',
+    }),
+    'fea/planar': (('fea_panel.js',), {}),
+    'thermal_fea/fea': (('thermal_fea_panel.js',), {
+        'input_field': 'bkz. fea/structural `input_field`',
+    }),
+    'thermal_fea/wall_profile': (('thermal_fea_panel.js',), {
+        'nozzle_type': 'girdi yankısı — lüle tipi',
+        'cooling_type': 'girdi yankısı — soğutma tipi',
+        'wall_thickness_mm': 'girdi yankısı — cidar kalınlığı',
+        'throat_diameter_m': 'girdi yankısı — boğaz çapı',
+        'n_stations': 'ağ çözünürlüğü — panel h(z) eğrisini çiziyor',
+        'throat_index': 'boğaz istasyonu indisi — grafikte im olabilirdi; '
+                        'gerekçe ÖLÇÜLMEDİ',
+        'x_throat_mm': 'eksen imi — bkz. `throat_index`',
+        'x_exit_mm': 'eksen sınırı — bkz. `throat_index`',
+        'h_g': 'ham dizi — panel bu bloğu OKUMAZ, /api/fea/thermal '
+               'isteğinin gövdesine AYNEN iletir (taşıyıcı); ekranda '
+               'karşılığı termal FEA alanlarıdır',
+        'T_recovery': 'ham dizi — bkz. `h_g` (taşıyıcı)',
+        'q_MW': 'ham dizi — bkz. `h_g` (taşıyıcı)',
+        'mach': 'ham dizi — bkz. `h_g` (taşıyıcı)',
+        'area_ratio': 'ham dizi — bkz. `h_g` (taşıyıcı)',
+        'T_wall_eq': 'ham dizi — bkz. `h_g` (taşıyıcı)',
+        # ÖH D15 birleşmesi (1 Eyl 2026) — termo-uçuş P4B1-08 ile geldi:
+        # istasyon yarıçapı artık uçtan YAYIMLANIYOR ki tüketiciler onu
+        # `r_t*sqrt(area_ratio)` ile geri kurmasın (iki boğaz tanımı
+        # ayrıştığında yarıçap ölçekleniyor, eksen ölçeklenmiyordu).
+        'r_mm': 'ham dizi — bkz. `h_g` (taşıyıcı): panel `wall_profile` '
+                'bloğunu /api/fea/thermal gövdesine AYNEN geçiriyor '
+                '(thermal_fea_panel.js, `axial_profile`), tek tek okumuyor',
+    }),
+    'sixdof/summary': (('sixdof_panel.js',), {
+        'lateral_drift_at_end':
+            'yanal sürüklenme — panel iniş noktası/menzil alanlarını '
+            'basıyor; gerekçe ÖLÇÜLMEDİ',
+    }),
+    'sixdof/series': (('sixdof_panel.js',), {
+        # ÖH D25 / OH-D24-16 — envanter GEVŞETİLMEDİ, alan SINIFLANDIRILDI.
+        # Bu bir "panel basmıyor" borcu değil: alanın tüketicisi başka bir
+        # dosyadadır ve ölçüldü (a2/once.json K5 + a2 bekçisi
+        # ``test_tuketici_alani_gercekten_okuyor``).
+        'altitude_datum': (
+            'datum SÖZLEŞMESİ, ekrana basılan bir metin değil: irtifa '
+            'dizisini ÇİZEN tüketici launch_site_globe.js (satır 820) '
+            'alanı okuyor ve tanımadığı datumda yolu FAIL-CLOSED '
+            "reddediyor (_onError('flight_altitude_datum_unknown')). "
+            'sixdof_panel.js seriyi küreye devrediyor, datumu kendisi '
+            'yazı olarak basmıyor — kanal ÖLÜ DEĞİL.'),
+    }),
+    'injector': (('injector_panel.js',), {
+        'motor_type': 'girdi yankısı — motor tipi',
+        'injector_type': 'girdi yankısı — enjektör tipi',
+        'user_cd': 'girdi yankısı — kullanıcının verdiği Cd (verilmediyse '
+                   'None); panel KULLANILAN Cd\'yi ve kaynağını basıyor',
+    }),
+    'settings/update': (('settings_panel.js', 'update_check.js'), {
+        'asset': 'indirme varlığı bloğu — panel indirme akışını '
+                 '`/api/update/download` üzerinden yürütüyor',
+    }),
+}
+
+TERS_BORCLU_BLOKLAR = {
+    # BORÇ İMİ KALDIRILDI — ÖH D26 / arayuz a2 (OH-B3-02).
+    # ÖLÇÜLDÜ: taban 7751531 ``a2/once.json`` -> ``a2/sonra.json``.
+    # `property_table_clamped_stations` 0 -> panelde: cooling_panel.js
+    # model notları bloğuna sayıyı ve ne anlama geldiğini yazıyor
+    # (SIFIR da söylenir — 'hiçbiri kırpılmadı' bir cevaptır).
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir — alan yeniden ekrandan düşerse test kırmızı verir.
+    # BORÇ İMİ KALDIRILDI — ÖH D26 / arayuz a2 (OH-B3-02).
+    # ÖLÇÜLDÜ: taban 7751531 ``a2/once.json`` -> ``a2/sonra.json``.
+    # `confidence` 0 -> panelde (slosh): ortak `confidenceHtml()`
+    # yardımcısı ucun güven beyanını ad = değer basıyor.
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir — alan yeniden ekrandan düşerse test kırmızı verir.
+    # BORÇ İMİ KALDIRILDI — ÖH D26 / arayuz a2 (OH-B3-02).
+    # ÖLÇÜLDÜ: taban 7751531 ``a2/once.json`` -> ``a2/sonra.json``.
+    # `confidence` 0 -> panelde (pressurant/regulated), aynı yardımcı.
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir — alan yeniden ekrandan düşerse test kırmızı verir.
+    # BORÇ İMİ KALDIRILDI — ÖH D26 / arayuz a2 (OH-B3-02).
+    # ÖLÇÜLDÜ: taban 7751531 ``a2/once.json`` -> ``a2/sonra.json``.
+    # `confidence` 0 -> panelde (pressurant/blowdown), aynı yardımcı.
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir — alan yeniden ekrandan düşerse test kırmızı verir.
+    # BORÇ İMİ KALDIRILDI — ÖH D26 / arayuz a2 (OH-B3-02).
+    # ÖLÇÜLDÜ: taban 7751531 ``a2/once.json`` -> ``a2/sonra.json``.
+    # `vapor_pressure_source` 0 -> panelde. İm ödendikten SONRA bekçi
+    # İKİNCİ bir dürüstlük alanı gösterdi (`flow_source`, imde adı
+    # geçmiyordu); o da aynı yönetici-tepe tablosuna bağlandı, yani
+    # blok bugün TAM ödenmiştir. XPASS(strict) ile bu satır KIRMIZI
+    # veriyordu; blok artık CANLI bekçidir.
+    # BORÇ İMİ KALDIRILDI — ÖH D26 / arayuz a2 (OH-B3-02).
+    # ÖLÇÜLDÜ: taban 7751531 ``a2/once.json`` -> ``a2/sonra.json``.
+    # `contour_basis` (7 alt alan) 0 -> panelde: thermal_fea_panel.js
+    # profil yanıtından bloğu saklıyor ve künye bölümünde alt
+    # alanlarıyla basıyor; profil artık künyesiz çizilmiyor.
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir — alan yeniden ekrandan düşerse test kırmızı verir.
+    # 'injector' borcu Z5 taşıma dalgasında ödendi (OH-B4-01): panel artık
+    # ucun gerçek `warnings`/`assumptions` kayıtlarını okuyor — im kalktı.
+    # BORÇ İMİ KALDIRILDI — ÖH D27 / electron a1 (OH-D26-18, P13B4-01).
+    # ÖLÇÜLDÜ: taban 709a235e ``D27/electron/a1/once.json`` ->
+    # ``sonra.json`` (node ikizi, GERÇEK settings_panel.js + update_check.js,
+    # iki dil). `source` 0 -> ekranda: hem ayarlar penceresinin denetim
+    # satırının altında hem güncelleme penceresinde/bildiriminde KOŞULSUZ
+    # basılıyor. API yolu ile YEDEK SAYFA KAZIMASI artık ekranda ayrılıyor
+    # (`ayirt_guncelleme_var`/`ayirt_guncel` false -> true, üç yüzeyde de).
+    # Alan hiç gelmezse ya da adsızsa sessiz kalınmıyor ("sunucu bildirmedi").
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir — alan yeniden ekrandan düşerse test kırmızı verir.
+    # BORÇ İMİ KALDIRILDI — ÖH D28 / arayuz a1 (OH-D27-16).
+    # ÖLÇÜLDÜ: taban 7cd08bcc ``D28/arayuz/a1/once.json`` ->
+    # ``sonra.json``. `cfd`: `time_integrator_basis` 0 -> panelde.
+    # ``panels/cfd_panel.js`` künyeyi ``convergenceHtml`` içinde
+    # ``basisText()`` ile AYNEN basıyor (şemanın ADI da ayrı satırda);
+    # kullanıcı artık yakınsama hükmünün hangi zaman ilerletme yoluyla
+    # kazanıldığını görüyor. XPASS(strict) ile bu satır KIRMIZI
+    # veriyordu; blok artık CANLI bekçidir — alan yeniden ekrandan
+    # düşerse test kırmızı verir.
+    # BORÇ İMİ KALDIRILDI — ÖH D28 / arayuz a1 (OH-D27-16).
+    # ÖLÇÜLDÜ: taban 7cd08bcc ``D28/arayuz/a1/once.json`` ->
+    # ``sonra.json``. `thermal_fea/wall_profile`: `column_basis`
+    # (6 çocuk) 0 -> panelde. ``thermal_fea_panel.js`` künye bölümünde
+    # her sütunu ``ad [birim] = dayanak`` olarak, ucun metnini AYNEN
+    # (SRV) basıyor; 86 katlık sütun tuzağı artık ekranda yazıyor.
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir.
+}
+
+#: ÖH D27 / fix-26b — PANELE İNMEYEN **KOZMETİK** ALAN BORCU.
+#:
+#: ``TERS_MUAFIYET``ten AYRI TUTULUR ve ayrılık kasıtlıdır: muafiyet
+#: "panel bunu bilerek basmıyor, çünkü ..." der (girdi yankısı, SI ikizi,
+#: taşıyıcı ham dizi, tüketicisi başka dosya). Buradaki satırlar ise
+#: "panel bunu BASMALI ama henüz basmıyor" der — yani BORÇ. İkisi tek
+#: sözlükte toplansaydı borç, izin gibi okunurdu.
+#:
+#: Alanlar dürüstlük beyanı DEĞİLDİR (``_durustluk_alani`` onları
+#: seçmez); dürüstlük borcu ``TERS_BORCLU_BLOKLAR`` + ``DURUSTLUK_BORCU``
+#: ikilisinde tutulur. Kayıt TEK YÖNLÜDÜR: küme büyüyemez (yeni kör alan
+#: kırmızı yakar) ve ölü satır taşıyamaz (panel alanı okumaya başlayınca
+#: satır KALKMAK ZORUNDA, yoksa ``test_panel_borcu_olu_satir_tasimaz``
+#: kırmızı verir). Her satır alanı GETİREN D26 aşamasını ve commit'ini
+#: adıyla yazar.
+#: Borç gerekçesinin KÜNYE ÖNEKİ (ÖH D32 / fix-35b). Gerekçe metni
+#: ``ÖH D<aşama> <kulvar/aşama adı>, commit <hash> — ...`` ile BAŞLAMAK
+#: zorundadır. Desen nüfus DEĞİL SÖZLEŞME kodlar, yani yeni bir dalga
+#: geldiğinde güncellenmesi gerekmez.
+#:
+#: NEDEN ÖNEK, NEDEN SERBEST ARAMA DEĞİL: ilk deneme ``\bD\d{1,3}\b``
+#: idi ve ters mutasyon #7'de YEŞİL KALDI — gerekçenin prozasında geçen
+#: ilgisiz bir ``OH-D32-03`` defter numarası deseni kazara tatmin etti.
+#: Metnin herhangi bir yerinde bir D-imi aramak, künyeyi ölçmek değil
+#: künyeye BENZEYEN bir dizgiyi aramaktır. Önek şartı hem eski
+#: ``'D26' in neden`` ölçütünden hem de serbest aramadan SIKIDIR.
+_BORC_KUNYE_ONEKI = re.compile(
+    r'^ÖH (?P<asama>D\d{1,3}) [^,]+, commit (?P<commit>[0-9a-f]{7,40}) — ')
+
+TERS_PANEL_BORCU = {
+    # BORÇ TAMAMEN ÖDENDİ — ÖH D28 / arayuz a1 (OH-D27-16).
+    # ÖLÇÜLDÜ: taban 7cd08bcc ``D28/arayuz/a1/once.json`` (5 kozmetik
+    # kör alan) -> ``sonra.json`` (0). Satırlar SİLİNDİ, çünkü kayıt tek
+    # yönlüdür: ödenen satır ``test_panel_borcu_olu_satir_tasimaz``ta
+    # KIRMIZI verir ve liste "unutulmuş af listesi"ne dönüşemez.
+    #   cfd: `convergence_history` + `time_integrator` ->
+    #     ``panels/cfd_panel.js::convergenceHistoryHtml`` üç seriyi
+    #     (mass_flow_in / mass_flow_out / throat_mach) son değeri,
+    #     birimi, seyreltme sayaçları ve ucun kendi künyesiyle basıyor;
+    #     şemanın adı ``convergenceHtml`` künye tablosunda.
+    #   thermal_fea/wall_profile: `units` -> künye bölümünde her sütun
+    #     ``ad [birim] = dayanak`` satırıyla; birim ucun ``units``
+    #     bloğundan okunur, panel birim UYDURMAZ.
+    #   feed/press_reg: `expulsion_efficiency` + `swept_volume_m3` ->
+    #     ``panels/feed_panel.js::expulsionHtml``; gaz kütlesini
+    #     ölçekleyen boşaltma varsayımı artık kütlenin yanında.
+    # Sözlük BOŞ kalır ve boş kalması ANLAMLIDIR: yeni bir kozmetik kör
+    # alan doğarsa ``test_kozmetik_kalan_gerekceli_izinli`` kırmızı yanar
+    # ve buraya ADLI gerekçeyle yazılması gerekir.
+    #
+    # ... ve tam olarak bu oldu — ÖH D32 / fix-35b (15 Eylül 2026):
+    # `feed/slosh` -> `size_envelope` satırı buraya yazıldı.
+    #
+    # ... ve ÖDENDİ — ÖH D33-2 / arayuz-panel a1 (kalem OH-D32-03).
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/D33-2/arayuz-panel/a1/once.json ->
+    # sonra.json, bölüm K2): okunan çocuk sayısı 0/7 -> 7/7;
+    # `panels/feed_panel.js::sizeEnvelopeHtml` bloğun YEDİ çocuğunu da
+    # adıyla basıyor (bant yoksa "BEYAN EDİLMEDİ", Bond sayısı yoksa
+    # eksik girdinin adı). Satır SİLİNDİ, çünkü kayıt tek yönlüdür:
+    # ödenmiş borcu burada bırakmak `test_panel_borcu_olu_satir_tasimaz`ta
+    # KIRMIZI verir ve liste "unutulmuş af listesi"ne dönerdi.
+    'injector': {'orifice_band': (
+        'ÖH D37 A2 hibrit, commit c3d1df8b — F-10 design_injector yanıtına '
+        'orifice_band {d_min_mm, d_max_mm, source} (tek kaynaklı delik çapı '
+        'bandı + Sutton/Mishra künyesi) ekledi; injector_panel.js bandı ve '
+        'künyesini henüz BASMIYOR. Baskı A2 faz-c-1 kulvarının işi; defter '
+        'kaydı OH-D37-H4 (ana model açar).')},
+}
+
+
+@pytest.fixture(scope='module')
+def ters_bloklar(regen, slosh, press_reg, press_bd, wh_safe, cfd_body,
+                 fea_structural, fea_planar, fea_thermal, wall_profile,
+                 sixdof_body, injector_design):
+    return {
+        'cooling/ust': regen,
+        'cooling/summary': regen['summary'],
+        'feed/slosh': slosh,
+        'feed/press_reg': press_reg,
+        'feed/press_bd': press_bd,
+        'feed/water_hammer': wh_safe,
+        'cfd': cfd_body['cfd'],
+        'fea/structural': fea_structural,
+        'fea/planar': fea_planar,
+        'thermal_fea/fea': fea_thermal,
+        'thermal_fea/wall_profile': wall_profile,
+        'sixdof/summary': sixdof_body['summary'],
+        'sixdof/series': sixdof_body['series'],
+        'injector': injector_design,
+        'settings/update': UPDATE_CHECK_SEMASI,
+    }
+
+
+def _ters_param(blok_id):
+    gerekce = TERS_BORCLU_BLOKLAR.get(blok_id)
+    if gerekce is None:
+        return pytest.param(blok_id, id=blok_id)
+    return pytest.param(blok_id, id=blok_id,
+                        marks=pytest.mark.xfail(strict=True, reason=gerekce))
+
+
+class TestTersYonSozlesmesi:
+    """ÖH FAZ C — C1/C2/C3: `payload.keys() − panelin okuduğu adlar`."""
+
+    @pytest.mark.parametrize('blok', [_ters_param(b) for b in TERS_MUAFIYET])
+    def test_durustluk_alanlari_panele_iniyor(self, ters_bloklar, blok):
+        js_yollari, _muafiyet = TERS_MUAFIYET[blok]
+        envanter = _okuma_envanteri(*js_yollari)
+        eksik = [ad for ad in _ters_alanlar(ters_bloklar[blok], envanter)
+                 if _durustluk_alani(ad)]
+        assert not eksik, (
+            f"{blok}: uç şu DÜRÜSTLÜK alanlarını yayımlıyor ama "
+            f"{list(js_yollari)} hiç basmıyor: {eksik}")
+
+    @pytest.mark.parametrize('blok', sorted(TERS_MUAFIYET))
+    def test_kozmetik_kalan_gerekceli_izinli(self, ters_bloklar, blok):
+        js_yollari, muafiyet = TERS_MUAFIYET[blok]
+        borc = TERS_PANEL_BORCU.get(blok, {})
+        envanter = _okuma_envanteri(*js_yollari)
+        kalan = [ad for ad in _ters_alanlar(ters_bloklar[blok], envanter)
+                 if not _durustluk_alani(ad) and ad not in muafiyet
+                 and ad not in borc]
+        assert not kalan, (
+            f"{blok}: panelin basmadığı şu alanlar için ne muafiyet "
+            f"gerekçesi ne de adlı borç kaydı var: {kalan}")
+        bos = [ad for ad, neden in muafiyet.items() if not str(neden).strip()]
+        assert not bos, f"{blok}: gerekçesiz muafiyet satırı: {bos}"
+
+    @pytest.mark.parametrize('blok', sorted(TERS_MUAFIYET))
+    def test_muafiyet_listesi_olu_satir_tasimaz(self, ters_bloklar, blok):
+        _js, muafiyet = TERS_MUAFIYET[blok]
+        olu = sorted(set(muafiyet) - set(ters_bloklar[blok]))
+        assert not olu, (
+            f"{blok}: izin listesinde ucun yayımlamadığı alan var: {olu}")
+
+    @pytest.mark.parametrize('blok', sorted(TERS_MUAFIYET))
+    def test_panel_borcu_olu_satir_tasimaz(self, ters_bloklar, blok):
+        """Borç TEK YÖNLÜDÜR: ödenen satır kalkmak ZORUNDA.
+
+        ÖH D27 / fix-26b. Kayıt bir muafiyet değil borç olduğu için iki
+        yönden de kapalıdır: yeni kör alan ``kozmetik_kalan`` bekçisini
+        kırmızı yakar, ödenmiş satır ise BURADA kırmızı verir. Böylece
+        liste "unutulmuş af listesi"ne dönüşemez.
+        """
+        js_yollari, _muafiyet = TERS_MUAFIYET[blok]
+        # ÖH D28 / arayuz a1: parametre kümesi artık TERS_MUAFIYET'tir
+        # (borç sözlüğü BOŞALDI ve boş parametrizasyon testi sessizce
+        # ATLARDI — "no tests ran" kırmızı sayılır). Kapı GENİŞLEDİ:
+        # borcu olmayan bloklar da her koşumda denetleniyor.
+        borc = TERS_PANEL_BORCU.get(blok, {})
+        yuk = ters_bloklar[blok]
+        envanter = _okuma_envanteri(*js_yollari)
+
+        bos = [ad for ad, neden in borc.items() if not str(neden).strip()]
+        assert not bos, f"{blok}: gerekçesiz borç satırı: {bos}"
+        # ÇEVRİLDİ — ÖH D32 / fix-35b. Eski ölçüt ``'D26' not in neden``
+        # idi; kayıt kurulduğunda borçların HEPSİ D26'dan geldiği için
+        # doğruydu ama iddiayı DEĞİL o günkü nüfusu kodluyordu. D31'den
+        # gelen bir alanın gerekçesine 'D26' yazmak KÜNYE UYDURMAK olur,
+        # 'D26' aramaya devam etmek ise dürüst künyeyi reddetmek. Sözlüğün
+        # kendi cümlesi ("her satır alanı GETİREN aşamayı VE commit'ini
+        # adıyla yazar") aynen ölçülür ve kapı SIKILAŞIR: artık commit
+        # künyesi de ŞARTTIR (eski ölçüt onu hiç aramıyordu).
+        kunyesiz = [ad for ad, neden in borc.items()
+                    if not _BORC_KUNYE_ONEKI.match(str(neden))]
+        assert not kunyesiz, (
+            f"{blok}: borç satırı künye ÖNEKİYLE başlamıyor — beklenen "
+            "biçim 'ÖH D<aşama> <kulvar> ..., commit <hash> — <gerekçe>': "
+            f"{kunyesiz}")
+
+        yayimlanmayan = sorted(set(borc) - set(yuk))
+        assert not yayimlanmayan, (
+            f"{blok}: borç listesinde ucun artık yayımlamadığı alan var "
+            f"(alan düştüyse borç da düşer): {yayimlanmayan}")
+        odenmis = sorted(set(borc) & envanter)
+        assert not odenmis, (
+            f"{blok}: panel şu alanları ARTIK OKUYOR, yani borç ödendi — "
+            f"satırı TERS_PANEL_BORCU'ndan kaldır: {odenmis}")
+
+
+class TestTersYonBorcEnvanteri:
+    """Borç imleri xfail altında sussa da yeni borç doğarsa haber ver."""
+
+    #: Ölçüldü 27 Ağustos 2026. TEK YÖNLÜ: küme büyüyemez, küçülebilir.
+    #: `injector` satırı OH-B3-06 incelmesiyle GÖRÜNÜR OLDU (i18n maskesi
+    #: kalkınca): panel `*_tr` ikizlerini okuyor, uç `warnings`/
+    #: `assumptions` yayımlıyor; `*_tr` üreticisi depoda YOK.
+    DURUSTLUK_BORCU = {
+        'cooling/summary': ('property_table_clamped_stations',),
+        'feed/slosh': ('confidence',),
+        'feed/press_reg': ('confidence',),
+        'feed/press_bd': ('confidence',),
+        # ÖH D18 / P4B4-10: ``flow_source`` hangi girdinin ÇÖZÜME GİRDİĞİNİ
+        # adlandırır. Panelin bastığı debi alanının künyesidir; borç
+        # envanterine bilerek yazıldı (panel bağlaması ayrı kalem).
+        'feed/water_hammer': ('vapor_pressure_source', 'flow_source'),
+        'injector': ('assumptions', 'warnings'),   # OH-B3-06 incelmesi
+        # ÖH D27 / electron a1 (OH-D26-18): `settings/update`in `source`
+        # borcu ÖDENDİ, satır DÜŞTÜ. Küme tek yönlüdür (küçülmesi serbest);
+        # ödenmiş bir satırı burada bırakmak aynı körlüğü ileride affederdi.
+        # ÖH D28 / arayuz a1 (OH-D27-16): `thermal_fea/wall_profile`
+        # (`contour_basis` D26 arayuz a2'de, `column_basis` bu aşamada)
+        # ve `cfd` (`time_integrator_basis`) satırları ÖDENDİ, DÜŞTÜ.
+        # Küme tek yönlüdür (küçülmesi serbest); ödenmiş bir satırı
+        # burada bırakmak aynı körlüğü ileride affederdi.
+    }
+
+    #: Ölçüldü 27 Ağustos 2026 — adı DA çocukları DA okunmayan alt bloklar.
+    #: `injector` satırı: iki liste de kayıt SÖZLÜKLERİ taşıyor
+    #: (`{code, params, severity}`), üç çocuğun hiçbiri panelde geçmiyor.
+    SAGIR_ALT_BLOKLAR = {
+        'injector': {'assumptions': 3, 'warnings': 3,    # OH-B3-06
+                     # ÖH D37 A2 hibrit (commit c3d1df8b): F-10
+                     # design_injector yanıtına orifice_band {d_min_mm,
+                     # d_max_mm, source} ekledi; 7. tur (karar §28-25)
+                     # yakınlık penceresinin beyanını ekledi
+                     # {near_lower_edge_fraction, near_lower_edge_basis}.
+                     # injector_panel.js beş çocuğun hiçbirini basmıyor.
+                     # Adlı borç TERS_PANEL_BORCU['injector'] satırında;
+                     # baskı A2 faz-c-1 (defter OH-D37-H4). Panel basınca
+                     # bu satır da silinir (ödenen borç satırını
+                     # test_panel_borcu_olu_satir_tasimaz yakalar).
+                     'orifice_band': 5},
+        # ÖH D37 A2-1 termal 7. tur (ana model izni): B2-CP `consumed_paths`
+        # kayıt listesi (4 çocuk); tüketicisi K3s (A7b), panel değil —
+        # gerekçe TERS_MUAFIYET['fea/structural'] içinde.
+        # v3 fea-yuk (OH-DK-04): `load_model` künyesinin 10 çocuğu
+        # (ölçüldü 14 Eki 2026); gerekçe TERS_MUAFIYET['fea/structural'].
+        'fea/structural': {'consumed_paths': 4, 'load_model': 10},
+        # ÖH D28 / arayuz a1 (OH-D27-16): `thermal_fea/wall_profile`
+        # satırı DÜŞTÜ — panel hem `contour_basis`i hem `column_basis`i
+        # adıyla okuyup künye bölümünde basıyor, dolayısıyla ikisi de
+        # "sağır alt blok" değil.
+        # ÖH D18 / P4B4-09: referans düzlemi künyesi (6 çocuk). Gerekçesi
+        # TERS_MUAFIYET['feed/water_hammer'] içinde yazılı.
+        'feed/water_hammer': {'working_pressure_reference': 6},
+        # ÖH D32 / fix-35b: `feed/slosh` -> `size_envelope` (7 çocuk)
+        # satırı buraya yazılmıştı; ÖH D33-2 / arayuz-panel a1
+        # (OH-D32-03) bloğu bağladı ve satır DÜŞTÜ — panel yedi çocuğu da
+        # adıyla okuyor, dolayısıyla blok artık "sağır" değil. Küme tek
+        # yönlüdür (küçülmesi serbest); ödenmiş bir satırı burada
+        # bırakmak aynı körlüğü ileride affederdi.
+    }
+
+    def test_durustluk_borcu_buyumez(self, ters_bloklar):
+        yeni = {}
+        for blok, (js_yollari, _m) in TERS_MUAFIYET.items():
+            envanter = _okuma_envanteri(*js_yollari)
+            kor = {ad for ad in _ters_alanlar(ters_bloklar[blok], envanter)
+                   if _durustluk_alani(ad)}
+            fazla = sorted(kor - set(self.DURUSTLUK_BORCU.get(blok, ())))
+            if fazla:
+                yeni[blok] = fazla
+        assert not yeni, (
+            "YENİ dürüstlük körlüğü doğdu (27 Ağu 2026 tabanının dışında): "
+            f"{yeni}")
+
+    def test_sagir_alt_bloklar_buyumez(self, ters_bloklar):
+        yeni = {}
+        for blok, (js_yollari, _m) in TERS_MUAFIYET.items():
+            if blok == 'settings/update':
+                continue  # dondurulmuş şemada değerler yok, yapı ölçülemez
+            envanter = _okuma_envanteri(*js_yollari)
+            sagir = _sagir_alt_bloklar(ters_bloklar[blok], envanter)
+            fazla = sorted(set(sagir)
+                           - set(self.SAGIR_ALT_BLOKLAR.get(blok, {})))
+            if fazla:
+                yeni[blok] = {ad: sagir[ad] for ad in fazla}
+        assert not yeni, f"YENİ sağır alt blok doğdu: {yeni}"
+
+
+class TestPanelOkumaEnvanteri:
+    """C3 — kapsama alınan panellerin OKUDUĞU alan envanteri (taban ölçüm)."""
+
+    #: TABANLAR OH-B3-06 İNCELMESİYLE YENİDEN ÖLÇÜLDÜ (27 Ağustos 2026);
+    #: parantez içi ESKİ (i18n maskeli) ölçüm.
+    ENVANTER_TABANI = {
+        'panels/cooling_panel.js': 70,     # eski maskeli ölçüm: 132
+        'panels/feed_panel.js': 155,       # 252
+        'panels/cfd_panel.js': 346,        # 529
+        'fea_panel.js': 218,               # 287
+        'thermal_fea_panel.js': 159,       # 207
+        'sixdof_panel.js': 305,            # 314
+        'injector_panel.js': 211,          # 217
+        'settings_panel.js': 130,          # 130 (i18n dizgesi yok)
+        'update_check.js': 92,             # 93
+    }
+
+    @pytest.mark.parametrize('rel', sorted(ENVANTER_TABANI))
+    def test_envanter_cikarimi_saglam(self, rel):
+        taban = self.ENVANTER_TABANI[rel]
+        boy = len(_okuma_envanteri(rel))
+        assert boy >= int(taban * 0.7), (
+            f"{rel}: okuma envanteri {boy} ada düştü (taban {taban}) — "
+            "çıkarım bozulmuş olabilir")
+
+
+class TestIncelmeYanlisKirmiziUretmez:
+    """OH-B3-06 incelmesinin M2 kontrolü (mekanizma wave3 §8 ile aynı).
+
+    Gerçek okuma envanterde KALMALI. Bu dosya defterin örnek vakasını da
+    taşıyor: `injector_panel.js`'te `references` HEM `common.references`
+    çeviri anahtarında HEM `dz.references` okumasında geçiyor — incelme
+    onu düşürmemeli (düşürseydi enjektör bloğunda yanlış kırmızı doğardı).
+    """
+
+    def test_i18n_anahtari_tek_basina_okuma_sayilmaz(self):
+        metin = "html += `${T('common.warnings', 'Warnings')}`;"
+        assert 'warnings' not in _envanter_metinden(metin)
+
+    def test_gercek_okuma_i18n_ikiziyle_birlikte_hayatta_kalir(self):
+        metin = ("const w = dz.warnings || [];\n"
+                 "html += `${T('common.warnings', 'Warnings')}`;")
+        assert 'warnings' in _envanter_metinden(metin), (
+            'incelme GERÇEK okumayı da sildi — ters yön yanlış kırmızı verir')
+
+    def test_dizin_erisimi_de_hayatta_kalir(self):
+        metin = ("const w = dz['warnings'];\n"
+                 "html += T('common.warnings', 'W');")
+        assert 'warnings' in _envanter_metinden(metin)
+
+    def test_enjektor_borcunun_dayanagi_olculdu(self):
+        """`warnings_tr`/`assumptions_tr` üreticisi depoda gerçekten yok mu?
+
+        Enjektör borç iminin gerekçesi buna dayanıyor: panel bir ad
+        okuyor, o adı ÜRETEN kimse yok. Üretici doğarsa bu iddia kırmızı
+        verir ve borç imi yeniden ölçülmelidir.
+        """
+        aranan = ('warnings_tr', 'assumptions_tr')
+        uretici = []
+        for yol in sorted((REPO_ROOT / 'hrma').rglob('*.py')):
+            metin = yol.read_text(encoding='utf-8', errors='ignore')
+            for ad in aranan:
+                if f"'{ad}'" in metin or f'"{ad}"' in metin:
+                    uretici.append(f'{yol.name}:{ad}')
+        assert not uretici, (
+            'enjektör panelinin okuduğu `*_tr` adlarının artık bir '
+            f'üreticisi var: {uretici} — borç imi yeniden ölçülmeli')
+
+    #: (panel, ad): ad HEM i18n anahtarında HEM gerçek okumada geçiyor.
+    CIFT_GECEN = (
+        ('injector_panel.js', 'references'),
+        ('panels/cooling_panel.js', 'warnings'),
+        ('panels/feed_panel.js', 'warnings'),
+        ('fea_panel.js', 'busy'),
+    )
+
+    @pytest.mark.parametrize('rel,ad', CIFT_GECEN,
+                             ids=[f'{r}:{a}' for r, a in CIFT_GECEN])
+    def test_urun_capasi_incelmeden_sag_cikti(self, rel, ad):
+        metin = (REPO_STATIC_JS / Path(rel)).read_text(encoding='utf-8')
+        yapraklar = {parca
+                     for m in I18N_ANAHTAR_DIZGESI.finditer(metin)
+                     for parca in m.group(0).strip('\'"').split('.')[1:]}
+        assert ad in yapraklar, (
+            f"{rel}: {ad!r} artık bir i18n anahtarında geçmiyor — çapa bayat")
+        assert ad in _okuma_envanteri(rel), (
+            f"{rel}: {ad!r} gerçek okumaydı, incelme düşürdü")

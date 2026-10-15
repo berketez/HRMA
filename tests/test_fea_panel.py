@@ -200,8 +200,17 @@ def _kalite_rozetleri(html):
     rozeti ölçekli Jacobian'ı, uzama rozeti en-boy oranını adlandırır.
     Damga metni değişirse bekçi kırılır — ayrışmanın adı sözleşmedir.
     """
+    # ÖH D25 · P11B3-05: kalite şeridinde artık ÜÇÜNCÜ bir rozet var —
+    # "WORST ELEMENT — aspect ratio {ar} ({arX}x the threshold), scaled
+    # Jacobian {sj}" (en kötü elemanın ÖLÇÜSÜ; sayım değil). O rozet iki
+    # damgayı da (Jacobian + aspect ratio) taşıdığı için bu ayıklayıcı
+    # onu hem bozulma hem uzama sanıyordu. Ayıklama sırası değişti;
+    # HİÇBİR İDDİA gevşetilmedi — iki özgün rozet aynı damgalarla, aynı
+    # sıkılıkta bulunmaya devam ediyor.
     bozulma = uzama = None
     for sinif, metin in _rozetler(html):
+        if 'WORST ELEMENT' in metin or 'EN KÖTÜ ELEMAN' in metin:
+            continue
         if 'Jacobian' in metin:
             bozulma = (sinif, metin)
         elif 'aspect ratio' in metin:
@@ -280,7 +289,33 @@ def test_advanced_html_paneli_yukluyor_ve_kuruyor():
 
 
 def test_liquid_html_paneli_yukluyor_ve_kuruyor():
-    """Sıvı sayfası bağlaması (2026-08-15 — köşe tekilliği borcu kapandı).
+    """Sıvı sayfası bağlaması (2026-08-15 — panel sıvıya bağlandı).
+
+    KÖŞE TEKİLLİĞİ BORCU KAPANDI (ÖH D25 fea-cfd a1, kalem OH-D24-01;
+    defter P17B1-17 kapanışı ÖH D26 fix-25b'de ölçüldü).
+
+    TARİHÇE — künye iki kez düzeltildi, ikisi de ÖLÇÜMLE:
+    (1) D24 fea-cfd a3: satır "borç kapandı" diyordu, ölçüm çürüttü
+        (sonra_p17b1_17.json): üç sıvı vakasının 2'sinde ürünün kendi
+        hükmü ``converged = False``, ``converged_birincil_kip = True``,
+        ``converged_yayimlanan_kip = False`` — borç PANELİN BASTIĞI
+        kipte açıktı (2 kN'de bağıl değişim %3,91, tolerans %1).
+    (2) D25 fea-cfd a1 (4732efb, OH-D24-01) borcu GERÇEKTEN kapattı:
+        kapı artık ASME BPVC VIII-2 Bölüm 5 / Ek 5-A ile
+        LİNEERLEŞTİRİLMİŞ P_L+P_b'yi ölçüyor. Eski kapı ham düğüm
+        tepesini (ASME "F") de şart koşuyordu; o büyüklük kontur
+        köşelerindeki zayıf tekillik yüzünden h → 0 iken TANIM GEREĞİ
+        yakınsamaz (gözlenen mertebe p ≈ 0,12; 16.384 elemanda hâlâ
+        %4,0/tur) ve ASME Tablo 5.6 tepeyi plastik çökme hükmünden
+        zaten DIŞLAR — yani kapı kazanılamaz bir şey istiyordu.
+    ÖLÇÜLDÜ (D26 fix-25b, bu depo): D24'ün üç vakasının ÜÇÜ de
+    ``converged_yayimlanan_kip = True``; 2 kN vakasında bağıl değişim
+    %3,91 -> %0,267 (14,6 kat iyileşme). TOLERANS DEĞİŞMEDİ: hâlâ %1
+    (``DEFAULT_REFINE_TOL = 0.01``, 67ac180'den beri, D24'ten ÖNCE
+    konmuş ve D25'te ELLENMEMİŞ). Yani kapı gevşetilmedi, ÖLÇTÜĞÜ
+    BÜYÜKLÜK düzeltildi.
+    Bu testin sınadığı şey yine bağlamadır, yakınsama değil; kapanış
+    bekçisi tests/test_d24_fea_cfd_a3.py::TestP17B117BorcKapandi.
 
     Üç kilit: (1) panel dosyası yüklü + init var; (2) çapa
     'analysis-dock-anchor' — sonuç bölümünün içindeki tek kararlı kimlik

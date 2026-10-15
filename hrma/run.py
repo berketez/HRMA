@@ -75,6 +75,15 @@ def run_server():
     forced = os.environ.get("HRMA_PORT")
     port = int(forced) if forced else pick_port()
 
+    # V3 SG-2 / SG-02: köken kapısına gerçekte bağlandığımız portu bildir.
+    # Bu yol (start.sh / start.bat) HRMA_SELF_PORT'u hiç doldurmuyordu; kapı
+    # port bilinmeyince 127.0.0.1'in HER portundan gelen Origin'i kabul
+    # ediyordu (ölçüldü: SG-0 poc/sonuc/sg_ag_kapilar.json). Aşağıdaki üç
+    # sunucu dalının (waitress / Windows yedek / Unix) hepsinden ÖNCE tek
+    # kayıt; paketli başlatıcı (packaging/launcher.py) aynı adı yazıyor.
+    from hrma.security.origin_gate import register_self_port
+    register_self_port(app, port)
+
     print("=" * 60)
     print("  ROCKET MOTOR ANALYSIS WEB TOOL")
     print(f"  http://127.0.0.1:{port}")
@@ -93,7 +102,18 @@ def run_server():
         try:
             from waitress import serve
             print("Using Waitress server (Windows optimized)")
-            serve(app, host='127.0.0.1', port=port, threads=4)
+            # V3 güvenlik (14 Eki, SG-2 denetimi uyumsuz 7): waitress gövdeyi
+            # uygulamaya (köken kapısına) vermeden ÖNCE tamamen tamponlar ve
+            # varsayılan tavanı 1 GiB'tır; yabancı bir sayfa no-cors POST ile
+            # istek başına 1 GiB'a kadar tampon yaptırabiliyordu, 403 sonra
+            # geliyordu. Tavan uygulamanınkiyle AYNI sayı (tek kaynak
+            # body_limit). '+ 1': waitress `uzunluk >= max_request_body_size`
+            # olanı reddeder (waitress/parser.py:158, :177), uygulama
+            # `uzunluk > tavan` olanı; böylece iki katman aynı gövdeyi kabul
+            # eder (en büyük kabul = REQUEST_BODY_MAX_BYTES).
+            from hrma.security.body_limit import REQUEST_BODY_MAX_BYTES
+            serve(app, host='127.0.0.1', port=port, threads=4,
+                  max_request_body_size=REQUEST_BODY_MAX_BYTES + 1)
         except ImportError:
             print("Waitress not available, using Flask dev server")
             app.run(host='127.0.0.1', port=port, debug=False, threaded=True, use_reloader=False)

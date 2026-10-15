@@ -306,8 +306,11 @@
         });
     }
 
-    function tTrace(tr_, tr) {
+    function tTrace(tr_, tr, trEksen) {
         if (!tr_ || typeof tr_ !== 'object') return;
+        // ÖH D36 dil2 a2: kategori ekseni veri kimliğidir, ondalık virgül
+        // dönüşümü görmez (verilmezse görünen metin çevirmeni kullanılır).
+        var trKategori = trEksen || tr;
         tset(tr_, 'name', tr);
         tset(tr_, 'hovertemplate', tr);
         tset(tr_, 'hovertext', tr);
@@ -323,6 +326,30 @@
         if (tr_.colorbar) tAxis(tr_.colorbar, tr);
         if (tr_.marker && tr_.marker.colorbar) tAxis(tr_.marker.colorbar, tr);
 
+        /* ÖH D35 / OH-GT-22 (22 Eylül 2026) — KATEGORİ EKSENİ DE ÇEVRİLİR.
+
+           ÖLÇÜLEN KUSUR (raw/OH/D35/dil-safligi/a1/once.json, GT22): çubuk
+           grafiklerin kategori adları (x = ['Total','Oxidizer','Fuel'],
+           ['Peak','Average','Burnout'], ['Tank Outlet','Main Valve', ...])
+           ekseni DEĞER tarafından kuruyor ve bu boğazdan hiç geçmiyordu;
+           16 kategori etiketinin 16'sı TR ekranda İngilizce kalıyordu.
+           `ticktext` zaten çevriliyordu — aynı ekranın iki etiket kaynağı
+           ayrışmıştı.
+
+           FAIL-CLOSED: dizinin TAMAMI dize değilse (sayısal ya da karışık
+           eksen) HİÇ dokunulmaz; tek bir sayıyı dizeye çevirmek ekseni
+           kategori ekseni yapar ve grafiği bozardı. Sözlükte karşılığı
+           olmayan dize `chartText` tarafından zaten aynen döndürülür. */
+        ['x', 'y', 'z'].forEach(function (eksen) {
+            var deger = tr_[eksen];
+            if (!Array.isArray(deger) || !deger.length) return;
+            if (deger.length > 500) return;            // devasa eksen: atla
+            for (var i = 0; i < deger.length; i++) {
+                if (typeof deger[i] !== 'string') return;
+            }
+            tset(tr_, eksen, trKategori);
+        });
+
         // table trace: başlık satırı ve hücreler
         ['header', 'cells'].forEach(function (part) {
             var p = tr_[part];
@@ -337,12 +364,115 @@
         });
     }
 
-    /* Figürü yerinde çevirir. İngilizce dilde hiçbir şey değişmez. */
+
+    /* ==================================================================
+       ÖH D36 / dil2-i18n-pdf a2 — TR ONDALIK AYRACI (OH-P-11 geniş kök)
+       ==================================================================
+       ÖLÇÜLEN KUSUR (raw/OH/D36/dil2-i18n-pdf/a2/once_tarayici.json, taban
+       bb7ee57c, TR kipi, hesap sonrası): Plotly SVG metinlerinde noktalı
+       ondalık hibrit 115, katı 27, sıvı 22; virgüllü 0/3/0; 23 çizimin
+       23'ünde `layout.separators` tanımsız. İki kök:
+         1) Plotly tik ve `%{y:.2f}` hover biçimini `layout.separators` ile
+            basar; hiçbir figür bunu TR'ye göre kurmuyordu (varsayılan '.,').
+         2) Python figürleri (visualization.py) anotasyon / çubuk metni /
+            hover metnine "6.81" gibi HAZIR sayı metni gömüyor; `chartText`
+            yalnız sözcükleri çeviriyordu, sayıya dokunmuyordu.
+       Onarım bu boğazda, `translateFigure` içinde:
+         * `layout.separators`: TR'de ',.'. Değer tanımsızsa ya da iki kanon
+           değerinden biriyse ('.,' / ',.') dile göre yazılır — böylece
+           katı kulvarının solid.html yerel ayarıyla (aynı kanondan okur)
+           İDEMPOTENTTİR ve dil gidiş-dönüşünde bayat kalmaz. Başka bir
+           değer çağıranın bilinçli seçimidir, dokunulmaz. EN'de tanımsız
+           ayraç tanımsız kalır (EN davranışı değişmez).
+         * Literal metin: `chartText` çıktısındaki SAF ondalık sayılar
+           `I18N.decimalText`ten (TEK KAYNAK, i18n.js) geçer. DOKUNULMAYAN:
+           `%{...}` biçim belirteçleri, HTML etiketleri ve öznitelikleri,
+           URL / DOI, iki+ noktalı sürüm dizesi (2.6.27, v2.6.27), harfe
+           yapışık sayı (v2.6), binlik ayraçlı sayı (1,234.5) ve bölüm /
+           denklem / tablo numarası (Eq. 3.25, Table 4.1 — TR'de de noktalı).
+         * Veri eksenleri (x/y/z kategori dizileri) ondalık dönüşümü GÖRMEZ:
+           dizi değeri verinin kimliğidir, sayısal dize eksen türünü de
+           belirler.
+       Karar dil ADINDAN değil kanondan okunur (`I18N.number(1.5, 1)`
+       virgül basıyor mu) — katı kulvarının `hrmaPlotSeparators`ıyla aynı
+       sorgu; iki yer aynı cevabı verir. */
+    var SEP_KANON = [',.', '.,'];
+
+    function ondalikVirgulMu() {
+        var api = (typeof window !== 'undefined') ? window.I18N : null;
+        if (!api || typeof api.number !== 'function') return false;
+        return String(api.number(1.5, 1)).indexOf(',') >= 0;
+    }
+
+    function ayraclariKur(layout, virgul) {
+        if (!layout || typeof layout !== 'object') return;
+        var mevcut = layout.separators;
+        if (mevcut === undefined || mevcut === null) {
+            if (virgul) layout.separators = ',.';
+            return;
+        }
+        if (SEP_KANON.indexOf(mevcut) !== -1) {
+            layout.separators = virgul ? ',.' : '.,';
+        }
+    }
+
+    /* Etiket deseni harf ya da '/' ile başlamalı: metindeki küçüktür işareti
+       ('K_c = 0.00 < 1.5') etiket değildir. ÖLÇÜLDÜ (a2/sonra_tarayici_ilk_kosu.json,
+       ilk koşu): eski '<[^>]*>' deseni hibrit enjektör uyarı kutusunda
+       '< 1.5 (...)<br>' parçasını etiket sanıp 4 ondalığı korumaya alıyordu. */
+    var KORUNAN = /%\{[^}]*\}|<\/?[A-Za-z][^<>]*>|[A-Za-z][A-Za-z0-9+.\-]*:\/\/[^\s<>"']*|www\.[^\s<>"']*|doi:\s*[^\s<>"']*|\b10\.\d{4,9}\/[^\s<>"']*/gi;
+    var SAYI_ZINCIRI = /\d+(?:\.\d+)+(?:[eE][+-]?\d+)?/g;
+    var NUMARA_ONEKI = /(?:\b(?:Eqs?|Sec|Secs|Table|Tab|Fig|Figs|Ch|Chapter|Ref|Refs|No|Art|Madde|Bölüm|Tablo|Denklem|Şekil)\.?|§)\s*$/i;
+
+    function serbestParca(metin) {
+        var api = window.I18N;
+        if (!api || typeof api.decimalText !== 'function') return metin;
+        return metin.replace(SAYI_ZINCIRI, function (sayi, ofs, tum) {
+            if ((sayi.match(/\./g) || []).length !== 1) return sayi;   // 2.6.27
+            var once = ofs > 0 ? tum.charAt(ofs - 1) : '';
+            if (/[A-Za-z_.]/.test(once)) return sayi;                   // v2.6
+            if (once === ',' && ofs > 1 && /\d/.test(tum.charAt(ofs - 2))) {
+                return sayi;                                             // 1,234.5
+            }
+            if (NUMARA_ONEKI.test(tum.slice(Math.max(0, ofs - 12), ofs))) {
+                return sayi;                                             // Eq. 3.25
+            }
+            return api.decimalText(sayi);
+        });
+    }
+
+    function ondalikVirgulle(metin) {
+        if (typeof metin !== 'string' || metin.indexOf('.') < 0) return metin;
+        var out = '';
+        var son = 0;
+        var m;
+        KORUNAN.lastIndex = 0;
+        while ((m = KORUNAN.exec(metin)) !== null) {
+            out += serbestParca(metin.slice(son, m.index)) + m[0];
+            son = m.index + m[0].length;
+            if (m[0].length === 0) KORUNAN.lastIndex++;
+        }
+        return out + serbestParca(metin.slice(son));
+    }
+
+    /* Figürü yerinde çevirir. İngilizce dilde hiçbir şey değişmez.
+       ÖH D36 dil2 a2: TR'de görünen metin çevirisi (`trGorunen`) ondalık
+       virgülden de geçer; veri eksenleri (`tr`) geçmez. */
     function translateFigure(data, layout) {
         var tr = translator();
-        if (!tr) return;
-        if (Array.isArray(data)) data.forEach(function (t) { tTrace(t, tr); });
-        tLayout(layout, tr);
+        var virgul = ondalikVirgulMu();
+        ayraclariKur(layout, virgul);
+        if (!tr) {
+            if (!virgul) return;
+            tr = function (s) { return s; };
+        }
+        var trGorunen = virgul
+            ? function (s) { return ondalikVirgulle(tr(s)); }
+            : tr;
+        if (Array.isArray(data)) {
+            data.forEach(function (t) { tTrace(t, trGorunen, tr); });
+        }
+        tLayout(layout, trGorunen);
     }
 
     /* ==================================================================
@@ -535,5 +665,6 @@
 
     // Test ve hata ayıklama için açığa çıkarılır (üretimde kullanılmaz).
     Plotly.__hrmaTranslateFigure = translateFigure;
+    Plotly.__hrmaDecimalComma = ondalikVirgulle;
     Plotly.__hrmaRedrawAllPlots = redrawAllPlots;
 })();

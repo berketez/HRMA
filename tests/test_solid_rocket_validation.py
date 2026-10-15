@@ -51,6 +51,49 @@ from hrma.data.propellants_db import PROPELLANTS
 _APCP_A = float(PROPELLANTS['apcp']['burn_rate_a'])   # m/s @ (P[bar])^n
 _APCP_N = float(PROPELLANTS['apcp']['burn_rate_n'])   # -
 
+# ÖH KİTAP p1b-F (B11): APCP termokimya beklentileri BAĞIMSIZ kâhinden
+# (NASA CEA, tests/test_kitap_p1b.py — depodaki TEK kâhin kaynağı) alınır.
+# Eski literaller (c* 1598,2 / γ 1,1986 / T_c 3614,8) c*'tan geri çözülmüş
+# eşdeğer setti; T_c denge alev sıcaklığı değildi (+215 K).
+from tests.test_kitap_p1b import (  # noqa: E402
+    CEA_DENGE_CSTAR_M_S,
+    CEA_DENGE_GAMMA_S,
+    CEA_ODA_T_C_K,
+)
+
+
+# ---------------------------------------------------------------------------
+# ÖH D24 · OH-D23-01 — DOĞRULAMA SONUÇLARI İDDİAYA BAĞLANIR
+#
+# Aşağıdaki dört doğrulama testi hesap yapıyor, her vaka için bir ``passed``
+# bayrağı üretiyor ve sonucu EKRANA BASIYORDU; hiçbir ``assert`` yoktu.
+# Yani "✗ FAIL" yazan bir gerileme testi YEŞİL bırakıyordu — bekçi kusuru
+# GÖRMÜYORDU (kalemin tanımı). Bayraklar artık iddiaya bağlı.
+# ---------------------------------------------------------------------------
+
+def _bayraklari_dogrula(baslik, kayitlar, alan_yollari=('passed',)):
+    """Her kaydın ``passed`` bayrağı doğru olmalı; değilse ADIYLA kırmızı.
+
+    ``alan_yollari`` iç içe kayıtlar içindir (ör. atmosfer testinde her
+    kayıt ``{'pressure': {...}, 'temperature': {...}}`` taşır).
+    """
+    assert kayitlar, '%s: doğrulama hiç vaka üretmedi (iddia vakumluk)' % baslik
+    basarisiz = []
+    for idx, kayit in enumerate(kayitlar):
+        for yol in alan_yollari:
+            hucre = kayit
+            for parca in yol.split('.'):
+                hucre = hucre[parca] if parca else hucre
+            if not hucre.get('passed', False) if isinstance(hucre, dict) \
+                    else not hucre:
+                basarisiz.append('%s[%d].%s (hata %%%.3f)'
+                                 % (baslik, idx, yol,
+                                    (hucre.get('error_percent')
+                                     if isinstance(hucre, dict) else 0.0) or 0.0))
+    assert not basarisiz, (
+        '%s doğrulaması başarısız vaka taşıyor: %s' % (baslik, basarisiz))
+    return len(kayitlar)
+
 
 class SolidRocketValidationTest:
     """Comprehensive validation test suite for solid rocket motor calculations"""
@@ -78,15 +121,13 @@ class SolidRocketValidationTest:
                 'core_diameter': 30,      # mm
                 'chamber_pressure': 68.9, # bar (= 1000 psia, standard rating condition)
                 # --- INDEPENDENT references (not copied from the engine) ---
-                # c* from the thermodynamic identity c* = sqrt(R*Tc)/Gamma(gamma),
-                # Gamma(g) = sqrt(g)*(2/(g+1))^((g+1)/(2(g-1)))
-                # (Sutton & Biblarz 9th ed., Eq. 3-32), evaluated for the
-                # documented set gamma=1.1986, M=28.0 g/mol
-                # (R = 8314.46/28.0 = 296.945 J/kg/K), Tc=3614.8 K:
-                # sqrt(296.945*3614.8)/0.64826 = 1598.2 m/s
-                # (2026-06-12: motor APCP seti bu özdeşlikle tutarlı hale
-                # getirildi — T_c ve M, c*=1598.2 ile uzlaştırıldı.)
-                'expected_c_star': 1598.2,  # m/s (Sutton Eq. 3-32; independent identity)
+                # ÖH KİTAP p1b-F (B11): c* is the NASA CEA shifting-equilibrium
+                # value of the same formulation (AP 68 / Al 18 / HTPB 14,
+                # 68.9 bar) from the independent oracle in test_kitap_p1b
+                # (RocketCEA / CEA2 re-run there). The previous 1598.2 m/s
+                # was the Eq. 3-32 value of a back-solved (gamma 1.1986,
+                # M 28.0, Tc 3614.8 K) set, not a CEA output.
+                'expected_c_star': CEA_DENGE_CSTAR_M_S,  # m/s (NASA CEA)
                 # Typical delivered sea-level Isp of aluminized AP/Al/HTPB
                 # composite propellant at ~6.9 MPa chamber pressure
                 # (Sutton & Biblarz 9th ed., Ch. 13: ~260-270 s):
@@ -105,9 +146,11 @@ class SolidRocketValidationTest:
                 # Checked only to confirm the engine loads the documented set;
                 # EXCLUDED from validation pass metrics (they are inputs, not
                 # predictions — comparing them would be tautological).
-                'expected_gamma': 1.1986,
+                # ÖH KİTAP p1b-F (B11): gamma ve T_c kâhinin CEA denge
+                # değerleri (eski 1,1986 / 3614,8 geri çözülmüş setti).
+                'expected_gamma': CEA_DENGE_GAMMA_S,
                 'expected_density': 1810,   # kg/m³ (typical AP/Al/HTPB: 1.75-1.85 g/cc, Sutton 9th ed., Ch. 13)
-                'expected_flame_temp': 3614.8,  # K (c* ile Eq. 3-32 üzerinden tutarlı)
+                'expected_flame_temp': CEA_ODA_T_C_K,  # K (NASA CEA denge oda sıcaklığı)
                 # ------------------------------------------------------------
                 # T1-2 (parti 31) — BİRİM SÖZLEŞMESİ DÜZELTMESİ
                 #
@@ -314,6 +357,9 @@ class SolidRocketValidationTest:
                 'check_type': 'configuration_echo'
             }
         }
+        _bayraklari_dogrula(
+            'APCP referansı',
+            list(self.results['apcp_reference_validation'].values()))
 
         # Print results
         print("Independent checks:")
@@ -392,6 +438,7 @@ class SolidRocketValidationTest:
             print(f"  Error: {error:+.2f}% {'✓ PASS' if abs(error) <= 10.0 else '✗ FAIL'}")
 
         self.results['saint_robert_validation'] = results
+        _bayraklari_dogrula('Saint-Robert', results)
 
     def test_standard_atmosphere(self):
         """Validate altitude performance against US Standard Atmosphere 1976"""
@@ -451,6 +498,8 @@ class SolidRocketValidationTest:
                   f"Error: {temp_error:+.2f}% {'✓' if abs(temp_error) <= 1.0 else '✗'}")
 
         self.results['standard_atmosphere_validation'] = results
+        _bayraklari_dogrula('US Standard Atmosphere', results,
+                            ('pressure', 'temperature'))
 
     def test_thrust_coefficient(self):
         """Validate thrust coefficient calculations (full CF with pressure term)"""
@@ -500,6 +549,7 @@ class SolidRocketValidationTest:
             print(f"  Error: {error:+.2f}% {'✓ PASS' if abs(error) <= 3.0 else '✗ FAIL'}")
 
         self.results['thrust_coefficient_validation'] = results
+        _bayraklari_dogrula('İtki katsayısı', results)
 
     def _calculate_percentage_error(self, calculated, expected):
         """Calculate percentage error between calculated and expected values"""
@@ -833,8 +883,23 @@ def test_json_serialization_roundtrip(tmp_path=None):
     if 'thrust_coefficient_validation' not in suite.results:
         suite.test_thrust_coefficient()
     converted = suite._convert_to_json_serializable(suite.results)
-    # json.dumps TypeError fırlatmamalı (np.bool_/np.float64 temizlenmiş olmalı)
-    json.dumps(converted)
+    # ÖH D24 / OH-D23-01: gövde İDDİASIZDI — ``json.dumps`` tek başına
+    # ne dönüşümün BİR ŞEY taşıdığını ne gidiş-dönüş kaybını sınar.
+    metin = json.dumps(converted)
+    geri = json.loads(metin)
+    assert geri == converted, (
+        'JSON gidiş-dönüşü kayıplı: dönüştürülen gövde geri okunduğunda '
+        'aynı değil')
+    assert 'thrust_coefficient_validation' in geri, (
+        'dönüştürülen gövde doğrulama sonucunu taşımıyor (iddia vakumluk)'
+    )
+    kayitlar = geri['thrust_coefficient_validation']
+    assert kayitlar, 'itki katsayısı doğrulaması boş'
+    for kayit in kayitlar:
+        assert isinstance(kayit['passed'], bool), (
+            'np.bool_ temizlenmemiş: %r' % type(kayit['passed']))
+    assert 'NaN' not in metin and 'Infinity' not in metin, (
+        'JSON gövdesi katı-olmayan NaN/Infinity taşıyor')
 
 
 def main():

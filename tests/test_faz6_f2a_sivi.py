@@ -121,7 +121,10 @@ JS_CONSTS = ['LOSS_LABEL_UNDERSCORE_RE', 'EFF_PRODUCT_TOL_PCT',
              'EFF_OUTSIDE_PRODUCT_RE', 'ALT_PROPORTIONAL_REL_TOL',
              'ALT_RANGE_PAD_FRAC', 'LIQUID_G0', 'ALT_SL_ISP_REL_TOL',
              'LIQUID_INJECTOR_FIELDS']
-JS_FUNCS = ['_lossLabel', '_effBudgetSplit', '_altSeriesRatio',
+#: ``numTxt`` ürünün GERÇEK sayı biçimleyicisidir (D35 sayi-bicimi, 8f9313ca:
+#: ekran sayıları I18N kanonuna bağlandı); taklit yazılmaz, şablondan kesilir.
+#: Düzenekte ``window.I18N`` yok → ürünün kendi geri düşüşü (toFixed) koşar.
+JS_FUNCS = ['numTxt', '_lossLabel', '_effBudgetSplit', '_altSeriesRatio',
             '_altAnchorNote', '_buildAltitudeFigure', '_liquidSixDofDriveFrom',
             '_pdfNum', '_liquidPdfMotorData', '_liquidPdfAnalysisResults',
             '_liquidInjectorSolverValues', 'markInjectorUserEdits',
@@ -355,10 +358,36 @@ def test_t01_uretilen_pdf_gercek_sayilari_basiyor(client, tmp_path, cr):
 
 
 def test_t01_bekci_kusuru_yeniden_uretiyor(client, cr):
-    """Eski gövde (düz ``currentResults``) HÂLÂ 0.0 basmalı.
+    """Eski gövde (düz ``currentResults``) UYDURMA SAYI DEĞİL beyan basmalı.
 
-    Bu test düzeltmeyi değil, BEKÇİNİN AYIRT EDİCİLİĞİNİ sınar: yukarıdaki
-    iddialar düzeltme geri alındığında gerçekten kırılıyor mu?
+    Bu test düzeltmeyi değil, BEKÇİNİN AYIRT EDİCİLİĞİNİ sınar: hazırlanmış
+    ``performance`` bloğu OLMAYAN eski gövdede rapor ne yapıyor?
+
+    ÇEVİRİ (ÖH D15 fix-3 / taban geçişi, 1 Eyl 2026). Bu bekçinin eski hâli
+    ``'Maximum Thrust: N/A' in text`` diyordu; o iddia, "eski gövdenin
+    sayıları raporun HİÇBİR kaynağında görünmüyor" gerçeğinin bekçisiydi ve
+    ÖH Z5S / S7 (defter P9B3-09, KRİTİK) onu geçersiz kıldı:
+    ``hrma/app.py:16988-17032`` (``_build_pdf_analysis_sections``)
+    performans alanlarını artık YALNIZ ``motor_data``da değil, ham çözücü
+    yükünde de arıyor ve ad çözümünü tek kaynaktan
+    (``pdf_generator.SOLVER_PERFORMANCE_ALIASES``) yapıyor. Yani sayı
+    KURTARILDI. Eski iddiayı olduğu gibi bırakmak, kurtarmayı geri alan bir
+    gerilemeyi YEŞİL göstermek olurdu (kusuru koruyan bekçi) — sözleşme
+    çevrildi.
+
+    Yeni sözleşme iki ayaklıdır ve ayırt edicilik KORUNUR:
+      (a) çözücünün yayımladığı bir büyüklük ham yükten kurtarıldıysa
+          AYNEN çözücünün değeri basılır — uydurma 0.0 N asla;
+      (b) çözücünün HİÇ yayımlamadığı bir büyüklük ('total_impulse')
+          uydurulmaz, 'N/A' beyanıyla basılır.
+    Kurtarma geri alınırsa (a) kırmızı yanar; uydurma geri gelirse (a) ve
+    0.0 kilidi birlikte kırmızı yanar.
+
+    ÖLÇÜLDÜ (bu depo, çeviriden önce — LIQUID_FORM tasarım noktası):
+    çözücü thrust=10000, isp_sea_level=245,56249342967686,
+    burn_time=400,0, total_impulse=None yayımlıyor; eski gövdeyle üretilen
+    PDF 'Maximum Thrust: 10000.0 N', 'Specific Impulse: 245.6 s',
+    'Burn Time: 400.0 s' ve 'Total Impulse: N/A' basıyor.
     """
     resp = client.post('/api/export-pdf/summary', json={
         'motor_data': {'motor_name': 'X', 'motor_type': 'liquid'},
@@ -367,8 +396,27 @@ def test_t01_bekci_kusuru_yeniden_uretiyor(client, cr):
     })
     assert resp.status_code == 200
     text = _pdf_text(resp.data)
-    assert 'Maximum Thrust: 0.0 N' in text, (
-        'eski gövde artık 0.0 basmıyor — bekçinin ayırt ediciliği kayboldu')
+    assert 'Maximum Thrust: 0.0 N' not in text, (
+        'eski gövdeye yine 0.0 uyduruluyor — P9B3-02 onarımı geri dönmüş')
+    # (a) Kurtarılan sayı ÇÖZÜCÜNÜN sayısıdır — ikinci bir cevap yok.
+    for etiket, deger, birim in (('Maximum Thrust', cr['thrust'], 'N'),
+                                 ('Specific Impulse', cr['isp_sea_level'], 's'),
+                                 ('Burn Time', cr['burn_time'], 's')):
+        beklenen = '%s: %.1f %s' % (etiket, float(deger), birim)
+        assert beklenen in text, (
+            '%r basılmıyor — eski gövdenin sayısı ham çözücü yükünden '
+            'kurtarılmıyor (defter P9B3-09, hrma/app.py '
+            'SOLVER_PERFORMANCE_ALIASES besleme ayağı geri alınmış olabilir)'
+            % beklenen)
+    # (b) Çözücünün yayımlamadığı büyüklük UYDURULMAZ, beyan edilir.
+    assert cr.get('total_impulse') is None, (
+        'fikstür değişmiş: çözücü artık total_impulse yayımlıyor, bu ayağın '
+        'ön koşulu kalmadı (eksik-beyan iddiası başka bir alana taşınmalı)')
+    assert 'Total Impulse: N/A' in text, (
+        'çözücünün hiç yayımlamadığı toplam impuls için ne beyan ne sayı '
+        'var — beyanlı eksik sözleşmesi bozulmuş')
+    assert 'Total Impulse: 0.0' not in text, (
+        'yayımlanmamış toplam impuls için 0.0 uyduruluyor')
 
 
 # ===========================================================================

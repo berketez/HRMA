@@ -71,7 +71,51 @@ THERMAL_JS = JS / 'panels' / 'thermal_panel.js'
 COOLING_JS = JS / 'panels' / 'cooling_panel.js'
 I18N_COMMON = JS / 'i18n_common.js'
 
+#: TARİHSEL ÇEKİRDEK — parti 20'de elle yazılan üç dosya. Yapısal testler
+#: (TANIMLI_BAGLAMALAR / ESKI_ANAHTARLAR) hâlâ bu üçünü adıyla kilitler.
 TUKETICILER = (APP_JS, THERMAL_JS, COOLING_JS)
+
+# ÖH D29 / arayuz-i18n a1 — P15B3-08: ELLE LİSTE ÇÜRÜMESİ ONARILDI.
+# ÖLÇÜLDÜ (raw/OH/D29/arayuz-i18n/a1/once.json, M7): tarama listesi ÜÇ
+# dosyaydı, diskte 47 tüketici adayı vardı ve çıplak etiket taşıyan
+# dosyaların HİÇBİRİ listede DEĞİLDİ (i18n_charts.js 12, i18n_common.js 2,
+# comparative_panel.js 1, uncertainty_panel.js 1). Yani bekçi "3 passed"
+# derken kusur kapsamın dışında duruyordu — bu, elle listenin çürümesidir
+# (S1-savci sınıfı: elle-liste çürümesi).
+#
+# Liste ARTIK DİSKTEN TÜRETİLİR: `hrma/static/js/*.js` (sözlük parçaları
+# hariç) + `hrma/static/js/panels/*.js`. Yeni bir panel eklenince kapsama
+# kendiliğinden girer.
+#
+# SÖZLÜK PARÇALARI NEDEN DIŞARIDA: `i18n_charts.js` bir METİN->METİN çeviri
+# tablosudur; SOL tarafı üreticinin bastığı İngilizce metnin BİREBİR
+# kendisidir ('Specific Impulse': 'Özgül itki'). O metni "adlandırmak"
+# eşleşmeyi kırar ve çeviri sessizce düşer — yani orada çıplak biçim
+# KUSUR DEĞİL, ANAHTARDIR. Üreticiler Python tarafındadır
+# (hrma/app.py:11528, hrma/visualization/*.py) ve bu kulvarın sahası
+# dışındadır; adlandırma borcu orada durur. `i18n_common.js` ise
+# ETİKET sözlüğüdür ve ayrıca aşağıda ADLI BORÇ olarak sayılır.
+TURETILMIS_TUKETICILER = tuple(sorted(
+    [p for p in JS.glob('*.js') if not p.name.startswith('i18n')]
+    + list((JS / 'panels').glob('*.js'))))
+
+#: ADLI BORÇ — kapsam genişlemesinin AÇTIĞI, bu kulvarın ödeyemediği iki
+#: bulgu. İkisi de AYNI kökten gelir: `i18n_common.js`teki
+#: ``'out.isp': 'Isp'`` etiketi. Paneller yalnız o anahtarın satır içi
+#: YEDEĞİNİ taşır ('Isp'), yani ekrandaki metin sözlükten gelir ve borç
+#: sözlük değerindedir.
+#:
+#: NEDEN BU DALGADA ÖDENMEDİ (dürüst gerekçe, beyan değil çözüm arayışı):
+#: hangi Isp olduğunu YAZMAK için panelin hangi alanı bağladığını ölçmek
+#: gerekir. `comparative_panel.js:102` yanında bir `out.isp_basis` alanı
+#: taşır (yani temeli DEĞİŞKEN), `uncertainty_panel.js:69` taşımaz.
+#: Ölçmeden "design point" yazmak, doktrin 1'in yasakladığı KAZANILMAMIŞ
+#: künye olurdu. Panel dosyaları D29'da `arayuz-panel` kulvarınındır;
+#: ölçüm + adlandırma oraya devredildi (rapor: 'panel devri').
+ADLI_BORC = {
+    'comparative_panel.js': {'Isp'},
+    'uncertainty_panel.js': {'Isp'},
+}
 
 
 def read(path):
@@ -145,22 +189,31 @@ def _ciplak_etiketler(text, yasakli):
 # ---------------------------------------------------------------------------
 # 1. Tarama: çıplak etiket geri gelmedi
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize('path', TUKETICILER, ids=lambda p: p.name)
+def _borcsuz(path, bulgular):
+    """ADLI_BORC'ta sayılan çıplak biçimleri eler (ötekiler kırmızı)."""
+    borc = ADLI_BORC.get(path.name, set())
+    return [b for b in bulgular
+            if b.split(': ', 1)[1].strip("'\"<>") not in borc]
+
+
+@pytest.mark.parametrize('path', TURETILMIS_TUKETICILER, ids=lambda p: p.name)
 def test_ciplak_isp_etiketi_kalmadi(path):
     """Aynı yanıttaki dört Isp (tasarım/vakum/deniz seviyesi/azami) ayırt
     edilebilir olmalı: 'Isp' hangi Isp olduğunu söylemeden basılmaz."""
-    bulgu = _ciplak_etiketler(mask_comments(read(path)), CIPLAK_ISP)
+    bulgu = _borcsuz(path, _ciplak_etiketler(mask_comments(read(path)),
+                                             CIPLAK_ISP))
     assert not bulgu, (
         '%s içinde çıplak Isp etiketi var (tanımlı ek kullanın, ör. '
         '"Isp (design point, at design-altitude ambient)", "Vacuum Isp"): '
         '\n  %s' % (path.name, '\n  '.join(bulgu)))
 
 
-@pytest.mark.parametrize('path', TUKETICILER, ids=lambda p: p.name)
+@pytest.mark.parametrize('path', TURETILMIS_TUKETICILER, ids=lambda p: p.name)
 def test_ciplak_isi_akisi_etiketi_kalmadi(path):
     """Referans-cidar tasarım yükü ile kuple denge akısı (ölçülen: 294 kata
     varan fark) çıplak bir 'ısı akısı' adını paylaşamaz."""
-    bulgu = _ciplak_etiketler(mask_comments(read(path)), CIPLAK_AKI)
+    bulgu = _borcsuz(path, _ciplak_etiketler(mask_comments(read(path)),
+                                             CIPLAK_AKI))
     assert not bulgu, (
         '%s içinde çıplak ısı akısı etiketi var (cidar referansını yazın, '
         'ör. "(reference cooled wall)" / "(coupled wall balance)"):\n  %s'
@@ -377,3 +430,41 @@ def test_dosya_bekcisi_kendi_kaynagini_goruyor():
         assert len(data) > 1000, path
         # md5 yalnız teşhis içindir; sabitlenmez (dosyalar canlı).
         assert hashlib.md5(data).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# ÖH D29 / arayuz-i18n a1 — P15B3-08 kapsam mandalları
+# ---------------------------------------------------------------------------
+def test_tuketici_listesi_diskten_turetilmis():
+    """Elle liste geri gelmesin: tarama kümesi diskle birebir olmalı."""
+    diskte = {p.name for p in JS.glob('*.js')
+              if not p.name.startswith('i18n')}
+    diskte |= {p.name for p in (JS / 'panels').glob('*.js')}
+    taranan = {p.name for p in TURETILMIS_TUKETICILER}
+    assert taranan == diskte, (
+        'tarama kümesi diskten sapmış (eksik: %s, fazla: %s)'
+        % (sorted(diskte - taranan), sorted(taranan - diskte)))
+    assert len(taranan) > 3 * len(TUKETICILER), (
+        'kapsam hâlâ elle listenin boyunda: %d dosya' % len(taranan))
+    for p in TUKETICILER:
+        assert p in TURETILMIS_TUKETICILER, p.name
+
+
+def test_adli_borc_hala_gercek():
+    """Borç ödendiğinde liste GÜNCELLENSİN: ölü muafiyet sessiz boşluktur."""
+    for ad, metinler in sorted(ADLI_BORC.items()):
+        yol = next((p for p in TURETILMIS_TUKETICILER if p.name == ad), None)
+        assert yol is not None, 'adlı borç dosyası kapsamda yok: %s' % ad
+        ham = _ciplak_etiketler(mask_comments(read(yol)),
+                                CIPLAK_ISP | CIPLAK_AKI)
+        bulunan = {b.split(': ', 1)[1].strip('\'"<>') for b in ham}
+        assert metinler <= bulunan, (
+            '%s: adlı borç artık üründe yok (%s) — muafiyeti kaldırın'
+            % (ad, sorted(metinler - bulunan)))
+
+
+def test_adli_borcun_koku_sozlukte_adiyla_duruyor():
+    """Borcun kökü `out.isp` sözlük değeridir; kaybolursa mandal bayatlar."""
+    src = read(I18N_COMMON)
+    assert "'out.isp': 'Isp'" in src, (
+        "out.isp değeri değişmiş — ADLI_BORC gerekçesi yeniden ölçülmeli")

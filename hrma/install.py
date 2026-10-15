@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Cross-platform installer and dependency checker
-for UZAYTEK Rocket Motor Analysis
+for HRMA - Rocket Motor Analysis
 
 Thin wrapper: checks the Python version, installs the pinned
 dependencies from the repository's requirements.txt, then verifies
@@ -74,7 +74,7 @@ def verify_app_import():
 
 def main():
     print("=" * 60)
-    print("  UZAYTEK ROCKET MOTOR ANALYSIS")
+    print("  HRMA - ROCKET MOTOR ANALYSIS")
     print("  Cross-platform Installation Check")
     print("=" * 60)
     print()

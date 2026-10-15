@@ -43,9 +43,10 @@ kosar; G1 tembel-kurucu garantisi).
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from hrma.constants import G_0
+from hrma.constants import G_0, IN_M, LB_KG, P_SEA_LEVEL_PA, PA_PER_PSI
 
 __all__ = [
     "ADAPTER_VERSION",
@@ -73,35 +74,40 @@ UNIT_TO_SI: Dict[str, float] = {
     "kpa": 1e3,
     "mpa": 1e6,
     "bar": 1e5,
-    "atm": 101325.0,
-    "psia": 6894.757293168,
-    "psi": 6894.757293168,
+    "atm": P_SEA_LEVEL_PA,   # atm TANIMI merkezden (OH-D26-01)
+    # P15B2-10: psi TANIMI merkezden (1 lbf/in^2, kesin tanımlardan türetilir);
+    # tablodaki yorum satırında yazan 6894,757293168 ile BİT-AYNIdır.
+    "psia": PA_PER_PSI,
+    "psi": PA_PER_PSI,
     # kuvvet -> N
     "n": 1.0,
     "kn": 1e3,
-    "kgf": 9.80665,
+    "kgf": G_0,        # kgf TANIMI 1 kg x g_0 (ÖH P10B3-10, tek kaynak)
     "lbf": 4.4482216152605,
     # kutle debisi -> kg/s
     "kgps": 1.0,
     "gps": 1e-3,
-    "lbps": 0.45359237,
+    # P15B2-10 kuyruğu (ÖH D30 / fix-29a): lb ve in TANIMLARI da
+    # merkezden okunur. Değerler BİT-AYNI (0,45359237 ve 0,0254 tam
+    # tanımlardır); değişen tek şey ikinci tanım noktasının kalkmasıdır.
+    "lbps": LB_KG,
     # uzunluk -> m
     "m": 1.0,
     "cm": 1e-2,
     "mm": 1e-3,
-    "in": 0.0254,
+    "in": IN_M,
     "ft": 0.3048,
     # kutle -> kg
     "kg": 1.0,
     "g": 1e-3,
-    "lb": 0.45359237,
+    "lb": LB_KG,
     # zaman / Isp -> s
     "s": 1.0,
     # hiz -> m/s
     "mps": 1.0,
     "mmps": 1e-3,
     "cmps": 1e-2,
-    "inps": 0.0254,
+    "inps": IN_M,
     # kutle akisi -> kg/(m^2.s)
     "kgpm2s": 1.0,
     "gpcm2s": 10.0,
@@ -192,6 +198,15 @@ _HYBRID_RTOL = 1e-4
 _HYBRID_ALGEBRAIC_COPY_CHAIN = ("isp", "thrust", "thrust_mean",
                                 "total_impulse")
 
+# --- F022'nin kati karsiligi (2026-08-19, F3 kapanis olcumu) -----------------
+# Kati static-fire kayitlarinda total_impulse = m_p * g0 * Isp zinciri iki
+# tarafta da tamdir (Nakka Kappa uclusunde bilesim farki <= 0.5 yuzde puani
+# olculdu; tests/test_f3_yayimlanmis_korelasyon.py). Ayni Oberkampf & Roy
+# ilkesi: bagimli ciktilar ayri dogrulama metrigi sayilmaz. thrust_peak
+# ZINCIRDE DEGIL — tepe, egri SEKLININ bagimsiz kanitidir; propellant_mass
+# ve burn_time de bagimsiz skorlanir (zincir yalniz carpimlarini tasir).
+_SOLID_ALGEBRAIC_COPY_CHAIN = ("isp", "total_impulse")
+
 # --- F007 eki (2026-07-27): hibrit regresyon fitlerinin kaynak kampanyalari --
 # HYBRID_REGRESSION_COEFFICIENTS (hrma/data/propellant_database.py) a-n
 # fitlerinin geldigi yayinlar (o dosyanin kendi kaynak yorumlarindan):
@@ -251,14 +266,27 @@ def convert_block(block: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     Dondurulen sozluk:
       'si'          : {taban_ad: SI_deger}  (yalniz cevrilebilen sayilar)
-      'unconverted' : [orijinal_anahtar]    (sayisal ama birimi cozulemedi)
+      'unconverted' : [orijinal_anahtar]    (sayisal ama birimi COZULEMEDI)
+      'duplicate_base': [orijinal_anahtar]  (birim COZULDU ama taban ad dolu)
       'null'        : [taban_ad]            (degeri null — olculmemis)
       'curves'      : [taban_ad]            (egri objesi; v1'de skorlanmaz)
       'text'        : {anahtar: deger}      (metin/bool alanlar, ör. grain_geometry)
-    Ayni taban ada ikinci kez yazma (celiski riski) 'unconverted'a duser.
+
+    ÖH D29 / app-api-dogrulama a1 · defter P10B2-11 — İKİ SEBEP, İKİ AD.
+    ``unconverted`` eskiden İKİ AYRI olayı tek isim altında topluyordu ve
+    koşucu ikisini de ``unknown_unit`` diye raporluyordu. ÖLÇÜLDÜ (taban
+    ``4c27fa51``, ``once.json`` -> ``P10B2-11``): ``chamber_pressure_psia``
+    (birimi BİLİNEN, taban adı ``chamber_pressure_bar`` ile ÇAKIŞAN) ile
+    ``combustion_temperature_f`` (birimi gerçekten bilinmeyen) AYNI listeye
+    ve aynı ``unknown_unit`` durumuna düşüyordu. İki olayın kullanıcı için
+    anlamı ve çözümü ZITTIR: birincisinde kayıt aynı büyüklüğü iki kez
+    bildirmiştir (hangisinin geçerli olduğu belirsizdir — kayıt düzeltilir),
+    ikincisinde birim tablosuna sonek eklenmesi gerekir. ``unconverted``
+    artık YALNIZ ikinci sınıfı taşır; çakışma ``duplicate_base``e gider.
     """
     out: Dict[str, Any] = {
-        "si": {}, "unconverted": [], "null": [], "curves": [], "text": {},
+        "si": {}, "unconverted": [], "duplicate_base": [], "null": [],
+        "curves": [], "text": {},
     }
     if not block:
         return out
@@ -276,9 +304,9 @@ def convert_block(block: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             continue
         cbase, si = to_si(key, value)
         if si is None:
-            out["unconverted"].append(key)
+            out["unconverted"].append(key)          # birim COZULEMEDI
         elif cbase in out["si"]:
-            out["unconverted"].append(key)
+            out["duplicate_base"].append(key)       # taban ad ZATEN DOLU
         else:
             out["si"][cbase] = si
     return out
@@ -295,11 +323,21 @@ def _base_result(record: Dict[str, Any]) -> Dict[str, Any]:
         "status": "ok",
         "reason": None,
         "missing": [],
+        # P10B2-02 (2026-08-28): ``missing`` TEK bir sınıfı anlatıyordu ama
+        # iki sınıfı birden taşıyordu. ``missing_detail`` o kümeyi ikiye
+        # ayırır: değer GERÇEKTEN yok mu, yoksa kayıtta duruyor da birim
+        # soneki mi çözülemiyor. Ayrıntılı liste EK alandır; ``missing``
+        # birebir aynıdır (koşucunun ``insufficient_inputs`` listesi ve
+        # mevcut bekçiler etkilenmez).
+        "missing_detail": [],
         "predictions": {},
         "measured_si": {},
         "measured_null": [],
         "measured_curves": [],
         "measured_unconverted": [],
+        # P10B2-11: birimi cozulemeyen anahtar (yukarisi) ile ayni buyuklugu
+        # ikinci kez bildiren anahtar (asagisi) AYRI raporlanir.
+        "measured_duplicate_base": [],
         "input_bases": [],
         "consumed_measured": [],
         "derived_bases": [],
@@ -317,13 +355,75 @@ def _base_result(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _insufficient(result: Dict[str, Any], missing: List[str]) -> Dict[str, Any]:
+def _cozulemeyen_birim_anahtarlari(base: str,
+                                   bloklar: Tuple[Dict[str, Any], ...]
+                                   ) -> List[str]:
+    """``base`` için kayıtta DURAN ama birimi çözülemeyen özgün anahtarlar.
+
+    ``convert_block``, birimi çözülemeyen anahtarı ÖZGÜN adıyla
+    ``unconverted`` listesine koyar ("mdot_ox_lbmps"); taban ad
+    çıkarılamadığı için bu sayı hiçbir yerde "mdot_ox" diye görünmez.
+    Bağlantı önek eşlemesiyle kurulur: anahtarın kendisi taban ada eşitse ya
+    da "taban_" ile başlıyorsa o tabana ait sayılır.
+    """
+    hits: List[str] = []
+    for blok in bloklar:
+        for key in blok.get("unconverted", ()):
+            lk = str(key).lower()
+            if lk == base or lk.startswith(base + "_"):
+                hits.append(key)
+    return sorted(set(hits))
+
+
+def _insufficient(result: Dict[str, Any], missing: List[str],
+                  bloklar: Tuple[Dict[str, Any], ...] = ()) -> Dict[str, Any]:
+    """Girdi yetersiz hükmü — GEREKÇE iki sınıfı ayırır (P10B2-02).
+
+    ÖLÇÜLDÜ (2026-08-28, tam DB; kanıt ``once_korelasyon.json``): beş kayıtta
+    ("hyb-amroc1993-htpb-lox-dm01-b1..b4", "hyb-knowles2004-htpb-lox-htt-002")
+    gerekçe "gerekli girdiler eksik: ... mdot_ox ..." diyordu ama değer
+    kayıtta DURUYOR: ``mdot_ox_lbmps: 619`` / ``mdot_ox_max_lbmps: 15.0``.
+    Eksik olan şey değer değil, ``lbmps`` sonekinin ``UNIT_TO_SI`` tablosunda
+    BULUNMAMASIDIR. Yanlış gerekçe yanlış iş emri üretiyordu: "deneyi tekrar
+    ölç" ile "birim tablosuna sonek ekle" aynı cümleye sığınıyordu.
+
+    Bu onarım birim tablosuna DOKUNMAZ (sonek eklemek beş kaydı koşturur ve
+    yayımlanan istatistiği değiştirir — ayrı kalem, P10B2-11). Yalnızca
+    hükmün GEREKÇESİ doğru sınıfı söyler; ``missing`` listesi birebir aynıdır.
+    """
     result["status"] = "insufficient_inputs"
-    result["missing"] = sorted(missing)
-    result["reason"] = (
-        "kayitta motor kosusu icin gerekli girdiler eksik: "
-        + ", ".join(sorted(missing))
-    )
+    eksik = sorted(missing)
+    result["missing"] = eksik
+
+    yok: List[str] = []
+    birimsiz: List[str] = []
+    detay: List[Dict[str, Any]] = []
+    for base in eksik:
+        anahtarlar = _cozulemeyen_birim_anahtarlari(base, bloklar)
+        if anahtarlar:
+            birimsiz.append(base)
+            detay.append({"field": base, "reason": "unit_unresolved",
+                          "record_keys": anahtarlar})
+        else:
+            yok.append(base)
+            detay.append({"field": base, "reason": "value_absent",
+                          "record_keys": []})
+    result["missing_detail"] = detay
+
+    parcalar = []
+    if yok:
+        # Metnin bu yarısı DEĞİŞMEDİ: birim sorunu olmayan kayıtlarda
+        # gerekçe birebir eskisi gibi kalır.
+        parcalar.append("kayitta motor kosusu icin gerekli girdiler eksik: "
+                        + ", ".join(yok))
+    if birimsiz:
+        cift = ", ".join(
+            f"{d['field']} <- {'/'.join(d['record_keys'])}"
+            for d in detay if d["reason"] == "unit_unresolved")
+        parcalar.append(
+            "kayitta DEGER VAR ama birim soneki cozulemedi (deger yok "
+            "sayilmadi; sonek UNIT_TO_SI tablosunda yok): " + cift)
+    result["reason"] = "; ".join(parcalar)
     return result
 
 
@@ -339,6 +439,7 @@ def _fill_measured(result: Dict[str, Any], meas: Dict[str, Any]) -> None:
     result["measured_null"] = sorted(meas["null"])
     result["measured_curves"] = sorted(meas["curves"])
     result["measured_unconverted"] = sorted(meas["unconverted"])
+    result["measured_duplicate_base"] = sorted(meas.get("duplicate_base", ()))
 
 
 def _propellant_keys(record: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -434,7 +535,7 @@ def _run_hybrid(record: Dict[str, Any]) -> Dict[str, Any]:
     if fuel_key is None:
         missing.append("hrma_fuel_key")
     if missing:
-        return _insufficient(result, missing)
+        return _insufficient(result, missing, (inp, geo, meas))
 
     if ox_key is None:
         ox_key = "n2o"
@@ -636,7 +737,7 @@ def _run_liquid(record: Dict[str, Any]) -> Dict[str, Any]:
     if ox_key is None:
         missing.append("hrma_oxidizer_key")
     if missing:
-        return _insufficient(result, missing)
+        return _insufficient(result, missing, (inp, meas))
 
     thrust_known = True
     if "thrust" in inp["si"]:
@@ -739,9 +840,16 @@ _GRAIN_TYPE_MAP = (
 
 
 def _solid_grain_type(record: Dict[str, Any], result: Dict[str, Any]) -> str:
+    # F3 onarimi #3 (2026-08-18, olculdu): eski alt-dizgi eslemesi ('star' in
+    # text) Turkce kayit metnindeki 'astarlanmis' (astar = kaplama/liner)
+    # sozcugune takilip BATES motoru YILDIZ tane olarak kosturuyordu —
+    # KSB-002 kaydinda tepe itki +%68.8'lik saf siniflandirma artefakti
+    # uretti (bates ile +%7 bandi). Eslesme artik sozcuk sinirlidir
+    # (\btoken\b); 'BATES', 'star', 'end burner', 'wagon wheel' gibi gercek
+    # anahtar kelimeler ayni sekilde yakalanmaya devam eder.
     text = str((record.get("geometry") or {}).get("grain_geometry", "")).lower()
     for token, grain_type in _GRAIN_TYPE_MAP:
-        if token in text:
+        if re.search(r"\b" + re.escape(token) + r"\b", text):
             return grain_type
     result["assumed_defaults"]["grain_type"] = "bates"
     return "bates"
@@ -806,7 +914,7 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
                 "yerine strand r(P) noktasal kiyasina dusuldu "
                 f"(eksik: {sorted(missing)}).")
             return strand
-        return _insufficient(result, missing)
+        return _insufficient(result, missing, (inp, geo, meas))
 
     pc = inp["si"].get("chamber_pressure")
     if pc is None and "chamber_pressure" in meas["si"]:
@@ -816,17 +924,28 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
         pc = 40.0e5
         result["assumed_defaults"]["chamber_pressure_bar"] = 40.0
 
-    result["assumed_defaults"]["burn_rate_a"] = 0.005
-    result["assumed_defaults"]["burn_rate_n"] = 0.35
-    result["adapter_notes"].append(
-        "Saint-Robert a-n katsayilari HRMA varsayilanidir (yakit-basina "
-        "yayimli tablo yok); yanma-hizi duyarli tahminler bu varsayimla "
-        "okunmalidir.")
-
     overrides = {}
     rho = prop_si.get("propellant_density") or prop_si.get("fuel_density")
     if rho is not None:
         overrides["density"] = rho
+
+    # F3 onarimi #1 (2026-08-18, olculdu): kayit geometrisindeki BATES segment
+    # sayisi motora ULASMIYORDU — motor L/D konvansiyonuyla kendi segment
+    # sayisini seciyordu (NASA SP-8064 yaklasigi). Kappa KSB-002 kaydinda
+    # (408 mm / 55.9 mm) motor 7 segment varsayarken yayimlanmis motor 4
+    # segmentti; fark MADDI olculdu: t_b 1.966 -> 1.714 s (%13), F_tepe
+    # 1769 -> 1510 N (%15), Isp 141.8 -> 147.0 s (%3.6). Motor 'n_segments'
+    # override'ini zaten destekliyor (_user_segment_count); kayit yalnizca
+    # kablolanir — model degistirilmedi. Bu yol bugune kadar hicbir uretim
+    # kaydinda kosmuyordu (tum mevcut kati static_fire kayitlari
+    # insufficient_inputs; 2026-08-18 taramasi), regresyon alani bos.
+    n_segments = geo["si"].get("n_segments")
+    if n_segments is not None:
+        overrides["n_segments"] = int(round(n_segments))
+        result["adapter_notes"].append(
+            f"BATES segment sayisi kayittan alindi (n_segments="
+            f"{int(round(n_segments))}); verilmeseydi motor L/D "
+            f"konvansiyonuyla kendi sayisini secerdi.")
 
     engine = SolidRocketEngine(
         grain_type=grain_type,
@@ -837,6 +956,19 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
         chamber_pressure=pc / 1e5,             # bar
         overrides=overrides or None,
     )
+    # F3 onarimi #2 (2026-08-18, olculdu): eski kod kosulsuz olarak
+    # assumed_defaults'a a=0.005 / n=0.35 yaziyordu ama motor katalog
+    # yakitlarinda (knsb/kndx/knsu/apcp) kendi a-n degerlerini cozuyor
+    # (olculdu: knsb icin engine.a=0.0022334, 0.005 DEGIL). Adaptorun
+    # kullanilmamis bir varsayimi 'varsayilan' diye beyan etmesi durustluk
+    # ihlaliydi; artik motorun GERCEKTE cozdugu katsayilar raporlanir.
+    result["assumed_defaults"]["burn_rate_a"] = float(engine.a)
+    result["assumed_defaults"]["burn_rate_n"] = float(engine.n)
+    result["adapter_notes"].append(
+        "Saint-Robert a-n katsayilari kayittan DEGIL, HRMA'nin kendi yakit "
+        "katalogundan/rejim tablosundan gelir (assumed_defaults'ta motorun "
+        "gercekte cozdugu degerler raporlanir); yanma-hizi duyarli tahminler "
+        "bu varsayimla okunmalidir.")
     res = engine.calculate_performance()
     if "error" in res:
         raise RuntimeError(f"SolidRocketEngine: {res['error']}")
@@ -861,6 +993,23 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
         "c* tahmini HRMA yakit tablosu referansidir (motor kosusundan "
         "bagimsiz sabit); c* kiyasi zayif bir tutarlilik denetimidir.")
     result["predictions"] = predictions
+
+    # F022'nin kati karsiligi (_SOLID_ALGEBRAIC_COPY_CHAIN yorumu): kayit
+    # hem isp hem total_impulse olctuyse bunlar bagimsiz iki kanit degildir;
+    # zincirin olculen ILK halkasi skorlanir, kalanlar derived_bases ile
+    # skor disi kalir (hibritteki F022 blogunun birebir kardesi).
+    copy_chain_present = [b for b in _SOLID_ALGEBRAIC_COPY_CHAIN
+                          if b in meas["si"]]
+    for base in copy_chain_present[1:]:
+        if base not in result["derived_bases"]:
+            result["derived_bases"].append(base)
+    if len(copy_chain_present) > 1:
+        result["adapter_notes"].append(
+            "ZAYIF KANIT (F022-kati): total_impulse = m_p*g0*Isp cebirsel "
+            "zinciri iki tarafta da tam oldugundan yalniz "
+            f"'{copy_chain_present[0]}' skorlandi, "
+            f"{copy_chain_present[1:]} derived_bases ile skor disi "
+            "(tek karsilastirma, tek n).")
     return result
 
 
@@ -910,7 +1059,7 @@ def _run_strand(record: Dict[str, Any]) -> Dict[str, Any]:
     if prop_key is None:
         missing.append("hrma_propellant_key")
     if missing:
-        return _insufficient(result, missing)
+        return _insufficient(result, missing, (inp, meas))
 
     from hrma.data import burn_rate_db
 
@@ -941,17 +1090,33 @@ def _run_strand(record: Dict[str, Any]) -> Dict[str, Any]:
                 f"disinda; en yakin uc rejim ekstrapole edildi (dusuk guven).")
     else:
         # Dogrulanmis yasa yok: motor kurucu varsayilani (dusuk guven).
-        result["assumed_defaults"]["burn_rate_a"] = 0.005
-        result["assumed_defaults"]["burn_rate_n"] = 0.35
-        result["adapter_notes"].append(
-            "Strand kiyasi r = a*P^n noktasal degerlendirmedir (motor kosusu "
-            "yok); yakit icin dogrulanmis rejim yasasi YOK, HRMA genel "
-            "varsayilan a-n kullanildi (dusuk guven; birim/koken belgesiz).")
-
+        #
+        # P10B2-03 (2026-08-28) — BEYAN, KULLANILANDAN ÜRETİLİR.
+        # ÖLÇÜLDÜ: bu dal koşulsuz olarak "varsayılan a-n = 0,005 / 0,35"
+        # beyan ediyordu, ama tahmini aşağıdaki satır motorun GERÇEKTE
+        # çözdüğü katsayılarla (``engine.a`` / ``engine.n``) üretiyordu.
+        # Bugünkü motor kurucu varsayılanı a = 0,0022334179607548157'dir
+        # (``SolidRocketEngine.__init__`` imzası); 50 bar'da beyan edilen a-n
+        # r = 19,66 mm/s, kullanılan a-n r = 8,78 mm/s verir — beyanla
+        # kullanılan arasında %55,3 fark. Aynı dürüstlük hatası katı tam
+        # motor yolunda 2026-08-18'de (F3 onarımı #2) kapatılmıştı; strand
+        # dalı o onarımdan pay almamıştı.
+        #
+        # Motor ÖNCE kurulur, beyan SONRA onun çözdüğü sayılardan yazılır:
+        # tek kaynak motorun kendisidir, elle yazılan sabit YOKTUR.
         engine = SolidRocketEngine(
             propellant_type=prop_key,
             chamber_pressure=pressure / 1e5,
         )
+        result["assumed_defaults"]["burn_rate_a"] = float(engine.a)
+        result["assumed_defaults"]["burn_rate_n"] = float(engine.n)
+        result["adapter_notes"].append(
+            "Strand kiyasi r = a*P^n noktasal degerlendirmedir (motor kosusu "
+            "yok); yakit icin dogrulanmis rejim yasasi YOK, HRMA genel "
+            "varsayilan a-n kullanildi (dusuk guven; birim/koken belgesiz). "
+            "assumed_defaults'taki a-n, tahminde KULLANILAN katsayilardir "
+            "(motor kurucusundan okundu), elle yazilmis bir beyan degildir.")
+
         r_mps = float(engine.a) * (pressure / 1e5) ** float(engine.n)  # m/s
 
     result["predictions"] = {

@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "test_id": "sol-nakka2000-kappa-ksb001",
+  "record_type": "static_fire",
+  "motor_type": "solid",
+  "source": {
+    "citation": "R. Nakka, 'Kappa-SB rocket motor -- Static Test KSB-001 Report', nakka-rocketry.net (statik test 9 Eylül 2000; tepe değerler Şekil 6 üzerine yazılı: 362 lb / 1609 N, 1235 psi / 8.52 MPa). Boğaz çapı KSB-002 raporundaki '0.495 in -> 0.500 in büyütüldü' cümlesiyle izlenebilir (bu testte 0.495 in).",
+    "doi": null,
+    "url": "https://www.nakka-rocketry.net/ksb001.html",
+    "access": "webpage",
+    "confidence": "medium",
+    "date_checked": "2026-08-18",
+    "data_extraction": "figure_digitized",
+    "extraction_note": "Toplam impuls (1780 N·s), teslim Isp (120.4 s), tane kütlesi (1508 g), ortalama oda basıncı (735 psi), segment boyu (3.80 in = 96.5 mm -> 4 segment = 386 mm), çekirdek/dış çap rapor METNİNDEN; tepe itki (362 lbf) Şekil 6 üzerine YAZILI değer (eğri okuması değil). Yanma süresi Şekil 6'dan sayısallaştırıldı: itkinin tepe değerin ~%5'inin üzerinde kaldığı süre (~0.10 s -> ~2.35 s), belirsizlik ±0.1 s. İtki eğrisi 2-4x büyütülmüş görüntüden okundu; 0.1-0.3 s aralığındaki salınımlar nedeniyle okuma belirsizliği ~±15 lb.",
+    "erratum": null
+  },
+  "propellants": {
+    "propellant": "KNSB (KNO3/sorbitol 65/35)",
+    "oxidizer": "kno3",
+    "fuel": "sorbitol",
+    "hrma_propellant_key": "knsb",
+    "oxidizer_mass_pct": 65,
+    "fuel_mass_pct": 35
+  },
+  "geometry": {
+    "grain_geometry": "BATES, 4 serbest duran segment; dış yüzey inhibitörlü (reçineli pamuk kumaş, tek kat, ort. 0.012 in; 3. segmentte çift kat tagboard)",
+    "n_segments": 4,
+    "grain_outer_diameter_mm": 56.6,
+    "core_diameter_mm": 19.05,
+    "segment_length_avg_mm": 96.5,
+    "grain_length_mm": 386,
+    "grain_length_with_spacers_mm": 400,
+    "throat_diameter_mm": 12.6,
+    "expansion_ratio": 11.0,
+    "casing_note": "6061-T6511 alüminyum boru, dış çap 2.50 in (63.5 mm), et 0.065 in (1.65 mm); iki katlı ablatif/kağıt termal astar",
+    "design_note": "Lüle ~1000 psi (6.9 MPa) tasarım basıncı için optimize (rapor sonuç bölümü); tasarım impulsu 2000 N·s"
+  },
+  "inputs": {
+    "chamber_pressure_psia": 1000
+  },
+  "measured": {
+    "total_impulse_ns": 1780,
+    "isp_s": 120.4,
+    "propellant_mass_g": 1508,
+    "thrust_peak_lbf": 362,
+    "burn_time_s": 2.25,
+    "chamber_pressure_avg_psia": 735,
+    "thrust_curve_lbf": {
+      "time_s": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9, 1.0, 1.1, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.42],
+      "value": [0, 55, 70, 95, 120, 140, 175, 235, 270, 310, 345, 362, 355, 335, 265, 200, 155, 120, 85, 65, 50, 30, 15, 0]
+    }
+  },
+  "units_original": "lb (itki, şekil ekseni), psi (basınç), N·s (impuls), s (süre), g (kütle), in ve mm (boyutlar) — rapor metni + şekil eksenleri aynen",
+  "digitized": true,
+  "synthetic": false,
+  "anomaly": {
+    "flag": true,
+    "note": "Üç anormallik: (1) İtki başlangıcı yavaş/aşamalı — piroteknik ateşleyiciyle tutuşma gecikmesi; itki ~1.2 s boyunca yaklaşık doğrusal tırmandı (kappa.html: piroteknik ateşleyicide itki başlangıcı 2+ s sürebiliyordu; KSB-002'de pyrogen ile giderildi). (2) Oda basıncı ölçüm hattı egzoz kalıntısıyla KISMEN TIKALI — Şekil 6'da 'Blockage in sensor line' kesikli bölge; basınç verisinin bir bölümü geçersiz, bu yüzden basınç eğrisi kayda alınmadı ve ortalama basınç (735 psi) yalnız kaynak beyanı olarak taşındı. (3) İlk kez gözlenen 'üçgen' itki profili — teslim Isp'yi düşürdü (120.4 s; ikiz temiz test KSB-002'de 125.0 s). Ana istatistiğe girmemesi doğrudur; anomali katmanında skorlanır."
+  },
+  "tags": ["static_fire", "kn_sugar", "bates", "amateur_rigorous", "published_literature", "f3_korelasyon_dongusu"],
+  "notes": "YAYIMLANMIŞ LİTERATÜR kaydı (F3 korelasyon döngüsü) — DIŞ KULLANICI VERİSİ DEĞİLDİR. Kappa-SB ilk testi; motor donanımı KDX-002 ile aynı (rapor: 'The motor for this test was the same as that used for the second Kappa static test'). STS-5000 standı, hidrolik yük hücresi + gösterge/video kaydı — elektronik DAQ yok, belirsizlik sınıfı yayımlanmamış (measurement_uncertainty bilinçli YOK). Şekil üzerine yazılı tepe oda basıncı 1235 psi (8.52 MPa) — skalar skor dışı (tasarım Pc girdi yankısı; ölçüldü, gerekçe KSB-002/KDX-002 kayıtlarının notlarında). CEBİRSEL BAĞ: Isp = I/(m·g0) — 1780/(1.508·9.80665) = 120.36 ≈ 120.4 doğrulandı. Rapor Update bölümü: motor içi türetilmiş yanma hızı r = 1.535·P^1.0 + 0.862 (mm/s, MPa) — strand fitlerinden köklü biçimde farklı; KNSB model-formu sınırının birincil kaynağı."
+}

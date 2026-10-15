@@ -60,16 +60,50 @@ for pair in "${PAIRS[@]}"; do
   elif [ -d "$src" ]; then
     echo "zaten gerçek dizin: $rel"
   else
-    echo "UYARI: ne symlink ne dizin: $rel (paketleme başarısız olabilir)"
+    echo "EKSİK: ne symlink ne dizin: $rel"
   fi
 done
 
-# Paketleme öncesi son kontrol: hiçbir derleme girdisi symlink kalmamalı.
+# ---------------------------------------------------------------------------
+# Paketleme öncesi son kontrol — FAIL-CLOSED (ÖH D18 / altyapi, P10B3-17)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (once_p10b3_17.json): girdilerin İKİSİ DE yokken bu betik iki
+# "UYARI" satırı basıp "Derleme girdileri hazır. Paketleme yapılabilir."
+# diyerek 0 ile çıkıyordu. Son kontrol yalnız SYMLINK arıyordu; YOKLUĞU
+# aramıyordu. Betik .github/workflows/release.yml:494'te KAPI ADIMI olarak
+# koşuyor, yani yayın hattı girdisiz bir ağaçta "hazır" hükmünü alıp
+# paketlemeye geçiyordu — .app/.exe içi boş çıkar, kullanıcıda patlar.
+#
+# Kapının hükmü artık üç şarta birden bağlı: symlink DEĞİL + gerçek dizin +
+# BOŞ DEĞİL. Boşluk da sayılır, çünkü boş bir payload dizini eksik payload
+# ile aynı sonucu verir ama "dizin var" diye sessizce geçerdi.
+eksikler=()
 for pair in "${PAIRS[@]}"; do
-  rel="${pair%%:*}"
-  if [ -L "$REPO/$rel" ]; then
-    echo "HATA: $rel hâlâ symlink — paketleme YAPMA"; exit 1
+  rel="${pair%%:*}"; name="${pair##*:}"
+  src="$REPO/$rel"
+  if [ -L "$src" ]; then
+    eksikler+=("$rel — hâlâ symlink (gerçek dizin bekleniyor)")
+  elif [ ! -d "$src" ]; then
+    eksikler+=("$rel — dizin YOK (önbellek: $CACHE/$name)")
+  elif [ -z "$(ls -A "$src" 2>/dev/null)" ]; then
+    eksikler+=("$rel — dizin BOŞ (içerik yok)")
   fi
 done
+
+if [ ${#eksikler[@]} -ne 0 ]; then
+  echo
+  echo "HATA: derleme girdileri hazır DEĞİL — PAKETLEME YAPMA."
+  for e in "${eksikler[@]}"; do
+    echo "  - $e"
+  done
+  echo
+  echo "Girdiler depoda tutulmaz; önbellekten geri konur ya da yeniden"
+  echo "üretilir:"
+  echo "  packaging/win/payload -> packaging/build_win_payload.sh"
+  echo "  packaging/mac/libs    -> packaging/build_mac_app.sh (denge"
+  echo "                           termokimyası kütüphaneleri)"
+  echo "Önbellek dizini: $CACHE"
+  exit 1
+fi
 
 echo "Derleme girdileri hazır ($restored geri kondu). Paketleme yapılabilir."

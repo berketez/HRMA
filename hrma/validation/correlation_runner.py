@@ -36,6 +36,13 @@ Akis:
    (rapor hem 'tumu' hem 'aykirisiz' istatistigi verir). anomaly.flag=true
    kayitlar ana istatistige GIRMEZ, ayri listede raporlanir. Guven katmani:
    ana istatistik high+medium; low ayri hucre listesinde (Berke onayli K2).
+   Model kapsami (P10B2-06): model_scope.in_scope=false kayitlar AYRI bir
+   katmandir (out_of_scope_entries) — 'deneyin anomalisi' ile 'modelin
+   sinirlari' ayni bayrakla tasinmaz. Kapsam disi kayitlarin basliga etkisi
+   olculur ve yayimlanir: her hucre n_out_of_scope + stats_incl_out_of_scope
+   tasir, kaniti TAMAMEN kapsam disi olan hucre ise adiyla geri cekilir
+   (out_of_scope_withheld_cells) — "olculmedi" ile "olculdu, cikarildi"
+   birbirine karismaz.
 5. Determinizm: kosucu saf fonksiyondur — ayni DB ayni sonuc. DB icerik
    hash'i (sha256) sonuca yazilir (spec 3.4 cache mantiginin temeli).
    Zaman olcumleri ('elapsed_s', 'timing') dogal olarak deterministik
@@ -55,6 +62,13 @@ import time
 import warnings as _warnings
 from typing import Any, Dict, Iterable, List, Optional
 
+# P10B2-16: bağıl fark yüzdesinin TEK tanım noktası (referans ADIYLA verilir).
+from hrma.validation._relative import (
+    REFERENCE_MEASUREMENT, relative_difference_pct)
+
+#: Skor hatasının PAYDA rolü: deneysel veri (ASME V&V 20-2009 Böl. 2).
+SCORE_ERROR_REFERENCE = REFERENCE_MEASUREMENT
+
 from hrma.validation import record_adapters
 from hrma.validation.experiment_db import load_records, records_for_statistics
 
@@ -63,6 +77,7 @@ __all__ = [
     "MAIN_CONFIDENCE_LEVELS",
     "OUTLIER_MAD_SCALE",
     "OUTLIER_MODIFIED_Z",
+    "OUTLIER_CRITERION_TEXT",
     "db_content_hash",
     "run_correlation",
     "deterministic_view",
@@ -82,6 +97,14 @@ MAIN_CONFIDENCE_LEVELS = ("high", "medium")
 # Handle Outliers', ASQC Basic References in Quality Control Vol. 16, 1993).
 OUTLIER_MAD_SCALE = 0.6745
 OUTLIER_MODIFIED_Z = 3.5
+# P10B2-07 (2026-08-28): aykırı ÖLÇÜTÜNÜN METNİ de bu iki sabitten üretilir.
+# Yayımlanan belgelerde (paper_report PDF + Markdown) ölçüt ELLE yazılmıştı ve
+# F035 değişiminden pay almamıştı: iki yerde de hâlâ "3*MAD" yazıyordu, yani
+# yayımlanan ölçüt kodun uyguladığı ölçüt DEĞİLDİ. Metin artık sabitin
+# kendisinden türediği için bir dahaki eşik değişiminde bayatlayamaz.
+OUTLIER_CRITERION_TEXT = (
+    f"modified z-score |{OUTLIER_MAD_SCALE}*(error - median)/MAD| > "
+    f"{OUTLIER_MODIFIED_Z}")
 # Kayit basina sure uyari esigi (s). Kosucu tek is parcaciklidir; kosuyu
 # KESMEZ (yarim motor hesabi guvenle iptal edilemez), sonuca uyari yazar.
 PER_RECORD_TIME_WARN_S = 120.0
@@ -150,7 +173,8 @@ def _score_adapter_result(adapter_result: Dict[str, Any],
     Her measured taban adi icin bir giris doner:
       status: 'scored' | 'skipped_circular_input' | 'skipped_consumed' |
               'skipped_derived' | 'no_prediction' | 'measured_zero' |
-              'measured_null' | 'curve_skipped_v1' | 'unknown_unit'
+              'measured_null' | 'curve_skipped_v1' | 'unknown_unit' |
+              'duplicate_base'
     'scored' girislerde predicted/measured (SI) ve isaretli error_pct bulunur.
     Kayit olcum belirsizligi bildiriyorsa (F008 eki) 'measurement_u_pct' ve
     'coverage_k' eklenir; k biliniyorsa normalize hata E_n = error_pct /
@@ -177,7 +201,10 @@ def _score_adapter_result(adapter_result: Dict[str, Any],
             scores[base] = {"status": "measured_zero"}
         else:
             predicted = float(predictions[base])
-            error_pct = (predicted - measured) / measured * 100.0
+            # P10B2-16: formül merkezden; PAYDA ROLÜ adıyla verilir
+            # (ASME V&V 20-2009: hata deneysel veriye normalize edilir).
+            error_pct = relative_difference_pct(
+                predicted, measured, reference=SCORE_ERROR_REFERENCE)
             scores[base] = {
                 "status": "scored",
                 "predicted_si": predicted,
@@ -205,6 +232,10 @@ def _score_adapter_result(adapter_result: Dict[str, Any],
         scores.setdefault(base, {"status": "curve_skipped_v1"})
     for key in adapter_result.get("measured_unconverted", []):
         scores.setdefault(key, {"status": "unknown_unit"})
+    # P10B2-11: birimi BILINEN ama tabani zaten dolu olan anahtar
+    # 'unknown_unit' DEGILDIR — kayit ayni buyuklugu iki kez bildirmistir.
+    for key in adapter_result.get("measured_duplicate_base", []):
+        scores.setdefault(key, {"status": "duplicate_base"})
     return dict(sorted(scores.items()))
 
 
@@ -353,18 +384,82 @@ def _cell(motor_type: str, quantity: str,
     return cell
 
 
+def _is_non_converged(rr: Dict[str, Any]) -> bool:
+    """Kaydın kendi çözücüsü yakınsadığını SÖYLEMEDİ mi? (P10B2-08)
+
+    Yalnız ``convergence`` bloğu ÜRETEN adaptörler için anlamlıdır (bugün
+    hibrit sabit-nokta döngüsü). Blok yoksa hüküm verilmez — "bilinmiyor"
+    "yakınsamadı" sayılmaz (uydurma yasağı).
+    """
+    conv = rr.get("convergence")
+    return isinstance(conv, dict) and conv.get("converged") is False
+
+
 def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Hücre istatistiği + karantina listeleri.
+
+    P10B2-08 (2026-08-28) — YAKINSAMAYAN KOŞU ARTIK GÖRÜNÜR.
+    ÖLÇÜLDÜ (tam DB, 212 kayıt): 48 kayıt ``convergence`` bloğu üretiyor,
+    biri ("hyb-karabeyoglu2003-paraffin-gox-t4p-04", bağıl kalıntı
+    1,389e-4 > _HYBRID_RTOL 1e-4; 12 iterasyonda tükendi) YAKINSAMIYOR.
+    Bu bayrak kayıt sözlüğüne yazılıyordu ama skorlama yolunda HİÇ
+    OKUNMUYORDU: yakınsamayan koşu normal veri noktası gibi skorlanıyor ve
+    hiçbir çıktı kanalında görünmüyordu.
+
+    Uygulanan hüküm (Z4'te FEA için verilen kuralın kardeşi — "converged=
+    False -> hüküm GERİ ÇEKİLİR, sayı silinmez"):
+      * Yakınsamayan her skorlanmış giriş ``non_converged_entries``
+        listesinde ADIYLA yayımlanır (sayı silinmez, görünür olur).
+      * Bir (motor, büyüklük) hücresinin TÜM girişleri yakınsamamışsa hücre
+        HİÇ ÜRETİLMEZ — o hücrenin hükmü yakınsamamış koşulardan
+        KAZANILAMAZ (fail-closed; ``non_converged_withheld_cells`` içinde
+        adıyla raporlanır).
+      * Karışık hücrede (bugünkü tek vaka) sayılar yerinde kalır ve hücre
+        yayımlanmaya devam eder; yakınsamayan giriş hem listede hem
+        markdown/uç gövdesinde adıyla anılır. Girişin hücreden ATILMASI
+        yayımlanan taban istatistiğini değiştirir — ÖLÇÜLDÜ: bu kaydın iki
+        büyüklüğü skorlanıyor (chamber_pressure, regression_rate), yani
+        ``hybrid`` hücrelerinde n 35 -> 34 olurdu ve
+        ``tests/test_correlation_guards.py``in ``n >= taban`` kapısı iki
+        hücrede kırmızı verirdi. Taban güncellemesi BİLİNÇLİ bir karardır
+        ve bu paketin dışındadır.
+    """
     main: Dict[Any, List[Dict[str, Any]]] = {}
     low: Dict[Any, List[Dict[str, Any]]] = {}
     anomaly_entries: List[Dict[str, Any]] = []
+    non_converged_entries: List[Dict[str, Any]] = []
+    # P10B2-06: kapsam-disi girisler HEM adiyla yayimlanir (asagidaki liste)
+    # HEM de ait olduklari (motor, buyukluk, bant) kovasinda saklanir ki
+    # hucrenin "kapsam-disi dahil" alternatif istatistigi UYDURULMADAN
+    # hesaplanabilsin.
+    out_of_scope_entries: List[Dict[str, Any]] = []
+    out_of_scope: Dict[Any, List[Dict[str, Any]]] = {}
 
     for rr in record_results:
         if rr["status"] != "ok":
             continue
+        yakinsamadi = _is_non_converged(rr)
         for quantity, score in rr["scores"].items():
             if score.get("status") != "scored":
                 continue
+            if yakinsamadi:
+                conv = rr["convergence"]
+                non_converged_entries.append({
+                    "test_id": rr["test_id"],
+                    "motor_type": rr["motor_type"],
+                    "quantity": quantity,
+                    "error_pct": score["error_pct"],
+                    "confidence": rr["confidence"],
+                    "iterations": conv.get("iterations"),
+                    "relative_residual": conv.get("relative_residual"),
+                })
             entry = {
+                # Fail-closed kapısı giriş düzeyinde sayar (hücre BANDINA
+                # göre ayrı ayrı): aynı (motor, büyüklük) hem main hem low
+                # katmanında görünebilir; tek bir sayaçla ikisi birden
+                # yanlışlıkla geri çekilirdi. Alt çizgili anahtar YAYIMLANMAZ
+                # — ``_cell`` çıktı girişini alan alan kurar.
+                "_non_converged": yakinsamadi,
                 "test_id": rr["test_id"],
                 "error_pct": score["error_pct"],
                 "confidence": rr["confidence"],
@@ -378,7 +473,26 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "normalized_error": score.get("normalized_error"),
             }
             key = (rr["motor_type"], quantity)
-            if rr["anomaly"]:
+            band = ("high_medium" if rr["confidence"] in MAIN_CONFIDENCE_LEVELS
+                    else "low")
+            if rr.get("out_of_scope"):
+                # Kayit modelin ILAN ETTIGI kapsamin disinda: ana istatistige
+                # GIREMEZ (yoksa olculen sey model hatasi degil kapsam
+                # uyusmazligi olur) — ama gorunmez de kalamaz.
+                out_of_scope_entries.append({
+                    "test_id": rr["test_id"],
+                    "motor_type": rr["motor_type"],
+                    "quantity": quantity,
+                    "error_pct": score["error_pct"],
+                    "confidence": rr["confidence"],
+                    "confidence_band": band,
+                    "model_scope_note": rr.get("model_scope_note"),
+                    # Iki gerekce birden gecerliyse hicbiri kaybolmaz.
+                    "also_anomaly_flagged": bool(rr["anomaly"]),
+                    "anomaly_note": rr.get("anomaly_note"),
+                })
+                out_of_scope.setdefault((key, band), []).append(entry)
+            elif rr["anomaly"]:
                 anomaly_entries.append({
                     "test_id": rr["test_id"],
                     "motor_type": rr["motor_type"],
@@ -392,15 +506,91 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 low.setdefault(key, []).append(entry)
 
-    cells = [_cell(mt, q, entries, "high_medium")
-             for (mt, q), entries in sorted(main.items())]
-    low_cells = [_cell(mt, q, entries, "low")
-                 for (mt, q), entries in sorted(low.items())]
+    # Fail-closed kapısı: girişlerinin TAMAMI yakınsamamış bir hücrenin
+    # hükmü kazanılmamıştır; hücre üretilmez, adıyla geri çekilir.
+    withheld: List[Dict[str, Any]] = []
+
+    def _emit(groups: Dict[Any, List[Dict[str, Any]]], band: str
+              ) -> List[Dict[str, Any]]:
+        out = []
+        for (mt, q), entries in sorted(groups.items()):
+            if all(e.get("_non_converged") for e in entries):
+                withheld.append({
+                    "motor_type": mt, "quantity": q, "confidence_band": band,
+                    "n": len(entries),
+                    "reason": ("all scored runs failed the adapter's own "
+                               "convergence criterion; cell verdict withheld "
+                               "(numbers listed under non_converged_entries)"),
+                })
+                continue
+            cell = _cell(mt, q, entries, band)
+            # P10B2-06: hucrenin sayilari, kapsam-disi kayitlarin CIKARILMIS
+            # olmasindan pay aliyorsa bu pay ADIYLA ve SAYIYLA yayimlanir.
+            # Beyan degil OLCUM: alternatif istatistik gercek girislerden
+            # hesaplanir, okur basligin bu secime ne kadar duyarli oldugunu
+            # kendi gozuyle gorur.
+            disi = out_of_scope.get(((mt, q), band)) or []
+            if disi:
+                cell["n_out_of_scope"] = len(disi)
+                cell["out_of_scope_test_ids"] = sorted(
+                    e["test_id"] for e in disi)
+                cell["stats_incl_out_of_scope"] = _basic_stats(entries + disi)
+            else:
+                cell["n_out_of_scope"] = 0
+                cell["out_of_scope_test_ids"] = []
+                cell["stats_incl_out_of_scope"] = None
+            out.append(cell)
+        return out
+
+    cells = _emit(main, "high_medium")
+    low_cells = _emit(low, "low")
+
+    # P10B2-06 FAIL-CLOSED: kanitin TAMAMI kapsam disi olan (motor, buyukluk)
+    # cifti tablodan sessizce DUSMEZ. Boyle bir hucre "olculmedi" diye
+    # okunurdu; oysa olculdu, sayilar duruyor ve model kapsami geregi
+    # cikarildi. Adiyla, hata araligiyla ve gerekcesiyle geri cekilir.
+    scope_withheld: List[Dict[str, Any]] = []
+    yayimlanan = {(c["motor_type"], c["quantity"], c["confidence_band"])
+                  for c in cells + low_cells}
+    for ((mt, q), band), disi in out_of_scope.items():
+        if (mt, q, band) in yayimlanan:
+            continue
+        hatalar = [e["error_pct"] for e in disi]
+        notlar = sorted({e.get("model_scope_note") for e in out_of_scope_entries
+                         if e["motor_type"] == mt and e["quantity"] == q
+                         and e.get("model_scope_note")})
+        scope_withheld.append({
+            "motor_type": mt,
+            "quantity": q,
+            "confidence_band": band,
+            "n": len(disi),
+            "test_ids": sorted(e["test_id"] for e in disi),
+            "error_pct_min": min(hatalar),
+            "error_pct_max": max(hatalar),
+            "model_scope_notes": notlar,
+            "reason": ("every scored run for this cell is outside the "
+                       "declared model scope; no cell statistic is published "
+                       "(the individual errors are listed above -- this is "
+                       "'measured and withheld', NOT 'not measured')"),
+        })
+    scope_withheld.sort(key=lambda c: (c["motor_type"], c["quantity"],
+                                       c["confidence_band"]))
+
+    out_of_scope_entries.sort(key=lambda e: (e["test_id"], e["quantity"]))
     anomaly_entries.sort(key=lambda e: (e["test_id"], e["quantity"]))
+    non_converged_entries.sort(key=lambda e: (e["test_id"], e["quantity"]))
+    withheld.sort(key=lambda c: (c["motor_type"], c["quantity"]))
     return {
         "cells": cells,
         "low_confidence_cells": low_cells,
         "anomaly_entries": anomaly_entries,
+        # P10B2-06: model kapsamı dışı kayıtlar AYRI katmandır — "deneyin
+        # anomalisi" ile "modelin sınırı" aynı listede karışmaz.
+        "out_of_scope_entries": out_of_scope_entries,
+        "out_of_scope_withheld_cells": scope_withheld,
+        # P10B2-08: yakınsamayan koşular artık SAYILIR ve ADIYLA yayımlanır.
+        "non_converged_entries": non_converged_entries,
+        "non_converged_withheld_cells": withheld,
     }
 
 
@@ -464,9 +654,17 @@ def run_correlation(records: Optional[Iterable[Dict[str, Any]]] = None,
             "quantity_flags": adapter_result.get("quantity_flags", {}),
             "anomaly": bool(rec.get("anomaly", {}).get("flag", False)),
             "anomaly_note": rec.get("anomaly", {}).get("note"),
+            # P10B2-06: MODELIN kapsami, DENEYIN anomalisinden ayri okunur.
+            "out_of_scope": rec.get("model_scope", {}).get(
+                "in_scope") is False,
+            "model_scope_note": rec.get("model_scope", {}).get("note"),
             "status": status,
             "reason": reason,
             "missing": adapter_result.get("missing", []),
+            # P10B2-02: eksikliğin SINIFI (değer yok / birim soneki
+            # çözülemedi). ``missing`` listesi birebir korunur; ayrım EK
+            # alanda taşınır ki uç katmanı doğru iş emrini yayımlayabilsin.
+            "missing_detail": adapter_result.get("missing_detail", []),
             "consumed_measured": adapter_result.get("consumed_measured", []),
             "derived_bases": adapter_result.get("derived_bases", []),
             "assumed_defaults": adapter_result.get("assumed_defaults", {}),
@@ -549,31 +747,84 @@ def _dependence_label(stats: Dict[str, Any]) -> str:
     return "; ".join(parts) or "-"
 
 
+#: P10B2-15 (2026-08-28) — TEK GÖZLEMLİ HÜCRENİN YAYIM KÜNYESİ.
+#: n=1 hücrede bias = fmean([e]) = e, RMS = sqrt(fmean([e^2])) = |e|,
+#: medAPE = |e|, MAPE = |e|: DÖRT SÜTUN aynı tek sayının kopyasıdır ve tablo
+#: bunları dört bağımsız istatistik gibi basıyordu. ÖLÇÜLDÜ (tam DB): on iki
+#: hücre n=1 — main / low_confidence / anomaly katmanlarının her birinde
+#: solid burn_time, isp, propellant_mass, thrust_peak; üçü de tek bir Nakka
+#: Kappa kaydından. Yayımda artık yalnız İŞARETLİ HATA basılır; saçılım
+#: sütunları "-" ile boş bırakılır (tek gözlemde saçılım YOKTUR,
+#: uydurulmaz) ve büyüklük adı künyeyi taşır.
+_SINGLE_OBS_TAG = "(single observation)"
+
+
+def _is_single_observation(cell: Dict[str, Any]) -> bool:
+    return int(cell.get("n", 0)) == 1
+
+
 def _cell_rows(cells: List[Dict[str, Any]]) -> List[str]:
     rows = []
     for cell in cells:
         outliers = ", ".join(cell["outlier_test_ids"]) or "-"
+        if _is_single_observation(cell):
+            quantity = f"{cell['quantity']} {_SINGLE_OBS_TAG}"
+            medape = rms = "-"
+        else:
+            quantity = cell["quantity"]
+            medape = f"{cell['median_ape_pct']:.1f}"
+            rms = f"{cell['rms_pct']:.1f}"
         rows.append(
-            f"| {cell['motor_type']} | {cell['quantity']} "
+            f"| {cell['motor_type']} | {quantity} "
             f"| {cell['n']} ({cell['n_campaigns']}) "
             f"| {_fmt_pct(cell['bias_pct'])} "
-            f"| {cell['median_ape_pct']:.1f} "
-            f"| {cell['rms_pct']:.1f} "
+            f"| {medape} "
+            f"| {rms} "
             f"| {_fmt_pct(cell['min']['error_pct'])} ({cell['min']['test_id']}) "
             f"| {_fmt_pct(cell['max']['error_pct'])} ({cell['max']['test_id']}) "
             f"| {_dependence_label(cell)} "
             f"| {outliers} |")
         if cell["stats_excl_outliers"]:
             ex = cell["stats_excl_outliers"]
+            if _is_single_observation(ex):
+                ex_quantity = (f"{cell['quantity']} (excl. outliers) "
+                               f"{_SINGLE_OBS_TAG}")
+                ex_medape = ex_rms = "-"
+            else:
+                ex_quantity = f"{cell['quantity']} (excl. outliers)"
+                ex_medape = f"{ex['median_ape_pct']:.1f}"
+                ex_rms = f"{ex['rms_pct']:.1f}"
             rows.append(
-                f"| {cell['motor_type']} | {cell['quantity']} (excl. outliers) "
+                f"| {cell['motor_type']} | {ex_quantity} "
                 f"| {ex['n']} ({ex['n_campaigns']}) "
                 f"| {_fmt_pct(ex['bias_pct'])} "
-                f"| {ex['median_ape_pct']:.1f} | {ex['rms_pct']:.1f} "
+                f"| {ex_medape} | {ex_rms} "
                 f"| {_fmt_pct(ex['min']['error_pct'])} ({ex['min']['test_id']}) "
                 f"| {_fmt_pct(ex['max']['error_pct'])} ({ex['max']['test_id']}) "
                 f"| {_dependence_label(ex)} "
                 f"| flagged, not dropped |")
+        # P10B2-06: hucrenin sayilari kapsam-disi kayitlarin CIKARILMASINDAN
+        # pay aliyorsa, alternatifi AYNI TABLODA basilir. Dipnot degil satir:
+        # okur basligin bu secime duyarliligini yan yana gorur.
+        inc = cell.get("stats_incl_out_of_scope")
+        if inc:
+            if _is_single_observation(inc):
+                inc_quantity = (f"{cell['quantity']} (incl. out-of-scope) "
+                                f"{_SINGLE_OBS_TAG}")
+                inc_medape = inc_rms = "-"
+            else:
+                inc_quantity = f"{cell['quantity']} (incl. out-of-scope)"
+                inc_medape = f"{inc['median_ape_pct']:.1f}"
+                inc_rms = f"{inc['rms_pct']:.1f}"
+            rows.append(
+                f"| {cell['motor_type']} | {inc_quantity} "
+                f"| {inc['n']} ({inc['n_campaigns']}) "
+                f"| {_fmt_pct(inc['bias_pct'])} "
+                f"| {inc_medape} | {inc_rms} "
+                f"| {_fmt_pct(inc['min']['error_pct'])} ({inc['min']['test_id']}) "
+                f"| {_fmt_pct(inc['max']['error_pct'])} ({inc['max']['test_id']}) "
+                f"| {_dependence_label(inc)} "
+                f"| {cell['n_out_of_scope']} out-of-scope added |")
     return rows
 
 
@@ -597,8 +848,12 @@ def to_markdown(result: Dict[str, Any]) -> str:
         + ", ".join(f"{k}={v}" for k, v in result["status_counts"].items()),
         "",
         "Signed error convention: (predicted - measured) / measured * 100. "
-        "Outliers use the modified z-score |0.6745*(error - median)/MAD| > "
-        "3.5 (Iglewicz & Hoaglin, 1993); they are flagged, never dropped. "
+        # P10B2-07: olcut metni SABITTEN turer (elle yazilmis kopya yok).
+        f"Outliers use the {OUTLIER_CRITERION_TEXT} "
+        "(Iglewicz & Hoaglin, 1993); they are flagged, never dropped. "
+        "Cells with a single observation report the signed error only: "
+        "bias, median APE and RMS would all repeat that one number, so the "
+        "scatter columns are left empty. "
         "N is 'records (independent campaigns)': records from the same "
         "campaign share systematic error, so the effective sample size is "
         "closer to the campaign count than to N. Dependence column: "
@@ -637,10 +892,89 @@ def to_markdown(result: Dict[str, Any]) -> str:
                   _TABLE_HEADER]
         lines += _cell_rows(low)
 
+    # P10B2-08: yakinsamayan kosular yayimda GORUNUR (sayi silinmez).
+    withheld = result["statistics"].get("non_converged_withheld_cells") or []
+    if withheld:
+        lines += ["", "## Cells withheld (no converged run)", "",
+                  "Every scored run in these cells failed the adapter's own "
+                  "convergence criterion, so no cell statistic is published "
+                  "for them; the individual errors are listed below.", "",
+                  "| Motor | Quantity | Layer | N |", "|---|---|---|---|"]
+        for cell in withheld:
+            lines.append(
+                f"| {cell['motor_type']} | {cell['quantity']} "
+                f"| {cell['confidence_band']} | {cell['n']} |")
+
+    non_conv = result["statistics"].get("non_converged_entries") or []
+    if non_conv:
+        lines += ["", "## Non-converged runs (flagged, kept)", "",
+                  "The adapter's fixed-point loop did not reach its own "
+                  "relative-residual tolerance for these runs; their scores "
+                  "are shown here explicitly rather than passing as ordinary "
+                  "data points.", "",
+                  "| Test | Quantity | Error % | Iterations | Rel. residual |",
+                  "|---|---|---|---|---|"]
+        for entry in non_conv:
+            residual = entry.get("relative_residual")
+            residual_txt = ("-" if residual is None
+                            else f"{float(residual):.3e}")
+            lines.append(
+                f"| {entry['test_id']} | {entry['quantity']} "
+                f"| {_fmt_pct(entry['error_pct'])} "
+                f"| {entry.get('iterations') if entry.get('iterations') is not None else '-'} "
+                f"| {residual_txt} |")
+
+    # P10B2-06: MODEL KAPSAMI DISI kayitlar yayimda kendi basligiyla durur.
+    # Onceki davranista bu kayitlar "anomali" listesine dokulup gorunmez
+    # oluyordu; okur hem gerekceyi (deneyin kusuru mu, modelin siniri mi?)
+    # hem de basligin bu secime duyarliligini goremiyordu.
+    scope_withheld = result["statistics"].get(
+        "out_of_scope_withheld_cells") or []
+    if scope_withheld:
+        lines += ["", "## Cells withheld (entirely outside the model scope)",
+                  "",
+                  "Every scored run for these cells is outside HRMA's own "
+                  "declared modelling scope, so no cell statistic is "
+                  "published. These rows are 'measured and withheld', NOT "
+                  "'not measured': the individual errors are given below.", "",
+                  "| Motor | Quantity | Layer | N | Error % range | Tests |",
+                  "|---|---|---|---|---|---|"]
+        for cell in scope_withheld:
+            lines.append(
+                f"| {cell['motor_type']} | {cell['quantity']} "
+                f"| {cell['confidence_band']} | {cell['n']} "
+                f"| {_fmt_pct(cell['error_pct_min'])} .. "
+                f"{_fmt_pct(cell['error_pct_max'])} "
+                f"| {', '.join(cell['test_ids'])} |")
+
+    out_of_scope = result["statistics"].get("out_of_scope_entries") or []
+    if out_of_scope:
+        lines += ["", "## Out-of-model-scope records (excluded from "
+                  "statistics)", "",
+                  "These records are excluded because HRMA's own model does "
+                  "not cover the configuration, NOT because the experiment "
+                  "is suspect. Excluding them removes the cases the model "
+                  "struggles with, so the headline's sensitivity to that "
+                  "choice is published with each affected cell "
+                  "(`n_out_of_scope` and the 'incl. out-of-scope' row).", "",
+                  "| Test | Quantity | Error % | Also anomaly | Scope note |",
+                  "|---|---|---|---|---|"]
+        for entry in out_of_scope:
+            lines.append(
+                f"| {entry['test_id']} | {entry['quantity']} "
+                f"| {_fmt_pct(entry['error_pct'])} "
+                f"| {'yes' if entry.get('also_anomaly_flagged') else 'no'} "
+                f"| {entry.get('model_scope_note') or '-'} |")
+
     anomalies = result["statistics"]["anomaly_entries"]
     if anomalies:
         lines += ["", "## Anomaly-flagged records (excluded from statistics)",
-                  "", "| Test | Quantity | Error % | Note |", "|---|---|---|---|"]
+                  "",
+                  "Data-quality exclusions: the EXPERIMENT is suspect "
+                  "(nozzle erosion, blocked pressure line, cracked grain, "
+                  "an inconsistency inside the source). Model-scope "
+                  "exclusions are reported separately above.", "",
+                  "| Test | Quantity | Error % | Note |", "|---|---|---|---|"]
         for entry in anomalies:
             lines.append(
                 f"| {entry['test_id']} | {entry['quantity']} "

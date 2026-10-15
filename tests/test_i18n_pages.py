@@ -41,6 +41,7 @@ CORE_JS = REPO_ROOT / 'hrma' / 'static' / 'js' / 'i18n.js'
 PAGES = {
     'solid.html': 'solid.',
     'liquid.html': 'liq.',
+    # 'simple.html': 'simple.', 'uzaytek.html': 'uzt.' (ÖH D24 / OH-Z1-02) emekli — sayfa sökümü: Berke 23 Eyl, dalga36/sokum
 }
 
 HAS_LETTER = re.compile(r'[A-Za-z]')
@@ -77,9 +78,27 @@ def blank(match):
 
 
 def mask_html_noise(text):
-    """HTML yorumlarını ve <style> bloklarını maskeler."""
+    """HTML yorumlarını, Jinja yorumlarını ve <style> bloklarını maskeler.
+
+    ÖH D24 / OH-Z1-02 (2026-09-05) — GEVŞETME DEĞİL, YANLIŞ POZİTİF ONARIMI:
+    ``{# ... #}`` Jinja yorumu şablon derlenirken SİLİNİR, tarayıcıya hiç
+    ulaşmaz; dolayısıyla "çevrilmemiş görünür metin" olamaz. Ölçüldü
+    (88a29d3 taban ağacı): ``liquid.html:573``teki tek Jinja yorumu bu
+    testi kırmızı tutuyordu ve orada işaretlenecek bir kullanıcı metni
+    yok — ``data-i18n`` konulabilecek bir düğüm bile yok. Maske yalnız bu
+    sözdizimini kaldırır; gerçek metin kapsamı daralmaz (bkz.
+    :func:`test_jinja_maskesi_gercek_metni_gizlemiyor`).
+    """
     text = re.sub(r'<!--.*?-->', blank, text, flags=re.S)
+    text = re.sub(r'\{#.*?#\}', blank, text, flags=re.S)
     return re.sub(r'<style\b[^>]*>.*?</style>', blank, text, flags=re.S | re.I)
+
+
+def test_jinja_maskesi_gercek_metni_gizlemiyor():
+    """Maske Jinja yorumunu siler, düz metni SİLMEZ."""
+    assert 'Thrust' in mask_html_noise('<h2>Thrust</h2>')
+    assert 'gizli' not in mask_html_noise('{# gizli #}')
+    assert 'Thrust' in mask_html_noise('{# not #}<h2>Thrust</h2>')
 
 
 def inline_scripts(text):
@@ -215,6 +234,11 @@ def pages():
 def template_keys(html):
     """Şablonda geçen data-i18n* ve T()/TF() anahtarları."""
     keys = set(re.findall(r'data-i18n(?:-title|-placeholder)?="([^"]+)"', html))
+    # ÖH D18 fix-11: şablon içi <script> bloklarındaki I18N.t('anahtar', ...)
+    # çağrıları da kullanımdır (liquid.html:7308 burn_time_placeholder_derived —
+    # D17 arayuz P12bB1-07 alanı devre dışı bırakıp yer tutucuyu buradan okur);
+    # tarayıcı bunu görmediği için canlı anahtar 'kullanılmıyor' sayılıyordu.
+    keys |= set(re.findall(r"I18N\.t\(\s*'([^']+)'", html))
     keys |= set(re.findall(r"\bTF?\('([^']+)'", html))
     return keys
 
@@ -378,13 +402,52 @@ def test_turkish_values_use_turkish_letters(dict_tr):
         'ASCII\'ye kaçış şüphesi.' % (ratio * 100))
 
 
-def fold(text):
-    """Karşılaştırma için küçült.
+# ---------------------------------------------------------------------------
+# Küçültme (fold) — DİLE GÖRE AYRI (ÖH FAZ A / A4, defter P13S1-01)
+# ---------------------------------------------------------------------------
+# ESKİ HÂLİ tek bir fonksiyondu ve iki tarafta da `str.lower()` kullanıyordu:
+#
+#     def fold(text):
+#         return text.lower().replace('̇', '')
+#
+# Python'un `lower()`ı İngilizce kurallarını uygular: 'I' -> 'i'. Türkçede
+# 'I'nın küçüğü 'ı', 'İ'nin küçüğü 'i'dir. Sonuç iki yönde birden bozuktu
+# (P13/S1-savci §2.5, ölçüldü):
+#
+#   FAIL-OPEN      'ITKI' (yani 'İTKİ'nin BOZUK yazımı) -> 'itki' -> GEÇER
+#   YANLIŞ KIRMIZI 'ODA BASINC'      -> 'oda basinc'      ('basınc' beklenir)
+#   YANLIŞ KIRMIZI 'EMNİYET KATSAYI' -> 'emniyet katsayi' ('katsayı' beklenir)
+#   YANLIŞ KIRMIZI 'CİDAR KALINLIĞ'  -> 'cidar kalinliğ'  ('kalınlığ' beklenir)
+#
+# ÖNEMLİ ÖLÇÜM (bu partide, 27 Ağustos 2026): Türkçe küçültmeyi İKİ TARAFA
+# birden uygulamak yeni bir kusur doğuruyor — İngilizce sözlükte
+# 'Specific Impulse' -> 'specıfıc ımpulse' olur ve 'specific impulse'
+# teriminin eşleşme sayısı 3'ten 0'a düşer, yani terim SESSİZCE kapsam
+# dışına çıkar (`assert hits` kırmızı verir). Bu yüzden küçültme dile göre
+# ayrıldı: İngilizce değer İngilizce, Türkçe değer Türkçe küçültülür.
+# Dokuz terimlik hüküm sınavının ölçülen sonucu (hits sayıları):
+#   bugün      -> 6/8/2/27/3/3/10/22/4, 0 yanlış
+#   TR-her yer -> 6/8/2/27/3/**0**/10/22/4   <- specific impulse kaybolur
+#   AYRIK      -> 6/8/2/27/3/3/10/22/4, 0 yanlış   <- seçilen
 
-    Python'da 'İ'.lower() 'i' + birleşen nokta (U+0307) üretir; bu nokta
-    silinmezse 'İtki' metni 'itki' aramasıyla eşleşmez.
+def fold_en(text):
+    """İngilizce değer için küçültme (Python'un varsayılan kuralı doğru)."""
+    return text.casefold().replace('̇', '')
+
+
+def fold_tr(text):
+    """Türkçe değer için küçültme: 'I' -> 'ı', 'İ' -> 'i'.
+
+    Birleşen nokta (U+0307) silme adımı KORUNUR: 'İ'nin normalleşmemiş
+    biçimi ('i' + U+0307) sözlükte geçerse yine eşleşsin.
     """
-    return text.lower().replace('̇', '')
+    return (text.replace('İ', 'i').replace('I', 'ı')
+                .lower().replace('̇', ''))
+
+
+#: Geriye dönük ad. Türkçe küçültmeye bağlıdır: bu dosyada `fold` adıyla
+#: yapılan her karşılaştırma TÜRKÇE metin üstündedir.
+fold = fold_tr
 
 
 TERMS = {
@@ -402,14 +465,94 @@ TERMS = {
 
 @pytest.mark.parametrize('english,turkish', sorted(TERMS.items()))
 def test_engineering_terms_are_consistent(dict_en, dict_tr, english, turkish):
-    """Yerleşik Türkçe karşılığı olan terimler her yerde aynı çevrilir."""
-    hits = [k for k, v in dict_en.items() if fold(v).startswith(english)]
+    """Yerleşik Türkçe karşılığı olan terimler her yerde aynı çevrilir.
+
+    İki taraf AYRI küçültülür: İngilizce değer `fold_en`, Türkçe değer
+    `fold_tr` ile (gerekçe ve ölçüm için yukarıdaki blok — P13S1-01).
+    """
+    hits = [k for k, v in dict_en.items() if fold_en(v).startswith(english)]
     assert hits, 'Sözlükte "%s" ile başlayan değer yok' % english
-    wrong = [k for k in hits if turkish not in fold(dict_tr[k])]
+    wrong = [k for k in hits if turkish not in fold_tr(dict_tr[k])]
     assert not wrong, (
         '"%s" için beklenen karşılık "%s" değil:\n  %s'
         % (english, turkish,
            '\n  '.join('%s = %r' % (k, dict_tr[k]) for k in wrong[:10])))
+
+
+# ---------------------------------------------------------------------------
+# A4 — küçültmenin KENDİSİNİ kilitleyen bekçiler (P13S1-01)
+# ---------------------------------------------------------------------------
+# Yukarıdaki terim bekçisi bugün canlı sözlüklerde YEŞİL: hiçbir değer o üç
+# terimi BÜYÜK HARF yazmıyor, dolayısıyla kusur oradan görünmüyordu. Savcı
+# kusuru sentetik vakalarla ölçtü; o dört vaka burada TEST olarak kilitlenir.
+# Bu bekçiler olmadan `fold_tr` sessizce `str.lower()`a geri döndürülebilir
+# ve terim kapsamı genişletildiğinde 9 terimin 3'ünde yanlış kırmızı doğar
+# (K2 sıra kısıtının sayısal tabanı).
+
+#: (ekranda görünen metin, terim, yakalanmalı mı) — savcının ölçtüğü dört vaka.
+FOLD_VAKALARI = (
+    ('ITKI', 'itki', True,
+     "'İTKİ'nin ASCII'ye bozulmuş yazımı: bekçi bunu YAKALAMALI "
+     '(eski fold FAIL-OPEN veriyordu)'),
+    ('ODA BASINC', 'oda basınc', False,
+     'doğru Türkçe yazım: yanlış kırmızı VERİLMEMELİ'),
+    ('EMNİYET KATSAYI', 'emniyet katsayı', False,
+     'doğru Türkçe yazım: yanlış kırmızı VERİLMEMELİ'),
+    ('CİDAR KALINLIĞ', 'cidar kalınlığ', False,
+     'doğru Türkçe yazım: yanlış kırmızı VERİLMEMELİ'),
+)
+
+
+@pytest.mark.parametrize('ekran,terim,yakalanmali,gerekce', FOLD_VAKALARI,
+                         ids=[v[0] for v in FOLD_VAKALARI])
+def test_fold_tr_savci_vakalari(ekran, terim, yakalanmali, gerekce):
+    """P13S1-01'in dört ölçülmüş vakası — iki yönde birden."""
+    eslesti = terim in fold_tr(ekran)
+    if yakalanmali:
+        assert not eslesti, (
+            f'{ekran!r} -> {fold_tr(ekran)!r}: terim {terim!r} EŞLEŞTİ, yani '
+            f'bekçi bozuk yazımı geçiriyor. {gerekce}')
+    else:
+        assert eslesti, (
+            f'{ekran!r} -> {fold_tr(ekran)!r}: terim {terim!r} EŞLEŞMEDİ, '
+            f'yani bekçi doğru yazımı suçluyor. {gerekce}')
+
+
+@pytest.mark.parametrize('buyuk,kucuk', [
+    ('I', 'ı'), ('İ', 'i'), ('IŞIK', 'ışık'), ('İSTANBUL', 'istanbul'),
+    ('ÇĞÖŞÜ', 'çğöşü'), ('ISPARTA', 'ısparta'),
+])
+def test_fold_tr_turkce_kuraliyla_kucultuyor(buyuk, kucuk):
+    assert fold_tr(buyuk) == kucuk, (
+        f'Türkçe küçültme bozuk: {buyuk!r} -> {fold_tr(buyuk)!r} '
+        f'(beklenen {kucuk!r}). `str.lower()`a geri dönülmüş olabilir.')
+
+
+def test_fold_en_ingilizce_kuraliyla_kucultuyor():
+    """EN tarafı Türkçe küçültülürse terim SESSİZCE kapsam dışına düşer.
+
+    Ölçüldü: 'Specific Impulse' Türkçe küçültmeyle 'specıfıc ımpulse' olur,
+    'specific impulse' teriminin eşleşmesi 3'ten 0'a iner.
+    """
+    assert fold_en('Specific Impulse') == 'specific impulse'
+    assert fold_en('Specific Impulse').startswith('specific impulse')
+    assert not fold_tr('Specific Impulse').startswith('specific impulse'), (
+        'fold_tr İngilizce metni bozmuyor görünüyor — bu testin varsayımı '
+        'çürümüş olabilir; ayrık küçültmenin gerekçesini yeniden ölçün')
+
+
+def test_dokuz_terimin_hicbiri_kapsam_disina_dusmuyor(dict_en):
+    """Hüküm sınavı: her terimin EN tarafında en az bir eşleşmesi kalmalı.
+
+    `assert hits` her terim için ayrı testte de var; burada TOPLU ölçülür ki
+    küçültme değişikliği bir terimi sessizce boşaltırsa sebep ADIYLA görünsün.
+    """
+    bos = [t for t in sorted(TERMS)
+           if not any(fold_en(v).startswith(t) for v in dict_en.values())]
+    assert not bos, (
+        f'{bos} terimlerinin İngilizce sözlükte eşleşmesi KALMADI — '
+        'küçültme değişikliği kapsamı daralttı (ölçülen taban: dokuz terimin '
+        'dokuzu da eşleşiyor; hits = 6/8/2/27/3/3/10/22/4)')
 
 
 # Yerleşik Türkçe karşılığı OLMAYAN teknik kısaltmalar: olduğu gibi kalmalı.

@@ -69,6 +69,56 @@ def make_regen(**overrides):
     return RegenCooling(**kwargs)
 
 
+def make_regen_high_expansion(**overrides):
+    """P4B2-11'in ölçüm devresi: ε=25, RP-1/bakır, 100 kanal.
+
+    Yüksek genişleme oranında konverjan bölümün EKSENEL payı çok küçüktür
+    (z_throat/z_exit ≈ 0.03), bu yüzden istasyonları uzunlukla dağıtan
+    ızgara konverjanı bir-iki segmente sıkıştırır. Kırpma sınırlarının
+    (20/50) SONUCUNU ölçen bekçiler bu devreyi kullanır.
+    """
+    kwargs = dict(
+        chamber_pressure=70e5,
+        chamber_temperature=3500.0,
+        gamma=1.2,
+        molecular_weight=22.0,
+        throat_diameter=0.10,
+        expansion_ratio=25.0,
+        coolant='rp1',
+        coolant_mdot=8.0,
+        coolant_inlet_temp=300.0,
+        coolant_inlet_pressure=120e5,
+        n_channels=100,
+        channel_width=2.0e-3,
+        channel_height=3.0e-3,
+        wall_thickness=1.0e-3,
+        wall_material='copper',
+        n_stations=50,
+        coolant_props_source='table',
+    )
+    kwargs.update(overrides)
+    return RegenCooling(**kwargs)
+
+
+def independent_wetted_integral(res):
+    """Yayımlanan üç diziden BAĞIMSIZ ısı entegrali (trapez kuadratür).
+
+    Kodun marş şemasını (birinci mertebe yukarı-akım) ve istasyon sırasını
+    YENİDEN UYGULAMAZ: yalnız yayımlanan ``q_MW_m2``, ``x_mm`` ve ``r_mm``
+    dizilerini okur ve ıslak yüzey üzerinde trapez kuralıyla entegre eder.
+    Bu, ``test_energy_balance_surface_integral``in şema-özdeşliği kilidinden
+    farklı bir ölçüm eksenidir (ÖH defter P4B2-11).
+    """
+    x_m = np.asarray(res['x_mm'], dtype=float) / 1e3
+    r_m = np.asarray(res['r_mm'], dtype=float) / 1e3
+    q = np.asarray(res['q_MW_m2'], dtype=float) * 1e6
+    ds = np.hypot(np.diff(x_m), np.diff(r_m))
+    r_mean = 0.5 * (r_m[:-1] + r_m[1:])
+    dA = 2.0 * math.pi * r_mean * ds
+    q_mean = 0.5 * (q[:-1] + q[1:])
+    return float(np.sum(q_mean * dA))
+
+
 # ======================================================================
 # 1) Modül-düzeyi yardımcılar — analitik el hesabı çapaları
 # ======================================================================
@@ -157,6 +207,14 @@ class TestCoolantProperties:
         assert p['density'] == pytest.approx(997.0, abs=1.0)
         assert p['cp'] == pytest.approx(4179.0, abs=1.0)
         assert p['conductivity'] == pytest.approx(0.613, abs=1e-3)
+        # ÖH D19 · P13B3-05 — BANT GEREKÇESİ (ölçülen, D19 taban 60cd341):
+        # bugün fark = 0 (bit-özdeş), yani ±1e-5'lik bant bir kez bile
+        # sınanmadı. Bant yine de KALIYOR ve gerekçesi şudur: sağ taraf
+        # ürünün kopyası değil, Incropera Tablo A.6'nın 300 K satırıdır.
+        # Tablo daha hassas bir kaynağa güncellenirse (ör. 0,8538e-3)
+        # KİMLİK denetimi doğru bir iyileştirmeyi kırardı; ±1e-5 = referans
+        # tablosunun kendi yuvarlama basamağıdır (%1,2). Bandı daraltmak
+        # burada kusuru değil kaynağı kilitler.
         assert p['viscosity'] == pytest.approx(0.855e-3, abs=1e-5)
         # Pr = cp*mu/k ~ 5.83 (Incropera A.6)
         assert p['prandtl'] == pytest.approx(4179.0 * 0.855e-3 / 0.613, rel=1e-9)
@@ -260,10 +318,124 @@ class TestStationGrid:
             assert len(res[k]) == n, k
 
     def test_n_stations_clamped_low(self):
+        # NOT (ÖH FAZ B-4/P2): bu bekçi yalnız KIRPMA SINIRINI ölçer,
+        # kırpmanın SONUCUNU değil. Kırpılmış ızgaranın yayımladığı toplamın
+        # ızgaradan bağımsız olup olmadığı kardeş bekçidedir:
+        # ``test_station_clamps_deliver_a_grid_converged_total`` (P4B2-11).
         assert make_regen(n_stations=5).solve()['n_stations'] == 20
 
     def test_n_stations_clamped_high(self):
         assert make_regen(n_stations=999).solve()['n_stations'] == 50
+
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B2-11 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH D15 termo-ucus a3 (06a99d4) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/regen_cooling.py:227
+    # REGEN_MARCH_MAX_PASSES / :228 REGEN_MARCH_TOL; :1421 segment
+    # ısısı trapez (ikinci mertebe), marş sabit nokta yinelemesiyle
+    # kapatılıyor
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P4B2-11 —
+    # istasyonlar UZUNLUKLA dağıtıldığı için
+    # (regen_cooling.py:956-964 frac_conv = z_throat/z_exit) ε=25
+    # lülede konverjan bölüm tek segmente sıkışıyor (ölçülen
+    # throat_index=1, n=20/30/40) ve birinci mertebe yukarı-akım
+    # entegrali (:1283-1290) ızgaraya bağımlı bir toplam üretiyor:
+    # ölçülen Q(20)=4.429.234 W ⟷ Q(50)=4.545.512 W (%2,56 salınım).
+    # Konverjan alanın %2,6'sı ama ısının %9,2'si. Onarım gelince
+    # bu im KALKAR.
+    def test_station_clamps_deliver_a_grid_converged_total(self):
+        """Kırpma sınırlarının SONUCU: yayımlanan toplam ızgaradan bağımsız.
+
+        ``n_stations`` kırpması (20 ⟷ 50) bir uygulama ayrıntısıdır;
+        kullanıcıya yayımlanan ``total_heat_W`` ise fiziksel bir büyüklüktür.
+        Aynı devre, yalnız istasyon sayısı değişerek, iki farklı ısı yükü
+        veremez. İkinci iddia konverjan bölümün gerçekten ÇÖZÜLDÜĞÜNÜ ölçer:
+        tek segment, birinci mertebe şemada konverjan payını boğaz akısıyla
+        doldurur (raporda +%22,4 fazla sayım).
+        """
+        az = make_regen_high_expansion(n_stations=20).solve()
+        cok = make_regen_high_expansion(n_stations=50).solve()
+
+        assert az['throat_index'] >= 2, (
+            'konverjan bölüm tek segmentte kalıyor '
+            f"(throat_index={az['throat_index']}, n={az['n_stations']}): "
+            'birinci mertebe yukarı-akım entegrali o segmentin tamamını '
+            'boğaz akısıyla dolduruyor')
+
+        q_az = az['summary']['total_heat_W']
+        q_cok = cok['summary']['total_heat_W']
+        assert q_az == pytest.approx(q_cok, rel=1e-2), (
+            f'aynı devre, iki ızgara: Q(20)={q_az:.1f} W ⟷ '
+            f'Q(50)={q_cok:.1f} W (sapma %{100.0 * abs(q_az / q_cok - 1):.2f})')
+
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B2-01 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH D15 termo-ucus a3 (06a99d4) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/regen_cooling.py:1104-1108
+    # kamara gövdesi konturun başına ekleniyor; :1168
+    # _barrel_length_mm (tek kaynak: motor_data['chamber_length']);
+    # :1164 chamber_barrel_length_mm beyanı
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P4B2-01 —
+    # _build_stations (regen_cooling.py:933-975) ızgarayı YALNIZ
+    # sample_nozzle_inner_contour üstünde kuruyor; o konturun z=0'ı
+    # KAMARA ÇIKIŞIDIR (nozzle_design.py:1062), yani silindirik
+    # kamara gövdesi ceket modelinde YOK ve hiçbir girdiyle
+    # eklenemiyor (md_geo kamara BOYUNU taşımıyor). Ölçülen:
+    # chamber_length 0,10 m ⟷ 0,40 m ile total_heat_W BİT BİREBİR
+    # AYNI (126.913,760323 W) ve ızgara açıklığı iki durumda da
+    # 94,89 mm. Rapor ölçümü: gövde eklenirse ısı +%57,8..+89,5,
+    # T_out +142,6..+220,6 K, ceket ΔP +%45..56 — üç sayı da AŞAĞI
+    # yönde yanlış. Onarım gelince bu im KALKAR.
+    def test_jacket_grid_sees_the_cylindrical_chamber_barrel(self):
+        """Ceket, ısıttığı yüzeyin tamamını görmeli (kamara gövdesi dahil).
+
+        Modülün kendi künyesi 'thrust chambers and nozzles' (:3-5) ve marş
+        künyesi 'coolant ... flows toward the throat and chamber' (:57-65)
+        diyor; ``liquid_rocket_engine.py:3832-3836`` da 'the full nozzle is
+        inside the jacket' cümlesini üretiyor. İddia bu künyelerin
+        DAVRANIŞTAKİ karşılığıdır — hangi L* modelinin doğru olduğuna
+        hükmetmez, yalnız gövdenin ceket sözleşmesinde GÖRÜNMESİ gerektiğini
+        söyler.
+        """
+        md = dict(chamber_pressure=20.0, chamber_temperature=3000.0,
+                  gamma=1.2, molecular_weight=24.0, throat_diameter=0.03,
+                  expansion_ratio=6.0, chamber_diameter=0.045)
+        ortak = dict(coolant='water', coolant_mdot=6.0,
+                     coolant_inlet_temp=300.0, coolant_inlet_pressure=40e5,
+                     n_channels=60, channel_width=1.5e-3,
+                     channel_height=3.0e-3, wall_thickness=1.0e-3,
+                     wall_material='cucrzr', n_stations=40,
+                     coolant_props_source='table')
+        kisa = RegenCooling.from_motor_data(
+            dict(md, chamber_length=0.10), **ortak).solve()
+        uzun = RegenCooling.from_motor_data(
+            dict(md, chamber_length=0.40), **ortak).solve()
+
+        span_mm = float(uzun['x_mm'][-1]) - float(uzun['x_mm'][0])
+        assert span_mm > 400.0, (
+            f'ceket ızgarası {span_mm:.2f} mm eksenel aralık kaplıyor; '
+            'yalnız 400 mm\'lik silindirik gövde bile bundan uzun — ızgara '
+            'kamara çıkışında başlıyor')
+
+        q_kisa = kisa['summary']['total_heat_W']
+        q_uzun = uzun['summary']['total_heat_W']
+        assert q_uzun > 1.05 * q_kisa, (
+            f'kamara boyu 0,10 m → 0,40 m olurken ısı yükü {q_kisa:.6f} W → '
+            f'{q_uzun:.6f} W: ceket gövdeyi görmüyor')
 
     def test_x_monotonic_increasing(self):
         x = np.array(make_regen().solve()['x_mm'])
@@ -301,8 +473,45 @@ class TestEnergyAndContinuity:
         assert abs(q_total - mcpdt) / q_total < 1e-3
 
     def test_energy_balance_surface_integral(self):
-        # total_heat_W'yi q(x) ve ıslak alandan BAĞIMSIZ yeniden kur.
-        # Varsayılan counterflow marşı: sıra [n-1,...,0], upwind q.
+        """ŞEMA ÖZDEŞLİĞİ kilidi — BAĞIMSIZ bir kuadratür DEĞİLDİR.
+
+        DÜZELTME (ÖH FAZ B-4/P2, defter P4B2-11): bu bekçinin eski yorumu
+        'BAĞIMSIZ yeniden kur' diyordu, oysa aşağıdaki döngü kodun KENDİ
+        marş şemasını, KENDİ istasyon sırasını ve KENDİ alan elemanını
+        birebir yeniden uygular — bu yüzden rel=1e-9 ile tutar ve şema
+        kaynaklı hiçbir hatayı göremez. Bekçinin gerçek değeri şudur ve
+        yalnız bu kadardır: yayımlanan ``total_heat_W``, yayımlanan
+        ``q_MW_m2``/``x_mm``/``r_mm`` dizileriyle AYNI şemadan çıkmıştır
+        (diziler ile toplam arasında sessiz bir kopukluk yok).
+
+        ÇEVİRİ (ÖH D15 / bekci-cevirisi, defter OH-Z5-15). PK5 paketi
+        P4B2-11'i onardı: segment ısısı artık BİRİNCİ MERTEBE YUKARI-AKIM
+        değil, iki uç istasyonun akı ORTALAMASIDIR (trapez) ve marş bir
+        sabit nokta yinelemesiyle kapatılır
+        (``hrma/analysis/regen_cooling.py`` marş bloğu; sabitler
+        ``REGEN_MARCH_TOL`` / ``REGEN_MARCH_MAX_PASSES``). Bu bekçi eski
+        şemayı yeniden uyguladığı için kırmızıya döndü; PK5 raporu
+        kırılmayı BEYAN ETTİ ve testin kendisine dokunmadı. Burada bekçi
+        onarımdan SONRAKİ şemaya çevriliyor — iddia aynı kalıyor, yalnız
+        hangi şemanın özdeşliğinin kilitlendiği güncelleniyor.
+
+        ÖLÇÜLDÜ (bu depo, ÇEVİRİDEN ÖNCE — betik:
+        ``docs/scofield/raw/OH/D15/bekci-cevirisi/a1/olcum_regen.py``):
+
+        ============  ==================  ==================
+        devre         eski yukarı-akım    yeni trapez marş
+        ============  ==================  ==================
+        taban         %1,0126 sapma       0,0 (bit-aynı)
+        eps=25        %1,9549 sapma       1,57e-13
+        ============  ==================  ==================
+
+        Yani eski şema artık yayımlanan toplamı TUTMUYOR (kilit oradaydı),
+        yeni şema makine hassasiyetinde tutuyor.
+
+        Şemadan bağımsız ölçüm kardeş bekçidedir:
+        ``test_energy_balance_independent_quadrature`` (P4B2-11).
+        """
+        # Varsayılan counterflow marşı: sıra [n-1,...,0].
         r = make_regen()
         res = r.solve()
         n = res['n_stations']
@@ -311,12 +520,65 @@ class TestEnergyAndContinuity:
         q = np.array(res['q_MW_m2']) * 1e6
         order = list(range(n - 1, -1, -1))   # counterflow
         Q = 0.0
+        Q_upwind = 0.0
         for k in range(len(order) - 1):
             i, j = order[k], order[k + 1]
             ds = math.hypot(x_m[j] - x_m[i], r_m[j] - r_m[i])
-            r_mean = 0.5 * (r_m[i] + r_m[j])
-            Q += q[i] * 2.0 * math.pi * r_mean * ds
-        assert Q == pytest.approx(res['summary']['total_heat_W'], rel=1e-9)
+            dA = 2.0 * math.pi * 0.5 * (r_m[i] + r_m[j]) * ds
+            Q += 0.5 * (q[i] + q[j]) * dA      # ürünün ŞU ANKİ şeması
+            Q_upwind += q[i] * dA              # ONARIMDAN ÖNCEKİ şema
+        pub = res['summary']['total_heat_W']
+        assert Q == pytest.approx(pub, rel=1e-9), (
+            f'yayımlanan toplam {pub:.6f} W, yayımlanan dizilerin marş '
+            f'trapezi {Q:.6f} W — diziler ile toplam AYRI şemadan çıkıyor')
+        # Onarımın gerçekten yürürlükte olduğunun kilidi: birinci mertebe
+        # yukarı-akım toplamı artık yayımlanan toplamı VERMEZ. Bu ayak
+        # olmadan şema sessizce geri alınabilirdi (ölçülen sapma %1,0126).
+        assert abs(Q_upwind / pub - 1.0) > 1.0e-3, (
+            f'yukarı-akım toplamı {Q_upwind:.6f} W yayımlanan toplamla '
+            f'({pub:.6f} W) ayırt edilemiyor — P4B2-11 onarımı geri '
+            'alınmış olabilir')
+
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B2-11 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH D15 termo-ucus a3 (06a99d4) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/regen_cooling.py:1421 trapez
+    # marş; kardeş bekçi test_energy_balance_surface_integral zaten
+    # yeni şemaya çevrilmişti ve eski yukarı-akım toplamının AYIRT
+    # EDİLEBİLİR olduğunu kilitliyor
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P4B2-11 — ısı
+    # entegrali birinci mertebe yukarı-akım
+    # (regen_cooling.py:1283-1290: dQ = q·dA, q YUKARI-AKIM
+    # istasyonundan). Yayımlanan dizinin bağımsız trapez entegrali
+    # ile yayımlanan total_heat_W çelişiyor: ölçülen taban devrede
+    # 127.393,47 W ⟷ 126.913,76 W (%0,378), ε=25 devrede 4.618.774,0
+    # W ⟷ 4.545.511,6 W (%1,61). Onarım gelince bu im KALKAR.
+    def test_energy_balance_independent_quadrature(self):
+        """Yayımlanan dizi ile yayımlanan toplam aynı sayıyı vermeli.
+
+        P15 reçetesi: aynı fiziksel büyüklük iki kanaldan yayımlanıyorsa
+        (istasyon dizisi ⟷ özet toplamı) iki kanal ayrışamaz. Bu bekçi
+        kodun marş şemasını yeniden uygulamaz; yalnız yayımlanan üç diziyi
+        trapez kuralıyla entegre eder (``independent_wetted_integral``).
+        Hangi kanalın doğru olduğuna HÜKMETMEZ — yalnız ayrıştıklarını
+        ölçer.
+        """
+        for etiket, kur in (('taban', make_regen),
+                            ('eps=25', make_regen_high_expansion)):
+            res = kur().solve()
+            q_pub = res['summary']['total_heat_W']
+            q_trapez = independent_wetted_integral(res)
+            assert q_trapez == pytest.approx(q_pub, rel=1e-3), (
+                f'{etiket}: yayımlanan q(x) dizisinin trapez entegrali '
+                f'{q_trapez:.1f} W, yayımlanan total_heat_W {q_pub:.1f} W '
+                f'(sapma %{100.0 * abs(q_trapez / q_pub - 1):.3f})')
 
     def test_cp_mean_physical_for_water(self):
         # Enerji-dengesi cp_mean su için fiziksel bantta olmalı (~4180)
@@ -465,6 +727,16 @@ class TestWarnings:
 # 9) Çıktı sağlığı ve fizik işaretleri
 # ======================================================================
 class TestOutputSanity:
+    """Çıktı sağlığı.
+
+    NOT (ÖH FAZ B-4/P2, defter P4B2-03): bu sınıf uzun süre yalnız
+    ``q>0``, ``v>0`` ve ``T_hot>=T_cold`` sıralamalarını sordu; yayımlanan
+    sıcaklıkların MUTLAK SICAKLIK olup olmadığını hiç sormadı. Marşta
+    (regen_cooling.py:1320-1328) ne ``dT``ye ne ``T``ye sınır olduğundan
+    ölçülen uçta 14 istasyon mutlak sıfırın altına iniyor. Aşağıdaki iki
+    bekçi o ekseni açar: biri sağlıklı devrede sözleşmeyi kurar, öteki
+    patolojik devrede bugünkü açığı kırmızı tutar.
+    """
 
     def test_positive_fluxes_and_velocities(self):
         res = make_regen().solve()
@@ -508,6 +780,84 @@ class TestOutputSanity:
         assert 'bartz' in note
         assert 'dittus' in note
         assert 'haaland' in note
+
+    # -- ÖH FAZ B-4/P2 · defter P4B2-03 -----------------------------------
+    def test_published_temperatures_are_absolute_temperatures(self):
+        """Yayımlanan HER sıcaklık mutlak sıfırın üstünde olmalı.
+
+        Sağlıklı devrede bugün doğru olan sözleşme burada YAZILI hâle
+        getirilir. Ölçüldü (ÖH FAZ B-4/P2): bu satırlardan önce depoda
+        yayımlanan bir regen sıcaklığının mutlak sıfırın üstünde olduğunu
+        SÖYLEYEN tek bir iddia yoktu — mevcut iddiaların tamamı ya SIRALAMA
+        (T_hot>=T_cold, T_cool<=T_hot<=T_aw) ya da yayımlanan alanlardan
+        yeniden kurulan ÖZDEŞLİK biçimindeydi; ikisi de bir işaret tabanı
+        kurmaz. Patolojik devredeki bugünkü açık kardeş bekçidedir:
+        ``test_marching_never_publishes_a_negative_absolute_temperature``.
+        """
+        res = make_regen().solve()
+        for anahtar in ('T_coolant_K', 'T_wall_hot_K', 'T_wall_cold_K',
+                        'T_recovery_K'):
+            kotu = [(i, t) for i, t in enumerate(res[anahtar]) if not t > 0.0]
+            assert not kotu, (
+                f'{anahtar}: mutlak sıfırın altında/sıfırda yayımlanan '
+                f'istasyonlar {kotu[:5]} (toplam {len(kotu)})')
+        s = res['summary']
+        for anahtar in ('coolant_exit_temp_K', 'max_wall_hot_K',
+                        'max_wall_cold_K'):
+            assert s[anahtar] > 0.0, f'summary.{anahtar} = {s[anahtar]}'
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B2-03 borcunu ``xfail(strict=True)`` ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu. Kusur
+    # ÖH Z5S / PK5 (ısı-soğutma kulvarı, commit bba33e4) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test GEÇİYOR
+    # ve strict im XPASS(strict) ile KIRMIZI veriyordu. İm kaldırıldı;
+    # iddia artık CANLI bekçidir — onarım geri alınırsa burası kırmızı
+    # verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/regen_cooling.py:1611 "ÖH Z5S / PK5
+    # (P4B2-03) — FİZİK KAPISI, FAIL-CLOSED."; :1622 "'MODEL OUT OF
+    # ENVELOPE' + NOT_MODELLED" deseni; :1628 "cannot be evaluated from
+    # a non-physical state".
+    def test_marching_never_publishes_a_negative_absolute_temperature(self):
+        """Fizik dışı sıcaklık ya üretilmez ya da ADIYLA bildirilir.
+
+        Kabul edilen üç davranıştan biri yeter (fail-closed politikası):
+          (a) marş fizik dışı duruma girince ``ValueError`` ile durur,
+          (b) yayımlanan hiçbir istasyon mutlak sıfırın altına inmez,
+          (c) uyarılardan biri fizik dışılığı ADIYLA söyler.
+        Bugün üçü de yok. Kardeş modülün doğru deseni depoda YAZILI:
+        ``thermal_protection`` zarf dışında sayı üretmek yerine
+        'MODEL OUT OF ENVELOPE' + NOT_MODELLED diyor.
+        """
+        r = RegenCooling(
+            chamber_pressure=70e5, chamber_temperature=3500.0, gamma=1.2,
+            molecular_weight=22.0, throat_diameter=0.10, expansion_ratio=25.0,
+            coolant='rp1', coolant_mdot=1e-9, coolant_inlet_temp=300.0,
+            coolant_inlet_pressure=100e5, n_channels=100,
+            channel_width=2.0e-3, channel_height=3.0e-3,
+            wall_thickness=1.0e-3, wall_material='copper', n_stations=40,
+            coolant_props_source='table')
+        try:
+            res = r.solve()
+        except ValueError:
+            return                      # (a) fail-closed: kabul
+
+        t = np.asarray(res['T_coolant_K'], dtype=float)
+        negatif = int(np.sum(t < 0.0))
+        if negatif == 0:
+            return                      # (b) fizik dışı sayı yayımlanmadı
+
+        adlandiran = [w for w in res['summary']['warnings']
+                      if any(s in w.lower() for s in
+                             ('negative', 'non-physical', 'nonphysical',
+                              'unphysical', 'not modelled', 'not_modelled',
+                              'out of envelope', 'invalid'))]
+        assert adlandiran, (                                       # (c)
+            f'{negatif} istasyon MUTLAK SIFIRIN ALTINDA '
+            f'(min {t.min():.1f} K, max {t.max():.1f} K) ve '
+            f"{len(res['summary']['warnings'])} uyarının hiçbiri bunu "
+            'adlandırmıyor')
 
 
 # ======================================================================
@@ -568,10 +918,61 @@ class TestPropertyTableEnvelope:
         assert s['property_table_clamped_stations'] > 0
         assert s['property_table_band_K'] == [290.0, 500.0]
         hits = [w for w in s['warnings'] if 'PROPERTY RANGE' in w]
-        assert len(hits) == 1
+        # DÜZELTME (ÖH FAZ B-4/P2, defter P4B2-03): eski hâli
+        # ``len(hits) == 1`` idi. Bu eşitlik bekçiyi ÜST sınıra da
+        # kilitliyordu: modül aynı duruma ikinci bir hüküm (ör. sıcaklığın
+        # model zarfının dışına çıktığını ADIYLA söyleyen uyarı) eklerse
+        # bekçi kırmızıya düşerdi — yani doğru yönde bir onarımı
+        # engelliyordu. Buradaki iddia "uyarı GELİYOR mu"dur; kaç tane
+        # geldiği bir sözleşme değildir.
+        assert len(hits) >= 1
         # Uyarı hangi bandın aşıldığını ve kaç istasyonu etkilediğini söylemeli
         assert '290-500 K' in hits[0]
         assert 'FROZEN' in hits[0]
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Aynı kalemin (P4B2-03) ikinci ayağı; kardeş ayağıyla birlikte
+    # ÖH Z5S / PK5 (bba33e4) tarafından ONARILDI ve im BAYATLADI:
+    # birleşik ağaçta test GEÇİYOR, strict im XPASS(strict) ile kırmızı
+    # veriyordu. İm kaldırıldı; iddia CANLI bekçidir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/regen_cooling.py:1715 "ÖH Z5S / PK5
+    # (P4B2-03) — MODEL ZARFI BEYANI."; :1740 f"MODEL OUT OF ENVELOPE:
+    # {self.coolant} bulk temperature ...".
+    def test_far_out_of_band_coolant_temperature_is_declared_out_of_envelope(self):
+        """Tavanın katlarına çıkan sıcaklık 'dondurulmuş özellik' değildir.
+
+        Bant kenarında donmuş özellikler bir DOĞRULUK sorunudur ve bugünkü
+        PROPERTY RANGE uyarısı onu dürüstçe bildirir. Tavanın 5 katına çıkan
+        bir 'soğutucu sıcaklığı' ise artık bir doğruluk sorunu değil, model
+        zarfının terk edilmesidir: RP-1 o sıcaklıkta sıvı değildir, cp/rho
+        tablosunun uzantısı diye bir şey yoktur. Depo bu ayrımın doğru
+        desenini başka modülde yazmıştır (``thermal_protection``:
+        'MODEL OUT OF ENVELOPE' + NOT_MODELLED + gerekçe). Bu bekçi o desenin
+        soğutucu tarafındaki karşılığını ister; hangi eşiğin doğru olduğuna
+        HÜKMETMEZ, yalnız 5× aşımın adlandırılmasını ister.
+        """
+        s = make_regen_high_expansion(
+            throat_diameter=0.06, coolant_mdot=0.01, n_channels=100,
+            channel_width=1.5e-3, n_stations=40).solve()['summary']
+        tavan = s['property_table_band_K'][1]
+        cikis = s['coolant_exit_temp_K']
+        if cikis is None:
+            return                      # sonuç geri çekildi: kabul
+        assert cikis > 2.0 * tavan, (
+            f'ön koşul: bu devre tavanı katlarca aşmalı (çıkış {cikis:.1f} K, '
+            f'tavan {tavan:.1f} K)')
+
+        hukum = [w for w in s['warnings']
+                 if any(k in w.lower() for k in
+                        ('out of envelope', 'not modelled', 'not_modelled',
+                         'unphysical', 'non-physical', 'invalid',
+                         'withheld'))]
+        assert hukum, (
+            f'soğutucu çıkışı {cikis:.1f} K = tablo tavanının '
+            f'{cikis / tavan:.1f} katı, ama {len(s["warnings"])} uyarının '
+            'hiçbiri sonucu model zarfının dışında saymıyor — yalnız '
+            'özelliklerin donduğu söyleniyor')
 
     def test_interp_table_exposes_band(self):
         p = rp1_properties(600.0)

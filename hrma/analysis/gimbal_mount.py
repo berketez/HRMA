@@ -79,6 +79,12 @@ ekstrapolasyon yerine açık beyan (ValueError ya da ``validity``) üretilir.
 import math
 from typing import Dict, List, Optional
 
+# ÖH D23 / P5B4-16: sayısal girdi kapıları TEK KAYNAKTAN.
+from hrma.analysis._input_guards import (reject_bool,
+                                         require_positive,
+                                         require_non_negative,
+                                         require_whole_number)
+
 __all__ = [
     'thrust_components',
     'resultant_gimbal_angle_deg',
@@ -183,43 +189,55 @@ NOT_MODELLED = {
 # ===========================================================================
 # Saf yardımcılar (analitik, tek tek test edilebilir)
 # ===========================================================================
-def _require_positive(value, name: str, unit: str = '') -> float:
-    """Pozitif ve sonlu olma şartı; değilse İngilizce ValueError."""
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f'{name} must be a positive finite number {unit}')
-    if not math.isfinite(v) or v <= 0.0:
-        raise ValueError(
-            f'{name} must be a positive finite number {unit}; got {value!r}')
-    return v
+#: ÖH D23 / P5B4-16: TEK KAYNAK. Bu ad üç analiz modülünde birebir
+#: kopyalanmıştı; tanım artık ``hrma/analysis/_input_guards.py``tadır ve
+#: ``bool``u reddeder (ölçüm ve gerekçe o modülün docstring'inde).
+_require_positive = require_positive
 
 
-def _require_non_negative(value, name: str, unit: str = '') -> float:
-    """Negatif olmama şartı; değilse İngilizce ValueError."""
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f'{name} must be a non-negative finite number {unit}')
-    if not math.isfinite(v) or v < 0.0:
-        raise ValueError(
-            f'{name} must be a non-negative finite number {unit}; '
-            f'got {value!r}')
-    return v
+#: ÖH D23 / P5B4-16: TEK KAYNAK (bkz. ``_require_positive``).
+_require_non_negative = require_non_negative
 
 
 def _check_gimbal_angle(angle_deg: float) -> float:
-    """Gimbal açısı geçerlilik kontrolü; sert aralık dışı ValueError."""
+    """Sapma açısının BÜYÜKLÜĞÜ [deg]; bant dışıysa ValueError.
+
+    --- ÖH D23 / P5B4-21: NEGATİF SAPMA AÇISI REDDEDİLMEZ ------------------
+    Eski kapı ham işaretli değeri banda sokuyordu (``a < lo`` ile ``lo = 0``),
+    yani her negatif açı HTTP 400 oluyordu. ÖLÇÜLDÜ (``once.json``
+    P5B4-21): ``gimbal_angle_deg = -6`` -> ValueError "outside the supported
+    validity range (0.0, 45.0)"; ``-10,5`` ve ``-46`` de aynı.
+
+    Oysa **aynı hata metninin kendi kaynak künyesi** donanımı ± ile
+    anlatıyor: "F-1 ~+-6 deg, SSME +-10.5 deg pitch, Merlin ~+-5 deg"
+    (bkz. :data:`GIMBAL_ANGLE_SOURCE`). Gimbal iki yöne de sapar; işaret
+    yalnız YÖNÜ seçer. Bu modülün yayımladığı yüklerin hepsi BÜYÜKLÜKTÜR
+    ve ±delta'da özdeştir: F_eksenel = F·cos(delta) çifttir, F_yan =
+    F·|sin(delta)|, halka momenti M = F·sin(delta)·h ve cıvata yükü
+    F_max = 4M/(nD) yalnız büyüklüğe bağlıdır. Kardeş fonksiyon
+    :func:`resultant_gimbal_angle_deg` bunu ZATEN böyle sayıyordu
+    (``_check_gimbal_angle(abs(...))``), yani depo kendi içinde
+    tutarsızdı.
+
+    Bant bundan böyle BÜYÜKLÜĞE uygulanır (|delta| <= 45 deg) ve dönen
+    değer büyüklüktür; işaretli girdi çağırana ``gimbal_angle_input_deg``
+    ile geri yankılanır (bkz. :func:`thrust_components`), böylece
+    gönderilen sayı kaybolmaz.
+    """
+    reject_bool(angle_deg, 'gimbal_angle_deg', '[deg]')
     a = float(angle_deg)
     if not math.isfinite(a):
         raise ValueError('gimbal_angle_deg must be finite [deg]')
+    buyukluk = abs(a)
     lo, hi = GIMBAL_ANGLE_VALID_DEG
-    if a < lo or a > hi:
+    if buyukluk < lo or buyukluk > hi:
         raise ValueError(
             f'gimbal_angle_deg {a:g} is outside the supported validity '
-            f'range {GIMBAL_ANGLE_VALID_DEG} deg (invalid range declared - '
-            'no silent extrapolation). ' + GIMBAL_ANGLE_SOURCE)
-    return a
+            f'range +-{hi:g} deg (the band applies to the DEFLECTION '
+            f'MAGNITUDE; the sign only selects the direction and every '
+            f'load reported here is symmetric in +-delta). Invalid range '
+            'declared - no silent extrapolation. ' + GIMBAL_ANGLE_SOURCE)
+    return buyukluk
 
 
 def thrust_components(thrust_N: float, gimbal_angle_deg: float) -> Dict:
@@ -229,9 +247,13 @@ def thrust_components(thrust_N: float, gimbal_angle_deg: float) -> Dict:
     rad = math.radians(a)
     axial = f * math.cos(rad)
     side = f * math.sin(rad)
+    # ÖH D23 / P5B4-21: işaretli girdi kaybolmaz. Alan yalnız işaret
+    # GERÇEKTEN eksiyse konur; pozitif çağrıda gövde bit-aynı kalır.
+    _isaretli = float(gimbal_angle_deg)
     return {
         'thrust_N': f,
         'gimbal_angle_deg': a,
+        **({'gimbal_angle_input_deg': _isaretli} if _isaretli < 0.0 else {}),
         'axial_N': float(axial),
         'side_N': float(side),
         'thrust_loss_N': float(f - axial),
@@ -241,7 +263,11 @@ def thrust_components(thrust_N: float, gimbal_angle_deg: float) -> Dict:
             'F_axial = F*cos(delta), F_side = F*sin(delta), loss = '
             'F*(1 - cos(delta)) (Sutton & Biblarz, "Rocket Propulsion '
             'Elements", 9th ed., Ch. 18). The thrust magnitude is assumed '
-            'unchanged by gimballing - nozzle flow is not re-solved.'),
+            'unchanged by gimballing - nozzle flow is not re-solved. '
+            'delta is the deflection MAGNITUDE: a negative gimbal_angle_deg '
+            'is accepted (real hardware deflects both ways) and its sign is '
+            'echoed in gimbal_angle_input_deg, but every load reported here '
+            'is symmetric in +-delta, so only the magnitude enters.'),
     }
 
 
@@ -254,10 +280,36 @@ def resultant_gimbal_angle_deg(pitch_deg: float, yaw_deg: float) -> float:
     açılarda sqrt(pitch^2 + yaw^2)'ye indirgenir. Dönme sırasının etkisi
     ikinci mertebedendir.
     """
-    p = math.radians(_check_gimbal_angle(abs(float(pitch_deg))))
-    y = math.radians(_check_gimbal_angle(abs(float(yaw_deg))))
+    p = math.radians(_check_gimbal_angle(pitch_deg))
+    y = math.radians(_check_gimbal_angle(yaw_deg))
     cos_theta = min(1.0, max(-1.0, math.cos(p) * math.cos(y)))
-    return math.degrees(math.acos(cos_theta))
+    bileske = math.degrees(math.acos(cos_theta))
+    # --- ÖH D23 / P5B4-22: BİLEŞKE DE SERT BANDA TABİDİR -------------------
+    # Eski kod yalnız eksenleri TEK TEK banda sokuyordu; bileşke banttan
+    # taşsa bile HTTP 200 ile yayımlanıyordu. ÖLÇÜLDÜ (``once.json``
+    # P5B4-22, sert bant (0,0 - 45,0) deg):
+    #     pitch = yaw = 45 deg -> resultant_angle_deg = 59,99999999999999
+    #                             ve uç HTTP 200
+    #     pitch = 40, yaw = 30 -> resultant_angle_deg = 48,439237
+    #     tek eksende 46 deg   -> HTTP 400 (ValueError)
+    # Yani aynı sapma tek eksenden istenince reddedilen, iki eksene
+    # bölünerek kabul ettiriliyordu. Üstelik ``liquid.html`` içindeki
+    # ``gimbal_range`` alanı max='45' ve panel iki eksenle çağırıyor, yani
+    # kapı üründen erişilebilirdi. Bant bir FİZİK sınırı değil ama modelin
+    # BEYAN ETTİĞİ geçerlilik sınırıdır; bileşke onu aşıyorsa hüküm
+    # üretilmez (fail-closed) — sayı uydurulmaz, kırpılmaz.
+    lo, hi = GIMBAL_ANGLE_VALID_DEG
+    if bileske > hi:
+        raise ValueError(
+            f'the two-axis resultant deflection {bileske:g} deg (pitch '
+            f'{float(pitch_deg):g} deg, yaw {float(yaw_deg):g} deg, '
+            f'cos(resultant) = cos(pitch)*cos(yaw)) is outside the '
+            f'supported validity range +-{hi:g} deg, even though each '
+            f'axis on its own is inside it. The same deflection requested '
+            f'on a single axis is rejected, so it is rejected here too '
+            f'(invalid range declared - no silent extrapolation). '
+            + GIMBAL_ANGLE_SOURCE)
+    return bileske
 
 
 def actuator_stroke(actuator_arm_m: float, gimbal_angle_deg: float) -> Dict:
@@ -267,18 +319,38 @@ def actuator_stroke(actuator_arm_m: float, gimbal_angle_deg: float) -> Dict:
     rad = math.radians(a)
     arc = r * rad
     chord = 2.0 * r * math.sin(rad / 2.0)
+    # --- ÖH D21 / P5B4-17: TAM STROK KİRİŞİ 2*kiriş DEĞİLDİR ---------------
+    # Eski satır ``stroke_full_travel_chord_m = 2 * chord = 4*r*sin(delta/2)``
+    # idi. Kiriş bir DOĞRU parçasının uzunluğudur; iki tek-yönlü kirişi uç
+    # uca eklemek kiriş vermez, kırık bir çizgi verir. +delta ile -delta
+    # konumları arasındaki gerçek kiriş 2*delta merkez açısını gerer:
+    #     kiris(2*delta) = 2*r*sin(delta) = 4*r*sin(delta/2)*cos(delta/2)
+    # yani eski sayı gerçeğin 1/cos(delta/2) katıydı ve DAİMA BÜYÜKTÜ.
+    # ÖLÇÜLDÜ (``once.json`` P5B4-17, r = 1 m):
+    #     delta =  6 deg -> 0,20934382 <-> gerçek 0,20905693  (+%0,137)
+    #     delta = 15 deg -> 0,52210477 <-> gerçek 0,51763809  (+%0,863)
+    #     delta = 45 deg -> 1,53073373 <-> gerçek 1,41421356  (+%8,239)
+    # Sapma tek yönlüydü (sayı daima yukarı kaçıyordu), yani '_basis'
+    # metnindeki "chord <= arc, so the pair BRACKETS the true stroke"
+    # iddiası tam strok çiftinde geçersizdi — ve panelde (liquid.html,
+    # 'Actuator Full Travel') görünen TEK aktüatör sayısı budur.
+    full_chord = 2.0 * r * math.sin(rad)
+    full_arc = 2.0 * arc
     return {
         'actuator_arm_m': r,
         'gimbal_angle_deg': a,
         'stroke_chord_m': float(chord),
         'stroke_arc_m': float(arc),
-        'stroke_full_travel_chord_m': float(2.0 * chord),
-        'stroke_full_travel_arc_m': float(2.0 * arc),
+        'stroke_full_travel_chord_m': float(full_chord),
+        'stroke_full_travel_arc_m': float(full_arc),
         '_basis': (
             'Attachment point on radius r_a about the pivot: arc length = '
             'r_a*delta, chord = 2*r_a*sin(delta/2); chord <= arc, so the '
-            'pair BRACKETS the true stroke. Full travel is the +delta to '
-            '-delta excursion (twice the one-sided value). The exact '
+            'pair BRACKETS the true stroke. FULL TRAVEL is the +delta to '
+            '-delta excursion, i.e. a central angle of 2*delta: its arc is '
+            '2*r_a*delta (twice the one-sided arc) but its chord is '
+            '2*r_a*sin(delta), NOT twice the one-sided chord - two chords '
+            'laid end to end form a broken line, not a chord. The exact '
             'stroke depends on where the actuator is anchored on the '
             'vehicle and on the engine (a four-bar linkage) and is NOT '
             'modelled here.'),
@@ -294,10 +366,22 @@ def bolt_circle_max_load(moment_N_m: float, bolt_circle_diameter_m: float,
     m = _require_non_negative(moment_N_m, 'moment_N_m', '[N.m]')
     d = _require_positive(bolt_circle_diameter_m,
                           'bolt_circle_diameter_m', '[m]')
-    try:
-        n = int(bolt_count)
-    except (TypeError, ValueError):
-        raise ValueError('bolt_count must be an integer')
+    # --- ÖH D23 / P5B4-20: KESİRLİ CIVATA SAYISI SESSİZCE KIRPILMAZ ------
+    # Eski satır ``int(bolt_count)`` idi; ``int`` sıfıra doğru KIRPAR, yani
+    # 11,4 -> 11 ve 12,9 -> 12 oluyordu ve kullanıcı gönderdiğinden DAHA AZ
+    # cıvatalı bir bağlantının yükünü görüyordu. F_max = 4M/(n*D) olduğu
+    # için sapma doğrudan yüke geçiyor. ÖLÇÜLDÜ (``once.json`` P5B4-20;
+    # F = 800 kN, delta = 6 deg, h = 0,5 m, D_bc = 1 m):
+    #     bolt_count = 12    -> moment_induced_max_N = 13937,128436 N
+    #     bolt_count = 11,4  -> moment_induced_max_N = 15204,140112 N
+    #                           (11 cıvata; cıvata başına **+%9,09**)
+    #     bolt_count = 12,9  -> 12 cıvata, uyarı YOK
+    # Kırpma yönü daima aşağı olduğu için hata tek yönlüdür ve emniyetsiz
+    # değil ama YANLIŞ tarafta: kullanıcı istediği bağlantıyı görmüyordu.
+    # Sayı ne yuvarlanır ne kırpılır — hangi tam sayının istendiği sorulur.
+    # ``bool`` da reddedilir (``True`` eskiden 1 cıvata olup yalnız
+    # tesadüfen ``BOLT_COUNT_MIN`` kapısına takılıyordu).
+    n = require_whole_number(bolt_count, 'bolt_count', '[-]')
     if n < BOLT_COUNT_MIN:
         raise ValueError(
             f'bolt_count {n} is below the minimum {BOLT_COUNT_MIN}: the '
@@ -410,6 +494,37 @@ def actuator_load(*,
                 'by e. Alignment tolerance, thrust vector misalignment '
                 'and engine weight offset all feed this term.'),
         })
+    else:
+        # --- ÖH D21 / P5B4-19: BASKIN TERİMİN YOKLUĞU HER ZAMAN BEYANLI ---
+        # Eski davranışta "bu bir tasarım yükü değildir" uyarısı HEP-YA-HİÇ
+        # idi: yalnız moment bütçesinin TAMAMI sıfırken üretiliyordu.
+        # ÖLÇÜLDÜ (``once.json`` P5B4-19; F = 800 kN, delta = 6 deg,
+        # r_a = 1,2 m):
+        #   bütçe tamamen sıfır      -> F_akt = 0,0 N,      1 uyarı + 2 validity
+        #   yalnız 0,001 N.m sürtünme-> F_akt = 0,000833 N, 0 uyarı + 1 validity
+        # yani 800 kN'lik bir motorda 0,8 milinewtonluk aktüatör kuvveti
+        # UYARISIZ ve VALIDITY'SİZ yayımlanıyordu; oysa aradaki tek fark
+        # bütçeye giren mikroskobik bir terimdi. Baskın terim ``thrust_offset_m``
+        # ise iki durumda da 0 idi ve HİÇ sorulmuyordu: modelin en büyük
+        # eksiği tam da sessiz kalan terimdi.
+        #
+        # Kaçıklık momenti M = F*e itki ile ölçeklenir; hizalama toleransı
+        # sıfır olan bir motor yoktur (Huzel & Huang, NASA SP-125 / AIAA 147,
+        # Böl. 9: motor bağlantısında itki vektörü kaçıklığı tasarım yükünün
+        # ana kaynağıdır). Sayı UYDURULMAZ — yokluğu ADIYLA bildirilir.
+        validity.append({
+            'field': 'thrust_offset_m',
+            'status': 'not_supplied',
+            'message': (
+                'thrust_offset_m is zero, so the thrust misalignment moment '
+                'M = F*e is ABSENT from the budget below. It is normally the '
+                'dominant term, because it scales with the full thrust; no '
+                'alignment tolerance was assumed on your behalf. Whatever '
+                'actuator force is reported here therefore covers only the '
+                'terms you supplied.')})
+        warnings.append(
+            'thrust_offset_m is zero: the thrust misalignment moment - '
+            'normally the dominant actuator load - is not in the budget.')
 
     # --- esnek hat/körük burulma direnci ---
     m_duct = 0.0
@@ -537,7 +652,10 @@ def actuator_load(*,
                 'deflection. ' + GIMBAL_ANGLE_SOURCE)})
 
     return {
-        'thrust': thrust_components(f, a),
+        # ÖH D23 / P5B4-21: HAM (işaretli) açı geçirilir; büyüklüğe
+        # indirgeme ``_check_gimbal_angle`` içinde tek yerde olur ve
+        # işaret ``gimbal_angle_input_deg`` ile yankılanır.
+        'thrust': thrust_components(f, gimbal_angle_deg),
         'moment_budget': {
             'thrust_offset_N_m': float(m_offset),
             'flex_duct_N_m': float(m_duct),
@@ -593,35 +711,140 @@ def mount_ring_loads(*,
     v_shear = f * math.sin(rad)
     m_ring = v_shear * h
 
+    # --- ÖH D21 / P5B4-18: HALKA MESAFESİ 0 -> MOMENT YÜKÜ YAYIMLANMAZ ----
+    # ``ring_offset_m`` imzada varsayılansızdır ama ``analyze_gimbal_mount``
+    # onu 0,0 varsayılanıyla çağırır. Sonuç ÖLÇÜLDÜ (``once.json`` P5B4-18;
+    # F = 800 kN, delta = 6 deg, 12 cıvata, D_bc = 1 m):
+    #     ring_offset_m = 0,0 -> bending_moment_N_m = 0,0 ve
+    #                            bolts.moment_induced_max_N = 0,0 N,
+    #                            validity = ['inertia_moment'], warnings = []
+    # yani "cıvatalar momentten yük görmüyor" iddiası BEYANSIZ yayımlanıyor
+    # ve ``liquid.html`` bunu 'Max Bolt Load (from moment): 0.00 kN' diye
+    # BASIYORDU. Aynı dosya 20 satır yukarıda kardeş satır için tam tersini
+    # yapıyor: moment bütçesi sıfırken aktüatör kuvveti satırını BASTIRIYOR
+    # ("sıfırı gösterge yapmak yasak", ``mb.total_N_m > 0`` koşulu).
+    #
+    # Sıfır burada bir ÖLÇÜM değil, kesitin pivot düzleminde alındığı ideal
+    # kabulün artefaktıdır: halka düzleminin pivottan uzaklığı verilmemiştir.
+    # Doktrin-1 (fail-closed): kazanılmamış sayı yayımlanmaz. Momentten
+    # TÜREYEN alanlar ``None`` döner (panel ``hrmaFmt`` ile '—' basar),
+    # itkiden doğrudan gelen eksenel/kesme payları KALIR — onlar gerçekten
+    # hesaplanmıştır.
+    halka_momenti_kazanilmadi = (h <= 0.0)
+    ring_validity: List[Dict] = []
+    ring_warnings: List[str] = []
+    if halka_momenti_kazanilmadi:
+        ring_validity.append({
+            'field': 'bending_moment_N_m',
+            'status': 'not_evaluated',
+            'message': (
+                'No ring offset was supplied (ring_offset_m is zero), so the '
+                'ring bending moment M = F*sin(delta)*h is zero by '
+                'construction and every load derived from it - '
+                'bolts.moment_induced_max_N and both max_tension_* '
+                'combinations - is NOT evaluated. That zero is the ideal '
+                'result for a section cut exactly in the pivot plane; it is '
+                'NOT a design load. Supply the distance from the pivot to '
+                'the mount ring plane to obtain these numbers.')})
+        ring_warnings.append(
+            'ring bending moment and the moment-induced bolt loads were not '
+            'evaluated because ring_offset_m is zero; this is a model '
+            'artefact, not a design load.')
+
     bolts = None
     if bolt_circle_diameter_m is not None and bolt_count is not None:
         d_bc = _require_positive(bolt_circle_diameter_m,
                                  'bolt_circle_diameter_m', '[m]')
-        n = int(bolt_count)
+        # ÖH D23 / P5B4-20: aynı kapı burada da (bu satır cıvata başına
+        # eksenel/kesme payını böler; ``bolt_circle_max_load``dan bağımsız
+        # olarak kırpma yapıyordu).
+        n = require_whole_number(bolt_count, 'bolt_count', '[-]')
         f_moment = bolt_circle_max_load(m_ring, d_bc, n)
         f_axial_share = n_axial / n
         v_share = v_shear / n
         bolts = {
             'bolt_count': n,
             'bolt_circle_diameter_m': float(d_bc),
-            'moment_induced_max_N': float(f_moment),
+            'moment_induced_max_N': (None if halka_momenti_kazanilmadi
+                                     else float(f_moment)),
             'axial_share_per_bolt_N': float(f_axial_share),
             'shear_per_bolt_N': float(v_share),
-            'max_tension_if_axial_is_tensile_N': float(f_moment
-                                                       + f_axial_share),
-            'max_tension_if_axial_is_compressive_N': float(f_moment
-                                                           - f_axial_share),
+            'max_tension_if_axial_is_tensile_N': (
+                None if halka_momenti_kazanilmadi
+                else float(f_moment + f_axial_share)),
+            # --- ÖH D23 / P5B4-23: 'max_tension' ALANI NEGATİF TAŞIMAZ ----
+            # Eski satır ``float(f_moment - f_axial_share)`` idi ve bu fark
+            # eksenel pay moment payını aştığında NEGATİF oluyordu.
+            # ÖLÇÜLDÜ (``once.json`` P5B4-23; F = 800 kN, delta = 6 deg,
+            # h = 0,5 m, 12 cıvata, D_bc = 1 m):
+            #     moment_induced_max_N                  =  13 937,128436 N
+            #     axial_share_per_bolt_N                =  66 301,459691 N
+            #     max_tension_if_axial_is_compressive_N = -52 364,331256 N
+            # ve ``liquid.html`` bunu 'Max Bolt Tension (axial compressive)'
+            # satırında negatif kN olarak BASIYORDU. 'Çekme' adı taşıyan bir
+            # alanın negatif olması iki hataya davetiyedir: (a) sayı olduğu
+            # gibi ``bolted_joint``e çekme diye beslenirse yük yanlış tarafa
+            # gider, (b) mutlak değeri alınırsa var olmayan 52 kN'luk bir
+            # çekme uydurulur. Fizik açık: eksenel pay bası ise cıvatada NET
+            # ÇEKME YOKTUR, en büyük çekme SIFIRDIR.
+            #
+            # Alan bundan böyle gerçekten en büyük ÇEKMEyi taşır (taban
+            # sıfır); işaretli net yük bilgisi kaybolmaz, kendi adıyla
+            # (``net_bolt_load_if_axial_is_compressive_N``, artı = çekme,
+            # eksi = bası) ayrıca yayımlanır ve net bası hâli beyan edilir.
+            'max_tension_if_axial_is_compressive_N': (
+                None if halka_momenti_kazanilmadi
+                else float(max(0.0, f_moment - f_axial_share))),
+            'net_bolt_load_if_axial_is_compressive_N': (
+                None if halka_momenti_kazanilmadi
+                else float(f_moment - f_axial_share)),
+            'if_axial_is_compressive_verdict': (
+                None if halka_momenti_kazanilmadi
+                else ('net_tension' if f_moment > f_axial_share
+                      else 'net_compression')),
+            'moment_induced_loads_status': (
+                'not_evaluated' if halka_momenti_kazanilmadi else 'computed'),
             '_basis': (
                 'Moment share: F_max = 4*M/(n*D) (Shigley Ch. 8). Axial '
                 'and shear are divided equally over the bolts. SIGN '
                 'CONVENTION MATTERS: whether the thrust puts the ring in '
                 'tension or compression depends on the installation, so '
                 'BOTH combinations are reported and the caller must pick '
-                'the one matching the load path. Bolt preload, joint '
+                'the one matching the load path. The two max_tension_* '
+                'fields are TENSIONS and are therefore never negative: if '
+                'the axial share is compressive and exceeds the '
+                'moment-induced share there is no net bolt tension at all '
+                'and the field is 0 by definition. The signed net load is '
+                'published separately as '
+                'net_bolt_load_if_axial_is_compressive_N (positive = '
+                'tension, negative = net compression) so the magnitude is '
+                'not lost; do NOT feed a negative value into a tensile '
+                'check. Bolt preload, joint '
                 'stiffness and capacity are NOT evaluated here - feed '
                 'these loads into the bolted_joint module. '
                 + BOLT_CIRCLE_SOURCE),
         }
+
+    if (bolts is not None and not halka_momenti_kazanilmadi
+            and bolts['if_axial_is_compressive_verdict'] == 'net_compression'):
+        # ÖH D23 / P5B4-23: sıfır burada bir artefakt DEĞİL, kazanılmış
+        # sonuçtur; yine de kullanıcı NEDENİNİ görmeli (panel bu listeyi
+        # aynen basıyor).
+        ring_validity.append({
+            'field': 'bolts.max_tension_if_axial_is_compressive_N',
+            'status': 'zero_by_result',
+            'message': (
+                'If the thrust puts the ring in COMPRESSION, the '
+                f'moment-induced share ({bolts["moment_induced_max_N"]:.1f} '
+                f'N per bolt) is smaller than the axial share '
+                f'({bolts["axial_share_per_bolt_N"]:.1f} N), so no bolt '
+                'sees net tension on that load path: the maximum tension '
+                'is 0 N, not a negative tension. The signed net load '
+                f'({bolts["net_bolt_load_if_axial_is_compressive_N"]:.1f} '
+                'N, negative = net compression) is reported as '
+                'net_bolt_load_if_axial_is_compressive_N. Bolt preload and '
+                'joint separation still have to be checked in the '
+                'bolted_joint module.')})
 
     return {
         'section_loads': {
@@ -642,6 +865,10 @@ def mount_ring_loads(*,
                 'not_modelled.aerodynamic_and_inertial_vehicle_loads).'),
         },
         'bolts': bolts,
+        # ÖH D21 / P5B4-18: halka bloğunun KENDİ beyan kanalı. Aktüatör
+        # kardeşiyle aynı biçim; ``analyze_gimbal_mount`` ikisini birleştirir.
+        'validity': ring_validity,
+        'warnings': ring_warnings,
         'not_modelled': dict(NOT_MODELLED),
     }
 
@@ -694,6 +921,10 @@ def analyze_gimbal_mount(*,
 
     validity = list(act['validity'])
     warnings = list(act['warnings'])
+    # ÖH D21 / P5B4-18: halka bloğunun beyanları da tek listeye girer —
+    # ekran ve ihraç katmanı yalnız bu iki listeyi okuyor.
+    validity.extend(ring.get('validity') or [])
+    warnings.extend(ring.get('warnings') or [])
 
     two_axis = None
     if yaw_angle_deg is not None:
@@ -709,6 +940,19 @@ def analyze_gimbal_mount(*,
                 'small-angle limit is sqrt(pitch^2 + yaw^2). Rotation '
                 'ORDER changes the result only at second order.'),
         }
+        if resultant > GIMBAL_ANGLE_PRACTICE_BAND_DEG[1]:
+            # ÖH D23 / P5B4-22: bileşke sert bandın içinde ama pratik
+            # bandın dışındaysa tek eksenli kardeşiyle aynı beyan verilir
+            # (eskiden yalnız ``gimbal_angle_deg`` için bakılıyordu).
+            validity.append({
+                'field': 'two_axis.resultant_angle_deg',
+                'status': 'outside_practice_band',
+                'message': (
+                    f'the two-axis resultant {resultant:.2f} deg exceeds '
+                    f'the practice band {GIMBAL_ANGLE_PRACTICE_BAND_DEG} '
+                    f'deg (still inside the hard validity range '
+                    f'{GIMBAL_ANGLE_VALID_DEG} deg). '
+                    + GIMBAL_ANGLE_SOURCE)})
         validity.append({
             'field': 'two_axis',
             'status': 'informational',

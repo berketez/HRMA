@@ -179,14 +179,38 @@ class TestResponsesAreBrowserParseable:
         assert 'NaN' not in text, endpoint
         assert _browser_parseable(text)
 
-    def test_non_finite_becomes_null_not_a_made_up_number(self, client):
-        """Sonlu olmayan değer ``null`` olur; uydurma sayıya çevrilmez."""
+    def test_non_finite_alan_adiyla_reddedilir(self, client):
+        """Sonlu olmayan irtifa artık ``null`` yayımlanmaz, REDDEDİLİR.
+
+        BEKÇİ ÇEVRİLDİ — ÖH D23 / app-api a2, defter **P13B4-12** ·
+        ÖK-20 ADIM 3. Eski hâli ``body['pressure'] is None`` diyordu, yani
+        HTTP **200** + ``{'altitude': null, 'pressure': null,
+        'temperature': null}`` gövdesini KİLİTLİYORDU. Faz 5B'de bu bir
+        ilerlemeydi (ham ``Infinity`` RFC 8259 dışıdır ve tarayıcının
+        ``response.json()`` çağrısını patlatıyordu), ama tam çözüm değildi:
+        200 + ``null`` gövdesi panelde *"ölçüldü, sonuç boş"* diye okunur ve
+        kullanıcı HANGİ alanın kabul edilmediğini göremez.
+
+        Doktrin (fail-closed): çözülemeyen girdi 4xx + ALAN ADI + gerekçe
+        ile reddedilir; sayı da uydurulmaz, ``null`` da yayımlanmaz. Ölçüm
+        ``docs/scofield/raw/OH/D23/app-api/a2/{once,sonra}_supurme.json``:
+        ``/api/altitude-to-pressure`` için dört düşman değerin (``true``,
+        ``"NaN"``, ``"Infinity"``, ``"yirmi"``) DÖRDÜ de HTTP 200 iken artık
+        dördü de HTTP 422 + ``invalid_fields[0].field == 'altitude'``.
+
+        Kardeş iddia KORUNDU: ham ``Infinity``/``NaN`` metni gövdeye hâlâ
+        sızamaz — onu :meth:`test_no_bare_nan_or_infinity_in_body` ölçüyor
+        ve o test DEĞİŞMEDİ.
+        """
         response = _post_raw(client, '/api/altitude-to-pressure',
                              json.dumps({'altitude': -float('inf')}))
+        assert response.status_code == 422, response.get_data(as_text=True)
         body = response.get_json()
-        assert body['pressure'] is None
-        assert body['temperature'] is None
-        assert body['altitude'] is None
+        assert body.get('invalid_fields'), body
+        assert body['invalid_fields'][0]['field'] == 'altitude'
+        assert 'pressure' not in body and 'temperature' not in body
+        ham = response.get_data(as_text=True)
+        assert 'Infinity' not in ham and 'NaN' not in ham
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,9 @@ white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
 .hint{margin:10px 16px;color:var(--dim);font-size:12px;white-space:normal}
 code{background:#0d1720;padding:1px 5px;border-radius:3px;font-size:12px}
 .path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+/* ÖH D20 / P10B4-06: secim alaninin OLCUM GUCU hukumle birlikte gorunur. */
+.kapsam{color:var(--dim);font-size:11px}
+.kirik{color:var(--red);font-size:11px;font-weight:600}
 /* Sutunlar arasi baglanti oklari: secili alanin nereye gittigini gorsel
    olarak izlemek icin. Fare olaylarini engellememesi sart. */
 #links{position:fixed;inset:0;pointer-events:none;z-index:5}
@@ -63,39 +66,43 @@ p.note{color:var(--dim);font-size:13px;line-height:1.7}
 </style></head><body>
 <div class="wrap">
   <h1 style="font-size:20px">HRMA bağlama haritası</h1>
-  <p class="meta">ölçüm: 2026-08-16 13:33</p>
+  <p class="meta">ölçüm: 2026-09-05 23:23</p>
   <div class="cards">
-        <a class="card ok" href="wiring_map_hybrid.html">
+        <a class="card warn" href="wiring_map_hybrid.html">
           <h2>hybrid</h2>
-          <div class="big">57</div>
+          <div class="big">62</div>
           <div class="lbl">alan ölçüldü</div>
           <div class="tags">
-            <span>55 bağlı</span>
+            <span>60 bağlı</span>
             <span class="bad">0 ölü</span>
             <span class="amb">2 yankı (beyanlı)</span>
           </div>
           <div class="tags">
-            <span>107 sabit açıklandı</span>
-            <span class="bad">98 sınıflandırılmamış</span>
+            <span>85 sabit aklandı</span>
+            <span class="amb">4 açık hesap</span>
+            <span class="bad">19 sınıflandırılmamış</span>
           </div>
-          <div class="badge">temiz</div>
+          <div class="tags"><span class="bad">güçlü sarsımda 31/221 eriyor (%14.0)</span></div>
+          <div class="badge">girdi düzeyi temiz — 19 sınıflandırılmamış yaprak</div>
         </a>
-        <a class="card ok" href="wiring_map_liquid.html">
+        <a class="card warn" href="wiring_map_liquid.html">
           <h2>liquid</h2>
-          <div class="big">48</div>
+          <div class="big">47</div>
           <div class="lbl">alan ölçüldü</div>
           <div class="tags">
-            <span>41 bağlı</span>
+            <span>40 bağlı</span>
             <span class="bad">0 ölü</span>
             <span class="amb">7 yankı (beyanlı)</span>
           </div>
           <div class="tags">
-            <span>147 sabit açıklandı</span>
-            <span class="bad">140 sınıflandırılmamış</span>
+            <span>121 sabit aklandı</span>
+            <span class="amb">8 açık hesap</span>
+            <span class="bad">41 sınıflandırılmamış</span>
           </div>
-          <div class="badge">temiz</div>
+          <div class="tags"><span class="bad">güçlü sarsımda 29/372 eriyor (%7.8)</span></div>
+          <div class="badge">1 sorunlu alan</div>
         </a>
-        <a class="card ok" href="wiring_map_solid.html">
+        <a class="card warn" href="wiring_map_solid.html">
           <h2>solid</h2>
           <div class="big">57</div>
           <div class="lbl">alan ölçüldü</div>
@@ -105,17 +112,24 @@ p.note{color:var(--dim);font-size:13px;line-height:1.7}
             <span class="amb">3 yankı (beyanlı)</span>
           </div>
           <div class="tags">
-            <span>105 sabit açıklandı</span>
-            <span class="bad">46 sınıflandırılmamış</span>
+            <span>111 sabit aklandı</span>
+            <span class="amb">23 açık hesap</span>
+            <span class="ok">0 sınıflandırılmamış</span>
           </div>
-          <div class="badge">temiz</div>
+          <div class="tags"><span class="bad">güçlü sarsımda 215/215 eriyor (%100.0)</span></div>
+          <div class="badge">girdi düzeyi temiz — 23 açık hesap yaprağı</div>
         </a></div>
   <p class="note">Bu harita ÖLÇÜMDEN üretilir, elle düzenlenmez. Her alan
   gerçek bir hesap koşularak sarsılır ve yanıtın hangi dallarının değiştiği
   kaydedilir. Kod değişince <code>python3 tools/wiring_map.py</code> ile
   yeniden üretilir.<br><br>
   Sabitler sınıflandırılır (ızgara / standart / tanım / beyanlı / kopya);
-  izlenen tek sayı <b>sınıflandırılmamış</b>, hedefi sıfırdır.
   Sınıfların tanımı: <code>tools/sabit_siniflandirma.py</code>.<br>
-  Toplam sınıflandırılmamış: <b>284</b></p>
+  Toplam sınıflandırılmamış: <b>60</b> &middot;
+  toplam açık hesap (ölçümle açıklandı, AKLANMADI): <b>35</b><br>
+  <i>Açık hesap</i> = <code>sablon_koru</code> (yaprak sabit değil; şablonun
+  gönderdiği alanlar onu görmüyor, payload anahtarı sarsımında oynuyor) +
+  <code>girdi_yankisi</code> (alt-çözümlemenin kendi girdisi; /calculate
+  yükünde onu besleyen alan yok). İkisi de <b>iş listesinde kalır</b>.<br>
+  Erime ÖLÇÜLDÜ: 808 sabit yaprağın <b>275'i (%34.0)</b> daha güçlü sarsımda oynuyor (payload anahtarı sarsımı: ×1,4 ×0,6 ×10 ×0,1 + tüm seçim seçenekleri). Bu pay sıfıra inmeden "sınıflandırılmamış = 0" bir KAPI ÖLÇÜTÜ DEĞİLDİR: sayı kusur değil ölçüm gücü ölçüyor (defter P10B4-07).</p>
 </div></body></html>

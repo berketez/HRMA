@@ -55,10 +55,23 @@ class TestParseThrustCsv:
         assert np.allclose(out['time'], [0, 1])
         assert any('Unit row' in w for w in out['warnings'])
 
-    def test_non_si_unit_row_produces_warning(self):
+    def test_non_si_unit_row_is_converted(self):
+        """ÖH D16 / app-api — P10B2-05 ile ÇEVRİLDİ.
+
+        Bu bekçi eskiden ``# dönüşüm YOK`` diyerek kusuru sözleşme
+        yapıyordu: kullanıcı birimi AÇIKÇA beyan ediyor, modül sayıyı
+        beyan edilmemiş gibi okuyor, uyarı basıp geçiyordu. Uyarı bir
+        beyandır, onarım değildir (Berke doktrini 1) — ve aynı bilgi
+        başlık parantezinden geldiğinde uyarı bile yoktu.
+        Artık iki yol da TEK çarpan tablosundan geçiyor: kN -> N (x1000),
+        ms -> s (x1e-3). El hesabı: 10 kN = 10.000 N, 1 ms = 0,001 s.
+        """
         out = parse_thrust_csv("time;thrust\nms;kN\n0;0\n1;10\n")
-        assert np.allclose(out['thrust'], [0, 10])  # dönüşüm YOK
-        assert any('non-SI' in w for w in out['warnings'])
+        assert np.allclose(out['thrust'], [0, 10000.0])
+        assert np.allclose(out['time'], [0, 0.001])
+        assert out['units']['thrust']['declared'] == 'kn'
+        assert out['units']['time']['declared'] == 'ms'
+        assert any('converted' in w for w in out['warnings'])
 
     def test_blank_lines_tolerated(self):
         out = parse_thrust_csv("time,thrust\n\n0,0\n\n1,10\n\n")
@@ -136,22 +149,30 @@ class TestCompare:
         assert 'agreement' in out['assessment']
 
     def test_constant_curve_hand_anchor(self):
-        # user: 100 N sabit, pred: 90 N sabit, 0..10 s
+        # ÇEVRİLDİ — ÖH D30 / OH-D28-12 + P10B2-16 (ana model hükmü,
+        # 9 Eylül 2026): yüzde farkların PAYDASI TAHMİNden ÖLÇÜME geçti
+        # (ASME V&V 20-2009 kanonu). El çapası aynı iki eğriyle korunur,
+        # beklenen sayı kanonla YENİDEN TÜRETİLİR: (90-100)/100 = -%10,0
+        # (eski: (100-90)/90 = +%11,1). Sayı gevşetilmedi; işaret ve payda
+        # değişti, büyüklük eskisinden KÜÇÜKtür.
+        # user: 100 N sabit (ÖLÇÜM), pred: 90 N sabit, 0..10 s
         t = np.array([0.0, 10.0])
         out = compare((t, np.array([100.0, 100.0])),
                       (t, np.array([90.0, 90.0])))
         m = out['metrics']
         assert m['total_impulse_user_ns'] == pytest.approx(1000.0)
         assert m['total_impulse_predicted_ns'] == pytest.approx(900.0)
-        assert m['total_impulse_diff_pct'] == pytest.approx(100.0 / 9.0)
-        assert m['peak_thrust_diff_pct'] == pytest.approx(100.0 / 9.0)
+        assert m['total_impulse_diff_pct'] == pytest.approx(-10.0)
+        assert m['peak_thrust_diff_pct'] == pytest.approx(-10.0)
         assert m['mean_thrust_user_n'] == pytest.approx(100.0)
         assert m['mean_thrust_predicted_n'] == pytest.approx(90.0)
-        assert m['mean_thrust_diff_pct'] == pytest.approx(100.0 / 9.0)
+        assert m['mean_thrust_diff_pct'] == pytest.approx(-10.0)
         assert m['rmse_n'] == pytest.approx(10.0)
         assert m['nrmse_pct'] == pytest.approx(100.0 / 9.0)
         assert m['burn_time_diff_s'] == pytest.approx(0.0, abs=1e-12)
-        assert out['grade'] == 'fair'  # %11.1 -> fair kovası
+        # Not DEĞİŞMEDİ: puan max(|impuls farkı|, NRMSE) ve NRMSE
+        # (=%11,1) paydadan etkilenmez (tahmini tepeye normalize).
+        assert out['grade'] == 'fair'
 
     def test_burn_time_trapezoid_hand_anchor(self):
         # Eşik = 100*0.05 = 5 N; kesişimler 0.05 s ve 9.95 s -> 9.9 s
@@ -201,9 +222,12 @@ class TestCompare:
         out = compare((t, np.array([108.0, 108.0])),
                       (t, np.array([100.0, 100.0])))
         text = out['assessment']
-        assert 'total impulse differs by' in text
+        # ÇEVRİLDİ — ÖH D30 / OH-D28-12: payda ÖLÇÜM olunca cümle de
+        # gerçeği söyler (hangi büyüklük NEYE göre sapıyor) ve sayı
+        # kanondan türer: (100-108)/108 = -%7,4 (eski: +%8,0).
+        assert 'the predicted total impulse differs from the measured' in text
         assert 'RMSE' in text
-        assert '+8.0%' in text
+        assert '-7.4%' in text
 
     def test_non_overlapping_time_ranges_raise(self):
         with pytest.raises(ValueError, match='overlap'):

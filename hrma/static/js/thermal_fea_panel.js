@@ -60,18 +60,157 @@
     const PROFILE_ENDPOINT = '/api/analysis/wall-profile';
     const THERMAL_ENDPOINT = '/api/fea/thermal';
 
+    /* ÖH D26 / P11B3-16 — ORTAM SICAKLIĞI ALANININ SAHİBİ.
+       ÖLÇÜLDÜ (taban 7751531, ``a2/once.json``): `#fea_t_ambient` alanı
+       `value="293.15"` ile ÖNCEDEN DOLUYDU ve panel bu sonlu sayının
+       KENDİSİNE ait olduğunu hiçbir yerde söylemiyordu; `readAmbientK()`
+       alandan ne okursa onu `ambient_temperature_K` diye gönderiyordu.
+       Yani kullanıcı hiçbir şey yazmasa bile uç, kullanıcı 293,15 K
+       demiş gibi bir başlangıç koşuluyla çözüyordu. Kardeş CFD paneli
+       aynı konuda TERS politika uygular: `P_ambient_Pa` onun
+       REQUIRED_FIELDS listesindedir ve motorun kendi sonucundan çözülür
+       (ölçüldü: cfd_ambient_zorunlu = 1).
+
+       ÖK-21 bu dalgada form katmanının `value`/`||` sökümünü YASAKLADIĞI
+       için alan dolu KALIR; onarım SAHİPLİK katmanındadır:
+         * sayı ARTIK TEK YERDE yaşar (doktrin 4) — HTML'e ikinci kez
+           yazılmaz, alan bu sabitten kurulur;
+         * alan kullanıcı tarafından değiştirilene kadar `data-dirty`
+           taşımaz ve panel gönderdiği sayının KİMİN olduğunu ekranda
+           ADIYLA ilan eder (rozet + künye satırı).
+       Böylece "kullanıcının verdiği sayı" ile "panelin varsayılanı"
+       ekranda ayrılır; sessiz varsayılan kalmaz. */
+    const AMBIENT_PANEL_DEFAULT_K = 293.15;
+
     let cfg = {};
     let lastMotorResults = null;     // paneli besleyecek motor sonucu
     let lastPayload = null;          // son FEA yanıtı (fea bloğu)
     let lastError = null;            // ağ/sunucu hatası metni
     let busy = false;
+    let busySince = null;      // koşumun başlangıç damgası (P17B1-18)
     let showMesh = true;             // tel-kafes katmanı açık/kapalı
     let carpetFallback = false;      // carpet çizilemedi → nokta haritası
+    //: Son koşumda gönderilen ortam sıcaklığının KAYNAĞI (P11B3-16):
+    //: 'user' (alan elle değiştirilmişti) | 'panel_default' (panelin
+    //: kendi sabiti) | null (henüz koşulmadı). Uydurulmaz: alanın
+    //: `data-dirty` imi neyse o.
+    let ambientSource = null;
+    //: ÖH D26 / OH-B3-02 — /api/analysis/wall-profile `contour_basis`
+    //: bloğu (h(z) profilinin dayandığı konturun künyesi, 7 alt alan).
+    //: ÖLÇÜLDÜ (a2/once.json): panel bu bloğu ne kendi adıyla ne bir
+    //: çocuğuyla anıyordu — profil ekranda KÜNYESİZ çiziliyordu.
+    let lastContourBasis = null;
+    //: ÖH D28 / arayuz a1 (OH-D27-16) — /api/analysis/wall-profile
+    //: `column_basis` (6 sütunun dayanağı) ve `units` (14 sütunun birimi)
+    //: blokları. ÖLÇÜLDÜ (a1/once.json, taban 7cd08bcc): panelin 191 adlık
+    //: okuma envanterinde ikisi de 0 kez geçiyordu; `column_basis`ın ALTI
+    //: çocuğunun (h_g, q_MW, T_wall_eq, T_recovery, mach, area_ratio)
+    //: hiçbiri de okunmuyordu — SAĞIR ALT BLOK.
+    let lastColumnBasis = null;
+    let lastProfileUnits = null;
+    //: ÖH D37 A2-1 termal 7. tur (karar §28-24 §2 b) — h(z) profilinin
+    //: γ / MW / c* kökeni (`wall_profile.gas_properties_basis`). Uç
+    //: yayımlamadıysa null; künyede ADIYLA basılır, uydurulmaz.
+    let lastGasBasis = null;
 
     // i18n köprüleri — i18n.js yoksa İngilizce yedek metin döner
     function T(key, fallback) {
         return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
     }
+    /* ÖH D23 / P17B4-07 + P17B1-18 — İSTEK ZAMAN AŞIMI.
+       Süre sınırı TEK KAYNAKTAN gelir: fea_panel.js onu
+       `window.HRMA_ISTEK_ZAMAN_ASIMI_MS` ile yayımlar (doktrin 4 — sayı
+       ikinci kez YAZILMAZ). fea_panel.js bu panelin yüklü olduğu tek
+       şablonda (advanced.html) da yüklüdür; yine de yayım yoksa sinyal
+       kurulmaz ve panel eski davranışına düşer (sessiz uydurma yok). */
+    function zamanAsimiMs() {
+        const v = window.HRMA_ISTEK_ZAMAN_ASIMI_MS;
+        return (typeof v === 'number' && isFinite(v) && v > 0) ? v : null;
+    }
+
+    function zamanAsimiSinyali() {
+        const ms = zamanAsimiMs();
+        return (ms && typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+            ? AbortSignal.timeout(ms) : undefined;
+    }
+
+    function zamanAsimiMi(e) {
+        const ad = e && e.name;
+        return ad === 'TimeoutError' || ad === 'AbortError';
+    }
+
+    /* ÖH D26 · P11B3-19 — KULLANICI KOŞUMU DURDURABİLİR.
+       ÖLÇÜLDÜ (a3/once.json, taban 7751531): term_abort_controller = 0,
+       term_iptal_dugmesi = 0. Zaman aşımı vardı, iptal yoktu; tek çıkış
+       sayfayı yenilemekti. Desen fea_panel.js ile BİREBİR aynıdır
+       (süre sınırı yine oradan, tek kaynaktan gelir).
+       İki durdurucu AYRI cümleyle beyan edilir. */
+    let denetleyici = null;
+    let kullaniciIptali = false;
+    /* İki ADIMLI koşumun (h(z) profili -> geçici FEA) TEK sinyali: iptal
+       ikinci adımı da durdurur ve süre sınırı koşumun TAMAMINI ölçer. */
+    let aktifSinyal = null;
+
+    function kosumSinyali() {
+        kullaniciIptali = false;
+        if (typeof AbortController !== 'function') {
+            aktifSinyal = zamanAsimiSinyali();
+            return aktifSinyal;
+        }
+        const c = new AbortController();
+        denetleyici = c;
+        const zs = zamanAsimiSinyali();
+        if (zs && typeof AbortSignal !== 'undefined'
+                && typeof AbortSignal.any === 'function') {
+            aktifSinyal = AbortSignal.any([c.signal, zs]);
+            return aktifSinyal;
+        }
+        const ms = zamanAsimiMs();
+        if (ms && typeof setTimeout === 'function') {
+            const t = setTimeout(function () {
+                if (denetleyici === c) c.abort();
+            }, ms);
+            if (typeof c.signal.addEventListener === 'function') {
+                c.signal.addEventListener('abort', function () {
+                    if (typeof clearTimeout === 'function') clearTimeout(t);
+                });
+            }
+        }
+        aktifSinyal = c.signal;
+        return aktifSinyal;
+    }
+
+    function kosumuIptalEt() {
+        if (!denetleyici) return false;
+        const c = denetleyici;
+        kullaniciIptali = true;
+        denetleyici = null;
+        try { c.abort(); } catch (e) { return false; }
+        return true;
+    }
+
+    function kosumBitti() {
+        denetleyici = null;
+        aktifSinyal = null;
+    }
+
+    /* Meşgul satırı nabzı: geçen süre GERÇEK ölçümdür, yüzde YOKTUR. */
+    const NABIZ_MS = 1000;
+    let nabizTimer = null;
+
+    function nabziDurdur() {
+        if (nabizTimer) { clearInterval(nabizTimer); nabizTimer = null; }
+    }
+
+    /* Savunmacı öznitelik yazımı — bkz. fea_panel.js aynı not. */
+    function ozY(el, ad, deger) {
+        if (el && typeof el.setAttribute === 'function') el.setAttribute(ad, deger);
+    }
+
+    function ozS(el, ad) {
+        if (el && typeof el.removeAttribute === 'function') el.removeAttribute(ad);
+    }
+
     function TF(key, params, fallback) {
         if (window.I18N && window.I18N.tf) return window.I18N.tf(key, params, fallback);
         return String(fallback).replace(/\{(\w+)\}/g, function (whole, name) {
@@ -96,6 +235,19 @@
 
     function fmt(v, digits) {
         return isNum(v) ? v.toFixed(digits === undefined ? 2 : digits) : '—';
+    }
+
+    /* ÖH D37 A2-1 denetçi Ş4 — EKRAN biçimlendiricisi (§0 kural 4: TR
+       ekranda ondalık VİRGÜL; makine kanalı nokta kalır). TF yalnız BAŞTAN
+       SONA sayı olan parametreyi çevirir (I18N.decimalText); merdiven
+       satırı gibi birleşik metinlerin içindeki sayılar noktalı kalıyordu
+       (ölçüldü: TR künyede "16×4 2582.55 K"). Sayı burada, metne
+       girmeden, aynı tek kaynaktan (I18N.decimalText) geçirilir; I18N yoksa
+       (node bekçisi) fmt çıktısı aynen döner. */
+    function fmtScr(v, digits) {
+        const s = fmt(v, digits);
+        return (window.I18N && typeof window.I18N.decimalText === 'function')
+            ? window.I18N.decimalText(s) : s;
     }
 
     // Enerji artığı gibi çok küçük sayılar için üstel biçim.
@@ -151,12 +303,55 @@
     //: Uzunluk alanları — uç METRE bekler; okuma readLen üzerinden.
     const CORE_LENGTH_FIELDS = ['chamber_diameter', 'chamber_length'];
 
+    /* ÖH D37 A2-1 / F-03 (CW-S5) — MOTOR DÜZENİ. Köprünün kendi imzası
+       (hrma/fea/bridge.py detect_engine_layout: structural_analysis altında
+       chamber_analysis → hybrid, chamber_structure → liquid, case_analysis →
+       solid) burada da AYNI kuralla okunur; tahmin yok, imza yoksa null. */
+    function engineLayoutLocal(m) {
+        const sa = m && m.structural_analysis;
+        if (!sa || typeof sa !== 'object') return null;
+        if (sa.chamber_analysis && typeof sa.chamber_analysis === 'object') return 'hybrid';
+        if (sa.chamber_structure && typeof sa.chamber_structure === 'object') return 'liquid';
+        if (sa.case_analysis && typeof sa.case_analysis === 'object') return 'solid';
+        return null;
+    }
+
+    /* ÖH D37 A2-1 / OH-DK-09 — CİDAR KALINLIĞI KÖPRÜNÜN OKUDUĞU ALANDAN.
+       ÖLÇÜLDÜ (DK termal B2; A2 termal a1 once/t7_ozet.json): bu gövde
+       kalınlık göndermiyordu → uç 5 mm varsayıyor, profilin T_wall_eq
+       sütunu 5 mm cidara aitken FEA meshi 23,08 mm çözüyordu. Aynı üç yol
+       (hrma/fea/bridge.py _extract_wall_thickness_m; hepsi mm) okunur ve
+       METREYE çevrilir; alan yoksa GÖNDERİLMEZ (uç varsayılanını
+       inputs_assumed ile ilan eder — uydurma yok). */
+    function bridgeWallThicknessM(m) {
+        const sa = (m && m.structural_analysis) || {};
+        const adaylar = [
+            (sa.chamber_analysis || {}).wall_thickness_used_mm,
+            (sa.chamber_structure || {}).wall_thickness,
+            (sa.case_analysis || {}).wall_thickness_mm,
+        ];
+        for (let i = 0; i < adaylar.length; i += 1) {
+            if (isNum(adaylar[i]) && adaylar[i] > 0) return adaylar[i] / 1000.0;
+        }
+        return undefined;
+    }
+
     // Ölçülmüş zincirin 1. adımının gövdesi. Dönüş: { body, missing }.
     // missing doluysa istek atılmaz; eksikler ADIYLA panelde basılır.
     function buildWallProfileBody(results) {
         const m = motorDictLocal(results) || {};
         const body = {};
         const missing = [];
+        /* F-03: katı ve sıvı sözlükleri düz hibrit alanlarını taşımaz (mm
+           uzunluklar, total_mass_flow, motor_geometry SI bloğu). Gövde
+           panelde kurulmaz: motor sözlüğü AYNEN gönderilir, uç tek kurucu
+           (heat_transfer_analysis.wall_profile_inputs_from_motor) ile kurar
+           ve bulamadığı çekirdek alanı 422 + adıyla reddeder. Hibrit yol
+           BİT-AYNI kalır (aşağıdaki düz gövde). */
+        const layout = engineLayoutLocal(m);
+        if (layout === 'solid' || layout === 'liquid') {
+            return { body: { motor_results: m }, missing: [] };
+        }
         CORE_FLAT_FIELDS.forEach(function (k) {
             if (isNum(m[k])) body[k] = m[k];
             else missing.push(k);
@@ -172,6 +367,21 @@
         const dt = readLen(results, 'throat_diameter');
         if (isNum(dt)) body.throat_diameter = dt;
         if (isNum(m.expansion_ratio)) body.expansion_ratio = m.expansion_ratio;
+        /* ÖH D37 A2-1 / F-03 Bartz eşleştirme hükmü — MOTORUN KENDİ GAZI.
+           ÖLÇÜLDÜ (A2 termal a1 sonra/): bu gövde gamma / molecular_weight /
+           c_star GÖNDERMİYORDU; uç modül varsayılanına (MW 24 g/mol, repo
+           gamma) düşüyor ve örnek hibritte boğaz h_g 6770 W/m²K çıkıyordu —
+           motorun kendi γ/MW/c*'ı ile 6370 W/m²K (−%5,9; motorun kendi
+           gas_side_analysis'i de 1881,96 K ile bunu doğruluyor). Bartz'ı
+           motor tipi değil termodinamik durum belirler; motor bu üçünü
+           yayımlıyorsa AYNEN geçer, yayımlamıyorsa alan konmaz. Yayımlanan
+           FEA sayısını değiştirir → ÖNEMLİ (Sunum 2 tablosu). */
+        ['gamma', 'molecular_weight', 'c_star'].forEach(function (k) {
+            if (isNum(m[k]) && m[k] > 0) body[k] = m[k];
+        });
+        // OH-DK-09: köprünün mesh'i kurduğu kalınlık, metre.
+        const tw = bridgeWallThicknessM(m);
+        if (isNum(tw)) body.wall_thickness = tw;
         // Parti 25 (bell/parabolik dirilişi): motorun YAYIMLADIĞI lüle
         // konturu varsa AYNEN geçirilir. Ölçüldü: kontursuz gövdede bell
         // motorda profil ekseni FEA köprüsünün konturundan 38-97% sapıyor
@@ -183,7 +393,43 @@
                 && nc.points.length >= 2) {
             body.nozzle_contour = nc;
         }
+        // ÖH defter P7B3-30 — ZİNCİRİN İKİ UCU AYNI MALZEMEYİ KULLANIR.
+        // Bu gövde ``material`` GÖNDERMİYORDU, yani profil daima jenerik
+        // 'steel' ile hesaplanıyordu; 2. adım (/api/fea/thermal) ise mesh'i
+        // motorun KENDİ malzemesiyle (ör. steel_4130) çözüyordu. Gaz tarafı
+        // h(z) bir malzemenin izin sıcaklığından (referans soğutulmuş cidar
+        // Tw_ref) çıkarken cidar iletimi başka malzemeninkinden geliyordu.
+        // ÖLÇÜLDÜ (docs/scofield/raw/OH/D19/app-api/a1/once_a1.json): aynı
+        // motorda q_MW tepe 6,122 (graphite) ⟷ 25,251 (steel_4130) MW/m²,
+        // oran 4,125. Panel malzemeyi UYDURMAZ: motorun kendi yapısal
+        // bloğundan okur (üç yerleşimin üçü de köprünün okuduğu alandır,
+        // hrma/fea/bridge.py::_extract_material) ve bulamazsa alanı hiç
+        // koymaz — o zaman uç varsayılanını ADIYLA ilan eder. Yanlış
+        // okursa da sessiz kalmaz: /api/fea/thermal profilin malzemesi
+        // mesh malzemesinden farklıysa adlı 422 verir (fail-closed).
+        const sa = m.structural_analysis;
+        if (sa && typeof sa === 'object') {
+            const adaylar = [
+                (sa.design_parameters || {}).material,
+                (sa.chamber_structure || {}).material_key,
+                (sa.case_analysis || {}).case_material,
+            ];
+            for (let i = 0; i < adaylar.length; i += 1) {
+                if (typeof adaylar[i] === 'string' && adaylar[i].trim()) {
+                    body.material = adaylar[i].trim();
+                    break;
+                }
+            }
+        }
         return { body: body, missing: missing };
+    }
+    /* Bekçiler için künye: gövde hangi yoldan kuruldu (düz alanlar ⟷
+       motor_results) ve motor düzeni ne. Ürün akışı bunu okumaz. */
+    function buildWallProfileBodyMeta(results) {
+        const r = buildWallProfileBody(results);
+        r.layout = engineLayoutLocal(motorDictLocal(results) || {});
+        r.via = (r.body && r.body.motor_results) ? 'motor_results' : 'flat';
+        return r;
     }
     // <<< THERMAL_FEA_PAYLOAD_END
     // ==================================================================
@@ -339,6 +585,11 @@
                 n_axial: mesh.n_axial, n_radial: mesh.n_radial,
                 grid_ni: grid.ni, grid_nj: grid.nj,
                 units: mesh.coordinate_units || null,
+                /* ÖH D26 · P11B3-21 — ağ üreticisinin geometri beyanı.
+                   ÖLÇÜLDÜ (a3/once.json): term_vm_meta_alinan = 0 —
+                   yapısal kardeş bloğu görünüm modeline ALIYOR ama
+                   basmıyordu; termal panel HİÇ almıyordu bile. */
+                mesh_meta: mesh.meta || null,
             },
             scalars: {
                 peak_wall_T_K: isNum(scalars.peak_wall_T_K)
@@ -383,11 +634,120 @@
                 mesh_policy: (meta.mesh_politikasi
                               && meta.mesh_politikasi.beyan) || null,
             },
+            /* ÖH D26 / P11B3-15 — MESH YAKINSAMASI EKRANIN ÜST KATINA
+               ÇIKAR. Çözücü bunu ZATEN beyan ediyordu
+               (`meta.mesh_politikasi.beyan`: "termal yolda MESH
+               yakınsaması otomatik DENETLENMEZ ..."), panel ise o cümleyi
+               YALNIZ katlanmış `<details id="fea_t_basis">` künye
+               bloğuna koyuyordu (ölçüldü, a2/once.json:
+               mesh_politikasi_kunyede = 2, mesh_politikasi_rozette = 0).
+               Rozet şeridinde ise YEŞİL "TIME STEP CONVERGED" duruyordu.
+               Kullanıcının gördüğü: yeşil "yakınsadı". Gerçek: yalnız
+               ZAMAN ekseni yakınsadı, UZAMSAL ayrıklık hiç sınanmadı.
+               Beyan katlı yerde kalırken yeşil rozetin üstte durması,
+               beyanın kendisini örtüyordu.
+
+               `mesh_declared`: çözücü mesh politikasını beyan etti mi?
+               Etmediyse rozet "BEYAN EDİLMEDİ" der (fail-closed): panel
+               "yakınsadı" ya da "yakınsamadı" diye HÜKÜM UYDURMAZ. */
+            mesh_declared: !!(meta.mesh_politikasi
+                              && typeof meta.mesh_politikasi === 'object'),
+            /* ÖH D37 A2-1 / F-02 — UZAMSAL MERDİVEN HÜKMÜ. Kaynak önceliği:
+               (1) fea.spatial_convergence (İngilizce sözleşme, app yaması
+               sonrası); (2) çözücünün kendi bloğu meta.cozucu.uzamsal_
+               yakinsama (bugün de yanıtta). İkisi de yoksa null → rozet
+               "BEYAN EDİLMEDİ" (fail-closed; hüküm UYDURULMAZ). */
+            spatial: spatialFromPayload(fea, meta),
+            /* F-01 (CW-B3) — iki termal yolun uzlaştırma bloğu (FEA yarısı). */
+            reconciliation: (fea.thermal_paths_reconciliation
+                             && typeof fea.thermal_paths_reconciliation === 'object')
+                ? fea.thermal_paths_reconciliation : null,
+            /* B2-CP — köprünün okuduğu motor yolları (sayı değil, künye). */
+            consumed_paths: Array.isArray(fea.consumed_paths)
+                ? fea.consumed_paths : null,
         };
         // Izgara SUNUCUNUN beyan ettiği düğüm sayısını vermiyorsa alan
         // çizilmez (kısmî harita, haritasızlıktan kötüdür).
         vm.grid_consistent = (grid.ni * grid.nj === mesh.n_nodes);
         return vm;
+    }
+    /* ÖH D37 A2-1 denetçi Ş4 — çözücü bloğunun Türkçe neden kodu →
+       sözleşmenin İngilizce reason_code'u. hrma/fea/bridge.py
+       SPATIAL_REASON_CODES ile BİREBİR (bekçi a2
+       test_neden_kodu_tablosu_kopruyle_ayni iki tabloyu karşılaştırır). */
+    const SOLVER_REASON_CODES = {
+        sinif: 'non_monotonic',
+        p_dusuk: 'observed_order_below_min',
+        gci_buyuk: 'gci_above_tolerance',
+        dejenere: 'degenerate_zero_change',
+        az_seviye: 'fewer_than_three_levels',
+        refiner_yok: 'no_mesh_refiner',
+    };
+    /* F-02 — uzamsal hükmü tek biçime indirir: {verdict, reason_code,
+       gci_status, p, p_min, gci_pct, tol_pct, levels[{n_axial,n_radial,
+       peak_K,published}], published_level, extrapolated_K,
+       richardson_reliable, declaration}. Sayı türetmez; iki kaynaktan
+       hangisi varsa onun alanlarını taşır. Sunucunun Türkçe ``reason``
+       metni BİLEREK taşınmaz (Ş4: ekran onu basmaz, kodu kendi dilinde
+       kurar). */
+    function spatialFromPayload(fea, meta) {
+        const sc = fea && fea.spatial_convergence;
+        if (sc && typeof sc === 'object') {
+            return {
+                source: 'fea.spatial_convergence',
+                verdict: sc.verdict || null,
+                reason_code: (typeof sc.reason_code === 'string')
+                    ? sc.reason_code : null,
+                gci_status: (typeof sc.gci_status === 'string')
+                    ? sc.gci_status : null,
+                p: isNum(sc.observed_order_p) ? sc.observed_order_p : null,
+                p_min: isNum(sc.p_min_asymptotic) ? sc.p_min_asymptotic : null,
+                gci_pct: isNum(sc.gci_fine_pct) ? sc.gci_fine_pct : null,
+                tol_pct: isNum(sc.gci_tolerance_pct) ? sc.gci_tolerance_pct : null,
+                levels: Array.isArray(sc.levels) ? sc.levels.map(function (l) {
+                    return { n_axial: l.n_axial, n_radial: l.n_radial,
+                             peak_K: l.peak_wall_T_K, published: !!l.published };
+                }) : [],
+                published_level: sc.published_level || null,
+                extrapolated_K: isNum(sc.richardson_extrapolated_peak_K)
+                    ? sc.richardson_extrapolated_peak_K : null,
+                richardson_reliable: (typeof sc.richardson_reliable === 'boolean')
+                    ? sc.richardson_reliable : null,
+                declaration: sc.declaration || null,
+            };
+        }
+        const u = meta && meta.cozucu && meta.cozucu.uzamsal_yakinsama;
+        if (u && typeof u === 'object') {
+            return {
+                source: 'meta.cozucu.uzamsal_yakinsama',
+                /* Fail-closed: hüküm alanı (hukum) yoksa bu F-02 ÖNCESİ tek
+                   inceltmeli bloktur — GCI'sız "converged" hükmü 'legacy'
+                   diye ayrı okunur; panel onu üç seviyeli hüküm gibi
+                   BASMAZ (ölçüldü: ÖNCE yükü "p = —, GCI —%" basıyordu). */
+                verdict: u.hukum || (u.denetlendi === false ? 'not_evaluated'
+                                     : 'legacy_single_refinement'),
+                rel_change: isNum(u.rel_change) ? u.rel_change : null,
+                reason_code: (Object.prototype.hasOwnProperty.call(
+                    SOLVER_REASON_CODES, u.neden_kodu))
+                    ? SOLVER_REASON_CODES[u.neden_kodu] : null,
+                gci_status: (u.gci && typeof u.gci.status === 'string')
+                    ? u.gci.status : null,
+                p: isNum(u.p) ? u.p : null,
+                p_min: isNum(u.p_min_asimptotik) ? u.p_min_asimptotik : null,
+                gci_pct: isNum(u.GCI_fine21) ? 100.0 * u.GCI_fine21 : null,
+                tol_pct: isNum(u.tol) ? 100.0 * u.tol : null,
+                levels: Array.isArray(u.seviyeler) ? u.seviyeler.map(function (l) {
+                    return { n_axial: l.n_axial, n_radial: l.n_radial,
+                             peak_K: l.peak_wall_T, published: !!l.yayimlandi };
+                }) : [],
+                published_level: u.yayimlanan_seviye || null,
+                extrapolated_K: isNum(u.peak_wall_T_ext_K) ? u.peak_wall_T_ext_K : null,
+                richardson_reliable: (typeof u.richardson_guvenilir === 'boolean')
+                    ? u.richardson_guvenilir : null,
+                declaration: u.beyan || null,
+            };
+        }
+        return null;
     }
     // <<< THERMAL_FEA_VIEWMODEL_END
     // ==================================================================
@@ -435,7 +795,7 @@
     function panelHtml() {
         return `
         <div class="panel" id="thermalFeaPanel" style="width:100%; grid-column: 1 / -1;">
-            <h2>▣ <span data-i18n="feaT.title">${T('feaT.title',
+            <h2><span data-i18n="feaT.title">${T('feaT.title',
                 'Thermal FEA — Transient Wall Temperature Field')}</span></h2>
             <div class="chart-explanation">
                 <strong data-i18n="common.whatThisShows">${T('common.whatThisShows',
@@ -456,11 +816,15 @@
                     data-i18n="feaT.run">${T('feaT.run', 'Run thermal analysis')}</button>
                 <span id="fea_t_busy" style="display:none; font-family:var(--hd-mono);
                     font-size:0.78rem; color:var(--hd-cyan, #00e5ff);"></span>
+                <button id="fea_t_cancel" class="btn" type="button"
+                    style="display:none; padding:2px 10px; font-size:0.75rem;"
+                    >${esc(T('feaT.cancel', 'Cancel run'))}</button>
                 <label style="font-family:var(--hd-mono); font-size:0.75rem;
                     color:var(--hd-ink-dim, #7d97a5); display:flex; gap:6px; align-items:center;">
                     <span data-i18n="feaT.ambientLabel">${T('feaT.ambientLabel',
                         'Initial / ambient temperature [K]')}</span>
-                    <input type="number" id="fea_t_ambient" value="293.15" step="0.05"
+                    <input type="number" id="fea_t_ambient"
+                        value="${AMBIENT_PANEL_DEFAULT_K}" step="0.05"
                         style="width:90px;">
                 </label>
                 <label style="font-family:var(--hd-mono); font-size:0.75rem;
@@ -650,6 +1014,142 @@
     // ------------------------------------------------------------------
     // Basım
     // ------------------------------------------------------------------
+    /* ÖH D37 A2-1 denetçi Ş4 — NEDEN, EKRANIN DİLİNDE. Eskiden rozet
+       sunucunun Türkçe neden metnini (iç kod 'p_dusuk' dâhil) AYNEN
+       basıyordu; EN ekranda şu görünüyordu (ölçüldü, sonra/kare/
+       termal_panel_t7_1440.png): "MESH NOT CONVERGED — p_dusuk: gözlenen
+       mertebe 0.450 < 1 ...". Artık yalnız makine kodu okunur ve metin
+       EN/TR i18n anahtarından kurulur; sayılar TF'ye saf ondalık metin olarak
+       girer (TR ekranda virgül). Kod yoksa ya da tanınmıyorsa metin
+       UYDURULMAZ: "neden makine biçiminde beyan edilmedi" (fail-closed). */
+    function spatialReasonText(sp) {
+        const code = sp && sp.reason_code;
+        if (code === 'observed_order_below_min') {
+            return TF('feaT.meshReasonOrderLow',
+                { p: fmt(sp.p, 3), pmin: fmt(sp.p_min, 1) },
+                'observed order p = {p} < {pmin} (outside the asymptotic '
+                + 'range; the Richardson extrapolation is unreliable)');
+        }
+        if (code === 'gci_above_tolerance') {
+            return TF('feaT.meshReasonGciLarge',
+                { gci: fmt(sp.gci_pct, 3), tol: fmt(sp.tol_pct, 2) },
+                'GCI {gci}% above the {tol}% tolerance');
+        }
+        if (code === 'non_monotonic') {
+            if (sp.gci_status === 'monotonic_divergent') {
+                return T('feaT.meshReasonDivergent',
+                    'monotonic divergence — the peak keeps moving away with '
+                    + 'refinement; no GCI');
+            }
+            if (sp.gci_status === 'oscillatory') {
+                return T('feaT.meshReasonOscillatory',
+                    'oscillatory ladder; no GCI');
+            }
+            return T('feaT.meshReasonNonMonotonic',
+                'no monotonic convergence; no GCI');
+        }
+        return T('feaT.meshReasonUnknown',
+            'reason not declared in machine form — see the declaration');
+    }
+
+    /* ÖH D37 A2-1 / F-02 — MERDİVEN ROZETİ (renderBadges'in yardımcısı).
+       Rozet çözücünün ÜÇ SEVİYELİ merdiven + GCI hükmünü söyler (converged /
+       not_converged + neden / degenerate / not_evaluated / F-02 öncesi tek
+       inceltme); eski sabit "DENETLENMEDİ" metni BAYATTI (çözücü P8B1-10'dan
+       beri ölçüyordu, köprü inkâr ediyordu). Hüküm ve sayılar sunucudan;
+       hüküm yoksa null döner ve renderBadges fail-closed "BEYAN EDİLMEDİ"
+       rozetini basar. Ayrı işlev: P11B3-15/16 kaynak bekçileri rozet
+       şeridinin ilk 4000 karakterinde mesh + ambient rozetlerini arar. */
+    function spatialBadge(sp) {
+        if (!sp || !sp.verdict) return null;
+        const lvl = sp.published_level
+            ? (sp.published_level.n_axial + '×' + sp.published_level.n_radial) : '?';
+        if (sp.verdict === 'converged') {
+            return badge(TF('feaT.badgeMeshConverged',
+                { p: fmt(sp.p, 2), gci: fmt(sp.gci_pct, 3), lvl: lvl },
+                'MESH CONVERGED (3-level ladder, GCI) — p = {p}, GCI {gci}% · '
+                + 'published level {lvl}'), 'ok');
+        }
+        if (sp.verdict === 'not_converged') {
+            return badge(TF('feaT.badgeMeshNotConvergedGci',
+                { reason: esc(spatialReasonText(sp)), lvl: lvl },
+                'MESH NOT CONVERGED — {reason} · published level {lvl}; the '
+                + 'peak temperature is still mesh-sensitive'), 'warn');
+        }
+        if (sp.verdict === 'legacy_single_refinement') {
+            return badge(TF('feaT.badgeMeshLegacy',
+                { rel: isNum(sp.rel_change) ? fmt(100.0 * sp.rel_change, 3) : '—' },
+                'MESH: single 2× refinement only (pre-F-02 solver) — peak '
+                + 'change {rel}%, no GCI; the residual error is NOT bounded'),
+                'warn');
+        }
+        if (sp.verdict === 'degenerate') {
+            return badge(T('feaT.badgeMeshDegenerate',
+                'MESH LADDER DEGENERATE — the peak did not change between '
+                + 'levels (pinned boundary?); no GCI; see the declaration'),
+                'warn');
+        }
+        return badge(T('feaT.badgeMeshNotEvaluated',
+            'MESH CONVERGENCE NOT EVALUATED — fewer than three ladder '
+            + 'levels were solved; see the declaration below'), 'warn');
+    }
+
+    /* ÖH D37 A2-1 termal 7. tur — olumlu hüküm geri çekme nedenleri
+       (sunucunun makine kodu → bu ekranın dili). Tanınmayan kod AYNEN
+       basılır (sessiz düşmez). */
+    function withheldReasonText(ml) {
+        const kodlar = (ml && Array.isArray(ml.verdict_withheld_reasons))
+            ? ml.verdict_withheld_reasons : [];
+        const metin = kodlar.map(function (k) {
+            if (k === 'numerical_convergence_not_achieved') {
+                return T('feaT.withheldNumerical',
+                    'numerical convergence not achieved');
+            }
+            if (k === 'gas_properties_assumed') {
+                const alanlar = (Array.isArray(ml.inputs_assumed)
+                    ? ml.inputs_assumed : []).map(function (a) {
+                        return a && a.field;
+                    }).filter(Boolean).join(', ');
+                return TF('feaT.withheldGas', { fields: alanlar || '—' },
+                    'gas properties assumed (module default: {fields})');
+            }
+            // 8. tur (yeniden denetim-7 Ş1): profil gaz künyesi taşımıyor
+            // (ya da künye okunamıyor) — gaz "varsayıldı" değil, BİLİNMİYOR.
+            if (k === 'gas_properties_not_declared') {
+                return T('feaT.withheldGasUndeclared',
+                    'the h(z) profile does not declare its gas properties');
+            }
+            return String(k);
+        });
+        return metin.join('; ');
+    }
+
+    /* ÖH D37 A2-1 termal 7. tur — karar §28-24 §1 c / §2 b: yakınsamamış
+       alan ya da jenerik gazlı profil OLUMLU hüküm üretmez. Neden kodları
+       SUNUCUDAN (verdict_withheld_reasons); panel hüküm uydurmaz. Ayrı
+       işlev: P11B3-15/16 kaynak bekçileri renderBadges'in ilk 4000
+       karakterinde mesh + ambient rozetlerini arar (spatialBadge ile aynı
+       gerekçe). */
+    function withheldBadge(ml) {
+        return badge(TF('feaT.badgeVerdictWithheld',
+            { reasons: esc(withheldReasonText(ml)),
+              allow: fmt(ml.allowable_temperature_K, 0) },
+            'NO SAFETY VERDICT — {reasons}; the peak is shown against '
+            + 'the allowable {allow} K for information only'), 'warn');
+    }
+
+    /* F-01 (CW-B3) — iki yol tek rozette: denge ⟷ geçici tepe. Sayılar
+       sunucunun uzlaştırma bloğundan; blok/sayı yoksa rozet yok. */
+    function reconciliationBadge(rc) {
+        if (!rc || !isNum(rc.equilibrium_K) || !isNum(rc.fea_peak_K)) return '';
+        return badge(TF('feaT.badgeReconciliation',
+            { eq: fmt(rc.equilibrium_K, 0), fe: fmt(rc.fea_peak_K, 0),
+              t: fmt(rc.fea_time_s, 1), gap: fmt(rc.gap_K, 0) },
+            'TWO THERMAL PATHS: equilibrium (t→∞) {eq} K vs transient peak '
+            + '{fe} K at t = {t} s — gap {gap} K (different questions, not '
+            + 'a contradiction)'), 'info');
+    }
+
     function renderBadges(el, vm) {
         let html = '';
         if (vm.engine_layout) {
@@ -679,6 +1179,8 @@
                       melt: fmt(ml.melting_point_K, 0) },
                     'EXCEEDS ALLOWABLE {allow} K (melting point {melt} K)'),
                     'warn');
+            } else if (ml.verdict_withheld === true) {
+                html += withheldBadge(ml);   // 7. tur, §28-24
             } else if (ml.exceeds_allowable === false) {
                 html += badge(TF('feaT.badgeWithinLimits',
                     { allow: fmt(ml.allowable_temperature_K, 0) },
@@ -696,17 +1198,58 @@
                 + 'material record)'), 'dim');
         }
 
+        // P11B3-21 — GEOMETRİ DEĞİŞTİYSE HÜKÜM ŞERİDİNDE SÖYLENİR
+        // (yapısal kardeşle aynı kat, aynı eşik).
+        const _dy = disYuzeyBeyani(vm.mesh_info && vm.mesh_info.mesh_meta);
+        if (_dy && _dy.duzeltilen !== null && _dy.duzeltilen > 0) {
+            html += badge(TF('feaT.badgeOuterModified',
+                { n: _dy.duzeltilen,
+                  pct: (_dy.sapma_yuzde !== null)
+                      ? fmt(_dy.sapma_yuzde, 1) : '?' },
+                'OUTER SURFACE MODIFIED at {n} station(s) · wall {pct}% vs '
+                + 'requested'), 'warn');
+        }
         if (vm.energy && isNum(vm.energy.residual_rel)) {
             html += badge(TF('feaT.badgeEnergy',
                 { v: fmtExp(vm.energy.residual_rel) },
                 'ENERGY RESIDUAL {v} (relative)'), 'info');
         }
         if (vm.time_step && 'converged' in vm.time_step) {
+            // P11B3-15: rozet artık HANGİ EKSENİN yakınsadığını söyler.
+            // Eski metin ("TIME STEP CONVERGED") çıplak bir "yakınsadı"
+            // gibi okunuyordu; yanındaki mesh rozetiyle birlikte hükmün
+            // kapsamı ekranda kapalıdır.
             html += badge(vm.time_step.converged
-                ? T('feaT.badgeStepOk', 'TIME STEP CONVERGED')
+                ? T('feaT.badgeStepOk',
+                    'TIME STEP CONVERGED (time axis only)')
                 : T('feaT.badgeStepNo', 'TIME STEP NOT CONVERGED — read the '
                     + 'declaration below'),
                 vm.time_step.converged ? 'ok' : 'warn');
+        }
+        /* P11B3-15 — mesh yakınsaması rozeti, zaman adımı rozetinin
+           YANINDA; hüküm ölçülmüşse spatialBadge (F-02), yoksa fail-closed. */
+        const meshRozeti = spatialBadge(vm.spatial);
+        html += (meshRozeti !== null) ? meshRozeti : badge(vm.mesh_declared
+            ? T('feaT.badgeMeshNotConverged',
+                'MESH CONVERGENCE NOT CHECKED — spatial discretisation was '
+                + 'not refined; see the declaration below')
+            : T('feaT.badgeMeshNotDeclared',
+                'MESH CONVERGENCE NOT DECLARED — the solver published no '
+                + 'mesh policy for this run'),
+            'warn');
+        html += reconciliationBadge(vm.reconciliation);
+        /* P11B3-16 — başlangıç koşulunun SAHİBİ rozet katında. Künye
+           bloğu katlıdır; sayının kime ait olduğu katlı yerde kalırsa
+           P11B3-15'in kusuru tekrarlanır. */
+        if (ambientSource === 'panel_default') {
+            html += badge(TF('feaT.badgeAmbientDefault',
+                { v: String(AMBIENT_PANEL_DEFAULT_K) },
+                'INITIAL T = {v} K IS THE PANEL DEFAULT (you supplied no '
+                + 'ambient temperature)'), 'warn');
+        } else if (ambientSource === 'user') {
+            html += badge(TF('feaT.badgeAmbientUser',
+                { v: fmt(vm.scalars.ambient_temperature_K, 2) },
+                'INITIAL T {v} K SUPPLIED BY YOU'), 'info');
         }
         if (carpetFallback) {
             html += badge(T('feaT.badgeFallback',
@@ -737,6 +1280,71 @@
         el.innerHTML = html;
     }
 
+    /* ÖH D26 · P11B3-21 — DIŞ YÜZEY DÜZELTMESİ BEYANI (termal ayak).
+       Yapısal kardeşin (fea_panel.js `disYuzeyBeyani`) okuduğu ALANLARIN
+       AYNISI okunur; iki panel aynı ağın aynı gerçeğini söyler. Sayı
+       türetilmez, ucun kendi alanları basılır; alan yoksa satır yok. */
+    /* ÖH D27 · OH-D26-16 — YÜZDE ÇARPANI TEK KAYNAKTAN.
+       `const YUZDE = 100.0` bu dosyada ve kardeşinde AYRI AYRI yazılıydı
+       (ölçüldü: a2/once.json `yuzde_yerel_tanim` = 2). Artık ikisi de
+       `units_constants.js`ten OKUR. FAIL-CLOSED: modül yoksa yedek sayı
+       uydurulmaz, hata fırlar. Çözüm ÇAĞRI ANINDA yapılır (yükleme anında
+       değil) ki bu dosyayı units_constants.js olmadan yükleyen mevcut
+       düzenekler kırılmasın — kapı, sayının KULLANILDIĞI yerdedir. */
+    function yuzdeCarpani() {
+        var g = (typeof window !== 'undefined') ? window : globalThis;
+        if (!g.HRMAUnits && typeof require === 'function') {
+            try {
+                var m = require('./units_constants.js');
+                g.HRMAUnits = m.UNITS;
+                g.HRMAUnits.requirePercentPerFraction =
+                    m.requirePercentPerFraction;
+            } catch (e) { /* tarayıcıda require yok — <script> ile gelir */ }
+        }
+        if (!g.HRMAUnits || !g.HRMAUnits.requirePercentPerFraction) {
+            throw new Error('units_constants.js must load before this panel: '
+                + 'PERCENT_PER_FRACTION has a single source and is not '
+                + 're-declared here.');
+        }
+        return g.HRMAUnits.requirePercentPerFraction();
+    }
+
+    function disYuzeyBeyani(meta) {
+        if (!meta || typeof meta !== 'object') return null;
+        const t = meta.dis_yuzey_egrilik_tabani;
+        if (!t || typeof t !== 'object') return null;
+        const duzeltilen = t.duzeltilen_istasyon;
+        const sapma = t.kalinlik_sapma_orani;
+        return {
+            duzeltilen: (typeof duzeltilen === 'number'
+                         && isFinite(duzeltilen)) ? duzeltilen : null,
+            sapma_yuzde: (typeof sapma === 'number' && isFinite(sapma))
+                ? sapma * yuzdeCarpani() : null,
+            taban_kaynagi: (typeof t.taban_kaynagi === 'string')
+                ? t.taban_kaynagi : null,
+        };
+    }
+
+    function disYuzeySatirlari(meta) {
+        const d = disYuzeyBeyani(meta);
+        if (!d) return [];
+        const satir = [];
+        if (d.duzeltilen !== null) {
+            satir.push(TF('feaT.meshOuterCorrected', { n: d.duzeltilen },
+                'mesh.meta: the outer surface was corrected at {n} axial '
+                + 'station(s) for well-posedness; the wall solved here is the '
+                + 'meshed wall, not the raw offset.'));
+        }
+        if (d.sapma_yuzde !== null) {
+            satir.push(TF('feaT.meshThicknessDeviation',
+                { pct: fmt(d.sapma_yuzde, 1) },
+                'mesh.meta: solved wall thickness deviates {pct}% from the '
+                + 'requested thickness (kalinlik_sapma_orani).'));
+        }
+        if (d.taban_kaynagi) satir.push(SRV(d.taban_kaynagi));
+        return satir;
+    }
+
     function renderBasis(els, vm) {
         if (!els.basis || !els.basisText) return;
         const parts = [];
@@ -745,6 +1353,151 @@
         if (vm.basis.history) parts.push(SRV(vm.basis.history));
         if (vm.basis.material) parts.push(SRV(vm.basis.material));
         if (vm.basis.mesh_policy) parts.push(SRV(vm.basis.mesh_policy));
+        /* F-02 — merdivenin seviyeleri sayılarıyla (sunucudan). */
+        if (vm.spatial && vm.spatial.levels && vm.spatial.levels.length) {
+            /* Ş4: merdiven metnindeki sayılar ekran biçimlendiricisinden
+               (TR virgül); Ş7: dışdeğer asimptotik aralık dışındaysa
+               (richardson_reliable === false) SAYI BASILMAZ, nedeni yazılır
+               — sunucu sayıyı yine yayımlar, ekran onu hata sınırı gibi
+               göstermez. */
+            const merdiven = vm.spatial.levels.map(function (l) {
+                return l.n_axial + '×' + l.n_radial + ' ' + fmtScr(l.peak_K, 2)
+                    + ' K' + (l.published ? ' *' : '');
+            }).join(' → ');
+            if (vm.spatial.richardson_reliable === false) {
+                parts.push(TF('feaT.ladderLineUnreliable', { ladder: merdiven },
+                    'Spatial ladder (peak wall T; * = published level): '
+                    + '{ladder}; Richardson extrapolation NOT shown — the '
+                    + 'observed order is below the asymptotic minimum, so the '
+                    + 'extrapolation and the residual error estimates are a '
+                    + 'direction indicator only, not an error bound'));
+            } else {
+                parts.push(TF('feaT.ladderLine',
+                    { ladder: merdiven,
+                      ext: (vm.spatial.extrapolated_K !== null)
+                          ? fmt(vm.spatial.extrapolated_K, 2) : '—' },
+                    'Spatial ladder (peak wall T; * = published level): {ladder}; '
+                    + 'Richardson extrapolation {ext} K.'));
+            }
+            if (vm.spatial.declaration) parts.push(SRV(vm.spatial.declaration));
+        }
+        /* F-01 — uzlaştırma: hangi sayı hangi soruya cevap (sunucu metni). */
+        if (vm.reconciliation) {
+            const r = vm.reconciliation;
+            parts.push(TF('feaT.reconLine',
+                { eq: (isNum(r.equilibrium_K) ? fmt(r.equilibrium_K, 1) : '—'),
+                  fe: (isNum(r.fea_peak_K) ? fmt(r.fea_peak_K, 1) : '—'),
+                  gap: (isNum(r.gap_K) ? fmt(r.gap_K, 1) : '—') },
+                'Two thermal paths — equilibrium chain {eq} K (steady-state '
+                + 'surface energy balance, t→∞) vs this FEA peak {fe} K '
+                + '(transient, end of burn); gap {gap} K.'));
+            if (r.question_equilibrium) parts.push(SRV(r.question_equilibrium));
+            if (r.question_fea) parts.push(SRV(r.question_fea));
+        }
+        /* B2-CP — okunan motor yolları (yalnız künye; sayı değil). */
+        if (vm.consumed_paths && vm.consumed_paths.length) {
+            parts.push(TF('feaT.consumedPaths', { n: vm.consumed_paths.length,
+                list: vm.consumed_paths.map(function (c) { return c.path; }).join(', ') },
+                'Motor fields read by the FEA bridge ({n}): {list}.'));
+        }
+        // P11B3-21 — ağ üreticisinin geometri beyanı.
+        disYuzeySatirlari(vm.mesh_info && vm.mesh_info.mesh_meta)
+            .forEach(function (c) { parts.push(c); });
+        /* ÖH D26 / OH-B3-02 — konturun künyesi (wall_profile.contour_basis).
+           Uç yedi alt alan yayımlıyordu, panel bloğu hiç anmıyordu; h(z)
+           profili ekranda künyesiz çiziliyordu. Alt alanlar AYNEN, ad =
+           değer olarak basılır (panel metni yeniden yazmaz). */
+        if (lastContourBasis) {
+            const satir = Object.keys(lastContourBasis).map(function (ad) {
+                const v = lastContourBasis[ad];
+                return ad + ' = ' + ((v === null || v === undefined)
+                    ? T('feaT.notSupplied', 'not supplied')
+                    : (typeof v === 'object' ? JSON.stringify(v) : String(v)));
+            });
+            if (satir.length) {
+                parts.push(T('feaT.contourBasisTitle',
+                    'Contour basis of the h(z) profile (published by '
+                    + '/api/analysis/wall-profile):') + '\n' + satir.join('\n'));
+            }
+        }
+        /* ÖH D28 / arayuz a1 (OH-D27-16) — SÜTUN KÜNYESİ VE BİRİMLERİ.
+           ÖLÇÜLDÜ (a1/once.json, taban 7cd08bcc): D26 / app-api a4
+           (`e5882484`, P7B3-31) bu uca `column_basis` (6 sütun) ve
+           `units` (14 sütun) bloklarını ekledi; panel ikisini de hiç
+           okumuyordu. Künyenin taşıdığı ölçüm şudur: `q_MW` TASARIM
+           referans cidarında, `T_wall_eq` ise yüzey enerji dengesinden
+           gelir; q/(T_recovery − T_wall_eq) orta istasyonda yayımlanan
+           `h_g`nin 86,1 KATIDIR. Üç sütunu q = h_g·ΔT diye birbirine
+           bağlayan okuyucu 86 kat yanılır — künye bu yüzden ekranda
+           olmak zorundadır. Metin SUNUCUDAN gelir (SRV), panel onu
+           yeniden yazmaz; birim `units` bloğundan okunur, uydurulmaz. */
+        if (lastColumnBasis || lastProfileUnits) {
+            const kunye = lastColumnBasis || {};
+            const birim = lastProfileUnits || {};
+            // Fiziksel sütunlar ADIYLA öne alınır (okuma sırası tutarlı
+            // olsun diye); ucun yayımladığı başka ad varsa o da DÜŞMEZ.
+            const onSira = ['h_g', 'q_MW', 'T_wall_eq', 'T_recovery',
+                            'mach', 'area_ratio'];
+            const gorulen = {};
+            const sutunlar = [];
+            onSira.concat(Object.keys(kunye), Object.keys(birim))
+                .forEach(function (ad) {
+                    if (gorulen[ad]) return;
+                    if (!(ad in kunye) && !(ad in birim)) return;
+                    gorulen[ad] = true;
+                    sutunlar.push(ad);
+                });
+            const satirlar = sutunlar.map(function (ad) {
+                const b = birim[ad];
+                const k = kunye[ad];
+                return ad + (b ? ' [' + String(b) + ']' : '')
+                    + (k ? ' = ' + SRV(String(k)) : '');
+            });
+            if (satirlar.length) {
+                parts.push(T('feaT.columnBasisTitle',
+                    'Column basis and units of the axial profile '
+                    + '(published by /api/analysis/wall-profile - q_MW is '
+                    + 'the DESIGN flux at the reference wall, NOT '
+                    + 'h_g*(T_recovery - T_wall_eq)):')
+                    + '\n' + satirlar.join('\n'));
+            }
+        }
+        /* ÖH D37 A2-1 termal 7. tur (karar §28-24 §2) — h(z)'nin gazı:
+           her alanın değeri ve KÖKENİ sunucunun bloğundan AYNEN. */
+        if (lastGasBasis) {
+            const gsat = ['gamma', 'molecular_weight', 'c_star']
+                .filter(function (ad) {
+                    return lastGasBasis[ad] && typeof lastGasBasis[ad] === 'object';
+                })
+                .map(function (ad) {
+                    const g = lastGasBasis[ad];
+                    return ad + ' = ' + (isNum(g.value) ? fmt(g.value, 4) : '—')
+                        + (g.unit ? ' ' + String(g.unit) : '')
+                        + ' (' + String(g.source) + ')';
+                });
+            if (gsat.length) {
+                const eksik = Array.isArray(lastGasBasis.assumed_fields)
+                    ? lastGasBasis.assumed_fields : [];
+                parts.push(TF('feaT.gasBasisTitle',
+                    { assumed: eksik.length ? eksik.join(', ') : '—' },
+                    'Gas properties of the h(z) profile (module defaults: '
+                    + '{assumed}):') + '\n' + gsat.join('\n'));
+            }
+        }
+        /* ÖH D26 / P11B3-16 — gönderilen ortam sıcaklığının SAHİBİ.
+           `ambientSource` koşum anında kaydedilir; burada yalnız okunur. */
+        if (ambientSource === 'panel_default') {
+            parts.push(TF('feaT.ambientPanelDefault',
+                { v: String(AMBIENT_PANEL_DEFAULT_K) },
+                'Initial / ambient temperature {v} K is THIS PANEL\'s default, '
+                + 'not a value you supplied: the field was pre-filled and was '
+                + 'never edited. The solver used it as the uniform initial '
+                + 'condition. Change the field to run on your own number.'));
+        } else if (ambientSource === 'user') {
+            parts.push(T('feaT.ambientUser',
+                'Initial / ambient temperature was supplied by you (the field '
+                + 'was edited before this run).'));
+        }
         if (vm.bc.inner) parts.push(SRV(vm.bc.inner));
         if (vm.bc.initial) parts.push(SRV(vm.bc.initial));
         if (vm.bc.window) parts.push(SRV(vm.bc.window));
@@ -788,6 +1541,7 @@
             badges: document.getElementById('fea_t_badges'),
             chip: document.getElementById('fea_t_chip'),
             busy: document.getElementById('fea_t_busy'),
+            cancel: document.getElementById('fea_t_cancel'),
             warnings: document.getElementById('fea_t_warnings'),
             field: document.getElementById('fea_t_plot_field'),
             inner: document.getElementById('fea_t_plot_inner'),
@@ -799,14 +1553,53 @@
         if (!els.badges || !els.chip) return;   // panel kurulmamış
 
         if (els.busy) {
-            // Belirsiz süreli iş: yüzde YOK, nabız var (sahte ilerleme yasak).
-            els.busy.style.display = busy ? '' : 'none';
-            els.busy.textContent = busy
-                ? T('feaT.busy', 'Running — the gas-side profile is computed '
-                    + 'first, then the transient solver refines its time step '
-                    + 'until the peak temperature stops changing; the duration '
-                    + 'is not known in advance.') : '';
-            if (busy) els.busy.setAttribute('data-indeterminate', 'true');
+            // Yüzde YOK (sahte ilerleme yasak) ama GEÇEN SÜRE ve SÜRE
+            // SINIRI yazılır — P17B1-18: eski satır gerekçesiz, süresiz
+            // ve sonsuzdu; kullanıcı takılı koşumu yavaş koşumdan
+            // ayıramıyordu.
+            const bel = els.busy;
+            bel.style.display = busy ? '' : 'none';
+            if (!busy) {
+                bel.textContent = '';
+                ozS(bel, 'data-indeterminate');
+                ozS(bel, 'data-elapsed-s');
+                nabziDurdur();
+            } else {
+                ozY(bel, 'data-indeterminate', 'true');
+                const govde = T('feaT.busy', 'Running — the gas-side profile is '
+                    + 'computed first, then the transient solver refines its time '
+                    + 'step until the peak temperature stops changing; the '
+                    + 'duration is not known in advance.');
+                const ms = zamanAsimiMs();
+                const boya = function () {
+                    const gecen = busySince
+                        ? Math.max(0, Math.round((Date.now() - busySince) / 1000)) : 0;
+                    ozY(bel, 'data-elapsed-s', String(gecen));
+                    bel.textContent = govde + ' ' + (ms
+                        ? TF('feaT.busyElapsed',
+                             { s: gecen, limit: Math.round(ms / 1000) },
+                             'Elapsed {s} s; the request is cancelled after '
+                             + '{limit} s.')
+                        : TF('feaT.busyElapsedNoLimit', { s: gecen },
+                             'Elapsed {s} s.'));
+                };
+                boya();
+                nabziDurdur();
+                // Nabız yalnız gerçek, bağlı DOM düğümünde kurulur.
+                if (bel.isConnected !== true
+                        || typeof setInterval !== 'function') return;
+                nabizTimer = setInterval(function () {
+                    if (!bel.isConnected || bel.style.display === 'none') {
+                        nabziDurdur();
+                        return;
+                    }
+                    boya();
+                }, NABIZ_MS);
+            }
+        }
+        // P11B3-19 — iptal düğmesi YALNIZ koşum sürerken görünür.
+        if (els.cancel && els.cancel.style) {
+            els.cancel.style.display = busy ? '' : 'none';
         }
 
         if (vm.mode !== 'ok') {
@@ -917,6 +1710,19 @@
         return (cur && typeof cur === 'object') ? cur : null;
     }
 
+    /* ÖH D26 / P11B3-16 — alan KİMİN? `data-dirty` imi analysis_dock'un
+       öneri kapısıyla aynı desendir: kullanıcı alana dokunduğu anda im
+       düşer ve panel bir daha "bu benim varsayılanım" demez. */
+    function markAmbientDirty() {
+        const el = document.getElementById('fea_t_ambient');
+        if (el) el.setAttribute('data-dirty', '1');
+    }
+
+    function ambientIsUserSupplied() {
+        const el = document.getElementById('fea_t_ambient');
+        return !!(el && el.getAttribute('data-dirty') === '1');
+    }
+
     function readAmbientK() {
         const el = document.getElementById('fea_t_ambient');
         const v = el ? parseFloat(el.value) : NaN;
@@ -956,8 +1762,14 @@
         }
 
         const ambientK = readAmbientK();
+        // P11B3-16: gönderilen sayının SAHİBİ koşumla birlikte kaydedilir.
+        // Alan boşsa/çözülemezse kaynak da yoktur (uydurulmaz).
+        ambientSource = (ambientK === undefined)
+            ? null
+            : (ambientIsUserSupplied() ? 'user' : 'panel_default');
 
         busy = true;
+        busySince = Date.now();
         lastError = null;
         render();
         // Adım 1 — h(z) profili (ölçülmüş zincir): /api/analysis/wall-profile
@@ -965,6 +1777,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(built.body),
+            signal: kosumSinyali(),   // P17B4-07 + P11B3-19 (adım 1)
         }).then(function (resp) {
             return resp.json().then(function (body) {
                 return { ok: resp.ok, body: body };
@@ -977,6 +1790,23 @@
                          + 'thermal FEA was not attempted.'));
             }
             const wp = r.body.wall_profile;
+            // OH-B3-02: konturun künyesi AYNEN saklanır (uç ne yayımladıysa);
+            // panel onu yeniden yazmaz, künye bloğunda gösterir.
+            lastContourBasis = (wp && wp.contour_basis
+                                && typeof wp.contour_basis === 'object')
+                ? wp.contour_basis : null;
+            // OH-D27-16 (ÖH D28 / arayuz a1): sütun künyesi ve birimleri
+            // de AYNEN saklanır. Uç yayımlamadıysa null kalır ve künye
+            // bölümünde hiçbir satır çıkmaz — birim UYDURULMAZ.
+            lastColumnBasis = (wp && wp.column_basis
+                               && typeof wp.column_basis === 'object')
+                ? wp.column_basis : null;
+            lastProfileUnits = (wp && wp.units
+                                && typeof wp.units === 'object')
+                ? wp.units : null;
+            lastGasBasis = (wp && wp.gas_properties_basis
+                            && typeof wp.gas_properties_basis === 'object')
+                ? wp.gas_properties_basis : null;
             if (!wp || !Array.isArray(wp.x_mm) || !wp.x_mm.length) {
                 throw new Error(T('feaT.profileEmpty',
                     'The wall-profile endpoint returned no axial stations; '
@@ -994,6 +1824,8 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(govde),
+                // Adım 2 AYNI sinyali taşır: iptal burada da geçerlidir.
+                signal: aktifSinyal || zamanAsimiSinyali(),
             });
         }).then(function (resp) {
             return resp.json().then(function (body) {
@@ -1001,21 +1833,56 @@
             });
         }).then(function (r) {
             busy = false;
-            if (!r.ok || !r.body || r.body.status !== 'success') {
+            busySince = null;
+            // OH-D17-07: uç, köprü reddettiğinde artık HTTP 200 + 'success'
+            // DEĞİL, adlandırılmış red yayımlıyor (NOT_MODELLED -> 422 +
+            // status='not_modelled'; NOT_AVAILABLE / INPUTS_READY -> 501).
+            // Bunlar HATA DEĞİL, köprünün BEYANLI hükmüdür: gövde
+            // 'fea.missing' / 'fea.reason' taşır ve panelin kendi
+            // NOT_MODELLED kartı (buildViewModel) tam da bunu gösterir.
+            // Jenerik hata metnine düşürülürse kullanıcı hangi alanın eksik
+            // olduğunu göremez.
+            const REDDEDILEN = ['not_modelled', 'not_available',
+                                'inputs_ready'];
+            const durum = r.body && r.body.status;
+            const koprununRedBeyani = (REDDEDILEN.indexOf(durum) >= 0
+                                       && r.body.fea);
+            if (durum === 'success' || koprununRedBeyani) {
+                lastPayload = r.body.fea || null;
+                lastError = null;
+            } else {
                 lastPayload = null;
                 lastError = (r.body && (r.body.detail || r.body.error))
                     || T('feaT.httpError',
                          'The thermal FEA endpoint returned an error.');
-            } else {
-                lastPayload = r.body.fea || null;
-                lastError = null;
             }
+            kosumBitti();
             render();
             return lastPayload;
         }).catch(function (e) {
+            const gecen = busySince
+                ? Math.round((Date.now() - busySince) / 1000) : null;
+            const iptalEdildi = kullaniciIptali;
             busy = false;
+            busySince = null;
+            kosumBitti();
             lastPayload = null;
-            lastError = String((e && e.message) || e);
+            // P17B1-18 — sessiz düşüş yok: zaman aşımı adıyla ve süresiyle
+            // beyan edilir; iki adımlı koşumda hangi adımda düştüğü
+            // sunucunun kendi cümlesinden gelir, uydurulmaz.
+            // P11B3-19 — kullanıcı durdurduysa AYRI cümle: iptal bir arıza
+            // değildir ve arıza gibi anlatılmaz.
+            lastError = iptalEdildi
+                ? TF('feaT.cancelled', { s: gecen === null ? 0 : gecen },
+                     'You stopped the thermal FEA run after {s} s. Nothing was '
+                     + 'computed and no result was changed.')
+                : zamanAsimiMi(e)
+                ? TF('feaT.timeout',
+                     { s: gecen === null ? '—' : gecen },
+                     'The thermal FEA run was cancelled after {s} s without a '
+                     + 'reply from the solver. Nothing was computed. Try a '
+                     + 'coarser axial profile, then run it again.')
+                : String((e && e.message) || e);
             render();
             return null;
         });
@@ -1054,6 +1921,11 @@
         }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(panel);
 
+        // P11B3-19 — iptal düğmesi: koşumu DURDURUR, sayfayı yenilemez.
+        const cancelBtn = document.getElementById('fea_t_cancel');
+        if (cancelBtn) cancelBtn.addEventListener('click', function () {
+            kosumuIptalEt();
+        });
         const runBtn = document.getElementById('fea_t_run');
         if (runBtn) runBtn.addEventListener('click', function () { run(); });
         const meshBox = document.getElementById('fea_t_show_mesh');
@@ -1062,6 +1934,14 @@
                 showMesh = !!meshBox.checked;
                 render();
             });
+        }
+        /* ÖH D26 / P11B3-16 — kullanıcı ortam sıcaklığına DOKUNDUĞU anda
+           alan onun olur. `input` olayı yazmayı, `change` ok tuşu/spinner
+           ile değişimi yakalar; ikisi de aynı imi düşürür. */
+        const ambientBox = document.getElementById('fea_t_ambient');
+        if (ambientBox) {
+            ambientBox.addEventListener('input', markAmbientDirty);
+            ambientBox.addEventListener('change', markAmbientDirty);
         }
 
         // Hesap köprüsü: fea_panel.js/blowdown_panel.js ile AYNI desen.
@@ -1105,7 +1985,7 @@
         },
         // Bekçi testleri için: birim dönüşümü kilidi bu iki işlev üstünde
         // sınanır (AnalysisDock yokken yedek yol koşar).
-        _buildWallProfileBody: buildWallProfileBody,
+        _buildWallProfileBody: buildWallProfileBodyMeta,
         _fallbackLengthM: fallbackLengthM,
         get payload() { return lastPayload; },
     };

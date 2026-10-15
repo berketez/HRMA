@@ -369,6 +369,158 @@ def check_twophase(rec: dict) -> None:
                     % (beta, name, got, want))
 
 
+def check_bmg(rec: dict) -> None:
+    """Back-Massier-Gier (TR 32-415) kaydının iç tutarlılığı.
+
+    Ölçüm kaydı — sayılar yeniden türetilemez ama BİRBİRİNİ tutmak zorundadır:
+    boğaz yarıçapı iki yoldan, boğulmuş debi çaprazı (275 anomalisi DAHİL —
+    anomali sessizce 'düzeltilirse' bekçi kırmızıya döner: kayıt kaynağı
+    yansıtmalı, akla yatkınlığı değil), h = q_w/(T_aw−T_w) yeniden hesabı,
+    St ↔ h/(ρu·cp) bandı ve tablo yapısı.
+    """
+    case = rec["case"]
+    geo = rec["inputs"]["geometry"]
+
+    r_a = math.sqrt(geo["throat_area_in2"] / math.pi)
+    r_d = geo["throat_diameter_in"] / 2.0
+    if abs(r_a - r_d) / r_d > 1.5e-3:
+        bad(case, "boğaz yarıçapı A*'dan %.5f, D*'dan %.5f — tutmuyor" % (r_a, r_d))
+
+    taps = geo["pressure_tap_stations"]
+    if len(taps) != 32:
+        bad(case, "tap sayısı 32 değil: %d" % len(taps))
+    zl = [t["z_over_L"] for t in taps]
+    if any(b <= a for a, b in zip(zl, zl[1:])):
+        bad(case, "tap z/L dizisi kesin artan değil")
+    aa = [t["A_over_Astar"] for t in taps]
+    if min(aa) != aa[11]:
+        bad(case, "A/A* minimumu tap 12'de (z/L=0.6018) değil")
+
+    # Boğulmuş debi: Cd kayıtlı değerleri yeniden üretmeli; 275 anomalisi korunmalı
+    in2m, psi, lb, r_air = 0.0254, 6894.757293168, 0.45359237, 287.05
+    a_m2 = geo["throat_area_in2"] * in2m * in2m
+    cd_want = rec["consistency_checks"]["choked_mass_flow"]["Cd_by_test"]
+    for cond in rec["inputs"]["selected_test_conditions"]:
+        t_r = cond["T_t0_R"]
+        g = 1.380 if t_r < 1200 else (1.328 if t_r > 1800 else 1.345)
+        flow = math.sqrt(g) * (2.0 / (g + 1.0)) ** ((g + 1.0) / (2.0 * (g - 1.0)))
+        m_1d = a_m2 * cond["p_t_psia"] * psi / math.sqrt(r_air * t_r / 1.8) * flow
+        c_d = cond["mdot_lb_per_s"] * lb / m_1d
+        want = cd_want[str(cond["test"])]
+        if abs(c_d - want) > 0.005:
+            bad(case, "test %d Cd hesaptan %.4f, kayıtta %.3f" % (cond["test"], c_d, want))
+        if cond["test"] == 275:
+            if c_d <= 1.02:
+                bad(case, "test 275 mdot anomalisi kaybolmuş (Cd=%.4f) — kaynakla karşılaştır" % c_d)
+        elif not 0.95 <= c_d <= 1.02:
+            bad(case, "test %d Cd=%.4f makul bandın dışında" % (cond["test"], c_d))
+
+    b3 = rec["expected_outputs"]["heat_transfer_tables_B3"]
+    tests = ("test_288", "test_266", "test_262", "test_268", "test_278", "test_275")
+    for key in tests:
+        if len(b3[key]) != 22:
+            bad(case, "%s istasyon sayısı 22 değil: %d" % (key, len(b3[key])))
+
+    # St ↔ h/(ρu·cp): kapalı çevrimden çıkan cp hava bandında kalmalı.
+    # Belgeli istisna: test 268 z/L=0.938'de KAYNAK 0.982 basmış (dizgi hatası
+    # adayı, gerçek ~0.882 — kayıttaki known_source_typo_candidates). Basılı
+    # değer korunur; bekçi hücrenin ANOMALİ kalmasını da sınar ki biri sessizce
+    # 'düzeltirse' kırmızıya dönsün.
+    typo_cells = {("test_268", 0.938)}
+    for key in tests:
+        for row in b3[key]:
+            h = row["h_1e-4_btu_per_s_in2_F"]
+            st = row["St_1e-3"]
+            rue = row["rho_e_u_e_lb_per_s_in2"]
+            if not all(isinstance(v, (int, float)) for v in (h, st, rue)):
+                continue
+            cp_implied = h * 1e-4 / (rue * st * 1e-3)  # BTU/(lb·°F)
+            in_band = 0.235 <= cp_implied <= 0.285
+            if (key, row["z_over_L"]) in typo_cells:
+                if in_band:
+                    bad(case, "%s z/L=%.3f: belgeli kaynak dizgi anomalisi kaybolmuş "
+                        "(cp=%.4f bandın içinde) — kaynakla karşılaştır"
+                        % (key, row["z_over_L"], cp_implied))
+            elif not in_band:
+                bad(case, "%s z/L=%.3f: St/h/ρu üçlüsünden cp=%.4f BTU/lb°F — hava bandı dışı"
+                    % (key, row["z_over_L"], cp_implied))
+
+    # h = q_w/(T_aw − T_w) — test 262, dört istasyon (M ölçülen p/p_t'den)
+    p_pt = {0.133: 0.996, 0.512: 0.789, 0.825: 0.133, 0.905: 0.092}
+    g, pr, t_t = 1.345, 0.689, 1518.0
+    rows262 = {row["z_over_L"]: row for row in b3["test_262"]}
+    for z, p in p_pt.items():
+        row = rows262[z]
+        mach = math.sqrt((p ** (-(g - 1.0) / g) - 1.0) * 2.0 / (g - 1.0))
+        rec_f = pr ** (1.0 / 3.0)
+        t_aw = t_t * (1.0 + rec_f * (g - 1.0) / 2.0 * mach * mach) \
+            / (1.0 + (g - 1.0) / 2.0 * mach * mach)
+        h_calc = row["q_w_btu_per_s_in2"] / (t_aw - row["T_w_R"]) * 1e4
+        if abs(h_calc / row["h_1e-4_btu_per_s_in2_F"] - 1.0) > 0.03:
+            bad(case, "test 262 z/L=%.3f: h yeniden hesaptan %.3f, tabloda %.3f"
+                % (z, h_calc, row["h_1e-4_btu_per_s_in2_F"]))
+
+    # B-2 kolonları geometri tap listesiyle aynı iskelette olmalı
+    b2 = rec["expected_outputs"]["wall_static_pressure_tables_B2"]
+    for key in ("test_288", "test_266", "test_262", "test_268"):
+        col = b2[key]
+        if len(col) != 32:
+            bad(case, "B-2 %s kolonu 32 satır değil" % key)
+            continue
+        for tap_geo, tap_p in zip(taps, col):
+            if (tap_geo["tap"] != tap_p["tap"]
+                    or tap_geo["z_over_L"] != tap_p["z_over_L"]
+                    or tap_geo["A_over_Astar"] != tap_p["A_over_Astar"]):
+                bad(case, "B-2 %s tap %s iskeleti geometriyle uyuşmuyor"
+                    % (key, tap_p.get("tap")))
+                break
+
+
+def check_boldman(rec: dict) -> None:
+    """Boldman TN D-4788: A/A* = (D/D*)² ve in↔cm özdeşlikleri yeniden türetilir."""
+    case = rec["case"]
+    geo = rec["inputs"]["geometry"]
+    for noz_key in ("nozzle_30deg", "nozzle_60deg"):
+        noz = geo[noz_key]
+        d_star = noz["throat_diameter_in"]
+        for st in noz["stations"]:
+            got = (st["D_in"] / d_star) ** 2
+            if not close(got, st["A_over_Astar"], 5e-4):
+                bad(case, "%s istasyon %d: (D/D*)²=%.4f, tabloda %.4f"
+                    % (noz_key, st["station"], got, st["A_over_Astar"]))
+            if not close(st["D_in"] * 2.54, st["D_cm"], 5e-4):
+                bad(case, "%s istasyon %d: D dönüşümü tutmuyor" % (noz_key, st["station"]))
+            if st["z_in"] > 0 and not close(st["z_in"] * 2.54, st["z_cm"], 5e-4):
+                bad(case, "%s istasyon %d: z dönüşümü tutmuyor" % (noz_key, st["station"]))
+        if not close((noz["stations"][0]["D_in"] / d_star) ** 2,
+                     noz["contraction_area_ratio"], 5e-4):
+            bad(case, "%s daralma oranı istasyon 1'den türetilemiyor" % noz_key)
+
+
+def check_wang_digitization(rec: dict) -> None:
+    """Wang 2021 sayısallaştırması: eksen sınırları + izoterm-şablonu kanıtı."""
+    case = rec["case"]
+    out = rec["expected_outputs"]
+    cfd = out["cfd_inner_wall_temperature"]
+    if len(cfd) < 15:
+        bad(case, "CFD eğrisi nokta sayısı beklenenden az: %d" % len(cfd))
+    for pt in cfd:
+        if not (0.0 <= pt["x_mm"] <= 160.0 and 320.0 < pt["T_K"] < 500.0):
+            bad(case, "CFD noktası eksen dışına taşmış: %r" % pt)
+    peak = out["cfd_peak"]
+    grid_max = max(pt["T_K"] for pt in cfd)
+    if not (grid_max - 0.1 <= peak["T_K"] <= grid_max + 2.5):
+        bad(case, "tepe değeri (%.1f K) ızgara maksimumuyla (%.1f K) uyumsuz"
+            % (peak["T_K"], grid_max))
+    # yazarların deney noktaları 25°F katlarına oturmalı (ilk nokta belgeli istisna)
+    pts = out["authors_experiment_points"]["points"]
+    for pt in pts[1:]:
+        t_f = pt["T_K"] * 1.8 - 459.67
+        if abs(t_f / 25.0 - round(t_f / 25.0)) * 25.0 > 0.3:
+            bad(case, "deney noktası 25°F şablonuna oturmuyor: %.1f K = %.1f°F"
+                % (pt["T_K"], t_f))
+
+
 def check_f1_consistency(rec: dict) -> None:
     """F-1 turbopompa tablosunun iç tutarlılığı (ölçüm kaydı; yeniden türetilemez)."""
     case = rec["case"]
@@ -408,16 +560,25 @@ DERIVATION_CHECKS = {
     "acoustic_cylindrical_chamber_modes": check_acoustic_modes,
     "twophase_particle_loading_loss": check_twophase,
     "turbopump_f1_saturnv": check_f1_consistency,
+    "nozzle_back_massier_gier_1964": check_bmg,
+    "nozzle_boldman_conical_1968": check_boldman,
+    "nozzle_ansys_published_wang_2021": check_wang_digitization,
 }
 
 # Ölçüme dayanan, yeniden türetilemeyen kayıtlar — bilerek denetim dışı.
+# (VMFL044: belgeleme kaydı — sayısal sonuç içermez, yalnız künye + kurulum.)
 MEASUREMENT_ONLY = {
     "turbopump_rl10a33_design_point",
     "turbopump_rl10a33a_geometry",
     "turbopump_merlin_rd180_unavailable",
     "acoustic_f1_first_tangential",
     "thermal_bartz_accuracy_band",
+    "nozzle_ansys_published_ansys_vmfl044",
 }
+
+# Kabul edilen çekilme tarihleri: her parti kendi tarihini ekler; serbest
+# tarih kabul ETMİYORUZ ki yazım hatası (ör. 2026-18-08) sessiz geçmesin.
+VALID_RETRIEVED_DATES = {"2026-08-03", "2026-08-18"}
 
 
 def main(argv: list[str]) -> int:
@@ -447,7 +608,7 @@ def main(argv: list[str]) -> int:
                 bad(case, "source künyesinde eksik alan: %s" % field)
         if rec.get("confidence") not in VALID_CONFIDENCE:
             bad(case, "confidence tanımsız: %r" % rec.get("confidence"))
-        if rec.get("retrieved") != "2026-08-03":
+        if rec.get("retrieved") not in VALID_RETRIEVED_DATES:
             bad(case, "retrieved beklenmedik: %r" % rec.get("retrieved"))
         if rec.get("case") and rec["case"] != os.path.splitext(name)[0]:
             bad(case, "case alanı dosya adıyla uyuşmuyor (%s)" % name)

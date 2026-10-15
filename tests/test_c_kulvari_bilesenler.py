@@ -23,7 +23,20 @@ Bekçi çapaları — doğrulamasız fizik modülü teslim edilmez:
     dP, büyük kol -> küçük aktüatör kuvveti, büyük serbest hacim ->
     büyük şarj vb.).
 (d) Sözleşme: valve_feedline'ın ürettiği su koçu girdisi GERÇEKTEN
-    WaterHammerAnalyzer.analyze(**kwargs) çağrısına giriyor.
+    WaterHammerAnalyzer.analyze(**kwargs) çağrısına giriyor VE dönen
+    sayılar kapalı formla birebir aynı çıkıyor (dalga hızı, Joukowsky
+    tepesi, aşağı salınım, hoop eşikleri, hüküm). ÖH FAZ B adım B1/B2:
+    bu bölümün eski ana hükmü `status in ('SAFE','MARGINAL','UNSAFE')`,
+    yani modülün üretebildiği TÜM kümeydi; uçtan uca zincir de 15 kwarg'ı
+    elle doldurup `fluid='water'`ı kendi veriyordu (defter P13B2-07).
+    İkisi de sayısallaştırıldı ve zincir ürünün kendi adaptör halkasından
+    (itici -> akışkan anahtarı/kaydı) geçirildi. Ürün kusuru yüzünden
+    kırmızıya düşen iddialar xfail(strict) borç imiyle durur; Z5S/PK4
+    onarımından sonra kalan iki im ve sebepleri: P4B4-08 (ürün onarıldı,
+    bekçinin ön koşulu onarımın çürüttüğü öncüle dayanıyor — defter
+    kararı bekliyor) ve P4B4-07 (gerçek VERİ borcu, 7 itici hâlâ su koçu
+    tablosunda yok). P4B4-01 (kritik) ile P5B3-02 imleri, ürün onarılıp
+    iddialar yeşile döndüğü için SÖKÜLDÜ.
 (e) Dürüstlük: geçersiz aralıkta sessiz ekstrapolasyon YOK (sert
     aralıkta ValueError, yumuşak bantta `validity` kaydı); hesaplanamayan
     kalem için sayı UYDURULMAZ (`not_modelled`/`not_evaluated`); her
@@ -96,6 +109,14 @@ from hrma.analysis.igniter_sizing import (
     NOT_MODELLED as IGNITER_NOT_MODELLED,
 )
 from hrma.analysis.regen_cooling import haaland_friction_factor
+from hrma.analysis.water_hammer import (
+    WaterHammerAnalyzer,
+    FLUID_PROPERTIES as WH_FLUID_PROPERTIES,
+    COLUMN_SEPARATION_PEAK_FACTOR,
+    MAWP_YIELD_SAFETY_FACTOR,
+    DEFAULT_PIPE_MATERIAL as WH_DEFAULT_PIPE_MATERIAL,
+)
+from hrma.data.materials_db import get_material
 from hrma.constants import G_0, R_UNIVERSAL
 
 # Testin İÇİNDE bağımsız kurulan kesin tanımlar (modüldeki bir yazım
@@ -103,6 +124,110 @@ from hrma.constants import G_0, R_UNIVERSAL
 INCH_M = 0.0254                    # 1 in [m], kesin tanım
 POUND_KG = 0.45359237              # 1 lb [kg], kesin tanım
 GALLON_M3 = 231.0 * INCH_M ** 3    # 1 ABD galonu [m^3], kesin tanım
+
+
+# ===========================================================================
+# ÖH FAZ B — adım B1/B2: su koçu zincirinin SAYISAL çapaları
+#
+# Eski hüküm `status in ('SAFE','MARGINAL','UNSAFE')` modülün üretebildiği
+# TÜM kümeydi (defter P13B2-07): hiçbir sayıyı sınamıyordu, dolayısıyla
+# P4B4-01 (kolon ayrılması kapısı override'da açılıyor), P4B4-07/-08 ve
+# P5B3-02 kusurlarının hiçbirini göremiyordu. Aşağıdaki yardımcılar hükmü
+# sayıların FONKSİYONU hâline getirir.
+#
+# ÇAPA KURALI: bu blok dışarıdan sayı getirmez. Akışkan kaydı (yoğunluk,
+# hacimsel modül, buhar basıncı) water_hammer'ın kendi tablosundan, boru
+# Young modülü/dayanımı materials_db'den, akışkan anahtarı sıvı motorun
+# besleme haritasından, itici yoğunluğu deponun PropellantDatabase'inden
+# okunur. Kapalı formlar (Wylie & Streeter Eş. 1-10, Joukowsky, Barlow)
+# testin İÇİNDE bağımsız kurulur.
+# ===========================================================================
+SU_KOCU_HAT = dict(line_id_m=0.0254, wall_thickness_m=0.0015,
+                   line_length_m=5.0)
+SU_KOCU_SIVILARI = ('water', 'n2o', 'rp1', 'lox')
+
+
+def _boru_kaydi():
+    """Su koçu modülünün KENDİ varsayılan boru malzemesinin kaydı."""
+    return get_material(WH_DEFAULT_PIPE_MATERIAL)
+
+
+def _hoop_basinclari(line_id_m, wall_thickness_m):
+    """(MAWP, akma) basınçları [Pa] — ince cidar hoop, testin içinde kurulur.
+
+    P = sigma*t/r_i (Barlow / Shigley Böl. 3, iç yarıçap konservatif);
+    anma MAWP = P_akma / emniyet faktörü.
+    """
+    mat = _boru_kaydi()
+    r_i = line_id_m / 2.0
+    p_yield = float(mat['yield_strength']) * wall_thickness_m / r_i
+    return p_yield / MAWP_YIELD_SAFETY_FACTOR, p_yield
+
+
+def _beklenen_hukum(p_design_Pa, p_mawp_Pa, p_yield_Pa):
+    """Emniyet hükmü, hüküm basıncının basamak fonksiyonudur.
+
+    water_hammer.WaterHammerAnalyzer docstring'inin kendi tanımı: tepe
+    MAWP altındaysa SAFE, akma basıncına kadar MARGINAL, üstünde UNSAFE.
+    """
+    if p_design_Pa <= p_mawp_Pa:
+        return 'SAFE'
+    if p_design_Pa <= p_yield_Pa:
+        return 'MARGINAL'
+    return 'UNSAFE'
+
+
+def _dalga_hizi_kapali_form(bulk_Pa, rho, line_id_m, wall_m, e_pipe_Pa):
+    """(a_esnek, a_rijit) — Wylie & Streeter (1978) Eş. 1-10, bağımsız."""
+    a_rijit = math.sqrt(bulk_Pa / rho)
+    return (a_rijit / math.sqrt(1.0 + bulk_Pa * line_id_m
+                                / (e_pipe_Pa * wall_m)),
+            a_rijit)
+
+
+def _su_kocu_zinciri(fluid, mass_flow_kg_s, working_pressure_Pa,
+                     *, buhar_basinci=True, override=True, **ek):
+    """valve_feedline adaptörü -> analyzer_kwargs -> analyze() zinciri.
+
+    Returns
+    -------
+    (kayit, wh_in, out) : akışkan kaydı, adaptör çıktısı, çözücü çıktısı.
+    """
+    kayit = WH_FLUID_PROPERTIES[fluid]
+    e_pipe = float(_boru_kaydi()['elastic_modulus'])
+    hat = dict(SU_KOCU_HAT)
+    hat.update(ek)
+    wh_in = water_hammer_inputs(
+        fluid=fluid, mass_flow_kg_s=mass_flow_kg_s,
+        density_kg_m3=kayit['density_kg_m3'],
+        working_pressure_Pa=working_pressure_Pa,
+        bulk_modulus_Pa=(kayit['bulk_modulus_Pa'] if override else None),
+        pipe_youngs_modulus_Pa=e_pipe,
+        vapor_pressure_Pa=(kayit['vapor_pressure_Pa'] if buhar_basinci
+                           else None),
+        **hat)
+    return kayit, wh_in, WaterHammerAnalyzer().analyze(
+        **wh_in['analyzer_kwargs'])
+
+
+def _hedef_tepe_icin_debi(fluid, working_pressure_Pa, hedef_tepe_Pa):
+    """Verilen hüküm basıncını üreten kütle debisi [kg/s] — tersine çözüm.
+
+    Kolon ayrılması rejiminde hüküm basıncı p_work + F*dP'dir; buradan
+    dP, Joukowsky'den hız, hızdan debi geri çözülür. Eşik testleri böylece
+    "şu debide şu hüküm çıkıyordu" ezberi değil, eşiğin KENDİSİNİN sınanması
+    olur.
+    """
+    kayit = WH_FLUID_PROPERTIES[fluid]
+    rho = kayit['density_kg_m3']
+    a, _ = _dalga_hizi_kapali_form(
+        kayit['bulk_modulus_Pa'], rho, SU_KOCU_HAT['line_id_m'],
+        SU_KOCU_HAT['wall_thickness_m'],
+        float(_boru_kaydi()['elastic_modulus']))
+    dp = (hedef_tepe_Pa - working_pressure_Pa) / COLUMN_SEPARATION_PEAK_FACTOR
+    v = dp / (rho * a)
+    alan = math.pi * SU_KOCU_HAT['line_id_m'] ** 2 / 4.0
+    return rho * v * alan
 
 
 # ===========================================================================
@@ -601,54 +726,249 @@ class TestMonotonluk:
 # (d) Sözleşme: su koçu girdisi gerçekten çalışıyor
 # ===========================================================================
 class TestSuKocuSozlesmesi:
-    def test_uretilen_girdi_water_hammer_tarafindan_kabul_edilir(self):
-        """valve_feedline'ın ürettiği kwargs GERÇEKTEN analyze()'a giriyor.
+    """Su koçu sözleşmesi — SAYISAL (ÖH Faz B adım B1).
 
-        Bu bekçi, iki modül arasındaki sözleşmenin kağıt üstünde değil
-        fiilen kurulduğunu sınar: anahtar adı veya birim kayarsa test
-        kırılır.
+    Bu sınıfın eski ana hükmü ``status in ('SAFE','MARGINAL','UNSAFE')``
+    idi: modülün üretebildiği tüm küme, yani her koşuda doğru olan bir
+    kabul (defter P13B2-07). Bu yüzden aynı sınıf, hattın kendi kolon
+    ayrılması kapısının override'da açıldığını (P4B4-01, kritik) yıllarca
+    göremedi. Hüküm artık şu üç şeye bağlıdır: (i) Joukowsky/dalga hızı
+    kapalı formları, (ii) hoop akma/MAWP eşikleri, (iii) kolon ayrılması
+    kapısının fiilen değerlendirilmiş olması.
+    """
+
+    @pytest.mark.parametrize('fluid', SU_KOCU_SIVILARI)
+    def test_uretilen_girdi_water_hammer_tarafindan_kabul_edilir(self, fluid):
+        """Zincir çalışıyor VE ürettiği her sayı kapalı formla birebir aynı.
+
+        Akışkan artık bekçiden gelmiyor: dördü de su koçu tablosunun
+        gerçek kayıtlarıdır (su, N2O, RP-1, LOX). Sözleşme "anahtar adı
+        kaymadı" düzeyinde değil, "aynı fizik iki modülde aynı sayıyı
+        veriyor" düzeyinde sınanır.
         """
-        from hrma.analysis.water_hammer import WaterHammerAnalyzer
+        p_work = 25.0e5
+        kayit, wh_in, out = _su_kocu_zinciri(fluid, 2.0, p_work)
+        rho = float(kayit['density_kg_m3'])
+        bulk = float(kayit['bulk_modulus_Pa'])
+        d = SU_KOCU_HAT['line_id_m']
+        t_wall = SU_KOCU_HAT['wall_thickness_m']
+        uzunluk = SU_KOCU_HAT['line_length_m']
+        kw = wh_in['analyzer_kwargs']
 
-        wh_in = water_hammer_inputs(
-            fluid='water', mass_flow_kg_s=2.0, density_kg_m3=998.0,
-            line_id_m=0.0254, wall_thickness_m=0.0015, line_length_m=5.0,
-            working_pressure_Pa=25.0e5, bulk_modulus_Pa=2.19e9,
-            pipe_youngs_modulus_Pa=193.0e9,
-            allowable_pressure_rise_Pa=5.0e5, vapor_pressure_Pa=2339.0)
-        out = WaterHammerAnalyzer().analyze(**wh_in['analyzer_kwargs'])
-        assert out['status'] in ('SAFE', 'MARGINAL', 'UNSAFE')
-        # Hız ve uzunluk gerçekten taşınmış olmalı
-        assert wh_in['analyzer_kwargs']['flow_velocity_m_s'] == (
-            pytest.approx(wh_in['flow_velocity_m_s'], rel=1e-12))
-        assert wh_in['analyzer_kwargs']['line_id_mm'] == pytest.approx(
-            25.4, rel=1e-12)
-        # Kritik süre water_hammer'ın kendi tanımıyla: t_c = 2L/a
+        # (1) Taşıma: adaptörün ürettiği hız/çap gerçekten çözücüye girdi.
+        assert kw['flow_velocity_m_s'] == pytest.approx(
+            wh_in['flow_velocity_m_s'], rel=1e-12)
+        assert kw['line_id_mm'] == pytest.approx(25.4, rel=1e-12)
+        assert out['flow_velocity_m_s'] == pytest.approx(
+            kw['flow_velocity_m_s'], rel=1e-12)
+        # Hat debisi de korunmalı: çözücü aynı hattı çözüyor.
+        assert out['mass_flow_kg_s'] == pytest.approx(2.0, rel=1e-9)
+
+        # (2) Dalga hızı: Wylie & Streeter Eş. 1-10 testin içinde kurulur.
+        a_bek, a_rijit_bek = _dalga_hizi_kapali_form(
+            bulk, rho, d, t_wall, float(_boru_kaydi()['elastic_modulus']))
+        assert out['wave_speed_rigid_m_s'] == pytest.approx(a_rijit_bek,
+                                                            rel=1e-12)
+        assert out['wave_speed_m_s'] == pytest.approx(a_bek, rel=1e-12)
+        assert 0.0 < a_bek < a_rijit_bek
+        # Adaptör ile çözücü AYNI dalga hızını vermeli (tek kaynak).
+        assert wh_in['wave_speed_m_s'] == pytest.approx(a_bek, rel=1e-12)
+
+        # (3) Kritik süre ve Joukowsky: kapalı form, sayı bandıyla.
+        v = 4.0 * 2.0 / (rho * math.pi * d * d)
+        assert out['critical_closure_time_s'] == pytest.approx(
+            2.0 * uzunluk / a_bek, rel=1e-12)
         assert wh_in['critical_closure_time_s'] == pytest.approx(
-            2.0 * 5.0 / wh_in['wave_speed_m_s'], rel=1e-12)
-        # Esnek boru dalga hızı rijit değerin altında kalmalı
-        assert wh_in['wave_speed_m_s'] < wh_in['wave_speed_rigid_m_s']
+            2.0 * uzunluk / a_bek, rel=1e-12)
+        dp_bek = rho * a_bek * v
+        assert out['joukowsky_pressure_rise_Pa'] == pytest.approx(dp_bek,
+                                                                  rel=1e-12)
+        # Kapanma süresi verilmedi -> ani rejim: uygulanan artış tam Joukowsky
+        assert out['applied_pressure_rise_Pa'] == pytest.approx(dp_bek,
+                                                                rel=1e-12)
+        assert out['peak_pressure_Pa'] == pytest.approx(p_work + dp_bek,
+                                                        rel=1e-12)
+        assert out['downsurge_pressure_Pa'] == pytest.approx(p_work - dp_bek,
+                                                             rel=1e-12)
 
-    def test_dalga_hizi_verilmeyince_uydurulmaz(self):
+        # (4) Boru sınıfı: hoop basınçları testin içinde Barlow'dan kurulur.
+        mawp, akma = _hoop_basinclari(d, t_wall)
+        assert out['pipe']['material'] == WH_DEFAULT_PIPE_MATERIAL
+        assert out['pipe']['mawp_bar'] == pytest.approx(mawp / 1e5, rel=1e-12)
+        assert out['pipe']['hoop_yield_pressure_bar'] == pytest.approx(
+            akma / 1e5, rel=1e-12)
+
+        # (5) Kolon ayrılması kapısı DEĞERLENDİRİLMİŞ olmalı (fail-closed).
+        assert out['column_separation'] is not None, (
+            'buhar basıncı verildiği hâlde kolon ayrılması hiç '
+            'değerlendirilmemiş — kapı sessizce açık')
+        assert out['vapor_pressure_Pa'] == pytest.approx(
+            float(kayit['vapor_pressure_Pa']), rel=1e-12)
+        ayrilir = (p_work - dp_bek) < float(kayit['vapor_pressure_Pa'])
+        assert out['column_separation'] is ayrilir
+        p_design_bek = (p_work + COLUMN_SEPARATION_PEAK_FACTOR * dp_bek
+                        if ayrilir else p_work + dp_bek)
+        assert out['design_peak_pressure_bar'] == pytest.approx(
+            p_design_bek / 1e5, rel=1e-12)
+        # Hüküm basıncı Joukowsky tepesinin ALTINA düşemez.
+        assert out['design_peak_pressure_bar'] >= out['peak_pressure_bar']
+
+        # (6) Hüküm, üç durumdan biri değil, EŞİKLERİN fonksiyonu.
+        assert out['status'] == _beklenen_hukum(p_design_bek, mawp, akma)
+
+    @pytest.mark.parametrize('fluid', SU_KOCU_SIVILARI)
+    @pytest.mark.parametrize('kesir,beklenen', [
+        (0.98, 'SAFE'), (1.02, 'MARGINAL'),
+        (MAWP_YIELD_SAFETY_FACTOR * 1.02, 'UNSAFE'),
+    ])
+    def test_hukum_esikleri_sayilarla_yer_degistirir(self, fluid, kesir,
+                                                     beklenen):
+        """SAFE/MARGINAL/UNSAFE eşiği MAWP ve akma basıncının kendisidir.
+
+        Debi, hedeflenen hüküm basıncından TERSİNE çözülür (Joukowsky +
+        kolon ayrılması çarpanı), yani eşiğin yeri sınanır; "şu debide şu
+        hüküm çıkmıştı" ezberi değil. Eşik kayarsa üç durumdan en az biri
+        kırmızıya döner.
+        """
+        p_work = 25.0e5
+        mawp, akma = _hoop_basinclari(SU_KOCU_HAT['line_id_m'],
+                                      SU_KOCU_HAT['wall_thickness_m'])
+        hedef = mawp * kesir
+        mdot = _hedef_tepe_icin_debi(fluid, p_work, hedef)
+        _, _, out = _su_kocu_zinciri(fluid, mdot, p_work)
+        assert out['column_separation'] is True, (
+            'bu koşuda aşağı salınım buhar basıncının altında olmalı')
+        assert out['design_peak_pressure_bar'] == pytest.approx(
+            hedef / 1e5, rel=1e-9)
+        assert out['status'] == beklenen, (
+            f'{fluid}: hüküm basıncı {hedef / 1e5:.2f} bar, MAWP '
+            f'{mawp / 1e5:.2f} bar, akma {akma / 1e5:.2f} bar')
+
+    def test_kolon_ayrilmasi_hukmu_fail_closed_dusuruyor(self):
+        """Tablo yolunda kapı ÇALIŞIYOR: hüküm SAFE'ten MARGINAL'e düşüyor.
+
+        Ölçülen (su, 25 bar hat, 25,4x1,5 mm ss_304, ṁ = 3,74 kg/s):
+        Joukowsky tepesi 125,14 bar MAWP'nin (169,29 bar) altında kalır,
+        yani ayrılma görülmezse hüküm SAFE'tir. Aşağı salınım -75,14 bar
+        (fiziksel olarak imkânsız, sütun KOPAR) olduğu için birleşme
+        tepesi 225,28 bar hesaplanır ve hüküm MARGINAL'e düşer. Kapının
+        var olduğunun kanıtı budur; B1'in kardeş bekçileri kapının override
+        verilince KAPANMADIĞINI sayar (borç imleri Z5S/PK4 onarımıyla
+        söküldü).
+        """
+        p_work = 25.0e5
+        _, _, out = _su_kocu_zinciri('water', 3.74, p_work)
+        mawp, akma = _hoop_basinclari(SU_KOCU_HAT['line_id_m'],
+                                      SU_KOCU_HAT['wall_thickness_m'])
+        assert out['column_separation'] is True
+        assert out['peak_pressure_Pa'] < mawp          # ayrılma yoksa SAFE
+        assert out['design_peak_pressure_bar'] * 1e5 > mawp
+        assert out['status'] == 'MARGINAL'
+        assert any('COLUMN SEPARATION' in w for w in out['warnings'])
+        assert any('negative absolute pressure' in w for w in out['warnings'])
+
+    # ÖH defter P4B4-01 (KRİTİK) — Z5S/PK4 onarımıyla YEŞİLE DÖNDÜ;
+    # xfail(strict) borç imi söküldü. Kusurun kaydı: bulk_modulus_Pa +
+    # density_kg_m3 birlikte verilince akışkan kaydı "Custom fluid" olarak
+    # SIFIRDAN kuruluyor ve tablonun buhar basıncı düşüyordu
+    # (vapor_pressure_Pa=None). Sayılar tablonun KENDİ sayıları olsa bile
+    # kolon ayrılması kapısı kapanıyordu: column_separation True -> None,
+    # hüküm basıncı 2x düşüyordu. /api/water-hammer ucu bu override'ı
+    # kullanıcıdan aldığı ve vapor_pressure_Pa alanını hiç kabul etmediği
+    # için uçtan gelen her özel-akışkan isteğinde kapı AÇIKTI. Onarım:
+    # akışkan tabloda ise kayıt tablodan gelir, override yalnız ilgili ALANI
+    # ezer — buhar basıncı yerinde kalır.
+    @pytest.mark.parametrize('fluid', SU_KOCU_SIVILARI)
+    def test_tablo_sayilari_override_verilince_kapi_kapali_kalir(self, fluid):
+        """Tablonun KENDİ sayısı override olarak verilince hüküm değişemez.
+
+        İki koşum aynı fiziktir: birinde K ve rho tablodan çözülür,
+        diğerinde AYNI iki sayı override olarak verilir. Aynı girdiden
+        farklı hüküm çıkıyorsa hüküm fizikten değil çağrı biçiminden
+        geliyordur.
+        """
+        p_work = 25.0e5
+        _, _, tablo = _su_kocu_zinciri(fluid, 3.74, p_work,
+                                       buhar_basinci=False, override=False)
+        _, _, ovr = _su_kocu_zinciri(fluid, 3.74, p_work,
+                                     buhar_basinci=False, override=True)
+        assert ovr['vapor_pressure_Pa'] == tablo['vapor_pressure_Pa']
+        assert ovr['column_separation'] == tablo['column_separation']
+        assert ovr['design_peak_pressure_bar'] == pytest.approx(
+            tablo['design_peak_pressure_bar'], rel=1e-12)
+        assert ovr['status'] == tablo['status']
+
+    # ÖH defter P4B4-01 (KRİTİK) — Z5S/PK4 onarımıyla YEŞİLE DÖNDÜ;
+    # xfail(strict) borç imi söküldü. Kusurun kaydı (ölçüldü: su, 25 bar hat,
+    # ṁ=3,74 kg/s, 25,4x1,5 mm ss_304): tablo yolunda aşağı salınım
+    # -75,14 bar, kolon ayrılması TRUE, hüküm basıncı 225,28 bar >
+    # MAWP 169,29 bar -> MARGINAL; aynı koşum tablonun kendi K/rho'suyla
+    # çağrılınca hüküm basıncı 125,14 bara iniyor ve hüküm SAFE oluyordu
+    # (MARGINAL -> SAFE kaçağı). Onarım: override yalnız ilgili alanı ezdiği
+    # için buhar basıncı düşmüyor, fail-closed hüküm ayakta kalıyor.
+    def test_override_verilince_hukum_fail_closed_kalir(self):
+        """Override, fail-closed hükmü SAFE'e çeviremez."""
+        _, _, out = _su_kocu_zinciri('water', 3.74, 25.0e5,
+                                     buhar_basinci=False, override=True)
+        assert out['column_separation'] is True
+        assert out['status'] == 'MARGINAL'
+
+    @pytest.mark.parametrize('fluid', SU_KOCU_SIVILARI)
+    def test_dalga_hizi_verilmeyince_uydurulmaz(self, fluid):
         """Young modülü yoksa dalga hızı HESAPLANMAZ, sayı uydurulmaz."""
+        kayit = WH_FLUID_PROPERTIES[fluid]
         wh_in = water_hammer_inputs(
-            fluid='water', mass_flow_kg_s=2.0, density_kg_m3=998.0,
-            line_id_m=0.0254, wall_thickness_m=0.0015, line_length_m=5.0,
-            working_pressure_Pa=25.0e5)
+            fluid=fluid, mass_flow_kg_s=2.0,
+            density_kg_m3=float(kayit['density_kg_m3']),
+            working_pressure_Pa=25.0e5, **SU_KOCU_HAT)
         assert wh_in['wave_speed_m_s'] is None
         assert wh_in['critical_closure_time_s'] is None
         assert any('NOT computed' in n for n in wh_in['notes'])
 
-    def test_cok_siki_surge_izni_zamanlamayla_saglanamaz(self):
-        """t_min <= t_c ise kapanma zamanlaması TEK BAŞINA yetmez, denir."""
-        wh_in = water_hammer_inputs(
-            fluid='water', mass_flow_kg_s=2.0, density_kg_m3=998.0,
-            line_id_m=0.0254, wall_thickness_m=0.0015, line_length_m=5.0,
-            working_pressure_Pa=25.0e5, bulk_modulus_Pa=2.19e9,
-            pipe_youngs_modulus_Pa=193.0e9,
-            allowable_pressure_rise_Pa=200.0e5)
-        assert wh_in['closure_time']['status'] == 'unreachable_by_scheduling'
-        assert 'Joukowsky' in wh_in['closure_time']['message']
+    @pytest.mark.parametrize('fluid', SU_KOCU_SIVILARI)
+    def test_surge_izni_joukowskynin_ustundeyse_kisit_yok(self, fluid):
+        """İzin Joukowsky'nin ÜSTÜNDEYSE hiçbir kapanma kısıtı YOKTUR.
+
+        ÇEVRİLEN BEKÇİ (ÖH D15 / P5B3-03). Eski hâli ``t_min <= t_c``
+        dalında ``'unreachable_by_scheduling'`` bekliyordu, yani TERS
+        HÜKMÜ birebir kilitliyordu. Cebir: ``t_min <= t_c`` tam olarak
+        ``rho*a*dv <= dP_izin``, yani Joukowsky yükselişinin payın ALTINDA
+        kaldığı — hattın koşulsuz güvenli olduğu — durumdur. Ölçüm ve
+        gerekçe ``valve_feedline`` içindeki P5B3-03 notunda; Michaud
+        bağıntısında dP -> 0 olduğu için "zamanlamayla ulaşılamaz" dalı
+        fiziksel olarak yoktur.
+
+        İzin bandının iki yakası da sınanır; sayısal sınır (Joukowsky
+        artışının kendisi) değişmedi.
+        """
+        kayit = WH_FLUID_PROPERTIES[fluid]
+        rho = float(kayit['density_kg_m3'])
+        a, _ = _dalga_hizi_kapali_form(
+            float(kayit['bulk_modulus_Pa']), rho, SU_KOCU_HAT['line_id_m'],
+            SU_KOCU_HAT['wall_thickness_m'],
+            float(_boru_kaydi()['elastic_modulus']))
+        v = 4.0 * 2.0 / (rho * math.pi * SU_KOCU_HAT['line_id_m'] ** 2)
+        dp_jouk = rho * a * v
+        ortak = dict(fluid=fluid, mass_flow_kg_s=2.0, density_kg_m3=rho,
+                     working_pressure_Pa=25.0e5,
+                     bulk_modulus_Pa=float(kayit['bulk_modulus_Pa']),
+                     pipe_youngs_modulus_Pa=float(
+                         _boru_kaydi()['elastic_modulus']),
+                     **SU_KOCU_HAT)
+        # İzin Joukowsky'nin ÜSTÜNDE: zamanlama gereksiz VE modül bunu
+        # artık doğru söylüyor (t_min <= t_c dalı).
+        gevsek = water_hammer_inputs(
+            allowable_pressure_rise_Pa=dp_jouk * 1.05, **ortak)
+        assert gevsek['closure_time']['status'] == 'no_scheduling_constraint'
+        assert 'Joukowsky' in gevsek['closure_time']['message']
+        # Gerekmeyen donanım ÖNERİLMEZ.
+        assert 'accumulator' not in gevsek['closure_time']['message']
+        # İzin Joukowsky'nin ALTINDA: yavaşlatarak sağlanabilir.
+        siki = water_hammer_inputs(
+            allowable_pressure_rise_Pa=dp_jouk * 0.5, **ortak)
+        assert siki['closure_time']['status'] == 'achievable_by_scheduling'
+        assert siki['closure_time']['minimum_closure_time_s'] > (
+            siki['critical_closure_time_s'])
 
 
 # ===========================================================================
@@ -865,28 +1185,313 @@ class TestDurustluk:
 # Uçtan uca akış: zincirin bütünü çalışıyor ve JSON-güvenli
 # ===========================================================================
 class TestUctanUca:
-    def test_valve_feedline_tam_zincir(self):
+    """Uçtan uca zincir — ÜRÜN AKIŞININ adaptör halkasından geçerek.
+
+    Eski ``test_valve_feedline_tam_zincir`` "tam zincir" adını taşıyordu
+    ama 15 kwarg'ı elle dolduruyor, ``fluid='water'``ı kendi veriyor ve
+    ürettiği ``analyzer_kwargs``ı yalnız DOLU olduğu için kabul ediyordu
+    (defter P13B2-07). Yani adaptör halkası — iticiden akışkan anahtarına
+    ve buhar basıncına giden eşleme — bekçinin göremediği yerdeydi; P4B4-07
+    ve P5B3-02 tam orada yaşıyor. Zincir artık o halkadan geçirilir:
+    akışkan anahtarı ve akışkan kaydı sıvı motorun besleme haritasından
+    okunur, çıktı gerçekten ``analyze()``a verilir ve sayısal olarak
+    sınanır.
+    """
+
+    @staticmethod
+    def _adaptor_halkasi(itici):
+        """Ürün akışının kullandığı halka: itici -> (anahtar, kayıt)."""
+        from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
+        return LiquidRocketEngine._feed_fluid_record(itici)
+
+    @pytest.mark.parametrize('itici,rol', [('lox', 'oxidizer'),
+                                           ('rp1', 'fuel')])
+    def test_valve_feedline_tam_zincir(self, itici, rol):
+        """Zincirin tamamı: itici -> adaptör -> hat/vana -> su koçu çözücüsü.
+
+        Su koçu girdisi elle yazılmaz: hattın yoğunluğu deponun merkezî
+        itici tablosundan, akışkan anahtarı ve kaydı ürünün besleme
+        eşlemesinden, viskozite motorun kendi yedek tablosundan, boru
+        malzemesi/Young modülü motorun sabitinden ve materials_db'den
+        gelir. Halka koparsa (eşleme başka bir akışkana giderse) hattın
+        yoğunluğu ile etiketin yoğunluğu ayrışır ve bekçi kırmızıya döner.
+        """
         import json
 
+        from hrma.data.propellant_database import PropellantDatabase
+        from hrma.engines.liquid_rocket_engine import (
+            FEED_LINE_ROUGHNESS_M, FEED_VISCOSITY_FALLBACK_PA_S,
+            WATER_HAMMER_DEFAULT_PIPE_MATERIAL)
+
+        anahtar, kayit = self._adaptor_halkasi(itici)
+        assert kayit is not None, (
+            f'{itici} besleme akışkan haritasında yok — zincir kurulamaz')
+        # Hattın yoğunluğu BAŞKA bir kaynaktan gelir: merkezî itici tablosu.
+        rho = float(
+            PropellantDatabase().get_propellant_properties(itici)['density'])
+        assert float(kayit['density_kg_m3']) == pytest.approx(rho, rel=1e-9), (
+            f'{itici}: su koçu tablosu {kayit["density_kg_m3"]} kg/m³, '
+            f'merkezî itici tablosu {rho} kg/m³ — iki kaynak ayrışmış')
+        p_inlet = 25.0e5
+        mdot = 2.0
+
         out = analyze_valve_feedline(
-            mass_flow_kg_s=2.0, density_kg_m3=998.0, viscosity_Pa_s=1.0e-3,
-            line_id_m=0.0254, line_length_m=5.0, inlet_pressure_Pa=25.0e5,
-            valve_pressure_drop_Pa=2.0e5, wall_thickness_m=0.0015,
-            fluid='water',
+            mass_flow_kg_s=mdot, density_kg_m3=rho,
+            viscosity_Pa_s=FEED_VISCOSITY_FALLBACK_PA_S[rol],
+            line_id_m=SU_KOCU_HAT['line_id_m'],
+            line_length_m=SU_KOCU_HAT['line_length_m'],
+            inlet_pressure_Pa=p_inlet, valve_pressure_drop_Pa=2.0e5,
+            wall_thickness_m=SU_KOCU_HAT['wall_thickness_m'],
+            fluid=anahtar,
+            # Ürün akışı pürüzlülüğü ADLA değil ÖLÇÜYLE verir (motorun
+            # kendi sabiti); böylece pipe_material yalnız su koçu
+            # tarafına, materials_db anahtarı olarak gider.
+            roughness_m=FEED_LINE_ROUGHNESS_M,
+            pipe_material=WATER_HAMMER_DEFAULT_PIPE_MATERIAL,
             fittings={'elbow_90_long_radius': 4,
                       'ball_valve_full_bore': 1, 'entrance_sharp': 1},
-            vapor_pressure_Pa=2339.0, critical_pressure_Pa=22.064e6,
-            bulk_modulus_Pa=2.19e9, pipe_youngs_modulus_Pa=193.0e9,
+            vapor_pressure_Pa=float(kayit['vapor_pressure_Pa']),
+            bulk_modulus_Pa=float(kayit['bulk_modulus_Pa']),
+            pipe_youngs_modulus_Pa=float(_boru_kaydi()['elastic_modulus']),
             allowable_pressure_rise_Pa=5.0e5)
-        # Bütçe kapanıyor mu
+
+        # (1) Bütçe kapanıyor mu (eski çapa korunur)
         b = out['budget']
         assert b['total_dp_Pa'] == pytest.approx(
             b['line_dp_Pa'] + b['valve_dp_Pa'], rel=1e-12)
         assert b['delivery_pressure_Pa'] == pytest.approx(
             b['inlet_pressure_Pa'] - b['total_dp_Pa'], rel=1e-9)
         assert out['valve']['capacity']['cv_required'] > 0.0
-        assert out['water_hammer']['analyzer_kwargs']
+
+        # (2) Akışkan etiketi adaptörden geldi, bekçiden değil.
+        kw = out['water_hammer']['analyzer_kwargs']
+        assert kw['fluid'] == anahtar
+        assert kw['fluid'] in WH_FLUID_PROPERTIES
+        assert WH_FLUID_PROPERTIES[kw['fluid']]['density_kg_m3'] == (
+            pytest.approx(rho, rel=1e-12)), (
+            'yayımlanan akışkan etiketi hattın yoğunluğunu temsil etmiyor')
+
+        # (3) Zincir GERÇEKTEN çözücüye giriyor ve sayılar kapalı formla aynı.
+        res = WaterHammerAnalyzer().analyze(**kw)
+        d = SU_KOCU_HAT['line_id_m']
+        a_bek, _ = _dalga_hizi_kapali_form(
+            float(kayit['bulk_modulus_Pa']), rho, d,
+            SU_KOCU_HAT['wall_thickness_m'],
+            float(_boru_kaydi()['elastic_modulus']))
+        v = 4.0 * mdot / (rho * math.pi * d * d)
+        dp_bek = rho * a_bek * v
+        assert res['wave_speed_m_s'] == pytest.approx(a_bek, rel=1e-12)
+        assert res['mass_flow_kg_s'] == pytest.approx(mdot, rel=1e-9)
+        assert res['joukowsky_pressure_rise_Pa'] == pytest.approx(dp_bek,
+                                                                  rel=1e-12)
+        # ÖH D20 / P5B3-13 — BU İDDİA ÇEVRİLDİ (gerekçe aşağıda).
+        #
+        # Eski hâli::
+        #
+        #     assert res['peak_pressure_Pa'] == pytest.approx(
+        #         p_inlet + dp_bek, rel=1e-12)
+        #
+        # yani tepe basıncın tabanı hattın GİRİŞ basıncıydı. Oysa surge
+        # VANANIN kapanmasıyla doğar ve vana ``analyze_valve_feedline``in
+        # kendi docstring'ine göre hattın SONUNDADIR ("vana giriş basıncı
+        # hat çıkış basıncıdır"); ``size_valve`` zaten hat çıkışını
+        # kullanıyordu, yalnız su koçu bağlaması girişi geçiriyordu.
+        #
+        # ÖLÇÜLDÜ (bu test, lox kolu): eski taban p_inlet = 25,0 bar ile
+        # ``peak_pressure_Pa = 7 237 484,545564627 Pa``; onarımdan sonra
+        # vana giriş basıncıyla ``7 167 776,030290613 Pa`` — aradaki
+        # 69 708,515274 Pa tam olarak hattın kendi düşümüdür.
+        #
+        # Yön BU çalışma noktasında kötümserdi (kot farkı sıfır, kayıplar
+        # küçük), ama işaret tasarıma bağlıdır: ``elevation_gain_m < 0``
+        # olan bir hatta (çıkış girişten AŞAĞIDA) hat çıkışı girişten
+        # YÜKSEKTİR ve eski taban tepe basıncı EKSİK gösterirdi. Doğru
+        # olan, surge'ün doğduğu istasyonun basıncını kullanmaktır.
+        p_vana_giris = out['line']['total']['outlet_pressure_Pa']
+        assert kw['working_pressure_bar'] == pytest.approx(
+            p_vana_giris / 1e5, rel=1e-12)
+        assert res['peak_pressure_Pa'] == pytest.approx(
+            p_vana_giris + dp_bek, rel=1e-12)
+
+        # (4) Hüküm sayıların fonksiyonu; malzeme varsayıma düşmemiş.
+        mawp, akma = _hoop_basinclari(d, SU_KOCU_HAT['wall_thickness_m'])
+        assert res['pipe']['material'] == WATER_HAMMER_DEFAULT_PIPE_MATERIAL
+        assert res['column_separation'] is not None
+        assert res['status'] == _beklenen_hukum(
+            res['design_peak_pressure_bar'] * 1e5, mawp, akma)
+        assert not any('ASSUMED material' in w for w in res['warnings'])
+
         json.dumps(out)   # JSON-güvenli olmalı
+
+    # ÖH D26 / sivi a2 — P4B4-08 borç imi SÖKÜLDÜ; im gerekçesi BAYAT.
+    #
+    # Z5S/PK4 ürünü ONARMIŞTI (kürasyon notunun İKİNCİ seçeneği, ARGÜMAN
+    # AYRIMI): ``pipe_material`` yalnız ``PIPE_ROUGHNESS_M`` yüzey-bitişi
+    # anahtarı olarak kaldı, yapısal ad için ayrı ``pipe_structural_material``
+    # argümanı (materials_db anahtarı, varsayılan ``ss_304``) eklendi. İm,
+    # kusur yüzünden değil, testin İLK SATIRINDAKİ ÖN KOŞUL yüzünden
+    # duruyordu: o ön koşul (``PIPE_ROUGHNESS_M ∩ materials_db`` boş olmasın)
+    # kürasyon notunun REDDEDİLEN birinci seçeneğini (sözlük birleştirme)
+    # şart koşuyordu ve uygulanan onarım o öncülü ÇÜRÜTTÜ — iki sözlük artık
+    # kesişmek ZORUNDA DEĞİL, çünkü onları besleyen argüman iki tane.
+    #
+    # ÖLÇÜLDÜ (``docs/scofield/raw/OH/D26/sivi/a2/once_su_kocu.json``,
+    # ``P4B4-08``; taban ağacı):
+    #   PIPE_ROUGHNESS_M ∩ materials_db   = []      (hâlâ boş — önemli DEĞİL)
+    #   yayımlanan pipe_material          = 'ss_304' (materials_db anahtarı)
+    #   get_material(...)                 = çözülüyor (KeyError YOK)
+    #   'Unknown pipe material' uyarısı   = False
+    #   'ASSUMED material' uyarısı        = False
+    #   pipe_material='cast_iron' verilince yapısal ad  = 'ss_304' (DEĞİŞMEZ)
+    #   pipe_structural_material='al_2024_t3' verilince = 'al_2024_t3'
+    #
+    # Ön koşul, onarımın gerçekten kurduğu SÖZLEŞMEYLE değiştirildi: iki ad
+    # iki tablodan okunur ve BİRBİRİNDEN BAĞIMSIZDIR. Kusurun geri gelme
+    # biçimi — tek argümanın yine iki sözlüğe gitmesi — bu iddiaların
+    # ÜÇÜNCÜSÜYLE yakalanır (pürüzlülük adını değiştirmek yapısal adı
+    # oynatırsa ayrım çökmüş demektir).
+    def test_adapter_boru_malzemesini_materials_db_anahtariyla_yayimlar(self):
+        """Adaptörün yayımladığı boru malzemesi çözülebilir olmalı.
+
+        VE iki malzeme adı (yüzey bitişi ⟷ yapısal alaşım) ayrı kalmalı.
+        """
+        from hrma.analysis.valve_feedline import PIPE_ROUGHNESS_M
+        from hrma.data.materials_db import list_materials
+
+        cagri = dict(
+            mass_flow_kg_s=2.0, density_kg_m3=1141.0, viscosity_Pa_s=2.0e-4,
+            line_id_m=SU_KOCU_HAT['line_id_m'],
+            line_length_m=SU_KOCU_HAT['line_length_m'],
+            inlet_pressure_Pa=25.0e5, valve_pressure_drop_Pa=2.0e5,
+            wall_thickness_m=SU_KOCU_HAT['wall_thickness_m'], fluid='lox',
+            vapor_pressure_Pa=101325.0)
+
+        # (1) Yayımlanan yapısal ad materials_db'de ÇÖZÜLMELİ.
+        out = analyze_valve_feedline(**cagri)
+        kw = out['water_hammer']['analyzer_kwargs']
+        assert kw['pipe_material'] in set(list_materials()), (
+            f"adaptör {kw['pipe_material']!r} yayımlıyor; bu ad materials_db "
+            f'anahtarı değil — yapısal ad yine pürüzlülük tablosundan '
+            f'geliyor olabilir')
+        get_material(kw['pipe_material'])
+        res = WaterHammerAnalyzer().analyze(**kw)
+        assert res['pipe']['material'] == kw['pipe_material']
+        assert not any('Unknown pipe material' in w for w in res['warnings'])
+        assert not any('ASSUMED material' in w for w in res['warnings'])
+
+        # (2) Yüzey-bitişi adı KENDİ tablosundan okunmalı.
+        assert 'stainless_tubing' in PIPE_ROUGHNESS_M, (
+            'pürüzlülük tablosu değişmiş — bu bekçinin ölçtüğü ayrım '
+            'başka bir yerden kurulmuş olabilir')
+
+        # (3) AYRIM: pürüzlülük adını değiştirmek yapısal adı OYNATMAMALI.
+        #     (Kusurun geri geliş biçimi tam olarak budur.)
+        puruzlu = analyze_valve_feedline(**dict(cagri,
+                                                pipe_material='cast_iron'))
+        assert (puruzlu['water_hammer']['analyzer_kwargs']['pipe_material']
+                == kw['pipe_material']), (
+            'pürüzlülük anahtarı yapısal malzeme adını değiştirdi — TEK '
+            'argüman yine İKİ sözlüğe gidiyor (P4B4-08 geri geldi)')
+
+        # (4) Yapısal ad KENDİ argümanıyla değiştirilebilmeli.
+        yapisal = analyze_valve_feedline(
+            **dict(cagri, pipe_structural_material='al_2024_t3'))
+        assert (yapisal['water_hammer']['analyzer_kwargs']['pipe_material']
+                == 'al_2024_t3'), (
+            'pipe_structural_material yok sayılıyor — ayrım yalnız adda '
+            'kalmış, kanal bağlanmamış')
+
+    # DURUM NOTU (Z5S/PK4) — İM YERİNDE BIRAKILDI, borç GERÇEK ve VERİ
+    # borcudur. P4B4-07'nin YALAN ayağı onarıldı: adaptör artık haritasız
+    # itici için sessizce fluid='water' yayımlamıyor, su koçu bloğu hiç
+    # ÜRETİLMİYOR ve sebebi itici ADIYLA beyan ediliyor
+    # (water_hammer_coupling_source). Ama bu bekçi haritanın DOLMASINI
+    # istiyor; kapsam ölçümü değişmedi: 9 iticiden 7'si (lh2, methane, mmh,
+    # udmh, n2o, h2o2, n2o4) hâlâ haritasız. Dolması 6 itici için kaynak
+    # künyeli hacimsel modül + yoğunluk + buhar basıncı kaydı ister; n2o
+    # ayrıca Berke'nin bekleyen 'n2o kanon-T' kararına bağlıdır (FLUID_-
+    # PROPERTIES 785 kg/m³ ⟷ PropellantDatabase 745 kg/m³). Sayı
+    # UYDURULMADI, bu yüzden im borç olarak duruyor.
+    # ÖH D26 / sivi a2 — İM METNİ DÜZELTİLDİ (im KALDI, borç GERÇEK).
+    # Eski gerekçe "ürün akışı bunları sessizce fluid='water' yapıyor"
+    # diyordu; bu cümle Z5S/PK4 onarımından SONRA YANLIŞTI ve strict bir
+    # borç imi yanlış bir olguyu ilan ediyordu. ÖLÇÜLDÜ (``docs/scofield/
+    # raw/OH/D26/sivi/a2/once_su_kocu.json`` ``P4B4-07.fail_closed``, taban
+    # ağacı): haritasız YEDİ iticinin (lh2, methane, mmh, udmh, n2o, h2o2,
+    # n2o4) HİÇBİRİNDE su koçu bağlaması ÜRETİLMİYOR ve uydurulan 'water'
+    # etiketi sayısı **0/7**; haritalı ikisinde (lox, rp1) bağlama
+    # üretiliyor. Yani YALAN ayağı kapalı, açık kalan şey VERİ borcudur ve
+    # im artık onu söylüyor. Fail-closed sözleşmesinin kendi bekçisi:
+    # ``tests/test_d26_sivi_a2.py::TestP4B407FailClosed``.
+    # ÖH D31 / sivi a1 — İM METNİ GÜNCELLENDİ (im KALDI, borç KÜÇÜLDÜ).
+    # P4B4-07 + OH-D27-08 ile veri borcunun BEŞ iticilik kısmı ödendi:
+    # lh2, methane, mmh, udmh, n2o4 birincil kaynaklı (NIST Chemistry
+    # WebBook; AFRPL-TR-69-149 §2.4.1/§2.5.1; AFRPL-TR-76-76 §2.3.1)
+    # K = rho*a^2 + buhar basıncı kaydıyla haritaya girdi. ÖLÇÜLDÜ: harita
+    # kapsaması 2/9 -> 7/9, üretilen su koçu bloğu 2 -> 7. n2o'nun
+    # 785 ⟷ 745 kg/m³ ayrışması da kapandı (kayıt artık merkezî
+    # N2O_LIQUID_DENSITY_SAT_25C adını okuyor, ÖLÇÜLEN ayrışma 40 -> 0).
+    # İm DURUYOR çünkü liste HENÜZ dolmadı; kalan iki iticinin gerekçesi
+    # aşağıda ADIYLA yazılıdır ve ikisi de sıvı motorun DESTEKLEDİĞİ itici
+    # çiftlerinde geçmez (ethanol/lox, lh2/lox, methane/lox, mmh/n2o4,
+    # rp1/lox, udmh/n2o4) — yani bugün kullanıcıya ulaşan bir boşluk değil,
+    # katalog bütünlüğü borcudur.
+    @pytest.mark.xfail(strict=True, reason=(
+        'ÖH defter P4B4-07 — VERİ BORCUNUN KALAN İKİ İTİCİSİ (ürün '
+        'fail-closed). Besleme akışkan haritası (liquid_rocket_engine.py '
+        "WATER_HAMMER_FLUID_KEY) D31'de {'lox','rp1'} -> {'lox','rp1','lh2',"
+        "'methane','mmh','udmh','n2o4'} genişledi; motorun itici "
+        'listesinden haritada KALMAYAN ikisi h2o2 ve n2o. h2o2: '
+        'FLUID_PROPERTIES kaydı VAR (K ve rho künyeli, AFRPL-TR-67-144 + '
+        'Schumb) ama BUHAR BASINCI için birincil kaynak kazanılamadı; '
+        'harita aynı zamanda NPSH/kavitasyon buhar basıncı kaynağı olduğu '
+        'için kayıt haritaya alınmadı. n2o: kaydı D31 kanona taşındı ve '
+        'künyesi tamamdır; haritaya alınması ürün KAPSAM kararıdır. '
+        'Sayı UYDURULMAZ.'))
+    def test_besleme_akiskan_haritasi_iticileri_kapsar(self):
+        """Haritadaki her delik, su koçu ucunda 'water' etiketine dönüşür."""
+        from hrma.data.propellant_database import PropellantDatabase
+
+        db = PropellantDatabase()
+        iticiler = (db.get_propellant_list('liquid_fuels')
+                    + db.get_propellant_list('oxidizers'))
+        assert iticiler, 'itici listesi boş — kaynak değişmiş'
+        eksik = [p for p in iticiler if self._adaptor_halkasi(p)[0] is None]
+        assert not eksik, (
+            f'besleme akışkan haritasında olmayan itici(ler): {eksik} — '
+            "ürün akışı bunlar için fluid='water' yayımlıyor")
+
+    # ÖH defter P5B3-02 / P4B4-07 — Z5S/PK4 onarımıyla YEŞİLE DÖNDÜ;
+    # xfail(strict) borç imi söküldü. Kusurun kaydı: adaptör fluid alanını
+    # yoğunlukla DOĞRULAMIYORDU. Ölçüldü (LH2 hattı, deponun kendi
+    # PropellantDatabase kaydı rho=70,8 kg/m³, ṁ=2,0 kg/s): etiket 'water'
+    # yayımlanınca çözücü hattın debisini 28,19 kg/s okuyor (14,096 kat) ve
+    # Joukowsky artışını su yoğunluğuyla 754,85 bar veriyordu. Onarım:
+    # water_hammer_inputs hattın KENDİ yoğunluğunu her zaman çözücüye
+    # iletiyor (debi 2,000 kg/s = 1,000 kat, artış 201,05 bar) ve etiket ile
+    # yoğunluğun ayrışması fluid_label künyesinde beyan ediliyor
+    # (label_status='density_mismatch', density_ratio 0,0709).
+    def test_adapter_fluid_etiketi_hattin_yogunlugunu_temsil_eder(self):
+        """Etiket ile hattın yoğunluğu ayrışırsa zincir sessiz kalamaz.
+
+        Adaptör hem gerçek yoğunluğu (hız hesabı için) hem akışkan
+        etiketini alır; ikisi çelişiyorsa ya reddetmeli ya beyan etmeli.
+        Bugün ikisi de yok: çözücü etiketin tablo yoğunluğunu kullanır ve
+        aynı hattın debisi iki modülde iki farklı sayı olur.
+        """
+        from hrma.data.propellant_database import PropellantDatabase
+
+        rho_lh2 = float(
+            PropellantDatabase().get_propellant_properties('lh2')['density'])
+        mdot = 2.0
+        wh_in = water_hammer_inputs(
+            fluid='water', mass_flow_kg_s=mdot, density_kg_m3=rho_lh2,
+            working_pressure_Pa=25.0e5, **SU_KOCU_HAT)
+        res = WaterHammerAnalyzer().analyze(**wh_in['analyzer_kwargs'])
+        assert res['mass_flow_kg_s'] == pytest.approx(mdot, rel=1e-6), (
+            f"etiket 'water', hat yoğunluğu {rho_lh2:g} kg/m³ — çözücü "
+            f"hattın debisini {res['mass_flow_kg_s']:.2f} kg/s okuyor "
+            f"({res['mass_flow_kg_s'] / mdot:.3f} kat)")
 
     def test_gimbal_tam_zincir(self):
         import json

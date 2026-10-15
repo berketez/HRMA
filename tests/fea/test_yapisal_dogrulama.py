@@ -37,6 +37,7 @@ from hrma.fea.structural_axisym import (
     von_mises,
     DEFAULT_REFINE_TOL,
 )
+from hrma.utils.numeric_compat import trapezoid
 
 # ---------------------------------------------------------------------------
 # Ortak problem tanımı: iç basınçlı kalın cidarlı silindir.
@@ -154,14 +155,47 @@ class TestLameKalinCidar:
         assert np.max(np.abs(sz_num - sz_beklenen)) / olcek < LAME_REL_TOL
 
     def test_emniyet_katsayisi_alani(self, cozum):
-        """SF alanı akma/von Mises'ten türetilmiş ve tutarlı olmalı."""
+        """SF alanı akma/von Mises'ten türetilmiş ve tutarlı olmalı.
+
+        ÇEVRİLEN BEKÇİ (ÖH D15, kulvar fea-viz, kalem P8B1-01). Bu test
+        eskiden ``min_safety_factor == akma / max_von_mises`` (Gauss
+        noktaları) kilitliyordu — yani KUSURU koruyordu. Gauss noktaları
+        eleman İÇİNDE kaldığı için tepe gerilmeyi daima eksik ölçer ve
+        emniyet katsayısını daima YÜKSEK verir; ölçüldü (bu çapanın kendi
+        fixture'ı): eski tanım 8,20596 ⟷ yayımlanan 8,00439, yani %2,52
+        iyimser. Kaba mesh'te (16x4) aynı çapada iyimserlik +%10,51'e
+        çıkıyor (docs/scofield/raw/OH/D15/fea-viz/a1/once_A.json). Hüküm
+        sayısı artık DÜĞÜM/SPR maksimumundan gelir ve aynı sonuçtaki
+        ``safety_factor_nodal`` alanının minimumuyla BİREBİR aynıdır.
+        """
         _, result = cozum
         assert result.safety_factor_nodal is not None
         assert result.min_safety_factor is not None
         ys = STEEL.yield_strength
-        # min SF, Gauss maks von Mises'ten türetilir (kaynak beyanı meta'da).
+        # --- ÇEVRİLDİ (ÖH D25, OH-D24-01) — GEREKÇE ÖLÇÜLDÜ -------------
+        # İki eşitlik ("min SF = akma / ham düğüm tepesi" ve "= düğüm SF
+        # alanının minimumu") artık geçerli DEĞİL: hüküm sayısı ASME BPVC
+        # VIII-2 Bölüm 5 / Ek 5-A lineerleştirmesinden geliyor
+        # (max(1,5·P_m, P_L+P_b)). Gerekçe: ham düğüm tepesi (ASME "F")
+        # geometrik süreksizlikte mesh inceltmesiyle YAKINSAMIYOR ve ASME
+        # Tablo 5.6 onu plastik çökme hükmünden zaten dışlıyor.
+        # ÖNEMLİ ÖLÇÜM — GEVŞEME YOK: bu KALIN CİDAR (Lamé) çapasında
+        # yeni hüküm ESKİSİNDEN SIKI çıkıyor, 8,004393 → 7,916835
+        # (%1,09 daha muhafazakâr), çünkü kalın cidarda bağlayıcı ölçüt
+        # membran ayağıdır (1,5·P_m). Ham tepeden türeyen eski sayı
+        # SİLİNMEDİ: ``tepe_emniyet_katsayisi`` alanında yayımlanıyor ve
+        # aşağıda AYNEN sınanıyor.
+        assert result.tepe_emniyet_katsayisi == pytest.approx(
+            ys / result.max_von_mises_nodal)
+        assert result.tepe_emniyet_katsayisi == pytest.approx(
+            float(np.min(result.safety_factor_nodal)))
+        # Hüküm sayısı lineerleştirmenin paydasından gelir ve beyanlıdır.
+        scl = result.meta['scl_lineerlestirme']
+        assert scl['gecerli'] is True
         assert result.min_safety_factor == pytest.approx(
-            ys / result.max_von_mises)
+            ys / result.max_von_mises_hukum)
+        assert result.max_von_mises_hukum == pytest.approx(
+            max(1.5 * scl['P_m_maks_pa'], scl['P_L_Pb_maks_pa']))
         # Düğüm SF alanı = yield / vm_nodal (vm > 0 olan her yerde).
         maske = result.von_mises_nodal > 0
         np.testing.assert_allclose(
@@ -317,7 +351,7 @@ class TestMeshYakinsama:
         idx = mesh.node_index_grid[i_mid, :]
         r = mesh.nodes[idx, 1]
         st = result.stress_nodal[idx, 2]
-        ortalama_hoop = np.trapz(st, r) / (r[-1] - r[0])
+        ortalama_hoop = trapezoid(st, r) / (r[-1] - r[0])
         hoop_ince = p * a / t                   # formülden, hardcode değil
         assert abs(ortalama_hoop - hoop_ince) / hoop_ince < LAME_REL_TOL
 

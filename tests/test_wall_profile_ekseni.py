@@ -40,6 +40,10 @@ NE KİLİTLENİR
   7. Yayımlanan kontur bozuksa (kesin artan değil, r <= 0, biçimsiz) sessizce
      kabul edilmez: canlı örneklemeye düşülür ve gerekçe beyan edilir.
   8. Eksenin başlangıcı VARSAYILMAZ, konturdan okunur.
+  9. Kapı, KÜNYESİNDE belgelediği kusur vakasını (profil 171 mm / kontur
+     124 mm → %37,9 sapma) reddetmeye devam eder; ve bu dosyanın sınırları
+     artık ``THERMAL_PROFILE_DOMAIN_TOL``dan TÜRETİLMEZ, ölçülmüş vakalara
+     çapalıdır (ÖH FAZ B-1 adım #9 — defter P14M4-03d / P14M4-03c).
 
 Sayısal doğruluk bu dosyanın işi değildir (o profilin kendi fizik
 testlerinin işi: tests/test_axial_profile.py); burada kilitlenen şey iki
@@ -66,6 +70,48 @@ VARSAYILAN = dict(fuel_type='htpb', oxidizer_type='n2o', thrust=1000,
 PANEL_ALANLARI = ('chamber_pressure', 'chamber_temperature', 'burn_time',
                   'mdot_total', 'chamber_diameter', 'chamber_length',
                   'throat_diameter')
+
+# ----------------------------------------------------------------------
+# ÖLÇÜLMÜŞ ÇAPALAR (ÖH FAZ B-1 adım #9 — defter P14M4-03d / P14M4-03c)
+# ----------------------------------------------------------------------
+# H2 KURALI: BİR EŞİĞİ KORUYAN İDDİA O EŞİKTEN TÜRETİLMİŞ OLAMAZ.
+#
+# Bu dosyanın bekçileri sınırlarını, korumakla yükümlü oldukları sabitin
+# KENDİSİYLE yazıyordu (``sapma <= bridge.THERMAL_PROFILE_DOMAIN_TOL * L``).
+# Refleks tek-kaynak hijyeni açısından doğruydu ("ölçüt kopyalanmaz, okunur")
+# ama eşiğin KENDİ bekçisine uygulandığında iddiayı totolojiye çeviriyordu:
+# sabit gevşerse iddia da onunla gevşer.
+#
+# ÖLÇÜLDÜ (P14M4-03d): ``THERMAL_PROFILE_DOMAIN_TOL`` 0,05 -> 0,40 (8×)
+# yapıldığında 6 dosya / 198 test SIFIR kırmızı verdi; gerçek RED bekçisi
+# ancak 60×'ten sonra ısırıyordu, arada kalan bantta kapı kendi künyesinde
+# BELGELEDİĞİ kusur vakasını sessizce kabul ediyordu.
+#
+# Çözüm: sınırlar TOL türetmesinden koparıldı ve iki ölçülmüş vakaya
+# çapalandı (aşağıdaki iki sabit). Çapalar üründen İTHAL EDİLMEZ.
+
+#: Bugün ölçülen profil-kontur sapması — analizör yolunda da (bu dosyanın
+#: 2026-08-26 ölçümü: konik / bell / varsayılan hibrit üçünde de tam
+#: 0,000000e+00 mm) UÇTAN UCA zincirde de (aynı ölçüm, panel gövdesi ->
+#: /api/analysis/wall-profile -> /api/fea/thermal: yine 0,000000e+00 mm) SIFIR.
+#: Sıfır olmasının sebebi tanım gereğidir: eksen, köprünün okuduğu dizinin ta
+#: kendisinden okunuyor. Tavan 1e-6 mm = 1 nm; ürün toleransının (TOL·L ≈
+#: 4,4-6,3 mm) yaklaşık 5e6 katı SIKI ve tamamen ondan bağımsız.
+SAPMA_TAVANI_MM = 1e-6
+
+#: Köprünün kendi künyesinin (``bridge.py:177-178``) BELGELEDİĞİ ölçülmüş
+#: kusur vakası: "aynı motorun geometrisi eksik verilerek çağrılan profil
+#: 171 mm, konturu 124 mm çıkıyor" — yani kapının var oluş sebebi olan gerçek
+#: sapma, kontur boyunun %37,9'udur. Kapı bu vakayı reddetmeyi bırakırsa
+#: BAŞKA geometrinin h(z)'si mesh'e taşınır.
+KUNYE_PROFIL_MM = 171.0
+KUNYE_KONTUR_MM = 124.0
+KUNYE_SAPMA_ORANI = (KUNYE_PROFIL_MM - KUNYE_KONTUR_MM) / KUNYE_KONTUR_MM
+
+#: Konik ve bell eksen boylarının ÖLÇÜLEN farkı (2 kN / 30 bar hibrit,
+#: 2026-08-26): 126,158257 mm − 87,306353 mm = 38,851905 mm (bell boyunun
+#: %44,5'i). Meta bekçi bu farkı TOL ile değil bu ölçümle sınar.
+KONIK_BELL_FARK_MM = 38.851905
 
 
 def _quiet(fn, *args, **kwargs):
@@ -136,6 +182,18 @@ def panel_govdesi(motor):
     if (isinstance(kontur, dict) and isinstance(kontur.get('points'), list)
             and len(kontur['points']) >= 2):
         govde['nozzle_contour'] = kontur
+    # ÖH D19 / P7B3-30: panel motorun kendi malzemesini de gönderiyor —
+    # profil ve mesh AYNI cidarı anlatmak zorunda (yoksa /api/fea/thermal
+    # adlı 422 ``axial_profile_material_mismatch`` verir).
+    sa = motor.get('structural_analysis')
+    if isinstance(sa, dict):
+        for blok, alan in (('design_parameters', 'material'),
+                           ('chamber_structure', 'material_key'),
+                           ('case_analysis', 'case_material')):
+            deger = (sa.get(blok) or {}).get(alan)
+            if isinstance(deger, str) and deger.strip():
+                govde['material'] = deger.strip()
+                break
     return govde
 
 
@@ -165,28 +223,125 @@ class TestEksenKimligi:
     @pytest.mark.parametrize('ad', ['konik', 'bell'])
     def test_kopru_profili_kabul_eder(self, analyzer, ad,
                                       motor_konik, motor_bell):
-        """Köprü eksen-uyum kapısını GEÇER; tolerans köprüden okunur."""
+        """Köprü eksen-uyum kapısını GEÇER; sapma ÖLÇÜLMÜŞ tavana çapalıdır.
+
+        ESKİ HALİ (P14M4-03d ile ölçülen kusur):
+            ``assert sapma <= bridge.THERMAL_PROFILE_DOMAIN_TOL * (z1 - z0)``
+        Bu iddia sınırını, korumakla yükümlü olduğu sabitin KENDİSİNDEN
+        türetiyordu: TOL 8× gevşetildiğinde iddianın tavanı da 8× gevşiyor ve
+        bekçi hiçbir şey söylemiyordu (6 dosya / 198 test → 0 kırmızı).
+
+        YENİ HALİ: tavan ``SAPMA_TAVANI_MM`` (1e-6 mm), ölçülen sapma
+        0,000000e+00 mm'den geliyor ve üründeki hiçbir sabite bakmıyor.
+        Kapının kendisinin gevşemesi bu iddiayı gevşetemez; kapının
+        gevşemesini yakalayan iddia bir alttaki ``..._kunye_vakasini_reddeder``
+        testidir (davranışsal, TOL'den bağımsız).
+
+        H2 kuralı: BİR EŞİĞİ KORUYAN İDDİA O EŞİKTEN TÜRETİLMİŞ OLAMAZ.
+        """
         motor = motor_konik if ad == 'konik' else motor_bell
         profil = analyzer.analyze_axial_profile(motor, n_stations=40)
         sonuc = bridge.extract_thermal_inputs(motor, axial_profile=profil,
                                               include_chamber=False)
         assert sonuc['status'] == bridge.BRIDGE_STATUS_OK, sonuc.get('reason')
 
-        # Sapma gerçekten toleransın ALTINDA mı — ölçüt kopyalanmaz, okunur.
         z0, z1 = kontur_araligi_mm(motor)
         sapma = max(abs(profil['x_mm'][0] - z0), abs(profil['x_mm'][-1] - z1))
-        assert sapma <= bridge.THERMAL_PROFILE_DOMAIN_TOL * (z1 - z0)
+        assert sapma <= SAPMA_TAVANI_MM, (
+            '%s: sapma %.6e mm > ölçülmüş tavan %.1e mm (ölçülen taban '
+            '0,000000e+00 mm — eksen konturdan OKUNUYOR)'
+            % (ad, sapma, SAPMA_TAVANI_MM))
+
+    @pytest.mark.parametrize('ad', ['konik', 'bell'])
+    def test_kopru_kunye_vakasini_reddeder(self, analyzer, ad,
+                                           motor_konik, motor_bell):
+        """Kapı, KÜNYESİNDE belgelediği kusur vakasını reddetmeye devam eder.
+
+        NEDEN BU TEST VAR (defter P14M4-03d, orta; P14M4-03c, düşük):
+        eksen kapısının 8×'e kadar KÖR BANDI ölçüldü. Bandın içinde kapı,
+        ``bridge.py:177-178``in belgelediği gerçek kusuru — *"aynı motorun
+        geometrisi eksik verilerek çağrılan profil 171 mm, konturu 124 mm
+        çıkıyor"*, yani kontur boyunun %37,9'u kadar sapma — sessizce kabul
+        ediyordu. Depodaki gerçek RED bekçisi profili 500 mm (2,75 × L)
+        kaydırıyor: savunduğu kusurdan 7 kat KABA bir uyarıcı.
+
+        Bu bekçi uyarıcıyı kusurun KENDİ ölçüsüne indirir. Ölçüldü
+        (2026-08-26, üç motorun üçünde de aynı eşik):
+
+            kaydırma = 0,379032 × L      (konik 47,818 mm / bell 33,092 mm
+                                          / varsayılan hibrit 34,069 mm)
+            TOL=0,05 (1,0×) → NOT_MODELLED     TOL=0,35 (7,0×) → NOT_MODELLED
+            TOL=0,37 (7,4×) → NOT_MODELLED     TOL=0,38 (7,6×) → ok  ← KIRMIZI
+            TOL=0,40 (8,0×) → ok               TOL=0,50 (10×)  → ok
+
+        Yani P14'ün kaçan 8× mutasyonu bu bekçiyle kırmızıya döner ve
+        duyarlılık 60×'ten 7,6×'e iner. İddia TOL'ü OKUMAZ; kaydırma
+        ölçülmüş kusur vakasının oranıdır.
+        """
+        motor = motor_konik if ad == 'konik' else motor_bell
+        profil = analyzer.analyze_axial_profile(motor, n_stations=40)
+        z0, z1 = kontur_araligi_mm(motor)
+        kaydirma = KUNYE_SAPMA_ORANI * (z1 - z0)
+        assert kaydirma > 1.0, kaydirma        # vaka gerçekten kaba olmalı
+
+        kayik = dict(profil)
+        kayik['x_mm'] = [x + kaydirma for x in profil['x_mm']]
+        sonuc = bridge.extract_thermal_inputs(motor, axial_profile=kayik,
+                                              include_chamber=False)
+        assert sonuc['status'] == bridge.BRIDGE_STATUS_NOT_MODELLED, (
+            '%s: künyenin belgelediği kusur vakası (%.3f mm = kontur boyunun '
+            '%%%.1f\'i) KABUL EDİLDİ — başka geometrinin h(z)\'si bu mesh\'e '
+            'taşınır. Eksen kapısı gevşetilmiş olabilir '
+            '(THERMAL_PROFILE_DOMAIN_TOL).'
+            % (ad, kaydirma, 100.0 * KUNYE_SAPMA_ORANI))
+        assert 'eksen' in (sonuc.get('reason') or ''), sonuc.get('reason')
+        # Kaydırılmamış profil AYNI çağrıda kabul ediliyor: red, kapının
+        # topyekûn kapalı olmasından değil eksen uyuşmazlığından geliyor.
+        assert bridge.extract_thermal_inputs(
+            motor, axial_profile=profil,
+            include_chamber=False)['status'] == bridge.BRIDGE_STATUS_OK
+
+    def test_kapi_kunye_vakasindan_sikidir(self):
+        """Kapının SAYISI, savunduğu kusur vakasından sıkı kalmalı (ucuz ikiz).
+
+        Yukarıdaki davranış bekçisi zincirin tamamına (``/calculate`` →
+        örnekleyici → köprü) bağlıdır; zincir bir gün toplanamaz hâle gelirse
+        sessizce kaybolabilir. Bu iddia aynı hükmü fikstürsüz kurar ve
+        yalnızca EŞİTSİZLİK sınar: tolerans SIKILAŞTIRILABİLİR (yeşil kalır),
+        ölçülmüş kusur vakasının üstüne çıkarılamaz.
+
+        Çapa üründen değil künyeden gelir: ``bridge.py:177-178``in belgelediği
+        profil 171 mm / kontur 124 mm vakası → %37,9. Bugün ölçülen pay
+        0,379032 / 0,05 = 7,58 kat.
+        """
+        assert bridge.THERMAL_PROFILE_DOMAIN_TOL < KUNYE_SAPMA_ORANI, (
+            'eksen kapısı (%.4f) künyesinde belgelediği kusur vakasının '
+            '(%.4f = %.0f mm / %.0f mm) üstüne çıkarılmış: kapı artık kendi '
+            'var oluş sebebini kabul ediyor.'
+            % (bridge.THERMAL_PROFILE_DOMAIN_TOL, KUNYE_SAPMA_ORANI,
+               KUNYE_PROFIL_MM - KUNYE_KONTUR_MM, KUNYE_KONTUR_MM))
 
     def test_bell_konik_ekseni_gercekten_farkli(self, motor_konik, motor_bell):
         """Bekçinin ANLAMLI olduğunun kanıtı: iki geometri gerçekten ayrı.
 
         Bu olmasaydı 'bell de geçiyor' cümlesi hiçbir şey ölçmezdi (konik
         varsayımı bell konturuyla zaten çakışıyor olurdu).
+
+        ESKİ HALİ sınırı yine kapının sabitinden türetiyordu
+        (``> THERMAL_PROFILE_DOMAIN_TOL * bell_boy``). P14M4-03c bunun
+        ÖLÇÜLMÜŞ yan etkisini yazdı: kapı 10× gevşetildiğinde kırmızıya dönen
+        TEK test buydu — yani "yakalama" doğru sebepten değildi; bu test
+        emniyet gerilemesini değil ÖN KOŞULU ölçer. Sınır artık ölçülen
+        farka çapalı (2 kN / 30 bar hibrit: 126,158257 − 87,306353 =
+        38,851905 mm, bell boyunun %44,5'i); kapının gevşemesi bu testte
+        artık sahte sinyal üretmez. Kapının gevşemesini ölçen bekçi
+        ``test_kopru_kunye_vakasini_reddeder``dir.
         """
         _, konik_boy = kontur_araligi_mm(motor_konik)
         _, bell_boy = kontur_araligi_mm(motor_bell)
-        assert abs(konik_boy - bell_boy) > (
-            bridge.THERMAL_PROFILE_DOMAIN_TOL * bell_boy)
+        fark = abs(konik_boy - bell_boy)
+        assert fark == pytest.approx(KONIK_BELL_FARK_MM, rel=0.05), fark
+        assert fark > 0.25 * bell_boy, (fark, bell_boy)
 
 
 # ======================================================================
@@ -210,12 +365,17 @@ class TestUctanUca:
         return profil, (govde.get('fea') or govde)
 
     def test_ureme_noktasi_konik_yesil(self, client, motor_konik):
-        """2 kN / 30 bar: profil-kontur farkı köprü toleransında, uç 'ok'."""
+        """2 kN / 30 bar: profil-kontur farkı ölçülmüş tavanda, uç 'ok'.
+
+        Sınır TOL türetmesinden koparıldı (P14M4-03d): uçtan uca zincirde
+        ölçülen sapma 0,000000e+00 mm; tavan ``SAPMA_TAVANI_MM``.
+        """
         profil, fea = self._zincir(client, motor_konik)
         z0, z1 = kontur_araligi_mm(motor_konik)
         sapma = max(abs(profil['x_mm'][0] - z0), abs(profil['x_mm'][-1] - z1))
-        assert sapma <= bridge.THERMAL_PROFILE_DOMAIN_TOL * (z1 - z0), (
-            'profil %.3f mm, kontur %.3f mm' % (profil['x_mm'][-1], z1))
+        assert sapma <= SAPMA_TAVANI_MM, (
+            'profil %.3f mm, kontur %.3f mm, sapma %.6e mm'
+            % (profil['x_mm'][-1], z1, sapma))
         assert fea['status'] == bridge.BRIDGE_STATUS_OK, fea.get('reason')
 
     def test_varsayilan_hibrit_ekseni_bozulmadi(self, client,
@@ -245,8 +405,11 @@ class TestUctanUca:
             'generic_defaults_used', [])
         z0, z1 = kontur_araligi_mm(motor_bell)
         sapma = max(abs(profil['x_mm'][0] - z0), abs(profil['x_mm'][-1] - z1))
-        assert sapma <= bridge.THERMAL_PROFILE_DOMAIN_TOL * (z1 - z0), (
-            'bell: profil %.3f mm, kontur %.3f mm' % (profil['x_mm'][-1], z1))
+        # Sınır TOL türetmesinden koparıldı (P14M4-03d): docstring'in yazdığı
+        # "0,000 mm" ölçümü artık iddianın KENDİSİ.
+        assert sapma <= SAPMA_TAVANI_MM, (
+            'bell: profil %.3f mm, kontur %.3f mm, sapma %.6e mm'
+            % (profil['x_mm'][-1], z1, sapma))
         assert fea['status'] == bridge.BRIDGE_STATUS_OK, fea.get('reason')
 
 

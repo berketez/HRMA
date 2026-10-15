@@ -50,7 +50,15 @@ MOTOR = {
     'thrust': 3000.0,
     'burn_time': 4.0,
     'total_impulse': 12000.0,
-    'isp': 200.0,
+    # ÖH D23 / P4B3-24 — 'isp' ANAHTARI KALDIRILDI (bekçi çevirisi).
+    # Bu yük KENDİ İÇİNDE TUTARSIZDI: entegre edilen impuls bütçesinden
+    # türeyen Isp (total_impulse / (m_p * g0)) ile yazılı isp %1'den
+    # fazla ayrışıyordu, yani yanma iki kez ve iki farklı biçimde tarif
+    # edilmişti. Çözücü artık bu çelişkiyi reddediyor (fail-closed).
+    # Isp bu çözücüde bir GİRDİ DEĞİL, bütçenin türevidir: anahtar
+    # verilmediğinde bütçeden türetilir ve bu dosyadaki testlerin
+    # ölçtüğü sayıların HİÇBİRİ değişmez (ölçüldü, taban ef527ae:
+    # isp = 220 / 1 / 1e9 ile apoje BİT-AYNI, once.json P4B3_24).
     'propellant_mass_total': 8.0,
 }
 MASS_DRY = 20.0
@@ -68,8 +76,16 @@ def _run(thrust=None, burn_time=None, mass_dry=MASS_DRY, cd0=CD0, **launch):
     ta = TrajectoryAnalyzer()
     ta.set_vehicle_parameters(mass_dry=mass_dry, diameter=DIAMETER,
                               drag_coefficient=cd0)
+    # ÖH D22 / OH-D18-05: SAĞLIKLI uçuş artık bir kurtarma sistemi
+    # gerektirir — paraşüt alanı verilmezse iniş fazı hiç çözülmez ve iniş
+    # hükmü yayımlanmaz. Bu dosyanın konusu ÇÖZÜCÜ OLAY KAPISIDIR (hangi
+    # olayla bitti, hangi sayı bilinmiyor); ölçüm yapabilmesi için tabanda
+    # bir paraşüt bulunmalı. Eskiden aynı alan modül sabitinden SESSİZCE
+    # geliyordu; şimdi test onu AÇIKÇA istiyor. Sayılar değişmez: aynı
+    # 2,0 m² ile aynı iniş çözülür.
     params = {'launch_angle': 85.0, 'launch_altitude': 0.0,
-              'wind_speed': 0.0, 'wind_direction': 0.0}
+              'wind_speed': 0.0, 'wind_direction': 0.0,
+              'parachute_area': TA.DEFAULT_PARACHUTE_AREA_M2}
     params.update(launch)
     return ta.calculate_trajectory(motor, params)
 

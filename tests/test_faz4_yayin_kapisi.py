@@ -259,17 +259,34 @@ def test_kapi_yesil_ise_herkese_acik_yayin_olur(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _kapi_bolumleri():
-    """Kapı betiğini ``baslik "N/8 ..."`` sınırlarından bölümlere ayırır.
+    """Kapı betiğini ``baslik "N/P ..."`` sınırlarından bölümlere ayırır.
 
     2026-08-04: kapıya 8. adım (paket içerik manifesti + boyut sapması)
     eklendi; ayrıştırıcı /7'den /8'e güncellendi.
+    2026-09-02 (ÖH D17 / altyapi, defter P10B3-01): 9. adım (görsel tur —
+    ``tools/browser_harness/run_tour.py``) eklendi; ayrıştırıcı /8'den /9'a
+    güncellendi. İDDİA DEĞİŞMEDİ ("kapının her adımı ayrıştırılabilir ve
+    atlama bayrağını görmez"), yalnız adım sayısı arttı.
+    2026-09-08 (ÖH D28 / altyapi, defter OH-D27-04): 10. adım (iddia dili
+    kapısı — ``tools/iddia_lint.py --check``) eklendi. Bu sefer ayrıştırıcı
+    paydayı ARTIK SABİT YAZMIYOR: desen üç dalgada üst üste elle güncellendi
+    ve her seferinde "sayıyı yükselt" dışında bir seçenek bırakmadı. Payda
+    da yakalanır ve ``test_kapi_her_adimi_ayristirilabiliyor`` beyanın
+    gerçek adım sayısına eşit olduğunu ölçer.
     """
     metin = KAPI_BETIGI.read_text(encoding="utf-8")
-    parcalar = re.split(r'^baslik "(\d)/8\s+([^"]*)"', metin, flags=re.M)
+    parcalar = re.split(r'^baslik "(\d+)/(\d+)\s+([^"]*)"', metin, flags=re.M)
     bolumler = {}
-    for indeks in range(1, len(parcalar), 3):
-        bolumler[int(parcalar[indeks])] = parcalar[indeks + 2]
+    for indeks in range(1, len(parcalar), 4):
+        bolumler[int(parcalar[indeks])] = parcalar[indeks + 3]
     return bolumler
+
+
+def _kapi_paydalari():
+    """Başlıkların yazdığı payda kümesi (``N/P`` içindeki P)."""
+    metin = KAPI_BETIGI.read_text(encoding="utf-8")
+    return {int(p) for _n, p in
+            re.findall(r'^baslik "(\d+)/(\d+)\s', metin, flags=re.M)}
 
 
 def _kod_satirlari(govde):
@@ -285,9 +302,20 @@ def _kod_satirlari(govde):
                      if not satir.lstrip().startswith("#"))
 
 
-def test_kapi_sekiz_adimin_hepsini_iceriyor():
+def test_kapi_her_adimi_ayristirilabiliyor():
+    """Adımlar 1..N kesintisiz VE başlıkların paydası N'e eşit.
+
+    ÖH D28 / altyapi (OH-D27-04): eskiden ``range(1, 10)`` diye sabit
+    sayıydı. Sabit sayı meşru bir yüzey büyümesinde kırılır ve tek çözümü
+    sayıyı yükseltmektir — yani hiçbir şey ölçmez. Ölçülen artık ilişkidir:
+    numaralar kesintisiz mi ve kapı kendi adım sayısını doğru mu söylüyor.
+    """
     bolumler = _kapi_bolumleri()
-    assert sorted(bolumler) == list(range(1, 9)), sorted(bolumler)
+    assert bolumler, 'kapıda hiç adım bulunamadı'
+    assert sorted(bolumler) == list(range(1, len(bolumler) + 1)), sorted(bolumler)
+    assert _kapi_paydalari() == {len(bolumler)}, (
+        f'{len(bolumler)} adım var ama başlıklar '
+        f'{sorted(_kapi_paydalari())} paydasını yazıyor')
 
 
 def test_ci_kontrolu_hicbir_atlama_bayragi_gormez():
@@ -307,7 +335,7 @@ def test_ci_kontrolu_hicbir_atlama_bayragi_gormez():
         kod = _kod_satirlari(govde)
         for bayrak in ("TAKIMI_ATLA", "HIZLI"):
             assert bayrak not in kod, (
-                f"{numara}/8 adımı '{bayrak}' atlama bayrağını görüyor — "
+                f"{numara}. adım '{bayrak}' atlama bayrağını görüyor — "
                 f"atlanabilir hâle gelmiş")
 
     # Karşı yön: bayrak 5/7'de GERÇEKTEN duruyor olmalı. Yoksa test,
@@ -376,9 +404,25 @@ def test_yapi_commit_zaman_sirasi_kapisi():
 # ---------------------------------------------------------------------------
 
 def _is_akisi_yukle(ad):
-    """İş akışını ayrıştırır. PyYAML yoksa testi ATLAR (bkz. üstteki not)."""
-    yaml = pytest.importorskip(
-        "yaml", reason="PyYAML kurulu değil — derin YAML denetimi atlandı")
+    """İş akışını ayrıştırır. PyYAML ZORUNLUDUR — atlama yolu yoktur.
+
+    ÖH defter **OH-B3-05**: burada eskiden ``pytest.importorskip("yaml")``
+    duruyordu. Gerekçesi (üstteki modül notu) ölçüldüğü gün doğruydu:
+    PyYAML hiçbir requirements dosyasında yoktu. O ölçüm ARTIK GEÇERSİZ —
+    ``requirements-dev.txt`` PyYAML'i zorunlu bildiriyor ve ``tests.yml``
+    kurulumu ``import yaml`` ile doğruluyor (bekçi:
+    :func:`test_yonetisim_bekcilerinin_bagimliligi_bildirilmis`). Kalan
+    ``importorskip`` bu yüzden bağımlılık kapısı değil, E3 iş akışı
+    bekçilerini SESSİZLEŞTİRME yoluydu: PyYAML kurulumu bir gün kırılsa
+    kapı kırmızı vermek yerine testleri atlardı.
+
+    İthal MODÜL düzeyine ÇIKARILMAZ (üstteki not orada hâlâ geçerli:
+    toplama anında kırılırsa dosyanın 25 testi birden junit'te tek satıra
+    düşer). Fonksiyon düzeyinde düz ithal, kırıldığında YALNIZ bu testleri
+    ve DÜRÜSTÇE kırmızı yapar.
+    """
+    import yaml
+
     veri = yaml.safe_load((ISAKISI_DIZINI / ad).read_text(encoding="utf-8"))
     # PyYAML, YAML 1.1 uyarınca çıplak ``on:`` anahtarını True'ya çevirir.
     if True in veri and "on" not in veri:
@@ -481,10 +525,18 @@ def test_is_akisi_action_surumleri_acik():
 # H5-2 / H5-4 (Faz 5) — CI'da SESSİZCE atlanan bekçiler
 # ---------------------------------------------------------------------------
 
-#: `step-export` işinin gerçekten koşturması gereken STEP/CAD test dosyaları.
+#: `step-export` işinin koşturması ŞART olan ÇEKİRDEK STEP/CAD dosyaları.
 #: Bunlar Faz 4'ün A1 (STL/DXF 1000× birim hatası), A4 (NaN geometriden katı
-#: cisim), A8 (katı cidarı) ve A11 (tank geometrisi) bulgularının bekçileridir.
-STEP_TEST_DOSYALARI = (
+#: cisim), A8 (katı cidarı) ve A11 (tank geometrisi) bulgularının bekçileridir;
+#: 3 Ağustos 2026'da ÖLÇÜLMÜŞ çapadır ve listeden düşemez.
+#:
+#: DİKKAT — bu tuple artık "işin koşturduğu dosyaların listesi" DEĞİLDİR.
+#: 3 Ağustos'tan 17 Ağustos'a kadar öyleydi ve tam olarak o yüzden ÇÜRÜDÜ:
+#: iş akışına üç dosya daha eklendi (parti 31 / T2-1), bu beşli sabit kaldı ve
+#: bekçi "beş dosya koşuyor mu?" diye sormaya devam etti — sekiz dosyanın
+#: üçü hakkında hiçbir şey sınanmadı (defter P13B1-08, ÖH FAZ D / D1).
+#: Koşan liste artık `_is_akisindan_step_dosyalari()` ile TÜRETİLİR.
+STEP_TEST_CEKIRDEGI = (
     "tests/test_step_import.py",
     "tests/test_tank_step_units.py",
     "tests/test_faz4_export_geometri.py",
@@ -492,19 +544,52 @@ STEP_TEST_DOSYALARI = (
     "tests/test_export_generators.py",
 )
 
+#: 17 Ağustos 2026 ölçümü (parti 31 / T2-1): `step-export` işi SEKİZ dosya
+#: koşuyor (çekirdek beşli + test_step_durustluk_kapisi + test_faz5_cizim_birim
+#: + test_faz6_sivi). Türetilen küme bunun altına düşerse iş akışından dosya
+#: sessizce çıkarılmış demektir.
+STEP_TEST_DOSYA_TABANI = 8
+
+
+def _is_akisindan_step_dosyalari(komutlar):
+    """`step-export` işinin GERÇEKTEN koşturduğu test dosyalarını türetir.
+
+    İlacın emsali depoda yazılı: ``tests/test_i18n_common.py:67``
+    (``PANEL_FILES = sorted(PANELS_DIR.glob('*.js'))``) — elle liste yerine
+    kaynaktan türetme. Burada kaynak, işin kendi ``run`` komutlarıdır.
+
+    YORUM SATIRLARI DÜŞÜRÜLÜR ve bu şart ölçümle bulundu: ``run: |`` bir YAML
+    blok skaleridir, içindeki ``#`` satırları YAML yorumu DEĞİL kabuk
+    yorumudur ve PyYAML onları aynen taşır. Düşürülmezse `step-export`
+    adımının kendi açıklama satırındaki ``tests/test_ci_kapsam_kapisi.py``
+    "koşulan dosya" sanılır: türetilen küme 8 yerine 9 çıkar ve alt sınır
+    denetimi YANLIŞ gerekçeyle geçer (27 Ağustos 2026'da ölçüldü).
+    """
+    gercek_satirlar = [s for s in komutlar.splitlines()
+                       if not s.lstrip().startswith("#")]
+    return tuple(sorted(set(
+        re.findall(r"tests/[\w./-]+\.py", "\n".join(gercek_satirlar)))))
+
 
 def test_step_export_isi_gercekten_kosuyor():
     """H5-2: STEP/CAD bekçileri CI'da HER ZAMAN atlanıyordu.
 
-    Ölçüm (3 Ağustos 2026, HEAD 9d3728e) — yukarıdaki beş dosya:
+    Ölçüm (3 Ağustos 2026, HEAD 9d3728e) — çekirdek beş dosya:
       * build123d KURULU ortam  : 143 passed, 2 xfailed, 0 atlandı
       * build123d YOK ortam (CI): 98 passed, **47 skipped**
     Yani 47 bekçi CI'da hiç koşmuyordu ve bu "yeşil" sayılıyordu.
 
-    Sözleşme: ``tests.yml`` içinde build123d KURAN ve bu beş dosyayı
-    koşturan ayrı bir iş bulunmalı. Sadece "iş var" yetmez — işin
-    fail-closed olması gerekir, yoksa kütüphane kurulamadığında testler
-    yine sessizce atlanır ve iş yeşil kalır.
+    Sözleşme: ``tests.yml`` içinde build123d KURAN ve bu dosyaları koşturan
+    ayrı bir iş bulunmalı. Sadece "iş var" yetmez — işin fail-closed olması
+    gerekir, yoksa kütüphane kurulamadığında testler yine sessizce atlanır
+    ve iş yeşil kalır.
+
+    D1 (P13B1-08, 27 Ağustos 2026): (d) maddesi artık ELLE yazılmış beşliyi
+    değil, iş akışından TÜRETİLEN kümeyi sınar. Türetilmiş kümeyi yine aynı
+    komuta karşı sınamak totoloji olurdu; bu yüzden iki BAĞIMSIZ çapa
+    kullanılır — ölçülmüş çekirdek (altküme şartı) ve ölçülmüş dosya sayısı
+    tabanı. Bugün kırmızı üretmez: çekirdek beşli türetilen sekizin
+    altkümesidir (ölçüldü).
     """
     metin = (ISAKISI_DIZINI / "tests.yml").read_text(encoding="utf-8")
     veri = _is_akisi_yukle("tests.yml")
@@ -529,28 +614,430 @@ def test_step_export_isi_gercekten_kosuyor():
         "step_export.BUILD123D_AVAILABLE doğrulanmıyor — kütüphane "
         "kurulamazsa testler yine sessizce atlanır")
 
-    # (d) beş dosyanın beşi de koşmalı
-    for dosya in STEP_TEST_DOSYALARI:
-        assert dosya in komutlar, f"step-export işi {dosya} koşmuyor"
+    # (d) koşan liste TÜRETİLİR, iki bağımsız çapaya karşı sınanır (D1)
+    kosulan = _is_akisindan_step_dosyalari(komutlar)
+
+    eksik = [d for d in STEP_TEST_CEKIRDEGI if d not in kosulan]
+    assert not eksik, (
+        "step-export işi ÖLÇÜLMÜŞ çekirdek dosyaları koşmuyor: "
+        f"{eksik} — bunlar Faz 4'ün A1/A4/A8/A11 bulgularının bekçileridir "
+        f"(işin koştuğu türetilmiş küme: {list(kosulan)})")
+
+    assert len(kosulan) >= STEP_TEST_DOSYA_TABANI, (
+        f"step-export işi yalnız {len(kosulan)} test dosyası koşuyor; "
+        f"17 Ağustos 2026 ölçümü {STEP_TEST_DOSYA_TABANI} idi — iş akışından "
+        f"dosya düşmüş olabilir (koşulan: {list(kosulan)}). Kasıtlıysa bu "
+        "tabanı ölçümle birlikte güncelleyin.")
+
+
+# ---------------------------------------------------------------------------
+# ÖH FAZ F / F2 — atlama süzgeci: DİZGE denetimi yerine DAVRANIŞ denetimi
+#
+# Eski bekçi (3 Ağustos 2026 - 27 Ağustos 2026) süzgecin KAYNAK METNİNDE
+# "pytest.skip" ve "pytest.xfail" dizgelerini arıyordu. Bu, kampanyanın
+# adlandırdığı kusuru koruyan bekçi sınıfının ders kitabı örneğiydi: süzgeç
+# modül DÜZEYİ atlamayı (junit XML'de ``type`` alanı OLMAYAN "collection
+# skipped" satırı) hiç saymıyordu — yani bir test dosyasının tamamı sessizce
+# yok olabiliyor, bekçi ise iki dizgeyi bulup yeşil kalıyordu (P13B1-06).
+#
+# Süzgeç artık iş akışından ÇIKARILIP sentetik bir junit raporuna karşı
+# GERÇEKTEN KOŞTURULUYOR. Rapor uydurma değil: aşağıdaki üç atlama biçimi
+# 27 Ağustos 2026'da pytest 8.4.2 ile üretilmiş gerçek çıktıdan alınmıştır
+# (ölçüm: gövde içi ``pytest.skip`` + ``skipif`` işareti + modül düzeyi
+# ``pytest.skip(allow_module_level=True)`` + modül başında ``importorskip``
+# + ``xfail``). Ölçülen biçimler:
+#   * gövde içi skip / skipif  -> <skipped type="pytest.skip" message="...">
+#   * xfail                    -> <skipped type="pytest.xfail" message="...">
+#   * modül düzeyi atlama      -> <skipped message="collection skipped"> ve
+#                                 ``type`` alanı YOK; gerekçe düğüm METNİNDE
+# ---------------------------------------------------------------------------
+
+#: Sentetik junit raporu — F2 süzgecinin davranış tezgâhı.
+#: 5 atlama (2 gövde/işaret + 1 ters kapı + 2 toplama düzeyi) + 1 xfail
+#: (atlama SAYILMAZ) + 1 geçen test. ``tests`` sayısı, step-export işindeki
+#: alt sınır denetimini (240) karıştırmamak için ölçümün üstünde tutulur.
+SENTETIK_JUNIT_ATLAMA = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="0" failures="0" skipped="6" \
+tests="300" time="1.0">
+<testcase classname="tests.test_ornek" name="test_gecen" time="0.1" />
+<testcase classname="tests.test_ornek" name="test_govde_skip" time="0.0">\
+<skipped type="pytest.skip" message="govde ici pytest.skip">\
+/x/tests/test_ornek.py:3: govde ici pytest.skip</skipped></testcase>
+<testcase classname="tests.test_ornek" name="test_isaretli" time="0.0">\
+<skipped type="pytest.skip" message="build123d kurulu degil (STEP uretimi \
+atlanir)">/x/tests/test_ornek.py:9: atlandi</skipped></testcase>
+<testcase classname="tests.test_ornek" name="test_ters_kapi" time="0.0">\
+<skipped type="pytest.skip" message="build123d kurulu - .step sinaniyor">\
+/x/tests/test_ornek.py:14: atlandi</skipped></testcase>
+<testcase classname="tests.test_ornek" name="test_borc" time="0.0">\
+<skipped type="pytest.xfail" message="borc imi" /></testcase>
+<testcase classname="" name="tests.test_modul_skip" time="0.0">\
+<skipped message="collection skipped">('/x/tests/test_modul_skip.py', 2, \
+'Skipped: modul duzeyi atlama')</skipped></testcase>
+<testcase classname="" name="tests.test_modul_ios" time="0.0">\
+<skipped message="collection skipped">('/x/tests/test_modul_ios.py', 2, \
+"Skipped: could not import 'build123d': No module named 'build123d'")\
+</skipped></testcase>
+</testsuite></testsuites>
+"""
+
+
+def _yml_python_govdesi(is_adi, adim_deseni):
+    """`tests.yml` içindeki bir adımın heredoc Python gövdesini çıkarır."""
+    veri = _is_akisi_yukle("tests.yml")
+    adlar = []
+    for adim in veri["jobs"][is_adi]["steps"]:
+        ad = adim.get("name", "")
+        adlar.append(ad)
+        if re.search(adim_deseni, ad):
+            eslesme = re.search(r"python\s+-\s+<<'PY'\n(.*?)\n\s*PY\s*$",
+                                adim.get("run", ""), re.S)
+            assert eslesme, (
+                f"'{ad}' adımı `python - <<'PY' ... PY` kalıbında değil — "
+                "süzgeç davranış olarak sınanamıyor")
+            return eslesme.group(1)
+    raise AssertionError(
+        f"'{is_adi}' işinde /{adim_deseni}/ desenine uyan adım yok "
+        f"(bulunan adımlar: {adlar})")
+
+
+def _sentetik_rapora_karsi_kos(govde, rapor_adi, tmp_path, xml):
+    """Süzgeç gövdesini sentetik junit raporuna karşı KOŞTURUR.
+
+    ``xml=None`` verilirse rapor dosyası HİÇ YAZILMAZ (varsa silinir) —
+    "rapor üretilmeden düşen koşum" hâlini sınamak için.
+
+    Dönen: adımın çıkış kodu. ``sys.exit('mesaj')`` kabuğa 1 döndürür, yani
+    "kırmızı" ölçütü ``cikis_kodu not in (0, None)``.
+    """
+    rapor = tmp_path / rapor_adi
+    if xml is None:
+        if rapor.exists():
+            rapor.unlink()
+    else:
+        rapor.write_text(xml, encoding="utf-8")
+    eski_dizin = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        kod = compile(govde, f"<tests.yml::{rapor_adi}>", "exec")
+        try:
+            exec(kod, {"__name__": "__main__"})       # noqa: S102 — bilerek
+        except SystemExit as cikis:
+            return cikis.code
+        return 0
+    finally:
+        os.chdir(eski_dizin)
+
+
+def test_step_export_atlama_suzgeci_uc_atlama_bicimini_de_sayiyor(
+        tmp_path, capsys):
+    """F2 (P13B1-06): süzgeç DAVRANIŞ olarak sınanır, dizge olarak değil.
+
+    Sentetik rapor 5 atlama taşır: 2 işaret/gövde skip'i, 1 ters kapı, 2
+    MODÜL DÜZEYİ atlama; ayrıca 1 xfail (sayılmamalı) ve 1 geçen test.
+    Eski süzgeç (``type == 'pytest.skip'``) modül düzeyindeki İKİSİNİ birden
+    kaçırıyordu — bu bekçi tam olarak o farkı ölçer.
+    """
+    govde = _yml_python_govdesi("step-export", r"Atlama bütçesi")
+    # ÖH D37 / YB-15: gövde "kanıt yok" önekini tek kaynaktan AST ile okur,
+    # okuyamazsa düşer — tezgâha gerçek dosyalar KOPYALANIR (docs'suz ağaç).
+    _tek_kaynagi_kur(tmp_path)
+    _kanit_kaynagini_kur(tmp_path)
+    kod = _sentetik_rapora_karsi_kos(govde, "step-report.xml", tmp_path,
+                                     SENTETIK_JUNIT_ATLAMA)
+    cikti = capsys.readouterr().out
+
+    sayilar = re.search(
+        r"atlanan=(\d+) \(ters_kapi=(\d+) gercek=(\d+) toplama_duzeyi=(\d+)\)",
+        cikti)
+    assert sayilar, (
+        "süzgeç atlama sayımını basmıyor ya da toplama düzeyi atlamalarını "
+        f"hiç raporlamıyor. Çıktı:\n{cikti}")
+    atlanan, ters_kapi, gercek, toplama = (int(g) for g in sayilar.groups())
+
+    assert atlanan == 5, (
+        f"süzgeç {atlanan} atlama saydı, 5 olmalıydı — xfail sayılmış ya da "
+        "modül düzeyi atlamalar (type alanı YOK) gözden kaçmış olabilir; "
+        f"çıktı:\n{cikti}")
+    assert toplama == 2, (
+        f"modül düzeyi atlama sayısı {toplama}; sentetik raporda 2 var "
+        "(biri allow_module_level, biri modül başındaki importorskip). "
+        "Bunlar sayılmazsa bir test dosyasının tamamı sessizce yok olur "
+        "(P13B1-06 / K8)")
+    assert ters_kapi == 1, (
+        f"ters kapı sayısı {ters_kapi}; sentetik raporda 1 var. DİKKAT: "
+        "toplama düzeyi atlaması ters kapı SAYILAMAZ — ters kapı tek testi "
+        "atlar, toplama atlaması dosyanın tamamını düşürür")
+    assert gercek == 4, f"gerçek atlama sayısı {gercek}, 4 olmalıydı"
+    assert kod not in (0, None), (
+        "step-export bütçesi 4 gerçek atlamayı görüp kırmızıya dönmedi — "
+        f"çıkış kodu {kod!r}, çıktı:\n{cikti}")
 
 
 def test_step_export_isinde_atlama_butcesi_sifir():
-    """H5-2: 'atlandı' başarı sayılamaz — bütçe SIFIR olmalı.
-
-    Bu işte atlama bütçesi 0'dır: gerçek bir ``pytest.skip`` çıkarsa iş
-    kırmızıya döner. ``xfail`` atlama sayılmaz (junit XML xfail'i de
-    ``<skipped>`` olarak yazar; ayırt edici alan ``type``'tır).
-    """
+    """H5-2: 'atlandı' başarı sayılamaz — bütçe SIFIR olmalı."""
     veri = _is_akisi_yukle("tests.yml")
     adimlar = veri["jobs"]["step-export"]["steps"]
     komutlar = "\n".join(a.get("run", "") for a in adimlar)
 
     assert "--junitxml=step-report.xml" in komutlar, (
         "atlama sayısı ölçülemiyor: junit raporu üretilmiyor")
-    assert "pytest.skip" in komutlar and "pytest.xfail" in komutlar, (
-        "atlama denetimi gerçek skip ile xfail'i ayırt etmiyor")
     assert re.search(r"sys\.exit\(", komutlar), (
         "atlama bütçesi kırmızıya dönmüyor — yalnız bilgi basıyor")
+
+
+# ---------------------------------------------------------------------------
+# ÖH FAZ F / F1 — ana `pytest` işinin ÖLÇÜLMÜŞ atlama bütçesi (P13B1-07)
+#
+# 3-27 Ağustos 2026 arasında ana işte eşik YOKTU: 9497 testin ~9400'ünde
+# "atlandı" mekanik olarak korunmasızdı. İş akışının kendi yorumu bunu dürüst
+# bir gerekçeyle savunuyordu ("sayı ölçülmedi"). Sayı ölçüldü; bütçe kondu.
+#
+# Bu bekçiler bütçenin METNİNİ değil MEKANİZMASINI sınar: adımın Python
+# gövdesi iş akışından çıkarılır ve sentetik junit raporlarına karşı
+# koşturulur. Sınanan dört kaçış yolu (dördü de ölçülmüş kusur sınıfı):
+#   1. bütçe aşımı                      -> kırmızı
+#   2. modül düzeyi atlama (type YOK)   -> kırmızı  (P13B1-06 / K8)
+#   3. toplamanın çökmesi               -> kırmızı  ("0 test, 0 atlama" yeşili)
+#   4. depo-içi importorskip            -> kırmızı  (P13B1-05 / P14 §3.2-e)
+# ---------------------------------------------------------------------------
+
+ANA_IS_BUTCE_ADIMI = r"Atlama bütçesi"
+
+
+def _sentetik_junit(atlama=0, toplama_duzeyi=0, xfail=0, gecen=1,
+                    toplam=9500):
+    """Ölçülen junit biçimlerinden sentetik rapor üretir.
+
+    Biçimler 27 Ağustos 2026'da pytest 8.4.2 ile üretilen gerçek çıktıdan
+    alınmıştır (bkz. ``SENTETIK_JUNIT_ATLAMA`` notu).
+    """
+    parcalar = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        f'<testsuites><testsuite name="pytest" errors="0" failures="0" '
+        f'tests="{toplam}" time="1.0">',
+    ]
+    for i in range(gecen):
+        parcalar.append(
+            f'<testcase classname="tests.test_x" name="test_g{i}" time="0.1" />')
+    for i in range(atlama):
+        parcalar.append(
+            f'<testcase classname="tests.test_x" name="test_s{i}" time="0.0">'
+            f'<skipped type="pytest.skip" message="atlama {i}">'
+            f'/x/tests/test_x.py:{i}: atlama</skipped></testcase>')
+    for i in range(xfail):
+        parcalar.append(
+            f'<testcase classname="tests.test_x" name="test_x{i}" time="0.0">'
+            f'<skipped type="pytest.xfail" message="borc imi" /></testcase>')
+    for i in range(toplama_duzeyi):
+        parcalar.append(
+            f'<testcase classname="" name="tests.test_m{i}" time="0.0">'
+            f'<skipped message="collection skipped">'
+            f"('/x/tests/test_m{i}.py', 2, 'Skipped: modul duzeyi atlama')"
+            f'</skipped></testcase>')
+    parcalar.append('</testsuite></testsuites>')
+    return "\n".join(parcalar)
+
+
+def _temiz_tests_dizini(tmp_path):
+    """Bütçenin statik taraması için kusursuz bir `tests/` ağacı kurar."""
+    dizin = tmp_path / "tests"
+    dizin.mkdir(exist_ok=True)
+    (dizin / "test_temiz.py").write_text(
+        "import pytest\n"
+        "yaml = pytest.importorskip('yaml')   # DIŞ paket — meşru\n"
+        "def test_bir():\n    assert True\n",
+        encoding="utf-8")
+    return dizin
+
+
+def _tek_kaynagi_kur(tmp_path):
+    """Bütçenin TEK KAYNAĞINI (``tools/atlama_kapisi.py``) tmp ağacına koyar.
+
+    ÖH D21 / defter OH-D17-19. Adımın gövdesi artık eşikleri kendi içinde
+    YAZMIYOR, kaynak dosyadan AST ile okuyor. Gövde ``tmp_path`` içinde
+    exec edildiği için kaynak orada da bulunmalı; KOPYALANIR, yeniden
+    yazılmaz — böylece davranış bekçileri ürünün GERÇEK bütçesiyle koşar,
+    kendi uydurdukları bir sayıyla değil.
+    """
+    hedef = tmp_path / "tools"
+    hedef.mkdir(exist_ok=True)
+    (hedef / "atlama_kapisi.py").write_text(
+        (DEPO / "tools" / "atlama_kapisi.py").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    return hedef / "atlama_kapisi.py"
+
+
+def _kanit_kaynagini_kur(tmp_path):
+    """"kanıt yok" önekinin TEK KAYNAĞINI (``tests/support/kanit.py``) kurar.
+
+    ÖH D37 / YB-15. Adımın gövdesi öneki ve geliştirme ağacı işaretini bu
+    dosyadan AST ile okur, okuyamazsa DÜŞER. KOPYALANIR, yeniden yazılmaz.
+    ``tmp_path``te ``docs/scofield`` yoktur: tezgâh docs'suz ağaçtır.
+    """
+    hedef = tmp_path / "tests" / "support"
+    hedef.mkdir(parents=True, exist_ok=True)
+    shutil.copy(DEPO / "tests" / "support" / "kanit.py", hedef / "kanit.py")
+    return hedef / "kanit.py"
+
+
+def _ana_is_butcesini_kos(tmp_path, xml, tests_dizini=True, tek_kaynak=True,
+                          kanit_kaynagi=True):
+    if tests_dizini:
+        _temiz_tests_dizini(tmp_path)
+    if tek_kaynak:
+        _tek_kaynagi_kur(tmp_path)
+    if kanit_kaynagi:
+        _kanit_kaynagini_kur(tmp_path)
+    govde = _yml_python_govdesi("pytest", ANA_IS_BUTCE_ADIMI)
+    return _sentetik_rapora_karsi_kos(
+        govde, "pytest-report.xml", tmp_path, xml=xml)
+
+
+def _butce_sayisi():
+    """Adımın kullandığı bütçeyi TEK KAYNAKTAN okur.
+
+    Eskiden sayı adımın gövdesinden regexle çekiliyordu; o biçim bütçenin
+    ikinci tanım noktası olmasını ZORUNLU kılıyordu (OH-D17-19). Artık
+    kaynak `tools/atlama_kapisi.ATLAMA_BUTCESI`dir ve bu yardımcı, adımın
+    gövdesinde bir sayı KALMADIĞINI da ayrıca doğrular.
+    """
+    from tools.atlama_kapisi import ATLAMA_BUTCESI
+    govde = _yml_python_govdesi("pytest", ANA_IS_BUTCE_ADIMI)
+    kalinti = re.search(r"^\s*BUTCE\s*=\s*(\d+)\s*$", govde, re.M)
+    assert not kalinti, (
+        "ana `pytest` işinin gövdesinde bütçe SAYI olarak yeniden yazılmış "
+        f"(BUTCE = {kalinti.group(1) if kalinti else ''}) — tek kaynak "
+        "`tools/atlama_kapisi.ATLAMA_BUTCESI` kırılmış.")
+    return int(ATLAMA_BUTCESI)
+
+
+def test_ana_is_butcesi_tek_kaynagi_okuyamayinca_KIRMIZI(tmp_path, capsys):
+    """OH-D17-19 / FAIL-CLOSED: kaynak yoksa eşik KAZANILMAMIŞTIR.
+
+    Ters mutasyonun kendisi: `tools/atlama_kapisi.py` tmp ağacına
+    konmadığında adım varsayılan bir sayıya düşmemeli, DÜŞMELİ.
+    """
+    kod = _ana_is_butcesini_kos(
+        tmp_path, _sentetik_junit(atlama=0), tek_kaynak=False)
+    cikti = capsys.readouterr().out
+    assert kod not in (0, None), (
+        "bütçenin tek kaynağı okunamadığı hâlde adım yeşil kaldı — "
+        f"ölçülemeyen eşik geçmiş sayılamaz. Çıktı:\n{cikti}")
+
+
+def test_ana_is_atlama_butcesi_asilinca_kirmizi(tmp_path, capsys):
+    """F1: bütçe MEKANİZMASI çalışıyor mu — tam sınırda yeşil, +1'de kırmızı."""
+    butce = _butce_sayisi()
+
+    kod = _ana_is_butcesini_kos(tmp_path, _sentetik_junit(atlama=butce))
+    cikti = capsys.readouterr().out
+    assert kod in (0, None), (
+        f"tam bütçe kadar ({butce}) atlamada iş kırmızıya döndü — bütçe "
+        f"kullanılamaz derecede dar. Çıktı:\n{cikti}")
+
+    kod = _ana_is_butcesini_kos(tmp_path, _sentetik_junit(atlama=butce + 1))
+    cikti = capsys.readouterr().out
+    assert kod not in (0, None), (
+        f"{butce + 1} atlama bütçeyi ({butce}) aştı ama iş yeşil kaldı — "
+        f"bütçe yalnız bilgi basıyor. Çıktı:\n{cikti}")
+
+    # xfail atlama SAYILMAZ: borç imleri bütçeyi yemez.
+    kod = _ana_is_butcesini_kos(
+        tmp_path, _sentetik_junit(atlama=butce, xfail=200))
+    cikti = capsys.readouterr().out
+    assert kod in (0, None), (
+        "200 xfail bütçeye sayıldı — borç imleri atlama değildir; junit "
+        f"XML ikisini de <skipped> yazar, ayırt edici alan `type`. Çıktı:\n{cikti}")
+
+
+def test_ana_is_butcesi_modul_dusmesini_ve_toplama_cokmesini_goruyor(
+        tmp_path, capsys):
+    """F1 × K8: sayıyla bütçelenemeyen iki kaçış yolu ayrıca kapalı."""
+    # (a) TEK modül düzeyi atlama — bütçenin çok altında ama yine de kırmızı:
+    #     tek satır görünür, dosyanın bütün testleri raporlanmadan kaybolur.
+    kod = _ana_is_butcesini_kos(
+        tmp_path, _sentetik_junit(atlama=1, toplama_duzeyi=1))
+    cikti = capsys.readouterr().out
+    assert kod not in (0, None), (
+        "bir MODÜL toplama düzeyinde düştü (junit'te `type` alanı olmayan "
+        "tek satır) ama bütçe yeşil kaldı — P13B1-06'nın tam olarak ölçtüğü "
+        f"delik. Çıktı:\n{cikti}")
+
+    # (b) toplama çöktü: 12 test toplandı, hiç atlama yok — "yeşil" görünür.
+    kod = _ana_is_butcesini_kos(tmp_path, _sentetik_junit(toplam=12, gecen=12))
+    cikti = capsys.readouterr().out
+    assert kod not in (0, None), (
+        "toplanan test sayısı 9497'den 12'ye düştü ama iş yeşil kaldı — "
+        f"atlama bütçesi tek başına bu çöküşü görmez. Çıktı:\n{cikti}")
+
+    # (c) rapor hiç yok: sayı ÖLÇÜLEMEZ, o hâlde geçer not verilemez.
+    kod = _ana_is_butcesini_kos(tmp_path, None)
+    cikti = capsys.readouterr().out
+    assert kod not in (0, None), (
+        "junit raporu yokken bütçe adımı sessizce 0 döndü — ölçülemeyen şey "
+        f"geçmiş sayılamaz. Çıktı:\n{cikti}")
+
+
+def test_ana_is_butcesi_depo_ici_importorskipi_sayiyor(tmp_path, capsys):
+    """P14 §3.2-e: bütçe, depo-içi `importorskip` sitelerini de saymalı.
+
+    Bu siteler KOŞTUĞUNDA görünmez — modül yerindeyken atlama üretmezler,
+    yani dinamik atlama sayımı onları asla göremez. Görünür oldukları tek an
+    modülün kırıldığı andır ve o anda bekçiyi kırmızı vermeden yok ederler.
+    Bu yüzden bütçe adımı ayrıca STATİK tarama yapar.
+    """
+    dizin = _temiz_tests_dizini(tmp_path)
+    (dizin / "test_depo_ici.py").write_text(
+        "import pytest\n"
+        "sabit = pytest.importorskip('hrma.engines.solid_rocket_engine')\n"
+        "def test_bir():\n    assert sabit is not None\n",
+        encoding="utf-8")
+
+    kod = _ana_is_butcesini_kos(
+        tmp_path, _sentetik_junit(atlama=0), tests_dizini=False)
+    cikti = capsys.readouterr().out
+    assert kod not in (0, None), (
+        "tests/ altında depo-içi `pytest.importorskip` var ama bütçe yeşil "
+        f"kaldı — P13B1-05 sessizce geri gelebilir. Çıktı:\n{cikti}")
+    assert "hrma.engines.solid_rocket_engine" in cikti, (
+        f"tarama kırmızı verdi ama siteyi adıyla söylemedi. Çıktı:\n{cikti}")
+
+
+def test_depoda_depo_ici_importorskip_kalmadi():
+    """P13B1-05 (kapanış bekçisi): `tests/` altında depo-içi ithal atlaması 0.
+
+    Ölçüm (27 Ağustos 2026): 78 `pytest.importorskip` çağrısının 3'ü depo-içi
+    modüle bakıyordu (`test_iki_faz_kayip.py:361`,
+    `test_step_durustluk_kapisi.py:32`, `test_tank_step_units.py:37`);
+    ikisi MODÜL DÜZEYİNDEydi, yani ithal kırıldığında o dosyaların tamamı
+    (14 + 13 kalem) junit'te tek bir "collection skipped" satırına dönüşüp
+    bütçeden kayboluyordu. Üçü de düz ithale çevrildi; bu bekçi geri
+    gelmelerini engeller. Dış paketler (`build123d`, `ezdxf`, `yaml`…) bu
+    yasağın DIŞINDADIR — onlar gerçekten isteğe bağlıdır.
+    """
+    import ast
+
+    depo_kokleri = ("hrma", "app", "tools", "data")
+    bulunan = []
+    for yol in sorted((DEPO / "tests").rglob("test_*.py")):
+        agac = ast.parse(yol.read_text(encoding="utf-8"))
+        for dugum in ast.walk(agac):
+            if (isinstance(dugum, ast.Call)
+                    and isinstance(dugum.func, ast.Attribute)
+                    and dugum.func.attr == "importorskip"
+                    and dugum.args
+                    and isinstance(dugum.args[0], ast.Constant)):
+                hedef = str(dugum.args[0].value)
+                if hedef.split(".")[0] in depo_kokleri:
+                    bulunan.append(
+                        f"{yol.relative_to(DEPO)}:{dugum.lineno} -> {hedef}")
+
+    assert not bulunan, (
+        "depo-içi `pytest.importorskip` geri geldi: " + "; ".join(bulunan) +
+        " — modül DEPONUN KENDİSİ; 'isteğe bağlı bağımlılık' gerekçesi "
+        "geçersiz. Düz ithale çevirin: kırılırsa bekçi DÜRÜSTÇE kırmızı "
+        "vermeli, sessizce kaybolmamalı (P13B1-05).")
 
 
 def test_yonetisim_bekcilerinin_bagimliligi_bildirilmis():
@@ -660,9 +1147,23 @@ def test_otomatik_blok_bugunku_kodun_urettigiyle_ayni():
     """
     import contextlib
 
-    correlation_runner = pytest.importorskip(
-        "hrma.validation.correlation_runner")
-    status_report = pytest.importorskip("hrma.validation.status_report")
+    # DEPO-İÇİ ``pytest.importorskip`` KALDIRILDI — P14S1-03 / P13B1-05,
+    # ÖH Faz B-1 adım 10 (2026-08-26).
+    #
+    # Eski gövde ``correlation_runner = pytest.importorskip(
+    # "hrma.validation.correlation_runner")`` idi. Bu modül DEPONUN KENDİSİdir;
+    # "isteğe bağlı bağımlılık" gerekçesi burada geçerli değil (dosya başındaki
+    # PyYAML notu yalnız DIŞ paketler için yazılmıştır — o not duruyor).
+    #
+    # ÖLÇÜLDÜ (bellekte-yama ile iki modülün import'u kırılarak, 2026-08-26):
+    #   eski gövde -> "1 skipped"  — korelasyon koşucusu kırıldığında bekçi
+    #                                KIRMIZI VERMEDEN yok oluyordu;
+    #   bu gövde   -> "1 failed"   — ImportError gövdede patlar, dürüstçe kırmızı.
+    # Ağırlığı ölçülü: P14'ün mutasyon taramasında HTPB ``a`` katsayısının
+    # %20 bozulmasını yakalayan İKİ bekçiden biri tam olarak bu testtir
+    # (P14M2-14). Yani kampanyanın en güçlü sabit bekçilerinden biri, bir
+    # import hatasıyla sessizce kaybolabiliyordu.
+    from hrma.validation import correlation_runner, status_report
 
     belgedeki = _otomatik_blok()
     tarih_eslesme = re.search(r"- Generated: (\d{4}-\d{2}-\d{2})", belgedeki)
@@ -811,27 +1312,70 @@ def test_pre_commit_yapilandirmasi_calisir():
         betik = girdi.split()[-1]
         assert (DEPO / betik).exists(), f"pre-commit olmayan betiği çağırıyor: {betik}"
 
-    # Büyük dosya tavanı, izlenen en büyük dosyanın ÜSTÜNDE olmalı; altında
-    # olursa hook temiz bir ağaçta bile kırmızı yanar.
+    # ------------------------------------------------------------------
+    # Büyük dosya tavanı.
+    #
+    # ÖH D15 birleştirme (1 Eyl 2026) — BEKÇİ ÇEVRİLDİ. Buradaki iddia
+    # "tavan, izlenen en büyük dosyanın ÜSTÜNDE olmalı; altında olursa hook
+    # temiz ağaçta kırmızı yanar" idi. Birleşmeden sonra gerçekten kırmızı
+    # yandı (fea-viz kulvarının iki ham kanıt dökümü 24.296 / 23.933 KB),
+    # AMA İDDİANIN KENDİSİ ÖLÇÜMLE YANLIŞ ÇIKTI:
+    #
+    #     $ pre-commit run check-added-large-files --all-files
+    #     check for added large files..............................Passed
+    #
+    # ``check-added-large-files`` — adının söylediği gibi — YALNIZ o
+    # commit'te EKLENEN dosyalara bakar; zaten izlenen bir dosya
+    # ``--enforce-all`` verilmedikçe kapsam dışıdır. Yani tavanı 24 MB'ın
+    # üstüne çıkarmak "temiz ağaç kırmızısını" ÖNLEMEZ (öyle bir kırmızı
+    # yok); yalnızca bundan SONRA eklenecek dev dosyalara kapıyı açardı —
+    # kusuru gizleyen bir gevşetme olurdu. Tavan bu yüzden 10240'ta KALIR.
+    #
+    # Ölçülen davranışa göre iki ayrı iddia kilitlenir:
+    #   1. ``--enforce-all`` VARSA eski koşul geçerlidir (hook o zaman
+    #      gerçekten bütün ağaca bakar): tavan en büyüğün üstünde olmalı.
+    #   2. Yoksa yapılandırma ağacın gerçeğini YANLIŞ ANLATMAMALIDIR. Yanlış
+    #      beyan sonraki bakımcıya ağacın temiz olduğunu söyler ve
+    #      ``--enforce-all`` eklendiği gün kapı sessizce patlar.
     tavan_kb = None
+    enforce_all = False
     for kayit in depolar:
         for kanca in kayit.get("hooks") or []:
             if kanca.get("id") == "check-added-large-files":
                 for arguman in kanca.get("args", []):
                     if arguman.startswith("--maxkb="):
                         tavan_kb = int(arguman.split("=", 1)[1])
+                    if arguman == "--enforce-all":
+                        enforce_all = True
     if tavan_kb is not None:
         listeleme = subprocess.run(["git", "-C", str(DEPO), "ls-files"],
                                    capture_output=True, text=True, timeout=120)
-        if listeleme.returncode == 0:
-            en_buyuk = 0
-            for yol in listeleme.stdout.splitlines():
-                tam = DEPO / yol
-                if tam.is_file():
-                    en_buyuk = max(en_buyuk, tam.stat().st_size)
+        assert listeleme.returncode == 0, "git ls-files koşmadı — ölçüm yok"
+        en_buyuk, en_buyuk_yol = 0, None
+        for yol in listeleme.stdout.splitlines():
+            tam = DEPO / yol
+            if tam.is_file() and tam.stat().st_size > en_buyuk:
+                en_buyuk, en_buyuk_yol = tam.stat().st_size, yol
+        if enforce_all:
             assert en_buyuk / 1024 < tavan_kb, (
-                f"izlenen en büyük dosya {en_buyuk / 1024:.0f} KB, "
-                f"tavan {tavan_kb} KB — hook temiz ağaçta kırmızı yanar")
+                f"--enforce-all verilmiş: hook BÜTÜN ağaca bakar. İzlenen en "
+                f"büyük dosya {en_buyuk / 1024:.0f} KB ({en_buyuk_yol}), tavan "
+                f"{tavan_kb} KB — hook temiz ağaçta kırmızı yanar")
+        else:
+            metin = (DEPO / ".pre-commit-config.yaml").read_text(
+                encoding="utf-8")
+            asiyor = en_buyuk / 1024 >= tavan_kb
+            beyan = re.search(
+                r"[Cc]eiling is above the largest tracked file", metin)
+            assert not (asiyor and beyan), (
+                f".pre-commit-config.yaml 'ceiling is above the largest "
+                f"tracked file' diye bir OLGU beyan ediyor ama beyan yanlış: "
+                f"{en_buyuk_yol} {en_buyuk / 1024:.0f} KB >= tavan "
+                f"{tavan_kb} KB. Beyan düzeltilmeli (ya da dosya "
+                f"küçültülmeli). TAVANI BÜYÜTMEK ÇÖZÜM DEĞİL: temiz ağaç "
+                f"kırmızısı diye bir şey yok — hook --enforce-all olmadan "
+                f"izlenen dosyaya hiç bakmıyor — büyütmek yalnız gelecekteki "
+                f"dev eklemelere kapıyı açar.")
 
 
 def test_citation_cff_zorunlu_alanlari_var():

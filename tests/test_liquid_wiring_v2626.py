@@ -32,7 +32,8 @@ import warnings
 
 import pytest
 
-from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
+from hrma.engines.liquid_rocket_engine import (
+    BURN_TIME_DEFAULT_S, LiquidRocketEngine)
 
 warnings.filterwarnings('ignore')
 
@@ -47,6 +48,15 @@ LIQUID_HTML = REPO_ROOT / 'hrma' / 'templates' / 'liquid.html'
 OFFLINE_PROPELLANTS = {'rp1': {}, 'lox': {}}
 
 # liquid.html varsayılanlarıyla uyumlu taban yük.
+#
+# ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ, onemli2-sivi a2): motor yanma süresini ARTIK
+# VARSAYMAZ; süre verilmezse ``propellant_tanks`` ``not_modelled`` döner ve
+# bu dosyanın 23 düğümü ``KeyError 'oxidizer_tank'`` ile düşüyordu. Ölçülen
+# şey (tank iç yapısı: ağız/bafl/kütle yaprakları, tank emniyet katsayısı)
+# yakılan kütleden boyutlanan, yani SÜRESİ VERİLMİŞ bir tasarımdır. Süre
+# motorun kendi sabitinden AÇIKÇA verilir (sayı burada yazılmaz); sayılar
+# LU-1 öncesindeki sessiz varsayımla birebir aynıdır. Süre yokken kartın
+# fail-closed hâli tests/test_d36_sivi_a1.py'de kilitli.
 BASE = dict(
     fuel_density=810, oxidizer_density=1141,
     mixture_ratio=2.3, combustion_efficiency=97,
@@ -57,6 +67,7 @@ BASE = dict(
     characteristic_length=1.2, chamber_material='inconel_718',
     cooling_type='regenerative', nozzle_expansion_ratio=12,
     nozzle_type='bell_80', safety_factor=2.5,
+    max_burn_duration=BURN_TIME_DEFAULT_S,
 )
 
 CTOR = dict(thrust=25000, chamber_pressure=70, mixture_ratio=2.3,

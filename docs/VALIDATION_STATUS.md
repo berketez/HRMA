@@ -183,27 +183,41 @@ markers is machine-generated; the rest of this document remains hand-written.
 <!-- AUTO-CORRELATION:BEGIN -->
 *This block is auto-generated from the real-experiment correlation run; do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
 
-- Generated: 2026-08-02 (runner v1, adapter v1)
-- Experiment DB content hash: `2ee2a86bbd6968e4d0c7d4a5f770665cc31094b6c0ba6e1dc2fb9d6971d9eca4`
-- Records: 209 total, scored 95, insufficient inputs 107, not supported (v1) 7, runner errors 0
-- Signed error convention: (predicted - measured) / measured x 100. Outliers are flagged, never dropped; anomaly-flagged records are aggregated separately.
+- Generated: 2026-10-07 (runner v1, adapter v1)
+- Experiment DB content hash: `19cf1d9587eae349d4950f8b85f74fd2403a579e47d6c0563badfb6a9c4ecb63`
+- Records: 212 total, adapter ok 98 (with at least one scored quantity: 92), insufficient inputs 107, not supported (v1) 7, runner errors 0
+- Signed error convention: (predicted - measured) / measured x 100. Outliers (modified z-score |0.6745*(error - median)/MAD| > 3.5) are flagged, never dropped; records excluded from the headline are aggregated in their own layer and the reason is kept distinct: `anomaly` means the EXPERIMENT is suspect (data quality), `out_of_scope` means HRMA's own declared model does not cover the configuration. An `out_of_scope` row is 'measured and withheld', not 'not measured'. Cells marked 'single observation' report the signed error only (with n=1 the scatter columns would repeat that one number). Dependence column: 'in-sample' entries are scored against the fit's own source data (an implementation check, not an independent validation); 'weak-evidence' entries carry a curator caveat; u_meas is the median reported measurement uncertainty.
 
-| Motor | Quantity | Layer | N | Bias % | Median APE % | RMS % | Worst test |
-|---|---|---|---|---|---|---|---|
-| hybrid | c_star | main | 18 | +0.1 | 2.3 | 3.3 | hyb-rezaei2018-htpb-n2o-t55 |
-| hybrid | chamber_pressure | main | 35 | +16.8 | 13.8 | 20.7 | hyb-karabeyoglu2003-paraffin-gox-t4thr-1 |
-| hybrid | isp | main | 18 | +9.6 | 9.1 | 10.5 | hyb-rezaei2018-htpb-n2o-t69 |
-| hybrid | port_diameter_final | main | 18 | -9.4 | 10.1 | 10.6 | hyb-rezaei2018-htpb-n2o-t65 |
-| hybrid | regression_rate | main | 35 | -24.9 | 36.7 | 35.4 | hyb-rezaei2018-htpb-n2o-t69 |
-| liquid | isp_sl | main | 4 | +2.0 | 2.1 | 2.2 | liq-rd180-atlas-spec |
-| liquid | isp_vac | main | 14 | +0.9 | 1.2 | 2.2 | liq-vulcain21-2020-spec |
-| liquid | thrust_vac | main | 4 | -0.4 | 0.2 | 0.6 | liq-rd0120-energia-spec |
-| solid | burn_rate | main | 27 | -0.4 | 0.5 | 2.0 | sol-nakka1999-knsb-p09 |
-| hybrid | c_star | anomaly | 4 | +13.7 | 13.5 | 15.5 | hyb-heydari2017-htpb-n2o-s4a1-3 |
-| hybrid | chamber_pressure | anomaly | 13 | +53.2 | 32.6 | 98.2 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 |
-| hybrid | port_diameter_final | anomaly | 4 | -8.1 | 8.0 | 8.2 | hyb-heydari2017-htpb-n2o-s4a1-1 |
-| hybrid | regression_rate | anomaly | 9 | -4.9 | 14.7 | 20.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 |
-| hybrid | thrust | anomaly | 4 | +28.5 | 27.7 | 29.1 | hyb-heydari2017-htpb-n2o-s4a1-3 |
+| Motor | Quantity | Layer | N | Bias % | Median APE % | RMS % | Worst test | Dependence |
+|---|---|---|---|---|---|---|---|---|
+| hybrid | c_star | main | 18 | -2.4 | 3.3 | 4.0 | hyb-rezaei2018-htpb-n2o-t68 | u_meas~0.81% (n=18) |
+| hybrid | chamber_pressure | main | 35 | +15.5 | 10.9 | 20.4 | hyb-karabeyoglu2003-paraffin-gox-t4thr-1 | u_meas~0.14% (n=18) |
+| hybrid | isp | main | 18 | +5.4 | 5.0 | 6.7 | hyb-rezaei2018-htpb-n2o-t69 | u_meas~0.81% (n=18) |
+| hybrid | port_diameter_final | main | 18 | -9.4 | 10.1 | 10.6 | hyb-rezaei2018-htpb-n2o-t65 | - |
+| hybrid | regression_rate | main | 35 | -24.9 | 36.7 | 35.4 | hyb-rezaei2018-htpb-n2o-t69 | 17/35 in-sample; u_meas~0.33% (n=18) |
+| liquid | isp_sl | main | 4 | +2.0 | 2.0 | 2.2 | liq-rd180-atlas-spec | - |
+| liquid | isp_vac | main | 14 | +0.8 | 1.0 | 2.1 | liq-vulcain21-2020-spec | - |
+| liquid | thrust_vac | main | 4 | -0.4 | 0.2 | 0.6 | liq-rd0120-energia-spec | 4/4 weak-evidence |
+| solid | burn_rate | main | 27 | -0.4 | 0.5 | 2.0 | sol-nakka1999-knsb-p09 | 27/27 in-sample |
+| solid | burn_time (single observation) | main | 1 | -20.3 | - | - | sol-nakka2000-kappa-ksb002 | - |
+| solid | isp (single observation) | main | 1 | +18.4 | - | - | sol-nakka2000-kappa-ksb002 | - |
+| solid | propellant_mass (single observation) | main | 1 | +9.6 | - | - | sol-nakka2000-kappa-ksb002 | - |
+| solid | thrust_peak (single observation) | main | 1 | -7.6 | - | - | sol-nakka2000-kappa-ksb002 | - |
+| solid | burn_time (single observation) | low_confidence | 1 | -14.8 | - | - | sol-nakka2000-kappa-kdx002 | - |
+| solid | isp (single observation) | low_confidence | 1 | +10.5 | - | - | sol-nakka2000-kappa-kdx002 | - |
+| solid | propellant_mass (single observation) | low_confidence | 1 | +4.7 | - | - | sol-nakka2000-kappa-kdx002 | - |
+| solid | thrust_peak (single observation) | low_confidence | 1 | +9.6 | - | - | sol-nakka2000-kappa-kdx002 | - |
+| hybrid | chamber_pressure | anomaly | 9 | +66.4 | 33.3 | 116.9 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 | - |
+| hybrid | regression_rate | anomaly | 9 | -4.9 | 14.7 | 20.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 | - |
+| solid | burn_time (single observation) | anomaly | 1 | -22.0 | - | - | sol-nakka2000-kappa-ksb001 | - |
+| solid | isp (single observation) | anomaly | 1 | +22.8 | - | - | sol-nakka2000-kappa-ksb001 | - |
+| solid | propellant_mass (single observation) | anomaly | 1 | +5.1 | - | - | sol-nakka2000-kappa-ksb001 | - |
+| solid | thrust_peak (single observation) | anomaly | 1 | -9.6 | - | - | sol-nakka2000-kappa-ksb001 | - |
+| hybrid | c_star | out_of_scope | 4 | +12.1 | 12.1 | 14.0 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
+| hybrid | chamber_pressure | out_of_scope | 4 | +21.8 | 22.0 | 23.3 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
+| hybrid | port_diameter_final | out_of_scope | 4 | -8.1 | 8.0 | 8.2 | hyb-heydari2017-htpb-n2o-s4a1-1 | - |
+| hybrid | thrust | out_of_scope | 4 | +24.6 | 24.0 | 25.2 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
+- Non-converged runs (flagged, kept): 2 scored quantities from 1 record(s): hyb-karabeyoglu2003-paraffin-gox-t4p-04
 <!-- AUTO-CORRELATION:END -->
 
 ## Known limitations (do NOT design beyond these without independent check)

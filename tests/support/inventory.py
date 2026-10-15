@@ -53,13 +53,28 @@ _READ_PATTERNS = (
     # ile "değer geldi" ayrımını yapabilmesi buna bağlı. Okuma biçimi
     # açısından numById ile aynıdır: alanı id'siyle okur, dolayısıyla o
     # alanlar "hiçbir yerde okunmuyor" sayılmamalıdır.
-    re.compile(r"\boptNum\(\s*['\"]([\w-]+)['\"]"),
+    # ÖH D31 · arayuz-panel a3: ``liqOptNum`` / ``solOptNum`` da aynı
+    # okuyucu sınıfıdır (ÖK-21 form katmanı sökümü; liquid.html ve
+    # solid.html sayfa düzeyinde kendi sarmalayıcısını tanımlıyor, çünkü
+    # ikisinde de işlev-kapsamlı bir ``optNum`` ZATEN var ve üst düzeyde
+    # aynı adı tanımlamak GÖLGELEME üretirdi). Alan adı yine id ile
+    # okunuyor; ön ek okuma biçimini değiştirmez.
+    re.compile(r"\b\w*[Oo]ptNum\(\s*['\"]([\w-]+)['\"]"),
     # optChoice: optNum'un <select> karşılığı (2.6.27 yirminci parti,
     # liquid.html collectClosureAndFeedLineParams). Boş seçimde anahtar
     # gönderilmez; varsayılan kararı ve beyanı çözücünündür. Yerel takma
     # adla (choice) yazıldığında bu alanlar Katman A'da "hiçbir yerde
     # okunmuyor" görünmüştü — desen adı şablonla sözleşmelidir.
     re.compile(r"\boptChoice\(\s*['\"]([\w-]+)['\"]"),
+    # enjAta: ÖH D32 · arayuz-panel a2 (OH-D31-14). advanced.html'in enjektör
+    # kollarındaki okuyucu; gövdesi ``numById``dir, farkı boş alanda anahtarı
+    # gövdeden SİLMESİDİR (``delete data[ad]``) — ÖK-21'in "kullanıcı
+    # girmediyse alan GÖNDERİLMEZ" hükmü. Okuma biçimi açısından numById ile
+    # aynı: alanı id'siyle okur, dolayısıyla o alanlar Katman A'da "hiçbir
+    # yerde okunmuyor" sayılmamalıdır (optNum'un kendi gerekçesiyle birebir
+    # aynı durum). Desen adı şablonla SÖZLEŞMEDİR: enjektör kollarında
+    # yerel bir takma ad kullanılırsa alanlar yeniden görünmez olur.
+    re.compile(r"\benjAta\(\s*['\"]([\w-]+)['\"]"),
 )
 
 

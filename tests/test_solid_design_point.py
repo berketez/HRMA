@@ -289,6 +289,10 @@ def test_warnings_are_language_free_records():
                 burn_time=BATES_INFEASIBLE[1]),           # zarf dışı
         _engine(),                                        # ham geometri
         _engine(grain_type='star', thrust=5000.0, burn_time=3.0),
+        # ÖH D30: fallback TAŞIYAN kayıt üreten senaryo (aralık dışı girdi).
+        # Olmadan şema mandalı bu alanı hiç görmez ve yeniden bayatlar.
+        _engine(grain_type='star', thrust=5000.0, burn_time=3.0,
+                star_points=99),
     ]
     records = []
     for eng in engines:
@@ -298,11 +302,36 @@ def test_warnings_are_language_free_records():
     _assert_valid_warning_records(records)
 
 
+#: Kaydın ZORUNLU alanları (D-track sözleşmesi).
+ZORUNLU_ALANLAR = {'code', 'params', 'severity'}
+#: İzin verilen TEK ek alan: İngilizce yedek metin.
+#
+# ÖH D30 · katı a1. Bu yardımcı eskiden ``set(rec) == ZORUNLU_ALANLAR``
+# diyordu ve mandal BAYATTI: depo ``fallback`` alanını bu testten önce
+# kullanmaya başlamıştı ve aynı kanala (``design_warnings``) koyuyordu.
+# ÖLÇÜLDÜ (taban ağacı ab7cf68b, aralık dışı ``star_points=99``):
+#   warn.solid.input_out_of_range | anahtarlar: code, fallback, params, severity
+# Mandal yalnız bu üç senaryonun aralık dışı girdi ÜRETMEMESİ sayesinde
+# yeşil kalıyordu. Alan kullanıcıya gösterilen metnin kendisidir —
+# ``displaySolidWarnings`` ve ``app.js warnToText`` ``w.fallback || w.code``
+# okur — yani "backend dilsizdir" sözleşmesinin İSTİSNASI değil, çeviri
+# gelene kadarki KÖPRÜSÜdür. Mandal gevşetilmedi, KAPSAMI düzeltildi:
+# zorunlu üçlü aynen zorunludur, ek alan yalnız ``fallback`` olabilir ve
+# boş olamaz; başka her fazla alan yine kırmızıdır. Bayatlamasın diye
+# aşağıdaki test artık fallback TAŞIYAN bir kaydı da toplar.
+IZINLI_EK_ALANLAR = {'fallback'}
+
+
 def _assert_valid_warning_records(records):
-    """{code, params, severity} sözleşmesini özyinelemeli doğrular."""
+    """{code, params, severity} (+ istege bagli fallback) sözleşmesi."""
     for rec in records:
         assert isinstance(rec, dict), rec
-        assert set(rec) == {'code', 'params', 'severity'}, rec
+        assert ZORUNLU_ALANLAR <= set(rec), rec
+        fazla = set(rec) - ZORUNLU_ALANLAR
+        assert fazla <= IZINLI_EK_ALANLAR, (
+            'uyarı kaydında tanınmayan alan: %s (%r)' % (sorted(fazla), rec))
+        if 'fallback' in rec:
+            assert isinstance(rec['fallback'], str) and rec['fallback'].strip()
         assert isinstance(rec['code'], str) and rec['code'].startswith(
             'warn.solid.'), rec
         assert rec['code'].isascii(), rec
@@ -382,7 +411,10 @@ def test_no_target_means_no_sizing():
     # düşen tepe basınç birlikte tepe itkiyi biraz düşürüp süreyi biraz
     # uzattı. Kayma progresif taneciklerde çok daha büyüktür (star %-63'e
     # kadar); bates'te küçük olması alan oranının 1'e yakınlığındandır.
-    assert stats['peak'] == pytest.approx(4999.52, rel=1e-3)
+    # ÖH KİTAP p1b (B11, §28-36 Ş-3): 4999.52 N geri çözülmüş APCP
+    # dörtlüsündendi; CEA denge dörtlüsüyle ölçülen yeni taban 5070.33 N
+    # (+%1.42, tasarım noktası C_F'i). Yanma süresi değişmedi.
+    assert stats['peak'] == pytest.approx(5070.33, rel=1e-3)
     # v2.5.2 (Codex bulgusu): yanma suresi ve impuls son integrasyon adimini
     # atliyordu — ornekler t ilerlemeden once saklaniyor, son web artisindan
     # sonraki araligi trapz disarida birakiyordu. Terminal tukenis ornegi
@@ -393,13 +425,17 @@ def test_no_target_means_no_sizing():
 
     # F024'un tek suclu oldugunun bekcisi: eski (hatali) katsayiyla eski
     # sayilar geri gelmeli (docstring'deki olcume bak).
+    # ÖH KİTAP p1b (B11, §28-36 Ş-3): tepe 12060.600863912117 N ve
+    # A_t 0.0015761860795333138 m² geri çözülmüş APCP dörtlüsündendi (c*
+    # 1598.2 boğazı boyutluyor); CEA denge dörtlüsüyle ölçülen yeni taban.
+    # Süre değişmedi (yanma hızı yasası aynı).
     legacy = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
                                chamber_pressure=50, burn_rate_a=0.005)
     legacy_curve = legacy.calculate_thrust_curve()
     legacy_peak = float(np.asarray(legacy_curve['thrust']).max())
-    assert legacy_peak == pytest.approx(12060.600863912117, rel=1e-12)
+    assert legacy_peak == pytest.approx(12231.399903085883, rel=1e-12)
     assert float(legacy_curve['throat_area']) == pytest.approx(
-        0.0015761860795333138, rel=1e-12)
+        0.0015635623892454734, rel=1e-12)
     # F179 artigi: sure 1.3e-5 s kayar, bu yuzden tolerans 1e-4 s
     assert float(legacy_curve['time'][-1]) == pytest.approx(
         2.024960, abs=1e-4)
@@ -438,10 +474,24 @@ def test_endpoint_reports_design_point():
     resp = client.post('/calculate_solid', json=dict(
         base, thrust=BATES_INFEASIBLE[0], burn_time=BATES_INFEASIBLE[1],
         grain_type='bates'))
-    assert resp.status_code == 200
+    # ÖH D26 (defter P15B3-02, YÜKSEK) — ÇEVRİLDİ. Bu satır eskiden
+    # ``assert resp.status_code == 200`` idi ve tam da onarılan kusuru
+    # SÖZLEŞME hâline getiriyordu: zarf dışı hedefte uç, çözücüye verilen
+    # BAŞLANGIÇ geometrisinin eğrisini "sonuç" diye 200 ile yayımlıyordu.
+    # Ölçüldü (``docs/scofield/raw/OH/D26/kati/a1/once.json``, taban
+    # 7751531): 20 / 50 / 100 / 150 / 200 / 250 N istekleri BİT-ÖZDEŞ tek bir
+    # yanıt (1930,475099292884 N) veriyordu ve 250 N isteyen 1930 N, 300 N
+    # isteyen 282 N alıyordu. Hüküm kazanılmadıysa yayımlanmaz: yanıt artık
+    # 422'dir ve gövde tasarım noktası raporunu AYNEN taşır (testin adı ve
+    # asıl iddiası — "tasarım noktası raporu yer almalı" — korunur).
+    assert resp.status_code == 422
     data = resp.get_json()
     assert data['design_point']['achieved'] is False
+    assert data['design_point']['status'] == 'design_point_not_reached'
+    assert data['design_point']['exceeded']
     assert data['design_warnings']
+    # Başlangıç geometrisinin eğrisi hükümmüş gibi yayımlanmaz.
+    assert 'average_thrust' not in data
 
     resp2 = client.post('/calculate_solid', json=dict(
         base, thrust=2000, burn_time=5, grain_type='end_burner'))

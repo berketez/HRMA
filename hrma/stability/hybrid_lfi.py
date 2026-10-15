@@ -63,8 +63,15 @@ __all__ = [
     'RT_AV_SOURCE',
     'LFI_COEFFICIENT',
     'LFI_FREQUENCY_DELAY_COEFFICIENT',
+    'LFI_FREQUENCY_PATHS_REL_DIFF',
+    'LFI_FREQUENCY_PATHS_IDENTITY_TOL_REL',
+    'frekans_yollari_ozdeslik_kapisi',
     'LFI_DELAY_CONSTANT_C_PRIME',
     'LFI_LECTURE_NOTE_COEFFICIENT_REJECTED',
+    'LFI_COEFFICIENT_FROM_DELAY',
+    'LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL',
+    'LFI_COEFFICIENT_IDENTITY_TOL_REL',
+    'LFI_COEFFICIENT_PRINTED_DECIMALS',
     'is_supported_oxidizer',
     'rt_av_for_oxidizer',
     'boundary_layer_delay_s',
@@ -97,6 +104,84 @@ LFI_DELAY_CONSTANT_C_PRIME = 2.050       # s. 1115: 43 teste uydurulmuş c'
 # Ders notu (AA284a Ders 14, s. 29) katsayısı — KULLANILMAZ, yalnız çelişki
 # beyanı ve bekçisi için burada adıyla durur.
 LFI_LECTURE_NOTE_COEFFICIENT_REJECTED = 0.119
+
+# --- P6B4-10: KATSAYI ÖZDEŞLİĞİ ARTIK HESAPLANIYOR --------------------------
+# Ürün yüzü eskiden "0.2341 = 0.48/2.05" diye TAM EŞİTLİK yayımlıyordu;
+# ölçülen bölüm 0,23414634146341465 olduğu için bu eşitlik YANLIŞTI (bağıl
+# fark 1,979e-04) ve aynı yanlışlık iki YAYIMLANAN frekans yoluna sızıyordu
+# (Denk. 15 ⟷ Denk. 7: 12,4463 ⟷ 12,4488 Hz). İki sayı da makalenin kendi
+# sayısıdır ve biri ötekinden TÜRETİLEMEZ (0,2341, Denk. 15'te 4 ondalıkla
+# BASILI hâliyle alıntılanır); dolayısıyla "tek kaynağa indir" çözümü
+# literatürü tahrif ederdi. Doğru çözüm: bağıntıyı METİN olmaktan çıkarıp
+# ÖLÇÜLEN bir büyüklüğe bağlamak ve basım yuvarlamasının izin verdiği
+# aralığı kapı yapmak.
+LFI_COEFFICIENT_FROM_DELAY = (LFI_FREQUENCY_DELAY_COEFFICIENT
+                              / LFI_DELAY_CONSTANT_C_PRIME)
+LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL = (
+    abs(LFI_COEFFICIENT - LFI_COEFFICIENT_FROM_DELAY)
+    / LFI_COEFFICIENT_FROM_DELAY)
+#: Denk. 15'in katsayısı makalede 4 ONDALIKLA basılıdır; basım yuvarlamasının
+#: yarım-birimi 5e-5 mutlak, yani 5e-5/0,23415 = 2,1354e-04 bağıldır. Özdeşlik
+#: ancak bu aralıkta "aynı sayının iki basımı" sayılabilir.
+LFI_COEFFICIENT_PRINTED_DECIMALS = 4
+LFI_COEFFICIENT_IDENTITY_TOL_REL = (
+    0.5 * 10.0 ** (-LFI_COEFFICIENT_PRINTED_DECIMALS)
+    / LFI_COEFFICIENT_FROM_DELAY)
+if LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL > LFI_COEFFICIENT_IDENTITY_TOL_REL:
+    # FAIL-CLOSED: sabitlerden biri değişip bağıntı basım yuvarlamasının
+    # dışına çıkarsa modül yanlış bir özdeşlik YAYIMLAMAK yerine yüklenmez.
+    raise ValueError(
+        'hrma.stability.hybrid_lfi: the published coefficient identity is '
+        f'broken: LFI_COEFFICIENT = {LFI_COEFFICIENT!r} but '
+        f'LFI_FREQUENCY_DELAY_COEFFICIENT/LFI_DELAY_CONSTANT_C_PRIME = '
+        f'{LFI_COEFFICIENT_FROM_DELAY!r} (relative residual '
+        f'{LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL:.6g} > printing tolerance '
+        f'{LFI_COEFFICIENT_IDENTITY_TOL_REL:.6g}). Eq. 15 and Eq. 7+Eq. 12 '
+        'would then be two DIFFERENT models, not two printings of one; no '
+        'identity is published on top of that.')
+
+#: --- OH-Z5-02 (ÖH D28): İKİ FREKANS YOLUNUN FARKI TEK KAYNAKTAN ---------
+#: ``frequency_paths_rel_diff`` yaprağı D25'ten beri "uydurma sabit"
+#: bekçisinin (``tests/test_field_wiring_layer_b.py::
+#: test_no_fabricated_constant_outputs``) listesinde KALAN TEK yapraktı.
+#: Hüküm ÖLÇÜLEREK verildi (kanıt ``docs/scofield/raw/OH/D28/fea-cfd/a1/
+#: once_z502.json``): yaprak TANIM GEREĞİ sabittir, çünkü
+#:
+#:   f·τ = (K·(G_o+G_t)·R·T_av/(L·P_c)) · (c'·L·P_c/((G_o+G_t)·R·T_av))
+#:       = K·c'                                    (girdi SADELEŞİR)
+#:
+#: ve dolayısıyla
+#:
+#:   |f·τ/0,48 − 1| = |K·c'/0,48 − 1| = |K − 0,48/c'| / (0,48/c')
+#:                  = LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL.
+#:
+#: Boyut analizi: [f]=s⁻¹, [τ]=s ⇒ f·τ boyutsuz; 0,48 (Denk. 7) da f·τ
+#: boyutunda, yani oran ve çıkarma boyutsuz — tutar.
+#:
+#: Yaprak yalnız sabit DEĞİL, aynı zamanda YANLIŞTI: satır içi float yolu
+#: (``frequency*delay/0.48 - 1``) beş işletme noktasında ÜÇ FARKLI sayı
+#: veriyordu (1,97916666666464e-04 / 1,97916666666686e-04 /
+#: 1,97916666666798e-04) ve hiçbiri, ürünün AYNI SÖZLÜKTE yayımladığı
+#: ``coefficient_identity_residual_rel`` = 1,97916666666714e-04 ile
+#: bit-aynı değildi. Yani ürün tek bir büyüklüğü İKİ SAYI olarak basıyor,
+#: üstelik yaprağın kendi künyesi ("They differ by EXACTLY the printing
+#: residual of the coefficient") bu iki sayının aynı olduğunu SÖYLÜYORDU.
+#: Oynayan şey ölçüm değil son bitlerdeki yuvarlama gürültüsüydü
+#: (yayılım ≈ 1,7e-13 bağıl, platform float sözleşmesinin 1e-12 gürültü
+#: tabanının ALTINDA). TEK KAYNAK kuralı (Berke doktrini 4): büyüklük bir
+#: kez hesaplanır, iki ad aynı sayıyı basar.
+LFI_FREQUENCY_PATHS_REL_DIFF = LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL
+
+#: Özdeşliğin İŞLETME NOKTASINDA hâlâ tuttuğunu ölçen kapının bandı.
+#: Sabit yaprağın "meşru" sayılabilmesinin tek şartı, onu doğuran cebirsel
+#: özdeşliğin gerçekten yürürlükte olmasıdır; bu yüzden sabitlik bir İDDİA
+#: olarak bırakılmaz, her koşumda ÖLÇÜLÜR (``frekans_yollari_ozdeslik_kapisi``).
+#: Band ölçümden türedi: f·τ/(K·c') − 1 sapması beş işletme noktasında
+#: |·| ≤ 2,3e-16 (çift duyarlıklı yuvarlama); gerçek bir kopma — Denk. 15
+#: ya da Denk. 11/12 katsayısının değişmesi, kırpma, ikinci bir model —
+#: 1e-4 mertebesindedir. 1e-9 iki mertebeler arasında güvenli aralıktır:
+#: gürültünün 4e6 katı, gerçek kopmanın 1e5'te biri.
+LFI_FREQUENCY_PATHS_IDENTITY_TOL_REL = 1e-9
 
 LFI_COEFFICIENT_BASIS = (
     'f = 0.2341*(2 + 1/(O/F))*Go*R*Tav/(L*Pc), the universal scaling law of '
@@ -190,8 +275,10 @@ def lfi_frequency_hz(grain_length_m, chamber_pressure_Pa,
                      of_ratio=None, total_flux_kg_m2_s=None):
     """LFI frekansı f [Hz] — Denk. (15) (O/F yolu) ya da Denk. (14b) grubu.
 
-    Denk. (15) ile Denk. (7)+(12) aynı sayıyı verir: 0,2341 = 0,48/2,050
-    (katsayı özdeşliği bekçili).
+    Denk. (15) ile Denk. (7)+(12) BASILI KESİNLİĞE KADAR aynı sayıyı
+    verir: 0,2341 ⟷ 0,48/2,050 = 0,23414634146341465 (bağıl artık
+    1,979e-04; P6B4-10). İki yolun frekansları da bu artık kadar ayrışır
+    ve ``assess_hybrid_lfi`` ikisini de yayımlar.
     """
     length = _positive('grain_length_m', grain_length_m)
     pressure = _positive('chamber_pressure_Pa', chamber_pressure_Pa)
@@ -199,6 +286,45 @@ def lfi_frequency_hz(grain_length_m, chamber_pressure_Pa,
     group, _, _, _ = _flux_group(oxidizer_flux_kg_m2_s, of_ratio,
                                  total_flux_kg_m2_s)
     return LFI_COEFFICIENT * group * rt_av / (length * pressure)
+
+
+def frekans_yollari_ozdeslik_kapisi(frequency_hz, delay_s):
+    """f·τ = K·c\' özdeşliği İŞLETME NOKTASINDA tutuyor mu? (fail-closed).
+
+    ``frequency_paths_rel_diff`` yaprağı TANIM GEREĞİ sabittir (bkz.
+    ``LFI_FREQUENCY_PATHS_REL_DIFF`` künyesi) — ama yalnızca Denk. 15 ile
+    Denk. 11/12 gerçekten aynı katsayı çiftini kullandığı sürece. Sabiti
+    ölçmeden yayımlamak, o özdeşliğin bir gün sessizce kopmasına açık
+    kapı bırakır (ör. ``lfi_frequency_hz`` kırpma eklerse ya da ikinci bir
+    model devreye girerse iki yol AYRI büyüklükler olur ve "basım artığı"
+    künyesi YALAN olur).
+
+    Bu yüzden yayımlanan sabit her koşumda ölçülen çarpımla karşılaştırılır.
+    Sapma banda sığmazsa hiçbir sayı yayımlanmaz (Berke doktrini 1): sessiz
+    yedek yerine adlı gerekçeyle ``ValueError``.
+
+    Returns:
+        float: f·τ/(K·c\') − 1, bağıl sapma (band içindeyse).
+
+    Raises:
+        ValueError: özdeşlik ``LFI_FREQUENCY_PATHS_IDENTITY_TOL_REL``
+            bandının dışına çıktıysa.
+    """
+    beklenen = LFI_COEFFICIENT * LFI_DELAY_CONSTANT_C_PRIME
+    olculen = frequency_hz * delay_s
+    sapma = olculen / beklenen - 1.0
+    if not abs(sapma) <= LFI_FREQUENCY_PATHS_IDENTITY_TOL_REL:
+        raise ValueError(
+            'hrma.stability.hybrid_lfi: the two published frequency routes '
+            'are no longer two printings of ONE number. Eq. 15 times '
+            f'Eq. 11/12 should give f*tau = {beklenen!r} '
+            f'(LFI_COEFFICIENT*LFI_DELAY_CONSTANT_C_PRIME) but the operating '
+            f'point gives {olculen!r} (relative deviation {sapma:.6g} > '
+            f'tolerance {LFI_FREQUENCY_PATHS_IDENTITY_TOL_REL:.6g}). '
+            'frequency_paths_rel_diff is published as the PRINTING RESIDUAL '
+            'of the coefficient; that label would be false here, so no '
+            'number is published.')
+    return sapma
 
 
 def assess_hybrid_lfi(oxidizer_type, grain_length_m, chamber_pressure_Pa,
@@ -232,6 +358,10 @@ def assess_hybrid_lfi(oxidizer_type, grain_length_m, chamber_pressure_Pa,
     delay = boundary_layer_delay_s(
         grain_length_m, chamber_pressure_Pa, oxidizer_flux_kg_m2_s, rt_corr,
         of_ratio=of_ratio, total_flux_kg_m2_s=total_flux_kg_m2_s)
+
+    # OH-Z5-02: yayımlanan sabitin künyesi ("iki yol yalnız basım artığı
+    # kadar ayrışır") her koşumda ÖLÇÜLEREK doğrulanır; kopmuşsa fail-closed.
+    frekans_yollari_ozdeslik_kapisi(frequency, delay)
 
     rt_thermo = (None if rt_thermo_m2_s2 is None
                  else _positive('rt_thermo_m2_s2', rt_thermo_m2_s2))
@@ -272,13 +402,54 @@ def assess_hybrid_lfi(oxidizer_type, grain_length_m, chamber_pressure_Pa,
         'model': 'karabeyoglu_2005_tcg_coupled_scaling_law',
         'model_basis': LFI_COEFFICIENT_BASIS,
         'frequency_hz': frequency,
+        # P6B4-10: Denk. 7 yolu (f = 0,48/τ_bl2) da YAYIMLANIR. İki yol
+        # ürün yüzünde zaten yan yana duruyordu (frequency_hz ve
+        # boundary_layer_delay_s birlikte); farkları yalnız SÖYLENMİYORDU.
+        'frequency_via_delay_hz': (LFI_FREQUENCY_DELAY_COEFFICIENT / delay),
+        # OH-Z5-02: TEK KAYNAK. Bu yaprak eskiden burada yeniden
+        # hesaplanıyordu (``abs(frequency*delay/0.48 - 1)``) ve aynı
+        # büyüklüğü ``coefficient_identity_residual_rel``den FARKLI bir
+        # sayı olarak basıyordu (ölçüldü: beş işletme noktasında üç ayrı
+        # değer, hiçbiri kardeşiyle bit-aynı değil). Özdeşliğin işletme
+        # noktasında hâlâ tuttuğu KAYBOLMADI — yukarıdaki kapı onu her
+        # koşumda ölçer ve kopmuşsa hiçbir sayı yayımlanmaz.
+        'frequency_paths_rel_diff': LFI_FREQUENCY_PATHS_REL_DIFF,
+        'frequency_paths_basis': (
+            'Two published routes to the same frequency: Eq. 15 (coefficient '
+            f'{LFI_COEFFICIENT}) and Eq. 7 (f = '
+            f'{LFI_FREQUENCY_DELAY_COEFFICIENT}/tau_bl2) combined with '
+            f'Eq. 12 (c\' = {LFI_DELAY_CONSTANT_C_PRIME}). They differ by '
+            'exactly the printing residual of the coefficient, published as '
+            'frequency_paths_rel_diff; neither is a second model and neither '
+            'is hidden. That residual is INPUT-INDEPENDENT by construction '
+            '(f*tau = K*c\' — the flux/length/pressure group cancels), so it '
+            'is published from the single source '
+            'LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL and is bit-identical to '
+            'the coefficient_identity_residual_rel field below. The '
+            'cancellation is not assumed: f*tau is measured against K*c\' on '
+            'every run and no number is published if it drifts (tolerance '
+            f'{LFI_FREQUENCY_PATHS_IDENTITY_TOL_REL:.6g}).'),
         'boundary_layer_delay_s': delay,
         'delay_constant_c_prime': LFI_DELAY_CONSTANT_C_PRIME,
         'coefficient': LFI_COEFFICIENT,
+        'coefficient_from_delay': LFI_COEFFICIENT_FROM_DELAY,
+        'coefficient_identity_residual_rel':
+            LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL,
+        'coefficient_identity_tol_rel': LFI_COEFFICIENT_IDENTITY_TOL_REL,
+        # Metin ARTIK ölçülen sayıyı söylüyor: eskiden burada TAM EŞİTLİK
+        # ('0.2341 = 0.48/2.05') yazıyordu, ölçülen bölüm ise
+        # 0,23414634146341465'ti (P6B4-10).
         'coefficient_identity': (
-            f'{LFI_COEFFICIENT} = {LFI_FREQUENCY_DELAY_COEFFICIENT}/'
-            f'{LFI_DELAY_CONSTANT_C_PRIME} (Eq. 7 combined with Eq. 12); the '
-            f'rejected lecture-note coefficient '
+            f'{LFI_COEFFICIENT} is Eq. 15 as PRINTED (to '
+            f'{LFI_COEFFICIENT_PRINTED_DECIMALS} decimals); Eq. 7 combined '
+            f'with Eq. 12 gives {LFI_FREQUENCY_DELAY_COEFFICIENT}/'
+            f'{LFI_DELAY_CONSTANT_C_PRIME} = '
+            f'{LFI_COEFFICIENT_FROM_DELAY!r}. The two are the same number to '
+            f'the printed precision, NOT bit-identical: relative residual '
+            f'{LFI_COEFFICIENT_IDENTITY_RESIDUAL_REL:.6g} against the '
+            f'printing tolerance {LFI_COEFFICIENT_IDENTITY_TOL_REL:.6g}. '
+            f'That residual is what separates frequency_hz from '
+            f'frequency_via_delay_hz. The rejected lecture-note coefficient '
             f'{LFI_LECTURE_NOTE_COEFFICIENT_REJECTED} is NOT used.'),
         'rt_corr_m2_s2': rt_corr,
         'rt_gate': gate['rt_gate'],

@@ -7,14 +7,38 @@ turda eksenel VE radyal bölümü REFINE_FACTOR ile birlikte katlıyordu
 (eleman tur başına F² kat). Yönler farklı hızda yakınsadığı için bu eleman
 israf eder — ölçülen örnekler:
 
-* Lamé silindiri (z'den bağımsız çözüm): birlikte katlama 3072 elemanda
-  yakınsıyor; yön-ayrışık politika 4 kararın 4'ünde de radyalı seçip 192
-  elemanda AYNI analitik doğrulukla (%0,023) yakınsıyor — 16 kat tasarruf.
-* Sıvı deterministik vakası (tol=0,05): birlikte katlama 16384 elemanda
-  (6,7 s), yön-ayrışık 4096 elemanda (0,6 s) yakınsıyor — 4 kat tasarruf.
-* Aynı bütçede (max_rounds=4) iki politika sıvı vakasında aynı (256, 64)
-  mesh'ine varıyor; yön-ayrışık hüküm ölçütü %2,6 (eskisi %4,6) — hüküm
-  aynı elemanla DAHA isabetli ölçülüyor (gösterge ayrıştırması).
+ÇAPA GÖÇÜ (ÖH D15 birleşme düzeltmesi, 1 Eylül 2026) — bu dosyanın
+sayısal çapaları 15 Ağustos 2026'da ÖLÇÜLDÜ ve o gün yakınsama HEDEFİ
+Gauss noktası maksimumuydu. fea-viz kulvarı P8B1-01'i onardı: hüküm sayısı
+(``min_safety_factor``) düğüm/SPR maksimumundan türetiliyor, dolayısıyla
+yakınsama ölçütü de AYNI büyüklüğe taşındı (``structural_axisym`` içindeki
+``_hedef``). Düğüm alanı O(h²), Gauss alanı O(h¹) yakınsadığı için aynı
+toleransta inceltme DAHA ERKEN duruyor — kulvarın kendi raporu bunu beyan
+etti (``docs/scofield/raw/OH/D15/fea-viz/a1/rapor.md``: "yakınsama hedefi
+O(h²) yakınsayan düğüm alanına taşındığı için aynı toleransta daha ERKEN
+duruyor"). Çapalar aşağıda YENİDEN ÖLÇÜLDÜ; hiçbir tolerans
+gevşetilmedi, ölçüm noktası değişti. Politikanın KENDİ iddiası (yön
+ayrımı eleman tasarrufu sağlar) her iki ölçümde de ayakta.
+
+* Lamé silindiri (z'den bağımsız çözüm): birlikte katlama 192 elemanda
+  (16×12), yön-ayrışık politika 2 kararın 2'sinde de radyalı seçip 48
+  elemanda (4×12) yakınsıyor — 4 kat tasarruf, AYNI sayıyla: iki
+  politikanın düğüm maksimumu 3,12328508e7 Pa'da 1e-13 içinde aynı
+  (eksenel katlama z'den bağımsız çözümde hiçbir şey değiştirmiyor).
+  Analitik sapma %0,344 (V2.7 şartı %2). ESKİ ÖLÇÜM (Gauss hedefi):
+  3072 ⟷ 192 eleman, 16 kat, sapma %0,023.
+* Sıvı deterministik vakası (tol=0,05): yön-ayrışık 8192 elemanda
+  (512×16) YAKINSIYOR (final_rel_change 0,0352); birlikte katlama 16384
+  elemanda (256×64) hâlâ %8,63 oynuyor ve tur bütçesi biterken
+  YAKINSAMIYOR. Yani tasarruf eskisinden BÜYÜK: eleman farkı artık
+  "daha ucuza aynı hüküm" değil, "birlikte katlama bu bütçede hükmü hiç
+  kazanamıyor" demek. ESKİ ÖLÇÜM (Gauss hedefi): birlikte katlama
+  16384'te yakınsıyordu — o "yakınsadı" hükmü hükmü taşıyan düğüm alanı
+  için KAZANILMAMIŞTI; P8B1-01 tam olarak bunu kapattı. Yön-ayrışık
+  yolun 4096 → 8192 kayması ise aynı dalgadaki ikinci ürün onarımından:
+  dış yüzey eğrilik tabanının köşe penceresi geometrik ölçeğe alındı
+  (``mesh_axisym``), köşe her çözünürlükte düzeltiliyor ve yerel cidar
+  2,0053 → 2,0463 mm kalınlaşıyor.
 
 Sözleşme:
 
@@ -126,8 +150,10 @@ class TestKararBeyani:
 
     @pytest.fixture(scope='class')
     def sivi(self, sivi_girdileri):
-        # tol=0,05: ölçülen yol [eksenel×3, radyal×2, eksenel] → (256, 16)
-        # elemanda yakınsar; her iki yön de kararlarda görülür.
+        # tol=0,05: ölçülen yol (1 Eylül 2026) [eksenel×4, radyal,
+        # eksenel, radyal] → (512, 16) mesh'inde yakınsar; her iki yön de
+        # kararlarda görülür. Yol, P8B1-01 (düğüm/SPR hedefi) ve köşe
+        # penceresi onarımından sonra yeniden ölçüldü.
         return _kos_sivi(sivi_girdileri, tol=0.05)
 
     def test_politika_ve_cozum_sayisi_beyanli(self, sivi):
@@ -181,8 +207,19 @@ class TestKararBeyani:
         'Hep aynı yönü katla' mutasyonları (karar ölçümünün koparılması)
         burada kırmızı verir.
         """
+        # ÇAPA GÖÇÜ 3 (OH-D24-01, ÖH D25): hüküm büyüklüğü ASME Ek 5-A
+        # lineerleştirmesine geçince sıvı vakası daha erken duruyor ve bu
+        # bütçede yalnız bir yön katlanıyor. Bekçinin ASIL iddiası "karar
+        # ÖLÇÜLÜYOR" olmasıdır; o yüzden dondurulmuş yön kümesi yerine
+        # kararın ölçüme dayandığı sınanır (ölçüm koparılırsa kırmızı).
         yonler = {h['yon'] for h in sivi.history[1:]}
-        assert yonler == {'eksenel', 'radyal'}
+        assert yonler and yonler <= {'eksenel', 'radyal'}
+        for h in sivi.history[1:]:
+            k = h['karar']
+            assert k is not None, 'yön kararı beyansız'
+            secilen = k['d_eksenel'] if h['yon'] == 'eksenel' else k['d_radyal']
+            assert secilen == max(k['d_eksenel'], k['d_radyal']), (
+                f'karar büyük göstergeyi seçmiyor: {k}')
 
     def test_final_rel_change_son_kaydin_olcusudur(self, sivi):
         assert sivi.final_rel_change == sivi.history[-1]['rel_change']
@@ -208,28 +245,103 @@ class TestLameYonAyrimi:
         """
         assert all(h['yon'] == 'radyal' for h in yonlu.history[1:])
         for h in yonlu.history[1:]:
-            assert h['karar']['d_eksenel'] < 1e-6
-            assert h['karar']['d_radyal'] > 1e-3
+            # ÇAPA GÖÇÜ 3 (OH-D24-01): lineerleştirilmiş hedefte radyal
+            # gösterge ilk turda 3,87e-05'e düşüyor (eskiden 0,053) —
+            # integral alan cidar detayını daha erken çözüyor. İddia
+            # (eksenel gösterge SIFIR, radyal POZİTİF ve seçilen odur)
+            # aynen duruyor.
+            assert h['karar']['d_eksenel'] < 1e-9
+            assert h['karar']['d_radyal'] > h['karar']['d_eksenel']
         assert yonlu.mesh.n_axial == 4          # başlangıçtaki değerde kaldı
 
     def test_eleman_tasarrufu_olculen_esikte(self, yonlu):
-        """Ölçüldü: birlikte katlama 3072 elemanda, yön-ayrışık 192'de
-        yakınsıyor (16 kat). Eşik ölçümden: en az 8 kat tasarruf."""
+        """Ölçüldü (1 Eylül 2026, düğüm/SPR hedefi): birlikte katlama 192
+        elemanda (16×12), yön-ayrışık 48'de (4×12) yakınsıyor — 4 kat.
+
+        ÇAPA GÖÇÜ (P8B1-01): eski çapa 3072 ⟷ 192 (16 kat) idi ve Gauss
+        hedefiyle ölçülmüştü. Hüküm sayısı düğüm/SPR maksimumuna taşınınca
+        yakınsama ölçütü de oraya taşındı; düğüm alanı O(h²) yakınsadığı
+        için iki politika da BİR TUR ERKEN duruyor (her ikisi de 3 tur).
+        Tasarruf oranı 16 → 4 düştü çünkü oran turların ÜSSÜDÜR: joint tur
+        başına 4 kat (iki yön), directional 2 kat eleman ekler; iki turda
+        4² / 2² = 4. Politikanın iddiası değişmedi, ölçüm noktası değişti.
+
+        ÇAPA GÖÇÜ 2 (OH-D15-02, ÖH D24): kabul ölçütü TEK turdan ARDIŞIK
+        ``REFINE_ONAY_ARDISIK_TUR`` tura çıkarıldı (gerekçesi
+        ``structural_axisym`` sabitinin başındaki ölçüm — katı motorda tek
+        turluk düşüş YEREL ÇUKUR çıkıyordu). Her iki politika da ONAY TURU
+        kadar bir tur daha atıyor: yön-ayrışık 48 → 96 (4×12 → 4×24),
+        birlikte 192 → 768 (16×12 → 32×24). İDDİA GÜÇLENDİ, gevşemedi:
+        tasarruf oranı 4 kattan 8 KATA çıktı (oran turların ÜSSÜDÜR; ek tur
+        joint'e 4 kat, directional'a 2 kat eleman ekler).
+
+        Eşik ÖLÇÜMDEN ve iki değer de BİREBİR dondurulmuştur — gevşetme
+        değil, yeniden çapalama.
+
+        ÇAPA GÖÇÜ 3 (OH-D24-01, ÖH D25): hüküm büyüklüğü ASME BPVC VIII-2
+        Bölüm 5 / Ek 5-A lineerleştirmesine (max(1,5·P_m, P_L+P_b)) geçti
+        ve yakınsama ölçütü — tek-kaynak sözleşmesi gereği — onunla
+        birlikte taşındı. Gerekçe ölçüldü: ham düğüm tepesi geometrik
+        süreksizlikte h→0 iken yakınsamıyor (katı motor, tekdüze
+        merdiven, gözlenen mertebe p ≈ 0,12, 16.384 elemanda hâlâ %4,0;
+        kanıt docs/scofield/raw/OH/D25/fea-cfd/a1/teshis_scl.json), ASME
+        Tablo 5.6 onu plastik çökme hükmünden zaten dışlıyor. Lineerleşen
+        büyüklük cidar boyu bir İNTEGRALDİR, bu yüzden aynı problemde bir
+        tur ERKEN duruyor. Sayılar yeniden çapalandı; iddialar (yön
+        ayrımı, geriye uyum kuralı, analitik doğruluk şartı) değişmedi.
+        Ölçülen (D25): yön-ayrışık 48 (4×12), birlikte 192 (16×12) —
+        tasarruf oranı 4 kat (iki tur; joint tur başına 4, directional 2
+        kat eleman ekler). İki değer yine BİREBİR dondurulmuştur.
+        """
         birlikte = _kos_lame(refine_policy=REFINE_POLICY_JOINT)
         assert birlikte.converged and yonlu.converged
-        assert yonlu.mesh.n_elems == 192
-        assert birlikte.mesh.n_elems == 3072
-        assert yonlu.mesh.n_elems * 8 <= birlikte.mesh.n_elems
+        assert yonlu.mesh.n_elems == 48
+        assert (yonlu.mesh.n_axial, yonlu.mesh.n_radial) == (4, 12)
+        assert birlikte.mesh.n_elems == 192
+        assert (birlikte.mesh.n_axial, birlikte.mesh.n_radial) == (16, 12)
+        assert yonlu.mesh.n_elems * 4 <= birlikte.mesh.n_elems
+        # Tasarruf BEDELSİZ: z'den bağımsız çözümde eksenel katlama
+        # hükmü taşıyan sayıyı değiştirmiyor (ölçüldü: 1e-13 içinde aynı).
+        assert (float(yonlu.result.von_mises_nodal.max())
+                == pytest.approx(float(birlikte.result.von_mises_nodal.max()),
+                                 rel=1e-9))
 
     def test_analitik_dogruluk_degismez(self, yonlu):
-        """Yakınsamış çözüm Lamé analitiğine < %2 (V2.7 şartı); ölçülen
-        %0,023 — anizotrop (4×48) mesh SPR doğruluğunu bozmuyor."""
+        """Yakınsamış çözüm Lamé analitiğine < %2 (V2.7 ŞARTI, değişmedi);
+        ölçülen %0,344 — anizotrop (4×12) mesh SPR doğruluğunu bozmuyor.
+
+        ÇAPA GÖÇÜ (P8B1-01): eski ölçüm %0,023 idi ve eşik %0,25 (ölçümün
+        10 katı pay) olarak konmuştu. Yakınsama hedefi düğüm/SPR alanına
+        taşınınca inceltme bir tur erken duruyor (192 → 48 eleman) ve aynı
+        çözücü aynı problemde %0,344 sapma bırakıyor. ŞART DEĞİŞMEDİ:
+        V2.7'nin istediği %2 ve ölçüm hâlâ onun 5,8 katı içinde. Yeni eşik
+        %0,5, yani ölçümün 1,45 katı — eskisinin 10 katlık payından BELİRGİN
+        DARDIR: bu bekçi gevşemedi, tersine daha dar bir bantta duruyor.
+
+        İkinci ayak, ÇAPA GÖÇÜNÜN KENDİSİNİ kilitler: yakınsama ölçütünün
+        okuduğu büyüklük hükmü taşıyan büyüklükle AYNI olmalıdır (P8B1-01
+        tek-kaynak sözleşmesi). Ölçüt Gauss alanına geri alınırsa bu ayak
+        kırmızı verir.
+        """
         b = LAME_A + LAME_T
         vm_ana = float(_lame_vm_plane_strain(LAME_A, LAME_A, b, LAME_P,
                                              STEEL.nu))
         vm_nod = float(yonlu.result.von_mises_nodal.max())
-        assert abs(vm_nod - vm_ana) / vm_ana < 0.0025   # ölçülen 10 katı pay
+        assert abs(vm_nod - vm_ana) / vm_ana < 0.005     # ölçülen %0,3441
+        assert abs(vm_nod - vm_ana) / vm_ana < 0.02      # V2.7 şartı
         assert yonlu.final_rel_change < yonlu.tol
+        # P8B1-01 tek-kaynak: geçmişin izlediği sayı = hükmün sayısı.
+        # ÇAPA GÖÇÜ 3 (OH-D24-01): tek-kaynak sözleşmesi AYNEN duruyor —
+        # yalnız hükmü taşıyan alan değişti (ham düğüm tepesi → ASME Ek
+        # 5-A lineerleştirmesi). Bekçi artık HÜKÜM alanını izliyor; ölçüt
+        # ham tepeye ya da Gauss alanına geri alınırsa kırmızı verir.
+        assert yonlu.history[-1]['max_von_mises'] == pytest.approx(
+            float(yonlu.result.max_von_mises_hukum), rel=1e-12), (
+            'yakınsama ölçütü hükmü taşıyan alanı DEĞİL başka bir alanı '
+            'izliyor — P8B1-01 / OH-D24-01 tek-kaynak sözleşmesi kırık')
+        assert yonlu.result.max_von_mises_hukum != pytest.approx(
+            float(yonlu.result.max_von_mises_nodal), rel=1e-12), (
+            'hüküm alanı ham tepeyle özdeş — lineerleştirme devre dışı mı?')
 
 
 # ---------------------------------------------------------------------------
@@ -242,18 +354,68 @@ class TestJointGeriyeUyum:
         return _kos_lame(refine_policy=REFINE_POLICY_JOINT)
 
     def test_grid_dizisi_eski_politikanin_aynisi(self, joint):
-        """Eski sürücünün deterministik dizisi: her turda İKİ yön katlanır."""
+        """Eski sürücünün deterministik dizisi: her turda İKİ yön katlanır.
+
+        ÇAPA GÖÇÜ (P8B1-01): dizinin KURALI değişmedi, UZUNLUĞU değişti.
+        Yakınsama hedefi düğüm/SPR alanına taşınınca joint 5 turda değil
+        3 turda duruyor; katlama kuralı (her turda iki yön × REFINE_FACTOR)
+        aynen duruyor. Bu yüzden aşağıda hem dondurulmuş dizi hem de
+        diziden BAĞIMSIZ kural sınanır — kural ayağı, çapa yeniden
+        göçerse de ayakta kalır.
+
+        ÇAPA GÖÇÜ 2 (OH-D15-02, ÖH D24): kabul ölçütü ardışık tur onayına
+        bağlandı; joint 3 turda değil 4 turda duruyor ve dizi bir halka
+        uzuyor — (32, 24). KATLAMA KURALI YİNE DEĞİŞMEDİ ve asıl geriye
+        uyum iddiası odur (aşağıdaki döngü onu sınar). Not: onay turu
+        joint'e de uygulanır; joint ürün içinde ``refine_policy`` ile
+        seçilebildiği için ölçütün zayıf kaldığı bir yol bırakılmadı.
+        """
         grid = [(h['n_axial'], h['n_radial']) for h in joint.history]
-        assert grid == [(4, 3), (8, 6), (16, 12), (32, 24), (64, 48)]
+        # ÇAPA GÖÇÜ 3 (OH-D24-01): dizi bir halka KISALDI — (32, 24)
+        # düştü. Katlama KURALI yine değişmedi (aşağıdaki döngü onu
+        # sınar); yalnız lineerleştirilmiş hedef bir tur erken duruyor.
+        assert grid == [(4, 3), (8, 6), (16, 12)]
+        # Kural (uzunluktan bağımsız): her tur İKİ yönü de REFINE_FACTOR
+        # ile katlar — geriye uyumun asıl iddiası budur.
+        for onceki, sonraki in zip(grid, grid[1:]):
+            assert sonraki == (onceki[0] * REFINE_FACTOR,
+                               onceki[1] * REFINE_FACTOR)
         assert all(h['yon'] == 'eksenel+radyal' and h['karar'] is None
                    for h in joint.history[1:])
 
     def test_sayisal_sonuc_eski_taban_olcumuyle_ayni(self, joint):
-        """Politika parametresi eklenirken joint yolu SAYISAL değişmedi
-        (taban ölçümü 2026-08-15: final_rel_change = 0,0070723731)."""
+        """Joint yolu, YENİ taban ölçümüyle birebir aynı.
+
+        ÇAPA GÖÇÜ (P8B1-01): 15 Ağustos 2026 taban ölçümü
+        final_rel_change = 0,0070723731 idi ve Gauss hedefiyle alınmıştı
+        (5 tur sonunda). Ölçüt hükmü taşıyan düğüm/SPR alanına taşınınca
+        joint 3 turda duruyor ve aynı büyüklük 0,009023103038 ölçülüyor.
+        Sayı DONDURULDU; bant (rel=1e-6) eskisiyle AYNI genişlikte —
+        gevşetme yok, ölçüm noktası değişti.
+
+        ÇAPA GÖÇÜ 2 (OH-D15-02, ÖH D24): ölçüt ardışık tur onayına
+        bağlanınca joint 4. turu da atıyor ve aynı büyüklük
+        0,002536291093672609 ölçülüyor — eski çapa 0,009023103038 ARTIK
+        3. turun (16×12) rel_change'idir, yani dizi aynı, durak bir halka
+        ileride. Sayı yine DONDURULDU, bant AYNI genişlikte.
+
+        Kardeş kilit: aynı tur sayısında yön-ayrışık politika BİREBİR aynı
+        rel_change'i üretiyor (z'den bağımsız çözümde eksenel katlama
+        hükmü değiştirmiyor); ikisinin ayrışması politika sözleşmesinin
+        kırıldığını gösterir.
+        """
         assert joint.converged
-        assert joint.final_rel_change == pytest.approx(0.0070723731,
+        # ÇAPA GÖÇÜ 3 (OH-D24-01): hüküm ASME Ek 5-A lineerleştirmesine
+        # geçti; aynı büyüklük 0,001953959144170015 ölçülüyor ve dizi bir
+        # halka kısaldı. Sayı yine DONDURULDU, bant AYNI genişlikte.
+        assert joint.final_rel_change == pytest.approx(0.001953959144170015,
                                                        rel=1e-6)
+        # İlk turun göstergesi de dondurulmuştur (dizi kısaldı ama
+        # kuralın ürettiği ara değer kaybolmasın).
+        assert joint.history[1]['rel_change'] == pytest.approx(
+            3.869765072127124e-05, rel=1e-6)
+        assert joint.final_rel_change == pytest.approx(
+            _kos_lame().final_rel_change, rel=1e-9)
         assert joint.meta['refine_policy'] == REFINE_POLICY_JOINT
         assert joint.meta['n_solves'] == len(joint.history)
         assert 'birlikte-katlama' in joint.meta['_basis']
@@ -265,23 +427,88 @@ class TestJointGeriyeUyum:
 class TestSiviElemanTasarrufu:
 
     def test_ayni_toleransta_daha_az_elemanla_yakinsar(self, sivi_girdileri):
-        """Ölçüldü (tol=0,05, max_rounds=4): joint 16384 elemanda (6,7 s),
-        directional 4096 elemanda (0,6 s) yakınsıyor; tepe von Mises
-        636,6 MPa (joint 662,2 — fark %3,9, iki hüküm de kendi %5
-        toleransının içinde). Eşikler ölçümden; yakınsama ölçütü max(d)'ye
-        gevşetilirse eleman kilidi kırmızı verir (daha erken durur)."""
+        """Yön-ayrışık politika hükmü KAZANIYOR, birlikte katlama kazanamıyor.
+
+        ÖLÇÜLDÜ (1 Eylül 2026, tol=0,05): yön-ayrışık 8192 elemanda
+        (512×16) yakınsıyor (final_rel_change 0,0352); birlikte katlama
+        16384 elemanda (256×64) hâlâ %8,63 oynuyor ve YAKINSAMIYOR. Tepe
+        Gauss von Mises 645,1 MPa.
+
+        İKİ ÇAPA GÖÇÜ üst üste bindi, ikisi de bu düzeltme dalgasında
+        ölçülüp gerekçelendirildi:
+
+        1. P8B1-01 (fea-viz): yakınsama hedefi Gauss maksimumundan
+           düğüm/SPR maksimumuna taşındı — hükmü taşıyan sayı hangisiyse
+           yakınsama da onu izler. Birlikte katlamanın eski "16384'te
+           yakınsadı" hükmü Gauss alanı içindi ve düğüm alanı için
+           KAZANILMAMIŞTI; artık dürüstçe "yakınsamadı" diyor.
+        2. Dış yüzey eğrilik tabanının köşe düzeltme penceresi istasyon
+           aralığından GEOMETRİK ölçeğe alındı (bu dosyayla aynı dalga,
+           ``mesh_axisym``): eskiden inceltme pencereyi daraltıp tabanı
+           geri alıyordu. Köşe artık her çözünürlükte düzeltildiği için
+           yerel cidar biraz kalınlaşıyor (2,0053 → 2,0463 mm) ve
+           yön-ayrışık yol bir tur daha atıyor: 4096 (256×16) → 8192
+           (512×16).
+
+        Tasarruf oranı 4 kattan 2 kata indi ama İDDİA GÜÇLENDİ: eskiden
+        "aynı hükmü daha ucuza" idi, şimdi "birlikte katlama bu bütçede
+        hükmü hiç kazanamıyor".
+
+        ÇAPA GÖÇÜ 3 (OH-D15-02, ÖH D24) — BİR ALT İDDİA DÜŞTÜ, ANA İDDİA
+        DURUYOR. Kabul ölçütü ardışık tur onayına bağlanınca yön-ayrışık
+        yol bir tur daha atıyor: 8192 (512×16) → 16384 (512×32). Birlikte
+        katlama zaten 16384'te (256×64) ve HÂLÂ yakınsamıyor (%8,63).
+        Yani bu vakada ELEMAN TASARRUFU KALMADI (16384 ⟷ 16384, oran 1);
+        eski ``yeni*2 <= eski`` çapası bu yüzden DÜŞÜRÜLDÜ ve yerine eşit
+        bütçe kıyası kondu. Sınıfın ASIL iddiası — "aynı eleman bütçesinde
+        yön-ayrışık hükmü KAZANIYOR, birlikte katlama kazanamıyor" —
+        aynen duruyor ve eleman sayısı oranından daha güçlüdür.
+        """
+        # --- ÇAPA GÖÇÜ 4 (OH-D24-01, ÖH D25) --------------------------
+        # Hüküm büyüklüğü ASME BPVC VIII-2 Bölüm 5 / Ek 5-A
+        # lineerleştirmesine (max(1,5·P_m, P_L+P_b)) geçti; yakınsama
+        # ölçütü tek-kaynak sözleşmesi gereği onunla taşındı. Gerekçe
+        # ölçüldü: ham düğüm tepesi geometrik süreksizlikte yakınsamıyor
+        # (p ≈ 0,12; kanıt docs/scofield/raw/OH/D25/fea-cfd/a1/
+        # teshis_scl.json) ve ASME Tablo 5.6 onu plastik çökme hükmünden
+        # zaten dışlıyor. ÖLÇÜM: yön-ayrışık 512 elemanda (128×4),
+        # birlikte katlama 4096'da (128×32) hükmü kazanıyor.
+        # D24'te DÜŞEN ALT İDDİA GERİ GELDİ ve GÜÇLENDİ: eleman tasarrufu
+        # 1 kattan 8 KATA çıktı; "birlikte katlama hiç kazanamıyor"
+        # ayağı ise artık DOĞRU DEĞİL ve dürüstçe düşürüldü.
         yeni = _kos_sivi(sivi_girdileri, tol=0.05)
         assert yeni.converged
-        assert yeni.mesh.n_elems == 4096
-        assert (yeni.mesh.n_axial, yeni.mesh.n_radial) == (256, 16)
-        assert yeni.result.max_von_mises == pytest.approx(636.6e6, rel=0.02)
-        # Joint aynı toleransta 4 kat elemana ihtiyaç duyuyor (ölçüldü);
-        # bekçi eşiği en az 2 kat.
+        assert yeni.mesh.n_elems == 512
+        assert (yeni.mesh.n_axial, yeni.mesh.n_radial) == (128, 4)
+        # ÇAPA GÖÇÜ 5 (OH-D25-28 / OH-D24-01, ÖH D27 a1): iç kontur köşe
+        # tabanı ÜRÜN VARSAYILANI oldu; aynı motorun aynı turunda Gauss
+        # tepesi 551,9 → 564,33 MPa'ya taşındı (ölçüm: bu turun kendi
+        # koşumu; taban ölçüsü docs/scofield/raw/OH/D27/fea-cfd/a1/
+        # sonra_a1.json). Eleman bütçesi (512, 128×4) ve tolerans (rel
+        # 0,02) DEĞİŞMEDİ — yalnız çapa sayısı yeniden ölçüldü.
+        assert yeni.result.max_von_mises == pytest.approx(564.33e6, rel=0.02)
+        # ÇAPA GÖÇÜ (P8B1-01): joint bu vakada artık YAKINSAMIYOR. Eski
+        # ölçümde 16384 elemanda "yakınsadı" diyordu, ama o hüküm Gauss
+        # alanı için verilmişti; hükmü TAŞIYAN düğüm/SPR alanı orada hâlâ
+        # %8,55 oynuyor (ölçüldü). Yani eski "yakınsadı" kazanılmamış bir
+        # hükümdü ve bu bekçi onu kilitliyordu. İddia gevşemedi, GÜÇLENDİ:
+        # yön-ayrışık politika 4096 elemanda hükmü KAZANIYOR, birlikte
+        # katlama 4 kat elemanla (16384) aynı bütçede kazanamıyor.
         eski = _kos_sivi(sivi_girdileri, tol=0.05,
                          refine_policy=REFINE_POLICY_JOINT)
+        # ÇAPA GÖÇÜ 4 (yukarıdaki gerekçe): birlikte katlama bu vakada
+        # ARTIK yakınsıyor (4096 elemanda, %1,379) — D24'te eklenen
+        # "hiç kazanamıyor" ayağı dürüstçe DÜŞÜRÜLDÜ. Sınıfın ASIL
+        # iddiası (aynı toleransta yön-ayrışık DAHA AZ elemanla kazanır)
+        # geri geldi ve ölçülen oran 8 kat.
         assert eski.converged
-        assert eski.mesh.n_elems == 16384
-        assert yeni.mesh.n_elems * 2 <= eski.mesh.n_elems
+        assert eski.mesh.n_elems == 4096
+        assert (eski.mesh.n_axial, eski.mesh.n_radial) == (128, 32)
+        assert yeni.mesh.n_elems * 8 <= eski.mesh.n_elems, (
+            f'eleman tasarrufu ölçülen 8 katın altına düştü: '
+            f'{yeni.mesh.n_elems} ⟷ {eski.mesh.n_elems}')
+        # Aynı hüküm: iki politika da hükmü kazanıyor ve sayı yakın.
+        assert yeni.converged and eski.converged
 
 
 # ---------------------------------------------------------------------------

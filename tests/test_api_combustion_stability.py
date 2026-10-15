@@ -161,7 +161,9 @@ def test_notr_egri_orneklemesi_ve_bit_ayniligi(client):
     # olmalı — üç noktada tam eşitlik (approx değil).
     for k in (0, len(js) // 2, len(js) - 1):
         assert ratios[k] == chug_neutral_tau_ratio(js[k])
-    # Sayısal çapa: J = 0,20 noktası eğrinin üzerinde ve 0,8652 değerinde.
+    # Sayısal çapa: J = 0,20 noktası eğrinin üzerinde; belge üç basamak
+    # yazar (0,865), iddia ise tam değere rel=1e-9 ile bağlıdır. Yorumda
+    # eskiden belgede geçmeyen 0,8652 yazılıydı (ÖH D22 · P13B3-13).
     mid = min(range(len(js)), key=lambda i: abs(js[i] - DOC_J))
     assert ratios[mid] == pytest.approx(0.8651523967380913, rel=1e-9)
 
@@ -367,11 +369,34 @@ def test_bilinmeyen_mode_400(client):
     assert 'chug' in err and 'damping' in err
 
 
-def test_modsuz_govde_400(client):
-    """mode'un varsayılanı yok: boş JSON nesnesi 400 alır (sessiz seçim yok)."""
+def test_modsuz_govde_422(client):
+    """mode'un varsayılanı yok: boş JSON nesnesi 422 alır (sessiz seçim yok).
+
+    ÇEVRİLDİ — ÖH D30 / app-api-uc a3 · P16B3-35. Bekçi ``400`` diye
+    yazılmıştı ve KUSURU KORUYORDU: gönderilmeyen bir alan, "tanınmayan
+    değer" dalından geçtiği için yanıt *"Unknown mode **None**.
+    Available: …"* diyordu (ölçüm: ``docs/scofield/raw/OH/D30/app-api-uc/
+    a3/once.json`` K3, ``once3.json`` K17) — yani Python'un ``None``
+    sözcüğü ürün yüzüne basılıyor, gövdede ``error`` dışında tek alan
+    bulunmuyordu.
+
+    Bu ucun KENDİ sözleşmesinde eksik zorunlu girdinin karşılığı zaten
+    **422 + missing_fields**tir: aynı fonksiyonun on satır aşağısındaki
+    mod-içi kapısı (``incomplete_combustion_stability_input``) tam olarak
+    bunu yapıyor. Gönderilmemiş ``mode`` da eksik zorunlu girdidir.
+
+    Bekçinin ASIL İDDİASI korunuyor ve güçlendi: sessiz mod seçimi yok,
+    hüküm üretilmiyor, eksik alan artık ADIYLA yayımlanıyor. GÖNDERİLMİŞ
+    ama tanınmayan mod hâlâ 400'dür — ``test_bilinmeyen_mode_400`` onu
+    ölçüyor ve metni sözcüğü sözcüğüne korundu.
+    """
     r = client.post(URL, json={}, headers=LOCAL_HOST)
-    assert r.status_code == 400
-    assert 'mode' in r.get_json()['error'].lower()
+    assert r.status_code == 422
+    govde = r.get_json()
+    assert govde['missing_fields'] == ['mode']
+    assert sorted(govde['supported_modes']) == ['chug', 'damping']
+    assert 'None' not in r.get_data(as_text=True)
+    assert 'assessment' not in govde and 'nozzle' not in govde
 
 
 def test_sayi_olmayan_girdi_400(client):

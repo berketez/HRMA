@@ -31,9 +31,35 @@
 
     const ENDPOINT = '/api/comparative-analysis';
     const PANEL_ID = 'comparative';
+    // V3 SG-2 / SG-03 kalem tavanı aşım kodu — sunucu sözleşmesi
+    // hrma/security/limits.py::item_budget_error (413 gövdesinin `error`
+    // alanı; `maximum` ve `requested` sayıları aynı gövdededir).
+    const ITEM_BUDGET_CODE = 'item_budget_exceeded';
 
     // Snapshot deposu — sayfa ömrü boyunca yaşar (kalıcı depolama yok)
     const snapshots = [];
+
+    /* V3 SG-2 Bölüm B (12 Eki) — KALEM TAVANI AŞIMI İNSAN OKUR METİNLE.
+       ÖLÇÜLDÜ (SG-2A devri): 256'dan fazla anlık görüntüyle karşılaştırma
+       istendiğinde sunucu 413 `item_budget_exceeded` döner ve panel bu
+       makine kodunu ham basıyordu ("ERROR: item_budget_exceeded").
+       Sayılar sunucu gövdesinden okunur; sonlu sayı değilse null döner
+       ve eski yol (sunucunun kodu) aynen kalır — sayı uydurulmaz.
+       Metin textContent'e gider (innerHTML'e değil). */
+    function budgetMessage(data) {
+        if (!data || data.error !== ITEM_BUDGET_CODE) return null;
+        const max = data.maximum;
+        const req = data.requested;
+        if (typeof max !== 'number' || !isFinite(max)
+                || typeof req !== 'number' || !isFinite(req)) {
+            return null;
+        }
+        return U.tf('panel.comparative.itemBudgetExceeded',
+            { requested: req, maximum: max },
+            'Too many designs to compare: {requested} snapshots were sent; '
+            + 'the server accepts at most {maximum} in one comparison. '
+            + 'Nothing was computed.');
+    }
 
     // ------------------------------------------------------------------
     // Metrik çıkarımı — sayfa tipine dayanıklı (hybrid: results.motor,
@@ -45,6 +71,18 @@
         return (typeof v === 'number' && isFinite(v)) ? v : null;
     }
 
+    /* 'a.b.c' yolunu güvenli okur (analysis_dock.js:1176 `deepGet`
+       deseni; o yardımcı dışa AÇILMAMIŞ olduğu için burada yereldir). */
+    function yolOku(obj, path) {
+        let cur = obj;
+        const parts = String(path).split('.');
+        for (let i = 0; i < parts.length; i++) {
+            if (cur == null || typeof cur !== 'object') return undefined;
+            cur = cur[parts[i]];
+        }
+        return cur;
+    }
+
     function currentMetrics() {
         const r = window.currentResults;
         if (!r) return null;
@@ -54,18 +92,100 @@
         // ayrı anahtarlarda); eskiden karşılaştırmaya itki ve toplam impuls
         // hiç girmiyordu. Merkezi okuyucu motor tipine göre çözer.
         const thrust = num(U.readThrust(r));
-        const isp = num(m.isp);
+        // ÖH D15 / P11B5-04 — Isp KATIDA VE SIVIDA HİÇ OKUNMUYORDU.
+        // ÖLÇÜLDÜ (once.json, gerçek /calculate_solid iki konfigürasyon):
+        // `m.isp` katı yanıtta YOK (`specific_impulse` = `isp_sea_level`
+        // = 242,49 / 253,98 var), sıvıda da yok (`isp_sea_level` var).
+        // Panel itki ve yanma süresi için merkezî tip-duyarlı okuyucuları
+        // kullanırken Isp'yi tek anahtarla okuyordu; sonuçta katı/sıvı
+        // sayfalarında Isp satırı HİÇ çizilmiyor, `BEST ISP` kalıcı olarak
+        // "—" kalıyordu ve daha YÜKSEK Isp'li tasarım (253,98 s) elenip
+        // daha düşüğü (242,49 s) yalnız itkiyle öne çıkıyordu.
+        //
+        // Üç tipin de DENİZ SEVİYESİ Isp'si karşılaştırılır (ölçüldü:
+        // hibrit `isp` === `sea_level_isp`; katı `specific_impulse` ===
+        // `isp_sea_level`; sıvı `isp_sea_level`) — vakum Isp'si KARIŞTIRILMAZ.
+        // Hangi anahtardan okunduğu `isp_basis` ile beyan edilir (uç bu
+        // metni sayısal metrik saymaz, sıralamaya girmez). Anahtarların
+        // hiçbiri yoksa alan HİÇ gönderilmez: uydurma yok, "—" dürüsttür.
+        const ISP_KEYS = {
+            hybrid: ['isp', 'sea_level_isp'],
+            solid: ['isp_sea_level', 'specific_impulse'],
+            liquid: ['isp_sea_level', 'specific_impulse'],
+        };
+        let ispKey = null;
+        let isp = null;
+        const mt = (window.AnalysisDock && window.AnalysisDock.getMotorType)
+            ? window.AnalysisDock.getMotorType() : null;
+        // Tip çözülemezse (sayfa bağlamı yok) ÜÇ listenin birleşimi denenir:
+        // hepsi DENİZ SEVİYESİ Isp'sidir, tanım karışmaz. Vakum anahtarları
+        // (`isp_vacuum`, `vacuum_isp`) listeye ASLA girmez.
+        // Önce sayfanın tipi denenir; o listede karşılık YOKSA üç tipin
+        // birleşimine düşülür (hepsi deniz seviyesi Isp'si — tanım karışmaz).
+        // Tip yanlış raporlansa bile Isp sessizce kaybolmaz.
+        (ISP_KEYS[mt] || []).concat(ISP_KEYS.hybrid, ISP_KEYS.solid)
+            .forEach(function (k) {
+                if (isp === null && num(m[k]) !== null) {
+                    isp = num(m[k]); ispKey = k;
+                }
+            });
         let totalImpulse = num(m.total_impulse);
         if (totalImpulse == null && thrust != null) {
             const burnTime = num(U.readBurnTime(r));
             if (burnTime != null) totalImpulse = thrust * burnTime;
         }
-        const totalMass = (num(m.total_mass) != null)
-            ? num(m.total_mass) : num(m.total_motor_mass);
+        // ÖH D30 · P11B5-18 — `BEST EFFICIENCY` ÜÇ TİPTE DE ÖLÜYDÜ.
+        // ÖLÇÜLDÜ (a2/once.json: P11B5-18_ust_duzey_kutle_{hibrit,kati,sivi}
+        // = 0/0/0, gerçek üç-motor /calculate gövdelerinde): panel kütleyi
+        // `m.total_mass` / `m.total_motor_mass` diye ARIYORDU, ama hiçbir
+        // motor tipi bu iki adı üst düzeyde yayımlamıyor. Kütle alanı HİÇ
+        // dolmadığı için uç `best_efficiency = isp / total_mass` oranını
+        // (app.py:12121) hiçbir zaman hesaplayamıyor ve kart üç sayfada da
+        // kalıcı '—' kalıyordu.
+        //
+        // Gerçek adlar (aynı çapa gövdelerinden okundu) ve KAPSAMLARI:
+        //   hibrit : design_summary.key_dimensions.total_mass_kg  → YÜKLÜ
+        //            kalkış kütlesi (kuru + yüklü oksitleyici + yüklü yakıt;
+        //            ucun kendi `total_mass_basis` beyanı)
+        //   katı   : design_summary.masses.total_mass_kg          → YÜKLÜ
+        //   sıvı   : engine_mass_estimate                         → KURU
+        //            motor kütlesi (component_masses.total_dry_mass;
+        //            itici ve tanklar DAHİL DEĞİL)
+        // Kapsamlar aynı DEĞİL. Isp/kütle oranını karışık kapsamlı iki
+        // konfigürasyon arasında kurmak elmayla armudu bölmektir; bu yüzden
+        // kütle `total_mass_scope` kapsam kimliğiyle BİRLİKTE taşınır ve
+        // karşılaştırmaya yalnız kapsamlar EŞİTKEN gönderilir (runComparison).
+        // Ad yoksa alan hiç gönderilmez — sayı uydurulmaz (fail-closed).
+        const MASS_SOURCES = {
+            hybrid: [['design_summary.key_dimensions.total_mass_kg',
+                      'loaded_liftoff']],
+            solid: [['design_summary.masses.total_mass_kg', 'loaded_liftoff']],
+            liquid: [['engine_mass_estimate', 'engine_dry'],
+                     ['component_sizing.component_masses.total_dry_mass',
+                      'engine_dry']],
+        };
+        let totalMass = num(m.total_mass);
+        let massScope = (totalMass != null) ? 'unspecified' : null;
+        if (totalMass == null) {
+            totalMass = num(m.total_motor_mass);
+            if (totalMass != null) massScope = 'unspecified';
+        }
+        if (totalMass == null) {
+            const adaylar = (MASS_SOURCES[mt] || [])
+                .concat(MASS_SOURCES.hybrid, MASS_SOURCES.solid,
+                        MASS_SOURCES.liquid);
+            for (let i = 0; i < adaylar.length && totalMass == null; i++) {
+                const v = num(yolOku(m, adaylar[i][0]));
+                if (v != null) { totalMass = v; massScope = adaylar[i][1]; }
+            }
+        }
         if (thrust != null) out.thrust = thrust;
-        if (isp != null) out.isp = isp;
+        if (isp != null) { out.isp = isp; out.isp_basis = ispKey; }
         if (totalImpulse != null) out.total_impulse = totalImpulse;
-        if (totalMass != null) out.total_mass = totalMass;
+        if (totalMass != null) {
+            out.total_mass = totalMass;
+            out.total_mass_scope = massScope;
+        }
         return Object.keys(out).length ? out : null;
     }
 
@@ -259,11 +379,13 @@
             }
             const arrow = r.delta > 0 ? '▲' : (r.delta < 0 ? '▼' : '=');
             const relTxt = r.changed
-                ? (arrow + ' ' + U.fmt(r.rel * 100, 3) + ' %')
+                ? (arrow + ' ' + ((window.I18N && window.I18N.percent)
+                    ? window.I18N.percent(r.rel * 100, 3)
+                    : (U.fmt(r.rel * 100, 3) + ' %')))
                 : '—';
             const relStyle = r.changed
                 ? 'color:var(--hd-ink-strong, #eaf7fb);'
-                : 'color:var(--hd-ink-faint, #46606d);';
+                : 'color:var(--hd-ink-faint, #6a8491);';
             const relTitle = r.changed ? '' : ' title="' + escapeHtml(epsTip) + '"';
             return `<tr data-cmp-metric="${escapeHtml(r.metric)}"
                 data-cmp-changed="${r.changed ? '1' : '0'}">
@@ -317,6 +439,10 @@
         out.innerHTML = overlayTableHtml(a, b);
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(out);
     }
+
+    //: Son karşılaştırmada kütle kapsamları karışık mıydı (P11B5-18)?
+    //: `BEST EFFICIENCY` kartının gerekçe metni buna bakar.
+    let kutleKapsamiKarisik = false;
 
     function snapshotRow(snap, idx) {
         const parts = [];
@@ -445,8 +571,29 @@
                 'At least 2 snapshots are required for comparison.');
             return;
         }
+        // ÖH D30 · P11B5-18 — KAPSAM KAPISI (fail-closed).
+        // `best_efficiency` ucun kendi tanımıyla Isp / total_mass'tır.
+        // Kütlenin KAPSAMI motor tipine göre değişiyor (hibrit/katı: yüklü
+        // kalkış kütlesi; sıvı: kuru motor kütlesi) — karışık kapsamlı iki
+        // konfigürasyonda bu oran karşılaştırılabilir bir sayı DEĞİLDİR.
+        // Kapsamlar eşit değilse kütle hiç gönderilmez: uç oranı üretmez,
+        // kart '—' kalır ve nedeni ekranda yazar. Sayı uydurulmaz.
+        const kapsamlar = snapshots
+            .map(function (s) { return s.metrics.total_mass_scope; })
+            .filter(function (k) { return k != null; });
+        const kapsamKumesi = kapsamlar.filter(function (k, i) {
+            return kapsamlar.indexOf(k) === i;
+        });
+        kutleKapsamiKarisik = (kapsamKumesi.length > 1);
         const motorConfigs = {};
-        snapshots.forEach(function (s) { motorConfigs[s.name] = s.metrics; });
+        snapshots.forEach(function (s) {
+            const kopya = {};
+            Object.keys(s.metrics).forEach(function (k) {
+                if (kutleKapsamiKarisik && k === 'total_mass') return;
+                kopya[k] = s.metrics[k];
+            });
+            motorConfigs[s.name] = kopya;
+        });
 
         btn.disabled = true;
         root.style.display = 'none';
@@ -461,7 +608,8 @@
             try { data = await resp.json(); } catch (e) { data = null; }
             if (!resp.ok || !data || data.status === 'error') {
                 // 400 gövdesi net mesaj taşır — panelde okunur gösterilir
-                throw new Error((data && data.error) || ('HTTP ' + resp.status));
+                throw new Error(budgetMessage(data)
+                    || (data && data.error) || ('HTTP ' + resp.status));
             }
             U.purgePlots(root);   // eski grafiğin resize dinleyicisi sızmasın
             root.innerHTML = '';
@@ -503,10 +651,22 @@
             + U.statCard(T('panel.comparative.bestEfficiency', 'BEST EFFICIENCY'),
                 escapeHtml(analysis.best_efficiency || '—'), '',
                 analysis.best_efficiency ? 'ok' : 'dim',
-                T('panel.comparative.bestEfficiencyTip',
-                  'Highest Isp / total mass ratio (needs both metrics)'))
+                kutleKapsamiKarisik
+                    ? T('panel.comparative.bestEfficiencyScopeTip',
+                        'Not computed: the stored configurations report total '
+                        + 'mass on different scopes (loaded lift-off mass for '
+                        + 'hybrid/solid, dry engine mass for liquid), so the '
+                        + 'Isp / mass ratio would not be comparable between '
+                        + 'them. Compare configurations of the same motor type.')
+                    : T('panel.comparative.bestEfficiencyTip',
+                        'Highest Isp / total mass ratio (needs both metrics)'))
+            // ÖH D25 / P11B2-12: `|| 0` yedeği uç sayımı yayımlamadığında
+            // "CONFIGS 0" basıyordu — komşu iki kart ('—' + 'dim') zaten
+            // fail-closed'dı; üçü de aynı sözleşmede.
             + U.statCard(T('panel.comparative.configs', 'CONFIGS'),
-                String(analysis.total_configs || 0), '', 'info',
+                Number.isFinite(analysis.total_configs)
+                    ? String(analysis.total_configs) : '—', '',
+                Number.isFinite(analysis.total_configs) ? 'info' : 'dim',
                 T('panel.comparative.configsTip', 'Number of configurations compared'))
             + '</div>';
     }
@@ -524,6 +684,15 @@
         const plot = document.createElement('div');
         wrap.appendChild(plot);
         root.appendChild(wrap);
+
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (X_basis / X_source / X_status / X_model) okuyup ekrana DÜZ
+        // METİN döküyor, hükmünü (hesaplandı / sizin girdiniz / varsayım
+        // / modellenmedi) hiç vermiyordu — pano sınıflandırıcısı ölü
+        // katmandı. Defter ucun KENDİ beyanını ortak sınıflandırıcıdan
+        // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
+        U.source.ledgerInto(root, data && data.analysis, { deep: true });
 
         const fig = parseFigure(data && data.plot);
         if (!fig) {

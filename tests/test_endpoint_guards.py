@@ -5,8 +5,11 @@ Kapsam (test_client ile — sunucuya port BAĞLANMAZ):
   1. /api/kinetic-analysis, /api/cfd-analysis, /api/professional-analysis
      -> 501 'unavailable' bekçisi (kinetik çağrısı tek-worker masaüstünde
      uygulamayı saatlerce kilitleyebiliyordu; CFD çözücüsü ıraksıyordu).
-  2. /api/advanced-analysis 'heat_transfer' tipi artık 200 döner
-     (eski kod var olmayan analyze_chamber_thermal'ı çağırıp 500 veriyordu).
+  2. /api/advanced-analysis 'heat_transfer' tipi GERÇEK motor verisiyle 200
+     döner (eski kod var olmayan analyze_chamber_thermal'ı çağırıp 500
+     veriyordu); girdisiz istekte ise fail-closed olmalıdır — ÖH Faz B / B3
+     ile taşınan bekçi (defter P13B2-02, P4B1-01) bugün xfail(strict) borç
+     imiyle duruyor.
   3. /calculate yanıtı: motor.gamma + motor.molecular_weight üst seviyede;
      render edilmeyen plots.heat_transfer / plots.structural_analysis
      anahtarları YOK; motor içi heat/structural sonuçları KORUNUR
@@ -25,6 +28,15 @@ GUARDED_ENDPOINTS = [
     '/api/cfd-analysis',
     '/api/professional-analysis',
 ]
+
+#: ``/api/advanced-analysis``'in ``heat_transfer`` dalının ürün tarafında
+#: VARSAYILANLA doldurduğu girdiler (``hrma/app.py:4730-4735``). Liste testin
+#: kendi ölçümüdür — ürün sabitini ithal ETMEZ, çünkü sınanan şey tam da
+#: ürünün bu alanları uydurma hakkıdır.
+ADVANCED_HEAT_INPUTS = (
+    'chamber_pressure', 'chamber_temperature', 'chamber_diameter',
+    'chamber_length', 'burn_time', 'mdot_total',
+)
 
 
 @pytest.fixture(scope='module')
@@ -55,6 +67,20 @@ class TestGuards501:
 
 class TestAdvancedAnalysisHeatTransfer:
     def test_heat_transfer_type_returns_200(self, client):
+        """SAĞLIKLI YOL — gövde ÖH D16 / OH-Z3-02 ile GÜNCELLENDİ.
+
+        Eski gövde ``wall_thickness`` GÖNDERMİYORDU ve 200 bekliyordu; uç
+        o alanı ``data.get('wall_thickness', 0.005)`` ile UYDURUYORDU
+        (ölçüldü, ``docs/scofield/raw/OH/D16/yapisal-sistem/a1/once.json``
+        K8: cidar gönderilen ve gönderilmeyen gövde BİREBİR aynı yanıtı
+        veriyor, ``design_parameters.wall_thickness = 5.0`` mm). Kardeş uç
+        ``/analyze_thermal_safety`` aynı gövdeyi zaten 422 ile reddediyordu.
+        Bu iddia, güncellenmeseydi, F4-1 varsayılanını ŞART KOŞAN bir bekçi
+        olurdu — hemen altındaki ``test_empty_motor_data_is_rejected_
+        fail_closed``ın kaldırdığı kilidin aynısı. İddianın KENDİSİ
+        (sağlıklı gövde -> 200 + gerçek analiz sözleşmesi) korunur; yalnız
+        cidar artık AÇIKÇA gönderilir.
+        """
         r = client.post('/api/advanced-analysis', json={
             'motor_data': {
                 'chamber_pressure': 20.0, 'chamber_temperature': 3200.0,
@@ -63,6 +89,7 @@ class TestAdvancedAnalysisHeatTransfer:
             },
             'analysis_types': ['heat_transfer'],
             'material_type': 'steel_4130',
+            'wall_thickness': 0.005,
         })
         assert r.status_code == 200
         j = r.get_json()
@@ -77,11 +104,73 @@ class TestAdvancedAnalysisHeatTransfer:
             assert key in ha, f"heat_analysis missing {key}"
         assert ha['heat_transfer_coefficients']['gas_side'] > 0
 
-    def test_heat_transfer_with_empty_motor_data_uses_defaults(self, client):
-        r = client.post('/api/advanced-analysis', json={
-            'motor_data': {}, 'analysis_types': ['heat_transfer']})
-        assert r.status_code == 200
-        assert r.get_json()['status'] == 'success'
+    # Z3 onarımı (2026-08-27): boş motor_data 422 + missing_fields; sağlıklı
+    # yol bit-aynı (14.661.635,924841596 çapası korunuyor) — im düştü.
+    @pytest.mark.parametrize('body', [
+        {'motor_data': {}, 'analysis_types': ['heat_transfer']},
+        {'analysis_types': ['heat_transfer']},
+    ], ids=['bos_motor_data', 'motor_data_anahtari_yok'])
+    def test_empty_motor_data_is_rejected_fail_closed(self, client, body):
+        """Girdisiz ısı transferi analizi ÜRETİLMEZ (fail-closed).
+
+        **Bu bekçi TAŞINDI (ÖH Faz B, adım B3 — Tip-T).**
+
+        Eski hâli ``test_heat_transfer_with_empty_motor_data_uses_defaults``
+        idi ve gövdesinin TAMAMI iki iddiaydı::
+
+            assert r.status_code == 200
+            assert r.get_json()['status'] == 'success'
+
+        Yani boş ``motor_data`` ile ÇALIŞMAYI ŞART KOŞUYORDU. Bugün ölçülen
+        (27 Ağu 2026, HEAD 344714d) davranış:
+
+        =========================  ====  ==============================
+        gövde                      HTTP  ``heat_flux`` [W/m²]
+        =========================  ====  ==============================
+        ``motor_data: {}``         200   **13 027 380,540100738**
+        ``motor_data`` yok         200   **13 027 380,540100738**
+        gerçek motor (Tc 3200 K)   200   14 661 635,924841596
+        =========================  ====  ==============================
+
+        Uydurulan sayı ``app.py:4730-4735``'in varsayılanlarından doğuyor
+        (Pc 20 bar, Tc 3000 K, Ø 0,1 m, L 0,5 m, t_b 10 s, ṁ 1,0 kg/s) ve
+        ``heat_analysis`` içinde bunu bildiren TEK BİR beyan alanı yok
+        (ölçüldü: ``default``/``declared``/``assumed`` içeren anahtar 0).
+        ``risk_level`` yine ``HIGH`` basılıyor: kullanıcının vermediği bir
+        motor için güvenlik hükmü.
+
+        Savcı ölçümü (P13 §2.4-c) rotanın ürün tüketicisinin **0** olduğunu
+        gösterdi — yani bu rotanın davranışını tanımlayan tek merci test
+        süiti. Eski iddia o merciyi fail-open'ı ŞART KOŞACAK biçimde
+        kullanıyordu; kusuru kilitleyen bekçi olduğu için SİLİNDİ.
+
+        Beklenen davranış deponun kendi sağlıklı deseni: ``/calculate_solid``
+        (``app.py:3701-3722``) ve ``/api/thermal-protection`` eksik girdide
+        4xx + ``missing_fields`` ile eksik alanı ADIYLA söylüyor.
+
+        Defter: P13B2-02 (yüksek) · P4B1-01 (kritik) kardeş ucu.
+        """
+        r = client.post('/api/advanced-analysis', json=body)
+
+        assert 400 <= r.status_code < 500, (
+            'girdisiz istek reddedilmeli; alınan HTTP '
+            f'{r.status_code}, gövde {r.get_data(as_text=True)[:200]}')
+        j = r.get_json()
+        assert j.get('status') != 'success'
+        assert j.get('error'), 'ret makine-okur bir "error" kodu taşımalı'
+
+        missing = j.get('missing_fields')
+        assert missing, ('eksik girdiler ADIYLA bildirilmeli '
+                         '(/calculate_solid deseni)')
+        assert all(isinstance(ad, str) for ad in missing)
+        assert set(missing) & (set(ADVANCED_HEAT_INPUTS) | {'motor_data'}), (
+            f'bildirilen eksik alanlar ürünün girdi adlarından olmalı: '
+            f'{missing}')
+
+        # Reddedilen istekten hüküm de grafik de çıkmaz.
+        results = j.get('results') or {}
+        assert 'heat_analysis' not in results
+        assert 'heat_transfer_plot' not in results
 
 
 class TestCalculateResponseShape:

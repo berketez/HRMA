@@ -81,7 +81,9 @@ def _verify_sf(wall_thickness=0.005, **ezme):
 
     ``ezme`` BASE alanlarını ezer (ör. ``chamber_pressure=40``).
     """
-    kw = dict(BASE, **ezme)
+    # 10. tur (dört koşul): tablo steel_4130 ile ölçüldü; motor varsayılanı
+    # değişince (ana model kararı) ölçüm koşulu açıkça sabitlenir.
+    kw = dict({'chamber_material': 'steel_4130'}, **dict(BASE, **ezme))
     ca = (HybridRocketEngine(**kw, wall_thickness=wall_thickness)
           .calculate()['structural_analysis']['chamber_analysis'])
     assert ca['design_mode'] == 'verify', ca['design_mode']
@@ -311,14 +313,37 @@ def test_nozzle_material_over_temp_is_reported_as_critical():
 # ---------------------------------------------------------------------------
 
 def test_parabolic_nozzle_is_a_distinct_solution(base_result):
-    """Parabolik kontur konik ve çandan AYRI bir lambda verimi kullanır."""
+    """Parabolik seçenek ÇÖZÜCÜDE gerçekten ayrı bir çözüm üretir.
+
+    ÖH D21 / P15B1-04 — ÇEVRİLDİ. Eski satır ``par['isp'] != bell['isp']``
+    diyordu ve bu fark YALNIZCA katalog sabitlerinden geliyordu
+    (LAMBDA_PARABOLIC = 0,975 ⟷ LAMBDA_BELL = 0,985). O sabitler konturun
+    KENDİ açısıyla çelişiyordu: ``_design_parabolic_nozzle`` D16/B4-07'den
+    beri çıkış açısını bell dalının kullandığı AYNI Rao %80 tablosundan alır
+    (ölçüldü, eps=8: iki konturda da theta_e = 14,0°, theta_n = 23,5°), yani
+    diverjans verimi geometrik olarak ÖZDEŞTİR ve lüle paneli ikisine zaten
+    aynı λ'yı veriyordu. Manşetin farklı sayı basması iki-kaynak artefaktıydı.
+    Bekçi artık farkı GEOMETRİDE arar (fark orada gerçekten var) ve λ
+    özdeşliğini bilerek kilitler.
+    """
     par = HybridRocketEngine(**dict(BASE, nozzle_type='parabolic')).calculate()
     bell = HybridRocketEngine(**dict(BASE, nozzle_type='bell')).calculate()
     assert par['nozzle_angles']['nozzle_type'] == 'parabolic'
-    # Konik ve çandan farklı bir Isp vermeli; aynıysa üçüncü seçenek
-    # arayüzde var ama çözücüde yok demektir (bu depoda görülen hata sınıfı).
+    # Konikten AYRI kalmalı (konik 15° yarı açı -> farklı λ, farklı Isp).
     assert par['isp'] != base_result['isp']
-    assert par['isp'] != bell['isp']
+    # Çandan ayrım KONTURDA: parabolik yaklaşım 15° konik boyun %85'i,
+    # bell kendi Rao boyudur — uzunluklar ayrışmalı.
+    par_kontur = par['nozzle_contour']['divergent']
+    bell_kontur = bell['nozzle_contour']['divergent']
+    assert par_kontur['type'] == 'parabolic'
+    assert bell_kontur['type'] != 'parabolic'
+    assert par_kontur['length'] != pytest.approx(bell_kontur['length'],
+                                                 rel=1e-9)
+    # ...ve diverjans verimi ÖZDEŞ olmalı: aynı çıkış açısı, aynı λ.
+    assert par_kontur['exit_angle'] == pytest.approx(
+        bell_kontur['exit_angle'], rel=1e-12)
+    assert par['nozzle_angles']['divergence_efficiency'] == pytest.approx(
+        bell['nozzle_angles']['divergence_efficiency'], rel=1e-12)
 
 
 # ---------------------------------------------------------------------------

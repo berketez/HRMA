@@ -229,6 +229,45 @@ class TestH4_2BirimSozlesmesi:
 # H4-1 — grain yalnız gerçekten varsa çizilir
 # ---------------------------------------------------------------------------
 
+#: Enjektör panelinin TASARLANAN plaka kalınlığı [mm] — ÖH D32 / OH-D31-16.
+#: Ürün yolunda bu sayı kullanıcının enjektör panelinden gelir; HRMA onu
+#: TÜRETMEZ (``injector_plate_structural`` kalınlığı çağırandan alır ve
+#: ``plate_thickness_earned`` ile künyeler).
+_D32_PANEL_PLAKA_MM = 6.0
+
+
+def _d32_panel_plakali(sonuc, t_mm=_D32_PANEL_PLAKA_MM):
+    """Sonuca enjektör panelinin tasarlanan plakasını ekler.
+
+    ÖH D32 / OH-D31-16 — ÇEVRİLEN BEKÇİ GEREKÇESİ. Aşağıdaki bekçiler
+    STEP paketinde enjektör parçasının BULUNMASINI şart koşuyordu. O şart,
+    plaka kalınlığının kamaranın ÖN KAPAĞINDAN (ya da bir üreteç
+    sabitinden) türetildiği dönemden kalmaydı. ÖH D15 / P9B1-13 o ikameyi
+    ölçüp reddetti (mesh/gerçek plaka oranı 10,0x) ve kardeş üretici
+    ``cad_visualization`` plakayı ancak kalınlık YAYIMLANMIŞSA çiziyor.
+
+    Ölçüldü (taban dd1dcddc): bu dosyanın ham çözücü fikstürleri plaka
+    kalınlığı yayımlamıyor, dolayısıyla STL plakayı çizmiyordu; STEP ise
+    çiziyordu. Aynı motorun iki katı dosyası iki farklı makineyi
+    anlatıyordu ve ``/api/export-complete-zip`` paketi 422 ile
+    reddediyordu. D32'de STEP de aynı çözümleyiciye bağlandı.
+
+    Bekçilerin ASIL niyeti (gerçek çözüm verisiyle STEP üretimi kırılmaz;
+    üretilen parçalar geçerli ve dolu) KORUNUR: fikstür artık kalınlığın
+    KAZANILDIĞI koşuyu kurar. Kalınlığın YOKLUĞUNDA parçanın çizilmediği
+    ``tests/test_d32_ihracat_a1.py``de ayrıca sınanır.
+    """
+    r = dict(sonuc)
+    r['injector_results'] = {
+        'plate_structural': {
+            'status': 'analyzed',
+            'plate_thickness_mm': float(t_mm),
+            'material': 'stainless_steel_316',
+        },
+    }
+    return r
+
+
 class TestH4_1SiviMotordaGrainYok:
 
     def test_liquid_result_has_no_grain(self, liquid_results):
@@ -291,7 +330,8 @@ class TestH4_1SiviMotordaGrainYok:
                                                          tmp_path):
         pytest.importorskip('build123d')
         from hrma.export.step_export import generate_step_assembly
-        files = _quiet(generate_step_assembly, liquid_results,
+        files = _quiet(generate_step_assembly,
+                       _d32_panel_plakali(liquid_results),
                        out_dir=str(tmp_path / 'step'), motor_type='liquid')
         assert 'fuel_grain' not in files, (
             'sıvı motor STEP montajında yakıt grain parçası var: '
@@ -378,7 +418,8 @@ class TestUcDosyaAyniMotor:
         """
         build123d = pytest.importorskip('build123d')
         pytest.importorskip('ezdxf')
-        from hrma.export.cad_visualization import _chamber_wall_thickness_m
+        from hrma.export.cad_visualization import (
+            _chamber_wall_thickness_m, _front_cap_design)
         from hrma.export.step_export import generate_step_assembly
 
         results = solid_results if kind == 'solid' else liquid_results
@@ -392,7 +433,23 @@ class TestUcDosyaAyniMotor:
         md, _report = normalise_export_geometry(results)
         wall_mm = _chamber_wall_thickness_m(md)[0] * 1000.0
         rc_mm = md['chamber_diameter'] * 1000.0 / 2.0
-        cap_mm = min(max(1.6 * wall_mm, 8.0), 0.3 * rc_mm + 8.0)
+        # ÖH D16 / OH-Z2-03 — BEKÇİ ÜRÜNÜN KENDİ ÇÖZÜMLEYİCİSİNİ ÇAĞIRIR.
+        # Buraya eskiden üreteç yedek formülünün KOPYASI yazılıydı
+        # (``min(max(1.6*wall, 8.0), 0.3*rc + 8.0)``). Kopya iki şeyi birden
+        # bozuyordu: (a) sayısal sabitler ikinci kez tanımlanıyordu
+        # (CLAUDE.md kural 11; tek kaynak cad_visualization.CAP_FALLBACK_*),
+        # (b) daha kötüsü, kopya yalnız YEDEK dalı tanıyordu — katı/sıvı bir
+        # gün ``structural_analysis.end_cap_analysis`` yayımlarsa ürün
+        # doğru kapağı (yapısal düz kapak kalınlığını) çizer, bekçi ise hâlâ
+        # yedek formülü bekleyip KUSURSUZ ÜRÜNDE kırmızıya dönerdi. Artık
+        # ölçülen şey ürünün hükmü değil, DXF ⟷ STEP arasındaki eksenel
+        # farkın kapak kalınlığına EŞİT olmasıdır; kapağın nereden geldiği
+        # step_export'un çağırdığı tek çözümleyicinin işidir (aynı imzayla,
+        # step_export.py:509).
+        cap_mm = _front_cap_design(
+            md, wall_mm=wall_mm, bore_radius_mm=rc_mm)['thickness_mm']
+        assert cap_mm is not None, (
+            f'{kind}: kapak kalınlığı çözülemedi — STEP zaten üretilemezdi')
         assert step_x - dxf_x == pytest.approx(cap_mm, abs=1e-6), (
             f'{kind}: DXF {dxf_x:.2f} mm, STEP {step_x:.2f} mm; fark '
             f'{step_x - dxf_x:.3f} mm, baş kapak {cap_mm:.3f} mm olmalıydı')
@@ -458,9 +515,21 @@ class TestH4_3RaporPdfBirimi:
 
     def test_uniform_input_still_gets_a_single_line(self, generator,
                                                     hybrid_results):
-        """Tüm alanlar aynı yoldan çözülüyorsa tek satırlık beyan kalır."""
+        """Tüm alanlar aynı yoldan çözülüyorsa tek satırlık beyan kalır.
+
+        ÖH D15 / harita H1a ile GÜNCELLENDİ. Hibrit motor sonucu artık
+        ``length_units='m'`` BEYAN ediyor (5 m'yi aşan kamara boyunun
+        "demek ki mm" diye 1000'e bölünmesini bu beyan durduruyor), bu
+        yüzden alan başına çözüm 'si' (büyüklükten çıkarım) yerine
+        'declared:m' yolunu seçiyor ve satır bunu söylüyor. İddia
+        DEĞİŞMEDİ — tek yoldan çözülen motorda hâlâ TEK satır basılıyor;
+        değişen, o satırın artık tahmin değil beyan bildirmesi.
+        Beklenen metin tek kaynaktan okunur ki üçüncü bir kopya doğmasın.
+        """
         note = generator._length_unit_note(hybrid_results)
-        assert note == 'mm (input interpreted as m)', note
+        assert hybrid_results.get('length_units') == 'm'
+        assert note == generator._UNIFORM_UNIT_NOTES['declared:m'], note
+        assert 'declared by the caller' in note
 
     def test_raw_liquid_throat_is_still_right_without_motor_geometry(
             self, generator, liquid_results):
@@ -509,8 +578,17 @@ class TestH4_7KutleOtoritesi:
         assert rec['cad_total_kg'] == pytest.approx(cad_bd['total_dry_mass'])
         assert rec['nozzle_authoritative_kg'] == pytest.approx(
             cad_bd['nozzle_mass'])
-        # Ölçülen ayrışma: %20'den büyük, sıfır değil
-        assert rec['difference_percent'] > 1.0
+        # V3 yapi-sf (7 Eki 2026) — BEKLENTİ ÇEVİRİSİ. Eski satır
+        # ``difference_percent > 1.0`` idi ("ölçülen ayrışma %20'den büyük"):
+        # o ayrışmanın büyük kısmı yapısal toplamdaki %30 kuralı lüleydi
+        # (düzeltilen kusur; lüle artık iki toplamda da çizilen katının AYNI
+        # sayısı). Kalan fark YALNIZ kapsam farkıdır: yapısal toplam uç
+        # kapaklarını, CAD toplamı enjektörü içerir. Kâhin: iki bağımsız
+        # çıktının farkı (kapak modeli ⟷ enjektör tasarımı); kamara kabuğu
+        # iki tarafta aynı formüldür.
+        assert rec['difference_kg'] == pytest.approx(
+            abs(struct['end_caps_weight'] - cad_bd['injector_mass']))
+        assert rec['difference_percent'] > 0.0
 
     def test_eng_file_carries_the_discrepancy(self, hybrid_with_cad):
         from hrma.export.openrocket_integration import OpenRocketExporter

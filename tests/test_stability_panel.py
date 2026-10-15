@@ -246,11 +246,18 @@ def chug_yaniti(dp, tau, tau_c, tau_f=None):
     return {
         'status': 'ok', 'mode': 'chug', 'assessment': assessment,
         'neutral_curve': {'dp_ratio_j': j_list, 'tau_over_tau_c': neutral},
+        # ÖH D27 / P11B4-28 — TEST İKİZİ UCUN ŞEKLİNE ÇEKİLDİ.
+        # Bu yardımcı `skipped_points`i ÜST DÜZEYE koyuyordu; uç onu
+        # `root_locus` sözlüğüne koyar (hrma/app.py,
+        # /api/analysis/combustion-stability) ve üst düzeyde BÖYLE BİR
+        # ANAHTAR YOKTUR (ölçüldü: üst düzey anahtarlar
+        # assessment/mode/neutral_curve/operating_point/root_locus/status).
+        # İkiz uçtan ayrıştığı için panelin yanlış adresi okuması yıllarca
+        # yeşil kaldı — bekçi ölü kusuru koruyordu.
         'root_locus': {'dp_ratio_j': lj, 'sigma_1_s': sg,
-                       'frequency_hz': fr},
+                       'frequency_hz': fr, 'skipped_points': atlanan},
         'operating_point': {'dp_ratio_j': dp,
                             'tau_over_tau_c': assessment['tau_over_tau_c']},
-        'skipped_points': atlanan,
     }
 
 
@@ -468,6 +475,23 @@ function dumpModel() {
         if (pb.tickWidth) {
             out.probes.tickWidth = SP._maxTickWidthPx(
                 pb.tickWidth.values, pb.tickWidth.fontPx);
+        }
+        // K2c: kök yer çerçevesi VERİLEN genişlikte yeniden kurulur —
+        // dar sütun senaryosu tarayıcısız ölçülebilsin diye.
+        if (pb.locusFigure) {
+            out.probes.locusFigure = pb.locusFigure.widths.map(function (w) {
+                const fig = SP._rootLocusFigure(payload.response, w);
+                return { widthPx: w, layout: fig.layout, traces: fig.traces };
+            });
+        }
+        if (pb.bottomMargin) {
+            out.probes.bottomMargin = pb.bottomMargin.map(function (n) {
+                return SP._xAxisBottomMarginPx(n);
+            });
+        }
+        if (pb.leftMargin) {
+            out.probes.leftMargin = SP._yAxisLeftMarginPx(
+                pb.leftMargin.values, pb.leftMargin.lines);
         }
     }
     process.stdout.write(JSON.stringify(out));
@@ -818,15 +842,27 @@ class TestOneriler:
             ham = _yol(m, kaynak[alan]['path'])
             assert ham is not None and yakin(deger[alan], ham), (
                 f'{tip}: {alan} önerisi motorun yayınından ayrışmış')
-        mach = _yol(m, 'combustion_stability.acoustic_response_threshold'
-                       '.mean_flow_mach_M_N')
-        if tip == 'liquid':
-            assert mach is None, 'vaka değişmiş: sıvı M_N yayımlamaya başladı'
-            assert 'nozzle_entrance_mach' not in deger, (
-                'sıvı: kaynağı olmayan M_N için sayı UYDURULMUŞ')
-        else:
-            assert mach is not None and \
-                yakin(deger['nozzle_entrance_mach'], mach)
+        # ÖH defter P17B3-03 (D23) — BEKÇİ ÇEVRİLDİ (gerekçe):
+        # Bu dal eskiden sıvıda M_N önerisinin BULUNMAMASINI şart koşuyordu
+        # ("vaka değişmiş: sıvı M_N yayımlamaya başladı"). Kilitlediği şey
+        # bir sözleşme değil, ÖLÇÜLEN BİR KUSURDU: hibrit ve katıda tek
+        # tıkla koşan akustik analizi sıvı kullanıcısı ancak lüle girişi
+        # Mach'ını kendisi bularak koşturabiliyordu (P17 turu, B3-rapor.md).
+        # Sıvı bağlaması M_N'i artık KENDİ akustik mod bloğunda, Culick &
+        # Yang'in kütle-akısı oranından ÇÖZÜP yayımlıyor - uydurmuyor.
+        # Bekçinin asıl işi (öneri, motorun KENDİ yayınından gelmeli)
+        # korunur: hangi yoldan geldiğine bakılmaksızın değer o yolun
+        # taşıdığı sayıya eşit olmalıdır.
+        yollar = ('combustion_stability.acoustic_response_threshold'
+                  '.mean_flow_mach_M_N',
+                  'combustion_analysis.stability_analysis.acoustic_modes'
+                  '.mean_flow_mach_M_N')
+        mach = next((v for v in (_yol(m, y) for y in yollar)
+                     if isinstance(v, (int, float))), None)
+        assert mach is not None, (
+            f'{tip}: motor M_N yayımlamıyor, öneri kanalı beslenemez')
+        assert yakin(deger['nozzle_entrance_mach'], mach), (
+            f'{tip}: M_N önerisi motorun yayınından ayrışmış')
 
 
 # ---------------------------------------------------------------------------
@@ -1059,8 +1095,10 @@ class TestCizim:
         """
         dp, tau, tau_c = sivi_chug_girdileri(motor_sivi)
         yanit = chug_yaniti(dp, tau, tau_c)
-        yanit['skipped_points'] = [{'dp_ratio_j': 0.02,
-                                    'reason': 'core refused this sample'}]
+        # ÖH D27 / P11B4-28: kalem ucun YAYIMLADIĞI adrese konur; üst
+        # düzeye konursa panel onu göremez ve GÖRMEMELİDİR de.
+        yanit['root_locus']['skipped_points'] = [
+            {'dp_ratio_j': 0.02, 'reason': 'core refused this sample'}]
         out = kos_panel(tmp_path, motorType='liquid', results=motor_sivi,
                         response=yanit,
                         select=['chamber_acoustics', 'combustion_stability'],
@@ -1614,6 +1652,123 @@ class TestKullanilabilirlikK2:
         # koşumda üstüne yazar, çakışma yok.
         self._marj_dogrula(tmp_path, motor_hibrit, cagri)
 
+    # -- K2c: kök yer eğrisinin YATAY başlığı (defter kalemi, 2026-08-18) --
+    #
+    # ÖLÇÜLEN KUSUR: x başlığı ('Dominant root growth rate sigma [1/s]
+    # (sigma > 0 = growing)') panelin kendi ölçümüyle 389,4 px ve tek
+    # satırdaydı; alt marj 60 px'te SABİTTİ. Merkez'in görüntüleyici
+    # sütunu grid'de minmax(250px, 1fr) taşıdığı için üç sütun yan yanayken
+    # kap 250-420 px bandına iner ve çizime kalan genişlik 185-355 px olur
+    # — başlık üç ölçümde de taşıyordu. Bekçi K2a deseninin yatay ikizini
+    # kilitler: sarma panelin KENDİ fonksiyonundan, alt marj panelin KENDİ
+    # marj fonksiyonundan, lejant marjın kendisinden.
+    DAR_SUTUN_PX = (250, 320, 420)
+
+    def _cerceve_tutarli(self, tmp_path, motor, cagri, metrikler):
+        """Bir çizim düzeninin KENDİ İÇİNDE tutarlı olduğunu ölçer:
+        her başlık satırı kendi kullanılabilir uzunluğuna sığar, iki marj
+        da panelin kendi marj fonksiyonlarından çıkar, lejant alt marjın
+        dış kenarındadır. Formül Python'da kopyalanmaz — marjlar için
+        panelin _xAxisBottomMarginPx / _yAxisLeftMarginPx sondaları
+        çağrılır."""
+        lay = cagri['layout']
+        genislik = cagri['widthPx']
+        for eksen in ('xaxis', 'yaxis'):
+            assert isinstance(lay[eksen]['title'], dict), (
+                f'{eksen} başlığı ölçülü sarma nesnesi değil (düz metin) — '
+                'kırpılma bekçisi kör kalır')
+        x_satir = lay['xaxis']['title']['text'].split('<br>')
+        y_satir = lay['yaxis']['title']['text'].split('<br>')
+        cizim_w = max(genislik - lay['margin']['l'] - lay['margin']['r'],
+                      metrikler['minPlotWidthPx'])
+        cizim_h = lay['height'] - lay['margin']['t'] - lay['margin']['b']
+        y_degerleri = []
+        for t in cagri['traces']:
+            for v in (t.get('y') or []):
+                if isinstance(v, (int, float)):
+                    y_degerleri.append(v)
+        p = kos_panel(tmp_path, motorType='hybrid', results=motor,
+                      probes={
+                          'measure': [[s, metrikler['titleFontPx']]
+                                      for s in x_satir + y_satir],
+                          'wrapTitle': {'text': ' '.join(x_satir),
+                                        'availablePx': cizim_w,
+                                        'fontPx': metrikler['titleFontPx']},
+                          'bottomMargin': [len(x_satir)],
+                          'leftMargin': {'values': y_degerleri,
+                                         'lines': len(y_satir)}},
+                      )['probes']
+        assert p['wrapTitle'] == x_satir, (
+            'x başlığı satırları panelin kendi sarma fonksiyonundan '
+            'ayrışmış — sarma formülü iki yerde yaşayamaz')
+        for s, gen in zip(x_satir, p['measure'][:len(x_satir)]):
+            assert gen <= cizim_w, (
+                f'x başlık satırı {s!r} ölçülen genişliğiyle ({gen:.0f}px) '
+                f'çizim genişliğine ({cizim_w}px) sığmıyor — taşar/kırpılır')
+        for s, gen in zip(y_satir, p['measure'][len(x_satir):]):
+            assert gen <= cizim_h, (
+                f'y başlık satırı {s!r} ({gen:.0f}px) çizim yüksekliğine '
+                f'({cizim_h}px) sığmıyor')
+        assert lay['margin']['b'] == p['bottomMargin'][0], (
+            f"margin.b={lay['margin']['b']} panelin kendi alt marj "
+            f"fonksiyonundan ({p['bottomMargin'][0]}) ayrışmış — sabit "
+            'piksel tahmini geri gelmiş olabilir')
+        assert lay['margin']['l'] == p['leftMargin'], (
+            f"margin.l={lay['margin']['l']} panelin kendi sol marj "
+            f"fonksiyonundan ({p['leftMargin']}) ayrışmış")
+        # Lejant alt marjın DIŞ kenarında: Plotly y'yi çizim yüksekliğinin
+        # kesri okur, marj büyüyünce lejant da inmeli — yoksa 3 satırlık
+        # başlık lejantın üstüne biner.
+        assert yakin(lay['legend']['y'], -lay['margin']['b'] / cizim_h,
+                     bagil=1e-9), (
+            f"lejant y={lay['legend']['y']} alt marjdan türetilmemiş "
+            f"(beklenen {-lay['margin']['b'] / cizim_h:.4f}) — başlık "
+            'satırları arttığında lejantın altına girer')
+
+    def test_kok_yer_x_basligi_dar_sutunda_sarilir_ve_alt_marj_olculu(
+            self, tmp_path, motor_hibrit, motor_sivi):
+        """K2c kusurunun bekçisi: dar sütunda yatay başlık sarılmalı ve
+        alt marj satır sayısından türemeli."""
+        dp, tau, tau_c = sivi_chug_girdileri(motor_sivi)
+        out = kos_panel(tmp_path, motorType='liquid', results=motor_sivi,
+                        response=chug_yaniti(dp, tau, tau_c),
+                        probes={'locusFigure': {
+                            'widths': list(self.DAR_SUTUN_PX)}})
+        m = out['axisMetrics']
+        cizimler = out['probes']['locusFigure']
+        assert len(cizimler) == len(self.DAR_SUTUN_PX)
+        for cagri in cizimler:
+            lay = cagri['layout']
+            baslik = lay['xaxis']['title']
+            assert isinstance(baslik, dict), (
+                f"{cagri['widthPx']}px: x başlığı ölçülü sarma nesnesi "
+                'değil (düz metin) — kırpılma bekçisi kör kalır')
+            assert '<br>' in baslik['text'], (
+                f"{cagri['widthPx']}px kapta x başlığı TEK satır: ölçülen "
+                '389,4 px metin bu sütuna sığmaz — K2c kusuru geri döndü')
+            self._cerceve_tutarli(tmp_path, motor_hibrit, cagri, m)
+
+    def test_kok_yer_cizimi_kabin_genisligiyle_kurulur(self, tmp_path,
+                                                       motor_hibrit,
+                                                       motor_sivi):
+        """GERÇEK koşumda çizilen kök yer düzeni de aynı çerçeveden çıkar.
+
+        (Sonda yolunun yeşil, çizim yolunun sabit marjlı kalması mümkündü:
+        bu bekçi çizimin GERÇEKTEN axisFrame'den geçtiğini ölçer.)
+        """
+        dp, tau, tau_c = sivi_chug_girdileri(motor_sivi)
+        out = kos_panel(tmp_path, motorType='liquid', results=motor_sivi,
+                        response=chug_yaniti(dp, tau, tau_c),
+                        select=['chamber_acoustics', 'combustion_stability'],
+                        runs=1)
+        cagri = cizim(out, 'stab_locus')
+        assert cagri, 'kök yer eğrisi çizilmemiş'
+        m = out['axisMetrics']
+        # Taklit DOM clientWidth vermez: panel Plotly'nin kendi varsayılan
+        # çizim genişliğine düşer (AXIS_METRICS.defaultPlotWidthPx).
+        cagri = dict(cagri, widthPx=m['defaultPlotWidthPx'])
+        self._cerceve_tutarli(tmp_path, motor_hibrit, cagri, m)
+
     def test_rcrit_satir_baslari_olculu_min_genislik_ile_kirpilmaz(
             self, tmp_path, motor_hibrit, sonum_gorunumu):
         """K2b kusurunun bekçisi: '1L @ 959.391 Hz' satır başları dar
@@ -1707,7 +1862,8 @@ class TestKullanilabilirlikK3:
         # Hüküm rozeti katlanmamış görünümde kapsamıyla duruyor.
         assert any('UNSTABLE — feed-coupled chug' in t
                    for _k, t in rozetler(dis))
-        if yanit['skipped_points']:
+        # ÖH D27 / P11B4-28: adres ucun şekline çekildi (bkz. chug_yaniti).
+        if yanit['root_locus']['skipped_points']:
             assert 'data-stab-block="skipped"' in dis, (
                 'atlanan nokta beyanı katlanmış — dürüstlük beyanı görünür '
                 'kalmalı')

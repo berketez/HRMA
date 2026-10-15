@@ -55,3 +55,11 @@ scratchpad/
 # Lean 4 biçimsel doğrulama platformu — derleme çıktıları (7+ GB Mathlib önbelleği)
 formal/.lake/
 formal/build/
+
+# ÖH D18 / altyapi (P10B3-24): start.sh bağımlılıkları proje içi sanal
+# ortama kurar; ortam depoya girmez.
+.venv/
+.coverage
+
+# ÖH D35 katı devir 4: HRMA_PROJECTS_DIR=examples damgası (mutlak yol içerir)
+examples/.seeded_v1

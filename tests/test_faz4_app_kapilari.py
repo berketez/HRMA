@@ -182,14 +182,27 @@ class TestB3YapisalHukumKapisi:
         assert data['design_basis']['verdict'] == 'withheld'
 
     def test_dogrulama_modunda_hukum_veriliyor(self, client):
-        """Gerçek cidar verilirse hüküm KAZANILIR ve yayımlanır."""
+        """TAM kapsamlı gerçek cidarlarla hüküm KAZANILIR ve yayımlanır.
+
+        Z4 onarımı (2026-08-27): yalnız hazne cidarıyla minimum hâlâ
+        lüle/kapaktan (boyutlandırılmış) geliyordu — eski test bunu
+        'issued + tautological False' diye kilitliyordu (yalan künye).
+        Uç artık throat_wall_thickness/end_cap_thickness kabul ediyor;
+        ÜÇÜ verilince hüküm gerçekten kazanılıyor (ölçülen: MARGINAL,
+        verdict_safety_factor 4,378).
+        """
         data = _structural(client, wall_thickness=0.006,
-                           chamber_temperature=3000)
+                           chamber_temperature=3000,
+                           throat_wall_thickness=0.006,
+                           end_cap_thickness=0.006)
         chamber = data['structural_analysis']['chamber_analysis']
         safety = data['structural_analysis']['safety_analysis']
         assert chamber['safety_factor_is_tautological'] is False
         assert safety['status'] != 'NOT_EVALUATED'
         assert safety['minimum_safety_factor_is_tautological'] is False
+        assert safety['stations_not_verified'] == []
+        assert safety['verdict_safety_factor'] == pytest.approx(
+            4.377928605144967)
         assert data['design_basis']['verdict'] == 'issued'
         assert data['design_basis']['is_verification'] is True
 

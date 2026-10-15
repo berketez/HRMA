@@ -89,6 +89,13 @@
     const registry = [];          // kayıt sırası korunur
     const registeredIds = {};
     const lastData = {};          // panel id -> son başarılı yanıt (dil değişiminde yeniden çizilir)
+    // ÖH D24 / P17B2-08 — ÇÖZÜLEMEYEN MALZEME KOŞUMU DURDURUR.
+    // panel id -> { alan: {solver, sent} }. Çözücünün verdiği malzeme
+    // güvertenin seçenek listesinde (alias çözümünden SONRA da) yoksa
+    // kayıt buraya düşer ve `runPanel` isteği HİÇ göndermez: yapısal
+    // hüküm, motorun hesaplandığı alaşımdan BAŞKA bir alaşım üzerinde
+    // verilemez. Boş sözlük = engel yok.
+    const blockedSelects = {};
 
     // ------------------------------------------------------------------
     // Ortak UI yardımcıları (paneller AnalysisDock.ui üzerinden kullanır)
@@ -195,14 +202,72 @@
                     .join(' · ');
         }
         if (typeof w !== 'object') return String(w);
-        if (!w.code) return JSON.stringify(w);  // beklenmeyen biçim: görünür kıl
+        // ÖH D29 · P11B2-19 — AYNI SÖZLEŞMENİN İKİ UYGULAMASI AYRIŞMIŞTI.
+        // ÖLÇÜLDÜ (a3/once.json, node): `warnText({message:'plain message'})`
+        // burada `{"message":"plain message"}` üretiyordu; app.js'in YEREL
+        // eşi (`warnToText`) aynı girdide `SRV(w.message)` ile düz metni
+        // basıyor. app.js dock yüklüyse KENDİ yedeğini kullanmıyor
+        // (advanced.html'de dock hep yüklü), yani ekrana çıkan biçim
+        // buradaki daldı. İki uygulama tek sözleşmeden konuşur:
+        // adlandırılmış düz metin alanları önce denenir, ham JSON yalnız
+        // GERÇEKTEN beklenmeyen biçim için kalır (görünür kılma dalı).
+        if (!w.code) return SRV(w.message || w.text || JSON.stringify(w));
         if (depth > 4) return w.code;           // bozuk/döngüsel veri koruması
         var p = {};
         Object.keys(w.params || {}).forEach(function (k) {
             var v = w.params[k];
-            p[k] = (v && typeof v === 'object') ? warnText(v, depth + 1) : v;
+            p[k] = (v && typeof v === 'object') ? warnText(v, depth + 1)
+                : warnParamText(k, v);
         });
         return TF(w.code, p, w.fallback || w.code);
+    }
+
+    // V3 KK 3. tur (§28-50 (c)) — UYARI PARAMETRESİNDE HAM KOD.
+    // ÖLÇÜLDÜ (docs/user_guide/img/v3_0/kanit/kayit_tr.json, TR kip, örnek
+    // hibrit): '... natural soğutmalı Graphite (isostatic, nozzle insert
+    // grade) ...' ve '... belirtilen soğutmayla steel_4130 erime noktası
+    // ...'. İki kural, ikisi de mevcut kaynaktan (yeni ad UYDURULMAZ):
+    //   material — malzeme ANAHTARI geldiyse önce güvertede kayıtlı
+    //     panellerin KENDİ 'material' seçenek listesi (değer, EN etiket,
+    //     mat.* sözlük anahtarı; ör. termal panel MATERIALS) — kopya liste
+    //     yazılmaz; orada yoksa merkezi kataloğun (materials_db →
+    //     /api/materials → HRMAMaterials, sayfada yüklüyse) kayıt adı. Ad
+    //     zaten görünen adsa (materials_db 'name') ya da hiçbiri tanımıyorsa
+    //     değer AYNEN kalır.
+    //   cooling — soğutma kipi kodu güvertenin kendi sözlük anahtarıyla
+    //     (cool.*, termal panel seçicisiyle aynı); tanınmayan kod AYNEN.
+    var COOLING_KEYS = {
+        natural: ['cool.natural', 'Natural (heat sink)'],
+        forced: ['cool.forced', 'Forced convection'],
+        regenerative: ['cool.regenerative', 'Regenerative'],
+    };
+    function warnParamText(k, v) {
+        if (typeof v !== 'string' || !v) return v;
+        if (k === 'material') {
+            for (var i = 0; i < registry.length; i++) {
+                var alanlar = Array.isArray(registry[i].fields) ? registry[i].fields : [];
+                for (var j = 0; j < alanlar.length; j++) {
+                    var f = alanlar[j];
+                    if (!Array.isArray(f) || f[0] !== 'material' || !Array.isArray(f[3])) continue;
+                    for (var m = 0; m < f[3].length; m++) {
+                        var o = f[3][m];
+                        if (!Array.isArray(o) || o[0] !== v) continue;
+                        return o[2] ? T(o[2], o[1]) : (o[1] || v);
+                    }
+                }
+            }
+            if (window.HRMAMaterials
+                    && typeof window.HRMAMaterials.get === 'function') {
+                var rec = window.HRMAMaterials.get(v);
+                if (rec && typeof rec.name === 'string' && rec.name) return rec.name;
+            }
+            return v;
+        }
+        if (k === 'cooling'
+                && Object.prototype.hasOwnProperty.call(COOLING_KEYS, v)) {
+            return T(COOLING_KEYS[v][0], COOLING_KEYS[v][1]);
+        }
+        return v;
     }
 
     // Uyarı / öneri kutusu (injector_panel uyarı bloğu deseni)
@@ -212,7 +277,186 @@
         return `<div style="border:1px solid ${c}; border-radius:8px;
             padding:10px 14px; margin:10px 0; color:${c};">
             <strong>${title}</strong><ul style="margin:6px 0 0 18px;">` +
-            items.map(w => `<li>${warnText(w)}</li>`).join('') + '</ul></div>';
+            items.map(w => `<li>${escAttr(warnText(w))}</li>`).join('') + '</ul></div>';
+    }
+
+    // ==================================================================
+    // C4 — GÖRÜNÜRLÜK ASİMETRİSİ: KATLANMIŞ BEYANIN SIFIR-TIKLAMA ROZETİ
+    // ------------------------------------------------------------------
+    // ÖLÇÜLEN KUSUR (P17B2-04): üründeki HER `<details>` varsayılan KAPALI
+    // (11/11) ve 9'u beyan taşıyor. Tek ekranda 8.725 karakterlik beyan bir
+    // tıklama arkasında dururken yeşil "GEÇTİ" rozetleri sıfır tıklamada
+    // görünüyor. Kullanıcı kusursuz bir motor görüyor; kusurun beyanı
+    // katlanmış duruyor.
+    //
+    // Katlamanın KENDİSİ kaldırılmıyor — stability_panel'in K3 katlayıcısı
+    // 2.400 px'lik bir metin duvarını çözmek için BİLEREK konmuştu ve onu
+    // geri açmak eski kusuru geri getirirdi. Bunun yerine özet satırına
+    // SIFIR TIKLAMADA görünen bir sayaç rozeti iliştirilir.
+    //
+    // SAYI UYDURULMAZ: rozet, katlı gövdenin GERÇEK ölçümüdür —
+    //   items : gövdedeki <li> madde sayısı
+    //   lines : madde yoksa boş olmayan metin satırı sayısı
+    //   chars : gövdenin karakter sayısı (bulgunun ölçtüğü büyüklük)
+    // Gövde boşsa (henüz doldurulmamış `display:none` kabuk) rozet HİÇ
+    // basılmaz. Uyarı imi (▲) yalnız katlının KENDİ MAKİNE ADI beyan
+    // sözlüğüne uyduğunda konur; uymayan katlı nötr im (▸) alır ve hangi
+    // adın eşleştiği ipucunda yazar — sınıflandırma denetlenebilir.
+    //
+    // SİMGE SEÇİMİ: uyarı imi ⚠ (U+26A0) DEĞİL ▲ (U+25B2). Berke'nin emoji
+    // yasağı U+2600-U+27BF aralığını kapsıyor (tests/test_i18n.py
+    // test_no_emoji_in_templates) ve ⚠ tam o aralıkta. Güvertenin kendi
+    // kaynak çipleri de aynı sebeple geometrik simge kullanıyor (● ■ ◆ ×).
+    // ==================================================================
+
+    //: Beyan sözlüğü — ürünün KENDİ makine adlarından (ölçüldü: fea_basis,
+    //  bp_basis, fea_t_basis, data-stab-fold="not-modelled", fea.basisTitle,
+    //  common.assumptions).
+    const DECL_FOLD_MARKS = ['basis', 'assum', 'decl', 'not-modelled',
+                             'not_modelled', 'notmodelled', 'warning',
+                             'caveat', 'limitation', 'withheld',
+                             'uncertain', 'not-verified'];
+
+    //: Rozetin özet satırındaki yuvası (aynı katlı ikinci kez işlenirse
+    //  yeni rozet basılmaz, mevcut yuva tazelenir).
+    const DECL_FOLD_SLOT_ATTR = 'data-hd-declfold-slot';
+
+    // Katlının kendi makine adları: id + data-* + özetin çeviri anahtarı.
+    // Bunlar ÜRÜNÜN kendi adlarıdır; burada ad UYDURULMAZ.
+    function foldMachineNames(det, sum) {
+        const parts = [];
+        const at = function (el, name) {
+            if (!el || typeof el.getAttribute !== 'function') return;
+            const v = el.getAttribute(name);
+            if (v) parts.push(name + '=' + v);
+        };
+        at(det, 'id');
+        at(det, 'data-stab-fold');
+        at(det, 'data-hd-declaration');
+        at(sum, 'data-i18n');
+        return parts;
+    }
+
+    // Katlı gövdesinin ÖLÇÜMÜ (özet satırı hariç).
+    function declarationFoldInfo(det, sum) {
+        const all = String((det && det.textContent) || '');
+        const head = String((sum && sum.textContent) || '');
+        const body = (head && all.indexOf(head) === 0)
+            ? all.slice(head.length) : all;
+        const chars = body.replace(/\s+/g, ' ').trim().length;
+        let items = 0;
+        if (det && typeof det.querySelectorAll === 'function') {
+            const lis = det.querySelectorAll('li');
+            items = lis ? lis.length : 0;
+        }
+        const lines = body.split('\n')
+            .map(function (s) { return s.trim(); })
+            .filter(function (s) { return s.length > 0; }).length;
+        const names = foldMachineNames(det, sum);
+        const low = names.join(' ').toLowerCase();
+        let matched = null;
+        for (let i = 0; i < DECL_FOLD_MARKS.length; i++) {
+            if (low.indexOf(DECL_FOLD_MARKS[i]) !== -1) {
+                matched = DECL_FOLD_MARKS[i];
+                break;
+            }
+        }
+        return {
+            chars: chars, items: items, lines: lines,
+            declaration: matched !== null, matched: matched, names: names,
+        };
+    }
+
+    function ensureFoldSlot(sum) {
+        if (typeof sum.querySelector === 'function') {
+            const found = sum.querySelector('[' + DECL_FOLD_SLOT_ATTR + ']');
+            if (found) return found;
+        }
+        const span = document.createElement('span');
+        span.setAttribute(DECL_FOLD_SLOT_ATTR, '1');
+        span.style.marginLeft = '8px';
+        span.style.fontFamily = 'var(--hd-mono, monospace)';
+        span.style.fontSize = '0.68rem';
+        sum.appendChild(span);
+        return span;
+    }
+
+    // Sayfadaki katlanmış bölümleri ölçer ve özet satırlarına sayaç
+    // rozetini basar. Kaç katlı işaretlendiğini döndürür (test ölçümü).
+    function markDeclarationFolds(root) {
+        const host = root
+            || ((typeof document !== 'undefined') ? document : null);
+        if (!host || typeof host.querySelectorAll !== 'function') return 0;
+        const folds = host.querySelectorAll('details');
+        let marked = 0;
+        for (let i = 0; i < (folds ? folds.length : 0); i++) {
+            const det = folds[i];
+            if (!det || typeof det.querySelector !== 'function') continue;
+            const sum = det.querySelector('summary');
+            if (!sum) continue;
+            const info = declarationFoldInfo(det, sum);
+            const slot = ensureFoldSlot(sum);
+            if (!info.chars) {
+                // Gövde BOŞ: ölçülecek bir şey yok, rozet basılmaz.
+                slot.textContent = '';
+                slot.setAttribute('title', '');
+                continue;
+            }
+            // Rozetin sayısı EN BİLGİLİ ölçümdür: madde varsa madde, yoksa
+            // satır, tek satırlık metin duvarıysa karakter (bulgunun ölçtüğü
+            // büyüklük: "8.725 karakter beyan bir tıklama arkasında").
+            const n = info.items > 0 ? String(info.items)
+                : (info.lines > 1 ? String(info.lines) : String(info.chars) + 'c');
+            const text = (info.declaration ? '▲ ' : '▸ ') + n;
+            // DEĞİŞMEDİYSE YAZMA: rozetin kendisi bir DOM değişikliğidir;
+            // aynı metni yeniden yazmak aşağıdaki gözlemciyi sonsuz
+            // tetikler. Kararlı durumda hiçbir mutasyon üretilmez.
+            if (slot.textContent !== text) slot.textContent = text;
+            slot.style.color = kindColor(info.declaration ? 'warn' : 'dim');
+            slot.setAttribute('title',
+                'folded content measured: items=' + info.items
+                + ' lines=' + info.lines + ' chars=' + info.chars
+                + (info.declaration
+                    ? ' | declaration fold, matched: ' + info.matched
+                    : ' | not classified as a declaration fold')
+                + (info.names.length ? ' | ' + info.names.join(' ') : ''));
+            if (det.dataset) {
+                det.dataset.hdDeclfold = info.declaration
+                    ? 'declaration' : 'content';
+                det.dataset.hdDeclfoldChars = String(info.chars);
+            }
+            marked += 1;
+        }
+        return marked;
+    }
+
+    // Katlılar hesap sonrası DOLDURULUYOR (paneller ekranı sonradan çiziyor),
+    // bu yüzden ölçüm bir kez değil, DOM değiştikçe tazelenir. Gözlemci
+    // kendi yazdığımız rozeti tekrar tetiklemesin diye iki kapı var:
+    // (1) yazma sırasında bayrak, (2) "değişmediyse yazma" kuralı.
+    let declFoldTimer = null;
+    let declFoldBusy = false;
+
+    function runDeclarationFolds() {
+        declFoldTimer = null;
+        declFoldBusy = true;
+        try { markDeclarationFolds(document); } catch (e) { /* DOM yok */ }
+        setTimeout(function () { declFoldBusy = false; }, 0);
+    }
+
+    function scheduleDeclarationFolds() {
+        if (declFoldBusy || declFoldTimer !== null) return;
+        declFoldTimer = setTimeout(runDeclarationFolds, 250);
+    }
+
+    function startDeclarationFoldWatch() {
+        if (typeof document === 'undefined' || !document.body) return;
+        scheduleDeclarationFolds();
+        if (typeof window === 'undefined' || !window.MutationObserver) return;
+        try {
+            const obs = new window.MutationObserver(scheduleDeclarationFolds);
+            obs.observe(document.body, { childList: true, subtree: true });
+        } catch (e) { /* gözlemci yoksa tek seferlik ölçüm yeter */ }
     }
 
     // ==================================================================
@@ -241,10 +485,13 @@
     // Beyan HİÇ yoksa `declared:false` döner ve ipucu metni bunu açıkça
     // söyler — "hesaplandı" iddiası beyansız değere yazılmaz.
     // ==================================================================
+    // ÖH D32 · OH-D31-18 — `assumed` ambersi token katmanında
+    // (`--hd-amber-source`); değer değişmedi, ayna bekçiyle kilitli
+    // (tests/test_d32_arayuz_panel_a1.py::TestOHD3118AmberTokeni).
     const SOURCE_COLORS = {           // motor_viz3d.js ile birebir aynı
         computed: '#39d6ec',
         user: '#e8edf2',
-        assumed: '#ffb347',
+        assumed: '#ffb347',          // = var(--hd-amber-source)
         missing: '#8a93a0',
     };
     // Simge + Plotly marker eşlemesi (renk körlüğü: şekil ayırt eder)
@@ -309,7 +556,50 @@
     const SRC_ASSUMED_RE = new RegExp(
         '\\bassum|\\bdefault|fallback|typical|nominal|literature|handbook'
         + '|rule[- ]of[- ]thumb|estimat|approxim|placeholder|clamp'
+        // ÖH D24 / P11B2-10 — OLUMLU KÖKEN İMLERİ. Ürünün kendi beyan
+        // metinlerinden ölçüldü (git grep): 'materials_db recommended
+        // design factor…', 'DECLARED DESIGN CHOICE…', 'model constant…'
+        // üçü de bir VARSAYIMI adlandırır; listede karşılığı olmadığı için
+        // sınıflandırıcı bu cümlelerde yalnız olumsuzlama parçasını
+        // görüyordu ve 'user'/'missing' damgalıyordu.
+        + '|recommend|declared|design choice|model constant'
         + '|varsay|öngör|tahmin|kabul edil|yerel üret|sınırlan|kırpıl', 'i');
+
+    // ------------------------------------------------------------------
+    // ÖH D24 / P11B2-10 — OLUMSUZLAMA KÖRLÜĞÜ
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (a3/once_e3.json: 17 gerçek beyan metninin 6'sı yanlış):
+    // sınıflandırıcı bir cümlenin İÇİNDEKİ kelimeye bakıyordu, cümlenin
+    // OLUMSUZLAMASINA değil. Sonuç: "…NOT the design safety factor entered
+    // by the user" diyen alana USER ("Entered by you") damgası, "model
+    // constant, not computed from this design" diyen ve hesapta GERÇEKTEN
+    // KULLANILAN sayıya NOT MODELLED damgası.
+    //
+    // Kural: bir karşıtlık yan cümlesi ("…, not a user input", "; NOT
+    // auto-sized", "(no user value)") değerin NE OLMADIĞINI söyler; köken
+    // hükmü metnin OLUMLU parçasından verilir. Olumlu parça hüküm
+    // vermiyorsa TAM METNE dönülür — böylece kendisi bir olumsuzlama olan
+    // gerçek beyanlar ("not modelled", "This effect is not modelled…")
+    // bozulmadan 'missing' kalır.
+    const SRC_CONTRAST_RE = new RegExp(
+        '[;,(]\\s*(?:and\\s+|but\\s+|which\\s+is\\s+)?(?:NOT|not|no)\\b[^.;)]*\\)?'
+        + '|(?:^|[.\\s])(?:NOT|not|no)\\s+(?:a\\s+|an\\s+|the\\s+)?'
+        + '[a-z_ -]{0,40}?'
+        + '(?:entered|supplied|given|provided|specified|auto-sized|autosized|'
+        + 'computed\\s+result|user\\s+input|user\\s+value)'
+        + '(?:\\s+by\\s+the\\s+user)?[^.;)]*', 'g');
+
+    function sourcePositiveText(text) {
+        return String(text).replace(SRC_CONTRAST_RE, ' ')
+            .replace(/\s+/g, ' ').trim();
+    }
+
+    function srcMatchKind(s) {
+        if (SRC_MISSING_RE.test(s)) return 'missing';
+        if (SRC_USER_RE.test(s)) return 'user';
+        if (SRC_ASSUMED_RE.test(s)) return 'assumed';
+        return null;
+    }
 
     function sourceColor(kind) {
         return SOURCE_COLORS[kind] || SOURCE_COLORS.missing;
@@ -333,10 +623,13 @@
         if (!s) return null;
         const direct = SOURCE_STATUS_MAP[s.toLowerCase()];
         if (direct) return direct;
-        if (SRC_MISSING_RE.test(s)) return 'missing';
-        if (SRC_USER_RE.test(s)) return 'user';
-        if (SRC_ASSUMED_RE.test(s)) return 'assumed';
-        return null;
+        // Karşıtlık yan cümlesi çıkarılmış metin önce denenir (P11B2-10).
+        const olumlu = sourcePositiveText(s);
+        if (olumlu && olumlu !== s) {
+            const k = srcMatchKind(olumlu);
+            if (k) return k;
+        }
+        return srcMatchKind(s);
     }
 
     // Bir sözlükteki alanın kaynağını çözer.
@@ -420,6 +713,163 @@
         const unit = (info.value != null && o.unit) ? ' ' + o.unit : '';
         return `<span data-src-value="${escAttr(field || '')}">${txt}${unit}</span>`
             + sourceChip(info);
+    }
+
+    // ------------------------------------------------------------------
+    // ÖH D26 / P11B2-10 — SINIFLANDIRICIYI PANELE BAĞLAYAN İKİ YARDIMCI
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (a1/once.json): 16 panelin 13'ü ucun beyan alanlarını
+    // (`X_basis` / `X_source` / `X_status` / `X_model`; 81 ayrı alan adı)
+    // OKUYOR, ama sınıflandırıcıyı çağıran panel sayısı 2 idi — 11 panel
+    // beyanı ekrana DÜZ METİN olarak döküyor, hükmü (hesaplandı / sizin
+    // girdiniz / varsayım / modellenmedi) hiç vermiyordu. Katmanın ölü
+    // kalmasının sebebi teknik değil ergonomikti: tek bir satıra çip
+    // eklemek için panelin `sourceOf` + `declared` kapısı + `chip`
+    // üçlüsünü elle kurması gerekiyordu, o yüzden paneller kendi
+    // damgalarını UYDURUYORDU (`chip({kind:'assumed'})`, 5 yer).
+    //
+    // `ledger` : bir bloğun BÜTÜN beyanlarını tarayıp her biri için ortak
+    //            hükmü basan katlı defter (24 beyanlı cfd_panel gibi
+    //            bloklar tek çağrıyla bağlanır).
+    // İkisi de FAIL-CLOSED: beyan yoksa hiçbir şey basılmaz — "hesaplandı"
+    // iddiası beyansız değere yazılmaz (doktrin 1).
+
+    // Bir bloktaki beyan alanlarını (X_basis/_source/_status/_model)
+    // tabana göre gruplar. Dönen: [{field, basis, source, status}, ...]
+    const SRC_DECL_SUFFIX = ['_basis', '_source', '_status', '_model'];
+
+    // opts.deep     : iç bloklara da in (uçlar beyanı `cfd.*`, `sep.*`,
+    //                 `safety_factors.*` gibi alt sözlüklerde yayımlıyor)
+    // opts.maxDepth : iniş derinliği (varsayılan 3)
+    function sourceDeclarations(obj, opts) {
+        const o = opts || {};
+        const maxDepth = o.deep ? (o.maxDepth == null ? 3 : o.maxDepth) : 0;
+        const bases = {};
+        const order = [];
+        const gezildi = [];
+
+        function kayit(holder, prefix, key, suf) {
+            const val = holder[key];
+            // Beyan METİN olmalı: sayı ya da nesne beyan değildir.
+            if (typeof val !== 'string' || !val.trim()) return;
+            const base = key.slice(0, key.length - suf.length);
+            if (!base) return;
+            const yol = prefix ? (prefix + '.' + base) : base;
+            if (!bases[yol]) {
+                bases[yol] = { field: yol, base: base, holder: holder,
+                               basis: null, source: null, status: null };
+                order.push(yol);
+            }
+            if (suf === '_basis') bases[yol].basis = val;
+            else if (suf === '_source') bases[yol].source = val;
+            else bases[yol].status = bases[yol].status || val;
+        }
+
+        function tara(node, prefix, depth) {
+            if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+            if (gezildi.indexOf(node) !== -1) return;   // döngü koruması
+            gezildi.push(node);
+            const keys = Object.keys(node);
+            keys.forEach(function (key) {
+                for (let i = 0; i < SRC_DECL_SUFFIX.length; i++) {
+                    const suf = SRC_DECL_SUFFIX[i];
+                    if (key.length <= suf.length) continue;
+                    if (key.slice(-suf.length) !== suf) continue;
+                    kayit(node, prefix, key, suf);
+                    return;
+                }
+            });
+            if (depth >= maxDepth) return;
+            keys.forEach(function (key) {
+                const v = node[key];
+                if (v && typeof v === 'object' && !Array.isArray(v)) {
+                    tara(v, prefix ? (prefix + '.' + key) : key, depth + 1);
+                }
+            });
+        }
+
+        tara(obj || {}, '', 0);
+        return order.map(function (b) { return bases[b]; });
+    }
+
+    // Beyan defteri: bloğun her beyanı için ortak sınıflandırıcının hükmü
+    // + beyan metninin kendisi. Beyan yoksa '' döner (bölüm hiç basılmaz).
+    //   opts.title  : başlık metni
+    //   opts.values : sayısal değerleri taşıyan blok (varsayılan: obj)
+    function sourceLedger(obj, opts) {
+        const o = opts || {};
+        const decls = sourceDeclarations(obj, o);
+        if (!decls.length) return '';
+        const rows = decls.map(function (d) {
+            // Değer beyanın KENDİ bloğundan okunur; yoksa satır YALNIZ
+            // beyanı sınıflandırır (uydurma sayı basılmaz — em-dash).
+            const vals = o.values || d.holder || {};
+            const has = Object.prototype.hasOwnProperty.call(vals, d.base);
+            // FAIL-CLOSED: beyanın tarif ettiği DEĞER yoksa sınıflandırıcıya
+            // `null` gider ve hüküm 'missing' olur. Beyan metnini "değer"
+            // yerine koymak, sayısı OLMAYAN ama "computed from the Bartz
+            // correlation" diyen bir alana HESAPLANDI damgası bastırıyordu;
+            // olmayan sayı için hesap iddiası doktrin 1 ihlalidir. Beyan
+            // metni satırda ayrıca gösterilir — bilgi kaybolmaz.
+            const info = sourceOf(
+                { basis: d.basis, source: d.source, status: d.status },
+                null,
+                { value: has ? vals[d.base] : null });
+            let txt = '—';
+            if (has) {
+                const v = vals[d.base];
+                if (typeof v === 'number' && Number.isFinite(v)) {
+                    txt = String(dockSigFig(v, o.sig));
+                } else if (v != null && typeof v !== 'object') {
+                    txt = escAttr(String(v));
+                }
+            }
+            // ÖH D37 A1a · DV36-01 — DAYANAK HÜCRESİ serverText'TEN GEÇER.
+            // ÖLÇÜLDÜ (D36 dil2 a2 sonra.json K4; D37 a1/once/olcum.json):
+            // gerçek /analyze_safety geri çekme yanıtında TR ekranda patlayıcı
+            // gerekçe cümlesi bu hücrede İngilizce kalıyordu (panel geneli
+            // TR = 1); aynı cümle çip ipucunda (`sourceChip`) zaten
+            // çevriliyordu. Sunucu düz metnidir: `SRV` sözlük + desenle çevirir,
+            // eşleşme yoksa metni AYNEN döndürür (uydurma çeviri yok).
+            const beyan = SRV(d.basis || d.source || d.status || '');
+            return '<tr><td style="' + TD
+                + ' font-family:var(--hd-mono, monospace); font-size:0.72rem;"'
+                + ' data-src-field="' + escAttr(d.field) + '">'
+                + escAttr(d.field) + '</td><td style="' + TD + '">'
+                + txt + sourceChip(info) + '</td><td style="' + TD
+                + ' color:var(--hd-ink-dim, #7d97a5); font-size:0.74rem;">'
+                + escAttr(beyan) + '</td></tr>';
+        }).join('');
+        const title = o.title
+            || T('dock.src.ledger', 'VALUE SOURCES') + ' (' + decls.length + ')';
+        // KATLI VARSAYILAN OLARAK KAPALI. Z5/C4 doktrini: hiçbir ürün
+        // katlısı `open` ile açılmaz (bekçi: tests/test_z5_rozet_dock.py
+        // ::test_c4_urun_katlilarinin_hepsi_hala_varsayilan_kapali).
+        // Sıfır tıklamada okunacak sayı özet satırındaki rozetten
+        // gelir — `markDeclarationFolds` onu gerçek DOM'da basar.
+        return '<details data-src-ledger="' + decls.length + '"'
+            + ' style="margin:8px 0;">'
+            + '<summary style="cursor:pointer; color:var(--hd-ink-dim, #7d97a5);'
+            + ' font-family:var(--hd-mono, monospace); font-size:0.72rem;'
+            + ' letter-spacing:0.08em;">' + escAttr(title) + '</summary>'
+            + '<table style="' + TBL + '">' + rows + '</table></details>';
+    }
+
+    // Defteri doğrudan panel köküne basar — panel TEK satırla bağlanır.
+    // Beyan yoksa hiçbir düğüm eklenmez (boş "kaynaklar" başlığı çıkmaz).
+    // Dönen: basılan beyan satırı sayısı (ölçüm için).
+    function sourceLedgerInto(root, obj, opts) {
+        if (!root || typeof document === 'undefined'
+            || typeof document.createElement !== 'function') return 0;
+        const decls = sourceDeclarations(obj, opts || {});
+        if (!decls.length) return 0;
+        const html = sourceLedger(obj, opts);
+        if (!html) return 0;
+        const div = document.createElement('div');
+        div.setAttribute('data-src-ledger-host', '1');
+        div.innerHTML = html;
+        root.appendChild(div);
+        return decls.length;
     }
 
     // Dört durumu birden gösteren anahtar (lejant).
@@ -660,7 +1110,7 @@
                 'First result stored as the reference — nothing to compare yet.')}</span>`;
         }
         const epsPct = dockSigFig(result.threshold * 100, 3);
-        const basis = `<div style="color:var(--hd-ink-faint, #46606d); margin-top:4px;">${
+        const basis = `<div style="color:var(--hd-ink-faint, #6a8491); margin-top:4px;">${
             TF('dock.diff.basis', { pct: epsPct },
                'Only relative changes above {pct} % are marked; smaller '
                + 'differences are within the 6-significant-digit pre-fill noise '
@@ -955,6 +1405,137 @@
     }
 
     // ==================================================================
+    // CİDARIN KÜNYESİ — "bu sayı kimin cidarı?"  (OH-Z4-05 / Z5-C1)
+    // ------------------------------------------------------------------
+    // ÖLÇÜLEN KUSUR (2026-08-27, app.test_client; kanıt:
+    // docs/scofield/raw/OH/Z5/c/olcum_c1_once.txt): kullanıcı cidar alanını
+    // BOŞ bırakıyor, /calculate cidarı KENDİ boyutlandırıyor
+    // (design_mode: size · wall_thickness_source: sized_by_hrma ·
+    // 15,903671 mm), panelin `fromResults`'ı o sayıyı cidar alanına
+    // dolduruyor ve /analyze_structural_safety onu şöyle damgalıyor:
+    //     wall_thickness_source : user_supplied
+    //     is_verification       : true
+    //     message               : "The supplied wall thickness was evaluated
+    //                              against the design pressure; this result
+    //                              is a verification."
+    // Yani HRMA kendi cidarını "kullanıcının cidarı" diye DOĞRULUYORDU —
+    // kendi kendini doğrulayan döngü. Ekranda hiçbir yerde bu yazmıyordu.
+    //
+    // ÇÖZÜM: cidar okuması artık ÇIPLAK SAYI değil, KÜNYELİ okumadır.
+    // Künye tahmin edilmez, motorun KENDİ beyanından okunur. Üç motor
+    // tipinde de ölçüldü (kanıt: olcum_c1_kunye_envanteri.txt):
+    //
+    //   motor    künye bloğu                                  design_mode
+    //   hibrit   structural_analysis.chamber_analysis         size / verify
+    //   katı     structural_analysis.case_analysis            size / verify
+    //   sıvı     structural_analysis.chamber_structure        size / verify
+    //
+    // `design_mode` üç tipte de KANONİKTİR ('size' ⟷ 'verify');
+    // `wall_thickness_source` metni tipe göre değişiyor (sıvıda serbest
+    // cümle: "user input (chamber wall thickness)" / "next standard plate
+    // thickness above the requirement"), bu yüzden ikincil kanıttır.
+    // ==================================================================
+
+    //: Cidar künyesinin yayımlandığı blok — cidar sayısının KENDİ bloğu.
+    const WALL_PROVENANCE_PATHS = {
+        hybrid: ['structural_analysis.chamber_analysis'],
+        solid: ['structural_analysis.case_analysis',
+                'design_summary.key_dimensions'],
+        liquid: ['structural_analysis.chamber_structure'],
+    };
+
+    //: Künye sınıfları (panellerin karşılaştırdığı sabitler).
+    const WALL_PROV_USER = 'user_supplied';   // kullanıcının cidarı sınandı
+    const WALL_PROV_SOLVER = 'solver_sized';  // HRMA kendi cidarını üretti
+    const WALL_PROV_UNDECLARED = 'undeclared';  // beyan YOK -> iddia YOK
+
+    //: `wall_thickness_source` metninde kullanıcıyı gösteren imler (ölçüldü).
+    const WALL_SOURCE_USER_MARKS = ['user_supplied', 'user input', 'user-supplied'];
+    //: HRMA'nın kendi boyutlandırmasını gösteren imler (ölçüldü).
+    const WALL_SOURCE_SIZED_MARKS = ['sized_by_hrma', 'standard plate',
+                                     'auto', 'requirement'];
+
+    function _wallProvenanceBlock(m) {
+        const paths = WALL_PROVENANCE_PATHS[getMotorType()] || [];
+        for (let i = 0; i < paths.length; i++) {
+            const blk = deepGet(m, paths[i]);
+            if (blk && typeof blk === 'object'
+                    && (blk.design_mode !== undefined
+                        || blk.wall_thickness_source !== undefined)) {
+                return { block: blk, path: paths[i] };
+            }
+        }
+        return null;
+    }
+
+    function _markHit(text, marks) {
+        const low = String(text || '').toLowerCase();
+        if (!low) return false;
+        for (let i = 0; i < marks.length; i++) {
+            if (low.indexOf(marks[i]) !== -1) return true;
+        }
+        return false;
+    }
+
+    // Cidar okuması + künyesi. Dönen sözlük:
+    //   source     : 'user_supplied' | 'solver_sized' | 'undeclared'
+    //   value_m    : metre cinsinden cidar (yoksa undefined)
+    //   value_mm   : milimetre cinsinden cidar (yoksa undefined)
+    //   designMode : motorun kendi `design_mode` beyanı (yoksa null)
+    //   declared   : motorun kendi `wall_thickness_source` metni (yoksa null)
+    //   blockPath  : künyenin okunduğu MAKİNE YOLU (ekranda ipucu olur)
+    // Beyan hiç yoksa 'undeclared' döner ve HİÇBİR ŞEY İDDİA EDİLMEZ —
+    // "kullanıcının cidarı" iddiası ancak motor bunu KENDİ söylerse doğar.
+    function readWallThicknessProvenance(r) {
+        const m = motorDict(r);
+        const mm = firstNumber(m, WALL_THICKNESS_MM_PATHS[getMotorType()] || []);
+        const found = _wallProvenanceBlock(m);
+        const blk = found ? found.block : {};
+        const mode = (blk.design_mode == null) ? null : String(blk.design_mode);
+        const decl = (blk.wall_thickness_source == null)
+            ? null : String(blk.wall_thickness_source);
+        let source = WALL_PROV_UNDECLARED;
+        if (mode === 'verify' || (mode === null && _markHit(decl, WALL_SOURCE_USER_MARKS))) {
+            source = WALL_PROV_USER;
+        } else if (mode === 'size'
+                || (mode === null && _markHit(decl, WALL_SOURCE_SIZED_MARKS))) {
+            source = WALL_PROV_SOLVER;
+        }
+        // İki beyan ÇELİŞİYORSA iddia geri çekilir (fail-closed): 'verify'
+        // diyen bir modun kaynağı "sized_by_hrma" olamaz.
+        if (source === WALL_PROV_USER && _markHit(decl, ['sized_by_hrma'])) {
+            source = WALL_PROV_UNDECLARED;
+        }
+        return {
+            source: source,
+            value_m: (mm === undefined) ? undefined : mm / 1000,
+            value_mm: mm,
+            designMode: mode,
+            declared: decl,
+            blockPath: found ? found.path : null,
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // ÖNERİ GERİ ÇEKME (`__withheld`) — panelin BİLEREK doldurmadığı alan
+    // ------------------------------------------------------------------
+    // `fromResults` sözlüğüne `__withheld: {alanAdı: 'gerekçe'}` koyabilir.
+    // O alanın DEĞERİ yine normal bir sayıdır (panelin "sen boyutlandır"
+    // nöbetçisi), yani öneri sözlüğünün TİPİ değişmez — sayı bekleyen her
+    // tüketici çalışmaya devam eder. Değişen tek şey KÜNYEdir: alan
+    // "hesaptan geldi" (computed) diye imlenmez, kaynak çipinin ipucuna
+    // gerekçe makine diliyle iliştirilir.
+    //
+    // Nöbetçi değerin AÇIKÇA yazılması şart: eski davranışta `undefined`
+    // dönünce alan olduğu gibi kalıyordu, yani bir ÖNCEKİ koşumdan kalan
+    // bayat öneri sessizce uca gidiyordu.
+    //
+    // Kullanıcının ELLE yazdığı alan bundan ETKİLENMEZ: `data-dirty` kapısı
+    // applySuggestions'ın en başındadır, yani gerçek kullanıcı girdisi
+    // korunur ve uç onu doğrular.
+    const WITHHELD_KEY = '__withheld';
+
+    // ==================================================================
     // CİDAR SICAKLIĞI  (F5-2, 2026-08-17 ölçümü)
     // ------------------------------------------------------------------
     // `/analyze_structural_safety` iki anahtarı BİRİNCİ ÖNCELİKLE okuyor
@@ -1071,11 +1652,64 @@
             // step bir seçenek listesi: [[value, label, labelKey?], ...] → <select>
             const opts = step.map(o =>
                 `<option value="${o[0]}"${o[0] === defVal ? ' selected' : ''}${i18nAttr(o[2])}>${T(o[2], o[1])}</option>`).join('');
+            // ÖH D35 · OH-GT-31 — SEÇİLİ SEÇENEĞİN TAM METNİ `title`DA.
+            // ÖLÇÜLDÜ (a1/once.json M1_secici_kesik): hücre ızgarası
+            // `minmax(170px, 1fr)` idi, sığan metin ~20 karakter, güverte
+            // ve merkez seçeneklerinin 64'ü (70 anahtarın) bunu aşıyordu
+            // ("Ters yönlü (çıkıştan odaya)" = 27, "Counterflow (exit →
+            // chamber)" = 28). Ekranda metin ORTASINDAN kesiliyordu ve
+            // `title` YOKTU (`fieldHtml_select_title_var_mi = false`),
+            // yani kullanıcının seçtiği şeyi okumasının hiçbir yolu yoktu.
+            // Izgara asgarisi 210 px'e çıktı (aşağıda) ve kırpılan metin
+            // artık üç noktayla biter (theme.css); TAM metin ipucundadır.
+            // İpucu kurulumda basılır, seçim değişince ve dil değişince
+            // `secimIpucu` ile tazelenir — üçü de ÖLÇÜLÜR (bekçi).
+            const secili = step.filter(o => o[0] === defVal)[0]
+                || (step.length ? step[0] : null);
+            const ipucu = secili ? escAttr(T(secili[2], secili[1])) : '';
+            // DV36-06: ipucu seçenekle aynı anahtardan çevrilir (secimIpucu).
+            const ipucuAnahtari = (secili && secili[2])
+                ? ' data-i18n-title="' + escAttr(secili[2]) + '"' : '';
             return `<div class="form-group">${lab}
-                <select id="${domId}" data-field="${fid}">${opts}</select></div>`;
+                <select id="${domId}" data-field="${fid}" title="${ipucu}"${ipucuAnahtari}>${opts}</select></div>`;
         }
         return `<div class="form-group">${lab}
             <input type="number" id="${domId}" data-field="${fid}" value="${defVal}" step="${step}"></div>`;
+    }
+
+    // ÖH D35 · OH-GT-31 — seçili seçeneğin TAM metnini `title`a yazar.
+    // Fail-closed: seçili seçenek yoksa ipucu SİLİNİR (eski, artık yanlış
+    // metin ekranda kalmaz); uydurma metin yazılmaz.
+    // ÖH D37 A1a · DV36-06 — İPUCU SEÇİLİ SEÇENEĞİN ANAHTARINI DA TAŞIR.
+    // ÖLÇÜLDÜ (a1/once/tarayici.json, 1440 px, örnek proje + hesap): sıvı
+    // sayfasında TR kipte 6 termal seçicinin 5'inin ipucu İngilizceydi
+    // ('Ablative liner — Q* sizing' ⟷ görünen 'Ablatif astar — …'). Kök:
+    // sözlük (i18n_common.js) bu sayfada güverte tarafından SONRADAN
+    // yükleniyor; güverte kurulurken `T()` İngilizce yedeği döndürüyor,
+    // sözlük gelince `I18N.apply` seçenek metnini (`data-i18n`) çeviriyor
+    // ama `title` onun kanalında değildi. Artık seçili seçeneğin anahtarı
+    // `data-i18n-title` olarak da yazılır: sözlük hangi sırada gelirse
+    // gelsin, seçenek metni ile ipucu AYNI geçişte çevrilir. Anahtarsız
+    // seçenekte (katalogdan gelen ad) nitelik SİLİNİR — eski anahtar,
+    // görünen metinden başka bir şey yazdırmasın.
+    function secimIpucu(el) {
+        if (!el || el.tagName !== 'SELECT') return;
+        const o = el.options ? el.options[el.selectedIndex] : null;
+        const metin = (o && typeof o.textContent === 'string') ? o.textContent.trim() : '';
+        const anahtar = (o && o.getAttribute) ? o.getAttribute('data-i18n') : null;
+        if (anahtar) el.setAttribute('data-i18n-title', anahtar);
+        else el.removeAttribute('data-i18n-title');
+        if (metin) el.setAttribute('title', metin);
+        else el.removeAttribute('title');
+    }
+
+    // Bölümdeki (ya da verilen kökteki) bütün seçicilerin ipucunu tazeler.
+    // Dil değiştiğinde `I18N.applyTo` seçenek METİNLERİNİ çevirir ama
+    // `title` niteliği onun kanalında değildir — eski dilde kalırdı.
+    function secimIpuclariniTazele(kok) {
+        const host = kok || document;
+        if (!host.querySelectorAll) return;
+        host.querySelectorAll('select[data-field]').forEach(secimIpucu);
     }
 
     function panelSectionHtml(spec) {
@@ -1086,9 +1720,9 @@
             <h3 style="margin:0 0 8px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
                 <span${i18nAttr(spec.titleKey)}>${T(spec.titleKey, spec.title)}</span>
                 <span style="font-family:var(--hd-mono); font-size:0.68rem;
-                      color:var(--hd-ink-faint, #46606d);">${spec.endpoint || ''}</span>
+                      color:var(--hd-ink-faint, #6a8491);">${spec.endpoint || ''}</span>
             </h3>
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
                  gap:10px; margin:10px 0;">
                 ${fieldsHtml}
                 <div class="form-group" style="align-self:end;">
@@ -1102,20 +1736,60 @@
         </div>`;
     }
 
+    // ------------------------------------------------------------------
+    // ÖH D34 · OH-GT-13 — SEÇİLİ SEKME YALNIZ RENKLE ANLATILIYORDU
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (a1/once.json): şeritteki `.ad-tab` düğmelerinde
+    // `role="tab"` yok, `aria-selected` yok, şeritte `role="tablist"` yok;
+    // `selectCategory` yalnız `background`, `color` ve `borderColor`
+    // yazıyordu — `renk_disi_eksen_sayisi` = 0. Yani hangi bölmenin açık
+    // olduğu SADECE renkten okunuyordu: renk ayrımı zayıf kullanıcı için
+    // bilgi yok (WCAG 1.4.1), ekran okuyucu için ise durum hiç yok —
+    // düğmeler sıradan düğme olarak, seçilmişlik bildirimi olmadan
+    // okunuyordu.
+    //
+    // İki ayrı eksen eklendi:
+    //   1. ANLAM: tablist/tab/tabpanel + `aria-selected` + `aria-controls`.
+    //   2. BİÇİM: seçilide 2 px alt çizgi ve 600 ağırlık. Alt çizginin YERİ
+    //      her zaman ayrılır (`border-bottom: 2px solid transparent`), yoksa
+    //      seçim değişince şerit 2 px zıplar.
+    // Roving tabindex: ok tuşları eklendiği için ARIA deseni bunu ister —
+    // şeritte Tab ile TEK durak olur, sekmeler arasında ok tuşuyla gezilir.
     function tabButtonHtml(cat) {
         const key = 'dock.cat.' + cat;
         return `<button type="button" class="ad-tab" data-category="${cat}"
+            role="tab" id="ad_tab_${cat}" aria-controls="ad_pane_${cat}"
+            aria-selected="false" tabindex="-1"
             style="font-family:var(--hd-mono); font-size:0.78rem; letter-spacing:0.08em;
             padding:7px 16px; cursor:pointer; border-radius:6px 6px 0 0;
-            border:1px solid var(--hd-line, rgba(0,229,255,0.14)); border-bottom:none;
+            border:1px solid var(--hd-line, rgba(0,229,255,0.14));
+            border-bottom:2px solid transparent; font-weight:400;
             background:transparent; color:var(--hd-ink-dim, #7d97a5);"
             data-i18n="${key}">${T(key, cat)}</button>`;
+    }
+
+    /** Şeritte ok tuşuyla gezinme (ARIA tab deseni). */
+    function tabKeyNav(ev) {
+        const yon = { ArrowRight: 1, ArrowLeft: -1, Home: 0, End: -0 };
+        if (!(ev.key in yon)) return;
+        const hepsi = Array.prototype.slice.call(
+            document.querySelectorAll('#ad_tabs .ad-tab'));
+        if (hepsi.length < 2) return;
+        const simdi = hepsi.indexOf(ev.currentTarget);
+        let hedef;
+        if (ev.key === 'Home') hedef = 0;
+        else if (ev.key === 'End') hedef = hepsi.length - 1;
+        else hedef = (simdi + yon[ev.key] + hepsi.length) % hepsi.length;
+        ev.preventDefault();
+        const dugme = hepsi[hedef];
+        selectCategory(dugme.getAttribute('data-category'));
+        dugme.focus();
     }
 
     function dockHtml() {
         return `
         <div class="panel" id="analysisDock" style="width:100%; grid-column: 1 / -1;">
-            <h2>&#9654; <span data-i18n="dock.title">${T('dock.title', 'Analysis Dock')}</span></h2>
+            <h2><span data-i18n="dock.title">${T('dock.title', 'Analysis Dock')}</span></h2>
             <div class="chart-explanation">
                 <strong data-i18n="common.whatItDoes">${T('common.whatItDoes', 'What it does:')}</strong>
                 <span data-i18n="dock.intro">${T('dock.intro',
@@ -1140,7 +1814,9 @@
                  font-family:var(--hd-mono, monospace); font-size:0.72rem;
                  color:var(--hd-ink, #cfe8f2); overflow-x:auto;
                  overflow-wrap:anywhere;"></div>
-            <div id="ad_tabs" style="display:flex; gap:6px; margin:14px 0 0; flex-wrap:wrap;"></div>
+            <div id="ad_tabs" role="tablist"
+                 aria-label="${T('dock.tabs.label', 'Analysis categories')}"
+                 style="display:flex; gap:6px; margin:14px 0 0; flex-wrap:wrap;"></div>
             <div id="ad_panes" style="border-top:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));"></div>
         </div>`;
     }
@@ -1290,10 +1966,14 @@
         holder.innerHTML = tabButtonHtml(cat);
         const btn = holder.firstElementChild;
         btn.addEventListener('click', function () { selectCategory(cat); });
+        btn.addEventListener('keydown', tabKeyNav);   // OH-GT-13
         tabs.appendChild(btn);
 
         pane = document.createElement('div');
         pane.id = 'ad_pane_' + cat;
+        pane.setAttribute('role', 'tabpanel');              // OH-GT-13
+        pane.setAttribute('aria-labelledby', 'ad_tab_' + cat);
+        pane.setAttribute('tabindex', '0');
         pane.style.display = 'none';
         pane.innerHTML = `<p class="ad-empty" data-i18n="dock.empty"
             style="color:var(--hd-ink-dim, #7d97a5);
@@ -1315,6 +1995,14 @@
             b.style.color = on ? 'var(--hd-cyan, #00e5ff)' : 'var(--hd-ink-dim, #7d97a5)';
             b.style.borderColor = on ? 'var(--hd-line-strong, rgba(0,229,255,0.42))'
                                      : 'var(--hd-line, rgba(0,229,255,0.14))';
+            // OH-GT-13 — renkten BAĞIMSIZ iki eksen. `borderColor`
+            // kısa yazımı alt kenarı da boyadığı için alt çizgi ONDAN
+            // SONRA yazılır, yoksa seçili alt çizgi silinir.
+            b.style.borderBottomColor = on ? 'var(--hd-cyan, #00e5ff)'
+                                           : 'transparent';
+            b.style.fontWeight = on ? '600' : '400';
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+            b.setAttribute('tabindex', on ? '0' : '-1');
         });
         const panes = document.getElementById('ad_panes');
         if (!panes) return;
@@ -1374,6 +2062,73 @@
         return Number(v.toPrecision(digits || DOCK_SIGFIG));
     }
 
+    // ==================================================================
+    // ÖH D37 A1b sahte-veri-b · OH-D37-S4 — BAYAT ÖNERİ TEMİZLENİR
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/A1b/sahte-veri-b/a1/once/olcum.json,
+    // senaryo S4_sivi_sureli_sonra_suresiz — gerçek güverte + dört panel,
+    // node): süreli sıvı (250 s) → AYNI DOM'da süresiz sıvı → Çalıştır.
+    // Güvenlik, termal, yapısal ve performans panelleri `burn_time: 250`,
+    // güvenlik ayrıca `propellant_mass: 2297,08` gönderiyordu — ÖNCEKİ
+    // koşunun değerleri; dört uç da 200 + tam hüküm döndü ve çip "hesap
+    // sonucu değer taşımıyordu, kutuda panelin varsayılanı duruyor"
+    // diyordu (kutuda varsayılan YOKTU). Kök: öneri yalnız sonlu sayıyı
+    // yazıyor, alanı hiç temizlemiyordu; refreshSuggestions her hesaptan
+    // sonra AYNI DOM'u tazeliyor.
+    //
+    // Kural (geçmişten bağımsızlık): kullanıcının dokunmadığı alanın
+    // değeri = f(alan tanımı, ŞİMDİKİ sonuç). Son değeri ÖNERİDEN gelen
+    // alan (`data-suggested`; `data-dirty` DEĞİL) her geçişin başında
+    // TANIM varsayılanına döner ve şimdiki sonuç öneri veriyorsa yeniden
+    // dolar — yani aynı sonuçla sıfırdan açılan sayfanın göreceği değer.
+    // Varsayılanı boş dize olan alan (burn_time, propellant_mass, cidar
+    // sıcaklığı çifti …) boşalır ve gövdeye GİRMEZ; uç kendi kuralını
+    // adıyla uygular (422 missing_fields ya da adıyla geri çekme).
+    // Kullanıcının elle yazdığı alan (`data-dirty`) EZİLMEZ. Temizlenen
+    // alanın çipi bunu ADIYLA söyler (`data-cleared`, paintFieldSources).
+    // ==================================================================
+    function resetFieldToDefinition(el, f) {
+        const def = f[2];
+        el.value = (def == null) ? '' : String(def);
+        if (el.tagName === 'SELECT') {
+            // fieldHtml tanım değerinde `selected` basar; eşleşen seçenek
+            // yoksa tarayıcı ilk seçeneği seçer — sıfırdan kurulumla aynı.
+            if (el.value !== String(def) && el.options && el.options.length) {
+                el.selectedIndex = 0;
+            }
+            secimIpucu(el);
+        }
+    }
+
+    // Önceki geçişte öneriyle dolan (ve kullanıcının dokunmadığı) alanları
+    // tanım varsayılanına döndürür; döndürülenlerin adlarını verir.
+    function clearSuggestedFields(spec) {
+        const onceki = {};
+        (spec.fields || []).forEach(function (f) {
+            const el = document.getElementById(fieldDomId(spec.id, f[0]));
+            if (!el || !el.dataset || el.dataset.dirty === '1') return;
+            if (el.dataset.suggested !== '1') return;
+            resetFieldToDefinition(el, f);
+            delete el.dataset.suggested;
+            onceki[f[0]] = true;
+        });
+        // Çözücü malzemesi engeli (P17B2-08) de ŞİMDİKİ sonuçtan yeniden
+        // kurulur: önceki koşunun engeli yeni motorun koşumunu durdurmaz.
+        delete blockedSelects[spec.id];
+        return onceki;
+    }
+
+    // Geçiş sonu: öneri almayan eski öneri alanı "temizlendi" imini taşır;
+    // yeniden öneri alan alanın imi kalkar.
+    function markClearedFields(spec, onceki, written) {
+        (spec.fields || []).forEach(function (f) {
+            const el = document.getElementById(fieldDomId(spec.id, f[0]));
+            if (!el || !el.dataset) return;
+            if (written[f[0]]) delete el.dataset.cleared;
+            else if (onceki[f[0]]) el.dataset.cleared = '1';
+        });
+    }
+
     // ------------------------------------------------------------------
     // Öneri (fromResults) uygulama — kullanıcının elle değiştirdiği
     // alanlar (data-dirty) EZİLMEZ; POST her zaman formdan okunur.
@@ -1382,14 +2137,30 @@
         // `applied`: ÖNERİSİ gerçekten alana yazılan alanlar. Kaynak çipi
         // (E3) buradan beslenir — tahmin değil, yapılan işin kaydı.
         const applied = {};
-        if (!cfg.resultsProvider || !spec.fromResults) { paintFieldSources(spec, applied); return; }
+        // `withheld`: panelin BİLEREK doldurmadığı alanların GEREKÇESİ
+        // (Z5-C1). Çip 'assumed' kalır — kutuda gerçekten panel varsayılanı
+        // durur — ama ipucu metni nedenini makine diliyle söyler.
+        const withheld = {};
+        // OH-D37-S4: önceki öneriler tanım varsayılanına döner (yukarıda);
+        // `written` bu geçişte öneriyle YAZILAN alanlar.
+        const onceki = clearSuggestedFields(spec);
+        const written = {};
+        const bitir = function () {
+            markClearedFields(spec, onceki, written);
+            paintFieldSources(spec, applied, withheld);
+        };
+        if (!cfg.resultsProvider || !spec.fromResults) { bitir(); return; }
         let r = null;
         try { r = cfg.resultsProvider(); } catch (e) { r = null; }
-        if (!r) { paintFieldSources(spec, applied); return; }
+        if (!r) { bitir(); return; }
         let sug = null;
         try { sug = spec.fromResults(r); } catch (e) { sug = null; }
-        if (!sug) { paintFieldSources(spec, applied); return; }
+        if (!sug) { bitir(); return; }
+        // Panelin BİLEREK doldurmadığı alanların gerekçesi (bkz. WITHHELD_KEY).
+        const gerekceler = (sug[WITHHELD_KEY] && typeof sug[WITHHELD_KEY] === 'object')
+            ? sug[WITHHELD_KEY] : {};
         Object.keys(sug).forEach(function (k) {
+            if (k === WITHHELD_KEY) return;         // künye sözlüğü, alan değil
             const el = document.getElementById(fieldDomId(spec.id, k));
             if (!el || el.dataset.dirty === '1') return;
             const v = sug[k];
@@ -1408,23 +2179,102 @@
                 for (let i = 0; i < opts.length; i++) {
                     if (opts[i].value === want) { found = true; break; }
                 }
+                // ÖH D24 / P17B2-08 — İKİ AD, TEK MALZEME.
+                // ÖLÇÜLDÜ (P17 tur-16/17): çözücü `steel_304` diyor,
+                // güverte listesinde yalnız `ss_304` var — AYNI alaşımın
+                // iki adı. `materials_db.ALIASES` bunu zaten eşliyor ve
+                // ürün onu `/api/materials` üstünden `HRMAMaterials`e
+                // yayımlıyor. Eşleme burada YENİDEN YAZILMAZ (tek kaynak):
+                // hem çözücünün adı hem her seçenek aynı kataloğa
+                // sorulur, kanonik anahtarlar karşılaştırılır.
+                if (!found && window.HRMAMaterials
+                        && typeof window.HRMAMaterials.resolve === 'function') {
+                    const kanon = window.HRMAMaterials.resolve(want);
+                    if (kanon) {
+                        for (let i = 0; i < opts.length; i++) {
+                            if (window.HRMAMaterials.resolve(opts[i].value)
+                                    === kanon) {
+                                el.value = opts[i].value;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
                 if (found) {
-                    el.value = want;
+                    // el.value alias dalında zaten seçenek değerine
+                    // ayarlandı; doğrudan eşleşmede `want` yazılır.
+                    if (el.value !== want) {
+                        for (let i = 0; i < opts.length; i++) {
+                            if (opts[i].value === want) { el.value = want; break; }
+                        }
+                    } else {
+                        el.value = want;
+                    }
+                    written[k] = true; el.dataset.suggested = '1'; // S4
                     applied[k] = true;
-                } else if (window.console && console.warn) {
-                    console.warn('[AnalysisDock] ' + spec.id + '.' + k
-                        + ': çözücünün verdiği "' + want + '" seçeneği listede yok;'
-                        + ' alan değiştirilmedi (görünen değer gönderilir).');
+                    // DV36-06 — ÖLÇÜLDÜ (a1/once/tarayici.json, hibrit, hesap
+                    // sonrası): öneri `ad_f_thermal_material`i 'steel_4130'a
+                    // çekiyordu, ipucu kurulumdaki 'Çelik (genel)'de kalıyordu
+                    // (görünen 'Steel AISI 4130'). Değer programla değişince
+                    // `change` olayı yok: ipucu burada tazelenir.
+                    secimIpucu(el);
+                    if (blockedSelects[spec.id]) {
+                        delete blockedSelects[spec.id][k];
+                    }
+                } else {
+                    // ÖH D21 / P17B2-08 (yüksek) — UYUŞMAZLIK KONSOLDA KALMAZ.
+                    // ÖLÇÜLDÜ (a2/once.json M3): bu dal kusuru DOĞRU tarif
+                    // eden bir cümle üretiyordu ama yalnız `console.warn`e
+                    // yazıyordu (ekran künyesi sayısı 0). P17 turu sonucu
+                    // ölçtü: çözücü `steel_304` diyor, listede yalnız `ss_304`
+                    // var, alan `steel_4130`da kalıyor ve
+                    // POST /analyze_structural_safety gövdesine
+                    // `"material": "steel_4130"` gidiyor — yani yapısal hüküm
+                    // motorun hesaplandığı alaşımdan BAŞKA bir alaşım
+                    // üzerinde veriliyor. Ekrandaki tek künye `◆ ASSUMED`
+                    // idi: "bir varsayım var" diyor, "çözücünün söylediği
+                    // malzeme DÜŞÜRÜLDÜ" demiyordu.
+                    // Konsol bir kullanıcı arayüzü değildir: gerekçe artık
+                    // `withheld` kanalına yazılır ve `paintFieldSources`
+                    // onu EKRANDA GÖRÜNÜR metin olarak basar. Metin bir
+                    // çeviri anahtarı değil, makine-yolu dizesidir (Z4
+                    // kaçışı): iki anahtar da ham geçer, çevrilmez.
+                    const gonderilen = (el.value == null) ? '' : String(el.value);
+                    withheld[k] = 'solver_value_not_in_option_list: solver="'
+                        + want + '" sent="' + gonderilen + '"';
+                    // ÖH D24 / P17B2-08 — BEYAN ÇÖZÜM DEĞİLDİR.
+                    // D21 gerekçeyi konsoldan ekrana taşıdı; ekranda
+                    // gerekçe duruyor ama İSTEK YİNE DE GİDİYORDU ve
+                    // gövdeye güvertenin KENDİ varsayılanı (`steel_4130`)
+                    // yazılıyordu. Kayıt artık koşumu durdurur.
+                    if (!blockedSelects[spec.id]) blockedSelects[spec.id] = {};
+                    blockedSelects[spec.id][k] = {
+                        solver: want, sent: gonderilen,
+                        label: k,
+                    };
+                    if (window.console && console.warn) {
+                        console.warn('[AnalysisDock] ' + spec.id + '.' + k
+                            + ': çözücünün verdiği "' + want + '" seçeneği listede yok;'
+                            + ' alan değiştirilmedi (görünen değer gönderilir).');
+                    }
                 }
                 return;
             }
             // Anlamlı basamak: ham float değil (T66 + T45, gerekçe yukarıda)
             if (typeof v === 'number' && Number.isFinite(v)) {
                 el.value = dockSigFig(v);
-                applied[k] = true;
+                // OH-D37-S4: öneriyle yazıldı — sonraki sonuç bu alana öneri
+                // vermezse alan tanım varsayılanına döner (bayat kalmaz).
+                written[k] = true;
+                el.dataset.suggested = '1';
+                // GERİ ÇEKİLEN alan "hesaptan geldi" diye imlenmez: kutuda
+                // panelin nöbetçi değeri var, çözücünün sayısı DEĞİL.
+                if (gerekceler[k]) withheld[k] = String(gerekceler[k]);
+                else applied[k] = true;
             }
         });
-        paintFieldSources(spec, applied);
+        bitir();
     }
 
     // ------------------------------------------------------------------
@@ -1463,15 +2313,86 @@
             + 'enter a value.',
     };
 
-    function paintFieldSources(spec, applied) {
+    // ÖH D37 A1b sahte-veri-b · OH-D37-S5 — BOŞ ALANIN İKİ HÂLİ.
+    // `missing` notu ("bir değer girene kadar istek gönderilmez") yalnız
+    // ZORUNLU alan için doğrudur (requiredFieldInfo: tanım varsayılanı
+    // sonlu sayı). İsteğe bağlı boş alan (burn_time, propellant_mass,
+    // cidar sıcaklığı çifti …) gövdeye konmadan istek GİDER; uç o alan
+    // için kendi kuralını uygular (422 missing_fields, bant ya da adıyla
+    // geri çekme). Çipin rengi/etiketi aynı ('missing'); değişen not.
+    const FIELD_SRC_BLANK_OPTIONAL_KEY = 'dock.src.fieldBlankOptional';
+    const FIELD_SRC_BLANK_OPTIONAL_FALLBACK = 'The field is empty — this field '
+        + 'is not sent; the endpoint applies its own rule.';
+    // OH-D37-S4: önceki koşunun önerisi bu koşuda gelmediği için temizlendi.
+    const FIELD_SRC_CLEARED_KEY = 'dock.src.fieldCleared';
+    const FIELD_SRC_CLEARED_FALLBACK = 'The previous run\'s value was cleared '
+        + '— this run did not publish this field.';
+
+    function fieldSourceNote(kind, optional) {
+        if (kind === 'missing' && optional) {
+            return T(FIELD_SRC_BLANK_OPTIONAL_KEY, FIELD_SRC_BLANK_OPTIONAL_FALLBACK);
+        }
+        return T(FIELD_SRC_NOTE_KEYS[kind], FIELD_SRC_NOTE_FALLBACK[kind]);
+    }
+
+    function paintFieldSources(spec, applied, withheld) {
+        const zorunluluk = requiredFieldInfo(spec);            // OH-D37-S5
         (spec.fields || []).forEach(function (f) {
             const fid = f[0];
             const slot = document.getElementById(fieldSourceSlotId(spec.id, fid));
             if (!slot) return;
             const el = document.getElementById(fieldDomId(spec.id, fid));
             const kind = fieldSourceKind(el, fid, applied);
-            slot.innerHTML = sourceChip({ kind: kind, declared: true },
-                T(FIELD_SRC_NOTE_KEYS[kind], FIELD_SRC_NOTE_FALLBACK[kind]));
+            let note = fieldSourceNote(kind, !!zorunluluk.optional[fid]);
+            // OH-D37-S4: bayat öneri temizlendiyse ipucu bunu ÖNCE söyler;
+            // ardından alanın BUGÜNKÜ hâlinin notu (boş / tanım varsayılanı).
+            const temizlendi = !!(el && el.dataset && el.dataset.cleared === '1'
+                && kind !== 'user');
+            if (temizlendi) {
+                note = T(FIELD_SRC_CLEARED_KEY, FIELD_SRC_CLEARED_FALLBACK) + ' ' + note;
+            }
+            // Z5-C1: geri çekilen önerinin GEREKÇESİ ipucuna eklenir. Metin
+            // bir çeviri anahtarı DEĞİL, makine-yolu dizesidir (Z4 kaçışı):
+            // alan adları ve motorun kendi beyanı ham geçer, çevrilmez.
+            if (withheld && withheld[fid]) {
+                note += ' | ' + withheld[fid];
+                if (slot.dataset) slot.dataset.withheld = '1';
+            } else if (slot.dataset && slot.dataset.withheld) {
+                delete slot.dataset.withheld;
+            }
+            slot.innerHTML = sourceChip({ kind: kind, declared: true }, note);
+            // ÖH D21 / P17B2-08: GEREKÇE `title` İPUCUNDA SAKLANMAZ.
+            // P17 turu aynı kusuru iki yerde ölçtü (P17B2-08 malzeme
+            // uyuşmazlığı; borç kontrolünde S1-03 ısı akısı): ürün doğru
+            // beyanı üretiyor ama yalnız ipucuna/konsola yazıyor. İpucu
+            // fare gerektirir, dokunmatik ekranda ve ekran okuyucunun
+            // akışında yoktur. Geri çekilen öneri artık çipin yanında
+            // GÖRÜNÜR bir satır olarak da durur.
+            if (withheld && withheld[fid]) {
+                slot.insertAdjacentHTML('beforeend',
+                    '<span class="ad-withheld-note" style="display:block;'
+                    + 'margin-top:2px; font-family:var(--hd-mono, monospace);'
+                    + 'font-size:0.62rem; letter-spacing:0.04em;'
+                    + 'color:var(--hd-orange, #ff8c33); white-space:normal;">'
+                    + escAttr(withheld[fid]) + '</span>');
+            }
+            // OH-D37-S4: temizlenen alan da ipucunda SAKLANMAZ (D21 dersi) —
+            // çipin altında görünür satır; `data-i18n` ile dil değişince
+            // kendiliğinden çevrilir.
+            if (slot.dataset) {
+                if (temizlendi) slot.dataset.cleared = '1';
+                else delete slot.dataset.cleared;
+            }
+            if (temizlendi) {
+                slot.insertAdjacentHTML('beforeend',
+                    '<span class="ad-cleared-note" data-i18n="'
+                    + FIELD_SRC_CLEARED_KEY + '" style="display:block;'
+                    + 'margin-top:2px; font-family:var(--hd-mono, monospace);'
+                    + 'font-size:0.62rem; letter-spacing:0.04em;'
+                    + 'color:var(--hd-ink-dim, #7d97a5); white-space:normal;">'
+                    + escAttr(T(FIELD_SRC_CLEARED_KEY, FIELD_SRC_CLEARED_FALLBACK))
+                    + '</span>');
+            }
             if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(slot);
         });
     }
@@ -1482,8 +2403,9 @@
         if (!slot) return;
         const el = document.getElementById(fieldDomId(spec.id, fieldId));
         const kind = fieldSourceKind(el, fieldId, null);
+        if (slot.dataset) delete slot.dataset.cleared;             // OH-D37-S4
         slot.innerHTML = sourceChip({ kind: kind, declared: true },
-            T(FIELD_SRC_NOTE_KEYS[kind], FIELD_SRC_NOTE_FALLBACK[kind]));
+            fieldSourceNote(kind, !!requiredFieldInfo(spec).optional[fieldId]));
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(slot);
     }
 
@@ -1513,12 +2435,29 @@
     // hangi alanların boş olduğu kullanıcıya adıyla söylenir. Uydurma
     // varsayılan KONMAZ — boş alan bir değer değildir.
     // ==================================================================
+    //
+    // ÖH A2 sivi-sogutma · 7. tur — 'BOŞ + ZORUNLU' BEYANI.
+    // Kural yalnız sonlu sayısal varsayılanı zorunlu sayıyordu; kaynaksız
+    // ön-dolgusu kaldırılan (tanım değeri BOŞ) ama uç ya da model için
+    // zorunlu olan alan 'isteğe bağlı' görünüyordu (ölçülen: regen paneli
+    // n_channels — güverte çipi "gönderilmez, uç kendi kuralını uygular"
+    // diyordu, uç ise 400 veriyordu). Panel artık `spec.required`
+    // dizisinde bu alanları ADIYLA beyan eder; beyanlı alan varsayılanı
+    // ne olursa olsun zorunludur (boşsa istek gönderilmez). Beyan dışı
+    // alanlarda kural aynen.
     function requiredFieldInfo(spec) {
         const optional = {};
         const labels = {};
+        const beyanli = {};
+        if (spec && Array.isArray(spec.required)) {
+            spec.required.forEach(function (id) {
+                if (typeof id === 'string' && id) beyanli[id] = true;
+            });
+        }
         (spec.fields || []).forEach(function (f) {
             const def = f[2];
-            if (!(typeof def === 'number' && Number.isFinite(def))) {
+            if (!(typeof def === 'number' && Number.isFinite(def))
+                    && !beyanli[f[0]]) {
                 optional[f[0]] = true;
             }
             labels[f[0]] = T(f[4], f[1]);
@@ -1529,6 +2468,9 @@
     // {payload, missing} döner. `missing` boş değilse istek gönderilmemelidir.
     function buildPayload(spec) {
         applySuggestions(spec);
+        // OH-GT-31: öneri bir seçiciyi değiştirmiş olabilir — ipucu seçimle
+        // birlikte gider, yoksa ekranda eski seçeneğin tam metni kalırdı.
+        secimIpuclariniTazele(document.getElementById('ad_sec_' + spec.id));
         const payload = {};
         const missing = [];
         const sec = document.getElementById('ad_sec_' + spec.id);
@@ -1537,6 +2479,12 @@
         sec.querySelectorAll('[data-field]').forEach(function (el) {
             const key = el.getAttribute('data-field');
             if (el.tagName === 'SELECT') {
+                // 7. tur: zorunlu seçicide boş seçim (yer tutucu) bir değer
+                // değildir — istek durur, alan adıyla söylenir.
+                if (el.value === '' && !info.optional[key]) {
+                    missing.push(info.labels[key] || key);
+                    return;
+                }
                 payload[key] = el.value;
                 return;
             }
@@ -1584,6 +2532,127 @@
     }
 
     // ------------------------------------------------------------------
+    // ÖH D34 · OH-GT-14 — GÜVERTE HAM ARKA UÇ KODU BASIYORDU
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (a1/once.json): `runPanel` reddi `throw new Error(data.error
+    // || 'HTTP ' + status)` ile kuruyordu, yani ekrana ucun MAKİNE KODU
+    // düşüyordu: "HATA: incomplete_flow_input". Aynı ölçümde dört ucun
+    // hata gövdesi canlı okundu (Flask test istemcisi, eksik gövde):
+    //   /api/flow-analysis          422  error + message + missing_fields(6)
+    //                                    + invalid_fields(6)
+    //   /analyze_thermal_safety     422  error + message + invalid_fields(1)
+    //   /analyze_structural_safety  422  error + message + missing_fields(3)
+    //   /analyze_safety             422  error + message + missing_fields(3)
+    // Yani kullanıcının ihtiyaç duyduğu HER ŞEY (hangi alan eksik, hangisi
+    // kullanılamaz, neden) gövdede ZATEN vardı ve güverte hepsini atıp tek
+    // bir kodu basıyordu. Arka uca dokunulmadı; kayıp yalnız bu katmandaydı.
+    //
+    // FAIL-CLOSED (Doktrin 1): tanınmayan kod ÇEVRİLMEZ, uydurulmaz ve
+    // yutulmaz — olduğu gibi, "bu güverte bu kodu tanımıyor" işaretiyle
+    // basılır; alan listeleri ve ucun kendi gerekçesi yine gösterilir, yani
+    // tanınmayan kodda bile bilgi KAYBOLMAZ.
+    //
+    // Sözlük anahtarları henüz `i18n_*.js`te YOK (o dosya bu dalgada başka
+    // kulvarın sahasında): `T`/`TF` İngilizce yedeği basar, Türkçe karşılık
+    // metin-i18n kulvarına devredildi. Uç mesajları İngilizce kalır.
+    //: Güvertenin uçlarında ÖLÇÜLMÜŞ reddetme kodları -> sözlük anahtarı.
+    const HATA_ANAHTARI = {
+        incomplete_flow_input: 'dock.err.incompleteFlowInput',
+        invalid_flow_input: 'dock.err.invalidFlowInput',
+        incomplete_thermal_input: 'dock.err.incompleteThermalInput',
+        invalid_thermal_input: 'dock.err.invalidThermalInput',
+        incomplete_structural_input: 'dock.err.incompleteStructuralInput',
+        invalid_structural_input: 'dock.err.invalidStructuralInput',
+        incomplete_safety_input: 'dock.err.incompleteSafetyInput',
+        invalid_safety_input: 'dock.err.invalidSafetyInput',
+    };
+    //: Aynı kodların İngilizce yedek cümleleri (sözlük yüklenmezse basılır).
+    const HATA_YEDEGI = {
+        incomplete_flow_input:
+            'The nozzle flow solution was not run: this endpoint publishes '
+            + 'the regime, CF and thrust of YOUR motor, and the inputs '
+            + 'below were not supplied, so nothing was assumed for you.',
+        invalid_flow_input:
+            'The nozzle flow solution was not run: the inputs below are '
+            + 'outside the range this solver can work in.',
+        incomplete_thermal_input:
+            'The thermal analysis was not run: the inputs below were not '
+            + 'supplied and cannot be derived from the rest of the form.',
+        invalid_thermal_input:
+            'The thermal analysis was not run: the inputs below are not '
+            + 'usable (non-finite, non-positive or out of range).',
+        incomplete_structural_input:
+            'The structural assessment was not produced: the inputs below '
+            + 'were not supplied.',
+        invalid_structural_input:
+            'The structural assessment was not produced: the inputs below '
+            + 'are not usable, and a verdict may not be computed on them.',
+        incomplete_safety_input:
+            'The safety verdict was not produced: the inputs below were '
+            + 'not supplied.',
+        invalid_safety_input:
+            'The safety verdict was not produced: the inputs below are not '
+            + 'usable, and a verdict may not be computed on them.',
+    };
+
+    /** Reddedilen bir uç yanıtını okunabilir cümleye çevirir. */
+    function ucRedMetni(data, http) {
+        const govde = (data && typeof data === 'object') ? data : {};
+        const kod = govde.error ? String(govde.error) : '';
+        const parcalar = [];
+        // V3 KK 3. tur: kendi POST'unu yapan panel kendi ucunun kodunu
+        // üçüncü argümanla verir ({kod: [anahtar, EN yedek]}); güvertenin
+        // ölçülmüş kod tablosu (HATA_ANAHTARI) değişmez.
+        const ekKodlar = (arguments.length > 2 && arguments[2]
+                          && typeof arguments[2] === 'object') ? arguments[2] : {};
+
+        if (!kod) {
+            parcalar.push(TF('dock.err.noCode', { status: http },
+                'The endpoint refused the request (HTTP {status}) without '
+                + 'naming a reason. Nothing was computed.'));
+        } else if (HATA_ANAHTARI[kod]) {
+            parcalar.push(T(HATA_ANAHTARI[kod], HATA_YEDEGI[kod]));
+        } else if (Object.prototype.hasOwnProperty.call(ekKodlar, kod)
+                   && Array.isArray(ekKodlar[kod])) {
+            parcalar.push(T(ekKodlar[kod][0], ekKodlar[kod][1]));
+        } else {
+            // Tanınmayan kod: HAM + İŞARETLİ (sessiz "ok" ya da tahmin yok).
+            parcalar.push(TF('dock.err.unknown', { code: kod, status: http },
+                'The endpoint refused the request with a reason code this '
+                + 'deck does not recognise, printed unchanged: "{code}" '
+                + '(HTTP {status}). Nothing was computed.'));
+        }
+
+        const eksik = Array.isArray(govde.missing_fields)
+            ? govde.missing_fields.map(String) : [];
+        if (eksik.length) {
+            parcalar.push(TF('dock.err.missingFields',
+                { fields: eksik.join(', ') },
+                'Not supplied: {fields}.'));
+        }
+
+        const gecersiz = (Array.isArray(govde.invalid_fields)
+            ? govde.invalid_fields : []).map(function (f) {
+                if (!f || typeof f !== 'object') return String(f);
+                const ad = f.field == null ? '?' : String(f.field);
+                const neden = f.reason ? ' (' + String(f.reason) + ')' : '';
+                return ad + neden;
+            }).filter(function (x) { return eksik.indexOf(x) < 0; });
+        if (gecersiz.length) {
+            parcalar.push(TF('dock.err.invalidFields',
+                { fields: gecersiz.join('; ') },
+                'Not usable: {fields}.'));
+        }
+
+        // Uç kendi gerekçesini yazdıysa ve yukarıda ALAN ADI çıkmadıysa o
+        // cümle TEK bilgi kaynağıdır — yutulmaz (uç mesajları İngilizcedir).
+        if (!eksik.length && !gecersiz.length && govde.message) {
+            parcalar.push(String(govde.message));
+        }
+        return parcalar.join(' ');
+    }
+
+    // ------------------------------------------------------------------
     // Çalıştırma
     // ------------------------------------------------------------------
     async function runPanel(spec) {
@@ -1593,6 +2662,59 @@
         if (!status || !root || !btn) return;
         // Gövde ÖNCE kurulur: zorunlu alan boşsa uca hiç gidilmez (H3-B8).
         const built = buildPayload(spec);
+
+        // ------------------------------------------------------------------
+        // ÖH D24 / P17B2-08 — ÇÖZÜCÜNÜN MALZEMESİ DÜŞÜRÜLDÜYSE KOŞMA
+        // ------------------------------------------------------------------
+        // ÖLÇÜLDÜ (P17 tur-17): çözücü `steel_304` verdi, güverte listesinde
+        // yoktu, alan `steel_4130`da kaldı ve gövdeye `"material":
+        // "steel_4130"` gitti — yapısal emniyet hükmü motorun hesaplandığı
+        // alaşımdan BAŞKA bir alaşım üzerinde verildi. `applySuggestions`
+        // artık alias kataloğunu (materials_db → /api/materials) deniyor;
+        // ORADAN DA çözülemeyen bir ad kalırsa istek GÖNDERİLMEZ. Sessiz
+        // yedek yasaktır: kullanıcı hangi alanın, hangi çözücü değerinin ve
+        // yerine ne gideceğinin ADINI okur.
+        const engel = blockedSelects[spec.id] || {};
+        const engelliAlanlar = Object.keys(engel);
+        if (engelliAlanlar.length) {
+            root.style.display = 'none';
+            status.textContent = TF('dock.materialNotInList',
+                { fields: engelliAlanlar.map(function (k) {
+                    return k + ' (solver="' + engel[k].solver
+                        + '", the form would send "' + engel[k].sent + '")';
+                }).join('; ') },
+                'The solver value for {fields} is not in this deck\'s option '
+                + 'list and could not be matched through the materials '
+                + 'catalogue. The request was NOT sent: a safety verdict may '
+                + 'not be computed on a different material than the motor. '
+                + 'Pick the matching entry yourself, or re-run the motor '
+                + 'calculation with a material this deck offers.');
+            return;
+        }
+
+        // ------------------------------------------------------------------
+        // ÖH D24 / P11B2-11 — BOŞ GÖVDE POSTALAMA
+        // ------------------------------------------------------------------
+        // ÖLÇÜLDÜ (a3/once.json + P11 B2-repro-09): `fields: []` ile
+        // kaydolan panellerde `payload = {}` ve `missing = []` olduğu için
+        // kapı açık kalıyordu; üç uç her seferinde HTTP 400 döndürüyordu
+        // (comparative "At least 2 motor configurations…", uncertainty
+        // "motor_type must be one of…", validation "No CSV content…") ve
+        // kullanıcı ekranda ham arka-uç cümlesi okuyordu. Bu paneller kendi
+        // `fetch`lerini ayrıca kuruyor: güvertenin düğmesi çalışan yolun
+        // yanında duran, HİÇ çalışmayan ikinci bir kontroldü.
+        // Boş gövdenin MEŞRU olduğu tek uç (`/api/correlation-report`,
+        // ölçüldü: 200 + 54.805 B) bunu `allowsEmptyPayload` ile BEYAN eder.
+        if (!Object.keys(built.payload).length && spec.allowsEmptyPayload !== true) {
+            root.style.display = 'none';
+            status.textContent = T('dock.emptyPayload',
+                'This panel declares no deck fields, so this button would '
+                + 'post an empty body — the endpoint rejects that. Nothing '
+                + 'was sent. Use the panel\'s own controls below, which build '
+                + 'the request they need.');
+            return;
+        }
+
         if (built.missing.length) {
             root.style.display = 'none';
             status.textContent = TF('dock.missingFields',
@@ -1607,6 +2729,9 @@
         status.textContent = spec.long
             ? T('common.runningLong', 'RUNNING — this analysis may take a while…')
             : T('common.running', 'RUNNING…');
+        // ÖH D35 · OH-GT-36 — BİTİŞ GERİ BİLDİRİMİ (süre ölçümü burada başlar)
+        const t0 = (window.performance && typeof performance.now === 'function')
+            ? performance.now() : Date.now();
         try {
             const resp = await fetch(spec.endpoint, {
                 method: 'POST',
@@ -1615,7 +2740,7 @@
             });
             const data = await readJsonBody(resp);
             if (!resp.ok || data.status === 'error') {
-                throw new Error(data.error || ('HTTP ' + resp.status));
+                throw new Error(ucRedMetni(data, resp.status));   // OH-GT-14
             }
             purgePlots(root);           // eski grafiklerin resize dinleyicileri sızmasın
             root.innerHTML = '';
@@ -1623,7 +2748,31 @@
             spec.render(data, root);
             if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
             root.style.display = 'block';
-            status.textContent = '';
+            // ------------------------------------------------------------------
+            // ÖH D35 · OH-GT-36 — KOŞUM BİTİNCE DURUM SATIRI SUSUYORDU
+            // ------------------------------------------------------------------
+            // ÖLÇÜLDÜ (a1/once.json M6_bitis_geri_bildirimi): başarı dalının
+            // son işi `status.textContent = ''` idi
+            // (`basari_dalinda_status_bosaltiliyor_mu = true`) ve süre hiç
+            // ölçülmüyordu (`sure_olculuyor_mu = false`). Yani "ÇALIŞIYOR…"
+            // yazısı SİLİNİYOR, yerine hiçbir şey konmuyordu: sonuç kökü
+            // dolsa bile kullanıcı (ve 21 Eylül turunda Cowork) "hiçbir şey
+            // olmadı" sanıyordu — U-1/SU-1/LU-3'ün ayakta kalan çekirdeği bu.
+            // (Aynı bulgunun "istek hiç gitmiyor" iddiası ana modelin canlı
+            // ölçümüyle ÇÜRÜDÜ: istek gidiyor, `ad_root` doluyor.)
+            //
+            // Metin YENİ bir anahtar icat etmez: Analiz Merkezi'nin bitiş
+            // cümlesi (`ac.run.done`, i18n_common.js:233/2802) AYNI olguyu
+            // AYNI sözcüklerle anlatıyor — tek kaynak odur.
+            // Ondalık ayracı da tek kaynaktan: `I18N.number` (i18n.js:330).
+            // Satır SOLMAZ; bir sonraki koşum ya da hata onu değiştirir.
+            const gecen = ((window.performance && typeof performance.now === 'function')
+                ? performance.now() : Date.now()) - t0;
+            const sn = Math.round(gecen / 100) / 10;      // 0,1 s çözünürlük
+            const snMetin = (window.I18N && typeof window.I18N.number === 'function')
+                ? window.I18N.number(sn, 1) : sn.toFixed(1);
+            status.textContent = TF('ac.run.done', { seconds: snMetin },
+                                    'Completed in {seconds} s.');
         } catch (err) {
             status.textContent = TF('common.errorPrefix', { message: err.message },
                                     'ERROR: {message}');
@@ -1648,6 +2797,9 @@
                 if (window.console) console.warn('AnalysisDock rerender:', spec.id, e);
             }
         });
+        // OH-GT-31: seçici ipuçları (`title`) I18N.apply kanalında DEĞİL —
+        // seçenek metni çevrildikten sonra elle tazelenir.
+        secimIpuclariniTazele(document);
         // "Ne değişti" şeridi ve kaynak lejantı da yeni dile döner
         renderDiffBand();
         const legendHost = document.getElementById('ad_src_legend');
@@ -1681,16 +2833,22 @@
             const fid = el.getAttribute('data-field');
             el.addEventListener('input', function () {
                 el.dataset.dirty = '1';
+                delete el.dataset.suggested; delete el.dataset.cleared; // S4
                 repaintFieldSource(spec, fid);      // çip anında 'user'a döner
             });
             el.addEventListener('change', function () {
                 el.dataset.dirty = '1';
+                delete el.dataset.suggested; delete el.dataset.cleared; // S4
                 repaintFieldSource(spec, fid);
+                secimIpucu(el);                       // OH-GT-31
             });
         });
         // İlk montajda sonuçtan önerileri doldur (varsa)
         applySuggestions(spec);
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(sec);
+        // OH-GT-31: öneri seçimi değiştirmiş ve applyTo seçenekleri
+        // çevirmiş olabilir — ipuçları en sonda, çevrilmiş metinle basılır.
+        secimIpuclariniTazele(sec);
     }
 
     // ------------------------------------------------------------------
@@ -1712,6 +2870,10 @@
         kindOfText: sourceKindOfText,
         chip: sourceChip,
         cell: sourceCell,
+        // ÖH D26 / P11B2-10 — panel bağlaması (blok defteri)
+        ledger: sourceLedger,
+        ledgerInto: sourceLedgerInto,
+        declarations: sourceDeclarations,
         legend: sourceLegend,
         color: sourceColor,
         symbol: sourceSymbol,
@@ -1755,6 +2917,25 @@
         }
         inited = true;
 
+        // ÖH D37 A1a · DV36-06 — İPUCU GÖSTERİM ANINDA EŞİTLENİR.
+        // ÖLÇÜLDÜ (a1/once/tarayici.json): katalog (`HRMAMaterials
+        // .populateSelect`, katı sayfası) seçenekleri kurulumdan SONRA yeniden
+        // kuruyor ve ipucu eski seçeneğin metninde kalıyordu ('Steel
+        // (generic)' ⟷ görünen 'Carbon steel (generic, A36-class)'). Kaynak
+        // ne olursa olsun (katalog, öneri, geç sözlük) ipucu, göründüğü an
+        // seçili seçeneğin görünen metnidir: üzerine gelme ve odak.
+        if (dock && dock.addEventListener) {
+            ['mouseover', 'focusin'].forEach(function (olay) {
+                dock.addEventListener(olay, function (e) {
+                    const t = e && e.target;
+                    if (t && t.tagName === 'SELECT' && t.getAttribute
+                            && t.getAttribute('data-field') !== null) {
+                        secimIpucu(t);
+                    }
+                });
+            });
+        }
+
         // Yerleşim düğmeleri (E1) — tercih localStorage'da yaşar
         const toolbar = document.getElementById('ad_toolbar');
         if (toolbar && toolbar.querySelectorAll) {
@@ -1778,6 +2959,10 @@
         }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(dock);
         if (window.I18N && window.I18N.onChange) window.I18N.onChange(rerenderAll);
+        // C4: katlanmış beyanların sıfır-tıklama sayaç rozeti. Güverte
+        // dışındaki panelleri de kapsar (fea/blowdown/sixdof/thermal_fea) —
+        // hepsi aynı sayfada yaşıyor ve hepsinin katlısı varsayılan kapalı.
+        startDeclarationFoldWatch();
     }
 
     function getMotorType() {
@@ -1795,6 +2980,10 @@
         if (typeof cfg.resultsProvider === 'function') {
             try { noteResults(cfg.resultsProvider()); } catch (e) { /* sonuç yok */ }
         }
+        // C4: hesap sonrası katlılar yeniden doluyor. Gözlemci zaten
+        // tetikleniyor; bu çağrı MutationObserver'ı olmayan tarayıcılarda
+        // sayacın bayat kalmamasını garanti eder.
+        scheduleDeclarationFolds();
     }
 
     window.AnalysisDock = {
@@ -1818,12 +3007,55 @@
             diff: DIFF_API,
             t: T,
             tf: TF,
+            /* ÖH D31 · OH-D30-06 — BİRİMLİ DİZE TR KİPİNDE NOKTALI.
+               ÖLÇÜLDÜ (a1/once.json · M5): panels/ altında 17 `toFixed`
+               çağrısı var, `I18N.number` atfı 0. `toFixed` her zaman
+               NOKTA basar; ürünün geri kalanı TR kipinde VİRGÜL basıyor
+               (I18N.number, i18n.js:373). Sonuç: aynı ekranda "36.3 bar"
+               ile "36,3 bar" yan yana duruyordu. Biçim TEK KAYNAKTAN
+               gelir; sözlük motoru yüklenmemişse toFixed'e düşer (sayı
+               UYDURULMAZ, yalnız ayraç yerelleşmez).
+               NOT: CSS geometrisi (piksel, opaklık) BU yardımcıdan
+               GEÇMEZ — orada nokta zorunludur ve virgül stili bozar. */
+            num: function (value, digits) {
+                if (typeof value !== 'number' || !isFinite(value)) {
+                    return (value === null || value === undefined)
+                        ? '' : String(value);
+                }
+                return (window.I18N && window.I18N.number)
+                    ? window.I18N.number(value, digits)
+                    : ((typeof digits === 'number')
+                        ? value.toFixed(digits) : String(value));
+            },
             badge: badge,
             statCard: statCard,
             kvTable: kvTable,
             sectionTitle: sectionTitle,
             listBlock: listBlock,
+            /* ÖH D26 / arayuz a2 — `U.esc` KANALI VARDI, KAPISI YOKTU.
+               ÖLÇÜLDÜ (taban 7751531, node ile canlı koşum:
+               `typeof AnalysisDock.ui.esc === 'undefined'`, ui 37
+               anahtar taşıyor ve `esc` bunlardan biri DEĞİL):
+               `panels/flow_panel.js` bu adı YEDİ kez çağırıyor
+               (`U.esc(String(perf.c_star_source))` gibi) ve ikisi
+               `honestyBlock()` içindedir — o blok ana render yolundan
+               KOŞULSUZ çağrılır (flow_panel.js render: `+ honestyBlock(
+               flow)`). Yani ucun `c_star_source` ya da
+               `inputs.wall_temperature_source` alanı dolu geldiği anda
+               panel `U.esc is not a function` ile düşüyordu; dürüstlük
+               rozetleri (itki çapraz denetimi, C* kaynağı, kullanılan
+               cidar sıcaklığı) hiç çizilmiyordu.
+
+               a1'in `cfd_panel.js` bulgusuyla AYNI SINIF kusur ('U is
+               not defined'): panel bir yardımcıyı çağırıyor, güverte onu
+               yayımlamıyor. Kapı açılıyor ve modülün KENDİ kaçıcısına
+               bağlanıyor — ikinci bir kaçıcı YAZILMADI (doktrin 4). */
+            esc: escAttr,
             warnText: warnText,
+            // V3 KK 3. tur: ret gövdesinin okunur cümlesi (OH-GT-14 ile aynı
+            // kural) — kendi POST'unu yapan paneller (belirsizlik) de
+            // makine kodu yerine bunu basar. İkinci bir okuyucu yazılmaz.
+            rejectText: ucRedMetni,
             purgePlots: purgePlots,
             fmt: fmt,
             pick: pick,
@@ -1849,7 +3081,18 @@
             readChamberMaterial: readChamberMaterial,
             readWallThicknessM: readWallThicknessM,
             readWallThicknessMM: readWallThicknessMM,
+            // Cidarın KÜNYELİ okuması (Z5-C1): çıplak sayı yerine
+            // "bu sayı kimin cidarı" beyanıyla birlikte döner.
+            readWallThicknessProvenance: readWallThicknessProvenance,
+            WALL_PROV_USER: WALL_PROV_USER,
+            WALL_PROV_SOLVER: WALL_PROV_SOLVER,
+            WALL_PROV_UNDECLARED: WALL_PROV_UNDECLARED,
+            // Panelin bir alanı BİLEREK doldurmama sözleşmesi (Z5-C1):
+            // `fromResults` sözlüğüne bu anahtarla {alan: gerekçe} konur.
+            WITHHELD_KEY: WITHHELD_KEY,
             readWallTemperaturesK: readWallTemperaturesK,
+            // Beyan taşıyan katlanmış bölümlerin sıfır-tıklama rozeti (Z5-C4)
+            markDeclarationFolds: markDeclarationFolds,
         },
         // Test / hata ayıklama için salt-okunur kayıt listesi
         _registry: registry,

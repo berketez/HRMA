@@ -24,6 +24,51 @@
 
     if (typeof window === 'undefined') return;
 
+    /* ÖH D35 / OH-GT-25 — EKRAN SAYISI TEK KAYNAKTAN (i18n.js kanonu).
+
+       ÖLÇÜLEN KUSUR (docs/scofield/raw/OH/D35/sayi-bicimi/a1/once.json +
+       ana modelin tarayıcı sayımı, 22 Eylül, TR oturum): ekrana giden
+       ondalıklar NOKTA ile basılıyordu — hibrit 202 / katı 210 / sıvı 95
+       noktalı ondalık, buna karşılık yalnız 36 / 20 / 30 virgüllü. Sebep
+       tek bir hata değil, DESENDİ: ayraç kararı her çağrı yerinde ayrı
+       ayrı `toFixed` ile veriliyordu, yani kural ekranın yüzlerce yerinde
+       tekrarlanıyordu.
+
+       Bu üç yardımcı kararı i18n.js'e devreder (`I18N.number` /
+       `I18N.unit` / `I18N.percent`); ayraç `ondalikAyraci()` TEK
+       kaynağından okunur. Basamak sayısı DEĞİŞMEZ: çağıran `toFixed(1)`
+       dediyse yine bir basamak basılır, yalnız ayraç yerelleşir — aksi
+       hâlde ekranda ölçülmemiş bir duyarlık ilan edilirdi (i18n.js:309
+       künyesi). Sözlük motoru yoksa eski davranışa düşülür: sayı
+       UYDURULMAZ, yalnız ayraç yerelleşmez (panellerin `_num` deseni,
+       cfd_panel.js:207). `typeof window` kontrolü BİLEREK: solid.html'in
+       dürüst biçimlendirici bloğu node'da DOM'suz koşturuluyor
+       (tests/test_ui_no_fabricated_numbers.py). */
+    function numTxt(v, d) {
+        return (typeof window !== 'undefined' && window.I18N && window.I18N.number)
+            ? window.I18N.number(v, d)
+            : ((typeof v === 'number' && isFinite(v))
+                ? (d === undefined ? String(v) : v.toFixed(d)) : String(v));
+    }
+    function unitTxt(v, unit, d) {
+        return (typeof window !== 'undefined' && window.I18N && window.I18N.unit)
+            ? window.I18N.unit(v, unit, d)
+            : (numTxt(v, d) + (unit ? '\u00A0' + unit : ''));
+    }
+    function pctTxt(v, d) {
+        return (typeof window !== 'undefined' && window.I18N && window.I18N.percent)
+            ? window.I18N.percent(v, d) : (numTxt(v, d) + '%');
+    }
+    /* ÖH D36 / sahne-hud — ÖNCEDEN BİÇİMLENMİŞ SAYI METNİ (colorbar tikleri).
+       `cfdTickLabel` saf kalır (bekçiler onu tek başına koşturur) ve
+       ECMA-262 gereği NOKTA basar; ayraç YALNIZ burada, i18n.js'in
+       `decimalText` kanalından yerelleşir (basamak değişmez, ters yön yok). */
+    function decTxt(text) {
+        return (typeof window !== 'undefined' && window.I18N
+                && typeof window.I18N.decimalText === 'function')
+            ? window.I18N.decimalText(text) : text;
+    }
+
     var TAU = Math.PI * 2;
     var CUT_PHI_START = Math.PI / 4;      // kesit modunda dolu bölge başlangıcı
     var CUT_PHI_LENGTH = 1.5 * Math.PI;   // 270° dolu, 90° açık (açıklık φ=0'da)
@@ -40,6 +85,116 @@
     // sahne kendiliğinden 'perf' moduna düşer (görev 3).
     var AUTO_PERF_FRAME_WINDOW = 60;      // ölçüm penceresi (kare)
     var AUTO_PERF_DT_LIMIT = 0.028;       // ortalama kare süresi eşiği (s)
+
+    // Patlatılmış görünüm: parça başına eksenel ofset (× toplam boy × f).
+    // TEK KAYNAK — hem _applyExplode hem gölge kadrajı (eksen boyu patlatma
+    // ile büyür, gölge frustumu buna göre açılır) buradan okur.
+    var EXPLODE_OFFSETS = {
+        closure: -0.48, casing: -0.30, injector: -0.16,
+        liner: -0.06, grain: 0.10, nozzle: 0.30
+    };
+
+    // Zemin düzlemi: dış yarıçapın bu katı kadar aşağıda (gölge düzlemi +
+    // ızgara + durum çipleri aynı düzlemi paylaşır — floorYMm tek kaynak).
+    var FLOOR_DROP_RATIO = 1.9;
+
+    // ==================================================================
+    // RENDER_QUALITY — fotogerçekçi sunum katmanının TEK KAYNAĞI (B7)
+    //
+    // Malzeme / ışık / gölge sayısal parametreleri YALNIZ burada durur;
+    // sahne kodu literal yazmaz (bekçi: tests/test_viz3d_render_kalite.py).
+    // Her alanın yanında ESKİ değeri yazılıdır: geri dönüş tek noktadan.
+    //
+    // KİMLİK DIŞARIDA: neon jant ışıkları (_rimCyan 0x00e5ff / _rimOrange
+    // 0xff7a1a) ve yanma ışıkları (_combLight / _exitLight) bilerek tabloya
+    // ALINMADI — onlar sahnenin renk kimliği ve gerçek yanma verisine bağlı
+    // dinamik ışıklardır; değerleri kimlik bekçisiyle dondurulmuştur.
+    // VERİ KATMANLARI DIŞARIDA: ısı haritası (vertexColors) ve CFD alan
+    // karoları ölçüm gösterir, sunum değil — kendi bekçileri vardır.
+    // ==================================================================
+    var RENDER_QUALITY = {
+        shadow: {
+            // Ölçüm (2026-08-18, varsayılan hibrit L=1670 mm, R=65 mm):
+            // gölge kamerası ±L kare frustumdu ve near hiç ayarlanmıyordu
+            // (r128 varsayılanı 0,5). Teksel 2·L/2048 = 1,63 mm.
+            mapSizeHigh: 4096,        // eski: 2048 (kaliteden bağımsız sabit)
+            mapSizePerf: 1024,        // eski: 2048 (perf kipi gölgeyi düşürmüyordu)
+            fitMargin: 1.04,          // frustum kenar payı (kırpılma emniyeti)
+            // Derinlik bias'ı DÜNYA ölçüsünden türetilir: r128 gölge
+            // gölgelendiricisi `shadowCoord.z += shadowBias` yapar ve
+            // ortografik kamerada derinlik doğrusaldır ⇒
+            //   bias = -biasDepthMm / (far - near)
+            // Kadraj daraldıkça (far-near küçülür) bias otomatik büyür.
+            biasDepthMm: 0.5,         // eski: bias = 0 (varsayılan, akne riski)
+            normalBiasTexels: 1.5,    // eski: normalBias = 0 — teksel × 1,5
+            floorOpacity: 0.32        // eski: 0.32 (DEĞİŞMEDİ — gerekçe raporda)
+        },
+        lights: {
+            // Üç nokta düzeni: anahtar + dolgu + (mevcut) jant ışıkları.
+            // Yayınık bütçe KORUNUR: hemi'den alınan 0,30 dolguya verildi.
+            //   eski: key 0,95 + hemi 0,55            = 1,50
+            //   yeni: key 0,95 + hemi 0,25 + fill 0,30 = 1,50
+            // key/fill oranı 3,17 — sinematografik 2:1..4:1 bandında.
+            keyColor: 0xffffff, keyIntensity: 0.95,      // eski: 0.95 (aynı)
+            keyDir: { x: 0.8, y: 1.1, z: 0.7 },          // eski: aynı konum kuralı
+            hemiSky: 0x93a7c4, hemiGround: 0x0a0e14,     // eski: aynı renkler
+            hemiIntensity: 0.25,                          // eski: 0.55
+            // Dolgu rengi = gökyüzü rengi: bu ışık ambiyansın YÖNLÜ hâlidir,
+            // renk dengesi (dolayısıyla kimlik) değişmesin diye aynı jeton.
+            fillIntensity: 0.30,                          // eski: dolgu YOKTU
+            fillDir: { x: -0.85, y: 0.55, z: 0.75 },
+            diffuseBudget: 1.50                           // key+hemi+fill (kilit)
+        },
+        texture: {
+            // Fırça izi silindir yüzeyinde SIYIRMA açısıyla görülür — izotropik
+            // mipmap bandı bulanıklaştırıp titretir. r128 anizotropik süzmeyi
+            // destekler (capabilities.getMaxAnisotropy) — 8 yaygın tavan, sürücü
+            // sınırıyla ayrıca kısılır.
+            brushedAnisotropy: 8                          // eski: 1 (varsayılan)
+        },
+        // PBR yüzey malzemeleri. envMapIntensity ÖLÇÜLDÜ: grain/grainCut/
+        // liner/linerCut/oring/orifice alanı hiç yazmıyordu ⇒ r128 varsayılanı
+        // 1,0 ile ortam haritasını TAM alıyorlardı — açıkça yazılmış her malzeme
+        // ≤0,75 ve her kesit yüzü 0,2 idi. Tutarsızlık kapatıldı.
+        materials: {
+            casing: { color: 0x9fabbc, metalness: 0.72, roughness: 0.42,
+                      envMapIntensity: 0.70, brushed: true, bumpScale: 0.12,
+                      // Anodize/boyalı alüminyum kasa ince bir dielektrik kat
+                      // taşır: taban fırça izinin ÜSTÜNDE bakışa bağlı ayrı bir
+                      // parlama. r128 MeshPhysicalMaterial clearcoat destekler.
+                      clearcoat: 0.18, clearcoatRoughness: 0.42 }, // eski: clearcoat YOK
+            casingCut: { color: 0xc3ccd8, metalness: 0.15, roughness: 0.90,
+                         envMapIntensity: 0.20, cut: true },
+            nozzle: { color: 0x525c68, metalness: 0.78, roughness: 0.38,
+                      envMapIntensity: 0.75 },
+            nozzleCut: { color: 0x76818f, metalness: 0.10, roughness: 0.95,
+                         envMapIntensity: 0.20, cut: true },
+            graphite: { color: 0x23262a, metalness: 0.42, roughness: 0.78,
+                        envMapIntensity: 0.50 },
+            graphiteCut: { color: 0x393e45, metalness: 0.10, roughness: 0.95,
+                           envMapIntensity: 0.20, cut: true },
+            grain: { color: 0x6d4326, metalness: 0.0, roughness: 0.94,
+                     envMapIntensity: 0.45 },              // eski: örtük 1.0
+            grainCut: { color: 0x936243, metalness: 0.0, roughness: 1.0,
+                        envMapIntensity: 0.20, cut: true }, // eski: örtük 1.0
+            liner: { color: 0x23282e, metalness: 0.05, roughness: 0.90,
+                     envMapIntensity: 0.40 },              // eski: örtük 1.0
+            linerCut: { color: 0x3a4046, metalness: 0.0, roughness: 1.0,
+                        envMapIntensity: 0.20, cut: true }, // eski: örtük 1.0
+            injector: { color: 0xb08d57, metalness: 0.85, roughness: 0.38,
+                        envMapIntensity: 0.65 },
+            injectorCut: { color: 0xd2b184, metalness: 0.20, roughness: 0.85,
+                           envMapIntensity: 0.20, cut: true },
+            bolt: { color: 0x343b44, metalness: 0.85, roughness: 0.40,
+                    envMapIntensity: 0.60 },
+            steel: { color: 0x6f7883, metalness: 0.90, roughness: 0.32,
+                     envMapIntensity: 0.70 },
+            oring: { color: 0x121417, metalness: 0.0, roughness: 0.97,
+                     envMapIntensity: 0.35 },              // eski: örtük 1.0
+            orifice: { color: 0x10151a, metalness: 0.20, roughness: 0.80,
+                       envMapIntensity: 0.35 }             // eski: örtük 1.0
+        }
+    };
 
     // Plume fiziği (görev 6): radyal saçılım referans çıkış yarım açısı ve
     // deniz seviyesinde ~ideal genişleme oranı (pe ≈ pa) yaklaşımı.
@@ -60,6 +215,102 @@
     // Fizik değerleri DEĞİŞMEZ — yalnız görsel sunum (kadraj, boyut,
     // görünürlük aktarımı, ölçek) burada hesaplanır.
     // ==================================================================
+
+    // --- Zemin düzlemi (tek kaynak) -----------------------------------
+    // Gölge düzlemi, ızgara ve durum çipleri aynı y'yi paylaşır; gölge
+    // kamerası da bu düzlemi kadrajına almak zorunda (aşağıya bkz.).
+    function floorYMm(rOuterMm) {
+        return -rOuterMm * FLOOR_DROP_RATIO;
+    }
+
+    // --- Gölge kamerası kadrajı (B7, kalem 1) -------------------------
+    // Ölçüm (2026-08-18): key ışığın ortografik gölge kamerası ±L kare
+    // frustumla kuruluyordu (L = motorun TAM boyu) ve near hiç
+    // ayarlanmıyordu (r128 varsayılanı 0,5). Oysa model ışık düzlemine
+    // izdüşürüldüğünde çok daha küçük bir alan kaplar: varsayılan hibritte
+    // (L=1670 mm, R=65 mm) yarı genişlik 598 mm, yarı yükseklik 529 mm.
+    // Yani gölge dokusunun ~%88'i boşa gidiyordu (teksel 1,63 mm).
+    //
+    // Yeni kural — kadraj ışığın KENDİ tabanına oturur:
+    //   * taban three.js'in lookAt kuralıyla birebir kurulur:
+    //       ẑ = normalize(ışıkKonumu - hedef),  x̂ = normalize(up × ẑ),
+    //       ŷ = ẑ × x̂        (hedef = orijin, up = +Y)
+    //   * modelin AABB köşeleri x̂/ŷ'ye izdüşürülür → halfW/halfH
+    //   * köşelerin ZEMİNE düşen gölgeleri ışık ekseni boyunca kaydığı için
+    //     x̂/ŷ izdüşümünü DEĞİŞTİRMEZ, yalnız derinliği uzatır → far
+    //   * patlatılmış görünümde eksen boyu büyür (EXPLODE_OFFSETS)
+    // Kırpılma emniyeti: r128 gölge gölgelendiricisi frustum dışını
+    // AYDINLIK sayar (`frustumTest` → shadow = 1.0), yani dar kadraj
+    // kenarda bant artefaktı üretmez; kırpılan tek şey gölgenin kendisi
+    // olurdu — bekçi köşeleri bağımsız izdüşürüp bunu sınar.
+    //
+    // Bias'lar teksel boyundan TÜRETİLİR (sabit literal değil):
+    //   normalBias = normalBiasTexels × max(tekselW, tekselH)   [mm]
+    //   bias       = -biasDepthMm / (far - near)                [birimsiz]
+    // İkincisi r128'in `shadowCoord.z += shadowBias` satırının ortografik
+    // (doğrusal derinlik) karşılığıdır; sonuç literatürün -1e-4..-5e-4
+    // bandına kendiliğinden oturur (bekçi bandı sınar).
+    function shadowFrustumFit(halfAxisMm, radiusMm, floorYMm_, lightPos,
+                              mapSize, margin) {
+        var m = margin || 1.0;
+        var lp = [lightPos.x, lightPos.y, lightPos.z];
+        var dist = Math.sqrt(lp[0] * lp[0] + lp[1] * lp[1] + lp[2] * lp[2]);
+        var z = [lp[0] / dist, lp[1] / dist, lp[2] / dist];   // ẑ (ışığa doğru)
+        // x̂ = normalize(up × ẑ); up = +Y ⇒ (z[2], 0, -z[0])
+        var xl = Math.sqrt(z[2] * z[2] + z[0] * z[0]);
+        var x = xl > 1e-9 ? [z[2] / xl, 0, -z[0] / xl] : [1, 0, 0];
+        var y = [z[1] * x[2] - z[2] * x[1],
+                 z[2] * x[0] - z[0] * x[2],
+                 z[0] * x[1] - z[1] * x[0]];                  // ŷ = ẑ × x̂
+        var halfW = 0, halfH = 0, dMin = Infinity, dMax = -Infinity;
+        var sx, sy, sz, p, s, fp, du;
+        for (sx = -1; sx <= 1; sx += 2) {
+            for (sy = -1; sy <= 1; sy += 2) {
+                for (sz = -1; sz <= 1; sz += 2) {
+                    p = [sx * halfAxisMm, sy * radiusMm, sz * radiusMm];
+                    halfW = Math.max(halfW, Math.abs(
+                        p[0] * x[0] + p[1] * x[1] + p[2] * x[2]));
+                    halfH = Math.max(halfH, Math.abs(
+                        p[0] * y[0] + p[1] * y[1] + p[2] * y[2]));
+                    // derinlik: ışıktan noktaya uzaklık = dist - (p·ẑ)
+                    du = dist - (p[0] * z[0] + p[1] * z[1] + p[2] * z[2]);
+                    dMin = Math.min(dMin, du);
+                    dMax = Math.max(dMax, du);
+                    // köşenin zemine düşen gölgesi (ışık ekseni boyunca)
+                    if (z[1] > 1e-9) {
+                        s = (p[1] - floorYMm_) / z[1];
+                        fp = [p[0] - s * z[0], floorYMm_, p[2] - s * z[2]];
+                        du = dist - (fp[0] * z[0] + fp[1] * z[1] + fp[2] * z[2]);
+                        dMax = Math.max(dMax, du);
+                    }
+                }
+            }
+        }
+        halfW *= m;
+        halfH *= m;
+        var pad = (dMax - dMin) * (m - 1) / 2 + 1;
+        var near = Math.max(dMin - pad, dist * 0.01);
+        var far = dMax + pad;
+        var texelW = 2 * halfW / mapSize;
+        var texelH = 2 * halfH / mapSize;
+        return {
+            halfW: halfW, halfH: halfH, near: near, far: far, dist: dist,
+            texelW: texelW, texelH: texelH,
+            normalBias: RENDER_QUALITY.shadow.normalBiasTexels *
+                Math.max(texelW, texelH),
+            bias: -RENDER_QUALITY.shadow.biasDepthMm / (far - near)
+        };
+    }
+
+    // Patlatma açıkken eksen yarı boyu: en büyük |ofset| iki yöne de
+    // uygulanır (emniyetli üst sınır — kırpılma yerine biraz fazla kadraj).
+    function shadowAxisHalfMm(totalLenMm, explodeF) {
+        var mx = 0;
+        Object.keys(EXPLODE_OFFSETS).forEach(function (k) {
+            mx = Math.max(mx, Math.abs(EXPLODE_OFFSETS[k]));
+        });
+        return totalLenMm * (0.5 + mx * Math.max(0, Math.min(1, explodeF || 0)));
+    }
 
     // --- Kamera kadrajı (kalem 4) -------------------------------------
     // Eski kural dist = max(L*1.15, R*6) yalnız dikey FOV'u örtük varsayar,
@@ -384,8 +635,19 @@
         return cells * cellMm;
     }
     // Köşe rozeti metni: hücre boyu beyanı (gerçek seçilen değer yazılır)
+    //
+    // ÖH D21 / P17B1-09 (yüksek) — SAHNE OTURUM DİLİNİ İZLER.
+    // ÖLÇÜLDÜ (P17 B1-tur-07, tarayıcı yereli `en-US`, sayfanın rozetleri
+    // İngilizce): 3B tuvalde beş etiket SABİT TÜRKÇE basılıyordu — 'ızgara
+    // 10 mm', 'ØC iç 80.0 / dış 90.0 mm', 'kontur: çözücü', 'kontur: yerel
+    // üretim', 'soğutma kanalları: veri yok'. Turun sahneye ayırdığı iki
+    // denetim (tuval_dolu, plume_cizildi) PİKSEL sayar, yazıya hiç bakmaz;
+    // bu yüzden hüküm değişmiyordu. Etiketler artık aynı dosyadaki T()
+    // kanalından geçer (anahtar yoksa İngilizce tam metin döner, anahtar
+    // adı ekrana ASLA yazılmaz) — sayılar biçimlendirmeyi değiştirmez,
+    // yalnız çevresindeki sözcükler dile bağlanır.
     function gridBadgeText(cellMm) {
-        return 'ızgara ' + cellMm + ' mm';
+        return T('viz3d.badge.grid', 'grid') + ' ' + cellMm + ' mm';
     }
 
     // --- Ölçü etiketleri (kalem 6-7) ----------------------------------
@@ -405,15 +667,42 @@
     // canvas sprite UTF-8 çizer, 'ic/dis' ASCII kaçışının teknik gerekçesi
     // yoktu. GRAIN/CHAMBER İngilizce kalıntıları da Türkçeleşti: yakıt
     // çekirdeği boyu 'YAKIT', sıvı motorda yanma odası boyu 'ODA'.
+    // P11B1-05 (ölçüldü, sıvı varsayılan koşu): 'ODA' etiketi çözücünün
+    // yanma odası boyunu değil, YAKIT ÇEKİRDEĞİ yedeğini yazıyordu. Sıvı
+    // motorda grain_length yayımlanmaz, bu yüzden dims() içindeki
+    //     Lg = num(gd.grain_length_mm, num(md.grain_length, 0.8*Lch/1000)*1000)
+    // yedeğe düşüyor ve etiket oda boyunun 0,8 KATINI basıyordu
+    // (78,0 ⟷ 97,96 mm). Bu uydurma sayıdır (sahte veri yasağı).
+    // Artık sıvıda ODA doğrudan çözücünün chamber_length'inden gelir;
+    // çözücü onu yayımlamadıysa (chamberLengthKaynakli false) etiketin o
+    // yarısı HİÇ YAZILMAZ — fail-closed, yedek sayı basılmaz.
     function dimensionLabelTexts(v) {
-        var lgWord = v.motorType === 'liquid' ? 'ODA ' : 'YAKIT ';
+        var total = 'L ' + numTxt(v.totalMm, 0) + ' mm';
+        // ÖH D23 / P17B1-09 (ayak 1) — SON İKİ SABİT TÜRKÇE SÖZCÜK.
+        // ÖLÇÜLDÜ (a2 once.json: ham_turkce_YAKIT = 1, ham_turkce_ODA = 1):
+        // D21 sahnedeki beş etiketi T() kanalına bağlamıştı; hükmün (H1)
+        // kaynak taramasının KAÇIRDIĞI altıncı etiket burasıydı — ekranda
+        // `L 668 mm • YAKIT 506 mm` diye okunuyor ve `en-US` oturumda da
+        // Türkçe kalıyordu. Sayı biçimi değişmez, yalnız çevresindeki
+        // sözcük oturum diline bağlanır.
+        if (v.motorType === 'liquid') {
+            if (v.chamberLengthKaynakli && isFinite(v.chamberLengthMm)) {
+                total += '  •  ' + T('viz3d.label.chamber', 'CHAMBER') + ' '
+                    + numTxt(v.chamberLengthMm, 0) + ' mm';
+            }
+        } else {
+            total += '  •  ' + T('viz3d.label.grain', 'GRAIN') + ' '
+                + numTxt(v.grainMm, 0) + ' mm';
+        }
         return {
-            chamber: 'ØC iç ' + v.chamberInnerMm.toFixed(1) + ' / dış '
-                + v.chamberOuterMm.toFixed(1) + ' mm',
-            throat: 'ØT ' + v.throatMm.toFixed(1) + ' mm',
-            exit: 'ØE ' + v.exitMm.toFixed(1) + ' mm',
-            total: 'L ' + v.totalMm.toFixed(0) + ' mm  •  '
-                + lgWord + v.grainMm.toFixed(0) + ' mm'
+            // P17B1-09: 'iç' / 'dış' sözcükleri oturum dilinden gelir.
+            chamber: 'ØC ' + T('viz3d.badge.inner', 'inner') + ' '
+                + numTxt(v.chamberInnerMm, 1) + ' / '
+                + T('viz3d.badge.outer', 'outer') + ' '
+                + numTxt(v.chamberOuterMm, 1) + ' mm',
+            throat: 'ØT ' + numTxt(v.throatMm, 1) + ' mm',
+            exit: 'ØE ' + numTxt(v.exitMm, 1) + ' mm',
+            total: total
         };
     }
 
@@ -452,15 +741,36 @@
     //   user     = kullanıcı girdisi (beyaz)
     //   assumed  = varsayım / yerel üretim (amber)
     //   missing  = modellenmedi / veri yok (gri)
+    // ÖH D32 · OH-D31-18 — `assumed` ambersi artık TOKEN KATMANINDA
+    // tanımlı (`--hd-amber-source`, theme.css + hd_doc.css) ve DEĞERİ
+    // DEĞİŞMEDİ. Tablo `var()` kullanamaz: bu değerler `textSprite`in
+    // canvas `fillStyle`ına ve `new THREE.Color(...)`a gidiyor, ikisi de
+    // CSS değişkeni çözmez. Ayna tokene bekçiyle kilitli:
+    // tests/test_d32_arayuz_panel_a1.py::TestOHD3118AmberTokeni.
     var SOURCE_COLORS = {
         computed: '#39d6ec',
         user: '#e8edf2',
-        assumed: '#ffb347',
+        assumed: '#ffb347',      // = var(--hd-amber-source)
         missing: '#8a93a0'
+    };
+
+    // ÖH D26 / P11B1-09 — SİMGE TABLOSU analysis_dock.js ile BİREBİR.
+    // Renk tek başına ayırt edici değildir (renk körlüğü); panodaki çip ile
+    // sahnedeki çip AYNI durumu AYNI simgeyle göstermek zorundadır, yoksa
+    // kullanıcı iki ayrı görsel dil öğrenmek zorunda kalır.
+    var SOURCE_SYMBOLS = {
+        computed: '●',
+        user: '■',
+        assumed: '◆',
+        missing: '×'
     };
 
     function sourceColor(kind) {
         return SOURCE_COLORS[kind] || SOURCE_COLORS.missing;
+    }
+
+    function sourceSymbol(kind) {
+        return SOURCE_SYMBOLS[kind] || SOURCE_SYMBOLS.missing;
     }
 
     // --- B1: soğutma kanalları (sahte 8 bilezik söküldü) --------------
@@ -604,11 +914,27 @@
     //     emniyetidir (ölçülen sinyalin 0 olduğu yerde bağ değildir).
     //   * r_throat: yeniden örnekleme istasyonu gerçek boğaz noktasını
     //     ıskalayabilir; ölçülen en kötü bağıl sapma 4,27e-3 (coarse,
-    //     küçük konik). Tolerans = 2× en kötü ölçüm → 8,6e-3. Yanlış
-    //     kontur (gerçek uyumsuzluk) yüzde-onlarca sapar — ayrım payı
-    //     en az bir dekad.
+    //     küçük konik). Bu POLİGON-min uzaklığı kullanıcıya bilgi olarak
+    //     beyan edilmeye devam eder (dr_throat_mm) ama KAPI artık onunla
+    //     kurulmaz — aşağıdaki parti 33 hükmüne bak (beyan yeniden
+    //     üretimi, dr_throat_node_mm).
     var CFD_ALIGN_EXACT_REL_TOL = 1e-9;
-    var CFD_ALIGN_R_THROAT_REL_TOL = 8.6e-3;
+    // Boğaz çapası kapısı (parti 33 hükmü): eski 8,6e-3 sabiti kalibre
+    // edilmiş bir AİLE ölçümüydü (2× en kötü: konik 40/60/100 + bell hibrit
+    // + küçük konik) ve ailenin dışındaki sıvı bell konturunda GERÇEK
+    // yeniden-örnekleme sapması kılpayı dışarı taştı (canlı ölçüm, 18 Ağu:
+    // dr_throat 0,147 mm / minR ≈ %0,98 > %0,86 → alan sahneye hiç
+    // inemiyordu). Aileyi büyütmek yerine ucun YAYIMLADIĞI kural sahnede
+    // yeniden üretilir: "the wall polyline is resampled onto ni+1 uniform
+    // axial stations by linear interpolation" (grid._basis / koşum kartı).
+    // Sahne konturu aynı kurala sokulup DÜĞÜM-min ↔ DÜĞÜM-min
+    // karşılaştırılır; fark artık örnekleme yoğunluğundan bağımsız saf
+    // float gürültüsüdür (m→mm ölçek + JSON gidiş-dönüşü; ölçülen
+    // < 1e-12 bağıl). 1e-9 emniyet payı gerçek kontur uyuşmazlığının
+    // (yüzde-onlarca) >=6 dekad altındadır. Ucun kuralı değişirse
+    // tests/test_viz3d_cfd_alan.py::_kaynak_bagi_dogrula bağı kopar ve
+    // süit kırmızıya düşer — kural kopyası sürüklenemez.
+    var CFD_ALIGN_R_THROAT_REPRO_REL_TOL = 1e-9;
     // Radyal düzgünlük eşiği: yükün kendi beyanı "the radial distribution
     // is uniform from axis to wall" (grid._basis). Düzgün dağılımda bir
     // istasyondaki ardışık hücre-merkez farkları eşittir; ölçülen float
@@ -630,6 +956,26 @@
         return dims.Lch + (zMm - dims.contourPoints[0].z);
     }
 
+    // Ucun beyan ettiği yeniden örnekleme sahne konturunda yeniden
+    // üretilir: ni+1 düzgün z istasyonu, doğrusal interpolasyon, en küçük
+    // DÜĞÜM yarıçapı. cfdFieldAlignment'ın boğaz kapısı bunun çıktısıyla
+    // karşılaştırır (düğüm-min ↔ düğüm-min; polygon-min ile DEĞİL — o fark
+    // örnekleme yoğunluğuna bağlıdır ve kullanıcıya bilgi olarak ayrıca
+    // beyan edilir).
+    function cfdReproThroatNodeR(pts, ni) {
+        var z0 = pts[0].z, z1 = pts[pts.length - 1].z;
+        var minR = Infinity, seg = 0;
+        for (var k = 0; k <= ni; k++) {
+            var z = z0 + (z1 - z0) * k / ni;
+            while (seg < pts.length - 2 && pts[seg + 1].z < z) seg++;
+            var a = pts[seg], b = pts[seg + 1];
+            var r = (b.z === a.z) ? a.r
+                : a.r + (b.r - a.r) * (z - a.z) / (b.z - a.z);
+            if (r < minR) minR = r;
+        }
+        return minR;
+    }
+
     // Geometri çapa denetimi: CFD ızgarası sahnede çizilen konturla aynı
     // geometriden mi kuruldu? Sahne konturu yerel üretimse (contourSource
     // !== 'solver') ızgara başka geometridir — yanlış hizalanmış alan
@@ -649,10 +995,15 @@
         var ze = num(grid.z_exit_m, NaN) * 1000;
         var rt = num(grid.r_throat_m, NaN) * 1000;
         var rx = num(grid.r_exit_m, NaN) * 1000;
+        var ni = num(grid.ni, NaN);
         if (!isFinite(zi) || !isFinite(ze) || !isFinite(rt)
             || !isFinite(rx)) {
             return { ok: false, code: 'bad_field_block',
                      params: { missing: 'grid anchors' } };
+        }
+        if (!isFinite(ni) || ni < 2) {
+            return { ok: false, code: 'bad_field_block',
+                     params: { missing: 'grid.ni' } };
         }
         var cz0 = pts[0].z, cz1 = pts[pts.length - 1].z;
         var minR = Infinity;
@@ -661,23 +1012,31 @@
         }
         var cRx = pts[pts.length - 1].r;
         var axLen = Math.max(cz1 - cz0, 1e-9);
+        // dr_throat_mm: kontur POLİGON minimumuna uzaklık — kullanıcıya
+        // beyan edilen bilgi (örnekleme istasyonu gerçek boğazı ne kadar
+        // ıskaladı). KAPI bununla değil, beyan yeniden üretimiyle kurulur:
+        // dr_throat_node_mm = |ızgara boğazı - aynı kuralla sahneden
+        // üretilen düğüm-min|.
+        var rtRepro = cfdReproThroatNodeR(pts, Math.round(ni));
         var meas = {
             dz_inlet_mm: Math.abs(zi - cz0),
             dz_exit_mm: Math.abs(ze - cz1),
             dr_throat_mm: Math.abs(rt - minR),
+            dr_throat_node_mm: Math.abs(rt - rtRepro),
             dr_exit_mm: Math.abs(rx - cRx)
         };
         var mismatch =
             meas.dz_inlet_mm > CFD_ALIGN_EXACT_REL_TOL * axLen ||
             meas.dz_exit_mm > CFD_ALIGN_EXACT_REL_TOL * axLen ||
             meas.dr_exit_mm > CFD_ALIGN_EXACT_REL_TOL * cRx ||
-            meas.dr_throat_mm > CFD_ALIGN_R_THROAT_REL_TOL * minR;
+            meas.dr_throat_node_mm > CFD_ALIGN_R_THROAT_REPRO_REL_TOL * minR;
         if (mismatch) {
             return { ok: false, code: 'contour_mismatch', params: meas };
         }
         return { ok: true, dz_inlet_mm: meas.dz_inlet_mm,
                  dz_exit_mm: meas.dz_exit_mm,
                  dr_throat_mm: meas.dr_throat_mm,
+                 dr_throat_node_mm: meas.dr_throat_node_mm,
                  dr_exit_mm: meas.dr_exit_mm };
     }
 
@@ -710,6 +1069,50 @@
     function cfdWallRadii(field) {
         var rm = field && field.r_m;
         if (!Array.isArray(rm) || rm.length < 2) return null;
+        // ------------------------------------------------------------------
+        // YAYIMLANMIŞ RADYAL GEOMETRİ (parti 40) — TÜRETME DEĞİL OKUMA.
+        // Uç artık her yayımlanan istasyonun nj+1 radyal DÜĞÜM yarıçapını
+        // taşıyor (field.radial_geometry). Blok varsa duvar yarıçapı
+        // TÜRETİLMEZ, son düğümden OKUNUR ve düzgünlük hükmü UCUN
+        // ÖLÇÜMÜNDEN alınır — burada yeniden ölçülmez.
+        //
+        // NEDEN 'ada değil ölçüme bak': dağılımın AİLE ADI 'uniform'
+        // kalırken geometri düzgün OLMAYABİLİR (duvar-normal yaka düzgün
+        // bir dağılımın üstüne kurulunca ad değişmez, düğümler eşit
+        // aralıklı olmaktan çıkar — ölçülen aralık sapması 4,7e-01).
+        // O yüzden bloğun `radial_distribution` ADI değil `radial_uniform`
+        // ÖLÇÜMÜ okunur.
+        //
+        // NEDEN DÜZGÜN OLMAYAN YÜK YİNE DE REDDEDİLİYOR: bu katmanın karo
+        // kurucusu (aşağıdaki CFD katman kurucu işlevi — adı bu yorumda
+        // BİLEREK yazılmadı, çünkü tests/test_viz3d_cfd_alan.py::
+        // test_metrik_degisimi_geometri_kurmaz o adın KAYNAKTAKİ geçiş
+        // sayısını sayıyor ve bir yorum bile o bekçiyi yanlış ateşler)
+        // radyal bandı hâlâ [j/nj, (j+1)/nj] diye
+        // kuruyor, yani EŞİT ARALIK varsayıyor. Duvar yarıçapını doğru
+        // okumak o varsayımı düzeltmez; gerdirilmiş bir yükü çizmek
+        // SESSİZCE YANLIŞ çizmek olurdu. Karo modeli mutlak düğüm
+        // yarıçaplarına geçene kadar red DOĞRU davranıştır ve çağıran onu
+        // 'bad_field_block' olarak beyan eder.
+        var rg = field.radial_geometry;
+        if (rg && Array.isArray(rg.r_nodes_m)
+                && rg.r_nodes_m.length === rm.length) {
+            if (rg.radial_uniform !== true) return null;
+            var okunan = [];
+            for (var k = 0; k < rg.r_nodes_m.length; k++) {
+                var dugum = rg.r_nodes_m[k];
+                var satir = rm[k];
+                if (!Array.isArray(dugum) || !Array.isArray(satir)
+                        || dugum.length !== satir.length + 1) {
+                    return null;
+                }
+                var rw = num(dugum[dugum.length - 1], NaN);
+                if (!isFinite(rw) || !(rw > 0)) return null;
+                okunan.push(rw);
+            }
+            return okunan;
+        }
+        // ESKİ YÜK YOLU (blok yok): bugünkü türetme korunur — geri uyum.
         var out = [];
         for (var i = 0; i < rm.length; i++) {
             var row = rm[i];
@@ -959,6 +1362,109 @@
         return { values: out, min: min, max: max };
     }
 
+    // ------------------------------------------------------------------
+    // A1b faz-c-0 · K1b — PROBE (fare altı hücre okuması), saf katman
+    // ------------------------------------------------------------------
+    // Sözleşme: docs/tasarim/ui-yeniden/B2_ansys_analiz_sonuc.md §4
+    // "Probe" + §7.1 K1b (B1 K1b; hakem uygulama B1). Alan katmanı hücre
+    // başına İKİ kesit düzleminde ikişer üçgen kurar (12 köşe, hücre sırası
+    // eksenel dış / radyal iç döngü) — r128 raycast'i indekssiz geometride
+    // `faceIndex` = üçgen sırası verir, yani üçgen t hücre floor(t / 4)'ün
+    // karosudur. Eşleme bekçisi GERÇEK geometri üstünde koşar
+    // (tests/test_faz_c_k1b.py): kurulum değişip eşleme bozulursa yanlış
+    // hücrenin sayısı yazılmaz, bekçi kırmızı olur.
+    var CFD_PROBE_TRIS_PER_CELL = 4;
+
+    function cfdProbeCell(faceIndex, nAx, nRad) {
+        if (typeof faceIndex !== 'number' || !isFinite(faceIndex)
+            || faceIndex < 0 || !(nAx > 0) || !(nRad > 0)) {
+            return null;
+        }
+        var c = Math.floor(faceIndex / CFD_PROBE_TRIS_PER_CELL);
+        if (c >= nAx * nRad) return null;
+        return { cell: c, k: Math.floor(c / nRad), j: c % nRad };
+    }
+
+    // Okuma: değer yükteki dizinin KENDİ elemanıdır (field[payloadKey]
+    // [k][j]; bit-aynı). CFD hücre merkezli, karo düzdür — ara değer
+    // üretilmez, `interpolated` bu yolda daima false (künye yalnız gerçek
+    // ara değerde basılır; FEA kabuğunun en yakın düğüm/eleman içi yolu
+    // K3b'nin). Hücre künyesi çözücünün KENDİ indeksleridir
+    // (axial_indices / radial_indices — inceltilmiş yükte atlanan
+    // istasyonlar sayılır), konum hücre merkezinin yayımlanan z_m / r_m'si.
+    // Sonlu olmayan değer → null (uydurma sayı basılmaz).
+    function cfdProbeReading(L, hucre) {
+        if (!L || !hucre) return null;
+        var m = null;
+        for (var i = 0; i < CFD_METRICS.length; i++) {
+            if (CFD_METRICS[i].id === L.metric) m = CFD_METRICS[i];
+        }
+        if (!m) return null;
+        var satir = (L.field[m.payloadKey] || [])[hucre.k];
+        var v = Array.isArray(satir) ? satir[hucre.j] : undefined;
+        if (typeof v !== 'number' || !isFinite(v)) return null;
+        var zr = (L.field.z_m[hucre.k] || [])[hucre.j];
+        var rr = (L.field.r_m[hucre.k] || [])[hucre.j];
+        var ai = L.field.axial_indices, ri = L.field.radial_indices;
+        var ii = Array.isArray(ai) ? num(ai[hucre.k], NaN) : hucre.k;
+        var jj = Array.isArray(ri) ? num(ri[hucre.j], NaN) : hucre.j;
+        return {
+            metric: m.id, labelKey: m.labelKey,
+            labelFallback: m.labelFallback,
+            value: v, unit: m.unit,
+            // k/j: katman (yük) indeksi; axial/radial: çözücü indeksi
+            cell: { k: hucre.k, j: hucre.j,
+                    axial: isFinite(ii) ? ii : hucre.k,
+                    radial: isFinite(jj) ? jj : hucre.j },
+            z_m: num(zr, null), r_m: num(rr, null),
+            sampling: 'cell-centred', interpolated: false,
+            decimated: !!L.decimated,
+            stations: { shown: L.stationsShown, total: L.stationsTotal }
+        };
+    }
+
+    // Probe satırının parçaları (ekran metni; sayılar I18N kanalından —
+    // TR virgül; makine kanalı DOM özniteliğinde nokta). Doktrin (B2 §4c):
+    // <metrik> <değer> [<birim>] · hücre (i, j) · konum · N/M istasyon.
+    function probeLineParts(rd) {
+        var parts = [
+            { cls: 'metric', text: T(rd.labelKey, rd.labelFallback) },
+            // Birim alan tanımından; birimsiz büyüklükte (Mach) boş
+            { cls: 'value', text: unitTxt(rd.value, rd.unit) },
+            { cls: 'meta', text: cfdFormatTemplate(
+                T('viz3d.probe.cell', 'cell ({i}, {j})'),
+                { i: rd.cell.axial, j: rd.cell.radial }) }
+        ];
+        if (typeof rd.z_m === 'number' && typeof rd.r_m === 'number') {
+            parts.push({ cls: 'meta', text: cfdFormatTemplate(
+                T('viz3d.probe.centre', 'cell centre z = {z} mm, r = {r} mm'),
+                { z: numTxt(rd.z_m * 1000, 1), r: numTxt(rd.r_m * 1000, 1) }) });
+        }
+        if (rd.decimated && rd.stations) {
+            parts.push({ cls: 'decl', text: cfdFormatTemplate(
+                T('viz3d.cfd.stations', '{shown} / {total} axial stations'),
+                { shown: rd.stations.shown, total: rd.stations.total }) });
+        }
+        if (rd.interpolated === true) {
+            parts.push({ cls: 'decl',
+                         text: T('viz3d.probe.interpolated', 'interpolated') });
+        }
+        return parts;
+    }
+
+    function probeLineText(rd) {
+        return probeLineParts(rd).map(function (p) { return p.text; })
+            .join(' · ');
+    }
+
+    // Tırnak işareti \u0022 kaçışıyla yazılır: kaynak tarayan bekçilerin
+    // yorum söküçüleri (ör. D27 a1 olcum.py `yorumsuz`) düzenli ifade
+    // değişmezindeki çıplak tırnağı dize başlangıcı sanıp kayıyor (ölçüldü).
+    function probeHtmlEsc(t) {
+        return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/\u0022/g, '&quot;');
+    }
+
     // Parıltı silindirinin lathe-z aralığı — TEK KAYNAK: _rebuildGlow
     // geometriyi BU değerlerle kurar, CFD örtüşme ölçümü de aynı aralığı
     // okur (ikinci formül kopyası yazılmaz). İfade _rebuildGlow'un eski
@@ -1093,14 +1599,32 @@
     // (plumeColorAt → gerçek sıcaklık sürücüsü) gelir; dokuya gömülü keyfi
     // turuncu yok (eski glowTexture çifti egzozdan çıkarıldı). 128 px:
     // glowTexture ile aynı doku bütçesi (kalem 5).
+    // CSS alfa metni (MAKİNE kanalı, dil bağımsız): 1e-4'e yuvarlanır;
+    // [0,1] aralığında ECMA-262 `String` üstel gösterime geçmez (eşik
+    // 1e-6) ve ondalık ayracı her zaman NOKTA'dır. Ekran biçimleyicisi
+    // (numTxt / I18N.number) buraya GİRMEZ.
+    function cssAlpha(a) {
+        var v = Math.max(0, Math.min(1, Number(a) || 0));
+        return String(Math.round(v * 1e4) / 1e4);
+    }
+
     function flameSpriteTexture() {
         var c = makeCanvas(128, 128);
         var g = c.getContext('2d');
         var grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
         var stops = flameSpriteStops(9);
         for (var i = 0; i < stops.length; i++) {
+            // ÖH D36 / sahne-hud a2 — MAKİNE KANALI: CSS renk dizesi.
+            // ÖLÇÜLDÜ (raw/OH/D36/sahne-hud/a2/once.json): D35 sayı
+            // kanonu bu alfa değerini ekran biçimlendiricisinden (numTxt
+            // → I18N.number) geçiriyordu; TR oturumda dize
+            // 'rgba(255,255,255,1,0000)' oluyor, addColorStop SyntaxError
+            // atıyor ve MotorScene kurucusu (_buildPlume) çöküyordu: 3B
+            // güverte Türkçe arayüzde HİÇ açılmıyordu. Renk dizesi CSS
+            // sözdizimidir, dil değil: `cssAlpha` NOKTA basar.
+            // Bekçi: tests/test_d36_sahne_a2.py
             grad.addColorStop(stops[i].t,
-                'rgba(255,255,255,' + stops[i].alpha.toFixed(4) + ')');
+                'rgba(255,255,255,' + cssAlpha(stops[i].alpha) + ')');
         }
         g.fillStyle = grad;
         g.fillRect(0, 0, 128, 128);
@@ -1112,7 +1636,7 @@
     // Fırçalanmış metal dokusu: çevresel taşlama izleri (LatheGeometry
     // UV'sinde u=çevre, v=profil → satır bazlı parlaklık gürültüsü çevresel
     // çizgi üretir). bumpMap + roughnessMap olarak paylaşılır.
-    function brushedTexture() {
+    function brushedTexture(maxAnisotropy) {
         var c = makeCanvas(64, 256);
         var g = c.getContext('2d');
         for (var y = 0; y < 256; y++) {
@@ -1126,6 +1650,13 @@
         tex.wrapS = THREE.RepeatWrapping;
         tex.wrapT = THREE.RepeatWrapping;
         tex.repeat.set(1, 3);
+        // Anizotropik süzme (B7 kalem 2): doku minFilter'ı varsayılan
+        // LinearMipmapLinear'dır (ölçüldü: 1008), yani mipmap zinciri zaten
+        // kuruluyor; silindirin siyirma açılı kısımlarında izotropik mipmap
+        // fırça izini bulanıklaştırıp titretiyordu. Sürücü tavanı (r128
+        // capabilities.getMaxAnisotropy) ayrıca kısıtlar.
+        tex.anisotropy = Math.max(1, Math.min(
+            RENDER_QUALITY.texture.brushedAnisotropy, maxAnisotropy || 1));
         return tex;
     }
 
@@ -1231,7 +1762,15 @@
     // verinin gerçek kaynağını beyan eder (tasarım dili, B4 temeli).
     function statusChip(text, kind) {
         var col = sourceColor(kind);
-        return textSprite(text, { color: col, border: col });
+        // ÖH D26 / P11B1-09 — SİMGE DE BASILIR, yalnız renk değil.
+        // Panodaki çip (analysis_dock.js::sourceChip) durumu
+        // "simge + etiket" ikilisiyle gösteriyor; sahne yalnız renk
+        // kullansaydı iki yüzey aynı hükmü iki ayrı görsel dille
+        // anlatırdı ve renk körü kullanıcı sahnede hiçbir ayrım
+        // göremezdi. Tablo iki dosyada birebirdir (bekçi:
+        // test_d26_arayuz_a1.py::test_simge_tablosu_panoyla_birebir).
+        return textSprite(sourceSymbol(kind) + ' ' + text,
+                          { color: col, border: col });
     }
 
     // ------------------------------------------------------------------
@@ -1320,7 +1859,13 @@
         ['chamber_structure', 'wall_thickness', 'required_wall_thickness', true]
     ];
 
-    function resolveCasingWall(md, Dch) {
+    // ÖH D26 / P11B1-09: ikinci parametreden sonra İSTEĞE BAĞLI `out`
+    // sözlüğü alır ve çizilen kalınlığın NEREDEN geldiğini `out.kind`
+    // alanına yazar ('user' | 'computed' | 'assumed'). Eski iki argümanlı
+    // çağrılar aynen çalışır — çizim davranışı değişmez, yalnız kaynak
+    // hükmü artık dışarı verilir (önceden hiç verilmiyordu).
+    function resolveCasingWall(md, Dch, out) {
+        var o = out || {};
         var struct = (md && md.structural_analysis) || {};
         for (var i = 0; i < CASING_WALL_SCHEMAS.length; i++) {
             var s = CASING_WALL_SCHEMAS[i];
@@ -1332,12 +1877,24 @@
             // Gerilmelerin hesaplandığı kalınlık çizilir: 'verify' modunda
             // (ya da as-designed alanı kesin olan şemalarda) kullanıcının
             // cidarı, aksi hâlde yapısal önerinin kendisi.
-            if ((blk.design_mode === 'verify' || s[3]) && used !== null && used > 0) return used;
-            if (recommended !== null && recommended > 0) return recommended;
-            if (used !== null && used > 0) return used;
+            if ((blk.design_mode === 'verify' || s[3]) && used !== null && used > 0) {
+                // Kullanıcının/tasarımın as-designed cidarı çiziliyor.
+                o.kind = 'user'; o.basis = s[0] + '.' + s[1];
+                return used;
+            }
+            if (recommended !== null && recommended > 0) {
+                o.kind = 'computed'; o.basis = s[0] + '.' + s[2];
+                return recommended;
+            }
+            if (used !== null && used > 0) {
+                o.kind = 'user'; o.basis = s[0] + '.' + s[1];
+                return used;
+            }
         }
         // Yapısal sonuç yok: sunucu tarafındaki AYNI geometrik yedek kural
         // (CHAMBER_WALL_FALLBACK_FRACTION = 0.045) — mesh ile çelişmesin.
+        // Bu bir VARSAYIMDIR; sahne artık bunu çiple beyan eder.
+        o.kind = 'assumed'; o.basis = 'geometric fallback 0.045·D';
         return Math.max(4, 0.045 * Dch);
     }
 
@@ -1391,21 +1948,45 @@
             ? tc / (1 + 0.5 * (gamma - 1) * me * me)
             : NaN;
 
-        // Tam genişlemiş eşdeğer jet Mach sayısı: akış pa basıncına kadar
-        // izentropik genişleseydi ulaşacağı Mach. Aşırı-genişlemiş jette
-        // (pe < pa) Mj < Me olur.
+        // Tam genişlemiş eşdeğer jet Mach sayısı Mj: akış pa basıncına kadar
+        // izentropik genişleseydi ulaşacağı Mach. Toplam basınç korunur:
+        //     1 + (γ−1)/2·Mj² = (p0/pa)^((γ−1)/γ),
+        //     p0 = pe·(1 + (γ−1)/2·Me²)^(γ/(γ−1))
+        //  => Mj² = 2/(γ−1)·[(pe/pa)^((γ−1)/γ)·(1 + (γ−1)/2·Me²) − 1]
+        // pe = pa ⇒ Mj = Me (tam genişleme); aşırı-genişlemiş jette
+        // (pe < pa) Mj < Me olur. Bağımsız sağlama: Norum & Seiner, NASA
+        // TM-84521 (1982) Tablo 1 s. 191 (γ = 1,4; Pt/Pa 3,247 ↔ Mj 1,414).
+        // KU-25 / H-4 düzeltmesi: eski kod köşeli ifadenin önüne "1 +"
+        // ekleyip √(1 + Mj²) üretiyordu (pe = pa'da Me 2,56 iken 2,75).
         var mj = me;
-        var arg = 1 + (2 / (gamma - 1)) * (Math.pow(pRatio, (gamma - 1) / gamma)
+        var mj2 = (2 / (gamma - 1)) * (Math.pow(pRatio, (gamma - 1) / gamma)
             * (1 + 0.5 * (gamma - 1) * me * me) - 1);
-        if (isFinite(arg) && arg > 1) mj = Math.sqrt(arg);
+        if (isFinite(mj2) && mj2 > 0) mj = Math.sqrt(mj2);
 
-        // Şok hücre aralığı — Prandtl-Pack bağıntısı:
+        // Tam genişlemiş jet çapı D_j — aynı toplam koşulla izentropik
+        // kütle korunumu: D_j = d_e·√[(A/A*)(Mj) / (A/A*)(Me)].
+        // Kaynak: Wernet, Georgiadis & Locke, NASA/TM-20205007269 (2020)
+        // Denk. (4) s. 41 (D_eff; SMC017 SP1664: D 50,8 mm → 47 mm).
+        function areaRatio(m) {
+            var t = (2 / (gamma + 1)) * (1 + 0.5 * (gamma - 1) * m * m);
+            return Math.pow(t, (gamma + 1) / (2 * (gamma - 1))) / m;
+        }
+        var dj = num(md.exit_diameter, 0) * 1000
+            * Math.sqrt(areaRatio(mj) / areaRatio(me));
+
+        // Şok hücre aralığı — Prandtl-Pack doğrusal bağıntısı:
         //     L_s = 1.306 * D_j * sqrt(Mj^2 - 1)
-        // Kaynak: Prandtl (1904); Pack, Q. J. Mech. Appl. Math. 3 (1950).
-        // Jet aeroakustiğinde yaygın olarak doğrulanmıştır. Mj <= 1 ise
-        // hücre yapısı oluşmaz (tam genişlemiş/ses altı jet).
-        var cellSpacing = (mj > 1.02)
-            ? 1.306 * num(md.exit_diameter, 0) * 1000 * Math.sqrt(mj * mj - 1)
+        // Kaynak: Prandtl (1904); Pack, Q. J. Mech. Appl. Math. 3 (1950)
+        // (künye CFD B1 P-M10'dan; özgün metin bu turda okunmadı).
+        // GEÇERLİLİK BEYANI: doğrusal teori yalnız hafif basınç
+        // uyumsuzluğunda geçerlidir — Love 1959, NASA TR R-6, Sonuç 1
+        // s. 23: p_j/p_∞ ≈ 2 üstünde mevcut yöntemler yetersiz. Aşırı
+        // genişlemiş ölçümlerde (Norum-Seiner M2,0; Wernet SP1664) D_j ile
+        // bile ≈ %20-30 fazla tahmin eder. Sahnedeki aralık bu yüzden TEMSİLÎDİR,
+        // ölçülmüş ya da CFD hücre boyu değildir. Mj <= 1 ise hücre yapısı
+        // oluşmaz (ses altı jet).
+        var cellSpacing = (mj > 1.02 && dj > 0)
+            ? 1.306 * dj * Math.sqrt(mj * mj - 1)
             : 0;
 
         return {
@@ -1425,6 +2006,292 @@
         };
     }
 
+    // ------------------------------------------------------------------
+    // ÖH D27 / P11B1-09 + OH-D26-02 — BİRİNCİL ÖLÇÜ KAPISI (FAIL-CLOSED)
+    // ------------------------------------------------------------------
+    //
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/D27/arayuz/a1/once.json): sahnenin
+    // DÖRT birincil ölçüsü çözücüden gelmediğinde sessiz bir sabite
+    // düşüyordu —
+    //     num(md.chamber_diameter, 0.1)   num(md.chamber_length, 0.3)
+    //     num(md.throat_diameter, 0.02)   num(md.exit_diameter, 0.08)
+    // ve AYNI dört uydurma sayfa adaptörlerinde de vardı
+    // (buildSolidVizData 0,1 / 0,3 / 0,02 / 0,08 m; buildLiquidVizData
+    // 100 / 300 mm, 0,05 / 0,15 m). Node altında ölçüldü: çıplak bir
+    // çözücü yanıtıyla iki adaptör de dördü de UYDURUYORDU, yani ekranda
+    // ölçekli, ölçülü, gerçekmiş gibi duran 100 mm x 300 mm'lik bir motor
+    // çiziliyordu ve kullanıcı onu kendi tasarımı sanıyordu.
+    //
+    // D26 bu düşüşü yalnız BEYAN etti (srcDecl defteri + amber çip).
+    // Beyan çözüm değildir (doktrin 1): ölçü YOKSA sahne ÇİZİLMEZ ve
+    // eksik alan ADIYLA reddedilir. Bu, sunucu tarafındaki `/calculate`
+    // 422 kuralının ve katı sayfasının Plotly CAD yolundaki (v2.6.26,
+    // Faz 2) "ölçü eksikse çizim yapılmaz" kuralının istemci karşılığıdır.
+    var PRIMARY_DIM_FIELDS = ['chamber_diameter', 'chamber_length',
+                              'throat_diameter', 'exit_diameter'];
+
+    // Reddin kodu tek yerde yazılır (mount + update aynı kodu bildirir).
+    // CFD red kodlarıyla AYNI KANAL DEĞİLDİR: bu kod CFD_REASONS'ta
+    // aranmaz, karşılığı doğrudan i18n anahtarlarıyla (viz3d.reject.*)
+    // ekrana yazılır. İki kanalın kod kümesi kesişmez.
+    var DIMS_REJECT_CODE = 'missing_primary_dims';
+
+    // Çözücünün YAYIMLAMADIĞI birincil ölçülerin adları (tablo sırasında).
+    // Boş dizi = sahne çizilebilir.
+    // --- ÖH D31 · OH-D27-13 — İKİNCİL ÖLÇÜ YEDEĞİ KÜNYESİZ OLAMAZ ------
+    // 9 Eyl Berke kararı (madde 4) üç ayaklıydı: (a) künye zorunlu,
+    // (b) panelde rozet, (c) künyesiz yedek fail-closed. D27'de (a) indi,
+    // (b) yalnız 3B sahne çipi olarak indi, (c) hiç inmedi — ölçüldü
+    // (a1/once.json · M3: `kunyesiz_yedek_fail_closed = 0`,
+    // `panel_rozet_solid = 0`, `panel_rozet_advanced = 0`).
+    //
+    // Birincil ölçüler (`missingPrimaryDims`) zaten fail-closed'dır. Bu
+    // kapı İKİNCİL türetilmiş yedekler içindir: casing_wall 0,045·D,
+    // tane liner clamp(0,02·D), tane boyu 0,8·Lch. Bunların çizilmesi
+    // meşrudur (boş tuval kullanıcıya bir şey söylemez) AMA künyesi
+    // olmadan çizilmesi değildir: künyesiz bir varsayım kullanıcıya
+    // "çözücü böyle dedi" diye görünür. Künye yoksa sahne ÇİZMEZ.
+    var ASSUMED_DIM_NO_BASIS = 'assumed_dimension_without_basis';
+
+    function AssumedDimError(alan) {
+        this.name = 'AssumedDimError';
+        this.reason = ASSUMED_DIM_NO_BASIS;
+        this.field = alan;
+        this.message = 'MotorViz3D: "' + alan + '" bir VARSAYIM ölçüsü ama '
+            + 'künyesi (basis) yok. Künyesiz yedek çizilmez — yedeğin '
+            + 'dayanağı adıyla yazılmalı (OH-D27-13, 9 Eyl Berke kararı).';
+    }
+    AssumedDimError.prototype = Object.create(Error.prototype);
+    AssumedDimError.prototype.constructor = AssumedDimError;
+
+    /** Künye kapısı: künyesiz VARSAYIM kaydı deftere giremez.
+     *  Kaydı AYNEN döndürür ki çağıran yerde `srcDecl['x'] = ...` atama
+     *  deseni (mevcut ölçüm betikleri ve bekçiler onu arar) bozulmasın. */
+    function _kunyeKapisi(alan, kayit) {
+        var tur = kayit && kayit.kind;
+        var kunye = kayit && kayit.basis;
+        if (tur !== 'computed' && tur !== 'user'
+                && !(typeof kunye === 'string' && kunye.trim())) {
+            throw new AssumedDimError(alan);
+        }
+        return kayit;
+    }
+
+    function missingPrimaryDims(md) {
+        md = md || {};
+        var eksik = [];
+        for (var i = 0; i < PRIMARY_DIM_FIELDS.length; i++) {
+            var ad = PRIMARY_DIM_FIELDS[i];
+            var v = num(md[ad], NaN);
+            if (!(isFinite(v) && v > 0)) eksik.push(ad);
+        }
+        return eksik;
+    }
+
+    // Sahnenin kurulmasını reddeden hüküm. Taşıdığı şey bir METİN değil,
+    // ALAN LİSTESİDİR: çağıran hangi ölçünün eksik olduğunu adıyla okur.
+    function MotorDimsError(missing) {
+        this.name = 'MotorDimsError';
+        this.code = DIMS_REJECT_CODE;
+        this.missing = (missing || []).slice();
+        this.message = 'motor_viz3d: missing primary dimensions: '
+            + this.missing.join(', ');
+    }
+    MotorDimsError.prototype = Object.create(Error.prototype);
+    MotorDimsError.prototype.constructor = MotorDimsError;
+
+    // Reddin kullanıcıya görünen yüzü. Boş kutu ya da "bir hata oluştu"
+    // YASAK (doktrin 1 + 6): hangi ölçünün gelmediği ADIYLA yazılır ve
+    // hüküm çipleriyle aynı görsel dil kullanılır (SOURCE_SYMBOLS /
+    // SOURCE_COLORS + DIM_SRC_LABEL_KEYS etiketleri).
+    function renderDimsRejection(el, missing) {
+        var kutu = document.createElement('div');
+        kutu.className = 'viz3d-dims-reject';
+        kutu.setAttribute('data-missing', (missing || []).join(','));
+        kutu.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+            + 'justify-content:center;min-height:220px;height:100%;'
+            + 'padding:22px;box-sizing:border-box;border-radius:8px;'
+            + 'font:13px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;'
+            + 'color:#e8edf2;background:#0d1117;border:1px solid '
+            + sourceColor('missing');
+
+        var baslik = document.createElement('div');
+        baslik.style.cssText = 'font-weight:600;letter-spacing:0.4px;color:'
+            + sourceColor('assumed');
+        baslik.textContent = sourceSymbol('missing') + ' '
+            + T('viz3d.reject.title', '3D model not drawn');
+        kutu.appendChild(baslik);
+
+        var giris = document.createElement('div');
+        giris.textContent = T('viz3d.reject.missingDims',
+            'The solver did not publish these primary dimensions:');
+        kutu.appendChild(giris);
+
+        var liste = document.createElement('ul');
+        liste.style.cssText = 'margin:0;padding-left:18px';
+        (missing || []).forEach(function (alan) {
+            var etiket = DIM_SRC_LABEL_KEYS[alan];
+            var satir = document.createElement('li');
+            satir.setAttribute('data-field', alan);
+            satir.textContent = (etiket ? T(etiket[0], etiket[1]) : alan)
+                + '  (' + alan + ')';
+            liste.appendChild(satir);
+        });
+        kutu.appendChild(liste);
+
+        var kural = document.createElement('div');
+        kural.style.cssText = 'color:' + sourceColor('missing');
+        kural.textContent = T('viz3d.reject.rule',
+            'A model drawn from assumed dimensions would not be your design, '
+            + 'so no substitute value is invented.');
+        kutu.appendChild(kural);
+
+        el.appendChild(kutu);
+        return kutu;
+    }
+
+    // ==================================================================
+    // A1a sahne-sahte-veri · CM-S1 — KESİRLE ÇİZİLEN PARÇA YOK
+    // ==================================================================
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/A1a/sahne-sahte-veri/a1/once/,
+    // üç örnek proje): sahne montaj parçalarını ÇÖZÜCÜNÜN YAYIMLAMADIĞI
+    // ölçülerle, kamara yarıçapının / cidarının KESRİ olarak çiziyordu —
+    // on bir kesir: kapak kalınlığı (1,6 x cidar), giriş borusu yarıçapı
+    // (0,22 x rc) ve boyu (1,6 x kapak), grafit boğaz eki (0,35 x rt),
+    // O-ring (0,16 x kapak), spigot (0,55 x kapak), kapak cıvatası
+    // (0,3 x cidar), astar (rc - 0,15), enjektör plakası (0,9 x kapak),
+    // ateşleyici (0,09 x rc), lüle cıvatası (0,05 x rc). Ekranda ölçekli,
+    // gerçekmiş gibi duran bu parçaların hiçbiri kullanıcının tasarımı
+    // değildi (CLAUDE.md 2026-07-29 sahte veri yasağı; CAD hakem #4).
+    //
+    // KURAL: parçanın ölçüsü çözücünün YAYIMLADIĞI yanıt alanından
+    // geliyorsa O ALANDAN çizilir; gelmiyorsa parça ÇİZİLMEZ (kesirle
+    // yedek YOK). Çizilmeyen parçaların SAYISI sahne çipinde beyan edilir
+    // ("montaj planı yok — N parça çizilmedi"). Parçaları yerleşim
+    // planıyla geri getirmek CM-3'ün (A6a) işidir.
+    //
+    // Alan adresleri (yanıtın kendi birimleri; hepsi mm):
+    var PART_SOURCE_FIELDS = {
+        closure_cap: ['structural_analysis', 'end_cap_analysis',
+                      'flat_head_thickness'],
+        chamber_liner: ['thermal_protection', 'chamber_liner', 'thickness'],
+        injector_plate: ['injector_design', 'plate_thickness_mm'],
+        bolt_count: ['structural_analysis', 'fastener_analysis', 'num_bolts'],
+        bolt_circle: ['structural_analysis', 'fastener_analysis',
+                      'bolt_circle_radius']
+    };
+    // Cıvata deliği: kartın adı `bolted_joint.clearance_hole_diameter_mm`;
+    // cıvata analizörünün (hrma/analysis/bolted_joint.py) kendi çıktısında
+    // aynı değer `bearing` bloğundadır. İkisi de okunur; bugün hiçbir
+    // /calculate yanıtı yayımlamıyor (ölçüldü, üç örnek) → cıvata çizilmez.
+    var BOLT_HOLE_FIELD_PATHS = [
+        ['bolted_joint', 'clearance_hole_diameter_mm'],
+        ['bolted_joint', 'bearing', 'clearance_hole_diameter_mm']
+    ];
+    // Cıvata çemberi bir yanıt ÖLÇÜSÜ SAYILMAZ: structural_analysis.py
+    // `bolt_circle_radius = D/2 + 0,025` sabit yerleşim kuralıdır (CAD hakem
+    // #4). Cıvata YALNIZ bu künyeyle çizilir; metin A2 cm-0-plan ASSUMED
+    // tablosuyla birebir (makine dizesi — çevrilmez).
+    var BOLT_CIRCLE_BASIS = 'assumed: fixed +25 mm layout rule';
+    // Sahnenin çizebildiği montaj parçaları, motor tipine göre. Bir parça
+    // ya yayımlanan alanından çizilir ya da çizilmeyenler listesine girer.
+    var ASSEMBLY_PARTS = {
+        hybrid: ['closure_cap', 'closure_seals', 'closure_spigot',
+                 'closure_bolts', 'feed_inlet', 'injector_plate', 'igniter',
+                 'chamber_liner', 'throat_insert', 'nozzle_flange',
+                 'nozzle_seal', 'nozzle_bolts'],
+        liquid: ['closure_cap', 'closure_seals', 'closure_spigot',
+                 'closure_bolts', 'feed_inlet', 'injector_plate',
+                 'throat_insert', 'nozzle_flange', 'nozzle_seal',
+                 'nozzle_bolts'],
+        solid: ['closure_cap', 'closure_seals', 'closure_snap_ring',
+                'chamber_liner', 'throat_insert', 'nozzle_flange',
+                'nozzle_seal', 'nozzle_bolts']
+    };
+
+    // Yanıttaki sonlu ve pozitif sayı (yol dizisiyle); yoksa null.
+    function _publishedMm(md, yol) {
+        var v = md;
+        for (var i = 0; i < yol.length; i++) {
+            if (!v || typeof v !== 'object') return null;
+            v = v[yol[i]];
+        }
+        return (typeof v === 'number' && isFinite(v) && v > 0) ? v : null;
+    }
+
+    /** Montaj parçalarının YAYIMLANAN ölçülerden kurulum planı (saf).
+     *  geo: { motorType, rc, rGrainOut } (mm). Dönen ölçüler mm'dir ve
+     *  yanıt alanına BİT-AYNIDIR; kesir, kırpma, taban YOKTUR. */
+    function publishedPartPlan(md, geo) {
+        md = md || {};
+        geo = geo || {};
+        var tip = ASSEMBLY_PARTS[geo.motorType] ? geo.motorType : 'hybrid';
+        var alan = function (ad) {
+            return _publishedMm(md, PART_SOURCE_FIELDS[ad]);
+        };
+        var kaynak = function (ad) {
+            return 'solver: ' + PART_SOURCE_FIELDS[ad].join('.');
+        };
+        var plan = { capT: null, plateT: null, liner: null, bolts: null,
+                     sources: {}, drawn: [], undrawn: [] };
+
+        plan.capT = alan('closure_cap');
+        if (plan.capT !== null) plan.sources.closure_cap = kaynak('closure_cap');
+
+        if (tip !== 'solid') {
+            plan.plateT = alan('injector_plate');
+            if (plan.plateT !== null) {
+                plan.sources.injector_plate = kaynak('injector_plate');
+            }
+        }
+
+        if (tip !== 'liquid') {
+            var tLiner = alan('chamber_liner');
+            var gap = geo.rc - geo.rGrainOut;
+            if (tLiner !== null) {
+                // Çözücünün astarı tanenin ÖRTMEDİĞİ kamara kesimlerini
+                // korur (hybrid_rocket_engine chamber_liner.function: ön ve
+                // arka yanma odası) — kalınlık alanın kendisi.
+                plan.liner = { tMm: tLiner, rIn: geo.rc - tLiner,
+                               span: 'unshielded', basis: kaynak('chamber_liner') };
+            } else if (isFinite(gap) && gap > 0) {
+                // Tane ile kasa deliği arasındaki yalıtım: iki yayımlanan
+                // çapın farkı (katıda kullanıcının yalıtımını birebir verir).
+                plan.liner = { tMm: gap, rIn: geo.rGrainOut, span: 'full',
+                               basis: 'solver: chamber bore - grain outer '
+                                      + 'diameter (grain_design)' };
+            }
+            if (plan.liner) plan.sources.chamber_liner = plan.liner.basis;
+        }
+
+        var nBolt = alan('bolt_count');
+        var delik = null;
+        for (var k = 0; k < BOLT_HOLE_FIELD_PATHS.length && delik === null; k++) {
+            delik = _publishedMm(md, BOLT_HOLE_FIELD_PATHS[k]);
+        }
+        var cember = alan('bolt_circle');
+        if (tip !== 'solid' && nBolt !== null && delik !== null
+                && cember !== null && plan.capT !== null) {
+            // Cıvata gövdesi: delik çapında, kapak kalınlığı boyunca (sıkma
+            // boyu = yayımlanan kapak). Çember künyesiz ÇİZİLMEZ.
+            plan.bolts = { count: Math.round(nBolt), holeMm: delik,
+                           circleMm: cember, basis: BOLT_CIRCLE_BASIS };
+            plan.sources.closure_bolts = kaynak('bolt_count')
+                + ' + bolted_joint.clearance_hole_diameter_mm';
+        }
+
+        var cizilen = {
+            closure_cap: plan.capT !== null,
+            injector_plate: plan.plateT !== null,
+            chamber_liner: plan.liner !== null,
+            closure_bolts: plan.bolts !== null
+        };
+        ASSEMBLY_PARTS[tip].forEach(function (p) {
+            (cizilen[p] ? plan.drawn : plan.undrawn).push(p);
+        });
+        return plan;
+    }
+
     function extractDims(md) {
         md = md || {};
         var gd = md.grain_design || {};
@@ -1439,16 +2306,111 @@
         var struct = md.structural_analysis || {};
         var fasteners = struct.fastener_analysis || {};
 
-        var Dch = num(md.chamber_diameter, 0.1) * 1000;
-        var Lch = num(md.chamber_length, 0.3) * 1000;
-        var dt = num(md.throat_diameter, 0.02) * 1000;
-        var de = num(md.exit_diameter, 0.08) * 1000;
+        // ------------------------------------------------------------------
+        // ÖH D26 / P11B1-09 — ÖLÇÜ KAYNAĞI DEFTERİ
+        // ------------------------------------------------------------------
+        // ÖLÇÜLDÜ (a1/once.json): sahnedeki "veri yok / varsayım" beyan
+        // mekanizması YALNIZ 3 kaleme (soğutma kanalı, kontur kaynağı, port
+        // gerilemesi) uygulanmıştı. Birincil ölçülerin DÖRDÜ de sessiz bir
+        // uydurma yedekle çözülüyordu — num(md.chamber_diameter, 0.1),
+        // num(md.chamber_length, 0.3), num(md.throat_diameter, 0.02),
+        // num(md.exit_diameter, 0.08) — cidar 0,045·D geometrik yedeğine,
+        // tane dış çapı da clamp(0.02·D) liner uydurmasına düşüyordu.
+        // Bu hâlde ekranda ÖLÇEKLİ, ölçülü, gerçekmiş gibi duran bir motor
+        // çiziliyor ve hiçbir çip çıkmıyordu: kullanıcı 100 mm'lik kamarayı
+        // çözücünün ürettiği sanıyordu.
+        //
+        // Defter her birincil ölçü için hükmü kaydeder ('computed' = çözücü
+        // yayımladı, 'assumed' = yerel uydurma yedek). Panodaki (analysis_dock)
+        // sınıflandırıcıyla AYNI sözlüğü (SOURCE_COLORS / SOURCE_SYMBOLS)
+        // kullanır — P11B2-10 ile tek görsel dil.
+        var srcDecl = {};
+
+        // Çözücü bu alanı gerçekten yayımladı mı? (sonlu ve pozitif)
+        function mdVar(alan) {
+            var v = num(md[alan], NaN);
+            return isFinite(v) && v > 0;
+        }
+        function decl(ad, kaynakli, beyan) {
+            srcDecl[ad] = _kunyeKapisi(ad,
+                { kind: kaynakli ? 'computed' : 'assumed', basis: beyan });
+            return kaynakli;
+        }
+
+        // FAIL-CLOSED (ÖH D27 / OH-D26-02): birincil ölçü yoksa UYDURULMAZ.
+        // Kapı ürün yolunda (MotorViz3D.mount / .update) zaten sınanır;
+        // buradaki sınama ikinci savunmadır — extractDims'i doğrudan
+        // çağıran yeni bir yol açılırsa sessizce uydurma geometri
+        // üretmesin, hükmü ALAN ADIYLA fırlatsın.
+        var eksikOlcu = missingPrimaryDims(md);
+        if (eksikOlcu.length) throw new MotorDimsError(eksikOlcu);
+
+        var Dch = num(md.chamber_diameter, NaN) * 1000;
+        var Lch = num(md.chamber_length, NaN) * 1000;
+        // P11B1-05 → ÖH D27: oda boyu artık HER ZAMAN çözücünündür
+        // (yoksa sahne yukarıdaki kapıda reddedilir), ama etiketin kaynak
+        // bayrağı SABİTE bağlanmaz: yüklem burada ÖLÇÜLMEYE devam eder ki
+        // kapı bir gün gevşetilirse ölçü etiketi kendiliğinden yalan
+        // söylemeye başlamasın (P11B1-05 bekçisi bu ölçümü şart koşar).
+        var LchKaynakli = isFinite(num(md.chamber_length, NaN))
+            && num(md.chamber_length, 0) > 0;
+        var dt = num(md.throat_diameter, NaN) * 1000;
+        var de = num(md.exit_diameter, NaN) * 1000;
         var rt = dt / 2, re = de / 2, rc = Dch / 2;
+
+        // Beyan metni ÇIPLAK bir nokta-ayrık dize OLAMAZ: i18n tarayıcısı
+        // (tests/test_i18n_common.py FIELD_RE) tırnakla başlayan
+        // `motor.<alan>` biçimini çeviri anahtarı sanar ve sözlükte
+        // bulamayınca kırmızı verir — ölçüldü. Adres 'solver:' önekiyle
+        // yazılır: hem tarayıcı yanılmaz hem de beyan KİMİN yayımladığını
+        // söyler.
+        decl('chamber_diameter', mdVar('chamber_diameter'),
+             'solver: motor.chamber_diameter');
+        decl('chamber_length', LchKaynakli, 'solver: motor.chamber_length');
+        decl('throat_diameter', mdVar('throat_diameter'),
+             'solver: motor.throat_diameter');
+        decl('exit_diameter', mdVar('exit_diameter'),
+             'solver: motor.exit_diameter');
 
         // Kullanıcının tasarladığı cidar çizilir; 0.12·D üst kırpması
         // kaldırıldı (kullanıcının kalınlığını sessizce değiştiriyordu).
-        var casingWall = Math.max(0.2, resolveCasingWall(md, Dch));
-        var nozzleWall = clamp(num(md.nozzle_geometry && md.nozzle_geometry.wall_thickness, Math.max(3, 0.1 * dt)), 2.5, 0.25 * dt + 6);
+        var wallSrc = {};
+        var casingWall = Math.max(0.2, resolveCasingWall(md, Dch, wallSrc));
+        // ÖH D31 · OH-D27-13 — KÜNYESİZ YEDEK FAIL-CLOSED. `basis` null
+        // kalırsa kapı fırlatır (aşağıdaki `_srcDeclYaz`); sahne künyesiz
+        // bir varsayımı sessizce çizmez.
+        srcDecl['casing_wall'] = _kunyeKapisi('casing_wall',
+            { kind: wallSrc.kind || 'assumed',
+              basis: wallSrc.basis || null });
+        // --- ÖH D29 · P11B1-10 — LÜLE CİDARI BEYAN EDİLİR ------------------
+        // ÖLÇÜLDÜ (a2/once.json P11B1-10, `uydurma_oran: true`,
+        // `srcDecl_nozzle_wall: false`): cidar, çözücü değer yayımlamadığında
+        // `max(3 mm; 0,10·d_t)` yedeğinden çiziliyordu ve bunu HİÇBİR beyan
+        // söylemiyordu. O oran ürünün KENDİ SÖKTÜĞÜ kuraldır: nozzle_design.py
+        // `_calculate_nozzle_geometry` yorumu birebir "ESKİ DAVRANIŞ:
+        // wall_thickness = max(0.003, dt·0.1) … Bu kuralın hiçbir kaynağı
+        // yoktu ve ölçekle patlıyordu" diyor; ürün onu ince cidarlı basınç
+        // kabı (hoop) bağıntısıyla değiştirdi (Huzel & Huang, NASA SP-125
+        // Böl. 4) ve sonucu `nozzle_geometry.wall_thickness` [mm] adıyla
+        // yayımlıyor. Hibrit bu bloğu gönderiyor (ölçüldü: 3,453 mm);
+        // katı ve sıvı GÖNDERMİYOR (`_design_nozzle_geometry` çıktısında
+        // wall_thickness alanı yok) — orada ekrandaki cidar bir tasarım
+        // değil, sökülmüş oranın kalıntısıdır.
+        // Sayı GİZLENMEZ (boş lüle kullanıcıya bir şey söylemez) ama artık
+        // uydurma olduğunu SÖYLER: hüküm ölçü kaynağı defterine girer ve
+        // amber çipte adıyla görünür. Ürün ayağı (katı/sıvıda cidarın
+        // yayımlanması) fea-cfd/termo sahasıdır.
+        var nozzleWallSrc = num(md.nozzle_geometry
+            && md.nozzle_geometry.wall_thickness, NaN);
+        var nozzleWallKaynakli = isFinite(nozzleWallSrc) && nozzleWallSrc > 0;
+        var nozzleWall = clamp(
+            nozzleWallKaynakli ? nozzleWallSrc : Math.max(3, 0.1 * dt),
+            2.5, 0.25 * dt + 6);
+        decl('nozzle_wall', nozzleWallKaynakli,
+             nozzleWallKaynakli
+                 ? 'solver: motor.nozzle_geometry.wall_thickness'
+                 : 'geometric fallback max(3 mm, 0.10*d_t) - the source-less '
+                   + 'rule nozzle_design.py replaced with the hoop relation');
         // Grain dış yarıçapı çözücünün BEYAN ETTİĞİ çaptan okunur; liner
         // (yalıtım + boşluk) bu çapla kasa deliği arasındaki farktan ÇIKAR.
         // Faz 6 / T06: eski kod liner'i clamp(0.02*Dch, 1.5, 5) diye
@@ -1461,9 +2423,14 @@
         if (isFinite(dGrainOut) && dGrainOut > 0 && dGrainOut / 2 <= rc + 1e-9) {
             rGrainOut = Math.min(dGrainOut / 2, rc);
             liner = Math.max(0, rc - rGrainOut);
+            // ÖH D26 / P11B1-09: tane dış çapı çözücünün beyanından.
+            decl('grain_outer_diameter', true, 'grain_design.outer_diameter_mm');
         } else {
             liner = clamp(0.02 * Dch, 1.5, 5);
             rGrainOut = rc - liner;
+            // Tane dış çapı YOK: yalıtım clamp(0.02·D, 1,5, 5) ile
+            // UYDURULUYOR ve tane dışı ondan çıkarılıyor — varsayım.
+            decl('grain_outer_diameter', false, 'liner clamp(0.02·D, 1.5, 5)');
         }
 
         // T10: grain boyu ARTIK KIRPILMIYOR. Ölçüldü (hibrit varsayılan
@@ -1472,6 +2439,36 @@
         // sessiz kısaltma. Yakıt kütlesiyle çapraz doğrulandı: raporun
         // yazdığı 1,54 kg ancak 1512,8 mm ile çıkıyor.
         var Lg = num(gd.grain_length_mm, num(md.grain_length, 0.8 * Lch / 1000) * 1000);
+        // ÖH D26 / P11B1-09: tane boyu ya çözücünün beyanıdır ya da
+        // 0,8·Lch oranından UYDURULUR — ikincisi sahnede beyan edilir.
+        //
+        // OH-GT-08 (ÖH D34, 21 Eylül) — KÜNYE ARTIK KAYNAĞA BAKIYOR.
+        // ÖLÇÜLDÜ (a1/once.json K2, node altında GERÇEK extractDims):
+        // çözücü 511,533 mm yayımladığı hâlde (`Lg_mm: 511.533`) künye
+        // `{kind: 'computed', basis: 'fallback 0.8·Lch'}` diyordu — yani
+        // güverte çipi "hesaplandı" der, dayanak olarak da HİÇ
+        // kullanılmamış bir uydurma oranı gösterirdi. İki yükte birden
+        // yalan ölçüldü (`yalan_sayisi: 2`). Kardeş `chamber_diameter`
+        // doğruydu, çünkü onun dayanağı tek dallıdır.
+        //
+        // Dayanak artık DEĞERİN GELDİĞİ DALDAN türer; dalların ayrımı
+        // `num()`un kendi yüklemidir (sonlu SAYI), yoksa künye ile değer
+        // yine ayrışırdı (ör. çözücü 0 yayımlarsa değer 0'dır ama eski
+        // yüklem bunu 'fallback' sayardı).
+        var _gdLgSayi = typeof gd.grain_length_mm === 'number'
+            && isFinite(gd.grain_length_mm);
+        var _mdLgSayi = typeof md.grain_length === 'number'
+            && isFinite(md.grain_length);
+        var LgKunye = _gdLgSayi
+            ? 'solver: grain_design.grain_length_mm'
+            : (_mdLgSayi ? 'solver: motor.grain_length' : 'fallback 0.8·Lch');
+        var LgKaynakli = Lg > 0 && (_gdLgSayi || _mdLgSayi);
+        // FAIL-CLOSED: çözücü yayımladı ama değer kullanılabilir değil
+        // (pozitif olmayan). Sessizce 'fallback' demek KAYNAĞI gizlerdi.
+        if (!LgKaynakli && (_gdLgSayi || _mdLgSayi)) {
+            LgKunye += ' (non-positive - not usable)';
+        }
+        decl('grain_length', LgKaynakli, LgKunye);
         var rPort0 = num(gd.port_diameter_initial_mm, num(md.port_diameter_initial, 0.03) * 1000) / 2;
         rPort0 = Math.min(rPort0, rGrainOut);
         // NOT: ``rPortF`` (bitiş port yarıçapı) KALDIRILDI (v2.6.27, B5).
@@ -1512,8 +2509,16 @@
             Ld = cpts[cpts.length - 1].z - cpts[iThroat].z;
         }
 
-        var capT = clamp(1.6 * casingWall, 8, 0.3 * rc + 8);
-        var flangeT = clamp(0.8 * capT, 6, 26);
+        // A1a sahne-sahte-veri · CM-S1: kapak kalınlığı artık kesir değil,
+        // yapısal analizin düz kapak kalınlığıdır; yayımlanmadıysa null ve
+        // kapak ÇİZİLMEZ. Ondan türeyen lüle flanşı kalınlığı ve giriş
+        // borusu boyu onunla birlikte düştü (ölçüleri hiçbir alanda yok).
+        var partPlan = publishedPartPlan(md, {
+            motorType: md.viz_motor_type || 'hybrid',
+            rc: rc, rGrainOut: rGrainOut });
+        var capT = partPlan.capT;
+        // Kadraj payı (kamera, zemin, çip ölçeği). Artık hiçbir parça
+        // çizmez (lüle flanşı düştü); kesir kaldı → DEVİR A6a cm-3-sahne.
         var flangeLip = clamp(0.10 * rc, 4, 18);
 
         // Grain kamara içindeki yeri: çözücü ön/arka oda boyunu yayımlıyorsa
@@ -1541,12 +2546,31 @@
                 tWallInner: num(wallAn.inner_temperature, null),
                 tWallOuter: num(wallAn.outer_temperature, null)
             };
+            // ÖH D24 · P11B1-02: efsanenin uçları rampanın KENDİ alanıdır.
+            // `qChamber` bandın dibinde değil, log ölçeğinde t = 0,205'te
+            // durur; etikete o sayıyı yazmak bandın tamamını kaydırırdı.
+            var _hd = heatRampDomain(heat);
+            heat.qRampMin = _hd.qMin;
+            heat.qRampMax = _hd.qMax;
         }
+
+        // P11B1-13 — cıvata sayısının hükmü ölçülür ve defterde durur.
+        var boltSrc = num(fasteners.num_bolts, NaN);
+        var boltKaynakli = isFinite(boltSrc) && boltSrc > 0;
+        srcDecl['bolt_count'] = _kunyeKapisi('bolt_count', boltKaynakli
+            ? { kind: 'computed',
+                basis: 'solver: structural_analysis.fastener_analysis.num_bolts' }
+            : { kind: 'missing',
+                basis: 'structural_analysis.fastener_analysis.num_bolts '
+                     + 'not published - no bolts drawn' });
 
         return {
             // 'hybrid' | 'solid' | 'liquid' — sayfa adaptörü belirler
             motorType: md.viz_motor_type || 'hybrid',
-            Dch: Dch, Lch: Lch, rc: rc, rt: rt, re: re, dt: dt, de: de,
+            // ÖH D26 / P11B1-09 — ölçü kaynağı defteri (sahne çipi buradan)
+            srcDecl: srcDecl,
+            Dch: Dch, Lch: Lch, LchKaynakli: LchKaynakli,
+            rc: rc, rt: rt, re: re, dt: dt, de: de,
             casingWall: casingWall, nozzleWall: nozzleWall, liner: liner,
             rcOut: rc + casingWall,
             Lg: Lg, zg0: zg0, zg1: zg1,
@@ -1554,9 +2578,10 @@
             nozType: nozType, Lc: Lc, Ld: Ld,
             thetaN: thetaN, thetaE: thetaE, halfAngle: halfAngle,
             Rn: Rn, Rconv: Rconv,
-            capT: capT, flangeT: flangeT, flangeLip: flangeLip,
-            inletR: clamp(0.22 * rc, 5, 22),
-            inletL: clamp(1.6 * capT, 14, 60),
+            capT: capT, flangeLip: flangeLip,
+            // A1a sahne-sahte-veri · CM-S1 — yayımlanan ölçülerden montaj
+            // planı (çizilen / çizilmeyen parçalar + alan künyeleri).
+            partPlan: partPlan,
             // v2.6.26: UYDURMA DELİK DESENİ YASAK. Eski kod veri yokken
             // 12 delik x 1,5 mm çiziyor, üstelik Math.max(4, ...) yüzünden
             // çözücünün 3 deliğini 4 gösteriyordu. Sayı ya da çap yoksa
@@ -1572,11 +2597,44 @@
             annulusGap: clamp(num(inj.annulus_gap_mm, 1.2), 0.4, 6),
             innerJetR: clamp(num(inj.inner_jet_diameter, 0.18 * Dch) / 2, 1.5, 0.35 * rc),
             impingeHalfDeg: clamp(num(inj.impingement_angle_deg, 60) / 2, 10, 60),
-            nBolts: Math.max(6, Math.round(num(fasteners.num_bolts, 8))),
-            burnTime: Math.max(0.1, num(md.burn_time, 10)),
-            thrust: num(md.thrust, 1000),
-            isp: num(md.isp, 200),
-            pc: num(md.chamber_pressure, 20),
+            // ÖH D29 · P11B1-13 — CIVATA SAYISI DA UYDURULMAZ.
+            // ÖLÇÜLDÜ (a3/once.json): taban
+            // `Math.max(6, Math.round(num(fasteners.num_bolts, 8)))` idi ve
+            // İKİ ayrı uydurma taşıyordu: (a) alan hiç yayımlanmazsa 8
+            // cıvata — katı ve sıvı /calculate yanıtlarında
+            // `structural_analysis.fastener_analysis.num_bolts` YOKTUR
+            // (çapa yükünden ölçüldü: hibrit 6, katı null, sıvı null),
+            // yani o iki sayfada ekrandaki 8 cıvatanın kaynağı BU SATIRDI;
+            // (b) çözücü 6'dan az bildirirse sessiz yukarı yuvarlama.
+            // Aynı dosya bu deseni orifis için ZATEN söktü (yukarıdaki
+            // nOrifices yorumu: "Math.max(4, ...) yüzünden çözücünün 3
+            // deliğini 4 gösteriyordu"); kural burada da uygulanır —
+            // sayı yoksa cıvata ÇİZİLMEZ, hüküm çipe yazılır.
+            nBolts: boltKaynakli ? Math.round(boltSrc) : 0,
+            // ÖH D36 / onemli2-sivi a2 — ZAMAN EKSENİ UYDURULMAZ. Eski
+            // satır ``Math.max(0.1, num(md.burn_time, 10))`` idi: süre
+            // taşımayan sözlükte (süresiz sıvı; sayfa adaptörü de sabit 10
+            // basıyordu) güverte saati "t = 0,00 s / 10,00 s" ve kaydırıcı
+            // UYDURMA bir yanma süresi gösteriyordu (ölçüldü,
+            // a2/once.json K7: sıvı süre boş ve 400 s İKİSİ de 10). Süre
+            // yoksa ``null``: sahne oynatmaz, güverte zaman eksenini
+            // çizmez (motor_viz_deck.js). Süre verildiğinde değer eskisiyle
+            // bit-aynıdır (hibrit ve katı daima süre taşır).
+            burnTime: (num(md.burn_time, NaN) > 0)
+                ? Math.max(0.1, md.burn_time) : null,
+            thrust: num(md.thrust, null),
+            isp: num(md.isp, null),
+            pc: num(md.chamber_pressure, null),
+            // A1b faz-c-0 · OH-D37-S7 (SAHTE VERİ) — PERFORMANS DA
+            // UYDURULMAZ (yukarıdaki üç satır). Eskiden itki / Isp / oda
+            // basıncı yayımlanmadığında 1000 N / 200 s / 20 bar yazılıyordu
+            // ve sahnenin HUD yayını (onTick → güverte çipleri) o sayıları
+            // çözücününmüş gibi basıyordu (ölçüldü: A1b faz-c-0 a1
+            // once/node_olcum.json M3_s7.yayimsiz — thrust 1000, isp 200).
+            // Yayımlanmadıysa null; sahne `perfNotPublished` çipiyle adıyla
+            // beyan eder. Alan varken değer bit-aynıdır (num aynı yüklem).
+            // Not: bu yorum burnTime ile thrust ARASINA yazılmaz — D36
+            // sıvı a2 bekçisi burnTime ifadesini ',\n thrust:'a kadar okur.
             // v2.6.26 — SAHTE PLUME SÖKÜMÜ: egzoz gösterimi çözücünün gerçek
             // nozul çıkış büyüklüklerini KULLANMIYORDU; parçacık hızı, pe/pa
             // oranı ve şok elması aralığı uydurma sabitlerden geliyordu.
@@ -1756,6 +2814,190 @@
         if (spec.hasPortArea) return 'solid_port_area';
         if (spec.hasWebHistory) return 'solid_mass_balance';
         return 'no_data';
+    }
+
+    // ------------------------------------------------------------------
+    // ÖH D26 / P11B1-09 — ÖLÇÜ KAYNAĞI ÇİPİ
+    // ------------------------------------------------------------------
+    // Defterdeki (extractDims → dims.srcDecl) hükümleri sahne çipine
+    // çevirir. Kural FAIL-CLOSED değil, BEYAN-ZORUNLU: sahne bir motoru
+    // çizmek zorundadır (boş tuval kullanıcıya bir şey söylemez), ama
+    // ölçüsü uydurma yedekten geliyorsa bunu SÖYLEMEK zorundadır.
+    //
+    // 'computed' ölçüler için çip BASILMAZ — her ölçüye çip basmak sahneyi
+    // okunmaz eder ve gerçek uyarıyı gürültüye gömer. Yalnız uydurma
+    // yedeğe düşen ölçüler tek bir amber çipte toplanır.
+    // ÖH D29 · P11B1-10 — lüle cidarı da beyan edilen bir ölçüdür.
+    // i18n devri (arayuz-i18n): bu dalgada i18n_common.js kardeş kulvarın
+    // elinde (ölçüldü: dalga29/arayuz-i18n o dosyaya dokundu), bu yüzden
+    // YENİ anahtar açılmaz. `nozzle_wall` girdisinin anahtar alanı null
+    // bırakılır ve etiket makine dizesi olarak basılır; anahtar sonraki
+    // aşamada 'viz3d.dim.nozzleWall' adıyla bağlanacak.
+    // NOT: bu blok sabitin İÇİNE yazılmaz. Mevcut bekçiler (D26 a1
+    // ``_sabit``) sabiti "atamadan ilk noktalı virgüle kadar" deseniyle
+    // çıkarıyor; gövdedeki bir noktalı virgül çıkarımı ortadan keser ve
+    // node koşumu SyntaxError verir (ölçüldü). Aynı sebeple o desenin
+    // KENDİSİ de buraya yazılmaz — arama sabitten önce buraya düşerdi.
+    var DIM_SRC_LABEL_KEYS = {
+        chamber_diameter: ['viz3d.dim.chamberDia', 'Ø chamber'],
+        chamber_length: ['viz3d.dim.chamberLen', 'L chamber'],
+        throat_diameter: ['viz3d.dim.throatDia', 'Ø throat'],
+        exit_diameter: ['viz3d.dim.exitDia', 'Ø exit'],
+        casing_wall: ['viz3d.dim.casingWall', 'casing wall'],
+        nozzle_wall: [null, 'nozzle wall'],
+        bolt_count: [null, 'bolt count'],
+        grain_outer_diameter: ['viz3d.dim.grainOuter', 'Ø grain'],
+        grain_length: ['viz3d.dim.grainLen', 'L grain']
+    };
+
+    // Tek ölçünün beyanı. Hüküm 'computed' ise null döner (çip yok).
+    function srcNote(alan, decl) {
+        if (!decl || decl.kind === 'computed') return null;
+        var lbl = DIM_SRC_LABEL_KEYS[alan];
+        // Anahtarı olmayan etiket (i18n devri) ham dizeyle basılır —
+        // T(null, …) çağrısı yapılmaz, sözlük bekçisi yanlış alarm vermez.
+        return { field: alan, kind: decl.kind,
+                 text: lbl ? (lbl[0] ? T(lbl[0], lbl[1]) : lbl[1]) : alan,
+                 basis: decl.basis || null };
+    }
+
+    // Sahnedeki ölçü-kaynağı çip tanımları. Bütün ölçüler çözücüden
+    // geliyorsa boş dizi döner (temiz sahne = gerçekten temiz veri).
+    // --- ÖH D31 · OH-D27-13 (ayak ii) — ROZET PANELDE DE GÖRÜNÜR --------
+    // 9 Eyl kararının lafzı "panelde 'varsayılan' rozeti" idi; D27'de
+    // rozet YALNIZ 3B sahne çipi olarak indi (ölçüldü a1/once.json · M3:
+    // `panel_rozet_solid = 0`, `panel_rozet_advanced = 0`). Sahne çipi
+    // kullanıcı 3B görünümü açmadığında hiç görünmez; ölçü tablosuna
+    // bakan kullanıcı cidarın uydurma olduğunu öğrenemez.
+    //
+    // Metin UYDURULMAZ: rozet, sahne çipiyle AYNI defterden (srcDecl)
+    // aynı `srcNote` süzgeciyle üretilir — iki yüzey ayrışamaz.
+    var _sonVarsayilanOlculer = [];
+
+    /** Çip listesinden panel rozetini tazeler. Tek kaynak: çipin kendi
+     *  `fields` dizisi; künye metni defterin (`dims.srcDecl`) kendisi. */
+    function _varsayimRozetiniTazele(cipler, dims) {
+        var cip = null;
+        (cipler || []).forEach(function (c) {
+            if (!cip && c && c.kind === 'assumed' && Array.isArray(c.fields)) {
+                cip = c;
+            }
+        });
+        var decls = (dims && dims.srcDecl) || {};
+        _sonVarsayilanOlculer = (cip && Array.isArray(cip.fields))
+            ? cip.fields.map(function (alan) {
+                return srcNote(alan, decls[alan])
+                    || { field: alan, kind: 'assumed', text: alan,
+                         basis: null };
+            })
+            : [];
+        renderAssumedDimBadge();
+        return _sonVarsayilanOlculer.length;
+    }
+
+    /** Son çizilen sahnenin künyeli varsayım ölçüleri (boş = temiz veri). */
+    function assumedDimensionList() {
+        return _sonVarsayilanOlculer.map(function (n) {
+            return { field: n.field, kind: n.kind, text: n.text,
+                     basis: n.basis };
+        });
+    }
+
+    /** Rozeti sayfa DOM'una yazar. Kapsayıcı yoksa sessizce geçer
+     *  (sayfa rozeti istemiyorsa zorlanmaz); varsa ve varsayım yoksa
+     *  KAPATILIR — bayat rozet asılı kalmaz. */
+    function renderAssumedDimBadge(kapsayiciId) {
+        var el = document.getElementById(kapsayiciId || 'hrma-dims-assumed');
+        if (!el) return false;
+        var liste = assumedDimensionList();
+        if (!liste.length) {
+            el.innerHTML = '';
+            el.style.display = 'none';
+            return false;
+        }
+        var kacir = function (t) {
+            return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        };
+        var satirlar = liste.map(function (n) {
+            // Künye (basis) kullanıcıya AYNEN gösterilir: hangi kural
+            // uygulandığı sayının yanında durur, yorumlanmaz.
+            return '<li><strong>' + kacir(n.text) + '</strong>'
+                + (n.basis ? ' — <code>' + kacir(n.basis) + '</code>' : '')
+                + '</li>';
+        }).join('');
+        el.style.display = '';
+        el.innerHTML =
+            '<div class="dims-assumed-badge" style="border-left:3px solid '
+            + 'var(--hd-amber, #ffbe46); padding:6px 10px; margin:8px 0; '
+            + 'font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5);">'
+            + '<span style="color:var(--hd-amber, #ffbe46); '
+            + 'font-weight:600;">\u25C6 '
+            + kacir(T('viz3d.chip.dimsAssumed', 'assumed dimensions'))
+            + '</span><ul style="margin:4px 0 0 16px; padding:0;">'
+            + satirlar + '</ul></div>';
+        return true;
+    }
+
+    function dimensionSourceChipDefs(dims) {
+        var decls = (dims && dims.srcDecl) || {};
+        var solid = dims && dims.motorType === 'solid';
+        var hybrid = dims && dims.motorType === 'hybrid';
+        var notlar = [];
+        Object.keys(DIM_SRC_LABEL_KEYS).forEach(function (alan) {
+            // Tane ölçüleri yalnız tanesi olan motorlarda anlamlıdır.
+            if ((alan === 'grain_outer_diameter' || alan === 'grain_length')
+                && !(solid || hybrid)) return;
+            var n = srcNote(alan, decls[alan]);
+            if (n) notlar.push(n);
+        });
+        if (!notlar.length) return [];
+        var adlar = notlar.map(function (n) { return n.text; }).join(', ');
+        return [{
+            text: T('viz3d.chip.dimsAssumed', 'assumed dimensions') + ': ' + adlar,
+            kind: 'assumed',
+            // Ölçüm/test için: hangi alanlar beyan edildi.
+            fields: notlar.map(function (n) { return n.field; })
+        }];
+    }
+
+    // A1b faz-c-0 · OH-D37-S7 — YAYIMLANMAYAN PERFORMANS BÜYÜKLÜKLERİ.
+    // extractDims itki / Isp / oda basıncını artık uydurmuyor (null);
+    // sahne hangisinin gelmediğini ADIYLA söyler. Sıra sabittir (itki,
+    // Isp, Pc); dönen dizi boşsa çip basılmaz (temiz veri = temiz sahne).
+    // Alan adı `dims`teki adıdır, etiket oturum dilinde.
+    // ÖH V3 taban-v (14 Eki 2026) — Isp ADI NİTELİKLİ. Çıplak 'Isp' aynı
+    // yanıttaki dört Isp'yi (tasarım/vakum/deniz seviyesi/azami) ayırt
+    // etmiyordu (tests/test_ciplak_etiket_common.py). Sahne `md.isp`in hangi
+    // ortamda hesaplandığını bilmez: sayfalar bunu `isp_reference` ile
+    // YALNIZ değer varken beyan eder (liquid.html, solid.html), yani değer
+    // yayımlanmadığında referans da beyan edilmemiştir. Etiket güvertenin
+    // aynı durum için kullandığı metindir (motor_viz_deck.js
+    // ISP_REFERANSSIZ_ETIKET; TR karşılığı i18n_charts.js'teki kayıt).
+    var PERF_FIELD_LABEL_KEYS = [
+        ['thrust', 'viz3d.perf.thrust', 'thrust'],
+        ['isp', 'viz3d.perf.isp', 'Isp (reference not declared)'],
+        ['pc', 'viz3d.perf.pc', 'chamber pressure']
+    ];
+    function perfNotPublished(dims) {
+        var eksik = [];
+        PERF_FIELD_LABEL_KEYS.forEach(function (p) {
+            var v = dims ? dims[p[0]] : null;
+            if (!(typeof v === 'number' && isFinite(v))) eksik.push(p[0]);
+        });
+        return eksik;
+    }
+    function perfNotPublishedChipDef(dims) {
+        var eksik = perfNotPublished(dims);
+        if (!eksik.length) return null;
+        var adlar = PERF_FIELD_LABEL_KEYS.filter(function (p) {
+            return eksik.indexOf(p[0]) !== -1;
+        }).map(function (p) { return T(p[1], p[2]); }).join(', ');
+        return {
+            text: cfdFormatTemplate(T('viz3d.chip.perfNotPublished',
+                'not published by the solver: {fields}'), { fields: adlar }),
+            kind: 'missing', field: 'performance', fields: eksik
+        };
     }
 
     // Kipin durum çipleri. Çip BEYANDIR: animasyonun neyden sürüldüğünü
@@ -2076,6 +3318,39 @@
         return new THREE.Color(HEAT_STOPS[HEAT_STOPS.length - 1][1]);
     }
 
+    // ÖH D24 · P11B1-02 — RAMPANIN ALANI TEK KAYNAKTAN OKUNUR.
+    //
+    // ÖLÇÜLDÜ (taban 88a29d3, once.json P11B1-02): efsanenin SOL etiketi
+    // `fmt(info.qChamber)` = 2,60 MW/m² basıyordu; rampanın t=0 ucunun
+    // temsil ettiği akı ise exp(lnMin) = qC·0,6 = 1,56 MW/m², yani etiket
+    // bandın dibini 1/0,6 = 1,6667 kat YANLIŞ adlandırıyordu. Renkli bandın
+    // en koyu ucundan sayı okuyan kullanıcı akıyı %67 fazla okur.
+    //
+    // Efsane bir RENK ⟷ DEĞER SÖZLEŞMESİDİR: uçlarına rampanın kendi alan
+    // uçları yazılır, başka bir büyüklük değil. Alan bu fonksiyondan
+    // okunur; hem mesh'i boyayan `_applyHeatMap` hem `getHeatInfo` üstünden
+    // efsaneyi yazan güverte/şablon AYNI iki sayıyı kullanır — ikinci
+    // kopya yok, dolayısıyla uç bir daha kayamaz.
+    //
+    // `HEAT_RAMP_FLOOR` neden 1 değil: taban tam qC'ye oturtulsaydı kamara
+    // yüzeyi rampanın t=0'ında, yani skalanın en koyu renginde düz siyah
+    // görünürdü. Pay bilinçli bir GÖRSEL karardır; bundan böyle etikette
+    // beyan edilir (uydurulmaz).
+    var HEAT_RAMP_FLOOR = 0.6;
+
+    //: `heat` = {qThroat, qChamber} (W/m²). Döner: rampanın uç değerleri.
+    //: `heat` yoksa ısı haritası kapalıdır; boyama zaten yapılmaz, yine de
+    //: bölme hatası vermeyen dejenere alan döner.
+    function heatRampDomain(heat) {
+        var qT = (heat && isFinite(heat.qThroat)) ? heat.qThroat : 1;
+        var qC = (heat && isFinite(heat.qChamber))
+            ? Math.min(heat.qChamber, qT * 0.9) : 1;
+        return {
+            qMin: Math.max(qC * HEAT_RAMP_FLOOR, 1),
+            qMax: Math.max(qT, 2)
+        };
+    }
+
     // ------------------------------------------------------------------
     // Nozul iç konturu: konverjan (kosinüs blend) + Rao boğaz yayı +
     // konik doğru ya da bell (kuadratik Bézier, θn→θe)
@@ -2148,55 +3423,25 @@
         return pts;
     }
 
-    // Nozul katı poligonu: iç kontur + duvar ofsetli dış yol + montaj flanşı.
-    // Boğaz bölgesinde gövde iç yüzeyi grafit insert kalınlığı kadar dışa
-    // ötelenir; insert ayrı katı olarak döner (gerçek motor mimarisi:
-    // grafit boğaz insert'i + metal tutucu gövde).
+    // Nozul katı poligonu: iç kontur + yayımlanan cidar kadar ofsetli dış yol.
+    // A1a sahne-sahte-veri · CM-S1 — montaj flanşı (kalınlığı kapak
+    // kesrinin 0,8 katı, dudağı 0,10 x rc) ve grafit boğaz eki (kalınlığı
+    // 0,35 x rt) SÖKÜLDÜ: üçünün de ölçüsü hiçbir yanıt alanında yok. Katı
+    // artık dışa aktarımın lüle katısıyla aynı tanımdır
+    // (cad_visualization._nozzle_solid: iç kontur + cidar ofseti).
     function nozzleProfile(dims) {
         var inner = nozzleInnerContour(dims);
         var zEnd = inner[inner.length - 1].z;
-        var flangeR = dims.rcOut + dims.flangeLip;
-        var flangeZ1 = dims.Lch + dims.flangeT;
-
-        // İnsert aralığı: konverjanın ortasından diverjanın ilk çeyreğine
-        var tIns = clamp(0.35 * dims.rt, 2.5, 10);
-        var zt = dims.Lch + dims.Lc;
-        var zA = dims.Lch + 0.45 * dims.Lc;
-        var zB = zt + 0.28 * dims.Ld;
-        var ramp = Math.max(2, 0.08 * (zB - zA)); // uçlarda yumuşak geçiş
-        function insOffset(z) {
-            if (z <= zA || z >= zB) return 0;
-            var fIn = clamp((z - zA) / ramp, 0, 1);
-            var fOut = clamp((zB - z) / ramp, 0, 1);
-            return tIns * Math.min(fIn, fOut);
-        }
-
         var poly = [];
-        // iç yüzey (öne doğru) — insert bölgesinde dışa ofsetli
-        inner.forEach(function (p) { poly.push({ r: p.r + insOffset(p.z), z: p.z }); });
+        inner.forEach(function (p) { poly.push({ r: p.r, z: p.z }); });
         // çıkış dudağı
         poly.push({ r: inner[inner.length - 1].r + dims.nozzleWall, z: zEnd });
-        // dış yüzey (geriye doğru, duvar ofseti + flanş bölgesi)
+        // dış yüzey (geriye doğru, cidar ofseti)
         for (var i = inner.length - 1; i >= 0; i--) {
-            var p = inner[i];
-            var rOut = p.r + dims.nozzleWall;
-            if (p.z <= flangeZ1) rOut = Math.max(rOut, flangeR);
-            poly.push({ r: rOut, z: p.z });
-        }
-
-        // Grafit insert katısı: gerçek akış konturu ile ofsetli gövde arası
-        var span = inner.filter(function (p) { return p.z >= zA && p.z <= zB; });
-        var insertPoly = null;
-        if (span.length >= 3) {
-            insertPoly = [];
-            span.forEach(function (p) { insertPoly.push({ r: p.r, z: p.z }); });
-            for (var k = span.length - 1; k >= 0; k--) {
-                var q = span[k];
-                insertPoly.push({ r: q.r + Math.max(insOffset(q.z), 0.6), z: q.z });
-            }
+            poly.push({ r: inner[i].r + dims.nozzleWall, z: inner[i].z });
         }
         return { poly: poly, zExit: zEnd, rExit: inner[inner.length - 1].r,
-                 flangeR: flangeR, inner: inner, insertPoly: insertPoly };
+                 inner: inner };
     }
 
     // ------------------------------------------------------------------
@@ -2204,36 +3449,45 @@
     // ------------------------------------------------------------------
 
     var viz = null; // tek aktif örnek
+    // ÖH D24 / P11B1-08 — son CFD reddinin gerekçe bloğu (ölçüm).
+    var _cfdLastReject = null;
+    // ÖH D27 / OH-D26-02 — son BİRİNCİL ÖLÇÜ reddi (yoksa null). Sahne
+    // kurulmadıysa güverte/sayfa gerekçeyi buradan okur; red sessizce
+    // kaybolmaz (D24 / P11B1-08 dersinin ölçü ayağı).
+    var _dimsLastReject = null;
 
-    function createMaterials() {
-        var brushed = brushedTexture();
-        // envMapIntensity: scene.environment metallere yansıma verir; 0.6-0.8
-        // bandı yıkanmadan hacim kazandırır. Kesit yüzleri mat kalır (0.2).
-        return {
-            // Fırçalanmış alüminyum kasa: çevresel taşlama izi bump+roughness
-            casing: new THREE.MeshStandardMaterial({
-                color: 0x9fabbc, metalness: 0.72, roughness: 0.42,
-                bumpMap: brushed, bumpScale: 0.12, roughnessMap: brushed,
-                envMapIntensity: 0.7
-            }),
-            casingCut: new THREE.MeshStandardMaterial({ color: 0xc3ccd8, metalness: 0.15, roughness: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.2 }),
-            nozzle: new THREE.MeshStandardMaterial({ color: 0x525c68, metalness: 0.78, roughness: 0.38, envMapIntensity: 0.75 }),
-            nozzleCut: new THREE.MeshStandardMaterial({ color: 0x76818f, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.2 }),
-            // Grafit boğaz insert'i: koyu, mat, hafif yansımalı
-            graphite: new THREE.MeshStandardMaterial({ color: 0x23262a, metalness: 0.42, roughness: 0.78, envMapIntensity: 0.5 }),
-            graphiteCut: new THREE.MeshStandardMaterial({ color: 0x393e45, metalness: 0.1, roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.2 }),
-            grain: new THREE.MeshStandardMaterial({ color: 0x6d4326, metalness: 0.0, roughness: 0.94 }),
-            grainCut: new THREE.MeshStandardMaterial({ color: 0x936243, metalness: 0.0, roughness: 1.0, side: THREE.DoubleSide }),
-            liner: new THREE.MeshStandardMaterial({ color: 0x23282e, metalness: 0.05, roughness: 0.9 }),
-            linerCut: new THREE.MeshStandardMaterial({ color: 0x3a4046, metalness: 0.0, roughness: 1.0, side: THREE.DoubleSide }),
-            injector: new THREE.MeshStandardMaterial({ color: 0xb08d57, metalness: 0.85, roughness: 0.38, envMapIntensity: 0.65 }),
-            injectorCut: new THREE.MeshStandardMaterial({ color: 0xd2b184, metalness: 0.2, roughness: 0.85, side: THREE.DoubleSide, envMapIntensity: 0.2 }),
-            bolt: new THREE.MeshStandardMaterial({ color: 0x343b44, metalness: 0.85, roughness: 0.4, envMapIntensity: 0.6 }),
-            steel: new THREE.MeshStandardMaterial({ color: 0x6f7883, metalness: 0.9, roughness: 0.32, envMapIntensity: 0.7 }),
-            // O-ring elastomeri: tam mat, simsiyah
-            oring: new THREE.MeshStandardMaterial({ color: 0x121417, metalness: 0.0, roughness: 0.97 }),
-            orifice: new THREE.MeshStandardMaterial({ color: 0x10151a, metalness: 0.2, roughness: 0.8 })
-        };
+    // Malzemeler TABLODAN kurulur (B7): sayısal parametre burada YAZILMAZ,
+    // hepsi RENDER_QUALITY.materials'tan gelir (tek kaynak bekçili).
+    //   * cut       → kesit yüzü (DoubleSide)
+    //   * brushed   → fırçalanmış metal bump+roughness haritası
+    //   * clearcoat → dielektrik kaplama ⇒ MeshPhysicalMaterial (r128'de var,
+    //                 isMeshStandardMaterial mirası korunur: scene.environment
+    //                 ve CAD malzeme kısıcısı aynen çalışır)
+    function createMaterials(maxAnisotropy) {
+        var brushed = brushedTexture(maxAnisotropy);
+        var spec = RENDER_QUALITY.materials;
+        var out = {};
+        Object.keys(spec).forEach(function (key) {
+            var s = spec[key];
+            var opts = {
+                color: s.color, metalness: s.metalness, roughness: s.roughness,
+                envMapIntensity: s.envMapIntensity
+            };
+            if (s.cut) opts.side = THREE.DoubleSide;
+            if (s.brushed) {
+                opts.bumpMap = brushed;
+                opts.roughnessMap = brushed;
+                opts.bumpScale = s.bumpScale;
+            }
+            if (s.clearcoat !== undefined) {
+                opts.clearcoat = s.clearcoat;
+                opts.clearcoatRoughness = s.clearcoatRoughness;
+                out[key] = new THREE.MeshPhysicalMaterial(opts);
+            } else {
+                out[key] = new THREE.MeshStandardMaterial(opts);
+            }
+        });
+        return out;
     }
 
     function MotorScene(container, motorData, hooks) {
@@ -2263,6 +3517,8 @@
         this._buildLabels();
         this._bindResize();
         this._bindLangChange();
+        // A1b faz-c-0 · K1b — fare altı probe (alan katmanı yokken sessiz)
+        this._bindProbe();
 
         this._clock = new THREE.Clock();
         this._introT = 0;
@@ -2323,13 +3579,26 @@
         this._envTex = makeEnvCubeTexture();
         this.scene.environment = this._envTex;
 
-        // Işıklar: nötr anahtar + cyan/turuncu jant ışıkları (sci-fi ton)
-        this.scene.add(new THREE.HemisphereLight(0x93a7c4, 0x0a0e14, 0.55));
-        var key = new THREE.DirectionalLight(0xffffff, 0.95);
+        // Işıklar: üç nokta düzeni (anahtar + dolgu + hemi) + cyan/turuncu
+        // jant ışıkları (sci-fi ton, KİMLİK — değerleri tabloya alınmadı).
+        // Yayınık bütçe korunur: hemi 0,55 → 0,25, açığa çıkan 0,30 yönlü
+        // dolguya verildi (RENDER_QUALITY.lights.diffuseBudget = 1,50).
+        var LI = RENDER_QUALITY.lights;
+        this._hemiLight = new THREE.HemisphereLight(
+            LI.hemiSky, LI.hemiGround, LI.hemiIntensity);
+        this.scene.add(this._hemiLight);
+        var key = new THREE.DirectionalLight(LI.keyColor, LI.keyIntensity);
         key.castShadow = true;
-        key.shadow.mapSize.set(2048, 2048);
         this._keyLight = key;
         this.scene.add(key);
+        // Dolgu ışığı: gölge ATMAZ (ikinci gölge seti sahte kontak üretir),
+        // rengi gökyüzü jetonuyla AYNI — ambiyansın yönlü hâli olduğu için
+        // sahnenin renk dengesi (kimlik) değişmez. Gölge kadrajı ve mapSize
+        // _applyShadowFit'te uygulanır (kalite kipine bağlı).
+        var fill = new THREE.DirectionalLight(LI.hemiSky, LI.fillIntensity);
+        fill.castShadow = false;
+        this._fillLight = fill;
+        this.scene.add(fill);
         this._rimCyan = new THREE.PointLight(0x00e5ff, 0.55, 0, 2);
         // 0.15: 0.4'te metal kapak yüzeyi turuncuyu aynalayıp altın görünüyordu
         this._rimOrange = new THREE.PointLight(0xff7a1a, 0.15, 0, 2);
@@ -2353,7 +3622,7 @@
         var d = this.dims;
         // Malzemeler bir kez üretilir (cutaway toggle'da yeniden kurulumda
         // material/texture sızıntısı olmasın — hakem bulgusu H1)
-        var mats = this.mats || (this.mats = createMaterials());
+        var mats = this.mats || (this.mats = createMaterials(this._maxAnisotropy()));
         var cut = this.state.cutaway;
 
         if (this.assembly) {
@@ -2370,29 +3639,26 @@
         var isLiquid = d.motorType === 'liquid';
         var isSolid = d.motorType === 'solid';
 
-        // Detay segment sayıları: perf modunda düşürülür
-        var segR = this._perfMode ? 8 : 12;    // torus kesit segmenti
+        // Detay segment sayısı: perf modunda düşürülür
         var segC = this._perfMode ? 24 : 48;   // torus çevre segmenti
 
-        // O-ring boyutu ve yiv yardımcısı: rOut duvarında zList merkezli
-        // kare yivler açan (r,z) nokta dizisi üretir (z artan yönde)
-        var orr = clamp(0.16 * d.capT, 1.2, 3);   // O-ring kesit yarıçapı
-        function wallWithGrooves(rOut, z0, z1, zList, gw, gd) {
-            var pts = [{ r: rOut, z: z0 }];
-            zList.forEach(function (zc) {
-                pts.push({ r: rOut, z: zc - gw });
-                pts.push({ r: rOut - gd, z: zc - gw });
-                pts.push({ r: rOut - gd, z: zc + gw });
-                pts.push({ r: rOut, z: zc + gw });
+        // A1a sahne-sahte-veri · CM-S1 — montaj parçaları YALNIZ yayımlanan
+        // ölçülerden (extractDims → publishedPartPlan). Sökülen kesirler:
+        // O-ring (0,16 x kapak) ve yivleri, spigot (0,55 x kapak), katı
+        // kapağın tüp içi çapı (rc - 0,15) + segmanı (0,12 x kapak) + tüp
+        // uzatması (kapak + 4 mm), kapak cıvatası (0,3 x cidar çap, 0,5 x
+        // kapak boy, cidar ortası çember), giriş borusu + rakor (0,22 x rc,
+        // 1,6 x kapak). Hiçbirinin ölçüsü bir yanıt alanında yok.
+        var plan = d.partPlan || { drawn: [], undrawn: [] };
+        // Parça künyesi mesh'lere yazılır: sahne ölçümü (kanıt betiği,
+        // bekçi) çizilen parçanın ADINI ve ölçüsünün KAYNAĞINI okur.
+        function tagPart(obj, part, sizeMm, basis) {
+            obj.traverse(function (o) {
+                o.userData.part = part;
+                if (sizeMm !== undefined) o.userData.sizeMm = sizeMm;
+                if (basis) o.userData.basis = basis;
             });
-            pts.push({ r: rOut, z: z1 });
-            return pts;
-        }
-        function addORing(parent, R, zPos, tube) {
-            var ring = new THREE.Mesh(ringGeo(R, tube || orr, segR, segC, cut), mats.oring);
-            ring.position.y = zPos;
-            parent.add(ring);
-            return ring;
+            return obj;
         }
         // Dış parting-line halkası (işlenmiş parça birleşim izi — tam çember)
         function addJointLine(parent, zPos) {
@@ -2403,93 +3669,53 @@
             parent.add(jr);
         }
 
-        // --- Gövde tüpü (kapak artık AYRI parça — gerçek motor mimarisi) ---
-        // Katıda tüp öne uzar: kapak tüpün içinde, snap-ring ile tutulur
-        var tubeZ0 = isSolid ? -d.capT - 4 : 0;
+        // --- Gövde tüpü (kapak AYRI parça) ---
         var casingPoly = [
-            { r: d.rc, z: tubeZ0 },
-            { r: d.rcOut, z: tubeZ0 },
+            { r: d.rc, z: 0 },
+            { r: d.rcOut, z: 0 },
             { r: d.rcOut, z: d.Lch },
             { r: d.rc, z: d.Lch }
         ];
         var casing = buildSolid(casingPoly, mats.casing, mats.casingCut, cut);
         this.parts.casing = casing;
 
-        // --- Ön kapak (forward closure): O-ring yivli, cıvatalı/snap-ring'li ---
+        // --- Ön kapak (forward closure): yapısal analizin DÜZ KAPAK
+        // kalınlığı (end_cap_analysis.flat_head_thickness). Profil dışa
+        // aktarımın kapağıyla aynı tanım: tüp alnında, dış çap = kasa dış
+        // çapı (cad_visualization._chamber_solid). Alan yoksa kapak yok.
         var closure = new THREE.Group();
-        if (isSolid) {
-            // Tüp içine oturan kapak: OD üzerinde 2 O-ring yivi + önünde
-            // tüp iç yüzeyine oturan snap ring (segman)
-            var cOD = d.rc - 0.15;
-            var zO1 = -0.65 * d.capT, zO2 = -0.3 * d.capT;
-            // Yiv yarı genişliği aralığa oranla sınırlı: dar kapakta
-            // yivlerin çakışıp poligonu kendine kesmesini önler
-            var gwS = Math.min(orr * 0.9, 0.15 * d.capT);
-            var closPoly = [{ r: 0, z: -d.capT }]
-                .concat(wallWithGrooves(cOD, -d.capT, 0, [zO1, zO2], gwS, orr * 0.7))
-                .concat([{ r: 0, z: 0 }]);
-            closure.add(buildSolid(closPoly, mats.casing, mats.casingCut, cut));
-            addORing(closure, cOD - orr * 0.7 + orr * 0.55, zO1);
-            addORing(closure, cOD - orr * 0.7 + orr * 0.55, zO2);
-            // Snap ring: kapağın önünde, tüp ID yivinde
-            var snap = new THREE.Mesh(
-                ringGeo(d.rc - 0.6, clamp(0.12 * d.capT, 1, 2.4), 4, segC, cut),
-                mats.steel);
-            snap.position.y = -d.capT - 2;
-            closure.add(snap);
-        } else {
-            // Hibrit/sıvı: flanşlı kapak + tüp içine giren spigot (2 O-ring
-            // yivli) + tüp alın yüzeyine cıvata çemberi
-            var spigR = d.rc - 0.25;
-            var sg = clamp(0.55 * d.capT, 5, 20);
-            var zg1 = 0.32 * sg, zg2 = 0.72 * sg;
-            // Yiv yarı genişliği spigot boyuna oranla sınırlı (çakışma önlemi)
-            var gwH = Math.min(orr * 0.9, 0.16 * sg);
-            var closPoly2 = [
+        if (d.capT !== null && d.capT > 0) {
+            var capPoly = [
                 { r: 0, z: -d.capT },
                 { r: d.rcOut, z: -d.capT },
-                { r: d.rcOut, z: 0 }
-            ].concat(wallWithGrooves(spigR, 0, sg, [zg1, zg2], gwH, orr * 0.7))
-             .concat([{ r: 0, z: sg }]);
-            closure.add(buildSolid(closPoly2, mats.casing, mats.casingCut, cut));
-            addORing(closure, spigR - orr * 0.7 + orr * 0.55, zg1);
-            addORing(closure, spigR - orr * 0.7 + orr * 0.55, zg2);
-            // Cıvata çemberi: kapak ön yüzünden tüp alın yüzeyine (M4-M6 görünüm)
-            var cbR = clamp(0.3 * d.casingWall, 1.6, 4);
-            var cbH = clamp(0.5 * d.capT, 4, 12);
-            var cbGeo = new THREE.CylinderGeometry(cbR, cbR, cbH, 6);
-            var cbCircle = (d.rc + d.rcOut) / 2;
-            for (var cb = 0; cb < d.nBolts; cb++) {
-                var cphi = ((cb + 0.5) / d.nBolts) * TAU;
-                var cbolt = new THREE.Mesh(cbGeo, mats.bolt);
-                cbolt.position.set(cbCircle * Math.sin(cphi), -d.capT - cbH * 0.45,
-                    cbCircle * Math.cos(cphi));
-                cbolt.userData.phi = cphi;
-                cbolt.userData.hideInCut = true;
-                cbolt.castShadow = true;
-                closure.add(cbolt);
-            }
+                { r: d.rcOut, z: 0 },
+                { r: 0, z: 0 }
+            ];
+            closure.add(tagPart(
+                buildSolid(capPoly, mats.casing, mats.casingCut, cut),
+                'closure_cap', d.capT, plan.sources.closure_cap));
             addJointLine(closure, 0.4); // kapak-tüp birleşim izi
+            // Kapak cıvataları: sayı + delik YAYIMLANDIYSA; çember sabit
+            // yerleşim kuralıdır ve YALNIZ künyesiyle çizilir.
+            if (plan.bolts) {
+                var pb = plan.bolts;
+                var cbGeo = new THREE.CylinderGeometry(pb.holeMm / 2,
+                    pb.holeMm / 2, d.capT, 6);
+                for (var cb = 0; cb < d.nBolts; cb++) {
+                    var cphi = ((cb + 0.5) / d.nBolts) * TAU;
+                    var cbolt = new THREE.Mesh(cbGeo, mats.bolt);
+                    cbolt.position.set(pb.circleMm * Math.sin(cphi),
+                        -d.capT / 2, pb.circleMm * Math.cos(cphi));
+                    cbolt.userData.phi = cphi;
+                    cbolt.userData.hideInCut = true;
+                    cbolt.castShadow = true;
+                    cbolt.receiveShadow = true;
+                    tagPart(cbolt, 'closure_bolts', pb.holeMm, pb.basis);
+                    closure.add(cbolt);
+                }
+            }
         }
         this.parts.closure = closure;
-
-        // Oksitleyici/yakıt giriş borusu + rakor (katıda yok — kapalı kapak)
-        if (!isSolid) {
-            var inletPoly = [
-                { r: 0, z: -d.capT - d.inletL },
-                { r: d.inletR, z: -d.capT - d.inletL },
-                { r: d.inletR, z: -d.capT + 1 },
-                { r: 0, z: -d.capT + 1 }
-            ];
-            closure.add(buildSolid(inletPoly, mats.casing, null, false));
-            var collar = new THREE.Mesh(
-                new THREE.TorusGeometry(d.inletR + 1.5, 2.2, segR, segC),
-                mats.bolt
-            );
-            collar.rotation.x = Math.PI / 2;
-            collar.position.y = -d.capT - d.inletL * 0.55;
-            closure.add(collar);
-        }
 
         // B1 (v2.6.27): SAHTE 8 BİLEZİK SÖKÜLDÜ. Eski kod her sıvı motora,
         // veriden bağımsız 8 dekoratif çevresel "soğutma bileziği" çiziyordu
@@ -2518,42 +3744,57 @@
                     chMesh.userData.phi = chn.phi;
                     chMesh.userData.hideInCut = true; // kesit açıklığında gizlenir
                     chMesh.castShadow = true;
+                    chMesh.receiveShadow = true;      // komşu kanal gölgesi
                     casing.add(chMesh);
                 }
             } else {
                 this._coolingChip = {
-                    text: 'soğutma kanalları: veri yok', kind: 'missing'
+                    // P17B1-09: beyan çipi de oturum dilinde.
+                    text: T('viz3d.chip.coolingNoData',
+                            'cooling channels: no data'), kind: 'missing'
                 };
             }
         }
 
-        // --- Liner (fenolik yalıtım tüpü — grain'li motorlarda) ---
-        if (!isLiquid) {
-            var linerPoly = [
-                { r: d.rGrainOut, z: 2 },
-                { r: d.rc - 0.15, z: 2 },
-                { r: d.rc - 0.15, z: d.Lch - 2 },
-                { r: d.rGrainOut, z: d.Lch - 2 }
-            ];
-            this.parts.liner = buildSolid(linerPoly, mats.liner, mats.linerCut, cut);
-        } else {
-            this.parts.liner = new THREE.Group();
+        // --- Astar (grain'li motorlarda) — CM-S1: dış yarıçap kasa deliği
+        // (eski rc - 0,15 kesri söküldü), kalınlık YAYIMLANAN alandan:
+        //  * thermal_protection.chamber_liner.thickness → astar, çözücünün
+        //    kendi tanımıyla tanenin ÖRTMEDİĞİ kesimlerde (ön/arka oda);
+        //  * yoksa tane ile kasa deliği arası (iki yayımlanan çapın farkı)
+        //    → yalıtım, kamara boyunca.
+        // İkisi de yoksa astar ÇİZİLMEZ.
+        this.parts.liner = new THREE.Group();
+        if (!isLiquid && plan.liner) {
+            var ln = plan.liner;
+            var linerSpans = (ln.span === 'unshielded')
+                ? [[0, d.zg0], [d.zg1, d.Lch]] : [[0, d.Lch]];
+            for (var ls = 0; ls < linerSpans.length; ls++) {
+                var za = linerSpans[ls][0], zb = linerSpans[ls][1];
+                if (!(zb > za)) continue;
+                this.parts.liner.add(tagPart(buildSolid([
+                    { r: ln.rIn, z: za },
+                    { r: d.rc, z: za },
+                    { r: d.rc, z: zb },
+                    { r: ln.rIn, z: zb }
+                ], mats.liner, mats.linerCut, cut), 'chamber_liner', ln.tMm,
+                    ln.basis));
+            }
         }
 
-        // --- Enjektör plakası + showerhead orifis deseni (katı motorda yok) ---
-        if (!isSolid) {
-            // Plaka, kapak spigot'unun hemen arkasına oturur (manifold
-            // hacmi = spigot yüzü ile plaka arasındaki boşluk)
-            var injZ0 = sg + 2;
-            var injT = clamp(0.9 * d.capT, 6, 24);
-            if (!isLiquid) {
-                // Hibritte plaka grain başlangıcına taşmasın
-                injT = Math.max(4, Math.min(injT, d.zg0 - injZ0 - 1));
-            }
+        // --- Enjektör plakası + orifis deseni (katı motorda yok) ---
+        // A1a sahne-sahte-veri · CM-S1: plaka kalınlığı YALNIZ
+        // injector_design.plate_thickness_mm alanından (eski 0,9 x kapak
+        // kesri + hibrit kırpması söküldü; değer kırpılmadan, bit-aynı
+        // çizilir). Plaka kamara deliğini doldurur ve kapağın iç yüzüne
+        // oturur (manifold boyu yayımlanmıyor → boşluk uydurulmaz). Alan
+        // yoksa plaka ve yüzündeki delik deseni ÇİZİLMEZ.
+        if (!isSolid && d.partPlan && d.partPlan.plateT !== null) {
+            var injZ0 = 0;
+            var injT = d.partPlan.plateT;
             var injPoly = [
                 { r: 0, z: injZ0 },
-                { r: d.rc - 0.4, z: injZ0 },
-                { r: d.rc - 0.4, z: injZ0 + injT },
+                { r: d.rc, z: injZ0 },
+                { r: d.rc, z: injZ0 + injT },
                 { r: 0, z: injZ0 + injT }
             ];
             var injector = buildSolid(injPoly, mats.injector, mats.injectorCut, cut);
@@ -2575,6 +3816,7 @@
                     mats.injector);
                 post.position.y = injFace + pLen / 2;
                 post.castShadow = true;
+                post.receiveShadow = true;   // plaka gölgesi pintle gövdesinde
                 injector.add(post);
                 // Uçta radyal delik dizisi (yatık silindirler) — yalnız
                 // çözücü gerçek bir delik sayısı/çapı verdiyse
@@ -2748,26 +3990,26 @@
                     ]);
                     injector.add(new THREE.Line(swGeo, swMat));
                 });
+                // ÖH D24 / P11B1-07 — SAHNENİN SON KODA GÖMÜLÜ TÜRKÇESİ.
+                // ÖLÇÜLDÜ (a3/once.json): dosyanın kendi sözleşmesi
+                // (anahtar sözlükte yoksa İNGİLİZCE tam metin döner)
+                // dışında kalan iki yerden biri buydu; en-US oturumda tek
+                // çip yığınında iki dil okunuyordu. Sayı değişmez.
                 var swChip = statusChip(
-                    'sprey açısı ' + (2 * swHalf).toFixed(0) + '°', 'computed');
+                    T('viz3d.chip.sprayAngle', 'spray angle') + ' '
+                    + numTxt((2 * swHalf), 0) + '°', 'computed');
                 var swH = Math.max(6, Math.min(d.Lch * 0.05, d.rc * 0.8));
                 swChip.scale.set(swH * swChip.userData.aspect, swH, 1);
                 swChip.position.set(0, injFace + swLen * 1.12, 0);
                 injector.add(swChip);
             }
 
-            // Hibrit: kapaktan port girişine uzanan ateşleyici (pirinç gövde)
-            if (!isLiquid) {
-                var igR = clamp(0.09 * d.rc, 2.5, 8);
-                var igL = (injZ0 + injT + 10) - (-d.capT + 1);
-                var ig = new THREE.Mesh(
-                    new THREE.CylinderGeometry(igR, igR * 0.8, igL, this._perfMode ? 10 : 16),
-                    mats.injector);
-                ig.position.y = (-d.capT + 1) + igL / 2;
-                ig.castShadow = true;
-                injector.add(ig);
-            }
-            this.parts.injector = injector;
+            // A1a sahne-sahte-veri · CM-S1: hibrit ateşleyici (0,09 x rc
+            // yarıçap, kapaktan porta uzanan boy) SÖKÜLDÜ — igniter_sizing
+            // bu çözücüde değerlendirilmiyor, ölçüsü hiçbir alanda yok.
+            // Plakanın yüz geometrisi plakanın parçasıdır (aynı künye).
+            this.parts.injector = tagPart(injector, 'injector_plate', injT,
+                plan.sources.injector_plate);
         } else {
             this.parts.injector = new THREE.Group();
         }
@@ -2778,32 +4020,17 @@
         this._resolvePortRegression();
         this._rebuildGrain(portRadiusAt(d, this.state.time, this._portRegMode), true);
 
-        // --- Nozul: metal tutucu gövde + grafit boğaz insert'i + flanş ---
+        // --- Nozul: iç kontur + yayımlanan cidar ---
+        // A1a sahne-sahte-veri · CM-S1: grafit boğaz eki (0,35 x rt), lüle
+        // flanşı (0,8 x kapak / 0,10 x rc), flanş O-ringi (0,18 x flanş) ve
+        // flanş cıvataları (0,05 x rc çap, flanş kesri boy) SÖKÜLDÜ. Lüle
+        // bağlantısı yapısal analizde ayrı boyutlandırılmıyor
+        // (fastener_analysis yalnız ön kapak yükünü taşır: "Total force on
+        // end cap") → lüle cıvatası için yayımlanan ölçü yok.
         var np = nozzleProfile(d);
         this._nozzleInfo = np;
         var nozzle = buildSolid(np.poly, mats.nozzle, mats.nozzleCut, cut);
-        // Grafit insert: gerçek akış konturunu taşıyan ayrı katı (kesitte
-        // koyu bant olarak metal gövdeden ayrışır)
-        if (np.insertPoly) {
-            nozzle.add(buildSolid(np.insertPoly, mats.graphite, mats.graphiteCut, cut));
-        }
-        // Nozul-kasa arayüz O-ringi (flanş alın yüzeyi contası)
-        addORing(nozzle, (d.rc + d.rcOut) / 2, d.Lch + 0.6,
-                 clamp(0.18 * d.flangeT, 1.2, 3));
-        addJointLine(nozzle, d.Lch - 0.4); // tüp-flanş birleşim izi
-        // Flanş cıvataları (retention: cıvatalı flanş)
-        var boltR = clamp(0.05 * d.rc, 2.2, 6);
-        var boltGeo = new THREE.CylinderGeometry(boltR, boltR, d.flangeT * 0.9, 6); // altıgen başlı görünüm
-        var boltCircle = (np.flangeR + d.rcOut) / 2 + 1;
-        for (var b = 0; b < d.nBolts; b++) {
-            var bphi = ((b + 0.5) / d.nBolts) * TAU;
-            var bolt = new THREE.Mesh(boltGeo, mats.bolt);
-            bolt.position.set(boltCircle * Math.sin(bphi), d.Lch + d.flangeT + 2, boltCircle * Math.cos(bphi));
-            bolt.userData.phi = bphi;
-            bolt.userData.hideInCut = true;
-            bolt.castShadow = true;
-            nozzle.add(bolt);
-        }
+        addJointLine(nozzle, d.Lch - 0.4); // tüp-lüle birleşim izi
         this.parts.nozzle = nozzle;
 
         // --- Port içi yanma parıltısı (materyal + alev spriteı tek sefer) ---
@@ -2833,7 +4060,9 @@
             this.parts.injector, this.parts.grain, this.parts.nozzle, this._throatFlame);
 
         // Modeli merkeze al
-        var zMin = -d.capT - d.inletL;
+        // A1a sahne-sahte-veri · CM-S1: giriş borusu söküldü; model önde
+        // yayımlanan kapakla (yoksa kamara iç yüzüyle) biter.
+        var zMin = -(d.capT > 0 ? d.capT : 0);
         var zMax = np.zExit;
         this._zCenter = (zMin + zMax) / 2;
         this._totalLen = zMax - zMin;
@@ -2847,11 +4076,12 @@
         // Zemin: gölge düzlemi + ızgara. Gölge düzlemi ilk kurulumda üretilir
         // ve motor boyuyla ölçeklenir (yalnız gölge alanıdır); sonraki
         // kurulumlarda konum tazelenir (görev 5a — bayatlamayı önler)
-        var floorY = -(this.dims.rcOut + this.dims.flangeLip) * 1.9;
+        var floorY = floorYMm(this.dims.rcOut + this.dims.flangeLip);
         if (!this._floor) {
             var shadowPlane = new THREE.Mesh(
                 new THREE.PlaneGeometry(this._totalLen * 4, this._totalLen * 4),
-                new THREE.ShadowMaterial({ opacity: 0.32 })
+                new THREE.ShadowMaterial({
+                    opacity: RENDER_QUALITY.shadow.floorOpacity })
             );
             shadowPlane.rotation.x = -Math.PI / 2;
             shadowPlane.receiveShadow = true;
@@ -2908,6 +4138,7 @@
         this._gridBadge.scale.set(gbH * this._gridBadge.userData.aspect, gbH, 1);
         var gbP = gridBadgePositionMm(this._totalLen || 1, floorY, gbH);
         this._gridBadge.position.set(gbP.x, gbP.y, gbP.z);
+        this._gridBadgeFloorY = floorY;   // dil değişiminde yeniden kurulum için
         // Izgara yeniden kurulduysa CAD nötr stüdyo stili korunur
         if (this.state.cadMode) this._applyCadGridStyle(true);
 
@@ -2929,15 +4160,86 @@
         var d = this.dims;
         var defs = [];
         if (this._coolingChip) defs.push(this._coolingChip);
+        // ÖH D26 / P11B1-09 — uydurma yedeğe düşen ölçüler beyan edilir.
+        // (Önce: birincil ölçülerin dördü de sessizce uyduruluyordu.)
+        // ÖH D31 · OH-D27-13 — panel rozeti sahne çipiyle AYNI listeden
+        // beslenir. Kanca BURADA, `dimensionSourceChipDefs`in İÇİNDE
+        // değil: mevcut bekçiler (D26 a1, D29 a2) o işlevi tek başına
+        // çıkarıp node'da eval ediyor; gövdesine serbest bir ad koymak
+        // onları ReferenceError ile kırar (ölçüldü).
+        defs = defs.concat(dimensionSourceChipDefs(d));
+        _varsayimRozetiniTazele(defs, d);
+        // --- ÖH D29 · P11B1-12 — İKİ BEYAN ALANI ÇİPE BAĞLANDI ------------
+        // ÖLÇÜLDÜ (a2/once.json P11B1-12): `extractDims` 41 alan döndürüyor
+        // ve bunların İKİSİ sahnede de güvertede de HİÇ okunmuyordu:
+        // `injectorSource` ('injector_results' | 'injector_design') ve
+        // `contourBasis` (`nozzle_contour._basis` künyesi). İkisi de beyan
+        // için hesaplanıp atılıyordu; `injectorSource` tam olarak
+        // "kullanıcı hangi enjektörü gördüğünü bilemiyor" (P11B1-04)
+        // kusurunun taşıyıcısıydı.
+        // Beyan UYDURULMAZ: künye yükten gelmediyse çip basılmaz; enjektör
+        // hiç çizilmediyse (nOrifices = 0 ve desen yok) enjektör çipi de
+        // basılmaz — çizilmeyen şeyin kaynağı beyan edilmez.
         defs.push(d.contourSource === 'solver'
-            ? { text: 'kontur: çözücü', kind: 'computed' }
-            : { text: 'kontur: yerel üretim', kind: 'assumed' });
+            // P17B1-09: kaynak beyanı çipleri de oturum dilinde.
+            ? { text: T('viz3d.chip.contourSolver', 'contour: solver')
+                    + (d.contourBasis ? ' (' + d.contourBasis + ')' : ''),
+                kind: 'computed', basis: d.contourBasis || null }
+            : { text: T('viz3d.chip.contourLocal', 'contour: locally generated')
+                    + (d.contourBasis ? ' (' + d.contourBasis + ')' : ''),
+                kind: 'assumed', basis: d.contourBasis || null });
+        if (d.injectorSource && (d.nOrifices > 0 || d.injPattern)) {
+            defs.push({
+                // i18n devri (arayuz-i18n): metin bu dalgada anahtarsız
+                // basılır — künyenin kendisi zaten makine dizesidir
+                // ('injector_results' / 'injector_design').
+                text: 'injector block: ' + d.injectorSource,
+                kind: 'computed', field: 'injector_source'
+            });
+        }
+        // A1a sahne-sahte-veri · CM-S1 — delik deseni plakanın parçasıdır:
+        // plaka kalınlığı yayımlanmadıysa plaka da deseni de çizilmez, o
+        // yüzden desenin kaynağı da beyan edilmez (çizilmeyen şeyin künyesi
+        // kullanıcıyı yanıltır — yukarıdaki çipin kendi kuralı).
+        var plan = d.partPlan || null;
+        if (!(plan && plan.plateT !== null)) {
+            defs = defs.filter(function (c) {
+                return c.field !== 'injector_source';
+            });
+        }
+        // Montaj planı beyanı: yayımlanan ölçüsü olmayan parçalar ÇİZİLMEDİ
+        // ve sayıları söylenir (sayı ölçülür: planın çizilmeyenler listesi).
+        if (plan && plan.undrawn && plan.undrawn.length) {
+            defs.push({
+                text: T('viz3d.chip.noAssemblyPlan',
+                        'no assembly plan — {n} parts not drawn '
+                        + '(layout rule, not a dimension)')
+                    .replace('{n}', String(plan.undrawn.length)),
+                kind: 'missing', field: 'assembly_plan',
+                parts: plan.undrawn.slice()
+            });
+        }
+        // Cıvata çizildiyse çemberinin künyesi (sabit yerleşim kuralı)
+        // amber varsayım çipinde, A2 cm-0-plan ASSUMED tablosuyla birebir.
+        if (plan && plan.bolts) {
+            defs.push({
+                text: T('viz3d.chip.boltCircle', 'bolt circle') + ': '
+                    + plan.bolts.basis,
+                kind: 'assumed', field: 'bolt_circle',
+                basis: plan.bolts.basis
+            });
+        }
         // Yanma animasyonunun kaynağı (B5): çip, iç yüzeyin neyden
         // gerilediğini — ya da gerilemediğini — beyan eder.
         if (d.motorType !== 'liquid') {
             defs = defs.concat(portRegressionChipDefs(this._portRegMode,
                 { endsBurn: d.endsBurn }));
         }
+        // A1b faz-c-0 · OH-D37-S7 — yayımlanmayan itki / Isp / Pc adıyla
+        // (HUD yayını onları null taşır; sayı uydurulmaz). En sona: mevcut
+        // çiplerin sırası ve yeri değişmez.
+        var perfCip = perfNotPublishedChipDef(d);
+        if (perfCip) defs.push(perfCip);
         return defs;
     };
 
@@ -2946,6 +4248,41 @@
     MotorScene.prototype._refreshStatusChips = function () {
         if (this._floorY === undefined) return;
         this._buildStatusChips(this._statusChipDefs(), this._floorY);
+    };
+
+    // ÖH D23 / P17B1-09 (ayak 2) — IZGARA ROZETİ DE DİLE BAĞLI.
+    // ÖLÇÜLDÜ (a2 once.json: lang_izgara_rozetini_tazeler = 0,
+    // lang_etiketleri_tazeler = 0): dil dinleyicisi YALNIZ durum çiplerini
+    // ve CFD renk çubuğunu tazeliyordu. Izgara hücresi rozeti
+    // (`gridBadgeText` → 'grid 10 mm' / 'ızgara 10 mm') ve ölçü etiketleri
+    // (`dimensionLabelTexts` → 'ØC inner … / outer …', 'GRAIN … mm') canvas
+    // sprite metnidir; DOM olmadıkları için i18n.js'in translateTree'si
+    // onlara ULAŞAMAZ ve yalnız KURULUM anında çözülüyorlardı. Sonuç:
+    // kullanıcı EN⟷TR düğmesine bastığında sayfanın geri kalanı çevrilir,
+    // 3B sahne eski dilde donar — hükmün (H1) ölçtüğü kusurun kalıcı hâli.
+    // Rozet metni hücreden, ölçek ve konum MOTORDAN gelir; ikisi de
+    // saklanan son değerlerden yeniden kurulur (uydurma değer yok).
+    MotorScene.prototype._refreshGridBadge = function () {
+        if (!this._gridBadge || this._gridCell === undefined) return;
+        if (this._gridBadgeFloorY === undefined) return;
+        var eski = this._gridBadge;
+        this.scene.remove(eski);
+        if (eski.material.map) eski.material.map.dispose();
+        eski.material.dispose();
+        var badge = textSprite(gridBadgeText(this._gridCell), {
+            border: 'rgba(20, 111, 128, 0.7)', color: '#7fd4e2'
+        });
+        badge.material.depthTest = true;   // HUD değil, zemin mobilyası
+        badge.renderOrder = 0;
+        this._gridBadge = badge;
+        this.scene.add(badge);
+        var gbH = this._gridBadgeH || chipHeightMm(this._totalLen || 1,
+            2 * (this.dims.rcOut + this.dims.flangeLip));
+        badge.scale.set(gbH * badge.userData.aspect, gbH, 1);
+        var gbP = gridBadgePositionMm(this._totalLen || 1,
+            this._gridBadgeFloorY, gbH);
+        badge.position.set(gbP.x, gbP.y, gbP.z);
+        if (this.state.cadMode) this._applyCadGridStyle(true);
     };
 
     // Port gerileme kipini çöz (tek karar noktası). Kesit şekli, tane
@@ -3196,10 +4533,12 @@
                 vertexColors: true, metalness: 0.05, roughness: 0.95, side: THREE.DoubleSide
             });
         }
+        // Rampa alanı TEK KAYNAKTAN (ÖH D24 · P11B1-02): efsane etiketi de
+        // aynı `heatRampDomain` çıktısını yazar.
         var qT = on ? d.heat.qThroat : 1;
-        var qC = on ? Math.min(d.heat.qChamber, qT * 0.9) : 1;
-        var lnMin = Math.log(Math.max(qC * 0.6, 1));
-        var lnMax = Math.log(Math.max(qT, 2));
+        var dom = heatRampDomain(on ? d.heat : null);
+        var lnMin = Math.log(dom.qMin);
+        var lnMax = Math.log(dom.qMax);
 
         [this.parts.casing, this.parts.nozzle].forEach(function (grp) {
             if (!grp) return;
@@ -3233,15 +4572,18 @@
     };
 
     // Patlatılmış görünüm ofsetleri (f: 0=montajlı, 1=ayrık)
+    // Ofsetler EXPLODE_OFFSETS tablosundan (tek kaynak): gölge kadrajı da
+    // aynı tablodan en büyük ofseti okuyup frustumu açar — patlatılmış
+    // parçaların gölgesi kırpılmasın (B7 kalem 1).
     MotorScene.prototype._applyExplode = function (f) {
         if (!this.parts.casing) return;
         var L = this._totalLen;
-        if (this.parts.closure) this.parts.closure.position.y = -0.48 * L * f;
-        this.parts.casing.position.y = -0.30 * L * f;
-        this.parts.injector.position.y = -0.16 * L * f;
-        this.parts.liner.position.y = -0.06 * L * f;
-        this.parts.grain.position.y = 0.10 * L * f;
-        this.parts.nozzle.position.y = 0.30 * L * f;
+        var parts = this.parts;
+        Object.keys(EXPLODE_OFFSETS).forEach(function (k) {
+            if (parts[k]) parts[k].position.y = EXPLODE_OFFSETS[k] * L * f;
+        });
+        this._explodeF = f;
+        this._applyShadowFit();
     };
 
     // Kesit modunda açıklık bölgesindeki cıvata/orifisleri gizle.
@@ -3276,11 +4618,18 @@
         // Radyal saçılım: nozul çıkış yarı açısı akışın geometrik sapmasıdır.
         // Az genişlemiş jette (pe > pa) akış çıkışta ayrıca Prandtl-Meyer
         // genişlemesiyle DIŞA açılır; aşırı genişlemişte içeri büzülür.
+        // KU-25 / K-12: eski künyesiz `pressureTurn = clamp((pe/pa)^0,5,
+        // 0,6, 1,8)` çarpanı kaldırıldı. Yerine ilk jet sınırı eğimi:
+        //     δ = θ_N + [ν(Mj) − ν(Me)]
+        // (Love 1959, NASA TR R-6, s. 7 "Initial inclination of jet
+        // boundary": dudaktaki 2B genişleme/sıkışma + θ_N eklenir). Açı
+        // çekirdek koniyle AYNI kaynaktan (plumeConeSpec) — tek bağıntı.
         var thetaDeg = d.nozType === 'conical' ? d.halfAngle : d.thetaE;
-        var geometric = Math.tan(THREE.MathUtils.degToRad(clamp(thetaDeg, 2, 35)));
-        var pressureTurn = clamp(Math.pow(ex.pressureRatio, 0.5), 0.6, 1.8);
-        var spread = geometric / Math.tan(
-            THREE.MathUtils.degToRad(PLUME_REF_EXIT_ANGLE_DEG)) * pressureTurn;
+        var cone = plumeConeSpec(d.re, clamp(thetaDeg, 2, 35), ex.exitMach,
+            ex.jetMach, ex.gamma, 0);
+        if (!cone) return null;
+        var spread = Math.tan(THREE.MathUtils.degToRad(cone.halfAngleDeg))
+            / Math.tan(THREE.MathUtils.degToRad(PLUME_REF_EXIT_ANGLE_DEG));
 
         // Şok elmalarının ŞİDDETİ basınç uyumsuzluğuyla artar; tam genişlemiş
         // jette (pe = pa) hücre yapısı kaybolur. Sürücü ölçülen |1 − pe/pa|
@@ -3428,8 +4777,15 @@
     MotorScene.prototype._updateDiamondPositions = function () {
         var d = this.dims;
         var info = this._plumeInfo || (this._plumeInfo = this._plumeAero());
-        // Çözücü verisi yoksa ya da jet tam genişlemişse hücre yapısı YOKTUR;
-        // elmasları uydurma bir aralıkla dizmek yerine gizleriz.
+        // İlk elmasın çıkış düzleminden uzaklığı (d_e cinsinden).
+        // KAYNAKSIZ GÖRSEL YERLEŞİM — BEYAN (KU-25 / LULE-2c K-4): fiziksel
+        // konum p_j/p_∞'a güçlü bağlıdır (Love 1959, NASA TR R-6, Şekil 8:
+        // l/d_j ≈ 0,2 … 8); HRMA'nın lüle zarfı için künyeli bir bağıntı
+        // yoktur. Sahnedeki ilk elmas konumu ölçülmüş/hesaplanmış DEĞİLDİR.
+        var FIRST_DIAMOND_OFFSET_DE = 0.9;
+        // Çözücü verisi yoksa ya da jet ses altıysa (Mj ≤ 1,02) hücre
+        // yapısı YOKTUR; elmasları uydurma bir aralıkla dizmek yerine
+        // gizleriz.
         if (!info || !(info.diamondSpacing > 0)) {
             for (var j = 0; j < this._diamonds.length; j++) {
                 this._diamonds[j].visible = false;
@@ -3438,7 +4794,7 @@
         }
         for (var k = 0; k < this._diamonds.length; k++) {
             this._diamonds[k].visible = true;
-            var yk = d.de * 0.9 + k * info.diamondSpacing;
+            var yk = d.de * FIRST_DIAMOND_OFFSET_DE + k * info.diamondSpacing;
             this._diamonds[k].position.set(0, this._nozzleInfo.zExit + yk, 0);
             // Elmas ölçeği koni katmanıyla hizalı (kalem 4): parlama o
             // istasyondaki jet sınırı yarıçapına (coneRadiusAt) oturur —
@@ -3664,8 +5020,12 @@
             chamberOuterMm: 2 * d.rcOut,
             throatMm: d.dt,
             exitMm: d.de,
-            totalMm: this._nozzleInfo.zExit + d.capT,
-            grainMm: d.Lg
+            totalMm: this._nozzleInfo.zExit + (d.capT > 0 ? d.capT : 0),
+            grainMm: d.Lg,
+            // P11B1-05: sıvıda ODA etiketi BU alandan yazılır (d.Lg'den
+            // değil); kaynak bayrağı false ise etiket hiç kurulmaz.
+            chamberLengthMm: d.Lch,
+            chamberLengthKaynakli: d.LchKaynakli
         });
         callout(d.Lch * 0.30, d.rcOut, texts.chamber);
         callout(d.Lch + d.Lc, d.rt + 2, texts.throat, scaleBase * 1.5);
@@ -3706,16 +5066,71 @@
             fit.dir.x * dist, fit.dir.y * dist, fit.dir.z * dist);
         cam.position.copy(this._camHome).multiplyScalar(1.5); // intro dolly başlangıcı
         this.controls.target.set(0, 0, 0);
-        this._keyLight.position.set(L * 0.8, L * 1.1, L * 0.7);
-        var sc = this._keyLight.shadow.camera;
-        sc.left = -L; sc.right = L; sc.top = L; sc.bottom = -L; sc.far = L * 6;
-        this._keyLight.shadow.camera.updateProjectionMatrix();
+        // Anahtar + dolgu konumu ve gölge kadrajı tek elden (_applyShadowFit)
+        this._applyShadowFit();
         this._rimCyan.position.set(-L * 0.9, L * 0.25, -L * 0.9);
         this._rimOrange.position.set(L * 1.0, -L * 0.35, -L * 0.7);
         cam.far = Math.max(dist, L) * 30;
         cam.updateProjectionMatrix();
         // CAD kipindeyken geometri değişimi ortografik kadrajı da tazeler
         if (this.state.cadMode) this.setCadPreset(this._cadPresetName || 'iso');
+    };
+
+    // Sürücünün desteklediği en yüksek anizotropik süzme (r128 yeteneği).
+    // WebGL bağlamı yoksa (test/harness) süzme varsayılanda kalır.
+    MotorScene.prototype._maxAnisotropy = function () {
+        try {
+            return this.renderer.capabilities.getMaxAnisotropy();
+        } catch (e) {
+            return 1;
+        }
+    };
+
+    // Gölge kalitesi TEK NOKTADAN (B7, kalem 1 + 5). Çağrı yerleri:
+    //   _fitCamera    — geometri/kadraj değişti
+    //   _applyExplode — eksen boyu patlatmayla büyür/küçülür
+    //   setQuality    — kalite kipi mapSize'ı değiştirir
+    // Sürücü sınırı: r128 gölge dokusunu maxTextureSize'a KENDİ kısar
+    // (WebGLShadowMap: `r.x>h && (u.mapSize.x = ...)`), o yüzden 4096 istemek
+    // zayıf donanımda güvenlidir.
+    MotorScene.prototype._applyShadowFit = function () {
+        var key = this._keyLight;
+        if (!key || !this._totalLen) return null;
+        var RQ = RENDER_QUALITY.shadow;
+        // Yönlü ışıkların konumu da BURADA: gölge kadrajı ışık konumundan
+        // türetildiği için ikisi asla ayrı düşmemeli (kuruluş sırasından
+        // bağımsız — _buildMotor, _fitCamera'dan ÖNCE de çağırabilir).
+        var L = this._totalLen;
+        var LI = RENDER_QUALITY.lights;
+        key.position.set(L * LI.keyDir.x, L * LI.keyDir.y, L * LI.keyDir.z);
+        if (this._fillLight) {
+            this._fillLight.position.set(
+                L * LI.fillDir.x, L * LI.fillDir.y, L * LI.fillDir.z);
+        }
+        var want = this._perfMode ? RQ.mapSizePerf : RQ.mapSizeHigh;
+        if (key.shadow.mapSize.x !== want) {
+            // r128 gölge hedefini YALNIZ `null === shadow.map` iken kurar;
+            // canlı boyut değişimi için eski hedef atılmalı, yoksa yeni
+            // mapSize sessizce yok sayılır (vendor kodundan ölçüldü).
+            if (key.shadow.map) {
+                key.shadow.map.dispose();
+                key.shadow.map = null;
+            }
+            key.shadow.mapSize.set(want, want);
+        }
+        var R = (this.dims.rcOut + this.dims.flangeLip) || 1;
+        var fit = shadowFrustumFit(
+            shadowAxisHalfMm(this._totalLen, this._explodeF),
+            R, floorYMm(R), key.position, want, RQ.fitMargin);
+        var sc = key.shadow.camera;
+        sc.left = -fit.halfW; sc.right = fit.halfW;
+        sc.top = fit.halfH; sc.bottom = -fit.halfH;
+        sc.near = fit.near; sc.far = fit.far;
+        sc.updateProjectionMatrix();
+        key.shadow.bias = fit.bias;
+        key.shadow.normalBias = fit.normalBias;
+        this._shadowFit = fit;   // ölçüm/teşhis için son kadraj
+        return fit;
     };
 
     MotorScene.prototype._bindResize = function () {
@@ -3743,8 +5158,15 @@
         this._langHandler = function () {
             if (self._disposed) return;
             self._refreshStatusChips();
+            // ÖH D23 / P17B1-09 (ayak 2): ölçü etiketleri ve ızgara hücresi
+            // rozeti de sprite metnidir — dil değişiminde YENİDEN ÜRETİLİR.
+            // _buildLabels eski etiket grubunu kendi dispose eder (H1).
+            if (self.dims && self._nozzleInfo) self._buildLabels();
+            self._refreshGridBadge();
             // Colorbar metinleri de dil değişiminde tazelenir
             if (self._cfdLayer) self._cfdUpdateColorbar();
+            // K1b: probe satırı da (DOM, ama sahnenin kendi metni)
+            if (self._probe) self._probeRender();
         };
         document.addEventListener('hrma:langchange', this._langHandler);
     };
@@ -3775,6 +5197,10 @@
         }
 
         // Simülasyon zamanı
+        // ÖH D36 / onemli2-sivi a2: süre yoksa (dims.burnTime null) zaman
+        // ekseni yoktur — sahne oynatılmaz, saat 0'da kalır.
+        var zamanVar = typeof d.burnTime === 'number' && isFinite(d.burnTime);
+        if (st.playing && !zamanVar) st.playing = false;
         if (st.playing) {
             st.time += dt * st.speed;
             if (st.time >= d.burnTime) {
@@ -3868,6 +5294,8 @@
         this.controls.autoRotate = st.autoRotate;
         this.controls.update();
         this.renderer.render(this.scene, this.camera);
+        // K1b: kamera/sahne kıpırdadıysa imleç altındaki okuma tazelenir
+        if (this._probeNdc) this._probeFollow();
 
         // Otomatik kalite bekçisi (görev 3): son AUTO_PERF_FRAME_WINDOW
         // karenin ortalama süresi limiti aşarsa 'perf' moduna geçilir.
@@ -3908,9 +5336,12 @@
                 of: ofNow !== null ? ofNow : d.of0,
                 isp: ispNow !== null ? ispNow : d.isp,
                 // Transient eğri varsa GERÇEK anlık itki; yoksa tasarım sabiti
+                // Süre yoksa (a2) zaman ekseni yok: çip tasarım itkisini
+                // gösterir (kararlı rejim), "yanma bitti = 0" demez.
                 thrust: thrustNow !== null
                     ? (st.time < d.burnTime ? thrustNow : 0)
-                    : (st.time < d.burnTime ? d.thrust : 0),
+                    : (!zamanVar ? d.thrust
+                       : (st.time < d.burnTime ? d.thrust : 0)),
                 pc: pcNow,                      // Pa (transient varsa) | null
                 throttle: throttle,
                 burning: burning
@@ -4192,6 +5623,8 @@
         if (!this._cfdLayer) return cfdReason('no_field', { metric: id });
         var applied = this._cfdApplyMetric(id);
         if (!applied.ok) return applied;
+        // K1b: imleç yerinde duruyorsa okuma yeni metriğin dizisinden
+        this._probeFollow();
         return this._cfdResult();
     };
 
@@ -4232,6 +5665,9 @@
             L.colorbarEl.parentNode.removeChild(L.colorbarEl);
         }
         this._cfdLayer = null;
+        // K1b: alan yoksa probe okuması da öğesi de yok
+        this._probe = null;
+        this._probeRender();
         return true;
     };
 
@@ -4240,6 +5676,146 @@
         // Gizlenen süs katmanları geri gelir (örtüşme kalktı)
         if (had) this._syncCfdDecor();
         return had;
+    };
+
+    // ------------------------------------------------------------------
+    // A1b faz-c-0 · K1b — PROBE, sahne katmanı (saf katman yukarıda:
+    // cfdProbeCell / cfdProbeReading / probeLineParts)
+    // ------------------------------------------------------------------
+    // Nişan (NDC) → raycast; isabetler motor montajı + alan katmanı
+    // üstünden, uzaklık sırasıyla. İLK görünür OPAK mesh alanın kendisi
+    // değilse (metal önde) okuma YOKTUR: kullanıcının görmediği hücrenin
+    // sayısı yazılmaz. Saydam/additive süsler (parıltı), sprite ve
+    // çizgiler görüntüyü örtmediği için isabeti de örtmez. Alan gizliyse
+    // (patlatma) ya da yoksa okuma yok ve probe öğesi DOM'da YOK
+    // (B1 sözleşme: alt şerit KOŞULLU; hakem B2).
+    function probeVisible(o, kok) {
+        for (var p = o; p; p = p.parent) {
+            if (!p.visible) return false;
+            if (p === kok) return true;
+        }
+        return true;
+    }
+
+    function probeOpaque(mat) {
+        if (Array.isArray(mat)) {
+            return !mat.every(function (m) { return !m || m.transparent; });
+        }
+        return !!mat && mat.visible !== false && !mat.transparent;
+    }
+
+    MotorScene.prototype.probeAt = function (x, y) {
+        var gecerli = typeof x === 'number' && isFinite(x)
+            && typeof y === 'number' && isFinite(y);
+        this._probeNdc = gecerli ? { x: x, y: y } : null;
+        var rd = null, L = this._cfdLayer;
+        if (L && gecerli && this.camera) {
+            this.scene.updateMatrixWorld();
+            this.camera.updateMatrixWorld();
+            var rc = this._probeRaycaster
+                || (this._probeRaycaster = new THREE.Raycaster());
+            rc.setFromCamera(new THREE.Vector2(x, y), this.camera);
+            var hedef = this.assembly ? [this.assembly, L.group] : [L.group];
+            var isabet = rc.intersectObjects(hedef, true);
+            for (var i = 0; i < isabet.length; i++) {
+                var o = isabet[i].object;
+                if (!o.isMesh || !probeVisible(o, this.model)) continue;
+                if (o === L.mesh) {
+                    rd = cfdProbeReading(L, cfdProbeCell(isabet[i].faceIndex,
+                        L.nAx, L.nRad));
+                    break;
+                }
+                if (probeOpaque(o.material)) break;   // metal önde
+            }
+        }
+        this._probeSig = this._probeSignature();
+        this._probe = rd;
+        this._probeRender();
+        return this.getProbe();
+    };
+
+    // Son okumanın kopyası (makine kanalı; sayı biçimlenmemiş) ya da null.
+    MotorScene.prototype.getProbe = function () {
+        return this._probe ? JSON.parse(JSON.stringify(this._probe)) : null;
+    };
+
+    // Okumayı geçersiz kılan sahne durumu: kamera (yörünge, yakınlaştırma,
+    // CAD kamerası), alan görünürlüğü, patlatma oranı, montajın yeniden
+    // kurulması (kesit kipi), metrik, alan katmanının kendisi. İmleç
+    // kıpırdamasa da biri değişirse okuma aynı nişandan TAZELENİR — bayat hücrenin sayısı ekranda kalmaz.
+    MotorScene.prototype._probeSignature = function () {
+        var L = this._cfdLayer;
+        return { cam: this.camera, lay: L || null,
+                 e: this.camera ? this.camera.matrixWorld.elements.slice() : null,
+                 vis: !!(L && L.group.visible), exp: this._explodeF,
+                 asm: this.assembly || null, metric: L ? L.metric : null };
+    };
+
+    MotorScene.prototype._probeFollow = function () {
+        if (!this._probeNdc) return;
+        var a = this._probeSig, b = this._probeSignature();
+        var ayni = !!a && a.cam === b.cam && a.lay === b.lay && a.vis === b.vis
+            && a.exp === b.exp && a.asm === b.asm && a.metric === b.metric
+            && !!a.e && !!b.e;
+        for (var i = 0; ayni && i < 16; i++) ayni = a.e[i] === b.e[i];
+        if (!ayni) this.probeAt(this._probeNdc.x, this._probeNdc.y);
+    };
+
+    MotorScene.prototype._probeClear = function () {
+        this._probeNdc = null;
+        this._probe = null;
+        this._probeRender();
+    };
+
+    // Probe satırı: sahne kabında, colorbar'ın hemen üstünde (theme.css
+    // .viz3d-probe). Okuma yoksa öğe KALDIRILIR (gizlenmez).
+    MotorScene.prototype._probeRender = function () {
+        var rd = this._probe, el = this._probeEl, L = this._cfdLayer;
+        if (!rd || !L) {
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+            this._probeEl = null;
+            return;
+        }
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'viz3d-probe';
+            el.setAttribute('data-viz3d-probe', '1');
+            this.container.appendChild(el);
+            this._probeEl = el;
+        }
+        el.innerHTML = probeLineParts(rd).map(function (p) {
+            return '<span class="viz3d-probe-' + p.cls + '">'
+                + probeHtmlEsc(p.text) + '</span>';
+        }).join('<span class="viz3d-probe-sep"> · </span>');
+        // Makine kanalı (nokta ondalık; ekran biçiminden bağımsız)
+        el.setAttribute('data-probe-metric', rd.metric);
+        el.setAttribute('data-probe-cell', rd.cell.axial + ',' + rd.cell.radial);
+        el.setAttribute('data-probe-value', String(rd.value));
+        var cb = L.colorbarEl;
+        var h = (cb && cb.offsetHeight) ? cb.offsetHeight : 0;
+        el.style.bottom = (8 + (h ? h + 6 : 0)) + 'px';
+    };
+
+    // Fare dinleyicileri (tuval). Sürüklerken (yörünge) hücre imlecin
+    // altından kayar: okuma tutulmaz, bırakınca ilk hareket yeniden okur.
+    MotorScene.prototype._bindProbe = function () {
+        var self = this;
+        var cv = this.renderer && this.renderer.domElement;
+        if (!cv || !cv.addEventListener) return;
+        this._probeMove = function (ev) {
+            if (self._disposed) return;
+            if (ev.buttons || !self._cfdLayer) {
+                if (self._probe || self._probeNdc) self._probeClear();
+                return;
+            }
+            var r = cv.getBoundingClientRect();
+            if (!(r.width > 0 && r.height > 0)) return;
+            self.probeAt(((ev.clientX - r.left) / r.width) * 2 - 1,
+                         -((ev.clientY - r.top) / r.height) * 2 + 1);
+        };
+        this._probeLeave = function () { self._probeClear(); };
+        cv.addEventListener('pointermove', this._probeMove);
+        cv.addEventListener('pointerleave', this._probeLeave);
     };
 
     // Süs katmanı / görünürlük eşitlemesi. Kararlar veriden:
@@ -4269,6 +5845,8 @@
             this._glowMesh.visible = hidden.indexOf('glow') === -1;
         }
         if (L) L.decorHidden = hidden;
+        // K1b: görünürlük/katman değiştiyse probe aynı nişandan tazelenir
+        this._probeFollow();
     };
 
     // Colorbar (DOM katmanı, viewport üstünde). Alan yokken HİÇ
@@ -4276,19 +5854,36 @@
     // ve tikler VERİDEN; örnekleme beyanı yalnız inceltilmiş yükte.
     // Kimlik: araç çubuğuyla aynı mono font + camgöbeği çerçeve (sayfa
     // kimliği değişmez, yalnız yeni katman).
+    //
+    // ÖH D36 / sahne-hud (Berke 22 Eyl: "ANSYS gibi, altta renk çubuğu"):
+    // çubuk eskiden viewport'un SOL kenarında dikey duruyordu (left:8px,
+    // top:50%) ve tik metinleri `cfdTickLabel`tan doğrudan basılıyordu,
+    // yani TR oturumda basınç alanı için "44125.7 … 1.99e6" (ölçüldü:
+    // raw/OH/D36/sahne-hud/a1/once.json M2_colorbar, 5 noktalı / 0
+    // virgüllü sayı). Şimdi sahnenin ALT kenarına yatay yerleşir (min
+    // solda, maks sağda, tikler orantılı konumda, başlıkta büyüklük +
+    // [birim]), her sayı `decTxt` (I18N.decimalText) kanalından geçer.
+    // Ölçek, tik seçimi ve renk durakları DEĞİŞMEZ; yalnız yerleşim ve
+    // ayraç. Genişlik 440 px ile sınırlanır; sağ alttaki ısı efsanesi
+    // (theme.css .viz-heatlegend: sağ 18 px, çubuk 190 px + 2×14 px
+    // dolgu) ile ancak sahne ~690 px'ten genişse çakışmaz. Daha dar
+    // sahnede ikisi birlikte açılırsa üst üste biner (ısı haritası ile
+    // alan aynı anda açık olabilir; a1/rapor.md devri, Faz C K2).
+    // Bekçi: tests/test_d36_sahne_a1.py
     MotorScene.prototype._cfdUpdateColorbar = function () {
         var L = this._cfdLayer;
         if (!L) return;
         if (!L.colorbarEl) {
             var el = document.createElement('div');
+            el.setAttribute('data-cfd-colorbar', '1');
             el.style.cssText = [
-                'position:absolute', 'left:8px', 'top:50%',
-                'transform:translateY(-50%)', 'z-index:5',
+                'position:absolute', 'left:8px', 'bottom:8px',
+                'width:min(440px, calc(100% - 16px))', 'z-index:5',
                 'pointer-events:none',
                 'font:600 10px "SF Mono","JetBrains Mono",Consolas,monospace',
                 'color:#9beaf7', 'background:rgba(4,12,20,0.78)',
                 'border:1px solid rgba(0,229,255,0.45)',
-                'border-radius:8px', 'padding:8px', 'max-width:170px'
+                'border-radius:8px', 'padding:6px 10px', 'box-sizing:border-box'
             ].join(';');
             this.container.appendChild(el);
             L.colorbarEl = el;
@@ -4304,47 +5899,49 @@
         }
         var mn = L.range.min, mx = L.range.max;
         var ticks = (mx > mn) ? cfdColorbarTicks(mn, mx, 5) : [];
-        var barH = 150;
         var tickHtml = '';
         for (i = 0; i < ticks.length; i++) {
             var frac = (ticks[i] - mn) / (mx - mn);
             // Uç etiketleriyle (min/max) çakışan tikler atlanır
-            if (frac < 0.07 || frac > 0.93) continue;
-            tickHtml += '<span style="position:absolute;left:0;bottom:'
-                + (frac * 100) + '%;transform:translateY(50%);color:#7fd4e2">'
-                + cfdTickLabel(ticks[i]) + '</span>';
+            if (frac < 0.12 || frac > 0.88) continue;
+            tickHtml += '<span style="position:absolute;top:0;left:'
+                + (frac * 100) + '%;transform:translateX(-50%);color:#7fd4e2">'
+                + decTxt(cfdTickLabel(ticks[i])) + '</span>';
         }
         var label = T(m.labelKey, m.labelFallback)
             + (m.unit ? ' [' + m.unit + ']' : '');
-        var decl = '';
+        var decl = [];
         if (L.decimated) {
-            decl += '<div style="margin-top:6px;color:#ffb347">'
+            // ÖH D32 · OH-D31-18 — çıplak amber tokene bağlandı
+            // (CSS dizesi olduğu için `var()` burada ÇÖZÜLÜR; değer aynı).
+            decl.push('<span style="color:var(--hd-amber-source, #ffb347)">'
                 + cfdFormatTemplate(
                     T('viz3d.cfd.stations',
                       '{shown} / {total} axial stations'),
                     { shown: L.stationsShown, total: L.stationsTotal })
-                + '</div>';
+                + '</span>');
         }
-        decl += '<div style="margin-top:' + (L.decimated ? 2 : 6)
-            + 'px;color:#8a93a0">'
-            + T('viz3d.cfd.flatNote', 'cell-centred, flat tiles') + '</div>';
+        decl.push('<span style="color:#8a93a0">'
+            + T('viz3d.cfd.flatNote', 'cell-centred, flat tiles') + '</span>');
+        L.colorbarEl.setAttribute('data-cfd-metric', String(L.metric));
         L.colorbarEl.innerHTML =
-            '<div style="margin-bottom:6px;letter-spacing:0.4px">'
-            + label + '</div>'
-            + '<div style="display:flex;gap:7px;align-items:stretch;height:'
-            + barH + 'px">'
-            + '<div style="width:12px;height:100%;border-radius:3px;'
+            '<div style="display:flex;justify-content:space-between;gap:12px;'
+            + 'margin-bottom:4px;letter-spacing:0.4px">'
+            + '<span data-cfd-colorbar-label="1">' + label + '</span>'
+            + '<span>' + decl.join(' · ') + '</span></div>'
+            + '<div style="height:12px;border-radius:3px;'
             + 'border:1px solid rgba(0,229,255,0.45);'
-            + 'background:linear-gradient(to top,' + grad.join(',') + ')">'
+            + 'background:linear-gradient(to right,' + grad.join(',') + ')">'
             + '</div>'
-            + '<div style="position:relative;flex:1;min-width:56px">'
-            + '<span style="position:absolute;left:0;top:0;color:#e8f9ff">'
-            + cfdTickLabel(mx) + '</span>'
+            + '<div style="position:relative;height:14px;margin-top:3px">'
+            + '<span data-cfd-colorbar-min="1" '
+            + 'style="position:absolute;top:0;left:0;color:#e8f9ff">'
+            + decTxt(cfdTickLabel(mn)) + '</span>'
             + tickHtml
-            + '<span style="position:absolute;left:0;bottom:0;color:#e8f9ff">'
-            + cfdTickLabel(mn) + '</span>'
-            + '</div></div>'
-            + decl;
+            + '<span data-cfd-colorbar-max="1" '
+            + 'style="position:absolute;top:0;right:0;color:#e8f9ff">'
+            + decTxt(cfdTickLabel(mx)) + '</span>'
+            + '</div>';
     };
 
     // Canlı tasarım modu: yeni motor sözlüğüyle sahneyi yerinde güncelle
@@ -4357,7 +5954,9 @@
         // kalır — tasarım modu güncellemesi burnTime'ı tasarım sabitine
         // geri döndürmesin (görev 5c)
         if (this._transient) this.dims.burnTime = this._transient.tEnd;
-        this.state.time = clamp(this.state.time, 0, this.dims.burnTime);
+        // a2: süre yoksa zaman ekseni yok, saat 0'da kalır
+        this.state.time = (this.dims.burnTime === null) ? 0
+            : clamp(this.state.time, 0, this.dims.burnTime);
         this._lastPortR = -1;
         this._buildMotor();
         this._buildLabels();
@@ -4408,12 +6007,15 @@
     };
     MotorScene.prototype.setAutoRotate = function (on) { this.state.autoRotate = !!on; };
     MotorScene.prototype.play = function () {
+        // ÖH D36 / onemli2-sivi a2: süre yoksa oynatılacak zaman ekseni yok
+        if (this.dims.burnTime === null) { this.state.playing = false; return; }
         if (this.state.time >= this.dims.burnTime - 1e-3) this.state.time = 0;
         this.state.playing = true;
     };
     MotorScene.prototype.pause = function () { this.state.playing = false; };
     MotorScene.prototype.setTime = function (t) {
-        this.state.time = clamp(t, 0, this.dims.burnTime);
+        this.state.time = (this.dims.burnTime === null) ? 0
+            : clamp(t, 0, this.dims.burnTime);
     };
     MotorScene.prototype.cycleSpeed = function () {
         var opts = [0.5, 1, 2, 4];
@@ -4505,6 +6107,11 @@
             this._lastPortR = -1;
             this._buildMotor();     // detay geometrileri yeni segment sayısıyla
             this._buildLabels();
+            // Gölge dokusu da kalite kipine bağlıdır (B7 kalem 5): perf'te
+            // mapSizePerf, HQ'da mapSizeHigh — bias'lar teksel boyundan
+            // yeniden türetilir (_buildMotor'daki _applyExplode zaten çağırır,
+            // burada kip değişimi TEK BAŞINA da yeterli olsun diye açıkça).
+            this._applyShadowFit();
         }
         var label = perf ? 'perf' : 'high';
         // Deck / sayfa butonu gerçek durumu göstersin (otomatik perf düşüşü
@@ -4607,17 +6214,22 @@
                     m.userData._cadOrig = {
                         metalness: m.metalness,
                         roughness: m.roughness,
-                        envMapIntensity: m.envMapIntensity
+                        envMapIntensity: m.envMapIntensity,
+                        // clearcoat yalnız MeshPhysicalMaterial'da tanımlı
+                        // (kasa); nötr stüdyoda kaplama parlaması kapanır
+                        clearcoat: m.clearcoat
                     };
                 }
                 if (m.metalness !== undefined) m.metalness = Math.min(m.metalness, 0.15);
                 if (m.roughness !== undefined) m.roughness = Math.max(m.roughness, 0.75);
                 if (m.envMapIntensity !== undefined) m.envMapIntensity = 0.15;
+                if (m.clearcoat !== undefined) m.clearcoat = 0;
             } else if (m.userData._cadOrig !== undefined) {
                 var o = m.userData._cadOrig;
                 if (o.metalness !== undefined) m.metalness = o.metalness;
                 if (o.roughness !== undefined) m.roughness = o.roughness;
                 if (o.envMapIntensity !== undefined) m.envMapIntensity = o.envMapIntensity;
+                if (o.clearcoat !== undefined) m.clearcoat = o.clearcoat;
                 delete m.userData._cadOrig;
             }
         });
@@ -4684,9 +6296,17 @@
             return b;
         }
         this._cadPresetBtns = {};
-        [['front', 'ÖN'], ['top', 'ÜST'], ['side', 'YAN'], ['iso', 'İZO']]
+        // ÖH D24 / P11B1-07 — CAD görünüş düğmeleri de oturum dilinde.
+        // Etiket ve ipucu aynı anahtardan gelir: ekranda iki dil olmaz.
+        [['front', 'viz3d.cad.front', 'FRONT'],
+         ['top', 'viz3d.cad.top', 'TOP'],
+         ['side', 'viz3d.cad.side', 'SIDE'],
+         ['iso', 'viz3d.cad.iso', 'ISO']]
             .forEach(function (pr) {
-                var b = mkBtn(pr[1], 'Ortografik görünüş: ' + pr[1]);
+                var etiket = T(pr[1], pr[2]);
+                var b = mkBtn(etiket,
+                    T('viz3d.cad.orthoTip', 'Orthographic view:') + ' '
+                    + etiket);
                 b.style.display = 'none';
                 b.addEventListener('click', function () {
                     self.setCadPreset(pr[0]);
@@ -4740,6 +6360,14 @@
             document.removeEventListener('hrma:langchange', this._langHandler);
             this._langHandler = null;
         }
+        // K1b: probe dinleyicileri (öğe yukarıda katman sökümüyle gitti)
+        if (this._probeMove && this.renderer && this.renderer.domElement) {
+            this.renderer.domElement.removeEventListener('pointermove',
+                this._probeMove);
+            this.renderer.domElement.removeEventListener('pointerleave',
+                this._probeLeave);
+            this._probeMove = this._probeLeave = null;
+        }
         // OrbitControls DOM dinleyicilerini bırak (görev 8 — sızıntı önlemi)
         if (this.controls && this.controls.dispose) this.controls.dispose();
         // Ortam küp dokusu sahne grafiğinde değil scene.environment'ta durur;
@@ -4786,14 +6414,60 @@
             if (!el) return null;
             if (viz) { viz.dispose(); viz = null; }
             el.innerHTML = '';
+            // FAIL-CLOSED KAPISI (ÖH D27 / P11B1-09 + OH-D26-02):
+            // birincil ölçü eksikse sahne KURULMAZ; eksik alanlar adıyla
+            // ekrana yazılır ve red bloğu saklanır. Uydurma yedekle
+            // çizilen motor kullanıcının tasarımı değildir.
+            var eksik = missingPrimaryDims(motorData);
+            if (eksik.length) {
+                _dimsLastReject = { code: DIMS_REJECT_CODE,
+                                    missing: eksik };
+                renderDimsRejection(el, eksik);
+                return null;
+            }
+            _dimsLastReject = null;
             viz = new MotorScene(el, motorData, hooks);
             return viz;
         },
         // Tasarım modu: mevcut sahneyi yeni geometriyle yerinde güncelle
         update: function (motorData) {
-            if (viz) viz.update(motorData);
+            if (!viz) return null;
+            // Canlı güncelleme de kapıdan geçer: yeni sözlükte ölçü
+            // yoksa ESKİ sahne bırakılmaz (bırakmak, ekrandaki motorun
+            // yeni tasarım olduğu yalanını sürdürürdü) — sahne sökülür
+            // ve red adıyla yazılır.
+            var eksik = missingPrimaryDims(motorData);
+            if (eksik.length) {
+                var kap = viz.container;
+                viz.dispose();
+                viz = null;
+                _dimsLastReject = { code: DIMS_REJECT_CODE,
+                                    missing: eksik };
+                if (kap) {
+                    kap.innerHTML = '';
+                    renderDimsRejection(kap, eksik);
+                }
+                return null;
+            }
+            _dimsLastReject = null;
+            viz.update(motorData);
             return viz;
         },
+        // Son birincil-ölçü reddinin gerekçe bloğu (yoksa null).
+        getDimsReject: function () { return _dimsLastReject; },
+        // Bir motor sözlüğünün sahne için yeterli olup olmadığı: eksik
+        // birincil ölçülerin adları (boş dizi = çizilebilir). Sayfalar
+        // kendi kararlarını AYNI kuralla verebilsin diye dışa açık.
+        missingPrimaryDims: function (motorData) {
+            return missingPrimaryDims(motorData);
+        },
+        // ÖH D31 · OH-D27-13 — son sahnenin varsayım ölçüleri (künyeli).
+        // Sayfalar rozeti kendi paneline basabilsin diye dışa açık.
+        assumedDimensions: function () { return assumedDimensionList(); },
+        renderAssumedDimBadge: function (id) {
+            return renderAssumedDimBadge(id);
+        },
+        ASSUMED_DIM_NO_BASIS: ASSUMED_DIM_NO_BASIS,
         // Transient itki/basınç eğrisini canlı sahneye bağla
         setTransient: function (tr) { if (viz) viz.setTransient(tr); },
         setCameraPreset: function (name) { return viz ? viz.setCameraPreset(name) : null; },
@@ -4807,17 +6481,37 @@
         // CFD alan katmanı (parti 30 — A2): /api/cfd/nozzle data.cfd
         // sözlüğü AYNEN verilir; sahne yoksa (mount edilmedi / WebGL yok)
         // sözleşmedeki 'no_scene' reddi döner
+        // ÖH D24 / P11B1-08 — RED SESSİZ KAYBOLMAZ.
+        // ÖLÇÜLDÜ (a3/once.json): sahne bir alanı reddettiğinde
+        // (`no_solver_contour`, `contour_mismatch`, `bad_field_block`)
+        // `getCfdField()` null KALIR; güvertenin durum imzası
+        // (`cfdStateSig(null) === ''`) kurulumdaki imzayla aynı olduğu
+        // için `cfdSyncFromScene` hiç yazmaz ve ekranda "CFD analizini
+        // koştur ve 'Show in the 3D scene'e bas" cümlesi asılı kalır —
+        // yani kullanıcıdan AZ ÖNCE YAPTIĞI ŞEY yeniden isteniyordu.
+        // Red bloğu artık burada saklanır: bir ÖLÇÜMDÜR (sahnenin kendi
+        // sözleşme kodu + parametreleri), tahmin değildir. Başarılı bir
+        // yükleme ya da alanın kaldırılması onu temizler.
         setCfdField: function (cfd) {
-            return viz ? viz.setCfdField(cfd) : cfdReason('no_scene', {});
+            var res = viz ? viz.setCfdField(cfd) : cfdReason('no_scene', {});
+            _cfdLastReject = (res && res.ok === false && res.reason)
+                ? res.reason : null;
+            return res;
         },
         clearCfdField: function () {
+            _cfdLastReject = null;
             return viz ? viz.clearCfdField() : false;
         },
+        // Son reddin gerekçe bloğu (yoksa null). Güverte bunu okuyup
+        // durum satırına GERÇEK sebebi yazar.
+        getCfdReject: function () { return _cfdLastReject; },
         setCfdMetric: function (id) {
             return viz ? viz.setCfdMetric(id)
                 : cfdReason('no_scene', { metric: id });
         },
         getCfdField: function () { return viz ? viz.getCfdField() : null; },
+        // A1b faz-c-0 · K1b — son probe okuması (makine kanalı) ya da null
+        getProbe: function () { return viz ? viz.getProbe() : null; },
         // Metrik + renk skalası tabloları dışa açık: 2B panel aynı
         // tablodan beslenir (iki görünüm aynı büyüklüğe aynı renk)
         CFD_METRICS: CFD_METRICS,

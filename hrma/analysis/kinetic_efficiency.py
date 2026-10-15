@@ -60,6 +60,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 from hrma.constants import G_0, R_UNIVERSAL
+from hrma.constants import L_STAR_DEFAULT_M as _L_STAR_DEFAULT_M
 
 # Cantera opsiyonel bağımlılık — combustion_analysis ile aynı desen.
 # Kurulu değilse modül import edilebilir kalır; high_fidelity isteği
@@ -113,9 +114,15 @@ class KineticEfficiency:
     # ------------------------------------------------------------------
 
     #: Default chamber characteristic length L* [m] when the caller gives
-    #: none. Typical L* spans ~0.6-3 m across propellant families
-    #: (Sutton & Biblarz 9th ed., Table 8-1). Approximate default.
-    DEFAULT_L_STAR_M = 1.0
+    #: none. SINGLE SOURCE: ``hrma.constants.L_STAR_DEFAULT_M``.
+    #:
+    #: ÖH D18 fizik-a2 (F2): this used to be a SECOND, CONTRADICTING default
+    #: (1.0 m here vs 1.2 m in ``liquid_rocket_engine``), so the same engine
+    #: had a 20 % different residence time depending on which module asked,
+    #: and the kinetic-efficiency band was fed by the smaller of the two.
+    #: The number now lives in ``hrma/constants.py`` with its Huzel & Huang
+    #: NASA SP-125 Table 4-1 provenance (overall band 0.38-3.05 m).
+    DEFAULT_L_STAR_M = _L_STAR_DEFAULT_M
 
     #: Reference chamber pressure [bar] at which TAU_CHEM_REF_S applies.
     P_REF_BAR = 20.0
@@ -230,11 +237,13 @@ class KineticEfficiency:
         state = self._extract_state(cres, chamber_pressure)
 
         if fidelity == 'fast':
-            return self._evaluate_fast(state)
+            return self._tag_reference(
+                self._evaluate_fast(state), state, nozzle_profile)
         if fidelity == 'engineering':
-            return self._evaluate_engineering(
-                state, characteristic_length, throat_diameter
-            )
+            return self._tag_reference(
+                self._evaluate_engineering(
+                    state, characteristic_length, throat_diameter
+                ), state, nozzle_profile)
 
         # high_fidelity — zarif düşüş garantili
         try:
@@ -254,7 +263,98 @@ class KineticEfficiency:
                 "fell back to the engineering correlation. "
                 + result['model_note']
             )
+            return self._tag_reference(result, state, nozzle_profile)
+
+    # ------------------------------------------------------------------ #
+    # Genişleme referansı — künye + fail-closed kapı (ÖH D15, P4B4-05)
+    # ------------------------------------------------------------------ #
+    #: Profil çıkış basıncı ile referans çıkış basıncı arasındaki bağıl
+    #: tolerans. Bunun altındaki fark modülün KENDİ temiz noktasıdır
+    #: (profil çıkışı combustion referansıyla çakışır -> iki yol bit-bit
+    #: aynı çifti verir); üstündeki fark iki AYRI genişleme demektir.
+    EXPANSION_REFERENCE_REL_TOL = 0.02
+
+    @staticmethod
+    def _profile_exit_pressure_pa(nozzle_profile) -> Optional[float]:
+        """Verilen lüle profilinin çıkış (son istasyon) basıncı [Pa]."""
+        if not isinstance(nozzle_profile, dict):
+            return None
+        p = nozzle_profile.get('P')
+        try:
+            arr = np.asarray(p, dtype=float)
+        except (TypeError, ValueError):
+            return None
+        if arr.ndim != 1 or arr.size < 2:
+            return None
+        p_e = float(arr[-1])
+        return p_e if np.isfinite(p_e) and p_e > 0 else None
+
+    def _tag_reference(self, result: Dict, state: Dict,
+                       nozzle_profile) -> Dict:
+        """Isp çiftinin genişleme referansını yayımlar; uyuşmazlıkta geri çeker.
+
+        ÖLÇÜLEN KUSUR (31 Ağustos 2026, htpb/N2O, O/F=6, Pc=20 bar,
+        D_t=50 mm; AYNI gövde, yalnız ``kinetic_fidelity`` değişiyor):
+
+            engineering    isp_frozen 223,4882  isp_shifting 231,6993
+            high_fidelity  isp_frozen 276,2363  isp_shifting 290,7203
+            -> isp_shifting %25,47, isp_frozen %23,60 SAPMA
+
+        Sebep alan adı değil REFERANSTIR: ``high_fidelity`` çifti PROFİLİN
+        çıkışında (0,05 bar) kurar, ``engineering``/``fast`` ise
+        ``combustion_results``ın DENİZ SEVİYESİ çiftini (1,01325 bar) aynen
+        taşır. ``analyze_combustion`` bu referansı ``conditions.exit.basis =
+        'sea_level_default'`` diye kendisi VARSAYILAN ilan ediyor. Yani
+        çağıran gerçek lüle profilini ELDEN verdiği hâlde yanıt başka bir
+        genişlemenin Isp'sini, hiçbir etiket olmadan, o lülenin sayısıymış
+        gibi yayımlıyordu (``/api/flow-analysis`` varsayılan fidelity
+        'engineering' ve profili HER ZAMAN geçiriyor -> ürün yüzü).
+
+        İki ayak:
+          1) Referans çıkış basıncı ve künyesi HER seviyede ADIYLA yayımlanır
+             (``diagnostics.isp_reference_exit_pressure_pa`` /
+             ``isp_reference_source`` / ``isp_reference_basis``).
+          2) FAIL-CLOSED: çağıran bir lüle profili verdiyse ve o profilin
+             çıkış basıncı referanstan %2'den fazla ayrılıyorsa, bu seviyenin
+             Isp üçlüsü ve kinetik kayıp o lüleye ait DEĞİLDİR — sayı
+             uydurulmaz, geri çekilir (``None``) ve gerekçe
+             ``isp_withheld_because`` ile iki basıncı da adıyla söyler.
+             Anahtarlar korunur (tüketici ``KeyError`` almaz, kart "—" çizer).
+        """
+        result = dict(result)
+        diagnostics = dict(result.get('diagnostics') or {})
+        p_ref_pa = (None if state.get('p_e_ref_bar') is None
+                    else float(state['p_e_ref_bar']) * 1e5)
+        diagnostics['isp_reference_exit_pressure_pa'] = p_ref_pa
+        diagnostics['isp_reference_source'] = (
+            'combustion_results.conditions.exit.P')
+        diagnostics['isp_reference_basis'] = state.get('p_e_ref_basis')
+        # ÖH D21 / P4B4-15: kinetik kayıp MW'ye duyarlıdır (%16,61 bağıl
+        # 26 <-> 18 g/mol); hükmün dayandığı MW ve kaynağı yayımlanır.
+        diagnostics['molecular_weight_g_mol'] = state.get('mw')
+        diagnostics['molecular_weight_source'] = state.get('mw_source')
+        result['diagnostics'] = diagnostics
+
+        p_prof_pa = self._profile_exit_pressure_pa(nozzle_profile)
+        if p_prof_pa is None or p_ref_pa is None:
             return result
+        if abs(p_prof_pa - p_ref_pa) <= self.EXPANSION_REFERENCE_REL_TOL * p_ref_pa:
+            return result
+
+        result['isp_withheld_because'] = (
+            f"The Isp pair carried by this result was built at an exit "
+            f"pressure of {p_ref_pa:.1f} Pa "
+            f"({diagnostics['isp_reference_basis'] or 'unstated basis'}), but "
+            f"the nozzle profile you supplied expands to {p_prof_pa:.1f} Pa. "
+            "They describe DIFFERENT expansions, so no Isp is published for "
+            "your nozzle at this fidelity level and none is invented. Use "
+            "fidelity='high_fidelity' (which solves the pair at the profile "
+            "exit state), or supply combustion_results whose "
+            "conditions.exit.P matches your nozzle.")
+        for key in ('isp_frozen', 'isp_shifting', 'isp_predicted',
+                    'kinetic_loss_pct', 'loss_band_pct'):
+            result[key] = None
+        return result
 
     # ------------------------------------------------------------------ #
     # State extraction from a combustion_analysis result
@@ -287,9 +387,41 @@ class KineticEfficiency:
         if p_c_bar <= 0 or t_c <= 0:
             raise ValueError("Chamber pressure and temperature must be positive")
 
-        mw = chamber_comp.get('molecular_weight') \
-            or perf.get('molecular_weights', {}).get('chamber') \
-            or 26.0  # tipik yanma gazı MW'si (Sutton 9. baskı Böl. 3 mertebesi)
+        # ÖH D21 / P4B4-15 — MOLEKÜL AĞIRLIĞI ARTIK UYDURULMUYOR.
+        # Eski üç satır ``... or ... or 26.0`` idi. İki ayrı kusur:
+        #   (1) MW hiç çözülemediğinde 26,0 g/mol SESSİZCE konuyordu:
+        #       yanıtta tek bir iz yoktu (ölçüldü, once.json K5:
+        #       ``model_note``ta '26' geçmiyor, ``diagnostics``te MW alanı
+        #       yok), oysa MW 26,0 <-> 18,0 arasında ``kinetic_loss_pct``
+        #       %16,61 BAĞIL değişiyor (1,8786 -> 2,2528). Yani kullanıcı,
+        #       vermediği bir gazın kinetik kayıp hükmünü okuyordu.
+        #   (2) ``or`` zinciri 0,0'ı da yakalıyordu: MW=0 gönderen çağıran
+        #       (geçersiz girdi) hata değil, sessizce 26,0 alıyordu
+        #       (ölçüldü: K5 ``mw_sifir`` -> mw 26,0).
+        # Kardeş büyüklükler (P, T, c*) bu fonksiyonun hemen yukarısında
+        # zaten ValueError ile reddediliyor; MW de aynı sözleşmeye alındı
+        # ve çözüldüğünde kaynağı künyeye yazılıyor.
+        mw, mw_source = None, None
+        for _deger, _ad in (
+                (chamber_comp.get('molecular_weight'),
+                 'compositions.chamber.molecular_weight'),
+                (perf.get('molecular_weights', {}).get('chamber'),
+                 'performance.molecular_weights.chamber')):
+            try:
+                _f = float(_deger)
+            except (TypeError, ValueError):
+                continue
+            if _f > 0.0 and np.isfinite(_f):
+                mw, mw_source = _f, _ad
+                break
+        if mw is None:
+            raise ValueError(
+                "combustion_results must carry a positive chamber molecular "
+                "weight, in compositions['chamber']['molecular_weight'] or "
+                "performance['molecular_weights']['chamber']. It is NOT "
+                "defaulted: the kinetic loss moves 16.6% in relative terms "
+                "between 26 and 18 g/mol, so a fabricated molecular weight "
+                "is a fabricated verdict.")
 
         rho_c = chamber_comp.get('density')
         if rho_c is None or rho_c <= 0:
@@ -349,14 +481,36 @@ class KineticEfficiency:
                 f"Inconsistent Isp pair: frozen={isp_frozen}, shifting={isp_shifting}"
             )
 
+        # --- ISP ÇİFTİNİN GENİŞLEME REFERANSI (ÖH D15, P4B4-05) ----------
+        # ``isp_frozen``/``isp_shifting`` bir GENİŞLEME DURUMUNA aittir; hangi
+        # çıkış basıncında kuruldukları bilinmeden sayı okunamaz.
+        # ``analyze_combustion`` bunu kendisi künyeliyor
+        # (``conditions.exit.basis``, ölçüldü: ``'sea_level_default'``), ama
+        # bu modül künyeyi taşımıyordu.
+        exit_cond = conditions.get('exit', {}) or {}
+        p_e_ref_bar = exit_cond.get('P')
+        try:
+            p_e_ref_bar = (None if p_e_ref_bar is None
+                           else float(p_e_ref_bar))
+        except (TypeError, ValueError):
+            p_e_ref_bar = None
+        if p_e_ref_bar is not None and not (np.isfinite(p_e_ref_bar)
+                                            and p_e_ref_bar > 0):
+            p_e_ref_bar = None
+
         return {
             'p_c_bar': float(p_c_bar),
             't_c': float(t_c),
             'rho_c': float(rho_c),
             'c_star': float(c_star),
             'mw': float(mw),
+            # ÖH D21 / P4B4-15: MW'nin GELDİĞİ alan; ``diagnostics``e
+            # taşınır ki kullanıcı hükmün hangi gaza ait olduğunu okusun.
+            'mw_source': mw_source,
             'isp_frozen': float(isp_frozen),
             'isp_shifting': float(isp_shifting),
+            'p_e_ref_bar': p_e_ref_bar,
+            'p_e_ref_basis': exit_cond.get('basis'),
             'note_parts': note_parts,
         }
 
@@ -624,6 +778,15 @@ class KineticEfficiency:
                 'n_reactions': int(gas.n_reactions),
                 'residence_time_s': t_end,
                 'exit_pressure_pa': p_e_pa,
+                # ÖH D15 / P4B4-05: referans genişleme durumu KANONİK adla
+                # da yayımlanır — kardeş seviyelerle (fast/engineering) aynı
+                # anahtar, böylece iki yanıt yan yana okunabilir.
+                'isp_reference_exit_pressure_pa': float(p_e_pa),
+                'isp_reference_source': 'nozzle_profile exit station',
+                'isp_reference_basis': (
+                    'frozen/shifting pair re-solved with the same mechanism '
+                    'AT THE SUPPLIED PROFILE EXIT PRESSURE (energy method, '
+                    'Sutton 9th ed. Eq. 3-15b / NASA RP-1311)'),
                 'frozen_shifting_gap_pct': gap_pct,
             },
         )

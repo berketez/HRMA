@@ -10,10 +10,13 @@ from typing import Dict, List, Optional
 # Plotly 6 binary (bdata) kodlaması vendor plotly.js 1.58.5 tarafından
 # çözülemiyor; tüm figür JSON'ları ortak sanitize kapısından geçer.
 from hrma.visualization.visualization import _fig_json
+from hrma.constants import P_SEA_LEVEL_PA
 
 #: Deniz seviyesi ISA ortam basinci [Pa] — vakum itkisi bagintisinda kullanilir
 #: (Sutton & Biblarz 9. baski, Eq. 3-29: F = mdot*ve + (pe - pa)*Ae).
-SEA_LEVEL_AMBIENT_PA = 101325.0
+#: ÖH D27 / OH-D26-01: değer merkezden gelir (ISA taban satırı);
+#: modülün kendi adı korunur, ikinci literal kalkar.
+SEA_LEVEL_AMBIENT_PA = P_SEA_LEVEL_PA
 
 
 def _identity(motor_results: Dict, keys) -> str:
@@ -57,21 +60,88 @@ def _vacuum_column(motor_results: Dict, sea_level_isp, vacuum_isp):
     return None, None, 'not available (no vacuum Isp and no exit geometry)'
 
 
+#: P8B4-13 (ÖH D24 / fea-cfd a2) — ``create_cea_style_results``ın KOŞULSUZ
+#: okuduğu motor alanları. Bu adlar ``motor_results[...]`` ile, hiçbir
+#: ``if ... in motor_results`` koruması olmadan indeksleniyor.
+#:
+#: ÖLÇÜLDÜ (taban ``88a29d3``, ``docs/scofield/raw/OH/D24/fea-cfd/a2/
+#: once_a2.json`` → ``P8B4-13``): alanlardan HERHANGİ biri düştüğünde
+#: fonksiyon çıplak ``KeyError`` atıyordu (25/25 alanda, biri bile
+#: geçmiyordu) ve ``/calculate`` bunu korumasız çağırdığı için tüm çözüm
+#: ``HTTP 400 + {"error": "'cf'"}`` oluyordu: kullanıcı ne hangi alanın
+#: eksik olduğunu ne de çözümün geri kalanının hesaplandığını görüyordu.
+#: Aynı paketin ``_validate_comparative_configs``i ise aynı durumda ADIYLA
+#: ``ValueError`` atıyor — bu iki zıt kapı deseni tek desende birleştirildi.
+CEA_REQUIRED_KEYS = (
+    'burn_time', 'c_star', 'cf', 'chamber_diameter', 'chamber_length',
+    'chamber_pressure', 'chamber_temperature', 'chamber_volume',
+    'exit_diameter', 'expansion_ratio', 'fuel_mass', 'g_ox_final',
+    'g_ox_initial', 'isp', 'mdot_f', 'mdot_ox', 'mdot_total',
+    'oxidizer_mass', 'port_diameter_final', 'port_diameter_initial',
+    'propellant_mass_total', 'regression_rate', 'throat_diameter',
+    'thrust', 'total_impulse')
+
+
+def cea_missing_fields(motor_results: Dict):
+    """CEA raporu için EKSİK olan zorunlu alanların adları (sıralı liste)."""
+    if not isinstance(motor_results, dict):
+        return list(CEA_REQUIRED_KEYS)
+    return [k for k in CEA_REQUIRED_KEYS if k not in motor_results]
+
+
+def cea_unavailable_text(motor_results: Dict) -> str:
+    """Rapor üretilemediğinde basılacak AÇIK gerekçe (sayı UYDURULMAZ).
+
+    Fail-closed: eksik alanın yerine varsayılan bir sayı konmaz ve rapor
+    "sanki tamammış gibi" basılmaz; eksik alanlar ADIYLA sayılır.
+    """
+    eksik = cea_missing_fields(motor_results)
+    return '\n'.join([
+        '=' * 80,
+        'CEA-STYLE RESULTS: NOT AVAILABLE FOR THIS RUN',
+        '=' * 80,
+        '',
+        'This report is not published because the motor result does not '
+        'report the following field(s):',
+        '',
+    ] + ['  - %s' % k for k in eksik] + [
+        '',
+        'No placeholder value is substituted for a missing field: a CEA-style '
+        'table whose cells were filled with defaults would read as a solved '
+        'design. The rest of the solution (plots, geometry, performance '
+        'fields) is unaffected and is returned alongside this notice.',
+        '',
+    ])
+
+
 def create_cea_style_results(motor_results: Dict) -> str:
-    """Create NASA CEA-style results output"""
-    
+    """Create NASA CEA-style results output.
+
+    Raises:
+        ValueError: when a required motor field is missing — the missing
+            names are listed in the message (P8B4-13; same gate pattern as
+            ``_validate_comparative_configs``, no bare ``KeyError``).
+    """
+
+    eksik = cea_missing_fields(motor_results)
+    if eksik:
+        raise ValueError(
+            'motor_results is missing field(s) required by the CEA-style '
+            'report: ' + ', '.join(eksik) + '. Expected keys: '
+            + ', '.join(CEA_REQUIRED_KEYS) + '.')
+
     results_text = []
     
     # Header
     results_text.append("=" * 80)
-    results_text.append("UZAYTEK HYBRID ROCKET MOTOR ANALYSIS")
+    results_text.append("HRMA HYBRID ROCKET MOTOR ANALYSIS")
     results_text.append("THEORETICAL ROCKET PERFORMANCE")
     results_text.append("=" * 80)
     results_text.append("")
     
     # Motor Information
     results_text.append("MOTOR CONFIGURATION:")
-    results_text.append(f"  Motor Name: {motor_results.get('motor_name', 'UZAYTEK-HRM-001')}")
+    results_text.append(f"  Motor Name: {motor_results.get('motor_name', 'HRMA-001')}")
     # DURUSTLUK DUZELTMESI (2026-07-19): yakit ve oksitleyici artik motor
     # sonucundan okunur. Eski surum oksitleyiciyi 'N2O' SABIT yaziyor,
     # yakiti da bulunmayan bir anahtarin varsayilaniyla 'HTPB' gosteriyordu;
@@ -255,15 +325,20 @@ def create_cea_style_results(motor_results: Dict) -> str:
             if station in thermo_props['stations']:
                 props = thermo_props['stations'][station]
                 results_text.append(f"{station.title()}".ljust(15) + 
-                                  f"{props['enthalpy']:.1f}".ljust(12) + 
-                                  f"{props['entropy']:.4f}".ljust(12) + 
-                                  f"{props['density']:.2f}".ljust(12) + 
-                                  f"{props['cp']:.3f}".ljust(12))
+                                  f"{props['enthalpy_kJ_kg']:.1f}".ljust(12) +
+                                  f"{props['entropy_kJ_kg_K']:.4f}".ljust(12) +
+                                  f"{props['density']:.2f}".ljust(12) +
+                                  f"{props['cp_kJ_kg_K']:.3f}".ljust(12))
         
         results_text.append("")
         results_text.append(f"Isentropic Efficiency: {thermo_props['isentropic_efficiency']:.1%}")
-        results_text.append(f"Enthalpy Change: {thermo_props['deltas']['enthalpy_change']:.1f} kJ/kg")
-        results_text.append(f"Entropy Change: {thermo_props['deltas']['entropy_change']:.4f} kJ/kg·K")
+        # ÖH D24 / P15B1-05: alan adları artık birimi taşıyor (kJ tabanı).
+        results_text.append(
+            f"Enthalpy Change: "
+            f"{thermo_props['deltas']['enthalpy_change_kJ_kg']:.1f} kJ/kg")
+        results_text.append(
+            f"Entropy Change: "
+            f"{thermo_props['deltas']['entropy_change_kJ_kg_K']:.4f} kJ/kg·K")
         results_text.append("")
     
     # Optimization Results
@@ -274,9 +349,51 @@ def create_cea_style_results(motor_results: Dict) -> str:
         results_text.append(f"Optimum O/F: {motor_results['optimum_of_ratio']:.4f}")
         results_text.append(f"Maximum Isp: {motor_results['maximum_isp']:.1f} s")
         results_text.append(f"Current Isp: {motor_results['isp']:.1f} s")
-        
+
         isp_efficiency = (motor_results['isp'] / motor_results['maximum_isp']) * 100
         results_text.append(f"Isp Efficiency: {isp_efficiency:.1f}%")
+
+        # ÖH D23 / fea-cfd a1 (P8B4-12) — KARTIN KÜNYESİ ÇÖZÜCÜDE VARDI,
+        # KART OKUMUYORDU.
+        #
+        # ÖLÇÜLDÜ (taban ``ef527ae``, ``once_p8.json`` bölüm ``P8B4_12``):
+        # kart yalnız iki satır basıyordu — ``Optimum O/F: 6.1200`` ve
+        # ``Maximum Isp: 236.9 s``. Aynı koşuda çözücü
+        # ``optimum_analysis.of_range_searched = [1.0, 10.0]`` ve
+        # ``of_range_basis = 'interior optimum inside the searched band
+        # [1, 10]'`` yayımlıyordu; ikisi de karta HİÇ girmiyordu. Bant
+        # yayımlanmadığı için okuyucu, aramanın BANT KENARINDA mı yoksa
+        # bandın İÇİNDE mi durduğunu ayırt edemiyordu — kenar noktası
+        # "optimum" değil, "aranan aralığın ucu" demektir.
+        #
+        # Ayrıca hibrit çözücü bu aramayı KENDİ tanımıyla danışma amaçlı
+        # sayar ve tasarım O/F'sini DEĞİŞTİRMEZ
+        # (``hybrid_rocket_engine.py``, design_summary durum gerekçesi:
+        # "find_optimum_of_ratio yalnız danışma amaçlıdır ... tasarım
+        # O/F'sini DEĞİŞTİRMEZ"). Kart bunu söylemediği için sayı bir
+        # tasarım hükmü gibi okunuyordu. Aşağıdaki satırlar YENİ BİR SAYI
+        # ÜRETMEZ: yalnız çözücünün kendi yayımladığı alanları basar.
+        _opt = motor_results.get('optimum_analysis')
+        _opt = _opt if isinstance(_opt, dict) else {}
+        _band = _opt.get('of_range_searched')
+        if isinstance(_band, (list, tuple)) and len(_band) == 2:
+            try:
+                results_text.append(
+                    f"Searched O/F band: {float(_band[0]):.4f} "
+                    f"to {float(_band[1]):.4f}")
+            except (TypeError, ValueError):
+                pass
+        else:
+            results_text.append(
+                "Searched O/F band: not reported by this run "
+                "(a band-edge result cannot be told from an interior "
+                "optimum without it)")
+        _basis = _opt.get('of_range_basis')
+        if _basis:
+            results_text.append(f"Search outcome: {_basis}")
+        results_text.append(
+            "Advisory only: this search does NOT change the design O/F "
+            "above; the motor was solved at the Current O/F.")
         results_text.append("")
     
     # Total Impulse to Thrust Analysis
@@ -288,7 +405,84 @@ def create_cea_style_results(motor_results: Dict) -> str:
         results_text.append(f"Input Total Impulse: {thrust_analysis['input_total_impulse']:.0f} N·s")
         results_text.append(f"Sea Level Thrust: {thrust_analysis['base_thrust_sea_level']:.0f} N")
         results_text.append(f"Maximum Thrust: {thrust_analysis['max_thrust']:.0f} N at {thrust_analysis['max_thrust_altitude']:.0f} m")
-        results_text.append(f"Vacuum Thrust: {thrust_analysis['vacuum_thrust']:.0f} N")
+        # P8B4-11 (ÖH D15 / fea-viz a2, 31 Ağustos 2026) — AYNI METİNDE ÜÇ
+        # FARKLI VAKUM İTKİSİ.
+        #
+        # ÖLÇÜLDÜ (hibrit HTPB/N2O, F_sl = 3000 N, eps = 4):
+        #   PERFORMANCE PARAMETERS tablosu "Vacuum" sütunu : 3427 N
+        #   bu satırın eski hâli ("Vacuum Thrust:")         : 3404 N
+        #   _vacuum_column'un Sutton Eq. 3-29 yedeği        : 3444,9 N
+        # Yayılım 40,9 N (%1,20); kart ⟷ tablo farkı 23,0 N (%0,68).
+        # Eski satır ``thrust_altitude_data[-1]['thrust']`` yazıyordu; o
+        # değer VAKUM DEĞİL, irtifa ızgarasının SON noktasıydı ve ölçümde
+        # ``max_thrust == vacuum_thrust`` (ikisi de 3404,3358 N, 20 km).
+        # 20 km'de ISA ortam basıncı hâlâ deniz seviyesinin ~%5,5'i, yani
+        # o sayı vakum itkisi olamaz.
+        #
+        # Onarım: kart, tablonun kullandığı ``_vacuum_column`` sonucunu ve
+        # aynı gerekçe künyesini basar (tek kaynak; ikinci bir formül
+        # yazılmaz). Izgara tavanındaki sayı silinmez — ADIYLA, irtifasıyla
+        # basılır. _vacuum_column hüküm veremiyorsa (Isp çifti de çıkış
+        # geometrisi de yoksa) sayı UYDURULMAZ: 'not available' yazılır.
+        #
+        # ÖH D17 / P8B4-11 ŞARTI + OH-D16-12 (aynı kusur, iki kimlik).
+        # Yukarıdaki onarım yazıldığında ``vacuum_thrust`` HÂLÂ ızgaranın
+        # son satırıydı, dolayısıyla tavan satırı onu okumakta haklıydı.
+        # Sonra hibrit P1B3-01 ÜRETİCİYİ onardı: ``vacuum_thrust`` artık
+        # GERÇEK vakum limitidir (meta['thrust_vacuum_n'], P_a = 0) ve
+        # ızgaranın ucu ADIYLA ayrı alanlara taşındı
+        # (``top_of_grid_thrust`` / ``top_of_grid_altitude_m``). Tavan
+        # satırı okumasını GÜNCELLEMEDİ ve kart kendi kendisiyle çelişir
+        # hâle geldi — ÖLÇÜLDÜ (aynı hibrit vaka,
+        # docs/scofield/raw/OH/D17/fea-cfd/a1/once_P8B4-11.json):
+        #     vacuum_thrust        = 3427,4312 N   (gerçek vakum limiti)
+        #     top_of_grid_thrust   = 3404,3358 N   (20 km ızgara ucu)
+        #     fark                 =   23,0954 N
+        #   "Vacuum Thrust:"                      satırı → 3427 N
+        #   "Altitude-grid ceiling (20000 m) ..." satırı → 3427 N
+        #                                    ve diyor ki "NOT the vacuum
+        #                                    value" — AYNI SAYI, ÇELİŞEN
+        #                                    İKİ ETİKET; dürüst ızgara ucu
+        #                                    (3404 N) metinde HİÇ YOK.
+        # Onarım: tavan satırı üreticinin YENİ alanlarından okur. Alanlar
+        # yoksa (eski sonuç sözlüğü) eski alana düşülür ama bu BEYAN
+        # EDİLİR — sessiz yedek yok, ve düşülen değer vakum değeriyse
+        # "NOT the vacuum value" cümlesi YAZILMAZ (yalan söylemez).
+        _ceiling_thrust = thrust_analysis.get('top_of_grid_thrust')
+        _ceiling_alt = thrust_analysis.get('top_of_grid_altitude_m')
+        _ceiling_src = 'top_of_grid_thrust/top_of_grid_altitude_m'
+        if _ceiling_thrust is None or _ceiling_alt is None:
+            _ceiling_thrust = thrust_analysis.get('vacuum_thrust')
+            _ceiling_alt = thrust_analysis.get('max_thrust_altitude')
+            _ceiling_src = ('vacuum_thrust/max_thrust_altitude (FALLBACK: '
+                            'this result dict predates top_of_grid_thrust, '
+                            'so the number below may BE the vacuum limit '
+                            'rather than the grid ceiling)')
+        if thrust_vac is None:
+            results_text.append(
+                "Vacuum Thrust: not available "
+                f"({vac_basis})")
+        else:
+            results_text.append(f"Vacuum Thrust: {thrust_vac:.0f} N")
+            results_text.append(f"  Vacuum thrust basis: {vac_basis}")
+        if _ceiling_thrust is not None and _ceiling_alt is not None:
+            # NOT: satır BİLEREK 'Thrust' ile başlamıyor — PERFORMANCE
+            # PARAMETERS tablosunun 'Thrust' satırını ayrıştıran tüketiciler
+            # (tests/test_viz_real_fields.py::row) bu satırı o satır
+            # sanmasın.
+            _vac_ref = thrust_analysis.get('vacuum_thrust')
+            _tavan_vakumun_kendisi = (
+                _vac_ref is not None
+                and abs(float(_ceiling_thrust) - float(_vac_ref)) < 1e-9)
+            results_text.append(
+                f"Altitude-grid ceiling ({float(_ceiling_alt):.0f} m) "
+                f"thrust: {float(_ceiling_thrust):.0f} N "
+                + ("(source: this result dict does not publish the grid "
+                   "ceiling separately, so this IS the vacuum value; "
+                   f"basis: {_ceiling_src})"
+                   if _tavan_vakumun_kendisi else
+                   "(NOT the vacuum value: ambient pressure is still "
+                   f"finite there; source: {_ceiling_src})"))
         results_text.append("")
         
         results_text.append("THRUST vs ALTITUDE:")
@@ -325,7 +519,7 @@ def create_cea_style_results(motor_results: Dict) -> str:
         results_text.append("")
     
     results_text.append("=" * 80)
-    results_text.append("Analysis completed with UZAYTEK Advanced Hybrid Rocket Analysis Software")
+    results_text.append("Analysis completed with HRMA - Rocket Motor Analysis")
     results_text.append("=" * 80)
     
     return "\n".join(results_text)
@@ -340,19 +534,101 @@ ALTITUDE_PLOT_V_SPACING = 0.18
 ALTITUDE_PLOT_HEIGHT = 700
 
 
+#: P8B4-15 (ÖH D24 / fea-cfd a2) — İKİ UYUMSUZ ``altitude_performance``
+#: ŞEMASI TEK OKUYUCUDA BULUŞUR.
+#:
+#: ÖLÇÜLDÜ (taban ``88a29d3``, ``once_a2.json`` → ``P8B4-15``):
+#:   hibrit  (``combustion_analysis.calculate_altitude_performance``)
+#:           -> {'altitude_performance': [ {altitude, isp, cf, thrust,
+#:              pressure}, ... ], ...}
+#:   katı    (``solid_rocket_engine.calculate_altitude_performance``)
+#:           -> [ {altitude, pressure, specific_impulse,
+#:              thrust_coefficient, thrust_n}, ... ]   (DÜZ liste)
+#: Tüketici yalnız hibritinkini konuşuyordu:
+#:   ``motor_results['altitude_performance']['altitude_performance']``
+#:   -> katıda ``TypeError: list indices must be integers``
+#: ve düz liste doğrudan çiziciye verilse bile ``KeyError: 'isp'``.
+#: Yani katı motorun 8 satırlık irtifa tablosu ürüne HİÇ ulaşmıyordu
+#: (P2B2-09 kırpma künyesi de bu yüzden tüketiciye varmıyor).
+#:
+#: Eş anlamlılar TEK yerde tanımlıdır; yeni bir şema çıkarsa buraya eklenir.
+ALTITUDE_ROW_ALIASES = {
+    'altitude': ('altitude', 'altitude_m'),
+    'isp': ('isp', 'specific_impulse'),
+    'thrust': ('thrust', 'thrust_n'),
+    'cf': ('cf', 'thrust_coefficient'),
+    'pressure': ('pressure', 'ambient_pressure_bar', 'pressure_bar'),
+}
+
+
+def normalize_altitude_rows(payload):
+    """İki şemayı da tek satır biçimine indirger; çözemezse ADIYLA reddeder.
+
+    Kabul edilen girdiler:
+      * düz satır listesi (katı motor),
+      * ``{'altitude_performance': [...]}`` sarmalayıcısı (hibrit/sıvı).
+
+    Returns:
+        ``list[dict]`` — her satırda ``altitude``, ``isp``, ``thrust``,
+        ``cf``, ``pressure``.
+
+    Raises:
+        ValueError: girdi hiçbir bilinen şemaya uymuyorsa ya da bir satırda
+            çözülemeyen alan varsa. Eksik alan için sayı UYDURULMAZ.
+    """
+    rows = payload
+    if isinstance(payload, dict):
+        rows = payload.get('altitude_performance')
+    if not isinstance(rows, (list, tuple)) or not rows:
+        raise ValueError(
+            'altitude_performance payload is neither a non-empty list of '
+            'rows nor a dict carrying one under "altitude_performance" '
+            '(got %s).' % type(payload).__name__)
+    cikti = []
+    for i, ham in enumerate(rows):
+        if not isinstance(ham, dict):
+            raise ValueError(
+                'altitude_performance row %d is %s, expected a dict of '
+                'metrics.' % (i, type(ham).__name__))
+        satir, eksik = {}, []
+        for ad, adaylar in ALTITUDE_ROW_ALIASES.items():
+            deger = None
+            for aday in adaylar:
+                if ham.get(aday) is not None:
+                    deger = ham[aday]
+                    break
+            if deger is None:
+                eksik.append('%s (accepted names: %s)'
+                             % (ad, ', '.join(adaylar)))
+            else:
+                satir[ad] = deger
+        if eksik:
+            raise ValueError(
+                'altitude_performance row %d does not report: %s. No '
+                'placeholder is substituted.' % (i, '; '.join(eksik)))
+        cikti.append(satir)
+    return cikti
+
+
 def create_altitude_performance_plot(altitude_data: List[Dict]) -> str:
-    """Create altitude performance visualization"""
-    
+    """Create altitude performance visualization.
+
+    Accepts either published ``altitude_performance`` schema (P8B4-15);
+    raises ``ValueError`` naming the unresolved field when it cannot.
+    """
+
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
-    
+
+    altitude_data = normalize_altitude_rows(altitude_data)
+
     # Extract data
     altitudes = [p['altitude'] / 1000 for p in altitude_data]  # Convert to km
     isp_values = [p['isp'] for p in altitude_data]
     thrust_values = [p['thrust'] for p in altitude_data]
     cf_values = [p['cf'] for p in altitude_data]
     pressure_values = [p['pressure'] for p in altitude_data]
-    
+
     # Create subplots
     fig = make_subplots(
         rows=2, cols=2,
@@ -477,6 +753,53 @@ def create_mass_fractions_plot(mass_fractions: Dict) -> str:
               if f > MIN_SIGNIFICANT_MASS_FRACTION][:MAX_PLOTTED_SPECIES]
 
     fig = go.Figure()
+
+    # P8B4-14 (ÖH D24 / fea-cfd a2) — BOŞ FİGÜR "SONUÇ" GİBİ BASILMAZ.
+    #
+    # ÖLÇÜLDÜ (taban ``88a29d3``, ``once_a2.json`` → ``P8B4-14``): ``{}``,
+    # ``None``, ``{'chamber': {}}`` ve ``{'chamber': 'metin'}`` girdilerinin
+    # DÖRDÜ de 0 iz üretiyordu, ama figür yine "Mass Fractions Through
+    # Nozzle" başlığıyla ve LOGARİTMİK eksenle çiziliyordu; 0 anotasyon,
+    # yani hiçbir yerinde "veri yok" yazmıyordu. Kullanıcı bunu "bu motorda
+    # tür kalmamış" diye okuyabilirdi — grafiğin kendisi bir iddiadır.
+    #
+    # Fail-closed: çizilecek tür yoksa başlık bunu SÖYLER, log eksen
+    # kaldırılır (boş log eksen sahte bir ölçek sunar) ve panelin ortasına
+    # gerekçesi yazılır. Sayı UYDURULMAZ, sahte iz eklenmez.
+    if not ranked:
+        toplam_istasyon = sum(1 for s in per_station if s)
+        if not isinstance(mass_fractions, dict) or not mass_fractions:
+            neden = ('no combustion composition was supplied to this figure '
+                     '(the payload was %s)'
+                     % ('empty' if isinstance(mass_fractions, dict)
+                        else type(mass_fractions).__name__))
+        elif toplam_istasyon == 0:
+            neden = ('none of the stations (%s) carries a readable '
+                     'species -> mass-fraction mapping; the supplied values '
+                     'were %s'
+                     % (', '.join(stations),
+                        ', '.join(sorted({type(v).__name__ for v
+                                          in mass_fractions.values()}))
+                        or 'absent'))
+        else:
+            neden = ('every reported species stays below the plotting '
+                     'threshold of %g mass fraction'
+                     % MIN_SIGNIFICANT_MASS_FRACTION)
+        fig.update_layout(
+            title='Mass Fractions: not available for this run',
+            xaxis_title='Nozzle Station',
+            yaxis_title='Mass Fraction',
+            height=500,
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            annotations=[dict(
+                x=0.5, y=0.5, xref='paper', yref='paper', showarrow=False,
+                align='center', font=dict(size=13),
+                text=('No species curve is drawn: ' + neden
+                      + '.<br>An empty logarithmic panel is not published as '
+                        'a result.'))])
+        return _fig_json(fig)
+
     for i, species in enumerate(ranked):
         fractions = [float(station.get(species, 0.0)) for station in per_station]
         fig.add_trace(go.Scatter(

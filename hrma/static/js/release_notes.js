@@ -92,11 +92,31 @@
             'font-size:14px;font-weight:700;letter-spacing:0.4px;' +
             'color:var(--hd-cyan, #00e5ff);',
             'v' + escapeHtml(v.version || '?')));
-        if (v.date) {
+        /* ÖH D34 · OH-GT-18 — YAYIMLANMAMIŞ SÜRÜM YAYIN TARİHİ BASAMAZ.
+           ÖLÇÜLDÜ (a1/once.json): en üst sürüm 2.6.27 başlıkta
+           "2026-08-15" basıyordu; aynı sürümün başlığı ve gövdesi
+           "in development / has NOT been published yet" diyor. Kullanıcı
+           başlıktaki tarihe bakıp bir aylık yayımlanmış bir sürüm
+           sanıyordu. Tarih kaydın kendisinden DÜŞTÜ (uydurma yasak,
+           yayın günü o gün konur) ve yerine DURUM basılır.
+           Fail-closed: `unreleased` değilse ama tarih de yoksa boş
+           geçilmez — "kayıtlı değil" ADIYLA yazılır, sessiz boşluk yok. */
+        var damgaStili = 'font-size:12px;font-family:var(--hd-mono, monospace);';
+        if (v.unreleased === true) {
             head.appendChild(el('span',
-                'font-size:12px;color:var(--hd-ink-faint, #46606d);' +
-                'font-family:var(--hd-mono, monospace);',
+                damgaStili + 'color:var(--hd-amber, #ffbe46);' +
+                'letter-spacing:0.08em;text-transform:uppercase;',
+                escapeHtml(T('release.status.unreleased',
+                             'in development — not published yet'))));
+        } else if (v.date) {
+            head.appendChild(el('span',
+                damgaStili + 'color:var(--hd-ink-faint, #6a8491);',
                 escapeHtml(v.date)));
+        } else {
+            head.appendChild(el('span',
+                damgaStili + 'color:var(--hd-ink-faint, #6a8491);',
+                escapeHtml(T('release.status.noDate',
+                             'release date not recorded'))));
         }
         block.appendChild(head);
         block.appendChild(el('div',
@@ -213,21 +233,68 @@
        (statik HTML'de değil) verilir: index.html'in data-i18n anahtarları
        i18n.js ÇEKİRDEĞİNDE aranır (tests/test_i18n.py sözleşmesi), bu
        anahtar ise i18n_shell.js'te yaşar. */
-    /* Çapa yoksa (alt sayfalarda index'in aux-links şeridi bulunmaz)
-       gezinme şeridine kendi bağlantısını ekler; şerit de yoksa sessizce
-       vazgeçer (window.hrmaShowReleaseNotes yine çağrılabilir). */
+    /* ---------------------------------------------------------------------
+       KABUK ŞERİT TABLOSU — TEK TANIM (ÖH D18 / P12aB5-06)
+
+       Ürün üç ayrı gezinme kabuğu kullanıyor: index.html `.aux-links`,
+       motor/formül sayfaları `.nav-links`, launch_site.html `#ls-topbar`.
+       Bu tabloyu yalnız `user_guide.js` tanıyordu (T72, 2026-08-03);
+       `release_notes.js` ve `settings_panel.js` yalnız `.nav-links` sorup
+       başarısız olunca SESSİZCE dönüyordu. ÖLÇÜLDÜ: /launch-site'ta iki
+       bağlantı da hiç çizilmiyordu (betikler yüklü, çapa yok) — Ayarlar
+       penceresi ve içindeki "Hata bildir" bölümü o sayfada hiçbir yoldan
+       açılamıyordu; üstelik yerel pencere menüsünde de Ayarlar girdisi yok.
+
+       Aynı tablonun üç kopyası tutulmaz: burada TEK kez tanımlanır ve
+       `window.HRMA_SHELL_NAV` ile yayımlanır. Bu dosya altı ürün şablonunun
+       HEPSİNDE kabuk betiklerinin İLKİDİR (ölçüldü, bkz.
+       docs/scofield/raw/OH/D18/electron/a1/once_b5_06.json → yuklenme_sirasi),
+       bu yüzden tüketiciler yüklenirken tablo hazırdır. Sıra
+       tests/test_d18_electron_a1.py ile kilitlidir.
+
+       Hiçbir çapa bulunamazsa sessizce vazgeçilir — pencere menüsünün
+       çağırdığı window.hrma* API'leri yine çalışır. */
+    var NAV_HOSTS = [
+        // seçici,        bağlantı sınıfı, kendinden önce eklenecek eleman
+        { host: '.nav-links', cls: '',         before: null },
+        { host: '.aux-links', cls: 'aux-link', before: null },
+        // Fırlatma sahası üst şeridinde "Uygulamaya dön" en sağda kalmalı:
+        // yeni bağlantı ondan ÖNCE eklenir.
+        { host: '#ls-topbar', cls: 'ls-link',  before: '.ls-link' }
+    ];
+
+    /* Tanınan ilk şeride `id` kimlikli bir yardımcı bağlantı ekler ve
+       döndürür; hiçbir şerit yoksa null. */
+    function injectShellNavLink(id) {
+        for (var i = 0; i < NAV_HOSTS.length; i++) {
+            var spec = NAV_HOSTS[i];
+            var nav = document.querySelector(spec.host);
+            if (!nav) continue;
+            var a = document.createElement('a');
+            a.id = id;
+            a.href = '#';
+            if (spec.cls) a.className = spec.cls;
+            a.setAttribute('data-shell-aux', '1');
+            // Şeride eklenen İLK yardımcı bağlantı sağa yaslanır; sonrakiler
+            // onun yanına dizilir. Yalnız `.nav-links` için geçerli: diğer
+            // iki şeritte yerleşim kabın kendi kuralıyla (aux-links
+            // flex-wrap, ls-topbar spacer) çözülüyor.
+            if (spec.host === '.nav-links'
+                    && !nav.querySelector('[data-shell-aux]')) {
+                a.style.marginLeft = 'auto';
+            }
+            var anchor = spec.before ? nav.querySelector(spec.before) : null;
+            if (anchor) nav.insertBefore(a, anchor);
+            else nav.appendChild(a);
+            return a;
+        }
+        return null;
+    }
+
+    window.HRMA_SHELL_NAV = { HOSTS: NAV_HOSTS, inject: injectShellNavLink };
+
     function injectNavLink() {
-        var nav = document.querySelector('.nav-links');
-        if (!nav) return null;
-        var a = document.createElement('a');
-        a.id = 'releaseNotesLink';
-        a.href = '#';
-        a.setAttribute('data-shell-aux', '1');
-        // Şeride eklenen İLK yardımcı bağlantı sağa yaslanır; sonrakiler
-        // onun yanına dizilir (settings_panel.js aynı sözleşmeyi kullanır).
-        if (!nav.querySelector('[data-shell-aux]')) a.style.marginLeft = 'auto';
-        nav.appendChild(a);
-        return a;
+        return injectShellNavLink('releaseNotesLink');
     }
 
     function mountLink() {

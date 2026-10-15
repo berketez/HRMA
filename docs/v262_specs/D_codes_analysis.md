@@ -57,11 +57,14 @@ tanımlı (parallel-write çakışması olmasın diye ortak modül YOK; şema bi
 | `warn.safety.remote_pressure_abort` | info | — | Remote pressure monitoring with automatic abort | Otomatik durdurmalı uzaktan basınç izleme |
 | `warn.safety.redundant_transducers` | info | — | Redundant transducers (2oo3 voting) and hard-wired cutoff | Yedekli dönüştürücüler (2oo3 oylama) ve donanımsal kesme |
 
-## thermal (19 kod)
+## thermal (22 kod)
 
 | code | severity | params | EN | TR |
 |---|---|---|---|---|
 | `warn.thermal.wall_exceeds_service` | critical | `T_wall, material, limit, q_MW` | UNSAFE: equilibrium wall temperature {T_wall} K exceeds {material} service limit {limit} K with the specified cooling — burn-through likely. Required cooling load q={q_MW} MW/m² at the throat. | GÜVENSİZ: denge cidar sıcaklığı {T_wall} K, belirtilen soğutmayla {material} servis sınırı {limit} K değerini aşıyor — cidar delinmesi olası. Boğazda gerekli soğutma yükü q={q_MW} MW/m². |
+| `warn.thermal.wall_exceeds_melting` | critical | `T_wall, material, melting, q_MW` | Equilibrium wall temperature {T_wall} K exceeds the {material} melting point {melting} K with the specified cooling; required cooling load q={q_MW} MW/m² at the throat. | Denge cidar sıcaklığı {T_wall} K, belirtilen soğutmayla {material} erime noktası {melting} K değerini aşıyor; boğazda gereken soğutma yükü q={q_MW} MW/m². |
+| `warn.thermal.max_temp_exceeds_melting` | critical | `T_max, melting` | Peak temperature {T_max} K exceeds the material melting point {melting} K — the wall cannot survive this condition. | Tepe sıcaklık {T_max} K, malzemenin erime noktası {melting} K değerini aşıyor — cidar bu koşulda ayakta kalamaz. |
+| `warn.thermal.wetted_integral_unavailable` | warning | — | Wetted-area integral could not be evaluated for this contour; gas-side heat load falls back to the throat station only. | Bu kontur için ıslak alan integrali hesaplanamadı; gaz tarafı ısı yükü yalnızca boğaz istasyonundan alınıyor. |
 | `warn.thermal.wall_exceeds_allowable` | warning | `T_wall, material, allowable` | WARNING: equilibrium wall temperature {T_wall} K exceeds {material} allowable {allowable} K — strength margin lost. | UYARI: denge cidar sıcaklığı {T_wall} K, {material} izin verilen {allowable} K değerini aşıyor — mukavemet marjı kayboldu. |
 | `warn.thermal.wall_nonphysical` | critical | `T_wall` | Wall temperature {T_wall} K is non-physical for any solid liner (>3500 K). Regenerative/film cooling or ablative liner required. | Cidar sıcaklığı {T_wall} K herhangi bir katı astar için fiziksel değil (>3500 K). Rejeneratif/film soğutma veya ablatif astar gerekli. |
 | `warn.thermal.wall_pinned_adiabatic` | critical | — | Equilibrium wall temperature pinned near the adiabatic-wall temperature: modelled cooling is grossly insufficient. | Denge cidar sıcaklığı adyabatik-cidar sıcaklığına yapıştı: modellenen soğutma büsbütün yetersiz. |

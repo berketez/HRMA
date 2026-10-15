@@ -82,19 +82,294 @@ KAYNAK_MODUL = 'hrma/analysis/acoustic_modes.py'
 #: tutulur ve her satırı kod kanıtlıdır. Bir satır kapanırsa (dosya artık
 #: ithal ediyorsa) aşağıdaki bekçi KIRMIZI olur ve satırın silinmesini
 #: zorlar — muafiyet listesi kendiliğinden çürüyemez.
-DEVREDILEN_KOPYALAR = {
-    'hrma/engines/injector_design.py': {
-        'adlar': ('CHUG_DP_PC_MIN', 'CHUG_DP_PC_RECOMMENDED'),
-        'devir': ('F2c / enjektör kalemi — bu parti sıvı motor + geçici '
-                  'balistik dosyalarına sahipti; injector_design.py eş '
-                  'zamanlı başka bir kulvarın dosyasıdır (paralel yazma '
-                  'kuralı), o yüzden dokunulmadı.'),
-    },
+#:
+#: v2.6.27 parti 31: liste BOŞALDI. Tek satırı olan
+#: ``hrma/engines/injector_design.py`` (CHUG_DP_PC_MIN /
+#: CHUG_DP_PC_RECOMMENDED) artık merkezî tanımın takma adıdır — sayı orada
+#: bir daha yazılmıyor. Satırı silmek zorunda kalmamız bu bekçinin ÇALIŞTIĞI
+#: anlamına gelir: borç kapandığında muafiyet de düşer.
+DEVREDILEN_KOPYALAR = {}
+
+#: ADLI kopya tavanı: ``CHUG`` adını taşıyan ikinci bir sayısal tanım
+#: kalmadı (parti 31'de kapandı). Bu sayı 0'dan YÜKSELTİLEMEZ.
+ADLI_DEVIR_TAVANI = 0
+
+# ---------------------------------------------------------------------------
+# ÖH FAZ B-1 / adım #7 — bekçiyi ADdan DEĞERe çevirme
+# ---------------------------------------------------------------------------
+# ÖLÇÜLEN KUSUR (P14M2-03/-03b/-04/-04b/-05/-05b, savcı §3.1-7):
+# Yukarıdaki bekçi yalnız ``ast.Assign`` düğümlerini ve yalnız adında 'CHUG'
+# geçen hedefleri tarıyordu. Bu iki süzgeç birlikte, ölçülen borcun
+# TAMAMINI görünmez yapıyordu:
+#
+#   * ``if self.delta_P_inj < 0.2 * self.P_c:`` — sayı bir ``Compare``
+#     operandı, hiçbir ada bağlı değil; ``Assign`` taraması göremez.
+#   * ``INJECTOR_DP_FRAC_LIQUID_DEFAULT = 0.20`` — ``Assign`` AMA adında
+#     'CHUG' yok; ad süzgeci eler. (H2 §5(c): ayrım adlandırılmış/çıplak
+#     değil, "bekçinin desenine uyacak biçimde adlandırılmış"tır.)
+#   * ``spec.get('dp_ratio_ox', 0.20)`` — ``Call`` varsayılanı.
+#   * ``'dp_ratio_ox': ... else 0.20`` — ``Dict`` değeri.
+#
+# Sonuç: bekçi ``DEVIR_TAVANI = 0`` ile "borç 0" ilan ediyordu; savcının
+# ölçtüğü gerçek borç **12 site / 6 dosya** (``raw/P14/S1-olcum-08.py`` (b)).
+# Üç beyan birden yanlıştı (bekçi, tavan ve ürün yorumu).
+#
+# TAVANIN BİRİMİ DEĞİŞTİ: eski 0, "muaf DOSYA sayısı" idi ve kırık bir
+# süzgeçle ölçülmüştü. Yeni tavan ölçülmüş SİTE sayısıdır. Adlı kopya
+# tavanı gevşemedi — ``ADLI_DEVIR_TAVANI`` olarak 0'da duruyor.
+DEVIR_TAVANI = 0   # ÖH D20 / P4B4-18: 10 -> 9; ÖH D21 / P15B2-07: 9 -> 7;
+#                    ÖH D26 / P14M2-05(+b): 7 -> 5 (hibritin İKİ sitesi kapandı);
+#                    ÖH D27 / OH-D26-07: 5 -> 0 (bağlam varsayılanları tek kaynağa)
+
+#: Sayı çiftinin ΔP/Pc bağlamında arandığı desen — savcının ölçümüyle AYNI
+#: (``S1-olcum-08.py`` (b)), ki sayım birebir yeniden üretilebilsin.
+ORAN_BAGLAMI = re.compile(
+    r'(?i)dp|delta_p|pressure_drop|p_c|chamber_pressure|inj')
+
+#: ÖLÇÜLEN BORÇ — savcının ölçtüğü 12 site / 6 dosyadan İKİ site ÖH Z5S'te
+#: kapandı (28 Ağu 2026): P10-Z5S-A ``hrma/utils/injector_design.py``deki
+#: ``delta_P_inj`` sitesini, P10-Z5S-B ``hrma/utils/common_fixes.py``deki
+#: ``min_pressure_drop`` sitesini ``acoustic_modes`` tek kaynağına bağladı —
+#: kalan borç 10 site / 4 dosya. Her satır ``(dosya, sahip)``; sahip,
+#: satır numarasından bağımsız olsun diye AST'den türetilir (atama hedefi,
+#: sözlük anahtarı, çağrı anahtarı ya da karşılaştırmanın sol tarafı).
+#: Liste ne büyüyebilir (yeni site) ne de çürüyebilir (kapanan site listede
+#: kalamaz); ikisi de aşağıdaki bekçiyi KIRMIZI yapar.
+# ÖH D20 / P4B4-18 — BORÇ AZALDI (bu bekçinin kendi talimatıyla):
+# ``cycle_power_balance.INJECTOR_DP_FRAC_LIQUID_DEFAULT`` artık kendi
+# 0,20 literalini yazmıyor, ``acoustic_modes.CHUG_DP_RATIO_RECOMMENDED``
+# tanım noktasından okuyor. Kapanan borç defterde tutulamaz (bekçi bunu
+# "Defter ÇÜRÜMÜŞ" diye kırmızı yapıyordu); satır silindi, sayım ve tavan
+# DÜŞÜRÜLDÜ — gevşetme değil daraltmadır.
+#: ÖH D27 · OH-D26-07 — BORÇ KAPANDI (5 -> 0). Ölçüm:
+#: ``docs/scofield/raw/OH/D27/sivi/a1/{once,sonra}.json`` ``OH-D26-07``.
+#: DÖRT site tanım noktasına BAĞLANDI (sayı değişmedi, ikinci tanım
+#: noktaları kalktı):
+#:   injector_design.py     dp_ratio_ox / dp_ratio_fuel çağrı varsayılanı
+#:                          -> ``CHUG_DP_RATIO_RECOMMENDED`` (0,20)
+#:   liquid_rocket_engine   INJECTOR_TYPE_DP_FRACTION_DEFAULT
+#:                          -> ``CHUG_DP_RATIO_RECOMMENDED`` (0,20)
+#: Kalan İKİ site (cycle_power_balance'ın gaz + ön yakıcı 0,15 ikizi) TEK
+#: tanıma indirildi: ``INJECTOR_DP_FRAC_HOT_GAS_BAND_LOW``. O tek tanım
+#: chug kuralı DEĞİLDİR (sıcak gaz / ön yakıcı enjeksiyonu; Huzel & Huang
+#: NASA SP-125 Böl. 4) ve bu yüzden ``SEMANTIK_DISI`` kaydına gerekçesiyle
+#: taşındı — chug bandına bağlamak sayısal bir tesadüfü fizik gibi
+#: göstermek olurdu (önceki dalganın ayrımı korunur). Kapanan borç defterde
+#: tutulamaz (bekçi bunu "Defter ÇÜRÜMÜŞ" diye kırmızı yapar): küme boşaldı,
+#: sayım ve tavan DÜŞÜRÜLDÜ. Gevşetme değil DARALTMADIR — yeni bir site
+#: doğarsa bekçi yine kırmızıya döner.
+CHUG_ORAN_SITELERI = set()
+#: ``pressure_drop_factor`` aynı dosyada İKİ kez (0,15 ve 0,20) yazılıyor —
+#: küme tek kayıt tutar, sayım ise site bazındadır. ÖH D20'de sıvı enjektör
+#: varsayılanı tanım noktasına bağlandığı için site sayısı 10 -> 9,
+#: farklı (dosya, sahip) çifti 9 -> 8 indi.
+#: ÖH D21 · P15B2-07: ``calculate_injector_design``in BEŞ satır-içi ΔP/Pc
+#: kopyası (0,22 / 0,18 / 0,28 / 0,15 / 0,20) silindi ve oran tek tanım
+#: yerinden (``_injector_dp_fraction`` -> ``INJECTOR_TYPE_DP_FRACTION``)
+#: okunuyor; ``pressure_drop_factor`` sahibi defterden DÜŞTÜ, site sayısı
+#: 9 -> 7, tavan 9 -> 7. Gevşetme değil DARALTMADIR.
+#: ÖH D26 · P14M2-05 (+P14M2-05b): hibrit motorun İKİ sitesi kapandı —
+#: ``_design_fuel_grain``daki ``delta_P = 0.2 * self.P_c`` çıplak literali
+#: ve ``dp_ratio_ox`` yedek dalındaki ``else 0.20`` — ikisi de artık
+#: ``acoustic_modes.CHUG_DP_RATIO_RECOMMENDED``dan okuyor (ölçüldü:
+#: docs/scofield/raw/OH/D26/hibrit/a1/sonra.json, hibritte çıplak geçiş
+#: 3 -> 1 ve kalan tek geçiş ΔP/Pc DEĞİL O/F kayma eşiğidir). Kapanan borç
+#: defterde tutulamaz; site sayısı 7 -> 5, tavan 7 -> 5. DARALTMADIR.
+#: ÖH D27 · OH-D26-07: 5 -> 0 (dördü tanım noktasına bağlandı, ikisi tek
+#: tanıma indirilip gerekçeli muafiyete taşındı).
+CHUG_ORAN_SITE_SAYISI = 0
+
+#: MEKANİK olarak desene uyan ama chug ΔP/Pc kuralı OLMAYAN geçişler.
+#: Her satırın gerekçesi yazılıdır; gerekçesiz muafiyet yoktur. Bir satır
+#: kaybolursa bekçi kırmızı olur ve muafiyetin silinmesini zorlar.
+SEMANTIK_DISI = {
+    ('hrma/engines/liquid_rocket_engine.py', 'injector_pressure_drop'):
+        'kullanıcı override BANDI (0,2 bar - 200 bar) — birim bar, oran değil',
+    ('hrma/engines/solid_rocket_engine.py', 'pressure_fraction_default'):
+        'katı motorun ateşleme basıncı payı (P_ateş/P_c) — başka mekanizma',
+    ('hrma/utils/injector_design.py', 'INJECTOR_PLATE_MIN_LIGAMENT'):
+        'plaka ligament kalınlığı alt sınırı [mm] — basınç oranı değil',
+    # ÖH D27 · OH-D26-07: SICAK GAZ / ÖN YAKICI enjektör ΔP/Pc alt bandı.
+    # Bu sayı chug kuralı DEĞİLDİR: chug bandı SIVI enjeksiyonun besleme
+    # kuplajı eşiğidir (acoustic_modes), buradaki oran sıcak gaz
+    # enjeksiyonunun boyutlandırma pratiğidir (Huzel & Huang, NASA SP-125,
+    # Böl. 4). İkisinin 0,15'te çakışması sayısal tesadüftür ve önceki
+    # dalga ayrımı BİLEREK kurmuştur (cycle_power_balance yorumu). Bu
+    # dalgada iki takma ad (gaz + ön yakıcı) TEK tanıma indirildi; muaf
+    # olan o tek tanım noktasıdır, iki kopya değil.
+    ('hrma/engines/cycle_power_balance.py',
+     'INJECTOR_DP_FRAC_HOT_GAS_BAND_LOW'):
+        'sıcak gaz / ön yakıcı enjektör ΔP/Pc alt bandı (H&H SP-125 Böl. 4) '
+        '— chug kararlılık eşiği DEĞİL, ayrı büyüklük',
 }
 
-#: Muafiyet listesi tavanı: ölçülen borç 1 dosyadır. Yükseltmek, borcu
-#: gizlemektir (eşik testi deseni: yastıksız).
-DEVIR_TAVANI = 1
+
+def _sabit_sahibi(dugum, ebeveyn):
+    """Bir sayı sabitinin AST'deki SAHİBİ (satır numarasından bağımsız ad).
+
+    ``Assign`` hedefi, ``Dict`` anahtarı, ``Call``in ilk dize argümanı,
+    ``keyword`` adı ya da ``Compare``in sol tarafı — hangisi önce gelirse.
+    """
+    n = dugum
+    while n in ebeveyn:
+        ust = ebeveyn[n]
+        if isinstance(ust, ast.Assign):
+            for hedef in ust.targets:
+                if isinstance(hedef, ast.Name):
+                    return hedef.id
+                if isinstance(hedef, ast.Attribute):
+                    return hedef.attr
+            return None
+        if isinstance(ust, ast.Dict):
+            for anahtar, deger in zip(ust.keys, ust.values):
+                if deger is n and isinstance(anahtar, ast.Constant):
+                    return str(anahtar.value)
+            return None
+        if isinstance(ust, ast.Compare):
+            sol = ust.left
+            if isinstance(sol, ast.Attribute):
+                return sol.attr
+            if isinstance(sol, ast.Name):
+                return sol.id
+            return None
+        if isinstance(ust, ast.keyword):
+            return ust.arg
+        if isinstance(ust, ast.Call):
+            for arg in ust.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    return arg.value
+            if isinstance(ust.func, ast.Attribute):
+                return ust.func.attr
+            return None
+        n = ust
+    return None
+
+
+def _oran_sitelerini_tara():
+    """0,20/0,15 çiftinin ΔP/Pc bağlamındaki TÜM AST geçişleri.
+
+    ``Assign`` ile sınırlı DEĞİL: sabit hangi düğümün içinde durursa dursun
+    (``Compare``, ``BinOp``, ``Call``, ``Dict``) bulunur. Kanonik modül
+    dışlanır — tanımın sahibi orasıdır.
+    """
+    hedefler = (0.20, 0.15)
+    siteler = []
+    for kok, _dizinler, dosyalar in os.walk(os.path.join(REPO_ROOT, 'hrma')):
+        if '__pycache__' in kok:
+            continue
+        for dosya in sorted(dosyalar):
+            if not dosya.endswith('.py'):
+                continue
+            tam = os.path.join(kok, dosya)
+            bagil = os.path.relpath(tam, REPO_ROOT).replace(os.sep, '/')
+            if bagil == KAYNAK_MODUL:
+                continue
+            with open(tam, encoding='utf-8') as f:
+                kaynak = f.read()
+            agac = ast.parse(kaynak, filename=tam)
+            satirlar = kaynak.split('\n')
+            ebeveyn = {}
+            for ust in ast.walk(agac):
+                for cocuk in ast.iter_child_nodes(ust):
+                    ebeveyn[cocuk] = ust
+            for dugum in ast.walk(agac):
+                if not isinstance(dugum, ast.Constant):
+                    continue
+                deger = dugum.value
+                if isinstance(deger, bool) or not isinstance(deger, (int, float)):
+                    continue
+                if not any(abs(deger - h) < 1e-12 for h in hedefler):
+                    continue
+                satir = satirlar[dugum.lineno - 1]
+                if not ORAN_BAGLAMI.search(satir):
+                    continue
+                sahip = _sabit_sahibi(dugum, ebeveyn)
+                siteler.append((bagil, sahip, deger, dugum.lineno,
+                                satir.strip()[:96]))
+    return siteler
+
+
+def test_chug_orani_DEGER_duzeyinde_envanterli():
+    """ΔP/Pc sayı çiftinin ürün kodundaki her geçişi DEFTERE kayıtlı olmalı.
+
+    Bu, ``test_chug_esigi_tek_kaynak``ın ad süzgecinin GÖREMEDİĞİ katmandır:
+    çıplak ``Compare`` operandı, 'CHUG' adını taşımayan sabit, çağrı
+    varsayılanı, sözlük değeri. Envanter üç yönde birden kilitlidir:
+
+    * yeni site  -> borç büyüdü, KIRMIZI (deftere yazmadan eklenemez);
+    * kapanan site defterde kaldı -> muafiyet çürüdü, KIRMIZI;
+    * semantik muafiyet kayboldu  -> gerekçe boşa düştü, KIRMIZI.
+
+    Bekçinin kendisi borcu ONAYLAMAZ; sayar. Tekilleştirme indikçe defter
+    satır satır boşalır ve her boşalma bu testi kırarak görünür olur.
+    """
+    olculen = _oran_sitelerini_tara()
+    olculen_ciftler = {(d, s) for d, s, _v, _l, _m in olculen}
+
+    yeni = sorted(olculen_ciftler - CHUG_ORAN_SITELERI - set(SEMANTIK_DISI))
+    ayrinti = {(d, s): (l, m) for d, s, _v, l, m in olculen}
+    assert not yeni, (
+        'ΔP/Pc sayı çifti DEFTERE YAZILMADAN yeni bir yerde doğmuş:\n'
+        + '\n'.join(f'  {d}:{ayrinti[(d, s)][0]} [{s}] {ayrinti[(d, s)][1]}'
+                    for d, s in yeni)
+        + f'\nTek tanım yeri: {KAYNAK_MODUL}. Oradan ithal et; ithal '
+          'edemiyorsan siteyi CHUG_ORAN_SITELERI defterine gerekçesiyle yaz.')
+
+    kapanan = sorted(CHUG_ORAN_SITELERI - olculen_ciftler)
+    assert not kapanan, (
+        f'Defter ÇÜRÜMÜŞ: {kapanan} artık kendi sayısını yazmıyor. '
+        'CHUG_ORAN_SITELERI listesinden sil ve CHUG_ORAN_SITE_SAYISI ile '
+        'DEVIR_TAVANI değerlerini düşür (borç kapandıktan sonra da durmaz).')
+
+    dusen_muafiyet = sorted(set(SEMANTIK_DISI) - olculen_ciftler)
+    assert not dusen_muafiyet, (
+        f'Semantik muafiyet boşa düştü: {dusen_muafiyet} artık taranmıyor. '
+        'SEMANTIK_DISI listesinden sil.')
+
+    assert len(olculen) - len(SEMANTIK_DISI) == CHUG_ORAN_SITE_SAYISI, (
+        f'ölçülen chug ΔP/Pc sitesi {len(olculen) - len(SEMANTIK_DISI)}, '
+        f'defter {CHUG_ORAN_SITE_SAYISI} diyor')
+    assert CHUG_ORAN_SITE_SAYISI <= DEVIR_TAVANI, (
+        'borç tavanı aşıldı — tavanı yükseltmek borcu gizlemektir')
+
+
+def test_yayimlanan_kunye_TEK_TANIM_diye_yalan_soylemiyor():
+    """Kullanıcıya giden künye metni, ölçülen borçla çelişemez.
+
+    İki yönlü kapanır: ya cümle gerçeğe çevrilir, ya da kalan siteler
+    tekilleştirilip cümle doğru hâle gelir. İkisi de bu satırı yeşile
+    döndürür — yani bekçi çözümü dayatmaz, YALANI yasaklar.
+
+    ÖH D26 / OH-B1-03 — BORÇ İMİ KALKTI. Ölçülen (once.json, K2): yayımlanan
+    ``_chug_report()['threshold_source']`` alanı "This pair (0.20 / 0.15) is
+    the ONLY numeric definition of the chug design rule in HRMA" diyordu,
+    ürün kodundaki borç ise 7 site / 4 dosyaydı (hepsi ``hrma/engines/``
+    altında: sıvı/katı/hibrit kulvarlarının sahası, akustik modülünden
+    tekilleştirilemez). Münhasırlık iddiası düzyazıdan SÖKÜLDÜ; yerine
+    doğrulanabilir olan yayımlandı — tanımın SAHİBİ (modül + sembol adları)
+    ve münhasır OLMADIĞI. Bekçi artık iki katmanı birden kilitler: düzyazı
+    yeniden münhasırlık iddia edemez, yapısal alan da borç dururken
+    ``exclusive_in_repository=True`` diyemez.
+    """
+    metin = acoustic_modes.CHUG_THRESHOLD_SOURCE
+    tekil_iddiasi = 'ONLY numeric definition' in metin
+    borc = len(_oran_sitelerini_tara()) - len(SEMANTIK_DISI)
+    assert not (tekil_iddiasi and borc), (
+        f'yayımlanan künye "TEK sayısal tanım" diyor ama ürün kodunda '
+        f'{borc} site daha var. Ya cümle düzeltilir ya borç kapatılır.')
+
+    # YAPISAL ayak: iddia artık düzyazıya değil alana bağlı, alan da borca.
+    chug = acoustic_modes.AcousticModeAnalyzer().analyze(
+        chamber_temperature=3000.0, gamma=1.2, gas_constant=360.0,
+        chamber_diameter=0.10, chamber_length=0.40,
+        injector_dp_ratio=0.20)['stability_report']['chug']
+    tanim = chug['threshold_definition_point']
+    assert tanim['module'] == 'hrma.analysis.acoustic_modes'
+    for sembol in tanim['symbols']:
+        assert hasattr(acoustic_modes, sembol), sembol
+    assert not (tanim['exclusive_in_repository'] and borc), (
+        f'yayımlanan tanım-noktası kaydı münhasırlık iddia ediyor ama ürün '
+        f'kodunda {borc} site daha var.')
 
 
 def test_chug_esigi_tek_kaynak():
@@ -102,6 +377,13 @@ def test_chug_esigi_tek_kaynak():
 
     Tarama AST üstündendir: docstring/yorum tarihçeyi anlatabilir (anlatmak
     ZORUNDADIR), ama kodda sayı olarak ikinci kez doğamaz.
+
+    KAPSAM BEYANI (P14M2-03/-04/-05 ölçümü): bu bekçi yalnız ``ast.Assign``
+    düğümlerini ve yalnız adında 'CHUG' geçen hedefleri görür — yani
+    "eşiğin ADIYLA yeniden doğması"nı yasaklar. Sayının ADSIZ ya da başka
+    adla doğmasını GÖREMEZ; o katman
+    ``test_chug_orani_DEGER_duzeyinde_envanterli`` ile ölçülür. Bu iki
+    bekçi birbirinin yerine geçmez.
     """
     hedefler = (0.20, 0.15)
     ihlaller = []
@@ -145,7 +427,7 @@ def test_chug_esigi_tek_kaynak():
         f'Devir listesi ÇÜRÜMÜŞ: {sorted(kapananlar)} artık kendi sayısını '
         'tanımlamıyor. DEVREDILEN_KOPYALAR listesinden sil (muafiyet, borç '
         'kapandıktan sonra da durmaz).')
-    assert len(DEVREDILEN_KOPYALAR) <= DEVIR_TAVANI
+    assert len(DEVREDILEN_KOPYALAR) <= ADLI_DEVIR_TAVANI
 
 
 def test_esik_kullanicilari_ayni_NESNEYI_okuyor():
@@ -196,23 +478,41 @@ def test_model_gecerlilik_tabani_chug_esigiyle_karistirilmadi():
 
 
 def test_i18n_bagli_uyari_metni_korundu():
-    """Uyarı METNİ i18n regex'ine bağlıdır; eşik göçü onu kırmamalı.
+    """Uyarı METNİ ile i18n deseni BİRLİKTE tutar.
 
-    ``static/js/i18n_charts.js`` bu cümleyi regex ile yakalayıp Türkçeye
-    çeviriyor. Sabit tek kaynağa taşınırken metnin bit-aynı kalması
-    ŞARTTI (i18n bu partinin dosyası değil).
+    ÖH D18 (P2B4-08) — bu bekçi eskiden metnin ``(SP-8089)`` künyesini
+    HARFİ HARFİNE arıyordu. Oysa deponun eşiği tanımlayan tek kaynağı
+    (``acoustic_modes.CHUG_THRESHOLD_SOURCE``) o atfı AÇIKÇA geri çekiyor:
+    "the band has NOT been verified page-by-page inside it in this
+    repository, so the threshold is not attributed to it". Yani bekçi geri
+    çekilmiş bir künyeyi sözleşme yapıyordu ve düzeltmeyi kırmızıya
+    çeviriyordu (ÖK-05 'kusuru koruyan bekçi' deseni).
+
+    Sınanan şey değişmedi: uyarı metni ile ``i18n_charts.js`` deseni
+    birlikte tutmalıdır. Artık künye TEK kaynaktan okunur ve desen künyeyi
+    YAKALAR, ona çivilenmez — sözleşme metnin ŞEKLİDİR, künyenin kendisi
+    değil.
     """
+    from hrma.analysis.acoustic_modes import CHUG_THRESHOLD_CITATION
     yol = os.path.join(REPO_ROOT, 'hrma', 'analysis',
                        'transient_ballistics.py')
     with open(yol, encoding='utf-8') as f:
         govde = f.read()
-    assert '— chugging risk (SP-8089)' in govde
+    assert 'chugging risk ({CHUG_THRESHOLD_CITATION})' in govde, (
+        'künye tek kaynaktan gelmiyor')
+    assert 'chugging risk (SP-8089)' not in govde, (
+        'geri çekilmiş SP-8089 atfı metne geri döndü')
     js = os.path.join(REPO_ROOT, 'hrma', 'static', 'js', 'i18n_charts.js')
     with open(js, encoding='utf-8') as f:
         js_govde = f.read()
-    assert re.search(r'chugging risk \\\(SP-8089\\\)', js_govde), (
-        'i18n deseni değişmiş: uyarı metni ile desen BİRLİKTE '
-        'değiştirilmelidir.')
+    m = re.search(r'\[/(\^t=.*?chugging risk[^/]*)/,', js_govde)
+    assert m, 'i18n chug deseni bulunamadı'
+    desen = m.group(1).replace('\\/', '/')
+    ornek = ('t=3.10s: ΔP/Pc=0.11 < 0.15 — chugging risk (%s)'
+             % CHUG_THRESHOLD_CITATION)
+    assert re.match(desen, ornek), (
+        'i18n deseni çözücünün ürettiği cümleyi artık yakalamıyor: '
+        '%r ⟷ %r' % (desen, ornek))
 
 
 # ===========================================================================
@@ -238,8 +538,20 @@ def test_cevrim_girdileri_motorun_KENDI_cozumunden(taban, cevrim, kararlilik):
     assert cevrim['tau_s'] == pytest.approx(comb['mixing_time'] / 1000.0,
                                             rel=1e-12)
     # τ_c = L*/(c*Γ²), L* ve c* motorun kendi değerleri
+    #
+    # ÖH D17 · P6B4-01 — ÇEVRİLEN BEKÇİ. Bu satır
+    # ``eng._l_star()`` (İSTENEN L*) yazıyordu ve tam da kalemin kusurunu
+    # KİLİTLİYORDU: chug çevrimi çizilmeyen bir haznenin L*'ını tüketiyor,
+    # bekçi de "doğru" diyordu. Ölçüldü (raw/OH/D17/sivi/a1/once.json):
+    # 250 kN'da çizilen L* 3,4720 m ⟷ istenen 1,2 m, 1 MN'da 5,7428 ⟷ 1,2;
+    # τ_c üç itkide bit-aynı 0,001596822 s çıkıyordu. İddia ÇİZİLEN L*'a
+    # çevrildi (``_chamber_volume_split()`` altıncı dönüşü, aynı sayı
+    # ``cooling_system.l_star`` olarak yayımlanır). Bu fikstür 10 kN
+    # olduğu için çizilen = istenen; iddia gevşemedi, DOĞRU büyüklüğe
+    # bağlandı ve büyük motorlarda artık gerçekten kilitliyor.
     tc = cevrim['chamber_time_constant']
-    assert tc['l_star_m'] == pytest.approx(eng._l_star(), rel=1e-12)
+    _l_star_cizilen = eng._chamber_volume_split()[5]
+    assert tc['l_star_m'] == pytest.approx(_l_star_cizilen, rel=1e-12)
     assert tc['c_star_m_s'] == pytest.approx(float(eng.c_star), rel=1e-12)
     assert cevrim['tau_c_s'] == tc['tau_c_s']
 

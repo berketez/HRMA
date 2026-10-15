@@ -164,6 +164,18 @@ class TestThermalStressFromMaterial:
         assert pc_['elastic_modulus_GPa'] != pytest.approx(200.0, abs=1e-6)
 
     def test_stress_matches_gradient_formula(self, heat):
+        """Yayımlanan ``thermal_stress`` gradyan formülünün ta kendisi.
+
+        KAPSAM BEYANI — ÖH Faz B-4, defter P4B1-15 (orta). Bu bekçi
+        ``thermal_stress`` alanının kendi ADIYLA tutarlı olduğunu
+        gösterir ve o kadarıyla DOĞRUDUR; ama aynı sözlükte yayımlanan
+        ``stress_safety_factor`` adı, yalnız bu gradyan terimini içerdiği
+        hâlde "gerilme emniyet katsayısı" diye okunuyor: aynı cidarın
+        taşıdığı çember (basınç) gerilmesi hesaba HİÇ girmiyor — üstelik
+        ``_analyze_thermal_safety`` ``pressure`` argümanını ALIYOR. Ad
+        eksenini iki yeni bekçi ölçüyor (ikisi de bugün xfail(strict)):
+        :meth:`test_stress_safety_factor_carries_the_hoop_term` ve
+        :meth:`test_thermal_safety_consumes_the_pressure_it_receives`."""
         r = self._run(heat, 'steel_4130')
         s = r['safety_analysis']
         p = s['thermal_stress_properties']
@@ -176,10 +188,195 @@ class TestThermalStressFromMaterial:
         assert s['thermal_stress_delta_T_K'] == pytest.approx(dT, rel=1e-9)
 
     def test_stress_no_longer_absurd(self, heat):
-        """Eski tam-kısıtlı form GPa mertebesi veriyordu (SF ~ 0.04)."""
+        """Eski tam-kısıtlı form GPa mertebesi veriyordu (SF ~ 0.04).
+
+        KAPSAM BEYANI — ÖH Faz B-4, defter P4B1-15 (orta). ``SF > 0,1``
+        bir BÜYÜKLÜK bandıdır; sayının İÇERİĞİNİ (hangi gerilme
+        bileşenlerini topladığını) sormaz, dolayısıyla basınç terimi
+        eksik bir SF'yi de geçirir. Ölçüldü (2026-08-27, bu vaka):
+        ``thermal_stress`` 1784,95 MPa — bandın üst kenarı 2000'e %10,8
+        pay kalmış; SF 0,2577. Aynı vakada çember gerilmesi 20,0 MPa,
+        birleşik SF 0,2549 → yayımlanan SF birleşiğinden İYİMSER."""
         s = self._run(heat, 'steel_4130')['safety_analysis']
         assert s['thermal_stress'] < 2000.0, 'thermal stress still absurd (GPa)'
         assert s['stress_safety_factor'] > 0.1
+
+    # -----------------------------------------------------------------
+    # ÖH FAZ B-4 — "stress_safety_factor" ADI KADAR İDDİA TAŞIYOR MU?
+    # (defter P4B1-15, orta — ad-fazla-iddia sınıfı)
+    #
+    # Depoda DOĞRU desen zaten yazılı: structural_analysis aynı cidar için
+    # ``safety_factor_pressure`` + ``safety_factor_total`` ikilisini
+    # yayımlıyor (kardeş bekçi tests/test_wall_chain.py:111). Burada
+    # istenen o desenin bu modüle uygulanması ya da adın/künyenin
+    # kapsamını AÇIKÇA söylemesidir — aynı sözlükteki
+    # ``ambient_temperature_basis`` künyesi bunun emsalidir.
+    #
+    # ÖLÇÜM (2026-08-27, steel_4130, 5 mm cidar, D=100 mm, rejeneratif;
+    # akma 460,0 MPa). σ_hoop = p·r/t (ince cidar):
+    #   Pc [bar]   σ_th [MPa]   SF (yayımlanan)   σ_hoop   SF_birleşik
+    #      20       1784,95         0,2577          20,0      0,2549
+    #     100       2749,14         0,1673         100,0      0,1615
+    #     500       3218,20         0,1429         500,0      0,1237
+    #    2000       3351,45         0,1373        2000,0      0,0860
+    # Yayımlanan SF her satırda birleşiğinden BÜYÜK (iyimser) ve makas
+    # basınçla açılıyor: %1,1 → %3,6 → %15,5 → %59,7.
+    # -----------------------------------------------------------------
+
+    #: Künye adayları — alan hangisiyle gelirse gelsin kapsamını söylemeli.
+    KAPSAM_KUNYE_ADAYLARI = ('stress_safety_factor_basis',
+                             'stress_safety_factor_source',
+                             'stress_safety_factor_scope')
+
+    def _hoop_MPa(self, pc_bar, cap_m=0.1, cidar_m=0.005):
+        """İnce cidar çember gerilmesi σ = p·r/t [MPa] (aynı girdilerden)."""
+        return (pc_bar * 1e5) * (cap_m / 2.0) / cidar_m / 1e6
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-15 borcunu ``xfail(strict=True)`` ile taşıyordu;
+    # imin kendi metni "onarım dalgası bu imi kaldırır" diyordu. Kusur
+    # ÖH Z5S / PK6 (hüküm damgası kulvarı, commit f8269a5) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test GEÇİYOR
+    # ve strict im XPASS(strict) ile KIRMIZI veriyordu. İm kaldırıldı;
+    # iddia artık CANLI bekçidir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/heat_transfer_analysis.py:2528
+    # "ÖH P4B1-15: ÇEMBER (BASINÇ) TERİMİ"; :2551 ``stress_scope =
+    # 'thermal_gradient_plus_pressure_hoop'``; :2644-2647 künye
+    # ``stress_safety_factor_scope`` ve ``pressure_hoop_stress_MPa``
+    # ADIYLA yayımlanıyor — testin İKİ kabul yolu da karşılanıyor.
+    #
+    # ÖH D16 / termo-ucus a1 (OH-D15-09) — BORÇ İMİ KALDIRILDI.
+    # Bu bekçi ``xfail(strict=True)`` ile yazılmıştı ve ürün onarımı
+    # (``_analyze_thermal_safety``e çember terimi) daha SONRA indi; im
+    # kaldırılmadığı için XPASS(strict) = KIRMIZI kaldı ve üç test
+    # imsiz kırmızı olarak sayıldı (ölçüldü: e88d096 ve 6fde52b).
+    # Onarımın gerçekten indiği KODDAN doğrulandı (once.json K3):
+    # dört basınçta da ``pressure_hoop_stress_MPa`` = p·r/t el hesabıyla
+    # birebir ve ``stress_safety_factor`` = akma/(σ_th+σ_hoop):
+    #   Pc  20 bar -> hoop  20,0 MPa, SF 0,2587396 (yalnız-termal 0,2616834)
+    #   Pc 100 bar -> hoop 100,0 MPa, SF 0,1625110 (yalnız-termal 0,1684625)
+    #   Pc 500 bar -> hoop 500,0 MPa, SF 0,1238879 (yalnız-termal 0,1431668)
+    #   Pc 2000bar -> hoop 2000,0 MPa, SF 0,0859636 (yalnız-termal 0,1372684)
+    # İm kalkınca bekçi ASIL işini yapar: onarım geri alınırsa kırmızıya
+    # döner (ters-mutasyon kanıtı: tests/test_d16_termo_ucus_a1.py).
+    @pytest.mark.parametrize('pc_bar', [20.0, 500.0])
+    def test_stress_safety_factor_carries_the_hoop_term(self, heat, pc_bar):
+        """SF ya çember terimini içerir ya kapsamını künyede söyler.
+
+        ÖH Faz B-4 — defter P4B1-15 (orta). Kabul iki yönlüdür (ürün
+        hangisini seçerse seçsin bekçi yeşile döner):
+          * SF birleşik gerilmeden (σ_th + σ_hoop) türetilmiş olur, yani
+            yalnız-termal SF'den daha İYİMSER olamaz; ya da
+          * ``safety_analysis`` bir kapsam künyesi taşır ve o künye
+            alanın YALNIZ termal gradyanı içerdiğini söyler (kardeşi
+            ``ambient_temperature_basis`` bu deseni aynı modülde
+            uyguluyor).
+        """
+        md = {'chamber_pressure': pc_bar, 'chamber_temperature': 3200,
+              'chamber_diameter': 0.1, 'chamber_length': 0.5,
+              'burn_time': 10, 'mdot_total': 1.0}
+        s = heat.analyze_heat_transfer(md, material='steel_4130',
+                                       wall_thickness=0.005,
+                                       cooling_type='regenerative'
+                                       )['safety_analysis']
+        kunye = [k for k in self.KAPSAM_KUNYE_ADAYLARI if k in s]
+        metin = ' '.join(str(s[k]) for k in kunye).lower() if kunye else ''
+        # ÖH D21 bekci-cevirisi a1 (OH-D17-28) — KÜNYE DALI DARALTILDI.
+        # Ölçüldü (once_statik.json K5): ürün
+        # ``stress_safety_factor_scope='thermal_gradient_plus_pressure_hoop'``
+        # yayımlıyor. ESKİ kabul yolu yalnız "metinde 'thermal' geçiyor mu"
+        # diye sorup ``return`` ediyordu; o dize 'thermal' İÇERDİĞİ için
+        # bekçi SAYISAL dala HİÇ inmiyordu → çember terimi üründen
+        # sökülse bile 6/6 yeşil kalıyordu (Fable-D17 bağımsız
+        # mutasyonuyla teyit; OH-D17-28). Beyan yolu ancak künye alanın
+        # çember terimini İÇERMEDİĞİNİ söylüyorsa geçerlidir; künye
+        # "hoop/pressure/çember dahil" diyorsa bu bir BEYAN değil bir
+        # İDDİADIR ve sayıyla sınanır.
+        HOOP_IZLERI = ('hoop', 'pressure', 'basinc', 'basınç',
+                       'cember', 'çember')
+        hoop_beyani = any(t in metin for t in HOOP_IZLERI)
+        akma = s['thermal_stress_properties']['yield_strength_MPa']
+        hoop = self._hoop_MPa(pc_bar)
+        birlesik = akma / (s['thermal_stress'] + hoop)
+        if kunye and not hoop_beyani:
+            assert 'thermal' in metin or 'termal' in metin, (
+                f'kapsam künyesi ({kunye}) alanın yalnız termal gradyanı '
+                f'içerdiğini söylemiyor: {metin[:200]!r}')
+            return
+        if hoop_beyani:
+            # Künye çember terimini İÇERDİĞİNİ söylüyor: sayı da öyle desin.
+            assert s.get('pressure_hoop_stress_MPa') == pytest.approx(
+                hoop, rel=1e-9), (
+                f'künye {metin[:120]!r} çember terimini içerdiğini söylüyor '
+                f'ama yayımlanan pressure_hoop_stress_MPa '
+                f'{s.get("pressure_hoop_stress_MPa")!r}; aynı girdilerden '
+                f'p·r/t = {hoop:.4f} MPa olmalıydı')
+            assert s['stress_safety_factor'] == pytest.approx(
+                birlesik, rel=1e-6), (
+                f'künye {metin[:120]!r} SF\'nin çember terimini içerdiğini '
+                f'söylüyor ama yayımlanan {s["stress_safety_factor"]:.6f} '
+                f'birleşik değer {birlesik:.6f} DEĞİL — künye ile sayı ayrı '
+                f'şey anlatıyor')
+        assert s['stress_safety_factor'] <= birlesik * (1.0 + 1e-9), (
+            f"stress_safety_factor {s['stress_safety_factor']:.4f} "
+            f"yayımlanıyor; aynı cidarın çember gerilmesi "
+            f"({hoop:.1f} MPa, Pc={pc_bar:g} bar) eklendiğinde katsayı "
+            f"{birlesik:.4f} olurdu (%{100 * (s['stress_safety_factor'] / birlesik - 1):.1f} "
+            f"iyimser). Alan ne birleşik SF'dir ne de kapsamını söyleyen "
+            f"bir künyesi vardır (aranan: {self.KAPSAM_KUNYE_ADAYLARI})")
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Aynı kalemin (P4B1-15) yapısal ayağı; ÖH Z5S / PK6 (f8269a5)
+    # tarafından ONARILDI ve im BAYATLADI (XPASS(strict) → kırmızı).
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/heat_transfer_analysis.py:2465
+    # "ÖH ONARIMI (defter P4B1-15) — ``pressure`` ARTIK TÜKETİLİYOR.";
+    # :1116 çağıran hazne yarıçapını da geçiriyor.
+    #
+    # ÖH D16 / termo-ucus a1 (OH-D15-09) — BORÇ İMİ KALDIRILDI (yukarıdaki
+    # gerekçe). AST ölçümü (once.json K3): ``_analyze_thermal_safety``
+    # gövdesi ``pressure`` adını artık OKUYOR (pressure_Pa = float(pressure)
+    # -> hoop_stress = pressure_Pa * radius_m / thickness_m).
+    def test_thermal_safety_consumes_the_pressure_it_receives(self):
+        """Aldığı basınç argümanı gövdede OKUNMALI (yapısal ölçüm).
+
+        ÖH Faz B-4 — defter P4B1-15 (orta). Kusurun bulunuş yöntemi
+        buydu ve burada bekçileşiyor: çağıran (``:827``) basıncı dört
+        konumlu argümanın dördüncüsü olarak geçiriyor, imza onu
+        ``pressure`` adıyla alıyor, gövde ise adı bir kez bile OKUMUYOR.
+        Ölçüldü (2026-08-27, ``ast``): imza
+        ``(self, max_temp, mat_props, thickness, pressure, wall_delta_T)``,
+        gövdede Load bağlamında geçmeyen tek argüman ``pressure``
+        (``thickness`` geçiyor — yani kusur "argümanlar zaten
+        kullanılmıyor" genellemesi değil, ADRESLİ).
+
+        Ölü argüman ya tüketilir ya imzadan düşer: ikisi de bu bekçiyi
+        yeşile çevirir; bugünkü hâl "basıncı aldım" görüntüsü verip
+        yalnız termal SF yayımlamaktır.
+        """
+        import ast
+        import pathlib
+
+        kaynak = (pathlib.Path(__file__).resolve().parents[1] / 'hrma'
+                  / 'analysis' / 'heat_transfer_analysis.py')
+        agac = ast.parse(kaynak.read_text(encoding='utf-8'))
+        dugum = next((n for n in ast.walk(agac)
+                      if isinstance(n, ast.FunctionDef)
+                      and n.name == '_analyze_thermal_safety'), None)
+        assert dugum is not None, (
+            '_analyze_thermal_safety bulunamadı — bekçi güncellenmeli')
+        argumanlar = [a.arg for a in dugum.args.args if a.arg != 'self']
+        assert 'pressure' in argumanlar, (
+            f'imza değişmiş ({argumanlar}); basınç argümanı düştüyse bu '
+            'bekçi kaldırılabilir')
+        okunan = {n.id for n in ast.walk(dugum)
+                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+        assert 'pressure' in okunan, (
+            f"_analyze_thermal_safety (satır {dugum.lineno}) 'pressure' "
+            f"argümanını alıyor ama gövdesinde HİÇ okumuyor; yayımladığı "
+            f"alanın adı ise 'stress_safety_factor'. Gövdede okunan diğer "
+            f"argümanlar: {sorted(a for a in argumanlar if a in okunan)}")
 
 
 class TestStructuralThermalHoop:
@@ -357,15 +554,20 @@ class TestPlotlyNoBdata:
 
     def test_fuel_comparison_plot_has_no_bdata(self, regression_data):
         ra, _ = regression_data
+        # ÇEVRİLEN BEKÇİ (ÖH D15 / P5B4-01): bu çağrı başlangıç port
+        # çapını GÖNDERMİYORDU ve çözümleyicinin uydurduğu 30 mm'ye
+        # yaslanıyordu. Değer açıkça yazıldı — o günkü örtük değerin ta
+        # kendisi, yani grafiğe dair sayısal iddia değişmedi.
         payload = ra.compare_fuel_types({
-            'burn_time': 10.0, 'mdot_ox': 0.5, 'chamber_length': 0.4})
+            'burn_time': 10.0, 'mdot_ox': 0.5, 'chamber_length': 0.4,
+            'port_diameter_initial': 0.03})
         assert 'bdata' not in payload
 
     def test_trajectory_plot_has_no_bdata(self):
         from hrma.analysis.trajectory_analysis import TrajectoryAnalyzer
         t = TrajectoryAnalyzer()
         motor = {'thrust': 2000, 'burn_time': 8, 'total_impulse': 16000,
-                 'isp': 220, 'propellant_mass_total': 8.0}
+                 'propellant_mass_total': 8.0}  # ÖH D23/P4B3-24: tutarsız 'isp' kaldırıldı
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             res = t.calculate_trajectory(motor, {'launch_angle': 85})

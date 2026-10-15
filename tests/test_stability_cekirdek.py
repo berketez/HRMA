@@ -52,6 +52,11 @@ from hrma.stability import (
     tau_c_from_volume,
 )
 from hrma.stability.chug import chug_neutral_delay_s
+# ÖH D20 / P13B3-07 + P13B3-08 — eşikler TEK KAYNAKTAN okunur.
+from tests.support.esikler import (
+    CEBIRSEL_KIMLIK_REL,
+    PLATFORM_GURULTU_TABANI_REL,
+)
 
 # Tasarım belgesi §3.2'nin tipik sıvı motor vakası (SI).
 DOC_L_STAR_M = 1.0
@@ -59,6 +64,16 @@ DOC_C_STAR_M_S = 1800.0
 DOC_GAMMA = 1.2
 DOC_TAU_C_S = 1.3208873639398158e-3      # ölçüldü; belgede 1,32 ms
 DOC_NEUTRAL_RATIO = 0.8651523967380913   # belgede 0,865 (J = 0,20)
+#: Belgenin BASILI hâli ve onun yuvarlama basamağı — aynı doktrin
+#: DOC_GAMMA_SQ'da da yazılı: "bir çapanın bandı, çapanın KAYNAĞININ
+#: basamağıdır". ÖLÇÜLDÜ (ÖH D22 · P13B3-13): burada eskiden belgede
+#: HİÇ GEÇMEYEN dört basamaklı bir literal (0,8652) ±5e-5 ile
+#: kilitliydi ve bandın %95,21'i tüketilmişti (kalan pay 2,40e-6 —
+#: deponun tek bıçak-sırtı bekçisi). Belge iki yerde de üç basamak
+#: yazıyor: docs/mimari/f2-yanma-tepkisi-tasarimi.md:147 ve
+#: docs/arastirma/fizik/A4-sivi-kararlilik.md:117 (0,865 / 0,865152…).
+DOC_NEUTRAL_RATIO_BELGE = 0.865
+DOC_NEUTRAL_RATIO_YUVARLAMA = 5e-4
 
 
 # ===========================================================================
@@ -74,10 +89,48 @@ def test_gamma_kare_sifir_bir_araliginda(gamma):
     assert gamma_function(gamma) == pytest.approx(math.sqrt(value), rel=1e-15)
 
 
+#: Tasarım belgesi §3.2'nin YAZDIĞI değer ve onun yuvarlama basamağı.
+#: Belge dört anlamlı basamak veriyor (0,4206); bir çapanın bandı, çapanın
+#: KAYNAĞININ basamağıdır.
+DOC_GAMMA_SQ = 0.4206
+DOC_GAMMA_SQ_YUVARLAMA = 5e-5
+
+
 def test_gamma_kare_belge_degeri():
-    """γ = 1,2 ⇒ Γ² = 0,42059… (tasarım belgesi §3.2: 0,4206)."""
-    assert gamma_function_sq(1.2) == pytest.approx(0.4205926793776707,
-                                                   rel=1e-14)
+    """γ = 1,2 ⇒ Γ² = 0,42059… — İKİ AYRI İDDİA, İKİ AYRI BANT.
+
+    ÖH defteri **P13B3-08**: bu test tek bir satırda 16 basamaklı bir
+    literali ``rel=1e-14`` ile kilitliyordu. Belge ise dört basamak yazar
+    (0,4206), yani bekçi kaynağından **1,2e10 kat** sıkıydı ve o sıkılığın
+    hiçbir ölçülmüş dayanağı yoktu: ``rel=1e-14`` bu ölçekte ~75,8 ULP'lik
+    bir bütçedir ve aynı fiziğin iki yazımı arasında ölçülen fark 2 ULP'dir
+    (yani bant, iddia ettiği şeyi değil, tesadüfen tutan bir sayıyı
+    koruyordu). Çapayı KAYNAĞINA bağlamak yerine literale bağlamak,
+    platform değişince bekçinin ne söylediğini bilinmez yapar.
+
+    Artık iki iddia ayrı ayrı duruyor:
+
+    1. **Belge çapası** — ürünün sayısı belgenin yazdığı sayıyla, belgenin
+       kendi yuvarlama basamağında (±5e-5) örtüşür.
+    2. **Tanım kimliği** — Γ² = γ·(2/(γ+1))^((γ+1)/(γ−1)) (Vandenkerckhove
+       çarpanının tanımı; Sutton & Biblarz, *Rocket Propulsion Elements*,
+       9. baskı, Böl. 3). Burada BAĞIMSIZ olarak yeniden yazılır ve bandı
+       cebirsel kimlik bandıdır. Ürünün iç yazımı (``gamma_function``
+       üstünden karekök) değişse bile bu kimlik ayakta kalmalıdır.
+
+    Bant KAYNAĞINDAN geliyor, çıktıdan seçilmiyor.
+    """
+    olculen = gamma_function_sq(1.2)
+    # (1) belge çapası, belgenin basamağında
+    assert olculen == pytest.approx(DOC_GAMMA_SQ, abs=DOC_GAMMA_SQ_YUVARLAMA)
+    # (2) tanım kimliği (literatürden bağımsız yazım)
+    g = 1.2
+    tanimdan = g * (2.0 / (g + 1.0)) ** ((g + 1.0) / (g - 1.0))
+    assert olculen == pytest.approx(tanimdan, rel=CEBIRSEL_KIMLIK_REL), (
+        f'Γ² tanımıyla ayrıştı: ürün {olculen!r} ⟷ tanım {tanimdan!r}')
+    # Belge ile tanım aynı sayıyı gösteriyor mu (çapa kaynağı sağlam mı)
+    assert tanimdan == pytest.approx(DOC_GAMMA_SQ,
+                                     abs=DOC_GAMMA_SQ_YUVARLAMA)
 
 
 def test_gamma_fonksiyonu_quasi1d_ile_ayni_kavram():
@@ -130,11 +183,23 @@ def test_tau_c_termodinamik_yol_ile_ozdes():
     assert tau_thermo == pytest.approx(tau_lstar, rel=1e-14)
 
 
+#: Gidiş-dönüş sınavının GİRDİSİ (dondurulmuş bir fizik değeri değil).
+GIDIS_DONUS_C_STAR_M_S = 1650.0
+
+
 def test_rt_cstar_gidis_donus():
-    """R·T = (c*Γ)² ve c* = √(R·T)/Γ birbirinin tersi."""
+    """R·T = (c*Γ)² ve c* = √(R·T)/Γ birbirinin tersi.
+
+    ÖH D20 / P13B3-07: buradaki ``1650`` bir ÇAPA değil, sınavın kendi
+    GİRDİSİDİR; ikisi de aynı adlı sabitten okunur ki "gürültü tabanının
+    altında dondurulmuş sayı" gibi görünmesin. Bant, cebirsel kimlik
+    bandıdır — iddia platform taşınabilirliği değil, iki fonksiyonun
+    birbirinin tersi olduğudur.
+    """
     for gamma in (1.14, 1.2, 1.33):
-        rt = rt_from_cstar(1650.0, gamma)
-        assert cstar_from_rt(rt, gamma) == pytest.approx(1650.0, rel=1e-13)
+        rt = rt_from_cstar(GIDIS_DONUS_C_STAR_M_S, gamma)
+        assert cstar_from_rt(rt, gamma) == pytest.approx(
+            GIDIS_DONUS_C_STAR_M_S, rel=CEBIRSEL_KIMLIK_REL)
     # Fiziksel mertebe: γ=1,2 · c*=1800 ⇒ R·T ≈ 1,36e6 (m/s)² ⇒ T ≈ 3400 K
     # (R ≈ 400 J/kgK sınıfı) — mertebe kontrolü, iddia değil.
     assert 1.0e6 < rt_from_cstar(1800.0, 1.2) < 2.0e6
@@ -152,10 +217,25 @@ def test_tau_c_tekdüze_yonleri():
 # (c) + (d) Chug nötr eğrisi ve kök yeri
 # ===========================================================================
 def test_chug_notr_egrisi_belge_capasi():
-    """J = 0,20 ⇒ τ/τ_c = 0,865152… (tasarım belgesi §3.2 elle hesabı)."""
+    """J = 0,20 ⇒ τ/τ_c = 0,865152… (tasarım belgesi §3.2 elle hesabı).
+
+    ÇEVRİLDİ (ÖH D22 · P13B3-13). İkinci iddia belgede geçmeyen dört
+    basamaklı bir sayıya (0,8652) ±5e-5 ile bağlıydı; ölçülen bant
+    kullanımı %95,21, kalan pay 2,40e-6 idi. Gürültü tabanının (1e-12)
+    çok üstünde ama fiziksel olarak önemsiz bir 2,4e-6'lık kayma bekçiyi
+    kırmızıya çeviriyordu — yani bekçi bir fizik regresyonunu değil bir
+    yuvarlama sınırını koruyordu. Çapa artık belgenin KENDİ bastığı üç
+    basamağa ve o basamağın yuvarlama yarım bandına bağlı: ölçülen bant
+    kullanımı %30,48, kalan pay 3,48e-4 (145 kat).
+
+    Gevşetme değildir: bit düzeyi kilidi bir üstteki ``rel=1e-14``
+    iddiası tutuyor ve o değişmedi. Değişen, YALNIZ belge çapasının
+    kendi kaynağına hizalanmasıdır.
+    """
     assert chug_neutral_tau_ratio(0.2) == pytest.approx(DOC_NEUTRAL_RATIO,
                                                         rel=1e-14)
-    assert chug_neutral_tau_ratio(0.2) == pytest.approx(0.8652, abs=5e-5)
+    assert chug_neutral_tau_ratio(0.2) == pytest.approx(
+        DOC_NEUTRAL_RATIO_BELGE, abs=DOC_NEUTRAL_RATIO_YUVARLAMA)
 
 
 def test_chug_notr_gecikme_tipik_sivi_vakasi():
@@ -570,6 +650,9 @@ _DIMENSIONLESS_KEYS = {
     'rule_min_ratio', 'rule_recommended_ratio',
     'model_neutral_tau_over_tau_c_at_rule_min',
     'model_neutral_tau_over_tau_c_at_rule_recommended',
+    # P6B4-14: R·T özdeşliğinin İKİ τ_c yolu arasındaki BAĞIL farkı —
+    # tanım gereği boyutsuz (s/s). Sözleşmeye adıyla giriyor.
+    'tau_c_route_rel_diff',
 }
 
 

@@ -29,6 +29,8 @@ import warnings
 
 import pytest
 
+from tests.support import serilestirme
+
 from hrma.engines.hybrid_rocket_engine import (
     GRAIN_LD_WARN_THRESHOLD,
     HybridRocketEngine,
@@ -106,7 +108,20 @@ BEKLENEN_BEYANLAR = {
 # artık o anahtarların sonuçta BELİRMESİ beklenen davranıştır ve kendi
 # bekçi dosyası pozitif yönde sınar.
 CELISKI_ANAHTARLARI = {
-    'feed_system': {'feed_system', 'feed_lines', 'valve_count',
+    # ÖH D18 (kalem B2-08) — ÖLÜ ANAHTAR AYIKLANDI, KAPSAM ADIYLA YAZILDI.
+    # Buradaki 'feed_lines' ÇOĞUL yazılmıştı; motorun yayımladığı ad
+    # 'feed_line' TEKİL (combustion_stability.chug_loop.feed_line). Ölçüldü
+    # (docs/scofield/raw/OH/D18/hibrit/a1/once.json, B2_08): kesişim BOŞ, yani
+    # bu satır bu beyan için assert'i KOŞULSUZ hâle getirmişti — tam da
+    # gördüğü varsayılan çelişki (çözülmüş chug atalet hattı ⟷ "hiçbir yerde
+    # modellenmiyor" beyanı) tek harflik farkla gözden kaçıyordu.
+    # 'feed_line' bilerek YASAKLI DEĞİL: beyan D18'de daraltıldı ve topaklanmış
+    # hat ataletini artık AÇIKÇA çözülmüş ilan ediyor (tek kaynak: beyanın
+    # kendi metni). Beyan metniyle çözülen alan arasındaki bağı POZİTİF yönde
+    # sınayan bekçi: tests/test_d18_hibrit_a1.py::TestB208BeslemeBeyani.
+    # Burada kalan yasaklar, daraltılmış beyanın hâlâ yokluğunu iddia ettiği
+    # DONANIM sayımlarıdır.
+    'feed_system': {'feed_system', 'valve_count',
                     'sensor_count', 'check_valve_count'},
     'ignition_startup_transient': {'ignition_delay', 'startup_sequence',
                                    'startup_time', 'igniter_design'},
@@ -312,9 +327,15 @@ def test_t60_yapisal_analiz_yoksa_kapakli_boy_uydurulmaz(boru_motor):
 
 
 def test_sonuc_json_serilestirilebilir(boru_motor):
-    """Yeni bloklar (not_modelled, T60 alanları) yanıt sözleşmesini bozmaz."""
+    """Yeni bloklar (not_modelled, T60 alanları) yanıt sözleşmesini bozmaz.
+
+    ÇEVRİLDİ (ÖH D22 · P13B1-10): gövde İDDİASIZDI — blok hiç
+    üretilmemiş olsa da ``dumps`` geçiyordu.
+    """
     _, sonuc = boru_motor
-    json.dumps({'not_modelled': sonuc['not_modelled'],
-                'not_modelled_basis': sonuc['not_modelled_basis'],
-                'key_dimensions': sonuc['design_summary']['key_dimensions'],
-                'design_warnings': sonuc['design_warnings']})
+    serilestirme.json_capasi(
+        {'not_modelled': sonuc['not_modelled'],
+         'not_modelled_basis': sonuc['not_modelled_basis'],
+         'key_dimensions': sonuc['design_summary']['key_dimensions'],
+         'design_warnings': sonuc['design_warnings']},
+        'hibrit beyan bloğu')

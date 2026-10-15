@@ -21,7 +21,10 @@ import pytest
 CELL_FIELDS = ('motor_type', 'quantity', 'layer', 'n', 'bias_percent',
                'rms_percent', 'median_ape_percent', 'mape_percent',
                'worst_test_id')
-VALID_LAYERS = {'main', 'low_confidence', 'anomaly'}
+# P10B2-06 (2026-09-05): 'out_of_scope' DÖRDÜNCÜ katmandır — MODELİN
+# ilan ettiği kapsam gerekçesiyle dışlanan kayıtlar, DENEYİN veri
+# kalitesi gerekçesiyle dışlananlardan ('anomaly') ayrı yayımlanır.
+VALID_LAYERS = {'main', 'low_confidence', 'anomaly', 'out_of_scope'}
 
 RETYPED_NOT_SUPPORTED = {
     'hyb-whitmore2020-abs-gox-regfit',

@@ -21,6 +21,8 @@ import warnings
 import numpy as np
 import pytest
 
+from tests.support import serilestirme
+
 from hrma.analysis.tank_blowdown import N2OSaturation
 from hrma.engines.hybrid_rocket_engine import (
     HybridRocketEngine,
@@ -134,7 +136,8 @@ def test_manset_sayilar_yeniden_derecelendirilmez(n2o_kosu):
 
 
 def test_blok_json_serilestirilebilir(blok):
-    json.dumps(blok)
+    """ÇEVRİLDİ (ÖH D22 · P13B1-10): gövde İDDİASIZDI — boş blok da geçerdi."""
+    serilestirme.json_capasi(blok, 'tank_blowdown bloğu')
 
 
 # ---------------------------------------------------------------------------

@@ -47,3 +47,29 @@ shapely==2.1.2
 # pywebview zinciri BURADA DEĞİL: environment marker'lar çalışan yorumlayıcıya
 # göre çözüldüğünden platform bağımlılıkları build betiklerinde --no-deps ile
 # açık listeyle kurulur (mac: pyobjc ailesi, win: pythonnet ailesi).
+
+# ---------------------------------------------------------------------------
+# PAKETE GİREN AMA BU DOSYADAN PIP İLE KURULMAYAN BAĞIMLILIKLAR — 2. AŞAMA
+# ---------------------------------------------------------------------------
+# ÖH D23 / altyapi · defter P10B3-19. ÖLÇÜLDÜ (a2/once.json, taban ef527ae):
+# "paketlenen bağımlılıklar" tek bir dosyadan okunamıyordu — requirements.txt
+# ile bu dosya 22 ortak pakette farklı kısıt taşıyor, 5 paket yalnız
+# requirements.txt'te görünüyordu ve bunlardan rocketcea aslında PAKETE
+# GİRİYORDU (win: build_win_payload.sh --no-deps; mac: build_mac_app.sh
+# anaconda kopyası). Yani dosya "eksik" değil YANILTICIYDI.
+#
+# Aşağıdaki satırlar makine tarafından okunur (tools/bundle_kapisi.py):
+# her "2. AŞAMA" kaydı, adı geçen paketi GERÇEKTEN kuran bir derleme
+# betiğiyle çaprazlanır; her "HARİÇ" kaydı gerekçesiyle birlikte durur.
+# Beyansız eksik paket kapıyı KAPATIR — sessiz eksik, cantera vakasında
+# (v2.6.2) yanlış termokimyaya yol açmıştı.
+#
+# 2. AŞAMA: build123d==0.11.1 — numpy>=2 deklare ediyor ama 1.26.4 ile çalışır; --no-deps
+# 2. AŞAMA: ocp-gordon==0.2.0 — aynı numpy deklarasyonu sorunu; --no-deps
+# 2. AŞAMA: rocketcea==1.2.1 — PyPI'da mac wheel yok; win --no-deps, mac anaconda kopyası
+# 2. AŞAMA: pywebview==6.2.1 — environment marker'lar çalışan yorumlayıcıya göre çözülüyor
+#
+# HARİÇ: black — biçimlendirme aracı; çalışma zamanı bağımlılığı değildir
+# HARİÇ: flake8 — sözdizim denetleyicisi; çalışma zamanı bağımlılığı değildir
+# HARİÇ: gunicorn — Linux WSGI sunucusu; paketli uygulama waitress ile koşar
+# HARİÇ: pyinstaller — derleme aracı; paketin içine girmez

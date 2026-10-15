@@ -1,0 +1,307 @@
+{
+  "schema_version": "1.0",
+  "case": "nozzle_boldman_conical_1968",
+  "description_tr": "Boldman-Schmidt-Gallagher (NASA Lewis, 1968) 30° ve 60° yakınsama yarım açılı konik lülelerde duvar ısı transferi + laminerleşme deneyi — Back-Massier-Gier (1964) için 1964 SONRASI, BAĞIMSIZ laboratuvardan ÇAPRAZ TEYİT kaynağı. Aynı fizik (soğutulmuş konik lüle, hızlanan türbülanslı sınır tabaka, düşük Re'de laminerleşme) FARKLI ölçüm tekniğiyle (Inconel ısı akısı ölçerler; BMG'de gömülü ısıl çift tapaları) ve temiz gazla (yanma ürünü değil, ısıtılmış hava) doğrulanmıştır. Geometri TABLO hâlinde (aşağıda, elle çıkarıldı); ısı transferi dağılımları kaynakta YALNIZ ŞEKİL olarak var (Şekil 5-6, log-log) — eğri okuma YAPILMADI; onun yerine raporun kendi SAYISAL bulgu cümleleri kayda alındı.",
+  "discipline": "cfd_viscous_heat_transfer",
+  "inputs": {
+    "geometry": {
+      "_status": "PUBLISHED_HARDWARE",
+      "nozzle_30deg": {
+        "convergent_half_angle_deg": 30.0,
+        "divergent_half_angle_deg": 15.0,
+        "throat_diameter_in": 1.492,
+        "contraction_area_ratio": 18.98,
+        "throat_curvature_radius": "r_c = 2.0·r* (Şekil 1 etiketi)",
+        "convergent_length_note": "Şekil 1: 4.737 in (12.032 cm) — boğaza eksenel mesafe imi",
+        "stations": [
+          {
+            "station": 1,
+            "A_over_Astar": 18.98,
+            "D_in": 6.5,
+            "D_cm": 16.51,
+            "z_in": 0.0,
+            "z_cm": 0.0
+          },
+          {
+            "station": 2,
+            "A_over_Astar": 11.648,
+            "D_in": 5.092,
+            "D_cm": 12.934,
+            "z_in": 13.218,
+            "z_cm": 33.574
+          },
+          {
+            "station": 3,
+            "A_over_Astar": 6.952,
+            "D_in": 3.934,
+            "D_cm": 9.992,
+            "z_in": 14.221,
+            "z_cm": 36.121
+          },
+          {
+            "station": 4,
+            "A_over_Astar": 5.591,
+            "D_in": 3.528,
+            "D_cm": 8.961,
+            "z_in": 14.575,
+            "z_cm": 37.021
+          },
+          {
+            "station": 5,
+            "A_over_Astar": 4.395,
+            "D_in": 3.128,
+            "D_cm": 7.945,
+            "z_in": 14.921,
+            "z_cm": 37.899
+          },
+          {
+            "station": 6,
+            "A_over_Astar": 3.328,
+            "D_in": 2.722,
+            "D_cm": 6.914,
+            "z_in": 15.273,
+            "z_cm": 38.793
+          },
+          {
+            "station": 7,
+            "A_over_Astar": 2.41,
+            "D_in": 2.316,
+            "D_cm": 5.883,
+            "z_in": 15.623,
+            "z_cm": 39.682
+          },
+          {
+            "station": 8,
+            "A_over_Astar": 1.392,
+            "D_in": 1.76,
+            "D_cm": 4.47,
+            "z_in": 16.12,
+            "z_cm": 40.945
+          },
+          {
+            "station": 9,
+            "A_over_Astar": 1.024,
+            "D_in": 1.51,
+            "D_cm": 3.835,
+            "z_in": 16.558,
+            "z_cm": 42.057
+          },
+          {
+            "station": 10,
+            "A_over_Astar": 1.0,
+            "D_in": 1.492,
+            "D_cm": 3.79,
+            "z_in": 16.733,
+            "z_cm": 42.502
+          }
+        ]
+      },
+      "nozzle_60deg": {
+        "convergent_half_angle_deg": 60.0,
+        "divergent_half_angle_deg": 15.0,
+        "throat_diameter_in": 1.499,
+        "contraction_area_ratio": 18.8,
+        "throat_curvature_radius": "r_c = 2.0·r* (Şekil 2 etiketi)",
+        "convergent_length_note": "Şekil 2: 2.304 in (5.852 cm)",
+        "stations": [
+          {
+            "station": 1,
+            "A_over_Astar": 18.8,
+            "D_in": 6.5,
+            "D_cm": 16.51,
+            "z_in": 0.0,
+            "z_cm": 0.0
+          },
+          {
+            "station": 2,
+            "A_over_Astar": 9.352,
+            "D_in": 4.584,
+            "D_cm": 11.643,
+            "z_in": 12.548,
+            "z_cm": 31.872
+          },
+          {
+            "station": 3,
+            "A_over_Astar": 7.769,
+            "D_in": 4.178,
+            "D_cm": 10.612,
+            "z_in": 12.665,
+            "z_cm": 32.169
+          },
+          {
+            "station": 4,
+            "A_over_Astar": 6.299,
+            "D_in": 3.762,
+            "D_cm": 9.555,
+            "z_in": 12.785,
+            "z_cm": 32.474
+          },
+          {
+            "station": 5,
+            "A_over_Astar": 3.322,
+            "D_in": 2.732,
+            "D_cm": 6.939,
+            "z_in": 13.094,
+            "z_cm": 33.259
+          },
+          {
+            "station": 6,
+            "A_over_Astar": 2.373,
+            "D_in": 2.309,
+            "D_cm": 5.865,
+            "z_in": 13.28,
+            "z_cm": 33.731
+          },
+          {
+            "station": 7,
+            "A_over_Astar": 1.341,
+            "D_in": 1.736,
+            "D_cm": 4.409,
+            "z_in": 13.719,
+            "z_cm": 34.846
+          },
+          {
+            "station": 8,
+            "A_over_Astar": 1.023,
+            "D_in": 1.516,
+            "D_cm": 3.851,
+            "z_in": 14.154,
+            "z_cm": 35.951
+          },
+          {
+            "station": 9,
+            "A_over_Astar": 1.0,
+            "D_in": 1.499,
+            "D_cm": 3.807,
+            "z_in": 14.3,
+            "z_cm": 36.322
+          }
+        ]
+      },
+      "inlet_pipe": {
+        "diameter_in": 6.5,
+        "length_in": 37.59,
+        "material": "AISI 304 paslanmaz, cidar 0.25 in",
+        "cooling_note_tr": "soğutma giriş borusunda 13.41 in'den itibaren (24.18 in soğutulmuş uzunluk); sınır tabaka ölçüm istasyonu lüle girişinin 12.00 in yukarısında",
+        "bleed_note_tr": "girişte plenum sınır tabaka emişi — düzgün hız profili için"
+      },
+      "z_definition_tr": "z, giriş sınır tabaka ölçüm istasyonundan ölçülür (BMG'deki gibi lüle girişinden DEĞİL); istasyon 1 borudadır",
+      "instrumented_region_note_tr": "ÖLÇÜM İSTASYONLARI BOĞAZDA BİTER (30°: istasyon 10 = boğaz; 60°: istasyon 9 = boğaz) — ıraksak kesitte ısı transferi ölçümü YOK; BMG ile çapraz teyit yalnız yakınsak+boğaz bölgesinde yapılabilir"
+    },
+    "conditions": {
+      "working_fluid": "ısıtılmış hava (yanma yok)",
+      "T_t0_nominal_R": 970,
+      "T_t0_nominal_K": 539,
+      "p_t0_atm": [
+        2.0,
+        3.1,
+        5.1,
+        7.5,
+        10.9,
+        20.4
+      ],
+      "p_t0_note": "2.03e5 - 20.67e5 N/m²; boğaz Re_D ≈ 6.0e5 - 5.0e6",
+      "boundary_layer_surveys_at_atm": [
+        3.1,
+        20.4
+      ]
+    }
+  },
+  "expected_outputs": {
+    "_status": "PUBLISHED_MEASUREMENT",
+    "NOT_DIGITIZED": "Isı transferi dağılımları (St_ref·Pr^0.7 – Re_D,ref; Şekil 5-6) YALNIZ log-log şekil olarak yayımlanmış; üst üste binen çok eğrili şekilden güvenilir okuma yapılamadığı için sayısal dağılım BU KAYITTA YOK. Aşağıdaki sayılar raporun METNİNDEN alınmış bulgu cümleleridir.",
+    "text_anchored_findings": [
+      {
+        "finding_tr": "Yüksek Re'de (Re_D,ref ≥ 2.0e6 [30°] / 3.0e6 [60°]) BOĞAZ ısı transferi türbülanslı boru-akışı korelasyonunun yaklaşık %50'si",
+        "value": 0.5,
+        "kind": "throat_St_over_turbulent_correlation_high_Re",
+        "source_ref": "rapor s.16"
+      },
+      {
+        "finding_tr": "Aynı rejimde boğaz ısı transferi laminer korelasyon tahmininin yaklaşık 3 katı",
+        "value": 3.0,
+        "kind": "throat_St_over_laminar_correlation_high_Re",
+        "source_ref": "rapor s.16"
+      },
+      {
+        "finding_tr": "Re_D,ref < ~1e6'da boğaz ısı transferi laminer korelasyon değerine yaklaşık EŞİT (laminerleşme)",
+        "value": 1.0,
+        "kind": "throat_St_over_laminar_correlation_low_Re",
+        "source_ref": "rapor s.16"
+      },
+      {
+        "finding_tr": "60° lüle boğaz ısı transferi 30°'ninkinden en yüksek Re'de ~%13, düşük Re'de ~%20 yüksek",
+        "value": [
+          0.13,
+          0.2
+        ],
+        "kind": "60deg_vs_30deg_throat",
+        "source_ref": "rapor s.16"
+      },
+      {
+        "finding_tr": "Düşük Re rejiminde 30° lülenin memba istasyonunda ısı transferi türbülanslı korelasyonun −%20'si içinde; 60°'de +%40'a kadar aşım (girişte ani dönüş → 1B hız varsayımı düşük kalıyor)",
+        "value": [
+          -0.2,
+          0.4
+        ],
+        "kind": "upstream_station_vs_turbulent_correlation",
+        "source_ref": "rapor s.16"
+      },
+      {
+        "finding_tr": "Eksenel simetrik kritik ivmelenme parametresi K_ax,cr = 2.88e-6 (Re_theta,cr = 360 kabulüyle; laminerleşme sınırı)",
+        "value": 2.88e-06,
+        "kind": "K_ax_critical",
+        "source_ref": "rapor s.9-10, Ek B"
+      }
+    ],
+    "definitions": {
+      "St_ref_Pr07": "St_ref·Pr^0.7 = q/(ρ_ref·u_∞·(i_ad − i_w))·Pr^0.7; i_ad = i_s + Pr^(1/3)(i_0 − i_s); Pr = 0.71 sabit",
+      "i_ref": "i_ref = i_s + 0.5(i_w − i_s) + 0.22·Pr^(1/3)(i_0 − i_s) — Eckert referans entalpi; ρ_ref, μ_ref bu entalpide",
+      "turbulent_correlation": "St_ref·Pr^0.7 = 0.026·Re_D,ref^(−0.2)  (Denk. 1)",
+      "laminar_correlation": "St_ref·Pr^0.7 = 0.29·Re_D,ref^(−0.5)  (Denk. 2)",
+      "Re_D_ref": "ρ_ref·u_∞·D/μ_ref — yerel çap; hızlar ölçülen duvar statik basıncından izantropik bağıntıyla",
+      "q_method": "Inconel ısı akısı ölçer: −q·Y = C1·t² + C2·t + C3 (Fourier iletim integrali); duvar sıcaklığı Y=0'da",
+      "definition_difference_vs_bmg_tr": "DİKKAT: BMG St'yi kenar STATİK sıcaklıkta (ρ_e u_e c_p_e) ve h'yi T_aw ile tanımlar; Boldman REFERANS ENTALPİ özellikleriyle St_ref tanımlar. Çapraz karşılaştırmada tanımlar AYNI TABANA getirilmeden oran kıyası yapılamaz."
+    }
+  },
+  "uncertainty": {
+    "heat_flux_air_gap_uncertainty_pct": 10.0,
+    "note_tr": "ana hata kaynağı ısı akısı ölçer çevresindeki hava boşluğu (ölçülen akıyı YÜKSELTİR); belirsizlik çarpanı ~%10. Bağımsız deney (ref. 11) ile boğaz ısı transferi ~%5 içinde uyum; ref. 11'in kendi hatası yüksek Re'de ±%8. Sonuçlar hava boşluğu düzeltmesi UYGULANMADAN 1B ısı akısı ölçümlerinden verilmiştir (rapor s.8)."
+  },
+  "derived_cross_checks": {
+    "_status": "DERIVED_BY_US_NOT_PUBLISHED",
+    "note_tr": "selfcheck.py her istasyonda A/A* = (D/D*)² ve cm = 2.54·in özdeşliklerini yeniden türetir (tablolar iç tutarlı; en büyük sapma <%0.1)."
+  },
+  "units": "in, cm, atm, °R, K — raporun orijinal birimleri (rapor SI eşdeğerlerini kendisi verir)",
+  "extraction_method_tr": "Tablolar (Şekil 1-2 istasyon tabloları) sayfa görüntüsünden gözle okundu; bulgu cümleleri metinden aynen alındı; ŞEKİLLERDEN eğri okuması yapılmadı.",
+  "source": {
+    "title": "Laminarization of a Turbulent Boundary Layer as Observed from Heat-Transfer and Boundary-Layer Measurements in Conical Nozzles, NASA TN D-4788",
+    "author": "D. R. Boldman, J. F. Schmidt, A. K. Gallagher (NASA Lewis Research Center)",
+    "year": 1968,
+    "url_or_doi": "https://ntrs.nasa.gov/api/citations/19680024170/downloads/19680024170.pdf",
+    "ntrs_id": "19680024170",
+    "ntrs_distribution": "PUBLIC",
+    "sha256": "950ae9cf4ab2d03233873036503663f6f14b9b6187ee6bffd7544ee63ab10b36",
+    "size_bytes": 1696735
+  },
+  "secondary_source": {
+    "title": "Heat Transfer and Boundary Layer in Conical Nozzles (derleme; 30°-15° ve 60°-15° lüleler)",
+    "author": "D. R. Boldman, R. W. Graham (NASA Lewis)",
+    "year": 1972,
+    "url_or_doi": "https://ntrs.nasa.gov/api/citations/19720008558/downloads/19720008558.pdf",
+    "note_tr": "NTRS 19720008558, PUBLIC — aynı deney ailesinin 1972 derlemesi; bu kayıtta sayı KULLANILMADI, ileri okuma için künye"
+  },
+  "retrieved": "2026-08-18",
+  "confidence": "high",
+  "verification_note_tr": "BMG ile çapraz teyit ancak TANIM dönüşümüyle yapılabilir (referans entalpi ↔ kenar statik özellikleri). Nitel/oran düzeyinde çapraz teyit ŞİMDİDEN geçerli: her iki deney de (a) yüksek Re'de boğaz St'sinin boru korelasyonunun ALTINDA kaldığını, (b) düşük Re'de laminer seviyeye İNDİĞİNİ, (c) laminerleşme eşiğinin ivmelenme parametresiyle tarif edildiğini bağımsız olarak bulur. HRMA CFD'si BMG 262/268'i tutturuyorsa Boldman'ın %50/3x/laminer-eşitlik oranlarına da nitel uymalıdır.",
+  "tags": [
+    "cross_validation",
+    "viscous",
+    "heat_transfer",
+    "nozzle",
+    "laminarization",
+    "primary_source",
+    "hand_extracted",
+    "no_curve_reading"
+  ]
+}

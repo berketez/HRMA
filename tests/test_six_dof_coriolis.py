@@ -21,6 +21,7 @@ import pytest
 from hrma.analysis.six_dof_trajectory import (
     BarrowmanAero, SixDOFTrajectory, _coriolis_acceleration, OMEGA_EARTH,
 )
+from hrma.utils.numeric_compat import trapezoid
 
 G0 = 9.80665
 
@@ -222,7 +223,7 @@ def test_C1_mass_at_bit_identical_to_trapz():
         mask = solver._t_thrust <= ti
         t_part = np.append(solver._t_thrust[mask], ti)
         F_part = np.append(solver._F_thrust[mask], solver._thrust_at(ti))
-        frac = np.trapz(F_part, t_part) / max(solver._impulse, 1e-9)
+        frac = trapezoid(F_part, t_part) / max(solver._impulse, 1e-9)
         return solver.m_dry + solver.m_prop * (1.0 - frac)
 
     for t in np.linspace(0.0, solver.t_burn * 1.05, 500):

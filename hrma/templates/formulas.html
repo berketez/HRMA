@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rocket Motor Formulas - UZAYTEK</title>
+    <title>Rocket Motor Formulas - HRMA</title>
     <script id="MathJax-script" async src="/static/vendor/mathjax-3-tex-svg.js"></script>
     <script>
         MathJax = {
@@ -111,6 +111,14 @@
             transition: color 0.3s;
         }
         
+        .toc-note {
+            margin: 12px 0 0;
+            padding: 10px 12px;
+            border-left: 3px solid #b8860b;
+            background: rgba(184, 134, 11, 0.08);
+            font-size: 0.92em;
+            line-height: 1.5;
+        }
         .toc a:hover {
             color: #1e3c72;
             background-color: #f8f9fa;
@@ -152,6 +160,37 @@
             margin: 20px 0;
             text-align: center;
             font-size: 18px;
+            /* ÖH D36 · OH-K-03 — uzun MathJax ifadeleri (ölçüldü: 413 px'lik
+               Isp bağıntısı 390 px'lik ekranda) kutudan taşıp sayfayı sağa
+               genişletiyordu; kutu kendi içinde yatay kaydırır. */
+            overflow-x: auto;
+            max-width: 100%;
+        }
+        /* Satır içi (display="true" olmayan) MathJax kapsayıcısı `inline`
+           doğar; inline kutu max-width/overflow tanımaz (ölçüldü: 413 px
+           genişlik, sayfa 470 px'e uzuyor). inline-block yapılır; görüntü
+           kipindeki kapsayıcıyı MathJax'ın kendi [display="true"] kuralı
+           (daha özgül) block tutar. */
+        .formula-box mjx-container { display: inline-block; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+
+        /* ÖH D30 · P12bB4-07 — ürünün DEĞERLENDİRMEDİĞİ, yalnız örnekleme
+           amaçlı bağıntılar: kutu vurgusuz çizilir ki hesaplanan bağıntılarla
+           aynı ağırlıkta okunmasın. Sınıf METİN EKLEMEZ, yalnız biçim verir.
+           ÖH D33-KOLAY · P12bB4-12: kural `.formula-box`TAN SONRA duruyor
+           (bu blok içinde). ÖH D34 · OH-GT-12 — SIRA YETMEDİ: bu blok
+           `theme.css`ten ÖNCE yükleniyor (o `<link>` aşağıda, satır ~266)
+           ve oradaki `.formula-box` kuralı aynı (0,1,0) özgüllükte
+           `border-left: 3px solid` yazıyor. ÖLÇÜLDÜ (a1/once.json):
+           basamağın `border-left-style` kazananı `theme.css .formula-box`
+           = `solid`; sayfada kesikli sol çizgi HİÇ YOKTU, ayrım yalnız
+           %72 opaklıktı. Ayrım artık `theme.css`te
+           `.formula-box.formula-illustrative` (0,2,0) olarak duruyor ve
+           yükleme sırasından bağımsız kazanıyor.
+           Aşağıdaki kural YEDEKTİR: `theme.css` yüklenmezse vurgusuzluk
+           yine de görünsün diye bırakıldı. Sınıf METİN EKLEMEZ. */
+        .formula-illustrative {
+            opacity: 0.72;
+            border-left: 3px dashed #b0b0b0;
         }
         
         .variable-table {
@@ -226,7 +265,15 @@
                 flex-direction: column;
                 gap: 10px;
             }
-            
+            /* ÖH D36 · OH-K-03 — dar ekranda sekiz bağlantılı menü tek
+               satırda kalıp 954 px'e uzuyordu (390 px'te scrollWidth 722;
+               "Home / Hybrid / Solid" görünmez alana taşıyordu). Sarar. */
+            .nav-links {
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 8px 14px;
+            }
+
             .header h1 {
                 font-size: 28px;
             }
@@ -237,6 +284,12 @@
             
             .variable-table {
                 font-size: 14px;
+                /* OH-K-03: dört sütunlu değişken tablosu 368 px'e uzuyor ve
+                   overflow-x:hidden bir <table>'ı kaydıramıyor (ölçüldü:
+                   sağ kenar 409 px); tablo blok olarak kendi içinde kayar. */
+                display: block;
+                overflow-x: auto;
+                max-width: 100%;
             }
         }
     </style>
@@ -281,7 +334,17 @@
                 <li><a href="#manufacturing-analysis" data-i18n="fx.s11.h">11. Manufacturing Analysis</a></li>
                 <li><a href="#cost-analysis" data-i18n="fx.s12.h">12. Cost Analysis</a></li>
                 <li><a href="#advanced-analysis" data-i18n="fx.s13.h">13. Advanced Analysis</a></li>
+                <!-- ÖH D28 / P12bB4-08 — ÖLÇÜLEN KUSUR: sayfada 14 <h2>
+                     bölümü var, İÇİNDEKİLER 13 madde sayıyordu; eksik olan
+                     tam da §14 (`nasa-standards`) idi. §14, sayfanın
+                     "ürün başka bir model koşturuyor" beyanlarını taşıyan
+                     TEK bölüm (ölçüldü: bu üç beyan satırının üçü de
+                     §14'te). İÇİNDEKİLER'den erişilemediği için okuyucunun
+                     onu bulması 1.400 satırlık sayfayı sonuna kadar
+                     kaydırmasına bağlıydı. -->
+                <li><a href="#nasa-standards" data-i18n="fx.s14.h">14. Reference Relations Behind the Advanced Analysis Figures</a></li>
             </ul>
+            <p class="toc-note" data-i18n="fx.toc.modelGapNotice">Sections 1-13 state the reference relations of the field. Where the shipped solver runs a different or more detailed model than the box above, section 14 names the difference — read it before hand-checking any number on this page.</p>
         </div>
         
         <!-- Section 1: Fundamental Performance Parameters -->
@@ -294,7 +357,7 @@
                 $I_{sp} = \frac{F}{\dot{m} \cdot g_0} = \frac{v_e}{g_0}$
             </div>
             <div class="formula-box">
-                $I_{sp} = \frac{c^*}{\sqrt{\gamma}} \sqrt{\frac{2\gamma}{\gamma-1}} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}} \sqrt{1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}}$
+                $I_{sp} = \frac{c^*}{g_0 \sqrt{\gamma}} \sqrt{\frac{2\gamma}{\gamma-1}} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}} \sqrt{1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}}$
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s1_1.desc">Specific impulse is the fundamental performance metric in rocket propulsion, quantifying the efficiency of propellant utilization. It represents the thrust generated per unit weight flow rate of propellant consumed per second. Physically, it measures how long one pound of propellant can produce one pound of thrust. Higher specific impulse indicates more efficient propellant use and better rocket performance. This parameter is critical for mission planning, propellant loading calculations, and comparing different propulsion systems. In practice, it determines the rocket's capability to achieve desired velocity increments and payload capacity.</span></p>
             <table class="variable-table">
@@ -535,6 +598,14 @@
                 <tr><td>$C_p$</td><td data-i18n="fx.var.specific_heat_capacity">Specific heat capacity</td><td>kJ/kg·K</td><td>1.2-4.5</td></tr>
                 <tr><td>$Q_{combustion}$</td><td data-i18n="fx.var.heat_of_combustion">Heat of combustion</td><td>MJ/kg</td><td>8-45</td></tr>
             </table>
+            <!-- Kitap uyum B16, 2. tur (Ş-7, karar §28-18): sıvı N₂O girişinin
+                 atanmış entalpisi. Bağıntı ürünün koştuğu bağıntıdır
+                 (hrma/engines/oxidizer_inlet.py; yanma çözücüsü HP dengesi). -->
+            <p><strong data-i18n="fx.s3_3.assigned_label">Assigned enthalpy of a liquid N₂O inlet (hybrid):</strong></p>
+            <div class="formula-box">
+                $\Delta H_{f,\,l}(T) = \Delta H^0_{f,\,g}(298.15\,\mathrm{K}) - \left[\,h_{ig}(298.15\,\mathrm{K}) - h_{sat,\,l}(T)\,\right]$
+            </div>
+            <p><span data-i18n="fx.s3_3.assigned_desc">A condensed reactant enters the combustion equilibrium with an assigned enthalpy, not with the gas-phase standard value (NASA RP-1311 Part I, Sec. 4.1): the sensible heat, the real-gas correction and the heat of vaporization are subtracted from the gas formation enthalpy. HRMA evaluates the bracket with one equation of state and one reference state (CoolProp, N₂O equation of Lemmon &amp; Span 2006), so the reference constant cancels. The inlet state is an input: temperature = tank temperature, phase = oxidizer phase. Assumption when these fields are left empty: saturated liquid at 293.15 K. The gas phase uses the 298.15 K standard-state gas value. A liquid temperature outside the saturated-liquid range (triple point to critical point, read from CoolProp) is rejected with an explicit error, not approximated. The hybrid design results (main calculation, quick geometry, transient, optimum O/F, parametric sweep, advanced analysis, uncertainty analysis) state the inlet state they were solved with (oxidizer_inlet_state); the surface map and the kinetic-efficiency evaluator state that they used the default. The flow analysis and the correlation report do not carry this declaration yet.</span></p>
             
             <h3 data-i18n="fx.s3_4.h">3.4 Combustion Efficiency</h3>
             <div class="formula-box">
@@ -700,11 +771,37 @@
             </table>
             
             <h3 data-i18n="fx.s5_3.h">5.3 Cooling System</h3>
+            <!-- ÖH D28 / P12bB4-06 (soğutucu ayağı) — ÖLÇÜLEN KUSUR: bu kutu
+                 soğutucu tarafı katsayısını Re/Pr korelasyonuyla gösteriyordu;
+                 ürün ise rejime göre SABİT bir değer döndürüyor
+                 (heat_transfer_analysis.py _coolant_side_coefficient:
+                 natural 25, forced 100, regenerative 20000 W/m²K). Üç ayrı
+                 motorda (pc 5/20/80 bar, Tc 2400/3200/3600 K, Dt 20/50/100 mm)
+                 dönen değer HİÇ değişmiyordu: Re, Pr, k ve D sonuca girmiyor.
+                 Sayfayı okuyan, ürünün soğutma kanalını Re/Pr'den
+                 boyutlandırdığını sanıyordu. Kutu duruyor (alan bağıntısı
+                 doğru) ama ürünün ne yaptığı artık yanında yazıyor —
+                 ürün tarafındaki sabit, termo-ucus kulvarının sahasıdır.
+                 ÖH D31 / P12bB4-06 (termo-ucus a1) — ÜRÜN AYAĞI ONARILDI:
+                 kanal girdileri (n_channels, channel_width, channel_height,
+                 coolant_mdot, coolant) verildiğinde soğutucu tarafı artık
+                 GERÇEKTEN bu kutunun bağıntısıyla hesaplanıyor
+                 (heat_transfer_analysis._coolant_side_dittus_boelter;
+                 coolant_side_method='dittus_boelter'). Girdiler yoksa sayı
+                 üretilmiyor: beyan edilen tipik bant
+                 coolant_side_method='not_modelled' künyesiyle ve eksik alan
+                 adlarıyla dönüyor. Aşağıdaki not O SÖZLEŞMEYİ anlatır;
+                 metin ürünle bekçiye bağlıdır (tests/test_d31_termo_ucus_a1.py
+                 ve tests/test_d29_arayuz_panel_a1.py). -->
             <div class="formula-box">
                 $q = h(T_{gas} - T_{wall})$
             </div>
-            <div class="formula-box">
-                $h = 0.023 \frac{k}{D} Re^{0.8} Pr^{0.4}$
+            <div class="formula-box" data-model-gap="fx.s5_3.model_note">
+                $h_{coolant} = 0.023 \frac{k}{D} Re^{0.8} Pr^{0.4}$
+            </div>
+            <div class="info">
+                <strong data-i18n="fx.label.note">Note:</strong>
+                <span data-i18n="fx.s5_3.model_note" data-i18n-html>The shipped solver evaluates the correlation above <em>only when the cooling channel is actually described</em>. Give it <code>n_channels</code>, <code>channel_width</code>, <code>channel_height</code>, <code>coolant_mdot</code> and <code>coolant</code> (water or RP-1) and the coolant-side coefficient is computed as $Nu = 0.023\,Re^{0.8}Pr^{0.4}$, $h = Nu\,k/D_h$ on the rectangular-channel hydraulic diameter, reported with <code>coolant_side_method = "dittus_boelter"</code> and with any validity-envelope violation ($Re \ge 10^4$, $0.6 \le Pr \le 160$) named beside it. Without those inputs the coolant side is <em>not modelled</em>: the solver reports a declared typical band &mdash; 25 W/m&sup2;K natural, 100 forced, 20000 regenerative &mdash; under <code>coolant_side_method = "not_modelled"</code> together with the names of the missing fields, and Re, Pr, k and D do not enter that number. Supercritical methane or hydrogen channels are outside this correlation; use the regenerative cooling solver for them.</span>
             </div>
             <div class="formula-box">
                 $\dot{Q}_{cooling} = \dot{m}_{coolant} C_p \Delta T$
@@ -747,11 +844,15 @@
             <p data-i18n="fx.s6.intro">Hybrid rocket motors represent an innovative propulsion approach combining the advantages of both solid and liquid systems while mitigating many of their disadvantages. By using solid fuel grains with liquid oxidizers, hybrids offer throttling capability, restart capability, and improved safety through separate fuel and oxidizer storage. The solid fuel eliminates the complexity of fuel injection systems while the liquid oxidizer provides control authority. However, hybrids face unique challenges including low regression rates, shifting mixture ratios during burn, and complex combustion processes involving boundary layer interactions. These systems are particularly attractive for applications requiring safety, simplicity, and moderate performance requirements.</p>
             
             <h3 data-i18n="fx.s6_1.h">6.1 Regression Rate</h3>
-            <div class="formula-box">
+            <div class="formula-box" data-model-gap="fx.s6_1.model_note">
                 $\dot{r} = a G_{ox}^n$
             </div>
             <div class="formula-box">
                 $G_{ox} = \frac{\dot{m}_{ox}}{A_{port}}$
+            </div>
+            <div class="info">
+                <strong data-i18n="fx.label.note">Note:</strong>
+                <span data-i18n="fx.s6_1.model_note" data-i18n-html>The oxidizer-flux law above is the classical reference form, but it is <em>not</em> what the shipped hybrid solver runs by default. <code>HybridRocketEngine</code> takes a <code>flux_mode</code> argument whose default is <code>'total'</code>, i.e. it evaluates <code>&#7771; = a G_total&#8319;</code> with <code>G_total = G_ox + G_fuel</code> (Marxman and Gilbert, 9th Symposium on Combustion, 1963; Sutton and Biblarz, "Rocket Propulsion Elements", 9th ed., Ch. 16), closing the fuel-flux term iteratively because <code>G_fuel</code> itself depends on <code>&#7771;</code>. The <code>G_ox</code>-only law shown here is reached only with <code>flux_mode='ox'</code>, kept for backward compatibility. The two differ most where the fuel flux is a large share of the total, i.e. late in the burn and at low O/F, so a hand check against this box will not reproduce the shipped regression rate.</span>
             </div>
             <!-- T28 düzeltmesi (2026-08-03): eski yazım a·G_ox^n/(1−n)·[1−(r₀/r_f)^(1−n)]
                  idi; bu, §6.2'deki r(t) çözümünün zaman ortalaması DEĞİL ve n=1'de
@@ -811,7 +912,7 @@
                 $C_d = \frac{\dot{m}_{actual}}{\dot{m}_{ideal}} = \frac{\dot{m}}{A_{inj}\sqrt{2\rho\Delta P}}$
             </div>
             <div class="formula-box">
-                $L^* = \frac{V_c A_t}{\dot{m} c^*}$ <span data-i18n="fx.ann.characteristic_length">(characteristic length)</span>
+                $L^* = \frac{V_c}{A_t}$ <span data-i18n="fx.ann.characteristic_length">(characteristic length)</span>
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s6_4.desc">Hybrid motor injector design must efficiently distribute oxidizer into the fuel port while maintaining proper atomization and mixing with gasified fuel products. The injector system directly affects regression rate uniformity, combustion efficiency, and motor performance. Unlike liquid engines, hybrid injectors operate into a relatively low-pressure environment with significant gas cross-flow from fuel pyrolysis. The characteristic length (L*) represents the combustion chamber residence time, affecting mixing quality and combustion completeness. Proper injector design ensures uniform oxidizer distribution, prevents local hot spots that could damage fuel grains, and maintains adequate penetration depth for complete mixing. The discharge coefficient accounts for real flow effects and geometric constraints unique to hybrid motor configurations.</span></p>
             <table class="variable-table">
@@ -828,11 +929,33 @@
             <p data-i18n="fx.s7.intro">Heat transfer analysis is absolutely critical in rocket motor design due to the extreme thermal environment created by high-temperature combustion (2800-3800K) occurring in close proximity to structural materials with much lower temperature limits. The challenge lies in protecting motor components while minimizing cooling system weight and complexity. Heat transfer governs material selection, cooling system design, thermal barrier requirements, and operational limitations. Understanding the mechanisms of convective, radiative, and conductive heat transfer enables engineers to predict temperature distributions, prevent thermal failure, and optimize cooling strategies. Effective thermal management is essential for motor reliability, performance maintenance, and structural integrity throughout the operating envelope.</p>
             
             <h3 data-i18n="fx.s7_1.h">7.1 Convective Heat Transfer</h3>
+            <!-- ÖH D28 / P12bB4-06 — ÖLÇÜLEN KUSUR: bu bölüm gaz tarafı için
+                 Dittus-Boelter ($0.023 Re^{0.8} Pr^{0.4}$) gösteriyordu ve
+                 "Bartz" sözcüğü §7 içinde SIFIR kez geçiyordu; ürün ise
+                 Bartz bağıntısını koşuyor (heat_transfer_analysis.py
+                 _bartz_coefficient). Ölçülen sapma üç motorda 1,3679 /
+                 1,4058 / 1,3679 kat. İkinci kusur sürükleyici sıcaklıktaydı:
+                 kutu $q = h(T_{gas}-T_{wall})$ diyordu, ürün adyabatik cidar
+                 (kurtarma) sıcaklığını kullanıyor (_adiabatic_wall_temperature)
+                 ve sayfanın TAMAMINDA "recovery"/"adiabatic wall" 0 kez
+                 geçiyordu. §7 kullanıcının ısı transferi modelini öğrenmek
+                 için gittiği bölümdür; artık ürünün koştuğu bağıntıyı
+                 gösterir. -->
             <div class="formula-box">
-                $q = h(T_{gas} - T_{wall})$
+                $q = h_g(T_{aw} - T_{wall})$
             </div>
             <div class="formula-box">
-                $h = \frac{k}{D} Nu = \frac{k}{D} \cdot 0.023 Re^{0.8} Pr^{0.4}$
+                $T_{aw} = T_c \frac{1 + r\frac{\gamma-1}{2}M^2}{1 + \frac{\gamma-1}{2}M^2}, \quad r = Pr^{1/3}$
+            </div>
+            <div class="formula-box">
+                $h_g = \frac{0.026}{D_t^{0.2}} \left(\frac{\mu^{0.2} c_p}{Pr^{0.6}}\right) \left(\frac{P_c}{c^*}\right)^{0.8} \left(\frac{D_t}{R_c}\right)^{0.1} \left(\frac{A_t}{A}\right)^{0.9} \sigma$
+            </div>
+            <div class="formula-box" data-model-gap="fx.s7_1.model_note">
+                $\sigma = \left[\frac{1}{2}\frac{T_{wall}}{T_c}\left(1 + \frac{\gamma-1}{2}M^2\right) + \frac{1}{2}\right]^{-0.68} \left(1 + \frac{\gamma-1}{2}M^2\right)^{-0.12}$
+            </div>
+            <div class="info">
+                <strong data-i18n="fx.label.note">Note:</strong>
+                <span data-i18n="fx.s7_1.model_note" data-i18n-html>This is the correlation the shipped solver runs (Bartz 1957; Sutton &amp; Biblarz, <em>Rocket Propulsion Elements</em>, 9th ed., Eq. 8-22), evaluated with frozen transport properties. A Dittus-Boelter hand check of the same throat returns 1.37-1.41&times; less: measured 5969 vs 4364 W/m&sup2;K (20 bar, 3200 K, D<sub>t</sub> 50 mm), 22655 vs 16115 (80 bar, 3600 K, 20 mm) and 1656 vs 1211 (5 bar, 2400 K, 100 mm). The driving temperature is the adiabatic wall (recovery) temperature, not the stagnation temperature.</span>
             </div>
             <div class="formula-box">
                 $St = \frac{h}{\rho u C_p} = \frac{Nu}{Re \cdot Pr}$ <span data-i18n="fx.ann.stanton_number">(Stanton number)</span>
@@ -907,13 +1030,34 @@
             </table>
             
             <h3 data-i18n="fx.s8_2.h">8.2 Safety Factor</h3>
+            <!-- ÖH D28 / P12bB4-02 — ÖLÇÜLEN KUSUR: bu kutu
+                 $SF = \sigma_{ultimate}/\sigma_{working}$ diyordu; ürün ise
+                 SICAKLIĞA GÖRE DERATE EDİLMİŞ AKMA dayanımını kullanıyor
+                 (structural_analysis.py: hoop_safety_factor =
+                 yield_for_design / hoop_stress, yield_for_design =
+                 derating['derated_yield_strength']) ve çevresel gerilmeyi
+                 tasarım basıncından (P_c · 1,5) çıkarıyor. Aynı motorda
+                 (çelik, p_c = 20 bar, r = 0,075 m, t = 5 mm) sayfanın el
+                 hesabı SF = 400/30 = 13,3333 verirken ürün 2,8074
+                 yayımlıyordu: sayfa 4,7493× İYİMSER. SF, ürünün
+                 UNSAFE/MARGINAL hükmünü veren sayıdır; referans sayfasını
+                 izleyerek elle doğrulama yapan kullanıcı "yetersiz" denen
+                 bir cidarı "bol marjlı" sanıyordu. Kutu artık ürünün
+                 gerçekten koştuğu tanımı gösterir. -->
             <div class="formula-box">
-                $SF = \frac{\sigma_{ultimate}}{\sigma_{working}}$
+                $SF = \frac{\sigma_{yield}(T_{wall})}{\sigma_{working}}, \quad \sigma_{yield}(T_{wall}) = k_{derate}(T_{wall}) \cdot \sigma_{yield,\,20^\circ C}$
+            </div>
+            <div class="formula-box" data-model-gap="fx.s8_2.model_note">
+                $\sigma_{working} = \frac{P_{design} \, r}{t} + \sigma_{thermal}, \quad P_{design} = K_{design} \cdot P_c \;\; (K_{design} = 1.5)$
+            </div>
+            <div class="info">
+                <strong data-i18n="fx.label.note">Note:</strong>
+                <span data-i18n="fx.s8_2.model_note">The shipped solver derates yield strength to the computed wall temperature and applies the design-pressure factor before dividing, so its published safety factor is lower than an ultimate-strength hand check. Worked example (steel, p_c = 20 bar, r = 75 mm, t = 5 mm): an ultimate-strength hand check gives SF = 400/30 = 13.33, while the solver publishes 2.81 &mdash; a factor of 4.75 in this run. This ratio belongs to this worked example; it is not a general rule. Section 10.1 states the same quantity for the burst-pressure route; both are the same definition written for different loads.</span>
             </div>
             <div class="formula-box">
                 $\sigma_{von Mises} = \sqrt{\sigma_1^2 + \sigma_2^2 - \sigma_1\sigma_2}$
             </div>
-            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s8_2.desc">Safety factor analysis ensures adequate structural margins against material failure under the combined effects of pressure, thermal, and mechanical loading. The safety factor represents the ratio between material ultimate strength and actual working stress, providing margin for uncertainties in loading, material properties, and analysis methods. Von Mises stress analysis combines principal stresses into an equivalent stress for comparing against material yield strength, particularly important for multiaxial stress states in rocket motor casings. Safety factors must account for consequences of failure, loading uncertainties, material variability, and inspection capabilities. Rocket motors typically use higher safety factors than commercial pressure vessels due to catastrophic failure consequences and difficulty of thorough inspection after manufacturing.</span></p>
+            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s8_2.desc">Safety factor analysis ensures adequate structural margins against material failure under the combined effects of pressure, thermal, and mechanical loading. The safety factor represents the ratio between the temperature-derated yield strength of the material and the actual working stress, providing margin for uncertainties in loading, material properties, and analysis methods. It is the derated yield strength &mdash; not the room-temperature ultimate strength &mdash; that the shipped solver divides by, because a casing that has yielded has already lost its geometry. Von Mises stress analysis combines principal stresses into an equivalent stress for comparing against material yield strength, particularly important for multiaxial stress states in rocket motor casings. Safety factors must account for consequences of failure, loading uncertainties, material variability, and inspection capabilities. Rocket motors typically use higher safety factors than commercial pressure vessels due to catastrophic failure consequences and difficulty of thorough inspection after manufacturing.</span></p>
             <div class="info">
                 <strong data-i18n="fx.label.typical_sf_values">Typical SF Values:</strong> <span data-i18n="fx.s8_2.info">Static loads 1.5-2.0, dynamic loads 2.0-4.0</span>
             </div>
@@ -945,7 +1089,7 @@
             <div class="formula-box">
                 $MR = \frac{m_0}{m_f} = \exp\left(\frac{\Delta v}{I_{sp} g_0}\right)$
             </div>
-            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s9_1.desc">The Tsiolkovsky rocket equation is the cornerstone of astronautics, relating the velocity change capability of a rocket to its propulsion system performance and mass distribution. This equation demonstrates the exponential relationship between mass ratio and achievable delta-V, explaining why multi-stage rockets are necessary for high-energy missions. The logarithmic nature means that small improvements in specific impulse or mass ratio provide significant performance benefits. This fundamental relationship governs all aspects of rocket design, from propellant selection to structural optimization. Understanding this equation is essential for mission analysis, trajectory planning, and determining the feasibility of space missions. It directly links propulsion technology limits to mission capability boundaries.</span></p>
+            <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s9_1.desc">The Tsiolkovsky rocket equation is the cornerstone of astronautics, relating the velocity change capability of a rocket to its propulsion system performance and mass distribution. Delta-V grows linearly with specific impulse but only logarithmically with mass ratio: each further increase of the mass ratio buys less delta-V (diminishing returns), and the mass ratio required grows exponentially with the delta-V demanded, which is why multi-stage rockets are necessary for high-energy missions. This fundamental relationship governs all aspects of rocket design, from propellant selection to structural optimization. Understanding this equation is essential for mission analysis, trajectory planning, and determining the feasibility of space missions. It directly links propulsion technology limits to mission capability boundaries.</span></p>
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
                 <tr><td>$\Delta v$</td><td data-i18n="fx.var.velocity_increment">Velocity increment</td><td>m/s</td><td>1000-15000</td></tr>
@@ -967,7 +1111,7 @@
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s9_2.desc">Orbital velocity calculations determine the minimum speeds required to achieve stable orbits at various altitudes, forming the basis for launch vehicle performance requirements. Circular orbital velocity represents the balance between gravitational attraction and centrifugal force, while escape velocity defines the threshold for leaving Earth's gravitational influence entirely. These velocities establish the fundamental energy requirements for space missions and directly determine launch vehicle sizing. The gravitational parameter μ encapsulates planetary characteristics affecting orbital mechanics. Understanding these relationships is crucial for mission planning, determining launch windows, calculating fuel requirements, and establishing the minimum performance capabilities needed for successful orbital insertion and interplanetary trajectories.</span></p>
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
-                <tr><td>$v_{orbit}$</td><td data-i18n="fx.var.orbital_velocity">Orbital velocity</td><td>m/s</td><td>7400-11200</td></tr>
+                <tr><td>$v_{orbit}$</td><td data-i18n="fx.var.orbital_velocity">Orbital velocity</td><td>m/s</td><td>3070-7790</td></tr>
                 <tr><td>$v_{escape}$</td><td data-i18n="fx.var.escape_velocity">Escape velocity</td><td>m/s</td><td>11200</td></tr>
                 <tr><td>$r$</td><td data-i18n="fx.var.orbital_radius">Orbital radius</td><td>m</td><td>6.57×10⁶-4.22×10⁷</td></tr>
                 <tr><td>$\mu$</td><td data-i18n="fx.var.standard_gravitational_parameter">Standard gravitational parameter</td><td>m³/s²</td><td>3.986×10¹⁴</td></tr>
@@ -975,7 +1119,7 @@
             
             <h3 data-i18n="fx.s9_3.h">9.3 Gravity Losses</h3>
             <div class="formula-box">
-                $\Delta v_{gravity} = g_0 t_{burn} \cos(\theta)$
+                $\Delta v_{gravity} = \int_0^{t_{burn}} g \sin(\theta)\, dt \approx g_0 t_{burn} \sin(\theta)$ <span data-i18n="fx.ann.theta_from_horizontal">(θ from the horizontal, π/2 = vertical; the approximation holds for constant g and θ)</span>
             </div>
             <div class="formula-box">
                 $\Delta v_{drag} = \int_0^{t_{burn}} \frac{\frac{1}{2}\rho v^2 C_d A}{m(t)} dt$
@@ -990,25 +1134,31 @@
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
                 <tr><td>$t_{burn}$</td><td data-i18n="fx.var.burn_time">Burn time</td><td>s</td><td>100-600</td></tr>
-                <tr><td>$\theta$</td><td data-i18n="fx.var.flight_angle">Flight angle</td><td>rad</td><td>0-π/2</td></tr>
+                <tr><td>$\theta$</td><td data-i18n="fx.var.flight_angle">Flight-path angle from the horizontal (π/2 = vertical)</td><td>rad</td><td>0-π/2</td></tr>
                 <tr><td>$C_d$</td><td data-i18n="fx.var.drag_coefficient">Drag coefficient</td><td>-</td><td>0.3-0.8</td></tr>
             </table>
             
             <h3 data-i18n="fx.s9_4.h">9.4 Multi-Stage Rocket</h3>
             <div class="formula-box">
-                $\Delta v_{total} = \sum_{i=1}^{n} v_{e,i} \ln\left(\frac{m_{i-1}}{m_i}\right)$
+                $\Delta v_{total} = \sum_{i=1}^{n} v_{e,i} \ln\left(\frac{m_{0,i}}{m_{b,i}}\right), \quad MR_i = \frac{m_{0,i}}{m_{b,i}}$
             </div>
             <div class="formula-box">
                 $\Delta v_{ideal} = v_{e1} \ln(MR_1) + v_{e2} \ln(MR_2) + ...$
             </div>
             <div class="formula-box">
-                $MR_{optimum} = \sqrt[n]{MR_{total}}$ <span data-i18n="fx.ann.equal_stages">(equal stages)</span>
+                $m_{0,i+1} = m_{b,i} - m_{s,i}$ <span data-i18n="fx.ann.stage_jettison">(stage i structure is jettisoned before stage i+1 ignites)</span>
+            </div>
+            <div class="formula-box">
+                $MR_{optimum} = \sqrt[n]{MR_{total}}, \quad MR_{total} = \prod_{i=1}^{n} MR_i \neq \frac{m_{0,1}}{m_{b,n}}$ <span data-i18n="fx.ann.equal_stages">(equal stages)</span>
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s9_4.desc">Multi-stage rocket analysis extends the basic rocket equation to systems where empty mass is jettisoned during flight, dramatically improving performance over single-stage vehicles. Each stage contributes its delta-V according to its individual mass ratio and specific impulse, with the total capability being the sum of individual stage contributions. Stage optimization involves balancing mass ratios across stages to maximize total performance while meeting structural and operational constraints. The staging principle explains why space launch vehicles universally employ multiple stages and guides decisions about optimal stage sizes, propellant types, and separation sequences. This analysis is fundamental to launch vehicle architecture selection and performance optimization for high-energy missions requiring large total delta-V.</span></p>
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
                 <tr><td>$n$</td><td data-i18n="fx.var.number_of_stages">Number of stages</td><td>-</td><td>2-4</td></tr>
                 <tr><td>$MR_i$</td><td data-i18n="fx.var.i_th_stage_mass_ratio">i-th stage mass ratio</td><td>-</td><td>3-15</td></tr>
+                <tr><td>$m_{0,i}$</td><td data-i18n="fx.var.stage_ignition_mass">Mass at stage i ignition (stage i and everything above it)</td><td>kg</td><td>-</td></tr>
+                <tr><td>$m_{b,i}$</td><td data-i18n="fx.var.stage_burnout_mass">Mass at stage i burnout, before separation</td><td>kg</td><td>-</td></tr>
+                <tr><td>$m_{s,i}$</td><td data-i18n="fx.var.stage_jettisoned_mass">Stage i structure jettisoned at separation</td><td>kg</td><td>-</td></tr>
                 <tr><td>$\Delta v_{total}$</td><td data-i18n="fx.var.total_velocity_increment">Total velocity increment</td><td>m/s</td><td>9000-15000</td></tr>
             </table>
             
@@ -1017,10 +1167,10 @@
                 $TWR = \frac{F}{m g} = \frac{\dot{m} v_e}{m g}$
             </div>
             <div class="formula-box">
-                $a_{net} = \frac{F}{m} - g \cos(\theta)$
+                $a_{net} = \frac{F}{m} - g \sin(\theta)$
             </div>
             <div class="formula-box">
-                $TWR_{min} = \frac{1}{\cos(\theta)}$ <span data-i18n="fx.ann.for_liftoff">(for liftoff)</span>
+                $TWR_{min} = \sin(\theta)$ <span data-i18n="fx.ann.for_liftoff">(for liftoff)</span>
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s9_5.desc">Thrust-to-weight ratio represents the fundamental measure of a rocket's ability to accelerate against gravitational forces and achieve useful motion. TWR directly determines whether a vehicle can lift off, how quickly it can accelerate, and how efficiently it can climb out of the gravity well. Values below 1.0 cannot achieve liftoff, while higher ratios enable faster acceleration but at the cost of structural mass and propellant consumption. The minimum TWR for various flight phases depends on flight path angle and gravitational losses. Understanding TWR requirements is crucial for engine sizing, structural design, and trajectory optimization. The relationship between thrust, vehicle mass, and acceleration governs all aspects of launch vehicle design from initial sizing through operational flight profiles.</span></p>
             <div class="info">
@@ -1180,11 +1330,38 @@
             </table>
             
             <h3 data-i18n="fx.s13_2.h">13.2 Multi-Phase Flow Analysis</h3>
+            <!-- ÖH D33-KOLAY · P12bB4-12 (Fable denetim ŞARTI) — ÜRÜNÜN
+                 KOŞTUĞU MODEL ARTIK KUTUDA; literatür ifadesi ayrışık.
+                 ÖLÇÜLDÜ (a2/once.json K6): bölümde İKİ `formula-box` vardı,
+                 ikisi de yalnız literatürdü (`\phi` ve `\xi` üründe HİÇ
+                 geçmiyor) ve ürünün gerçekten değerlendirdiği bağıntı
+                 (`urun_modeli_kutuda` = false) sayfada KUTU olarak hiç
+                 görünmüyordu. Beyan metni doğruydu ama kutulardan SONRA
+                 geliyordu: gözle okuma sırası iddiayı önce, çürütmesini
+                 sonra veriyordu. Düzen P12bB4-07'nin (§14.1) emsalidir —
+                 beyan kutulardan ÖNCE, literatür kutuları
+                 `formula-illustrative` ile vurgusuz. Aşağıdaki ilk kutu
+                 `hrma/analysis/two_phase_loss.py`nin GERÇEKTEN
+                 değerlendirdiği bağıntıdır (`loss_pct = 100*K*beta*
+                 size_factor`, `size_factor = 2x/(1+x)`,
+                 `x = (d43/D43_REF)^2 * (D_THROAT_REF/Dt)`) ve elle
+                 denetlenebilir. -->
             <div class="formula-box">
+                $\Delta I_{sp}\,[\%] = 100 \cdot K \cdot \beta \cdot g(x), \qquad g(x) = \frac{2x}{1+x}, \qquad x = \left(\frac{d_{43}}{d_{43,ref}}\right)^{2} \frac{D_{t,ref}}{D_t}$
+            </div>
+            <div class="info">
+                <strong data-i18n="fx.label.note">Note:</strong>
+                <span data-i18n="fx.s13_2.literature_note" data-i18n-html>The two boxes below are the classical textbook statement of two-phase lag. They are shown for orientation only: the shipped solver does <em>not</em> evaluate them, and neither variable in them occurs in the code. Read them beside the box above, which is the relation the application actually computes.</span>
+            </div>
+            <div class="formula-box formula-illustrative">
                 $\phi = \frac{\dot{m}_{particles}}{\dot{m}_{gas}}$ <span data-i18n="fx.ann.loading_ratio">(Loading ratio)</span>
             </div>
-            <div class="formula-box">
+            <div class="formula-box formula-illustrative" data-model-gap="fx.s13_2.model_note">
                 $\eta_{2-phase} = \eta_{gas} \cdot \left(1 - \frac{\phi}{1+\phi} \cdot \frac{1-\xi}{\xi^2}\right)$
+            </div>
+            <div class="info">
+                <strong data-i18n="fx.label.note">Note:</strong>
+                <span data-i18n="fx.s13_2.model_note" data-i18n-html>The expression above is <em>not</em> the model the shipped solver evaluates, and its two variables do not appear in the code at all: neither the lag parameter <code>&xi;</code> nor the loading ratio <code>&phi;</code> occurs anywhere in <code>hrma/analysis/two_phase_loss.py</code>. What the application computes is a lag-loss estimate assembled from published anchors, <code>loss_pct = 100 &middot; K &middot; &beta; &middot; g(x)</code> with <code>g(x) = 2x/(1+x)</code> and the Stokes-number ratio <code>x = (d43/5 &micro;m)&sup2; &middot; (D_throat_ref/D_t)</code>, where <code>&beta;</code> is the condensed mass fraction, <code>K = 0.12</code> the central linear coefficient and <code>d43</code> the mass-averaged particle diameter from the Hermsen correlation (Hermsen, J. Spacecraft and Rockets 18(6), 1981, reproduced in AIAA 96-2779; K anchors from NASA SP-8039 and the AFRPL rule of thumb). The &ldquo;2-5%&rdquo; figure in the description below is the literature band, not a reduction this box applies. Do not hand-check the shipped two-phase loss against this box.</span>
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s13_2.desc">Two-phase flow occurs when solid particles (alumina) are suspended in exhaust gases. Loading ratio quantifies particle concentration, while two-phase efficiency accounts for momentum transfer between phases. This reduces specific impulse by 2-5%.</span></p>
             
@@ -1218,21 +1395,56 @@
             <h2 data-i18n="fx.s14.h">14. Reference Relations Behind the Advanced Analysis Figures</h2>
             <p data-i18n="fx.s14.intro">Relations used by the advanced analysis panel, each with the source the implementation follows. Where the shipped code evaluates a different or more detailed model than the expression shown, the description says so. This section records what is computed; it is not a statement of compliance with any standard.</p>
             
-            <h3 data-i18n="fx.s14_1.h">14.1 Chamber Pressure-Mixture Ratio 3D Response Surface (NASA SP-125)</h3>
-            <div class="formula-box">
-                $I_{sp}(P_c, O/F) = I_{sp,base} \cdot f_{pressure}(P_c) \cdot f_{mixture}(O/F)$
-            </div>
-            <div class="formula-box">
-                $f_{pressure}(P_c) = 1 + 0.15 \ln\left(\frac{P_c}{20}\right) \exp\left(-\frac{(P_c - 50)^2}{800}\right)$
-            </div>
-            <div class="formula-box">
-                $f_{mixture}(O/F) = 1 - 0.3 \left(\frac{O/F - O/F_{opt}}{O/F_{opt}}\right)^2$
-            </div>
+            <!-- ÖH D32 · P12bB4-07 — KAZANILMAMIŞ STANDART KÜNYESİ
+                 KALDIRILDI. D30 a3 kalemin yarısını çürütmüş (iki
+                 şekil fonksiyonu üründe HİÇ yok: urunde_sekil_
+                 fonksiyonu = 0) ve okuma sırasını onarmıştı; D31
+                 a1 kalanı "i18n sahası" diye devretmişti. D32'de
+                 arayuz-i18n kulvarı YOK ve kardeş dal ölçümü
+                 i18n_formulas.js'e dokunan başka dal olmadığını
+                 gösterdi (11 dal, 0), bu yüzden kalan iş burada
+                 kapatıldı.
+                 ÖLÇÜLDÜ (a1/once.json · M3): başlık hem şablonda
+                 hem sözlükte (EN + TR) "(NASA SP-125)" künyesini
+                 taşıyordu. Künye KAZANILMAMIŞTIR: (a) altındaki iki
+                 kutu bu sayfaya özgü ILLUSTRATIF bir uyarlamadır ve
+                 hiçbir SP-125 denklem/tablo numarasına bağlı değil,
+                 (b) ürünün çizdiği yüzey SP-125'ten değil, kimyasal
+                 denge çözücüsünden düğüm düğüm gelir
+                 (visualization.py:2538-2545), (c) §14 girişinin
+                 kendisi "bu bölüm hiçbir standarda uygunluk beyanı
+                 değildir" diyor. Kaynak beyanı açıklamada zaten var;
+                 başlıktan yalnız hak edilmemiş atıf düştü. -->
+            <h3 data-i18n="fx.s14_1.h">14.1 Chamber Pressure-Mixture Ratio 3D Response Surface</h3>
             <!-- Ölçüm (visualization.py:2538-2545): 3B yüzeyin her düğümü
                  gerçek bir CombustionAnalyzer.analyze_combustion çağrısıdır;
                  yukarıdaki iki şekil fonksiyonu 2026-07-19 uydurma denetiminde
-                 koddan KALDIRILDI. Açıklama bunu artık söylüyor. -->
+                 koddan KALDIRILDI. Açıklama bunu artık söylüyor.
+
+                 ÖH D30 · P12bB4-07 — BEYAN İDDİADAN ÖNCE OKUNUR.
+                 ÖLÇÜLDÜ (a3/once.json B4_07_*): iki şekil fonksiyonu üründe
+                 HİÇ kalmadı (urunde_sekil_fonksiyonu = 0), ama sayfada üç
+                 LaTeX kutusu "14.1 ... (NASA SP-125)" başlığının hemen
+                 altında duruyordu ve tek uyarı (illustrative_beyani = 1)
+                 kutulardan SONRA gelen düz metindeydi (kutu_ici_beyan = 0).
+                 Gözle okuma sırası iddiayı önce, çürütmesini sonra veriyordu:
+                 bulucunun ölçtüğü sapma (basınç duyarlılığı 15,6x az, tepe
+                 dışı Isp %33,4 fazla) tam da bu kutuları ürünün çizdiği
+                 yüzeyle karşılaştırınca çıkıyor. Açıklama kutuların ÜSTÜNE
+                 alındı ve kutular `formula-illustrative` sınıfıyla
+                 vurgusuzlaştırıldı. Başlıktaki "NASA SP-125"
+                 künyesi ÖH D32'de kaldırıldı (yukarıdaki künye); kalem
+                 kapandı. -->
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s14_1.desc">The two shape functions above are an illustrative fit only. The 3D surface HRMA draws is solved node by node from the chemical-equilibrium combustion solver for the selected propellant pair, so the optimum ridge and its location come from the solution, not from these expressions.</span></p>
+            <div class="formula-box formula-illustrative">
+                $I_{sp}(P_c, O/F) = I_{sp,base} \cdot f_{pressure}(P_c) \cdot f_{mixture}(O/F)$
+            </div>
+            <div class="formula-box formula-illustrative">
+                $f_{pressure}(P_c) = 1 + 0.15 \ln\left(\frac{P_c}{20}\right) \exp\left(-\frac{(P_c - 50)^2}{800}\right)$
+            </div>
+            <div class="formula-box formula-illustrative">
+                $f_{mixture}(O/F) = 1 - 0.3 \left(\frac{O/F - O/F_{opt}}{O/F_{opt}}\right)^2$
+            </div>
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
                 <tr><td>$P_c$</td><td data-i18n="fx.var.chamber_pressure">Chamber pressure</td><td>bar</td><td>10-100</td></tr>
@@ -1342,7 +1554,7 @@
 
         <!-- Footer -->
         <div class="footer">
-            <p><strong><span data-i18n="fx.footer.brand">UZAYTEK Motor Analysis</span> v{{ app_version }}</strong> | <span data-i18n="fx.footer.credits">Developed by: Berke Tezgöçen | Idea &amp; Testing: Ayberk Cem Aksoy</span></p>
+            <p><strong><span data-i18n="fx.footer.brand">HRMA - Rocket Motor Analysis</span> v{{ app_version }}</strong> | <span data-i18n="fx.footer.credits">Developed by: Berke Tezgöçen | Idea &amp; Testing: Ayberk Cem Aksoy</span></p>
             <p data-i18n="fx.footer.tagline">Professional Rocket Propulsion Mathematical Reference</p>
             <p><em data-i18n="fx.footer.quote">"Science is the poetry of reality" - Richard Dawkins</em></p>
 

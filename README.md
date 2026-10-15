@@ -27,8 +27,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-2.6.26.exe**](https://github.com/berketez/HRMA/releases/download/v2.6.26/HRMA-Setup-2.6.26.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-2.6.26-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v2.6.26/HRMA-Setup-2.6.26-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-3.0.0.exe**](https://github.com/berketez/HRMA/releases/download/v3.0.0/HRMA-Setup-3.0.0.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-3.0.0-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v3.0.0/HRMA-Setup-3.0.0-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -142,8 +142,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-2.6.26.exe`](https://github.com/berketez/HRMA/releases/download/v2.6.26/HRMA-Setup-2.6.26.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-2.6.26-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v2.6.26/HRMA-Setup-2.6.26-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-3.0.0.exe`](https://github.com/berketez/HRMA/releases/download/v3.0.0/HRMA-Setup-3.0.0.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-3.0.0-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v3.0.0/HRMA-Setup-3.0.0-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -237,14 +237,41 @@ HRMA/
 
 ## Version
 
-**HRMA v2.6.26**
+**HRMA v3.0.0**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - A preliminary-design and educational rocket-propulsion analysis tool
   (not a flight-qualification tool — see the scope note above)
-- Last Updated: August 2026
+- Last Updated: October 2026
 
-**v2.6.26 is a wiring release.** It adds no physics. An empirical audit of the
+**v3.0.0 publishes every number with its validity limits and withholds a
+verdict the model cannot support, with the reason, instead of showing it as
+a pass.** It is the first release after 2.6.26; the work shown in the
+application as "2.6.27 (in development)" ships here. In short:
+
+- **Engine physics:** one allowable-temperature ladder for thermal safety verdicts
+  (stainless steel 304/316 1143 → 1073 K, carbon-carbon 2273 → 1920 K); the
+  hybrid N₂O liquid inlet state (tank temperature, phase) enters the
+  enthalpy balance; solid APCP thermochemistry from NASA CEA (flame
+  temperature 3614.8 → 3399.65 K); structural approvals are withheld
+  outside the structural model's validity range, while the numbers stay
+  visible.
+- **CAD:** drawn from the analysis geometry (nine geometry errors found by
+  an independent CAD check are fixed); manufacturing STEP refused below a
+  structural safety factor of 1; smooth B-spline nozzle surfaces.
+- **Launch-site map:** detailed offline map with city and country labels;
+  satellite imagery downloads are off until you turn them on.
+- **Security:** one 32 MiB request-body limit enforced before buffering,
+  tighter origin gates, a stricter Content-Security-Policy; malformed input
+  gets 400/422 instead of a server error.
+- **Interface:** chart and panel texts follow the interface language; the
+  OpenRocket features are gathered in one sidebar tab.
+
+Known limitations and what is planned for 3.1:
+[`CHANGELOG.md`](CHANGELOG.md). Full list: `packaging/release_notes_v3.0.0.md`
+and the in-app Release Notes window.
+
+**v2.6.26, part 1: wiring.** This part adds no physics. An empirical audit of the
 hybrid page measured, field by field, whether typing a value into an input
 changed any leaf of the output. Eight fields changed nothing at all, and the
 release connects them:
@@ -306,7 +333,7 @@ Host gate applies to `GET`/`HEAD`/`OPTIONS` as well, closing a DNS-rebinding
 read path; and the chemical database no longer writes to disk at import time,
 so a read-only installation starts.
 
-**v2.6.26 is about numbers that were wrong and screens that said things the
+**v2.6.26, part 2: numbers that were wrong and screens that said things the
 solver never said.** The ascent trajectory was off by a factor of 20 for every
 vehicle with a thrust-to-weight ratio below about 2.9 — measured at 85° with
 T/W 2.19, apogee came out 13.86 m where an independent reference integration

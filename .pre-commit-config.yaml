@@ -34,8 +34,22 @@ repos:
       - id: check-toml
 
       # Build outputs are measured in gigabytes and are gitignored; this is the
-      # backstop for `git add -f`. Ceiling is above the largest tracked file
-      # (hrma/data/dem/etopo2022_5min_int16.bin.gz, 8.2 MB).
+      # backstop for `git add -f`.
+      #
+      # SCOPE (measured 2026-09-01, not assumed): without --enforce-all this
+      # hook only looks at files ADDED by the commit being made. Files already
+      # tracked are out of scope, so `pre-commit run --all-files` reports
+      # "Passed" on this tree even though two evidence dumps under
+      # docs/scofield/raw/OH/D15/fea-viz/a3/ are ~24 MB each, i.e. above the
+      # ceiling. That is not a false negative: the ceiling's job is to stop the
+      # NEXT oversized file, and at 10 MB it still does that.
+      #
+      # Do NOT raise the ceiling to "match" those two files. Raising it would
+      # not fix any red run (there is none) and would open the door for future
+      # multi-megabyte additions. If the tracked tree itself must be enforced,
+      # add --enforce-all AND first bring those files under the ceiling —
+      # tests/test_faz4_yayin_kapisi.py::test_pre_commit_yapilandirmasi_calisir
+      # locks both halves of that rule.
       - id: check-added-large-files
         args: [--maxkb=10240]
 
@@ -84,6 +98,32 @@ repos:
   #
   # It always scans the whole target set (pass_filenames: false) because the
   # registry is global; it is fast because it is a line scan.
+  #
+  # THIS FILE IS NOT A GATE ON ITS OWN (P10B4-01, measured 2026-08-27).
+  # A pre-commit config only runs after somebody has run `pre-commit install`
+  # in their clone. On this machine that had never happened: `.git/hooks/`
+  # contained a single hook (commit-msg) and no pre-commit hook at all, so the
+  # claim lint had been protecting nothing since the day it was written. A
+  # config file that looks like protection but never runs is worse than no
+  # config, because it stops people from asking where the gate is.
+  #
+  # The gate therefore does not depend on this file any more. It lives in the
+  # test suite, which the release gate runs:
+  #     tests/test_z5s_kampanya_araclari.py::TestIddiaLintKapisi
+  # runs `python3 tools/iddia_lint.py --check` as a SUBPROCESS and asserts the
+  # exit code, i.e. exactly what a hook would do. The hook below stays because
+  # catching a claim before the commit is still cheaper than catching it in
+  # CI -- but it is now a convenience, not the guarantee.
+  #
+  # ÖH D28 / altyapi (defter OH-D27-04, 8 Sep 2026): "it lives in the test
+  # suite" was still only an INDIRECT binding, and it was measured to be thin
+  # -- the tool's name appeared 0 times under .github/ and 0 times under
+  # packaging/. The tool now also runs DIRECTLY, by name, in three places:
+  #     packaging/release_gate.sh  step 10/10  (fail-closed, unskippable)
+  #     .github/workflows/tests.yml           (step "İddia dili kapısı")
+  #     .github/workflows/release.yml         (same step, `testler` job)
+  # Those three are the guarantee; this file and the suite test remain the
+  # cheap early warnings.
   # ---------------------------------------------------------------------
   - repo: local
     hooks:

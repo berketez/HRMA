@@ -1,0 +1,199 @@
+{
+ "dil": "tr",
+ "sunucu": "http://127.0.0.1:51025",
+ "tarayici": "/Users/apple/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+ "device_scale_factor": 1.5,
+ "goruntuler": [
+  {
+   "dosya": "tr-v30-01-kati-withheld.png",
+   "url": "http://127.0.0.1:51025/solid?project=Example%20Solid%20KNDX%20BATES%2075mm",
+   "clip_css_px": {
+    "x": 85,
+    "y": 16,
+    "width": 1272,
+    "height": 560
+   },
+   "sha256": "85eaa7c60cbff470c53e95ceaf17379e9c73a9f9fabfe3472f2b36d5037edba0",
+   "bayt": 196951,
+   "olcum": {
+    "girdiler": {
+     "case_material": "aluminum",
+     "insulation_thickness": 0,
+     "grain_type": "end_burner",
+     "grain_length": 1500,
+     "flame_temp": 3200,
+     "case_thickness": 4
+    },
+    "sonuc": {
+     "model_validity_limit_exceeded": true,
+     "model_validity_reasons": [
+      "wall_temperature_above_derating_curve_data",
+      "wall_temperature_at_or_above_melting_point"
+     ],
+     "burn_time_s": 159.15965968739843
+    },
+    "gorunen": "Yapısal Analiz\nGövde Analizi\nÇevresel Gerilme:\t40,5 MPa\nBoyuna Gerilme:\t20,3 MPa\nEmniyet Katsayısı:\tHÜKÜM GERİ ÇEKİLDİ\nMalzeme Kullanım Oranı:\t%16,2\nÖnerilen Cidar Kalınlığı:\t1,6 mm\nMODEL GEÇERLİLİK SINIRI DIŞINDA\nIsı modelinin hesapladığı kasa sıcaklığı, kasa malzemesinin erime noktasında ya da üstünde, veya dayanım düşürme verisinin üstünde; kasa gerilmeleri, emniyet katsayıları ve patlama basıncı ise oda sıcaklığı dayanımıyla hesaplanıyor. Bu, mevcut yapısal modelin geçerlilik sınırının dışındadır: bu sayılar yalnız tanı amaçlıdır, geçerli tasarım çıktısı değildir; ne onay (PASS) ne de sayısal tasarım hükmü verilir. FAIL ya da MARGINAL durumu yine bir uyarıdır.\nmodel_validity_reasons: wall_temperature_above_derating_curve_data, wall_temperature_at_or_above_melting_point\nYakıt Bloğu Yapısal Analizi\nAzami Blok Gerilmesi:\t55,4 MPa\nYapısal Verim:\t%0,0\nÇatlak İlerlemesi Riski:\tYüksek\nIsıl "
+   }
+  },
+  {
+   "dosya": "tr-v30-02-dock-yapisal.png",
+   "url": "http://127.0.0.1:51025/solid?project=Example%20Solid%20KNDX%20BATES%2075mm",
+   "clip_css_px": {
+    "x": 68,
+    "y": 9,
+    "width": 1306,
+    "height": 640
+   },
+   "sha256": "da7647a6fa5681df00f522a3234216e35df6e3ab6f3a307e40e523b76eb43885",
+   "bayt": 258557,
+   "olcum": {
+    "gorunen": "BURKULMA: NOT_EVALUATED\nYAPI: UNSAFE\nRİSK: HIGH\nYORULMA: withheld\nMALZEME: ALUMINUM_6061\nMODEL GEÇERLİLİK SINIRI DIŞINDA\nHÜKÜM GERİ ÇEKİLDİ\n\nBu sayfadaki motorun kendi cidarı mevcut yapısal modelin geçerlilik sınırı dışında. Bu panel koşumu motorun cidar sıcaklığını taşımadığı için o cidarın doğrulaması değildir: onay gösterilmez, aşağıdaki sayılar yalnız tanı amaçlıdır.\n\nmodel_validity_limit_exceeded\ttrue · motor.structural_analysis.case_analysis\nmodel_validity_reasons\twall_temperature_above_derating_curve_data, wall_temperature_at_or_above_melting_point\nBu hükmün dayanağı\nHÜKÜM GERİ ÇEKİLDİ\nCİDAR: SİZİN VERDİĞİNİZ\nwall_thickness_suggestion\tapplied · wall_thickness from motor.structural_analysis.case_analysis.design_mode: verify (wall_thickness_source: user_supplied)\nis_verification_scope\tchamber wall thickness\nstations_not_verified\tend_cap, nozzle\nverification_scope_complete\tfalse\n\nDoğrulama kapsamı eksik: sepetteki bazı istasyonlar doğrulanmadı.\n\nsubmitted_wall_thickness_mm\t4,000\nevaluated_wall_thickness_mm\t—\ndesign_basis.message\twithheld · model_validity_limit_exceeded\nOnay neden verilmedi\nstations_not_verified\nburn_time\tbu analizde kullanılmadı · burn_time doğrulanır ama yapısal model onu KULLANMAZ: gerilmeler ve emniyet katsayıları tasarım basıncında kararlı durum değerleridir; yorulma denetimi ise bir yanma süresinin belirlemediği BASINÇLANDIRMA ÇEVRİMLERİNİ (design_cycles) sayar. Sizin yerinize bir yanma süresi de varsayılmadı - alan bu analize hiç girmez. Sünme ve sı"
+   }
+  },
+  {
+   "dosya": "tr-v30-03-dock-termal.png",
+   "url": "http://127.0.0.1:51025/solid?project=Example%20Solid%20KNDX%20BATES%2075mm",
+   "clip_css_px": {
+    "x": 68,
+    "y": 9,
+    "width": 1306,
+    "height": 700
+   },
+   "sha256": "5a223d5c0b29968a50057047316caf189853de1bd707153927a324e48f8a9c0a",
+   "bayt": 192467,
+   "olcum": {
+    "gorunen": "TERMAL RİSK: HIGH\nSOĞUTMA: NATURAL\nISI MODELİ: BARTZ\nCİDAR T FİZİKSEL DEĞİL — soğutma yetersiz\nH_G (GAZ TARAFI)\n18882 W/m²·K\nQ_BOĞAZ (REFERANS SOĞUTULMUŞ CİDAR)\n51,20 MW/m²\nQ_ODA (REFERANS SOĞUTULMUŞ CİDAR)\n1,33 MW/m²\nT_CİDAR İÇ\n3177 K\nT_CİDAR DIŞ\n3175 K\nT_ADYABATİK CİDAR\n3182 K\nYanma gazı\nAdyabatik cidar\nCidar (iç)\nCidar (dış)\n0\n1000\n2000\n3000\nCidar Sıcaklıkları ile Malzeme Sınırları\nSıcaklık (K)\nİzin verilen sınır — 477 K\nErime noktası — 855 K\nIsı Yükü ve Soğutma Değerlendirmesi\nToplam ısı gücü\t616,4 kW · wetted_integral_contour_basis.generic_defaults_used: exit_diameter, nozzle_type\nToplam ısı enerjisi (yanma)\t98,1 MJ · wetted_integral_contour_basis.generic_defaults_used: exit_diameter, nozzle_type\nSoğutma verimi\t0,30 (natural)\nGereken soğutma alanı\t493,16 m²\nheat_sink_mass\t595,6 kg● HESAPLANDI · heat_sink_delta_T_K 183,85 · heat_sink_specific_heat_J_kgK 896,0 · heat_sink_specific_heat_source material_record · heat_sink_temperature_limit_K 477,0\nheat_sink_delta_T_basis: material record allowable_temperature (477 K) minus initial temperature (293.1 K)\nSıcak gaz yüzey alanı\t0,442 m² · VERİLMEDİ — ne exit_diameter ne de expansion_ratio verildi; örnekleyici kendi genel çıkış çapına düşer, bu yüzden bu eksenin ıraksak uzantısı bu motorunki DEĞİLDİR\nTermal Emniyet Katsayıları\nErime emniyet katsayısı\t0,27\nSıcaklık emniyet katsayısı\t0,15\nTermal gerilme emniyet katsayısı\t6,46\nTermal gerilme\t2 MPa\nMalzeme sınırları\t477 K izin verilen · 855 K erime\nHükmü veren sıcaklık sınırı\tmalzemenin izin verilen sıcaklığı (allowable_temperature) ve yapısal servis sınırı (max_service_temp) ikisi de 477 K; hükmü bu sınır verir\nCidar kalınlığı\t4,0 mm (aluminum_6061)\nUyarılar\nCidar sıcaklığı izin verilen sınırı aşıyor\nTepe sıcaklık 3177 K, malzemenin erime noktası 855 K değerini aşıyor — cidar "
+   }
+  },
+  {
+   "dosya": "tr-v30-04-hibrit-uyarilar.png",
+   "url": "http://127.0.0.1:51025/hybrid?project=Example%20Hybrid%20N2O-HTPB%203kN",
+   "clip_css_px": {
+    "x": 0,
+    "y": 16,
+    "width": 1440,
+    "height": 860
+   },
+   "sha256": "84c74e14bf32695a542409c6c877d4b2d01023e4ae08c1cf7efcb63ab0f51132",
+   "bayt": 463420,
+   "olcum": {
+    "gorunen": "UYARILAR\nDOĞRULAMA DURUMU: UYARI VAR\nUYARI\nEnjektör Reynolds sayısı 1219721, burada kullanılan bağıntı aralığının üst sınırı olan 200000 değerini aşıyor.\nUYARI\nEnjektör basınç düşüşü oda basıncının 0,68 katı, 0,35 üst sınırının üzerinde: besleme basıncı ve pompa işi artar, yanma kararlılığına katkısı olmaz.\nUYARI\nYerleşik HTPB/ABS regresyon katsayıları bu projenin doğrulama veritabanına göre yanlı: kendi 43 kaydı üzerinde medyan sapma %-39,5, medyan mutlak hata %46,6. Bağımsız çapraz denetim, yayımlanmış 46 nokta üzerinde %-47,6 sapma ve %49,4 medyan mutlak hata veriyor; kampanya başına bant %-50,6 · -41,8 ve gövdeyi kuran kampanyalar şunlar: Rezaei 2018 (n2o, nokta sayısı: 29): %-50,6 sapma, %50,9 medyan mutlak hata · Carmicino 2013 (n2o, nokta sayısı: 16): %-41,8 sapma, %43,5 medyan mutlak hata · Heydari 2017 (n2o, nokta sayısı: 1): %-50,3 sapma, medyan mutlak hata bildirilmedi. İki belirleme UZLAŞTIRILMADI (uzlaştırıldı mı: hayır); ölçülen gerekçeler: iki kayıt havuzu aynı küme değil (ürünün kendi 43 noktasına karşılık 46 bağımsız nokta) · ürün yolu, G_ox ile fit edilmiş bir katsayıyı G_total akı kapanışı altında koşturuyor; bu da öngörülen regresyonu %10-18 yükseltiyor (propellant_database.py). Bu kampanyaların oksitleyici zarfı n2o; bu koşu n2o kullanıyor, zarf eşleşmesi: evet. Katsayılar BİLEREK yeniden ayarlanmadı — yeni static-fire verisi olmadan kalibre etmek, ölçülmüş bir uyuşmazlığı uydurulmuş bir uyumla değiştirmek olurdu. Bu iticiyi ateşlediyseniz kendi a ve n değerlerinizi girin. Yanlılık gövdesi: docs/arastirma/fizik/A3-hibrit-regresyon.md.\nKRİTİK\nBoğaz cidarı 3304 K sıcaklığa çıkıyor; bu, Doğal (ısı emici) soğutmalı Graphite (isostatic, nozzle insert grade) için izin verilen 3300 K değerinin üstünde. Bu boğaz dayanmaz: izin verilen sıcaklığı daha yüksek bir malzeme seçin ya da soğutma ekleyin.\nKRİTİK\nDenge cidar sıcaklığı 3313 K, belirtilen soğutmayla Paslanmaz 304 erime noktası 1673 K değerini aşıyor; boğazda gereken soğutma yükü q=25,9 MW/m².\nKRİTİK\nDenge cidar sıcaklığı adyabatik cidar sıcaklığına yapıştı: modellenen soğutma fena hâlde yetersiz.\nKRİTİK\nCidar sıcaklığı izin verilen sınırı aşıyor\nKRİTİK\nTepe sıcaklık 3313 K, malzemenin erime noktası 1673 K değerini aşıyor — cidar bu koşulda ayakta kalamaz.\nUYARI\n'expansion_ratio' alanı (0) formdan okunmaz, model tarafından çözülür; analiz kendi bulduğu 5,17875 değerini kullanıyor.\nUYARI\n'chamber_diameter_input' alanı (0) formdan okunmaz, model tarafından çözülür; analiz kendi bulduğu 121,26 değerini kullanıyor.\nUYARI\nL/D oranı (1,2) en uygun aralığın (3-5) dışında\nUYARI\nKavitasyon riski: Nurick kavitasyon sayısı K_c = 0,00 < 1,5 (enjektör girişi P_1 = 50,5 bar, dP = 20,5 bar, P_v = 50,5 bar (293 K))\nUYARI\nAni kaynama riski tespit edildi\nUYARI\nHedef püskürtme hızı (30,0 m/s) delik sayısıyla belirlenmiyor: Cd=0,78 ile ulaşılan hız 42,7 m/s. Hedefe ulaşmak için dP = 5,81 bar gerekir (şu an 20,54 bar)."
+   }
+  },
+  {
+   "dosya": "tr-v30-06-cad-ret.png",
+   "url": "http://127.0.0.1:51025/hybrid?project=Example%20Hybrid%20N2O-HTPB%203kN",
+   "clip_css_px": {
+    "x": 0,
+    "y": 20,
+    "width": 1440,
+    "height": 302
+   },
+   "sha256": "0a0788c92b28a82073b69ce61968f4a533b1ace526519a14976a2240bccf62a7",
+   "bayt": 316986,
+   "olcum": {
+    "uc": "/api/export-complete-zip",
+    "http": 422,
+    "ileti": "Eksiksiz tasarım paketi dışa aktarımı başarısız: [manufacturing_safety_gate_closed] İmalat dışa aktarımı emniyet kapısında reddedildi (2 parça): analizin onaylamadığı basınç taşıyan bir parça için imalat dosyası yazılmaz. Kamara: yapısal sonuç model geçerlilik sınırının dışında (structural_analysis.thermal_analysis.strength_derating.exceeds_melting_point); bu yüzden 0,2317 emniyet katsayısı geçerli bir tasarım çıktısı değil. Kamara: çizilen 25,2636 mm cidarda emniyet katsayısı 0,2317, 1,0 değerinin altında (structural_analysis.chamber_analysis.safety_factor_total). Nozul: 4 emniyet katsayısı 2,5062 mm cidara ait (structural_analysis.nozzle_analysis.throat_thickness_used_mm); oysa çizilen cidar 7,1845 mm.",
+    "inen_dosyalar": []
+   }
+  },
+  {
+   "dosya": "tr-v30-07-harita.png",
+   "url": "http://127.0.0.1:51025/launch-site",
+   "clip_css_px": {
+    "x": 0,
+    "y": 0,
+    "width": 1440,
+    "height": 900
+   },
+   "sha256": "56d44aad792eaf5891419eadefe3ce57cc7d11dd0cd7d3e6dce89a58026040d3",
+   "bayt": 1591957,
+   "olcum": {
+    "ag_anahtari_acik": false,
+    "olcek": {
+     "metersPerPixel": 519.22159154283,
+     "camAltitudeM": 457962.1601613201,
+     "tilesDrawn": true,
+     "textureCoarse": false,
+     "textureLayer": "bm_local",
+     "textureMpp": 1956.796875,
+     "textureMagnified": true
+    },
+    "karo_istekleri_ilk10": [
+     [
+      "/api/tile/bm_local/5/22/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/24/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/23/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/21/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/21/5",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/25/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/22/5",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/24/5",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/23/5",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/25/5",
+      200
+     ]
+    ],
+    "karo_istek_sayisi": 75,
+    "karo_durumlari": [
+     200,
+     403
+    ]
+   }
+  },
+  {
+   "dosya": "tr-v30-05-panel-kunye.png",
+   "url": "http://127.0.0.1:51025/solid?project=Example%20Solid%20KNDX%20BATES%2075mm",
+   "clip_css_px": {
+    "x": 68,
+    "y": 532,
+    "width": 1306,
+    "height": 368
+   },
+   "sha256": "aeedee978b97767708fda7b52acee7811dde3c81b42f4382d755faa77be2d077",
+   "bayt": 175477,
+   "olcum": {
+    "motor": "Example Solid KNDX BATES 75mm (değiştirilmeden)",
+    "uq_durum": "",
+    "gorunen": "Bu P5–P95 bandı neye koşullu conditionality\nGeçerli olduğu çıktılar\tapplies_to\toutputs.*.p5/p25/p50/p75/p95 ve std/cv_percent\nKoşullu olduğu örneklenen girdiler\tconditional_on_inputs\tburn_rate_a, burn_rate_n_delta, density, c_star\nÖrneklenen girdi sayısı\tinput_count\t4\nNominalde sabit tutulanlar\tfrozen_at_nominal\tconditional_on_inputs içinde listelenmeyen her model girdisi\nÖRNEKLEYİCİ\tsampler\tlhs\nBandın dayandığı örnek sayısı\tn_effective\t200\nVarsayılan girdi korelasyonu\tinput_correlation_assumed\tbağımsız (sıra korelasyonu sıfır)\nModel biçimi belirsizliği dâhil\tmodel_form_uncertainty_included\thayır\nBant nasıl okunur\tinterpretation\tBu yüzdelikler yalnız listelenen girdi dağılımlarının ürettiği yayılımı anlatır. Gerçek motor performansı için bir güven aralığı DEĞİLDİR: model biçimi hatası (ampirik bağıntı belirsizliği, ihmal edilen fizik) örneklenmez ve banda dâhil edilmez, girdiler bağımsız örneklenir ve listelenmeyen her girdi nominal değerinde tutulur. Girdi dağılımlarını değiştirerek bu bandı genişletmek ya da daraltmak, modelin donanımla ne kadar uyuştuğunu değiştirmez."
+   }
+  }
+ ],
+ "tarayici_surumu": "145.0.7632.6",
+ "dis_ag_istekleri": [],
+ "sayfa_hatalari": [],
+ "beklenen_konsol_hatalari": [
+  "console.error: Failed to load resource: the server responded with a status of 403 (FORBIDDEN)",
+  "console.error: Failed to load resource: the server responded with a status of 422 (UNPROCESSABLE ENTITY)"
+ ],
+ "dis_ag_istekleri_05": [],
+ "sayfa_hatalari_05": []
+}

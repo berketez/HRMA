@@ -11,6 +11,15 @@ from scipy.optimize import brentq
 from hrma.constants import G_0
 from hrma.data.materials_db import get_material
 
+# --- ÖH D20 / B1-12 · SÜRTÜNME VERİMİ TEK TANIM NOKTASI --------------------
+# Bu sayı iki imza varsayılanında (design_nozzle ve
+# _calculate_nozzle_performance) ve motor tarafındaki manşet kayıp kümesinde
+# kullanılıyor. Üç yerde ayrı ayrı yazılması TEK KAYNAK ihlalidir; buradan
+# ithal edilir. Sutton & Biblarz 9th ed. Ch.3: iyi tasarlanmış lülede sınır
+# tabaka/sürtünme kaybı %0,5-1,5 -> eta_friction 0,985-0,995; tipik %1.
+NOZZLE_FRICTION_EFFICIENCY_DEFAULT = 0.99
+
+
 class NozzleDesigner:
     """Advanced nozzle design and analysis"""
 
@@ -23,9 +32,16 @@ class NozzleDesigner:
     #   Kaynak: Rao, G.V.R., "Exhaust Nozzle Contour for Optimum Thrust",
     #   Jet Propulsion 28(6), 1958; Sutton & Biblarz, "Rocket Propulsion
     #   Elements" 9. baskı Fig. 3-14 (%80 bell açı grafikleri);
-    #   Huzel & Huang, NASA SP-125, Fig. 4-15.
-    # Ara değerler ln(eps) üzerinde DOĞRUSAL enterpolasyonla alınır (grafiğin
-    # kendisi yarı-logaritmiktir). Bant dışında uç değere kırpılır ve bu
+    #   Huzel & Huang, NASA SP-125 (1967), Şekil 4-14 (s. 91).
+    #   KU-K1/SP-H1 K1 + KU-K6 (6 Eki 2026): eski künye "Fig. 4-15" idi;
+    #   SP-125 Şekil 4-15 (s. 92) lüle BOY karşılaştırmasıdır, %80 bell
+    #   açıları Şekil 4-14'tedir (s. 91). SP-125 grafiği ε ≤ 50'yi kapsar;
+    #   ε = 100 çapası SP-125'te yoktur. Çapa sayıları DEĞİŞMEDİ (açıların
+    #   kendisi ÖNEMLİ kalemi B1/B2'dir).
+    # Ara değerler ln(eps) üzerinde DOĞRUSAL enterpolasyonla alınır (bu bir
+    # HRMA seçimidir; SP-125 Şekil 4-14'ün ε ekseni SP-H1 notuna göre
+    # doğrusaldır, eski "grafik yarı-logaritmik" ifadesi SP-125 için doğru
+    # değildi). Bant dışında uç değere kırpılır ve bu
     # durum kontur sözlüğünde 'angle_basis' ile dürüstçe bildirilir.
     # -----------------------------------------------------------------
     _RAO_80_BELL_ANGLES = (
@@ -158,7 +174,8 @@ class NozzleDesigner:
                      gamma: Optional[float] = None,
                      R_specific: Optional[float] = None,
                      T_chamber: Optional[float] = None,
-                     friction_efficiency: float = 0.99,
+                     friction_efficiency: float = (
+                         NOZZLE_FRICTION_EFFICIENCY_DEFAULT),
                      kinetic_efficiency: float = 0.995,
                      particle_mass_fraction: float = 0.0,
                      two_phase_loss_coeff: float = 0.12,
@@ -326,7 +343,9 @@ class NozzleDesigner:
         # Bell nozzle parameters
         # Boğaz yayı eğrilik yarıçapları (Rao geometrisi):
         # konverjan taraf 1.5·r_t, diverjan taraf 0.382·r_t
-        # Kaynak: Rao (1958); Sutton & Biblarz 9th ed., Fig. 3-14; Huzel & Huang Fig. 4-15
+        # Kaynak: Rao (1958); Sutton & Biblarz 9th ed., Fig. 3-14; Huzel & Huang
+        # NASA SP-125 (1967) Şekil 4-13 metni, s. 91 (KU-K1/SP-H1 K1: eski künye
+        # "Fig. 4-15" idi — o şekil lüle boy karşılaştırmasıdır, s. 92)
         R_conv = 1.5 * rt   # Konverjan boğaz yayı eğrilik yarıçapı (oda yarıçapı DEĞİL)
         Rn = 0.382 * rt     # Diverjan boğaz yayı eğrilik yarıçapı
 
@@ -354,9 +373,13 @@ class NozzleDesigner:
         # kısa çıkıyordu):
         #     L_konik15 = [ (r_e − r_t) + R_1·(sec 15° − 1) ] / tan 15°
         #     L_bell    = 0.8 · L_konik15                    (R_1 = 1.5·r_t)
-        # Kaynak: Huzel & Huang, "Modern Engineering for Design of
-        # Liquid-Propellant Rocket Engines" (NASA SP-125), Eş. 4-7 ve Fig. 4-15;
-        # Rao (1958); Sutton & Biblarz 9th ed., Fig. 3-14 (fractional length).
+        # Kaynak: Huzel & Huang, "Design of Liquid Propellant Rocket Engines"
+        # (NASA SP-125, 1967), Eş. 4-7 (s. 90) ve Şekil 4-15 (s. 92, lüle boy
+        # karşılaştırması); Rao (1958); Sutton & Biblarz 9th ed., Fig. 3-14
+        # (fractional length). KU-K1/SP-H1 K2: eski künye "Modern Engineering
+        # ... (NASA SP-125)" iki ayrı kitabı karıştırıyordu (AIAA 1992 ⟷ NASA
+        # SP-125 1967). Not (SP-H1 B6): SP-125 Örnek 4-2 (s. 98) Eş. 4-7'yi
+        # R = 0,382·R_t ile uygular; burada R_1 = 1,5·r_t kullanılır.
         _t15 = np.tan(np.radians(15.0))
         _sec15 = 1.0 / np.cos(np.radians(15.0))
         L_ref_15 = ((re - rt) + R_conv * (_sec15 - 1.0)) / _t15
@@ -396,7 +419,7 @@ class NozzleDesigner:
         re = de / 2
 
         # Conical nozzle parameters
-        theta = 15.0  # Half angle (degrees) — standart 15° konik (Sutton & Biblarz 9th ed.)
+        theta = self.CONICAL_HALF_ANGLE_DEG  # standart 15° (Sutton & Biblarz 9th ed.)
 
         # Convergent section
         # Konverjan boğaz yayı eğrilik yarıçapı (Rao geometrisi, 1.5·r_t) —
@@ -451,6 +474,29 @@ class NozzleDesigner:
 
         Lt = Lc + Ld
 
+        # ÖH D16 (kalem B4-07) — PARABOLİK DAL ARTIK AÇISINI YAYIMLIYOR.
+        # Eski sözlükte diverjan anahtarları ['curvature_parameter','length',
+        # 'type'] idi: AÇI YOKTU. Sonuç, AYNI konturun iki farklı geometri
+        # olarak okunmasıydı; ÖLÇÜLDÜ (1 Eylül 2026, taban 6fde52b;
+        # r_t = 30 mm, eps = 8):
+        #   performans yolu: _divergence_efficiency 'exit_angle' bulamayıp
+        #     kendi 10,0° varsayılanına düşüyordu -> lambda = 0,99240388,
+        #     lambda'dan geri çözülen theta_e = 10,000000°
+        #   çizim/ihracat yolu: sample_nozzle_inner_contour ise
+        #     `_num(div.get('exit_angle'), 8.0)` ile 8,0° kullanıyordu
+        # yani Isp zinciri 10°, STL/STEP/DXF + 2B/3B + FEA/CFD ağı 8°
+        # görüyordu. Karşılaştırma: bell dalı exit_angle/throat_angle/
+        # angle_basis, konik dalı half_angle yayımlıyor — yalnız parabolik
+        # dal sessizdi ve bu sessizlik bekçi yazılmasını da imkânsız
+        # kılıyordu.
+        # TEK KAYNAK: açı, bell dalının kullandığı AYNI Rao %80 tablosundan
+        # (_rao_bell_angles) gelir — parabolik kontur zaten o bell konturunun
+        # parabolik yaklaşımıdır (Rao 1961; Sutton & Biblarz 9th ed.,
+        # Fig. 3-14). İkinci bir açı sabiti doğmaz; bant dışı kırpma
+        # 'angle_basis' ile dürüstçe bildirilir.
+        expansion_ratio = (re / rt) ** 2 if rt > 0 else None
+        theta_n, theta_e, angle_basis = self._rao_bell_angles(expansion_ratio)
+
         return {
             'convergent': {
                 'chamber_radius': r_chamber * 1000,
@@ -461,12 +507,60 @@ class NozzleDesigner:
             'divergent': {
                 'length': Ld * 1000,
                 'type': 'parabolic',
-                'curvature_parameter': 0.8
+                'curvature_parameter': 0.8,
+                'throat_angle': theta_n,  # derece (Rao %80 tablosu, eps'e bağlı)
+                'exit_angle': theta_e,    # derece (Rao %80 tablosu, eps'e bağlı)
+                'angle_basis': angle_basis,
+                'expansion_ratio': expansion_ratio
             },
             'total_length': Lt * 1000,
             'length_efficiency': 0.96
         }
     
+    #: Standart konik lüle diverjan yarı açısı [derece] (Sutton & Biblarz
+    #: 9. baskı, Böl. 3). ÖH D21 / P15B1-04: hem konturu kuran
+    #: ``_design_conical_nozzle`` hem de λ'yı genişleme oranından çözen
+    #: ``divergence_efficiency_from_expansion`` bu TEK sayıyı okur.
+    CONICAL_HALF_ANGLE_DEG = 15.0
+
+    @staticmethod
+    def lambda_from_angle(theta_deg: float) -> float:
+        """λ = ½·(1 + cos θ) — diverjans (geometrik) verimi.
+
+        Sutton & Biblarz 9. baskı Eş. 3-34 / Tablo 3-3. Formülün TEK yazım
+        yeri burasıdır; konik yarı açı ile bell/parabolik çıkış açısı aynı
+        bağıntıya girer.
+        """
+        return float(0.5 * (1.0 + np.cos(np.radians(float(theta_deg)))))
+
+    @classmethod
+    def divergence_efficiency_from_expansion(cls, nozzle_type: str,
+                                             expansion_ratio) -> float:
+        """λ'yı (tip, ε) çiftinden çözer — boğaz alanından BAĞIMSIZ.
+
+        ÖH D21 / P15B1-04 — İKİNCİ λ KAYNAĞININ KAPATILMASI. Manşet zinciri
+        (hibrit motorun kendi C_F'i) λ'yı KATALOG SABİTİNDEN
+        (``hrma.constants.LAMBDA_*``) okuyordu; lüle paneli ise aynı lülenin
+        KONTURUNDAN hesaplıyordu. Aynı yanıtta aynı büyüklüğün iki değeri
+        oluyordu ve ikisi ε ile farklı davranıyordu: katalog sabiti ε'den
+        bağımsız, kontur değeri Rao %80 tablosuyla ε'ye bağlı. ÖLÇÜLDÜ
+        (docs/scofield/raw/OH/D21/hibrit/a1/once_lambda.json; 3 tip × 8 ε):
+        24 noktanın 24'ü ayrışıyordu, en büyük bağıl fark **%2,0253**
+        (parabolik), ve ``thrust_coefficient_loss_set_consistency`` kapısı
+        uçtan uca 4 koşumun 4'ünde ``out_of_band`` yayımlanıyordu.
+
+        Bu fonksiyon, konturu KURMADAN aynı açı kaynağını kullanır: konikte
+        ``CONICAL_HALF_ANGLE_DEG``, bell/parabolikte ``_rao_bell_angles``.
+        Konturun açıları da bu iki kaynaktan geldiği için sonuç
+        ``_divergence_efficiency(nozzle_type, contour)`` ile BİREBİR aynıdır
+        (bekçi: tests/test_d21_hibrit_a1.py::test_p15b1_04_*).
+        """
+        tip = str(nozzle_type).strip().lower()
+        if tip == 'conical':
+            return cls.lambda_from_angle(cls.CONICAL_HALF_ANGLE_DEG)
+        _, theta_e, _ = cls._rao_bell_angles(expansion_ratio)
+        return cls.lambda_from_angle(theta_e)
+
     def _divergence_efficiency(self, nozzle_type: str, contour: Dict) -> float:
         """Geometrik diverjans verimi lambda (boyutsuz).
 
@@ -483,8 +577,8 @@ class NozzleDesigner:
         """
         div = contour.get('divergent', {})
         if nozzle_type == 'conical':
-            half_angle = div.get('half_angle', 15.0)  # derece (Sutton std. 15°)
-            return 0.5 * (1.0 + np.cos(np.radians(half_angle)))
+            half_angle = div.get('half_angle', self.CONICAL_HALF_ANGLE_DEG)
+            return self.lambda_from_angle(half_angle)
         # bell / parabolik (ve bilinmeyen → bell varsayılanı)
         theta_e = div.get('exit_angle', None)
         if theta_e is None:
@@ -497,7 +591,7 @@ class NozzleDesigner:
         # kapatır: eps=10 -> theta_e=14° -> λ=0.9851; eps=50 -> 9° -> λ=0.9938.
         # Toplam ayrık-kayıp çarpımı da artık genişleme oranına duyarlıdır
         # (legacy tek-faktör 0.98 sabitine kalibrasyon kaldırıldı).
-        return 0.5 * (1.0 + np.cos(np.radians(theta_e)))
+        return self.lambda_from_angle(theta_e)
 
     def _calculate_nozzle_performance(self, throat_area: float, exit_area: float,
                                     chamber_pressure: float, exit_pressure: float,
@@ -507,7 +601,8 @@ class NozzleDesigner:
                                     T_chamber: Optional[float] = None,
                                     ambient_pressure: Optional[float] = None,
                                     divergence_efficiency: float = 1.0,
-                                    friction_efficiency: float = 0.99,
+                                    friction_efficiency: float = (
+                         NOZZLE_FRICTION_EFFICIENCY_DEFAULT),
                                     two_phase_efficiency: float = 1.0,
                                     kinetic_efficiency: float = 0.995,
                                     particle_mass_fraction: float = 0.0,
@@ -622,8 +717,52 @@ class NozzleDesigner:
             # Legacy tek-faktör geçersiz kılma (geriye uyumluluk)
             eta_nozzle = float(efficiency)
 
-        # Apply efficiency
-        cf_actual = cf_ideal * eta_nozzle
+        # --- ÖH D23 / P15B1-04 · lambda'nin UYGULAMA YERI --------------------
+        # Sutton & Biblarz 9. baski Es. 3-34 diverjans carpanini YALNIZ
+        # momentum itkisine uygular:  F = lambda*mdot*v2 + (p2 - p3)*A2.
+        # Basinc-itki terimi bir basinc x alan carpimidir; egzoz jetinin
+        # yonelmesiyle ilgisi yoktur, dolayisiyla lambda ile olceklenmez.
+        #
+        # ESKI DAVRANIS: cf_actual = cf_ideal * eta_nozzle, yani lambda
+        # BASINC terimini de kirpiyordu. Ayni deponun MANSET zinciri
+        # (hybrid_rocket_engine._calculate_thrust_coefficient) bunu D20'den
+        # beri DOGRU yapiyor (CF_lossless = lambda*mom + basinc, sonra kayip
+        # kumesi), bu yuzden ayni lulenin iki C_F'i arasinda bir fark
+        # kaliyordu. OLCULDU (once.json, konik, gamma=1,20, R=350,
+        # T_c=3400 K, P_c=30 bar, p_a=1,01325 bar):
+        #   eps=4   -> -0,0458 %   (basinc terimi +0,03895; adapte ustu)
+        #   eps=6,5 -> +0,0883 %   (basinc terimi -0,07457)
+        #   eps=12  -> +0,2350 %   (ayrilmis bant; basinc terimi -0,19154)
+        #   eps=40  -> +0,2350 %   (ayni; C_F ayrilma istasyonuna kelepceli)
+        #   eps=100 -> +0,2350 %   (ayni)
+        # Ayrilmis bantta momentum tabani AYRILMA ISTASYONUNUNKIDIR; kiyas
+        # cikis duzleminin momentumuyla yapilirsa sayilar buyuk cikar
+        # (D22 raporundaki +0,2827/+0,4733/+0,5793 o kiyastandir).
+        # Isaret basinc teriminin isaretiyle donuyor: asiri genislemede
+        # (p_e < p_a) terim negatiftir ve onu lambda ile kucultmek C_F'i
+        # BUYUTUYORDU, yani panel iyimser taraftaydi.
+        #
+        # HIZ tipindeki kayiplar (surtunme, iki-fazli, kinetik) egzoz hizini
+        # dusurur; onlar C_F'in tamamina degil ama bu modelde manset zinciriyle
+        # AYNI noktada uygulanir (kayipsiz C_F x kayip carpimi) — iki taraf
+        # boylece tek bir kayip modelini paylasir. Legacy tek-faktor
+        # (efficiency=<sayi>) yolunda uygulama yeri DEGISMEZ.
+        if efficiency is None:
+            eta_velocity = (friction_efficiency * two_phase_efficiency *
+                            kinetic_efficiency)
+            cf_momentum_applied = _cf_mom(p_sep) if flow_separated else cf_momentum
+            cf_pressure_thrust = cf_ideal - cf_momentum_applied
+            cf_actual = ((divergence_efficiency * cf_momentum_applied
+                          + cf_pressure_thrust) * eta_velocity)
+        else:
+            cf_momentum_applied = _cf_mom(p_sep) if flow_separated else cf_momentum
+            cf_pressure_thrust = cf_ideal - cf_momentum_applied
+            cf_actual = cf_ideal * eta_nozzle
+        # Yayimlanan verim carpimi (eta_nozzle) ile C_F'e FIILEN inen oran
+        # artik ozdes DEGILDIR; ikisi de yayimlanir ki kullanici hangisinin
+        # ne oldugunu okuyabilsin (sayi uydurma yok, ozdeslik beyanli).
+        cf_efficiency_effective = (cf_actual / cf_ideal
+                                   if cf_ideal not in (0.0, -0.0) else None)
 
         # Specific impulse
         isp = cf_actual * c_star / self.g0
@@ -644,7 +783,7 @@ class NozzleDesigner:
         # verilmediğinde p_a = p_e) fark sıfırdı, yani etiket yanlıştı.
         # Ayrılmış akışta (Summerfield) fiziksel çıkış düzlemi ayrılma
         # düzlemidir; hız da orada değerlendirilir.
-        cf_momentum_basis = _cf_mom(p_sep) if flow_separated else cf_momentum
+        cf_momentum_basis = cf_momentum_applied
         ve = cf_momentum_basis * c_star            # gerçek (izentropik) çıkış hızı
         c_effective = cf_actual * c_star           # efektif egzoz hızı = Isp·g0
 
@@ -660,6 +799,24 @@ class NozzleDesigner:
             'exit_velocity_basis': ('separation_plane' if flow_separated
                                     else 'isentropic_exit_plane'),
             'nozzle_efficiency': eta_nozzle,  # toplam (lambda·eta_fric·eta_2ph·eta_kin) veya legacy override
+            # --- P15B1-04: lambda'nin UYGULAMA YERI beyanli ---
+            'thrust_coefficient_pressure_thrust': cf_pressure_thrust,
+            'thrust_coefficient_efficiency_effective': cf_efficiency_effective,
+            'nozzle_efficiency_application': (
+                'legacy single-factor override: the given efficiency '
+                'multiplies the FULL coefficient'
+                if efficiency is not None else
+                'Sutton & Biblarz 9th ed. Eq. 3-34: the divergence factor '
+                'lambda multiplies the MOMENTUM thrust only; the pressure '
+                'thrust epsilon*(p_e-p_a)/p_c is a pressure-times-area term '
+                'and is not scaled by jet divergence. The velocity-type '
+                'losses (friction x two-phase x kinetic) then scale the sum, '
+                'which is the same application point the headline engine '
+                'chain uses. nozzle_efficiency is the PRODUCT of the four '
+                'factors; thrust_coefficient_efficiency_effective is the '
+                'ratio that actually reaches the coefficient '
+                '(cf_actual / cf_ideal). They are equal only when the '
+                'pressure thrust vanishes (adapted expansion).'),
             # --- Ayrık kayıp bileşenleri (Sutton & Biblarz 9th ed. Ch.3) ---
             'divergence_efficiency': divergence_efficiency,    # lambda (geometrik)
             'friction_efficiency': friction_efficiency,        # sınır tabaka/sürtünme
@@ -706,14 +863,41 @@ class NozzleDesigner:
             'pressure_ratio': pressure_ratio,
             'expansion_ratio': expansion_ratio,
             # --- F050 dürüstlük alanları (bar) ---
-            # exit_pressure: CF'de fiilen kullanılan, ε ile TUTARLI çıkış
-            # statik basıncı. exit_pressure_input: çağıranın geçtiği değer.
+            # exit_pressure: CF'de fiilen kullanılan çıkış statik basıncı.
+            # exit_pressure_input: çağıranın geçtiği değer.
             # ambient_pressure: basınç-itki teriminde kullanılan geri basınç.
-            'exit_pressure': p_exit,
+            #
+            # D15/P1B4-03 — ALANIN KENDİ BEYANI ARTIK DOĞRU. ESKİ kod bu
+            # alanın açıklamasında "CF'de fiilen kullanılan" diyordu ama
+            # AYRILMIŞ dalda CF ``p_sep = 0,4·p_a`` ile hesaplanırken
+            # ``exit_pressure`` hiç gerçekleşmeyen geometrik-ε izentropik
+            # değerini taşıyordu. ÖLÇÜLDÜ (konik, γ=1,20, R=350, T_c=3400 K,
+            # Pc=40 bar, p_a=1,01325 bar):
+            #   ε= 8  ayrılmadı  p_e=0,67476  p_sep=0,40530   —
+            #   ε= 25 AYRILDI    p_e=0,15217  p_sep=0,40530  oran  2,66×
+            #   ε= 60 AYRILDI    p_e=0,04997  p_sep=0,40530  oran  8,11×
+            #   ε=100 AYRILDI    p_e=0,02630  p_sep=0,40530  oran 15,41×
+            # Aynı kusurun ikizi ``exit_mach``taydı: hız (``exit_velocity``)
+            # AYRILMA düzleminden, Mach ise GEOMETRİK çıkıştan geliyordu, yani
+            # yayımlanan dörtlü tek bir istasyonu tarif etmiyordu
+            # (v_e/(M_e·a_e) = 0,9403 / 0,8922 / 0,8709). Tüketici
+            # ``motor_viz3d.js readNozzleExit`` tam bu dörtlüyü okuyor.
+            # ARTIK: üç alan da AYNI istasyondadır (ayrılmışsa ayrılma
+            # düzlemi, değilse geometrik çıkış) ve geometrik izentropik değer
+            # ``exit_pressure_geometric`` / ``exit_mach_geometric`` altında
+            # KAYBOLMADAN durur.
+            'exit_pressure': (p_sep if flow_separated else p_exit),
+            'exit_pressure_geometric': p_exit,
             'exit_pressure_input': p_exit_input,
             'ambient_pressure': pa,
-            'exit_pressure_basis': 'isentropic_area_ratio',
-            'exit_mach': self.mach_from_area_ratio(expansion_ratio, gamma),
+            'exit_pressure_basis': ('separation_plane' if flow_separated
+                                    else 'isentropic_area_ratio'),
+            'exit_mach': self.mach_from_area_ratio(
+                eps_effective if flow_separated else expansion_ratio, gamma),
+            'exit_mach_geometric': self.mach_from_area_ratio(
+                expansion_ratio, gamma),
+            'exit_mach_basis': ('separation_plane' if flow_separated
+                                else 'isentropic_exit_plane'),
             # --- Aşırı genişleme / ayrılma tanılaması ---
             'flow_separated': bool(flow_separated),
             'separation_pressure': p_sep,                  # bar (0.4·p_a)
@@ -784,8 +968,32 @@ class NozzleDesigner:
             surface_area = np.pi * (rt + re) * L_div * 1.1  # 10% increase for curvature
         
         # Volume calculation
-        L_total = contour['total_length'] / 1000
-        volume = np.pi * L_total * (rt**2 + rt * re + re**2) / 3
+        #
+        # ÖH D16 (kalem B4-06) — HACİM ARTIK İKİ BÖLÜMÜN TOPLAMI.
+        # Eski yazım tek bir kesik koni bağıntısı kullanıyordu ama BOYU
+        # konverjanı DA içeren toplam boydan (contour['total_length']),
+        # YARIÇAPLARI ise yalnız diverjandan (r_t, r_e) alıyordu. Yani
+        # yayımlanan sayı ne konverjanın ne diverjanın ne de ikisinin
+        # hacmiydi. ÖLÇÜLDÜ (1 Eylül 2026, taban 6fde52b; r_t = 30 mm,
+        # eps = 8, Pc = 40 bar, gamma = 1,20, R = 350, T_c = 3400 K):
+        #   bell      2279,8867 ⟷ 2039,7213 cm³  -> oran 1,117744
+        #   conical   2683,4812 ⟷ 2443,3158 cm³  -> oran 1,098295
+        #   parabolic 2341,1584 ⟷ 2100,9930 cm³  -> oran 1,114310
+        # (yalnız diverjan referansı sırasıyla 1878,5576 / 2282,1521 /
+        # 1939,8293 cm³ — yani eski sayı bu ikisinden HİÇBİRİ değildi.)
+        # Doğru yazım: her bölüm kendi kesik konisiyle toplanır
+        #   V = pi*L*(r_1^2 + r_1*r_2 + r_2^2)/3      (kesik koni hacmi)
+        # konverjan r_oda -> r_t boyunca L_c, diverjan r_t -> r_e boyunca
+        # L_d. Kaynak: kesik koni hacmi (temel geometri); bölüm boyları ve
+        # oda yarıçapı konturun KENDİ yayımladığı alanlardan gelir, yani
+        # ikinci bir geometri kaynağı doğmaz.
+        r_chamber = float(contour['convergent']['chamber_radius']) / 1000.0
+        L_conv = float(contour['convergent']['length']) / 1000.0
+        L_div_geo = float(contour['divergent']['length']) / 1000.0
+        volume = (
+            np.pi * L_conv * (r_chamber**2 + r_chamber * rt + rt**2) / 3.0
+            + np.pi * L_div_geo * (rt**2 + rt * re + re**2) / 3.0
+        )
         
         # --- Cidar kalınlığı ve kütle (F049; gerekçe docstring'de) ---
         # v2.6.26 (O3): çağıran malzeme vermediğinde SESSİZCE çeliğe düşülüyor,
@@ -890,78 +1098,23 @@ class NozzleDesigner:
                  f"'{self._DEFAULT_WALL_MATERIAL}' ({rho_wall:.0f} kg/m3)")),
         }
     
-    def calculate_nozzle_flow_properties(self, nozzle_data: Dict, 
-                                       mass_flow_rate: float,
-                                       chamber_conditions: Dict) -> Dict:
-        """Calculate flow properties throughout the nozzle"""
-
-        # gamma/R/T_c çağıran combustion analizinden gelmeli; sözlükte yoksa
-        # eski hardcoded varsayılanlar kullanılır (geriye uyumlu).
-        gamma = chamber_conditions.get('gamma', 1.25)  # legacy varsayılan 1.25
-        R = chamber_conditions.get('gas_constant', 300)  # J/kg·K (legacy 300)
-        T_chamber = chamber_conditions.get('temperature', 3000)  # K (legacy 3000)
-        P_chamber = chamber_conditions.get('pressure', 40)  # bar
-        
-        # Throat conditions (choked flow)
-        T_throat = T_chamber * (2 / (gamma + 1))
-        P_throat = P_chamber * (2 / (gamma + 1))**(gamma / (gamma - 1))
-        rho_throat = P_throat * 1e5 / (R * T_throat)  # kg/m³
-        v_throat = np.sqrt(gamma * R * T_throat)
-        
-        # Exit conditions
-        expansion_ratio = nozzle_data['basic_dimensions']['expansion_ratio']
-        
-        # Calculate exit Mach number from area ratio
-        # H-2 duzeltmesi: eski formul (P_c/P_e -> M) izentropik basinc-Mach
-        # iliskisiydi, alan-Mach iliskisi DEGIL. Cozucu v2.6.2'de sinif
-        # duzeyine tasindi (NozzleDesigner.mach_from_area_ratio) ki performans
-        # yolu (_calculate_nozzle_performance) ile TEK kaynagi paylassin.
-        M_exit = self.mach_from_area_ratio(expansion_ratio, gamma)
-        
-        # Calculate exit pressure from Mach number
-        P_exit = P_chamber / ((1 + (gamma - 1) / 2 * M_exit**2)**(gamma / (gamma - 1)))
-        T_exit = T_chamber / (1 + (gamma - 1) / 2 * M_exit**2)
-        rho_exit = P_exit * 1e5 / (R * T_exit)
-        v_exit = np.sqrt(2 * gamma * R * T_chamber / (gamma - 1) * 
-                        (1 - (P_exit / P_chamber)**((gamma - 1) / gamma)))
-        
-        # Mach numbers
-        a_throat = np.sqrt(gamma * R * T_throat)
-        a_exit = np.sqrt(gamma * R * T_exit)
-        
-        M_throat = v_throat / a_throat  # Should be 1.0
-        M_exit = v_exit / a_exit
-        
-        return {
-            'chamber': {
-                'temperature': T_chamber,
-                'pressure': P_chamber,
-                'density': P_chamber * 1e5 / (R * T_chamber),
-                'velocity': 0,  # Negligible in chamber
-                'mach_number': 0
-            },
-            'throat': {
-                'temperature': T_throat,
-                'pressure': P_throat,
-                'density': rho_throat,
-                'velocity': v_throat,
-                'mach_number': M_throat,
-                'sonic_velocity': a_throat
-            },
-            'exit': {
-                'temperature': T_exit,
-                'pressure': P_exit,
-                'density': rho_exit,
-                'velocity': v_exit,
-                'mach_number': M_exit,
-                'sonic_velocity': a_exit
-            },
-            'mass_flow_rate': mass_flow_rate,
-            'area_ratios': {
-                'throat': 1.0,
-                'exit': expansion_ratio
-            }
-        }
+    # ÖH D21 / B4-15 — ÖLÜ KOD KALDIRILDI: calculate_nozzle_flow_properties
+    # (72 satır) ürün yolunda HİÇ ÇAĞRILMIYORDU. Ölçüldü (2026-09-04,
+    # `git grep calculate_nozzle_flow_properties`): depoda tek geçiş kendi
+    # tanımıydı; hrma/ altında 0 çağıran, tests/ altında 0 bekçi.
+    # Kaldırılmasının sebebi yalnız ölülük değil, İÇERİĞİ idi — iki
+    # CEBİRSEL ÖZDEŞLİĞİ ölçüm gibi yayımlıyordu:
+    #   M_throat = v_throat / a_throat, oysa aynı gövdede
+    #     v_throat = sqrt(gamma*R*T_throat) = a_throat  ->  M_throat ≡ 1
+    #   M_exit = v_exit / a_exit, oysa v_exit enerji denkleminden,
+    #     T_exit ve P_exit ise alan-Mach kökünden geliyordu; cebirle
+    #     v_exit/a_exit ≡ mach_from_area_ratio(eps, gamma), yani satır
+    #     kendi girdisini geri yazıyordu (bağımsız doğrulama DEĞİL).
+    # Ayrıca gamma/R/T_c için 1.25 / 300 / 3000 sessiz yedeklerini
+    # taşıyordu (fail-closed ihlali). Akış istasyonları ürün yolunda
+    # _calculate_nozzle_performance ve combustion_analysis istasyonlarından
+    # gelir; ikinci bir tanım yeri doğmasın diye geri konmaz.
+    # Bekçi: tests/test_d21_hibrit_a1.py::test_b4_15_*
 
 
 def _bell_length_fraction(noz_type):
@@ -1049,6 +1202,30 @@ def _finite_positive(value):
     return f if (np.isfinite(f) and f > 0) else None
 
 
+#: ÖH V3 CAD · CADI D-T6-4 — örnekleyicinin okuduğu istemci AÇI alanları
+#: (yol, okuma sırası). ÖLÇÜLDÜ (14 Eki, CADI devri): bu alanlardan biri
+#: yayımlanmış ama sonlu bir sayı değilse ('nan', 'inf', '1e400', true,
+#: 'abc') örnekleyici sessizce 30° / 8° / 15° / 15° / 30° varsayılanına
+#: düşüyor ve imalat dosyası (DXF, STL, STEP) HTTP 200 ile iniyordu —
+#: boğaz yayında kapanan sınıfın (D-T5-5) kardeşi. Kapı
+#: (``nozzle_contour_gate``) yalnız bu listedeki yolları adıyla basar;
+#: istek değeri yansıtılmaz.
+NOZZLE_CONTOUR_ANGLE_FIELDS = (
+    'nozzle_contour.divergent.throat_angle',
+    'nozzle_contour.divergent.exit_angle',
+    'nozzle_contour.divergent.half_angle',
+    'nozzle_angles.divergent_half_angle_deg',
+    'nozzle_angles.convergent_half_angle_deg')
+
+
+def _contour_angle_raw_values(div, angles):
+    """``NOZZLE_CONTOUR_ANGLE_FIELDS`` sırasıyla (yol, ham değer) çiftleri."""
+    kaynak = {'nozzle_contour.divergent': div, 'nozzle_angles': angles}
+    for yol in NOZZLE_CONTOUR_ANGLE_FIELDS:
+        blok, alan = yol.rsplit('.', 1)
+        yield yol, kaynak[blok].get(alan)
+
+
 def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26,
                                 require_solved_length=False):
     """Nozul iç akış yolu örneklemesi — 2D kesit, 3D görselleştirme ve CAD
@@ -1080,11 +1257,26 @@ def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26,
             return fb
 
     md = motor_results or {}
-    contour = md.get('nozzle_contour') or {}
-    conv = contour.get('convergent') or {}
-    div = contour.get('divergent') or {}
+    # ÖH V3 CAD · CADK — blok TİPİ (girdi yolu, fail-closed). ÖLÇÜLDÜ
+    # (14 Eki, katı örnek): ``nozzle_contour.convergent = 5`` ya da
+    # ``divergent = [1]`` gövdesi ``.get`` çağrısında AttributeError veriyor,
+    # ``/api/export-dxf`` ve ``/api/export-stl-zip`` HTTP 500 dönüyordu.
+    # Sözlük olmayan (dolu) blok 'yayımlanmış ama okunamayan' sayılır:
+    # çizim/görünüm yolu boş blokla sürer, imalat kapısı adlı ret verir
+    # (yakınsak blok -> boğaz yayı okunamaz; ıraksak blok ve açı bloğu ->
+    # içindeki açı yolları okunamaz).
+    def _blok(ust, ad):
+        ham = ust.get(ad)
+        if isinstance(ham, dict):
+            return ham, False
+        return {}, bool(ham)
+    contour, _kontur_bozuk = _blok(md, 'nozzle_contour')
+    conv, _conv_bozuk = _blok(contour, 'convergent')
+    div, _div_bozuk = _blok(contour, 'divergent')
+    _conv_bozuk = _conv_bozuk or _kontur_bozuk
+    _div_bozuk = _div_bozuk or _kontur_bozuk
     ds_noz = (md.get('design_summary') or {}).get('nozzle') or {}
-    angles = md.get('nozzle_angles') or {}
+    angles, _aci_bozuk = _blok(md, 'nozzle_angles')
 
     D_ch = _num(md.get('chamber_diameter'), 0.1) * 1000
     d_t = _num(md.get('throat_diameter'), 0.02) * 1000
@@ -1115,6 +1307,30 @@ def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26,
             f'({L_div_source}); refusing to build a manufacturing model from '
             'an unsolved length')
     Rn = _num(conv.get('throat_radius_curvature'), 0.382 * rt)
+    # ÖH V3 CAD · CADI D-T6-4 — yayımlanmış ama OKUNAMAYAN açı alanları.
+    # Yukarıdaki ``_num`` sonlu olmayan açıyı SESSİZCE 30°/8°/15°/30°
+    # varsayılanına düşürür (çizim/görünüm yolu bunu sürdürür); imalat
+    # kontur kapısı bu listeyi okur ve adlı ret verir. Alan HİÇ yoksa
+    # (``None``) kayıtlı varsayılan + beyan aynen sürer, listeye girmez.
+    from hrma.utils.input_guard import finite_number as _finite_number
+    _bozuk_blok = {'nozzle_contour.divergent': _div_bozuk,
+                   'nozzle_angles': _aci_bozuk}
+    unreadable_angle_fields = [
+        yol for yol, ham in _contour_angle_raw_values(div, angles)
+        if _bozuk_blok[yol.rsplit('.', 1)[0]]
+        or (ham is not None and _finite_number(ham) is None)]
+    # İmalat kontur kapısının okuduğu boğaz yayı: yayımlanmamışsa çizilen
+    # Rao değeri; yayımlanmış ama sonlu bir sayı DEĞİLSE (ör. "nan", "inf",
+    # true, "abc") NaN — çizim yukarıdaki Rao yedeğine düşer, ama kapı bu
+    # sessiz yedeği imalata geçirmez (ölçüldü 14 Eki: beşi de DXF'te 200).
+    _rn_ham = conv.get('throat_radius_curvature')
+    if _conv_bozuk:
+        Rn_kapi = float('nan')
+    elif _rn_ham is None:
+        Rn_kapi = Rn
+    else:
+        from hrma.utils.input_guard import finite_number
+        Rn_kapi = finite_number(_rn_ham, float('nan'))
 
     pts = []
     for i in range(n_conv):  # konverjan: iki uçta sıfır eğimli kosinüs
@@ -1156,8 +1372,168 @@ def sample_nozzle_inner_contour(motor_results, n_conv=27, n_arc=14, n_div=26,
     # açıdan türetilen boydan ~%1 farklıdır); source o boyun nereden geldiğini
     # söyler. Tüketici 'NOT SOLVED' ile başlayan bir kaynağı görürse boyun
     # hesaplanmadığını bilir (sessiz varsayım yok).
+    # ``throat_radius_curvature_mm``: boğaz yayı yarıçapı — yayımlanan değer
+    # (sonlu değilse NaN) ya da yayımlanmamışsa çizilen Rao 0,382·rt. İmalat
+    # kontur kapısı (``nozzle_contour_gate``) onu buradan okur; alan yolunu
+    # ikinci kez yazmaz.
     meta = {'z_throat': z_throat, 'z_exit': z_exit,
             'r_throat': rt, 'r_exit': pts[-1][1], 'noz_type': noz_type,
             'divergent_length_mm': z_exit - z_throat,
-            'divergent_length_source': L_div_source}
+            'divergent_length_source': L_div_source,
+            'throat_radius_curvature_mm': Rn_kapi,
+            'unreadable_angle_fields': unreadable_angle_fields}
     return pts, meta
+
+
+# ---------------------------------------------------------------------------
+# LÜLE KONTURU İMALAT KAPISI — TEK İŞLEV (ÖH V3 CAD · §28-41, CADP D-T5-5)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (14 Eki, CADP ``kanit/t5/14n_kardes_uclar.txt``): istemciden gelen
+# ``nozzle_contour.convergent.throat_radius_curvature`` 0 ya da −5 mm iken
+# ``/api/export-step`` adlı 422 veriyordu (pürüzsüz yüzey kapısı), ama aynı
+# gövdeye ``/api/export-dxf`` ve ``/api/export-stl-zip`` HTTP 200 ile lüle
+# dosyası üretiyordu: örnekleyici istemci değerini yalnız sonluluk için
+# süzüyordu. −5 mm'de yay eksen boyunca GERİ döner ve boğazı daraltır; 0'da
+# yay tek noktaya çöker (yayımlanan boğaz eğriliği fiziksel bir uzunluk
+# değildir).
+#
+# Kapı BURADA, örnekleyicinin yanında TEK işlevdir: STEP (B-spline eğrisini
+# ``curve_builder`` ile kurar), DXF, çizim PDF'i ve STL (çokgen; eğri =
+# noktaların kendisi) AYNI denetimden geçer. Ağır çekirdek (OCC) gerekmez;
+# STEP'e özgü eğri kuruluşu çağırandan gelir.
+#: Ardışık iki kontur noktası bu mesafeden (mm) yakınsa tek nokta sayılır:
+#: interpolasyon çakışık noktada kurulamaz (ör. boğaz eğrilik yarıçapı 0
+#: yayımlanırsa yay noktalarının hepsi boğazdadır). 1 nm; STEP konum
+#: toleransının (10 µm) çok altında, geometriyi değiştirmez.
+CONTOUR_POINT_MERGE_MM = 1e-6
+#: Eğri, kontur noktalarının yarıçap zarfından [min r, max r] en çok bu
+#: kadar (mm) taşabilir. Gerekçe: STEP konum çözünürlüğü 10 µm (A1 TOLERANS
+#: tablosu, 'step_mm'). Taşma bundan büyükse eğri BOĞAZI daraltıyor ya da
+#: zarfı büyütüyor demektir; yayımlanan ölçü değişeceği için ret.
+#: ÖLÇÜLDÜ (14 Eki, örnek motorlar ve konik/bell ikizleri): yayımlanan
+#: konturda boğaz altı taşma en çok 0,71 µm; boğaz eğrilik yarıçapı 0
+#: gönderilirse 13-430 µm (sivri boğazı eğri yuvarlayıp daraltıyor).
+CONTOUR_ENVELOPE_TOLERANCE_MM = 0.01
+#: Ret kayıtlarının alan adı (aile sözleşmesi ``invalid_fields``).
+NOZZLE_CONTOUR_FIELD = 'nozzle_contour'
+#: Kapının ret gerekçeleri. İlk altısı pürüzsüz yüzey turunun (STEP)
+#: gerekçeleridir; ``contour_turns_back`` çokgen tüketicilerin (DXF, PDF,
+#: STL) geri dönme gerekçesidir (B-spline'ınki
+#: ``contour_interpolation_oscillates``), ``throat_radius_curvature_not_
+#: positive`` yayımlanan boğaz yayının kendisidir. i18n anahtarları
+#: ``cad_visualization.CONTOUR_GATE_REASON_KEYS``.
+NOZZLE_CONTOUR_REASONS = (
+    'non_finite_contour_point', 'too_few_contour_points',
+    'contour_interpolation_failed', 'contour_interpolation_oscillates',
+    'contour_outside_point_envelope', 'contour_profile_not_closed',
+    'contour_turns_back', 'throat_radius_curvature_not_positive',
+    'contour_angle_not_finite')
+
+
+class NozzleContourError(ValueError):
+    """Lüle konturu imalat kapısının adlı reddi.
+
+    ``reason`` makine kodu (``NOZZLE_CONTOUR_REASONS``), ``message`` EN
+    cümle — istek değerini YANSITMAZ (güvenlik: yansıtılan kullanıcı metni
+    yok). ``invalid_fields`` aile sözleşmesi.
+    """
+
+    def __init__(self, reason, message):
+        super().__init__(message)
+        self.reason = reason
+        self.message = message
+        self.invalid_fields = [{'field': NOZZLE_CONTOUR_FIELD,
+                                'reason': reason}]
+
+
+def _contour_points_merged(points_zr):
+    """Sonlu (z, r) listesi; ardışık çakışık noktalar teke indirilir.
+
+    Sayı okuması merkezden (``input_guard.finite_number``; OH-D27-11):
+    çevrilemeyen, sonlu olmayan ya da ``bool`` değer reddedilir."""
+    from hrma.utils.input_guard import finite_number
+    pts = []
+    for z_ham, r_ham in points_zr:
+        z, r = finite_number(z_ham), finite_number(r_ham)
+        if z is None or r is None or r < 0.0:
+            raise NozzleContourError(
+                'non_finite_contour_point',
+                'the nozzle contour has a non-finite or negative-radius point')
+        if pts and np.hypot(z - pts[-1][0], r - pts[-1][1]) <= \
+                CONTOUR_POINT_MERGE_MM:
+            continue
+        pts.append((z, r))
+    return pts
+
+
+def nozzle_contour_gate(points_zr, straight_tail=False, curve_builder=None,
+                        throat_radius_curvature_mm=None,
+                        unreadable_angle_fields=None):
+    """Lüle konturu imalat kapısı — STEP, DXF, PDF ve STL için TEK işlev.
+
+    ``points_zr``: ``sample_nozzle_inner_contour`` noktaları [(z, r) mm].
+    ``curve_builder``: verilirse ``curve_builder(pts) -> (eğri, zs, rs)``
+    imalat yüzeyini kurar (STEP: B-spline) ve eğrinin örneklerini döndürür;
+    kuruluş başarısızsa kendisi ``NozzleContourError`` yükseltir. Verilmezse
+    çizilen eğri noktaların kendisidir (çokgen: DXF, PDF, STL).
+    ``throat_radius_curvature_mm``: verilirse sonlu ve pozitif olmalı.
+    ``unreadable_angle_fields``: örnekleyici ``meta``sının aynı adlı alanı —
+    yayımlanmış ama sonlu olmayan açı yolları; boş değilse ret (D-T6-4).
+
+    Sıra (gerekçe sırası sabittir): nokta sonluluğu → nokta sayısı →
+    eğri kuruluşu → geri dönme / ekseni kesme → yarıçap zarfı → boğaz yayı
+    → açı alanları.
+    Döner: ``(noktalar, eğri)``; eğri yalnız ``curve_builder`` ile dolu.
+    """
+    from hrma.utils.input_guard import finite_number
+    pts = _contour_points_merged(points_zr)
+    if len(pts) < (3 if straight_tail else 2):
+        raise NozzleContourError(
+            'too_few_contour_points',
+            'the nozzle contour has too few distinct points to build a '
+            'surface')
+    if curve_builder is None:
+        egri = None
+        zs = np.array([z for z, _r in pts])
+        rs = np.array([r for _z, r in pts])
+        geri_neden, geri_metin = (
+            'contour_turns_back',
+            'the nozzle contour turns back along the axis or reaches it')
+    else:
+        egri, zs, rs = curve_builder(pts)
+        zs, rs = np.asarray(zs, dtype=float), np.asarray(rs, dtype=float)
+        geri_neden, geri_metin = (
+            'contour_interpolation_oscillates',
+            'the B-spline through the nozzle contour points oscillates (it '
+            'turns back along the axis or crosses it)')
+    yon = 1.0 if pts[-1][0] >= pts[0][0] else -1.0
+    if np.any(yon * np.diff(zs) < -CONTOUR_POINT_MERGE_MM) or \
+            np.any(rs <= 0.0):
+        raise NozzleContourError(geri_neden, geri_metin)
+    r_noktalar = [r for _z, r in pts]
+    if rs.min() < min(r_noktalar) - CONTOUR_ENVELOPE_TOLERANCE_MM or \
+            rs.max() > max(r_noktalar) + CONTOUR_ENVELOPE_TOLERANCE_MM:
+        raise NozzleContourError(
+            'contour_outside_point_envelope',
+            'the B-spline through the nozzle contour points leaves the '
+            'radius range of the points (it would narrow the throat or widen '
+            'the envelope)')
+    if throat_radius_curvature_mm is not None:
+        rn = finite_number(throat_radius_curvature_mm)
+        if rn is None or rn <= 0.0:
+            raise NozzleContourError(
+                'throat_radius_curvature_not_positive',
+                'the throat radius of curvature '
+                '(nozzle_contour.convergent.throat_radius_curvature) is not a '
+                'positive finite length')
+    if unreadable_angle_fields:
+        # Yalnız sabit listedeki yollar basılır: iletide istekten gelen
+        # metin yok (değer de, bilinmeyen anahtar adı da yansıtılmaz).
+        adlar = [y for y in NOZZLE_CONTOUR_ANGLE_FIELDS
+                 if y in set(unreadable_angle_fields)]
+        raise NozzleContourError(
+            'contour_angle_not_finite',
+            'a published nozzle contour angle is not a finite number ('
+            + (', '.join(adlar) or 'unnamed field') + '); the export does '
+            'not fall back to a default angle')
+    return pts, egri

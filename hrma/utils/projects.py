@@ -31,6 +31,13 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from hrma import __version__ as APP_VERSION
+# Motor türleri TEK KAYNAKTAN gelir (hrma/constants.py). Bu dosyadaki üç
+# kullanım da ÜYELİK sorar ('in' / sorted()), o yüzden merkezde demetten
+# TÜRETİLEN küme biçimi alınır. Takma adla içe aktarılıyor ki modül düzeyinde
+# ikinci bir atama satırı olmasın: 'MOTOR_TYPES = MOTOR_TYPE_SET' yazmak
+# tutarlılık kancasına (check-consistency) yalancı "farklı değer" alarmı
+# verdiriyordu — ölçüldü. Bekçi: tests/test_sabit_tek_kaynak.py (kimlik).
+from hrma.constants import MOTOR_TYPE_SET as MOTOR_TYPES
 
 # --- Sabitler ---------------------------------------------------------------
 
@@ -53,7 +60,8 @@ _WINDOWS_RESERVED = frozenset(
 
 PROJECT_FORMAT_TAG = 'hrma-project'
 PROJECT_FORMAT_VERSION = 1
-MOTOR_TYPES = frozenset(['hybrid', 'solid', 'liquid'])
+# MOTOR_TYPES burada TANIMLI DEĞİLDİR — yukarıda hrma.constants'tan takma adla
+# içe aktarılır (tek tanım noktası).
 
 # Kaydedilen belgede izin verilen üst seviye anahtarlar.
 # Damga alanları (app_version, created_at, updated_at) istemciden gelirse
@@ -532,16 +540,52 @@ def load_project(name: str) -> Tuple[Dict, List[str]]:
     except ProjectValidationError as e:
         raise ProjectCorruptError(f'Project file does not match the schema: {e}')
 
-    warnings: List[str] = []
+    warnings = [load_warning_text(r) for r in load_warning_records(doc)]
+    return doc, warnings
+
+
+# --------------------------------------------------------------------------
+# Yükleme uyarıları — makine kodu + parametre (V3 KK 2. tur, REL D-5)
+# --------------------------------------------------------------------------
+# ÖLÇÜLDÜ (dal tabanı 1b4bbff7): eski sürümle kaydedilmiş proje açılınca
+# uyarı YALNIZ İngilizce düz metindi; proje şeridi onu TR kipinde de
+# İngilizce basıyordu. Uyarı artık sıvı motor uyarılarıyla aynı biçimde
+# ``{code, params, severity}`` kaydıdır; metni arayüz i18n anahtarıyla
+# kurar (EN = TR). ``load_project``ın düz metin listesi GERİYE UYUMLU kalır
+# (aynı kayıtlardan, bu sözlükten kurulur; bayt-aynı).
+LOAD_WARNING_APP_VERSION_MISMATCH = 'warn.project.app_version_mismatch'
+LOAD_WARNING_MISSING_STAMP = 'warn.project.missing_stamp'
+#: Sunucunun İngilizce yedek metinleri (i18n_common.js 'en' ile birebir;
+#: bekçi tests/test_v3_kucuk.py::TestProjeYuklemeUyarisi).
+_LOAD_WARNING_TEXT_EN = {
+    LOAD_WARNING_APP_VERSION_MISMATCH: (
+        'Project was saved with app version {saved_version}; '
+        'current version is {current_version}'),
+    LOAD_WARNING_MISSING_STAMP: "Project file is missing the '{stamp}' stamp",
+}
+_LOAD_STAMPS = ('app_version', 'created_at', 'updated_at')
+
+
+def load_warning_records(doc: Dict) -> List[Dict]:
+    """Yüklenen belgenin uyarı kayıtları: ``{code, params, severity}``."""
+    records: List[Dict] = []
     saved_version = doc.get('app_version')
     if isinstance(saved_version, str) and saved_version != APP_VERSION:
-        warnings.append(
-            f'Project was saved with app version {saved_version}; '
-            f'current version is {APP_VERSION}')
-    for stamp in ('app_version', 'created_at', 'updated_at'):
+        records.append({'code': LOAD_WARNING_APP_VERSION_MISMATCH,
+                        'severity': 'warning',
+                        'params': {'saved_version': saved_version,
+                                   'current_version': APP_VERSION}})
+    for stamp in _LOAD_STAMPS:
         if stamp not in doc:
-            warnings.append(f"Project file is missing the '{stamp}' stamp")
-    return doc, warnings
+            records.append({'code': LOAD_WARNING_MISSING_STAMP,
+                            'severity': 'warning',
+                            'params': {'stamp': stamp}})
+    return records
+
+
+def load_warning_text(record: Dict) -> str:
+    """Kaydın İngilizce yedek metni (``load_project`` düz listesi)."""
+    return _LOAD_WARNING_TEXT_EN[record['code']].format(**record['params'])
 
 
 def list_projects() -> List[Dict]:
@@ -579,6 +623,23 @@ def list_projects() -> List[Dict]:
         except ProjectCorruptError as e:
             entry['corrupt'] = True
             entry['reason'] = str(e)
+            entry['reason_kind'] = 'unreadable'
+            entries.append(entry)
+            continue
+
+        # Listeleme, YÜKLEMEYLE AYNI ŞEMA KAPISINDAN geçer. Eskiden burada
+        # yalnız "geçerli JSON + kök sözlük" denetimi vardı; şemaya uymayan
+        # bir dosya listede corrupt=False, yani SAĞLAM görünüyor, tıklanınca
+        # load_project ProjectCorruptError veriyordu (2026-08-27 ölçümü:
+        # {"bu": "sema degil"} → listede sağlam, açılışta 'unknown keys: bu').
+        # Liste ile yükleme aynı gerçeği söylemek zorunda: açılamayacak dosya
+        # açılabilir gösterilmez (sessiz vaat yasağı).
+        try:
+            validate_payload(doc)
+        except ProjectValidationError as e:
+            entry['corrupt'] = True
+            entry['reason'] = f'Project file does not match the schema: {e}'
+            entry['reason_kind'] = 'schema'
             entries.append(entry)
             continue
 

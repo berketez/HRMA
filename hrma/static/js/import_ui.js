@@ -90,6 +90,94 @@
     }
 
     // ------------------------------------------------------------------
+    // Yükleme boyut tavanı (V3 güvenlik 5. tur, 14 Eki)
+    // ------------------------------------------------------------------
+    // KUSUR: waitress yollarında tavanı aşan yükleme waitress'in İngilizce
+    // DÜZ METİN 413'ünü alıyor (sg2_waitress devri 3); arayüz ya 'HTTP 413'
+    // ya da makine kodu ('request_body_too_large') basıyordu ve dosyayı
+    // tavanı bilmeden baştan sona gönderiyordu.
+    //
+    // Tavanlar sayfaya SUNUCUDAN gelir: app.py ``inject_upload_limits``
+    // bağlamı → şablondaki <meta name="hrma-upload-limits"> (JSON, bayt).
+    // Bu dosyada tavan sayısı YOKTUR (CLAUDE.md §11). Tavan okunamazsa ön
+    // denetim yapılmaz; sunucu kapısı yine reddeder (asıl kapı sunucudur,
+    // bu denetim yalnız gereksiz gönderimi ve okunmaz iletiyi önler).
+    var UPLOAD_LIMITS_META = 'meta[name="hrma-upload-limits"]';
+    // Birim dönüşümü (sayı değil birim): sunucu iletileri de MB'ı
+    // 1024 × 1024 bayt sayar (hrma/importers/api.py::_payload_too_large).
+    var BYTES_PER_MB = 1024 * 1024;
+    // CSV ucunun SATIR bandı da 413 döner; o bir BOYUT reddi değildir ve
+    // sunucunun kendi iletisi gösterilir (user_data_validation.py
+    // thrust_csv_row_band_error: limit = 'data_rows').
+    var ROW_BAND_LIMIT = 'data_rows';
+    var HTTP_PAYLOAD_TOO_LARGE = 413;
+
+    function uploadLimitBytes(kind) {
+        try {
+            var meta = document.querySelector(UPLOAD_LIMITS_META);
+            if (!meta) return null;
+            var limits = JSON.parse(meta.getAttribute('content') || '');
+            if (!limits || typeof limits !== 'object'
+                || !Object.prototype.hasOwnProperty.call(limits, kind)) return null;
+            var v = limits[kind];
+            // Fail-closed okuma: yalnız pozitif güvenli tamsayı geçerli tavandır
+            return (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) ? v : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function utf8ByteLength(text) {
+        return new Blob([String(text)]).size;
+    }
+
+    // Boyut, tavanın altında görünmesin diye YUKARI yuvarlanır (0,1 MB)
+    function mbText(bytes) {
+        return (Math.ceil(bytes / BYTES_PER_MB * 10) / 10).toFixed(1);
+    }
+
+    function tooLargeMessage(kind, bytes) {
+        var limit = uploadLimitBytes(kind);
+        var size = (typeof bytes === 'number' && isFinite(bytes) && bytes >= 0)
+            ? mbText(bytes) : '?';
+        if (limit === null) {
+            return TF('imp.tooLargeNoLimit', { size: size },
+                'Upload too large: {size} MB.');
+        }
+        var limitMb = limit / BYTES_PER_MB;
+        return TF('imp.tooLarge',
+            { size: size,
+              limit: Number.isInteger(limitMb) ? limitMb : mbText(limit) },
+            'Upload too large: {size} MB; the limit for this upload is {limit} MB.');
+    }
+
+    // Göndermeden ÖNCE: aşıyorsa iletiyi, aşmıyorsa (ya da tavan yoksa) null
+    function uploadSizeError(kind, bytes) {
+        var limit = uploadLimitBytes(kind);
+        if (limit === null || typeof bytes !== 'number' || !isFinite(bytes)) return null;
+        return bytes > limit ? tooLargeMessage(kind, bytes) : null;
+    }
+
+    function assertUploadSize(kind, bytes) {
+        var msg = uploadSizeError(kind, bytes);
+        if (msg) {
+            var err = new Error(msg);
+            err.code = 'upload_too_large';
+            throw err;
+        }
+    }
+
+    // Sunucudan yine de BOYUT 413'ü geldiyse (düz metin ya da JSON) ham
+    // gövde yerine aynı i18n iletisi; boyut 413'ü değilse null. Yanıt
+    // NESNESİ alınır: dönen metin sunucu metni değil, yerel i18n iletisidir.
+    function payloadTooLargeMessage(kind, bytes, resp, data) {
+        var status = resp ? resp.status : null;
+        if (status !== HTTP_PAYLOAD_TOO_LARGE) return null;
+        if (data && data.limit === ROW_BAND_LIMIT) return null;
+        return tooLargeMessage(kind, bytes);
+    }
+
+    // ------------------------------------------------------------------
     // Dosya okuma
     // ------------------------------------------------------------------
     function readFileAsText(file) {
@@ -112,6 +200,9 @@
             Array.isArray(prediction.thrust)) {
             body.prediction = { time: prediction.time, thrust: prediction.thrust };
         }
+        // Sunucu dosya İÇERİĞİNİN UTF-8 baytını tavanla karşılaştırır
+        var contentBytes = utf8ByteLength(content);
+        assertUploadSize('motor_file', contentBytes);
         var resp = await fetch('/api/import/motor-file', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -119,6 +210,9 @@
         });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
+        var tooLarge = payloadTooLargeMessage('motor_file', contentBytes,
+                                              resp, data);
+        if (tooLarge) throw new Error(tooLarge);
         if (!resp.ok || !data || data.status !== 'success') {
             var err = new Error((data && data.error) || ('HTTP ' + resp.status));
             // Karşılaştırma örtüşmese bile motors gövdede kalabilir (sözleşme)
@@ -129,11 +223,14 @@
     }
 
     async function postOrk(file) {
+        assertUploadSize('ork', file.size);
         var form = new FormData();
         form.append('file', file, file.name);
         var resp = await fetch('/api/import/ork', { method: 'POST', body: form });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
+        var tooLarge = payloadTooLargeMessage('ork', file.size, resp, data);
+        if (tooLarge) throw new Error(tooLarge);
         if (!resp.ok || !data || data.status !== 'success') {
             throw new Error((data && data.error) || ('HTTP ' + resp.status));
         }
@@ -160,8 +257,17 @@
         return '>Z';
     }
 
+    /* ÖH D21 / P12aB4-21: sayılar `toFixed` ile basılıyordu, yani her dilde
+       nokta ondalık ayırıcı. Bu değerler `I18N.tf`ye DİZGE olarak gidiyor
+       (tf yalnız `typeof v === 'number'` olanları I18N.number'dan geçirir),
+       bu yüzden TR kipinde "D 24 mm, L 70 mm | yakıt 0.062 kg" çıkıyordu.
+       Biçim tek kaynaktan (I18N.number) gelir; sözlük yoksa toFixed'e
+       düşülür. Sonlu olmayan değer hâlâ '--' basılır: sayı UYDURULMAZ. */
     function fmtNum(v, digits) {
-        return (typeof v === 'number' && isFinite(v)) ? v.toFixed(digits) : '--';
+        if (typeof v !== 'number' || !isFinite(v)) return '--';
+        return (window.I18N && window.I18N.number)
+            ? window.I18N.number(v, digits)
+            : v.toFixed(digits);
     }
 
     // Tek satır meta özeti: ad / üretici / çap / boy / kütleler + impuls sınıfı
@@ -204,5 +310,10 @@
         csvFromCurve: csvFromCurve,
         toast: toast,
         escapeHtml: escapeHtml,
+        uploadLimitBytes: uploadLimitBytes,
+        utf8ByteLength: utf8ByteLength,
+        uploadSizeError: uploadSizeError,
+        assertUploadSize: assertUploadSize,
+        payloadTooLargeMessage: payloadTooLargeMessage,
     };
 })();

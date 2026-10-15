@@ -103,7 +103,14 @@ def test_iki_faz_girdileri_cozucunun_kendi_buyuklukleri(temel):
     assert kullanilan['throat_diameter_m'] == pytest.approx(
         res['throat_diameter'] / 1000.0)
     assert kullanilan['chamber_pressure_bar'] == pytest.approx(float(e.P_c))
-    assert kullanilan['gamma'] == pytest.approx(float(e.gamma))
+    # ÖH KİTAP p1b 3. tur (karar §28-47 Ş2-2 (a), denetim Ş2-3): modüle
+    # giden gamma çözücünün donmuş gaz kuralındandır (``_frozen_gas_gamma``;
+    # §28-36 Ş-2 A) — genleşme gamma'sı (e.gamma) değil. APCP'de bu değer
+    # kâhinin CEA donmuş oda GAMMAs'ıdır (kâhin sabitiyle de karşılaştırılır).
+    from tests.test_kitap_p1b import CEA_DONMUS_GAMMA_S, TOL_GAMMA
+    assert kullanilan['gamma'] == pytest.approx(float(e._frozen_gas_gamma()))
+    assert kullanilan['gamma'] == pytest.approx(CEA_DONMUS_GAMMA_S,
+                                                abs=TOL_GAMMA)
     assert kullanilan['molecular_weight_g_mol'] == pytest.approx(
         float(e.mw_exhaust))
 

@@ -7,7 +7,8 @@ tarafından kaydedilir; bu modül app.py'yi import ETMEZ (bağımsız kalır).
 Güvenlik notları:
   - Yüklenen dosya adı ASLA disk yolunda kullanılmaz; içerik ``tempfile``
     ile üretilen güvenli geçici yola yazılır (yol traversal imkansız).
-  - Uzantı beyaz listesi (.step/.stp) + 50 MB boyut sınırı (Content-Length
+  - Uzantı beyaz listesi (.step/.stp) + boyut sınırı (uygulamanın genel
+    gövde tavanı, 32 MiB: ``hrma/security/body_limit.py``; Content-Length
     başlığı VE akış okuma sırasında çift kontrol; chunked yüklemede başlık
     olmayabilir).
   - STEP düz metindir; ZIP/XML işlenmez (sıkıştırılmış .stpz reddedilir),
@@ -27,6 +28,8 @@ import time
 
 from flask import Blueprint, jsonify, request
 
+from hrma.security.body_limit import REQUEST_BODY_MAX_BYTES
+
 try:
     from hrma.importers.step_import import analyze_step
 except ImportError:  # paket __init__ henüz yoksa: dosya yolundan yükle
@@ -43,9 +46,13 @@ except ImportError:  # paket __init__ henüz yoksa: dosya yolundan yükle
 # Uç nokta parametreleri (parametre tutarlılığı kuralı: tek yerde tanım;
 # depo genelinde başka upload sınırı tanımı yok — Grep ile doğrulandı).
 # ---------------------------------------------------------------------------
-#: Azami yükleme boyutu (bayt). 50 MB: büyük montaj STEP'leri dahi metin
-#: olarak genelde 10-20 MB'tır; üstü kötü niyet/deneysel kabul edilir.
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+#: Azami yükleme boyutu (bayt): uygulamanın genel gövde tavanı (32 MiB).
+#: Büyük montaj STEP'leri dahi metin olarak genelde 10-20 MB'tır; üstü kötü
+#: niyet/deneysel kabul edilir. V3 SG-07 (c): eskiden burada 50 MB yazıyordu,
+#: ama genel tavan (``app.config['MAX_CONTENT_LENGTH']``) her istekte önce
+#: çalıştığı için 32 MiB üstü bu uca hiç ulaşmıyordu (beyan ⟷ gerçek). Sayı
+#: artık tek kaynaktan gelir; gerekçe ``hrma/security/body_limit.py``.
+MAX_UPLOAD_BYTES = REQUEST_BODY_MAX_BYTES
 #: İzin verilen dosya uzantıları (küçük harf karşılaştırılır).
 ALLOWED_EXTENSIONS = ('.step', '.stp')
 #: Akış okuma parça boyutu (bayt).

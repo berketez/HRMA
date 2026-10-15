@@ -43,6 +43,8 @@ import urllib.parse
 
 import pytest
 
+from tests.support import yedek_dili
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 JS_DIR = REPO_ROOT / 'hrma' / 'static' / 'js'
 BUG_JS = JS_DIR / 'bug_report.js'
@@ -52,9 +54,47 @@ TEMPLATE_DIR = REPO_ROOT / 'hrma' / 'templates'
 NODE = shutil.which('node')
 needs_node = pytest.mark.skipif(NODE is None, reason='node kurulu değil')
 
-# Ayarlar panelini yükleyen (yani "Hata bildir" bölümünü gösterebilecek) sayfalar
-PAGES_WITH_SETTINGS = ['index.html', 'advanced.html', 'solid.html',
-                       'liquid.html', 'formulas.html', 'launch_site.html']
+# ---------------------------------------------------------------------------
+# Kapsam — ÖH FAZ B-4 / FAZ D kuyruğu (elle liste → türetilmiş)
+# ---------------------------------------------------------------------------
+# ``PAGES_WITH_SETTINGS`` 2026-08-27'ye kadar ELLE yazılmış altı dosyaydı.
+# Aynı dosyada bir "liste güncel mi" bekçisi de vardı
+# (``test_ayarlar_paneli_yukleyen_sayfa_listesi_guncel``) — yani hastalık ve
+# ilaç yan yanaydı: liste çürüdüğünde HABER veriliyordu ama yeni sayfa,
+# birisi listeyi elle güncelleyene kadar YÜKLEME SIRASI taramasına
+# GİRMİYORDU. D4'ün ``blowdown_panel.js`` mekanizmasının aynısı: elle liste
+# ile ölçüt arasına düşen dosya taranmaz.
+#
+# Ölçüt tek cümle: **``settings_panel.js``i yükleyen şablon** ayarlar
+# panelini (dolayısıyla "Hata bildir" bölümünü) gösterebilir; tarama onun
+# üstünde koşar. Ölçüt mekaniktir, elle muafiyet listesi yoktur.
+#
+# ÖLÇÜM (2026-08-27, bu depo): 8 şablonun 6'sı paneli yüklüyor — elle
+# listenin birebir aynısı; kapsam dışı kalan ``simple.html`` ve
+# ``uzaytek.html`` ayarlar panelini hiç yüklemiyor.
+#
+# ÖH D36 sökümü (Berke 23 Eyl, dalga36/sokum): paneli yüklemeyen bu iki
+# şablon silindi; bugün 6 şablonun 6'sı kapsamda.
+
+SETTINGS_SRC = '/static/js/settings_panel.js'
+BUG_SRC = '/static/js/bug_report.js'
+
+
+def _ayarlar_sayfalari(sablon_dizini=None):
+    """Ayarlar panelini yükleyen şablonların adları (türetilmiş)."""
+    d = TEMPLATE_DIR if sablon_dizini is None else sablon_dizini
+    return sorted(p.name for p in d.glob('*.html')
+                  if SETTINGS_SRC in p.read_text(encoding='utf-8'))
+
+
+#: Elle liste döneminin kapsamı — TABAN (türetme daralırsa kırmızı).
+TARIHSEL_PAGES_WITH_SETTINGS = ('index.html', 'advanced.html', 'solid.html',
+                                'liquid.html', 'formulas.html',
+                                'launch_site.html')
+
+#: Ayarlar panelini yükleyen (yani "Hata bildir" bölümünü gösterebilecek)
+#: sayfalar — TÜRETİLMİŞ; yeni sayfa kendiliğinden taranır.
+PAGES_WITH_SETTINGS = _ayarlar_sayfalari()
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +324,7 @@ class TestSurumDurustlugu:
     def test_altbilgi_yedegi_calisiyor(self, tmp_path):
         """formulas.html sürümü yalnız altbilgi metninde taşıyor."""
         out = _run(_base_spec(globals={},
-                              footerText='UZAYTEK Motor Analysis v2.6.27 | ...'),
+                              footerText='HRMA - Rocket Motor Analysis v2.6.27 | ...'),
                    tmp_path)
         assert out['env']['version'] == '2.6.27'
         assert out['env']['version_basis'] == '.footer'
@@ -746,6 +786,10 @@ Object.defineProperty(Node.prototype, 'innerHTML', {
 Node.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 Node.prototype.getAttribute = function (k) {
     return (k in this.attrs) ? this.attrs[k] : null; };
+// ÖH D22 / P12aB5-12: taklit DOM `removeAttribute`i uygulamıyordu; ürün
+// kodu durum satırını TEMİZLERKEN (setStatus(node, null)) onu çağırıyor.
+// Eksik olan standart DOM yöntemiydi, ürün kusuru değil.
+Node.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
 Node.prototype.appendChild = function (c) {
     c.parent = this; this.children.push(c); return c; };
 Node.prototype.addEventListener = function (n, fn) {
@@ -924,13 +968,44 @@ class TestSablonlar:
         assert panel != -1
         assert bug < panel, sayfa + ': bug_report.js panelden sonra yükleniyor'
 
-    def test_ayarlar_paneli_yukleyen_sayfa_listesi_guncel(self):
-        """Yeni bir sayfa ayarlar panelini yüklerse bu test onu yakalar."""
-        yukleyen = sorted(p.name for p in TEMPLATE_DIR.glob('*.html')
-                          if '/static/js/settings_panel.js'
-                          in p.read_text(encoding='utf-8'))
-        assert yukleyen == sorted(PAGES_WITH_SETTINGS), (
-            'ayarlar panelini yükleyen sayfa kümesi değişti: ' + str(yukleyen))
+    def test_ayarlar_paneli_yukleyen_sayfa_listesi_guncel(self, tmp_path):
+        """Kapsam kaynaktan türetilir ve elle liste dönemini KAPSAR.
+
+        ÖH Faz B-4 (FAZ D kuyruğu). Bu bekçi 2026-08-27'ye kadar elle
+        listeyle türetilmiş kümenin EŞİTLİĞİNİ sınıyordu; liste artık
+        türetildiği için o iddia totolojiye dönüşürdü. Yerine iki yönlü
+        kilit kondu:
+          * türetme daralırsa (ölçüt çürür, betik yolu değişir) elle liste
+            döneminin altı sayfası kaybolur → kırmızı;
+          * türetme genişlerse yeni sayfa YÜKLEME SIRASI taramasına
+            kendiliğinden girer (yukarıdaki parametrik bekçi) — eskiden
+            bu ancak listeyi elle güncelledikten sonra oluyordu.
+
+        Ölçüldü (2026-08-27): 8 şablonun 6'sı ayarlar panelini yüklüyor.
+        ÖH D36 sökümünden sonra: 6 şablonun 6'sı (bkz. aşağıdaki not).
+        """
+        turetilmis = _ayarlar_sayfalari()
+        assert set(TARIHSEL_PAGES_WITH_SETTINGS) <= set(turetilmis), (
+            'türetilmiş kapsam elle liste döneminden DAR: kaybolan %s '
+            '(türetilen: %s) — ölçüt (%r atfı) çürümüş olabilir'
+            % (sorted(set(TARIHSEL_PAGES_WITH_SETTINGS) - set(turetilmis)),
+               turetilmis, SETTINGS_SRC))
+        assert turetilmis == PAGES_WITH_SETTINGS, (
+            'modül yüklenirken türetilen kapsam ile şimdi türetilen farklı')
+        tum = sorted(p.name for p in TEMPLATE_DIR.glob('*.html'))
+        assert set(turetilmis) <= set(tum)
+        # Vakum koruması — ölçüt AYIRT EDİYOR mu? Eskiden "kapsam, şablon
+        # kümesinin ÖZ altkümesi" diye gerçek ağaçtan ölçülüyordu; paneli
+        # yüklemeyen yalnız iki şablon vardı (simple/uzaytek) ve ÖH D36'da
+        # söküldü (Berke 23 Eyl, dalga36/sokum), bugün 6 şablonun 6'sı
+        # kapsamda. Ayırt etme artık iki dosyalık yapay dizinde ölçülür:
+        # paneli yükleyen alınır, yüklemeyen alınmaz.
+        (tmp_path / 'yukler.html').write_text(
+            '<script src="%s"></script>' % SETTINGS_SRC, encoding='utf-8')
+        (tmp_path / 'yuklemez.html').write_text(
+            '<script src="/static/js/i18n.js"></script>', encoding='utf-8')
+        assert _ayarlar_sayfalari(tmp_path) == ['yukler.html'], (
+            'ölçüt ayırt etmiyor — bekçi vakumlanmış olabilir')
 
     def test_betik_dosyasi_var_ve_bos_degil(self):
         assert BUG_JS.exists()
@@ -1003,14 +1078,34 @@ class TestMetinler:
             assert bulunan, path.name + ': hiç shell.bug.* çağrısı bulunamadı'
 
     def test_yedek_metinler_ingilizce(self):
-        """Yedekler İngilizcedir (çeviri sözlükten gelir) — Türkçe kaçmasın."""
-        kaynak = BUG_JS.read_text(encoding='utf-8')
-        yedekler = re.findall(r"T\(\s*'shell\.bug\.[^']+'\s*,\s*'([^']*)'",
-                              kaynak)
-        assert yedekler, 'yedek metin bulunamadı (desen değişmiş olabilir)'
-        for y in yedekler:
-            assert not re.search(r'[çğıöşüÇĞİÖŞÜ]', y), \
-                'İngilizce yedekte Türkçe harf: ' + y
+        """Yedekler İngilizcedir (çeviri sözlükten gelir) — Türkçe kaçmasın.
+
+        ÇEVRİLDİ (ÖH D22 · P13B2-06). İki kusur birden vardı:
+
+        1. **Kilitlenen karar kopyalanmıştı.** "Yedek dili İngilizcedir"
+           bir tasarım kararıdır; kararı değiştirmek isteyen önce bu
+           bekçiyi taşımak zorunda. Karar artık tek yerde yazılı
+           (``tests/support/yedek_dili.py::YEDEK_DILI``) ve taşıma
+           maliyeti bir satır.
+        2. **Kapsam asimetrikti.** Yasak yalnız ``bug_report.js``in 21
+           yedeğini tarıyordu; aynı ad alanını (``shell.bug.*``) kullanan
+           ``settings_panel.js``in 10 yedeği yasağın DIŞINDAYDI — oysa
+           bir üstteki "yedeği var mı" bekçisi iki dosyayı da tarıyor.
+           Ölçüldü (ÖH D22): kaçak 10 yedek, Türkçe harf taşıyan 0.
+        """
+        toplam = 0
+        for path in (BUG_JS, PANEL_JS):
+            ciftler = yedek_dili.yedekler(path.read_text(encoding='utf-8'),
+                                          'shell.bug.')
+            assert ciftler, (
+                path.name + ': yedek metin bulunamadı (desen değişmiş olabilir)')
+            toplam += len(ciftler)
+            kacak = yedek_dili.dil_kacaklari(ciftler)
+            assert not kacak, (
+                '%s: yedek dili %r iken Türkçe harf taşıyan yedek(ler): %s'
+                % (path.name, yedek_dili.YEDEK_DILI, kacak))
+        assert toplam >= 31, (
+            'yedek metin nüfusu düştü (ÖH D22 tabanı 21+10=31): %d' % toplam)
 
 
 # ===========================================================================

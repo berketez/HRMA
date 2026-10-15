@@ -150,7 +150,17 @@ def test_hibrit_pano_yapisi_korunur():
     gauge = fig["data"][4]
     assert gauge["value"] == pytest.approx(42.0)
     assert gauge["gauge"]["axis"]["range"] == [0, 100]
-    assert gauge["gauge"]["threshold"]["value"] == pytest.approx(50.0)
+    # ÇEVRİLDİ — ÖH D22 / fea-cfd a2, P8B3-09. Eski satır
+    #   assert gauge["gauge"]["threshold"]["value"] == pytest.approx(50.0)
+    # KUSURU KORUYORDU: eşik, tam skalanın yarısı olarak OKUNAN DEĞERDEN
+    # türetiliyordu; aynı fiziksel hız iki koşuda zıt emniyet hükmü alıyordu
+    # (60 m/s bir koşuda kırmızı, öbüründe yeşil — once_p8b3.json). Kaynağı
+    # olmayan hüküm çizgisi kaldırıldı; test artık eşiğin ve bandın
+    # OLMADIĞINI sınıyor. Skala (okuma aralığı) korunur.
+    assert "threshold" not in gauge["gauge"], (
+        "kaynaksız emniyet eşiği geri gelmiş")
+    assert not gauge["gauge"].get("steps"), (
+        "kaynaksız yeşil/kırmızı bant geri gelmiş")
 
 
 def test_hibrit_tank_basinci_yoksa_cubuk_tank_adini_TASIMAZ():
@@ -253,7 +263,15 @@ def test_sivi_pano_uretilir():
         pytest.approx(rates["fuel"]),
     ]
     # Besleme = pompa çıkış basıncı, ΔP = enjektör tasarımından
-    assert fig["data"][1]["x"] == ["Chamber", "Feed", "Inj. ΔP"]
+    #
+    # ÖH D15 / fea-viz a2 (P8B3-17) ÇEVİRİSİ: bu iddia 'Feed' etiketini —
+    # yani DEVRESİZ, hangi hattın çizildiğini söylemeyen adı — kilitliyordu.
+    # Ölçüldü (/calculate_liquid RP-1/LOX): o çubuk birebir
+    # ``pump_discharge_pressure_ox``tur, yakıt pompası çıkışı figürde hiç
+    # yoktur. Etiket artık devreyi ADIYLA söyler. Bu fixture yalnız ox
+    # pompa çıkışını taşıdığı için ikinci çubuk burada çıkmaz (gerçek
+    # koşuda çıkar; bkz. tests/test_d15_fea_viz_a2.py).
+    assert fig["data"][1]["x"] == ["Chamber", "Feed (Ox)", "Inj. ΔP"]
     assert fig["data"][1]["y"] == [
         pytest.approx(100.0), pytest.approx(105.1), pytest.approx(22.0),
     ]
@@ -274,7 +292,14 @@ def test_hibrit_enjektor_hizi_tam_skalayi_asarsa_olcek_buyur():
     fig = _fig(create_performance_plots(HYBRID_MOTOR, inj))
     gauge = fig["data"][-1]
     assert gauge["gauge"]["axis"]["range"] == [0, 150]
-    assert gauge["gauge"]["threshold"]["value"] == pytest.approx(75.0)
+    # ÇEVRİLDİ — ÖH D22 / fea-cfd a2, P8B3-09. Eski satır
+    #   assert gauge["gauge"]["threshold"]["value"] == pytest.approx(75.0)
+    # tam da kusurun kendisini kilitliyordu: skala 150'ye çıkınca eşik de
+    # 75'e KAYIYOR, yani 60 m/s bu koşuda yeşil, 100 m/s skalalı koşuda
+    # kırmızı oluyordu. Skalanın büyümesi (okuma aralığı) korunur; kaynağı
+    # olmayan hüküm eşiği kalktı.
+    assert "threshold" not in gauge["gauge"], (
+        "kaynaksız emniyet eşiği geri gelmiş")
 
 
 # ---------------------------------------------------------------------------
@@ -291,25 +316,53 @@ def test_izgara_panel_sayisina_gore_kurulur():
 
 
 def test_eksik_veride_panel_atlanir():
-    # port_history + enjektör verisi YOK → yalnız 2 çubuk paneli kalır
+    # ÖH D27 / fea-cfd a2 — P8B3-25 ÇEVİRİSİ (gerekçeli).
+    #
+    # ESKİ SÖZLEŞME: ``_titles`` figürün TÜM anotasyonlarını topluyor ve
+    # test "yalnız iki panel başlığı olsun" diyordu. P8B3-25 onarımından
+    # sonra figür bir anotasyon DAHA taşıyor: düşen çubuğun KÜNYESİ
+    # ("Pressure Distribution: Inj. ΔP not reported by this solution").
+    # Eski hâliyle bu test tam da onarımı ENGELLİYORDU: "eksik veri
+    # sessizce düşsün" sözleşmesini koruyordu (ölçüldü, once_a2.json ->
+    # P8B3-25: ``dusen_beyanli: false``). Bekçi panel başlıklarını
+    # sınamaya devam eder, künye anotasyonu ise AYRICA aranır.
     md = {"mdot_total": 0.62, "mdot_ox": 0.53, "mdot_f": 0.09,
           "chamber_pressure": 30.0, "tank_pressure": 50.0}
     fig = _fig(create_performance_plots(md, None))
-    assert _titles(fig) == ["Mass Flow Rates", "Pressure Distribution"]
+    basliklar = [t for t in _titles(fig) if not t.startswith("- ")]
+    assert basliklar == ["Mass Flow Rates", "Pressure Distribution"]
+    kunyeler = [t for t in _titles(fig) if t.startswith("- ")]
+    assert any("not reported by this solution" in k for k in kunyeler)
     assert fig["layout"]["height"] == 425          # tek satır
 
     # Katıda itki eğrisi yoksa yalnız tasarım basıncı paneli kalır
     fig2 = _fig(create_performance_plots(
         {"grain_type": "bates", "propellant_type": "apcp",
          "chamber_pressure": 40.0}, None))
-    assert _titles(fig2) == ["Pressure Distribution"]
+    assert [t for t in _titles(fig2)
+            if not t.startswith("- ")] == ["Pressure Distribution"]
 
 
 def test_hicbir_veri_yoksa_cokmez():
-    for payload in ({}, None, {"garbage": "x"}, {"mdot_ox": None, "mdot_f": None}):
+    # ÖH D27 / fea-cfd a2 — P8B3-22 ÇEVİRİSİ (gerekçeli).
+    #
+    # ESKİ SÖZLEŞME: veri yoksa "No performance data available" yazan boş
+    # figür — ama BAŞLIĞI "Hybrid Rocket Performance Analysis" idi
+    # (ölçüldü, once_a2.json -> P8B3-22: ``bos_baslik``). Yani pano, hiçbir
+    # çözücünün demediği bir motor tipini İDDİA ederek boşalıyordu. Test
+    # yalnız gövde metnine baktığı için bu iddiayı hiç görmüyordu.
+    # YENİ SÖZLEŞME: çökmeme + boş gövde AYNEN korunur; ek olarak başlığın
+    # bir motor tipi iddia ETMEDİĞİ sınanır ve gerekçe alan adıyla aranır.
+    for payload in ({}, None, {"garbage": "x"},
+                    {"mdot_ox": None, "mdot_f": None}):
         fig = _fig(create_performance_plots(payload, None))
         assert fig["data"] == []
-        assert "No performance data available" in json.dumps(fig["layout"])
+        yerlesim = json.dumps(fig["layout"])
+        assert "could not be determined" in yerlesim
+        assert "motor_type" in yerlesim
+        assert "Hybrid" not in fig["layout"]["title"]["text"]
+        assert "Solid" not in fig["layout"]["title"]["text"]
+        assert "Liquid" not in fig["layout"]["title"]["text"]
 
 
 def test_bozuk_seriler_paneli_dusurur_hata_atmaz():

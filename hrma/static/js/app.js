@@ -17,86 +17,150 @@ function SRV(text) {
         ? window.I18N.serverText(text) : text;
 }
 
+/* ÖH D35 / OH-GT-25 — EKRAN SAYISI TEK KAYNAKTAN (i18n.js kanonu).
+
+   ÖLÇÜLEN KUSUR (docs/scofield/raw/OH/D35/sayi-bicimi/a1/once.json +
+   ana modelin tarayıcı sayımı, 22 Eylül, TR oturum): ekrana giden
+   ondalıklar NOKTA ile basılıyordu — hibrit 202 / katı 210 / sıvı 95
+   noktalı ondalık, buna karşılık yalnız 36 / 20 / 30 virgüllü. Sebep
+   tek bir hata değil, DESENDİ: ayraç kararı her çağrı yerinde ayrı
+   ayrı `toFixed` ile veriliyordu, yani kural ekranın yüzlerce yerinde
+   tekrarlanıyordu.
+
+   Bu üç yardımcı kararı i18n.js'e devreder (`I18N.number` /
+   `I18N.unit` / `I18N.percent`); ayraç `ondalikAyraci()` TEK
+   kaynağından okunur. Basamak sayısı DEĞİŞMEZ: çağıran `toFixed(1)`
+   dediyse yine bir basamak basılır, yalnız ayraç yerelleşir — aksi
+   hâlde ekranda ölçülmemiş bir duyarlık ilan edilirdi (i18n.js:309
+   künyesi). Sözlük motoru yoksa eski davranışa düşülür: sayı
+   UYDURULMAZ, yalnız ayraç yerelleşmez (panellerin `_num` deseni,
+   cfd_panel.js:207). `typeof window` kontrolü BİLEREK: solid.html'in
+   dürüst biçimlendirici bloğu node'da DOM'suz koşturuluyor
+   (tests/test_ui_no_fabricated_numbers.py). */
+// ÖH D36 · A-3 + G-1 — hibrit sayfasının yeni metinleri app.* anahtarlarıdır
+// ve i18n_common.js'te durur; şablon (advanced.html) yalnız i18n_advanced.js
+// anahtarlarını kullanır (tests/test_i18n_advanced.py sözleşmesi). Metni bu
+// dosya kurar, şablon yalnız veriyi verir.
+function tasarimKaynakNotu(kaynak, alanId) {
+    if (kaynak === 'user') return T('app.design.srcUser', 'you edited');
+    if (alanId === 'pressure_drop_percent') {
+        return T('app.design.srcProjectDpNotApplied',
+            'from the project file; not applied, the injector circuit solution takes precedence until you edit this field');
+    }
+    return T('app.design.srcProject', 'from the project file');
+}
+function tasarimDurumSatirlari(giden, kalan) {
+    const satirlar = [];
+    if (giden.length) {
+        satirlar.push(TF('app.design.willSend', { fields: giden.join(', ') },
+                         'Will be sent to the solver: {fields}'));
+    }
+    if (kalan.length) {
+        satirlar.push(TF('app.design.willNotSend', { fields: kalan.join(', ') },
+                         'Not sent, HRMA decides and declares it in the results: {fields}'));
+    }
+    return satirlar;
+}
+function tasarimOneriNotu() {
+    return T('app.design.suggestionNote',
+        'The values shown are suggestions. A field reaches the solver only after you change it (or a project file supplies it); untouched fields are not sent, so HRMA sizes the wall and solves the injector pressure drop itself and declares that in the results.');
+}
+// G-1: "Optimumu Bul" sonucunun künye satırları. Sayı uydurulmaz: bant ve
+// basınç uç yanıtından, kanon son hesabın motor.optimum_of_ratio alanından.
+function optimumKunyeSatirlari(result, motor) {
+    const satirlar = [];
+    const aralik = (result && Array.isArray(result.sweep_range)) ? result.sweep_range : null;
+    if (aralik && aralik.length === 2 && typeof result.chamber_pressure === 'number') {
+        satirlar.push(TF('app.optimum.basis', {
+            lo: numTxt(aralik[0], 2), hi: numTxt(aralik[1], 2),
+            pc: numTxt(result.chamber_pressure, 1)
+        }, 'Found by a sea-level-exit equilibrium search (no nozzle expansion ratio), O/F band {lo} to {hi}, Pc {pc} bar.'));
+    }
+    const kanonOF = motor ? motor.optimum_of_ratio : null;
+    const kanonIsp = motor ? motor.maximum_isp : null;
+    if (typeof kanonOF === 'number' && isFinite(kanonOF)) {
+        satirlar.push(TF('app.optimum.canon', {
+            of: numTxt(kanonOF, 2),
+            isp: (typeof kanonIsp === 'number' && isFinite(kanonIsp)) ? numTxt(kanonIsp, 1) : '-'
+        }, 'Solver canon (design nozzle, last calculation): O/F {of}, Isp {isp} s.'));
+    } else {
+        satirlar.push(T('app.optimum.canonNone',
+            'Solver canon: not available until you run Calculate (the solver searches at the design nozzle).'));
+    }
+    return satirlar;
+}
+function optimumEgriAltYazisi(pcv) {
+    if (!pcv || !Array.isArray(pcv.sweep_range) || typeof pcv.step !== 'number') return null;
+    return TF('app.optimum.curveBasis', {
+        lo: numTxt(pcv.sweep_range[0], 2), hi: numTxt(pcv.sweep_range[1], 2),
+        step: numTxt(pcv.step, 3), n: String(pcv.n_points)
+    }, 'Display grid {lo} to {hi}, step {step}, {n} points, sea-level exit; not the solver canon.');
+}
+
+function numTxt(v, d) {
+    return (typeof window !== 'undefined' && window.I18N && window.I18N.number)
+        ? window.I18N.number(v, d)
+        : ((typeof v === 'number' && isFinite(v))
+            ? (d === undefined ? String(v) : v.toFixed(d)) : String(v));
+}
+function unitTxt(v, unit, d) {
+    return (typeof window !== 'undefined' && window.I18N && window.I18N.unit)
+        ? window.I18N.unit(v, unit, d)
+        : (numTxt(v, d) + (unit ? '\u00A0' + unit : ''));
+}
+function pctTxt(v, d) {
+    return (typeof window !== 'undefined' && window.I18N && window.I18N.percent)
+        ? window.I18N.percent(v, d) : (numTxt(v, d) + '%');
+}
+
 // currentResults is defined in advanced.html to avoid conflicts
 
-// Update injector parameters based on selected type
-function updateInjectorParams() {
-    const injectorType = document.getElementById('injector_type');
-    const paramsDiv = document.getElementById('injectorParams');
-    
-    // Safety checks
-    if (!injectorType || !paramsDiv) {
-        console.log('Injector elements not found, skipping update');
-        return;
-    }
-    
-    let html = '';
-    
-    if (injectorType.value === 'showerhead') {
-        html = `
-            <div id="showerhead_params">
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.targetVelocity">${T('app.inj.targetVelocity', 'Target Velocity (m/s)')}</label>
-                    <input type="number" class="form-control" id="target_velocity" value="30" step="1">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.nHolesAuto">${T('app.inj.nHolesAuto', 'Number of Holes (0 for auto)')}</label>
-                    <input type="number" class="form-control" id="n_holes" value="0" step="1">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.holeDiaMin">${T('app.inj.holeDiaMin', 'Min Hole Diameter (mm)')}</label>
-                    <input type="number" class="form-control" id="hole_diameter_min" value="0.3" step="0.1">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.holeDiaMax">${T('app.inj.holeDiaMax', 'Max Hole Diameter (mm)')}</label>
-                    <input type="number" class="form-control" id="hole_diameter_max" value="2.0" step="0.1">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.plateThickness">${T('app.inj.plateThickness', 'Plate Thickness (mm)')}</label>
-                    <input type="number" class="form-control" id="plate_thickness" value="3.0" step="0.1">
-                </div>
-            </div>
-        `;
-    } else if (injectorType.value === 'pintle') {
-        html = `
-            <div id="pintle_params">
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.outerDiameter">${T('app.inj.outerDiameter', 'Outer Diameter (mm)')}</label>
-                    <input type="number" class="form-control" id="outer_diameter" value="50" step="1">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.pintleDiameter">${T('app.inj.pintleDiameter', 'Pintle Diameter (mm)')}</label>
-                    <input type="number" class="form-control" id="pintle_diameter" value="25" step="1">
-                </div>
-            </div>
-        `;
-    } else if (injectorType.value === 'swirl') {
-        html = `
-            <div id="swirl_params">
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.nSlots">${T('app.inj.nSlots', 'Number of Slots')}</label>
-                    <input type="number" class="form-control" id="n_slots" value="6" step="1">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.slotWidthAuto">${T('app.inj.slotWidthAuto', 'Slot Width (mm, 0 for auto)')}</label>
-                    <input type="number" class="form-control" id="slot_width" value="0" step="0.1">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label" data-i18n="app.inj.slotHeightAuto">${T('app.inj.slotHeightAuto', 'Slot Height (mm, 0 for auto)')}</label>
-                    <input type="number" class="form-control" id="slot_height" value="0" step="0.1">
-                </div>
-            </div>
-        `;
-    }
-    
-    paramsDiv.innerHTML = html;
-    if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(paramsDiv);
-}
+// ENJEKTÖR ALAN KURUCUSU BURADA DEĞİL — templates/advanced.html içindeki
+// inline updateInjectorParams'tadır.
+//
+// ÖH D25 · P11B2-22: burada aynı adlı İKİNCİ bir kopya duruyordu (74
+// satır). Ölçüldü (a3/once.json, taban cdf2106):
+//   * advanced.html app.js'i ÖNCE yükleyip kendi inline sürümünü SONRA
+//     tanımladığı için global bağ onunkiydi; buradaki kopya hiçbir zaman
+//     çalışmıyordu (v2.6.26'da getFormData için ölçülen desenin aynısı).
+//   * Kap adları çaprazlanmıştı: bu kopya `#injectorParams` kabına
+//     yazıyordu, advanced.html'de o kimlik 0 kez geçiyor (`#dynamic_params`
+//     1 kez) — yani çalıştırılsaydı bile "Injector elements not found"
+//     deyip çıkardı.
+//   * Kapsam farkı: bu kopya showerhead/pintle/swirl (3 tip) taşıyordu,
+//     sayfadaki seçici 5 seçenek sunuyor (impingement ve coaxial dahil) ve
+//     şablonun kopyası beşini de kuruyor.
+// Şablondaki kopya kendi `adv.inj.*` anahtarlarıyla çevrilidir, yani
+// çeviri kaybı YOKTUR. Ölü kopyanın 10 `app.inj.*` anahtarı artık
+// hiçbir yerden kullanılmadığı için sözlükten de KALDIRILDI (EN+TR 20
+// kayıt); depo bunu zaten şart koşuyor:
+// tests/test_i18n_common.py::test_every_dictionary_key_is_used.
+//
+// Aşağıdaki DOMContentLoaded ve dil-değişimi çağrıları çalışma anında
+// advanced.html'deki inline sürüme çözülür; sürüm YOKSA (app.js'i
+// tanımsız bir sayfa yüklerse) çağrı SESSİZCE ATLANIR — uydurma alan
+// basılmaz (fail-closed).
 
 // Birim dönüşüm katsayıları — TEK KAYNAK. Arayüz mühendislik birimlerinde
 // (mm, mm²) girdi alır, backend SI (m, m²) bekler; dönüşüm burada tanımlıdır.
 const MM_PER_M = 1000;
 const MM2_PER_M2 = MM_PER_M * MM_PER_M;
+
+// ÖH D25 · P11B2-23 — AÇI BASIMININ TEK KAYNAĞI.
+// ÖLÇÜLDÜ (a3/once.json, taban cdf2106): swirl enjektörle koşulan uç
+// `injector.spray_angle = 90.00000000000001` döndürüyor (çözücü
+// 2*theta_half hesaplıyor, ikili artık kaçınılmaz) ve tasarım raporu bu
+// alanı `${injectorData.spray_angle}°` ile YUVARLAMADAN basıyordu:
+// ekranda "90.00000000000001°" yazıyordu. Aynı tablonun diğer bütün
+// sayıları toFixed(1)/toFixed(2) ile basılıyor ve güvertenin tamamı 6
+// anlamlı basamak kuralına (DOCK_SIGFIG) uyuyor. Sayı GİZLENMEZ, yalnız
+// okunabilir basamağa yuvarlanır; alan yoksa em tire konur (uydurma yok).
+const ACI_BASAMAK = 2;
+function aciBas(v, basamak) {
+    const n = Number(v);
+    if (v === undefined || v === null || !isFinite(n)) return '—';
+    return numTxt(n, basamak === undefined ? ACI_BASAMAK : basamak) + '°';
+}
 
 // Safe parseFloat with fallback - only for NaN/invalid values
 function safeParseFloat(value, fallback = 0) {
@@ -121,11 +185,21 @@ function safeParseFloat(value, fallback = 0) {
 // ALANI YOK (getElementById null donuyordu); app.py bu anahtarlari
 // okuyor ama arayuzden erisilemiyorlar. Silinmeleriyle bir sey kaybolmadi.
 //
-// Asagidaki calculate() / calculateParametric() / calculateTrajectory()
-// cagrilarindaki getFormData(), calisma aninda advanced.html'deki inline
-// surume cozulur. liquid.html ve solid.html app.js'i yukler ama kendi
-// calculateLiquid() / calculateSolid() akislarini kullanir; bu
-// fonksiyonlari cagirmazlar.
+// Aşağıdaki calculate() / calculateParametric() / calculateTrajectory()
+// çağrılarındaki getFormData(), çalışma anında advanced.html'deki inline
+// sürüme çözülür.
+//
+// ÖH D25 · P11B2-22 — YORUM ÖLÇÜMLE DÜZELTİLDİ. Burada "liquid.html ve
+// solid.html app.js'i yükler" yazıyordu; ölçüldü (a3/once.json, taban
+// cdf2106):
+//     grep -l 'js/app.js' hrma/templates altındaki bütün .html
+//     dosyalarında  ->  YALNIZ advanced.html
+//     (glob deseni bilerek yazılmadı: yorum içindeki bir bölü-yıldız
+//      dizisi blok yorum açar ve tarayıcılar dosyanın geri kalanını
+//      yorum sanar — ölçüldü, test_i18n_common strip_comments)
+// liquid.html ve solid.html app.js'i HİÇ yüklemez (kendi inline
+// calculateLiquid() / calculateSolid() akışlarını taşırlar). Yanlış yorum
+// bir sonraki denetimi yine yanlış kopyaya yönlendirirdi.
 
 // Main calculation function
 async function calculate() {
@@ -137,6 +211,29 @@ async function calculate() {
     // Validate inputs
     if (!validateInputs(data)) {
         return;
+    }
+
+    // ÖH D28 · P12bB3-17 — SAYFANIN KENDİ EK DOĞRULAYICISI ARTIK KOŞAR.
+    // ÖLÇÜLDÜ (a3/once_taban.json): `advanced.html` 50 satırlık
+    // `validateFormData()` taşıyor (10 zorunlu alan + O/F 0,1-20,
+    // Pc 1-100 bar, F 1-100000 N, t_b 0,1-300 s) ve depoda ÇAĞRISI YOK
+    // (`validateFormData_cagrisi = 0`); sayfada `<form>` de 0 adet ve
+    // `invalid` olayı bastırılıyor, yani ekranda ilan edilen beş bandın
+    // hiçbiri uygulanmıyordu (ölçülen boşluk: Pc = 400 bar HTTP 200).
+    // Bağlama BURADA yapılır çünkü ortak giriş kapısı budur; şablonun
+    // `calculate`i yeniden tanımlaması gölgeleme (P12bB3-09) üretirdi.
+    // Sayfa böyle bir doğrulayıcı tanımlamadıysa hiçbir şey değişmez.
+    if (typeof window.validateFormData === 'function') {
+        let sayfaHatalari = [];
+        try {
+            sayfaHatalari = window.validateFormData(data) || [];
+        } catch (e) {
+            sayfaHatalari = [];   // doğrulayıcı patlarsa hesap engellenmez
+        }
+        if (Array.isArray(sayfaHatalari) && sayfaHatalari.length) {
+            showError(sayfaHatalari.join(' \u2022 '));
+            return;
+        }
     }
     
     // Show loading indicator
@@ -155,7 +252,10 @@ async function calculate() {
         if (!response.ok) {
             const errorText = await response.text();
             console.error('Error response text:', errorText);
-            throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+            // ÖH D29 · P11B2-16 — HAM GÖVDE KULLANICIYA BASILMAZ.
+            throw new Error(sunucuHataMetni(
+                response.status, response.headers.get('content-type'),
+                errorText));
         }
 
         const responseText = await response.text();
@@ -182,10 +282,7 @@ async function calculate() {
         displayCalculationResults(results);
         
         // Enable export buttons
-        const exportBtn = document.getElementById('exportResultsBtn');
-        if (exportBtn) {
-            exportBtn.disabled = false;
-        }
+        setExportResultsEnabled(true);
         
         // Enable STL and OpenRocket export buttons
         const exportSTLBtn = document.getElementById('exportSTLBtn');
@@ -203,15 +300,130 @@ async function calculate() {
         }
         
     } catch (error) {
+        // ÖH D15 / P11B2-07 — BAYAT SONUÇ EKRANDA KALMAZ.
+        // ÖLÇÜLDÜ (kod yolu): hata dalı yalnız `handleError` çağırıyordu;
+        // `currentResults` bir önceki koşumun değerinde kalıyor, sonuç
+        // paneli açık duruyor, bir önceki koşuda `disabled=false` yapılan
+        // PDF / STL / .eng düğmeleri ETKİN kalıyordu. Kullanıcı bir
+        // parametreyi değiştirip Hesapla'ya basıyor, uyarıyı kapatıyor ve
+        // DEĞİŞTİRDİĞİ PARAMETREYE AİT OLMAYAN sayıları okumaya devam
+        // ediyordu — üstelik o hâliyle dışa aktarabiliyordu.
+        // Emsal aynı depoda: analysis_center.js saklı sonucu `stale`
+        // beyanıyla basar, analysis_dock.js koşumdan önce kabı gizler.
+        invalidateStaleResults();
         handleError(error, 'Main Calculation Function');
     } finally {
         showLoading(false);
     }
 }
 
+// ÖH D15 / P11B2-07 — başarısız koşumdan sonra ekranı kazanılmamış hâle
+// getirir: sonuç kabı gizlenir, dışa aktarım düğmeleri kapanır, saklı
+// sonuç düşürülür. Sayı SİLİNMEZ, GÖSTERİLMEZ: ekranda kalan bir sayı
+// hangi girdiye ait olduğu bilinmeden okunamaz.
+function invalidateStaleResults() {
+    currentResults = null;
+    const panel = document.getElementById('resultsPanel');
+    if (panel) panel.style.display = 'none';
+    ['exportResultsBtn', 'exportSTLBtn', 'downloadEngBtn'].forEach(function (id) {
+        const btn = document.getElementById(id);
+        if (btn) btn.disabled = true;
+    });
+    // OH-GT-09: kapanan düğme nedenini yeniden söyler.
+    setExportResultsEnabled(false);
+    const warningsPanel = document.getElementById('warningsPanel');
+    if (warningsPanel) warningsPanel.style.display = 'none';
+}
+
+// ---------------------------------------------------------------------
+// ÖH D34 · OH-GT-09 — KAPALI DIŞA AKTARIM DÜĞMESİ NEDENİNİ SÖYLER
+// ---------------------------------------------------------------------
+// ÖLÇÜLDÜ (a1/once.json K3): "Sonuçları Dışa Aktar" düğmesi sayfa
+// açılışında `disabled` geliyor, `opacity: .4` ile soluyor AMA hiçbir
+// `title` taşımıyordu (`title_var: false`) ve imleç hâlâ `pointer`dı
+// (`sablonda_btn_disabled_imleci: false`) — yani düğme tıklanabilir
+// görünüyor, tıklanınca hiçbir şey olmuyor ve NEDENİ hiçbir yerde
+// yazmıyordu. İmleç kuralı şablonun kendi stil bloğunda; neden metni
+// burada. Metin YENİ anahtar İSTEMEZ: `app.msg.noResultsExport`
+// (i18n_common.js) tam bu durumu söyleyen mevcut karşılıktır ve
+// `exportReport()` çağrıldığında zaten aynı metin basılır.
+function setExportResultsEnabled(etkin) {
+    const btn = document.getElementById('exportResultsBtn');
+    if (!btn) return null;
+    btn.disabled = !etkin;
+    if (etkin) {
+        btn.removeAttribute('title');
+    } else {
+        btn.title = T('app.msg.noResultsExport', 'No results to export');
+    }
+    return btn;
+}
+
+// ---------------------------------------------------------------------
+// ÖH D24 / P11B2-09 — EKRANDAKİ min/max BEYANI DEKORATİF DEĞİLDİR
+// ---------------------------------------------------------------------
+// ÖLÇÜLDÜ (a3/once.json): advanced.html'de 87 `type="number"` girdisinin
+// 70'i `min` ve/veya `max` BEYAN EDİYOR; `validateInputs` bunların
+// yalnız 8'inin adını anıyor ve onlar için de HTML'deki sayıları değil
+// JS'e ayrıca yazılmış başka eşikleri uyguluyordu. `calculate()` ilk
+// satırında `event?.preventDefault?.()` çağırdığı için tarayıcının kendi
+// min/max denetimi de kapalı. Ölçülen sonuç (P11 B2-repro-14):
+//   oxidizer_temp = -50 K (min=100) -> HTTP 200, ekranda olağan sonuç
+//   l_star = -5 m (min=0.1)         -> HTTP 200, aynı sayılar
+//   wall_thickness = 0.5 mm (min=2) -> Min SF 1,69 -> 0,29, tek uyarı yok
+//
+// TEK KAYNAK: sınır sayıları buraya KOPYALANMAZ. Beyanı yapan yer HTML'dir
+// ve kapı o beyanı okur; ikinci bir eşik tablosu yazmak iki kaynaklı bir
+// sistem üretirdi (aynı kusurun P11B2-09'da ölçülen hâli: HTML min=1 ⟷ JS
+// >200). Boş alan burada HATA DEĞİLDİR — boşluğun hükmü çağıranındır.
+function declaredBoundsErrors() {
+    const errors = [];
+    if (typeof document === 'undefined' || !document.querySelectorAll) {
+        return errors;
+    }
+    const alanlar = document.querySelectorAll('input[type="number"]');
+    for (let i = 0; i < alanlar.length; i++) {
+        const el = alanlar[i];
+        if (el.disabled) continue;
+        // Görünmeyen (kapalı sekme / gizli blok) alanın beyanı bu koşumda
+        // uygulanmaz: kullanıcı onu görmüyor, gövdeye de girmiyor.
+        if (el.offsetParent === null && el.type !== 'hidden'
+            && typeof el.offsetParent !== 'undefined') continue;
+        const ham = (el.value == null) ? '' : String(el.value).trim();
+        if (ham === '') continue;
+        const v = parseFloat(ham);
+        if (!Number.isFinite(v)) continue;
+        const ad = el.getAttribute('data-label')
+            || el.getAttribute('name') || el.id || 'field';
+        const alt = el.getAttribute('min');
+        const ust = el.getAttribute('max');
+        if (alt !== null && alt !== '' && Number.isFinite(parseFloat(alt))
+                && v < parseFloat(alt)) {
+            errors.push(TF('app.val.belowDeclaredMin',
+                { field: ad, value: v, min: alt },
+                '{field} = {value} is below the minimum this form declares '
+                + 'on screen ({min}). The request was not sent.'));
+        }
+        if (ust !== null && ust !== '' && Number.isFinite(parseFloat(ust))
+                && v > parseFloat(ust)) {
+            errors.push(TF('app.val.aboveDeclaredMax',
+                { field: ad, value: v, max: ust },
+                '{field} = {value} is above the maximum this form declares '
+                + 'on screen ({max}). The request was not sent.'));
+        }
+    }
+    return errors;
+}
+
 // Validate inputs
 function validateInputs(data) {
     const errors = [];
+    // Hesabı ENGELLEMEYEN tavsiyeler (OH-D27-01): hüküm ile öğüt ayrı
+    // kanallardır. Öğüt `errors`e konursa sağlıklı tasarım reddedilir.
+    const advisories = [];
+    // Ekranda beyan edilen sınırlar ÖNCE uygulanır: kullanıcı kutunun
+    // yanında yazan sayıya güvenerek yazıyor.
+    Array.prototype.push.apply(errors, declaredBoundsErrors());
     
     // Check for NaN values
     Object.keys(data).forEach(key => {
@@ -235,13 +447,27 @@ function validateInputs(data) {
     } else if (data.tank_pressure <= data.chamber_pressure) {
         const minRequired = data.chamber_pressure * 1.2; // Minimum 20% higher
         errors.push(TF('app.val.tankTooLow',
-            { tank: data.tank_pressure, pc: data.chamber_pressure, min: minRequired.toFixed(1) },
+            { tank: data.tank_pressure, pc: data.chamber_pressure, min: numTxt(minRequired, 1) },
             'Tank pressure ({tank} bar) must be higher than chamber pressure ({pc} bar). '
             + 'Minimum required: {min} bar'));
     } else if (data.tank_pressure < data.chamber_pressure * 1.2) {
+        // ÖH D31 · arayuz-panel a3 — OH-D27-01 (kalemin ÖLÇÜLEN ayağı).
+        //
+        // Bu dal bir TAVSİYEDİR: metni de "Warning: ... should be ..." diyor
+        // ve altındaki hüküm (tank <= hazne) ayrı dalda zaten reddediliyor.
+        // Ama tavsiye `errors` dizisine konduğu için `validateInputs` false
+        // dönüyor ve hesap "Input validation failed" başlığıyla TAMAMEN
+        // ENGELLENİYORDU: %19 marjla çalışan sağlıklı bir tasarım ekranda
+        // bir HATA olarak reddediliyor, kullanıcı hiçbir sayı alamıyordu.
+        // ÖK-22 (sağlıklı envanter gevşetilemez) bu yönde ihlal ediliyordu.
+        //
+        // Tavsiye artık ENGELLEMEZ, susturulmaz da: aynı metin uyarı
+        // kanalına (`showWarning` -> `showMessage`, sayfanın canlı sürümü)
+        // basılır. Eşik BURADA yeni tanımlanmıyor — üstteki dalın kendi
+        // 1,2 katsayısı, aynı ifade, ikinci kez yazılmadı.
         const minRecommended = data.chamber_pressure * 1.2;
-        errors.push(TF('app.val.tankMargin',
-            { tank: data.tank_pressure, min: minRecommended.toFixed(1) },
+        advisories.push(TF('app.val.tankMargin',
+            { tank: data.tank_pressure, min: numTxt(minRecommended, 1) },
             'Warning: Tank pressure ({tank} bar) should be at least 20% higher than '
             + 'chamber pressure. Recommended minimum: {min} bar'));
     }
@@ -284,7 +510,17 @@ function validateInputs(data) {
             + errors.join('\n• '));
         return false;
     }
-    
+
+    // Tavsiyeler hesabı durdurmaz; görünür kalır (susturmak da beyan
+    // kaybı olurdu). Kanal sayfanın canlı `showMessage` sürümüdür.
+    if (advisories.length > 0 && typeof showWarning === 'function') {
+        try {
+            showWarning(advisories.join(' • '));
+        } catch (e) {
+            /* uyarı kanalı yoksa hesap yine de engellenmez */
+        }
+    }
+
     return true;
 }
 
@@ -298,7 +534,10 @@ function displayCalculationResults(results) {
     validateAndFixInjectorDiameter(results);
     
     // Display performance metrics
-    displayPerformanceMetrics(results.motor);
+    // İkinci argüman: yapısal kartın künyesi üst düzey `structural_design_basis`
+    // bloğundan okunur (cidarı kim verdi / hüküm kazanıldı mı) — motor
+    // sözlüğünde o blok YOK.
+    displayPerformanceMetrics(results.motor, results);
     
     // Display plots
     displayPlots(results.plots);
@@ -319,10 +558,12 @@ function displayCalculationResults(results) {
     // cidar kalınlığı, ...) topluyor ama hiçbiri ekrana ulaşmıyordu.
     // Ölçüldü: chamber_material='ZIRVAAA' gönderilen istek HTTP 200 dönüyor,
     // sessizce steel_4130 kullanılıyor ve kullanıcı bunu asla göremiyordu.
-    const engineWarnings = (results.motor && (results.motor.warnings
-        || results.motor.design_warnings)) || [];
-    const injectorWarnings = (results.injector && results.injector.warnings) || [];
-    displayWarnings(engineWarnings.concat(injectorWarnings), results.validation);
+    //
+    // ÖH Z5-A (P14M3-04): kaynak listesi artık collectResultWarnings'te —
+    // dil değişimi yolu (I18N.onChange) burayı KOPYALAMIYOR, aynı toplayıcıyı
+    // çağırıyor. Eski hâlde o yol yalnız enjektör uyarılarını geçiriyordu ve
+    // dil değiştiren kullanıcı motorun kritik uyarılarını kaybediyordu.
+    displayWarnings(collectResultWarnings(results), results.validation);
     
     // Show export panel after successful calculation
     const exportPanel = document.getElementById('exportActionsPanel');
@@ -370,8 +611,8 @@ function validateAndFixInjectorDiameter(results) {
         if (results.injector.outer_diameter > chamberDiameter * 0.9) {
             warn(T('app.warn.injectorTooWide',
                    'Injector outer diameter does not fit the chamber')
-                 + ` (${results.injector.outer_diameter.toFixed(1)} mm > 90% of `
-                 + `${chamberDiameter.toFixed(1)} mm). Increase the chamber `
+                 + ` (${numTxt(results.injector.outer_diameter, 1)} mm > 90% of `
+                 + `${numTxt(chamberDiameter, 1)} mm). Increase the chamber `
                  + `diameter or reduce the injector; the reported values are `
                  + `the solver's and were not adjusted.`);
         }
@@ -380,25 +621,656 @@ function validateAndFixInjectorDiameter(results) {
     if (results.injector.type === 'showerhead') {
         // Kaba yerleşim kontrolü: kare dizilimde delik alanının kapladığı
         // yaklaşık çap. Bu bir TAHMİN, çözüm değil; yalnız uyarı üretir.
-        const effectiveDiameter = Math.sqrt(results.injector.n_holes || 1)
-            * (results.injector.hole_diameter || 1) * 3;
-        if (effectiveDiameter > chamberDiameter * 0.9) {
-            warn(T('app.warn.holePatternTooWide',
-                   'Hole pattern does not fit the chamber face')
-                 + ` (~${effectiveDiameter.toFixed(1)} mm > 90% of `
-                 + `${chamberDiameter.toFixed(1)} mm). Reduce the hole count or `
-                 + `increase the chamber diameter; the reported hole geometry `
-                 + `is the solver's and was not adjusted.`);
+        //
+        // ÖH D25 / P11B2-12 — FAIL-CLOSED. Eskiden delik sayısı ve delik
+        // çapı için `|| 1` yedeği vardı: çözücü bu iki alanı vermediğinde
+        // 1 delik / 1 mm varsayılıyor, uyarı metnine `~3.0 mm` gibi
+        // UYDURULMUŞ bir çap yazılıyordu. Alan yoksa kontrol hiç yapılmaz;
+        // ekrana geçersiz bir sayı çıkmasındansa uyarının hiç çıkmaması
+        // yeğdir (gerçek geometri zaten çözücünün tablosunda görünür).
+        const nHoles = results.injector.n_holes;
+        const holeDia = results.injector.hole_diameter;
+        if (isFiniteNum(nHoles) && nHoles > 0
+            && isFiniteNum(holeDia) && holeDia > 0) {
+            const effectiveDiameter = Math.sqrt(nHoles) * holeDia * 3;
+            if (effectiveDiameter > chamberDiameter * 0.9) {
+                warn(T('app.warn.holePatternTooWide',
+                       'Hole pattern does not fit the chamber face')
+                     + ` (~${numTxt(effectiveDiameter, 1)} mm > 90% of `
+                     + `${numTxt(chamberDiameter, 1)} mm). Reduce the hole count or `
+                     + `increase the chamber diameter; the reported hole geometry `
+                     + `is the solver's and was not adjusted.`);
+            }
         }
     }
     // 'injector_diameter' UYDURULMAZ: çözücü vermiyorsa alan boş kalır ve
     // gösterim katmanı "bildirilmedi" der.
 }
 
+// HTML gövdesine giren SUNUCU metni için kaçış (künye/gerekçe satırları
+// sunucunun kendi cümleleridir, şablona ham gömülmez).
+function hdEscape(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ÖH D36 · OH-P-05 — KÜNYE SIKIŞMAZ, SÖZCÜK İÇİNDEN KIRILMAZ.
+// ÖLÇÜLDÜ (D34 piksel turu r03; a1/once.json P05): dar "YAPISAL ASGARİ EK"
+// kartında künye tek paragrafta " · " ile akıyor ve "minimum_earned_safe /
+// ty_factor" diye harf ortasından bölünüyordu (results_hud.css
+// `overflow-wrap:anywhere`, alan adı boşluksuz tek belirteç). Onarım: her
+// künye öğesi kendi satırında durur (satır kaydırma), alan adı KISALTILMAZ
+// (kanondur). Satıra sığmayan uzun alan adlarında kırma fırsatı YALNIZ alt
+// çizgilerdedir (<wbr>); eşikten kısa adlar dokunulmadan kalır. Eşik kabın
+// genişliğinden: ölçülen .hd-metric-note 113-135 px (0,66rem eş aralıklı
+// ~6,5 px/karakter -> ~17-20 karakter), .hd-verdict-kunye 830-1370 px.
+// Metin hdEscape'ten geçer.
+const KUNYE_KIRMA_ESIGI = 30;          // geniş şerit (hd-verdict-kunye)
+const KUNYE_DAR_KART_ESIGI = 16;       // dar ölçü kartı (hd-metric-note)
+function kunyeSarmaHtml(metin, esik) {
+    const sinir = (typeof esik === 'number' && esik > 0) ? esik : KUNYE_KIRMA_ESIGI;
+    return String(metin == null ? '' : metin).split(' \u00b7 ').map(function (oge) {
+        const govde = hdEscape(oge).replace(/[A-Za-z0-9_]+/g, function (belirtec) {
+            return (belirtec.length > sinir && belirtec.indexOf('_') >= 0)
+                ? belirtec.replace(/_/g, '_<wbr>') : belirtec;
+        });
+        // Sınıf yok: öğe, sarma kuralı taşıyan kabın (.hd-metric-note /
+        // .hd-verdict-kunye) içinde durur ve kuralı ondan miras alır.
+        return '<span style="display:block">' + govde + '</span>';
+    }).join('');
+}
+
+// ÖH Z5-A / P11B2-01 (KRİTİK) + OH-Z2-07 —— YAPISAL HÜKÜM ŞERİDİ.
+//
+// ÖLÇÜLEN KUSUR (hibrit varsayılan koşum, 1 kN / 20 bar / N2O-HTPB):
+// /calculate yanıtı `status: 'UNSAFE'`, `risk_level: 'HIGH'` ve YEDİ
+// adlandırılmış onarım önerisi (warn.structural.increase_wall_thickness,
+// ...higher_strength_material, ...increase_chamber_wall,
+// ...thermal_stress_dominates, ...thin_wall_invalid, ...severe_derating,
+// ...thermal_margin_service_limit) taşıyordu. Ana sonuç ekranına bunlardan
+// HİÇBİRİ inmiyordu: geriye kalan tek iz "Min SF 1,69" kartı ve metnin
+// rengiydi. Aynı yanıttaki `structural_design_basis` künyesinin de ekranda
+// tüketicisi yoktu (yalnız kartın title ipucunda görünüyordu).
+//
+// FAIL-CLOSED: yalnız yanıtta GERÇEKTEN duran alanlar basılır. Alan yoksa o
+// satır hiç konmaz; şeridin tamamı boş kalırsa şerit de basılmaz. Hüküm
+// metni, gerekçe ve öneri metinleri SUNUCUNUN kendi kayıtlarıdır — burada
+// yeniden yazılmaz, eşik hesaplanmaz, yeni sınıflandırma icat edilmez.
+function structuralVerdictBlock(motorData, results) {
+    const sf = (motorData && motorData.structural_analysis
+                && motorData.structural_analysis.safety_analysis) || null;
+    const dbasis = (results && results.structural_design_basis) || null;
+    if (!sf && !dbasis) return '';
+
+    const RED = 'var(--hd-red, #ff5d73)';
+    const AMBER = 'var(--hd-orange, #ff8c33)';
+    const GREEN = 'var(--hd-green, #2dd4a8)';
+    const CYAN = 'var(--hd-cyan, #00e5ff)';
+    const DIM = 'var(--hd-ink-dim, #7d97a5)';
+    // Renk sunucunun kendi durum dizesinden türer; eşik burada hesaplanmaz.
+    const statusColor = (s) => {
+        const u = String(s || '').toUpperCase();
+        if (u === 'UNSAFE' || u === 'CRITICAL' || u === 'HIGH') return RED;
+        if (u === 'MARGINAL' || u === 'MEDIUM') return AMBER;
+        if (u === 'SAFE' || u === 'LOW' || u === 'ACCEPTABLE') return GREEN;
+        return DIM;
+    };
+    const badge = (text, color) =>
+        `<span class="hd-verdict-badge" style="display:inline-block;
+            font-family:var(--hd-mono); font-size:0.7rem; font-weight:700;
+            letter-spacing:0.04em; padding:3px 8px; margin:0 6px 6px 0;
+            border:1px solid ${color}; border-radius:3px; color:${color};"
+            >${hdEscape(text)}</span>`;
+
+    let badges = '';
+    // 1) Hüküm. Sunucu hükmü GERİ ÇEKTİYSE (verdict_withheld) bunu önce
+    //    söyleriz; ama kalan UNSAFE/MARGINAL bir TEHLİKE BİLDİRİMİDİR ve
+    //    bastırılmaz (uçun kendi verdict_basis metni bunu yazıyor).
+    const withheld = !!(sf && sf.verdict_withheld === true)
+        || !!(dbasis && String(dbasis.verdict || '') === 'withheld');
+    if (sf && sf.status) {
+        badges += badge(T('panel.structural.badgeStructure', 'STRUCTURE')
+                        + ': ' + sf.status, statusColor(sf.status));
+    }
+    if (sf && sf.risk_level) {
+        badges += badge(T('common.risk', 'RISK') + ': ' + sf.risk_level,
+                        statusColor(sf.risk_level));
+    }
+    if (withheld) {
+        badges += badge(T('panel.structural.verdictWithheld', 'VERDICT WITHHELD'),
+                        AMBER);
+    } else if (dbasis && String(dbasis.verdict || '') === 'issued') {
+        // Fable Z5 denetimi ŞART 1: "hüküm üretildi" bir SÜREÇ durumudur,
+        // GEÇME değil — nötr ton alır (C2/P17B2-11 ile aynı anlambilim).
+        // Yeşil YALNIZ "geçti" demektir.
+        badges += badge(T('panel.structural.verdictIssued', 'VERDICT ISSUED'),
+                        CYAN);
+    }
+    // ÖH D28 · OH-D26-21 — HÜKMÜN SONUCU DA SÖYLENİR (H1-Y3 panel ayağı).
+    // ÖLÇÜLDÜ (a2/once.json `OH-D26-21`): uç `_carry_structural_verdict_outcome`
+    // (app.py:18548) ile beyan bloğuna dört alan TAŞIYOR —
+    // `verdict_outcome` / `verdict_risk_level` / `verdict_safety_factor` /
+    // `verdict_outcome_source` — ve arayüzde bunların tüketicisi 0'dı.
+    // Sonuç: `wall_thickness: 1` mm ile koşulan bir tasarımda ekran
+    // "VERDICT ISSUED" rozetini basıyor, ama taşınan sonucun UNSAFE / HIGH
+    // olduğunu SÖYLEMİYORDU. Rozet YALNIZ modül katmanı aynı şeyi zaten
+    // söylemiyorsa eklenir (aynı hüküm iki kez basılmasın); renk sunucunun
+    // kendi durum dizesinden türer, burada eşik hesaplanmaz.
+    if (dbasis && dbasis.verdict_outcome
+        && !(sf && sf.status && String(sf.status).toUpperCase()
+             === String(dbasis.verdict_outcome).toUpperCase())) {
+        badges += badge(T('panel.structural.badgeVerdictOutcome', 'VERDICT OUTCOME')
+                        + ': ' + dbasis.verdict_outcome,
+                        statusColor(dbasis.verdict_outcome));
+    }
+    if (dbasis && dbasis.verdict_risk_level
+        && !(sf && sf.risk_level && String(sf.risk_level).toUpperCase()
+             === String(dbasis.verdict_risk_level).toUpperCase())) {
+        badges += badge(T('common.risk', 'RISK') + ': '
+                        + dbasis.verdict_risk_level,
+                        statusColor(dbasis.verdict_risk_level));
+    }
+
+    // 2) Künye satırı — makine adlarıyla, Z4'ün künye deseni. Çeviri anahtarı
+    //    AÇILMAZ: bunlar alan adresleridir, kullanıcı metni değil.
+    const kunye = [];
+    if (sf && Array.isArray(sf.verdict_scope) && sf.verdict_scope.length) {
+        kunye.push('verdict_scope: ' + sf.verdict_scope.join(', '));
+    }
+    if (sf && Array.isArray(sf.verdict_withheld_reasons)
+        && sf.verdict_withheld_reasons.length) {
+        kunye.push('verdict_withheld_reasons: '
+                   + sf.verdict_withheld_reasons.join(', '));
+    }
+    // Ölçülmüş kapsam ile kazanılmış kapsam hükmü AYRIŞIYORSA (Z4 kanalı)
+    // ikisi de basılır; özdeşse tekrar edilmez.
+    if (sf && sf.measured_scope_status && sf.status
+        && sf.measured_scope_status !== sf.status) {
+        kunye.push('measured_scope_status: ' + sf.measured_scope_status);
+    }
+    if (sf && sf.earned_scope_status && sf.status
+        && sf.earned_scope_status !== sf.status) {
+        kunye.push('earned_scope_status: ' + sf.earned_scope_status);
+    }
+    if (dbasis) {
+        // OH-Z2-07: künyenin ekrandaki İLK tüketicisi. Alanlar sunucudan
+        // olduğu gibi; olmayan alan satıra girmez.
+        ['design_mode', 'wall_thickness_source', 'wall_thickness_input_status',
+         'chamber_material_source', 'thermal_input', 'wall_temperature_source'
+        ].forEach(function (k) {
+            if (dbasis[k] !== undefined && dbasis[k] !== null && dbasis[k] !== '') {
+                kunye.push(k + ': ' + dbasis[k]);
+            }
+        });
+        if (typeof dbasis.is_verification === 'boolean') {
+            kunye.push('is_verification: ' + dbasis.is_verification
+                       + (dbasis.is_verification_scope
+                          ? ' (' + dbasis.is_verification_scope + ')' : ''));
+        }
+        if (typeof dbasis.verification_scope_complete === 'boolean') {
+            kunye.push('verification_scope_complete: '
+                       + dbasis.verification_scope_complete);
+        }
+        if (Array.isArray(dbasis.stations_not_verified)
+            && dbasis.stations_not_verified.length) {
+            kunye.push('stations_not_verified: '
+                       + dbasis.stations_not_verified.join(', '));
+        }
+        if (Array.isArray(dbasis.not_evaluated) && dbasis.not_evaluated.length) {
+            kunye.push('not_evaluated: ' + dbasis.not_evaluated.join(', '));
+        }
+        // OH-D26-21: taşınan hüküm sonucunun künyesi. `verdict_outcome_source`
+        // hükmü KİMİN verdiğini söyler ('not_published_by_module' hâli dâhil);
+        // sayı burada yeniden notlanmaz, sunucunun kendi dizesi basılır.
+        ['verdict_outcome', 'verdict_risk_level', 'verdict_outcome_source'
+        ].forEach(function (k) {
+            if (dbasis[k] !== undefined && dbasis[k] !== null && dbasis[k] !== '') {
+                kunye.push(k + ': ' + dbasis[k]);
+            }
+        });
+        if (typeof dbasis.verdict_safety_factor === 'number'
+            && isFinite(dbasis.verdict_safety_factor)) {
+            // Ekran basamağı: app.js `gateNumberText` ile BİREBİR aynı üç
+            // satır (o yardımcı `collectResultWarnings` içinde kapalıdır,
+            // buradan görünmez; kural tek kaynaktan KOPYALANIR, yeni bir
+            // yuvarlama icat edilmez).
+            const _vsf = dbasis.verdict_safety_factor;
+            // ÖH D36 · OH-P-11: basamak kuralı aynı; ayraç TR'de virgül
+            // (I18N.decimalText, tek kaynak). Makine kanalı etkilenmez.
+            const _vsfMetin = Number.isInteger(_vsf)
+                ? String(_vsf) : String(parseFloat(_vsf.toPrecision(6)));
+            kunye.push('verdict_safety_factor: '
+                       + ((typeof window !== 'undefined' && window.I18N
+                           && typeof window.I18N.decimalText === 'function')
+                          ? window.I18N.decimalText(_vsfMetin) : _vsfMetin));
+        }
+    }
+
+    // 3) Gerekçe metinleri — sunucu yazar, ekran yeniden yazmaz.
+    const gerekce = [];
+    if (dbasis && dbasis.message) gerekce.push(dbasis.message);
+    if (sf && sf.verdict_basis) gerekce.push(sf.verdict_basis);
+    if (sf && sf.minimum_safety_factor_verdict_basis
+        && gerekce.indexOf(sf.minimum_safety_factor_verdict_basis) === -1) {
+        gerekce.push(sf.minimum_safety_factor_verdict_basis);
+    }
+
+    // 4) Adlandırılmış onarım önerileri. Kayıtlar {code, params, severity};
+    //    metin ortak çeviriciden geçer (uyarı paneliyle aynı kaynak).
+    const recs = (sf && Array.isArray(sf.recommendations))
+        ? sf.recommendations : [];
+
+    if (!badges && !kunye.length && !gerekce.length && !recs.length) return '';
+
+    let html = `<div id="structuralVerdictStrip" class="hd-verdict-strip"
+        style="margin-top:14px; padding:10px 12px; border-radius:4px;
+        border:1px solid color-mix(in srgb, ${DIM} 35%, transparent);">`;
+    if (badges) html += `<div>${badges}</div>`;
+    if (kunye.length) {
+        html += `<div class="hd-verdict-kunye" style="font-family:var(--hd-mono);
+            font-size:0.66rem; letter-spacing:0.02em; color:${DIM};
+            margin-top:2px;">${kunyeSarmaHtml(kunye.join(' · '))}</div>`;
+    }
+    // OH-Z4-04: gerekçe cümleleri HAM basılıyordu — Türkçe kipte İngilizce
+    // kalıyorlardı. Z5 i18n süpürmesi `minimum_safety_factor_verdict_basis`in
+    // dört dalını i18n_charts.js MSG_PATTERNS'e yazmıştı; kanal vardı, kapı
+    // yoktu. Tekilleştirme HAM metin üstünden yapılır (çeviri iki ayrı
+    // İngilizce cümleyi aynı Türkçeye indirebilir), çeviri yalnız basımda.
+    gerekce.forEach(function (t) {
+        html += `<p style="font-size:0.78rem; margin:6px 0 0; color:${DIM};"
+            >${hdEscape(SRV(t))}</p>`;
+    });
+    if (recs.length) {
+        html += `<div class="hd-verdict-recs" style="margin-top:8px;">
+            <div style="font-size:0.74rem; font-weight:600; color:${DIM};"
+            >${hdEscape(T('common.recommendations', 'Recommendations'))}</div>
+            <ul style="margin:4px 0 0 18px; padding:0; font-size:0.78rem;
+                color:${DIM};">`;
+        recs.forEach(function (r) {
+            const metin = warnToText(r);
+            if (!metin) return;
+            html += `<li style="margin:2px 0; color:${
+                warnIsCritical(r) ? RED : DIM};">${hdEscape(metin)}</li>`;
+        });
+        html += '</ul></div>';
+    }
+    html += '</div>';
+    return html;
+}
+
+// ÖH D25 / P11B2-13 — "HANGİ GİRDİ VARSAYILANA DÜŞTÜ" BEYANI EKRANDA.
+//
+// ÖLÇÜLDÜ (docs/scofield/raw/OH/D25/arayuz/a2/once.json): çözücü bu beyanı
+// ÜÇ yerde birden yayımlıyor — `motor.defaults_used`, `motor.fallbacks_used`
+// ve `motor.design_summary.defaults_used/fallbacks_used` — ama app.js
+// dosyasında `defaults_used` dizesi HİÇ GEÇMİYORDU (ölçülen geçiş sayısı 0).
+// Yani kullanıcı, itkisini/yanma süresini/oda basıncını vermediğinde ürünün
+// onun yerine bir sayı SEÇTİĞİNİ ekranda hiçbir yerden öğrenemiyordu; kartlar
+// o sayıyı kullanıcının kendi tasarımıymış gibi gösteriyordu.
+//
+// Beyan ÇÖZÜM DEĞİLDİR, ama bu kalemde yapılacak iş beyanın kendisidir:
+// çözücünün KENDİ listesi yazılır; burada sınıflandırma üretilmez, sayı
+// uydurulmaz, liste boşsa hiçbir şerit basılmaz (boş şerit de bir iddiadır).
+function defaultsDeclarationBlock(motorData, results) {
+    const md = motorData || {};
+    const r = results || {};
+    const ds = md.design_summary || {};
+    const birlestir = function (a, b) {
+        const out = [];
+        [a, b].forEach(function (liste) {
+            if (!Array.isArray(liste)) return;
+            liste.forEach(function (x) {
+                const t = (typeof x === 'string') ? x
+                    : (x && (x.field || x.name || x.message)) ? String(x.field
+                        || x.name || x.message) : '';
+                if (t && out.indexOf(t) === -1) out.push(t);
+            });
+        });
+        return out;
+    };
+    const varsayilan = birlestir(md.defaults_used || r.defaults_used,
+                                 ds.defaults_used);
+    const yedek = birlestir(md.fallbacks_used || r.fallbacks_used,
+                            ds.fallbacks_used);
+    if (varsayilan.length === 0 && yedek.length === 0) return '';
+    const esc = s2 => String(s2 == null ? '' : s2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Adlar MAKİNE ADIdır; sunucu-metni çeviri kanalından geçirilir
+    // (eşleşme yoksa ad aynen kalır — uydurma çeviri yapılmaz).
+    const satir = function (baslik, liste, renk) {
+        if (!liste.length) return '';
+        return `<div style="font-family:var(--hd-mono, monospace);
+             font-size:0.68rem; letter-spacing:0.04em; margin-top:4px;
+             color:${renk};"><strong>${esc(baslik)}</strong> ${
+            liste.map(function (x) { return esc(SRV(x)); }).join(' · ')}</div>`;
+    };
+    return `<div class="hd-defaults-note" data-defaults-count="${
+        varsayilan.length}" data-fallbacks-count="${yedek.length}"
+         style="margin-top:10px; padding:6px 8px; border-radius:6px;
+         border:1px solid var(--hd-orange, #ff8c33);">`
+        + satir(T('app.defaults.title',
+                  'INPUTS THE SOLVER SUPPLIED (not entered by you):'),
+                varsayilan, 'var(--hd-orange, #ff8c33)')
+        + satir(T('app.fallbacks.title',
+                  'QUANTITIES THAT FELL BACK TO A SUBSTITUTE MODEL OR TABLE:'),
+                yedek, 'var(--hd-orange, #ff8c33)')
+        + '</div>';
+}
+
+// ==================================================================
+// ÖH D37 A1a · CW-A4E6 (hibrit) — `defaults_applied` KÜNYESİ EKRANDA
+// ==================================================================
+// ÖLÇÜLDÜ (docs/scofield/raw/OH/A1a/hibrit-beyan/a1/once.json M1,
+// Ornek-H1 canlı): `/calculate` yanıtının ÜST DÜZEY `defaults_applied`
+// listesi 7 kayıt taşıyordu (cooling_channels, l_star = 1 m,
+// hole_diameter_min = 0,3 mm, hole_diameter_max = 2 mm, ...) ama
+// ekranda 0 satır vardı; `defaultsDeclarationBlock` yalnız MOTORUN
+// `defaults_used` / `fallbacks_used` listelerini okuyor. Kullanıcı
+// L* = 1,0 m'nin kendi seçimi olmadığını hiçbir yerden öğrenemiyordu.
+//
+// Liste ELLE YAZILMAZ: yalnız sunucunun kendi listesi basılır; her
+// satır alan adını (makine adı), sunucunun uyguladığı değeri ve
+// gerekçesini taşır. `not_supplied_solver_derives` kaydında `value`
+// (0) bir "türet" işaretidir, uygulanmış bir sayı DEĞİLDİR — o yüzden
+// sayı basılmaz, çözücünün türettiği yazılır. Tanınmayan gerekçe
+// makine koduyla basılır (çeviri uydurulmaz). Liste boşsa blok yok.
+function defaultsAppliedBlock(results) {
+    const liste = (results && Array.isArray(results.defaults_applied))
+        ? results.defaults_applied : [];
+    const esc = s2 => String(s2 == null ? '' : s2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const satirlar = [];
+    liste.forEach(function (k) {
+        const kayit = (k && typeof k === 'object') ? k : {};
+        const alan = (typeof k === 'string') ? k
+            : (typeof kayit.field === 'string' ? kayit.field : '');
+        if (!alan) return;
+        const neden = (typeof kayit.reason === 'string') ? kayit.reason : '';
+        let deger = '';
+        let aciklama = '';
+        if (neden === 'not_supplied_solver_derives') {
+            aciklama = T('app.defaultsApplied.solverDerives',
+                'not supplied: the solver derives it itself (no value assumed)');
+        } else {
+            if (typeof kayit.value === 'number' && isFinite(kayit.value)) {
+                const birim = (kayit.unit && kayit.unit !== 'dimensionless')
+                    ? kayit.unit : '';
+                deger = unitTxt(kayit.value, birim);
+            } else if (kayit.value !== undefined && kayit.value !== null) {
+                deger = String(kayit.value);
+            }
+            aciklama = (neden === 'not_supplied')
+                ? T('app.defaultsApplied.serverDefault',
+                    'not supplied: this server applied its own default; the result describes that assumption, not your design')
+                : neden;
+            // ÖH D37 A2 hibrit · 10. tur (HB9 devir 44): sunucu kaydı
+            // ``applied: false`` diyorsa (N₂O doyma kipinde tank_pressure
+            // yedeği; app.py ``_n2o_doyma_tank_kunyesi``) satır "uyguladı"
+            // DEMEZ — API beyanıyla çelişki yok. Model sayısı kaydın kendi
+            // ``used_by_model`` alanından (sonlu değilse sayı basılmaz).
+            if (kayit.applied === false) {
+                const kullanilan = (typeof kayit.used_by_model === 'number'
+                    && isFinite(kayit.used_by_model))
+                    ? unitTxt(kayit.used_by_model,
+                              (kayit.unit && kayit.unit !== 'dimensionless')
+                                  ? kayit.unit : '')
+                    : '';
+                if (kullanilan && kayit.used_by_model_source
+                        === 'n2o_saturation_at_tank_temperature') {
+                    aciklama = TF('app.defaultsApplied.notUsedN2oSat',
+                        { used: kullanilan },
+                        'listed as this server\'s default but NOT used in this run: the model used P_sat(T_tank) = {used} from the N₂O saturation table');
+                } else if (kullanilan) {
+                    aciklama = TF('app.defaultsApplied.notUsedValue',
+                        { used: kullanilan },
+                        'listed as this server\'s default but NOT used in this run: the model used {used}');
+                } else {
+                    aciklama = T('app.defaultsApplied.notUsed',
+                        'listed as this server\'s default but NOT used in this run');
+                }
+            }
+        }
+        satirlar.push(`<div class="hd-defaults-applied-row"
+             data-defaults-applied-field="${esc(alan)}"
+             style="margin-top:3px;"><code>${esc(alan)}</code>${
+            deger ? ' = <strong>' + esc(deger) + '</strong>' : ''} — ${
+            esc(aciklama)}</div>`);
+    });
+    // Kitap uyum B16, 3. tur (Ş-5; karar §28-18 "açık varsayım olarak
+    // beyan"): hibrit sonucun N₂O giriş durumu panelde TEK SATIRLA yazılır.
+    // Satır motorun KENDİ beyanından okunur (results.motor.
+    // oxidizer_inlet_state: sıcaklık, faz, alanların kaynağı); beyan yoksa
+    // ya da tanınmıyorsa satır HİÇ çizilmez (sayı uydurulmaz). Kaynak
+    // sözcüğü beyanın alan kaynaklarından: 'user input' → girdiniz, aksi
+    // hâlde varsayım. 'gas' fazında sıcaklık uygulanmaz; beyanın yazdığı
+    // standart hâl sıcaklığı basılır. Künye satırlarından AYRI bir sınıf
+    // taşır (o listenin sayımı ve başlığı değişmez).
+    const GIRIS_T_ONDALIK = 2;
+    let girisSatiri = '';
+    const giris = (results && results.motor && typeof results.motor === 'object')
+        ? results.motor.oxidizer_inlet_state : null;
+    if (giris && typeof giris === 'object' && giris.oxidizer === 'n2o'
+            && (giris.phase === 'liquid' || giris.phase === 'gas')
+            && typeof giris.temperature_K === 'number'
+            && isFinite(giris.temperature_K)) {
+        const kullanici = function (kaynak) {
+            return typeof kaynak === 'string' && kaynak.indexOf('user input') === 0;
+        };
+        const kaynakSozcugu = function (k) {
+            return k ? T('app.oxInlet.entered', 'your input')
+                : T('app.oxInlet.assumed', 'assumption');
+        };
+        const sivi = giris.phase === 'liquid';
+        const tKul = kullanici(giris.inlet_temperature_source);
+        const fKul = kullanici(giris.inlet_phase_source);
+        let kaynak;
+        if (!sivi || tKul === fKul) {
+            kaynak = kaynakSozcugu(sivi ? tKul : fKul);
+        } else {
+            kaynak = TF('app.oxInlet.tempSource', { src: kaynakSozcugu(tKul) },
+                        'temperature: {src}')
+                + '; ' + TF('app.oxInlet.phaseSource',
+                            { src: kaynakSozcugu(fKul) }, 'phase: {src}');
+        }
+        if (sivi) {
+            kaynak += '; ' + T('app.oxInlet.refLiquid', 'RP-1311 §4.1');
+        }
+        const fazMetni = sivi
+            ? T('app.oxInlet.liquid', 'saturated liquid')
+            : T('app.oxInlet.gas', 'ideal gas, standard state');
+        girisSatiri = `<div class="hd-oxidizer-inlet-line"
+             data-oxidizer-inlet-phase="${esc(giris.phase)}"
+             data-oxidizer-inlet-temperature-k="${esc(giris.temperature_K)}"
+             style="margin-top:10px; font-family:var(--hd-mono, monospace);
+             font-size:0.68rem; letter-spacing:0.02em;">${
+            esc(T('app.oxInlet.label', 'N₂O inlet:'))} ${
+            esc(unitTxt(giris.temperature_K, 'K', GIRIS_T_ONDALIK))} ${
+            esc(fazMetni)} (${esc(kaynak)})</div>`;
+    }
+    if (!satirlar.length) return girisSatiri;
+    return girisSatiri + `<div class="hd-defaults-applied" data-defaults-applied-count="${
+        satirlar.length}" style="margin-top:10px; padding:6px 8px;
+         border-radius:6px; border:1px solid var(--hd-orange, #ff8c33);
+         font-family:var(--hd-mono, monospace); font-size:0.68rem;
+         letter-spacing:0.02em; color:var(--hd-orange, #ff8c33);"><strong>${
+        esc(T('app.defaultsApplied.title',
+              'VALUES THIS RUN ASSUMED FOR FIELDS YOU LEFT EMPTY:'))}</strong>${
+        satirlar.join('')}</div>`;
+}
+
+// ==================================================================
+// ÖH D37 A1a · CW-B3 (ana zincir tarafı) — CİDAR SICAKLIĞI HANGİ SORUYU
+// YANITLIYOR
+// ==================================================================
+// ÖLÇÜLDÜ (once.json M2, Ornek-H1): ana zincir cidar sıcaklığını
+// (`heat_transfer_analysis.wall_analysis.max_temperature` = 3323 K)
+// yalnız üç KRİTİK uyarı cümlesinde basıyordu; Termal FEA paneli aynı
+// motor için 10 s sonundaki tepe cidarı (Cowork: 2724 K) veriyor. İki
+// sayı arasında 600 K var ve ekran hangisinin hangi soruyu yanıtladığını
+// söylemiyordu. Bu blok UZLAŞTIRMA DEĞİLDİR (o, A2 termalin
+// `thermal_paths_reconciliation` bloğuyla gelir ve faz-c-1 bağlar);
+// yalnız iki sayının SORUSUNU ve kaynağını yazar:
+//   * ana zincir: denge (sürekli rejim) cidar sıcaklığı — yanma süresi
+//     sonsuz kabulü, soğutma SINIFI sunucunun çözdüğü sınıf;
+//   * Termal FEA: sonlu yanmanın sonundaki (geçici) tepe cidar sıcaklığı —
+//     sayı yalnız panel BU sonuç için koşturulduysa basılır; koşulmadıysa
+//     gri "koşulmadı" yazılır (sayı uydurulmaz, önceki koşumun sayısı
+//     taşınmaz: panel yeni sonuçta kendi yükünü siler).
+// Ana zincir sayısı yoksa blok hiç çizilmez (etiketlenecek sayı yok).
+const WALL_T_FEA_SLOT = 'data-wall-t-fea';
+
+// Sunucunun çözdüğü soğutma SINIFININ ekran adı. Sınıf kümesi motorun
+// COOLING_GEOMETRY_EQUIVALENCE anahtarlarıdır (natural / forced /
+// regenerative); tanınmayan sınıf makine adıyla basılır, yoksa
+// "yayımlanmadı" yazılır (sınıf uydurulmaz).
+function coolingClassText(sinif) {
+    const SINIF_ANAHTARI = {
+        natural: 'app.wallT.clsNatural',
+        forced: 'app.wallT.clsForced',
+        regenerative: 'app.wallT.clsRegenerative',
+    };
+    if (!(typeof sinif === 'string' && sinif)) {
+        return T('app.wallT.clsUnpublished', 'not published');
+    }
+    return SINIF_ANAHTARI[sinif] ? T(SINIF_ANAHTARI[sinif], sinif) : sinif;
+}
+
+function wallTemperatureFeaSlotHtml() {
+    const esc = s2 => String(s2 == null ? '' : s2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const panel = (typeof window !== 'undefined') ? window.ThermalFeaPanel : null;
+    const yuk = panel ? panel.payload : null;
+    const sk = (yuk && yuk.status === 'ok' && yuk.scalars
+                && typeof yuk.scalars === 'object') ? yuk.scalars : null;
+    const tepe = sk ? sk.peak_wall_T_K : null;
+    if (!(typeof tepe === 'number' && isFinite(tepe))) {
+        return `<span style="color:var(--hd-ink-dim, #7d97a5);">${esc(T(
+            'app.wallT.feaNotRun',
+            'peak wall temperature at the end of a finite burn (transient): not run for this result; run the Thermal FEA panel to get it'))}</span>`;
+    }
+    const an = (typeof sk.peak_time_s === 'number' && isFinite(sk.peak_time_s))
+        ? sk.peak_time_s : sk.burn_time_s;
+    const soru = (typeof an === 'number' && isFinite(an))
+        ? TF('app.wallT.feaQuestion',
+             { t: numTxt(an, 2) },
+             'peak wall temperature at t = {t} s (transient, finite burn)')
+        : T('app.wallT.feaQuestionNoTime',
+            'peak wall temperature of the transient run (finite burn)');
+    return `${esc(soru)} → <strong>${esc(unitTxt(tepe, 'K', 0))}</strong>`
+        + ` <span style="color:var(--hd-ink-dim, #7d97a5);">${
+            esc(`/api/fea/thermal · scalars.peak_wall_T_K`)}</span>`;
+}
+
+function wallTemperatureQuestionsBlock(motorData) {
+    const md = motorData || {};
+    const wa = ((md.heat_transfer_analysis || {}).wall_analysis) || {};
+    const tDenge = wa.max_temperature;
+    if (!(typeof tDenge === 'number' && isFinite(tDenge))) return '';
+    const esc = s2 => String(s2 == null ? '' : s2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const sinif = (md.cooling_channel_geometry || {}).resolved_class;
+    const sinifMetni = coolingClassText(sinif);
+    const uzlastirmaYok = !md.thermal_paths_reconciliation;
+    return `<div class="hd-wall-t-questions" data-wall-temperature-questions="1"
+         style="margin-top:10px; padding:6px 8px; border-radius:6px;
+         border:1px solid var(--hd-ink-dim, #7d97a5);
+         font-family:var(--hd-mono, monospace); font-size:0.68rem;
+         letter-spacing:0.02em;"><strong>${esc(T('app.wallT.title',
+            'WALL TEMPERATURE: TWO RESULTS ANSWER TWO DIFFERENT QUESTIONS'))}</strong>
+        <div style="margin-top:3px;"><strong>${esc(T('app.wallT.thisRun',
+            'This result (main chain):'))}</strong> ${esc(TF('app.wallT.eqQuestion',
+            { cls: sinifMetni },
+            'equilibrium (steady-state) wall temperature, burn time taken as infinite, cooling class: {cls}'))}
+            → <strong>${esc(unitTxt(tDenge, 'K', 0))}</strong>
+            <span style="color:var(--hd-ink-dim, #7d97a5);">${
+            esc(`/calculate · heat_transfer_analysis.wall_analysis.max_temperature`)}</span></div>
+        <div style="margin-top:3px;"><strong>${esc(T('app.wallT.feaPanel',
+            'Thermal FEA panel:'))}</strong> <span ${WALL_T_FEA_SLOT}="1">${
+            wallTemperatureFeaSlotHtml()}</span></div>${
+        uzlastirmaYok ? `
+        <div style="margin-top:3px; color:var(--hd-ink-dim, #7d97a5);">${esc(T(
+            'app.wallT.noReconciliation',
+            'The two numbers answer different questions and are not expected to be equal; no reconciliation between them is published for this run.'))}</div>` : ''}
+    </div>`;
+}
+
+// Termal FEA paneli koşunca (ya da yeni sonuçta yükünü silince) kendi
+// kabını yeniden çizer; blok o değişimi izleyip YALNIZ FEA yuvasını
+// tazeler. Panelin kaynağına dokunulmaz (sahipliği başka kulvarda):
+// sayı panelin kamuya açık `ThermalFeaPanel.payload` okuyucusundan gelir.
+function watchThermalFeaForWallTemperature() {
+    if (typeof MutationObserver !== 'function') return;
+    const kap = document.getElementById('thermalFeaPanel');
+    if (!kap || kap.__hrmaWallTWatch) return;
+    kap.__hrmaWallTWatch = new MutationObserver(function () {
+        if (typeof document.querySelectorAll !== 'function') return;
+        const yuva = document.querySelectorAll('[' + WALL_T_FEA_SLOT + ']');
+        if (!yuva.length) return;
+        const html = wallTemperatureFeaSlotHtml();
+        Array.prototype.forEach.call(yuva, function (el) {
+            if (el.innerHTML !== html) el.innerHTML = html;
+        });
+    });
+    kap.__hrmaWallTWatch.observe(kap, { childList: true, subtree: true,
+                                        characterData: true });
+}
+
+// ==================================================================
+// ÖH D37 A1a · OH-D31-04 — SOĞUTMA MENÜSÜNDE AYIRT EDİLEMEYEN SEÇİMLER
+// ==================================================================
+// Menü GEOMETRİ soruyor (radial / spiral), ısı transferi modeli yalnız
+// SINIF çözüyor; aynı sınıfa düşen seçimler birebir aynı sayıları verir
+// (D31 hibrit a1 ölçümü). Sunucu bunu her hesapta
+// `cooling_channel_geometry.equivalence_classes` ile yayımlıyor (once.json
+// M4: natural=[none], regenerative=[radial, spiral]); menü ise hiçbir şey
+// söylemiyordu. Not, ÜYESİ İKİ VE ÜSTÜ olan her sınıf için menünün KENDİ
+// seçenek metinlerini (dile göre) listeler. Liste elle yazılmaz; hesap
+// yoksa ya da alan yoksa not gizli kalır (iddia yok). F-08 Dean modeli
+// (A4) gelince sınıflar ayrışır ve not kendiliğinden kalkar.
+function coolingEquivalenceNote(motorData) {
+    const not = document.getElementById('coolingEquivalenceNote');
+    if (!not) return;
+    const ccg = (motorData && motorData.cooling_channel_geometry) || {};
+    const siniflar = (ccg.equivalence_classes
+                      && typeof ccg.equivalence_classes === 'object')
+        ? ccg.equivalence_classes : null;
+    const menu = document.getElementById('cooling_channels');
+    const secenekMetni = function (deger) {
+        const opts = (menu && menu.options) ? menu.options : [];
+        for (let i = 0; i < opts.length; i++) {
+            if (opts[i].value === deger) {
+                return String(opts[i].textContent || deger).trim();
+            }
+        }
+        return deger;
+    };
+    const cumleler = [];
+    if (siniflar) {
+        Object.keys(siniflar).forEach(function (sinif) {
+            const uyeler = Array.isArray(siniflar[sinif]) ? siniflar[sinif] : [];
+            if (uyeler.length < 2) return;
+            cumleler.push(TF('app.cool.sameResult', {
+                options: uyeler.map(secenekMetni).join(' = '),
+                cls: coolingClassText(sinif),
+            }, '{options}: identical results. Channel geometry is not modelled; the heat-transfer model resolves only the cooling class ({cls}).'));
+        });
+    }
+    not.textContent = cumleler.join(' ');
+    not.hidden = cumleler.length === 0;
+    if (cumleler.length) not.setAttribute('data-cooling-equivalence', '1');
+    else not.removeAttribute('data-cooling-equivalence');
+}
+
 // Display performance metrics
 // Eski mor inline-gradyan kartlar hd-metric şablonuna taşındı (results_hud.css
 // + hud.js). HUD katmanı yüklü değilse (eski sayfa) düz metne düşülür.
-function displayPerformanceMetrics(motorData) {
+function displayPerformanceMetrics(motorData, results) {
+    // ÖH D37 A1a · OH-D31-04: menü notu sonuçla (ve dil değişimiyle)
+    // birlikte tazelenir; CW-B3: FEA yuvası panel koşunca tazelenir.
+    try { coolingEquivalenceNote(motorData); } catch (e) { /* form yoksa */ }
+    try { watchThermalFeaForWallTemperature(); } catch (e) { /* panel yoksa */ }
     const metricsDiv = document.getElementById('performanceMetrics');
     if (!metricsDiv) return;
 
@@ -420,29 +1292,170 @@ function displayPerformanceMetrics(motorData) {
     // Yapısal durum backend'den geldiyse beşinci kart: minimum SF.
     // data-state eşlemesi hud.js bindState ile — eşik hesabı burada YOK,
     // durum stringi (SAFE/MARGINAL/UNSAFE) backend'in kendi kararıdır.
+    //
+    // KÜNYE (ÖH Z4 / P17B3-06, 2026-08-27): bu kart ile güverte yapısal
+    // panelinin "Minimum SF (all modes)" satırı AYNI ADI taşıyan İKİ AYRI
+    // KOŞUMDUR. Bu kart `/calculate` yanıtının motor bloğundan, panel ise
+    // `/analyze_structural_safety`den okur; girdi kümeleri ayrışabilir
+    // (P17 turu 0,81 ⟷ 1,07 ölçtü — 1,0 eşiğinin iki yanı). Bugünkü
+    // ölçümde (hibrit varsayılan, panel önerileriyle) ikisi de
+    // 1,7173327063051922 — bit-özdeş. Ayrışma her koşuda yok; ama ekran
+    // hangisinin hangi koşum olduğunu HİÇ söylemiyordu.
+    //
+    // İKİNCİ KÜNYE (Z4 kökü): bu sayı kullanıcının KAZANDIĞI marj olmak
+    // zorunda değil. Ölçüldü (hibrit varsayılan tasarım): beş modun BEŞİ de
+    // `safety_factor_is_tautological: true`, `minimum_earned_safety_factor
+    // = null`, `chamber_analysis.design_mode = 'size'` — yani sayı
+    // HRMA'nın KENDİ boyutlandırdığı cidardan geliyor, kullanıcının
+    // kurduğu bir cidarın doğrulaması DEĞİL. Kart bunu artık künyesinde
+    // söylüyor; beyan yoksa hiçbir şey iddia etmez (fail-closed).
     const structSafety = motorData.structural_analysis
         && motorData.structural_analysis.safety_analysis;
     if (structSafety && typeof structSafety.minimum_safety_factor === 'number'
         && isFinite(structSafety.minimum_safety_factor)) {
+        const kunye = [];
+        // Hangi koşum? (Bu işlev YALNIZ /calculate yanıtıyla çağrılır:
+        // displayCalculationResults tek çağıranı ve o da /calculate fetch'i.)
+        kunye.push('/calculate');
+        // Cidar nereden geldi? Sunucunun kendi kapı sınıfı — üç değerin
+        // ikisinin sözlükte karşılığı var, üçüncüsü makine adıyla basılır.
+        const dbasis = (results && results.structural_design_basis) || null;
+        const wsrc = dbasis && String(dbasis.wall_thickness_source || '');
+        if (wsrc === 'sized_by_hrma') {
+            kunye.push(T('panel.structural.wallSized', 'WALL: SIZED BY HRMA'));
+        } else if (wsrc === 'user_supplied' && dbasis.is_verification !== false) {
+            kunye.push(T('panel.structural.wallUser', 'WALL: AS SUPPLIED'));
+        } else if (wsrc) {
+            kunye.push('wall_thickness_source: ' + wsrc);
+        }
+        // Minimumu belirleyen mod(lar) ve kazanılıp kazanılmadığı.
+        if (Array.isArray(structSafety.binding_safety_factors)
+            && structSafety.binding_safety_factors.length) {
+            kunye.push('binding: ' + structSafety.binding_safety_factors.join(', '));
+        }
+        // Hedef geri okuması imi: uç istasyonları adıyla veriyorsa (Z4-A
+        // kanalı) onlar basılır — ama YALNIZ minimumu belirleyen istasyon
+        // gerçekten hedefi geri okuyorsa; aksi hâlde bu sayı bir ölçümdür.
+        const readback = Array.isArray(structSafety.stations_reading_back_target)
+            ? structSafety.stations_reading_back_target : null;
+        const bind = Array.isArray(structSafety.binding_safety_factors)
+            ? structSafety.binding_safety_factors : [];
+        const bindOkur = (typeof structSafety.binding_safety_factor_reads_back_target
+                === 'boolean')
+            ? structSafety.binding_safety_factor_reads_back_target
+            : !!(readback && readback.length && bind.length
+            && bind.some(function (k) { return readback.indexOf(k) !== -1; }));
+        // Eski `binding_safety_factor_is_tautological` bayrağı YALNIZ yeni
+        // kanal YOKKEN kullanılır: ölçüldü (hibrit varsayılan, 27 Ağu) —
+        // bayrak `true` derken `stations_reading_back_target` chamber_hoop'u
+        // İÇERMİYOR, çünkü o kesit hedefin ALTINA düşmüş gerçek bir ölçüm.
+        // İki beyan aynı anda basılırsa ekran kendi kendisiyle çelişir.
+        if (bindOkur) {
+            kunye.push('stations_reading_back_target: ' + readback.join(', '));
+        } else if (!readback
+                   && structSafety.binding_safety_factor_is_tautological === true) {
+            kunye.push('binding_safety_factor_is_tautological: true');
+        }
+        const earned = structSafety.minimum_earned_safety_factor;
+        if (typeof earned === 'number' && isFinite(earned)) {
+            kunye.push('minimum_earned_safety_factor: ' + numTxt(earned, 2));
+        } else if (earned === null) {
+            kunye.push('minimum_earned_safety_factor: null');
+        }
+        // Hükmün ÇEKİLDİĞİ sayı ayrı yayımlanıyorsa (Z4-A kanalı) ve karttaki
+        // sayıdan FARKLIYSA künyeye girer; aynıysa tekrar edilmez.
+        const vsf = structSafety.verdict_safety_factor;
+        if (typeof vsf === 'number' && isFinite(vsf)
+            && Math.abs(vsf - structSafety.minimum_safety_factor)
+                > Math.abs(structSafety.minimum_safety_factor) * 1e-9) {
+            kunye.push('verdict_safety_factor: ' + numTxt(vsf, 2));
+        } else if (vsf === null) {
+            kunye.push('verdict_safety_factor: null');
+        }
+        // Gerekçe metnini SUNUCU yazar, kart yeniden yazmaz (panel
+        // designBasisBlock deseni).
+        const tip = [structSafety.minimum_safety_factor_basis,
+                     structSafety.minimum_safety_factor_verdict_basis,
+                     structSafety.verdict_safety_factor_source
+                         ? 'verdict_safety_factor_source: '
+                           + structSafety.verdict_safety_factor_source : '',
+                     dbasis && dbasis.message]
+            .filter(function (s) { return typeof s === 'string' && s; })
+            // OH-Z4-04: kartın ipucu da sunucunun cümlesidir — çeviri
+            // kanalından geçer (eşleşme yoksa metin AYNEN kalır).
+            .map(function (s) { return SRV(s); })
+            .join(' ');
         metrics.push({
             label: T('app.metric.minSf', 'Structural Min SF'),
             value: structSafety.minimum_safety_factor,
             decimals: 2,
             unit: '',
-            state: structSafety.status
+            state: structSafety.status,
+            // ÖH D21 / P17B2-01 (yüksek) — HÜKÜM RENKTEN BAŞKA BİR KANALDA DA
+            // TAŞINIR.
+            // ÖLÇÜLDÜ (P17 B2-tur-04, canlı /hybrid, SF 0,81 -> UNSAFE):
+            // kartın `textContent`i "STRUCTURAL MIN SF 0.81" idi;
+            // UNSAFE/MARGINAL/SAFE sözcüğü kartta 0 kez geçiyor, title /
+            // aria-label yok, `.hd-led` düğümü sayfada hiç yok. Hüküm YALNIZ
+            // `data-state` renginde duruyordu ve üç durumun WCAG bağıl
+            // parlaklık kontrastı 1,07 / 1,49 / 1,59 — üçü de metin-dışı
+            // ayırt edilebilirlik tabanının (3:1) altında. Yani ekran
+            // okuyucu, gri baskı ve kırmızı-yeşil renk körlüğü hükmü AYNI
+            // ANDA kaybediyordu; üstelik ürün onu doğru hesaplamıştı.
+            // Sözcük SUNUCUNUN kendi hüküm belirtecidir; burada sınıflandırma
+            // ÜRETİLMEZ, yalnız yazıya dökülür (SRV = sunucu dizesi çeviri
+            // kanalı; eşleşme yoksa makine adı aynen kalır).
+            stateWord: (typeof structSafety.status === 'string'
+                        && structSafety.status) ? structSafety.status : '',
+            note: kunye.join(' · '),
+            // Turuncu künye = "bu sayı kurulmuş bir donanımın doğrulaması
+            // değil". Ölçüt aynı önceliği izler: yeni kanal varsa onun
+            // kararı, yoksa eski bayrak.
+            noteWarn: (wsrc === 'sized_by_hrma' || bindOkur
+                       || (!readback
+                           && structSafety.binding_safety_factor_is_tautological
+                              === true)),
+            title: tip
         });
     }
 
+    /* ÖH D33-3 / OH-D33-12 — HUD'suz yol ve `aria-label` da TEK AYRAÇ
+       KANONUNU izler. ÖLÇÜLDÜ (a1/once.json M1 `hudsuz_yol_ilk300`):
+       Türkçe kipte "Oda Basıncı: 20.0 bar · Kütle Debisi: 0.457 kg/s"
+       yazıyordu, yani ekran okuyucunun duyduğu ve HUD'suz sayfanın
+       gösterdiği metin de nokta basıyordu. Basamak sayısına yine çağıran
+       karar verir (`m.decimals`); `I18N.number` yalnız ayracı
+       `ondalikAyraci()` tek kaynağından yazar (i18n.js:330). */
     const fmtVal = m => {
         const v = Number(m.value);
-        return isFinite(v) ? v.toFixed(m.decimals) : 'n/a';
+        if (!isFinite(v)) return 'n/a';
+        return (window.I18N && typeof window.I18N.number === 'function')
+            ? window.I18N.number(v, m.decimals) : v.toFixed(m.decimals);
     };
+    // Künye metni sunucudan geliyor: title ÖZNİTELİĞİNE konmadan önce
+    // tırnak/açılı ayraç kaçırılır (bozuk öznitelik = kaybolan kart).
+    const attrSafe = s => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     // HUD katmanı yoksa (hud.js yüklenmemiş eski sayfa): zarifçe düz metin.
+    // Künye burada da DÜŞMEZ: kartın anlamı ona bağlı.
     if (typeof window.HRMAHud === 'undefined') {
+        // P17B2-01: HUD'suz yolda da hüküm sözcüğü düşmez — orada renk
+        // kanalı hiç yok, dolayısıyla sözcük TEK kanaldır.
         metricsDiv.innerHTML = metrics.map(m =>
-            `<div style="padding:4px 0;"><strong>${m.label}:</strong> ${fmtVal(m)} ${m.unit}</div>`
-        ).join('');
+            `<div style="padding:4px 0;" title="${attrSafe(m.title)}"><strong>${m.label}:</strong> `
+            + `${fmtVal(m)} ${m.unit}`
+            + `${m.stateWord ? ' — ' + attrSafe(SRV(m.stateWord)) : ''}`
+            + `${m.note ? ' — ' + m.note : ''}</div>`
+        ).join('')
+            // P11B2-01: hüküm/risk/öneriler HUD'suz yolda da DÜŞMEZ.
+            + structuralVerdictBlock(motorData, results)
+            // P11B2-13: varsayılan beyanı HUD'suz yolda da DÜŞMEZ.
+            + defaultsDeclarationBlock(motorData, results)
+            // ÖH D37 A1a · CW-A4E6 + CW-B3: HUD'suz yolda da düşmez.
+            + defaultsAppliedBlock(results)
+            + wallTemperatureQuestionsBlock(motorData);
         return;
     }
 
@@ -452,10 +1465,51 @@ function displayPerformanceMetrics(motorData) {
         const countSpan = isFinite(v)
             ? `<span class="hd-count" data-target="${v}" data-decimals="${m.decimals}">0</span>`
             : '<span>n/a</span>';
+        const note = m.note
+            ? `<div class="hd-metric-note" style="font-family:var(--hd-mono);
+                 font-size:0.66rem; letter-spacing:0.02em; margin-top:2px;
+                 color:${m.noteWarn ? 'var(--hd-orange, #ff8c33)'
+                                    : 'var(--hd-ink-dim, #7d97a5)'};"
+                 >${kunyeSarmaHtml(m.note, KUNYE_DAR_KART_ESIGI)}</div>`
+            : '';
+        // P17B2-01: hüküm sözcüğü kartın GÖRÜNÜR metnine girer. Rozet
+        // `data-state` rengiyle aynı kaynaktan beslenir ama renkten
+        // bağımsız okunur; `aria-label` kartın tamamını tek cümlede verir.
+        /* ÖH D27 a4 · P11S1-02 — UNSAFE HÜKMÜNÜN GÖRSEL İMZASI DOĞUYOR.
+
+           ÖLÇÜLDÜ (a4/once.json): `results_hud.css` durum pilini
+           (`.hd-statustag`, 2 kural) ve LED'i (`.hd-led`, 8 kural) tanımlı
+           tutuyordu; LED'in hud.js'te tüketicisi vardı ama PİLİN ürün
+           kodunda tüketicisi SIFIRDI (`p11s1_02_js_tuketici_hd_statustag`
+           = 0). Bu kart pili yeniden yazan satır-içi bir üslupla kendi
+           `.hd-state-word` rozetini çiziyordu ve içinde `.hd-led` düğümü
+           YOKTU — oysa `[data-state="unsafe"] .hd-led` kuralı UNSAFE'in
+           TEK kalıcı görsel imzasıdır (yanıp sönen LED). `bindState`
+           kartın kendisine `data-state` koyuyordu, kart da rengi alıyordu;
+           ama renk metin-dışı ayırt edilebilirlik tabanının altında
+           (P17B2-01 ölçümü: 1,07 / 1,49 / 1,59 — taban 3:1). Yani imza
+           hiç doğmuyordu.
+
+           Rozet artık paylaşılan pil sözleşmesini KULLANIR (biçim tek
+           kaynakta, CSS'te) ve içine LED düğümünü alır. `hd-state-word`
+           sınıfı korunur (tests/test_d21_arayuz_a2.py ona bakıyor);
+           satır-içi üslup yalnız CSS'in vermediği yerleşim payını
+           taşır — renk/kenar/yuvarlaklık artık pilin kendisinden gelir. */
+        const stateWord = m.stateWord
+            ? `<span class="hd-statustag hd-state-word"
+                 style="margin-left:6px; white-space:nowrap;"
+                 ><span class="hd-led"></span>${attrSafe(SRV(m.stateWord))}</span>`
+            : '';
+        const kartEtiketi = m.stateWord
+            ? `${attrSafe(m.label)} ${attrSafe(fmtVal(m))} ${attrSafe(m.unit)}`
+              + ` — ${attrSafe(SRV(m.stateWord))}`
+            : '';
         html += `
-            <div class="hd-metric">
+            <div class="hd-metric" title="${attrSafe(m.title)}"${
+                kartEtiketi ? ` aria-label="${kartEtiketi}"` : ''}>
                 <div class="hd-metric-head">
-                    <div class="hd-metric-label">${m.label}</div>
+                    <div class="hd-metric-label">${m.label}${stateWord}</div>
+                    ${note}
                 </div>
                 <div class="hd-metric-value">
                     ${countSpan}<small>${m.unit}</small>
@@ -463,6 +1517,17 @@ function displayPerformanceMetrics(motorData) {
             </div>`;
     });
     html += '</div>';
+    // P11B2-01 (KRİTİK): yapısal hüküm + risk + adlandırılmış onarım
+    // önerileri kart ızgarasının HEMEN altına. Aynı işlev dil değişiminde de
+    // çağrıldığı için şerit dille birlikte yeniden basılır.
+    html += structuralVerdictBlock(motorData, results);
+    // P11B2-13: çözücünün kendi "varsayılana düşen girdiler" listesi.
+    html += defaultsDeclarationBlock(motorData, results);
+    // ÖH D37 A1a · CW-A4E6: ucun `defaults_applied` künyesi (boş alanlar
+    // için sunucunun uyguladığı değerler) — liste sunucudan, elle değil.
+    html += defaultsAppliedBlock(results);
+    // ÖH D37 A1a · CW-B3: cidar sıcaklığının hangi soruyu yanıtladığı.
+    html += wallTemperatureQuestionsBlock(motorData);
     metricsDiv.innerHTML = html;
 
     // Durum bağlama + count-up başlatma
@@ -486,6 +1551,52 @@ function displayPerformanceMetrics(motorData) {
  * yapıldı ama sonuç sıfır" izlenimi verir — oysa gerçek "bu koşuda eğri
  * üretilmedi"dir (ör. eski kayıt yüklendiğinde).
  */
+// ÖH D29 · P11B2-15 — EĞRİNİN KENDİ KÜNYESİ (basis + sampling).
+// Ölçülen: `thrust_curve.basis` ve `thrust_curve.sampling` yükte var ve
+// panelde 0 kez okunuyordu; kullanıcı 201 noktalık diziyi çözücünün
+// çözünürlüğü sanabiliyordu (dizinin YAYIN çözünürlüğü olduğu, neyin
+// korunduğu ve türetilmiş sayıların TAM çözünürlükten geldiği yalnız bu
+// iki alanda yazılı). Künye hiçbir sayı ÜRETMEZ: alan yoksa satır hiç
+// yazılmaz, alan adları makine verisidir (yeni çeviri anahtarı açılmaz).
+function thrustCurveDeclaration(panel, curve) {
+    if (!panel) return;
+    let kutu = panel.querySelector('[data-thrust-curve-decl]');
+    const satirlar = [];
+    if (typeof curve.basis === 'string' && curve.basis) {
+        satirlar.push('thrust_curve.basis: ' + SRV(curve.basis));
+    }
+    const sm = curve.sampling;
+    if (sm && typeof sm === 'object') {
+        const alanlar = ['points_published', 'points_computed', 'decimated',
+                         'solver_time_step_s', 'max_points', 'cap_exceeded'];
+        const parcalar = alanlar
+            .filter(k => sm[k] !== undefined && sm[k] !== null)
+            .map(k => k + ' = ' + String(sm[k]));
+        if (parcalar.length) {
+            satirlar.push('thrust_curve.sampling: ' + parcalar.join(', '));
+        }
+        if (typeof sm.basis === 'string' && sm.basis) {
+            satirlar.push('thrust_curve.sampling.basis: ' + SRV(sm.basis));
+        }
+        if (typeof sm.cap_note === 'string' && sm.cap_note) {
+            satirlar.push('thrust_curve.sampling.cap_note: ' + SRV(sm.cap_note));
+        }
+    }
+    if (!satirlar.length) {
+        if (kutu) kutu.remove();
+        return;
+    }
+    if (!kutu) {
+        kutu = document.createElement('div');
+        kutu.setAttribute('data-thrust-curve-decl', '1');
+        kutu.style.cssText = 'margin-top:8px; font-size:0.72rem;'
+            + ' line-height:1.45; color:#6c757d;'
+            + ' font-family:var(--hd-mono, monospace);';
+        panel.appendChild(kutu);
+    }
+    kutu.textContent = satirlar.join('  |  ');
+}
+
 function renderHybridThrustCurve() {
     const panel = document.getElementById('hybridThrustCurvePanel');
     const host = document.getElementById('hybrid_thrust_plot');
@@ -526,9 +1637,36 @@ function renderHybridThrustCurve() {
         });
     }
 
+    // ÖH D29 · P11B2-15 — ÜRETİLEN TOPLAM DEBİ EĞRİSİ ÇİZİLİYOR.
+    // ÖLÇÜLDÜ (a3/once.json): `thrust_curve` altı alan yayımlıyor
+    // (time, thrust, pressure, mass_flow, basis, sampling) ve panel
+    // yalnız ilk üçünü okuyordu — `curve.mass_flow` / `curve.basis` /
+    // `curve.sampling` tüketicisi app.js'te 0'dı. Hibritte oksitleyici
+    // debisi sabit, yakıt debisi port gerilemesiyle değişir; toplam debi
+    // O/F kaymasının doğrudan okunabildiği eğridir.
+    // Eğri UYDURULMAZ: uzunluğu zaman eksenine eşit ve tamamı sonlu
+    // değilse iz HİÇ eklenmez (basınç izinin kuralıyla aynı).
+    const massFlow = Array.isArray(curve.mass_flow) ? curve.mass_flow : [];
+    const massFlowCizilir = massFlow.length === curve.time.length
+        && massFlow.every(v => typeof v === 'number' && isFinite(v));
+    if (massFlowCizilir) {
+        traces.push({
+            x: curve.time,
+            y: massFlow,
+            type: 'scatter',
+            mode: 'lines',
+            name: T('common.f.mdotTotal', 'Total Mass Flow (kg/s)'),
+            yaxis: 'y3',
+            line: { width: 2, dash: 'dashdot' }
+        });
+    }
+
     const layout = {
-        title: T('app.chart.thrustVsTime', 'Thrust and Chamber Pressure vs Time'),
-        xaxis: { title: T('app.chart.timeS', 'Time (s)') },
+        title: T('app.chart.thrustVsTime', 'Thrust and Chamber Pressure vs Time')
+            + (massFlowCizilir
+                ? ' · ' + T('common.f.mdotTotal', 'Total Mass Flow (kg/s)') : ''),
+        xaxis: { title: T('app.chart.timeS', 'Time (s)'),
+                 domain: massFlowCizilir ? [0.0, 0.90] : [0.0, 1.0] },
         yaxis: { title: T('app.chart.thrustN', 'Thrust (N)') },
         yaxis2: {
             title: T('app.chart.pressureBar', 'Chamber Pressure (bar)'),
@@ -537,8 +1675,31 @@ function renderHybridThrustCurve() {
             showgrid: false
         },
         showlegend: true,
+        // ÖH D34 · OH-P-01 (piksel turu, 21 Eyl 2026) — GRAFİK ÇÖKÜKTÜ.
+        // ÖLÇÜLDÜ (1440x900, hibrit örneği, Plotly _fullLayout): kap
+        // #hybrid_thrust_plot 542 px yüksekken Plotly yüksekliği 140 px,
+        // çizim alanı 20 px çıkıyordu — y etiketleri üst üste, üç y ekseni
+        // ve dikey gösterge sağ kenarda birbirine biniyordu; grafik
+        // okunmuyordu. Sebep: yükseklik yerleşimde beyan edilmiyor, çizim
+        // anında kabın ölçüsü henüz oturmamış oluyor. ONARIM: açık yükseklik
+        // + yatay gösterge çizim alanının altında (sağ kenar üç y ekseninin).
+        // Canlı relayout ile doğrulandı: çizim alanı 20 → 311 px
+        // (.playwright-mcp/piksel/hibrit-03-thrust-deneme.png).
+        height: 480,
+        legend: { orientation: 'h', x: 0, xanchor: 'left', y: -0.22 },
         margin: { t: 60, r: 70, b: 60, l: 70 }
     };
+    if (massFlowCizilir) {
+        layout.yaxis3 = {
+            title: T('common.f.mdotTotal', 'Total Mass Flow (kg/s)'),
+            overlaying: 'y',
+            side: 'right',
+            position: 1.0,
+            anchor: 'free',
+            showgrid: false
+        };
+    }
+    thrustCurveDeclaration(panel, curve);
     Plotly.newPlot(host, traces, layout, {
         responsive: true,
         displaylogo: false,
@@ -558,11 +1719,168 @@ function renderHybridThrustCurve() {
  * olarak birbirini yalanlıyordu. Artık GERÇEK hacim gösterilir; hedef hacim
  * l_star / l_star_achieved satırlarından zaten okunabiliyor.
  */
+// ==================================================================
+// P11B2-24 — "BAŞARI" ROZETİ HTTP KODUNUN KOPYASI OLMAKTAN ÇIKARILDI
+// ==================================================================
+// Ölçülen (docs/scofield/raw/OH/D15/ui-paneller/a2/b2_24_ONCE.json):
+// üç dışa aktarım işleyicisi de yalnız `response.ok`'a bakıyordu ve
+// içeriği boş / istenmeyen 200 yanıtlarında ÜÇÜ DE yeşil onay yayımladı
+// (icerik_bos_ama_basari_yayimlayan = 3/3).
+// Aşağıdaki üç kapı fail-closed'dır: hüküm kazanılmadıysa yayımlanmaz,
+// eksik olan ADIYLA söylenir, hiçbir sayı uydurulmaz.
+
+// Kapıların fırlattığı mesajlar MAKİNE VERİSİDİR (alan adları + ölçülen
+// değerler): yeni çeviri anahtarı AÇILMAZ. Üçü de dış işleyicinin ZATEN
+// çevrilmiş zarfına giriyor (`app.msg.cadError` / `app.msg.paramError`),
+// PDF dalı ise yalnız console.warn'a düşüp metin rapor yedeğine geçiyor.
+const BOS_ICERIK = 'endpoint returned no content: ';
+const PDF_DEGIL = 'endpoint did not return a PDF: ';
+const TARAMA_IKAME = 'endpoint substituted the sweep: ';
+
+// ÖH D30 · OH-D29-02 (ÇİFT: P12bB3-09 / OH-D28-10 / P12bS1-06) — ÖLÇÜLEN ÖLÜ KOPYA SÖKÜLDÜ.
+// app.js YALNIZ advanced.html tarafından yükleniyor (ölçüldü: 8 şablonun 1’i) ve
+// o sayfanın satır içi betiği bu adı app.js etiketinden SONRA yeniden bildiriyordu;
+// hoisting ile satır içi sürüm kazanıyordu, yani aşağıdaki gövde hiç koşmuyordu.
+// Kanıt: docs/scofield/raw/OH/D30/arayuz-panel/a1/{once,sonra}.json (11 canlı gölge,
+// 446 satır) — söküm ÖNCESİ her adın hangi sürümünün kazandığı sayfa sayfa ölçüldü.
+// SÖKÜLDÜ (D30 a1) · assertCadContent() — tek çağrısı yukarıdaki ölü generateCAD içindeydi; denetlediği /api/export-cad yanıt şekli canlı yolda hiç istenmiyor (canlı yol /api/generate-3d’dir ve kendi fail-closed dalı OH-D23-15’te açıldı).
+
+// İnen blob'un gerçekten PDF olduğunu doğrular: sunucunun ilan ettiği
+// içerik tipi + dosyanın kendi `%PDF-` imzası. Biri tutmazsa fırlatır.
+async function assertPdfBlob(blob, response) {
+    const ilan = String((response && response.headers
+        && response.headers.get('Content-Type')) || (blob && blob.type) || '');
+    if (ilan.indexOf('application/pdf') < 0) {
+        throw new Error(PDF_DEGIL + 'Content-Type=' + (ilan || '—'));
+    }
+    if (!blob || !(blob.size > 0)) {
+        throw new Error(PDF_DEGIL + 'blob.size=0');
+    }
+    // İmza: PDF dosyaları "%PDF-" ile başlar (ISO 32000-1 §7.5.2).
+    const bas = await blob.slice(0, 5).arrayBuffer();
+    const b = new Uint8Array(bas);
+    const imza = String.fromCharCode.apply(null, Array.prototype.slice.call(b));
+    if (imza !== '%PDF-') {
+        throw new Error(PDF_DEGIL + 'magic=' + JSON.stringify(imza));
+    }
+}
+
+// Ucun yankıladığı tarama, istenen taramayla aynı mı? Değilse fırlatır.
+function assertParametricMatchesRequest(result, istenenTip, bas, son) {
+    if (!result || typeof result !== 'object') {
+        throw new Error(BOS_ICERIK + 'parametric response');
+    }
+    const donenTip = result.sweep_parameter;
+    if (typeof donenTip === 'string' && istenenTip
+            && donenTip !== String(istenenTip)) {
+        throw new Error(TARAMA_IKAME + 'sweep_parameter=' + donenTip
+            + ' (requested ' + String(istenenTip) + ')');
+    }
+    const aralik = result.sweep_range;
+    if (Array.isArray(aralik) && aralik.length === 2
+            && isFiniteNum(bas) && isFiniteNum(son)
+            && isFiniteNum(aralik[0]) && isFiniteNum(aralik[1])) {
+        // Yankı ile isteğin sayısal karşılaştırması; kayan nokta artığı
+        // için 1e-9 göreli tolerans (mutlak eşiği olmayan saf oran testi).
+        const uyar = function (a, b) {
+            const olcek = Math.max(Math.abs(a), Math.abs(b), 1e-30);
+            return Math.abs(a - b) / olcek <= 1e-9;
+        };
+        if (!uyar(aralik[0], bas) || !uyar(aralik[1], son)) {
+            throw new Error(TARAMA_IKAME + 'sweep_range='
+                + aralik[0] + '–' + aralik[1]
+                + ' (requested ' + bas + '–' + son + ')');
+        }
+    }
+    if (isFiniteNum(result.points_succeeded) && result.points_succeeded <= 0) {
+        throw new Error(BOS_ICERIK + 'points_succeeded='
+            + result.points_succeeded);
+    }
+}
+
+// ==================================================================
+// P11B2-08 — YANAN KÜTLE ⟷ YÜKLENEN KÜTLE ÇELİŞKİSİ
+// ==================================================================
+// Ölçülen (docs/scofield/raw/OH/D15/ui-paneller/a2/b2_08_ONCE.json):
+// "Propellant" bölümü `propellant_mass_total` = 4,7130 kg basıyordu
+// (= oksitleyici 4,1681 + YANAN yakıt 0,5449). Aynı raporun "Design
+// Summary" bölümü `total_mass_kg` = 20,6662 kg basıyor ve çözücünün
+// kendi beyanı (`key_dimensions.total_mass_basis`) bunun kuru kütle +
+// YÜKLENEN oksitleyici + YÜKLENEN gren olduğunu söylüyor. Yüklenen
+// itergaç 4,1681 + 1,9378 = 6,1059 kg; ekrandaki satırla arada
+// 1,3929 kg (+%29,55) fark var ve ekranda bunu açıklayan tek kelime
+// yoktu — grenin %71,88'i yanmadan ölü ağırlık olarak uçuyor.
+//
+// Çözüm BEYAN DEĞİL, eksik alanların basılmasıdır: çözücü
+// `fuel_mass_loaded`, `fuel_sliver_fraction`, `oxidizer_mass_residual_kg`
+// alanlarını HER hesapta yayımlıyordu, rapor üçünü de düşürüyordu.
+// Satır etiketleri MAKİNE ALAN ADIYLA nitelenir (yeni çeviri anahtarı
+// açılmaz — a1'de safety_panel için kullanılan desenin aynısı): hangi
+// sayının yanan hangisinin yüklenen olduğu ada bakarak okunur.
+//
+// Uydurma yok: hiçbir satır hesaplanmaz, yalnız ucun yayımladığı alan
+// basılır. Alan yoksa satır HİÇ çıkmaz (fail-closed).
+
+// Satır etiketinin yanına ucun makine alan adını koyar.
+function fieldTag(name) {
+    return ` <span class="hd-field-tag" style="font-family:var(--hd-mono);
+        font-size:0.68rem; color:var(--hd-ink-dim, #7d97a5);">${name}</span>`;
+}
+
+function isFiniteNum(x) {
+    return typeof x === 'number' && isFinite(x);
+}
+
+// Yüklenen (uçan) kütle satırları. Yalnız ucun gerçekten yayımladığı
+// alanlar basılır; hiçbiri yoksa boş dize döner ve tablo eskisi gibi kalır.
+function loadedMassRows(motorData) {
+    if (!motorData || typeof motorData !== 'object') return '';
+    const rows = [];
+    if (isFiniteNum(motorData.fuel_mass_loaded)) {
+        rows.push(`<tr><td>${T('app.rep.fuelMass', 'Fuel Mass')}`
+            + fieldTag('fuel_mass_loaded')
+            + `</td><td>${numTxt(motorData.fuel_mass_loaded, 2)} kg</td></tr>`);
+    }
+    // ÖH D37 A1a · DV-GT27 — ÖLÇÜLDÜ (a1/once.json M7, Ornek-H1 canlı,
+    // EN ve TR): bu iki satırın etiket hücresi YALNIZ ham makine alan adını
+    // basıyordu (`fuel_sliver_fraction`, `oxidizer_mass_residual_kg`;
+    // alan imi dışında metin ''). Kardeş satırlarla aynı desene çekildi:
+    // çevrilmiş etiket + yanında makine alan imi (imi korunur: hangi
+    // sayının hangi alan olduğu ada bakarak okunmaya devam eder).
+    if (isFiniteNum(motorData.fuel_sliver_fraction)) {
+        rows.push(`<tr><td>${T('app.rep.fuelSliverFraction', 'Unburned fuel (sliver) fraction')}`
+            + fieldTag('fuel_sliver_fraction')
+            + `</td><td>${pctTxt((motorData.fuel_sliver_fraction * 100), 1)}</td></tr>`);
+    }
+    if (isFiniteNum(motorData.oxidizer_mass_residual_kg)) {
+        rows.push(`<tr><td>${T('app.rep.oxResidualMass', 'Residual (unused) oxidizer mass')}`
+            + fieldTag('oxidizer_mass_residual_kg')
+            + `</td><td>${numTxt(motorData.oxidizer_mass_residual_kg, 2)} kg</td></tr>`);
+    }
+    return rows.join('\n');
+}
+
+// ÖH D25 / P11B2-12 — çözücü hacmi yayımlamadıysa SIFIR DÖNMEZ, `null`
+// döner. Eskiden `motorData.chamber_volume || 0` yüzünden ekranda
+// "0.0 cm³" yazıyordu ve kullanıcı bunu ölçülmüş bir hacim sanıyordu.
+// Sıfır hacim fiziksel olarak anlamsızdır; "hesaplanmadı" ile "sıfır"
+// aynı şey değildir.
 function chamberVolumeM3(motorData) {
-    if (!motorData) return 0;
+    if (!motorData) return null;
     const actual = motorData.chamber_volume_actual;
-    return (typeof actual === 'number' && isFinite(actual) && actual > 0)
-        ? actual : (motorData.chamber_volume || 0);
+    if (isFiniteNum(actual) && actual > 0) return actual;
+    const nominal = motorData.chamber_volume;
+    return (isFiniteNum(nominal) && nominal > 0) ? nominal : null;
+}
+
+// Hacmin ekrana çıkan metni. Hesaplanmadıysa sayı UYDURULMAZ; birim de
+// yazılmaz (birimsiz "hesaplanmadı cm³" ibaresi olmasın diye birim bu
+// yardımcının içindedir).
+function chamberVolumeCm3Text(motorData) {
+    const v = chamberVolumeM3(motorData);
+    return v === null
+        ? T('common.notComputed', 'not computed')
+        : numTxt((v * 1e6), 1) + ' cm³';
 }
 
 function safePlotCreate(elementId, plotData) {
@@ -685,7 +2003,22 @@ function displayPlots(plots) {
     let viz3dMounted = false;
     if (typeof mountMotorViz === 'function' && window.currentResults && currentResults.motor) {
         try {
-            viz3dMounted = mountMotorViz(currentResults.motor);
+            // ÖH D15 / P11B1-04 — SAHNEYE ENJEKTÖR ÇÖZÜCÜSÜNÜN SONUCU DA
+            // VERİLİR. ÖLÇÜLDÜ: sahnenin `resolveInjectorSource` tercihi
+            // `md.injector_results` altını arıyor; sahneye YALNIZ
+            // `currentResults.motor` verildiği için o dal HİÇ ateşlenmiyor
+            // ve kod sessizce `injector_design` yedeğine düşüyordu —
+            // kullanıcı enjektör sekmesinde 32 delik × 0,83 mm okuyup 3B
+            // plakada 3 delik × 2,06 mm görüyordu. Eksik olan tek şey
+            // KABLOYDU: panelin sonucu yanıtın üst düzeyinde
+            // (`data.injector`) yayımlanıyor. Motor sözlüğü DEĞİŞTİRİLMEZ
+            // (sığ kopya); enjektör yoksa hiçbir şey eklenmez.
+            const vizMotor = (currentResults.injector
+                              && typeof currentResults.injector === 'object')
+                ? Object.assign({}, currentResults.motor,
+                                { injector_results: currentResults.injector })
+                : currentResults.motor;
+            viz3dMounted = mountMotorViz(vizMotor);
         } catch (e) {
             console.warn('MotorViz3D mount failed, falling back to Plotly 3D:', e);
         }
@@ -752,14 +2085,25 @@ function lStarRow(motorData) {
     const asked = motorData.l_star;
     const achieved = motorData.l_star_achieved;
     if (typeof asked !== 'number' && typeof achieved !== 'number') return '';
-    const fmt = (v) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(2) : 'N/A';
+    const fmt = (v) => (typeof v === 'number' && isFinite(v)) ? numTxt(v, 2) : 'N/A';
     let value = `${fmt(asked)} m`;
     if (typeof achieved === 'number' && typeof asked === 'number'
         && Math.abs(achieved - asked) > 0.01) {
         value = `${fmt(asked)} m requested &rarr; <strong>${fmt(achieved)} m achieved</strong>`;
     }
+    // ÖH D30 · P11B2-18 — SUNUCU METNİ KAÇIŞSIZ innerHTML'e giriyordu.
+    // ÖLÇÜLDÜ (a2/once.json: P11B2-18_kacissiz_l_star_note = 1,
+    // _escli_l_star_note = 0): `l_star_note` motor çözücüsünün serbest
+    // metnidir (malzeme adı, geometri notu, kullanıcıdan gelen ad
+    // parçaları taşıyabilir) ve şablon dizgisine ham gömülüyordu; içindeki
+    // `<` `&` bu satırda BİÇİMLENDİRME olarak yorumlanıyordu. Rapor
+    // gövdesi innerHTML ile basıldığı için bu bir metin-enjeksiyon
+    // yüzeyidir. Kaçış kardeş yayıcıların (app.js:762, 944) desenidir.
+    const escNote = (s2) => String(s2 == null ? '' : s2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const note = motorData.l_star_note
-        ? `<div style="font-size:11px;color:#7d97a5;margin-top:2px;">${motorData.l_star_note}</div>`
+        ? `<div style="font-size:11px;color:#7d97a5;margin-top:2px;">${
+            escNote(motorData.l_star_note)}</div>`
         : '';
     return `<tr><td>${T('app.rep.lStar', 'L* (characteristic length)')}</td>`
         + `<td>${value}${note}</td></tr>`;
@@ -768,7 +2112,7 @@ function lStarRow(motorData) {
 // --- Design Report yardımcıları -------------------------------------------
 // Sayısal biçimleyici: sonlu değilse em-dash (tablo kırılmaz, sahte 0 yok).
 function reportNum(value, digits) {
-    return (typeof value === 'number' && isFinite(value)) ? value.toFixed(digits) : '—';
+    return (typeof value === 'number' && isFinite(value)) ? numTxt(value, digits) : '—';
 }
 
 // 'cylindrical_bore' -> 'Cylindrical bore' (backend enum'ları okunur hale gelir)
@@ -863,7 +2207,27 @@ function designSummarySection(designSummary) {
         [T('app.rep.totalImpulse', 'Total Impulse'), reportNum(perf.total_impulse_Ns, 0), 'N&middot;s'],
         [T('common.burnTime', 'Burn Time'), reportNum(perf.burn_time_s, 2), 's']
     ];
-    return reportSection(T('app.rep.secSummary', 'Design Summary'), rows);
+    // P11B2-08 — "Total Mass" ile "Total Propellant Mass" arasındaki
+    // 1,39 kg'lık farkı açıklayan İKİ beyan çözücüde vardı ve rapor
+    // ikisini de düşürüyordu. Cümleler ÇÖZÜCÜNÜN kendi kelimeleridir;
+    // panel yeniden yazmaz, yalnız basar (SRV = varsa Türkçe karşılığı).
+    let html = reportSection(T('app.rep.secSummary', 'Design Summary'), rows);
+    const beyanlar = [];
+    if (typeof dims.total_mass_basis === 'string' && dims.total_mass_basis) {
+        beyanlar.push(['total_mass_basis', dims.total_mass_basis]);
+    }
+    if (typeof dims.dry_mass_basis === 'string' && dims.dry_mass_basis) {
+        beyanlar.push(['dry_mass_basis', dims.dry_mass_basis]);
+    }
+    if (beyanlar.length) {
+        html += beyanlar.map(function (b) {
+            return `<p class="hd-mass-basis" style="font-size:0.75rem;
+                color:var(--hd-ink-dim, #7d97a5); margin:2px 0 0 0;">`
+                + `<span style="font-family:var(--hd-mono);">${b[0]}</span>: `
+                + `${hdEscape(SRV(b[1]))}</p>`;
+        }).join('');
+    }
+    return html;
 }
 
 function displayDesignReport(motorData, injectorData) {
@@ -874,12 +2238,12 @@ function displayDesignReport(motorData, injectorData) {
             <h6>${T('app.rep.secPerformance', 'Motor Performance')}</h6>
             <table class="report-table table table-striped">
                 <tbody>
-                    <tr><td>${T('app.rep.ispDesignLong', 'Specific Impulse (Isp, design point at design-altitude ambient)')}</td><td>${motorData.isp.toFixed(1)} s</td></tr>
-                    <tr><td>${T('app.rep.cstarLong', 'Characteristic Velocity (C*)')}</td><td>${motorData.c_star.toFixed(0)} m/s</td></tr>
-                    <tr><td>${T('app.rep.cfLong', 'Thrust Coefficient (CF)')}</td><td>${motorData.cf.toFixed(3)}</td></tr>
-                    <tr><td>${T('app.rep.throatDia', 'Throat Diameter')}</td><td>${(motorData.throat_diameter * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>${T('app.rep.exitDia', 'Exit Diameter')}</td><td>${(motorData.exit_diameter * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>${T('common.f.expansionRatio', 'Expansion Ratio')}</td><td>${motorData.expansion_ratio.toFixed(1)}</td></tr>
+                    <tr><td>${T('app.rep.ispDesignLong', 'Specific Impulse (Isp, design point at design-altitude ambient)')}</td><td>${numTxt(motorData.isp, 1)} s</td></tr>
+                    <tr><td>${T('app.rep.cstarLong', 'Characteristic Velocity (C*)')}</td><td>${numTxt(motorData.c_star, 0)} m/s</td></tr>
+                    <tr><td>${T('app.rep.cfLong', 'Thrust Coefficient (CF)')}</td><td>${numTxt(motorData.cf, 3)}</td></tr>
+                    <tr><td>${T('app.rep.throatDia', 'Throat Diameter')}</td><td>${numTxt((motorData.throat_diameter * 1000), 1)} mm</td></tr>
+                    <tr><td>${T('app.rep.exitDia', 'Exit Diameter')}</td><td>${numTxt((motorData.exit_diameter * 1000), 1)} mm</td></tr>
+                    <tr><td>${T('common.f.expansionRatio', 'Expansion Ratio')}</td><td>${numTxt(motorData.expansion_ratio, 1)}</td></tr>
                 </tbody>
             </table>
         </div>
@@ -888,14 +2252,14 @@ function displayDesignReport(motorData, injectorData) {
             <h6>${T('app.rep.secGeometry', 'Motor Geometry')}</h6>
             <table class="report-table table table-striped">
                 <tbody>
-                    <tr><td>${T('app.rep.chamberDia', 'Chamber Diameter')}</td><td>${(motorData.chamber_diameter * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>${T('app.rep.chamberLen', 'Chamber Length')}</td><td>${(motorData.chamber_length * 1000).toFixed(1)} mm</td></tr>
+                    <tr><td>${T('app.rep.chamberDia', 'Chamber Diameter')}</td><td>${numTxt((motorData.chamber_diameter * 1000), 1)} mm</td></tr>
+                    <tr><td>${T('app.rep.chamberLen', 'Chamber Length')}</td><td>${numTxt((motorData.chamber_length * 1000), 1)} mm</td></tr>
                     ${lStarRow(motorData)}
-                    <tr><td>${T('app.rep.chamberVolume', 'Chamber Volume')}</td><td>${(chamberVolumeM3(motorData) * 1e6).toFixed(1)} cm³</td></tr>
-                    <tr><td>${T('app.rep.portInitial', 'Initial Port Diameter')}</td><td>${(motorData.port_diameter_initial * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>${T('app.rep.portFinal', 'Final Port Diameter')}</td><td>${(motorData.port_diameter_final * 1000).toFixed(1)} mm</td></tr>
-                    <tr><td>${T('app.rep.regressionRate', 'Regression Rate')}</td><td>${motorData.regression_rate ? (motorData.regression_rate * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
-                    <tr><td>${T('app.rep.regressionAvg', 'Avg Regression Rate')}</td><td>${motorData.regression_rate_avg ? (motorData.regression_rate_avg * 1000).toFixed(2) : 'N/A'} mm/s</td></tr>
+                    <tr><td>${T('app.rep.chamberVolume', 'Chamber Volume')}</td><td>${chamberVolumeCm3Text(motorData)}</td></tr>
+                    <tr><td>${T('app.rep.portInitial', 'Initial Port Diameter')}</td><td>${numTxt((motorData.port_diameter_initial * 1000), 1)} mm</td></tr>
+                    <tr><td>${T('app.rep.portFinal', 'Final Port Diameter')}</td><td>${numTxt((motorData.port_diameter_final * 1000), 1)} mm</td></tr>
+                    <tr><td>${T('app.rep.regressionRate', 'Regression Rate')}</td><td>${motorData.regression_rate ? numTxt((motorData.regression_rate * 1000), 2) : 'N/A'} mm/s</td></tr>
+                    <tr><td>${T('app.rep.regressionAvg', 'Avg Regression Rate')}</td><td>${motorData.regression_rate_avg ? numTxt((motorData.regression_rate_avg * 1000), 2) : 'N/A'} mm/s</td></tr>
                 </tbody>
             </table>
         </div>
@@ -905,30 +2269,31 @@ function displayDesignReport(motorData, injectorData) {
             <table class="report-table table table-striped">
                 <tbody>
                     <tr><td>${T('common.type', 'Type')}</td><td>${injectorData.type.charAt(0).toUpperCase() + injectorData.type.slice(1)}</td></tr>
-                    <tr><td>${T('app.rep.exitVelocity', 'Exit Velocity')}</td><td>${injectorData.exit_velocity.toFixed(1)} m/s</td></tr>
-                    <tr><td>${T('app.rep.reynolds', 'Reynolds Number')}</td><td>${injectorData.reynolds_number.toFixed(0)}</td></tr>
-                    <tr><td>${T('app.rep.pressureDrop', 'Pressure Drop')}</td><td>${injectorData.pressure_drop.toFixed(2)} bar</td></tr>
+                    <tr><td>${T('app.rep.exitVelocity', 'Exit Velocity')}</td><td>${numTxt(injectorData.exit_velocity, 1)} m/s</td></tr>
+                    <tr><td>${T('app.rep.reynolds', 'Reynolds Number')}</td><td>${numTxt(injectorData.reynolds_number, 0)}</td></tr>
+                    <tr><td>${T('app.rep.pressureDrop', 'Pressure Drop')}</td><td>${numTxt(injectorData.pressure_drop, 2)} bar</td></tr>
     `;
     
     // Add type-specific parameters
     if (injectorData.type === 'showerhead') {
         html += `
                     <tr><td>${T('app.rep.nHoles', 'Number of Holes')}</td><td>${injectorData.n_holes}</td></tr>
-                    <tr><td>${T('app.rep.holeDia', 'Hole Diameter')}</td><td>${injectorData.hole_diameter.toFixed(2)} mm</td></tr>
-                    <tr><td>${T('app.rep.ldRatio', 'L/D Ratio')}</td><td>${injectorData.L_D_ratio.toFixed(1)}</td></tr>
+                    <tr><td>${T('app.rep.holeDia', 'Hole Diameter')}</td><td>${numTxt(injectorData.hole_diameter, 2)} mm</td></tr>
+                    <tr><td>${T('app.rep.ldRatio', 'L/D Ratio')}</td><td>${numTxt(injectorData.L_D_ratio, 1)}</td></tr>
         `;
     } else if (injectorData.type === 'pintle') {
         html += `
-                    <tr><td>${T('app.rep.outerDia', 'Outer Diameter')}</td><td>${injectorData.outer_diameter.toFixed(1)} mm</td></tr>
-                    <tr><td>${T('app.rep.pintleDia', 'Pintle Diameter')}</td><td>${injectorData.pintle_diameter.toFixed(1)} mm</td></tr>
-                    <tr><td>${T('app.rep.gap', 'Gap')}</td><td>${injectorData.gap.toFixed(2)} mm</td></tr>
+                    <tr><td>${T('app.rep.outerDia', 'Outer Diameter')}</td><td>${numTxt(injectorData.outer_diameter, 1)} mm</td></tr>
+                    <tr><td>${T('app.rep.pintleDia', 'Pintle Diameter')}</td><td>${numTxt(injectorData.pintle_diameter, 1)} mm</td></tr>
+                    <tr><td>${T('app.rep.gap', 'Gap')}</td><td>${numTxt(injectorData.gap, 2)} mm</td></tr>
         `;
     } else if (injectorData.type === 'swirl') {
         html += `
                     <tr><td>${T('app.rep.nSlots', 'Number of Slots')}</td><td>${injectorData.n_slots}</td></tr>
-                    <tr><td>${T('app.rep.slotWidth', 'Slot Width')}</td><td>${injectorData.slot_width.toFixed(2)} mm</td></tr>
-                    <tr><td>${T('app.rep.slotHeight', 'Slot Height')}</td><td>${injectorData.slot_height.toFixed(2)} mm</td></tr>
-                    <tr><td>${T('app.rep.sprayAngle', 'Spray Angle')}</td><td>${injectorData.spray_angle}°</td></tr>
+                    <tr><td>${T('app.rep.slotWidth', 'Slot Width')}</td><td>${numTxt(injectorData.slot_width, 2)} mm</td></tr>
+                    <tr><td>${T('app.rep.slotHeight', 'Slot Height')}</td><td>${numTxt(injectorData.slot_height, 2)} mm</td></tr>
+                    <tr><td>${T('app.rep.sprayAngleFull', 'Spray Cone Angle (full, 2\u03B8)')}</td><td>${aciBas(injectorData.spray_angle)}</td></tr>
+                    <tr><td>${T('app.rep.sprayHalfAngle', 'Spray Half Angle (\u03B8)')}</td><td>${aciBas(injectorData.spray_half_angle_deg)}</td></tr>
         `;
     }
     
@@ -941,12 +2306,13 @@ function displayDesignReport(motorData, injectorData) {
             <h6>${T('app.rep.secPropellant', 'Propellant')}</h6>
             <table class="report-table table table-striped">
                 <tbody>
-                    <tr><td>${T('app.rep.mdotTotal', 'Total Mass Flow Rate')}</td><td>${motorData.mdot_total.toFixed(3)} kg/s</td></tr>
-                    <tr><td>${T('app.rep.mdotOx', 'Oxidizer Mass Flow Rate')}</td><td>${motorData.mdot_ox.toFixed(3)} kg/s</td></tr>
-                    <tr><td>${T('app.rep.mdotFuel', 'Fuel Mass Flow Rate')}</td><td>${motorData.mdot_f.toFixed(3)} kg/s</td></tr>
-                    <tr><td>${T('app.rep.propMassTotal', 'Total Propellant Mass')}</td><td>${motorData.propellant_mass_total.toFixed(2)} kg</td></tr>
-                    <tr><td>${T('app.rep.oxMass', 'Oxidizer Mass')}</td><td>${motorData.oxidizer_mass.toFixed(2)} kg</td></tr>
-                    <tr><td>${T('app.rep.fuelMass', 'Fuel Mass')}</td><td>${motorData.fuel_mass.toFixed(2)} kg</td></tr>
+                    <tr><td>${T('app.rep.mdotTotal', 'Total Mass Flow Rate')}</td><td>${numTxt(motorData.mdot_total, 3)} kg/s</td></tr>
+                    <tr><td>${T('app.rep.mdotOx', 'Oxidizer Mass Flow Rate')}</td><td>${numTxt(motorData.mdot_ox, 3)} kg/s</td></tr>
+                    <tr><td>${T('app.rep.mdotFuel', 'Fuel Mass Flow Rate')}</td><td>${numTxt(motorData.mdot_f, 3)} kg/s</td></tr>
+                    <tr><td>${T('app.rep.propMassTotal', 'Total Propellant Mass')}${fieldTag('propellant_mass_total')}</td><td>${numTxt(motorData.propellant_mass_total, 2)} kg</td></tr>
+                    <tr><td>${T('app.rep.oxMass', 'Oxidizer Mass')}${fieldTag('oxidizer_mass')}</td><td>${numTxt(motorData.oxidizer_mass, 2)} kg</td></tr>
+                    <tr><td>${T('app.rep.fuelMass', 'Fuel Mass')}${fieldTag('fuel_mass')}</td><td>${numTxt(motorData.fuel_mass, 2)} kg</td></tr>
+${loadedMassRows(motorData)}
                 </tbody>
             </table>
         </div>
@@ -990,7 +2356,9 @@ function drawDesignReportRegressionChart(motorData) {
 
     if (!time || !portMm || time.length < 2 || portMm.length !== time.length) {
         // Doğrusal tahmin (port geçmişi yoksa)
-        const tb = Number(motorData.burn_time) || 0;
+        // `|| 0` YOK: Number(undefined) -> NaN ve aşağıdaki `!(tb > 0)`
+        // kapısı NaN'i de yakalar. Yedek yalnız bekçiyi yanıltırdı.
+        const tb = Number(motorData.burn_time);
         const d0 = Number(motorData.port_diameter_initial) * 1000;
         const d1 = Number(motorData.port_diameter_final) * 1000;
         if (!(tb > 0) || !isFinite(d0) || !isFinite(d1)) {
@@ -1027,27 +2395,216 @@ function drawDesignReportRegressionChart(motorData) {
 
     const layout = {
         autosize: true,
-        height: 320,
+        // ÖH D34 · OH-P-07 (piksel turu, 21 Eyl 2026): kap 500 px ölçülürken sabit
+        // 320 px yerleşim altında 180 px boşluk bırakıyordu; kap kadar (en az 320).
+        height: Math.max(320, el.clientHeight || 0),
         margin: {t: 30, b: 45, l: 55, r: 55},
         xaxis: {title: T('common.axis.timeS', 'Time (s)')},
         yaxis: {title: T('app.chart.portDia', 'Port diameter (mm)')},
         yaxis2: {title: 'r (mm/s)', overlaying: 'y', side: 'right'},
         legend: {orientation: 'h', y: -0.22},
-        title: approximate
-            ? T('app.chart.linearEstimate', 'Linear estimate (no transient port history)') : ''
+        // ÖH D34 · OH-GT-11 — GRAFİĞİN BAŞLIĞI VAR.
+        // ÖLÇÜLDÜ (a1/once.json K5, node altında GERÇEK çizim): gerçek
+        // port geçmişiyle çizilen grafikte `layout.title` BOŞ dizeydi
+        // (`baslik_bos: true`); başlık yalnız doğrusal tahmin dalında,
+        // hem de bir başlık değil UYARI metni olarak çıkıyordu. Raporun
+        // 14 grafiğinin tek başlıksızı buydu. Başlık artık HER dalda
+        // yazılır; doğrusal tahmin uyarısı ona EK olarak asılır.
+        // Yeni anahtar İSTEMEZ: `app.rep.secRegression` bu grafiğin
+        // üstündeki bölüm başlığının kendi anahtarıdır (EN+TR dolu).
+        title: T('app.rep.secRegression', 'Regression Rate & Port Growth')
+            + (approximate
+                ? ' - ' + T('app.chart.linearEstimate',
+                            'Linear estimate (no transient port history)')
+                : '')
     };
 
     // Koyu tema plotly_dark.js sarmalayıcısı tarafından otomatik uygulanır.
     Plotly.newPlot(el, traces, layout, {responsive: true, displayModeBar: false});
 }
 
-// Display warnings — enjektör uyarıları + /calculate cevabındaki üst seviye
-// validation objesi birlikte listelenir:
+// D-track sözleşmesi (v2.6.2): backend uyarıları düz metin yerine
+// {code, params, severity} sözlüğü olarak döndürür. Sözlük doğrudan
+// şablona gömülürse ekrana "[object Object]" basılır — bu regresyon
+// v2.6.2'de yaşandı ve kritik uyarıları okunmaz hale getirdi.
+//
+// İç içe kayıtlar: bazı uyarıların parametresi kendisi bir uyarı kaydı ya
+// da kayıt listesidir (ör. warn.solid.bates_envelope'un `options` alanı),
+// bu yüzden çeviri özyinelemelidir. AnalysisDock aynı mantığı
+// U.warnText olarak dışa açıyor; yüklüyse onu kullan, değilse yerel eş.
+//
+// ÖH Z5-A (P11B2-01): bu çevirici artık displayWarnings'in İÇİNDE değil,
+// modül düzeyinde. Sebep: yapısal hüküm şeridi (structuralVerdictBlock) de
+// AYNI {code, params} kayıtlarını basıyor — çözücünün adlandırılmış onarım
+// önerileri. İki tüketici tek çeviriciden konuşmazsa biri sözlüğü, öteki
+// ham kodu basar. (liquid.html'de aynı gerekçeyle T44'te taşınmıştı.)
+function warnToText(w, depth) {
+    if (window.AnalysisDock && window.AnalysisDock.ui
+        && window.AnalysisDock.ui.warnText) {
+        return window.AnalysisDock.ui.warnText(w);
+    }
+    depth = depth || 0;
+    if (w === null || w === undefined) return '';
+    // Düz metin dalı: {code, params} sözleşmesine geçmemiş uyarılar
+    // (hrma/validation, hrma/importers, regen_cooling gibi düz
+    // İngilizce üretenler) buradan geçiyor. serverText sözlük + desen
+    // sırasıyla çevirir, eşleşme yoksa metni AYNEN döndürür.
+    // NOT: bu yorumda "yıldızlı yol" yazmayın — tests/test_i18n_common.py
+    // yorum temizleyicisi satır yorumunun içindeki eğik-çizgi-yıldızı
+    // blok yorum başlangıcı sanıp dosyanın gerisini siliyor (ölçüldü).
+    if (typeof w === 'string') return SRV(w);
+    if (Array.isArray(w)) {
+        return w.map(x => warnToText(x, depth + 1)).filter(Boolean).join(' · ');
+    }
+    if (typeof w !== 'object') return String(w);
+    if (!w.code) return SRV(w.message || w.text || JSON.stringify(w));
+    if (depth > 4) return w.code;
+    const p = {};
+    Object.keys(w.params || {}).forEach(k => {
+        const v = w.params[k];
+        p[k] = (v && typeof v === 'object') ? warnToText(v, depth + 1) : v;
+    });
+    return (window.I18N && window.I18N.tf)
+        ? window.I18N.tf(w.code, p, w.fallback || w.code)
+        : (w.fallback || w.code);
+}
+
+// Uyarı kaydının KENDİ önem derecesi. Kayıt sözlük değilse (düz metin) hiçbir
+// önem iddia edilmez — kritik rozeti KAZANILARAK basılır, varsayılarak değil.
+function warnIsCritical(w) {
+    return !!(w && typeof w === 'object' && !Array.isArray(w)
+              && String(w.severity || '').toLowerCase() === 'critical');
+}
+
+// ÖH Z5-A (OH-Z2-05 + P14M3-04): sonuç sözlüğündeki TÜM uyarı kanalları tek
+// yerden toplanır. İki çağıran vardı (hesap sonrası ve dil değişimi) ve
+// ikincisi motor uyarılarını hiç okumuyordu — dil değiştiren kullanıcı
+// motorun kritik erime uyarılarını ekrandan KAYBEDİYORDU (ölçüldü: hibrit
+// varsayılan koşumda 5 kayıt -> 0). Toplayıcı ortak olduğu için o ayrışma
+// artık yapısal olarak mümkün değil.
+//
+// Kanallar: motor tasarım uyarıları, motorun GİRDİ denetimi (input_warnings —
+// sıvı çözücüde cidar kalınlığı gibi kritik girdi hükümleri buradan çıkar) ve
+// enjektör uyarıları. Yoksa boş dizi; uydurma kayıt üretilmez.
+
+// ÖH D16 (OH-D15-05) — TASARIM KAPISI DEFTERİ (`motor.design_gate_checks`).
+// D15/P1B1-06 bu defteri motorda kurdu ve uç onu YAYIMLIYOR (ölçüldü,
+// a2/once.json: eta_c_star=0,30 + G_ox=900 koşumunda 2 hüküm yanıtta), ama
+// app.js dosyasında `design_gate_checks` GEÇMİYORDU (ölçülen geçiş sayısı 0):
+// kanal vardı, kapı yoktu. Kullanıcı bant dışı bir c* verimini, taşkın
+// akısını ya da sessiz oksitleyici yedeğini ekranda HİÇ görmüyordu.
+//
+// Metin niye sözlükten değil: bu kulvarda i18n anahtar dosyası
+// değiştirilemez ve `test_i18n_common.py::test_every_used_key_exists_in_
+// dictionary` sözlükte olmayan bir anahtarın kullanılmasını zaten
+// yasaklıyor. Bu yüzden kayıt KODSUZ üretilir; `warnToText` kodsuz kaydı
+// `SRV(message)` ile çevirir (sunucu-metni sözlüğü + desen, eşleşme yoksa
+// metin aynen geçer) — motorun kendi yayımladığı `basis` cümlesi ve sayılar
+// dışında hiçbir şey uydurulmaz. Kodlu uyarıya geçiş ui/i18n kulvarının
+// kalemidir.
+//
+// İki yardımcı NİYE İÇERİDE: `collectResultWarnings` DOM'suz koşucularda
+// (tests/test_d15_ui_paneller_a1.py'nin node kum havuzu, tests/
+// test_z5_teslim_kanali.py) kaynaktan AD AD çekilip tek başına çalıştırılıyor
+// — o koşucular yüklenecek fonksiyon adlarını elle sayıyor. Yardımcılar modül
+// düzeyinde kalsaydı çekilen gövde tanımsız ada başvurur ve koşucu ÇÖKERDİ
+// (ölçüldü: 12_kirmizi_tasnifi.json — bu beş test yalnız bende kırmızıydı,
+// tabanda yeşildi). İç içe tanım, tek çıkışlı fonksiyonu kendi kendine
+// yeterli kılar; başka bir kulvarın bekçi dosyasına dokunmak gerekmez.
+function collectResultWarnings(results) {
+    function gateNumberText(v) {
+        if (typeof v !== 'number' || !isFinite(v)) return String(v);
+        if (Number.isInteger(v)) return String(v);
+        return String(parseFloat(v.toPrecision(6)));
+    }
+
+    function designGateChecksToWarnings(gates) {
+        if (!Array.isArray(gates)) return [];
+        return gates.filter(function (g) {
+            // 'pass' hükümleri bilerek yayımlanıyor (geçtiğini görmek
+            // değerlidir) ama uyarı DEĞİLDİR — panele geçen bant/kırpma/
+            // yedek hükümleridir.
+            return g && typeof g === 'object'
+                && String(g.status || '').toLowerCase() !== 'pass';
+        }).map(function (g) {
+            const parca = [];
+            parca.push('Design gate ' + String(g.gate || 'unknown')
+                       + ': ' + String(g.status || 'reported').toUpperCase());
+            if (g.quantity !== undefined && g.value !== undefined) {
+                parca.push(String(g.quantity) + ' = ' + gateNumberText(g.value)
+                           + (g.unit ? ' ' + String(g.unit) : ''));
+            }
+            if (Array.isArray(g.band) && g.band.length === 2) {
+                parca.push('band ' + gateNumberText(g.band[0]) + '-'
+                           + gateNumberText(g.band[1]));
+            }
+            if (g.limit !== undefined) {
+                parca.push('limit ' + gateNumberText(g.limit)
+                           + (g.unit ? ' ' + String(g.unit) : ''));
+            }
+            if (g.requested !== undefined) {
+                parca.push('requested ' + gateNumberText(g.requested));
+            }
+            if (g.used_instead !== undefined) {
+                parca.push('used instead: ' + String(g.used_instead));
+            }
+            if (g.source) { parca.push('source: ' + String(g.source)); }
+            const govde = parca.join(' | ');
+            return {
+                // Önem KAZANILARAK basılır: kayıt kendi severity'sini
+                // yayımlıyorsa o kullanılır, yoksa 'warning' varsayılır —
+                // kritik rozeti varsayımla dağıtılmaz.
+                severity: (typeof g.severity === 'string' && g.severity)
+                    ? g.severity : 'warning',
+                message: g.basis ? (govde + ' — ' + String(g.basis)) : govde,
+                design_gate: String(g.gate || 'unknown')
+            };
+        });
+    }
+
+    const r = results || {};
+    const motor = r.motor || {};
+    const engine = (motor.warnings || motor.design_warnings) || [];
+    const inputs = motor.input_warnings || r.input_warnings || [];
+    const injector = (r.injector && r.injector.warnings) || [];
+    const gates = designGateChecksToWarnings(
+        motor.design_gate_checks || r.design_gate_checks);
+    return [].concat(Array.isArray(engine) ? engine : [],
+                     Array.isArray(inputs) ? inputs : [],
+                     Array.isArray(injector) ? injector : [],
+                     gates);
+}
+
+// Display warnings — motor/girdi/enjektör uyarıları + /calculate cevabındaki
+// üst seviye validation objesi birlikte listelenir:
 //   validation = { overall_status, critical_warnings[], regular_warnings[],
 //                  total_warnings, validation_passed }
-// critical_warnings kırmızı (CRITICAL), regular + enjektör uyarıları amber
-// (WARNING) etiketiyle gösterilir; hiç uyarı yoksa panel gizli kalır.
+// validation.critical_warnings kırmızı (CRITICAL), regular amber (WARNING).
+// Kanaldan gelen kayıtlar KENDİ severity alanlarına göre ayrışır: motorun
+// severity:'critical' uyarısı (ör. cidar erime sıcaklığını aşıyor) artık
+// amber 'WARNING' olarak basılmaz — kırmızı CRITICAL rozeti alır (P11B2-06).
+// Hiç uyarı yoksa panel gizli kalır.
+// ÖH D28 / P12bB3-22 — "Design validation" satırının TEK yazıcısı.
+// Metin SUNUCUDAN gelir (validation.overall_status, warnToText ile çözülür);
+// panel kendi hükmünü ÜRETMEZ. Sunucu hüküm yayımlamadıysa olumlu bir şey
+// yazılmaz — kazanılmamış hüküm yayımlanmaz (fail-closed).
+function setDesignValidationVerdict(validation) {
+    const el = document.getElementById('design_validation_verdict');
+    if (!el) return;   // bu düğüm yalnız gelişmiş sayfada var
+    if (validation && validation.overall_status) {
+        el.textContent = warnToText(validation.overall_status);
+        el.classList.remove('dv-unpublished');
+    } else {
+        el.textContent = T('app.warn.validationNotPublished',
+            'The server published no validation verdict for this run.');
+        el.classList.add('dv-unpublished');
+    }
+    // i18n yeniden çevirisi bu düğümü artık EZMEMELİ: metin sunucudan geldi.
+    el.removeAttribute('data-i18n');
+}
+
 function displayWarnings(warnings, validation) {
+    setDesignValidationVerdict(validation);
     const warningsPanel = document.getElementById('warningsPanel');
     const warningsList = document.getElementById('warningsList');
 
@@ -1069,54 +2626,24 @@ function displayWarnings(warnings, validation) {
         return;
     }
 
-    // D-track sözleşmesi (v2.6.2): backend uyarıları düz metin yerine
-    // {code, params, severity} sözlüğü olarak döndürür. Sözlük doğrudan
-    // şablona gömülürse ekrana "[object Object]" basılır — bu regresyon
-    // v2.6.2'de yaşandı ve kritik uyarıları okunmaz hale getirdi.
-    //
-    // İç içe kayıtlar: bazı uyarıların parametresi kendisi bir uyarı kaydı ya
-    // da kayıt listesidir (ör. warn.solid.bates_envelope'un `options` alanı),
-    // bu yüzden çeviri özyinelemelidir. AnalysisDock aynı mantığı
-    // U.warnText olarak dışa açıyor; yüklüyse onu kullan, değilse yerel eş.
-    function warnToText(w, depth) {
-        if (window.AnalysisDock && window.AnalysisDock.ui
-            && window.AnalysisDock.ui.warnText) {
-            return window.AnalysisDock.ui.warnText(w);
-        }
-        depth = depth || 0;
-        if (w === null || w === undefined) return '';
-        // Düz metin dalı: {code, params} sözleşmesine geçmemiş uyarılar
-        // (hrma/validation, hrma/importers, regen_cooling gibi düz
-        // İngilizce üretenler) buradan geçiyor. serverText sözlük + desen
-        // sırasıyla çevirir, eşleşme yoksa metni AYNEN döndürür.
-        // NOT: bu yorumda "yıldızlı yol" yazmayın — tests/test_i18n_common.py
-        // yorum temizleyicisi satır yorumunun içindeki eğik-çizgi-yıldızı
-        // blok yorum başlangıcı sanıp dosyanın gerisini siliyor (ölçüldü).
-        if (typeof w === 'string') return SRV(w);
-        if (Array.isArray(w)) {
-            return w.map(x => warnToText(x, depth + 1)).filter(Boolean).join(' · ');
-        }
-        if (typeof w !== 'object') return String(w);
-        if (!w.code) return SRV(w.message || w.text || JSON.stringify(w));
-        if (depth > 4) return w.code;
-        const p = {};
-        Object.keys(w.params || {}).forEach(k => {
-            const v = w.params[k];
-            p[k] = (v && typeof v === 'object') ? warnToText(v, depth + 1) : v;
-        });
-        return (window.I18N && window.I18N.tf)
-            ? window.I18N.tf(w.code, p, w.fallback || w.code)
-            : (w.fallback || w.code);
-    }
-
+    // V3 SG-05 (12 Eki): uyarı metni sunucudan gelir (içe aktarıcı ve
+    // doğrulama düz metni, {code, params} parametreleri) ve innerHTML'e
+    // gidiyordu; HTML olarak değil METİN olarak girer. Kaçış, bu dosyanın
+    // kardeş yayıcılarındaki desendir (bkz. l_star_note, P11B2-18).
+    const escWarn = s2 => String(s2 == null ? '' : s2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const item = (label, text, cls) =>
         `<div class="warning-item ${cls}">` +
         `<span class="warning-tag">${label}</span>` +
-        `<span class="warning-text">${warnToText(text)}</span></div>`;
+        `<span class="warning-text">${escWarn(warnToText(text))}</span></div>`;
 
     let html = '';
     if (validation && validation.overall_status) {
-        const statusCls = critical.length ? 'warning-status-critical' : 'warning-status-regular';
+        // Durum satırı kırmızıya, kanaldan gelen kritik kayıtlar yüzünden de
+        // döner: "0 kritik doğrulama uyarısı" ile "0 kritik uyarı" aynı şey
+        // değil (motorun erime hükümleri bu kanaldan geliyor).
+        const statusCls = (critical.length || injector.some(warnIsCritical))
+            ? 'warning-status-critical' : 'warning-status-regular';
         // 2026-08-03 (Faz 6, T31): burada `${validation.overall_status}` vardı.
         // overall_status da uyarılar gibi {code, params, severity} sözlüğüdür
         // (validation_system.py:245-249), düz metin değil — şablona doğrudan
@@ -1126,13 +2653,21 @@ function displayWarnings(warnings, validation) {
         // geçiyordu, durum satırı geçmiyordu.
         html += `<div class="warning-status ${statusCls}">`
             + T('app.warn.validationStatus', 'Validation status:') + ' '
-            + `${warnToText(validation.overall_status)}</div>`;
+            + `${escWarn(warnToText(validation.overall_status))}</div>`;
     }
     const critLabel = T('app.warn.critical', 'CRITICAL');
     const warnLabel = T('app.warn.warning', 'WARNING');
     critical.forEach(w => { html += item(critLabel, w, 'warning-critical'); });
     regular.forEach(w => { html += item(warnLabel, w, 'warning-regular'); });
-    injector.forEach(w => { html += item(warnLabel, w, 'warning-regular'); });
+    // P11B2-06: burada tüm kanal amber basılıyordu. Motorun erime hükümleri
+    // (warn.thermal.wall_exceeds_melting vb.) severity:'critical' taşıyor ama
+    // ekranda sıradan bir uyarıdan ayırt edilemiyordu — hem rozet metni hem
+    // sınıf (dolayısıyla kırmızı kenar/renk) artık kaydın kendi önemine bağlı.
+    injector.forEach(w => {
+        html += warnIsCritical(w)
+            ? item(critLabel, w, 'warning-critical')
+            : item(warnLabel, w, 'warning-regular');
+    });
 
     warningsList.innerHTML = html;
     warningsPanel.style.display = 'block';
@@ -1151,7 +2686,26 @@ async function exportReport() {
     const motor = currentResults.motor || {};
     const name = motor.motor_name || 'HRMA_Motor';
 
+    // ÖH D36 · U-7/U-8 — ÖZET PDF'İN TEK YOLU.
+    // ÖLÇÜLDÜ (raw/OH/D36/onemli2-hibrit/a1/once.json U78, örnek hibrit
+    // proje, gerçek tarayıcı): "Sonuçları Dışa Aktar" ile "Özet PDF" AYNI
+    // uca (/api/export-pdf/summary) giden AYNI PDF'i (22548 B) iki ayrı kod
+    // yolundan indiriyordu. Her tık 1 istek, 1 blob, 1 indirme; "çift blob"
+    // ölçülmedi. Ama bu yol ekranda HİÇBİR iz bırakmıyordu (mesaj yok,
+    // durum satırı yok) ve dosya adı yanıtta olmayan motor_name alanından
+    // kurulduğu için daima "HRMA_Motor_summary_report.pdf" idi. Sayfa tek
+    // yolu (exportAnalysisPDF: durum satırı + proje adlı dosya) sunuyorsa
+    // oraya bağlanır; PDF üretilemezse aşağıdaki içerik kapısı ve metin
+    // rapor yedeği aynen çalışır (sessiz yedek yok).
+    const tekPdfYolu = (typeof window !== 'undefined'
+                        && typeof window.exportAnalysisPDF === 'function')
+        ? window.exportAnalysisPDF : null;
+
     try {
+        if (tekPdfYolu) {
+            await tekPdfYolu('summary', { throwOnFail: true });
+            return;
+        }
         const response = await fetch('/api/export-pdf/summary', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -1161,15 +2715,34 @@ async function exportReport() {
             })
         });
         if (!response.ok) throw new Error('HTTP ' + response.status);
+        // P11B2-24 KAPI 2 — İNEN DOSYA GERÇEKTEN PDF Mİ?
+        // Ölçülen: uç BOŞ gövdeye bile HTTP 200 + 5.632 B döndürüyor ve
+        // app.js yalnız `response.ok`'a bakıp blob'u `.pdf` adıyla
+        // indiriyordu; 200 dönen bir HTML/JSON hata sayfası da aynı adla
+        // inerdi. Kapı iki şeye bakar: sunucunun ilan ettiği içerik tipi
+        // ve dosyanın kendi imzası (`%PDF-`). İkisinden biri tutmuyorsa
+        // dosya İNMEZ — metin rapor yedeğine düşülür (aşağısı).
         const blob = await response.blob();
+        await assertPdfBlob(blob, response);
         downloadBlobAs(blob, `${name}_summary_report.pdf`);
         return;
     } catch (e) {
+        // ÖH D17 / P11B2-24 ŞARTI — YEDEĞE SESSİZ DÜŞÜLMEZ.
+        // ÖLÇÜLDÜ (raw/OH/D17/arayuz/a1/once.json M4): içerik kapısı
+        // (assertPdfBlob) fırlattığında bu dal YALNIZ console.warn yazıyordu;
+        // kullanıcı istediği PDF yerine sessizce bir .txt indirildiğini
+        // ekranda hiç görmüyordu (catch_dalinda_yalniz_console_warn=true).
+        // Kapının hükmü artık ekrana da iner: ne istendiği, neden
+        // verilemediği ve yerine ne indirildiği söylenir.
         console.warn('PDF report unavailable, falling back to text report:', e);
+        showWarning(T('app.msg.pdfReportFallback',
+                      'The PDF report failed its content check, so a plain-text '
+                      + 'report was downloaded instead')
+                    + ': ' + (e && e.message ? e.message : String(e)));
     }
 
     const inj = currentResults.injector || {};
-    const f = (v, d) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : 'N/A';
+    const f = (v, d) => (typeof v === 'number' && isFinite(v)) ? numTxt(v, d) : 'N/A';
     let report = T('app.txt.title', 'HYBRID ROCKET MOTOR ANALYSIS REPORT') + '\n';
     report += '=====================================\n\n';
     report += T('app.txt.performance', 'MOTOR PERFORMANCE') + ':\n';
@@ -1183,9 +2756,61 @@ async function exportReport() {
     report += `${T('app.rep.reynolds', 'Reynolds Number')}: ${f(inj.reynolds_number, 0)}\n`;
     report += `${T('app.rep.pressureDrop', 'Pressure Drop')}: ${f(inj.pressure_drop, 2)} bar\n\n`;
 
-    if (Array.isArray(inj.warnings) && inj.warnings.length > 0) {
+    // ÖH D25 / P11B2-14 — İNEN RAPOR EKRANDAKİ UYARILARIN TAMAMINI TAŞIR.
+    //
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/D25/arayuz/a2/once.json): bu blok
+    // YALNIZ `inj.warnings` yazıyordu (taşınan kanal sayısı 1/5). Ekranda
+    // ise BEŞ kanal var: motor tasarım uyarıları, motorun GİRDİ denetimi
+    // (`input_warnings`), tasarım kapısı defteri (`design_gate_checks`),
+    // enjektör ve `validation.critical_warnings` / `regular_warnings`.
+    // Yani PDF üretilemediğinde kullanıcının eline geçen tek belge,
+    // KRİTİK hükümleri düşürülmüş bir rapordu — üstelik bu dal tam da
+    // "PDF alınamadı" vakasında çalışıyor.
+    //
+    // Kaynak TEK: ekranı besleyen `collectResultWarnings` + `validation`
+    // aynen okunur; burada yeniden sınıflandırma YAPILMAZ ve uydurma
+    // kayıt üretilmez. Kritik olanlar ayrı başlıkta ve ADIYLA geçer.
+    const kritik = (currentResults.validation
+                    && Array.isArray(currentResults.validation.critical_warnings))
+        ? currentResults.validation.critical_warnings : [];
+    const olagan = (currentResults.validation
+                    && Array.isArray(currentResults.validation.regular_warnings))
+        ? currentResults.validation.regular_warnings : [];
+    let cozucu = [];
+    try {
+        cozucu = collectResultWarnings(currentResults) || [];
+    } catch (e) {
+        // Toplayıcı çökerse rapor SESSİZ kalmaz: eksikliği yazar.
+        cozucu = [];
+        report += T('app.txt.warnCollectFailed',
+                    'WARNING CHANNELS COULD NOT BE READ — this report is '
+                    + 'incomplete') + ': ' + (e && e.message ? e.message : String(e))
+                  + '\n\n';
+    }
+    const satirla = (w) => {
+        const t = warnToText(w);
+        return (typeof t === 'string' && t) ? t : '';
+    };
+    if (kritik.length > 0) {
+        report += T('app.txt.criticalWarnings', 'CRITICAL WARNINGS') + ':\n';
+        kritik.forEach(w => {
+            const t = satirla(w);
+            if (t) report += `- ${t}\n`;
+        });
+        report += '\n';
+    }
+    const digerleri = [].concat(cozucu, olagan);
+    if (digerleri.length > 0) {
         report += T('common.warnings', 'Warnings').toUpperCase() + ':\n';
-        inj.warnings.forEach(warning => { report += `- ${warning}\n`; });
+        digerleri.forEach(w => {
+            const t = satirla(w);
+            if (t) report += `- ${t}\n`;
+        });
+        report += '\n';
+    }
+    if (kritik.length === 0 && digerleri.length === 0) {
+        report += T('app.txt.noWarnings', 'No warnings were published for '
+                    + 'this run.') + '\n\n';
     }
 
     downloadBlobAs(new Blob([report], {type: 'text/plain'}), `${name}_report.txt`);
@@ -1202,7 +2827,71 @@ function downloadBlobAs(blob, filename) {
     window.URL.revokeObjectURL(url);
 }
 
+// ÖH D22 / P17B4-02 — fetch() AĞ KOPMASININ TARAYICI İMZALARI (tek kaynak).
+// fetch, isteği hiç tamamlayamadığında bir `TypeError` atar; ayırt edici tek
+// şey mesaj metnidir ve metin tarayıcı ailesine göre değişir:
+//   Chrome / Edge / Chromium  : "Failed to fetch"
+//   Firefox                   : "NetworkError when attempting to fetch resource."
+//   Safari / WKWebView        : "Load failed"   (paketli HRMA penceresi bunu kullanır)
+// Liste burada TEK yerde durur; sınıflandırıcı bunu okur.
+const FETCH_KOPMASI =
+    /Failed to fetch|NetworkError when attempting to fetch|Load failed|Network request failed/i;
+
 // Advanced Error Handler
+// ==================================================================
+// P11B2-16 — SUNUCUNUN HAM GÖVDESİ KULLANICIYA BASILMAZ
+// ==================================================================
+// ÖLÇÜLDÜ (docs/scofield/raw/OH/D29/arayuz-panel/a3/once.json):
+// `calculate()` hatada `body: ${errorText}` diyerek Flask'ın gövdesini
+// (500'de HTML yığın izi) hata mesajına gömüyordu ve `handleError`
+// bu mesajı `Original: ...` satırıyla `alert()` içine basıyordu —
+// kullanıcı kesilmiş, biçimsiz, kopyalanamayan bir HTML parçası
+// görüyordu (`ham_govde_hata_mesajinda: 1`,
+// `alert_ham_error_message: true`).
+//
+// KAPI (fail-closed, doktrin 1): sunucunun ADLANDIRILMIŞ hatası varsa O
+// basılır; yoksa hiçbir şey uydurulmaz — gövdenin TÜRÜ ve BOYUTU adıyla
+// söylenir ve tam gövdenin konsolda olduğu yazılır (console.error zaten
+// basıyor). Düz metin gövde kırpılır ve kırpıldığı BEYAN edilir.
+const HATA_GOVDE_TAVANI = 300;
+
+//: Etiketleri söker, boşluğu tekleştirir, tavana kırpar. Kırpma sessiz
+//: değildir: kaç bayt olduğu ve tamamının nerede olduğu yazılır.
+function hataGovdeOzeti(govde) {
+    const ham = String(govde == null ? '' : govde);
+    const duz = ham.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!duz) return '';
+    if (duz.length <= HATA_GOVDE_TAVANI) return duz;
+    return duz.slice(0, HATA_GOVDE_TAVANI) + ' … [truncated; '
+        + ham.length + ' bytes total, full body in the browser console]';
+}
+
+//: Sunucu hatasının kullanıcıya gösterilecek metni. Sıra: (1) yapılı
+//: JSON hatası -> alan ADIYLA, (2) HTML gövde -> tür + boyut beyanı,
+//: (3) düz metin -> kırpılmış özet.
+function sunucuHataMetni(status, contentType, govde) {
+    const ctype = String(contentType || 'unknown content-type').split(';')[0];
+    const ham = String(govde == null ? '' : govde);
+    let yapili = null;
+    try { yapili = JSON.parse(ham); } catch (e) { yapili = null; }
+    if (yapili && typeof yapili === 'object' && !Array.isArray(yapili)) {
+        const alan = ['error', 'message', 'detail', 'reason']
+            .find(k => typeof yapili[k] === 'string' && yapili[k]);
+        if (alan) {
+            const nerede = (typeof yapili.field === 'string' && yapili.field)
+                ? ' [' + yapili.field + ']' : '';
+            return `HTTP ${status}: ` + SRV(yapili[alan]) + nerede;
+        }
+    }
+    if (/^\s*</.test(ham)) {
+        return `HTTP ${status}: the server returned an unstructured `
+            + `${ctype} body (${ham.length} bytes) instead of a named error; `
+            + 'the full body is in the browser console.';
+    }
+    const ozet = hataGovdeOzeti(ham);
+    return `HTTP ${status}` + (ozet ? ': ' + ozet : '');
+}
+
 function handleError(error, context = 'Unknown') {
     console.group('ERROR DETAILS');
     console.error('Context:', context);
@@ -1220,6 +2909,23 @@ function handleError(error, context = 'Unknown') {
     } else if (error.message.includes('HTTP')) {
         errorSource = T('app.err.srcNetwork', 'Network/Backend');
         userMessage = T('app.err.msgNetwork', 'Server communication error');
+    } else if (FETCH_KOPMASI.test(error.message)) {
+        // ÖH D22 / P17B4-02 — AĞ KOPMASINA "veri tipi uyuşmazlığı" DENMEZ.
+        // ÖLÇÜLDÜ (raw/OH/D22/arayuz/a1/once.json M4, taban b84b10a):
+        // sunucu öldürülüp Hesapla'ya basıldığında fetch() bir TypeError
+        // atar ve aşağıdaki `instanceof TypeError` dalı onu yakalayıp
+        // "Data type mismatch in calculations" diyordu — P17 turunda
+        // yakalanan alert gövdesi birebir bu. Üç tarayıcı ailesinin üçü de
+        // (3/3 yanlış teşhis) bu dala düşüyordu. Kullanıcıya yanlış teşhis
+        // koymak beyanı ÇÖZÜM değil KUSUR yapar: sunucusu ölmüş kişi
+        // girdilerinde tip hatası arar.
+        // Kapı: fetch'in ağ kopması imzaları TypeError dalından ÖNCE
+        // sınanır. Sabit tek kaynaktan (FETCH_KOPMASI) gelir; imzalar
+        // uydurma değil, tarayıcıların gerçek metinleridir.
+        errorSource = T('app.err.srcConnection', 'Network/Connection');
+        userMessage = T('app.err.msgConnection',
+            'Could not reach the HRMA server (the request never completed). '
+            + 'The server may have stopped or the connection was interrupted.');
     } else if (error instanceof TypeError) {
         errorSource = T('app.err.srcType', 'JavaScript Type Error');
         userMessage = T('app.err.msgType', 'Data type mismatch in calculations');
@@ -1244,23 +2950,112 @@ ${T('app.err.message', 'Message')}: ${userMessage}
 
 ${T('app.err.technical', 'Technical Details')}:
 - ${T('common.type', 'Type')}: ${error.constructor.name}
-- ${T('app.err.original', 'Original')}: ${error.message}
+- ${T('app.err.original', 'Original')}: ${hataGovdeOzeti(error.message)}
 - ${T('app.err.time', 'Time')}: ${new Date().toLocaleString()}
 
 ${T('app.err.console', 'Check browser console for full stack trace.')}
     `;
-    
-    alert(detailedError);
+
+    // ÖH D37 A1a · CW-U6: yerli pencere yerine sayfa içi, kapatılabilir
+    // bildirim (metin aynı; odak bildirime taşınır).
+    showNotice(detailedError.trim(), 'error');
     return { source: errorSource, context, originalError: error };
 }
 
-// Utility functions
-function showLoading(show) {
-    const indicator = document.getElementById('loading');
-    if (indicator) {
-        indicator.style.display = show ? 'block' : 'none';
+// ==================================================================
+// ÖH D37 A1a · CW-U6 — HATA/BİLGİ İLETİSİ SAYFA İÇİ BİLDİRİMDİR
+// ==================================================================
+// ÖLÇÜLDÜ (docs/scofield/raw/OH/A1a/hibrit-beyan/a1/once.json M3):
+// `showError`, `showInfo` ve `handleError` üçü de işletim sisteminin
+// engelleyici `alert()` kutusunu açıyordu (3/3 çağrı `alert`e gitti,
+// sayfada 0 bildirim). Sayfanın geri kalanı `showMessage` ile sayfa içi
+// kutu kullanıyor; ama o kutu 5 s sonra kendiliğinden SİLİNİR — bir
+// HATA iletisi okunmadan kaybolabilir. Bu yüzden hata/bilgi iletisi:
+//   * kendiliğinden kaybolmaz; kullanıcı "Kapat" düğmesiyle kapatır
+//     (Escape de kapatır);
+//   * hata iletisi `role="alert"`, bilgi `role="status"` taşır ve hata
+//     iletisinde odak bildirime taşınır (klavye kullanıcısı oradadır);
+//   * metin `textContent` ile basılır (sunucu metni HTML olarak
+//     yorumlanmaz); aynı metin ikinci kez gelirse eskisi kaldırılır.
+// Kap şablonda `#hrmaNotices`tir; yoksa `#messages`in önüne kurulur.
+function noticeHost() {
+    let kap = document.getElementById('hrmaNotices');
+    if (kap) return kap;
+    if (typeof document.createElement !== 'function') return null;
+    kap = document.createElement('div');
+    kap.id = 'hrmaNotices';
+    kap.className = 'hrma-notices';
+    const mesajlar = document.getElementById('messages');
+    if (mesajlar && mesajlar.parentNode
+            && typeof mesajlar.parentNode.insertBefore === 'function') {
+        mesajlar.parentNode.insertBefore(kap, mesajlar);
+    } else if (document.body && typeof document.body.appendChild === 'function') {
+        document.body.appendChild(kap);
+    } else {
+        return null;
     }
+    return kap;
 }
+
+function showNotice(message, type) {
+    const tur = (type === 'error') ? 'error' : 'info';
+    const metin = String(message == null ? '' : message);
+    // DOM'suz bağlam (ör. `handleError`ı tek başına koşturan sözleşme
+    // düzenekleri): hata YUTULMAZ ve çağıranın dönüşü bozulmaz — ileti
+    // konsola düşer. Tarayıcıda `document` her zaman vardır.
+    if (typeof document === 'undefined') {
+        console.error('[HRMA notice] ' + metin);
+        return null;
+    }
+    const kap = noticeHost();
+    if (!kap) {
+        // DOM yoksa (sözleşme düzenekleri) ileti kaybolmaz: konsola düşer.
+        console.error('[HRMA notice] ' + metin);
+        return null;
+    }
+    if (typeof kap.querySelectorAll === 'function') {
+        Array.prototype.forEach.call(kap.querySelectorAll('.hrma-notice'),
+            function (eski) {
+                if (eski.getAttribute('data-notice-text') === metin) {
+                    eski.parentNode.removeChild(eski);
+                }
+            });
+    }
+    const onceki = document.activeElement || null;
+    const kutu = document.createElement('div');
+    kutu.className = 'alert alert-' + (tur === 'error' ? 'danger' : 'info')
+        + ' hrma-notice';
+    kutu.setAttribute('role', tur === 'error' ? 'alert' : 'status');
+    kutu.setAttribute('data-notice-type', tur);
+    kutu.setAttribute('data-notice-text', metin);
+    kutu.setAttribute('tabindex', '-1');
+    const kapat = document.createElement('button');
+    kapat.type = 'button';
+    kapat.className = 'hrma-notice-close';
+    kapat.setAttribute('aria-label', T('common.close', 'Close'));
+    kapat.textContent = T('common.close', 'Close');
+    const govde = document.createElement('div');
+    govde.className = 'hrma-notice-text';
+    govde.textContent = metin;
+    const kapatIsle = function () {
+        if (kutu.parentNode) kutu.parentNode.removeChild(kutu);
+        if (onceki && typeof onceki.focus === 'function'
+                && document.contains && document.contains(onceki)) {
+            onceki.focus();
+        }
+    };
+    kapat.addEventListener('click', kapatIsle);
+    kutu.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); kapatIsle(); }
+    });
+    kutu.appendChild(kapat);
+    kutu.appendChild(govde);
+    kap.appendChild(kutu);
+    if (tur === 'error' && typeof kutu.focus === 'function') kutu.focus();
+    return kutu;
+}
+
+// SÖKÜLDÜ (D30 a1) · showLoading() — advanced.html satır içi sürümü kazanıyordu.
 
 function hideWelcomeMessage() {
     const welcome = document.getElementById('welcomeMessage');
@@ -1270,20 +3065,14 @@ function hideWelcomeMessage() {
 }
 
 function showError(message) {
-    alert(T('common.error', 'Error') + ': ' + message);
+    showNotice(T('common.error', 'Error') + ': ' + message, 'error');
 }
 
 function showInfo(message) {
-    alert(T('common.info', 'Info') + ': ' + message);
+    showNotice(T('common.info', 'Info') + ': ' + message, 'info');
 }
 
-function showMessage(message, type = 'info') {
-    // Tip: 'info', 'success', 'warning', 'error'
-    const keys = { info: 'common.info', success: 'common.success',
-                   warning: 'common.warning', error: 'common.error' };
-    const fallback = type.charAt(0).toUpperCase() + type.slice(1);
-    alert(T(keys[type] || 'common.info', fallback) + ': ' + message);
-}
+// SÖKÜLDÜ (D30 a1) · showMessage() — advanced.html satır içi sürümü kazanıyordu (i18n zarflı sürüm).
 
 function showSuccess(message) {
     showMessage(message, 'success');
@@ -1295,21 +3084,39 @@ function showWarning(message) {
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
-    updateInjectorParams();
+    // Şablonun inline sürümü: tanımlı değilse çağrılmaz (P11B2-22).
+    if (typeof updateInjectorParams === 'function') updateInjectorParams();
+    // OH-GT-09: düğme HTML'de `disabled` doğuyor — açılışta künyesini al.
+    const _exp = document.getElementById('exportResultsBtn');
+    if (_exp) setExportResultsEnabled(!_exp.disabled);
     // Dil değişince: enjektör form etiketleri + saklanan sonuç blokları
     // yeniden basılır (yeni hesap yapılmaz).
     if (window.I18N && window.I18N.onChange) {
         window.I18N.onChange(function () {
-            try { updateInjectorParams(); } catch (e) { /* form yoksa sessiz */ }
+            try {
+                if (typeof updateInjectorParams === 'function') {
+                    updateInjectorParams();
+                }
+            } catch (e) { /* form yoksa sessiz */ }
+            // OH-GT-09: ipucu metni de dille birlikte yeniden yazılır.
+            try {
+                const b = document.getElementById('exportResultsBtn');
+                if (b) setExportResultsEnabled(!b.disabled);
+            } catch (e) { /* düğme yoksa sessiz */ }
             const r = window.currentResults;
             if (!r || !r.motor) return;
-            try { displayPerformanceMetrics(r.motor); } catch (e) { /* panel yoksa */ }
+            // Dil değişiminde de künye ile birlikte (r = tam sonuç sözlüğü).
+            try { displayPerformanceMetrics(r.motor, r); } catch (e) { /* panel yoksa */ }
             try {
                 if (r.injector) displayDesignReport(r.motor, r.injector);
             } catch (e) { /* rapor yoksa */ }
             try { displayMotorTable(r.motor); } catch (e) { /* tablo yoksa */ }
             try { if (r.injector) displayInjectorTable(r.injector); } catch (e) { /* tablo yoksa */ }
-            try { displayWarnings(r.injector && r.injector.warnings, r.validation); }
+            // P14M3-04: burada `r.injector && r.injector.warnings` vardı —
+            // motor uyarıları dil değişiminde ekrandan siliniyordu (ölçüldü:
+            // hibrit varsayılan koşumda 5 kayıt, 4'ü kritik -> 0). Hesap
+            // sonrası yolla AYNI toplayıcı kullanılır.
+            try { displayWarnings(collectResultWarnings(r), r.validation); }
             catch (e) { /* uyarı paneli yoksa */ }
         });
     }
@@ -1364,16 +3171,52 @@ As an expert aerospace engineer, please provide detailed analysis in the followi
 
 Please provide specific numerical recommendations where applicable and explain the engineering rationale behind your suggestions.`;
     
-    // Copy to clipboard
-    navigator.clipboard.writeText(prompt).then(() => {
+    // ------------------------------------------------------------------
+    // OH-GT-07 (ÖH D34, 21 Eylül) — PANO BAŞARISIZSA ÖZELLİK KAYBOLMAZ.
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (a1/once.json K1): veri modalı YALNIZ başarı dalındaydı
+    // (`basari_dalinda_modal: true`, `hata_dalinda_modal: false`). Pano
+    // yazımı reddedilince — izin verilmemiş, belge odakta değil ya da
+    // bağlam güvenli değil — ekranda HİÇBİR ŞEY açılmıyor, kullanıcı
+    // dakikalarca süren hesabın çıktısına hiçbir yoldan ulaşamıyordu.
+    // Oysa veri O ANDA BELLEKTE HAZIR (`aiData` / `prompt`).
+    //
+    // Ayrıca `console.error('Failed to copy:', err)` konsola boş nesne
+    // ("{}") basıyordu: DOMException'ın kendi alanları sayılabilir
+    // değildir. Hata artık ADIYLA yazılır (`NotAllowedError: ...`).
+    //
+    // FAIL-CLOSED: güvensiz bağlamda `navigator.clipboard` UNDEFINED'dır
+    // ve `.writeText` SENKRON fırlatır — o hâlde `.catch` hiç koşmaz ve
+    // özellik yine sessizce kaybolurdu. Söz burada kurulur.
+    let panoSozu;
+    try {
+        panoSozu = (navigator.clipboard && navigator.clipboard.writeText)
+            ? navigator.clipboard.writeText(prompt)
+            : Promise.reject(new Error('clipboard API unavailable'));
+    } catch (err) {
+        panoSozu = Promise.reject(err);
+    }
+    panoSozu.then(() => {
         showInfo(T('app.msg.aiCopied', 'Analysis data copied to clipboard! Paste it into your favorite AI assistant.'));
-        
-        // Optional: Show the data in a modal
         showAIDataModal(aiData, prompt);
     }).catch(err => {
-        console.error('Failed to copy:', err);
-        showError(T('app.msg.aiCopyFailed', 'Failed to copy data. Check console for details.'));
+        console.error('Failed to copy:', panoHataMetni(err));
+        const uyari = T('app.msg.aiCopyFailed', 'Failed to copy data. Check console for details.');
+        showError(uyari);
+        // Kopyalanamadı ama veri kaybolmaz: aynı metin pencerede açılır.
+        showAIDataModal(aiData, prompt, uyari);
     });
+}
+
+/** Pano hatasını İNSANIN okuyabileceği tek satıra çevirir.
+ *  `console.error(..., err)` DOMException'ı "{}" diye basıyordu (kendi
+ *  alanları sayılabilir değil) — ad + ileti ise her zaman okunur. */
+function panoHataMetni(err) {
+    if (!err) return 'unknown clipboard error';
+    if (err.name || err.message) {
+        return String(err.name || 'Error') + ': ' + String(err.message || '');
+    }
+    return String(err);
 }
 
 // Function to get display name for fuel type
@@ -1445,6 +3288,73 @@ function getFuelTypeDisplayName(fuelType) {
 }
 
 // Prepare AI-friendly data
+// ÖH D15 / P11B2-03 · -04 ortak yardımcıları -----------------------------
+// Sonlu sayı ise sayıyı, değilse null döner. Sayı UYDURMAZ: yokluğun yerine
+// "tipik değer" yazmak, yapay zekâya giden yükün en sinsi uydurmasıydı.
+function numOrNull(v) {
+    return (typeof v === 'number' && isFinite(v)) ? v : null;
+}
+
+// Lüle açıları: çözücünün `motor.nozzle_angles` bloğu TEK KAYNAK.
+// Eski kod `motor.convergent_angle` / `motor.divergent_angle` okuyup
+// bulamayınca 15,0 / 12,0 sabitlerine düşüyordu (ölçüldü: o anahtarlar
+// yanıtta hiç yok). Blok yoksa hiçbir açı iddia edilmez.
+function buildNozzleGeometryExport(motorData) {
+    const m = motorData || {};
+    const ang = m.nozzle_angles || {};
+    const yak = numOrNull(ang.convergent_half_angle_deg ?? m.convergent_angle);
+    const ira = numOrNull(ang.divergent_half_angle_deg ?? m.divergent_angle);
+    if (yak === null && ira === null) {
+        return {
+            status: 'NOT_REPORTED',
+            basis: 'solver did not return motor.nozzle_angles'
+        };
+    }
+    return {
+        convergent_angle_deg: yak,
+        divergent_angle_deg: ira,
+        angle_definition: 'half_angles_from_centerline',
+        // Lüle tipi de ÇÖZÜCÜNÜN: eski "conical_assumed" etiketi, çözücü
+        // aynı yanıtta "conical" derken bir varsayım iddia ediyordu.
+        nozzle_type: ang.nozzle_type || null,
+        divergence_efficiency: numOrNull(ang.divergence_efficiency),
+        source: 'motor.nozzle_angles'
+    };
+}
+
+// Enjektör akış bloğu (P11B2-04). Eski hâli formdaki girdileri yok sayıp
+// sabit basıyordu: oksitleyici giriş sıcaklığı 293,15 K sabit (form alanı
+// `oxidizer_temp` gönderiliyorken), kavitasyon indisi ΔP/25 bar sabitiyle
+// (form `tank_pressure` = 50 bar iken sonuç tam 2 kat), flash boiling ise
+// sabit "ΔP < 3 bar" eşiğiyle — çözücü aynı yanıtta Nurick sayısını
+// hesaplayıp uyarı yayımlıyorken. İkisi de KALDIRILDI: yükte yalnız
+// çözücünün yayımladığı büyüklükler ve açık bir NOT_MODELLED beyanı var.
+function buildInjectorFlowExport(results) {
+    const inj = (results && results.injector) || {};
+    const alan = (id) => {
+        const el = document.getElementById(id);
+        const v = el ? parseFloat(el.value) : NaN;
+        return isFinite(v) ? v : null;
+    };
+    return {
+        oxidizer_inlet_temperature_K: alan('oxidizer_temp'),
+        oxidizer_inlet_temperature_source: document.getElementById('oxidizer_temp')
+            ? 'form field oxidizer_temp' : 'not supplied',
+        tank_pressure_bar: alan('tank_pressure'),
+        injector_inlet_pressure_bar: numOrNull(inj.injector_inlet_pressure_bar),
+        vapor_pressure_bar: numOrNull(inj.vapor_pressure_bar),
+        pressure_drop_bar: numOrNull(inj.pressure_drop_bar ?? inj.pressure_drop),
+        cavitation_status: 'NOT_MODELLED',
+        cavitation_basis: 'the cavitation number is computed by the solver '
+            + '(Nurick K_c) and reported in the warnings block; this payload '
+            + 'carries its inputs but does not derive a second index',
+        flash_boiling_status: 'NOT_MODELLED',
+        flash_boiling_basis: 'flash boiling is assessed by the solver against '
+            + 'the oxidizer vapour pressure and reported in the warnings '
+            + 'block; no fixed pressure-drop threshold is applied here'
+    };
+}
+
 function prepareAIData(results) {
     return {
         analysis_type: "Hybrid Rocket Motor Design",
@@ -1515,12 +3425,17 @@ function prepareAIData(results) {
             l_over_d_ratio: (results.motor.chamber_length * 1000) / (results.motor.chamber_diameter * 1000),
             geometry_anomalies: detectGeometryAnomalies(results.motor),
             
-            nozzle_geometry: {
-                convergent_angle_deg: results.motor.convergent_angle || 15.0,
-                divergent_angle_deg: results.motor.divergent_angle || 12.0,
-                angle_definition: "half_angles_from_centerline",
-                nozzle_type: "conical_assumed"
-            }
+            // ÖH D15 / P11B2-03 — LÜLE AÇILARI ÇÖZÜCÜDEN OKUNUR.
+            // ÖLÇÜLDÜ (31 Ağustos 2026, gerçek /calculate yanıtı +
+            // node içinde gerçek prepareAIData): `motor.convergent_angle`
+            // ve `motor.divergent_angle` anahtarları yanıtta HİÇ YOK, yani
+            // `|| 15.0` / `|| 12.0` yedeği HER koşuda ateşleniyordu; gerçek
+            // açılar aynı yanıtta `motor.nozzle_angles` altında duruyordu
+            // (yakınsak 30,0° ⟷ yüke giden 15,0° = 2×; ıraksak 15,0° ⟷ 12,0°).
+            // Kullanıcı aynı sayfada iki farklı açı görüyordu ve yapay zekâya
+            // giden kopya YANLIŞ olanıydı. Yedek KALDIRILDI: alan yoksa sayı
+            // uydurulmaz, null gider (fail-closed).
+            nozzle_geometry: buildNozzleGeometryExport(results.motor)
         },
         
         injector_design: {
@@ -1533,22 +3448,26 @@ function prepareAIData(results) {
                 fluid: "oxidizer",
                 calculation_note: "Re = ρvd/μ for oxidizer flow"
             },
-            discharge_coefficient: 0.65, // Assumed typical value
+            // ÖH D15 / P11B2-03 — Cd ve L/D ÇÖZÜCÜDEN. Sabit 0,65 ve 2,0
+            // aynı sayfadaki tasarım raporuyla çelişiyordu (ölçüldü:
+            // gerçek Cd = 0,700 ve L/D = 3,900). Alan yoksa null gider.
+            discharge_coefficient: numOrNull(results.injector.discharge_coefficient),
             ...(results.injector.type === 'showerhead' && {
                 holes_count: results.injector.n_holes,
                 hole_diameter_mm: results.injector.hole_diameter,
-                l_over_d_ratio: 2.0, // Assumed typical value
-                plate_thickness_mm: 3.0 // Assumed
+                l_over_d_ratio: numOrNull(results.injector.L_D_ratio
+                                          ?? results.injector.l_d_ratio),
+                plate_thickness_mm: numOrNull(results.injector.plate_thickness)
             }),
-            flow_characteristics: {
-                oxidizer_inlet_temperature_K: 293.15,
-                inlet_pressure_bar: (results.motor.chamber_pressure || 20) + (results.injector.pressure_drop || 5),
-                flash_boiling_risk: results.injector.pressure_drop < 3.0 ? "HIGH" : "LOW",
-                cavitation_index: calculateCavitationIndex(results.injector)
-            }
+            flow_characteristics: buildInjectorFlowExport(results)
         },
         
-        warnings: structurizeWarnings(results.injector.warnings || []),
+        // ÖH D15 / P11B2-02 (kritik) — YÜK EKRANIN GÖRDÜĞÜ UYARILARI TAŞIR.
+        // ÖLÇÜLDÜ: ekranda 10 uyarı dururken yüke YALNIZ enjektörün 3'ü
+        // giriyordu; motorun HTPB regresyon yanlılığı, lülede akış ayrılması
+        // ve cidarın erime sıcaklığını aşması dâhil 7 kayıt düşüyordu.
+        // Kanal artık ekranın kendi toplayıcısıyla AYNI (tek kaynak).
+        warnings: structurizeWarnings(collectResultWarnings(results)),
         
         // v2.6.26 — UYDURMA VERIM UCLUSU KALDIRILDI.
         // 0,95 / 0,98 / 0,93 hicbir hesaptan gelmiyordu ve lule verimi
@@ -1576,15 +3495,38 @@ function prepareAIData(results) {
         })(),
         
         thermal_analysis: {
-            chamber_temperature_K: results.motor.chamber_temperature || 3000,
-            nozzle_angles: {
-                convergent_angle_deg: results.motor.convergent_angle || 15.0,
-                divergent_angle_deg: results.motor.divergent_angle || 12.0
-            },
+            // ÖH D17 / P11B2-03 ŞARTI + OH-D16-13 — İKİNCİ KOPYA TEK KAYNAĞA
+            // BAĞLANDI. ÖLÇÜLDÜ (raw/OH/D17/arayuz/a1/once.json M1, gerçek
+            // /calculate yanıtı + node içinde gerçek prepareAIData): aynı
+            // yükün `geometry.nozzle_geometry` bloğu çözücünün 30,0°/15,0°
+            // açılarını taşırken bu blok `|| 15.0` / `|| 12.0` yedeklerini
+            // ateşleyip 15,0°/12,0° basıyordu (`motor.convergent_angle` ve
+            // `motor.divergent_angle` anahtarları yanıtta HİÇ YOK — ölçüldü:
+            // motorda_convergent_angle_var=false). D15 onarımı yalnız
+            // birinci kopyayı düzeltmişti; yapay zekâya giden yük iki
+            // farklı açı çifti taşımaya devam ediyordu (iki_blok_CELISIK).
+            // Aynı satırdaki `|| 3000` yedeği de kaldırıldı: oda sıcaklığı
+            // çözülemediyse sayı UYDURULMAZ, null gider (fail-closed).
+            chamber_temperature_K: numOrNull(results.motor.chamber_temperature),
+            nozzle_angles: buildNozzleGeometryExport(results.motor),
+            // ÖH D15 / P11B2-04 — SABİT MALZEME LİSTESİ ve SABİT 1200 K
+            // KALDIRILDI. Üçü de motorun malzemesinden, basıncından ya da
+            // sıcaklığından gelmiyordu; kullanıcı `chamber_material` alanını
+            // değiştirse bile yapay zekâya aynı üç malzeme gidiyordu.
             material_properties: {
-                recommended_materials: ['Steel 4130', 'Inconel 718', 'Aluminum 6061'],
+                selected_material: (document.getElementById('chamber_material')?.value
+                                    || null),
+                recommended_materials_status: 'NOT_MODELLED',
+                recommended_materials_basis: 'this payload does not rank '
+                    + 'materials; the selected material above is the form '
+                    + 'input and the computed margins are in the structural '
+                    + 'and safety analysis blocks',
                 thermal_considerations: {
-                    max_wall_temperature_K: 1200,
+                    max_wall_temperature_status: 'NOT_MODELLED',
+                    max_wall_temperature_basis: 'no wall temperature limit is '
+                        + 'derived here; the solver publishes the wall '
+                        + 'temperature chain and its warnings in the '
+                        + 'warnings block',
                     cooling_required: results.motor.chamber_temperature > 2500
                 }
             }
@@ -1654,7 +3596,7 @@ function detectGeometryAnomalies(motorData) {
         anomalies.push({
             type: "SCALE_ANOMALY",
             severity: "HIGH", 
-            message: `Extremely low L/D ratio: ${lOverD.toFixed(3)}`,
+            message: `Extremely low L/D ratio: ${numTxt(lOverD, 3)}`,
             likely_cause: "Unit conversion error or data entry mistake"
         });
     }
@@ -1676,23 +3618,44 @@ function detectGeometryAnomalies(motorData) {
     return anomalies;
 }
 
+// ÖH D15 / P11B2-02 — İKİ UYARI BİÇİMİ DE OKUNUR.
+// Kanal artık yalnız enjektörün düz metin uyarılarını değil, motorun ve
+// girdi doğrulamasının {code, params, severity} kayıtlarını da taşıyor.
+// Eski gövde `warning.includes(...)` diyordu: sözlük kaydı geldiğinde
+// TypeError fırlatıyor ve YAPAY ZEKÂ DÜĞMESİ ÇÖKÜYORDU (ölçüldü, node).
+// Kaydın kendi `code`/`severity` alanı varsa O kullanılır — burada
+// yeniden sınıflandırma yapılmaz (sınıfın sahibi çözücüdür).
 function structurizeWarnings(warningStrings) {
-    return warningStrings.map((warning, index) => ({
-        id: `WARN_${index + 1}`,
-        code: warning.includes('flash') ? 'FLASH_BOILING' : 'GENERAL',
-        severity: warning.includes('flash') ? 'HIGH' : 'MEDIUM',
-        message: warning,
-        timestamp: new Date().toISOString(),
-        path: 'injector_design'
-    }));
+    const liste = Array.isArray(warningStrings) ? warningStrings : [];
+    return liste.map((warning, index) => {
+        const sozluk = (warning && typeof warning === 'object') ? warning : null;
+        const metin = sozluk
+            ? String(sozluk.message || sozluk.code || '')
+            : String(warning == null ? '' : warning);
+        const flash = metin.toLowerCase().includes('flash');
+        return {
+            id: `WARN_${index + 1}`,
+            code: (sozluk && sozluk.code)
+                ? sozluk.code : (flash ? 'FLASH_BOILING' : 'GENERAL'),
+            severity: (sozluk && sozluk.severity)
+                ? String(sozluk.severity).toUpperCase()
+                : (flash ? 'HIGH' : 'MEDIUM'),
+            message: metin,
+            // Çözücünün parametreleri (bias_pct, of, lo, hi …) kaybolmaz:
+            // uyarının SAYISI onlarda duruyor.
+            params: (sozluk && sozluk.params) ? sozluk.params : null,
+            timestamp: new Date().toISOString(),
+            path: sozluk ? 'solver_warnings' : 'injector_design'
+        };
+    });
 }
 
-function calculateCavitationIndex(injectorData) {
-    // Simplified cavitation index calculation
-    const pressureDrop = injectorData.pressure_drop || 5;
-    const inletPressure = 25; // Assumed tank pressure in bar
-    return pressureDrop / inletPressure;
-}
+// ÖH D15 / P11B2-04 — KALDIRILDI (uydurma kavitasyon indisi).
+// Bu fonksiyon giriş basıncını SABİT 25 bar alıyordu; formdaki
+// `tank_pressure` 50 bar iken indis tam 2 kat iyimser çıkıyordu ve çözücü
+// aynı yanıtta gerçek Nurick sayısını (K_c) yayımlıyordu. İki ayrı indis
+// üretmek yerine yükte çözücünün girdileri + açık NOT_MODELLED beyanı
+// taşınıyor (bkz. buildInjectorFlowExport). Fonksiyonun tüketicisi kalmadı.
 
 // Rapor exportu için yapısal bölüm: currentResults.motor.structural_analysis'in
 // GERÇEK backend değerleri kullanılır. Sonuç yoksa alanlar 'not computed'
@@ -1720,6 +3683,25 @@ function buildStructuralExport(motorData) {
             pressure_only: num(sa.safety_factor_pressure),
             total_incl_thermal: num(sa.safety_factor_total),
             minimum_all_modes: num(safety.minimum_safety_factor),
+            // ÖH Z4 / P11B4-03: `minimum_all_modes` HRMA'nın KENDİ
+            // boyutlandırdığı kesitlerden gelebilir; o hâlde sayı tasarım
+            // hedefinin geri okumasıdır, kullanıcının kazandığı marj değil.
+            // İhraç dosyası bugüne dek yalnız sol sütunu taşıyordu.
+            // `null` ile 'not computed' AYNI ŞEY DEĞİL: null = hesaplandı,
+            // sonuç "kazanılmış mod yok" (bütün kesitler HRMA'nın kendi
+            // boyutlandırdığı kesitler). Alan hiç yoksa 'not computed'.
+            minimum_earned: (typeof safety.minimum_earned_safety_factor === 'number'
+                             && isFinite(safety.minimum_earned_safety_factor))
+                ? safety.minimum_earned_safety_factor
+                : (safety.minimum_earned_safety_factor === null
+                    ? null : NOT_COMPUTED),
+            binding_modes: safety.binding_safety_factors || NOT_COMPUTED,
+            binding_is_target_readback:
+                (typeof safety.binding_safety_factor_is_tautological === 'boolean')
+                    ? safety.binding_safety_factor_is_tautological : NOT_COMPUTED,
+            per_mode_is_target_readback:
+                safety.safety_factor_is_tautological || NOT_COMPUTED,
+            verdict_basis: safety.minimum_safety_factor_verdict_basis || NOT_COMPUTED,
             per_mode: safety.safety_factors || NOT_COMPUTED
         },
         stress_analysis: {
@@ -1743,14 +3725,12 @@ function identifyRiskFactors(results) {
         risks.push('HIGH_PRESSURE: Chamber pressure exceeds 40 bar - requires robust design');
     }
     
-    // O/F ratio risks
-    const ofRatio = results.motor.of_ratio;
-    if (ofRatio < 2.0) {
-        risks.push('RICH_MIXTURE: Low O/F ratio may cause incomplete combustion');
-    } else if (ofRatio > 8.0) {
-        risks.push('LEAN_MIXTURE: High O/F ratio may cause overheating');
-    }
-    
+    // ÖH D15 / P11B2-02 — O/F BANDI BURADAN KALDIRILDI (tek kaynak).
+    // Buradaki 2,0–8,0 bandı çözücünün bandıyla (0,5–6,0) ilgisizdi ve
+    // ölçülen koşuda O/F = 7,5 iken çözücü `warn.validation.of_out_of_range`
+    // uyarısı yayımlarken bu blok sessiz kalıyordu. Bandın tek sahibi
+    // çözücüdür; uyarısı `warnings` bloğunda yükün içinde taşınıyor.
+
     // Thrust density risk
     const thrustDensity = results.motor.thrust / (Math.PI * Math.pow(results.motor.chamber_diameter/2, 2));
     if (thrustDensity > 5000000) { // N/m²
@@ -1768,17 +3748,31 @@ function identifyRiskFactors(results) {
         risks.push('EXCESSIVE_REGRESSION: Large port growth may affect performance');
     }
     
-    return risks.length > 0 ? risks : ['LOW_RISK: Design parameters within normal ranges'];
+    // ÖH D15 / P11B2-02 (kritik) — "LOW_RISK" HÜKMÜ KALDIRILDI.
+    // ÖLÇÜLDÜ: çözücü aynı koşuda 10 uyarı (kavitasyon, flash boiling,
+    // cidarın erime sıcaklığını aşması, lülede akış ayrılması, HTPB
+    // regresyon yanlılığı) yayımlarken bu satır yapay zekâya
+    // "Design parameters within normal ranges" cümlesini götürüyordu.
+    // Aşağıdaki dört sezgisel bir risk DEĞERLENDİRMESİ değildir; hiçbiri
+    // yanmadığında doğru cümle "risk düşük" değil "burada hüküm
+    // KURULMADI"dır. Çözücünün uyarı kanalı sayılarak beyan edilir.
+    if (risks.length > 0) return risks;
+    const cozucuUyarilari = collectResultWarnings(results);
+    return ['NOT_ASSESSED: this payload does not derive a risk verdict; '
+            + cozucuUyarilari.length + ' solver warning(s) are carried in '
+            + 'the warnings block and must be read there'];
 }
 
 // Show AI data in modal
-function showAIDataModal(data, prompt) {
+// OH-GT-07: `girisMetni` verilirse onu basar (pano başarısız olduğunda
+// "panoya kopyalandı" demek YALAN olurdu). Verilmezse eski metin.
+function showAIDataModal(data, prompt, girisMetni) {
     // Create modal HTML
     const modalHTML = `
         <div id="aiModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; display: flex; align-items: center; justify-content: center;">
             <div style="background: white; padding: 30px; border-radius: 10px; max-width: 80%; max-height: 80%; overflow-y: auto;">
                 <h2 style="margin-bottom: 20px;">${T('app.ai.modalTitle', 'AI Analysis Data')}</h2>
-                <p style="margin-bottom: 15px;">${T('app.ai.modalIntro',
+                <p style="margin-bottom: 15px;">${girisMetni || T('app.ai.modalIntro',
                     'The following data has been copied to your clipboard. You can paste '
                     + 'it into ChatGPT, Claude, or any AI assistant:')}</p>
                 <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; max-height: 400px;">${prompt}</pre>
@@ -1800,76 +3794,11 @@ document.addEventListener('keypress', function(e) {
     }
 });
 
-// Show design configuration panel
-function showDesignConfig() {
-    if (!currentResults) {
-        showError(T('app.msg.calculateFirst', 'Please calculate motor first'));
-        return;
-    }
-    
-    // Hide export panel temporarily
-    document.getElementById('exportActionsPanel').style.display = 'none';
-    
-    // Show config panel
-    document.getElementById('designConfigPanel').style.display = 'block';
-    
-    // Auto-fill values from analysis results
-    autoFillDesignConfig();
-}
+// SÖKÜLDÜ (D30 a1) · showDesignConfig() — advanced.html satır içi sürümü kazanıyordu (D28 arayuz a3 kapıyı orada onarmıştı).
 
-// Auto-fill design configuration from analysis results
-function autoFillDesignConfig() {
-    if (!currentResults) return;
-    
-    // Motor parameters
-    const motor = currentResults.motor;
-    const injector = currentResults.injector;
-    
-    // Auto-fill chamber dimensions (convert to mm)
-    const chamberLength = document.getElementById('chamber_length_override');
-    if (chamberLength && motor.chamber_length) {
-        chamberLength.placeholder = `Auto: ${(motor.chamber_length * 1000).toFixed(0)} mm`;
-    }
-    
-    // v2.6.26: burada 'injection_velocity' GİRDİ kutusuna çözücünün hesapladığı
-    // çıkış hızı YAZILIYORDU. Kullanıcının girdiği sayı sonuçla eziliyordu; bir
-    // sonraki koşuda o değer geri gönderilse "girdi sonuca uyuyor" görünürdü —
-    // kendini doğrulayan bir döngü. Alan kaldırıldı (bağlı eşdeğeri
-    // target_velocity) ve çıkış hızı zaten enjektör sonuç tablosunda gösteriliyor.
+// SÖKÜLDÜ (D30 a1) · autoFillDesignConfig() — tek çağrısı yukarıdaki ölü showDesignConfig içindeydi; yaptığı iki iş canlı yolda zaten var (generateCADBtn advanced.html:5617/5624’te açılıyor, yer tutucular satır içi sürümde kuruluyor).
 
-    if (injector.n_holes) {
-        document.getElementById('n_holes_override').placeholder = `Auto: ${injector.n_holes} holes`;
-    }
-    
-    if (injector.pressure_drop && motor.chamber_pressure) {
-        const dropPercent = (injector.pressure_drop / motor.chamber_pressure * 100).toFixed(0);
-        document.getElementById('pressure_drop_percent').value = dropPercent;
-    }
-    
-    // Update CAD button status
-    document.getElementById('generateCADBtn').disabled = false;
-}
-
-// Switch configuration tabs
-function switchConfigTab(tabName) {
-    // Hide all tab contents
-    document.querySelectorAll('.tab-content').forEach(content => {
-        if (content.parentElement.id === 'designConfigPanel') {
-            content.style.display = 'none';
-        }
-    });
-    
-    // Remove active class from all tabs
-    document.querySelectorAll('#designConfigPanel .tab').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    
-    // Show selected tab
-    document.getElementById(tabName).style.display = 'block';
-    
-    // Add active class to clicked tab
-    event.target.classList.add('active');
-}
+// SÖKÜLDÜ (D30 a1) · switchConfigTab() — advanced.html satır içi sürümü kazanıyordu.
 
 // Apply design configuration
 function applyDesignConfig() {
@@ -1911,394 +3840,50 @@ function applyDesignConfig() {
     showSuccess(T('app.msg.configApplied', 'Design configuration applied successfully'));
 }
 
-// CAD Generation Functions
-async function generateCAD() {
-    if (!currentResults) {
-        showError(T('app.msg.calculateFirst', 'Please calculate motor first'));
-        return;
+// SÖKÜLDÜ (D30 a1) · generateCAD() — advanced.html satır içi sürümü kazanıyordu (Three.js + /api/generate-3d yedeği, OH-D23-15 kapılı); bu kopya ölü /api/export-cad’i çağırıyordu.
+
+// SÖKÜLDÜ (D30 a1) · exportSTL() — advanced.html satır içi sürümü kazanıyordu (_downloadExport ile /api/export-stl-zip; bu kopya ölü /api/export-stl’i çağırıyordu).
+
+// ÖH D23 / P17B3-07 — ÖLÜ `exportOpenRocket` SÖKÜLDÜ.
+// SÖKÜLDÜ (D30 a1) · downloadEngFile() — advanced.html satır içi sürümü kazanıyordu (D23 P17B3-07 üretim yolu).
+
+// ÖH D24 / OH-D18-06 — STL indirme penceresinin kullanıcıya dönük metni.
+//
+// `stlDownloadWindow` yalnız SUNUCUNUN yayımladığı saniyeyi taşır; burada
+// hiçbir varsayılan yoktur. Üç hâl vardır ve üçü de farklı şey söyler:
+//   * bağlantı yok                -> hiçbir şey yazılmaz
+//   * bağlantı var, süre beyanlı  -> pencere ve BİTİŞ ANI yazılır
+//   * bağlantı var, süre beyansız -> "süre beyan edilmedi" yazılır
+// Sunucu sayıyı `_STL_REGISTRY_TTL_S` tek kaynağından üretir (hrma/app.py).
+function stlPencereMetni(cad) {
+    if (!cad || !Array.isArray(cad.stl_files) || cad.stl_files.length === 0) {
+        return '';
     }
-    
-    if (!window.designConfig) {
-        showError(T('app.msg.configureFirst', 'Please configure design parameters first'));
-        showDesignConfig();
-        return;
+    const stlDownloadWindow = Number(cad.stl_download_window_s);
+    if (!isFinite(stlDownloadWindow) || stlDownloadWindow <= 0) {
+        return ' ' + T('app.msg.stlWindowUndeclared',
+            'The server did not declare how long the STL download links stay '
+            + 'alive; re-generate the package if a link stops working.');
     }
-    
-    showLoading(true);
-    const cadStatus = document.getElementById('cadStatus');
-    cadStatus.textContent = T('app.msg.generating3d', 'Generating 3D model...');
-    
-    try {
-        // Merge analysis results with design config
-        const cadData = {
-            ...currentResults.motor,
-            design_config: window.designConfig
-        };
-        
-        const response = await fetch('/api/export-cad', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                motor_data: cadData,
-                formats: ['stl', 'technical_drawings', 'materials', '3d_plot']
-            })
-        });
-        
-        if (!response.ok) throw new Error(T('app.msg.cadFailed', 'CAD generation failed'));
-        
-        const data = await response.json();
-        
-        // Display 3D visualization
-        if (data.cad_exports.plotly_3d) {
-            document.getElementById('cad3DPanel').style.display = 'block';
-            const plot3D = JSON.parse(data.cad_exports.plotly_3d);
-            Plotly.newPlot('motor_3d_plot', plot3D.data, plot3D.layout, {responsive: true});
-        }
-        
-        // Enable STL export button
-        document.getElementById('exportSTLBtn').disabled = false;
-        window.cadExportData = data.cad_exports;
-        
-        cadStatus.textContent = T('app.msg.cadOkAlert', 'CAD model generated successfully!');
-        showSuccess(T('app.msg.cadOk', '3D CAD model generated successfully'));
-        
-    } catch (error) {
-        cadStatus.textContent = T('app.msg.cadFailed', 'CAD generation failed');
-        showError(TF('app.msg.cadError', { message: error.message }, 'Failed to generate CAD: {message}'));
-    } finally {
-        showLoading(false);
-    }
+    const dakika = Math.floor(stlDownloadWindow / 60);
+    const bitis = new Date(Date.now() + stlDownloadWindow * 1000);
+    window.stlDownloadExpiresAt = bitis.getTime();
+    return ' ' + TF('app.msg.stlWindow',
+        { count: cad.stl_files.length,
+          minutes: dakika,
+          at: bitis.toLocaleTimeString() },
+        'The {count} STL download links stay alive for {minutes} min (until '
+        + '{at}); after that they return 410 and the package must be '
+        + 'generated again.');
 }
 
-async function exportSTL() {
-    if (!currentResults || !currentResults.motor) {
-        showError(T('app.msg.analysisFirst', 'Please run motor analysis first'));
-        return;
-    }
-    
-    showLoading(true);
-    
-    try {
-        const response = await fetch('/api/export-stl', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                motor_data: currentResults.motor,
-                export_format: 'stl'
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        // Check if response is JSON (error) or binary (STL file)
-        const contentType = response.headers.get('content-type');
-        
-        if (contentType && contentType.includes('application/json')) {
-            const result = await response.json();
-            if (result.status === 'error') {
-                throw new Error(result.error || T('app.msg.stlFailed', 'STL export failed'));
-            }
-            // Handle multiple files case
-            if (result.stl_files && result.stl_files.length > 0) {
-                showSuccess(T('app.msg.stlFiles', 'STL files generated. Check downloads folder.'));
-                return;
-            }
-        }
-        
-        // Handle single STL file download
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        
-        const motorName = currentResults.motor.motor_name || 'UZAYTEK_motor';
-        a.download = `${motorName}_assembly.stl`;
-        
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        showSuccess(T('app.msg.stlOk', 'STL file exported successfully'));
-        
-    } catch (error) {
-        console.error('Error exporting STL:', error);
-        showError(TF('app.msg.stlError', { message: error.message }, 'Error exporting STL: {message}'));
-    } finally {
-        showLoading(false);
-    }
-}
+// SÖKÜLDÜ (D30 a1) · generateCompletePackage() — advanced.html satır içi sürümü kazanıyordu (generateCAD + exportCompleteZip).
 
-// OpenRocket Export Functions
-async function exportOpenRocket() {
-    if (!currentResults) {
-        showError(T('app.msg.calculateFirst', 'Please calculate motor first'));
-        return;
-    }
-    
-    showLoading(true);
-    const openrocketStatus = document.getElementById('openrocketStatus');
-    openrocketStatus.textContent = T('app.msg.orGenerating', 'Generating OpenRocket file...');
-    
-    try {
-        const response = await fetch('/api/export-openrocket', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                motor_data: currentResults.motor
-            })
-        });
-        
-        if (!response.ok) throw new Error(T('app.msg.orFailed', 'OpenRocket export failed'));
-        
-        const data = await response.json();
-        
-        // Store eng file content for download
-        window.openrocketData = data;
-        document.getElementById('downloadEngBtn').disabled = false;
-        
-        openrocketStatus.textContent = `Motor: ${data.motor_designation} - Ready for download`;
-        showSuccess(T('app.msg.orOk', 'OpenRocket file generated successfully'));
-        
-    } catch (error) {
-        openrocketStatus.textContent = T('app.msg.exportFailed', 'Export failed');
-        showError(TF('app.msg.orError', { message: error.message }, 'Failed to export OpenRocket: {message}'));
-    } finally {
-        showLoading(false);
-    }
-}
+// SÖKÜLDÜ (D30 a1) · rotate3DView() — advanced.html satır içi sürümü kazanıyordu (bu kopya hâlâ Plotly çağırıyordu).
 
-async function downloadEngFile() {
-    if (!currentResults || !currentResults.motor) {
-        showError(T('app.msg.analysisFirst', 'Please run motor analysis first'));
-        return;
-    }
-    
-    showLoading(true);
-    
-    try {
-        const response = await fetch('/api/export-openrocket', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                motor_data: currentResults.motor,
-                motor_name: document.getElementById('motor_name')?.value || 'UZAYTEK_Motor'
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            // Download the .eng file
-            const blob = new Blob([result.eng_file_content], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = result.download_filename || 'motor.eng';
-            document.body.appendChild(a);
-            a.click();
-            URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-            
-            showSuccess(T('app.msg.engOk', 'OpenRocket motor file downloaded successfully'));
-        } else {
-            throw new Error(result.error || T('app.msg.engFailed', 'Failed to generate motor file'));
-        }
-        
-    } catch (error) {
-        console.error('Error downloading motor file:', error);
-        showError(TF('app.msg.engError', { message: error.message }, 'Error downloading motor file: {message}'));
-    } finally {
-        showLoading(false);
-    }
-}
+// SÖKÜLDÜ (D30 a1) · reset3DView() — advanced.html satır içi sürümü kazanıyordu (bu kopya hâlâ Plotly çağırıyordu).
 
-// Complete Package Generation
-async function generateCompletePackage() {
-    if (!currentResults) {
-        showError(T('app.msg.calculateFirst', 'Please calculate motor first'));
-        return;
-    }
-    
-    showLoading(true);
-    const packageStatus = document.getElementById('packageStatus');
-    packageStatus.textContent = T('app.msg.packageGenerating', 'Generating complete package...');
-    
-    try {
-        const response = await fetch('/api/generate-complete-package', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                motor_data: currentResults.motor,
-                package_options: {
-                    include_cad: true,
-                    include_openrocket: true,
-                    include_analysis: true,
-                    include_manufacturing: true
-                }
-            })
-        });
-        
-        if (!response.ok) throw new Error(T('app.msg.packageFailed', 'Package generation failed'));
-        
-        const data = await response.json();
-        
-        // Download as JSON package
-        const blob = new Blob([JSON.stringify(data.complete_package, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${data.package_info.motor_name}_complete_package.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        packageStatus.textContent = T('app.msg.packageDownloaded', 'Complete package downloaded!');
-        showSuccess(T('app.msg.packageOk', 'Complete design package generated successfully'));
-        
-    } catch (error) {
-        packageStatus.textContent = T('app.msg.packageFailed', 'Package generation failed');
-        showError(TF('app.msg.packageError', { message: error.message }, 'Failed to generate package: {message}'));
-    } finally {
-        showLoading(false);
-    }
-}
-
-// 3D View Controls
-function rotate3DView() {
-    if (window.Plotly) {
-        Plotly.relayout('motor_3d_plot', {
-            'scene.camera': {
-                eye: {
-                    x: 1.5 * Math.cos(Date.now() / 1000),
-                    y: 1.5 * Math.sin(Date.now() / 1000),
-                    z: 0.5
-                }
-            }
-        });
-    }
-}
-
-function reset3DView() {
-    if (window.Plotly) {
-        Plotly.relayout('motor_3d_plot', {
-            'scene.camera': {
-                eye: {x: 1.25, y: 1.25, z: 1.25}
-            }
-        });
-    }
-}
-
-// Parametric Analysis
-async function calculateParametric() {
-    try {
-        // Check if required elements exist
-        if (!document.getElementById('param_type') || 
-            !document.getElementById('param_start') || 
-            !document.getElementById('param_end') || 
-            !document.getElementById('param_steps')) {
-            showError(T('app.msg.paramFormMissing', 'Parametric analysis form elements not found'));
-            return;
-        }
-        
-        showLoading(true);
-        showMessage(T('app.msg.paramStarted', 'Parametric analysis started...'), 'info');
-        
-        // Get form data
-        const paramType = document.getElementById('param_type').value;
-        const paramStart = parseFloat(document.getElementById('param_start').value);
-        const paramEnd = parseFloat(document.getElementById('param_end').value);
-        const paramSteps = parseInt(document.getElementById('param_steps').value);
-        
-        // Validate parametric inputs
-        if (isNaN(paramStart) || isNaN(paramEnd) || isNaN(paramSteps)) {
-            throw new Error(T('app.msg.paramInvalid', 'Invalid parametric analysis inputs'));
-        }
-        
-        if (paramStart >= paramEnd) {
-            throw new Error(T('app.msg.paramRange', 'Start value must be less than end value'));
-        }
-        
-        if (paramSteps < 3 || paramSteps > 50) {
-            throw new Error(T('app.msg.paramSteps', 'Number of steps must be between 3 and 50'));
-        }
-        
-        const baseData = getFormData();
-        
-        const requestData = {
-            ...baseData,
-            param_type: paramType,
-            param_start: paramStart,
-            param_end: paramEnd,
-            param_steps: paramSteps
-        };
-        
-        const response = await fetch('/parametric-analysis', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestData)
-        });
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.error) {
-            throw new Error(result.error);
-        }
-        
-        // Display parametric plot
-        const plotContainer = document.getElementById('parametric_plot');
-        if (!plotContainer) {
-            // Create plot container if it doesn't exist
-            const parametricTab = document.getElementById('parametric_tab');
-            if (parametricTab) {
-                const newContainer = document.createElement('div');
-                newContainer.id = 'parametric_plot';
-                newContainer.className = 'plot-container';
-                parametricTab.appendChild(newContainer);
-            }
-        }
-        
-        // Parametrik grafik de safePlotCreate üzerinden çizilir (v2.5.5):
-        // responsive config + yükseklik sabitleme + PNG dışa aktarım
-        // seçenekleri tek merkezden gelir.
-        if (result.plot_data) {
-            const pd = result.plot_data;
-            safePlotCreate('parametric_plot',
-                typeof pd === 'string' ? pd : JSON.stringify(pd));
-
-            // Show the parametric tab if hidden
-            const parametricTab = document.getElementById('parametric_tab');
-            if (parametricTab && parametricTab.style.display === 'none') {
-                parametricTab.style.display = 'block';
-            }
-        } else if (result.plot) {
-            // Alternative: check for 'plot' field
-            const pd = result.plot;
-            safePlotCreate('parametric_plot',
-                typeof pd === 'string' ? pd : JSON.stringify(pd));
-        } else {
-            showWarning(T('app.msg.paramNoPlot', 'No plot data received from parametric analysis'));
-        }
-        
-        showSuccess(T('app.msg.paramOk', 'Parametric analysis completed successfully'));
-        
-    } catch (error) {
-        console.error('Parametric analysis error:', error);
-        showError(TF('app.msg.paramError', { message: error.message }, 'Parametric analysis failed: {message}'));
-    } finally {
-        showLoading(false);
-    }
-}
+// SÖKÜLDÜ (D30 a1) · calculateParametric() — advanced.html satır içi sürümü kazanıyordu (runParametricAnalysis sarmalayıcısı); bu kopyanın TEK kapısı assertParametricMatchesRequest idi ve o kapı D30 a1’de canlı sürüme bağlandı.
 
 // Trajectory Analysis
 async function calculateTrajectory() {
@@ -2368,8 +3953,10 @@ async function calculateTrajectory() {
         });
         
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            // ÖH D31 · OH-D30-02 — ham gövde metnini ekrana dökmek yerine
+            // ucun YAPILI ret sözleşmesi (`invalid_fields`/`missing_fields`)
+            // alan adlarıyla basılır. Çözücü TEK kaynakta: reject_body.js.
+            throw await HRMAReject.hata(response);
         }
         
         const result = await response.json();
@@ -2420,7 +4007,7 @@ async function calculateTrajectory() {
         if (result.engine_data) {
             const engineData = result.engine_data;
             showMessage(TF('app.msg.trajOkEngine',
-                { thrust: engineData.thrust.toFixed(0), isp: engineData.isp.toFixed(1) },
+                { thrust: numTxt(engineData.thrust, 0), isp: numTxt(engineData.isp, 1) },
                 'Trajectory analysis completed! Engine: {thrust} N thrust, {isp} s Isp'),
                 'success');
         } else {
@@ -2440,18 +4027,22 @@ function displayMotorTable(motorData) {
     if (!motorTableBody) return;
     
     const motorRows = [
-        [T('app.rep.throatDia', 'Throat Diameter'), (motorData.throat_diameter * 1000).toFixed(1), 'mm'],
-        [T('app.rep.exitDia', 'Exit Diameter'), (motorData.exit_diameter * 1000).toFixed(1), 'mm'],
-        [T('common.f.expansionRatio', 'Expansion Ratio'), motorData.expansion_ratio.toFixed(1), '-'],
-        [T('app.rep.chamberDia', 'Chamber Diameter'), (motorData.chamber_diameter * 1000).toFixed(1), 'mm'],
-        [T('app.rep.chamberLen', 'Chamber Length'), (motorData.chamber_length * 1000).toFixed(1), 'mm'],
-        [T('app.rep.chamberVolume', 'Chamber Volume'), (chamberVolumeM3(motorData) * 1e6).toFixed(1), 'cm³'],
-        [T('app.metric.pc', 'Chamber Pressure'), (motorData.chamber_pressure).toFixed(1), 'bar'],
-        [T('app.metric.thrust', 'Thrust'), (motorData.thrust).toFixed(0), 'N'],
-        [T('app.metric.ispDesign', 'Isp (design point, at design-altitude ambient)'), motorData.isp.toFixed(1), 's'],
-        [T('app.rep.cstar', 'Characteristic Velocity'), motorData.c_star.toFixed(0), 'm/s'],
-        [T('app.rep.cf', 'Thrust Coefficient'), motorData.cf.toFixed(3), '-'],
-        [T('app.metric.mdot', 'Mass Flow Rate'), motorData.mdot_total.toFixed(3), 'kg/s']
+        [T('app.rep.throatDia', 'Throat Diameter'), numTxt((motorData.throat_diameter * 1000), 1), 'mm'],
+        [T('app.rep.exitDia', 'Exit Diameter'), numTxt((motorData.exit_diameter * 1000), 1), 'mm'],
+        [T('common.f.expansionRatio', 'Expansion Ratio'), numTxt(motorData.expansion_ratio, 1), '-'],
+        [T('app.rep.chamberDia', 'Chamber Diameter'), numTxt((motorData.chamber_diameter * 1000), 1), 'mm'],
+        [T('app.rep.chamberLen', 'Chamber Length'), numTxt((motorData.chamber_length * 1000), 1), 'mm'],
+        [T('app.rep.chamberVolume', 'Chamber Volume'),
+         chamberVolumeM3(motorData) === null
+             ? T('common.notComputed', 'not computed')
+             : numTxt((chamberVolumeM3(motorData) * 1e6), 1),
+         chamberVolumeM3(motorData) === null ? '' : 'cm³'],
+        [T('app.metric.pc', 'Chamber Pressure'), numTxt((motorData.chamber_pressure), 1), 'bar'],
+        [T('app.metric.thrust', 'Thrust'), numTxt((motorData.thrust), 0), 'N'],
+        [T('app.metric.ispDesign', 'Isp (design point, at design-altitude ambient)'), numTxt(motorData.isp, 1), 's'],
+        [T('app.rep.cstar', 'Characteristic Velocity'), numTxt(motorData.c_star, 0), 'm/s'],
+        [T('app.rep.cf', 'Thrust Coefficient'), numTxt(motorData.cf, 3), '-'],
+        [T('app.metric.mdot', 'Mass Flow Rate'), numTxt(motorData.mdot_total, 3), 'kg/s']
     ];
     
     motorTableBody.innerHTML = '';
@@ -2470,24 +4061,81 @@ function displayInjectorTable(injectorData) {
 
     // Sayisal alanlari guvenli bicimle: 0 gecerli bir degerdir ('N/A' degil).
     const fmt = (v, digits) => (typeof v === 'number' && isFinite(v))
-        ? v.toFixed(digits) : 'N/A';
+        ? numTxt(v, digits) : 'N/A';
     
     const injectorRows = [
         [T('common.type', 'Type'), injectorData.type, '-'],
-        [T('app.rep.exitVelocity', 'Exit Velocity'), injectorData.exit_velocity.toFixed(1), 'm/s'],
-        [T('app.rep.reynolds', 'Reynolds Number'), injectorData.reynolds_number.toFixed(0), '-'],
-        [T('app.rep.pressureDrop', 'Pressure Drop'), injectorData.pressure_drop.toFixed(2), 'bar']
+        [T('app.rep.exitVelocity', 'Exit Velocity'), numTxt(injectorData.exit_velocity, 1), 'm/s'],
+        [T('app.rep.reynolds', 'Reynolds Number'), numTxt(injectorData.reynolds_number, 0), '-'],
+        [T('app.rep.pressureDrop', 'Pressure Drop'), numTxt(injectorData.pressure_drop, 2), 'bar']
     ];
     
     // Add type-specific parameters
     if (injectorData.type === 'showerhead') {
         injectorRows.push([T('app.rep.nHoles', 'Number of Holes'), injectorData.n_holes || 'N/A', '-']);
-        injectorRows.push([T('app.rep.holeDia', 'Hole Diameter'), injectorData.hole_diameter ? injectorData.hole_diameter.toFixed(2) : 'N/A', 'mm']);
-        injectorRows.push([T('app.rep.ldRatio', 'L/D Ratio'), injectorData.l_d_ratio ? injectorData.l_d_ratio.toFixed(1) : 'N/A', '-']);
+        injectorRows.push([T('app.rep.holeDia', 'Hole Diameter'), injectorData.hole_diameter ? numTxt(injectorData.hole_diameter, 2) : 'N/A', 'mm']);
+        injectorRows.push([T('app.rep.ldRatio', 'L/D Ratio'), injectorData.l_d_ratio ? numTxt(injectorData.l_d_ratio, 1) : 'N/A', '-']);
     } else if (injectorData.type === 'pintle') {
-        injectorRows.push([T('app.rep.outerDia', 'Outer Diameter'), injectorData.outer_diameter ? injectorData.outer_diameter.toFixed(1) : 'N/A', 'mm']);
-        injectorRows.push([T('app.rep.pintleDia', 'Pintle Diameter'), injectorData.pintle_diameter ? injectorData.pintle_diameter.toFixed(1) : 'N/A', 'mm']);
-        injectorRows.push([T('app.rep.gap', 'Gap'), injectorData.gap ? injectorData.gap.toFixed(2) : 'N/A', 'mm']);
+        injectorRows.push([T('app.rep.outerDia', 'Outer Diameter'), injectorData.outer_diameter ? numTxt(injectorData.outer_diameter, 1) : 'N/A', 'mm']);
+        injectorRows.push([T('app.rep.pintleDia', 'Pintle Diameter'), injectorData.pintle_diameter ? numTxt(injectorData.pintle_diameter, 1) : 'N/A', 'mm']);
+        injectorRows.push([T('app.rep.gap', 'Gap'), injectorData.gap ? numTxt(injectorData.gap, 2) : 'N/A', 'mm']);
+    } else if (injectorData.type === 'swirl') {
+        // ÖH D25 · P11B2-23 — SWIRL ALANLARI TABLOYA DA GİRER.
+        // ÖLÇÜLDÜ (a3/once.json, taban cdf2106): bu dal HİÇ YOKTU —
+        // `displayInjectorTable` yalnız showerhead ve pintle dallarını
+        // taşıyordu, swirl seçildiğinde `n_slots` / `slot_width` /
+        // `slot_height` / `spray_angle` tabloya girmiyordu (yalnız
+        // tasarım raporunda vardı) ve yanıtın taşıdığı film kalınlığı,
+        // atomizasyon sabiti, hava çekirdeği oranı, yarık hızı gibi
+        // alanlar hiçbir yerde okunmuyordu. Alanlar yükten geldiği gibi
+        // basılır; olmayan alan satır AÇMAZ (uydurma sayı yok).
+        injectorRows.push([T('app.rep.nSlots', 'Number of Slots'),
+                           injectorData.n_slots !== undefined
+                               ? String(injectorData.n_slots) : 'N/A', '-']);
+        injectorRows.push([T('app.rep.slotWidth', 'Slot Width'),
+                           fmt(injectorData.slot_width, 3), 'mm']);
+        injectorRows.push([T('app.rep.slotHeight', 'Slot Height'),
+                           fmt(injectorData.slot_height, 3), 'mm']);
+        // Etiket belirsizliği giderildi: çözücü `spray_angle`'ı TAM koni
+        // açısı (2θ) diye tanımlar (hrma/utils/injector_design.py) ve yarı
+        // açıyı AYRI alanda verir; aynı rapor lüle için "Convergent HALF
+        // Angle" ayrımını zaten yapıyor.
+        injectorRows.push([T('app.rep.sprayAngleFull',
+                             'Spray Cone Angle (full, 2\u03B8)'),
+                           fmt(injectorData.spray_angle, 2), '°']);
+        if (injectorData.spray_half_angle_deg !== undefined
+                && injectorData.spray_half_angle_deg !== null) {
+            injectorRows.push([T('app.rep.sprayHalfAngle',
+                                 'Spray Half Angle (\u03B8)'),
+                               fmt(injectorData.spray_half_angle_deg, 2), '°']);
+        }
+        if (injectorData.film_thickness_mm !== undefined
+                && injectorData.film_thickness_mm !== null) {
+            injectorRows.push([T('app.rep.filmThickness', 'Film Thickness'),
+                               fmt(injectorData.film_thickness_mm, 4), 'mm']);
+        }
+        if (injectorData.slot_velocity !== undefined
+                && injectorData.slot_velocity !== null) {
+            injectorRows.push([T('app.rep.slotVelocity',
+                                 'Tangential Slot Velocity'),
+                               fmt(injectorData.slot_velocity, 1), 'm/s']);
+        }
+        if (injectorData.atomizer_constant_K !== undefined
+                && injectorData.atomizer_constant_K !== null) {
+            injectorRows.push([T('app.rep.atomizerK',
+                                 'Atomizer Constant K'),
+                               fmt(injectorData.atomizer_constant_K, 4), '-']);
+        }
+        if (injectorData.air_core_ratio_X !== undefined
+                && injectorData.air_core_ratio_X !== null) {
+            injectorRows.push([T('app.rep.airCoreX', 'Air Core Ratio X'),
+                               fmt(injectorData.air_core_ratio_X, 4), '-']);
+        }
+        if (injectorData.swirl_chamber_d_source) {
+            injectorRows.push([T('app.rep.swirlChamberSource',
+                                 'Swirl Chamber Diameter Source'),
+                               String(injectorData.swirl_chamber_d_source), '-']);
+        }
     }
     
     // Add common parameters
@@ -2500,7 +4148,7 @@ function displayInjectorTable(injectorData) {
     // Add injector diameter if available
     if (injectorData.injector_diameter) {
         injectorRows.push([T('app.rep.maxInjectorDia', 'Max Injector Diameter'),
-                           injectorData.injector_diameter.toFixed(1), 'mm']);
+                           numTxt(injectorData.injector_diameter, 1), 'mm']);
     }
 
     injectorRows.push([T('app.rep.weber', 'Weber Number'), fmt(injectorData.weber_number, 0)]);
@@ -2515,6 +4163,12 @@ function displayInjectorTable(injectorData) {
     if (injectorData.pressure_drop_source) {
         injectorRows.push([T('app.rep.dpBasis', 'Pressure Drop Basis'),
                            injectorData.pressure_drop_source, '-']);
+    }
+    // P11B2-23: uç boşaltma katsayısının DAYANAĞINI da yayımlıyor
+    // (`discharge_coefficient_basis`); tabloda okunmuyordu.
+    if (injectorData.discharge_coefficient_basis) {
+        injectorRows.push([T('app.rep.cdBasis', 'Discharge Coefficient Basis'),
+                           String(injectorData.discharge_coefficient_basis), '-']);
     }
     
     injectorTableBody.innerHTML = '';

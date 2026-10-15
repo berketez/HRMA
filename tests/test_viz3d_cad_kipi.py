@@ -246,8 +246,21 @@ class TestEnjektorDeseni:
         src = _source()
         assert len(re.findall(r'\bimpingementApexZ\(', src)) >= 2
         assert 'injPattern' in src
-        # Swirl açı gösterimi gerçek açı değerini yazar
-        assert 'sprey açısı' in src
+        # ÖH D24/a3 — BEKÇİ ÇEVRİLDİ (P11B1-07). Eski şart ham Türkçe
+        # dizeyi ('sprey açısı') dosyaya KİLİTLİYORDU; sahnenin kendi
+        # sözleşmesi ise "anahtar sözlükte yoksa İNGİLİZCE tam metin
+        # döner" diyor ve en-US oturumda tek çip yığınında iki dil
+        # okunuyordu. Korunan şey aynı: çip gerçek açı değerini yazar.
+        assert "T('viz3d.chip.sprayAngle'" in src
+        # ÖH V3 taban-v (14 Eki 2026) — BEKÇİ ÇEVRİLDİ (dört koşul).
+        # Eski desen ``(2 * swHalf).toFixed(0)`` idi; ÖH D35 sayi-bicimi
+        # (OH-GT-25, commit 8f9313ca) ekran sayılarını ``numTxt`` →
+        # ``I18N.number`` kanonuna bağladı ("basamak sayısı DEĞİŞMEZ, yalnız
+        # ayraç yerelleşir"). Korunan iddia aynı: çip gerçek tam açıyı
+        # (2 × yarım açı) 0 basamakla, artık oturumun ondalık kanonundan
+        # yazar. Ham ``.toFixed(`` geri gelirse kırmızı.
+        assert re.search(r"numTxt\(\(2 \* swHalf\), 0\)", src)
+        assert not re.search(r"\(2 \* swHalf\)\.toFixed\(", src)
         # Desen bloğu yalnız veri varken çalışır
         assert re.search(r'if \(pat && pat\.patternType', src)
 
@@ -524,5 +537,37 @@ class TestKablolama:
         src = _source()
         assert '_buildToolbar' in src
         assert re.search(r"mkBtn\('CAD'", src)
-        for label in ('ÖN', 'ÜST', 'YAN', 'İZO'):
-            assert label in src, 'ortografik görünüş butonu eksik: %s' % label
+        # ÖH D24/a3 — BEKÇİ ÇEVRİLDİ (P11B1-07). Eski şart dört düğme
+        # etiketini ham Türkçe olarak motor_viz3d.js'e kilitliyordu.
+        # Dört düğme hâlâ zorunlu; etiketleri artık oturum dilinden gelir
+        # ve Türkçe karşılıkları sözlükte durur.
+        for anahtar in ('viz3d.cad.front', 'viz3d.cad.top',
+                        'viz3d.cad.side', 'viz3d.cad.iso'):
+            assert "'%s'" % anahtar in src, (
+                'ortografik görünüş butonu eksik: %s' % anahtar)
+        assert "T('viz3d.cad.orthoTip'" in src
+        import io as _io
+        import os as _os
+        _sozluk = _io.open(_os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+            'hrma', 'static', 'js', 'i18n_common.js'), encoding='utf-8').read()
+        # ÖH D34 / OH-GT-04 — BEKÇİ ÇEVRİLDİ.
+        # Eski şart dört Türkçe karşılığı dizesiyle kilitliyordu;
+        # aralarında 'İZO' da vardı. Ölçüldü (once.json OH_GT_04): aynı
+        # kamera kipi sıvı sayfasında 'İzometrik', hibritte 'İZO'
+        # görünüyordu — yani bu bekçi tutarsızlığın YARISINI koruyordu.
+        # Geçerli şart değişmedi: dört anahtarın da Türkçe karşılığı
+        # olmalı ve İngilizcesinden farklı olmalı. Tek Türkçe karşılık
+        # şartı tests/test_d34_metin_i18n_a1.py'de ölçülür.
+        import re as _re
+        for _anahtar, _en in (('viz3d.cad.front', 'FRONT'),
+                              ('viz3d.cad.top', 'TOP'),
+                              ('viz3d.cad.side', 'SIDE'),
+                              ('viz3d.cad.iso', 'ISO')):
+            _degerler = _re.findall(
+                r"'%s':\s*'([^']*)'" % _re.escape(_anahtar), _sozluk)
+            assert len(_degerler) == 2, (_anahtar, _degerler)
+            assert _en in _degerler, (_anahtar, _degerler)
+            _tr = [d for d in _degerler if d != _en]
+            assert _tr and _tr[0].strip(), (
+                '%s Türkçe karşılığı yok: %s' % (_anahtar, _degerler))

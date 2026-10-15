@@ -117,13 +117,16 @@ def cizim(kimlik: str, **degisiklikler) -> Dict[str, Any]:
     return temel
 
 
-#: Hibrit sayfasının ÇERÇEVE ölçümü (canlı tur): altı satır, biri canlı.
-#: 'blocked' satır katı tanesinin düzlemsel FEA'sıdır (hibrit motora
-#: uygulanmaz), 'absent' satırlar henüz Merkez'e taşınmamış analizlerdir.
+#: Hibrit sayfasının ÇERÇEVE ölçümü — 19 Ağu 2026 CANLI TURDAN tazelendi
+#: (tur_p40 raporu; eski fixture parti 34 öncesinin bayat hâliydi ve
+#: yapısal satırı 'absent' kaydediyordu). Yedi satır, DÖRDÜ ready
+#: (yapısal + CFD + akustik modlar + yanma kararlılığı — parti 34 FEA
+#: göçü ve F2c'nin gerçeği); 'blocked' katı tanesinin düzlemsel FEA'sı
+#: (hibrit motora uygulanmaz), 'absent' satırlar henüz Merkez'e
+#: taşınmamış analizlerdir (termal kiracının NEDEN taşınamadığı
+#: TestTermalTasinmadi bekçisinde).
 HIBRIT_SATIRLARI = (
-    ('chamber_nozzle_wall.structural', 'absent',
-     'This analysis has not been moved into the Analysis Center yet; it '
-     'still runs in its own panel.'),
+    ('chamber_nozzle_wall.structural', 'ready', ''),
     ('chamber_nozzle_wall.thermal', 'absent',
      'This analysis has not been moved into the Analysis Center yet; it '
      'still runs in its own panel.'),
@@ -133,9 +136,8 @@ HIBRIT_SATIRLARI = (
     ('feed_structure.module_cards', 'absent',
      'This analysis has not been moved into the Analysis Center yet; it '
      'still runs in its own panel.'),
-    ('chamber_acoustics.acoustic_modes', 'absent',
-     'This analysis has not been moved into the Analysis Center yet; it '
-     'still runs in its own panel.'),
+    ('chamber_acoustics.acoustic_modes', 'ready', ''),
+    ('chamber_acoustics.combustion_stability', 'ready', ''),
 )
 
 
@@ -167,6 +169,10 @@ def cfd_olcumu(**degisiklikler) -> Dict[str, Any]:
               'threshold', 'ok'),
         rozet('ITERATION BUDGET ADVISORY — measured runs near contraction '
               'ratio 13.72 spend most of the budget', 'warn'),
+        # ÖH D21 / P17B1-14 — fixture 9 rozette KİLİTLİYDİ, ürün 10 basıyor.
+        # 4 Eylül 2026 canlı turunda (sistem Chrome 152) üç sayfanın üçünde
+        # de bu rozet ekrandaydı; sırası ve rengi ('dim') ÖLÇÜLDÜ.
+        rozet('INVISCID (Euler) — no wall shear, no wall heat flux', 'dim'),
         rozet('MASS IMBALANCE 9.37e-10 (relative)'),
         rozet('ENERGY IMBALANCE 8.42e-10 (relative)'),
         rozet('KERNEL numba'),
@@ -193,7 +199,14 @@ def cfd_olcumu(**degisiklikler) -> Dict[str, Any]:
                 'budget_advisory_reasons': ['measured_slow_band'],
                 'contraction_ratio': 13.721770926966528,
                 'alan_bloklu': True, 'kalinti_noktalari': 400,
-                'resolution': 'coarse'},
+                'resolution': 'coarse',
+                # ÖH D26 / P17B1-14 (Fable ŞARTI) — koşum VİSKOZSUZ. Fixture
+                # bu alanı taşımadığı sürece koşullu viskoz çifti hiç
+                # sınanmıyordu: `viscous_enabled` None kaldığı için denetim
+                # hüküm vermiyor, INVISCID rozeti de koşulsuz bekleniyordu.
+                # Ölçülen canlı tur (4 Eylül 2026) viskozsuz koştu.
+                'viscous_enabled': False,
+                'viscous_turbulence': None, 'viscous_wall_thermal': None},
         'cizimler': [cizim('cfd_wall_1'),
                      cizim('cfd_field_1', svg_sayisi=13, yukseklik=320),
                      cizim('cfd_res_1', svg_sayisi=13, yukseklik=260)],
@@ -215,6 +228,9 @@ def cfd_olcumu_sivi(**degisiklikler) -> Dict[str, Any]:
         rozet('CONVERGED — 2915 iterations', 'ok'),
         rozet('FLOW SEPARATION PREDICTED — 29.1% of the divergent length '
               '(0.100401 m, 17 stations below the threshold)', 'warn'),
+        # ÖH D21 / P17B1-14 — sıvıda da ölçüldü (4 Eylül 2026): bütçe uyarısı
+        # ateşlemediği için toplam 9 rozet, ama kapsam beyanı BU dalda da var.
+        rozet('INVISCID (Euler) — no wall shear, no wall heat flux', 'dim'),
         rozet('MASS IMBALANCE 6.89e-11 (relative)'),
         rozet('ENERGY IMBALANCE 8.83e-11 (relative)'),
         rozet('KERNEL numba'),
@@ -234,10 +250,98 @@ def cfd_olcumu_sivi(**degisiklikler) -> Dict[str, Any]:
              'budget_advisory_reasons': [],
              'contraction_ratio': 3.924721598332682,
              'alan_bloklu': True, 'kalinti_noktalari': 400,
-             'resolution': 'coarse'},
+             'resolution': 'coarse',
+             # ÖH D26 / P17B1-14 — sıvı dalı da VİSKOZSUZ koştu (aynı canlı
+             # tur); ekranındaki INVISCID rozeti bu alanın karşılığıdır.
+             'viscous_enabled': False,
+             'viscous_turbulence': None, 'viscous_wall_thermal': None},
         rozetler=rozetler, rozet_sayisi=len(rozetler),
         durum_metni='Completed in 1.7 s.',
         metin=' '.join(r['metin'] for r in rozetler))
+    temel.update(degisiklikler)
+    return temel
+
+
+#: ÖH D23 / altyapi — defter P10B3-03 + P17B1-15.
+#: CANLI ölçüm (4 Eylül 2026, sistem Chrome, /hybrid; kayıt
+#: ``docs/scofield/raw/OH/D22/altyapi/a1/canli_kiraci_olcumu.json``).
+#: Rozet metinleri, çizim kimlikleri ve yük alanları o ölçümden alındı.
+def akustik_olcumu(**degisiklikler) -> Dict[str, Any]:
+    rozetler = [
+        rozet('NOZZLE DAMPING alpha_N = -86.549 1/s', 'info'),
+        rozet('TOTAL MODELLED LOSS 86.549 1/s', 'info'),
+        rozet('NO STABILITY VERDICT ON THIS PATH — damping/threshold only',
+              'dim'),
+    ]
+    temel = {
+        'ad': 'acoustic_modes',
+        'satir_anahtari': 'chamber_acoustics.acoustic_modes',
+        'satir_secicisi': '#ac_row_chamber_acoustics_acoustic_modes',
+        'satir_durumu': 'ready', 'satir_nedeni': '',
+        'kok_var': True, 'kok_gorunur': True,
+        'basladi': True, 'asama': 'tamam', 'kosum_s': 0.42,
+        'gecmis_esigi': 0, 'gecmis_uzunlugu': 1,
+        'zaman_asimi_ms': esikler.MERKEZ_KOSUM_ZAMAN_ASIMI_MS,
+        # Canlı ölçümde bu yol HÜKÜM YAYIMLAMAZ (verdict yok) — rozetteki
+        # "NO STABILITY VERDICT" cümlesinin kod karşılığı budur.
+        'son_kosum': {'ok': True, 'seconds': 0.4,
+                      'satir': 'chamber_acoustics.acoustic_modes',
+                      'hata': None, 'hukum_anahtari': None,
+                      'hukum_sinifi': None},
+        'yuk': {'status': 'ok', 'mode': 'damping',
+                'nozul_sonumu_1_s': -86.549, 'nozul_dayanagi': 'quasi_steady',
+                'toplam_kayip_1_s': 86.549, 'toplam_sonum_1_s': -86.549,
+                'butce_terim_sayisi': 1, 'modellenmeyen_sayisi': 1,
+                'yanlilik_dayanagi': 'loss_terms_not_modelled'},
+        'cizimler': [cizim('stab_map_1', svg_sayisi=12),
+                     cizim('stab_bars_1', svg_sayisi=12, yukseklik=320)],
+        'cizim_sayisi': 2,
+        'rozetler': rozetler,
+        'rozet_sayisi': len(rozetler),
+        'durum_metni': 'Completed in 0.4 s.',
+        'metin': ' '.join(r['metin'] for r in rozetler),
+    }
+    temel.update(degisiklikler)
+    return temel
+
+
+def chug_olcumu(**degisiklikler) -> Dict[str, Any]:
+    rozetler = [
+        # Hüküm rozeti ölçümde VAR ama beklenen imza listesinde YOK: rengi
+        # ve metni fiziktir (bkz. esikler.ROZET_IMZALARI notu).
+        rozet('STABLE — feed-coupled chug (modeled mechanism only), '
+              'inertance-free feed line', 'ok'),
+        rozet('NO NEUTRAL POINT AT THIS J (gain 1/(2J) <= 1)', 'info'),
+        rozet('INERTANCE-FREE FEED LINE', 'info'),
+    ]
+    temel = {
+        'ad': 'combustion_stability',
+        'satir_anahtari': 'chamber_acoustics.combustion_stability',
+        'satir_secicisi': '#ac_row_chamber_acoustics_combustion_stability',
+        'satir_durumu': 'ready', 'satir_nedeni': '',
+        'kok_var': True, 'kok_gorunur': True,
+        'basladi': True, 'asama': 'tamam', 'kosum_s': 0.38,
+        'gecmis_esigi': 1, 'gecmis_uzunlugu': 2,
+        'zaman_asimi_ms': esikler.MERKEZ_KOSUM_ZAMAN_ASIMI_MS,
+        'son_kosum': {'ok': True, 'seconds': 0.4,
+                      'satir': 'chamber_acoustics.combustion_stability',
+                      'hata': None,
+                      'hukum_anahtari': 'panel.stab.verdictScoped',
+                      'hukum_sinifi': 'ok'},
+        'yuk': {'status': 'ok', 'mode': 'chug', 'model': 'lumped_chug',
+                'verdict': 'stable', 'inertance_included': False,
+                'unconditionally_stable': True, 'dp_ratio_j': 1.51867,
+                'tau_over_tau_c': 0.906399, 'growth_rate_1_s': -12.4,
+                'varsayim_sayisi': 5, 'modellenmeyen_sayisi': 1,
+                'notr_egri_var': True, 'kok_egrisi_var': True},
+        'cizimler': [cizim('stab_neutral_2', svg_sayisi=12),
+                     cizim('stab_locus_2', svg_sayisi=12, yukseklik=320)],
+        'cizim_sayisi': 2,
+        'rozetler': rozetler,
+        'rozet_sayisi': len(rozetler),
+        'durum_metni': 'Completed in 0.4 s.',
+        'metin': ' '.join(r['metin'] for r in rozetler),
+    }
     temel.update(degisiklikler)
     return temel
 
@@ -249,8 +353,26 @@ def merkez_olcumu(cerceve=None, kiraci=None) -> Dict[str, Any]:
     ölçen testler Merkez yüzünden kırmızıya düşmesin diye sağlıklı bir
     Merkez ölçümüyle koşarlar.
     """
+    # ÖH D23 / P10B3-03: /hybrid'de artık üç kiracı koşuyor. Sözlükte fazla
+    # kiracı bulunması solid/liquid raporlarını etkilemez — rapor YALNIZ
+    # sayfanın kendi tanımındaki kiracılar için denetim üretir.
     return {'cerceve': cerceve if cerceve is not None else cerceve_olcumu(),
-            'kiracilar': {'cfd': kiraci if kiraci is not None else cfd_olcumu()}}
+            'kiracilar': {'cfd': kiraci if kiraci is not None else cfd_olcumu(),
+                          'acoustic_modes': akustik_olcumu(),
+                          'combustion_stability': chug_olcumu()}}
+
+
+def yerlesim_olcumu(**degisiklikler) -> Dict[str, Any]:
+    """Sağlıklı yerleşim ölçümü (ÖH Faz 0 — taşma yok, örtüşme yok).
+
+    ``test_browser_harness_fea.py`` de bunu içe aktarır: FEA/Merkez'i
+    ölçen rapor testleri yerleşim yüzünden kırmızıya düşmesin.
+    """
+    temel = {'yatay_tasma_px': 0, 'belge_genisligi': 1600,
+             'pencere_genisligi': 1600, 'yaprak_sayisi': 412,
+             'kirpildi': False, 'ortusmeler': []}
+    temel.update(degisiklikler)
+    return temel
 
 
 # ---------------------------------------------------------------------------
@@ -261,10 +383,43 @@ class TestTanimlar:
     """Kimlikler/seçiciler üründe gerçekten var mı? (tarayıcısız)"""
 
     def test_uc_sayfada_da_merkez_ve_cfd_kiracisi(self):
+        """ÖH D23 / P10B3-03 — BEKÇİ ÇEVRİLDİ (kusuru koruyordu).
+
+        Eski hâli ``== ['cfd']`` diyordu: üç sayfanın da TEK kiracı
+        koşturması sözleşmenin kendisi sayılıyordu. Oysa ölçüm (a2/once.json)
+        Merkez'de canlı READY dört kiracı buldu ve turun yalnız birini
+        koşturduğunu gösterdi — yani bu eşitlik, kapsam boşluğunu KİLİTLEYEN
+        bir bekçiydi. Yeni hâli iki şeyi ayrı ayrı sorar: CFD her sayfada
+        koşuyor mu, ve ÖLÇÜLMÜŞ kiracılar tanıma girmiş mi.
+        """
         for ad in ('hybrid', 'solid', 'liquid'):
             sayfa = sayfalar.SAYFALAR[ad]
             assert sayfa.merkez_var is True, ad
-            assert [k.ad for k in sayfa.merkez_kiracilari] == ['cfd'], ad
+            assert 'cfd' in [k.ad for k in sayfa.merkez_kiracilari], ad
+
+    def test_hybridde_olculmus_kararlilik_kiracilari_kosuyor(self):
+        """Canlı ölçülen iki kararlılık kiracısı tanıma girdi mi?
+
+        ÖLÇÜLDÜ (4 Eylül 2026, /hybrid): ``chamber_acoustics.acoustic_modes``
+        ve ``chamber_acoustics.combustion_stability`` READY ve koşturulabilir.
+        """
+        adlar = [k.ad for k in sayfalar.SAYFALAR['hybrid'].merkez_kiracilari]
+        assert 'acoustic_modes' in adlar
+        assert 'combustion_stability' in adlar
+
+    def test_olculmemis_kiraci_tanima_KAÇAK_girmemis(self):
+        """FAIL-CLOSED: ölçülmemiş kiracıya tarif yazılmaz.
+
+        ``chamber_nozzle_wall.structural`` canlı sondada READY görüldü ama
+        KOŞTURULMADI; sözleşmesi yazılmadığı için tanıma da girmemelidir.
+        Girerse tur, ölçülmemiş bir kiracıyı tahmine dayalı bir tarifle
+        koşturuyor demektir.
+        """
+        anahtarlar = {k.satir_anahtari
+                      for s in sayfalar.SAYFALAR.values()
+                      for k in s.merkez_kiracilari}
+        for eksik in sayfalar.OLCULMEMIS_HAZIR_KIRACILAR:
+            assert eksik not in anahtarlar, eksik
 
     def test_merkez_uc_sayfa_sablonunda_kuruluyor(self):
         """Dosya var ama sayfada init edilmiyorsa tur boşa gezer."""
@@ -469,7 +624,7 @@ class TestCerceveDenetimi:
     def test_saglikli_cerceve_gecer(self):
         hukum = self._hukum()
         assert hukum.gecti is True
-        assert 'ready×1' in hukum.ozet
+        assert 'ready×4' in hukum.ozet
         assert 'nozzle_flow.cfd' in hukum.ozet
 
     def test_olcum_yoksa_kalir(self):
@@ -528,13 +683,20 @@ class TestCerceveDenetimi:
         assert 'ağaçta YOK' in hukum.ozet
 
     def test_beyansiz_gri_satir_kalir(self):
-        """Kural 1: gri satır GİZLENMEZ ama nedeni ADIYLA yazılır."""
+        """Kural 1: gri satır GİZLENMEZ ama nedeni ADIYLA yazılır.
+
+        Hedef satır fixture tazelemesiyle (19 Ağu) indeks 0'dan 1'e kaydı:
+        yapısal satır artık ready (nedeni olmaması doğru), gri örnek
+        termal kiracı satırıdır.
+        """
         satirlar = [dict(s) for s in cerceve_olcumu()['satirlar']]
-        satirlar[0]['neden'] = '   '
+        assert satirlar[1]['anahtar'] == 'chamber_nozzle_wall.thermal'
+        assert satirlar[1]['durum'] == 'absent'
+        satirlar[1]['neden'] = '   '
         hukum = self._hukum(cerceve_olcumu(satirlar=satirlar))
         assert hukum.gecti is False
         assert 'nedeni yazılmamış' in hukum.ozet
-        assert 'chamber_nozzle_wall.structural' in hukum.ozet
+        assert 'chamber_nozzle_wall.thermal' in hukum.ozet
 
     def test_beyansiz_ret_emniyet_agi_ekrandaysa_kalir(self):
         """Çerçevenin kendi "nedenini adlandırmadı" cümlesi görünmemeli."""
@@ -926,33 +1088,66 @@ class TestAkisaBaglanma:
             piksel={'dolu_oran': 0.41, 'icerik_entropi_bit': 3.42,
                     'parlak_oran': 0.01},
             metin='Chamber Pressure 20.0 bar', plume_baslatma='ui',
-            goruntuler={'tam_sayfa': None, 'uc_boyut': None},
-            fea=fea, merkez=merkez)
+            # ÖH D20 · P17B1-05: tam sayfa görüntüsü artık ölçülüyor.
+            goruntuler={'tam_sayfa': '/x/%s_tam.png' % sayfa_adi,
+                        'tam_sayfa_px': {'genislik': 1600,
+                                         'yukseklik': 9412},
+                        'uc_boyut': None},
+            fea=fea, merkez=merkez, yerlesim=yerlesim_olcumu())
 
     def test_merkez_dortlusu_her_sayfada_ayni_sirada(self):
         from tests.test_browser_harness_fea import (tane_olcum, termal_olcum,
                                                     yapisal_olcum)
-        beklenen = ['merkez_cerceve', 'merkez_cfd_kosum', 'merkez_cfd_cizim',
-                    'merkez_cfd_rozet']
+        # ÖH D23 / P10B3-03 — BEKÇİ ÇEVRİLDİ: "dörtlü" adı artık yalnız tek
+        # kiracılı sayfalar için doğru. /hybrid'de üç kiracı koşuyor, yani
+        # çerçeve + 3x3 = 10 denetim var; son dördü ise kiracı SIRASININ
+        # sonuncusudur. Sıra sözleşmesi korunur, sayı kiracıya göre büyür.
+        #
+        # ÖH D24 / P17B1-15 — BEKÇİ İKİNCİ KEZ ÇEVRİLDİ, bu kez ELDEN
+        # ÇIKARILARAK: canlı ölçüm /solid ve /liquid'e de kiracı ekleyince
+        # elle yazılan sözlük ÜÇÜNCÜ kez bayatlayacaktı. Beklenen son üçlü
+        # artık TANIMDAN türetiliyor (son kiracının üçlüsü) — sözleşme aynı,
+        # kaynak tek.
+        beklenen_sonlar = {
+            ad: ['merkez_%s_%s' % (sayfa.merkez_kiracilari[-1].ad, son)
+                 for son in ('kosum', 'cizim', 'rozet')]
+            for ad, sayfa in sayfalar.SAYFALAR.items()
+            if sayfa.merkez_kiracilari
+        }
         for sayfa_adi, fea in (('hybrid', {'yapisal': yapisal_olcum(),
                                            'termal': termal_olcum()}),
                                ('solid', {'tane': tane_olcum()}),
                                ('liquid', {'yapisal': yapisal_olcum()})):
             rapor = self._tam_rapor(sayfa_adi, fea, merkez_olcumu())
             adlar = [d['ad'] for d in rapor['denetimler']]
-            assert adlar[-4:] == beklenen, sayfa_adi
+            assert adlar[-3:] == beklenen_sonlar[sayfa_adi], sayfa_adi
+            assert 'merkez_cerceve' in adlar, sayfa_adi
+            assert adlar.index('merkez_cerceve') < adlar.index(
+                'merkez_cfd_kosum'), sayfa_adi
             assert rapor['gecti'] is True, sayfa_adi
 
     def test_sayfa_basina_denetim_sayisi(self):
-        """CANLI TURUN ölçtüğü sayı: 15 + 12 + 12 = 39.
+        """Sözleşmenin toplamı: 26 + 19 + 22 = 67.
 
-        Sayı bir hedef değil, sözleşmenin toplamıdır: 5 temel + FEA
-        paneli başına 3 + Merkez çerçevesi 1 + kiracı başına 3. Bir
-        denetim sessizce düşerse burada görünür.
+        Sayı bir hedef değil, sözleşmenin toplamıdır: 6 temel + 2 yerleşim
+        (ÖH Faz 0) + FEA paneli başına 4 (koşum/çizim/rozet + yük çaprazı —
+        çapraz yalnız yük yayımlanmışken üretilir; bu testin ölçümleri
+        sağlıklı olduğundan hep var) + Merkez çerçevesi 1 + kiracı başına 3.
+        Bir denetim sessizce düşerse burada görünür. (Eski sözleşme
+        15+12+12=39'du; P17 reçetesi 3 denetim ekledi; ÖH D20 · P17B1-05
+        temel diziye ``tam_sayfa_goruntusu``nu ekledi: 19+15+15=49 → 52.)
         """
         from tests.test_browser_harness_fea import (tane_olcum, termal_olcum,
                                                     yapisal_olcum)
-        beklenen = {'hybrid': 15, 'solid': 12, 'liquid': 12}
+        # ÖH D23 / P10B3-03 — BEKÇİ ÇEVRİLDİ: hibritte kiracı sayısı 1 -> 3
+        # oldu, kiracı başına 3 denetim eklendiği için 20 -> 26. Toplam
+        # 52 -> 58. Sayı yine bir hedef değil, sözleşmenin toplamıdır.
+        # ÖH D24 / P17B1-15 — YİNE ÇEVRİLDİ: canlı ölçüm (5 Eylül 2026)
+        # /solid'de acoustic_modes'u, /liquid'de acoustic_modes +
+        # combustion_stability'yi READY buldu; kiracılar tanıma eklendi.
+        # solid 16 -> 19 (1 kiracı × 3), liquid 16 -> 22 (2 kiracı × 3).
+        # Toplam 58 -> 67. Sayı yine hedef değil, sözleşmenin toplamı.
+        beklenen = {'hybrid': 26, 'solid': 19, 'liquid': 22}
         fealer = {'hybrid': {'yapisal': yapisal_olcum(),
                              'termal': termal_olcum()},
                   'solid': {'tane': tane_olcum()},
@@ -963,7 +1158,7 @@ class TestAkisaBaglanma:
                                     merkez_olcumu())
             assert len(rapor['denetimler']) == sayi, sayfa_adi
             toplam += len(rapor['denetimler'])
-        assert toplam == 39
+        assert toplam == 67
 
     def test_merkez_olcumu_kalirsa_sayfa_kalir(self):
         """Merkez denetimi ESKİ denetimlerle aynı ağırlıkta."""
@@ -974,20 +1169,35 @@ class TestAkisaBaglanma:
         kalanlar = [d['ad'] for d in rapor['denetimler'] if not d['gecti']]
         assert kalanlar == ['merkez_cfd_kosum']
 
-    def test_merkez_hic_olculmediyse_dordu_de_kalir(self):
+    def test_merkez_hic_olculmediyse_HEPSI_kalir(self):
+        """Merkez hiç ölçülmediyse çerçeve + HER kiracının üçlüsü kalır.
+
+        ÖH D24 / P17B1-15 — BEKÇİ ÇEVRİLDİ (ad dâhil): eski adı
+        ``..._dordu_de_kalir`` idi ve /liquid tek kiracılıyken doğruydu.
+        Canlı ölçüm sıvıya ``acoustic_modes`` + ``combustion_stability``
+        ekleyince kalan denetim 4 -> 10 oldu. Sayı yine hedef değil,
+        tanımın türevidir; gevşeme yok — 'hiç ölçüm yoksa hiçbiri geçmez'
+        sözleşmesi AYNEN korunuyor, artık her kiracı için sınanıyor.
+        """
         from tests.test_browser_harness_fea import yapisal_olcum
         rapor = self._tam_rapor('liquid', {'yapisal': yapisal_olcum()}, {})
         kalanlar = [d['ad'] for d in rapor['denetimler'] if not d['gecti']]
-        assert kalanlar == ['merkez_cerceve', 'merkez_cfd_kosum',
-                            'merkez_cfd_cizim', 'merkez_cfd_rozet']
+        beklenen = ['merkez_cerceve']
+        for kiraci in sayfalar.SAYFALAR['liquid'].merkez_kiracilari:
+            beklenen += ['merkez_%s_%s' % (kiraci.ad, son)
+                         for son in ('kosum', 'cizim', 'rozet')]
+        assert kalanlar == beklenen
 
     def test_merkez_olcumu_rapora_yazilir(self):
         from tests.test_browser_harness_fea import tane_olcum
         rapor = self._tam_rapor('solid', {'tane': tane_olcum()},
                                 merkez_olcumu())
         merkez = rapor['olcumler']['merkez']
-        assert merkez['kiracilar']['cfd']['rozet_sayisi'] == 9
-        assert merkez['cerceve']['satir_sayisi'] == 6
+        # ÖH D21 / P17B1-14 — 9 → 10: kapsam beyanı (INVISCID) fixture'a
+        # girdi. Sayı fixture'ın uzunluğudur, ürünün değil; canlı ölçüm
+        # (4 Eylül 2026) hibrit/katıda 10, sıvıda 9 rozet gördü.
+        assert merkez['kiracilar']['cfd']['rozet_sayisi'] == 10
+        assert merkez['cerceve']['satir_sayisi'] == 7
         assert json.dumps(rapor, ensure_ascii=False)
 
     def test_yapilandirma_sozlukleri_tanimdan_uretilir(self):
@@ -1005,7 +1215,10 @@ class TestAkisaBaglanma:
             'rozet_ozniteligi': 'data-cfd-badge',
             'dugme': esikler.MERKEZ_KOSUM_DUGMESI_KIMLIGI,
             'durum': esikler.MERKEZ_DURUM_KIMLIGI,
-            'min_kenar': esikler.MERKEZ_CIZIM_MIN_KENAR_PX}
+            'min_kenar': esikler.MERKEZ_CIZIM_MIN_KENAR_PX,
+            # ÖH D23 / P10B3-03: yük sözleşmesi de tanımdan üretilir.
+            'yuk_anahtari': 'cfd',
+            'yuk_alanlari': [list(a) for a in sayfalar.CFD_KIRACISI.yuk_alanlari]}
 
     def test_esik_kunyesi_merkez_esiklerini_tasir(self):
         kunye = run_tour.esik_kunyesi()
@@ -1056,10 +1269,25 @@ class TestOlcumBetikleri:
         assert '!b.disabled' in tur.JS_MERKEZ_KOSUM_BITTI
 
     def test_kiraci_betigi_dogrudan_dayanaklari_okur(self):
-        for parca in ('AnalysisCenter', 'history()', 'son.data.cfd',
+        # ÖH D23 / P10B3-03 — BEKÇİ ÇEVRİLDİ: eski liste JS gövdesinde
+        # ``son.data.cfd`` ile CFD'nin ALAN ADLARINI arıyordu; tam da bu,
+        # okuyucunun tek kiracıya gömülü olmasını sözleşme sayan bekçiydi.
+        # Artık gövde hiçbir kiracının alan adını bilmez: yol izleyici +
+        # dönüşüm sözlüğü aranır, alan adları TANIMDAN gelir.
+        for parca in ('AnalysisCenter', 'history()', 'son.data',
                       'js-plotly-plot', "querySelectorAll('svg')",
-                      'judgment_confidence', 'budget_advisory'):
+                      'c.yuk_anahtari', 'c.yuk_alanlari',
+                      'yol_izle', 'donustur'):
             assert parca in tur.JS_MERKEZ_KIRACI, parca
+        # Yorum satırındaki tarihsel anma sayılmasın diye KOD
+        # gövdesinde aranır: yorumsuz satırlar.
+        kod = '\n'.join(ln for ln in tur.JS_MERKEZ_KIRACI.splitlines()
+                        if not ln.strip().startswith('//'))
+        assert 'son.data.cfd' not in kod
+        # Alan adları TANIMDA durmalı (tek kaynak).
+        adlar = [a[0] for a in sayfalar.CFD_KIRACISI.yuk_alanlari]
+        assert 'judgment_confidence' in adlar
+        assert 'budget_advisory' in adlar
 
     def test_kiraci_betigi_hesap_yapmaz(self):
         """Ölçüm betiği YALNIZ okur: türetilmiş sayı üretmez."""

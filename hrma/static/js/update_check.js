@@ -61,6 +61,17 @@
     // başlığıyla başlar ('# HRMA v2.6.25 — ...'; Atom yolunda '#' düşer).
     var SECTION_HEAD = /^[ \t]*#{0,3}[ \t]*HRMA[ \t]+v?\d/i;
     var TR_LETTERS = /[çğıİöşüÇĞÖŞÜ]/g;
+    /* ÖH D22 / P12aB5-14 — İMSİZ GÖVDEDE SIRA KURALI (yedek ayraç).
+       Türkçe harf sezgisi mutlak eşikli: Türkçe bölüm hiç Türkçe harf
+       taşımazsa (ölçüldü: "Kod duzeltildi." gibi imsiz bir gövde) İKİ blok
+       da 'en' sınıflanıyor, iki dil bulunamıyor ve Türkçe kullanıcıya
+       İNGİLİZCE bölüm de dâhil bütün gövde basılıyordu. Yayın sözleşmesi
+       sırayı sabitler: notlar ÖNCE İngilizce, SONRA Türkçe yazılır — imli
+       her sürüm dosyasında ölçüldü (2.6.25 / 2.6.26 / 2.6.27) ve yayın
+       kapısı imleri zorunlu kılar (tests/test_v262_release_gate.py::
+       test_release_notes_are_bilingual_with_markers). Bu yüzden sezgi
+       ayıramadığında sıra kuralı uygulanır; kural TEK yerde yazılıdır. */
+    var SECTION_ORDER = ['en', 'tr'];
 
     function activeLang() {
         return (window.I18N && window.I18N.lang) ? window.I18N.lang : 'en';
@@ -113,7 +124,17 @@
             bolumler[dil] = bolumler[dil]
                 ? bolumler[dil] + '\n' + bloklar[j] : bloklar[j];
         }
-        return (bolumler.tr && bolumler.en) ? bolumler : null;
+        if (bolumler.tr && bolumler.en) return bolumler;
+        /* Sezgi ayıramadı. Blok sayısı yayın sözleşmesindeki dil sayısıyla
+           BİREBİR eşleşiyorsa (iki blok = iki dil) sıra kuralına düşülür;
+           eşleşmiyorsa (tek blok, ya da üç ve daha fazlası) gövde gerçekten
+           iki dilli sayılmaz ve olduğu gibi gösterilir — uydurma bölme yok. */
+        if (bloklar.length !== SECTION_ORDER.length) return null;
+        var sirali = {};
+        for (var k = 0; k < SECTION_ORDER.length; k++) {
+            sirali[SECTION_ORDER[k]] = bloklar[k];
+        }
+        return sirali;
     }
 
     function pickLanguageSection(text) {
@@ -136,10 +157,86 @@
         return pickLanguageSection(info.notes);
     }
 
+    // -----------------------------------------------------------------------
+    // Sürüm bilgisinin KAYNAĞI (ÖH D27 / OH-D26-18 — OH-B3-02'nin electron payı)
+    //
+    // ÖLÇÜLDÜ (`once.json`, node ikizi, iki dil): `/api/update/check` yanıtı
+    // `source` alanını yayımlıyor ("api" | "page" | null) ama ne bu dosya ne
+    // `settings_panel.js` onu basıyordu. Sonuç: GitHub Releases API'sinden
+    // okunan sürüm ile, API'ye ULAŞILAMAYINCA devreye giren YEDEK SAYFA
+    // KAZIMASINDAN okunan sürüm ekranda BİRBİRİNİN AYNIsıydı
+    // (once.json: `ayirt_guncelleme_var = false`, `ayirt_guncel = false`).
+    // Kazıma yolu HTML okur ve API'nin verdiği güvenceyi vermez; kullanıcı
+    // "yeni sürüm var" / "güncelsiniz" cümlesinin hangi dayanakla kurulduğunu
+    // göremeden karar veriyordu.
+    //
+    // FAIL-CLOSED: satır KOŞULSUZ basılır. Alan hiç gelmediyse (eski ya da
+    // aracılı sunucu) veya adsızsa sessiz kalınmaz — "sunucu bildirmedi"
+    // denir. Tanınmayan bir kod gelirse anlamı UYDURULMAZ, kod olduğu gibi
+    // gösterilir.
+    //
+    // TEK KAYNAK: sözlük burada yaşar; ayarlar paneli ikinci bir tablo
+    // yazmaz, `window.HRMAUpdateSource` köprüsünden okur.
+    //
+    // Anahtarlar `update.*` ailesindendir. ÖH D30 · OH-D21-06 ÖLÇÜMÜ: bu
+    // ailenin sözlüğü `i18n_common.js`tir (bu dosyanın 25 anahtarının 24'ü
+    // orada; i18n_shell.js yalnız 1'ini taşıyor). Buradaki eski satır
+    // "sözlükte i18n_shell.js'te dururlar" diyordu — ölçümle yanlışlandı.
+    // Sözlük artık `sozlukHazir` ile TALEP ÜZERİNE yüklenir.
+    // -----------------------------------------------------------------------
+    var SOURCE_TEXTS = {
+        api: ['update.sourceApi',
+              'Version data was read from the GitHub Releases API.'],
+        page: ['update.sourcePage',
+               'The Releases API could not be reached, so version data was '
+               + 'read from the releases page instead (fallback path).']
+    };
+
+    /* Yanıttan kaynak beyanını çıkarır: {key, params, fallback}.
+       Dizge DEĞİL anahtar döner, çünkü ayarlar paneli düğüme `data-i18n`
+       koyup dil değişiminde tazeliyor (i18n.js sözleşmesi). */
+    function sourceNote(info) {
+        if (!info || !Object.prototype.hasOwnProperty.call(info, 'source')) {
+            return { key: 'update.sourceMissing', params: null,
+                     fallback: 'The server did not report where this version '
+                               + 'information came from.' };
+        }
+        var kod = info.source;
+        if (kod === null || kod === undefined || kod === '') {
+            return { key: 'update.sourceNone', params: null,
+                     fallback: 'The server reported no source for this '
+                               + 'version information.' };
+        }
+        if (Object.prototype.hasOwnProperty.call(SOURCE_TEXTS, kod)) {
+            return { key: SOURCE_TEXTS[kod][0], params: null,
+                     fallback: SOURCE_TEXTS[kod][1] };
+        }
+        return { key: 'update.sourceOther', params: { code: String(kod) },
+                 fallback: 'Version information source reported by the '
+                           + 'server: {code} (unknown to this version).' };
+    }
+
+    /* Ayarlar paneli köprüsü (settings_panel.js) — sözlüğün TEK kopyası. */
+    window.HRMAUpdateSource = sourceNote;
+
     function el(tag, style, html) {
         var node = document.createElement(tag);
         if (style) node.style.cssText = style;
         if (html !== undefined) node.innerHTML = html;
+        return node;
+    }
+
+    /* Kaynak beyanını i18n sözleşmesine uygun tek satır olarak basar. */
+    function sourceRow(info, style) {
+        var not = sourceNote(info);
+        var node = el('div', style);
+        node.setAttribute('data-i18n', not.key);
+        if (not.params) {
+            node.setAttribute('data-i18n-params', JSON.stringify(not.params));
+            node.textContent = TF(not.key, not.params, not.fallback);
+        } else {
+            node.textContent = T(not.key, not.fallback);
+        }
         return node;
     }
 
@@ -170,6 +267,11 @@
                  current: escapeHtml(info.current) },
                'HRMA {latest} has been released (installed version: {current}). '
                + 'Would you like to update now?')));
+
+        // Sürüm iddiasının DAYANAĞI — koşulsuz (ÖH D27 / OH-D26-18).
+        box.appendChild(sourceRow(info,
+            'font-size:12px;line-height:1.5;margin:-8px 0 14px;' +
+            'color:var(--hd-ink-dim, #7d97a5);'));
 
         var notesText = notesForActiveLang(info);
         if (notesText) {
@@ -211,7 +313,7 @@
             'border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));',
             T('update.btnLater', 'Later'));
         var skipBtn = el('button', btnBase +
-            'background:transparent;color:var(--hd-ink-faint, #46606d);border:none;' +
+            'background:transparent;color:var(--hd-ink-faint, #6a8491);border:none;' +
             'flex:0 1 auto;min-width:0;',
             T('update.btnSkip', 'Skip this version'));
 
@@ -235,7 +337,7 @@
         var manualRow = el('div',
             'margin-top:12px;font-size:12px;color:var(--hd-ink-dim, #7d97a5);');
         var manualLink = el('a',
-            'color:var(--hd-cyan-soft, #6fd3e6);cursor:pointer;text-decoration:underline;',
+            'color:var(--hd-cyan-soft, #3af2ff);cursor:pointer;text-decoration:underline;',
             T('update.browserLink', 'download it in your browser'));
         manualRow.appendChild(document.createTextNode(
             T('update.slowPrefix', 'Slow or stuck? You can also ')));
@@ -346,6 +448,14 @@
         var lastPct = -1;
         var stallStrikes = 0;
         var idleStrikes = 0;
+        // ÖH D17 / P12aB5-02: /api/update/status ulaşılamadığında (sunucu
+        // kendini kapattı, ağ koptu) yoklama SONSUZA DEK sessizce sürüyordu —
+        // ölçümde 200 çağrıda durmadı, ekranda "Downloading…" donuk kaldı ve
+        // kullanıcı elle indirebileceğini hiç öğrenmedi. `idle` dalındaki
+        // sayacın (idleStrikes > 5) hata dalında karşılığı yoktu. Artık var:
+        // aynı eşik, aynı bildirim, aynı "tarayıcıdan indir" vurgusu.
+        var errorStrikes = 0;
+        var ERROR_LIMIT = 5;
 
         function highlightManual() {
             manualRow.style.color = 'var(--hd-ink-strong, #eaf7fb)';
@@ -362,7 +472,18 @@
                         // Takılma algılama: pct artmıyorsa say, eşiği geçince uyar
                         if (st.pct <= lastPct) {
                             stallStrikes += 1;
-                            if (stallStrikes === STALL_LIMIT) {
+                            // ÖH D18 / P12aB5-03: eşik KATI EŞİTLİKLE (===)
+                            // sınanıyordu; sayaç eşiği geçtiği anda `else`
+                            // dalına düşülüyor ve yönlendirme cümlesi düz
+                            // ilerleme metniyle EZİLİYORDU. Ölçüldü: 200
+                            // yoklamalık takılmada uyarı 1 adım (0,7 sn)
+                            // ekranda kaldı, sonra kayboldu — takılmış
+                            // indirmeden çıkış yolu fiilen görünmez oluyordu.
+                            // Eşik artık ULAŞILDIĞINDA VE SONRASINDA geçerli:
+                            // takılma sürdükçe cümle ekranda durur, ilerleme
+                            // yeniden başladığında (aşağıdaki `else`) sayaç
+                            // sıfırlanıp düz metne dönülür.
+                            if (stallStrikes >= STALL_LIMIT) {
                                 highlightManual();
                                 progressText.innerHTML = TF('update.slowProgress',
                                     { pct: st.pct },
@@ -404,7 +525,20 @@
                         setTimeout(pollStatus, POLL_MS);
                     }
                 })
-                .catch(function () { setTimeout(pollStatus, POLL_MS * 2); });
+                .catch(function () {
+                    // Sonlu deneme + adlı bildirim (ÖH D17 / P12aB5-02).
+                    errorStrikes += 1;
+                    if (errorStrikes > ERROR_LIMIT) {
+                        highlightManual();
+                        progressText.innerHTML = T('update.statusUnreachable',
+                            'Update status could not be read — the download may not '
+                            + 'have finished. Use the browser link below instead.');
+                        updateBtn.disabled = false;
+                        updateBtn.style.opacity = '1';
+                        return;
+                    }
+                    setTimeout(pollStatus, POLL_MS * 2);
+                });
         }
     }
 
@@ -413,7 +547,10 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    function toast(msg, actionLabel) {
+    /* `kaynakBilgisi` verilirse iddianın DAYANAĞI ikinci satıra basılır
+       (ÖH D27 / OH-D26-18). "Güncelsiniz" de bir iddiadır: yedek sayfa
+       kazımasından okunmuşsa kullanıcı bunu bilmelidir. */
+    function toast(msg, actionLabel, kaynakBilgisi) {
         var old = document.getElementById('hrma-update-toast');
         if (old) old.remove();
         var t = el('div',
@@ -427,6 +564,12 @@
             'box-shadow:var(--hd-shadow, 0 14px 44px rgba(0,0,0,0.42));');
         t.id = 'hrma-update-toast';
         t.textContent = msg;
+        if (kaynakBilgisi !== undefined) {
+            t.style.cssText += 'max-width:420px;text-align:center;line-height:1.5;';
+            t.appendChild(sourceRow(kaynakBilgisi,
+                'margin-top:6px;font-size:12px;font-weight:400;' +
+                'color:var(--hd-ink-dim, #7d97a5);'));
+        }
         // Hata durumunda çıkış yolu: tek tıkla sürümler sayfası (elle indirme)
         if (actionLabel) {
             t.style.cssText += 'max-width:420px;text-align:center;line-height:1.5;';
@@ -452,9 +595,80 @@
         setTimeout(function () { t.remove(); }, actionLabel ? 12000 : 4200);
     }
 
+    /* ÖH D30 · OH-D21-06 — SÖZLÜK TALEP ÜZERİNE YÜKLENİR.
+       ÖLÇÜLDÜ (a2/once.json: OHD2106_i18n_common_bayt = 505.460;
+       OHD2106_launch_site_i18n_common_etiketi = 1): bu pencerenin 25
+       anahtarının 24'ü `i18n_common.js` sözlüğünde yaşıyor (ölçüldü;
+       bu dosyanın kendi yorumu "anahtarlar i18n_shell.js'te" diyordu —
+       YANLIŞ: i18n_shell 25 anahtarın yalnız 1'ini taşıyor, o yorum da
+       bu onarımla düzeltildi). launch_site.html bu yüzden 505 KB'lık
+       sözlüğü SAYFA AÇILIŞINDA, yalnız güncelleme penceresi ihtimali
+       için indiriyordu; pencere ise oturumların çoğunda hiç açılmıyor.
+
+       Desen `analysis_dock.js:42 ensureCommonDictionary`ten alındı, tek
+       farkla: orada IIFE (açılışta), burada METİN BASILMADAN ÖNCE ve
+       geri çağrımla — yani ağ yükü pencere/toast gerçekten çizilecekse
+       doğuyor. Sözlük gelmezse (onerror) metinler İngilizce yedeğe
+       düşer ve pencere yine açılır: T(key, fallback) ürünün zaten
+       beyan ettiği sözleşmedir, uydurma çeviri üretilmez. */
+    /* ÖH D33-2 · OH-UC-13 — ETİKETİN VARLIĞI SÖZLÜĞÜN HAZIR OLDUĞU DEĞİLDİR.
+       ÖLÇÜLDÜ (docs/scofield/raw/OH/D33-2/altyapi/a1/ara_surucu_onarildi.json,
+       `lazy` kipi = launch_site/liquid/solid): `force` akışında bu işlev İKİ
+       kez çağrılır — önce ısıtma için (checkNow'ın ilk satırı), sonra pencere
+       çizilmeden hemen önce. Birinci çağrı etiketi head'e koyuyordu; ikinci
+       çağrı "etiket var" diye ERKEN DÖNÜP pencereyi sözlük daha İNMEDEN
+       çizdiriyordu (fetch'in `then` zinciri mikro görev, betik yüklemesi
+       makro görev — ikincisi her zaman sonra biter). Ölçülen sonuç: Türkçe
+       arayüzde başlık 'UPDATE AVAILABLE', soru İngilizce
+       (baslik_turkce_mi=false) — yani bu ailenin kapattığı "arayüz Türkçe,
+       pencere İngilizce" sınıfının ta kendisi geri gelmişti.
+
+       İki değişiklik:
+         (i)  Hazır olma ölçütü artık ETİKETE değil SÖZLÜĞE sorulur
+              (`I18N.has('update.available')`, bu pencerenin ilk metni) —
+              sayfa sözlüğü kendi etiketiyle getirdiyse de doğru cevap verir.
+         (ii) İnen bir istek varken gelen ikinci çağrı erken dönmez, KUYRUĞA
+              girer; kuyruk `onload`/`onerror` ile TEK seferde boşalır. Çift
+              indirme kapısı böylece etiket metnine değil duruma bağlanır
+              (D30/OH-D21-06'nın "sayfa açılışında 505 KB inmesin" kazancı
+              aynen durur: etiket hâlâ ancak metin basılacağı an doğar). */
+    var SOZLUK_ANAHTARI = 'update.available';   // bu pencerenin ilk metni
+    var SOZLUK_KUYRUK = null;                   // null = inen istek yok
+
+    function sozlukYuklu() {
+        return !!(window.I18N && typeof window.I18N.has === 'function'
+                  && window.I18N.has(SOZLUK_ANAHTARI));
+    }
+
+    function sozlukHazir(cb) {
+        if (!document || !document.head || !document.querySelector) { cb(); return; }
+        if (sozlukYuklu()) { cb(); return; }
+        if (SOZLUK_KUYRUK) { SOZLUK_KUYRUK.push(cb); return; }
+        SOZLUK_KUYRUK = [cb];
+        var tag = document.createElement('script');
+        tag.src = '/static/js/i18n_common.js';
+        tag.async = false;
+        function bitti() {
+            var kuyruk = SOZLUK_KUYRUK || [];
+            SOZLUK_KUYRUK = null;
+            for (var i = 0; i < kuyruk.length; i++) {
+                // bir geri çağrımın hatası ötekini düşürmesin
+                try { kuyruk[i](); } catch (e) { /* yut */ }
+            }
+        }
+        tag.onload = bitti;
+        tag.onerror = bitti;     // sözlük yoksa İngilizce yedekle devam
+        document.head.appendChild(tag);
+    }
+
     function checkNow(force) {
         // force=true: kullanıcı menüden istedi — atlanan sürümü de göster,
         // güncel/hata durumunda sessiz kalma (toast bildir).
+        // OH-D21-06: `force` kipinde her dal metin basar (toast ya da
+        // pencere), o yüzden sözlük ağ isteğiyle BİRLİKTE ısıtılır;
+        // sessiz açılış denetiminde (force=false) yalnız pencere dalı
+        // kendi içinde garantiler — güncel sürümde hiç yük doğmaz.
+        if (force) { sozlukHazir(function () { /* önden ısıtma */ }); }
         fetch('/api/update/check')
             .then(function (r) { return r.json(); })
             .then(function (info) {
@@ -474,7 +688,8 @@
                                 T('update.openReleases', 'Open the releases page'));
                         } else {
                             toast(TF('update.upToDate', { version: info.current },
-                                     'HRMA v{version} is up to date.'));
+                                     'HRMA v{version} is up to date.'),
+                                  null, info);
                         }
                     }
                     return;
@@ -485,7 +700,10 @@
                     if (skipped === info.latest) return;
                 }
                 if (document.getElementById('hrma-update-modal')) return;
-                buildModal(info);
+                sozlukHazir(function () {
+                    if (document.getElementById('hrma-update-modal')) return;
+                    buildModal(info);
+                });
             })
             .catch(function () {
                 if (force) {

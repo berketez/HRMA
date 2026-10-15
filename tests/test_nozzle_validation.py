@@ -222,13 +222,24 @@ class TestThermodynamicParameters:
         assert (real['performance']['characteristic_velocity'] !=
                 pytest.approx(legacy['performance']['characteristic_velocity'], rel=1e-3))
 
-    def test_flow_properties_reads_gamma(self, designer):
-        # calculate_nozzle_flow_properties artık chamber_conditions['gamma'] okur
-        res = designer.design_nozzle(0.001, EPS, PC, PE, 'bell', gamma=GAMMA)
-        fp = designer.calculate_nozzle_flow_properties(
-            res, 1.0, {'gamma': 1.2, 'gas_constant': 320,
-                       'temperature': 2800, 'pressure': 40})
-        assert fp['exit']['mach_number'] > 1.0  # supersonik çıkış
+    def test_urun_yolu_cagiranin_gammasini_okuyor(self, designer):
+        """ÖH D21 / B4-15 — ÇEVRİLEN BEKÇİ.
+
+        Eski gövde ``calculate_nozzle_flow_properties``ı çağırıyordu: ürün
+        yolunda 0 çağıranı olan, içinde 1.25/300/3000 sessiz yedeklerini
+        taşıyan ölü yöntem. Aynı iddia (gamma ÇAĞIRANDAN gelir, gömülü
+        değildir) ürünün koştuğu yolda ölçülür.
+        """
+        a = designer.design_nozzle(0.001, EPS, PC, PE, 'bell', gamma=1.2,
+                                   R_specific=320.0, T_chamber=2800.0)
+        b = designer.design_nozzle(0.001, EPS, PC, PE, 'bell', gamma=1.15,
+                                   R_specific=320.0, T_chamber=2800.0)
+        assert a['performance']['exit_mach'] > 1.0
+        assert a['performance']['exit_mach'] == pytest.approx(
+            designer.mach_from_area_ratio(EPS, 1.2), rel=1e-9)
+        # gamma gerçekten etkin: iki koşum ayrışmalı
+        assert a['performance']['exit_mach'] != pytest.approx(
+            b['performance']['exit_mach'], rel=1e-6)
 
 
 class TestApiPreservation:

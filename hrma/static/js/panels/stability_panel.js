@@ -22,9 +22,9 @@
      POST /api/analysis/combustion-stability   (ikizi: thermal-protection)
        mode='chug'    → {status:'ok', mode:'chug', assessment: assess_chug()
                          AYNEN, neutral_curve:{dp_ratio_j[],tau_over_tau_c[]},
-                         root_locus:{dp_ratio_j[],sigma_1_s[],frequency_hz[]},
-                         operating_point:{dp_ratio_j,tau_over_tau_c},
-                         skipped_points:[...]}
+                         root_locus:{dp_ratio_j[],sigma_1_s[],frequency_hz[],
+                                     skipped_points:[...]},
+                         operating_point:{dp_ratio_j,tau_over_tau_c}}
        mode='damping' → {status:'ok', mode:'damping',
                          nozzle: nozzle_damping_quasi_steady() AYNEN,
                          budget: damping_budget([lüle]) AYNEN}
@@ -132,11 +132,39 @@
     function isNum(v) {
         return typeof v === 'number' && isFinite(v);
     }
-    function fmt(v, digits) {
-        return isNum(v) ? v.toFixed(digits === undefined ? 3 : digits) : '—';
+    // ÖH D31 · OH-D30-06 — BİÇİM TEK KAYNAKTAN. Bu panel ortak `U`
+    // nesnesini yakalamıyor (kendi T/TF delegatörleri var); aynı desenle
+    // I18N.number'a devreder (import_ui.js:171, project_bar.js:810).
+    // Sözlük motoru yoksa toFixed'e düşer: sayı UYDURULMAZ, yalnız
+    // ondalık ayracı yerelleşmez.
+    function _num(v, digits) {
+        return (window.I18N && window.I18N.number)
+            ? window.I18N.number(v, digits) : v.toFixed(digits);
     }
+    function fmt(v, digits) {
+        return isNum(v) ? _num(v, digits === undefined ? 3 : digits) : '—';
+    }
+    /* ÖH D35 · OH-GT-28 — yüzde işaretinin yeri dile bağlıdır (TDK: "%12,5").
+       `_num` deseninin aynısı: karar i18n.js kanonunda, panel yalnız
+       devreder; sözlük yoksa eski (sona konan) biçime düşülür. */
+    function _pct(v, digits) {
+        return (window.I18N && window.I18N.percent)
+            ? window.I18N.percent(v, digits)
+            : (_num(v, digits) + ' %');
+    }
+    /* ÖH D35 · OH-GT-25 — ÜSSEL GÖSTERİMDE DE TEK KAYNAK.
+       ÖLÇÜLDÜ (raw/OH/D35/sayi-bicimi/a1/once.json, `davranis`): kardeş
+       `fmt` I18N.number'a bağlıyken bu yol bağlı DEĞİLDİ; Türkçe oturumda
+       aynı panelde `40,0` ile `1.96e-3` yan yana okunuyordu.
+       `toExponential` çıktısı ECMA-262 gereği HER ZAMAN noktalıdır ve
+       `SAF_ONDALIK_METIN` desenine (üs kuyruğu dâhil) uyar; `decimalText`
+       o metni YUVARLAMADAN yalnız ayraçtan geçirir — basamak sayısına
+       yine çağıran karar verir. */
     function fmtExp(v, digits) {
-        return isNum(v) ? v.toExponential(digits === undefined ? 2 : digits) : '—';
+        if (!isNum(v)) return '—';
+        var metin = v.toExponential(digits === undefined ? 2 : digits);
+        return (window.I18N && window.I18N.decimalText)
+            ? window.I18N.decimalText(metin) : metin;
     }
     //: Anlamlı basamak — Merkez'in ön dolum kuralıyla aynı kaynak.
     function sigFig(value) {
@@ -148,7 +176,16 @@
     }
     //: Alan YOKSA 'NaN' yerine em tire (cfd_panel ile aynı gerekçe).
     function sig(value) {
-        return isNum(value) ? String(sigFig(value)) : '—';
+        if (!isNum(value)) return '—';
+        /* ÖH D35 · OH-GT-25 — anlamlı-basamak yolu da kanona bağlandı.
+           `sigFig` SAYI döndürür; `String()` onu her zaman noktayla
+           basar. Panelin ekrana giden satırlarının çoğu (alpha_N, tau,
+           J, kayıp bütçesi) bu yoldan geçtiği için Türkçe ekranda
+           `80.6` okunuyordu. Yuvarlama `sigFig`te KALIR — burada
+           yalnız ayraç yerelleşir (i18n.js `decimalText` sözleşmesi). */
+        var metin = String(sigFig(value));
+        return (window.I18N && window.I18N.decimalText)
+            ? window.I18N.decimalText(metin) : metin;
     }
     //: Koşum kimliği toleransı: Merkez ön dolumu alanlara 6 anlamlı basamak
     //: yazar (analysis_dock DOCK_SIGFIG = 6); 6 basamağın en kötü yarım-ulp
@@ -298,9 +335,15 @@
                     + '.inputs.gamma' },
         ],
         nozzle_entrance_mach: [
-            // Hibrit + katı bağlaması M_N'i yayımlıyor; sıvıda kaynak yok
-            // (alan boş kalır, kullanıcı elle girebilir).
+            // Hibrit + katı bağlaması M_N'i eşik bloğunda yayımlıyor.
             { path: 'combustion_stability.acoustic_response_threshold'
+                    + '.mean_flow_mach_M_N' },
+            // ÖH defter P17B3-03 (D23): sıvı bağlaması M_N'i KENDİ akustik
+            // mod bloğunda çözüp yayımlar (aynı Culick kütle-akısı oranı).
+            // Eskiden bu alan sıvıda BOŞ kalıyor ve panel isteği fail-closed
+            // reddediyordu - hibrit/katıda tek tıkla koşan analiz sıvıda
+            // koşmuyordu.
+            { path: 'combustion_analysis.stability_analysis.acoustic_modes'
                     + '.mean_flow_mach_M_N' },
         ],
     };
@@ -435,6 +478,10 @@
     let lastSentAcoustic = null;
     //: Son öneri turlarının kaynak yolları (ekranda adlandırılır).
     let lastSuggestion = { damping: null, chug: null };
+    //: ÖH D37 A1b panel-js · OH-D32-09 — son öneri turunda okunan motor
+    //: chug döngüsü (kaynak yoluyla). τ-seçimi duyarlılığı bu bloktan
+    //: okunur; yalnız koşunun girdileri döngünün girdileriyle eşleşirse.
+    let lastChugLoop = null;
     //: Çizim kimlik sayacı (kimlik çakışmasın).
     let drawSeq = 0;
 
@@ -595,6 +642,9 @@
         //: Plotly'nin kendi varsayılan çizim genişliği — yerleşim bandı
         //: ölçüsüdür, ekrana basılan bir veri değildir.
         defaultPlotWidthPx: 700,
+        //: Marjlar yenince çizime kalan asgari genişlik; bunun altında
+        //: sarma anlamsızlaşır (her kelime ayrı satıra düşer).
+        minPlotWidthPx: 60,
         monoFamily: "'JetBrains Mono', 'SF Mono', Consolas, monospace",
     };
 
@@ -667,6 +717,70 @@
             + AXIS_METRICS.tickPadPx
             + titleLineCount * AXIS_METRICS.titleFontPx * AXIS_METRICS.lineHeight
             + AXIS_METRICS.padPx);
+    }
+
+    //: K2c — sayısal x-ekseni ALT marjı: tik etiketi satırı + tampon +
+    //: başlık satır sayısı × satır yüksekliği + tampon. yAxisLeftMarginPx'in
+    //: yatay ikizidir; oradaki tik GENİŞLİĞİ ölçülür, buradaki tik
+    //: YÜKSEKLİĞİ fontun kendi satır yüksekliğidir (tek satırlık sayı
+    //: etiketi — ölçülecek bir metin yok, metrik yeterlidir).
+    function xAxisBottomMarginPx(titleLineCount) {
+        return Math.ceil(AXIS_METRICS.tickFontPx * AXIS_METRICS.lineHeight
+            + AXIS_METRICS.tickPadPx
+            + titleLineCount * AXIS_METRICS.titleFontPx * AXIS_METRICS.lineHeight
+            + AXIS_METRICS.padPx);
+    }
+
+    //: İki eksenin marjı birbirine BAĞLIDIR: dikey başlık satırı arttıkça
+    //: sol marj büyür → çizim daralır → yatay başlık daha çok satıra
+    //: sarılır → alt marj büyür → dikey başlığa kalan yükseklik azalır.
+    //: Bu yüzden çerçeve sabit noktaya kadar yinelenir. Yineleme aşağıdan
+    //: başlar (alt marj asgari, yani dikey satır sayısı ALT sınırı) ve satır
+    //: sayısı monoton artıp tavanladığı için sonludur; tur sayısı yine de
+    //: sınırlıdır. Kaçak bir durumda sessizce yanlış çerçeve dönmesin diye
+    //: bekçi ALGORİTMAYI değil SONUCU ölçer: dönen çerçevede her başlık
+    //: satırı kendi kullanılabilir uzunluğuna SIĞAR ve iki marj da panelin
+    //: kendi marj fonksiyonlarından çıkar.
+    const AXIS_FRAME_MAX_PASSES = 4;
+
+    function axisFrame(spec) {
+        const W = isNum(spec.widthPx) && spec.widthPx > 0
+            ? spec.widthPx : AXIS_METRICS.defaultPlotWidthPx;
+        const H = spec.heightPx, mT = spec.marginTopPx, mR = spec.marginRightPx;
+        const fontPx = AXIS_METRICS.titleFontPx;
+        const yVals = spec.yValues || [];
+        const genislik = function (marjSol) {
+            return Math.max(W - marjSol - mR, AXIS_METRICS.minPlotWidthPx);
+        };
+        // Başlangıç: alt marj ASGARİ (tek satırlık yatay başlık) kabul
+        // edilir — bu, dikey başlık satır sayısının alt sınırıdır.
+        let yLines = wrapAxisTitle(spec.yTitle,
+                                   H - mT - xAxisBottomMarginPx(1), fontPx);
+        let mL = yAxisLeftMarginPx(yVals, yLines.length);
+        let xLines = wrapAxisTitle(spec.xTitle, genislik(mL), fontPx);
+        let mB = xAxisBottomMarginPx(xLines.length);
+        for (let tur = 0; tur < AXIS_FRAME_MAX_PASSES; tur++) {
+            const yeni = wrapAxisTitle(spec.yTitle, H - mT - mB, fontPx);
+            const sabit = (yeni.length === yLines.length);
+            yLines = yeni;
+            if (sabit) break;
+            mL = yAxisLeftMarginPx(yVals, yLines.length);
+            xLines = wrapAxisTitle(spec.xTitle, genislik(mL), fontPx);
+            mB = xAxisBottomMarginPx(xLines.length);
+        }
+        const plotH = H - mT - mB;
+        return {
+            xTitleLines: xLines, yTitleLines: yLines,
+            marginLeftPx: mL, marginBottomPx: mB,
+            plotWidthPx: genislik(mL), plotHeightPx: plotH,
+            //: Yatay lejant, alt marjın DIŞ kenarından başlar (Plotly y'yi
+            //: çizim yüksekliğinin kesri olarak okur). Bugünkü sabit çift
+            //: (H=300, marj 60 → çizim 200) bu formülden birebir -0,3
+            //: verir: kural yeni değil, marj artık ölçüldüğü için lejant da
+            //: onunla birlikte iner — 3 satırlık başlık lejantın altına
+            //: girmez.
+            legendY: -(mB / plotH),
+        };
     }
 
     //: K2 — kategori (bant/satır adı) ekseni sol marjı: en geniş ölçülen
@@ -1004,7 +1118,8 @@
                 return { x: m.frequency_hz, row: String(m.band),
                          label: String(m.label) };
             }),
-            { plotWidthPx: Math.max(w - marginL - marginR, 60) });
+            { plotWidthPx: Math.max(w - marginL - marginR,
+                                    AXIS_METRICS.minPlotWidthPx) });
         const annotations = placed.map(function (p) {
             const m = modes[p.index];
             return {
@@ -1177,7 +1292,31 @@
         };
     }
 
-    function rootLocusFigure(data) {
+    /* ÖH D27 a4 · P11B4-29 — pencere simetrisi ölçütü (TEK KAYNAK).
+       Kollar kayan noktalı aritmetikle kurulduğu için birebir eşitlik
+       aranmaz; 1e-9 bağıl fark "aynı" sayılır. Bu bir mühendislik eşiği
+       DEĞİL, sayısal gürültü tabanıdır. */
+    const LOCUS_SYMMETRY_REL_TOL = 1e-9;
+
+    /* SAF ÖLÇÜM: yayımlanan J örneklerinin işletme noktası etrafındaki
+       simetrisi. Girdi ucun kendi iki alanıdır; sayı üretilmez, yalnız
+       kıyaslanır. Kıyas kurulamıyorsa null döner (fail-closed). */
+    function locusWindowSymmetry(rl, a) {
+        const j = (rl && Array.isArray(rl.dp_ratio_j))
+            ? rl.dp_ratio_j.filter(isNum) : [];
+        const jOp = (a && isNum(a.dp_ratio_j)) ? a.dp_ratio_j : null;
+        if (j.length < 2 || jOp === null) return null;
+        const jMin = Math.min.apply(null, j);
+        const jMax = Math.max.apply(null, j);
+        const left = jOp - jMin;
+        const right = jMax - jOp;
+        const arm = Math.max(Math.abs(left), Math.abs(right));
+        const rel = arm > 0 ? Math.abs(left - right) / arm : 0;
+        return { jOp: jOp, left: left, right: right, rel: rel,
+                 symmetric: rel <= LOCUS_SYMMETRY_REL_TOL };
+    }
+
+    function rootLocusFigure(data, widthPx) {
         const rl = data.root_locus || {};
         const a = data.assessment || {};
         const traces = [{
@@ -1199,31 +1338,46 @@
                         'Dominant root at the operating J'),
             });
         }
-        // K2 — sol marj ölçülen tiklerden; kısa başlık gerekirse sarılır.
-        const H = 300, mT = 40, mB = 60;
+        // K2c (ölçülen kusur, 2026-08-18): x başlığı YATAY ve uzundu
+        // ('Dominant root growth rate sigma [1/s] (sigma > 0 = growing)' —
+        // panelin kendi ölçümüyle 389,4 px) ve alt marj 60 px'te sabitti.
+        // Merkez'in görüntüleyici sütunu grid'de minmax(250px, 1fr) ile
+        // daralabiliyor; 250/320/420 px'lik kapta çizime kalan genişlik
+        // 185/255/355 px, yani başlık ÜÇÜNDE DE taşıyordu. Artık K2a
+        // deseninin yatay ikizi işliyor: başlık kullanılabilir GENİŞLİĞE
+        // ölçülerek sarılır, alt marj satır sayısından türetilir, lejant
+        // marjla birlikte iner (axisFrame sabit noktası).
+        const H = 300, mT = 40, mR = 12;
         const yVals = (Array.isArray(rl.frequency_hz)
             ? rl.frequency_hz.filter(isNum) : [])
             .concat(isNum(a.frequency_hz) ? [a.frequency_hz] : []);
-        const titleLines = wrapAxisTitle(
-            T('panel.stab.axisLocusFreq', 'Frequency [Hz]'),
-            H - mT - mB, AXIS_METRICS.titleFontPx);
+        const frame = axisFrame({
+            widthPx: widthPx, heightPx: H, marginTopPx: mT, marginRightPx: mR,
+            yTitle: T('panel.stab.axisLocusFreq', 'Frequency [Hz]'),
+            xTitle: T('panel.stab.axisSigma',
+                      'Dominant root growth rate sigma [1/s] '
+                      + '(sigma > 0 = growing)'),
+            yValues: yVals,
+        });
+        const titleFont = { size: AXIS_METRICS.titleFontPx,
+                            family: AXIS_METRICS.monoFamily };
         return {
             traces: traces,
             layout: {
                 title: T('panel.stab.chartLocus',
                          'Chug root locus (sigma-frequency plane)'),
-                xaxis: { title: T('panel.stab.axisSigma',
-                                  'Dominant root growth rate sigma [1/s] '
-                                  + '(sigma > 0 = growing)') },
-                yaxis: { title: { text: titleLines.join('<br>'),
-                                  font: { size: AXIS_METRICS.titleFontPx,
-                                          family: AXIS_METRICS.monoFamily } },
+                xaxis: { title: { text: frame.xTitleLines.join('<br>'),
+                                  font: titleFont },
+                         tickfont: { size: AXIS_METRICS.tickFontPx,
+                                     family: AXIS_METRICS.monoFamily } },
+                yaxis: { title: { text: frame.yTitleLines.join('<br>'),
+                                  font: titleFont },
                          tickfont: { size: AXIS_METRICS.tickFontPx,
                                      family: AXIS_METRICS.monoFamily } },
                 height: H,
-                legend: { orientation: 'h', y: -0.3 },
-                margin: { t: mT, r: 12, b: mB,
-                          l: yAxisLeftMarginPx(yVals, titleLines.length) },
+                legend: { orientation: 'h', y: frame.legendY },
+                margin: { t: mT, r: mR, b: frame.marginBottomPx,
+                          l: frame.marginLeftPx },
             },
         };
     }
@@ -1402,12 +1556,172 @@
             }
             if (th && th.block) drawFigure(barsId, dampingBarsFigure(th.block));
         }
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (bias_basis / interpretation_basis / verdict_basis /
+        // inertance_basis / model_basis / root_basis) ekrana DÜZ METİN
+        // döküyor, hükmünü (hesaplandı / varsayım / modellenmedi) hiç
+        // vermiyordu — pano sınıflandırıcısı ölü katmandı. Defter ucun
+        // KENDİ beyanını ortak sınıflandırıcıdan geçirir; beyan yoksa
+        // hiçbir düğüm eklenmez (fail-closed).
+        var UD = window.AnalysisDock && window.AnalysisDock.ui;
+        if (UD && UD.source && UD.source.ledgerInto) {
+            UD.source.ledgerInto(root, data, { deep: true });
+        }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
     }
 
     // ------------------------------------------------------------------
     // CHUG kiracısının görünümü
     // ------------------------------------------------------------------
+    /* ÖH D37 A1b panel-js · OH-D32-09 JS AYAĞI — τ SEÇİMİ DUYARLILIĞI.
+
+       ÖLÇÜLDÜ (docs/scofield/raw/OH/A1b/panel-js/a1/once/olcum.json K2):
+       sıvı örnek projenin chug döngüsü `tau_choice_sensitivity` bloğunu
+       dört alanıyla yayımlıyor (`is_tau_sensitive` = true; frekans bandı
+       67,69–145,96 Hz, 2,16 kat) ve bu panelde dört alanın DÖRDÜ de 0 kez
+       geçiyordu. Kullanıcı tek yayımlanan frekansı/büyüme oranını kesin
+       sanıyordu. Hibritte döngü bloğu YAYIMLAMIYOR, yerine
+       `tau_choice_not_measured` gerekçesini koyuyor — "ölçülmedi"
+       "duyarsız" DEĞİLDİR, gerekçe aynen basılır.
+
+       Kaynak sırası (uydurma yok): (1) ucun kendi değerlendirmesi bloğu
+       taşıyorsa (`assess_chug` AYNEN) o; (2) değilse motorun kendi chug
+       döngüsü — YALNIZ bu koşunun J/τ/τ_c/τ_f girdileri döngünün
+       girdileriyle ölçülebilir biçimde eşleşiyorsa (akustik mod
+       tablosundaki `acousticRunMatches` disiplini). Kullanıcı alanları
+       değiştirdiyse motorun ölçümü bu koşuya GİYDİRİLMEZ: gri + gerekçe.
+       Üç durumlu bayraklar: null "ölçülmedi"dir, false'a TERFİ ETMEZ.
+       Alanlar AÇIK özellik erişimiyle okunur (kural 11 — hrma/stability/
+       chug.py `chug_tau_sensitivity`). */
+    function tauChoiceView(a, loopSnap) {
+        if (a && a.tau_choice_sensitivity
+                && typeof a.tau_choice_sensitivity === 'object') {
+            return { state: 'block', block: a.tau_choice_sensitivity,
+                     path: 'assessment.tau_choice_sensitivity' };
+        }
+        const loop = loopSnap && loopSnap.block;
+        if (!a || !loop) return { state: 'no_source' };
+        const inp = loop.inputs || {};
+        const tfDongu = isNum(inp.tau_f_s) ? inp.tau_f_s : null;
+        const ayni = relClose(a.dp_ratio_j, inp.dp_ratio_j)
+            && relClose(a.tau_s, inp.tau_s)
+            && relClose(a.tau_c_s, inp.tau_c_s)
+            && (tfDongu === null ? a.inertance_included !== true
+                : relClose(a.tau_f_s, tfDongu));
+        if (!ayni) return { state: 'other_inputs', path: loopSnap.path };
+        if (loop.tau_choice_sensitivity
+                && typeof loop.tau_choice_sensitivity === 'object') {
+            return { state: 'block', block: loop.tau_choice_sensitivity,
+                     path: loopSnap.path + '.tau_choice_sensitivity' };
+        }
+        const olcmedi = loop.tau_choice_not_measured;
+        if (olcmedi && typeof olcmedi === 'object' && olcmedi.reason) {
+            return { state: 'not_measured', reason: olcmedi.reason,
+                     path: loopSnap.path + '.tau_choice_not_measured' };
+        }
+        return { state: 'no_source', path: loopSnap.path };
+    }
+
+    function tauTri(v) {
+        if (v === true) return T('panel.stab.tauYes', 'YES');
+        if (v === false) return T('panel.stab.tauNo', 'NO');
+        return T('panel.stab.tauNull', 'NOT MEASURED (null)');
+    }
+
+    function tauRatioText(r) {
+        return isNum(r) ? ', ' + TF('panel.stab.tauRatio', { r: sig(r) },
+                                    'ratio {r}') : '';
+    }
+
+    function tauFreqText(bant, gerekce) {
+        if (bant && typeof bant === 'object'
+                && isNum(bant.min_hz) && isNum(bant.max_hz)) {
+            return TF('panel.stab.tauFreqBand', {
+                min: sig(bant.min_hz), max: sig(bant.max_hz),
+                lo: String(bant.min_candidate), hi: String(bant.max_candidate),
+            }, '{min} – {max} Hz ({lo} → {hi})') + tauRatioText(bant.ratio);
+        }
+        return gerekce ? SRV(gerekce)
+            : T('panel.stab.tauBandNone', 'no band published');
+    }
+
+    function tauGrowthText(bant, gerekce) {
+        if (bant && typeof bant === 'object'
+                && isNum(bant.min_1_s) && isNum(bant.max_1_s)) {
+            let metin = TF('panel.stab.tauGrowthBand', {
+                min: sig(bant.min_1_s), max: sig(bant.max_1_s),
+                lo: String(bant.min_candidate), hi: String(bant.max_candidate),
+                span: sig(bant.span_1_s),
+            }, '{min} – {max} 1/s ({lo} → {hi}), span {span} 1/s');
+            if (isNum(bant.ratio)) {
+                metin += tauRatioText(bant.ratio);
+            } else if (bant.ratio_not_applicable_reason) {
+                metin += ' — ' + SRV(bant.ratio_not_applicable_reason);
+            }
+            return metin;
+        }
+        return gerekce ? SRV(gerekce)
+            : T('panel.stab.tauBandNone', 'no band published');
+    }
+
+    function tauChoiceHtml(a) {
+        const v = tauChoiceView(a, lastChugLoop);
+        let html = sectionTitle('panel.stab.secTauChoice',
+            'Sensitivity to the choice of time lag tau');
+        const kaynak = v.path ? note(TF('panel.stab.tauSource',
+            { path: v.path }, 'Source: {path}'), 'dim') : '';
+        if (v.state === 'block') {
+            const b = v.block;
+            const satir = function (alan, etiket, deger) {
+                return '<tr data-stab-tau-field="' + alan + '">'
+                    + '<td style="padding:2px 8px 2px 0; color:var(--hd-ink,'
+                    + ' #cfe8f2); vertical-align:top;">' + esc(etiket)
+                    + ' <span style="font-family:var(--hd-mono, monospace);'
+                    + ' color:var(--hd-ink-dim, #7d97a5);">' + alan + '</span>'
+                    + '</td><td style="padding:2px 0; color:var(--hd-ink,'
+                    + ' #cfe8f2); font-family:var(--hd-mono, monospace);'
+                    + ' overflow-wrap:anywhere;">' + esc(deger) + '</td></tr>';
+            };
+            html += '<div data-stab-block="tau-choice">'
+                + '<table style="border-collapse:collapse; font-size:0.7rem;'
+                + ' width:100%;"><tbody>'
+                + satir('is_tau_sensitive', T('panel.stab.rowTauSensitive',
+                    'Result depends on the tau choice (verdict, frequency or '
+                    + 'growth rate)'), tauTri(b.is_tau_sensitive))
+                + satir('frequency_hz_span', T('panel.stab.rowFreqSpan',
+                    'Frequency band across tau candidates'),
+                    tauFreqText(b.frequency_hz_span,
+                                b.frequency_span_not_resolved_reason))
+                + satir('growth_is_tau_sensitive',
+                    T('panel.stab.rowGrowthSensitive',
+                      'Growth rate depends on the tau choice'),
+                    tauTri(b.growth_is_tau_sensitive))
+                + satir('growth_rate_1_s_span', T('panel.stab.rowGrowthSpan',
+                    'Growth-rate band across tau candidates'),
+                    tauGrowthText(b.growth_rate_1_s_span,
+                                  b.growth_span_not_resolved_reason))
+                + '</tbody></table>' + kaynak + '</div>';
+        } else if (v.state === 'not_measured') {
+            html += greyBlock('tau-not-measured',
+                esc(tauTri(null)) + ' — ' + esc(SRV(v.reason)) + kaynak);
+        } else if (v.state === 'other_inputs') {
+            html += greyBlock('tau-other-inputs',
+                esc(T('panel.stab.tauOtherInputs',
+                    'The motor result measured this sensitivity for its own '
+                    + 'chug loop inputs (J, tau, tau_c, tau_f); this run uses '
+                    + 'different inputs, so that measurement is not shown '
+                    + 'against it.')) + kaynak);
+        } else {
+            html += greyBlock('tau-no-source',
+                esc(T('panel.stab.tauNoSource',
+                    'Not measured for this run: the loop was solved at the '
+                    + 'single tau supplied and no tau-choice sensitivity was '
+                    + 'published for these inputs.')) + kaynak);
+        }
+        return html;
+    }
+
     function renderChug(data, root) {
         if (!root) return;
         purge(root);
@@ -1494,11 +1808,40 @@
             [T('panel.stab.rowFreq', 'Oscillation frequency [Hz]'),
              sig(a.frequency_hz)],
         ]);
+        // ÖH D26 / fix-25b — P6B4-15'in EKSİK KAPISI.
+        // Uç, kök çözülemediğinde büyüme oranını ve frekansı null bırakıp
+        // GEREKÇESİNİ (`root_not_resolved_reason`) ve sayısal tanısını
+        // (`root_not_resolved_detail`: continuation_step / steps /
+        // tau_f_reached_s) yayımlıyor — ölçüldü: ataletli taramada 441
+        // noktanın 31'i (%7,0). Panel bu iki alanı HİÇ basmıyordu, yani
+        // kullanıcı yukarıdaki tabloda iki '—' görüp NEDENİNİ göremiyordu:
+        // kanal vardı, kapı yoktu. Gerekçe artık VERİ-YOKSA-GRİ disipliniyle
+        // basılıyor (aynı bölümdeki `skipped_points` ve kök yer eğrisi gri
+        // kutusuyla birebir aynı desen). Sunucu düzyazısı SRV() çevrim
+        // kanalından geçer; YENİ SÖZLÜK ANAHTARI EKLENMEDİ.
+        if (!isNum(a.growth_rate_1_s) && a.root_not_resolved_reason) {
+            html += greyBlock('root-not-resolved',
+                esc(SRV(a.root_not_resolved_reason))
+                + ((a.root_not_resolved_detail
+                    && typeof a.root_not_resolved_detail === 'object')
+                    ? listBlock(a.root_not_resolved_detail) : ''));
+        }
+        // ÖH D37 A1b panel-js · OH-D32-09 — τ seçimi duyarlılığı (dört
+        // alan) büyüme oranı ve frekans satırlarının hemen altında.
+        html += tauChoiceHtml(a);
         // K3 — kök baskınlığı açıklaması katlanır (rozeti zaten yukarıda).
         html += foldProse('root-dominance', 'panel.stab.foldDominance',
                           'TRACKED ROOT NOTE', a.root_dominance_note);
-        const skipped = Array.isArray(data.skipped_points)
-            ? data.skipped_points : [];
+        // ÖH D27 / P11B4-28 — KAPI YANLIŞ DUVARDAYDI.
+        // ÖLÇÜLDÜ (a3/once.json): panel `data.skipped_points`'i okuyordu;
+        // uç listeyi `root_locus.skipped_points` altında yayımlıyor
+        // (hrma/app.py, /api/analysis/combustion-stability). Üst düzeyde
+        // BÖYLE BİR ANAHTAR YOK, yani "atlanan noktalar sessizce
+        // düşürülmez" bloğu hiç çalışamıyordu. Bugünkü çekirdek hiçbir
+        // noktayı atlamadığı için kayıp canlı veriyle görünmüyordu: bekçi
+        // ölüydü. Adres ucun şekline çekildi.
+        const skipped = Array.isArray(rl.skipped_points)
+            ? rl.skipped_points : [];
         if (skipped.length) {
             html += '<div data-stab-block="skipped">'
                 + note(TF('panel.stab.skippedPoints', { n: skipped.length },
@@ -1512,6 +1855,50 @@
                     }
                     return String(e);
                 })) + '</div>';
+        }
+
+        /* ÖH D27 a4 · P11B4-29 — KÖK-YERİ PENCERESİNİN KÜNYESİ EKRANA İNER.
+
+           ÖLÇÜLDÜ (a4/once.json, `p11b4_29_basis_okunuyor` = 0): uç
+           `root_locus._basis` ile pencerenin nasıl kurulduğunu ANLATIYOR —
+           işletme noktası çevresinde +/-yarı-genişlik alınır, ama pencere
+           merkezi nötr-eğri bandının içine KIRPILIR — ve panel bu metni
+           hiç basmıyordu. Kırpma olduğunda pencere işletme noktası
+           etrafında SİMETRİK DEĞİLDİR: eğrinin sol ve sağ kolları farklı
+           uzunlukta olur, kullanıcı da bunu bilmeden "işletme noktası
+           ortada" diye okur.
+
+           İki şey basılır ve ikisi de UÇTAN türetilir, panelde sayı
+           uydurulmaz:
+             1. `_basis` düzyazısı (SRV çeviri kanalından, yeni sözlük
+                anahtarı AÇILMADAN — anahtar dosyaları bu turda büyümez),
+             2. yayımlanan J örneklerinden ÖLÇÜLEN simetri: sol kol
+                (J_op - J_min) ile sağ kol (J_max - J_op). Eşit değillerse
+                rozet asimetriyi SAYIYLA söyler; eşitlerse de söyler
+                ("simetrik"), çünkü sessizlik burada bilgi değildir. */
+        const locusBasis = rl._basis;
+        const sim = locusWindowSymmetry(rl, a);
+        if (locusBasis || sim) {
+            let simetriMetni = '';
+            if (sim) {
+                simetriMetni = (sim.symmetric
+                    ? 'Window IS symmetric about the operating point: '
+                    : 'Window is NOT symmetric about the operating point '
+                      + '(the centre was clamped into the neutral-curve '
+                      + 'band): ')
+                    + 'J_op = ' + sig(sim.jOp) + ', left arm = '
+                    + sig(sim.left) + ', right arm = ' + sig(sim.right)
+                    + ', relative difference = '
+                    + _pct(sigFig(sim.rel * 100)) + '.';
+                html += badge(sim.symmetric
+                    ? T('panel.stab.locusSymmetric', 'LOCUS WINDOW SYMMETRIC')
+                    : T('panel.stab.locusAsymmetric',
+                        'LOCUS WINDOW NOT CENTRED ON THE OPERATING POINT'),
+                    sim.symmetric ? 'info' : 'warn', simetriMetni);
+            }
+            html += greyBlock('locus-basis',
+                (locusBasis ? esc(SRV(locusBasis)) : '')
+                + (simetriMetni ? '<br>' + esc(simetriMetni) : ''));
         }
 
         // 3) Klasik kural çaprazı — ölçüm, eşik değil.
@@ -1615,8 +2002,21 @@
                 drawFigure(neutralId, neutralCurveFigure(data));
             }
             if (Array.isArray(rl.sigma_1_s) && rl.sigma_1_s.length) {
-                drawFigure(locusId, rootLocusFigure(data));
+                drawFigure(locusId, rootLocusFigure(
+                    data, plotContainerWidth(locusId)));
             }
+        }
+        // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
+        // Ölçüldü (a1/once.json): bu panel ucun beyan alanlarını
+        // (bias_basis / interpretation_basis / verdict_basis /
+        // inertance_basis / model_basis / root_basis) ekrana DÜZ METİN
+        // döküyor, hükmünü (hesaplandı / varsayım / modellenmedi) hiç
+        // vermiyordu — pano sınıflandırıcısı ölü katmandı. Defter ucun
+        // KENDİ beyanını ortak sınıflandırıcıdan geçirir; beyan yoksa
+        // hiçbir düğüm eklenmez (fail-closed).
+        var UD = window.AnalysisDock && window.AnalysisDock.ui;
+        if (UD && UD.source && UD.source.ledgerInto) {
+            UD.source.ledgerInto(root, data, { deep: true });
         }
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
     }
@@ -1704,6 +2104,7 @@
         fromResults: function (results) {
             const sug = suggestChug(results);
             lastSuggestion.chug = sug;
+            lastChugLoop = chugLoopOf(results);
             return sug.values;
         },
 
@@ -1732,6 +2133,8 @@
         _thresholdOf: thresholdOf,
         _lfiOf: lfiOf,
         _chugLoopOf: chugLoopOf,
+        _tauChoiceView: tauChoiceView,
+        _tauChoiceHtml: tauChoiceHtml,
         _chugApplicabilityOf: chugApplicabilityOf,
         _dampingApplicability: dampingApplicability,
         _chugApplicability: chugApplicability,
@@ -1749,6 +2152,12 @@
         _measureLabelPx: measureLabelPx,
         _wrapAxisTitle: wrapAxisTitle,
         _maxTickWidthPx: maxTickWidthPx,
+        _yAxisLeftMarginPx: yAxisLeftMarginPx,
+        _xAxisBottomMarginPx: xAxisBottomMarginPx,
+        _axisFrame: axisFrame,
+        _rootLocusFigure: rootLocusFigure,
+        _locusWindowSymmetry: locusWindowSymmetry,
+        _locusSymmetryRelTol: LOCUS_SYMMETRY_REL_TOL,
         _axisMetrics: AXIS_METRICS,
     };
 })();

@@ -264,7 +264,10 @@ class TestSifirCapliMotorUretilemez:
 
     def test_designation_sinif_harfini_uydurmuyor(self, exporter):
         """``M0-...`` dizesinin "M"si 10000 N·s varsayılanından geliyordu."""
-        assert exporter._designation({}) == 'UNKNOWN-UZAYTEK-HRM-001'
+        # UI openrocket-kose 2. tur, devir D2: eski varsayılan 'HRMA-001'in '-001'i
+        # OpenRocket'te gecikme sanılıp kesiliyordu (AbstractMotorLoader.removeDelay,
+        # ölçüldü: 'O167-HRMA-001' -> 'O167-HRMA'). Yeni varsayılan kesilmez.
+        assert exporter._designation({}) == 'UNKNOWN-HRMA_001'
         assert not exporter._designation({}).startswith('M0')
         # Gerçek veriyle sınıf harfi yine üretilir
         assert exporter._designation(dict(TAM_MOTOR)).startswith('L')

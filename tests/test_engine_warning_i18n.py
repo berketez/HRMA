@@ -55,6 +55,61 @@ ENGINE_PREFIXES = (
 # Uyarı kaydı üreten yardımcıların adları (dosya-yerel tanımlar).
 WARN_HELPERS = ('_w', '_warn', '_mk_warning')
 
+# --- ZİNCİR BORCU (ÖH D30 · katı a1 · OH-D29-05 / OH-D28-05) --------------
+# Bir uyarı kodunun SÖZLÜK karşılığını, kodu yayımlayan kulvar ekleyemez:
+# ``i18n_common.js``in sahibi arayuz-i18n kulvarıdır ve D29 hüküm-18 zinciri
+# "motor kodu -> i18n anahtarı -> panel satırı" sırasını şart koşar (kod
+# yokken anahtar yazmak olmayan bir uyarıyı varmış gibi göstermek olurdu).
+# Zincirin iki ayağı ayrı dalgalara düştüğünde arada bir dalga boyu
+# anahtarsız kod bulunur.
+#
+# Bu listenin GEVŞETME OLMAMASININ sebebi, testin gerekçesinin ("yoksa
+# kullanıcı ham anahtar görür") o kodlar için geçerli OLMAMASIDIR: kayıt
+# İngilizce metnini ``fallback`` alanında taşır ve ekran katmanı
+# (``templates/solid.html`` ``displaySolidWarnings``, ``static/js/app.js``
+# ``warnToText``) ``w.fallback || w.code`` ile onu basar — kullanıcı ham
+# anahtar değil İngilizce cümle görür. Liste bir BORÇ İMİdir ve iki ayrı
+# bekçiyle kendini temizler:
+#   * girmek KAZANILIR: kodun her yayım yerinde ``fallback`` bulunmalıdır
+#     (test_zincir_borcu_kodlari_ingilizce_yedek_tasiyor),
+#   * anahtar eklendiği anda kod buradan ÇIKMAK zorundadır
+#     (test_zincir_borcu_odendiyse_liste_temizlenir).
+# Küme kalıcıdır: zincirin iki ayağı (motor kodu -> i18n anahtarı) ayrı
+# dalgalara düştüğünde yeni kod buraya gerekçesiyle yazılır. `set()` /
+# `{...}` küme yazılır, boş SÖZLÜK DEĞİL: ikincisi küme farkı alan üç
+# kullanım yerinde TypeError verirdi (ölçüldü).
+#
+# ÖH D30 · fix-31: ``warn.solid.erosion_exponent_extrapolated`` EN+TR
+# karşılığını aldı ve test_zincir_borcu_odendiyse_liste_temizlenir uyarınca
+# buradan ÇIKARILDI.
+#
+# ÖH D32 · kati a1 (OH-D31-17): ``warn.solid.two_phase_correction_unverified``
+# eklendi. Berke/Astra hükmü (15 Eyl) "iki-faz düzeltmesi doğrulanmamış"
+# durumunun PDF'e taşınmasını ŞART koşuyor ve PDF katmanı yalnız
+# ``design_warnings`` kayıtlarını okuyor (pdf_generator.WARNING_SOURCES) —
+# yani kodun bu dalgada yayımlanması zorunluydu. ``i18n_common.js`` ise
+# arayuz-i18n kulvarının sahasıdır ve D29 hüküm-18 zinciri "önce motor
+# kodu, sonra i18n anahtarı" sırasını şart koşar. Kayıt İngilizce metnini
+# ``fallback`` alanında taşıyor (test_zincir_borcu_kodlari_ingilizce_yedek_
+# tasiyor bunu kilitliyor), bu yüzden kullanıcı ham anahtar GÖRMÜYOR.
+# Borç, arayuz-i18n kulvarı EN+TR anahtarını eklediğinde kapanır.
+#
+# ÖH D33 · motorlar a1 (OH-UC-05): ``warn.liquid.vacuum_isp_improvement_
+# out_of_band`` eklendi. Hüküm ZATEN VARDI ama yalnız ``print()`` ile
+# stdout'a basılıyordu (ÖLÇÜLDÜ, docs/scofield/raw/OH/D33/motorlar/a1/
+# once.json · K1: stdout'ta "Vakum Isp iyileştirmesi anormal: %0.0" satırı
+# VAR, yanıttaki eşleşen ``design_warnings`` kaydı 0) — yani kullanıcı
+# hükmü HİÇ görmüyordu. Kanalın onarımı bu dalganın kalemidir;
+# ``i18n_common.js`` ise arayuz-i18n kulvarının sahasıdır ve D33-KOLAY'da
+# o kulvar AÇILMADI. Kayıt İngilizce metnini ``fallback`` alanında taşıyor
+# (``test_zincir_borcu_kodlari_ingilizce_yedek_tasiyor`` kilitliyor) ve
+# ekran katmanı (``static/js/app.js`` ``warnToText``, ``analysis_dock.js``
+# ``warnText``) ``TF(code, params, w.fallback || w.code)`` ile onu basıyor;
+# ``I18N.tf`` yer tutucuları YEDEK METİNDE de yerine koyar (i18n.js:282),
+# yani kullanıcı ham anahtar değil sayılı İngilizce cümle görür. Borç,
+# arayuz-i18n kulvarı EN+TR anahtarını eklediğinde kapanır.
+ZINCIR_BORCU = set()  # fix-35e (15 Eyl): warn.solid.two_phase_correction_unverified ödendi; fix-36a (15 Eyl 23:2x, ana model): warn.liquid.vacuum_isp_improvement_out_of_band (D33 motorlar a1 · OH-UC-05) EN+TR sözlüğe girdi, borç ödendi ve listeden çıktı — küme BOŞ
+
 CODE_RE = re.compile(r"['\"](warn\.[a-z0-9_.]+)['\"]")
 KEY_RE = re.compile(r"'(warn\.[a-z0-9_.]+)'\s*:\s*'((?:[^'\\]|\\.)*)'")
 PLACEHOLDER_RE = re.compile(r'\{(\w+)\}')
@@ -126,15 +181,86 @@ def _declared_params():
     return calls
 
 
+# ---------------------------------------------------------------------------
+# ÖH D24 · OH-D23-22 — SÖZLÜK KESİTİ, DENGELİ PARANTEZLE ÇIKARILIR
+#
+# Eski ``_dicts`` EN bloğunu ``js[en_start:tr_start]``, TR bloğunu
+# ``js[tr_start:]`` diye DİLİMLİYORDU. İki kusur:
+#
+#   1. EN kesiti ``tr: {`` işaretinde biter; dosyanın SONUNA eklenen bir
+#      anahtar EN tarafında GÖRÜNMEZ. (Dalga briefinin "electron/sivi
+#      anahtarı dosya sonuna blok olarak eklenebilir" istisnası tam bu
+#      yüzden kaldırıldı — ÖH D23 sıvı kulvarı ölçtü.)
+#   2. TR kesiti DOSYA SONUNA kadar gider; sözlük nesnesi ``};`` ile
+#      kapandıktan SONRA gelen her şeyi de TR çevirisi sayar. Oysa orası
+#      ``I18N.register`` çağrısıdır: oraya yazılan anahtar tarayıcıya HİÇ
+#      ulaşmaz. Yani bekçi, hiç yüklenmeyen bir anahtarı "TR çevirisi var"
+#      diye kabul ediyordu — fail-open.
+#
+# Kesit artık dengeli parantezle çıkarılır ve iki bloğun DIŞINDA kalan
+# ``warn.*`` anahtarları ADIYLA raporlanır (``_blok_disi_anahtarlar``).
+# ---------------------------------------------------------------------------
+
+def _blok_araligi(js, bas_imi):
+    """``bas_imi`` satırından, aynı girintideki kapanış satırına kadar.
+
+    Karakter düzeyinde parantez saymak bu dosyada GÜVENİLMEZ: metinler
+    kesme işareti ve süslü yer tutucu ("{shown}", "don't") taşıyor, JS
+    yorumları da öyle. Ölçüldü (ÖH D24): karakter tarayıcısı EN bloğunu
+    2516-450570 aralığında "kapatıyor", yani TR bloğunu da yutuyordu ve
+    iki sözlük birebir aynı çıkıyordu (``test_turkish_block_is_actually_
+    turkish`` kırmızıya düştü).
+
+    Bu dosyanın biçimi kesindir ve ADIYLA sınanır: blok ``        en: {``
+    satırıyla açılır, ``        }`` / ``        },`` satırıyla kapanır.
+    Biçim değişirse fonksiyon SESSİZ KALMAZ, hata yükseltir.
+    """
+    satirlar = js.split('\n')
+    girinti = bas_imi[:len(bas_imi) - len(bas_imi.lstrip())]
+    bas_no = None
+    for i, satir in enumerate(satirlar):
+        if satir.rstrip() == bas_imi.rstrip():
+            bas_no = i
+            break
+    assert bas_no is not None, '%r satırı yok' % bas_imi
+    kapanis = re.compile(r'^%s\}[,;]?\s*$' % re.escape(girinti))
+    for j in range(bas_no + 1, len(satirlar)):
+        if kapanis.match(satirlar[j]):
+            bas_ofs = sum(len(x) + 1 for x in satirlar[:bas_no])
+            son_ofs = sum(len(x) + 1 for x in satirlar[:j + 1])
+            return (bas_ofs, son_ofs), '\n'.join(satirlar[bas_no:j + 1])
+    raise AssertionError('%r bloğu kapanmıyor (biçim değişmiş)' % bas_imi)
+
+
+def _blok_araliklari():
+    js = (ROOT / I18N_FILE).read_text(encoding='utf-8')
+    en_ara, en_metin = _blok_araligi(js, '        en: {')
+    tr_ara, tr_metin = _blok_araligi(js, '        tr: {')
+    assert en_ara[0] < tr_ara[0], 'i18n_common.js blok sırası beklenmedik'
+    return js, (en_ara, en_metin), (tr_ara, tr_metin)
+
+
 def _dicts():
     """i18n_common.js içindeki en/tr bloklarını {kod: metin} olarak döndürür."""
-    js = (ROOT / I18N_FILE).read_text(encoding='utf-8')
-    en_start, tr_start = js.index('        en: {'), js.index('        tr: {')
-    assert en_start < tr_start, 'i18n_common.js blok sırası beklenmedik'
-    return (
-        dict(KEY_RE.findall(js[en_start:tr_start])),
-        dict(KEY_RE.findall(js[tr_start:])),
-    )
+    _, (_, en_metin), (_, tr_metin) = _blok_araliklari()
+    return dict(KEY_RE.findall(en_metin)), dict(KEY_RE.findall(tr_metin))
+
+
+def _blok_disi_anahtarlar():
+    """``en``/``tr`` bloklarının DIŞINDA duran ``warn.*`` anahtarları.
+
+    Böyle bir anahtar ya hiç yüklenmez (sözlük nesnesi kapandıktan sonra)
+    ya da yanlış dile yazılır. Sessizce saymak yerine ADIYLA bildirilir.
+    """
+    js, (en_ara, _), (tr_ara, _) = _blok_araliklari()
+    disarida = []
+    for m in KEY_RE.finditer(js):
+        i = m.start()
+        icinde = (en_ara[0] <= i < en_ara[1]) or (tr_ara[0] <= i < tr_ara[1])
+        if not icinde:
+            satir = js.count('\n', 0, i) + 1
+            disarida.append('%s:%d %s' % (I18N_FILE, satir, m.group(1)))
+    return disarida
 
 
 def _engine_keys(table):
@@ -162,8 +288,58 @@ def test_every_engine_code_has_translation(lang_index, lang):
     """Her motor kodunun karşılığı olmalı; yoksa kullanıcı ham anahtar görür."""
     codes = _backend_codes()
     table = _dicts()[lang_index]
-    missing = sorted(codes - set(table))
+    missing = sorted(codes - set(table) - ZINCIR_BORCU)
     assert not missing, f'{lang} sözlüğünde eksik motor uyarı kodu: {missing}'
+
+
+def _yayim_yerleri(code):
+    """``code``u yayımlayan çağrı düğümleri (AST) — dosya adıyla birlikte."""
+    bulunan = []
+    for path in _engine_files():
+        agac = ast.parse(path.read_text(encoding='utf-8'))
+        for node in ast.walk(agac):
+            if not isinstance(node, ast.Call):
+                continue
+            sabitler = [c.value for c in ast.walk(node)
+                        if isinstance(c, ast.Constant)
+                        and isinstance(c.value, str)]
+            if code in sabitler:
+                bulunan.append((path.name, node))
+    return bulunan
+
+
+def test_zincir_borcu_kodlari_ingilizce_yedek_tasiyor():
+    """Borç imi KAZANILIR: anahtarsız kod İngilizce metnini taşımalı.
+
+    Aksi hâlde liste gerçekten bir gevşetme olurdu — kullanıcı ham anahtar
+    görürken bekçi yeşil kalırdı.
+    """
+    eksik = []
+    for code in sorted(ZINCIR_BORCU):
+        yerler = _yayim_yerleri(code)
+        assert yerler, f'{code} hiçbir motor dosyasında yayımlanmıyor'
+        # En dış çağrı (``dict(_w(...), fallback=...)``) yedek metni taşır.
+        yedekli = [
+            (ad, n) for ad, n in yerler
+            if any(kw.arg == 'fallback'
+                   and isinstance(kw.value, ast.Constant)
+                   and isinstance(kw.value.value, str)
+                   and kw.value.value.strip()
+                   for kw in n.keywords)
+        ]
+        if not yedekli:
+            eksik.append('%s (%s)' % (code, sorted({a for a, _ in yerler})))
+    assert not eksik, (
+        'zincir borcundaki kod İngilizce yedek metin taşımıyor: %s' % eksik)
+
+
+def test_zincir_borcu_odendiyse_liste_temizlenir():
+    """Anahtar geldiyse borç imi KALMAZ (XPASS'ın sözlük karşılığı)."""
+    en, tr = _dicts()
+    odenmis = sorted(c for c in ZINCIR_BORCU if c in en and c in tr)
+    assert not odenmis, (
+        'bu kodların EN+TR anahtarı eklenmiş; ZINCIR_BORCU listesinden '
+        'çıkarın: %s' % odenmis)
 
 
 def test_no_orphan_engine_translation_keys():

@@ -3,6 +3,7 @@ Comprehensive Chemical Species Database
 NASA CEA compatible chemical species database with thermodynamic properties
 """
 
+import math
 import os
 import numpy as np
 import json
@@ -11,6 +12,11 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import csv
 from hrma import DATA_DIR
+# ÖH D24 / P10B3-10 — NASA polinomlarının gaz sabiti TEK KAYNAKTAN.
+# Cp/H/S üç ayrı yerde ``R = 8.314`` yazıyordu (kesilmiş değer).
+# SAYI DEĞİŞTİ, BEYANLI: 8,314 -> 8,314462618 J/(mol*K), bağıl fark
+# +5,5644e-5; cp/enthalpy/entropy çıktıları aynı oranda kayar.
+from hrma.constants import P_SEA_LEVEL_PA, R_MOLAR
 
 @dataclass
 class ChemicalSpecies:
@@ -94,11 +100,28 @@ class ChemicalDatabase:
             'N2': ChemicalSpecies(
                 name='N2', formula='N2', molecular_weight=28.014,
                 enthalpy_formation=0.0, entropy_standard=191.61,
+                # ÖH D16/ihracat (OH-Z5-06): a4/a5 BOZUKTU
+                # (2.84151630E-09 / -1.35168050E-13). Ölçülen sapma JANAF'a
+                # göre 700 K'de -%11,20 · 1000 K'de -%12,27. Standart NASA-7
+                # düşük-sıcaklık (200-1000 K) N2 seti geri konuldu; aynı
+                # dosyadaki H2O kaydı JANAF'ı <%0,06 ile tutturduğu için
+                # bozukluk TEKİLDİ (bkz. once_veri.json / sonra_veri.json).
                 cp_coefficients=[3.29867700E+00, 1.40824040E-03, -3.96322200E-06,
-                               2.84151630E-09, -1.35168050E-13, -1.02089990E+03, 3.95037200E+00],
+                               5.64151500E-09, -2.44485400E-12, -1.02089990E+03, 3.95037200E+00],
                 temperature_ranges=[(200, 1000), (1000, 6000)],
                 phase='gas', cas_number='7727-37-9', source='NASA_CEA'
             ),
+            # KÜNYE NOTU (KU H-13 / KITAP-2a H5, 6 Eki 2026; yalnız yorum,
+            # DEĞER DEĞİŞMEDİ). Bu 7 katsayılı NASA polinomu GRI-Mech 3.0'ın
+            # OH kaydıyla (not 'RUS78') birebir aynıdır — yerelde Cantera
+            # 3.1.0 ``gri30.yaml`` ile karşılaştırıldı; aynı kayıttan
+            # 298,15 K'de h = 39,347 kJ/mol çıkar ve aşağıdaki 39 349 J/mol
+            # onunla iç tutarlıdır. Yani ``source='NASA_CEA'`` etiketi bu
+            # kayıt için tam doğru değildir; CEA'nın kendi thermo.inp OH
+            # kaydı (Ruscic 2002) 37,278 kJ/mol, JANAF 4. bs. 38,99 verir
+            # (KITAP-2a notu). Etiket bir mantık dalını besliyor
+            # (``species.source == 'NASA_CEA'``) ve bir bekçi onu okuyor;
+            # bu yüzden burada değiştirilmedi — devir: KU h-q1 raporu.
             'OH': ChemicalSpecies(
                 name='OH', formula='OH', molecular_weight=17.007,
                 enthalpy_formation=39349.0, entropy_standard=183.70,
@@ -412,38 +435,184 @@ class ChemicalDatabase:
                 results.append(species)
         return results
     
-    def calculate_cp(self, species_name: str, temperature: float) -> float:
-        """Calculate heat capacity at constant pressure using NASA polynomials"""
+    # -----------------------------------------------------------------
+    # Katsayı sağlığı — ÖH Z5S / P9B4-12
+    # -----------------------------------------------------------------
+    # Bulgu: 37 türün 8'i (RP1, NH4ClO4, MMH, UDMH, HTPB, Paraffin, AP, AN)
+    # yedi katsayısının TAMAMI 0.0 olan YER TUTUCU taşıyor. Kayıtların
+    # kendi yorumları bunu söylüyor ('Approximation needed', 'Needs
+    # calculation', 'Empirical model needed'), ama kod söylemiyordu:
+    # `len(coeffs) >= 5` yapısal kapısı yer tutucuyu GEÇERLİ sayıyor,
+    # polinom sıfır katsayılarla değerlendiriliyor ve cp = 0.0 J/mol/K
+    # dönüyordu. Sıfır ısı sığası fiziksel olarak imkânsızdır: bu bir
+    # ölçüm değil, KAZANILMAMIŞ bir sayıdır ve uçtan kullanıcıya çıkıyordu.
+    # Kodun kendi belgelediği "Fallback constant Cp = 30.0" dalı ise
+    # `len(coeffs) < 5` istediği için hiç çalışmıyordu (ölü kod).
+    #
+    # Onarım fail-closed: yer tutucu kayıtta SAYI BASILMAZ (None döner) ve
+    # gerekçe adlandırılır. 30.0 J/mol/K sabiti de KURTARILMADI — 352 g/mol
+    # parafin için ~20 kat yanlış olurdu; uydurma sabit, uydurma sıfırın
+    # yerine geçmez. Katsayısı gerçek olan 29 türün sayıları BİT-AYNI.
+    CP_UNAVAILABLE_PLACEHOLDER = 'placeholder_zero_cp_coefficients'
+    CP_UNAVAILABLE_TOO_FEW = 'insufficient_cp_coefficients'
+    CP_UNAVAILABLE_UNKNOWN_SPECIES = 'unknown_species'
+    #: ÖH D20 / defter OH-D17-11 — SICAKLIK ARALIĞI KAPISI.
+    CP_UNAVAILABLE_OUT_OF_RANGE = 'temperature_outside_coefficient_range'
+
+    @staticmethod
+    def _coefficient_status(species: Optional[ChemicalSpecies]) -> Optional[str]:
+        """Katsayılar kullanılabilir mi? Kullanılabilirse None, değilse gerekçe."""
+        if species is None:
+            return ChemicalDatabase.CP_UNAVAILABLE_UNKNOWN_SPECIES
+        coeffs = species.cp_coefficients or []
+        if len(coeffs) < 5:
+            return ChemicalDatabase.CP_UNAVAILABLE_TOO_FEW
+        if not any(float(c) != 0.0 for c in coeffs):
+            return ChemicalDatabase.CP_UNAVAILABLE_PLACEHOLDER
+        return None
+
+    @staticmethod
+    def coefficient_validity_range(
+            species: Optional[ChemicalSpecies]
+    ) -> Optional[Tuple[float, float]]:
+        """Elde TUTULAN katsayı setinin gerçekten geçerli olduğu aralık [K].
+
+        ÖH D20 / defter OH-D17-11. ``ChemicalSpecies.temperature_ranges``
+        her tür için İKİ aralık BEYAN eder (ör. N₂ ``[(200, 1000),
+        (1000, 6000)]``) ama ``cp_coefficients`` TEK 7-katsayılı settir —
+        yani yalnız DÜŞÜK-sıcaklık NASA polinomu. Beyan ile veri arasındaki
+        bu boşluk hiçbir kapıyla kapatılmamıştı.
+
+        ÖLÇÜLDÜ (taban ``14acd1d``, ``once.json`` bölüm D):
+
+        | tür | 300 K | 800 K | 1500 K | 2000 K | 3000 K |
+        |---|---|---|---|---|---|
+        | N₂  | 29,074 | 31,392 | **26,246** | **−30,955** | **−614,054** |
+        | O₂  | 29,386 | 33,748 | 43,156 | 96,671 | 704,736 |
+        | H₂O | 33,595 | 38,731 | 52,076 | 88,588 | 433,392 |
+
+        N₂'nin JANAF değeri 1500 K'de 34,852 J/mol/K'dir: yayımlanan 26,246
+        **−%24,7** sapar; 2000 K'de sayı NEGATİFTİR (ısı sığası fiziksel
+        olarak negatif olamaz), 3000 K'de −614. O₂ ve H₂O aynı yerde YUKARI
+        ıraksar (JANAF 3000 K: O₂ 37,79 — yayımlanan 704,74, ~19 kat).
+        Yani düşük-sıcaklık polinomu geçerlilik aralığının dışında
+        değerlendiriliyordu; ``calculate_enthalpy``/``calculate_entropy`` de
+        aynı katsayıları integre ettiği için aynı bölgede çöpe dönüyordu.
+
+        Yüksek-sıcaklık katsayı seti bu depoda YOKTUR ve uydurulamaz
+        (uydurma katsayı, uydurma sayının kaynağı olur). Bu yüzden hüküm
+        fail-closed'dur: geçerlilik aralığı **beyan edilen ilk aralıktır**
+        (elde tutulan tek setin ait olduğu aralık) ve dışında SAYI
+        YAYIMLANMAZ, gerekçe ``CP_UNAVAILABLE_OUT_OF_RANGE`` adıyla döner.
+
+        Aralık beyanı hiç yoksa ``None`` döner ve kapı uygulanmaz (beyanı
+        olmayan kayıt için sınır uydurulmaz).
+        """
+        if species is None:
+            return None
+        ranges = species.temperature_ranges or []
+        if not ranges:
+            return None
+        try:
+            lo, hi = float(ranges[0][0]), float(ranges[0][1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
+            return None
+        return (lo, hi)
+
+    @classmethod
+    def _temperature_status(cls, species: Optional[ChemicalSpecies],
+                            temperature) -> Optional[str]:
+        """Sorulan sıcaklık katsayı setinin geçerlilik aralığında mı?"""
+        band = cls.coefficient_validity_range(species)
+        if band is None:
+            return None
+        try:
+            T = float(temperature)
+        except (TypeError, ValueError):
+            return cls.CP_UNAVAILABLE_OUT_OF_RANGE
+        if not math.isfinite(T) or not (band[0] <= T <= band[1]):
+            return cls.CP_UNAVAILABLE_OUT_OF_RANGE
+        return None
+
+    def species_data_status(self, species_name: str) -> Dict[str, object]:
+        """Bir türün termodinamik katsayılarının KAZANILMIŞ olup olmadığı.
+
+        Tüketici, sayının neden basılmadığını adıyla öğrensin diye vardır
+        (bare None ile 'tür yok' ayrımı yapılamıyordu).
+        """
         species = self.get_species(species_name)
-        if not species:
-            return 0.0
-        
+        reason = self._coefficient_status(species)
+        return {
+            'species': species_name,
+            'known_species': species is not None,
+            'coefficients_usable': reason is None,
+            'unavailable_reason': reason,
+            'coefficient_count': (len(species.cp_coefficients)
+                                  if species is not None else 0),
+            'source': species.source if species is not None else None,
+            # ÖH D20 / OH-D17-11: elde tutulan setin GEÇERLİ olduğu aralık.
+            # ``temperature_ranges`` iki aralık beyan ediyor olabilir; bu
+            # alan hangisinin karşılığının gerçekten var olduğunu söyler.
+            'coefficient_validity_range_K': list(
+                self.coefficient_validity_range(species) or ()) or None,
+            'declared_temperature_ranges': (
+                [list(r) for r in (species.temperature_ranges or [])]
+                if species is not None else None),
+        }
+
+    def list_placeholder_species(self) -> List[str]:
+        """Katsayısı yer tutucu (tamamı sıfır) olan türlerin adları."""
+        return sorted(
+            name for name, sp in self.species_data.items()
+            if self._coefficient_status(sp) is not None)
+
+    def calculate_cp(self, species_name: str, temperature: float) -> Optional[float]:
+        """Cp [J/mol/K] — NASA polinomundan.
+
+        Katsayıları KAZANILMAMIŞ türlerde (bilinmeyen tür ya da yer tutucu
+        sıfır katsayı) sayı üretilmez, None döner; gerekçe için
+        ``species_data_status`` çağrılır (ÖH Z5S / P9B4-12).
+        """
+        species = self.get_species(species_name)
+        if self._coefficient_status(species) is not None:
+            return None
+        # ÖH D20 / OH-D17-11 — aralık dışında SAYI YAYIMLANMAZ.
+        if self._temperature_status(species, temperature) is not None:
+            return None
+
         # Use NASA 7-coefficient polynomial
         # Cp/R = a1 + a2*T + a3*T^2 + a4*T^3 + a5*T^4
-        R = 8.314  # J/mol/K
+        R = R_MOLAR  # J/mol/K
         T = temperature
         coeffs = species.cp_coefficients
-        
-        if len(coeffs) >= 5:
-            cp_over_r = (coeffs[0] + coeffs[1]*T + coeffs[2]*T**2 + 
-                        coeffs[3]*T**3 + coeffs[4]*T**4)
-            return cp_over_r * R
-        else:
-            # Fallback constant Cp
-            return 30.0  # J/mol/K
-    
-    def calculate_enthalpy(self, species_name: str, temperature: float) -> float:
-        """Calculate enthalpy at temperature T"""
+
+        cp_over_r = (coeffs[0] + coeffs[1]*T + coeffs[2]*T**2 +
+                     coeffs[3]*T**3 + coeffs[4]*T**4)
+        return cp_over_r * R
+
+    def calculate_enthalpy(self, species_name: str,
+                           temperature: float) -> Optional[float]:
+        """H(T) [J/mol] — NASA polinom integralinden.
+
+        Yer tutucu katsayılı türlerde polinom terimleri sıfırlanıp sonuç
+        her sıcaklıkta H_f'ye eşitleniyordu: sıcaklıktan BAĞIMSIZ bu sayı
+        da bir ölçüm değildir. Aynı fail-closed kapı uygulanır (P9B4-12).
+        """
         species = self.get_species(species_name)
-        if not species:
-            return 0.0
-        
+        if self._coefficient_status(species) is not None:
+            return None
+        # ÖH D20 / OH-D17-11 — aynı katsayılar integre edildiği için aynı kapı.
+        if self._temperature_status(species, temperature) is not None:
+            return None
+
         # H(T) = H_f + integral(Cp dT) from 298 to T
-        R = 8.314
+        R = R_MOLAR
         T = temperature
         T_ref = 298.15
         coeffs = species.cp_coefficients
-        
+
         if len(coeffs) >= 7:
             # NASA polynomial integration
             h_t = (coeffs[0]*T + coeffs[1]*T**2/2 + coeffs[2]*T**3/3 + 
@@ -456,16 +625,27 @@ class ChemicalDatabase:
             cp_avg = self.calculate_cp(species_name, (T + T_ref)/2)
             return species.enthalpy_formation + cp_avg * (T - T_ref)
     
-    def calculate_entropy(self, species_name: str, temperature: float, pressure: float = 101325) -> float:
-        """Calculate entropy at temperature T and pressure P"""
+    def calculate_entropy(self, species_name: str, temperature: float,
+                          pressure: float = P_SEA_LEVEL_PA
+                          ) -> Optional[float]:
+        """S(T, P) [J/mol/K] — NASA polinomundan.
+
+        Yer tutucu katsayılı türlerde termal terim sıfırlanıp sonuç yalnız
+        standart entropi + basınç düzeltmesine düşüyordu (sıcaklıktan
+        bağımsız). Aynı fail-closed kapı uygulanır (ÖH Z5S / P9B4-12).
+        """
         species = self.get_species(species_name)
-        if not species:
-            return 0.0
-        
-        R = 8.314
+        if self._coefficient_status(species) is not None:
+            return None
+        # ÖH D20 / OH-D17-11 — aynı katsayılar integre edildiği için aynı kapı.
+        if self._temperature_status(species, temperature) is not None:
+            return None
+
+        R = R_MOLAR
         T = temperature
         T_ref = 298.15
-        P_ref = 101325.0
+        # ÖH D26 / P15B2-06: literal yerine tek kaynak.
+        P_ref = P_SEA_LEVEL_PA
         coeffs = species.cp_coefficients
         
         if len(coeffs) >= 7:
@@ -511,9 +691,25 @@ class ChemicalDatabase:
                         f.write(f"    a{i+1} {coeff:.8E}\n")
                 f.write("\n")
     
-    def validate_database(self) -> Dict[str, int]:
-        """Validate database integrity and coverage"""
-        validation_results = {
+    def validate_database(self) -> Dict[str, object]:
+        """Validate database integrity and coverage.
+
+        ÖH Z5S / P9B4-13 — TOTOLOJİ SÖKÜLDÜ. Önceki sayaç kendi tanımından
+        türüyordu: 'katsayısı var mı?' sorusunu ``len(coeffs) >= 7`` diye,
+        yani YALNIZ LİSTE UZUNLUĞUYLA yanıtlıyordu. Sekiz tür yedi adet
+        0.0 taşıdığı için rapor ``species_with_coefficients: 37/37`` ve
+        ``species_missing_data: 0`` diyordu — veritabanı kendi eksiğini
+        kendi ölçütüyle görünmez kılıyordu ve bu rapor
+        ``/api/chemical-database`` üzerinden kullanıcıya çıkıyordu.
+
+        Artık ölçüt İÇERİK: bir kaydın katsayıları ancak en az biri
+        sıfırdan farklıysa kullanılabilir sayılır (``_coefficient_status``,
+        cp/h/s'nin kullandığı AYNI kapı — sayaç ile hesap tek ölçüte bağlı).
+        Yapısal sayı da kaybolmuyor, ``species_with_seven_coefficients``
+        adıyla ayrı raporlanıyor; iki sayının farkı eksiğin kendisidir.
+        """
+        placeholder_names: List[str] = []
+        validation_results: Dict[str, object] = {
             'total_species': len(self.species_data),
             'gas_species': 0,
             'liquid_species': 0,
@@ -521,27 +717,44 @@ class ChemicalDatabase:
             'nasa_cea_species': 0,
             'custom_species': 0,
             'species_with_coefficients': 0,
-            'species_missing_data': 0
+            'species_missing_data': 0,
+            'species_with_seven_coefficients': 0,
+            'species_with_usable_coefficients': 0,
+            'species_with_placeholder_coefficients': 0,
         }
-        
-        for species in self.species_data.values():
+
+        for name, species in self.species_data.items():
             if species.phase == 'gas':
                 validation_results['gas_species'] += 1
             elif species.phase == 'liquid':
                 validation_results['liquid_species'] += 1
             elif species.phase == 'solid':
                 validation_results['solid_species'] += 1
-            
+
             if species.source == 'NASA_CEA':
                 validation_results['nasa_cea_species'] += 1
             else:
                 validation_results['custom_species'] += 1
-            
+
             if len(species.cp_coefficients) >= 7:
+                validation_results['species_with_seven_coefficients'] += 1
+
+            if self._coefficient_status(species) is None:
+                validation_results['species_with_usable_coefficients'] += 1
                 validation_results['species_with_coefficients'] += 1
             else:
+                validation_results['species_with_placeholder_coefficients'] += 1
                 validation_results['species_missing_data'] += 1
-        
+                placeholder_names.append(name)
+
+        validation_results['placeholder_species'] = sorted(placeholder_names)
+        validation_results['coefficient_check_basis'] = (
+            'A record counts as having coefficients only when at least one '
+            'cp_coefficient is non-zero; a list of seven zeros is a '
+            'placeholder, not data. species_with_seven_coefficients reports '
+            'the structural count separately so the two can be compared.')
+        validation_results['thermo_properties_withheld_for'] = sorted(
+            placeholder_names)
         return validation_results
 
 # Initialize global database instance

@@ -106,8 +106,20 @@ def sivi_motor(client):
 @pytest.fixture(scope='module')
 def kati_motor(client):
     """GERÇEK katı hesabı — /calculate_solid yanıtı (üst düzey sözlük)."""
-    yuk = {'motor_name': 'bridge-s', 'chamber_pressure': 40, 'thrust': 1500,
-           'burn_time': 3, 'grain_type': 'bates', 'outer_diameter': 100,
+    # ÖH D26 (defter P15B3-02, YÜKSEK) — GÖVDE DÜZELTİLDİ. Bu gövde
+    # eskiden ``'thrust': 1500, 'burn_time': 3`` taşıyordu; ikisi katı
+    # ucunda TASARIM NOKTASI HEDEFİDİR ve bu yanma hızı katsayılarıyla
+    # (a=0,005 / n=0,35) BATES zarfının dışındadır. Taban 7751531'de uç,
+    # ulaşılamayan hedefi sessizce düşürüp başlangıç geometrisinin
+    # eğrisini 200 ile yayımlıyordu: yani buradaki 1500 N HİÇBİR ZAMAN
+    # etkili olmadı, testin ölçtüğü motor her zaman 4312,736770254884 N
+    # / 1,9963492719477878 s idi. Zarf kapısı fail-closed olunca o dal
+    # 422 döner. Gövde bu yüzden ZATEN ÖLÇÜLEN kipe (geometri kipi)
+    # çevrildi; ``outer_diameter`` da ucun okuduğu ada getirildi (uç
+    # zaten aynı 100 mm'yi tohumluyordu). ÖLÇÜLDÜ: yanıt tasarım noktası
+    # bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148, 186.659 bayt).
+    yuk = {'motor_name': 'bridge-s', 'chamber_pressure': 40,
+           'grain_type': 'bates', 'chamber_diameter': 100,
            'core_diameter': 35, 'grain_length': 300, 'segments': 1,
            'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
            'chamber_temperature': 3000, 'c_star': 1550,
@@ -150,12 +162,16 @@ def _kosuyu_dogrula(out, motor, cidar_mm, beklenen_tip):
     assert conv['history'], 'inceltme geçmişi boş olamaz'
     assert isinstance(conv['beyan'], str) and 'YAKINSA' in conv['beyan'].upper()
 
-    # Girdilerin _basis zinciri: her alanın kaynağı beyanlı; P(x)
-    # yayımlanmadığı için sabit-Pc yaklaşımı AÇIKÇA yazılı.
+    # Girdilerin _basis zinciri: her alanın kaynağı beyanlı. OH-DK-04 (v3
+    # fea-yuk, karar §28-18 B): P(x) artık modellenir — dağılımın beyanı yük
+    # modeli künyesindedir; üç motor da γ yayımladığı için izantropik
+    # dağılım (eski beklenti 'SABİT Pc' kararla geçersizleşen yükten
+    # türemişti; dört koşul satırı docs/scofield/raw/OH/V3/fea-yuk/rapor.md).
     basis = ins['_basis']
-    for alan in ('kontur', 'cidar', 'malzeme', 'yuk', 'kamara_uzantisi'):
+    for alan in ('kontur', 'cidar', 'malzeme', 'yuk', 'kamara_uzantisi',
+                 'yuk_modeli'):
         assert alan in basis, f'_basis zincirinde {alan} beyanı yok'
-    assert 'SABİT Pc' in basis['yuk']['dagilim']
+    assert basis['yuk_modeli']['distribution'] == 'isentropic_1d'
     assert out['meta']['not_modelled'], 'modellenmeyen fizik beyanı boş'
 
 
@@ -270,15 +286,54 @@ def test_tip_tespiti_tahmin_etmez():
 # ---------------------------------------------------------------------------
 # 4) Termal iskelet — profil zorunlu, D2 kapısı import-korumalı
 # ---------------------------------------------------------------------------
-def _ornek_profil():
+def _ornek_profil(motor=None):
     """analyze_axial_profile sözleşmesinde küçük sentetik profil.
 
     Test altyapısıdır (pytest fixture sınıfı) — kullanıcıya gösterilen
     veri değildir; sahte veri yasağının test-mock istisnası kapsamındadır.
+
+    ÖH D15 (P8B1-01 kulvarı, kalem P8B2-01) GÜNCELLEMESİ: köprü artık
+    h(z)'nin BÜYÜKLÜK MERTEBESİNİ motorun kendi boğaz gaz-tarafı
+    katsayısına karşı sınıyor (eskiden yalnız isfinite + > 0 idi ve
+    Bartz'ın 1/50'si sessizce kabul ediliyordu). Buradaki sabit tepe
+    değer (4.800 W/m²K) gerçek hibrit motorun yayımladığı ~11.500
+    W/m²K'den %58 sapıyor ve haklı olarak REDDEDİLİYOR. Profilin ROLÜ
+    bu dosyada h(z)'nin doğruluğu değil, D2 kapısının davranışı; o
+    yüzden şekil aynı bırakılıp ÖLÇEĞİ motorun kendi alanından alınır.
+    Motor verilmezse eski sabitler kalır (kapının çalıştırılamadığı
+    dallar için).
     """
-    return {'x_mm': [0.0, 40.0, 80.0, 124.0],
+    prof = {'x_mm': [0.0, 40.0, 80.0, 124.0],
             'h_g': [900.0, 4800.0, 2100.0, 1300.0],
             'T_recovery': [2900.0, 2850.0, 2600.0, 2400.0]}
+    if isinstance(motor, dict):
+        hg = ((motor.get('heat_transfer_analysis') or {})
+              .get('heat_transfer_coefficients') or {}).get('gas_side')
+        if isinstance(hg, (int, float)) and hg > 0:
+            olcek = float(hg) / max(prof['h_g'])
+            prof['h_g'] = [v * olcek for v in prof['h_g']]
+        # ÖH D15 aşama 3 (kalem P8B2-04) GÜNCELLEMESİ: köprü artık profilin
+        # İÇ istasyonlarını da sınıyor — h(z) tepesi konturun boğazına
+        # düşmelidir (eskiden yalnız iki UÇ noktası denetleniyordu ve iç
+        # istasyonları tamamen kaydırılmış profil kapıdan geçiyordu).
+        # Bu fikstürün sabit tepe istasyonu (40 mm) gerçek hibrit konturun
+        # boğazından (66,43 mm) 26,4 mm sapıyor ve haklı olarak
+        # REDDEDİLİYOR. Profilin bu dosyadaki ROLÜ h(z) doğruluğu değil D2
+        # kapısının davranışıdır; ŞEKİL aynı bırakılıp istasyonlar motorun
+        # kendi konturuna oturtulur (ölçek düzeltmesinin aynı deseni).
+        try:
+            import numpy as _np
+            _gir = extract_structural_inputs(motor, include_chamber=False)
+            if _gir.get('status') == 'ok':
+                _k = _np.asarray(_gir['contour'], dtype=float)
+                _z = _k[:, 0] * 1000.0
+                _z_bogaz = float(_z[int(_np.argmin(_k[:, 1]))])
+                _z0, _z1 = float(_z.min()), float(_z.max())
+                prof['x_mm'] = [_z0, _z_bogaz,
+                                0.5 * (_z_bogaz + _z1), _z1]
+        except Exception:                                    # noqa: BLE001
+            pass
+    return prof
 
 
 def test_termal_profilsiz_red(hibrit_motor):
@@ -304,7 +359,7 @@ def test_termal_modul_yokken_aciklayici_red(hibrit_motor, monkeypatch):
     """
     monkeypatch.setitem(sys.modules, 'hrma.fea.thermal_axisym', None)
     sonuc = run_thermal_from_motor(hibrit_motor,
-                                   axial_profile=_ornek_profil())
+                                   axial_profile=_ornek_profil(hibrit_motor))
     assert sonuc['status'] == BRIDGE_STATUS_NOT_AVAILABLE
     assert 'thermal_axisym' in sonuc['reason']
     assert sonuc['warning']['code'] == bridge.WARN_THERMAL_SOLVER_UNAVAILABLE
@@ -316,12 +371,15 @@ def test_termal_modul_varken_girdiler_hazir(hibrit_motor, monkeypatch):
     """D2 varken: INPUTS_READY + çıkarılmış girdiler; çözüm İDDİASI yok."""
     monkeypatch.setitem(sys.modules, 'hrma.fea.thermal_axisym',
                         types.ModuleType('hrma.fea.thermal_axisym'))
-    sonuc = run_thermal_from_motor(hibrit_motor,
-                                   axial_profile=_ornek_profil())
+    prof = _ornek_profil(hibrit_motor)
+    sonuc = run_thermal_from_motor(hibrit_motor, axial_profile=prof)
     assert sonuc['status'] == BRIDGE_STATUS_INPUTS_READY
     ins = sonuc['inputs']
     # x_mm → m dönüşümü yapılmış, diziler eş boy ve pozitif.
-    assert ins['h_x_m'][-1] == pytest.approx(0.124)
+    # ÖH D15 aşama 3 (P8B2-04): sabit 0,124 beklentisi, fikstür artık
+    # istasyonlarını motorun KENDİ konturuna oturttuğu için profilin kendi
+    # son istasyonundan okunur — sınanan şey birim dönüşümüdür, sabit değil.
+    assert ins['h_x_m'][-1] == pytest.approx(prof['x_mm'][-1] / 1000.0)
     assert ins['h_g_W_m2K'].shape == ins['t_recovery_K'].shape
     assert np.all(ins['h_g_W_m2K'] > 0.0)
     # Malzemenin termal alanları materials_db kaydından beyanlı.

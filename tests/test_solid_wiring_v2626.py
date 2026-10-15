@@ -138,21 +138,48 @@ class TestPropellantIdentityReachesSolver:
 
     def test_two_phase_loss_follows_the_condensed_mass_fraction(
             self, client, base_payload):
-        """Metalize APCP ile dumansız çift bazlı aynı kaybı raporlayamaz."""
+        """Metalize APCP ile dumansız çift bazlı aynı kaybı raporlayamaz.
+
+        ÖH D33 · motorlar a1 (OH-D32-17) — BEKÇİ ÇEVRİLDİ, GEVŞETİLMEDİ.
+        Düğüm eskiden ``sugar > 0`` ve ``sugar > apcp`` diyordu; knsu'nun
+        X_p = 0,44'ü K çapasının yayımlanmış penceresinin (NASA SP-8039
+        Fig. 8, 0-0,40) DIŞINDA olduğu için o sayı bir EKSTRAPOLASYONDU ve
+        Berke kararıyla (15 Eyl 2026, hüküm-21c) geri çekildi: alan artık
+        ``None`` ve gerekçesi ``two_phase_losses_withheld_reason``
+        alanında. ÖLÇÜLDÜ (docs/scofield/raw/OH/D33/motorlar/a1/once.json
+        K3/K4): taban 5,28 yayımlıyordu.
+
+        İDDİA KORUNDU: "yakıt kimliği çözücüye ULAŞIYOR ve iki-faz kalemi
+        yoğuşmuş faz kesrini İZLİYOR" hükmü hâlâ sınanıyor — üç yakıt üç
+        AYRI sonuç veriyor (apcp sayı, double_base tam sıfır, knsu geri
+        çekilmiş) ve knsu'nun geri çekilme SEBEBİ yine X_p tablosundan
+        okunuyor. Kimlik çözücüye ulaşmasaydı üçü de aynı olurdu.
+        """
+        from hrma.engines.solid_rocket_engine import _two_phase_anchor_envelope
         path = ('detailed_analysis.performance_metrics.'
                 'theoretical_vs_actual_isp.two_phase_losses')
+        gerekce = ('detailed_analysis.performance_metrics.'
+                   'theoretical_vs_actual_isp.'
+                   'two_phase_losses_withheld_reason')
         apcp = leaf(run(client, base_payload, propellant_type='apcp'), path)
         double_base = leaf(run(client, base_payload,
                                propellant_type='double_base'), path)
-        sugar = leaf(run(client, base_payload, propellant_type='knsu'), path)
+        knsu_govde = run(client, base_payload, propellant_type='knsu')
+        sugar = leaf(knsu_govde, path)
 
-        assert apcp > 0 and sugar > 0
+        assert apcp > 0
         assert double_base == 0.0, 'dumansız yakıtta iki-fazlı kayıp olmaz'
+        # Zarf dışı yakıtta sayı YOK, gerekçe VAR (fail-closed).
+        assert sugar is None
+        assert leaf(knsu_govde, gerekce) == 'outside_anchor_envelope'
         assert apcp != sugar
-        # X_p tablosuyla tutarlı sıralama: şekerde yoğuşmuş faz daha ağır.
+        # X_p tablosuyla tutarlı: şekerde yoğuşmuş faz daha ağır — ve zaten
+        # bu yüzden K çapasının penceresinin dışına çıkıyor.
         assert (SOLID_CONDENSED_MASS_FRACTION['knsu']
                 > SOLID_CONDENSED_MASS_FRACTION['apcp'])
-        assert sugar > apcp
+        pencere, _kaynak = _two_phase_anchor_envelope()
+        assert SOLID_CONDENSED_MASS_FRACTION['apcp'] <= pencere[1]
+        assert SOLID_CONDENSED_MASS_FRACTION['knsu'] > pencere[1]
 
     def test_grain_temperature_limit_follows_the_propellant_and_is_labelled(
             self, client, base_payload):

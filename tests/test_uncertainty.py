@@ -14,6 +14,7 @@ Kapsam (ARGE spec docs/arge-guven-2026-07/arge_uq_tasarim.md, Bölüm 4-7, 9-10)
   * hibrit FAST bütçesi (N=200) süre üst sınırı (< 60 s bu makinede)
 """
 
+import os
 import time
 import warnings
 
@@ -132,7 +133,22 @@ def test_sample_zero_is_nominal_vector():
     # /calculate teorik c* raporlar (eta_c_star'i UYGULAMAZ), dolayisiyla UQ
     # nominali de 1.0 olmali; 0.93 beklemek UQ ile ana sayfayi birbirinden
     # ayiriyordu ve hicbir kontrol bunu yakalamiyordu (nominal_override).
-    assert row0['eta_c_star'] == pytest.approx(1.0)
+    #
+    # BİLİNÇLİ KİLİT — AÇIK BORÇ (ÖH FAZ A / A5, defter P13B3-14, ÖK-04).
+    # Bu satır bir TUTARLILIK kilididir, bir FİZİK hükmü DEĞİLDİR: ana akışın
+    # eta_c*'yi hiç uygulamadığı GERÇEĞİNİ kilitler. Borç ve ödeme koşulu
+    # aşağıdaki `TestEtaCStarBorcu` sınıfında xfail(strict=True) ile AÇIK
+    # imlenmiştir; fizik dalgası eta_c*'yi ürün akışına bağladığında o imler
+    # XPASS verip KIRMIZIYA döner ve bu satırın da güncellenmesini ister.
+    # O gün yapılacak: buradaki 1.0'ı "geri al" DEĞİL, iki yolun ortak
+    # eta_c* değeriyle (ör. dağılım ortalaması 0.93) DEĞİŞTİR ve
+    # `nominal_override`ı kaldır — aynı commit'te.
+    assert row0['eta_c_star'] == pytest.approx(1.0), (
+        'UQ nominali 1.0 değil. Bu bir kusur DEĞİL de fizik dalgasının '
+        'onarımıysa (ana akış artık eta_c* uyguluyorsa): bu satırı ana '
+        'akışın uyguladığı değere çekin, uncertainty.py:nominal_override '
+        'imini kaldırın ve TestEtaCStarBorcu xfail imlerini silin — '
+        'ÖH defter P13B3-14 / ÖK-04.')
 
 
 def test_sampled_values_respect_bounds():
@@ -422,15 +438,50 @@ def test_hybrid_optimum_of_injection():
 
 
 def test_hybrid_eta_c_star_scaling():
+    """Teslim edilen c* = eta x teorik; Isp bunu CF ÜZERİNDEN taşır.
+
+    ÖH D26 fix-25a — eski satır ``isp`` için de DÜZ orantı istiyordu
+    (``scaled.isp == eta * base.isp``, rel=1e-6) ve ölçümle yanlışlandı:
+    0,90'da oran 0,900628566849563 (sapma 6,98e-04). Sapma bir kusur DEĞİL,
+    ürünün GERÇEK bir bağlaşımıdır ve kaynağı bit düzeyinde bulundu
+    (``a109e4a`` — ÖH D22 hibrit a1, OH-D21-02/OH-D21-03 "gerçekleşen L*"):
+
+        eta_c* düşer -> aynı itki için mdot artar -> kamara/tane büyür ->
+        GERÇEKLEŞEN L* artar (4,7975 -> 5,4993 m) -> kalış süresi uzar ->
+        eta_kinetic ARTAR (0,993292516176 -> 0,993986239229) -> CF artar.
+
+    ÖLÇÜLDÜ: ``CF_lossless`` iki koşumda BİT-AYNI, ``friction_efficiency``
+    aynı, ve ``cf`` oranı ile ``kinetic_efficiency`` oranı arasındaki fark
+    TAM SIFIR — yani CF'nin eta'ya olan TEK bağımlılığı bu bağlaşımdır.
+    Dolayısıyla değişmez nicelik ``Isp/CF = c*/g0``'dır ve o EKSİKSİZ
+    ölçeklenir (eta ile fark 2,2e-16).
+
+    Bekçi GEVŞEMEDİ, SIKILAŞTI: düz orantı yerine türetimli özdeşlik
+    sınanıyor (rel 1e-6 -> 1e-12) ve CF sapmasının kaynağı da ADIYLA
+    çivileniyor. eta yalnız c*'a uygulanıp Isp'e uygulanmasaydı (borcun
+    yarım ödenmesi) Isp/CF oranı 1,0 çıkar ve bu bekçi kırmızı verirdi.
+    """
     from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
     base = HybridRocketEngine(track_performance=False, uq_mode=True,
                               **HYBRID_CTOR).calculate()
     eta = 0.90
     scaled = HybridRocketEngine(track_performance=False, uq_mode=True,
                                 eta_c_star=eta, **HYBRID_CTOR).calculate()
-    # Teslim edilen c* = eta * teorik; Isp aynı oranda ölçeklenir (Isp=CF·c*/g0)
     assert scaled['c_star'] == pytest.approx(eta * base['c_star'], rel=1e-9)
-    assert scaled['isp'] == pytest.approx(eta * base['isp'], rel=1e-6)
+    # Isp/CF = c*/g0: eta'yı TAM taşıyan değişmez.
+    assert (scaled['isp'] / scaled['cf']) == pytest.approx(
+        eta * base['isp'] / base['cf'], rel=1e-12), (
+        'eta_c* Isp\'e c* çarpanı üzerinden girmiyor — borç yarım ödenmiş '
+        'olabilir')
+    # CF'nin TEK eta bağımlılığı gerçekleşen L* -> kinetik verim zinciridir.
+    kin = 'kinetic_efficiency'
+    assert (scaled['cf'] / base['cf']) == pytest.approx(
+        scaled['nozzle_design']['performance'][kin]
+        / base['nozzle_design']['performance'][kin], rel=1e-12), (
+        'CF eta ile kinetik verim DIŞINDA bir yerden de oynuyor')
+    # Yön kilidi: daha büyük motor -> daha uzun kalış -> daha iyi kinetik.
+    assert (base['nozzle_design']['performance'][kin]
+            < scaled['nozzle_design']['performance'][kin] < 1.0)
     assert scaled['c_star_theoretical'] == pytest.approx(base['c_star'],
                                                          rel=1e-9)
     assert scaled['eta_c_star'] == pytest.approx(eta)
@@ -466,14 +517,57 @@ def test_combustion_analyzer_memoization_consistency():
     assert plain.memoize is False and plain._equilibrium_cache == {}
 
 
+#: OH-D20-12 — örnek başına denge çözümü tavanı. ÖLÇÜLEN taban 3,015
+#: (14acd1d, 200 örnek / 603 önbellek yazımı); tavan tabanın ~%6 üstünde.
+#: Bu bant makine hızından BAĞIMSIZDIR: yalnız önbellek anahtarının
+#: inceliği (ve dolayısıyla algoritma maliyeti) değişirse aşılır.
+COZUM_PER_ORNEK_TAVANI = 3.2
+
+
 def test_hybrid_fast_budget_end_to_end():
     """Hibrit FAST bütçesi (N=200) uçtan uca: şema + süre üst sınırı.
 
     ARGE ölçümü: uq_mode + memo + track=False ≈ 91-185 ms/örnek → 200 örnek
     ~20-40 s. Üst sınır 60 s (M4'te; yaşlı donanım payıyla).
+
+    CI çarpanı (2026-08-18, parti 33): bütçe M4 ölçümünden türetildi;
+    paylaşımlı GitHub koşucusunda AYNI commit 60,19 s ölçtü (%0,3 taşma,
+    32106265299 numaralı koşum) — donanım tabanı farklı, algoritma
+    gerilemesi değil. Bu bekçinin işi ALGORİTMA maliyeti gerilemesini
+    yakalamak (tarihsel gerilemeler 3-10×); CI'da 2× pay o sınıfı hâlâ
+    yakalar, koşucu değişkenliğini kırmızıya çevirmez. Yerelde sınır
+    değişmedi. Örnek-başına 250 ms tavanı iki ortamda da aynıdır.
     """
     from hrma.engines.combustion_analysis import CombustionAnalyzer
     shared = CombustionAnalyzer(memoize=True)
+
+    # ÖH D20 · defter OH-D20-12 — MAKİNEDEN BAĞIMSIZ İKİNCİ ÖLÇÜ.
+    #
+    # Duvar saati bekçisi tek başına yeterli DEĞİL: OH-D18-02 bu testin
+    # 24,66 s'den (e726048) 46,20 s'ye (60cd341) çıktığını, yani maliyetin
+    # 1,87× arttığını ölçtü ve 60 s'lik sınır bunu YAKALAMADI (pay %59 ->
+    # %23). Sınır makine hızıyla algoritma maliyetini karıştırıyor;
+    # paylaşımlı bir koşucuda kırmızıya düşerken gerçek gerilemeyi sessiz
+    # geçirebiliyor.
+    #
+    # Pahalı iş, denge çözümüdür ve sayısı ÖLÇÜLEBİLİR: önbelleğe her
+    # yazım bir gerçek çözüm demektir. ÖLÇÜLDÜ (14acd1d, ``once_ohd2012
+    # .json``): 200 örnek için 603 yazım = **3,015 çözüm/örnek**, denge
+    # önbelleği 402 anahtar, istasyon önbelleği 64. Önbellek ANAHTARI
+    # incelirse (B3-07 sınıfı gerileme) bu sayı örnek sayısına doğru
+    # patlar — hangi makinede koşarsa koşsun.
+    class _SayanOnbellek(dict):
+        yazim = 0
+
+        def __setitem__(self, k, v):
+            _SayanOnbellek.yazim += 1
+            dict.__setitem__(self, k, v)
+
+    _SayanOnbellek.yazim = 0
+    shared._equilibrium_cache = _SayanOnbellek(shared._equilibrium_cache)
+    shared._eq_station_cache = _SayanOnbellek(
+        getattr(shared, '_eq_station_cache', {}) or {})
+
     dists = get_default_distributions('hybrid',
                                       overrides={'cd_injector': None})
     factory = _make_hybrid_factory(shared)
@@ -489,9 +583,33 @@ def test_hybrid_fast_budget_end_to_end():
     assert res['consistency']['nominal_check'] == 'passed'
     assert res['n_samples'] == FAST
     assert res['failed_samples'] <= 5
-    assert wall < 60.0, f'FAST butcesi {wall:.1f} s (limit 60 s)'
+    limit_s = 120.0 if os.environ.get('GITHUB_ACTIONS') == 'true' else 60.0
+    assert wall < limit_s, f'FAST butcesi {wall:.1f} s (limit {limit_s:.0f} s)'
     # uq_mode örnek süresi hedefi (spec: <= 250 ms/örnek)
     assert res['timing']['per_sample_ms'] <= 250.0, res['timing']
+
+    # OH-D20-12: algoritma maliyeti — saat DEĞİL, SAYI.
+    #
+    # ÖH D26 · Fable-D20 ŞART — FAIL-CLOSED ALT SINIR. Tavan iddiası tek
+    # başına ÖLÇÜMÜN KOPMASINA kör: sayaç hiç yazım görmezse
+    # ``cozum_per_ornek`` 0,000 olur ve tavan testi YEŞİL geçer. Bu, en
+    # sessiz gerileme biçimidir — önbellek ürün tarafında yeniden atanır
+    # (``self._equilibrium_cache = {}``), ``clear()`` edilir ya da yazım
+    # ``__setitem__`` dışından (``dict.update``, ``setdefault``) yapılırsa
+    # sayaç sarmalayıcı devre dışı kalır ve bekçi ölçtüğünü sanarak boş
+    # döner. Alt sınır yalnız SIFIRI ısırır: tavan iddiasını ve hibrit
+    # kulvarının meşru maliyet düşürme payını hiç kısıtlamaz.
+    assert _SayanOnbellek.yazim > 0, (
+        'sayaç hiç yazım görmedi — ölçüm kopuk (önbellek yeniden '
+        'atanmış/clear edilmiş ya da __setitem__ dışı yazım). '
+        'Bu durumda aşağıdaki tavan iddiası 0,000 ile YEŞİL geçer, '
+        'yani OH-D20-12 bekçisi sessizce hiçbir şey ölçmüyordur')
+    cozum_per_ornek = _SayanOnbellek.yazim / float(FAST)
+    assert cozum_per_ornek <= COZUM_PER_ORNEK_TAVANI, (
+        f'örnek başına denge çözümü {cozum_per_ornek:.3f}; ölçülen taban '
+        f'3,015 ve tavan {COZUM_PER_ORNEK_TAVANI}. Önbellek anahtarı '
+        'incelmiş olabilir (OH-D20-12 / B3-07 sınıfı gerileme); duvar '
+        'saati bunu makine hızının arkasına saklar, bu sayı saklamaz')
 
     # Şema: her çıktı için istatistik bloğu + duyarlılık + künyeler
     for key in output_keys:
@@ -516,15 +634,150 @@ def test_hybrid_fast_budget_end_to_end():
     # kurmak UQ'yu ana sayfadan ayırıyordu (Isp 225.4 vs 242.3, tam 1/0.93
     # oranı) ve hiçbir kontrol bu sapmayı yakalamıyordu. nominal_override
     # ikisini birbirine kilitler — bu test o kilidin bekçisidir.
+    #
+    # BİLİNÇLİ KİLİT — AÇIK BORÇ (ÖH FAZ A / A5, defter P13B3-14, ÖK-04).
+    # `eta_c_star=1.0` burada bir FİZİK SEÇİMİ değil, ürünün bugünkü
+    # davranışının YAZIYA DÖKÜLMÜŞ hâlidir. Borç `TestEtaCStarBorcu`da
+    # xfail(strict=True) ile imli; ödendiği gün bu satır "geri alınmaz",
+    # ana akışın uyguladığı eta_c* ile GÜNCELLENİR.
     from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
     det = HybridRocketEngine(track_performance=False, uq_mode=True,
                              eta_c_star=1.0, **HYBRID_CTOR).calculate()
-    assert res['nominal']['isp'] == pytest.approx(det['isp'], rel=1e-9)
+    assert res['nominal']['isp'] == pytest.approx(det['isp'], rel=1e-9), (
+        'UQ nominali deterministik yoldan ayrıldı. Fizik dalgası eta_c*\'yi '
+        'ana akışa bağladıysa: yukarıdaki eta_c_star=1.0\'ı ana akışın '
+        'uyguladığı değerle değiştirin ve TestEtaCStarBorcu imlerini '
+        'kaldırın (ÖH defter P13B3-14 / ÖK-04). Aksi halde bu, UQ panelini '
+        'ana sayfadan koparan gerçek bir gerilemedir.')
 
     # Rapor için örnek başına süreyi görünür kıl (pytest -s ile)
     print(f"\nhibrit FAST: {wall:.1f} s toplam, "
           f"{res['timing']['per_sample_ms']:.0f} ms/ornek, "
           f"{res['failed_samples']} basarisiz")
+
+
+# ---------------------------------------------------------------------------
+# η_c* BORCU — ters yön bekçileri (ÖH FAZ A / A5, defter P13B3-14, ÖK-04)
+# ---------------------------------------------------------------------------
+# Ölçülen kusur: bu dosyadaki iki bekçi (`test_sample_zero_is_nominal_vector`
+# :136 ve `test_hybrid_fast_budget_end_to_end` :531-533) ana akışın eta_c*'yi
+# HİÇ UYGULAMADIĞI gerçeğini kilitliyordu. Kilit tutarlılık için doğruydu ama
+# tek yönlüydü: kök sebebi (uygulanmama) sınayan bir iddia YOKTU. Fizik
+# dalgası eta_c*'yi bağladığında o iki bekçi kırmızıya döner ve düzelten
+# kişiye "geri al" derdi — kampanyanın "kusuru koruyan bekçi" sınıfı.
+#
+# Aşağıdaki üç bekçi TERS YÖNDE sorar: "eta_c* uygulanıyor mu?" Bugün YANIT
+# HAYIR olduğu için üçü de xfail(strict=True) — yani borç AÇIK, belgeli ve
+# KIRMIZI sayılır. Onarım geldiğinde strict im XPASS'i kırmızıya çevirir:
+# bekçi kendi imini KALDIRTIR, "geri al" DEMEZ.
+#
+# Bugün ölçülen (27 Ağustos 2026, HYBRID_CTOR):
+#   hrma/app.py içinde 'eta_c_star' geçişi        : 0
+#   varsayılan calculate() çıktısında eta_c_star  : anahtar YOK (None)
+#   DEFAULT_UQ_MODELS['hybrid'] nominal_override  : 1.0  (mean 0.93)
+#   Isp: varsayılan 242,3268 s ⟷ eta=0,93 ile 225,3639 s  -> oran TAM 0,93
+
+ETA_BORC_IMI = pytest.mark.xfail(
+    strict=True,
+    reason='ÖH defter P13B3-14 (ÖK-04): ana akış (/calculate) eta_c*\'yi '
+           'UYGULAMIYOR — teorik c* raporlanıyor. Bu im borcun AÇIK '
+           'kaydıdır; fizik dalgası eta_c*\'yi bağladığında test XPASS '
+           'verir, strict im KIRMIZI olur ve im kaldırılır. Aynı commit\'te '
+           'güncellenecekler: test_uncertainty.py:136 nominali, '
+           'test_uncertainty.py eta_c_star=1.0 karşılaştırması, '
+           'hrma/analysis/uncertainty.py nominal_override.')
+
+
+class TestEtaCStarBorcu:
+    """η_c* uygulanıyor mu? (bugün HAYIR — borç açık imli)"""
+
+    @ETA_BORC_IMI
+    def test_ana_akis_eta_c_star_gonderiyor(self):
+        """Uç (app.py) motoru eta_c* ile kuruyor mu?"""
+        import pathlib
+        kaynak = pathlib.Path(
+            uq.__file__).resolve().parents[1].joinpath('app.py').read_text(
+                encoding='utf-8')
+        assert 'eta_c_star' in kaynak, (
+            'hrma/app.py hiçbir motoru eta_c* ile kurmuyor: kullanıcının '
+            'gördüğü Isp/c* TEORİKTİR (verim uygulanmamış, iyimser yön).')
+
+    @ETA_BORC_IMI
+    def test_varsayilan_hesap_eta_c_star_kunyeliyor(self):
+        """Varsayılan hesap uyguladığı verimi ADIYLA raporluyor mu?"""
+        from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
+        r = HybridRocketEngine(track_performance=False, uq_mode=True,
+                               **HYBRID_CTOR).calculate()
+        assert r.get('eta_c_star') is not None, (
+            'varsayılan hesabın çıktısında eta_c_star yok — uygulanan bir '
+            'verim de, uygulanmadığının künyesi de mevcut değil')
+
+    @ETA_BORC_IMI
+    def test_uq_nominali_override_gerektirmiyor(self):
+        """İki yol aynı verimi uygularsa `nominal_override` GEREKSİZLEŞİR."""
+        eta = DEFAULT_UQ_MODELS['hybrid']['eta_c_star']
+        assert eta.nominal_override is None, (
+            f'nominal_override={eta.nominal_override} hâlâ gerekli: UQ '
+            f'dağılımı ortalama {eta.mean} varsayarken ana akış 1.0 '
+            'uyguluyor. Override iki yolu birbirine kilitliyor ama farkı '
+            'ORTADAN KALDIRMIYOR.')
+
+    def test_borcun_buyuklugu_olculu_ve_sabit(self):
+        """Bugün YEŞİL çapa: borcun BÜYÜKLÜĞÜ ölçülür ve kilitlenir.
+
+        Yukarıdaki üç im "borç var" der; bu bekçi "borç TAM ŞU KADAR" der.
+        Biri eta_c*'yi YARIM bağlarsa (ör. yalnız c*'a uygulayıp Isp'e
+        uygulamazsa) imler hâlâ xfail kalabilir ama bu oran kayar ve KIRMIZI
+        verir. Ölçülen: 225,3639 / 242,3268 = 0,93 (dağılım ortalaması).
+
+        ÖH D26 fix-25a — (2) numaralı ayak ``isp`` oranını DOĞRUDAN eta'ya
+        eşitliyordu ve ölçümle yanlışlandı: oran 0,930452718819554 (sapma
+        4,87e-04). Sapmanın tamamı ``a109e4a`` (ÖH D22 hibrit a1,
+        OH-D21-02/OH-D21-03) ile gelen GERÇEKLEŞEN L* bağlaşımından geliyor:
+        eta düşünce aynı itki için motor büyüyor (L* 4,7975 -> 5,2701 m),
+        kalış süresi uzuyor ve kinetik verim artıyor (0,993292516176 ->
+        0,993776045440). ÖLÇÜLDÜ: ``cf`` oranı ile ``kinetic_efficiency``
+        oranı arasındaki fark TAM SIFIR; ``CF_lossless`` bit-aynı.
+
+        Yani borç YARIM ÖDENMİŞ DEĞİL — c*'a TAM uygulanıyor (oran tam 0,93)
+        ve Isp bunu CF çarpanı üzerinden taşıyor. Bekçi bu yüzden GEVŞEMEZ,
+        değişmez niceliğe (``Isp/CF = c*/g0``) çevrilir ve tolerans 1e-9'dan
+        1e-12'ye SIKILAŞIR; CF sapmasının kaynağı da ayrıca çivilenir.
+        eta yalnız c*'a uygulanıp Isp'e uygulanmasaydı oran 1,0 çıkardı.
+        """
+        from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
+        varsayilan = HybridRocketEngine(track_performance=False, uq_mode=True,
+                                        **HYBRID_CTOR).calculate()
+        teorik = HybridRocketEngine(track_performance=False, uq_mode=True,
+                                    eta_c_star=1.0, **HYBRID_CTOR).calculate()
+        eta = DEFAULT_UQ_MODELS['hybrid']['eta_c_star'].mean
+        teslim = HybridRocketEngine(track_performance=False, uq_mode=True,
+                                    eta_c_star=eta,
+                                    **HYBRID_CTOR).calculate()
+        # (1) Varsayılan yol = TEORİK yol: verim uygulanmıyor.
+        assert varsayilan['isp'] == pytest.approx(teorik['isp'], rel=1e-12), (
+            'varsayılan hesap artık teorik c* vermiyor — eta_c* bağlanmış '
+            'olabilir; öyleyse yukarıdaki üç xfail imi de düşmüş olmalı '
+            '(defter P13B3-14)')
+        # (2) Borcun büyüklüğü: dağılım ortalaması kadar, TAM — değişmez
+        #     nicelik Isp/CF = c*/g0 üstünden ölçülür.
+        olculen = (teslim['isp'] / teslim['cf']) / (varsayilan['isp']
+                                                    / varsayilan['cf'])
+        assert olculen == pytest.approx(eta, rel=1e-12), (
+            'eta_c* Isp\'e c* çarpanı üzerinden girmiyor: borç yarım '
+            'ödenmiş ya da başka bir yerden telafi edilmiş olabilir. '
+            f'ölçülen oran={olculen!r}, beklenen={eta}')
+        # (3) c*'ın kendisi de tam ölçeklenir (borcun uygulandığı yer).
+        assert teslim['c_star'] / varsayilan['c_star'] == pytest.approx(
+            eta, rel=1e-12)
+        # (4) CF'nin eta'ya olan TEK bağımlılığı gerçekleşen L* -> kinetik
+        #     verim zinciridir; başka bir telafi kanalı açılırsa kırmızı.
+        kin = 'kinetic_efficiency'
+        assert teslim['cf'] / varsayilan['cf'] == pytest.approx(
+            teslim['nozzle_design']['performance'][kin]
+            / varsayilan['nozzle_design']['performance'][kin], rel=1e-12), (
+            'CF eta ile kinetik verim DIŞINDA bir yerden de oynuyor — '
+            'borç başka bir kanaldan telafi ediliyor olabilir')
 
 
 # ---------------------------------------------------------------------------

@@ -421,8 +421,19 @@ class TestIzgara:
             'izgara yine motorla ölçekleniyor — mutlak referans kayboldu')
 
     def test_rozet_hucre_boyunu_yazar(self):
-        out = _emit(_extract('gridBadgeText'), 'gridBadgeText(50)')
-        assert out == 'ızgara 50 mm'                 # UTF-8 'ı' ile
+        """ÇEVRİLEN BEKÇİ (ÖH D21, kulvar arayuz, kalem P17B1-09).
+
+        Eskiden ``out == 'ızgara 50 mm'`` idi, yani rozetin dilden bağımsız
+        TÜRKÇE yazmasını kilitliyordu — P17'nin ``en-US`` oturumda ölçtüğü
+        kusurun ta kendisi. Asıl iddia (rozet SEÇİLEN hücre boyunu yazar,
+        sahneye bağlıdır) korunuyor; sözcük artık oturum dilinden gelir.
+        """
+        EN = "function T(key, fallback) { return fallback; }\n"
+        TR = ("function T(key, fallback) {"
+              " return key === 'viz3d.badge.grid' ? 'ızgara' : fallback; }\n")
+        gov = _extract('gridBadgeText')
+        assert _emit(EN + gov, 'gridBadgeText(50)') == 'grid 50 mm'
+        assert _emit(TR + gov, 'gridBadgeText(50)') == 'ızgara 50 mm'
         src = _source()
         assert 'gridBadgeText(cell)' in src, 'rozet sahneye bağlanmamış'
 
@@ -634,21 +645,110 @@ HYBRID_DIMS = ("{ motorType: 'hybrid', chamberInnerMm: 85.0, "
 
 class TestSahneDili:
 
+    # ÖH D21 / P17B1-09 — ÇEVRİLEN BEKÇİ (gerekçe aşağıda).
+    # `dimensionLabelTexts` artık etiket sözcüklerini dosyanın kendi `T()`
+    # kanalından çözüyor. İzole koşumda `window.I18N` yok; ürünün gerçek
+    # yedek davranışı "sözlük yoksa İNGİLİZCE tam metni döndür"dür
+    # (motor_viz3d.js: `T(key, fallback)`), o yüzden harness aynı yedeği
+    # kurar. Dil seçimi ayrıca `_texts_tr` ile sınanır.
+    T_STUB_EN = ("function T(key, fallback) { return fallback; }\n")
+    T_STUB_TR = (
+        "var SOZLUK = {'viz3d.badge.grid': 'ızgara',"
+        " 'viz3d.badge.inner': 'iç', 'viz3d.badge.outer': 'dış',"
+        # ÖH D23 / P17B1-09 (ayak 1): ölçü etiketinin son iki sabit Türkçe
+        # sözcüğü de sözlüğe bağlandı; TR saplaması onları da taşır.
+        " 'viz3d.label.grain': 'YAKIT', 'viz3d.label.chamber': 'ODA'};\n"
+        "function T(key, fallback) {"
+        " return SOZLUK[key] !== undefined ? SOZLUK[key] : fallback; }\n")
+
+    # ÖH V3 taban-v (14 Eki 2026) — DÜZENEK UYARLAMASI (iddialar DEĞİŞMEDİ).
+    # ÖH D35 sayi-bicimi (OH-GT-25, commit 8f9313ca) ``dimensionLabelTexts``
+    # içindeki ``toFixed`` çağrılarını dosyanın kendi ``numTxt``
+    # delegatörüne bağladı; izole koşum o işlevi taşımadığı için
+    # ``ReferenceError: numTxt is not defined`` veriyordu. Ürünün KENDİ
+    # ``numTxt``i kaynaktan sökülüp eklenir (kopya yazılmaz). İzole koşumda
+    # ``window.I18N`` yok; ürünün yedek yolu ``v.toFixed(d)``dir, beklenen
+    # '85.0' / '95.5' sayıları aynen bu yedekten gelir.
     def _texts(self, dims_js=HYBRID_DIMS):
-        return _emit(_extract('dimensionLabelTexts'),
+        return _emit(self.T_STUB_EN + _extract('numTxt') + '\n'
+                     + _extract('dimensionLabelTexts'),
                      'dimensionLabelTexts(%s)' % dims_js)
 
-    def test_ic_dis_turkce_yazilir(self):
-        ch = self._texts()['chamber']
-        assert 'iç' in ch and 'dış' in ch, ch
-        assert not re.search(r'\bic\b', ch), ch     # ASCII kaçışı geri gelmesin
-        assert not re.search(r'\bdis\b', ch), ch
+    def _texts_tr(self, dims_js=HYBRID_DIMS):
+        return _emit(self.T_STUB_TR + _extract('numTxt') + '\n'
+                     + _extract('dimensionLabelTexts'),
+                     'dimensionLabelTexts(%s)' % dims_js)
 
-    def test_sahne_dili_tek(self):
-        t = self._texts()['total']
-        assert 'YAKIT' in t and 'GRAIN' not in t, t
-        liq = self._texts(HYBRID_DIMS.replace("'hybrid'", "'liquid'"))['total']
-        assert 'ODA' in liq and 'CHAMBER' not in liq, liq
+    def test_ic_dis_oturum_diline_bagli(self):
+        """ÇEVRİLEN BEKÇİ (ÖH D21, kulvar arayuz, kalem P17B1-09).
+
+        Bu test eskiden ``'iç' in ch and 'dış' in ch`` diyordu, yani
+        sahnenin SABİT TÜRKÇE yazmasını sözleşme hâline getiriyordu.
+        Ölçüldü (P17 B1-tur-07, tarayıcı yereli ``en-US``, sayfanın
+        rozetleri İngilizce): 3B tuval aynı ekranda beş Türkçe etiket
+        basıyordu ve bu bekçi tam olarak o davranışı kilitliyordu —
+        yani kusuru koruyan bekçiydi. Testin ASIL iddiası (etiket
+        ASCII'ye kaçmaz, iki çapı ayırt eder) aynen korunuyor; eklenen
+        iddia: sözcük OTURUM DİLİNDEN gelir.
+        """
+        ch_en = self._texts()['chamber']
+        assert 'inner' in ch_en and 'outer' in ch_en, ch_en
+        ch_tr = self._texts_tr()['chamber']
+        assert 'iç' in ch_tr and 'dış' in ch_tr, ch_tr
+        # ASCII kaçışı geri gelmesin (asıl iddia korunur).
+        assert not re.search(r'\bic\b', ch_tr), ch_tr
+        assert not re.search(r'\bdis\b', ch_tr), ch_tr
+        # İki çap hâlâ ayırt ediliyor.
+        for ch in (ch_en, ch_tr):
+            assert '85.0' in ch and '95.5' in ch, ch
+
+    def test_sahne_dili_oturum_dilini_izler(self):
+        """ÇEVRİLEN BEKÇİ (ÖH D23, kulvar arayuz, kalem P17B1-09).
+
+        Bu test D19'da ``test_sahne_dili_tek`` adıyla yazılmış ve ASIL
+        iddiasını "sahne dili tek ve TÜRKÇE" diye kaydetmişti:
+        ``assert 'YAKIT' in t and 'GRAIN' not in t`` — üstelik EN
+        saplamasıyla, yani sözlük yokken bile Türkçe basılmasını
+        SÖZLEŞME hâline getiriyordu.
+
+        ÖLÇÜLDÜ (P17 B1-tur-07 + H1 hükmü, tarayıcı yereli ``en-US``,
+        sayfanın rozetleri İngilizce): 3B tuvalde ``L 668 mm •
+        YAKIT 506 mm`` duruyordu. Hükmün deyişiyle bu, turcunun kaynak
+        taramasının kaçırdığı ALTINCI Türkçe etiketti. Bu bekçi tam o
+        davranışı kilitliyordu, yani kusuru koruyan bekçiydi (D21'de
+        kardeş testi ``test_ic_dis_oturum_diline_bagli`` aynı gerekçeyle
+        çevrilmişti; bu satır o turda gözden kaçmış).
+
+        ÇEVRİLEN İDDİA: "her zaman Türkçe" → "OTURUM DİLİNDEN".
+        KORUNAN İDDİALAR (aynen):
+          * sahne dili TEKtir — bir etikette iki dil karışmaz;
+          * ODA etiketi yalnız çözücünün ``chamber_length``i geldiğinde
+            yazılır, kaynak yoksa o yarı hiç kurulmaz (fail-closed,
+            uydurma sayı yasağı — D19 / P11B1-05 onarımı).
+        """
+        # (a) Sözlük yoksa İNGİLİZCE yedek — ürünün T(key, fallback) kuralı.
+        t_en = self._texts()['total']
+        assert 'GRAIN' in t_en and 'YAKIT' not in t_en, t_en
+        # (b) TR sözlüğü yüklüyse Türkçe.
+        t_tr = self._texts_tr()['total']
+        assert 'YAKIT' in t_tr and 'GRAIN' not in t_tr, t_tr
+
+        sivi = HYBRID_DIMS.replace("'hybrid'", "'liquid'").replace(
+            'grainMm: 450.0 }',
+            'grainMm: 450.0, chamberLengthMm: 562.5, '
+            'chamberLengthKaynakli: true }')
+        liq_en = self._texts(sivi)['total']
+        assert 'CHAMBER' in liq_en and 'ODA' not in liq_en, liq_en
+        liq_tr = self._texts_tr(sivi)['total']
+        assert 'ODA' in liq_tr and 'CHAMBER' not in liq_tr, liq_tr
+
+        # Kaynak yoksa uydurma sayı basılmaz (sahte veri yasağı) — İKİ dilde.
+        for oku in (self._texts, self._texts_tr):
+            kaynaksiz = oku(
+                sivi.replace('chamberLengthKaynakli: true',
+                             'chamberLengthKaynakli: false'))['total']
+            assert 'ODA' not in kaynaksiz and 'CHAMBER' not in kaynaksiz, kaynaksiz
+            assert '450' not in kaynaksiz, kaynaksiz
 
     def test_sayilar_gercek_girdiden_gelir(self):
         """Etiketteki her sayı girdiden türer — uydurma değer yok."""

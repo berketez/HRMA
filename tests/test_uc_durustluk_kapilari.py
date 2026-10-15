@@ -154,17 +154,54 @@ class TestKalem1YapisalHukumKapisi:
         assert basis['design_mode'] == 'size'
         assert basis['is_verification'] is False
         assert basis['wall_thickness_source'] == 'sized_by_hrma'
-        assert basis['chamber_material_source'] == 'default:steel_4130'
+        assert basis['chamber_material_source'] == 'default:steel_304'
         assert basis['verdict'] == 'withheld'
         assert 'safety_factor_is_tautological' in basis[
             'verdict_withheld_reasons']
         assert 'not a verification' in basis['message']
 
     def test_malzeme_secilince_beyan_degisiyor(self, cidarli):
+        """V3 yapi-sf 3. tur Ş2-2 — ÇEVİRİ (karar §28-37 seçenek (a); karar
+        §28-24 (C); dört koşul). Eski beklenti: hibrit (5 mm, steel_4130)
+        ``verdict == 'issued'``. Malzeme beyanı AYNEN sınanır; hüküm iddiası
+        geçerlilik bayrağına bağlanır: geçerlilik dışı hibritte 'withheld' +
+        gerekçe kodu (uyarı korunur), 'issued' dalı geçerlilik İÇİ vakada
+        (600/590 K, kullanıcı cidarı) aynı beyan işleviyle. Kâhin: malzeme
+        kaydı (erime/eğri sonu) ⟷ yayımlanan cidar sıcaklığı."""
+        import copy
+
+        from hrma.analysis.structural_analysis import (
+            STRUCTURAL_MODEL_VALIDITY_WITHHELD_REASON)
+        from hrma.app import _motor_structural_design_basis
+        from tests.test_v3_yapi_sf import (
+            DOGRULAMA_MALZEMESI, TEHLIKELI_CIDAR_M, gecerlilik_ici_dogrulama,
+            malzeme_kaydina_gore_gecerlilik_disi)
+
         basis = cidarli['structural_design_basis']
         assert basis['chamber_material_source'] == 'user_supplied'
-        assert basis['verdict'] == 'issued'
         assert basis['is_verification'] is True
+        yapisal = cidarli['motor']['structural_analysis']
+        assert malzeme_kaydina_gore_gecerlilik_disi(yapisal) is True
+        assert basis['verdict'] == 'withheld'
+        assert STRUCTURAL_MODEL_VALIDITY_WITHHELD_REASON in basis[
+            'verdict_withheld_reasons']
+        assert yapisal['safety_analysis']['status'] not in (
+            'SAFE', 'ACCEPTABLE')
+
+        # Geçerlilik içi: malzeme seçilince beyan 'user_supplied' + 'issued';
+        # seçilmeyince varsayılan çelik adıyla yazılır.
+        sonuc = gecerlilik_ici_dogrulama(TEHLIKELI_CIDAR_M)
+        assert malzeme_kaydina_gore_gecerlilik_disi(sonuc) is False
+        secili = _motor_structural_design_basis(
+            {'structural_analysis': copy.deepcopy(sonuc)}, TEHLIKELI_CIDAR_M,
+            DOGRULAMA_MALZEMESI)
+        assert secili['chamber_material_source'] == 'user_supplied'
+        assert secili['verdict'] == 'issued'
+        assert secili['is_verification'] is True
+        secilmemis = _motor_structural_design_basis(
+            {'structural_analysis': copy.deepcopy(sonuc)}, TEHLIKELI_CIDAR_M,
+            None)
+        assert secilmemis['chamber_material_source'] == 'default:steel_304'
 
     def test_totolojik_emniyet_katsayisi_isaretleniyor(self, girdisiz):
         """Sayı SİLİNMEZ (gerçekten hesaplandı) ama ne olduğu yazılır."""
@@ -289,15 +326,33 @@ class TestKalem3KatiKatsayiKaynagi:
         assert girdiler['burn_rate_a_used'] != pytest.approx(0.005)
 
     def test_katsayi_secilen_yakita_ait(self, client):
-        """APCP'nin katsayısı KNDX'e verilmez (kurucu varsayılanı APCP'dir)."""
+        """APCP'nin katsayısı KNDX'e verilmez (kurucu varsayılanı APCP'dir).
+
+        ÇEVRİLDİ — ÖH D24 / defter **P9B4-22**. Bu test eskiden çözülen çifti
+        ``burn_rate_a_used`` / ``burn_rate_n_used`` üzerinden okuyordu ve
+        böylece o adları SAYI TAŞIMAYA ZORLUYORDU. Oysa KNDX'te çözücü parçalı
+        rejim tablosunu kullanır ve AYNI yanıttaki ``burn_rate_basis``
+        "the single a/n pair entered for this motor was NOT used" der:
+        ``*_used`` adının taşıdığı iddia yanlıştı (ölçüm:
+        ``docs/scofield/raw/OH/D24/ihracat/a2/once.json`` -> ``M2_P9B4_22``,
+        ``CELISKI: true``).
+
+        Testin GERÇEK iddiası — "çözülen çift seçilen yakıta ait" — aynen
+        korunuyor, yalnız artık dürüst alandan (``*_resolved``) okunuyor;
+        üstüne çeliştiğimiz hüküm de sınanıyor.
+        """
         from hrma.engines.solid_rocket_engine import _catalog_burn_rate
 
         sonuc = _solid(client, propellant_type='kndx')
         girdiler = sonuc['burn_rate_inputs']
         a_kndx, n_kndx = _catalog_burn_rate('kndx')
         assert girdiler['burn_rate_a_source'] == 'central_catalog:kndx'
-        assert girdiler['burn_rate_a_used'] == pytest.approx(float(a_kndx))
-        assert girdiler['burn_rate_n_used'] == pytest.approx(float(n_kndx))
+        assert girdiler['burn_rate_a_resolved'] == pytest.approx(float(a_kndx))
+        assert girdiler['burn_rate_n_resolved'] == pytest.approx(float(n_kndx))
+        # KNDX'te parçalı yasa çifti ezer: "kullanıldı" adı sayı taşıyamaz.
+        assert girdiler['burn_rate_pair_used'] is False
+        assert girdiler['burn_rate_a_used'] is None
+        assert girdiler['burn_rate_n_used'] is None
 
     def test_kullanicinin_katsayisi_ezilmiyor(self, client):
         sonuc = _solid(client, propellant_type='apcp', burn_rate_a=0.005,
@@ -371,7 +426,10 @@ class TestKalem3KasaOnayKapisi:
         for uyari in ('FAIL', 'MARGINAL'):
             sonuc = {'safety_analysis': {
                 'pressure_safety': {'vessel_status': uyari}}}
+            # Z2 onarımı (2026-08-27): imza ham değeri alır oldu
+            # (case_thickness_supplied bool -> case_thickness_input);
+            # None = "gönderilmedi". Sınanan sözleşme AYNI.
             _withhold_unearned_vessel_verdict(sonuc,
-                                              case_thickness_supplied=False)
+                                              case_thickness_input=None)
             assert sonuc['safety_analysis']['pressure_safety'][
                 'vessel_status'] == uyari

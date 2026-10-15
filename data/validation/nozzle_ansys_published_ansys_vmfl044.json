@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "case": "nozzle_ansys_published_ansys_vmfl044",
+  "source_type": "code_ansys_official_validation_case",
+  "description_tr": "ANSYS'in KENDİ resmi doğrulama el kitabı vakası VMFL044 'Supersonic Nozzle Flow' — referansı birebir Back-Massier-Gier 1964 makalesidir. Hem Fluent hem CFX ile SST modeli kullanılarak çözülür; duvar boyunca p/p_t deneyle karşılaştırılır. Bu kayıt bir VERİ kaydı değil BELGELEME kaydıdır: ANSYS ailesinin bu deneyi resmi doğrulama capası olarak kullandığının künyesi. HRMA'nın aynı deneyi capa almasının sektör pratiğiyle aynı hizada olduğunun kanıtı.",
+  "discipline": "cfd_viscous_heat_transfer",
+  "inputs": {
+    "solvers": [
+      "ANSYS Fluent",
+      "ANSYS CFX"
+    ],
+    "turbulence_model": "SST",
+    "case_conditions_as_published": {
+      "nozzle_length_m": 0.1594,
+      "exit_to_throat_area_ratio": 2.68,
+      "divergent_half_angle_deg": 15.0,
+      "inlet_relative_pressure_Pa": 1000000.0,
+      "inlet_total_temperature_K": 825.0,
+      "wall_temperature_K": 413.0
+    },
+    "matching_bmg_test_tr": "koşullar test 268 ailesine karşılık gelir (150.6 psia = 1.038e6 Pa; 1484°R = 824.4 K; T_w≈743-750°R ≈ 413-417 K). DİKKAT: vaka İZOTERMAL duvar (413 K sabit) kullanır — deneyde T_w dağılımı sabit değildir (B-3: 751-974°R). Lüle uzunluğu 0.1594 m etiketi ana kaynaktaki L=5.925 in=0.1505 m'den %5.9 uzundur (muhtemelen giriş parçası dahil)."
+  },
+  "expected_outputs": {
+    "_status": "NOT_DIGITIZED",
+    "compared_quantity": "duvar boyunca statik/durma basınç oranı p/p_t (deney: BMG)",
+    "note_tr": "El kitabı sonuçları YALNIZ grafik olarak verir (v24.2, Şekil 113 Fluent / 114 CFX); sayısal hedef tablosu yayımlanmamıştır ve yardım görüntüleyicisinden şekil çıkarılamadı — eğri okuma YAPILMADI. Isı akısı kıyası bu vakada YOK (yalnız basınç). Deneysel basınç capası zaten elimizde: nozzle_back_massier_gier_1964.json B-2 test 268 kolonu."
+  },
+  "units": "m, Pa, K",
+  "source": {
+    "title": "VMFL044: Supersonic Nozzle Flow — Ansys Fluent/CFX Validation Manual (v24.2)",
+    "author": "Ansys, Inc.",
+    "year": 2024,
+    "url_or_doi": "https://ansyshelp.ansys.com/public/Views/Secured/corp/v242/en/fbu_vm/Hlp_VMFL044.html",
+    "access_note_tr": "kamuya açık yardım sayfası (public görünüm); erişim 2026-08-18, WebFetch ile metin düzeyinde okundu"
+  },
+  "secondary_source": {
+    "title": "Convective heat transfer in a convergent-divergent nozzle",
+    "author": "L. H. Back, P. F. Massier, H. L. Gier",
+    "year": 1964,
+    "url_or_doi": "doi:10.1016/0017-9310(64)90052-3",
+    "note_tr": "VMFL044'ün kendi referansı"
+  },
+  "retrieved": "2026-08-18",
+  "confidence": "medium",
+  "confidence_note_tr": "medium: içerik tek kaynaklı (ANSYS el kitabı) ve sayısal hedef tablosu yok; vakanın VARLIĞI ve kurulumu yüksek güvenle, sonuç değerleri hiç kayıtlı değil.",
+  "tags": [
+    "published_cfd",
+    "ansys_official",
+    "fluent",
+    "cfx",
+    "sst",
+    "documentation_only",
+    "bmg_nozzle",
+    "test_268",
+    "wall_pressure"
+  ]
+}

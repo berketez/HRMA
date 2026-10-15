@@ -30,7 +30,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>HRMA</string>
     <key>CFBundleDisplayName</key><string>HRMA</string>
-    <key>CFBundleIdentifier</key><string>com.uzaytek.hrma</string>
+    <key>CFBundleIdentifier</key><string>io.github.berketez.hrma</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
@@ -151,13 +151,74 @@ fi
 # iki platform artık TEK pinli kaynaktan besleniyor. Önbellek varsa bile
 # koşulur: betiğin kendi notu "mac/libs eski bir kopyadan geliyorsa bile bu
 # adım güncel tutar" diyor, aynı ilke.
+# --- ÖH D19 / altyapi — defter P10B3-15 ------------------------------------
+# Anaconda kaynaklı paketler: yol TEK KAYNAK, sürüm PİNLİ, kopya SESSİZ DEĞİL.
+# Ölçüldü (once_p10b3_15.json): `/opt/anaconda3/...` yolu 3 yerde sabit
+# yazılıydı, sürüm pini yoktu, cantera/ruamel kopyaları `|| true` ile sessizce
+# geçiliyordu ve doğrulama yalnız `[ -d ... ]` idi. "Dizin var" ile "doğru
+# sürüm, dolu paket" aynı şey değildir.
+ANACONDA_SITE="${ANACONDA_SITE:-/opt/anaconda3/lib/python3.12/site-packages}"
+ANACONDA_PIN_DOSYASI="${ANACONDA_PIN_DOSYASI:-$B/anaconda_paket_pinleri.txt}"
+if [ ! -d "$ANACONDA_SITE" ]; then
+    echo "HATA: Anaconda site-packages yok: $ANACONDA_SITE"
+    echo "      ANACONDA_SITE ile yolu verin (rocketcea/cantera/ruamel.yaml"
+    echo "      macOS arm64 wheel'i PyPI'da YOK, buradan kopyalanıyor)."
+    exit 1
+fi
+if [ ! -f "$ANACONDA_PIN_DOSYASI" ]; then
+    echo "HATA: sürüm pin dosyası yok: $ANACONDA_PIN_DOSYASI"
+    exit 1
+fi
+
+anaconda_pin_surumu() {   # $1 = paket adı -> pinli sürüm (yoksa boş)
+    awk -v p="$1" '$0 !~ /^[[:space:]]*#/ && $1 == p { print $2; exit }'         "$ANACONDA_PIN_DOSYASI"
+}
+
+anaconda_pin_dogrula() {  # $1 = paket adı; kaynaktaki sürüm pinle aynı mı
+    local pkg="$1" pin bulunan ad
+    pin="$(anaconda_pin_surumu "$pkg")"
+    if [ -z "$pin" ]; then
+        echo "HATA: $pkg için sürüm pini yok ($ANACONDA_PIN_DOSYASI) —"
+        echo "      pakete hangi sürümün gireceği ÖLÇÜLEMİYOR."
+        exit 1
+    fi
+    bulunan="$(ls -d "$ANACONDA_SITE/$pkg"-*.dist-info 2>/dev/null | head -1)"
+    if [ -z "$bulunan" ]; then
+        echo "HATA: $pkg dist-info yok ($ANACONDA_SITE) — sürüm ÖLÇÜLEMİYOR,"
+        echo "      pinsiz kopya pakete girmez."
+        exit 1
+    fi
+    ad="$(basename "$bulunan")"; ad="${ad#"$pkg"-}"; ad="${ad%.dist-info}"
+    if [ "$ad" != "$pin" ]; then
+        echo "HATA: $pkg sürümü $ad, pin $pin ($ANACONDA_PIN_DOSYASI)."
+        echo "      Pinli olmayan bir denge termokimyası sürümü pakete"
+        echo "      giremez: ölçün, pini güncelleyin, parti kaydına yazın."
+        exit 1
+    fi
+    echo "      $pkg $ad (pin doğrulandı)"
+}
+
+anaconda_kopya_dogrula() {  # $1 = paket dizini adı; DOLU mu (varlık değil)
+    local ad="$1" n
+    n="$(find "$RES/libs/$ad" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    if [ ! -d "$RES/libs/$ad" ] || [ "${n:-0}" -lt 1 ]; then
+        echo "HATA: $ad kopyalanmadı ya da BOŞ ($n dosya) — 'dizin var'"
+        echo "      hükmü kazanılmadı."
+        exit 1
+    fi
+    echo "      $ad kopyalandı ($n dosya)"
+}
+
 echo "      pinli bağımlılıklar (requirements_bundle.txt)..."
 python3 -m pip install --target "$RES/libs" --upgrade \
     --only-binary=:all: -r "$B/requirements_bundle.txt" \
     --no-warn-script-location
-# rocketcea: PyPI'da mac wheel yok — çalışan anaconda ortamından kopyala (arm64, numpy 1.26.4 uyumlu)
-cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea "$RES/libs/"
-cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea-*.dist-info "$RES/libs/" 2>/dev/null || true
+# rocketcea: PyPI'da mac wheel yok — çalışan anaconda ortamından kopyala
+# (arm64, numpy 1.26.4 uyumlu). Sürüm PİNLİ (P10B3-15).
+anaconda_pin_dogrula rocketcea
+cp -R "$ANACONDA_SITE/rocketcea" "$RES/libs/"
+cp -R "$ANACONDA_SITE/rocketcea-"*.dist-info "$RES/libs/"
+anaconda_kopya_dogrula rocketcea
 
 # cantera (+ ruamel.yaml bağımlılığı): denge termokimyası, ~17 MB.
 # v2.6.2'de eklendi. Bundle'da YOKTU ve eksikliği SESSİZDİ: CombustionAnalyzer
@@ -169,9 +230,14 @@ cp -R /opt/anaconda3/lib/python3.12/site-packages/rocketcea-*.dist-info "$RES/li
 # ulaşıyordu (hrma/app.py:723).
 # Windows tarafında requirements_bundle.txt üzerinden geliyor; macOS'ta
 # mac/libs önceden hazırlanmış bir dizin olduğu için buraya elle kopyalanır.
+# P10B3-15: `|| true` KALKTI — sessiz kopya, sessiz yanlış termokimya demekti.
+anaconda_pin_dogrula cantera
+anaconda_pin_dogrula ruamel.yaml
 for _pkg in cantera ruamel; do
-    cp -R /opt/anaconda3/lib/python3.12/site-packages/"$_pkg"* "$RES/libs/" 2>/dev/null || true
+    cp -R "$ANACONDA_SITE/$_pkg"* "$RES/libs/"
 done
+anaconda_kopya_dogrula cantera
+anaconda_kopya_dogrula ruamel
 
 # pywebview (yerel WKWebView penceresi) + pyobjc ailesi — marker sorunu
 # yüzünden --no-deps + açık liste (bkz. build_win_payload.sh notu).
@@ -196,9 +262,18 @@ python3 -m pip install --target "$RES/libs" --no-deps --upgrade \
 [ -d "$RES/libs/openpyxl" ] || { echo "HATA: openpyxl eksik!"; exit 1; }
 # cantera: yokluğu SESSİZ ve sonuç YANLIŞ (sabit ürün bileşimi, c* %4-13 hata).
 # Derleme burada durmalı; kullanıcı uydurma termokimyayla paket almamalı.
-[ -d "$RES/libs/cantera" ] || { echo "HATA: cantera eksik! (yanma analizi sahte bileşime düşer)"; exit 1; }
-# rocketcea: sıvı motor gerçek çalışma noktası termokimyası
-[ -d "$RES/libs/rocketcea" ] || { echo "HATA: rocketcea eksik!"; exit 1; }
+# P10B3-15: VARLIK değil İÇERİK + SÜRÜM. Boş bir `cantera/` dizini de
+# `[ -d ]` sınamasından geçiyordu; pakete giren sürüm ise hiç ölçülmüyordu.
+anaconda_kopya_dogrula cantera
+anaconda_kopya_dogrula rocketcea
+for _pkg in rocketcea cantera ruamel.yaml; do
+    _pin="$(anaconda_pin_surumu "$_pkg")"
+    if [ ! -d "$RES/libs/$_pkg-$_pin.dist-info" ]; then
+        echo "HATA: $_pkg-$_pin.dist-info pakette yok — pakete giren sürüm"
+        echo "      KANITLANAMIYOR (paketten okunamayan sürüm pinli değildir)."
+        exit 1
+    fi
+done
 
 echo "[4/8] Uygulama kaynakları..."
 mkdir -p "$RES/app"

@@ -21,6 +21,7 @@ kaynaktan ayıklanıp node ile izole çalıştırılır.
 """
 
 import json
+import re
 import shutil
 import subprocess
 import pathlib
@@ -234,8 +235,79 @@ class TestAdvancedPassesRawMotor:
         assert 'mountMotorViz(currentResults.motor)' in source
 
     def test_app_js_auto_mount_also_passes_the_raw_object(self):
+        """``app.js`` otomatik montajı motor nesnesini SÜZMEDEN geçirir.
+
+        ÖH D15 birleştirme (1 Eyl 2026) — bu bekçi ``'mountMotorViz(
+        currentResults.motor)'`` DİZGESİNİ arıyordu. Dizge artık yok ve
+        GERİ GETİRİLMESİ KUSUR OLUR: ui-paneller kulvarı (P11B1-04)
+        ölçtü ki sahnenin ``resolveInjectorSource`` tercihi
+        ``motor_viz3d.js:1583`` ``md.injector_results`` altını arıyor, ama
+        gerçek ``/calculate`` yanıtında (``docs/scofield/raw/OH/D15/
+        ui-paneller/a1/_calc_yanit.json``) enjektör sonucu ÜST DÜZEYDE
+        (``injector``) duruyor ve ``motor`` altında ``injector_results``
+        YOK. Ham nesne verilince o dal hiç ateşlenmiyor, sahne sessizce
+        ``injector_design`` yedeğine düşüyordu — kullanıcı enjektör
+        sekmesinde 32 delik × 0,83 mm okuyup 3B plakada 3 × 2,06 mm
+        görüyordu.
+
+        Bu sınıfın KORUDUĞU iddia dizge değil: araya ALAN SÜZEN bir
+        adaptör girmemesi. Ekleme süzme değildir. Bekçi bu yüzden artık
+        montaj ifadesini node içinde GERÇEKTEN kurar ve ölçer.
+        """
         source = APP_JS.read_text(encoding='utf-8')
-        assert 'mountMotorViz(currentResults.motor)' in source
+        m = re.search(r'mountMotorViz\(\s*([A-Za-z_$][\w$]*)\s*\)', source)
+        assert m, 'app.js artık mountMotorViz çağırmıyor'
+        ad = m.group(1)
+        if ad == 'currentResults':          # doğrudan ham nesne — eski biçim
+            return
+        atama = re.search(
+            r'const\s+%s\s*=\s*(.*?);\n' % re.escape(ad), source, re.S)
+        assert atama, ('%s montaja veriliyor ama kurulduğu yer bulunamadı — '
+                       'ifade elle incelenmeli' % ad)
+        ifade = atama.group(1)
+        assert 'currentResults.motor' in ifade, (
+            'montaja verilen nesne artık çözücünün motor nesnesinden '
+            'türemiyor: %s' % ifade[:300])
+
+        betik = """
+        const motor = { chamber_temperature: 3300, gamma: 1.21,
+            nozzle_design: { performance: { exit_pressure: 51000,
+                ambient_pressure: 101325, exit_mach: 2.4 } },
+            altitude_performance: { altitude_performance: [
+                { exit_velocity: 2210 }] },
+            combustion_analysis: { compositions: { chamber: { gamma: 1.19 } } },
+            injector_design: { hole_count: 3, hole_diameter_mm: 2.06 } };
+        const currentResults = { motor: motor,
+            injector: { hole_count: 32, hole_diameter_mm: 0.83 } };
+        const vizMotor = %s;
+        const motorSonra = JSON.stringify(motor);
+        process.stdout.write(JSON.stringify({
+            gecen: Object.keys(vizMotor).sort(),
+            beklenen: Object.keys(motor).sort(),
+            enjektor: (vizMotor.injector_results || null),
+            motorDegisti: motorSonra !== JSON.stringify(currentResults.motor),
+            motoraYazildi: Object.prototype.hasOwnProperty.call(
+                motor, 'injector_results'),
+            degerlerAyni: Object.keys(motor).every(function (k) {
+                return JSON.stringify(vizMotor[k]) === JSON.stringify(motor[k]);
+            })
+        }));
+        """ % ifade
+        out = _run_node(betik)      # _run_node zaten JSON çözüyor
+        eksik = sorted(set(out['beklenen']) - set(out['gecen']))
+        assert not eksik, (
+            'montaj yolunda ALAN SÜZÜLÜYOR — çözücü motor nesnesinin şu '
+            'alanları sahneye ulaşmıyor: %s' % eksik)
+        assert out['degerlerAyni'], (
+            'montaj yolunda alan DEĞERLERİ değiştiriliyor (süzme/yeniden '
+            'kurma); sahne artık çözücünün sayılarını görmüyor')
+        assert not out['motoraYazildi'], (
+            'çözücünün motor sözlüğü DEĞİŞTİRİLİYOR (sığ kopya değil) — '
+            'aynı nesneyi okuyan öteki paneller kirlenir')
+        assert out['enjektor'] == {'hole_count': 32, 'hole_diameter_mm': 0.83}, (
+            'enjektör çözücüsünün sonucu sahneye BAĞLANMIYOR: %r — '
+            'motor_viz3d.js:1583 `md.injector_results` altını arıyor'
+            % (out['enjektor'],))
 
     def test_mount_does_not_rebuild_the_dict(self):
         body = _extract(ADVANCED_HTML, 'mountMotorViz')

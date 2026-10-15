@@ -226,6 +226,38 @@ def flow_separated(client):
 
 
 @pytest.fixture(scope='module')
+def flow_unchoked(client):
+    """Boğulmamış lüle — P4B2-02 geri çekme rejiminin yanıt ŞEKLİ.
+
+    ÖH D15 (1 Eyl 2026): `flow_panel.js` bu rejim için de yazılıdır
+    (`flow.performance_withheld_because`, `perf.withheld_because`,
+    `losses.withheld_because`), ama alias bekçisi yalnız BOĞULMUŞ üç
+    fixture'a bakıyordu; koşullu yayımlanan geri çekme künyeleri panelde
+    "yanıtta olmayan anahtar" gibi görünüyordu. Yük ölçüldü ve
+    `tests/test_d15_termo_ucus_a1.py::TestP4B202BogulmamisLule` ile AYNI
+    çalışma noktasıdır (P_c = 1,0 bar, P_a = 0,9999 bar, ε = 25).
+    """
+    return _post_ok(client, '/api/flow-analysis', dict(
+        FLOW_INPUT, chamber_pressure=1.0, expansion_ratio=25.0,
+        ambient_pressure=0.9999e5, n_stations=31, fidelity='engineering'))
+
+
+@pytest.fixture(scope='module')
+def flow_shocked(client):
+    """Lüle içinde normal şok — P4B2-06 referans geri çekme rejimi.
+
+    ÖH D15 (1 Eyl 2026): fizik dışı (negatif) `CF_ideal` /
+    `thrust_full_flow_N` referansları bu rejimde geri çekiliyor ve gerekçesi
+    `performance.reference_withheld_because` / `_fields` ile yayımlanıyor
+    (ölçüldü: rejim `normal_shock_in_nozzle`). Panel bu iki alanı basıyor;
+    alias bekçisinin ölçütü de bu yanıt şeklini içermeli.
+    """
+    return _post_ok(client, '/api/flow-analysis',
+                    dict(FLOW_INPUT, ambient_pressure=10e5,
+                         fidelity='engineering'))
+
+
+@pytest.fixture(scope='module')
 def kinetic_by_fidelity(client):
     """Üç fidelity yanıtı: {'fast': ..., 'engineering': ..., 'high_fidelity': ...}."""
     out = {}
@@ -488,12 +520,49 @@ class TestFlowFastLevel:
                 f"fast/engineering skaler uyuşmazlığı: {key}")
 
     def test_engineering_kinetic_chain_populated(self, flow_eng):
-        """of_ratio verilen engineering akışı kinetik zinciri doldurur."""
+        """of_ratio verilen engineering akışı kinetik zinciri KURAR.
+
+        ÇEVİRİ (ÖH D15 birleşmesi, 1 Eyl 2026 — termo-uçuş P4B4-05).
+        Bekçi eskiden tek şey soruyordu: üçlü DOLU ve sıralı mı. O iddia
+        artık ürünün kazanılmış hükmüyle çelişiyor: çağıran gerçek bir lüle
+        profili verdiğinde, Isp çiftinin kurulduğu REFERANS çıkış basıncı
+        (``combustion_results.conditions.exit.P``, bu koşumda
+        ``sea_level_default`` = 101.325,0 Pa) profilin çıkışından (87.026,7
+        Pa) %2'den fazla ayrılıyorsa üçlü BAŞKA bir genişlemeye aittir ve
+        fail-closed geri çekilir. Eski iddia yürürlükte kalsaydı bekçi
+        "uydurulmuş Isp yayımla" demiş olurdu.
+
+        Bekçi bu yüzden GEVŞETİLMEDİ, İKİ KOLA AYRILDI ve geri çekme kolu
+        eskisinden SIKIDIR: yarım sayı yayımlanamaz (üçlünün TAMAMI ve
+        kayıp/band None), gerekçe boş olamaz ve referans basıncı ADIYLA
+        anmak zorundadır. Yayımlama kolunda sıralama iddiası aynen durur.
+        (Profilsiz yol — ``/api/kinetic-efficiency`` — üçlüyü doldurmaya
+        devam eder ve sıralaması ``TestKineticEfficiencyLevels``te ölçülür.)
+        """
         kin = flow_eng['kinetic_efficiency']
         assert kin is not None, (
             "of_ratio verildiği hâlde kinetik zincir boş döndü")
         for key in KINETIC_KEYS:
             assert key in kin, f"kinetik blokta eksik anahtar: {key}"
+        ucler = ('isp_frozen', 'isp_predicted', 'isp_shifting')
+        gerekce = kin.get('isp_withheld_because')
+        if gerekce:
+            assert all(kin[ad] is None for ad in ucler), (
+                "geri çekme yarım kaldı: üçlünün bir kısmı hâlâ yayımlanıyor "
+                f"({ {ad: kin[ad] for ad in ucler} })")
+            assert kin['kinetic_loss_pct'] is None, (
+                "Isp geri çekildi ama kinetik kayıp yüzdesi duruyor")
+            assert kin['loss_band_pct'] is None, (
+                "Isp geri çekildi ama kayıp bandı duruyor")
+            tani = kin['diagnostics']
+            p_ref = tani['isp_reference_exit_pressure_pa']
+            assert p_ref is not None, (
+                "geri çekme gerekçesi var ama referans basıncı yayımlanmıyor")
+            assert tani['isp_reference_source'], 'referans künyesi boş'
+            assert ('%.1f' % p_ref) in gerekce, (
+                "gerekçe referans çıkış basıncını ADIYLA söylemiyor: "
+                f"{gerekce!r}")
+            return
         assert (kin['isp_frozen'] <= kin['isp_predicted']
                 <= kin['isp_shifting']), "frozen ≤ predicted ≤ shifting bozuk"
 
@@ -767,7 +836,14 @@ class TestLegacyEndpointSuccessors:
         assert r.status_code == 501
         body = r.get_json()
         assert body['status'] == 'unavailable'
-        assert body['successor'] == '/api/flow-analysis'
+        # ÇEVRİLDİ — ÖH D30 / app-api-uc a1 (P7B4-14). Eski hâl
+        # ``successor``ın DİZE olmasını şart koşuyordu; aynı bölgedeki
+        # ``/api/professional-analysis`` ise LİSTE yayımlıyordu (ölçüldü:
+        # ``D30/app-api-uc/a1/once.json`` K11 — ``successor_tipi``: str,
+        # str, list). Üç saplama artık TEK tip yayımlar: uç YOLLARINDAN
+        # oluşan liste. Bekçi tipi de kilitler ki ayrışma geri gelmesin.
+        assert isinstance(body['successor'], list)
+        assert body['successor'] == ['/api/flow-analysis']
         assert '/api/flow-analysis' in body['error'], (
             "501 mesajı kullanıcıyı halef uç noktaya yönlendirmeli")
 
@@ -776,7 +852,9 @@ class TestLegacyEndpointSuccessors:
         assert r.status_code == 501
         body = r.get_json()
         assert body['status'] == 'unavailable'
-        assert body['successor'] == '/api/kinetic-efficiency'
+        # ÇEVRİLDİ — P7B4-14 (yukarıdaki gerekçe).
+        assert isinstance(body['successor'], list)
+        assert body['successor'] == ['/api/kinetic-efficiency']
         assert '/api/kinetic-efficiency' in body['error']
 
 
@@ -817,17 +895,29 @@ def _extract_refs(js_text, alias):
 
 class TestFlowPanelRenderKeys:
     def test_aliases_match_response_blocks(self, flow_eng, flow_fast,
-                                           flow_separated):
+                                           flow_separated, flow_unchoked,
+                                           flow_shocked):
         js = _js_source('flow_panel.js')
         flow = flow_eng['flow']
         # Üst düzey: kinetic_note yalnız fast yanıtında (not koşullu eklenir)
         top_keys = set(flow_eng.keys()) | set(flow_fast.keys())
         sep_block = flow_separated['flow']['regime']['separation']
+        # ÖH D15 (1 Eyl 2026): geri çekme künyeleri (P4B2-02) YALNIZ
+        # boğulmamış rejimde yayımlanır. Panel ikisini de basıyor, o yüzden
+        # ölçüt de iki rejimin BİRLEŞİMİ olmalı; tek rejimle ölçmek panelin
+        # doğru kodunu "yanıtta yok" diye kırmızıya düşürüyordu. Birleşim
+        # bekçiyi GENİŞLETİR (bir yanıt şekli daha kapsanır), gevşetmez:
+        # iki şeklin hiçbirinde olmayan anahtar yine kırmızı verir.
+        unchoked = flow_unchoked['flow']
+        shocked = flow_shocked['flow']
         alias_map = {
             'data': top_keys,
-            'flow': set(flow.keys()),
-            'perf': set(flow['performance'].keys()),
-            'losses': set(flow['losses'].keys()),
+            'flow': set(flow.keys()) | set(unchoked.keys()),
+            'perf': (set(flow['performance'].keys())
+                     | set(unchoked['performance'].keys())
+                     | set(shocked['performance'].keys())),
+            'losses': (set(flow['losses'].keys())
+                       | set(unchoked['losses'].keys())),
             'regime': set(flow['regime'].keys()),
             'st': set(flow['stations'].keys()),
             'kin': set(flow_eng['kinetic_efficiency'].keys()),
@@ -902,3 +992,575 @@ class TestWave4aJsSyntax:
                               capture_output=True, text=True, timeout=60)
         assert proc.returncode == 0, (
             f"node --check başarısız: {path}\n{proc.stderr[:500]}")
+
+
+# ===========================================================================
+# 10. ÖH FAZ C — TERS YÖN SÖZLEŞMESİ (uç yayımlar, panel BASIYOR mu?)
+# ===========================================================================
+#
+# Mekanizma ve gerekçe `tests/test_wave3_contract.py` §8 ile AYNIdır
+# (kopya desen: bu üç sözleşme dosyası `_js_source`/`_extract_refs`i de
+# birbirinden kopyalar; ortak modül açmak paket sahipliğini böler).
+# Kısaca: §8'in ileri yönü SIZINTIyı, buradaki ters yön KAYIP'ı kapatır.
+# Defter: P13B4-01, P13B4-02, P11B5-02.
+#
+# Bu dosya, P13B4-01'in 16 sözleşmesiz panelinden BEŞİNİ kapsama alır:
+# performance, comparative, stability, uncertainty, correlation.
+
+REPO_STATIC_JS = REPO_ROOT / 'hrma' / 'static' / 'js'
+
+DURUSTLUK_TAM = frozenset({
+    'unconservative', 'model_valid', 'valid', 'validity', 'confidence',
+    'fallback', 'warning', 'warnings', 'assumption', 'assumptions',
+    'verdict', 'skipped', 'missing', 'not_modelled', 'source', 'basis',
+    'note', 'notes',
+})
+#: ÖH D26 / fix-25b: ``_reason`` EKLENDİ. `stability/assessment` ucu
+#: P6B4-15 ile `root_not_resolved_reason` yayımlamaya başlamıştı; bu alan
+#: bir null'un GEREKÇESİDİR (büyüme oranı neden basılamadı), yani tam
+#: anlamıyla dürüstlük beyanıdır — ama sınıflandırıcı onu görmediği için
+#: "kozmetik kalan" kovasına düşüyor ve bir GEREKÇE SATIRIYLA muaf
+#: tutulabiliyordu. Artık düşemez: bir `*_reason` alanı ucun yayımlayıp
+#: panelin basmadığı hâle gelirse SERT kırmızı verir, muafiyetle susturulamaz.
+#: ÖLÇÜLDÜ (bu değişiklikten önce ve sonra): ters yön takımı 55 yeşil /
+#: 2 xfail — yeni kırmızı doğmuyor. ``_detail`` de ölçüldü ve GÜVENLİYDİ
+#: ama EKLENMEDİ: "detay" her zaman beyan değildir (kozmetik ayrıntı da
+#: olabilir), oysa "gerekçe" tanımı gereği beyandır.
+DURUSTLUK_SONEK = ('_basis', '_status', '_note', '_notes', '_source',
+                   '_valid', '_validity', '_regime', '_reason')
+DURUSTLUK_ONEK = ('warning', 'assumption', 'exceeds', 'unconservative',
+                  'skipped', 'missing', 'not_modelled', 'verdict',
+                  'defaults')
+DURUSTLUK_ICEREN = ('withheld', 'confidence', 'validity', 'fallback',
+                    'disclaimer', 'unconservative', 'not_modelled',
+                    'clamped')
+
+
+def _durustluk_alani(ad):
+    """Bu alan adı bir DÜRÜSTLÜK beyanı mı? (kalıplar ürün taramasından)"""
+    return (ad in DURUSTLUK_TAM
+            or ad.endswith(DURUSTLUK_SONEK)
+            or ad.startswith(DURUSTLUK_ONEK)
+            or any(parca in ad for parca in DURUSTLUK_ICEREN))
+
+
+# --- OH-B3-06 incelmesi (mekanizma ve gerekçe wave3 §8 ile AYNI) -----------
+# `T('common.warnings')` metninde `.warnings` geçtiği için ters yön o adı
+# "panel basıyor" sayıyordu; çeviri ANAHTARI okuma değildir. Süzgeç yalnız
+# i18n önekli dizge SABİTLERİNİ siler — aynı ad gerçek bir okumada da
+# geçiyorsa envanterde kalır (M2: `TestIncelmeYanlisKirmiziUretmez`).
+I18N_ANAHTAR_DIZGESI = re.compile(
+    r"""(['"])(?:common|panel|solid|fea[A-Za-z]*)\.[A-Za-z0-9_.]*\1""")
+
+
+def _envanter_metinden(metin):
+    """Bir JS METNİNDEN okunan alan adları (i18n anahtarları düşülmüş)."""
+    metin = I18N_ANAHTAR_DIZGESI.sub('""', metin)
+    return (set(re.findall(r'\.([A-Za-z_]\w*)', metin))
+            | set(re.findall(r'\[\s*[\'"]([A-Za-z_]\w*)[\'"]\s*\]', metin)))
+
+
+def _okuma_envanteri(*js_yollari):
+    """Panelin OKUDUĞU alan adları (`x.alan` + `x['alan']`, takma ad üstü).
+
+    Ters yön KASITLI olarak cömerttir: ad panelde herhangi bir takma ad
+    altında geçiyorsa "okunuyor" sayılır, böylece yanlış kırmızı doğmaz.
+    Cömertliğin tek istisnası i18n anahtarlarıdır (OH-B3-06 incelmesi).
+    """
+    envanter = set()
+    for rel in js_yollari:
+        yol = REPO_STATIC_JS / Path(rel)
+        assert yol.exists(), f"panel dosyası yok: {yol}"
+        envanter |= _envanter_metinden(yol.read_text(encoding='utf-8'))
+    return envanter
+
+
+def _ters_alanlar(payload, envanter):
+    return sorted(set(payload) - envanter)
+
+
+def _sagir_alt_bloklar(payload, envanter):
+    """Adı DA çocuklarının HİÇBİRİ de okunmayan alt bloklar."""
+    sagir = {}
+    for ad in set(payload) - envanter:
+        deger = payload[ad]
+        cocuk = set()
+        if isinstance(deger, dict):
+            cocuk = set(deger)
+        elif isinstance(deger, list) and deger and isinstance(deger[0], dict):
+            cocuk = set(deger[0])
+        if cocuk and not (cocuk & envanter):
+            sagir[ad] = len(cocuk)
+    return sagir
+
+
+# --- C3: bu dosyaya düşen sözleşmesiz panellerin uç yükleri ---------------
+PERFORMANCE_PANEL_INPUT = {
+    'chamber_pressure': 30.0, 'chamber_temperature': 3000.0,
+    'throat_diameter': 0.03, 'expansion_ratio': 8.0, 'gamma': 1.2,
+    'molecular_weight': 22.0, 'thrust': 2000.0, 'burn_time': 10.0,
+}
+STABILITY_CHUG_INPUT = {
+    'mode': 'chug', 'dp_ratio_j': 0.2, 'tau_s': 1.0e-3, 'tau_c_s': 3.0e-3,
+}
+STABILITY_LOCAL_HOST = {'Host': '127.0.0.1:8080'}
+
+
+@pytest.fixture(scope='module')
+def performance_body(client):
+    return _post_ok(client, '/api/advanced-performance-analysis',
+                    PERFORMANCE_PANEL_INPUT)
+
+
+@pytest.fixture(scope='module')
+def comparative_body(client):
+    return _post_ok(client, '/api/comparative-analysis',
+                    {'motor_configs': COMPARATIVE_CONFIGS})
+
+
+@pytest.fixture(scope='module')
+def stability_body(client):
+    """`/api/analysis/combustion-stability` yerel-host kapısının ardında."""
+    return _post_ok(client, '/api/analysis/combustion-stability',
+                    STABILITY_CHUG_INPUT, headers=STABILITY_LOCAL_HOST)
+
+
+# --- DONDURULMUŞ yükler (uç bu dosyada CANLI sürülmez) --------------------
+# İki uç bu sözleşme dosyasında koşturulmaz; sebep ÖLÇÜLDÜ (27 Ağu 2026,
+# aynı makine, aynı test_client):
+#   * POST /api/correlation-report  -> 123 s (ilk üretim; süreç içi
+#     önbellekten sonra 0,1 s). Dosyanın tamamı bugün ~5 s.
+#   * POST /api/uncertainty-analysis (level='fast') -> 8-29 s (Monte
+#     Carlo; `n_samples` istemciden kısılamıyor, 50'de sabit).
+# Bu iki blokta ters iddianın PANEL tarafı CANLI (JS her koşuda okunur),
+# UÇ tarafı ölçüm anlık görüntüsüdür. SINIRI açıkça yazıyorum: uç YENİ
+# bir dürüstlük alanı yayımlarsa bu bekçi onu göremez — canlı koşum
+# B-3 borcudur (uçları `tests/test_correlation_endpoint.py` ve
+# `tests/test_uq_endpoint.py` zaten sürüyor; ters yön oraya taşınabilir).
+DONDURULMUS_YUKLER = {
+    'correlation': {
+        # ölçüldü: POST /api/correlation-report {} -> 200, üst düzey 8 alan
+        'cached': None, 'cells': None, 'db_hash': None, 'generated_s': None,
+        'markdown': None, 'record_counts': None, 'skipped_summary': None,
+        'status': None,
+    },
+    'uncertainty': {
+        # ölçüldü: POST /api/uncertainty-analysis
+        # {motor_type:'hybrid', level:'fast', seed:42, inputs:{...}} -> 200
+        'consistency_note': None, 'failed_samples': None,
+        'inputs_used': None, 'level': None, 'mean_shift_percent': None,
+        'motor_type': None, 'n_samples': None, 'outputs': None,
+        'sampler': None, 'seed': None, 'sensitivity': None,
+        'sensitivity_basis': None, 'sensitivity_meta': None,
+        'sensitivity_method_note': None, 'sensitivity_status': None,
+        'status': None, 'timing_s': None, 'uq_version': None,
+    },
+}
+
+
+TERS_MUAFIYET = {
+    'flow/ust': ('panels/flow_panel.js', {
+        'status': 'zarf alanı — `_post_ok` ve şema iddiaları sınıyor',
+        'fidelity_levels':
+            'desteklenen seviye listesi — panel seçili seviyeyi '
+            '(`fidelity`) ve `kinetic_note`u basıyor; liste form '
+            'seçeneklerini kuruyor',
+    }),
+    'flow/flow': ('panels/flow_panel.js', {
+        'inputs': 'girdi yankısı bloğu — panel kullanıcının formunu '
+                  'zaten gösteriyor',
+        'throat': 'alt blok — panel boğaz alanlarını `st.`/`perf.` takma '
+                  'adlarıyla istasyon dizisinden okuyor',
+    }),
+    'flow/performance': ('panels/flow_panel.js', {
+        'thrust_full_flow_N':
+            'ayrılma öncesi/sonrası itki ikizleri — panel gerçekleşen '
+            'itkiyi (`thrust_N`) ve ayrılma rejimini basıyor',
+        'thrust_wall_integral_N': 'bkz. `thrust_full_flow_N`',
+        'separation_thrust_gain_N': 'bkz. `thrust_full_flow_N`',
+        'wall_integral_residual_rel':
+            'sayısal tutarlılık kalıntısı — bekçi '
+            '(`TestFlowPhysicsAnchors`) sınıyor; ekranda yeri yok',
+        'mass_conservation_max_rel_error':
+            'kütle korunumu kalıntısı — bkz. `wall_integral_residual_rel`',
+    }),
+    'flow/losses': ('panels/flow_panel.js', {
+        'method': 'kayıp modeli anahtarı — panel `correction_applies_to` '
+                  've sürtünme oranını basmıyor; gerekçe ÖLÇÜLMEDİ',
+        'correction_applies_to': 'düzeltmenin uygulandığı büyüklük — '
+                                 'gerekçe ÖLÇÜLMEDİ',
+        'friction_loss_fraction':
+            # ÖH D16 (bekci-cevirisi/a1, OH-B4-07): künye adları
+            # SATIR SONUNDA BÖLÜNMÜŞ ve `_source` kısaltmasıyla
+            # yazılmıştı; hiçbir makine bu iki adı çözemezdi. Adlar
+            # bölünmeden yazıldı (kaynak: nozzle_flow_1d.py:1218).
+            'sürtünme kaybı oranı — künyeleri '
+            '(`friction_loss_fraction_basis` / '
+            '`friction_loss_fraction_source`) bu blokta DÜRÜSTLÜK borcu '
+            'olarak imli; '
+            'sayı ve künyesi birlikte inmeli',
+        'friction_loss_fraction_integral_bl': 'bkz. `friction_loss_fraction`',
+        'friction_loss_fraction_legacy_constant':
+            'bkz. `friction_loss_fraction`',
+        'friction_loss_delta_vs_default': 'bkz. `friction_loss_fraction`',
+        'friction_drag_integral_bl_N': 'bkz. `friction_loss_fraction`',
+        'boundary_layer': 'sınır tabaka alt bloğu — panel çocuklarının '
+                          'bir bölümünü başka takma adla okuyor',
+        'boundary_layer_error': 'sınır tabaka çözüm hatası — tanı alanı',
+        'CF_effective_integral_bl':
+            'CF ikizleri — panel etkin CF ve CF_ideal\'i basıyor',
+        'CF_effective_legacy_constant': 'bkz. `CF_effective_integral_bl`',
+        'thrust_effective_integral_bl_N': 'bkz. `CF_effective_integral_bl`',
+        'thrust_effective_legacy_constant_N':
+            'bkz. `CF_effective_integral_bl`',
+        'divergence_factor': 'ıraksama kaybı üçlüsü — panel toplam kaybı '
+                             'basıyor; gerekçe ÖLÇÜLMEDİ',
+        'divergence_half_angle_deg': 'bkz. `divergence_factor`',
+        'divergence_loss_fraction': 'bkz. `divergence_factor`',
+        'initial_wall_angle_deg': 'kontur açısı — geometri girdisi',
+        'momentum_thrust_N': 'itki bileşeni — panel toplam itkiyi basıyor',
+        'pressure_thrust_N': 'itki bileşeni — bkz. `momentum_thrust_N`',
+    }),
+    'flow/regime': ('panels/flow_panel.js', {
+        'ambient_pressure_Pa': 'girdi yankısı — ortam basıncı',
+        'exit_mach_supersonic': 'rejim sınıflandırmasının ara kararı — '
+                                'panel `type` + `description` basıyor',
+        'exit_pressure_isentropic_Pa': 'bkz. `exit_mach_supersonic`',
+        'exit_pressure_subsonic_Pa': 'bkz. `exit_mach_supersonic`',
+        'pressure_ratio_Pe_over_Pa': 'bkz. `exit_mach_supersonic`',
+        'classification_tolerance': 'sınıflandırma toleransı — eşik '
+                                    'parametresi',
+        'thresholds_Pa': 'ÖLÇÜLDÜ: 5 çocuğun HİÇBİRİ panelde geçmiyor — '
+                         '`test_sagir_alt_bloklar_buyumez` borcu',
+        'normal_shock': 'normal şok alt bloğu — panel ayrılma bloğunu '
+                        '(`sep.`) basıyor; gerekçe ÖLÇÜLMEDİ',
+    }),
+    'flow/stations': ('panels/flow_panel.js', {
+        'radius_mm': 'ham istasyon dizisi — panel kontur/mach/basınç '
+                     'eğrilerini çiziyor, bu diziyi ad ile anmıyor',
+        'temperature_K': 'ham istasyon dizisi — bkz. `radius_mm`',
+        'density_kg_m3': 'ham istasyon dizisi — bkz. `radius_mm`',
+        'velocity_m_s': 'ham istasyon dizisi — bkz. `radius_mm`',
+        'h_g_W_m2K': 'Bartz kuplajı dizisi — ısı yükü paneli (protection) '
+                     'ekseni; akış panelinde yeri yok',
+        'q_conv_W_m2': 'Bartz kuplajı dizisi — bkz. `h_g_W_m2K`',
+        'T_recovery_K': 'Bartz kuplajı dizisi — bkz. `h_g_W_m2K`',
+    }),
+    'flow/kinetic': ('panels/flow_panel.js', {
+        'fidelity_requested': 'istenen seviye — panel GERÇEKLEŞENİ '
+                              '(`fidelity_used`) basıyor, dürüst geri '
+                              'düşüş orada görünüyor',
+        'diagnostics': 'ÖLÇÜLDÜ: 8 çocuğun HİÇBİRİ panelde geçmiyor — '
+                       '`test_sagir_alt_bloklar_buyumez` borcu',
+    }),
+    'flow/separation': ('panels/flow_panel.js', {
+        'criterion_factor': 'Summerfield katsayısı — panel ayrılma '
+                            'konumunu ve eşiği grafikte gösteriyor',
+        'effective_exit_pressure_Pa': 'ayrılma sonrası etkin çıkış '
+                                      'büyüklükleri — gerekçe ÖLÇÜLMEDİ',
+        'effective_expansion_ratio': 'bkz. `effective_exit_pressure_Pa`',
+        'downstream_wall_pressure_Pa': 'ayrılma sonrası cidar platosu — '
+                                       'panel duvar basıncı eğrisini çiziyor',
+        'velocity_m_s': 'ayrılma istasyonu hızı — gerekçe ÖLÇÜLMEDİ',
+    }),
+    'validation/ust': ('panels/validation_panel.js', {}),
+    'validation/parsed': ('panels/validation_panel.js', {
+        # ÖH D16 / app-api — P10B2-05. `units` MAKİNE OKUR künyedir:
+        # hangi birim beyan edildi, hangi çarpan uygulandı, beyan nereden
+        # geldi. Kullanıcıya dönük yüzü panelde ZATEN basılıyor —
+        # çevrim `parsed.warnings` içine bir cümle olarak düşüyor ve
+        # validation_panel.js:530-533 uyarı listesini 'warn' olarak
+        # çiziyor. Yani bilgi ekranda görünmüyor değil; ekranda cümle,
+        # gövdede yapı olarak duruyor.
+        'units': 'birim beyanı/çarpan künyesi — kullanıcıya dönük hâli '
+                 '`parsed.warnings` cümlesi olarak panelde basılıyor '
+                 '(validation_panel.js:530-533); bu alan aynı bilginin '
+                 'makine okur biçimi',
+    }),
+    'validation/comparison': ('panels/validation_panel.js', {
+        'diff_pct_reference':
+            'D29 app-api-dogrulama a1 (P10B2-16, 9 Eyl 2026): sapmanın '
+            'PAYDA ROLÜ künyesi (REFERENCE_MEASUREMENT kanon); panel bu '
+            'künyeyi henüz basmıyor — ADLI BORÇ, OH-D28-12 ile arayuz-panel '
+            'bağlar; bağlanınca bu satır silinir (tek yönlü).',
+    }),
+    'validation/metrics': ('panels/validation_panel.js', {
+        'burn_time_diff_s':
+            'saniye cinsinden fark — panel yüzde farkı '
+            '(`burn_time_diff_pct`) basıyor',
+    }),
+    'validation/motorfile': ('panels/validation_panel.js', {
+        'filename': 'girdi yankısı — kullanıcının seçtiği dosya adı',
+    }),
+    'performance/info': ('panels/performance_panel.js', {}),
+    'comparative': ('panels/comparative_panel.js', {}),
+    'stability/ust': ('panels/stability_panel.js', {}),
+    'stability/assessment': ('panels/stability_panel.js', {
+        # ÖH D16 (bekci-cevirisi/a1, OH-B4-07): "gerekçe ÖLÇÜLMEDİ"
+        # kaydı kapatıldı — panel iddiası artık makineyle sınanıyor.
+        'model': 'model anahtarı (lumped_capacitance_resistance_delay, '
+                 'kaynağı hrma/stability/chug.py `_MODEL_NAME`) — panel '
+                 'hükmü ve kapsamını (`verdict`, `verdict_scope`) basıyor; '
+                 'ÖLÇÜLDÜ: bu iki ad panelin okuma envanterinde VAR, model '
+                 'anahtarının kendisi ekranda geçmiyor',
+    }),
+    'correlation': ('panels/correlation_panel.js', {
+        'markdown': 'rapor metninin markdown ikizi — panel hücre '
+                    'tablosunu (`cells`) çiziyor',
+    }),
+    'uncertainty': ('panels/uncertainty_panel.js', {
+        'inputs_used': 'girdi yankısı bloğu — panel kullanıcının formunu '
+                       'zaten gösteriyor',
+        'motor_type': 'girdi yankısı — seçili motor tipi',
+        'sampler': 'örnekleyici adı — panel `n_samples`/`seed` basıyor; '
+                   'gerekçe ÖLÇÜLMEDİ',
+        'uq_version': 'şema sürümü — kullanıcı ekranında yeri yok',
+    }),
+}
+
+TERS_BORCLU_BLOKLAR = {
+    # BORÇ İMİ KALDIRILDI — ÖH D26 / arayuz a2 (OH-B3-02).
+    # Eski im: "`losses` bloğu dört künye alanı yayımlıyor ...;
+    # flow_panel.js hiçbirini basmıyor". ÖLÇÜLDÜ (taban 7751531,
+    # ``a2/once.json``: dört alanın dördü de 0) → ``a2/sonra.json``:
+    # dördü de panelde. `honestyBlock()` artık künyeleri ad = değer
+    # olarak basıyor (metin SUNUCUDAN, panel yeniden yazmıyor).
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir — künyeler yeniden ekrandan düşerse test kırmızı verir.
+    # BORÇ İMİ KALDIRILDI — ÖH D26 / arayuz a2 (OH-B3-02).
+    # ÖLÇÜLDÜ: taban 7751531 ``a2/once.json`` -> ``a2/sonra.json``.
+    # `skipped_summary` (rapora girmeyen kayıtların özeti) 0 -> panelde:
+    # correlation_panel.js `skippedSummaryHtml()` ile özet satırını
+    # ad = değer basıyor; özet boşsa satır hiç açılmaz.
+    # XPASS(strict) ile bu satır KIRMIZI veriyordu; blok artık CANLI
+    # bekçidir — alan yeniden ekrandan düşerse test kırmızı verir.
+    # --- ÖH D26 / app-api a4 (P7B4-05), 7 Eylül 2026 ---------------------
+    # ÇEVRİLDİ, GEREKÇE (ayrıntısı DURUSTLUK_BORCU'nda): ``/api/flow-
+    # analysis`` boş gövdeye DOKUZ uydurma varsayılanla çözüm yayımlıyordu
+    # ve yalnız biri (``chamber_pressure``, OH-D19-09) beyanlıydı. Kalan
+    # sekizi de aynı ``defaults_applied`` kanalına bağlandı; kanalın kendisi
+    # D21'den beri ``flow_panel.js`` tarafından HİÇ okunmuyor. Bu bekçi
+    # bugüne kadar yeşildi çünkü sabit istek gövdesi basıncı GÖNDERİYOR,
+    # yani alan doğmuyordu — körlük ÖRTÜLÜYDÜ, yeni doğmadı.
+    # 'flow/ust' SATIRI KALDIRILDI — ÖH D31 · arayuz-panel · a2
+    # (OH-D26-20 / ÖK-21 kilidi açıldı, Berke 14 Eyl 2026). Borcun panel
+    # ayağı ÖDENDİ: ``flow_panel.js`` artık ``defaults_applied`` künyesini
+    # ``defaultsBlock()`` ile ana render yolundan KOŞULSUZ basıyor
+    # (``+ defaultsBlock(data.defaults_applied)``), alan/değer/birim/gerekçe
+    # SUNUCUDAN okunuyor. Aynı aşamada formun ön-dolu varsayılanları da
+    # söküldüğü için kanal artık gerçekten doluyor: soğuk panel gövdesi
+    # DOKUZ beyan açıyor (ölçüldü, ``a2/sonra.json`` M5_uc_kosumu B; önce
+    # ikiydi, çünkü altı zorunlu alan formdan dolu gidiyordu). İm yerinde
+    # kalsaydı XPASS(strict) verirdi, yani "kusur duruyor" iddiası YALAN
+    # olurdu. Blok artık CANLI bekçidir: alan ekrandan düşerse KIRMIZI.
+    # 'uncertainty' SATIRI KALDIRILDI — ÖH D15 birleşmesi (1 Eyl 2026).
+    # P13B4-01'in borcu kapandı: `uncertainty_panel.js` artık
+    # `data.consistency_note`u okuyup ADIYLA basıyor (aynı dosyada
+    # `consistency_note` etiketiyle, satır ~400-423). Borç imi yerinde
+    # kalsaydı XPASS(strict) verirdi, yani "kusur duruyor" iddiası YALAN
+    # olurdu. Borç kalktığı için blok artık normal (yeşil beklenen)
+    # bekçiye tabi: not yeniden ekrandan düşerse KIRMIZI verir.
+}
+
+
+@pytest.fixture(scope='module')
+def ters_bloklar(flow_eng, flow_fast, flow_separated, csv_comparison,
+                 motorfile_response, performance_body, comparative_body,
+                 stability_body):
+    flow = flow_eng['flow']
+    return {
+        'flow/ust': dict(flow_fast, **flow_eng),
+        'flow/flow': flow,
+        'flow/performance': flow['performance'],
+        'flow/losses': flow['losses'],
+        'flow/regime': flow['regime'],
+        'flow/stations': flow['stations'],
+        'flow/kinetic': flow_eng['kinetic_efficiency'],
+        'flow/separation': flow_separated['flow']['regime']['separation'],
+        'validation/ust': csv_comparison,
+        'validation/parsed': csv_comparison['parsed'],
+        'validation/comparison': csv_comparison['comparison'],
+        'validation/metrics': csv_comparison['comparison']['metrics'],
+        'validation/motorfile': motorfile_response,
+        'performance/info': performance_body['analysis_info'],
+        'comparative': comparative_body['analysis'],
+        'stability/ust': stability_body,
+        'stability/assessment': stability_body['assessment'],
+        'correlation': DONDURULMUS_YUKLER['correlation'],
+        'uncertainty': DONDURULMUS_YUKLER['uncertainty'],
+    }
+
+
+def _ters_param(blok_id):
+    gerekce = TERS_BORCLU_BLOKLAR.get(blok_id)
+    if gerekce is None:
+        return pytest.param(blok_id, id=blok_id)
+    return pytest.param(blok_id, id=blok_id,
+                        marks=pytest.mark.xfail(strict=True, reason=gerekce))
+
+
+class TestTersYonSozlesmesi:
+    """ÖH FAZ C — C1/C2/C3: `payload.keys() − panelin okuduğu adlar`."""
+
+    @pytest.mark.parametrize('blok', [_ters_param(b) for b in TERS_MUAFIYET])
+    def test_durustluk_alanlari_panele_iniyor(self, ters_bloklar, blok):
+        js_yollari, _muafiyet = TERS_MUAFIYET[blok]
+        envanter = _okuma_envanteri(js_yollari)
+        eksik = [ad for ad in _ters_alanlar(ters_bloklar[blok], envanter)
+                 if _durustluk_alani(ad)]
+        assert not eksik, (
+            f"{blok}: uç şu DÜRÜSTLÜK alanlarını yayımlıyor ama "
+            f"{js_yollari} hiç basmıyor: {eksik}")
+
+    @pytest.mark.parametrize('blok', sorted(TERS_MUAFIYET))
+    def test_kozmetik_kalan_gerekceli_izinli(self, ters_bloklar, blok):
+        js_yollari, muafiyet = TERS_MUAFIYET[blok]
+        envanter = _okuma_envanteri(js_yollari)
+        kalan = [ad for ad in _ters_alanlar(ters_bloklar[blok], envanter)
+                 if not _durustluk_alani(ad) and ad not in muafiyet]
+        assert not kalan, (
+            f"{blok}: panelin basmadığı şu alanlar için gerekçe yok: "
+            f"{kalan}")
+        bos = [ad for ad, neden in muafiyet.items() if not str(neden).strip()]
+        assert not bos, f"{blok}: gerekçesiz muafiyet satırı: {bos}"
+
+    @pytest.mark.parametrize('blok', sorted(TERS_MUAFIYET))
+    def test_muafiyet_listesi_olu_satir_tasimaz(self, ters_bloklar, blok):
+        _js, muafiyet = TERS_MUAFIYET[blok]
+        olu = sorted(set(muafiyet) - set(ters_bloklar[blok]))
+        assert not olu, (
+            f"{blok}: izin listesinde ucun yayımlamadığı alan var: {olu}")
+
+
+class TestTersYonBorcEnvanteri:
+    """Borç imleri xfail altında sussa da yeni borç doğarsa haber ver."""
+
+    #: Ölçüldü 27 Ağustos 2026. TEK YÖNLÜ: küme büyüyemez, küçülebilir.
+    DURUSTLUK_BORCU = {
+        # --- ÖH D26 / app-api a4 (P7B4-05), 7 Eylül 2026 -----------------
+        # ÇEVRİLDİ, GEREKÇE: bu satır YENİ bir körlük DEĞİL, ÖRTÜLÜ olanın
+        # görünür hâlidir. ``defaults_applied`` kanalını ``/api/flow-
+        # analysis``a ÖH D21 (OH-D19-09) açmıştı ve ``flow_panel.js`` onu
+        # O GÜNDEN BERİ hiç basmıyor; bu bekçi kırmızı vermiyordu çünkü
+        # sabitlenmiş istek gövdesi ``chamber_pressure``ı GÖNDERİYOR, yani
+        # alan hiç doğmuyordu. P7B4-05 onarımı kalan sekiz varsayılanı da
+        # (chamber_temperature · gamma · molecular_weight · throat_diameter
+        # · ambient_pressure · n_stations · separation_factor ·
+        # wall_temperature) aynı kanaldan beyan edince alan bu gövdede de
+        # doğdu ve körlük ORTAYA ÇIKTI. Kanal kapatılmadı: sekiz uydurma
+        # sayının sessiz kalması, panelde görünmemesinden daha ağır bir
+        # kusurdur (ÖK-19).
+        # PANEL AYAĞI BU DALGADA YAPILAMAZ: ``hrma/static/js/panels/
+        # flow_panel.js`` ARAYÜZ kulvarınındır ve ÖLÇÜLDÜ — dalga26/arayuz
+        # dalı bu dosyaya bu dalgada dokunuyor (kardeş-dal ölçümü), yani
+        # aynı dosyaya ikinci el değmez. Satır, panel alanı bastığında
+        # SİLİNMELİDİR (küme tek yönlüdür: küçülebilir).
+        'flow/ust': ('defaults_applied',),
+        'flow/losses': ('friction_comparison_basis',
+                        'friction_loss_fraction_basis',
+                        'friction_loss_fraction_bl_note',
+                        'friction_loss_fraction_source'),
+        'correlation': ('skipped_summary',),
+        # 'uncertainty': ('consistency_note',) — ÖH D15 (1 Eyl 2026):
+        # panel notu artık basıyor, körlük kalmadı. Taban satırı da
+        # SİLİNDİ ki körlük geri gelirse burada kırmızı versin.
+    }
+
+    #: Ölçüldü 27 Ağustos 2026 — adı DA çocukları DA okunmayan alt bloklar.
+    SAGIR_ALT_BLOKLAR = {
+        'flow/regime': {'thresholds_Pa': 5},
+        'flow/kinetic': {'diagnostics': 8},
+    }
+
+    def test_durustluk_borcu_buyumez(self, ters_bloklar):
+        yeni = {}
+        for blok, (js_yollari, _m) in TERS_MUAFIYET.items():
+            envanter = _okuma_envanteri(js_yollari)
+            kor = {ad for ad in _ters_alanlar(ters_bloklar[blok], envanter)
+                   if _durustluk_alani(ad)}
+            fazla = sorted(kor - set(self.DURUSTLUK_BORCU.get(blok, ())))
+            if fazla:
+                yeni[blok] = fazla
+        assert not yeni, (
+            "YENİ dürüstlük körlüğü doğdu (27 Ağu 2026 tabanının dışında): "
+            f"{yeni}")
+
+    def test_sagir_alt_bloklar_buyumez(self, ters_bloklar):
+        yeni = {}
+        for blok, (js_yollari, _m) in TERS_MUAFIYET.items():
+            if blok in DONDURULMUS_YUKLER:
+                continue  # dondurulmuş yükte değerler yok, yapı ölçülemez
+            envanter = _okuma_envanteri(js_yollari)
+            sagir = _sagir_alt_bloklar(ters_bloklar[blok], envanter)
+            fazla = sorted(set(sagir)
+                           - set(self.SAGIR_ALT_BLOKLAR.get(blok, {})))
+            if fazla:
+                yeni[blok] = {ad: sagir[ad] for ad in fazla}
+        assert not yeni, f"YENİ sağır alt blok doğdu: {yeni}"
+
+
+class TestPanelOkumaEnvanteri:
+    """C3 — kapsama alınan panellerin OKUDUĞU alan envanteri (taban ölçüm)."""
+
+    #: TABANLAR OH-B3-06 İNCELMESİYLE YENİDEN ÖLÇÜLDÜ (27 Ağustos 2026);
+    #: parantez içi ESKİ (i18n maskeli) ölçüm.
+    ENVANTER_TABANI = {
+        'panels/flow_panel.js': 103,          # eski maskeli ölçüm: 152
+        'panels/validation_panel.js': 106,    # 151
+        'panels/performance_panel.js': 63,    # 87
+        'panels/comparative_panel.js': 95,    # 133
+        'panels/stability_panel.js': 207,     # 312
+        'panels/correlation_panel.js': 62,    # 99
+        'panels/uncertainty_panel.js': 102,   # 144
+    }
+
+    @pytest.mark.parametrize('rel', sorted(ENVANTER_TABANI))
+    def test_envanter_cikarimi_saglam(self, rel):
+        taban = self.ENVANTER_TABANI[rel]
+        boy = len(_okuma_envanteri(rel))
+        assert boy >= int(taban * 0.7), (
+            f"{rel}: okuma envanteri {boy} ada düştü (taban {taban}) — "
+            "çıkarım bozulmuş olabilir")
+
+
+class TestIncelmeYanlisKirmiziUretmez:
+    """OH-B3-06 incelmesinin M2 kontrolü (mekanizma wave3 §8 ile aynı).
+
+    Gerçek okuma envanterde KALMALI; kalmazsa ters yön yanlış kırmızı
+    üretir. Sentetik metin + bu dosyanın panellerinden ölçülmüş çapalar.
+    """
+
+    def test_i18n_anahtari_tek_basina_okuma_sayilmaz(self):
+        metin = "html += `${T('common.warnings', 'Warnings')}`;"
+        assert 'warnings' not in _envanter_metinden(metin)
+
+    def test_gercek_okuma_i18n_ikiziyle_birlikte_hayatta_kalir(self):
+        metin = ("const w = d.warnings || [];\n"
+                 "html += `${T('common.warnings', 'Warnings')}`;")
+        assert 'warnings' in _envanter_metinden(metin), (
+            'incelme GERÇEK okumayı da sildi — ters yön yanlış kırmızı verir')
+
+    def test_dizin_erisimi_de_hayatta_kalir(self):
+        metin = ("const w = d['warnings'];\n"
+                 "html += T('common.warnings', 'W');")
+        assert 'warnings' in _envanter_metinden(metin)
+
+    #: (panel, ad): ad HEM i18n anahtarında HEM gerçek okumada geçiyor.
+    CIFT_GECEN = (
+        ('panels/uncertainty_panel.js', 'nominal'),
+        ('panels/correlation_panel.js', 'cached'),
+        ('panels/comparative_panel.js', 'onlyIn'),
+        ('panels/performance_panel.js', 'title'),
+    )
+
+    @pytest.mark.parametrize('rel,ad', CIFT_GECEN,
+                             ids=[f'{r}:{a}' for r, a in CIFT_GECEN])
+    def test_urun_capasi_incelmeden_sag_cikti(self, rel, ad):
+        metin = (REPO_STATIC_JS / Path(rel)).read_text(encoding='utf-8')
+        yapraklar = {parca
+                     for m in I18N_ANAHTAR_DIZGESI.finditer(metin)
+                     for parca in m.group(0).strip('\'"').split('.')[1:]}
+        assert ad in yapraklar, (
+            f"{rel}: {ad!r} artık bir i18n anahtarında geçmiyor — çapa bayat")
+        assert ad in _okuma_envanteri(rel), (
+            f"{rel}: {ad!r} gerçek okumaydı, incelme düşürdü")

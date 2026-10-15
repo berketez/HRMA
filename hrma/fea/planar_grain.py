@@ -114,6 +114,25 @@ DEFAULT_N_THETA0 = 24
 
 OUTER_BC_MODES = ("bonded_rigid", "free")
 
+#: KÜÇÜK GERİNİM / GEOMETRİK LİNEERLİK SINIRI (P8B2-07, ÖH D15/a3).
+#: Bu çözücü küçük gerinim + küçük yer değiştirme varsayar: denge DEFORME
+#: OLMAMIŞ geometride kurulur, basınç yükü deforme yüzeyi TAKİP ETMEZ
+#: (follower değil) ve bünye bağıntısı lineerleştirilmiş gerinim ölçüsüyle
+#: yazılır. Ölçüldü (bates, apcp E = 6 MPa, ν = 0,4995, D 100/40 mm):
+#: Pc 800 bar'da port lif gerinimi %10,43 çıkıyor, 0 uyarı basılıyor ve
+#: pay 3,36 hüküm gibi yayımlanıyordu; ``not_modelled`` listesinin altı
+#: kaleminin hiçbiri küçük gerinimden söz etmiyordu. Sınırın SAYISAL yeri
+#: artık burada, TEK yerde durur ve her sonuçta beyan edilir.
+#:
+#: Eşiklerin gerekçesi: mühendislik gerinimi ile logaritmik (gerçek)
+#: gerinim farkı ε²/2 mertebesindedir — %2'de bağıl fark %1'in altında,
+#: %5'te ~%2,5, %10'da ~%5. UYARI eşiği %2 (sonuç ön boyutlandırma için
+#: hâlâ okunabilir, ama sapma beyan edilir); HÜKÜM eşiği %5 — bunun
+#: üstünde kabul payı YAYIMLANMAZ, çünkü lineer çözümün kendi varsayımı
+#: kırılmıştır (fail-closed).
+SMALL_STRAIN_WARN = 0.02
+SMALL_STRAIN_LIMIT = 0.05
+
 
 @dataclass
 class PlanarGrainResult:
@@ -516,6 +535,22 @@ def _result_meta_planar(outer_bc: str) -> dict:
             "uzun tane, uçlar tutulu varsayımı)",
             "tane-kasa yapıştırma (bond) gerilmeleri",
             "yanma ile port büyümesi (t = 0 geometrisi çözülür)",
+            # P8B2-08: kabul payı bir ÇEKME ölçütüdür; basma tarafının
+            # kabiliyeti (ezilme/akma) modellenmiyor ve pay ondan
+            # hesaplanmıyor.
+            ("BASMA KABİLİYETİ — kopma uzaması yalnız ÇEKME tarafının "
+             "kabiliyetidir; port çevresindeki basma gerinimi ölçülüp "
+             "meta['port_lif_gerinimi']['maks_basma'] alanında yayımlanır "
+             "ama ona karşı bir kabul ölçütü YOKTUR (P8B2-08)"),
+            # P8B2-07: listede küçük gerinim/geometrik lineerlik kalemi HİÇ
+            # yoktu; sınırın sayısal yeri modül sabitlerindedir ve her
+            # sonuçta meta['kucuk_gerinim_siniri'] içinde yayımlanır.
+            ("GEOMETRİK LİNEERLİK — küçük gerinim + küçük yer değiştirme "
+             "varsayılır: denge deforme olmamış geometride kurulur ve "
+             "basınç yükü deforme yüzeyi TAKİP ETMEZ (follower değil). "
+             f"Uyarı eşiği %{100.0 * SMALL_STRAIN_WARN:.0f}, hüküm eşiği "
+             f"%{100.0 * SMALL_STRAIN_LIMIT:.0f} port lif gerinimi; hüküm "
+             "eşiği aşılırsa kabul payı yayımlanmaz"),
         ],
     }
 
@@ -619,12 +654,43 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
     eps_edge, eps_node = _bore_fiber_strain(mesh, u2)
     i_max = int(np.argmax(np.abs(eps_node)))
     max_bore = float(eps_node[i_max])
-    if strain_capability is not None and abs(max_bore) > 0.0:
-        margin = float(strain_capability / abs(max_bore))
-    elif strain_capability is not None:
-        margin = float("inf")
-    else:
+
+    # --- P8B2-08 (ÖH D26 / fea-cfd a3): PAY ÇEKME GERİNİMİNDEN ------------
+    # ÖLÇÜLDÜ (taban 7751531, ``once_a3.json``): ``max_bore_strain`` en
+    # büyük MUTLAK değeri aldığı için port çevresinde basma (negatif)
+    # gerinim baskın olduğunda pay o BASMA gerinimi üzerinden veriliyordu.
+    # Ölçülen vaka (8 uçlu yıldız, r_port 20 mm, r_uç 40 mm, r_dış 50 mm,
+    # p 3 MPa, ν 0,499, kopma uzaması 0,30): yayımlanan max_bore_strain
+    # −0,0022649 (BASMA), pay 132,455; oysa aynı kesitin en büyük ÇEKME
+    # gerinimi +0,0011524 ve doğru pay 260,333.
+    # Kabul ölçütü (NASA SP-8073, katı yakıt tanesi gerinim kabulü)
+    # KOPMA UZAMASIDIR: bir ÇEKME kabiliyeti. Basma gerinimini kopma
+    # uzamasına bölmek büyüklükleri karıştırır — sayı bu vakada kötümser
+    # çıksa bile ölçüt yanlıştır ve işaret değiştiğinde (basma > çekme)
+    # payın hangi mekanizmayı temsil ettiği belirsizleşir.
+    # ARTIK: pay yalnız en büyük ÇEKME gerinimiyle hesaplanır; port
+    # çevresinde hiç çekme yoksa pay UYDURULMAZ, adıyla geri çekilir.
+    # ``max_bore_strain`` (işaretli, mutlak maksimum) alan sözleşmesi
+    # DEĞİŞMEDİ — silinmez, yanında durur.
+    eps_cekme = float(np.max(eps_node))
+    eps_basma = float(np.min(eps_node))
+    max_bore_tensile = eps_cekme if eps_cekme > 0.0 else None
+    margin_geri_cekme = None
+    if strain_capability is None:
         margin = None
+    elif max_bore_tensile is None:
+        margin = None
+        margin_geri_cekme = (
+            "KABUL PAYI HESAPLANMADI: port yüzeyinde hiçbir istasyonda "
+            f"ÇEKME lif gerinimi yok (en büyük gerinim {eps_cekme:.6g}, "
+            f"en küçük {eps_basma:.6g} — hepsi basma). Kopma uzaması "
+            "(strain_capability) bir ÇEKME kabiliyetidir; basma gerinimini "
+            "ona bölmek farklı iki büyüklüğü oranlar. Basma kabiliyeti "
+            "modellenmiyor, bu yüzden sayı uydurulmaz (P8B2-08).")
+    elif max_bore_tensile > 0.0:
+        margin = float(strain_capability / max_bore_tensile)
+    else:                                    # tam sıfır çekme
+        margin = float("inf")
 
     meta = _result_meta_planar(outer_bc)
     meta["stress_nodal_kaynagi"] = yontem
@@ -632,14 +698,77 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
                        "ad": material.name}
     meta["yukler"] = {"bore_pressure_Pa": p}
     meta["simetri"] = mesh.meta.get("simetri")
+    # P8B2-08: gerinim uçları AYRI AYRI yayımlanır — payın hangi sayıdan
+    # geldiği ve hangi işaretin baskın olduğu figüre değil ALANA yazılır.
+    meta["port_lif_gerinimi"] = {
+        "maks_cekme": eps_cekme,
+        "maks_basma": eps_basma,
+        "mutlak_maksimum_isaretli": max_bore,
+        "pay_hangi_gerinimden": ("cekme" if max_bore_tensile is not None
+                                 else "YOK — çekme gerinimi bulunmadı"),
+        "_basis": (
+            "kopma uzaması (strain_capability) bir ÇEKME kabiliyetidir "
+            "(NASA SP-8073 tane gerinim kabulü); kabul payı bu yüzden "
+            "yalnız en büyük ÇEKME lif geriniminden hesaplanır. Basma "
+            "ucu ayrı alanda durur; basma kabiliyeti MODELLENMİYOR "
+            "(P8B2-08)."),
+    }
     if strain_capability is None:
         meta["strain_margin_durumu"] = (
             "HESAPLANMADI — kopma uzaması (strain_capability) verilmedi; "
             "uydurma değer konmaz")
+    elif margin_geri_cekme is not None:
+        meta["strain_margin_durumu"] = margin_geri_cekme
     else:
         meta["strain_margin_temeli"] = (
-            "strain_capability / |maks port lif gerinimi| — kopma uzaması "
-            "çağıranın verdiği SOLID_GRAIN_MECHANICS kaydından")
+            "strain_capability / maks port ÇEKME lif gerinimi — kopma "
+            "uzaması çağıranın verdiği SOLID_GRAIN_MECHANICS kaydından; "
+            "basma ucu meta['port_lif_gerinimi']['maks_basma'] alanında "
+            "ayrıca durur (P8B2-08)")
+
+    # --- P8B2-07: KÜÇÜK GERİNİM SINIRI DENETLENİR VE BEYAN EDİLİR --------
+    # Sınırın sayısal yeri modül sabitlerindedir (SMALL_STRAIN_WARN /
+    # SMALL_STRAIN_LIMIT). Uyarı bandında sayı yayımlanır ama sapma
+    # söylenir; hüküm bandının üstünde KABUL PAYI GERİ ÇEKİLİR — beyanla
+    # geçiştirilmez, çünkü lineer çözümün varsayımı kırılmıştır.
+    eps_abs = abs(max_bore)
+    uyarilar = list(meta.get("uyarilar") or [])
+    meta["kucuk_gerinim_siniri"] = {
+        "uyari_esigi": SMALL_STRAIN_WARN,
+        "hukum_esigi": SMALL_STRAIN_LIMIT,
+        "olculen_maks_port_gerinimi": max_bore,
+        "_basis": (
+            "denge deforme OLMAMIŞ geometride kurulur, basınç yükü deforme "
+            "yüzeyi takip etmez ve bünye bağıntısı lineerleştirilmiş "
+            "gerinim ölçüsüyle yazılır; mühendislik ⟷ logaritmik gerinim "
+            "farkı ε²/2 mertebesindedir"),
+    }
+    if eps_abs > SMALL_STRAIN_LIMIT:
+        meta["kucuk_gerinim_durumu"] = "asildi"
+        meta["strain_margin_geri_cekme"] = (
+            f"KABUL PAYI GERİ ÇEKİLDİ: maks port lif gerinimi "
+            f"%{100.0 * eps_abs:.2f}, küçük-gerinim hüküm eşiği "
+            f"%{100.0 * SMALL_STRAIN_LIMIT:.2f}'in üstünde. Yer değiştirme "
+            "ve gerilme alanları çözücünün gerçek çıktısıdır ve SİLİNMEZ, "
+            "ancak geometrik lineerlik varsayımı kırıldığı için bu "
+            "gerinimden 'tane kabul edilir/edilmez' hükmü çıkarılamaz. "
+            "Büyük yer değiştirme + takip eden basınç yükü içeren bir "
+            "çözüm gerekir.")
+        uyarilar.append({
+            "code": "warn.fea.planar_grain_small_strain_exceeded",
+            "params": {"strain_pct": round(100.0 * eps_abs, 4),
+                       "limit_pct": round(100.0 * SMALL_STRAIN_LIMIT, 4)}})
+        margin = None
+    elif eps_abs > SMALL_STRAIN_WARN:
+        meta["kucuk_gerinim_durumu"] = "uyari_bandi"
+        uyarilar.append({
+            "code": "warn.fea.planar_grain_small_strain_warn",
+            "params": {"strain_pct": round(100.0 * eps_abs, 4),
+                       "warn_pct": round(100.0 * SMALL_STRAIN_WARN, 4)}})
+    else:
+        meta["kucuk_gerinim_durumu"] = "gecerli"
+    if uyarilar:
+        meta["uyarilar"] = uyarilar
 
     return PlanarGrainResult(
         displacement=u2,

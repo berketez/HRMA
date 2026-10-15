@@ -103,6 +103,31 @@ def yapisal_olcum(**degisiklikler) -> Dict[str, Any]:
                   'distortion alarm'),
         ],
         'rozet_sayisi': 7,
+        # Rozetlerin türediği yük içeriği (ÖH Faz 0 — rozet⟷yük çaprazının
+        # ham girdisi; sayılar yukarıdaki rozetlerle AYNI koşumun değerleri).
+        'yuk_ozeti': {
+            'scalars': {'von_mises_gauss_max_pa': 16.8e6,
+                        'min_safety_factor': 12.83},
+            'convergence': {'converged': True, 'rounds': 3,
+                            'final_rel_change_pct': 0.55},
+            # ÖH D18 / P17B1-20 ŞART: ``flags`` bloğu turun yuk_ozeti
+            # süzgecinde ZATEN vardı (tur.py:279) ama fikstür onu taşımıyordu,
+            # bu yüzden kalite rozetlerinin sayıları çaprazlanamıyordu.
+            # Buradaki değerler uydurma değil, yukarıdaki iki rozetin
+            # (`MESH DISTORTION (scaled Jacobian < 0.5): 0/1024 flagged`,
+            # `ELONGATED ELEMENTS (aspect ratio > 4): 1024/1024`) türediği
+            # payload bloğunun ta kendisidir — fea_panel.js:418-435
+            # qualityBadges bu üç alt sözlükten basar.
+            'flags': {'measured': {'jacobian': True, 'aspect': True},
+                      'counts': {'jacobian': 0, 'aspect': 1024,
+                                 'total': 1024},
+                      'thresholds': {'scaled_jacobian_min': 0.5,
+                                     'aspect_ratio_max': 4}},
+            # `ENGINE: HYBRID` ve `MESH 1024 elements / 1105 nodes`
+            # rozetlerinin türediği alanlar (fea_panel.js:714-719).
+            'engine_layout': 'hybrid',
+            'mesh_info': {'n_elems': 1024, 'n_nodes': 1105},
+        },
         'cizimler': {k: cizim_olcumu()
                      for k in sayfalar.YAPISAL_FEA.cizim_kimlikleri},
         'panel_plotly_kap_sayisi': 4,
@@ -130,6 +155,20 @@ def termal_olcum(**degisiklikler) -> Dict[str, Any]:
             rozet('TIME STEP CONVERGED', 'ok'),
         ],
         'rozet_sayisi': 6,
+        'yuk_ozeti': {
+            'scalars': {'peak_wall_T_K': 3056.0, 'peak_time_s': 10.0},
+            'material_limits': {'exceeds_melting': True,
+                                'exceeds_allowable': True,
+                                'melting_point_K': 1673.0,
+                                'allowable_temperature_K': 1073.0},
+            'time_step': {'converged': True},
+            'energy': {'residual_rel': 4.6e-15},
+            # ÖH D18 / P17B1-20 ŞART: `ENGINE: HYBRID` ve
+            # `MESH 64 elements / 85 nodes` rozetlerinin payload karşılığı
+            # (thermal_fea_panel.js:655-661).
+            'engine_layout': 'hybrid',
+            'mesh_info': {'n_elems': 64, 'n_nodes': 85},
+        },
         'cizimler': {k: cizim_olcumu()
                      for k in sayfalar.TERMAL_FEA.cizim_kimlikleri},
         'panel_plotly_kap_sayisi': 3,
@@ -162,6 +201,33 @@ def tane_olcum(**degisiklikler) -> Dict[str, Any]:
                   'contour, not a distortion alarm'),
         ],
         'rozet_sayisi': 9,
+        'yuk_ozeti': {
+            'scalars': {'von_mises_gauss_max_mpa': 0.073,
+                        'max_bore_strain_pct': 1.0,
+                        'strain_capability_pct': 35.0,
+                        'strain_margin': 35.01},
+            'convergence': {'converged': False,
+                            'final_rel_change_pct': 2.019,
+                            'acceptance': {'converged': True,
+                                           'quantity': 'max_bore_strain',
+                                           'rel_change_pct': 0.0007914,
+                                           'tol_pct': 1.0}},
+            # ÖH D18 / P17B1-20 ŞART — yapısal fikstürdeki gerekçenin aynısı:
+            # `MESH DISTORTION (scaled Jacobian < 0.5): 0/6144 flagged` ve
+            # `ELONGATED ELEMENTS (aspect ratio > 4): 6144/6144` rozetlerinin
+            # türediği payload bloğu (fea_panel.js:1638-1660).
+            'flags': {'measured': {'jacobian': True, 'aspect': True},
+                      'counts': {'jacobian': 0, 'aspect': 6144,
+                                 'total': 6144},
+                      'thresholds': {'scaled_jacobian_min': 0.5,
+                                     'aspect_ratio_max': 4}},
+            # `SECTION: BATES · 1/8 slice` ve
+            # `MESH 6144 elements / 6369 nodes` rozetlerinin payload
+            # karşılığı (fea_panel.js:1558-1571).
+            'grain_type': 'bates',
+            'symmetry_fraction': 8,
+            'mesh_info': {'n_elems': 6144, 'n_nodes': 6369},
+        },
         'cizimler': {k: cizim_olcumu()
                      for k in sayfalar.TANE_FEA.cizim_kimlikleri},
         'panel_plotly_kap_sayisi': 3,
@@ -232,10 +298,26 @@ class TestPanelTanimlari:
         assert 'GrainFeaPanel.init(' in katı
 
     def test_termal_panel_ortam_alani_on_dolu(self):
-        """293,15 K ön-dolu gelir; tur ona DOKUNMAZ (varsayılan yol denetlenir)."""
+        """293,15 K ön-dolu gelir; tur ona DOKUNMAZ (varsayılan yol denetlenir).
+
+        ÖH D26 · arayuz a2 (``c51b9e6a``) sayıyı şablondan söküp panelin
+        TEK KAYNAĞINA taşıdı (``AMBIENT_PANEL_DEFAULT_K``, ÖK-04) ve bu
+        bekçi kırmızıya düştü — çünkü METNİ sınıyordu, ANLAMI değil.
+        Ölçüldü (a4 sembol taraması; taban ağacında YEŞİL, worktree'de
+        KIRMIZI). Bekçi çevrildi: hem alanın ön-dolu geldiği hem bastığı
+        sayının 293,15 K olduğu ayrı ayrı iddia edilir; sabit iki yere
+        yazılırsa ya da alan boşa düşerse test yine KIRMIZI olur.
+        """
         metin = (ROOT / 'hrma/static/js/thermal_fea_panel.js').read_text(
             encoding='utf-8')
-        assert 'id="fea_t_ambient" value="293.15"' in metin
+        assert re.search(
+            r'id="fea_t_ambient"\s*value="\$\{AMBIENT_PANEL_DEFAULT_K\}"',
+            metin), 'ortam alanı ön-dolu gelmiyor ya da tek kaynaktan okumuyor'
+        assert re.search(
+            r'const AMBIENT_PANEL_DEFAULT_K\s*=\s*293\.15\s*;', metin), \
+            'panelin ortam sıcaklığı varsayılanı 293,15 K değil'
+        assert 'id="fea_t_ambient" value="293.15"' not in metin, (
+            'sayı alanın şablonuna geri gömülmüş: tek kaynak bozuldu')
 
     def test_denetim_adlari_sayfa_icinde_benzersiz(self):
         """İki panelin denetimi aynı adı taşırsa rapor okunamaz hâle gelir."""
@@ -259,7 +341,9 @@ class TestRozetImzalari:
     """
 
     @pytest.mark.parametrize('imza', ['mesh_bozulmasi', 'uzamis_elemanlar',
-                                      'kabul_olcutu', 'tepe_cidar_sicakligi'])
+                                      'kabul_olcutu', 'tepe_cidar_sicakligi',
+                                      'sf_hukmu', 'termal_sinir_hukmu',
+                                      'tane_gerinim_marji_hukmu'])
     def test_imza_sozlukteki_her_dilde_geciyor(self, imza):
         tanim = esikler.ROZET_IMZALARI[imza]
         varyantlar = tanim['varyantlar']
@@ -275,7 +359,9 @@ class TestRozetImzalari:
                     % (varyantlar, anahtar, deger))
 
     @pytest.mark.parametrize('imza', ['mesh_bozulmasi', 'uzamis_elemanlar',
-                                      'kabul_olcutu', 'tepe_cidar_sicakligi'])
+                                      'kabul_olcutu', 'tepe_cidar_sicakligi',
+                                      'sf_hukmu', 'termal_sinir_hukmu',
+                                      'tane_gerinim_marji_hukmu'])
     def test_imza_ingilizce_yedekte_de_geciyor(self, imza):
         """Sözlük yüklenmezse panel YEDEK metni basar; imza orada da olmalı."""
         tanim = esikler.ROZET_IMZALARI[imza]
@@ -566,12 +652,19 @@ class TestRozetDenetimi:
 
 class TestAkisaBaglanma:
 
-    def test_panel_basina_uc_hukum(self):
+    def test_panel_basina_hukum_kumesi(self):
+        """Sağlıklı ölçümde DÖRT hüküm: koşum/çizim/rozet + yük çaprazı.
+
+        (ÖH Faz 0: eski üçlüye P17 reçetesinin rozet⟷yük çaprazı eklendi;
+        çapraz yalnız yük yayımlanmışken üretilir — ölçümsüz hâl aşağıdaki
+        testte üçlü kalır.)
+        """
         hukumler = denetimler.fea_denetimleri(sayfalar.YAPISAL_FEA,
                                               yapisal_olcum())
         assert [h.ad for h in hukumler] == ['fea_yapisal_kosum',
                                             'fea_yapisal_cizim',
-                                            'fea_yapisal_rozet']
+                                            'fea_yapisal_rozet',
+                                            'fea_yapisal_yuk_caprazi']
         assert all(h.gecti for h in hukumler)
 
     def test_olcum_yoksa_uc_hukum_de_kalir(self):
@@ -593,34 +686,76 @@ class TestAkisaBaglanma:
         ölçen bu testler onun yüzünden kırmızıya düşerdi. Merkez'in kendi
         bekçileri ``tests/test_browser_harness_merkez.py``de.
         """
-        from tests.test_browser_harness_merkez import merkez_olcumu
+        from tests.test_browser_harness_merkez import (merkez_olcumu,
+                                                       yerlesim_olcumu)
         gezgin = self._gezgin(sayfa_adi)
         return gezgin._rapor(
+            yerlesim=yerlesim_olcumu(),
             sureler={'yukleme_s': 0.7, 'hesap_s': 3.1},
             viz={'erisim': 'motorviz3d', 'cizim_araligi': 900,
                  'plume_bilgisi_var': True, 'oynatiliyor': True,
                  'plume_acik': True, 'partikul_tavani': 900},
             tuval_ham={'kaynak': 'MotorViz3D.snapshot()'},
-            piksel={'dolu_oran': 0.19, 'icerik_entropi_bit': 3.07,
+            # ÖH D23 fix-20 — FİKSTÜR YENİDEN KALİBRE EDİLDİ (0,19 → 0,4119).
+            # ``89085d2`` (ÖH D22 altyapi a1, defter P10B3-12) tuval eşiğini
+            # canlı ölçümle 0,02 → 0,20'ye çekti: %2,1 dolu bir YER TUTUCU
+            # eski eşikten geçiyordu. Bu dosyanın 0,19'u eski eşiğe göre
+            # seçilmiş bir "sağlıklı sahne" temsilcisiydi ve yeni bandın
+            # ALTINDA kalıyor — üç test ``tuval_dolu`` KALDI diye kırmızıydı.
+            # Kardeş fikstür (``test_browser_harness_merkez.py``: 0,41) aynı
+            # commit'te güncellenmiş, bu dosya atlanmıştı; birleşme boşluğu.
+            # Yeni değer UYDURULMADI: depodaki 6 canlı tur raporunun 22
+            # ölçümünün EN KÜÇÜĞÜ (0,4119, ``docs/scofield/raw/P17/cikti/
+            # B4-harness-tur/tour_report.json``; bant 0,4119-0,4933). Yani
+            # fikstür artık gerçek bir sahnenin en zayıf ölçümünü taşıyor —
+            # eşik yükselirse bu satır ilk kırılan olur, yastık yok.
+            piksel={'dolu_oran': 0.4119, 'icerik_entropi_bit': 3.07,
                     'parlak_oran': 0.01},
             metin='Chamber Pressure 20.0 bar', plume_baslatma='ui',
-            goruntuler={'tam_sayfa': None, 'uc_boyut': None}, fea=fea,
+            # ÖH D20 · P17B1-05: sözleşme büyüdü — tam sayfa görüntüsü
+            # artık ÖLÇÜLÜYOR; gerçek turda hep alınır, fikstür de
+            # gerçek bir koşumun (16.384 px tavanının altındaki) ölçüsünü
+            # taşır.
+            goruntuler={'tam_sayfa': '/x/%s_tam.png' % sayfa_adi,
+                        'tam_sayfa_px': {'genislik': 1600,
+                                         'yukseklik': 9412},
+                        'uc_boyut': None}, fea=fea,
             merkez=merkez_olcumu() if merkez is None else merkez)
 
     def test_hibrit_raporu_iki_paneli_de_denetler(self):
         rapor = self._tam_rapor('hybrid', {'yapisal': yapisal_olcum(),
                                            'termal': termal_olcum()})
         adlar = [d['ad'] for d in rapor['denetimler']]
-        assert adlar[:5] == ['akis_tamam', 'tuval_dolu', 'plume_cizildi',
-                             'konsol_temiz', 'sizinti_yok']
-        assert adlar[5:11] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
-                               'fea_yapisal_rozet', 'fea_termal_kosum',
-                               'fea_termal_cizim', 'fea_termal_rozet']
-        # NÖBET DEĞİŞİMİ (16 Ağu 2026): FEA üçlülerinden SONRA Analiz
+        # ÖH D20 · P17B1-05: temel dizi altıya çıktı (tam sayfa görüntüsü).
+        assert adlar[:6] == ['akis_tamam', 'tuval_dolu', 'plume_cizildi',
+                             'konsol_temiz', 'sizinti_yok',
+                             'tam_sayfa_goruntusu']
+        # ÖH Faz 0: temel diziden sonra iki yerleşim denetimi geldi.
+        assert adlar[6:8] == ['yerlesim_yatay_tasma', 'yerlesim_metin_ortusmesi']
+        assert adlar[8:16] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
+                               'fea_yapisal_rozet', 'fea_yapisal_yuk_caprazi',
+                               'fea_termal_kosum', 'fea_termal_cizim',
+                               'fea_termal_rozet', 'fea_termal_yuk_caprazi']
+        # NÖBET DEĞİŞİMİ (16 Ağu 2026): FEA dörtlülerinden SONRA Analiz
         # Merkezi'nin dörtlüsü geliyor. Eski sözleşme "adlar[5:] yalnız
         # FEA" diyordu; Merkez ürüne girince o cümle YALANCI olurdu.
-        assert adlar[11:] == ['merkez_cerceve', 'merkez_cfd_kosum',
-                              'merkez_cfd_cizim', 'merkez_cfd_rozet']
+        #
+        # ÖH D24 · P10B3-02 — BEKÇİ ÇEVRİLDİ (bayat listeyi kilitliyordu).
+        # Kuyruk buraya ``['merkez_cerceve', 'merkez_cfd_*']`` diye ELLE
+        # yazılmıştı. D23'te hibride iki kiracı daha girdi
+        # (``acoustic_modes``, ``combustion_stability``); rapor onların
+        # denetimlerini de üretince bu satır ürünle çeliştirip KIRMIZI
+        # kaldı — yani sıra sözleşmesini değil, o günkü kiracı LİSTESİNİ
+        # kilitliyordu. Kuyruk artık SAYFA TANIMINDAN türetilir: yeni
+        # kiracı eklendiğinde bekçi kendiliğinden büyür, korunan şey
+        # sözleşmenin kendisi olur (önce çerçeve, sonra kiracılar tanım
+        # sırasıyla, her biri koşum → çizim → rozet üçlüsü).
+        beklenen_merkez = ['merkez_cerceve']
+        for _k in sayfalar.SAYFALAR['hybrid'].merkez_kiracilari:
+            beklenen_merkez += ['merkez_%s_kosum' % _k.ad,
+                                'merkez_%s_cizim' % _k.ad,
+                                'merkez_%s_rozet' % _k.ad]
+        assert adlar[16:] == beklenen_merkez
         assert rapor['gecti'] is True
         assert rapor['olcumler']['fea']['termal']['kosum_s'] == 0.12
 
@@ -642,8 +777,8 @@ class TestAkisaBaglanma:
         """
         rapor = self._tam_rapor('liquid', {})
         adlar = [d['ad'] for d in rapor['denetimler']]
-        assert adlar[5:8] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
-                              'fea_yapisal_rozet']
+        assert adlar[8:11] == ['fea_yapisal_kosum', 'fea_yapisal_cizim',
+                               'fea_yapisal_rozet']
         assert not any(a.startswith(('fea_termal', 'fea_tane'))
                        for a in adlar)
         assert rapor['gecti'] is False

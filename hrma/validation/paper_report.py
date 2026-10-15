@@ -8,7 +8,8 @@ korelasyonunu dogrudan makaleye tasinabilir gorsel + sayilarla belgelemek.
 Tasarim kararlari (dogruluk ve durustluk):
   - Parite noktalari ``result["records"][].scores`` icinden toplanir (hucre
     istatistigi yalniz isaretli hatayi tutar, tahmin/olcum degerlerini degil).
-  - Katman ayrimi correlation_runner._aggregate ile BIREBIR ayni: anomaly
+  - Katman ayrimi correlation_runner._aggregate ile BIREBIR ayni: kapsam-disi
+    (model_scope.in_scope=false) ANOMALIDEN ONCE ayrilir; anomaly
     isaretli kayit ana istatistige girmez (ayri ici bos isaretci); low-guven
     kayit ayri; main = high + medium.
   - Aykirilar (cell["outlier_test_ids"]) isaretlenir ama ATILMAZ (parite
@@ -62,6 +63,7 @@ REPORT_VERSION = "1"
 _BLUE = "#2563a8"        # ana seri dolu isaretci
 _BLUE_EDGE = "#123a63"   # ana seri kenari (koyu mavi)
 _ORANGE = "#ff8c33"      # anomaly (ici bos)
+_OUT_OF_SCOPE = "#7a52cc"  # model kapsami disi (ici bos kare, P10B2-06)
 _GRAY = "#888888"        # y=x cizgisi
 _BAND = "#2563a8"        # +-%10 bant dolgusu (dusuk alfa)
 _OUTLIER_EDGE = "#1a1a1a"  # aykiri koyu halka
@@ -170,15 +172,22 @@ def _collect_points(result: Dict[str, Any]) -> Dict[Tuple[str, str],
         motor_type = rr.get("motor_type")
         confidence = rr.get("confidence")
         is_anomaly = bool(rr.get("anomaly"))
+        # P10B2-06: katman ayrimi correlation_runner._aggregate ile BIREBIR
+        # kalmalidir — kapsam-disi kayit orada ANOMALIDEN ONCE ayrilir. Bu
+        # sira burada da korunmazsa figurler swirl kayitlarini ANA katmanda
+        # cizerdi (tablo ile figur ayrisir).
+        is_out_of_scope = bool(rr.get("out_of_scope"))
         for quantity, score in rr.get("scores", {}).items():
             if score.get("status") != "scored":
                 continue
             key = (motor_type, quantity)
-            layer = ("anomaly" if is_anomaly
+            layer = ("out_of_scope" if is_out_of_scope
+                     else "anomaly" if is_anomaly
                      else "main" if confidence in MAIN_CONFIDENCE_LEVELS
                      else "low")
             bucket = points.setdefault(
-                key, {"main": [], "low": [], "anomaly": []})
+                key, {"main": [], "low": [], "anomaly": [],
+                      "out_of_scope": []})
             bucket[layer].append({
                 "test_id": rr.get("test_id"),
                 "predicted": float(score["predicted_si"]),
@@ -217,16 +226,18 @@ def _parity_figure(cell: Dict[str, Any],
                    layers: Dict[str, List[Dict]]) -> "plt.Figure":
     """Bir (motor_type x quantity) hucresi icin predicted-vs-measured figuru.
 
-    Ana katman dolu mavi; anomaly ici bos turuncu (AYNI figurde, efsanede
-    'excluded from statistics' notuyla). y=x + %10 bant. Aykirilar koyu halka.
+    Ana katman dolu mavi; anomaly ici bos turuncu daire; model kapsami disi
+    ici bos MOR KARE (AYNI figurde, efsanede 'excluded' gerekcesiyle).
+    y=x + %10 bant. Aykirilar koyu halka.
     """
     motor_type = cell["motor_type"]
     quantity = cell["quantity"]
     main = layers.get("main", [])
     anomaly = layers.get("anomaly", [])
+    out_of_scope = layers.get("out_of_scope", [])
 
     all_vals: List[float] = []
-    for p in main + anomaly:
+    for p in main + anomaly + out_of_scope:
         all_vals.extend([p["measured"], p["predicted"]])
     logscale = _use_log(all_vals)
 
@@ -269,7 +280,16 @@ def _parity_figure(cell: Dict[str, Any],
                    [p["predicted"] for p in anomaly],
                    s=52, facecolor="none", edgecolor=_ORANGE,
                    linewidth=1.4, zorder=3,
-                   label="anomaly-flagged (excluded from statistics)")
+                   label="anomaly-flagged (data quality; excluded)")
+    # P10B2-06: kapsam-disi noktalar figurde de AYRI seridir — "deney bozuk"
+    # ile "model kapsamiyor" ayni sembolle cizilirse figur de gerekceyi
+    # gizler.
+    if out_of_scope:
+        ax.scatter([p["measured"] for p in out_of_scope],
+                   [p["predicted"] for p in out_of_scope],
+                   s=52, facecolor="none", edgecolor=_OUT_OF_SCOPE,
+                   linewidth=1.4, zorder=3, marker="s",
+                   label="outside declared model scope (excluded)")
 
     if logscale:
         ax.set_xscale("log")
@@ -377,11 +397,17 @@ def _summary_page(result: Dict[str, Any]) -> "plt.Figure":
         f"DB content hash: {result.get('db_content_hash')}",
         f"Main cells: {len(stats.get('cells', []))} | "
         f"low-confidence cells: {len(stats.get('low_confidence_cells', []))} "
-        f"| anomaly entries: {len(stats.get('anomaly_entries', []))}",
+        f"| anomaly entries: {len(stats.get('anomaly_entries', []))}"
+        f" | out-of-scope entries: "
+        f"{len(stats.get('out_of_scope_entries', []))}",
         "Status counts: " + ", ".join(
             f"{k}={v}" for k, v in result.get("status_counts", {}).items()),
+        # P10B2-07 (2026-08-28): ÖLÇÜT SABİTTEN ÜRETİLİR. Bu satır
+        # ">3*MAD" yazıyordu; kodun uyguladığı ölçüt F035'ten beri modifiye
+        # z-skorudur (``correlation_runner._mad_outliers``). Yani YAYIMLANAN
+        # PDF, kodun kullanmadığı bir ölçütü beyan ediyordu.
         "Signed error: (predicted - measured) / measured * 100. "
-        "Outliers (>3*MAD) flagged, never dropped.",
+        f"Outliers ({cr.OUTLIER_CRITERION_TEXT}) flagged, never dropped.",
     ]
     y = 0.885
     for line in meta_lines:
@@ -465,7 +491,10 @@ def _build_markdown(result: Dict[str, Any],
         f"- DB content hash: `{result.get('db_content_hash')}`",
         f"- Main cells: {len(cells)} | low-confidence cells: "
         f"{len(stats.get('low_confidence_cells', []))} | "
-        f"anomaly entries: {len(stats.get('anomaly_entries', []))}",
+        f"anomaly entries (data quality): "
+        f"{len(stats.get('anomaly_entries', []))}",
+        f"out-of-scope entries (declared model scope): "
+        f"{len(stats.get('out_of_scope_entries', []))}",
         "- Status counts: " + ", ".join(
             f"{k}={v}" for k, v in result.get("status_counts", {}).items()),
         "",
@@ -477,8 +506,10 @@ def _build_markdown(result: Dict[str, Any],
         "statistics (see detailed tables).",
         "- Anomaly-flagged: excluded from statistics; drawn as open orange "
         "markers so they stay visible without biasing the numbers.",
-        "- Outliers (|error - median| > 3*MAD): flagged (dark ring), never "
-        "dropped; an 'excl. outliers' row is provided as extra information.",
+        # P10B2-07: aynı bayat ölçütün ikinci kopyası; aynı tek kaynaktan.
+        f"- Outliers ({cr.OUTLIER_CRITERION_TEXT}): flagged (dark ring), "
+        "never dropped; an 'excl. outliers' row is provided as extra "
+        "information.",
         "",
         "## Figures",
         "",

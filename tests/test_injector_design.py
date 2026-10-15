@@ -303,6 +303,12 @@ class TestSwirl:
         for target in (30.0, 40.0, 45.0, 50.0, 60.0):
             K = swirl_K_from_theta(target)
             got = swirl_solve(K)['theta_deg']
+            # ÖH D19 · P13B3-05 — BANT GEREKÇESİ (ölçülen, D19): bugün
+            # fark = 0, ±0,5°'lik bant sınanmadı. KALIYOR: ``swirl_solve``
+            # sayısal bir kök bulucudur; bandı kimliğe çekmek çözücünün
+            # meşru yakınsama gürültüsünü kusur sayar. 0,5° = hedef açının
+            # %1'i ve testin yakaladığı gerileme (tavanın 15,9°'ye düşmesi)
+            # bu bandın 30 katı uzağında.
             assert got == pytest.approx(target, abs=0.5), (
                 f'{target}° hedefi çözülemedi (gerçekleşen {got:.1f}°)')
 

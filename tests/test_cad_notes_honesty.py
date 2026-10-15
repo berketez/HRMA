@@ -193,36 +193,54 @@ class TestManufacturingNotesLabelling:
 class TestGeometrySummaryLength:
 
     def test_valid_motor_gives_real_total_length(self, designer, small_motor):
-        summary = designer._generate_cad_performance_summary(small_motor)
-        total = summary['geometry_summary']['total_length']
+        """ÖH D19 (defter P15B4-11) — ALAN YER DEĞİŞTİRDİ, İDDİA DEĞİŞMEDİ.
+
+        ``total_length`` artık ÜRETİLEN KATIDAN ölçülür (``max_diameter``
+        ile aynı kural, Z5S/P9B1-02). Bu sahne katı vermeden çağırdığı için
+        ölçülen alan fail-closed None kalır; FORMÜLÜN sayısı adı "tahmin"
+        olan ``total_length_estimate`` alanındadır. Bu bekçinin iddiası
+        formülün sayısıydı, o yüzden iddia oraya taşındı — gevşetme değil.
+        """
+        geo = designer._generate_cad_performance_summary(
+            small_motor)['geometry_summary']
+        total = geo['total_length_estimate']
         assert total is not None and total > 0
         # Kamara boyundan büyük olmalı (lüle ekleniyor)
         assert total > small_motor['chamber_length'] * 1000.0
+        # Ölçülen alan uydurulamaz: katı yoksa None ve künye nedenini söyler.
+        assert geo['total_length'] is None
+        assert 'not measured' in str(geo['total_length_basis'])
+        assert 'ESTIMATE' in str(geo['total_length_estimate_basis'])
 
     def test_nan_chamber_length_gives_none_not_zero(self, designer, small_motor):
         """NaN kamara boyu sessizce 0 mm katkı yapamaz."""
         broken = dict(small_motor)
         broken['chamber_length'] = float('nan')
-        total = (designer._generate_cad_performance_summary(broken)
-                 ['geometry_summary']['total_length'])
-        assert total is None, \
-            f"geçersiz kamara boyu hesaplanmış gibi gösterildi: {total}"
+        geo = (designer._generate_cad_performance_summary(broken)
+               ['geometry_summary'])
+        assert geo['total_length_estimate'] is None, \
+            f"geçersiz kamara boyu hesaplanmış gibi gösterildi: {geo['total_length_estimate']}"
+        assert geo['total_length'] is None
 
     def test_missing_chamber_length_gives_none(self, designer, small_motor):
         broken = dict(small_motor)
         broken.pop('chamber_length', None)
-        total = (designer._generate_cad_performance_summary(broken)
-                 ['geometry_summary']['total_length'])
-        assert total is None
+        geo = (designer._generate_cad_performance_summary(broken)
+               ['geometry_summary'])
+        assert geo['total_length_estimate'] is None
+        assert geo['total_length'] is None
 
     def test_zero_is_never_used_as_a_length_fallback(self, designer, small_motor):
         """Hiçbir geçersiz girdi 0.0 mm 'toplam boy' üretmemeli."""
         for bad_value in (float('nan'), None, 0.0, -1.0, 'abc'):
             broken = dict(small_motor)
             broken['chamber_length'] = bad_value
-            total = (designer._generate_cad_performance_summary(broken)
-                     ['geometry_summary']['total_length'])
-            assert total is None, f"{bad_value!r} girdisinde total_length={total}"
+            geo = (designer._generate_cad_performance_summary(broken)
+                   ['geometry_summary'])
+            assert geo['total_length_estimate'] is None, (
+                f"{bad_value!r} girdisinde "
+                f"total_length_estimate={geo['total_length_estimate']}")
+            assert geo['total_length'] is None
 
     def test_drawing_nozzle_length_is_never_zero(self, designer, small_motor):
         """Teknik çizimde de aynı kural: boy ya gerçek ya NOT AVAILABLE."""
@@ -232,15 +250,30 @@ class TestGeometrySummaryLength:
             isinstance(length, float) and length > 0 and math.isfinite(length))
 
     def test_text_report_labels_missing_length(self, designer, small_motor):
-        """Metin raporda None, 'None' diye değil açık etiketle basılmalı."""
+        """Özette boy ya gerçek ya None — 'None' dizesi basılmaz.
+
+        ÖH D24 / P9B1-30 (BEKÇİ ÇEVRİLDİ): bu test eskiden son üç satırında
+        ``designer.generate_cad_report(...)`` çağırıp metin raporda
+        ``'total_length: None'`` aramıyordu. ÖLÇÜLDÜ (taban 88a29d3,
+        ``once.json`` M4, AST taraması): ``generate_cad_report`` 57 satırlık
+        bir metin üreticiydi ve ÜRÜN kodunda **0 çağıranı** vardı — tek
+        çağıran BU testti. Yani test, yalnız kendisinin ayakta tuttuğu bir
+        sembolü doğruluyordu (totolojik bekçi); sembolün varlığı ürün
+        davranışının kanıtı DEĞİLDİ. Sembol silindi, testin GERÇEK iddiası
+        (özet uydurma boy üretmez) olduğu gibi korundu — o iddia
+        ``_generate_cad_performance_summary`` üzerinden ölçülür ve o fonksiyon
+        ürün yolunda canlıdır.
+        """
         broken = dict(small_motor)
         broken['chamber_length'] = float('nan')
         summary = designer._generate_cad_performance_summary(broken)
+        assert summary['geometry_summary']['total_length_estimate'] is None
         assert summary['geometry_summary']['total_length'] is None
-
-        report = _silent(designer.generate_cad_report, small_motor)
-        assert 'CAD PERFORMANCE SUMMARY' in report
-        assert 'total_length: None' not in report
+        # Boşluk hiçbir yerde 'None' DİZESİ olarak yayımlanmaz (eski metin
+        # raporun kusuru buydu): değer ya gerçek sayı ya Python None'ıdır.
+        for anahtar, deger in summary['geometry_summary'].items():
+            assert deger != 'None', anahtar
+            assert not (isinstance(deger, str) and 'None' in deger), anahtar
 
 
 # ---------------------------------------------------------------------------
@@ -284,14 +317,40 @@ class TestGeometrySummaryNeverFabricates:
         assert geo['thrust_to_weight'] is None
 
     def test_valid_motor_still_reports_every_field(self, designer, small_motor):
-        """Dürüstlük düzeltmesi geçerli motorda alan kaybettirmemeli."""
+        """Dürüstlük düzeltmesi geçerli motorda alan kaybettirmemeli.
+
+        Z5S/P9B1-02: max_diameter artık ÜRETİLEN KATIDAN ölçülür; katı
+        verilmeden çağrılan bu sahnede alan None kalır (fail-closed) ve
+        formülün sayısı adı 'tahmin' olan ayrı alanda yayımlanır — alan
+        kaybı değil, künye dürüstlüğü."""
         geo = designer._generate_cad_performance_summary(
             small_motor)['geometry_summary']
-        for key in ('total_length', 'max_diameter', 'chamber_volume',
+        # ÖH D19 (P15B4-11): 'total_length' de artık ÖLÇÜLEN alandır ve bu
+        # sahnede katı yoktur; formülün sayısı 'total_length_estimate'te.
+        for key in ('total_length_estimate', 'chamber_volume',
                     'thrust_to_weight'):
             value = geo[key]
             assert value is not None and math.isfinite(value) and value > 0, \
                 f'{key} geçerli motorda üretilmedi: {value!r}'
+
+        # Katı yokken zarf ÖLÇÜLEMEZ: ölçülen alan None, tahmin alanı dolu
+        # ve künyesi tahmin olduğunu söylüyor (uydurma 'measured' yasak).
+        assert geo['max_diameter'] is None, (
+            'katı verilmeden max_diameter doldu — ölçüm uydurulmuş: '
+            f"{geo['max_diameter']!r}")
+        tahmin = geo.get('max_diameter_estimate')
+        assert tahmin is not None and math.isfinite(tahmin) and tahmin > 0, (
+            f'zarf tahmini kayboldu: {tahmin!r}')
+        assert 'ESTIMATE' in str(geo.get('max_diameter_estimate_basis', '')), (
+            'tahmin alanı künyesiz — ESTIMATE beyanı yok')
+
+        # Aynı kural boy için (ÖH D19 / P15B4-11): ölçüm uydurulmaz, tahmin
+        # kaybolmaz, tahminin künyesi tahmin olduğunu söyler.
+        assert geo['total_length'] is None, (
+            'katı verilmeden total_length doldu — ölçüm uydurulmuş: '
+            f"{geo['total_length']!r}")
+        assert 'ESTIMATE' in str(geo.get('total_length_estimate_basis', '')), (
+            'boy tahmini künyesiz — ESTIMATE beyanı yok')
 
         # Hacim gerçek çap ve boydan gelmeli (uydurma 0.1 m / 0.5 m değil)
         expected_cm3 = (math.pi * (small_motor['chamber_diameter'] / 2) ** 2

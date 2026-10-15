@@ -45,7 +45,21 @@ gereksinimlerini sağlıyor mu?"
         kapalı-form başlık denklemi vermez (emniyet faktörü standardıdır);
         geometri faktörleri ASME'den ödünçtür → 'approximate'.
 
-GERÇEK kopma basıncı (her iki modda da raporlanır):
+MODELLE TAHMİN EDİLEN kopma basıncı (her iki modda da raporlanır):
+
+  ÖH D31 / OH-D30-13 — AD DÜZELTMESİ. Bu blok eskiden "GERÇEK kopma
+  basıncı" başlığını taşıyordu ve alan ``actual_burst_pressure_bar`` diye
+  yayımlanıyordu. "Gerçek" (actual) sözcüğü ÖLÇÜLMÜŞ bir dayanımı ima eder;
+  buradaki sayı ölçüm DEĞİL, iki kapalı-form korelasyonun (Faupel 1956
+  kalın cidar + Harvey ince cidar membran limiti) MİNİMUMUDUR. Hiçbir
+  hidrostatik kopma deneyi yapılmamıştır; malzeme dayanımları da depo
+  tablosundan (oda sıcaklığı + derating eğrisi) gelir. Sayı ve alan adı
+  SİLİNMEDİ (tüketiciler onu okuyor: ``safety_analysis``,
+  ``solid_rocket_engine``, ``vessel_panel.js``, ``safety_panel.js``);
+  yanına dürüst adlı kardeşi (``predicted_burst_pressure_bar``) ve
+  künyesi (``actual_burst_pressure_basis``) kondu, ekran etiketi de
+  "Predicted Burst (model)" olarak düzeltildi.
+
   * Kalın cidar — Faupel formülü:
         P_b = (2/√3) · σ_y · (2 − σ_y/σ_u) · ln(b/a)
     Kaynak: Faupel, J.H., "Yield and Bursting Characteristics of
@@ -55,7 +69,9 @@ GERÇEK kopma basıncı (her iki modda da raporlanır):
         P_b ≈ 2 · σ_u · t / D_ort ,  D_ort = D_iç + t
     Kaynak: Harvey, J.F., "Theory and Design of Pressure Vessels",
     Van Nostrand Reinhold (membran limit yükü kestirimi) — 'approximate'.
-  * İkisinin MİNİMUMU 'actual_burst' olarak raporlanır (konservatif).
+  * İkisinin MİNİMUMU 'actual_burst' adıyla raporlanır (konservatif) —
+    OH-D30-13: bu ad tarihseldir ve MODELLE TAHMİN EDİLEN kopma basıncını
+    taşır; ölçülmüş bir dayanım değildir (bkz. yukarıdaki ad düzeltmesi).
   * burst_margin = actual_burst / required_burst
   * Cidar kalınlığı verilmediğinde (otomatik boyutlandırma) kalınlık, AYNI
     min(Faupel, ince cidar) fonksiyonunun sayısal kökünden alınır ve hedef
@@ -129,11 +145,73 @@ CRYOGENIC_WARNING_TEMPERATURE_K = 200.0
 # Mo ve W refrakterleri). Östenitik paslanmazlar, alüminyum, bakır ve
 # nikel esaslı alaşımlar (YMK kafes) bu listede DEĞİLDİR — onlar kriyoda
 # sünekliğini korur (ASME BPVC VIII-1 UHA-51 muafiyetleri).
-DBTT_SENSITIVE_MATERIALS = (
-    'steel', 'steel_4130', 'steel_4340',   # karbon / düşük alaşımlı çelik
-    'ss_17_4ph',                           # martenzitik çökelme sertleşmeli
-    'molybdenum_tzm', 'tungsten',          # HMK refrakterler
+# ÖH D15 / defter P9B4-08: küme artık BURADA TANIMLI DEĞİL. Ham kullanıcı
+# argümanıyla karşılaştırıldığı için ``materials_db`` takma adlarıyla
+# (``aisi_4340``, ``stainless_17_4``, ``17-4ph``, ``tzm``) çağrıldığında
+# eşleşmiyor ve kriyojenik gevrek-kırılma uyarısı TERSİNE dönüyordu
+# (ölçüldü: 4/4 alias çiftinde "brittle fracture risk" -> "stay ductile
+# when cold"). Duyarlılık malzemenin kendi kaydının yanına taşındı ve
+# KANONİK ad üzerinden sorulur; ad tanınmazsa ``None`` döner.
+from hrma.data.materials_db import (  # noqa: E402
+    DBTT_SENSITIVE as DBTT_SENSITIVE_MATERIALS,
+    DEFAULT_STRUCTURAL_MATERIAL,
+    canonical_name as _kanonik_malzeme_adi,
+    is_dbtt_sensitive as _is_dbtt_sensitive,
 )
+
+#: HER SICAKLIKTA gevrek olan malzemeler: sünek-gevrek GEÇİŞİ yoktur, çünkü
+#: sünek bir rejimleri hiç yoktur (seramik/karbon matrisli malzemeler).
+#: Bunlara "soğukta sünek kalır" demek her sıcaklıkta yanlıştır.
+#: Kaynak: ASM Handbook Vol. 21 (Composites) — karbon-karbon ve grafit
+#: gevrek kırılma modludur; ablatif kompozitler de aynı sınıftadır.
+#: ÖH D16 / OH-D15-12: adlar KANONİKtir ve küme yalnız
+#: ``materials_db.canonical_name`` çözümüyle sorulur (ham kullanıcı
+#: argümanıyla DEĞİL) — ``c-c`` / ``silica_phenolic`` takma adları da
+#: buraya düşer.
+ALWAYS_BRITTLE_MATERIALS = (
+    'graphite', 'carbon_carbon', 'ablative',
+)
+
+#: ASME BPVC VIII-1 UHA-51 (ve UNF/UHA muafiyetleri) kapsamında, düşük
+#: sıcaklıkta darbe testinden MUAF tutulan malzeme aileleri: östenitik
+#: (YMK) paslanmazlar, alüminyum alaşımları, bakır alaşımları ve nikel
+#: esaslı alaşımlar. YMK kafes kayma sistemleri sıcaklıkla kapanmadığı
+#: için bu aileler kriyoda sünekliğini korur.
+#:
+#: ÖH D15 / P5B1-09 — ÖLÇÜLDÜ (taban ``once.json``, T = 20 K, 60 bar,
+#: D_iç 150 mm, cidar 5 mm): 24 malzemenin 7'si bu künyeyi HAK ETMEDEN
+#: alıyordu — ``titanium`` (HMK/HSP, muafiyet listesinde YOK),
+#: ``graphite``, ``carbon_carbon``, ``ablative`` (her sıcaklıkta gevrek),
+#: ``magnesium_az31b`` (HSP) ve ``niobium_c103`` (HMK refrakter). Beşi
+#: ``status = PASS``, üçü ``FAIL`` alıyordu; hiçbirine "muaf DEĞİLSİN"
+#: denmiyordu. Künye metni yanlış olduğu için hüküm de kazanılmamıştı.
+#:
+#: Liste AÇIK UÇLU DEĞİLDİR: burada olmayan bir malzeme "muaf değil"
+#: sayılır (fail-closed). Bilinmeyen bir malzeme kriyoda sünek DEĞİLDİR.
+#:
+#: ÖH D16 / OH-D15-12: adlar KANONİKtir ve küme yalnız
+#: ``materials_db.canonical_name`` çözümüyle sorulur; takma adla
+#: (``stainless_304``, ``aluminum``, ``in718`` …) çağıran kullanıcı da
+#: kanonik kardeşiyle AYNI künyeyi alır.
+CRYO_EXEMPT_MATERIALS = (
+    'ss_304', 'ss_316',                    # östenitik (YMK) paslanmazlar
+    'aluminum_6061', 'al_2024_t3', 'al_7075_t6',   # alüminyum alaşımları
+    'copper', 'cucrzr', 'brass_c360',
+    'beryllium_copper_c17200',             # bakır alaşımları
+    'inconel_625', 'inconel_718',          # nikel esaslı alaşımlar
+)
+
+
+def _kanonik_sicaklik_ust_siniri_K() -> float:
+    """Deponun kanonik sıcaklık ÜST sınırı [K] — yeni eşik İCAT EDİLMEZ.
+
+    Tek kaynak ``MotorDataValidator.limits['temperature']`` (200-5000 K).
+    Alt uç burada UYGULANMAZ: bu modül kriyojenik servisi meşru biçimde
+    analiz eder (20 K koşumu a2'nin P5B1-09 bekçisinde ölçülüdür); alt
+    sınır mutlak sıfırdır ve zaten yukarıdaki kontrolde duruyor.
+    """
+    from hrma.validation.motor_validation import MotorDataValidator
+    return float(MotorDataValidator().limits['temperature']['max'])
 
 
 class PressureVesselAnalyzer:
@@ -174,7 +252,31 @@ class PressureVesselAnalyzer:
         curve_min_C: Optional[float] = None
         below_envelope = False
         if not curve:
-            retention = 0.5  # eğri yok → konservatif orta-seviye kayıp
+            # ÖH D23 / P5B1-23 — FAIL-CLOSED (doktrin 1).
+            #
+            # ÖLÇÜLDÜ (taban ``ef527ae``, ``once.json`` P5B1-23; eğrisiz
+            # sahte malzeme kaydı, yield 400 MPa, T = 300 K):
+            #   strength_retention_factor = 0,5
+            #   derated_yield_strength_Pa = 200 000 000,0
+            # ve ÇIKTIDA bu 0,5'in NEDENİNİ söyleyen HİÇBİR alan yoktu
+            # (``retention_basis`` bu modülde hiç yayımlanmıyor). Kullanıcı
+            # dayanımın yarıya inmesini yalnız sayının kendisinden görüyor,
+            # sebebini göremiyordu.
+            #
+            # materials_db'nin 24/24 kaydında eğri dolu olduğu için dal
+            # ürün yolunda ÖLÜ KODDUR; yalnız kendi malzeme sözlüğünü
+            # geçiren çağıran buraya düşer. 0,5 yayımlanmış bir kaynağı
+            # olmayan bir varsayımdır: eğri yoksa sıcaklık derating hükmü
+            # KAZANILMAMIŞTIR.
+            raise ValueError(
+                "material record has no 'derating_curve', so no "
+                "temperature-dependent strength verdict can be earned at "
+                f"{temperature_K:.1f} K. The previous behaviour silently "
+                "applied a 0.5 retention factor (a 50% strength cut with "
+                "no published source and no field explaining it). Supply a "
+                "'derating_curve' ({temperature_C: retention}) for this "
+                "material, or analyse at the room-temperature reference "
+                "where the retention is 1.0 by definition.")
         else:
             temps = sorted(curve.keys())
             factors = [curve[t] for t in temps]
@@ -363,6 +465,25 @@ class PressureVesselAnalyzer:
                 and math.isfinite(temperature_K) and temperature_K > 0):
             raise ValueError(
                 f"Temperature must be positive Kelvin (got {temperature_K!r}).")
+        # --- P5B1-19 (ÖH D15 / a3): ÜST SINIR --------------------------
+        # ÖLÇÜLDÜ (``a3/once.json``; steel_4130, 60 bar, Ø150 mm, 5 mm):
+        # ``temperature_K = 1e9`` KABUL EDİLİYOR ve derating eğrisinin son
+        # noktasında (0,15) SABİTLENDİĞİ için sonuç 3000 K ile BİREBİR aynı
+        # çıkıyordu (``burst_margin = 0,5869935949953238``, retention 0,15,
+        # status FAIL — üç sıcaklıkta da aynı). Yani modül, güneş çekirdeğinin
+        # 60 000 katı bir sıcaklıkta bile kabın dayanımının %15'ini KORUDUĞUNU
+        # iddia ediyordu. Alt uç zaten kapalıydı (mutlak sıfır); üst uç
+        # deponun KENDİ kanonik bandından okunur — yeni eşik yok.
+        _ust = _kanonik_sicaklik_ust_siniri_K()
+        if temperature_K > _ust:
+            raise ValueError(
+                f"Temperature {temperature_K!r} K is above the repository's "
+                f"own physical temperature band (max {_ust:g} K, "
+                "MotorDataValidator.limits['temperature']). Above the last "
+                "point of the derating curve the retention factor is HELD, "
+                "so an unbounded temperature would silently keep 15% of the "
+                "room-temperature strength; no vessel verdict is issued "
+                "there.")
         if not any(abs(weld_efficiency - e) < 1e-9
                    for e in ALLOWED_WELD_EFFICIENCIES):
             raise ValueError(
@@ -379,11 +500,12 @@ class PressureVesselAnalyzer:
     def analyze(self,
                 meop_bar: float,
                 inner_diameter_mm: float,
-                material: str = 'aluminum_6061',
+                material: Optional[str] = None,
                 wall_thickness_mm: Optional[float] = None,
                 temperature_K: float = ROOM_TEMPERATURE_K,
                 weld_efficiency: float = 1.0,
                 head_type: str = 'ellipsoidal_2_1',
+                head_thickness_mm: Optional[float] = None,
                 code_mode: Optional[str] = None) -> Dict:
         """Basınçlı kap analizi.
 
@@ -411,6 +533,32 @@ class PressureVesselAnalyzer:
         mode = code_mode if code_mode is not None else self.code_mode
         self._validate_inputs(meop_bar, inner_diameter_mm, wall_thickness_mm,
                               temperature_K, weld_efficiency, head_type, mode)
+
+        # ÖH D24 / OH-D23-03 — VARSAYILAN ARTIK SESSİZ DEĞİL (ÖK-19).
+        # ÖLÇÜLDÜ (once.json K3, taban 2e4d81f): ``material`` HİÇ
+        # gönderilmeyen gövde ile açıkça ``'aluminum_6061'`` gönderen gövde
+        # BİT-AYNI yanıt üretiyordu (ayirt_edilebilir = False) ve yanıtta
+        # ``defaults_applied`` diye bir alan yoktu. Yani kullanıcı, kabın
+        # hangi malzemede boyutlandırıldığını yanıttan öğrenemiyordu;
+        # alüminyum bir seçim değil, sessiz bir kabuldü — üstelik malzeme
+        # kimliği burst/MAWP/derating zincirinin tamamını belirliyor.
+        # Sayı DEĞİŞMEDİ (aynı varsayılan, aynı sonuç); değişen, uygulamanın
+        # ADIYLA beyan edilmesidir.
+        defaults_applied: List[Dict] = []
+        if material is None or material == '':
+            material = DEFAULT_STRUCTURAL_MATERIAL
+            defaults_applied.append({
+                'field': 'material',
+                'value': DEFAULT_STRUCTURAL_MATERIAL,
+                'reason': 'not_supplied',
+                'message': (
+                    "'material' was not supplied; the vessel was sized in "
+                    f"'{DEFAULT_STRUCTURAL_MATERIAL}'. That is an "
+                    'assumption, not a result - the allowable stress, MAWP '
+                    'and burst pressure all follow from the material. Send '
+                    'the material you are building in.'),
+            })
+
         try:
             mat = get_material(material)
         except KeyError as exc:
@@ -436,6 +584,11 @@ class PressureVesselAnalyzer:
         D = inner_diameter_mm / 1e3              # m (iç çap)
         R = D / 2.0                              # m (iç yarıçap)
         E = float(weld_efficiency)
+
+        # ÖH D15 / P5B1-07: kriyojenik gevrek kırılma HÜKÜM bayrağı.
+        # Modül bu yetmezlik modunu MODELLEMEZ (kendi uyarısı öyle diyor);
+        # modellenmemiş bir modun yönettiği koşulda ONAY KAZANILMAMIŞTIR.
+        brittle_fracture_unmodelled = False
 
         # --- Sıcaklık derating'i (tasarım sıcaklığında) ---
         derating = self._derate_strength(mat, temperature_K)
@@ -470,7 +623,84 @@ class PressureVesselAnalyzer:
                     "suitability must be verified against the ductile-to-"
                     "brittle transition temperature (DBTT); this module does "
                     "not model low-temperature fracture toughness.")
-            if material in DBTT_SENSITIVE_MATERIALS:
+            # ÖH D15 birleştirme (ana model, 1 Eyl 2026): yapisal P5B1-07/-09 zinciri +
+            # ihracat P9B4-08 kanonik-ad çözümü tek zincirde. Sıra: her sıcaklıkta gevrek
+            # (sünek rejim yok) → ad ÇÖZÜLEMEDİ (fail-closed, muafiyet yok) → DBTT-duyarlı
+            # (P5B1-07 hükme bağlı) → UHA-51 muafiyet aileleri → geri kalan (fail-closed).
+            # ÖH D16 / OH-D15-12 — ÜÇ KÜME DE KANONİK ADLA SORULUR.
+            # ÖLÇÜLDÜ (taban 6fde52b, ``once.json`` K7): P9B4-08 yalnız
+            # DBTT kümesini kanonik ada çözmüştü; ``ALWAYS_BRITTLE_MATERIALS``
+            # ve ``CRYO_EXEMPT_MATERIALS`` HÂLÂ ham kullanıcı argümanıyla
+            # karşılaştırılıyordu. Sonuç: 19/19 takma ad çifti kardeşinden
+            # FARKLI künye alıyordu — ``stainless_304``, ``aluminum``,
+            # ``in718``, ``becu``, ``brass`` … hepsi UHA-51 muafiyet dalını
+            # ıskalayıp fail-closed "muaf DEĞİLSİN" dalına düşüyor;
+            # ``c-c`` ve ``silica_phenolic`` ise "her sıcaklıkta gevrek"
+            # künyesini hiç alamıyordu. Kanonik adıyla çağıran kullanıcı
+            # doğru künyeyi, takma adıyla çağıran YANLIŞ künyeyi görüyordu.
+            # Takma ad tablosu TEK KAYNAKTA (``materials_db.ALIASES``);
+            # burada ikinci bir tablo kurulmaz, o tablonun çözücüsü sorulur.
+            # Ad çözülemezse ``None`` döner ve aşağıdaki ``_dbtt is None``
+            # dalı (fail-closed) hüküm vermez — muafiyet DE verilmez.
+            _kanonik = _kanonik_malzeme_adi(material)
+            _dbtt = _is_dbtt_sensitive(material)
+            if _kanonik in ALWAYS_BRITTLE_MATERIALS:
+                # ÖH D15 / P5B1-09: bunlarda sünek-gevrek GEÇİŞİ yoktur,
+                # çünkü sünek bir rejim hiç yoktur. Eski kod bunlara
+                # "soğukta sünek kalır" muafiyet künyesini basıyordu.
+                brittle_fracture_unmodelled = True
+                warnings.append(
+                    base + " WARNING: this material is BRITTLE AT EVERY "
+                    "TEMPERATURE (carbon / ceramic matrix, no ductile "
+                    "regime), so there is no ductile-to-brittle transition "
+                    "to be above. It is NOT covered by the ASME BPVC VIII-1 "
+                    "UHA-51 low-temperature exemptions, which apply to "
+                    "austenitic stainless, aluminium, copper and nickel "
+                    "alloys only.")
+            elif _dbtt is None and _kanonik is None:
+                # P9B4-08: bilinmeyen malzeme için 'sünek kalır' güvencesi VERİLMEZ.
+                brittle_fracture_unmodelled = True
+                warnings.append(
+                    base + " This module could not resolve the material "
+                    f"name {material!r} in the materials database, so it "
+                    "makes NO claim about its low-temperature ductility: "
+                    "verify the DBTT of the actual grade before cryogenic "
+                    "service.")
+            elif _dbtt is None:
+                # ÖH D23 / OH-D22-04 — KÜNYE GERÇEĞİ SÖYLER.
+                #
+                # D22'de ``materials_db`` her kayda 19. zorunlu alan olarak
+                # ``cryogenic_ductility`` ekledi ve ``is_dbtt_sensitive``
+                # artık depo bir hüküm kazanmamışsa (``not_qualified`` /
+                # ``always_brittle``) ``False`` demek yerine ``None``
+                # dönüyor. Bu dal fail-closed olduğu için DOĞRUdur, ama
+                # metni hâlâ eski tek nedeni ("ad çözülemedi") anlatıyordu.
+                #
+                # ÖLÇÜLDÜ (taban ``ef527ae``, ``once.json`` OH-D22-04, 90 K
+                # / 60 bar / D_iç 150 mm / cidar 5 mm): ``titanium_6al4v``,
+                # ``ti_grade2_cp`` ve ``magnesium_az31b`` için uyarı
+                # "This module could not resolve the material name ... in
+                # the materials database" diyordu, oysa
+                # ``canonical_name`` ÜÇÜNÜ DE çözüyor
+                # (``ad_cozulemedi_iddiasi = true``, ``canonical`` dolu).
+                # Gerçekten çözülemeyen ad (``peynir_alasimi``) buraya hiç
+                # ulaşmıyor: ``analyze`` daha önce ``ValueError`` atıyor.
+                # Yani künye, kullanıcıyı var olmayan bir yazım hatasına
+                # yönlendiriyor ve gerçek nedeni (depo bu malzeme için
+                # kriyojenik süneklik hükmü kazanmamış) gizliyordu.
+                brittle_fracture_unmodelled = True
+                warnings.append(
+                    base + " The materials database resolves this entry "
+                    f"({_kanonik!r}) but records NO qualified "
+                    "low-temperature ductility verdict for it "
+                    "(cryogenic_ductility is not 'cryo_ductile' or "
+                    "'dbtt_sensitive'), so this module makes NO claim "
+                    "either way and grants NO ASME BPVC VIII-1 UHA-51 "
+                    "exemption: qualify the actual grade against its DBTT "
+                    "before cryogenic service.")
+            elif _dbtt:
+                # ÖH D15 / P5B1-07: bu dal artık HÜKME BAĞLI (aşağıya bkz.).
+                brittle_fracture_unmodelled = True
                 warnings.append(
                     base + " WARNING: this material family (ferritic / "
                     "martensitic steel or bcc refractory) is DBTT-sensitive "
@@ -478,12 +708,54 @@ class PressureVesselAnalyzer:
                     "(ASME BPVC VIII-1 UCS-66) — brittle fracture risk. "
                     "Consider an austenitic stainless, aluminium or nickel "
                     "alloy for cryogenic tanks.")
-            else:
+            elif _kanonik in CRYO_EXEMPT_MATERIALS:
                 warnings.append(
                     base + " Austenitic stainless, aluminium, copper and "
                     "nickel alloys stay ductile when cold (ASME BPVC VIII-1 "
                     "UHA-51 exemptions), but the specific grade and weld "
                     "procedure still require qualification.")
+            else:
+                # ÖH D15 / P5B1-09 — FAIL-CLOSED: muafiyet listesinde
+                # OLMAYAN malzeme muaf DEĞİLDİR. Eski kod bu dala düşen her
+                # şeye (titanyum, magnezyum, niyobyum ve tanınmayan adlar)
+                # muafiyet künyesini basıyordu; künye yanlış olduğu için
+                # onun üstüne kurulan hüküm de kazanılmamıştı.
+                brittle_fracture_unmodelled = True
+                warnings.append(
+                    base + " WARNING: this material is NOT among the "
+                    "families covered by the ASME BPVC VIII-1 UHA-51 "
+                    "low-temperature exemptions (austenitic stainless, "
+                    "aluminium, copper and nickel alloys). Titanium, "
+                    "magnesium and refractory alloys in particular need "
+                    "their own low-temperature toughness qualification; no "
+                    "exemption is assumed here.")
+
+        # --- ÖH D15 / P5B1-04: KAYNAK VERİMİ ARTIK GÖVDEYE GİRİYOR -------
+        # ÖLÇÜLDÜ (once_b1.json, 60 bar, D_iç = 150 mm, steel_4130,
+        # aiaa_s080): E = 0,70 / 0,85 / 1,00 için t_req = 1,481888 mm ve
+        # MAWP = 60,6891 bar BİREBİR AYNI çıkıyordu; aynı kabın BAŞLIĞI ise
+        # %43 değişiyordu (2,1021 ↔ 1,4703 mm), çünkü ``E_head`` başlık
+        # formuna geçiyordu. Yani tek kap iki farklı kaynak kalitesi
+        # varsayımıyla çözülüyordu: girdi doğrulanıyor, yanıtta geri
+        # yayımlanıyor, ama YÖNETEN üyeyi hiç etkilemiyordu.
+        #
+        # Düzeltme: kaynak birleşimi basınç sınırının bir parçasıdır ve
+        # yöneten kesit odur; dayanım o kesitte E kadar düşürülür
+        # (ASME BPVC VIII-1'in S·E kuralının S-080 karşılığı; UG-27(c)(1)
+        # ASME modunda zaten böyle davranıyordu). Aşağıdaki iki değer
+        # gövde denklemlerinde, MAWP geri formunda ve kopma
+        # değerlendirmesinde kullanılır. E = 1,00 (varsayılan) için her sayı
+        # BİT-AYNI kalır — hareket eden tek şey kullanıcının E'yi fiilen
+        # düşürdüğü koşumdur.
+        sy_w = sy * E
+        su_w = su * E
+        if E < 1.0:
+            assumptions.append(
+                f'Weld joint efficiency E = {E:.2f} is applied as a strength '
+                'knock-down on the pressure boundary (shell thickness, MAWP '
+                'and burst assessment), because the weld land is the '
+                'governing section — ASME BPVC VIII-1 uses the same S*E '
+                'construction in UG-27(c)(1).')
 
         # --- Mod bazlı izin verilen gerilme ve gerekli kalınlık ---
         # ASME izin verilen gerilmeler (tasarım ve test/oda sıcaklığı):
@@ -522,8 +794,9 @@ class PressureVesselAnalyzer:
             # Kaynak: Shigley's Mechanical Engineering Design, ince cidarlı
             # basınçlı kap (ortalama yarıçap membran formu);
             # ASME BPVC VIII-1 UG-27(c)(1).
-            denom_y = sy - 0.5 * AIAA_PROOF_FACTOR * P
-            denom_u = su - 0.5 * AIAA_BURST_FACTOR * P
+            # P5B1-04: E kaynak verimi dayanıma uygulanır (sy_w/su_w).
+            denom_y = sy_w - 0.5 * AIAA_PROOF_FACTOR * P
+            denom_u = su_w - 0.5 * AIAA_BURST_FACTOR * P
             if denom_y <= 0 or denom_u <= 0:
                 raise ValueError(
                     "Design pressure too high for this material: the "
@@ -532,7 +805,9 @@ class PressureVesselAnalyzer:
                     "Choose a stronger material or lower MEOP.")
             t_req = max(AIAA_PROOF_FACTOR * P * R / denom_y,
                         AIAA_BURST_FACTOR * P * R / denom_u)
-            # Başlıklar: UG-32 formu + S-080 eşdeğer izin verilen gerilme
+            # Başlıklar: UG-32 formu + S-080 eşdeğer izin verilen gerilme.
+            # (E burada ÇARPILMAZ: ``_head_thicknesses`` E_head'i kendi
+            # içinde uygular; iki kez uygulamak başlığı çifte cezalandırır.)
             S_head = min(sy / AIAA_PROOF_FACTOR, su / AIAA_BURST_FACTOR)
             E_head = E
 
@@ -550,7 +825,7 @@ class PressureVesselAnalyzer:
             else:
                 p_burst_req = ASME_UTS_MARGIN * P
             target_burst = MARGINAL_BURST_MARGIN * p_burst_req
-            t_burst_req = self.thickness_for_burst_target(sy, su, R,
+            t_burst_req = self.thickness_for_burst_target(sy_w, su_w, R,
                                                           target_burst)
             if not math.isfinite(t_burst_req):
                 # İnce-cidar membran limiti 2·σ_u'ya doyuyor: hedef kopma
@@ -594,11 +869,26 @@ class PressureVesselAnalyzer:
             # F149: t_req ile TAM TERSİNİR olması için burada da ortalama
             # yarıçap (R + t/2) kullanılır.
             r_mean = R + t / 2.0
-            mawp = min(sy * t / (AIAA_PROOF_FACTOR * r_mean),
-                       su * t / (AIAA_BURST_FACTOR * r_mean))
+            mawp = min(sy_w * t / (AIAA_PROOF_FACTOR * r_mean),
+                       su_w * t / (AIAA_BURST_FACTOR * r_mean))
 
         # --- Test / proof / gerekli burst basınçları ---
-        proof_pressure = AIAA_PROOF_FACTOR * P             # S-080 proof
+        # --- ÖH D22 / P5B1-20: AIAA PROOF ÇARPANI ASME KİPİNE SIZMIYOR ---
+        # ÖLÇÜLDÜ (``once.json`` P5B1-20; 60 bar MEOP, Ø150 mm iç, 3,0 mm
+        # cidar, steel_4130): ``proof_pressure_bar`` HER İKİ kipte de
+        # 90,00 bar (= 1,5 x MEOP) yayımlanıyordu — ``aiaa_s080`` ve
+        # ``asme_viii`` ayrımı yokmuş gibi. ASME BPVC VIII-1'de "1,5 x MEOP
+        # proof" diye bir kavram YOKTUR; o kipin basınç testi UG-99(b)
+        # hidrostatik testidir ve zaten AYRICA raporlanıyor (aynı koşumda
+        # 105,9152 bar). Yani okuyucu, seçtiği koda ait olmayan bir kabul
+        # basıncını o kodun raporunda görüyordu.
+        #
+        # Fail-closed: başka bir standardın sayısı bu kipte yayımlanmaz.
+        # Sayı SİLİNMEZ, alan da silinmez (tüketiciler onu okuyor) —
+        # ``None``a çekilir ve nedeni ``proof_pressure_basis`` ile ADIYLA
+        # yazılır, testin hangi alanda durduğu söylenir.
+        proof_pressure = (AIAA_PROOF_FACTOR * P           # S-080 proof
+                          if mode == 'aiaa_s080' else None)
         hydro_test = ASME_HYDRO_FACTOR * mawp * (S_test / S_design)  # UG-99(b)
         if mode == 'aiaa_s080':
             required_burst = AIAA_BURST_FACTOR * P
@@ -610,8 +900,8 @@ class PressureVesselAnalyzer:
         # --- GERÇEK kopma basıncı: Faupel + ince cidar plastik limit ---
         # (min'i = actual_burst_pressure(); otomatik boyutlandırma da AYNI
         #  fonksiyonun kökünü alır — F021 tutarlılık düzeltmesi.)
-        burst_faupel = self.burst_pressure_faupel(sy, su, R, t)
-        burst_thin = self.burst_pressure_thin_wall(su, D, t)
+        burst_faupel = self.burst_pressure_faupel(sy_w, su_w, R, t)
+        burst_thin = self.burst_pressure_thin_wall(su_w, D, t)
         actual_burst = min(burst_faupel, burst_thin)
         burst_margin = actual_burst / required_burst
 
@@ -619,11 +909,52 @@ class PressureVesselAnalyzer:
         heads = self._head_thicknesses(P, D, S_head, E_head)
         head_mm = {k: v * 1e3 for k, v in heads.items()}
 
+        # --- P5B1-12 (ÖH D15 / a3): BAŞLIK GEREKSİNİMİ BİR KAPIYA BAĞLANDI
+        # ÖLÇÜLDÜ (``a3/once.json``; ASME kipi, steel_4130, 60 bar,
+        # Ø150 mm, cidar 3,0 mm, ``head_type='torispherical'``):
+        #   gövde gerekli (UG-27) = 2,195427934206858 mm  -> sağlanıyor
+        #   başlık gerekli (UG-32) = 3,8298530017859598 mm -> girilen cidarın
+        #                                                    1,2766 KATI
+        #   status = PASS, ``warnings`` içinde 'head' geçen TEK satır yok,
+        #   ``head_status`` / ``head_margin`` alanları YOK.
+        # Yani modül aynı yanıtta hem "bu kap geçer" hem "başlığın 3,83 mm
+        # olması gerekir" diyordu ve ikisi arasında hiçbir bağ yoktu.
+        # Kapak ayrı bir sacdan yapılabilir, o yüzden kalınlığı AYRI bir
+        # girdidir; verilmediğinde gövde kalınlığı varsayılır ve bu varsayım
+        # ``head_thickness_basis`` alanında ADIYLA yazılır (ÖK-19: varsayılan
+        # kalacaksa beyan ZORUNLU).
+        # BEYAN YENİ BİR DÜRÜSTLÜK ALANI AÇMAZ (a2/P5B1-07 emsali): depo
+        # sözleşmesi (``test_wave3_contract``) yayımlanan her künye/hüküm
+        # alanının panele kablolanmasını şart koşar, panel bu paketin mülkü
+        # değildir. Hüküm ZATEN ``status``tadır, gerekçe panelin bastığı
+        # ``warnings``te, varsayım da ``assumptions``ta.
+        head_required_m = heads[head_type]
+        if head_thickness_mm is None:
+            head_used_m = t
+            assumptions.append(
+                "Head thickness was not supplied, so the head is checked "
+                "against the SAME wall thickness as the shell "
+                f"({t * 1e3:.3f} mm). Pass head_thickness_mm if the head is "
+                "formed from a different plate.")
+        else:
+            head_used_m = float(head_thickness_mm) / 1e3
+        head_margin = (head_used_m / head_required_m
+                       if head_required_m > 0 else float('inf'))
+        head_ok = math.isfinite(head_required_m) and head_margin >= 1.0 - 1e-9
+        if not head_ok:
+            warnings.append(
+                f"HEAD UNDER-THICKNESS: the {head_type} head needs "
+                f"{head_required_m * 1e3:.3f} mm (UG-32) but only "
+                f"{head_used_m * 1e3:.3f} mm is available. The shell check "
+                "passes on its own, but a vessel is not stronger than its "
+                "head, so no overall PASS is issued.")
+
         # --- Durum kararı ---
         thickness_margin = t / t_req if t_req > 0 else float('inf')
         if (derating['exceeds_max_service_temp']
                 or burst_margin < 1.0
                 or (not auto_sized and t < t_req * (1.0 - 1e-9))
+                or not head_ok
                 or mawp < P * (1.0 - 1e-9)):
             status = 'FAIL'
         elif burst_margin < MARGINAL_BURST_MARGIN:
@@ -635,8 +966,58 @@ class PressureVesselAnalyzer:
         else:
             status = 'PASS'
 
+        # --- ÖH D15 / P5B1-07: GEVREK KIRILMA HÜKMÜ BAĞLAR ---------------
+        # ÖLÇÜLDÜ (once_b1.json; 5 bar MEOP, D_iç = 400 mm, cidar 8 mm,
+        # T = 20 K): A36 sınıfı karbon çeliği, steel_4130, ss_17_4ph,
+        # molybdenum_tzm ve tungsten — BEŞİ de ``status = PASS``,
+        # burst_margin 15,57…51,37. Modül aynı yanıtta "bu malzeme ailesi
+        # DBTT-duyarlıdır, ASME BPVC VIII-1 UCS-66 darbe testinden MUAF
+        # DEĞİLDİR, gevrek kırılma riski var" diyor ve "bu modül düşük
+        # sıcaklık kırılma tokluğunu modellemez" diye de beyan ediyordu.
+        # 20 K'de karbon çeliğinde YÖNETEN yetmezlik modu tam da
+        # modellenmeyen moddur; onu yalnız uyarı olarak basıp tam bir KABUL
+        # hükmü yayımlamak, aynı deponun ``structural_analysis`` F4-2
+        # ilkesine ("kazanılmamış ONAY geri çekilir") aykırıydı.
+        #
+        # Kural (fail-closed, F4-2 ile aynı yön): ÖLÇÜLMÜŞ bir yetmezlik
+        # (FAIL) asla susturulmaz; kazanılmamış bir ONAY (PASS/MARGINAL)
+        # yayımlanmaz -> 'NOT_EVALUATED' + adlı gerekçe.
+        # BEYAN YENİ BİR ALAN AÇMAZ. Depo sözleşmesi (ölçüldü:
+        # tests/test_wave3_contract.py::TestTersYonSozlesmesi
+        # ::test_durustluk_alanlari_panele_iniyor ve
+        # ::TestTersYonBorcEnvanteri::test_durustluk_borcu_buyumez)
+        # yayımlanan her DÜRÜSTLÜK alanının panele kablolanmasını
+        # şart koşar; panel bu paketin mülkü değildir. Onarımın
+        # KENDİSİ zaten hükümdedir (``status`` -> NOT_EVALUATED) ve
+        # gerekçe, panelin ZATEN bastığı ``warnings`` listesinde
+        # yayımlanır. Böylece ne sağır alt blok ne de kablosuz beyan
+        # borcu doğar.
+        brittle_basis = (
+                'Low-temperature fracture toughness (ductile-to-brittle '
+                'transition) is NOT modelled by this module. For a '
+                'DBTT-sensitive material family in cryogenic service the '
+                'governing failure mode is therefore outside the analysis, '
+                'so a PASS/MARGINAL verdict cannot be earned: the strength '
+                'and burst checks below say nothing about brittle fracture. '
+                'Qualify the grade to ASME BPVC VIII-1 UCS-66 (impact '
+                'testing) or choose an austenitic stainless, aluminium or '
+                'nickel alloy.')
+        if brittle_fracture_unmodelled and status in ('PASS', 'MARGINAL'):
+            status = 'NOT_EVALUATED'
+            warnings.append(brittle_basis)
+            warnings.append(
+                "Verdict withheld: the governing failure mode at this "
+                "temperature (brittle fracture of a DBTT-sensitive material) "
+                "is not modelled here, so no acceptance can be granted "
+                "(status = NOT_EVALUATED). The strength and burst numbers "
+                "below remain valid on their own terms.")
+
         return {
             'code_mode': mode,
+            # ÖH D24 / OH-D23-03: varsayılan uygulandıysa ADIYLA burada
+            # durur; kullanıcı verdiyse liste BOŞTUR (iki gövde artık
+            # ayırt edilebilir).
+            'defaults_applied': defaults_applied,
             'material': material,
             'material_name': mat.get('name', material),
             'inputs': {
@@ -647,6 +1028,10 @@ class PressureVesselAnalyzer:
                 'temperature_K': temperature_K,
                 'weld_efficiency': E,
                 'head_type': head_type,
+                # P5B1-12: kapak kalınlığı AYRI bir girdidir; verilmediyse
+                # None durur (gövde kalınlığı varsayıldığı ``assumptions``ta
+                # yazar) — "0 ile verilmedi" karıştırılmaz.
+                'head_thickness_mm': head_thickness_mm,
             },
             'derating': derating,
             'allowable_stress_MPa': S_design / 1e6,
@@ -655,15 +1040,69 @@ class PressureVesselAnalyzer:
             'auto_sized': auto_sized,
             'thickness_margin': thickness_margin,
             'mawp_bar': mawp / 1e5,
-            'proof_pressure_bar': proof_pressure / 1e5,
+            'proof_pressure_bar': (None if proof_pressure is None
+                                   else proof_pressure / 1e5),
+            # ÖH D22 / P5B1-20: sayının hangi STANDARDA ait olduğu adıyla.
+            'proof_pressure_basis': (
+                'AIAA S-080 proof pressure = %.2f x MEOP.'
+                % AIAA_PROOF_FACTOR
+                if proof_pressure is not None else
+                'not applicable in ASME BPVC VIII-1 Div 1: the code has no '
+                '1.5 x MEOP proof-pressure concept. The pressure test for '
+                'this mode is the UG-99(b) hydrostatic test, reported in '
+                'hydrostatic_test_pressure_bar.'),
             'hydrostatic_test_pressure_bar': hydro_test / 1e5,
             'required_burst_pressure_bar': required_burst / 1e5,
             'burst_faupel_bar': burst_faupel / 1e5,
             'burst_thin_wall_bar': burst_thin / 1e5,
             'actual_burst_pressure_bar': actual_burst / 1e5,
+            # --- ÖH D31 / OH-D30-13: 'actual' ÖLÇÜLMÜŞ DEMEK DEĞİLDİR ----
+            # Aynı sayı, dürüst adıyla. Tüketiciler eski adı okumaya devam
+            # eder (sayı bit-aynı); yeni ad tek kaynaktan aynı değişkeni
+            # basar, ikinci bir hesap YOKTUR.
+            'predicted_burst_pressure_bar': actual_burst / 1e5,
+            'actual_burst_pressure_basis': (
+                'MODEL PREDICTION, not a measured strength. This is the '
+                'minimum of two closed-form correlations: the Faupel (1956) '
+                'thick-wall bursting relation and the Harvey thin-wall '
+                'membrane plastic limit, both evaluated with the material '
+                "database's room-temperature strengths after the derating "
+                'curve. No hydrostatic burst test was performed and no '
+                'batch-specific coupon data were used. The field name '
+                "'actual_burst_pressure_bar' is historical and is kept so "
+                'existing consumers keep working; the same number is also '
+                "published as 'predicted_burst_pressure_bar'. The two "
+                'contributors are published separately as burst_faupel_bar '
+                'and burst_thin_wall_bar.'),
             'burst_margin': burst_margin,
+            # --- ÖH D15 / P5B2-09: ORANIN TANIMI ADINDA -----------------
+            # ÖLÇÜLDÜ (taban ``once.json``; 100 mm iç çap, 40 bar MEOP,
+            # 2 mm 4130 kasa): aynı fiziksel kap için iki üretici AYNI
+            # ``burst_margin`` adıyla TAM 2 KAT farklı sayı yayımlıyordu —
+            # ``/analyze_safety`` 3,5672195467649987 (kopma / gerekli kopma)
+            # ile ``/calculate_solid`` 7,134439093529997 (kopma / MEOP);
+            # kopma basıncı ise ikisinde de 285,3775637411999 bar, çünkü
+            # ikisi de bu çözümleyiciyi kullanıyor. Ad çakışması kozmetik
+            # değil: ``_score_pressure_risk`` eşikleri (1,0 / 1,25 / 2,0)
+            # KOPMA/GEREKLİ-KOPMA tanımına göre ayarlıdır.
+            #
+            # ``burst_margin`` sayısı ve tüketicileri DEĞİŞMEDİ; yanına
+            # oranın hangi tanım olduğunu ADIYLA söyleyen kardeşler kondu,
+            # böylece iki üreticinin sayısı aynı yanıtta ayırt edilebilir.
+            'burst_margin_vs_required_burst': burst_margin,
+            'burst_margin_vs_meop': actual_burst / P,
+            'burst_margin_definition': (
+                'burst_margin = actual_burst_pressure_bar / '
+                'required_burst_pressure_bar (i.e. against the CODE-REQUIRED '
+                'burst pressure, not against MEOP). The ratio against MEOP '
+                'is published separately as burst_margin_vs_meop; the two '
+                'differ by the burst factor and must not be compared to the '
+                'same thresholds.'),
             'head_type': head_type,
             'head_thickness_selected_mm': head_mm[head_type],
+            # P5B1-12: başlık gereksinimi artık bir HÜKÜM üretir.
+            'head_thickness_available_mm': head_used_m * 1e3,
+            'head_margin': head_margin,
             'head_thicknesses_mm': head_mm,
             'status': status,
             'warnings': warnings,

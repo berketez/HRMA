@@ -48,7 +48,7 @@ from hrma.stability.fuel_thermal import (
 )
 from hrma.stability.response import (
     CONFIDENCE_EXTRAPOLATED,
-    CONFIDENCE_FIRM,
+    CONFIDENCE_FIRM,  # noqa: F401 (P6B4-09 çevirisinden sonra yalnız belge)
     QSHODBand,
     qshod_response_band,
 )
@@ -227,13 +227,39 @@ _KAPPA = 1.0e-7
 _RB = 0.005
 
 
-def test_zarf_ici_calisma_noktasi_firm():
-    """A-35 zarfının içindeki nokta (3 MPa, 2160 K) FIRM rozeti üretmeli."""
+def test_zarf_ici_calisma_noktasi_DEJENERE_EKSENDE_FIRM_DEGIL():
+    """A-35: sıcaklık ekseni DEJENERE olduğu için rozet FIRM'e yükselmez.
+
+    ÇEVRİLDİ — ÖH D25 · fea-cfd · a2 · defter P6B4-09. Bu test eskiden
+    ``CONFIDENCE_FIRM`` bekliyordu ve **kusuru kilitliyordu**: A-35
+    kaydının sıcaklık zarfı TEK NOKTADIR (2160 K = 2160 K), yani o
+    eksende ortada bir zarf yoktur. "İçinde mi?" sorusu ölçü-sıfır bir
+    eşitlik testine iner; testin verdiği 2160,0 tam o noktaya bit-eşit
+    çıktığı için ``firm`` kazanılıyordu.
+
+    ÖLÇÜLDÜ (docs/scofield/raw/OH/D25/fea-cfd/a2/once_a2.json →
+    "P6B4-09"): üç QSHOD kaydının ÜÇÜNDE de sıcaklık ekseni dejenere;
+    tam noktada rozet ``firm``, 1 ppm sapmada ``extrapolated_low``.
+    Yani gerçek bir çalışma noktası bu rozeti pratikte HİÇ kazanamıyor
+    ve rozet bilgi taşımıyordu.
+
+    Yeni davranış (fail-closed): dejenere eksenli kayıtta rozet
+    ``firm``e YÜKSELMEZ ve gerekçe dejenere ekseni ADIYLA söyler. Bant
+    ve sayılar SİLİNMEZ. Rozet ölmedi — iki eksende de genişliği olan
+    bant hâlâ ``firm`` alır; bu ``tests/test_stability_tepki.py::
+    test_zarf_ici_firm_rozeti`` (sentetik iki-yönlü zarf) ile ve
+    ``tests/test_d25_fea_cfd_a2.py::TestP6B409DejenereZarf::
+    test_GENIS_zarf_hala_firm_KAZANABILIR`` ile kilitlidir.
+    """
     result = qshod_response_band(
         _A35, 2.0 * math.pi * 500.0, _KAPPA, _RB,
         pressure_Pa=3.0e6, temperature_K=2160.0)
-    assert result['confidence'] == CONFIDENCE_FIRM
-    assert 'inside the validity envelope' in result['confidence_basis']
+    assert result['confidence'] == CONFIDENCE_EXTRAPOLATED
+    assert 'SINGLE operating point' in result['confidence_basis']
+    assert 'temperature_range_K' in result['confidence_basis']
+    # Basınç ekseni A-35'te dejenere DEĞİLDİR: nokta gerçekten içeride.
+    assert (_A35.pressure_range_Pa[0] <= 3.0e6
+            <= _A35.pressure_range_Pa[1])
     # Dejenere bant: dört köşe aynı -> min == maks.
     assert result['response_real_min'] == pytest.approx(
         result['response_real_max'])

@@ -431,10 +431,25 @@ def _panel_kos(tmp_path, alanlar, sonuclar, yanit=None, mutasyon=None):
 
 
 def _beyan_alanlari(govde):
-    """Basılan eksik-girdi beyanından alan adları listesi."""
+    """Basılan eksik-girdi beyanından alan adları listesi.
+
+    ÖH D36 (OH-P-08 r08, ÇEVRİLEN YARDIMCI): beyan artık ham anahtarı değil
+    form ETİKETİNİ basar ve anahtarı sonda parantez içinde taşır
+    (``Gimbal Aktüatör Kolu (actuator_arm_m)``). Bu yardımcının iddiası
+    DEĞİŞMEDİ — sunucu listesiyle birebir eşitlenen şey hâlâ ALAN ADLARIDIR;
+    yalnız ad artık parantezden okunur. Parantez yoksa (eski biçim) parça
+    olduğu gibi alınır.
+    """
     m = re.search(r'\[\[liq\.js\.gimbal_missing_inputs\]\]\s*([^<]*)</p>', govde)
     assert m, 'eksik-girdi beyanı basılmamış; basılan gövde: %r' % govde[:300]
-    return [p.strip() for p in m.group(1).split(',') if p.strip()]
+    adlar = []
+    for p in m.group(1).split(','):
+        p = p.strip()
+        if not p:
+            continue
+        k = re.search(r'\(([A-Za-z0-9_]+)\)\s*$', p)
+        adlar.append(k.group(1) if k else p)
+    return adlar
 
 
 #: Yerel kapıyı devre dışı bırakan mutasyon — "fetch koşulsuz atılsın".

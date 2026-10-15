@@ -85,9 +85,22 @@ def test_form_toplayicisi_deseni_gonderiyor():
     """
     html = (ROOT / 'hrma' / 'templates' / 'advanced.html').read_text(
         encoding='utf-8')
+    # ÖH V3 taban-v (14 Eki 2026) — BEKÇİ ÇEVRİLDİ (dört koşul). Eski
+    # beklenti damgasız satırdı (``if (holePattern) data.hole_pattern =
+    # holePattern;``). KAYITLI KARAR ÖH D36 · A-3 (onemli2-hibrit a1
+    # rapor.md §A-3; commit 7b6b9dd1, bekçisi tests/test_d36_hibrit_a1.py):
+    # gizli tasarım panelinin alanları — hole_pattern dahil — gövdeye
+    # YALNIZ köken damgasıyla (``tasarimAlaniGonder``: user | project_file)
+    # girer; damgasız gönderim kullanıcı vermemişken "kullanıcı verdi"
+    # dedirtiyordu. Korunan iddia aynı: alan toplayıcıya BAĞLIDIR (v2.6.26
+    # "kanal var kapı yok" geri gelmez) ve gerçek kod satırı aranır.
     assert re.search(
-        r"^\s*if \(holePattern\) data\.hole_pattern = holePattern;",
+        r"^\s*tasarimAlaniGonder\(holePatternEl, 'hole_pattern', holePattern\);",
         html, re.M), 'payload toplayıcısında hole_pattern satırı yok'
+    # Damgasız eski yol geri gelirse A-3 kusuru da geri gelir.
+    assert not re.search(r"^\s*if \(holePattern\) data\.hole_pattern\s*=",
+                         html, re.M), (
+        'hole_pattern köken damgası olmadan gövdeye yazılıyor (A-3)')
 
 
 def test_app_dogrulamasi_tek_kaynaktan():

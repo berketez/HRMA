@@ -388,12 +388,26 @@ class TestGercekKolRadyalPay:
 #: Cidar kalınlığı yolları motor tipine göre farklı (analysis_dock.js
 #: WALL_THICKNESS_MM_PATHS). Kaynakların hepsi MİLİMETRE.
 CIDAR_ORNEK = {
-    'hybrid': ({'motor': {'heat_transfer_analysis': {
-        'design_parameters': {'wall_thickness': 8.0}}}}, 8.0),
+    # Z5-C1: cidar önerisi artık motorun KENDİ künyesine bağlı. Künye üç
+    # tipte de yayımlanıyor (design_mode 'size' | 'verify'); sentetik sahne
+    # "kullanıcı cidarı doğrulandı" durumunu kurar, böylece bekçi asıl
+    # ölçtüğü şeyi (mm -> m) ölçmeye devam eder.
+    'hybrid': ({'motor': {
+        'heat_transfer_analysis': {
+            'design_parameters': {'wall_thickness': 8.0}},
+        'structural_analysis': {'chamber_analysis': {
+            'design_mode': 'verify',
+            'wall_thickness_source': 'user_supplied'}}}}, 8.0),
     'solid': ({'structural_analysis': {
-        'case_analysis': {'wall_thickness_mm': 3.5}}}, 3.5),
+        'case_analysis': {'wall_thickness_mm': 3.5,
+                          'design_mode': 'verify',
+                          'wall_thickness_source': 'user_supplied'}}}, 3.5),
     'liquid': ({'structural_analysis': {
-        'chamber_structure': {'wall_thickness': 6.25}}}, 6.25),
+        'chamber_structure': {
+            'wall_thickness': 6.25,
+            'design_mode': 'verify',
+            'wall_thickness_source': 'user input (chamber wall thickness)'}}},
+       6.25),
 }
 
 
@@ -513,7 +527,11 @@ const TP = sandbox.window.TransientPanel;
 OUT.table = TP._buildExportTable(%s);
 OUT.bos = TP._buildExportTable(null);
 """ % json.dumps(TRANSIENT_PA)
-    return _node([STATIC_JS / 'transient_panel.js'], body)
+    # ÖH D25 / OH-D24-05 — kum havuzu tarayıcının betik SIRASINI aynalar:
+    # PA_PER_BAR artık panelde tanımlı değil, ortak birim modülünden
+    # okunuyor (advanced.html'de de units_constants.js önce yükleniyor).
+    return _node([STATIC_JS / 'units_constants.js',
+                  STATIC_JS / 'transient_panel.js'], body)
 
 
 def _sutun(table, basligin_parcasi):

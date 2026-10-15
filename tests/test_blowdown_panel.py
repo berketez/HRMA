@@ -34,6 +34,8 @@ import subprocess
 
 import pytest
 
+from tests.support import yedek_dili
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 PANEL_JS = REPO_ROOT / 'hrma' / 'static' / 'js' / 'blowdown_panel.js'
 ADVANCED_HTML = REPO_ROOT / 'hrma' / 'templates' / 'advanced.html'
@@ -375,14 +377,25 @@ def test_kararsizlik_uyarilari_vurgulanir_ilgisizler_sizmasin(tmp_path):
 def test_blok_ici_chugging_metni_kirmizi_vurgulu(tmp_path):
     """transient çözücüsünün serbest-metin chugging uyarısı 'err' vurgusu alır."""
     blok = _tam_blok()
+    # ÖH D18 (P2B4-08): fikstür GERİ ÇEKİLMİŞ '(SP-8089)' künyesini harfi
+    # harfine yazıyordu ve rozet iddiası da o metne bağlıydı; künye
+    # düzeltilince bu bekçi kusuru koruyan bir kilide dönüşüyordu. Künye
+    # artık çözücünün TEK kaynağından (acoustic_modes.
+    # CHUG_THRESHOLD_CITATION) okunur; bekçinin sınadığı şey değişmedi:
+    # chugging uyarısı 'instability' vurgusu alır, zararsız uyarı almaz.
+    from hrma.analysis.acoustic_modes import CHUG_THRESHOLD_CITATION
     blok['warnings'] = [
-        't=3.10s: ΔP/Pc=0.18 < 0.2 — chugging risk (SP-8089)',
+        't=3.10s: ΔP/Pc=0.18 < 0.2 — chugging risk (%s)'
+        % CHUG_THRESHOLD_CITATION,
         'tank temperature clamped to model band (test, benign)',
     ]
     out = _run_panel({'motor': {'tank_blowdown': blok, 'thrust': 1000.0}},
                      tmp_path)
     rozetler = out['els']['bp_badges']['html']
-    assert 'chugging risk (SP-8089)' in rozetler
+    # Künye HTML kaçışından geçer ('&' -> '&amp;'), o yüzden kaçışlı
+    # biçim aranır; künyenin kendisi tek kaynaktan okunur.
+    kacisli = CHUG_THRESHOLD_CITATION.replace('&', '&amp;')
+    assert ('chugging risk (%s)' % kacisli) in rozetler, rozetler[:400]
     # chugging → data-warn="instability"; zararsız uyarı → "general".
     # Uyarı metnindeki '<' esc ile '&lt;' olur; bu yüzden kaçışlı HTML
     # üzerinde aranır (eleman gövdesinde ham '<' kalmaz).
@@ -418,12 +431,30 @@ def test_kaynakta_uydurma_veri_ureteci_yok():
 
 
 def test_her_t_cagrisinin_ingilizce_yedegi_var():
-    """Sözlük anahtarı kayıtlı değilken bile ekrana ham anahtar basılmaz."""
+    """Sözlük anahtarı kayıtlı değilken bile ekrana ham anahtar basılmaz.
+
+    ÇEVRİLDİ (ÖH D22 · P13B2-06). Testin adı "İngilizce yedeği var"
+    diyordu ama gövdesi YALNIZ yedeğin VARLIĞINI sınıyordu; dil denetimi
+    yalnız ``bug_report.js`` tarafında vardı. Ad, yapılmayan bir denetimi
+    ilan ediyordu (aynı sınıf: P13B1-11 "kapı 6/8" adlandırması).
+
+    Ad artık gövdeyle örtüşüyor: yedeğin VARLIĞI ve DİLİ birlikte
+    sınanıyor; dil kararı tek kaynaktan okunuyor
+    (``tests/support/yedek_dili.py``). Ölçüldü (ÖH D22): bu panelde 18
+    yedek var, Türkçe harf taşıyan 0 — yani denetim eklemek bir gevşetme
+    değil, kapsam genişletmesidir.
+    """
     src = kaynak()
-    yediksiz = re.findall(r"\bT\(\s*'[^']+'\s*\)", src)
+    yediksiz = yedek_dili.yedeksiz_cagrilar(src)
     assert not yediksiz, 'yedeksiz T() çağrıları: %s' % yediksiz
     yediksiz_tf = re.findall(r"\bTF\(\s*'[^']+'\s*,\s*[^,]+\)\s*[;)]", src)
     assert not yediksiz_tf, 'yedeksiz TF() çağrıları: %s' % yediksiz_tf
+    ciftler = yedek_dili.yedekler(src)
+    assert ciftler, 'panelde hiç yedekli T()/TF() çağrısı bulunamadı'
+    kacak = yedek_dili.dil_kacaklari(ciftler)
+    assert not kacak, (
+        'yedek dili %r iken Türkçe harf taşıyan yedek(ler): %s'
+        % (yedek_dili.YEDEK_DILI, kacak))
 
 
 def test_yeni_anahtarlar_blowdown_onekli():

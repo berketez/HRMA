@@ -76,7 +76,48 @@ def profil_govdesi(motor):
     if (isinstance(kontur, dict) and isinstance(kontur.get('points'), list)
             and len(kontur['points']) >= 2):
         govde['nozzle_contour'] = kontur
+    # ÖH D19 / P7B3-30: panel artık motorun KENDİ malzemesini de gönderiyor
+    # (zincirin iki ucu aynı cidarı anlatmak zorunda). Ayna panelin okuma
+    # sırasını birebir izler; malzeme UYDURULMAZ, yoksa alan konmaz.
+    govde.update(panel_malzemesi(motor))
     return govde
+
+
+def panel_gazi_ve_kalinligi(motor):
+    """``buildWallProfileBody``in gaz (γ / MW / c*) ve cidar kalınlığı
+    okumasının Python aynası — ÖH D37 A2-1 termal 7. tur, karar §28-24 §2
+    (A): panel motorun KENDİ gazını gönderir; köprünün mesh'i kurduğu
+    kalınlık metre olarak gider (OH-DK-09). Motor yayımlamıyorsa alan
+    konmaz (uydurma yok). Yalnız gövde aynası testinin beklenen gövdesine
+    eklenir; ``profil_govdesi`` (başka fikstürlerin gövdesi) değişmez."""
+    ek = {}
+    for k in ('gamma', 'molecular_weight', 'c_star'):
+        v = motor.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            ek[k] = v
+    sa = motor.get('structural_analysis') or {}
+    for blok, alan in (('chamber_analysis', 'wall_thickness_used_mm'),
+                       ('chamber_structure', 'wall_thickness'),
+                       ('case_analysis', 'wall_thickness_mm')):
+        v = (sa.get(blok) or {}).get(alan)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            ek['wall_thickness'] = v / 1000.0
+            break
+    return ek
+
+
+def panel_malzemesi(motor):
+    """``buildWallProfileBody``in malzeme okumasının Python aynası."""
+    sa = motor.get('structural_analysis')
+    if not isinstance(sa, dict):
+        return {}
+    for blok, alan in (('design_parameters', 'material'),
+                       ('chamber_structure', 'material_key'),
+                       ('case_analysis', 'case_material')):
+        deger = (sa.get(blok) or {}).get(alan)
+        if isinstance(deger, str) and deger.strip():
+            return {'material': deger.strip()}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +269,12 @@ def fea(client, motor, profil):
 def fea_eksik(client, motor):
     """Profil verilmemiş GERÇEK red yanıtı (dürüstlük sözleşmesi)."""
     kod, govde = kos(client, motor=motor, ambient_temperature_K=293.15)
-    assert kod == 200 and govde['status'] == 'NOT_MODELLED', govde
+    # OH-D17-07 (ÖH D22): eskiden ``kod == 200`` idi ve kusuru KORUYORDU —
+    # köprü NOT_MODELLED yayımlarken zarf 'success' + 200 diyordu. Zarf
+    # artık reddi kendi yüzünde de söylüyor (422 + status='not_modelled');
+    # ``fea`` bloğu (bu fixture'ın döndürdüğü gövde) AYNEN duruyor, panel
+    # onu kendi NOT_MODELLED kartında göstermeye devam ediyor.
+    assert kod == 422 and govde['status'] == 'NOT_MODELLED', govde
     return govde
 
 
@@ -498,7 +544,9 @@ class TestBirimDonusumu:
         sonuc = _run_panel(tmp_path, build_body=[motor])
         b = sonuc['bodies'][0]
         assert b['missing'] == []
-        ayna = profil_govdesi(motor)
+        # 7. tur (§28-24 §2 A): panel motorun gazını ve köprü kalınlığını da
+        # gönderir — ayna o alanlarla genişletildi (ana model izni).
+        ayna = dict(profil_govdesi(motor), **panel_gazi_ve_kalinligi(motor))
         assert set(b['body']) == set(ayna)
         for k, v in ayna.items():
             if isinstance(v, (int, float)):

@@ -41,6 +41,8 @@ import warnings
 import numpy as np
 import pytest
 
+from tests.support import serilestirme
+
 from hrma.engines.hybrid_rocket_engine import (
     OF_PERF_GRID_STEP,
     OF_PERF_INTERP_ERROR_BOUND_PCT,
@@ -475,9 +477,14 @@ def test_beyanlar_of_kaymasini_modellenmiyor_ilan_etmiyor(varsayilan):
 
 
 def test_yeni_alanlar_json_serilestirilebilir(varsayilan):
-    """Yeni bloklar yanıt sözleşmesini bozmaz (Flask jsonify yolu)."""
+    """Yeni bloklar yanıt sözleşmesini bozmaz (Flask jsonify yolu).
+
+    ÇEVRİLDİ (ÖH D22 · P13B1-10): gövde İDDİASIZDI.
+    """
     _, sonuc = varsayilan
-    json.dumps({'of_shift': sonuc['of_shift'],
-                'of_shift_performance': sonuc['of_shift_performance'],
-                'tank_blowdown': sonuc['tank_blowdown'],
-                'design_warnings': sonuc['design_warnings']})
+    serilestirme.json_capasi(
+        {'of_shift': sonuc['of_shift'],
+         'of_shift_performance': sonuc['of_shift_performance'],
+         'tank_blowdown': sonuc['tank_blowdown'],
+         'design_warnings': sonuc['design_warnings']},
+        'hibrit O/F kayması blokları')

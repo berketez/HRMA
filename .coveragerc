@@ -1,0 +1,70 @@
+# HRMA — kapsam yapılandırması. KAPSAM KAPISININ TEK KAYNAĞI.
+#
+# ÖH D25 / altyapı a1 — defter kalemi P14H2-C1.
+#
+# NEDEN BU DOSYA VAR
+# ------------------
+# P14 savcı raporu (docs/scofield/raw/P14/S1-savci.md:225; kaynağı
+# H2-hukum.md §e) şu hükmü vermişti:
+#
+#   "Süit --cov altında 12 hayalet kırmızı veriyor ... Sonuç: bu depoya
+#    bugün kapsam kapısı kurulamaz — kapı ilk gün 12 kırmızıyla açılır."
+#
+# İki iddia da ölçüldü (kanıt: docs/scofield/raw/OH/D25/altyapi/a1/):
+#
+# 1. HAYALET İDDİASI — DOĞRU ÇIKTI, AMA YALNIZ DAR HEDEFTE.
+#    Kalemin kendi seçeneğiyle (--cov=hrma.export.pdf_generator) ve
+#    VARSAYILAN çekirdekle aynı grafik/PDF kümesi bugün de 11 kırmızı
+#    veriyor; 11'i de kalemin adıyla saydığı sınıflarda. AMA aynı dosyalar,
+#    aynı çekirdek, kaynak GENİŞ verildiğinde (source = hrma) 0 kırmızı.
+#    Kırmızı veren koşum kapsamsızdan DAHA HIZLI (x0,78), yani mekanizma
+#    kalemin sandığı "zaman aşımı/yavaşlama" değil, hedefin DARLIĞI.
+#    => Bu yüzden aşağıdaki `source` DARALTILAMAZ. Daraltmak sadece yüzdeyi
+#       şişirmez, 11 testi kırmızıya döndürür.
+#
+# 2. MALİYET İDDİASI — ÇEKİRDEK SORUNUYMUŞ.
+#    D24 tam süiti kapsam altında koşamamıştı (~52 test / 7 dk 40 sn).
+#    Ölçülen maliyet: varsayılan C izleyici x1,54-x2,09;
+#    COVERAGE_CORE=sysmon x0,90-x1,04. sysmon, varsayılanla BİT-AYNI satır
+#    kümesini görüyor (22.979 = 22.979, yalnız-birinde: 0), yani ucuzluk
+#    ölçüm doğruluğundan satın alınmıyor.
+#    Tam süit (487 dosya, 24 dilim, sıralı, coverage combine) sysmon ile
+#    90,8 dk'da koştu: 17.223 geçti, HAYALET KIRMIZI 0, kapsam %88,18.
+#
+# EŞİK NEREDEN GELİYOR
+# --------------------
+# Ölçüm macOS'ta, kapı ubuntu-latest'te koşuyor ve CI'nın `pytest`/`testler`
+# işleri build123d'yi BİLEREK kurmuyor (numpy<2 pini; STEP testleri ayrı
+# `step-export` işinde). Eşik bu farkı TAHMİN etmez, ÖLÇER:
+#
+#   ölçülen kapsam (487 dosya, 51.641 ifade)          %88,1800
+#   - yalnız build123d ile kapsanan satır       748   (96 test atlıyor)
+#   - platforma kapılı dalda kapsanan satır       2   (statik tarama)
+#   = CI'da koşmayan yolların ÜST SINIRI        750   = 1,4523 puan
+#   => CI kapsamının ALT SINIRI                      %86,7277
+#   => fail_under = floor(alt sınır, 1 ondalık)      %86,7
+#
+# Yani eşik yuvarlanmış bir tahmin değil, iki ölçümden TÜRETİLMİŞ bir alt
+# sınırdır (esik_turetimi alanı: kapsam_hukmu.json). İlk gecelik koşum
+# CI'nın gerçek sayısını basacak; eşik o sayıyla DARALTILABİLİR — ama
+# kaldırılamaz (bekçi).
+#
+# BEKÇİ
+# -----
+# tests/test_d25_altyapi_a1.py: eşiğin varlığını (fail-closed), dişini
+# (ölçümden en çok 3 puan aşağı), ölçümü aşmamasını (ilk gün kırmızı yok),
+# kaynağın daraltılmamasını (yapılandırmada VE iş akışı komut satırında),
+# ucuz çekirdeğin işaretli olmasını ve bağımlılığın beyan edilmesini ayrı
+# ayrı sınar. 16 ters-mutasyonla kanıtlıdır.
+#
+# NOT: Eşik burada olduğu için `pytest --cov` yerel bir ALT KÜME üzerinde
+# koşulduğunda da uygulanır ve kırmızı verir. Bu bilinçlidir (fail-closed);
+# yalnız ölçüm yapmak isteyen betikler COVERAGE_RCFILE ile eşiksiz bir
+# yapılandırma verir (bkz. docs/scofield/raw/OH/D25/altyapi/a1/olcum_notr.cfg).
+
+[run]
+source = hrma
+
+[report]
+fail_under = 86.7
+precision = 2

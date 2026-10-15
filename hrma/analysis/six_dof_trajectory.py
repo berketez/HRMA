@@ -62,9 +62,31 @@ Sınırlar (dürüst beyan):
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from hrma.constants import ISA_LAYERS  # merkezi USSA 1976 tablosu
+from hrma.constants import (  # merkezi USSA 1976 tablosu
+    G_0, ISA_LAYERS, ISA_TABLE_TOP_M, P_SEA_LEVEL_PA)
+# ÖH D17 (P4B3-13 + OH-D16-11): kalkış eşiği ve itki eğrisi sözleşmesi
+# kardeş düzlemsel çözücüde TANIMLIDIR ve BURADAN İTHAL EDİLİR — aynı
+# soruya iki modülde iki farklı cevap üreten ikinci kopya yazılmaz.
+# (Bağımlılık tek yönlüdür: ``trajectory_analysis`` bu modülü ithal etmez.)
+from hrma.analysis.trajectory_analysis import (  # noqa: E402
+    LIFTOFF_ALTITUDE_EPS_M, normalize_thrust_curve)
 
-G0 = 9.80665          # m/s²
+#: Atış rayı boyu VERİLMEDİĞİNDE kullanılan varsayılan [m] — ÖH D21 /
+#: OH-D19-24. Sayı v2.6.27'ye kadar İKİ yerde yazılıydı: bu modülün
+#: ``__init__`` imzasında (``rail_length=5.0``) ve ``hrma/app.py``in
+#: ``/api/six-dof-analysis`` ucunda (``data.get('rail_length', 5.0)``).
+#: Uç artık anahtarı yoksa None geçer; varsayılanın TEK tanım yeri burası
+#: ve seçim ``rail_length_source`` künyesiyle yayımlanır.
+#:
+#: NOT (kardeş asimetri, bu dalgada kapatılmadı): düzlemsel çözücü
+#: ``trajectory_analysis`` ray boyu verilmediğinde rayı HİÇ MODELLEMİYOR
+#: (``rail.modelled=False``, ``rail_length_m=None``), yani aynı üründe
+#: aynı eksik girdi iki çözücüde iki ayrı hükme yol açıyor. Bu modülde
+#: ray tutum kilidini belirlediği için "modellemeyi kapatmak" dinamiği
+#: değiştirir; o adım kendi ölçümüyle ayrı bir kalemdir.
+DEFAULT_RAIL_LENGTH_M = 5.0
+
+G0 = G_0              # m/s² — hrma.constants (ÖH P10B3-10, tek kaynak)
 R_EARTH = 6_371_000.0  # m
 # USSA 1976 geopotansiyel dönüşüm yarıçapı. ORTALAMA Dünya yarıçapı (R_EARTH)
 # DEĞİLDİR: standart atmosfer H = h·r0/(r0+h) dönüşümünü r0 = 6 356 766 m
@@ -80,6 +102,13 @@ R_GEOPOTENTIAL = 6_356_766.0  # m
 OMEGA_EARTH = 7.292115e-5  # rad/s
 R_AIR = 287.053        # J/(kg·K)
 GAMMA_AIR = 1.4
+
+# CG verilmediğinde kullanılan kaba boy kesirleri (ÖH defter P4B3-07).
+# TEK TANIM NOKTASI (kural #11): hem düşülen değer hem de yayımlanan künye
+# (``x_cg_source`` / ``x_cg_is_estimate``) buradan okunur; iki yerde ayrı
+# yazılırsa künye sayıdan kopar.
+CG_ASSUMED_FULL_FRACTION = 0.55
+CG_ASSUMED_EMPTY_FRACTION = 0.50
 
 # Entegrasyon (atalet) çerçevesinin eksen etiketleri — bileşen sırası.
 # SAĞ-ELLİ: E×N=U, yani np.cross bu çerçevede fiziksel çapraz çarpımla
@@ -118,10 +147,18 @@ def _atmosphere_full(h):
     # Geopotansiyel dönüşüm USSA 1976 etkin yarıçapıyla (6 356 766 m) yapılır;
     # ortalama Dünya yarıçapı DEĞİL (F165 düzeltmesi, kardeş modülle tutarlı).
     H = h * R_GEOPOTENTIAL / (R_GEOPOTENTIAL + h)  # geopotansiyel
-    H_TABLE_TOP = 84852.0            # m, USSA 1976 üst geopotansiyel sınır
+    # ÖH D20 / altyapi (P10B4-15): yerel 84852.0 literali KALKTI — değer
+    # hrma.constants.ISA_TABLE_TOP_M ile BİT-AYNI idi, yani ikinci tanım
+    # noktasıydı; merkez değişse bu kopya geride kalırdı.
+    H_TABLE_TOP = ISA_TABLE_TOP_M    # m, USSA 1976 üst geopotansiyel sınır
 
     if H <= H_TABLE_TOP:
-        T, P = 288.15, 101325.0
+        # ÖH D27 / OH-D26-01 (P15B2-06 üçüncü ayak): döngü tohumu
+        # ISA tablosunun KENDİ taban satırıdır; ``101325.0`` çıplak
+        # yazılınca tablonun ikinci tanım noktası oluyordu. Basınç
+        # merkezî addan (``P_SEA_LEVEL_PA = ISA_LAYERS[0][3]``),
+        # sıcaklık aynı satırdan okunur — yeni sayı YAZILMAZ.
+        T, P = ISA_LAYERS[0][1], P_SEA_LEVEL_PA
         for base, T_base, lapse, P_base in ISA_LAYERS:
             if H >= base:
                 if lapse == 0.0:
@@ -217,47 +254,210 @@ def _drag_coefficient_mach(mach, cd0):
     return cd0 * factor
 
 
-# Kanat sıkıştırılabilirlik bandı sınırları (transonik harman aralığı)
-_FIN_M_SUB = 0.8   # altında saf Prandtl-Glauert
-_FIN_M_SUP = 1.2   # üstünde saf lineerleştirilmiş süpersonik teori
+# Kanat sıkıştırılabilirlik bandı sınırları (transonik harman aralığı).
+#
+# Sayılar kaynaklıdır: Niskanen 2009/2013, *OpenRocket Technical
+# Documentation* referans gerçeklemesi (``FinSetCalc.java``) altsonik
+# kanat bağıntısını M = 0,9'a, süpersonik bağıntıyı M = 1,5'ten sonra
+# kullanır ve aradaki bandı enterpolasyonla geçer. ÖH D24 / OH-D23-17'den
+# ÖNCE bu bant 0,8 – 1,2 idi ve dayanağı yazılı değildi.
+_FIN_M_SUB = 0.9   # altında saf altsonik (sıkıştırılabilir) sonlu-açıklık
+_FIN_M_SUP = 1.5   # üstünde saf lineerleştirilmiş süpersonik (Ackeret)
+
+# Süpersonik UÇ MACH KONİSİ düzeltmesinin geçerlilik sınırı (ÖH D25 /
+# OH-D24-03). Kanadın uç hücum kenarından çıkan Mach çizgisi firar
+# kenarına varana dek içeri ``c/β`` kadar girer; bu nüfuz kanadın KÖKÜNE
+# (gövde/yansıma düzlemi) ulaşırsa lineer şerit çözümü geçersizdir:
+#
+#     c/β ≤ s   ⟺   β·AR_f ≥ 1     (AR_f = s²/A_fin = s/c, dikdörtgende)
+#
+# Sembolik kanıt: docs/scofield/raw/OH/D25/termo-ucus/a1/turetim.py (T1).
+# Altında narin-kanat (Jones) sınırı kullanılır — aşağıya bak.
+_FIN_TIP_CONE_MIN_BETA_AR = 1.0
 
 
-def _fin_compressibility_factor(mach):
+def _fin_compressibility_factor(mach, fin_aspect, cos_gamma_c):
     """Kanat normal-kuvvet eğimi için sıkıştırılabilirlik çarpanı k(M).
 
-    Barrowman (1967) lineer teorisi SIKIŞTIRILAMAZ akış sonucudur; kod tüm
-    Mach'larda tek sabit C_Nα kullanıyordu (F059). İnce profil 2B eğimi:
-      - subsonik : dC_N/dα = 2π/β,  β = sqrt(1−M²)   (Prandtl-Glauert)
-      - süpersonik: dC_N/dα = 4/β,  β = sqrt(M²−1)   (Ackeret lineer teorisi)
-    Sıkıştırılamaz referansa (2π) göre çarpan:
-      k_sub(M) = 1/sqrt(1−M²) ,  k_sup(M) = (4/2π)/sqrt(M²−1)
-    M=0.8'de k=1.667, M=1.2'de k=0.960, M=2'de k=0.368 (kanat etkinliği
-    süpersonikte ~%60 düşer — audit'in beklediği mertebe).
+    ``k(M) = C_Nα,kanat(M) / C_Nα,kanat(0)``. Çarpan SONLU AÇIKLIKLIDIR:
+    hem pay hem payda AYNI sonlu-açıklık ailesinden gelir, bu yüzden
+    en-boy (aspect ratio) kaybı YALNIZ BİR KEZ sayılır.
 
-    Transonik bant (0.8 ≤ M ≤ 1.2) her iki lineer teorinin de geçersiz olduğu
-    bölgedir; burada iki uç arasında DOĞRUSAL harman uygulanır. Bu harmanın
-    kendisi mühendislik enterpolasyonudur, belirli bir yayına dayanmaz
-    (uydurma kaynak yazılmadı); uçlardaki değerler kaynaklıdır.
+    Args:
+        mach: Mach sayısı [-] (negatifse 0 kabul edilir)
+        fin_aspect: ``AR_f = s²/A_fin`` [-] — Barrowman/Diederich'in kanat
+            en-boy ölçüsü (s: açıklık, A_fin: BİR kanadın alanı)
+        cos_gamma_c: orta-veter süpürme açısının kosinüsü ``cos Γ_c`` [-]
 
-    Kaynak: Anderson, "Fundamentals of Aerodynamics", sıkıştırılabilirlik
-    düzeltmesi (Prandtl-Glauert) ve lineerleştirilmiş süpersonik (Ackeret)
-    bölümleri; Niskanen 2009 OpenRocket Technical Documentation —
-    kanat C_Nα'sının sıkıştırılabilirlikle ölçeklenmesi.
+    Raises:
+        ValueError: ``fin_aspect`` ya da ``cos_gamma_c`` pozitif değilse.
+            Sessiz yedek YOKTUR: geometri çözülemiyorsa çarpan da
+            çözülemez (fail-closed).
 
-    NOT: Burun terimine (C_Nα = 2) uygulanmaz. O değer narin-cisim (slender
-    body) teorisinden gelir ve birinci mertebede Mach'tan bağımsızdır.
+    ÖH D24 / OH-D23-17 — ESKİ DALIN KUSURU (ölçüldü, kanıt
+    ``docs/scofield/raw/OH/D24/termo-ucus/a1/once.json``):
+
+        eski k_alt(M) = 1/√(1−M²)          (Prandtl-Glauert, 2-B)
+        eski k_üst(M) = (4/2π)/√(M²−1)     (Ackeret/ince profil, 2-B)
+
+    Bu iki oran **2-B ince profil** oranlarıdır. Çarpıldıkları Barrowman
+    kanat terimi ise eq. (3.40)'ın β = 1 hâlidir ve DÜŞÜK EN-BOY
+    düzeltmesini ZATEN içerir. 2-B oranıyla ölçeklemek en-boy kaybını İKİ
+    KEZ sayar. Aşağıdaki kapalı biçimlerde ispatlanıyor (sembolik kanıt:
+    ``docs/scofield/raw/OH/D24/termo-ucus/a1/turetim.py``):
+
+        lim_{AR_f → ∞} k_üst(M) = (4/2π)/√(M²−1)   (eski ifade)
+        lim_{AR_f → ∞} k_alt(M) = 1/√(1−M²)        (eski ifade)
+
+    yani ESKİ İFADELER YENİSİNİN 2-B (sonsuz en-boy) LİMİTİDİR; sonlu
+    en-boyda ikisi arasındaki oran ``D₀/AR_f > 1`` kadar açılır. Ölçülen
+    (d = 0,15 m, 4 kanat, c_r = 0,30, c_t = 0,15, s = 0,15, süpürme
+    0,10 m): M = 2,5'te statik marj **4,41 kalibreden 0,04 kalibreye**
+    düşüyordu; M = 2,9'da **−0,69 kalibre** (kararsız). Gerçekte bu araç
+    süpersonikte kararlıdır.
+
+    KAYNAK — altsonik (sonlu açıklık, sıkıştırılabilir):
+      Niskanen, *OpenRocket Technical Documentation*, eq. (3.40)
+      (Barrowman'ın kullandığı Diederich yarı-deneysel yöntemi,
+      Diederich 1951, NACA TN 2335):
+
+          (C_Nα)₁ = 2π (s²/A_ref) / (1 + √(1 + (β s²/(A_fin cos Γ_c))²)),
+          β = √(1−M²)
+
+      β = 1 konunca bu ifade koddaki Barrowman kanat terimiyle
+      ÖZDEŞTİR (``Q = s²/(A_fin cos Γ_c) = 2 l_orta/(c_r+c_t)``), yani
+      pay ve payda AYNI bağıntının iki Mach değeridir:
+
+          k_alt(M) = (1 + √(1+Q²)) / (1 + √(1 + β²Q²))
+
+    KAYNAK — süpersonik (lineerleştirilmiş, düz levha):
+      Ackeret (1925) lineerleştirilmiş süpersonik teori; Anderson,
+      *Fundamentals of Aerodynamics*, lineerleştirilmiş süpersonik akış
+      bölümü: düz levhanın NET normal kuvvet eğimi kanat alanı başına
+      ``4/β``, β = √(M²−1). Aynı sonuç Barrowman'ın Busemann üçüncü
+      mertebe şerit yönteminin lineer teriminden de çıkar: iki yüzeyin
+      basınç farkı ``ΔC_p = 2·K₁·α`` ve ``K₁ = 2/β``
+      (Niskanen eq. (3.42)) → ``4/β``. Buradan
+
+          k_üst(M) = [A_fin·(4/β)/A_ref] / [(C_Nα)₁(β=1)]
+                   = 2·(1 + √(1+Q²)) / (π · AR_f · β)
+
+    DÜRÜSTÇE — bu gerçeklemenin OpenRocket'tan AYRILDIĞI yer: OpenRocket
+    kodu (``FinSetCalc.java``) süpersonik dalda TEK yüzeyin basınç
+    katsayısını kullanır (``K₁ = 2/β``), yani yukarıdakinin yarısını.
+    OpenRocket'ın KENDİ doğrulama bölümü (techdoc §6.4) bunun sonucunu
+    şöyle bildirir: *"simulated normal force coefficient derivative is
+    notably lower than the experimental values"* ve süpersonikte CP
+    kestirimi *"too pessimistic"*. Barrowman'ın kendi tezi ise ~%6
+    doğruluk veriyordu. İki yüzeyli (4/β) biçim hem Ackeret'in ders
+    kitabı sonucudur hem de altsonik dalla TUTARLIDIR: eq. (3.40)'ın 2-B
+    limiti 2π'dir (iki yüzeyli ince profil), dolayısıyla süpersonik
+    limitin de iki yüzeyli olması gerekir. Tek yüzeyli seçim k'yı tam
+    2 kat küçültür ve iki dalı kıyaslanamaz hâle getirir.
+
+    UÇ MACH KONİSİ KAYBI (ÖH D25 / OH-D24-03 — D24'te YAZILMAMIŞTI):
+    yukarıdaki ``4/β`` **iki boyutlu** (sonsuz açıklık) değerdir. Sonlu
+    açıklıkta kanadın uç hücum kenarından bir Mach konisi çıkar; bu koninin
+    süpürdüğü üçgen içinde yükleme 2-B değerin tam YARISIDIR (Evvard /
+    koni akış klasiği; Ackeret teorisinin uç sınır koşulu). Üçgenin alanı
+    ``½·c·(c/β)``, kanat alanı ``s·c`` olduğundan kayıp payı
+
+        Δ = ½·(½·c²/β)/(s·c) = c/(4βs) = 1/(4·β·AR_f)
+
+    (sembolik ispat ``docs/scofield/raw/OH/D25/termo-ucus/a1/turetim.py``
+    T1; ``AR_f = s²/A_fin`` dikdörtgen kanatta ``s/c``'dir). Böylece
+
+        k_üst(M) = 2·(1 + √(1+Q²))·(1 − 1/(4·β·AR_f)) / (π · AR_f · β),
+                   β·AR_f ≥ 1
+
+    Düzeltme 2-B limiti BOZMAZ: ``AR_f → ∞`` iken kayıp payı sıfıra gider
+    ve ifade yine ``2/(πβ)`` olur (T3). Çarpan her zaman ``[3/4, 1)``
+    aralığındadır (T7): etkinliği en çok %25 azaltır, ASLA artırmaz.
+
+    KAYNAK: lineerleştirilmiş süpersonik kanat teorisinin uç düzeltmesi —
+    Busemann/Ackeret şerit yöntemi + uç Mach konisi; Nielsen, *Missile
+    Aerodynamics* (1960) ve USAF DATCOM §4.1.3.2'nin dikdörtgen kanat
+    bağıntısı ``C_Nα = (4/β)[1 − 1/(2·β·A)]`` ile ÖZDEŞTİR: oradaki ``A``
+    iki uçlu tam kanadın en-boyudur; kök yansıma düzlemli kanatta
+    ``A = 2·AR_f`` olduğundan ``1/(2βA) = 1/(4β·AR_f)``.
+
+    ÖRTÜŞEN KONİ / NARİN KANAT KOLU (β·AR_f < 1): koni köke ulaşır, şerit
+    çözümü ve uç düzeltmesi birlikte geçersizleşir. Bu bölgede narin
+    (düşük en-boy) kanat teorisi geçerlidir — R. T. Jones (1946), NACA
+    TR-835: ``C_Nα → π·A/2``, **Mach'tan bağımsız**. Kök yansıma düzlemiyle
+    ``A = 2·AR_f`` olduğundan kanat alanı başına ``π·AR_f`` çıkar ve
+    sıkıştırılamaz Diederich değerine bölününce
+
+        k_narin = (1 + √(1+Q²)) / 2 = D₀/2      (Mach'tan bağımsız)
+
+    (T4). Bu sayı UYDURMA DEĞİL: altsonik Diederich dalının ``M → 1⁻``
+    limiti de tam olarak ``D₀/2``'dir (T5), yani narin kol sonik noktaya
+    SÜREKLİ bağlanır. D24 hâli bu kolu tanımıyordu ve düşük en-boylu
+    kanatlarda ``4/β``'yı sınırsız büyütüyordu: ölçüldü (AR_f = 0,25 aracı,
+    ``docs/scofield/raw/OH/D25/termo-ucus/a1/once.json``) M = 1,5'te
+    k = 4,63 — kanat etkinliği sıkıştırılamaz değerin 4,6 KATI, fiziksel
+    olarak olanaksız. Narin kol bunu 1,015'e oturtur.
+
+    DÜRÜSTÇE — kolların birleşme yerindeki BASAMAK: ``β·AR_f = 1``'de iki
+    kol tam ``3/π`` oranındadır, yani k %4,507 aşağı sıçrar (T6). Bu, iki
+    bağımsız lineer teorinin ortak geçerlilik sınırındaki bilinen
+    uyuşmazlığıdır. İki kol ``β·AR_f = (2+√(4−π))/π ≈ 0,9315``'te tam
+    kesişir (T10); eşik oraya ÇEKİLMEDİ — süreklilik uğruna geçerlilik
+    sınırını kaydırmak kalibrasyon olurdu. Basamak ilan ediliyor ve
+    ``tests/test_d25_termo_ucus_a1.py`` içinde tam ``1 − 3/π`` olarak
+    kilitleniyor.
+
+    DÜRÜSTÇE — referans gerçeklemeden AYRILMA: Niskanen §3.2.1 bu terimi
+    açıkça atar (*"ignoring a third-order term that corrects for fin-tip
+    Mach cone effects"*) ve narin kolu da yoktur. Ayrılma bilinçlidir:
+    ihmal, düşük en-boyda yukarıdaki 4,6 katlık olanaksız değeri üretir.
+
+    Transonik bant (``_FIN_M_SUB`` ≤ M ≤ ``_FIN_M_SUP``) her iki lineer
+    teorinin de geçersiz olduğu bölgedir; uçlar arasında DOĞRUSAL harman
+    uygulanır. Harmanın kendisi mühendislik enterpolasyonudur, belirli
+    bir yayına dayanmaz (uydurma kaynak yazılmadı); UÇLARDAKİ değerler
+    kaynaklıdır.
+
+    NOT: Burun terimine (C_Nα = 2) uygulanmaz. O değer narin-cisim
+    (slender body) teorisinden gelir ve birinci mertebede Mach'tan
+    bağımsızdır.
     """
     m = max(float(mach), 0.0)
-    if m <= 0.0:
-        return 1.0
-    if m < _FIN_M_SUB:
-        return 1.0 / np.sqrt(1.0 - m * m)
-    k_sub = 1.0 / np.sqrt(1.0 - _FIN_M_SUB ** 2)
-    k_sup = (4.0 / (2.0 * np.pi)) / np.sqrt(_FIN_M_SUP ** 2 - 1.0)
-    if m <= _FIN_M_SUP:
-        frac = (m - _FIN_M_SUB) / (_FIN_M_SUP - _FIN_M_SUB)
-        return k_sub + frac * (k_sup - k_sub)
-    return (4.0 / (2.0 * np.pi)) / np.sqrt(m * m - 1.0)
+    ar_f = float(fin_aspect)
+    cos_g = float(cos_gamma_c)
+    if not (ar_f > 0.0) or not (cos_g > 0.0):
+        raise ValueError(
+            'kanat sıkıştırılabilirlik çarpanı geometrisiz hesaplanamaz: '
+            f'fin_aspect={fin_aspect!r}, cos_gamma_c={cos_gamma_c!r} '
+            '(ikisi de > 0 olmalı)')
+    q = ar_f / cos_g                     # Q = s²/(A_fin cos Γ_c) [-]
+    d0 = 1.0 + np.sqrt(1.0 + q * q)      # sıkıştırılamaz payda (β = 1)
+
+    def _k_sub(mm):
+        beta2 = 1.0 - mm * mm            # β² = 1 − M²
+        return d0 / (1.0 + np.sqrt(1.0 + beta2 * q * q))
+
+    def _k_sup(mm):
+        beta = np.sqrt(mm * mm - 1.0)    # β = √(M²−1)
+        beta_ar = beta * ar_f
+        if beta_ar < _FIN_TIP_CONE_MIN_BETA_AR:
+            # Uç Mach konisi kanadın KÖKÜNE ulaşıyor (c/β > s): lineer
+            # şerit çözümü de uç düzeltmesi de geçersiz. Narin kanat
+            # (Jones, NACA TR-835) sınırı — Mach'tan BAĞIMSIZ ve altsonik
+            # dalın M→1⁻ limitiyle SÜREKLİ (turetim.py T4, T5).
+            return 0.5 * d0
+        # Uç Mach konisi kaybı: koni üçgeninde yükleme 2-B değerin yarısı
+        # → pay 1 − 1/(4·β·AR_f) (turetim.py T1/T2). AR_f → ∞'da 1 olur.
+        return 2.0 * d0 * (1.0 - 1.0 / (4.0 * beta_ar)) / (np.pi * ar_f * beta)
+
+    if m <= _FIN_M_SUB:
+        return float(_k_sub(m))
+    if m >= _FIN_M_SUP:
+        return float(_k_sup(m))
+    k_sub = _k_sub(_FIN_M_SUB)
+    k_sup = _k_sup(_FIN_M_SUP)
+    frac = (m - _FIN_M_SUB) / (_FIN_M_SUP - _FIN_M_SUB)
+    return float(k_sub + frac * (k_sup - k_sub))
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +499,8 @@ class BarrowmanAero:
 
         # --- Kanatlar (varsa) ---
         cn_fins, xcp_fins = 0.0, 0.0
+        self._fin_aspect = None          # kanat yoksa geometri de YOK
+        self._fin_cos_gamma = None
         if fin_count and fin_span > 0 and fin_root_chord > 0:
             n = int(fin_count)
             s = float(fin_span)
@@ -309,6 +511,17 @@ class BarrowmanAero:
             l_mid = np.sqrt(s ** 2 + (m + (ct - cr) / 2.0) ** 2)
             cn_fins = (4.0 * n * (s / self.d) ** 2) / \
                 (1.0 + np.sqrt(1.0 + (2.0 * l_mid / (cr + ct)) ** 2))
+            # ÖH D24 / OH-D23-17 — sıkıştırılabilirlik çarpanının GEOMETRİSİ.
+            # Yukarıdaki payda, Niskanen eq. (3.40)'ın β = 1 hâlidir; oradaki
+            # boyutsuz sayı Q = s²/(A_fin·cos Γ_c)'dir. Koddaki
+            # 2·l_orta/(c_r+c_t) ifadesiyle ÖZDEŞTİR (A_fin = s(c_r+c_t)/2,
+            # cos Γ_c = s/l_orta konunca; cebirsel kanıt
+            # docs/scofield/raw/OH/D24/termo-ucus/a1/turetim.py). Çarpanın
+            # sonlu-açıklık olması için bu iki büyüklük SAKLANIR — eskiden
+            # çarpan yalnız Mach'ı görüyor ve 2-B oran uyguluyordu.
+            a_fin = s * (cr + ct) / 2.0          # BİR kanadın alanı [m²]
+            self._fin_aspect = float(s * s / a_fin)      # AR_f = s²/A_fin [-]
+            self._fin_cos_gamma = float(s / l_mid)       # cos Γ_c [-]
             # Gövde girişim faktörü
             R_body = self.d / 2.0
             cn_fins *= 1.0 + R_body / (s + R_body)
@@ -335,7 +548,12 @@ class BarrowmanAero:
         değerleri olarak KALIR — statik marj konvansiyon gereği düşük hızda
         beyan edilir ve raporlanan sayı eskisiyle birebir aynıdır.
         """
-        k = _fin_compressibility_factor(mach)
+        if self.cn_alpha_fins <= 0.0:
+            # Kanat yok: düzeltilecek terim de yok. (Burun narin-cisim
+            # terimi Mach'tan bağımsızdır.)
+            return self.cn_alpha, self.x_cp
+        k = _fin_compressibility_factor(mach, self._fin_aspect,
+                                        self._fin_cos_gamma)
         cn_fins = self.cn_alpha_fins * k
         cn = self.cn_alpha_nose + cn_fins
         if cn <= 0.0:
@@ -527,7 +745,7 @@ class SixDOFTrajectory:
                  launch_elevation_deg=90.0, launch_azimuth_deg=0.0,
                  latitude_deg=None, coriolis=True, launch_altitude=0.0,
                  nozzle_exit_area=None, thrust_reference_pressure=None,
-                 rail_length=5.0, roll_damping=0.05, components=None):
+                 rail_length=None, roll_damping=0.05, components=None):
         """
         Args:
             aero: BarrowmanAero örneği
@@ -562,7 +780,9 @@ class SixDOFTrajectory:
                       basıncı [Pa]; None → saha rakımındaki USSA 1976 basıncı
                       (deniz seviyesi test standı varsayımı yerine sahanın
                       kendi basıncı).
-            rail_length: atış rayı boyu [m] — ray üstünde tutum kilitli
+            rail_length: atış rayı boyu [m] — ray üstünde tutum kilitli;
+                         None -> VERİLMEDİ, DEFAULT_RAIL_LENGTH_M kullanılır
+                         ve ``solve()`` ``rail_length_source='default'`` der
             roll_damping: pasif roll sönüm katsayısı
             components: opsiyonel bileşen listesi
                         [{'mass': kg, 'x': m (burundan), 'propellant': bool}];
@@ -580,7 +800,12 @@ class SixDOFTrajectory:
                         launch_elevation_deg=launch_elevation_deg,
                         launch_azimuth_deg=launch_azimuth_deg,
                         launch_altitude=launch_altitude or 0.0,
-                        rail_length=rail_length, roll_damping=roll_damping)
+                        roll_damping=roll_damping)
+        # ÖH D21 / OH-D19-24: ``rail_length=None`` artık "sonlu olmayan
+        # girdi" değil "VERİLMEDİ" demektir (``latitude_deg`` ile aynı
+        # sözleşme); verildiğinde sonluluk kapısı aynen işler.
+        if rail_length is not None:
+            _require_finite(rail_length=rail_length)
         if latitude_deg is not None:
             _require_finite(latitude_deg=latitude_deg)
         if nozzle_exit_area is not None:
@@ -597,31 +822,19 @@ class SixDOFTrajectory:
         self.m_prop = float(propellant_mass)
 
         if thrust_curve is not None:
-            t = np.asarray(thrust_curve['time'], dtype=float)
-            F = np.asarray(thrust_curve['thrust'], dtype=float)
-            if not (np.all(np.isfinite(t)) and np.all(np.isfinite(F))):
-                raise ValueError(
-                    "thrust_curve 'time'/'thrust' sonlu olmayan değer içeriyor")
-            # B3: net doğrulama — boş/tek-nokta/uyumsuz uzunluk çağıran
-            # katmanda anlaşılır ValueError (endpoint 400) olsun; aksi halde
-            # t[0] IndexError → 500 sızıyordu.
-            if t.ndim != 1 or F.ndim != 1:
-                raise ValueError(
-                    "thrust_curve 'time' ve 'thrust' 1B dizi olmalı")
-            if t.size != F.size:
-                raise ValueError(
-                    "thrust_curve 'time' ve 'thrust' aynı uzunlukta olmalı "
-                    f"(time={t.size}, thrust={F.size})")
-            if t.size < 2:
-                raise ValueError(
-                    "thrust_curve en az 2 nokta içermeli "
-                    "('time' boş ya da tek noktalı)")
-            if t[0] > 0.0:
-                t = np.insert(t, 0, 0.0)
-                F = np.insert(F, 0, F[0])
+            # ÖH D17 / OH-D16-11 — TEK KAYNAK. Bu blok B3'te burada yazılmış,
+            # D16'da düzlemsel çözücüye ``normalize_thrust_curve`` adıyla
+            # taşınmış ama BURADAN çağrılmamıştı: iki kopya kaldı ve
+            # ayrıştılar — buradaki kopya artan-olmayan zamanı, negatif itkiyi
+            # ve sıfır impulsü KABUL ediyordu (kardeşi reddediyor). Artık tek
+            # kural kümesi var. Atılan ``TrajectoryInputError`` bir
+            # ``ValueError`` türevidir, yani ``ValueError`` yakalayan eski
+            # çağıranların (bu ucun 400 dalı dâhil) davranışı değişmez;
+            # yakalamayanlar alan adı taşıyan makine-okur gerekçeyi görür.
+            t, F, impulse = normalize_thrust_curve(thrust_curve)
             self._t_thrust, self._F_thrust = t, F
             self.t_burn = float(t[-1])
-            self._impulse = float(np.trapz(F, t))
+            self._impulse = impulse
         else:
             # DİKKAT: ``not thrust`` NaN'ı yakalamaz (``not float('nan')`` =
             # False). Sonlu-değer kapısı bu yüzden AYRI çağrılır (B7).
@@ -653,8 +866,37 @@ class SixDOFTrajectory:
         # Verilen CG kullanılır (UI bileşen tablosu x_cg_full/x_cg_empty
         # gönderir); yoksa/0 ise kaba L kesri tahminine düşülür — 0 m (burun
         # ucu) fiziksel olarak anlamsız olduğundan eksik girdi sayılır.
-        self.x_cg_full = float(x_cg_full) if x_cg_full else 0.55 * L
-        self.x_cg_empty = float(x_cg_empty) if x_cg_empty else 0.50 * L
+        #
+        # ÖH defter P4B3-07 — UYDURULAN CG ARTIK BEYAN EDİLİYOR.
+        # Kararlılık hükmü (``stable``, ``static_margin_full/empty``)
+        # DOĞRUDAN bu sayıdan çıkar; kesir tahmini kullanıldığında tüketici
+        # hükmü ölçüm sanıyordu. ÖLÇÜLDÜ (27 Ağu 2026, d=10 cm / L=2 m):
+        # CG verilmeyen koşum ile aynı CG açıkça verilen koşum BİREBİR aynı
+        # çıktıyı üretiyordu (static_margin_full 5,199; uyarı listesi de
+        # aynı) — çıktıda "cg" geçen tek alan yoktu (24 anahtar / 0 eşleşme).
+        # Sayı DEĞİŞMEZ (fizik aynı); değişen tek şey KÜNYEDİR: kaynağı
+        # (``x_cg_source``), değeri (``x_cg_full/empty``) ve tahmin bayrağı
+        # (``x_cg_is_estimate``) ``solve()`` çıktısında yayımlanır.
+        #
+        # KANAL SEÇİMİ (bilinçli): kardeş desen eksik ENLEM için bir UYARI
+        # kodu üretiyor (``warn.sixdof.coriolis_disabled_no_latitude``), ama
+        # CG künyesi ALAN kanalından yayımlanıyor. İki sebep: (1) uç
+        # (/api/six-dof-analysis) ``warnings``i hiç döndürmüyor, sabit bir
+        # ``summary`` anahtar listesi seçiyor — yani uyarı kanalı bugün
+        # tüketiciye ULAŞMIYOR; (2) her backend ``warn.*`` kodunun iki dilde
+        # sözlük karşılığı olmak ZORUNDA (tests/test_i18n_common.py) ve
+        # sözlük dosyası bu onarımın sahası dışında. Uç künyeyi taşımaya
+        # başladığında uyarı kodu da eklenebilir (ÖH devir kalemi).
+        _cg_full_verildi = bool(x_cg_full)
+        _cg_empty_verildi = bool(x_cg_empty)
+        self.x_cg_full = (float(x_cg_full) if x_cg_full
+                          else CG_ASSUMED_FULL_FRACTION * L)
+        self.x_cg_empty = (float(x_cg_empty) if x_cg_empty
+                           else CG_ASSUMED_EMPTY_FRACTION * L)
+        self.x_cg_source = (
+            'supplied' if (_cg_full_verildi and _cg_empty_verildi)
+            else 'assumed_length_fraction')
+        self.x_cg_is_estimate = (self.x_cg_source != 'supplied')
         self.cd0 = float(cd0)
         # Rüzgârın GELDİĞİ yönden esen yatay rüzgâr vektörü (hava hareketi).
         # DİKKAT (F167): ``self.wind`` GERİYE DÖNÜK olarak (N,E,U) sırasındadır —
@@ -667,7 +909,19 @@ class SixDOFTrajectory:
         self._wind_i = self.wind[list(_OUTPUT_ROW_ORDER)]   # (N,E,U) → (E,N,U)
         self.q0 = _quat_from_elevation_azimuth(launch_elevation_deg,
                                                launch_azimuth_deg)
-        self.rail_length = float(rail_length)
+        # ÖH D21 / OH-D19-24 — RAY BOYUNUN KAYNAĞI KÜNYELİ.
+        # ``rail_length`` ray üstünde tutumu kilitler (:on_rail) ve
+        # dolayısıyla erken uçuşun tamamını etkiler; verilmediğinde
+        # kullanılan 5,0 m bir ÖLÇÜ değil depo varsayılanıdır ve
+        # ``solve()`` çıktısında ``rail_length_m`` diye HİÇ AYRIM
+        # YAPILMADAN yayımlanıyordu (ölçüldü: once.json K4 — üç vakanın
+        # üçünde de ``rail_length_source`` yok).
+        if rail_length is None:
+            self.rail_length = float(DEFAULT_RAIL_LENGTH_M)
+            self.rail_length_source = 'default'
+        else:
+            self.rail_length = float(rail_length)
+            self.rail_length_source = 'supplied'
         self.roll_damping = float(roll_damping)
 
         self.warnings = []
@@ -677,6 +931,11 @@ class SixDOFTrajectory:
         # yer-üstü (AGL) yüksekliğin değil. Durum vektöründeki r[2] sahaya
         # göre ölçülür, atmosfere girerken launch_altitude eklenir.
         self.launch_altitude = float(launch_altitude or 0.0)
+        # Sahanın kendi jeosentrik yarıçapı. Serbest-hava (ters kare) düzeltmesi
+        # bu yarıçaptan ölçülür, çünkü ``self.g_surface`` ZATEN saha rakımındaki
+        # değerdir (launch_site.local_gravity(lat, launch_altitude)); düzeltmeyi
+        # deniz seviyesinden başlatmak rakımı İKİ KEZ saymak olurdu.
+        self._r_site = R_EARTH + self.launch_altitude
 
         # Coriolis (dönen teğet düzlem). latitude_deg = atış sahası enlemi.
         # F060: enlem VERİLMEDİYSE Coriolis kapatılır. Eski varsayılan 0.0
@@ -896,13 +1155,48 @@ class SixDOFTrajectory:
         C_bi = _quat_to_dcm(q)          # gövde→atalet
         x_body_i = C_bi[:, 0]           # gövde ekseninin atalet ifadesi
 
-        h = max(r[2], 0.0)
-        rho, a_snd = _atmosphere(h)
-        g = G0 * (R_EARTH / (R_EARTH + h)) ** 2
+        # ÖH defter P4B3-01 — ATMOSFER MUTLAK İRTİFANIN FONKSİYONUDUR.
+        # ``r[2]`` durum vektöründe SAHAYA GÖRE (AGL) ölçülür; USSA 1976
+        # profili ise deniz seviyesinden (MSL) tanımlıdır. Eski kod AGL
+        # yüksekliği doğrudan tabloya veriyordu, yani her sahayı deniz
+        # seviyesinde varsayıyordu — F023 "düzeltildi" beyanına rağmen.
+        # ÖLÇÜLDÜ (27 Ağu 2026, HEAD 9ddbb22): 0 m ⟷ 3000 m fırlatma sahası
+        # arasında apoje farkı 0,000e+00 (bit-eş). ``launch_altitude = 0``
+        # kolunda davranış BİT-AYNIDIR (0.0 eklemek kayan noktada birim işlem).
+        h_agl = max(r[2], 0.0)
+        h_msl = self.launch_altitude + h_agl
+        rho, a_snd = _atmosphere(h_msl)
+        # ÖH defter P4B3-11 — TABAN g ARTIK YEREL g.
+        # ``self.g_surface`` (WGS84 Somigliana + serbest hava, :708-713)
+        # hesaplanıyor ama dosyanın hiçbir yerinde OKUNMUYORDU; dinamik
+        # enlemden bağımsız G0 kullanıyordu. ÖLÇÜLDÜ (Coriolis kapalı):
+        # ekvator 9,780325 ⟷ kutup 9,832185 m/s² (%0,530) olmasına rağmen
+        # apoje bit-eşti. Ters-kare düzeltmesi sahanın yarıçapından ölçülür
+        # (bkz. ``self._r_site``). Enlem verilmemişse g_surface == G0 ve
+        # launch_altitude == 0 iken ifade eskisiyle BİT-AYNIDIR.
+        g = self.g_surface * (self._r_site / (self._r_site + h_agl)) ** 2
 
         # --- kuvvetler ---
         F_i = np.array([0.0, 0.0, -m * g])
-        F_i += self._thrust_at(t) * x_body_i
+        # ÖH D15 / P4B3-10 — İRTİFA TELAFİLİ İTKİNİN TELİ ÇEKİLDİ.
+        # ``_thrust_at_altitude`` (F081, :807-819) YAZILMIŞ ama dosyanın
+        # HİÇBİR YERİNDEN ÇAĞRILMIYORDU; dinamik hep referans itkiyi
+        # kullanıyordu. ÖLÇÜLDÜ (31 Ağustos 2026, taban e88d096; örnek araç:
+        # kuru 20 kg + 10 kg propelan, 3000 N / 6 s, 88° yükseliş):
+        #   nozzle_exit_area = None -> apoje 9417,472838766114 m
+        #   nozzle_exit_area = 0,05 -> apoje 9417,472838766114 m (BİT-EŞ),
+        #     ama kurucu ``warn.sixdof.thrust_not_altitude_compensated``
+        #     uyarısını ARTIK VERMİYORDU: kullanıcı doğru veriyi sağladığı
+        #     için dürüstlük beyanı susuyor, telafi ise uygulanmıyordu.
+        #     ``_thrust_at_altitude(0, 0)`` = 8066,25 N iken çözücünün fiilen
+        #     kullandığı ``_thrust_at(0)`` = 3000,00 N idi. Örnek hibrit
+        #     lülesinde (A_e = 41,907 cm²) vakum itkisi 3424,62 N (+%14,2).
+        # Bayrağın KENDİSİ yalan söylüyordu (P2 'cidar user_supplied'
+        # kaleminin aynısı). Ortam basıncı istasyonun MUTLAK (MSL) irtifasından
+        # okunur — ``h_msl`` yukarıda P4B3-01 için zaten çözülmüştür.
+        # A_e verilmemişse ``_thrust_at_altitude`` referans itkiyi AYNEN
+        # döndürür (:816-817), yani o kolda davranış BİT-AYNIDIR.
+        F_i += self._thrust_at_altitude(t, _pressure_at(h_msl)) * x_body_i
 
         # Hava-bağıl hız (atalet). ``self._wind_i`` KULLANILIR, ``self.wind``
         # DEĞİL: v entegrasyon çerçevesinde (E,N,U), ``self.wind`` ise dış
@@ -922,20 +1216,49 @@ class SixDOFTrajectory:
             # Eksenel kuvvet (harekete karşı)
             F_ax_b = -qbar * S * ca * np.sign(u_b[0]) * np.array([1.0, 0, 0])
 
+            # ÖH D24 / OH-D23-17 + P4B3-23 (a) — BAĞLANDI (kalıcı).
+            #
+            # D23'te ``at_mach`` buraya bağlanmış, ÖLÇÜLMÜŞ ve GERİ
+            # ALINMIŞTI: bağlandığında standart bir sondaj roketi
+            # M ≈ 2,91'de TAKLA atıyordu. Kök sebep kalemin sandığı yerde
+            # (ölü kodun çağrılmamasında) değil, ``_fin_compressibility_
+            # factor``ün süpersonik dalındaydı: 2-B ince profil oranı
+            # k = (4/2π)/√(M²−1), zaten düşük en-boy düzeltmesi taşıyan
+            # Barrowman kanat terimiyle çarpılınca en-boy kaybını İKİ KEZ
+            # sayıyordu. D24'te çarpan SONLU AÇIKLIKLI biçimiyle
+            # değiştirildi (Niskanen eq. (3.40) / Ackeret 4/β; türetim ve
+            # kaynaklar o fonksiyonun docstring'inde) ve bağ KALICI oldu.
+            #
+            # ÖLÇÜLDÜ (aynı araç ve aynı bağ; yalnız çarpan değişiyor —
+            # docs/scofield/raw/OH/D24/termo-ucus/a1/ab.json):
+            #   ESKİ 2-B çarpanla : end_reason='tumble_detected',
+            #                       |ω| = 15,0 rad/s, t = 7,99 s,
+            #                       max M = 2,91, apoje YAYIMLANMIYOR
+            #   YENİ çarpanla     : end_reason='apogee', apoje yayımlanıyor
+            # İkinci araçta (s=0,15 m) M=2,5'te statik marj: ESKİ 0,04
+            # kalibre (M=2,9'da −0,69 → kararsız), YENİ 4,21 kalibre
+            # (M=2,9'da 3,74) — süpersonikte kararlı, gerçeğe uygun.
+            #
+            # Artık dinamik, KUVVETİ ve MOMENT KOLUNU o anki Mach'ta
+            # çözülmüş (C_Nα, x_cp) çiftinden alır. Künyede yayımlanan
+            # ``cn_alpha`` / ``x_cp`` / ``static_margin_*`` M→0 Barrowman
+            # değerleri OLARAK KALIR (konvansiyon; ``solve`` docstring'i).
+            cn_alpha_m, x_cp_m = self.aero.at_mach(mach)
+
             # Normal kuvvet: enine akış bileşenine karşı, CP'de
             u_t = np.array([0.0, u_b[1], u_b[2]])
             u_t_mag = np.linalg.norm(u_t)
             F_n_b = np.zeros(3)
             if u_t_mag > 1e-6:
                 alpha = np.arctan2(u_t_mag, abs(u_b[0]))
-                F_n_mag = qbar * S * self.aero.cn_alpha * alpha
+                F_n_mag = qbar * S * cn_alpha_m * alpha
                 F_n_b = -F_n_mag * (u_t / u_t_mag)
 
             F_aero_b = F_ax_b + F_n_b
             F_i += C_bi @ F_aero_b
 
             # --- momentler (CP−CG kolu; gövde ekseninde) ---
-            arm = self.aero.x_cp - x_cg          # +x burun yönünde ölçülür
+            arm = x_cp_m - x_cg                  # +x burun yönünde ölçülür
             r_cp_b = np.array([-arm, 0.0, 0.0])  # CP, CG'nin arkasında ise −x
             M_b = np.cross(r_cp_b, F_n_b)
             # Pitch/yaw sönümü (F061 düzeltmesi, v2.6.2):
@@ -954,12 +1277,47 @@ class SixDOFTrajectory:
             # Kaynak: standart pitch-damping türevi (Barrowman tabanlı model
             # roket stabilite formülasyonu; Mandell, Caporaso & Bengen,
             # "Topics in Advanced Model Rocketry", sönüm momenti katsayısı).
-            c_mq = -2.0 * self.aero.cn_alpha * (arm / self.aero.d) ** 2
+            # C_Nα burada da Mach'a bağlı olandır (P4B3-23): sönüm katsayısı
+            # normal-kuvvet eğiminden TÜRETİLİR, iki yerde iki farklı C_Nα
+            # kullanmak aynı akışa iki farklı aerodinamik atfetmek olurdu.
+            c_mq = -2.0 * cn_alpha_m * (arm / self.aero.d) ** 2
             d = self.aero.d
             M_b[1] += qbar * S * d * c_mq * (w_b[1] * d / (2.0 * u_mag))
             M_b[2] += qbar * S * d * c_mq * (w_b[2] * d / (2.0 * u_mag))
             M_b[0] += -qbar * S * d * self.roll_damping * \
                 (w_b[0] * d / (2.0 * u_mag))
+
+        # --- JET SÖNÜMÜ (ÖH D23 / P4B3-23 (b), F062) ----------------------
+        # ``_mdot_at`` D21'de yazıldı ve ÜRÜN YOLUNDA HİÇ ÇAĞRILMADI
+        # (ölçüldü, taban ef527ae: çağrı sayısı 0). Yanma boyunca aracın
+        # açısal sönümünün bir kısmı aerodinamik DEĞİLDİR: lüleden atılan
+        # kütle, CG etrafında dönen araçta enine momentum taşır ve onu
+        # gövdeden GÖTÜRÜR.
+        #
+        # Türetme (birinci mertebe, standart "jet damping" terimi): ω enine
+        # açısal hızıyla dönen araçta lüle çıkış istasyonu x_e'deki maddenin
+        # CG'ye göre enine hızı v_t = ω·(x_e − x_cg). Bu maddeyi ṁ debisiyle
+        # atmak, gövdeden ṁ·v_t·(x_e − x_cg) hızıyla açısal momentum çeker:
+        #   M_jet = −ṁ·(x_e − x_cg)²·ω
+        # İşaret ω'ya terstir → HER ZAMAN sönümdür ve aerodinamik sönümün
+        # aksine dinamik basınca DEĞİL, debiye bağlıdır: yani q̄'nın küçük
+        # olduğu ilk saniyelerde ve yüksek irtifada baskın sönüm terimidir.
+        # Yanma bitince ṁ = 0 → terim kendiliğinden yok olur.
+        #
+        # Kaynak: Cornelisse, Schöyer & Wakker, "Rocket Propulsion and
+        # Spaceflight Dynamics" (1979), jet damping momenti; aynı birinci
+        # mertebe ifade NASA sounding-roket dinamik modellerinde standarttır.
+        #
+        # x_e = araç TOPLAM boyu (burundan lüle çıkışına). Roll ekseni için
+        # karşılığı ṁ·r_e²·ω_x'tir; r_e ≪ (x_e − x_cg) olduğundan (burada
+        # r_e bilinmiyor, uydurulmaz) roll terimi YAZILMAZ — eksik olduğu
+        # bilinerek bırakılır, sayı icat edilmez.
+        mdot = self._mdot_at(t)
+        if mdot > 0.0:
+            _arm_jet = self.aero.L - x_cg
+            _k_jet = mdot * _arm_jet ** 2
+            M_b[1] -= _k_jet * w_b[1]
+            M_b[2] -= _k_jet * w_b[2]
 
         # Ray fazı: tutum ve açısal hız kilitli (yalnız eksen boyu ivme)
         dist = np.linalg.norm(r - self._r0)
@@ -1061,24 +1419,30 @@ class SixDOFTrajectory:
         # yayımlanır ama türetilmiş skaler HİÇBİRİ (bkz. aşağıdaki
         # ``converged`` bloğu) geçerli sonuç gibi verilmez.
         i_apogee = int(np.argmax(alt)) if alt.size else 0
-        alpha_hist, mach_hist = [], []
+        mach_hist = []
         for k in range(len(t)):
-            qk = q[:, k] / np.linalg.norm(q[:, k])
-            C = _quat_to_dcm(qk)
             u_i = v[:, k] - self._wind_i     # ikisi de (E,N,U); bkz. _derivatives
             um = np.linalg.norm(u_i)
-            _, a_snd = _atmosphere(max(alt[k], 0.0))
+            # P4B3-01: Mach da MUTLAK irtifanın ses hızıyla ölçülür —
+            # _derivatives ile AYNI atmosfer, aksi hâlde aynı koşuda iki
+            # farklı atmosfer olurdu.
+            _, a_snd = _atmosphere(self.launch_altitude + max(alt[k], 0.0))
             mach_hist.append(um / a_snd)
-            if um > 0.5:
-                u_b = C.T @ u_i
-                alpha_hist.append(np.degrees(np.arctan2(
-                    np.hypot(u_b[1], u_b[2]), abs(u_b[0]))))
-            else:
-                alpha_hist.append(0.0)
 
         sm_full = self.aero.static_margin(self.x_cg_full)
         sm_empty = self.aero.static_margin(self.x_cg_empty)
-        alpha_arr = np.array(alpha_hist)
+        # ÖH D23 / P4B3-23 (c) — α SERİSİ ARTIK TEK YERDE TANIMLI.
+        # ``_alpha_deg_series`` D21'de (F163) yazıldı ve ürün yolunda HİÇ
+        # çağrılmadı (ölçüldü, taban ef527ae: çağrı sayısı 0); yukarıdaki
+        # döngü aynı tanımın İKİNCİ, skaler kopyasıydı. İki kopya zamanla
+        # ayrışabilir (aynı soruya iki cevap); doktrin-4 gereği tek kaynak
+        # bırakıldı. Sayısal sonuç BİT-AYNIDIR: vektörleştirilmiş sürüm
+        # aynı quaternion normalizasyonunu, aynı Cᵀ·u dönüşümünü, aynı
+        # 0,5 m/s hız eşiğini ve aynı atan2(‖(u_y,u_z)‖, |u_x|) ifadesini
+        # kullanır (ölçüm: ``once.json``/``sonra.json`` alpha_deg_ilk5,
+        # alpha_deg_son5 alanları).
+        alpha_arr = (_alpha_deg_series(q, v, self._wind_i) if t.size
+                     else np.array([]))
         # Yanma sonrası apoje öncesi maksimum α — kararlılık göstergesi.
         # α YALNIZ araç aerodinamik otoriteye sahipken (yeterli hız → dinamik
         # basınç q=½ρv²) anlamlıdır. Apoje yakınında hız→0 olunca herhangi bir
@@ -1127,10 +1491,25 @@ class SixDOFTrajectory:
             'quaternion': q,
             'angular_velocity': w,            # gövde ekseni (çerçeveden bağımsız)
             'altitude': alt,
+            # ÖH D22 / OH-D18-10 — SERİNİN datumu adıyla. Aşağıdaki
+            # ``apogee_datum`` yalnız APOJE sayısını adlandırıyordu; ``alt``
+            # dizisinin kendisi adsızdı ve tüketici (küre çizimi) datumu
+            # VARSAYMAK zorundaydı. Aynı değer, aynı tek kaynak: ``alt``
+            # SAHA ÜSTÜ (AGL) irtifadır (bkz. :973-981 ``h_msl`` türetimi).
+            'altitude_datum': 'above_launch_site',
             'speed': speed,
             'mach': np.array(mach_hist),
             'alpha_deg': alpha_arr,
             'apogee': float(alt[i_apogee]) if alt.size else None,
+            # ÖH D18 / termo-ucus a1 (P4B3-21) — DATUM ADIYLA. ``alt`` bu
+            # çözücüde SAHA ÜSTÜ (AGL) irtifadır; kardeş düzlemsel çözücü
+            # ``max_altitude``ı DENİZ SEVİYESİNDEN yayımlıyor. İki sayı aynı
+            # başlıkla ("Apoje") gösterildiğinde 1500 m'lik bir sahada
+            # 1500 m'lik sahte bir fark doğuyordu. Sayı DEĞİŞMEDİ.
+            'apogee_datum': 'above_launch_site',
+            'launch_site_elevation_m': float(self.launch_altitude),
+            'apogee_msl_m': (float(self.launch_altitude + alt[i_apogee])
+                             if alt.size else None),
             'apogee_time': float(t[i_apogee]) if t.size else None,
             'max_speed': float(speed.max()) if speed.size else None,
             'max_mach': float(np.max(mach_hist)) if mach_hist else None,
@@ -1146,6 +1525,16 @@ class SixDOFTrajectory:
             # geçerlidir ve None'a çevrilmez.
             'static_margin_full': float(sm_full),
             'static_margin_empty': float(sm_empty),
+            # ÖH P4B3-07 — HÜKMÜN DAYANDIĞI CG, HÜKÜMLE BİRLİKTE YAYIMLANIR.
+            # Statik marj gibi bunlar da saf geometridir (entegrasyondan
+            # gelmez), bu yüzden çözücü çökse de geçerlidir ve None'a
+            # çevrilmez. ``x_cg_source`` iki değer alır: 'supplied' (çağıran
+            # verdi) | 'assumed_length_fraction' (0,55·L / 0,50·L kesir
+            # tahmini; ``x_cg_is_estimate`` de True olur).
+            'x_cg_full': float(self.x_cg_full),
+            'x_cg_empty': float(self.x_cg_empty),
+            'x_cg_source': self.x_cg_source,
+            'x_cg_is_estimate': bool(self.x_cg_is_estimate),
             'stable': bool(sm_full > 1.0 and sm_empty > 1.0 and
                            max_alpha < 15.0),
             'cn_alpha': float(self.aero.cn_alpha),
@@ -1153,6 +1542,18 @@ class SixDOFTrajectory:
             # B5: çözücü hükmü sonucun bir parçasıdır, çağıran okuyabilsin.
             'converged': converged,
             'solver_message': solver_message,
+            # ÖH D17 / P4B3-13 — ARAÇ PEDDEN AYRILDI MI?
+            # Modülde bu kavram HİÇ yoktu; kardeş düzlemsel çözücü aynı
+            # soruyu ``flight_status.lifted_off`` ile yanıtlıyor. Eşik
+            # oradan İTHAL EDİLİR (LIFTOFF_ALTITUDE_EPS_M), ikinci sayı
+            # tanımlanmaz.
+            'lifted_off': bool(alt.size and
+                               float(np.max(alt)) > LIFTOFF_ALTITUDE_EPS_M),
+            'rail_length_m': float(self.rail_length),
+            # ÖH D21 / OH-D19-24: 'supplied' -> çağıran verdi;
+            # 'default' -> DEFAULT_RAIL_LENGTH_M kullanıldı (bir ölçü
+            # değil, depo varsayılanı).
+            'rail_length_source': self.rail_length_source,
         }
         if not converged:
             # Entegrasyon çökmüş: apoje, tepe hız/Mach, maksimum α ve
@@ -1163,6 +1564,42 @@ class SixDOFTrajectory:
             for _key in ('apogee', 'apogee_time', 'max_speed', 'max_mach',
                          'max_alpha_deg', 'stable', 'lateral_drift_at_end'):
                 out[_key] = None
+        elif end_reason == 'tumble_detected':
+            # ÖH D15 / P4B3-02 — TAKLA DA SONUÇ DEĞİLDİR (B6 deliğinin
+            # kapatılmamış ikinci ağzı).
+            #
+            # ``tumble_event`` |omega| eşiğinde entegrasyonu KESER; kesme
+            # anındaki irtifa ``apogee`` diye yayımlanıyordu. ÖLÇÜLDÜ
+            # (kararsız araç, |w| > 15 rad/s):
+            #   apogee = 449,21 m  @ dikey hız +131,59 m/s (HÂLÂ TIRMANIYOR)
+            #   apogee = 396,53 m  @ +119,06 m/s
+            #   apogee = 105,37 m  @ +105,85 m/s
+            #   apogee = 365,14 m  @ +136,93 m/s
+            # Dördünde de ``peak_values_are_lower_bounds`` bayrağı YOKTU ve
+            # max_speed / max_mach "tepe" diye çıkıyordu. Bu sayıya en çok
+            # muhtaç kullanıcı (kararsız tasarım) tam bu dala düşüyor.
+            #
+            # Zirveye VARILMADIĞI için apoje ve apoje anı yayımlanmaz;
+            # ``stable`` de yayımlanmaz (hüküm ``max_alpha < 15°`` içerir ve
+            # takla tam o koşulun çöktüğü olaydır — zaten False çıkardı ama
+            # ÖLÇÜLMÜŞ bir hüküm değil, kesilmiş bir pencerenin hükmüdür).
+            # Tepe hız/Mach kesme anına kadarki GERÇEK ölçümlerdir; üst
+            # sınır değil ALT SINIR olarak damgalanır — time_limit dalıyla
+            # birebir aynı sözleşme.
+            for _key in ('apogee', 'apogee_time', 'stable'):
+                out[_key] = None
+            out['peak_values_are_lower_bounds'] = True
+            # Beyan bir UYARI KODU değil, veri alanı olarak taşınır: yeni
+            # bir i18n anahtarı bu kulvarın sahası dışındadır ve çevrilmemiş
+            # bir kod ekranda ham anahtar olarak görünürdü.
+            out['apogee_withheld_because'] = (
+                'TUMBLE: the integration was cut when the body rate exceeded '
+                'the tumble threshold, while the vehicle was still climbing '
+                '(measured: +105 to +137 m/s vertical speed at the cut). The '
+                'altitude at that instant is NOT an apogee, so apogee, time '
+                'to apogee and the stability verdict are not reported. Peak '
+                'speed, Mach and angle of attack are lower bounds measured '
+                'before the cut.')
         elif end_reason == 'time_limit':
             # B6 (Faz 5) — ZAMAN SINIRI SONUÇ DEĞİLDİR.
             #
@@ -1188,5 +1625,63 @@ class SixDOFTrajectory:
             solve_warnings.append(_mk_warning(
                 'warn.sixdof.integration_time_limit', 'error',
                 t_max_s=float(t_max)))
+
+        # --- KALKMAYAN ARAÇ SONUÇ DEĞİLDİR (ÖH D17 / P4B3-13) -----------
+        # ÖLÇÜLDÜ (once.json K5): T/W = 0,3399 (100 N itki, 30 kg araç) ->
+        # ``apogee = 0,0``, ``stable = True``, ``end_reason = 'ground'``,
+        # HTTP 200, kalkışa dair tek kelime yok. Araç rampadan HİÇ
+        # ayrılmadı; "apoje 0 m" bir uçuş sonucu değil, hiç olmayan bir
+        # uçuşun ölçüsüdür ve ``stable`` hükmü (saf geometrik statik marj)
+        # o hiç olmayan uçuş hakkında bir iddiaya dönüşüyor.
+        #
+        # Fail-closed: apoje, apoje anı ve kararlılık hükmü YAYIMLANMAZ.
+        # Statik marj / CP / C_Nα SAF GEOMETRİDİR ve kalkıştan bağımsız
+        # geçerlidir, bu yüzden korunur (aynı ayrım tumble/time_limit
+        # dallarında da yapılıyor). Beyan bir UYARI KODU değil VERİ ALANI
+        # olarak taşınır: yeni bir i18n anahtarı bu kulvarın sahası
+        # dışındadır (D15 / P4B3-02 ile aynı gerekçe).
+        if converged and not out['lifted_off']:
+            for _key in ('apogee', 'apogee_time', 'stable'):
+                out[_key] = None
+            # ÖH D21 / OH-D19-24 — GEREKÇE ARTIK ÖLÇÜLEN T/W'YE BAKIYOR.
+            # Eski metin KOŞULSUZ olarak "T/W is {twr} — below 1 the
+            # vehicle cannot rise" diyordu. T/W ≥ 1 olduğu hâlde araç
+            # kalkış eşiğini geçmeyen her vakada (çok kısa yanma, ağır
+            # sürükleme, T/W = 1 tam dengesi) kullanıcıya YANLIŞ bir
+            # gerekçe veriliyordu: sayı doğru, cümle yalan. Metnin
+            # kendisi ürün yüzüne çıkan bir hükümdür ve yalnız gerçeği
+            # söylemek zorundadır.
+            _twr = self._liftoff_thrust_to_weight()
+            _ortak = (
+                'NO LIFTOFF: the vehicle never left the pad (peak altitude '
+                'stayed within {eps:g} m of the ground plane). There is '
+                'therefore no apogee, no time to apogee and no in-flight '
+                'stability verdict to report. The static margin, centre of '
+                'pressure and normal-force slope below are pure geometry '
+                'and stay valid.').format(eps=LIFTOFF_ALTITUDE_EPS_M)
+            if _twr < 1.0:
+                _neden = (
+                    ' Thrust-to-weight at ignition is {twr:.4g}: below 1 the '
+                    'vehicle cannot rise.').format(twr=_twr)
+            else:
+                _neden = (
+                    ' Thrust-to-weight at ignition is {twr:.4g}, i.e. NOT '
+                    'below 1, so the thrust level is not the cause. Check '
+                    'the burn time, the launch rail length ({rail:g} m) and '
+                    'the drag model.').format(
+                        twr=_twr, rail=self.rail_length)
+            out['apogee_withheld_because'] = _ortak + _neden
+            out['thrust_to_weight_at_ignition'] = _twr
         out['warnings'] = solve_warnings
         return out
+
+    def _liftoff_thrust_to_weight(self) -> float:
+        """Ateşleme anındaki T/W — ÖLÇÜLEN itkiden, uydurma yok.
+
+        İtki eğrinin (ya da dikdörtgen profilin) t = 0 değeridir; ağırlık
+        dolu kütle × sahadaki yerçekimidir (çözücünün kendi
+        ``self.g_surface`` alanı; ikinci bir yerçekimi sabiti yazılmaz).
+        """
+        f0 = float(self._F_thrust[0]) if self._F_thrust.size else 0.0
+        w = (self.m_dry + self.m_prop) * float(self.g_surface)
+        return f0 / w if w > 0.0 else float('nan')

@@ -64,9 +64,21 @@ def _mach_alan_bagintisindan(area_ratio, gamma, supersonic):
 
 def test_yakinsama_beyani(lule_cozumu):
     _, res = lule_cozumu
-    assert res['converged'] is True, (
-        f"Çözüm yakınsamadı: {res['convergence_basis']} — kalıntı geçmişi "
-        f"son değeri {res['residual_history'][-1]:.3e}")
+    # --- ÇEVRİLDİ (ÖH D32 / OH-D31-15) -------------------------------
+    # İzantropik 120×24 vakası AÇIK yolda koşuyor, sınırlayıcı donuyor ve yayımlanan
+    # kalıntı BAYAT operatörünündür; şemanın kendi (canlı minmod)
+    # kalıntısı tolun 2,903e+07 katıdır (ÖLÇÜLDÜ: docs/scofield/raw/OH/D32/
+    # fea-cfd/a2/once.json K1). Çözücü artık o hükmü VERMİYOR
+    # (converged=None, convergence_status='not_evaluated'; Berke kararı
+    # 15 Eyl 2026 §3 seç. A). Eski ``is True`` iddiası KAZANILMAMIŞ
+    # hükmün yerinde durmasını şart koşuyordu — kusuru koruyan bekçi,
+    # yönü çevrildi. Korunan yasak aynen duruyor: ıraksamış ya da
+    # ÖLÇÜLMÜŞ olarak yakınsamamış alandan iddia kurulmaz.
+    assert res['converged'] is not False, (
+        f"Çözüm ÖLÇÜLMÜŞ olarak yakınsamadı: {res['convergence_basis']} — "
+        f"kalıntı geçmişi son değeri {res['residual_history'][-1]:.3e}")
+    assert res['convergence_status'] in ('converged', 'not_evaluated'), (
+        f"vaka kurulumu bozulmuş: {res['convergence_status']!r}")
     assert len(res['residual_history']) == res['iterations']
 
 

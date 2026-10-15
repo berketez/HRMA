@@ -25,10 +25,19 @@ import sys
 from collections import defaultdict
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "tools"))
 
-VARSAYILAN_RAPOR = os.path.expanduser(
-    "~/HRMA-kurtarma/takim-raporlari/sabit-bulgular.json"
+from kampanya_defteri import (  # noqa: E402
+    DefterHatasi,
+    VARSAYILAN_DEFTER,
+    defteri_yukle,
+    kapsam_beyani,
 )
+
+#: Defterin yolu TEK kaynaktan gelir (``tools/kampanya_defteri.py``).
+#: Eskiden burada depo DIŞI bir yol vardı ve o dosya kaybolmuştu; araç
+#: "Rapor bulunamadı" deyip çıkış kodu 1 veriyordu (P10B4-10).
+VARSAYILAN_RAPOR = VARSAYILAN_DEFTER
 VARSAYILAN_CIKTI = os.path.join(REPO, "docs", "dev", "kusur_partileri.json")
 
 # Bu dosyalar merkezî düğüm: pek çok kalem onlara dokunur. Paralel yazılmaz,
@@ -134,8 +143,8 @@ class BirlesimBul:
 
 
 def partileri_uret(rapor_yolu: str, parti_tavani: int = 60) -> dict:
-    with open(rapor_yolu, encoding="utf-8") as f:
-        gruplar = json.load(f)
+    # FAIL-CLOSED: defter yoksa/bozuksa DefterHatasi yükselir (P10B4-10/-12).
+    gruplar, kunye = defteri_yukle(rapor_yolu)
 
     indeks = depo_dosyalarini_indeksle()
 
@@ -232,6 +241,8 @@ def partileri_uret(rapor_yolu: str, parti_tavani: int = 60) -> dict:
 
     return {
         "kaynak": rapor_yolu,
+        "defter_kunyesi": kunye,
+        "defter_kapsam_beyani": kapsam_beyani(kunye),
         "toplam_kusur": len(kusurlar),
         "parti_sayisi": len(partiler),
         "partiler": partiler,
@@ -268,12 +279,17 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    if not os.path.exists(args.rapor):
-        print(f"Rapor bulunamadı: {args.rapor}", file=sys.stderr)
-        return 1
-
-    sonuc = partileri_uret(args.rapor, parti_tavani=args.tavan)
+    try:
+        sonuc = partileri_uret(args.rapor, parti_tavani=args.tavan)
+    except DefterHatasi as hata:
+        print(str(hata), file=sys.stderr)
+        print("ÖLÇEMEDİM — defter okunamadı, parti üretilmiyor.",
+              file=sys.stderr)
+        return 3
     hatalar = cakisma_denetimi(sonuc)
+    if sonuc.get("defter_kapsam_beyani"):
+        print(f"DEFTER KAPSAMI: {sonuc['defter_kapsam_beyani']}",
+              file=sys.stderr)
 
     os.makedirs(os.path.dirname(args.cikti), exist_ok=True)
     with open(args.cikti, "w", encoding="utf-8") as f:

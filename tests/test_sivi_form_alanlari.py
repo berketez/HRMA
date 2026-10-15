@@ -81,6 +81,13 @@ BILINCLI_ISTISNALAR = {
     # birbiriyle çelişebilirdi; bu kanal dairesel olmayan kanallar için
     # API/proje yüklemesine açık tutulur ama sayfada kapısı bilinçli yok.
     'feed_line_area_m2',
+    # ÖH D36 / LU-1: motor öğretici kip bayrağını ``overrides`` üzerinden
+    # okur (yalnız bu bayrakla BURN_TIME_DEFAULT_S uygulanır ve uç bunu
+    # ``defaults_applied`` ile beyan eder). Bayrak bir TASARIM girdisi değil,
+    # istek kipidir: uç onu ``_form_bool_kapisi`` ile adlı 4xx'le okur ve
+    # gerçek bool olarak geçirir. Sıvı sayfasında öğretici kip anahtarı
+    # bilinçli olarak yok; kanal API/öğretici akışı için açık tutulur.
+    'use_tutorial_defaults',
 }
 
 
@@ -460,7 +467,115 @@ CIPLAK_ISP = {'Isp', 'Isp (s)', 'Specific Impulse', 'Specific impulse',
               'Specific Impulse (Isp)'}
 CIPLAK_AKI = {'Heat Flux', 'Heat flux', 'HEAT FLUX'}
 
-UC_SAYFA = ('advanced.html', 'solid.html', 'liquid.html')
+# ---------------------------------------------------------------------------
+# Kapsam — ÖH FAZ B-4 / FAZ D kuyruğu (elle liste → türetilmiş)
+# ---------------------------------------------------------------------------
+# ``UC_SAYFA`` 2026-08-27'ye kadar ELLE yazılmış üç şablondu ve tarama tam da
+# "aynı yanıtın birden çok Isp'si çıplak etiketle basılıyor" sürüklemesini
+# durdurmak için var. Elle liste bu işi YALNIZ üç sayfada yapıyordu; motor
+# çözümü İSTEYEN öteki şablonlar (``simple.html``, ``uzaytek.html``) listeye
+# hiç girmemişti — P14'ün oksitleyici yoğunluğu bulgusunda (1220 sabiti
+# advanced.html'de onarıldı, iki kardeşte kalmıştı) ölçülen kör noktanın
+# birebir aynısı.
+#
+# Ölçüt tek cümle: **bir motor çözümü İSTEYEN şablon** taranır — kendi
+# gövdesinde ya da yüklediği üst düzey betiklerden birinde ``/calculate``,
+# ``/calculate_solid`` veya ``/calculate_liquid`` çağrısı geçiyorsa sayfa
+# motor SONUCU basıyor demektir. Ölçüt mekaniktir, elle muafiyet yoktur.
+#
+# ÖLÇÜM (2026-08-27, bu depo): 8 şablonun 5'i ölçüte uyuyor —
+#   advanced.html (dolaylı: app.js → '/calculate'), liquid.html
+#   ('/calculate_liquid'), solid.html ('/calculate_solid'),
+#   simple.html ve uzaytek.html (ikisi de doğrudan '/calculate').
+# Kapsam dışı 3 sayfa (formulas / index / launch_site) hiçbir motor ucunu
+# çağırmıyor: formulas.html'in "Specific impulse" başlıkları bir TANIM
+# listesidir, sonuç etiketi değil — ölçüt bu ayrımı kendiliğinden yapıyor.
+#
+# ÖH D36 sökümü (Berke 23 Eyl, dalga36/sokum): simple.html ve uzaytek.html
+# silindi; kapsam türetildiği için kendiliğinden daraldı — bugün 6 şablonun
+# 3'ü (advanced / liquid / solid), tarihsel taban aynen korunuyor.
+
+#: Motor çözümü isteyen uç adları (tek kaynak; tarama ölçütünün kendisi).
+MOTOR_HESAP_UCLARI = ('/calculate', '/calculate_solid', '/calculate_liquid')
+_MOTOR_UC_RE = re.compile(
+    r"""['"](?:%s)['"]""" % '|'.join(re.escape(u) for u in MOTOR_HESAP_UCLARI))
+_SCRIPT_SRC_RE = re.compile(
+    r"""<script[^>]+src=["'](/static/[^"']+\.js)["']""", re.I)
+
+
+def _motor_sonucu_basiyor(path):
+    """Şablon bir motor çözümü İSTİYOR mu (kendi gövdesi ya da betikleri)?"""
+    metin = mask_comments(read(path))
+    if _MOTOR_UC_RE.search(metin):
+        return True
+    for src in set(_SCRIPT_SRC_RE.findall(metin)):
+        betik = REPO_ROOT / 'hrma' / 'static' / src[len('/static/'):]
+        if betik.exists() and _MOTOR_UC_RE.search(read(betik)):
+            return True
+    return False
+
+
+def _motor_sonuc_sayfalari(sablon_dizini=None):
+    """Motor sonucu basan şablonların adları (türetilmiş)."""
+    d = TEMPLATES if sablon_dizini is None else sablon_dizini
+    return tuple(sorted(p.name for p in d.glob('*.html')
+                        if _motor_sonucu_basiyor(p)))
+
+
+#: Elle liste döneminin kapsamı — TABAN (türetme daralırsa kırmızı).
+TARIHSEL_UC_SAYFA = ('advanced.html', 'solid.html', 'liquid.html')
+
+#: Taramanın kapsamı — TÜRETİLMİŞ (ad tarihsel sebeple UC_SAYFA kaldı;
+#: ÖH D36 sökümünden beri 3 üye, yeni motor sayfası kendiliğinden girer).
+UC_SAYFA = _motor_sonuc_sayfalari()
+
+#: Kapsam genişlemesinin AÇTIĞI çıplak-etiket borcu — sayfa başına,
+#: ÖLÇÜLMÜŞ (2026-08-27). Borç yalnız burada sayılan sayfalarla sınırlıdır:
+#: başka bir sayfada çıplak etiket doğarsa normal bekçi KIRMIZI verir, borç
+#: imi onu yutmaz. Ödeme ÜRÜN işidir (`hrma/templates/` — bu paketin yazma
+#: yetkisi dışında).
+#: ÖH Z1 (2026-08-27): simple.html:307 borcu ÖDENDİ (etiket
+#: 'Isp (design point, at design-altitude ambient)' oldu) — sözlük boş.
+CIPLAK_ISP_BORCU = {}
+CIPLAK_AKI_BORCU = {}
+
+
+def _sayfa_parametreleri(borc):
+    """UC_SAYFA'yı, borçlu sayfaları xfail(strict) imleyerek parametreler."""
+    return [
+        pytest.param(s, marks=pytest.mark.xfail(strict=True, reason=(
+            'ÖH Faz B-4 kapsam genişlemesi — ürün kusuru (%s): %s. Faz B '
+            'ürün onarımı YAPMAZ; bekçi borç imiyle yazılır, onarım '
+            'dalgası bu imi kaldırır.' % (s, borc[s]))))
+        if s in borc else s
+        for s in UC_SAYFA
+    ]
+
+
+def test_kapsam_turetilmis_ve_daralmamis():
+    """Tarama kapsamı kaynaktan türetilir ve elle liste dönemini KAPSAR.
+
+    ÖH Faz B-4 (FAZ D kuyruğu). Daralma (ölçüt çürümesi, uç adı değişimi)
+    kırmızı verir; genişleme serbesttir — yeni sayfa kendiliğinden taranır.
+    Ölçüldü (2026-08-27): 8 şablonun 5'i kapsamda.
+    """
+    turetilmis = _motor_sonuc_sayfalari()
+    assert set(TARIHSEL_UC_SAYFA) <= set(turetilmis), (
+        'türetilmiş kapsam elle liste döneminden DAR: kaybolan %s '
+        '(türetilen: %s) — ölçüt (%s) çürümüş olabilir'
+        % (sorted(set(TARIHSEL_UC_SAYFA) - set(turetilmis)),
+           list(turetilmis), list(MOTOR_HESAP_UCLARI)))
+    assert turetilmis == UC_SAYFA, (
+        'modül yüklenirken türetilen kapsam ile şimdi türetilen farklı')
+    tum = sorted(p.name for p in TEMPLATES.glob('*.html'))
+    assert set(turetilmis) < set(tum), (
+        'her şablon kapsama giriyor — ölçüt ayırt etmiyor, bekçi '
+        'vakumlanmış olabilir (şablonlar: %s)' % tum)
+    # Borç listesi çürümesin: borçlu sayfa kapsamdan çıkarsa satır silinmeli.
+    for borc in (CIPLAK_ISP_BORCU, CIPLAK_AKI_BORCU):
+        olu = set(borc) - set(turetilmis)
+        assert not olu, (
+            'borç listesinde kapsam dışı sayfa var: %s' % sorted(olu))
 
 
 def _ciplak_etiketler(text, yasakli):
@@ -483,7 +598,7 @@ def _ciplak_etiketler(text, yasakli):
     return bulgular
 
 
-@pytest.mark.parametrize('sayfa', UC_SAYFA)
+@pytest.mark.parametrize('sayfa', _sayfa_parametreleri(CIPLAK_ISP_BORCU))
 def test_ciplak_isp_etiketi_kalmadi(sayfa):
     """Bulgu defteri kapanışı: 'Isp' hangi Isp olduğunu söylemeden basılmaz."""
     text = mask_comments(read(TEMPLATES / sayfa))
@@ -494,7 +609,7 @@ def test_ciplak_isp_etiketi_kalmadi(sayfa):
         '\n  %s' % (sayfa, '\n  '.join(bulgu)))
 
 
-@pytest.mark.parametrize('sayfa', UC_SAYFA)
+@pytest.mark.parametrize('sayfa', _sayfa_parametreleri(CIPLAK_AKI_BORCU))
 def test_ciplak_isi_akisi_etiketi_kalmadi(sayfa):
     """İki ayrı boğaz akısı (referans cidar / denge cidarı) tek adı paylaşamaz."""
     text = mask_comments(read(TEMPLATES / sayfa))

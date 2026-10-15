@@ -85,9 +85,9 @@
    "source": "Tablo 1"
   }
  },
- "anomaly": {
-  "flag": true,
-  "note": "Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil anomali katmanına girer. Ön/art yanma odası konfigürasyonu diğer testlerden farklı (Tablo 3); yazarlar doğrudan karşılaştırılamayacağını belirtiyor."
+ "model_scope": {
+  "in_scope": false,
+  "note": "Swirl (1 eksenel + 4 teğetsel) enjeksiyon: HRMA v1 EKSENEL hibrit modelinin kapsamı dışında — kaynağın kendi fitleri bile ayrışıyor (eksenel r=0.40*Gox^0.37, swirl r=0.14*Gox^1.40). Kayıt ana istatistiğe değil model-kapsamı (out_of_scope) katmanına girer. Ön/art yanma odası konfigürasyonu diğer testlerden farklı (Tablo 3); yazarlar doğrudan karşılaştırılamayacağını belirtiyor."
  },
  "tags": [
   "lab_scale",

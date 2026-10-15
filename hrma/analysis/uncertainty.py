@@ -82,6 +82,30 @@ HISTOGRAM_BINS = 20
 # Duyarlilik gurultu tabani icin coklu-kiyas alfasi (Sidak duzeltmesi).
 SENSITIVITY_ALPHA = 0.05
 
+# Duyarlilik yontemi kimligi (API + panel bu adi YANKILAR, uydurmaz).
+SENSITIVITY_METHOD = 'spearman_rank_correlation'
+
+# Siralamanin savunulabilir oldugu en dusuk ornek sayisi ve en yuksek
+# gurultu tabani. IKISI DE OLCUMDEN TURETILDI, secilmedi:
+#
+#   sensitivity_noise_floor(n, d) fonksiyonu (asagida) sifir-etki altindaki
+#   |rho| beklentisini verir. Bu taban 0.5'i gectiginde |rho| araliginin
+#   YARIDAN FAZLASI sifirdan ayirt edilemez hale gelir; boyle bir listede
+#   "hangi girdi amaci oynatiyor" sorusunun cevabi siralamadan OKUNAMAZ.
+#   Taban < 0.5 icin gereken en kucuk n olculdu (bu modulun kendi
+#   fonksiyonuyla, 2026-08-18):
+#       d=1 -> n>=17   d=3 -> n>=24   d=5 -> n>=28   d=8  -> n>=31
+#       d=2 -> n>=22   d=4 -> n>=26   d=6 -> n>=29   d=10 -> n>=33
+#   Varsayilan modeller d=3 (sivi), d=4 (kati), d=6 (hibrit) kullaniyor;
+#   30 bu ucunu de payla kapsayan en kucuk yuvarlak esiktir. d buyudukce
+#   30 yetmez, o yuzden taban kapisi (MAX_NOISE_FLOOR) AYRICA sinanir —
+#   ikisi ayni ilkenin n-tarafi ve d-tarafidir.
+#
+# Kapi kapaninca blok 'not_modelled' beyaniyla DUSER: sayi uydurulmaz,
+# sifir yazilmaz, siralama gosterilmez (bkz. _sensitivity_block).
+SENSITIVITY_MIN_SAMPLES = 30
+SENSITIVITY_MAX_NOISE_FLOOR = 0.5
+
 _SENSITIVITY_METHOD_NOTE = (
     'Spearman rank correlation on the MC sample; captures monotonic '
     'effects only (non-monotonic interactions are not resolved). '
@@ -93,6 +117,23 @@ _SENSITIVITY_METHOD_NOTE = (
 
 
 # --- Girdi dagilim modeli ---------------------------------------------------
+
+#: Mod başına band ALT SINIRI ve sınırın DIŞLAYICI olup olmadığı
+#: (ÖH D18 / P5B2-19). Tek kaynak: kapı da, kapının gerekçesi de burada
+#: durur. Sayılar kalibrasyon değil İŞARET sınırıdır.
+_BAND_LOWER_LIMIT = {
+    # Çarpan bir büyüklüğü ÖLÇEKLER: 0 onu siler, negatif işaretini çevirir.
+    # Bu yüzden sınır DIŞLAYICIdır.
+    'multiplier': (0.0, True),
+    # 'absolute' niceliğin KENDİSİDİR (verim, boşaltma katsayısı); negatif
+    # olamaz. SIFIR dışlanmaz: dejenere bir uç değerdir, işaret hatası
+    # değildir — ölçümde [0,0, 1,0] bandı tabanla AYNI sayıları veriyordu
+    # (c* 1504,987 / 46,817), yani ÖLÇÜLEN zarar yalnız NEGATİF içerikten
+    # geliyor. Kapı ölçülen zarara göre kurulur, ondan geniş değil.
+    'absolute': (0.0, False),
+    # 'offset' TOPLAMSAL bir farktır (ör. regression_n_delta) ve negatif
+    # olabilir; listede YOKTUR.
+}
 
 @dataclass(frozen=True)
 class UncertainInput:
@@ -145,6 +186,50 @@ class UncertainInput:
         if not (self.low < self.high):
             raise ValueError(f"{self.name}: low < high olmali "
                              f"({self.low} >= {self.high})")
+        # --- ÖH D18 / P5B2-19: FİZİKSEL İŞARET KAPISI -------------------
+        # Bandın GEÇERLİLİĞİ şimdiye kadar yalnız "low < high" ile
+        # ölçülüyordu; işaret hiç denetlenmiyordu. Oysa mod bu bilgiyi
+        # ZATEN taşıyor: 'multiplier' bir büyüklüğü ÖLÇEKLER (çarpan <= 0
+        # büyüklüğü sıfırlar ya da işaretini çevirir), 'absolute' ise
+        # kesinlikle pozitif bir fiziksel niceliğe (c* verimi, boşaltma
+        # katsayısı) DEĞER atar. Yalnız 'offset' toplamsal bir farktır ve
+        # negatif olabilir.
+        #
+        # ÖLÇÜLDÜ (taban 9071a64, ``once_uq.json``; hybrid/fast/seed 1234,
+        # taban c* ortalama 1504,988, std 46,816):
+        #
+        #   =============================  =====  =====================
+        #   override                       HTTP   c* ortalama / std
+        #   =============================  =====  =====================
+        #   yok (taban)                    200    1504,988 / 46,816
+        #   eta_c_star band [-0,5, 0,5]    200    **806,454 / 3,278**
+        #   eta_c_star band [0,0, 1,0]     200    1504,987 / 46,817
+        #   regression_lambda [0,0, 1,4]   200    1504,988 / 46,816
+        #   eta_c_star band [-2, -1]       **500**  ham "tüm örnekler
+        #                                         başarısız"
+        #   chamber_pressure [-1,5, -0,5]  **500**  aynı ham hata
+        #   =============================  =====  =====================
+        #
+        # Yani fiziksel olmayan bir band ya SESSİZCE yutulup DAR bir güven
+        # aralığı üretiyor (806,454 ± 3,278 — tabanın %54'ü kadar bir c*,
+        # üstelik 14 kat daha "kesin" görünerek) ya da ham 500 veriyordu;
+        # hiçbir yolda kullanıcıya HANGİ alanın fiziksel olmadığı
+        # söylenmiyordu.
+        _kapi = _BAND_LOWER_LIMIT.get(self.mode)
+        if _kapi is not None and not (self.low > _kapi[0] if _kapi[1]
+                                      else self.low >= _kapi[0]):
+            _kural = 'strictly positive' if _kapi[1] else 'non-negative'
+            raise ValueError(
+                f"{self.name}: the lower bound of a '{self.mode}' band must "
+                f"be {_kural} (low = {self.low} was given). A "
+                "'multiplier' scales a physical magnitude, so a factor at or "
+                "below zero nullifies or flips it; an 'absolute' band assigns "
+                "the physical quantity itself, which cannot be negative. A "
+                "band that reaches below the limit pushes part of the samples "
+                "into a non-physical region: the run then either swallows "
+                "them and reports a narrow, falsely confident band, or fails "
+                "outright. Use mode='offset' for an additive perturbation "
+                "that may be negative.")
         if self.dist == 'truncnorm' and not (self.sigma > 0):
             raise ValueError(
                 f"{self.name}: truncnorm icin sigma > 0 olmali. Parametreyi "
@@ -267,28 +352,48 @@ DEFAULT_UQ_MODELS = {
             name='burn_rate_a', dist='truncnorm', mode='multiplier',
             mean=1.0, sigma=0.03, low=0.88, high=1.12,
             applies_to='burn_rate_a (existing solid MC pattern)',
+            # KU-K2 (6 Eki 2026, sayı değişmedi): eski künye "+/-1-3%:
+            # NASA SP-8064" idi. SP-8064'te "%1-3" ifadesi YOK; monograf
+            # yalnız yanma hızı için şartname SINIRI verir (CV < 0,02 s. 69;
+            # formülasyon sapması <= +/-%2 s. 70; ölçüm std. sapması <= %2
+            # s. 73). Buradaki sigma 0,03 bu sınırın ÜSTÜNDEDİR.
             source_note=(
-                'Lot-to-lot burn-rate repeatability +/-1-3%: NASA SP-8064, '
-                '"Solid Propellant Selection and Characterization", 1971.')),
+                'Assumed early-production lot-to-lot scatter (1 sigma 3%). '
+                'NASA SP-8064, "Solid Propellant Selection and '
+                'Characterization", 1971, pp. 69-73, sets a specification '
+                'LIMIT of 2% standard deviation for the burning rate; this '
+                'band is deliberately wider than that limit. Mature '
+                'production: NASA SP-8039 Table III, p. 53 (CV 2.0%).')),
         'burn_rate_n_delta': UncertainInput(
             name='burn_rate_n_delta', dist='truncnorm', mode='offset',
             mean=0.0, sigma=0.005, low=-0.015, high=0.015,
             applies_to=('burn_rate_n (additive; adapter must clip the final '
                         'exponent to [0.1, 0.99] as the existing solid MC '
                         'does)'),
+            # KU-K2: SP-8064'te n toleransı için SAYI yok; s. 71-72 yalnız
+            # dolaylı ölçüt verir (parti farkı basınç/yanma hızı std.
+            # sapmasını %2'nin üstüne çıkarmamalı).
             source_note=(
                 'Production tolerance of the pressure exponent (not the '
-                'correlation fit): NASA SP-8064, 1971.')),
+                'correlation fit); 0.005 is an assumed value. NASA SP-8064 '
+                '(1971) pp. 71-72 gives no exponent tolerance, only the '
+                'indirect limit that batch-to-batch exponent changes must '
+                'not raise the pressure or burning-rate standard deviation '
+                'above 2%.')),
         'density': UncertainInput(
             name='density', dist='truncnorm', mode='multiplier',
             mean=1.0, sigma=0.01, low=0.96, high=1.04,
             applies_to='propellant density override',
-            source_note='Casting quality-control band (NASA SP-8064, 1971).'),
+            # KU-K2: SP-8064'te yoğunluk toleransı için sayı bulunamadı.
+            source_note=('Casting quality-control band, assumed value; no '
+                         'density tolerance found in NASA SP-8064 (1971).')),
         'c_star': UncertainInput(
             name='c_star', dist='truncnorm', mode='multiplier',
             mean=1.0, sigma=0.01, low=0.96, high=1.04,
             applies_to='char_velocity override',
-            source_note='Composition tolerance (NASA SP-8064, 1971).'),
+            # KU-K2: SP-8064'te c* toleransı için sayı bulunamadı.
+            source_note=('Composition tolerance, assumed value; no c* '
+                         'tolerance found in NASA SP-8064 (1971).')),
     },
     'liquid': {
         # nominal_override=1.0 — hibritteki ile ayni gerekce (F029). Sivi
@@ -545,6 +650,84 @@ def spearman_sensitivity(X, y, names, noise_floor=None):
     return out
 
 
+def _sensitivity_basis(n_used, n_requested, n_failed, names, sampler, seed,
+                       noise_floor):
+    """Duyarliligin NEYE dayandigini soyleyen beyan metni (Ingilizce).
+
+    Tek cumlede uc soruyu kapatir: (1) hangi ornekten hesaplandi, (2) kac
+    ornek gercekten kullanildi, (3) hangi buyuklugun altinda sayi
+    okunamaz. Panel bu metni AYNEN gosterir — kendi cumlesini kurmaz.
+    """
+    dropped = ('' if not n_failed
+               else f' ({n_failed} failed sample(s) excluded)')
+    return (
+        f'Computed from the SAME Monte Carlo sample as the statistics above; '
+        f'no extra model runs were made. Basis: {n_used} of {n_requested} '
+        f'samples{dropped}, {sampler} sampler, seed {seed}, '
+        f'{len(names)} uncertain input(s). |rho| below the noise floor '
+        f'{noise_floor:.3f} is indistinguishable from zero and is reported '
+        f'with significant=false.')
+
+
+def _sensitivity_block(X_ok, collected, output_keys, names, n_used,
+                       n_requested, n_failed, sampler, seed):
+    """run_uncertainty'nin 'sensitivity' blogunu kurar.
+
+    Donen sozluk (v2.6.27 E5'te yapisallastirildi):
+        status      : 'modelled' | 'not_modelled'
+        method      : SENSITIVITY_METHOD
+        basis       : beyan metni (ornek sayisi + hangi ornekten)
+        per_output  : {cikti: [satir, ...]}   <-- TEK dogru okuma yeri
+        n_used / n_requested / min_samples / noise_floor / method_note
+        <cikti>     : per_output[cikti] ile AYNI liste (geriye donuk okuma)
+
+    NEDEN per_output (2026-08-18 olcumu): blok bugune dek cikti-basina
+    LISTELERI ve skaler meta alanlarini ('method_note', 'noise_floor') AYNI
+    duzeyde tasiyordu; tuketiciler hangisinin cikti oldugunu TIP BAKARAK
+    ayirmak zorundaydi (app.py'de bu tip ayrimi bir kez TypeError ile
+    kirildi, oradaki yorum kayitli). Ayrica 'noise_floor' adli bir cikti
+    anahtari meta alanin UZERINE yazardi. per_output bu belirsizligi
+    kaldirir; eski duz anahtarlar KIRILMAMASI icin ayni liste nesnesine
+    isaret ederek korunur (kopya degil, ayni referans).
+
+    Kapi: n_used < SENSITIVITY_MIN_SAMPLES veya taban >= MAX_NOISE_FLOOR
+    ise siralama URETILMEZ (status='not_modelled' + sayili gerekce).
+    """
+    noise_floor = sensitivity_noise_floor(n_used, len(names))
+    block = {
+        'method': SENSITIVITY_METHOD,
+        'method_note': _SENSITIVITY_METHOD_NOTE,
+        'noise_floor': noise_floor,
+        'n_used': int(n_used),
+        'n_requested': int(n_requested),
+        'min_samples': SENSITIVITY_MIN_SAMPLES,
+    }
+    if n_used < SENSITIVITY_MIN_SAMPLES or noise_floor >= SENSITIVITY_MAX_NOISE_FLOOR:
+        block['status'] = 'not_modelled'
+        block['per_output'] = {}
+        block['reason'] = (
+            f'Sensitivity ranking not reported: {n_used} usable sample(s) '
+            f'with {len(names)} inputs gives a noise floor of '
+            f'{noise_floor:.3f}, so the ranking would not be distinguishable '
+            f'from sampling noise (requires n >= {SENSITIVITY_MIN_SAMPLES} '
+            f'and noise floor < {SENSITIVITY_MAX_NOISE_FLOOR:g}). No values '
+            'are invented for this block.')
+        block['basis'] = block['reason']
+        return block
+
+    per_output = {}
+    for key in output_keys:
+        rows = spearman_sensitivity(X_ok, np.asarray(collected[key]), names,
+                                    noise_floor=noise_floor)
+        per_output[key] = rows
+        block[key] = rows          # geriye donuk duz okuma (ayni referans)
+    block['status'] = 'modelled'
+    block['per_output'] = per_output
+    block['basis'] = _sensitivity_basis(n_used, n_requested, n_failed, names,
+                                        sampler, seed, noise_floor)
+    return block
+
+
 # --- Calistirici -------------------------------------------------------------
 
 def _extract_outputs(result, output_keys):
@@ -613,6 +796,47 @@ def _consistency_note(distributions):
                  'deterministic path, so their distribution mean appears '
                  f'directly in this shift: {detail}. See pinned_nominals.')
     return note
+
+
+def _conditionality_block(distributions, names, sampler, n_used):
+    """P5/P95 bandinin NEYE kosullu oldugunu ADIYLA yazan blok.
+
+    OH-D30-12 (ÖH D31; hukum-19 Astra capraz denetimi). OLCULDU
+    (``docs/scofield/raw/OH/D31/app-api-uc/a1/once.json`` K5, taban
+    ``9d70e9ed``): ``run_uncertainty`` sonucu ``p5``/``p25``/``p50``/``p75``/
+    ``p95`` yuzdeliklerini yayimliyor ama sonucun HICBIR yerinde bu bandin
+    (a) hangi girdi dagilimlarina kosullu oldugu, (b) MODEL HATASINI
+    kapsamadigi yazili degildi; kaynak taramasinda ``conditionality``,
+    ``model_form``, ``conditional_on``, ``model_error`` ve
+    ``interpretation`` adlarinin hicbiri gecmiyordu (5/5 yok).
+
+    Kullanici icin fark suydu: "%90 guven araligi" diye okunan band, yalniz
+    LISTELENEN girdilerin varsayilan dagilimlari altindaki YAYILIMDIR.
+    Korelasyon sifir varsayilir, listelenmeyen her girdi nominalde
+    DONDURULMUSTUR, ve modelin kendi formulasyon hatasi (ampirik korelasyon
+    belirsizligi, ihmal edilen fizik) banda HIC girmez. Bu blok yeni bir
+    sayi URETMEZ; yalnizca zaten kosulan orneklemenin kapsamini adlandirir.
+    """
+    return {
+        'applies_to': 'outputs.*.p5/p25/p50/p75/p95 and std/cv_percent',
+        'conditional_on_inputs': list(names),
+        'input_count': len(names),
+        'frozen_at_nominal': (
+            'every model input not listed in conditional_on_inputs'),
+        'sampler': sampler,
+        'n_effective': n_used,
+        'input_correlation_assumed': 'independent (zero rank correlation)',
+        'model_form_uncertainty_included': False,
+        'interpretation': (
+            'These percentiles describe the spread produced by the listed '
+            'input distributions alone. They are NOT a confidence interval '
+            'on the true motor performance: model-form error (empirical '
+            'correlation uncertainty, omitted physics) is not sampled and '
+            'is not included, inputs are sampled as independent, and every '
+            'input not listed is held at its nominal value. Widening or '
+            'narrowing this band by changing input distributions does not '
+            'change how well the model matches hardware.'),
+    }
 
 
 def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
@@ -757,18 +981,17 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
 
     # 4) Istatistik + duyarlilik
     X_ok = X[kept_rows, :]
-    noise_floor = sensitivity_noise_floor(n_ok, len(names))
     outputs_stats = {}
-    sensitivity = {}
     mean_shift = {}
     for key in output_keys:
         block = _stats_block(collected[key], nominal_outputs[key])
         outputs_stats[key] = block
         mean_shift[key] = block.get('mean_shift_percent', 0.0)
-        sensitivity[key] = spearman_sensitivity(
-            X_ok, np.asarray(collected[key]), names, noise_floor=noise_floor)
-    sensitivity['method_note'] = _SENSITIVITY_METHOD_NOTE
-    sensitivity['noise_floor'] = noise_floor
+    # Duyarlilik AYNI ornekten hesaplanir (ek model kosusu YOK); yetersiz
+    # ornekte blok 'not_modelled' beyaniyla duser (bkz. _sensitivity_block).
+    sensitivity = _sensitivity_block(
+        X_ok, collected, output_keys, names, n_ok, n, len(failed), sampler,
+        int(seed))
 
     wall_s = time.perf_counter() - t0
     result = {
@@ -787,6 +1010,10 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
         'nominal': nominal_outputs,
         'outputs': outputs_stats,
         'sensitivity': sensitivity,
+        # OH-D30-12: bandin KAPSAMI sonucun yaninda durur (panel + PDF ayni
+        # yerden okur); yuzdelikler bu blok olmadan yayimlanmaz.
+        'conditionality': _conditionality_block(
+            distributions, names, sampler, n_ok),
         'consistency': {
             'nominal_check': 'passed',
             'mean_shift_percent': mean_shift,

@@ -42,12 +42,17 @@ import tempfile
 import threading
 from typing import Any, Dict, Optional, Tuple
 
+from hrma.constants import PSIA_PER_BAR
+
 # --------------------------------------------------------------------------
 # Birim sabitleri — TEK doğruluk kaynağı (NIST SP 811)
 # --------------------------------------------------------------------------
 FT_PER_S_TO_M_PER_S = 0.3048              # 1 ft = 0.3048 m (tam tanım)
 DEG_R_TO_K = 5.0 / 9.0                    # Rankine -> Kelvin (tam tanım)
-BAR_TO_PSIA = 14.5037738                  # 1 bar -> psia (NIST)
+#: P15B2-10: ELLE YAZILI 14,5037738 kopyası kaldırıldı (türetilmiş değerden
+#: 1,9e-9 bağıl sapıyordu). Başlığın "TEK doğruluk kaynağı" iddiası artık
+#: gerçek: sayı ``hrma.constants``ta kesin tanımlardan türetilir.
+BAR_TO_PSIA = PSIA_PER_BAR                # 1 bar -> psia (kesin tanımlardan)
 CAL_TO_J = 4.184                          # termokimyasal kalori (tam tanım)
 CAL_PER_G_K_TO_J_PER_KG_K = CAL_TO_J * 1000.0   # cal/(g·K) -> J/(kg·K)
 STD_SEA_LEVEL_BAR = 1.01325               # standart deniz seviyesi basıncı (ISA)
@@ -92,7 +97,23 @@ _EPS_ANCHOR_TOL = 0.5   # bu farkın altındaki ε istekleri çapayla aynı say�
 # asıl işini (aynı çalışma noktasının tekrarı) korur.
 _PC_SIG_DIGITS = 6   # oda basıncı: 6 anlamlı basamak (bağıl ~1e-6)
 _MR_ROUND = 2        # O/F iki ondalık
-_EPS_ROUND = 1       # alan oranı bir ondalık
+# ÖH D16 (kalem B3-07) — ALAN ORANI DA ARTIK BAĞIL ÇÖZÜNÜRLÜKTE.
+# Eski `_EPS_ROUND = 1` MUTLAK 0,1 adımıydı; yanı başındaki oda basıncı
+# ölçütü (_PC_SIG_DIGITS, Faz 5 / H2-3 düzeltmesi) BAĞIL olduğu hâlde aynı
+# ölçüt ε'ya uygulanmamıştı. ÖLÇÜLDÜ (1 Eylül 2026, taban 6fde52b):
+#   bağıl adım ε=1,6'da %6,250 · ε=2'de %5,000 · ε=4'te %2,500 ·
+#   ε=16'da %0,625   (Pc'de düzeltilen bağıl adım ~1e-6, yani 1e-4 %)
+#   ε 1,6499 -> 1,6501 (girdide %0,0121 fark) AYRI hücrelere düşüyor ve
+#   RP-1/LOX Pc=100 bar MR=2,56'da isp_vac 259,139444 -> 262,404722 s
+#   (+3,265278 s, +%1,2600) basamağı doğuyordu; 1,6000-1,6499 arası bit-aynı
+#   düzlüktü.
+# Ayrıca liquid_rocket_engine._solve_design_expansion sabit-nokta toleransı
+# 1e-3·ε'dur — 0,1 mutlak adım o toleransın 25-62 KATI ÜSTÜNDE kalıyor,
+# yani iterasyon basamağın altına inemiyordu ("yakınsadı" anlamsızdı).
+# Yeni ölçüt Pc ile AYNI: 6 anlamlı basamak (bağıl ~1e-6), yani kayan nokta
+# gürültüsü hâlâ tek hücreye toplanır ama fiziksel olarak ayrı çalışma
+# noktaları ayrı kalır.
+_EPS_SIG_DIGITS = 6  # alan oranı: 6 anlamlı basamak (bağıl ~1e-6)
 _AMB_ROUND = 3       # ortam basıncı (bar) üç ondalık
 
 
@@ -165,11 +186,17 @@ def ensure_isolated_cea_data_dir() -> Optional[str]:
     ``CEA_Obj`` kurulmadan ÖNCE yapılmalıdır.
     """
     global _CEA_DATA_DIR
-    if _CEA_DATA_DIR is not None:
+    # V3 KK 2. tur (SO1 D-2): önbelleklenen dizin, modülün ETKİN global'iyle
+    # karşılaştırılır. Sapma (başka bir çağıranın set_rocketcea_data_dir'ı)
+    # görülürse dizin kilit altında YENİDEN sabitlenir; sabitlenemezse None
+    # (fail-closed: yalıtım iddia edilmez).
+    if _CEA_DATA_DIR is not None and not _cea_data_dir_drifted():
         return _CEA_DATA_DIR
     with _CEA_STATE_LOCK:
         if _CEA_DATA_DIR is not None:
-            return _CEA_DATA_DIR
+            if not _cea_data_dir_drifted():
+                return _CEA_DATA_DIR
+            return _repin_cea_data_dir()
         try:
             import rocketcea
             import rocketcea.cea_obj as _cea_module
@@ -220,6 +247,62 @@ def ensure_isolated_cea_data_dir() -> Optional[str]:
         _CEA_DATA_DIR = effective
         return _CEA_DATA_DIR
 
+
+#: Sapma görülüp dizinin YENİDEN sabitlendiği sayı (tanı; V3 KK 2. tur).
+_CEA_DATA_DIR_REPINS = 0
+
+
+def _cea_data_dir_drifted() -> bool:
+    """Önbelleklenen dizin ``rocketcea.cea_obj.ROCKETCEA_DATA_DIR``dan saptı mı?
+
+    V3 kararlılık SO1 D-2 (K-1 ile aynı sınıf: doğrulamasız önbellek).
+    Modül hiç yüklenmemişse karşılaştırılacak global yoktur (sapma yok);
+    ``import`` YAPILMAZ — sıcak yolda yalnız bir sözlük okuması.
+    """
+    import sys
+    modul = sys.modules.get('rocketcea.cea_obj')
+    if modul is None:
+        return False
+    return getattr(modul, 'ROCKETCEA_DATA_DIR', None) != _CEA_DATA_DIR
+
+
+def _repin_cea_data_dir() -> Optional[str]:
+    """Sapan veri dizinini önbelleklenen sürece özel dizine geri çek.
+
+    Kilit altında çağrılır. Global geri okunur; hâlâ sapıyorsa ``None``
+    (fail-closed). Sapma sırasında köprünün önbelleğine girmiş ``CEA_Obj``
+    örnekleri ``pathPrefix``i yabancı dizinde DONDURMUŞ olabilir
+    (rocketcea/cea_obj.py:394); köprünün kendi örnek önbelleği bu yüzden
+    boşaltılır ve örnekler sabitlenen dizinde yeniden kurulur. Sayı
+    önbelleği (``_compute_rocketcea``) dizinden bağımsızdır, dokunulmaz.
+    """
+    global _CEA_DATA_DIR_REPINS
+    try:
+        import rocketcea
+        import rocketcea.cea_obj as _cea_module
+    except Exception:
+        return None
+    try:
+        _cea_module.set_rocketcea_data_dir(_CEA_DATA_DIR, do_print=False)
+    except Exception:
+        try:
+            _cea_module.ROCKETCEA_DATA_DIR = _CEA_DATA_DIR
+        except Exception:
+            return None
+    try:
+        rocketcea.set_rocketcea_data_dir(_CEA_DATA_DIR, do_print=False)
+    except Exception:
+        pass
+    if getattr(_cea_module, 'ROCKETCEA_DATA_DIR', None) != _CEA_DATA_DIR:
+        return None
+    try:
+        os.makedirs(_CEA_DATA_DIR, exist_ok=True)
+    except Exception:
+        return None
+    _cea_obj.cache_clear()
+    _CEA_DATA_DIR_REPINS += 1
+    return _CEA_DATA_DIR
+
 # --------------------------------------------------------------------------
 # HRMA adı -> RocketCEA kart adı eşlemesi
 # --------------------------------------------------------------------------
@@ -238,10 +321,61 @@ FUEL_CARD_MAP = {
     'h2': 'LH2',
     'mmh': 'MMH',          # monometilhidrazin
     'udmh': 'UDMH',        # asimetrik dimetilhidrazin
-    'ethanol': 'C2H5OH',   # NOT: RocketCEA kartı SAF etanol; HRMA tablosu
-    'c2h5oh': 'C2H5OH',    # "75% Etanol/25% Su" karışımıdır — Tc/c* farkı
+    # D15/P1B3-04 — BİR MOTORUN KİMLİĞİ TEKTİR.
+    # 'ethanol' anahtarı HRMA tablosunda
+    # ('ethanol','lox') -> 'Ethanol/LOX (75% Ethanol/25% Water)'
+    # KARIŞIMI adlandırır (liquid_rocket_engine.py) ve yakıt yoğunluğu da o
+    # karışımınkidir; burada ise SAF etanol kartına (C2H5OH) eşleniyordu.
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/D15/hibrit/a1/once2.json; LOX,
+    # Pc = 100 bar, MR = 1,524, eps = 200):
+    #     tablo (karışım)   c* 1678,30 m/s  T_c 3241,5 K  mw 24,230
+    #     SAF C2H5OH kartı  c* 1739,74 m/s  T_c 3351,26 K mw 22,621
+    #                       -> c* +%3,66, T_c +%3,39, mw −%6,64
+    # Yani adı ve yoğunluğu karışımın, termokimyası saf etanolün olan bir
+    # itici yayımlanıyordu ve `validity` sözlüğünde bunu söyleyen tek bir
+    # bayrak yoktu. Uyarı basmak çözüm değildir: doğru olan, kartı ADIN
+    # tarif ettiği iticiye getirmektir.
+    'ethanol': 'ETHANOL75',   # %75 etanol / %25 su (bkz. CUSTOM_FUEL_CARDS)
+    'ethanol75': 'ETHANOL75',
+    'c2h5oh': 'C2H5OH',       # SAF etanol — açıkça istenirse
+    'ethanol_pure': 'C2H5OH',
     'hydrazine': 'N2H4',   # bonus (tabloda yok ama web köprüsünde vardı)
 }
+
+# --------------------------------------------------------------------------
+# RocketCEA'da yerleşik OLMAYAN kartlar (D15/P1B3-04)
+# --------------------------------------------------------------------------
+# Bileşen satırlarının HİÇBİRİ burada uydurulmadı: ikisi de RocketCEA'nın
+# kendi ``input_cards.py`` dosyasından, olduğu gibi alındı —
+#   'C2H5OH' : fuel C2H5OH(L) C 2 H 6 O 1 / h,cal=-66370.0 t(k)=298.15
+#   'H2O'    : water H 2.0 O 1.0          / h,cal=-68308.   t(k)=298.15
+# Karışım oranı HRMA'nın kendi tablo adından gelir (%75/%25 kütlece).
+# Çok bileşenli kart deseni yine RocketCEA'nın kendi '90_H2O2' kartıdır.
+CUSTOM_FUEL_CARDS = {
+    'ETHANOL75': (
+        ' fuel C2H5OH(L)  C 2 H 6 O 1   wt%=75.00 \n'
+        ' h,cal=-66370.0     t(k)=298.15 \n'
+        ' fuel water H 2.0 O 1.0   wt%=25.00 \n'
+        ' h,cal=-68308.      t(k)=298.15 \n'
+    ),
+}
+
+_CUSTOM_CARDS_REGISTERED = False
+
+
+def ensure_custom_cards() -> None:
+    """``CUSTOM_FUEL_CARDS`` kartlarını RocketCEA'ya bir kez tanıtır.
+
+    ``add_new_fuel`` global bir kütüphane sözlüğüne yazar; ``_CEA_STATE_LOCK``
+    altında ve yalnız bir kez çağrılır (bkz. ``_cea_obj``).
+    """
+    global _CUSTOM_CARDS_REGISTERED
+    if _CUSTOM_CARDS_REGISTERED:
+        return
+    from rocketcea.cea_obj import add_new_fuel
+    for ad, kart in CUSTOM_FUEL_CARDS.items():
+        add_new_fuel(ad, kart)
+    _CUSTOM_CARDS_REGISTERED = True
 
 OX_CARD_MAP = {
     'lox': 'LOX',          # sıvı oksijen
@@ -249,8 +383,25 @@ OX_CARD_MAP = {
     'gox': 'GOX',          # gaz oksijen
     'n2o4': 'N2O4',        # azot tetroksit
     'nto': 'N2O4',
-    'h2o2': 'H2O2',        # yüksek konsantrasyon hidrojen peroksit
+    # %100 (SAF) hidrojen peroksit — RocketCEA 'H2O2' kartı: "oxid H2O2(L)
+    # … wt%=100" (KU H-5 / K2b-10). Roket sınıfı %90/%98 HTP DEĞİLDİR
+    # (RocketCEA'da ayrı kartlar: '90_H2O2', '98_H2O2'). ÖLÇÜLDÜ (KITAP-2b
+    # K2b-10): RP-1/H2O2, O/F 7, 1000 psia'da %100 kartı T_c 2988 K, %90
+    # kartı 2778 K. Konsantrasyonu %90'a çevirmek bir DEĞER SEÇİMİDİR ve
+    # bu kalemde yapılmadı; yanıt bunu ``validity['oxidizer_card_note']``
+    # ile açıkça söyler.
+    'h2o2': 'H2O2',
     'hydrogen_peroxide': 'H2O2',
+}
+
+#: Kartı kullanıcı adından anlaşılmayan oksitleyiciler için yanıta giden
+#: beyan (ad -> metin). Sayı taşımaz; yalnız hangi kartın çözüldüğünü söyler.
+OX_CARD_NOTES = {
+    'H2O2': ("'h2o2' is solved with the RocketCEA 'H2O2' card: 100 wt% "
+             "(pure) hydrogen peroxide, H2O2(L). It is NOT rocket-grade "
+             "90% or 98% HTP (separate RocketCEA cards '90_H2O2' / "
+             "'98_H2O2'); with a diluted peroxide the 100% card overstates "
+             "T_c, c* and Isp."),
 }
 
 
@@ -284,10 +435,18 @@ def _cea_obj(ox_card: str, fuel_card: str, fac_cr: Optional[float] = None):
 
     ``fac_cr`` verilirse CEA SONLU ALANLI YANMA ODASI (finite-area combustor)
     modunda çözer: yanma odası kesiti sonsuz kabul edilmez, akış odada
-    hızlanırken Rayleigh hattı boyunca basınç ve sıcaklık düşer. Sonuç c*
-    sonsuz-alan çözümünden bir miktar DÜŞÜKTÜR ve gerçeğe daha yakındır.
-    Küçük kontraksiyon oranlarında (kısa/geniş portlu hibritlerde) fark
-    ölçülebilir düzeye çıkar.
+    hızlanırken Rayleigh hattı boyunca DURGUNLUK basıncı düşer.
+
+    Kayıp c*'ta DEĞİL, durgunluk basıncındadır (KU H-14 / K2b-02 beyan
+    düzeltmesi; eski metin "c* sonsuz-alandan bir miktar düşüktür ve
+    gerçeğe daha yakındır" diyordu). NASA RP-1311 Kısım I §6 (Eş. 6.11):
+    FAC'ta c* = p_inf·A_t/ṁ, p_inf hayali sonsuz-alan noktasının
+    basıncıdır; bu yüzden FAC c* ≈ IAC c*. ÖLÇÜLDÜ (KITAP-2b K2b-02,
+    S9 Tablo 5-4 vakası): FAC ⟷ IAC c* farkı %0,06; lüle girişi durgunluk
+    basıncının enjektör basıncına oranı ise CR 2,0'de 0,951, CR 1,3'te
+    0,887. Küçük kontraksiyon oranlarında fark bu basınç zincirinde
+    ölçülebilir düzeye çıkar (sayı değişikliği bu docstring'in konusu
+    değildir; sıvı yoldaki eksik kayıp ayrı kalemdir, K3 / Ö-10).
 
     ``None`` ise klasik sonsuz-alan (infinite-area) çözümü kullanılır —
     eski davranış, geriye uyumlu.
@@ -298,9 +457,73 @@ def _cea_obj(ox_card: str, fuel_card: str, fac_cr: Optional[float] = None):
     ensure_isolated_cea_data_dir()
     from rocketcea.cea_obj import CEA_Obj
     with _CEA_STATE_LOCK:
+        # D15/P1B3-04: yerleşik olmayan kartlar (ör. ETHANOL75) CEA_Obj
+        # kurulmadan ÖNCE kütüphaneye tanıtılmalıdır.
+        ensure_custom_cards()
         if fac_cr is None:
             return CEA_Obj(oxName=ox_card, fuelName=fuel_card)
         return CEA_Obj(oxName=ox_card, fuelName=fuel_card, fac_CR=float(fac_cr))
+
+
+# --------------------------------------------------------------------------
+# Önbellekli CEA_Obj'nin kütüphane kaydı (V3 kararlılık SO-0 / K-1)
+# --------------------------------------------------------------------------
+#: Kütüphane kaydı ölü bulunan nesne yeniden kurulduktan sonra çağrının kaç
+#: kez YENİDEN deneneceği. Bir kez: kayıt yeniden kurulumla açılır; ikinci
+#: denemede de düşerse sorun bayatlık değildir ve hata olduğu gibi yükselir.
+CEA_STALE_RECORD_RETRIES = 1
+
+#: CEA kurulu iken çağrı düşüp statik tabloya inildiğinde yanıta yazılan
+#: gerekçe kodu (``validity['fallback_reason']``) ve uyarı kaydının kodu.
+#: Kurulu olmayan kütüphanenin gerekçesi ayrıdır (kaynak yine
+#: 'static_table', ama ``fallback_reason`` yazılmaz).
+FALLBACK_REASON_CEA_CALL_FAILED = 'rocketcea_call_failed'
+WARN_CEA_CALL_FAILED = 'warn.combustion.rocketcea_call_failed'
+
+
+def cea_record_alive(obj) -> bool:
+    """Önbellekteki ``CEA_Obj``'nin RocketCEA tarafındaki kaydı hâlâ var mı?
+
+    V3 kararlılık (SO-0 / K-1, karar §28-33): RocketCEA her ``CEA_Obj`` için
+    süreç-global bir sonuç önbelleği kaydı tutar (``_CacheObjDict[desc]``,
+    rocketcea/cea_obj.py:114) ve kaydı YALNIZ kurucuda açar
+    (cea_obj.py:420-423). Kütüphane bu sözlüğü kendisi boşaltabilir: aynı
+    adla yeniden tanımlanan kart (``add_new_card``, cea_obj.py:144-146) ya
+    da ``clearCache()``. Boşaltmadan sonra önbellekte tutulan eski nesnenin
+    her yeni noktası ``setTcK`` satırında ``KeyError: 'LOX / RP1'`` verir
+    (cea_obj.py:957). Kaydın varlığı kütüphanenin AÇIK işleviyle
+    (``getCacheDict``) okunur; okunamıyorsa kayıt ölü sayılır ve nesne
+    yeniden kurulur (fail-closed: doğrulanamayan önbellek kullanılmaz).
+
+    Tek tanım yeri burasıdır; ``cycle_power_balance._get_cea`` de bunu
+    kullanır (CLAUDE.md §11).
+    """
+    try:
+        from rocketcea.cea_obj import getCacheDict
+        return getattr(obj, 'desc', None) in getCacheDict()
+    except Exception:
+        return False
+
+
+def _live_cea_obj(ox_card: str, fuel_card: str, fac_cr: Optional[float] = None):
+    """``_cea_obj`` önbelleğinden kaydı DOĞRULANMIŞ ``CEA_Obj``.
+
+    K-1 (V3 kararlılık 2. tur): ``_cea_obj`` lru önbelleği, SO-0'da
+    ``cycle_power_balance._get_cea``de kapatılan bayatlama sınıfındaydı.
+    RocketCEA önbelleği boşalınca önbellekteki nesnenin her YENİ noktası
+    KeyError veriyor, ``get_combustion_properties`` bunu yakalayıp
+    statik tabloya iniyordu. ÖLÇÜLDÜ (docs/scofield/raw/OH/V3/kararlilik/
+    kanit/t2/): 25 kN RP-1/LOX 61 bar c* 1807,93 -> 1820,24 m/s, kaynak
+    'static_table'. Kayıt ölüyse önbellek boşaltılıp nesne yeniden kurulur;
+    kütüphane boşaltması bütün kayıtları birlikte sildiği için tek tek değil
+    topluca kurulur. Kayıt yerindeyken aynı nesne döner (sıcak yol aynı).
+    YALNIZ ``_CEA_STATE_LOCK`` altında çağrılır.
+    """
+    c = _cea_obj(ox_card, fuel_card, fac_cr)
+    if cea_record_alive(c):
+        return c
+    _cea_obj.cache_clear()
+    return _cea_obj(ox_card, fuel_card, fac_cr)
 
 
 # --------------------------------------------------------------------------
@@ -341,8 +564,32 @@ def _compute_rocketcea_locked(
     ambient_bar: Optional[float],
     fac_cr: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """`_compute_rocketcea` gövdesi — YALNIZ `_CEA_STATE_LOCK` altında çağrılır."""
-    c = _cea_obj(ox_card, fuel_card, fac_cr)
+    """`_compute_rocketcea` gövdesi — YALNIZ `_CEA_STATE_LOCK` altında çağrılır.
+
+    K-1: nesnenin kütüphane kaydı önce doğrulanır (``_live_cea_obj``); çözüm
+    sırasında yine de kayıt kaybından KeyError gelirse nesne yeniden kurulur
+    ve çağrı ``CEA_STALE_RECORD_RETRIES`` kez yeniden denenir. Kayıt
+    yerindeyken gelen KeyError bayatlık değildir, olduğu gibi yükselir.
+    """
+    deneme = 0
+    while True:
+        c = _live_cea_obj(ox_card, fuel_card, fac_cr)
+        try:
+            return _solve_with_cea_obj(c, pc_bar, mr, eps, ambient_bar)
+        except KeyError:
+            if deneme >= CEA_STALE_RECORD_RETRIES or cea_record_alive(c):
+                raise
+            deneme += 1
+
+
+def _solve_with_cea_obj(
+    c,
+    pc_bar: float,
+    mr: float,
+    eps: Optional[float],
+    ambient_bar: Optional[float],
+) -> Dict[str, Any]:
+    """Tek noktanın CEA çözümü (verilen ``CEA_Obj`` ile); kilit altında."""
     pc_psia = pc_bar * BAR_TO_PSIA
 
     # c* ve Tc — oda büyüklükleri, nozul eps'inden bağımsız
@@ -456,6 +703,36 @@ def _from_fallback(fallback: Dict[str, Any], pc_bar: float, eps: Optional[float]
     YOKTUR; bu durum validity/note ile açıkça bildirilir.
     """
     gamma_ch = _read_alias(fallback, 'gamma_chamber', 'gamma', 'gamma_ref')
+
+    # ÖH D16 (kalem B3-10) — ÇAPA ARTIK GERÇEKTEN DENETLENİYOR.
+    # `eps` parametresi imzada vardı ama GÖVDEDE HİÇ OKUNMUYORDU (AST ile
+    # ölçüldü: 'eps' adı gövdede geçmiyordu). Sonuç: modülün kendi künyesinde
+    # (FALLBACK_EPS_ANCHOR / _EPS_ANCHOR_TOL / 'isp_vac_eps' / 'eps_anchor')
+    # ilan ettiği koruma YOKTU ve dördü de dosyada yalnız 1'er kez, yani ÖLÜ
+    # sabitti. ÖLÇÜLDÜ (1 Eylül 2026, taban 6fde52b): ε = 1,6 / 4,0 / 16,0 /
+    # 200,0 / 1000,0 isteklerinin HEPSİ aynı isp_vac_s = 380,4 s'yi
+    # döndürüyordu ve validity anahtarları ['extrapolated','note',
+    # 'pc_range_ok','real_gas_warning'] — ε bayrağı yoktu. Statik tablo
+    # ε = 200 çapasına demirlidir; sessiz hatanın büyüklüğü (aynı çiftte
+    # gerçek CEA'ya karşı) ε=1,6'da +%46,79, ε=4'te +%27,03, ε=16'da +%12,08.
+    #
+    # FAIL-CLOSED: çapadan uzak bir ε istendiğinde Isp yaprakları YAYIMLANMAZ
+    # (None) ve durum validity içinde alan adıyla bildirilir. Beyan tek başına
+    # çözüm sayılmadığı için sayı da geri çekilir; c*/T_c/gamma/MW gibi
+    # ε'DAN BAĞIMSIZ yapraklar (tablo bunları ε'suz taşır) korunur.
+    eps_anchor = _read_alias(fallback, 'isp_vac_eps', 'eps_anchor')
+    try:
+        eps_anchor = (float(eps_anchor) if eps_anchor is not None
+                      else FALLBACK_EPS_ANCHOR)
+    except (TypeError, ValueError):
+        eps_anchor = FALLBACK_EPS_ANCHOR
+    try:
+        eps_istenen = None if eps is None else float(eps)
+    except (TypeError, ValueError):
+        eps_istenen = None
+    eps_anchor_ok = (eps_istenen is None
+                     or abs(eps_istenen - eps_anchor) <= _EPS_ANCHOR_TOL)
+
     out = {
         'c_star_m_s': _read_alias(fallback, 'c_star_m_s', 'c_star', 'c_star_ref'),
         'tc_k': _read_alias(fallback, 'tc_k', 'T_c', 'tc'),
@@ -476,12 +753,29 @@ def _from_fallback(fallback: Dict[str, Any], pc_bar: float, eps: Optional[float]
             # Statik tablo 100 bar çapasıdır; istenen Pc farklıysa fiilen
             # ekstrapolasyondur (tablo Pc'yi görmez).
             'extrapolated': abs(pc_bar - 100.0) > 1.0,
+            'eps_anchor': eps_anchor,
+            'eps_requested': eps_istenen,
+            'eps_anchor_ok': eps_anchor_ok,
             'note': (
                 'Static Pc=100 bar anchor table (no chamber-pressure '
                 'dependence); RocketCEA unavailable or propellant pair '
-                'unmapped.'),
+                'unmapped.'
+                if eps_anchor_ok else
+                'Static Pc=100 bar anchor table (no chamber-pressure '
+                'dependence); RocketCEA unavailable or propellant pair '
+                'unmapped. The tabulated specific impulse is anchored to an '
+                'area ratio of {anchor:g} and carries no expansion-ratio '
+                'dependence, so it is NOT a value at the requested area '
+                'ratio {req:g}; the Isp fields are withheld rather than '
+                'reported at the wrong expansion.'.format(
+                    anchor=eps_anchor, req=eps_istenen)),
         },
     }
+    if not eps_anchor_ok:
+        # ε'ya bağlı yapraklar geri çekilir; ε'dan bağımsızlar kalır.
+        out['isp_vac_s'] = None
+        out['isp_vac_frozen_s'] = None
+        out['isp_sl_s'] = None
     return out
 
 
@@ -561,7 +855,9 @@ def get_combustion_properties(
         try:
             pc_key = _round_significant(float(pc_bar), _PC_SIG_DIGITS)
             mr_key = round(float(mr), _MR_ROUND)
-            eps_key = round(float(expansion_ratio), _EPS_ROUND) if expansion_ratio else None
+            eps_key = (_round_significant(float(expansion_ratio),
+                                          _EPS_SIG_DIGITS)
+                       if expansion_ratio else None)
             # F090: 0.0 bar geçerli bir girdidir (vakum) — `if ambient_bar`
             # onu None'a çevirip deniz seviyesine düşürüyordu.
             amb_key = (round(float(ambient_bar), _AMB_ROUND)
@@ -596,6 +892,11 @@ def get_combustion_properties(
                 'combustor_model': ('finite-area (CR=%.2f)' % cr_key
                                     if cr_key else 'infinite-area'),
             }
+            # KU H-5 (K2b-10): 'h2o2' adının %100 karta bağlı olduğu
+            # YANITTA da yazılır (yalnız beyanı olan kartlarda; sayı yok).
+            if ox_card in OX_CARD_NOTES:
+                result['validity']['oxidizer_card'] = ox_card
+                result['validity']['oxidizer_card_note'] = OX_CARD_NOTES[ox_card]
             return result
         except Exception as exc:  # RocketCEA çağrı hatası -> fallback
             if fallback:
@@ -603,6 +904,16 @@ def get_combustion_properties(
                 out['validity']['note'] = (
                     f'RocketCEA call failed ({type(exc).__name__}); '
                     + out['validity']['note'])
+                # K-1: CEA KURULU iken tabloya inmek sessiz olmaz — gerekçe
+                # adıyla ve uyarı kaydı (``{code, params, severity}``,
+                # i18n EN = TR) yanıtın validity sözlüğünde taşınır.
+                out['validity']['fallback_reason'] = (
+                    FALLBACK_REASON_CEA_CALL_FAILED)
+                out['validity']['fallback_warning'] = {
+                    'code': WARN_CEA_CALL_FAILED,
+                    'params': {'error': type(exc).__name__},
+                    'severity': 'warning',
+                }
                 return out
             return _not_modelled(
                 pc_bar, f'RocketCEA call failed ({type(exc).__name__}: {exc}) '

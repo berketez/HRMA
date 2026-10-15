@@ -90,7 +90,17 @@ alanlar bar/mm/ms cinsinden de sunulur. Tüm kullanıcı metinleri İngilizce.
 import math
 from typing import Dict, List, Optional, Tuple
 
+from hrma.constants import P_SEA_LEVEL_PA, isa_pressure
 from hrma.data.materials_db import get_material
+from hrma.data.propellant_database import (
+    H2O2_98_LIQUID_DENSITY_293K,
+    LH2_LIQUID_DENSITY_20K,
+    METHANE_LIQUID_DENSITY_NBP,
+    MMH_LIQUID_DENSITY_293K,
+    N2O4_LIQUID_DENSITY_293K,
+    N2O_LIQUID_DENSITY_SAT_25C,
+    UDMH_LIQUID_DENSITY_293K,
+)
 
 __all__ = [
     'WaterHammerAnalyzer',
@@ -111,6 +121,62 @@ __all__ = [
 # kılabilir. K = rho*a^2 (a = sıvı ses hızı) ilişkisiyle türetilenler
 # kaynak alanında belirtilmiştir.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ÖH D31 · P4B4-07 + OH-D27-08 — TÜRETME YARDIMCILARI
+#
+# Aşağıdaki tabloya K (hacimsel modül) SAYI OLARAK YAZILMAZ. Birincil kaynak
+# ses hızını (a) ve yoğunluğu (rho) tablolar; K bu ikisinden BURADA türetilir.
+# Böylece (i) K ile a/rho ayrışamaz, (ii) boyut kimliği mekanik olarak durur,
+# (iii) yoğunluk deponun tek yoğunluk kaynağından (propellant_database)
+# gelir ve n2o'da yaşanan "iki yerde iki sayı" ayrışması tekrarlanamaz.
+# ---------------------------------------------------------------------------
+
+#: Torr (mmHg) -> Pa. TANIM: 1 Torr = 1 atm / 760 (BIPM SI broşürü, Ek).
+#: Sayı yazılmaz; merkezî deniz seviyesi basıncından türetilir.
+TORR_PA = P_SEA_LEVEL_PA / 760.0
+
+#: Veri eki A çapraz denetiminin ÖLÇÜLEN en büyük sapması. Tablolanmış
+#: adiyabatik sıkıştırılabilirlikten (K = 1/beta_s) bulunan değer ile
+#: K = rho*a^2 arasındaki fark mmh / udmh / n2o4 için %0,43 / %0,71 / %4,59
+#: çıkmıştır (kaynak yoğunluklarıyla). İkinci BAĞIMSIZ belirlemesi olmayan
+#: kayıtların bandı bu ÖLÇÜLEN en kötü sapmayla kurulur: bant uydurulmaz,
+#: ölçülenin en kötüsü genellenir.
+K_CROSSCHECK_MAX_DEVIATION = 0.0459
+
+
+def bulk_modulus_from_sound_speed(density_kg_m3: float,
+                                  sound_speed_m_s: float) -> float:
+    """İzantropik hacimsel modül K_s = rho * a^2 [Pa].
+
+    Boyut denetimi: [kg/m^3] * [m/s]^2 = kg*m^-1*s^-2 = Pa. Aynı kimlik
+    Joukowsky'de de kapanır: dP = rho*a*dv -> [kg/m^3][m/s][m/s] = Pa.
+        Wylie & Streeter, "Fluid Transients" (1978), Bolum 1.
+    """
+    return float(density_kg_m3) * float(sound_speed_m_s) ** 2
+
+
+def bulk_modulus_from_compressibility(beta_s_per_atm: float) -> float:
+    """Tablolanmis adiyabatik sikistirilabilirlikten K = 1/beta_s [Pa].
+
+    beta_s atm^-1 cinsinden tablolanir (USAF itici el kitaplari); 1/beta_s
+    once atm cinsinden K verir, merkezi 1 atm degeriyle Pa'ya cevrilir.
+    Bu, a ve rho'dan BAGIMSIZ ikinci bir belirlemedir (capraz denetim).
+    """
+    return P_SEA_LEVEL_PA / float(beta_s_per_atm)
+
+
+def _k_band(k_pa: float, *alternatives: float) -> Tuple[float, float]:
+    """Hacimsel modul bandi: butun belirlemelerin kapsami + olculen pay.
+
+    Bant bir GECERLILIK ZARFI DEGILDIR: kaydin anma kosulundaki belirleme
+    dagilimidir. Besleme kosulu anma kosulundan uzaksa kullanici
+    ``bulk_modulus_Pa`` ile ezmelidir.
+    """
+    hepsi = (float(k_pa),) + tuple(float(a) for a in alternatives)
+    return (min(hepsi) * (1.0 - K_CROSSCHECK_MAX_DEVIATION),
+            max(hepsi) * (1.0 + K_CROSSCHECK_MAX_DEVIATION))
+
+
 FLUID_PROPERTIES: Dict[str, Dict] = {
     'water': {
         'name': 'Water (~20 C)',
@@ -126,32 +192,49 @@ FLUID_PROPERTIES: Dict[str, Dict] = {
         'vapor_pressure_source': ('NIST/IAPWS saturation pressure of water at '
                                   '293.15 K = 2.339 kPa (White, "Fluid '
                                   'Mechanics" 7th ed. Table A.5).'),
+        'critical_pressure_Pa': 22.064e6,
+        'critical_pressure_source': ('IAPWS-95 critical point of water: p_c = 22.064 MPa, T_c = 647.096 K. Exact reference value.'),
     },
     'n2o': {
-        'name': 'Liquid nitrous oxide (~293 K, near saturation)',
+        'name': 'Liquid nitrous oxide (298.15 K, saturated)',
         'bulk_modulus_Pa': 0.19e9,
         'bulk_modulus_band_Pa': (0.10e9, 0.35e9),
-        # ~785 kg/m3: repo tank_blowdown NIST doygun sıvı tablosuyla tutarlı
-        # (291 K: 801, 294 K: 778.5 -> 293.15 K ~= 785 kg/m3).
-        'density_kg_m3': 785.0,
+        # ÖH D31 · P4B4-07 / OH-D27-08 — KANON ÇELİŞKİSİ KAPANDI.
+        # Bu kayıt kendi yoğunluk sayısını (785,0 kg/m³ @ 293,15 K) YAZIYORDU
+        # ve deponun n2o kanonuyla (``N2O_LIQUID_DENSITY_SAT_25C`` = 745,0
+        # kg/m³ @ 298,15 K) ayrışıyordu; ÖLÇÜLEN fark 40 kg/m³ idi. İki sayı
+        # da kendi sıcaklığında doğruydu, ama deponun n2o anma durumu TEK
+        # olmalı (9 Eylül kanon kararı): kayıt 298,15 K'ye taşındı ve sayı
+        # artık merkezî addan okunuyor. Buhar basıncı da AYNI sıcaklığa
+        # taşındı (aşağıya bakın) ki kayıt kendi içinde tek durumu anlatsın.
+        'density_kg_m3': N2O_LIQUID_DENSITY_SAT_25C,
         'confidence': 'low',
         'source': ('APPROXIMATE: K = rho*a^2 from liquid N2O speed of sound '
-                   'near saturation (~450-550 m/s) with rho ~= 785 kg/m3 '
-                   '(NIST/Span-Wagner; consistent with repo tank_blowdown '
-                   'saturated-liquid table at 293 K). Highly compressible and '
+                   'near saturation (~450-550 m/s) with the repo canonical '
+                   'saturated-liquid density rho = 745 kg/m3 at 298.15 K '
+                   '(NIST WebBook, Lemmon & Span 2006; the same constant the '
+                   'propellant catalogue publishes). The tabulated K implies '
+                   'a = 505 m/s, inside that band. Highly compressible and '
                    'self-pressurizing near saturation -> large uncertainty; '
                    'verify for the actual tank state.'),
-        # 293.15 K doygunluk basıncı: deponun KENDİ tank_blowdown._SAT_TABLE
-        # kaydından (291 K: 4.8106 MPa, 294 K: 5.1507 MPa) doğrusal
-        # interpolasyonla 5.054 MPa. Tablo CoolProp/Span-Wagner kaynaklıdır.
-        'vapor_pressure_Pa': 5.054e6,
-        'vapor_pressure_ref_K': 293.15,
-        'vapor_pressure_source': ('Saturation pressure of N2O at 293.15 K '
-                                  '(~50.5 bar), interpolated from the repo '
+        # 298.15 K doygunluk basıncı: AYNI yöntem, AYNI tablo, yalnız kanon
+        # sıcaklığında. Deponun KENDİ tank_blowdown._SAT_TABLE kaydından
+        # (297 K: 5.509221 MPa, 300 K: 5.887437 MPa) doğrusal interpolasyonla
+        # 5.654 MPa. Tablo CoolProp/Span-Wagner kaynaklıdır.
+        # ÖH D31: eski değer 5.054 MPa (293,15 K) idi; yoğunluk 298,15 K
+        # kanonuna taşınırken buhar basıncı 293,15 K'de bırakılsaydı kayıt
+        # iki farklı duruma ait iki sayı taşırdı VE kolon ayrılması kapısı
+        # GEVŞERDİ (düşük p_v -> aşağı salınımın daha derine inmesi gerekir).
+        'vapor_pressure_Pa': 5.654e6,
+        'vapor_pressure_ref_K': 298.15,
+        'vapor_pressure_source': ('Saturation pressure of N2O at 298.15 K '
+                                  '(~56.5 bar), interpolated from the repo '
                                   'tank_blowdown saturated table (CoolProp / '
                                   'Span-Wagner). A self-pressurizing N2O feed '
                                   'line sits essentially AT its vapor '
                                   'pressure -> any downsurge flashes.'),
+        'critical_pressure_Pa': 7.245e6,
+        'critical_pressure_source': ('N2O critical point p_c = 7.245 MPa, T_c = 309.6 K (Span-Wagner EOS / NIST). Same value the repo propellant database carries for N2O; the D19 guard test asserts the two agree.'),
     },
     'rp1': {
         'name': 'RP-1 kerosene (~290 K)',
@@ -171,6 +254,11 @@ FLUID_PROPERTIES: Dict[str, Dict] = {
                                   'data, MIL-DTL-25576 volatility limits). '
                                   'Batch-dependent -> supply '
                                   'vapor_pressure_Pa for the actual lot.'),
+        # ÖH D19 / P5B3-08: 'critical_pressure_Pa' BİLEREK YOK.
+        # RP-1 bir kerosen KESİTİDİR; kritik noktası tek bir madde
+        # değeri değil parti bağımlı sözde-kritik bir kestirimdir.
+        # Uydurmak yerine alan yoktur: vana boyutlandırması bu
+        # akışkanda rejim hükmünü ADIYLA geri çeker (fail-closed).
     },
     'lox': {
         'name': 'Liquid oxygen (~90 K, normal boiling point)',
@@ -182,13 +270,218 @@ FLUID_PROPERTIES: Dict[str, Dict] = {
                    'sound (a ~= 900 m/s) and density (rho ~= 1141 kg/m3) near '
                    'the normal boiling point; strongly temperature/pressure '
                    'dependent -> verify for the actual feed conditions.'),
-        'vapor_pressure_Pa': 101325.0,
+        # 1 atm merkezî addan (ÖH D27 / OH-D26-01): aşağıdaki
+        # ``vapor_pressure_source`` zaten "normal boiling point ->
+        # 1 atm" diyor; sayı o cümlenin ikinci kopyası olamaz.
+        'vapor_pressure_Pa': P_SEA_LEVEL_PA,
         'vapor_pressure_ref_K': 90.19,
         'vapor_pressure_source': ('By definition of the normal boiling point: '
                                   'LOX at 90.19 K sits at 1 atm saturation '
                                   '(NIST). Sub-cooled feeds tolerate a deeper '
                                   'downsurge -> supply vapor_pressure_Pa for '
                                   'the actual feed temperature.'),
+        'critical_pressure_Pa': 5.043e6,
+        'critical_pressure_source': ('Oxygen critical point p_c = 5.043 MPa, T_c = 154.58 K (NIST/Schmidt-Wagner EOS). Same value the repo propellant database carries for LOX; the D19 guard test asserts the two agree.'),
+    },
+    # =====================================================================
+    # ÖH D31 · P4B4-07 + OH-D27-08 — VERİ BORCUNUN ÖDENEN KISMI
+    #
+    # Tablo D31'e kadar YALNIZ dört akışkan taşıyordu (water, n2o, rp1, lox)
+    # ve motorun kendi itici listesindeki yedi itici haritasızdı; ürün onlar
+    # için su koçu bloğunu HİÇ üretmiyordu (fail-closed; ölçüldü 2/9 kapsama).
+    # Aşağıdaki kayıtlar BİRİNCİL kaynaklıdır ve her satırın künyesi vardır.
+    #
+    # ORTAK YÖNTEM (her kayıt için aynı):
+    #   K_s = rho * a^2           (izantropik hacimsel modül)
+    #   rho <- deponun TEK yoğunluk kaynağı (propellant_database sabitleri)
+    #   a   <- birincil kaynağın tablosu (aşağıda rapor + bölüm numarasıyla)
+    #   bant <- mevcut bütün belirlemelerin kapsamı + ÖLÇÜLEN en kötü çapraz
+    #           denetim sapması (K_CROSSCHECK_MAX_DEVIATION)
+    # Boyut denetimi: [kg/m^3]*[m/s]^2 = kg*m^-1*s^-2 = Pa.
+    #
+    # ÜÇ AKIŞKANDA BAĞIMSIZ ÇAPRAZ DENETİM: mmh / udmh / n2o4 için el
+    # kitapları adiyabatik sıkıştırılabilirliği (beta_s) de tabloluyor;
+    # K = 1/beta_s, a ve rho'dan BAĞIMSIZ ikinci bir belirlemedir ve üçünde
+    # de aynı büyüklüğü veriyor (bant o iki belirlemeyi birden kapsar).
+    #
+    # H2O2 HARİTAYA ALINMADI (fail-closed): K ve rho künyeli ama BUHAR
+    # BASINCI için birincil kaynak kazanılamadı (AFRPL-TR-67-144 Tablo 2.1
+    # taranmış kopyada OCR bozulmasıyla okunuyor). Buhar basıncı olmadan
+    # kolon ayrılması ve NPSH kapıları kurulamaz; sayı UYDURULMAZ. Kayıt
+    # burada durur (özel su koçu çağrısı K/rho'yu kullanabilir) ama motor
+    # köprüsü (WATER_HAMMER_FLUID_KEY) onu TAŞIMAZ.
+    # =====================================================================
+    'lh2': {
+        'name': 'Liquid hydrogen (~20 K, saturated liquid)',
+        'sound_speed_m_s': 1129.1,
+        'density_kg_m3': LH2_LIQUID_DENSITY_20K,
+        'bulk_modulus_Pa': bulk_modulus_from_sound_speed(
+            LH2_LIQUID_DENSITY_20K, 1129.1),
+        'bulk_modulus_band_Pa': _k_band(bulk_modulus_from_sound_speed(
+            LH2_LIQUID_DENSITY_20K, 1129.1)),
+        'confidence': 'low',
+        'source': ('APPROXIMATE: K = rho*a^2. Speed of sound a = 1129.1 m/s '
+                   'for saturated-liquid hydrogen at 20.001 K from the NIST '
+                   'Chemistry WebBook fluid data (NORMAL hydrogen). Density '
+                   'is the repo canonical liquid-hydrogen value (70.8 kg/m3 '
+                   'at 20 K), so the two modules cannot disagree. CAUTION: '
+                   'rocket tanks usually store PARA-hydrogen; if the para '
+                   'isomer matters for the feed line, take a from the NIST '
+                   'para-hydrogen fluid record and override bulk_modulus_Pa. '
+                   'K of a saturated cryogen is strongly sub-cooling '
+                   'dependent -> verify for the actual feed state.'),
+        'vapor_pressure_Pa': 0.90751e5,
+        'vapor_pressure_ref_K': 20.001,
+        'vapor_pressure_source': ('Saturation pressure of normal hydrogen at '
+                                  '20.001 K = 0.90751 bar (NIST Chemistry '
+                                  'WebBook fluid data, saturated liquid). '
+                                  'Slightly BELOW the 1 atm normal boiling '
+                                  'point (20.28 K) -> a line at 1 atm is '
+                                  'marginally sub-cooled.'),
+    },
+    'methane': {
+        'name': 'Liquid methane (111.67 K, normal boiling point)',
+        'sound_speed_m_s': 1338.1,
+        'density_kg_m3': METHANE_LIQUID_DENSITY_NBP,
+        'bulk_modulus_Pa': bulk_modulus_from_sound_speed(
+            METHANE_LIQUID_DENSITY_NBP, 1338.1),
+        'bulk_modulus_band_Pa': _k_band(bulk_modulus_from_sound_speed(
+            METHANE_LIQUID_DENSITY_NBP, 1338.1)),
+        'confidence': 'low',
+        'source': ('APPROXIMATE: K = rho*a^2. Speed of sound a = 1338.1 m/s '
+                   'for saturated-liquid methane at the normal boiling point '
+                   '(111.67 K) from the NIST Chemistry WebBook fluid data. '
+                   'Density is the repo canonical liquid-methane value '
+                   '(422.6 kg/m3 at 111.7 K). K of a saturated cryogen is '
+                   'strongly sub-cooling dependent -> verify for the actual '
+                   'feed state.'),
+        # 1 atm merkezî addan (lox kaydıyla AYNI gerekçe, ÖH D27/OH-D26-01):
+        # ``vapor_pressure_source`` zaten "normal boiling point -> 1 atm"
+        # diyor; sayı o cümlenin ikinci kopyası olamaz. NIST'in tablosundaki
+        # 1.0132 bar da bu tanımın kendisidir.
+        'vapor_pressure_Pa': P_SEA_LEVEL_PA,
+        'vapor_pressure_ref_K': 111.67,
+        'vapor_pressure_source': ('By definition of the normal boiling '
+                                  'point: methane at 111.67 K sits at 1 atm '
+                                  'saturation (NIST Chemistry WebBook lists '
+                                  '1.0132 bar there). Sub-cooled feeds '
+                                  'tolerate a deeper downsurge -> supply '
+                                  'vapor_pressure_Pa for the actual feed '
+                                  'temperature.'),
+    },
+    'mmh': {
+        'name': 'Monomethylhydrazine (298 K)',
+        'sound_speed_m_s': 1548.0,
+        'density_kg_m3': MMH_LIQUID_DENSITY_293K,
+        'bulk_modulus_Pa': bulk_modulus_from_sound_speed(
+            MMH_LIQUID_DENSITY_293K, 1548.0),
+        'bulk_modulus_band_Pa': _k_band(
+            bulk_modulus_from_sound_speed(MMH_LIQUID_DENSITY_293K, 1548.0),
+            bulk_modulus_from_compressibility(4.88e-05)),
+        'confidence': 'low',
+        'source': ('K = rho*a^2 with a = 1548 m/s at 298 K from the property '
+                   'summary of AFRPL-TR-69-149 ("Hydrazine and its '
+                   'derivatives" propellant handbook) Sec. 2.4.1; density is '
+                   'the repo canonical MMH value (875 kg/m3 at 20 C). '
+                   'CROSS-CHECKED against an INDEPENDENT quantity from the '
+                   'same table: the tabulated adiabatic compressibility '
+                   'beta_s = 4.88e-05 /atm gives K = 1/beta_s = 2.076 GPa, '
+                   'within ~1% of rho*a^2. The band spans both '
+                   'determinations. Temperature dependent -> verify for the '
+                   'actual feed temperature.'),
+        'vapor_pressure_Pa': 49.47 * TORR_PA,
+        'vapor_pressure_ref_K': 298.0,
+        'vapor_pressure_source': ('Vapour pressure 49.47 mmHg at 298 K from '
+                                  'AFRPL-TR-69-149 Sec. 2.4.1 property '
+                                  'summary; converted with the exact Torr '
+                                  'definition (1 Torr = 1 atm / 760).'),
+    },
+    'udmh': {
+        'name': 'Unsymmetrical dimethylhydrazine (298 K)',
+        'sound_speed_m_s': 1247.0,
+        'density_kg_m3': UDMH_LIQUID_DENSITY_293K,
+        'bulk_modulus_Pa': bulk_modulus_from_sound_speed(
+            UDMH_LIQUID_DENSITY_293K, 1247.0),
+        'bulk_modulus_band_Pa': _k_band(
+            bulk_modulus_from_sound_speed(UDMH_LIQUID_DENSITY_293K, 1247.0),
+            bulk_modulus_from_compressibility(8.23e-05)),
+        'confidence': 'low',
+        'source': ('K = rho*a^2 with a = 1247 m/s at 298 K from the property '
+                   'summary of AFRPL-TR-69-149 Sec. 2.5.1; density is the '
+                   'repo canonical UDMH value (791 kg/m3 at 20 C). '
+                   'CROSS-CHECKED against an INDEPENDENT quantity from the '
+                   'same table: beta_s = 8.23e-05 /atm gives K = 1/beta_s = '
+                   '1.231 GPa, within ~0.1% of rho*a^2. The band spans both '
+                   'determinations. Temperature dependent -> verify for the '
+                   'actual feed temperature.'),
+        'vapor_pressure_Pa': 167.1 * TORR_PA,
+        'vapor_pressure_ref_K': 298.0,
+        'vapor_pressure_source': ('Vapour pressure 167.1 mmHg at 298 K from '
+                                  'AFRPL-TR-69-149 Sec. 2.5.1 property '
+                                  'summary; converted with the exact Torr '
+                                  'definition (1 Torr = 1 atm / 760).'),
+    },
+    'n2o4': {
+        'name': 'Nitrogen tetroxide (298.15 K)',
+        'sound_speed_m_s': 997.0,
+        'density_kg_m3': N2O4_LIQUID_DENSITY_293K,
+        'bulk_modulus_Pa': bulk_modulus_from_sound_speed(
+            N2O4_LIQUID_DENSITY_293K, 997.0),
+        'bulk_modulus_band_Pa': _k_band(
+            bulk_modulus_from_sound_speed(N2O4_LIQUID_DENSITY_293K, 997.0),
+            bulk_modulus_from_compressibility(7.44e-05)),
+        'confidence': 'low',
+        'source': ('K = rho*a^2 with a = 997 m/s at 298.15 K from the '
+                   'property summary of AFRPL-TR-76-76 (nitrogen tetroxide '
+                   'propellant handbook) Sec. 2.3.1; density is the repo '
+                   'canonical N2O4 value (1443 kg/m3 at 20 C). '
+                   'CROSS-CHECKED against an INDEPENDENT quantity from the '
+                   'same table: beta_s = 7.44e-05 /atm gives K = 1/beta_s = '
+                   '1.362 GPa, ~5% below rho*a^2 - consistent with the '
+                   'three-significant-digit rounding of the tabulated '
+                   'beta_s. The band spans both determinations. N2O4 boils '
+                   'at 294.3 K, so a 298 K line is ABOVE its normal boiling '
+                   'point and must be pressurised -> verify the feed state.'),
+        'vapor_pressure_Pa': 898.57 * TORR_PA,
+        'vapor_pressure_ref_K': 298.15,
+        'vapor_pressure_source': ('Vapour pressure 898.57 mmHg at 298.15 K '
+                                  'from AFRPL-TR-76-76 Sec. 2.3.1 property '
+                                  'summary; converted with the exact Torr '
+                                  'definition (1 Torr = 1 atm / 760). Note '
+                                  'this is only ~0.18 bar below 1 atm: the '
+                                  'liquid is close to boiling at room '
+                                  'temperature and column separation is '
+                                  'easy to provoke.'),
+    },
+    'h2o2': {
+        # BU KAYIT HARİTAYA ALINMADI — buhar basıncı kaynağı kazanılamadı;
+        # yukarıdaki blok başlığına bakın. Kayıt burada durur ki özel su koçu
+        # çağrısı K/rho'yu kaynağıyla kullanabilsin; NPSH ve kolon ayrılması
+        # kapıları buhar basıncı olmadığı için FAIL-CLOSED kalır.
+        'name': 'Hydrogen peroxide, 98% solution (~298 K)',
+        'sound_speed_m_s': 1774.6,
+        'density_kg_m3': H2O2_98_LIQUID_DENSITY_293K,
+        'bulk_modulus_Pa': bulk_modulus_from_sound_speed(
+            H2O2_98_LIQUID_DENSITY_293K, 1774.6),
+        'bulk_modulus_band_Pa': _k_band(bulk_modulus_from_sound_speed(
+            H2O2_98_LIQUID_DENSITY_293K, 1774.6)),
+        'confidence': 'low',
+        'source': ('APPROXIMATE: K = rho*a^2 with a = 1774.6 m/s for the 98% '
+                   'solution from AFRPL-TR-67-144 (Rocketdyne 1967) Table '
+                   '2.1; density is the repo canonical 98% value (1438.1 '
+                   'kg/m3 at 293.15 K, same handbook, Sec. 2.2.2.1). The '
+                   'CONCENTRATION is not a free choice here: the propellant '
+                   'catalogue models 98% H2O2 and the handbook tabulates a '
+                   'per concentration (1781.0 / 1774.6 / 1767.0 m/s for '
+                   '100 / 98 / 95%), so the 98% column is the matching one. '
+                   'The two quantities are read 5 K apart (a at 298.15 K, '
+                   'rho at 293.15 K) -> treat K as an estimate. NO VAPOUR '
+                   'PRESSURE is published for this record: the handbook page '
+                   'is OCR-damaged in the scanned copy and no other primary '
+                   'source was obtained, so the column-separation and NPSH '
+                   'gates stay fail-closed rather than invent a number.'),
+        # 'vapor_pressure_Pa' BİLEREK YOK (rp1'in 'critical_pressure_Pa'
+        # yokluğuyla aynı desen): kaynak kazanılamadı, sayı uydurulmaz.
     },
 }
 
@@ -207,6 +500,19 @@ DEFAULT_PIPE_MATERIAL = 'ss_304'
 # (mühendislik pratiği; AIAA S-080 proof faktörü 1.5 ile analog). Kod
 # zorunluluğu değil -> 'approximate'. Kullanıcı pipe_mawp_bar ile ezebilir.
 MAWP_YIELD_SAFETY_FACTOR = 1.5
+
+# ÖH D18 / termo-ucus a1 (P4B4-10): aynı akışı iki yoldan tarif eden
+# girdiler (mdot_kg_s ⟷ flow_velocity_m_s) arasında kabul edilen bağıl pay.
+# Kardeş kapı ``hrma/app.py::_TRAJECTORY_PROPELLANT_REL_TOL`` ile AYNI
+# ilkeyi kodlar (aynı yanmayı iki yoldan tarif etme); sayı burada yerel
+# tutuluyor çünkü uç katmanının sabiti yörünge sözleşmesine aittir ve bu
+# modül uç katmanından bağımsız çağrılabilir.
+FLOW_INPUT_REL_TOL = 0.01
+
+# Referans düzlemi kapısının kullandığı ortam basıncı: ISA deniz seviyesi
+# (101.325 Pa). SAYI BURAYA YAZILMAZ — merkezî ISA tablosundan okunur
+# (hrma.constants.isa_pressure), böylece iki yerde iki değer olmaz.
+WORKING_PRESSURE_REFERENCES = ('absolute', 'gauge')
 
 
 # ===========================================================================
@@ -312,9 +618,14 @@ class WaterHammerAnalyzer:
         out['wave_speed_m_s'], out['peak_pressure_bar'], out['status']
 
     Emniyet durumu (tepe basınç = çalışma basıncı + geçerli dP):
-        SAFE     : tepe <= boru MAWP (anma sınıfı)
-        MARGINAL : MAWP < tepe <= akma basıncı (geçici aşım toleransı içinde)
+        SAFE     : tepe <= ETKİN MAWP (anma sınıfı, hoop akmasıyla kırpılmış)
+        MARGINAL : etkin MAWP < tepe <= akma basıncı (geçici aşım toleransı)
         UNSAFE   : tepe > akma basıncı (kalıcı deformasyon/kopma riski)
+
+    ETKİN MAWP = min(verilen ``pipe_mawp_bar``, modellenen cidarın hoop akma
+    basıncı). Kullanıcı basınç sınıfı akmanın üstündeyse merdivenin sırası
+    bozulur ve ilk dal her şeyi yutar; o yüzden sınıf akmayla kırpılır ve
+    çelişki uyarıyla söylenir (P4B4-03, ÖH D15).
     """
 
     STATUS_SAFE = 'SAFE'
@@ -335,7 +646,8 @@ class WaterHammerAnalyzer:
                 bulk_modulus_Pa: Optional[float] = None,
                 density_kg_m3: Optional[float] = None,
                 delta_v_m_s: Optional[float] = None,
-                vapor_pressure_Pa: Optional[float] = None) -> Dict:
+                vapor_pressure_Pa: Optional[float] = None,
+                working_pressure_reference: Optional[str] = None) -> Dict:
         """Su koçu analizi.
 
         Args:
@@ -380,8 +692,40 @@ class WaterHammerAnalyzer:
         warnings: List[str] = []
 
         # --- sıvı özellikleri ---
+        #
+        # ÖH Z5S / defter P4B4-01 (KRİTİK) DÜZELTMESİ. Eskiden bu blokta
+        # TEK koşul vardı: ``bulk_modulus_Pa`` ve ``density_kg_m3`` BİRLİKTE
+        # verilmişse akışkan kaydı "Custom fluid" olarak SIFIRDAN kuruluyor,
+        # dolayısıyla akışkan TABLODA OLSA BİLE tablonun buhar basıncı
+        # düşüyordu (``vapor_pressure_Pa=None``). Buhar basıncı düşünce aşağı
+        # salınım kolon ayrılmasıyla kıyaslanamıyor ve fail-closed kapısı
+        # sessizce açılıyordu. ÖLÇÜLDÜ (su, 100 m x 100 mm x 6 mm steel_4130,
+        # 10 bar, MAWP 500 bar; tablonun KENDİ K ve rho'su override olarak
+        # verildi): 2 m/s'de kolon ayrılması True -> None ve hüküm basıncı
+        # 64,38 -> 37,19 bar; 20 m/s'de hüküm UNSAFE -> SAFE (hüküm basıncı
+        # 553,81 -> 281,90 bar, akma 552,00 bar). Aynı fizik, iki çağrı
+        # biçimi, iki hüküm.
+        #
+        # Doğru ayrım ÇAĞRI BİÇİMİ değil AKIŞKANIN TABLODA OLUP OLMAMASIDIR:
+        #   * tabloda VARSA: kayıt tablodan gelir, verilen override yalnız
+        #     ilgili ALANI ezer (buhar basıncı yerinde kalır),
+        #   * tabloda YOKSA: özel akışkan kaydı kurulur ve buhar basıncı
+        #     BİLİNMEZ olur (uydurulmaz) — o hâlde SAFE sertifikası da
+        #     verilemez (aşağıdaki fail-closed düşüşü).
         fluid_key = str(fluid).lower()
-        if bulk_modulus_Pa is not None and density_kg_m3 is not None:
+        tabloda = fluid_key in FLUID_PROPERTIES
+        overridden: List[str] = []
+        if tabloda:
+            fluid_rec = dict(FLUID_PROPERTIES[fluid_key])
+            record_source = 'fluid_table'
+            if bulk_modulus_Pa is not None:
+                fluid_rec['bulk_modulus_Pa'] = float(bulk_modulus_Pa)
+                fluid_rec['bulk_modulus_band_Pa'] = None
+                overridden.append('bulk_modulus_Pa')
+            if density_kg_m3 is not None:
+                fluid_rec['density_kg_m3'] = float(density_kg_m3)
+                overridden.append('density_kg_m3')
+        elif bulk_modulus_Pa is not None and density_kg_m3 is not None:
             fluid_rec = {
                 'name': f'Custom fluid ({fluid})',
                 'bulk_modulus_Pa': float(bulk_modulus_Pa),
@@ -393,18 +737,13 @@ class WaterHammerAnalyzer:
                 'vapor_pressure_ref_K': None,
                 'vapor_pressure_source': None,
             }
+            record_source = 'user_custom_fluid'
+            overridden = ['bulk_modulus_Pa', 'density_kg_m3']
         else:
-            if fluid_key not in FLUID_PROPERTIES:
-                raise ValueError(
-                    f"Unknown fluid '{fluid}'. Available: "
-                    f"{sorted(FLUID_PROPERTIES)} — or pass both "
-                    f"bulk_modulus_Pa and density_kg_m3 for a custom fluid.")
-            fluid_rec = dict(FLUID_PROPERTIES[fluid_key])
-            if bulk_modulus_Pa is not None:
-                fluid_rec['bulk_modulus_Pa'] = float(bulk_modulus_Pa)
-                fluid_rec['bulk_modulus_band_Pa'] = None
-            if density_kg_m3 is not None:
-                fluid_rec['density_kg_m3'] = float(density_kg_m3)
+            raise ValueError(
+                f"Unknown fluid '{fluid}'. Available: "
+                f"{sorted(FLUID_PROPERTIES)} — or pass both "
+                f"bulk_modulus_Pa and density_kg_m3 for a custom fluid.")
 
         K = float(fluid_rec['bulk_modulus_Pa'])
         rho = float(fluid_rec['density_kg_m3'])
@@ -446,6 +785,54 @@ class WaterHammerAnalyzer:
         sigma_u = float(mat['ultimate_strength'])  # Pa
 
         # --- akış hızı ---
+        #
+        # ÖH D18 / termo-ucus a1 (P4B4-10) — İKİ DEBİ, TEK HÜKÜM.
+        # ÖLÇÜLDÜ (``once.json`` K8, taban 9071a64): ``mdot_kg_s=0,5`` ve
+        # ``flow_velocity_m_s=0,979784`` BİRLİKTE gönderildiğinde yanıtın
+        # ``inputs`` bloğu İKİSİNİ DE yankılıyor, hangisinin çözüme girdiğini
+        # söyleyen tek alan yok (``hangi_gecerli_alani: []``). Sessiz kural
+        # "hız mdot'u ezer" idi: kullanıcı gönderdiği kütle debisinin
+        # kullanılmadığını hiçbir yerden öğrenemiyordu.
+        #
+        # Artık: (a) hangisinin OTORİTE olduğu adıyla yayımlanır
+        # (``flow_source``), (b) ikisi birden gönderilmiş ve BİRBİRİYLE
+        # ÇELİŞİYORSA hüküm kazanılmamıştır — sayı seçilmez, iki sayı da
+        # adıyla geri verilir (fail-closed, kardeş
+        # ``/api/trajectory-analysis`` ``inconsistent_thrust_input``
+        # kapısıyla aynı doktrin ve AYNI bağıl pay).
+        flow_source = None
+        flow_cross_check = None
+        if flow_velocity_m_s is not None and mdot_kg_s is not None:
+            if not (isinstance(mdot_kg_s, (int, float))
+                    and math.isfinite(mdot_kg_s) and mdot_kg_s > 0):
+                raise ValueError(
+                    "mdot_kg_s must be a positive finite mass flow "
+                    f"(got {mdot_kg_s!r}).")
+            if not (isinstance(flow_velocity_m_s, (int, float))
+                    and math.isfinite(flow_velocity_m_s)
+                    and flow_velocity_m_s > 0):
+                raise ValueError(
+                    "flow_velocity_m_s must be a positive finite speed "
+                    f"(got {flow_velocity_m_s!r}).")
+            _mdot_from_v = rho * float(flow_velocity_m_s) * area
+            _sapma = abs(_mdot_from_v - float(mdot_kg_s)) / float(mdot_kg_s)
+            if _sapma > FLOW_INPUT_REL_TOL:
+                raise ValueError(
+                    'The line flow is described twice and the two '
+                    'descriptions disagree: mdot_kg_s = '
+                    f'{float(mdot_kg_s):g} kg/s, while flow_velocity_m_s = '
+                    f'{float(flow_velocity_m_s):g} m/s implies '
+                    f'{_mdot_from_v:g} kg/s through this bore at rho = '
+                    f'{rho:g} kg/m^3 (relative disagreement {_sapma:.4g} > '
+                    f'{FLOW_INPUT_REL_TOL:g}). No transient was computed: '
+                    'reporting one of them would silently discard the other. '
+                    'Send flow_velocity_m_s OR mdot_kg_s.')
+            flow_cross_check = {
+                'mdot_kg_s_supplied': float(mdot_kg_s),
+                'mdot_kg_s_implied_by_velocity': float(_mdot_from_v),
+                'relative_disagreement': float(_sapma),
+                'accepted_relative_disagreement': FLOW_INPUT_REL_TOL,
+            }
         if flow_velocity_m_s is not None:
             if not (isinstance(flow_velocity_m_s, (int, float))
                     and math.isfinite(flow_velocity_m_s)
@@ -455,6 +842,7 @@ class WaterHammerAnalyzer:
                     f"(got {flow_velocity_m_s!r}).")
             v_flow = float(flow_velocity_m_s)
             mdot_used = rho * v_flow * area
+            flow_source = 'flow_velocity_m_s'
         elif mdot_kg_s is not None:
             if not (isinstance(mdot_kg_s, (int, float))
                     and math.isfinite(mdot_kg_s) and mdot_kg_s > 0):
@@ -463,17 +851,66 @@ class WaterHammerAnalyzer:
                     f"(got {mdot_kg_s!r}).")
             mdot_used = float(mdot_kg_s)
             v_flow = mdot_used / (rho * area)     # v = mdot/(rho*A)
+            flow_source = 'mdot_kg_s'
         else:
             raise ValueError(
                 "Provide either flow_velocity_m_s or mdot_kg_s to define "
                 "the line flow velocity.")
 
         # Kapanmadaki hız değişimi (tam kapanma: dv = v_flow)
+        #
+        # ÖH D29 / app-api-uc a1 (P16B3-26, kalan yarı) — ÜÇÜNCÜ DEBİ
+        # TANIMININ SESSİZ ÜSTÜNLÜĞÜ. P4B4-10 ``mdot_kg_s`` ⟷
+        # ``flow_velocity_m_s`` çelişkisini kapatmıştı; ``delta_v_m_s``
+        # aynı kapının DIŞINDA kalmıştı.
+        #
+        # ÖLÇÜLDÜ (``a1/once.json`` K1, taban 4c27fa51; su hattı
+        # 25,4x1,5 mm, 5 m, 25 bar, mdot 3,74 kg/s -> v_flow 7,395776 m/s):
+        #
+        #   delta_v_m_s gönderilmez -> tepe   125,139754 bar (dv = v_flow)
+        #   delta_v_m_s = 1000      -> tepe 13565,128099 bar, HTTP 200
+        #   delta_v_m_s = -5        -> tepe    92,700640 bar, HTTP 200
+        #
+        # 1000 m/s'lik bir "kapanma hız değişimi", hattın kendi akış hızının
+        # 135 KATIDIR: bir vana akışı, akışın sahip olmadığı bir hızdan
+        # yavaşlatamaz. Joukowsky dp = rho*a*dv doğrudan o sayıdan
+        # hesaplanıyor, yani kullanıcının verdiği ``mdot_kg_s`` fiilen
+        # devre dışı kalıyor ve bunu söyleyen tek alan yok. Negatif değer
+        # ise ``abs()`` ile sessizce işaret değiştiriyordu — hüküm
+        # üretiliyor ama girdinin işareti kaybediliyordu.
+        #
+        # Sınır İCAT EDİLMEDİ: üst sınır hattın KENDİ çözülmüş akış hızıdır
+        # (``v_flow``, kaynağı ``flow_source`` ile zaten yayımlanıyor); tam
+        # kapanma dv = v_flow tanımın kendisidir ve bu değer KABUL edilir.
+        # dv = 0 (vana kapanmıyor) meşrudur ve reddedilmez. Alan
+        # gönderilmezse davranış BİT-AYNI.
+        delta_v_source = 'full_closure:flow_velocity'
         if delta_v_m_s is not None:
             if not (isinstance(delta_v_m_s, (int, float))
                     and math.isfinite(delta_v_m_s)):
                 raise ValueError("delta_v_m_s must be a finite speed [m/s].")
-            dv = abs(float(delta_v_m_s))
+            _dv_ham = float(delta_v_m_s)
+            if _dv_ham < 0.0:
+                raise ValueError(
+                    'delta_v_m_s is the velocity DROP across the closing '
+                    f'valve and cannot be negative (got {_dv_ham:g} m/s). '
+                    'It was previously made positive with abs() and a '
+                    'verdict was issued on a number you did not send. No '
+                    'transient was computed.')
+            if _dv_ham > v_flow * (1.0 + FLOW_INPUT_REL_TOL):
+                raise ValueError(
+                    f'delta_v_m_s = {_dv_ham:g} m/s exceeds the line flow '
+                    f'velocity {v_flow:g} m/s (resolved from '
+                    f'{flow_source}). A closing valve cannot remove more '
+                    'velocity than the flow has: full closure IS dv = '
+                    'v_flow. Accepting the larger number would drive the '
+                    'Joukowsky rise dp = rho*a*dv straight from it and '
+                    'silently discard the mass flow you supplied. No '
+                    'transient was computed; send delta_v_m_s <= '
+                    f'{v_flow:g} m/s for a partial closure, or omit it for '
+                    'full closure.')
+            dv = min(_dv_ham, v_flow)
+            delta_v_source = 'delta_v_m_s'
         else:
             dv = v_flow
 
@@ -582,10 +1019,41 @@ class WaterHammerAnalyzer:
                     f"(got {pipe_mawp_bar!r}).")
             p_mawp = float(pipe_mawp_bar) * 1e5
             mawp_source = 'user_supplied_pressure_class'
+            # ÖH D15 / termo-ucus (P4B4-03) — HÜKÜM MERDİVENİNİN VARSAYIMI
+            # KULLANICI SINIFINDA ÇÖKÜYORDU. Merdiven (aşağıda) SAFE <= MAWP
+            # < MARGINAL <= akma < UNSAFE sırasını "MAWP < p_yield" VARSAYARAK
+            # kurar. Kullanıcı basınç sınıfı akmanın ÜSTÜNDEYSE ilk dal her
+            # şeyi yutuyor, akma AŞILDIĞI hâlde hüküm SAFE çıkıyordu.
+            #
+            # ÖLÇÜLDÜ (su, L=50 m, ID=25 mm, t=1,0 mm, P_iş=20 bar, ss_304,
+            # pipe_mawp_bar=400; hoop akma 172,000 bar):
+            #     v =  6 m/s -> design_peak 176,5815 bar -> SAFE
+            #     v =  8 m/s -> design_peak 228,7753 bar -> SAFE
+            #     v = 10 m/s -> design_peak 280,9691 bar -> SAFE
+            # Üçünde de akmaya dair TEK uyarı bile üretilmiyordu.
+            #
+            # ANMA SINIFI, MODELLENEN GEOMETRİNİN AKMA BASINCININ ÜSTÜNDE
+            # SERTİFİKA VEREMEZ: sınıf başka (daha kalın) bir cidar için
+            # geçerli olabilir, ama bu koşuda çözülen hoop akma basıncı
+            # verilen ``wall_thickness_mm`` + ``pipe_material`` ikilisinden
+            # gelir. İkisi çelişiyorsa çelişki ADIYLA söylenir ve hüküm
+            # DÜŞÜK olan dayanımla verilir (fail-closed).
+            if p_mawp > p_yield:
+                warnings.append(
+                    f"Supplied pipe_mawp_bar ({p_mawp / 1e5:.1f} bar) is ABOVE "
+                    f"the hoop yield pressure of the modelled wall "
+                    f"({p_yield / 1e5:.1f} bar, from wall_thickness_mm and "
+                    f"the resolved pipe material). A pressure class cannot "
+                    "certify above the yield of the geometry actually "
+                    "analysed — the safety verdict uses the hoop yield "
+                    "pressure as the effective rating. Either the wall "
+                    "thickness or the pressure class is wrong for this line.")
+            p_mawp_effective = min(p_mawp, p_yield)
         else:
             p_mawp = p_yield / MAWP_YIELD_SAFETY_FACTOR
             mawp_source = (f'thin_wall_hoop_yield_over_SF'
                            f'({MAWP_YIELD_SAFETY_FACTOR:g})')
+            p_mawp_effective = p_mawp
 
         # İnce-cidar geçerliliği (t/r_i < 0.1; Shigley/Roark)
         if t_wall / r_i > 0.1:
@@ -593,7 +1061,7 @@ class WaterHammerAnalyzer:
                 f"t/r = {t_wall / r_i:.3f} > 0.1 — thin-wall hoop assumption "
                 "degrades; thick-wall (Lame) analysis recommended for the "
                 "pipe pressure rating. Wave-speed correction is unaffected.")
-        if p_work >= p_mawp:
+        if p_work >= p_mawp_effective:
             warnings.append(
                 "Working pressure already meets or exceeds the pipe MAWP "
                 "before any transient — line is under-rated for steady "
@@ -606,7 +1074,7 @@ class WaterHammerAnalyzer:
         # KORUNUR (geriye dönük sözleşme); hüküm ayrı alanla raporlanır.
         p_design = peak_pressure if rejoin_peak is None else max(peak_pressure,
                                                                  rejoin_peak)
-        if p_design <= p_mawp:
+        if p_design <= p_mawp_effective:
             status = self.STATUS_SAFE
         elif p_design <= p_yield:
             status = self.STATUS_MARGINAL
@@ -620,6 +1088,105 @@ class WaterHammerAnalyzer:
                 "Peak transient pressure exceeds the hoop yield pressure — "
                 "risk of permanent deformation or rupture.")
 
+        # ------------------------------------------------------------------
+        # ÖH D18 / termo-ucus a1 (P4B4-09) — ÇALIŞMA BASINCININ REFERANS
+        # DÜZLEMİ. ÖLÇÜLDÜ (``once.json`` K8, taban 9071a64): yanıtta
+        # ``reference`` içeren TEK bir alan yok, ama modül aynı sayıyı İKİ
+        # ZIT sözleşmeyle kullanıyordu:
+        #   * kolon ayrılması  ``p_work − dP < p_vap``  -> p_work MUTLAK,
+        #   * hüküm merdiveni  ``p_design <= p_mawp``   -> p_work GÖSTERGE
+        #     (ince-cidar hoop kapasitesi cidar ÜZERİNDEKİ FARK basıncıdır).
+        # Bir atmosferlik yorum farkı bu yüzden hem tepe basıncını hem de
+        # ayrılma hükmünü kaydırır.
+        #
+        # Kapı bir sayı SEÇMEZ: iki okumayı da değerlendirir. Hüküm ikisinde
+        # de AYNIYSA yayımlanır ve düzlemin hükmü değiştirmediği söylenir;
+        # AYRIŞIYORSA hüküm kazanılmamıştır — alan adıyla reddedilir.
+        # Çağıran ``working_pressure_reference`` verirse iki karşılaştırma da
+        # O düzlemde TUTARLI yapılır.
+        p_ambient = isa_pressure(0.0)
+        if working_pressure_reference is not None:
+            if working_pressure_reference not in WORKING_PRESSURE_REFERENCES:
+                raise ValueError(
+                    "working_pressure_reference must be one of "
+                    f"{list(WORKING_PRESSURE_REFERENCES)} "
+                    f"(got {working_pressure_reference!r}).")
+
+        def _hukum(okuma):
+            p_abs = p_work if okuma == 'absolute' else p_work + p_ambient
+            p_gauge = p_work - p_ambient if okuma == 'absolute' else p_work
+            sep = None if p_vap is None else bool(
+                (p_abs - dp_applied) < p_vap)
+            tepe_g = p_gauge + dp_applied
+            tasarim_g = (tepe_g if not sep else
+                         max(tepe_g,
+                             p_gauge + COLUMN_SEPARATION_PEAK_FACTOR
+                             * dp_applied))
+            if tasarim_g <= p_mawp_effective:
+                st = self.STATUS_SAFE
+            elif tasarim_g <= p_yield:
+                st = self.STATUS_MARGINAL
+            else:
+                st = self.STATUS_UNSAFE
+            return {'status': st, 'column_separation': sep,
+                    'working_pressure_absolute_bar': float(p_abs / 1e5),
+                    'working_pressure_gauge_bar': float(p_gauge / 1e5),
+                    'design_peak_gauge_bar': float(tasarim_g / 1e5)}
+
+        # ÖH D24 / termo-ucus a2 (P4B4-09, Fable-D18 ŞART) — BAYRAK HESAPLANIR.
+        #
+        # ÖLÇÜLDÜ (``a2/once.json`` K4, taban 88a29d3): düzlem AÇIKÇA
+        # verildiğinde YALNIZ o okuma değerlendiriliyordu
+        # (``_okumalar = (ref,)``); ``verdict_by_reading`` tek anahtarlı
+        # kalıyor ve ``verdict_depends_on_reference`` KOD SABİTİ ``False``
+        # yayımlanıyordu. Fable ölçümü (SU_HATTI ss_304, 185 bar — ayrışma
+        # penceresinin İÇİ): ``reference='absolute'`` → SAFE, ``'gauge'`` →
+        # MARGINAL; iki yanıt da ``verdict_depends_on_reference=False``
+        # basıyordu. Beyan YANLIŞTI: hüküm düzleme BAĞLIYKEN künye "bağlı
+        # değil" diyordu (uydurma sabit).
+        #
+        # Artık İKİ OKUMA DA HER ÇAĞRIDA değerlendirilir ve bayrak
+        # (status, column_separation) ikilisinin okumalar arasında
+        # AYRIŞMASI olarak hesaplanır. Düzlem verildiğinde hüküm yine o
+        # düzlemden gelir (sayısal davranış DEĞİŞMEZ); değişen tek şey
+        # künyenin artık gerçeği söylemesidir. Düzlem verilmediğinde
+        # ayrışma hâlâ fail-closed ``ValueError``dır — sayı seçilmez.
+        _okuma_hukumleri = {o: _hukum(o) for o in WORKING_PRESSURE_REFERENCES}
+        _hukumler = {(h['status'], h['column_separation'])
+                     for h in _okuma_hukumleri.values()}
+        _duzleme_bagli = len(_hukumler) > 1
+        if working_pressure_reference is None:
+            if _duzleme_bagli:
+                _a = _okuma_hukumleri['absolute']
+                _g = _okuma_hukumleri['gauge']
+                raise ValueError(
+                    "working_pressure_bar = "
+                    f"{float(working_pressure_bar):g} bar was supplied "
+                    "without a reference plane, and the verdict DEPENDS on "
+                    "it: read as ABSOLUTE the line is "
+                    f"{_a['status']} (column_separation="
+                    f"{_a['column_separation']}, design peak "
+                    f"{_a['design_peak_gauge_bar']:.4g} bar gauge); read as "
+                    f"GAUGE it is {_g['status']} (column_separation="
+                    f"{_g['column_separation']}, design peak "
+                    f"{_g['design_peak_gauge_bar']:.4g} bar gauge). One "
+                    "atmosphere of interpretation decides the answer, so no "
+                    "verdict was reported. Send "
+                    "working_pressure_reference='absolute' or 'gauge'.")
+        else:
+            # Düzlem AÇIKÇA verildi: iki karşılaştırma da o düzlemde
+            # tutarlı yapılır ve hüküm oradan gelir.
+            _tek = _okuma_hukumleri[working_pressure_reference]
+            status = _tek['status']
+            column_separation = _tek['column_separation']
+            if column_separation:
+                rejoin_peak = (p_work + COLUMN_SEPARATION_PEAK_FACTOR
+                               * dp_applied)
+            else:
+                rejoin_peak = None
+            p_design = (peak_pressure if rejoin_peak is None
+                        else max(peak_pressure, rejoin_peak))
+
         # Malzeme varsayıldıysa 'SAFE' hükmü verilemez (fail-closed): basınç
         # sınıfı tahmin edilen bir malzemenin dayanımından türetilmiştir.
         if resolved_material != pipe_material and status == self.STATUS_SAFE:
@@ -630,9 +1197,34 @@ class WaterHammerAnalyzer:
                 f"('{DEFAULT_PIPE_MATERIAL}'), not the one requested — supply "
                 "a known pipe_material or pipe_mawp_bar to certify SAFE.")
 
+        # ÖH Z5S / defter P4B4-01 (KRİTİK) fail-closed AYAĞI: kolon ayrılması
+        # kapısı hiç değerlendirilemediyse (buhar basıncı bilinmiyor) modülün
+        # kendi uyarısı zaten "the Joukowsky peak below is NOT guaranteed to
+        # be the upper bound" diyor. ÜST SINIR OLMADIĞI BEYAN EDİLEN bir
+        # tepeden SAFE sertifikası çıkarılamaz. Desen yeni değildir: aynı
+        # dosya malzeme VARSAYILDIĞINDA da SAFE'i MARGINAL'e düşürür; burada
+        # o desenin ikizi kurulur (ölçüldü: özel akışkan, 20 bar hat, MAWP
+        # 500 bar -> eskiden SAFE).
+        if column_separation is None and status == self.STATUS_SAFE:
+            status = self.STATUS_MARGINAL
+            warnings.append(
+                "Safety verdict downgraded to MARGINAL: the column-separation "
+                "check could NOT be performed (no vapour pressure for this "
+                "fluid), so the Joukowsky peak is not a certified upper bound "
+                "— supply vapor_pressure_Pa to certify SAFE.")
+
         # --- kapanma süresi önerisi ---
-        recommendation, recommended_close_ms = self._closure_recommendation(
-            dp_instant, p_mawp, p_work, rho, L, dv, t_c)
+        # NOT (Z5S/PK4): önerinin dayandığı izin künyesi YANITA EKLENMEZ.
+        # Deponun ters-yön sözleşmesi (P13B4-01 bekçileri) yeni bir üst
+        # düzey alanın PANELDE tüketilmesini ister; feed_panel.js bu paketin
+        # sahasında değildir, tüketicisiz künye de yeni bir borç doğurur.
+        # Künyenin taşıdığı bilgi ``recommendation`` metnine yazılır (panel
+        # o metni zaten basıyor) ve önerilen süreden sayısal olarak geri
+        # çözülebilir: dP_izin = 2*rho*L*dv/t_onerilen.
+        recommendation, recommended_close_ms, _allowance = \
+            self._closure_recommendation(dp_instant, p_mawp, p_work, rho, L,
+                                         dv, t_c, p_vap,
+                                         COLUMN_SEPARATION_PEAK_FACTOR)
 
         # --- çıktı (JSON-güvenli) ---
         result = {
@@ -666,6 +1258,34 @@ class WaterHammerAnalyzer:
             'vapor_pressure_source': p_vap_source,
             'vapor_pressure_ref_K': fluid_rec.get('vapor_pressure_ref_K'),
             'column_separation': column_separation,
+            # ÖH D18 / P4B4-09: hükmün hangi REFERANS DÜZLEMİNDE verildiği.
+            # ``supplied`` None ise düzlem beyan edilmemiştir; o durumda İKİ
+            # okuma da değerlendirilmiş ve hüküm ikisinde de AYNI çıkmıştır
+            # (ayrışsaydı bu yanıt hiç üretilmezdi).
+            'working_pressure_reference': {
+                'supplied': working_pressure_reference,
+                'ambient_pressure_Pa': float(p_ambient),
+                'ambient_pressure_source': 'ISA sea level (isa_pressure(0))',
+                'verdict_by_reading': _okuma_hukumleri,
+                # ÖH D24 / P4B4-09 (Fable-D18 ŞART): ÖLÇÜLEN bayrak, kod
+                # sabiti DEĞİL. True ise bu satırın üstündeki hüküm
+                # (status / column_separation) 1 atm'lik yorum farkıyla
+                # DEĞİŞİR ve yalnız ``supplied`` düzlemi için geçerlidir.
+                'verdict_depends_on_reference': bool(_duzleme_bagli),
+                '_basis': (
+                    'working_pressure_bar enters TWO comparisons with '
+                    'OPPOSITE reference planes: column separation needs an '
+                    'ABSOLUTE pressure (vs the fluid vapour pressure) and '
+                    'the thin-wall hoop rating needs a GAUGE pressure (the '
+                    'differential across the wall). Both readings are '
+                    'ALWAYS evaluated and both are published above. If they '
+                    'disagree and no plane was stated, no verdict is '
+                    'reported at all (the call is refused). If they '
+                    'disagree and a plane WAS stated, the verdict comes '
+                    'from that plane and verdict_depends_on_reference is '
+                    'true: one atmosphere of interpretation would change '
+                    'the answer, so the plane you sent is load bearing.'),
+            },
             'column_separation_peak_factor': (
                 None if rejoin_peak is None else COLUMN_SEPARATION_PEAK_FACTOR),
             'column_separation_peak_bar': (None if rejoin_peak is None
@@ -673,12 +1293,33 @@ class WaterHammerAnalyzer:
             # Emniyet hükmünün dayandığı basınç: kolon ayrılması yoksa
             # Joukowsky tepesi, varsa tahmini birleşme tepesi (fail-closed).
             'design_peak_pressure_bar': float(p_design / 1e5),
+            # ÖH D18 / P4B4-10: hangi girdi ÇÖZÜME GİRDİ. ``flow_source``
+            # otoriteyi adlandırır; ``flow_cross_check`` yalnız iki girdi
+            # BİRLİKTE gönderildiğinde doludur ve ikisinin uyuştuğunu
+            # sayıyla gösterir (uyuşmasalardı yanıt hiç üretilmezdi).
+            'flow_source': flow_source,
+            'flow_cross_check': flow_cross_check,
+            # ÖH D29 / app-api-uc a1 (P16B3-26) — ``delta_v_source``
+            # yaprağı BİLEREK yayımlanmadı: ``_source`` soneki
+            # ``tests/test_wave4b_contract.py``de DÜRÜSTLÜK alanı sayılır
+            # ve ters-yön sözleşmesi onu ``panels/feed_panel.js``in de
+            # basmasını şart koşar; o dosya arayuz-panel kulvarının
+            # sahasıdır (D29 kulvar bölmesi), bu kulvar oraya dokunamaz.
+            # Uç tarafı hazır (``delta_v_source`` yerel değişkeni), tek
+            # satırla açılır — arayuz-panel devri, a1/rapor.md §6.
             'pipe': {
                 'material': resolved_material,
                 'material_name': mat.get('name', resolved_material),
                 'elastic_modulus_GPa': float(E_pipe / 1e9),
                 'mawp_bar': float(p_mawp / 1e5),
                 'mawp_source': mawp_source,
+                # Hükmün GERÇEKTEN kullandığı anma dayanımı (P4B4-03).
+                # Kullanıcı basınç sınıfı hoop akmasının üstünde kaldıysa
+                # bu alan akma basıncını gösterir ve ikisi arasındaki fark
+                # okunabilir olur; hüküm merdiveni bu sayıya dayanır.
+                'mawp_effective_bar': float(p_mawp_effective / 1e5),
+                'mawp_capped_by_hoop_yield': bool(
+                    p_mawp_effective < p_mawp),
                 'hoop_yield_pressure_bar': float(p_yield / 1e5),
                 'hoop_burst_pressure_bar': float(p_burst_thin / 1e5),
                 'thin_wall_ratio_t_over_r': float(t_wall / r_i),
@@ -704,8 +1345,40 @@ class WaterHammerAnalyzer:
                 'mdot_kg_s': mdot_kg_s,
                 'flow_velocity_m_s': flow_velocity_m_s,
                 'valve_closure_time_ms': valve_closure_time_ms,
-                'pipe_material': resolved_material,
+                # ÖH Z5S / defter P4B4-08 künye ayağı: burada eskiden
+                # ``resolved_material`` yazıyordu, yani KULLANICININ GÖNDERDİĞİ
+                # ad çıktıdan siliniyordu (ölçüldü: 'unobtanium' gönderilen
+                # çağrıda inputs.pipe_material 'ss_304' dönüyordu ve gönderilen
+                # ad yalnız serbest metinli bir uyarı cümlesinde kalıyordu).
+                # Deponun tescilli deseni: gönderilen / kullanılan ayrı ayrı
+                # yapısal alanlardan okunur (warn.liquid.input_field_not_read,
+                # P16 §4).
+                'pipe_material': pipe_material,
+                'pipe_material_submitted': pipe_material,
+                'pipe_material_used': resolved_material,
+                'pipe_material_use_instead': (
+                    None if resolved_material == pipe_material
+                    else resolved_material),
                 'pipe_mawp_bar': pipe_mawp_bar,
+                # ÖH D19 / P4B4-11 — YOĞUNLUĞUN KÜNYESİ.
+                # Kalemin ana iddiası ("adaptör motorun yoğunluğunu hiç
+                # iletmiyor; hız motorun rho'suyla, dP tablonun rho'suyla
+                # hesaplanıyor") bu tabanda ÖLÇÜMLE ÇÜRÜTÜLDÜ: RP-1 hattında
+                # tablo 810 kg/m3 iken caller 820 verince çözücü 820'yi
+                # kullanıyor ve Joukowsky 47,46675811961261 ->
+                # 47,75886400354484 bar oluyor (once.json K11). Kalan gerçek
+                # boşluk KÜNYEYDİ: ``inputs`` bloğu gönderilen yoğunluğu
+                # yankılamıyordu (``inputs.density_kg_m3 = null``) ve
+                # yanıtta ``density_source`` adında bir alan yoktu. Kardeş
+                # ``pipe_material_submitted/used`` deseni aynen uygulanır;
+                # YENİ SAYI YOK — ``density_kg_m3_used`` çözümün zaten
+                # kullandığı ``rho``dur.
+                'density_kg_m3': density_kg_m3,
+                'density_kg_m3_submitted': density_kg_m3,
+                'density_kg_m3_used': float(rho),
+                'density_source': ('caller_override'
+                                   if 'density_kg_m3' in overridden
+                                   else record_source),
             },
             'fluid_properties': {
                 'bulk_modulus_Pa': K,
@@ -714,6 +1387,11 @@ class WaterHammerAnalyzer:
                 'density_kg_m3': rho,
                 'confidence': fluid_rec.get('confidence'),
                 'source': fluid_rec.get('source'),
+                # Kaydın KÖKENİ ve hangi alanların ezildiği (P4B4-01): tablo
+                # kaydına override uygulanması, kaydı "özel akışkan" yapmaz —
+                # buhar basıncı yerinde kalır.
+                'record_source': record_source,
+                'overridden_fields': list(overridden),
             },
             'assumptions': [
                 "Lumped Joukowsky/Allievi model; not a method-of-"
@@ -757,28 +1435,112 @@ class WaterHammerAnalyzer:
                                 rho: float,
                                 length_m: float,
                                 delta_v: float,
-                                critical_time_s: float) -> Tuple[str, Optional[float]]:
-        """Tepe basıncı MAWP içinde tutan minimum kapanma süresi önerisi.
+                                critical_time_s: float,
+                                vapor_pressure_Pa: Optional[float],
+                                peak_factor: float,
+                                ) -> Tuple[str, Optional[float], Dict]:
+        """HÜKÜM basıncını MAWP içinde tutan minimum kapanma süresi önerisi.
 
         Yavaş kapanma formülünü tersine çevirir:
-            dP_slow = 2*rho*L*dv/t_close = dP_allow  ->
-            t_close = 2*rho*L*dv / dP_allow ,   dP_allow = MAWP - P_work
+            dP_slow = 2*rho*L*dv/t_close = dP_hedef  ->
+            t_close = 2*rho*L*dv / dP_hedef
 
-        Sonuç kritik süreden büyük olmalıdır (yavaş rejim). Eğer ani basınç
-        artışı zaten MAWP marjına sığıyorsa özel bir sınırlama gerekmez.
+        ÖH Z5S / defter P4B4-02 DÜZELTMESİ. Eskiden ``dP_hedef`` doğrudan
+        ``dP_allow = MAWP - P_calisma`` idi, yani öneri YALNIZ Joukowsky
+        artışını görüyordu; kolon ayrılması rejiminde hükmün dayandığı
+        birleşme tepesini (``p_work + F*dP``) hiç görmüyordu. İki ölçülen
+        sonucu vardı:
+
+        * N2O 55 bar hattı (100 m x 100 mm x 6 mm steel_4130, 2 m/s,
+          MAWP 70 bar): hüküm basıncı 70,33 bar > MAWP -> hüküm MARGINAL,
+          buna rağmen öneri "no closure-time restriction is required" ve
+          önerilen süre None. Hüküm "emniyetsiz" derken öneri "kısıt
+          gerekmez" diyordu.
+        * Su 10 bar hattı (aynı boru, 2 m/s, MAWP 30 bar): önerilen 199,6 ms
+          uygulandığında Joukowsky tepesi tam 30,000 bara iniyor ama aşağı
+          salınım buhar basıncının altına düştüğü için hüküm basıncı
+          50,000 bar oluyordu — öneri metninin kendi iddiası ürünün kendi
+          hüküm basıncıyla çürüyordu.
+
+        Hedef artış artık REJİMİN izin verdiği en büyük artıştır:
+
+          * ayrılmasız dal: dP <= P_calisma - P_buhar iken aşağı salınım
+            buhar basıncının üstünde kalır, hüküm basıncı = Joukowsky
+            tepesidir -> dP <= dP_allow yeterlidir,
+          * ayrılmalı dal: hüküm basıncı p_work + F*dP olduğundan
+            dP <= dP_allow / F gerekir.
+
+        İki dalın izin verdiği en büyük değer alınır; ikisi de hüküm
+        basıncını MAWP'nin İÇİNDE bırakır (kanıt: dP = min(dP_allow,
+        P_calisma - P_buhar) ayrılma üretmez ve tepe = p_work + dP <= MAWP;
+        dP = dP_allow/F ise ayrılma olsa da olmasa da hüküm basıncı
+        <= MAWP). Buhar basıncı BİLİNMİYORSA ayrılma dışlanamaz, o yüzden
+        fail-closed olarak yalnız ayrılmalı dal kullanılır.
+
+        Returns
+        -------
+        (metin, onerilen_sure_ms, izin_kunyesi)
         """
         dp_allow = p_mawp_Pa - p_work_Pa
+        kunye: Dict = {
+            'mawp_margin_Pa': float(dp_allow),
+            'column_separation_peak_factor': float(peak_factor),
+        }
         if dp_allow <= 0.0:
+            kunye.update({'allowed_pressure_rise_Pa': None,
+                          'allowance_basis': (
+                              'the working pressure already meets the MAWP: '
+                              'no transient allowance exists.')})
             return ("Line MAWP is already met at the working pressure; no "
                     "valve closure time keeps the peak within rating — "
                     "increase the pipe pressure class or lower the working "
-                    "pressure."), None
-        if dp_instant_Pa <= dp_allow:
+                    "pressure."), None, kunye
+
+        if vapor_pressure_Pa is None:
+            dp_target = dp_allow / peak_factor
+            allowance_basis = (
+                'the fluid vapour pressure is unknown, so column separation '
+                'cannot be excluded; the allowance is the MAWP margin divided '
+                f'by the {peak_factor:g}x rejoining-shock factor '
+                '(fail-closed).')
+            separation_limited = True
+        else:
+            dp_no_separation = max(p_work_Pa - float(vapor_pressure_Pa), 0.0)
+            dp_split = dp_allow / peak_factor
+            dp_target = max(min(dp_allow, dp_no_separation), dp_split)
+            separation_limited = dp_target < dp_allow
+            if separation_limited:
+                allowance_basis = (
+                    f'the downsurge reaches the vapour pressure at a rise of '
+                    f'{dp_no_separation / 1e5:.3f} bar, so the MAWP margin '
+                    f'({dp_allow / 1e5:.3f} bar) cannot be spent on the '
+                    f'Joukowsky rise alone: with column separation the design '
+                    f'peak is p_work + {peak_factor:g}*dP (Wylie & Streeter '
+                    f'Ch. 9), hence the allowance is '
+                    f'{dp_target / 1e5:.3f} bar.')
+            else:
+                allowance_basis = (
+                    f'the downsurge stays above the vapour pressure up to a '
+                    f'rise of {dp_no_separation / 1e5:.3f} bar, so the whole '
+                    f'MAWP margin ({dp_allow / 1e5:.3f} bar) is available '
+                    'without column separation.')
+        kunye.update({'allowed_pressure_rise_Pa': float(dp_target),
+                      'allowance_basis': allowance_basis,
+                      'column_separation_limited': bool(separation_limited)})
+
+        ek = ((f' The allowance is limited by column separation to '
+               f'{dp_target / 1e5:.3f} bar, not by the MAWP margin '
+               f'({dp_allow / 1e5:.3f} bar) alone: with a ruptured column the '
+               f'design peak is p_work + {peak_factor:g}*dP.')
+              if separation_limited else '')
+        if dp_instant_Pa <= dp_target:
             return ("Even instantaneous closure keeps the peak within the "
-                    "pipe MAWP; no closure-time restriction is required."), None
-        # dP_slow = 2*rho*L*dv/t_close = dp_allow
-        t_req_s = 2.0 * rho * length_m * delta_v / dp_allow
+                    "pipe MAWP; no closure-time restriction is required."
+                    + ek), None, kunye
+        # dP_slow = 2*rho*L*dv/t_close = dp_target
+        t_req_s = 2.0 * rho * length_m * delta_v / dp_target
         t_req_s = max(t_req_s, critical_time_s)
         t_req_ms = t_req_s * 1e3
-        return (f"Valve closure slower than {t_req_ms:.1f} ms recommended to "
-                f"keep the peak pressure within the pipe MAWP."), float(t_req_ms)
+        metin = (f"Valve closure slower than {t_req_ms:.1f} ms recommended to "
+                 f"keep the peak pressure within the pipe MAWP." + ek)
+        return metin, float(t_req_ms), kunye

@@ -10,8 +10,16 @@ Kapsam (görev şartnamesi a–e):
       G_0'dır; Isp tabanlı ideal delta-v saha bağımsızdır. (Sessiz hatanın
       kilidi — modül başlığındaki KRİTİK AYRIM.)
   (d) Çevrimdışı kip AĞ çağrısı YAPMADAN çalışır.
-  (e) Enlem verilmediğinde düzlemsel trajectory ve 6-DOF çözümü ESKİSİYLE
-      birebir aynıdır (regresyon kilidi); enlem yalnız ağırlık terimine girer.
+  (e) Enlem verilmediğinde düzlemsel trajectory ESKİSİYLE birebir aynıdır;
+      enlem verildiğinde YEREL yerçekimi ağırlık terimine girer ve apoje
+      ölçülebilir biçimde değişir (2B kolda doğrulanmış desen).
+  (f) 6-DOF çözücüsü aynı girdiyle BİT-EŞ koşum üretir (determinizm) VE
+      fırlatma sahası (rakım, enlem) çözüme fiilen girer. ÖH FAZ B adım B7:
+      bu bekçinin eski hâli "6-DOF enlemden bağımsızdır" iddiasını REGRESYON
+      KİLİDİ yapıyordu — yani defter P4B3-01 (saha rakımı atmosfere girmiyor)
+      ve P4B3-11 (WGS84 yerel g hesaplanıyor ama dinamiğe hiç girmiyor)
+      kusurlarını koruyordu. İddia tersine çevrildi; kusurlar bugün
+      xfail(strict) borç imiyle sayılır.
 
 Ek: enu_to_geodetic (küre uçuş-yolu çizimi bunun JS kopyasını kullanır) kapalı
 formülle doğrulanır — Python ve JS'in aynı dönüşümü yapması garanti edilir.
@@ -143,7 +151,11 @@ def test_dem_available_offline():
 def _motor():
     return {
         "thrust": 6500.0, "burn_time": 7.5, "total_impulse": 6500.0 * 7.5,
-        "isp": 220.0, "propellant_mass_total": 18.0,
+        # ÖH D23 / P4B3-24: "isp" kaldırıldı — yük kendi içinde tutarsızdı
+        # (impuls bütçesinden türeyen Isp ile %1'den fazla ayrışıyordu) ve
+        # çözücü artık çelişkiyi reddediyor. Isp bütçenin türevidir; anahtar
+        # yokken ondan türetilir, testin ölçtüğü sayılar değişmez.
+        "propellant_mass_total": 18.0,
         "mass_flow_rate": 6500.0 / (220.0 * G_0),
     }
 
@@ -203,26 +215,126 @@ def test_latitude_changes_weight_not_standard_gravity():
     assert abs(eq - base) > 1.0
 
 
-def test_sixdof_solver_is_deterministic_and_latitude_free():
-    """6-DOF çözücü enlem parametresi ALMAZ; çıktısı saha katmanından
-    bağımsız ve tekrarlanabilir (regresyon kilidi)."""
-    from hrma.analysis.six_dof_trajectory import BarrowmanAero, SixDOFTrajectory
+def _sixdof_kos(**kw):
+    """6-DOF koşumu — tek yerde kurulu, saha parametreleri dışarıdan.
 
-    def run():
-        aero = BarrowmanAero(body_diameter=0.15, nose_length=0.5,
-                             body_length=3.0, fin_count=4,
-                             fin_root_chord=0.22, fin_tip_chord=0.1,
-                             fin_span=0.13, fin_sweep=0.08)
-        s = SixDOFTrajectory(aero=aero, dry_mass=25.0, propellant_mass=18.0,
-                             thrust=6500.0, burn_time=7.5,
-                             launch_elevation_deg=84.0, launch_azimuth_deg=90.0,
-                             wind_speed=6.0, wind_direction_deg=270.0)
-        return s.solve(t_max=400.0)
+    ÖH B7: eski bekçi çözücüyü "enlem parametresi ALMAZ" diye tanıtıyordu;
+    çözücü aslında ``latitude_deg`` ve ``launch_altitude`` alıyor
+    (six_dof_trajectory.py:528). Yardımcı bu yüzden saha parametrelerini
+    geçirilebilir yapar.
+    """
+    from hrma.analysis.six_dof_trajectory import (BarrowmanAero,
+                                                  SixDOFTrajectory)
 
-    r1, r2 = run(), run()
-    assert r1["apogee"] == pytest.approx(r2["apogee"], rel=1e-9)
+    aero = BarrowmanAero(body_diameter=0.15, nose_length=0.5,
+                         body_length=3.0, fin_count=4,
+                         fin_root_chord=0.22, fin_tip_chord=0.1,
+                         fin_span=0.13, fin_sweep=0.08)
+    s = SixDOFTrajectory(aero=aero, dry_mass=25.0, propellant_mass=18.0,
+                         thrust=6500.0, burn_time=7.5,
+                         launch_elevation_deg=84.0, launch_azimuth_deg=90.0,
+                         wind_speed=6.0, wind_direction_deg=270.0, **kw)
+    return s, s.solve(t_max=400.0)
+
+
+def _sapan_alanlar(a, b, tol=0.0):
+    """İki koşum sözlüğünde BİT-EŞ olmayan alanların adları + farkları."""
+    sapan = []
+    for k in sorted(set(a) | set(b)):
+        va, vb = a.get(k), b.get(k)
+        if isinstance(va, np.ndarray) or isinstance(vb, np.ndarray):
+            va, vb = np.asarray(va), np.asarray(vb)
+            if va.shape != vb.shape:
+                sapan.append(f'{k}: biçim {va.shape} != {vb.shape}')
+            elif not np.array_equal(va, vb):
+                fark = float(np.nanmax(np.abs(va - vb)))
+                if fark > tol:
+                    sapan.append(f'{k}: en büyük fark {fark:.3e}')
+        elif isinstance(va, (int, float)) and not isinstance(va, bool):
+            if abs(float(va) - float(vb)) > tol:
+                sapan.append(f'{k}: {va!r} != {vb!r}')
+        elif va != vb:
+            sapan.append(f'{k}: {va!r} != {vb!r}')
+    return sapan
+
+
+def test_sixdof_ayni_girdi_bit_es_kosum_uretir():
+    """Aynı girdi -> BİT-EŞ çıktı; sapan alan varsa ADIYLA raporlanır.
+
+    Eski bekçi yalnız apojeyi ``rel=1e-9`` ile karşılaştırıyordu: yörünge,
+    hız, quaternion ve açısal hız dizilerinin tamamı sessizce kayabilirdi.
+    Determinizm iddiası artık ÇIKTININ TAMAMI üstünde ve bit düzeyinde.
+    """
+    _, r1 = _sixdof_kos()
+    _, r2 = _sixdof_kos()
+    sapan = _sapan_alanlar(r1, r2)
+    assert not sapan, 'aynı girdiyle sapan alanlar: ' + '; '.join(sapan)
     assert r1["position"].shape[0] == 3            # 3×N (x=K, y=D, z=yukarı)
     assert math.isfinite(r1["apogee"]) and r1["apogee"] > 0
+
+
+def test_sixdof_firlatma_sahasi_rakimi_cozume_girer():
+    """3000 m rakımlı saha, deniz seviyesiyle aynı yörüngeyi veremez.
+
+    Deniz seviyesinde yoğunluk 1,225 kg/m³, 3000 m'de ~0,909 kg/m³:
+    sürükleme ~%26 azalır, apoje ölçülebilir biçimde YÜKSELİR.
+
+    ÖH Z5S / PK2 ONARILDI (defter P4B3-01) — xfail borç imi SÖKÜLDÜ.
+    ÖNCE: ``six_dof_trajectory._derivatives`` yoğunluğu ``h = max(r[2], 0)``
+    ile, yani SAHAYA GÖRE yükseklikle çözüyordu; ``self.launch_altitude``
+    yalnız itki referans basıncına giriyordu. Ölçüldü: 0 m ⟷ 3000 m arasında
+    apoje farkı 0,000e+00 (bit-eş) — F023 "düzeltildi" beyanı yanlıştı.
+    SONRA: atmosfer MUTLAK irtifadan (``launch_altitude + h_agl``) okunuyor;
+    aynı kurulumda apoje 5757,345774 m → 6981,206966 m, fark 1223,861192 m.
+    ``launch_altitude = 0`` kolu BİT-AYNI (çapa koşumu:
+    docs/scofield/raw/OH/Z5S/pk2/capa_ONCE.json ⟷ capa_SONRA.json).
+    """
+    _, deniz = _sixdof_kos(launch_altitude=0.0)
+    _, yayla = _sixdof_kos(launch_altitude=3000.0)
+    fark = yayla['apogee'] - deniz['apogee']
+    # Eşik 2B kardeşin desenidir (``test_latitude_changes_weight_...``):
+    # "farklı olsun" demek yetmez, fark ÖLÇÜLEBİLİR olmalı — böylece
+    # koşum gürültüsü bu bekçiyi yanlışlıkla yeşile çeviremez.
+    assert abs(fark) > 1.0, (
+        f"rakım 0 m ve 3000 m için apoje farkı {fark:.3e} m "
+        f"({deniz['apogee']:.6f} m) — saha rakımı atmosfer modeline "
+        'hiç girmiyor')
+    assert fark > 0.0
+
+
+def test_sixdof_yerel_yercekimi_dinamige_girer():
+    """Ekvator ile kutup arasındaki %0,53'lük g farkı apojeye yansımalı.
+
+    2B kolun doğru deseni ``test_latitude_changes_weight_not_standard_
+    gravity``de yazılı: yerel g yalnız AĞIRLIK terimine girer, Isp/g0
+    zinciri dokunulmaz. Bu bekçi aynı deseni 6-DOF koluna taşır. Coriolis
+    kapatılır ki ölçülen fark yalnız yerçekiminden gelsin.
+
+    ÖH Z5S / PK2 ONARILDI (defter P4B3-11) — xfail borç imi SÖKÜLDÜ.
+    ÖNCE: WGS84 yerel yerçekimi hesaplanıyordu (``self.g_surface``) ama
+    dinamik ``g = G0·(R/(R+h))²`` ile KÜRESEL sabiti kullanıyordu;
+    ``g_surface`` dosyanın hiçbir yerinde okunmuyordu. Ölçüldü (Coriolis
+    kapalı): ekvator g 9,780325 ⟷ kutup 9,832185 m/s² (%0,530 fark) olmasına
+    rağmen apoje bit-eşti, fark 0,000e+00.
+    SONRA: ``g = g_surface·((R+h_saha)/(R+h_saha+h_agl))²``; aynı kurulumda
+    ekvator apojesi 5767,039014 m ⟷ kutup 5748,096187 m, fark 18,942827 m.
+    Enlem verilmemiş kolda ``g_surface == G0`` ve ``launch_altitude == 0``
+    olduğundan ifade eskisiyle BİT-AYNIDIR (çapa koşumu kanıtı).
+    """
+    ekvator_s, ekvator = _sixdof_kos(latitude_deg=0.0, coriolis=False)
+    kutup_s, kutup = _sixdof_kos(latitude_deg=90.0, coriolis=False)
+    # Saha katmanı yerel g'yi GERÇEKTEN çözüyor (girdi tarafı sağlam).
+    assert ekvator_s.g_surface == pytest.approx(ls.local_gravity(0.0, 0.0),
+                                                rel=1e-9)
+    assert kutup_s.g_surface > ekvator_s.g_surface
+    fark = ekvator['apogee'] - kutup['apogee']
+    assert abs(fark) > 1.0, (
+        f"ekvator ve kutup apojesi arasındaki fark {fark:.3e} m "
+        f"({ekvator['apogee']:.6f} m) — yerel g "
+        f'({ekvator_s.g_surface:.6f} ⟷ {kutup_s.g_surface:.6f} m/s²) '
+        'dinamiğe hiç girmiyor')
+    # Kutupta ağırlık daha büyük -> apoje daha düşük.
+    assert fark > 0.0
 
 
 # ---------------------------------------------------------------------------

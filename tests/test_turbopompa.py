@@ -55,11 +55,20 @@ from hrma.analysis.turbopump_sizing import (
     NS_CENTRIFUGAL_MAX_US,
     PUMP_STAGES_MAX,
     HEAD_COEFF_DEFAULT,
+    HEAD_COEFF_DESIGN_BAND,
     SPEED_DERATE_DEFAULT,
     TURBINE_STAGES_MAX,
     NOT_MODELLED,
 )
 from hrma.constants import G_0
+# ÖH D20 / P13B3-06 — eşikler TEK KAYNAKTAN; sistematik sapma ADIYLA
+# çıkarıldıktan sonra kalan artık cebirsel kimliktir.
+from tests.support.esikler import PLATFORM_GURULTU_TABANI_REL
+
+#: Yayımlanmış donanım sayılarının YUVARLAMA basamağından türeyen bantlar.
+#: (Bant çıktıdan seçilmiyor; KAYNAĞIN basamağından hesaplanıyor.)
+#: 7,07 in -> ±0,005 in ; 4,2 in -> ±0,05 in ; 5,9 in -> ±0,05 in.
+PUB_ROUND_IN = {'fuel_pump_stage1': 0.005, 'lox_pump': 0.05, 'turbine': 0.05}
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 VALIDATION_DIR = REPO_ROOT / 'data' / 'validation'
@@ -210,33 +219,88 @@ class TestRL10TasarimNoktasi:
         assert _rl10_ox_case(rl10)['pump']['stage_count'] == 1
 
     def test_yakit_cark_capi(self, rl10, rl10_geom):
-        """Yakıt çark çapı tahmini yayımlanmış 7.07 in'e karşı, %15 tolerans.
+        """Yakıt çark çapı: sistematik sapma ADIYLA çıkarılır.
 
-        Gerekçe: donanımdan geriye hesap psi = 0.60 (bant ucu), varsayılan
-        psi = 0.50 -> D ~ psi^-0.5 sistematik +%9.5 sapar; kalan pay tablo
-        yuvarlamaları için. Hesaplanan sapma ~+%10.
+        ÖH defteri **P13B3-06**: bu test ``rel=0.15`` kullanıyordu ve
+        docstring'i bandın "ölçülen ~%10 sapmayı kapsayacak biçimde"
+        seçildiğini söylüyordu — yani eşik çıktıdan seçilmişti ve yapıca
+        kırılamazdı (modelin fiziği %14 kayarsa test yine yeşil kalırdı).
+
+        Sapmanın ADI VAR: model varsayılan baş katsayısıyla (psi = 0,50)
+        boyutlandırır, RL10 donanımı ise daha yüksek psi'de çalışır.
+        Modülün kendi bağıntısı (turbopump_sizing §5) D ∝ psi^(-1/2)
+        olduğundan psi donanımdan GERİ HESAPLANABİLİR:
+
+            psi_donanim = psi_varsayilan · (D_model / D_yayim)²
+
+        ÖLÇÜLDÜ (``once_p13b306.json``): psi_donanim = **0,6048** — tasarım
+        bandının (0,40-0,60) hemen dışında, docstring'in "0,60 bant ucu"
+        cümlesiyle uyumlu. psi bu değere konulduğunda model yayımlanmış
+        çapı **2,2e-16 bağıl** içinde yeniden üretir (bit düzeyinde
+        kimlik). Bant artık çıktıdan değil, yayımlanmış sayının yuvarlama
+        basamağından (7,07 in → ±0,005 in) türetiliyor.
+
+        ÖH D26 · **Fable-D20 ŞART**: bandın ``max(psi_bant, 1e-3)``
+        biçimindeki ADSIZ tabanı kaldırıldı. 1e-3, yayım yuvarlamasından
+        türeyen bandın (8,555e-4) 1,17 katıydı ve hiçbir ölçüme
+        dayanmıyordu — yani bandın bir kısmı yine çıktıdan seçilmişti.
+        Türetilen bant tek başına yeterlidir: ölçülen psi_hw 0,604825,
+        çapa 0,6048, fark **2,54e-5** — bandın %3'ü (``once_p13b306
+        .json``, D26 ölçümü ``once_p13b306_d26.json``).
         """
         pub_in = rl10_geom['expected_outputs']['hardware_geometry'][
             'fuel_pump_impeller_diameter_in']['stage1']
         res = _rl10_fuel_case(rl10)
         d_in = res['pump']['impeller_diameter_in']
-        assert d_in == pytest.approx(pub_in, rel=0.15)
+
+        # (a) sistematik sapmanın ADI: donanımın baş katsayısı
+        psi_hw = HEAD_COEFF_DEFAULT * (d_in / pub_in) ** 2
+        # Yayımlanmış çapın yuvarlaması psi'ye ×2 bağıl olarak taşınır.
+        psi_bant = 2.0 * (PUB_ROUND_IN['fuel_pump_stage1'] / pub_in) * psi_hw
+        assert psi_hw == pytest.approx(0.6048, abs=psi_bant), (
+            f'donanımdan geri hesaplanan baş katsayısı {psi_hw:.6f}; kayıt '
+            f'0,6048 (±{psi_bant:.6f}, yayım yuvarlamasından) — model '
+            'fiziği ya da yayımlanmış sayı değişti')
+        assert psi_hw > HEAD_COEFF_DESIGN_BAND[1], (
+            'psi artık tasarım bandının İÇİNDE; o zaman varsayılanla '
+            'ölçülen sapmanın açıklaması da değişmiştir')
+
+        # (b) sapma adıyla konunca artık KİMLİKTİR (ölçülen: 2,2e-16)
+        geri = _rl10_fuel_case(rl10, head_coefficient=psi_hw)
+        assert geri['pump']['impeller_diameter_in'] == pytest.approx(
+            pub_in, rel=PLATFORM_GURULTU_TABANI_REL), (
+            'D ∝ psi^(-1/2) bağıntısı artık tutmuyor: sistematik sapma '
+            'baş katsayısıyla açıklanamıyor')
+
         lo, hi = res['pump']['impeller_diameter_band_m']
         assert lo < res['pump']['impeller_diameter_m'] < hi
 
     def test_lox_cark_capi(self, rl10, rl10_geom):
-        """LOX çark çapı tahmini yayımlanmış 4.2 in'e karşı, %25 tolerans.
+        """LOX çark çapı: %25'lik bant yerine ADI KONMUŞ baş katsayısı.
 
-        Gerekçe: geriye hesap psi = 0.73 — jenerik tasarım bandının
-        (0.40-0.60) DIŞINDA (düşük özgül devirli, dişli tahrikli pompa;
-        modül docstring'i bu vakayı sert bandın gerekçesi olarak anar).
-        psi 0.50 -> 0.73 farkı D'de sqrt(0.73/0.50)-1 = +%21 sistematik
-        sapma demektir; tolerans bunu kapsayacak şekilde %25 seçildi.
+        ÖH defteri **P13B3-06** bu testi adıyla anıyordu: docstring
+        *"tolerans bunu kapsayacak şekilde %25 seçildi"* diyordu — bandın
+        çıktıdan seçildiğinin itirafı. Sapmanın adı LOX pompasının düşük
+        özgül devirli, dişli tahrikli mimarisidir ve sayısı ölçülebilir:
+
+            psi_donanim = 0,50 · (D_model/D_yayim)² = **0,7348**
+
+        (``once_p13b306.json``; modül docstring'inin "0,73" dediği vaka.)
+        Bant, yayımlanmış 4,2 in'in yuvarlamasından (±0,05 in) türetilir:
+        psi'de ±0,018. Model fiziği %2 kayarsa bu test artık KIRMIZI verir;
+        eski ±%25 bandında %10'luk bir kayma bile sessizdi.
         """
         pub_in = rl10_geom['expected_outputs']['hardware_geometry'][
             'lox_pump_impeller_diameter_in']
         d_in = _rl10_ox_case(rl10)['pump']['impeller_diameter_in']
-        assert d_in == pytest.approx(pub_in, rel=0.25)
+        psi_hw = HEAD_COEFF_DEFAULT * (d_in / pub_in) ** 2
+        psi_bant = 2.0 * (PUB_ROUND_IN['lox_pump'] / pub_in) * psi_hw
+        assert psi_hw == pytest.approx(0.7348, abs=psi_bant), (
+            f'LOX pompası baş katsayısı {psi_hw:.4f}; kayıt 0,7348 '
+            f'(±{psi_bant:.4f}, yayım yuvarlamasından)')
+        assert psi_hw > HEAD_COEFF_DESIGN_BAND[1], (
+            'psi tasarım bandına girdi; "banda sığmayan mimari" gerekçesi '
+            'artık geçerli değil, kalem yeniden ölçülsün')
 
     def test_turbin_kademe_ve_cap(self, rl10, rl10_geom):
         """Türbin: 2 kademe (yayımlanmış mimari) ve 5.9 in'e karşı %15.
@@ -257,8 +321,32 @@ class TestRL10TasarimNoktasi:
         assert res['turbine']['stage_count'] == 2
         pub_in = rl10_geom['expected_outputs']['hardware_geometry'][
             'turbine_meanline_diameter_in']
-        assert res['turbine']['mean_diameter_in'] == pytest.approx(
-            pub_in, rel=0.15)
+        # ÖH D20 / P13B3-06 — "±%15 sapmayı kapsar" yerine ADI KONMUŞ artık:
+        # D_ort = 60·U/(π·N) ve U = nu·sqrt(2·dh/n) olduğundan D ∝ nu.
+        # Donanımın çalıştığı hız oranı geri hesaplanır:
+        #     nu_donanim = nu_model · D_yayim/D_model = 0,4474
+        # yani teorik optimumun (0,46985) **%95,2'si**. KU H-10 (KU-29, 6 Eki
+        # 2026): eski metin bunu "gerçek darbe türbinleri optimumun hemen
+        # altında çalışır" diye GENELLİYORDU. Bu tek bir genişletici çevrim
+        # (RL10) noktasıdır, genelleme değildir: NASA SP-8110 Tablo I'deki
+        # (s. 10) iki sıralı hız-bileşik GG türbinlerinin çoğu U/C0
+        # 0,11-0,21'de; basınç-bileşik Mark 3/4 GG türbinleri 0,39-0,42;
+        # SP-8110 s. 15: iki sıralı GG/tap-off 0,10-0,40. Aynı tablo
+        # RL10 A3-3 için U/C0 0,35 verir — 0,4474 ile fark
+        # varyant (A-3-3 ⟷ A-3-3A), C0 tanımı ya da çalışma noktasından
+        # olabilir, karar verilemedi (d). Bant yayımlanmış 5,9 in'in
+        # yuvarlamasından (±0,05 in) gelir.
+        nu_model = res['turbine']['velocity_ratio_per_stage']
+        nu_opt = res['turbine']['velocity_ratio_optimum_per_stage']
+        nu_hw = nu_model * pub_in / res['turbine']['mean_diameter_in']
+        nu_bant = (PUB_ROUND_IN['turbine'] / pub_in) * nu_hw
+        assert nu_hw == pytest.approx(0.4474, abs=nu_bant), (
+            f'donanımdan geri hesaplanan U/C0 {nu_hw:.4f}; kayıt 0,4474 '
+            f'(±{nu_bant:.4f})')
+        assert 0.90 < nu_hw / nu_opt < 1.0, (
+            'RL10 donanım hız oranı artık optimumun hemen ALTINDA değil '
+            '(yalnız bu RL10 noktası için; genelleme değil); '
+            f'nu_hw/nu_opt = {nu_hw / nu_opt:.3f}')
 
     def test_turbin_girdisi_yoksa_none_ve_beyanli(self, rl10):
         """Türbin girdisi verilmezse turbine=None + NOT_SIZED beyanı

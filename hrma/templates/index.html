@@ -199,7 +199,21 @@
             gap: 26px;
         }
 
+        /* ÖH D34 · OH-GT-16 — KART BİR BAĞLANTIDIR.
+           ÖLÇÜLDÜ (a1/once.json): üç kartın üçü de `onclick` taşıyan
+           `<div>`di; `odaklanabilir_kart` = 0. Yani kart klavyeyle
+           odaklanamıyor, Enter ile açılamıyor, orta tıkla/Cmd-tıkla yeni
+           sekmede açılamıyor ve ekran okuyucuya bağlantı olarak görünmüyor
+           (WCAG 2.1.1). Tıklama davranışı görsel olarak vardı, semantiği
+           yoktu. Etiket `<a href>`e çevrildi; iç içe `<a>` olmasın diye
+           kartın içindeki "LAUNCH DESIGNER" gerçek bağlantı olmaktan
+           çıkıp `<span>`a indi (kart zaten aynı hedefe gidiyor).
+           `display:block` açıkça yazılır: ızgara öğesi blok davranır ama
+           kural ızgaradan bağımsız dursun. */
         .motor-card {
+            display: block;
+            color: inherit;
+            text-decoration: none;
             position: relative;
             background: var(--hd-panel);
             border: 1px solid var(--hd-line);
@@ -232,6 +246,13 @@
             border-right: 2px solid var(--mc-accent);
             opacity: 0.5;
         }
+        /* OH-GT-16: klavye odağı GÖRÜNÜR olmalı — fare vurgusuyla aynı
+           çerçeve + tarayıcının kendi odak halkası korunur. */
+        .motor-card:focus-visible {
+            outline: 2px solid var(--mc-accent);
+            outline-offset: 3px;
+        }
+
         .motor-card:hover {
             transform: translateY(-6px);
             border-color: var(--mc-accent);
@@ -387,7 +408,7 @@
         <div class="hero-badge"><span data-i18n="hero.badge">VERSION</span><span class="ver">{{ app_version }}</span></div>
         <h1>HRM<span>A</span></h1>
         <div class="tagline" data-i18n="hero.tagline">Hybrid, Liquid &amp; Solid Rocket Motor Analysis &amp; Design Suite</div>
-        <div class="sub" data-i18n="hero.sub">Parametric Solvers &middot; NASA CEA Validated &middot; Interactive 3D Model</div>
+        <div class="sub" data-i18n="hero.sub">Parametric Solvers &middot; Thermochemical Equilibrium Model &middot; Interactive 3D Model</div>
         <div class="cap-strip">
             <span data-i18n="cap.regression">Regression-coupled ballistics</span>
             <span data-i18n="cap.nozzle">Rao nozzle contours</span>
@@ -400,7 +421,7 @@
         <div class="section-label" data-i18n="section.select">Select Propulsion Architecture</div>
         <div class="motor-grid">
             <!-- Hybrid Motor Card -->
-            <div class="motor-card hybrid" onclick="window.location.href='/hybrid'">
+            <a class="motor-card hybrid" href="/hybrid">
                 <div class="mc-head">
                     <div class="mc-icon">H</div>
                     <div class="mc-title">
@@ -415,11 +436,11 @@
                     <li data-i18n="card.hybrid.f3">Injector design optimization</li>
                     <li data-i18n="card.hybrid.f4">Marxman regression analysis</li>
                 </ul>
-                <a href="/hybrid" class="btn-enter" data-i18n="btn.launch">Launch Designer</a>
-            </div>
+                <span class="btn-enter" data-i18n="btn.launch">Launch Designer</span>
+            </a>
 
             <!-- Solid Motor Card -->
-            <div class="motor-card solid" onclick="window.location.href='/solid'">
+            <a class="motor-card solid" href="/solid">
                 <div class="mc-head">
                     <div class="mc-icon">S</div>
                     <div class="mc-title">
@@ -434,11 +455,11 @@
                     <li data-i18n="card.solid.f3">Burn rate calculations</li>
                     <li data-i18n="card.solid.f4">Progressive / regressive thrust</li>
                 </ul>
-                <a href="/solid" class="btn-enter" data-i18n="btn.launch">Launch Designer</a>
-            </div>
+                <span class="btn-enter" data-i18n="btn.launch">Launch Designer</span>
+            </a>
 
             <!-- Liquid Motor Card -->
-            <div class="motor-card liquid" onclick="window.location.href='/liquid'">
+            <a class="motor-card liquid" href="/liquid">
                 <div class="mc-head">
                     <div class="mc-icon">L</div>
                     <div class="mc-title">
@@ -453,8 +474,8 @@
                     <li data-i18n="card.liquid.f3">Turbopump specifications</li>
                     <li data-i18n="card.liquid.f4">Combustion instability analysis</li>
                 </ul>
-                <a href="/liquid" class="btn-enter" data-i18n="btn.launch">Launch Designer</a>
-            </div>
+                <span class="btn-enter" data-i18n="btn.launch">Launch Designer</span>
+            </a>
         </div>
 
         <div class="aux-links">

@@ -42,18 +42,59 @@ from hrma.engines.cea_bridge import (
     DEG_R_TO_K,
     BAR_TO_PSIA,
 )
+from tests.bagimlilik_kapisi import kapi
 
-# RocketCEA opsiyonel: kurulu değilse CEA-gerektiren testler atlanır,
-# fallback/eşleme/yapı testleri yine koşar.
+# ---------------------------------------------------------------------------
+# RocketCEA kapısı — ÜÇ DURUMLU (ÖH FAZ A / A1, defter P13B1-01)
+# ---------------------------------------------------------------------------
+# Kararın TEK KAYNAĞI ``tests/bagimlilik_kapisi.kapi``; burada yalnız o kapıya
+# verilecek iki girdi üretilir (yol açık mı + kırıklık teşhisi). Kardeşi:
+# ``tests/test_combustion_cea_validation.py`` (aynı desen, aynı gerekçe).
+#
+# ESKİ HÂLİ ``except Exception -> skipif("RocketCEA kurulu değil")`` idi ve
+# rocketcea KURULUYKEN ithal yolu bozulduğunda da atlıyordu: ölçümde
+# (P13/S1-savci §1.4a) sabotaj RuntimeError ile de OSError ile de birebir aynı
+# sonucu verdi — ``1 failed, 30 passed, 31 skipped`` — ve o tek kırmızı bile
+# KAZA eseriydi (`test_call_failure_falls_back`, yedek notun sözcük seçimi:
+# 'failed' aranıyor, not 'unavailable' diyor). Yani 31 bekçi bir YALANLA
+# sessizleşiyordu.
+#
+#     kurulu DEĞİL               -> ATLA   (gerekçe find_spec ile DOĞRULANIR)
+#     kurulu + ithal ÇALIŞIYOR   -> KOŞ
+#     KURULU ama ithal KIRIK     -> KIRMIZI (atlanamaz)
 try:
     from rocketcea.cea_obj import CEA_Obj
-    ROCKETCEA_AVAILABLE = True
-except Exception:  # pragma: no cover
-    ROCKETCEA_AVAILABLE = False
+    ROCKETCEA_YOLU_ACIK = True
+    ROCKETCEA_ITHAL_HATASI = ''
+except ImportError as _rc_exc:      # pragma: no cover - ortama bağlı
+    ROCKETCEA_YOLU_ACIK = False
+    ROCKETCEA_ITHAL_HATASI = f'{type(_rc_exc).__name__}: {_rc_exc}'
+except Exception as _rc_exc:        # pragma: no cover - ortama bağlı
+    # OSError / RuntimeError / ...: KURULUM sorusunun yanıtı DEĞİL.
+    ROCKETCEA_YOLU_ACIK = False
+    ROCKETCEA_ITHAL_HATASI = f'{type(_rc_exc).__name__}: {_rc_exc}'
 
-needs_cea = pytest.mark.skipif(
-    not ROCKETCEA_AVAILABLE,
-    reason="RocketCEA kurulu değil; CEA gerektiren testler atlanıyor.")
+
+def _rocketcea_kirik_aciklamasi() -> str:
+    return (
+        'rocketcea KURULU (dağıtım bulundu) ama '
+        '`from rocketcea.cea_obj import CEA_Obj` yüklenemedi:\n'
+        f'    {ROCKETCEA_ITHAL_HATASI or "(ithal hatası kaydedilmedi)"}\n'
+        'Bu dosyanın birim disiplini / ham-CEA çapraz bekçileri bu ortamda '
+        'KOŞMUYOR. Atlanacak değil DÜZELTİLECEK bir durumdur (kurulum bozuk: '
+        'gfortran / derlenmiş CEA uzantısı). Eskiden "RocketCEA kurulu değil" '
+        'gerekçesiyle SESSİZCE atlanıyordu — ÖH defter P13B1-01.')
+
+
+@pytest.fixture
+def cea_kapisi():
+    """Üç durumlu rocketcea kapısı (bkz. yukarıdaki blok)."""
+    kapi('rocketcea', ROCKETCEA_YOLU_ACIK, _rocketcea_kirik_aciklamasi())
+
+
+#: CEA gerektiren sınıfların imi. ``skipif`` DEĞİL: atlama kararını kurulum
+#: sorusunu GERÇEKTEN soran kapı verir.
+needs_cea = pytest.mark.usefixtures('cea_kapisi')
 
 
 # --------------------------------------------------------------------------
@@ -81,7 +122,19 @@ class TestNameMapping:
         ('mmh', 'n2o4', 'MMH', 'N2O4'),
         ('udmh', 'n2o4', 'UDMH', 'N2O4'),
         ('methane', 'lox', 'CH4', 'LOX'),
-        ('ethanol', 'lox', 'C2H5OH', 'LOX'),
+        # ÖH D15/hibrit-a1 (31 Ağu 2026) — BEKÇİ ÇEVRİLDİ.
+        # Bu satır kusuru KORUYORDU: 'ethanol' anahtarı HRMA tablosunda
+        # 'Ethanol/LOX (75% Ethanol/25% Water)' KARIŞIMINI adlandırır ve
+        # yakıt yoğunluğu da o karışımınkidir; buradaki beklenti ise SAF
+        # etanol kartıydı (C2H5OH). Ölçüldü (LOX, Pc = 100 bar, MR = 1,524):
+        # saf kart c* 1739,74 m/s ⟷ tablo 1678,30 (+%3,66), mw 22,621 ⟷
+        # 24,23 (−%6,64). Testin AMACI değişmedi — tablodaki her çift
+        # eşlenmeli — yalnız 'ethanol' için doğru kart artık karışım
+        # kartıdır (cea_bridge.CUSTOM_FUEL_CARDS['ETHANOL75']). Saf etanol
+        # KAYBOLMADI, kendi anahtarlarında sınanır (aşağıdaki iki satır).
+        ('ethanol', 'lox', 'ETHANOL75', 'LOX'),
+        ('c2h5oh', 'lox', 'C2H5OH', 'LOX'),
+        ('ethanol_pure', 'lox', 'C2H5OH', 'LOX'),
         ('rp1', 'h2o2', 'RP1', 'H2O2'),   # görev kapsamı: h2o2 oksitleyici
     ])
     def test_table_pairs_map(self, fuel, ox, exp_f, exp_o):

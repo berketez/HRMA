@@ -12,6 +12,12 @@ import os
 from hrma import DATA_DIR
 
 
+#: ÖH D22 / P9B5-13 — künye eşiği. Bu sayı HESABA GİRMEZ: ölçekleme her
+#: zaman uygulanır (bkz. ``validate_motor_calculation``). Yalnız "ölçeklendi"
+#: notunun basılıp basılmayacağını belirler, yani okunabilirlik eşiğidir;
+#: sayısal sonucu değiştirmediği için bir hüküm eşiği değildir.
+SCALE_NOTE_VISIBILITY = 0.001
+
 class NASARealtimeValidator:
     """NASA/NIST gerçek zamanlı veri doğrulayıcısı"""
 
@@ -83,29 +89,77 @@ class NASARealtimeValidator:
         return None
     
     def fetch_nist_gas_properties(self, gas: str) -> Optional[Dict]:
-        """NIST webbook'tan gerçek gas properties çek"""
+        """NIST WebBook'tan gaz özelliği çek — KÜNYE KAZANILARAK.
+
+        P9B5-15 ONARIMI (2026-08-27). Eski davranış: HTTP 200 gelir gelmez
+        sonuç ``'source': 'NIST WebBook Live'`` künyesiyle dönüyordu. Ama
+        dönen sözlüğün iki sayısı da ``_extract_nist_mw`` /
+        ``_extract_nist_gamma`` çıktısıydı ve bu iki ayrıştırıcı, WebBook'un
+        gerçek JANAF sayfasında ARADIĞI deseni (``Molecular weight`` /
+        ``Cp/Cv``) bulamadığında ``None`` döner. Yani "NIST'ten canlı veri"
+        künyesi, İÇİNDE TEK BİR SAYI OLMAYAN bir sözlüğe basılabiliyordu:
+        yanıtın gelmiş olması, sayının ayıklanmış olması demek değildir.
+
+        Yeni sözleşme (Z4'ün kazanılmış-künye kuralının veri katmanındaki
+        eşliği): 'Live' damgası ANCAK en az bir sayı gerçekten ayıklandığında
+        verilir. Hiçbiri ayıklanamazsa sayı UYDURULMAZ, sözlük
+        ``status='parse_failed'`` ve kökeni dürüstçe söyleyen bir künye ile
+        döner; hangi alanların ayıklandığı/ayıklanamadığı ADLARIYLA yazılır.
+        Sayılara dokunulmadı — yalnız künye gerçeğe bağlandı.
+        """
         try:
             nist_url = "https://webbook.nist.gov/cgi/cbook.cgi"
-            
+
             params = {
                 'ID': self._get_nist_id(gas),
                 'Type': 'JANAF',
                 'Table': 'on'
             }
-            
+
             response = requests.get(nist_url, params=params, timeout=10)
-            
+
             if response.status_code == 200:
-                return {
-                    'molecular_weight': self._extract_nist_mw(response.text),
-                    'cp_cv_ratio': self._extract_nist_gamma(response.text),
+                ayiklanan = {}
+                for alan, ayiklayici in (
+                        ('molecular_weight', self._extract_nist_mw),
+                        ('cp_cv_ratio', self._extract_nist_gamma)):
+                    deger = ayiklayici(response.text)
+                    if deger is not None:
+                        ayiklanan[alan] = deger
+
+                ortak = {
+                    'gas': gas,
+                    'nist_id': self._get_nist_id(gas),
+                    'source_url': nist_url,
+                    'http_status': response.status_code,
                     'fetched_at': datetime.now().isoformat(),
-                    'source': 'NIST WebBook Live'
+                    'parsed_fields': sorted(ayiklanan),
+                    'unparsed_fields': sorted(
+                        {'molecular_weight', 'cp_cv_ratio'} - set(ayiklanan)),
                 }
-                
+
+                if not ayiklanan:
+                    # Yanıt geldi ama TEK SAYI ayıklanamadı: 'Live' künyesi
+                    # KAZANILMADI. Boş anahtar da konmuyor (fail-closed) —
+                    # çağıran ".get(anahtar, yedek)" ile kendi kaynağına düşer.
+                    ortak.update({
+                        'status': 'parse_failed',
+                        'source': ('NIST WebBook reached (HTTP 200) but no '
+                                   'numeric property could be parsed'),
+                    })
+                    return ortak
+
+                ortak.update(ayiklanan)
+                ortak.update({
+                    'status': 'success' if not ortak['unparsed_fields']
+                              else 'partial',
+                    'source': 'NIST WebBook Live',
+                })
+                return ortak
+
         except Exception as e:
             print(f"NIST fetch error: {e}")
-            
+
         return None
     
     def validate_motor_calculation(self, motor_name: str, calculated_throat_mm: float, thrust_N: float = None, chamber_pressure_bar: float = None) -> Dict:
@@ -122,26 +176,51 @@ class NASARealtimeValidator:
         reference = self.nasa_motors[motor_name]
         ref_throat_mm = reference['throat_diameter_mm']
 
-        # Thrust/Pc ölçeği farklıysa referans throat'u ölçekle
+        # ------------------------------------------------------------------
+        # ÖH D22 / defter P9B5-13 — ÖLÇEKLEME EŞİĞİ SÖKÜLDÜ (SÜREKSİZLİK).
+        #
+        # ÖLÇÜLDÜ (taban ``b84b10a``, ``once.json`` bölümü P9B5-13, F-1
+        # referansı: d_t = 914,4 mm, F_ref = 6 770 000 N, Pc_ref = 70 bar):
+        #
+        #     itki oranı 1,0999 -> beklenen boğaz 914,400 mm, "DEVIATION < 2%"
+        #     itki oranı 1,1001 -> beklenen boğaz 959,074 mm, "DEVIATION 2-5%"
+        #
+        # İtki **%0,02** değişince referans boğaz çapı **%4,886** sıçrıyor ve
+        # hüküm etiketi değişiyordu. Sıçramanın kaynağı fizik değil, bir
+        # ``if abs(thrust_ratio - 1.0) > 0.1`` kapısıydı: eşiğin altında
+        # ölçekleme HİÇ uygulanmıyor (yani sessizce ``thrust_ratio = 1``
+        # varsayılıyor), üstünde tam uygulanıyordu. Aynı sıçrama Pc tarafında
+        # daha da sinsiydi: itki referansla aynı ama Pc iki katı olan bir
+        # motorda ölçekleme dalına HİÇ girilmiyor, yani ``sqrt(Pc_ref/Pc)``
+        # düzeltmesi tamamen düşüyordu.
+        #
+        # Bağıntının kendisi (d_t ∝ sqrt(F/Pc)) SÜREKLİDİR ve oran 1'e
+        # eşitken birim dönüşümüdür. Bu yüzden eşik KALDIRILDI, yeni bir
+        # eşik de İCAT EDİLMEDİ: ölçekleme her zaman uygulanır, oran 1 iken
+        # sonuç ref_throat_mm'in kendisidir (özdeşlik). Eşik yalnız
+        # KÜNYE metninde yaşamaya devam eder — "ölçeklendi" notu, ölçeğin
+        # okunur biçimde farklı olduğu durumda basılır; SAYIYI etkilemez.
+        # ------------------------------------------------------------------
         scale_note = ""
+        thrust_ratio = None
+        pc_ratio = None
         if thrust_N and 'thrust_sl_N' in reference:
             thrust_ratio = thrust_N / reference['thrust_sl_N']
-            if abs(thrust_ratio - 1.0) > 0.1:  # %10'dan fazla fark varsa ölçekle
-                # Pc oranını da hesaba kat
-                pc_ratio = 1.0
-                if chamber_pressure_bar and 'chamber_pressure_bar' in reference:
-                    pc_ratio = chamber_pressure_bar / reference['chamber_pressure_bar']
+        if chamber_pressure_bar and 'chamber_pressure_bar' in reference:
+            pc_ratio = chamber_pressure_bar / reference['chamber_pressure_bar']
 
-                # d_t_scaled = d_t_ref * sqrt(F_user / F_ref) * sqrt(Pc_ref / Pc_user)
-                if pc_ratio > 0:
-                    expected_mm = ref_throat_mm * math.sqrt(thrust_ratio / pc_ratio)
-                else:
-                    expected_mm = ref_throat_mm * math.sqrt(thrust_ratio)
-                scale_note = f" (scaled from {reference['source']}, thrust ratio: {thrust_ratio:.4f}x)"
-            else:
-                expected_mm = ref_throat_mm
-        else:
-            expected_mm = ref_throat_mm
+        _F = thrust_ratio if (thrust_ratio and thrust_ratio > 0) else 1.0
+        _P = pc_ratio if (pc_ratio and pc_ratio > 0) else 1.0
+        # d_t_scaled = d_t_ref * sqrt(F_user / F_ref) * sqrt(Pc_ref / Pc_user)
+        expected_mm = ref_throat_mm * math.sqrt(_F / _P)
+        if abs(_F / _P - 1.0) > SCALE_NOTE_VISIBILITY:
+            _parcalar = []
+            if thrust_ratio is not None:
+                _parcalar.append(f"thrust ratio: {thrust_ratio:.4f}x")
+            if pc_ratio is not None:
+                _parcalar.append(f"chamber pressure ratio: {pc_ratio:.4f}x")
+            scale_note = (f" (scaled from {reference['source']}, "
+                          + ', '.join(_parcalar) + ")")
 
         error_pct = abs(calculated_throat_mm - expected_mm) / expected_mm * 100
 

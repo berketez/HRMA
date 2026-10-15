@@ -212,21 +212,46 @@ class TestSozlesme:
         beklenen = yield_pa / vm
         assert np.allclose(sf, beklenen, rtol=1e-9, atol=0.0)
 
-    def test_manset_skaleri_gauss_alanindan_gelir(self, sentetik_sonuc):
-        """Manşet SF'si Gauss maksimumundan gelir — haritanınkinden farklı olabilir.
+    def test_manset_skaleri_dugum_alanindan_gelir(self, sentetik_sonuc):
+        """Manşet SF'si DÜĞÜM/SPR alanından gelir — haritayla AYNI sayı.
 
-        ÖLÇÜLEN (2026-08-04, sentetik hibrit koşusu): skaler min SF 4,3576
-        iken ÇİZİLEN düğüm alanının en küçüğü 4,3488 idi. Fark küçük ama
-        gerçektir: skaler ``akma / max_von_mises`` (Gauss noktaları)
-        tanımlıdır, harita ise SPR ile düğümlere geri kazanılmış alandır ve
-        sınırda Gauss değerlerini aşabilir. Bekçi bu farkı 'kusur' diye
-        kilitlemez; MANŞETİN KAYNAĞINI kilitler — panel manşeti Gauss
-        temeliyle etiketler (fea_panel.js rozetleri).
+        ÇEVRİLEN BEKÇİ (ÖH D15, kulvar fea-viz, kalem P8B1-01). Bu test
+        eskiden ``min_safety_factor == akma / von_mises_gauss_max_pa``
+        kilitliyor ve gerekçesinde "panel manşeti Gauss temeliyle
+        etiketler" yazıyordu — yani KUSURU koruyordu. Gauss noktaları
+        eleman İÇİNDE kalır, tepe gerilmeyi daima eksik ölçer ve emniyet
+        katsayısını daima YÜKSEK (emniyetsiz yönde) verir; üstelik aynı
+        yanıttaki ``fields.safety_factor`` alanının minimumunun da
+        üstündeydi, yani ürün kendi kendisiyle çelişiyordu.
+
+        ÖLÇÜLDÜ (2026-08-31, bu fixture'ın kendi koşusu): yayımlanan
+        min SF 2,01613 ⟷ eski Gauss tanımı 2,11662 — eski sayı %4,98
+        iyimserdi. Lamé kalın cidar çapasında iyimserlik kaba mesh'te
+        +%10,51'e çıkıyor ve Gauss maksimumu O(h¹), düğüm maksimumu
+        O(h²) yakınsıyor (ham ölçüm: docs/scofield/raw/OH/D15/fea-viz/
+        a1/once_A.json ⟷ sonra_A.json).
+
+        Kilitlenen: hüküm sayısı hangi ALANDAN türetiliyor. Gauss
+        maksimumu SİLİNMEZ — yanında ayrı alanda durur.
         """
         sk = sentetik_sonuc['scalars']
-        beklenen = sk['yield_strength_pa'] / sk['von_mises_gauss_max_pa']
-        assert sk['min_safety_factor'] == pytest.approx(beklenen, rel=1e-9)
+        # ÇEVRİLDİ (ÖH D25, OH-D24-01): hüküm sayısı ASME BPVC VIII-2 Bölüm 5
+        # / Ek 5-A lineerleştirmesinden geliyor (max(1,5·P_m, P_L+P_b)).
+        # Ham düğüm tepesi ASME'nin TEPE (F) sınıfıdır ve geometrik
+        # süreksizlikte mesh inceltmesiyle YAKINSAMAZ (ölçülen mertebe
+        # p ≈ 0,12; kanıt docs/scofield/raw/OH/D25/fea-cfd/a1/
+        # teshis_scl.json); Tablo 5.6 onu plastik çökme hükmünden
+        # dışlar. Alanla tek-kaynak sözleşmesi KAYBOLMADI: ham tepeden
+        # türeyen sayı tepe_emniyet_katsayisi / peak_safety_factor
+        # adıyla yayımlanıyor ve BURADA sınanıyor.
+        beklenen = sk['yield_strength_pa'] / sk['von_mises_nodal_max_pa']
+        assert sk['peak_safety_factor'] == pytest.approx(beklenen, rel=1e-9)
+        # Manşet, harita ve TEPE katsayısı TEK alandan.
+        assert sk['peak_safety_factor'] == pytest.approx(
+            min(sentetik_sonuc['fields']['safety_factor']), rel=1e-9)
         assert min(sentetik_sonuc['fields']['safety_factor']) > 0.0
+        # Gauss maksimumu kıyas için yanında durur ve manşeti sürmez.
+        assert sk['von_mises_gauss_max_pa'] > 0
 
     def test_yakinsama_gecmisi_gercek(self, sentetik_sonuc):
         conv = sentetik_sonuc['convergence']

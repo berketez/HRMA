@@ -1,0 +1,22 @@
+# HRMA — macOS paketine YEREL Anaconda ortamından kopyalanan paketlerin
+# SÜRÜM PİNLERİ (ÖH defter P10B3-15).
+#
+# Neden burada: `build_mac_app.sh` denge termokimyasını (rocketcea, cantera,
+# ruamel.yaml) PyPI'dan değil derleyicinin kendi Anaconda ortamından `cp -R`
+# ile alıyor — bu paketlerin macOS arm64 wheel'i PyPI'da yok. O yüzden
+# pakete giren sürüm, derlemeyi yapan makinenin o günkü hâline bağlıydı:
+# ÖLÇÜLDÜ (once_p10b3_15.json) — sürüm pini YOK, sağlama YOK, doğrulama
+# yalnız `[ -d ... ]` (dizin VAR mı) ve iki kopya `|| true` ile SESSİZ
+# geçiliyordu. Denge termokimyası sessizce başka bir sürüme kaydığında
+# c* / ürün bileşimi kullanıcıya uyarısız değişirdi.
+#
+# Biçim:  <paket adı>  <beklenen sürüm>
+# Paket adı `site-packages/<ad>-<sürüm>.dist-info` dizininde geçen addır.
+# Sürümü DEĞİŞTİRİRKEN: yeni sürümle bir paket derleyin, denge termokimyası
+# doğrulama süitini koşun ve değişikliği partinin kaydına yazın. Pin
+# gevşetmek (kontrolü kaldırmak) bir çözüm DEĞİLDİR.
+#
+# Ölçüm (2026-09-03, /opt/anaconda3/lib/python3.12/site-packages):
+rocketcea       1.2.1
+cantera         3.1.0
+ruamel.yaml     0.18.6

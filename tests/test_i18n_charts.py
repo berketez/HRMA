@@ -479,6 +479,58 @@ def test_server_text_en_dilinde_dokunmuyor(result):
 
 
 # ---------------------------------------------------------------------------
+# 5b. ÖH D28 fix-28b — blowdown "kesilmiş kuyruk" uyarısının İKİ hâli
+# ---------------------------------------------------------------------------
+#: Ürün kaynağında ADIYLA aranan parçalar. Kapsam bekçisi (§6) yalnız o
+#: koşumda GERÇEKTEN üretilen metni görür; kesme uyarısının zarfı terk
+#: ETMEYEN ikinci hâli tipik koşumlarda hiç çıkmaz, dolayısıyla çevirisi
+#: sessizce ölebilirdi. Aşağıdaki üç parça ürün dosyasında birebir aranır:
+#: ürün cümlesi değişirse bu bekçi kırmızıya döner ve MSG_PATTERNS'taki iki
+#: kuralın da güncellenmesi gerektiğini söyler (kopya metin bayatlayamaz).
+_KESME_URUN_DOSYASI = REPO_ROOT / 'hrma' / 'analysis' / 'transient_ballistics.py'
+_KESME_URUN_PARCALARI = (
+    'TRUNCATED TAIL-OFF: the march stops the instant the ',
+    'i.e. the tank tail-off model is out of envelope there.',
+    ' (the tail-off model is not integrated by this solver).',
+)
+
+#: Ürünün ürettiği İKİ tam hâl (sayılar örnektir; desen sayıyı yakalar).
+#: Kaynak: hrma/analysis/transient_ballistics.py, OH-D27-09 (D28 hibrit a1).
+_KESME_GOVDE = (
+    'TRUNCATED TAIL-OFF: the march stops the instant the liquid is '
+    'exhausted, so no vapour step is integrated. 0.821 kg of oxidiser is '
+    'still in the tank; valued at the oxidiser-specific impulse of the last '
+    'integrated step (F/mdot_ox) that is worth 2241 N*s, 28.1 % of the '
+    'impulse reported above. It is NOT modelled here'
+)
+_KESME_IKI_HAL = (
+    _KESME_GOVDE + ': the adiabatic vapour path would fall below the N2O '
+    'triple point (mass ratio 0.214) before the flow could stop at ambient '
+    'pressure (mass ratio 0.063), i.e. the tank tail-off model is out of '
+    'envelope there.',
+    _KESME_GOVDE + ' (the tail-off model is not integrated by this solver).',
+)
+
+
+def test_kesme_uyarisinin_urun_cumlesi_degismedi():
+    """Kopya metin bayatlamasın: parçalar ürün kaynağında ADIYLA duruyor."""
+    kaynak = _KESME_URUN_DOSYASI.read_text(encoding='utf-8')
+    eksik = [p for p in _KESME_URUN_PARCALARI if kaynak.count(p) != 1]
+    assert not eksik, (
+        'kesme uyarısının ürün metni değişmiş (birebir bulunamayan ya da '
+        'birden çok kez geçen parça): %r — MSG_PATTERNS\'taki İKİ kural da '
+        'güncellenmeli, yoksa TR kipinde İngilizce kalır' % eksik)
+
+
+@needs_node
+def test_kesme_uyarisinin_IKI_hali_de_cevriliyor(harness, tmp_path):
+    """Zarfı terk eden ve etmeyen hâl; ikisi de serverText'ten geçmeli."""
+    oran, eksik = _kapsam_olc(harness, tmp_path, _KESME_IKI_HAL, 'uyari')
+    assert oran == 1.0, (
+        'kesme uyarısının çevrilemeyen hâli: %s' % '\n  '.join(eksik))
+
+
+# ---------------------------------------------------------------------------
 # 6. Kapsam bekçisi — GERÇEK backend figürleri
 # ---------------------------------------------------------------------------
 HYBRID_PAYLOAD = {

@@ -38,10 +38,15 @@ Kullanıcıya dönebilecek hata metinleri İngilizce'dir (UI kuralı).
 import math
 
 from hrma.analysis.uncertainty import get_default_distributions
+# ÖH D29 / P15B2-01: deger katmani kapilarinin TEK KAYNAGI.
+from hrma.utils.input_guard import finite_number
 
 __all__ = [
     "CONTRACT_OUTPUTS",
     "UNMAPPED_PARAMS",
+    "ZERO_CONTRACT_INFLUENCE",
+    "WITHHELD_REASONS",
+    "withheld_distributions",
     "HYBRID_N_BAND",
     "SOLID_N_BAND",
     "normalize_overrides",
@@ -68,14 +73,128 @@ UNMAPPED_PARAMS = {
     "liquid": (),
 }
 
+#: Kurucuya BAĞLI ama SÖZLEŞME ÇIKTILARININ HİÇBİRİNİ oynatmayan
+#: parametreler — ÖH D15 / P5B2-07 (kulvar yapisal-sistem, a3).
+#:
+#: **ÖLÇÜLEN KUSUR** (taban ``8bc001b``, kanıt
+#: ``docs/scofield/raw/OH/D15/yapisal-sistem/a3/once.json``): hibrit
+#: ``fuel_density`` tam künyesiyle (σ = %2) yayımlanıyor, ``UNMAPPED_PARAMS``
+#: içinde YOK (haklı olarak: kurucuya gerçekten bağlı, ``uq_adapters.py``
+#: ``kwargs['fuel_density'] = rho_nom * sample[...]``), ama +3σ'da
+#: (çarpan 1,06) altı sözleşme çıktısının ALTISI DA BİT-AYNI kalıyor::
+#:
+#:     isp                 230.34676978693597   -> 230.34676978693597
+#:     thrust              1000.0               -> 1000.0
+#:     chamber_pressure    20.0                 -> 20.0
+#:     c_star              1619.5970602689638   -> 1619.5970602689638
+#:     total_impulse       10000.0              -> 10000.0
+#:     regression_rate_avg 0.0007710086974592675-> 0.0007710086974592675
+#:
+#: Yani duyarlılık tablosunda ``fuel_density`` satırı ρ = 0 (ya da sayısal
+#: gürültü) ile çiziliyordu. ``UNMAPPED_PARAMS``ın hemen üstündeki kural
+#: bunu açıkça yasaklıyor: "sensitivity'de sahte 0 göstermek yerine hiç
+#: raporlanmaz". Kural yalnız "kurucuya eşlenemeyen" dala yazılmıştı;
+#: kullanıcı açısından ikisi AYNI şeydir — ekranda ölçülmüş gibi duran
+#: bir 0. Kural bu yüzden ikinci dalıyla tamamlandı.
+#:
+#: Parametre ÖLÜ DEĞİLDİR: yakıt yoğunluğu GEOMETRİ çıktılarında yaşıyor
+#: (port/grain boyutlandırması). Sözleşme çıktı kümesinin genişletilmesi
+#: API kararıdır ve bu paketin işi değildir (borç: P11 — tornado grafiği).
+#:
+#: Liste ÖLÇÜMDÜR, iddia değil: ``tests/test_d15_yapisal_sistem_a3.py``
+#: her adı ±3σ koşumuyla İKİ YÖNLÜ sınar — burada olmayan bir sıfır-katkılı
+#: parametre de, burada olan ama artık katkı veren bir parametre de testi
+#: kırar.
+#:
+#: **ÖH D26 fix-25a — ``fuel_density`` LİSTEDEN DÜŞTÜ (hibrit kümesi boşaldı).**
+#: Listenin kendi iki yönlü bekçisi çalıştı: parametre ARTIK KATKI VERİYOR,
+#: dolayısıyla düşürülmesinin ölçüm dayanağı kalmadı. Yeniden ölçüldü
+#: (taban ``7751531``, aynı kurucu, ±3σ = çarpan 0,94 / 1,06)::
+#:
+#:     isp                  226.0777826 -> 226.1284157 / 226.0303165
+#:                          (bağıl 2,240e-04 / 2,100e-04)
+#:     regression_rate_avg  7.721626e-4 -> 7.721488e-4 / 7.721756e-4
+#:                          (bağıl 1,785e-05 / 1,674e-05)
+#:
+#: Sapma platform gürültü tabanının (1e-12) sekiz mertebe ÜSTÜNDEDİR, yani
+#: "sayısal gürültü" değildir. Kanal da bulundu (``a109e4a``, ÖH D22 hibrit
+#: a1, OH-D21-02/OH-D21-03 "gerçekleşen L*"): yakıt yoğunluğu tane/kamara
+#: boyutlandırmasını, o da GERÇEKLEŞEN L*'ı oynatıyor (ρ_f nominal ->
+#: L* 3,5438 -> 900 kg/m³'te 3,6037 / 1000 kg/m³'te 3,3282 m), gerçekleşen
+#: L* kinetik verimi, kinetik verim de CF ve Isp'i oynatıyor. Yani parametre
+#: yalnız GEOMETRİ çıktılarında yaşıyor cümlesi ARTIK DOĞRU DEĞİL.
+#:
+#: Bu bir kural değişikliği değil, kuralın DÜZELTİLMİŞ ÖLÇÜME uygulanmasıdır:
+#: kural "ölçülen katkı sıfırsa düşür" der. Katkı sıfır olmadığına göre satır
+#: geri gelir — aksi hâlde UQ, çıktıyı OYNATAN bir parametreyi örneklemeden
+#: bırakır ve belirsizliği EKSİK (iyimser yönde) bildirir. Sahte-0 kaygısı
+#: bu satır için geçerli değildir: yanıt tek yönlü ve tutarlı olduğundan
+#: duyarlılık katsayısı 0 değil, ölçülmüş bir sayı olarak çizilir.
+ZERO_CONTRACT_INFLUENCE = {
+    "hybrid": (),
+    "solid": (),
+    "liquid": (),
+}
+
+#: ``build_distributions``ın DÜŞÜRDÜĞÜ her adın gerekçesi (makine-okur).
+#: Uç katmanı bunu yayımlayabilsin diye ayrı bir yüz olarak durur: satır
+#: sessizce kaybolmaz, NEDEN kaybolduğu söylenebilir.
+WITHHELD_REASONS = {
+    "unmapped": ("this parameter has no path to the motor constructor, so "
+                 "its effect on the outputs cannot be sampled at all"),
+    "zero_contract_influence": (
+        "this parameter reaches the motor constructor but moves NONE of the "
+        "published contract outputs (measured at +/-3 sigma); it lives only "
+        "in geometry outputs, which are not part of this contract. A zero "
+        "row would read as a measured insensitivity rather than as an "
+        "output set that cannot see the parameter"),
+}
+
+
+def withheld_distributions(motor_type):
+    """{parametre: gerekçe} — dağılımdan DÜŞÜRÜLEN adlar ve nedenleri."""
+    kayit = {}
+    for ad in UNMAPPED_PARAMS.get(motor_type, ()):
+        kayit[ad] = WITHHELD_REASONS["unmapped"]
+    for ad in ZERO_CONTRACT_INFLUENCE.get(motor_type, ()):
+        kayit[ad] = WITHHELD_REASONS["zero_contract_influence"]
+    return kayit
+
 # Regresyon/yanma üssü fiziksel bantları (offset uygulandıktan sonra kırpılır)
 HYBRID_N_BAND = (0.3, 0.85)   # hibrit literatür bandı (ARGE spec 4.1)
 SOLID_N_BAND = (0.1, 0.99)    # mevcut solid run_monte_carlo kırpması
 
 # API override alan adları -> UncertainInput alan adları
 _OVERRIDE_KEY_MAP = {"std": "sigma"}
+
+# ÖH D23 / P5B2-20 — 'mode' KABUL EDİLİP YOK SAYILIYORDU (fail-closed).
+#
+# ``UncertainInput.mode`` örneğin motora NASIL uygulanacağını söyler
+# ('multiplier' | 'offset' | 'absolute'). Örnekleyici tarafı bunu gerçekten
+# uygular: ``get_default_distributions`` override'ı yazar, ``nominal_value``
+# ve bant kapısı ona göre davranır. Bu modüldeki FABRİKALAR ise her
+# parametrenin uygulanışını ADINA GÖRE SABİT yazar (``pc_nom * ornek``
+# gibi) ve ``.mode`` alanını HİÇ okumaz.
+#
+# ÖLÇÜLDÜ (taban ``ef527ae``, ``once.json`` P5B2-20;
+# ``{'chamber_pressure': {'mode': 'offset', 'mean': 0, 'std': 1,
+# 'low': -3, 'high': 3}}``):
+#   normalize_overrides -> mode 'offset' GEÇİYOR
+#   build_distributions -> dagilim_mode = 'offset', nominal = 0,0
+#   describe()['mode']  -> 'offset'  (inputs_used künyesine de yazılıyor)
+#   uq_adapters kaynağında '.mode' geçmiyor (adaptor_mode_okuyor_mu=False),
+#   ``pc_nom *`` deseni 2 kez -> örnek YİNE ÇARPAN gibi uygulanıyor.
+# Yani kullanıcı HTTP 200 alıyor, künye "offset" diyor, motor çarpan
+# görüyordu: kabul edilen, etkisiz ve künyesi yanlış bir override.
+#
+# Doğru davranış "yok say" değil, "reddet"tir: adaptör bir alanı
+# uygulayamıyorsa o alan kapıdan GEÇMEZ. ``mode`` (ve onunla birlikte
+# gelen ``nominal_override``) API sözleşmesinden çıkarıldı; endpoint
+# ValueError'ı 400'e çevirir. Bantın kendisi (``mean``/``std``/``low``/
+# ``high``) ve dağılım ailesi (``dist``) uygulanabilir olduğu için kalır.
+_REJECTED_OVERRIDE_KEYS = frozenset({"mode", "nominal_override"})
 _ALLOWED_OVERRIDE_KEYS = frozenset(
-    {"std", "sigma", "mean", "low", "high", "dist", "mode", "disabled"})
+    {"std", "sigma", "mean", "low", "high", "dist", "disabled"})
 
 
 def _clip(value, band):
@@ -102,6 +221,18 @@ def normalize_overrides(api_overrides):
         if not isinstance(spec, dict):
             raise ValueError(
                 f"distribution_overrides[{name!r}] must be an object or null")
+        rejected = set(spec) & _REJECTED_OVERRIDE_KEYS
+        if rejected:
+            # ÖH D23 / P5B2-20: uygulanamayan alan sessizce yutulmaz.
+            raise ValueError(
+                f"distribution_overrides[{name!r}]: field(s) "
+                f"{sorted(rejected)} cannot be honoured by this endpoint. "
+                "How each uncertain input is applied to the engine "
+                "(multiplier / offset / absolute) is fixed by the model "
+                "adapter, not by the request: accepting the field would "
+                "return a run whose inputs_used label contradicts what the "
+                "engine actually saw. Perturb the band itself with "
+                "std/low/high, or use 'disabled' to drop the parameter.")
         unknown = set(spec) - _ALLOWED_OVERRIDE_KEYS
         if unknown:
             raise ValueError(
@@ -124,8 +255,12 @@ def normalize_overrides(api_overrides):
 def build_distributions(motor_type, api_overrides=None):
     """Motor tipi için endpoint dağılım kümesini kurar.
 
-    ``get_default_distributions`` + API override normalizasyonu + eşlenemeyen
-    parametrelerin (ör. hibrit ``cd_injector``) çıkarılması.
+    ``get_default_distributions`` + API override normalizasyonu + duyarlılık
+    tablosunda SAHTE SIFIR üretecek parametrelerin çıkarılması: kurucuya
+    eşlenemeyenler (``UNMAPPED_PARAMS``, ör. hibrit ``cd_injector``) ve
+    kurucuya bağlı olduğu hâlde sözleşme çıktılarının hiçbirini oynatmayanlar
+    (``ZERO_CONTRACT_INFLUENCE``, ör. hibrit ``fuel_density``).
+    Düşürülen adların gerekçesi ``withheld_distributions`` ile alınır.
     """
     if motor_type not in CONTRACT_OUTPUTS:
         raise ValueError(
@@ -135,6 +270,11 @@ def build_distributions(motor_type, api_overrides=None):
     distributions = get_default_distributions(motor_type, overrides)
     for name in UNMAPPED_PARAMS.get(motor_type, ()):
         distributions.pop(name, None)
+    # ÖH D15 / P5B2-07: kurucuya bağlı ama sözleşme çıktılarını hiç
+    # oynatmayan parametreler de düşer — kural "sahte 0 gösterme"dir,
+    # "eşlenemeyeni gösterme" değil (gerekçe: ZERO_CONTRACT_INFLUENCE).
+    for name in ZERO_CONTRACT_INFLUENCE.get(motor_type, ()):
+        distributions.pop(name, None)
     if not distributions:
         raise ValueError(
             "all uncertain parameters are disabled; at least one active "
@@ -143,11 +283,45 @@ def build_distributions(motor_type, api_overrides=None):
 
 
 def _finite_float(value):
-    """Sonlu sayısal skaler -> float; değilse None (bool sayı değildir)."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
+    """Sonlu sayısal skaler -> float; değilse None (bool sayı değildir).
+
+    ÖH D29 / app-api-dogrulama a1 · defter P15B2-01 — MERKEZE BAĞLANDI
+    (``hrma.utils.input_guard.finite_number``). Yerel kopyanın
+    ``isinstance(value, (int, float))`` tip kısıtı bir DEĞER katmanında
+    YANLIŞTI: ``numpy.float32``/``numpy.int64`` bu demetin örneği DEĞİLDİR
+    (D28 ihracat a1 künyesi, ``once.json`` ``uc_katmani_ayrisma``), yani
+    çözücüden numpy skaleri gelen her alan sessizce "hesaplanmadı" sayılıp
+    belirsizlik raporundan düşüyordu. Merkez ``float()``a güvenir ve yalnız
+    ``bool``u (``numpy.bool_`` DÂHİL) ve sonlu olmayanı eler.
+    """
+    return finite_number(value)
+
+
+#: ÖH D28 a1 / P7B4-18 — NOMİNAL MOTORUN KENDİ HÜKÜM DEFTERİ.
+#:
+#: ÖLÇÜLDÜ (taban ``7cd08bcc``, ``a1/once.json`` K2): sağlıklı bir hibrit
+#: gövdenin belirsizlik yanıtı 12 248 bayt ve 19 üst anahtar taşıyor; motorun
+#: KENDİ ``design_warnings`` defteri (``warn.hybrid.htpb_coeff_bias``,
+#: ``warn.hybrid.grain_slenderness_high`` gibi kodlu, i18n'e bağlı kayıtlar)
+#: bu anahtarların HİÇBİRİNDE geçmiyor — yanıtta "anormal" dizesi 0 kez
+#: (``ham_anormal = 0``). Yani ana sayfada (``/calculate``) kullanıcıya
+#: gösterilen tasarım hükümleri, aynı motorun belirsizlik raporunda
+#: SESSİZCE düşüyordu.
+#:
+#: Kanal ``warnings.catch_warnings`` DEĞİLDİR (süreç-genel; ``threaded=True``
+#: Flask'ta P17B3-01'in kapattığı sınıfı geri açardı): motorun kendi
+#: nesnesinin defteri okunur. Defter NOMİNAL koşudan alınır —
+#: ``run_uncertainty``ın İLK çağrısı nominal örnektir (spec 7.3) — çünkü
+#: yayımlanan hüküm kullanıcının motorunun hükmüdür, örneklenmiş bir
+#: varyantınki değil.
+def _defteri_kaydet(factory, engine):
+    """Nominal (ilk) koşunun motor hüküm defterini fabrikaya iliştirir."""
+    if getattr(factory, 'nominal_design_warnings', None) is not None:
+        return
+    defter = getattr(engine, 'design_warnings', None)
+    factory.nominal_design_warnings = (
+        [dict(k) for k in defter if isinstance(k, dict)]
+        if isinstance(defter, (list, tuple)) else [])
 
 
 def _pick_outputs(motor_type, resolved):
@@ -201,6 +375,39 @@ def make_hybrid_factory(inputs, track_performance=False):
         motor_name=data.get('motor_name', ''),
         motor_description=data.get('motor_description', ''),
     )
+    # --- ÖH D28 a1 / OH-D27-18 · OKSİTLEYİCİ OKUNUR --------------------
+    # ÖLÇÜLDÜ (taban ``7cd08bcc``, ``a1/once.json`` K6): ``oxidizer_type``
+    # 'n2o' ile 'lox' gönderen iki istek BİT-AYNI belirsizlik raporu
+    # alıyordu ve yanıtta yalnız bir beyan vardı ("supplied but the hybrid
+    # uncertainty model does not read it"). Beyan doğruydu ama ÇÖZÜM
+    # DEĞİLDİR (Doktrin 1): kullanıcı LOX yazdığı motorun dağılımlarını
+    # N2O motorundan okuyordu — c*, itki ve Isp yüzdelikleri o oksitleyicinin
+    # değildi.
+    #
+    # YENİ VARSAYILAN YAZILMAZ (Doktrin 4): alan gönderilmediğinde anahtar
+    # ``ctor``a HİÇ konmaz ve ``HybridRocketEngine``in KENDİ imza
+    # varsayılanı ('n2o') yürürlükte kalır — sayı ikinci kez yazılmadığı
+    # için ikisi ayrışamaz. Alan gönderildiyse motora AYNEN geçer; motorun
+    # kendi ``oxidizer_type`` kapısı tanımadığı adı zaten reddeder.
+    if data.get('oxidizer_type') not in (None, ''):
+        ctor['oxidizer_type'] = data.get('oxidizer_type')
+    # --- Kitap uyum B16, 2. tur (denetçi şartı Ş-4) · GİRİŞ DURUMU ------
+    # ÖLÇÜLDÜ (p1a denetimi, 6 Eki): bu sözlükte tank sıcaklığı ve faz
+    # YOKTU; varsayılan, oxidizer_temp/tank_temperature = 273,15 K ve
+    # oxidizer_phase = 'gas' girdileriyle UQ nominali BİT-AYNI çıkıyordu
+    # (c* 1596,5521, Isp 236,3873). /calculate kullanıcının tank
+    # sıcaklığıyla yakarken /api/uncertainty-analysis her zaman 293,15 K
+    # doymuş sıvıyla yakıyordu. Aynı Doktrin 4: alan gönderilmediyse anahtar
+    # HİÇ konmaz (motorun kendi varsayılanı geçer); gönderildiyse motora
+    # AYNEN gider ve motorun fail-closed kapısı doğrular. Sıcaklıkta kanonik
+    # ad ``tank_temperature``, form adı ``oxidizer_temp`` takma addır
+    # (öncelik kuralı tek yerde: ``oxidizer_inlet.inlet_request_from_payload``).
+    from hrma.engines.oxidizer_inlet import inlet_request_from_payload
+    _giris = inlet_request_from_payload(data)
+    if _giris['temperature_k'] is not None:
+        ctor['tank_temperature'] = _giris['temperature_k']
+    if _giris['phase'] is not None:
+        ctor['oxidizer_phase'] = _giris['phase']
 
     analyzer = CombustionAnalyzer(memoize=True)
     # Sonda kurucu: calculate() ÇAĞRILMAZ; yalnız yakıt tablosu çözümü
@@ -216,6 +423,11 @@ def make_hybrid_factory(inputs, track_performance=False):
     # Danışma amaçlı optimum O/F: nominal girdilerle bir kez (spec 6.1).
     # Başarısızlık UQ koşusunu düşürmez — alan None kalır ve motor sonucu
     # optimum_of_note ile dürüstçe işaretlenir.
+    # Ş-4: danışma araması sonda motorun GİRİŞ DURUMUYLA koşar (paylaşılan
+    # analizör önce o duruma getirilir; arama önbelleğinin anahtarı giriş
+    # imzasını taşır — Ş-5). Geçersiz giriş durumu burada ADIYLA reddedilir
+    # (aşağıdaki geniş ``except`` onu yutmasın diye ``try`` DIŞINDA).
+    probe._sync_oxidizer_inlet_state()
     try:
         optimum_of = analyzer.find_optimum_of_ratio(
             {ctor['fuel_type']: 100.0},
@@ -244,8 +456,10 @@ def make_hybrid_factory(inputs, track_performance=False):
             precomputed_optimum_of=optimum_of,
             **kwargs)
         result = engine.calculate()
+        _defteri_kaydet(factory, engine)
         return _pick_outputs('hybrid', result)
 
+    factory.nominal_design_warnings = None
     return factory
 
 
@@ -259,6 +473,31 @@ def make_solid_factory(inputs, track_performance=False):
     argümanlarına işlenir, ``initial_temp`` düzeltmesi nominal a'ya bir kez
     uygulanır (örnek kurulumunda ikinci kez uygulanmaz). ``track_performance``
     katı motorda kullanılmaz; imza tutarlılığı için kabul edilir.
+
+    ÖH D26 / P5B2-06 (yüksek) — DONANIM SABİTLENMESİ EKLENDİ
+    --------------------------------------------------------
+    Bu fabrika ``run_monte_carlo`` kalıbını izlediğini söylüyordu ama o
+    kalıbın ÇEKİRDEK adımını, boğaz sabitlemesini (``pin_throat_area``,
+    ``solid_rocket_engine.py`` T19 onarımı) atlıyordu. Sonuç: her örnekte
+    boğaz, bozulmuş yakıt partisine göre YENİDEN boyutlandırılıyordu; yani
+    denge basıncı tasarım noktasına geri kilitleniyor ve uçtaki
+    ``max_pressure`` girilen oda basıncının DONMUŞ YANKISI oluyordu.
+
+    ÖLÇÜLDÜ (D26 tabanı 7751531, seed=42, N=40, apcp/BATES 100x500x30 mm,
+    40 bar; kanıt ``docs/scofield/raw/OH/D26/yapisal-sistem/a1/once.json``)::
+
+        max_pressure  ortalama 40,000000 bar   std 2,28e-15   cv 5,69e-15 %
+        isp           (aynı koşuda)                           cv 1,193 %
+
+    Yani örnekleyici çalışıyordu, sabit olan YALNIZ tepe basıncıydı — bir
+    UQ panelinde "basınç belirsizliği sıfır" diye okunan bu sayı, ölçülmüş
+    bir dayanıklılık değil, hiç sorulmamış bir sorunun yankısıydı.
+
+    Boğaz nominal tasarım noktasından BİR KEZ çözülür (``probe`` üstünde,
+    ``_design_throat_area`` — ``run_monte_carlo``nun okuduğu aynı tanım
+    noktası) ve her örnek motoruna sabitlenir. Yeni bir sayı ya da eşik
+    girmez; sabitleme yapılamazsa (alan sonlu-pozitif değilse) eski davranış
+    aynen sürer.
     """
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
 
@@ -283,6 +522,18 @@ def make_solid_factory(inputs, track_performance=False):
     # initial_temp düzeltmesi a_nom'a zaten işlendi (run_monte_carlo kalıbı)
     base_overrides.pop('initial_temp', None)
 
+    # ÖH D26 / P5B2-06: DONANIM tektir, yakıt partisi değişkendir.
+    # ``run_monte_carlo``:8023 ile aynı tanım noktası ve aynı fail-closed
+    # kuralı: alan sonlu-pozitif değilse sabitleme YAPILMAZ (uydurma bir
+    # alan çivilenmez), fabrika eski davranışını sürdürür.
+    try:
+        nom_throat_area, _nom_flux = probe._design_throat_area()
+        nom_throat_area = float(nom_throat_area)
+        if not (nom_throat_area > 0.0) or not math.isfinite(nom_throat_area):
+            nom_throat_area = None
+    except Exception:
+        nom_throat_area = None
+
     def factory(sample):
         overrides = dict(base_overrides)
         overrides['density'] = rho_nom * float(sample.get('density', 1.0))
@@ -293,8 +544,11 @@ def make_solid_factory(inputs, track_performance=False):
         kwargs['burn_rate_n'] = _clip(
             n_nom + float(sample.get('burn_rate_n_delta', 0.0)),
             SOLID_N_BAND)
-        result = SolidRocketEngine(overrides=overrides,
-                                   **kwargs).calculate_performance()
+        engine = SolidRocketEngine(overrides=overrides, **kwargs)
+        if nom_throat_area is not None:
+            engine.pin_throat_area(nom_throat_area)
+        result = engine.calculate_performance()
+        _defteri_kaydet(factory, engine)
         if isinstance(result, dict) and result.get('error'):
             raise ValueError(f"SolidRocketEngine: {result['error']}")
         pressure_curve = (result.get('thrust_curve') or {}).get(
@@ -307,6 +561,7 @@ def make_solid_factory(inputs, track_performance=False):
         }
         return _pick_outputs('solid', resolved)
 
+    factory.nominal_design_warnings = None
     return factory
 
 
@@ -349,6 +604,7 @@ def make_liquid_factory(inputs, track_performance=False):
         engine = LiquidRocketEngine(propellant_data=shared_propellant_data,
                                     **kwargs)
         result = engine.calculate_performance()
+        _defteri_kaydet(factory, engine)
         eta = sample.get('eta_c_star')
         eta = 1.0 if eta is None else float(eta)
         isp = _finite_float(result.get('isp_sea_level'))
@@ -363,7 +619,37 @@ def make_liquid_factory(inputs, track_performance=False):
         }
         return _pick_outputs('liquid', resolved)
 
+    factory.nominal_design_warnings = None
     return factory
+
+
+#: ÖH D27 a4 / P7B4-19 — her fabrikanın ``inputs`` sözlüğünden GERÇEKTEN
+#: OKUDUĞU alan adları (TEK KAYNAK; bekçi ``tests/test_d27_app_api_a4.py``
+#: bu demetleri AST ile fabrikaların kendi ``data.get('<ad>')`` çağrılarına
+#: karşı doğrular — liste kayarsa test kırmızı olur).
+#:
+#: ÖLÇÜLDÜ (taban ``8f083ca0``, ``docs/scofield/raw/OH/D27/app-api/a4/
+#: once.json`` K34): ``inputs`` içine konan ``peynir_orani = 42,0``
+#: HTTP 200 ile SESSİZCE yutuluyordu — yanıtta o adı anan tek bir yaprak
+#: yoktu. Kullanıcı bir motor alanının adını yanlış yazdığında, belirsizlik
+#: raporunu o alan HİÇ verilmemiş gibi alıyor ve farkı göremiyordu.
+#:
+#: ``solid`` BİLEREK YOK: katı fabrika ``SolidRocketEngine(overrides=data)``
+#: ile sözlüğün TAMAMINI motora geçirir, yani "okunmayan ad" kümesi bu
+#: katmandan kapalı biçimde bilinemez. Bilinmeyeni "okunmadı" diye ilan
+#: etmek, künyeyi ikinci kez yalancı yapardı.
+FACTORY_INPUT_FIELDS = {
+    'hybrid': (
+        'atmospheric_pressure', 'burn_time', 'chamber_diameter_input',
+        'chamber_pressure', 'chamber_temperature', 'combustion_type',
+        'expansion_ratio', 'fuel_density', 'fuel_type', 'gamma',
+        'gas_constant', 'l_star', 'motor_description', 'motor_name',
+        'nozzle_type', 'of_ratio', 'oxidizer_type', 'regression_a',
+        'regression_n', 'thrust', 'thrust_coefficient', 'total_impulse'),
+    'liquid': (
+        'chamber_pressure', 'cooling_type', 'fuel_type', 'injector_type',
+        'mixture_ratio', 'oxidizer_type', 'thrust'),
+}
 
 
 _FACTORY_BUILDERS = {

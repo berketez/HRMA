@@ -15,12 +15,16 @@
    görüntüleyici kabı (+ K5b içindekiler şeridi: kiracı çıktısındaki
    GERÇEK bölüm başlıklarından kurulan kaydırma bağları) ve geçmiş
    şeridi. Yerleşim stilleri (yapışkan sütun/şerit) ayrı dosyada:
-   /static/css/analysis_center.css (init() enjekte eder). İLK kiracı
-   CFD panelidir (panels/cfd_panel.js — ayrı dosya, ayrı sahip).
+   /static/css/analysis_center.css — üç motor şablonunun head'inde GERÇEK
+   <link> ile yüklenir (2026-08-18: init() enjeksiyonu söküldü). İLK
+   kiracı CFD panelidir (panels/cfd_panel.js — ayrı dosya, ayrı sahip).
 
    --------------------------------------------------------------------
    KURULUM SÖZLEŞMESİ (şablon tarafı — DEĞİŞTİRME)
    --------------------------------------------------------------------
+     <!-- head: yerleşim katmanı, theme.css'ten ÖNCE -->
+     <link rel="stylesheet" href="/static/css/analysis_center.css">
+     ...
      <script src="/static/js/analysis_center.js"></script>
      <script src="/static/js/panels/cfd_panel.js"></script>   <!-- kiracılar -->
      ...
@@ -135,6 +139,21 @@
     function i18nAttr(key) {
         return key ? ' data-i18n="' + key + '"' : '';
     }
+    // ÖH D36 / sahne-hud — KOŞUM SÜRESİ METNİ TEK KAYNAKTAN.
+    // ÖLÇÜLEN KUSUR (raw/OH/D36/sahne-hud/a1/once.json): süre
+    // `Number(x.toFixed(1))` ile SAYI olarak sözlüğe giriyordu; I18N.tf
+    // sayıyı `I18N.number(v)` (basamaksız) ile basar — 3,0 s "3 sn",
+    // 2,34 s "2,3 sn" olur: aynı şeritte bir koşum tam sayı, öteki tek
+    // ondalık okunur. Burada basamak sayısı ÇAĞIRANIN kararıdır (1);
+    // ayraç i18n.js kanonundan gelir, sayı değişmez. Saklanan kayıt
+    // (pushEntry.seconds) SAYI kalır — süre metni değil, ölçüm saklanır.
+    function secTxt(v) {
+        if (typeof v !== 'number' || !isFinite(v)) {
+            return String(v === null || v === undefined ? '—' : v);
+        }
+        return (window.I18N && typeof window.I18N.number === 'function')
+            ? window.I18N.number(v, 1) : v.toFixed(1);
+    }
     function esc(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
@@ -210,7 +229,12 @@
           titleKey: 'ac.an.thermal',
           title: 'Thermal (transient conduction, Bartz BC)',
           plannedEndpoint: '/api/fea/thermal',
-          motorTypes: ['hybrid'] },
+          // ÖH D37 A2-1 / F-03 (CW-S5): Bartz h(z) profili artık motor
+          // sözlüğünden motor-agnostik kurulur (/api/analysis/wall-profile
+          // `motor_results` gövdesi) ve köprü üç düzeni zaten tanıyor;
+          // "yalnız hibrit" kısıtı fizik değil, girdi kurulumuydu (ölçüldü:
+          // katı + sıvı örnek 200 + termal FEA 'ok').
+          motorTypes: ['hybrid', 'solid', 'liquid'] },
         { componentId: 'grain_section', analysisId: 'planar_grain',
           titleKey: 'ac.an.planarGrain',
           title: 'Plane strain (SP-8073 acceptance)',
@@ -264,7 +288,20 @@
     let cardSignature = null;            // kart yalnız gerçekten değişince yeniden kurulur
     let statusState = null;              // {kind, text} — koşum durumu beyanı
     let busy = false;                    // koşum sürüyor mu (gerçek durum)
+    let busyRow = null;                  // P11B2-21: KOŞAN satır (gerekçe)
     const runHistory = [];               // oturum içi koşum geçmişi
+    //: ÖH D29 · P11B2-17 — GEÇMİŞ SINIRSIZ BÜYÜYEMEZ.
+    //: ÖLÇÜLDÜ (a3/once.json): `pushEntry` koşulsuz `runHistory.push`
+    //: yapıyordu, üst sınır YOKTU ve her kayıt `data: payload.data` ile
+    //: yanıtın TAMAMINI tutuyordu (CFD kiracısı r-z alanı döndürür).
+    //: Uzun bir oturumda sekme belleği koşum sayısıyla doğrusal büyüyordu
+    //: ve kullanıcının elinde silme yolu yoktu.
+    //: İki ayrı tavan: KAYIT tavanı (satır sayısı) ve YÜK tavanı (kaç
+    //: koşumun TAM yanıtı bellekte tutulur). Yük bırakma sessiz değildir:
+    //: kayıt `yukBirakildi` imiyle durur, görüntüleyici bunu ADIYLA yazar
+    //: ve "boş sonuç" göstermez (fail-closed).
+    const GECMIS_TAVANI = 40;
+    const GECMIS_YUK_TAVANI = 8;
     const lastEntryByRow = {};           // rowKey -> en son koşum kaydı
     let viewingEntryId = null;           // görüntüleyicide duran kayıt
     let entrySeq = 0;
@@ -294,7 +331,9 @@
     //   ready   : kiracı var, motor tipi tutuyor, uygulanabilirlik olumlu
     //   blocked : kiracı var ama bugünkü sonuç/motor tipi taşımıyor
     //   absent  : bu analiz henüz Merkez'e taşınmadı (kiracı yok)
-    // 'blocked' ve 'absent' satırlar GİZLENMEZ; gri durur, nedenleri yazılır.
+    // 'not_ready', 'blocked' ve 'absent' satırlar GİZLENMEZ; nedenleri
+    // yazılır. 'not_ready' geçicidir (hesap koşunca açılır), 'blocked'
+    // kalıcıdır (bu tasarımda hiç geçerli değil) — P17B3-08.
     // ==================================================================
     function normalizeReason(reason) {
         if (reason == null || reason === '') {
@@ -352,9 +391,11 @@
                                      + 'Analysis Center yet; it still runs in its own panel.' };
             return row;
         }
-        // 3) Sayfada sonuç yok — Merkez sonucu OKUR, üretmez
+        // 3) Sayfada sonuç yok — Merkez sonucu OKUR, üretmez.
+        //    P17B3-08: bu GEÇİCİ bir durumdur (hesap koşunca satır `ready`
+        //    olur), kalıcı uygulanamazlıkla aynı rozeti giymez.
         if (!results) {
-            row.state = 'blocked';
+            row.state = 'not_ready';
             row.reason = { key: 'ac.reason.noResults',
                            fallback: 'No calculation result on this page yet — '
                                      + 'run the motor calculation first.' };
@@ -584,8 +625,28 @@
             + esc(text) + '</span>';
     }
 
+    /* ÖH D23 / P17B3-08 — "GEÇİCİ OLARAK KOŞULAMAZ" ile "BU MOTORDA HİÇ
+       GEÇERLİ DEĞİL" AYRI ROZETLER.
+
+       ÖLÇÜLDÜ (P17 B3, tur-02, hesap ÖNCESİ hibrit):
+       `chamber_nozzle_wall.structural` satırı `NOT APPLICABLE` rozetiyle
+       duruyor ve gerekçesi "No calculation result on this page yet — run
+       the motor calculation first."; HESAPTAN SONRA aynı satır `ready`
+       oluyor. Aynı rozet metni `grain_section.planar_grain` satırında da
+       var ve orada gerekçe KALICI: "This analysis does not apply to a
+       hybrid motor." Yani biri "şimdilik", öteki "hiçbir zaman" diyor ve
+       ikisi de aynı gri `NOT APPLICABLE` rozetini giyiyordu; ayrım YALNIZ
+       alt satırdaki gerekçe cümlesindeydi. Rozetine bakarak listeyi tarayan
+       kullanıcı, hesabı koşturarak açılacak bir satırı "bu motorda yok"
+       sanıp geçiyordu.
+
+       Ayrım DURUMUN KENDİSİNE taşındı: geçici olan `not_ready`, kalıcı olan
+       `blocked`. Renk de ayrılır (dim ⟷ info); rozet metni de. `absent`
+       (Merkez'e hiç taşınmamış) olduğu gibi kalır. */
     const STATE_BADGE = {
         ready: { kind: 'ok', key: 'ac.state.ready', fallback: 'READY' },
+        not_ready: { kind: 'info', key: 'ac.state.notReady',
+                     fallback: 'AWAITING RESULT' },
         blocked: { kind: 'dim', key: 'ac.state.blocked', fallback: 'NOT APPLICABLE' },
         absent: { kind: 'dim', key: 'ac.state.absent', fallback: 'NOT IN CENTER' },
     };
@@ -597,7 +658,7 @@
 
     function centerHtml() {
         return '<div class="panel" id="analysisCenter" style="width:100%; grid-column: 1 / -1;">'
-            + '<h2>&#9654; <span data-i18n="ac.title">' + esc(T('ac.title', 'Analysis Center'))
+            + '<h2><span data-i18n="ac.title">' + esc(T('ac.title', 'Analysis Center'))
             + '</span></h2>'
             + '<div class="chart-explanation">'
             + '<strong data-i18n="common.whatItDoes">'
@@ -690,7 +751,7 @@
               + esc(reasonText(row.reason)) + '</div>'
             : '';
         const extra = row.extra
-            ? '<div style="font-size:0.66rem; color:var(--hd-ink-faint, #46606d);"'
+            ? '<div style="font-size:0.66rem; color:var(--hd-ink-faint, #6a8491);"'
               + ' data-i18n="ac.matrix.extra">'
               + esc(T('ac.matrix.extra',
                       'Registered outside the design §2 matrix.')) + '</div>'
@@ -741,7 +802,7 @@
             + ' margin-bottom:4px;"' + i18nAttr(row.titleKey) + '>'
             + esc(T(row.titleKey, row.title)) + '</div>'
             + '<div style="font-family:var(--hd-mono, monospace); font-size:0.66rem;'
-            + ' color:var(--hd-ink-faint, #46606d); margin-bottom:8px;">'
+            + ' color:var(--hd-ink-faint, #6a8491); margin-bottom:8px;">'
             + esc(row.endpoint)
             + (row.endpointWired ? '' : ' <span' + i18nAttr('ac.endpoint.planned') + '>'
                 + esc(T('ac.endpoint.planned', '(declared in the design, not wired here)'))
@@ -781,12 +842,39 @@
     }
 
     // Koşum durumu: GERÇEK durum beyanı. Yüzde yok, zamanlayıcı yok.
+    //: ÖH D29 · P11B2-21 — KAPALI DÜĞME GEREKÇESİNİ SÖYLER.
+    //: ÖLÇÜLDÜ (a3/once.json): `busy` tek genel bayraktı, `renderStatus`
+    //: `btn.disabled = !!busy` diyordu ve `select()` yeni satıra geçerken
+    //: `statusState = null` yapıyordu — koşum sürerken ikinci satıra geçen
+    //: kullanıcı KAPALI bir Run düğmesi ve BOŞ bir durum satırı görüyordu.
+    //: Gerekçe uydurulmaz: koşan satırın ADI kayıtlı spec'ten gelir, metin
+    //: mevcut 'ac.run.running*' çevirilerinden kurulur (yeni anahtar yok).
+    function mesgulGerekcesi() {
+        const kok = (busyRow && busyRow.spec && busyRow.spec.long)
+            ? T('ac.run.runningLong', 'RUNNING — this analysis may take a while…')
+            : T('ac.run.running', 'RUNNING…');
+        if (!busyRow) return kok;
+        const ad = busyRow.titleKey ? T(busyRow.titleKey, busyRow.title)
+                                    : busyRow.title;
+        return ad ? kok + ' — ' + ad : kok;
+    }
+
     function renderStatus() {
         const el = document.getElementById('ac_status');
         const btn = document.getElementById('ac_run');
-        if (btn) btn.disabled = !!busy;
+        if (btn) {
+            btn.disabled = !!busy;
+            btn.title = busy ? mesgulGerekcesi() : '';
+        }
         if (!el) return;
-        if (!statusState) { el.textContent = ''; el.style.color = ''; return; }
+        if (!statusState) {
+            if (busy) {
+                el.textContent = mesgulGerekcesi();
+                el.style.color = kindColor('info');
+                return;
+            }
+            el.textContent = ''; el.style.color = ''; return;
+        }
         el.textContent = statusState.text;
         el.style.color = kindColor(statusState.kind || 'dim');
     }
@@ -905,8 +993,30 @@
                       'Shown from the run history — this is a stored result, '
                       + 'not a fresh run.')) + '</p>'
             : '';
+        // --- ÖH D22 / P17B3-03: GÖRÜNTÜLEYİCİ HANGİ ANALİZE AİT OLDUĞUNU
+        // SÖYLER. ÖLÇÜLDÜ (P17 turu, docs/scofield/raw/P17/B3-rapor.md
+        // tur-10): kullanıcı "Acoustic mode table" satırını seçip Run'a
+        // bastı, panel isteği GÖNDERMEDEN beyanlı reddetti; ekranında ise
+        // bir ÖNCEKİ analizin (nozzle_flow.cfd) yeşil "CONVERGED (2915
+        // iterations)" rozeti duruyordu. Sebep `viewingEntryId`: geçmiş
+        // şeridinden bir koşuma sabitlenen görüntüleyici, seçili satır
+        // değişse de o koşumu göstermeye devam eder (tasarım gereği) — ama
+        // başlıkta YALNIZ saat damgası ve hüküm rozeti vardı, ANALİZ ADI
+        // yoktu. Reddedilen koşumun altında başka analizin yeşil hükmü,
+        // sahibi yazmadan duruyordu.
+        // Kapı: başlık, sonucun ait olduğu analizin adını taşır. Uydurma
+        // yok — ad kayıtlı spec'ten gelir; spec yoksa satır anahtarı ham
+        // hâliyle basılır, ad ASLA tahmin edilmez.
+        const gorunenSpec = specByKey[entry.rowKey];
+        const gorunenAd = gorunenSpec ? T(gorunenSpec.titleKey, gorunenSpec.title)
+                                      : entry.rowKey;
         const head = '<div style="display:flex; gap:8px; align-items:baseline;'
             + ' flex-wrap:wrap; margin-bottom:6px;">'
+            + '<span data-ac-view-title="1"'
+            + (gorunenSpec ? i18nAttr(gorunenSpec.titleKey) : '')
+            + ' style="font-family:var(--hd-mono, monospace); font-size:0.72rem;'
+            + ' color:var(--hd-ink, #cfe8f2); font-weight:600;">'
+            + esc(gorunenAd) + '</span>'
             + '<span style="font-family:var(--hd-mono, monospace); font-size:0.7rem;'
             + ' color:var(--hd-ink-dim, #7d97a5);">' + esc(clockText(entry.at)) + '</span>'
             + verdictBadge(entry) + '</div>' + staleNote;
@@ -915,6 +1025,26 @@
             host.innerHTML = head + '<p data-ac-error="1" style="font-size:0.74rem;'
                 + ' color:var(--hd-red, #ff5d73); overflow-wrap:anywhere;">'
                 + esc(SRV(entry.errorText || '')) + '</p>';
+            if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(host);
+            return;
+        }
+
+        //: P11B2-17 — BIRAKILMIŞ YÜK SESSİZ KALMAZ. Kayıt duruyor ama
+        //: TAM yanıtı bellekten bırakıldıysa kiracı ÇAĞRILMAZ (boş sonuç
+        //: uydurmak yasak); hangi tavanın uygulandığı adıyla yazılır.
+        if (entry.ok && entry.yukBirakildi) {
+            host.innerHTML = head + '<p data-ac-payload-released="1"'
+                + ' style="font-size:0.74rem; color:var(--hd-ink-dim, #7d97a5);'
+                + ' font-family:var(--hd-mono, monospace);">'
+                // ÖH D36 / sahne-hud a2 (OH-P-08): cümle sözlüğe bağlandı;
+                // TR ekranda İngilizce kalıyordu (ölçüldü: a2/once.json M5).
+                // Tavan adı ve değeri makinedir, parametre olarak geçer.
+                + esc(TF('ac.view.payloadReleased',
+                         { cap: 'GECMIS_YUK_TAVANI = ' + GECMIS_YUK_TAVANI },
+                         'analysis_center: run payload released ({cap}); the '
+                         + 'record is kept, the response body is not. Re-run '
+                         + 'the analysis to see the result again.'))
+                + '</p>';
             if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(host);
             return;
         }
@@ -989,7 +1119,7 @@
             const on = (viewingEntry() === e);
             return '<button type="button" id="ac_hist_' + e.id + '"'
                 + ' data-ac-history="' + e.id + '" data-ac-history-row="' + esc(e.rowKey) + '"'
-                + ' title="' + esc(TF('ac.history.replay', { seconds: e.seconds },
+                + ' title="' + esc(TF('ac.history.replay', { seconds: secTxt(e.seconds) },
                     'Click to show this stored result again (run took {seconds} s).')) + '"'
                 + ' style="cursor:pointer; border-radius:6px; padding:4px 10px;'
                 + ' font-family:var(--hd-mono, monospace); font-size:0.68rem;'
@@ -999,9 +1129,36 @@
                 + '; color:var(--hd-ink, #cfe8f2);">'
                 + esc(clockText(e.at)) + ' · '
                 + esc(T(e.componentTitleKey, e.componentTitle)) + ' · '
-                + esc(T(e.titleKey, e.title)) + ' ' + verdictBadge(e) + '</button>';
+                + esc(T(e.titleKey, e.title)) + ' ' + verdictBadge(e)
+                //: P11B2-17: yükü bırakılmış kayıt şeritte de imlidir.
+                + (e.yukBirakildi
+                    ? '<span data-ac-released="1" style="margin-left:6px;'
+                      + ' font-size:0.62rem; color:var(--hd-ink-dim, #7d97a5);">'
+                      // ÖH D36 / sahne-hud a2 (OH-P-08): sözlüğe bağlandı.
+                      + esc(T('ac.history.released', '(payload released)'))
+                      + '</span>' : '')
+                + '</button>';
         }).join('');
-        host.innerHTML = items;
+        //: P11B2-17: silme yolu. Metin makine verisidir (tavanlar adıyla).
+        const temizle = '<button type="button" id="ac_hist_clear"'
+            + ' data-ac-history-clear="1"'
+            + ' title="' + esc('analysis_center: GECMIS_TAVANI = '
+                + GECMIS_TAVANI + ', GECMIS_YUK_TAVANI = '
+                + GECMIS_YUK_TAVANI) + '"'
+            + ' style="cursor:pointer; border-radius:6px; padding:4px 10px;'
+            + ' font-family:var(--hd-mono, monospace); font-size:0.68rem;'
+            + ' border:' + PANEL_BORDER + '; background:transparent;'
+            + ' color:var(--hd-ink-dim, #7d97a5);">'
+            // ÖH D36 / sahne-hud a2 (OH-P-08): düğme etiketi kullanıcı
+            // metnidir, sözlüğe bağlandı (title içindeki tavan adları makine).
+            + esc(TF('ac.history.clear',
+                     { n: runHistory.length, cap: GECMIS_TAVANI },
+                     'clear history ({n}/{cap})')) + '</button>';
+        host.innerHTML = items + temizle;
+        const temizleEl = document.getElementById('ac_hist_clear');
+        if (temizleEl && temizleEl.addEventListener) {
+            temizleEl.addEventListener('click', function () { gecmisiTemizle(); });
+        }
         runHistory.forEach(function (e) {
             const el = document.getElementById('ac_hist_' + e.id);
             if (el && el.addEventListener) {
@@ -1055,6 +1212,51 @@
         renderHistory();
     }
 
+    // P11B2-20: durum satırındaki analiz adı ÇEVRİLİR — görüntüleyici
+    // başlığıyla AYNI kural (T(titleKey, title)); ad uydurulmaz, anahtar
+    // yoksa kayıtlı İngilizce yedek metin basılır.
+    function kayitAdi(entry) {
+        return entry.titleKey ? T(entry.titleKey, entry.title) : entry.title;
+    }
+
+    //: P11B2-17 — İKİ TAVAN. (1) YÜK: en yeni GECMIS_YUK_TAVANI koşum
+    //: dışındaki kayıtların TAM yanıtı bırakılır; bir satırın SON kaydı
+    //: asla bırakılmaz (ekranda duran sonuç kaybolmasın). (2) KAYIT:
+    //: GECMIS_TAVANI üstündeki EN ESKİ kayıtlar listeden düşer; düşen
+    //: kayıt bir satırın son kaydıysa o satırın imi de temizlenir.
+    function gecmisiBuda() {
+        let yukluGorulen = 0;
+        for (let i = runHistory.length - 1; i >= 0; i--) {
+            const e = runHistory[i];
+            if (!e.ok || e.data === null || e.yukBirakildi) continue;
+            yukluGorulen += 1;
+            if (yukluGorulen > GECMIS_YUK_TAVANI
+                    && lastEntryByRow[e.rowKey] !== e) {
+                e.data = null;
+                e.yukBirakildi = true;
+            }
+        }
+        while (runHistory.length > GECMIS_TAVANI) {
+            const dusen = runHistory.shift();
+            if (lastEntryByRow[dusen.rowKey] === dusen) {
+                delete lastEntryByRow[dusen.rowKey];
+            }
+            if (viewingEntryId === dusen.id) viewingEntryId = null;
+        }
+    }
+
+    //: P11B2-17 — kullanıcının elindeki silme yolu. Yalnız geçmişi siler;
+    //: seçim ve kart olduğu gibi kalır.
+    function gecmisiTemizle() {
+        runHistory.length = 0;
+        Object.keys(lastEntryByRow).forEach(function (k) {
+            delete lastEntryByRow[k];
+        });
+        viewingEntryId = null;
+        renderViewer();
+        renderHistory();
+    }
+
     function pushEntry(row, payload) {
         entrySeq += 1;
         const comp = componentOf(row.componentId);
@@ -1076,7 +1278,28 @@
         };
         runHistory.push(entry);
         lastEntryByRow[row.key] = entry;
-        viewingEntryId = entry.id;
+        gecmisiBuda();
+        // --- ÖH D25 / P11B2-20: BİTEN KOŞUM GÖRÜNTÜLEYİCİYİ KAÇIRMAZ.
+        // ÖLÇÜLDÜ (a3/once.json, taban cdf2106): `pushEntry` KOŞULSUZ
+        // `viewingEntryId = entry.id` yapıyordu. Senaryo node'da koşuldu —
+        // kullanıcı A satırını (CFD, `long: true`, dakikalar sürer) seçip
+        // Run'a basıyor, koşum sürerken B satırına geçiyor; A bitince
+        // görüntüleyici A'nın çıktısına ATLIYOR ve ekranda kart B'nin
+        // alanlarını, görüntüleyici A'nın sonucunu gösteriyordu (ölçüm:
+        // kart_B = 1 ve görüntüleyici_A = 1, yani ÇAPRAZ GÖSTERİM).
+        // Bayatlık notu da basılmıyordu (`lastEntryByRow[rowKey] === entry`
+        // olduğu için `stale` false).
+        // Kapı: görüntüleyici YALNIZ biten koşumun satırı HÂLÂ SEÇİLİYSE
+        // o koşuma geçer. Kullanıcı başka satıra geçtiyse görüntüleyici
+        // ONUN seçiminde kalır; biten koşum SİLİNMEZ, geçmiş şeridinde
+        // durur ve durum satırı hangi analizin bittiğini ADIYLA söyler
+        // (run() içindeki 'ac.run.doneOther' / 'ac.run.errorOther').
+        // Seçim yoksa (hiç satır seçilmemiş) eski davranış korunur.
+        const halaSecili = !selection
+            || (selection.componentId === row.componentId
+                && selection.analysisId === row.analysisId);
+        if (halaSecili) viewingEntryId = entry.id;
+        entry.viewerFollowed = halaSecili;
         return entry;
     }
 
@@ -1117,6 +1340,7 @@
         }
 
         busy = true;
+        busyRow = row;
         statusState = { kind: 'info',
             text: spec.long ? T('ac.run.runningLong',
                                 'RUNNING — this analysis may take a while…')
@@ -1136,29 +1360,53 @@
                 return data;
             });
         }).then(function (data) {
-            const seconds = Number(((Date.now() - t0) / 1000).toFixed(1));
+            // 0,1 s'ye yuvarlanmış ÖLÇÜM (sayı); metin secTxt ile basılır.
+            const seconds = Math.round((Date.now() - t0) / 100) / 10;
             let verdict = null;
             if (typeof spec.verdict === 'function') {
                 try { verdict = spec.verdict(data); } catch (e) { verdict = null; }
             }
-            pushEntry(row, { at: Date.now(), seconds: seconds, ok: true,
-                             data: data, verdict: verdict });
+            const kayit = pushEntry(row, { at: Date.now(), seconds: seconds,
+                                           ok: true, data: data,
+                                           verdict: verdict });
             busy = false;
-            statusState = { kind: 'ok',
-                text: TF('ac.run.done', { seconds: seconds },
-                         'Completed in {seconds} s.') };
+            busyRow = null;
+            // P11B2-20: koşum kullanıcının AYRILDIĞI satıra aitse durum
+            // satırı bunu ADIYLA söyler — "Completed" tek başına, başka
+            // bir analizin kartına bakan kullanıcıyı yanıltırdı.
+            statusState = kayit.viewerFollowed
+                ? { kind: 'ok',
+                    text: TF('ac.run.done', { seconds: secTxt(seconds) },
+                             'Completed in {seconds} s.') }
+                : { kind: 'ok',
+                    text: TF('ac.run.doneOther',
+                             { seconds: secTxt(seconds),
+                               analysis: kayitAdi(kayit) },
+                             'Completed in {seconds} s — that run belongs to '
+                             + '"{analysis}", which you have left. The viewer '
+                             + 'stays on your current selection; open the run '
+                             + 'from the history strip below.') };
             renderStatus();
             renderViewer();
             renderHistory();
             return data;
         }).catch(function (err) {
-            const seconds = Number(((Date.now() - t0) / 1000).toFixed(1));
+            const seconds = Math.round((Date.now() - t0) / 100) / 10;
             const message = (err && err.message) || String(err);
-            pushEntry(row, { at: Date.now(), seconds: seconds, ok: false,
-                             errorText: message });
+            const kayit = pushEntry(row, { at: Date.now(), seconds: seconds,
+                                           ok: false, errorText: message });
             busy = false;
-            statusState = { kind: 'err',
-                text: TF('ac.run.error', { message: message }, 'ERROR: {message}') };
+            busyRow = null;
+            statusState = kayit.viewerFollowed
+                ? { kind: 'err',
+                    text: TF('ac.run.error', { message: message },
+                             'ERROR: {message}') }
+                : { kind: 'err',
+                    text: TF('ac.run.errorOther',
+                             { analysis: kayitAdi(kayit),
+                               message: message },
+                             'ERROR in "{analysis}", which you have left: '
+                             + '{message}') };
             renderStatus();
             renderViewer();
             renderHistory();
@@ -1210,33 +1458,18 @@
 
     // Parti 29 yerleşim stilleri (yapışkan sütunlar K5a, içindekiler
     // şeridi K5b, yapışkan geçmiş K5c) /static/css/analysis_center.css
-    // dosyasındadır. Şablonlarda <link> YOK (A2 ölçümü: ac-* kimlik
-    // stillerinin tek kaynağı bu dosyanın inline stilleri; şablonlar o
-    // partinin dosya kapsamı dışındaydı, ölü link de bekçiyle yasak) —
-    // link buradan enjekte edilir ki üç motor sayfası tek kuraldan
-    // beslensin. Şablonlara gerçek <link> girdiği gün (A2 halef bekçisi:
-    // dosya var + üç şablonda link) bu enjeksiyon sökülür. Defter kalemi.
-    const LAYOUT_CSS_HREF = '/static/css/analysis_center.css';
-
-    function injectLayoutCss() {
-        // Taklit DOM'larda head yoktur — enjeksiyon sessizce atlanır
-        // (yerleşim stili taklit ortamda zaten anlamsız).
-        if (!document.head || typeof document.head.appendChild !== 'function') return;
-        if (typeof document.querySelector === 'function'
-                && document.querySelector('link[href="' + LAYOUT_CSS_HREF + '"]')) {
-            return;                      // ikinci init/link tekrarı üretmez
-        }
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = LAYOUT_CSS_HREF;
-        document.head.appendChild(link);
-    }
+    // dosyasındadır ve o dosya artık ÜÇ MOTOR ŞABLONUNUN head'inde
+    // GERÇEK <link> ile yüklenir (advanced/liquid/solid, theme.css'ten
+    // önce — kaskad sözleşmesi CSS baş yorumunda). Parti 29'da şablonlar
+    // o partinin dosya kapsamı dışında olduğu için link buradan enjekte
+    // ediliyordu; enjeksiyon 2026-08-18'de SÖKÜLDÜ (defter kalemi).
+    // Bekçi halefi: tests/test_analysis_center_contract.py::
+    // TestLayoutCssLink — üç şablonda link VAR + burada enjeksiyon YOK.
 
     function init(options) {
         if (inited) return;
         cfg = options || {};
         cfg.motorType = cfg.motorType || 'hybrid';
-        injectLayoutCss();
 
         const anchor = cfg.anchorId ? document.getElementById(cfg.anchorId) : null;
         const host = document.createElement('div');
@@ -1300,6 +1533,10 @@
         getSelection: function () { return selection ? {
             componentId: selection.componentId, analysisId: selection.analysisId } : null; },
         history: function () { return runHistory.slice(); },
+        //: P11B2-17 — geçmiş tavanları ve silme yolu dışa açık
+        //: (bekçi tavanları saf katmandan ölçer).
+        clearHistory: gecmisiTemizle,
+        _historyCaps: { entries: GECMIS_TAVANI, payloads: GECMIS_YUK_TAVANI },
         // --- Test / hata ayıklama (DOM'suz koşulabilir model katmanı) ---
         _model: buildModel,
         _registry: registry,

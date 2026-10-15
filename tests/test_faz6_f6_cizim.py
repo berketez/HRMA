@@ -70,11 +70,31 @@ def _notlar(fig):
     return [a.get("text", "") for a in fig["layout"].get("annotations", [])]
 
 
+#: Katı motorun GERÇEK doğrulama koşumu (SolidRocketEngine, Ø100 mm kasa
+#: deliği / 500 mm grain / Ø30 mm çekirdek / Pc 40 bar,
+#: ``overrides={'case_thickness': 3.0}``): kullanıcı 3,00 mm kasa girdi,
+#: HRMA 2,40 mm öneriyor, ``design_mode = 'verify'``.
+#:
+#: ÖH B-1/B16 (defter P14M1-07). Fikstür eskiden İKİ ALANI DA 2,4 yazıyordu;
+#: iki sayı eşitken "as-designed mi, öneri mi çiziliyor" sorusu ölçülemez ve
+#: ``CHAMBER_WALL_SCHEMAS``in ``as_designed_is_authoritative`` bayrağı
+#: mutasyonla bozulsa bile hiçbir bekçi kırmızıya dönmüyordu. İki sayı artık
+#: AYRIK; ayrımın hangi bekçiyi beslediği aşağıdaki testlerde yazılıdır.
+KATI_CIDAR_AS_DESIGNED_MM = 3.0
+KATI_CIDAR_ONERILEN_MM = 2.4
+
+
 def _kati_geo(**kw):
     """``solid_results_to_motor_geometry`` çıktısının şekli (uzunluklar METRE).
 
     Sayılar gerçek /calculate_solid koşumundan: Ø100 mm kasa deliği, 500 mm
-    grain, Ø30 mm çekirdek, 2,4 mm kasa cidarı.
+    grain, Ø30 mm çekirdek; kasa cidarı kullanıcı girdisi 3,00 mm, yapısal
+    boyutlandırmanın önerisi 2,40 mm (``design_mode = 'verify'``).
+
+    DİKKAT — ``case_analysis`` bloğuna bilerek ``design_mode`` YAZILMAZ:
+    çizilecek kalınlığı bu şemada ``CHAMBER_WALL_SCHEMAS``in
+    ``as_designed_is_authoritative`` bayrağı seçer ve o bayrağın bekçisi
+    ancak iki sayı ayrıkken ölçülebilir (P14M1-07).
     """
     geo = {
         "chamber_diameter": 0.100,
@@ -95,8 +115,10 @@ def _kati_geo(**kw):
         },
         "structural_analysis": {
             "case_analysis": {
-                "wall_thickness_mm": 2.4,
-                "recommended_wall_thickness_mm": 2.4,
+                "wall_thickness_mm": KATI_CIDAR_AS_DESIGNED_MM,
+                "recommended_wall_thickness_mm": KATI_CIDAR_ONERILEN_MM,
+                "wall_thickness_source": "user_supplied",
+                "safety_factor_is_tautological": False,
             }
         },
     }
@@ -166,15 +188,25 @@ def test_t06_kasa_cidari_cozucu_degerini_kirpmadan_cizer():
     raporladı, çizim üçünde de 4,5 mm (= 0,045·D geometrik yedeği) çizdi.
     30 mm dalı ayrıca eski ``min(..., 0.12*D_ch)`` kırpmasını yakalar:
     Ø100 mm kasada o kırpma 30 mm'yi 12 mm'ye indiriyordu.
+
+    ÖH B-1/B16 (P14M1-07): önerilen kalınlık üç dalda da SABİT 2,40 mm
+    tutulur, yani "öneriyi çizme" kusuru üç dalda birden kırmızıya döner.
+    Eskiden iki alana da ``t`` yazılıyordu ve öneri çizilse bile bekçi
+    hiçbir şey görmüyordu.
     """
     for t in (2.0, 8.0, 30.0):
         fig = _fig(create_improved_motor_cross_section(
             _kati_geo(structural_analysis={
-                "case_analysis": {"wall_thickness_mm": t,
-                                  "recommended_wall_thickness_mm": t}}),
+                "case_analysis": {
+                    "wall_thickness_mm": t,
+                    "recommended_wall_thickness_mm": KATI_CIDAR_ONERILEN_MM}}),
             motor_type="solid"))
-        assert _cizilen_cidar(fig, 100.0) == pytest.approx(t), (
-            f"çözücü {t} mm cidar raporladı")
+        cizilen = _cizilen_cidar(fig, 100.0)
+        assert cizilen == pytest.approx(t), (
+            f"çözücü {t} mm cidar raporladı, çizim {cizilen:.4f} mm")
+        if abs(t - KATI_CIDAR_ONERILEN_MM) > 1e-9:
+            assert cizilen != pytest.approx(KATI_CIDAR_ONERILEN_MM, abs=1e-6), (
+                "as-designed yerine yapısal ÖNERİ çizilmiş")
 
 
 def test_t06_yalitim_halkasi_iki_capin_farkindan_gelir():
@@ -217,6 +249,51 @@ def test_t06_cidar_cad_cizimiyle_ayni_kaynaktan_gelir():
         beklenen = _chamber_wall_design(geo)["thickness_m"] * 1000.0
         fig = _fig(create_improved_motor_cross_section(geo))
         assert _cizilen_cidar(fig, oda_mm) == pytest.approx(beklenen, rel=1e-9)
+
+
+def test_t06_kati_kasada_as_designed_cidar_cizilir_oneri_degil():
+    """Katı kasada ÇİZİLEN kalınlık kullanıcının cidarıdır, öneri DEĞİL.
+
+    ÖH B-1/B16 (defter P14M1-07). ``CHAMBER_WALL_SCHEMAS``te katı motorun
+    satırı ``as_designed_is_authoritative = True`` taşır: katıda hoop
+    gerilmesi ``P·r/t_wall`` doğrudan kullanıcının kasasıyla hesaplandığı
+    için gerilmelerin ait olduğu kalınlık ODUR. Fikstürler iki alanı da
+    2,4 mm yazdığı sürece bu bayrak bozulsa bile hiçbir bekçi kırmızıya
+    dönmüyordu (P14 ölçümü: kelepçeli dalda 3,00 → 1,20 mm, 0 kırmızı).
+    Bu dalgada bayrak ``True -> False`` mutasyonuyla yeniden ölçüldü:
+    HEAD bekçileriyle 77 test yeşil, bu üç bekçiyle 3 kırmızı.
+
+    Gerçek koşum (SolidRocketEngine, ``overrides={'case_thickness': 3.0}``):
+    ``wall_thickness_mm = 3,0``, ``recommended_wall_thickness_mm = 2,4``,
+    ``design_mode = 'verify'``, ``safety_factor = 3,75``.
+    """
+    fig = _fig(create_improved_motor_cross_section(_kati_geo(),
+                                                   motor_type="solid"))
+    cizilen = _cizilen_cidar(fig, 100.0)
+    assert cizilen == pytest.approx(KATI_CIDAR_AS_DESIGNED_MM, rel=1e-9), (
+        f"çizilen cidar {cizilen:.4f} mm — kullanıcının kasası "
+        f"{KATI_CIDAR_AS_DESIGNED_MM} mm")
+    assert cizilen != pytest.approx(KATI_CIDAR_ONERILEN_MM, abs=1e-6), (
+        "yapısal ÖNERİ çizilmiş: emniyet katsayısı ekranda başka bir "
+        "parçaya ait olur")
+
+
+def test_t39_kati_kunye_de_iki_kalinligi_da_gosterir():
+    """Katı kasanın künyesi İKİ sayıyı da söyler (T39 deseninin katı ikizi).
+
+    ÖH B-1/B16 (defter P14M1-04/-07). Sıvı kolda tescilli desen
+    (``test_t39_kunye_hangi_kalinligin_cizildigini_soyler``) katı kolda
+    yoktu; fikstür eşitliği yüzünden yazılamıyordu da. İmalatçı hangi
+    kalınlığın hangi emniyet katsayısına ait olduğunu görmeden tezgâha
+    gitmemeli.
+    """
+    fig = _fig(create_improved_motor_cross_section(_kati_geo(),
+                                                   motor_type="solid"))
+    hover = [t.get("hovertext") for t in fig["data"]
+             if t.get("name") == "Chamber wall"][0]
+    assert f"{KATI_CIDAR_AS_DESIGNED_MM:.2f} mm" in hover, hover
+    assert f"{KATI_CIDAR_ONERILEN_MM:.2f} mm" in hover, hover
+    assert "recommends" in hover, hover
 
 
 # ---------------------------------------------------------------------------
@@ -428,13 +505,44 @@ def test_t18_itici_kimligi_yoksa_tasarim_noktasi_cizilmez():
 
 
 def test_t18_itici_kimligi_verildiyse_tasarim_noktasi_cizilir():
-    """Karşı kanıt: kimlik geldiğinde nokta yine basılır (test susturmuyor)."""
-    fig = _fig(create_chamber_pressure_mixture_ratio_3d_surface({
+    """Karşı kanıt: kimlik geldiğinde nokta yine basılır (test susturmuyor).
+
+    ÖH D15 / fea-viz a2 (P8B4-16) ÇEVİRİSİ: bu iddia eskiden haçın adını
+    "Design point (motor result)" diye SABİTLİYORDU. O ad, sayının motor
+    çözücüsünden geldiğini söyler; oysa buradaki üç sayı çağıranın
+    sözlüğünden gelir ve bu figürde YENİDEN ÇÖZÜLMEZ — kalemin kusuru tam
+    buydu (uç katmanı 300/3,5/50 varsayılanlarını "çözücünün bildirdiği
+    tasarım noktası" künyesiyle basıyordu). T18'in KENDİ konusu (kimlik
+    geldiyse nokta çizilir) korunur; ada gömülü kaynak iddiası, çağıranın
+    ``design_point_source`` beyanına bağlanır.
+    """
+    ortak = {
         "base_isp": 244.9, "optimal_of_ratio": 2.5,
         "optimal_chamber_pressure": 100.0, "grid_n": 3,
         "fuel_type": "htpb", "oxidizer_type": "n2o",
-    }))
-    assert "Design point (motor result)" in _iz_adlari(fig)
+    }
+    # ÖH D24 / P8B4-17 İKİNCİ ÇEVİRİ: iz ADI bir kez daha değişebilir hâle
+    # geldi (genleşme tabanı düzeltilince "Design (Pc, O/F) at this
+    # surface's expansion basis"). Kaynak iddiası zaten KÜNYEDE yaşıyor;
+    # T18'in konusu (kimlik geldiyse nokta çizilir) künye üzerinden
+    # çapalanıyor, ada gömülü iddia bırakılmıyor.
+    fig = _fig(create_chamber_pressure_mixture_ratio_3d_surface(dict(ortak)))
+
+    def _tasarim_kunyesi(f):
+        izler = [t for t in f.get("data", [])
+                 if str(t.get("name", "")).startswith("Design")]
+        assert izler, _iz_adlari(f)
+        return izler[0].get("hovertemplate") or ""
+
+    # Nokta ÇİZİLİR (T18'in asıl iddiası) ...
+    kunye = _tasarim_kunyesi(fig)
+    # ... ama çağıran beyan etmediği için "motor sonucu" DİYE ETİKETLENMEZ
+    assert "AS SUPPLIED" in kunye, kunye
+    assert "by the motor solver" not in kunye, kunye
+    # Çağıran kaynağı beyan ederse eski künye geri gelir
+    fig_c = _fig(create_chamber_pressure_mixture_ratio_3d_surface(
+        dict(ortak, design_point_source="solver")))
+    assert "by the motor solver" in _tasarim_kunyesi(fig_c)
     assert "reference pair" not in json.dumps(fig["layout"]["title"])
 
 
@@ -467,6 +575,33 @@ def test_t39_kunye_hangi_kalinligin_cizildigini_soyler():
              if t.get("name") == "Chamber wall"][0]
     assert "5.00 mm" in hover
     assert "6.68 mm" in hover and "recommends" in hover
+
+
+def test_t39_hibrit_dogrulama_dalinda_da_as_designed_cizilir():
+    """Hibrit ``chamber_analysis`` şemasının DOĞRULAMA dalı da kurulmalı.
+
+    ÖH B-1/B16 (defter P14M1-09). Hibrit satırı katıdan farklıdır:
+    ``as_designed_is_authoritative = False``, yani kararı ``design_mode``
+    verir. Bekçi ağı bugüne kadar yalnız boyutlandırma (``size``) dalını
+    savunuyordu; ``'verify'`` dalının hiç bekçisi yoktu, dolayısıyla o dal
+    sessizce öneriye dönse kimse görmezdi.
+
+    ``HIBRIT_GEO`` gerçek /calculate koşumundan: kullanıcı 5,00 mm cidar
+    girdi, yapısal boyutlandırma 8,3291 mm öneriyor.
+    """
+    oda_mm = HIBRIT_GEO["chamber_diameter"] * 1000.0
+    fig = _fig(create_improved_motor_cross_section(HIBRIT_GEO))
+    cizilen = _cizilen_cidar(fig, oda_mm)
+    assert cizilen == pytest.approx(5.0, rel=1e-9), (
+        f"doğrulama modunda çizilen cidar {cizilen:.4f} mm — kullanıcının "
+        "5,00 mm cidarı bekleniyordu")
+    assert cizilen != pytest.approx(8.329071753729403, abs=1e-6), (
+        "öneri çizilmiş: doğrulama dalı sessizce boyutlandırmaya düşmüş")
+
+    hover = [t.get("hovertext") for t in fig["data"]
+             if t.get("name") == "Chamber wall"][0]
+    assert "5.00 mm" in hover and "8.33 mm" in hover, hover
+    assert "recommends" in hover, hover
 
 
 def test_t39_yapisal_sonuc_yoksa_kunye_tahmin_oldugunu_soyler():

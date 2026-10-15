@@ -10,6 +10,11 @@ Regulated case V_p=0.1 m^3, P_tank=30 bar, T0=293.15 K, N2:
     adiabatic (P_store=200 bar): T_final = T0*(30/200)^(0.4/1.4) = 170.49 K
                 m = 3e5/(296.803*170.49) = 5.929 kg  (> isothermal)
 
+ÖH D27 / P5B3-16: the anchors above are the eta_ex = 1 bodies. The module
+default is now the shared EXPULSION_EFFICIENCY_DEFAULT (0.95), so the gas
+sweeps V_p/eta and every regulated mass/volume anchor is divided by that
+constant. The hand calculations below are DERIVED, never re-measured.
+
 Blowdown case P0=50 bar, V_u0=0.05 m^3, V_p=0.05 m^3, N2:
     n=1.0 : P_final = 50*(0.05/0.10)^1 = 25 bar, blowdown ratio 2.0, T_final=T0.
 """
@@ -21,6 +26,7 @@ import pytest
 from hrma.analysis.pressurant_sizing import (
     regulated_pressurant, blowdown_pressurant, analyze_pressurant,
     gas_properties, compressibility_factor, GAS_PROPERTIES, R_UNIVERSAL,
+    EXPULSION_EFFICIENCY_DEFAULT,
 )
 from tests.bagimlilik_kapisi import kurulu_mu
 
@@ -61,8 +67,21 @@ class TestGasConstants:
         assert GAS_PROPERTIES['nitrogen']['gamma'] == pytest.approx(1.40, rel=1e-6)
 
     def test_helium_specific_gas_constant(self):
+        """ÖH D23 / P5B3-19 — KUSURU KORUYAN BEKÇİ ÇEVRİLDİ.
+
+        Bu bekçi ``gamma``yı ``1.667 ± 1,7e-06`` ile kilitliyordu, yani
+        modülün KENDİ künyesiyle ("monatomic, 5/3") çelişen yuvarlanmış
+        ondalığı koruyordu. ÖLÇÜLDÜ (taban ``ef527ae``, ``once.json``
+        P5B3-19): 1,667 ile 5/3 = 1,6666666666666667 arasındaki sapma
+        %0,0200 ve ``rel=1e-6`` toleransı bunu geçirmiyordu — yani bekçi
+        DÜZELTMEYİ engelliyordu. Tek atomlu gazın özgül ısı oranı tam
+        olarak 5/3'tür (kinetik teori, f = 3 serbestlik derecesi;
+        Sutton & Biblarz 9. baskı Böl. 6). Kardeş azot satırı zaten tam
+        7/5'i sınıyordu; helyum artık aynı biçimde kesirle sınanır.
+        """
         assert GAS_PROPERTIES['helium']['R'] == pytest.approx(2077.26, rel=1e-4)
-        assert GAS_PROPERTIES['helium']['gamma'] == pytest.approx(1.667, rel=1e-6)
+        assert GAS_PROPERTIES['helium']['gamma'] == pytest.approx(5.0 / 3.0,
+                                                                 rel=1e-12)
 
     def test_specific_constant_is_universal_over_molar_mass(self):
         for props in GAS_PROPERTIES.values():
@@ -83,7 +102,10 @@ class TestRegulatedIsothermal:
         r = regulated_pressurant(propellant_volume=0.1, tank_pressure=30e5,
                                  gas='nitrogen', initial_temperature=293.15,
                                  storage_pressure=200e5)
-        assert r['isothermal']['gas_mass_kg'] == pytest.approx(3.4480, rel=1e-3)
+        # ÖH D27 / P5B3-16: 3.4480 kg eta=1 çıpasıdır; varsayılan eta artık
+        # EXPULSION_EFFICIENCY_DEFAULT olduğu için gaz V_p/eta süpürür.
+        assert r['isothermal']['gas_mass_kg'] == pytest.approx(
+            3.4480 / EXPULSION_EFFICIENCY_DEFAULT, rel=1e-3)
         assert r['isothermal']['final_temperature_K'] == pytest.approx(293.15)
 
     def test_isothermal_density_is_P_over_RT(self):
@@ -102,8 +124,9 @@ class TestRegulatedIsothermal:
     def test_helium_isothermal_hand_calc(self):
         r = regulated_pressurant(propellant_volume=0.1, tank_pressure=30e5,
                                  gas='helium', initial_temperature=293.15)
-        # 3e5 / (2077.264*293.15) = 0.49257 kg
-        assert r['isothermal']['gas_mass_kg'] == pytest.approx(0.49257, rel=1e-3)
+        # 3e5 / (2077.264*293.15) = 0.49257 kg  (eta = 1 çıpası)
+        assert r['isothermal']['gas_mass_kg'] == pytest.approx(
+            0.49257 / EXPULSION_EFFICIENCY_DEFAULT, rel=1e-3)
 
 
 class TestRegulatedAdiabatic:
@@ -121,7 +144,9 @@ class TestRegulatedAdiabatic:
         r = regulated_pressurant(propellant_volume=0.1, tank_pressure=30e5,
                                  gas='nitrogen', initial_temperature=293.15,
                                  storage_pressure=200e5)
-        assert r['adiabatic']['gas_mass_kg'] == pytest.approx(5.929, rel=1e-3)
+        # 5.929 kg eta=1 çıpası; varsayılan eta ile 1/eta katı (ÖH D27).
+        assert r['adiabatic']['gas_mass_kg'] == pytest.approx(
+            5.929 / EXPULSION_EFFICIENCY_DEFAULT, rel=1e-3)
 
     def test_adiabatic_exceeds_isothermal(self):
         for gas in ('nitrogen', 'helium'):

@@ -112,6 +112,71 @@ theorem kc_below_limit_iff {P₁ P₂ Pv : ℝ} (h : P₂ < P₁) :
   rw [div_lt_iff₀ hd]
   constructor <;> intro hx <;> linarith
 
+/-!
+## ÖH D37 A2 hibrit · F-10 — Orifis planı: alan sabitken çap ve ligament verimi
+
+`hrma/engines/injector_design.py::_plan_orifices` toplam alanı `n` deliğe
+`d = √(4A/(π n))` ile böler; `hrma/utils/injector_design.py::injector_plate_structural`
+plakanın ligament verimini `p = √(A_p/n)`, `η = (p − d)/p` ile kurar.
+
+İki şey ispatlanıyor:
+
+1. `n` delik toplam alanı TAM verir: `n·π·d²/4 = A` (alan değişmezliği).
+2. Ligament verimi `η = 1 − 2·√(A/(π·A_p))` — `n`'den BAĞIMSIZ. Dolayısıyla
+   Roark eğilme gerilmesi, emniyet katsayısı, gereken kalınlık ve plaka
+   kütlesi delik sayısıyla DEĞİŞMEZ (F10_orifis_bandi.md §5.2, K3 ölçümü).
+-/
+
+/-- **F-10 (1).** `n` deliğin toplam alanı istenen alanı tam verir. -/
+theorem orificeCount_area_invariant (A : ℝ) (n : ℕ) (hA : 0 < A) (hn : 0 < n) :
+    (n : ℝ) * Real.pi * (Real.sqrt (4 * A / (Real.pi * n))) ^ 2 / 4 = A := by
+  have hn' : (0 : ℝ) < n := by exact_mod_cast hn
+  have hpos : 0 ≤ 4 * A / (Real.pi * n) := by positivity
+  rw [Real.sq_sqrt hpos]
+  field_simp
+
+/-- **F-10 (2).** Ligament verimi delik sayısından bağımsızdır. -/
+theorem ligament_n_invariant (A Ap : ℝ) (n : ℕ) (hA : 0 < A) (hAp : 0 < Ap)
+    (hn : 0 < n) :
+    (Real.sqrt (Ap / n) - Real.sqrt (4 * A / (Real.pi * n))) / Real.sqrt (Ap / n)
+      = 1 - 2 * Real.sqrt (A / (Real.pi * Ap)) := by
+  have hn' : (0 : ℝ) < n := by exact_mod_cast hn
+  have hp : 0 < Real.sqrt (Ap / n) := Real.sqrt_pos.mpr (by positivity)
+  have hd : Real.sqrt (4 * A / (Real.pi * n))
+      = 2 * Real.sqrt (A / (Real.pi * Ap)) * Real.sqrt (Ap / n) := by
+    have hnn : 0 ≤ 2 * Real.sqrt (A / (Real.pi * Ap)) * Real.sqrt (Ap / n) := by
+      positivity
+    rw [← Real.sqrt_sq hnn]
+    congr 1
+    rw [mul_pow, mul_pow, Real.sq_sqrt (by positivity), Real.sq_sqrt (by positivity)]
+    field_simp
+    ring
+  rw [hd, sub_div, div_self hp.ne', mul_div_assoc, div_self hp.ne', mul_one]
+
+/-!
+## ÖH D37 A2 hibrit · F-09 — τ_c ⟷ kalış süresi oranının çarpanlara ayrılması
+
+`hrma/engines/hybrid_rocket_engine.py::_tau_c_residual_terms`: hibrit zincir
+boğazı `ṁ = C_D·Pc·A_t/c*` ile kurar, kalış süresi `ρ·V/ṁ` ile `ρ = Pc/(R·T)`,
+kamara zaman sabiti `τ_c = L*/(c*·Γ²)` ile `L* = V/A_t`. Oran iki ADLI
+çarpana ayrılır: `1/C_D` ve `(c*·Γ)²/(R·T)`. Ayrıştırmanın kapanışı da
+ispatlanır: `unexplained = (r − e)/e` tanımıyla `e·(1 + unexplained) = r`.
+-/
+
+/-- **F-09 (1).** Oran tam olarak `(1/C_D)·(c*Γ)²/(R·T)` çarpanlarına ayrılır. -/
+theorem tauC_ratio_factorises (Pc At cstar Γ R T CD V : ℝ)
+    (hPc : Pc ≠ 0) (hAt : At ≠ 0) (hc : cstar ≠ 0) (hΓ : Γ ≠ 0) (hR : R ≠ 0)
+    (hT : T ≠ 0) (hCD : CD ≠ 0) (hV : V ≠ 0) :
+    ((Pc / (R * T)) * V / (CD * Pc * At / cstar)) / ((V / At) / (cstar * Γ ^ 2))
+      = (1 / CD) * (cstar * Γ) ^ 2 / (R * T) := by
+  field_simp
+
+/-- **F-09 (2).** Kapanış: açıklanan çarpan × (1 + açıklanamayan pay) = oran. -/
+theorem residual_decomposition_closes (r e : ℝ) (he : e ≠ 0) :
+    e * (1 + (r - e) / e) = r := by
+  field_simp
+  ring
+
 end HRMA
 
 /-! ## Denetim -/
@@ -121,3 +186,7 @@ end HRMA
 #print axioms HRMA.conservative_when_overestimated
 #print axioms HRMA.underestimate_can_miss_warning
 #print axioms HRMA.kc_below_limit_iff
+#print axioms HRMA.orificeCount_area_invariant
+#print axioms HRMA.ligament_n_invariant
+#print axioms HRMA.tauC_ratio_factorises
+#print axioms HRMA.residual_decomposition_closes

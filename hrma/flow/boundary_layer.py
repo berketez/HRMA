@@ -115,6 +115,9 @@ BİRİMLER: SI (m, Pa, K, kg/m³, N). Açı yok.
 """
 
 import numpy as np
+# ÖH D26 / OH-D25-14: ``np.trapz`` NumPy 2.0'da ad alanından
+# KALDIRILDI (np.trapezoid); ad TEK YERDE çözülür.
+from hrma.utils.numeric_compat import trapezoid as _trapezoid
 from typing import Callable, Dict, Optional, Sequence, Tuple, Union
 
 from scipy.interpolate import PchipInterpolator
@@ -224,11 +227,30 @@ RELAMINARIZATION_K_THRESHOLD = 3.0e-6
 #: Reynolds-Colburn analojisinin Prandtl üssü: St = (c_f/2)·Pr^(−2/3).
 COLBURN_PRANDTL_EXPONENT = -2.0 / 3.0
 
-#: İstasyon aralığı başına marş alt adımı. ÖLÇÜLDÜ (45 istasyonlu gerçek
-#: lülede, çözünürlük merdiveni bekçisi): 1 → 64 alt adım arasında sürtünme
-#: integrali toplam %0.11 değişiyor (8 ile 64 arası %0.11'in altında).
-#: Varsayılan 8 seçildi: maliyet/duyarlılık dengesi. Başlangıç tekilliğinin
-#: analitik integrali olmasaydı yakınsama √Δx mertebesinde olurdu.
+#: İstasyon aralığı başına marş alt adımı.
+#:
+#: P6B3-08: künye eskiden "1 → 64 alt adım arasında sürtünme integrali toplam
+#: %0.11 değişiyor (8 ile 64 arası %0.11'in altında)" diyordu ve kaynak olarak
+#: yalnız "45 istasyonlu gerçek lüle, çözünürlük merdiveni bekçisi" yazıyordu.
+#: O bekçi depoda YOKTU: ``tests/flow/test_sinir_tabakasi.py::
+#: test_cozunurluk_merdiveni`` DÜZ LEVHA üzerinde ve yalnız 4→32 aralığında
+#: ölçüyor. Yani sayı, yeniden üretilebilir bir vakaya bağlı değildi ve kendi
+#: içinde tutarsızdı (aynı künyede 1→64 toplamı 8→64 bandından KÜÇÜK
+#: gösteriliyordu; merdiven monoton olduğu için bu imkânsızdır).
+#:
+#: ÖLÇÜLDÜ (D25 a2, ``docs/scofield/raw/OH/D25/fea-cfd/a2/once_a2.json`` →
+#: P6B3-08; bekçi ``tests/test_d25_fea_cfd_a2.py::
+#: TestP6B308AltAdimKunyesi``): 45 istasyonlu yakınsak-ıraksak lülede
+#: (r_t = 30 mm, r_c = 75 mm, r_e = 90 mm, γ = 1,2, P₀ = 50 bar, T₀ = 3200 K,
+#: türbülanslı marş) sürtünme integrali 64 alt adıma göre
+#:   1 → %0,1285 · 2 → %0,0820 · 4 → %0,0478 · 8 → %0,0257 ·
+#:   16 → %0,0123 · 32 → %0,0045
+#: kadar sapıyor. Dizi MONOTON azalır; 1→64 toplam değişim (%0,1285)
+#: tanım gereği 8→64 bandından (%0,0257) BÜYÜKTÜR.
+#:
+#: Varsayılan 8 seçildi: 64'e göre sapması %0,03'ün altında, maliyeti 64'ün
+#: sekizde biri. Başlangıç tekilliğinin analitik integrali olmasaydı
+#: yakınsama √Δx mertebesinde olurdu.
 DEFAULT_SUBSTEPS = 8
 
 #: Sıkıştırılabilir δ*/θ integrallerinin Gauss-Legendre nokta sayısı.
@@ -254,7 +276,17 @@ MARCH_LAMINAR_SEPARATION = 'laminar_separation'
 MARCH_TURBULENT_SEPARATION = 'turbulent_separation'
 MARCH_NUMERICAL_FAILURE = 'numerical_failure'
 
-_EPS = 1e-12
+#: P15B2-11 (gürültü tabanı TEK TANIM değil, ROL başına tanımdır).
+#: Bu modüldeki tek sayısal pay, BOYUTSUZ Thwaites basınç-gradyanı
+#: parametresi λ = (θ²/ν)(du_e/dx) için ayrılma eşiğiyle karşılaştırma
+#: payıdır. Adı eskiden çıplak ``_EPS`` idi; aynı ad depoda üç ayrı
+#: BOYUTTA üç ayrı role veriliyordu (``importers/step_import.py``de mm
+#: cinsinden uzunluk tabanı, ``flow/quasi1d.py``de Mach braket payı) ve
+#: "tek gürültü tabanı" izlenimi doğuruyordu. Ortak bir taban YOKTUR:
+#: boyutları farklı olduğu için ortak olamaz. Sabit rolüyle adlandırıldı;
+#: değer değişmedi (1e-12, çift duyarlıklı λ karşılaştırması için
+#: makine epsilonunun ~4500 katı).
+_LAMBDA_COMPARE_EPS = 1e-12
 
 BOUNDARY_LAYER_NOT_MODELLED = {
     'separated_flow': (
@@ -319,7 +351,7 @@ def thwaites_shear(lam: float) -> float:
     λ = −0.09 laminer ayrılmadır (S = 0); altı TANIMSIZDIR ve hata verir.
     """
     lam = float(lam)
-    if lam < THWAITES_LAMBDA_SEPARATION - _EPS:
+    if lam < THWAITES_LAMBDA_SEPARATION - _LAMBDA_COMPARE_EPS:
         raise ValueError(
             f'λ = {lam:.6g} < {THWAITES_LAMBDA_SEPARATION} — Thwaites '
             f'kapanışı ayrılma noktasının ötesinde tanımsızdır.')
@@ -725,6 +757,22 @@ def solve_boundary_layer(x_m: Sequence[float],
     substeps = int(substeps)
     if substeps < 1:
         raise ValueError('substeps ≥ 1 olmalı.')
+    # P6B3-09 (fail-closed): θ₀ SONLU ve NEGATİF OLMAYAN bir uzunluk
+    # olmalıdır. Kapı YOKKEN ölçüldü (D25 a2, ``once_a2.json`` → P6B3-09):
+    # θ₀ = −1e−4 / NaN / +inf ÜÇÜ DE kabul ediliyor, marş
+    # ``numerical_failure`` durumuyla bitiyor ve ``friction_drag_N`` = 0,0
+    # yayımlanıyor. Sıfır sürtünme "sürtünmesiz cidar" diye okunur; bu
+    # sessiz yedektir. θ bir momentum kalınlığıdır [m] ve tanım gereği
+    # θ = ∫ ρu(u_e−u) dy / (ρ_e u_e²) ≥ 0'dır (Schlichting, Boundary-Layer
+    # Theory, 8. baskı, §2.5); negatifi fiziksel değildir, NaN/inf ise hiç
+    # sayı değildir.
+    theta_initial_m = float(theta_initial_m)
+    if not np.isfinite(theta_initial_m) or theta_initial_m < 0.0:
+        raise ValueError(
+            f'theta_initial_m sonlu ve negatif olmayan bir momentum '
+            f'kalınlığı [m] olmalı (verilen: {theta_initial_m!r}). Momentum '
+            f'kalınlığı tanım gereği negatif olamaz; reddedilen girdi '
+            f'yerine sessizce sıfır sürtünme yayımlanmaz.')
     gamma = float(gamma)
     gas_constant = float(gas_constant_J_kgK)
     prandtl = float(prandtl)
@@ -975,7 +1023,7 @@ def solve_boundary_layer(x_m: Sequence[float],
     if idx.size >= 2:
         xs = x_fine[idx]
         integrand = 2.0 * np.pi * edge_cache['radius_m'][idx] * diag['tau_wall_Pa'][idx]
-        friction_drag = float(np.trapz(integrand, xs))
+        friction_drag = float(_trapezoid(integrand, xs))
         if first_interval_exponent is not None and idx[0] == 1:
             # τ_w ∝ x^(−q) tekilliği ANALİTİK integrallenir:
             #   ∫₀^Δ τ_w dx = τ_w(Δ)·Δ/(1 − q)
@@ -1064,9 +1112,36 @@ def solve_boundary_layer(x_m: Sequence[float],
             'fine_points': int(n_fine),
             'marched_points': marched,
             'marched_to_x_m': float(x_fine[marched - 1]) if marched else None,
-            'completed_fraction': (float(x_fine[marched - 1] - x_fine[0])
-                                   / float(x_fine[-1] - x_fine[0])
-                                   if marched > 1 else 0.0),
+            # --- KAPSAMA (ÖH defter P6B3-02) --------------------------
+            # KUSUR: payda ``x_fine[-1] - x_fine[0]`` idi ve ``x_fine``
+            # ``stop_x_m``de KESİLİYOR (x_end = min(stop_x_m, x[-1])).
+            # Yani çağıran marşı durdurduğunda payda da onunla birlikte
+            # küçülüyor ve oran 1,0000 çıkıyordu — GERÇEK kapsama
+            # %30/%50/%75 iken (ölçüldü, a2/once.json: üç vakanın üçünde
+            # completed_fraction = 1,0000). Kesilmiş ızgaranın kendi
+            # içinde tamamlanması AYRI bir bilgidir ve ADIYLA yayımlanır;
+            # ``completed_fraction`` artık GEOMETRİNİN ne kadarının
+            # yürüdüğüdür — çağıranın verdiği istasyon ekseni paydadır.
+            'completed_fraction': (
+                float(x_fine[marched - 1] - float(x[0]))
+                / float(x[-1] - x[0])
+                if (marched > 1 and float(x[-1]) > float(x[0])) else 0.0),
+            'completed_fraction_of_march_grid': (
+                float(x_fine[marched - 1] - x_fine[0])
+                / float(x_fine[-1] - x_fine[0])
+                if (marched > 1 and float(x_fine[-1]) > float(x_fine[0]))
+                else 0.0),
+            'march_grid_end_x_m': float(x_fine[-1]),
+            'march_grid_truncated': bool(float(x_fine[-1])
+                                         < float(x[-1])),
+            'completed_fraction_basis': (
+                'completed_fraction = (marched_to_x_m − x[0]) / (x[-1] − '
+                'x[0]): çağıranın VERDİĞİ istasyon ekseninin ne kadarı '
+                'yürüdü. stop_x_m ile marş kesildiyse payda KÜÇÜLMEZ — '
+                'kesilen kısım yürünmemiş sayılır. '
+                'completed_fraction_of_march_grid ise kesilmiş marş '
+                'ızgarasının kendi içindeki orandır (marş kendi hedefine '
+                'vardı mı?) ve stop_x_m verildiğinde 1,0 olabilir.'),
             'h1_clamped_steps': clamped_h1,
             '_basis': (
                 'status = completed | stopped_by_caller | '

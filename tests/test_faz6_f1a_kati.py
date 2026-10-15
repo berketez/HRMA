@@ -181,7 +181,13 @@ def run_node(source):
 
 def harness(html, functions, body, extra=''):
     """STUB + sökülen fonksiyonlar + sınama gövdesi."""
-    parts = [STUB, extra]
+    # ÖH D35 · OH-GT-25: sayfanın sayı biçimlendiricileri ortak
+    # `numTxt` delegatörüne bağlandı (i18n.js kanonu). Düzenek sayfanın
+    # ambiyans bağımlılıklarını taklit ediyor; delegatör de onlardan
+    # biri. KOPYA YAZILMAZ — blok sökülüp eklenir. `window` STUB'ta boş
+    # olduğundan delegatör `toFixed` davranışına düşer ve bu dosyanın
+    # sayısal iddiaları aynen geçerli kalır.
+    parts = [STUB, honest_formatters(html), extra]
     parts.extend(js_function(html, name) for name in functions)
     parts.append(body)
     parts.append('bitir();')
@@ -572,7 +578,8 @@ def test_t24_web_thickness_is_a_readonly_output(html):
     assert 'readonly' in alan.group(0), \
         'ölü alan hâlâ düzenlenebilir (kullanıcı yazdığını sanıyor)'
     # Etiket/birim sözleşmesi bozulmamalı (test_solid_page_contract ile aynı kural)
-    assert re.search(r'<label>(.*?)</label>\s*<input[^>]*id="web_thickness"',
+        # D35 U-4 (22 Eyl): etiketler for= niteliği taşır; desen niteliği kabul eder.
+    assert re.search(r'<label[^>]*>(.*?)</label>\s*<input[^>]*id="web_thickness"',
                      html, re.S), 'etiket-alan bitişikliği bozuldu'
 
 

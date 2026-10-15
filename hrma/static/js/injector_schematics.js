@@ -82,8 +82,16 @@
         return (v === null || v < 1) ? null : Math.round(v);
     }
 
+    // ÖH D37 A1b panel-js · OH-P-18 (yan ölçüm) — çizim künyelerinin
+    // ondalığı ekran kanonundan (`I18N.number`): TR sayfada "pintle
+    // gövdesi D_p = 12.5 mm", "halka aralığı 0.45 mm", "BF = 0.620"
+    // NOKTALI basılıyordu (ölçüldü: once/olcum.json K4 çift metinleri),
+    // aynı çizimde TF'den geçen "17 adet, çap 0,81 mm" virgüllüydü.
     function fmtN(v, d) {
-        return (v === null || v === undefined) ? '' : Number(v).toFixed(d == null ? 2 : d);
+        if (v === null || v === undefined) return '';
+        var n = Number(v), basamak = (d == null ? 2 : d);
+        return (window.I18N && typeof window.I18N.number === 'function')
+            ? window.I18N.number(n, basamak) : n.toFixed(basamak);
     }
 
     // Bir sıra deliği çizerken kaç tanesini gerçekten çizeceğimiz. Eksenel
@@ -98,11 +106,37 @@
 
     var W = 460, H = 260;
 
+    // ÖH D37 A1b panel-js · OH-P-18 — ETİKETLER ÜST ÜSTE BİNMEZ.
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/A1b/panel-js/a1/once/olcum.json K4,
+    // başsız Chromium getBBox, 920 px kap): dokuz tipin tam/iki akışkanlı/
+    // geometrisiz 20 vakasında EN 43, TR 54 metin kutusu çifti kesişiyordu.
+    // Üç kök: (1) alt köşedeki iki-üç satırlık not bloğu 12 px aralıkla
+    // yazılıyordu, 10 px yazının kutusu ~12,5 px olduğu için her satır
+    // bir alttakine ~1 px biniyordu; en uzun not (hibrit pintle "Tek
+    // akışkanlı ... radyal akış payı %55") çizimin alt kenarındaki "←
+    // besleme manifoldu" / "yanma odası tarafı →" etiketlerinin ÜSTÜNE
+    // düşüyordu; çarpışma tiplerinde `injector_type:` kimliği de aynı
+    // satıra. (2) Üst üste iki künye (radyal delikler/delik künyesi,
+    // halka aralığı/akışkan adı, toplam açı/eleman künyesi, dış halka/
+    // t) yine 12 px aralıklıydı. (3) TR besleme etiketi ("oksitleyici
+    // debisi (kg/s)", 25 karakter) levhanın ve halka künyelerinin
+    // üstüne taşıyordu.
+    // Onarım YERLEŞİMDİR (hiçbir değer, sayı ya da etiket eklenmez/
+    // çıkarılmaz): not satırları çizimin ALTINDA ayrı bir not şeridine
+    // (viewBox yüksekliği not sayısı kadar uzar, not yoksa şerit yok)
+    // 14 px aralıkla; üst üste künyeler 14 px aralıkla; besleme etiketi
+    // levhaya sığmazsa sözcük sınırından iki satıra bölünür.
+    var LINE_DY = 14;
+    //: 10 px eş aralıklı yazının karakter genişliği (≈0,6 em; ölçüldü:
+    //: "mdot_ox (kg/s)" 14 karakter getBBox 84,3 px). Yalnız besleme
+    //: etiketinin satır bölme kararı için kullanılır.
+    var CHAR_W = 6.1;
+
     // Palette pulled from the application theme with literal fallbacks so
     // the schematic still reads when embedded outside the app shell.
     var C = {
         metal: 'var(--hd-metal, rgba(148,163,180,0.85))',
-        metalLine: 'var(--hd-ink, #d7e3ee)',
+        metalLine: 'var(--hd-ink, #cfe8f2)',
         flow: 'var(--hd-cyan, #00e5ff)',
         accent: 'var(--hd-orange, #ff8c33)',
         dim: 'var(--hd-ink-dim, #7d97a5)',
@@ -132,9 +166,16 @@
         coaxial: ['sch.titleCoaxial', 'Coaxial element &#8212; axial cross-section']
     };
 
-    function titleOf(kind) {
+    function titleOf(kind, raw) {
         var pair = TITLE_KEYS[kind];
-        return pair ? T(pair[0], pair[1]) : '';
+        var fam = pair ? T(pair[0], pair[1]) : '';
+        if (!raw || raw === kind) return fam;
+        // Seçilen tip ailenin KANONİK üyesi değilse ailenin adı bir kimlik
+        // iddiası olur; o iddia bu çizimle kazanılmadı.
+        if (CANONICAL[kind] && raw !== CANONICAL[kind]) {
+            return 'injector_type: ' + raw;
+        }
+        return fam;
     }
 
     // ------------------------------------------------------------------
@@ -186,14 +227,41 @@
             '</defs>';
     }
 
-    function frame(title, body) {
-        return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" ' +
+    // notes: [[metin, renk, anchor?, x?], ...] — çizimin altındaki not
+    // şeridi. Boş/eksik giriş (null) atlanır; sıra korunur.
+    function frame(title, body, notes) {
+        var satirlar = (notes || []).filter(function (n) { return n && n[0]; });
+        // Son satırın alt payı (kuyruk harfleri, ~0,3 em) kutunun İÇİNDE
+        // kalsın: ölçüldü — +4 px ile son not viewBox'tan 1-2 px taşıyordu.
+        var hTop = H + (satirlar.length ? LINE_DY * satirlar.length + 12 : 0);
+        var serit = '';
+        satirlar.forEach(function (n, i) {
+            serit += label(n[3] == null ? 24 : n[3], H + 4 + LINE_DY * (i + 1),
+                n[0], n[1], n[2]);
+        });
+        return '<svg viewBox="0 0 ' + W + ' ' + hTop + '" width="100%" ' +
             'preserveAspectRatio="xMidYMid meet" role="img" ' +
             'aria-label="' + title + '" style="color:' + C.flow + ';">' +
             defs() +
             label(W / 2, 16, title, C.metalLine, 'middle', 12) +
             body +
+            serit +
             '</svg>';
+    }
+
+    // Besleme oku etiketi: okun üstünde, levhaya (xLimit) kadar. Sığmazsa
+    // son boşluktan İKİ satıra bölünür (üst satır LINE_DY yukarıda);
+    // metin kesilmez, kısaltılmaz.
+    function feedLabel(xLimit, text, fill) {
+        var x = 34, y = 96;
+        var sigar = Math.floor((xLimit - 4 - x) / CHAR_W);
+        if (String(text).length <= sigar) return label(x, y, text, fill);
+        x = 24;
+        sigar = Math.floor((xLimit - 4 - x) / CHAR_W);
+        var kes = String(text).lastIndexOf(' ', sigar);
+        if (kes <= 0) return label(x, y, text, fill);
+        return label(x, y - LINE_DY, String(text).slice(0, kes), fill) +
+            label(x, y, String(text).slice(kes + 1), fill);
     }
 
     // Shared chamber-side context: centreline + chamber label
@@ -207,7 +275,7 @@
     // ------------------------------------------------------------------
     // Type drawings
     // ------------------------------------------------------------------
-    function showerhead(geom) {
+    function showerhead(geom, raw) {
         var px = 150, pw = 40, top = 60, bot = H - 60, cy = H / 2;
         var s = chamberContext(px);
         s += rect(px, top, pw, bot - top, C.metal);          // plate
@@ -227,19 +295,19 @@
         var tag = countLabel(nOrif, g_(geom, 'orifice_d_mm'));
         if (tag) s += label(px + pw + 66, top + 6, tag, C.flow);
         s += arrow(34, 104, px - 8, 104, C.flow);
-        s += label(34, 96, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
+        s += feedLabel(px, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
         s += label(px + pw + 66, cy - 6, T('sch.parallelJets', 'parallel axial jets'), C.flow);
         s += label(px + pw / 2, top - 10, T('sch.injectorPlate', 'injector plate'), C.metalLine, 'middle');
         s += line(px, bot + 14, px + pw, bot + 14, C.dim, 1);
         // Etiket sağa yaslanır: sol-alt köşe not bloğuna ayrılmıştır
         s += label(px + pw + 8, bot + 18, T('sch.plateThickness', 'L (plate thickness) &#8594; L/D'),
             C.dim, 'start');
-        s += label(24, H - 44, T('sch.dpPlate', 'dP across plate'), C.accent);
-        s += label(24, H - 32, T('sch.cdFormula', 'Cd = f(inlet, L/D)'), C.accent);
-        return frame(titleOf('showerhead'), s);
+        return frame(titleOf('showerhead', raw), s, [
+            [T('sch.dpPlate', 'dP across plate'), C.accent],
+            [T('sch.cdFormula', 'Cd = f(inlet, L/D)'), C.accent]]);
     }
 
-    function pintle(geom) {
+    function pintle(geom, raw) {
         var px = 140, pw = 30, cy = H / 2;
         var postLen = 150, rPost = 16, gap = 9;
         // TEK AKIŞKAN mı? Hibritte yakıt grain'den gelir, pintle YALNIZ
@@ -286,21 +354,26 @@
             s += arrow(xh, cy - rPost, xh + dx, cy - rPost - dy, radialColor);
             s += arrow(xh, cy + rPost, xh + dx, cy + rPost + dy, radialColor);
         }
-        s += label(xStart - 4, cy - rPost - jetLen - 8,
+        // Radyal delik künyeleri levhanın (y = 55) ÜSTÜNDE: sağa yaslı
+        // uzun metin levhanın solundan başlayıp levhanın üstünden geçiyordu
+        // (OH-P-18 levha ölçümü, tests/test_d37_panel_piksel_a1.py).
+        s += label(xStart - 4, 55 - 4,
             T('sch.radialHoles', 'radial holes &#8594; BF'), radialColor, 'end');
         var holeTag = countLabel(nHoles, g_(geom, 'radial_hole_d_mm'));
         if (holeTag) {
-            s += label(xStart - 4, cy - rPost - jetLen - 20,
+            s += label(xStart - 4, 55 - 4 - LINE_DY,
                 radialName + ': ' + holeTag, radialColor, 'end');
         }
         if (theta !== null) {
-            s += label(xEnd + 8, cy - 6, '2' + 'θ = ' + fmtN(2 * theta, 0) + DEG,
+            // 2θ künyesi D_p künyesinin (cy + 4) bir satır ÜSTÜNDE
+            // (eskiden cy - 6: iki kutu 3 px biniyordu).
+            s += label(xEnd + 8, cy + 4 - LINE_DY, '2' + 'θ = ' + fmtN(2 * theta, 0) + DEG,
                 C.spray, 'start');
         }
 
         // --- besleme okları ------------------------------------------------
         s += arrow(34, 104, px - 8, 104, C.flow);
-        s += label(34, 96, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
+        s += feedLabel(px, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
         if (!single) {
             // İki akışkanlı düzende merkez akım YAKITTIR; tek besleme oku
             // "her şey oksitleyici" izlenimi veriyordu.
@@ -310,10 +383,11 @@
 
         // --- künyeler --------------------------------------------------------
         var gapMm = g_(geom, 'annulus_gap_mm');
-        s += label(px + pw + 6, cy - rPost - gap - 8,
+        // Halka künyeleri besleme etiketinin (x ≤ px - 4) sağında başlar.
+        s += label(px + pw + 16, cy - rPost - gap - 8,
             T('sch.annulusGap', 'annulus gap')
             + (gapMm === null ? '' : ' ' + fmtN(gapMm) + ' mm'), C.flow);
-        s += label(px + pw + 6, cy - rPost - gap - 20, annulusName, C.flow);
+        s += label(px + pw + 16, cy - rPost - gap - 8 - LINE_DY, annulusName, C.flow);
         var dp = g_(geom, 'd_pintle_mm');
         s += label(px + pw + 6, cy + 4, T('sch.pintlePost', 'pintle post D_p')
             + (dp === null ? '' : ' = ' + fmtN(dp, 1) + ' mm'), C.metalLine);
@@ -324,24 +398,21 @@
         s += label(px + pw + postLen / 2, cy + rPost + gap + 40,
             ls === null ? T('sch.skipDistance', 'skip distance L_s &#8776; D_p')
                         : 'L_s = ' + fmtN(ls, 1) + ' mm', C.dim, 'middle');
-        s += label(24, H - 44, T('sch.dpSheet', 'dP sets sheet velocity'), C.accent);
         var bf = g_(geom, 'bf');
-        s += label(24, H - 32, bf === null
-            ? T('sch.bfFormula', 'BF = n*d / (pi*D_p)')
-            : 'BF = ' + fmtN(bf, 3), C.accent);
         // Hibritte akışın ne kadarının radyal gittiği ÇİZİMDE de yazılır:
         // kullanıcının çevirdiği kol budur (panelde 'Radial flow fraction').
         var fRad = g_(geom, 'radial_flow_fraction');
-        if (single && fRad !== null) {
-            s += label(24, H - 20, TF('inj.singleFluid',
+        return frame(titleOf('pintle', raw), s, [
+            [T('sch.dpSheet', 'dP sets sheet velocity'), C.accent],
+            [bf === null ? T('sch.bfFormula', 'BF = n*d / (pi*D_p)')
+                         : 'BF = ' + fmtN(bf, 3), C.accent],
+            (single && fRad !== null) ? [TF('inj.singleFluid',
                 { pct: fmtN(fRad * 100, 0) },
                 'Single-fluid (oxidizer-centred hybrid pintle); radial flow '
-                + 'share {pct}%'), C.dim);
-        }
-        return frame(titleOf('pintle'), s);
+                + 'share {pct}%'), C.dim] : null]);
     }
 
-    function swirl(geom) {
+    function swirl(geom, raw) {
         var px = 140, pw = 46, cy = H / 2, rExit = 12;
         var s = chamberContext(px);
         s += rect(px, 55, pw, H - 110, C.metal);
@@ -382,15 +453,15 @@
             s += label(px + pw + 8, cy + 78, 't = ' + fmtN(film, 3) + ' mm', C.flow);
         }
         s += arrow(34, 104, px - 8, 104, C.flow);
-        s += label(34, 96, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
+        s += feedLabel(px, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
         var K = g_(geom, 'K');
-        s += label(24, H - 44, T('sch.dpSwirl', 'dP &#8594; swirl number K')
-            + (K === null ? '' : ' = ' + fmtN(K, 2)), C.accent);
-        s += label(24, H - 32, T('sch.cdFromK', 'Cd from K (below plain orifice)'), C.accent);
-        return frame(titleOf('swirl'), s);
+        return frame(titleOf('swirl', raw), s, [
+            [T('sch.dpSwirl', 'dP &#8594; swirl number K')
+                + (K === null ? '' : ' = ' + fmtN(K, 2)), C.accent],
+            [T('sch.cdFromK', 'Cd from K (below plain orifice)'), C.accent]]);
     }
 
-    function impingement(geom) {
+    function impingement(geom, raw) {
         var px = 150, pw = 36, cy = H / 2;
         var s = chamberContext(px);
         s += rect(px, 55, pw, H - 110, C.metal);
@@ -404,11 +475,19 @@
         }
         // Çarpışma yarım açısı biliniyorsa jetler o açıyla birleşir.
         var half = g_(geom, 'half_angle_deg');
+        // O-F-O triplet: iki dış jet + MERKEZ jet aynı noktada çarpışır.
+        // Yalnız seçilen tip triplet ise çizilir; doublet/like-impinging
+        // çiziminde üçüncü jet YOKTUR (temsilî fazlalık basılmaz).
+        var isTriplet = (raw === 'impinging_triplet');
         pairs.forEach(function (dy) {
             var y = cy + dy;
             // two angled bores converging to one impingement point
             s += line(px, y - 14, px + pw, y - 6, C.flow, 3);
             s += line(px, y + 14, px + pw, y + 6, C.flow, 3);
+            if (isTriplet) {
+                // merkez (yakıt) jeti — eksen boyunca, farklı renkte
+                s += line(px, y, px + pw, y, C.accent, 3);
+            }
             // Serbest jet boyu açıdan türer: dar açıda jetler daha geç
             // buluşur. Açı yoksa eski temsilî uzaklık kullanılır.
             var reachX = (half === null) ? 46
@@ -417,25 +496,35 @@
             var xi = px + pw + reachX;
             s += line(px + pw, y - 6, xi, y, C.flow, 2);
             s += line(px + pw, y + 6, xi, y, C.flow, 2);
+            if (isTriplet) s += line(px + pw, y, xi, y, C.accent, 2);
             s += '<circle cx="' + xi + '" cy="' + y + '" r="3" fill="' + C.accent + '"/>';
             s += line(xi, y, xi + 40, y - 22, C.spray, 1.6);
             s += line(xi, y, xi + 40, y + 22, C.spray, 1.6);
         });
         s += label(px + pw + 52, cy - 66, T('sch.impingePoint', 'impingement point'), C.accent);
+        // Kimlik makine adıyla çizimin İÇİNE de yazılır: başlık kırpılsa
+        // bile hangi tipin çizildiği okunur (uydurma etiket değil, seçilen
+        // `injector_type` değerinin kendisi).
+        // (OH-P-18: kimlik satırı "← besleme manifoldu" ile aynı satıra
+        // düşüyordu — artık not şeridinin ilk satırı.)
+        var kimlik = (raw && raw !== 'impingement') ? 'injector_type: ' + raw : null;
         s += label(px + pw + 52, cy + 76, T('sch.sprayFan', 'flat spray fan'), C.spray);
-        s += label(px + pw / 2, 44, T('sch.includedAngle', 'included angle 2&#952;')
+        // Açı künyesi levhanın (y = 55) üstünde; eleman künyesi bir satır
+        // (LINE_DY) yukarıda — eskiden 12 px aralık, kutular biniyordu.
+        s += label(px + pw / 2, 46, T('sch.includedAngle', 'included angle 2&#952;')
             + (half === null ? '' : ' = ' + fmtN(2 * half, 0) + DEG),
             C.metalLine, 'middle');
         var elemTag = countLabel(nElem, g_(geom, 'orifice_d_mm'));
-        if (elemTag) s += label(px + pw / 2, 32, elemTag, C.flow, 'middle');
+        if (elemTag) s += label(px + pw / 2, 46 - LINE_DY, elemTag, C.flow, 'middle');
         s += arrow(34, 104, px - 8, 104, C.flow);
-        s += label(34, 96, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
-        s += label(24, H - 44, T('sch.dpJet', 'dP &#8594; jet velocity'), C.accent);
-        s += label(24, H - 32, T('sch.weberFormula', 'We = rho*v^2*d / sigma'), C.accent);
-        return frame(titleOf('impingement'), s);
+        s += feedLabel(px, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
+        return frame(titleOf('impingement', raw), s, [
+            kimlik ? [kimlik, C.dim] : null,
+            [T('sch.dpJet', 'dP &#8594; jet velocity'), C.accent],
+            [T('sch.weberFormula', 'We = rho*v^2*d / sigma'), C.accent]]);
     }
 
-    function coaxial(geom) {
+    function coaxial(geom, raw) {
         var px = 140, pw = 30, cy = H / 2;
         var rIn = 13, wall = 5, gap = 11, len = 140;
         // Tek akışkanlı (hibrit) coax'ta iç jet ve dış anülüs AYNI akışkandır;
@@ -464,11 +553,12 @@
         var dIn = g_(geom, 'orifice_d_mm');
         s += label(px + pw + 6, cy + 4, T('sch.innerJet', 'inner jet')
             + (dIn === null ? '' : ' ' + DIA + fmtN(dIn) + ' mm'), C.flow);
-        s += label(px + pw + 6, cy - rIn - wall - gap - 8,
+        // Dış halka künyeleri besleme etiketinin (x ≤ px - 4) sağında.
+        s += label(px + pw + 16, cy - rIn - wall - gap - 8,
             T('sch.outerAnnulus', 'outer annulus') + ' — ' + outerName, C.accent);
         var gapMm = g_(geom, 'annulus_gap_mm');
         if (gapMm !== null) {
-            s += label(px + pw + 6, cy - rIn - wall - gap - 20,
+            s += label(px + pw + 16, cy - rIn - wall - gap - 8 - LINE_DY,
                 't = ' + fmtN(gapMm) + ' mm', C.accent);
         }
         s += line(px + pw, cy + rIn + wall + gap + 26, px + pw + 40,
@@ -476,15 +566,13 @@
         s += label(px + pw + 44, cy + rIn + wall + gap + 30,
             T('sch.recess', 'recess &#8776; 1&#183;d_inner'), C.dim);
         s += arrow(34, 104, px - 8, 104, C.flow);
-        s += label(34, 96, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
-        s += label(24, H - 44, T('sch.dpShared', 'dP shared by both passages'), C.accent);
+        s += feedLabel(px, T('sch.mdotOx', 'mdot_ox (kg/s)'), C.flow);
         // 'same fluid' notu YALNIZ tek akışkanlı düzende doğrudur; sıvı
         // iki devreli coax'ta bu not yanlış bilgi veriyordu.
-        if (single) {
-            s += label(24, H - 32,
-                T('sch.coaxNote', 'inner jet + outer annulus (same fluid)'), C.accent);
-        }
-        return frame(titleOf('coaxial'), s);
+        return frame(titleOf('coaxial', raw), s, [
+            [T('sch.dpShared', 'dP shared by both passages'), C.accent],
+            single ? [T('sch.coaxNote', 'inner jet + outer annulus (same fluid)'),
+                      C.accent] : null]);
     }
 
     var BUILDERS = {
@@ -501,8 +589,32 @@
 
     // geom İSTEĞE BAĞLIDIR: verilmezse tipin genel çizimi basılır ve
     // hiçbir sayısal künye yazılmaz (uydurma değer yok).
+    // ÖH D15 / P11B5-07 — ÜÇ SEÇİM, BAYT-ÖZDEŞ ÇİZİM, YANLIŞ KİMLİK.
+    // ÖLÇÜLDÜ (once.json, InjectorSchematics.svg node içinde, aynı geometri,
+    // yalnız `injector_type` değişiyor): `impinging_doublet`,
+    // `impinging_triplet` ve `like_impinging` üç seçimde de SVG md5
+    // `846417c330` — BAYT ÖZDEŞ; üçünün de aria-label başlığı "Impinging
+    // doublet — axial cross-section"; SVG'de "triplet" kelimesi hiç geçmiyor.
+    // Oysa tablonun hemen üstündeki metin "4 O-F-O triplets (outer 2x ox.,
+    // centre fuel)" yazıyor. Triplet'in TANIMI üçüncü orifis; çizim iki jet
+    // gösterip altına "doublet" yazarak üstündeki cümleyi yalanlıyordu.
+    //
+    // İki ayrı onarım:
+    //  (a) triplet GERÇEKTEN üç jetle çizilir (merkez jet + iki dış jet
+    //      aynı çarpışma noktasında) — çizim artık bayt-özdeş değil;
+    //  (b) başlık, ailenin OLUMLU kimlik iddiasını yalnız o ailenin kanonik
+    //      üyesinde basar. Diğer üyelerde iddia edilmez: başlık makine
+    //      kimliğine düşer (`injector_type: <seçilen>`) — yeni çeviri
+    //      anahtarı açılmaz, uydurma kimlik de basılmaz (fail-closed).
+    var CANONICAL = {
+        showerhead: 'showerhead', pintle: 'pintle', swirl: 'swirl',
+        coaxial: 'coaxial', impingement: 'impinging_doublet',
+    };
+
     function svg(type, geom) {
-        return BUILDERS[resolve(type)](geom || null);
+        var kind = resolve(type);
+        var raw = (typeof type === 'string' && type) ? type : kind;
+        return BUILDERS[kind](geom || null, raw);
     }
 
     function render(type, el, geom) {

@@ -198,7 +198,16 @@ class TestLocalApiTrustBoundary:
             app.config['HRMA_SELF_PORT'] = previous
 
     def test_missing_self_port_falls_back_to_loopback_check(self):
-        """Port bilinmiyorsa (geliştirme) kapı gevşer — saha hatası dönmesin."""
+        """Port bilinmiyorsa kapı GEVŞEMEZ: sunucunun portu Host'tan alınır.
+
+        V3 SG-02c (ana model izni, 12 Eki; dört koşul): bu düğüm eskiden
+        Host :8080 + Origin :9999 için 200 bekliyordu, yani açığın kendisini
+        (port bilinmeyince 127.0.0.1'in her portu kabul) şart koşuyordu.
+        Kâhin: aynı köken = şema + ana makine + port (RFC 6454 §4-5) ve SG-0
+        tehdit modeli (geri döngünün başka portundaki sayfa). Yeni beklenti:
+        yabancı port 403, Host ile aynı port 200 (v2.6.25 saha hatası
+        dönmez: tarayıcı Host'u sayfanın portuyla yazar).
+        """
         from hrma.app import app
         previous = app.config.get('HRMA_SELF_PORT')
         app.config['HRMA_SELF_PORT'] = None
@@ -208,7 +217,13 @@ class TestLocalApiTrustBoundary:
                 json={'altitude': 1000},
                 headers={'Host': '127.0.0.1:8080',
                          'Origin': 'http://127.0.0.1:9999'})
-            assert resp.status_code == 200
+            assert resp.status_code == 403
+            ok = app.test_client().post(
+                '/api/altitude-to-pressure',
+                json={'altitude': 1000},
+                headers={'Host': '127.0.0.1:8080',
+                         'Origin': 'http://127.0.0.1:8080'})
+            assert ok.status_code == 200
         finally:
             app.config['HRMA_SELF_PORT'] = previous
 

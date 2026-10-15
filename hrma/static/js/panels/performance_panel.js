@@ -75,21 +75,61 @@
     //   hibrit : hepsi METRE
     // Panel hepsini SI sanıyordu: sıvıda kamara 1000 kat uzun, katıda boğaz
     // alanı 10^6 kat büyük gidiyordu. Tek doğruluk kaynağı normalize
-    // `motor_geometry` bloğu (SI); yoksa büyüklükten çıkarım yapılır —
-    // eşikler Python tarafıyla aynı (hrma/export/openrocket_integration.py).
-    const DIAMETER_SI_MAX_M = 1.0;
-    const LENGTH_SI_MAX_M = 5.0;
+    // `motor_geometry` bloğudur (her alan SI).
+    //
+    // ÖH D33-2 / arayuz-panel a1 · kalem OH-D32-01 (defter zinciri P7B1-06)
+    // -------------------------------------------------------------------
+    // BURADA İKİNCİ BİR BANT DURUYORDU: çap tavanı 1,0 m ve boy tavanı
+    // 5,0 m elle yazılıydı, blok yoksa "değer tavanın üstündeyse değer
+    // milimetredir" diye ÇIKARIM yapılıyordu. ÖLÇÜLDÜ (a1/once.json,
+    // bölüm K1): bu iki sayı doğrulayıcının KENDİ kanonuyla ayrışıyordu —
+    // motor_validation.DIAMETER_UNIT_INFERENCE_MAX_M 5,0 m ve
+    // LENGTH_UNIT_INFERENCE_MAX_M 20,0 m (ikisi de CANONICAL_LIMITS
+    // tablosundan TÜRETİLİR, elle yazılmaz). Aradaki boşlukta kalan meşru
+    // ölçüler panelde 1000 kat küçülüyordu:
+    //
+    //     girdi (kanonik bant içi)   panel okudu     sunucu okur
+    //     chamber_diameter 1,5 m     0,0015 m        1,5 m
+    //     chamber_length   6,0 m     0,006 m         6,0 m
+    //     throat_diameter  1,2 m  -> alan 1,131e-6 m²  1,131 m² (10^6 kat)
+    //
+    // Bandı arayüze yayımlayan bir uç YOK (/api/limits benzeri uç
+    // app-api-uc kulvarına devredildi — bkz. a1/rapor.md). Bandın ikinci
+    // kopyası TAŞINMAZ ve sayı UYDURULMAZ; birim çözümü ürünün MEVCUT tek
+    // kaynağına devredilir (aşağıdaki geoLength).
+    // Canlı yolda kayıp yoktur: ÖLÇÜLDÜ (a1/once.json, K1) üç motor
+    // tipinin /calculate ailesi de `motor_geometry` bloğunu
+    // chamber_length / chamber_diameter / throat_diameter ile yayımlıyor.
+    // Blok GELMEYEN yol da ölçüldü: ham `HybridRocketEngine.calculate()`
+    // sonucu `motor_geometry` taşımaz (üst seviye metre) ve tamamen silmek
+    // tests/test_unit_contract.py::TestPerformancePanelUnits::
+    // test_throat_area_and_chamber_length_are_physical[hybrid] bekçisini
+    // kırıyordu — yani gerçek bir yeteneği düşürüyordu. Güvertenin
+    // ölçülmüş birim tablosuna devir hem kusuru hem o kaybı kapatır.
 
-    function siLength(value, siMax) {
-        const v = Number(value);
-        if (!Number.isFinite(v) || v <= 0) return null;
-        return v > siMax ? v / 1000 : v;      // > eşik ise değer milimetredir
-    }
+    //: Bu turda birimi ÇÖZÜLEMEYEN alan adları — sessiz yedek yerine ADLI
+    //: yokluk. Test yüzeyi bunu `_unresolvedGeometry()` ile okur.
+    let birimiCozulemeyenAlanlar = [];
 
-    // motor_geometry varsa oradan (SI garantili), yoksa çıkarımla
-    function geoLength(m, geo, key, siMax) {
+    // Birim çözümü İKİ TEK-KAYNAKTAN gelir, panelden ASLA:
+    //   1) normalize `motor_geometry` bloğu (her alan SI — uç garanti eder),
+    //   2) güvertenin MERKEZİ birim sözleşmesi
+    //      (`analysis_dock.js::readLengthM`, motor tipine göre ÖLÇÜLMÜŞ
+    //      `LENGTH_UNITS` tablosu — hibrit 'm', katı 'mm', sıvıda alan alan).
+    // İkisi de konuşmuyorsa alan ÖNERİSİZ kalır ve adı beyan edilir.
+    // Büyüklükten çıkarım (eski `siLength`) YOK: bir sayının kaç olduğu
+    // birimini söylemez.
+    function geoLength(m, geo, key, r) {
         if (geo && Number.isFinite(geo[key]) && geo[key] > 0) return geo[key];
-        return siLength(m[key], siMax);
+        if (U && typeof U.readLengthM === 'function') {
+            const v = U.readLengthM(r, key);
+            if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+        }
+        if (m && m[key] !== undefined && m[key] !== null
+                && birimiCozulemeyenAlanlar.indexOf(key) < 0) {
+            birimiCozulemeyenAlanlar.push(key);
+        }
+        return null;
     }
 
     // İlk sonlu pozitif değer (üretici/tüketici anahtar adı farkları için)
@@ -204,14 +244,68 @@
         });
     }
 
-    window.AnalysisDock.register({
-        id: 'performance',
-        title: 'Advanced Performance — 3D Surface, Mach Contour, Heat Flux',
-        titleKey: 'panel.performance.title',
-        category: 'PERFORMANCE',
-        endpoint: ENDPOINT,
-        motorTypes: ['hybrid', 'liquid', 'solid'],
-        fields: [
+    // ------------------------------------------------------------------
+    // ÖH D37 A1a pdf-grafik-step · CW-SU6 — KATIDA O/F HARİTASI İSTENMEZ
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (``docs/scofield/raw/OH/A1a/pdf-grafik-step/a1/once.json``
+    // K4): panel üç motor tipine de kaydoluyordu ve güvertenin POST'u
+    // `analysis_type` göndermediği için uç her Çalıştır'da 3B yüzeyi
+    // (Isp – Pc – O/F) döndürüyordu — katı sayfasında da. Önceden
+    // karıştırılmış katı itici için O/F bir tasarım değişkeni DEĞİLDİR;
+    // katının iticisi yakıt/oksitleyici çifti de taşımadığından yüzey uç
+    // tarafında referans çiftine düşüyordu. Sunucu motor tipini göremez
+    // (`app.py` `engine_data` gövdesinde `motor_type` yok) → karar istemcide:
+    //   * hibrit/sıvı: 'performance' kaydı AYNEN (yüzey + iki ek figür);
+    //   * katı: ayrı kayıt; güvertenin POST'u `analysis_type` seçicisiyle
+    //     gider (Mach konturu / ısı akısı), yüzey HİÇ istenmez ve yerinde
+    //     gri + neden durur. Yalnız yüzeyi besleyen iki alan (O/F, taban
+    //     Isp — `app.py` 3d_surface `engine_data`) katı formunda yok.
+    const SURFACE_ONLY_FIELDS = ['optimal_of_ratio', 'base_isp'];
+    const SOLID_OF_NA_EN = 'The 3D performance surface (Isp vs chamber '
+        + 'pressure and O/F) is not drawn for a solid motor: O/F is not a '
+        + 'design variable of a premixed solid propellant — its oxidizer-to-'
+        + 'fuel ratio is fixed by the propellant formulation. The figure was '
+        + 'not requested.';
+    // Seçici seçenekleri güvertenin biçiminde: [değer, etiket, etiketAnahtarı]
+    const SOLID_FIGURES = EXTRA_FIGURES.map(function (f) {
+        return [f[0], f[2], f[1]];
+    });
+
+    function selectedSolidFigure() {
+        const sec = document.getElementById('ad_sec_performance_solid');
+        const el = sec && sec.querySelector
+            ? sec.querySelector('[data-field="analysis_type"]') : null;
+        const v = el ? el.value : null;
+        for (let i = 0; i < SOLID_FIGURES.length; i++) {
+            if (SOLID_FIGURES[i][0] === v) return SOLID_FIGURES[i];
+        }
+        return null;
+    }
+
+    function renderSolid(data, root) {
+        // 1) Yüzeyin yerinde gri + neden — figür istenmedi, çizilmez.
+        const na = document.createElement('div');
+        na.setAttribute('data-perf-na', 'of_surface');
+        na.style.cssText = 'border:1px dashed var(--hd-line, rgba(125,151,165,0.45));'
+            + ' border-radius:var(--hd-radius-sm, 8px); padding:10px 14px;'
+            + ' margin:8px 0; color:var(--hd-ink-dim, #7d97a5); font-size:0.8rem;';
+        na.innerHTML = U.sectionTitle(T('panel.performance.figSurface',
+            '3D Performance Surface — Isp vs Chamber Pressure & O/F'));
+        const neden = document.createElement('p');
+        neden.style.margin = '6px 0 0';
+        neden.textContent = T('panel.performance.solidOfNa', SOLID_OF_NA_EN);
+        na.appendChild(neden);
+        root.appendChild(na);
+        // 2) Güvertenin POST'u seçilen figürü döndürdü.
+        const secim = selectedSolidFigure();
+        const baslik = secim ? T(secim[2], secim[1])
+            : ((data && data.analysis_info && data.analysis_info.title)
+               || T('panel.performance.titleSolid',
+                    'Advanced Performance — Mach Contour, Heat Flux'));
+        drawResponse(figureBlock(root, baslik), data);
+    }
+
+    const PERF_FIELDS = [
             ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar'],
             ['optimal_of_ratio', 'Optimal O/F Ratio', 3.5, 0.1, 'common.f.optimalOf'],
             ['base_isp', 'Base Isp (s)', 300, 5, 'common.f.baseIsp'],
@@ -219,7 +313,7 @@
             ['throat_area', 'Throat Area (m²)', 0.001, 0.0001, 'common.f.throatAreaM2'],
             ['nozzle_length', 'Nozzle Length (m)', 0.1, 0.01, 'common.f.nozzleLengthM'],
             ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM'],
-            ['burn_time', 'Burn Time (s)', 30, 0.5, 'common.f.burnTimeS'],
+            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
             ['base_heat_flux', 'Base Heat Flux (W/m²)', 2000000, 100000, 'common.f.baseHeatFlux'],
             ['critical_heat_flux', 'Critical Heat Flux (MW/m²)', 4.0, 0.5, 'common.f.criticalHeatFlux'],
             // Bartz ısı akısı çözücüsünün gaz hâli girdileri (bulgu 6): bunlar
@@ -229,9 +323,34 @@
             ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen'],
             ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.1, 'common.f.mdotTotal'],
             ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.01, 'common.f.chamberDiameterM'],
-        ],
+    ];
+
+    window.AnalysisDock.register({
+        id: 'performance',
+        title: 'Advanced Performance — 3D Surface, Mach Contour, Heat Flux',
+        titleKey: 'panel.performance.title',
+        category: 'PERFORMANCE',
+        endpoint: ENDPOINT,
+        motorTypes: ['hybrid', 'liquid'],
+        fields: PERF_FIELDS,
         fromResults: fromResults,
         render: render,
+    });
+
+    window.AnalysisDock.register({
+        id: 'performance_solid',
+        title: 'Advanced Performance — Mach Contour, Heat Flux',
+        titleKey: 'panel.performance.titleSolid',
+        category: 'PERFORMANCE',
+        endpoint: ENDPOINT,
+        motorTypes: ['solid'],
+        fields: [['analysis_type', 'Figure', SOLID_FIGURES[0][0], SOLID_FIGURES,
+                  'panel.performance.figChoice']].concat(
+            PERF_FIELDS.filter(function (f) {
+                return SURFACE_ONLY_FIELDS.indexOf(f[0]) === -1;
+            })),
+        fromResults: fromResults,
+        render: renderSolid,
     });
 
     // Saf eşleme: motor sonucu -> form alanları. register() içindeki anonim
@@ -240,6 +359,7 @@
         const m = (r && r.motor) || r || {};
         const geo = (m.motor_geometry && typeof m.motor_geometry === 'object')
             ? m.motor_geometry : null;
+        birimiCozulemeyenAlanlar = [];
 
         // 2026-08-03 (Faz 6, T18 kök nedeni): itici KİMLİĞİ hiçbir zaman
         // isteğe girmiyordu. Uç (app.py::advanced_performance_analysis)
@@ -268,9 +388,9 @@
         if (of !== null) sug.optimal_of_ratio = of;
 
         // Uzunluklar SI'ya normalize edilir (bulgu 5)
-        const chamberL = geoLength(m, geo, 'chamber_length', LENGTH_SI_MAX_M);
+        const chamberL = geoLength(m, geo, 'chamber_length', r);
         if (chamberL !== null) sug.chamber_length = chamberL;
-        const chamberD = geoLength(m, geo, 'chamber_diameter', DIAMETER_SI_MAX_M);
+        const chamberD = geoLength(m, geo, 'chamber_diameter', r);
         if (chamberD !== null) sug.chamber_diameter = chamberD;
 
         // base_isp: doğrudan isp (sıvıda isp_sea_level, katıda
@@ -290,7 +410,7 @@
             sug.mdot_total = Number((thrust / (isp * 9.80665)).toPrecision(6));
         }
         // Backend alan (m²) ister; sonuçta çap var → A = π d²/4
-        const throatD = geoLength(m, geo, 'throat_diameter', DIAMETER_SI_MAX_M);
+        const throatD = geoLength(m, geo, 'throat_diameter', r);
         if (throatD !== null) {
             sug.throat_area = Number(
                 (Math.PI * throatD * throatD / 4).toPrecision(6));
@@ -303,7 +423,11 @@
         _render: render,
         _parseFigure: parseFigure,
         _readFormPayload: readFormPayload,
-        _siLength: siLength,
+        //: OH-D32-01 — emekli `_siLength` çıkarımının yerine ADLI yokluk:
+        //: son `fromResults` turunda birimi çözülemeyen alan adları.
+        _unresolvedGeometry: function () {
+            return birimiCozulemeyenAlanlar.slice();
+        },
         // Birim sözleşmesi testi (tests/test_unit_contract.py) bu saf
         // fonksiyonu gerçek motor yanıtı üzerinde node ile çalıştırır.
         _fromResults: fromResults,

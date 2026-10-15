@@ -1,7 +1,8 @@
 """Model limit kontrolleri — SINIRLI ve AÇIKÇA BEYAN EDİLMİŞ kapsam.
 
 Bu modülün üretimdeki TEK canlı girişi ``SafetyLimits.check_throat_diameter``
-(``hrma/engines/liquid_rocket_engine.py:2723``) ve o çağrının sonucu yalnız
+(``hrma/engines/liquid_rocket_engine.py`` ->
+``LiquidRocketEngine.calculate_nozzle_geometry``) ve o çağrının sonucu yalnız
 ``print()`` ile konsola gider. Yani burası bir GÜVENLİK KAPISI DEĞİLDİR:
 ``violations`` listesi hiçbir HTTP yanıtına, export'a ya da panele
 girmemektedir. Bu cümle süs değil, ölçüm sonucudur — aşağıya bakınız.
@@ -17,7 +18,8 @@ genelinde grep; kendi tanımları ve bu dosya hariç tutularak):
     check_thrust             -> üretim: 0   test: 0
     check_mass_flow_rate     -> üretim: 0   test: 0
     MotorValidator           -> depo genelinde 0 referans
-    check_throat_diameter    -> üretim: 1   (liquid_rocket_engine.py:2723)
+    check_throat_diameter    -> üretim: 1   (liquid_rocket_engine.py,
+                                             LiquidRocketEngine.calculate_nozzle_geometry)
 
 Dört ``check_*`` metodu YALNIZ ``comprehensive_check`` içinden çağrılıyordu,
 ``comprehensive_check`` da hiçbir yerden çağrılmıyordu; yani hiçbiri hiçbir
@@ -26,6 +28,27 @@ olduğu izlenimini veriyordu. Karar: BAĞLAYAMADIĞIMIZ için KALDIRILDI —
 ulaşılamayan kodun "var olması" hiçbir şeyi denetlemez, yalnız okuyucuyu
 yanıltır. Yeniden ihtiyaç duyulursa git geçmişinden alınabilir; geri
 gelirse ÇAĞRI YERİYLE birlikte gelmelidir.
+
+ÖH D26 / P5B2-23 — KÜNYE ADRESİ ARTIK SATIR NUMARASI DEĞİL
+-----------------------------------------------------------
+Bu künye 3 Ağustos 2026'da ``liquid_rocket_engine.py`` içinde 2723.
+satırı gösteriyordu.
+ÖLÇÜLDÜ (D26 tabanı 7751531, ``once.json`` P5B2-23): çağrı gerçekte
+**4719.** satırdaydı, yani atıf 1996 satır kaymıştı ve 2723. satırda duran
+şey bambaşka bir ifadeydi (``family=('pressure-fed' if basinc_besleme``).
+Kayma iki kez sessizce büyüdü (2723 -> 3137 -> 4719) çünkü künyeyi
+denetleyen hiçbir bekçi yoktu.
+
+Satır numarası, BAŞKA bir dosyanın uzunluğuna bağlı olduğu için doğası
+gereği çürüyen bir adrestir: ``liquid_rocket_engine.py``ye yukarıdan tek
+satır eklendiği anda bu künye yalan söylemeye başlar. Bu yüzden adres
+SEMBOLE çevrildi — sınıf + metot adı, o dosya ne kadar büyürse büyüsün
+kaymaz. Adresi ``tests/test_safety_honesty.py::
+TestSafetyLimitsSurfaceIsDeclared::test_kunye_call_site_address_resolves``
+her koşumda çözer: metot yoksa, çağrı o metodun içinde değilse ya da
+dosyada birden çok canlı çağrı belirirse test kırmızı düşer. Künyeye
+yeniden bir ``liquid_rocket_engine.py:<satır>`` atfı yazılırsa aynı bekçi
+onu da doğrular; yanlışsa geçmez.
 
 Korunan yüzey ve gerekçesi:
 * ``check_throat_diameter`` — üretimde canlı (tek çağrı yeri yukarıda).

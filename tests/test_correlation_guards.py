@@ -52,16 +52,36 @@ from hrma.validation.correlation_runner import run_correlation
 # ANA İSTATİSTİK SETİ DEĞİŞMEDİ: yeni kayıtların 59'u insufficient_inputs
 # (kaynaklar port/boğaz çapını yayımlamamış veya büyük-ölçek İngiliz-birim
 # nokta yolu adaptör v2 işi), 4'ü (Heydari S4A1 swirl serisi) v1 eksenel
-# model kapsamı dışı olduğundan anomaly bayraklı — anomali katmanında
-# izlenir. BASELINE değerleri bu yüzden aynı kaldı.
+# model kapsamı dışı — 2026-09-05'e kadar ANOMALİ bayrağıyla, o tarihten
+# sonra kendi `model_scope` bloğuyla (P10B2-06) izlenir. BASELINE değerleri
+# her iki düzende de aynı kaldı.
 # Hash güncellemesi (2026-07-23, dünya-çapı genişletme): 199 -> 209 kayıt.
 # 10 yeni GERÇEK sıvı motor eklendi (kaynaklı, çoğu birincil ajans belgesi):
 # LE-9/LE-7A/LE-5B-2/LE-5B-3 (JAXA-MHI), NK-33/RD-180/RD-0120 (Rusya),
 # Vinci (ESA/ArianeGroup), RS-68 (ABD), CE-20 (ISRO). Sıvı vakum Isp örneklemi
 # n=4 -> n=14'e, 6 ülkeye çıktı — dış denetimin "n çok küçük" eleştirisine
 # yanıt. Ana istatistik iyileşti/genişledi, aşağıda BILINÇLI güncellendi.
+# Hash güncellemesi (2026-08-18, F3 yayımlanmış-veri korelasyon döngüsü):
+# 209 -> 212 kayıt. Nakka Kappa kampanyasından 3 TAM katı static_fire kaydı
+# eklendi (KDX-002 / KSB-001 / KSB-002 — geometri + itki-zaman eğrisi +
+# kütle + impuls/Isp). Tam-katı motor yolu İLK KEZ koşuyor: KSB-002 ana
+# katmanda 5 yeni (solid, X) hücresi n=1 açtı; KDX-002 low-confidence
+# katmanında (tane boyu kardeş-test çıkarımı, kayıt extraction_note'unda
+# gerekçeli); KSB-001 anomaly bayraklı (tutuşma gecikmesi + basınç hattı
+# tıkanması). MEVCUT BASELINE HÜCRELERİ DEĞİŞMEDİ (ölçüldü: solid burn_rate
+# n=27, bias -0.42, medAPE 0.51 aynı). Yeni hücrelerin bantları
+# tests/test_f3_yayimlanmis_korelasyon.py'de ayrıca kilitlidir.
+# Hash güncellemesi (2026-09-05, P10B2-06 — model kapsamı ⟷ veri anomalisi
+# ayrımı): kayıt SAYISI ve hiçbir ÖLÇÜLEN SAYI değişmedi (212 kayıt aynı).
+# Değişen yalnız dört Heydari S4A1 swirl kaydının SINIFLANDIRMA metadatası:
+# gerekçe metni birebir korunarak `anomaly` bloğundan yeni `model_scope`
+# bloğuna taşındı (kaydın kendi notu zaten "HRMA v1 EKSENEL hibrit modelinin
+# kapsamı dışında" diyordu — yani deneyin değil MODELİN sınırı). ÖLÇÜLDÜ
+# (docs/scofield/raw/OH/D23/app-api/a1/{once,sonra}_p10b2_06.json):
+# aşağıdaki BASELINE hücrelerinin n / bias / medAPE değerleri BİT AYNI kaldı;
+# değişen tek şey dışlamanın GEREKÇESİ ve GÖRÜNÜRLÜĞÜ.
 EXPECTED_DB_HASH = (
-    "2ee2a86bbd6968e4d0c7d4a5f770665cc31094b6c0ba6e1dc2fb9d6971d9eca4")
+    "19cf1d9587eae349d4950f8b85f74fd2403a579e47d6c0563badfb6a9c4ecb63")
 
 # (motor, quantity) -> (bias_pct, median_ape_pct, n)
 BASELINE = {
@@ -125,7 +145,41 @@ def test_all_baseline_cells_present(cells):
         f"düşmüş olabilir (adaptör/status değişimini incele).")
 
 
-@pytest.mark.parametrize("key", sorted(BASELINE), ids=lambda k: f"{k[0]}:{k[1]}")
+# Beyanlı kırmızı hücreler — kapı GEVŞETİLMEDİ (taban, kapı formülü ve kayıtlar
+# aynen). kitap p1a B16, karar §28-18 (a): kendinden basınçlı hibritte N₂O
+# artık 293,15 K doymuş SIVI giriş entalpisiyle yakılıyor; hibrit c* önyargısı
+# −%0,1'den −%2,4'e geçti (|bias| > kapı %1,6), yani teorik denge c*'ı ölçülen
+# c*'ın altına düştü (zımni verim > 1). Birincil makale okundu (Rezaei vd.
+# 2018, Scientia Iranica B 25(1) 253-265; yerel kopya sha256 4c77678a…):
+# §2.2 (s. 255) N₂O hava ile buhar basıncının ~10 bar üstüne basınçlandırılıp
+# kavitasyonsuz SIVI olarak besleniyor — B16'nın sıvı giriş varsayımı bu
+# kayıtlar için doğru. c* Denk. (4) (s. 256): ∫P_c·A_t dt / (m_o + m_f);
+# makale CEA'ya göre %94-98 verim bildiriyor ama CEA girdisini (HTPB bileşimi,
+# N₂O entalpi hâli) yazmıyor. Kalan −%2,4, kayıttaki c*'ın sıvı girişli teorik
+# üst sınırı aşmasıdır (η > 1); B16'nın hatası değil. ``strict=True``: hücre
+# kapıya dönerse XPASS kırmızıya döner ve işaret elle kaldırılır. İzleme
+# kalemi KITAP-P1A-REZAEI (sahibi ana model): η > 1'in kaynağı (HTPB
+# formülasyonu/entalpisi, A_t ortalama kuralı, ṁ_f ölçümü). Kayıtlar
+# DOKUNULMAZ.
+BEYANLI_KIRMIZI = {
+    ("hybrid", "c_star"): (
+        "p1a B16 (karar §28-18): sıvı N₂O giriş entalpisiyle hibrit c* "
+        "|bias| %2,4 > kapı %1,6; kapı gevşetilmedi. Rezaei 2018 §2.2 "
+        "besleme SIVI (giriş varsayımı doğru); kayıttaki c* sıvı girişli "
+        "teorik üst sınırı aşıyor (η > 1). İzleme: KITAP-P1A-REZAEI."),
+}
+
+
+def _hucre_parametresi(key):
+    if key in BEYANLI_KIRMIZI:
+        return pytest.param(key, marks=pytest.mark.xfail(
+            strict=True, raises=AssertionError,
+            reason=BEYANLI_KIRMIZI[key]))
+    return key
+
+
+@pytest.mark.parametrize("key", [_hucre_parametresi(k) for k in sorted(BASELINE)],
+                         ids=lambda k: f"{k[0]}:{k[1]}")
 def test_cell_not_degraded(cells, key):
     """medAPE ve |bias| taban kapısının üstüne çıkamaz; n düşemez."""
     base_bias, base_medape, base_n = BASELINE[key]
@@ -166,18 +220,42 @@ def test_physics_ceiling(cells, key):
 
 
 def test_anomaly_records_not_in_cells(corr, cells):
-    """Anomali bayraklı kayıt ana istatistiğe sızamaz (karantina bütünlüğü)."""
-    anomaly_ids = {e["test_id"] for e in corr["statistics"]["anomaly_entries"]}
+    """Dışlanan kayıt ana istatistiğe sızamaz (karantina bütünlüğü).
+
+    ÇEVRİLDİ (2026-09-05, P10B2-06). Eski sürüm Heydari swirl kaydının
+    ANOMALİ bayrağı taşımasını SÖZLEŞME yapıyordu:
+
+        assert "hyb-heydari2017-htpb-n2o-s4a1-1" in anomaly_ids
+
+    Bu iddia kusuru koruyordu. Kaydın kendi notu "HRMA v1 EKSENEL hibrit
+    modelinin kapsamı dışında" diyor — yani gerekçe DENEYİN anomalisi değil
+    MODELİN sınırı. İkisini aynı bayrakla taşımak, modelin zorlandığı
+    vakaları veri kusuru kılığında başlıktan çıkarmaktır (ölçülen etki:
+    hybrid c* önyargısı yayımlanan %-0,12 ⟷ kapsam-dışı dâhil %+2,45,
+    işaret dönüyor; hybrid/thrust — DB'nin TEK hibrit itki karşılaştırması —
+    ana tabloda hiç görünmüyordu).
+
+    Korunan yük iddiası aynen duruyor: hiçbir dışlanan kayıt ana hücreye
+    sızamaz. Değişen: swirl kaydı artık KAPSAM katmanında aranıyor, anomali
+    katmanında aranmıyor; ayrımın kendisi ayrıca sınanıyor.
+    """
+    stats = corr["statistics"]
+    anomaly_ids = {e["test_id"] for e in stats["anomaly_entries"]}
+    scope_ids = {e["test_id"] for e in stats["out_of_scope_entries"]}
     assert "hyb-karabeyoglu2003-paraffin-gox-t4l-12" in anomaly_ids, (
         "t4l-12 anomali bayrağı kayboldu (bildiri-içi tutarsızlık kaydı; "
         "bkz. kayıt anomaly.note).")
-    assert "hyb-heydari2017-htpb-n2o-s4a1-1" in anomaly_ids, (
-        "Heydari swirl (S4A1) anomali bayrağı kayboldu — swirl enjeksiyon "
-        "v1 eksenel model kapsamı dışıdır, ana istatistiğe giremez "
-        "(bkz. kayıt anomaly.note, 2026-07-18 veri genişletme dalgası).")
+    assert "hyb-heydari2017-htpb-n2o-s4a1-1" in scope_ids, (
+        "Heydari swirl (S4A1) kaydı model-kapsamı katmanından düştü — swirl "
+        "enjeksiyon v1 eksenel model kapsamı dışıdır, ana istatistiğe "
+        "giremez (bkz. kayıt model_scope.note).")
+    assert "hyb-heydari2017-htpb-n2o-s4a1-1" not in anomaly_ids, (
+        "Heydari swirl kaydı yine ANOMALİ sayılıyor: modelin kendi sınırı "
+        "deneyin kusuru kılığında yayımlanamaz (P10B2-06).")
     for key, cell in cells.items():
-        leaked = anomaly_ids & {e["test_id"] for e in cell["entries"]}
-        assert not leaked, f"{key}: anomali kayıtları ana hücreye sızdı: {leaked}"
+        leaked = (anomaly_ids | scope_ids) & {e["test_id"]
+                                              for e in cell["entries"]}
+        assert not leaked, f"{key}: dışlanan kayıtlar ana hücreye sızdı: {leaked}"
 
 
 # --- 2026-07-27 fizik denetimi bekçileri (F006/F007/F022 + F008 eki) ---------

@@ -157,13 +157,64 @@ def _decode_bdata(value):
     return value
 
 
+#: ÖH D22 / defter P9B3-23 — ``_trace_x_problem`` gerekçe kodları.
+X_PROBLEM_LENGTH_MISMATCH = 'x_length_mismatch'
+X_PROBLEM_UNDECODABLE = 'x_undecodable'
+
+
+def _trace_x_problem(trace):
+    """İzin x'i YAYIMLANMIŞ ama y'siyle hizalanmıyorsa gerekçe, yoksa None.
+
+    ÖH D22 / defter P9B3-23 — ÖLÇÜLEN KUSUR. ``_trace_xy`` üç ayrı durumu
+    TEK sessiz ikameye eziyordu: (a) x hiç yok, (b) x var ama çözülemedi,
+    (c) x var, çözüldü, ama uzunluğu y'ninkiyle tutmuyor. Üçünde de
+    ``x = range(len(y))`` konuluyor, yani eksen VERİ koordinatından ÖRNEK
+    İNDİSİNE çevriliyordu — eksen BAŞLIĞI ise değişmiyordu.
+
+    ÖLÇÜLDÜ (taban ``b84b10a``, ``once.json`` bölümü P9B3-23): x = 3 nokta,
+    y = 5 nokta olan bir izde ``_trace_xy`` x'i ``[0, 1, 2, 3, 4]`` yaptı,
+    ``_is_drawable_trace`` True dedi, ``fallback_refusal_reason`` None
+    döndü ve emniyet çizicisi 40.667 baytlık bir PNG üretti; x ekseninin
+    başlığı hâlâ "Time (s)" yazıyordu. Yani "saniye" etiketli eksende
+    örnek indisi çiziliyordu ve PDF hiçbir uyarı basmıyordu. Bozuk
+    ``bdata`` yolunda da aynı sessiz ikame ölçüldü (x -> ``[0, 1, 2]``).
+
+    (a) yalnızca-y izleri plotly'nin KENDİ anlamıdır (x örtük olarak örnek
+    indisidir) ve doğru çizilir; bu yüzden (a) sorun DEĞİLDİR. (b) ve (c)
+    ise kullanıcının yayımladığı bir eksenin sessizce başkasıyla
+    değiştirilmesidir — modülün kendi fail-closed sözleşmesi (bkz.
+    ``fallback_refusal_reason``) burada da geçerlidir.
+    """
+    if not isinstance(trace, dict):
+        return None
+    ham = trace.get('x')
+    if ham is None:
+        return None                      # (a) x hiç yayımlanmamış
+    y = _decode_bdata(trace.get('y'))
+    if y is None or not _has_len(y):
+        return None                      # y'siz iz zaten çizilmiyor
+    x = _decode_bdata(ham)
+    if x is None or not _has_len(x):
+        return X_PROBLEM_UNDECODABLE     # (b) x var ama okunamadı
+    if len(x) != len(y):
+        return X_PROBLEM_LENGTH_MISMATCH  # (c) hizalanmıyor
+    return None
+
+
 def _trace_xy(trace):
-    """İzin (x, y) dizilerini döndürür; y yoksa None."""
+    """İzin (x, y) dizilerini döndürür; y yoksa None.
+
+    ÖH D22 / P9B3-23: x YAYIMLANMIŞ ama y'siyle hizalanmıyorsa artık örnek
+    indisine SESSİZCE düşülmez — iz çizilemez sayılır (None). Yalnız x'i
+    hiç olmayan iz örnek indisiyle çizilir (plotly'nin kendi anlamı).
+    """
     y = _decode_bdata(trace.get('y'))
     if y is None or not _has_len(y) or len(y) == 0:
         return None
+    if _trace_x_problem(trace) is not None:
+        return None
     x = _decode_bdata(trace.get('x'))
-    if x is None or not _has_len(x) or len(x) != len(y):
+    if x is None or not _has_len(x):
         x = list(range(len(y)))
     return x, y
 
@@ -233,6 +284,164 @@ def _trace_color(trace):
     return None
 
 
+def figure_panel_axes(fig_dict):
+    """Figürün izlerinin dağıldığı (x ekseni, y ekseni) kimlik kümeleri.
+
+    Plotly çok panelli figürleri ``xaxis='x2'`` / ``yaxis='y3'`` gibi eksen
+    KİMLİKLERİYLE anlatır; ``make_subplots`` her paneli ayrı bir kimliğe
+    bağlar. Emniyet çizicisi tek ``add_subplot(111)`` (+ en fazla bir
+    ``twinx``) kurduğu için birden fazla panel FAİTHFUL çizilemez.
+    """
+    xs, ys = set(), set()
+    for trace in fig_dict.get('data') or ():
+        if not isinstance(trace, dict):
+            continue
+        xs.add(str(trace.get('xaxis') or 'x'))
+        ys.add(str(trace.get('yaxis') or 'y'))
+    return xs, ys
+
+
+def fallback_refusal_reason(fig_dict):
+    """Emniyet çizicisi bu figürü SADIK çizebilir mi? Çizemezse gerekçe.
+
+    ÖH D15 / defter P9B3-13 — ÖLÇÜLEN KUSUR. Emniyet çizicisi çok panelli
+    figürleri tek eksene EZİYORDU: hibrit koşumun 10 gerçek figüründen 6'sı
+    çok panelli (``altitude_performance`` 8 eksen: "Isp (s)", "Thrust (N)",
+    "Cf (-)", "Pressure (bar)"; ``trajectory`` 10 eksen; ``performance`` 7;
+    ``thrust_altitude`` 6; ``combustion_analysis`` 6;
+    ``realtime_dashboard`` 6). Dört ayrı büyüklük TEK eksende çiziliyor,
+    eksen etiketi yalnız ``layout.yaxis.title`` (yani "Isp (s)") oluyordu ve
+    PDF hiçbir uyarı basmıyordu (metinde ``fallback`` / ``degraded`` /
+    ``chart unavailable`` dizelerinin 7/7'si yoktu).
+
+    Bu yol Windows paketinin SAHA davranışıdır; modülün kendi iddiası da
+    (``shape-temelli figürler ... None döner ... uydurma görsel
+    üretilmez``) tam bunu vaat ediyordu. Fail-closed: sadık çizilemeyen
+    figür için "inandırıcı ama yanlış eksenli" bir görsel üretmek yerine
+    ``None`` döner ve çağıran taraf "chart unavailable" notunu basar.
+
+    ``None`` = çizilebilir; aksi hâlde gerekçe metni.
+    """
+    xs, ys = figure_panel_axes(fig_dict)
+    if len(xs) > 1 or len(ys - {'y', 'y2'}) > 0:
+        return ('multi-panel figure (%d x-axes, %d y-axes): the fallback '
+                'renderer draws a single axis pair and would collapse '
+                'different quantities onto one scale'
+                % (max(len(xs), 1), max(len(ys), 1)))
+    # ÖH D22 / P9B3-23: hizalanmayan x SESSİZCE ÖRNEK İNDİSİNE çevrilmez.
+    # Böyle bir iz düşürülüp figürün geri kalanı çizilseydi, okuyucu eksik
+    # olduğunu göremeyeceği bir grafik alırdı; bu yüzden figürün TAMAMI
+    # reddedilir ve çağıran 'chart unavailable' notunu basar.
+    for _i, _t in enumerate(fig_dict.get('data') or ()):
+        _sorun = _trace_x_problem(_t)
+        if _sorun is None:
+            continue
+        _ad = str((_t or {}).get('name') or 'trace %d' % _i)
+        if _sorun == X_PROBLEM_LENGTH_MISMATCH:
+            _x = _decode_bdata(_t.get('x'))
+            _y = _decode_bdata(_t.get('y'))
+            return ('trace %r publishes %d x values for %d y values: the '
+                    'renderer would silently replace the published x axis '
+                    '(%r) with the sample index, so the chart is not '
+                    'published' % (_ad, len(_x), len(_y),
+                                   _axis_title((fig_dict.get('layout') or {})
+                                               .get('xaxis'))))
+        return ('trace %r publishes an x array that could not be decoded: '
+                'the renderer would silently replace the published x axis '
+                'with the sample index, so the chart is not published'
+                % _ad)
+    return None
+
+
+#: Plotly ``xref``/``yref`` değerlerinden matplotlib koordinat sistemine.
+#: 'paper' ve '<eksen> domain' eksen kesri, çıplak eksen adı VERİ koordinatı.
+def _ref_kind(ref):
+    text = str(ref or '').strip().lower()
+    if text.startswith('paper') or text.endswith('domain'):
+        return 'frac'
+    return 'data'
+
+
+def _draw_annotations(ax, layout):
+    """Plotly ``layout.annotations`` girdilerini matplotlib'e çizer.
+
+    ÖH D15 / P9B3-13: bu blok eskiden HİÇ okunmuyordu ve ölçülen kayıp
+    60 açıklamaydı — aralarında alt grafik BAŞLIKLARI ("Specific Impulse vs
+    Altitude"), DÜRÜSTLÜK BEYANLARI ("eta_c* = 100.00% (theoretical
+    equilibrium; no measured c* efficiency supplied)") ve ölçü künyeleri
+    ("L_chamber = 959 mm", "Grain = 877 mm (2 x 438 mm)") vardı. Kampanyanın
+    kâğıda koyduğu beyan metinleri sessizce siliniyordu.
+
+    Çizilen açıklama sayısını döndürür.
+    """
+    n = 0
+    for ann in (layout.get('annotations') or ()):
+        if not isinstance(ann, dict):
+            continue
+        if ann.get('visible') is False:
+            continue
+        text = ann.get('text')
+        if text in (None, ''):
+            continue
+        xk, yk = _ref_kind(ann.get('xref')), _ref_kind(ann.get('yref'))
+        x, y = ann.get('x'), ann.get('y')
+        if x is None or y is None:
+            continue
+        if xk == 'frac' and yk == 'frac':
+            transform = ax.transAxes
+        elif xk == 'data' and yk == 'data':
+            transform = ax.transData
+        else:
+            from matplotlib.transforms import blended_transform_factory
+            transform = blended_transform_factory(
+                ax.transAxes if xk == 'frac' else ax.transData,
+                ax.transAxes if yk == 'frac' else ax.transData)
+        try:
+            ax.text(x, y, str(text), transform=transform,
+                    fontsize=8, color='#111111',
+                    ha=str(ann.get('xanchor') or 'center'),
+                    va=str(ann.get('yanchor') or 'middle'),
+                    rotation=float(ann.get('textangle') or 0.0),
+                    zorder=5)
+            n += 1
+        except Exception:
+            continue
+    return n
+
+
+def _draw_shapes(ax, layout):
+    """``layout.shapes`` içindeki dikey/yatay çizgileri çizer.
+
+    ``add_vline(..., annotation_text='Flow separation (Summerfield)')` ve
+    ``'Normal shock (quasi-1D)'`` işaretleri bu yoldan kayboluyordu
+    (ÖH D15 / P9B3-13, ``visualization.py`` çizici ailesi).
+    Çizilen şekil sayısını döndürür.
+    """
+    n = 0
+    for sh in (layout.get('shapes') or ()):
+        if not isinstance(sh, dict) or sh.get('visible') is False:
+            continue
+        if str(sh.get('type') or '') != 'line':
+            continue
+        x0, x1 = sh.get('x0'), sh.get('x1')
+        y0, y1 = sh.get('y0'), sh.get('y1')
+        cfg = sh.get('line') or {}
+        color = _to_mpl_color(cfg.get('color')) or '#555555'
+        style = _PLOTLY_DASH_TO_MPL.get(str(cfg.get('dash') or '')) or '-'
+        try:
+            if x0 is not None and x0 == x1:
+                ax.axvline(float(x0), color=color, linestyle=style,
+                           linewidth=float(cfg.get('width') or 1.2), zorder=4)
+                n += 1
+            elif y0 is not None and y0 == y1:
+                ax.axhline(float(y0), color=color, linestyle=style,
+                           linewidth=float(cfg.get('width') or 1.2), zorder=4)
+                n += 1
+        except (TypeError, ValueError):
+            continue
+    return n
+
+
 def matplotlib_png(fig_dict, width_px, height_px):
     """Plotly figür sözlüğünü matplotlib ile beyaz zeminli PNG'ye çizer.
 
@@ -248,6 +457,13 @@ def matplotlib_png(fig_dict, width_px, height_px):
         traces = [t for t in (fig_dict.get('data') or ())
                   if _is_drawable_trace(t)]
         if not traces:
+            return None
+
+        # FAIL-CLOSED (ÖH D15 / P9B3-13): sadık çizilemeyen figür için
+        # inandırıcı ama YANLIŞ EKSENLİ bir görsel üretilmez.
+        _ret = fallback_refusal_reason(fig_dict)
+        if _ret is not None:
+            print('Fallback chart refused: %s' % _ret)
             return None
 
         layout = fig_dict.get('layout') or {}
@@ -312,6 +528,11 @@ def matplotlib_png(fig_dict, width_px, height_px):
         ax.tick_params(colors='#111111')
         if ax2 is not None:
             ax2.tick_params(colors='#111111')
+        # Açıklamalar ve dikey/yatay işaretler artık DÜŞMÜYOR
+        # (ÖH D15 / P9B3-13: ölçülen kayıp 60/60 açıklamaydı).
+        _draw_shapes(ax, layout)
+        _draw_annotations(ax, layout)
+
         if any_label:
             handles, labels = ax.get_legend_handles_labels()
             if ax2 is not None:

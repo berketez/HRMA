@@ -619,18 +619,26 @@ class TestAblationSurfaceEnergyBalance:
     # (a) GERİ UYUMLULUK — eski yol kılı kıpırdamamalı
     # ------------------------------------------------------------------
     def test_legacy_path_is_bit_identical(self, tp):
-        """Eski imza → eski sayı (278.773 mm sınıfı), BİLİNEREK korunuyor.
+        """Eski imza → eski GERİLEME sayıları, BİLİNEREK korunuyor.
 
         Bu, "doğru sonuç" testi DEĞİLDİR: 278 mm'lik bir boğaz astarı
         fiziksel değildir (v2.6.27 teşhisinin konusu tam da budur). Bu test
-        eski yolun DEĞİŞMEDİĞİNİ kilitler, çünkü üç motorun termal koruma
-        bağlaması ve onların beyan testleri bugün bu sayıyı yayımlıyor.
-        Yeni yola geçiş motor motor yapılacaktır; o gün bu test, yerini
-        yeni yolun beklentisine bırakmalıdır.
+        eski yolun ARİTMETİĞİNİN değişmediğini kilitler.
+
+        GÜNCELLEME (ÖH Z5S / PK6, defter P4B1-14 — R1'in "onarım günü iki
+        eski kilit bilinçli güncellenecek" reçetesi): eskiden burada
+        ``required_thickness_mm == 278,773`` şart koşuluyordu. Onarım kapıyı
+        YOLDAN BAĞIMSIZ hâle getirdi (aynı zarf ihlali iki kanaldan iki zıt
+        damga alamaz), bu girdi de gerileme tavanını aşıyor (0,6195 mm/s >
+        RECESSION_VALID_MAX_MM_S) — dolayısıyla kalınlık artık İKİ yolda da
+        yayımlanmıyor. ARİTMETİK DEĞİŞMEDİ ve kaybolmadı: aşağıda geri
+        kurulup ölçülüyor (0,6195 mm/s × 300 s × 1,5 = 278,775 mm). Değişen
+        tek şey, zarfın dışındaki bu sayının "tasarım" diye YAYIMLANMAMASI.
 
         Akı, teşhiste ölçülen gerilemeden geri çözülür (uydurma sabit
         değil): ṡ = q/(rho*Q*)  →  q = ṡ*rho*Q*.
         """
+        assert 0.6195 > RECESSION_VALID_MAX_MM_S     # ön koşul, adıyla
         rho = get_material('ablative')['density']          # 1400 kg/m^3
         q_star = 8.0e6                                     # konservatif uç
         sdot_measured_m_s = 0.6195e-3                      # teşhis ölçümü
@@ -641,7 +649,13 @@ class TestAblationSurfaceEnergyBalance:
                                     material='silica_phenolic')
 
         assert out['recession_rate_mm_s'] == pytest.approx(0.6195, abs=1e-4)
-        assert out['required_thickness_mm'] == pytest.approx(278.773, abs=0.1)
+        # Eski sayı KAYBOLMADI, yalnız hüküm olarak yayımlanmıyor: aynı
+        # aritmetik yayımlanan alanlardan bire bir geri kurulur.
+        assert out['total_recession_mm'] == pytest.approx(185.850, abs=0.1)
+        assert (out['total_recession_mm'] * out['design_margin']
+                == pytest.approx(278.775, abs=0.1))
+        assert out['required_thickness_mm'] is None
+        assert out['thickness_status'] == 'NOT_MODELLED'
         assert out['flux_basis'] == 'caller_supplied_no_energy_balance'
         assert out['recession_regime'] == 'caller_supplied_flux'
         # Enerji dengesi alanları eski yolda UYDURULMAZ.
@@ -650,14 +664,26 @@ class TestAblationSurfaceEnergyBalance:
         assert out['q_reradiated_W_m2'] is None
         assert out['q_caller_W_m2'] == pytest.approx(q, rel=1e-12)
 
-    def test_legacy_path_keeps_sized_status_even_when_gate_trips(self, tp):
-        """GEÇİCİ İKİLİK: eski yolda kapı statü DÜŞÜRMEZ, bilgi verir.
+    def test_gate_downgrades_the_stamp_on_the_legacy_path_too(self, tp):
+        """Kapı ESKİ yolda da statü düşürür — ikilik BİTTİ.
 
-        Motor bağlama testleri (sıvı/hibrit/katı beyan testleri) bugün
-        thickness_status='sized' ve sayısal bir kalınlık bekliyor. Kapı bu
-        yolda yalnız model_valid/validity_note ile konuşur. Bu ikilik
-        BİLİNÇLİDİR ve motorların tamamı yeni yola geçtiğinde kalkmalıdır —
-        bu test o günü fark etmemizi sağlar (kalktığında kırılır).
+        ESKİ ADI ``test_legacy_path_keeps_sized_status_even_when_gate_trips``
+        (ÖH Z5S / PK6'da değiştirildi). Defter P13 B2 bu bekçiyi ADIYLA
+        suçladı: "kapı tetiklenmişken ``thickness_status == 'sized'`` ŞART
+        KOŞULUYOR" — yani bekçi kusuru koruyordu. Kendi docstring'i
+        ikiliğin "motorların tamamı yeni yola geçtiğinde kalkması"nı şart
+        koşuyordu; ölçüm o günün GELDİĞİNİ gösterdi (üç motor da geçti,
+        ikilik yalnız eski imzayı doğrudan çağıran HTTP ucunda yaşıyordu:
+        POST /api/analysis/thermal-protection {'mode':'ablative',
+        'q_net_W_m2':12e6,...} → HTTP 200, model_valid False + 'sized' +
+        32,143 mm).
+
+        Onarım (defter P4B1-14, R1 reçetesi): ``gated_out`` artık
+        ``use_energy_balance``a bakmıyor. Bu bekçi de yön değiştirdi —
+        eskiden 'sized'ı şart koşuyordu, şimdi zarf dışında kalınlık
+        yayımlanmadığını kilitliyor. ÖLÇÜLDÜ (bu onarımın çapası): üç
+        motorun /calculate gövdesi BİT-AYNI kaldı (sha256 değişmedi), yani
+        motor bağlaması bu yoldan geçmiyor.
         """
         rho = get_material('ablative')['density']
         q = 0.6195e-3 * rho * 8.0e6
@@ -667,10 +693,60 @@ class TestAblationSurfaceEnergyBalance:
         assert out['recession_rate_mm_s'] > RECESSION_VALID_MAX_MM_S
         assert out['model_valid'] is False
         assert out['validity_note'] is not None
-        assert 'FOR INFORMATION ONLY' in out['validity_note']
-        # ... ama kalınlık HÂLÂ yayımlanıyor:
-        assert out['thickness_status'] == 'sized'
-        assert out['required_thickness_mm'] == pytest.approx(278.773, abs=0.1)
+        assert out['validity_note'].startswith('MODEL OUT OF ENVELOPE')
+        # Gerekçe hangi yoldan konuşulduğunu HÂLÂ söyler (künye kaybolmadı).
+        assert 'CALLER' in out['validity_note']
+        assert out['flux_basis'] == 'caller_supplied_no_energy_balance'
+        # ... ve kalınlık artık YAYIMLANMIYOR (eski hâlde 'sized' + 278,773).
+        assert out['thickness_status'] == 'NOT_MODELLED'
+        assert out['required_thickness_mm'] is None
+        # Aritmetik kaybolmadı: gerileme alanları duruyor.
+        assert out['total_recession_mm'] == pytest.approx(185.850, abs=0.1)
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-14 borcunu ``xfail(strict=True)`` ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu. Kusur
+    # ÖH Z5S / PK6 (hüküm damgası kulvarı, commit f8269a5) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test GEÇİYOR
+    # ve strict im XPASS(strict) ile KIRMIZI veriyordu. İm kaldırıldı;
+    # iddia artık CANLI bekçidir — onarım geri alınırsa burası kırmızı
+    # verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/thermal_protection.py:806 "ÖH
+    # P4B1-14 ONARIMI — TEK DAMGA, İKİ YOL. ... Zarfın dışında bir
+    # kalınlık ya İKİ yolda yayımlanır ya HİÇBİRİNDE: aşağıdaki kapı
+    # artık yola bakmaz."; :826-827 ``gated_out = bool(reasons) or
+    # no_net`` → ``thickness_status``; :924-925 kalınlık alanları
+    # ``None if gated_out``.
+    def test_same_envelope_violation_gets_the_same_stamp_on_both_paths(self, tp):
+        """Aynı ihlal, aynı damga: kalınlık ya iki yolda yayımlanır ya hiç.
+
+        Bu bekçi hangi yolun doğru olduğuna HÜKMETMEZ (yeni yolun
+        NOT_MODELLED'ı mı, eski yolun 'sized'ı mı) — yalnız aynı fiziksel
+        hükmün iki kanaldan iki zıt damgayla çıkamayacağını söyler.
+        ``model_valid`` alanı zaten iki yolda da False; ayrışan alanlar
+        ``thickness_status`` ve ``required_thickness_mm``.
+        """
+        rho = get_material('ablative')['density']
+        eski = tp.ablative_thickness(0.6195e-3 * rho * 8.0e6,
+                                     burn_time_s=300.0,
+                                     station_radius_m=0.0496)
+        yeni = tp.ablative_thickness(1.0e6, burn_time_s=100.0,
+                                     h_gas_W_m2K=5.0e4, T_recovery_K=3500.0)
+
+        # Ön koşul: iki koşu da AYNI kapıyı (gerileme tavanı) tetikliyor.
+        assert eski['recession_rate_mm_s'] > RECESSION_VALID_MAX_MM_S
+        assert yeni['recession_rate_mm_s'] > RECESSION_VALID_MAX_MM_S
+        assert eski['model_valid'] is False and yeni['model_valid'] is False
+
+        assert eski['thickness_status'] == yeni['thickness_status'], (
+            f"aynı zarf ihlali eski yolda '{eski['thickness_status']}', "
+            f"yeni yolda '{yeni['thickness_status']}' damgası alıyor")
+        assert (eski['required_thickness_mm'] is None) == \
+               (yeni['required_thickness_mm'] is None), (
+            f"eski yol {eski['required_thickness_mm']} mm yayımlıyor, yeni "
+            f"yol {yeni['required_thickness_mm']} — zarfın dışında bir "
+            'kalınlık ya iki yolda da vardır ya hiçbirinde')
 
     # ------------------------------------------------------------------
     # (b) YENİ YOL — ölçülmüş ablasyon mertebesi
@@ -980,8 +1056,16 @@ class TestAblationSurfaceEnergyBalance:
         # Üfleme yoksa blokaj da yoktur: psi=1, B'=0 (limit davranışı).
         assert out['blowing_blockage'] == pytest.approx(1.0)
         assert out['b_prime'] == pytest.approx(0.0)
-        # Hız tavanı ihlal edilmedi: model_valid kapısı ayrı bir hükümdür.
-        assert out['model_valid'] is True
+        # DÜZELTME (ÖH FAZ B-4/P2, defter P4B1-14): burada eski hâlde
+        # ``assert out['model_valid'] is True`` vardı. O satır, hiçbir şeyin
+        # modellenmediği (thickness_status='NOT_MODELLED') bir yanıtta
+        # model_valid'in YEŞİL kalmasını SÖZLEŞME yapıyordu; model_valid'e
+        # bakan her tüketici (protection_panel.js) yeşil işaret alır. İddia
+        # ters yönde kardeş bekçiye taşındı:
+        # ``test_model_valid_is_not_green_when_nothing_was_modelled``.
+        # Burada yalnız gerileme tavanının İHLAL EDİLMEDİĞİ ölçülür — kapı
+        # hükmü ile model_valid'in aynı şey olmadığını göstermek için.
+        assert out['recession_rate_mm_s'] <= RECESSION_VALID_MAX_MM_S
 
         # Gaz zaten ablasyon sıcaklığının ALTINDA (T_recovery < T_s):
         # aynı sözleşme.
@@ -995,6 +1079,133 @@ class TestAblationSurfaceEnergyBalance:
         assert cold['thickness_status'] == 'NOT_MODELLED'
         assert cold['validity_note'].startswith('NO NET HEATING')
         assert cold['blowing_blockage'] == pytest.approx(1.0)
+
+    # ------------------------------------------------------------------
+    # (c-2) ÖH FAZ B-4/P2 — no_net_heating dalının YAYIMLADIĞI ÜÇLÜ
+    #       (defter P4B1-12) ve damgası (defter P4B1-14)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _no_net_heating_soguk(tp):
+        """Raporun ölçüm sınıfı: T_recovery, yüzey sıcaklığının ÇOK altında."""
+        return tp.ablative_thickness(9.9e6, burn_time_s=50.0,
+                                     h_gas_W_m2K=5.0e3, T_recovery_K=1133.53,
+                                     gas_cp_J_kgK=2000.0)
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-12 borcunu ``xfail(strict=True)`` ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu. Kusur
+    # ÖH Z5S / PK6 (hüküm damgası kulvarı, commit f8269a5) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test GEÇİYOR
+    # ve strict im XPASS(strict) ile KIRMIZI veriyordu. İm kaldırıldı;
+    # iddia artık CANLI bekçidir — onarım geri alınırsa burası kırmızı
+    # verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/thermal_protection.py:450 "ÖH
+    # P4B1-12 ONARIMI: ``q_conv_blocked_W_m2`` eskiden ..." — kırpma
+    # kalktı, konvektif terim İŞARETİYLE yayımlanıyor.
+    def test_no_net_heating_published_fluxes_are_self_consistent(self, tp):
+        """Yayımlanan üçlü, yayımlanan girdilerden yeniden kurulabilmeli.
+
+        İddia yalnız YAYIMLANAN alanları kullanır (h_gas, T_recovery,
+        T_surface, blowing_blockage) — modelin içine bakmaz. İki ayak:
+          (a) ``q_conv_blocked_W_m2`` = h·ψ·(T_recovery − T_surface),
+              İŞARETİYLE birlikte (soğuk gazda negatiftir);
+          (b) net akı üçlüyü kapatmalı: q_mean = max(q_conv − q_rerad, 0).
+        Bugün (a) kırpma yüzünden tutmuyor; (b) yalnız (a) yanlış olduğu
+        için tutar görünüyor.
+        """
+        h = 5.0e3
+        t_recovery = 1133.53
+        out = self._no_net_heating_soguk(tp)
+        beklenen_conv = (h * float(out['blowing_blockage'])
+                         * (t_recovery - float(out['T_surface_K'])))
+
+        assert out['q_conv_blocked_W_m2'] == pytest.approx(
+            beklenen_conv, rel=1e-6), (
+            f"yayımlanan q_conv_blocked = {out['q_conv_blocked_W_m2']:.1f} "
+            f'W/m², yayımlanan girdilerden kurulan h·ψ·(T_r−T_s) = '
+            f'{beklenen_conv:.1f} W/m² — kırpma konvektif terimin işaretini '
+            'yutuyor')
+
+        net = out['q_conv_blocked_W_m2'] - out['q_reradiated_W_m2']
+        assert out['q_mean_W_m2'] == pytest.approx(max(net, 0.0), abs=1.0), (
+            f"üçlü kapanmıyor: q_conv {out['q_conv_blocked_W_m2']:.1f} − "
+            f"q_rerad {out['q_reradiated_W_m2']:.1f} = {net:.1f}, ama "
+            f"q_mean {out['q_mean_W_m2']:.1f}")
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-12 borcunu ``xfail(strict=True)`` ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu. Kusur
+    # ÖH Z5S / PK6 (hüküm damgası kulvarı, commit f8269a5) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test GEÇİYOR
+    # ve strict im XPASS(strict) ile KIRMIZI veriyordu. İm kaldırıldı;
+    # iddia artık CANLI bekçidir — onarım geri alınırsa burası kırmızı
+    # verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/thermal_protection.py:848 "ÖH
+    # P4B1-12 ONARIMI — gerekçe metni artık yanındaki SAYILARI ..." —
+    # denge cümlesi ve CAUTION cümlesi koşullu hâle geldi.
+    def test_no_net_heating_note_matches_the_published_numbers(self, tp):
+        """Gerekçe metni, yanındaki sayıların söylediğini söylemeli.
+
+        İki ayak:
+          (a) 'geldiği kadarını geri ışıyor' denge iddiası, ancak yayımlanan
+              iki akı gerçekten yakınsa kurulabilir;
+          (b) 'birkaç yüz K yakınındaysa' uyarısı KOŞULLU olmalı: 50 K ile
+              916 K fark aynı metni üretemez.
+        """
+        yakin = tp.ablative_thickness(9.9e6, burn_time_s=50.0,
+                                      h_gas_W_m2K=1.0e3, T_recovery_K=2100.0,
+                                      gas_cp_J_kgK=2000.0)      # fark −50 K
+        uzak = self._no_net_heating_soguk(tp)                    # fark 916,5 K
+
+        q_conv = float(uzak['q_conv_blocked_W_m2'])
+        q_rerad = float(uzak['q_reradiated_W_m2'])
+        denge_iddiasi = 're-radiates as much as' in uzak['validity_note']
+        if denge_iddiasi:
+            assert q_conv == pytest.approx(q_rerad, rel=0.05), (
+                f'not "geldiği kadarını geri ışıyor" diyor ama yayımlanan '
+                f'akılar {q_conv:.1f} ⟷ {q_rerad:.1f} W/m² '
+                f'(T_recovery {1133.53:.1f} K < T_surface '
+                f"{uzak['T_surface_K']:.1f} K: gaz yüzeyi o sıcaklığa hiç "
+                'çıkaramaz)')
+
+        assert yakin['validity_note'] != uzak['validity_note'], (
+            'CAUTION cümlesi koşulsuz: −50 K farkla 916,5 K fark birebir '
+            'aynı gerekçe metnini üretiyor')
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-14 borcunu ``xfail(strict=True)`` ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu. Kusur
+    # ÖH Z5S / PK6 (hüküm damgası kulvarı, commit f8269a5) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test GEÇİYOR
+    # ve strict im XPASS(strict) ile KIRMIZI veriyordu. İm kaldırıldı;
+    # iddia artık CANLI bekçidir — onarım geri alınırsa burası kırmızı
+    # verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/thermal_protection.py:829 "ÖH
+    # P4B1-14 ONARIMI (ikinci ayak): HİÇBİR ŞEY MODELLENMEDİYSE
+    # ``model_valid`` YEŞİL OLAMAZ."; :834 ``model_valid = (not reasons)
+    # and not gated_out``.
+    def test_model_valid_is_not_green_when_nothing_was_modelled(self, tp):
+        """Modellenmemiş sonuç 'geçerli model' damgası taşıyamaz.
+
+        Depo doğru deseni aynı modülde yazmıştır: zarf dışı girdide
+        NOT_MODELLED + model_valid=False + sayılı gerekçe (P08 tescili).
+        no_net_heating dalı bu desenin yalnız iki ayağını uyguluyor.
+        """
+        for etiket, out in (
+                ('T_r yüzeyin hemen üstünde',
+                 tp.ablative_thickness(9.9e6, burn_time_s=50.0,
+                                       h_gas_W_m2K=1.0e3,
+                                       T_recovery_K=2100.0,
+                                       gas_cp_J_kgK=2000.0)),
+                ('T_r yüzeyin çok altında', self._no_net_heating_soguk(tp))):
+            assert out['thickness_status'] == 'NOT_MODELLED'   # ön koşul
+            assert out['model_valid'] is not True, (
+                f'{etiket}: thickness_status=NOT_MODELLED ve '
+                'required_thickness_mm=None iken model_valid=True '
+                'yayımlanıyor')
 
     def test_flux_basis_present_on_both_paths(self, tp):
         """flux_basis HER İKİ yolda da bulunmalı ve birbirinden farklı."""

@@ -46,6 +46,7 @@ import pytest
 
 import hrma.engines.solid_rocket_engine as solid_mod
 from hrma.engines.solid_rocket_engine import SolidRocketEngine
+from hrma.utils.numeric_compat import trapezoid
 
 #: Bütün ölçümlerin alındığı referans geometri (dosya başındaki tablo).
 TABAN = dict(propellant_type='apcp', chamber_diameter=100.0,
@@ -312,7 +313,7 @@ def test_turetilmis_buyuklukler_tam_cozumden_geliyor():
         m = motor(gt)
         tam = m.calculate_thrust_curve()
         sonuc = m.calculate_performance()
-        beklenen = float(np.trapz(tam['thrust'], tam['time']))
+        beklenen = float(trapezoid(tam['thrust'], tam['time']))
         assert sonuc['total_impulse'] == pytest.approx(beklenen, rel=1e-12), gt
         assert sonuc['average_thrust'] == pytest.approx(
             beklenen / float(tam['time'][-1]), rel=1e-12), gt
@@ -381,25 +382,80 @@ def test_ornekleme_blogu_kendini_beyan_ediyor():
 # ---------------------------------------------------------------------------
 # 4) Yapısal totoloji ve kazanılmamış kap onayı
 # ---------------------------------------------------------------------------
-def test_cidar_verilmeyince_emniyet_katsayisi_girdinin_ekosu():
-    """KUSURUN KANITI: üç basınçta cidar değişiyor, SF birebir sabit."""
+def test_cidar_verilmeyince_emniyet_katsayisi_bayragiyla_TUTARLI():
+    """Boyutlandırma modunda SF ile totoloji BAYRAĞI birbirini tutmalı.
+
+    ÇEVRİLDİ — ÖH D24 / defter **P14M1-11** (savcı hükmü:
+    *YANLIŞI-SAVUNAN, bilinçli-kilitleyen, protokollü*;
+    ``docs/scofield/raw/P14/S1-savci.md`` §1.2 M1, satır 140).
+
+    Bu testin adı ``..._girdinin_ekosu`` idi ve son iddiası şuydu::
+
+        assert len(katsayilar) == 1, (
+            'totoloji ortadan kalktıysa bu bekçi güncellenmeli: ...')
+
+    Yani üç farklı hazne basıncında emniyet katsayısının BİREBİR SABİT
+    kalmasını ŞART koşuyordu. Sabitlik kusurun kendisidir (SF, tasarım
+    hedefinin ekosu); bekçi böylece kusuru koruyordu: biri totolojiyi
+    gerçekten kaldırsa — yani SF cidara göre değişmeye başlasa — bu satır
+    KIRMIZI olurdu. Kendi mesajı bunu itiraf ediyor ("bu bekçi
+    güncellenmeli"), bu yüzden savcı onu *protokollü* saymıştı; protokollü
+    olması yanlışı savunduğu gerçeğini değiştirmiyor.
+
+    ÖLÇÜLDÜ (``docs/scofield/raw/OH/D24/ihracat/a2/once.json`` ->
+    ``M7_P14M1_11``, taban 88a29d3): ``sabit_kilit_asserti: true``,
+    ``protokol_mesaji: true``, ``iki_yonlu_iddia: false``.
+
+    İDDİA KORUNDU, KİLİT KALDIRILDI. Testin gerçek konusu SF'nin sabitliği
+    değil, ürünün KENDİ beyanıyla tutarlı olmasıdır — bu yüzden hüküm artık
+    ürünün ``safety_factor_is_tautological`` bayrağından okunur ve İKİ YÖNLÜ
+    sınanır:
+
+      * bayrak True ise SF hedefin ekosudur -> üç koşumda SABİT olmalı
+        (bugünkü davranış; sessizce değişirse bekçi kırmızıya döner),
+      * bayrak False ise hüküm KAZANILMIŞ demektir -> SF artık hedefin ekosu
+        OLAMAZ ve cidar değişirken sabit KALAMAZ.
+
+    Böylece totolojiyi dürüstçe kaldıran bir onarım (bayrak da düşer) bu
+    bekçiyi kırmadan geçer; totolojiyi sessizce bozan ya da bayrağı gerçeğe
+    aykırı bırakan her değişiklik kırmızıya düşer.
+    """
     goruldu = {}
+    bayraklar = set()
     for pc in (40, 80, 150):
         m = motor(chamber_pressure=pc)
         ca = m._calculate_structural_analysis()['case_analysis']
-        goruldu[pc] = (ca['wall_thickness_mm'], ca['safety_factor'])
+        goruldu[pc] = (ca['wall_thickness_mm'], ca['safety_factor'],
+                       ca['design_safety_factor'])
         assert ca['design_mode'] == 'size'
-        assert ca['safety_factor_is_tautological'] is True
         assert ca['wall_thickness_source'] == 'sized_by_hrma'
-        # SF, tasarım hedefinin ta kendisi:
-        assert ca['safety_factor'] == pytest.approx(
-            ca['design_safety_factor'], rel=1e-9)
+        bayraklar.add(bool(ca['safety_factor_is_tautological']))
     kalinliklar = {v[0] for v in goruldu.values()}
     katsayilar = {round(v[1], 9) for v in goruldu.values()}
     assert len(kalinliklar) == 3, 'senaryo geçersiz: cidar değişmiyor'
-    assert len(katsayilar) == 1, (
-        'totoloji ortadan kalktıysa bu bekçi güncellenmeli: '
-        f'{goruldu}')
+    assert len(bayraklar) == 1, (
+        'aynı modda üç koşum farklı totoloji bayrağı verdi; beyan '
+        f'kararsız: {goruldu}')
+    totolojik = bayraklar.pop()
+    if totolojik:
+        # Bayrak "bu sayı hüküm değil" diyor: o zaman GERÇEKTEN hedefin ekosu
+        # olmalı — hem sabit hem hedefe eşit.
+        assert len(katsayilar) == 1, (
+            'safety_factor_is_tautological=True ama SF cidarla birlikte '
+            f'değişiyor; bayrak gerçeği söylemiyor: {goruldu}')
+        for pc, (_t, sf, hedef) in goruldu.items():
+            assert sf == pytest.approx(hedef, rel=1e-9), (
+                f'{pc} bar: bayrak totolojik diyor ama SF hedeften ayrışıyor '
+                f'({sf} != {hedef})')
+    else:
+        # Bayrak "hüküm kazanıldı" diyor: SF artık hedefin ekosu OLAMAZ.
+        assert len(katsayilar) > 1, (
+            'safety_factor_is_tautological=False ama SF üç farklı cidarda '
+            f'hâlâ birebir sabit — hüküm kazanılmamış: {goruldu}')
+        for pc, (_t, sf, hedef) in goruldu.items():
+            assert sf != pytest.approx(hedef, rel=1e-9), (
+                f'{pc} bar: bayrak doğrulama diyor ama SF tasarım hedefinin '
+                f'ekosu ({sf} == {hedef})')
 
 
 def test_boyutlandirma_modunda_hukum_dogrulama_diye_sunulmuyor():

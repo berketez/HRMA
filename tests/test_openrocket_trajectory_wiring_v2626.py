@@ -50,7 +50,15 @@ MOTOR = {
     'thrust': 5000.0,
     'burn_time': 10.0,
     'total_impulse': 50000.0,
-    'isp': 240.0,
+    # ÖH D23 / P4B3-24 — 'isp' ANAHTARI KALDIRILDI (bekçi çevirisi).
+    # Bu yük KENDİ İÇİNDE TUTARSIZDI: entegre edilen impuls bütçesinden
+    # türeyen Isp (total_impulse / (m_p * g0)) ile yazılı isp %1'den
+    # fazla ayrışıyordu, yani yanma iki kez ve iki farklı biçimde tarif
+    # edilmişti. Çözücü artık bu çelişkiyi reddediyor (fail-closed).
+    # Isp bu çözücüde bir GİRDİ DEĞİL, bütçenin türevidir: anahtar
+    # verilmediğinde bütçeden türetilir ve bu dosyadaki testlerin
+    # ölçtüğü sayıların HİÇBİRİ değişmez (ölçüldü, taban ef527ae:
+    # isp = 220 / 1 / 1e9 ile apoje BİT-AYNI, once.json P4B3_24).
     'propellant_mass_total': 27.5,
     'chamber_diameter': 0.152,
     'chamber_length': 0.88,
@@ -175,7 +183,15 @@ TRAJ_MOTOR = {
     'thrust': 3000.0,
     'burn_time': 4.0,
     'total_impulse': 12000.0,
-    'isp': 200.0,
+    # ÖH D23 / P4B3-24 — 'isp' ANAHTARI KALDIRILDI (bekçi çevirisi).
+    # Bu yük KENDİ İÇİNDE TUTARSIZDI: entegre edilen impuls bütçesinden
+    # türeyen Isp (total_impulse / (m_p * g0)) ile yazılı isp %1'den
+    # fazla ayrışıyordu, yani yanma iki kez ve iki farklı biçimde tarif
+    # edilmişti. Çözücü artık bu çelişkiyi reddediyor (fail-closed).
+    # Isp bu çözücüde bir GİRDİ DEĞİL, bütçenin türevidir: anahtar
+    # verilmediğinde bütçeden türetilir ve bu dosyadaki testlerin
+    # ölçtüğü sayıların HİÇBİRİ değişmez (ölçüldü, taban ef527ae:
+    # isp = 220 / 1 / 1e9 ile apoje BİT-AYNI, once.json P4B3_24).
     'propellant_mass_total': 8.0,
 }
 

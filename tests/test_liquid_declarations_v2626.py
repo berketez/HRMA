@@ -55,6 +55,7 @@ from hrma.engines.injector_design import (
     design_injector,
 )
 from hrma.engines.liquid_rocket_engine import (
+    BURN_TIME_DEFAULT_S,
     CONVERGENT_HALF_ANGLE_DEG,
     COOLANT_CHANNEL_TARGET_VELOCITY_MS,
     COOLING_CHANNEL_HEIGHT_DEFAULT_M,
@@ -93,6 +94,15 @@ from sabit_siniflandirma import (  # noqa: E402
 OFFLINE_PROPELLANTS = {'rp1': {}, 'lox': {}}
 
 #: liquid.html varsayılanlarıyla uyumlu taban ezmeler.
+#
+# ÖH D36 / LU-1 (ÇEVRİLEN BEKÇİ, onemli2-sivi a2): motor yanma süresini ARTIK
+# VARSAYMAZ; süre verilmezse ``propellant_tanks`` ``not_modelled`` döner
+# ve bu dosyanın 8 düğümü ``KeyError`` (tank yaprakları yanıttan kayboldu) ile düşüyordu. Ölçülen şey
+# (beyan yaprak envanteri tank kartını da kapsar: rezerv/ullage,
+# L/D, seviye probu, emniyet vanası, bafl oranı) SÜRESİ VERİLMİŞ bir tasarımdır; süre motorun kendi
+# sabitinden AÇIKÇA verilir (sayı burada yazılmaz), sayılar LU-1 öncesindeki
+# sessiz varsayımla birebir aynıdır. Süre yokken fail-closed hâl:
+# tests/test_d36_sivi_a1.py (tank kartı) ve test_d36_sivi_a2.py.
 BASE_OVERRIDES = dict(
     fuel_density=810, oxidizer_density=1141, mixture_ratio=2.3,
     combustion_efficiency=97, engine_cycle='gas_generator', feed_pressure=105,
@@ -102,6 +112,7 @@ BASE_OVERRIDES = dict(
     characteristic_length=1.2, chamber_material='inconel_718',
     cooling_type='regenerative', nozzle_expansion_ratio=12,
     nozzle_type='bell_80', safety_factor=2.5,
+    max_burn_duration=BURN_TIME_DEFAULT_S,
 )
 
 BASE_CTOR = dict(thrust=25000, chamber_pressure=70, mixture_ratio=2.3,
@@ -326,35 +337,63 @@ def test_manifold_orani_gerceklenen_alandan_cikiyor(base):
 
 
 def test_manifold_totolojisi_isaretleniyor():
-    """SPI devresi özdeşliktir ve öyle bildirilir; NHNE devresi ayrılır.
+    """Oran hedefi tekrarlıyorsa BAYRAK bunu söyler — İKİ devrede de.
 
-    Eski kod ikisini de "gerçeklenen oran" diye sunuyordu. SPI'de
-    A = mdot/(rho*v) bir ÖZDEŞLİK olduğu için oran hedefi tekrarlar; N2O
-    devresinde alan iki fazlı kütle akısından çözüldüğü için ayrışır. Fark
-    ölçülebilir olmalı, yoksa alan hâlâ hiçbir şey ölçmüyor demektir.
+    Eski kod oranı "gerçeklenen ölçüm" diye sunuyordu; A = mdot/(rho*v) bir
+    ÖZDEŞLİK olduğu için oran hedefi tekrarlıyordu. v2.6.26 onarımı bayrağı
+    (``v_ratio_is_tautological``) koydu.
+
+    ÇEVRİLDİ — ÖH D15 birleşme etkileşimi (1 Eylül 2026)
+    ----------------------------------------------------
+    Bu bekçi NHNE (N₂O) devresinde bayrağın ``False`` olmasını ŞART koşuyordu.
+    O ayrışma bir fizik bulgusu değildi: alan iki fazlı kütle akısından
+    çözülürken ``v_orifice`` tek fazlı SPI bağıntısından okunuyordu, yani oran
+    ÇAĞIRANIN İKİ FARKLI MODELDEN okuduğu iki sayının artığıydı (ölçülmüştü:
+    a_man/a_orifis ≈ 7,2-7,6, hedef 10). Hibrit kulvarının **P1B4-01** onarımı
+    ``_solve_circuit``e her devrede SÜREKLİLİK hızını yayımlattı (NHNE oranı
+    1,32174 -> 1,00000) — yani ayrışmayı üreten tutarsızlık KAPANDI ve bayrak
+    iki dalda da doğru biçimde ``True`` döndü.
+
+    Şart "bayrak False olsun"dan "bayrak DOĞRUYU söylesin"e çevrildi: bayrak
+    sabit değil, ölçülen orandan TÜREMİŞ olmalı ve iki devrede de künyesiyle
+    beyan edilmelidir. Gevşeme yok — eski hâli yalnız NHNE'yi sınıyordu, yeni
+    hâli her devrede bayrak ⟷ sayı tutarlılığını sınıyor.
     """
     spi = design_injector({
         'motor_type': 'liquid', 'injector_type': 'impinging_doublet',
         'mdot_ox': 10.0, 'mdot_fuel': 4.0, 'rho_ox': 1141.0,
         'rho_fuel': 815.0, 'Pc_bar': 60.0})
-    for ad in ('ox_circuit', 'fuel_circuit'):
-        man = spi[ad]['manifold']
-        assert spi[ad]['flow_model'] == 'SPI'
-        assert man['v_ratio_is_tautological'] is True
-        assert man['v_ratio'] == pytest.approx(MANIFOLD_V_RATIO_TARGET,
-                                               abs=1e-9)
-
     nhne = design_injector({
         'motor_type': 'hybrid', 'mdot_ox': 1.2, 'Pc_bar': 30.0,
         'fluid_ox': 'n2o', 'T_ox_K': 293.15})
-    man = nhne['ox_circuit']['manifold']
     assert nhne['ox_circuit']['flow_model'] == 'NHNE'
-    assert man['v_ratio_is_tautological'] is False
-    assert abs(man['v_ratio'] - MANIFOLD_V_RATIO_TARGET) > 1e-3, (
-        'NHNE devresinde oran hâlâ hedefin kendisi: totoloji geri gelmiş')
-    # Bekçi sınırları hâlâ sağlanıyor (kural gerçekten sınanıyor).
-    assert man['v_ratio'] <= MANIFOLD_V_RATIO_MAX
-    assert man['area_ratio'] >= MANIFOLD_AREA_RATIO_MIN
+
+    devreler = [('SPI/' + ad, spi[ad])
+                for ad in ('ox_circuit', 'fuel_circuit')]
+    devreler.append(('NHNE/ox_circuit', nhne['ox_circuit']))
+    for etiket, devre in devreler:
+        man = devre['manifold']
+        totoloji = abs(man['v_ratio'] - MANIFOLD_V_RATIO_TARGET) < 1e-9
+        # (1) Bayrak SABİT değil, ölçülen orandan türer.
+        assert man['v_ratio_is_tautological'] is totoloji, (
+            f'{etiket}: bayrak {man["v_ratio_is_tautological"]} diyor ama '
+            f'ölçülen oran {man["v_ratio"]!r} (hedef '
+            f'{MANIFOLD_V_RATIO_TARGET!r}) bunu doğrulamıyor')
+        # (2) Özdeşlik geçerliyse künye de bunu SÖYLEMELİ (sessiz totoloji
+        #     yasağı — kusurun kendisi buydu).
+        if totoloji:
+            assert 'identity' in man['v_ratio_basis'], (
+                f'{etiket}: oran hedefi tekrarlıyor ama künye "ölçüm" gibi '
+                f'sunuyor: {man["v_ratio_basis"]}')
+            assert 'v_ratio_is_tautological' in man['v_ratio_basis']
+        # (3) Alan oranı sürekliliğin tersidir (ikinci bir tanım yok).
+        assert man['area_ratio'] == pytest.approx(1.0 / man['v_ratio'],
+                                                  rel=1e-9), etiket
+        # (4) Bekçi sınırları hâlâ gerçekten SINANIYOR (ölü sabit yasağı).
+        assert man['v_ratio'] <= MANIFOLD_V_RATIO_MAX, etiket
+        assert man['area_ratio'] >= MANIFOLD_AREA_RATIO_MIN, etiket
+        assert man['v_ratio_within_limit'] is bool(
+            man['v_ratio'] <= MANIFOLD_V_RATIO_MAX), etiket
 
 
 def test_manifold_hedef_literali_geri_gelmedi():

@@ -160,11 +160,18 @@ MANIFESTO = (
         gerekce=('BL ölçümü, düşük basınç + ağır gaz (γ = 1,25, '
                  'MW = 28): bandın alt ucuna yakın'),
     ),
+    # ÖH D19 / P15B4-09 — SATIR YENİDEN ÇAPALANDI. Eski satır
+    # (P_c = 6 bar, eps = 25) Summerfield ölçütünü SAĞLIYORDU, yani
+    # 'lüle içi normal şok' etiketi fiziksel değildi; merdiven ölçütü şok
+    # dalının önüne aldıktan sonra o vaka 'separated'a düşüyor. Manifestonun
+    # ölçtüğü şey (şok bandında kesir YAYIMLANMAZ) korunur; vaka ölçütün
+    # SAĞLANMADIĞI gerçek şok bandına taşınır (gamma = 1,2 / eps = 1,15;
+    # Pa/Pc = 0,73960, şok bandı (0,70070; 0,78390), ayrılma eşiği 0,82191).
     dict(
-        ad='sok_6bar_eps25',
-        vaka=dict(chamber_pressure=6e5, chamber_temperature=3000.0,
+        ad='sok_1_37bar_eps1_15',
+        vaka=dict(chamber_pressure=1.37e5, chamber_temperature=3000.0,
                   gamma=1.2, molecular_weight=24.0, throat_diameter=0.05,
-                  expansion_ratio=25.0, ambient_pressure=101325.0),
+                  expansion_ratio=1.15, ambient_pressure=101325.0),
         rejim='normal_shock_in_nozzle', kaynak='legacy_constant',
         olculen=None,
         gerekce=('ÖLÇÜM YOK: lüle içi normal şok. Marş şokta durur, '
@@ -516,9 +523,21 @@ HIBRIT_GOVDE = {
     'oxidizer_type': 'n2o', 'expansion_ratio': 4.0, 'nozzle_type': 'conical',
     'chamber_material': 'steel_4130', 'wall_thickness': 5,
 }
+# ÖH D26 (defter P15B3-02, YÜKSEK) — GÖVDE DÜZELTİLDİ. Bu gövde
+# eskiden ``'thrust': 1500, 'burn_time': 3`` taşıyordu; ikisi katı
+# ucunda TASARIM NOKTASI HEDEFİDİR ve bu yanma hızı katsayılarıyla
+# (a=0,005 / n=0,35) BATES zarfının dışındadır. Taban 7751531'de uç,
+# ulaşılamayan hedefi sessizce düşürüp başlangıç geometrisinin
+# eğrisini 200 ile yayımlıyordu: yani buradaki 1500 N HİÇBİR ZAMAN
+# etkili olmadı, testin ölçtüğü motor her zaman 4312,736770254884 N
+# / 1,9963492719477878 s idi. Zarf kapısı fail-closed olunca o dal
+# 422 döner. Gövde bu yüzden ZATEN ÖLÇÜLEN kipe (geometri kipi)
+# çevrildi; ``outer_diameter`` da ucun okuduğu ada getirildi (uç
+# zaten aynı 100 mm'yi tohumluyordu). ÖLÇÜLDÜ: yanıt tasarım noktası
+# bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148, 186.659 bayt).
 KATI_GOVDE = {
-    'motor_name': 'surtunme_gocu', 'chamber_pressure': 40, 'thrust': 1500,
-    'burn_time': 3, 'grain_type': 'bates', 'outer_diameter': 100,
+    'motor_name': 'surtunme_gocu', 'chamber_pressure': 40,
+    'grain_type': 'bates', 'chamber_diameter': 100,
     'core_diameter': 35, 'grain_length': 300, 'segments': 1,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35, 'chamber_temperature': 3000,
     'c_star': 1550, 'propellant_density': 1800, 'propellant_type': 'apcp',

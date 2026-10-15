@@ -93,6 +93,12 @@ class TestTemperatureDerating:
         # Gorev tanimi: AISI 4130 @500 C ~%50 kayip. Egri 500C -> 0.44.
         mat = analyzer.materials['steel_4130']
         d = analyzer._derate_strength(mat, 500.0 + 273.15)
+        # ÖH D19 · P13B3-05 — BANT GEREKÇESİ (ölçülen, D19): bugün fark = 0
+        # (bit-özdeş), bant sınanmadı. KALIYOR: 0,44 eğrinin 500 °C
+        # düğümüdür ve ±0,02 görev tanımının "~%50 kayıp" ifadesinin
+        # sayısal karşılığıdır; hemen altındaki 0,40-0,60 iddiası zaten
+        # geniş bandı ayrıca kilitliyor. Kimlik denetimi eğrinin meşru
+        # yeniden ölçümünü kırardı.
         assert d['strength_retention_factor'] == pytest.approx(0.44, abs=0.02)
         # "yaklasik yari" -> retention 0.4-0.6 bandinda olmali (gorev ifadesi).
         assert 0.40 <= d['strength_retention_factor'] <= 0.60
@@ -148,7 +154,17 @@ class TestBuckling:
         mat = analyzer.materials['steel_4130']
         out = analyzer._check_buckling(5e5, 0.5, 0.001, 2.0, mat)
         assert out['axial_buckling_safety_factor'] == float('inf')
-        assert out['buckling_status'] == 'SAFE'
+        # ÖH D31 / P5B1-15 — BEKÇİ ÇEVRİLDİ. Bu satır eskiden
+        # ``buckling_status == 'SAFE'`` bekliyordu ve kusuru KORUYORDU:
+        # aynı koşumda kritik dış basınç 0,004315 bar (1 atm'in ~1/235'i)
+        # yayımlanıyor, dış basınç modu hiçbir uygulanan basınçla
+        # karşılaştırılmıyor, ama hüküm 'SAFE' basılıyordu. Bu testin
+        # KONUSU eksenel moddur (#203: iç basınç çekmesi burkulma yükü
+        # değildir), o yüzden iddia eksenel modun KENDİ adına taşındı.
+        # Birleşik hüküm artık dış basınç yük durumu beyan edilmediği için
+        # NOT_EVALUATED'dır (kazanılmamış onay yayımlanmaz).
+        assert out['axial_buckling_status'] == 'SAFE'
+        assert out['buckling_status'] == 'NOT_EVALUATED'
         assert out['applied_axial_stress_MPa'] == 0.0
         assert out['pressure_stabilizing_stress_MPa'] > 0.0
 
@@ -163,6 +179,9 @@ class TestBuckling:
         out = analyzer._check_buckling(0.0, r, t, 2.0, mat,
                                        axial_compression_force=3.0 * F_critical)
         assert out['axial_buckling_safety_factor'] == pytest.approx(1.0 / 3.0, rel=1e-6)
+        # P5B1-15: en kötü mod birleşik hükmü yönetir; eksenel mod kendi
+        # adıyla da CRITICAL der.
+        assert out['axial_buckling_status'] == 'CRITICAL'
         assert out['buckling_status'] == 'CRITICAL'
 
     def test_pressure_tension_credit_reduces_net_compression(self, analyzer):
@@ -223,6 +242,44 @@ class TestBuckling:
         out = analyzer._check_buckling(5e5, 0.5, 0.001, 2.0, mat)
         assert out['critical_external_pressure_bar'] > 0.0
         assert math.isfinite(out['critical_external_pressure_bar'])
+
+    # ÖH D31 / P5B1-15 — BORÇ İMİ KALDIRILDI (14 Eylül 2026).
+    # İmin taşıdığı kusur onarıldı: ``_check_buckling`` artık
+    # ``external_pressure`` / ``internal_pressure_min`` zarfını
+    # (max(p_dış − p_iç, 0)) kabul eder, ``external_buckling_safety_factor``
+    # ve ``external_buckling_status`` yayımlar; yük durumu beyan
+    # edilmediğinde hüküm ``NOT_EVALUATED``dır (SAFE + inf kalktı).
+    # Ölçüm: docs/scofield/raw/OH/D31/yapisal-sistem/a1/{once,sonra}.json
+    # (K1) — t = 0,5/1,0/5,0 mm için karşılaştırma alanı sayısı 0 -> 4,
+    # buckling_status 'SAFE' -> 'NOT_EVALUATED'. Kilit bekçi:
+    # tests/test_d31_yapisal_sistem_a1.py::TestP5B1_15DisBasincZarfi.
+    @pytest.mark.parametrize('t', (0.0005, 0.001, 0.005))
+    def test_external_pressure_mode_is_compared_with_an_applied_pressure(
+            self, analyzer, t):
+        """Yayımlanan kritik dış basınç bir HÜKME bağlanmalı.
+
+        Taşınan bekçi (kardeş düğüm ``:221``): eski iddia yalnız sayının
+        POZİTİF ve SONLU olduğunu sınıyordu — 0,0005 bar da pozitiftir.
+        Sözleşme: ya dış basınç modu bir uygulanan basınçla karşılaştırılıp
+        kendi emniyet katsayısını yayımlar, ya da genel ``buckling_status``
+        bu modu kapsamadığını söyleyerek koşulsuz 'SAFE' dememelidir.
+        """
+        mat = analyzer.materials['steel_4130']
+        out = analyzer._check_buckling(5e5, 0.5, t, 2.0, mat)
+        p_cr = float(out['critical_external_pressure_bar'])
+        assert p_cr > 0.0
+        if p_cr >= 1.01325:          # 1 atm'in üstündeyse bu vaka konu dışı
+            return
+        karsilastirma = [k for k in out
+                         if 'external' in k.lower()
+                         and ('applied' in k.lower() or 'safety' in k.lower()
+                              or 'margin' in k.lower()
+                              or 'status' in k.lower())]
+        assert karsilastirma or out['buckling_status'] != 'SAFE', (
+            f'kritik dış basınç {p_cr:.4f} bar (1 atm altı) yayımlanırken '
+            f"buckling_status = '{out['buckling_status']}': dış basınç modu "
+            'hiçbir uygulanan basınçla karşılaştırılmıyor, hüküm yalnız '
+            f'eksenel moddan geliyor (bloktaki alanlar: {sorted(out)})')
 
 
 class TestThinWallValidityAndLame:
@@ -293,8 +350,24 @@ class TestThermalEffectOnSafetyFactor:
 
         # Sadece-basinc: yuksek (guvenli gorunur) SF.
         assert sf_noT > 3.0, f"pressure-only SF should look safe, got {sf_noT}"
-        # Derating SF'yi olculebilir sekilde dusurmeli.
-        assert sf_T < sf_noT, f"derating must reduce SF: {sf_T} vs {sf_noT}"
+        # V3 yapi-sf (7 Eki 2026) — BEKLENTİ ÇEVİRİSİ. Eski satır
+        # ``sf_T < sf_noT`` idi: boyutlandırma kipinde sıcaklığın etkisi SF
+        # düşüşü olarak görünüyordu, çünkü boyutlandırma yalnız basınç
+        # hoop'unu hedefe oturtuyor, yayımlanan SF ise ısıl gerilmeyi de
+        # taşıyordu (boyutlandırılmış cidar kendi hedefini tutturmuyordu —
+        # düzeltilen kusur). Artık boyutlandırma toplam hoop'u (basınç +
+        # ısıl, derate edilmiş akma) hedefe oturtur: sıcaklığın etkisi DAHA
+        # KALIN cidardır ve iki koşu da hedef x imalat payını geri okur.
+        # Kâhin: ısıl gerilme > 0 ve akma düşürmesi < 1 iken aynı hedefi
+        # sağlayan cidar kalınlaşmak ZORUNDADIR (P·r/t + σ_th = S_y,der/SF).
+        t_noT = res_noT['chamber_analysis']['recommended_thickness']
+        t_T = res_T['chamber_analysis']['recommended_thickness']
+        assert t_T > t_noT, (
+            f"derating + thermal stress must thicken the sized wall: "
+            f"{t_T} vs {t_noT} mm")
+        assert sf_T == pytest.approx(sf_noT, rel=1e-12), (
+            f"both sized walls must read back target x allowance: "
+            f"{sf_T} vs {sf_noT}")
         # Sicaklik marji: cidar servis sinirinin %85'ini asiyor.
         sa = res_T['safety_analysis']
         assert sa['thermal_margin_ratio'] > 0.85
@@ -303,6 +376,53 @@ class TestThermalEffectOnSafetyFactor:
         # D-track: öneriler artık {code,params,severity}; metin frontend'de.
         assert any(r['code'] == 'warn.structural.thermal_margin_service_limit'
                    for r in sa['recommendations'])
+
+    # ÇEVİRİ (ÖH D15 fix-3 / taban geçişi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P5B1-02 borcunu ``xfail(strict=True)`` ile taşıyordu.
+    # Kusur ÖH Z5S / PK6 (hüküm damgası kulvarı, commit f8269a5)
+    # tarafından ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta
+    # test GEÇİYOR ve strict im XPASS(strict) ile KIRMIZI veriyordu.
+    # İm kaldırıldı; iddia artık CANLI bekçidir — onarım geri alınırsa
+    # burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/structural_analysis.py:745 "ÖH
+    # ONARIMI (defter P5B1-02, YÜKSEK): SERVİS SINIRI EKSENİ"; :769-793
+    # ölçülmüş cidar verilmediğinde ``T_peak_service = float(_T_alev)``
+    # (asimetrik T_aw doktrini) ve sayının ÜST SINIR olduğu :772/:781
+    # ``peak_wall_temperature_basis`` künyesiyle ADIYLA yayımlanıyor
+    # (:2775-2776). Gradyan/derating ekseni bilerek kendi soğutmasız
+    # ince-cidar tahmininde bırakıldı ve AYRI adla yayımlanıyor.
+    def test_estimated_wall_temperature_follows_the_flame(self, analyzer):
+        """Taşınan bekçi (kardeş düğüm ``:271``).
+
+        Kardeş iddia ``thermal_margin_ratio > 0.85`` diyor; bu yolda oran
+        HER ZAMAN tam 0,9000 olduğu için iddia tanım gereği geçiyor ve
+        kusuru koruyor. Kilitlenen sözleşme: tahmin edilen cidar sıcaklığı
+        ALEVE tepki vermeli — 1000 K ile 10 000 K aynı cidarı üretemez.
+        """
+        # Kontrol: gerçek cidar sıcaklığı verilen yol ÇALIŞIYOR (bu dosyanın
+        # test_service_limit_uses_peak_wall_temperature ölçümü).
+        bagli = analyzer.analyze_structure(
+            dict(REF_MOTOR_NO_TEMP, wall_temperature_hot=860.0,
+                 wall_temperature_cold=560.0),
+            material='steel_4130',
+            design_pressure_factor=1.5)['safety_analysis']
+        assert bagli['peak_wall_temperature_K'] == pytest.approx(860.0)
+
+        tahminler = {}
+        for T_flame in (1000.0, 3000.0, 10000.0):
+            sa = analyzer.analyze_structure(
+                dict(REF_MOTOR, chamber_temperature=T_flame),
+                material='steel_4130',
+                design_pressure_factor=1.5)['safety_analysis']
+            tahminler[T_flame] = (sa['peak_wall_temperature_K'],
+                                  sa['thermal_margin_ratio'])
+        soguk = tahminler[1000.0][0]
+        sicak = tahminler[10000.0][0]
+        assert sicak > soguk + 1.0, (
+            'tahmin edilen tepe cidar sıcaklığı alevi görmüyor: '
+            f'{ {k: (round(v[0], 2), round(v[1], 6)) for k, v in tahminler.items()} } '
+            '(alev 10 kat arttı, cidar kıpırdamadı)')
 
     def test_thermal_stress_superposition_and_cooled_gradient(self, analyzer):
         """Termal gerilme lineer superpozisyonla eklenir.

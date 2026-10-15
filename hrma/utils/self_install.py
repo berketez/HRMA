@@ -49,7 +49,17 @@ MAC_FREE_SPACE_FACTOR = 6
 # Batch betiğine gömüldüğünde cmd.exe tarafından özel yorumlanan
 # karakterler; kurulum yolunda görülürse otomatik moda GİRİLMEZ
 # (pratikte yalnızca sıra dışı kullanıcı adlarında olur).
-_CMD_UNSAFE = re.compile(r"[&^%!<>|()\"]")
+#
+# SATIR SONU ve diğer denetim karakterleri de kapıya dâhildir (2026-08-27).
+# Gerekçe: yol, WIN_HELPER şablonunun İÇİNE gömülüp .bat olarak yazılıyor;
+# batch dosyasında satır sonu KOMUT AYRACIDIR, yani '\n' içeren bir yol
+# betikte yeni bir satır — yeni bir komut — açardı. Sekme/CR de ayrıştırmayı
+# bozar. BUGÜN SÖMÜRÜLEBİLİR DEĞİLDİR: NTFS dosya/dizin adında 0x00-0x1F
+# aralığını zaten kabul etmiyor, dolayısıyla böyle bir kurulum yolu
+# oluşturulamıyor. Bu yüzden buradaki değişiklik bir açığın kapatılması
+# değil, SAVUNMA DERİNLİĞİDİR: kapı, yolun nereden geldiğine (kayıt
+# defteri, taşınan kurulum, ileride eklenecek bir kaynak) bağlı kalmasın.
+_CMD_UNSAFE = re.compile(r"[&^%!<>|()\"]|[\x00-\x1f]")
 
 
 def _package_root():

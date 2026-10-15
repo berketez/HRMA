@@ -30,6 +30,7 @@ import contextlib
 import io
 import math
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -242,6 +243,33 @@ class TestA8CidarKalinligi:
 # A2 — DXF birim başlığı
 # ---------------------------------------------------------------------------
 
+def _dxf_katman_kutusu(doc, layer):
+    """Bir DXF katmanındaki LWPOLYLINE'ların (xmin, xmax, ymin, ymax)'ı."""
+    xs, ys = [], []
+    for e in doc.modelspace():
+        if e.dxftype() != 'LWPOLYLINE' or e.dxf.layer != layer:
+            continue
+        for x, y in e.get_points('xy'):
+            xs.append(x)
+            ys.append(y)
+    if not xs:
+        return None
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def _dxf_olcu_sayisi(doc, onek):
+    """``'Ø_chamber = 183.3 mm'`` gibi bir ölçü metninden sayıyı çeker."""
+    for e in doc.modelspace():
+        if e.dxftype() != 'TEXT':
+            continue
+        text = e.dxf.text
+        if text.startswith(onek):
+            eslesme = re.search(r'(-?\d+(?:\.\d+)?)\s*mm', text)
+            if eslesme:
+                return float(eslesme.group(1)), text
+    return None, None
+
+
 class TestA2DxfBirimi:
     def test_insunits_is_millimetres(self, hybrid_results, tmp_path):
         ezdxf = pytest.importorskip('ezdxf')
@@ -255,26 +283,147 @@ class TestA2DxfBirimi:
 
     def test_geometry_is_consistent_with_the_declared_unit(
             self, hybrid_results, tmp_path):
-        """Beyan mm ise koordinatlar da mm büyüklüğünde olmalı."""
+        """Beyan mm ise KOORDİNATLAR da mm olmalı — X **ve** Y ekseninde.
+
+        ÖH B-1/B16 (defter P14M1-03). Bu bekçi eskiden yalnız X açıklığını
+        okuyordu ve bandı ``50 < span < 5000`` idi: 100 kat genişlikte bir
+        bant, üstelik dış cidar poliçizgisi Y'de yaşadığı için cidar 2×
+        büyütüldüğünde 633 test yeşil kalıyordu (mutasyonla ölçüldü).
+        İddia artık çizimin KENDİ ölçü metinlerine çapalanır — imalatçının
+        eline geçen dosyada sayı ile geometri aynı şeyi söylemek zorunda:
+
+          * ``Ø_chamber`` metni  ⟷  CONTOUR katmanının Y açıklığı
+          * ``L_chamber`` metni   ⟷  CONTOUR katmanının X açıklığı
+            (lüle eklendiği için X açıklığı boydan büyük, 3 katından küçük)
+
+        Metre yazılsaydı Ø_chamber metni 183,3 mm derken geometri 0,1833
+        çıkardı; her iki çapraz da kırılır.
+        """
         ezdxf = pytest.importorskip('ezdxf')
         from hrma.export.drawing_generator import generate_dxf
         doc = ezdxf.readfile(generate_dxf(hybrid_results,
                                           str(tmp_path / 'a2b.dxf')))
-        xs = [p[0] for e in doc.modelspace()
-              if e.dxftype() == 'LWPOLYLINE' for p in e.get_points('xy')]
-        span = max(xs) - min(xs)
-        assert 50.0 < span < 5000.0, (
-            f'çizim X açıklığı {span:.2f} — mm ölçeğinde bir motor '
-            'bekleniyordu (metre olsaydı < 10 çıkardı)')
+
+        cap_mm, cap_metni = _dxf_olcu_sayisi(doc, 'Ø_chamber')
+        boy_mm, boy_metni = _dxf_olcu_sayisi(doc, 'L_chamber')
+        assert cap_mm and boy_mm, (
+            'çizimde Ø_chamber / L_chamber ölçü metni yok — geometri '
+            'karşılaştırılacak bir beyan taşımıyor')
+
+        kontur = _dxf_katman_kutusu(doc, 'CONTOUR')
+        assert kontur is not None, 'CONTOUR katmanında poliçizgi yok'
+        xmin, xmax, ymin, ymax = kontur
+
+        # Y: iç akış yolunun en geniş yeri kamara çapıdır (metinle aynı sayı).
+        assert (ymax - ymin) == pytest.approx(cap_mm, abs=0.1), (
+            f'kontur Y açıklığı {ymax - ymin:.4f}, çizimin kendi ölçüsü '
+            f'{cap_metni!r} — sayı ile geometri aynı birimde değil')
+        assert ymax == pytest.approx(-ymin, rel=1e-9), 'kontur eksene simetrik değil'
+
+        # X: kamara + lüle. Boydan küçük olamaz, 3 katını da geçemez.
+        span = xmax - xmin
+        assert boy_mm <= span < 3.0 * boy_mm, (
+            f'çizim X açıklığı {span:.2f} mm; çizimin kendi ölçüsü '
+            f'{boy_metni!r} (metre olsaydı açıklık < 1 çıkardı)')
+
+    def test_outer_wall_polyline_matches_the_wall_thickness_dimension(
+            self, hybrid_results, tmp_path):
+        """Dış cidar poliçizgisi ``WALL THICKNESS`` ölçüsüyle AYNI olmalı.
+
+        ÖH B-1/B16 (defter P14M1-03). Mutasyon ölçümü: dış cidar
+        poliçizgisi 2× büyütüldüğünde 633 test yeşil kaldı, çünkü tek DXF
+        bekçisi yalnız X açıklığını okuyordu ve cidar Y'de yaşıyor.
+        Burada üç bacak birden kilitlenir:
+
+          1. çizimde bir ``WALL THICKNESS`` ölçüsü VAR (sessiz atlama yok),
+          2. OUTLINE katmanının Y yarı-açıklığı = iç konturun yarıçapı +
+             o ölçü,
+          3. aradaki fark, ölçünün kendi yazım hassasiyetinden (2 ondalık,
+             yani ±0,005 mm) büyük olamaz.
+
+        (2) tek başına cidarın poliçizgi tarafındaki her ölçek hatasını
+        yakalar; ölçü metnindeki sayının analizden geldiğini kardeş test
+        ``test_wall_thickness_dimension_carries_the_analysis_value`` sınar.
+
+        Bu dalgada yeniden ölçüldü (yalnız OUTLINE poliçizgisinin y'si 2×):
+        HEAD bekçileriyle 77 test **hepsi yeşil**; bu iki bekçiyle 2 kırmızı.
+        """
+        ezdxf = pytest.importorskip('ezdxf')
+        from hrma.export.drawing_generator import generate_dxf
+        doc = ezdxf.readfile(generate_dxf(hybrid_results,
+                                          str(tmp_path / 'a2c.dxf')))
+
+        cidar_mm, cidar_metni = _dxf_olcu_sayisi(doc, 'WALL THICKNESS')
+        assert cidar_mm is not None, (
+            'çizimde WALL THICKNESS ölçüsü yok — imalatçı et kalınlığını '
+            'poliçizgiden ölçmek zorunda kalır')
+
+        kontur = _dxf_katman_kutusu(doc, 'CONTOUR')
+        dis = _dxf_katman_kutusu(doc, 'OUTLINE')
+        assert dis is not None, (
+            'OUTLINE katmanında poliçizgi yok — dış cidar çizilmemiş')
+        ic_yaricap = kontur[3]
+        _xmin, _xmax, ymin, ymax = dis
+        beklenen = ic_yaricap + cidar_mm
+        assert ymax == pytest.approx(beklenen, abs=0.005), (
+            f'dış cidar poliçizgisi ±{ymax:.4f} mm konumunda; iç kontur '
+            f'{ic_yaricap:.4f} + ölçü {cidar_mm:.4f} = {beklenen:.4f} mm '
+            f'diyor ({cidar_metni!r})')
+        assert ymax == pytest.approx(-ymin, rel=1e-9), (
+            'dış cidar eksene simetrik değil')
+
+    def test_wall_thickness_dimension_carries_the_analysis_value(self, tmp_path):
+        """Ölçü metnindeki cidar, YAPISAL ANALİZİN as-designed kalınlığıdır.
+
+        ÖH B-1/B16. Doğrulama (``verify``) modunda kullanıcının GERÇEK
+        cidarı çizilir, yazılımın önerdiği kalınlık DEĞİL: gerilmeler ve
+        emniyet katsayıları o kalınlığa aittir. Fikstür iki sayıyı bilerek
+        AYIRIR (3,00 ⟷ 7,50 mm); eşit verilseydi hangisinin çizildiği
+        ölçülemezdi — P14M1-03/-07'nin kökü tam olarak buydu.
+        """
+        ezdxf = pytest.importorskip('ezdxf')
+        from hrma.export.drawing_generator import generate_dxf
+        payload = _dxf_payload(0.120, 0.030)
+        payload['structural_analysis'] = {
+            'chamber_analysis': {'design_mode': 'verify',
+                                 'wall_thickness_used_mm': 3.0,
+                                 'recommended_thickness': 7.5}}
+        doc = ezdxf.readfile(generate_dxf(payload, str(tmp_path / 'a2d.dxf')))
+
+        cidar_mm, cidar_metni = _dxf_olcu_sayisi(doc, 'WALL THICKNESS')
+        assert cidar_mm == pytest.approx(3.0, abs=1e-6), (
+            f'ölçü {cidar_metni!r} — doğrulama modunda as-designed 3,00 mm '
+            'çizilmeliydi; 7,50 mm yazıyorsa öneri çiziliyor demektir')
+        dis = _dxf_katman_kutusu(doc, 'OUTLINE')
+        assert dis[3] == pytest.approx(60.0 + 3.0, abs=1e-6), (
+            f'dış cidar ±{dis[3]:.4f} mm — Ø120 mm kamarada 63,00 bekleniyordu')
 
 
 # ---------------------------------------------------------------------------
 # A1 — STL birimi STEP ile aynı olmalı
 # ---------------------------------------------------------------------------
 
+#: ÖH B-1/ÖK-13: zarflar artık İKİ parçadan okunur. Tek parça (``chamber``)
+#: okumak, aynı ZIP'teki başka bir parçanın ayrışmasını görünmez kılıyordu
+#: (P15B4-03'ün adresi ``fuel_grain``). İkisi de STEP ve STL'de aynı adla var.
+STL_STEP_KARSILASTIRILAN_PARCALAR = ('chamber', 'fuel_grain')
+
+
 class TestA1StlBirimi:
     @pytest.fixture(scope='class')
     def both_exports(self, hybrid_results, tmp_path_factory):
+        """STEP ve STL zarfları — EKSEN KİMLİĞİ KORUNARAK.
+
+        ÖH B-1 / ÖK-13 (P15-K2, defter P15B4-02). Bu fikstür eskiden iki
+        zarfı da ``sorted()`` ile döndürüyordu: ölçümden ÖNCE hangi
+        büyüklüğün hangi eksende olduğu siliniyordu. Ölçüldü (H1): STEP
+        kamarayı X ekseninde, STL Z ekseninde yayımlıyor — sıralanmış
+        üçlüler birebir aynı olduğu için 90° dönüklük yapısal olarak
+        görünmezdi ve eksen onarımı da TERS onarım da yeşil kalırdı.
+        Sıralama artık iddianın kendisinde, açıkça yapılır.
+
+        Döner: {parça: (STEP (X,Y,Z), STL (X,Y,Z))}, STL yol listesi
+        """
         pytest.importorskip('build123d')
         trimesh = pytest.importorskip('trimesh')
         from build123d import import_step
@@ -287,28 +436,93 @@ class TestA1StlBirimi:
         cad = _quiet(designer.generate_3d_motor_assembly, dict(hybrid_results))
         stl_files = _quiet(designer.export_stl_files, cad['assembly_meshes'],
                            output_dir=str(out / 'stl'))
-        step_bb = import_step(step_files['chamber']).bounding_box()
-        stl_mesh = trimesh.load(os.path.join(str(out / 'stl'), 'chamber.stl'))
-        return (sorted((step_bb.size.X, step_bb.size.Y, step_bb.size.Z)),
-                sorted(float(v) for v in stl_mesh.extents), stl_files)
 
-    def test_step_and_stl_bounding_boxes_agree(self, both_exports):
-        """Aynı parçanın iki dosyası aynı büyüklükte olmalı (1000× bekçisi)."""
-        step_sizes, stl_sizes, _paths = both_exports
-        for step_mm, stl_mm in zip(step_sizes, stl_sizes):
-            assert stl_mm == pytest.approx(step_mm, rel=0.01), (
-                f'STEP {step_mm:.3f} mm, STL {stl_mm:.3f} — STL hâlâ metre '
-                'yazıyor olabilir (1000× birim hatası)')
+        zarflar = {}
+        for parca in STL_STEP_KARSILASTIRILAN_PARCALAR:
+            stl_path = os.path.join(str(out / 'stl'), parca + '.stl')
+            assert parca in step_files, f'STEP paketinde {parca} yok'
+            assert os.path.exists(stl_path), f'STL paketinde {parca} yok'
+            bb = import_step(step_files[parca]).bounding_box()
+            mesh = trimesh.load(stl_path)
+            zarflar[parca] = ((float(bb.size.X), float(bb.size.Y),
+                               float(bb.size.Z)),
+                              tuple(float(v) for v in mesh.extents))
+        return zarflar, stl_files
+
+    def test_step_and_stl_have_the_same_dimensions(self, both_exports):
+        """Aynı parçanın iki dosyası aynı ÖLÇÜLERİ taşımalı (1000× bekçisi).
+
+        Bu iddia bilerek EKSEN KÖRDÜR ve körlüğü burada beyan edilir: yalnız
+        ölçü kümesini (A1'in birim hatası) sınar, yönelimi kardeş test
+        ``test_step_and_stl_use_the_same_axis_convention`` sınar. Sıralama
+        fikstürde değil, iddianın içinde yapılır (ÖK-13).
+        """
+        zarflar, _paths = both_exports
+        for parca, (step_xyz, stl_xyz) in zarflar.items():
+            for step_mm, stl_mm in zip(sorted(step_xyz), sorted(stl_xyz)):
+                assert stl_mm == pytest.approx(step_mm, rel=0.01), (
+                    f'{parca}: STEP {step_mm:.3f} mm, STL {stl_mm:.3f} — STL '
+                    'hâlâ metre yazıyor olabilir (1000× birim hatası)')
+
+    def test_step_and_stl_use_the_same_axis_convention(self, both_exports):
+        """Aynı parçanın STEP ve STL'i AYNI eksende uzamalı.
+
+        Ölçüldü (P15/H1, hibrit): chamber STEP (358,674; 221,592; 221,592)
+        ⟷ STL (221,592; 221,592; 358,674) — sayılar birebir, eksen 90°
+        dönük. Aynısı fuel_grain'de de var. Montajı bu iki dosyadan kuran
+        kullanıcı parçaları çakıştıramaz.
+
+        ÖH D26 / defter P15B4-01 — BORÇ İMİ KALDIRILDI. Bu iddia
+        ``xfail(strict=True)`` ile "kusur ölçüldü, onarılmadı" diye
+        duruyordu. Ayrışma üç motorun beş parçasında yeniden ölçüldü
+        (``raw/OH/D26/ihracat/a1/once.json`` -> ``P15B4-01``,
+        ``ayrisan_parca_sayisi = 5``) ve kapatıldı: paketin tek eksen
+        sözleşmesi ``motor_geometry.EXPORT_AXIS`` (+X) oldu,
+        ``export_stl_files`` dosyaya yazdığı kopyayı o sözleşmeye çevirir.
+        Onarımdan sonra ``ayrisan_parca_sayisi = 0``.
+        """
+        zarflar, _paths = both_exports
+        for parca, (step_xyz, stl_xyz) in zarflar.items():
+            # İDDİANIN KENDİSİ: üç bileşen AYNI SIRADA eşleşmeli. Kardeş
+            # iddia (test_step_and_stl_have_the_same_dimensions) sıralanmış
+            # üçlüleri kıyaslar ve eksen körüdür; 90° dönüklüğü yalnız bu
+            # sırasız kıyas görür.
+            for eksen, step_mm, stl_mm in zip('XYZ', step_xyz, stl_xyz):
+                assert stl_mm == pytest.approx(step_mm, rel=0.01), (
+                    f'{parca}: {eksen} ekseninde STEP {step_mm:.3f} mm, '
+                    f'STL {stl_mm:.3f} mm — iki dosya 90° dönük olabilir '
+                    f'(STEP {step_xyz}, STL {stl_xyz})')
+            # "EN UZUN EKSEN" kıyası YALNIZ ayırt edici olduğunda yapılır.
+            # ÖH D26 / P15B4-01 onarımında ölçüldü: hibrit ``fuel_grain``
+            # zarfı (182,889; 184,330; 184,330) mm — en büyük bileşen bir
+            # ÇAP, üstelik iki çap birbirine eşit. ``list.index(max(...))``
+            # böyle bir üçlüde ekseni kayan-nokta gürültüsüyle seçer (STEP
+            # üçlüsünde iki çap 3e-14 ayrışıyordu -> 'Z', STL üçlüsünde tam
+            # eşit -> 'Y') ve iki dosya BİREBİR ÇAKIŞIKKEN bile ayrı eksen
+            # raporlanıyordu. Ayırt edicilik eşiği: en büyük bileşen
+            # ikincisinden en az %1 uzun olmalı (kıyasın kendi rel=0.01
+            # toleransı).
+            for ad, xyz in (('STEP', step_xyz), ('STL', stl_xyz)):
+                sirali = sorted(xyz, reverse=True)
+                if sirali[0] <= sirali[1] * 1.01:
+                    break
+            else:
+                step_eksen = 'XYZ'[step_xyz.index(max(step_xyz))]
+                stl_eksen = 'XYZ'[stl_xyz.index(max(stl_xyz))]
+                assert step_eksen == stl_eksen, (
+                    f'{parca}: STEP en uzun eksen {step_eksen}, STL '
+                    f'{stl_eksen} — STEP {step_xyz}, STL {stl_xyz}')
 
     def test_stl_is_not_metres(self, both_exports):
-        _step_sizes, stl_sizes, _paths = both_exports
-        assert max(stl_sizes) > 10.0, (
-            f'en büyük STL zarfı {max(stl_sizes):.4f} — mm bekleniyordu, '
-            'metre bulundu')
+        zarflar, _paths = both_exports
+        for parca, (_step_xyz, stl_xyz) in zarflar.items():
+            assert max(stl_xyz) > 10.0, (
+                f'{parca}: en büyük STL zarfı {max(stl_xyz):.4f} — mm '
+                'bekleniyordu, metre bulundu')
 
     def test_export_returns_real_absolute_paths(self, both_exports):
         """A10 sözleşmesi: dönen yollar mutlak ve GERÇEKTEN var olmalı."""
-        _s, _t, paths = both_exports
+        _zarflar, paths = both_exports
         assert paths, 'STL yolu dönmedi'
         for p in paths:
             assert os.path.isabs(p), f'göreli yol döndü: {p}'

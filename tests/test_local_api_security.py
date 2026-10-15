@@ -107,9 +107,12 @@ class TestCorsIsNotWildcard:
 
     def test_same_origin_state_change_allowed(self, client):
         """Uygulamanın kendi kökeninden gelen POST geçmeli."""
+        # V3 SG-02c: tarayıcı gibi Host da gönderilir (port bilinmeyince
+        # kapı sunucunun portunu Host'tan alır).
         r = client.post('/analyze_safety',
                         json={'chamber_pressure': 20},
-                        headers={'Origin': 'http://127.0.0.1:8080'})
+                        headers={'Origin': 'http://127.0.0.1:8080',
+                                 'Host': '127.0.0.1:8080'})
         assert r.status_code != 403
 
     def test_no_origin_header_allowed(self, client):
@@ -154,13 +157,66 @@ class TestCorsWorksOnEveryLauncherPort:
             'launcher.py port aralığı değişmiş — bu testteki '
             'LAUNCHER_PORT_RANGE de güncellenmeli')
 
+    def test_runner_port_range_matches_this_suite(self):
+        """ÖH D18 · P10B3-04 — ``hrma/run.py``'nin ADIYLA gösterdiği kilit.
+
+        ``hrma/run.py:18-20`` şunu yazıyor: "Taranacak port aralığı —
+        packaging/launcher.py::_pick_port ile AYNI olmalı. **tests/
+        test_local_api_security.py bu iki dosyanın ayrışmasını yakalar.**"
+
+        Ölçüldü (D18, ÖNCE): bu dosya ``hrma/run.py``'yi HİÇ okumuyordu —
+        yalnız ``packaging/launcher.py``'yi okuyordu. Yani ürünün adıyla
+        gösterdiği kilit YOKTU; run.py aralığı sessizce ayrışabilirdi ve
+        bu bekçi yeşil kalırdı. (Ayrışmayı yakalayan tek yer
+        ``test_v262_release_gate.py::
+        test_launcher_and_runner_share_the_same_port_range`` idi, ki
+        run.py onu adıyla göstermiyor.)
+
+        Beyan çözüm değildir: künyeyi doğrulatmak yerine kilidi KURUYORUZ.
+        Üç kaynak (bu süitin sabiti, launcher.py, run.py) tek aralıkta
+        buluşmalı.
+        """
+        import ast as _ast
+
+        kaynak = (ROOT / 'hrma' / 'run.py').read_text(encoding='utf-8')
+        araliklar = []
+        for dugum in _ast.walk(_ast.parse(kaynak)):
+            if not isinstance(dugum, _ast.Assign):
+                continue
+            adlar = [h.id for h in dugum.targets if isinstance(h, _ast.Name)]
+            if 'PORT_RANGE' not in adlar:
+                continue
+            cagri = dugum.value
+            assert isinstance(cagri, _ast.Call) and \
+                getattr(cagri.func, 'id', None) == 'range', (
+                'hrma/run.py::PORT_RANGE artık bir range(...) literali '
+                'değil — kilit ölçülemiyor')
+            araliklar.append(tuple(a.value for a in cagri.args))
+        assert len(araliklar) == 1, (
+            f'hrma/run.py::PORT_RANGE {len(araliklar)} kez tanımlanmış; '
+            'tek kaynak bozulmuş')
+        assert araliklar[0] == (self.LAUNCHER_PORT_RANGE.start,
+                                self.LAUNCHER_PORT_RANGE.stop), (
+            f'hrma/run.py port aralığı {araliklar[0]}, bu süitin ölçtüğü '
+            f'aralık ({self.LAUNCHER_PORT_RANGE.start}, '
+            f'{self.LAUNCHER_PORT_RANGE.stop}) — iki dosya AYRIŞTI; '
+            'run.py:18-20 bu bekçiyi adıyla gösteriyor')
+        # ...ve launcher tarafı da aynı sayıyı yazmalı (üçlü buluşma).
+        launcher = (ROOT / 'packaging' / 'launcher.py').read_text(
+            encoding='utf-8')
+        assert (f'range({araliklar[0][0]}, {araliklar[0][1]})') in launcher, (
+            'packaging/launcher.py aralığı hrma/run.py ile ayrıştı')
+
     @pytest.mark.parametrize('port', list(LAUNCHER_PORT_RANGE))
     def test_every_launcher_port_can_calculate(self, client, port):
         """Başlatıcının seçebileceği HER portta durum değiştiren istek geçmeli."""
         for ana_makine in ('127.0.0.1', 'localhost'):
+            # V3 SG-02c: tarayıcı Host'u sayfanın portuyla yazar; bekçi de
+            # öyle yapar (eskiden Host yoktu: varsayılan localhost = :80).
             r = client.post('/analyze_safety',
                             json={'chamber_pressure': 20},
-                            headers={'Origin': f'http://{ana_makine}:{port}'})
+                            headers={'Origin': f'http://{ana_makine}:{port}',
+                                     'Host': f'{ana_makine}:{port}'})
             assert r.status_code != 403, (
                 f'{ana_makine}:{port} kökeni 403 aldı — uygulama bu portta '
                 'hiçbir hesap yapamaz')
@@ -169,7 +225,8 @@ class TestCorsWorksOnEveryLauncherPort:
         """IPv6 geri döngü de meşru bir yerel köken."""
         r = client.post('/analyze_safety',
                         json={'chamber_pressure': 20},
-                        headers={'Origin': 'http://[::1]:8081'})
+                        headers={'Origin': 'http://[::1]:8081',
+                                 'Host': '[::1]:8081'})
         assert r.status_code != 403
 
     def test_remote_origin_still_rejected_on_any_port(self, client):

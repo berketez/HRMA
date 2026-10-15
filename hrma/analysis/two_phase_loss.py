@@ -128,7 +128,7 @@ Output schema of :meth:`TwoPhaseLoss.evaluate`::
 import math
 from typing import Dict, List, Optional
 
-from hrma.constants import R_UNIVERSAL
+from hrma.constants import R_UNIVERSAL, PSIA_PER_BAR
 
 # ---------------------------------------------------------------------------
 # Al2O3 sabitleri — motor tarafındaki AL_TO_AL2O3_MASS_RATIO ile aynı 101.96
@@ -142,7 +142,8 @@ AL2O3_LIQUID_CP_J_KG_K = 192.464 / (AL2O3_MOLAR_MASS_KG_KMOL / 1000.0)
 
 # Birim çevrimleri (Hermsen bağıntısı inch/psia/ms ister)
 _M_TO_INCH = 1000.0 / 25.4
-_BAR_TO_PSIA = 14.503773773
+#: P15B2-10: ondalık kopya değil, merkezden (kesin tanımlardan türetilir).
+_BAR_TO_PSIA = PSIA_PER_BAR
 
 # ---------------------------------------------------------------------------
 # Geçerlilik pencereleri — her satırın künyesi yanında. Pencere DIŞI girdi
@@ -184,6 +185,10 @@ NOT_MODELLED = (
     'nozzle_wall_impingement',      # tanecik-duvar çarpması yok
     'solidification_lag',           # donma gecikmesi + gizli ısı geri kazanımı yok
 )
+
+#: Etkin özellik önerisinin uygulanamazlık gerekçe kodu: gaz çifti yoğuşkan
+#: fazı zaten içeren termokimyadan (ÖH KİTAP p1b 3. tur, karar §28-47).
+EFFECTIVE_PROPERTIES_DOUBLE_COUNTING = 'condensed_phase_already_in_thermochemistry'
 
 
 class TwoPhaseLoss:
@@ -235,7 +240,8 @@ class TwoPhaseLoss:
                  residence_time_ms: Optional[float] = None,
                  gamma_gas: Optional[float] = None,
                  molecular_weight_gas: Optional[float] = None,
-                 particle_specific_heat: Optional[float] = None) -> Dict:
+                 particle_specific_heat: Optional[float] = None,
+                 condensed_phase_in_thermochemistry: bool = False) -> Dict:
         """Estimate the two-phase (particle-lag) Isp loss.
 
         Parameters
@@ -263,6 +269,15 @@ class TwoPhaseLoss:
         particle_specific_heat : float, optional
             Particle specific heat cs [J/(kg K)]. Default: liquid Al2O3,
             NIST-JANAF 192.464 J/(mol K) -> 1887.6 J/(kg K).
+        condensed_phase_in_thermochemistry : bool, optional
+            True when the caller's gas pair (gamma_gas, molecular_weight_gas)
+            comes from a thermochemistry that ALREADY contains the condensed
+            phase (e.g. NASA CEA mixture GAMMAs / M(1/n)). The effective-
+            property suggestion is then not evaluated (double counting, the
+            suggestion's own rule) and is published as not applicable with
+            the reason code. Default False keeps every existing call
+            bit-identical. Only the effective-property block reads it; the
+            loss estimate does not use gamma or MW.
 
         Raises
         ------
@@ -292,6 +307,12 @@ class TwoPhaseLoss:
               else AL2O3_LIQUID_CP_J_KG_K)
         if cs <= 0:
             raise ValueError("particle_specific_heat must be positive")
+        # ÖH KİTAP p1b 3. tur (karar §28-47): etkin özellik kapısının girdisi.
+        # Fail-closed: bool değilse (1, 'evet', None, NaN …) karar verilemez.
+        if not isinstance(condensed_phase_in_thermochemistry, bool):
+            raise ValueError(
+                'condensed_phase_in_thermochemistry must be a bool, got '
+                f'{type(condensed_phase_in_thermochemistry).__name__}')
 
         # --- Sıfır tanecik kısa devresi: kayıp TANIM GEREĞİ sıfır --------
         if beta == 0.0:
@@ -334,7 +355,8 @@ class TwoPhaseLoss:
 
         # --- Etkin özellik önerisi (kayıptan bağımsız raporlanır) --------
         effective = self._effective_properties(
-            beta, gamma_gas, molecular_weight_gas, cs, d43_um)
+            beta, gamma_gas, molecular_weight_gas, cs, d43_um,
+            condensed_phase_in_thermochemistry)
 
         if violations:
             return self._invalid_result(violations, d43_um, d43_basis,
@@ -421,7 +443,9 @@ class TwoPhaseLoss:
 
     def _effective_properties(self, beta: float, gamma_gas: Optional[float],
                               mw_gas: Optional[float], cs: float,
-                              d43_um: Optional[float]) -> Optional[Dict]:
+                              d43_um: Optional[float],
+                              condensed_phase_in_thermochemistry: bool = False
+                              ) -> Optional[Dict]:
         basis = (
             "Sutton & Biblarz, Rocket Propulsion Elements, 9th ed., "
             "Sec. 3.5 'Multiphase Flow', Eqs. 3-35..3-39 (pp. 83-85): "
@@ -443,6 +467,25 @@ class TwoPhaseLoss:
         if not mw_gas > 0:
             raise ValueError(f"molecular_weight_gas must be positive, "
                              f"got {mw_gas}")
+        # ÖH KİTAP p1b 3. tur (karar §28-47, Ş2-2 (a)): ilişkiler GAZ-YALNIZ
+        # bir çift ister; çağıranın çifti yoğuşkan fazı zaten içeren bir
+        # termokimyadan geliyorsa (NASA CEA karışım GAMMAs / M(1/n))
+        # yoğuşkan ikinci kez katılır — önerinin kendi kuralı "skip if it
+        # did (double counting)". Sayı üretilmez, gerekçe adıyla yazılır.
+        # (Bayrağın tipi ``evaluate`` girişinde denetlenir.)
+        if condensed_phase_in_thermochemistry:
+            return {
+                'applicable': False,
+                'reason_code': EFFECTIVE_PROPERTIES_DOUBLE_COUNTING,
+                'reason': (
+                    'the supplied gamma/molecular-weight pair comes from a '
+                    'thermochemistry that already contains the condensed '
+                    'phase (mixture values such as NASA CEA GAMMAs and '
+                    'M(1/n)); the mixture relations would add the condensed '
+                    'phase a second time (double counting), so they are not '
+                    'evaluated'),
+                '_basis': basis,
+            }
         if d43_um is not None and d43_um > self.EQUILIBRIUM_D43_MAX_UM:
             # Sutton'un denge varsayımı bozulur: değer ÜRETME (sessiz
             # ekstrapolasyon yasağı), nedenini söyle.

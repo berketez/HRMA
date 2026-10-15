@@ -239,7 +239,9 @@ def _yuk_kur(motor_adi, ni, nj, decimate=None):
 def _hizalama_prelude():
     return '\n'.join([
         _helpers(),
-        _consts('CFD_ALIGN_EXACT_REL_TOL', 'CFD_ALIGN_R_THROAT_REL_TOL'),
+        _consts('CFD_ALIGN_EXACT_REL_TOL',
+                'CFD_ALIGN_R_THROAT_REPRO_REL_TOL'),
+        _extract('cfdReproThroatNodeR'),
         _extract('cfdFieldAlignment'),
     ])
 
@@ -321,7 +323,12 @@ class TestHizalama:
 
     def test_gercek_yenidenornekleme_iki_seviyede_kabul(self):
         """Yayımlı her çözünürlük seviyesinde, gerçek konturla kurulan
-        ızgara kabul edilir; çapalar ölçülür ve beyan edilir."""
+        ızgara kabul edilir; çapalar ölçülür ve beyan edilir.
+
+        Parti 33 hükmü: boğaz kapısı artık kalibre aile sabiti değil,
+        ucun yayımladığı yeniden-örnekleme kuralının sahnede yeniden
+        üretimi (düğüm-min ↔ düğüm-min). dr_throat_mm (poligon-min
+        uzaklığı) bilgi olarak beyan edilmeye devam eder."""
         for motor in ('konik', 'bell'):
             for ad, (ni, nj) in _resolution_levels().items():
                 cfd, dims, ham = _yuk_kur(motor, ni, nj)
@@ -331,9 +338,39 @@ class TestHizalama:
                 assert res['dz_inlet_mm'] == 0.0
                 assert res['dz_exit_mm'] == 0.0
                 assert res['dr_exit_mm'] == 0.0
-                # Boğaz sapması ölçülen tolerans bandının içinde
                 rt_mm = float(np.min(ham['pts_m'][:, 1])) * 1000
-                assert res['dr_throat_mm'] <= 8.6e-3 * rt_mm, (motor, ad)
+                # Kapı: yeniden üretim farkı saf float gürültüsü
+                assert res['dr_throat_node_mm'] <= 1e-9 * rt_mm, (motor, ad)
+                # Bilgi çapası beyan edilmeye devam ediyor ve sonlu
+                assert res['dr_throat_mm'] >= 0.0, (motor, ad)
+
+    def test_kaba_ornekleme_kalibre_aile_disinda_da_kabul(self):
+        """SINIF TEMSİLCİSİ (sıvı bell vakası, canlı ölçüm 18 Ağu):
+        yeniden örnekleme kabalaştıkça poligon-min sapması eski kalibre
+        toleransı (8,6e-3) AŞAR — eski kapı bu sınıfı reddediyordu ve
+        sıvı sayfası kendi alanını sahnede hiç gösteremiyordu. Yeni kapı
+        beyaz-liste dışı kabalıkta bile beyan-yeniden-üretimiyle kabul
+        eder; gerçek kontur uyuşmazlığı değildir."""
+        eski_tol = 8.6e-3
+        secilen = None
+        for ni in range(10, 60):
+            _, _, ham = _yuk_kur('konik', ni, 8)
+            rt_poly = float(np.min(ham['pts_m'][:, 1]))
+            rt_node = float(np.min(ham['r_nodes']))
+            if abs(rt_node - rt_poly) > eski_tol * rt_poly:
+                secilen = ni
+                break
+        assert secilen is not None, (
+            'eski toleransı aşan kaba örnekleme bulunamadı — sınıf '
+            'temsilcisi kurulamıyor, kontur ailesi değişmiş olabilir')
+        cfd, dims, ham = _yuk_kur('konik', secilen, 8)
+        res = _hizalama(cfd, dims)
+        assert res['ok'] is True, (secilen, res)
+        rt_mm = float(np.min(ham['pts_m'][:, 1])) * 1000
+        # Eski kapı bu vakayı reddederdi (belgeleyen ölçüm):
+        assert res['dr_throat_mm'] > eski_tol * rt_mm
+        # Yeni kapı yeniden üretimle kabul ediyor:
+        assert res['dr_throat_node_mm'] <= 1e-9 * rt_mm
 
     def test_kaydirilmis_bogaz_reddedilir(self):
         """%2 boğaz kaydırması (tolerans 0,86%) -> contour_mismatch ve
@@ -426,6 +463,75 @@ class TestDuvarYaricapi:
         rw = 0.03
         r_row = [rw * j / (nj - 1) for j in range(nj)]   # 0'dan başlar
         assert self._walls([r_row, r_row]) is None
+
+    # -- YAYIMLANMIŞ RADYAL GEOMETRİ (parti 40): türetme değil OKUMA --
+    # Uç artık her istasyonun nj+1 radyal DÜĞÜM yarıçapını taşıyor
+    # (field.radial_geometry, hrma.cfd.grid_axisym.radial_geometry_block).
+    # Blok geldiğinde cfdWallRadii TÜRETMEZ, son düğümü OKUR ve düzgünlük
+    # hükmünü ucun ÖLÇÜMÜNDEN alır. Yukarıdaki dört bekçi ESKİ YÜK YOLUNU
+    # (blok gelmeyen yanıt) ölçmeye devam eder — geri uyum orada kilitli.
+
+    def _walls_blok(self, r_m, radial_geometry):
+        prelude = '\n'.join([
+            _helpers(), _consts('CFD_RADIAL_UNIFORM_REL_TOL'),
+            _extract('cfdWallRadii'),
+        ])
+        return _emit(prelude, 'cfdWallRadii(%s)' % json.dumps(
+            {'r_m': r_m, 'radial_geometry': radial_geometry}))
+
+    def test_blok_gelince_TURETMEZ_OKUR(self):
+        """Bloğun düğümleri türetmeyle ÇELİŞECEK biçimde verilir; okunan
+        değer bloğunkine eşit çıkmalı. Türetmeyle UYUMLU veri verilseydi
+        bu test hiçbir şey ölçmezdi (B2'nin tarifi)."""
+        nj = 12
+        rw = 0.03
+        r_row = [rw * (j + 0.5) / nj for j in range(nj)]
+        # Düğümler: duvar yarıçapı türetmenin verdiğinden %5 KAYDIRILMIŞ
+        turetilen = r_row[nj - 1] * nj / (nj - 0.5)
+        hedef = 1.05 * turetilen
+        dugum = [hedef * j / nj for j in range(nj + 1)]
+        blok = {'r_nodes_m': [dugum, dugum], 'radial_uniform': True}
+        walls = self._walls_blok([r_row, r_row], blok)
+        assert walls is not None
+        assert walls == pytest.approx([hedef, hedef], rel=1e-13)
+        assert abs(walls[0] - turetilen) / turetilen == pytest.approx(
+            0.05, rel=1e-9), 'test verisi türetmeyle çelişmiyor — bekçi kör'
+
+    def test_blok_ADI_degil_OLCUMU_okur(self):
+        """radial_uniform=False gelen yük REDDEDİLİR: karo modeli hâlâ eşit
+        radyal aralık varsayıyor, gerdirilmiş yükü çizmek SESSİZCE yanlış
+        çizmek olurdu. Aile adı ('uniform') hükme GİRMEZ."""
+        nj = 12
+        rw = 0.03
+        r_row = [rw * (j + 0.5) / nj for j in range(nj)]
+        dugum = [rw * j / nj for j in range(nj + 1)]
+        assert self._walls_blok([r_row, r_row], {
+            'r_nodes_m': [dugum, dugum], 'radial_uniform': True,
+            'radial_distribution': 'tanh'}) is not None
+        # ÖLÇÜM False -> red (ad 'uniform' olsa bile)
+        assert self._walls_blok([r_row, r_row], {
+            'r_nodes_m': [dugum, dugum], 'radial_uniform': False,
+            'radial_distribution': 'uniform'}) is None
+
+    def test_bozuk_blok_eski_yola_DUSMEZ_reddedilir(self):
+        """Blok VAR ama biçimi bozuksa (düğüm sayısı nj+1 değil) sessizce
+        türetmeye düşülmez — yükün iki yarısı tutarsızdır."""
+        nj = 12
+        rw = 0.03
+        r_row = [rw * (j + 0.5) / nj for j in range(nj)]
+        kisa = [rw * j / nj for j in range(nj)]          # nj düğüm (eksik)
+        assert self._walls_blok([r_row, r_row], {
+            'r_nodes_m': [kisa, kisa], 'radial_uniform': True}) is None
+
+    def test_blok_yoksa_eski_turetme_korunur(self):
+        """Geri uyum: blok gelmeyen (eski) yükte bugünkü türetme çalışır."""
+        nj = 12
+        rw = 0.03
+        r_row = [rw * (j + 0.5) / nj for j in range(nj)]
+        walls = self._walls([r_row, r_row])
+        assert walls is not None
+        assert walls[0] == pytest.approx(r_row[nj - 1] * nj / (nj - 0.5),
+                                         rel=1e-13)
 
     def test_bozuk_biçim_reddedilir(self):
         assert self._walls(None) is None

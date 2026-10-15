@@ -51,9 +51,10 @@ korunur.
 """
 
 from copy import deepcopy
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
-# Zorunlu kayıt şeması — docstring'deki 18 alan. Modül yüklenirken tüm
+# Zorunlu kayıt şeması — docstring'deki 18 alan + kriyojenik süneklik
+# beyanı (ÖH D22 / P9B4-09) = 19. Modül yüklenirken tüm
 # kayıtlar bu listeye karşı doğrulanır (_validate_materials).
 REQUIRED_FIELDS: Tuple[str, ...] = (
     # ortak
@@ -65,7 +66,46 @@ REQUIRED_FIELDS: Tuple[str, ...] = (
     # termal
     'thermal_conductivity', 'specific_heat', 'melting_point', 'emissivity',
     'allowable_temperature', 'max_service_temperature',
+    # kriyojenik (ÖH D22 / defter P9B4-09)
+    'cryogenic_ductility',
 )
+
+#: ÖH D22 / defter P9B4-09 — KRİYOJENİK SÜNEKLİK HÜKMÜ, KAYDIN KENDİ ALANI.
+#:
+#: ÖLÇÜLEN KUSUR (taban ``b84b10a``, ``once.json`` bölümü P9B4-09): 18
+#: zorunlu alanın HİÇBİRİ kriyojenik/DBTT değildi ve 24 kaydın **0**'ı bu
+#: hükmü beyan ediyordu. Hüküm modül düzeyindeki bir kümede
+#: (``DBTT_SENSITIVE``, 7 ad) yaşıyordu; kataloğun kalan **17** kaydı o
+#: kümede yer almadığı için ``is_dbtt_sensitive`` onlara koşulsuz ``False``
+#: — yani "soğukta sünek kalır" — diyordu. Bu bir ÖLÇÜM değil, beyan
+#: edilmemiş bir güvencedir: kataloğa yeni bir ferritik çelik eklendiğinde
+#: kimse bir şey yazmasa bile kod onun adına "gevrek kırılma riski yok"
+#: hükmünü veriyordu (fail-open).
+#:
+#: Hüküm artık kaydın KENDİ alanıdır ve şema zorunlu tutar: beyan
+#: edilmeyen kayıt modül yüklenirken reddedilir. Değerler İCAT EDİLMEDİ —
+#: deponun kendi kazanılmış sınıflandırmasından toplandı
+#: (``DBTT_SENSITIVE`` + ``pressure_vessel.ALWAYS_BRITTLE_MATERIALS`` +
+#: ``pressure_vessel.CRYO_EXEMPT_MATERIALS``); üçünün de dışında kalan
+#: HSP (hcp) titanyum ve magnezyum kayıtları ``not_qualified`` alır, çünkü
+#: depo onlar için bir hüküm KAZANMAMIŞTIR.
+#:
+#: Kaynak: ASME BPVC VIII-1 UCS-66 (karbon/düşük alaşımlı çelik MDMT),
+#: UHA-51 (östenitik muafiyet), ASM Handbook Vol. 21 (karbon-karbon).
+CRYOGENIC_DUCTILITY_VALUES = {
+    #: HMK (bcc) kafes: sünek-gevrek geçişi oda sıcaklığı civarında ya da
+    #: üstünde; kriyojenik servis için darbe testi ZORUNLU.
+    'dbtt_sensitive',
+    #: YMK (fcc) kafes: kayma sistemleri soğukta kapanmaz, sünek kalır
+    #: (UHA-51 muafiyet aileleri).
+    'cryo_ductile',
+    #: Sünek bir rejimi HİÇ yok (karbon/seramik matris): "geçiş"ten söz
+    #: edilemez, muafiyet de verilemez.
+    'always_brittle',
+    #: Depo bu kayıt için bir hüküm kazanmamıştır — ``is_dbtt_sensitive``
+    #: ``None`` döner ve tüketici fail-closed dalına düşer.
+    'not_qualified',
+}
 
 # Panel/tüketici filtre etiketleri — kayıtlardaki 'tags' yalnız bu kümeden
 # değer alabilir (yazım hatası modül yüklenirken yakalanır).
@@ -87,6 +127,7 @@ MATERIALS: Dict[str, Dict] = {
     # Çelikler
     # ------------------------------------------------------------------
     'steel_4130': {
+        'cryogenic_ductility': 'dbtt_sensitive',
         'name': 'AISI 4130 low-alloy steel (normalized)',
         # --- mekanik (structural_analysis.py tablosundan taşındı) ---
         'yield_strength': 460e6,        # Pa (oda sıcaklığı, normalize)
@@ -95,7 +136,11 @@ MATERIALS: Dict[str, Dict] = {
         'density': 7850,                # kg/m^3
         'poisson_ratio': 0.27,
         'fatigue_limit': 230e6,         # Pa
-        'safety_factor': 4.0,
+        # ÖH KU-K4 (6 Eki 2026) — BEYAN: 4,0 güvenlik katsayısının kaynağı YOK
+        # (künyesiz ön ayar; KARS-YP B7). Değer DEĞİŞMEDİ: SF zinciri ve hat
+        # cidarı standardı Berke kararıdır (KC-10, ÖNEMLİ). Karşılaştırma için:
+        # NASA SP-8087 s. 70 itki odasında ispat 1,2 / patlama 1,5 × MEOP.
+        'safety_factor': 4.0,         # künyesiz ön ayar (ÖH KU-K4)
         'thermal_expansion': 12.3e-6,   # 1/K (20-300 C ort.)
         'max_service_temp': 811.0,      # K (~538 C, kısa süreli)
         'derating_curve': dict(_LOW_ALLOY_STEEL_DERATING),
@@ -105,13 +150,14 @@ MATERIALS: Dict[str, Dict] = {
         'melting_point': 1705,          # K (solidus ~1432 C)
         'emissivity': 0.8,
         'allowable_temperature': 1000,  # K
-        'max_service_temperature': 2000,  # K (klamp üst sınırı)
+        'max_service_temperature': 1705,  # K = melting_point (ÖH D16 / P9B4-14: klamp erimenin ÜSTÜNDEYDİ)
         'source': ('Mechanical: AZoM/MatWeb AISI 4130 normalized; derating '
                    'MMPDS/MIL-HDBK-5 Fig. 2.3.1.1.1; alpha ASM Metals '
                    'Handbook. Thermal: MatWeb AISI 4130 (k, cp, solidus).'),
         'tags': ['structural', 'shell', 'pipe', 'bolt'],
     },
     'steel': {
+        'cryogenic_ductility': 'dbtt_sensitive',
         'name': 'Carbon steel (generic, A36-class)',
         # --- mekanik (literatürden dolduruldu; safety_analysis eski sabit
         #     250/400 MPa değerleriyle uyumlu — ASTM A36 minimumları) ---
@@ -121,7 +167,7 @@ MATERIALS: Dict[str, Dict] = {
         'density': 7850,
         'poisson_ratio': 0.29,
         'fatigue_limit': 200e6,         # Pa (~0.5*UTS, Shigley Se' kuralı)
-        'safety_factor': 4.0,
+        'safety_factor': 4.0,         # künyesiz ön ayar (ÖH KU-K4; bkz. steel_4130)
         'thermal_expansion': 12.0e-6,   # 1/K
         'max_service_temp': 811.0,      # K (düşük-alaşım/karbon çelik sınıfı)
         'derating_curve': dict(_LOW_ALLOY_STEEL_DERATING),
@@ -131,7 +177,7 @@ MATERIALS: Dict[str, Dict] = {
         'melting_point': 1773,
         'emissivity': 0.8,
         'allowable_temperature': 1073,
-        'max_service_temperature': 2000,
+        'max_service_temperature': 1773,  # K = melting_point (ÖH D16 / P9B4-14: klamp erimenin ÜSTÜNDEYDİ)
         'source': ('Mechanical: ASTM A36 minimums (matches prior '
                    'safety_analysis constants); fatigue Shigley 0.5*Su; '
                    'derating approximated by MMPDS low-alloy steel family '
@@ -140,6 +186,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['structural', 'shell'],
     },
     'ss_304': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Stainless steel 304 (annealed)',
         # --- mekanik (literatür) ---
         'yield_strength': 215e6,        # Pa (tipik tavlanmış; A240 min 205)
@@ -148,7 +195,7 @@ MATERIALS: Dict[str, Dict] = {
         'density': 8000,
         'poisson_ratio': 0.29,
         'fatigue_limit': 175e6,         # Pa (~0.35*UTS, östenitik yaklaşımı)
-        'safety_factor': 4.0,
+        'safety_factor': 4.0,         # künyesiz ön ayar (ÖH KU-K4; bkz. steel_4130)
         'thermal_expansion': 17.2e-6,   # 1/K (0-100 C)
         'max_service_temp': 1143.0,     # K (~870 C aralıklı servis sınırı)
         # AK Steel 304/304L yüksek sıcaklık akma verisi (oda değerine oran)
@@ -162,7 +209,7 @@ MATERIALS: Dict[str, Dict] = {
         'melting_point': 1673,          # K (solidus ~1400 C)
         'emissivity': 0.85,             # oksitlenmiş yüzey
         'allowable_temperature': 1073,
-        'max_service_temperature': 1723,  # K (liquidus klampı)
+        'max_service_temperature': 1673,  # K = melting_point (ÖH D16 / P9B4-14: klamp erimenin ÜSTÜNDEYDİ)
         'source': ('AK Steel 304/304L Product Data Bulletin (RT + elevated '
                    'temperature yield); MatWeb/ASM 304 (E, k, cp, alpha, '
                    'melting range 1400-1450 C); fatigue ~0.35*UTS austenitic '
@@ -170,6 +217,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['structural', 'shell', 'pipe', 'bolt'],
     },
     'ss_316': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Stainless steel 316 (annealed)',
         # --- mekanik (literatür) ---
         'yield_strength': 240e6,        # Pa (tipik tavlanmış; A240 min 205)
@@ -192,7 +240,7 @@ MATERIALS: Dict[str, Dict] = {
         'melting_point': 1644,          # K (solidus ~1371 C)
         'emissivity': 0.85,
         'allowable_temperature': 1073,
-        'max_service_temperature': 1672,  # K (liquidus klampı)
+        'max_service_temperature': 1644,  # K = melting_point (ÖH D16 / P9B4-14: klamp erimenin ÜSTÜNDEYDİ)
         'source': ('AK Steel 316/316L Product Data Bulletin (RT + elevated '
                    'temperature yield); MatWeb/ASM 316 (E, k, cp, alpha, '
                    'melting range 1371-1399 C); fatigue ~0.35*UTS austenitic '
@@ -203,6 +251,7 @@ MATERIALS: Dict[str, Dict] = {
     # Hafif alaşımlar
     # ------------------------------------------------------------------
     'aluminum_6061': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Aluminum 6061-T6',
         # --- mekanik (structural_analysis.py tablosundan taşındı) ---
         'yield_strength': 275e6,
@@ -234,6 +283,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['structural', 'shell', 'pipe'],
     },
     'titanium_6al4v': {
+        'cryogenic_ductility': 'not_qualified',
         'name': 'Titanium Ti-6Al-4V',
         # --- mekanik (structural_analysis.py tablosundan taşındı) ---
         'yield_strength': 880e6,
@@ -266,6 +316,7 @@ MATERIALS: Dict[str, Dict] = {
     # Yüksek sıcaklık alaşımları
     # ------------------------------------------------------------------
     'inconel_718': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Inconel 718 (aged)',
         # --- mekanik (structural_analysis.py tablosundan taşındı) ---
         'yield_strength': 1100e6,
@@ -299,6 +350,7 @@ MATERIALS: Dict[str, Dict] = {
     # Bakır ailesi (soğutmalı hazne astarları)
     # ------------------------------------------------------------------
     'copper': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Copper (OFHC, annealed)',
         # --- mekanik (literatürden dolduruldu; eski yapısal tabloda yoktu.
         #     DİKKAT: tavlanmış saf bakır yapısal kabuk malzemesi değildir,
@@ -331,6 +383,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['liner', 'insert'],
     },
     'cucrzr': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'CuCrZr (C18150, aged)',
         # --- mekanik (literatür) ---
         'yield_strength': 310e6,        # Pa (yaşlandırılmış min. sınıf)
@@ -370,6 +423,7 @@ MATERIALS: Dict[str, Dict] = {
     # Ametalik / astar malzemeleri
     # ------------------------------------------------------------------
     'graphite': {
+        'cryogenic_ductility': 'always_brittle',
         'name': 'Graphite (isostatic, nozzle insert grade)',
         # --- mekanik (literatür; GEVREK — basınçlı kabuk için uygun değil,
         #     boğaz eki (throat insert) kullanımına yöneliktir) ---
@@ -402,10 +456,29 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['insert'],
     },
     'ablative': {
+        'cryogenic_ductility': 'always_brittle',
         'name': 'Ablative liner (silica-phenolic class)',
         # --- mekanik (literatür; ASTAR/İZOLATÖR — birincil yapı değildir) ---
+        # ÖH Z5S / P9B4-21 — İKİ FARKLI YÜKLEME MODU TEK KAYITTA.
+        # yield_strength ÇEKME, ultimate_strength BASMA dayanımıdır; alan
+        # adları bunu söylemiyordu ve tüketici ikisini aynı eksenin iki
+        # noktası sanıyordu (yield < ultimate karşılaştırması bu kayıtta
+        # ANLAMSIZ: farklı eksenler). Silika-fenolik gerçekten anizotrop ve
+        # modlara göre çok farklıdır; bu yüzden SAYI DEĞİŞTİRİLMEDİ, yükleme
+        # modu alan düzeyinde ADLANDIRILDI (aşağıdaki *_mode alanları).
         'yield_strength': 40e6,         # Pa (lif yönünde çekme, bakir malzeme)
         'ultimate_strength': 90e6,      # Pa (basma dayanımı bandı alt ucu)
+        'yield_strength_mode': 'tensile_fiber_direction',
+        'ultimate_strength_mode': 'compressive',
+        'strength_modes_mixed': True,
+        'strength_mode_note': (
+            'yield_strength is a TENSILE value (fiber direction, virgin '
+            'material) while ultimate_strength is a COMPRESSIVE value: they '
+            'belong to different loading axes and must not be compared with '
+            'each other, nor used together as a yield/ultimate pair for a '
+            'single stress state. Liner/insulator only - not primary '
+            'structure (NASA SP-8093 ablative class). No tensile ultimate '
+            'value is carried in this repository; do not infer one.'),
         'elastic_modulus': 12e9,
         'density': 1400,
         'poisson_ratio': 0.25,
@@ -435,6 +508,7 @@ MATERIALS: Dict[str, Dict] = {
     # v2.5.2 genişletme — alüminyum alaşımları
     # ------------------------------------------------------------------
     'al_7075_t6': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Aluminum 7075-T6',
         'yield_strength': 503e6,        # Pa (MMPDS/MatWeb tipik)
         'ultimate_strength': 572e6,
@@ -462,6 +536,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['structural', 'shell'],
     },
     'al_2024_t3': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Aluminum 2024-T3',
         'yield_strength': 345e6,        # Pa (MMPDS/MatWeb tipik)
         'ultimate_strength': 483e6,
@@ -491,6 +566,7 @@ MATERIALS: Dict[str, Dict] = {
     # v2.5.2 genişletme — çelikler / süperalaşımlar
     # ------------------------------------------------------------------
     'ss_17_4ph': {
+        'cryogenic_ductility': 'dbtt_sensitive',
         'name': 'Stainless 17-4PH (H900)',
         'yield_strength': 1170e6,       # Pa (H900 tipik)
         'ultimate_strength': 1310e6,
@@ -519,6 +595,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['structural', 'shell', 'bolt'],
     },
     'steel_4340': {
+        'cryogenic_ductility': 'dbtt_sensitive',
         'name': 'AISI 4340 low-alloy steel (normalized)',
         'yield_strength': 862e6,        # Pa (normalize, MatWeb/ASM)
         'ultimate_strength': 1279e6,
@@ -536,7 +613,7 @@ MATERIALS: Dict[str, Dict] = {
         'melting_point': 1700,          # K (solidus ~1427 C)
         'emissivity': 0.8,
         'allowable_temperature': 1000,
-        'max_service_temperature': 2000,
+        'max_service_temperature': 1700,  # K = melting_point (ÖH D16 / P9B4-14: klamp erimenin ÜSTÜNDEYDİ)
         'source': ('MatWeb / ASM Metals Handbook AISI 4340 normalized '
                    '(Fty 862 MPa, Ftu 1279 MPa, E 205 GPa, k 44.5 W/m-K, '
                    'cp 475 J/kg-K); fatigue approximate (Shigley Se band); '
@@ -545,6 +622,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['structural', 'shell', 'bolt'],
     },
     'inconel_625': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Inconel 625 (annealed)',
         'yield_strength': 490e6,        # Pa (tavlanmış çubuk, tipik)
         'ultimate_strength': 930e6,
@@ -582,6 +660,7 @@ MATERIALS: Dict[str, Dict] = {
     # v2.5.2 genişletme — titanyum / refrakterler
     # ------------------------------------------------------------------
     'ti_grade2_cp': {
+        'cryogenic_ductility': 'not_qualified',
         'name': 'Titanium CP Grade 2',
         'yield_strength': 275e6,        # Pa (ASTM B265 Grade 2 min)
         'ultimate_strength': 345e6,
@@ -609,6 +688,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['structural', 'shell', 'pipe'],
     },
     'molybdenum_tzm': {
+        'cryogenic_ductility': 'dbtt_sensitive',
         'name': 'Molybdenum TZM (stress-relieved)',
         'yield_strength': 560e6,        # Pa (gerilim giderilmiş, tipik)
         'ultimate_strength': 690e6,
@@ -638,6 +718,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['insert', 'radiative'],
     },
     'tungsten': {
+        'cryogenic_ductility': 'dbtt_sensitive',
         'name': 'Tungsten (wrought, stress-relieved)',
         'yield_strength': 550e6,        # Pa (haddelenmiş, tipik RT)
         'ultimate_strength': 620e6,
@@ -674,6 +755,7 @@ MATERIALS: Dict[str, Dict] = {
     # v2.5.2 genişletme — bakır alaşımları / hafif metaller
     # ------------------------------------------------------------------
     'beryllium_copper_c17200': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Beryllium copper C17200 (aged, AT)',
         'yield_strength': 965e6,        # Pa (TF00/AT yaşlandırılmış, alt band)
         'ultimate_strength': 1210e6,
@@ -701,6 +783,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['structural', 'liner'],
     },
     'brass_c360': {
+        'cryogenic_ductility': 'cryo_ductile',
         'name': 'Brass C36000 (free-cutting, H02)',
         'yield_strength': 310e6,        # Pa (H02 yarı-sert)
         'ultimate_strength': 400e6,
@@ -728,6 +811,7 @@ MATERIALS: Dict[str, Dict] = {
         'tags': ['pipe'],
     },
     'magnesium_az31b': {
+        'cryogenic_ductility': 'not_qualified',
         'name': 'Magnesium AZ31B-H24',
         'yield_strength': 220e6,        # Pa (H24 levha, çekme)
         'ultimate_strength': 290e6,
@@ -760,6 +844,7 @@ MATERIALS: Dict[str, Dict] = {
     #  C-103 limit 1640 K / eps 0.75; C-C limit 1920 K / eps 0.85)
     # ------------------------------------------------------------------
     'niobium_c103': {
+        'cryogenic_ductility': 'dbtt_sensitive',
         'name': 'Niobium C-103 (silicide coated)',
         'yield_strength': 296e6,        # Pa (yeniden kristalize, tipik RT)
         'ultimate_strength': 420e6,
@@ -779,16 +864,23 @@ MATERIALS: Dict[str, Dict] = {
         'emissivity': 0.75,             # silisit kaplamalı yüzey (0.7-0.8)
         'allowable_temperature': 1640,  # K — thermal_protection service limit
         'max_service_temperature': 2623,
+        # ÖH KU (KU-K5): 1640 K künyesi — değer DEĞİŞMEDİ; dayanağı NASA
+        # SP-8124 (1977) süre bağımlı bandıdır (s. 27, 28, 70; ayrıntı
+        # thermal_protection.RADIATION_EXTENSION_MATERIALS notunda).
         'source': ('ATI / heritage C-103 (Nb-10Hf-1Ti) datasheets: RT Fty '
                    '~296 MPa, Ftu ~420 MPa, E ~90 GPa, rho 8860, melting '
                    '~2350 C; k, cp, fatigue and derating approximate '
                    '(typical). Service limit 1640 K and emissivity 0.75 '
                    'consistent with thermal_protection.py '
-                   'RADIATION_EXTENSION_MATERIALS (coated C-103, Apollo '
-                   'SM RCS heritage class).'),
+                   'RADIATION_EXTENSION_MATERIALS: a single, duration-'
+                   'independent value inside the NASA SP-8124 (1977) band '
+                   'for silicide-coated columbium (below 1589 K virtually '
+                   'unlimited life, p. 28; at most 1 h at 1811 K, pp. 27, '
+                   '70; at most 10 min at 1978 K, p. 70).'),
         'tags': ['radiative'],
     },
     'carbon_carbon': {
+        'cryogenic_ductility': 'always_brittle',
         'name': 'Carbon-carbon (2D/3D C-C)',
         # GEVREK kompozit — in-plane çekme bandı; basınçlı kabuk değildir.
         'yield_strength': 100e6,        # Pa (in-plane çekme, yaklaşık)
@@ -822,6 +914,45 @@ MATERIALS: Dict[str, Dict] = {
 # Eski modül anahtarları ve yaygın kısaltmalar → kanonik kayıt.
 # (Jenerik 'aluminum'/'inconel' artık alaşım kayıtlarına çözülür; tek
 # doğruluk kaynağı ilkesi.)
+#: Kriyojenik gevrek-kırılmaya (DBTT) duyarlı KANONİK malzeme adları.
+#:
+#: HMK (bcc) kafesli aileler: ferritik/martenzitik çelikler ve Mo/W
+#: refrakterleri. Östenitik paslanmazlar, alüminyum, bakır ve nikel esaslı
+#: alaşımlar (YMK kafes) bu kümede DEĞİLDİR — ASME BPVC VIII-1 UHA-51
+#: muafiyetleri onları kapsar.
+#:
+#: ÖH D15 / defter P9B4-08: bu küme eskiden TÜKETİCİDE
+#: (``analysis/pressure_vessel.py:DBTT_SENSITIVE_MATERIALS``) yaşıyordu ve
+#: ham kullanıcı argümanıyla karşılaştırılıyordu; takma adla çağrıldığında
+#: eşleşmiyor, güvenlik hükmü tersine dönüyordu. Küme malzeme kayıtlarının
+#: yanına taşındı ve ``is_dbtt_sensitive`` üzerinden KANONİK adla sorulur.
+#: ÖH D22 / defter P9B4-09: küme artık ELLE YAZILMAZ — kayıtların kendi
+#: ``cryogenic_ductility`` beyanından TÜRETİLİR (tek kaynak). Böylece
+#: kataloğa eklenen bir kayıt bu kümeye girmeyi "unutamaz": beyan zorunlu
+#: olduğu için ya duyarlı der ya demez, sessiz varsayılan kalmaz.
+DBTT_SENSITIVE: frozenset = frozenset(
+    k for k, v in MATERIALS.items()
+    if v.get('cryogenic_ductility') == 'dbtt_sensitive')
+
+#: ÖH D24 / OH-D23-03 — YAPISAL VARSAYILAN MALZEMENİN TEK KAYNAĞI.
+#:
+#: ``'aluminum_6061'`` dizgisi depoda 41 yerde geçiyordu; ölçüldü ve
+#: ayrıştırıldı (bkz. tests/test_d24_fix_asamasi.py): bunların çoğu
+#: VARSAYILAN DEĞİLDİ — açılır liste seçenekleri (JS panelleri, HTML
+#: ``<option>``), takma ad tabloları (ALIASES, liquid/solid eşleme
+#: sözlükleri), i18n etiketleri, izin verilen malzeme listeleri ve
+#: yorumlar. Defterin "33 satır-içi varsayılan" ifadesi bu yüzden
+#: KISMEN ÇÜRÜTÜLDÜ; gerçek varsayılan sayısı çok daha azdır.
+#:
+#: Bu sabit, "kullanıcı yapısal malzemeyi vermediyse ne kullanılır?"
+#: sorusunun TEK cevabıdır. Kullanımı ÖK-19'a bağlıdır: varsayılan
+#: uygulanırsa ``defaults_applied`` beyanı ZORUNLUDUR — sessiz uygulama
+#: yasak (fail-closed). Kardeş sabitler aynı deseni izler:
+#: ``bolted_joint.CLOSURE_JOINT_MEMBER_MATERIAL_DEFAULT`` (orada
+#: varsayılan tamamen KALDIRILDI, ÖH D15 / P5B1-05) ve
+#: ``liquid_rocket_engine.TANK_INTERNALS_MATERIAL``.
+DEFAULT_STRUCTURAL_MATERIAL: str = 'aluminum_6061'
+
 ALIASES: Dict[str, str] = {
     'aluminum': 'aluminum_6061',
     'inconel': 'inconel_718',
@@ -890,6 +1021,35 @@ def _validate_materials() -> None:
             raise ValueError(
                 f"materials_db record '{key}' has invalid tag(s) {bad}; "
                 f"valid tags: {sorted(VALID_TAGS)}")
+        # --- ÖH D22 / P9B4-09: kriyojenik süneklik hükmü BEYAN EDİLİR ---
+        cryo = rec.get('cryogenic_ductility')
+        if cryo not in CRYOGENIC_DUCTILITY_VALUES:
+            raise ValueError(
+                f"materials_db record '{key}' declares "
+                f"cryogenic_ductility = {cryo!r}, which is not one of "
+                f"{sorted(CRYOGENIC_DUCTILITY_VALUES)}. A record that does "
+                f"not state its low-temperature ductility cannot be "
+                f"published: the previous code answered 'not DBTT "
+                f"sensitive' on its behalf.")
+        # --- FİZİKSEL DEĞİŞMEZ (ÖH D16 / P9B4-14) ---------------------
+        # Termal klamp ve emniyet sınırı malzemenin KENDİ erime noktasını
+        # aşamaz. Ölçülen taban (6fde52b): 24 kayıttan 5'i bu değişmezi
+        # çiğniyordu (steel_4130 2000 K klamp / 1705 K erime) ve ürün
+        # sayıyı doğrudan basıyordu. Yama iki TÜKETİCİDE çoğaltılmıştı
+        # (heat_transfer_analysis.py `min(max_service, melting_point)`,
+        # regen_cooling.py) ama KAYNAKTA yoktu; yamayı bilmeyen üçüncü
+        # tüketici kusuru aynen devralıyordu. Klamp burada kapanır.
+        mp = rec.get('melting_point')
+        for alan in ('max_service_temperature', 'allowable_temperature'):
+            deger = rec.get(alan)
+            if (isinstance(mp, (int, float))
+                    and isinstance(deger, (int, float))
+                    and deger > mp):
+                raise ValueError(
+                    f"materials_db record '{key}': {alan} = {deger} K "
+                    f"exceeds its own melting_point = {mp} K. A service "
+                    f"limit above the melting point cannot be published "
+                    f"(the material is already molten there).")
     for alias, target in ALIASES.items():
         if target not in MATERIALS:
             raise ValueError(
@@ -908,6 +1068,67 @@ def _resolve(name: str) -> str:
         raise KeyError(
             f"Unknown material '{name}'. Available: {sorted(MATERIALS)}")
     return key
+
+
+def canonical_name(name: str) -> Optional[str]:
+    """Alias'ı kanonik ada çözer; çözülemezse ``None`` (istisna YÜKSELTMEZ).
+
+    ÖH D15 / defter P9B4-08. ``_resolve`` bilinmeyen adda ``KeyError``
+    yükseltir; GÜVENLİK taramaları ise ad tanınmadı diye ÇÖKMEMELİ ama
+    "tanıdım" da SAYMAMALIDIR. Bu sarmalayıcı tam olarak o üçüncü durumu
+    (``None`` = tanınmadı) taşır; çağıran taraf ona göre fail-closed
+    davranabilir.
+    """
+    try:
+        return _resolve(name)
+    except KeyError:
+        return None
+
+
+def is_dbtt_sensitive(name: str) -> Optional[bool]:
+    """Malzeme kriyojenik gevrek-kırılmaya (DBTT) duyarlı mı?
+
+    ``True`` duyarlı · ``False`` duyarlı değil · ``None`` ad TANINMADI.
+
+    ÖH D15 / defter P9B4-08 — ÖLÇÜLEN KUSUR. Duyarlılık taraması
+    tüketicide (``analysis/pressure_vessel.py``) elle yazılmış bir demetle
+    HAM argümana bakıyordu; ``materials_db`` alias'ı verilince aynı
+    malzeme listede bulunamıyor ve hüküm TERSİNE dönüyordu. Üründen
+    ölçüldü (``/api/pressure-vessel-analysis``, 90 K LOX tankı):
+
+        steel_4340      -> "brittle fracture risk"   (DOĞRU)
+        aisi_4340       -> "stay ductile when cold"  (YANLIŞ)
+        ss_17_4ph       -> "brittle fracture risk"   (DOĞRU)
+        stainless_17_4  -> "stay ductile when cold"  (YANLIŞ)
+        17-4ph          -> "stay ductile when cold"  (YANLIŞ)
+        molybdenum_tzm  -> "brittle fracture risk"   (DOĞRU)
+        tzm             -> "stay ductile when cold"  (YANLIŞ)
+
+    4/4 alias çifti hükmü tersine çeviriyordu; analiz DOĞRU malzeme
+    özellikleriyle koşuyor, yalnız güvenlik taraması YANLIŞ ADA bakıyordu.
+    4340 ferritik/martenzitik bir çeliktir ve ASME BPVC VIII-1 UCS-66
+    uyarınca darbe testi muafiyeti YOKTUR; uyarının kaybı doğrudan bir
+    güvenlik-tasarım kaybıdır.
+
+    Duyarlılık artık MALZEMENİN kendi kaydının yanında (bu modülde)
+    tanımlıdır ve KANONİK ad üzerinden sorulur — takma ad tablosu ile
+    duyarlılık tablosu bir daha ayrışamaz (TEK KAYNAK).
+    """
+    key = canonical_name(name)
+    if key is None:
+        return None
+    # ÖH D22 / P9B4-09: hüküm kaydın KENDİ beyanından okunur. Depo bu
+    # malzeme için bir hüküm kazanmadıysa (``not_qualified``) ya da
+    # malzemenin sünek bir rejimi hiç yoksa (``always_brittle``: "geçiş"ten
+    # söz edilemez) ``False`` DENMEZ — ``None`` döner ve tüketici
+    # fail-closed dalına ("bu malzeme için düşük sıcaklık süneklik iddiası
+    # yok") düşer.
+    beyan = (MATERIALS.get(key) or {}).get('cryogenic_ductility')
+    if beyan == 'dbtt_sensitive':
+        return True
+    if beyan == 'cryo_ductile':
+        return False
+    return None
 
 
 def get_material(name: str) -> Dict:
@@ -933,6 +1154,105 @@ def get_material_safe(name: str):
             f"Unknown material '{name}'. Canonical names: "
             f"{sorted(MATERIALS)}; aliases: {sorted(ALIASES)}")
     return deepcopy(MATERIALS[key]), key
+
+
+#: ÖH D37 A2-1 termal / F-01 + M2 — SICAKLIK EŞİĞİ MERDİVENİNİN TEK TANIMI.
+#: Aynı kayıt üç sınır alanı taşır (allowable_temperature, max_service_temp,
+#: max_service_temperature) + erime; ÖLÇÜLDÜ (docs/tasarim/malzeme-tarama/
+#: A1_mevcut_durum.md §1.4): on tüketici dört farklı alanı okuyordu — ss_304
+#: için aynı motorda denge zinciri uyarı 1073 / kritik 1673, termal FEA 1073,
+#: ısı-yutucu geçici 1143, sıvı künyesi "servis sınırı" diye ERİME (1673).
+#: Berke 23 Eyl §12: "tek eşik, tutarlı". Merdiven üç basamaktır ve her
+#: tüketici basamağı buradan okur; satır içi ``min(...)`` yeniden yazımı
+#: bekçiyle kırmızıdır (tests/fea/test_d37_termal_a1.py).
+TEMPERATURE_LIMIT_LADDER: Tuple[str, ...] = ('allowable', 'service', 'melting')
+
+
+def _sonlu_pozitif(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if (f == f and f > 0.0 and f != float('inf')) else None
+
+
+def temperature_limits(rec: Dict) -> Dict:
+    """Bir malzeme kaydının sıcaklık eşiği merdiveni (F-01 / M2, B1 §3.5).
+
+    Dönüş::
+
+        {'allowable_K': min(allowable_temperature, max_service_temp),
+         'service_K':   max_service_temp,          # kısa süreli yapısal servis
+         'clamp_K':     max_service_temperature,   # denge cidarı klamp üst sınırı
+         'melting_K':   melting_point,
+         'source_fields': {'allowable_K': <seçilen alan adı>,
+                           'allowable_candidates_K': {alan: değer},
+                           'service_K': 'max_service_temp',
+                           'clamp_K': 'max_service_temperature',
+                           'melting_K': 'melting_point'},
+         'ladder': ['allowable', 'service', 'melting'],
+         'basis': '...'}
+
+    Emniyet hükmü EN SIKI izin sınırından verilir (P8B2-03): kayıt hem
+    ``allowable_temperature`` hem ``max_service_temp`` taşıyorsa küçüğü
+    ``allowable_K``dır ve hangi alanın seçildiği, atlananın değeri
+    ``source_fields``te durur. Alan yoksa basamak ``None``dır — uydurulmaz.
+    ``rec`` bir kayıt sözlüğü ya da kayıt ADI (``get_material`` ile çözülür)
+    olabilir.
+    """
+    if isinstance(rec, str):
+        rec = get_material(rec)
+    if not isinstance(rec, dict):
+        raise TypeError('temperature_limits: kayıt sözlüğü ya da kayıt adı '
+                        'bekler')
+    adaylar = {}
+    for ad in ('allowable_temperature', 'max_service_temp'):
+        v = _sonlu_pozitif(rec.get(ad))
+        if v is not None:
+            adaylar[ad] = v
+    secilen = min(adaylar, key=lambda a: adaylar[a]) if adaylar else None
+    return {
+        'allowable_K': adaylar[secilen] if secilen else None,
+        'service_K': _sonlu_pozitif(rec.get('max_service_temp')),
+        'clamp_K': _sonlu_pozitif(rec.get('max_service_temperature')),
+        'melting_K': _sonlu_pozitif(rec.get('melting_point')),
+        'source_fields': {
+            'allowable_K': secilen,
+            'allowable_candidates_K': dict(adaylar),
+            'service_K': 'max_service_temp',
+            'clamp_K': 'max_service_temperature',
+            'melting_K': 'melting_point',
+        },
+        'ladder': list(TEMPERATURE_LIMIT_LADDER),
+        'basis': ('materials_db.temperature_limits(rec) — tek fonksiyon '
+                  '(F-01/M2): allowable_K = min(allowable_temperature, '
+                  'max_service_temp) (en sıkı izin sınırı, P8B2-03); '
+                  'service_K = max_service_temp; clamp_K = '
+                  'max_service_temperature; melting_K = melting_point'),
+    }
+
+
+def strength_mode_declaration(name: str) -> Dict:
+    """Kaydın dayanım alanlarının hangi YÜKLEME MODUNA ait olduğu.
+
+    ÖH Z5S / P9B4-21. Şema tek bir (yield, ultimate) çifti taşır ve
+    tüketici bunu tek eksenin iki noktası varsayar. 'ablative' kaydında
+    varsayım YANLIŞTIR: yield çekme, ultimate basma değeridir. Bu okuyucu,
+    modun beyan edilip edilmediğini ADIYLA döndürür.
+
+    ÖNEMLİ: beyanı olmayan kayıt için mod UYDURULMAZ — ``declared: False``
+    döner. "Beyan yoksa çekmedir" varsayımı tam da onarılan hatadır.
+    """
+    key = _resolve(name)
+    rec = MATERIALS[key]
+    return {
+        'material': key,
+        'declared': 'yield_strength_mode' in rec,
+        'yield_strength_mode': rec.get('yield_strength_mode'),
+        'ultimate_strength_mode': rec.get('ultimate_strength_mode'),
+        'modes_mixed': bool(rec.get('strength_modes_mixed', False)),
+        'note': rec.get('strength_mode_note'),
+    }
 
 
 def list_materials() -> List[str]:

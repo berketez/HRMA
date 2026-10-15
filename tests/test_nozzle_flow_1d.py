@@ -25,6 +25,8 @@ import math
 import numpy as np
 import pytest
 
+from tests.support import serilestirme
+
 from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer, R_UNIVERSAL
 from hrma.analysis.nozzle_flow_1d import (
     NozzleFlow1D,
@@ -195,31 +197,63 @@ class TestRegimeClassification:
         assert res['regime']['type'] == 'separated'
 
     def test_normal_shock_regime_low_pc(self):
-        # Pc = 3 atm, eps = 4, gamma = 1.4, deniz seviyesi:
-        # el hesabı — Pe/Pc ~ 0.0298, şok-çıkışta basınç ~ 0.295 Pc = 0.886 atm
-        # < 1 atm  =>  şok lüle İÇİNDE olmalı.
-        res = make_solver(chamber_pressure=3 * SEA_LEVEL,
+        # Pc = 1,45 atm, eps = 1,10, gamma = 1.4, deniz seviyesi:
+        # Pa/Pc = 0,68966, şok bandı (0,66325; 0,72581) => şok lüle İÇİNDE.
+        # ÖH D19 / P15B4-09 — VAKA YENİDEN ÇAPALANDI (kusuru koruyan bekçi
+        # DEĞİL): Summerfield ayrılma ölçütü artık rejim merdiveninde
+        # normal-şok dalının ÖNÜNDE. Eski çapa (eps = 4,0 / gamma = 1,4)
+        # ölçütü SAĞLIYORDU (P2/P1 = 9,92 > 1/k = 2,50), yani gerçek akış
+        # orada ayrılır ve yapışık şok çözümü geçerli değildir. Testin
+        # AMACI (şok çözücüsü) korunur, vakası ölçütün sağlanmadığı
+        # gerçek şok bandına taşınır: gamma = 1,4 / eps = 1,10 ->
+        # P2/P1 = 2,03 (çıkış; şok istasyonunda 1,81) < 2,50; şok bandı
+        # Pa/Pc (0,66325; 0,72581), ayrılma eşiği 0,81714; seçilen
+        # Pa/Pc = 0,68966.
+        # ÖH D25 / P15B4-09 (Fable-D19 ŞART) — buradaki P2/P1, ÇIKIŞ
+        # DÜZLEMİNDE duran normal şokun basınç sıçramasıdır
+        # (P_şok-çıkışta / P_e,izentropik), ölçütün kıyasladığı büyüklük.
+        # Eski metindeki '4,50' Anderson App. B'nin M1 = 2,0 tablo değeri
+        # (bkz. modül künyesi :13), '1,81' ise ŞOK İSTASYONU sıçraması
+        # (``normal_shock.static_pressure_jump_ratio`` @ M1 = 1,3018) —
+        # ikisi de bu ölçütün büyüklüğü değildi. Ölçüldü
+        # (a2/once.json K3): eps = 4,0 -> 9,9188; eps = 1,10 -> 2,0292.
+        # Eşitsizlik hükümleri (> 2,50 / < 2,50) her iki sayıyla da aynı.
+        res = make_solver(chamber_pressure=1.45 * SEA_LEVEL,
                           chamber_temperature=2000.0, gamma=1.4,
-                          molecular_weight=28.0, expansion_ratio=4.0,
+                          molecular_weight=28.0, expansion_ratio=1.10,
                           ambient_pressure=SEA_LEVEL).solve(include_bartz=False)
         assert res['regime']['type'] == 'normal_shock_in_nozzle'
         assert res['regime']['normal_shock'] is not None
+        # Ölçüt SAĞLANMIYOR — yapışık inviskid çözüm burada gerçekten geçerli.
+        assert res['regime']['separation_criterion_met'] is False
 
     def test_shock_at_exit_boundary(self):
         # Şok-çıkışta eşiğinin iki yanı: altı separated, üstü shock-in-nozzle
-        probe = make_solver(chamber_pressure=3 * SEA_LEVEL,
+        # ÖH D19 / P15B4-09: eşiğin ALTI artık 'overexpanded' (ayrılma
+        # ölçütü de sağlanmıyor, çünkü eps = 1,10'da 1/k eşiği ancak
+        # Pa/Pc > 0,81714'te aşılır), ÜSTÜ hâlâ 'normal_shock_in_nozzle'.
+        # Eski çapada (eps = 4,0) eşiğin altı 'separated' idi ve ÜSTÜ de
+        # ölçütü sağlıyordu — sınav iki tarafı da ayrılma bandının içinde
+        # yapıyordu, yani şok eşiğini değil ayrılma eşiğini ölçüyordu.
+        # ÖH D25 / P15B4-09 (Fable-D19 ŞART): o bandın ölçülen çıkış
+        # düzlemi oranı P2/P1 = 9,92 (> 1/k = 2,50); buradaki eps = 1,10
+        # bandınınki 2,03 (< 2,50). Eski künye metnindeki '4,50' Anderson
+        # App. B'nin M1 = 2,0 TABLO değeriydi, bu ölçütün büyüklüğü değil.
+        probe = make_solver(chamber_pressure=1.45 * SEA_LEVEL,
                             chamber_temperature=2000.0, gamma=1.4,
-                            molecular_weight=28.0, expansion_ratio=4.0,
+                            molecular_weight=28.0, expansion_ratio=1.10,
                             ambient_pressure=SEA_LEVEL).solve(include_bartz=False)
         p_shock_exit = probe['regime']['thresholds_Pa']['shock_at_exit_Pa']
-        common = dict(chamber_pressure=3 * SEA_LEVEL, chamber_temperature=2000.0,
-                      gamma=1.4, molecular_weight=28.0, expansion_ratio=4.0)
+        common = dict(chamber_pressure=1.45 * SEA_LEVEL, chamber_temperature=2000.0,
+                      gamma=1.4, molecular_weight=28.0, expansion_ratio=1.10)
         r_below = make_solver(ambient_pressure=0.99 * p_shock_exit,
                               **common).solve(include_bartz=False)
         r_above = make_solver(ambient_pressure=1.01 * p_shock_exit,
                               **common).solve(include_bartz=False)
-        assert r_below['regime']['type'] == 'separated'
+        assert r_below['regime']['type'] == 'overexpanded'
+        assert r_below['regime']['separation_criterion_met'] is False
         assert r_above['regime']['type'] == 'normal_shock_in_nozzle'
+        assert r_above['regime']['separation_criterion_met'] is False
 
     def test_unchoked_edge_case(self):
         # Pa, tam-subsonik çıkış basıncını da aşarsa lüle boğulmaz
@@ -296,9 +330,19 @@ class TestNormalShockInNozzle:
 
     @pytest.fixture()
     def shocked(self):
-        return make_solver(chamber_pressure=3 * SEA_LEVEL,
+        # ÖH D19 / P15B4-09: vaka ölçütün SAĞLANMADIĞI gerçek şok bandına
+        # taşındı (gamma = 1,4 / eps = 1,10; Pa/Pc = 0,68966, şok bandı
+        # (0,66325; 0,72581), ayrılma eşiği 0,81714). Eski çapa (eps = 4,0)
+        # ayrılma bandının içindeydi: orada yapışık şok çözümü FİZİKSEL
+        # DEĞİLDİ, dolayısıyla onu çapa alan bekçi kusuru koruyordu.
+        # ÖH D25 / P15B4-09 (Fable-D19 ŞART) — iki bandın ÖLÇÜLEN çıkış
+        # düzlemi basınç oranları (a2/once.json K3): eps = 4,0 -> 9,9188
+        # (> 1/k = 2,50, ölçüt sağlanıyor); eps = 1,10 -> 2,0292 (< 2,50,
+        # sağlanmıyor). Bu fikstürün şok istasyonu sıçraması ise 1,8105
+        # (M1 = 1,3018 -> M2 = 0,7850, x = 25,99 mm) — AYRI bir büyüklük.
+        return make_solver(chamber_pressure=1.45 * SEA_LEVEL,
                            chamber_temperature=2000.0, gamma=1.4,
-                           molecular_weight=28.0, expansion_ratio=4.0,
+                           molecular_weight=28.0, expansion_ratio=1.10,
                            ambient_pressure=SEA_LEVEL).solve(include_bartz=False)
 
     def test_shock_between_throat_and_exit(self, shocked):
@@ -436,8 +480,19 @@ class TestBartzCoupling:
 class TestApiContract:
 
     def test_output_is_json_serializable(self):
+        """ÇEVRİLDİ (ÖH D22 · P13B1-10): gövde İDDİASIZDI.
+
+        ``json.dumps(res)`` numpy tipini yakalıyordu ama (i) sonucun BOŞ
+        gelmesini, (ii) gidiş–dönüş kaybını ve (iii) NaN/Infinity
+        sızıntısını yakalamıyordu. Üçüncüsü burada özellikle önemli:
+        istasyon dizileri NaN taşırsa ``dumps`` sessizce ``NaN`` basar,
+        tarayıcı ``JSON.parse`` ise onu reddeder.
+        """
         res = make_solver().solve(include_bartz=True)
-        json.dumps(res)  # numpy tipi sızarsa TypeError fırlatır
+        # NaN/Infinity denetimi json_capasi içindeki allow_nan=False ile
+        # yapılır (ValueError). Ham dize taraması YANLIŞ POZİTİF verir:
+        # 'assumptions' metni "NaN = marşın ulaşmadığı ... istasyon" diyor.
+        serilestirme.json_capasi(res, 'nozzle_flow_1d sonucu')
 
     def test_station_arrays_share_length(self):
         res = make_solver().solve(include_bartz=True)

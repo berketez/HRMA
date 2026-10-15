@@ -18,10 +18,13 @@ V0 ÖLÇÜM ÖZETİ (tablolar; conftest lülesi, aksi yazılmadıkça ürün tol
     1.mrt : cfl 2→1473, 5→1309, 10→1243, 25→1198, 50→1182, 100→1174 it
             (Δt→∞ Newton-benzeri: tekdüze düşüş + doyum — yaklaşık
             Jacobian nedeniyle kuadratik Newton İDDİA EDİLMEZ)
-    MUSCL : cfl 25→4452, 50→5727, 100→8707 it (hepsi yeşil)
+    MUSCL : cfl 25→4452, 50→5727, 100→8707 it (V0, KAPI ÖNCESİ;
+            kapı sonrası 2026-09-07 ölçümü 5512/9970/10762 —
+            hrma.cfd.steady.IMPLICIT_CALIBRATION, OH-B4-05)
   K (eğim tazeleme) taraması (60×12 MUSCL): K=2 limit döngüsü, K=5
     1,5e-4'te asılı, K=10 12300, K=25 3605*, K=100 12306 it → varsayılan
-    25 (* kaynak-örtük öncesi ölçüm; son kod: 4452).
+    25 (* kaynak-örtük öncesi ölçüm; V0 son kodu 4452, kapı sonrası
+    5512 — OH-B4-05).
   nj merdiveni (60×nj, 1.mrt, örtük/açık it): 12: 1198/2889 (2,4×),
     48: 2704/7252 (2,7×), 96: 4403/13817 (3,1×) — iterasyon kazancı
     nj ile BÜYÜYOR (belge §4.2 öngörüsünün V0 kanıtı).
@@ -68,6 +71,15 @@ geri kondu; sağlam relax_implicit.py md5 b9470a1e6ab0b3fd92798a6a0b6d145e):
      ∝ nj) açık kalır → test_kaynak_ortuk_sagligi KIRMIZI, kalan 14
      yeşil — sondanın özgüllüğü: bu regresyonu 60×12 tabanlı hiçbir
      bekçi yakalayamaz (ölçülen desen: nj=12 etkilenmez).
+  M4 (V3, steady.py — tetik/hüküm ayrımı) "dairesel kilit geri":
+     _freeze_settled eşiği freeze_settle_tol yerine yeniden settle_tol
+     okur (sağlam steady.py md5 df5e633d37b8a09310a3cf8f09cac4b4,
+     mutant 3c5e02cb93fa627164633b9d67e4e2f9) → 2 KIRMIZI:
+     test_tetik_hukumden_bagimsiz_atesler (settle 1e-14'te donma hiç
+     olmuyor) + test_tetik_esigi_beyanda_yayimlanir (dondurma gerekçesi
+     doğmadığından eşik cümlesi beyanda yok); kalan 17 yeşil (varsayılan
+     yol bit-özdeşliğiyle tutarlı — kilit varsayılanda zaten aynı eşik).
+     Geri alma: md5 birebir döndü.
 """
 
 import numpy as np
@@ -76,7 +88,8 @@ import pytest
 from .conftest import (LULE_GAMMA, LULE_R, LULE_P0, LULE_T0, LULE_PB,
                        LULE_L_CONV, LULE_L_DIV, lule_duvar_yaricapi)
 from hrma.cfd.euler_core import (cons_to_prim_axisym, local_dt_axisym,
-                                 precompute_geometry, prim_to_cons_axisym)
+                                 precompute_geometry, prim_to_cons_axisym,
+                                 residual_axisym)
 from hrma.cfd.grid_axisym import build_grid_from_wall
 from hrma.cfd.relax_implicit import (convective_jacobian,
                                      line_implicit_delta, local_dt_axial)
@@ -126,8 +139,9 @@ def cift_1mrt(izgara):
 @pytest.fixture(scope='module')
 def cift_muscl(izgara):
     """MUSCL ürün-tol çifti: (açık, örtük). Örtük yol oturma-tetikli
-    dondurmayla yakınsar (kalibrasyon: donma 4253. iterasyonda, 4452
-    iterasyonda yeşil — açık 6897)."""
+    dondurmayla yakınsar (kalibrasyon 2026-09-07, OH-B4-05: donma 4253.
+    iterasyonda, 5512 iterasyonda yeşil — açık 6897; sayılar
+    hrma.cfd.steady.IMPLICIT_CALIBRATION'dadır)."""
     ra = solve_steady_axisym(izgara, max_iters=30000, **_ORTAK)
     rb = solve_steady_axisym(izgara, max_iters=30000,
                              time_integrator='line_implicit_j', **_ORTAK)
@@ -237,11 +251,27 @@ def test_notrluk_muscl(cift_muscl):
 
 
 def test_notrluk_iterasyon_kazanci(cift_muscl, cift_1mrt):
-    """Örtük yolun V0 kazancı bu vakada ÖLÇÜLÜDÜR: iterasyon sayısı açık
-    yoldan az (kalibrasyon: MUSCL 4452<6897, 1.mrt 1826<4031). Bu bir
-    performans İDDİASI değil regresyon çipasıdır: katmanı bozan ama
-    yakınsamayı bozmayan mutasyon (ör. yanlış Jacobian ölçeği) kazancı
-    siler ve burada yakalanır."""
+    """Örtük yolun kazancı bu vakada ÖLÇÜLÜDÜR: iterasyon sayısı açık
+    yoldan az. Bu bir performans İDDİASI değil regresyon çipasıdır:
+    katmanı bozan ama yakınsamayı bozmayan mutasyon (ör. yanlış Jacobian
+    ölçeği) kazancı siler ve burada yakalanır.
+
+    KAPSAM BEYANI — ÖH Faz B-4 (defter P6B1-08 ailesi, ölçüm 2026-08-27):
+    o gün buradaki "iterasyon" iki yolda AYNI ŞEYİ ölçmüyordu, çünkü
+    hükmü veren kalıntı iki yolda aynı operatörden gelmiyordu; şemanın
+    kendi kalıntısıyla ölçülünce kazanç TERSİNE dönüyordu (açık 6897,
+    örtük 8000-10000) ve yayımlanan 4452 bayat pencerenin erken hükmüydü.
+
+    ONARIM (OH-B4-05, ÖH D26 / fea-cfd a3, ölçüm 2026-09-07): kusurun
+    ÜRÜN ayağı ÖH D15'te (OH-Z5-14) zaten kapanmıştı — hüküm artık
+    şemanın kendi kalıntısı da eşiğin altındayken veriliyor. Bugün AYNI
+    vaka yeniden ölçüldü: örtük yol 4452'de DEĞİL **5512** iterasyonda
+    duruyor ve o noktada şema kalıntısı 8,53e-09 < 1e-8; açık yol 6897
+    (şema 9,86e-09). Yani ORTAK ölçüt altında kazanç TERSİNE DÖNMÜYOR,
+    1,25× olarak duruyor — B-4'ün "tersine" teşhisi kapı ÖNCESİ koda
+    aitti. Bayat olan yayımlanan SAYILARDI; onlar
+    ``hrma.cfd.steady.IMPLICIT_CALIBRATION`` içinde tek kaynağa alındı ve
+    bekçiye bağlandı (tests/test_d26_fea_cfd_a3.py)."""
     for ra, rb in (cift_muscl, cift_1mrt):
         assert rb['iterations'] < ra['iterations']
 
@@ -249,7 +279,18 @@ def test_notrluk_iterasyon_kazanci(cift_muscl, cift_1mrt):
 def test_hukum_olcutleri_degismez(cift_muscl):
     """Hüküm üçlüsü (debi bandı + Mach bandı + kalıntı eşiği) iki yolda
     AYNI beyanla: convergence_basis aynı ölçüt cümlesini taşır; örtük
-    yol ayrı/ek ölçüt İCAT EDEMEZ."""
+    yol ayrı/ek ölçüt İCAT EDEMEZ.
+
+    KAPSAM BEYANI — ÖH Faz B-4, defter P6B1-08 (orta). Bu bekçi ölçüt
+    CÜMLESİNİN aynılığını sınar, ölçütü BESLEYEN SAYININ aynı operatörden
+    geldiğini SINAMAZ: dört alt dizgi ("debi bandı", "Mach bandı",
+    "kalıntısı", "HÜKÜM-NÖTR") iki yolda da bulunduğu için, örtük yolun
+    hükmü 25 iterasyonluk Picard penceresinin BAYAT eğimli kalıntısını
+    okusa bile burası yeşil kalır. Sayısal eksen aşağıya taşındı:
+    :func:`test_ortuk_hukum_bayat_pencerenin_kalintisini_okuyor` (bugün
+    xfail(strict), P6B1-08) ve :func:`test_donmus_operator_kalintisi_
+    seman_kalintisi_degil` (P6B1-03). Bu bekçi SÖKÜLMEZ — cümle
+    sözleşmesi kendi başına doğrudur, yalnız yetmez."""
     ra, rb = cift_muscl
     for r in (ra, rb):
         basis = r['convergence_basis']
@@ -269,10 +310,207 @@ def test_hukum_olcutleri_degismez(cift_muscl):
 
 def test_ortuk_donma_beyani(cift_muscl):
     """Örtük MUSCL yolunun oturma-tetikli dondurması ÇIKTIDA beyanlı:
-    dondurma anı + sebep cümlesi (kalibrasyon: donma 4253'te)."""
+    dondurma anı + sebep cümlesi (kalibrasyon: donma 4253'te).
+
+    KAPSAM BEYANI — ÖH Faz B-4, defter P6B1-03 (yüksek). Bu bekçi
+    dondurmanın OLDUĞUNU beyan ettirir; dondurmanın FİYATINI (o andan
+    sonra yayımlanan kalıntının artık şemanın değil donmuş operatörün
+    kalıntısı olduğunu) sormaz — üstelik ürün cümlesi aynı yerde "şema
+    minmod" der (``steady.py:942-944``). Dondurmayı ŞART koştuğu için
+    bu bekçi savcı sınıflandırmasında "yanlış değeri kilitliyor"dur;
+    kilidi çözen sayısal eksen :func:`test_donmus_operator_kalintisi_
+    seman_kalintisi_degil`de (bugün xfail(strict))."""
     _, rb = cift_muscl
     assert rb['limiter_frozen_at_iter'] is not None
     assert 'oturma tespiti' in rb['convergence_basis']
+
+
+# ---------------------------------------------------------------------------
+# ÖH FAZ B-4 — "YAYIMLANAN KALINTI KİMİN?" (defter P6B1-03, P6B1-08)
+#
+# Hüküm cümlesi kalıntıyı "yoğunluk L2 kalıntısı X < tol" diye yayımlar ve
+# dondurma dalında "şema minmod" der. Örtük yolda bu sayı iki ayrı sebeple
+# ŞEMANIN kalıntısı olmayabilir:
+#   * P6B1-08 — eğim tazeleme periyodu 25'tir; pencerenin 24 iterasyonunda
+#     kalıntı BAYAT eğimlerle ölçülür ve çevrim içinde düşer, şemanın canlı
+#     kalıntısı düşmez. tol_res ikisinin arasına düşerse converged=True.
+#   * P6B1-03 — sınırlayıcı donduktan sonra kalıntı DONMUŞ operatörle
+#     ölçülür; ürün cümlesi yine "şema minmod" der.
+#
+# ÖLÇÜM (2026-08-27, bu depo, bu dosyanın kendi lülesi 60×12):
+#   açık yol (ssp_rk2, cift_muscl) : yayım 9,862447e-09 = ŞEMA 9,862447e-09
+#                                    (oran 1,000000× — sağlıklı taban)
+#   örtük yol (cift_muscl, donma 4253'te, it 4452 — KAPI ÖNCESİ ölçüm;
+#   kapı sonrası aynı vaka 5512 iterasyonda ve şema kalıntısı 8,53e-09):
+#                                    yayım 4,368523e-11 ↔ ŞEMA 8,637525e-07
+#                                    (19.770× ; ŞEMA/tol = 86,4)
+#   örtük yol, dondurma ATEŞLEMEDEN (settle_tol=1e-3, freeze_settle_tol=
+#   1e-30, tol_res=1e-6): it 1449, donma None,
+#                                    yayım 9,8538e-07 ↔ ŞEMA 9,7286e-05
+#                                    (98,7× ; ŞEMA/tol = 97,3)
+#   aynı ayarla AÇIK yol kontrolü  : it 4920, yayım = ŞEMA (oran 1,000000×)
+#
+# Yani ölçüm aygıtının kendisi açık yolda BİT-DOĞRUDUR (aşağıdaki yeşil
+# çapa bunu her koşuda yeniden kanıtlar); ayrışma örtük yola özgüdür.
+# ---------------------------------------------------------------------------
+
+def _sema_kalintisi(sonuc, izgara, second_order=True):
+    """Geri dönen ALANIN, ŞEMANIN kendi (canlı minmod) operatörüyle ölçülen
+    yoğunluk L2 kalıntısı — çözücünün yayımladığı sayıyla AYNI ölçekte
+    (ρ0·a0/L), böylece iki sayı doğrudan karşılaştırılabilir.
+
+    Eğim argümanı BİLEREK verilmez (``slopes=None`` → minmod yeniden
+    hesaplanır): sorulan soru tam olarak "yayımlanan sayı, şemanın kendi
+    operatörünün sayısı mı?"dır.
+    """
+    f = sonuc['fields']
+    U = prim_to_cons_axisym(f['rho_kg_m3'], f['u_z_m_s'], f['u_r_m_s'],
+                            f['pressure_Pa'], LULE_GAMMA)
+    res, _ = residual_axisym(U, izgara, LULE_GAMMA, LULE_R, LULE_P0, LULE_T0,
+                             Pb=LULE_PB, second_order=second_order,
+                             geom=precompute_geometry(izgara))
+    vol = izgara.volume
+    olcek = ((LULE_P0 / (LULE_R * LULE_T0))
+             * np.sqrt(LULE_GAMMA * LULE_R * LULE_T0)
+             / float(izgara.Z[-1, 0] - izgara.Z[0, 0]))
+    return float(np.sqrt(np.sum(res[..., 0] ** 2 * vol) / np.sum(vol))
+                 / olcek)
+
+
+#: Bayat-pencere vakasının ayarları (ölçümden; yorum bloğu). ``settle_tol``
+#: gevşek seçilir ki hüküm oturma bacağında takılmasın, ``freeze_settle_tol``
+#: erişilmez küçüklükte seçilir ki DONDURMA ateşlemesin — böylece kalan tek
+#: mekanizma bayat eğim penceresidir (P6B1-08 mekanizmasının izolasyonu).
+BAYAT_AYAR = dict(max_iters=20000, tol_res=1e-6, settle_tol=1e-3,
+                  freeze_settle_tol=1e-30)
+
+
+@pytest.fixture(scope='module')
+def bayat_pencere(izgara):
+    """Dondurma ATEŞLEMEDEN yakınsadı denen örtük koşu (~1,9 s ölçüldü)."""
+    return solve_steady_axisym(izgara, time_integrator='line_implicit_j',
+                               **BAYAT_AYAR, **_ORTAK)
+
+
+def test_acik_yolda_yayimlanan_kalinti_semanindir(cift_muscl, izgara):
+    """ÖLÇÜM AYGITININ ÇAPASI (yeşil): açık yolda yayımlanan kalıntı, geri
+    dönen alanın ŞEMA kalıntısıyla makine sınıfında aynıdır.
+
+    Bu bekçi olmadan aşağıdaki iki xfail "belki de yeniden hesaplama
+    yanlıştır" itirazına açık kalırdı: burada aynı yeniden hesaplama, aynı
+    ölçek ve aynı alanla ürünün kendi sayısını BİREBİR üretiyor
+    (ölçüldü 2026-08-27: 9,862447e-09 ↔ 9,862447e-09, oran 1,000000×).
+    """
+    ra, _ = cift_muscl
+    yayim = float(np.asarray(ra['residual_history'])[-1])
+    sema = _sema_kalintisi(ra, izgara)
+    assert ra['limiter_frozen_at_iter'] is None, (
+        'açık yol bu vakada dondurmamalıydı — vaka değişmiş, çapa yeniden '
+        'kalibre edilmeli')
+    assert sema == pytest.approx(yayim, rel=1e-9), (
+        f'açık yolda bile yayımlanan kalıntı ({yayim:.6e}) alanın şema '
+        f'kalıntısından ({sema:.6e}) ayrışıyor — ölçüm aygıtı ya da '
+        'çözücünün kalıntı tanımı değişmiş; aşağıdaki iki borç bekçisi bu '
+        'çapa olmadan okunamaz')
+
+
+# ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+# Bu bekçi P6B1-03 borcunu xfail(strict) ile taşıyordu;
+# imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+# Kusur ÖH D15 cfd-picard (OH-Z5-14) tarafından
+# ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+# GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+# kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+# alınırsa burası kırmızı verir.
+#
+# ÜRÜNDEKİ KANIT: hrma/cfd/steady.py:726 "YAYIMLANAN SAYI KİMİN? (ÖH
+# defter P6B1-01/-03/-04/-08, onarım ...)"
+#
+# KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P6B1-03 — ürün kusuru:
+# sınırlayıcı donduktan sonra yayımlanan kalıntı donmuş operatörün,
+# cümle ise aynı yerde "şema minmod" diyor. Faz B ürün onarımı YAPMAZ;
+# bekçi borç imiyle yazılır, onarım dalgası bu imi kaldırır.
+def test_donmus_operator_kalintisi_seman_kalintisi_degil(cift_muscl, izgara):
+    """``converged=True`` hükmü ŞEMANIN kalıntısıyla desteklenmelidir.
+
+    ÖH Faz B-4 — defter P6B1-03 (yüksek). Örtük MUSCL koşusu 4253.
+    iterasyonda sınırlayıcıyı donduruyor ve 4452'de "yakınsadı" ilan
+    ediyor; hükmü besleyen sayı (4,369e-11) donmuş Picard operatörünün
+    kalıntısıdır. Aynı alanın ŞEMA (canlı minmod) kalıntısı 8,638e-07,
+    yani ürünün kendi toleransının (1e-8) **86,4 katı** — şema o alanda
+    yakınsamamıştır. Fark 19.770×.
+
+    Kabul: ya hüküm şemanın kalıntısıyla verilir, ya da yayımlanan sayı
+    dondurulmuş operatöre ait olduğunu ADIYLA beyan eder (bugün cümle
+    tersini söylüyor: "şema minmod").
+
+    ONARIM SİMÜLASYONU (ölçüldü 2026-08-27): dondurma bastırıldığında
+    (``ramp_iters=1e7`` + ``freeze_settle_tol=1e-30``) koşu 5075
+    iterasyonda yine ``converged=True`` diyor, yayım 9,815e-09 ↔ şema
+    1,0837e-06 (tolun 108 katı) — yani **dondurma tek kanal değildir**,
+    P6B1-08'in bayat penceresi bu vakada da canlıdır. Hedef ULAŞILABİLİR:
+    aynı yol 12000 iterasyonda şema kalıntısını 2,234e-10'a indiriyor;
+    kusur erken HÜKÜMdür, erişilemez bir eşik değil.
+    """
+    _, rb = cift_muscl
+    assert rb['limiter_frozen_at_iter'] is not None, (
+        'vaka dondurmuyor — bekçi yeniden kalibre edilmeli (P6B1-03 vakası '
+        'dondurma ANINDAN sonrasını konu alır)')
+    tol = rb['inputs']['tol_res']
+    yayim = float(np.asarray(rb['residual_history'])[-1])
+    sema = _sema_kalintisi(rb, izgara)
+    assert not rb['converged'] or sema < tol, (
+        f"converged=True yayımlandı (kalıntı {yayim:.4e} < tol {tol:g}) ama "
+        f"alanın ŞEMA kalıntısı {sema:.4e} = tolun {sema / tol:.4g} katı; "
+        f"yayımlanan sayı {sema / yayim:.4g}× küçük — donmuş operatörün "
+        f"kalıntısı. Cümle: {rb['convergence_basis']}")
+
+
+# ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+# Bu bekçi P6B1-08 borcunu xfail(strict) ile taşıyordu;
+# imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+# Kusur ÖH D15 cfd-picard (OH-Z5-14) tarafından
+# ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+# GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+# kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+# alınırsa burası kırmızı verir.
+#
+# ÜRÜNDEKİ KANIT: hrma/cfd/steady.py:726 aynı onarım bloğu (P6B1-08
+# dahil)
+#
+# KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P6B1-08 — ürün kusuru:
+# örtük yolda hüküm, 25 iterasyonluk Picard penceresinin bayat eğimli
+# kalıntısını okuyor. Faz B ürün onarımı YAPMAZ; bekçi borç imiyle
+# yazılır, onarım dalgası bu imi kaldırır.
+def test_ortuk_hukum_bayat_pencerenin_kalintisini_okuyor(bayat_pencere,
+                                                         izgara):
+    """Dondurma ATEŞLEMEDEN de hüküm bayat sayıya dayanabiliyor.
+
+    ÖH Faz B-4 — defter P6B1-08 (orta). P6B1-03'ten AYRI mekanizma:
+    burada sınırlayıcı hiç donmuyor (``limiter_frozen_at_iter is None``),
+    ayrışmayı tek başına eğim tazeleme periyodu (25) üretiyor. Ölçüm
+    (2026-08-27, bu lüle 60×12, ``BAYAT_AYAR``): 1449 iterasyon,
+    yayımlanan 9,8538e-07 < tol 1e-6 → ``converged=True``; alanın ŞEMA
+    kalıntısı 9,7286e-05, yani tolun **97,3 katı** (oran 98,7×).
+
+    Aynı ayarlarla AÇIK yol kontrolü (ölçüldü): 4920 iterasyon,
+    yayımlanan = şema (oran 1,000000×) — yani kusur örtük yola özgüdür,
+    vakanın kendisine değil.
+    """
+    r = bayat_pencere
+    assert r['limiter_frozen_at_iter'] is None, (
+        'bu vakada dondurma ateşledi — P6B1-08 izolasyonu bozuldu, '
+        'BAYAT_AYAR yeniden kalibre edilmeli')
+    assert r['converged'] is True, (
+        'vaka yakınsadı hükmü vermiyor — bekçi yeniden kalibre edilmeli')
+    tol = r['inputs']['tol_res']
+    yayim = float(np.asarray(r['residual_history'])[-1])
+    sema = _sema_kalintisi(r, izgara)
+    assert sema < tol, (
+        f"converged=True yayımlandı (kalıntı {yayim:.4e} < tol {tol:g}) ama "
+        f"alanın ŞEMA kalıntısı {sema:.4e} = tolun {sema / tol:.4g} katı "
+        f"(oran {sema / yayim:.4g}×) — hüküm bayat eğimli pencerenin "
+        f"sayısını okudu. Cümle: {r['convergence_basis']}")
 
 
 def test_acik_yol_plato_beyani_degismedi(cift_muscl):
@@ -282,6 +520,87 @@ def test_acik_yol_plato_beyani_degismedi(cift_muscl):
     ra, _ = cift_muscl
     assert ra['limiter_frozen_at_iter'] is None
     assert 'oturma tespiti' not in ra['convergence_basis']
+
+
+# ---------------------------------------------------------------------------
+# V3 — eğim-dondurma TETİĞİ hükümden AYRI (dairesel kilidin kapanışı)
+#
+# Parti 38 ölçümü: tetik ile hüküm aynı settle_tol'u paylaşıyordu; KAPI
+# vakasında (viskoz 192×48) tazeleme gevelemesi bandı 1,008e-05 tabanına
+# kilitleyince tetik HİÇ ateşleyemiyordu (dondurma tam da o gevelemeyi
+# gidermek için varken). V3: tetiğin AYRI, beyanlı eşiği var
+# (freeze_settle_tol); hüküm aritmetiği (_settle_band) TEK yerde kaldı.
+# Varsayılanın None (= settle_tol, tarihsel bit-özdeş) SEÇİLME sebebi
+# ölçülmüş kök zehirlenmesidir (bu ızgarada freeze=1e-4 varsayılan olsaydı
+# donma 4253 → 560'a çekilir, açık↔örtük alan bandı 5,41e-08 → 5,03e-04'e,
+# debi farkı 1,42e-11 → 1,48e-06'ya bozulurdu — ÖLÇÜLDÜ, künye
+# steady.DEFAULT_FREEZE_SETTLE_TOL).
+# ---------------------------------------------------------------------------
+
+def test_tetik_hukumden_bagimsiz_atesler(izgara):
+    """(a) Tetik, hüküm erişilmezken ateşleyebilir (dairesel kilit yok).
+
+    ÖLÇÜLDÜ (bu ızgara, MUSCL örtük, 800 iter): settle_tol=1e-14 (hüküm
+    kasıtla erişilmez) + freeze_settle_tol=1e-4 → donma 560. iterasyonda,
+    converged=False, kalıntı 1,22e-08. AYNI ayar tetik eşiği verilmeden
+    (varsayılan = settle_tol = 1e-14) koşulursa donma HİÇ olmaz — dairesel
+    kilit geri gelirse (tetik yeniden hüküm eşiğini okursa) bu bekçi
+    kırmızıya düşer (mutasyon M4 kanıtı docstring'de).
+    """
+    ayrik = solve_steady_axisym(izgara, max_iters=800,
+                                time_integrator='line_implicit_j',
+                                settle_tol=1e-14, freeze_settle_tol=1e-4,
+                                **_ORTAK)
+    assert ayrik['converged'] is False, (
+        'vaka 800 iterasyonda 1e-14 bandına oturamaz — oturduysa vaka '
+        'değişmiş, bekçi yeniden kalibre edilmeli')
+    assert ayrik['limiter_frozen_at_iter'] is not None, (
+        'tetik, hüküm erişilmezken ateşleyemedi — tetik/hüküm ayrımı '
+        '(dairesel kilit kapanışı) geri açılmış')
+    kilitli = solve_steady_axisym(izgara, max_iters=800,
+                                  time_integrator='line_implicit_j',
+                                  settle_tol=1e-14, **_ORTAK)
+    assert kilitli['limiter_frozen_at_iter'] is None, (
+        'varsayılan (tetik = hüküm eşiği) bu vakada ateşlememeliydi — '
+        'varsayılan davranış değişmiş')
+
+
+def test_tetik_esigi_beyanda_yayimlanir(izgara, cift_muscl):
+    """(b) Tetik eşiği koşum beyanında: inputs + dondurma gerekçesi."""
+    r = solve_steady_axisym(izgara, max_iters=800,
+                            time_integrator='line_implicit_j',
+                            settle_tol=1e-14, freeze_settle_tol=1e-4,
+                            **_ORTAK)
+    assert r['inputs']['freeze_settle_tol'] == 1e-4
+    assert 'freeze_settle_tol=0.0001' in r['convergence_basis'], (
+        'dondurma gerekçesi tetik eşiğini ADIYLA söylemiyor')
+    # Varsayılanda etkin eşik = settle_tol ve BEYAN bunu yankılar
+    _, rb = cift_muscl
+    assert rb['inputs']['freeze_settle_tol'] == rb['inputs']['settle_tol']
+
+
+def test_tetik_varsayilani_bit_ozdes(izgara):
+    """None (varsayılan) ↔ freeze_settle_tol=settle_tol BİT-ÖZDEŞ.
+
+    Ayrımın kendisi varsayılan yolu tek bitte bile değiştiremez (ölçüldü:
+    kalıntı izleri array_equal) — tarihsel kalibrasyonların (donma 4253,
+    4452 it) taşıyıcısı budur.
+    """
+    ra = solve_steady_axisym(izgara, max_iters=300,
+                             time_integrator='line_implicit_j', **_ORTAK)
+    rb = solve_steady_axisym(izgara, max_iters=300,
+                             time_integrator='line_implicit_j',
+                             freeze_settle_tol=1e-9, **_ORTAK)
+    assert np.array_equal(ra['residual_history'], rb['residual_history'])
+    assert ra['inputs']['freeze_settle_tol'] == 1e-9
+
+
+def test_tetik_gecersiz_esik_reddi(izgara):
+    """Tetik eşiği kapılıdır: pozitif/sonlu olmayan değer ADIYLA reddedilir."""
+    for bozuk in (0.0, -1e-4, float('nan'), float('inf')):
+        with pytest.raises(ValueError, match='freeze_settle_tol'):
+            solve_steady_axisym(izgara, time_integrator='line_implicit_j',
+                                freeze_settle_tol=bozuk, **_ORTAK)
 
 
 # ---------------------------------------------------------------------------

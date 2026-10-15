@@ -140,18 +140,34 @@ def chamber_time_constant(l_star_m, c_star_m_s, gamma):
 
     Returns:
         dict: ``tau_c_s``, ``l_star_m``, ``c_star_m_s``, ``gamma``,
-        ``gamma_function_sq``, ``tau_c_basis``.
+        ``gamma_function_sq``, ``tau_c_basis``, ``rt_corresponding_m2_s2``,
+        ``tau_c_via_rt_s``, ``tau_c_route_rel_diff``, ``rt_identity_basis``.
     """
     l_star = _positive('l_star_m', l_star_m)
     c_star = _positive('c_star_m_s', c_star_m_s)
     g2 = gamma_function_sq(gamma)
+    tau_c = l_star / (c_star * g2)
+    # P6B4-14: R·T künyesi ARTIK ÖLÜ DEĞİL — hem yayımlanıyor hem de
+    # anlattığı özdeşlik burada ÖLÇÜLÜYOR. Künye "τ_c'ye giden iki bağımsız
+    # yol — L*/(c*·Γ²) ve V·c*/(A_t·R·T) — özdeş eşittir" diyor; bu iddia
+    # yalnız metin olarak durduğu sürece tüketicide kırılsa bile (P6B4-02
+    # ölçümü: %−26,5) kimse göremiyordu. Artık ikinci yol R·T = (c*·Γ)²
+    # üzerinden fiilen hesaplanıp bağıl farkıyla birlikte yayımlanıyor,
+    # yani künye ölçülebilir bir iddiaya bağlandı.
+    rt = rt_from_cstar(c_star, gamma)
+    tau_c_rt = l_star * c_star / rt          # = V·c*/(A_t·R·T)
     return {
-        'tau_c_s': l_star / (c_star * g2),
+        'tau_c_s': tau_c,
         'l_star_m': l_star,
         'c_star_m_s': c_star,
         'gamma': float(gamma),
         'gamma_function_sq': g2,
         'tau_c_basis': _TAU_C_BASIS,
+        'rt_corresponding_m2_s2': rt,
+        'tau_c_via_rt_s': tau_c_rt,
+        'tau_c_route_rel_diff': (abs(tau_c_rt - tau_c) / tau_c
+                                 if tau_c > 0.0 else None),
+        'rt_identity_basis': _RT_IDENTITY_BASIS,
     }
 
 

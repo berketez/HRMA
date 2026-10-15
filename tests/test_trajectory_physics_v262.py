@@ -33,7 +33,15 @@ MOTOR = {
     'thrust': 3000.0,
     'burn_time': 4.0,
     'total_impulse': 12000.0,
-    'isp': 200.0,
+    # ÖH D23 / P4B3-24 — 'isp' ANAHTARI KALDIRILDI (bekçi çevirisi).
+    # Bu yük KENDİ İÇİNDE TUTARSIZDI: entegre edilen impuls bütçesinden
+    # türeyen Isp (total_impulse / (m_p * g0)) ile yazılı isp %1'den
+    # fazla ayrışıyordu, yani yanma iki kez ve iki farklı biçimde tarif
+    # edilmişti. Çözücü artık bu çelişkiyi reddediyor (fail-closed).
+    # Isp bu çözücüde bir GİRDİ DEĞİL, bütçenin türevidir: anahtar
+    # verilmediğinde bütçeden türetilir ve bu dosyadaki testlerin
+    # ölçtüğü sayıların HİÇBİRİ değişmez (ölçüldü, taban ef527ae:
+    # isp = 220 / 1 / 1e9 ile apoje BİT-AYNI, once.json P4B3_24).
     'propellant_mass_total': 8.0,
 }
 
@@ -119,15 +127,42 @@ class TestBurnoutSampling:
 # ---------------------------------------------------------------------------
 class TestParachuteInput:
 
-    def test_default_area_is_flagged_as_assumed(self):
-        """Alan verilmezse metrik 'varsayım' işaretli ve uyarı üretilir."""
+    def test_missing_area_withholds_the_landing_verdict(self):
+        """Alan verilmezse iniş HÜKMÜ yayımlanmaz (ÖH D22 / OH-D18-05).
+
+        ÇEVRİLEN BEKÇİ. Eski adı ``test_default_area_is_flagged_as_assumed``
+        ve tam olarak KUSURU kilitliyordu: paraşüt verilmediğinde
+        ``parachute_area_m2 == DEFAULT_PARACHUTE_AREA_M2`` (2,0 m²),
+        ``landing_velocity_assumed is True`` ve
+        ``warn.trajectory.parachute_area_assumed`` uyarısının varlığını
+        ŞART koşuyordu — yani uydurma alandan türetilmiş bir iniş hızının
+        yayımlanmaya DEVAM etmesini test ediyordu.
+
+        ÖLÇÜLDÜ (``a2/once.json`` B bloğu): kullanıcının girdileri sabitken
+        yalnız ``DEFAULT_PARACHUTE_AREA_M2`` 1,0 -> 2,0 -> 4,0 yapılınca
+        yayımlanan 15 yaprak oynuyordu (iniş hızı, toplam uçuş süresi,
+        menzil, ortalama iniş hızı, uyarının kendi ``params.area``
+        yaprağı). Beyan dürüsttü ama sayı kazanılmamıştı; doktrin gereği
+        kazanılmamış hüküm yayımlanmaz.
+
+        Bekçi artık HÜKMÜN GERİ ÇEKİLDİĞİNİ kilitler.
+        """
         r = _run()
         tm = r['performance']['trajectory_metrics']
-        assert tm['landing_velocity_assumed'] is True
-        assert tm['parachute_area_m2'] == pytest.approx(
-            DEFAULT_PARACHUTE_AREA_M2)
+        assert tm['landing_velocity'] is None
+        assert tm['parachute_area_m2'] is None
+        assert tm['total_flight_time'] is None
+        assert tm['range_distance'] is None
+        assert r['flight_status']['landing_unknown'] is True
+        assert r['flight_status']['landed'] is False
+        # Çözücü BAŞARISIZ olmadı, hiç ÇAĞRILMADI: uçuş geçerli kalır.
+        assert r['flight_status']['valid'] is True
+        assert r['recovery']['descent_model'] == 'NOT_MODELLED'
+        assert 'parachute_area' in r['recovery']['landing_withheld_because']
         codes = [w['code'] for w in r.get('warnings', [])]
-        assert 'warn.trajectory.parachute_area_assumed' in codes
+        # Uyarı metni uydurma alanı ANLATIYORDU; alan artık hiç
+        # kullanılmadığı için uyarı da yalan söyleyemez.
+        assert 'warn.trajectory.parachute_area_assumed' not in codes
 
     def test_user_area_removes_assumption_flag(self):
         r = _run(parachute_area=3.0)
@@ -145,18 +180,45 @@ class TestParachuteInput:
             'performance']['trajectory_metrics']['landing_velocity']
         assert v_big == pytest.approx(v_small / 2.0, rel=0.05)
 
-    def test_default_area_reproduces_legacy_number(self):
-        """Geriye dönük kilit: alan verilmeyince eski 2.0 m² sonucu birebir."""
-        v_default = _run()['performance']['trajectory_metrics']['landing_velocity']
+    def test_legacy_number_needs_the_area_to_be_asked_for(self):
+        """Eski 2,0 m² sayısı ancak AÇIKÇA istenirse üretilir.
+
+        ÇEVRİLEN BEKÇİ (eski adı
+        ``test_default_area_reproduces_legacy_number``). Eski hâli
+        "alan verilmeyen koşum ile alan=2,0 verilen koşum AYNI iniş hızını
+        vermeli" diyordu — yani sessiz varsayılanı bir SÖZLEŞME olarak
+        kilitliyordu. Regresyon kilidinin kendisi değerlidir ve KORUNUR:
+        kullanıcı 2,0 m² isterse eski sayı bit-aynı çıkmalıdır. Değişen tek
+        şey, o sayının artık İSTENMEDEN üretilmemesidir.
+        """
+        v_default = _run()['performance']['trajectory_metrics'][
+            'landing_velocity']
         v_explicit = _run(parachute_area=DEFAULT_PARACHUTE_AREA_M2)[
             'performance']['trajectory_metrics']['landing_velocity']
-        assert v_default == pytest.approx(v_explicit, rel=1e-12)
+        assert v_default is None, 'sessiz varsayılan geri geldi'
+        # ÖH D24 / termo-ucus a2 (OH-D23-07) — ÇAPA YENİLENDİ (bekçinin
+        # SORUSU değişmedi: eski sayısal yol alanı ADIYLA istiyor mu).
+        # ÖLÇÜLDÜ: 10,697066699014087 -> 10,697066025270114 (bağıl −6,3e-8).
+        # Sebep: ``_atm_full`` artık 0 m altını deniz seviyesine
+        # KIRPMIYOR; iniş entegrasyonunun yer datumunun altına taşan
+        # adımları ISA tablosunun troposfer uzantısını (daha yoğun hava)
+        # görüyor. Kırpma kalkmadan iki ISA okuması aynı irtifada %4,61
+        # ayrışıyordu (a2/once.json K1).
+        assert v_explicit == pytest.approx(10.697066025270114, rel=1e-9)
 
-    def test_invalid_area_falls_back_to_assumption(self):
-        """Negatif/geçersiz alan sessizce kullanılmaz, varsayıma düşülür."""
+    def test_invalid_area_withholds_instead_of_falling_back(self):
+        """Geçersiz alan (negatif) SESSİZCE varsayıma düşmez.
+
+        ÇEVRİLEN BEKÇİ (eski adı
+        ``test_invalid_area_falls_back_to_assumption``): adının da
+        söylediği gibi eski hâli sessiz yedeğin ta kendisini şart
+        koşuyordu. Çözülemeyen girdi için hüküm geri çekilir.
+        """
         r = _run(parachute_area=-1.0)
-        assert r['performance']['trajectory_metrics'][
-            'landing_velocity_assumed'] is True
+        tm = r['performance']['trajectory_metrics']
+        assert tm['landing_velocity'] is None
+        assert tm['parachute_area_m2'] is None
+        assert r['recovery']['descent_model'] == 'NOT_MODELLED'
 
     def test_parachute_cd_is_configurable(self):
         """Cd artırılınca iniş hızı düşer (aynı alanda)."""
@@ -200,23 +262,29 @@ class TestWindDirectionConvention:
 
     def test_north_wind_drifts_vehicle_south(self):
         """Kuzeyden (wind_direction=0) esen rüzgâr aracı güneye (−x) taşır."""
-        r = _run(launch_angle=90.0, wind_speed=10.0, wind_direction=0.0)
+        r = _run(launch_angle=90.0, wind_speed=10.0, wind_direction=0.0,
+                 parachute_area=DEFAULT_PARACHUTE_AREA_M2)
         assert r['performance']['trajectory_metrics']['range_distance'] < -100.0
 
     def test_opposite_directions_mirror(self):
         """0° ve 180° rüzgâr, dik atışta simetrik sürüklenme üretir."""
-        d0 = _run(launch_angle=90.0, wind_speed=10.0, wind_direction=0.0)[
+        d0 = _run(launch_angle=90.0, wind_speed=10.0, wind_direction=0.0,
+                  parachute_area=DEFAULT_PARACHUTE_AREA_M2)[
             'performance']['trajectory_metrics']['range_distance']
-        d180 = _run(launch_angle=90.0, wind_speed=10.0, wind_direction=180.0)[
+        d180 = _run(launch_angle=90.0, wind_speed=10.0,
+                    wind_direction=180.0,
+                    parachute_area=DEFAULT_PARACHUTE_AREA_M2)[
             'performance']['trajectory_metrics']['range_distance']
         assert d0 == pytest.approx(-d180, rel=1e-6)
 
     def test_drift_magnitude_grows_with_wind(self):
         """Sürüklenme büyüklüğü rüzgârla monoton artar (yön konvansiyonundan
         bağımsız kilit — bu testin eski hâli işaret varsayıyordu)."""
-        d10 = abs(_run(launch_angle=90.0, wind_speed=10.0)[
+        d10 = abs(_run(launch_angle=90.0, wind_speed=10.0,
+                       parachute_area=DEFAULT_PARACHUTE_AREA_M2)[
             'performance']['trajectory_metrics']['range_distance'])
-        d20 = abs(_run(launch_angle=90.0, wind_speed=20.0)[
+        d20 = abs(_run(launch_angle=90.0, wind_speed=20.0,
+                       parachute_area=DEFAULT_PARACHUTE_AREA_M2)[
             'performance']['trajectory_metrics']['range_distance'])
         assert d20 > d10 > 100.0
 
@@ -251,21 +319,31 @@ class TestRecoveryStateIsolation:
         p.update(over)
         return p
 
-    def test_explicit_none_returns_to_assumption(self):
-        """Aynı örnekte 2. istek ``parachute_area=None`` -> varsayıma döner."""
+    def test_explicit_none_withholds_the_verdict_again(self):
+        """Aynı örnekte 2. istek ``parachute_area=None`` -> hüküm geri çekilir.
+
+        ÇEVRİLEN BEKÇİ (eski adı ``test_explicit_none_returns_to_assumption``).
+        Testin KORUDUĞU şey aynen duruyor ve hatta güçlendi: bir önceki
+        isteğin 5,0 m²'si ikinci isteğe SIZMAMALI. Eskiden bunun kanıtı
+        "alan tekrar 2,0 varsayımına döndü" idi; şimdi kanıt "iniş hükmü
+        tekrar geri çekildi" — sızıntı olsaydı ikinci istekte 5,0 m²'den
+        türetilmiş bir iniş hızı görünürdü.
+        """
         ta = self._analyzer()
         first = ta.calculate_trajectory(MOTOR, self._params(parachute_area=5.0))
         assert first['performance']['trajectory_metrics'][
             'landing_velocity_assumed'] is False
+        assert first['performance']['trajectory_metrics'][
+            'parachute_area_m2'] == pytest.approx(5.0)
 
         second = ta.calculate_trajectory(MOTOR,
                                          self._params(parachute_area=None))
         tm = second['performance']['trajectory_metrics']
-        assert tm['landing_velocity_assumed'] is True
-        assert tm['parachute_area_m2'] == pytest.approx(
-            DEFAULT_PARACHUTE_AREA_M2)
+        assert tm['parachute_area_m2'] is None, 'önceki isteğin alanı sızdı'
+        assert tm['landing_velocity'] is None
+        assert second['recovery']['descent_model'] == 'NOT_MODELLED'
         codes = [w['code'] for w in second.get('warnings', [])]
-        assert 'warn.trajectory.parachute_area_assumed' in codes
+        assert 'warn.trajectory.parachute_area_assumed' not in codes
 
     def test_cd_does_not_leak_between_requests(self):
         """Cd anahtarı verilen istek, önceki isteğin Cd'sini devralmaz."""

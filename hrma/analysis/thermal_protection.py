@@ -55,8 +55,11 @@ import math
 from typing import Dict, List, Optional, Sequence, Union
 
 import numpy as np
+# ÖH D26 / OH-D25-14: ``np.trapz`` NumPy 2.0'da ad alanından
+# KALDIRILDI (np.trapezoid); ad TEK YERDE çözülür.
+from hrma.utils.numeric_compat import trapezoid as _trapezoid
 
-from hrma.data.materials_db import get_material
+from hrma.data.materials_db import get_material, temperature_limits
 
 # v2.6.27: MERKEZÎLEŞTİRME BORCU KAPANDI — sabit artık hrma/constants.py'den
 # okunur (6 ayrı yerel tanım vardı; hepsi merkeze bağlandı, değer aynı:
@@ -144,6 +147,45 @@ RECESSION_VALID_MAX_MM_S = 0.35
 #: bir daha elle türetilmesin diye tek tanım noktası burasıdır.
 TM107041_TABLE2_ALL_MM_S = (0.00017, 0.0601)      # tüm örnekler
 TM107041_TABLE2_MX2600_MM_S = (0.00452, 0.00822)  # yüksek yoğunluklu uçuş sınıfı
+
+#: Açık (explicit) 1B FD marşının TEK İSTEK HESAP BÜTÇESİ [adım sayısı].
+#:
+#: ÖH D15 / P4B1-13. ``heat_sink_transient`` kararlılık için
+#: dt = cfl·dx²/(2α(1+Bi)) kullanır, yani adım sayısı
+#: n = ceil(t_yanma/dt) ∝ t_yanma · n_düğüm² / L² büyür. ``wall_thickness_m``,
+#: ``n_nodes`` ve ``burn_time_s`` üçünde de üst sınır YOKTU ve
+#: ``/api/analysis/thermal-protection`` üçünü de ham gövdeden geçiriyordu.
+#:
+#: ÖLÇÜLDÜ (31 Ağustos 2026, taban e88d096; çelik, h_g = 15 000 W/m²K):
+#:     5,00 mm /  51 düğüm /  10 s ->        35 655 adım -> 0,144 s
+#:     2,00 mm /  51 düğüm /  60 s ->     1 313 695 adım -> 4,545 s
+#:     0,50 mm / 201 düğüm / 300 s -> 1 662 835 780 adım -> 40 s'lik
+#:         pencerede BİTMEDİ (aynı oranla ≈62 dakika); HTTP ucu da aynı
+#:         pencerede dönmedi. Girdilerin üçü de makul mühendislik değeri;
+#:         tek worker'lı masaüstü sunucuda uygulama KİLİTLENİYORDU.
+#:
+#: Bütçe, ölçülen 1 313 695 adım / 4,545 s oranından (≈289 000 adım/s)
+#: kurulmuştur: 2 000 000 adım ≈ 7 saniyelik tek istek. Bu, kardeş
+#: ``_SIXDOF_WALL_CLOCK_BUDGET_S`` (60 s) duvar saati bütçesinin rahat
+#: altındadır ve sağlıklı ısı-kuyusu vakalarının (yukarıdaki ilk iki satır)
+#: tamamını içeride bırakır. Aşıldığında sayı üretilmez: hangi üç alanın
+#: bütçeyi taşırdığı ADIYLA söylenir (fail-closed).
+HEAT_SINK_MAX_STEPS = 2_000_000
+
+
+class HeatSinkBudgetExceeded(ValueError):
+    """Açık FD marşı tek istek hesap bütçesini aşıyor (ÖH D15 / P4B1-13).
+
+    ``ValueError`` alt sınıfıdır: mevcut ``except ValueError`` yakalayan
+    çağıranların davranışı (400) değişmez; uç katmanı ise bu tipi ayrıca
+    yakalayıp 422 + ``invalid_fields`` döndürebilir.
+    """
+
+    def __init__(self, message, invalid_fields, n_steps, budget):
+        super().__init__(message)
+        self.invalid_fields = list(invalid_fields)
+        self.n_steps = int(n_steps)
+        self.budget = int(budget)
 
 # ---------------------------------------------------------------------------
 # Ablatif malzeme Q* tablosu — LİTERATÜR BANDI (NASA SP-8093 sınıfı;
@@ -276,9 +318,22 @@ RADIATION_EXTENSION_MATERIALS: Dict[str, Dict] = {
         'name': 'Niobium C-103 (silicide coated)',
         'service_limit_K': 1640.0,
         'emissivity': 0.75,   # approximate — silisit kaplamalı yüzey
-        'source': ('~1640 K (~1370 C) max use, coated C-103 heritage '
-                   'radiation-cooled nozzle extensions (Apollo SM RCS '
-                   'class, NASA/AIAA heritage reports). Emissivity of '
+        # ÖH KU (KU-K5 / SP-S2 R6) künyesi: 1640 K DEĞİŞMEDİ. NASA SP-8124
+        # (1977) silisit kaplı kolumbiyum (C-103) için süre bağımlı bir
+        # bant verir (yerel metinden doğrulandı): 2400 °F (1589 K) altı
+        # "neredeyse sınırsız ömür" (s. 28), 2800 °F (1811 K) en çok 1 saat
+        # (s. 27, s. 70), 3100 °F (1978 K) en çok 10 dakika (s. 70). 1640 K
+        # bu bandın içinde ama SÜREDEN BAĞIMSIZ tek bir sayıdır; hükmü
+        # süreye bağlamak sayı/hüküm değiştirir (ÖNEMLİ, devir). Sutton 9
+        # s. 307'deki C-103 1120 K kitap hatasıdır (KB-1), dayanak değil.
+        'source': ('~1640 K (~1370 C) single, duration-independent service '
+                   'limit for coated C-103 radiation-cooled nozzle '
+                   'extensions. NASA SP-8124 (1977) gives a duration-'
+                   'dependent band for silicide-coated columbium: below '
+                   '2400 F (1589 K) virtually unlimited life (p. 28); do not '
+                   'exceed 1 h at 2800 F (1811 K) (pp. 27, 70); up to 10 min '
+                   'at 3100 F (1978 K) (p. 70). 1640 K lies inside that band '
+                   'but is not tied to the firing duration. Emissivity of '
                    'silicide-coated surface approximate (0.7-0.8 band).'),
     },
     'carbon_carbon': {
@@ -407,11 +462,22 @@ def _solve_blown_surface_balance(h_gas_W_m2K: float,
         # ya da gaz zaten yüzey sıcaklığının altında. Yarı-kararlı ablasyon
         # BAŞLAMAZ. Negatif gerileme fiziksel değildir. Bu dalda blokaj
         # uygulanamaz (üfleme yoksa blokaj da yoktur): psi = 1.
+        #
+        # ÖH P4B1-12 ONARIMI: ``q_conv_blocked_W_m2`` eskiden
+        # ``max(q_unblown, 0.0)`` ile yayımlanıyordu. O kırpma KONVEKTİF
+        # TERİMİN İŞARETİNİ yutuyordu: gaz yüzey sıcaklığının ALTINDAYKEN
+        # (T_r < T_s) terim gerçekten negatiftir — konveksiyon yüzeyi
+        # ısıtmaz, SOĞUTUR. Kırpma yüzünden yayımlanan üçlü kendi içinde
+        # kapanmıyordu (ölçüldü h=5.000, T_r=1133,53 K, T_s=2050 K: gerçek
+        # h·ψ·(T_r−T_s) = −4.583,4 kW/m², yayımlanan +0,0; q_rerad =
+        # +901,3 kW/m²; 0,0 − 901,3 ≠ 0,0). Fiziksel sıfırlama GERİLEMEDE
+        # ve ``q_net_W_m2``dedir; yayımlanan konvektif akı kırpılmaz, işaret
+        # kendi alanında durur.
         return {
             'recession_rate_m_s': 0.0,
             'blowing_blockage': 1.0,
             'b_prime': 0.0,
-            'q_conv_blocked_W_m2': max(q_unblown, 0.0),
+            'q_conv_blocked_W_m2': q_unblown,
             'q_reradiated_W_m2': q_rerad,
             'q_net_W_m2': 0.0,
             'blockage_basis': ('no blowing: the surface is not ablating, so '
@@ -650,7 +716,7 @@ class ThermalProtectionAnalyzer:
                 raise ValueError("time_s and q_net_W_m2 must have same length")
             if t_arr.size < 2 or np.any(np.diff(t_arr) <= 0):
                 raise ValueError("time_s must be increasing with >= 2 points")
-            total_heat_J_m2 = float(np.trapz(q_arr, t_arr))
+            total_heat_J_m2 = float(_trapezoid(q_arr, t_arr))
             duration = float(t_arr[-1] - t_arr[0])
             q_mean = total_heat_J_m2 / duration
         else:
@@ -753,10 +819,15 @@ class ThermalProtectionAnalyzer:
                     f"exceeds the station radius {radius * 1e3:.1f} mm — the "
                     f"station would burn through before the end of burn")
 
-        model_valid = not reasons
-        # Kapı yalnız YENİ yolda statü düşürür (bkz. docstring'deki GEÇİCİ
-        # İKİLİK notu): eski yolda üç motorun bugünkü sayısal davranışı
-        # korunur, ihlal BİLGİ olarak raporlanır.
+        # ÖH P4B1-14 ONARIMI — TEK DAMGA, İKİ YOL.
+        # Eskiden kapı statüyü YALNIZ yeni yolda düşürüyordu; aynı fiziksel
+        # zarf ihlali eski yolda 'sized' + sayılı kalınlık, yeni yolda
+        # 'NOT_MODELLED' + None damgası alıyordu (ölçüldü: aynı gerileme
+        # tavanı ihlalinde eski yol 278,775 mm — HTTP ucunda 32,143 mm —
+        # yeni yol None). Modülün kendi docstring'i ikiliğin motorlar yeni
+        # yola geçince kalkmasını şart koşuyordu; üç motor da geçti, ikilik
+        # yalnız uçta yaşıyordu. Zarfın dışında bir kalınlık ya İKİ yolda
+        # yayımlanır ya HİÇBİRİNDE: aşağıdaki kapı artık yola bakmaz.
         #
         # v2.6.27 blokaj denetimi EK HÜKMÜ — no_net_heating'de kalınlık
         # YAYIMLANMAZ. Eskiden bu rejim required_thickness = 0.0 ile 'sized'
@@ -768,36 +839,88 @@ class ThermalProtectionAnalyzer:
         # sıfır olduğu bilgisi total_recession_mm = 0 alanında durur.
         no_net = (use_energy_balance
                   and recession_regime == 'no_net_heating')
-        gated_out = (bool(reasons) and use_energy_balance) or no_net
+        gated_out = bool(reasons) or no_net
         thickness_status = 'NOT_MODELLED' if gated_out else 'sized'
+
+        # ÖH P4B1-14 ONARIMI (ikinci ayak): HİÇBİR ŞEY MODELLENMEDİYSE
+        # ``model_valid`` YEŞİL OLAMAZ. no_net_heating dalında zarf
+        # gerekçesi (``reasons``) boş olduğu için bayrak True kalıyordu ve
+        # ona bakan her tüketici (protection_panel.js) kalınlığı
+        # yayımlanmamış bir sonuç için geçerli-model işareti alıyordu.
+        model_valid = (not reasons) and not gated_out
 
         if reasons:
             validity_note = (
                 "MODEL OUT OF ENVELOPE: " + "; ".join(reasons) + ". "
-                + ("No thickness is published for this station: a Level-1 "
-                   "steady Q* model cannot size it. Use an in-depth "
-                   "pyrolysis/char (CMA-class) analysis, or change the "
-                   "design point (flux, burn time, material)."
-                   if use_energy_balance else
-                   "The flux came from the caller (no surface energy balance "
-                   "was solved here), so this is reported FOR INFORMATION "
-                   "ONLY and the legacy thickness is still published — see "
-                   "the two-path note in the method docstring."))
+                "No thickness is published for this station: a Level-1 "
+                "steady Q* model cannot size it. Use an in-depth "
+                "pyrolysis/char (CMA-class) analysis, or change the design "
+                "point (flux, burn time, material)."
+                + ("" if use_energy_balance else
+                   " The flux came from the CALLER (no surface energy "
+                   "balance was solved here), so the envelope was judged on "
+                   "the caller-supplied flux — see flux_basis."))
         elif no_net:
+            # ÖH P4B1-12 ONARIMI — gerekçe metni artık yanındaki SAYILARI
+            # okuyor. Eski metin iki yerde gerçeği ters söylüyordu:
+            #   (a) "yüzey geldiği kadarını geri ışıyor" denge cümlesi,
+            #       konvektif terim NEGATİF iken de basılıyordu (gaz yüzey
+            #       sıcaklığının 916,5 K altında: konveksiyon ısıtmıyor,
+            #       soğutuyor — ortada bir denge yok);
+            #   (b) "birkaç yüz K yakınındaysa" uyarısı SABİT metindi: −50 K
+            #       ile 916,5 K fark bit birebir aynı notu üretiyordu.
+            _q_conv = float(q_conv_blocked)
+            _q_rerad = float(q_reradiated)
+            _dT = float(T_recovery_K) - float(T_surface_K)
+            # Uyarının ölçütü UYDURULMAZ: malzemenin KENDİ belgelenmiş
+            # yüzey sıcaklığı bandı (``T_ablation_band_K``). Kurtarma
+            # sıcaklığı o bandın içindeyse, band içinden başka bir T_s
+            # seçimi hükmü çevirebilir — uyarı ancak o zaman doğrudur.
+            _band_lo, _band_hi = (float(v)
+                                  for v in rec['T_ablation_band_K'])
+            if _q_conv <= 0.0:
+                _neden = (
+                    f"the recovery temperature {float(T_recovery_K):.0f} K is "
+                    f"BELOW the ablation temperature, so convection REMOVES "
+                    f"heat from the surface "
+                    f"(q_conv_blocked = {_q_conv / 1e3:.1f} kW/m2) instead of "
+                    f"delivering it, and re-radiation "
+                    f"({_q_rerad / 1e3:.1f} kW/m2) is a further loss")
+            elif abs(_q_conv - _q_rerad) <= 0.05 * max(_q_conv, _q_rerad):
+                _neden = (
+                    f"the surface re-radiates as much as the unblocked "
+                    f"convection delivers "
+                    f"({_q_conv / 1e3:.1f} vs {_q_rerad / 1e3:.1f} kW/m2, "
+                    f"within 5%)")
+            else:
+                _neden = (
+                    f"the unblocked convection delivers only "
+                    f"{_q_conv / 1e3:.1f} kW/m2 while the surface re-radiates "
+                    f"{_q_rerad / 1e3:.1f} kW/m2, so re-radiation dominates")
             validity_note = (
                 "NO NET HEATING: at the steady ablation temperature "
-                f"{T_surface_K:.0f} K the surface re-radiates as much as the "
-                "unblocked convection delivers, so the steady-ablation "
+                f"{T_surface_K:.0f} K " + _neden + ", so the steady-ablation "
                 "recession is ~0 (total_recession_mm = 0). NO thickness is "
                 "published: with zero recession the liner is sized by the "
                 "case/bond-line temperature limit (NASA SP-8093 practice), "
                 "i.e. by transient conduction and char depth, which this "
                 "Level-1 Q* module does not model. A zero thickness would "
-                "not be a design, it would be a silent hazard. CAUTION: if "
-                "the recovery temperature is within ~a few hundred K of the "
-                "surface temperature, this verdict also sits on the model's "
-                "own T_s band edge — check T_ablation_band_K before trusting "
-                "the zero-recession claim.")
+                "not be a design, it would be a silent hazard."
+                + ((f" CAUTION: the recovery temperature "
+                    f"{float(T_recovery_K):.0f} K lies INSIDE this material's "
+                    f"own steady-ablation temperature band "
+                    f"{_band_lo:.0f}-{_band_hi:.0f} K ({abs(_dT):.0f} K from "
+                    f"the T_s used here), so a different T_s within the same "
+                    f"documented band could flip this verdict — check "
+                    f"T_ablation_band_K before trusting the zero-recession "
+                    f"claim.")
+                   if _band_lo <= float(T_recovery_K) <= _band_hi else
+                   (f" The recovery temperature {float(T_recovery_K):.0f} K "
+                    f"is {abs(_dT):.0f} K from the surface temperature and "
+                    f"OUTSIDE the T_ablation_band_K "
+                    f"{_band_lo:.0f}-{_band_hi:.0f} K, so the zero-recession "
+                    f"claim does not rest on where inside that band T_s was "
+                    f"taken.")))
         else:
             validity_note = None
 
@@ -938,13 +1061,30 @@ class ThermalProtectionAnalyzer:
         k = float(mat['thermal_conductivity'])
         rho = float(mat['density'])
         cp = float(mat['specific_heat'])
-        limit_K = float(mat['max_service_temp'])
+        # ÖH D37 A2-1 / F-01 + M2 — TEK EŞİK: sınır artık
+        # ``materials_db.temperature_limits(rec).allowable_K`` =
+        # min(allowable_temperature, max_service_temp). Eski satır
+        # ``mat['max_service_temp']`` okuyordu: ss_304'te 1143 K (izinli 1073
+        # K'nın 70 K ÜSTÜ) ile "sınıra süre" yayımlanıyor, aynı motorun
+        # termal FEA'sı 1073 K'ye göre hüküm veriyordu (A1 §1.4 ölçümü).
+        # Yayımlanan alan adı (``max_service_temp_K``) sözleşme gereği
+        # korunur, değeri artık merdivenin izin basamağıdır ve
+        # ``temperature_limits`` bloğu yanıtta durur (ÖNEMLİ: ss_304'te
+        # time_to_limit_s kısalır; steel_4130'da 811 K bit-aynı).
+        _limits = temperature_limits(mat)
+        if _limits['allowable_K'] is None:
+            raise ValueError(
+                f"materials_db['{wall_material}'] kaydında izin sıcaklığı "
+                "(allowable_temperature / max_service_temp) yok — sınıra "
+                "süre uydurulmaz")
+        limit_K = float(_limits['allowable_K'])
         # F078: erime noktası ayrı bir zarf sınırıdır — servis sınırı YAPISAL
         # (sürünme) eşiktir ve erime noktasının altındadır (ör. karbon çelik
         # 811 K servis / 1773 K erime). Kayıtta yoksa servis sınırına düşülür
         # (uydurma değer üretilmez; o durumda erime denetimi servis sınırıyla
         # çakışır ve muhafazakâr yönde kalır).
-        melting_K = float(mat.get('melting_point', limit_K))
+        melting_K = float(_limits['melting_K'] if _limits['melting_K']
+                          is not None else limit_K)
         alpha = k / (rho * cp)
 
         L = float(wall_thickness_m)
@@ -956,6 +1096,29 @@ class ThermalProtectionAnalyzer:
         dt_stable = dx * dx / (2.0 * alpha * (1.0 + Bi))
         dt = cfl_safety * dt_stable
         n_steps = max(1, int(math.ceil(burn_time_s / dt)))
+
+        # --- HESAP BÜTÇESİ KAPISI (ÖH D15 / P4B1-13) ----------------------
+        # Bkz. ``HEAT_SINK_MAX_STEPS`` künyesi: adım sayısı üç girdiyle
+        # birlikte ∝ t_yanma·n_düğüm²/L² büyüyor ve üçünde de üst sınır
+        # yoktu. Çözümü BAŞLATIP kilitlenmek yerine, çözülemeyeceği ÖNCEDEN
+        # bilinen istek reddedilir ve hangi alanların bütçeyi taşırdığı
+        # adıyla söylenir. Adım sayısı zaten burada, marş başlamadan önce
+        # bilinmektedir; tahmin değildir.
+        if n_steps > HEAT_SINK_MAX_STEPS:
+            raise HeatSinkBudgetExceeded(
+                "The explicit finite-difference march needs {n:,} time steps "
+                "(stability limit dt = cfl*dx^2/(2*alpha*(1+Bi)) = {dt:.3e} s "
+                "for a {L:.3f} mm wall on {nn} nodes over {bt:g} s), which "
+                "exceeds the single-request budget of {b:,} steps. The step "
+                "count grows as burn_time * n_nodes^2 / wall_thickness^2, so "
+                "reduce burn_time_s, reduce n_nodes, or increase "
+                "wall_thickness_m. No result is produced: this request would "
+                "occupy the server for roughly {est:.0f} s.".format(
+                    n=n_steps, dt=dt, L=L * 1e3, nn=n, bt=burn_time_s,
+                    b=HEAT_SINK_MAX_STEPS,
+                    est=n_steps / 289_000.0),
+                invalid_fields=['burn_time_s', 'n_nodes', 'wall_thickness_m'],
+                n_steps=n_steps, budget=HEAT_SINK_MAX_STEPS)
         dt = burn_time_s / n_steps
         Fo = alpha * dt / (dx * dx)
 
@@ -1050,6 +1213,14 @@ class ThermalProtectionAnalyzer:
             'T_outer_K': float(T[-1]),
             'T_max_K': float(np.max(T)),
             'max_service_temp_K': limit_K,
+            # F-01/M2: alan adı korunur; değer merdivenin İZİN basamağıdır.
+            'limit_K_basis': (
+                'materials_db.temperature_limits(rec).allowable_K = '
+                'min(allowable_temperature, max_service_temp) — field name '
+                'max_service_temp_K is kept for the response contract; the '
+                'value is the ALLOWABLE rung of the single temperature '
+                'ladder (F-01/M2), not the bare max_service_temp record'),
+            'temperature_limits': _limits,
             'exceeds_limit': bool(float(T[0]) >= limit_K
                                   or time_to_limit is not None),
             'time_to_limit_s': time_to_limit,
@@ -1093,10 +1264,21 @@ class ThermalProtectionAnalyzer:
             h_g * (T_recovery - T_w) + q_gas_rad = F * eps * sigma * T_w^4
         Bisection ile çözülür (sağ taraf artan, sol taraf azalan → tek kök).
 
+        ÖH KU H-14 (RUS R1) — YÖN BEYANI DÜZELTİLDİ: bu TEK YÜZEYLİ bir
+        dengedir; uzantının DIŞ yüzeyinin uzaya ışınımı da ihmal edilir ve
+        bu ihmal T_w'yi YÜKSELTİR (kötümser yön). Zarubin 2013 (Inzhenernyi
+        zhurnal, sayı 8, makale 888, Denk. 1-4 ve s. 6 örneği; RUS notunun
+        okuması) iki yüzeyli dengede 1298 K bulur; bu fonksiyon aynı
+        girdiyle F=1'de 1500 K verir. Yani varsayılan (F=1, q_gas=0) durumda
+        NET yön geometriye bağlıdır. ``unconservative`` bayrağının ANLAMI
+        değişmedi (yalnız aşağıdaki iki iç-yüzey ihmalini işaretler); notlar
+        artık iki yönü de söyler. Bayrağın kendisini değiştirmek hüküm
+        değiştirir (ÖNEMLİ, devir).
+
         DÜZELTME (v2.6.2, fizik denetimi F079): denklem doğruydu ama iki
         fiziksel terim SESSİZCE ihmal ediliyordu ve her ikisi de T_w'yi
-        EKSİK tahmin ettiriyordu (güvensiz yön, çünkü bu değer doğrudan
-        C-103 1640 K / C-C 1920 K malzeme seçim kararını veriyor):
+        EKSİK tahmin ettiriyordu (iç yüzey için güvensiz yön, çünkü bu değer
+        doğrudan C-103 1640 K / C-C 1920 K malzeme seçim kararını veriyor):
           (a) Uzantının iç yüzeyi kendini görür → uzaya görüş faktörü F < 1,
               net ışınım kaybı F kadar azalır (kendini gören kesir aynı
               sıcaklıkta olduğu için net alışverişi ~sıfırdır).
@@ -1158,7 +1340,8 @@ class ThermalProtectionAnalyzer:
                 rec = get_material(material)  # KeyError bilinmeyende
                 mat_name = rec['name']
                 mat_source = rec['source']
-                limit_K = float(rec['allowable_temperature'])
+                # F-01/M2: tek eşik merdiveninin izin basamağı.
+                limit_K = float(temperature_limits(rec)['allowable_K'])
                 if emissivity is None:
                     emissivity = float(rec['emissivity'])
 
@@ -1214,9 +1397,15 @@ class ThermalProtectionAnalyzer:
             unconservative_note = (
                 "Non-conservative: " + "; ".join(omissions)
                 + ". Both omissions push the equilibrium wall temperature "
-                  "DOWN, so the material verdict below is optimistic. Supply "
-                  "view_factor and q_gas_radiation_W_m2 for a bounding "
-                  "estimate.")
+                  "DOWN, so on these two counts the material verdict below "
+                  "is optimistic. Supply view_factor and q_gas_radiation_W_m2 "
+                  "for a bounding estimate. Opposite direction, always "
+                  "present: this is a single-surface balance and the "
+                  "OUTER-surface emission to space is not included, which "
+                  "pushes the wall temperature UP (pessimistic); the net "
+                  "direction therefore depends on the geometry (Zarubin "
+                  "2013, Inzhenernyi zhurnal no. 8, art. 888: two-surface "
+                  "1298 K vs this single-surface balance 1500 K at F=1).")
 
         result = {
             'T_wall_eq_K': Tw,
@@ -1243,7 +1432,10 @@ class ThermalProtectionAnalyzer:
                 "axial conduction and external convection neglected "
                 "(approximate). View factor F and incident gas radiation "
                 "are explicit inputs; their defaults (F=1, q_gas_rad=0) are "
-                "NON-CONSERVATIVE — both raise Tw when included."),
+                "NON-CONSERVATIVE — both raise Tw when included. The "
+                "balance is single-surface: outer-surface emission is not "
+                "included, which is CONSERVATIVE (it lowers Tw when "
+                "included; Zarubin 2013 two-surface model)."),
             'source': mat_source,
         }
         return result

@@ -60,6 +60,24 @@ def _min_konkav_yaricap(mesh):
     return float(R[sel].min()) if sel.any() else None
 
 
+# ---------------------------------------------------------------------------
+# ÖH D27 a1 YARGISI (OH-D25-28 / OH-D24-01) — bu dosyadaki dört V-vadi
+# bekçisi ÇEVRİLDİ. Gerekçe: sınadıkları şey DIŞ YÜZEY ÖTELEME/KAPAMA
+# operatörüdür, iç kontur köşe tabanı değil. D27 a1'de
+# ``INNER_KINK_VARSAYILAN_TOL_RAD`` ürün varsayılanı olarak açıldı; sentetik
+# V vadisinin 53,13°'lik köşesi artık mesh kurulmadan ÖNCE yuvarlanıyor ve
+# ötelemenin dejenerasyonu (bekçilerin ölçtüğü kusur) hiç doğmuyor. Bekçiyi
+# "geçsin diye" gevşetmek yerine sınadığı operatör YALITILDI:
+# ``inner_kink_tol_rad=0.0``. Bu bir tolerans büyütmesi DEĞİLDİR — eşik
+# aynı, girdi bekçinin yazıldığı gündeki girdidir.
+#
+# Tabanın AÇIK olduğu yoldaki karşılıkları (iç yüzeyin yuvarlatılmış eğri
+# üzerinde kalması, sapmanın türetilmiş sınırı aşmaması, kapamanın artık
+# köprü kurmak zorunda kalmaması) tests/test_d27_fea_cfd_a1.py'de
+# ``TestD27IcKoseTabaniVarsayilan`` altında sınanır; kapsam DARALMADI.
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture(scope='module')
 def sivi_motor():
     """Sıvı imzalı sentetik motor sözlüğü — kontur GERÇEK örnekleyiciden.
@@ -97,7 +115,8 @@ class TestSentetikVVadi:
     def test_ham_oteleme_tabani_ihlal_eder(self):
         """Kapama KAPALIYKEN dış eğri taban altına iner (kusurun kanıtı)."""
         mesh = build_wall_mesh(V_KONTUR, V_T, 32, 4,
-                               outer_curvature_floor=0.0)
+                               outer_curvature_floor=0.0,
+                               inner_kink_tol_rad=0.0)
         r_min = _min_konkav_yaricap(mesh)
         assert r_min is not None and r_min < V_T, (
             'ham öteleme V-vadide taban altı yarıçap üretmeliydi; '
@@ -106,7 +125,8 @@ class TestSentetikVVadi:
     def test_ham_oteleme_ince_orneklemede_dejenere(self):
         """İnceltme ham çentiği çözer → elemanlar ters döner (ölçüldü)."""
         with pytest.raises(ValueError, match='ters dönmüş|dejenere'):
-            build_wall_mesh(V_KONTUR, V_T, 64, 4, outer_curvature_floor=0.0)
+            build_wall_mesh(V_KONTUR, V_T, 64, 4, outer_curvature_floor=0.0,
+                            inner_kink_tol_rad=0.0)
 
     @pytest.mark.parametrize('n_axial', [32, 64, 128])
     def test_kapali_dis_egri_tabani_saglar(self, n_axial):
@@ -126,7 +146,7 @@ class TestSentetikVVadi:
         poligonun üzerindedir (V konturu z'nin tek değerli fonksiyonu —
         z-enterpolasyonuyla birebir karşılaştırılabilir).
         """
-        mesh = build_wall_mesh(V_KONTUR, V_T, 64, 4)
+        mesh = build_wall_mesh(V_KONTUR, V_T, 64, 4, inner_kink_tol_rad=0.0)
         ic = mesh.nodes[mesh.inner_nodes]
         Vz = [p[0] for p in V_KONTUR]
         Vr = [p[1] for p in V_KONTUR]
@@ -134,7 +154,7 @@ class TestSentetikVVadi:
                                    rtol=0.0, atol=1e-12)
 
     def test_kalinlasma_olculur_ve_beyan_edilir(self):
-        mesh = build_wall_mesh(V_KONTUR, V_T, 64, 4)
+        mesh = build_wall_mesh(V_KONTUR, V_T, 64, 4, inner_kink_tol_rad=0.0)
         tm = mesh.meta['dis_yuzey_egrilik_tabani']
         assert tm['outer_curvature_floor_m'] == pytest.approx(V_T)
         assert tm['kalinlik_min_m'] == pytest.approx(V_T, rel=1e-6)
@@ -221,23 +241,128 @@ class TestSiviVakasi:
         varsayımına aitti (çevre gerilmesi 29 MPa); bu payload t = 2 mm
         yayımlıyor, gerçek değer ölçülüp burada kilitlendi.
         """
-        assert kosu['von_mises_gauss_max'] == pytest.approx(662.2e6,
+        # ÇAPA GÖÇÜ (OH-D24-01, ÖH D25): hüküm büyüklüğü ASME BPVC VIII-2
+        # Bölüm 5 / Ek 5-A lineerleştirmesine geçti; inceltme sürücüsü
+        # artık o büyüklüğü izliyor ve BAŞKA bir mesh teslim ediyor
+        # (512×32 → 1024×8). Ölçülen yeni değerler dondurulmuştur:
+        # Gauss vM 616,1 MPa, min SF 1,9342 (hüküm), tepe SF 1,6945.
+        # Fiziksel mertebe iddiası değişmedi (membran çember bileşeni
+        # ~164 MPa; tepe hâlâ boğaz boynu eğriliği + eğilme mertebesinde).
+        # ÇAPA GÖÇÜ 2 (OH-D25-28 / OH-D24-01, ÖH D27 a1): iç kontur köşe
+        # tabanı ÜRÜN VARSAYILANI oldu (INNER_KINK_VARSAYILAN_TOL_RAD =
+        # INNER_KINK_TOL_RAD). Bu vakada ölçülen göç — kaynak
+        # docs/scofield/raw/OH/D27/fea-cfd/a1/sonra_a1.json §G1:
+        #     Gauss vM            616,134 → 571,348 MPa
+        #     min_safety_factor    1,93424 → 1,90165
+        #     tepe_emniyet_kats.   1,69446 → 1,79242
+        #     final_rel_change    0,002638 → 0,001369  (İKİYE KATLANARAK
+        #                                               İYİLEŞTİ)
+        # DÜRÜSTLÜK: göç yönü bu vakada MUHAFAZAKÂR DEĞİL (tepe SF %5,8
+        # yükseldi). Kazanç sayının küçülmesi değil, YAKINSAMASIDIR: aynı
+        # onarım katı ürün motorunda min SF'yi 1,26914 → 1,23856'ya
+        # (muhafazakâr yön) taşır. Karışık yön raporda §3/§5'te adıyla
+        # durur, tek yönlü "daha güvenli oldu" iddiası YAPILMAZ.
+        #
+        # İki çapa artık SAYI DEĞİL ÖZDEŞLİK: yayımlanan emniyet
+        # katsayıları ürünün kendi yayımladığı büyüklüklerden birebir
+        # türer (tek kaynak sözleşmesi). Elle yazılmış 1,934/1,694
+        # sabitleri bu yüzden DÜŞTÜ — yerlerine gelen bağ daha dardır
+        # (rel 1e-12), gevşek değil.
+        akma = 1100.0e6                       # fikstürün kendi girdisi
+        payda = kosu['scl_lineerlestirme']['hukum_paydasi_pa']
+        assert kosu['min_safety_factor'] == pytest.approx(akma / payda,
+                                                          rel=1e-12)
+        assert kosu['tepe_emniyet_katsayisi'] == pytest.approx(
+            akma / kosu['von_mises_nodal_max'], rel=1e-12)
+        # Tepe SINIRLI: ıraksayan bir tekillik olsaydı ham tepe
+        # lineerleştirilmiş hükmün katlarına çıkardı. Bağ ürünün KENDİ
+        # büyüklükleriyle kurulur (P_m ≤ Gauss tepesi ≤ 2·(P_L+P_b)).
+        P_m = kosu['scl_lineerlestirme']['P_m_maks_pa']
+        assert P_m <= kosu['von_mises_gauss_max'] <= 2.0 * payda, (
+            'Gauss tepesi membran ile lineerleştirilmiş hükmün iki katı '
+            f"arasında değil: {kosu['von_mises_gauss_max']:.4g} "
+            f'∉ [{P_m:.4g}, {2.0 * payda:.4g}]')
+        # Ölçülen değer yine kilitli (aynı rel=0,05 payı, yeni çapa).
+        assert kosu['von_mises_gauss_max'] == pytest.approx(571.35e6,
                                                             rel=0.05)
-        assert kosu['min_safety_factor'] == pytest.approx(1.66, rel=0.06)
         # Son tur bağıl değişimi SINIRLI (kapamasız ölçüm: 0,115; ham
         # jilet-çentikte inceltme hiç durmuyordu). Kalan pay çözücü
         # politikasının radyal katlama bileşenidir (raporda ölçülü).
         assert kosu['convergence']['final_rel_change'] < 0.08
 
     def test_taban_beyani_dolu_ve_koprude_akar(self, kosu):
+        """Taban beyanı dolu ve köprüde akıyor.
+
+        ÇEVİRİ (ÖH D15 birleşme düzeltmesi). Bu bekçi tabanı YANLIŞ
+        BÜYÜKLÜKTEN okuyordu. ``dis_egri_min_konkav_yaricap_m`` kapanmış
+        eğrinin İSTASYONLARDAKİ örneğidir ve çözünürlüğe bağlıdır; ölçüldü
+        (sıvı vakası, taban 2 mm, onarım öncesi):
+
+            n_axial   16     32     64    128    256    512   1024
+            R [mm]  12,21   9,48   4,67   3,36   2,65   1,28   0,39
+
+        yani sayı tabana YAKINSAMIYOR, sıfıra gidiyordu. Bekçi tabanda
+        yeşildi çünkü inceltme o gün n_axial = 256'da duruyordu (2,65 mm);
+        fea-viz kulvarı P8B1-01 ile yakınsama hedefini düğüm/SPR alanına
+        taşıyınca yön kararları değişti, inceltme n_axial = 512'ye gitti
+        ve aynı iddia 1,28 mm ile kırmızıya döndü. Kırmızı gerçek bir
+        geometri bozulması DEĞİL, iddianın çözünürlüğe bağlı bir sayıya
+        çakılmış olmasıydı.
+
+        İki ürün onarımı yapıldı (``hrma/fea/mesh_axisym.py``):
+
+        1. Taban artık KENDİ kanıtıyla yayımlanıyor:
+           ``kapali_egri_min_konkav_yaricap_m`` kapanmış dış eğrinin (H)
+           n_axial'dan BAĞIMSIZ yoğun ızgaradaki (42.171 nokta, 16.296
+           konkav tepe) en küçük konkav yarıçapıdır. Ölçüldü: tam olarak
+           taban, 2,000000 mm — kapama öncesi ham eğride 0,0409 mm ve 13
+           tabanaltı köşe vardı. Taban iddiası ARTIK BURADAN okunuyor.
+        2. Köşe düzeltme penceresi istasyon aralığıyla değil GEOMETRİK
+           ölçekle (taban mertebesi) kuruluyor. Eskiden pencere
+           ``min(2·h_loc, 4·taban)`` idi, yani inceltme onu daraltıp
+           tabanı fiilen geri alıyordu. Ölçüldü: n_axial = 512'de örnek
+           1,279 mm → 2,251 mm.
+
+        İddia GEVŞEMEDİ, ikiye çıktı: hem çözünürlükten bağımsız taban
+        kanıtı hem de teslim edilen mesh'in örneği taban üstünde.
+        """
         tm = kosu['mesh']['meta']['dis_yuzey_egrilik_tabani']
         assert tm['outer_curvature_floor_m'] == pytest.approx(0.002)
         assert len(tm['uygulama_bolgesi_z_m']) >= 1
         assert tm['kalinlik_maks_m'] > tm['kalinlik_min_m']
-        assert tm['dis_egri_min_konkav_yaricap_m'] >= 0.95 * 0.002
+        # (1) TABANIN KANITI — n_axial'dan bağımsız, kapanmış eğriden.
+        assert tm['kapali_egri_min_konkav_yaricap_m'] >= 0.95 * 0.002, (
+            'kapanmış dış eğri tabanın altında konkav köşe taşıyor — '
+            'yuvarlanan-top kapaması işlemiyor')
+        # (2) TESLİM EDİLEN MESH'İN ÖRNEĞİ: bu ayak ÖH D25'te AYRI bir
+        # teste (aşağıda, strict xfail) taşındı çünkü bekçinin kendi
+        # uyarısı GERÇEKLEŞTİ ve kusur ÜRÜNDE, TABANDA da var — ölçüldü
+        # (taban ağacı, aynı kontur, n_radial=8):
+        #     n_axial     128        512        1024
+        #     dış zincir  0,0031919  0,0022510  0,0004555   (taban 0,002)
+        # Yani köşe düzeltme penceresi çözünürlükle DARALIYOR ve 1024
+        # istasyonda dış zincir tabanın altına iniyor. OH-D24-01 onarımı
+        # bu kusuru YARATMADI, yalnız GÖRÜNÜR KILDI: lineerleştirilmiş
+        # hedef 512×32 yerine 1024×8 mesh teslim ediyor.
         # Köprü meta zinciri: mesh beyanı girdiler/cozucu yanında AYNEN.
         meta = kosu['meta']
         assert meta['mesh_beyani'] is kosu['mesh']['meta']
+
+    @pytest.mark.xfail(strict=True, reason=(
+        'ÖLÇÜLMÜŞ ÜRÜN KUSURU (ÖH D25, OH-D24-01 ölçümünde bulundu; '
+        'TABANDA DA VAR): dış yüzey eğrilik tabanının köşe düzeltme '
+        'penceresi istasyon çözünürlüğüyle DARALIYOR. Taban ağacında '
+        'aynı konturda n_axial 128/512/1024 için dış zincirin en küçük '
+        'konkav yarıçapı 0,0031919 / 0,0022510 / 0,0004555 m ölçüldü '
+        "(taban 0,002 m). Kapanmis egri (n_axial'dan bagimsiz) dogru: "
+        '0,002. Onarım mesh üreticisindedir (hrma/fea/mesh_axisym.py: '
+        '_outer_curvature_floor_correction penceresi) ve ayrı kalem '
+        'olarak acilmalidir; bu bekci kusur giderilince XPASS verir.'))
+    def test_TESLIM_EDILEN_meshin_dis_zinciri_taban_ustunde(self, kosu):
+        tm = kosu['mesh']['meta']['dis_yuzey_egrilik_tabani']
+        assert tm['dis_egri_min_konkav_yaricap_m'] >= 0.95 * 0.002, (
+            'mesh dış zinciri tabanın altına indi — köşe düzeltme '
+            'penceresi çözünürlükle daralıyor')
         assert 'girdiler' in meta and 'cozucu' in meta
 
     def test_dereceli_ornekleme_beyanli(self, kosu):

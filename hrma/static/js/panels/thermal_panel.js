@@ -20,6 +20,24 @@
     const U = window.AnalysisDock.ui;
     const T = U.t;                       // çeviri kısayolu
 
+    // V3 KK 3. tur (§28-50 (c)) — TR KİPİNDE NOKTALI ONDALIK.
+    // ÖLÇÜLDÜ (docs/user_guide/img/v3_0/kanit/kayit_tr.json, TR kip, örnek
+    // katı, güverte termal paneli): '51.20 MW/m²', '616.4 kW', '0.27',
+    // '493.16 m²'. `U.fmt` her zaman nokta basar; ekrandaki sayı metni
+    // güvertenin TEK biçim kaynağından (`U.num` → I18N.number) gelir.
+    // Basamak sayısı DEĞİŞMEZ; sayı yoksa U.fmt ile aynı '—' imi.
+    function numL(x, d) {
+        return (x == null || !Number.isFinite(x)) ? '—'
+            : U.num(x, d == null ? 2 : d);
+    }
+
+    // Sunucu cümlesi (ör. ıslak alan konturu beyanı) TR kipte çevrilir;
+    // eşleşme yoksa AYNEN (i18n_charts.js serverText sözleşmesi).
+    function SRV(text) {
+        return (window.I18N && typeof window.I18N.serverText === 'function')
+            ? window.I18N.serverText(text) : text;
+    }
+
     // FALLBACK listesi — /api/materials kataloğu yüklenemezse kullanılır
     // (anahtarlar heat_transfer_analysis.py self.materials içinde çözülür;
     // katalog gelirse 'liner'+'shell' etiketli tam liste bunun yerine geçer)
@@ -32,24 +50,24 @@
     // çözülüyor — ölçüldü: k 0,5-401 W/m·K, T_allow 450-3300 K.
     const MATERIALS = [
         ['steel', 'Steel (generic)', 'mat.steelGeneric'],
-        ['steel_4130', 'Steel AISI 4130'],
-        ['steel_4340', 'Steel AISI 4340'],
-        ['ss_304', 'Stainless 304'],
-        ['ss_316', 'Stainless 316'],
-        ['ss_17_4ph', 'Stainless 17-4PH (H900)'],
+        ['steel_4130', 'Steel AISI 4130', 'mat.steelAisi4130'],
+        ['steel_4340', 'Steel AISI 4340', 'mat.steelAisi4340'],
+        ['ss_304', 'Stainless 304', 'mat.stainless304'],
+        ['ss_316', 'Stainless 316', 'mat.stainless316'],
+        ['ss_17_4ph', '17-4PH (H900)'],
         ['aluminum', 'Aluminum', 'mat.aluminum'],
-        ['aluminum_6061', 'Aluminum 6061-T6'],
-        ['al_7075_t6', 'Aluminum 7075-T6'],
-        ['al_2024_t3', 'Aluminum 2024-T3'],
+        ['aluminum_6061', 'Aluminum 6061-T6', 'mat.aluminum6061'],
+        ['al_7075_t6', 'Aluminum 7075-T6', 'mat.aluminum7075'],
+        ['al_2024_t3', 'Aluminum 2024-T3', 'mat.aluminum2024'],
         ['copper', 'Copper', 'mat.copper'],
         ['cucrzr', 'CuCrZr (C18150)'],
-        ['beryllium_copper_c17200', 'Beryllium copper C17200'],
+        ['beryllium_copper_c17200', 'BeCu C17200'],
         ['inconel', 'Inconel'],
         ['inconel_718', 'Inconel 718'],
         ['inconel_625', 'Inconel 625'],
-        ['titanium_6al4v', 'Titanium Ti-6Al-4V'],
-        ['ti_grade2_cp', 'Titanium CP Grade 2'],
-        ['magnesium_az31b', 'Magnesium AZ31B'],
+        ['titanium_6al4v', 'Titanium Ti-6Al-4V', 'mat.titanium6al4v'],
+        ['ti_grade2_cp', 'Titanium CP Grade 2', 'mat.titaniumGrade2'],
+        ['magnesium_az31b', 'Magnesium AZ31B', 'mat.magnesiumAz31b'],
         ['graphite', 'Graphite', 'mat.graphite'],
         ['ablative', 'Ablative liner', 'mat.ablativeLiner'],
     ];
@@ -73,6 +91,85 @@
         if (sf < 1.0) return 'err';
         if (sf < 2.0) return 'warn';   // heat_transfer_analysis.py uyarı eşiği
         return 'ok';
+    }
+
+    /* ÖH D37 A2-1 termal 7. tur — karar §28-24 §3/§4 (panel çelişkisi):
+       TEK EŞİK. Kart rengi, "Material limits … allowable" satırı ve
+       grafikteki "Allowable limit" çizgisi sunucunun KANONİK izin
+       basamağını okur: `safety_analysis.threshold_ladder.allowable_K`
+       (= materials_db.temperature_limits(rec).allowable_K = min(
+       allowable_temperature, max_service_temp)); sıcaklık emniyet
+       katsayısı ve critical `temp_exceeds_allowable` uyarısı da bu
+       sayıdan kurulur. ÖLÇÜLDÜ (Sunum 2 §3 [4. tur] bilgi satırı): ham
+       `material_properties.allowable_temperature` okunurken pencere
+       vakalarında (cidar 811-1000 K, bakırda 723-1000 K) kart YEŞİL ve
+       "1000 K allowable" basılıyor, aynı yanıt critical uyarı veriyordu.
+       Sunucu basamağı yayımlamadıysa sayı UYDURULMAZ (null → '—', çizgi
+       yok); ham alana geri düşülmez. */
+    function canonicalAllowableK(ta) {
+        const sa = (ta && ta.safety_analysis) || {};
+        const tl = sa.threshold_ladder;
+        const v = tl && tl.allowable_K;
+        return (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+    }
+
+    /* V3 KK (KAB devri 5, karar §28-31 tek izin basamağı): aynı yanıtta
+       `material_properties.allowable_temperature` (malzeme kaydının ısıl izin
+       ADAYI) ile `threshold_ladder.allowable_K` (hükmü veren basamak) farklı
+       olabiliyor — ÖLÇÜLDÜ 'steel' 1073 K ⟷ 811 K (max_service_temp). Satır,
+       sunucunun yayımladığı `allowable_governed_by` + `allowable_candidates_K`
+       alanlarından hükmü vereni ve ötekini ADIYLA basar. Yalnız bilinen iki
+       aday adı basılır (sabit sözlük, sunucu metni HTML olarak girmez);
+       alan yoksa ya da ad tanınmıyorsa satır HİÇ basılmaz (uydurma yok). */
+    function governingLimitName(field) {
+        if (field === 'max_service_temp') {
+            return T('panel.thermal.limitNameService',
+                     'structural service limit (max_service_temp)');
+        }
+        if (field === 'allowable_temperature') {
+            return T('panel.thermal.limitNameAllowable',
+                     'material allowable temperature (allowable_temperature)');
+        }
+        return null;
+    }
+
+    function governingLimitRow(ta) {
+        const sa = (ta && ta.safety_analysis) || {};
+        const tl = sa.threshold_ladder || {};
+        const gov = tl.allowable_governed_by;
+        const cands = (tl.allowable_candidates_K
+                       && typeof tl.allowable_candidates_K === 'object')
+            ? tl.allowable_candidates_K : null;
+        const allowK = canonicalAllowableK(ta);
+        const govName = governingLimitName(gov);
+        if (!cands || govName === null || allowK === null) return null;
+        const govK = cands[gov];
+        if (typeof govK !== 'number' || !Number.isFinite(govK)
+                || govK !== allowK) return null;
+        const other = gov === 'max_service_temp'
+            ? 'allowable_temperature' : 'max_service_temp';
+        const otherK = cands[other];
+        let text;
+        if (typeof otherK !== 'number' || !Number.isFinite(otherK)) {
+            text = U.tf('panel.thermal.governingLimitSingle',
+                        { gov: govName, govK: U.fmt(govK, 0) },
+                        '{gov} = {govK} K gives the verdict');
+        } else if (otherK === govK) {
+            text = U.tf('panel.thermal.governingLimitEqual',
+                        { gov: govName, other: governingLimitName(other),
+                          govK: U.fmt(govK, 0) },
+                        '{gov} and {other} are both {govK} K; '
+                        + 'that limit gives the verdict');
+        } else {
+            text = U.tf('panel.thermal.governingLimitValue',
+                        { gov: govName, govK: U.fmt(govK, 0),
+                          other: governingLimitName(other),
+                          otherK: U.fmt(otherK, 0) },
+                        '{gov} = {govK} K gives the verdict · '
+                        + '{other} = {otherK} K does not');
+        }
+        return [T('panel.thermal.governingLimit', 'Governing temperature limit'),
+                text];
     }
 
     function temperaturePlot(root, ta) {
@@ -115,7 +212,7 @@
                 font: { size: 10, color: color },
             });
         }
-        limitLine(matp.allowable_temperature, T('panel.thermal.allowableLimit', 'Allowable limit'), '#ff8c33');
+        limitLine(canonicalAllowableK(ta), T('panel.thermal.allowableLimit', 'Allowable limit'), '#ff8c33');
         limitLine(matp.melting_point, T('panel.thermal.meltingPoint', 'Melting point'), '#ff5d73');
 
         Plotly.newPlot(div, [{
@@ -387,7 +484,7 @@
         }
         badges += U.badge(T('panel.thermal.badgeCooling', 'COOLING') + ': '
             + String(dpp.cooling_type || '—').toUpperCase(), 'info',
-            U.tf('panel.thermal.coolingEffTip', { value: U.fmt(cool.cooling_efficiency, 2) },
+            U.tf('panel.thermal.coolingEffTip', { value: numL(cool.cooling_efficiency, 2) },
                  'Cooling efficiency {value}'));
         if (htc.correlation) {
             badges += U.badge(T('panel.thermal.badgeModel', 'MODEL: BARTZ'), 'info', htc.correlation);
@@ -401,16 +498,17 @@
         }
 
         // ---- Sayısal kartlar ----
+        const allowK = canonicalAllowableK(ta);   // tek eşik (7. tur)
         const tempKind = function (temp) {
             if (typeof temp !== 'number' || !Number.isFinite(temp)) return 'dim';
             if (matp.melting_point != null && temp >= matp.melting_point) return 'err';
-            if (matp.allowable_temperature != null && temp > matp.allowable_temperature) return 'warn';
+            if (allowK != null && temp > allowK) return 'warn';
             return 'ok';
         };
         const head = document.createElement('div');
         head.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`
             + `<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">`
-            + U.statCard(T('panel.thermal.cardHg', 'h_g (gas side)'), U.fmt(htc.gas_side, 0),
+            + U.statCard(T('panel.thermal.cardHg', 'h_g (gas side)'), numL(htc.gas_side, 0),
                 'W/m²·K', null, htc.correlation || '')
             // ADLANDIRMA (v2.6.27, parti 20): iki kart da REFERANS SOĞUTULMUŞ
             // cidardaki Bartz tasarım yüküdür (heat_transfer_analysis.py,
@@ -421,19 +519,19 @@
             // tepe akısı ise KUPLE cidar dengesinden gelir — aynı adı
             // taşıyamazlar (ölçüm için panel.regen.cardPeakFluxBalance).
             + U.statCard(T('panel.thermal.cardQThroatRefWall', 'q_throat (reference cooled wall)'),
-                U.fmt(gsa.throat_heat_flux / 1e6, 2), 'MW/m²', null,
+                numL(gsa.throat_heat_flux / 1e6, 2), 'MW/m²', null,
                 T('panel.thermal.cardQThroatTip',
                   'Bartz design load at the reference cooled wall '
                   + '(T_w,ref = min(allowable, 0.8*T_aw)); not the flux at the '
                   + 'equilibrium wall temperature'))
             + U.statCard(T('panel.thermal.cardQChamberRefWall', 'q_chamber (reference cooled wall)'),
-                U.fmt(gsa.chamber_heat_flux / 1e6, 2), 'MW/m²')
+                numL(gsa.chamber_heat_flux / 1e6, 2), 'MW/m²')
             + U.statCard(T('panel.thermal.cardTwallIn', 'T_wall inner'),
-                U.fmt(wa.inner_temperature, 0), 'K', tempKind(wa.inner_temperature))
+                numL(wa.inner_temperature, 0), 'K', tempKind(wa.inner_temperature))
             + U.statCard(T('panel.thermal.cardTwallOut', 'T_wall outer'),
-                U.fmt(wa.outer_temperature, 0), 'K', tempKind(wa.outer_temperature))
+                numL(wa.outer_temperature, 0), 'K', tempKind(wa.outer_temperature))
             + U.statCard(T('panel.thermal.cardTaw', 'T_adiabatic wall'),
-                U.fmt(gsa.adiabatic_wall_temperature, 0), 'K')
+                numL(gsa.adiabatic_wall_temperature, 0), 'K')
             + '</div>';
         root.appendChild(head);
 
@@ -442,24 +540,127 @@
 
         const tail = document.createElement('div');
         let thtml = U.sectionTitle(T('panel.thermal.secHeatLoad', 'Heat Load & Cooling Assessment'));
+        // ÖH D15 / P11B5-05 — ISI KUYUSU ETİKETİ ÖLÇÜMLE TERSTİ.
+        // ÖLÇÜLDÜ (once.json, gerçek /analyze_thermal_safety, 40 bar/3000 K/
+        // 5 mm, yalnız `material` değişiyor): kütle SEÇİLEN malzemenin
+        // cp'siyle ve ucun KENDİ ΔT'siyle hesaplanıyor —
+        //   steel  24,18 kg  ΔT 517,85 K  cp 460   limit  811 K
+        //   graphite 0,73 kg ΔT 3.006,85 K cp 710  limit 3300 K
+        //   Al 6061 49,00 kg ΔT 183,85 K   cp 896  limit  477 K
+        // Ekrandaki "(steel equiv.)" ve "for a 200 K temperature rise"
+        // ipucu hiçbir satırda doğru değil (sapma 0,92× ile 15,0× arası);
+        // grafit seçen kullanıcı "0,73 kg çelik, 200 K ısınır" okuyor.
+        // Ucun kendi beyanı (`heat_sink_delta_T_basis`,
+        // `heat_sink_specific_heat_source`, `heat_sink_temperature_limit_K`)
+        // ekranda hiç yoktu.
+        //
+        // Onarım: uç kendi tabanını yayımlıyorsa YANLIŞ etiket ve ipucu
+        // BASILMAZ; satır makine alan adıyla (yeni çeviri anahtarı açılmadı)
+        // ve ucun kendi ΔT/cp/kaynak beyanıyla çıkar. Beyan yoksa (eski uç)
+        // eski satır korunur — sayı hiçbir dalda değişmez.
+        const hsBasis = (typeof cool.heat_sink_delta_T_basis === 'string')
+            ? cool.heat_sink_delta_T_basis : null;
+        const hsSource = (typeof cool.heat_sink_specific_heat_source === 'string')
+            ? cool.heat_sink_specific_heat_source : null;
+        const hsDeclared = !!(hsBasis || hsSource
+            || typeof cool.heat_sink_delta_T_K === 'number');
+        // ÖH D25 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI ARTIK BAĞLI.
+        // Pano (analysis_dock.js) `U.source.of()` ile ucun KENDİ beyanını
+        // dört duruma çeviriyordu (computed/user/assumed/missing) ama hiçbir
+        // panel onu çağırmıyordu: ölçüldü (once.json), 16 panelin 13'ü beyan
+        // alanı OKUYOR, sınıflandırıcıyı çağıran panel sayısı 0'dı — katman
+        // ölüydü. Burada beyan METNİ zaten okunuyordu; hükmü artık ORTAK
+        // sınıflandırıcı verir, panel kendi damgasını uydurmaz.
+        const hsInfo = (U.source && U.source.of)
+            ? U.source.of({ basis: hsBasis, source: hsSource }, null,
+                          { value: cool.heat_sink_mass })
+            : null;
+        const hsChip = (hsInfo && U.source.chip) ? U.source.chip(hsInfo) : '';
+        const heatSinkRow = hsDeclared
+            ? ['<span style="font-family:var(--hd-mono); font-size:0.72rem;">'
+               + 'heat_sink_mass</span>',
+               numL(cool.heat_sink_mass, 1) + ' kg' + hsChip
+               + '<span style="font-family:var(--hd-mono); font-size:0.68rem;'
+               + ' color:var(--hd-ink-dim, #7d97a5);"> · heat_sink_delta_T_K '
+               + numL(cool.heat_sink_delta_T_K, 2)
+               + ' · heat_sink_specific_heat_J_kgK '
+               + numL(cool.heat_sink_specific_heat_J_kgK, 1)
+               + (hsSource ? ' · heat_sink_specific_heat_source ' + hsSource : '')
+               + (typeof cool.heat_sink_temperature_limit_K === 'number'
+                  ? ' · heat_sink_temperature_limit_K '
+                    + numL(cool.heat_sink_temperature_limit_K, 1) : '')
+               + (hsBasis
+                  ? '<br>heat_sink_delta_T_basis: ' + hsBasis : '')
+               + '</span>',
+               hsBasis || '']
+            : [T('panel.thermal.heatSinkMass', 'Heat sink mass (steel equiv.)'),
+               numL(cool.heat_sink_mass, 1) + ' kg',
+               T('panel.thermal.heatSinkTip',
+                 'Steel heat-sink mass for a 200 K temperature rise')];
+
+        // ÖH D15 / P11B5-06 — JENERİK LÜLE KONTURU BEYANI EKRANDA YOKTU.
+        // ÖLÇÜLDÜ (once.json): uç `gas_side_analysis
+        // .wetted_integral_contour_basis` içinde kendi cümlesini yazıyor —
+        // "neither exit_diameter nor expansion_ratio was supplied; the
+        //  sampler falls back to its own generic exit diameter, so the
+        //  divergent extent of this axis is NOT this motor's"
+        // (`generic_defaults_used = ['exit_diameter','nozzle_type']`).
+        // Panel formunda çıkış çapı / genleşme oranı alanı YOK, yani beyan
+        // varsayılan kullanımda HER koşuda üretiliyor. Ekranda ise yalnız
+        // "Hot-gas surface area 0.198 m²" duruyordu; aynı ıslak alandan
+        // türeyen üç sayı (toplam ısı hızı — ölçülen %31,5'i jenerik lüle
+        // konturundan, toplam ısı enerjisi, ısı kuyusu kütlesi) künyesizdi.
+        //
+        // Onarım: beyan varsa ıslak alan satırı ucun kendi cümlesini taşır
+        // ve türeyen satırlar aynı beyana bağlanır. Beyan yoksa hiçbir şey
+        // iddia edilmez (fail-closed).
+        const wib = gsa.wetted_integral_contour_basis;
+        const generics = (wib && Array.isArray(wib.generic_defaults_used))
+            ? wib.generic_defaults_used : null;
+        const wibNote = (wib && generics && generics.length)
+            ? ('wetted_integral_contour_basis.generic_defaults_used: '
+               + generics.join(', ') + ' — ' + SRV(String(wib.exit_diameter_source || '')))
+            : '';
+        const derivedNote = wibNote
+            ? ('wetted_integral_contour_basis.generic_defaults_used: '
+               + generics.join(', '))
+            : '';
+        // GÖRÜNÜR im: üzerine gelinmeden okunmayan bir `title` metni
+        // "ekranda" sayılmaz (a2 turunda ölçülen bekçi zaafı). Islak alandan
+        // TÜREYEN her satır beyanı kendi metninde taşır.
+        const derivedMark = wibNote
+            ? ('<span data-thermal-derived-generic="1"'
+               + ' style="font-family:var(--hd-mono); font-size:0.66rem;'
+               + ' color:var(--hd-orange, #ff8c33);"> · '
+               + 'wetted_integral_contour_basis.generic_defaults_used: '
+               + generics.join(', ') + '</span>')
+            : '';
         thtml += U.kvTable([
-            [T('panel.thermal.totalHeatRate', 'Total heat rate'), U.fmt(cool.peak_heat_rate, 1) + ' kW'],
+            [T('panel.thermal.totalHeatRate', 'Total heat rate'),
+             numL(cool.peak_heat_rate, 1) + ' kW' + derivedMark, derivedNote],
             [T('panel.thermal.totalHeatEnergy', 'Total heat energy (burn)'),
-             U.fmt(cool.total_heat_energy, 1) + ' MJ'],
-            [T('panel.thermal.coolingEfficiency', 'Cooling efficiency'), U.fmt(cool.cooling_efficiency, 2)
+             numL(cool.total_heat_energy, 1) + ' MJ' + derivedMark, derivedNote],
+            [T('panel.thermal.coolingEfficiency', 'Cooling efficiency'), numL(cool.cooling_efficiency, 2)
                 + ' (' + String(dpp.cooling_type || '—') + ')'],
             [T('panel.thermal.requiredArea', 'Required cooling area'),
-             U.fmt(cool.required_cooling_area, 2) + ' m²'],
-            [T('panel.thermal.heatSinkMass', 'Heat sink mass (steel equiv.)'),
-             U.fmt(cool.heat_sink_mass, 1) + ' kg',
-             T('panel.thermal.heatSinkTip', 'Steel heat-sink mass for a 200 K temperature rise')],
-            [T('panel.thermal.hotGasArea', 'Hot-gas surface area'), U.fmt(gsa.surface_area, 3) + ' m²'],
+             numL(cool.required_cooling_area, 2) + ' m²'],
+            heatSinkRow,
+            [T('panel.thermal.hotGasArea', 'Hot-gas surface area'),
+             numL(gsa.surface_area, 3) + ' m²'
+             + (wibNote
+                ? '<span data-thermal-generic-contour="'
+                  + String(generics.length) + '"'
+                  + ' style="font-family:var(--hd-mono); font-size:0.68rem;'
+                  + ' color:var(--hd-orange, #ff8c33);"> · '
+                  + U.esc(SRV(String(wib.exit_diameter_source))) + '</span>'
+                : ''),
+             wibNote],
         ]);
 
         thtml += U.sectionTitle(T('panel.thermal.secSafety', 'Thermal Safety Factors'));
         const sfRow = function (label, v, note) {
             const c = U.kindColor(sfKind(v));
-            return [label, `<span style="color:${c}; font-family:var(--hd-mono);">${U.fmt(v)}</span>`, note];
+            return [label, `<span style="color:${c}; font-family:var(--hd-mono);">${numL(v)}</span>`, note];
         };
         thtml += U.kvTable([
             sfRow(T('panel.thermal.sfMelting', 'Melting safety factor'), safe.melting_safety_factor,
@@ -468,14 +669,15 @@
                 safe.temperature_safety_factor,
                 T('panel.thermal.sfTemperatureTip', 'Allowable temperature / wall temperature')),
             sfRow(T('panel.thermal.sfStress', 'Thermal stress safety factor'), safe.stress_safety_factor),
-            [T('panel.thermal.thermalStress', 'Thermal stress'), U.fmt(safe.thermal_stress, 0) + ' MPa'],
+            [T('panel.thermal.thermalStress', 'Thermal stress'), numL(safe.thermal_stress, 0) + ' MPa'],
             [T('panel.thermal.materialLimits', 'Material limits'),
              U.tf('panel.thermal.materialLimitsValue',
-                  { allow: U.fmt(matp.allowable_temperature, 0), melt: U.fmt(matp.melting_point, 0) },
+                  { allow: numL(allowK, 0), melt: numL(matp.melting_point, 0) },
                   '{allow} K allowable · {melt} K melting')],
-            [T('common.f.wallThickness', 'Wall thickness'), U.fmt(dpp.wall_thickness, 1) + ' mm ('
+            governingLimitRow(ta),
+            [T('common.f.wallThickness', 'Wall thickness'), numL(dpp.wall_thickness, 1) + ' mm ('
                 + (dpp.material || '—') + ')'],
-        ]);
+        ].filter(Boolean));
 
         const warns = [].concat(safe.warnings || [], gsa.warnings || []);
         thtml += U.listBlock(T('common.warnings', 'Warnings'), warns, 'warn');
@@ -500,7 +702,7 @@
             ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK'],
             ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
             ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM'],
-            ['burn_time', 'Burn Time (s)', 10, 0.5, 'common.f.burnTimeS'],
+            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
             ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.05, 'common.f.mdotTotal'],
             ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM'],
             ['material', 'Wall Material', 'steel', MATERIALS, 'common.f.wallMaterial'],

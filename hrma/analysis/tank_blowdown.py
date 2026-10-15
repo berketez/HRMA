@@ -22,16 +22,25 @@ uygulandığında modeli üçlü noktanın çok altına, fiziksel olmayan
 sıcaklık/basınçlara götürür (bkz. ``N2OTankBlowdown._vapor_step``).
 
 Özellik kaynağı: CoolProp (NIST REFPROP tabanlı) varsa doğrudan; yoksa
-CoolProp'tan üretilmiş gömülü doygunluk tablosu (240-306 K) ile doğrusal
+CoolProp'tan üretilmiş gömülü doygunluk tablosu (240-309 K) ile doğrusal
 interpolasyon. Tablo değerleri Span-Wagner EOS'tan gelir; 293 K'de
 Psat = 50.5 bar (literatürle uyumlu).
+
+Bu modülün ``N2OSaturation`` sınıfı aynı zamanda **N₂O yoğunluğunun depo
+genelindeki tek doğruluk kaynağıdır** (Z1 zinciri, 2026-08-27): enjektör ve
+API yolları ``hrma.data.external_data_fetcher.oxidizer_reference_density``
+üzerinden buraya bağlanır. Sabit yoğunluk kullanmak savunulamaz —
+293 K'de dρ/dT = −7,65 kg/(m³·K), yani 1 K ≈ %1.
 
 Varsayımlar ve sınırlar:
 - Tank duvarı adyabatik (duvar ısıl kütlesi yok) → soğuma hafif fazla,
   basınç düşüşü hafif konservatif tahmin edilir.
 - Faz dengesi anlık (denge modeli); gerçek tanklarda buharlaşma gecikmesi
   başlangıçta birkaç bar'lık geçici sapma yaratabilir.
-- Geçerlilik bandı 240-306 K (kritik nokta 309.52 K'ye yaklaşma modellenmez).
+- Tablo bandı 240-309 K; band dışı sorgu kenara KENETLENİR ve ``clamped``
+  bayrağıyla raporlanır (F184).
+- Kritik noktanın (309.52 K) üstü ve üçlü noktanın (182.33 K) altı
+  FAIL-CLOSED'dır: orada doymuş sıvı yoktur, yaklaşık değer üretilmez.
 """
 
 import numpy as np
@@ -101,9 +110,25 @@ _SAT_TABLE = np.array([
     (300.0, 5887437, 724.7, 202.91, 235239, 373120, 227115, 344104),
     (303.0, 6286974, 690.1, 231.06, 246116, 365590, 237005, 338381),
     (306.0, 6710279, 643.6, 271.21, 259488, 354458, 249062, 329716),
+    # --- Z1 UZATMASI (2026-08-27, aynı kaynak: CoolProp 6.8.0 / Lemmon &
+    # Span 2006). Tablo 306 K'de bitiyordu; 35 °C'lik bir yaz günü tankı
+    # 308,15 K demektir ve orada gerçek sıvı yoğunluğu 589,52 kg/m³ iken
+    # tablo 643,6'ya KENETLENİYORDU → sessiz +%9,2 hata (kenetleme F184 ile
+    # raporlanıyordu, ama sayı yine de aşağı akıyordu). Adım 3 K'den 1 K'ye
+    # düşürüldü: kritik noktaya yaklaşırken eğrilik patlıyor (dρ/dT 306 K'de
+    # −20,8 kg/(m³·K)), 3 K'lik doğrusal ara değerleme burada yetersiz.
+    (307.0, 6857350, 622.4, 290.24, 265136, 349091, 254120, 325465),
+    (308.0, 7007848, 594.7, 315.83, 272184, 341856, 260399, 319667),
+    (309.0, 7162337, 548.6, 359.50, 283181, 329643, 270124, 309720),
 ])
 
 _T_MIN, _T_MAX = float(_SAT_TABLE[0, 0]), float(_SAT_TABLE[-1, 0])
+
+# ÖH D22 / P4B4-12 — TABLO BANDI ARTIK KAMUYA AÇIK TEK KAYNAK.
+# Tüketiciler (ör. ``hrma.utils.injector_design``) bandı kendi kopyasıyla
+# değil buradan okur; ikinci bir sayı yazılmaz (doktrin-4).
+SAT_TABLE_T_MIN = _T_MIN
+SAT_TABLE_T_MAX = _T_MAX
 
 
 class N2OSaturation:
@@ -112,7 +137,13 @@ class N2OSaturation:
     Tablo yolu 240-306 K bandı DIŞINDA sorgulanırsa değer banda kenetlenir.
     Kenetleme artık sessiz değildir (v2.6.2 fizik denetimi, bulgu F184):
     ``clamped`` bayrağı ve ``clamp_t_min/clamp_t_max`` en uç sorgu
-    sıcaklıklarını tutar; tank bunları okuyup kullanıcıya raporlar.
+    sıcaklıklarını tutar; defter ``clamp_report()`` ile okunur ve
+    ``N2OTankBlowdown.simulate()`` çıktısında ``saturation_clamp``
+    alanı olarak kullanıcıya taşınır (ÖH D22 / P4B4-12).
+
+    Band DIŞINI doğrudan sorgulayan tüketiciler için kenetleme değil
+    ``require_table_band()`` kapısı geçerlidir: kenetlenmiş kenar
+    değeri sorulan sıcaklığın değeri değildir ve yayımlanmaz.
     """
 
     def __init__(self, use_coolprop=True):
@@ -123,8 +154,94 @@ class N2OSaturation:
         self.clamp_t_min = float('inf')
         self.clamp_t_max = float('-inf')
 
+    @staticmethod
+    def _check_state(T):
+        """Doyma hâlinin FİZİKSEL zarfı — dışında sayı üretilmez (Z1).
+
+        Kritik noktanın (309,52 K) üstünde doymuş sıvı/buhar ayrımı yoktur;
+        tablo yolu orada bandın kenarına kenetlenip 309,0 K'nin değerini
+        döndürürdü, yani var olmayan bir hâl için "yaklaşık değer" üretirdi.
+        Üçlü noktanın (182,33 K) altında da sıvı yoktur (katılaşır).
+        Kenetleme bir belirsizlik bildirimidir; YOK olan bir hâli
+        yaklaşıklamak değildir — bu yüzden burası fail-closed'dır.
+        """
+        T = float(T)
+        if not np.isfinite(T):
+            raise ValueError(
+                f'N2O saturation state requires a finite temperature; '
+                f'got {T!r}')
+        if T >= N2O_T_CRIT:
+            raise ValueError(
+                f'{T:.2f} K is at or above the N2O critical temperature '
+                f'({N2O_T_CRIT:.2f} K, NIST WebBook): there is no saturated '
+                'liquid/vapour split above it and no value is invented.')
+        if T < N2O_T_TRIPLE:
+            raise ValueError(
+                f'{T:.2f} K is below the N2O triple point '
+                f'({N2O_T_TRIPLE:.2f} K, NIST WebBook): the fluid is solid '
+                'there and the saturation curve does not exist.')
+        return T
+
+    def clamp_report(self):
+        """F184 kenetleme defterinin OKUNABİLİR yüzü (ÖH D22 / P4B4-12).
+
+        ÖLÇÜLDÜ (taban b84b10a, ``once.json`` P4B4-12): ``clamped`` /
+        ``clamped_calls`` / ``clamp_t_min`` / ``clamp_t_max`` dörtlüsü
+        yazılıyordu ama ``hrma/`` altında OKUYAN TEK BİR SATIR YOKTU —
+        sınıf docstring'i "tank bunları okuyup kullanıcıya raporlar"
+        diyordu, tank raporlamıyordu. Defter artık tek çağrıyla okunur ve
+        ``N2OTankBlowdown.simulate()`` çıktısında yayımlanır.
+
+        DİKKAT: defter NESNE ÖMRÜ boyunca birikir. Modül düzeyi paylaşılan
+        bir örnek (ör. ``injector_design._SAT_N2O``) üstünde okunursa
+        sayı O ÖRNEĞİN tüm geçmişini kapsar, tek bir isteği değil — bu
+        yüzden istek başına hüküm için ``require_table_band`` kullanılır.
+        """
+        return {
+            'clamped': bool(self.clamped),
+            'clamped_calls': int(self.clamped_calls),
+            'clamp_t_min_K': (None if self.clamp_t_min == float('inf')
+                              else float(self.clamp_t_min)),
+            'clamp_t_max_K': (None if self.clamp_t_max == float('-inf')
+                              else float(self.clamp_t_max)),
+            'table_t_min_K': SAT_TABLE_T_MIN,
+            'table_t_max_K': SAT_TABLE_T_MAX,
+        }
+
+    @staticmethod
+    def require_table_band(T):
+        """Gömülü tablonun ÇÖZEBİLDİĞİ bandın kapısı — fail-closed.
+
+        ÖH D22 / P4B4-12. ``_interp`` band dışında bandın KENARININ
+        değerini döndürür; bu, tankın kendi ``_flag_out_of_band``
+        beyanıyla birlikte anlamlıdır (blowdown'da sıcaklık düşer, kenete
+        dayanmak beyanla birlikte kabul edilir). Ama band dışını DOĞRUDAN
+        sorgulayan bir tüketici için o sayı SORULAN sıcaklığın değeri
+        DEĞİLDİR ve kenetlemeyi okuyan kimse yoktu.
+
+        ÖLÇÜLDÜ (taban b84b10a, ``once.json`` P4B4-12): tablo yolunda
+        psat(200 K) = psat(230 K) = psat(239 K) = 11,8777 bar (240 K'nin
+        değeri) ve ``InjectorDesign(oxidizer_temp=230)``
+        ``p_vapor_bar = 11,8777``'yi "N2O saturation curve at 230.00 K"
+        künyesiyle yayımlıyordu — 230 K'de gerçek doyma basıncı bu değil.
+        Fiziksel zarf (üçlü nokta - kritik nokta) ``_check_state`` ile
+        zaten savunuluyor; burada savunulan TABLO zarfıdır.
+
+        Zarf içindeki T'yi float olarak döndürür, dışındakini reddeder.
+        """
+        T = N2OSaturation._check_state(T)
+        if T < SAT_TABLE_T_MIN or T > SAT_TABLE_T_MAX:
+            raise ValueError(
+                f'{T:.2f} K is outside the embedded N2O saturation table '
+                f'band [{SAT_TABLE_T_MIN:.0f}, {SAT_TABLE_T_MAX:.0f}] K '
+                f'(CoolProp 6.8.0 / Lemmon & Span 2006). The table can only '
+                f'be evaluated by clamping to the band edge there, and the '
+                f'edge value is not the saturation state at {T:.2f} K, so no '
+                f'number is published for it.')
+        return T
+
     def _interp(self, T, col):
-        T_req = float(T)
+        T_req = self._check_state(T)
         if T_req < _T_MIN or T_req > _T_MAX:
             # F184: banda kenetlenen sorgu artık deftere işleniyor. Kenetlenen
             # anda dönen değer bandın KENARININ değeridir (ör. 240 K'de
@@ -137,7 +254,10 @@ class N2OSaturation:
         return float(np.interp(T, _SAT_TABLE[:, 0], _SAT_TABLE[:, col]))
 
     def _cp(self, T, output, quality):
-        return PropsSI(output, 'T', float(T), 'Q', quality, 'N2O')
+        # Z1: aynı zarf kapısı CoolProp yolunda da geçerli — iki yol aynı
+        # sınırı savunmazsa "CoolProp kuruluysa başka, değilse başka" bir
+        # ürün doğar (tam olarak Z1'in kök hastalığı: kanal var, kapı yok).
+        return PropsSI(output, 'T', self._check_state(T), 'Q', quality, 'N2O')
 
     def psat(self, T):
         return self._cp(T, 'P', 0) if self.use_coolprop else self._interp(T, 1)
@@ -171,12 +291,12 @@ class N2OTankBlowdown:
     """
 
     def __init__(self, tank_volume, initial_temperature=293.15,
-                 liquid_fill_fraction=0.85, use_coolprop=True):
+                 liquid_fill_fraction=..., use_coolprop=True):  # ... -> dosya sonu (KU H-1)
         if not (_T_MIN <= initial_temperature <= _T_MAX):
             raise ValueError(
                 f"Tank sıcaklığı {initial_temperature:.1f} K model bandı "
                 f"[{_T_MIN:.0f}, {_T_MAX:.0f}] K dışında")
-        if not (0.05 <= liquid_fill_fraction <= 0.98):
+        if not (0.05 <= (liquid_fill_fraction := resolve_liquid_fill_fraction(liquid_fill_fraction)) <= 0.98):  # noqa: E501
             raise ValueError("liquid_fill_fraction 0.05-0.98 bandında olmalı "
                              "(ullage hacmi şart — sıvıyla tam dolu tank "
                              "termal genleşmede patlama riskidir)")
@@ -203,11 +323,11 @@ class N2OTankBlowdown:
 
     @classmethod
     def from_oxidizer_mass(cls, oxidizer_mass, initial_temperature=293.15,
-                           liquid_fill_fraction=0.85, use_coolprop=True):
+                           liquid_fill_fraction=..., use_coolprop=True):
         """Gerekli oksitleyici kütlesinden tank hacmini boyutlandırır."""
         props = N2OSaturation(use_coolprop=use_coolprop)
         rho_l = props.rho_l(initial_temperature)
-        tank_volume = (oxidizer_mass / rho_l) / liquid_fill_fraction
+        tank_volume = (oxidizer_mass / rho_l) / resolve_liquid_fill_fraction(liquid_fill_fraction)  # noqa: E501
         return cls(tank_volume, initial_temperature,
                    liquid_fill_fraction, use_coolprop)
 
@@ -437,11 +557,48 @@ class N2OTankBlowdown:
         return state
 
     def simulate(self, mdot_out, duration, dt=0.05):
-        """Sabit debiyle blowdown; zaman serilerini döndürür."""
+        """Sabit debiyle blowdown; zaman serilerini döndürür.
+
+        ÜÇLÜ NOKTA SONRASI SERİ KESİLİR (ÖH D22 / P4B4-13)
+        ---------------------------------------------------
+        ÖLÇÜLDÜ (taban b84b10a, ``once.json`` P4B4-13;
+        ``from_oxidizer_mass(16.5 kg, 293,15 K)``, ṁ=1,2 kg/s, 14 s,
+        dt=0,05 s, CoolProp açık): ``pressure`` dizisinin son beş değeri
+        [5,9800 | 5,1997 | 0,8784 | 0,8784 | 0,8784] bar idi — kuyruk
+        üçlü noktaya (0,8784 bar) çarptığı adımda eğriye TEK ADIMDA
+        5,9197 KATLIK süreksiz düşüş giriyor, ardından kenetlenmiş sabit
+        değer dizide kalmaya devam ediyordu. ``_vapor_step`` uyarısı
+        "the tail-off beyond this instant is NOT modelled — treat the burn
+        as over" diyor; buna rağmen modellenmeyen bölge kullanıcıya
+        çizilen dizide duruyordu (doktrin-1: kazanılmamış sayı
+        yayımlanmaz).
+
+        Yeni davranış: model geçersizleşen ADIM DAHİL yayımlanmaz; seri
+        son GEÇERLİ örnekte biter ve kesme adıyla/sayısıyla beyan edilir
+        (``truncated``, ``truncated_at_s``, ``samples_modelled``,
+        ``samples_requested``, ``truncation_reason``). ``step()`` API'si
+        değişmez — artımlı çağıran ``vapor_model_valid`` bayrağını adım
+        adım görmeye devam eder.
+        """
         n = max(int(round(duration / dt)), 1)
         t, P, T, ml, mv = [], [], [], [], []
+        kesildi = False
+        kesme_nedeni = None
         for i in range(n):
+            gecerliydi = bool(self.vapor_model_valid)
             s = self.step(mdot_out, dt)
+            if gecerliydi and not self.vapor_model_valid:
+                # Bu adımda üçlü nokta tabanı bağladı: adımın P/T değerleri
+                # kenetlenmiş taban değerleridir, fiziksel çözüm değil.
+                kesildi = True
+                kesme_nedeni = (
+                    f'the vapour tail-off reached the N2O triple point '
+                    f'({N2O_T_TRIPLE:.2f} K / {N2O_P_TRIPLE / 1e3:.1f} kPa, '
+                    f'NIST WebBook) at t = {(i + 1) * dt:.3f} s; the '
+                    f'adiabatic ideal-gas expansion is not valid below that '
+                    f'state, so no pressure/temperature samples are '
+                    f'published from this instant on')
+                break
             t.append((i + 1) * dt)
             P.append(s['P'])
             T.append(s['T'])
@@ -456,4 +613,114 @@ class N2OTankBlowdown:
             'phase': self.phase,
             'vapor_model_valid': bool(self.vapor_model_valid),
             'warnings': list(self.warnings),
+            # P4B4-13: seri istenen süreden KISA ise nedeni adıyla döner.
+            'truncated': bool(kesildi),
+            'truncated_at_s': (float(len(t) * dt) if kesildi else None),
+            'truncation_reason': kesme_nedeni,
+            'samples_modelled': int(len(t)),
+            'samples_requested': int(n),
+            # P4B4-12: doyma tablosunun kenetleme defteri artık OKUNUYOR ve
+            # çağırana taşınıyor (sınıf docstring'inin iddiası karşılandı).
+            'saturation_clamp': self.props.clamp_report(),
         }
+
+    def vapor_tail_off_envelope(self, ambient_pressure_pa):
+        """Yürünmeyen buhar kuyruğu bu modelin zarfını TERK EDER Mİ?
+
+        NEDEN VAR (ÖH D28 / OH-D27-09)
+        ------------------------------
+        ``TransientBallistics.solve`` yürüyüşü sıvı tükendiği anda durur
+        (``end_event = 'oxidizer_depleted'``), yani buhar kuyruğu HİÇ
+        integre edilmez. Sonuç: ``vapor_model_valid`` o yürüyüşte YAPISAL
+        OLARAK True'dur — üçlü nokta tabanı (``_vapor_step``) hiç
+        yoklanmadığı için asla ateşlenemez. "Hep doğru" bir bayrak, olmayan
+        bir kapıyı varmış gibi gösterir.
+
+        Bu metot kapıyı ANALİTİK olarak yoklar ve bunu bir debi/enjektör
+        modeline İHTİYAÇ DUYMADAN yapar. ``_vapor_step`` yolu sabit hacimde
+        adyabatik ideal gazdır:
+
+            P/P0 = r**g,      T/T0 = r**(g-1),      r = m_v / m_v0
+
+        Durum yalnız KALAN KÜTLE ORANI ``r`` ile parametrelenir; zaman ve
+        ṁ yalnız r'ye ne kadar hızlı inildiğini belirler, hangi (P, T)
+        ikilisinden geçileceğini DEĞİL. Dolayısıyla "kuyruk üçlü noktayı
+        geçer mi" sorusu iki eşik oranının kıyasına indirger:
+
+          * akış, tank basıncı aşağı akış basıncına (en iyi hâlde ortam)
+            düştüğünde durur:      r_stop   = (Pa/P0)**(1/g)
+          * üçlü nokta sıcaklık ayağından r_T = (T_t/T0)**(1/(g-1)),
+            basınç ayağından       r_P = (P_t/P0)**(1/g);
+            hangisi ÖNCE gelirse (BÜYÜK r) o belirler:
+                                   r_triple = max(r_T, r_P)
+
+        Zarf terk edilir  <=>  r_stop < r_triple.
+
+        BOYUT: r, P/P0, T/T0 ve iki üs (1/g, 1/(g-1)) boyutsuzdur; bağıntının
+        iki yanı da salt orandır, birim taşımaz. Basınçlar Pa, sıcaklıklar K
+        cinsinden ve KENDİ referanslarına bölünerek girer.
+
+        Kaynak: adyabatik bağıntı ideal gaz + sabit cp türetimidir (Sutton &
+        Biblarz, *Rocket Propulsion Elements*, 9. baskı, Böl. 3); N₂O tank
+        boşalmasında aynı yaklaşım kuyruk (tail-off) fazı için Zilliac &
+        Karabeyoglu, AIAA 2005-3549 ("Modeling of Propellant Tank
+        Pressurization") ve Whitmore & Chandler, JPP 26(4) 2010'da
+        kullanılır. Üçlü nokta 182,33 K / 87,84 kPa (NIST WebBook, CoolProp
+        6.8.0 teyidi; bkz. ``N2O_T_TRIPLE`` / ``N2O_P_TRIPLE``).
+
+        ÖLÇÜLDÜ (``docs/scofield/raw/OH/D28/hibrit/a1/once.json``, K3): altı
+        senaryonun ALTISINDA da r_stop < r_triple (nominal 0,0659 < 0,2222),
+        yani yürünmeyen kuyruk bu modelin geçerlilik zarfını terk ederdi.
+        Yürüyüşün orada durması bu yüzden keyfî bir kesme değil MODEL
+        SINIRIDIR — ve söylenmesi gereken şey budur.
+
+        Dönüş: oranları ve ``leaves_envelope`` hükmünü taşıyan sözlük. Sayı
+        uydurulmaz: ``ambient_pressure_pa`` yoksa hüküm None kalır.
+        """
+        g = float(N2O_GAMMA_VAPOR)
+        if self.phase == 'vapor':
+            T0 = float(self._vapor_T)
+            P0 = float(self._vapor_P0)
+        else:
+            T0 = float(self.T)
+            P0 = float(self.props.psat(T0))
+        r_T = (N2O_T_TRIPLE / T0) ** (1.0 / (g - 1.0))
+        r_P = (N2O_P_TRIPLE / P0) ** (1.0 / g)
+        r_triple = max(r_T, r_P)
+        if ambient_pressure_pa is None or float(ambient_pressure_pa) < 0.0:
+            r_stop = None
+            terk = None
+        else:
+            r_stop = (float(ambient_pressure_pa) / P0) ** (1.0 / g)
+            terk = bool(r_stop < r_triple)
+        return {
+            'onset_temperature_K': T0,
+            'onset_pressure_Pa': P0,
+            'gamma': g,
+            'mass_ratio_at_flow_stop': r_stop,
+            'mass_ratio_at_triple_point': float(r_triple),
+            'leaves_envelope': terk,
+        }
+
+
+# KU H-1 (K20, 6 Eki 2026) — SIVI DOLULUK KESRİ TEK TANIMI.
+# N2OTankBlowdown.__init__ ve from_oxidizer_mass imzalarında çıplak 0.85
+# literal'i duruyordu; aynı değerin adlı tek tanımı
+# ``hrma.engines.hybrid_rocket_engine.TANK_FILL_FRACTION_DEFAULT``'tur. O modül
+# bu modülü (external_data_fetcher ve injector_design üzerinden) modül
+# düzeyinde içe aktardığı için burada modül düzeyinde içe aktarma döngü
+# olur. Bu yüzden imza varsayılanı Ellipsis (``...``) nöbetçisidir ve ilk
+# kullanımda tek tanımdan okunur. Sayı DEĞİŞMEDİ. Açık None eskisi gibi
+# reddedilir (nöbetçi None değildir; sessiz varsayılana düşüş yok). Blok
+# dosyanın SONUNDADIR: serileştirici adres defteri
+# (tests/test_fazb_serilestirici_esligi.py S2, _pack_state satırı) kaymasın.
+LIQUID_FILL_FRACTION_DEFAULT_SENTINEL = ...
+
+
+def resolve_liquid_fill_fraction(value):
+    """Nöbetçiyi tek tanımdaki değere çevirir; başka her değeri aynen döndürür."""
+    if value is LIQUID_FILL_FRACTION_DEFAULT_SENTINEL:
+        from hrma.engines.hybrid_rocket_engine import (
+            TANK_FILL_FRACTION_DEFAULT)
+        return TANK_FILL_FRACTION_DEFAULT
+    return value

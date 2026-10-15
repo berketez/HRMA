@@ -71,7 +71,49 @@ _CONV_UNIT_NAMES = {
     'MILLI INCH': 'mil', 'THOU': 'mil',
 }
 
-_EPS = 1e-9
+# --------------------------------------------------------------------------
+# ÖH D24 / defter P15B2-11 — TEK ADIN ÜÇ AYRI BÜYÜKLÜĞÜ TAŞIMASI
+#
+# Burada tek bir ``_EPS = 1e-9`` vardı ve dört yerde kullanılıyordu. ÖLÇÜLDÜ
+# (``docs/scofield/raw/OH/D24/ihracat/a2/once.json`` -> ``M8_P15B2_11``, taban
+# 88a29d3): ``step_import_EPS_kullanim_sayisi: 4``,
+# ``step_import_rol_kunyesi_var: false``. Dört kullanımın BOYUTLARI farklıydı:
+#
+#   _unitize        : ``n > _EPS``                 -> yön vektörü normu (boyutsuz)
+#   boğaz kapısı    : ``max(r_min, _EPS)``         -> yarıçap  [mm]
+#   cidar yayılımı  : ``max(med, _EPS)``           -> kalınlık [mm]
+#   yüzey kapısı    : ``total_area <= _EPS``       -> ALAN     [mm²]
+#
+# Yani aynı ad, boyutsuz bir norm eşiğiyle 1e-9 mm²'lik bir alan kapısını
+# birlikte adlandırıyordu; okuyan kişi "bu modülün gürültü tabanı" sanıyordu.
+# Depoda aynı ADIN üç farklı büyüklüğü var (ölçüldü, aynı kayıt):
+# ``flow/boundary_layer.py::_EPS = 1e-12`` (bölme koruması),
+# ``flow/quasi1d.py::_MACH_EPS = 1e-9`` (M=1 tekilliğinden braket payı),
+# ``static/js/analysis_dock.js::DIFF_REL_EPS = 1e-5`` (ürün düzeyinde BAĞIL
+# değişim eşiği, kendi ölçülmüş gerekçesiyle). Bunlar TEK bir "sayısal gürültü
+# tabanı" DEĞİL, farklı boyutlarda farklı rollerdir; ortak bir sabite
+# indirgenmeleri yanlış olurdu. Doğru onarım, her rolün kendi adını ve
+# künyesini almasıdır (CLAUDE.md kural 11'in "aynı kavram tek ad" şartı, ters
+# yönü de kapsar: FARKLI kavram AYNI adı taşıyamaz).
+#
+# SAYILAR DEĞİŞMEDİ: üçü de 1e-9'dur, davranış bit-aynıdır. Değişen tek şey,
+# birinin gerekçesiyle diğerinin artık oynatılamaz olmasıdır.
+# Bekçi: tests/test_d24_ihracat_a2.py::TestP15B211RolAdlari
+# --------------------------------------------------------------------------
+
+#: Yön vektörü normalleştirme alt sınırı — BOYUTSUZ. Bunun altındaki norm bir
+#: yön taşımaz (dejenere kenar/eksen); vektör normalleştirilmeden döndürülür.
+_UNIT_VECTOR_MIN_NORM = 1e-9
+
+#: Bağıl oran hesaplarında paydanın alt sınırı [mm]. Yarıçap ya da kalınlık
+#: sıfıra gittiğinde ZeroDivisionError yerine oranın büyümesini sağlar; bir
+#: ÖLÇÜM eşiği değildir (geometrik eşlik toleransı ``_GEOM_TOL_MM``dir).
+_RELATIVE_DIV_FLOOR_MM = 1e-9
+
+#: Katının ölçülebilir yüzey alanı alt sınırı [mm²]. Bunun altında kalan bir
+#: katıdan geometri okunamaz; içe aktarma ADIYLA reddedilir (fail-closed).
+_DEGENERATE_AREA_MM2 = 1e-9
+
 #: Kayan nokta karşılaştırmalarında z/yarıçap eş kabul toleransı (mm).
 _GEOM_TOL_MM = 1e-6
 
@@ -140,7 +182,7 @@ def _rnd(x, nd=4):
 
 def _unitize(v):
     n = np.linalg.norm(v)
-    return v / n if n > _EPS else v
+    return v / n if n > _UNIT_VECTOR_MIN_NORM else v
 
 
 def _canonical_dir(d):
@@ -169,13 +211,56 @@ def _same_axis(o1, d1, o2, d2):
 def _detect_declared_unit(file_path):
     """STEP başlığındaki uzunluk birimini okur (varsayım YOK).
 
+    ÖH D21 / defter P9B2-19. ÖLÇÜLDÜ (taban ``35aa279``, ``once.json``
+    bölüm A): inç / foot / mil dalı KURALLARA UYGUN dosyalarda hiç
+    ateşlenmiyordu. Sebep, birimin dosyadaki ifade SIRASINA bağlı
+    okunmasıydı: eski kod ``LENGTH_UNIT`` geçen İLK ifadeyi görünce
+    dönüyordu, oysa ISO 10303-21 dosyalarında dönüşümlü birim şöyle yazılır
+    ve SI taban birimi HER ZAMAN önce gelir::
+
+        #10 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );
+        #12 = MEASURE_WITH_UNIT(LENGTH_MEASURE(25.4),#10);
+        #13 = ( CONVERSION_BASED_UNIT('INCH',#12) LENGTH_UNIT() ... );
+
+    ``#10`` dosyanın birimi DEĞİLDİR — dönüşümün DAYANDIĞI taban birimdir.
+    Eski okuma onu döndürdüğü için üç dosya da "mm" diyordu ve çağıran
+    ``unit != 'mm'`` uyarısını hiç basmıyordu (ölçülen: inch / foot / mil
+    üçünde de ``okunan='mm'``; 25,4 / 304,8 / 0,0254 katlık ölçek beyanı
+    sessizce kayboluyordu).
+
+    Yeni okuma dosyanın TAMAMINDAKİ ``LENGTH_UNIT`` ifadelerini toplar ve
+    şu sırayla hüküm verir (fail-closed):
+
+    * bir tane ``CONVERSION_BASED_UNIT`` varsa dosyanın birimi odur;
+    * birden çok FARKLI dönüşümlü birim varsa birim KAZANILMAMIŞTIR ->
+      ``(None, None)``; çağıran "beyan bulunamadı" uyarısını basar, sayı
+      uydurulmaz;
+    * dönüşümlü birim yoksa tek olan SI birimi kullanılır; farklı SI
+      birimleri varsa yine kazanılmamış sayılır.
+
     Returns
     -------
     (str | None, str | None)
         (normalize birim adı ör. 'mm'/'inch', ham gösterim) — bulunamazsa
-        (None, None).
+        ya da beyan çelişkiliyse (None, None).
     """
+    conv = []          # [(normalize_ad, ham)] — CONVERSION_BASED_UNIT
+    si = []            # [(normalize_ad, ham)] — SI_UNIT(..., .METRE.)
     buf = ''
+
+    def _topla(st):
+        if 'LENGTH_UNIT' not in st:
+            return
+        m = re.search(r"CONVERSION_BASED_UNIT\s*\(\s*'([^']+)'", st)
+        if m:
+            raw = m.group(1).strip().upper()
+            conv.append((_CONV_UNIT_NAMES.get(raw, raw.lower()), raw))
+            return
+        m = re.search(r"SI_UNIT\s*\(\s*(\$|\.\w+\.)\s*,\s*\.METRE\.", st)
+        if m:
+            raw = m.group(1)
+            si.append((_SI_PREFIX_UNIT.get(raw, 'm?'), raw))
+
     try:
         with open(file_path, 'r', errors='ignore') as fh:
             for line in fh:
@@ -188,18 +273,19 @@ def _detect_declared_unit(file_path):
                 statements = buf.split(';')
                 buf = statements[-1]
                 for st in statements[:-1]:
-                    if 'LENGTH_UNIT' not in st:
-                        continue
-                    m = re.search(r"CONVERSION_BASED_UNIT\s*\(\s*'([^']+)'", st)
-                    if m:
-                        raw = m.group(1).strip().upper()
-                        return _CONV_UNIT_NAMES.get(raw, raw.lower()), raw
-                    m = re.search(
-                        r"SI_UNIT\s*\(\s*(\$|\.\w+\.)\s*,\s*\.METRE\.", st)
-                    if m:
-                        raw = m.group(1)
-                        return _SI_PREFIX_UNIT.get(raw, 'm?'), raw
+                    _topla(st)
+        _topla(buf)     # noktalı virgülle kapanmayan son ifade
     except OSError:
+        return None, None
+
+    for aday in (conv, si):
+        if not aday:
+            continue
+        if len({ad for ad, _ham in aday}) == 1:
+            return aday[0]
+        # Aynı dosyada ÇELİŞEN birim beyanı: hangisinin geçerli olduğu
+        # ancak birim atama grafiği çözülerek bilinir. Burada tahmin
+        # yürütülmez — birim kazanılmamıştır (fail-closed).
         return None, None
     return None, None
 
@@ -426,6 +512,127 @@ def _suggestion(value, candidate_index, confidence):
             'confidence': confidence, 'estimated': True}
 
 
+# ---------------------------------------------------------------------------
+# Montajda HANGİ katı çözümlenecek? (ÖH D15 / defter P9B2-06)
+# ---------------------------------------------------------------------------
+#: Parça adının başında geçtiğinde katıyı YANMA ODASI olarak tanıtan kökler.
+#: Öncelik sırasıyla; ilk eşleşen kazanır.
+_CHAMBER_NAME_TOKENS = ('chamber', 'case', 'combustion_chamber', 'motor_case')
+#: Oda OLMADIĞI adından belli olan parçalar — hacimle seçimde bile elenirler.
+_NON_CHAMBER_NAME_TOKENS = ('nozzle', 'fuel_grain', 'grain', 'injector',
+                            'tank', 'liner', 'throat')
+
+
+def _name_tokens(name):
+    """Parça adını küçük harfli sözcüklere böler.
+
+    STEP'e yazılan ad, künyeyi de taşıdığı için uzundur ve noktalama
+    ``_``a dönüşmüştür (ör. ``chamber__wall_2_40_mm_-_structural...``).
+    Sözcük bölmesi bu yüzden ayraç-tabanlıdır, eşitlik değil.
+    """
+    return [t for t in re.split(r'[^a-z0-9]+', (name or '').lower()) if t]
+
+
+def _chamber_name_rank(name):
+    """Ad odayı gösteriyorsa öncelik sırası (0 en iyi), göstermiyorsa None."""
+    toks = _name_tokens(name)
+    if not toks:
+        return None
+    # Yalnız ADIN BAŞI sayılır: künye metninde 'chamber' sözcüğü lüle
+    # parçasının içinde de geçebilir ("...x chamber pressure").
+    head = toks[0]
+    if head in _NON_CHAMBER_NAME_TOKENS:
+        return None
+    for rank, token in enumerate(_CHAMBER_NAME_TOKENS):
+        if head == token:
+            return rank
+    # 'combustion_chamber' gibi iki sözcüklü baş
+    if len(toks) > 1 and f'{toks[0]}_{toks[1]}' in _CHAMBER_NAME_TOKENS:
+        return _CHAMBER_NAME_TOKENS.index(f'{toks[0]}_{toks[1]}')
+    return None
+
+
+def _choose_solid(solids_info):
+    """Montajdan çözümlenecek katıyı seçer -> ``(index, künye)``.
+
+    ÖH D15 (defter P9B2-06). Kusur: seçim KOŞULSUZ hacimle yapılıyordu
+    (``int(np.argmax(volumes))``) ve HRMA'nın kendi montaj STEP'inde en büyük
+    hacim yakıt tanesidir. Ölçüldü (31 Ağustos 2026, ``motor_solid``
+    fikstüründen üretilen ``EXPORT_assembly.step``):
+
+    ======================  =========  ========  ======  =========
+    öneri                   değer      güven     gerçek  hata
+    ======================  =========  ========  ======  =========
+    ``chamber_diameter_mm``  35,0000   **high**  100,0   -%65,0
+    ``chamber_length_mm``   300,0000   **high**  400,0   -%25,0
+    ``wall_thickness_mm``    30,5000   **high**    2,4   +%1171
+    ======================  =========  ========  ======  =========
+
+    Yani tanenin port deliği "oda çapı", tanenin web'i "cidar kalınlığı"
+    ilan ediliyordu — üstelik üçü de "high" güven rozetiyle. Aynı dosyada
+    katıların ADI vardı (``chamber...``, ``nozzle...``, ``fuel_grain...``) ve
+    içe aktarıcı o adı okuyup yanıtına yazıyor ama SEÇİMDE kullanmıyordu.
+    (Tek parça ``_chamber.step`` zaten doğru çözülüyordu: kusur sayısal
+    sadakatte değil, KATI SEÇİMİNDEYDİ.)
+
+    Yeni sözleşme:
+
+    * ad odayı gösteriyorsa O katı çözümlenir (birden çoksa en büyük hacimli);
+    * hiçbir ad odayı göstermiyorsa eski davranış (en büyük hacim) KORUNUR —
+      adsız dosyalar bit-aynı çözülür — ama seçim ``identified_as_chamber:
+      False`` ile künyelenir ve oda/cidar önerilerinin güveni düşürülür.
+    """
+    ranked = []
+    for info in solids_info:
+        rank = _chamber_name_rank(info.get('name'))
+        if rank is not None:
+            ranked.append((rank, -float(info.get('volume_mm3') or 0.0),
+                           int(info['index'])))
+    if ranked:
+        ranked.sort()
+        index = ranked[0][2]
+        return index, {
+            'index': index,
+            'basis': 'part name identifies the combustion chamber',
+            'matched_name': solids_info[index]['name'],
+            'identified_as_chamber': True,
+        }
+    volumes = [float(i.get('volume_mm3') or 0.0) for i in solids_info]
+    index = int(np.argmax(volumes)) if volumes else 0
+    return index, {
+        'index': index,
+        'basis': ('no part name identifies the combustion chamber; the '
+                  'largest solid was analyzed'),
+        'matched_name': solids_info[index]['name'] if solids_info else None,
+        'identified_as_chamber': False,
+    }
+
+
+def _demote_chamber_confidence(suggestions, warnings):
+    """Oda/cidar önerilerinin güvenini düşürür ve gerekçesini yazar.
+
+    ÖH D15 / P9B2-06'nın ikinci yarısı: çözümlenen katının ODA OLDUĞU
+    bilinmiyorsa "high" rozeti bir dürüstlük sinyali değil, YANLIŞ sinyaldir —
+    kullanıcı "Apply to form" dediğinde tasarım formuna o sayılar yazılır.
+    """
+    demoted = []
+    for key in ('chamber_diameter_mm', 'chamber_length_mm',
+                'wall_thickness_mm'):
+        s = suggestions.get(key)
+        if isinstance(s, dict) and s.get('confidence') != 'low':
+            s['confidence'] = 'low'
+            s['confidence_downgraded_because'] = (
+                'the analyzed solid is not identified as the combustion '
+                'chamber')
+            demoted.append(key)
+    if demoted:
+        warnings.append(
+            'confidence downgraded to low on ' + ', '.join(demoted)
+            + ': these values were read off a solid that is not identified '
+              'as the combustion chamber')
+    return demoted
+
+
 def _derive_suggestions(segments, warnings):
     """Aday segmentlerden ölçü önerileri türetir (bulunamayan alan YAZILMAZ)."""
     suggestions = {}
@@ -446,7 +653,7 @@ def _derive_suggestions(segments, warnings):
 
     # --- Boğaz: iç konturun minimum çapı ---
     z_throat = None
-    if (r_max - r_min) / max(r_min, _EPS) < THROAT_MIN_CONTRACTION:
+    if (r_max - r_min) / max(r_min, _RELATIVE_DIV_FLOOR_MM) < THROAT_MIN_CONTRACTION:
         warnings.append(
             'no distinct throat found in inner contour '
             '(inner radius nearly constant)')
@@ -562,7 +769,7 @@ def _derive_suggestions(segments, warnings):
         values = np.array([s[0] for s in samples])
         med = float(np.median(values))
         nearest = min(samples, key=lambda s: abs(s[0] - med))
-        spread = float((values.max() - values.min()) / max(med, _EPS))
+        spread = float((values.max() - values.min()) / max(med, _RELATIVE_DIV_FLOOR_MM))
         if used_fallback or restrict is None:
             conf = 'low'
         elif len(samples) >= 3 and spread < WALL_SPREAD_HIGH:
@@ -629,7 +836,8 @@ def analyze_step(file_path, solid_index=None):
         if unit is None:
             unit = 'unknown'
             warnings.append(
-                'length unit declaration not found in STEP header; '
+                'length unit could not be resolved from the STEP header '
+                '(no LENGTH_UNIT declaration, or conflicting declarations); '
                 'geometry interpreted as millimetres by the kernel')
         elif unit != 'mm':
             warnings.append(
@@ -662,12 +870,21 @@ def analyze_step(file_path, solid_index=None):
                 {'index': i, 'name': name, 'volume_mm3': _rnd(vol, 2)})
         base['solids'] = solids_info
 
+        chamber_identified = True
         if solid_index is None:
-            chosen = int(np.argmax(volumes))
+            chosen, selection = _choose_solid(solids_info)
+            base['solid_selection'] = selection
+            chamber_identified = selection['identified_as_chamber']
             if len(solids) > 1:
                 warnings.append(
-                    f'assembly: {len(solids)} solids, largest analyzed '
-                    f'(index {chosen})')
+                    f'assembly: {len(solids)} solids, index {chosen} '
+                    f'analyzed ({selection["basis"]})')
+                if not chamber_identified:
+                    warnings.append(
+                        'the analyzed solid is NOT identified as the '
+                        'combustion chamber (no part name in this file says '
+                        'so), so any chamber / wall suggestion below '
+                        'describes whichever body happened to be largest')
         else:
             try:
                 chosen = int(solid_index)
@@ -677,13 +894,21 @@ def analyze_step(file_path, solid_index=None):
                 return _fail(
                     f'solid_index out of range (0..{len(solids) - 1})',
                     'bad_request')
+            base['solid_selection'] = {
+                'index': chosen, 'basis': 'solid_index requested by the caller',
+                'matched_name': solids_info[chosen]['name'],
+                'identified_as_chamber':
+                    _chamber_name_rank(solids_info[chosen]['name']) is not None,
+            }
+            chamber_identified = base['solid_selection'][
+                'identified_as_chamber']
         base['solid_analyzed_index'] = chosen
         solid = solids[chosen][1]
 
         # 5) Yüzey taraması
         records = _face_records(solid.wrapped, deps)
         total_area = sum(r['area'] for r in records)
-        if total_area <= _EPS:
+        if total_area <= _DEGENERATE_AREA_MM2:
             return _fail('solid has no measurable surface area',
                          'invalid_file')
 
@@ -777,6 +1002,10 @@ def analyze_step(file_path, solid_index=None):
 
         # 9) Öneriler (bulunamayan alan hiç yazılmaz — sessiz doldurma yasak)
         suggestions = _derive_suggestions(segments, warnings)
+        # ÖH D15 / P9B2-06: çözümlenen katının ODA olduğu bilinmiyorsa oda ve
+        # cidar önerileri "high" rozeti taşıyamaz.
+        if len(solids) > 1 and not chamber_identified:
+            _demote_chamber_confidence(suggestions, warnings)
 
         profile = {
             'inner': _build_profile(

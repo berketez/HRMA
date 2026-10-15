@@ -151,8 +151,14 @@ def formul_kutulari(html, baslik_on_eki):
     m = re.search(r'<h3[^>]*>\s*' + re.escape(baslik_on_eki) + r'[^<]*</h3>(.*?)'
                   r'(?=<h3|<h2|</div>\s*\n\s*<!--\s*Section)', html, re.S)
     assert m, 'bölüm bulunamadı: ' + baslik_on_eki
+    # ÖH D29 · arayuz-panel a2: desen ÖZNİTELİKSİZ kutuyla sınırlıydı.
+    # ÖH D29 a1/a2 model-farkı beyanları kutulara `data-model-gap="…"`
+    # ekleyince §6.1'in üçüncü kutusu listeden DÜŞÜYOR ve indis taşıyordu
+    # (IndexError). Yardımcının niyeti "formül kutuları"dır, "özniteliksiz
+    # formül kutuları" değil — desen özniteliğe toleranslı hâle getirildi.
+    # Kusuru koruyan bir bekçi değildi; kırılganlıktı.
     return [re.sub(r'\s+', ' ', k).strip()
-            for k in re.findall(r'<div class="formula-box">(.*?)</div>',
+            for k in re.findall(r'<div class="formula-box"[^>]*>(.*?)</div>',
                                 m.group(1), re.S)]
 
 
@@ -217,8 +223,45 @@ def _sus_al(s, acilis_oncesi):
 class TestT08UcusGovdesi:
     """Gövde kurulumu node'da GERÇEKTEN çalıştırılır (hoisting dahil)."""
 
+    # --- ÖH D30 / fix-29a — SAYIM MANDALI KÜME ÖLÇÜSÜNE ÇEVRİLDİ ---------
+    # Bu sınıfın iki bekçisi ``== 8`` diye SAYIYORDU. D28 arayüz a4 iki
+    # meşru rüzgâr girdisi ekleyince (``ls-a-windspeed`` / ``ls-a-winddir``)
+    # sayı 10'a çıktı ve ikisi de kırmızıya döndü — oysa korudukları kusur
+    # (alanın dizge gitmesi, okuyucu ile biçimlendiricinin karışması) hiç
+    # doğmamıştı. Sayıyı 10'a YÜKSELTMEK mandalı bir sonraki meşru alanda
+    # yine kıracaktı ve arada eksilen bir alanı göremezdi. Ölçü artık KÜME:
+    # okunan alanlar ile şablonun varsayılanlı alanları BİREBİR aynı kümedir;
+    # yeni alan ikisini birlikte büyütür, biri eksik kalırsa kırmızı yanar.
+    # (D27 dersi 11: sayım bekçisi değil ilişki bekçisi.)
+
     @staticmethod
-    def _harness(html):
+    def _sablon_alanlari(html):
+        """Şablondaki ``ls-a-*`` girdileri: {id: varsayılan} (uydurma yok)."""
+        return dict(re.findall(
+            r'id="(ls-a-[a-z0-9]+)"[^>]*value="([^"]+)"', html))
+
+    @staticmethod
+    def _okunan_alanlar(js):
+        """JS'in ``fieldNum`` ile GERÇEKTEN okuduğu id'ler (bildirim değil)."""
+        return [c.strip().strip("'\"")
+                for c in re.findall(r'(?<!function )fieldNum\((.*?),', js)]
+
+    @classmethod
+    def _kume_esitligi(cls, html):
+        """Şablon ⟷ okuyucu küme eşitliği; iki yönlü, sayısız."""
+        sablon = cls._sablon_alanlari(html)
+        okunan = cls._okunan_alanlar(yorumsuz(inline_script(html)))
+        yinelenen = sorted({a for a in okunan if okunan.count(a) > 1})
+        assert not yinelenen, 'aynı alan iki kez okunuyor: %r' % yinelenen
+        assert set(okunan) == set(sablon), (
+            'şablon ile okuyucu ayrıştı — şablonda olup okunmayan: %s; '
+            'okunup şablonda varsayılanı olmayan: %s'
+            % (sorted(set(sablon) - set(okunan)),
+               sorted(set(okunan) - set(sablon))))
+        return sablon, okunan
+
+    @classmethod
+    def _harness(cls, html):
         js = inline_script(html)
         # Sayı yardımcılarının TAMAMI, dosyadaki SIRAYLA — hoisting'i birebir
         # yeniden üretmek şart: kusurlu sürümde iki bildirim de 'num' adındaydı.
@@ -227,10 +270,14 @@ class TestT08UcusGovdesi:
         assert len(bildirimler) >= 3, bildirimler
         dry = re.search(r'^\s*(var dryTotal = .*;)\s*$', js, re.M)
         assert dry, 'dryTotal satırı bulunamadı'
+        # ÖH D33-KOLAY · P12bB4-05: uçuş yükü artık beş gövde sabitini
+        # ŞABLONDAKİ TEK NESNEDEN (`LS_FIXED_AIRFRAME`) okuyor. Koşum ikizi
+        # nesneyi de sökmeli; yoksa `ReferenceError` ile patlar. Nesne
+        # ŞABLONDAN okunur, teste GÖMÜLMEZ (tek kaynak korunur).
+        sabitler = blok_sok(js, 'var LS_FIXED_AIRFRAME = ') + ';'
         govde = blok_sok(js, 'var body = ')
         # Girdi varsayılanları ŞABLONUN KENDİSİNDEN okunur (uydurma yok).
-        alanlar = dict(re.findall(r'id="(ls-a-[a-z0-9]+)"[^>]*value="([^"]+)"', html))
-        assert len(alanlar) == 8, alanlar
+        alanlar, _ = cls._kume_esitligi(html)
         return """
         'use strict';
         var DOM = %s;
@@ -241,8 +288,10 @@ class TestT08UcusGovdesi:
         %s
         %s
         %s
+        %s
         console.log(JSON.stringify(body));
-        """ % (json.dumps(alanlar), '\n'.join(bildirimler), dry.group(1), govde)
+        """ % (json.dumps(alanlar), '\n'.join(bildirimler), sabitler,
+                 dry.group(1), govde)
 
     @needs_node
     def test_gonderilen_alanlar_sayidir(self, ls_html):
@@ -256,21 +305,26 @@ class TestT08UcusGovdesi:
         assert cikti.returncode == 0, cikti.stderr
         body = json.loads(cikti.stdout.strip())
 
-        olculen = ['body_diameter', 'body_length', 'dry_mass', 'cd0',
-                   'fin_count', 'fin_span', 'launch_elevation_deg',
-                   'launch_azimuth_deg']
+        # Gövdenin HANGİ anahtarları alandan besleniyor — ŞABLONDAN ve
+        # gövde bloğundan okunur, elle listelenmez (yeni alan eklenince
+        # bu bekçi kendiliğinden onu da sınar).
+        sablon = self._sablon_alanlari(ls_html)
+        js = yorumsuz(inline_script(ls_html))
+        eslesme = dict(
+            (anahtar, alan) for anahtar, alan in re.findall(
+                r"(\w+):\s*fieldNum\('(ls-a-[a-z0-9]+)'", js))
+        assert eslesme, 'gövdede fieldNum ile beslenen anahtar yok'
+        olculen = sorted(eslesme) + ['dry_mass']
         dizgeler = {k: body[k] for k in olculen if isinstance(body[k], str)}
         assert not dizgeler, 'dizge olarak giden alanlar (422 sebebi): %r' % dizgeler
-        # Şablondaki varsayılanların ta kendisi
-        assert body['body_diameter'] == pytest.approx(0.15)
-        assert body['body_length'] == pytest.approx(3.0)
-        assert body['cd0'] == pytest.approx(0.45)
-        assert body['fin_count'] == 4
-        assert body['fin_span'] == pytest.approx(0.11)
-        assert body['launch_elevation_deg'] == 84
-        assert body['launch_azimuth_deg'] == 90
+        # Şablondaki varsayılanların TA KENDİSİ (sayı teste kopyalanmaz).
+        for anahtar, alan in sorted(eslesme.items()):
+            assert body[anahtar] == pytest.approx(float(sablon[alan])), (
+                '%s şablon varsayılanıyla (%s=%s) uyuşmuyor: %r'
+                % (anahtar, alan, sablon[alan], body[anahtar]))
         # ÇİFT SAYIM sözleşmesi: gövde kurusu + motor atılı (18 + 7)
-        assert body['dry_mass'] == pytest.approx(25.0), (
+        assert body['dry_mass'] == pytest.approx(
+            float(sablon['ls-a-drymass']) + 7), (
             "kusurlu sürümdeki imza '--7' idi")
         assert '--' not in json.dumps(body)
 
@@ -287,7 +341,10 @@ class TestT08UcusGovdesi:
         assert not re.search(r'[^\w.]num\s*\(', js), 'çıplak num( çağrısı kaldı'
         # (?<!function ) → bildirim satırlarını değil, ÇAĞRILARI süz
         cagrilar = re.findall(r'(?<!function )fieldNum\((.*?),', js)
-        assert len(cagrilar) == 8, cagrilar
+        # Sayı yerine KÜME: okuyucunun gördüğü alanlar şablonunkilerle bire
+        # bir aynı olmak zorunda (iki yönlü; yeni alan ikisini birlikte
+        # büyütür).
+        self._kume_esitligi(ls_html)
         for cagri in cagrilar:
             assert cagri.strip().startswith("'ls-"), \
                 'fieldNum id ile çağrılmalı: %r' % cagri
@@ -351,10 +408,23 @@ class TestT54KaroGostergesi:
         assert 'watchTiles();' in js, 'watchTiles hiç çağrılmıyor'
 
     def test_atif_ekrandaki_karoya_bagli(self, ls_html):
-        """Atıf, GIBS görüntüsü ekrandayken görünmeli — disk sayısına göre değil."""
+        """Atıf, GIBS görüntüsü ekrandayken görünmeli — disk sayısına göre değil.
+
+        ÖH D21 / P12aB4-19 (kalıp gevşetildi, sözleşme AYNI): görünürlük
+        ölçütü hâlâ küre durumudur (`info.active`), ama artık ek olarak
+        katmanın künye ANAHTARI da aranır — anahtar yoksa atıf hiç basılmaz
+        (başka katmanın künyesi gösterilmesin diye, fail-closed). Düğüm de
+        değişkene alındı (aynı düğüme iki kez `setAttribute` yapılıyor).
+        Eski kalıp `el('ls-tile-attr').style.display = info.active` metnini
+        BİREBİR arıyordu; korunan davranış değil yazım biçimiydi. Yeni kalıp
+        düğümün gerçekten `ls-tile-attr` olduğunu ayrıca doğrular.
+        """
         js = inline_script(ls_html)
         fn = blok_sok(js, 'function watchTiles')
-        assert re.search(r"ls-tile-attr'\)\.style\.display\s*=\s*info\.active", fn), \
+        assert re.search(r"var attrEl = el\('ls-tile-attr'\);", fn), \
+            'atıf düğümü watchTiles içinde çözülmüyor'
+        assert re.search(r"(?:attrEl|el\('ls-tile-attr'\))\.style\.display"
+                         r"\s*=\s*[^;]*\binfo\.active\b", fn), \
             'atıf görünürlüğü küre durumundan sürülmüyor'
         yenile = blok_sok(js, 'function refreshTileUsage')
         assert 'ls-tile-attr' not in yenile, (
@@ -372,37 +442,90 @@ class TestT54KaroGostergesi:
 # T73 — İngilizce arayüzde Türkçe metin
 # ===========================================================================
 class TestT73KisayolDili:
+    """ÇEVRİLDİ (ÖH D24 · P4B3-27). Eski hâli KUSURU KORUYORDU.
+
+    Eski üç test şablondaki ``var PRESETS = [ ... ]`` gömülü dizisini
+    metin olarak sökuyor, 7 kaydı ve koordinatlarını orada arıyordu —
+    yani P4B3-27'nin kusurunu (arayüzün Python listesinden BAĞIMSIZ
+    kendi kopyası) kilitliyordu: liste tek kaynağa bağlandığı anda
+    ``js.index('var PRESETS = [')`` ValueError atıyor.
+
+    Testlerin KORUDUĞU niyet aynen sürüyor, yalnız ölçüm noktası kaydı:
+    dil sızıntısı artık TEK KAYNAKTA (``LAUNCH_SITE_PRESETS``) ve
+    şablonun arazi referansında aranır; koordinatlar da o kaynaktan
+    doğrulanır. Kopya olmadığı için "iki liste ayrıştı" hatası artık
+    yapısal olarak imkânsız.
+    """
 
     TURKCE = set('çğıİöşüÇĞÖŞÜ')
 
-    def test_kisayol_etiketleri_turkce_icermez(self, ls_html):
+    def _terrain_refs(self, ls_html):
+        """Şablonun arazi referansı dizisi (fırlatma sahası DEĞİL)."""
         js = inline_script(ls_html)
-        dizi = js[js.index('var PRESETS = ['):]
-        dizi = dizi[:dizi.index('];') + 2]
-        etiketler = re.findall(r"\[\s*'[a-z]+',\s*'([^']+)'", dizi)
-        assert len(etiketler) == 7, etiketler
+        dizi = js[js.index('var TERRAIN_REFS = ['):]
+        return dizi[:dizi.index('];') + 2]
+
+    def test_kisayol_etiketleri_turkce_icermez(self, ls_html):
+        """İngilizce arayüzde Türkçe ad sızmasın (T73'ün kendi niyeti)."""
+        from hrma.analysis.launch_site import LAUNCH_SITE_PRESETS
+        etiketler = [p['name'] for p in LAUNCH_SITE_PRESETS]
+        etiketler += re.findall(r"name:\s*'([^']+)'", self._terrain_refs(ls_html))
+        assert len(etiketler) == len(LAUNCH_SITE_PRESETS) + 1, etiketler
         for e in etiketler:
             sizan = self.TURKCE & set(e)
             assert not sizan, 'İngilizce listede Türkçe karakter: %r (%r)' % (e, sizan)
-        assert 'Mount Everest (high terrain)' in etiketler
+        assert 'Mount Everest' in etiketler
 
     def test_etiketler_i18n_uzerinden_basilir(self, ls_html):
         """Anahtarlı girdi t() ile çözülmeli ve dil değişince tazelenmeli."""
         js = inline_script(ls_html)
-        assert re.search(r'function presetLabel\(p\)\s*\{[^}]*t\(p\[4\]', js)
+        assert re.search(r'function presetLabel\(p\)\s*\{[^}]*t\(p\.i18nKey', js)
         assert 'relabelPresets()' in js.split('I18N.onChange')[-1]
 
-    def test_koordinatlar_korundu(self, ls_html):
-        """Etiket düzeltmesi koordinatlara dokunmamalı (denetimde doğrulanmıştı)."""
+    def test_yaklasik_kayit_ekranda_ayriliyor(self, ls_html):
+        """ÖH D24 · P4B3-27: ``approx`` bayrağı ETİKETE ulaşır.
+
+        Python listesi 'Sinop (TR)' ve 'Konya (TR)' kayıtlarını
+        ``approx: True`` ile işaretliyor ("gerçek bir tesis değil, bölge
+        referansı"); bu ayrım ekranda söylenmezse kullanıcı onları KSC
+        LC-39A ile aynı sınıfta görür.
+        """
+        from hrma.analysis.launch_site import LAUNCH_SITE_PRESETS
+        assert sum(1 for p in LAUNCH_SITE_PRESETS if p['approx']) >= 1
         js = inline_script(ls_html)
-        dizi = js[js.index('var PRESETS = ['):]
-        dizi = dizi[:dizi.index('];') + 2]
-        koordinatlar = dict((m[0], (float(m[1]), float(m[2]))) for m in re.findall(
-            r"\['([a-z]+)',\s*'[^']+',\s*(-?[\d.]+),\s*(-?[\d.]+)", dizi))
-        assert koordinatlar['ksc'] == (28.6084, -80.6043)
-        assert koordinatlar['everest'] == (27.9881, 86.9250)
-        assert koordinatlar['sinop'] == (42.0231, 35.1531)
-        assert koordinatlar['mahia'] == (-39.2617, 177.8650)
+        etiket = blok_sok(js, 'function presetLabel')
+        assert 'p.approx' in etiket
+        assert 'site.presetApprox' in etiket
+        assert 'p.terrain' in etiket and 'site.presetTerrainRef' in etiket
+
+    def test_liste_sunucudan_geliyor_kopya_yok(self, ls_html):
+        """Şablon kendi saha listesini TAŞIMAZ; rotadan alır."""
+        # Veri JSON script etiketinde durur; gömülü JS onu okur (böylece
+        # betik saf JavaScript kalır ve node --check ayrıştırabilir).
+        assert ('<script type="application/json" id="ls-presets-data">'
+                '{{ launch_site_presets | tojson }}</script>') in ls_html
+        js = inline_script(ls_html)
+        assert "document.getElementById('ls-presets-data')" in js
+        # Gömülü koordinat dizisi geri gelmesin (eski kusurun imzası)
+        assert not re.search(r"\[\s*'[a-z_]+',\s*'[^']+',\s*-?\d+\.\d+,\s*-?\d+\.\d+", js)
+
+    def test_koordinatlar_korundu(self, ls_html):
+        """Etiket düzeltmesi koordinatlara dokunmamalı (denetimde doğrulanmıştı).
+
+        Artık TEK KAYNAKTAN doğrulanır: eski gömülü dizideki dört kayıt
+        Python listesinde birebir aynı koordinatlarla duruyor (everest
+        fırlatma sahası olmadığı için şablonun arazi referansında).
+        """
+        from hrma.analysis.launch_site import LAUNCH_SITE_PRESETS
+        koordinatlar = dict(
+            (p['id'], (p['latitude'], p['longitude'])) for p in LAUNCH_SITE_PRESETS)
+        assert koordinatlar['ksc_lc39a'] == (28.6084, -80.6043)
+        assert koordinatlar['sinop_tr'] == (42.0231, 35.1531)
+        assert koordinatlar['mahia_lc1'] == (-39.2617, 177.8650)
+        arazi = self._terrain_refs(ls_html)
+        assert re.search(r'latitude:\s*27\.9881', arazi)
+        assert re.search(r'longitude:\s*86\.9250', arazi)
+
 
 
 # ===========================================================================

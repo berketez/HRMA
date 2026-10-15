@@ -241,44 +241,95 @@ def test_win_betigi_dist_dizinini_hazirlar():
 # 3) Kapı 8/8: içerik manifesti gerçekten karar veriyor mu?
 # ---------------------------------------------------------------------------
 
-def test_kapi_sekizinci_adimi_var():
+def test_kapi_paket_icerik_adimi_var():
+    """Adım BAŞLIĞIYLA aranır, numarasıyla değil.
+
+    ÖH D28 / altyapi (defter OH-D27-04): iddia ``^baslik "8/9`` diye SABİT
+    numara arıyordu ve kapıya 10. adım (iddia dili kapısı) eklenince
+    paydası 8/10 oldu — mandal, aranan ADIMIN kaybolmasını değil kapının
+    BÜYÜMESİNİ yakalıyordu. Ölçülen şey artık adımın kendisi: "Paket
+    içerik manifesti" adlı bir adım var mı ve numarası kapının beyanıyla
+    tutarlı mı.
+    """
     metin = KAPI.read_text(encoding='utf-8')
-    assert re.search(r'^baslik "8/8\s', metin, re.M), (
-        'yayın kapısında 8/8 (paket içerik manifesti) adımı yok')
+    eslesme = re.search(r'^baslik "(\d+)/(\d+)\s+(Paket içerik manifesti[^"]*)"',
+                        metin, re.M)
+    assert eslesme, (
+        'yayın kapısında "Paket içerik manifesti" adımı yok')
+    numara, payda = int(eslesme.group(1)), int(eslesme.group(2))
+    toplam = len(re.findall(r'^baslik "\d+/\d+\s', metin, re.M))
+    assert payda == toplam, (
+        f'adım {numara}/{payda} diyor ama kapıda {toplam} adım var')
+    assert 1 <= numara <= toplam
 
 
 def test_manifest_eksik_ornekte_kapiyi_kapatir(tmp_path):
     """``manifest_denetle`` sahte bir paket ağacında doğru karar veriyor mu?"""
     govde = _bash_fonksiyonu(KAPI.read_text(encoding='utf-8'), 'manifest_denetle')
 
+    # ÖH D17 / altyapi (defter P10B3-13) — BEKÇİ ÇEVRİLDİ. Eski gövde
+    # "eksiksiz paket" diye 1 BAYTLIK dosyalardan ve BOŞ bir `data/`
+    # dizininden oluşan bir ağaç kuruyor ve kapının ona GEÇTİ demesini
+    # SÖZLEŞME hâline getiriyordu. Ölçüldü (once.json): tam da bu yüzden
+    # her dosyası 0 bayt olan sahte bir paket 6/6 geçiyordu. Manifest artık
+    # içeriğe bakıyor; "eksiksiz paket" örneği de gerçekten dolu.
+    # İDDİA DEĞİŞMEDİ: dolu paket geçer, örnek/ön-derleme kaybı kapıyı kapatır.
+    ORNEK_DOLGU = 'x' * 512
     kok = tmp_path / 'paket'
     (kok / 'app' / 'examples').mkdir(parents=True)
     (kok / 'app' / 'hrma' / '__pycache__').mkdir(parents=True)
     (kok / 'app' / 'data').mkdir(parents=True)
     (kok / 'libs' / 'flask' / '__pycache__').mkdir(parents=True)
-    (kok / 'app' / 'hrma' / 'app.py').write_text('x', encoding='utf-8')
-    (kok / 'app' / 'launcher.py').write_text('x', encoding='utf-8')
-    (kok / 'app' / 'examples' / 'generate_examples.py').write_text('x', encoding='utf-8')
+    (kok / 'app' / 'hrma' / 'app.py').write_text(ORNEK_DOLGU, encoding='utf-8')
+    (kok / 'app' / 'launcher.py').write_text(ORNEK_DOLGU, encoding='utf-8')
+    (kok / 'app' / 'examples' / 'generate_examples.py').write_text(
+        ORNEK_DOLGU, encoding='utf-8')
     for ad in ('a', 'b', 'c'):
-        (kok / 'app' / 'examples' / ('%s.hrma' % ad)).write_text('{}', encoding='utf-8')
+        (kok / 'app' / 'examples' / ('%s.hrma' % ad)).write_text(
+            '{"ad": "%s"}' % ad, encoding='utf-8')
+    for n in range(4):
+        (kok / 'app' / 'data' / ('katalog_%d.json' % n)).write_text(
+            ORNEK_DOLGU, encoding='utf-8')
+    (kok / 'app' / 'hrma' / '__pycache__' / 'app.cpython-312.pyc').write_bytes(
+        b'x' * 128)
+    (kok / 'libs' / 'flask' / '__pycache__' / 'app.cpython-312.pyc').write_bytes(
+        b'x' * 128)
+    ortam = ['REPO_ORNEK=3', 'REPO_DATA=4']
 
-    tam = _kapi_bash(govde, 'manifest_denetle "%s" "sahte paket"' % kok,
-                     ['REPO_ORNEK=3'])
+    tam = _kapi_bash(govde, 'manifest_denetle "%s" "sahte paket"' % kok, ortam)
     assert 'KALDI' not in tam, 'eksiksiz paket kapıyı kapatıyor:\n%s' % tam
     assert tam.count('GECTI') >= 6, tam
+
+    # 0 BAYTLIK dosyalar kapıyı KAPATMALI (P10B3-13'ün ölçtüğü delik).
+    (kok / 'app' / 'launcher.py').write_text('', encoding='utf-8')
+    bos_launcher = _kapi_bash(govde, 'manifest_denetle "%s" "sahte paket"' % kok,
+                              ortam)
+    assert 'KALDI|sahte paket: launcher.py YOK ya da boş' in bos_launcher, (
+        '0 baytlık launcher.py kapıdan geçti:\n%s' % bos_launcher)
+    (kok / 'app' / 'launcher.py').write_text(ORNEK_DOLGU, encoding='utf-8')
+
+    # BOŞ data/ dizini de kapıyı KAPATMALI (katalogsuz paket).
+    import shutil
+    for p in (kok / 'app' / 'data').iterdir():
+        p.unlink()
+    bos_data = _kapi_bash(govde, 'manifest_denetle "%s" "sahte paket"' % kok,
+                          ortam)
+    assert 'KALDI|sahte paket: data/ EKSİK' in bos_data, (
+        'boş data/ dizini kapıdan geçti:\n%s' % bos_data)
+    for n in range(4):
+        (kok / 'app' / 'data' / ('katalog_%d.json' % n)).write_text(
+            ORNEK_DOLGU, encoding='utf-8')
 
     # Örnekler düşerse kapı KAPANMALI (asıl arızanın tekrarı).
     for ad in ('a', 'b', 'c'):
         (kok / 'app' / 'examples' / ('%s.hrma' % ad)).unlink()
-    eksik = _kapi_bash(govde, 'manifest_denetle "%s" "sahte paket"' % kok,
-                       ['REPO_ORNEK=3'])
-    assert 'KALDI|sahte paket: örnek proje sayısı 0' in eksik, eksik
+    eksik = _kapi_bash(govde, 'manifest_denetle "%s" "sahte paket"' % kok, ortam)
+    assert 'KALDI|sahte paket: dolu örnek proje sayısı 0' in eksik, eksik
 
     # Ön-derleme kaybı da kapıyı kapatmalı (526 -> 383 MB vakası).
-    import shutil
     shutil.rmtree(kok / 'libs' / 'flask' / '__pycache__')
     onderlemesiz = _kapi_bash(govde, 'manifest_denetle "%s" "sahte paket"' % kok,
-                              ['REPO_ORNEK=3'])
+                              ortam)
     assert 'ön-derleme EKSİK' in onderlemesiz, onderlemesiz
 
 

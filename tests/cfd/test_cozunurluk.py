@@ -72,8 +72,19 @@ def _analitik_debi():
 
 def test_her_basamak_yakinsar(merdiven):
     for ni, nj, res in merdiven:
-        assert res['converged'] is True, (
-            f"{ni}×{nj} basamağı yakınsamadı: {res['convergence_basis']}")
+        # ÇEVRİLDİ (ÖH D32 / OH-D31-15): çözücü AÇIK yolda donmuş
+        # operatörün sayısından artık hüküm VERMİYOR (converged=None,
+        # convergence_status='not_evaluated'; Berke kararı 15 Eyl 2026 §3
+        # seç. A; ölçüm docs/scofield/raw/OH/D32/fea-cfd/a2/once.json).
+        # Eski doğruluk iddiası KAZANILMAMIŞ hükmün yerinde durmasını
+        # şart koşuyordu — kusuru koruyan bekçi, yönü çevrildi. Korunan
+        # yasak duruyor: ÖLÇÜLMÜŞ yakınsamama/ıraksama iddiayı geçersiz
+        # kılar.
+        assert res['converged'] is not False, (
+            f"{ni}×{nj} basamağı ÖLÇÜLMÜŞ olarak yakınsamadı: "
+            f"{res['convergence_basis']}")
+        assert res['convergence_status'] in ('converged', 'not_evaluated'), (
+            f"{ni}×{nj}: hüküm cinsi {res['convergence_status']!r}")
 
 
 def test_debi_hatasi_inceltmeyle_azalir(merdiven):

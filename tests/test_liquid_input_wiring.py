@@ -135,7 +135,19 @@ SHAKES = {
     'preburner_type': ('ox_rich', {'engine_cycle': 'staged_combustion',
                                    'preburner_type': 'fuel_rich'}),
     'thrust': (60000.0, {}),
-    'chamber_pressure': (160.0, {}),
+    # ÖH D26 / sivi a2 (P7B2-09) — BAĞLAM EKLENDİ, sarsma değeri AYNI.
+    # Sarsma gövdesi ``BASE_PAYLOAD``ın ``feed_pressure = 130`` bar'ını
+    # koruyup hazne basıncını 100 -> 160 bar'a çıkarıyordu; o motor FİZİKSEL
+    # OLARAK OLANAKSIZDIR (enjektörü besleyen basınç haznenin altında,
+    # ΔP = -30 bar). ``/calculate_liquid`` bu gövdeyi eskiden HTTP 200 ile
+    # hesaplıyordu (ölçüldü: ``a2/once.json`` ``P7B2-09``, feed 3/10/29 bar
+    # Pc = 30 bar'da hep 200); P7B2-09 onarımı ΔP kapısını ``feed_pressure``
+    # alanına da bağlayınca gövde adıyla 400 alıyor ve sarsma hiçbir yaprak
+    # oynatamıyor. Sarsılan alanın (``chamber_pressure``) ölçümü korunsun
+    # diye bağlam, İKİ gövdede birden geçerli bir besleme basıncı kuruyor
+    # (260 bar; ``feed_pressure`` sarsmasının kendi değeriyle aynı sayı,
+    # yeni sabit yazılmadı). Sarsma değeri ve iddia DEĞİŞMEDİ.
+    'chamber_pressure': (160.0, {'feed_pressure': 260.0}),
     'feed_pressure': (260.0, {}),
     'turbopump_efficiency': (55.0, {}),
     'generator_gas_temp': (1600.0, {}),

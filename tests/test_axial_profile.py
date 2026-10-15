@@ -129,10 +129,59 @@ class TestProfilePhysics:
         assert np.allclose(eps_from_mach, eps, rtol=1e-6)
 
     def test_heat_flux_peaks_at_throat(self, profile):
+        # NOT (ÖH FAZ B-4/P2, defter P4B1-03): bu bekçi yalnız TEPE KONUMUNU
+        # ölçer. Aynı boğazın akısı ürün içinde iki ayrı kanaldan yayımlanır
+        # (throat-analizi ⟷ eksenel profil) ve ikisi ayrışır; o eksen kardeş
+        # bekçidedir: ``test_throat_heat_flux_agrees_with_throat_analysis``.
         q = np.asarray(profile['q_MW'])
         ti = profile['throat_index']
         assert int(np.argmax(q)) == ti, "q maksimumu boğazda olmalı"
         assert np.all(q > 0)
+
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-03 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH Z5S / PK5 (ısı-soğutma kulvarı) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/heat_transfer_analysis.py:887
+    # "TASARIM AKISI — TEK TANIM NOKTASI (ÖH Z5S / PK5, P4B1-03)";
+    # :1806 throat_heat_flux tek tanımdan, :1543 referans soğutulmuş
+    # cidar tek tanım noktası
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P4B1-03 — aynı
+    # boğaz, aynı koşu, İKİ tasarım akısı. analyze_heat_transfer
+    # gaz-tarafı akıyı Tw_ref = 1073 K'de kuruyor
+    # (heat_transfer_analysis.py:1431-1453), analyze_axial_profile
+    # ise kendi cidar dengesinde çözüyor; ayrıca radyasyon terimi
+    # iki farklı gazda hesaplanıyor (:1439-1451 ⟷ :1232-1247). Bu
+    # fikstürde ölçülen: gas_side_analysis.throat_heat_flux 17,7935
+    # MW/m² ⟷ profil q_MW[boğaz] 18,7961 MW/m² (%5,63). İki değer
+    # İKİ AYRI tüketici kümesine gidiyor (PDF + 3B görselleştirme ⟷
+    # /api/analysis/wall-profile → termal FEA). Onarım gelince bu im
+    # KALKAR.
+    def test_throat_heat_flux_agrees_with_throat_analysis(self, analyzer,
+                                                          profile):
+        """Aynı boğazın tasarım akısı tek bir sayı olmalı.
+
+        Bu bekçi HANGİ kanalın doğru olduğuna hükmetmez (Tw_ref = 1073 K mi,
+        cidar dengesinden çözülen T_wall mü; hangi radyasyon gazı) — yalnız
+        aynı fiziksel büyüklüğün aynı koşuda iki değer YAYIMLAYAMAYACAĞINI
+        söyler. Modülün kendi docstring'i de (:1120-1121) 'throat-analiziyle
+        AYNI korelasyon ve gaz özellikleri' diyor; iddia o künyenin
+        davranıştaki karşılığıdır.
+        """
+        full = analyzer.analyze_heat_transfer(MOTOR_DATA)
+        q_throat_full = full['gas_side_analysis']['throat_heat_flux']   # W/m²
+        q_throat_profile = profile['q_MW'][profile['throat_index']] * 1e6
+        assert q_throat_profile == pytest.approx(q_throat_full, rel=0.01), (
+            f'boğaz tasarım akısı iki kanalda ayrışıyor: throat-analizi '
+            f'{q_throat_full / 1e6:.4f} MW/m² ⟷ eksenel profil '
+            f'{q_throat_profile / 1e6:.4f} MW/m² (sapma '
+            f'%{100.0 * abs(q_throat_profile / q_throat_full - 1):.2f})')
 
     def test_bartz_coefficient_peaks_at_throat(self, profile):
         h = np.asarray(profile['h_g'])
@@ -166,14 +215,49 @@ class TestProfilePhysics:
         assert p_reg['T_wall_eq'][ti] < p_nat['T_wall_eq'][ti], (
             "rejeneratif soğutma boğaz cidarını doğal soğutmadan soğuk tutmalı")
 
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-03 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH Z5S / PK5 (ısı-soğutma kulvarı) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/analysis/heat_transfer_analysis.py:1661
+    # "gaz-yanı katsayı artık TASARIM AKISININ ... "; :1730 "h_g'nin
+    # hangi cidar sıcaklığında kurulduğu ARTIK ..."; :1781 referans
+    # cidar TEK TANIM NOKTASINDAN
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P4B1-03 — aynı
+    # boğazın gaz-yanı katsayısı iki değerle yayımlanıyor:
+    # _calculate_heat_transfer_coefficients h_g'yi wall_guess =
+    # min(0,5·Tc, max_service·0,8) ile
+    # (heat_transfer_analysis.py:1342-1350), eksenel profil ise
+    # kendi cidar dengesiyle çözüyor. Bu fikstürde ölçülen: 8.105,45
+    # ⟷ 8.824,91 W/m²K (%8,88). Modül aynı kusuru denge-cidarı
+    # dalında F116 ile kapatmış (:1463-1478), tasarım akısı dalında
+    # kapatmamış. Onarım gelince bu im KALKAR.
     def test_throat_hg_consistent_with_throat_analysis(self, analyzer, profile):
-        # Boğaz istasyonu Bartz katsayısı, throat-analizinin gaz-yanı
-        # katsayısıyla aynı mertebede olmalı (aynı korelasyon; yalnız sigma
-        # için kullanılan referans cidar sıcaklığı farkı kadar sapabilir).
+        """Boğaz Bartz katsayısı iki kanalda aynı sayı olmalı.
+
+        DÜZELTME (ÖH FAZ B-4/P2): bu bekçinin eski hâli ``rel=0.25``
+        toleransı ve "yalnız sigma için kullanılan referans cidar sıcaklığı
+        farkı kadar sapabilir" yorumuyla tutarsızlığı AÇIKÇA kutsuyordu —
+        ölçülen %8,88 sapma o bantta rahatça geçiyor, yani bekçi kusuru
+        göremez hâlde yazılmıştı. Tolerans, iki kanalın AYNI korelasyondan
+        çıktığı yolundaki ürün künyesinin (:1120-1121) izin verdiği tek
+        şeye, sayısal gürültüye indirildi. Hangi cidar sıcaklığının doğru
+        referans olduğuna bu bekçi HÜKMETMEZ.
+        """
         full = analyzer.analyze_heat_transfer(MOTOR_DATA)
         h_throat_full = full['heat_transfer_coefficients']['gas_side']
         h_throat_profile = profile['h_g'][profile['throat_index']]
-        assert h_throat_profile == pytest.approx(h_throat_full, rel=0.25)
+        assert h_throat_profile == pytest.approx(h_throat_full, rel=0.01), (
+            f'boğaz h_g iki kanalda ayrışıyor: throat-analizi '
+            f'{h_throat_full:.2f} W/m²K ⟷ eksenel profil '
+            f'{h_throat_profile:.2f} W/m²K (sapma '
+            f'%{100.0 * abs(h_throat_profile / h_throat_full - 1):.2f})')
 
 
 class TestWallProfileEndpoint:
@@ -219,17 +303,137 @@ class TestWallProfileEndpoint:
         # Boğaz konumu işaretçisi frontend için mm cinsinden gelir
         assert profile['x_mm'][ti] == pytest.approx(profile['x_throat_mm'])
 
-    def test_endpoint_defaults_when_minimal_payload(self, client):
-        # Yalnız çekirdek alanlar — geometri backend varsayılanlarından çözülür
-        r = client.post('/api/analysis/wall-profile', json={
-            'chamber_pressure': 25.0,
-            'chamber_temperature': 3000.0,
-            'mdot_total': 1.5,
-        })
-        assert r.status_code == 200
-        profile = r.get_json()['wall_profile']
-        assert len(profile['x_mm']) == 40  # varsayılan n_stations
-        assert min(profile['area_ratio']) == pytest.approx(1.0)
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-02 borcunu xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu.
+    # Kusur ÖH Z5S / PK5 (ısı-soğutma kulvarı) tarafından
+    # ONARILDI, dolayısıyla im BAYATLADI: birleşik ağaçta test
+    # GEÇİYOR ve strict im XPASS ile kırmızı veriyordu. İm
+    # kaldırıldı; iddia artık CANLI bekçidir — onarım geri
+    # alınırsa burası kırmızı verir.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/app.py:13357 "ÖH Z5S / PK5 (P4B1-02) —
+    # GİRDİ KAPILARI. Bu uçta kapı HİÇ YOKTU."; :13447 "ya reddet ya
+    # söyle" ayağı; :13485 modül varsayılanları ADIYLA ilan ediliyor
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P4B1-02 —
+    # /api/analysis/wall-profile'da girdi kapısı HİÇ yok
+    # (app.py:7500-7575): kardeş uç /analyze_thermal_safety'nin iki
+    # kapısı (_collect_unphysical_fields,
+    # _withhold_unevaluated_thermal_verdict) burada yok, modül kendi
+    # 20.0/3000/1.0 varsayılanlarıyla çözüyor
+    # (heat_transfer_analysis.py:1144-1154). Ölçülen: eksik geometri
+    # → HTTP 200 + tam görünümlü profil, yanıtta hangi girdinin
+    # varsayıldığını söyleyen TEK alan yok (gövde yalnız {status,
+    # wall_profile}); boş gövde {} de aynı şekilde 200 dönüyor.
+    # Deponun koruması yalnız istemcide:
+    # thermal_fea_panel.js:946-950 "would silently substitute
+    # defaults... so it is not called". Onarım gelince bu im KALKAR.
+    def test_endpoint_declares_substituted_defaults(self, client):
+        """Eksik girdi ya reddedilir ya da YERİNE KONAN ilan edilir.
+
+        DÜZELTME (ÖH FAZ B-4/P2): bu bekçinin eski hâli
+        (``test_endpoint_defaults_when_minimal_payload``) "Yalnız çekirdek
+        alanlar — geometri backend varsayılanlarından çözülür" yorumuyla
+        sessiz varsayılan ikamesini SÖZLEŞME yapıyordu; uca kapı ekleyen her
+        onarım o bekçiyi kırardı. İddia deponun kendi sağlıklı desenine
+        çevrildi: ``inputs_not_used`` / ``warn.liquid.input_field_not_read``
+        ailesinde olduğu gibi, uydurulan sayı ya hiç uydurulmaz (4xx) ya da
+        ADIYLA ilan edilir.
+        """
+        eksik = {'chamber_pressure': 25.0, 'chamber_temperature': 3000.0,
+                 'mdot_total': 1.5}
+        r = client.post('/api/analysis/wall-profile', json=eksik)
+        if r.status_code != 200:
+            assert 400 <= r.status_code < 500, (
+                f'beklenmeyen HTTP {r.status_code}')
+            return                       # fail-closed: kabul
+
+        j = r.get_json()
+        beyan = [k for k in j
+                 if any(im in k.lower() for im in
+                        ('default', 'assumed', 'substitut', 'missing',
+                         'not_used', 'not_read', 'warn', 'inputs'))]
+        assert beyan, (
+            'eksik geometriyle 200 dönüldü ve yanıt hangi girdinin '
+            f'varsayıldığını söylemiyor (gövde anahtarları: {sorted(j)}); '
+            'boğaz çapı, çıkış çapı, gamma ve molekül ağırlığı sessizce '
+            'uyduruldu')
+
+    # ÇEVİRİ (ÖH D15 birleşme düzeltmesi) — BORÇ İMİ KALKTI.
+    # Bu bekçi P4B1-02'nin FİZİK ayağını xfail(strict) ile taşıyordu;
+    # imin kendi metni "onarım gelince bu im KALKAR" diyordu. Kusur
+    # ÖH Z5S / PK5 (ısı-soğutma kulvarı) tarafından ONARILDI — kardeş
+    # ayağı (test_endpoint_declares_substituted_defaults) bu dalgada
+    # zaten çevrildi; aynı kalemin iki ayağından birini canlı bırakıp
+    # ötekini borç iminde tutmak tutarsız olurdu.
+    #
+    # ÜRÜNDEKİ KANIT: hrma/app.py:13357 "ÖH Z5S / PK5 (P4B1-02) — GİRDİ
+    # KAPILARI. Bu uçta kapı HİÇ YOKTU." Uç artık fizik dışı alanı ADIYLA
+    # reddediyor; ÖLÇÜLDÜ (1 Eylül 2026, bu depo):
+    #   chamber_temperature=-3000 → HTTP 422 invalid_wall_profile_input
+    #       invalid_fields=[{field: chamber_temperature,
+    #                        reason: must_be_positive, value: -3000.0}]
+    #   chamber_pressure=-60      → HTTP 422, aynı biçim
+    #   wall_thickness=-0.01      → HTTP 422, aynı biçim
+    # Testin kendi sözleşmesi 4xx'i "fail-closed: kabul" sayar, o yüzden
+    # üç parametre de yeşil.
+    #
+    # KALKAN İMİN GEREKÇESİ (kayıt için): ÖH defter P4B1-02 — aynı
+    # kapısızlığın FİZİK ekseni: ölçülen chamber_temperature=−3000 → HTTP
+    # 200 ve T_wall_eq −530,13..−504,23 K (MUTLAK SIFIRIN ALTINDA) +
+    # T_recovery −2.896,37 K + q_MW 40/40 null; chamber_pressure=−60 →
+    # 200 + "cidar ortamda kalır" (293,15 K) + uydurma boğaz 0,03 m;
+    # wall_thickness=−0,01 → 200 + wall_thickness_mm = −10,0. Bu profil
+    # thermal_fea_panel.js:979-985 üzerinden AYNEN /api/fea/thermal'a
+    # h(z) sınır koşulu olarak geçiyor. Onarım gelince bu im KALKAR.
+    @pytest.mark.parametrize('ad,ek', [
+        ('negatif_hazne_sicakligi', {'chamber_temperature': -3000.0}),
+        ('negatif_hazne_basinci', {'chamber_pressure': -60.0}),
+        ('negatif_cidar_kalinligi', {'wall_thickness': -0.01}),
+    ])
+    def test_endpoint_rejects_unphysical_inputs(self, client, ad, ek):
+        """Fizik dışı girdiden profil yayımlanmaz.
+
+        Sözleşme deponun kendi desenidir: kardeş uç
+        ``/analyze_thermal_safety`` fizik dışı alanı ADIYLA toplayıp hükmü
+        geri çeker (``_collect_unphysical_fields``,
+        ``_withhold_unevaluated_thermal_verdict``); bu uç aynı şemayı
+        kullandığını BELGELİYOR (app.py:7507) ama kapıların hiçbirini
+        almamış.
+        """
+        r = client.post('/api/analysis/wall-profile',
+                        json=dict(self.PAYLOAD, **ek))
+        if r.status_code != 200:
+            assert 400 <= r.status_code < 500
+            return                       # fail-closed: kabul
+
+        j = r.get_json()
+        assert j['status'] == 'success'          # ön koşul: uç 200 + başarı
+        profile = j['wall_profile']
+
+        # (i) "Başarılı" bir profil çözülemeyen istasyon yayımlayamaz.
+        for anahtar in ('q_MW', 'h_g', 'T_wall_eq', 'T_recovery'):
+            bos = [i for i, v in enumerate(profile[anahtar])
+                   if v is None or not np.isfinite(float(v))]
+            assert not bos, (
+                f'{ad}: status=success ama {anahtar} dizisinin '
+                f'{len(bos)}/{len(profile[anahtar])} istasyonu '
+                'çözülememiş (None/NaN) — çözülemeyen girdi başarı diye '
+                'yayımlanıyor')
+
+        # (ii) Yayımlanan sıcaklıklar mutlak sıcaklıktır.
+        for anahtar in ('T_wall_eq', 'T_recovery'):
+            kotu = [v for v in profile[anahtar] if v is not None and v <= 0.0]
+            assert not kotu, (
+                f'{ad}: {anahtar} mutlak sıfırın altında değer yayımlıyor '
+                f'(ör. {kotu[:3]}) — HTTP 200')
+
+        # (iii) Geometri künyesi de fizikseldir.
+        assert profile['wall_thickness_mm'] > 0.0, (
+            f"{ad}: wall_thickness_mm = {profile['wall_thickness_mm']}")
+        assert profile['throat_diameter_m'] is not None, (
+            f'{ad}: boğaz çapı çözülememiş ama profil yayımlanıyor')
 
     def test_endpoint_respects_n_stations(self, client):
         payload = dict(self.PAYLOAD, n_stations=60)

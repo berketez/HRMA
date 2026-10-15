@@ -82,8 +82,29 @@ from hrma.fea.planar_grain import (
 )
 
 # Çözücü kiplerinin dürüst durum beyanı (bkz. modül docstring'i).
+#
+# P8B2-15 (ÖH D26 / fea-cfd a3) — ENVANTER ARTIK TAM VE DENETLİ.
+# ÖLÇÜLDÜ (taban 7751531, ``once_a3.json``): paket altı modül taşıyordu
+# (bridge, mesh_axisym, mesh_planar, planar_grain, structural_axisym,
+# thermal_axisym) ama "bu beyanın makine tarafından okunur hâli" diye
+# tanımlanan bu sözlükte YALNIZ DÖRDÜ vardı; ``bridge`` ve ``mesh_planar``
+# hiç görünmüyordu. Eksiklik yapısal olarak görünmezdi: altı bekçinin
+# altısı da anahtarı ADIYLA sorguluyordu, ``set(MODULE_STATUS)`` ile paket
+# envanterini kıyaslayan tek bir denetim yoktu (savcı S1 §2.2). Yani
+# "durumu buradan doğrulayabilirsin" sözleşmesi eksik anahtarda SESSİZ
+# ``KeyError``a düşüyordu — çağıran modülün durumunu değil, sözlüğün
+# eksikliğini öğreniyordu.
+#
+# Bundan sonra envanter ``assert_module_status_complete()`` ile ÖLÇÜLÜR;
+# modül eklenip anahtar unutulursa ithalat anında adıyla patlar (bekçi:
+# tests/test_d26_fea_cfd_a3.py).
 MODULE_STATUS = {
+    "bridge": "IMPLEMENTED",               # motor sözlüğü ⇄ çözücü köprüsü;
+                                           # doğrulama: tests/fea/test_bridge.py
     "mesh_axisym": "IMPLEMENTED",
+    "mesh_planar": "IMPLEMENTED",          # V2.7 Aşama C tane kesiti mesh'i;
+                                           # doğrulama: tests/
+                                           # test_fea_mesh_planar.py
     "structural_axisym": "IMPLEMENTED",
     "thermal_axisym": "IMPLEMENTED",       # V2.7 Aşama A — doğrulama:
                                            # tests/fea/test_termal_dogrulama.py
@@ -92,7 +113,52 @@ MODULE_STATUS = {
                                            # test_fea_planar_grain.py
 }
 
+
+def module_status_inventory() -> dict:
+    """Paketin GERÇEK modül envanteri ile MODULE_STATUS'un farkı (P8B2-15).
+
+    Dönüş: ``{'modules': [...], 'declared': [...], 'missing': [...],
+    'extra': [...]}``. ``missing`` = pakette olup beyan edilmeyen modül
+    (sözleşmenin sessiz deliği); ``extra`` = beyan edilip pakette olmayan
+    (bayat beyan). İkisi de boş olmalıdır.
+    """
+    import pkgutil
+    moduller = sorted(m.name for m in pkgutil.iter_modules(__path__)
+                      if not m.name.startswith("_"))
+    beyan = sorted(MODULE_STATUS)
+    return {
+        "modules": moduller,
+        "declared": beyan,
+        "missing": sorted(set(moduller) - set(beyan)),
+        "extra": sorted(set(beyan) - set(moduller)),
+        "_basis": (
+            "pkgutil.iter_modules(hrma.fea.__path__) ile ÖLÇÜLEN paket "
+            "envanteri, MODULE_STATUS anahtarlarıyla küme olarak "
+            "kıyaslanır; anahtarı ADIYLA sorgulayan bekçiler eksik "
+            "anahtarı göremez (P8B2-15)."),
+    }
+
+
+def assert_module_status_complete() -> None:
+    """MODULE_STATUS eksik/fazla anahtar taşıyorsa ADIYLA reddeder."""
+    env = module_status_inventory()
+    if env["missing"] or env["extra"]:
+        raise AssertionError(
+            "hrma.fea.MODULE_STATUS paket envanteriyle uyuşmuyor "
+            "(P8B2-15). Beyan edilmeyen modül(ler): "
+            + (", ".join(env["missing"]) or "yok")
+            + "; pakette olmayan beyan(lar): "
+            + (", ".join(env["extra"]) or "yok")
+            + ". Bu sözlük 'çözücü durumunun makine tarafından okunur "
+              "hâli' diye yayımlanıyor; eksik anahtar çağırana modülün "
+              "durumunu değil sözlüğün deliğini gösterir.")
+
+
+assert_module_status_complete()
+
 __all__ = [
+    "module_status_inventory",
+    "assert_module_status_complete",
     "AxisymMesh",
     "build_wall_mesh",
     "DEFAULT_ELEMS_THROUGH_WALL",

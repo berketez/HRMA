@@ -151,18 +151,41 @@ def test_t14_yerel_tablonun_kJ_birimli_ozgul_isisi_bozulmaz(client):
 
     Yerel tablo ``specific_heat``'i kJ/(kg·K) tutuyor (LH2 14,3), CoolProp ise
     J/(kg·K) veriyor (20,28 K'de 9722,9). ``oxidizer`` kolunda değer yerel
-    tablodan gelir ve DOKUNULMAMALIDIR; ``liquid_fuel`` kolunda CoolProp'tan
-    gelir ve ORTAM değeri (14306,3 J/kg·K) yerine DEPOLAMA değeri
-    (9722,9 J/kg·K) olmalıdır.
+    tablodan gelir ve CoolProp'un sayısıyla EZİLMEMELİDİR; ``liquid_fuel``
+    kolunda CoolProp'tan gelir ve ORTAM değeri (14306,3 J/kg·K) yerine
+    DEPOLAMA değeri (9722,9 J/kg·K) olmalıdır.
+
+    ÇEVRİLDİ — ÖH D15 / kulvar app-api / aşama 2 (P7B3-09). İddianın
+    ÇEKİRDEĞİ ("yerel değer CoolProp'un sayısıyla değiştirilmez") AYNEN
+    korundu ve aşağıda hâlâ ölçülüyor; değişen yalnız BİRİMDİR.
+
+    Bu hâliyle test kusuru KİLİTLİYORDU: ``14.3`` şartı, aynı anahtarın
+    (``specific_heat``) iki farklı birimde yayımlanmasını sabitliyordu —
+    ölçüldü (ÖH D15 a2 ``once.json``): ``lh2/liquid_oxidizer`` 14,3 ⟷
+    ``lh2/liquid_fuel`` 9722,913 = **679,9 kat**, yanıtta birim alanı YOK.
+    Ürünün kendi tüketicisi ``templates/advanced.html`` dönen sayıyı
+    ``${props.specific_heat.toFixed(0)} J/kg·K`` diye basıyor, yani kJ
+    değeri ekrana 1000 kat küçük ve YANLIŞ ETİKETLE çıkıyordu; sayfanın
+    kendi ipucu metni de SI bekliyor ("RP-1: 2090, LH2: 14300").
+
+    Uç artık TEK birimde (SI, J/(kg·K)) yayımlıyor ve birimi
+    ``specific_heat_unit`` ile yazıyor. 14,3 kJ/(kg·K) = 14300 J/(kg·K):
+    değer korundu, birim düzeldi. CoolProp'un 9722,9'u ile ezilmediği
+    aşağıda AYRICA sınanıyor (kilitlenen asıl şart oydu).
     """
     ox = _props(client, 'lh2', 'oxidizer')['properties']
-    assert ox['specific_heat'] == pytest.approx(14.3), (
-        'yerel tablodaki kJ/(kg·K) değeri J/(kg·K) ile ezilmiş — 1000x birim hatası')
+    assert ox['specific_heat_unit'] == 'J/(kg*K)', (
+        'birim beyanı yok — aynı anahtar iki birim taşıyabilir')
+    assert ox['specific_heat'] == pytest.approx(14300.0), (
+        'yerel tablodaki değer (14,3 kJ/(kg·K) = 14300 J/(kg·K)) korunmadı')
+    assert ox['specific_heat'] != pytest.approx(9722.9, rel=1e-3), (
+        'yerel tablo değeri CoolProp sayısıyla EZİLMİŞ')
 
     fuel = _props(client, 'lh2', 'liquid_fuel')['properties']
     assert fuel['specific_heat'] == pytest.approx(9722.9, rel=1e-3), (
         'liquid_fuel kolunda özgül ısı hâlâ ortam (298 K) değerinde')
     assert fuel['specific_heat'] != pytest.approx(14306.3, rel=1e-3)
+    assert fuel['specific_heat_unit'] == 'J/(kg*K)' 
 
 
 def test_t14_depolama_durumu_kunyesi_yayinlanir(client):
@@ -181,8 +204,13 @@ def test_t14_coolprop_tanimadigi_yakitin_kunyesini_uydurmaz(client):
 
     SONRA: künye gerçek kaynağı söyler; yoğunluk yerel tablodan geldiği gibi
     kalır (uydurma düzeltme yapılmaz).
+
+    ÖH Z1 (2026-08-27): rp1 beklentisi 800 -> 810. Eski 800, kategori
+    yedeğinin (liquid_fuel -> 800) sayısıydı; Z1 kategori-ezmesi onarımı
+    rp1'e merkezî tablonun kendi değerini (810) veriyor — docstring'in
+    'yerel tablodan geldiği gibi' şartı ancak şimdi sağlanıyor.
     """
-    for name, ptype, rho in (('rp1', 'liquid_fuel', 800), ('htpb', 'hybrid_fuel', 920)):
+    for name, ptype, rho in (('rp1', 'liquid_fuel', 810), ('htpb', 'hybrid_fuel', 920)):
         body = _props(client, name, ptype)
         assert not str(body['source']).startswith('CoolProp'), (
             f'{name}: CoolProp katkısı yokken künye CoolProp diyor')
@@ -195,13 +223,45 @@ def test_t14_coolprop_tanimadigi_yakitin_kunyesini_uydurmaz(client):
 # T30 — /api/flight-vehicle source='project' normalize edilmiş şema dönmeli
 # ===========================================================================
 
-#: flight_vehicle.py modül başındaki şema (docstring). Uç bu kümenin DIŞINA
-#: çıkarsa (ham motor sonucu) tüketici alanları boş kalır.
-VEHICLE_SCHEMA_KEYS = {
-    'motor_type', 'motor_name', 'thrust_curve', 'thrust', 'burn_time',
-    'propellant_mass', 'engine_inert_mass', 'engine_inert_mass_is_estimate',
-    'engine_inert_mass_note', 'engine_od_m', 'engine_length_m', 'source',
-}
+def _vehicle_sema_anahtarlari():
+    """``flight_vehicle`` modülünün KENDİ şemasını docstring'inden okur.
+
+    ÖH D30 / fix-29b: bu küme elle kopyalanmıştı ve bayatladı — ÖH D24 /
+    P15B2-03 beyan zinciri şemaya ``engine_od_unit_source`` künyesini
+    ADIYLA eklediğinde (dış çapın birimi hangi yoldan kazanıldı; kazanılamazsa
+    ``missing`` / ``ambiguous``) test onu "ham motor anahtarı sızmış" sandı.
+    Künye ürün YÜZEYİNİN parçasıdır: tüketici birimin nereden geldiğini
+    okumadan ``engine_od_m``e güvenemez. Liste artık TEK KAYNAKTAN gelir;
+    şemaya yeni bir alan girince test kendiliğinden tanır, şemada OLMAYAN
+    bir ham anahtar sızarsa yine kırmızı verir.
+    """
+    from hrma.analysis import flight_vehicle
+    belge = flight_vehicle.__doc__ or ''
+    bas = belge.find('Çıktı şeması')
+    assert bas >= 0, 'flight_vehicle şema çıpası kayboldu (docstring)'
+    i = belge.index('{', bas)
+    derinlik, son = 0, -1
+    for j in range(i, len(belge)):
+        if belge[j] == '{':
+            derinlik += 1
+        elif belge[j] == '}':
+            derinlik -= 1
+            if derinlik == 0:
+                son = j
+                break
+    assert son > i, 'flight_vehicle şema bloğu kapanmadı'
+    anahtarlar = set(re.findall(r"^\s*'([a-z_]+)'\s*:", belge[i:son],
+                                re.M))
+    assert len(anahtarlar) >= 12, (
+        'şema ayrıştırması çöktü (%d anahtar) — docstring biçimi değişmiş '
+        'olabilir; bekçi sessizce boş kümeye düşmemeli.' % len(anahtarlar))
+    return anahtarlar
+
+
+#: flight_vehicle.py modül başındaki şema (docstring) — KOPYA DEĞİL, kaynak.
+#: Uç bu kümenin DIŞINA çıkarsa (ham motor sonucu) tüketici alanları boş
+#: kalır.
+VEHICLE_SCHEMA_KEYS = _vehicle_sema_anahtarlari()
 #: Uç bunların üstüne yalnız şu iki bilgiyi ekleyebilir.
 VEHICLE_EXTRA_KEYS = {'load_warnings', 'airframe'}
 
@@ -444,6 +504,11 @@ const sandbox = {
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
+// OH D18 / P12aB5-06: uc-kabuk capa tablosu artik release_notes.js'te TEK
+// KEZ tanimli ve window.HRMA_SHELL_NAV ile yayimlaniyor (urun sablonlarinin
+// hepsinde kabuk betiklerinin ilki odur). Kosum sirasi urunle ayni tutulur.
+vm.runInContext(fs.readFileSync(path.join(staticDir, 'release_notes.js'), 'utf8'),
+                sandbox, { filename: 'release_notes.js' });
 vm.runInContext(fs.readFileSync(path.join(staticDir, 'user_guide.js'), 'utf8'),
                 sandbox, { filename: 'user_guide.js' });
 
@@ -456,7 +521,10 @@ console.log(JSON.stringify({
     sinif: link ? link.className : null,
     tiklamaDinleyicisi: link ? (link._listeners.click || []).length : 0,
     sira: kids.map(function (c) { return c.id || ('.' + c.className); }),
-    apiVar: typeof sandbox.window.hrmaOpenUserGuide === 'function'
+    apiVar: typeof sandbox.window.hrmaOpenUserGuide === 'function',
+    paylasimliTablo: !!(sandbox.window.HRMA_SHELL_NAV
+                        && typeof sandbox.window.HRMA_SHELL_NAV.inject === 'function'),
+    surumNotuBaglantisi: kids.some(function (c) { return c.id === 'releaseNotesLink'; })
 }));
 """
 
@@ -479,8 +547,16 @@ def test_t72_kilavuz_baglantisi_uc_kabukta_da_belirir(tmp_path, senaryo):
     SONRA: üç kabukta da bağlantı var, metni ve i18n anahtarı yerinde.
     """
     d = _user_guide_harness(tmp_path, senaryo)
+    assert d['paylasimliTablo'], (
+        'window.HRMA_SHELL_NAV yayımlanmamış — üç-kabuk tablosunun TEK '
+        'tanımı release_notes.js\'te (ÖH D18 / P12aB5-06)')
     assert d['baglantiVar'], (
         f'{senaryo} kabuğunda userGuideLink oluşmadı — enjeksiyon çapası eksik')
+    # ÖH D18 / P12aB5-06: aynı tablo artık Sürüm Notları bağlantısını da
+    # taşıyor; eskiden o yalnız `.nav-links` tanıdığı için index ve
+    # launch_site kabuklarında hiç çizilmiyordu.
+    assert d['surumNotuBaglantisi'], (
+        f'{senaryo} kabuğunda releaseNotesLink oluşmadı')
     assert d['metin'] == 'User Guide'
     assert d['i18nAnahtari'] == 'link.userGuide'
     assert d['tiklamaDinleyicisi'] == 1, 'tıklama dinleyicisi bağlanmamış'
@@ -492,7 +568,11 @@ def test_t72_launch_site_seridinde_geri_baglantisi_en_sagda_kalir(tmp_path):
     sonda durur; kılavuz bağlantısı ondan ÖNCE eklenir.
     """
     d = _user_guide_harness(tmp_path, 'topbar')
-    assert d['sira'] == ['userGuideLink', '.ls-link'], d['sira']
+    # ÖH D18 / P12aB5-06: şeride artık iki yardımcı bağlantı giriyor
+    # (Sürüm Notları + Kılavuz). Sözleşme değişmedi: "Uygulamaya dön" EN SON.
+    assert d['sira'][-1] == '.ls-link', d['sira']
+    assert 'userGuideLink' in d['sira'][:-1], d['sira']
+    assert 'releaseNotesLink' in d['sira'][:-1], d['sira']
     assert d['sinif'] == 'ls-link', 'şeridin kendi bağlantı sınıfı verilmemiş'
 
 
@@ -510,14 +590,29 @@ def test_t72_uc_kabugun_capasi_da_sablonlarda_duruyor():
     """Bekçinin varsayımı: seçiciler gerçekten bu üç şablonda var.
 
     Şablon yeniden adlandırılırsa (ör. .aux-links -> .shell-links) bu test
-    kırılır ve user_guide.js'in çapa tablosu güncellenir.
+    kırılır ve çapa tablosu güncellenir.
+
+    ÖH D18 / P12aB5-06: tablo eskiden YALNIZ user_guide.js'te duruyordu ve
+    kardeş dosyalara (release_notes.js, settings_panel.js) taşınmamıştı;
+    ölçüldü — /launch-site'ta o iki bağlantı hiç çizilmiyordu. Tablo artık
+    release_notes.js'te TEK KEZ tanımlı; bu test de tek tanımı kilitliyor.
     """
     assert '.nav-links' in read(TEMPLATES / 'formulas.html')
     assert 'class="aux-links"' in read(TEMPLATES / 'index.html')
     assert 'id="ls-topbar"' in read(TEMPLATES / 'launch_site.html')
-    js = read(STATIC_JS / 'user_guide.js')
+    js = read(STATIC_JS / 'release_notes.js')
     for sel in ("'.nav-links'", "'.aux-links'", "'#ls-topbar'"):
-        assert sel in js, f'user_guide.js {sel} çapasını tanımıyor'
+        assert sel in js, f'release_notes.js {sel} çapasını tanımıyor'
+    assert 'window.HRMA_SHELL_NAV' in js, \
+        'release_notes.js çapa tablosunu yayımlamıyor'
+    # TEK TANIM: başka hiçbir kabuk betiği kendi tablosunu tutmaz.
+    tanimlayan = sorted(f.name for f in STATIC_JS.glob('*.js')
+                        if 'NAV_HOSTS = [' in read(f))
+    assert tanimlayan == ['release_notes.js'], (
+        'Üç-kabuk çapa tablosunun birden fazla tanımı var: %s' % tanimlayan)
+    for tuketici in ('user_guide.js', 'settings_panel.js'):
+        assert 'HRMA_SHELL_NAV' in read(STATIC_JS / tuketici), \
+            f'{tuketici} paylaşımlı tabloyu kullanmıyor'
 
 
 # ===========================================================================
@@ -634,7 +729,10 @@ setTimeout(function () {
         tamMetin: link.textContent,
         dogrudanMetin: dogrudanMetin,
         korumaliSayisi: korumali.length,
-        korumaliMetin: korumali.length ? korumali[0].textContent : null
+        korumaliMetin: korumali.length ? korumali[0].textContent : null,
+        // ÖH D35 · OH-GT-33: şeritte artık BİRDEN ÇOK korumalı kap var
+        // (proje adı, tip rozeti, SI özeti). Tek kabın metni yetmez.
+        korumaliMetinler: korumali.map(function (n) { return n.textContent; })
     }));
 }, 80);
 """
@@ -681,20 +779,54 @@ def test_t75_si_simgeleri_buyuk_harf_donusumunden_muaf(tmp_path):
 
     assert 'Isp 207.1 s' in d['tamMetin'], d['tamMetin']
     assert 'It 13428 N·s' in d['tamMetin'], d['tamMetin']
-    assert d['korumaliSayisi'] == 1, (
+    # ÖH D35 · OH-GT-33 (22 Eylül): iddia eskiden "korumalı kap SAYISI tam
+    # 1" diyordu. O sayı T75'in çözümünün biçimiydi, sözleşmesi değil:
+    # aynı dalgada proje adı ve tip rozeti de kendi korumalı kaplarına
+    # alındı (ad artık hiç büyütülmüyor — "EXAMPLE … 25KN" kusuru), sayı
+    # 3 oldu. Sözleşme ise değişmedi ve burada AYNEN ölçülür: SI özetinin
+    # parçaları büyütmeyi kapatan BİR kabın içinde, büyütülen doğrudan
+    # metnin DIŞINDA olmalı.
+    assert d['korumaliSayisi'] >= 1, (
         'özet, büyük harf dönüşümünü kapatan bir kapta değil — '
         f"doğrudan metin: {d['dogrudanMetin']!r}")
+    korumali_birlesik = ' '.join(d['korumaliMetinler'])
     for parca in ('Isp', ' s', 'N·s', 'Fpk'):
-        assert parca in d['korumaliMetin'], (parca, d['korumaliMetin'])
+        assert parca in korumali_birlesik, (parca, d['korumaliMetinler'])
     for parca in ('Isp', 'N·s'):
         assert parca not in d['dogrudanMetin'], (
             f'{parca!r} hâlâ büyük harfe çevrilen doğrudan metinde')
 
 
 @pytest.mark.skipif(NODE is None, reason='node kurulu değil')
-def test_t75_proje_adi_ve_tip_rozeti_seridin_duzeninde_kalir(tmp_path):
-    """Düzeltme her şeyi kapatmamalı: proje adı ve [SOLID] rozeti şeridin
-    görsel düzenine (büyük harf) uymayı sürdürür.
+def test_d35_proje_adi_yazildigi_gibi_kalir_tip_rozeti_buyuk(tmp_path):
+    """ÇEVRİLEN BEKÇİ — ÖH D35 · OH-GT-33 (22 Eylül 2026).
+
+    ESKİ İDDİA (``test_t75_proje_adi_ve_tip_rozeti_seridin_duzeninde_kalir``):
+    ``dogrudanMetin == 'UI-Denetim-Test [SOLID]'`` — yani proje adının
+    ``.aux-link``in BÜYÜTÜLEN doğrudan metni olarak kalmasını ŞART
+    KOŞUYORDU. T75 (3 Ağustos) yalnız SI simgelerini kurtarmıştı ve
+    "düzeltme her şeyi kapatmasın" derken adı bilerek dışarıda bırakmıştı.
+
+    ÖLÇÜLDÜĞÜNDE (D35 a1/once.json ``M3_buyutme``) o karar bir kusur
+    çıktı: ad da simge taşıyor. Ekranda
+    ``EXAMPLE SOLID KNDX BATES 75MM`` (mm→MM) ve
+    ``EXAMPLE LIQUID LOX-RP1 25KN`` (kN→KN) yazıyordu — İngilizce kipte
+    bile; Türkçe kipte üstüne ``i→İ`` biniyordu (``EXAMPLE LİQUİD``).
+    Yani eski iddia kusuru KORUYORDU.
+
+    YENİ SÖZLEŞME (ana model kararı, ÖH D35): kullanıcının yazdığı ad
+    ekranda YAZILDIĞI GİBİ durur; tip rozeti şeridin görsel düzenine
+    (büyük harf) uymayı sürdürür ama büyütmesi CSS'ten değil, yerelden
+    BAĞIMSIZ ``toUpperCase()``ten gelir.
     """
     d = _project_bar_harness(tmp_path)
-    assert d['dogrudanMetin'] == 'UI-Denetim-Test [SOLID]', d['dogrudanMetin']
+    assert d['dogrudanMetin'] == '', (
+        'proje adı hâlâ büyütülen doğrudan metinde: %r' % d['dogrudanMetin'])
+    korumali_birlesik = ' '.join(d['korumaliMetinler'])
+    assert 'UI-Denetim-Test' in korumali_birlesik, (
+        'proje adı büyütmeyi kapatan bir kapta değil: %r'
+        % d['korumaliMetinler'])
+    assert '[SOLID]' in d['tamMetin'], d['tamMetin']
+    assert d['tamMetin'].startswith('UI-Denetim-Test [SOLID]'), (
+        'şeridin düzeni bozuldu (ad + rozet + özet sırası): %r'
+        % d['tamMetin'])

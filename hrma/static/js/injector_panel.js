@@ -36,6 +36,15 @@
     function T(key, fallback) {
         return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
     }
+    // Uçtan gelen METNİ işaretleme olarak DEĞİL metin olarak basmak için
+    // (ÖH D30 / P11B5-21). Şablon dizisine giren her uç dizesi buradan
+    // geçer; DOM'un kendi kaçışını kullanır, elle tablo tutmaz.
+    function escText(value) {
+        const d = document.createElement('div');
+        d.textContent = (value === null || value === undefined) ? '' : String(value);
+        return d.innerHTML;
+    }
+
     function TF(key, params, fallback) {
         if (window.I18N && window.I18N.tf) return window.I18N.tf(key, params, fallback);
         return String(fallback).replace(/\{(\w+)\}/g, function (whole, name) {
@@ -71,7 +80,7 @@
         inj_dp: ['inj.helpDp',
             'Injector pressure drop as a fraction of chamber pressure. '
             + 'Typical 0.15-0.30; below 0.15 chug instability is likely '
-            + '(NASA SP-8089).'],
+            + '(Sutton & Biblarz 9th ed. Ch. 8; NASA SP-194 Ch. 5-6).'],
         inj_mdot_ox: ['inj.helpMdotOx',
             'Oxidizer mass flow rate through the injector. Typical '
             + 'amateur/university range 0.1-5 kg/s.'],
@@ -252,6 +261,99 @@
     }
 
     // ------------------------------------------------------------------
+    // UYARI / VARSAYIM ŞERİDİ — ucun GERÇEK şeması (ÖH Z5 / OH-B4-01)
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (2026-08-27, app.test_client, POST /api/injector-design):
+    // uç `design.warnings` ve `design.assumptions` yayımlıyor ve bunlar
+    // {code, params, severity} KAYITLARIDIR (injector_design.py::_w;
+    // severity ∈ {critical, warning, info}). Panel ise `dz.warnings_tr` /
+    // `dz.assumptions_tr` okuyordu; bu iki adın ÜRETİCİSİ depoda YOK
+    // (bekçisi: test_wave4b_contract::test_enjektor_borcunun_dayanagi_
+    // olculdu). Yani şerit HER koşumda boştu. Ölçülen örnekler:
+    //     hibrit / showerhead  -> warnings 0, assumptions 4
+    //     hibrit / N2O pintle  -> warnings 1  (warn.injector.
+    //                             hydraulic_flip_risk_ox, severity
+    //                             'warning'), assumptions 5
+    // Kullanıcı hidrolik-flip riskini ve "yoğunluk/viskozite tablodan
+    // varsayıldı" künyelerini HİÇ görmüyordu.
+    //
+    // METİN: mevcut uyarı kimlik mekanizması kullanılır — kod kataloğu +
+    // `TF(code, params)`. Kod sözlükte yoksa yedek metin KODUN KENDİSİ ve
+    // parametreleridir (makine-yolu); uydurma cümle yazılmaz. Bu tur yeni
+    // çeviri anahtarı AÇILMAZ.
+    // ------------------------------------------------------------------
+
+    //: severity -> rozet/kutu rengi. Bilinmeyen severity 'warn' sayılır
+    //: (sessizce 'info'ya düşmek uyarıyı görünmez kılardı).
+    const SEVERITY_KIND = {
+        critical: 'err', error: 'err', warning: 'warn', warn: 'warn',
+        info: 'info', notice: 'info',
+    };
+
+    function severityKind(rec) {
+        const s = (rec && typeof rec === 'object') ? String(rec.severity || '') : '';
+        return SEVERITY_KIND[s.toLowerCase()] || 'warn';
+    }
+
+    function severityLabel(rec) {
+        const s = (rec && typeof rec === 'object') ? String(rec.severity || '') : '';
+        return s ? s.toUpperCase() : '';
+    }
+
+    // Kayıt -> okunur metin. Üç biçim de desteklenir: düz metin (eski
+    // sözleşme), {code, params, severity}, ve İÇ İÇE kayıt/kayıt listesi
+    // (bir parametrenin değeri kendisi bir kayıt olabilir; I18N.tf sayı
+    // olmayan parametreyi String(v) ile bastığı için çeviri ÖZYİNELEMELİ
+    // olmalı — aksi hâlde "[object Object]" basılır).
+    function warnText(w, depth) {
+        depth = depth || 0;
+        if (w === null || w === undefined) return '';
+        if (typeof w === 'string') return w;
+        if (Array.isArray(w)) {
+            return w.map(function (x) { return warnText(x, depth + 1); })
+                    .filter(function (s) { return s; })
+                    .join(' · ');
+        }
+        if (typeof w !== 'object') return String(w);
+        if (!w.code) return JSON.stringify(w);   // beklenmeyen biçim: görünür kıl
+        if (depth > 4) return String(w.code);    // bozuk/döngüsel veri koruması
+        const p = {};
+        Object.keys(w.params || {}).forEach(function (k) {
+            const v = w.params[k];
+            p[k] = (v && typeof v === 'object') ? warnText(v, depth + 1) : v;
+        });
+        const params = Object.keys(p).map(function (k) {
+            return k + '=' + String(p[k]);
+        }).join(', ');
+        return TF(w.code, p,
+                  String(w.code) + (params ? ' [' + params + ']' : ''));
+    }
+
+    // Bir kayıt listesinin en ağır severity'si (kutu rengi buradan).
+    function worstKind(records) {
+        let kind = 'info';
+        records.forEach(function (r) {
+            const k = severityKind(r);
+            if (k === 'err') kind = 'err';
+            else if (k === 'warn' && kind !== 'err') kind = 'warn';
+        });
+        return kind;
+    }
+
+    function recordItemsHtml(records) {
+        return records.map(function (r) {
+            const kind = severityKind(r);
+            const label = severityLabel(r);
+            const tag = label
+                ? '<span data-inj-severity="' + kind + '" style="font-family:'
+                  + 'var(--hd-mono); font-size:0.68rem; letter-spacing:0.06em;'
+                  + ' opacity:0.85;">[' + label + '] </span>'
+                : '';
+            return '<li>' + tag + warnText(r) + '</li>';
+        }).join('');
+    }
+
+    // ------------------------------------------------------------------
     // Rozetler (spec bölüm D)
     // ------------------------------------------------------------------
     function badgesHtml(dz) {
@@ -274,9 +376,40 @@
                 ? T('inj.nhneTip', 'Dyer NHNE two-phase model (AIAA 2007-5702)')
                 : T('inj.spiTip', 'Single-phase SPI'));
 
-        const flip = ox.hydraulic_flip_risk || (fu && fu.hydraulic_flip_risk);
-        if (flip) html += badge(T('inj.flipRisk', 'FLIP RISK'), 'err',
-            T('inj.flipTip', 'Hydraulic flip: cavitation-driven Cd collapse (Nurick 1976)'));
+        // --- ÖH D22 / OH-D17-09: "HÜKÜM VERİLMEDİ" ≠ "RİSK YOK" ---------
+        // ÖLÇÜLDÜ (raw/OH/D22/arayuz/a1/once.json M1, taban b84b10a): uç
+        // B4-05 hükmüyle `hydraulic_flip_risk`i ÜÇ DEĞERLİ yayımlıyor —
+        // true / false / null. null = 'NOT DECIDED': çağıran orifis boyu
+        // (plaka kalınlığı) ya da L/D vermediği için Nurick ölçütü modülün
+        // 4,0 VARSAYILANINDAN hüküm üretemez (injector_design.py:1301-1319).
+        // Panel bunu `||` ile okuduğu için null ile false AYNI HTML'i
+        // veriyordu (`null_ile_false_ayni: true`, ikisinde de 2 rozet) ve
+        // ucun `hydraulic_flip_risk_basis` künyesi HİÇBİR çıktıda geçmiyordu
+        // (`basis_null_ciktisinda: false`). Yani "ölçemedik" ekranda
+        // "güvenli"yle aynı görünüyordu — sessiz varsayılan.
+        //
+        // Kapı: üç durum üç ayrı görüntü. Uydurma yok — rozet yalnız uç
+        // alanı GERÇEKTEN yayımladıysa doğar, künye yalnız uçtan gelir.
+        // Devre adı yalnız iki devre varsa (sıvı) öne yazılır; hibritte tek
+        // devre olduğu için eski etiket birebir korunur.
+        const flipDevreler = fu ? [['OX', ox], ['FUEL', fu]] : [['', ox]];
+        flipDevreler.forEach(function (d) {
+            const c = d[1];
+            if (!c || !('hydraulic_flip_risk' in c)) return;
+            const onek = d[0] ? d[0] + ' ' : '';
+            const kunye = c.hydraulic_flip_risk_basis || '';
+            if (c.hydraulic_flip_risk === true) {
+                html += badge(onek + T('inj.flipRisk', 'FLIP RISK'), 'err',
+                    kunye || T('inj.flipTip',
+                        'Hydraulic flip: cavitation-driven Cd collapse (Nurick 1976)'));
+            } else if (c.hydraulic_flip_risk === null) {
+                html += badge(onek + T('inj.flipUndecided', 'FLIP: NOT DECIDED'),
+                    'warn', kunye || T('inj.flipUndecidedTip',
+                        'The hydraulic-flip criterion reads L/D; no orifice '
+                        + 'length or plate thickness was supplied, so no '
+                        + 'verdict was published.'));
+            }
+        });
 
         if (mo && mo.momentum_ratio != null) {
             html += badge(`MR ${fmt(mo.momentum_ratio)} → `
@@ -331,7 +464,11 @@
             if (p.single_fluid) {
                 rows.push([T('inj.elementArrangement', 'Element arrangement'),
                            TF('inj.singleFluid',
-                              { pct: fmt((p.radial_flow_fraction || 0) * 100, 0) },
+                              // ÖH D25 / P11B2-12: `|| 0` yedeği çözücü
+                              // oranı vermediğinde ekrana "radial flow
+                              // share 0%" yazıyordu. fmt(null) '—' verir.
+                              { pct: fmt(Number.isFinite(p.radial_flow_fraction)
+                                         ? p.radial_flow_fraction * 100 : null, 0) },
                               'Single-fluid (oxidizer-centred hybrid pintle); '
                               + 'radial flow share {pct}%')]);
             }
@@ -372,9 +509,18 @@
         const at = dz.atomization || {};
         let html = '';
 
-        if (dz.pattern && dz.pattern.description_tr) {
+        // ÖH D30 / P11B5-21 + OH-D29-11 — İKİ KUSUR, TEK SATIR.
+        // (1) Okunan anahtar `description_tr` idi: adı Türkçe içerik vaat
+        //     ediyor, uç ise ona `description` ile BİT-AYNI İngilizce metni
+        //     koyuyordu (ölçüldü: dört tipin dördünde `tr_ile_en_ayni`).
+        //     Üretici (`injector_design.py`) yalan alanı D30'da söktü;
+        //     panel dilden bağımsız `description`a geçti.
+        // (2) Metin şablon içine HAM basılıyordu: uçtan gelen bir dize
+        //     panelin HTML'ine doğrudan giriyordu. Artık `escText`ten
+        //     geçer — içerik metindir, işaretleme değil.
+        if (dz.pattern && dz.pattern.description) {
             html += `<p style="font-family:var(--hd-mono); font-size:0.85rem;
-                color:var(--hd-ink-dim); margin:8px 0;">${dz.pattern.description_tr}</p>`;
+                color:var(--hd-ink-dim); margin:8px 0;">${escText(dz.pattern.description)}</p>`;
         }
 
         html += `<table style="${TBL}">
@@ -400,21 +546,33 @@
 
         html += specificBlock(dz);
 
-        const warns = dz.warnings_tr || [];
+        // UYARILAR — ucun GERÇEK alanı `warnings` ({code,params,severity}).
+        // Eski kod `dz.warnings_tr` okuyordu; o adın üreticisi yoktu ve
+        // şerit hiç dolmuyordu (OH-B4-01). Kutu rengi listenin EN AĞIR
+        // severity'sinden gelir; her satır kendi severity etiketini taşır
+        // (renk tek başına taşıyıcı değildir).
+        const warns = Array.isArray(dz.warnings) ? dz.warnings : [];
         if (warns.length) {
-            html += `<div style="border:1px solid var(--hd-orange, #ff8c33); border-radius:8px;
-                padding:10px 14px; margin:10px 0; color:var(--hd-orange, #ff8c33);">
+            const kind = worstKind(warns);
+            const color = kind === 'err' ? 'var(--hd-red, #ff5d73)'
+                : kind === 'info' ? 'var(--hd-cyan, #00e5ff)'
+                    : 'var(--hd-orange, #ff8c33)';
+            html += `<div data-inj-warnings="${warns.length}"
+                style="border:1px solid ${color}; border-radius:8px;
+                padding:10px 14px; margin:10px 0; color:${color};">
                 <strong>${T('common.warnings', 'Warnings')}</strong>
-                <ul style="margin:6px 0 0 18px;">` +
-                warns.map(w => `<li>${w}</li>`).join('') + '</ul></div>';
+                <ul style="margin:6px 0 0 18px;">`
+                + recordItemsHtml(warns) + '</ul></div>';
         }
 
-        const assum = dz.assumptions_tr || [];
+        // VARSAYIMLAR — `assumptions` (severity 'info' kayıtları).
+        const assum = Array.isArray(dz.assumptions) ? dz.assumptions : [];
         if (assum.length) {
-            html += `<details style="margin:8px 0;"><summary style="cursor:pointer;
+            html += `<details data-inj-assumptions="${assum.length}"
+                style="margin:8px 0;"><summary style="cursor:pointer;
                 color:var(--hd-ink-dim);">${T('common.assumptions', 'Assumptions')} (${assum.length})</summary>
-                <ul style="margin:6px 0 0 18px; color:var(--hd-ink-dim); font-size:0.85rem;">` +
-                assum.map(a => `<li>${a}</li>`).join('') + '</ul></details>';
+                <ul style="margin:6px 0 0 18px; color:var(--hd-ink-dim); font-size:0.85rem;">`
+                + recordItemsHtml(assum) + '</ul></details>';
         }
 
         const refs = dz.references || [];

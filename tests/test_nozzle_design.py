@@ -49,7 +49,23 @@ def designer():
 class TestExitPressureFromGeometry:
 
     def test_exit_pressure_matches_isentropic_relation(self, designer):
-        """p_e, alan-Mach + izentropik basınç bağıntısıyla birebir tutarlı."""
+        """p_e, alan-Mach + izentropik basınç bağıntısıyla birebir tutarlı.
+
+        ÖH D15 / P1B4-03 — BEKÇİ ÇEVRİLDİ. Bu test ``eps = 16``te koşuyor ve
+        o nokta ZATEN AYRILMA BANDINDADIR (aynı dosyanın
+        ``TestFlowSeparation`` sınıfı ve bu sınıfın kendi
+        ``test_isp_no_longer_constant_across_expansion_ratio`` docstring'i
+        bunu yazılı olarak söylüyor). Eski hâliyle test, ``exit_pressure``ın
+        ayrılmış lülede bile GEOMETRİK izentropik değeri taşımasını şart
+        koşuyordu — yani alanın kendi beyanıyla ("CF'de fiilen kullanılan
+        çıkış statik basıncı") çelişmesini KİLİTLİYORDU. Ölçülen çelişki
+        (γ=1,20, R=350, T_c=3400 K, Pc=40 bar, p_a=1,01325 bar): ε=25/60/100'de
+        yayımlanan p_e ile CF'nin fiilen kullandığı p_sep arasında 2,66× /
+        8,11× / 15,41×. İzentropik bağıntının KENDİSİ doğrudur ve sınanmaya
+        devam eder — yalnız artık kendi alanında
+        (``exit_pressure_geometric``); ``exit_pressure`` ise CF'nin fiilen
+        kullandığı istasyonu taşır.
+        """
         eps = 16.0
         res = designer.design_nozzle(AT, eps, PC, 1.01325, 'conical',
                                      gamma=GAMMA)
@@ -57,6 +73,25 @@ class TestExitPressureFromGeometry:
         M_e = designer.mach_from_area_ratio(eps, GAMMA)
         p_ref = PC / ((1.0 + 0.5 * (GAMMA - 1.0) * M_e ** 2)
                       ** (GAMMA / (GAMMA - 1.0)))
+        assert p['exit_pressure_geometric'] == pytest.approx(p_ref, rel=1e-9)
+        if p['flow_separated']:
+            assert p['exit_pressure'] == pytest.approx(
+                p['separation_pressure'], rel=1e-12)
+            assert p['exit_pressure_basis'] == 'separation_plane'
+        else:
+            assert p['exit_pressure'] == pytest.approx(p_ref, rel=1e-9)
+            assert p['exit_pressure_basis'] == 'isentropic_area_ratio'
+
+    def test_exit_pressure_is_isentropic_when_attached(self, designer):
+        """Ayrılmayan lülede (ε=8, deniz seviyesi) alan eskisiyle bit-aynı."""
+        eps = 8.0
+        res = designer.design_nozzle(AT, eps, PC, 1.01325, 'conical',
+                                     gamma=GAMMA)
+        p = res['performance']
+        M_e = designer.mach_from_area_ratio(eps, GAMMA)
+        p_ref = PC / ((1.0 + 0.5 * (GAMMA - 1.0) * M_e ** 2)
+                      ** (GAMMA / (GAMMA - 1.0)))
+        assert p['flow_separated'] is False
         assert p['exit_pressure'] == pytest.approx(p_ref, rel=1e-9)
         assert p['exit_pressure_basis'] == 'isentropic_area_ratio'
 
@@ -128,7 +163,13 @@ class TestFlowSeparation:
                                      gamma=GAMMA)
         p = res['performance']
         assert p['separation_pressure'] == pytest.approx(0.4 * 1.01325, rel=1e-9)
-        assert p['exit_pressure'] < p['separation_pressure']
+        # ÖH D15 / P1B4-03: ayrılma ölçütü GEOMETRİK çıkış basıncına bakar
+        # (p_e_geom < 0,4·p_a), yayımlanan ``exit_pressure``a değil — o alan
+        # artık ayrılma düzlemini taşıyor ve ölçütle karşılaştırıldığında
+        # tanım gereği EŞİT çıkar. Ölçüt burada kendi girdisiyle sınanır.
+        assert p['exit_pressure_geometric'] < p['separation_pressure']
+        assert p['exit_pressure'] == pytest.approx(p['separation_pressure'],
+                                                   rel=1e-12)
         assert p['effective_expansion_ratio'] < p['expansion_ratio']
         assert p['thrust_coefficient_basis'] == 'separated_summerfield'
         assert p['warnings'] and p['warnings'][0]['code'] == 'warn.nozzle.flow_separation'
@@ -350,15 +391,27 @@ class TestApiPreservation:
         assert {'exit_pressure', 'exit_mach', 'flow_separated',
                 'effective_expansion_ratio'}.issubset(p.keys())
 
-    def test_flow_properties_shares_the_same_mach_solver(self, designer):
+    def test_urun_yolu_ayni_mach_cozucusunu_paylasiyor(self, designer):
+        """ÖH D21 / B4-15 — ÇEVRİLEN BEKÇİ.
+
+        Eski gövde ``calculate_nozzle_flow_properties``ı çağırıyordu; o
+        yöntem ürün yolunda HİÇ çağrılmıyordu (0 çağıran) ve içinde iki
+        cebirsel özdeşliği ölçüm gibi yayımlıyordu — bekçi ölü kodu ve
+        totolojiyi yerinde tutuyordu. Aynı iddia (tek Mach çözücüsü) artık
+        ÜRÜNÜN GERÇEKTEN KOŞTUĞU yolda ölçülür.
+        """
         res = designer.design_nozzle(0.001, 10.0, 40.0, 0.5, 'bell', gamma=GAMMA)
-        fp = designer.calculate_nozzle_flow_properties(
-            res, 1.0, {'gamma': GAMMA, 'gas_constant': 350.0,
-                       'temperature': 3400.0, 'pressure': PC})
-        assert fp['exit']['mach_number'] > 1.0
-        assert fp['exit']['pressure'] == pytest.approx(
+        p = res['performance']
+        assert p['exit_mach'] > 1.0
+        assert p['exit_mach'] == pytest.approx(
+            designer.mach_from_area_ratio(10.0, GAMMA), rel=1e-9)
+        assert p['exit_pressure'] == pytest.approx(
             NozzleDesigner.exit_pressure_from_expansion(10.0, GAMMA, PC),
             rel=1e-6)
+
+    def test_olu_akis_ozellikleri_yontemi_geri_gelmemis(self, designer):
+        """ÖH D21 / B4-15 — kaldırılan ölü yöntem geri konmasın."""
+        assert not hasattr(designer, 'calculate_nozzle_flow_properties')
 
 
 if __name__ == '__main__':

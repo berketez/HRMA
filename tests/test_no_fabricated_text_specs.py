@@ -496,7 +496,7 @@ class TestClosureTorque:
         # T = K * F_i * d bağıntısı gerçekten kullanılmış mı?
         from hrma.analysis.bolted_joint import BoltedJointAnalyzer
         analyzer = BoltedJointAnalyzer(size='M10', property_class='8.8',
-                                       bolt_count=6)
+                                       bolt_count=6, member_material='aluminum_6061')
         expected = (joint['nut_factor_K'] * analyzer.preload()['preload_N']
                     * analyzer.d_mm * 1e-3)
         assert joint['tightening_torque_nm'] == pytest.approx(expected,
@@ -548,9 +548,30 @@ class TestMonteCarloCriteriaText:
         assert result['criteria_detail']['thrust_band_rel'] == 0.20
 
     def test_detail_block_is_machine_readable(self):
+        """Ölçüt tablosunun HER sayısı makine tarafına birebir geçer.
+
+        ÖH D15 a2 (P2B3-02) — GENİŞLETİLDİ, GEREKÇE:
+        Eski iddia TAM EŞİTLİKti (``== dict(SOLID_MC_TOLERANCE_MODEL)``), yani
+        blok tablodan başka HİÇBİR şey taşıyamazdı. Bu, koşulan analizin
+        kendisini beyan etmeyi yasaklıyordu: parçalı rejim yasalı yakıtlarda
+        (kndx/knsb) a/n toleransı taban hıza ``(1+eps_a)*Pc^d_n`` çarpanı
+        olarak uygulanır ve bunun BEYANI (``burn_rate_law`` /
+        ``burn_rate_law_sampling``) bu blokta durmalıdır — aksi hâlde metin
+        ile koşulan analiz yine ayrışırdı (kalemin ta kendisi).
+
+        Bekçinin asıl iddiası KORUNUR ve güçlenir: tablonun her anahtarı
+        blokta AYNI değerle bulunmalıdır (üst küme), ek anahtarlar tablonun
+        sayılarını gölgeleyemez.
+        """
         from hrma.engines.solid_rocket_engine import SOLID_MC_TOLERANCE_MODEL
         result = _silent(_engine(**SMALL).run_monte_carlo, n_samples=20, seed=3)
-        assert result['criteria_detail'] == dict(SOLID_MC_TOLERANCE_MODEL)
+        detay = result['criteria_detail']
+        for anahtar, deger in SOLID_MC_TOLERANCE_MODEL.items():
+            assert anahtar in detay, anahtar
+            assert detay[anahtar] == deger, anahtar
+        # Ek anahtarlar YALNIZ beyan alanları olabilir (sayı ezmesi yok).
+        assert set(detay) - set(SOLID_MC_TOLERANCE_MODEL) == {
+            'burn_rate_law', 'burn_rate_law_sampling'}
 
 
 # ---------------------------------------------------------------------------

@@ -8,10 +8,10 @@
   "fields": {
    "propellant_name": "KNDX - Potassium Nitrate/Dextrose 65/35",
    "density": 1850.0,
-   "flame_temp": 1710.0,
-   "molecular_weight": 42.39,
-   "gamma": 1.1308,
-   "char_velocity": 912.4,
+   "flame_temp": 1713.1,
+   "molecular_weight": 37.51,
+   "gamma": 1.122,
+   "char_velocity": 915.9,
    "burn_rate_a": 0.0007876,
    "burn_rate_n": 0.688,
    "burn_rate_preset": "kndx",
@@ -26,18 +26,24 @@
    "inhibit_rear": false,
    "inhibit_outer": true,
    "chamber_diameter": 75.0,
-   "chamber_pressure": 40.0
+   "chamber_pressure": 40.0,
+   "combustion_efficiency": 0.95,
+   "nozzle_efficiency": 0.95,
+   "cf_efficiency": 0.98,
+   "kinetic_efficiency": 0.97,
+   "erosion_factor": 0.001,
+   "initial_temp": 298.0
   }
  },
  "results_summary": {
-  "total_impulse_Ns": 3381.804,
-  "burn_time_s": 2.024,
+  "total_impulse_Ns": 2959.642,
+  "burn_time_s": 2.277,
   "chamber_pressure_bar": 40.0,
-  "isp_s": 143.289,
-  "peak_thrust_N": 1926.775,
-  "computed_with_version": "2.6.26"
+  "isp_s": 125.401,
+  "peak_thrust_N": 1499.272,
+  "computed_with_version": "3.0.0"
  },
- "app_version": "2.6.26",
+ "app_version": "3.0.0",
  "created_at": "2026-07-30T17:01:45",
- "updated_at": "2026-08-01T00:03:56"
+ "updated_at": "2026-10-14T14:18:18"
 }

@@ -1,0 +1,11 @@
+{
+ "tur": "KLV2 (15 Eki 2026)",
+ "bekci": ["tests/test_d31_altyapi_a1.py::test_kilavuz_ikizi_kaynaktan_uretilmis", "tests/test_d32_altyapi_a1.py::TestOHD2107KilavuzDevri::test_kilavuz_borcu_ODENDI_im_sokuldu"],
+ "mutasyon": "hrma/static/docs/HRMA-Kullanma-Kilavuzu-TR.pdf orta baytı XOR 0xFF (bayt yedeği cp -p)",
+ "md5_once": "6915f8a8df6f98b49ce8d6adbae4dd3e",
+ "md5_mutasyon": "c03608d0df43eb9860d6f613afd5ca01",
+ "sonuc_mutasyonda": "2 failed, 20 passed (iki bekçi KIRMIZI)",
+ "md5_geri": "6915f8a8df6f98b49ce8d6adbae4dd3e",
+ "geri_esit": true,
+ "kilavuz_derle_kontrol_sonra": "EŞİT (TR ve EN)"
+}

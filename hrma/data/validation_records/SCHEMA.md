@@ -43,7 +43,8 @@ KULLANILMAZ (yeni bağımlılık yasağı — paket bundle'ında yok).
 | `inputs` | obje | evet | Boş olmayan sözlük; değerler SONLU sayı. Deneyde ayarlanan büyüklükler |
 | `measured` | obje | evet | Boş olmayan sözlük; değerler sonlu sayı, `null` (ölçülmemiş) veya eğri objesi (aşağıda) |
 | `measurement_uncertainty` | obje | hayır | Anahtarları `inputs` VEYA `measured` içinde tanımlı olmalı (girdi belirsizlikleri UQ için saklanabilir) |
-| `anomaly` | obje | hayır | `{"flag": bool, "note": str}`; `flag: true` ise `note` zorunlu |
+| `anomaly` | obje | hayır | `{"flag": bool, "note": str}`; `flag: true` ise `note` zorunlu. **DENEYİN** veri kalitesi bayrağı (aşağıya bakınız) |
+| `model_scope` | obje | hayır | `{"in_scope": bool, "note": str}`; `in_scope: false` ise `note` zorunlu. **MODELİN** ilan ettiği kapsam (aşağıya bakınız) |
 | `units_original` | str | evet | Kaynağın orijinal birimlerinin serbest metin özeti |
 | `digitized` | bool | evet | Sayılar grafik sayısallaştırmasından mı geldi (WebPlotDigitizer vb.) |
 | `synthetic` | bool | hayır | Varsayılan `false`. `true` yalnız test fikstürlerinde |
@@ -51,6 +52,34 @@ KULLANILMAZ (yeni bağımlılık yasağı — paket bundle'ında yok).
 | `notes` | str | hayır | Serbest metin: test standı, bilinen anormallikler, taşıma notları |
 
 Bilinmeyen üst düzey alan REDDEDİLİR (yazım hatası koruması).
+
+## `anomaly` ⟷ `model_scope`: iki AYRI gerekçe, iki AYRI katman
+
+Bir kaydın başlık istatistiğine girmemesinin iki bağımsız nedeni olabilir ve
+bunlar **aynı alanda taşınmaz** (P10B2-06, 5 Eylül 2026):
+
+| Alan | Kimin kusuru | Örnek | Koşucu katmanı |
+|---|---|---|---|
+| `anomaly.flag: true` | **Deneyin/verinin** | Lüle erozyonu, basınç hattı tıkanması, tane çatlağı, bildiri-içi tutarsızlık, baskı hatası | `anomaly_entries` |
+| `model_scope.in_scope: false` | **HRMA modelinin** | Swirl (teğetsel) enjeksiyon ⟷ v1 EKSENEL hibrit modeli; modelin fiziği o konfigürasyonu kapsamıyor | `out_of_scope_entries` |
+
+Neden ayrı: model kapsamı gerekçesini `anomaly` bayrağıyla taşımak, **modelin
+zorlandığı vakaları veri kusuru kılığında başlıktan çıkarmaktır**. Ölçülen
+(tam DB, 4 swirl kaydı): `hybrid/c_star` başlık önyargısı bu dört kayıt dâhil
+edilince %−0,12'den %+2,5 bandına taşınır ve `hybrid/thrust` — veritabanının
+**tek** hibrit itki karşılaştırması — tabloda hiç görünmezken artık adıyla
+geri çekilmiş hücre olarak yayımlanır.
+
+Kural:
+- Kayıt SAĞLIKLI ama model onu kapsamıyorsa → yalnız `model_scope`.
+- Kayıt BOZUK ise → yalnız `anomaly` (model kapsasa da girmemeli).
+- İkisi birden geçerliyse iki blok da yazılır; koşucu kaydı `out_of_scope`
+  katmanında yayımlar ve `also_anomaly_flagged: true` künyesini taşır
+  (hiçbir gerekçe kaybolmaz).
+- `model_scope.in_scope: false` olan bir kayıt ana istatistiğe **giremez**;
+  ama etkisi görünmez de kalamaz: koşucu hem kapsam-dışı girişleri adıyla
+  yayımlar, hem ilgili ana hücrenin "kapsam-dışı dâhil" alternatif
+  istatistiğini (`stats_incl_out_of_scope`) basar.
 
 ## `record_type` değerleri
 

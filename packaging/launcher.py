@@ -34,17 +34,23 @@ import subprocess
 import webbrowser
 import urllib.request
 
+# ÖH D23 / altyapi · P17B4-06 — MÜHÜR KORUMASI, İLK SATIRLARDA.
+# Bayrak modül düzeyinde kurulur ki bu dosyadan sonra gerçekleşen HİÇBİR
+# import mühürlü paketin içine ``__pycache__`` dökmesin. ``_muhru_koru()``
+# aynı kararı ortam değişkeniyle alt süreçlere de taşır (aşağıda).
+sys.dont_write_bytecode = True
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 LIBS_DIR = os.path.abspath(os.path.join(APP_DIR, os.pardir, "libs"))
 
 HRMA_APP_NAME = "HRMA"
-APP_COPYRIGHT = "© 2026 Berke Tezgöçen — UZAYTEK"
+APP_COPYRIGHT = "© 2026 Berke Tezgöçen"
 GITHUB_URL = "https://github.com/berketez/HRMA"
-PENCERE_BASLIK = "HRMA — UZAYTEK Rocket Motor Analysis"
+PENCERE_BASLIK = "HRMA — Rocket Motor Analysis"
 
 # Windows görev çubuğu kimliği — TEK KAYNAK. Süreç pythonw.exe olduğu için
 # kabuk pencereyi varsayılan olarak "Python" altında gruplar.
-WIN_APP_USER_MODEL_ID = "UZAYTEK.HRMA"
+WIN_APP_USER_MODEL_ID = "BerkeTezgocen.HRMA"
 
 # Windows menü şeridinin koyu paleti (R, G, B) — TEK KAYNAK; renk değerleri
 # başka hiçbir yerde tekrarlanmaz. Değerler arayüz temasından alındı
@@ -74,14 +80,44 @@ def _hrma_version():
 
 def _pencere_baslik(version):
     if version:
-        return "HRMA v%s — UZAYTEK Rocket Motor Analysis" % version
+        return "HRMA v%s — Rocket Motor Analysis" % version
     return PENCERE_BASLIK
 
 # Gerçek uygulama yüklenene kadar durum: {"wsgi": Flask|None, "error": str|None}
 _app_state = {"wsgi": None, "error": None, "started_at": time.time()}
 
 
+def _muhru_koru():
+    """Kurulu .app kendi kod imzasını İLK AÇILIŞTA kırmasın.
+
+    ÖH D23 / altyapi · defter P17B4-06. ÖLÇÜLEN KUSUR (raw/P17/B4-rapor.md):
+    kurulu uygulama ilk açılışta MÜHÜRLÜ paketin İÇİNE 1654 dosya yazıyor ve
+    ``codesign --verify`` — yayın kapısının kendi ölçütü — kurulu kopyada
+    KALIYOR. Yazılan dosyaların ezici çoğunluğu yorumlayıcının kendi ürettiği
+    ``__pycache__/*.pyc``'lerdir: ``site.addsitedir`` + ``import`` zinciri
+    ``Contents/Resources/libs`` altına derleme önbelleği döker.
+
+    Çözüm kaynağında: bayt kodu yazımı KAPATILIR. İki kapı birden gerekir —
+    ``sys.dont_write_bytecode`` bu yorumlayıcı için, ortam değişkeni ise
+    başlatılan ALT süreçler için (launcher kendi python'unu çağırabiliyor).
+
+    Bunun bedeli her açılışta yeniden derleme yapılmasıdır; kazancı ise
+    mührün SAĞLAM kalmasıdır. Kurulu bir uygulamanın imzasını kendi kendine
+    bozması, kullanıcı tarafında "bu uygulama zarar görmüş" uyarısına ve
+    Gatekeeper reddine kadar gider — yeniden derleme maliyeti onun yanında
+    ölçülemeyecek kadar küçüktür.
+
+    FAIL-CLOSED değil, KAPALI-DOĞAR: bayrak import zincirinden ÖNCE, modül
+    düzeyinde kurulur; sonradan açılmaz.
+    """
+    sys.dont_write_bytecode = True
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
+
 def _setup_paths():
+    # Mühür koruması yol kurulumundan ÖNCE: ilk `import` bu satırdan sonra
+    # gerçekleşir, yani hiçbir .pyc paketin içine düşmez.
+    _muhru_koru()
     if os.path.isdir(LIBS_DIR):
         site.addsitedir(LIBS_DIR)
         # libs sistem paketlerinin önüne geçsin
@@ -104,7 +140,7 @@ def _setup_console():
             sys.stdout = sys.stderr = io.StringIO()
         return
     if os.name == "nt":
-        os.system("title HRMA - UZAYTEK Rocket Motor Analysis")
+        os.system("title HRMA - Rocket Motor Analysis")
         os.system("chcp 65001 >nul")
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -192,7 +228,7 @@ SPLASH_HTML = """<!DOCTYPE html>
 <body>
   <div class="kutu">
     <div class="logo">HRMA</div>
-    <div class="alt">UZAYTEK ROCKET MOTOR ANALYSIS __HRMA_VERSION__</div>
+    <div class="alt">ROCKET MOTOR ANALYSIS __HRMA_VERSION__</div>
     <div class="halka" id="halka"></div>
     <div class="durum" id="durum">Starting…</div>
     <div class="ipucu" id="ipucu">Loading computation engines.</div>
@@ -207,9 +243,24 @@ SPLASH_HTML = """<!DOCTYPE html>
     "Almost ready…"
   ];
   var i = 0;
+  // ÖH D24 / P17B4-08 — SUNUCUNUN ÖLÇTÜĞÜ SÜRE EKRANA ÇIKAR.
+  // ÖLÇÜLDÜ (P17 B4 turu): /health yanıtı `elapsed_s` taşıyor (3,6 → 116,6)
+  // ama ekranda yalnız tarayıcının kendi t0'ı vardı; 131 s'lik soğuk
+  // açılışta kullanıcı elde ölçülmüş gerçek bir sayıyı göremiyordu.
+  // Buraya SAHTE bir ilerleme çubuğu KONMADI (yüzde bilinmiyor, uydurulmaz);
+  // gösterilen tek şey sunucunun kendi ölçtüğü geçen süredir. Sunucudan
+  // henüz sayı gelmediyse tarayıcı sayacı yedek kalır ve bu ETİKETLENİR.
+  var sunucuSn = null;      // /health'in ölçtüğü elapsed_s (yoksa null)
+  function sureMetni() {
+    if (sunucuSn !== null) {
+      return 'Starting… (' + sunucuSn + ' s on the server)';
+    }
+    return 'Starting… (' + Math.round((Date.now() - t0) / 1000)
+           + ' s in this window)';
+  }
   setInterval(function () {
     var sn = Math.round((Date.now() - t0) / 1000);
-    document.getElementById('durum').textContent = 'Starting… (' + sn + ' s)';
+    document.getElementById('durum').textContent = sureMetni();
     if (sn > 0 && sn % 4 === 0) {
       i = Math.min(i + 1, ipuclari.length - 1);
       document.getElementById('ipucu').textContent = ipuclari[i];
@@ -219,6 +270,10 @@ SPLASH_HTML = """<!DOCTYPE html>
     fetch('/health', {cache: 'no-store'})
       .then(function (r) { return r.json(); })
       .then(function (d) {
+        if (typeof d.elapsed_s === 'number' && isFinite(d.elapsed_s)) {
+          sunucuSn = d.elapsed_s;
+          document.getElementById('durum').textContent = sureMetni();
+        }
         if (d.ready) { location.replace('/'); return; }
         if (d.error) {
           document.getElementById('halka').style.display = 'none';
@@ -821,6 +876,32 @@ def _menu_open_outputs():
         traceback.print_exc()
 
 
+def _menu_settings():
+    """Uygulama menüsü 'Settings…' — arayüzdeki ayarlar kipini açar.
+
+    ÖH D24 / OH-D23-02 — ÖLÇÜLEN KUSUR (P12aB5-06'nın ikinci yarısı):
+    ürün ``window.hrmaShowSettings`` köprüsünü yayımlıyor
+    (``hrma/static/js/settings_panel.js``) ama yerel pencere menüsünde onu
+    çağıran hiçbir öge YOKTU — üründe yayımlanan ``hrma*`` köprüleri
+    içinde menüden çağrılmayan TEK köprü buydu (ölçüm:
+    ``docs/scofield/raw/OH/D24/altyapi/a2/once_ohd2302.json``). Paketli
+    uygulamada gezinti çubuğu görünmeyen sayfalarda (``/``, ``/launch-site``)
+    ayarlara ulaşan başka yol kalmıyordu.
+
+    Kardeş 'User Guide…' / 'Release Notes…' ile AYNI desen kullanılır
+    (``window.<ad> && <ad>()``): ayar betiği yüklenmemiş bir sayfada
+    sessizce hiçbir şey yapmak, olmayan bir işlevi çağırıp JS istisnası
+    atmaktan iyidir.
+    """
+    try:
+        import webview
+        if webview.windows:
+            webview.windows[0].evaluate_js(
+                "window.hrmaShowSettings && window.hrmaShowSettings()")
+    except Exception:
+        traceback.print_exc()
+
+
 def _menu_release_notes():
     """macOS Help menüsü 'Release Notes…' — arayüzdeki sürüm notları modalını açar."""
     try:
@@ -828,6 +909,26 @@ def _menu_release_notes():
         if webview.windows:
             webview.windows[0].evaluate_js(
                 "window.hrmaShowReleaseNotes && window.hrmaShowReleaseNotes()")
+    except Exception:
+        traceback.print_exc()
+
+
+def _menu_user_guide():
+    """Help menüsü 'User Guide…' — arayüzdeki kılavuz açıcısını tetikler.
+
+    ÖH D22 / P12aB5-15 — ÖLÇÜLEN KUSUR: ``user_guide.js`` "Yerel pencere
+    menüsü (Help > 'User Guide…') buradan tetikler" diye yazıyordu ama
+    ``hrmaOpenUserGuide`` bu dosyada HİÇ geçmiyordu; menüde öge yoktu.
+    Beyan düzeltilmedi, EKSİK ÖGE kondu: kardeş 'Release Notes…' ile aynı
+    desen (``window.<ad> && <ad>()``), çünkü kılavuz betiği yüklenmemiş bir
+    sayfada sessizce hiçbir şey yapmak, olmayan bir işlevi çağırıp
+    JS istisnası atmaktan iyidir.
+    """
+    try:
+        import webview
+        if webview.windows:
+            webview.windows[0].evaluate_js(
+                "window.hrmaOpenUserGuide && window.hrmaOpenUserGuide()")
     except Exception:
         traceback.print_exc()
 
@@ -846,10 +947,14 @@ def _macos_menu():
         return None
     return [
         wm.Menu("__app__", [
+            # macOS'ta ayarlar ögesi uygulama menüsünün yeridir (Help'in
+            # değil); About'un hemen altına düşer.
+            wm.MenuAction("Settings…", _menu_settings),
             wm.MenuAction("Check for Updates…", _menu_check_updates),
             wm.MenuAction("Open Output Folder", _menu_open_outputs),
         ]),
         wm.Menu("Help", [
+            wm.MenuAction("User Guide…", _menu_user_guide),
             wm.MenuAction("Release Notes…", _menu_release_notes),
             wm.MenuAction("HRMA on GitHub",
                           lambda: webbrowser.open(GITHUB_URL)),
@@ -877,10 +982,12 @@ def _windows_menu():
         return None
     return [
         wm.Menu("HRMA", [
+            wm.MenuAction("Settings…", _menu_settings),
             wm.MenuAction("Check for Updates…", _menu_check_updates),
             wm.MenuAction("Open Output Folder", _menu_open_outputs),
         ]),
         wm.Menu("Help", [
+            wm.MenuAction("User Guide…", _menu_user_guide),
             wm.MenuAction("Release Notes…", _menu_release_notes),
             wm.MenuAction("HRMA on GitHub",
                           lambda: webbrowser.open(GITHUB_URL)),
@@ -1061,7 +1168,7 @@ def main():
     _app_state["version"] = _hrma_version()
 
     print("=" * 62)
-    print("  HRMA - UZAYTEK Rocket Motor Analysis"
+    print("  HRMA - Rocket Motor Analysis"
           + (" v" + _app_state["version"] if _app_state["version"] else ""))
     print("=" * 62)
 
@@ -1095,8 +1202,18 @@ def main():
 
     # 2) Sunucu ANINDA kalkar (shim: splash + /health)
     from waitress import serve
+    # V3 güvenlik (14 Eki): waitress gövde tavanı = uygulamanın tavanı.
+    # Varsayılan 1 GiB'tı ve waitress gövdeyi köken kapısından ÖNCE
+    # tamponluyordu (yabancı sayfa no-cors POST ile istek başına 1 GiB).
+    # Tek kaynak hrma/security/body_limit.py: saf sabit modülü, ağır import
+    # yok; paket hrma/'yı APP_DIR'de taşır ve _setup_paths onu sys.path'e
+    # koymuştur (_hrma_version da aynı paketi içe aktarır). İçe aktarma
+    # başarısızsa sunucu tavansız KALKMAZ (fail-closed). '+ 1': waitress
+    # `>=` ile reddeder (gerekçe hrma/run.py waitress dalında).
+    from hrma.security.body_limit import REQUEST_BODY_MAX_BYTES
     threading.Thread(
-        target=lambda: serve(_shim_app, host="127.0.0.1", port=port, threads=8),
+        target=lambda: serve(_shim_app, host="127.0.0.1", port=port, threads=8,
+                             max_request_body_size=REQUEST_BODY_MAX_BYTES + 1),
         daemon=True,
     ).start()
 

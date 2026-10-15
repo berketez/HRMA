@@ -13,12 +13,12 @@
    değişkeni TANIMLANMAZ (bekçi: TestLayoutStickyContract::
    test_css_defines_no_identity_tokens).
 
-   YÜKLENME: şablonlarda <link> yok (şablonlar bu partinin dosya
-   kapsamı dışında; A2 bekçisi ölü linki ayrıca yasaklar). Dosyayı
-   analysis_center.js init() sırasında <link> olarak enjekte eder — üç
-   motor sayfası tek kuraldan beslenir. Şablonlara gerçek <link>
-   girdiği gün (A2 halef bekçisi: dosya var + üç şablonda link +
-   theme.css'ten önce) enjeksiyon sökülür. Defter kalemi raporda.
+   YÜKLENME (2026-08-18, parti 33): üç motor şablonunun
+   (advanced/liquid/solid) head'inde GERÇEK <link> ile, theme.css'ten
+   ÖNCE — yerleşim dosyası kimlik kuralı taşımadığı için tasarım
+   sistemi onu ezebilmeli. init() enjeksiyonu SÖKÜLDÜ. Bekçi:
+   tests/test_analysis_center_contract.py::TestLayoutCssLink
+   (link var + sırası doğru + JS'te enjeksiyon yolu YOK, iki yönlü).
    ==================================================================== */
 
 /* ------------------- parti 29 yerleşim (A3) ------------------- */

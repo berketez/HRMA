@@ -39,15 +39,51 @@
         ['steel_4130', 'Steel AISI 4130'],
     ];
 
+    // ÖH A2 sivi-sogutma · 7. tur (F-17): soğutucu ön-dolgusu 'water' idi —
+    // hiçbir hesaptan değil. Seçici artık boş seçimle açılır; değer motorun
+    // yakıtından gelir (soğutucu = yakıt, fromResults) ya da kullanıcı seçer.
+    // Boş seçim gövdeye gitmez: alan spec.required'da (güverte durdurur).
+    // Metan ve hidrojen: modül ikisini de çözüyor (CoolProp, süperkritik
+    // marş; regen_cooling.canonical_coolant_name 'lh2' → 'hydrogen'), ama
+    // seçicide yoktu — LH2 motorunun paneli 'water' ile koşuyordu (ölçüldü,
+    // sart7/olcum/k12_once_sonra.json). Değerler motorun yakıt anahtarıyla
+    // aynıdır ki öneri doğrudan eşleşsin.
     const COOLANTS = [
+        ['', '— select —', 'panel.regen.coolantSelect'],
         ['water', 'Water', 'coolant.water'],
         ['rp1', 'RP-1 (kerosene)', 'coolant.rp1'],
+        ['methane', 'Methane (LCH4)', 'coolant.methane'],
+        ['lh2', 'Hydrogen (LH2)', 'coolant.hydrogen'],
     ];
 
     const FLOW_DIRECTIONS = [
         ['counterflow', 'Counterflow (exit → chamber)', 'coolant.counterflow'],
         ['coflow', 'Co-flow (chamber → exit)', 'coolant.coflow'],
     ];
+
+    /* ÖH D27 a4 · P11B5-15 — LİMİTSİZ MALZEMEDE YEŞİL HÜKÜM YOK.
+
+       ÖLÇÜLDÜ (a4/once.json, `p11b5_15_wallkind_limitsiz_yesil` = 1):
+       fonksiyonun son satırı koşulsuz `return 'ok'` idi. Üç limitin
+       (erime / servis / izin verilen) HİÇBİRİ çözülemediğinde — ablatif
+       astar gibi ERİMEYEN, servis sıcaklığı yayımlanmayan kayıtlarda tam
+       olarak böyle olur — panel YEŞİL `WALL WITHIN LIMIT` basıyordu.
+       Ölçülen vakada T_wall,hot = 3.249,6 K'de yeşil rozet çıkıyordu:
+       kıyaslanacak bir limit YOKKEN "limit içinde" hükmü veriliyordu.
+
+       FAIL-CLOSED: hüküm ancak KIYASLANACAK BİR LİMİT varsa kazanılır.
+       Limit yoksa dönüş 'dim' ve çağıran taraf yeşil rozet yerine
+       "limit yayımlanmadı" rozetini basar. Sayı uydurulmaz, hüküm
+       uydurulmaz. */
+    const WALL_LIMIT_FIELDS = ['material_melting_K',
+                               'material_service_limit_K',
+                               'material_allowable_temp_K'];
+
+    function wallLimitsResolved(summary) {
+        return WALL_LIMIT_FIELDS.filter(function (f) {
+            return Number.isFinite(summary && summary[f]);
+        });
+    }
 
     // Tepe cidar sıcaklığının malzeme limitlerine göre önem derecesi
     function wallKind(summary) {
@@ -56,6 +92,8 @@
         if (Number.isFinite(summary.material_melting_K) && t > summary.material_melting_K) return 'err';
         if (Number.isFinite(summary.material_service_limit_K) && t > summary.material_service_limit_K) return 'err';
         if (Number.isFinite(summary.material_allowable_temp_K) && t > summary.material_allowable_temp_K) return 'warn';
+        // Kıyas noktası yoksa hüküm KAZANILMAMIŞTIR.
+        if (!wallLimitsResolved(summary).length) return 'dim';
         return 'ok';
     }
 
@@ -221,7 +259,20 @@
                 T('panel.regen.wallNearTip',
                   'Peak hot-wall temperature exceeds the allowable (strength) limit — margin reduced.'));
         } else if (wk === 'ok') {
-            badges += U.badge(T('panel.regen.wallWithin', 'WALL WITHIN LIMIT'), 'ok', '');
+            // Hangi limite göre "içinde"? Rozet artık kıyas noktalarını da
+            // taşır — "limit içinde" hükmü ancak bir limit adıyla anlamlı.
+            badges += U.badge(T('panel.regen.wallWithin', 'WALL WITHIN LIMIT'),
+                'ok', 'Compared against: ' + wallLimitsResolved(sm).join(', '));
+        } else if (wk === 'dim' && Number.isFinite(sm.max_wall_hot_K)) {
+            // P11B5-15: cidar sıcaklığı ÇÖZÜLDÜ ama kıyaslanacak limit
+            // yayımlanmadı (ablatif / limitsiz kayıt). Eskiden burada
+            // YEŞİL rozet vardı; artık hükmün geri çekildiği yazılıyor.
+            badges += U.badge(T('panel.regen.wallNoLimit',
+                                'WALL LIMIT NOT PUBLISHED'), 'warn',
+                'No melting / service / allowable temperature was published '
+                + 'for this liner material, so no "within limit" verdict is '
+                + 'earned for T_wall,hot = '
+                + U.fmt(sm.max_wall_hot_K, 1) + ' K.');
         }
         if (sm.coking) {
             badges += U.badge(T('panel.regen.coking', 'RP-1 COKING'), 'err',
@@ -272,9 +323,63 @@
         if (Array.isArray(sm.warnings) && sm.warnings.length) {
             html += U.listBlock(T('common.warnings', 'Warnings'), sm.warnings, 'warn');
         }
-        if (cooling.model_note) {
+        // ÖH D22 / P4B2-10 — Dittus-Boelter GEÇERLİLİK ZARFI panele iniyor.
+        // Zarf taraması ürün yoluna yeni girdi; sayısı ve ihlalleri
+        // kullanıcıya gösterilmezse tarama yine görünmez kalırdı. Yeni
+        // i18n ANAHTARI AÇILMADI (anahtar dosyaları arayuz kulvarında):
+        // satırlar mevcut "model varsayımları" bloğuna ekleniyor.
+        const notlar = [];
+        if (cooling.model_note) { notlar.push(cooling.model_note); }
+        /* ÖH D26 / OH-B3-02 — CİDAR SICAKLIĞI KAÇ İSTASYONDA
+           EKSTRAPOLASYONLA GELDİ?
+           ÖLÇÜLDÜ (taban 7751531, ``a2/once.json``:
+           cooling_clamped_stations = 0): /api/regen-cooling
+           `summary.property_table_clamped_stations` yayımlıyor —
+           özellik tablosunun GEÇERLİ BANDI DIŞINA düşüp kırpılan istasyon
+           sayısı — ve cooling_panel.js basmıyordu. Yukarıdaki "PEAK WALL
+           T" / "WALL MARGIN" kartları bu istasyonların sayılarıyla
+           kuruluyor; kaçının bant dışında olduğu ekranda yazmıyorsa
+           kullanıcı hepsini ölçülmüş sanır.
+           tests/test_wave4b_contract.py bunu 'cooling/summary' altında
+           xfail(strict) borç imiyle taşıyordu.
+           SIFIR da bir cevaptır ("hiçbiri kırpılmadı") ve söylenir. */
+        const kirpilan = sm.property_table_clamped_stations;
+        if (kirpilan !== null && kirpilan !== undefined) {
+            notlar.push('property_table_clamped_stations = '
+                + U.fmt(kirpilan, 0)
+                + ' — coolant property lookups that fell OUTSIDE the '
+                + 'validated table band and were clamped to its edge; the '
+                + 'wall temperature at those stations is an extrapolation, '
+                + 'not a table reading.');
+        }
+        const dbz = cooling.dittus_boelter_envelope;
+        if (dbz) {
+            notlar.push('Dittus-Boelter validity envelope: Re_min = '
+                + U.fmt(dbz.reynolds_min, 0)
+                + ', Pr = ' + U.fmt(dbz.prandtl_min, 2)
+                + '-' + U.fmt(dbz.prandtl_max, 2)
+                + ', L/D = ' + U.fmt(dbz.length_over_diameter, 1)
+                // ÖH D25 / P11B2-12: `|| 0` yerine komşu satırların
+                // dürüst biçimlendiricisi (U.fmt -> '—').
+                + ' over ' + U.fmt(dbz.stations_using_dittus_boelter, 0)
+                + ' station(s), channel length '
+                + U.fmt(dbz.channel_length_m, 3) + ' m — '
+                + (dbz.in_envelope ? 'satisfied.' : 'VIOLATED.'));
+            if (Array.isArray(dbz.violations)) {
+                dbz.violations.forEach(function (v) { notlar.push(v); });
+            }
+            if (dbz.note) { notlar.push(dbz.note); }
+            if (dbz.sieder_tate_correction_applied === false) {
+                notlar.push('Sieder-Tate correction applied: no.');
+            }
+            if (dbz.scatter_pct) {
+                notlar.push('Reported scatter: +/-'
+                    + U.fmt(dbz.scatter_pct, 0) + '%.');
+            }
+        }
+        if (notlar.length) {
             html += U.listBlock(T('common.modelAssumptions', 'Model assumptions & limits'),
-                                [cooling.model_note], 'dim');
+                                notlar, 'dim');
         }
         tail.innerHTML = html;
         root.appendChild(tail);
@@ -298,17 +403,37 @@
             ['expansion_ratio', 'Expansion Ratio', 8, 0.1, 'common.f.expansionRatio'],
             ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen'],
             ['molecular_weight', 'Molecular Weight (g/mol)', 22, 0.5, 'common.f.molecularWeight'],
-            ['coolant', 'Coolant', 'water', COOLANTS, 'panel.regen.fCoolant'],
+            // ÖH A2 sivi-sogutma · 7. tur (F-17 ilkesi: kaynaksız ön-dolgu
+            // yok): soğutucu 'water', giriş sıcaklığı 300 K, giriş basıncı
+            // 60 bar, kanal genişliği 2,0 mm, derinliği 3,0 mm ve astar
+            // 1,0 mm hiçbir hesaptan gelmiyordu. Tanım değeri artık BOŞ;
+            // ön-dolgu motorun YAYIMLADIĞI değerdir (fromResults; yalnız
+            // sonlu pozitif, yalnız kanal devresi varken). Yayımlanmamışsa
+            // alan boş kalır ve ZORUNLUDUR (spec.required): güverte isteği
+            // göndermez, eksik alanı adıyla söyler.
+            ['coolant', 'Coolant', '', COOLANTS, 'panel.regen.fCoolant'],
             ['coolant_mdot', 'Coolant Mass Flow (kg/s)', 2.0, 0.05, 'panel.regen.fCoolantMdot'],
-            ['coolant_inlet_temp', 'Coolant Inlet T (K)', 300, 5, 'panel.regen.fInletT'],
-            ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', 60, 1, 'panel.regen.fInletP'],
-            ['n_channels', 'Number of Channels', 80, 1, 'panel.regen.fChannels'],
-            ['channel_width', 'Channel Width (mm)', 2.0, 0.1, 'panel.regen.fChannelW'],
-            ['channel_height', 'Channel Height (mm)', 3.0, 0.1, 'panel.regen.fChannelH'],
-            ['wall_thickness', 'Liner Thickness (mm)', 1.0, 0.1, 'panel.regen.fLinerThickness'],
+            ['coolant_inlet_temp', 'Coolant Inlet T (K)', '', 5, 'panel.regen.fInletT'],
+            ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', '', 1, 'panel.regen.fInletP'],
+            // ÖH A2 sivi-sogutma · 6. tur (F-17 ilkesi: kaynaksız ön-dolgu
+            // yok): eskiden 80 yazılı geliyordu — hiçbir hesaptan değil. Ön-dolgu
+            // artık /calculate_liquid'in YAYIMLADIĞI kanal sayısıdır
+            // (cooling_system.cooling_channels, fromResults); motor sonucu yoksa
+            // ya da N yayımlanmadıysa alan BOŞ kalır ve uç n_channels'ı adıyla
+            // ister (HTTP 400) — uydurma sayıyla hesap yapılmaz.
+            ['n_channels', 'Number of Channels', '', 1, 'panel.regen.fChannels'],
+            ['channel_width', 'Channel Width (mm)', '', 0.1, 'panel.regen.fChannelW'],
+            ['channel_height', 'Channel Height (mm)', '', 0.1, 'panel.regen.fChannelH'],
+            ['wall_thickness', 'Liner Thickness (mm)', '', 0.1, 'panel.regen.fLinerThickness'],
             ['wall_material', 'Liner Material', 'copper', WALL_MATERIALS, 'panel.regen.fLinerMaterial'],
             ['flow_direction', 'Flow Direction', 'counterflow', FLOW_DIRECTIONS, 'panel.regen.fFlowDir'],
         ],
+        // 'BOŞ + ZORUNLU' beyanı (analysis_dock.requiredFieldInfo): tanım
+        // değeri boş olan bu alanlar isteğe bağlı DEĞİL — uç n_channels'ı
+        // adıyla ister, kalanlar için güverte isteği durdurur.
+        required: ['n_channels', 'coolant', 'coolant_inlet_temp',
+                   'coolant_inlet_pressure', 'channel_width',
+                   'channel_height', 'wall_thickness'],
         // Sıvı motor sonuçlarından otomatik dolum: soğutucu = yakıt akışı.
         fromResults: function (r) {
             const m = (r && r.motor) || r || {};
@@ -330,6 +455,44 @@
             // çözücüde yok) anahtarlarını arıyordu; hibritin gerçek anahtarı
             // 'mdot_f'. Hibritte alan 2,0 kg/s panel varsayılanında kalıyordu,
             // gerçek yakıt debisi 0,158 kg/s — 12,6 kat fazla soğutucu.
+            // Kanal sayısı: motorun yayımladığı N (pozitif TAM sayı). Yoksa
+            // öneri yok — alan tanım değerinde (boş) kalır, uç adıyla reddeder.
+            const cs = (r && typeof r.cooling_system === 'object' && r.cooling_system) || {};
+            const nPub = cs.cooling_channels;
+            if (Number.isInteger(nPub) && nPub >= 1) {
+                sug.n_channels = nPub;
+                // 7. tur (F-17): kanal devresi VARSA motorun yayımladığı
+                // kesit, astar, soğutucu ve giriş hâli. Devre yoksa (ablatif,
+                // ışınımsal, sığmayan ceket) bu sayılar motorun varsayılan
+                // kalıntısıdır (bkz. liquid_rocket_engine kanalsız beyanı) —
+                // önerilmez, alan boş kalır.
+                const pozitif = function (v) {
+                    return (typeof v === 'number' && Number.isFinite(v) && v > 0) ? v : null;
+                };
+                const w = pozitif(cs.channel_width_mm);
+                if (w !== null) sug.channel_width = w;
+                const h = pozitif(cs.channel_height_mm);
+                if (h !== null) sug.channel_height = h;
+                // Marşın ısıyı İLETTİĞİ sıcak cidar (RP-1: hazne cidarı;
+                // süperkritik: astar) — sığma bloğunda künyesiyle yayımlanır.
+                const fit = (cs.channel_count_fit && typeof cs.channel_count_fit === 'object')
+                    ? cs.channel_count_fit : {};
+                const tw = pozitif(fit.hot_wall_thickness_mm);
+                if (tw !== null) sug.wall_thickness = tw;
+                const tin = pozitif(cs.coolant_inlet_temperature);
+                if (tin !== null) sug.coolant_inlet_temp = tin;
+                // Giriş basıncını motor YALNIZ süperkritik marşta yayımlar;
+                // RP-1 marşının giriş basıncı yanıtta yok → alan boş kalır.
+                const sc = (cs.regen_supercritical && typeof cs.regen_supercritical === 'object')
+                    ? cs.regen_supercritical : {};
+                const pin = pozitif(sc.inlet_pressure_bar);
+                if (pin !== null) sug.coolant_inlet_pressure = pin;
+                // Soğutucu = yakıt (motorun marşı da yakıtı soğutucu alır).
+                // Seçicide olmayan ad güvertenin kapısına düşer (seçim
+                // değişmez, koşum durur, gerekçe ekranda).
+                const yakit = (typeof r.fuel_type === 'string') ? r.fuel_type.trim() : '';
+                if (yakit) sug.coolant = yakit;
+            }
             const mdotFuel = U.readFuelFlow(r);
             if (Number.isFinite(mdotFuel) && mdotFuel > 0) sug.coolant_mdot = mdotFuel;
             return sug;
@@ -337,12 +500,58 @@
         render: render,
     });
 
+    /* ÖH D27 a4 · P11B5-15 — REJENERATİF ASTAR SEÇİCİSİNDEN ABLATİF ÇIKAR.
+
+       ÖLÇÜLDÜ (a4/once.json, `p11b5_15_astar_ablatif_suzgeci` = 0): katalog
+       yüklendiğinde seçici 'liner'+'shell' etiketli TÜM kayıtları sunuyordu
+       ve `materials_db.py` içindeki `ablative` kaydının etiketleri
+       ['ablative', 'liner'] — yani silika-fenolik ablatif astar rejeneratif
+       KANAL malzemesi olarak seçilebiliyordu. Ablatif astar kömürleşerek
+       kütle kaybeder; içine soğutma kanalı işlenmez ve bu panelin modeli
+       (Bartz + Dittus-Boelter + ince cidar iletimi) o malzeme için
+       tanımsızdır. Seçilebilir olması, panelin kendisinin çözemeyeceği bir
+       konfigürasyonu meşru gösteriyordu.
+
+       Süzgeç KATALOĞUN KENDİ etiketinden okunur; bu dosyada malzeme adı
+       listesi tutulmaz (tek kaynak: materials_db 'tags'). */
+    const NON_REGEN_TAG = 'ablative';
+
+    function ablatifAnahtarlar(H) {
+        const kayitlar = H.list(['liner', 'shell']) || [];
+        const out = {};
+        kayitlar.forEach(function (m) {
+            const t = m.tags || [];
+            if (t.indexOf(NON_REGEN_TAG) !== -1) out[m.key] = true;
+        });
+        return out;
+    }
+
     // Merkezi katalog yüklüyse liner select'ini 'liner'+'shell' etiketli
     // listeyle doldur; değilse fallback aynen kalır.
     if (typeof window.HRMAMaterials !== 'undefined' && window.HRMAMaterials) {
-        window.HRMAMaterials.populateSelect({
+        const H = window.HRMAMaterials;
+        H.populateSelect({
             panelId: 'cooling', fieldId: 'wall_material',
             tags: ['liner', 'shell'], fallback: WALL_MATERIALS,
+        }).then(function (ok) {
+            if (!ok) return;
+            const yasak = ablatifAnahtarlar(H);
+            if (!Object.keys(yasak).length) return;
+            // 1) Henüz monte edilmemiş paneller spec.fields üzerinden bu
+            //    diziyi okur — yerinde süz.
+            for (let i = WALL_MATERIALS.length - 1; i >= 0; i--) {
+                if (yasak[WALL_MATERIALS[i][0]]) WALL_MATERIALS.splice(i, 1);
+            }
+            // 2) Monte edilmiş select varsa seçeneği kaldır; seçili olan
+            //    yasaklıysa listenin ilk geçerli kaydına düş.
+            const el = document.getElementById('ad_f_cooling_wall_material');
+            if (el && el.tagName === 'SELECT') {
+                const secili = el.value;
+                Array.prototype.slice.call(el.options).forEach(function (o) {
+                    if (yasak[o.value]) el.removeChild(o);
+                });
+                if (yasak[secili] && el.options.length) el.selectedIndex = 0;
+            }
         });
     }
 
@@ -352,5 +561,8 @@
         _temperaturePlot: temperaturePlot,
         _fluxPressurePlot: fluxPressurePlot,
         _wallKind: wallKind,
+        _wallLimitsResolved: wallLimitsResolved,
+        _ablatifAnahtarlar: ablatifAnahtarlar,
+        _wallMaterials: WALL_MATERIALS,
     };
 })();

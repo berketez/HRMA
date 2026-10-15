@@ -1,0 +1,765 @@
+{
+ "/analyze_safety": {
+  "motor_type": "hybrid",
+  "chamber_pressure": 40,
+  "chamber_temperature": 3000,
+  "thrust": 1000,
+  "burn_time": 10,
+  "propellant_mass": 5,
+  "propellant_type": "composite",
+  "facility_type": "test_stand",
+  "chamber_diameter": 0.1,
+  "wall_thickness": 0.005
+ },
+ "/analyze_structural_safety": {
+  "chamber_pressure": 40,
+  "chamber_diameter": 0.1,
+  "chamber_length": 0.5,
+  "throat_diameter": 0.02,
+  "burn_time": 10,
+  "material": "steel_4130",
+  "wall_thickness": 0.025
+ },
+ "/analyze_thermal_safety": {
+  "chamber_pressure": 40,
+  "chamber_temperature": 3000,
+  "chamber_diameter": 0.1,
+  "chamber_length": 0.5,
+  "burn_time": 10,
+  "mdot_total": 1.0,
+  "wall_thickness": 0.005,
+  "material": "steel",
+  "cooling_type": "natural"
+ },
+ "/api/advanced-analysis": {
+  "motor_data": {
+   "chamber_pressure": 30.0,
+   "chamber_temperature": 3000.0,
+   "chamber_diameter": 0.12,
+   "chamber_length": 0.4,
+   "burn_time": 10.0,
+   "mdot_total": 1.2
+  },
+  "analysis_types": [
+   "heat_transfer"
+  ],
+  "material_type": "steel",
+  "wall_thickness": 0.005,
+  "cooling_type": "regenerative"
+ },
+ "/api/advanced-performance-analysis": {
+  "fuel_type": "htpb",
+  "oxidizer_type": "n2o",
+  "analysis_type": "3d_surface",
+  "grid_n": 3,
+  "base_isp": 233.0,
+  "optimal_of_ratio": 6.2,
+  "chamber_pressure": 31.0,
+  "design_point_source": "solver"
+ },
+ "/api/altitude-to-pressure": {
+  "altitude": 1000
+ },
+ "/api/analysis/combustion-stability": {
+  "mode": "chug",
+  "dp_ratio_j": 0.2,
+  "tau_s": 0.001,
+  "tau_c_s": 0.003
+ },
+ "/api/analysis/wall-profile": {
+  "chamber_pressure": 40.0,
+  "chamber_temperature": 3000.0,
+  "chamber_diameter": 0.1,
+  "chamber_length": 0.5,
+  "burn_time": 10.0,
+  "mdot_total": 1.0,
+  "throat_diameter": 0.03,
+  "exit_diameter": 0.075,
+  "expansion_ratio": 6.25,
+  "nozzle_type": "conical",
+  "material": "steel_4130",
+  "wall_thickness": 0.005
+ },
+ "/api/bolted-joint": {
+  "pressure_bar": 40.0,
+  "seal_diameter_mm": 100.0,
+  "bolt_count": 8,
+  "member_material": "aluminum_6061"
+ },
+ "/api/burn-rate/resolve": {
+  "propellant": "kndx",
+  "pressure_bar": 40.0
+ },
+ "/api/cfd/nozzle": {
+  "nozzle_contour": {
+   "points": [
+    [
+     0.0,
+     0.05
+    ],
+    [
+     0.05,
+     0.03
+    ],
+    [
+     0.08,
+     0.02
+    ],
+    [
+     0.14,
+     0.03
+    ],
+    [
+     0.2,
+     0.04
+    ]
+   ]
+  },
+  "P0_Pa": 2000000.0,
+  "T0_K": 3000.0,
+  "gamma": 1.2,
+  "R_J_per_kgK": 320.0,
+  "P_ambient_Pa": 101325.0,
+  "resolution": "coarse",
+  "max_iterations": 600
+ },
+ "/api/chemical-species": {
+  "species_name": "CO2",
+  "temperature": 2000
+ },
+ "/api/combustion-stability": {
+  "mode": "chug",
+  "dp_ratio_j": 0.2,
+  "tau_s": 0.001,
+  "tau_c_s": 0.003
+ },
+ "/api/comparative-analysis": {
+  "motor_configs": {
+   "A": {
+    "thrust": 1000.0,
+    "isp": 220.0,
+    "total_impulse": 8000.0,
+    "total_mass": 12.0
+   },
+   "B": {
+    "thrust": 1500.0,
+    "isp": 210.0,
+    "total_impulse": 9000.0,
+    "total_mass": 20.0
+   }
+  }
+ },
+ "/api/correlation-report": {
+  "refresh": true
+ },
+ "/api/detailed-cad/<motor_type>": {
+  "motor_name": "S7-DUZ",
+  "chamber_diameter": 100.0,
+  "chamber_length": 500.0,
+  "throat_diameter": 25.0,
+  "exit_diameter": 60.0,
+  "nozzle_length": 150.0
+ },
+ "/api/export-cad": {
+  "motor_data": {
+   "chamber_diameter": 0.1,
+   "chamber_length": 0.5,
+   "throat_diameter": 0.03,
+   "exit_diameter": 0.09,
+   "motor_name": "CAPA-1"
+  },
+  "formats": [
+   "technical_drawings"
+  ]
+ },
+ "/api/export-chart-pdf": {
+  "chart_data": "{\"data\":[{\"x\":[1,2],\"y\":[3,4],\"type\":\"scatter\"}],\"layout\":{}}",
+  "chart_title": "Thrust",
+  "motor_name": "T"
+ },
+ "/api/export-complete-zip": {
+  "motor_data": {
+   "motor_name": "FUZZBASE",
+   "motor_type": "solid",
+   "chamber_diameter": 0.1,
+   "chamber_length": 0.3,
+   "throat_diameter": 0.02,
+   "exit_diameter": 0.05,
+   "chamber_pressure": 40.0,
+   "thrust": 1000.0,
+   "burn_time": 5.0,
+   "propellant_mass": 2.0,
+   "total_impulse": 5000.0
+  }
+ },
+ "/api/export-drawings-pdf": {
+  "motor_data": {
+   "chamber_diameter": 75.0,
+   "chamber_length": 460.0
+  }
+ },
+ "/api/export-dxf": {
+  "motor_data": {
+   "chamber_diameter": 75.0,
+   "chamber_length": 460.0,
+   "throat_diameter": 17.93,
+   "exit_diameter": 46.38
+  }
+ },
+ "/api/export-eng": {
+  "motor_data": {
+   "motor_name": "FUZZBASE",
+   "motor_type": "solid",
+   "chamber_diameter": 0.1,
+   "chamber_length": 0.3,
+   "throat_diameter": 0.02,
+   "exit_diameter": 0.05,
+   "chamber_pressure": 40.0,
+   "thrust": 1000.0,
+   "burn_time": 5.0,
+   "propellant_mass": 0.001,
+   "total_impulse": 5000.0
+  }
+ },
+ "/api/export-openrocket": {
+  "motor_data": {
+   "motor_name": "../../../etc/passwd",
+   "motor_type": "hybrid",
+   "chamber_diameter": 100.0,
+   "chamber_length": 500.0,
+   "throat_diameter": 25.0,
+   "exit_diameter": 60.0,
+   "expansion_ratio": 5.76,
+   "chamber_pressure": 20.0,
+   "thrust": 1000.0,
+   "burn_time": 10.0,
+   "total_impulse": 10000.0,
+   "specific_impulse": 220.0,
+   "propellant_mass": 5.0
+  }
+ },
+ "/api/export-pdf/<report_type>": {
+  "motor_data": {
+   "motor_type": "hybrid",
+   "motor_name": "BARE",
+   "thrust": 1000.0,
+   "burn_time": 5.0
+  },
+  "analysis_results": {},
+  "charts": []
+ },
+ "/api/export-simulation": {
+  "motor_data": {
+   "motor_name": "../../../etc/passwd",
+   "motor_type": "hybrid",
+   "chamber_diameter": 100.0,
+   "chamber_length": 500.0,
+   "throat_diameter": 25.0,
+   "exit_diameter": 60.0,
+   "expansion_ratio": 5.76,
+   "chamber_pressure": 20.0,
+   "thrust": 1000.0,
+   "burn_time": 10.0,
+   "total_impulse": 10000.0,
+   "specific_impulse": 220.0,
+   "propellant_mass": 5.0
+  }
+ },
+ "/api/export-step": {
+  "motor_data": {
+   "chamber_pressure": 30.0,
+   "chamber_temperature": 3200.0,
+   "gamma": 1.22,
+   "molecular_weight": 26.0,
+   "mdot_total": 2.0,
+   "chamber_diameter": 0.1,
+   "chamber_length": 0.4,
+   "burn_time": 8.0,
+   "throat_diameter": 0.03,
+   "exit_diameter": 0.09,
+   "motor_name": "FAZ4_GUARD",
+   "structural_analysis": {
+    "chamber_analysis": {
+     "design_mode": "verify",
+     "wall_thickness_used_mm": 5.0,
+     "recommended_thickness": 5.0,
+     "safety_factor_total": 2.4
+    }
+   }
+  }
+ },
+ "/api/export-stl": {
+  "motor_data": {
+   "motor_name": "FUZZBASE",
+   "motor_type": "solid",
+   "chamber_diameter": 1.5,
+   "chamber_length": 0.3,
+   "throat_diameter": 0.02,
+   "exit_diameter": 0.05,
+   "chamber_pressure": 40.0,
+   "thrust": 1000.0,
+   "burn_time": 5.0,
+   "propellant_mass": 2.0,
+   "total_impulse": 5000.0
+  }
+ },
+ "/api/export-stl-zip": {
+  "motor_data": {
+   "chamber_pressure": 30.0,
+   "chamber_temperature": 3200.0,
+   "gamma": 1.22,
+   "molecular_weight": 26.0,
+   "mdot_total": 2.0,
+   "chamber_diameter": 0.1,
+   "chamber_length": 0.4,
+   "burn_time": 8.0,
+   "throat_diameter": 0.03,
+   "exit_diameter": 0.09,
+   "motor_name": "FAZ4_GUARD",
+   "structural_analysis": {
+    "chamber_analysis": {
+     "design_mode": "verify",
+     "wall_thickness_used_mm": 5.0,
+     "recommended_thickness": 5.0,
+     "safety_factor_total": 2.4
+    }
+   }
+  }
+ },
+ "/api/export-xlsx": {
+  "filename": "guard.xlsx",
+  "sheets": [
+   {
+    "name": "Bad/Name:Here",
+    "headers": [
+     "=1+1",
+     "@SUM(A1)",
+     "normal"
+    ],
+    "rows": [
+     [
+      "=cmd|calc",
+      "-5000",
+      "duz metin"
+     ]
+    ]
+   }
+  ]
+ },
+ "/api/fea/planar-grain": {
+  "grain_type": "star",
+  "propellant_type": "apcp",
+  "outer_diameter_mm": 98.0,
+  "core_diameter_mm": 32.0,
+  "chamber_pressure_bar": 45.0,
+  "grain_length_mm": 420.0,
+  "star_points": 6,
+  "star_radius": 12.5
+ },
+ "/api/fea/structural": {
+  "motor_results": {
+   "burn_time": 10.0,
+   "burn_time_basis": "burn_time is the burn the motor actually sustains. It equals burn_time_requested_s unless the fuel web is exhausted first, in which case burn_time_clipped is true, the warn.hybrid.web_exhausted_early warning is raised and the requested value stays visible in burn_time_requested_s.",
+   "burn_time_clipped": false,
+   "burn_time_effective_s": 10.0,
+   "burn_time_requested_s": 10.0,
+   "c_star": 1622.5484760564143,
+   "cf": 1.4471601498463944,
+   "chamber_diameter": 0.10156005165708552,
+   "chamber_length": 0.940991527854111,
+   "chamber_length_auto": 0.940991527854111,
+   "chamber_length_source": "grain_limited",
+   "chamber_material": "steel_4130",
+   "chamber_pressure": 30.0,
+   "chamber_temperature": 3345.4998028505565,
+   "chamber_volume": 0.0004700738262560252,
+   "chamber_volume_actual": 0.0030584437818109928,
+   "chamber_volume_actual_basis": "ACTUAL free volume in m^3 enclosed by the fuel port plus the pre/post-combustion chambers at the design instant; this is what L*_achieved is computed from.",
+   "chamber_volume_actual_m3": 0.0030584437818109928,
+   "chamber_volume_basis": "DESIGN TARGET chamber volume in m^3: requested L* times throat area (L* x A_t). NOT the free volume of the built chamber and NOT the gross cylinder swept by the case.",
+   "chamber_volume_m3": 0.0004700738262560252,
+   "design_safety_factor_input": null,
+   "equivalence_ratio": 1.491727057605561,
+   "exit_area": 0.0024049123594169436,
+   "exit_diameter": 0.05533560804429635,
+   "expansion_ratio": 5.116031195719267,
+   "fuel_mass": 1.1979028464881059,
+   "fuel_mass_flow_final": 0.11808094038019257,
+   "fuel_mass_loaded": 4.757656333148434,
+   "fuel_sliver_fraction": 0.7482157678893591,
+   "fuel_type": "htpb",
+   "g_ox_design": 350.0,
+   "g_ox_final": 202.7756213169055,
+   "g_ox_initial": 350.0,
+   "g_total_final": 202.7756213169055,
+   "g_total_initial": 350.0,
+   "gamma": 1.1652165044704632,
+   "gas_constant": 324.62637356203356,
+   "grain_length": 0.8597434865284426,
+   "isp": 239.43828888997157,
+   "isp_role": "budget-derived: the solver integrates the mass/impulse budget (m_p, t_b, I_total); isp is a consistent restatement of that budget, not an independent input to the dynamics",
+   "l_star": 1.0,
+   "l_star_achieved": 6.506305203526083,
+   "l_star_note": "Requested L* = 1.00 m is below the volume the grain port geometry already provides; achieved L* is 6.51 m. Increase L* above that value to lengthen the post-combustion chamber.",
+   "length_units": "m",
+   "maximum_isp": 247.14706932752472,
+   "mdot_f": 0.12167957379454351,
+   "mdot_ox": 0.730077442767261,
+   "mdot_total": 0.8517570165618046,
+   "molecular_weight": 25.612406431331344,
+   "not_modelled_basis": "explicit declarations of physics this hybrid solver does NOT compute (roadmap A10; the pattern the liquid and solid engines already follow). Every entry was verified against the code: the named computation exists nowhere in the hybrid chain, and items already declared at their own source (rigid-throat erosion, kinetic-efficiency diagnosis, multi-port equivalent-model warning) are not duplicated here. A declared absence is honest; a fabricated number is not.",
+   "nozzle_material": "graphite",
+   "of_ratio": 6.0,
+   "of_ratio_final": 6.182855932689773,
+   "of_ratio_initial": 6.0,
+   "optimum_of_ratio": 6.408280748717489,
+   "oxidizer_mass": 7.300774427672611,
+   "oxidizer_mass_basis": "oxidizer_mass is the LOADED mass: the tank is sized for the REQUESTED burn time (m_ox = mdot_ox x burn_time_requested_s) because the tank is hardware and does not shrink when the grain runs out early. oxidizer_mass_consumed_kg is what the burn actually uses and oxidizer_mass_residual_kg is the unburnt remainder that flies as dead weight. The mass budget must use the loaded value, the performance budget the consumed one.",
+   "oxidizer_mass_consumed_kg": 7.300774427672611,
+   "oxidizer_mass_residual_kg": 0.0,
+   "port_count": 1,
+   "port_count_basis": "number of equivalent circular combustion ports actually used by the grain model of this run. It is the value the port gate accepted: zero, negative and fractional inputs are rejected by name rather than silently rounded, and an omitted input means one port.",
+   "port_diameter_final": 0.06770670110472368,
+   "port_diameter_initial": 0.051535382321286224,
+   "post_chamber_length": 0.030468015497125668,
+   "pre_chamber_length": 0.05078002582854276,
+   "propellant_mass_total": 8.498677274160716,
+   "regression_flux_mode": "ox",
+   "regression_rate": 0.0009501793401783998,
+   "regression_rate_avg": 0.0008085659391718729,
+   "sea_level_isp": 239.43828888997157,
+   "stoichiometric_of": 8.950362345633366,
+   "throat_area": 0.0004700738262560252,
+   "throat_diameter": 0.024464598597445604,
+   "thrust": 2000.0,
+   "total_impulse": 19955.773778103176,
+   "total_impulse_basis": "total_impulse is the DELIVERED impulse of this run in EVERY case: it is always the same number as total_impulse_delivered_Ns, never the requested value. total_impulse_requested_Ns carries the design intent (thrust x requested burn time) and the two differ whenever the thrust curve is not perfectly flat - most visibly when the fuel web is exhausted early and burn_time_clipped is true. Delivered basis: trapz(F(t), t) of this run's own thrust curve over [0, burn_time_effective_s].",
+   "total_impulse_delivered_Ns": 19955.773778103176,
+   "total_impulse_requested_Ns": 20000.0,
+   "vacuum_isp": 268.0277221974325
+  },
+  "n_axial0": 12,
+  "n_radial0": 4,
+  "max_rounds": 2
+ },
+ "/api/find-optimum-of": {
+  "motor_type": "hybrid",
+  "oxidizer": "n2o",
+  "fuel": "htpb",
+  "chamber_pressure": 20.0
+ },
+ "/api/flight-vehicle": {
+  "source": "results",
+  "motor_type": "hybrid",
+  "results": {
+   "motor": {
+    "thrust": 1000.0,
+    "burn_time": 10.0
+   }
+  }
+ },
+ "/api/flow-analysis": {
+  "chamber_pressure": 20.0,
+  "chamber_temperature": 3000.0,
+  "gamma": 1.2,
+  "molecular_weight": 24.0,
+  "throat_diameter": 0.02,
+  "expansion_ratio": 4.0,
+  "ambient_pressure": 101325.0,
+  "n_stations": 45,
+  "fidelity": "engineering",
+  "of_ratio": 6.0,
+  "fuel_type": "htpb",
+  "oxidizer_type": "N2O"
+ },
+ "/api/generate-3d": {
+  "motor_data": {
+   "chamber_diameter": 0.1,
+   "chamber_length": 0.3,
+   "port_diameter_initial": 0.03,
+   "throat_diameter": 0.02,
+   "exit_diameter": 0.08
+  }
+ },
+ "/api/generate-complete-package": {
+  "motor_data": {
+   "motor_name": "BARE",
+   "chamber_pressure": 30.0
+  },
+  "package_options": {
+   "include_cad": false,
+   "include_openrocket": false,
+   "include_analysis": true,
+   "include_manufacturing": false
+  }
+ },
+ "/api/get-fuel-properties": {
+  "fuel_type": "htpb",
+  "temperature": 2000
+ },
+ "/api/get-propellant-properties": {
+  "propellant_type": "oxidizer",
+  "propellant_name": "abs"
+ },
+ "/api/gimbal-mount": {
+  "thrust_N": 1000000.0,
+  "gimbal_angle_deg": 6.0,
+  "actuator_arm_m": 0.5,
+  "ring_offset_m": 0.4,
+  "thrust_offset_m": 0.01,
+  "bolt_circle_diameter_m": 0.6,
+  "bolt_count": 12,
+  "BOGUS_KEY": 42,
+  "another_unknown": "x"
+ },
+ "/api/import/motor-file": {
+  "content": "; bekci testi\nTEST 25 120 P 0.05 0.1 HRMA\n0.5 100\n1.0 0\n",
+  "filename": "guard.eng",
+  "prediction": {
+   "time": [
+    0.0,
+    0.5,
+    1.0
+   ],
+   "thrust": [
+    0.0,
+    100.0,
+    0.0
+   ]
+  }
+ },
+ "/api/import/ork": {
+  "content_base64": "UEsDBBQAAAAIADcIJV15o56uCgEAAG8CAAAKAAAAcm9ja2V0Lm9ya61Sy07DMBC85yss36nTikocNq5UJI5cgA9wnCW1kqwj20Hk71nlQWg5IXGxNZOZ1UzWcPrsWvGBITpPhdzvcimQrK8c1YV8e326e5AnnYHvkYK3Daaf4qMUNqBJPhSyxMY6qTMhYBZqINOhPoOabohDaX3Xe0JKkWEyNS6al0XDZrZfCyeOWfIRLXOL5ZnhOrlFqtNF57v9EdQCIF2cbQhjZD7PD6A2YhnJQ817CqZywyS6B7XhTdOZhMGZVqSxR+45tI0UFVJ0aeSfcMjZKvWjCVXp+QC1GjTnW0OvLUpfjWko1xZnhjcteAV/LHHV4F/jf6edF6N+bYapeY03nzjH/AYyUNvT0dkXUEsBAhQDFAAAAAgANwglXXmjnq4KAQAAbwIAAAoAAAAAAAAAAAAAAIABAAAAAHJvY2tldC5vcmtQSwUGAAAAAAEAAQA4AAAAMgEAAAAA",
+  "filename": "bekci.ork"
+ },
+ "/api/injector-design": {
+  "motor_type": "hybrid",
+  "injector_type": "showerhead",
+  "mdot_ox": 1.2,
+  "Pc_bar": 20.0,
+  "rho_ox": 780.0,
+  "fluid_ox": "generic",
+  "dp_ratio_ox": 0.2,
+  "l_over_d": 4.0
+ },
+ "/api/kinetic-efficiency": {
+  "of_ratio": 6.0,
+  "chamber_pressure": 30.0,
+  "fuel_type": "htpb",
+  "oxidizer_type": "N2O",
+  "fidelity": "fast"
+ },
+ "/api/launch-site/resolve": {
+  "latitude": 39.9,
+  "longitude": 32.85,
+  "elevation_m": 1500.0
+ },
+ "/api/oxidizer-properties": {
+  "oxidizer_type": "n2o",
+  "temperature": 245.925
+ },
+ "/api/pressurant-sizing": {
+  "mode": "blowdown",
+  "propellant_volume": 0.3,
+  "initial_ullage_volume": 0.1,
+  "initial_pressure": 30.0,
+  "gas": "nitrogen",
+  "polytropic_n": 1.2,
+  "initial_temperature": 293.15
+ },
+ "/api/pressure-vessel-analysis": {
+  "meop_bar": 60.0,
+  "inner_diameter_mm": 150.0,
+  "material": "steel_4130",
+  "wall_thickness_mm": 6.0,
+  "code_mode": "asme_viii"
+ },
+ "/api/quick-geometry": {
+  "thrust": 1000,
+  "burn_time": 10,
+  "of_ratio": 6.0,
+  "fuel_type": "htpb",
+  "oxidizer_type": "n2o",
+  "chamber_pressure": 25.0
+ },
+ "/api/regen-cooling": {
+  "chamber_pressure": 50.0,
+  "chamber_temperature": 3400.0,
+  "throat_diameter": 0.05,
+  "expansion_ratio": 8.0,
+  "gamma": 1.2,
+  "molecular_weight": 22.0,
+  "coolant": "rp1",
+  "coolant_mdot": 2.0,
+  "coolant_inlet_temp": 300.0,
+  "coolant_inlet_pressure": 60.0,
+  "n_channels": 80,
+  "channel_width": 2.0,
+  "channel_height": 3.0,
+  "wall_thickness": 1.0,
+  "wall_material": "cucrzr"
+ },
+ "/api/regression-analysis": {
+  "motor_data": {
+   "fuel_type": "htpb",
+   "burn_time": 10.0,
+   "mdot_ox": 1.0,
+   "port_diameter_initial": 0.03,
+   "grain_length": 0.5
+  }
+ },
+ "/api/six-dof-analysis": {
+  "dry_mass": 20.0,
+  "propellant_mass": 10.0,
+  "thrust": 3000.0,
+  "burn_time": 5.0,
+  "cd0": 0.0
+ },
+ "/api/slosh-analysis": {
+  "radius": 0.3,
+  "fill_height": 0.6,
+  "g_eff": 9.81,
+  "fluid_density": 810.0,
+  "baffle_width_ratio": 0.15,
+  "baffle_depth_ratio": 0.1
+ },
+ "/api/solid-monte-carlo": {
+  "motor_name": "MC",
+  "propellant_type": "apcp",
+  "grain_type": "bates",
+  "chamber_pressure": 40.0,
+  "thrust": 5000.0,
+  "burn_time": 3.0,
+  "chamber_diameter": 100.0,
+  "grain_length": 500.0,
+  "core_diameter": 30.0,
+  "expansion_ratio": 8.0,
+  "n_samples": 8
+ },
+ "/api/thermal-protection": {
+  "mode": "ablative",
+  "material": "silica_phenolic",
+  "design_margin": 1.5,
+  "burn_time_s": 10,
+  "h_gas_W_m2K": 3000,
+  "T_recovery_K": 3200,
+  "q_net_W_m2": 2000000.0
+ },
+ "/api/trajectory-analysis": {
+  "thrust": 1000,
+  "burn_time": 10,
+  "initial_mass": 50.0,
+  "final_mass": 25.0,
+  "drag_coefficient": 0.5,
+  "reference_area": 0.1,
+  "isp": null
+ },
+ "/api/transient-analysis": {
+  "thrust": 1000.0,
+  "burn_time": 8.0,
+  "of_ratio": 7.0,
+  "chamber_pressure": 30.0,
+  "expansion_ratio": 0,
+  "fuel_type": "htpb",
+  "oxidizer_type": "n2o",
+  "erosion_enabled": false
+ },
+ "/api/uncertainty-analysis": {
+  "motor_type": "hybrid",
+  "level": "fast",
+  "inputs": {
+   "thrust": 1000,
+   "burn_time": 10,
+   "of_ratio": 6.0,
+   "chamber_pressure": 20.0,
+   "fuel_type": "htpb",
+   "oxidizer_type": "n2o"
+  }
+ },
+ "/api/validate-fuel": {
+  "composition": [
+   {
+    "formula": "C4H6",
+    "percentage": 100
+   }
+  ]
+ },
+ "/api/validation/upload-csv": {
+  "csv_text": "time,thrust\n0.0,0.0\n0.5,500.0\n1.0,1000.0\n1.5,500.0\n2.0,0.0\n",
+  "predicted_curve": {
+   "time": [
+    0.0,
+    0.5,
+    1.0,
+    1.5,
+    2.0
+   ],
+   "thrust": [
+    0.0,
+    500.0,
+    1000.0,
+    500.0,
+    0.0
+   ]
+  }
+ },
+ "/api/water-hammer": {
+  "fluid": "water",
+  "line_length_m": 20.0,
+  "line_id_mm": 25.0,
+  "wall_thickness_mm": 2.0,
+  "working_pressure_bar": 20.0,
+  "flow_velocity_m_s": 5.0,
+  "valve_closure_time_ms": 50.0,
+  "pipe_material": "ss_304"
+ },
+ "/export_tank_cad": {
+  "tank_data": {
+   "oxidizer_tank": {
+    "dimensions": {
+     "diameter": 150.0,
+     "length": 800.0,
+     "wall_thickness": 3.0
+    },
+    "structural": {
+     "material": "Aluminum 2219-T87",
+     "pressure_rating": 30.0
+    },
+    "internal_structures": {
+     "slosh_baffles": [],
+     "anti_vortex_device": {
+      "diameter": 0.05
+     }
+    }
+   },
+   "fuel_tank": {
+    "dimensions": {
+     "diameter": 150.0,
+     "length": 800.0,
+     "wall_thickness": 3.0
+    },
+    "structural": {
+     "material": "Aluminum 2219-T87",
+     "pressure_rating": 30.0
+    },
+    "internal_structures": {
+     "slosh_baffles": [],
+     "anti_vortex_device": {
+      "diameter": 0.05
+     }
+    }
+   }
+  }
+ },
+ "/parametric-analysis": {
+  "thrust": 1000,
+  "burn_time": 10,
+  "chamber_pressure": 20.0,
+  "of_ratio": 2.0,
+  "fuel_type": "htpb",
+  "param_type": "of_ratio",
+  "param_start": 1.0,
+  "param_end": 3.0,
+  "param_steps": 3
+ }
+}

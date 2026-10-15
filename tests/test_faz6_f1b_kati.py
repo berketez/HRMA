@@ -186,8 +186,16 @@ def thrust_shape(payload, client):
         'degisim': (curve[-1] - curve[0]) / curve[0],
         'tepe_ortalama': max(curve) / mean,
         'ortalama': mean,
-        # Çözücünün KENDİ sınıflandırması — eğri şeklinden bağımsız ikinci tanık.
+        # ÖH D18 (P2B4-01): bu alan 'bağımsız ikinci tanık' DEĞİLDİ; aynı
+        # eğri için İKİNCİ ve çelişen bir sınıflandırıcıydı (ölçüm: 54
+        # koşunun 30'unda thrust_curve_type ile farklı sınıf). Eski kopya
+        # söküldü; alan artık thrust_curve_type'ın küçük harfli hâlidir.
+        # Bekçi de bunu böyle okur: tanıklık eğri SAYILARINDAN gelir
+        # (degisim / tepe_ortalama), etiketten değil.
         'profil': (data.get('grain_design') or {}).get('burn_profile'),
+        'sinif': ((data.get('detailed_analysis') or {})
+                  .get('thrust_profile_analysis') or {}
+                  ).get('thrust_curve_type'),
         'inhibitor': (data.get('grain_design') or {}).get('inhibitor_config'),
     }
 
@@ -229,10 +237,19 @@ def test_t49_varsayilan_bates_notr_yaniyor(html, client):
     assert shape['tepe_ortalama'] < 1.20, (
         'tepe/ortalama %.3f — nötr bir BATES eğrisi için fazla tümsekli'
         % shape['tepe_ortalama'])
-    # Çözücünün kendi etiketi de sayfanın iddiasını doğrulamalı.
-    assert shape['profil'] == 'neutral', (
-        "çözücü varsayılan koşuyu %r diye sınıflandırıyor; sayfa 'BATES "
-        "(neutral)' diyor" % shape['profil'])
+    # ÖH D18 (P2B4-01): burada 'profil == neutral' aranıyordu ve bu, ESKİ
+    # (ilk/son çeyrek ortalaması) sınıflandırıcısının hükmüydü. O kopya
+    # söküldüğü için beklenti de ölçülene çevrildi: çözücünün TEK sınıfı
+    # bu koşuda 'Progressive-Regressive'dir (tepe/ortalama 1,10, tepe eğrinin
+    # İÇİNDE) ve sayfanın nötrlük iddiası eğri SAYILARIYLA yukarıda zaten
+    # sınanıyor (|değişim| < %10). Kilitlenen asıl şey artık TEK KAYNAK
+    # olmasıdır: iki alan aynı sınıfı söylemek ZORUNDA.
+    assert shape['profil'] == (shape['sinif'] or '').lower(), (
+        'burn_profile %r ⟷ thrust_curve_type %r — iki alan yine ayrıştı'
+        % (shape['profil'], shape['sinif']))
+    assert shape['profil'] == 'progressive-regressive', (
+        'çözücü varsayılan koşuyu %r diye sınıflandırıyor (ölçülen: '
+        'progressive-regressive)' % shape['profil'])
     assert shape['inhibitor'] == 'outer_surface', (
         'inhibitör düzeni BATES değil: %r' % shape['inhibitor'])
 
@@ -251,6 +268,10 @@ def test_t49_negatif_kontrol_eski_duzen_gerileyici(html, client):
         % (100 * shape['degisim']))
     assert shape['profil'] == 'regressive', (
         'eski düzenin çözücü etiketi %r (beklenen regressive)' % shape['profil'])
+    # ÖH D18 (P2B4-01): tek kaynak burada da sınanır.
+    assert shape['profil'] == (shape['sinif'] or '').lower(), (
+        'burn_profile %r ⟷ thrust_curve_type %r' % (shape['profil'],
+                                                    shape['sinif']))
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +363,9 @@ ok(NOT.textContent.indexOf('∉') < 0, 'bant içi 2400 dışarıda sayıldı: ' 
     # tutmak, sabit değişince bekçinin eski değeri onaylamasına yol açardı.
     sabitler = re.findall(r'var CSTAR_(?:MIN|MAX)_MS = [\d.]+;', html)
     assert len(sabitler) == 2, 'c* bant sabitleri şablondan sökülemedi'
-    proc = run_node(harness(html, ['updateCharVelocityBand'], body,
+    # numTxt: ürünün GERÇEK sayı biçimleyicisi (D35 sayi-bicimi, 8f9313ca);
+    # şablondan kesilir, taklit yazılmaz. window.I18N yok → ürünün geri düşüşü.
+    proc = run_node(harness(html, ['numTxt', 'updateCharVelocityBand'], body,
                             extra='\n'.join(sabitler)))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -469,7 +492,11 @@ ok(String(out.yaxis.title).indexOf('Thrust (N)') === 0,
    'eksen başlığı kayboldu: ' + out.yaxis.title);
 ok(String(out.yaxis.title).indexOf('0 ∉ [530.41 … 532.66]') >= 0,
    'bant ilan edilmiyor: ' + out.yaxis.title);
-ok(String(out.yaxis.title).indexOf('Δ 0.42 %') >= 0,
+// D35 sayi-bicimi OH-GT-28 (rapor §5, 8f9313ca): yüzde I18N.percent
+// kanonundan; EN'de işaret sayıya BİTİŞİK ve sonra ('0.42%'), TR'de önce
+// ('%0,42'). Düzenekte sözlük yok → ürünün geri düşüşü EN biçimi basar.
+// Sayının kendisi (2 basamak, 0.4213 → '0.42') DEĞİŞMEDİ.
+ok(String(out.yaxis.title).indexOf('Δ 0.42%') >= 0,
    'göreli genişlik ilan edilmiyor: ' + out.yaxis.title);
 
 // Aralık hâlâ veri bandına oturuyor (0'a çekilmedi).
@@ -491,11 +518,15 @@ ok(String(out3.yaxis.title) === 'Thrust (N)',
 // Büyük bantta yüzde tek ondalıkla yazılır (BATES varsayılanı: 6114 -> 8244).
 const out4 = hrmaPlotLayout({ yaxis: { title: 'Thrust (N)' } },
                             [6114.499, 8243.776, 6236.400]);
-ok(String(out4.yaxis.title).indexOf('Δ 25.8 %') >= 0,
+ok(String(out4.yaxis.title).indexOf('Δ 25.8%') >= 0,
    'geniş bant yüzdesi yanlış: ' + out4.yaxis.title);
 """
     proc = run_node(
-        harness(html, ['hrmaAxisRange', 'hrmaSigStr', 'hrmaMarkSuppressedZero',
+        # numTxt/pctTxt (D35 sayi-bicimi) ve hrmaPlotSeparators (D36
+        # onemli2-kati, Plotly TR ondalığı): ürünün çağırdığı GERÇEK
+        # yardımcılar; şablondan kesilir, taklit yazılmaz.
+        harness(html, ['numTxt', 'pctTxt', 'hrmaAxisRange', 'hrmaSigStr',
+                       'hrmaMarkSuppressedZero', 'hrmaPlotSeparators',
                        'hrmaPlotLayout'], body,
                 extra='var HRMA_PLOT_Y_PAD_FRACTION = 0.08;'))
     assert proc.returncode == 0, proc.stdout + proc.stderr

@@ -64,19 +64,26 @@ def _on_kapak_bekcisi(blok):
 
     Sayılar bu depoda ÖLÇÜLDÜ (2026-08-15, APCP 75/32/360 @ 40 bar):
     t = 0.694 mm, psi = 0.948, B' = 0.132, sdot = 0.156 mm/s.
+
+    YENİDEN ÖLÇÜLDÜ (ÖH KİTAP p1b, B11 seçenek F; karar §28-36 Ş-3): eski
+    sayılar APCP kaydının geri çözülmüş dörtlüsüyle ve Bartz'a DENGE γ
+    girerek (h_g, T_aw ≈ 3615 K) türemişti. Kayıt CEA denge dörtlüsünü,
+    Bartz zinciri donmuş oda γ'sını (1,1862) kullanıyor: hazne T_aw
+    3399,6 K, h_g 1698 W/m²K. Yeni taban: t = 0.459 mm, psi = 0.965,
+    B' = 0.0888, sdot = 0.103 mm/s. Paylar DEĞİŞMEDİ.
     """
     assert blok['thickness_status'] == 'sized'
     assert blok['recession_regime'] == 'steady_ablation'
     assert blok['thickness'] is not None
-    assert blok['thickness'] == pytest.approx(0.6942, rel=0.05)
+    assert blok['thickness'] == pytest.approx(0.4586, rel=0.05)
     # Blokaj ÇÖZÜLMÜŞ olmalı: 0 < psi < 1 ve B' > 0. Sabit 0.5 bu noktada
     # q_net'in işaretini ters çevirirdi (aşağıdaki mutasyon testi).
     assert 0.0 < blok['blowing_blockage'] < 1.0
-    assert blok['blowing_blockage'] == pytest.approx(0.9482, abs=0.02)
+    assert blok['blowing_blockage'] == pytest.approx(0.9649, abs=0.02)
     assert blok['b_prime'] > 0.0
-    assert blok['b_prime'] == pytest.approx(0.1318, rel=0.10)
+    assert blok['b_prime'] == pytest.approx(0.0888, rel=0.10)
     assert 'SOLVED' in blok['blockage_basis']
-    assert blok['recession_rate_mm_s'] == pytest.approx(0.1558, rel=0.05)
+    assert blok['recession_rate_mm_s'] == pytest.approx(0.1029, rel=0.05)
     assert blok['recession_rate_mm_s'] <= RECESSION_VALID_MAX_MM_S
     # Malzeme beyan edilmiş tasarım seçimi: EPDM ailesi (SP-8093 kubbe).
     assert 'EPDM' in blok['material']
@@ -91,6 +98,8 @@ def test_apcp_arka_kapak_zarf_disi_ve_parcacik_beyani(apcp_yalitim):
     """APCP lüle girişi: zarf-dışı hız → NOT_MODELLED + parçacık beyanı.
 
     Ölçülen (2026-08-15): sdot = 1.561 mm/s > 0.35 mm/s tavanı — Seviye-1
+    (ÖH KİTAP p1b, §28-36 Ş-3: CEA dörtlüsü + donmuş Bartz γ ile yeniden
+    ölçüldü: 1.413 mm/s; hâlâ tavanın 4 katı, hüküm aynı)
     yarı-kararlı Q* modeli bu istasyonu boyutlayamaz; sayı uydurulmaz.
     APCP'nin yoğuşmuş faz kesri (X_p ≈ 0.34, iki-fazlı kayıp tablosundan)
     sıfırdan büyük olduğu için parçacık erozyonunun MODELLENMEDİĞİ beyanı
@@ -101,7 +110,7 @@ def test_apcp_arka_kapak_zarf_disi_ve_parcacik_beyani(apcp_yalitim):
     assert blok['thickness'] is None
     # Gerekçenin kanıtı yayımlanmaya devam eder: hız tavan üstünde.
     assert blok['recession_rate_mm_s'] > RECESSION_VALID_MAX_MM_S
-    assert blok['recession_rate_mm_s'] == pytest.approx(1.561, rel=0.05)
+    assert blok['recession_rate_mm_s'] == pytest.approx(1.413, rel=0.05)
     note = blok['validity_note']
     assert note and 'MODEL OUT OF ENVELOPE' in note
     # Parçacık beyanı X_p TABLOSUNDAN gelir (yakıt adından değil).
@@ -126,6 +135,10 @@ def test_mutasyon_sabit_blokaj_bekciyi_kirar(apcp_motor, apcp_yalitim,
         psi=1 çözümü : q_net > 0  → sized, t ≈ 0.694 mm
         psi=0.5      : 0.5·h·ΔT ≈ 1.07 MW/m² < eps·σ·T_s⁴ ≈ 1.35 MW/m²
                        → q_net < 0 → 'no_net_heating' → kalınlık YOK
+
+    ÖH KİTAP p1b (B11, §28-36 Ş-3) yeniden ölçüm (CEA dörtlüsü + donmuş
+    Bartz γ): h_g≈1698 W/m2K, T_aw≈3400 K; psi çözümü t ≈ 0.459 mm;
+    psi=0.5 → 0.5·h·ΔT ≈ 0.93 MW/m² < 1.35 MW/m² → işaret yine döner.
 
     Yani kusur geri gelirse ön kapak bekçisi ('sized', 0<psi<1, t≈0.694)
     AssertionError ile düşer — bu test tam da onu talep eder.

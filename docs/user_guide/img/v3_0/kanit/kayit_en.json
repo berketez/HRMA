@@ -1,0 +1,199 @@
+{
+ "dil": "en",
+ "sunucu": "http://127.0.0.1:51025",
+ "tarayici": "/Users/apple/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+ "device_scale_factor": 1.5,
+ "goruntuler": [
+  {
+   "dosya": "en-v30-01-kati-withheld.png",
+   "url": "http://127.0.0.1:51025/solid?project=Example%20Solid%20KNDX%20BATES%2075mm",
+   "clip_css_px": {
+    "x": 85,
+    "y": 16,
+    "width": 1272,
+    "height": 560
+   },
+   "sha256": "e1f651557f7547b22705a2d565a616ad24a06971e69f58c3ff22c1959cc77945",
+   "bayt": 223517,
+   "olcum": {
+    "girdiler": {
+     "case_material": "aluminum",
+     "insulation_thickness": 0,
+     "grain_type": "end_burner",
+     "grain_length": 1500,
+     "flame_temp": 3200,
+     "case_thickness": 4
+    },
+    "sonuc": {
+     "model_validity_limit_exceeded": true,
+     "model_validity_reasons": [
+      "wall_temperature_above_derating_curve_data",
+      "wall_temperature_at_or_above_melting_point"
+     ],
+     "burn_time_s": 159.15965968739843
+    },
+    "gorunen": "Structural Analysis\nCase Analysis\nHoop Stress:\t40.5 MPa\nLongitudinal Stress:\t20.3 MPa\nSafety Factor:\tVERDICT WITHHELD\nMaterial Utilization:\t16.2%\nRecommended Wall Thickness:\t1.6 mm\nOUTSIDE MODEL VALIDITY\nThe case temperature computed by the heat-transfer model is at or above the melting point of the case material, or above its strength-derating data, while the case stresses, safety factors and burst pressure use its room-temperature strength. This is outside the validity limit of the current structural model: those numbers are diagnostic only, not valid design outputs, and no acceptance (no PASS) and no numeric design verdict is issued. A FAIL or MARGINAL status is still a warning.\nmodel_validity_reasons: wall_temperature_above_derating_curve_data, wall_temperature_at_or_above_melting_point\nGrain Structural Analysis\nMaximum Grain Stress:\t55.4 MPa\nStructural Efficiency:\t0.0%\nCrack Propaga"
+   }
+  },
+  {
+   "dosya": "en-v30-02-dock-yapisal.png",
+   "url": "http://127.0.0.1:51025/solid?project=Example%20Solid%20KNDX%20BATES%2075mm",
+   "clip_css_px": {
+    "x": 68,
+    "y": 9,
+    "width": 1306,
+    "height": 640
+   },
+   "sha256": "f02657193e10c3eda4448ab90c428d512a762479757c758b445a7b5aea92c422",
+   "bayt": 294355,
+   "olcum": {
+    "gorunen": "BUCKLING: NOT_EVALUATED\nSTRUCTURE: UNSAFE\nRISK: HIGH\nFATIGUE: withheld\nMATERIAL: ALUMINUM_6061\nOUTSIDE MODEL VALIDITY\nVERDICT WITHHELD\n\nThe motor's own wall on this page is outside the validity limit of the current structural model. This panel run does not carry the motor's wall temperature, so it is not a verification of that wall: no acceptance is shown and the numbers below are diagnostic only.\n\nmodel_validity_limit_exceeded\ttrue · motor.structural_analysis.case_analysis\nmodel_validity_reasons\twall_temperature_above_derating_curve_data, wall_temperature_at_or_above_melting_point\nBasis of this verdict\nVERDICT WITHHELD\nWALL: AS SUPPLIED\nwall_thickness_suggestion\tapplied · wall_thickness from motor.structural_analysis.case_analysis.design_mode: verify (wall_thickness_source: user_supplied)\nis_verification_scope\tchamber wall thickness\nstations_not_verified\tend_cap, nozzle\nverification_scope_complete\tfalse\n\nVerification scope is incomplete: some stations in the basket were not verified.\n\nsubmitted_wall_thickness_mm\t4.000\nevaluated_wall_thickness_mm\t—\ndesign_basis.message\twithheld · model_validity_limit_exceeded\nWhy no acceptance was issued\nstations_not_verified\nburn_time\tnot consumed by this analysis · burn_time is validated but NOT used by the structural model: stresses and safety factors are steady-state at the design pressure, and the fatigue check counts PRESSURISATION CYCLES (design_cycles), which a burn duration does not set. No burn time was assumed on your behalf either"
+   }
+  },
+  {
+   "dosya": "en-v30-03-dock-termal.png",
+   "url": "http://127.0.0.1:51025/solid?project=Example%20Solid%20KNDX%20BATES%2075mm",
+   "clip_css_px": {
+    "x": 68,
+    "y": 9,
+    "width": 1306,
+    "height": 700
+   },
+   "sha256": "912b96c6765fdcc30b5bd003e55c7ef45e25d5edba6cb9041a13c8a78df254f3",
+   "bayt": 209167,
+   "olcum": {
+    "gorunen": "THERMAL RISK: HIGH\nCOOLING: NATURAL\nMODEL: BARTZ\nWALL T UNPHYSICAL — cooling insufficient\nH_G (GAS SIDE)\n18882 W/m²·K\nQ_THROAT (REFERENCE COOLED WALL)\n51.20 MW/m²\nQ_CHAMBER (REFERENCE COOLED WALL)\n1.33 MW/m²\nT_WALL INNER\n3177 K\nT_WALL OUTER\n3175 K\nT_ADIABATIC WALL\n3182 K\nCombustion gas\nAdiabatic wall\nWall (inner)\nWall (outer)\n0\n1000\n2000\n3000\nWall Temperatures vs Material Limits\nTemperature (K)\nAllowable limit — 477 K\nMelting point — 855 K\nHeat Load & Cooling Assessment\nTotal heat rate\t616.4 kW · wetted_integral_contour_basis.generic_defaults_used: exit_diameter, nozzle_type\nTotal heat energy (burn)\t98.1 MJ · wetted_integral_contour_basis.generic_defaults_used: exit_diameter, nozzle_type\nCooling efficiency\t0.30 (natural)\nRequired cooling area\t493.16 m²\nheat_sink_mass\t595.6 kg● COMPUTED · heat_sink_delta_T_K 183.85 · heat_sink_specific_heat_J_kgK 896.0 · heat_sink_specific_heat_source material_record · heat_sink_temperature_limit_K 477.0\nheat_sink_delta_T_basis: material record allowable_temperature (477 K) minus initial temperature (293.1 K)\nHot-gas surface area\t0.442 m² · NOT GIVEN — neither exit_diameter nor expansion_ratio was supplied; the sampler falls back to its own generic exit diameter, so the divergent extent of this axis is NOT this motor's\nThermal Safety Factors\nMelting safety factor\t0.27\nTemperature safety factor\t0.15\nThermal stress safety factor\t6.46\nThermal stress\t2 MPa\nMaterial limits\t477 K allowable · 855 K melting\nGoverning temperature limit\tmaterial allowable temperature (allowable_temperature) and structural service limit (max_service_temp) are both 477 K; that limit gives the verdict\nWall thickness\t4.0 mm (aluminum_6061)\nWarnings\nWall temperature exceeds allowable limit\nPeak temperature 3177 K exceeds the material melting point 855 K — the wall cann"
+   }
+  },
+  {
+   "dosya": "en-v30-04-hibrit-uyarilar.png",
+   "url": "http://127.0.0.1:51025/hybrid?project=Example%20Hybrid%20N2O-HTPB%203kN",
+   "clip_css_px": {
+    "x": 0,
+    "y": 16,
+    "width": 1440,
+    "height": 860
+   },
+   "sha256": "10309dc38581f9f24e8b688b7c67be128c2f76cb66c440d6120b275b5133dbaf",
+   "bayt": 578698,
+   "olcum": {
+    "gorunen": "WARNINGS\nVALIDATION STATUS: WARNINGS PRESENT\nWARNING\nInjector Reynolds number 1219721 exceeds 200000, the upper bound of the correlation range used here.\nWARNING\nInjector pressure drop is 0.68 of chamber pressure, over the 0.35 ceiling: feed pressure and pump work rise with no combustion-stability benefit.\nWARNING\nThe built-in HTPB/ABS regression coefficients are biased against this project’s validation database: median bias -39.5%, median absolute error 46.6% over 43 of its own records. An independent cross-check over 46 published points gives -47.6% bias and 49.4% median absolute error; the per-campaign band spans -50.6 · -41.8% across these campaigns: Rezaei 2018 (n2o, points: 29): -50.6% bias, 50.9% median absolute error · Carmicino 2013 (n2o, points: 16): -41.8% bias, 43.5% median absolute error · Heydari 2017 (n2o, points: 1): -50.3% bias, median absolute error not published. The two determinations were NOT reconciled (reconciled: no); the measured reasons are: the two record pools are not the same set (43 of the product’s own points vs 46 independent points) · the product path runs a G_ox-fitted coefficient under a G_total flux closure, which lifts the predicted regression by 10-18% (propellant_database.py). Those campaigns cover the oxidizer scope n2o; this run uses n2o, scope match: yes. The coefficients were deliberately NOT retuned — recalibrating them without new static-fire data would replace a measured disagreement with an invented one. Enter your own a and n if you have fired this propellant. Bias body: docs/arastirma/fizik/A3-hibrit-regresyon.md.\nCRITICAL\nThe throat wall reaches 3304 K, above the 3300 K allowable temperature of Graphite (isostatic, nozzle insert grade) with Natural (heat sink) cooling. This throat will fail: pick a material with a higher allowable temperature or add cooling.\nCRITICAL\nEquilibrium wall temperature 3313 K exceeds the Stainless 304 melting point 1673 K with the specified cooling; required cooling load q=25.9 MW/m² at the throat.\nCRITICAL\nEquilibrium wall temperature pinned near the adiabatic-wall temperature: modelled cooling is grossly insufficient.\nCRITICAL\nWall temperature exceeds allowable limit\nCRITICAL\nPeak temperature 3313 K exceeds the material melting point 1673 K — the wall cannot survive this condition.\nWARNING\nInput field 'expansion_ratio' (0) is solved by the model, not read from the form; the analysis uses its own value 5.17875.\nWARNING\nInput field 'chamber_diameter_input' (0) is solved by the model, not read from the form; the analysis uses its own value 121.26.\nWARNING\nL/D ratio (1.2) outside optimal range (3-5)\nWARNING\nCavitation risk: Nurick cavitation number K_c = 0.00 < 1.5 (injector inlet P_1 = 50.5 bar, dP = 20.5 bar, P_v = 50.5 bar at 293 K)\nWARNING\nFlash boiling risk detected\nWARNING\nTarget injection velocity (30.0 m/s) is not set by hole count: with Cd=0.78 the achieved velocity is 42.7 m/s. Reaching the target needs dP = 5.81 bar (currently 20.54 bar)."
+   }
+  },
+  {
+   "dosya": "en-v30-06-cad-ret.png",
+   "url": "http://127.0.0.1:51025/hybrid?project=Example%20Hybrid%20N2O-HTPB%203kN",
+   "clip_css_px": {
+    "x": 0,
+    "y": 20,
+    "width": 1440,
+    "height": 282
+   },
+   "sha256": "1cb6fd8b4f2f7761681c25716f569e2a4ba4a45267969b12cd7ec260e041c034",
+   "bayt": 356864,
+   "olcum": {
+    "uc": "/api/export-complete-zip",
+    "http": 422,
+    "ileti": "Complete design package export failed: [manufacturing_safety_gate_closed] Manufacturing export refused by the safety gate (2 part(s)): no manufacturing file is written for a pressure-bearing part the analysis does not clear. Chamber: the structural result is outside the model validity limit (structural_analysis.thermal_analysis.strength_derating.exceeds_melting_point), so its safety factor 0.2317 is not a valid design output. Chamber: safety factor 0.2317 is below 1.0 at the drawn 25.2636 mm wall (structural_analysis.chamber_analysis.safety_factor_total). Nozzle: the safety factor 4 belongs to a 2.5062 mm wall (structural_analysis.nozzle_analysis.throat_thickness_used_mm) but 7.1845 mm is drawn.",
+    "inen_dosyalar": []
+   }
+  },
+  {
+   "dosya": "en-v30-07-harita.png",
+   "url": "http://127.0.0.1:51025/launch-site",
+   "clip_css_px": {
+    "x": 0,
+    "y": 0,
+    "width": 1440,
+    "height": 900
+   },
+   "sha256": "439f972acea528b90775e5df45ec287c1b5b2848f1e23f54759f0a5b1f3ad355",
+   "bayt": 1600912,
+   "olcum": {
+    "ag_anahtari_acik": false,
+    "olcek": {
+     "metersPerPixel": 519.22159154283,
+     "camAltitudeM": 457962.1601613201,
+     "tilesDrawn": true,
+     "textureCoarse": false,
+     "textureLayer": "bm_local",
+     "textureMpp": 1956.796875,
+     "textureMagnified": true
+    },
+    "karo_istekleri_ilk10": [
+     [
+      "/api/tile/bm_local/5/21/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/23/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/25/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/22/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/24/4",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/21/5",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/23/5",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/22/5",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/21/6",
+      200
+     ],
+     [
+      "/api/tile/bm_local/5/24/5",
+      200
+     ]
+    ],
+    "karo_istek_sayisi": 100,
+    "karo_durumlari": [
+     200,
+     403
+    ]
+   }
+  },
+  {
+   "dosya": "en-v30-05-panel-kunye.png",
+   "url": "http://127.0.0.1:51025/solid?project=Example%20Solid%20KNDX%20BATES%2075mm",
+   "clip_css_px": {
+    "x": 68,
+    "y": 530,
+    "width": 1306,
+    "height": 370
+   },
+   "sha256": "5a0b8c9edbb025d31c0ed39dd1776dc1394e33b71f7d813ea3c9cd6b380982fa",
+   "bayt": 185538,
+   "olcum": {
+    "motor": "Example Solid KNDX BATES 75mm (değiştirilmeden)",
+    "uq_durum": "",
+    "gorunen": "What this P5–P95 band is conditional on conditionality\nApplies to\tapplies_to\toutputs.*.p5/p25/p50/p75/p95 and std/cv_percent\nConditional on these sampled inputs\tconditional_on_inputs\tburn_rate_a, burn_rate_n_delta, density, c_star\nNumber of sampled inputs\tinput_count\t4\nHeld at nominal\tfrozen_at_nominal\tevery model input not listed in conditional_on_inputs\nSAMPLER\tsampler\tlhs\nSamples behind the band\tn_effective\t200\nInput correlation assumed\tinput_correlation_assumed\tindependent (zero rank correlation)\nModel-form uncertainty included\tmodel_form_uncertainty_included\tno\nHow to read the band\tinterpretation\tThese percentiles describe the spread produced by the listed input distributions alone. They are NOT a confidence interval on the true motor performance: model-form error (empirical correlation uncertainty, omitted physics) is not sampled and is not included, inputs are sampled as independent, and every input not listed is held at its nominal value. Widening or narrowing this band by changing input distributions does not change how well the model matches hardware."
+   }
+  }
+ ],
+ "tarayici_surumu": "145.0.7632.6",
+ "dis_ag_istekleri": [],
+ "sayfa_hatalari": [],
+ "beklenen_konsol_hatalari": [
+  "console.error: Failed to load resource: the server responded with a status of 403 (FORBIDDEN)",
+  "console.error: Failed to load resource: the server responded with a status of 422 (UNPROCESSABLE ENTITY)"
+ ],
+ "dis_ag_istekleri_05": [],
+ "sayfa_hatalari_05": []
+}

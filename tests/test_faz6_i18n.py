@@ -247,8 +247,9 @@ BEKLENEN_TR = {
     'Circuit': 'Devre',
     'Inj. inlet': 'Enj. girişi',
     # T43 — 'Final port' sonek kuralı GENEL kuraldan önce gelmeli
-    'Final port Ø99.8 mm (web fully consumed)': 'Son port Ø99.8 mm (web tamamen tükendi)',
-    'Final port Ø42.0 mm': 'Son port Ø42.0 mm',
+    # ÖH D37 A1b dil-cozucu-nesri (DV36-16): ölçü TR ondalık kanonundan geçer
+    'Final port Ø99.8 mm (web fully consumed)': 'Son port Ø99,8 mm (web tamamen tükendi)',
+    'Final port Ø42.0 mm': 'Son port Ø42,0 mm',
 }
 
 
