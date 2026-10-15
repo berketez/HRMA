@@ -10,7 +10,7 @@ sayfa eklenip biri unutulursa ``tests/test_browser_harness.py`` yakalar.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, Tuple
 
 from tools.browser_harness import esikler
@@ -172,6 +172,14 @@ class MerkezKiracisi:
     #:
     #: Boş demet = yük okunmaz (kiracının yükü henüz ölçülmemiştir).
     yuk_alanlari: Tuple[Tuple[str, str, str], ...] = ()
+    #: v3.0.0 (15 Eki) — ÜRÜNÜN BEYANLI YOKLUKLARI: ``(önek, gri_blok)``.
+    #: Önekli çizim yoksa, görüntüleyicide ``[data-stab-grey="<gri_blok>"]``
+    #: bloğu GÖRÜNÜR ve gerekçe metni DOLU ise yokluk kusur değil ürün
+    #: beyanıdır (stability_panel.js renderDamping: çözücü modellenmiş
+    #: ``acoustic_response_threshold`` yayımlamıyorsa sönüm çubukları
+    #: çizilmez, hiçbir terim uydurulmaz). Gri blok da yoksa kırmızı.
+    #: Boş demet = her önek ZORUNLU (varsayılan).
+    beyanli_yokluklar: Tuple[Tuple[str, str], ...] = ()
     notlar: str = ''
 
 
@@ -380,6 +388,19 @@ class Sayfa:
     #: 3B tuvali olmayan bir sayfayı "tuval boş" diye kırmızıya boyamak,
     #: kusuru olmayan sayfayı suçlamaktır.
     hesap_var: bool = True
+    #: Sayfa ürünle gelen ÖRNEK PROJEYLE mi açılır (``?project=<ad>``)?
+    #: v3.0.0 (15 Eki): sıvı sayfasının gereksinim alanları varsayılansız
+    #: (itki, oda basıncı ... — Berke kuralı 25 Eyl §24); boş formda hesap
+    #: adlı 422 ile REDDEDİLİR ve tur 300 s bekleyip düşüyordu. Örnekle
+    #: açılış piksel turunun akışıyla aynıdır (piksel.PROJE_YUKLENDI_KOSULU).
+    ornek_proje: str = ''
+    #: v3.0.0 (15 Eki) — SÜRESİZ SONUÇTA EGZOZ ÜRÜN KURALIYLA ÇİZİLMEZ.
+    #: ÖH D36 (motor_viz3d.js extractDims ``burnTime``): sonuç yanma süresi
+    #: yayımlamıyorsa zaman ekseni UYDURULMAZ, sahne oynatılmaz, egzoz
+    #: çizilmez. Sıvı çözücüsü süre yayımlamaz; bu bayrak YALNIZ o sayfada
+    #: açıktır. Hibrit ve katı daima süre taşır — orada süre kaybolursa
+    #: plume denetimi yine KIRMIZIDIR. Görsel eksik v3.1 işidir.
+    suresiz_egzoz_beyanli: bool = False
     #: Sayfada HESAP AKIŞINDAN BAĞIMSIZ bir çizim tuvali var mı, varsa
     #: hangisi? ÖH D27 / OH-D25-02(a): ``hesap_var=False`` dalı tuval
     #: ölçümünü TOPTAN atlıyordu ve gerekçesi "sayfada 3B sahne yok" idi.
@@ -464,6 +485,8 @@ SAYFALAR: Dict[str, Sayfa] = {
     'liquid': Sayfa(
         ad='liquid',
         yol='/liquid',
+        ornek_proje=esikler.PIKSEL_ORNEK_PROJELERI['liquid'],
+        suresiz_egzoz_beyanli=True,
         hesapla_secici='button[onclick="calculateLiquid()"]',
         sonuc_kosulu=_SONUC_VAR,
         # Sıvıda güverte sonuç akışında kendiliğinden kurulur
@@ -514,7 +537,15 @@ SAYFALAR: Dict[str, Sayfa] = {
         # acoustic_modes, combustion_stability. Sıvıda enjektör ve besleme
         # hattı VARDIR, o yüzden ``combustion_stability`` katının aksine
         # BLOCKED değil READY'dir.
-        merkez_kiracilari=(CFD_KIRACISI, ACOUSTIC_MODES_KIRACISI,
+        #
+        # v3.0.0 (15 Eki) — sönüm çubukları sıvıda ürün beyanıyla YOK:
+        # sıvı bağlaması modellenmiş acoustic_response_threshold üretmez,
+        # panel gri blokta gerekçesini basar (stability_panel.js
+        # renderDamping). Mod haritası (stab_map_) yine ZORUNLUDUR.
+        merkez_kiracilari=(CFD_KIRACISI,
+                           replace(ACOUSTIC_MODES_KIRACISI,
+                                   beyanli_yokluklar=(('stab_bars_',
+                                                       'damping-bars'),)),
                            COMBUSTION_STABILITY_KIRACISI),
     ),
 }

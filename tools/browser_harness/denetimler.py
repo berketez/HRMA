@@ -200,7 +200,8 @@ def tuval_denetimi(piksel: Optional[Dict[str, Any]],
 
 
 def plume_denetimi(viz: Optional[Dict[str, Any]],
-                   piksel: Optional[Dict[str, Any]] = None) -> Denetim:
+                   piksel: Optional[Dict[str, Any]] = None,
+                   suresiz_beyanli: bool = False) -> Denetim:
     """Egzoz gerçekten çiziliyor mu?
 
     Doğrudan ölçüt ``_plume.geometry.drawRange.count``: ``_buildPlume`` onu
@@ -232,6 +233,21 @@ def plume_denetimi(viz: Optional[Dict[str, Any]],
                 ozet='sahne kurulu ama çizim aralığı okunamadı (egzoz nesnesi yok)',
                 dayanak=dayanak, olcum=olcum, esik=esik)
         gecti = aralik >= esikler.PLUME_MIN_CIZIM_ARALIGI
+        # v3.0.0 (15 Eki) — ÜRÜN KURALI, YALNIZ BEYANLI SAYFADA: sonuç
+        # yanma süresi yayımlamıyorsa (sıvı) zaman ekseni uydurulmaz,
+        # sahne oynatılmaz, egzoz çizilmez (ÖH D36, motor_viz3d.js
+        # extractDims). Üç koşulun ÜÇÜ de ölçülür: sayfa beyanlı, süre
+        # ölçüldü ve YOK, sahne oynamıyor. Biri tutmazsa eski hüküm.
+        if (not gecti and suresiz_beyanli
+                and viz.get('yanma_suresi') is None
+                and not viz.get('oynatiliyor')):
+            return Denetim(
+                ad='plume_cizildi', gecti=True,
+                ozet=('UYGULANAMAZ (beyanlı ürün kuralı): sonuç yanma süresi '
+                      'yayımlamıyor — zaman ekseni uydurulmaz, sahne '
+                      'oynatılmaz, egzoz çizilmez (ÖH D36); süreli sıvı '
+                      'egzozu v3.1 işi'),
+                dayanak=dayanak, olcum=olcum, esik=esik)
         if gecti:
             ozet = ('egzoz çiziliyor: %d parçacık (tavan %s)'
                     % (aralik, viz.get('partikul_tavani', '?')))
@@ -845,8 +861,17 @@ def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, 
         if 'min_safety_factor' in s:
             sf = s['min_safety_factor']
             if _sayi_mi(sf):
-                renk = ('err' if sf < esikler.FEA_SF_ERR_ESIGI
-                        else 'warn' if sf < esikler.FEA_SF_WARN_ESIGI else 'ok')
+                # Ürün kuralı (fea_panel.js sfRozetTuru(hukumSf), P11B3-01):
+                # renk FEA sayısıyla motorun KENDİ emniyet katsayısının
+                # KÜÇÜĞÜNDEN verilir — yayımlanan en kötü sayı yönetir.
+                # Rozetteki SAYI yine FEA'nınkidir (aşağıda sayi=(sf, 2)).
+                mk = yuk.get('motor_sf_karsilastirmasi')
+                motor_sf = (mk.get('motor_safety_factor')
+                            if isinstance(mk, dict) else None)
+                hukum_sf = min(sf, motor_sf) if _sayi_mi(motor_sf) else sf
+                renk = ('err' if hukum_sf < esikler.FEA_SF_ERR_ESIGI
+                        else 'warn' if hukum_sf < esikler.FEA_SF_WARN_ESIGI
+                        else 'ok')
                 ekle('emniyet katsayısı hükmü',
                      ('MIN SAFETY FACTOR', 'EN KÜÇÜK EMNİYET KATSAYISI'),
                      renk, sayi=(sf, 2))
@@ -854,9 +879,14 @@ def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, 
                 ekle('emniyet katsayısı yayımlanmadı beyanı',
                      ('SAFETY FACTOR NOT PUBLISHED',
                       'EMNİYET KATSAYISI YAYIMLANMADI'), 'dim')
-        if _sayi_mi(s.get('von_mises_gauss_max_pa')):
+        # Ürün kuralı (fea_panel.js:843-846): rozet sunucu nodal/SPR alanını
+        # yayımladıysa ONU, yoksa Gauss tepesini basar (kaynak headline_source).
+        vm_pa = (s.get('von_mises_nodal_max_pa')
+                 if _sayi_mi(s.get('von_mises_nodal_max_pa'))
+                 else s.get('von_mises_gauss_max_pa'))
+        if _sayi_mi(vm_pa):
             ekle('tepe von Mises', ('PEAK von MISES', 'TEPE von MISES'),
-                 'info', sayi=(s['von_mises_gauss_max_pa'] / 1e6, 1))
+                 'info', sayi=(vm_pa / 1e6, 1))
         if conv is not None and 'converged' in conv:
             if conv['converged']:
                 ekle('yakınsama hükmü (yakınsadı)', ('CONVERGED', 'YAKINSADI'),
@@ -1285,7 +1315,9 @@ def merkez_kosum_denetimi(kiraci_adi: str,
 
 
 def merkez_cizim_denetimi(kiraci_adi: str, olcum: Optional[Dict[str, Any]],
-                          onekler: Sequence[str]) -> Denetim:
+                          onekler: Sequence[str],
+                          beyanli_yokluklar: Sequence[Sequence[str]] = ()
+                          ) -> Denetim:
     """Kiracının çizimleri görüntüleyici kabında EKRANDA mı?
 
     Ölçüt FEA panelleriyle aynı üçlüdür (kap görünür + Plotly kabı + içinde
@@ -1315,9 +1347,22 @@ def merkez_cizim_denetimi(kiraci_adi: str, olcum: Optional[Dict[str, Any]],
     cizimler = olcum.get('cizimler') or []
     eksik: List[str] = []
     bulunan: List[str] = []
+    beyanli: List[str] = []
+    gri = {str(g.get('ad')): g for g in (olcum.get('gri_bloklar') or [])
+           if isinstance(g, dict)}
+    yokluk_blogu = {str(o): str(b) for o, b in beyanli_yokluklar}
     for onek in onekler:
         adaylar = [c for c in cizimler if str(c.get('kimlik', '')).startswith(onek)]
         if not adaylar:
+            # v3.0.0 — ürünün BEYANLI yokluğu: yalnız kiracı bu öneki
+            # beyanlı saydıysa VE gri blok ekranda gerekçesiyle duruyorsa.
+            blok = gri.get(yokluk_blogu.get(onek, ''))
+            if (onek in yokluk_blogu and isinstance(blok, dict)
+                    and blok.get('gorunur') and str(blok.get('metin') or '').strip()):
+                beyanli.append('%s* (gri blok %r: %s)'
+                               % (onek, yokluk_blogu[onek],
+                                  _kirp(blok.get('metin'), 160)))
+                continue
             eksik.append('%s* (kap görüntüleyicide yok)' % onek)
             continue
         c = adaylar[0]
@@ -1339,8 +1384,10 @@ def merkez_cizim_denetimi(kiraci_adi: str, olcum: Optional[Dict[str, Any]],
                              % (len(eksik), len(onekler), '; '.join(eksik))),
                        dayanak=dayanak, olcum=olcum, esik=esik)
     return Denetim(ad=ad, gecti=True,
-                   ozet=('%d kiracı çizimi ekranda: %s'
-                         % (len(bulunan), ', '.join(bulunan))),
+                   ozet=('%d kiracı çizimi ekranda: %s%s'
+                         % (len(bulunan), ', '.join(bulunan),
+                            ('; BEYANLI YOKLUK: ' + '; '.join(beyanli))
+                            if beyanli else '')),
                    dayanak=dayanak, olcum=olcum, esik=esik)
 
 
@@ -1547,7 +1594,9 @@ def merkez_denetimleri(sayfa_tanimi,
     for kiraci in kiracilar:
         k = kiraci_olcumleri.get(kiraci.ad)
         liste.append(merkez_kosum_denetimi(kiraci.ad, k))
-        liste.append(merkez_cizim_denetimi(kiraci.ad, k, kiraci.cizim_onekleri))
+        liste.append(merkez_cizim_denetimi(
+            kiraci.ad, k, kiraci.cizim_onekleri,
+            getattr(kiraci, 'beyanli_yokluklar', ())))
         liste.append(merkez_rozet_denetimi(kiraci.ad, k,
                                            kiraci.beklenen_imzalar,
                                            kiraci.yasak_imzalar,

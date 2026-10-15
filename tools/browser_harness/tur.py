@@ -16,6 +16,7 @@ import base64
 import hashlib
 import os
 import time
+import urllib.parse
 from typing import Any, Dict, List, Optional, Sequence
 
 from tools.browser_harness import denetimler, esikler
@@ -187,6 +188,32 @@ JS_YERLESIM = """
   try {
     const de = document.documentElement;
     const tasma = Math.max(0, de.scrollWidth - de.clientWidth);
+    // v3.0.0 (15 Eki): taşma varsa SUÇLU öğeler adıyla raporlanır (yalnız
+    // ebeveyni taşmayan en dış öğeler) — 'X px taşıyor' tek başına onarım
+    // yeri göstermiyordu.
+    const tasanlar = [];
+    if (tasma > 0) {
+      const W = de.clientWidth;
+      document.querySelectorAll('body *').forEach(function (e) {
+        const r = e.getBoundingClientRect();
+        if (!(r.width > 0 && r.right > W + 1)) return;
+        const p = e.parentElement;
+        if (p && p !== document.body && p.getBoundingClientRect().right > W + 1) return;
+        const sinif = (typeof e.className === 'string' && e.className)
+          ? '.' + e.className.trim().split(/\\s+/).slice(0, 2).join('.') : '';
+        // Kimliksiz öğe için en yakın KİMLİKLİ ata da yazılır: 'table'
+        // tek başına hangi panelin taştığını söylemiyordu (tur1).
+        let ata = p, ata_ad = '';
+        for (let k = 0; ata && ata !== document.body && k < 12; k++) {
+          if (ata.id) { ata_ad = ata.tagName.toLowerCase() + '#' + ata.id; break; }
+          ata = ata.parentElement;
+        }
+        tasanlar.push([Math.round(r.right),
+                       e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + sinif,
+                       ata_ad, e.outerHTML.slice(0, 160)]);
+      });
+      tasanlar.sort(function (a, b) { return b[0] - a[0]; });
+    }
     const yapraklar = [];
     const elemanlar = [];
     let kirpildi = false;
@@ -285,6 +312,14 @@ JS_YERLESIM = """
     };
     yurut(document.body, { x1: -Infinity, y1: -Infinity,
                            x2: Infinity, y2: Infinity });
+    // Örtüşen metnin hangi panelde olduğu: en yakın KİMLİKLİ ata.
+    const kimlikliAta = function (e) {
+      for (let k = 0; e && e !== document.body && k < 12; k++) {
+        if (e.id) return e.tagName.toLowerCase() + '#' + e.id;
+        e = e.parentElement;
+      }
+      return '';
+    };
     const sira = yapraklar.map((v, i) => i).sort(
       (a, b) => yapraklar[a].y - yapraklar[b].y);
     const ortusmeler = [];
@@ -305,11 +340,16 @@ JS_YERLESIM = """
             || elemanlar[j].contains(elemanlar[i])) continue;
         ortusmeler.push({ a: A.m, b: B.m, alan: Math.round(alan),
                           konum: [Math.round(Math.max(A.x, B.x)),
-                                  Math.round(Math.max(A.y, B.y))] });
+                                  Math.round(Math.max(A.y, B.y))],
+                          a_ata: kimlikliAta(elemanlar[i]),
+                          b_ata: kimlikliAta(elemanlar[j]),
+                          a_html: elemanlar[i].outerHTML.slice(0, 160),
+                          b_html: elemanlar[j].outerHTML.slice(0, 160) });
         if (ortusmeler.length >= c.ornek) break;
       }
     }
-    return { yatay_tasma_px: tasma, belge_genisligi: de.scrollWidth,
+    return { yatay_tasma_px: tasma, tasan_ogeler: tasanlar.slice(0, 8),
+             belge_genisligi: de.scrollWidth,
              pencere_genisligi: de.clientWidth,
              yaprak_sayisi: yapraklar.length, kirpildi: kirpildi,
              yapiskan_etkisizlestirilen: yapiskanlar.length,
@@ -391,6 +431,14 @@ JS_FEA_PANEL_DURUMU = """
         if (kv !== undefined) secilen[k] = kv;
       }
     });
+    // fea_panel.js motorKarsilastirmasi: rozet rengi FEA sayısıyla motorun
+    // KENDİ emniyet katsayısının küçüğünden verilir (v3.0.0, 15 Eki).
+    const mk = (y.meta && typeof y.meta === 'object')
+      ? y.meta.motor_sf_karsilastirmasi : null;
+    if (mk && typeof mk === 'object' && !Array.isArray(mk)) {
+      const kv = kucult(mk, 0);
+      if (kv !== undefined) secilen.motor_sf_karsilastirmasi = kv;
+    }
     return secilen;
   })(yuk);
   const rozetKabi = document.getElementById(c.rozet);
@@ -617,6 +665,16 @@ JS_MERKEZ_KIRACI = """
                  yukseklik: Math.round(r.height) };
       })
     : [];
+  // Ürünün BEYANLI YOKLUK blokları (stability_panel.js greyBlock): çizim
+  // yoksa gerekçe burada basılır; denetim kiracının beyanlı_yokluklar
+  // eşlemesiyle karşılaştırır.
+  const gri_bloklar = kok
+    ? Array.from(kok.querySelectorAll('[data-stab-grey]')).map(function (g) {
+        return { ad: g.getAttribute('data-stab-grey'),
+                 gorunur: gorunur(g, 1),
+                 metin: duz(g.textContent).slice(0, 400) };
+      })
+    : [];
   const rozetler = kok
     ? Array.from(kok.querySelectorAll(c.rozet_secici)).map(function (b) {
         return { tur: b.getAttribute(c.rozet_ozniteligi),
@@ -637,6 +695,7 @@ JS_MERKEZ_KIRACI = """
     yuk: yuk,
     cizimler: cizimler,
     cizim_sayisi: cizimler.length,
+    gri_bloklar: gri_bloklar,
     rozetler: rozetler,
     rozet_sayisi: rozetler.length,
     durum_metni: durum ? duz(durum.textContent) : null,
@@ -782,6 +841,8 @@ class SayfaGezgini:
     # -- adımlar ----------------------------------------------------------
     def gez(self) -> Dict[str, Any]:
         url = self.temel_url + self.tanim.yol
+        if self.tanim.ornek_proje:
+            url += '?project=' + urllib.parse.quote(self.tanim.ornek_proje)
         sureler: Dict[str, float] = {}
         viz: Dict[str, Any] = {}
         tuval_ham: Dict[str, Any] = {}
@@ -809,6 +870,13 @@ class SayfaGezgini:
                 self.asamalar.append('ağ sessizliğine ulaşılamadı (devam edildi)')
             sureler['yukleme_s'] = time.time() - t0
             self.asamalar.append('sayfa açıldı: %s' % url)
+            if self.tanim.ornek_proje:
+                from tools.browser_harness.piksel import PROJE_YUKLENDI_KOSULU
+                self.p.wait_for_function(
+                    PROJE_YUKLENDI_KOSULU, arg=self.tanim.ornek_proje,
+                    timeout=esikler.PIKSEL_PROJE_YUKLEME_ZAMAN_ASIMI_MS)
+                self.asamalar.append('örnek proje yüklendi: %s'
+                                     % self.tanim.ornek_proje)
 
             # ÖH D21 / defter P17B1-16 — HESAPSIZ SAYFA DALI.
             # ``/``, ``/formulas`` ve ``/launch-site`` sayfalarında hesap
@@ -963,6 +1031,35 @@ class SayfaGezgini:
             goruntuler['tuval'] = yol
         return tuval_ham, denetimler.piksel_olcumu(baytlar)
 
+    def _sayfa_olc(self):
+        """(genişlik, yükseklik) — belge kaydırma boyu; okunamazsa (0, 0)."""
+        try:
+            olcu = self.p.evaluate(
+                '() => ({ g: Math.max(document.documentElement.scrollWidth,'
+                ' document.body ? document.body.scrollWidth : 0),'
+                ' y: Math.max(document.documentElement.scrollHeight,'
+                ' document.body ? document.body.scrollHeight : 0) })')
+            return int(olcu['g']), int(olcu['y'])
+        except Exception:
+            return 0, 0
+
+    def _sayfa_boyunu_durult(self):
+        """Boy iki ardışık ölçümde aynı kalana dek bekler (üst sınırlı).
+
+        Süre dolarsa son ölçüm döner; durulmayan sayfa dilim denetiminde
+        zaten kırmızı çıkar — bekleme kapıyı gevşetmez, yalnız ölçümün
+        hareketli bir hedefe yapılmasını önler.
+        """
+        g, y = self._sayfa_olc()
+        bitis = time.monotonic() + esikler.SAYFA_DURULMA_UST_SINIRI_S
+        while time.monotonic() < bitis:
+            self.p.wait_for_timeout(esikler.SAYFA_DURULMA_ARALIGI_MS)
+            g2, y2 = self._sayfa_olc()
+            if (g2, y2) == (g, y):
+                return g, y
+            g, y = g2, y2
+        return g, y
+
     def _tam_sayfa_yakala(self, goruntuler: Dict[str, Any]) -> None:
         """Tam sayfa kanıtı — tavanı aşan sayfada DİLİMLİ yakalama.
 
@@ -986,16 +1083,12 @@ class SayfaGezgini:
         alınır ve denetim eski yolla (yükseklik ⟷ tavan) hüküm verir.
         """
         tavan = esikler.CHROMIUM_TEK_KARE_TAVANI_PX
-        try:
-            olcu = self.p.evaluate(
-                '() => ({ g: Math.max(document.documentElement.scrollWidth,'
-                ' document.body ? document.body.scrollWidth : 0),'
-                ' y: Math.max(document.documentElement.scrollHeight,'
-                ' document.body ? document.body.scrollHeight : 0) })')
-            sayfa_g = int(olcu['g'])
-            sayfa_y = int(olcu['y'])
-        except Exception:
-            sayfa_g = sayfa_y = 0
+        # v3.0.0 (15 Eki) — sayfa boyu DURULMADAN ölçülüyordu. Ölçüldü
+        # (tur1): son dilim hibritte 7491 istendi 7487 üretildi, katıda
+        # 5344 → 5170, sıvıda 4111 → 3819 — panel koşumlarının ardından
+        # kaplar yakalama sırasında hâlâ boy değiştiriyordu. Kapı
+        # gevşetilmez: boy iki ardışık ölçümde aynı kalana dek beklenir.
+        sayfa_g, sayfa_y = self._sayfa_boyunu_durult()
         goruntuler['sayfa_boyu_px'] = (
             {'genislik': sayfa_g, 'yukseklik': sayfa_y} if sayfa_y > 0 else None)
 
@@ -1014,21 +1107,41 @@ class SayfaGezgini:
         # tavan adımı tavanı aşardı. Ölçek `scale='css'` ile sabitlenir,
         # adım da güvenli tarafta tutulur.
         adim = tavan // 2
+        # Yakalama sırasında boy yine değişirse dilim kümesi BÜTÜNÜYLE
+        # yeniden alınır (en çok DILIM_DENEME_SAYISI kez); son denemenin
+        # kümesi olduğu gibi denetime gider — uyuşmuyorsa kapı kırmızıdır.
+        # Her deneme rapora yazılır: kaç kez, hangi boylarla.
+        denemeler = []
         dilimler = []
-        i = 0
-        y0 = 0
-        while y0 < sayfa_y:
-            h = min(adim, sayfa_y - y0)
-            yol = os.path.join(self.cikti_dizini,
-                               '%s_tam_d%02d.png' % (self.tanim.ad, i))
-            self.p.screenshot(path=yol, full_page=True, scale='css',
-                              clip={'x': 0, 'y': y0,
-                                    'width': sayfa_g, 'height': h})
-            dilimler.append({'yol': yol, 'y0': y0, 'istenen_yukseklik': h,
-                             'px': png_boyutu(yol),
-                             'sha256': dosya_sha256(yol)})
-            y0 += h
-            i += 1
+        for _deneme in range(esikler.DILIM_DENEME_SAYISI):
+            if denemeler:
+                sayfa_g, sayfa_y = self._sayfa_boyunu_durult()
+                goruntuler['sayfa_boyu_px'] = (
+                    {'genislik': sayfa_g, 'yukseklik': sayfa_y}
+                    if sayfa_y > 0 else None)
+            dilimler = []
+            i = 0
+            y0 = 0
+            while y0 < sayfa_y:
+                h = min(adim, sayfa_y - y0)
+                yol = os.path.join(self.cikti_dizini,
+                                   '%s_tam_d%02d.png' % (self.tanim.ad, i))
+                self.p.screenshot(path=yol, full_page=True, scale='css',
+                                  clip={'x': 0, 'y': y0,
+                                        'width': sayfa_g, 'height': h})
+                dilimler.append({'yol': yol, 'y0': y0, 'istenen_yukseklik': h,
+                                 'px': png_boyutu(yol),
+                                 'sha256': dosya_sha256(yol)})
+                y0 += h
+                i += 1
+            _g, sonra_y = self._sayfa_olc()
+            kisa = [d['yol'] for d in dilimler
+                    if (d['px'] or {}).get('yukseklik') != d['istenen_yukseklik']]
+            denemeler.append({'sayfa_y_once': sayfa_y, 'sayfa_y_sonra': sonra_y,
+                              'kisa_dilimler': kisa})
+            if not kisa and sonra_y == sayfa_y:
+                break
+        goruntuler['tam_sayfa_denemeleri'] = denemeler
         goruntuler['tam_sayfa'] = dilimler[0]['yol'] if dilimler else None
         goruntuler['tam_sayfa_px'] = dilimler[0]['px'] if dilimler else None
         goruntuler['tam_sayfa_dilimleri'] = dilimler
@@ -1399,7 +1512,10 @@ class SayfaGezgini:
             liste.append(denetimler.tuval_denetimi(
                 piksel, kaynak=tuval_ham.get('kaynak', '')))
         if hesap_var:
-            liste.append(denetimler.plume_denetimi(viz, piksel))
+            liste.append(denetimler.plume_denetimi(
+                viz, piksel,
+                suresiz_beyanli=getattr(self.tanim, 'suresiz_egzoz_beyanli',
+                                        False)))
         liste.extend([
             denetimler.konsol_denetimi(self.kayitlar),
             denetimler.sizinti_denetimi(metin),

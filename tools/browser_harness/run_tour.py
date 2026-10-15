@@ -207,6 +207,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       % (temel_url, sunucu.SAGLIK_YOLU), file=sys.stderr)
                 return 2
         else:
+            # v3.0.0 (15 Eki): sıvı sayfası örnek projeyle açılır; örnek
+            # tohumlama kullanıcının GERÇEK proje dizinine yazmasın diye
+            # run_piksel.py'deki gibi geçici dizin kullanılır.
+            if not os.environ.get('HRMA_PROJECTS_DIR'):
+                os.environ['HRMA_PROJECTS_DIR'] = os.path.join(cikti, 'projeler')
             gunluk = os.path.join(cikti, 'sunucu.log')
             sunucu_nesnesi = sunucu.UygulamaSunucusu(gunluk_yolu=gunluk)
             print('Sunucu başlatılıyor: %s' % ' '.join(sunucu.komut()))

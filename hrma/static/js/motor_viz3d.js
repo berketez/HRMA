@@ -5899,14 +5899,32 @@
         }
         var mn = L.range.min, mx = L.range.max;
         var ticks = (mx > mn) ? cfdColorbarTicks(mn, mx, 5) : [];
+        var minTxt = decTxt(cfdTickLabel(mn));
+        var maxTxt = decTxt(cfdTickLabel(mx));
+        // Uç etiketleriyle (min/max) çakışan tikler atlanır. Sabit kesir
+        // kuralı (0,12 / 0,88) uzun uç etiketinde yetmiyordu — v3.0.0
+        // görsel turu, /solid: '2.5' tiki 0,878'de '2.845754' etiketine
+        // bindi (77 px²). Pay artık etiketlerin KARAKTER sayısından ölçülür
+        // (10 px eş aralıklı yazı, karakter başına ≤ 6,5 px); içerik
+        // genişliği okunamazsa (DOM dışı) eski kesir kuralı geçerlidir.
+        var CB_KARAKTER_PX = 6.5, CB_ARALIK_PX = 6;
+        var barW = (L.colorbarEl.clientWidth || 0) - 20;   // padding 10+10
         var tickHtml = '';
         for (i = 0; i < ticks.length; i++) {
             var frac = (ticks[i] - mn) / (mx - mn);
-            // Uç etiketleriyle (min/max) çakışan tikler atlanır
-            if (frac < 0.12 || frac > 0.88) continue;
+            var tickTxt = decTxt(cfdTickLabel(ticks[i]));
+            if (barW > 0) {
+                var x = frac * barW;
+                var yari = tickTxt.length * CB_KARAKTER_PX / 2;
+                if (x - yari < minTxt.length * CB_KARAKTER_PX + CB_ARALIK_PX
+                        || x + yari > barW - maxTxt.length * CB_KARAKTER_PX
+                            - CB_ARALIK_PX) continue;
+            } else if (frac < 0.12 || frac > 0.88) {
+                continue;
+            }
             tickHtml += '<span style="position:absolute;top:0;left:'
                 + (frac * 100) + '%;transform:translateX(-50%);color:#7fd4e2">'
-                + decTxt(cfdTickLabel(ticks[i])) + '</span>';
+                + tickTxt + '</span>';
         }
         var label = T(m.labelKey, m.labelFallback)
             + (m.unit ? ' [' + m.unit + ']' : '');
@@ -5936,11 +5954,11 @@
             + '<div style="position:relative;height:14px;margin-top:3px">'
             + '<span data-cfd-colorbar-min="1" '
             + 'style="position:absolute;top:0;left:0;color:#e8f9ff">'
-            + decTxt(cfdTickLabel(mn)) + '</span>'
+            + minTxt + '</span>'
             + tickHtml
             + '<span data-cfd-colorbar-max="1" '
             + 'style="position:absolute;top:0;right:0;color:#e8f9ff">'
-            + decTxt(cfdTickLabel(mx)) + '</span>'
+            + maxTxt + '</span>'
             + '</div>';
     };
 

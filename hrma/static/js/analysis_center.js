@@ -621,7 +621,11 @@
             + i18nAttr(key) + paramAttr
             + ' style="border:1px solid ' + c + '; color:' + c + '; border-radius:6px;'
             + ' padding:1px 8px; font-family:var(--hd-mono, monospace); font-size:0.66rem;'
-            + ' letter-spacing:0.06em; white-space:nowrap; display:inline-block;">'
+            // Kısa rozet tek satırda kalır; sütundan uzun olan (kapsamlı
+            // hüküm: "STABLE — feed-coupled …") sütun içinde SARILIR,
+            // sütunu ve sayfayı yatay taşırmaz (v3.0.0 görsel tur).
+            + ' letter-spacing:0.06em; white-space:normal; overflow-wrap:anywhere;'
+            + ' max-width:100%; box-sizing:border-box; display:inline-block;">'
             + esc(text) + '</span>';
     }
 

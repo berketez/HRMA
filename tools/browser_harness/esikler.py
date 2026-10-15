@@ -766,6 +766,17 @@ MERKEZ_KABUL_ROZET_SINIFI = 'ok'
 #: Kanıt sahteyse kanıt yoktur: tavanı aşan görüntü KANIT SAYILMAZ.
 CHROMIUM_TEK_KARE_TAVANI_PX = 16384
 
+#: v3.0.0 (15 Eki) — tam sayfa yakalamadan önce sayfa boyunun DURULMASI.
+#: Panel koşumlarından sonra kaplar bir süre daha boy değiştiriyor (tur1:
+#: son dilimde 4–292 px kısalma). Boy, bu aralıkla alınan iki ardışık
+#: ölçümde aynı kalınca durulmuş sayılır; üst sınır dolarsa son ölçüm
+#: kullanılır ve dilim denetimi uyuşmazlığı kırmızı basar.
+SAYFA_DURULMA_ARALIGI_MS = 500
+SAYFA_DURULMA_UST_SINIRI_S = 15.0
+#: Yakalama sırasında boy yine değişirse dilim kümesinin yeniden alınma
+#: sayısı (ilk deneme dahil).
+DILIM_DENEME_SAYISI = 3
+
 # ---------------------------------------------------------------------------
 # ÖH D20 · P17B1-03 — RENK DÜRÜSTLÜĞÜ, DÖRT ROZET YOLUNUN HEPSİNDE
 # ---------------------------------------------------------------------------

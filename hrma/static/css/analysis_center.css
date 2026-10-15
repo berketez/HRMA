@@ -53,6 +53,18 @@
     }
 }
 
+/* v3.0.0 (15 Eki) — SÜTUN TAŞMASI. Izgara öğesinin varsayılan
+   min-width'i `auto`dur: içeriğin en küçük genişliği (nowrap rozet, uzun
+   tablo hücresi) sütunu 1fr izinden GENİŞ açar ve sayfa yatay taşar.
+   Ölçüldü (görsel tur, /hybrid, 1600 px pencere, Merkez koşumlarından
+   sonra): belge 1636 px; taşan öğeler #ac_view_root içindeki tablo
+   (sağ kenar 1934 px) ve #ac_view içindeki kararlılık rozeti (1635 px).
+   min-width:0 sütunu izine bağlar; içerik sütunun İÇİNDE sarılır
+   (analysis_dock.js TD + analysis_center.js badge). overflow BURAYA
+   konmaz: içindekiler şeridinin yapışkanlığı ata overflow'uyla ölür
+   (K5b). */
+#ac_columns > .ac-col { min-width: 0; }
+
 /* K5b — İÇİNDEKİLER ŞERİDİ (.ac-toc): görüntüleyicinin üstünde yatay,
    bölüm başlıklarına kaydırma bağları. İçerik SABİT LİSTE DEĞİL:
    analysis_center.js şeridi kiracının GERÇEK render çıktısını tarayarak

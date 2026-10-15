@@ -101,7 +101,10 @@
     // Ortak UI yardımcıları (paneller AnalysisDock.ui üzerinden kullanır)
     // ------------------------------------------------------------------
     const TBL = 'width:100%; border-collapse:collapse; font-size:0.85rem; margin:8px 0;';
-    const TD = 'padding:6px 8px; border-bottom:1px solid var(--hd-line, rgba(0,229,255,0.14));';
+    // overflow-wrap:anywhere — boşluksuz uzun değer (alan yolu, kimlik)
+    // hücreyi sütundan geniş açmasın (v3.0.0 görsel tur, /hybrid taşması).
+    const TD = 'padding:6px 8px; border-bottom:1px solid var(--hd-line, rgba(0,229,255,0.14));'
+        + ' overflow-wrap:anywhere;';
 
     const KIND_COLORS = {
         ok: 'var(--hd-green, #2dd4a8)',
