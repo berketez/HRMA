@@ -65,6 +65,13 @@ SINIFLAR: Tuple[str, ...] = (
     'kataloglanmadi',
 )
 
+#: Bir ucun 200 verebilmesi için kurulu olması gereken İSTEĞE BAĞLI paketler.
+#: Paket yokken uç kendi aile ret kodunu döner (ör. export-step 501
+#: ``step_backend_unavailable``); bu ürün davranışıdır, katalog bayatlığı
+#: değildir. Ana CI işinde build123d BİLEREK kurulmaz (tests.yml), bu yüzden
+#: o uçların canlı taban-yük düğümü ``step-export`` işinde koşar.
+ARKA_UCLAR: Tuple[str, ...] = ('build123d',)
+
 #: Sarsım matrisi koşulurken gönderilen başlık (shake.HEADERS ile aynı olmalı;
 #: tek kaynak orasıdır, burada yalnız içe aktarılır).
 def headers() -> Dict[str, str]:
@@ -85,6 +92,8 @@ class UcKaydi:
     ``yuk``        Ölçülmüş taban yük (200 döndüğü doğrulanmış).
     ``uretici``    Yük dinamik üretiliyorsa üretici anahtarı; ``yuk`` ile
                    birlikte kullanılmaz (tek kaynak).
+    ``arka_uc``    200 için gereken isteğe bağlı paket (``ARKA_UCLAR``);
+                   ``None`` = her ortamda 200.
     """
     yol: str
     sinif: str
@@ -95,10 +104,13 @@ class UcKaydi:
     istek_yolu: Optional[str] = None
     #: Sarsımda atlanacak anahtarlar (ör. dosya adı, proje adı gibi kimlikler).
     sarsilmaz: Tuple[str, ...] = ()
+    arka_uc: Optional[str] = None
 
     def __post_init__(self):
         if self.sinif not in SINIFLAR:
             raise ValueError(f'{self.yol}: bilinmeyen sinif {self.sinif!r}')
+        if self.arka_uc is not None and self.arka_uc not in ARKA_UCLAR:
+            raise ValueError(f'{self.yol}: bilinmeyen arka uc {self.arka_uc!r}')
         if self.sinif == 'olculebilir':
             if self.yuk is None and self.uretici is None:
                 raise ValueError(f'{self.yol}: olculebilir kayit yuksuz olamaz')
@@ -459,6 +471,7 @@ KAYITLAR: Dict[str, UcKaydi] = {
         sinif='olculebilir',
         kaynak='tests/test_faz4_app_export.py (canli kayit)',
         yuk=_YUKLER['/api/export-step'],
+        arka_uc='build123d',
     ),
     '/api/export-stl': UcKaydi(
         yol='/api/export-stl',

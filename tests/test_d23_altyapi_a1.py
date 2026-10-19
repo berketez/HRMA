@@ -19,6 +19,7 @@ Kanıt: ``docs/scofield/raw/OH/D23/altyapi/a1/`` (once/sonra JSON, mutasyon,
 rapor.md).
 """
 
+import importlib.util
 import json
 import pathlib
 
@@ -27,6 +28,24 @@ import pytest
 from tests.support import shake, uc_katalogu
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+#: Ana CI işinde build123d BİLEREK kurulu değil (tests.yml). O ortamda
+#: export-step ucu ürün davranışı olarak 501 ``step_backend_unavailable``
+#: döner; 200 beklemek gece koşusunu 16-18 Eki'de üç kez kırmızı yaptı.
+STEP_VAR = importlib.util.find_spec('build123d') is not None
+
+
+def _taban_yuk_uclari():
+    """Ölçülebilir uçlar; arka ucu (``arka_uc``) gereken uç o paket yokken
+    STEP devri gerekçesiyle atlanır ve ``step-export`` işinde koşar."""
+    for yol in uc_katalogu.olculebilir_uclar():
+        if uc_katalogu.kayit(yol).arka_uc == 'build123d':
+            yield pytest.param(yol, marks=pytest.mark.skipif(
+                not STEP_VAR,
+                reason='build123d kurulu değil (STEP üretimi atlanır) — '
+                       'düğüm step-export işinde koşar'))
+        else:
+            yield yol
 
 #: Sarsım matrisinin bekçi içinde ucu ucuna koşturulduğu uçlar.
 #:
@@ -150,7 +169,7 @@ class TestTabanYuklerCanli:
     # olduğu için işaretlenmedi: katalog tek-kaynak sözleşmesi her
     # koşumda sınanmaya devam eder.
     @pytest.mark.agir_canli_uc
-    @pytest.mark.parametrize('yol', uc_katalogu.olculebilir_uclar())
+    @pytest.mark.parametrize('yol', list(_taban_yuk_uclari()))
     def test_taban_yuk_200_veriyor(self, client, yol):
         kayit = uc_katalogu.kayit(yol)
         yanit = client.post(kayit.cagri_yolu, json=uc_katalogu.taban_yuk(yol),

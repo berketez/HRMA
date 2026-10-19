@@ -770,6 +770,10 @@ jobs:
           # düzeyinde seçilir — iki dosyanın öteki hücreleri build123d VARKEN
           # 'uygulanamaz' diye atlanır ve bu işin sıfır-atlama bütçesini
           # boşuna kırardı (ölçüldü: 8 + 1 hücre); o hücreler ana işte koşar.
+          # 19 Eki: test_d23_altyapi_a1'in export-step canlı taban-yük hücresi
+          # de DÜĞÜM düzeyinde buradadır — ana işte build123d yok, uç orada
+          # 501 verir; gece koşusu 16-18 Eki'de bu yüzden kırmızıydı. Bu iş
+          # -m süzgeci kullanmadığından düğüm her push'ta koşar.
           # KAPILI DOSYA KÜMESİ — tests/test_ci_kapsam_kapisi.py bu listeyi
           # kaynaktan TÜRETİP karşılaştırır; yeni bir build123d-kapılı dosya
           # buraya yazılmazsa o bekçi kırmızıya döner (liste çürüyemez).
@@ -799,6 +803,7 @@ jobs:
                  'tests/test_d30_ihracat_a1.py::TestOHD2909ReddinYoluIZLENEBILIR::test_reddin_adlandirdigi_yolu_dolduran_govde_200_alir[/api/export-step]' \
                  tests/test_d35_onemli_kati_cad_a1.py \
                  tests/test_d37_pdf_a1.py \
+                 'tests/test_d23_altyapi_a1.py::TestTabanYuklerCanli::test_taban_yuk_200_veriyor[/api/export-step]' \
                  tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_iki_dosya_ayni_kasa_capini_yaziyor \
                  tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_capin_kaynagi_uydurma_degil \
                  'tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_cidar_kunyesi_iki_dosyada_da_ayni[hybrid]' \
