@@ -378,6 +378,7 @@
             'Parachute deploy': 'Parachute deploy',
             'Paraffin Wax': 'Paraffin Wax',
             'Parametric Analysis: Of Ratio Sweep': 'Parametric Analysis: Of Ratio Sweep',
+            'Parametric Analysis: O/F Ratio Sweep': 'Parametric Analysis: O/F Ratio Sweep',
             'Performance Chart': 'Performance Chart',
             'Performance Summary': 'Performance Summary',
             'Pintle Injector - Cross Section': 'Pintle Injector - Cross Section',
@@ -406,6 +407,7 @@
             'Propellant Mass (kg)': 'Propellant Mass (kg)',
             'Propellant Mass Flow': 'Propellant Mass Flow',
             'Propellant Mass vs Of Ratio': 'Propellant Mass vs Of Ratio',
+            'Propellant Mass vs O/F Ratio': 'Propellant Mass vs O/F Ratio',
             'Quasi-1D: Mach is uniform across each cross-section — the radial axis shows geometry only, no boundary layer is modeled.': 'Quasi-1D: Mach is uniform across each cross-section — the radial axis shows geometry only, no boundary layer is modeled.',
             'Radial Position (mm)': 'Radial Position (mm)',
             'Radial distance': 'Radial distance',
@@ -447,6 +449,7 @@
             'Specific Impulse (s)': 'Specific Impulse (s)',
             'Specific Impulse vs Altitude': 'Specific Impulse vs Altitude',
             'Specific Impulse vs Of Ratio': 'Specific Impulse vs Of Ratio',
+            'Specific Impulse vs O/F Ratio': 'Specific Impulse vs O/F Ratio',
             /* T64 ile aynı gerekçe: visualization.py:3316 açı bildirilmediğinde
                bu metni üretir; birebir kayıt olmazsa 'Püskürtme konisi
                (angle not reported)' diye yarı İngilizce kalır. Kısa 'Spray cone'
@@ -490,6 +493,7 @@
             'Throat Diameter': 'Throat Diameter',
             'Throat Diameter (mm)': 'Throat Diameter (mm)',
             'Throat Diameter vs Of Ratio': 'Throat Diameter vs Of Ratio',
+            'Throat Diameter vs O/F Ratio': 'Throat Diameter vs O/F Ratio',
             'Throat station': 'Throat station',
             'Thrust': 'Thrust',
             'Thrust & Chamber Pressure vs Time': 'Thrust & Chamber Pressure vs Time',
@@ -510,6 +514,7 @@
             'Thrust [N]': 'Thrust [N]',
             'Thrust vs Altitude': 'Thrust vs Altitude',
             'Thrust vs Of Ratio': 'Thrust vs Of Ratio',
+            'Thrust vs O/F Ratio': 'Thrust vs O/F Ratio',
             'Time': 'Time',
             'Time (s)': 'Time (s)',
             'Time [s]': 'Time [s]',
@@ -585,8 +590,10 @@
             'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.': 'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.',
             'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results': 'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results',
             'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement': 'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement',
+            'a hybrid injects ONE liquid stream (the oxidizer); the fuel/oxidizer momentum-ratio criterion applies only to unlike (fuel-on-oxidizer) impingement': 'a hybrid injects ONE liquid stream (the oxidizer); the fuel/oxidizer momentum-ratio criterion applies only to unlike (fuel-on-oxidizer) impingement',
             'the model COMPUTES the recess from the inner jet diameter; see the value in the results': 'the model COMPUTES the recess from the inner jet diameter; see the value in the results',
             'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array': 'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array',
+            'this path sizes a single coaxial element for the whole oxidizer flow; multi-element arrays are not modelled': 'this path sizes a single coaxial element for the whole oxidizer flow; multi-element arrays are not modelled',
 
             /* ÖH D35 / OH-GT-19, OH-GT-21, OH-GT-22 (22 Eylül 2026) —
                TÜRKÇE EKRANDA KALAN ÇÖZÜCÜ CÜMLELERİ.
@@ -630,6 +637,9 @@
             'Feed (Fuel)': 'Feed (Fuel)',
             'Feed (Ox)': 'Feed (Ox)',
             'Feed Lines': 'Feed Lines',
+            // V301/L-REJ (NK-36): yakıt bütçesinin rejeneratif ceket kalemi
+            // (fuel_line.regen_jacket) — 'Cooling Jacket' anahtarı bu sözlükte
+            // zaten vardı (yinelenen ikinci tanım kaldırıldı, ana model).
             'This run (solver)': 'This run (solver)',
             'injector plate': 'injector plate',
             'parallel axial jets': 'parallel axial jets',
@@ -1042,6 +1052,7 @@
             'Parachute deploy': 'Paraşüt açılışı',
             'Paraffin Wax': 'Parafin Mumu',
             'Parametric Analysis: Of Ratio Sweep': 'Parametrik Analiz: O/F Oranı Taraması',
+            'Parametric Analysis: O/F Ratio Sweep': 'Parametrik Analiz: O/F Oranı Taraması',
             'Performance Chart': 'Performans Grafiği',
             'Performance Summary': 'Performans Özeti',
             'Pintle Injector - Cross Section': 'Pintle Enjektör - Kesit',
@@ -1070,6 +1081,7 @@
             'Propellant Mass (kg)': 'İtici Kütlesi (kg)',
             'Propellant Mass Flow': 'İtici kütle debisi',
             'Propellant Mass vs Of Ratio': 'İtici Kütlesi - O/F Oranı',
+            'Propellant Mass vs O/F Ratio': 'İtici Kütlesi - O/F Oranı',
             'Quasi-1D: Mach is uniform across each cross-section — the radial axis shows geometry only, no boundary layer is modeled.': 'Yarı-1B: Mach her kesitte türdeştir — radyal eksen yalnız geometriyi gösterir, sınır tabaka modellenmemiştir.',
             'Radial Position (mm)': 'Radyal Konum (mm)',
             'Radial distance': 'Eksenden uzaklık',
@@ -1078,7 +1090,9 @@
             'Rail Length (m)': 'Ray Uzunluğu (m)',
             'Range': 'Menzil',
             'Range (km)': 'Menzil (km)',
-            'Real-Time Motor Performance Dashboard': 'Gerçek Zamanlı Motor Performans Panosu',
+            // V301/DİL (NK-11): pano canlı ölçüm değil, TASARIM NOKTASIdır
+            // (EN başlık sunucu figür metni; EN değer anahtarla aynı kalmalı).
+            'Real-Time Motor Performance Dashboard': 'Tasarım Noktası Motor Performans Panosu',
             'Regenerative Cooling — 1D Station March (Bartz + Dittus-Boelter)': 'Rejeneratif Soğutma — 1B İstasyon Yürüyüşü (Bartz + Dittus-Boelter)',
             'Regression Rate': 'Regresyon hızı',
             'Regression Rate & Port Growth': 'Regresyon Hızı ve Port Büyümesi',
@@ -1111,6 +1125,7 @@
             'Specific Impulse (s)': 'Özgül itki (s)',
             'Specific Impulse vs Altitude': 'Özgül İtki - İrtifa',
             'Specific Impulse vs Of Ratio': 'Özgül İtki - O/F Oranı',
+            'Specific Impulse vs O/F Ratio': 'Özgül İtki - O/F Oranı',
             'Spray cone': 'Püskürtme konisi',
             'Spray cone (angle not reported)': 'Püskürtme konisi (açı bildirilmedi)',
             'Star': 'Yıldız',
@@ -1149,6 +1164,7 @@
             'Throat Diameter': 'Boğaz çapı',
             'Throat Diameter (mm)': 'Boğaz çapı (mm)',
             'Throat Diameter vs Of Ratio': 'Boğaz Çapı - O/F Oranı',
+            'Throat Diameter vs O/F Ratio': 'Boğaz Çapı - O/F Oranı',
             'Throat station': 'Boğaz istasyonu',
             'Thrust': 'İtki',
             'Thrust & Chamber Pressure vs Time': 'İtki ve Oda Basıncı - Zaman',
@@ -1161,6 +1177,7 @@
             'Thrust [N]': 'İtki [N]',
             'Thrust vs Altitude': 'İtki - İrtifa',
             'Thrust vs Of Ratio': 'İtki - O/F Oranı',
+            'Thrust vs O/F Ratio': 'İtki - O/F Oranı',
             'Time': 'Zaman',
             'Time (s)': 'Zaman (s)',
             'Time [s]': 'Zaman [s]',
@@ -1236,8 +1253,10 @@
             'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.': 'Öğretici/tanıtım senaryosu için "use_tutorial_defaults": true gönderin; sonuç "defaults_applied" alanıyla hangi girdilerin varsayılandan geldiğini beyan eder.',
             'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results': 'model bu mesafeyi çarpışma açısı ve delik çapından HESAPLAR; sonuçtaki değere bakınız',
             'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement': 'bu yol benzer-akışkan (like-on-like) doublet modeller; momentum oranı ölçütü farklı-akışkan çarpışmada geçerlidir',
+            'a hybrid injects ONE liquid stream (the oxidizer); the fuel/oxidizer momentum-ratio criterion applies only to unlike (fuel-on-oxidizer) impingement': 'hibrit TEK bir sıvı akım (oksitleyici) enjekte eder; yakıt/oksitleyici momentum oranı ölçütü yalnız farklı-akışkan (yakıta oksitleyici) çarpışmada geçerlidir',
             'the model COMPUTES the recess from the inner jet diameter; see the value in the results': 'model girintiyi iç jet çapından HESAPLAR; sonuçtaki değere bakınız',
             'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array': 'bu yol tek koaksiyel eleman boyutlandırır; çok elemanlı dizilim için Enjektör Tasarımı panelini kullanınız',
+            'this path sizes a single coaxial element for the whole oxidizer flow; multi-element arrays are not modelled': 'bu yol bütün oksitleyici debisi için tek bir koaksiyel eleman boyutlandırır; çok elemanlı dizilim modellenmez',
 
             /* ÖH D35 / OH-GT-19, OH-GT-21, OH-GT-22 (22 Eylül 2026) —
                TÜRKÇE EKRANDA KALAN ÇÖZÜCÜ CÜMLELERİ.
@@ -1281,6 +1300,8 @@
             'Feed (Fuel)': 'Besleme (yakıt)',
             'Feed (Ox)': 'Besleme (oksitleyici)',
             'Feed Lines': 'Besleme hatları',
+            // V301/L-REJ (NK-36): rejeneratif ceket kalemi — anahtar bu
+            // sözlükte zaten 'Soğutma Ceketi' olarak vardı (ikinci tanım kaldırıldı).
             'This run (solver)': 'Bu koşum (çözücü)',
             'injector plate': 'enjektör plakası',
             'parallel axial jets': 'paralel eksenel jetler',
@@ -1877,6 +1898,15 @@
          'L/D oranı ($1) en uygun aralığın ($2) dışında'],
         [/^Exit velocity \((.+) m\/s\) outside optimal range \((.+)\)$/,
          'Çıkış hızı ($1 m/s) en uygun aralığın ($2) dışında'],
+        /* V301/E2: iki bandın kaynağı YOK — üretici (utils/injector_design.py
+           _check_warnings) artık "optimal" demiyor, HRMA buluşsal eşiği olduğunu
+           söylüyor. Eski iki desen kayıtlı sonuçlar için yerinde kalır. */
+        [/^Exit velocity \((.+) m\/s\) outside the (.+) m\/s band \(HRMA heuristic threshold - no literature value; not a design limit\)$/,
+         'Çıkış hızı ($1 m/s) $2 m/s bandının dışında (HRMA buluşsal eşiği - literatür değeri yok; tasarım sınırı değil)'],
+        [/^Impingement angle \((.+) deg\) outside the (.+) deg band \(HRMA heuristic threshold - no literature value; NASA SP-8089 pp\. 78-79 recommends 60 deg\)$/,
+         'Çarpışma açısı ($1 derece) $2 derece bandının dışında (HRMA buluşsal eşiği - literatür değeri yok; NASA SP-8089 s. 78-79 60 derece önerir)'],
+        [/^L\/D ratio \((.+)\) outside the (.+) band \(HRMA heuristic threshold - no literature value; NASA SP-8089 p\. 84 notes that intermediate L\/D of about 4-6 is susceptible to hydraulic flip\)$/,
+         'L/D oranı ($1) $2 bandının dışında (HRMA buluşsal eşiği - literatür değeri yok; NASA SP-8089 s. 84, yaklaşık 4-6 arası ara L/D değerlerinin hidrolik flip\'e duyarlı olduğunu belirtir)'],
         [/^Low Reynolds number \((.+)\) - laminar flow expected$/,
          'Düşük Reynolds sayısı ($1) - laminer akış bekleniyor'],
         [/^Port diameter \((.+)m\) is very large relative to chamber \((.+)m\)\. Check structural integrity\.$/,
@@ -1940,6 +1970,248 @@
          'Çıkış çapı ($1) boğaz çapından ($2) büyük olmalı'],
         [/^Tank pressure \((.+)\) must be higher than chamber pressure \((.+)\)$/,
          'Tank basıncı ($1) oda basıncından ($2) yüksek olmalı'],
+        /* v3.0.1 (22 Eki, V301/E2 devri 5) — KULLANICI TANK KİPİ 422
+           CÜMLELERİ. Üretici: hrma/engines/hybrid_rocket_engine.py kullanıcı
+           tank basıncı ret kayıtları (tank_pressure_required,
+           tank_pressure_not_above_chamber_pressure,
+           tank_pressure_below_saturation). Sayılar ondalık kanonundan geçer.
+           Birden çok ret kaydı tek cümlede birleşirse desen tutmaz ve cümle
+           İngilizce kalır (yarım çeviri yok). Bekçi:
+           tests/test_v301_tank_ret_dili.py */
+        [/^tank_pressure_source = 'user' takes the injector feed pressure from 'tank_pressure' \(bar, absolute\), which was not supplied\. No server default is used in this mode\.$/,
+         "tank_pressure_source = 'user' kipinde enjektör besleme basıncı "
+         + "'tank_pressure' alanından (bar, mutlak) alınır; bu alan "
+         + 'gönderilmedi. Bu kipte sunucu varsayılanı kullanılmaz.'],
+        [/^Injector pressure drop dP = P_1 - P_c = (\S+) - (\S+) = (\S+) bar is not positive \(P_1 = P_tank = (\S+) bar; feed line loss not included\)\. No oxidizer flow can be delivered: raise the tank pressure above the chamber pressure\.$/,
+         function (_t, p1, pc, dp, pt) {
+             return 'Enjektör basınç düşümü dP = P_1 - P_c = '
+                 + I18N_SAYI(p1) + ' - ' + I18N_SAYI(pc) + ' = '
+                 + I18N_SAYI(dp) + ' bar pozitif değil (P_1 = P_tank = '
+                 + I18N_SAYI(pt) + ' bar; besleme hattı kaybı dahil '
+                 + 'değil). Oksitleyici akışı sağlanamaz: tank basıncını '
+                 + 'oda basıncının üstüne çıkarın.';
+         }],
+        [/^Tank pressure (\S+) bar is below the N2O saturation pressure at the tank temperature, P_sat\((\S+) K\) = (\S+) bar \(HRMA tolerance (\S+) %\)\. This is inconsistent with the default equilibrium initial state: liquid N2O at T_tank cannot be held in equilibrium below its saturation pressure \(a metastable liquid is not modelled\)\. Raise the tank pressure to at least (\S+) bar or lower the tank temperature\.$/,
+         function (_t, pt, T, psat, tol, pmin) {
+             return 'Tank basıncı ' + I18N_SAYI(pt) + ' bar, tank '
+                 + 'sıcaklığındaki N2O doyma basıncının altında: P_sat('
+                 + I18N_SAYI(T) + ' K) = ' + I18N_SAYI(psat) + ' bar (HRMA '
+                 + 'toleransı %' + I18N_SAYI(tol) + '). Bu, varsayılan '
+                 + 'denge başlangıç durumuyla tutarsız: T_tank sıcaklığındaki '
+                 + 'sıvı N2O doyma basıncının altında dengede tutulamaz (yarı '
+                 + 'kararlı sıvı modellenmez). Tank basıncını en az '
+                 + I18N_SAYI(pmin) + ' bar yapın ya da tank sıcaklığını '
+                 + 'düşürün.';
+         }],
+        /* v3.0.1 (22 Eki, V301/K-A) — KATI TASARIM REDDİ 422 CÜMLELERİ.
+           Üreticiler: hrma/engines/solid_rocket_engine.py
+           (_check_case_fit, _check_port_throat, 7c core_not_inside_grain) ve
+           hrma/app.py /calculate_solid (_kati_reddedilen_girdi_hatasi,
+           _kati_gecersiz_tane_hatasi, core_too_large_for_grain). Sayılar
+           ondalık kanonundan geçer. Bir parça tanınmazsa (ör. çok alanlı ret
+           cümlesinde bilinmeyen madde) cümle İngilizce kalır (yarım çeviri
+           yok). Bekçi: tests/test_v301_kati_geometri.py */
+        [/^No design was published: the case inner diameter \(chamber_diameter\) (\S+) mm is below the (\S+) mm minimum that the (\S+) mm grain needs with its (\S+) mm liner and (\S+) mm insulation \(case inner diameter >= grain outer diameter \+ 2 x \(liner \+ insulation\)\)\. Enter at least (\S+) mm, leave chamber_diameter empty so HRMA derives the case from the grain, or reduce outer_diameter, liner_thickness or insulation_thickness; the case is not enlarged silently\.$/,
+         function (_t, beyan, gereken, tane, astar, yalitim, gir) {
+             return 'Tasarım yayımlanmadı: kasa iç çapı (chamber_diameter) '
+                 + I18N_SAYI(beyan) + ' mm; ' + I18N_SAYI(tane) + ' mm '
+                 + 'yakıt bloğunun ' + I18N_SAYI(astar) + ' mm astar ve '
+                 + I18N_SAYI(yalitim) + ' mm yalıtımla birlikte gerektirdiği '
+                 + 'en az ' + I18N_SAYI(gereken) + ' mm değerinin altında '
+                 + '(kasa iç çapı >= yakıt bloğu dış çapı + 2 x (astar + '
+                 + 'yalıtım)). En az ' + I18N_SAYI(gir) + ' mm girin, '
+                 + 'kasanın yakıt bloğundan türetilmesi için chamber_diameter '
+                 + 'alanını boş bırakın ya da outer_diameter, liner_thickness '
+                 + 'veya insulation_thickness değerini küçültün; kasa '
+                 + 'sessizce büyütülmez.';
+         }],
+        [/^No design was published: the core diameter (\S+) mm is not smaller than the grain outer diameter (\S+) mm \(outer_diameter\), so the (\S+) grain has no propellant web\. Enter a core diameter below (\S+) mm or a larger grain outer diameter\.$/,
+         function (_t, cekirdek, od, tip, od2) {
+             return 'Tasarım yayımlanmadı: çekirdek çapı '
+                 + I18N_SAYI(cekirdek) + ' mm, yakıt bloğu dış çapından ('
+                 + I18N_SAYI(od) + ' mm, outer_diameter) küçük değil; bu '
+                 + 'nedenle ' + tip + ' yakıt bloğunda et kalmıyor. '
+                 + I18N_SAYI(od2) + ' mm altında bir çekirdek çapı ya da daha '
+                 + 'büyük bir yakıt bloğu dış çapı girin.';
+         }],
+        [/^No design was published: the core diameter (\S+) mm leaves less than the (\S+) mm minimum web on each side of the (\S+) mm grain \(outer_diameter\); the largest accepted core is (\S+) mm\. Enter a core diameter of at most (\S+) mm or a larger grain outer diameter\.$/,
+         function (_t, cekirdek, web, od, enbuyuk, enbuyuk2) {
+             return 'Tasarım yayımlanmadı: çekirdek çapı '
+                 + I18N_SAYI(cekirdek) + ' mm, ' + I18N_SAYI(od) + ' mm '
+                 + 'yakıt bloğunun (outer_diameter) her iki yanında en az '
+                 + I18N_SAYI(web) + ' mm et kalınlığı bırakmıyor; kabul '
+                 + 'edilen en büyük çekirdek ' + I18N_SAYI(enbuyuk) + ' mm. '
+                 + 'En çok ' + I18N_SAYI(enbuyuk2) + ' mm çekirdek çapı ya da '
+                 + 'daha büyük bir yakıt bloğu dış çapı girin.';
+         }],
+        [/^No design was published: the initial port flow area (\S+) mm\^2 \(core diameter (\S+) mm, (\S+)\) is not larger than the throat area (\S+) mm\^2 \(throat diameter (\S+) mm, sized by the solver\), port\/throat area ratio (\S+)\. The flow would choke in the port, not at the nozzle throat\. (.+)\.$/,
+         function (_t, kanal, cekirdek, tip, bogaz, bogazCap, oran, eylem) {
+             var m, eylemTr = null;
+             if ((m = /^Enter a core diameter of at least (\S+) mm \(the throat is re-sized with the core\), or lower the burning area or raise the chamber pressure$/.exec(eylem))) {
+                 eylemTr = 'En az ' + I18N_SAYI(m[1]) + ' mm çekirdek çapı '
+                     + 'girin (boğaz çekirdekle yeniden boyutlanır) ya da '
+                     + 'yanma alanını küçültün veya oda basıncını yükseltin';
+             } else if (/^An end burner flows through the full grain cross-section, so enlarge the grain outer diameter or reduce the burning area \/ raise the chamber pressure$/.test(eylem)) {
+                 eylemTr = 'Uçtan yanan yakıt bloğunda akış bütün kesitten '
+                     + 'geçer; yakıt bloğu dış çapını büyütün ya da yanma '
+                     + 'alanını küçültün / oda basıncını yükseltin';
+             } else if ((m = /^No core diameter inside the (\S+) mm grain makes the port larger than the throat; enlarge the grain outer diameter, shorten the grain or raise the chamber pressure$/.exec(eylem))) {
+                 eylemTr = I18N_SAYI(m[1]) + ' mm yakıt bloğunun içinde '
+                     + 'kanalı boğazdan büyük yapan bir çekirdek çapı yok; '
+                     + 'yakıt bloğu dış çapını büyütün, bloğu kısaltın ya da '
+                     + 'oda basıncını yükseltin';
+             }
+             if (eylemTr === null) return _t;
+             return 'Tasarım yayımlanmadı: başlangıç kanal akış alanı '
+                 + I18N_SAYI(kanal) + ' mm^2 (çekirdek çapı '
+                 + I18N_SAYI(cekirdek) + ' mm, ' + tip + ') boğaz alanından '
+                 + '(' + I18N_SAYI(bogaz) + ' mm^2, boğaz çapı '
+                 + I18N_SAYI(bogazCap) + ' mm, çözücü boyutlandırdı) büyük '
+                 + 'değil; kanal/boğaz alan oranı ' + I18N_SAYI(oran) + '. '
+                 + 'Akış nozul boğazında değil kanalda boğulur. ' + eylemTr
+                 + '.';
+         }],
+        [/^No design was published: the solver found no burning surface for this (\S+) grain \(outer diameter (\S+) mm, core diameter (\S+) mm, length (\S+) mm\), so no thrust curve exists\. Check the grain dimensions and the (\S+) grain parameters\.$/,
+         function (_t, tip, od, cekirdek, boy, tip2) {
+             return 'Tasarım yayımlanmadı: çözücü bu ' + tip + ' yakıt '
+                 + 'bloğunda (dış çap ' + I18N_SAYI(od) + ' mm, çekirdek çapı '
+                 + I18N_SAYI(cekirdek) + ' mm, uzunluk ' + I18N_SAYI(boy)
+                 + ' mm) yanma yüzeyi bulamadı, itki eğrisi oluşmuyor. Yakıt '
+                 + 'bloğu ölçülerini ve ' + tip2 + ' parametrelerini '
+                 + 'denetleyin.';
+         }],
+        [/^No design was published: the solver could not build this (\S+) grain \(outer diameter (\S+) mm, core diameter (\S+) mm, length (\S+) mm; solver code (\S+)\)\. Check the grain dimensions\.$/,
+         function (_t, tip, od, cekirdek, boy, kod) {
+             return 'Tasarım yayımlanmadı: çözücü bu ' + tip + ' yakıt '
+                 + 'bloğunu kuramadı (dış çap ' + I18N_SAYI(od) + ' mm, '
+                 + 'çekirdek çapı ' + I18N_SAYI(cekirdek) + ' mm, uzunluk '
+                 + I18N_SAYI(boy) + ' mm; çözücü kodu ' + kod + '). Yakıt '
+                 + 'bloğu ölçülerini denetleyin.';
+         }],
+        [/^No design was published: (\d+) input\(s\) could not be used as entered and HRMA does not replace them with built-in values: (.+)\. Correct the field\(s\) and calculate again\.$/,
+         function (_t, sayi, maddeler) {
+             var birimTr = {'segments': 'segment', 'bolts': 'cıvata',
+                            'points': 'uç', 'deg': '°'};
+             var parcalar = String(maddeler).split('; ');
+             var cevrilen = [];
+             for (var i = 0; i < parcalar.length; i++) {
+                 var p = parcalar[i], m, tr = null;
+                 if ((m = /^(\w+) = (.+) is outside the accepted range (\S+) to (\S+?)(?: (\S+))?$/.exec(p))) {
+                     var birim = m[5] ? (' ' + (birimTr[m[5]] || m[5])) : '';
+                     tr = m[1] + ' = ' + I18N_SAYI(m[2]) + ', kabul edilen '
+                         + I18N_SAYI(m[3]) + ' - ' + I18N_SAYI(m[4]) + birim
+                         + ' aralığının dışında';
+                 } else if ((m = /^(\w+) = (.+) is not a whole number \(accepted (\S+) to (\S+)\)$/.exec(p))) {
+                     tr = m[1] + ' = ' + I18N_SAYI(m[2]) + ' tam sayı değil '
+                         + '(kabul edilen ' + I18N_SAYI(m[3]) + ' - '
+                         + I18N_SAYI(m[4]) + ')';
+                 } else if ((m = /^(\w+) = (.+) is a true\/false flag, not a number$/.exec(p))) {
+                     tr = m[1] + ' = ' + m[2] + ' bir doğru/yanlış bayrağı, '
+                         + 'sayı değil';
+                 } else if ((m = /^(\w+) is not a finite number$/.exec(p))) {
+                     tr = m[1] + ' sonlu bir sayı değil';
+                 } else if ((m = /^(\w+) = (.+) is not a number \(use a dot as the decimal separator\)$/.exec(p))) {
+                     tr = m[1] + ' = ' + m[2] + ' sayı değil (ondalık ayracı '
+                         + 'olarak nokta kullanın)';
+                 } else if ((m = /^(\w+) = (.+) could not be used$/.exec(p))) {
+                     tr = m[1] + ' = ' + m[2] + ' kullanılamadı';
+                 }
+                 if (tr === null) return _t;
+                 cevrilen.push(tr);
+             }
+             return 'Tasarım yayımlanmadı: ' + sayi + ' girdi yazıldığı '
+                 + 'gibi kullanılamadı ve HRMA bunların yerine yerleşik '
+                 + 'değer koymaz: ' + cevrilen.join('; ') + '. Alan(lar)ı '
+                 + 'düzeltip yeniden hesaplayın.';
+         }],
+        /* v3.0.1 (26 Eki, V301/L-A) — SIVI TASARIM REDDİ 422 CÜMLELERİ.
+           Üretici: hrma/app.py ``_sivi_kapanis_reddi`` (oda çapı ⟷ boğaz,
+           basınç beslemeli tank < gerekli besleme basıncı, kapanmayan
+           turbopompa çevrimi) ve /calculate_liquid tank/chug kapısının 400
+           cümleleri (hrma/utils/common_fixes.py validate_pressure_
+           consistency). Bant dışı girdi reddi katı ucun AYNI cümlesini
+           kullanır ("KATI TASARIM REDDİ 422" bloğu). Sayılar ondalık
+           kanonundan geçer; tanınmayan biçimde cümle İngilizce kalır.
+           Bekçi: tests/test_v301_sivi_kapilar.py */
+        [/^No design was published: the chamber diameter (\S+) mm \(chamber_diameter\) gives a contraction ratio of (\S+) with the solved (\S+) mm throat, outside the accepted (\S+) to (\S+) band; the solver would otherwise drop it and size the chamber from the contraction ratio\. Enter a chamber diameter between (\S+) and (\S+) mm, or leave chamber_diameter empty\.$/,
+         function (_t, dc, cr, dt, lo, hi, enAz, enCok) {
+             return 'Tasarım yayımlanmadı: ' + I18N_SAYI(dc) + ' mm oda '
+                 + 'çapı (chamber_diameter), çözülen ' + I18N_SAYI(dt)
+                 + ' mm boğazla ' + I18N_SAYI(cr) + ' daralma oranı '
+                 + 'veriyor; bu, kabul edilen ' + I18N_SAYI(lo) + ' - '
+                 + I18N_SAYI(hi) + ' bandının dışında. Kabul edilseydi '
+                 + 'çözücü bu değeri atıp odayı daralma oranından '
+                 + 'boyutlandıracaktı. ' + I18N_SAYI(enAz) + ' ile '
+                 + I18N_SAYI(enCok) + ' mm arasında bir oda çapı girin ya da '
+                 + 'chamber_diameter alanını boş bırakın.';
+         }],
+        [/^No design was published: the pressure-fed tank pressure (\S+) bar \(feed_pressure\) is (\S+) bar below the (\S+) bar the feed chain requires \(chamber pressure \+ injector pressure drop \+ cooling jacket pressure drop \+ feed line losses; binding side: (fuel|oxidizer)\), so the tanks cannot deliver the design flow\. Enter a feed pressure of at least (\S+) bar; the recommended tank pressure with the (\S+) bar declared margin is (\S+) bar\.$/,
+         function (_t, tank, acik, gerekli, taraf, enAz, pay, oneri) {
+             return 'Tasarım yayımlanmadı: basınç beslemeli tank basıncı '
+                 + I18N_SAYI(tank) + ' bar (feed_pressure), besleme '
+                 + 'zincirinin gerektirdiği ' + I18N_SAYI(gerekli) + ' bar '
+                 + 'değerinin ' + I18N_SAYI(acik) + ' bar altında (oda '
+                 + 'basıncı + enjektör basınç düşümü + soğutma ceketi basınç '
+                 + 'düşümü + besleme hattı kayıpları; bağlayıcı taraf: '
+                 + (taraf === 'fuel' ? 'yakıt' : 'oksitleyici') + '); '
+                 + 'tanklar tasarım debisini veremez. En az '
+                 + I18N_SAYI(enAz) + ' bar besleme basıncı girin; '
+                 + I18N_SAYI(pay) + ' bar beyanlı pay dahil önerilen tank '
+                 + 'basıncı ' + I18N_SAYI(oneri) + ' bar.';
+         }],
+        [/^No design was published: feed_pressure was not supplied; in a pressure-fed cycle the tank pressure is the injector feed pressure and the solver does not assume one\. The feed chain requires at least (\S+) bar \(chamber pressure \+ injector pressure drop \+ cooling jacket pressure drop \+ feed line losses; binding side: (fuel|oxidizer)\)\. Enter a feed pressure of at least (\S+) bar; the recommended tank pressure with the (\S+) bar declared margin is (\S+) bar\.$/,
+         function (_t, gerekli, taraf, enAz, pay, oneri) {
+             return 'Tasarım yayımlanmadı: feed_pressure gönderilmedi; '
+                 + 'basınç beslemeli çevrimde tank basıncı enjektörü '
+                 + 'besleyen basıncın kendisidir ve çözücü bir değer '
+                 + 'varsaymaz. Besleme zinciri en az ' + I18N_SAYI(gerekli)
+                 + ' bar gerektiriyor (oda basıncı + enjektör basınç düşümü '
+                 + '+ soğutma ceketi basınç düşümü + besleme hattı kayıpları; '
+                 + 'bağlayıcı taraf: '
+                 + (taraf === 'fuel' ? 'yakıt' : 'oksitleyici') + '). En az '
+                 + I18N_SAYI(enAz) + ' bar besleme basıncı girin; '
+                 + I18N_SAYI(pay) + ' bar beyanlı pay dahil önerilen tank '
+                 + 'basıncı ' + I18N_SAYI(oneri) + ' bar.';
+         }],
+        [/^No design was published: the (\S+) cycle did not close at this design point - the cycle solver reports (.+)\. The pump, turbine and cycle numbers of a cycle that does not close do not describe a working engine, so they are not published\. Change the cycle, the propellants or the operating point\.$/,
+         function (_t, cevrim, kodlar) {
+             return 'Tasarım yayımlanmadı: ' + cevrim + ' çevrimi bu '
+                 + 'tasarım noktasında kapanmadı; çevrim çözücüsünün '
+                 + 'bildirdiği: ' + I18N_OLCU(kodlar) + '. Kapanmayan bir çevrimin '
+                 + 'pompa, türbin ve çevrim sayıları çalışan bir motoru '
+                 + 'anlatmaz, bu yüzden yayımlanmaz. Çevrimi, iticileri ya da '
+                 + 'çalışma noktasını değiştirin.';
+         }],
+        /* Sıvı ucunun Cd kapısı (app.py OH-D16-05, invalid_discharge_
+           coefficient) — sayfa artık cümleyi bastığı için TR'si eklendi. */
+        [/^'discharge_coefficient' must be a number in \[(\S+), (\S+)\] \(given: (.+)\)\. A discharge coefficient is the ratio of actual to ideal mass flow through an orifice, so it is dimensionless and cannot exceed 1 or be zero or negative\. No substitute value is invented and the design is not published with a silently replaced coefficient\.$/,
+         function (_t, lo, hi, verilen) {
+             return "'discharge_coefficient' [" + I18N_SAYI(lo) + '; '
+                 + I18N_SAYI(hi) + '] aralığında bir sayı olmalı (verilen: '
+                 + verilen + '). Akış katsayısı bir orifisten geçen gerçek '
+                 + 'debinin ideal debiye oranıdır; boyutsuzdur, 1\'i aşamaz, '
+                 + 'sıfır ya da negatif olamaz. Yerine değer uydurulmaz ve '
+                 + 'tasarım sessizce değiştirilmiş bir katsayıyla '
+                 + 'yayımlanmaz.';
+         }],
+        [/^Tank pressure \((\S+) bar\) must be greater than chamber pressure \((\S+) bar\)$/,
+         function (_t, tank, pc) {
+             return 'Tank basıncı (' + I18N_SAYI(tank) + ' bar) oda '
+                 + 'basıncından (' + I18N_SAYI(pc) + ' bar) büyük olmalı';
+         }],
+        [/^Insufficient pressure drop\. Need at least (\S+) bar drop for proper injection$/,
+         function (_t, dp) {
+             return 'Basınç düşümü yetersiz. Düzgün enjeksiyon için en az '
+                 + I18N_SAYI(dp) + ' bar düşüm gerekir';
+         }],
+        /* v3.0.1 (V301/H4) — geçici uçta blowdown ⟷ kullanıcı tank kipi reddi
+           (app.py _gecici_besleme_kipi_kapisi). */
+        [/^feed_mode 'blowdown' models a self-pressurising N2O tank, but this design uses tank_pressure_source = 'user' \(a pressurised feed at the user-set tank pressure\), so a blowdown curve would describe a different motor\. Use feed_mode 'regulated' for this design\.$/,
+         "feed_mode 'blowdown' kendinden basınçlı bir N2O tankını modeller, "
+         + "ama bu tasarım tank_pressure_source = 'user' kullanıyor "
+         + '(kullanıcının verdiği tank basıncında basınçlandırılmış '
+         + 'besleme); blowdown eğrisi başka bir motoru anlatırdı. Bu tasarım '
+         + "için feed_mode 'regulated' kullanın."],
         [/^Total impulse \((.+)\) doesn['’]t match thrust×time \((.+)\)$/,
          'Toplam impuls ($1), itki×süre ile ($2) uyuşmuyor'],
 
@@ -2016,6 +2288,19 @@
          'KOKLAŞMA: RP-1 soğutucu tarafı cidar sıcaklığı $1 K değerine ulaşıyor, ~$2 K koklaşma eşiğinin üstünde ($3) — karbon birikmesi ve kanal tıkanması olası.'],
         [/^CRITICAL: peak hot-wall temperature (\S+) K exceeds (.+) melting point (\S+) K — liner failure\.$/,
          'KRİTİK: tepe sıcak cidar sıcaklığı $1 K, $2 malzemesinin $3 K erime sıcaklığını aşıyor — astar hasarı.'],
+        /* V301/L-KARBON — LOX/RP-1 karbon birikimi (regen_cooling.py). */
+        [/^CARBON DEPOSIT: LOX\/RP-1 gas-side carbon deposit resistance applied \(NASA SP-125 Fig\. 4-25; throat R_d (\S+) m2K\/W\)\. Peak hot wall (\S+) K with the deposit, (\S+) K where it spalls \(no deposit, same coolant state\)\.$/,
+         'KARBON BİRİKİMİ: LOX/RP-1 gaz tarafı karbon birikimi ısıl direnci uygulandı (NASA SP-125 Şekil 4-25; boğazda R_d $1 m2K/W). Tepe sıcak cidar birikimle $2 K, birikimin döküldüğü yerde $3 K (birikim yok, aynı soğutucu durumu).'],
+        [/^CRITICAL: where the carbon deposit spalls the hot wall reaches (\S+) K, above the (.+) melting point (\S+) K — local liner failure \(NASA SP-8087 sec\. 3\.4\.1: spalling shall not cause failure\)\.$/,
+         'KRİTİK: karbon birikiminin döküldüğü yerde sıcak cidar $1 K değerine ulaşıyor, $2 malzemesinin $3 K erime sıcaklığının üstünde — yerel astar hasarı (NASA SP-8087 §3.4.1: dökülme hasara yol açmamalı).'],
+        [/^CARBON DEPOSIT: carbon deposit not modelled \(out of envelope\): (.+) \(the deposit was observed experimentally only in that range, NASA TP-2862\)\.$/,
+         function (_t, ic) {
+             var tr = String(ic)
+                 .replace(/O\/F (\S+) outside (\S+)/g, 'O/F $1, $2 bandının dışında')
+                 .replace(/Pc (\S+) bar outside (\S+) bar/g, 'Pc $1 bar, $2 bar bandının dışında');
+             return 'KARBON BİRİKİMİ: modellenmedi (zarf dışı): ' + tr
+                 + ' (birikim deneyle yalnız bu aralıkta gözlendi, NASA TP-2862).';
+         }],
         /* OH-D33-43 — fix-38a'nın (OH-D33-34) AÇIK BIRAKTIĞI İKİ DESEN.
            ÖLÇÜLDÜ (tr-07-warnings karesi, kılavuzda yayımlandı): aynı Türkçe
            panelde hem virgül hem nokta duruyordu. Virgüllü olanlar
@@ -2068,6 +2353,42 @@
          'UYARI: tepe sıcak cidar sıcaklığı $1 K, $2 malzemesinin izin verilen $3 K sıcaklığını aşıyor — dayanım marjı azaldı.'],
         [/^PROPERTY RANGE: (.+?) bulk temperature leaves the internal property table band \((.+?) K\) at (\S+) station\(s\) \(T_bulk (.+?) K\); properties there are FROZEN at the nearest band edge — transport properties and the coolant-side coefficient are an extrapolation outside the source validity envelope\.$/,
          'ÖZELLİK ARALIĞI: $1 yığın sıcaklığı, iç özellik tablosunun bandını ($2 K) $3 istasyonda terk ediyor (T_bulk $4 K); oradaki özellikler en yakın bant kenarında DONDURULDU — taşınım özellikleri ve soğutucu tarafı katsayısı, kaynağın geçerlilik zarfının dışında bir dış değer atamasıdır.'],
+        // V301/DİL: duvar tarafı özellik bandı uyarısı (regen_cooling.py
+        // "PROPERTY RANGE (WALL)"); TR ekranda İngilizce kalıyordu ve
+        // test_backend_uyari_metinleri_kapsam_bekcisi main'de de kırmızıydı.
+        [/^PROPERTY RANGE \(WALL\): the (\S+) coolant-side wall temperature is above the internal property table band \((\S+)-(\S+) K\) at (\S+) station\(s\); the Sieder-Tate wall viscosity there is held at the band edge, so the \(mu_b\/mu_w\)\^0\.14 correction is UNDER-stated and the coolant-side coefficient is a conservative lower bound \(peak correction factor used (\S+)\)\.$/,
+         function (_t, sogutucu, alt, ust, n, f) {
+             return 'ÖZELLİK ARALIĞI (CİDAR): ' + sogutucu + ' soğutucu tarafı'
+                 + ' cidar sıcaklığı ' + n + ' istasyonda iç özellik tablosunun'
+                 + ' bandının (' + I18N_SAYI(alt) + '-' + I18N_SAYI(ust) + ' K)'
+                 + ' üstünde; oradaki Sieder-Tate cidar viskozitesi bant'
+                 + ' kenarında tutuluyor, bu yüzden (mu_b/mu_w)^0,14 düzeltmesi'
+                 + ' EKSİK hesaplanıyor ve soğutucu tarafı katsayısı ihtiyatlı'
+                 + ' bir alt sınırdır (kullanılan en büyük düzeltme çarpanı '
+                 + I18N_SAYI(f) + ').';
+         }],
+        // V301/DİL: sıvı otojen basınçlandırma kapsam gerekçesi
+        // (liquid_rocket_engine.py _autogenous_applicable).
+        [/^autogenous pressurisation is modelled only for methane\/LOX and LH2\/LOX; '([^']*)' is not supported \(the other propellants use stored helium\)$/,
+         function (_t, cift) {
+             return 'otojen basınçlandırma yalnız metan/LOX ve LH2/LOX için'
+                 + ' modellenir; \'' + cift + '\' desteklenmiyor (diğer'
+                 + ' iticiler depolanmış helyum kullanır)';
+         }],
+        // V301/DİL: N2O tank boşalmasının ideal-gaz kuyruğu (tank_blowdown.py).
+        [/^IDEAL-GAS TAIL-OFF: the liquid is exhausted at (\S+) K \/ (\S+) bar and the remaining vapour is expanded with the IDEAL-GAS adiabatic relation \(gamma = (\S+), the ideal-gas value of N2O: CoolProp 6\.8\.0 cp\/cv at 300 K \/ 1 bar = 1\.279\)\. At the SATURATED-VAPOUR state where it is applied the assumption does not hold: the real cp\/cv at 293 K saturated vapour is 3\.107 \(2\.4x\) and the real vapour density 158\.0 kg\/m3 versus 91\.2 kg\/m3 from p\/\(RT\) \(-42%\)\. The tail-off curve is an order-of-magnitude estimate only; the liquid-phase results up to this instant are unaffected\.$/,
+         function (_t, tK, pBar, gamma) {
+             return 'İDEAL-GAZ KUYRUĞU: sıvı ' + I18N_SAYI(tK) + ' K / '
+                 + I18N_SAYI(pBar) + ' bar\'da tükeniyor ve kalan buhar İDEAL-GAZ'
+                 + ' adyabatik bağıntısıyla genişletiliyor (gamma = '
+                 + I18N_SAYI(gamma) + ', N2O\'nun ideal-gaz değeri: CoolProp 6.8.0,'
+                 + ' 300 K / 1 bar\'da cp/cv = 1,279). Uygulandığı DOYMUŞ BUHAR'
+                 + ' durumunda bu varsayım tutmaz: 293 K doymuş buharda gerçek'
+                 + ' cp/cv 3,107 (2,4 kat) ve gerçek buhar yoğunluğu 158,0 kg/m3,'
+                 + ' p/(RT) ile bulunan 91,2 kg/m3\'e karşı (%-42). Kuyruk eğrisi'
+                 + ' yalnız mertebe kestirimidir; bu ana kadarki sıvı faz'
+                 + ' sonuçları etkilenmez.';
+         }],
         [/^NOTE: minimum channel Reynolds number (\S+) is below the Dittus-Boelter turbulent floor \(~1e4\); the coolant-side coefficient there is an extrapolation\.$/,
          'NOT: en düşük kanal Reynolds sayısı $1, Dittus-Boelter türbülanslı akış tabanının (~1e4) altında; oradaki soğutucu tarafı katsayısı bir dış değer atamasıdır.'],
         [/^GEOMETRY: (\S+) channels of width (\S+) mm exceed the throat circumference \((\S+) mm\) — channels do not physically fit; reduce count\/width\.$/,
@@ -2702,7 +3023,16 @@
        yola devam eder (uydurma hat adı yazılmaz). */
     var HAT_ONEKLERI = {
         'fuel line': 'yakıt hattı',
-        'oxidizer line': 'oksitleyici hattı'
+        'oxidizer line': 'oksitleyici hattı',
+        /* V301/K-C1 (K-A DEVİR 13): ret gövdelerinin durum kodu öneki
+           (reject_body.js HRMAReject.metni '[status] …'). Kod adları
+           hrma/app.py ret gövdelerindeki 'status' değerleridir. */
+        'invalid_input': 'geçersiz girdi',
+        'incomplete_input': 'eksik girdi',
+        'validation_error': 'doğrulama hatası',
+        'incomplete_geometry': 'eksik geometri',
+        'inconsistent_geometry': 'tutarsız geometri',
+        'unresolved_geometry_units': 'geometri birimi çözülemedi'
     };
 
     /* DV36-03 — hibrit patlayıcı dayanağının yakıt bloğu notu

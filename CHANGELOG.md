@@ -11,6 +11,406 @@ listesini taşır.
 
 ---
 
+## 3.0.1 — English
+
+*Not yet released (in preparation). Patch release for the findings of the
+team's test engineer; the solid and liquid pages are still being tested.*
+
+### Hybrid page (test round 1)
+
+- **No more "NASA CEA Offline / NIST WebBook Offline" badges.** The badges in
+  the fuel and oxidizer panels could never show a connection: the CEA check
+  read a local table (no network request), and the NIST parser did not match
+  the real NIST page. Both said "Offline" on every computer, and neither
+  source supplied a number to the calculation. The badges and the page-load
+  probe are removed from the hybrid, solid and liquid pages. Each panel now
+  states the source the calculation actually uses (oxidizer: CoolProp/
+  REFPROP; fuel: HRMA catalogue with the regression-law citation;
+  thermochemistry: Cantera with the mechanism actually used).
+  `/api/database-status` reports "connected / not connected" and "data
+  parsed" separately; CEA has no connection status.
+- **NASA CEA comparison at the end of the hybrid results.** RocketCEA (NASA
+  CEA) is run at the design point of the run (same Pc, O/F and expansion
+  ratio, HRMA's own propellant definitions). The table shows c*, T_c, γ,
+  M, p_e, C_F and ideal vacuum Isp: HRMA ⟷ CEA ⟷ difference. The
+  comparison is advisory and changes no design number. Example N₂O/HTPB:
+  Δc* +0.02 %, ΔT_c +0.06 %. The section is also in the PDF report.
+- **Pintle injector rebuilt.**
+  - One canonical geometry. The results table, the cross-section drawing,
+    the motor summary and the PDF report now show the same holes. Before,
+    one response carried three different pintles; with the fixed defaults
+    the drawn tip had 437 holes of 0.10 mm and a 0.05 mm gap.
+  - When left empty, the pintle diameter is sized from the flow; the fixed
+    25/50 mm defaults are removed. The housing outer diameter is not sized
+    unless you give it (it needs structural and packaging inputs).
+  - New optional inputs: number and diameter of the tip (secondary) holes,
+    annular gap, skip distance, tangential angle. A geometry that cannot
+    deliver the oxidizer flow at the design pressure drop is rejected with
+    the numbers.
+  - Every input says which dimension it is. Secondary holes default to
+    radial. The spray angle is a result, not an input.
+  - The numeric sizing rules are labelled as HRMA choices; Dressler & Bauer
+    (AIAA 2000-3871) does not give them.
+- **Other injector types (showerhead, impinging, swirl, coaxial).**
+  - The injector table and the separate injector panel now show the injector
+    circuit's own geometry. Before, one response carried two injectors:
+    impinging 4 × Ø1.54 mm on screen against 3 × Ø2.11 mm in the circuit;
+    swirl 1 element against 7.
+  - Impinging elements are like-on-like doublets with an even hole count.
+    The default plan is 4 × Ø1.83 mm instead of 3 × Ø2.11 mm, with the same
+    area.
+  - Removed: fields with no meaning in a hybrid (fuel/oxidizer momentum
+    ratio, triplet/quadlet patterns, "fuel post") and pre-filled example
+    numbers. An empty field means sized by the solver, and this is declared.
+    Every field explains what it is.
+  - The separate injector design panel follows the main design and fills
+    itself from the circuit inputs after a calculation.
+  - Velocity and L/D bands without a source are labelled "HRMA heuristic",
+    not "optimal".
+- **Refused calculations explain themselves.** A rejected request (HTTP
+  422) now shows the server's explanation in the interface, not only an
+  error code. The design report and the text export use the canonical
+  injector rows; the text export includes the NASA CEA comparison.
+- **The end-of-burn port now reaches the chamber wall.** When no chamber
+  diameter is given, the grain outer diameter is the final port diameter
+  plus twice an optional residual web (default 0, declared as an
+  idealisation). The old unsourced rule "chamber = 1.5 × final port" left
+  72 % of the loaded fuel unburned in the default design.
+  - Multi-port grains use a single-ring layout.
+  - A chamber diameter you enter is kept. Its unburned-fuel fraction is
+    reported, and a chamber the final ports do not fit in is rejected with
+    the smallest diameter that fits.
+  - This changes the default hybrid numbers: smaller chamber, shorter
+    chamber, Isp −0.01 to −0.28 % (lower achieved L*), and a higher injector
+    plate safety factor (the plate spans the chamber).
+- **Materials panel before the calculation.** Chamber, injector and nozzle
+  materials are selected in a visible panel; the options are every material
+  the engine can model (16 / 17 / 7), with the properties the calculation
+  reads and their sources. An unknown material name is rejected instead of
+  silently replaced.
+- **Tank pressure can be set by the user.** "Tank pressure source":
+  self-pressurised (N₂O saturation pressure at the tank temperature), design
+  pressure drop (LOX/H₂O₂ default), or your tank pressure. Your tank
+  pressure now enters the injector circuit (pressure drop = tank − chamber).
+  - Rejected: a tank pressure that does not exceed the chamber pressure, and
+    for N₂O a tank pressure below the saturation pressure at that
+    temperature.
+  - In supercharged mode the self-pressurised blowdown curve is not
+    published (pressurant expansion and dissolution are not modelled).
+- **Validation:** the "port exceeds chamber" critical warning is issued only
+  for real burn-through. An unsourced 0.8 × chamber rule flagged every
+  default design.
+
+### Liquid page
+
+- The propellant data badge no longer claims "Real-time Data" for a cached
+  or stored record. "Using cached data" and "Connection failed" texts that
+  described a cache that was not used are replaced by what happened: no
+  state-resolved value, or properties could not be loaded, with fields left
+  unchanged. The "Offline store" label is now "Stored copy".
+
+### Fixes from the measurements for the paper (20 October)
+
+- **Hybrid transient and blowdown curve:** the transient solver still
+  stopped the port at 0.8 × chamber diameter, an unsourced rule whose
+  design-side copy was already removed in this patch. With the new grain
+  envelope a single-port chamber equals the final port, so the advisory
+  blowdown curve of a 1 kN, 10 s motor ended at 2.75 s with 3.1 kg of N₂O
+  still in the tank (total impulse 2621 N·s). The web limit now comes from
+  the same grain envelope as the design: the curve runs to oxidiser
+  depletion at 10.15 s (8916 N·s), and the regulated transient reaches the
+  10 s burn time. With four ports the ports now stop where they meet
+  instead of growing to 1.93 × the final port. Headline thrust, Isp and
+  chamber pressure are unchanged.
+- **Injector ΔP/Pc band citation:** the hybrid validation block cited NASA
+  SP-8089 for the 0.15 lower bound, an attribution the module that defines
+  the threshold withdraws. It now cites Sutton & Biblarz 9th ed. Ch. 8 and
+  NASA SP-194 Ch. 5-6.
+- **Complete design package API (`/api/generate-complete-package`):** with
+  CAD enabled it wrote STL files without the manufacturing gates of the STL
+  package. A safety factor below 1, a star grain or a broken throat blend
+  produced files, and an unresolved length unit a raw server error. The
+  same gates now run in the same order, with the same named refusals.
+- **Manufacturing safety gate:** the gate also reads the model-validity
+  flag of the structural block whose safety factor it checks (liquid
+  chamber structure, solid case). A radiatively cooled liquid design and a
+  solid case hotter than its strength data were exported although their
+  structural result was outside the model validity limit; both are now
+  refused by name.
+- **Solid motor pressure solver:** the KNDX and KNSB burn-rate laws are
+  piecewise fits that jump at their regime boundaries (KNDX: −1.8 % at
+  2.57 MPa). When the chamber equilibrium fell inside such a jump, neither
+  branch had a solution, the iteration oscillated, and the example KNDX
+  motor reported 9 of 228 steps as not converged (status NOT_CONVERGED).
+  The solver now falls back to a bracketed root search. At a jump the
+  pressure is held at the boundary with the burn rate that closes the mass
+  balance, which must lie inside the jump; such steps are counted and
+  declared in the solver diagnostics. The example now converges in every
+  step (total impulse +0.018 %). Motors with a burn-rate exponent close to 1
+  (0.65–0.95), which the damped iteration approached too slowly and
+  reported as not converged, now reach their real root. A time step is
+  also no longer accepted on its first iteration with the port mass flux
+  of the previous step (erosive burning depends on it): in the KNSB
+  example the mass-balance residual of one step drops from 7.8e-5 to
+  2e-8.
+- **Fuel-rich hybrid thermochemistry:** the equilibrium had no condensed
+  phase, so on the fuel-rich side (N₂O/HTPB below O/F ≈ 3.2) carbon that
+  should form solid graphite stayed in the gas. At O/F 2 and 20 bar,
+  chamber temperature, c* and vacuum Isp were 11.5 %, 6.7 % and 5.0 % below
+  NASA CEA. Solid carbon C(gr) is now part of the equilibrium wherever the
+  gas is carbon-supersaturated, at every nozzle station; the 29 affected
+  measured points agree with CEA within 0.05 %, and states that are not
+  supersaturated are unchanged. Fuel-rich designs take longer to compute;
+  the c*(O/F) table behind the burn-time curves now asks the equilibrium
+  for c* alone, which keeps the example 1 kN design at O/F 2.5 at 1.0 s
+  (0.5 s without solid carbon, 1.6 s before that change; results are
+  bit-identical either way). The correlation against
+  measured hybrid firings shifts accordingly (hybrid Isp bias +5.4 % →
+  +5.9 %; see VALIDATION_STATUS). The high-fidelity finite-rate kinetics
+  option models the gas phase only; when solid carbon is present it now
+  declines with a stated reason and uses the engineering correlation.
+- **Documentation:** README and the validation status now state the
+  measured CEA agreement instead of an unsupported "≤1.5 % for all pairs",
+  say that the liquid CEA comparison is not an independent check, and
+  correct the injector element and material counts, the test count, the
+  uncertainty wording (a P5–P95 spread, not a credible interval), the
+  random seed, the STL closure claim and the formal-proof counts.
+
+### Fixes from the 22 October review
+
+- **Hybrid fuel table:** choosing ABS or PLA on the hybrid form filled in a
+  fuel density of 1040 or 1250 kg/m³, while the sourced catalogue gives
+  1050 and 1240. The form sends this value to the solver, so an ABS grain
+  came out 0.95 % too long and a PLA grain 0.81 % too short. The form now
+  uses the catalogue values.
+- **Transient analysis panel:** the panel sent only 14 form fields. A
+  four-port design therefore ran as a single-port motor (final port
+  53.7 mm instead of 32.8 mm), and the transient endpoint ignored the
+  residual web thickness. After a main calculation the panel now runs the
+  motor of that calculation. The endpoint reads the residual web through the
+  same check as `/calculate` and declares it when it is omitted.
+- **Tank-pressure refusals in Turkish:** the three refusals of the user
+  tank-pressure mode (tank pressure missing, below the chamber pressure,
+  below the N₂O saturation pressure) are now translated, with the numbers
+  in the local decimal format.
+- **OpenRocket tab:** the fixed side tab covered the right edge of eight
+  hybrid inputs while scrolling, including the arrow of the injector
+  material selector. Pages now keep a margin as wide as the tab.
+
+### Earlier fixes in this patch
+
+- Tank CAD export: a flat head drawn with a safety factor below 1 is
+  refused (Roark Table 11.2 case 10a).
+- Tank STEP label no longer carries raw client text.
+- Motor scene: time-varying flame flicker and the unsourced first shock
+  diamond are removed (no fake animation).
+- Nightly CI fix.
+
+### Known limitations
+
+- CAD/STEP still draws the pintle as a flat plate with equivalent orifices.
+- STEP and STL nozzle volumes differ by 3 % on the example hybrid after the
+  smaller chamber; the two generators are being aligned.
+- In user tank-pressure mode the tank vessel (MEOP) and tank CAD are not
+  produced.
+- Coaxial injector in a self-pressurised N₂O hybrid: the plate uses the
+  automatic pressure drop, not the feed-consistent one; this is declared.
+
+## 3.0.1 — Türkçe
+
+*Henüz yayımlanmadı (hazırlanıyor). Ekibin test mühendisinin bulgularına
+yönelik yama sürümü; katı ve sıvı sayfalarının testi sürüyor.*
+
+### Hibrit sayfası (test turu 1)
+
+- **"NASA CEA Offline / NIST WebBook Offline" rozetleri kalktı.** Yakıt ve
+  oksitleyici panellerindeki rozetler hiçbir koşulda bağlantı gösteremezdi:
+  CEA denetimi yerel bir tabloyu okuyordu (ağ isteği yok), NIST
+  ayrıştırıcısı ise NIST'in gerçek sayfasıyla eşleşmiyordu. İkisi de her
+  bilgisayarda "Offline" yazıyordu ve hiçbiri hesaba sayı vermiyordu.
+  Rozetler ve sayfa açılışındaki yoklama hibrit, katı ve sıvı sayfalarından
+  söküldü. Her panel artık hesabın gerçekten kullandığı kaynağı yazar
+  (oksitleyici: CoolProp/REFPROP; yakıt: HRMA kataloğu ve regresyon
+  yasasının atfı; termokimya: Cantera ve gerçekten kullanılan mekanizma).
+  `/api/database-status` "bağlandı / bağlanamadı" ile "veri okunabildi mi"
+  bilgisini ayrı verir; CEA'nın bağlantı durumu yoktur.
+- **Hibrit sonuçlarının sonunda NASA CEA karşılaştırması.** RocketCEA (NASA
+  CEA) koşumun tasarım noktasında çalıştırılır (aynı Pc, O/F ve genişleme
+  oranı, HRMA'nın kendi itici tanımları). Tablo c*, T_c, γ, M, p_e, C_F ve
+  ideal vakum Isp'yi gösterir: HRMA ⟷ CEA ⟷ fark. Karşılaştırma danışma
+  amaçlıdır, hiçbir tasarım sayısını değiştirmez. Örnek N₂O/HTPB: Δc*
+  +%0,02, ΔT_c +%0,06. Bölüm PDF raporunda da var.
+- **Pintle enjektör yeniden kuruldu.**
+  - Tek kanonik geometri. Sonuç tablosu, kesit çizimi, motor özeti ve PDF
+    raporu artık aynı delikleri gösterir. Önceden tek yanıtta üç farklı
+    pintle vardı; sabit varsayılanlarla çizilen uçta 0,10 mm'lik 437 delik ve
+    0,05 mm boşluk çıkıyordu.
+  - Boş bırakılan pintle çapı akıştan boyutlandırılır; 25/50 mm sabit
+    varsayılanlar kaldırıldı. Gövde dış çapı verilmedikçe boyutlandırılmaz
+    (yapısal ve yerleşim girdisi ister).
+  - Yeni isteğe bağlı girdiler: uç (ikincil) delik sayısı ve çapı, anülüs
+    boşluğu, skip distance, teğet açı. Tasarım basınç düşümünde oksitleyici
+    debisini veremeyen geometri sayılarıyla reddedilir.
+  - Her girdi hangi ölçü olduğunu yazar. İkincil delikler varsayılan olarak
+    radyaldir. Sprey açısı girdi değil sonuçtur.
+  - Sayısal boyutlandırma kuralları "HRMA seçimi" olarak etiketlendi;
+    Dressler & Bauer (AIAA 2000-3871) bunları vermiyor.
+- **Diğer enjektör tipleri (duş başlığı, çarpışmalı, swirl, koaksiyel).**
+  - Enjektör tablosu ve ayrı enjektör paneli artık enjektör devresinin
+    kendi geometrisini gösterir. Önceden tek yanıtta iki enjektör vardı:
+    çarpışmalıda ekranda 4 × Ø1,54 mm, devrede 3 × Ø2,11 mm; swirl'de 1
+    eleman ⟷ 7.
+  - Çarpışmalı elemanlar çift delik sayılı benzer-akışkan doublet'tir.
+    Varsayılan plan, aynı alanla 3 × Ø2,11 mm yerine 4 × Ø1,83 mm.
+  - Kaldırılanlar: hibritte anlamı olmayan alanlar (yakıt/oksitleyici
+    momentum oranı, triplet/quadlet desenleri, "yakıt direği") ve ön dolu
+    örnek sayılar. Boş alan çözücünün boyutlandırması demektir ve beyan
+    edilir. Her alan ne olduğunu açıklar.
+  - Ayrı enjektör tasarım paneli ana tasarımı izler; hesaptan sonra devrenin
+    girdileriyle kendini doldurur.
+  - Kaynaksız hız ve L/D bantları "optimal" değil "HRMA buluşsal eşiği"
+    olarak etiketlendi.
+- **Reddedilen hesap nedenini söyler.** Reddedilen istek (HTTP 422) artık
+  arayüzde yalnız hata kodunu değil sunucunun açıklamasını gösterir. Tasarım
+  raporu ve metin dışa aktarımı kanonik enjektör satırlarını kullanır; metin
+  dışa aktarımı NASA CEA karşılaştırmasını içerir.
+- **Yanma sonu port artık kamara cidarına ulaşıyor.** Kamara çapı
+  verilmediğinde grain dış çapı, son port çapı artı iki kat isteğe bağlı
+  artık ettir (varsayılan 0, idealizasyon olarak beyanlı). Eski kaynaksız
+  "kamara = 1,5 × son port" kuralı varsayılan tasarımda yüklenen yakıtın
+  %72'sini yanmadan bırakıyordu.
+  - Çok portlu grain'de tek halka dizilimi kullanılır.
+  - Girdiğiniz kamara çapı korunur. Yanmayan yakıt kesri raporlanır; son
+    portların sığmadığı kamara, sığan en küçük çapla birlikte reddedilir.
+  - Bu, varsayılan hibrit sayılarını değiştirir: daha küçük ve daha kısa
+    kamara, Isp −%0,01…−%0,28 (gerçekleşen L* düşer), daha yüksek enjektör
+    plakası emniyet katsayısı (plaka kamara çapını kaplar).
+- **Hesaptan önce malzeme paneli.** Yanma odası, enjektör ve nozul
+  malzemeleri görünür bir panelden seçilir. Seçenekler motorun
+  modelleyebildiği bütün malzemelerdir (16 / 17 / 7); hesabın okuduğu
+  özellikler ve kaynakları gösterilir. Bilinmeyen malzeme adı sessizce
+  değiştirilmez, reddedilir.
+- **Tank basıncını kullanıcı belirleyebilir.** "Tank basıncı kaynağı": kendi
+  basınçlı (tank sıcaklığında N₂O doyma basıncı), tasarım basınç düşümü
+  (LOX/H₂O₂ varsayılanı) ya da sizin tank basıncınız. Girdiğiniz tank
+  basıncı artık enjektör devresine girer (basınç düşümü = tank − oda).
+  - Reddedilenler: oda basıncını aşmayan tank basıncı ve N₂O'da o
+    sıcaklıktaki doyma basıncının altındaki tank basıncı.
+  - Takviyeli kipte kendinden basınçlı boşalma eğrisi yayımlanmaz
+    (basınçlandırıcı genleşmesi ve çözünmesi modellenmiyor).
+- **Doğrulama:** "port kamarayı aşıyor" kritik uyarısı yalnız gerçek delinmede
+  verilir. Kaynaksız 0,8 × kamara kuralı her varsayılan tasarımı
+  işaretliyordu.
+
+### Sıvı sayfası
+
+- İtici veri rozeti önbellek ya da saklanan kayıt için artık "Real-time
+  Data" demiyor. Kullanılmayan bir önbelleği anlatan "Using cached data" ve
+  "Connection failed" metinlerinin yerine ne olduğu yazılır: hâl çözümlü
+  değer yok ya da özellikler alınamadı, alanlar değiştirilmedi. "Offline
+  store" etiketi "Stored copy" oldu.
+
+### Makale ölçümlerinden çıkan düzeltmeler (20 Ekim)
+
+- **Hibrit geçici çözüm ve blowdown eğrisi:** geçici çözücü portu hâlâ
+  0,8 × kamara çapında durduruyordu. Bu kaynaksız kuralın tasarım tarafındaki
+  kopyası bu yamada zaten kaldırılmıştı. Yeni tane zarfıyla tek portlu
+  kamara son port çapına eşit olduğundan 1 kN, 10 s'lik motorun danışma
+  blowdown eğrisi 2,75 s'de bitiyor, tankta 3,1 kg N₂O kalıyordu (toplam
+  impuls 2621 N·s). Web sınırı artık tasarımla aynı tane zarfından okunur:
+  eğri 10,15 s'de oksitleyici bitimine kadar gider (8916 N·s), düzenlenmiş
+  geçici koşu 10 s yanma süresine ulaşır. Dört portta portlar birbirine
+  değdikleri yerde durur; eskiden son port çapının 1,93 katına kadar
+  büyüyebiliyordu. Başlık itki, Isp ve kamara basıncı değişmedi.
+- **Enjektör ΔP/Pc bandı künyesi:** hibrit doğrulama bloğu 0,15 alt sınırı
+  için NASA SP-8089'u gösteriyordu; eşiği tanımlayan modül bu atfı geri
+  çekiyor. Artık Sutton & Biblarz 9. baskı Böl. 8 ve NASA SP-194 Böl. 5-6.
+- **Tam tasarım paketi API'si (`/api/generate-complete-package`):** CAD
+  açıkken STL dosyalarını STL paketinin imalat kapılarından geçirmeden
+  yazıyordu. Emniyet katsayısı 1'in altında, yıldız tane ya da bozuk boğaz
+  yayı dosya üretiyor, çözülemeyen uzunluk birimi ham sunucu hatası
+  veriyordu. Aynı kapılar artık aynı sırayla ve aynı adlı retlerle çalışır.
+- **İmalat emniyet kapısı:** kapı, emniyet katsayısını okuduğu yapısal
+  bloğun model geçerlilik bayrağını da okur (sıvı kamara yapısı, katı
+  kasa). Radyatif soğutmalı bir sıvı tasarım ve dayanım verisinden sıcak
+  bir katı kasa, yapısal sonuçları model geçerlilik sınırı dışındayken dışa
+  aktarılıyordu; ikisi de artık adıyla reddedilir.
+- **Katı motor basınç çözücüsü:** KNDX ve KNSB yanma hızı yasaları rejim
+  sınırlarında sıçrayan parçalı fitlerdir (KNDX: 2,57 MPa'da −%1,8). Kamara
+  dengesi böyle bir sıçramanın içine düşünce iki dalda da çözüm yoktu,
+  yineleme salınıyor ve örnek KNDX motoru 228 adımın 9'unu yakınsamamış
+  sayıyordu (durum NOT_CONVERGED). Çözücü artık parantezli kök aramasına
+  düşer. Sıçramada basınç sınırda tutulur ve kütle dengesini kapatan yanma
+  hızı kullanılır; bu hız sıçramanın içinde kalmak zorundadır. Bu adımlar
+  sayılır ve çözücü tanısında beyan edilir. Örnek artık her adımda yakınsıyor
+  (toplam impuls +%0,018). Yanma hızı üssü 1'e yakın motorlar (0,65–0,95)
+  sönümlü yinelemeyle fazla yavaş yaklaşıyor ve "yakınsamadı" sayılıyordu;
+  artık gerçek köklerine ulaşıyor. Bir zaman adımı artık ilk yinelemede bir
+  önceki adımın port kütle akısıyla kabul edilmiyor (erozif yanma ona
+  bağlı): KNSB örneğinde bir adımın kütle dengesi artığı 7,8e-5'ten
+  2e-8'e iniyor.
+- **Yakıtça zengin hibrit termokimyası:** dengede yoğun faz yoktu; yakıtça
+  zengin tarafta (N₂O/HTPB'de O/F ≈ 3,2'nin altı) katı grafit olarak
+  çökmesi gereken karbon gazda kalıyordu. O/F 2 ve 20 bar'da kamara
+  sıcaklığı, c* ve vakum Isp NASA CEA'nın %11,5, %6,7 ve %5,0 altındaydı.
+  Katı karbon C(gr) artık gazın karbonca aşırı doymuş olduğu her lüle
+  istasyonunda dengeye katılır; etkilenen 29 ölçüm noktası CEA ile %0,05
+  içinde uyuşuyor, aşırı doymamış durumlar değişmedi. Yakıtça zengin
+  tasarımların hesabı daha uzun sürer; yanma süresi eğrilerinin
+  arkasındaki c*(O/F) tablosu artık dengeden yalnız c* istiyor, bu sayede
+  O/F 2,5'teki 1 kN örnek tasarım 1,0 s'de kalıyor (katı karbonsuz 0,5 s,
+  bu değişiklikten önce 1,6 s; sonuçlar iki durumda da bit-aynı). Ölçülen
+  hibrit ateşlemeleriyle korelasyon buna göre kaydı
+  (hibrit Isp sapması +%5,4 → +%5,9; bkz. VALIDATION_STATUS). Yüksek
+  doğruluklu sonlu hız kinetiği seçeneği yalnız gaz fazını modeller; katı
+  karbon varken artık gerekçesini söyleyerek devreden çıkar ve mühendislik
+  korelasyonunu kullanır.
+- **Belgeler:** README ve doğrulama durumu, desteksiz "bütün çiftlerde
+  ≤%1,5" yerine ölçülen CEA uyumunu yazıyor; sıvıda CEA karşılaştırmasının
+  bağımsız bir denetim olmadığını söylüyor; enjektör eleman ve malzeme
+  sayılarını, test sayısını, belirsizlik ifadesini (güven aralığı değil
+  P5–P95 yayılımı), rastgele tohumu, STL kapalılık iddiasını ve biçimsel
+  ispat sayılarını düzeltiyor.
+
+### 22 Ekim denetiminden düzeltmeler
+
+- **Hibrit yakıt tablosu:** hibrit formunda ABS ya da PLA seçilince yakıt
+  yoğunluğu 1040 ya da 1250 kg/m³ dolduruluyordu; kaynaklı katalog 1050 ve
+  1240 diyor. Form bu değeri çözücüye gönderdiği için ABS tanesi %0,95 uzun,
+  PLA tanesi %0,81 kısa çıkıyordu. Form artık katalog değerlerini kullanır.
+- **Geçici analiz paneli:** panel yalnız 14 form alanı gönderiyordu. Bu
+  yüzden 4 portlu bir tasarım tek portlu motor olarak çözülüyordu (son port
+  32,8 mm yerine 53,7 mm) ve geçici analiz ucu artık et kalınlığını yok
+  sayıyordu. Ana hesaptan sonra panel artık o hesabın motorunu koşar. Uç
+  artık eti `/calculate` ile aynı denetimden okur, verilmezse bunu beyan
+  eder.
+- **Tank basıncı retleri Türkçe:** kullanıcı tank basıncı kipinin üç ret
+  cümlesi (tank basıncı yok, oda basıncının altında, N₂O doyma basıncının
+  altında) artık çevriliyor, sayılar yerel ondalık biçimiyle.
+- **OpenRocket sekmesi:** sabit yan sekme, sayfa kaydırılırken hibritteki 8
+  girdinin sağ kenarını örtüyordu; enjektör malzemesi seçicisinin oku da
+  bunlara dahil. Sayfalar artık sağda sekme genişliği kadar boşluk bırakır.
+
+### Bu yamadaki önceki düzeltmeler
+
+- Tank CAD dışa aktarımı: emniyet katsayısı 1'in altında çizilen düz kapak
+  reddedilir (Roark Tablo 11.2 durum 10a).
+- Tank STEP etiketine istemci metni ham girmez.
+- Motor sahnesi: zamanla titreyen alev ve kaynaksız ilk şok elması kaldırıldı
+  (sahte animasyon yok).
+- Gece CI düzeltmesi.
+
+### Bilinen sınırlar
+
+- CAD/STEP pintle'ı hâlâ eşdeğer orifisli düz plaka olarak çiziyor.
+- Küçülen kamarayla örnek hibritte STEP ve STL lüle hacimleri %3 farklı; iki
+  üreteç hizalanıyor.
+- Kullanıcı tank basıncı kipinde tank kabı (MEOP) ve tank CAD'i üretilmez.
+- Kendinden basınçlı N₂O hibritte koaksiyel enjektör: plaka beslemeyle
+  tutarlı basınç düşümünü değil otomatik değeri kullanır; bu beyan edilir.
+
+---
+
 ## 3.0.0 — English
 
 *Released 2026-10-15.*

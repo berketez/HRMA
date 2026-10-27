@@ -596,15 +596,28 @@ class TestEnergyAndContinuity:
             assert rho * V * A_c == pytest.approx(mdot_ch, rel=1e-9)
 
     def test_dittus_boelter_station_application(self):
-        # h_coolant[i] = Nu(Re_i,Pr_i)*k/D_h — uçtan uca zincir doğrulaması
+        # h_coolant[i] = Nu(Re_i,Pr_i)*k/D_h * ST_i — uçtan uca zincir.
+        # V301/L-REJ (26 Eki, Berke "Modeli bugün düzelt"): sıvı soğutucuda
+        # yayımlanan h_c artık Sieder-Tate (mu_b/mu_w)^0,14 çarpanını taşır
+        # (NASA SP-125 Eş. 4-23); çarpan istasyon başına
+        # ``sieder_tate_factor`` dizisinde yayımlanır ve burada BAĞIMSIZ
+        # olarak tablodan yeniden kurulur. Eski beklenti çarpansızdı.
+        from hrma.analysis.regen_cooling import sieder_tate_factor
         r = make_regen()
         res = r.solve()
         Dh = r.hydraulic_diameter
-        for T, Re, h in zip(res['T_coolant_K'], res['reynolds'],
-                            res['h_coolant_W_m2K']):
+        for T, Tw, Re, h, st in zip(res['T_coolant_K'], res['T_wall_cold_K'],
+                                    res['reynolds'], res['h_coolant_W_m2K'],
+                                    res['sieder_tate_factor']):
             p = water_properties(T)
             nu = dittus_boelter_nu(Re, p['prandtl'], heating=True)
-            assert h == pytest.approx(nu * p['conductivity'] / Dh, rel=1e-9)
+            st_bagimsiz = sieder_tate_factor(
+                p['viscosity'], water_properties(Tw)['viscosity'])
+            # Çarpan, sabit noktanın SON adımından bir önceki T_wc ile
+            # kurulur (yakınsama toleransı 1e-3 K) -> yeni iddia için rel 1e-5.
+            assert st == pytest.approx(st_bagimsiz, rel=1e-5)
+            assert h == pytest.approx(nu * p['conductivity'] / Dh * st,
+                                      rel=1e-9)
 
     def test_wall_series_circuit_consistency(self):
         # q = h_g*(Taw - T_hot) = h_c*(T_cold - T_coolant) her istasyonda
@@ -618,8 +631,11 @@ class TestEnergyAndContinuity:
             thot = res['T_wall_hot_K'][i]
             tcold = res['T_wall_cold_K'][i]
             tcool = res['T_coolant_K'][i]
+            # V301/L-REJ: soğutucu tarafı alanı kanat oranıyla ölçeklenir
+            # (A_eff/A_gaz; eskiden su/RP-1'de 1 sayılıyordu).
+            ar = res['fin_area_ratio'][i]
             assert q == pytest.approx(hg * (taw - thot), rel=1e-4)
-            assert q == pytest.approx(hc * (tcold - tcool), rel=1e-4)
+            assert q == pytest.approx(hc * ar * (tcold - tcool), rel=1e-4)
 
 
 # ======================================================================
@@ -902,7 +918,12 @@ class TestPropertyTableEnvelope:
     def test_in_band_case_reports_no_clamp(self):
         s = make_regen(coolant_props_source='table').solve()['summary']
         assert s['property_table_clamped_stations'] == 0
-        assert not [w for w in s['warnings'] if 'PROPERTY RANGE' in w]
+        # V301/L-REJ: YIĞIN bandı içinde -> yığın klamp uyarısı yok. Cidar
+        # tarafının (Sieder-Tate mu_w) bant dışı beyanı AYRI adlıdır
+        # ('PROPERTY RANGE (WALL)') ve bu devrede soğutucu tarafı cidar
+        # 400 K'yi aştığı için beklenir.
+        assert not [w for w in s['warnings']
+                    if w.startswith('PROPERTY RANGE:')]
 
     def test_out_of_band_rp1_warns(self):
         r = RegenCooling(

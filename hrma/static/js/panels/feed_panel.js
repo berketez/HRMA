@@ -529,12 +529,12 @@
             endpoint: '/api/slosh-analysis',
             motorTypes: ['liquid', 'hybrid'], render: renderSlosh,
             fields: [
-                ['radius', 'Tank Radius (m)', 0.3, 0.01, 'panel.feed.fTankRadius'],
-                ['fill_height', 'Fill Height (m)', 0.6, 0.01, 'panel.feed.fFillHeight'],
-                ['g_eff', 'Axial Acceleration (m/s²)', 9.81, 0.1, 'panel.feed.fAxialAccel'],
-                ['fluid_density', 'Propellant Density (kg/m³)', 810, 1, 'panel.feed.fPropDensity'],
-                ['baffle_width_ratio', 'Baffle Width w/R', 0.15, 0.01, 'panel.feed.fBaffleW'],
-                ['baffle_depth_ratio', 'Baffle Depth d/R', 0.10, 0.01, 'panel.feed.fBaffleD'],
+                ['radius', 'Tank Radius (m)', 0.3, 0.01, 'panel.feed.fTankRadius', 'panel.feed.help.slosh.radius'],
+                ['fill_height', 'Fill Height (m)', 0.6, 0.01, 'panel.feed.fFillHeight', 'panel.feed.help.slosh.fill_height'],
+                ['g_eff', 'Axial Acceleration (m/s²)', 9.81, 0.1, 'panel.feed.fAxialAccel', 'panel.feed.help.slosh.g_eff'],
+                ['fluid_density', 'Propellant Density (kg/m³)', 810, 1, 'panel.feed.fPropDensity', 'panel.feed.help.slosh.fluid_density'],
+                ['baffle_width_ratio', 'Baffle Width w/R', 0.15, 0.01, 'panel.feed.fBaffleW', 'panel.feed.help.slosh.baffle_width_ratio'],
+                ['baffle_depth_ratio', 'Baffle Depth d/R', 0.10, 0.01, 'panel.feed.fBaffleD', 'panel.feed.help.slosh.baffle_depth_ratio'],
             ],
             suggest: function (m) {
                 const sug = {};
@@ -560,17 +560,17 @@
                 + 'volume and initial pressure. Unused fields are ignored per mode.',
             noteKey: 'panel.feed.pressurantNote',
             fields: [
-                ['mode', 'Architecture', 'regulated', PRESS_MODES, 'panel.feed.fArchitecture'],
-                ['gas', 'Pressurant Gas', 'helium', GASES, 'panel.feed.fGas'],
-                ['propellant_volume', 'Propellant Volume (m³)', 0.5, 0.01, 'panel.feed.fPropVolume'],
-                ['initial_temperature', 'Gas Temperature (K)', 293, 1, 'panel.feed.fGasTemp'],
-                ['tank_pressure', 'Tank Pressure (bar) [reg]', 20, 1, 'panel.feed.fTankPressure'],
-                ['storage_pressure', 'Storage Pressure (bar) [reg]', 200, 5, 'panel.feed.fStoragePressure'],
-                ['regulator_margin', 'Regulator Margin [reg]', 0.10, 0.01, 'panel.feed.fRegMargin'],
-                ['collapse_factor', 'Collapse Factor [reg]', 1.0, 0.05, 'panel.feed.fCollapse'],
-                ['initial_ullage_volume', 'Initial Ullage Vol (m³) [bd]', 0.10, 0.01, 'panel.feed.fUllage'],
-                ['initial_pressure', 'Initial Pressure (bar) [bd]', 30, 1, 'panel.feed.fInitialPressure'],
-                ['polytropic_n', 'Polytropic n [bd]', 1.2, 0.05, 'panel.feed.fPolytropic'],
+                ['mode', 'Architecture', 'regulated', PRESS_MODES, 'panel.feed.fArchitecture', 'panel.feed.help.pressurant.mode'],
+                ['gas', 'Pressurant Gas', 'helium', GASES, 'panel.feed.fGas', 'panel.feed.help.pressurant.gas'],
+                ['propellant_volume', 'Propellant Volume (m³)', 0.5, 0.01, 'panel.feed.fPropVolume', 'panel.feed.help.pressurant.propellant_volume'],
+                ['initial_temperature', 'Gas Temperature (K)', 293, 1, 'panel.feed.fGasTemp', 'panel.feed.help.pressurant.initial_temperature'],
+                ['tank_pressure', 'Tank Pressure (bar) [reg]', 20, 1, 'panel.feed.fTankPressure', 'panel.feed.help.pressurant.tank_pressure'],
+                ['storage_pressure', 'Storage Pressure (bar) [reg]', 200, 5, 'panel.feed.fStoragePressure', 'panel.feed.help.pressurant.storage_pressure'],
+                ['regulator_margin', 'Regulator Margin [reg]', 0.10, 0.01, 'panel.feed.fRegMargin', 'panel.feed.help.pressurant.regulator_margin'],
+                ['collapse_factor', 'Collapse Factor [reg]', 1.0, 0.05, 'panel.feed.fCollapse', 'panel.feed.help.pressurant.collapse_factor'],
+                ['initial_ullage_volume', 'Initial Ullage Vol (m³) [bd]', 0.10, 0.01, 'panel.feed.fUllage', 'panel.feed.help.pressurant.initial_ullage_volume'],
+                ['initial_pressure', 'Initial Pressure (bar) [bd]', 30, 1, 'panel.feed.fInitialPressure', 'panel.feed.help.pressurant.initial_pressure'],
+                ['polytropic_n', 'Polytropic n [bd]', 1.2, 0.05, 'panel.feed.fPolytropic', 'panel.feed.help.pressurant.polytropic_n'],
             ],
             suggest: function (m) {
                 const sug = {};
@@ -588,11 +588,11 @@
             endpoint: '/api/water-hammer',
             motorTypes: ['liquid', 'hybrid', 'solid'], render: renderWaterHammer,
             fields: [
-                ['fluid', 'Line Fluid', 'water', WH_FLUIDS, 'panel.feed.fLineFluid'],
-                ['line_length_m', 'Line Length (m)', 20, 0.5, 'panel.feed.fLineLength'],
-                ['line_id_mm', 'Line Inner Diameter (mm)', 25, 1, 'panel.feed.fLineId'],
-                ['wall_thickness_mm', 'Wall Thickness (mm)', 2, 0.1, 'common.f.wallThicknessMm'],
-                ['working_pressure_bar', 'Working Pressure (bar)', 20, 1, 'panel.feed.fWorkingPressure'],
+                ['fluid', 'Line Fluid', 'water', WH_FLUIDS, 'panel.feed.fLineFluid', 'panel.feed.help.water_hammer.fluid'],
+                ['line_length_m', 'Line Length (m)', 20, 0.5, 'panel.feed.fLineLength', 'panel.feed.help.water_hammer.line_length_m'],
+                ['line_id_mm', 'Line Inner Diameter (mm)', 25, 1, 'panel.feed.fLineId', 'panel.feed.help.water_hammer.line_id_mm'],
+                ['wall_thickness_mm', 'Wall Thickness (mm)', 2, 0.1, 'common.f.wallThicknessMm', 'panel.feed.help.water_hammer.wall_thickness_mm'],
+                ['working_pressure_bar', 'Working Pressure (bar)', 20, 1, 'panel.feed.fWorkingPressure', 'panel.feed.help.water_hammer.working_pressure_bar'],
                 // ÖH D22 / OH-D18-09 — ÇALIŞMA BASINCININ REFERANS DÜZLEMİ.
                 // D18'de (termo P4B4-09) modül bu sayıyı iki ZIT sözleşmeyle
                 // kullandığı için kapı kondu: düzlem verilmezse modül İKİ
@@ -610,10 +610,10 @@
                 // aynıysa yayımlanır, ayrışırsa 400 gelir ve kullanıcı bu
                 // alandan düzlemi seçerek hükmü kazanır.
                 ['working_pressure_reference', 'Working Pressure Reference', '',
-                 WH_PRESSURE_REFS, 'panel.feed.fWorkingPressureRef'],
-                ['mdot_kg_s', 'Mass Flow (kg/s)', 5, 0.1, 'panel.feed.fMassFlow'],
-                ['valve_closure_time_ms', 'Valve Closure Time (ms)', 50, 1, 'panel.feed.fValveTime'],
-                ['pipe_material', 'Pipe Material', 'ss_304', PIPE_MATERIALS, 'panel.feed.fPipeMaterial'],
+                 WH_PRESSURE_REFS, 'panel.feed.fWorkingPressureRef', 'panel.feed.help.water_hammer.working_pressure_reference'],
+                ['mdot_kg_s', 'Mass Flow (kg/s)', 5, 0.1, 'panel.feed.fMassFlow', 'panel.feed.help.water_hammer.mdot_kg_s'],
+                ['valve_closure_time_ms', 'Valve Closure Time (ms)', 50, 1, 'panel.feed.fValveTime', 'panel.feed.help.water_hammer.valve_closure_time_ms'],
+                ['pipe_material', 'Pipe Material', 'ss_304', PIPE_MATERIALS, 'panel.feed.fPipeMaterial', 'panel.feed.help.water_hammer.pipe_material'],
             ],
             suggest: function (m) {
                 const sug = {};
@@ -637,8 +637,18 @@
         return '<label' + (key ? ' data-i18n="' + key + '"' : '') + '>' + T(key, text) + '</label>';
     }
 
+    // v3.0.1 N-girdi-1: 6. eleman alanın ipucu anahtarı (TABS'ta LİTERAL);
+    // işaretleme ortak bileşenden (field_help.js → HRMAHelp), yoksa basılmaz.
+    function helpHtml(key) {
+        if (!key || !window.HRMAHelp || typeof window.HRMAHelp.html !== 'function') return '';
+        return window.HRMAHelp.html(key, T(key, ''));
+    }
+
     function fieldHtml(tabKey, f) {
         const fid = f[0], label = f[1], def = f[2], step = f[3], labelKey = f[4];
+        // Etiket + ipucu tek satırda (güvertenin `.ad-field-head` başlığı).
+        const head = '<div class="ad-field-head">' + labelHtml(labelKey, label)
+            + helpHtml(f[5]) + '</div>';
         const id = fieldDom(tabKey, fid);
         if (Array.isArray(step)) {
             const opts = step.map(function (o) {
@@ -646,10 +656,10 @@
                     + (o[2] ? ' data-i18n="' + o[2] + '"' : '')
                     + '>' + T(o[2], o[1]) + '</option>';
             }).join('');
-            return '<div class="form-group">' + labelHtml(labelKey, label)
+            return '<div class="form-group">' + head
                 + '<select id="' + id + '" data-field="' + fid + '">' + opts + '</select></div>';
         }
-        return '<div class="form-group">' + labelHtml(labelKey, label)
+        return '<div class="form-group">' + head
             + '<input type="number" id="' + id + '" data-field="' + fid + '" value="'
             + def + '" step="' + step + '"></div>';
     }

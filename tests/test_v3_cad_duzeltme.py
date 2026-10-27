@@ -307,6 +307,32 @@ def _step_olc(yollar, d):
     return olcum
 
 
+#: V301 bilinen C1 (22 Eki 2026): lüle HACMİ uyarlamalı integralle okunur.
+#: ÖLÇÜLDÜ (``docs/scofield/raw/OH/V301/bilinen/cad/once_c1.json``): OCC'nin
+#: varsayılan hacmi (build123d ``.volume`` = FreeCAD ``Shape.Volume`` yolu)
+#: dönel B-spline lüle yüzeyinde örnek hibritte +%2,50, katıda +%1,48
+#: yanılıyor; ``BRepGProp.VolumeProperties_s(.., eps, True)`` analitik
+#: kâhine (aynı noktalar + et ile pi*int(2rw + w^2)dz) 1,4e-4 içinde. Ürün
+#: aynı okumayı STEP README'sinde salık verir (``STEP_NOZZLE_VOLUME_NOTE``).
+#: Bu sayı bir kabul eşiği DEĞİL, okuyucunun integral hassasiyetidir; hacim
+#: toleransı (``TOLERANS['hacim_bagil']``) DEĞİŞMEDİ.
+STEP_HACIM_EPS = 1e-7
+
+
+def _step_hacim_uyarlamali(yol):
+    """STEP dosyasındaki katıların toplam hacmi — OCC uyarlamalı integral."""
+    pytest.importorskip('build123d')
+    from build123d import import_step
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    toplam = 0.0
+    for kati in import_step(yol).solids():
+        g = GProp_GProps()
+        BRepGProp.VolumeProperties_s(kati.wrapped, g, STEP_HACIM_EPS, True)
+        toplam += g.Mass()
+    return toplam
+
+
 @pytest.fixture(scope='module')
 def step_olcum(hibrit_paket):
     """Hibrit paketin STEP ölçümü (``_step_olc``)."""
@@ -376,9 +402,17 @@ class TestH2LuleEti:
                                               ['lule_eti'],
                                               abs=_tol('stl_mm'))
 
-    def test_ayni_paketteki_iki_lule_hacmi_esit(self, hibrit_paket,
-                                                step_olcum):
-        v_step = step_olcum['nozzle']['volume']
+    def test_ayni_paketteki_iki_lule_hacmi_esit(self, hibrit_paket):
+        """V301 bilinen C1 (22 Eki): eski xfail BORÇ KAYDI kapandı.
+
+        Kayıt 'profiller farklı' diyordu; ÖLÇÜLDÜ (``docs/scofield/raw/OH/
+        V301/bilinen/cad``): iki üretecin iç konturu aynı noktalardan geçiyor
+        (B-spline ⟷ çokgen int r dz bağıl farkı 2e-7). %3,06'nın +%2,50'si
+        STEP'i okuyan OCC VARSAYILAN hacmiydi, -%0,64'ü STL'in 32 kesitli
+        çokgen açığı. Profil artık ayrıca TEK kaynaktan
+        (``cad_visualization.nozzle_wall_profile``) ve STEP hacmi uyarlamalı
+        integralle okunur (``_step_hacim_uyarlamali``)."""
+        v_step = _step_hacim_uyarlamali(hibrit_paket['step']['nozzle'])
         v_stl = float(_stl(hibrit_paket, 'nozzle').volume)
         assert abs(v_stl / v_step - 1.0) <= _tol('hacim_bagil'), (
             f'STEP {v_step:.0f} mm³ ⟷ STL {v_stl:.0f} mm³')
@@ -621,11 +655,26 @@ class TestH5KapiDallari:
     def test_tank_dallari(self):
         from hrma.export.cad_visualization import (
             tank_manufacturing_safety_refusals as tank)
+        from tests.test_cv0_tank_kapak import KARAR_SF_ESIGI, kapak_kahini
+
+        # ÖH V31 CV-0 — ÇEVRİLDİ (19 Eki; ana model izni, dört koşul, koşul
+        # 1; docs/scofield/raw/OH/V31/cv0/etkilenen_dugumler.md). Bu düğüm
+        # GÖVDE dallarını sınar; kapı artık çizilen düz kapağı da hesaplar
+        # ve kapak girdisi (çap, işletme basıncı, malzeme) olmayan gövdeyi
+        # adıyla reddeder. Girdiye kapağı YETERLİ, açık bir kapak eklendi;
+        # kapak SF'si aşağıda bağıntıdan (Roark 11.2 durum 10a) hesaplanıp
+        # eşiğin üstünde gösterilir. Gövde iddiaları AYNEN durur.
+        kapak = {'diameter': 300.0, 'pressure_rating': 0.1,
+                 'material_key': 'al_2024_t3'}
 
         def t(sf=2.5, cizilen=3.0, pv=3.0):
-            return {'dimensions': {'wall_thickness': cizilen},
-                    'structural': {'safety_factor': sf},
+            return {'dimensions': {'wall_thickness': cizilen,
+                                   'diameter': kapak['diameter']},
+                    'structural': {'safety_factor': sf,
+                                   'pressure_rating': kapak['pressure_rating'],
+                                   'material_key': kapak['material_key']},
                     'pressure_vessel': {'wall_thickness_used_mm': pv}}
+        assert kapak_kahini(t())['sf'] >= KARAR_SF_ESIGI
         assert tank({'fuel_tank': t(), 'oxidizer_tank': t()}) == []
         r = tank({'fuel_tank': t(sf=0.8), 'oxidizer_tank': t(pv=2.0)})
         assert sorted((x['part'], x['reason']) for x in r) == [
@@ -696,6 +745,12 @@ class TestH5Uclar:
             ca[k] = 1.5
         md['structural_analysis']['thermal_analysis']['strength_derating'][
             'exceeds_melting_point'] = False
+        # ÖH V301 / B5 (20 Eki) — GEREKÇELİ GÜNCELLEME: kapı artık SF'nin
+        # okunduğu bloğun KENDİ geçerlilik bayrağını da okur
+        # (``chamber_analysis.model_validity_limit_exceeded``; örnek hibritte
+        # True). Testin öncülü "geçerlilik içinde yayımlasaydı" olduğu için
+        # o bayrak da False'a çekilir; iddia (STEP iner) aynen durur.
+        ca['model_validity_limit_exceeded'] = False
         md['structural_analysis']['nozzle_analysis'][
             'throat_thickness_used_mm'] = md['nozzle_geometry'][
                 'wall_thickness']
@@ -1252,7 +1307,17 @@ def tank_paket(client, tmp_path_factory):
     r = _sessiz(client.post, ENDPOINTS['liquid'],
                 json=calculate_payload('liquid', f), headers=HEADERS)
     assert r.status_code == 200
-    pt = r.get_json()['propellant_tanks']
+    # ÖH V31 CV-0 — ÇEVRİLDİ (19 Eki; ana model izni, dört koşul, koşul 1;
+    # docs/scofield/raw/OH/V31/cv0/etkilenen_dugumler.md). Bu fikstürün
+    # testleri tank STEP/STL GEOMETRİSİNİ sınar. Örnek tankların çizilen
+    # 3 mm düz kapağı artık imalat kapısında hesaplanır ve yetersizdir
+    # (SF < 1 -> 422; tests/test_cv0_tank_kapak.py). Girdi, AYNI geometrinin
+    # kapağı YETERLİ açık gövdesine çevrildi: yalnız işletme basıncı
+    # düşürülür (σ ∝ q); ``kapagi_yeterli`` her tankın kapak SF'sini
+    # bağıntıdan hesaplayıp hedefe eşit olduğunu denetler. Çap, boy, cidar,
+    # hacim, kütle ve iç yapılar değişmez; geometri iddiaları AYNEN durur.
+    from tests.test_cv0_tank_kapak import kapagi_yeterli
+    pt = kapagi_yeterli(r.get_json()['propellant_tanks'])
     rr = _sessiz(client.post, '/export_tank_cad', json={'tank_data': pt},
                  headers=HEADERS)
     assert rr.status_code == 200, rr.get_data(as_text=True)[:400]
@@ -1329,7 +1394,18 @@ class TestH4Tank:
         kunye = _step_adi(os.path.join(tank_paket['dir'], f'{ad}.step'))
         duz = kunye.replace('_', '')
         assert 'flat-endedcylinder' in duz
-        assert 'structuraladequacyofthedrawnflatheadswasNOTcomputed' in duz
+        # ÖH V31 CV-0 kalem 3 — ÇEVRİLDİ (19 Eki; ana model izni, dört
+        # koşul, koşul 1 + 3). Eski iddia künyenin "adequacy ... NOT
+        # computed" demesiydi; kart bu beyanı hesaplanan kapak SF'si ve
+        # kapının hükmüyle DEĞİŞTİRİR. Beklenti ürün çıktısından kopyalanmaz:
+        # SF bu testte bağıntıdan (Roark 11.2 durum 10a, ``kapak_kahini``)
+        # hesaplanır, cümle biçimi (3 ondalık) ``tank_head_declaration``
+        # sözleşmesidir. Girdi fikstürde kapağı yeterli gövdedir.
+        from tests.test_cv0_tank_kapak import kapak_kahini
+        assert 'NOTcomputed' not in duz
+        sf = kapak_kahini(tank_paket['pt'][ad])['sf']
+        assert f'headsafetyfactor{sf:.3f}' in duz, duz[-400:]
+        assert 'manufacturingsafetygate:headcleared' in duz
         hd = tank_paket['pt'][ad]['pressure_vessel']['head_type']
         assert f"evaluates{hd.replace('_', '')}heads" in duz
         assert 'hemisphericalheads-overall' not in duz
@@ -1537,7 +1613,15 @@ class TestS1UcKapilari:
                                                 sivi_tam_tankli):
         from hrma.export.cad_visualization import (
             tank_manufacturing_safety_refusals)
-        pt = _kopya(sivi_tam_tankli['propellant_tanks'])
+        from tests.test_cv0_tank_kapak import kapagi_yeterli
+        # ÖH V31 CV-0 — ÇEVRİLDİ (19 Eki; ana model izni, dört koşul,
+        # koşul 1; docs/scofield/raw/OH/V31/cv0/etkilenen_dugumler.md):
+        # bu düğüm GÖVDE dalını sınar; örnek tankların çizilen düz kapağı
+        # artık kapıda yetersizdir (SF < 1). Girdi AYNI geometrinin
+        # kapağı yeterli gövdesidir (yalnız işletme basıncı düşer; kapak
+        # SF'si ``kapagi_yeterli`` içinde bağıntıdan hesaplanır). Gövde
+        # iddiası (tam liste) AYNEN durur.
+        pt = kapagi_yeterli(sivi_tam_tankli['propellant_tanks'])
         assert tank_manufacturing_safety_refusals(pt) == [], (
             'ön koşul: örnek tanklar kapıdan geçer')
         pt['fuel_tank']['structural']['safety_factor'] = SART_SF_ALTINDA
@@ -1551,7 +1635,10 @@ class TestS1UcKapilari:
 
     def test_tank_cidar_uyusmazligi_paket_almaz(self, client,
                                                  sivi_tam_tankli):
-        pt = _kopya(sivi_tam_tankli['propellant_tanks'])
+        from tests.test_cv0_tank_kapak import kapagi_yeterli
+        # ÖH V31 CV-0 — ÇEVRİLDİ (koşul 1; bkz. üstteki düğüm): girdi
+        # AYNI geometrinin kapağı yeterli gövdesi; iddia AYNEN durur.
+        pt = kapagi_yeterli(sivi_tam_tankli['propellant_tanks'])
         ox = pt['oxidizer_tank']
         cizilen = float(ox['dimensions']['wall_thickness'])
         ox['pressure_vessel']['wall_thickness_used_mm'] = (

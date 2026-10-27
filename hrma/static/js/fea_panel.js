@@ -276,6 +276,12 @@
     function T(key, fallback) {
         return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
     }
+    // v3.0.1 N-girdi-2: alan ipucu ortak bileşenden (field_help.js →
+    // HRMAHelp); anahtar çağıranda LİTERAL. Bileşen yoksa ipucu basılmaz.
+    function yardimHtml(key) {
+        return (key && window.HRMAHelp && typeof window.HRMAHelp.html === 'function')
+            ? window.HRMAHelp.html(key, T(key, '')) : '';
+    }
     function TF(key, params, fallback) {
         if (window.I18N && window.I18N.tf) return window.I18N.tf(key, params, fallback);
         return String(fallback).replace(/\{(\w+)\}/g, function (whole, name) {
@@ -1063,12 +1069,12 @@
                     color:var(--hd-ink-dim, #7d97a5); display:flex; gap:6px; align-items:center;">
                     <input type="checkbox" id="fea_show_mesh" checked>
                     <span data-i18n="fea.showMesh">${T('fea.showMesh',
-                        'Show mesh wireframe')}</span>
+                        'Show mesh wireframe')}</span>${yardimHtml('panel.fea.help.showMesh')}
                 </label>
                 <label style="font-family:var(--hd-mono); font-size:0.75rem;
                     color:var(--hd-ink-dim, #7d97a5); display:flex; gap:6px; align-items:center;">
                     <span data-i18n="fea.qualityMetric">${T('fea.qualityMetric',
-                        'Quality metric')}</span>
+                        'Quality metric')}</span>${yardimHtml('panel.fea.help.qualityMetric')}
                     <select id="fea_metric">
                         <!-- ÖH D36 / dil2-i18n-pdf a2 (OH-GT devri): seçenek
                              etiketi data-i18n taşır, I18N.apply onu da çevirir.
@@ -2553,7 +2559,7 @@
                 <label style="font-family:var(--hd-mono); font-size:0.75rem;
                     color:var(--hd-ink-dim, #7d97a5); display:flex; gap:6px; align-items:center;">
                     <input type="checkbox" id="grainfea_show_mesh" checked>
-                    <span id="grainfea_mesh_label">${esc(GL('showMesh', 'Show mesh wireframe'))}</span>
+                    <span id="grainfea_mesh_label">${esc(GL('showMesh', 'Show mesh wireframe'))}</span>${yardimHtml('panel.fea.help.showMesh')}
                 </label>
             </div>
             <div id="grainfea_badges" style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;"></div>
@@ -3380,14 +3386,14 @@
             + ' align-items:center; margin:0 0 8px;">' + inner + '</div>';
     }
 
-    function acCheckbox(id, labelKey, labelText, checked) {
+    function acCheckbox(id, labelKey, labelText, checked, helpKey) {
         return '<label style="font-family:var(--hd-mono, monospace);'
             + ' font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);'
             + ' display:flex; gap:6px; align-items:center;">'
             + '<input type="checkbox" id="' + id + '"'
             + (checked ? ' checked' : '') + '>'
             + '<span' + (labelKey ? ' data-i18n="' + labelKey + '"' : '') + '>'
-            + esc(labelText) + '</span></label>';
+            + esc(labelText) + '</span>' + yardimHtml(helpKey) + '</label>';
     }
 
     // Yanıt gövdesinden 'fea' bloğu — uç {status:'success', fea:{...}} döner
@@ -3420,12 +3426,14 @@
         const p = 'ac_fea_';
         return acControlRow(
                 acCheckbox(p + 'mesh_' + seq, 'fea.showMesh',
-                           T('fea.showMesh', 'Show mesh wireframe'), showMesh)
+                           T('fea.showMesh', 'Show mesh wireframe'), showMesh,
+                           'panel.fea.help.showMesh')
                 + '<label style="font-family:var(--hd-mono, monospace);'
                 + ' font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);'
                 + ' display:flex; gap:6px; align-items:center;">'
                 + '<span data-i18n="fea.qualityMetric">'
                 + esc(T('fea.qualityMetric', 'Quality metric')) + '</span>'
+                + yardimHtml('panel.fea.help.qualityMetric')
                 + '<select id="' + p + 'metric_' + seq + '">'
                 + '<option value="aspect_ratio"'
                 + (qualityMetric === 'aspect_ratio' ? ' selected' : '')
@@ -3638,13 +3646,13 @@
     //: alan boş kalır ve body() isteği durdurur (uydurma sayı yok).
     const GRAIN_FIELDS = [
         ['outer_diameter_mm', 'Grain outer diameter [mm]', '', 'any',
-         'panel.grain.fieldOuter'],
+         'panel.grain.fieldOuter', 'panel.grain.help.outer'],
         ['core_diameter_mm', 'Port (core) diameter [mm]', '', 'any',
-         'panel.grain.fieldCore'],
+         'panel.grain.fieldCore', 'panel.grain.help.core'],
         ['chamber_pressure_bar', 'Chamber pressure [bar]', '', 'any',
-         'panel.grain.fieldPc'],
+         'panel.grain.fieldPc', 'panel.grain.help.pc'],
         ['grain_length_mm', 'Grain length [mm] — declaration only', '', 'any',
-         'panel.grain.fieldLength'],
+         'panel.grain.fieldLength', 'panel.grain.help.length'],
     ];
     //: Ucun 422 kapısındaki zorunlu SAYISAL alanlar (app.py
     //: _PLANAR_GRAIN_REQUIRED'ın sayısal üyeleri; grain_type ve
@@ -3792,7 +3800,7 @@
         const p = 'ac_grain_';
         return acControlRow(acCheckbox(p + 'mesh_' + seq, null,
                                        GL('showMesh', 'Show mesh wireframe'),
-                                       gShowMesh))
+                                       gShowMesh, 'panel.fea.help.showMesh'))
             + '<div id="' + p + 'badges_' + seq + '" style="display:flex;'
             + ' flex-wrap:wrap; gap:8px; margin:8px 0;"></div>'
             + '<div id="' + p + 'chip_' + seq + '" style="margin:8px 0;"></div>'

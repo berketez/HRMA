@@ -219,6 +219,41 @@ def _as_float(text):
         return None
 
 
+#: v3.0.1 kulvar M — sunucu kaydından basılan seçici seçenekleri. Hibrit
+#: sayfasının malzeme seçicileri seçeneklerini şablonda elle yazmaz; şablon
+#: başındaki ``malzeme_secenekleri`` makrosu sunucunun kaydını döker
+#: (app.py ``_hibrit_malzeme_secim_kaydi``). Ham metinde ``<option`` yoktur;
+#: seçenekler aynı kayıttan, sayfanın basacağı sırayla okunur. Üçüncü
+#: argüman ``true`` ise makro önce boş ("seçilmedi") seçeneği basar.
+_SUNUCU_SECENEK_MAKROSU = re.compile(
+    r'\{\{\s*malzeme_secenekleri\(\s*hybrid_materials\.(\w+)\s*,[^}]*?'
+    r'(,\s*true\s*)?\)\s*\}\}')
+
+
+def _sunucu_secenekleri(govde: str) -> List[str]:
+    m = _SUNUCU_SECENEK_MAKROSU.search(govde)
+    if not m:
+        return []
+    from hrma.app import _hibrit_malzeme_secim_kaydi
+    rol = _hibrit_malzeme_secim_kaydi()[m.group(1)]
+    return ([''] if m.group(2) else []) + [o['value'] for o in rol['options']]
+
+
+#: V301/K-B — katı sayfasının kasa/lüle seçicileri de seçeneklerini sunucu
+#: kaydından basar (``solid_materials.<alan>.options`` Jinja döngüsü; ham
+#: metindeki tek ``<option value="{{ o.value }}">`` bir ŞABLON ifadesidir,
+#: seçenek değil). Seçenekler aynı kayıttan, sayfanın basacağı sırayla.
+_KATI_SUNUCU_SECENEK = re.compile(r'solid_materials\.(\w+)\.options')
+
+
+def _kati_sunucu_secenekleri(govde: str):
+    m = _KATI_SUNUCU_SECENEK.search(govde)
+    if not m:
+        return None
+    from hrma.engines.solid_rocket_engine import solid_material_options
+    return [o['value'] for o in solid_material_options(m.group(1))]
+
+
 def field_specs(html: str) -> Dict[str, TemplateField]:
     """Şablondaki her form alanı için tip, aralık, varsayılan ve seçenekler."""
     out: Dict[str, TemplateField] = {}
@@ -241,7 +276,12 @@ def field_specs(html: str) -> Dict[str, TemplateField]:
         if tag == 'select':
             end = html.find('</select>', match.start())
             if end != -1:
-                options = _OPTION.findall(html[match.start():end])
+                govde = html[match.start():end]
+                options = _kati_sunucu_secenekleri(govde)
+                if options is None:
+                    options = _OPTION.findall(govde)
+                if not options:
+                    options = _sunucu_secenekleri(govde)
 
         value_match = _ATTR['value'].search(tag_text)
         out[field_id] = TemplateField(

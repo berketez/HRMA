@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import form_defaults
+
 ROOT = Path(__file__).resolve().parents[1]
 JS = ROOT / 'hrma' / 'static' / 'js'
 NODE = shutil.which('node')
@@ -43,6 +45,11 @@ LIQUID_FORM = {
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
     'cooling_channels': 80,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (L-A SV-03); sayfanın
+    # gönderdiği şablon varsayılanı (tek kaynak, kopyalanmaz).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 # ÖH A2 sivi-sogutma F-17 (Berke Sunum 2 onayı sonrası çeviri, denetçi Ş5.1):
 # iki sığma ölçütü tek tanıma indi; eski kod artık basılmıyor ve sözlükten

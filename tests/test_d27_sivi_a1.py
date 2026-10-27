@@ -246,8 +246,12 @@ class TestOHD2612CevrimEksenliTankKapisi:
         assert kod_dusuk == 400, f'ΔP kapısı susmuş; HTTP {kod_dusuk}'
         alan = (govde.get('invalid_fields') or [{}])[0]
         assert alan.get('reason') == 'insufficient_injector_pressure_drop', alan
+        # V301/L-A (SV-03): sağlıklı tank çözücüye feed_pressure ile de
+        # verilir (yalnız tank_pressure -> 3 bar yedek tank -> 422).
+        # Ölçüldü: 45 bar, marj 6,53 bar -> 200.
         kod_saglikli, _ = _gonder(
-            client, {'engine_cycle': 'pressure_fed', 'tank_pressure': 45})
+            client, {'engine_cycle': 'pressure_fed', 'tank_pressure': 45,
+                     'feed_pressure': 45})
         assert kod_saglikli == 200, (
             f'sağlıklı basınç beslemeli tank reddedildi; HTTP {kod_saglikli}')
 
@@ -260,13 +264,26 @@ class TestOHD2612CevrimEksenliTankKapisi:
         assert tank is not None and float(tank) > 0.0, (
             'çözücü kendi tank basıncını yayımlamıyor')
 
-    def test_feed_pressure_kapisi_HER_CEVRIMDE_isirir(self, client):
-        """``feed_pressure`` iki çevrimde de enjektörü besleyen basınçtır."""
-        for ek in ({}, {'engine_cycle': 'pressure_fed'}):
-            kod, _ = _gonder(client, dict(ek, feed_pressure=3))
-            assert kod == 400, (
-                f'{ek or "turbopompalı"}: 3 bar besleme 30 bar hazneye '
-                f'akamaz; HTTP {kod}')
+    def test_feed_pressure_kapisi_YALNIZ_BASINC_BESLEMEDE_isirir(self,
+                                                                  client):
+        """V301/L-A (SV-10) — BEKLENTİ DEĞİŞTİ, gerekçe ölçülü.
+
+        Eski iddia "``feed_pressure`` iki çevrimde de enjektörü besleyen
+        basınçtır" idi. Ölçüm (A-sivi SV-10; L-A once.json gg_fp_yok ⟷
+        v_gg) bunu çürüttü: turbopompalı çevrimde çözücü alanı OKUMAZ — tank
+        NPSH'den, pompa basma basıncı çevrim dengesinden gelir; 130 ⟷ 200 ⟷
+        gönderilmedi farkı yalnız yankı yaprağıdır. Kapı orada sağlıklı bir
+        tasarımı ENGELLİYORDU (gg_fp50 -> 400). Artık: basınç beslemede 400
+        aynen, turbopompalıda 200 + ``inputs_not_used`` beyanı.
+        """
+        kod, _ = _gonder(client, {'engine_cycle': 'pressure_fed',
+                                  'feed_pressure': 3})
+        assert kod == 400, f'basınç beslemede 3 bar besleme; HTTP {kod}'
+        kod, govde = _gonder(client, {'feed_pressure': 3})
+        assert kod == 200, f'turbopompalı: alan okunmuyor; HTTP {kod}'
+        beyan = [b for b in govde.get('inputs_not_used') or []
+                 if b.get('field') == 'feed_pressure']
+        assert beyan and beyan[0]['reason'] == 'not_read_in_turbopump_cycle'
 
     def test_cevrim_ayrimi_TEK_KAYNAKTAN(self):
         """Uç katmanı çevrim kuralını yeniden yazmaz; motordan okur."""

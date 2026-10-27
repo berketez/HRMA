@@ -60,6 +60,8 @@ from pathlib import Path
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 from tests.bagimlilik_kapisi import kurulu_mu
 
 warnings.filterwarnings('ignore')
@@ -94,9 +96,17 @@ Z5G_HIBRIT = {'motor_name': 'z5g-h', 'fuel_type': 'htpb',
 # geometrisinin eğrisi 200 ile yayımlanıyordu — buradaki 1500 N hiçbir zaman
 # etkili olmadı. Zarf kapısı fail-closed olduğundan gövde ZATEN ÖLÇÜLEN
 # geometri kipine çevrildi; yanıt tasarım noktası bloğu dışında BİT-AYNI.
+# v3.0.1 T-ÇAPA-B: eski çekirdek 35 mm (Ø100, boy 300 mm @ 40 bar,
+# a = 0,005 / n = 0,35) A_p/A_t 0,925 ile port boğulan motordu; K-A
+# kapısından beri 422 ``port_smaller_than_throat``. Konu port boğulması
+# değil: çekirdek tek tanım ``SOLID_DEFAULT_GEOMETRY_MM``den (48 mm,
+# kopyalanmaz); hazne/boy bu gövdenin kendi değerleri. Ölçüldü: boğaz
+# 37,54 mm, A_p/A_t 1,64. (Ø100/boy 500 tam varsayılan bu yanma hızı
+# katsayılarıyla yine boğuluyor: A_p/A_t 0,958.)
 Z5G_KATI = {'motor_name': 'z5g-s', 'chamber_pressure': 40,
-            'grain_type': 'bates', 'chamber_diameter': 100,
-            'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+            'grain_type': 'bates', 'chamber_diameter': 100, 'grain_length': 300,
+            'core_diameter': SOLID_DEFAULT_GEOMETRY_MM['core_diameter'],
+            'segments': 1,
             'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
             'chamber_temperature': 3000, 'c_star': 1550,
             'propellant_density': 1800, 'propellant_type': 'apcp'}
@@ -244,7 +254,18 @@ def istemci():
 
 @pytest.fixture(scope='module')
 def hibrit(istemci):
-    r = _sessiz(istemci.post, '/calculate', json=Z5G_HIBRIT)
+    # v3.0.1 (V301/H-termal): korunan yolda (yakıt bloğu altı beyanlı koruma
+    # + ön/son yanma odasında HRMA'nın boyutlandırdığı astar) hibritin kasası
+    # ortam sıcaklığında değerlendirilir; çıplak cidarın erime kaydı info +
+    # superseded_by olur ve bölge hükmü (LINER_REQUIRED) onun yerini alır
+    # (bekçi: tests/test_v301_hibrit_termal.py). Bu dosyanın P16S1-07 ve
+    # P17B1-01 bekçileri ÜRETİLEN kritik termal/erime hükmünün kanala ve
+    # ekrana inişini sınar; o hüküm artık ürünün fail-closed termal yolunda
+    # (astar boyutlandırması koşmadı) üretilir ve senaryo oradan kurulur
+    # (``tests.support.hibrit_termal``). İddialar değişmedi.
+    from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
+    with astar_boyutlandirmasi_kosmaz():
+        r = _sessiz(istemci.post, '/calculate', json=Z5G_HIBRIT)
     assert r.status_code == 200, r.get_data(as_text=True)[:400]
     return r.get_json()
 

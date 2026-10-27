@@ -616,7 +616,16 @@
             + '</div>'
             + honestyBlock(flow)
             + defaultsBlock(data.defaults_applied)
-            + kineticCard(data.kinetic_efficiency, data.kinetic_note);
+            + (katiMi()
+                // V301/K-C1 (KT-22): katı motorda hibrit kinetik kimyası
+                // (HTPB/N₂O, O/F 6) uca GİTMEZ; kart bunu adıyla söyler.
+                ? kineticCard(null, T('panel.nzl.kineticSolidNone',
+                    'Kinetic efficiency is not evaluated for a solid motor: '
+                    + 'the kinetics model needs an oxidizer/fuel pair and an '
+                    + 'O/F ratio, and HRMA has no finite-rate kinetics model '
+                    + 'for a solid propellant. The flow solution above uses '
+                    + 'the solid design\'s own gas properties.'))
+                : kineticCard(data.kinetic_efficiency, data.kinetic_note));
         root.appendChild(head);
 
         drawStationPlots(flow, root);
@@ -633,7 +642,20 @@
     // ------------------------------------------------------------------
     // Kayıt
     // ------------------------------------------------------------------
-    window.AnalysisDock.register({
+    // V301/K-C1 (KT-22) — KATI MOTORDA KİNETİK ALANLARI YOK.
+    // ÖLÇÜLDÜ (denetim A-kati akis_paneli2.json): katı sayfada bu panel
+    // seçicilerin varsayılanını (HTPB / N₂O / O/F 6) her istekte gönderiyor,
+    // kinetik kart da APCP motoru o HİBRİT kimyayla çözüyordu (M 25,79,
+    // Isp_frozen 242,6 s). Katı itici tek bileşenlidir (O/F yok; güvertenin
+    // OF_RATIO_PATHS.solid = []) ve kinetik modülün katı kimliği yoktur:
+    // alanlar katı sayfada çizilmez, gövdeye girmez, kart kapanır.
+    const KINETIK_ALANLARI = ['kinetic_fidelity', 'of_ratio', 'fuel_type',
+                              'oxidizer_type'];
+    function katiMi() {
+        return !!(window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function'
+                  && window.AnalysisDock.getMotorType() === 'solid');
+    }
+    const FLOW_SPEC = {
         id: PANEL_ID,
         title: 'Nozzle Flow — Quasi-1D Compressible (Regime, P(x), M(x), CF)',
         titleKey: 'panel.nzl.title',
@@ -644,12 +666,12 @@
             ['fidelity', 'Fidelity Level', 'engineering', [
                 ['fast', 'Fast Screening', 'nzl.fidelityFastOpt'],
                 ['engineering', 'Engineering', 'nzl.fidelityEngOpt'],
-            ], 'panel.nzl.fFidelity'],
+            ], 'panel.nzl.fFidelity', 'panel.nzl.help.fidelity'],
             ['kinetic_fidelity', 'Kinetic Model', 'engineering', [
                 ['fast', 'Fast (equilibrium reference)', 'nzl.kinFast'],
                 ['engineering', 'Engineering (JANNAF-style)', 'nzl.kinEng'],
                 // 'high_fidelity' seçeneği Cantera sondası başarılıysa eklenir
-            ], 'panel.nzl.fKineticModel'],
+            ], 'panel.nzl.fKineticModel', 'panel.nzl.help.kinetic_fidelity'],
             /* ÖH D31 · OH-D26-20 / OH-D27-10 / P12bS1-01 — ÖN-DOLU VARSAYILAN
                SÖKÜLDÜ (ÖK-21 form katmanı).
 
@@ -688,11 +710,11 @@
                ambient_pressure — kapı bugün ``if not data`` (yalnız BOŞ
                gövde) hâlinde; form tarafı söküldüğü için alan-alan
                ``incomplete_flow_input`` (422) hâline inebilir. */
-            ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar'],
-            ['chamber_temperature', 'Chamber Temperature (K)', '', 50, 'common.f.chamberTemperatureK'],
-            ['gamma', 'Gamma (frozen)', '', 0.01, 'common.f.gammaFrozen'],
-            ['molecular_weight', 'Molecular Weight (g/mol)', '', 0.5, 'common.f.molecularWeight'],
-            ['throat_diameter', 'Throat Diameter (m)', '', 0.001, 'common.f.throatDiameterM'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar', 'panel.nzl.help.chamber_pressure'],
+            ['chamber_temperature', 'Chamber Temperature (K)', '', 50, 'common.f.chamberTemperatureK', 'panel.nzl.help.chamber_temperature'],
+            ['gamma', 'Gamma (frozen)', '', 0.01, 'common.f.gammaFrozen', 'panel.nzl.help.gamma'],
+            ['molecular_weight', 'Molecular Weight (g/mol)', '', 0.5, 'common.f.molecularWeight', 'panel.nzl.help.molecular_weight'],
+            ['throat_diameter', 'Throat Diameter (m)', '', 0.001, 'common.f.throatDiameterM', 'panel.nzl.help.throat_diameter'],
             /* exit_diameter SÖKÜLDÜ — ÖH D33-2 / app-api-uc a1 (OH-D32-13).
                D31 / arayuz-panel a2 bu satırı BİLEREK bırakmıştı: o gün uçta
                ne kapı ne kanonik varsayılan vardı, alan sökülürse geometri
@@ -707,17 +729,17 @@
                düşürür) ve hüküm UÇTA verilir: kullanıcı iki yazımdan birini
                adıyla istenir, sayı uydurulmaz. SAYI TAŞINMADI: silinen 0,06
                başka bir yere yazılmadı. */
-            ['exit_diameter', 'Exit Diameter (m)', '', 0.001, 'common.f.exitDiameterM'],
-            ['ambient_pressure', 'Ambient Pressure (Pa)', '', 1000, 'common.f.ambientPressurePa'],
-            ['n_stations', 'Axial Stations (30-60)', 45, 1, 'panel.nzl.fStations'],
-            ['of_ratio', 'O/F Ratio (kinetics)', 6.0, 0.1, 'panel.nzl.fOfKinetics'],
+            ['exit_diameter', 'Exit Diameter (m)', '', 0.001, 'common.f.exitDiameterM', 'panel.nzl.help.exit_diameter'],
+            ['ambient_pressure', 'Ambient Pressure (Pa)', '', 1000, 'common.f.ambientPressurePa', 'panel.nzl.help.ambient_pressure'],
+            ['n_stations', 'Axial Stations (30-60)', 45, 1, 'panel.nzl.fStations', 'panel.nzl.help.n_stations'],
+            ['of_ratio', 'O/F Ratio (kinetics)', 6.0, 0.1, 'panel.nzl.fOfKinetics', 'panel.nzl.help.of_ratio'],
             ['fuel_type', 'Fuel (kinetics)', 'htpb', [
                 ['htpb', 'HTPB'], ['paraffin', 'Paraffin', 'fuel.paraffin'], ['pe', 'PE'],
                 ['pmma', 'PMMA'], ['abs', 'ABS'], ['pla', 'PLA'],
-            ], 'panel.nzl.fFuelKinetics'],
+            ], 'panel.nzl.fFuelKinetics', 'panel.nzl.help.fuel_type'],
             ['oxidizer_type', 'Oxidizer (kinetics)', 'N2O', [
                 ['N2O', 'N2O'], ['LOX', 'LOX'], ['H2O2', 'H2O2'],
-            ], 'panel.nzl.fOxKinetics'],
+            ], 'panel.nzl.fOxKinetics', 'panel.nzl.help.oxidizer_type'],
         ],
         // Hibrit/katı/sıvı sayfalarında motor sonuçlarından otomatik dolum
         fromResults: function (r) {
@@ -745,10 +767,39 @@
             // 'of_ratio' YOK — alan panel varsayılanında kalıyordu.
             const of = U.readOfRatio(r);
             if (Number.isFinite(of)) sug.of_ratio = of;
+            // V301/K-C1 (KT-22): katı yanıtı molekül ağırlığını düz anahtarda
+            // değil termokimya bloğunda yayımlar (M = 1/n, c* özdeşliğinin
+            // M'i: thermochemistry.molecular_weight); eğrinin kullandığı
+            // ortam basıncı nozzle_design.performance.ambient_pressure (bar).
+            // Sayfada ikisi de vardı, panel boş bırakıp 422 alıyordu.
+            if (katiMi()) {
+                const tk = (m.thermochemistry && typeof m.thermochemistry === 'object')
+                    ? m.thermochemistry : {};
+                if (!Number.isFinite(sug.molecular_weight)
+                        && Number.isFinite(tk.molecular_weight)) {
+                    sug.molecular_weight = tk.molecular_weight;
+                }
+                const nperf = ((m.nozzle_design || {}).performance) || {};
+                if (Number.isFinite(nperf.ambient_pressure) && nperf.ambient_pressure > 0) {
+                    sug.ambient_pressure = nperf.ambient_pressure * 1e5;   // bar → Pa
+                }
+            }
             return sug;
         },
         render: render,
+    };
+    // Alan listesi OKUNDUĞU anda motor tipine göre süzülür (güverte onu
+    // `init`ten sonra okur; kayıt anında motor tipi henüz yok).
+    const TUM_ALANLAR = FLOW_SPEC.fields;
+    Object.defineProperty(FLOW_SPEC, 'fields', {
+        enumerable: true,
+        get: function () {
+            return katiMi()
+                ? TUM_ALANLAR.filter(function (f) { return KINETIK_ALANLARI.indexOf(f[0]) === -1; })
+                : TUM_ALANLAR;
+        },
     });
+    window.AnalysisDock.register(FLOW_SPEC);
 
     // Test / hata ayıklama: saf yardımcılar (performance_panel deseni)
     window.FlowPanel = {

@@ -414,9 +414,16 @@ def _injector_face_png(motor_results, size=700):
     import plotly.graph_objects as go
     import plotly.io as pio
 
-    from hrma.export.cad_visualization import _injector_spec
+    from hrma.export.cad_visualization import (
+        _injector_spec, pintle_type_claimed)
 
     md = motor_results or {}
+    # V301 bilinen C2: pintle'da yüz deseni EŞDEĞER orifis planı değildir
+    # (çözücünün beyanı: "The pintle is NOT drilled this way"); yüz görünüşü
+    # STEP/STL ile TEK çözümleyiciden (``pintle_cad_geometry``) çizilir.
+    if pintle_type_claimed(md):
+        return _render_or_raise(_pintle_face_figure(md, size), width=size,
+                                height=size)
     spec = _injector_spec(md)
     D_ch = _num(md.get('chamber_diameter'), 0.1) * 1000
     n = spec['n_orifices']
@@ -480,6 +487,93 @@ def _injector_face_png(motor_results, size=700):
     return _render_or_raise(fig, width=size, height=size)
 
 
+def _pintle_face_figure(motor_results, size=700):
+    """V301 bilinen C2 — pintle enjektörün yüz görünüşü (plotly figürü).
+
+    Sayılar STEP/STL ile AYNI çözümleyiciden (``pintle_cad_geometry``):
+    kamara deliği, yüz plakası yayımlanmışsa anülüs deliği, direk ve uç
+    deliklerinin açısal yerleri (delikler direğin YAN yüzündedir; yüzden
+    bakışta direk çevresinde radyal çentik olarak gösterilir). Kanonik
+    geometri yoksa ``PintleCADError`` yükselir; sayfa adlı gerekçeyi basar,
+    eşdeğer orifisli düz plaka ÇİZİLMEZ.
+    """
+    import plotly.graph_objects as go
+
+    from hrma.export.cad_visualization import pintle_cad_geometry
+
+    md = motor_results or {}
+    geo = pintle_cad_geometry(md)
+    R = _num(md.get('chamber_diameter'), None) * 1000.0 / 2.0
+    theta = np.linspace(0, 2 * np.pi, 181)
+    fig = go.Figure()
+
+    def daire(r, renk, kalinlik, kesik=False):
+        fig.add_trace(go.Scatter(
+            x=r * np.cos(theta), y=r * np.sin(theta), mode='lines',
+            line=dict(color=renk, width=kalinlik,
+                      dash='dash' if kesik else 'solid')))
+
+    daire(R, '#1a2733', 2)
+    if geo['plate_t'] is not None:
+        daire(geo['bore'] / 2.0, '#1a2733', 1.5)
+    else:
+        daire(geo['bore'] / 2.0, '#8a93a0', 1, kesik=True)
+    daire(geo['d_post'] / 2.0, '#c0392b', 1.5)
+    r_p = geo['d_post'] / 2.0
+    for i in range(geo['n_holes']):
+        a = 2 * np.pi * i / geo['n_holes']
+        fig.add_shape(type='line', x0=r_p * np.cos(a), y0=r_p * np.sin(a),
+                      x1=(r_p - geo['hole_depth']) * np.cos(a),
+                      y1=(r_p - geo['hole_depth']) * np.sin(a),
+                      line=dict(color='#c0392b', width=1.5))
+    if geo['n_holes']:
+        delik = (f"{geo['n_holes']} x d{geo['d_hole']:.2f} mm radial tip "
+                 f"holes at L_s {geo['skip']:.2f} mm")
+    else:
+        delik = 'no tip holes'
+    plaka = (f"annulus bore d{geo['bore']:.2f} mm"
+             if geo['plate_t'] is not None else
+             f"annulus bore d{geo['bore']:.2f} mm (dashed: faceplate not "
+             'modelled)')
+    fig.update_layout(
+        title=dict(text=(
+            f"INJECTOR FACE - pintle: post d{geo['d_post']:.2f} mm<br>"
+            f"{plaka}<br>{delik}<br>the equivalent orifice plan is NOT "
+            'drilled'), font=dict(size=13)),
+        margin=dict(t=130),
+        paper_bgcolor='white', plot_bgcolor='white',
+        font=dict(color='#1a2733'),
+        xaxis=dict(title='mm', scaleanchor='y', scaleratio=1,
+                   range=[-R * 1.15, R * 1.15]),
+        yaxis=dict(title='mm', range=[-R * 1.15, R * 1.15]),
+        showlegend=False, width=size, height=size,
+    )
+    return fig
+
+
+def _pintle_schedule_value(motor_results, spec):
+    """V301 bilinen C2 — ölçü tablosunun pintle satırı (çizimle aynı
+    çözümleyiciden). Eşdeğer orifis planı adıyla 'delinmez' diye yazılır;
+    kanonik geometri çizilemiyorsa adlı gerekçe basılır."""
+    from hrma.export.cad_visualization import (
+        NOT_AVAILABLE_SPEC, PintleCADError, pintle_cad_geometry)
+    try:
+        geo = pintle_cad_geometry(motor_results)
+    except PintleCADError as exc:
+        return f'{NOT_AVAILABLE_SPEC} - {exc.invalid_fields[0]["reason"]}'
+    parca = [f"post d{geo['d_post']:.2f} mm",
+             f"annulus bore d{geo['bore']:.2f} mm"]
+    if geo['n_holes']:
+        parca.append(f"{geo['n_holes']} x d{geo['d_hole']:.2f} mm tip holes "
+                     f"at L_s {geo['skip']:.2f} mm")
+    else:
+        parca.append('no tip holes')
+    if spec.get('n_orifices') and spec.get('orifice_diameter_mm'):
+        parca.append(f"equivalent plan {spec['n_orifices']} x "
+                     f"d{spec['orifice_diameter_mm']:.2f} mm NOT drilled")
+    return '; '.join(parca)
+
+
 #: Ölçü tablosunda bir değer sütununun sığdığı karakter sayısı (Helvetica 10,
 #: 140 mm sütun başlangıcı). Satır kırma ve sayfa hesabı AYNI sayıyı kullanır.
 SCHEDULE_WRAP_COLUMNS = 62
@@ -503,7 +597,7 @@ def _schedule_rows(motor_results, d):
     from hrma.export.cad_visualization import (
         NOT_AVAILABLE_SPEC, _chamber_material, _chamber_wall_design,
         _injector_spec, _nozzle_exit_angle_deg, _nozzle_family,
-        _nozzle_half_angles, _wall_sf_basis_text)
+        _nozzle_half_angles, _wall_sf_basis_text, pintle_type_claimed)
 
     wall_design = _chamber_wall_design(motor_results)
     wall_m, wall_src = wall_design['thickness_m'], wall_design['source']
@@ -607,11 +701,13 @@ def _schedule_rows(motor_results, d):
          f"{('%.1f deg' % conv_deg) if conv_deg else 'n/a'}, div "
          f"{('%.1f deg' % div_deg) if div_deg else 'n/a'} "
          + _nozzle_angle_source_tag(motor_results)),
-        ('Injector orifices',
-         (f"{spec['n_orifices']} x d{spec['orifice_diameter_mm']:.2f} mm "
-          f"({spec['type'] or 'type n/a'})")
-         if (spec['n_orifices'] and spec['orifice_diameter_mm'])
-         else NOT_AVAILABLE_SPEC),
+        (('Injector (pintle)', _pintle_schedule_value(motor_results, spec))
+         if pintle_type_claimed(motor_results) else
+         ('Injector orifices',
+          (f"{spec['n_orifices']} x d{spec['orifice_diameter_mm']:.2f} mm "
+           f"({spec['type'] or 'type n/a'})")
+          if (spec['n_orifices'] and spec['orifice_diameter_mm'])
+          else NOT_AVAILABLE_SPEC)),
         ('Injector pressure drop',
          f"{spec['pressure_drop_bar']:.2f} bar" if spec['pressure_drop_bar']
          else NOT_AVAILABLE_SPEC),

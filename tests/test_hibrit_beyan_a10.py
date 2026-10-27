@@ -59,8 +59,15 @@ def boru_motor():
 
 @pytest.fixture(scope='module')
 def kompakt_motor():
-    """Aynı görev, port_count=4: kamara L/D ≈ 8,6 — eşiğin altında."""
-    return _kos(port_count=4)
+    """Aynı görev, port_count=5: kamara L/D ≈ 9,2 — eşiğin altında.
+
+    v3.0.1 kulvar P: eski kaynaksız 1,5·√N·D_son kuralı grain dış çapını
+    şişiriyordu; N = 4'te L/D 8,6 bu şişkinlikten geliyordu. Tek halka
+    zarfıyla (D_o = D_son·(1 + 1/sin(π/N))) ölçüldü: N = 4 -> 10,52,
+    N = 5 -> 9,17, N = 6 -> 8,11 (kamara L/D). Bekçinin iddiası (çok port
+    narinliği eşiğin altına indirir) aynen; örnek N = 5'e taşındı.
+    """
+    return _kos(port_count=5)
 
 
 # ---------------------------------------------------------------------------

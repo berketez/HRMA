@@ -48,9 +48,14 @@ class TestP8B418PintleSemaBeyani:
 
     def test_bos_girdide_uydurma_olcu_basilmaz(self):
         _d, metin = self._bos()
+        # V301/E1: etiketler formdaki adları taşır (body OD, D_p, t); yasak
+        # liste eski ve yeni adların İKİSİNİ de kapsar.
         for yasak in ("D_outer = 50.0", "D_outer: 50.0",
                       "D_pintle = 25.0", "D_pintle: 25.0",
-                      "gap = 1.50", "Gap: 1.50"):
+                      "gap = 1.50", "Gap: 1.50",
+                      "body OD = 50.0", "body OD: 50.0",
+                      "D_p = 25.0", "D_p (pintle tip): 25.0",
+                      "t = 1.500", "t (annular gap): 1.500"):
             assert yasak not in metin, (
                 f"boş girdide uydurma ölçü basıldı: {yasak!r}")
 
@@ -79,9 +84,11 @@ class TestP8B418PintleSemaBeyani:
             create_pintle_cross_section)
         _d, metin = _metinler(create_pintle_cross_section(
             {"outer_diameter": 62.0, "pintle_diameter": 18.0, "gap": 0.9}))
-        assert "D_outer = 62.0 mm" in metin
-        assert "D_pintle = 18.0 mm" in metin
-        assert "gap = 0.90 mm" in metin
+        # V301/E1: ad değişti (form ⟷ çizim aynı adlandırma: body OD, D_p,
+        # t); sayı ve "gerçek girdide AYNEN yayımlanır" iddiası DEĞİŞMEDİ.
+        assert "body OD = 62.0 mm" in metin
+        assert "D_p = 18.00 mm" in metin
+        assert "t = 0.900 mm" in metin
         assert "Do not machine" not in metin
 
     def test_kardes_swirl_deseni_bozulmadi(self):
@@ -707,10 +714,20 @@ class TestP8B103GeometriKalinlikKapisi:
         # 0,10 çapası KORUNDU — o operatör değişmedi.
         assert gk["toplam_kalinlik_sapma_orani"] > 0.0
         assert gk["kapama_taban_sapma_orani"] > 0.10
-        assert (gk["kapama_taban_sapma_orani"]
-                >= 0.9 * gk["toplam_kalinlik_sapma_orani"]), (
-            "kalınlaşmanın baskın kaynağı artık kapama değil — yeni bir "
-            f"kaynak doğmuş olabilir: {gk}")
+        # v3.0.1 port kulvarı (20 Eki): "kapama toplamın >= %90'ı" baskınlık
+        # sezgisi eski geometriye bağlıydı. Kamara artık son port çapında
+        # (80,6 -> 53,8 mm); bu kaba ızgarada (na=16) yerleşim payı %4,1'e
+        # çıktı (kapı eşiği %10, geçiyor). Bekçinin ASIL iddiası, "yeni bir
+        # kalınlaşma kaynağı doğmadı", doğrudan sınanır: toplam sapma kapama
+        # ile yerleşimin ÇARPIMIDIR ve kalan pay yoktur. Ölçüm: 1,2331 =
+        # 1,1841 × 1,0414. Yerleşim payı da kapının kendi eşiği içinde
+        # kalmalıdır.
+        assert (1.0 + gk["toplam_kalinlik_sapma_orani"]) == pytest.approx(
+            (1.0 + gk["kapama_taban_sapma_orani"])
+            * (1.0 + gk["yerlesim_sapma_orani"]), rel=1e-9), (
+            "toplam sapma kapama × yerleşim çarpımına ayrışmıyor — yeni bir "
+            f"kalınlaşma kaynağı doğmuş olabilir: {gk}")
+        assert gk["yerlesim_sapma_orani"] <= gk["esik"], gk
         # Kapı YERLEŞİM payını ölçüyor, toplamı değil.
         assert gk["sapma_orani"] == gk["yerlesim_sapma_orani"]
         assert gk["sapma_orani"] != gk["toplam_kalinlik_sapma_orani"]

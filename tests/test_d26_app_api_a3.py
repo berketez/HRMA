@@ -552,4 +552,10 @@ class TestOHZ502AppApiYapraklari:
         assert bant[0] == CHUG_DP_RATIO_MINIMUM
         kaynak = vs.injector_limit_sources['pressure_drop_ratio']
         assert 'CHUG_DP_RATIO_MINIMUM' in kaynak
-        assert 'SP-8089' in kaynak
+        # v3.0.1 (21 Eki, makale bulgusu B4): künye eşiği tanımlayan modülün
+        # KENDİ kısa künyesini taşır. Eski satır 'SP-8089' bekliyordu; oysa
+        # acoustic_modes.CHUG_THRESHOLD_SOURCE o atfı açıkça geri çekiyor
+        # (bant belgede sayfa sayfa doğrulanmadı). Bekçi artık ters yönde.
+        from hrma.analysis.acoustic_modes import CHUG_THRESHOLD_CITATION
+        assert CHUG_THRESHOLD_CITATION in kaynak
+        assert 'SP-8089' not in kaynak

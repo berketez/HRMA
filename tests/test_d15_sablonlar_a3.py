@@ -225,19 +225,32 @@ def test_b3_15_pintle_dali_outer_diameter_uretiyor(advanced_src):
 
 
 def test_b3_15_dis_cap_yuk_tasiyor(istemci):
-    """Sabit sayı atıl değildi: 50 -> 120 mm gövde et kalınlığını değiştirir."""
+    """Sabit sayı atıl değildi: 50 -> 70 mm gövde et kalınlığını değiştirir.
+
+    V301/E1: eski üst değer 120 mm idi; bu gövdenin çözülen kamarası
+    79,8 mm iç çaplıdır ve 120 mm'lik enjektör gövdesi kamaraya SIĞMAZ —
+    uç artık bunu 422 ``pintle_wider_than_chamber`` ile reddediyor
+    (geometrik kapı, kaynaksız eşik yok). Kalemin iddiası (dış çap yük
+    taşır) kamaraya sığan iki değerle aynen ölçülür.
+
+    v3.0.1 port kulvarı: grain dış çapı artık son port çapı olduğu için bu
+    gövdenin kendiliğinden çözülen kamarası ~53 mm'ye indi ve 70 mm'lik gövde
+    yine sığmadı. Kalemin iddiası kamara boyutuna bağlı değildir; kamara iç
+    çapı açıkça 100 mm verilir (kullanıcı kamara çapı korunur, artık yakıt
+    yayımlanır), iki gövde de sığar.
+    """
     sonuc = {}
-    for dc in (50.0, 120.0):
+    for dc in (50.0, 70.0):
         d, y = _post(istemci, '/calculate', {
             'thrust': 1000, 'burn_time': 10, 'of_ratio': 6.0,
             'chamber_pressure': 20.0, 'fuel_type': 'htpb',
             'oxidizer_type': 'n2o', 'injector_type': 'pintle',
             'outer_diameter': dc, 'pintle_diameter': 25.0,
-            'secondary_holes': 'radial'})
+            'secondary_holes': 'radial', 'chamber_diameter_input': 100.0})
         assert d == 200
         sonuc[dc] = ((y or {}).get('injector') or {}).get('body_wall_thickness')
-    assert sonuc[50.0] is not None and sonuc[120.0] is not None
-    assert abs(sonuc[120.0] - sonuc[50.0]) > 1.0, \
+    assert sonuc[50.0] is not None and sonuc[70.0] is not None
+    assert abs(sonuc[70.0] - sonuc[50.0]) > 1.0, \
         'dış çap artık yük taşımıyor — kalemin gerekçesi düştü'
 
 

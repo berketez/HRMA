@@ -133,8 +133,16 @@ class TestOHD2519OkunmayanKanonikAd:
         # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
         # AYNI kod 2,5e-12 mutlak bağıl sapma verdi (koşum 38770162288). Tolerans
         # referans platformda aynen; başkasında 1e-10 mutlak (tests/support/platform_capa.py).
-        assert r.get_json()['motor']['chamber_diameter'] == pytest.approx(
-            0.15401759407429375, abs=capa_rel(1e-12, 1e-10))
+        # ÇAPA YENİLENDİ — v3.0.1 kulvar P (ana model kararı): kaynaksız
+        # D_ch = 1,5·√N·D_son kuralı söküldü; N = 1, artık et 0 iken grain
+        # dış çapı = yanma sonu port çapı (Karabeyoglu ve ark. 2007 §VI.B).
+        # Eski çapa 1,5 katsayısını KİLİTLİYORDU (0,15402 / 1,5 = 0,10268).
+        # Ölçüm: docs/scofield/raw/OH/V301/ayberk1/port-kamara/RAPOR.md.
+        #   d_c 0,15401759407429375 -> 0,10268324142272364 (= D_port_son)
+        m = r.get_json()['motor']
+        assert m['chamber_diameter'] == pytest.approx(
+            0.10268324142272364, abs=capa_rel(1e-12, 1e-10))
+        assert m['chamber_diameter'] == m['port_diameter_final']
 
     def test_None_alan_yok_sayilir(self, client):
         """``chamber_diameter: null`` "alan gönderilmedi" demektir."""

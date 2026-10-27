@@ -56,6 +56,23 @@ from hrma.analysis.structural_analysis import published_material_record
 # g/mol cinsinden kullanılır.
 
 
+#: ÇIPLAK CİDAR kararlı denge kontrolünün KRİTİK kodları (aşağıdaki
+#: ``_analyze_gas_side_heat_transfer`` ve ``_analyze_thermal_safety``
+#: üretir). v3.0.1 (V301/H-termal): yalnız hibrit motor okur — kamara bölge
+#: hükmü (yakıt bloğu koruması + astar) bu kayıtların yerini ancak bütün
+#: bölgeler korunduğunda alır (``hybrid_rocket_engine.
+#: _chamber_wall_zones_block``). Bu modülün hesabı ve çıktısı DEĞİŞMEZ;
+#: tanım burada durur çünkü kodların sahibi bu modüldür (tek kaynak).
+BARE_WALL_CRITICAL_CODES = (
+    'warn.thermal.wall_exceeds_melting',
+    'warn.thermal.wall_exceeds_service',
+    'warn.thermal.wall_nonphysical',
+    'warn.thermal.wall_pinned_adiabatic',
+    'warn.thermal.temp_exceeds_allowable',
+    'warn.thermal.max_temp_exceeds_melting',
+)
+
+
 def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
     """Yapılandırılmış iki-dilli uyarı/öneri kaydı (D-track sözleşmesi).
 

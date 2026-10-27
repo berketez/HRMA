@@ -79,7 +79,7 @@ try:
     from build123d import (
         BuildPart, BuildSketch, BuildLine, Plane, Polyline, Line,
         make_face, revolve, Axis, Cylinder, Pos, Compound, export_step,
-        Mode, Locations, Edge, Wire, Face,
+        Mode, Locations, Edge, Wire, Face, Align,
     )
     # Pürüzsüz lüle konturu (ÖH V3 CAD · §28-41): build123d'nin kendi OCC
     # bağlaması (OCP); build123d kuruluysa o da vardır.
@@ -322,34 +322,43 @@ def _contour_bspline_edge(points_zr, straight_tail,
     return Edge(BRepBuilderAPI_MakeEdge(egri).Edge())
 
 
-def _revolve_smooth_nozzle(inner_zr, wall_mm, straight_tail,
+def _revolve_smooth_nozzle(inner_zr, outer_zr, straight_tail,
                            throat_radius_curvature_mm=None,
                            unreadable_angle_fields=None):
-    """Lüle katısı: iç kontur (B-spline) + dış kontur (aynı noktalar r + et,
-    aynı B-spline kuruluşu) + iki uç halka düzlemi; X ekseni etrafında
-    revolve (``_revolve_profile`` ile aynı eksen ve aynı profil tanımı).
+    """Lüle katısı: iç kontur (B-spline) + dış kontur (B-spline, aynı
+    kuruluş) + iki uç halka düzlemi; X ekseni etrafında revolve
+    (``_revolve_profile`` ile aynı eksen ve aynı profil tanımı).
 
-    Dış kontur iç konturun noktalarının r + ``wall_mm`` kaydırılmışıdır
-    (eski çokgen profille AYNI tanım). Kiriş boyu parametrelemesi kaydırmada
-    değişmediği için dış eğri iç eğrinin tam kaydırılmışıdır: her eksenel
-    istasyonda et = ``wall_mm``.
+    V301 bilinen C1: iki kontur da ``cad_visualization.nozzle_wall_profile``
+    sözlüğünden gelir (STL ve kütle dökümüyle TEK kaynak); dış kontur iç
+    konturun AYNI istasyonlarda r + et kaydırılmışıdır. Kiriş boyu
+    parametrelemesi kaydırmada değişmediği için dış eğri iç eğrinin tam
+    kaydırılmışıdır: her eksenel istasyonda et sabittir. İstasyon sayısı ya
+    da eksenel konumlar uyuşmuyorsa profil kapatılmaz (adlı ret).
 
     ``throat_radius_curvature_mm``: konturu çizen boğaz yayı (örnekleyici
     ``meta``sı); imalat kontur kapısı onu da denetler (DXF/PDF/STL ile aynı).
     ``unreadable_angle_fields``: örnekleyici ``meta``sının yayımlanmış ama
     sonlu olmayan açı yolları (CADI D-T6-4; DXF/PDF/STL ile aynı kapı).
     """
+    if (len(outer_zr) != len(inner_zr)
+            or any(zi != zo for (zi, _ri), (zo, _ro)
+                   in zip(inner_zr, outer_zr))):
+        raise _contour_refusal(
+            'contour_profile_not_closed',
+            'the outer nozzle contour is not the inner contour offset at the '
+            'same axial stations')
     ic = _contour_bspline_edge(
         inner_zr, straight_tail,
         throat_radius_curvature_mm=throat_radius_curvature_mm,
         unreadable_angle_fields=unreadable_angle_fields)
-    dis = _contour_bspline_edge([(z, r + wall_mm) for z, r in inner_zr],
-                                straight_tail)
+    dis = _contour_bspline_edge(outer_zr, straight_tail)
     (za, ra), (zb, rb) = inner_zr[0], inner_zr[-1]
-    giris = Edge.make_line((float(za), float(ra) + wall_mm, 0.0),
+    (_za, ra_dis), (_zb, rb_dis) = outer_zr[0], outer_zr[-1]
+    giris = Edge.make_line((float(za), float(ra_dis), 0.0),
                            (float(za), float(ra), 0.0))
     cikis = Edge.make_line((float(zb), float(rb), 0.0),
-                           (float(zb), float(rb) + wall_mm, 0.0))
+                           (float(zb), float(rb_dis), 0.0))
     tel = Wire.combine([giris, ic, cikis, dis])
     if len(tel) != 1 or not tel[0].is_closed:
         raise _contour_refusal(
@@ -670,25 +679,41 @@ def injector_circuits_from_block(md, inj, detail, motor_type='hybrid',
 #: lüle kütlesinin kaynağı ``cad_visualization`` ``mass_breakdown``
 #: ``nozzle_mass_basis`` (aynı kontur, et ve malzeme; kesik koni halka
 #: hacmi x yoğunluk). Lüle ya da montaj STEP'i pakette varsa README'ye girer.
+#:
+#: V301 bilinen C1 (22 Eki 2026) — NOT BAYATTI, YENİDEN ÖLÇÜLDÜ
+#: (``docs/scofield/raw/OH/V301/bilinen/cad/once_c1.json``): port kulvarının
+#: küçük kamarasıyla örnek hibrit lülede varsayılan okuma +%2,50 (analitik
+#: kâhine göre), katıda +%1,48, sıvıda +%0,23; uyarlamalı integral üçünde de
+#: 1,4e-4 içinde. Eski metin "%0,04-1,48" diyordu. Bu sapma, CHANGELOG'daki
+#: "aynı paketin STEP ve STL lülesi %3,06 farklı" bulgusunun da kaynağıydı
+#: (STL'in kendi açığı 32 kesitli çokgenin -%0,64'ü). Tavan sayısı aşağıdaki
+#: sabittedir; bekçi örnek lülelerde ölçüp sabitle karşılaştırır.
+STEP_NOZZLE_DEFAULT_VOLUME_ERROR_EXAMPLES_PCT = {
+    'hybrid': 2.50, 'solid': 1.48, 'liquid': 0.23}
 STEP_NOZZLE_VOLUME_NOTE = (
     'Nozzle volume/mass in CAD tools: the nozzle walls in these STEP files '
     'are smooth B-spline surfaces of revolution. The default volume of '
     'FreeCAD (Shape.Volume) and of other OpenCASCADE-based tools was '
-    'measured to be off by 0.04-1.48 % on such surfaces (+1.48 % on the '
-    'solid example nozzle); read the nozzle volume or mass with a '
+    'measured to be too high on such surfaces (example nozzles: hybrid '
+    '+{hybrid:.2f} %, solid +{solid:.2f} %, liquid +{liquid:.2f} %; other '
+    'contours may differ); read the nozzle volume or mass with a '
     'high-precision (adaptive) volume integration. The nozzle mass HRMA '
     'declares (mass_breakdown.nozzle_mass) is not read from this file: it '
     'is integrated over the same contour points, wall and material '
-    '(frustum-annulus volume x density).',
+    '(frustum-annulus volume x density).'.format(
+        **STEP_NOZZLE_DEFAULT_VOLUME_ERROR_EXAMPLES_PCT),
     'CAD aracında lüle hacmi/kütlesi: bu STEP dosyalarındaki lüle cidarları '
     'pürüzsüz dönel B-spline yüzeylerdir. FreeCAD (Shape.Volume) ve öteki '
-    'OpenCASCADE tabanlı araçların varsayılan hacmi bu yüzeylerde '
-    '%0,04-1,48 sapıyor (ölçüldü; katı örnek lülede +%1,48); lüle hacmini '
+    'OpenCASCADE tabanlı araçların varsayılan hacmi bu yüzeylerde fazla '
+    'çıkıyor (ölçüldü, örnek lüleler: hibrit +%{hybrid}, katı +%{solid}, '
+    'sıvı +%{liquid}; başka konturlarda farklı olabilir); lüle hacmini '
     'ya da kütlesini yüksek hassasiyetli (uyarlamalı) hacim integraliyle '
     'okuyun. HRMA\'nın beyan ettiği lüle kütlesi '
     '(mass_breakdown.nozzle_mass) bu dosyadan okunmaz: aynı kontur '
     'noktaları, cidar ve malzeme üzerinden integre edilir (kesik koni halka '
-    'hacmi x yoğunluk).',
+    'hacmi x yoğunluk).'.format(**{
+        k: f'{v:.2f}'.replace('.', ',')
+        for k, v in STEP_NOZZLE_DEFAULT_VOLUME_ERROR_EXAMPLES_PCT.items()}),
 )
 
 #: Notun girdiği parça anahtarları (``step_package_readme`` etiket tablosu):
@@ -983,8 +1008,9 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     from hrma.export.cad_visualization import (
         _MONTAJ_GIRISIM_TOLERANS_MM,
         _chamber_wall_design, _front_cap_design, _grain_outer_radius_m,
-        _injector_plate_design, _nozzle_wall_design, _wall_sf_basis_text,
-        injector_plate_axial_span_mm)
+        PintleCADError, _injector_plate_design, _wall_sf_basis_text,
+        injector_plate_axial_span_mm, nozzle_wall_profile,
+        pintle_assembly_refusal, pintle_cad_geometry, pintle_type_claimed)
     wall_design = _chamber_wall_design(md)
     wall_m, wall_src = wall_design['thickness_m'], wall_design['source']
     if wall_m is None:
@@ -1158,8 +1184,14 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     # dönüşürdü.
     plate_design = _injector_plate_design(md)
     injector_not_drawn_reason = None
+    # V301 bilinen C2 — PINTLE: delik planı değil KANONİK geometri çizilir.
+    # Devrenin ``number_of_orifices`` planı pintle'da akış alanı EŞDEĞERİDİR
+    # (çözücünün beyanı: "The pintle is NOT drilled this way"); onun yokluğu
+    # pintle'ı reddettirmez, pintle geometrisinin yokluğu reddettirir.
+    pintle_geo = None
+    pintle_secili = has_injector and pintle_type_claimed(md)
     if has_injector:
-        if not plan['circuits']:
+        if not plan['circuits'] and not pintle_secili:
             raise StepExportDataError(
                 'injector orifice count / diameter could not be resolved '
                 'from the analysis result (looked for injector_design / '
@@ -1187,10 +1219,25 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
         # Orifisler çözüldü; sıra PLAKANIN KENDİSİNDE (yukarıdaki nota bak).
         # Kalınlık çözülemiyorsa parça çizilmez: delinecek yüzeyin kalınlığı
         # bilinmeden delik derinliği de imal edilemez.
-        if plate_design['thickness_m'] is None:
+        if pintle_secili:
+            # Katı üretimine BAŞLAMADAN: kanonik geometri yoksa, okunamıyorsa
+            # ya da çizilemiyorsa ADLI ret (düz plakaya sessiz dönüş YOK).
+            # Plaka kalınlığı yayımlanmamışsa (pintle çözümleri yayımlamaz)
+            # yüz plakası çizilmez, direk ve uç delikleri çizilir (künyeli).
+            try:
+                pintle_geo = pintle_cad_geometry(md)
+            except PintleCADError as _hata:
+                raise StepExportDataError(
+                    str(_hata) + '; refusing to emit a manufacturing STEP.',
+                    invalid_fields=_hata.invalid_fields) from None
+            if pintle_geo['not_drawn_reason']:
+                has_injector = False
+                injector_not_drawn_reason = pintle_geo['not_drawn_reason']
+                pintle_geo = None
+        elif plate_design['thickness_m'] is None:
             has_injector = False
             injector_not_drawn_reason = plate_design['source']
-    if has_injector:
+    if has_injector and pintle_geo is None:
         # Halka yarıçapı: hiçbir çözücü orifis YERLEŞİMİNİ modellemez (devre
         # modeli sayı/çap/ΔP verir, radyal konum vermez). Delik sayısı/çapının
         # aksine bu "çözülemedi" değil "modellenmiyor" hâlidir; her enjektör
@@ -1254,7 +1301,13 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
 
     # ---- Nozul: iç kontur + duvar ofseti (tek kontur kaynağı) ----
     # İmalat çıktısı: ıraksak boy hesaplanmadıysa katı ÜRETİLMEZ (A5).
-    pts, meta = sample_nozzle_inner_contour(md, require_solved_length=True)
+    # V301 bilinen C1 — İÇ KONTUR, ET VE DIŞ KONTUR TEK KAYNAKTAN
+    # (``cad_visualization.nozzle_wall_profile``; STL ve kütle dökümü de onu
+    # okur). Eskiden burası örnekleyiciyi ve et çözümleyicisini kendisi
+    # çağırıp dış konturu ``(z, r + et)`` diye ayrıca kuruyordu.
+    noz_profile = nozzle_wall_profile(md, unit='mm',
+                                      require_solved_length=True)
+    meta = noz_profile['meta']
     # ÖH V3 CAD A1 · H2 — ET TEK KAYNAKTAN (``_nozzle_wall_design``; STL ve
     # kütle dökümü de onu okur). ÖLÇÜLDÜ (7 Eki CAD kontrolü, hibrit örnek):
     # çözücü ``nozzle_geometry.wall_thickness = 7,185 mm`` (thin_wall_hoop)
@@ -1263,14 +1316,15 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     # aynı paketteki STL lülesi 7,19 mm idi (hacim 2,53x). Et yayımlanmamışsa
     # (katı/sıvı) üreteç kuralı aynen sürer ve künyesi DEĞİŞMEDİ
     # (ÖH Z5S / P9B2-29: kuralın adı, kesri ve boğaz yedeği yazılır).
-    noz_wall = _nozzle_wall_design(md)
-    wall_noz = noz_wall['thickness_m'] * 1000.0
-    inner = [(L + z, r) for z, r in pts]
+    noz_wall = noz_profile['wall_design']
+    wall_noz = noz_profile['wall']
+    inner = [(L + z, r) for z, r in noz_profile['inner']]
+    outer = [(L + z, r) for z, r in noz_profile['outer']]
     # ÖH V3 CAD · §28-41 — PÜRÜZSÜZ YÜZEY: aynı kontur noktaları ve aynı
     # et; çokgen (``_revolve_profile(inner + outer)``, nokta başına bir koni
     # yüzü) yerine noktalardan geçen B-spline revolve edilir.
     nozzle = _revolve_smooth_nozzle(
-        inner, wall_noz, straight_tail=meta['noz_type'] == NOZZLE_TYPE_CONE,
+        inner, outer, straight_tail=meta['noz_type'] == NOZZLE_TYPE_CONE,
         throat_radius_curvature_mm=meta['throat_radius_curvature_mm'],
         unreadable_angle_fields=meta['unreadable_angle_fields'])
     if noz_wall['published']:
@@ -1384,10 +1438,68 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
         _export_step_atomic(grain, files['fuel_grain'])
         solids.append(grain)
 
+    # ---- V301 bilinen C2: pintle enjektör (kanonik geometri) ----
+    if has_injector and pintle_geo is not None:
+        _red = pintle_assembly_refusal(
+            pintle_geo, L, zg0 if has_grain else None,
+            r_p0 if has_grain else None)
+        if _red is not None:
+            raise StepExportDataError(
+                str(_red) + '; refusing to emit a manufacturing STEP.',
+                invalid_fields=_red.invalid_fields)
+        if pintle_geo['plate_t'] is not None and pintle_geo['x_face'] > L:
+            raise StepExportDataError(
+                f"the injector plate resolved to {pintle_geo['plate_t']:.2f} "
+                f'mm but the chamber is only {L:.2f} mm long; refusing to '
+                'emit a manufacturing STEP with a plate that pierces the '
+                'chamber.',
+                invalid_fields=[{
+                    'field': 'chamber_length',
+                    'reason': 'shorter_than_injector_plate',
+                    'submitted_mm': round(L, 4),
+                    'plate_thickness_mm': round(pintle_geo['plate_t'], 4)}])
+        if (has_grain and pintle_geo['x_face'] - zg0
+                > _MONTAJ_GIRISIM_TOLERANS_MM):
+            raise StepExportDataError(
+                f"the injector plate ends at x = {pintle_geo['x_face']:.2f} "
+                f'mm but the fuel grain starts at x = {zg0:.2f} mm; no '
+                'assembly is exported with interpenetrating parts.',
+                invalid_fields=[{
+                    'field': 'injector_results.plate_structural'
+                             '.plate_thickness_mm',
+                    'reason': 'injector_plate_intersects_fuel_grain',
+                    'plate_end_mm': round(pintle_geo['x_face'], 4),
+                    'grain_front_mm': round(zg0, 4)}])
+        plaka, direk = _pintle_injector_solids(pintle_geo)
+        parcalar = []
+        if plaka is not None:
+            plaka.label = (f"pintle faceplate (annulus bore "
+                           f"d{pintle_geo['bore']:.3f} mm)")
+            parcalar.append(plaka)
+        direk.label = (f"pintle post (d{pintle_geo['d_post']:.3f} mm, "
+                       f"tip at x = {pintle_geo['x_tip']:.3f} mm)")
+        parcalar.append(direk)
+        for _parca in parcalar:
+            _v = _parca.is_valid
+            if not (_v() if callable(_v) else _v):
+                raise StepExportDataError(
+                    'the pintle injector solid is not valid after drilling; '
+                    'refusing to emit a manufacturing STEP.',
+                    invalid_fields=[{
+                        'field': pintle_geo['source_path'],
+                        'reason': 'pintle_injector_not_a_valid_solid'}])
+        injector = Compound(
+            children=parcalar,
+            label='injector (pintle; ' + '; '.join(pintle_geo['notes'])
+                  + ')')
+        files['injector'] = os.path.join(out_dir, f'{name}_injector.step')
+        _export_step_atomic(injector, files['injector'])
+        solids.append(injector)
+
     # ---- Enjektör plakası: gerçek orifis delikleri ----
     # Delik sayısı/çapı yukarıdaki kapıdan gelir (çözülemediyse buraya hiç
     # ulaşılmaz); halka yarıçapı desen verisi yoksa 'ASSUMED' beyanıyla çizilir.
-    if has_injector:
+    if has_injector and pintle_geo is None:
         # Plaka kalınlığı: KARDEŞ ÜRETİCİYLE TEK ÇÖZÜMLEYİCİ
         # (``cad_visualization._injector_plate_design``, ÖH D15 / P9B1-13).
         # Buraya ancak kalınlık ÇÖZÜLDÜYSE ulaşılır; yukarıdaki kapı
@@ -1522,6 +1634,50 @@ def generate_step_assembly(motor_results, out_dir=None, motor_type='hybrid'):
     _export_step_atomic(assembly, files['assembly'])
 
     return files
+
+
+def _pintle_injector_solids(geo):
+    """V301 bilinen C2 — pintle enjektörün katıları ``(plaka|None, direk)``.
+
+    Geometri ``cad_visualization.pintle_cad_geometry``den (STL ile TEK
+    kaynak; aynı sayılar, aynı yerleşim). Plaka: kapak iç yüzüne oturan
+    disk, ortasında anülüs deliği (Ø D_p + 2t, gerçek boolean). Direk:
+    Ø D_p silindir, kökü kapak iç yüzünde, ucu ``x_tip``te; uç delikleri
+    yüzeyden ``hole_depth`` derinliğe RADYAL gerçek deliklerdir ve TEK
+    boolean'la açılır (kesiciler direk yüzeyini bir delik çapı aşar: yalnız
+    kesme payı, çizilen geometriye girmez).
+    """
+    x0, x1 = geo['x0'], geo['x_face']
+    plaka = None
+    if geo['plate_t'] is not None:
+        t = x1 - x0
+        with BuildPart() as plaka_bp:
+            with Locations((x0 + t / 2, 0, 0)):
+                Cylinder(radius=geo['plate_r'], height=t,
+                         rotation=(0, 90, 0))
+                Cylinder(radius=geo['bore'] / 2, height=t + 2,
+                         rotation=(0, 90, 0), mode=Mode.SUBTRACT)
+        plaka = plaka_bp.part
+    boy = geo['x_tip'] - x0
+    with BuildPart() as direk_bp:
+        with Locations((x0 + boy / 2, 0, 0)):
+            Cylinder(radius=geo['d_post'] / 2, height=boy,
+                     rotation=(0, 90, 0))
+    direk = direk_bp.part
+    if geo['n_holes']:
+        r_dip = geo['d_post'] / 2 - geo['hole_depth']
+        h = geo['hole_depth'] + geo['d_hole']
+        kesiciler = []
+        for i in range(geo['n_holes']):
+            a = 2 * np.pi * i / geo['n_holes']
+            yon = (0.0, float(np.cos(a)), float(np.sin(a)))
+            duzlem = Plane(origin=(geo['x_holes'], r_dip * yon[1],
+                                   r_dip * yon[2]), z_dir=yon)
+            kesiciler.append(duzlem * Cylinder(
+                radius=geo['d_hole'] / 2, height=h,
+                align=(Align.CENTER, Align.CENTER, Align.MIN)))
+        direk = direk.cut(*kesiciler)
+    return plaka, direk
 
 
 def _cooling_channel_note(md):
@@ -1812,7 +1968,12 @@ def generate_tank_step(tank_data, out_dir=None):
         part = _revolve_profile(geo['profile_xr'])
         # Cidarın ve başlık beyanının nereden geldiği CAD ağacında görünür
         # (kamara kolundaki ``chamber (wall ... - ...)`` deseninin eşleniği).
-        part.label = geo['label']
+        # ÖH V31 CV-0: çizilen düz kapağın imalat kapısındaki SF'si ve
+        # hükmü etikete eklenir (``cad_visualization.tank_head_declaration``;
+        # cümle yalnız sayılardan ve sabit kodlardan kurulur).
+        from hrma.export.cad_visualization import tank_head_declaration
+        part.label = (f"{geo['label']} "
+                      f"[{tank_head_declaration(td.get('head_assessment'))}]")
         files[key] = os.path.join(out_dir, f'{key}.step')
         _export_step_atomic(part, files[key])
     return files

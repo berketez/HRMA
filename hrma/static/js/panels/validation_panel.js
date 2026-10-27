@@ -100,11 +100,19 @@
     // ------------------------------------------------------------------
     // Özel form bloğu (textarea + dosya seçici + karşılaştır butonu)
     // ------------------------------------------------------------------
+    // v3.0.1 N-girdi-1: girdinin "?" ipucu — ortak bileşen (field_help.js →
+    // HRMAHelp); anahtar çağrıda LİTERAL. Bileşen yoksa basılmaz.
+    function helpHtml(key) {
+        if (!window.HRMAHelp || typeof window.HRMAHelp.html !== 'function') return '';
+        return window.HRMAHelp.html(key, T(key, ''));
+    }
+
     function customFormHtml() {
         return `<div id="vp_custom" style="margin:10px 0;">
             <div class="form-group">
-                <label data-i18n="panel.validation.csvLabel">${T('panel.validation.csvLabel',
-                    'Static-Fire CSV — paste text or choose a file (columns: time [s], thrust [N])')}</label>
+                <div class="ad-field-head"><label data-i18n="panel.validation.csvLabel">${T('panel.validation.csvLabel',
+                    'Static-Fire CSV — paste text or choose a file (columns: time [s], thrust [N])')}</label>${
+                    helpHtml('panel.validation.help.csv')}</div>
                 <textarea id="vp_csv_text" rows="8" spellcheck="false"
                     placeholder="time,thrust&#10;0.0,0&#10;0.1,412.5&#10;0.2,896.0&#10;..."
                     style="width:100%; font-family:var(--hd-mono); font-size:0.78rem;

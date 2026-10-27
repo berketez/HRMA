@@ -314,8 +314,13 @@ def used_keys():
 # görmediği için sözlüğe eklenmeleri "ölü çeviri" sayılıyordu. Ön ek listesi
 # Python'ın GERÇEKTEN gönderdiği ad alanlarını yansıtmalı, yoksa bekçi doğru
 # eklemeyi engeller.
+#: v3.0.1 (26 Eki, V301/H3 birleşmesi): ``info`` öneki eklendi. H3, sunucunun
+#: ürettiği ilk BİLGİ düzeyli kodu getirdi (``info.injector.saturated_inlet_two_phase``,
+#: ``hrma/utils/injector_design.py`` SATURATED_INLET_NOTE_CODE; EN + TR sözlükte).
+#: Kod Python'da literal duruyor ama önek listesi onu görmediği için anahtar
+#: "ölü" sayılıyordu — warn.* ile aynı yanlış pozitif sınıfı.
 PY_KEY_RE = re.compile(
-    r"['\"]((?:warn|panel|common|risk|out|status)\.[\w.]+)['\"]")
+    r"['\"]((?:warn|info|panel|common|risk|out|status)\.[\w.]+)['\"]")
 
 
 def python_dispatched_keys():
@@ -549,8 +554,14 @@ def test_en_tr_key_sets_match_and_values_non_empty():
 def test_english_block_has_no_turkish_letters():
     """EN bloğuna yanlışlıkla Türkçe metin sızmasın (blokların karışması)."""
     turkish = re.compile(r'[çğıİöşüÇĞÖŞÜ]')
+
+    def _metin(k, v):
+        # v3.0.1 (NK-51): proj.nameRule izin verilen Türkçe harfleri SAYAR;
+        # o liste metin değil karakter kümesidir. Yalnız tam liste çıkarılır,
+        # değerin geri kalanı yine denetlenir.
+        return v.replace('ç ğ ı İ ö ş ü', '') if k == 'proj.nameRule' else v
     slips = sorted(k for k, v in EN.items()
-                   if turkish.search(v) and 'Türkçe' not in v)
+                   if turkish.search(_metin(k, v)) and 'Türkçe' not in v)
     assert not slips, 'EN bloğunda Türkçe karakterli değerler: %s' % slips[:10]
 
 

@@ -54,10 +54,28 @@
     var isLanding = (path === '/');
     if (!motorType && !isLanding) return;      // formulas vb. — şerit yok
 
-    // Proje adı kuralı (sunucudaki beyaz listenin istemci aynası):
-    // [A-Za-z0-9 _.-] 1-80, nokta ile başlayamaz, nokta/boşluk ile bitemez,
-    // Windows'ta ayrılmış aygıt adı olamaz.
-    var NAME_RE = /^[A-Za-z0-9 _.\-]{1,80}$/;
+    // Proje adı kuralı (sunucudaki beyaz listenin istemci aynası,
+    // hrma/utils/projects.py _NAME_CHARS): İngilizce ve Türkçe harfler
+    // (yalnız önceden birleşik/NFC), rakam, boşluk, _ . - ; 1-80, nokta ile
+    // başlayamaz, nokta/boşluk ile bitemez, Windows'ta ayrılmış aygıt adı
+    // olamaz. v3.0.1 (NK-51): Türkçe harfli ad ("Şimşek-1") reddediliyordu.
+    var NAME_RE = /^[A-Za-z0-9çğıöşüÇĞİÖŞÜ _.\-]{1,80}$/;
+    var NAME_CHAR_RE = /^[A-Za-z0-9çğıöşüÇĞİÖŞÜ _.\-]$/;
+    // Reddedilen karakterleri adıyla göster (NK-51: ileti hangi karakterin
+    // sorun olduğunu söylemiyordu). Görünmez/birleştirici karakter U+XXXX
+    // olarak yazılır.
+    function yasakKarakterler(name) {
+        var gorulen = {}, liste = [];
+        Array.from(String(name)).forEach(function (ch) {
+            if (NAME_CHAR_RE.test(ch) || gorulen[ch]) return;
+            gorulen[ch] = true;
+            var gorunmez = /[\s\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]|\p{M}/u.test(ch);
+            liste.push(gorunmez
+                ? 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')
+                : ch);
+        });
+        return liste;
+    }
     // ÖH D20 / P12aB4-16 — ÖLÇÜLDÜ (once.json): sunucunun reddettiği 22
     // ayrılmış adın 22'si de istemci doğrulamasından geçiyordu; modal
     // kapanıyor, POST gidiyor, sunucu 400 dönüyor ve kullanıcı adı baştan
@@ -365,8 +383,9 @@
             }
         }
         if (!Object.keys(out).length) return null;
-        if (typeof window.HRMA_VERSION === 'string') {
-            out.computed_with_version = window.HRMA_VERSION;
+        var surumSimdi = window.HRMA_VERSION || window.HRMA_APP_VERSION;
+        if (typeof surumSimdi === 'string' && surumSimdi.trim()) {
+            out.computed_with_version = surumSimdi.trim();
         }
         return out;
     }
@@ -436,7 +455,42 @@
         }
     }
 
+    // V301/H-PANEL (NK-68): kayıtta OLMAYAN seçiciler sayfa varsayılanına
+    // döner. ÖLÇÜLDÜ (son kullanıcı testi, hibrit): "Kullanıcının verdiği
+    // tank basıncı" kipi seçilip örnek proje yeniden açılınca kip ESKİ
+    // kalıyordu — örnek proje kaydı ``tank_pressure_source`` alanını
+    // taşımıyor (kip, kayıttan sonra eklendi) ve geri yükleme yalnız
+    // kayıttaki alanları yazıyordu. Seçici kayıtta yoksa varsayılan seçeneğe
+    // (``defaultSelected``, yoksa ilk seçenek) döner ve bağımlı işleyiciler
+    // tetiklenir; köken kapılı alanın damgası silinir (kullanıcı girdisi
+    // sayılmasın). Kayıttaki alanlar bundan SONRA yazılır.
+    function resetUnsavedSelects(fields) {
+        var n = 0;
+        var kayit = fields || {};
+        var nodes = document.querySelectorAll('select[id]');
+        for (var i = 0; i < nodes.length; i++) {
+            var el = nodes[i];
+            if (el.id === 'langSelect') continue;
+            if (el.closest && el.closest(DYNAMIC_ROOTS)) continue;
+            if (Object.prototype.hasOwnProperty.call(kayit, el.id)) continue;
+            var hedef = null;
+            for (var j = 0; j < el.options.length; j++) {
+                if (el.options[j].defaultSelected) { hedef = el.options[j].value; break; }
+            }
+            if (hedef === null && el.options.length) hedef = el.options[0].value;
+            if (hedef === null || el.value === hedef) continue;
+            el.value = hedef;
+            dispatchFieldEvents(el);
+            if (el.dataset && el.dataset.hrmaSourceGate === '1') {
+                delete el.dataset.hrmaSource;
+            }
+            n += 1;
+        }
+        return n;
+    }
+
     function restoreFields(fields) {
+        try { resetUnsavedSelects(fields); } catch (e) { /* DOM yoksa */ }
         var skipped = 0;
         Object.keys(fields || {}).forEach(function (id) {
             var el = document.getElementById(id);
@@ -623,11 +677,13 @@
        geçerli adla çağrılır. ÖH D22 / P12aB4-24: sayfada `#motor_description`
        YOKSA (ölçüldü: /solid, /liquid) açıklama alanı BURADA sorulur;
        varsa sorulmaz — aynı veri iki yerde istenmez (tek kaynak). */
-    function promptNameModal(titleText, defaultName, onSubmit) {
+    function promptNameModal(titleText, defaultName, onSubmit, yeniProje) {
         var box = openModalShell(titleText);
         var label = document.createElement('div');
         label.style.cssText = 'font-size:13px; margin-bottom:6px;';
         label.textContent = T('proj.nameLabel', 'Project name');
+        // v3.0.1 N-girdi-2: alan ipucu ortak bileşenden (field_help.js).
+        if (window.HRMAHelp) window.HRMAHelp.attach(label, 'proj.help.name', T('proj.help.name', ''));
         var input = document.createElement('input');
         input.type = 'text';
         input.value = defaultName || '';
@@ -654,11 +710,19 @@
         if (!sayfaDesc) {
             descLabel = document.createElement('div');
             descLabel.style.cssText = 'font-size:13px; margin-bottom:6px;';
-            descLabel.textContent = T('proj.descLabel',
+            // Metin iç <span>'da çevrilir (data-i18n kabın textContent'ini
+            // yazınca ipucunu silerdi); ipucu ortak bileşenden.
+            var descMetin = document.createElement('span');
+            descMetin.textContent = T('proj.descLabel',
                 'Description (optional)');
-            descLabel.setAttribute('data-i18n', 'proj.descLabel');
+            descMetin.setAttribute('data-i18n', 'proj.descLabel');
+            descLabel.appendChild(descMetin);
+            if (window.HRMAHelp) window.HRMAHelp.attach(descLabel, 'proj.help.desc', T('proj.help.desc', ''));
             descIn = document.createElement('textarea');
-            descIn.value = String(state.description || '');
+            // V301/DİL (NK-65): "Yeni Proje" boş açıklamayla başlar —
+            // ölçüldü: açık örneğin açıklaması yeni projenin kutusuna
+            // doluyordu. Farklı Kaydet'te mevcut açıklama korunur.
+            descIn.value = yeniProje ? '' : String(state.description || '');
             descIn.rows = 2;
             descIn.maxLength = 400;
             descIn.style.cssText =
@@ -680,14 +744,18 @@
                 // ÖH D20 / P12aB4-16: red GEREKÇESİ adlandırılır. Ayrılmış
                 // aygıt adı kural metninde geçmiyor; genel "kurala bakın"
                 // uyarısı kullanıcıyı doğru düzeltmeye götürmüyordu.
+                var yasak = yasakKarakterler(name);
                 err.textContent =
                     (WINDOWS_RESERVED.indexOf(name.toUpperCase()) !== -1)
                         ? T('proj.nameReserved',
                             'This name is reserved by Windows for a device '
                             + '(CON, PRN, AUX, NUL, COM1-9, LPT1-9) and cannot '
                             + 'be used as a file name.')
-                        : T('proj.nameInvalid',
-                            'Invalid project name — check the naming rule.');
+                        : (yasak.length
+                            ? TF('proj.nameBadChars', {chars: yasak.join('  ')},
+                                'Not allowed in a project name: {chars}')
+                            : T('proj.nameInvalid',
+                                'Invalid project name — check the naming rule.'));
                 err.style.display = 'block';
                 return;
             }
@@ -812,7 +880,7 @@
                 catch (e) { /* gizli mod */ }
                 state.dirty = false;    // onay alındı; beforeunload tekrar sormasın
                 location.href = location.pathname;      // temiz varsayılanlar
-            });
+            }, true);
         }
         if (state.dirty) {
             // ÖH D20 / P12aB4-11: onay düğmesi nötr "TAMAM" idi; oysa bu
@@ -907,6 +975,31 @@
             // sayı basılmaz. Künye yoksa (eski kayıt) hiçbir şey eklenmez:
             // nedeni bilinmeyen yokluğa neden uydurulmaz.
             bits.push(T('proj.itNoBurnTime', 'It: burn time not supplied'));
+        }
+        // v3.0.1 (NK-26, son kullanıcı testi): listedeki özet ESKİ bir
+        // sürümün koşusundan geliyordu (katı örnek "Fpk 1642 N · Isp 140,1 s"
+        // ⟷ bugünkü hesap 1499,7 N · 125,4 s) ve bu hiçbir yerde
+        // söylenmiyordu; kullanıcı sayıyı motorun bugünkü başarımı sanıyordu.
+        // Özet başka sürümle hesaplandıysa sürümüyle söylenir; sürüm
+        // bilinmiyorsa (damgasız eski kayıt) bu da söylenir. Güncel sürüm
+        // sayfada yayımlanmıyorsa karşılaştırma yapılmaz.
+        // Güncel sürüm: hibrit HRMA_VERSION, ana sayfa ve Fırlatma Sahası
+        // HRMA_APP_VERSION yazar; ikisi de yoksa bilinmiyor (uydurulmaz).
+        // Kod BİLEREK bu işlevin içinde: tests/test_d21_electron_a1.py
+        // summaryMini gövdesini kaynaktan çıkarıp ayrı bir sandıkta koşuyor;
+        // modül kapsamındaki bir yardımcı orada tanımsız kalır (ölçüldü).
+        var simdi = window.HRMA_VERSION || window.HRMA_APP_VERSION;
+        simdi = (typeof simdi === 'string' && simdi.trim()) ? simdi.trim() : null;
+        if (bits.length && simdi) {
+            var ozetSurum = (typeof summary.computed_with_version === 'string')
+                ? summary.computed_with_version.trim() : '';
+            if (!ozetSurum) {
+                bits.push(T('proj.summaryVersionUnknown',
+                    'computed with an older version'));
+            } else if (ozetSurum !== simdi) {
+                bits.push(TF('proj.summaryOldVersion', { version: ozetSurum },
+                    'computed with v{version}'));
+            }
         }
         return bits.join(' · ');
     }
@@ -1055,6 +1148,16 @@
             status.textContent = TF('proj.listFailed', { message: srv(err.message) },
                 'Could not load the project list: {message}');
             status.style.color = 'var(--hd-red, #ff5d73)';
+        } finally {
+            // V301/DİL (NK-3): "Proje Aç" penceresinde kapat/iptal düğmesi
+            // yoktu (yalnız dış alana tıklama kapatıyordu). Liste, boş liste
+            // ve hata hâlinde de görünür bir İptal düğmesi bulunur.
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex; justify-content:flex-end; margin-top:12px;';
+            var iptal = modalButton(T('proj.btnCancel', 'Cancel'), false);
+            iptal.onclick = closeModal;
+            row.appendChild(iptal);
+            box.appendChild(row);
         }
     }
 

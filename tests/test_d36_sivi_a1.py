@@ -593,6 +593,15 @@ _SAYFA_ISLEVLERI = (
     'function tankKunye(alan, deger)', 'function tankKriyoSatiri(cs)',
     'function tankMalzemeHucresi(st)', 'function _liquidExportStatus(text)',
     'function liquidEngGateStatus(results)',
+    # v3.0.1 K kulvarı (kaynak-cea, 5e6a70514): displayResults veri kaynağı
+    # satırını bu yardımcıyla kurar; ikiz onu almazsa 'not defined' der
+    # (26 Eki çapraz denetimde taban kırmızısı olarak ölçüldü).
+    'function liquidCombustionSourceText(results)',
+    # V301/L-A (SV-15): calculateLiquid zincirinin iki yeni yardımcısı (ret
+    # gövdesi -> metin; eski hesap hatası bildirimlerinin temizliği).
+    'function _liquidRetMetni(govde, durum)',
+    'function _liquidHesapHatalariniTemizle()',
+    'function _liquidOpakZemin(el)',
 )
 
 

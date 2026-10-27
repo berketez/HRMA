@@ -39,6 +39,9 @@ import subprocess
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+from tests.support import form_defaults
+
 from hrma.app import app
 
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -50,9 +53,12 @@ PANEL_JS = os.path.join(KOK, 'hrma', 'static', 'js', 'panels',
 UC_SIVI_TABAN = {'thrust': 10000.0, 'chamber_pressure': 30.0,
                  'mixture_ratio': 2.2, 'fuel_type': 'rp1',
                  'oxidizer_type': 'lox'}
+# v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+# (A_p/A_t 0,947) ve K-A kapısından beri 422 ``port_smaller_than_throat``.
+# Bu dosyanın konusu künye/ön-dolgu, port boğulması değil: geometri tek
+# tanım ``SOLID_DEFAULT_GEOMETRY_MM``den (değer kopyalanmaz).
 UC_KATI_TABAN = {'propellant_type': 'apcp', 'chamber_pressure': 40.0,
-                 'chamber_diameter': 100.0, 'grain_length': 500.0,
-                 'core_diameter': 30.0}
+                 **{k: float(v) for k, v in SOLID_DEFAULT_GEOMETRY_MM.items()}}
 
 #: Ölçülen ZORUNLU sınıf (once/alan_alan.json ``zorunlu_422`` + sıvının
 #: ``KRITIK_GIRDILER``i). Alan silinince 422 ve ad.
@@ -679,9 +685,15 @@ def test_bekci_listesi_okuyucu_tablosuyla_ayni():
 def test_basinc_beslemede_pompa_verimi_kunyelenmez(istemci):
     """Ş2: basınç beslemeli çevrimde pompa yok → turbopump_efficiency
     künyede YOK; kalan dört kanonik alan VAR."""
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` gönderilmezse uç
+    # 422 ``pressure_fed_feed_pressure_not_supplied`` döner (L-A SV-03).
+    # Konu pompa verimi künyesi: sayfanın gönderdiği şablon varsayılanı
+    # verilir (tek kaynak, kopyalanmaz).
     kod, j = _post(istemci, '/calculate_liquid',
-                   dict(UC_SIVI_TABAN, engine_cycle='pressure_fed'))
-    assert kod == 200
+                   dict(UC_SIVI_TABAN, engine_cycle='pressure_fed',
+                        feed_pressure=form_defaults.sayisal_varsayilanlar(
+                            'liquid')['feed_pressure']))
+    assert kod == 200, j
     k = _kunye(j)
     assert 'turbopump_efficiency' not in k
     for alan in ('chamber_roughness', 'coolant_flow_percent',

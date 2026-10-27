@@ -37,9 +37,15 @@ HYBRID_INPUTS = {
 SOLID_INPUTS = {
     'grain_type': 'bates',
     'propellant_type': 'apcp',
+    # v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm (Ø100, boy 500 mm @ 40 bar,
+    # a = 0,005 / n = 0,35) port boğulan motordu; K-A kapısından beri 422
+    # ``port_smaller_than_throat``. Varsayılan çekirdek (48 mm) bu yanma hızı
+    # katsayılarıyla yine boğuluyor (A_p/A_t 0,958, ölçüldü). Konu port
+    # değil: açık geçerli port — çekirdek 70 mm, ölçülen boğaz 50,72 mm,
+    # A_p/A_t 1,90.
     'chamber_diameter': 100,
     'grain_length': 500,
-    'core_diameter': 30,
+    'core_diameter': 70,
     'chamber_pressure': 40,
     'burn_rate_a': 0.005,
     'burn_rate_n': 0.35,
@@ -219,13 +225,23 @@ class TestHybridFastContract:
         shift = hybrid_fast['mean_shift_percent']
         assert set(shift) == HYBRID_OUTPUT_KEYS
 
-        eta = DEFAULT_UQ_MODELS['hybrid']['eta_c_star']
-        assert eta.nominal_override == 1.0  # F029 sabitlemesi yürürlükte
+        # Çekirdek modelin F029 sabitlemesi (nominal 1,0 / ortalama 0,93)
+        # yürürlükte; ama uç yolunda (V301/H-PANEL, NK-20) dağılım
+        # /calculate'in η'sına OTURUR: bu gövdenin itici çifti N2O/HTPB,
+        # kaynaklı varsayılan η = 0,89 (nominal = ortalama). Eski −%7,08
+        # sabitleme terimi bu yüzden kalktı; geriye kesme bandının (0,80 -
+        # 1,00) asimetrisinden doğan küçük terim kalır.
+        from hrma.analysis import uq_adapters as _uqa
+        assert DEFAULT_UQ_MODELS['hybrid']['eta_c_star'].nominal_override == 1.0
+        eta = _uqa.center_hybrid_eta_distribution(
+            _uqa.build_distributions('hybrid', None),
+            HYBRID_INPUTS)['eta_c_star']
+        assert eta.nominal_value() == pytest.approx(0.89)
         a = (eta.low - eta.mean) / eta.sigma
         b = (eta.high - eta.mean) / eta.sigma
         eta_mean = float(truncnorm.mean(a, b, loc=eta.mean, scale=eta.sigma))
-        expected = (eta_mean / eta.nominal_override - 1.0) * 100.0
-        assert expected == pytest.approx(-7.079, abs=0.005)  # el hesabı çapası
+        expected = (eta_mean / eta.nominal_value() - 1.0) * 100.0
+        assert abs(expected) < 0.05  # el hesabı: +0,015 % (a = -3, b = +3,67)
 
         # c* ile doğrusal çıktılar sabitleme terimini TAŞIR; geriye kalan
         # artık gerçek Jensen boşluğudur ve 0.5 puanın altında kalmalıdır.

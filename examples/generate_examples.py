@@ -66,7 +66,8 @@ KATI_ORNEGE_TASINAN_FORM_ALANLARI = (
     'nozzle_efficiency',       # lüle verimi (solid.html:1198)
     'cf_efficiency',           # Cf verimi   (solid.html:1299)
     'kinetic_efficiency',      # kinetik verim (solid.html:1329)
-    'erosion_factor',          # boğaz erozyonu
+    # 'erosion_factor' ÇIKTI (V301/K-A, 22 Eki): sayfa artık boş açılır
+    # (kaynaksız 0,001 mm/s kalktı; çözücü beyanlı rijit boğaz uygular).
     'initial_temp',            # itici başlangıç sıcaklığı [K]
 )
 
@@ -197,11 +198,13 @@ def build_examples(client):
     }
 
     solid_desc = (
-        'Öğretici örnek: KNDX (KNO3/dekstroz 65/35) katı motor, 75 mm gövde, '
+        'Öğretici örnek: KNDX (KNO3/dekstroz 65/35) katı motor, 75 mm yakıt '
+        'bloğu (kasa iç çapı blok + 2 x astar olarak türetilir), '
         '3 BATES segmenti, 40 bar tasarım basıncı, L sınıfı. Termokimya ve '
         'yanma hızı uygulamanın merkezi kataloglarından (propellants_db + '
         'Nakka 1999 rejim fitleri). / Educational example: KNDX '
-        '(KNO3/dextrose 65/35) solid motor, 75 mm case, 3 BATES segments, '
+        '(KNO3/dextrose 65/35) solid motor, 75 mm grain (case inner diameter '
+        'derived as grain + 2 x liner), 3 BATES segments, '
         '40 bar design pressure, L class. Thermochemistry and burn rate '
         'come from the application catalogues (propellants_db + Nakka 1999 '
         'regime fits).')
@@ -230,8 +233,13 @@ def build_examples(client):
         'inhibit_front': False,
         'inhibit_rear': False,
         'inhibit_outer': True,
-        # Oda
-        'chamber_diameter': 75.0,
+        # Oda. V301/K-A (22 Eki, ana model kararı A): ``chamber_diameter``
+        # DAİMA kasa iç çapıdır; eskiden burada tane çapına EŞİT 75 yazıyordu
+        # ve "eşitse beyan sayma" özel durumu onu sessizce yok sayıyordu.
+        # Özel durum kalkınca 75 mm kasa 75 mm taneyi 2 mm astarıyla almaz
+        # (422 grain_does_not_fit_case). Alan gönderilmez: kasa tane +
+        # 2·(astar + yalıtım) = 79 mm türetilir ve ``case_bore``da beyan
+        # edilir. Performans sayıları değişmez (kasa yalnız kütleye girer).
         'chamber_pressure': 40.0,
     }
     # Form varsayılanları (OH-ON-03): örnek yüklenip Hesapla'ya basıldığında
@@ -339,6 +347,30 @@ def results_summary(motor_type, body):
     return out
 
 
+def _dagitilmis_karmaya_ekle(dosya_adi):
+    """Yeni üretilen örneğin sha256'sını dağıtılmış sürümler listesine ekler.
+
+    v3.0.1 (26 Eki): kullanıcı dizinindeki örnek kopyası bu listedeki bir
+    sürümle bayt bayt aynıysa (kullanıcı değiştirmemiş) bir sonraki sürüm
+    onu güncel örnekle değiştirir (hrma/utils/projects.py
+    refresh_seeded_examples). Liste güncellenmezse bu sürümün örneği
+    "kullanıcı değiştirmiş" sanılır ve hiç tazelenmez.
+    """
+    import hashlib
+    import json
+    from hrma.utils import projects as store
+    yol = EXAMPLES_DIR / store.SHIPPED_EXAMPLE_HASHES_FILENAME
+    belge = json.loads(yol.read_text(encoding='utf-8')) if yol.exists() else {}
+    karmalar = belge.setdefault('hashes', {})
+    h = hashlib.sha256((EXAMPLES_DIR / dosya_adi).read_bytes()).hexdigest()
+    liste = karmalar.setdefault(dosya_adi, [])
+    if h not in liste:
+        liste.append(h)
+        liste.sort()
+    yol.write_text(json.dumps(belge, ensure_ascii=False, indent=1) + '\n',
+                   encoding='utf-8')
+
+
 def main(secilen=None):
     """Örnekleri üret; ``secilen`` verilirse YALNIZ o motor türleri yazılır.
 
@@ -397,6 +429,7 @@ def main(secilen=None):
 
         print(f"{name}.hrma  yazıldı (app {info['app_version']})")
         print('  özet:', doc['results_summary'])
+        _dagitilmis_karmaya_ekle(name + store.FILE_EXT)
 
 
 if __name__ == '__main__':

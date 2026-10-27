@@ -113,6 +113,13 @@ POST_CHAMBER_D_FACTOR_MAX = 3.0
 # pratiği bandıdır, tek bir yayımlanmış sabit değildir; TEK yerde tanımlanır
 # ve uyarı parametresi olarak aynen yayımlanır (kopya eşik yasak). Aynı koşuda
 # port_count = 4 seçilince L/D 8,6'ya düşüyor — öneri metninin dayanağı budur.
+# v3.0.1 kulvar P — ÖLÇÜM YENİLENDİ: yukarıdaki sayılar kaynaksız
+# 1,5·√N·D_son kuralının şişirdiği kamara çapıyla ölçülmüştü. Grain dış
+# çapı artık yanma sonu port zarfıdır (bkz. GRAIN_RESIDUAL_WEB_DEFAULT_MM);
+# grain boyu DEĞİŞMEDİ (1,53 m), çap 80,6 -> 53,8 mm indi, yani narinlik
+# eskiden GİZLENİYORDU. Aynı görev (kamara L/D): N = 1 -> 29,3; N = 4 ->
+# 10,5; N = 5 -> 9,2; N = 6 -> 8,1. Öneri metni ("port sayısını artırın")
+# aynen geçerli; eşik değişmedi.
 GRAIN_LD_WARN_THRESHOLD = 10.0
 
 # Port oksitleyici kütle akısının FLOODING eşiği [kg/m²·s] (D15/P1B1-06).
@@ -163,6 +170,120 @@ CHAMBER_PRESSURE_PLACEHOLDER_BAR = 20.0
 # baskı Eş. 3-31); bant, ölçüm saçılımı ve düşük verimli deneysel motorlar
 # için genişletilmiş savunulabilir aralıktır.
 ETA_C_STAR_PHYSICAL_BAND = (0.5, 1.05)
+
+# ---------------------------------------------------------------------------
+# V301/H-PANEL (NK-15 / NK-20) — c* (yanma) veriminin KAYNAKLI varsayılanı
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (taban 52165c557, örnek 3 kN N2O/HTPB): hibrit formunda c* verimi
+# girdisi YOKTU; /calculate η = 1,00 (kuramsal denge c*) ile boyutlandırıyor,
+# aynı uygulamanın belirsizlik modeli ise η_c* dağılımının ortalamasını 0,93
+# alıyordu — manşet c* 1596,6 m/s / Isp 235,9 s, belirsizlik bandının
+# (P5-P95) ÜSTÜNDE kalıyordu. Sıvı %97, katı %95 verimle hesaplıyor.
+#
+# Varsayılan, ürünün KENDİ doğrulama veritabanındaki ÖLÇÜLMÜŞ hibrit c*
+# verimlerinden gelir (yeni bir sayı uydurulmadı; kayıtlar
+# hrma/data/validation_records/hybrid/, her biri kaynak tablosuyla):
+#   * Heydari & Ghadiri Massoom, Int. J. Aerospace Eng. 2017, Art. 3174140
+#     (doi 10.1155/2017/3174140), Tablo 2 ve 4-6: sıvı N2O/HTPB, 10 ateşleme,
+#     η_c* 0,77-0,99;
+#   * Scaramuzzino, Carmicino ve ark., 5. EUCASS 2013, Ek Tablo A1/A2 (s. 15):
+#     gaz N2O / saf HTPB, 16 ateşleme, η_c* 0,79-0,99.
+# 26 ölçümün ORTANCASI 0,89 (aralık 0,77-0,99). Bekçi
+# (tests/test_v301_hibrit_panel.py) sayının kayıtlardan yeniden
+# hesaplandığında aynı çıktığını sınar; kayıt eklenirse kırmızıya döner.
+# Ölçülmüş verimi olan BAŞKA itici çifti yok (veritabanındaki parafin
+# kayıtları GOX'ludur ve hibrit sayfasında GOX seçeneği yoktur): o çiftlerde
+# varsayılan 1,00'dır (kuramsal c*) ve sonuçta "ideal c* — verim
+# uygulanmadı" diye AÇIKÇA beyan edilir; kaynaksız bir "tipik" verim
+# uygulanmaz.
+HYBRID_ETA_C_STAR_MEASURED = {
+    ('n2o', 'htpb'): {
+        'eta_c_star': 0.89,
+        'statistic': 'median',
+        'n_tests': 26,
+        'measured_band': (0.77, 0.99),
+        'record_prefixes': ('hyb-heydari2017-htpb-n2o-',
+                            'hyb-carmicino2013-htpb-n2ogas-'),
+        'sources': (
+            'Heydari & Ghadiri Massoom, Int. J. Aerospace Eng. 2017, '
+            'Art. 3174140 (doi:10.1155/2017/3174140), Tables 2 and 4-6: '
+            '10 liquid-N2O/HTPB firings, eta_c* 0.77-0.99',
+            'Scaramuzzino, Carmicino et al., 5th EUCASS 2013, Appendix '
+            'Tables A1/A2 (p. 15): 16 gaseous-N2O / pure-HTPB firings, '
+            'eta_c* 0.79-0.99'),
+    },
+}
+
+#: Form alanının adı ve birimi (yüzde). Sıvı sayfasıyla aynı ad
+#: (``combustion_efficiency``); kabul bandı ``ETA_C_STAR_PHYSICAL_BAND``.
+C_STAR_EFFICIENCY_FIELD = 'combustion_efficiency'
+
+
+def resolve_hybrid_c_star_efficiency(oxidizer_type, fuel_type,
+                                     supplied_pct=None):
+    """Hibrit c* veriminin TEK çözümleyicisi (uç, geçici analiz, belirsizlik).
+
+    Döner: ``{'eta_c_star', 'percent', 'source', 'basis', ...}``.
+    ``source``: ``'user_input'`` | ``'sourced_default'`` | ``'ideal_no_source'``.
+    ``eta_engine``: motora geçecek değer (kaynaksız çiftte ``None`` — motorun
+    kuramsal c* yolu, sayılar bit-aynı).
+
+    Raises:
+        input_guard.InputError: verilen değer sayı değil, sonlu değil ya da
+            ``ETA_C_STAR_PHYSICAL_BAND`` (yüzde olarak) dışında.
+    """
+    alt = ETA_C_STAR_PHYSICAL_BAND[0] * 100.0
+    ust = ETA_C_STAR_PHYSICAL_BAND[1] * 100.0
+    ox = str(oxidizer_type or '').strip().lower()
+    fu = str(fuel_type or '').strip().lower()
+    ham = {C_STAR_EFFICIENCY_FIELD: supplied_pct}
+    deger = input_guard.num(ham, C_STAR_EFFICIENCY_FIELD, unit='%')
+    if deger is not None:
+        if not (alt <= deger <= ust):
+            raise input_guard.InputError(
+                f"'{C_STAR_EFFICIENCY_FIELD}' = {deger:g} % is outside the "
+                f"accepted band {alt:g}-{ust:g} % (c* efficiency "
+                f"{ETA_C_STAR_PHYSICAL_BAND[0]}-"
+                f"{ETA_C_STAR_PHYSICAL_BAND[1]}). It is not clipped; leave "
+                f"the field empty to use the sourced default.")
+        eta = deger / 100.0
+        return {
+            'eta_c_star': eta, 'percent': deger, 'eta_engine': eta,
+            'source': 'user_input',
+            'basis': ('c* efficiency entered by the user; delivered c* = '
+                      'eta_c* x theoretical equilibrium c*.'),
+            'accepted_band_percent': [alt, ust],
+        }
+    kayit = HYBRID_ETA_C_STAR_MEASURED.get((ox, fu))
+    if kayit is not None:
+        eta = float(kayit['eta_c_star'])
+        return {
+            'eta_c_star': eta, 'percent': eta * 100.0, 'eta_engine': eta,
+            'source': 'sourced_default',
+            'statistic': kayit['statistic'],
+            'n_tests': kayit['n_tests'],
+            'measured_band': list(kayit['measured_band']),
+            'sources': list(kayit['sources']),
+            'basis': (
+                f"not supplied: {kayit['statistic']} of {kayit['n_tests']} "
+                f"measured c* efficiencies for {ox.upper()}/{fu.upper()} in "
+                f"HRMA's validation records (measured range "
+                f"{kayit['measured_band'][0]:.2f}-"
+                f"{kayit['measured_band'][1]:.2f}); delivered c* = "
+                f"eta_c* x theoretical equilibrium c*."),
+            'accepted_band_percent': [alt, ust],
+        }
+    return {
+        'eta_c_star': 1.0, 'percent': 100.0, 'eta_engine': None,
+        'source': 'ideal_no_source',
+        'basis': (
+            f'not supplied, and HRMA holds no measured c* efficiency for '
+            f'{ox.upper() or "?"}/{fu.upper() or "?"}: the IDEAL '
+            f'(theoretical equilibrium) c* is used and NO efficiency is '
+            f'applied. A real motor delivers less; enter a measured value '
+            f'to apply one.'),
+        'accepted_band_percent': [alt, ust],
+    }
 
 # --- O/F -> performans ızgarası (v2.6.27, yol haritası A9) ------------------
 # Hibritte yakıt regresyonu r = a·G_ox^n olduğundan port büyüdükçe akı düşer,
@@ -268,6 +389,70 @@ LINER_MATERIAL_DEFAULT = 'silica_phenolic'
 # Cidar sıcaklık geçmişi örnekleme tavanı: port_history'deki ~200 nokta
 # deseniyle aynı gerekçe (yanıt boyutu sınırlanır, son nokta korunur).
 WALL_HISTORY_MAX_POINTS = 200
+
+# ---------------------------------------------------------------------------
+# v3.0.1 (V301/H-termal, Berke onaylı ÖNEMLİ fizik, 26 Eki) — KAMARA CİDARI
+# ÜÇ BÖLGEDİR. Isı modülü (heat_transfer_analysis) kamara cidarını bütünüyle
+# sıcak gaza AÇIK, soğutmasız ve kararlı sayıyordu; ölçüldü (örnek hibrit
+# 3 kN, ss_304): denge cidarı 3313 K ⟷ erime 1673 K, 12 lüle/soğutma/cidar
+# bileşiminin HEPSİNDE "cidar eriyor" ve bundan türeyen yorulma CRITICAL,
+# emniyet UNSAFE. Hibritte yakıt bloğu boyu (L_grain) boyunca kasanın önünde
+# yanan yakıt durur; gaza açık olan yalnız ön ve son yanma odalarıdır
+# (L_pre_chamber, L_post_chamber). Bölge hükmü ``_chamber_wall_zones_block``.
+# ---------------------------------------------------------------------------
+CHAMBER_ZONE_GRAIN = 'grain_section'
+CHAMBER_ZONE_PRE = 'pre_chamber'
+CHAMBER_ZONE_POST = 'post_chamber'
+#: Yakıt bloğu altındaki bölge yanma boyunca korunur (beyanlı model).
+ZONE_VERDICT_PROTECTED = 'PROTECTED_DURING_BURN'
+#: Yakıt bloğu koşulu sağlanmadı (geometri/sıcaklık okunamadı): koruma YOK.
+ZONE_VERDICT_NOT_PROTECTED = 'NOT_PROTECTED'
+#: Açık bölge: çıplak cidar sınırı aşıyor, HRMA'nın boyutlandırdığı astar
+#: gerekir (önem ``warning``).
+ZONE_VERDICT_LINER_REQUIRED = 'LINER_REQUIRED'
+#: Açık bölge: çıplak cidar sınırı aşıyor ve astar boyutlandırması KOŞMADI
+#: (fail-closed: ısı modülünün kritik hükmü AYNEN kalır).
+ZONE_VERDICT_BARE_WALL_CRITICAL = 'BARE_WALL_CRITICAL'
+#: Açık bölge: çıplak cidarın kararlı kontrolünde kritik kayıt yok.
+ZONE_VERDICT_BARE_WALL_OK = 'BARE_WALL_WITHIN_LIMIT'
+#: Bölge boyu sıfır (ör. kamara boyu ezmesinde son oda kalmadı).
+ZONE_VERDICT_ABSENT = 'NOT_PRESENT'
+#: Isı modülünün ÇIPLAK CİDAR kararlı kontrolünden gelen kritik kodlar —
+#: bölge hükmü bunların yerini ancak bütün bölgeler korunduğunda alır.
+#: Tanım kodların sahibi olan ısı modülündedir (tek kaynak).
+from hrma.analysis.heat_transfer_analysis import (  # noqa: E402
+    BARE_WALL_CRITICAL_CODES)
+#: Yapısal zincirin kasa sıcaklığı kaynağı (structural_analysis
+#: ``thermal_analysis.wall_temperature_source`` alanına yazılır).
+CASING_TEMPERATURE_SOURCE_ZONES = 'hybrid_chamber_zone_protection'
+#: Yakıt bloğu koruma modelinin beyanı (kullanıcıya EN; TR i18n'de).
+GRAIN_PROTECTION_DECLARATION = (
+    'MODEL, declared: the fuel grain covers the case over the grain length '
+    'for the whole burn (the burn is stopped before the web reaches the '
+    'case - grain envelope gate), so the case under the grain is not '
+    'exposed to combustion gas and is held at the initial (ambient) '
+    'temperature during the pressurised burn. NOT modelled: the heat wave '
+    'inside the grain and the post-burn heat soak (no sourced fuel thermal '
+    'diffusivity exists for this fuel: hrma/stability/fuel_thermal.py '
+    'declares the HTPB conductivity a MissingProperty).')
+#: Kaynak beyanı — birincil kaynak doğrulanamadı; destekleyen (kanıtlamayan)
+#: iki ölçüm raporu adıyla (docs/scofield/raw/OH/V301/hibrit-termal/RAPOR.md).
+GRAIN_PROTECTION_SOURCE = (
+    'HRMA choice - common engineering practice, primary source not '
+    'verified (Sutton & Biblarz 9th ed. Ch. 16 was searched and does not '
+    'state it). Supporting, not establishing: Hansen & Edwards 2012, '
+    'O-class paraffin/HTPB-N2O motor (University of Washington SARP): "A '
+    'grade C ablative phenolic liner and the high heat capacity of the '
+    'paraffin fuel reduces heat transfer to the aluminum chamber wall", '
+    'with phenolic PRE and POST combustor liner inserts; Palacz & Cieslik, '
+    'Aerospace 10(8) 727 (2023), doi 10.3390/aerospace10080727: the fuel '
+    'grains "provide thermal insulation".')
+#: Açık bölgelerde astarın kasayı ortam sıcaklığında tuttuğu VARSAYIMI.
+OPEN_ZONE_LINER_ASSUMPTION = (
+    'ASSUMPTION: the insulation liner HRMA sized for the pre/post-combustion '
+    'chambers (thermal_protection.chamber_liner, Level-1 Q*) keeps the case '
+    'at the initial (ambient) temperature. The Level-1 Q* model has no liner '
+    'back-face (bond-line) temperature, so this is not a computed result.')
 
 # --- A3 bağlama sabiti (v2.6.27 Dalga 6): oksitleyici tankı malzemesi ------
 # Sıvı motorun tank boyutlandırmasındaki varsayılan tank malzemesiyle AYNI
@@ -696,12 +881,181 @@ HTPB_INDEPENDENT_CAMPAIGN_RECORDS = tuple(
 #: (``independent_fit``).
 WARNING_BOOL_I18N_KEYS = {True: 'common.bool.true', False: 'common.bool.false'}
 
-# Port çapının kamara iç çapına oranı için üst sınır. Yakıt grain'i portu
-# SARDIĞINDAN port her zaman kamaradan küçüktür; kalan et kalınlığı
-# (D_ch − D_port)/2 yapısal ve yanma açısından gereklidir. Web tükenmesi bu
-# orana ulaşınca ilan edilir. TEK TANIM YERİ (CLAUDE.md kural 11): hem
-# time-marching sınırı hem de girdi doğrulaması bu sabiti kullanır.
-PORT_TO_CHAMBER_MAX_RATIO = 0.8
+# --- GRAIN DIŞ ZARFI ⟷ YANMA SONU PORTLARI (v3.0.1, kulvar P, Ayberk tur 1) ---
+# Ayberk: "End of burn port neden yanma odası çapına eşit olmuyor da daha
+# önce bitiyor?"
+#
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ayberk1/port-kamara/once.json): kamara
+# çapı verilmeyince ``D_ch = 1,5·√N·D_port_son`` uygulanıyordu ve 1,5
+# katsayısının KAYNAĞI YOKTU. Varsayılan hibritte (1 kN, 10 s, Pc 20 bar,
+# O/F 2,5, HTPB/N2O) D_port_son 53,76 mm iken kamara 80,64 mm çıkıyor,
+# yüklenen 5,579 kg yakıtın yalnız 1,579 kg'ı yanıyordu: yakıtın %71,7'si
+# ölü ağırlık olarak uçuyordu. √N terimi yalnız toplam port ALANINI korur,
+# N portu bir zarfa SIĞDIRMAZ (geometrik özdeşlik; çember içine çember
+# yerleşimi değildir). Kullanıcı kamara çapı verdiğinde ise başka bir
+# kaynaksız oran (port <= 0,8·D_ch/√N) yanmayı kırpıyordu.
+#
+# YENİ KURAL (ana model kararı; Astra danışması):
+#   N = 1 :  D_grain_dış = D_port_son + 2·t_artık
+#   N >= 2:  D_grain_dış = D_port_son·(1 + 1/sin(π/N)) + 2·t_artık
+# N >= 2 tek halka dizilimidir: N son port birbirine ve dış cidara teğettir
+# (merkezler R = D_port_son/(2·sin(π/N)) çemberinde). Bu bir geometrik
+# özdeşliktir; N = 2..6 için tek halka en sıkı dizilimdir, N >= 7'de geçerli
+# ama en sıkı değildir (örnek: N = 7'de merkez port + 6'lı halka 3,0·D verir,
+# tek halka 3,305·D). Portlar arası ara bölgelerde yakıt KALIR — çok portta
+# artık yakıt doğaldır ve gerçek alanlardan hesaplanıp yayımlanır.
+#
+# DAYANAK (birincil metinde doğrulandı, yerel PDF + pdftotext, 19 Eki 2026):
+#   Karabeyoglu, Cantwell & Zilliac, "Development of Scalable Space-Time
+#   Averaged Regression Rate Expressions for Hybrid Rockets", JPP 23(4) 2007,
+#   doi 10.2514/1.19226, §VI.B "Discussion of Results", s. 745: "each burn
+#   time corresponds to a different motor with the grain outside diameter
+#   (or motor case inside diameter) matched to the port diameter at the exit
+#   plane"; aynı paragraf tek dairesel portun artık yakıt kesrinin "much
+#   smaller ... compared with a multiport system" olduğunu söyler.
+#   Sutton & Biblarz 9. baskı s. 610 (Böl. 16, dairesel portlu büyük hibrit
+#   örneği): sliver kesri "1 minus fuel consumed divided by fuel loaded"
+#   (HRMA'nın ``fuel_sliver_fraction`` tanımı) ~%30; "some web must be
+#   designed to remain between ports at the end of the burn" — artık et
+#   gerçek bir tasarım payıdır, bu yüzden isteğe bağlı GİRDİDİR.
+#
+# t_artık VARSAYILANI 0 BİR İDEALİZASYONDUR (HRMA seçimi — literatürde evrensel
+# bir hibrit artık et değeri yok): nominal artık yakıt sıfır; ısıl koruma
+# (astar/yalıtım) ve regresyon belirsizliği DAHİL DEĞİL. "Korumasız gövdeye
+# kadar yak" izni değildir. HRMA portu eksenel olarak düzgün (uzay-ortalamalı
+# regresyon) modeller; yerel port büyümesi arka uçta ortalamayı aşabilir
+# (aynı makale Şekil 10-11) — artık et bu pay içindir.
+#
+# Kamara iç çapı = grain dış çapı; astar/yalıtım bu zarfta MODELLENMEZ.
+# TEK TANIM YERİ (CLAUDE.md kural 11): otomatik boyutlandırma, kullanıcı
+# kamara çapının sığma kapısı ve yayımlanan künye aşağıdaki üç fonksiyondan
+# beslenir.
+GRAIN_RESIDUAL_WEB_DEFAULT_MM = 0.0
+
+#: Yayımlanan künyenin kaynak cümlesi (kullanıcıya dönük: İngilizce).
+GRAIN_SIZING_RULE_BASIS = (
+    'grain outer diameter = final port envelope. Single port: '
+    'D_grain_outer = D_port_final + 2*t_residual (Karabeyoglu, Cantwell & '
+    'Zilliac, JPP 23(4) 2007, doi 10.2514/1.19226, Sec. VI.B p. 745: "the '
+    'grain outside diameter (or motor case inside diameter) matched to the '
+    'port diameter at the exit plane"). N >= 2 ports: single ring, the N '
+    'final ports tangent to each other and to the outer wall, '
+    'D_grain_outer = D_port_final*(1 + 1/sin(pi/N)) + 2*t_residual '
+    '(geometric identity; the densest layout for N = 2..6, valid but not '
+    'the densest for N >= 7). Fuel left between the ports is real residual '
+    'fuel (Sutton & Biblarz 9th ed. p. 610). The port is modelled as '
+    'axially uniform (space-averaged regression); local growth near the aft '
+    'end can exceed it (Karabeyoglu et al., Figs. 10-11). Chamber inner '
+    'diameter = grain outer diameter; liner/insulation is NOT modelled in '
+    'this envelope.')
+
+#: t_artık = 0 olduğunda künyeye giren idealizasyon beyanı.
+GRAIN_ZERO_RESIDUAL_WEB_DECLARATION = (
+    'zero nominal residual fuel; thermal protection and regression '
+    'uncertainty not included. This is an idealised sizing default, not '
+    'permission to burn against an unprotected case: supply '
+    'residual_web_thickness (mm) to keep a residual web.')
+
+#: Kaldırılan kuralın adı — künyede tarihçe olarak yayımlanır.
+GRAIN_SUPERSEDED_RULE = (
+    'D_ch = 1.5*sqrt(N)*D_port_final (no source; removed in v3.0.1) and, '
+    'with a user chamber diameter, port <= 0.8*D_ch/sqrt(N) burn clipping '
+    '(no source; replaced by the envelope fit gate in v3.0.1)')
+
+
+class GrainEnvelopeError(ValueError):
+    """Grain dış zarfı (kullanıcı kamara çapı / artık et) reddi.
+
+    ``ValueError`` alt sınıfıdır: üst katman onu İSTEMCİ reddi sayar.
+    ``invalid_fields`` yapılı künyedir (uç onu 422 gövdesine aynen koyar);
+    ``field``/``reason`` genel hata dalının kopyaladığı künyelerdir.
+    """
+
+    def __init__(self, message, invalid_fields):
+        super().__init__(message)
+        self.invalid_fields = list(invalid_fields)
+        ilk = self.invalid_fields[0] if self.invalid_fields else {}
+        self.field = ilk.get('field')
+        self.reason = ilk.get('reason')
+
+
+def grain_port_layout_factor(port_count):
+    """k(N): son port çapı başına grain dış çapı (artık et hariç).
+
+    N = 1 tek merkezi port: k = 1. N >= 2 tek halka, son portlar birbirine
+    ve dış cidara teğet: k = 1 + 1/sin(π/N) (N = 2 -> 2, N = 3 -> 2,1547,
+    N = 4 -> 2,4142, N = 6 -> 3). Geometrik özdeşlik; künye
+    ``GRAIN_SIZING_RULE_BASIS``.
+    """
+    n = int(port_count)
+    if n < 1:
+        raise ValueError(f'port_count must be a positive integer, given {n}')
+    if n == 1:
+        return 1.0
+    return 1.0 + 1.0 / float(np.sin(np.pi / n))
+
+
+def grain_outer_diameter_for_ports_m(port_diameter_final_m, port_count,
+                                     residual_web_m):
+    """Yanma sonu portlarını saran en küçük grain dış çapı [m]."""
+    return (grain_port_layout_factor(port_count) * float(port_diameter_final_m)
+            + 2.0 * float(residual_web_m))
+
+
+def max_port_diameter_in_envelope_m(grain_outer_diameter_m, port_count,
+                                    residual_web_m):
+    """Verilen grain dış zarfına sığan en büyük (tek) port çapı [m]."""
+    return ((float(grain_outer_diameter_m) - 2.0 * float(residual_web_m))
+            / grain_port_layout_factor(port_count))
+
+
+def residual_web_upper_bound_mm():
+    """Artık et üst sınırı [mm] — YENİ EŞİK DEĞİL.
+
+    Grain dış çapı kamara çapıdır ve 2·t_artık o çapın içinde kalmak
+    zorundadır; kamara çapının tek kanonik bandı
+    ``CANONICAL_LIMITS['chamber_diameter']`` (üst uç 5,0 m). Sınır o bandın
+    yarısıdır (``bolted_joint.seal_diameter_max_mm`` ile aynı desen: sayı
+    deponun kendi tablosundan okunur, burada yazılmaz).
+    """
+    from hrma.validation.motor_validation import CANONICAL_LIMITS
+    return float(CANONICAL_LIMITS['chamber_diameter']['max']) * 1e3 / 2.0
+
+
+def resolve_residual_web_input(raw, field='residual_web_thickness'):
+    """İsteğe bağlı artık et girdisini (mm) çözer: (t_artık [m], kaynak).
+
+    ``None`` / boş dize -> VERİLMEDİ: ``GRAIN_RESIDUAL_WEB_DEFAULT_MM``
+    (idealizasyon, kaynak ``'default_zero_idealisation'``). Verildiyse JSON
+    sayısı olmalı (``bool``, dize, liste, sözlük reddedilir —
+    ``input_guard.is_json_number`` kanonu), sonlu, >= 0 ve
+    ``residual_web_upper_bound_mm()`` altında. Sessiz kırpma, sessiz yedek
+    YOK: aykırı değer ``GrainEnvelopeError`` ile ADIYLA reddedilir.
+    """
+    if raw is None or (isinstance(raw, str) and raw.strip() == ''):
+        return GRAIN_RESIDUAL_WEB_DEFAULT_MM / 1e3, 'default_zero_idealisation'
+    ust = residual_web_upper_bound_mm()
+    kunye = {'field': field, 'unit': 'mm',
+             'accepted_range': [0.0, ust],
+             'submitted': (raw if input_guard.is_json_number(raw)
+                           and np.isfinite(float(raw))
+                           else str(raw)[:80])}
+    if not input_guard.is_json_number(raw):
+        kunye['reason'] = 'not_a_json_number'
+    elif not np.isfinite(float(raw)):
+        kunye['reason'] = 'not_finite'
+    elif float(raw) < 0.0:
+        kunye['reason'] = 'negative'
+    elif float(raw) >= ust:
+        kunye['reason'] = 'above_chamber_diameter_band'
+    else:
+        return float(raw) / 1e3, 'user_input'
+    raise GrainEnvelopeError(
+        f"'{field}' must be a finite number of millimetres, at least 0 and "
+        f'below {ust:g} mm (half of the chamber diameter band); given '
+        f'{kunye["submitted"]!r} ({kunye["reason"]}). It is the fuel web '
+        'kept between the final ports and the grain outer surface; no value '
+        'was assumed in its place.', [kunye])
 
 #: FIRLATMA SAHASI GİRDİ BANTLARI (D15/P1B2-06). TEK TANIM YERİ
 #: (CLAUDE.md kural 11): ``_launch_site_block`` kapısı yalnız buradan okur.
@@ -974,6 +1328,7 @@ class HybridRocketEngine:
                  thrust_coefficient=0, regression_a=None,
                  regression_n=None, fuel_density=None, 
                  combustion_type='infinite', chamber_diameter_input=0,
+                 residual_web_thickness=None,
                  contraction_ratio=0,
                  fuel_type='htpb', motor_name='', motor_description='',
                  initial_gox=None, flux_mode='ox', track_performance=True,
@@ -981,9 +1336,9 @@ class HybridRocketEngine:
                  eta_c_star=None, precomputed_optimum_of=None,
                  injector_type='showerhead', initial_port_diameter=None,
                  tank_temperature=None, port_count=1,
-                 throat_erosion_rate=None,
+                 throat_erosion_rate=None, tank_pressure_source=None,
                  chamber_material=None, wall_thickness=None,
-                 cooling_type='natural',
+                 cooling_type='natural', tank_pressure=None,
                  safety_factor=None, chamber_length_override=None,
                  nozzle_material=None, ambient_temperature=None,
                  plate_thickness=None, orifice_inlet=None,
@@ -1379,6 +1734,13 @@ class HybridRocketEngine:
         # dolayısıyla arayüzdeki alan tamamen ölüydü.
         self.contraction_ratio_input = contraction_ratio
         self.chamber_diameter_input = chamber_diameter_input / 1000 if chamber_diameter_input > 0 else 0  # Convert mm to m
+        # v3.0.1 kulvar P — artık et (residual web) [mm -> m]: son portlarla
+        # grain dış yüzeyi arasında bırakılan yakıt payı. Verilmezse 0
+        # (idealizasyon, beyanlı); aykırı değer adıyla reddedilir. Tanım ve
+        # dayanak: ``GRAIN_RESIDUAL_WEB_DEFAULT_MM`` künyesi.
+        (self.residual_web,
+         self.residual_web_source) = resolve_residual_web_input(
+            residual_web_thickness)
         self.motor_name = motor_name
         self.motor_description = motor_description
 
@@ -1447,7 +1809,7 @@ class HybridRocketEngine:
                     'assumed in its place: the oxidizer saturation state '
                     'that feeds the injector is read at this temperature.')
             self.tank_temperature = _T_tank
-
+        _tank_basinci_kaynagini_kur(self, tank_pressure_source, tank_pressure)
         # Kitap uyum B16 (Ö-1, §28) — OKSİTLEYİCİ GİRİŞ FAZI GİRDİ OLDU.
         # N₂O'nun HP dengesine giren reaktan entalpisi giriş durumuna
         # (sıcaklık = ``tank_temperature``, faz = bu alan) bağlıdır:
@@ -2289,25 +2651,25 @@ class HybridRocketEngine:
         return L
 
     def _resolve_nozzle_material(self, name):
-        """Lüle/boğaz malzemesini doğrular; tanınmıyorsa grafite düşer + UYARIR.
-
-        None döndürmez: lüle termal değerlendirmesi her koşuda yapılır.
-        Grafit varsayılanı seçilirken bunun bir VARSAYIM olduğu
-        _defaults_used ile işaretlenir.
+        """Lüle/boğaz malzemesini KANONİK ada çözer; tanınmıyorsa varsayılana
+        (HYBRID_NOZZLE_MATERIAL_DEFAULT, modül sonu) düşer + UYARIR.
+        None döndürmez; varsayılan _defaults_used ile işaretlenir. v3.0.1 M:
+        takma ad kanonik ada çözülür (cu_cr_zr -> cucrzr); eskiden ham ad
+        dönüyor ve NOZZLE_MATERIAL_COOLING / erozyon tablosu ıskalanıyordu.
         """
-        from hrma.data.materials_db import get_material
+        from hrma.data.materials_db import get_material_safe
         if name is None or str(name).strip() == '':
             self._defaults_used.append('nozzle_material')
-            return 'graphite'
+            return HYBRID_NOZZLE_MATERIAL_DEFAULT
         aday = str(name).strip().lower().replace(' ', '_')
         try:
-            get_material(aday)
-            return aday
+            _kayit, kanonik = get_material_safe(aday)
+            return kanonik
         except (KeyError, ValueError):
             self.design_warnings.append(_w(
                 'warn.hybrid.nozzle_material_unknown', 'warning',
-                requested=aday, used='graphite'))
-            return 'graphite'
+                requested=aday, used=HYBRID_NOZZLE_MATERIAL_DEFAULT))
+            return HYBRID_NOZZLE_MATERIAL_DEFAULT
 
     def _kinetic_efficiency(self, combustion_results,
                             throat_diameter=None,
@@ -2851,11 +3213,18 @@ class HybridRocketEngine:
         
             # Calculate chamber dimensions
             if self.chamber_diameter_input > 0:
+                # Kullanıcının kamara çapı KORUNUR; son portların bu zarfa
+                # sığdığı ``_design_fuel_grain`` içindeki kapıda sınandı
+                # (sığmıyorsa GrainEnvelopeError -> 422). Artık yakıt
+                # aşağıda gerçek alanlardan yayımlanır.
                 self.D_ch = self.chamber_diameter_input
             else:
-                # N portlu grain'de kamara, N portun TOPLAM alanını sarmalıdır:
-                # eşdeğer port çapı sqrt(N)·D_tek (F046).
-                self.D_ch = self.D_port_final * np.sqrt(self.port_count) * 1.5
+                # v3.0.1 kulvar P — grain dış çapı = yanma sonu port zarfı
+                # (N = 1: D_son + 2·t; N >= 2: tek halka). Eski kaynaksız
+                # 1,5·√N·D_son kuralı SÖKÜLDÜ; gerekçe, ölçüm ve dayanak
+                # ``GRAIN_RESIDUAL_WEB_DEFAULT_MM`` künyesinde.
+                self.D_ch = grain_outer_diameter_for_ports_m(
+                    self.D_port_final, self.port_count, self.residual_web)
             # v2.5.2 (Codex bulgusu hybrid:827) — SON kapı: grain portu sarmalı.
             # Yüklenen yakıt kütlesi (π/4)·(D_ch² − D_port_ilk²)·L_grain ile
             # hesaplandığından D_ch <= D_port_ilk durumunda NEGATİF kütle çıkar.
@@ -3040,21 +3409,31 @@ class HybridRocketEngine:
         # çiftinde N bir kez var bir kez yoktu. N portlu grain'de kamara
         # kesitinden N tane port kesiti düşülür:
         #     m_f_loaded = rho_f · (π/4) · (D_ch² − N·D_port_ilk²) · L_grain
-        # N=1'de ifade eskisiyle BİREBİR aynıdır. Terimin pozitifliği
-        # ``_design_fuel_grain`` kapısıyla garantidir: kullanıcı kamara çapı
-        # verdiyse N·D_i² ≤ (0,8·D_ch)², vermediyse D_ch = 1,5·√N·D_port_son
-        # ve D_port_son > D_port_ilk.
+        # N=1'de ifade eskisiyle BİREBİR aynıdır.
         # Ölçülen sapma (F=3 kN, t_b=8 s, O/F=2,5, Pc=25 bar, D_i=30 mm):
         # N=2 +%10,47 · N=4 +%20,46 · N=7 +%28,29 — sayı
         # ``fuel_mass_loaded`` ve ``key_dimensions.total_mass_kg`` ile
         # YAYIMLANIYORDU.
-        r_grain_outer = self.D_ch / 2.0
+        # v3.0.1 kulvar P — ARTIK YAKIT GERÇEK ALANDAN, FARKTAN DEĞİL:
+        #     m_artık = rho_f · (π/4) · (D_o² − N·D_son²) · L_grain
+        # Yanan kütle (``m_f_grain``) ve yüklenen kütle ayrı ayrı alan
+        # ifadelerinden geldiği için yüklenen = yanan + artık DENKLİĞİ bir
+        # sınamadır, tanım değildir (bekçi tests/test_v301_port_kamara_*).
+        # Terimlerin pozitifliği zarf kapısıyla garantidir: son portlar
+        # D_o'ya sığar (N = 1: D_son + 2t <= D_o; N >= 2: k(N)·D_son + 2t
+        # <= D_o ve k(N) > √N olduğundan N·D_son² < D_o²). Otomatik
+        # boyutlandırmada N = 1, t = 0 için D_o = D_son bit-özdeş olduğundan
+        # artık kütle TAM 0 çıkar.
+        D_o = self.D_ch
         self.m_f_loaded = self.rho_f * np.pi / 4.0 * (
-            (2.0 * r_grain_outer) ** 2
-            - self.port_count * self.D_port_initial ** 2
+            D_o ** 2 - self.port_count * self.D_port_initial ** 2
         ) * self.L_grain
-        self.fuel_sliver_fraction = max(
-            0.0, 1.0 - self.m_f / max(self.m_f_loaded, 1e-9))
+        self.m_f_residual = self.rho_f * np.pi / 4.0 * (
+            D_o ** 2 - self.port_count * self.D_port_final ** 2
+        ) * self.L_grain
+        self.fuel_sliver_fraction = (
+            self.m_f_residual / self.m_f_loaded
+            if self.m_f_loaded > 0 else 0.0)
         
         # ÖH D20 / B1-12: yanma çözümü ve gerçek (gamma, R, T_c) aktarımı
         # BOYUTLANDIRMANIN ÖNÜNE alındı (yukarı taşındı) — manşet C_F'in
@@ -3396,6 +3775,10 @@ class HybridRocketEngine:
         if self.ambient_temperature is not None:
             ht_kwargs['ambient_temp'] = float(self.ambient_temperature)
 
+        # v3.0.1 (V301/H-termal): son yapısal girdinin kasa koruması
+        # kullanıp kullanmadığı (``_yapisal_kosumu`` künyeyi buna göre yazar).
+        kasa_korumasi = {'uygulandi': False, 'basis': None}
+
         def _isi_kosumu(cidar_m):
             """Isı zincirini VERİLEN cidarla koşar (tek çağrı noktası)."""
             return self.heat_transfer_analyzer.analyze_heat_transfer(
@@ -3442,6 +3825,33 @@ class HybridRocketEngine:
                 ortam = self.ambient_temperature
             if ortam is not None:
                 girdi['ambient_temperature'] = float(ortam)
+            # v3.0.1 (V301/H-termal) — KAMARA BÖLGELERİ. Bütün bölgeler
+            # korunuyorsa (yakıt bloğu altı: beyanlı koruma; ön/son yanma
+            # odası: HRMA'nın boyutlandırdığı astar) yapısal zincirin kasa
+            # sıcaklığı bölgelerin BEYANLI sıcaklığıdır; çıplak cidarın
+            # kararlı adyabatik sıcaklığı akma/yorulmayı DÜŞÜRMEZ. Koşul
+            # sağlanmazsa aşağıdaki eski yol AYNEN çalışır (fail-closed).
+            kasa_korumasi['uygulandi'] = False
+            if isi_sonucu is not None:
+                bolgeler = self._chamber_wall_zones_block(
+                    isi_sonucu,
+                    self._thermal_protection_block(
+                        isi_sonucu, yalniz_kamara_astari=True)
+                    .get('chamber_liner'))
+                if bolgeler.get('all_zones_protected'):
+                    T_kasa = float(
+                        bolgeler['structural_casing_temperature_K'])
+                    girdi['wall_temperature_hot'] = T_kasa
+                    girdi['wall_temperature_cold'] = T_kasa
+                    # Referans cidar sözleşmesi (V3 yapi-sf Ş2) korunur:
+                    # gradyan sıfırdır, ölçekleme sonucu değiştirmez.
+                    if isi_cidar_m is not None:
+                        girdi['wall_temperature_reference_thickness'] = \
+                            float(isi_cidar_m)
+                    kasa_korumasi['uygulandi'] = True
+                    kasa_korumasi['basis'] = bolgeler[
+                        'structural_casing_temperature_basis']
+                    return girdi
             # ISI -> YAPISAL ZİNCİR (Dalga 0, 2026-07-14): ısı analizinin
             # hesapladığı GERÇEK iç/dış cidar sıcaklıkları geçirilir;
             # structural_analysis._estimate_wall_delta_T bunları birinci
@@ -3473,13 +3883,23 @@ class HybridRocketEngine:
             ``actual_wall_thickness`` verilirse modül DOĞRULAMA (verify)
             kipinde, verilmezse BOYUTLANDIRMA (size) kipindedir.
             """
-            return self.structural_analyzer.analyze_structure(
+            sonuc = self.structural_analyzer.analyze_structure(
                 _yapisal_girdi(isi_sonucu, isi_cidar_m),
                 material=self.chamber_material,
                 design_pressure_factor=1.5,
                 design_safety_factor=self.design_safety_factor,
                 actual_wall_thickness=gercek_cidar_m,
             )
+            # v3.0.1 (V301/H-termal): sıcaklığın KAYNAĞI adıyla — modül
+            # çağıranın verdiği çifti 'heat_transfer_module' diye etiketler;
+            # burada çift bölge beyanından geldi, ısı modülünden değil.
+            ta = sonuc.get('thermal_analysis') if isinstance(
+                sonuc, dict) else None
+            if kasa_korumasi['uygulandi'] and isinstance(ta, dict):
+                ta['wall_temperature_source'] = \
+                    CASING_TEMPERATURE_SOURCE_ZONES
+                ta['casing_temperature_basis'] = kasa_korumasi['basis']
+            return sonuc
 
         # --- CİDAR SÖZLEŞMESİ (bebek-Scofield F5-1): TEK KAYNAK -------------
         # Eski akış ısı zincirini sessiz 0,005 m ile koşuyor, yapısal zincir
@@ -3829,7 +4249,7 @@ class HybridRocketEngine:
             results = self.combustion_analyzer.analyze_combustion(
                 {self.fuel_type: 100.0},
                 getattr(self, 'oxidizer_type', None) or 'n2o',
-                of_node, self.P_c, None
+                of_node, self.P_c, None, c_star_only=True  # V301/B7 hız
             )
             c_node = float(results['performance']['c_star'])
             # c* verimi tasarım noktasıyla tutarlı uygulanır (v2.5.0 UQ)
@@ -3938,7 +4358,7 @@ class HybridRocketEngine:
                 results = self.combustion_analyzer.analyze_combustion(
                     {self.fuel_type: 100.0},
                     getattr(self, 'oxidizer_type', None) or 'n2o',
-                    of_probe, self.P_c, None
+                    of_probe, self.P_c, None, c_star_only=True  # V301/B7
                 )
                 c_exact = float(results['performance']['c_star'])
             except Exception:
@@ -4512,6 +4932,116 @@ class HybridRocketEngine:
         })
         return N2O_LIQUID_DENSITY_SAT_25C
 
+    def _grain_port_layout_name(self):
+        return ('single_central_port' if int(self.port_count) == 1
+                else 'single_ring_tangent_at_burnout')
+
+    def _grain_sizing_formula(self):
+        if int(self.port_count) == 1:
+            return 'D_grain_outer = D_port_final + 2*t_residual'
+        return ('D_grain_outer = D_port_final*(1 + 1/sin(pi/N)) + '
+                '2*t_residual')
+
+    def _raise_grain_envelope_exceeded(self, max_port, t_asim):
+        """Kullanıcı kamara çapı son portları taşıyamıyor: adlı ret.
+
+        v3.0.1 kulvar P (ana model kararı). Yalnız ``chamber_diameter_input``
+        verildiğinde çağrılır; sayılar bu koşunun kendi yürüyüşünden gelir.
+        """
+        n = int(self.port_count)
+        d_o = float(self.chamber_diameter_input)
+        t = float(self.residual_web)
+        d_son = float(self.D_port_final)
+        gereken = grain_outer_diameter_for_ports_m(d_son, n, t)
+        # Gereken en küçük çap 0,1 mm'ye YUKARI yuvarlanır (mesajdaki sayı
+        # girildiğinde kapıdan geçsin diye; aşağı yuvarlama sığmayan bir
+        # sayı önerirdi).
+        gereken_mm = float(np.ceil(gereken * 1e4 - 1e-9) / 10.0)
+        if n == 1 and t > 0.0 and d_son <= d_o:
+            neye = ('into the residual web you declared (the port itself '
+                    'stays inside the case)')
+        elif n == 1:
+            neye = 'into the chamber wall (case)'
+        else:
+            neye = ('into the neighbouring ports and/or the chamber wall '
+                    '(single-ring layout)')
+        # Eyleme dönük sayı (gereken en küçük çap) cümlenin BAŞINDADIR:
+        # ölçüldü (Playwright, 19 Eki) arayüz sunucu cümlesini ~300 karakterde
+        # kesiyor; sona konan öneri ekranda görünmüyordu.
+        mesaj = (
+            f'No design was published: the chamber diameter '
+            f'{d_o * 1e3:.1f} mm is below the {gereken_mm:.1f} mm minimum '
+            f'that the final fuel port(s) of this {float(self.t_b):g} s burn '
+            f'need ({n} x {d_son * 1e3:.1f} mm, '
+            f'{self._grain_sizing_formula()}, residual web {t * 1e3:g} mm). '
+            f'The burn would reach {neye} at t = {float(t_asim):.3f} s. '
+            f'Enter at least {gereken_mm:.1f} mm, leave the field at 0 so '
+            f'HRMA sizes the grain to the final ports, or reduce the burn '
+            f'time, the port count or the residual web; the burn is not '
+            f'clipped and no smaller motor is substituted.')
+        raise GrainEnvelopeError(mesaj, [{
+            'field': 'chamber_diameter_input',
+            'reason': 'grain_envelope_too_small_for_final_ports',
+            'submitted': d_o * 1e3,
+            'required_min': gereken_mm,
+            'unit': 'mm',
+            'port_count': n,
+            'port_layout': self._grain_port_layout_name(),
+            'final_port_diameter_mm': d_son * 1e3,
+            'max_final_port_diameter_mm': float(max_port) * 1e3,
+            'residual_web_mm': t * 1e3,
+            'residual_web_source': self.residual_web_source,
+            'envelope_reached_at_s': float(t_asim),
+            'burn_time_requested_s': float(self.t_b),
+            'sizing_rule': self._grain_sizing_formula(),
+            'message': mesaj,
+        }])
+
+    def _grain_sizing_rule_block(self):
+        """Grain dış zarfı künyesi — ``grain_design`` ve üst düzeyde AYNI."""
+        n = int(self.port_count)
+        t = float(getattr(self, 'residual_web', 0.0))
+        d_son = float(getattr(self, 'D_port_final', 0.0) or 0.0)
+        kullanici = bool(self.chamber_diameter_input > 0)
+        blok = {
+            'name': ('user_chamber_diameter_kept' if kullanici
+                     else 'final_port_envelope'),
+            'formula': self._grain_sizing_formula(),
+            'port_count': n,
+            'port_layout': self._grain_port_layout_name(),
+            'layout_factor': grain_port_layout_factor(n),
+            'final_port_diameter_mm': d_son * 1e3,
+            'required_outer_diameter_mm': (
+                grain_outer_diameter_for_ports_m(d_son, n, t) * 1e3),
+            'grain_outer_diameter_mm': float(self.D_ch) * 1e3,
+            'chamber_diameter_source': ('user_input' if kullanici
+                                        else 'derived_from_final_ports'),
+            'residual_web_mm': t * 1e3,
+            'residual_web_source': getattr(self, 'residual_web_source',
+                                           'default_zero_idealisation'),
+            'chamber_inner_equals_grain_outer': True,
+            'liner_insulation_modelled': False,
+            'basis': GRAIN_SIZING_RULE_BASIS,
+            'superseded_rule': GRAIN_SUPERSEDED_RULE,
+        }
+        if t == 0.0:
+            blok['idealisation'] = GRAIN_ZERO_RESIDUAL_WEB_DECLARATION
+        if kullanici:
+            blok['fit_gate'] = (
+                'the final ports must fit the chamber diameter you supplied: '
+                + self._grain_sizing_formula()
+                + ' <= chamber diameter, otherwise the request is rejected '
+                '(HTTP 422, grain_envelope_too_small_for_final_ports); the '
+                'fuel left outside the final ports is published as residual '
+                'fuel (fuel_mass_residual_kg, fuel_sliver_fraction)')
+        if n >= 7:
+            blok['layout_note'] = (
+                'for N >= 7 the single ring is a valid layout but not the '
+                'densest one (N = 7: a centre port plus a ring of six needs '
+                '3.0 x D_port_final, the single ring 3.305 x); HRMA sizes the '
+                'single ring')
+        return blok
+
     def _design_fuel_grain(self):
         """Design fuel grain geometry using correct hybrid rocket equations.
 
@@ -4715,44 +5245,28 @@ class HybridRocketEngine:
         dt = self.t_b / num_steps
         D_port = self.D_port_initial
 
-        # Fiziksel sınır: port çapı kamara çapının %80'ini geçmemeli.
-        # Eski koddaki hasattr(self, 'D_ch') kontrolü İLK çağrıda her zaman
-        # False idi (D_ch grain tasarımından SONRA atanıyor) → ölü kod; ikinci
-        # çağrıda ise bayat D_ch kullanılıyordu. Düzeltme: sınır yalnızca
-        # kullanıcı kamara çapı verdiyse uygulanabilir; verilmediyse kamara
-        # çapı port sonundan türetildiği için (D_ch = 1.5·D_port_final,
-        # yani D_port_final ≈ 0.67·D_ch < 0.8·D_ch) sınır kendiliğinden sağlanır.
+        # --- v3.0.1 kulvar P · ZARF KAPISI (kullanıcı kamara çapı) ---------
+        # ESKİ KURAL (kaynaksız): kullanıcı kamara çapı verdiyse port çapı
+        # 0,8·D_ch/√N'de KIRPILIYOR, yanma erken bitiyor ve tasarım
+        # TARGET_NOT_MET ile yayımlanıyordu. 0,8 oranının ne kodda ne
+        # literatürde kaynağı vardı; √N yalnız toplam alanı korur, portları
+        # zarfa sığdırmaz.
+        # YENİ KURAL (ana model kararı): zarfın taşıyabileceği en büyük son
+        # port GEOMETRİDEN gelir (``max_port_diameter_in_envelope_m``: N = 1
+        # D_o − 2t; N >= 2 tek halka (D_o − 2t)/(1 + 1/sin(π/N))). İstenen
+        # yanma süresi bunu aşan bir port gerektiriyorsa yanma gövdeye /
+        # komşu porta / beyan edilen artık ete geçerdi — tasarım YAYIMLANMAZ,
+        # adlı gerekçeyle reddedilir (GrainEnvelopeError -> uçta 422).
+        # Kırpma YOK: yürüyüş istenen süreye kadar sürer ki ret, gereken
+        # en küçük kamara çapını ve zarfın aşıldığı anı SAYIYLA söylesin.
+        # Kullanıcı kamara çapı vermediyse zarf son portlardan türetilir
+        # (``calculate``), kapı kendiliğinden sağlanır.
         if self.chamber_diameter_input > 0:
-            # N portlu grain'de sınır ALAN üzerinden kurulur: toplam port alanı
-            # kamara kesitinin (0.8)² katını geçmemeli. Tek port çapı cinsinden
-            # bu, D_tek <= 0.8·D_ch/sqrt(N) demektir (N=1'de eski ifadeyle
-            # birebir aynı).
-            max_port = (PORT_TO_CHAMBER_MAX_RATIO
-                        * self.chamber_diameter_input / np.sqrt(N_port))
-            if max_port <= self.D_port_initial:
-                # v2.5.2 DÜZELTMESİ (Codex bulgusu, hybrid:827): eski kod
-                # burada UYARIP sınırı sonsuza çekiyordu. Bu, imkansız
-                # geometriyi (port >= kamara) hesaba devam ettiriyordu:
-                # yüklenen yakıt kütlesi m_f_loaded = rho·(π/4)·(D_ch² −
-                # D_port_ilk²)·L_grain olduğundan D_port_ilk > D_ch iken
-                # NEGATİF kütle, negatif sliver ve anlamsız kamara hacmi
-                # üretiliyordu. Sessizce devam etmek yerine reddedilir;
-                # /calculate ve /api/quick-geometry bunu HTTP 400'e çevirir.
-                raise ValueError(
-                    f"Chamber diameter {self.chamber_diameter_input * 1000:.1f} mm "
-                    f"is too small for the initial port diameter "
-                    f"{self.D_port_initial * 1000:.1f} mm. The fuel grain must "
-                    f"surround the port, so the chamber diameter has to exceed "
-                    f"the port diameter divided by "
-                    f"{PORT_TO_CHAMBER_MAX_RATIO:g} "
-                    f"(minimum "
-                    f"{self.D_port_initial * np.sqrt(N_port) / PORT_TO_CHAMBER_MAX_RATIO * 1000:.1f} mm "
-                    f"for {N_port} port(s)). "
-                    f"Increase the chamber diameter or reduce the port "
-                    f"diameter / oxidizer mass flux."
-                )
+            max_port = max_port_diameter_in_envelope_m(
+                self.chamber_diameter_input, N_port, self.residual_web)
         else:
             max_port = np.inf
+        t_zarf_asimi = 0.0 if self.D_port_initial >= max_port else None
 
         # O/F kayması izleme: anlık mdot_f / O/F / c* / Isp her adımda.
         # Anlık c*/Isp, anlık O/F'den combustion analyzer ile hesaplanır
@@ -4760,7 +5274,6 @@ class HybridRocketEngine:
         # c*/Isp'yi tasarım O/F'sinde donduruyordu. Pahalı denge çözümünü her
         # adımda tekrarlamamak için O/F->c*/Isp tablosu önbelleğe alınır
         # (track_performance=True ise).
-        web_exhausted = False
         self._of_history = []
         self._cstar_history = []
         self._isp_history = []
@@ -4846,24 +5359,16 @@ class HybridRocketEngine:
             # Port yarıçapını artır (çap artışı = 2 · yarıçap artışı)
             D_port += 2 * r_dot * dt
 
-            if D_port >= max_port:
-                D_port = max_port
-                web_exhausted = True
-                warnings.warn(
-                    "Port çapı 0.8·D_kamara sınırına ulaştı — web yanma süresi "
-                    "bitmeden tükendi, grain tasarımını gözden geçirin"
-                )
-                # v2.6.2: bu, tasarımın İSTENEN yanma süresini tutturamadığı
-                # anlamına gelir; design_summary.status bunu okur.
-                self.design_warnings.append(_w(
-                    'warn.hybrid.web_exhausted_early', 'critical',
-                    t_web=round(float(t_now + dt), 2),
-                    t_burn=round(float(self.t_b), 2)))
-                break
+            # v3.0.1 kulvar P: zarfın aşıldığı İLK an kaydedilir; kırpma
+            # YOK (gerekçe yukarıdaki zarf kapısı yorumunda).
+            if t_zarf_asimi is None and D_port > max_port:
+                t_zarf_asimi = t_now + dt
 
         self.D_port_final = D_port
-        # Seriye son noktayı ekle (erken web tükenmesinde son adım zamanı)
-        t_end = t_now + dt if web_exhausted else self.t_b
+        if t_zarf_asimi is not None:
+            self._raise_grain_envelope_exceeded(max_port, t_zarf_asimi)
+        # Kırpma kalktığı için yürüyüş daima istenen süreyi tamamlar.
+        t_end = self.t_b
         self.t_burn_effective = t_end
         self._port_time_history.append(t_end)
         self._port_diameter_history.append(D_port)
@@ -4952,7 +5457,11 @@ class HybridRocketEngine:
             * (self.D_port_final**2 - self.D_port_initial**2)
             * self.L_grain
         )
-        self._web_exhausted = web_exhausted
+        # v3.0.1 kulvar P: kararlı tasarım yolunda web ERKEN TÜKENMEZ — zarfı
+        # aşan istek yukarıda reddedildi. Bayrak tüketiciler (tasarım özeti,
+        # ısıl blok) için False olarak yayımlanır; sözleşme alanları
+        # (burn_time_clipped vb.) korunur ve daima "kırpılmadı" der.
+        self._web_exhausted = False
 
         # Store for results
         self.G_ox_initial = G_ox_initial
@@ -5733,8 +6242,17 @@ class HybridRocketEngine:
             threshold_pct=round(OF_SHIFT_WARN_FRACTION * 100.0, 1),
             isp_delta_pct=round(isp_sapma, 2)))
 
-    def _thermal_protection_block(self, heat_transfer_results):
+    def _thermal_protection_block(self, heat_transfer_results,
+                                  yalniz_kamara_astari=False):
         """Kamara yalıtım astarı + çıplak cidar ısı-yutucu geçmişi (A5).
+
+        ``yalniz_kamara_astari=True`` (v3.0.1 V301/H-termal): yalnız kamara
+        astarı istasyonu boyutlandırılır ve blok orada döner — yapısal
+        zincirin bölge kararı (``_chamber_wall_zones_block``) cidar
+        boyutlandırma döngüsünün İÇİNDE bunu okur. Aynı ``_liner`` çağrısıdır
+        (ikinci bir boyutlandırma yolu yok); uq_mode'da da koşar, çünkü
+        yapısal kasa sıcaklığı ona bağlıdır ve UQ örnekleri nominal koşuyla
+        aynı kuralı izlemelidir.
 
         FİZİK KÜNYESİ
         -------------
@@ -5769,7 +6287,7 @@ class HybridRocketEngine:
             'The liner sizing and the wall history are NOT coupled: the '
             'history is the UNPROTECTED wall (no liner credit) and shows '
             'why the liner is needed.')
-        if self.uq_mode:
+        if self.uq_mode and not yalniz_kamara_astari:
             return {
                 'status': 'NOT_MODELLED',
                 '_basis': basis,
@@ -5991,6 +6509,9 @@ class HybridRocketEngine:
             'design flux: h_g = q_chamber/(T_aw - T_wall_ref)',
             r_kamara,
             'chamber inner radius of this run')
+        if yalniz_kamara_astari:
+            return {'status': 'modelled', '_basis': basis,
+                    'burn_time_s': t_burn, 'chamber_liner': chamber_liner}
         nozzle_entry_liner = _liner(
             'aft mixing chamber / nozzle entry',
             'Protect the convergent entry region ahead of the throat',
@@ -6117,6 +6638,289 @@ class HybridRocketEngine:
             'nozzle_entry_liner': nozzle_entry_liner,
             'wall_temperature_history': wall_history,
         }
+
+    def _chamber_wall_zones_block(self, heat_transfer_results, chamber_liner):
+        """Kamara cidarının üç bölgesi ve bölge hükümleri (v3.0.1 H-termal).
+
+        Bölgeler: yakıt bloğu altı (``L_grain``), ön yanma odası
+        (``L_pre_chamber``), son yanma odası (``L_post_chamber``).
+
+        * Yakıt bloğu altı: yanma boyunca kalan et > 0 olduğundan (zarf
+          kapısı yanmayı ete gelmeden durdurur) kasa gaza açık değildir;
+          kasa sıcaklığı başlangıç/ortam sıcaklığıdır — BEYANLI model
+          (``GRAIN_PROTECTION_DECLARATION``, kaynak
+          ``GRAIN_PROTECTION_SOURCE``). Koşul okunamazsa koruma VERİLMEZ.
+        * Açık bölgeler: ısı modülünün çıplak cidar kararlı kontrolü SAYI
+          olarak kalır; tasarım hükmü ``_thermal_protection_block``un
+          boyutlandırdığı kamara astarıyla verilir (``LINER_REQUIRED``,
+          önem ``warning``). Astar boyutlandırması koşmadıysa kritik hüküm
+          AYNEN kalır (``BARE_WALL_CRITICAL``, fail-closed).
+        * Yapısal zincirin kasa sıcaklığı ancak BÜTÜN bölgeler korunuyorsa
+          beyanlı sıcaklıktır (``all_zones_protected``); aksi hâlde çıplak
+          cidar sıcaklıkları eskisi gibi kullanılır.
+
+        Sayı üretmez: ortam sıcaklığı ısı modülünün fiilen kullandığı
+        değerdir (tek kaynak), astar kalınlığı ``chamber_liner``dan,
+        çıplak cidar sıcaklığı ``wall_analysis.max_temperature``dan okunur.
+        """
+        ht = (heat_transfer_results
+              if isinstance(heat_transfer_results, dict) else {})
+        if not ht:
+            return {
+                'status': 'NOT_MODELLED',
+                'reason': ('no heat transfer analysis in this run; the zone '
+                           'verdicts need its bare-wall check and ambient '
+                           'temperature'),
+                'all_zones_protected': False,
+            }
+
+        def _sonlu(deger):
+            try:
+                v = float(deger)
+            except (TypeError, ValueError):
+                return None
+            return v if np.isfinite(v) else None
+
+        T0 = _sonlu((ht.get('design_parameters') or {})
+                    .get('ambient_temperature'))
+        if T0 is not None and T0 <= 0:
+            T0 = None
+        T_bare = _sonlu((ht.get('wall_analysis') or {}).get('max_temperature'))
+        T_aw = _sonlu((ht.get('gas_side_analysis') or {})
+                      .get('adiabatic_wall_temperature'))
+        bare_kodlar = sorted({
+            w.get('code') for w in _critical_thermal_verdicts(ht)
+            if isinstance(w, dict)
+            and w.get('code') in BARE_WALL_CRITICAL_CODES})
+
+        L_grain = _sonlu(getattr(self, 'L_grain', None))
+        L_pre = _sonlu(getattr(self, 'L_pre_chamber', None))
+        L_post = _sonlu(getattr(self, 'L_post_chamber', None))
+        t_b = _sonlu(getattr(self, 't_burn_effective', None)
+                     or getattr(self, 't_b', None))
+        # Yanma sonunda kasaya kalan et: D_ch = k(N)·D_son + 2·t zarfının
+        # tersi (aynı ``grain_port_layout_factor``; yeni geometri yok).
+        try:
+            web_m = _sonlu(0.5 * (
+                float(self.D_ch)
+                - grain_port_layout_factor(self.port_count)
+                * float(self.D_port_final)))
+        except (AttributeError, TypeError, ValueError):
+            web_m = None
+
+        eksik = [ad for ad, deger in (
+            ('L_grain', L_grain), ('final_web_to_case', web_m),
+            ('ambient_temperature', T0), ('burn_time', t_b))
+            if deger is None]
+        if L_grain is not None and L_grain <= 0:
+            eksik.append('L_grain>0')
+        if web_m is not None and web_m < 0:
+            eksik.append('final_web_to_case>=0')
+        if t_b is not None and t_b <= 0:
+            eksik.append('burn_time>0')
+        blok_korur = not eksik
+
+        if blok_korur:
+            web_mm = web_m * 1e3
+            not_kaydi = (
+                {'code': 'warn.hybrid.zone_residual_web_zero',
+                 'severity': 'info', 'params': {}}
+                if web_m <= 0 else
+                {'code': 'warn.hybrid.zone_residual_web', 'severity': 'info',
+                 'params': {'web_mm': round(web_mm, 2)}})
+            grain = {
+                'zone': CHAMBER_ZONE_GRAIN,
+                'length_m': L_grain,
+                'length_mm': L_grain * 1e3,
+                'verdict': ZONE_VERDICT_PROTECTED,
+                'severity': 'info',
+                'casing_temperature_K': T0,
+                'casing_temperature_source': (
+                    'the initial (ambient) temperature the heat transfer '
+                    'analysis actually used (design_parameters.'
+                    'ambient_temperature) - DECLARED by the grain '
+                    'protection model, not computed'),
+                'final_web_mm': web_mm,
+                'final_web_basis': (
+                    'web left between the end-of-burn port(s) and the case: '
+                    '(D_ch - k(N)*D_port_final)/2 with the grain layout '
+                    'factor k(N) of the envelope rule; the grain envelope '
+                    'gate rejects any design in which it would fall below '
+                    'residual_web_thickness'),
+                'notes': [not_kaydi],
+                'declaration': GRAIN_PROTECTION_DECLARATION,
+                'source': GRAIN_PROTECTION_SOURCE,
+            }
+        else:
+            grain = {
+                'zone': CHAMBER_ZONE_GRAIN,
+                'length_m': L_grain,
+                'length_mm': (None if L_grain is None else L_grain * 1e3),
+                'verdict': ZONE_VERDICT_NOT_PROTECTED,
+                'severity': 'critical' if bare_kodlar else 'info',
+                'casing_temperature_K': T_bare,
+                'casing_temperature_source': (
+                    'bare-wall equilibrium of the heat transfer analysis '
+                    '(grain protection NOT granted, fail-closed)'),
+                'not_protected_reason': (
+                    'grain protection needs a positive grain length, a '
+                    'non-negative end-of-burn web, the ambient temperature '
+                    'of the heat analysis and a positive burn time; missing '
+                    'or not satisfied: ' + ', '.join(eksik)),
+                'notes': [],
+                'declaration': GRAIN_PROTECTION_DECLARATION,
+                'source': GRAIN_PROTECTION_SOURCE,
+            }
+
+        astar = chamber_liner if isinstance(chamber_liner, dict) else {}
+        astar_mm = _sonlu(astar.get('thickness'))
+        astar_hazir = bool(
+            astar.get('thickness_status') == 'sized'
+            and astar.get('model_valid') is True
+            and astar_mm is not None and astar_mm > 0
+            and T0 is not None)
+
+        def _acik_bolge(ad, L):
+            kayit = {'zone': ad, 'length_m': L,
+                     'length_mm': None if L is None else L * 1e3,
+                     'bare_wall_temperature_K': T_bare,
+                     'bare_wall_codes': list(bare_kodlar)}
+            if L is None or L <= 0:
+                kayit.update(verdict=ZONE_VERDICT_ABSENT, severity='info',
+                             casing_temperature_K=None)
+            elif not bare_kodlar:
+                kayit.update(
+                    verdict=ZONE_VERDICT_BARE_WALL_OK, severity='info',
+                    casing_temperature_K=T_bare,
+                    casing_temperature_source=(
+                        'bare-wall equilibrium of the heat transfer analysis '
+                        '(no critical bare-wall record in this run)'))
+            elif astar_hazir:
+                kayit.update(
+                    verdict=ZONE_VERDICT_LINER_REQUIRED, severity='warning',
+                    liner_thickness_mm=astar_mm,
+                    liner_material=astar.get('material'),
+                    liner_source=('thermal_protection.chamber_liner - sized '
+                                  'by HRMA (Level-1 Q* ablation)'),
+                    casing_temperature_K=T0,
+                    casing_temperature_source=OPEN_ZONE_LINER_ASSUMPTION)
+            else:
+                kayit.update(
+                    verdict=ZONE_VERDICT_BARE_WALL_CRITICAL,
+                    severity='critical',
+                    casing_temperature_K=T_bare,
+                    casing_temperature_source=(
+                        'bare-wall equilibrium of the heat transfer analysis '
+                        '(no liner credit: the liner sizing did not run, '
+                        'fail-closed)'),
+                    liner_not_sized_reason=(
+                        astar.get('validity_note') or astar.get('basis')
+                        or ('no chamber liner sizing in this run'
+                            if not astar else
+                            'chamber liner thickness not published')))
+            return kayit
+
+        pre = _acik_bolge(CHAMBER_ZONE_PRE, L_pre)
+        post = _acik_bolge(CHAMBER_ZONE_POST, L_post)
+        korunan = (ZONE_VERDICT_PROTECTED, ZONE_VERDICT_LINER_REQUIRED,
+                   ZONE_VERDICT_ABSENT)
+        hepsi_korunur = bool(
+            bare_kodlar and blok_korur
+            and all(z['verdict'] in korunan for z in (grain, pre, post)))
+        return {
+            'status': 'modelled',
+            'zones': [grain, pre, post],
+            'all_zones_protected': hepsi_korunur,
+            'structural_casing_temperature_K': T0 if hepsi_korunur else T_bare,
+            'structural_casing_temperature_source': (
+                CASING_TEMPERATURE_SOURCE_ZONES if hepsi_korunur
+                else 'heat_transfer_module'),
+            'structural_casing_temperature_basis': (
+                ('the hoop stress, fatigue, safety and structural design '
+                 'basis use the DECLARED case temperature of the zones: the '
+                 'grain protection model under the grain and, in the open '
+                 'zones, the liner assumption (' + OPEN_ZONE_LINER_ASSUMPTION
+                 + '). The steady bare-wall temperature is NOT used to '
+                 'derate strength or fatigue.')
+                if hepsi_korunur else
+                ('not every zone is protected (or the bare wall has no '
+                 'critical record), so the structural chain keeps the '
+                 'bare-wall equilibrium temperatures of the heat transfer '
+                 'analysis, as before (fail-closed).')),
+            'bare_wall_check': {
+                'temperature_K': T_bare,
+                'recovery_temperature_K': T_aw,
+                'codes': list(bare_kodlar),
+                'superseded_by_zone_verdicts': hepsi_korunur,
+                'basis': (
+                    'steady bare-wall equilibrium of the heat transfer '
+                    'analysis: no grain, no liner, the specified cooling '
+                    'class, evaluated at the module design station (throat '
+                    'conditions, M = 1). Kept as a NUMBER; when every zone '
+                    'is protected its critical records are published with '
+                    'severity info and superseded_by = chamber_wall_zones.'),
+            },
+            'liner_assumption': OPEN_ZONE_LINER_ASSUMPTION,
+            'declaration': GRAIN_PROTECTION_DECLARATION,
+            'source': GRAIN_PROTECTION_SOURCE,
+        }
+
+    def _apply_chamber_zone_verdicts(self, zones, heat_transfer_results):
+        """Bölge hükmünü yanıta işler (v3.0.1 H-termal).
+
+        Bütün bölgeler korunuyorsa ısı modülünün ÇIPLAK CİDAR kritik
+        kayıtları silinmez: ``severity: info`` ile, ``superseded_by`` ve
+        ``bare_wall_severity`` künyeleriyle yayımlanır (sayı kalır, hüküm
+        bölgelere geçer). Koruma yoksa hiçbir kayıt değişmez (fail-closed).
+        Bölge kayıtları ``design_warnings``e eklenir.
+        """
+        if not isinstance(zones, dict) or zones.get('status') != 'modelled':
+            return
+        if zones.get('all_zones_protected') and isinstance(
+                heat_transfer_results, dict):
+            def _cevir(node, depth=0):
+                if depth > 3 or not isinstance(node, dict):
+                    return
+                liste = node.get('warnings')
+                if isinstance(liste, list):
+                    node['warnings'] = [
+                        dict(w, severity='info',
+                             superseded_by='chamber_wall_zones',
+                             bare_wall_severity='critical')
+                        if (isinstance(w, dict)
+                            and w.get('code') in BARE_WALL_CRITICAL_CODES
+                            and str(w.get('severity', '')).lower()
+                            == 'critical')
+                        else w for w in liste]
+                for deger in node.values():
+                    if isinstance(deger, dict):
+                        _cevir(deger, depth + 1)
+            _cevir(heat_transfer_results)
+
+        bolge = {z['zone']: z for z in zones.get('zones') or []}
+        grain = bolge.get(CHAMBER_ZONE_GRAIN) or {}
+        if grain.get('verdict') == ZONE_VERDICT_PROTECTED:
+            self.design_warnings.append(_w(
+                'warn.hybrid.chamber_grain_protected', 'info',
+                grain_mm=round(float(grain['length_mm']), 1),
+                T_case_K=round(float(grain['casing_temperature_K']), 2)))
+            self.design_warnings.extend(dict(n) for n in grain['notes'])
+        astarli = [bolge[ad] for ad in (CHAMBER_ZONE_PRE, CHAMBER_ZONE_POST)
+                   if (bolge.get(ad) or {}).get('verdict')
+                   == ZONE_VERDICT_LINER_REQUIRED]
+        if astarli:
+            uzun = {z['zone']: z['length_mm'] for z in astarli}
+            self.design_warnings.append(_w(
+                'warn.hybrid.chamber_liner_required', 'warning',
+                liner_mm=round(float(astarli[0]['liner_thickness_mm']), 2),
+                pre_mm=round(float(uzun.get(CHAMBER_ZONE_PRE) or 0.0), 1),
+                post_mm=round(float(uzun.get(CHAMBER_ZONE_POST) or 0.0), 1),
+                bare_K=round(float(astarli[0]['bare_wall_temperature_K']))))
+        if zones.get('all_zones_protected'):
+            self.design_warnings.append(_w(
+                'warn.hybrid.structural_casing_temperature_declared', 'info',
+                T_case_K=round(float(
+                    zones['structural_casing_temperature_K']), 2)))
 
     def _launch_site_block(self):
         """Fırlatma sahası rakım/ortam düzeltmesi (yol haritası A8).
@@ -6460,6 +7264,7 @@ class HybridRocketEngine:
         blowdown = blowdown_block or {}
         v_tank = None
         fill = None
+        rho_kunyesi = None
         if blowdown.get('status') == 'modelled':
             try:
                 v_tank = float(blowdown['tank_volume_m3'])
@@ -6474,6 +7279,16 @@ class HybridRocketEngine:
                 'the liquid density is the value implied by that sizing '
                 '(m_ox / liquid volume, i.e. the N2O EOS rho_l at the tank '
                 'temperature)')
+        elif getattr(self, '_user_tank_feed', None) is not None:
+            # v3.0.1 (V301/H1): kullanıcı tank basıncı kipi — AYNI formül,
+            # sıvı yoğunluğu tankın kendi hâlinde ρ(P_tank, T); N₂O'da
+            # enjektör devresinin giriş hâli yoğunluğuyla AYNI işlev (hat
+            # kaybı yok: P₁ = P_tank). Kip dışında bu dal ÇALIŞMAZ.
+            rho_liquid, rho_kunyesi = user_tank_liquid_density(self)
+            fill = TANK_FILL_FRACTION_DEFAULT
+            v_liquid = m_ox / rho_liquid
+            v_tank = v_liquid / fill
+            volume_source = USER_TANK_VOLUME_SOURCE
         else:
             # Blowdown koşamadı (ör. N2O dışı oksitleyici): AYNI formül,
             # çözücünün besleme sıvı yoğunluğuyla — V = (m_ox/rho_l)/doluluk.
@@ -6516,7 +7331,7 @@ class HybridRocketEngine:
                 'tank_volume_source': volume_source,
             }
 
-        return {
+        blok = {
             'status': 'modelled',
             '_basis': basis,
             'tank_volume_m3': float(v_tank),
@@ -6541,6 +7356,9 @@ class HybridRocketEngine:
                 'draining-level dependence at 1 g only.'),
             'slosh': slosh,
         }
+        if rho_kunyesi is not None:   # yalnız kullanıcı tank kipi (H1)
+            blok['liquid_density_basis'] = rho_kunyesi
+        return blok
 
     # ======================================================================
     # v2.6.27 Dalga 6 — yazılı ama bağlanmamış modüllerin motor akışına
@@ -6600,15 +7418,27 @@ class HybridRocketEngine:
             'thickness — there is no as-built wall here to verify.')
         blowdown = blowdown_block or {}
         slosh = slosh_block or {}
+        # v3.0.1 (V301/H1): kullanıcı tank basıncı kipinde MEOP = P_tank
+        # (basınçla beslenen tankın tanım gereği işletme basıncı) ve cidar
+        # tasarım sıcaklığı tankın kendi hâlinden; kap AYNI analizörden,
+        # AYNI çağrıyla geçer (aşağıda). Kip dışında ``None``: yol bit-aynı.
+        kullanici = user_tank_vessel_state(self)
+        if kullanici is not None:
+            basis = kullanici['basis']
 
         eksik = []
-        if blowdown.get('status') != 'modelled':
+        if kullanici is not None and kullanici['design_temperature_K'] is None:
+            eksik.append('oxidizer tank wall design temperature: '
+                         + kullanici['fields']['design_temperature_source'])
+        if kullanici is None and blowdown.get('status') != 'modelled':
             eksik.append(
-                'oxidizer tank operating pressure (MEOP): the hybrid solver '
-                'computes a tank pressure ONLY through the self-pressurised '
-                'blowdown model, and that model did not run for this design '
-                '(reason in the tank_blowdown block). A pressure-fed tank '
-                'pressure input does not exist on the hybrid page')
+                'oxidizer tank operating pressure (MEOP): with the default '
+                'tank pressure source the hybrid solver obtains a tank '
+                'pressure only from the self-pressurised N2O blowdown model, '
+                'and that model did not run for this design (reason in the '
+                'tank_blowdown block). For a pressure-fed tank select '
+                "tank_pressure_source = 'user' and give the tank pressure: "
+                'the vessel is then sized at MEOP = that pressure')
         if slosh.get('status') != 'modelled' or not slosh.get(
                 'tank_diameter_m'):
             eksik.append(
@@ -6626,14 +7456,18 @@ class HybridRocketEngine:
             }
 
         try:
-            p_seri = [float(p) for p in (blowdown.get('tank_pressure_bar')
-                                         or [])]
-            t_seri = [float(t) for t in (blowdown.get('tank_temperature_K')
-                                         or [])]
-            meop_bar = max(p_seri) if p_seri else float(
-                blowdown['initial_pressure_bar'])
-            t_design = (max(t_seri) if t_seri
-                        else float(blowdown['initial_temperature_K']))
+            if kullanici is not None:
+                meop_bar = kullanici['meop_bar']
+                t_design = kullanici['design_temperature_K']
+            else:
+                p_seri = [float(p) for p in (
+                    blowdown.get('tank_pressure_bar') or [])]
+                t_seri = [float(t) for t in (
+                    blowdown.get('tank_temperature_K') or [])]
+                meop_bar = max(p_seri) if p_seri else float(
+                    blowdown['initial_pressure_bar'])
+                t_design = (max(t_seri) if t_seri
+                            else float(blowdown['initial_temperature_K']))
             d_inner = float(slosh['tank_diameter_m'])
         except (KeyError, TypeError, ValueError) as exc:
             return {
@@ -6661,7 +7495,7 @@ class HybridRocketEngine:
                 'inner_diameter_m': float(d_inner),
             }
 
-        return {
+        blok = {
             'status': 'modelled',
             '_basis': basis,
             'meop_bar': float(meop_bar),
@@ -6695,6 +7529,9 @@ class HybridRocketEngine:
                 'the burst margin. Nothing here verifies an as-built wall'),
             'pressure_vessel': vessel,
         }
+        if kullanici is not None:   # yalnız kullanıcı tank kipi (H1)
+            blok.update(kullanici['fields'])
+        return blok
 
     def _closure_joint_block(self):
         """Kapak cıvata birleşimi — hrma.analysis.bolted_joint (A4).
@@ -8619,18 +9456,22 @@ class HybridRocketEngine:
                 'total_impulse_delivered_Ns, never the requested value. '
                 'total_impulse_requested_Ns carries the design intent '
                 '(thrust x requested burn time) and the two differ whenever '
-                'the thrust curve is not perfectly flat - most visibly when '
-                'the fuel web is exhausted early and burn_time_clipped is '
-                'true. Delivered basis: ' + impuls_temeli + '.'),
+                'the thrust curve is not perfectly flat (O/F shift as the '
+                'port opens). Delivered basis: ' + impuls_temeli + '.'),
             'burn_time_requested_s': t_istenen,
             'burn_time_effective_s': t_etkin,
             'burn_time_clipped': bool(kirpildi),
+            # v3.0.1 kulvar P: kırpma yolu kalktı (zarfı aşan istek 422 ile
+            # reddediliyor); künye artık BUGÜNKÜ sözleşmeyi söyler.
             'burn_time_basis': (
-                'burn_time is the burn the motor actually sustains. It equals '
-                'burn_time_requested_s unless the fuel web is exhausted '
-                'first, in which case burn_time_clipped is true, the '
-                'warn.hybrid.web_exhausted_early warning is raised and the '
-                'requested value stays visible in burn_time_requested_s.'),
+                'burn_time is the burn the motor actually sustains. The '
+                'steady hybrid design never clips the burn: the grain outer '
+                'diameter is sized to the final ports, and a chamber '
+                'diameter too small for the requested burn is rejected by '
+                'name (grain_envelope_too_small_for_final_ports) instead of '
+                'publishing a shorter burn. burn_time therefore equals '
+                'burn_time_requested_s and burn_time_clipped is false in '
+                'every published design.'),
             'oxidizer_mass_consumed_kg': ox_harcanan,
             'oxidizer_mass_residual_kg': ox_artik,
             'oxidizer_mass_basis': (
@@ -8763,6 +9604,11 @@ class HybridRocketEngine:
             'fuel_mass': self.m_f,                      # YANAN yakıt (performans bütçesi)
             'fuel_mass_loaded': getattr(self, 'm_f_loaded', self.m_f),  # yüklenen (kütle bütçesi)
             'fuel_sliver_fraction': getattr(self, 'fuel_sliver_fraction', 0.0),
+            # v3.0.1 kulvar P: artık yakıt GERÇEK alandan (yüklenen = yanan +
+            # artık denkliği sınanabilir), artık et ve boyutlandırma kuralı.
+            'fuel_mass_residual_kg': getattr(self, 'm_f_residual', None),
+            'residual_web_mm': float(self.residual_web) * 1000,
+            'grain_sizing_rule': self._grain_sizing_rule_block(),
             
             # Operating conditions
             'chamber_pressure': self.P_c,
@@ -8979,6 +9825,14 @@ class HybridRocketEngine:
             'port_diameter_final_mm': self.D_port_final * 1000,
             'grain_length_mm': fuel_length * 1000,
             'grain_outer_diameter_mm': chamber_diameter * 1000,
+            # v3.0.1 kulvar P — grain dış zarfı ⟷ son port ⟷ artık yakıt
+            # aynı blokta: dış çap NEREDEN geldi (kural + dayanak), artık et
+            # ne kadar ve kimin seçimi, yanmadan kalan yakıt ne kadar.
+            'residual_web_mm': float(self.residual_web) * 1000,
+            'residual_web_source': self.residual_web_source,
+            'grain_sizing_rule': self._grain_sizing_rule_block(),
+            'fuel_mass_residual_kg': float(self.m_f_residual),
+            'fuel_sliver_fraction': float(self.fuel_sliver_fraction),
             # ÖH D37 A2 hibrit · K-8 (CAD B1 H07) — SEGMENT SAYISI UYDURULMAZ.
             # Eskiden 'number_of_segments': max(1, int(L/0,3 m)) yayımlanıyordu:
             # kaynaksız bir 0,3 m kuralı; fiziğe (gerileme, kalış süresi, Kn)
@@ -9008,7 +9862,9 @@ class HybridRocketEngine:
         delta_P_inj = self._inj_delta_P  # bar (stored from _design_fuel_grain)
         rho_ox = self._inj_rho_ox        # kg/m³
         try:
-            from hrma.engines.injector_design import design_injector
+            from hrma.engines.injector_design import (
+                design_injector, PINTLE_EQUIVALENT_ORIFICE_PLAN_BASIS,
+                COAXIAL_EQUIVALENT_ORIFICE_PLAN_BASIS)
             inj_spec = {
                 'motor_type': 'hybrid',
                 # v2.5.2: kullanıcının seçtiği enjektör tipi (eskiden sabit
@@ -9031,6 +9887,19 @@ class HybridRocketEngine:
                 'dp_ratio_ox': (delta_P_inj / self.P_c if self.P_c > 0
                                 else CHUG_DP_RATIO_RECOMMENDED),
             }
+            # V301/E1 — PINTLE EZMELERİ DEVRE ÇÖZÜCÜSÜNE GİRDİ. Kullanıcının
+            # sabitlediği ölçüler (D_p, anülüs boşluğu, delik sayısı/çapı,
+            # L_s, gövde dış çapı, ikincil delik kipi, teğet açı) KANON
+            # geometrinin tek çözücüsüne (``resolve_pintle_geometry``) gider;
+            # ekran bloğu ayrıca türetmez. Uç (``/calculate``) onları motor
+            # kurulduktan sonra ``pintle_geometry_inputs`` özniteliğine koyar
+            # (kurucu imzası bu kulvarda değişmedi). Yoksa anahtar konmaz ve
+            # çözücü akıştan boyutlandırır (varsayılan yol bit-aynı).
+            self.pintle_geometry_error = None
+            self.injector_element_error = None
+            if (inj_spec['injector_type'] == 'pintle'
+                    and getattr(self, 'pintle_geometry_inputs', None)):
+                inj_spec['pintle'] = dict(self.pintle_geometry_inputs)
             # v2.6.26 — DEŞARJ KATSAYISI ARTIK GEOMETRİDEN GELİYOR.
             # Devre çözücüsü Cd'yi discharge_coefficient(giriş, L/D) ile
             # ZATEN seçiyordu, ama hibrit sözlüğü ne 'inlet_ox' ne
@@ -9062,11 +9931,32 @@ class HybridRocketEngine:
                 inj_spec['T_ox_K'] = (self.tank_temperature
                                       if self.tank_temperature is not None
                                       else TANK_TEMPERATURE_DEFAULT_K)
+            # v3.0.1 (kulvar T) — KULLANICI TANK BASINCI DEVREYE BAĞLANDI.
+            # P₁ = P_tank − ΔP_hat (hat kaybı modellenmiyor → P₁ = P_tank,
+            # beyanlı) devre çözücüsüne ``p_feed_bar`` olarak gider; ΔP_enj =
+            # P₁ − P_c çözücüde kurulur. Takviyeli N₂O'da giriş aşırı
+            # soğutulmuştur: sıvı yoğunluğu (P₁, T) sıkıştırılmış sıvı hâlinde
+            # sorulur (``n2o_inlet_liquid_density``). Kendinden basınçlı /
+            # tasarım-ΔP kiplerinde bu dal ÇALIŞMAZ (bit-aynı).
+            _rho_giris_kunyesi = None
+            if self._user_tank_feed is not None:
+                inj_spec['p_feed_bar'] = float(
+                    self._user_tank_feed['injector_inlet_pressure_bar'])
+                if ox_name == 'n2o':
+                    inj_spec['rho_ox'], _rho_giris_kunyesi = \
+                        n2o_inlet_liquid_density(inj_spec['T_ox_K'],
+                                                 inj_spec['p_feed_bar'])
             # Oda gazı yoğunluğu (SMD için): T_c ve MW = R_evrensel/R_spesifik
             if getattr(self, 'T_c', None) and getattr(self, 'R', None):
                 inj_spec['T_c_K'] = self.T_c
                 inj_spec['mw_gas'] = R_UNIVERSAL / self.R
-            detail = design_injector(inj_spec)
+            # V301/E2 — PİNTLE DIŞI ELEMAN GİRDİLERİ DEVREYE GİRDİ. Çarpışmalı
+            # (çift sayısı, delik çapı, açı) ve swirl (hedef yarı açı, oda
+            # çapı, teğet giriş sayısı) girdileri uç (/calculate) tarafından
+            # ``injector_element_inputs`` özniteliğine konur; benzer-akışkan
+            # çift planı her zaman ÇİFT sayıda deliktir (modül sonu).
+            detail = eleman_girdileriyle_tasarla(
+                inj_spec, getattr(self, 'injector_element_inputs', None))
             if detail.get('status') != 'success':
                 raise ValueError(detail.get('error', 'enjektör tasarım hatası'))
             oxc = detail['ox_circuit']
@@ -9076,6 +9966,20 @@ class HybridRocketEngine:
                 # seçip sonuçta 'like_impinging' görmemeli).
                 'injector_type': self.injector_type,
                 'model_injector_type': detail['injector_type'],
+                # V301/E1: pintle'da KANON geometri (devre çözücüsünün
+                # ``pintle_geometry``si) özet blokta da durur; aşağıdaki
+                # delik sayısı/çapı devrenin EŞDEĞER düz orifis planıdır
+                # (Cd ve toplam alan onunla çözülür) ve beyanı yanındadır.
+                # Pintle dışı tiplerde anahtar HİÇ konmaz (yanıt bit-aynı).
+                **({'pintle_geometry': dict(detail['pintle_geometry']),
+                    'orifice_plan_basis': PINTLE_EQUIVALENT_ORIFICE_PLAN_BASIS}
+                   if detail.get('pintle_geometry') is not None else {}),
+                # V301/H2: koaksiyelde de kanon geometri özet blokta; delik
+                # planı devrenin eşdeğer düz orifis planıdır (beyanlı).
+                **({'coaxial_geometry': dict(detail['coaxial_geometry']),
+                    'orifice_plan_basis':
+                        COAXIAL_EQUIVALENT_ORIFICE_PLAN_BASIS}
+                   if detail.get('coaxial_geometry') is not None else {}),
                 'oxidizer_flow_rate_kg_s': self.mdot_ox,
                 'injection_velocity_m_s': oxc['velocity_m_s'],
                 'number_of_orifices': oxc['n_orifices'],
@@ -9111,11 +10015,18 @@ class HybridRocketEngine:
                 # adıyla söylenir (sessiz yok sayma biter).
                 'feed_pressure_bar': (float(self.P_c)
                                       + float(oxc['delta_p_bar'])),
+                # v3.0.1 (kulvar T): kullanıcı tank basıncı kipinde kaynak
+                # ve gerekçe o kipin kendi beyanıdır; diğer iki kipin değeri
+                # ve metni bayt bayt aynı kalır.
                 'feed_pressure_source': (
+                    FEED_PRESSURE_SOURCE_USER_TANK
+                    if self._user_tank_feed is not None else
                     FEED_PRESSURE_SOURCE_N2O_SAT
                     if inj_spec.get('fluid_ox') == 'n2o'
-                    else 'chamber_pressure_plus_design_pressure_drop'),
+                    else FEED_PRESSURE_SOURCE_DESIGN_DP),
                 'feed_pressure_basis': (
+                    user_tank_feed_basis(self._user_tank_feed, ox_name)
+                    if self._user_tank_feed is not None else
                     'P_1 = P_c + delta_p of the injector circuit solution. '
                     + ('For self-pressurised N2O the circuit takes P_1 = '
                        'P_sat(T_tank) from the saturation table; '
@@ -9129,6 +10040,14 @@ class HybridRocketEngine:
                     'the published pressure drop and orifice plan, so it is '
                     'not done silently here.'),
             }
+            if self._user_tank_feed is not None:
+                basic_results['injector_design'].update(
+                    user_tank_feed_fields(self._user_tank_feed, oxc,
+                                          inj_spec, _rho_giris_kunyesi))
+            # V301/E2: benzer-akışkan çift planının künyesi (yalnız o tipte).
+            if detail.get('element_plan') is not None:
+                basic_results['injector_design']['element_plan'] = dict(
+                    detail['element_plan'])
             basic_results['injector_design_detail'] = detail
         except Exception as _inj_err:
             # v2.6.26 — UYDURMA YEDEK KALDIRILDI.
@@ -9147,6 +10066,15 @@ class HybridRocketEngine:
             # 'status: not_analyzed' ile ve nedeniyle döner, uyarı
             # kullanıcıya ULAŞIR. Geometri uydurmak, geometri vermemekten
             # daha kötüdür — kullanıcı bu sayıları imalata götürüyor.
+            # V301/E1: kullanıcının pintle ölçüsü geçersiz/tutarsızsa hata
+            # adlı alanlarıyla saklanır; uç onu 422'ye çevirir (motor bloğu
+            # yine 'not_analyzed' olur, sayı uydurulmaz).
+            from hrma.engines.injector_design import (
+                PintleGeometryInputError, ElementPlanInputError)
+            if isinstance(_inj_err, PintleGeometryInputError):
+                self.pintle_geometry_error = _inj_err
+            if isinstance(_inj_err, ElementPlanInputError):
+                self.injector_element_error = _inj_err
             self._fallback_used.append('injector_design_detail')
             self.design_warnings.append(_w(
                 'warn.hybrid.injector_detail_unavailable', 'warning',
@@ -9512,7 +10440,16 @@ class HybridRocketEngine:
         # --- A1 (yol haritası): N₂O kendinden-basınçlı tank blowdown bloğu.
         # Çözücünün gerçek değerlerinden kurulur; uygulanamazsa NOT_MODELLED
         # gerekçesiyle boş döner (ayrıntı _tank_blowdown_block docstring'i).
-        basic_results['tank_blowdown'] = self._tank_blowdown_block()
+        # v3.0.1 (kulvar T): takviyeli (kullanıcı tank basıncı) N₂O'da
+        # kendinden basınçlı boşalma bloğu GEÇERSİZ — yalnız tasarım noktası
+        # yayımlanır (``user_tank_blowdown_block``). Kapı çağrı yerindedir:
+        # ``_tank_blowdown_block`` gövdesinin satırları Lean çapalarının
+        # (formal/registry.json) üstünde kalır, satır nötr.
+        basic_results['tank_blowdown'] = (
+            user_tank_blowdown_block()
+            if (self._user_tank_feed is not None
+                and _ox_key(getattr(self, 'oxidizer_type', None)) == 'n2o')
+            else self._tank_blowdown_block())
         # Kitap uyum B16: HP dengesine giren oksitleyici giriş durumu
         # (sıcaklık, faz, oluşum entalpisi [kJ/mol], yöntem, kaynak).
         basic_results['oxidizer_inlet_state'] = (
@@ -9523,6 +10460,21 @@ class HybridRocketEngine:
         # girdi yoksa NOT_MODELLED gerekçesiyle boş döner.
         basic_results['thermal_protection'] = self._thermal_protection_block(
             heat_transfer_results)
+        # v3.0.1 (V301/H-termal): kamara cidarının üç bölgesi. Astar,
+        # yukarıdaki bloğun kamara astarıdır; blok onu yayımlamadıysa (ör.
+        # uq_mode) yapısal zincirin okuduğu AYNI kamara istasyonu çağrısı
+        # kullanılır — iki zincir aynı hükmü okur.
+        _tp = basic_results['thermal_protection']
+        _kamara_astari = (_tp.get('chamber_liner')
+                          if isinstance(_tp, dict) else None)
+        if _kamara_astari is None and heat_transfer_results:
+            _kamara_astari = self._thermal_protection_block(
+                heat_transfer_results,
+                yalniz_kamara_astari=True).get('chamber_liner')
+        basic_results['chamber_wall_zones'] = self._chamber_wall_zones_block(
+            heat_transfer_results, _kamara_astari)
+        self._apply_chamber_zone_verdicts(basic_results['chamber_wall_zones'],
+                                          heat_transfer_results)
 
         # --- A8 (yol haritası): fırlatma sahası rakım/ortam düzeltmesi —
         # yalnız kullanıcı bir saha verdiyse; verilmediyse beyanla boş.
@@ -9540,6 +10492,10 @@ class HybridRocketEngine:
         # yapılmalıdır (aşağıdaki warnings_list satırı).
         basic_results['of_shift'] = self._of_shift_block(
             basic_results['tank_blowdown'])
+        # v3.0.1 (V301/H1): kullanıcı tank kipinde O/F kaymasının hangi
+        # durumunun bu tasarıma ait olduğu ve neyin modellenmediği adıyla.
+        if self._user_tank_feed is not None:
+            user_tank_of_shift_declaration(basic_results['of_shift'])
         # ÖH D24 / OH-D23-18 — EĞRİNİN KENDİ HARCADIĞI KÜTLE ÜST SEVİYEDE.
         # ``isp_delivered_avg_basis`` bu alanın adını anıyor; alan yoksa künye
         # olmayan bir şeyi işaret ederdi. Sayı BURADA HESAPLANMAZ, yalnız
@@ -9884,6 +10840,191 @@ class HybridRocketEngine:
 
 
 # ---------------------------------------------------------------------------
+# v3.0.1 (Ayberk tur 1, kulvar M) — MALZEME SEÇİM EKRANININ TEK KAYNAĞI.
+# Bu blok da BİLEREK modül sonundadır (Lean çapaları 7470/7482 kaymasın);
+# aşağıdaki 10. tur bloğundan ÖNCE durur ki modül sonuna yapılan başka
+# eklemelerle aynı birleşme parçasına düşmesin.
+#
+# Ayberk'in maddesi: "Material seçim ekranı olmalı hem yanma odası hem
+# enjektör hem nozzle için." Ölçülen durum (docs/scofield/raw/OH/V301/
+# ayberk1/malzeme/once.json S1): üç seçici de ilk hesaptan önce GİZLİ
+# panelde (#designConfigPanel) duruyordu ve seçenekleri şablonda elle
+# yazılmıştı — lülede motorun tanıdığı yedi malzemenin (NOZZLE_MATERIAL_COOLING)
+# yalnız üçü vardı. Seçenek listesi artık buradan, motorun kendi
+# tablolarından türetilir; şablon ve uç aynı kaydı okur.
+# ---------------------------------------------------------------------------
+#: Lüle (boğaz) malzemesi istekte verilmediğinde kullanılan ad. Değer
+#: DEĞİŞMEDİ: ``_resolve_nozzle_material`` içinde üç kez satır içi 'graphite'
+#: olarak yazılıydı (varsayılan + iki düşüş). Hibrit sayfasının malzeme
+#: panelinde seçili gösterilen seçenek de bu addan basılır (iki varsayılan
+#: yok, CLAUDE.md §11).
+HYBRID_NOZZLE_MATERIAL_DEFAULT = 'graphite'
+
+#: Malzeme rolleri — hangi malzeme hangi seçicide sunulur ve hesap o
+#: malzemeden HANGİ özellikleri okur.
+#:
+#: Seçim kuralı (HRMA seçimi; gerekçe RAPOR.md "KARAR M-1"):
+#:  * chamber_material  — materials_db ``'structural'`` etiketi ("basınçlı
+#:    gövde / yapısal analiz adayı", materials_db.py başlık belgesi). Hibrit
+#:    analiz güvertesinin yapısal/güvenlik/ısıl panelleri kamara malzemesini
+#:    yanıttan okuyup KENDİ seçicilerine basar (analysis_dock.js
+#:    CHAMBER_MATERIAL_PATHS.hybrid); o seçicilerin listesi de bu etiketin
+#:    16 kaydıdır (structural_panel.js MATERIALS). Listede olmayan bir ad
+#:    seçicide sessizce ilk seçeneğe düşüyordu (D15/P10B3-08: SF 3,38 kat
+#:    iyimser) — aynı etiket bu kusurun geri gelmesini engeller.
+#:  * nozzle_material   — motorun KENDİ lüle tablosu
+#:    (``NOZZLE_MATERIAL_COOLING``): soğutma varsayımı tanımlı yedi malzeme.
+#:  * injector_material — ``'structural'`` + ``'pipe'`` (besleme hattı
+#:    basınçlı tesisatı) etiketleri. Plaka denetimi akma dayanımına dayalı
+#:    sünek plaka modelidir (Roark Tablo 11.2 durum 10b); v3.0.0 formunun
+#:    pirinç seçeneği (brass_c360) yalnız 'pipe' etiketlidir ve eski
+#:    projeler onu taşır.
+#:
+#: ``properties``: (kimlik, birim, ölçek, ondalık). Her kimlik hesapta o rol
+#: için GERÇEKTEN okunan alandır (tüketiciler RAPOR.md "Tüketici haritası"):
+#:  yield_strength        yapısal akma (structural_analysis._derate_strength;
+#:                        enjektör: utils/injector_design.injector_plate_structural)
+#:  ultimate_strength     yapısal çekme (_derate_strength)
+#:  density               kamara kütlesi (structural_analysis._calculate_weight);
+#:                        enjektör plaka kütlesi
+#:  thermal_conductivity  cidar iletimi (heat_transfer_analysis
+#:                        _analyze_wall_temperature / analyze_axial_profile)
+#:  emissivity            boğaz ışınımı (analyze_axial_profile)
+#:  allowable_temperature_K  materials_db.temperature_limits(rec)['allowable_K']
+#:                        — ısıl hükmün eşiği (kamara: _analyze_gas_side_heat_
+#:                        transfer; lüle: _analyze_nozzle_material)
+#: Ölçek yalnız birim çevirisidir (Pa -> MPa); sayı uydurulmaz, alan kayıtta
+#: yoksa satır yayımlanmaz.
+HYBRID_MATERIAL_ROLES = {
+    'chamber_material': {
+        'tags': ('structural',),
+        'properties': (
+            ('yield_strength', 'MPa', 1e-6, 0),
+            ('ultimate_strength', 'MPa', 1e-6, 0),
+            ('density', 'kg/m³', 1.0, 0),
+            ('thermal_conductivity', 'W/(m·K)', 1.0, 1),
+            ('allowable_temperature_K', 'K', 1.0, 0),
+        ),
+    },
+    'nozzle_material': {
+        'tags': None,
+        'properties': (
+            ('thermal_conductivity', 'W/(m·K)', 1.0, 1),
+            ('emissivity', '', 1.0, 2),
+            ('allowable_temperature_K', 'K', 1.0, 0),
+        ),
+    },
+    'injector_material': {
+        'tags': ('structural', 'pipe'),
+        'properties': (
+            ('yield_strength', 'MPa', 1e-6, 0),
+            ('density', 'kg/m³', 1.0, 0),
+        ),
+    },
+}
+
+
+def hybrid_material_default(field):
+    """Rolün istekte verilmediğinde kullanılan malzeme ADI (ya da None).
+
+    Enjektörde varsayılan YOKTUR: alan gelmezse plaka yapısal denetimi hiç
+    koşmaz (app.py ``_injector_plate_report`` çağrısı alanın varlığına
+    bağlı). Sayfa bunu "seçilmedi" seçeneğiyle gösterir; varsayılan bir
+    malzeme seçili gibi gösterilmez.
+    """
+    if field == 'chamber_material':
+        return HYBRID_CHAMBER_MATERIAL_DEFAULT
+    if field == 'nozzle_material':
+        return HYBRID_NOZZLE_MATERIAL_DEFAULT
+    return None
+
+
+def hybrid_nozzle_material_key(name):
+    """Lüle malzemesi adını motorun çözdüğü kayda eşler; çözülmezse None.
+
+    Normalleştirme ``HybridRocketEngine._resolve_nozzle_material`` ile
+    birebirdir (boşluk kırpma, küçük harf, boşluk -> alt çizgi, materials_db
+    takma adları). Uç kapısı (app.py) bu işlevle karar verir: motorun kabul
+    ettiği hiçbir ad uçta reddedilmez, motorun düşeceği ad uçta ADLI 422
+    alır. Dize olmayan değer (bool, sayı, liste, sözlük) ad değildir: None.
+    """
+    if not isinstance(name, str):
+        return None
+    aday = name.strip().lower().replace(' ', '_')
+    if not aday:
+        return None
+    from hrma.data.materials_db import canonical_name
+    return canonical_name(aday)
+
+
+def _hybrid_material_property(rec, ozellik, olcek):
+    """Kayıttan sonlu-pozitif özellik değeri (birim ölçekli) ya da None."""
+    if ozellik == 'allowable_temperature_K':
+        from hrma.data.materials_db import temperature_limits
+        deger = temperature_limits(rec).get('allowable_K')
+    else:
+        deger = rec.get(ozellik)
+    if isinstance(deger, bool) or not isinstance(deger, (int, float)):
+        return None
+    deger = float(deger)
+    if not np.isfinite(deger) or deger <= 0.0:
+        return None
+    return deger * olcek
+
+
+def hybrid_material_role_options(field):
+    """Bir malzeme rolünün sunulan seçenekleri (motorun kendi kaydından).
+
+    Dönen liste materials_db kayıt sırasını (lülede NOZZLE_MATERIAL_COOLING
+    sırasını) korur. Her öğe::
+
+        {'material_key': kanonik ad, 'name': kaydın görünen adı (EN),
+         'i18n_key': 'adv.mat.<kanonik ad>',
+         'properties': [{'id', 'value', 'unit', 'digits'}, ...],
+         'source': kaydın kaynak metni,
+         # yalnız lüle:
+         'cooling_assumption': 'natural' | 'regenerative',
+         'erosion_model': 'published_band' | 'no_published_data'}
+
+    Kayıtta bulunmayan özellik satırı YAYIMLANMAZ (sahte veri yok).
+    Bilinmeyen rol ``KeyError``.
+    """
+    from hrma.data.materials_db import MATERIALS, get_material_safe
+    rol = HYBRID_MATERIAL_ROLES[field]
+    if rol['tags'] is None:
+        anahtarlar = list(NOZZLE_MATERIAL_COOLING)
+    else:
+        anahtarlar = [k for k, rec in MATERIALS.items()
+                      if set(rec.get('tags') or ()) & set(rol['tags'])]
+    secenekler = []
+    for anahtar in anahtarlar:
+        rec, kanonik = get_material_safe(anahtar)
+        ozellikler = []
+        for ozellik, birim, olcek, ondalik in rol['properties']:
+            deger = _hybrid_material_property(rec, ozellik, olcek)
+            if deger is None:
+                continue
+            ozellikler.append({'id': ozellik, 'value': deger, 'unit': birim,
+                               'digits': ondalik})
+        oge = {'material_key': kanonik, 'name': rec.get('name', kanonik),
+               'i18n_key': 'adv.mat.' + kanonik, 'properties': ozellikler,
+               'source': rec.get('source')}
+        if field == 'nozzle_material':
+            oge['cooling_assumption'] = NOZZLE_MATERIAL_COOLING[kanonik]
+            # Motorun KENDİ kararı: _analyze_nozzle_material aynı çağrıyla
+            # erozyonu ya hesaplar ya 'no_published_data' der.
+            from hrma.analysis.transient_ballistics import ThroatErosionModel
+            try:
+                ThroatErosionModel.for_material(kanonik)
+            except ValueError:
+                oge['erosion_model'] = 'no_published_data'
+            else:
+                oge['erosion_model'] = 'published_band'
+        secenekler.append(oge)
+    return secenekler
+
+
+# ---------------------------------------------------------------------------
 # ÖH D37 A2 hibrit · 10. tur — kamara malzemesinin TEK varsayılanı.
 # Bu blok BİLEREK modül sonundadır: yukarıdaki satır numaraları
 # ``formal/registry.json`` Lean çapalarıdır (7470, 7482).
@@ -9897,3 +11038,690 @@ class HybridRocketEngine:
 #: seçili seçeneği (``advanced.html``) ve örnek proje bu addan okur.
 #: Ad materials_db'de ``ss_304``ün takma adıdır; motor kanonik ada çözer.
 HYBRID_CHAMBER_MATERIAL_DEFAULT = 'steel_304'
+
+
+# ===========================================================================
+# v3.0.1 (Ayberk tur 1 · kulvar T) — TANK BASINCI KAYNAĞI
+# Bu blok BİLEREK modül sonundadır (yukarıdaki kamara malzemesi bloğuyla aynı
+# gerekçe): sınıf gövdesindeki satır numaraları ``formal/registry.json`` Lean
+# çapalarıdır (7470, 7482) ve o dosya bu kulvarın değildir. Sınıf bu adları
+# yalnız yöntem gövdelerinde (çağrı anında) okur; modül yüklenirken
+# çözülmeleri gerekmez.
+# ===========================================================================
+# v3.0.1 (Ayberk tur 1 · kulvar T) — TANK BASINCI KAYNAĞI KULLANICIYA AÇIK.
+# Ana model kararı (Astra danışması; brif T.md). Üç kip, TEK tanım; uç
+# katmanı (app.py ``tank_pressure_source`` alanı) ve ön yüz bu adları okur:
+#   self_pressurised     — N₂O varsayılanı: P₁ = P_sat(T_tank) (bugünkü yol,
+#                          bit-aynı);
+#   design_pressure_drop — LOX/H₂O₂ varsayılanı: P₁ = P_c·(1 + ΔP/P_c)
+#                          (tasarım ΔP oranı; bugünkü yol, bit-aynı);
+#   user                 — kullanıcının verdiği tank basıncı (He/N₂ ile
+#                          takviyeli N₂O, basınçla beslenen LOX/H₂O₂):
+#                          P₁ = P_tank − ΔP_hat devre çözücüsüne p_feed_bar
+#                          olarak gider.
+TANK_PRESSURE_SOURCE_SELF_PRESSURISED = 'self_pressurised'
+TANK_PRESSURE_SOURCE_DESIGN_DP = 'design_pressure_drop'
+TANK_PRESSURE_SOURCE_USER = 'user'
+TANK_PRESSURE_SOURCES = (TANK_PRESSURE_SOURCE_SELF_PRESSURISED,
+                         TANK_PRESSURE_SOURCE_DESIGN_DP,
+                         TANK_PRESSURE_SOURCE_USER)
+# İstekte 'default' = "oksitleyicinin varsayılan kipi" (ön yüzün seçim
+# kutusundaki değerin AYNISI; alanın hiç gönderilmemesiyle bit-aynı çözülür).
+TANK_PRESSURE_SOURCE_DEFAULT = 'default'
+TANK_PRESSURE_SOURCE_REQUEST_VALUES = ((TANK_PRESSURE_SOURCE_DEFAULT,)
+                                       + TANK_PRESSURE_SOURCES)
+# ``injector_design.feed_pressure_source``un diğer iki değeri (tek tanım).
+# İlki bugüne dek bloğu kuran dalda çıplak dize olarak yazılıydı; değer
+# DEĞİŞMEDİ, yalnız adı oldu.
+FEED_PRESSURE_SOURCE_DESIGN_DP = 'chamber_pressure_plus_design_pressure_drop'
+FEED_PRESSURE_SOURCE_USER_TANK = 'user_tank_pressure'
+
+
+class TankPressureSourceError(ValueError):
+    """Tank basıncı kaynağının ya da kullanıcı tank basıncının ADLI reddi.
+
+    ``invalid_fields`` uç sözleşmesinin kayıtlarıdır (alan, reason, sayılar,
+    birim); ``error_code`` makine kodu, ``message`` insan cümlesi (EN — ucun
+    diğer 422 cümleleriyle aynı dil sözleşmesi). /calculate kapısı (HTTP
+    422) ve motor kurucusu (Python API) AYNI kaydı üretir — iki yerde iki
+    metin yoktur. ``ValueError`` alt sınıfıdır: istemci reddidir, sunucu
+    arızası değil.
+    """
+
+    def __init__(self, error_code, message, invalid_fields):
+        super().__init__(message)
+        self.error_code = str(error_code)
+        self.message = str(message)
+        self.invalid_fields = [dict(k) for k in invalid_fields]
+        # app.py'nin genel istisna dalı ``field``/``reason`` künyelerini
+        # OLDUĞU GİBİ taşır (Python API yolu da adıyla reddeder).
+        self.field = (self.invalid_fields[0].get('field')
+                      if self.invalid_fields else None)
+        self.reason = (self.invalid_fields[0].get('reason')
+                       if self.invalid_fields else None)
+
+    def body(self):
+        """HTTP 422 gövdesi (uç katmanının kullandığı tek biçim).
+
+        Üst düzey ``field`` ön yüzün hata özetine alan adını ekler
+        (``app.js::sunucuHataMetni`` ``[alan]`` son ekini bu anahtardan
+        kurar)."""
+        govde = {'status': 'invalid_input', 'error': self.error_code,
+                 'message': self.message,
+                 'invalid_fields': [dict(k) for k in self.invalid_fields]}
+        if self.field:
+            govde['field'] = self.field
+        return govde
+
+
+def _ox_key(oxidizer_type):
+    """Motorun KENDİ oksitleyici anahtarı: ``(oxidizer_type or 'n2o').lower()``
+    (``_compile_results`` enjektör dalı ve ``_get_oxidizer_density`` ile aynı
+    ifade — kip kapısı ile çözücü aynı akışkanı görür)."""
+    return str(oxidizer_type or 'n2o').lower()
+
+
+def default_tank_pressure_source(oxidizer_type):
+    """Oksitleyicinin bugünkü (varsayılan) kipi — iki yol da BİT-AYNI kalır."""
+    return (TANK_PRESSURE_SOURCE_SELF_PRESSURISED
+            if _ox_key(oxidizer_type) == 'n2o'
+            else TANK_PRESSURE_SOURCE_DESIGN_DP)
+
+
+def resolve_tank_pressure_source(source, oxidizer_type):
+    """İstekteki ``tank_pressure_source`` → (kip, None) ya da (None, ret kaydı).
+
+    Alan yoksa (``None``/boş dize) ya da ``'default'`` ise oksitleyicinin
+    varsayılanı döner — bugünkü istekler aynen çözülür. Bilinmeyen ad SESSİZCE varsayılana düşmez;
+    oksitleyiciyle uyuşmayan kip de reddedilir: kendinden basınçlı model
+    N₂O'ya özgüdür (doyma tablosu), N₂O devresinin de tasarım-ΔP-oranı yolu
+    yoktur (P₁ ya P_sat'tır ya kullanıcının basıncı).
+    """
+    if source is None or (isinstance(source, str) and not source.strip()):
+        return default_tank_pressure_source(oxidizer_type), None
+    kabul = list(TANK_PRESSURE_SOURCE_REQUEST_VALUES)
+    if not isinstance(source, str):
+        return None, {
+            'field': 'tank_pressure_source', 'reason': 'not_a_string',
+            'submitted': repr(source)[:60], 'accepted_values': kabul}
+    kip = source.strip().lower()
+    if kip not in TANK_PRESSURE_SOURCE_REQUEST_VALUES:
+        return None, {
+            'field': 'tank_pressure_source', 'reason': 'unknown_value',
+            'submitted': source[:60], 'accepted_values': kabul}
+    if kip == TANK_PRESSURE_SOURCE_DEFAULT:
+        return default_tank_pressure_source(oxidizer_type), None
+    ox = _ox_key(oxidizer_type)
+    if kip == TANK_PRESSURE_SOURCE_SELF_PRESSURISED and ox != 'n2o':
+        return None, {
+            'field': 'tank_pressure_source',
+            'reason': 'not_applicable_to_oxidizer', 'submitted': kip,
+            'oxidizer_type': ox,
+            'accepted_values': [TANK_PRESSURE_SOURCE_DESIGN_DP,
+                                TANK_PRESSURE_SOURCE_USER],
+            'basis': ('the self-pressurised feed model (P_1 = P_sat(T_tank)) '
+                      'is N2O-specific; LOX and H2O2 are not '
+                      'self-pressurising at their storage temperature')}
+    if kip == TANK_PRESSURE_SOURCE_DESIGN_DP and ox == 'n2o':
+        return None, {
+            'field': 'tank_pressure_source',
+            'reason': 'not_applicable_to_oxidizer', 'submitted': kip,
+            'oxidizer_type': ox,
+            'accepted_values': [TANK_PRESSURE_SOURCE_SELF_PRESSURISED,
+                                TANK_PRESSURE_SOURCE_USER],
+            'basis': ('the N2O injector circuit has no design pressure-drop '
+                      'ratio path: its inlet pressure is either the '
+                      'saturation pressure at the tank temperature or the '
+                      'user-supplied tank pressure')}
+    return kip, None
+
+
+def user_tank_pressure_state(tank_pressure, chamber_pressure_bar,
+                             oxidizer_type, tank_temperature):
+    """Kullanıcı tank basıncı kipinin besleme durumu ve fizik kapıları.
+
+    Döner: ``(durum, ret_kayitlari)``. Ret listesi boş değilse durum
+    yayımlanmaz (``None``); kayıtların hepsi ``tank_pressure`` alanınındır.
+
+    * Değer katmanı: JSON sayısı (``bool`` ve dize sayı değildir —
+      ``input_guard.is_json_number``), sonlu ve pozitif.
+    * P₁ = P_tank − ΔP_hat. Hat kaybı MODELLENMİYOR: hibritte
+      ``feed_line_length_m`` / ``feed_line_inner_diameter_mm`` yalnız chug
+      çevriminin topaklanmış ataletini verir; sürtünme kaybı, vana/regülatör
+      düşümü yoktur (bkz. ``_not_modelled_declarations`` 'feed_system').
+      Kayıp UYDURULMAZ: P₁ = P_tank alınır ve "besleme hattı kaybı dahil
+      değil" beyanı durumda taşınır (``feed_line_loss_included: False``).
+    * ΔP_enj = P₁ − P_c ≤ 0 → ret (akış yok; sayılarla).
+    * N₂O doyma şartı: P_tank < P_sat(T_tank)·(1 − TANK_PRESSURE_PSAT_REL_TOL)
+      → ret. Varsayılan başlangıç hâli DENGE hâlidir: sıvı N₂O T_tank'ta doyma
+      basıncının altında dengede tutulamaz; yarı-kararlı (metastable) sıvı
+      vardır ama modellenmez (Waxman ve ark., AIAA 2013-3636, §III.A ve Ek B
+      — Astra danışması 7). P_sat devrenin NHNE'ye verdiği P_v'nin TA
+      KENDİSİDİR (``injector_design.n2o_vapor_pressure_bar``). Sıcaklık doyma
+      zarfı dışındaysa bu kapı sayı uydurmaz; sıcaklığı motorun kendi zarf
+      kapısı adıyla reddeder.
+
+    ``tank_temperature``: motor kurucusunun aldığı HAM değer (``None`` →
+    ``TANK_TEMPERATURE_DEFAULT_K``, devrenin ve blowdown bloğunun kullandığı
+    aynı varsayılan).
+    """
+    alan = 'tank_pressure'
+    if tank_pressure is None or (isinstance(tank_pressure, str)
+                                 and not tank_pressure.strip()):
+        return None, [{
+            'field': alan, 'reason': 'required_for_user_tank_pressure_source',
+            'unit': 'bar',
+            'message': (
+                "tank_pressure_source = 'user' takes the injector feed "
+                "pressure from 'tank_pressure' (bar, absolute), which was "
+                "not supplied. No server default is used in this mode.")}]
+    if not input_guard.is_json_number(tank_pressure):
+        return None, [{
+            'field': alan, 'reason': 'not_a_json_number',
+            'submitted': repr(tank_pressure)[:60], 'unit': 'bar'}]
+    p_tank = input_guard.finite_positive(tank_pressure)
+    if p_tank is None:
+        return None, [{
+            'field': alan, 'reason': 'not_a_positive_finite_number',
+            'submitted': repr(tank_pressure)[:60], 'unit': 'bar'}]
+    pc = float(chamber_pressure_bar)
+    ox = _ox_key(oxidizer_type)
+    p1 = p_tank   # hat kaybı modellenmiyor — kayıp düşülmez, beyan edilir
+    durum = {
+        'tank_pressure_bar': p_tank,
+        'feed_line_loss_bar': None,
+        'feed_line_loss_included': False,
+        'feed_line_loss_basis': (
+            'NOT INCLUDED: the hybrid solver has no feed-line pressure-loss '
+            'model (no friction, valve or regulator drop). feed_line_length_m '
+            '/ feed_line_inner_diameter_mm only give the lumped inertance of '
+            'the chug loop. The injector inlet pressure is therefore taken '
+            'equal to the tank pressure, P_1 = P_tank; a real feed line '
+            'lowers P_1 and the injector pressure drop.'),
+        'injector_inlet_pressure_bar': p1,
+        'chamber_pressure_bar': pc,
+        'injector_pressure_drop_bar': p1 - pc,
+    }
+    ret = []
+    if not (p1 - pc > 0.0):
+        ret.append({
+            'field': alan, 'reason': 'injector_pressure_drop_not_positive',
+            'submitted': p_tank, 'unit': 'bar',
+            'feed_line_loss_bar': None, 'feed_line_loss_included': False,
+            'injector_inlet_pressure_bar': p1, 'chamber_pressure_bar': pc,
+            'minimum_exclusive_bar': pc,
+            'message': (
+                f'Injector pressure drop dP = P_1 - P_c = {p1:g} - {pc:g} = '
+                f'{p1 - pc:g} bar is not positive (P_1 = P_tank = {p_tank:g} '
+                f'bar; feed line loss not included). No oxidizer flow can be '
+                f'delivered: raise the tank pressure above the chamber '
+                f'pressure.')})
+    if ox == 'n2o':
+        if tank_temperature is None:
+            T = TANK_TEMPERATURE_DEFAULT_K
+            T_kaynak = 'default'
+        else:
+            T = input_guard.finite_number(tank_temperature)
+            T_kaynak = 'user input (tank_temperature)'
+        p_sat = None
+        if T is not None:
+            try:
+                from hrma.engines.injector_design import (
+                    n2o_vapor_pressure_bar)
+                p_sat = n2o_vapor_pressure_bar(T)
+            except (ValueError, TypeError):
+                p_sat = None
+        if p_sat is not None and np.isfinite(p_sat):
+            p_min = p_sat * (1.0 - TANK_PRESSURE_PSAT_REL_TOL)
+            durum.update({
+                'tank_temperature_K': float(T),
+                'tank_temperature_source': T_kaynak,
+                'saturation_pressure_bar': p_sat,
+                'subcooling_pressure_margin_bar': p1 - p_sat,
+            })
+            if p_tank < p_min:
+                ret.append({
+                    'field': alan, 'reason': 'below_n2o_saturation_pressure',
+                    'submitted': p_tank, 'unit': 'bar',
+                    'saturation_pressure_bar': p_sat,
+                    'tank_temperature_K': float(T),
+                    'relative_tolerance': TANK_PRESSURE_PSAT_REL_TOL,
+                    'minimum_bar': p_min,
+                    'message': (
+                        f'Tank pressure {p_tank:g} bar is below the N2O '
+                        f'saturation pressure at the tank temperature, '
+                        f'P_sat({float(T):g} K) = {p_sat:.4g} bar (HRMA '
+                        f'tolerance {TANK_PRESSURE_PSAT_REL_TOL * 100:g} %). '
+                        f'This is inconsistent with the default equilibrium '
+                        f'initial state: liquid N2O at T_tank cannot be held '
+                        f'in equilibrium below its saturation pressure (a '
+                        f'metastable liquid is not modelled). Raise the tank '
+                        f'pressure to at least {p_min:.4g} bar or lower the '
+                        f'tank temperature.')})
+    return (None if ret else durum), ret
+
+
+def user_tank_pressure_error(ret_kayitlari):
+    """Ret kayıtlarından tek ``TankPressureSourceError`` kurar (ilk kayıt
+    makine kodunu belirler; bütün kayıtların cümleleri birleşir)."""
+    ilk = ret_kayitlari[0]
+    neden = ilk.get('reason')
+    metin = ' '.join(k.get('message') or '' for k in ret_kayitlari).strip()
+    if not metin:
+        metin = (f"'{ilk.get('field')}' was rejected "
+                 f"({ilk.get('reason')}); no design was published.")
+    return TankPressureSourceError(
+        {'below_n2o_saturation_pressure': 'tank_pressure_below_saturation',
+         'injector_pressure_drop_not_positive':
+             'tank_pressure_not_above_chamber_pressure',
+         'required_for_user_tank_pressure_source': 'tank_pressure_required',
+         }.get(neden, 'invalid_tank_pressure'),
+        metin, ret_kayitlari)
+
+
+def tank_pressure_source_error(kayit):
+    """``resolve_tank_pressure_source`` ret kaydından ``TankPressureSourceError``."""
+    return TankPressureSourceError(
+        ('tank_pressure_source_not_applicable'
+         if kayit.get('reason') == 'not_applicable_to_oxidizer'
+         else 'invalid_tank_pressure_source'),
+        (f"'tank_pressure_source' was rejected ({kayit.get('reason')}); "
+         f"accepted values: {kayit.get('accepted_values')}. "
+         + (kayit.get('basis') or '')).strip(),
+        [kayit])
+
+
+def n2o_inlet_liquid_density(T_K, p1_bar):
+    """Takviyeli (aşırı soğutulmuş) N₂O girişinin sıvı yoğunluğu (P₁, T).
+
+    Döner ``(rho [kg/m³], basis)``. Astra danışması 7: özellikler enjektör
+    GİRİŞ hâlinde (P₁, T₁) değerlendirilir, otomatik olarak doyma hâlinde
+    değil. Kendinden basınçlı kipin yoğunluğu doymuş sıvıdır
+    (``N2OSaturation().rho_l(T)``, CoolProp — Lemmon & Span 2006); burada
+    AYNI denklem (CoolProp N₂O EOS) sıkıştırılmış sıvı hâlinde, P₁ > P_sat
+    iken sorulur: P₁ = P_sat'ta iki değer özdeştir. P₁ ≤ P_sat (pay içi)
+    ya da CoolProp yoksa doymuş sıvı yoğunluğu kullanılır ve künye bunu
+    söyler (sessiz yedek yok).
+    """
+    from hrma.analysis.tank_blowdown import COOLPROP_AVAILABLE, N2OSaturation
+    T = float(T_K)
+    rho_sat = float(N2OSaturation().rho_l(T))
+    if not COOLPROP_AVAILABLE:
+        return rho_sat, (
+            'saturated-liquid density at T_tank (N2O saturation table); the '
+            'compressed-liquid correction for P_1 > P_sat was NOT applied '
+            'because CoolProp is not available in this installation')
+    from CoolProp.CoolProp import PropsSI
+    p_sat_eos = float(PropsSI('P', 'T', T, 'Q', 0, 'N2O'))
+    p1 = float(p1_bar) * 1e5
+    if not p1 > p_sat_eos:
+        return rho_sat, (
+            f'saturated-liquid density at T_tank = {T:g} K (CoolProp N2O EOS, '
+            f'Lemmon & Span 2006): P_1 = {p1_bar:g} bar is not above the EOS '
+            f'saturation pressure {p_sat_eos / 1e5:.4g} bar')
+    rho = float(PropsSI('D', 'T', T, 'P', p1, 'N2O'))
+    if not (np.isfinite(rho) and rho > 0.0):
+        return rho_sat, (
+            'saturated-liquid density at T_tank: the compressed-liquid EOS '
+            'query did not return a finite density')
+    return rho, (
+        f'compressed (subcooled) liquid density at the injector inlet state '
+        f'(P_1 = {p1_bar:g} bar, T = {T:g} K), CoolProp N2O EOS (Lemmon & '
+        f'Span 2006); saturated-liquid value at T would be {rho_sat:.4g} '
+        f'kg/m^3')
+
+
+def user_tank_feed_basis(durum, ox_name):
+    """Kullanıcı tank basıncı kipinin ``feed_pressure_basis`` metni."""
+    metin = (
+        f"P_1 = P_tank - feed line loss, with the user-supplied tank pressure "
+        f"(tank_pressure_source = 'user'). The feed line loss is NOT included "
+        f"(the hybrid solver has no line-loss model), so P_1 = P_tank = "
+        f"{float(durum['tank_pressure_bar']):g} bar enters the injector "
+        f"circuit as its feed pressure and the injector pressure drop is "
+        f"dP = P_1 - P_c from the circuit solution (P_1 = P_c + delta_p "
+        f"holds). ")
+    if _ox_key(ox_name) == 'n2o':
+        metin += (
+            'N2O: with P_1 above P_sat(T_tank) the inlet is subcooled '
+            '(supercharged tank); the liquid density is evaluated at the '
+            'inlet state (see inlet_state). The Dyer NHNE blend (AIAA '
+            '2007-5702) is used, with kappa = sqrt((P_1-P_2)/(P_v-P_2)) '
+            'evaluated only while P_2 < P_v; otherwise the flow is '
+            'single-phase SPI. NHNE alone is not generally sufficient for '
+            'subcooled critical flow (Zimmerman et al., AIAA 2013-4045, '
+            'Sec. II.B), so the subcooled N2O flow area is an estimate. '
+            'Pressurant (He/N2) dissolution, ullage expansion and the tank '
+            'pressure history are not modelled: only the design point is '
+            'published (tank_blowdown).')
+    else:
+        metin += ('The inlet is single-phase liquid (SPI orifice relation); '
+                  'the tank pressure history is not modelled - only the '
+                  'design point is published.')
+    return metin
+
+
+def user_tank_feed_fields(durum, oxc, inj_spec, rho_basis):
+    """Kullanıcı tank basıncı kipinde ``injector_design``a eklenen alanlar.
+
+    Yalnız bu kipte eklenir: varsayılan kiplerin yanıtı anahtar düzeyinde
+    de BİT-AYNI kalır. Sayılar çözücünün kendi yapraklarından okunur
+    (``oxc``), ikinci bir hesap yapılmaz.
+    """
+    alanlar = {
+        'tank_pressure_source': TANK_PRESSURE_SOURCE_USER,
+        'tank_pressure_bar': float(durum['tank_pressure_bar']),
+        'feed_line_loss_included': False,
+        'feed_line_loss_bar': None,
+        'feed_line_loss_basis': durum['feed_line_loss_basis'],
+    }
+    if inj_spec.get('fluid_ox') == 'n2o':
+        p1 = float(inj_spec['p_feed_bar'])
+        p_v = float(oxc.get('vapor_pressure_bar'))
+        alanlar['inlet_state'] = {
+            'injector_inlet_pressure_bar': p1,
+            'tank_temperature_K': float(inj_spec['T_ox_K']),
+            'vapor_pressure_bar': p_v,
+            'subcooling_pressure_margin_bar': p1 - p_v,
+            'subcooled': bool(p1 > p_v),
+            'liquid_density_kg_m3': float(inj_spec['rho_ox']),
+            'liquid_density_basis': rho_basis,
+            'flow_model': oxc.get('flow_model'),
+        }
+    return alanlar
+
+
+def _tank_basinci_kaynagini_kur(motor, tank_pressure_source, tank_pressure):
+    """Kurucunun tank basıncı kaynağı adımı (``HybridRocketEngine.__init__``).
+
+    Alan verilmezse oksitleyicinin bugünkü kipi (N₂O: P_sat(T_tank);
+    LOX/H₂O₂: tasarım ΔP oranı) — yol BİT-AYNI, motor bu kiplerde
+    ``tank_pressure`` değerini OKUMAZ (eskiden olduğu gibi). 'user' kipinde
+    değer ve fizik kapıları (ΔP > 0, N₂O doyma şartı) burada adıyla
+    reddedilir; uç katmanı (/calculate) aynı işlevlerle önce 422 döner, bu
+    kapı Python API'si için ikinci savunma hattıdır (tek tanım:
+    ``user_tank_pressure_state``). Kurucuda ``P_c``, ``oxidizer_type`` ve
+    ``tank_temperature`` çözüldükten SONRA çağrılır.
+    """
+    kip, ret = resolve_tank_pressure_source(tank_pressure_source,
+                                            motor.oxidizer_type)
+    if ret is not None:
+        raise tank_pressure_source_error(ret)
+    motor.tank_pressure_source = kip
+    motor._user_tank_feed = None
+    if kip == TANK_PRESSURE_SOURCE_USER:
+        durum, retler = user_tank_pressure_state(
+            tank_pressure, motor.P_c, motor.oxidizer_type,
+            motor.tank_temperature)
+        if retler:
+            raise user_tank_pressure_error(retler)
+        motor._user_tank_feed = durum
+
+
+def user_tank_blowdown_block():
+    """Kullanıcı tank basıncı kipinde ``tank_blowdown`` bloğu (yalnız N₂O).
+
+    ``_tank_blowdown_block`` denge iki-faz SAF N₂O tankını çözer (tank
+    basıncı = P_sat(T)); kullanıcı tank basıncı kipinde tank He/N₂ ile
+    takviyelidir ve basınç bir başka gazdan gelir. Saf N₂O eğrisini o tanka
+    yayımlamak başka bir tankın geçmişini göstermek olurdu: blok sayı
+    İÇERMEZ, yalnız tasarım noktası yayımlanır (Astra danışması 9 — kapsam
+    kararı). v3.0.1 (V301/H1): tasarım noktası tüketicileri bu bloğun
+    geçmişine değil tankın kendi hâline (P_tank, T) bağlıdır — slosh ve kap
+    blokları ``user_tank_liquid_density`` / ``user_tank_vessel_state``ten
+    okur; O/F kaymasının blowdown durumu (geçmiş ister) NOT_MODELLED kalır
+    (``user_tank_of_shift_declaration``).
+    """
+    return {
+        'status': 'NOT_MODELLED',
+        'basis': (
+            'equilibrium two-phase N2O tank blowdown '
+            '(hrma/analysis/tank_blowdown.N2OTankBlowdown; Whitmore & '
+            'Chandler, JPP 27(4) 2011) - NOT APPLIED in this mode'),
+        'tank_pressure_source': TANK_PRESSURE_SOURCE_USER,
+        'reason': (
+            'user-supplied (supercharged) tank pressure: the '
+            'self-pressurised equilibrium N2O blowdown model does not apply '
+            'to a pressurant-charged tank, so no tank pressure, temperature '
+            'or mass-flow history is published. Only the design point is '
+            'published.'),
+        'not_modelled': [
+            'pressurant (He/N2) ullage expansion and its energy balance',
+            'pressurant dissolution into / desorption from the liquid N2O '
+            '(flagged by Waxman et al., AIAA 2013-3636, Sec. III.A)',
+            'liquid-vapour phase exchange and wall heat transfer in the '
+            'ullage',
+            'regulator inflow (if a regulated feed is used)',
+        ],
+        'not_modelled_basis': (
+            'a transient model of a pressurant-charged tank needs pressurant '
+            'species conservation, ullage expansion, energy balances, phase '
+            'exchange and wall heat transfer (Zimmerman et al., AIAA '
+            '2013-4045, Secs. II.A, II.C, IV); HRMA does not solve it.'),
+    }
+
+
+# ---------------------------------------------------------------------------
+# v3.0.1 (V301/H1) — KULLANICI TANK KİPİNDE TANK KABI, SLOSH, O/F KAYMASI
+#
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/bilinen/hibrit/once.json, taban
+# 6369bf037): ``tank_pressure_source = 'user'`` kipinde kap bloğu
+# NOT_MODELLED'dı ("MEOP yalnız blowdown modelinden gelir; basınçla beslenen
+# tank girdisi yok" — kulvar T'den beri yanlış cümle); slosh bloğu doymuş
+# sıvı yoğunluğuyla (785,10 kg/m³) boyutlanıyordu, oysa aynı yanıttaki
+# enjektör devresi 60 bar'da sıkıştırılmış sıvı (803,03 kg/m³) kullanıyor ve
+# tank hacmi 60 ⟷ 80 bar arasında bit-aynı kalıyordu.
+#
+# Ana model kararı (brif H1): kullanıcı tank kipinde MEOP = P_tank — basınçla
+# beslenen tankın işletme basıncı tanım gereği budur. Kap hesabı P_sat
+# kipiyle AYNI işlevden (``_oxidizer_tank_vessel_block`` →
+# ``PressureVesselAnalyzer.analyze``, aynı malzeme, aynı boyutlandırma kipi)
+# geçer; bu işlevler yalnız GİRDİ hâlini ve künyesini verir.
+# ---------------------------------------------------------------------------
+USER_TANK_VOLUME_SOURCE = (
+    "user tank pressure mode (tank_pressure_source = 'user'): the SAME "
+    'sizing formula as the self-pressurised tank, V = (m_ox / rho_l) / liquid '
+    'fill fraction, with the liquid density at the tank state rho_l(P_tank, '
+    'T) (see liquid_density_basis) and the declared default fill fraction '
+    '(ullage margin). The blowdown history does not exist in this mode; the '
+    'tank state is the design point')
+
+USER_TANK_VESSEL_BASIS = (
+    'oxidizer tank pressure-vessel sizing by '
+    'hrma/analysis/pressure_vessel.py (AIAA S-080A-2018 metallic vessel '
+    'mode: proof = 1.5 x MEOP, burst = 2.0 x MEOP, mean-radius membrane hoop '
+    'thickness; actual burst = min(Faupel thick-wall, thin-wall plastic '
+    'limit)) - the same analyser and the same call as the self-pressurised '
+    "tank. In user tank pressure mode (tank_pressure_source = 'user') MEOP "
+    'is the user-supplied tank pressure and the wall design temperature is '
+    'the tank liquid temperature of this design (no tank history exists in '
+    'this mode); the diameter is the tank geometry the oxidizer_tank_slosh '
+    'block publishes (one tank, one geometry). No wall thickness is '
+    'computed anywhere in the hybrid solver, so the module runs in SIZING '
+    'mode and returns the REQUIRED thickness - there is no as-built wall '
+    'here to verify.')
+
+USER_TANK_OF_SHIFT_BASIS = (
+    "user tank pressure mode (tank_pressure_source = 'user', pressure-fed "
+    'tank): if the tank pressure is held at its set value (regulated '
+    'pressurant), the oxidiser flow stays at the design value and the '
+    "'regulated' case above IS this design's O/F shift (driven by the "
+    'regressing port only). An unregulated pressurant tank whose pressure '
+    'decays also drives O/F through a falling oxidiser flow; that case needs '
+    'the ullage pressure history (see tank_blowdown.not_modelled) and is '
+    'NOT_MODELLED.')
+
+USER_TANK_OF_SHIFT_BLOWDOWN_REASON = (
+    'user tank pressure mode: an O/F history for a decaying (unregulated) '
+    'pressurant tank needs the tank pressure history - pressurant ullage '
+    'expansion and energy balance, pressurant dissolution, phase exchange '
+    'and wall heat transfer - which HRMA does not solve (tank_blowdown.'
+    'not_modelled; Zimmerman et al., AIAA 2013-4045, Secs. II.A, II.C, IV). '
+    'The self-pressurised N2O blowdown curve does not apply to this tank. '
+    'No blowdown O/F curve is estimated.')
+
+
+def _kullanici_tank_sicakligi(motor):
+    """Kullanıcı tank kipinde tank sıvısının sıcaklığı [K] + künyesi.
+
+    N₂O: enjektör devresinin ``T_ox_K`` ifadesinin AYNISI (kullanıcı
+    ``oxidizer_temp``i ya da ``TANK_TEMPERATURE_DEFAULT_K``). Diğer
+    oksitleyiciler: çözücünün sıvı yoğunluğunun AİT OLDUĞU referans durum
+    (``external_data_fetcher.OXIDIZER_REFERENCE_STATE``: LOX 90,19 K NIST SRD
+    69, H₂O₂ 293,15 K AFRPL-TR-67-144). Tabloda yoksa ``(None, gerekçe)`` —
+    sıcaklık uydurulmaz.
+    """
+    ox = _ox_key(getattr(motor, 'oxidizer_type', None))
+    if ox == 'n2o':
+        if motor.tank_temperature is not None:
+            return float(motor.tank_temperature), (
+                'tank temperature of this design (user input oxidizer_temp), '
+                'the same value the injector circuit uses')
+        return float(TANK_TEMPERATURE_DEFAULT_K), (
+            f'default {TANK_TEMPERATURE_DEFAULT_K} K storage temperature '
+            f'(the same default the injector circuit uses)')
+    from hrma.data.external_data_fetcher import OXIDIZER_REFERENCE_STATE
+    kayit = OXIDIZER_REFERENCE_STATE.get(ox)
+    if not kayit:
+        return None, (f'no reference liquid state is defined for oxidizer '
+                      f'"{ox}", so no tank temperature exists for it')
+    return float(kayit[0]), (
+        f'reference liquid state of the solver {ox} density '
+        f'({float(kayit[0]):g} K; {kayit[1]}) - the hybrid solver has no '
+        f'separate {ox} tank temperature')
+
+
+def user_tank_liquid_density(motor):
+    """Kullanıcı tank kipinde tank sıvı yoğunluğu ρ(P_tank, T) + künyesi.
+
+    N₂O: ``n2o_inlet_liquid_density`` (enjektör devresinin giriş hâli
+    yoğunluğunu veren işlevin AYNISI; hat kaybı modellenmediği için
+    P₁ = P_tank ve iki hâl özdeştir — aynı sayı). Diğer oksitleyiciler:
+    çözücünün besleme sıvı yoğunluğu (devrenin kullandığı sayı); bu
+    akışkanlar için basınç (sıkıştırılmış sıvı) düzeltmesi modellenmez ve
+    künye bunu söyler.
+    """
+    p_tank = float(motor._user_tank_feed['tank_pressure_bar'])
+    ox = _ox_key(getattr(motor, 'oxidizer_type', None))
+    if ox == 'n2o':
+        T, _ = _kullanici_tank_sicakligi(motor)
+        rho, kunye = n2o_inlet_liquid_density(T, p_tank)
+        return float(rho), (
+            f'tank liquid at the tank state (P_tank = {p_tank:g} bar, T = '
+            f'{T:g} K) - the same state and the same function as the '
+            f'injector inlet (P_1 = P_tank, no feed-line loss is modelled): '
+            + kunye)
+    rho = getattr(motor, '_inj_rho_ox', None)
+    try:
+        rho = float(rho)
+    except (TypeError, ValueError):
+        rho = None
+    if not (rho and np.isfinite(rho) and rho > 0):
+        rho = float(motor._get_oxidizer_density())
+    _T, T_kunye = _kullanici_tank_sicakligi(motor)
+    return rho, (
+        f'the {ox} feed liquid density the solver uses for this design '
+        f'({rho:.6g} kg/m^3, the same value as the injector circuit; '
+        f'{T_kunye}). No compressed-liquid (pressure) correction is '
+        f'modelled for {ox}, so the tank pressure does not change it')
+
+
+def user_tank_vessel_state(motor):
+    """Kullanıcı tank kipinde kap bloğunun tasarım hâli; kip dışında ``None``.
+
+    Döner ``{'meop_bar', 'design_temperature_K', 'basis', 'fields'}``.
+    MEOP = P_tank (tanım gereği işletme basıncı); regülatör kilitlenmesi ve
+    ısıl sapma MODELLENMEZ (künyede). Sıcaklık ``_kullanici_tank_sicakligi``
+    (tanımsızsa ``None`` — kap bloğu analizörün ret dalından adıyla düşer,
+    sıcaklık uydurulmaz).
+    """
+    durum = getattr(motor, '_user_tank_feed', None)
+    if durum is None:
+        return None
+    p_tank = float(durum['tank_pressure_bar'])
+    T, T_kunye = _kullanici_tank_sicakligi(motor)
+    return {
+        'meop_bar': p_tank,
+        'design_temperature_K': T,
+        'basis': USER_TANK_VESSEL_BASIS,
+        'fields': {
+            'tank_pressure_source': TANK_PRESSURE_SOURCE_USER,
+            'meop_source': (
+                f"user-supplied tank pressure (tank_pressure_source = "
+                f"'user'): a pressure-fed tank operates at its set pressure "
+                f"by definition, so MEOP = P_tank = {p_tank:g} bar. "
+                f'NOT_MODELLED: regulator lock-up (creep above the set '
+                f'point) and thermal excursion (soak / solar heating of the '
+                f'liquid and the pressurant) that could raise the tank '
+                f'pressure above this value; no relief or set-point margin '
+                f'is added'),
+            'inner_diameter_source': (
+                'oxidizer_tank_slosh block of this run (tank volume V = '
+                '(m_ox / rho_l(P_tank, T)) / fill fraction, diameter from '
+                'the declared L/D ratio) - one tank, one geometry'),
+            'design_temperature_source': (
+                T_kunye + '; in this mode no tank temperature history '
+                'exists (the tank state is the design point)'),
+        },
+    }
+
+
+def user_tank_of_shift_declaration(of_shift_block):
+    """Kullanıcı tank kipinde ``of_shift`` beyanı (blok YERİNDE güncellenir).
+
+    Regüleli durum (ṁ_ox sabit) bu kipte basınç tutulan tankın O/F
+    kaymasıdır ve zaten çözülüyor; blowdown durumu tank basınç geçmişi ister
+    ve NOT_MODELLED kalır — gerekçesi bu kipin kendi cümlesidir (saf N₂O
+    blowdown eğrisi bu tanka ait değildir). Sayı eklenmez.
+    """
+    if not isinstance(of_shift_block, dict):
+        return of_shift_block
+    of_shift_block['user_tank_pressure_basis'] = USER_TANK_OF_SHIFT_BASIS
+    bd = of_shift_block.get('blowdown')
+    if isinstance(bd, dict) and bd.get('status') == 'NOT_MODELLED':
+        bd['reason'] = USER_TANK_OF_SHIFT_BLOWDOWN_REASON
+    return of_shift_block
+
+
+def eleman_girdileriyle_tasarla(inj_spec, eleman_girdileri):
+    """Hibrit devre çağrısı — pintle dışı eleman girdileriyle (V301/E2).
+
+    ``eleman_girdileri``: ``{'impingement': {...}, 'swirl': {...}}`` — anahtar
+    adları ``injector_design.ELEMENT_REQUEST_FIELDS`` sözlüğündeki devre
+    adlarıdır (uç çevirir ve ``element_clean_inputs`` kapısından geçirir).
+    Benzer-akışkan çarpışmalı tip HER ZAMAN ``design_like_doublet``ten geçer
+    (çift sayıda delik), swirl tipi ``design_swirl_element``ten (girdi yoksa
+    ``design_injector`` ile aynı devre + ``element_plan`` künyesi). Duş
+    başlığında kullanıcının delik sayısı ve imalat bandı planlayıcıya gider
+    (``n_orifices_ox`` / ``orifice_constraints``); verilmezse çağrı
+    ``design_injector(inj_spec)``le birebir aynıdır.
+    """
+    from hrma.engines.injector_design import (design_coaxial_element,
+                                              design_injector,
+                                              design_like_doublet,
+                                              design_swirl_element)
+    girdi = eleman_girdileri if isinstance(eleman_girdileri, dict) else {}
+    tip = inj_spec.get('injector_type')
+    if tip == 'coaxial':
+        # V301/H2: tek akışkanlı koaksiyel eleman devrede (iç jet payı
+        # ``girdi['coaxial']``; yoksa devrenin beyanlı varsayılanı).
+        if girdi.get('coaxial'):
+            inj_spec['coaxial'] = dict(girdi['coaxial'])
+        return design_coaxial_element(inj_spec)
+    if tip == 'like_impinging':
+        if girdi.get('impingement'):
+            inj_spec['impingement'] = dict(girdi['impingement'])
+        return design_like_doublet(inj_spec)
+    if tip == 'swirl':
+        if girdi.get('swirl'):
+            inj_spec['swirl'] = dict(girdi['swirl'])
+        return design_swirl_element(inj_spec)
+    if tip == 'showerhead' and girdi.get('showerhead'):
+        sh = girdi['showerhead']
+        if sh.get('n_holes') is not None:
+            inj_spec['n_orifices_ox'] = int(sh['n_holes'])
+        bant = {a: sh[b] for a, b in (('d_min_mm', 'd_min_mm'),
+                                      ('d_max_mm', 'd_max_mm')) if b in sh}
+        if bant:
+            inj_spec['orifice_constraints'] = bant
+    return design_injector(inj_spec)

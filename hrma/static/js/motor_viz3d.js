@@ -1943,10 +1943,25 @@
 
         var pRatio = pe / pa;
 
-        // Çıkış statik sıcaklığı — izentropik: Te = Tc / (1 + (g-1)/2 * Me^2)
-        var te = isFinite(tc)
-            ? tc / (1 + 0.5 * (gamma - 1) * me * me)
-            : NaN;
+        // Çıkış statik sıcaklığı. V301/K-C1 (N-CEA-2 §16 Y1): çözücü
+        // yayımladıysa (`nozzle_design.performance.exit_temperature_k`; katıda
+        // CEA yolunda T_c/γ/M_e'nin kendi seti) O okunur. Sahnenin kendi
+        // türetmesi oda γ'sıyla yapıldığı için CEA T_e'den ~%3 sapıyordu
+        // (APCP 40 bar: 2241 ⟷ 2318 K). Alan yoksa eski izentropik türetme
+        // kalır ve `exitTemperatureBasis` ile beyan edilir:
+        //     Te = Tc / (1 + (g-1)/2 * Me^2)
+        var teYayim = num(perf.exit_temperature_k, NaN);
+        var te, teDayanak;
+        if (isFinite(teYayim) && teYayim > 0) {
+            te = teYayim;
+            teDayanak = 'solver: nozzle_design.performance.exit_temperature_k';
+        } else {
+            te = isFinite(tc) ? tc / (1 + 0.5 * (gamma - 1) * me * me) : NaN;
+            teDayanak = isFinite(te)
+                ? 'derived in the scene: isentropic Tc / (1 + (gamma-1)/2 Me^2); '
+                  + 'the solver published no exit temperature'
+                : null;
+        }
 
         // Tam genişlemiş eşdeğer jet Mach sayısı Mj: akış pa basıncına kadar
         // izentropik genişleseydi ulaşacağı Mach. Toplam basınç korunur:
@@ -1997,6 +2012,7 @@
             jetMach: mj,
             exitVelocity: ve,          // m/s
             exitTemperature: te,       // K (Tc yoksa NaN)
+            exitTemperatureBasis: teDayanak,
             gamma: gamma,
             cellSpacingMm: cellSpacing,
             // pe > pa: az genişlemiş (jet çıkışta genişler, elmaslar belirgin)
@@ -3522,13 +3538,100 @@
 
         this._clock = new THREE.Clock();
         this._introT = 0;
-        var self = this;
-        (function loop() {
-            if (self._disposed) return;
-            self._raf = requestAnimationFrame(loop);
-            self._tick();
-        })();
+        // V301/K-C1 (KT-24, sıvı SV-18) — İSTEK ÜZERİNE ÇİZİM.
+        // ÖLÇÜLDÜ (denetim A-kati raf_olc + K-C1/raf_once.json): burada
+        // koşulsuz `requestAnimationFrame` döngüsü vardı; sahne bir kez
+        // açılınca hiçbir şey değişmese de, sahne ekran dışında ya da sekme
+        // arka plandayken de saniyede ~60 kez `renderer.render` çağrılıyordu
+        // (SwiftShader'da ~6 çekirdek). Döngü artık yalnız DURUM DEĞİŞİNCE
+        // koşar: kamera/kontrol olayı, imleç, oynatma, otomatik dönüş (kullanıcı
+        // açar; varsayılan kapalı), patlatma geçişi, giriş kaydırması, boyut
+        // ya da dil değişimi ve sahnenin herhangi bir genel yöntem çağrısı.
+        // Sahne görünmüyorsa (IntersectionObserver, `document.hidden`,
+        // display:none) döngü durur; görünür olunca kaldığı yerden sürer.
+        this._loopOn = false;
+        this._idleFrames = 0;
+        this._onScreen = true;
+        this._bindVisibility();
+        this._kick();
     }
+
+    //: Hiçbir şey kıpırdamadan kaç kare daha çizilip döngünün uyuyacağı.
+    //: HRMA seçimi: 2 kare — kontrol sönümünün son adımı ve kanca (HUD)
+    //: tazelemesi bir kare gecikmeyle gelebildiği için tek kare yetmez.
+    var RENDER_IDLE_FRAMES = 2;
+
+    // Döngüyü uyandırır (çalışıyorsa yalnız uyku sayacını sıfırlar).
+    MotorScene.prototype._kick = function () {
+        // Kurucu bitmeden (saat yokken) gelen olaylar yok sayılır: kurucunun
+        // son adımı döngüyü zaten başlatır.
+        if (this._disposed || !this._clock) return;
+        this._idleFrames = 0;
+        if (this._loopOn || !this._canRun()) return;
+        this._loopOn = true;
+        // Uyku süresi bir kare süresi sayılmasın (giriş/oynatma dt'si).
+        this._clock.getDelta();
+        var self = this;
+        var loop = function () {
+            if (self._disposed || !self._canRun()) {
+                self._loopOn = false;
+                self._raf = null;
+                return;
+            }
+            self._tick();
+            if (self._shouldSleep()) {
+                self._loopOn = false;
+                self._raf = null;
+                return;
+            }
+            self._raf = requestAnimationFrame(loop);
+        };
+        this._raf = requestAnimationFrame(loop);
+    };
+
+    MotorScene.prototype._canRun = function () {
+        if (typeof document !== 'undefined' && document.hidden) return false;
+        return this._onScreen !== false;
+    };
+
+    // Sürekli animasyon yoksa ve kamera bu karede kıpırdamadıysa uyku sayacı
+    // ilerler; RENDER_IDLE_FRAMES kare sakin geçince döngü durur.
+    MotorScene.prototype._shouldSleep = function () {
+        var st = this.state;
+        if (!this.container.offsetParent) return true;   // display:none ata
+        var hedef = st.exploded ? 1 : 0;
+        var surekli = st.playing || st.autoRotate || this._introT < 1
+            || Math.abs(this._explodeF - hedef) > 0.001 || this._camMoved;
+        if (surekli) { this._idleFrames = 0; return false; }
+        this._idleFrames += 1;
+        return this._idleFrames > RENDER_IDLE_FRAMES;
+    };
+
+    // Görünürlük bekçileri: ekran dışı / arka plan sekmesi döngüyü durdurur,
+    // geri gelince uyandırır. Etkileşim olayları da uyandırır.
+    MotorScene.prototype._bindVisibility = function () {
+        var self = this;
+        var uyandir = function () { self._kick(); };
+        this._wakeHandler = uyandir;
+        if (typeof IntersectionObserver === 'function') {
+            this._io = new IntersectionObserver(function (girdiler) {
+                var g = girdiler[girdiler.length - 1];
+                self._onScreen = !!(g && g.isIntersecting);
+                if (self._onScreen) self._kick();
+            });
+            this._io.observe(this.container);
+        }
+        this._visHandler = function () { if (!document.hidden) self._kick(); };
+        document.addEventListener('visibilitychange', this._visHandler);
+        var el = this.renderer && this.renderer.domElement;
+        if (el) {
+            ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']
+                .forEach(function (ad) {
+                    el.addEventListener(ad, uyandir, { passive: true });
+                });
+        }
+        document.addEventListener('hrma:langchange', uyandir);
+    };
 
     MotorScene.prototype._initRenderer = function () {
         var w = this.container.clientWidth || 800;
@@ -3564,6 +3667,10 @@
         this.controls.dampingFactor = 0.08;
         this.controls.autoRotateSpeed = 0.9;
         if (oldTarget) this.controls.target.copy(oldTarget);
+        // V301/K-C1 (KT-24): kontrol olayı (sürükleme, sönüm) döngüyü uyandırır.
+        var self = this;
+        this.controls.addEventListener('change', function () { self._kick(); });
+        this.controls.addEventListener('start', function () { self._kick(); });
         return this.controls;
     };
 
@@ -4777,16 +4884,17 @@
     MotorScene.prototype._updateDiamondPositions = function () {
         var d = this.dims;
         var info = this._plumeInfo || (this._plumeInfo = this._plumeAero());
-        // İlk elmasın çıkış düzleminden uzaklığı (d_e cinsinden).
-        // KAYNAKSIZ GÖRSEL YERLEŞİM — BEYAN (KU-25 / LULE-2c K-4): fiziksel
-        // konum p_j/p_∞'a güçlü bağlıdır (Love 1959, NASA TR R-6, Şekil 8:
-        // l/d_j ≈ 0,2 … 8); HRMA'nın lüle zarfı için künyeli bir bağıntı
-        // yoktur. Sahnedeki ilk elmas konumu ölçülmüş/hesaplanmış DEĞİLDİR.
-        var FIRST_DIAMOND_OFFSET_DE = 0.9;
-        // Çözücü verisi yoksa ya da jet ses altıysa (Mj ≤ 1,02) hücre
-        // yapısı YOKTUR; elmasları uydurma bir aralıkla dizmek yerine
-        // gizleriz.
-        if (!info || !(info.diamondSpacing > 0)) {
+        // İlk elmasın çıkış düzleminden uzaklığı YALNIZ künyeli bir plüm
+        // modeli onu yayımlarsa bilinir: fiziksel konum p_j/p_∞'a güçlü
+        // bağlıdır (Love 1959, NASA TR R-6, Şekil 8: l/d_j ≈ 0,2 … 8). Bugün
+        // bu konumu yayımlayan model YOK. Karar §27-15 (v3.0.1): kaynaksız
+        // 0,9·d_e yerleşimi söküldü; konum yayımlanana dek elmaslar
+        // ÇİZİLMEZ. Prandtl-Pack aralığı tek başına yetmez — ilk konum
+        // olmadan bütün dizi uydurma bir ofsetle kayar.
+        var ilkHucreMm = info ? info.firstCellOffsetMm : undefined;
+        // Çözücü verisi yoksa, jet ses altıysa (Mj ≤ 1,02) ya da ilk hücre
+        // konumu yayımlanmadıysa elmasları gizleriz.
+        if (!info || !(info.diamondSpacing > 0) || !(ilkHucreMm > 0)) {
             for (var j = 0; j < this._diamonds.length; j++) {
                 this._diamonds[j].visible = false;
             }
@@ -4794,7 +4902,7 @@
         }
         for (var k = 0; k < this._diamonds.length; k++) {
             this._diamonds[k].visible = true;
-            var yk = d.de * FIRST_DIAMOND_OFFSET_DE + k * info.diamondSpacing;
+            var yk = ilkHucreMm + k * info.diamondSpacing;
             this._diamonds[k].position.set(0, this._nozzleInfo.zExit + yk, 0);
             // Elmas ölçeği koni katmanıyla hizalı (kalem 4): parlama o
             // istasyondaki jet sınırı yarıçapına (coneRadiusAt) oturur —
@@ -4909,26 +5017,28 @@
         geo.attributes.position.needsUpdate = true;
         geo.attributes.color.needsUpdate = true;
 
-        // Çekirdek koni şiddeti (kalem 3): itkiyle (throttle) orantılı,
-        // hafif titreşimli — elmaslardaki flick kalıbının yavaşlatılmışı
-        // (türbülans temsili; taban opaklık kuruluşta userData'da)
+        // Çekirdek koni şiddeti (kalem 3): itkiyle (throttle) orantılı; taban
+        // opaklık kuruluşta userData'da. Zamanla salınan titreşim çarpanı
+        // YOK: veriye bağlı olmayan animasyon yasak (karar §27-15, v3.0.1).
         if (this._flameGroup) {
             this._flameGroup.visible = true;
-            var cflick = 0.85 + 0.15 * Math.sin(this._clock.elapsedTime * 23);
             for (var m = 0; m < this._flameGroup.children.length; m++) {
                 var cm = this._flameGroup.children[m];
                 cm.material.opacity =
-                    cm.userData.baseOpacity * clamp(intensity, 0, 1) * cflick;
+                    cm.userData.baseOpacity * clamp(intensity, 0, 1);
             }
         }
 
         // Elmas şiddeti basınç uyumsuzluğuyla (|1 − pe/pa| yaklaşımı) ölçekli:
-        // ideale yakın genişlemede elmaslar söner, sapmada belirginleşir
+        // ideale yakın genişlemede elmaslar söner, sapmada belirginleşir.
+        // Elmaslar yalnız konumları yayımlandığında görünür
+        // (_updateDiamondPositions). Titreşim çarpanı ve kaynaksız hücreler
+        // arası sönüm katsayısı söküldü (§27-15); hücre başına şiddet plüm
+        // modeli yayımlayınca girer.
         var dstr = this._plumeInfo ? this._plumeInfo.diamondStrength : 1;
         for (var k = 0; k < this._diamonds.length; k++) {
-            var flick = 0.75 + 0.25 * Math.sin(this._clock.elapsedTime * 37 + k * 2.4);
             this._diamonds[k].material.opacity =
-                intensity * (0.75 - k * 0.12) * flick * dstr;
+                this._diamonds[k].visible ? intensity * dstr : 0;
         }
     };
 
@@ -5139,6 +5249,7 @@
             if (self._disposed) return;
             var w = self.container.clientWidth, h = self.container.clientHeight;
             if (w < 10 || h < 10) return;
+            self._kick();   // V301/K-C1: yeni boyut bir kare ister
             self._perspCam.aspect = w / h;
             self._perspCam.updateProjectionMatrix();
             self.renderer.setSize(w, h);
@@ -5183,7 +5294,7 @@
         // (RAF döngüsü sürer; sekme geri gelince kaldığı yerden devam eder.
         // Gizli-sekme kurulum/resize akışına dokunulmaz — 2026-07-13 dersleri.)
         if (!this.container.offsetParent) {
-            this.controls.update();
+            this._camMoved = this.controls.update();
             return;
         }
         var d = this.dims;
@@ -5260,14 +5371,14 @@
             }
         }
 
-        // Yanma ışıkları + parıltı
-        var flick = 0.82 + 0.18 * Math.sin(this._clock.elapsedTime * 31) * Math.sin(this._clock.elapsedTime * 17.3);
-        this._glowMat.opacity = throttle * 0.5 * flick;
-        this._throatFlame.material.opacity = throttle * 0.85 * flick;
+        // Yanma ışıkları + parıltı: itkiyle (throttle) orantılı, zamanla
+        // salınmaz (sahte titreşim söküldü — karar §27-15, v3.0.1).
+        this._glowMat.opacity = throttle * 0.5;
+        this._throatFlame.material.opacity = throttle * 0.85;
         var Lw = this._totalLen;
-        this._combLight.intensity = throttle * 1.4 * flick;
+        this._combLight.intensity = throttle * 1.4;
         this._combLight.distance = Lw * 1.6;
-        this._exitLight.intensity = throttle * 1.8 * flick;
+        this._exitLight.intensity = throttle * 1.8;
         this._exitLight.distance = Lw * 2.2;
         // Işık konumları (dünya): model merkezine göre
         var zComb = (d.zg0 + d.zg1) / 2 - this._zCenter;
@@ -5292,7 +5403,9 @@
         }
 
         this.controls.autoRotate = st.autoRotate;
-        this.controls.update();
+        // V301/K-C1: update() kamerayı bu karede oynattıysa true döner
+        // (sönüm sürüyor demektir; döngü uyumaz).
+        this._camMoved = this.controls.update();
         this.renderer.render(this.scene, this.camera);
         // K1b: kamera/sahne kıpırdadıysa imleç altındaki okuma tazelenir
         if (this._probeNdc) this._probeFollow();
@@ -6369,6 +6482,22 @@
     };
     MotorScene.prototype.dispose = function () {
         this._disposed = true;
+        // V301/K-C1 (KT-24): görünürlük ve uyandırma dinleyicileri bırakılır.
+        if (this._io) { this._io.disconnect(); this._io = null; }
+        if (this._visHandler) {
+            document.removeEventListener('visibilitychange', this._visHandler);
+            this._visHandler = null;
+        }
+        if (this._wakeHandler) {
+            document.removeEventListener('hrma:langchange', this._wakeHandler);
+            var _el = this.renderer && this.renderer.domElement;
+            if (_el) {
+                var _h = this._wakeHandler;
+                ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']
+                    .forEach(function (ad) { _el.removeEventListener(ad, _h); });
+            }
+            this._wakeHandler = null;
+        }
         // CFD alan katmanı: geometri + malzeme + colorbar DOM'u bırakılır
         // (colorbar sahne grafiğinde değildir, traverse onu görmez)
         this._cfdDisposeLayer();
@@ -6417,6 +6546,24 @@
     // ------------------------------------------------------------------
     // Dışa açık API
     // ------------------------------------------------------------------
+
+    // V301/K-C1 (KT-24): sahnenin GENEL yöntemleri (araç çubuğu, deste, dış
+    // çağıranlar) durum değiştirir; her çağrıdan sonra çizim döngüsü
+    // uyandırılır. Salt okuyucular (get*, snapshot) ve dispose sarılmaz —
+    // her kare çağrılan bir okuyucu döngüyü sonsuza dek uyanık tutardı.
+    Object.keys(MotorScene.prototype).forEach(function (ad) {
+        if (ad.charAt(0) === '_' || ad === 'dispose' || ad === 'snapshot'
+                || ad.indexOf('get') === 0) {
+            return;
+        }
+        var asil = MotorScene.prototype[ad];
+        if (typeof asil !== 'function') return;
+        MotorScene.prototype[ad] = function () {
+            var sonuc = asil.apply(this, arguments);
+            this._kick();
+            return sonuc;
+        };
+    });
 
     window.MotorViz3D = {
         isSupported: function () {

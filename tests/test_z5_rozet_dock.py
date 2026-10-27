@@ -51,6 +51,9 @@ import warnings
 from pathlib import Path
 
 import pytest
+
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+from tests.support import form_defaults
 from tests.support.platform_capa import capa_rel
 
 warnings.filterwarnings('ignore')
@@ -91,9 +94,16 @@ KATI_GOVDE = {
     # ile yayımlanıyordu — yani buradaki 1500 N hiçbir zaman etkili olmadı.
     # Zarf kapısı fail-closed olduğundan gövde ZATEN ÖLÇÜLEN geometri kipine
     # çevrildi; yanıt tasarım noktası bloğu dışında BİT-AYNI.
+    # v3.0.1 T-ÇAPA-B: eski çekirdek 35 mm (Ø100, boy 300 mm @ 40 bar,
+    # a = 0,005 / n = 0,35) A_p/A_t 0,925 ile port boğulan motordu; K-A
+    # kapısından beri 422 ``port_smaller_than_throat``. Konu port boğulması
+    # değil: çekirdek tek tanım ``SOLID_DEFAULT_GEOMETRY_MM``den (48 mm,
+    # kopyalanmaz); hazne/boy bu gövdenin kendi değerleri. Ölçüldü: boğaz
+    # 37,54 mm, A_p/A_t 1,64. (Ø100/boy 500 tam varsayılan bu yanma hızı
+    # katsayılarıyla yine boğuluyor: A_p/A_t 0,958.)
     'motor_name': 'z5c', 'chamber_pressure': 40,
-    'grain_type': 'bates', 'chamber_diameter': 100,
-    'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+    'grain_type': 'bates', 'chamber_diameter': 100, 'grain_length': 300,
+    'core_diameter': SOLID_DEFAULT_GEOMETRY_MM['core_diameter'], 'segments': 1,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35, 'chamber_temperature': 3000,
     'c_star': 1550, 'propellant_density': 1800, 'propellant_type': 'apcp',
 }
@@ -104,6 +114,11 @@ SIVI_TABAN = {
     'contraction_ratio': 4, 'characteristic_length': 1.2,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (L-A SV-03); sayfanın
+    # gönderdiği şablon varsayılanı (tek kaynak, kopyalanmaz).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 SIVI_RP1 = dict(SIVI_TABAN, fuel_type='rp1')
 SIVI_METAN = dict(SIVI_TABAN, fuel_type='methane')
@@ -173,7 +188,15 @@ CIVATA_GOVDE = {
 #: (docs/scofield/raw/OH/KITAP/p1a/kanit/tur2b/kahin_cea.json) + önce/sonra
 #: (p1a rapor §12). Tolerans DEĞİŞMEDİ.
 #: 5665947.829137343 -> 5443058.87619067 W/m² (−%3,93): daha soğuk oda.
-HIBRIT_BOGAZ_AKISI_W_M2 = 5443058.87619067
+#: v3.0.1 port kulvarı (20 Eki): grain dış çapı = son port (eski 1,5·D_son);
+#: kamara/yakınsak geometrisi ve ṁ değişti -> boğaz akısı −%0,0011.
+#: Ölçüldü (birleşik main): 5443058.87619067 -> 5442998.239863697 W/m².
+#: v3.0.1 B7 (21 Eki, ÖNEMLİ, Berke onaylı): bu gövde O/F 2,5 N2O/HTPB —
+#: gaz karbonca aşırı doymuş, dengeye katı karbon C(gr) girdi; T_c
+#: 1834 -> 2037 K (CEA 2037,6 K) -> boğaz akısı +%18,34. Ölçüldü aynı
+#: süreçte: yoğun yol KAPALI 5442998.239863697 (eski çapa, bit-aynı),
+#: AÇIK 6441514.278282809 W/m². Tolerans DEĞİŞMEDİ.
+HIBRIT_BOGAZ_AKISI_W_M2 = 6441514.278282809
 
 
 def _sessiz(fn, *a, **k):

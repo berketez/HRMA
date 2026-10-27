@@ -240,6 +240,17 @@ def template_keys(html):
     # tarayıcı bunu görmediği için canlı anahtar 'kullanılmıyor' sayılıyordu.
     keys |= set(re.findall(r"I18N\.t\(\s*'([^']+)'", html))
     keys |= set(re.findall(r"\bTF?\('([^']+)'", html))
+    # V301/K-B (KT-10/12; hibrit M-6 deseni): katı malzeme seçeneklerinin
+    # anahtarları sunucu kaydından basılır (``solid.mat.{{ o.material_key }}``).
+    # YALNIZ bu tek Jinja ifadesi kaydın anahtar kümesiyle değiştirilir; genel
+    # ``{{ }}`` muafiyeti yok, ölü/eksik anahtar bekçisi aynen sıkı.
+    jinja = 'solid.mat.{{ o.material_key }}'
+    if jinja in keys:
+        from hrma.engines.solid_rocket_engine import solid_material_options
+        keys.discard(jinja)
+        for alan in ('case_material', 'nozzle_material'):
+            keys |= {'solid.mat.' + o['material_key']
+                     for o in solid_material_options(alan)}
     return keys
 
 

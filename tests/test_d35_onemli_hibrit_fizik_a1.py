@@ -154,10 +154,26 @@ def test_ON01_plaka_SF_yayimlanan_dP_ile_CAPRAZ_tutuyor(h1):
     assert plaka['bending_stress_MPa'] == pytest.approx(sigma / 1e6, rel=2e-3)
     sf = (plaka['yield_strength_MPa'] * 1e6) / sigma
     assert plaka['safety_factor'] == pytest.approx(sf, rel=2e-3)
-    # Ölçülen kusurun kapanışı: aynı plaka 4 bar'a göre SF 4,107 görüyordu.
-    assert plaka['safety_factor'] < 1.0, (
-        'Ornek-H1 plakası çözülen ΔP ile akmanın altında kalmalı; '
-        f"SF = {plaka['safety_factor']} — 4 bar'lık hüküm geri gelmiş olabilir")
+    # Ölçülen kusurun kapanışı: aynı plaka eskiden istekteki 4 bar'a göre
+    # denetleniyordu (D35 günü SF 4,107; çözülen ΔP ile 0,545). v3.0.1 tane
+    # zarfı kamara çapını, dolayısıyla plaka çapını küçülttü (σ ∝ a²) ve
+    # çözülen ΔP ile SF 1,192 oldu (d37 çapası 20 Eki'de güncellendi). Eski
+    # "SF < 1" beklentisi geometriye bağlı bir çapaydı ve bayatladı (21 Eki,
+    # temiz main'de kırmızıydı). Hükmün kendisi geometriden bağımsızdır:
+    # yayımlanan SF, AYNI plakanın 4 bar'daki SF'sinin ΔP oranı kadar
+    # küçültülmüş hâlidir; 4 bar'lık hüküm geri gelirse ikisi eşitlenir.
+    # Ölçüldü (21 Eki): ΔP 30,54 bar, SF 1,192, 4 bar SF 9,105 (oran 0,131);
+    # 0,5 payı "çözülen ΔP istekteki 4 bar'ın en az iki katı" demektir.
+    sigma_4bar = (0.75 * (ORNEK_H1['pressure_drop'] * 1e5) * a ** 2
+                  / (t ** 2 * eta))
+    sf_4bar = (plaka['yield_strength_MPa'] * 1e6) / sigma_4bar
+    assert plaka['safety_factor'] == pytest.approx(
+        sf_4bar * ORNEK_H1['pressure_drop'] / plaka['delta_P_bar'],
+        rel=2e-3)
+    assert plaka['safety_factor'] < 0.5 * sf_4bar, (
+        'Ornek-H1 plakası çözülen ΔP ile değil istekteki 4 bar ile '
+        f"denetleniyor olabilir: SF = {plaka['safety_factor']}, "
+        f'4 bar SF = {sf_4bar:.3f}')
 
 
 def test_ON01_chug_kapisi_COZULEN_dP_yi_derecelendiriyor(h1):

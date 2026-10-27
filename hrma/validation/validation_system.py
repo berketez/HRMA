@@ -29,16 +29,25 @@ from hrma.utils.input_guard import finite_positive
 from hrma.analysis.acoustic_modes import (
     CHUG_DP_RATIO_MINIMUM,
     CHUG_DP_RATIO_RECOMMENDED,
+    CHUG_THRESHOLD_CITATION,
 )
 
 #: ΔP/Pc üst sınırı — kararlılık değil, besleme sistemi maliyeti ölçütü.
-#: (Sutton & Biblarz 9. baskı Böl. 8.5 / NASA SP-8089: tipik enjektör ΔP
-#: bandının üst ucu; bunun ötesinde tank/pompa işi artar, kararlılık kazancı
-#: yoktur.) Chug eşiğiyle AYNI ŞEY DEĞİLDİR, bu yüzden ayrı adı vardır.
+#: (Sutton & Biblarz 9. baskı Böl. 8.5: tipik enjektör ΔP bandının üst ucu;
+#: bunun ötesinde tank/pompa işi artar, kararlılık kazancı yoktur.) Chug
+#: eşiğiyle AYNI ŞEY DEĞİLDİR, bu yüzden ayrı adı vardır. v3.0.1 (21 Eki):
+#: eski "/ NASA SP-8089" atfı kaldırıldı — bant o belgede sayfa sayfa
+#: doğrulanmadı (gerekçe: acoustic_modes.CHUG_THRESHOLD_SOURCE).
 INJECTOR_DP_PC_CEILING = 0.35
 
 #: ``comprehensive_validation`` raporunda ölçülemeyen eksenin künyesi.
 DP_RATIO_AXIS = 'pressure_drop_ratio'
+
+#: v3.0.1 — son port zarfı ⟷ kamara iç çapı karşılaştırmasının kayan nokta
+#: toleransı (bağıl). Fizik eşiği DEĞİLDİR: motor zarfı aynı formülle
+#: (k(N)·D_son + 2·t_artık) kurduğu için eşitlik tasarım gereğidir; tolerans
+#: yalnız yeniden hesaplamadaki yuvarlama farkını yutar.
+PORT_ENVELOPE_COMPARE_REL_TOL = 1e-9
 
 
 def _finite_positive(value) -> Optional[float]:
@@ -130,7 +139,7 @@ class ValidationSystem:
             'pressure_drop_ratio': (
                 f'lower bound = hrma.analysis.acoustic_modes.'
                 f'CHUG_DP_RATIO_MINIMUM ({CHUG_DP_RATIO_MINIMUM:.2f}, chug '
-                f'stability, NASA SP-8089; recommended '
+                f'stability, {CHUG_THRESHOLD_CITATION}; recommended '
                 f'{CHUG_DP_RATIO_RECOMMENDED:.2f}); upper bound = '
                 f'INJECTOR_DP_PC_CEILING ({INJECTOR_DP_PC_CEILING:.2f}, feed '
                 f'system cost, not a stability criterion)'),
@@ -341,8 +350,28 @@ class ValidationSystem:
                                         ratio=round(float(growth_ratio), 2)))
 
         # Chamber vs Port Diameter
+        # v3.0.1 (Ayberk tur 1, port kulvarının çapraz kırılması): eski kural
+        # ``d_port_final > 0.8 * d_chamber`` kaynaksızdı. Motordan sökülen
+        # 0,8·D_ch kırpmasının ikinci kopyasıydı. Grain dış çapı artık yanma
+        # sonu portlarından boyutlanıyor: artık et 0 iken D_son = D_kamara ve
+        # bu tasarım gereği. O yüzden eski kural HER varsayılan hibrit
+        # tasarımda yanlış 'kritik' basıyordu (ölçüldü: 1 kN, O/F 6).
+        # Hüküm artık motorun KENDİ geometrik zarfından gelir: son portların
+        # zarfı k(N)·D_son + 2·t_artık kamara iç çapını AŞARSA delinme var.
+        # Tolerans yalnız kayan nokta karşılaştırması içindir, fizik eşiği
+        # değildir.
         if d_chamber > 0 and d_port_final > 0:
-            if d_port_final > d_chamber * 0.8:
+            from hrma.engines.hybrid_rocket_engine import (
+                grain_port_layout_factor)
+            try:
+                n_port = int(data.get('port_count') or 1)
+            except (TypeError, ValueError):
+                n_port = 1
+            n_port = max(n_port, 1)
+            t_artik_mm = _finite_positive(data.get('residual_web_mm')) or 0.0
+            zarf_mm = (grain_port_layout_factor(n_port) * d_port_final
+                       + 2.0 * t_artik_mm)
+            if zarf_mm > d_chamber * (1.0 + PORT_ENVELOPE_COMPARE_REL_TOL):
                 warnings_list.append(_w("warn.validation.port_exceeds_chamber", "critical"))
 
         # --- Genleşme oranı: hüküm FİZİKTEN, sabit banttan DEĞİL --------

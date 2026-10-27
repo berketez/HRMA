@@ -2,6 +2,7 @@ import base64
 import functools
 import math
 import re
+import textwrap
 import unicodedata
 
 import plotly.graph_objects as go
@@ -262,6 +263,19 @@ def _style_subplot_titles(fig, size=13, color='#cfe8f2'):
     sonradan eklenen annotation'lara dokunulmasın)."""
     for ann in fig.layout.annotations:
         ann.font = dict(size=size, color=color)
+
+
+#: v3.0.1 (V301/N-grafik G3) — pano dipnotu yerleşimi (px). Ölçü:
+#: x tik (12 px) + standoff + eksen başlığı (14 px) ≈ 50 px; dipnot bunun
+#: altından başlar. Satır boyu 11 px yazıda ~14 px; 150 karakter ~930 px
+#: (1280 px sayfada figür ~1100 px). Lejant payı 66 px: kutu ~30 px; ilk
+#: ölçümde 48 px'lik payla lejant figürün dibinden ~8 px kırpılıyordu.
+#: Yanma panosunun çizim alanı eski yerleşimdeki gibi 590 px.
+PANO_DIPNOT_UST_PAY_PX = 64
+PANO_DIPNOT_SATIR_PX = 15
+PANO_DIPNOT_SATIR_KARAKTER = 150
+PANO_DIPNOT_LEJANT_PAY_PX = 66
+YANMA_PANOSU_CIZIM_PX = 590
 
 
 def _legend_below(y=-0.12):
@@ -1827,6 +1841,59 @@ def _perf_relation_note(primary_ys, secondary_ys, primary_name, secondary_name,
     return kisa, uzun
 
 
+#: v3.0.1 (V301/N-grafik G3) — biçimce aynı iki serinin ayrı dikey
+#: bantları: her seri kendi aralığının bu kadar katı boşlukla öteki banda
+#: yer bırakır (sol seri üstte, sağ seri altta; her biri hücrenin ~%43'ü,
+#: arada ~%14 boşluk). Kenar payı aralığın %8'i.
+PERF_BANT_BOSLUK_KAT = 1.25
+PERF_BANT_KENAR_KAT = 0.08
+
+
+def _perf_ayri_bantlar(ys1, ys2):
+    """Biçimce aynı iki seriyi ayrı dikey bantlara koyan eksen aralıkları.
+
+    Döner: ([alt1, üst1], [alt2, üst2]) ya da ölçülemezse None. Sayı
+    üretmez: aralıklar serilerin KENDİ min/max değerlerinden kurulur.
+    """
+    def _uc(ys):
+        v = [float(y) for y in ys if y is not None and math.isfinite(float(y))]
+        if len(v) < 2:
+            return None
+        lo, hi = min(v), max(v)
+        aralik = hi - lo
+        if aralik <= 0.0:
+            aralik = abs(hi) * 0.05 if hi != 0.0 else 1.0
+        return lo, hi, aralik
+    a, b = _uc(ys1), _uc(ys2)
+    if a is None or b is None:
+        return None
+    ust = [a[0] - PERF_BANT_BOSLUK_KAT * a[2], a[1] + PERF_BANT_KENAR_KAT * a[2]]
+    alt = [b[0] - PERF_BANT_KENAR_KAT * b[2], b[1] + PERF_BANT_BOSLUK_KAT * b[2]]
+    return ust, alt
+
+
+#: Biçim örtüşmesi eşiği: normalize fark < %5 olan nokta oranı ≥ 0,5.
+PERF_BICIM_FARK = 0.05
+PERF_BICIM_ORAN = 0.5
+
+
+def _perf_bicim_ortusur(ys1, ys2):
+    """İki seri kendi min–max'ına normalize edilince üst üste mi biniyor?"""
+    def _norm(ys):
+        v = [float(y) for y in ys]
+        if not v or not all(math.isfinite(y) for y in v):
+            return None
+        lo, hi = min(v), max(v)
+        if hi <= lo:
+            return [0.5] * len(v)
+        return [(y - lo) / (hi - lo) for y in v]
+    a, b = _norm(ys1), _norm(ys2)
+    if a is None or b is None or len(a) != len(b) or len(a) < 3:
+        return False
+    yakin = sum(1 for p, q in zip(a, b) if abs(p - q) < PERF_BICIM_FARK)
+    return yakin / len(a) >= PERF_BICIM_ORAN
+
+
 def _perf_dual_axis_panel(title, x, primary, secondary, x_title,
                           relation=None):
     """İki eksenli zaman serisi paneli.
@@ -1835,9 +1902,10 @@ def _perf_dual_axis_panel(title, x, primary, secondary, x_title,
     secondary None ise tek eksen çizilir.
 
     relation: (kısa_etiket, uzun_açıklama) — sağ eksenin sol eksenden
-        TÜRETİLDİĞİ ölçülmüşse verilir (T52). Kısa etiket eksen başlığının
-        altına, uzun açıklama ikinci serinin ipucuna yazılır. Sayı
-        DEĞİŞTİRİLMEZ; yalnız serinin ne olduğu beyan edilir.
+        TÜRETİLDİĞİ ölçülmüşse verilir (T52). Kısa etiket ve uzun açıklama
+        ikinci serinin ipucuna yazılır (v3.0.1 G3: eksen başlığının altındaki
+        döndürülmüş not kaldırıldı); iki eksen ayrı dikey bantlara oturur.
+        Sayı DEĞİŞTİRİLMEZ; yalnız serinin ne olduğu beyan edilir.
     """
     xs = _perf_series(x)
     if xs is None or primary is None:
@@ -1868,7 +1936,9 @@ def _perf_dual_axis_panel(title, x, primary, secondary, x_title,
             _hover = ('%{x:.2f} s<br>' + sec[1] + ': %{y:.2f} '
                       + sec[4]).rstrip()
             if relation:
-                _hover += '<br>' + relation[1]
+                # v3.0.1 (V301/N-grafik G3): kısa beyan eksen başlığından
+                # buraya taşındı (döndürülmüş küçük not okunmuyordu).
+                _hover += '<br>' + relation[0] + '<br>' + relation[1]
             fig.add_trace(
                 go.Scatter(
                     x=xs, y=sec[0], mode='lines',
@@ -1883,14 +1953,32 @@ def _perf_dual_axis_panel(title, x, primary, secondary, x_title,
         fig.update_xaxes(title_text=x_title, row=row, col=col)
         fig.update_yaxes(title_text=ytitle1, secondary_y=False, row=row, col=col)
         if sec is not None:
-            # Sağ eksen başlığı DÖNDÜRÜLMÜŞ çizilir: uzun metin panel
-            # yüksekliğini aşar. Bu yüzden kısa etiket ayrı bir <br> satırına
-            # ve <sub> ile küçültülerek konur; tam cümle ipucundadır.
-            _yt = sec[3]
-            if relation:
-                _yt = _yt + '<br><sub>' + relation[0] + '</sub>'
-            fig.update_yaxes(title_text=_yt, secondary_y=True,
+            # v3.0.1 (V301/N-grafik G3) — İKİ KUSUR, ÖLÇÜLDÜ
+            # (docs/scofield/raw/OH/V301/grafik/RAPOR.md, G2 önce, katı
+            # örneği): (1) kısa beyan ('= Burn Area / 13,28 cm²') sağ eksen
+            # başlığının altına <sub> ile DÖNDÜRÜLMÜŞ küçük not olarak
+            # basılıyordu — okunmuyordu; artık ikinci serinin ipucunda
+            # (bilgi kaybı yok, tam cümle de orada). (2) Oran ölçülüp
+            # sabit (ya da %5 içinde) bulunduğunda iki eğri BİÇİMCE aynıdır
+            # ve iki eksen kendi bandına oturduğu için çizimde üst üste
+            # biniyordu (normalize binme oranı ~1,0). Bu durumda eksenler
+            # ayrı DİKEY BANTLARA ayrılır: sol seri hücrenin üst, sağ seri
+            # alt bandında; her eksen yine kendi gerçek değerini gösterir.
+            # Ayrı alt grafik yerine bant: pano ızgarası (2×2) korunur.
+            fig.update_yaxes(title_text=sec[3], secondary_y=True,
                              row=row, col=col)
+            # Bant kararı: oran beyanı (relation) VAR ya da iki seri kendi
+            # min–max aralıklarına normalize edildiğinde noktaların yarısından
+            # çoğu %5 içinde örtüşüyor (ölçüldü: katı örneğinde F/Pc oranı
+            # %5'ten fazla gezindiği için beyan yoktu ama eğriler yine
+            # üst üste biniyordu, binme oranı 1,00).
+            if relation or _perf_bicim_ortusur(ys1, sec[0]):
+                bantlar = _perf_ayri_bantlar(ys1, sec[0])
+                if bantlar is not None:
+                    fig.update_yaxes(range=bantlar[0], secondary_y=False,
+                                     row=row, col=col)
+                    fig.update_yaxes(range=bantlar[1], secondary_y=True,
+                                     row=row, col=col)
 
     # time_axis: aynı panodaki zaman panelleri senkron zoom için eşlenir
     # (create_performance_plots sonunda _match_time_axes ile bağlanır).
@@ -3275,17 +3363,39 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
                      '(fuel/oxidizer/chamber pressure) was not supplied to '
                      'this figure.')
 
+    # v3.0.1 (V301/N-grafik G3) — DİPNOT EKSEN BAŞLIĞINA BİNMEZ, SAĞDAN
+    # TAŞMAZ. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/grafik/RAPOR.md, G2 önce,
+    # hibrit örneği 1440 px): dipnot ``y=-0.14`` ile yanchor'suz basılıyordu;
+    # Plotly y < 1/3 için 'bottom' seçtiği için kutu YUKARI uzayıp "O/F
+    # Ratio" eksen başlığına biniyordu (2 metin çakışması) ve 160+
+    # karakterlik satırlar figürün sağından taşıyordu (6 taşan metin).
+    # Onarım: satırlar sarılır, kutu çizim alanının dibinden sabit piksel
+    # payla AŞAĞI sarkar (yshift), lejant notların altına, alt kenar boşluğu
+    # satır sayısına göre açılır. Çizim alanı yüksekliği eskisiyle aynı
+    # (820 − 60 − 170 = 590 px). Metin ve sayılar DEĞİŞMEDİ.
+    _not_satirlari = []
+    for _n in notes:
+        if _n:
+            _not_satirlari.extend(textwrap.wrap(
+                '- ' + _n, PANO_DIPNOT_SATIR_KARAKTER, subsequent_indent='  ',
+                break_long_words=False, break_on_hyphens=False)
+                or ['- ' + _n])
+    _not_px = PANO_DIPNOT_SATIR_PX * len(_not_satirlari)
+    _alt_px = PANO_DIPNOT_UST_PAY_PX + _not_px + PANO_DIPNOT_LEJANT_PAY_PX
     fig.add_annotation(
-        x=0.0, y=-0.14, xref='paper', yref='paper', xanchor='left',
+        x=0.0, y=0.0, xref='paper', yref='paper', xanchor='left',
+        yanchor='top', yshift=-PANO_DIPNOT_UST_PAY_PX,
         showarrow=False, align='left',
-        text='<br>'.join(f'- {n}' for n in notes if n),
-        font=dict(size=10, color=STRUCT_DIM))
+        text='<br>'.join(_not_satirlari),
+        font=dict(size=11, color=STRUCT_DIM))
 
+    _lejant = _legend_below(
+        -(PANO_DIPNOT_UST_PAY_PX + _not_px + 8) / YANMA_PANOSU_CIZIM_PX)
     fig.update_layout(
         title_text="Combustion Analysis Dashboard",
-        showlegend=True, height=820, autosize=True,
-        legend=_legend_below(-0.24),
-        margin=dict(b=170))
+        showlegend=True, height=60 + YANMA_PANOSU_CIZIM_PX + _alt_px,
+        autosize=True, legend=_lejant,
+        margin=dict(t=60, b=_alt_px))
 
     fig.update_xaxes(title_text="Species", row=1, col=1)
     fig.update_yaxes(title_text="Mole Fraction", row=1, col=1)
@@ -5526,7 +5636,9 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
         colorscale=SEQ_CYAN,
         contours=dict(start=0.0, end=float(np.ceil(m_max * 10) / 10),
                       size=step),
-        colorbar=dict(title="Mach", x=1.02),
+        # v3.0.1 (V301/N-grafik G3): renk çubuğu başlığı yanda (üstteki
+        # başlık lejantla ve alt başlıkla çakışıyordu).
+        colorbar=dict(title=dict(text="Mach", side='right'), x=1.02),
         connectgaps=False,
         name='Mach field',
         hovertemplate=('x %{x:.1f} mm<br>r %{y:.1f} mm<br>'
@@ -5539,9 +5651,13 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
             name='Nozzle wall', showlegend=show,
             hovertemplate='x %{x:.1f} mm<br>wall r %{y:.1f} mm<extra></extra>'))
 
+    # v3.0.1 (V301/N-grafik G3): dikey çizgi etiketleri çizim alanının
+    # DİBİNE (ölçüldü: üstte, başlığın ikinci satırıyla çakışıyordu; nozul
+    # cidarı ±r bandında, dip boş).
     fig.add_vline(x=float(x_mm[i_t]), line_dash="dash",
                   line_color=COL_DANGER,
-                  annotation_text=f"Throat (M = {mach[i_t]:.2f})")
+                  annotation_text=f"Throat (M = {mach[i_t]:.2f})",
+                  annotation_position='bottom right')
 
     # Rejim: çözücünün SINIFLANDIRMASI — uydurma 'shock zone' yok
     regime = sol.get('regime') or {}
@@ -5551,11 +5667,13 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
     if isinstance(shock, dict) and shock.get('station_x_mm') is not None:
         fig.add_vline(x=float(shock['station_x_mm']), line_dash='dot',
                       line_color=COL_WARN_HI,
-                      annotation_text='Normal shock (quasi-1D)')
+                      annotation_text='Normal shock (quasi-1D)',
+                      annotation_position='bottom left')
     if isinstance(sep, dict) and sep.get('station_x_mm') is not None:
         fig.add_vline(x=float(sep['station_x_mm']), line_dash='dot',
                       line_color=COL_WARN,
-                      annotation_text='Flow separation (Summerfield)')
+                      annotation_text='Flow separation (Summerfield)',
+                      annotation_position='bottom left')
 
     perf = sol.get('performance') or {}
     sub = (f"Quasi-1D compressible solution | isentropic exit M = "
@@ -5580,8 +5698,13 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
                'x': 0.5, 'font': {'size': 16}},
         xaxis_title='Axial Position (mm)',
         yaxis_title='Radial Position (mm)',
-        autosize=True, height=620, showlegend=True,
-        margin=dict(b=110))
+        autosize=True, height=660, showlegend=True,
+        # v3.0.1 (V301/N-grafik G3): üç satırlık başlığa üst pay; lejant
+        # çizim alanının altına (ölçüldü: sağ üstte renk çubuğu başlığına
+        # biniyordu).
+        legend=dict(orientation='h', x=0.0, xanchor='left', y=-0.30,
+                    yanchor='top'),
+        margin=dict(t=120, b=150))
     fig.update_yaxes(scaleanchor='x', scaleratio=1)
 
     return _fig_json(fig)
@@ -7243,14 +7366,389 @@ PINTLE_MAX_DRAWN_HOLES = 12
 def create_pintle_cross_section(injector_data):
     """Pintle injector cross-section (axial: x = axis, y = radius).
 
-    v2.6.27 (B3): the drawing now reads the solver's real tip geometry
-    (``pintle_geometry``): the radial hole row is drawn from
-    ``n_radial_holes`` instead of two hard-coded arrows, the spray sheet is
-    drawn at the computed cone half angle instead of a literal '~45 deg', and
-    the radial jets are labelled with the fluid that actually flows through
-    them (oxidizer for a single-fluid hybrid pintle, fuel for the liquid
-    fuel-centred layout). Before this change the picture said 'fuel injected
-    radially' on the hybrid page, where the injector carries oxidizer only.
+    V301/E1 (Ayberk tur 1) — the hybrid pintle is drawn from the ONE canonical
+    pintle geometry of the answer (``injector.pintle_geometry`` = the injector
+    circuit's ``pintle_geometry``): tip-hole row at the skip distance L_s,
+    annular gap t, pintle tip diameter D_p, annulus bore D_p + 2t and — only
+    when the request supplied it — the body (housing) outer diameter. With no
+    body OD the body is NOT sized: the bore is drawn and labelled "body not
+    sized" (no invented outline). Labels use the same names as the form
+    (D_p, t, L_s, body OD).
+
+    The coaxial element (``type == 'coaxial'``) keeps its own concentric
+    drawing unchanged (``_concentric_cross_section_legacy``).
+    """
+    injector_data = injector_data if isinstance(injector_data, dict) else {}
+    if str(injector_data.get('type', '')).lower() == 'coaxial':
+        return _concentric_cross_section_legacy(injector_data)
+    return _pintle_tip_cross_section(injector_data)
+
+
+def _pintle_tip_cross_section(injector_data):
+    """Hibrit pintle eksenel kesiti — kanon geometriden (V301/E1).
+
+    Ölçü çizgisi BİR İDDİADIR: yalnız çözücünün (ya da isteğin) yayımladığı
+    boyuta konur. Bildirilmeyen boyut yalnız çizim ölçeğidir ve "not
+    reported (schematic)" diye yazılır (P8B4-18 sözleşmesi korunur). Uç
+    çıkıntısı ve gövde boyu modellenmez: çizim oranıdır, sayı iddia edilmez.
+    """
+    geom = injector_data.get('pintle_geometry') or {}
+
+    def _g(key):
+        return _perf_num(geom.get(key))
+
+    _d_out = _perf_num(injector_data.get('outer_diameter'))
+    _d_pin = _perf_num(injector_data.get('pintle_diameter'))
+    _gap_in = _perf_num(injector_data.get('gap'))
+    outer_is_real = _d_out is not None and _d_out > 0
+    pintle_is_real = _d_pin is not None and _d_pin > 0
+    gap_is_real = _gap_in is not None and _gap_in > 0
+    # Gövde boyutlandırılmadı: D_p ve t gerçek, gövde dış çapı YOK. Kılıf
+    # deliği çizilir, gövde dış hattı uydurulmaz.
+    govde_yok = (not outer_is_real) and pintle_is_real and gap_is_real
+    pintle_diameter = _d_pin if pintle_is_real else 25.0   # yalnız ölçek
+    gap = _gap_in if gap_is_real else 1.5                  # yalnız ölçek
+    bore = pintle_diameter + 2.0 * gap
+
+    # İMKÂNSIZ GEOMETRİ ÇİZİLMEZ (P13B2-04): üç sayı da geldiyse ve gövde
+    # kılıf deliğini sarmıyorsa figür yayımlanmaz.
+    if outer_is_real and pintle_is_real and gap_is_real and _d_out <= bore:
+        raise ValueError(
+            "Pintle cross-section not drawn: the supplied geometry is "
+            "not physically realisable. The injector body outer "
+            f"diameter is {_d_out:.3f} mm, but the annulus it "
+            f"must enclose already reaches {bore:.3f} mm "
+            f"(pintle {pintle_diameter:.3f} mm + 2 x gap {gap:.3f} mm), "
+            "so the body would have zero or negative wall thickness. "
+            "Check outer_diameter / pintle_diameter / gap against the "
+            "injector solver output; no substitute dimension is "
+            "invented here.")
+    outer_diameter = _d_out if outer_is_real else (
+        bore if govde_yok else 50.0)
+    sema_var = not (pintle_is_real and gap_is_real)
+
+    secim = str(geom.get('secondary_holes') or 'radial').lower()
+    n_radial = _g('n_radial_holes')
+    n_radial = int(n_radial) if (n_radial is not None and n_radial >= 1) \
+        else None
+    d_radial = _g('radial_hole_d_mm')
+    spray_half = _g('spray_half_angle_deg')
+    bf = _g('bf')
+    f_rad = _g('radial_flow_fraction')
+    tmr = _g('tmr')
+    skip_mm = _g('skip_distance_mm')
+    wall_mm = _perf_num(injector_data.get('body_wall_thickness'))
+    tan_aci = _g('tangential_angle_deg')
+    radial_fluid = 'Oxidizer' if geom.get('single_fluid') else 'Fuel'
+    delik_yok = secim == 'none' or (geom and n_radial is None
+                                    and _g('n_radial_holes') == 0)
+
+    fig = go.Figure()
+
+    # ---------------- Türetilmiş geometri (mm) ----------------
+    r_p = pintle_diameter / 2.0
+    r_ann = r_p + gap
+    r_out = outer_diameter / 2.0
+    if sema_var:
+        # Şematik yolda (D_p ve/veya t bildirilmedi) sayılar yalnız ölçektir;
+        # gövde her zaman anülüsü sarar (P13B2-04 öncesi koruma, yalnız şema).
+        r_out = max(r_out, r_ann + max(2.0, 0.15 * r_ann))
+    olcek = max(outer_diameter, bore)
+    k = olcek / 50.0          # metin/ok ötelemeleri çizim ölçeğiyle büyür
+    body_len = 1.2 * olcek
+    ls_x = skip_mm if (skip_mm is not None and skip_mm > 0) else None
+    tip_len = max(0.8 * pintle_diameter,
+                  (ls_x + 0.6 * pintle_diameter) if ls_x else 0.0)
+    taper_len = 0.6 * r_p
+    r_tip = 0.35 * r_p
+    ann_area = np.pi * (r_ann ** 2 - r_p ** 2)
+
+    # ---------------- Gövde ya da yalnız kılıf deliği ----------------
+    if outer_is_real or sema_var:
+        body_x = [-body_len, 0, 0, -body_len, -body_len, None,
+                  -body_len, 0, 0, -body_len, -body_len]
+        body_y = [r_ann, r_ann, r_out, r_out, r_ann, None,
+                  -r_ann, -r_ann, -r_out, -r_out, -r_ann]
+        body_hover = (
+            '<b>Injector Body</b><br>'
+            + (f'body OD: {outer_diameter:.2f} mm<br>' if outer_is_real
+               else 'body OD: not reported by the solver (schematic)<br>')
+            + (f'Wall (radial): {wall_mm if wall_mm is not None else r_out - r_ann:.2f} mm<br>'
+               if (outer_is_real and not sema_var)
+               else 'Wall (radial): not reported by the solver (schematic)<br>')
+            + 'Function: houses the oxidizer manifold and the annulus bore')
+        fig.add_trace(go.Scatter(
+            x=body_x, y=body_y, mode='lines', fill='toself',
+            fillcolor='rgba(125, 151, 165, 0.22)',
+            line=dict(color=STRUCT_INK, width=2),
+            name='Injector Body', hoveron='fills+points',
+            text=body_hover, hoverinfo='text', showlegend=False))
+    else:
+        bore_hover = (
+            '<b>Annulus bore (body not sized)</b><br>'
+            f'bore = D_p + 2t = {bore:.3f} mm<br>'
+            'body OD: not sized - the housing outer diameter was not '
+            'supplied; HRMA does not size the body (it needs housing '
+            'material, allowable stress and the pressure across the wall)')
+        fig.add_trace(go.Scatter(
+            x=[-body_len, 0, None, -body_len, 0],
+            y=[r_ann, r_ann, None, -r_ann, -r_ann], mode='lines',
+            line=dict(color=STRUCT_INK, width=2),
+            name='Annulus bore (body not sized)',
+            text=bore_hover, hoverinfo='text', showlegend=False))
+
+    # ---------------- Anüler akış geçidi ----------------
+    ann_x = [-body_len, 0, 0, -body_len, -body_len, None,
+             -body_len, 0, 0, -body_len, -body_len]
+    ann_y = [r_p, r_p, r_ann, r_ann, r_p, None,
+             -r_p, -r_p, -r_ann, -r_ann, -r_p]
+    ann_hover = (
+        '<b>Annular Flow Passage</b><br>'
+        + (f't (annular gap): {gap:.3f} mm<br>' if gap_is_real
+           else 't (annular gap): not reported by the solver (schematic)<br>')
+        + (f'Flow Area: {ann_area:.2f} mm2<br>' if not sema_var
+           else 'Flow Area: not computable - pintle diameter and/or gap not '
+                'reported by the solver<br>')
+        + 'Function: axial oxidizer sheet around the pintle')
+    fig.add_trace(go.Scatter(
+        x=ann_x, y=ann_y, mode='lines', fill='toself',
+        fillcolor='rgba(0, 229, 255, 0.16)',
+        line=dict(color='rgba(0, 229, 255, 0.45)', width=1),
+        name='Annular Passage', hoveron='fills+points',
+        text=ann_hover, hoverinfo='text', showlegend=False))
+
+    # ---------------- Pintle mili ----------------
+    pintle_x = [-body_len, tip_len - taper_len, tip_len, tip_len,
+                tip_len - taper_len, -body_len, -body_len]
+    pintle_y = [r_p, r_p, r_tip, -r_tip, -r_p, -r_p, r_p]
+    pintle_hover = (
+        '<b>Pintle Post</b><br>'
+        + (f'D_p (pintle tip): {pintle_diameter:.3f} mm<br>' if pintle_is_real
+           else 'D_p (pintle tip): not reported by the solver (schematic)<br>')
+        + 'Tip protrusion: drawing proportion (insertion depth is not '
+          'modelled)<br>'
+        + (f'Function: central post; {radial_fluid.lower()} leaves through '
+           f'the tip holes' if not delik_yok else
+           'Function: central post; no tip holes (annular element)'))
+    fig.add_trace(go.Scatter(
+        x=pintle_x, y=pintle_y, mode='lines', fill='toself',
+        fillcolor='rgba(255, 140, 51, 0.28)',
+        line=dict(color=PALETTE[1], width=2),
+        name='Pintle Post', hoveron='fills+points',
+        text=pintle_hover, hoverinfo='text', showlegend=False))
+
+    fig.add_trace(go.Scatter(
+        x=[-body_len - 8 * k, tip_len + 14 * k], y=[0, 0], mode='lines',
+        line=dict(color=STRUCT_DIM, width=1, dash='dashdot'),
+        name='Centerline', hoverinfo='skip', showlegend=False))
+
+    # ---------------- Akış okları (anülüs, +x) ----------------
+    arrow_len = 0.12 * body_len
+    for xa in (-0.85 * body_len, -0.55 * body_len, -0.25 * body_len):
+        for sgn in (1, -1):
+            fig.add_annotation(
+                x=xa + arrow_len, y=sgn * (r_p + gap / 2.0),
+                ax=xa, ay=sgn * (r_p + gap / 2.0),
+                xref='x', yref='y', axref='x', ayref='y',
+                showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                arrowcolor=PALETTE[0], opacity=0.85)
+
+    # ---------------- Uç delik sırası (tek çevresel sıra, x = L_s) --------
+    x_row = ls_x if ls_x is not None else 0.6 * tip_len
+    if not delik_yok:
+        for sgn in (1, -1):
+            fig.add_annotation(
+                x=x_row, y=sgn * (r_ann + 4.0 * k),
+                ax=x_row, ay=sgn * (0.55 * r_p),
+                xref='x', yref='y', axref='x', ayref='y',
+                showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                arrowcolor=PALETTE[1], opacity=0.9)
+        if n_radial is not None:
+            tur = 'tangential' if secim == 'tangential' else 'radial'
+            radial_tag = f'{radial_fluid}: {n_radial} {tur} tip holes'
+            if d_radial is not None:
+                radial_tag += f' x d {d_radial:.3f} mm'
+            radial_tag += (' (one row at L_s)' if ls_x is not None
+                           else ' (row position not reported)')
+            if secim == 'tangential':
+                radial_tag += (f'; angle {tan_aci:.1f} deg to the radius'
+                               if tan_aci is not None else
+                               '; angle not supplied')
+                radial_tag += ' - swirl not modelled'
+        else:
+            radial_tag = (f'{radial_fluid} tip holes: count not reported by '
+                          f'the solver')
+        fig.add_annotation(
+            x=x_row, y=-(r_out + 11.0 * k), text=radial_tag,
+            showarrow=False, xanchor='left', yanchor='top',
+            font=dict(size=10, color=PALETTE[1]))
+    else:
+        fig.add_annotation(
+            x=0.6 * tip_len, y=-(r_ann + 8.0 * k),
+            text='No tip holes: annular element (secondary holes = none)',
+            showarrow=False, xanchor='left', yanchor='top',
+            font=dict(size=10, color=PALETTE[1]))
+
+    # ---------------- Sprey konisi (çözücünün yarı açısı) ----------------
+    d_spr = 0.35 * olcek
+    if spray_half is not None:
+        th = np.radians(float(spray_half))
+        dx_spr, dy_spr = d_spr * np.cos(th), d_spr * np.sin(th)
+        spray_label = (f'Spray sheet: half angle {spray_half:.0f} deg '
+                       f'(2θ = {2 * spray_half:.0f} deg; Cheng 2017, '
+                       f'not validated for hybrid N2O)')
+    else:
+        dx_spr, dy_spr = d_spr * 0.707, d_spr * 0.707
+        spray_label = ('Spray sheet (cone angle not reported: no tip-hole '
+                       'jets)' if delik_yok else
+                       'Spray sheet (cone angle not reported by the solver)')
+    # Koni eksenel simetriktir: yalnız ÜST kol çizilir (alt kol, alt
+    # yarıdaki delik etiketinin üstünden geçiyordu — V301/E1 ekran ölçümü).
+    fig.add_annotation(
+        x=x_row + dx_spr, y=r_ann + dy_spr, ax=x_row, ay=r_ann,
+        xref='x', yref='y', axref='x', ayref='y',
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+        arrowcolor=PALETTE[6], opacity=0.8)
+    fig.add_annotation(
+        x=x_row + dx_spr + 2 * k, y=r_ann + dy_spr + 4 * k,
+        text=spray_label, showarrow=False,
+        font=dict(size=10, color=PALETTE[6]))
+
+    # ---------------- Boyut anotasyonları ----------------
+    x_dim = -body_len - 6 * k
+    if outer_is_real:
+        fig.add_annotation(
+            x=x_dim, y=r_out, ax=x_dim, ay=-r_out,
+            xref='x', yref='y', axref='x', ayref='y',
+            showarrow=True, arrowhead=2, arrowside='end+start',
+            arrowsize=1, arrowwidth=1.5, arrowcolor=STRUCT_DIM)
+    fig.add_annotation(
+        x=x_dim - 3 * k, y=0,
+        text=(f'body OD = {outer_diameter:.1f} mm' if outer_is_real
+              else ('body OD: not sized (not supplied)' if govde_yok
+                    else 'body OD: not reported (schematic)')),
+        showarrow=False, textangle=-90, font=dict(size=10, color=STRUCT_DIM))
+    fig.add_annotation(
+        x=-0.6 * body_len, y=-0.4 * r_p,
+        ax=-0.75 * body_len, ay=-(r_out + 10 * k),
+        xref='x', yref='y', axref='x', ayref='y',
+        text=(f'D_p = {pintle_diameter:.2f} mm' if pintle_is_real
+              else 'D_p: not reported (schematic)'),
+        showarrow=pintle_is_real, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+        arrowcolor=STRUCT_DIM, font=dict(size=10, color=STRUCT_INK))
+    fig.add_annotation(
+        x=-0.3 * body_len, y=r_p + gap / 2.0,
+        ax=-0.3 * body_len + 12 * k, ay=r_out + 10 * k,
+        xref='x', yref='y', axref='x', ayref='y',
+        text=(f't = {gap:.3f} mm' if gap_is_real
+              else 't: not reported (schematic)'),
+        showarrow=gap_is_real, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+        arrowcolor=STRUCT_DIM, font=dict(size=10, color=STRUCT_INK))
+    if ls_x is not None and not delik_yok:
+        y_ls = -(r_out + 4.0 * k)
+        fig.add_annotation(
+            x=ls_x, y=y_ls, ax=0, ay=y_ls,
+            xref='x', yref='y', axref='x', ayref='y',
+            showarrow=True, arrowhead=2, arrowside='end+start',
+            arrowsize=1, arrowwidth=1.5, arrowcolor=STRUCT_DIM)
+        fig.add_annotation(
+            x=ls_x / 2.0, y=y_ls - 2.5 * k, text=f'L_s = {ls_x:.2f} mm',
+            showarrow=False, yanchor='top',
+            font=dict(size=10, color=STRUCT_INK))
+
+    # ---------------- Özet bloğu ----------------
+    satirlar = ['<b>PINTLE INJECTOR - AXIAL CROSS-SECTION</b>']
+    parca = []
+    if pintle_is_real:
+        parca.append(f'D_p {pintle_diameter:.2f} mm')
+    if gap_is_real:
+        parca.append(f't {gap:.3f} mm')
+    if not sema_var:
+        parca.append(f'bore {bore:.2f} mm')
+    if outer_is_real:
+        parca.append(f'body OD {outer_diameter:.1f} mm'
+                     + (f' (wall {wall_mm:.2f} mm)' if wall_mm is not None
+                        else ''))
+    elif govde_yok:
+        parca.append('body OD: not sized')
+    if parca:
+        satirlar.append(' | '.join(parca))
+    eksik = [ad for ad, var in (('body OD', outer_is_real or govde_yok),
+                                ('D_p', pintle_is_real),
+                                ('t', gap_is_real)) if not var]
+    if eksik:
+        satirlar.append('Not reported by the solver: ' + ', '.join(eksik))
+    if not sema_var:
+        satirlar.append(f'Annulus Flow Area: {ann_area:.2f} mm2')
+    if delik_yok:
+        satirlar.append('Tip holes: none (annular element; TMR undefined)')
+    elif n_radial is not None:
+        row = f'Tip holes: {n_radial}'
+        if d_radial is not None:
+            row += f' x d {d_radial:.3f} mm'
+        if bf is not None:
+            row += f' | BF {bf:.3f}'
+        if f_rad is not None:
+            row += f' | radial flow share {f_rad * 100:.0f}%'
+        satirlar.append(row)
+    if tmr is not None and spray_half is not None:
+        satirlar.append(f'TMR {tmr:.2f} -> spray half-angle {spray_half:.0f} '
+                        f'deg (Cheng et al. 2017 Eq. 16; inference for '
+                        f'hybrid N2O)')
+    if ls_x is not None and not delik_yok:
+        _ls_dp = _g('ls_over_dp')
+        satirlar.append(f'Skip Distance L_s: {ls_x:.2f} mm'
+                        + (f' (L_s/D_p {_ls_dp:.2f})' if _ls_dp else ''))
+    # Özet ve not KÂĞIT koordinatında, çizim alanının ALTINDA durur: metin
+    # yüksekliği pikseldir, veri ölçeği küçük (mm altı) pintle'da veri
+    # koordinatındaki blok çizimin üstüne biniyordu (V301/E1 ekran ölçümü).
+    _alt_px = 62                        # eksen başlığının altı (piksel)
+    _satir_px = 16                      # 11 pt satır yüksekliği (piksel)
+    fig.add_annotation(
+        x=0.0, y=0.0, xref='paper', yref='paper', xanchor='left',
+        yanchor='top', yshift=-_alt_px, text='<br>'.join(satirlar),
+        showarrow=False, font=dict(size=11), align='left')
+    _not_kaydir = -(_alt_px + _satir_px * len(satirlar) + 8)
+    if sema_var:
+        fig.add_annotation(
+            x=0.0, y=0.0, xref='paper', yref='paper', xanchor='left',
+            yanchor='top', yshift=_not_kaydir, showarrow=False,
+            align='left',
+            text=('Body / pintle / annulus outlines are schematic: the '
+                  'solver did not report these dimensions, so the proportions '
+                  'are drawn for orientation only. Do not machine from this '
+                  'view.'),
+            font=dict(size=10, color=STRUCT_DIM))
+    elif govde_yok:
+        fig.add_annotation(
+            x=0.0, y=0.0, xref='paper', yref='paper', xanchor='left',
+            yanchor='top', yshift=_not_kaydir, showarrow=False,
+            align='left',
+            text=('Injector body not sized: no body outer diameter was '
+                  'supplied, so only the annulus bore D_p + 2t is drawn. Body '
+                  'length and tip protrusion are drawing proportions.'),
+            font=dict(size=10, color=STRUCT_DIM))
+
+    x_min = -body_len - 22 * k
+    x_max = x_row + dx_spr + 26 * k
+    y_lim = max(r_out, r_ann + dy_spr) + 28 * k
+    fig.update_layout(
+        title='Pintle Injector - Cross Section',
+        xaxis=dict(title='Axial Position (mm)', scaleanchor='y',
+                   scaleratio=1, range=[x_min, x_max], showgrid=True),
+        yaxis=dict(title='Radial Position (mm)', range=[-y_lim, y_lim],
+                   showgrid=True),
+        hovermode='closest', autosize=True,
+        height=640 + _satir_px * (len(satirlar) + 3),
+        margin=dict(b=_alt_px + 30 + _satir_px * (len(satirlar) + 3)))
+    return _fig_json(fig)
+
+
+def _concentric_cross_section_legacy(injector_data):
+    """Eş merkezli kesit — koaksiyel eleman (v2.6.27 çizimi, değişmedi).
+
+    V301/E1: hibrit pintle ``_pintle_tip_cross_section``a taşındı; bu gövde
+    yalnız koaksiyel tip için korunur (yanıtı bit-aynı kalsın diye).
     """
 
     geom = injector_data.get('pintle_geometry') or {}

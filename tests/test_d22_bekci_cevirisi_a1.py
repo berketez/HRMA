@@ -305,8 +305,13 @@ class TestP13B205RozetKilidi:
         assert not yasak, (
             'sözleşme bekçisi hâlâ hiçbir denetim koşmadan YEŞİL rozeti '
             'ŞART koşuyor: %s' % yasak)
-        assert 'ROZET_SINIF_METNI' in kaynak, (
-            'kilit kaldırıldı ama yerine sınıf ⟷ metin tutarlılığı konmamış')
+        # v3.0.1 K kulvarı: rozetin kendisi söküldü (her makinede yanlışlıkla
+        # "Offline"; kanıt docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/).
+        # Sınıf ⟷ metin sözlüğünün (ROZET_SINIF_METNI) halefi rozetin
+        # YOKLUĞUNU ve veri kaynağı satırında yasak iddiaları ölçer.
+        assert 'VERI_KAYNAGI_YASAK_IDDIALAR' in kaynak, (
+            'kilit kaldırıldı ama yerine veri kaynağı satırı sözleşmesi '
+            'konmamış')
 
     def test_borc_kumesi_yalniz_kuculuyor(self):
         """Yeni bir şablon önceden yeşil rozet kazanamaz (fail-closed).
@@ -329,16 +334,23 @@ class TestP13B205RozetKilidi:
             '(P17B2-07 kusuru geri gelmiş)' % sorted(yeni))
 
     def test_sinif_metin_tutarliligi_gercekten_kosuyor(self):
-        """Sözleşme bekçisinin yeni iddiası ürün üstünde ölçülür."""
+        """ÇEVRİLDİ (v3.0.1 K): ürün üstünde ölçülen iddia artık rozetin
+        YOKLUĞU ve yerindeki satırın kazanılmamış hüküm taşımamasıdır.
+
+        Eski hâli liquid.html'de en az bir rozet bulunmasını şart koşuyordu
+        (``assert rozetler``); rozet her makinede "Offline" yazdığı için
+        söküldü, şart kusuru kilitliyordu.
+        """
+        for bagil in ROZET_SABLONLARI_TARANAN:
+            yol = KOK / bagil
+            if not yol.exists():
+                continue
+            html = yol.read_text(encoding='utf-8')
+            assert not re.findall(r'<span class="database-status', html), bagil
         html = (KOK / 'hrma/templates/liquid.html').read_text(encoding='utf-8')
-        rozetler = re.findall(
-            r'<span class="database-status ([^"]*)"[^>]*>([^<]*)</span>', html)
-        assert rozetler, 'liquid.html rozet biçimi değişmiş'
-        for siniflar, metin in rozetler:
-            if 'status-connected' in siniflar:
-                assert 'Connected' in metin, (siniflar, metin)
-            elif 'status-unknown' in siniflar:
-                assert 'not checked' in metin, (siniflar, metin)
+        m = re.search(r'<div class="data-source-line"[^>]*>([^<]*)</div>', html)
+        assert m, 'liquid.html veri kaynağı satırı yok'
+        assert 'Connected' not in m.group(1) and 'Offline' not in m.group(1)
 
 
 # ===========================================================================

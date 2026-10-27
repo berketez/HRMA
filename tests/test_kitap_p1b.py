@@ -42,6 +42,16 @@ import re
 
 import pytest
 
+
+@pytest.fixture
+def cea_kapali(monkeypatch):
+    """V301/N-CEA-2: NASA CEA kapalı — katı motor katalog (tek basınçlı)
+    termokimyasına BEYANLA döner. Bu dosyadaki kayıt/katalog yolu bekçileri
+    öncüllerini (motor termokimyası = katalog kaydı) bu yolda korur; CEA
+    yolu tests/test_v301_n_cea2.py'de."""
+    from hrma.engines import cea_bridge
+    monkeypatch.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
+
 from hrma.constants import G_0, PSIA_PER_BAR, R_UNIVERSAL
 from hrma.data import propellants_db
 from hrma.data.propellants_db import PROPELLANTS, cstar_from_thermo
@@ -315,6 +325,7 @@ _KIYAS_YAPRAKLARI = (
 )
 
 
+@pytest.mark.usefixtures('cea_kapali')
 def test_B11_motor_tablosu_katalogdan_turer(monkeypatch):
     """D-1 kapandı (tek tanım): motorun 'apcp' termokimyası katalog kaydının
     ikinci kopyası değil, ondan okunan değerdir. Kayıt süreç içinde
@@ -362,6 +373,7 @@ def test_B11_apcp_ve_htpb_ap_al_ayni_sonucu_verir():
         CEA_DONMUS_GAMMA_S, abs=TOL_GAMMA)
 
 
+@pytest.mark.usefixtures('cea_kapali')
 def test_B11_bartz_zinciri_donmus_gamma_kullanir():
     """Bartz gaz özellikleri donmuş oda gamma'sından türer (kapalı biçimle
     bağımsız hesaplanan cp ve T_aw'a eşit). Boğaz istasyonunun yayımlanan
@@ -486,6 +498,7 @@ def test_B11_katalog_alani_her_kayitta_var_ve_denetlenir(monkeypatch):
 # 2. tur — karar §28-36 Ş-2 A (ÖNEMLİ): donmuş oda gamma'sı öteki "donmuş"
 # formül tüketicilerine (ısıl analiz cp'si, iki faz gaz-yalnız gamma'sı)
 # ---------------------------------------------------------------------------
+@pytest.mark.usefixtures('cea_kapali')
 def test_B11_S2A_isil_analiz_donmus_cp_ile_kahine_doner():
     """Tepkime entalpisi, ısı salım gücü ve termal verim kâhine döner.
 
@@ -521,6 +534,7 @@ _ETKIN_SAYI_ALANLARI = ('gamma_mixture', 'effective_molecular_weight',
                         'particle_specific_heat')
 
 
+@pytest.mark.usefixtures('cea_kapali')
 def test_B11_S2_2a_iki_faz_karisim_cifti_cift_sayilmaz():
     """ÇEVRİLDİ (eski: ``test_B11_S2A_iki_faz_gaz_yalniz_gamma_donmus``). Eski
     test CEA donmuş GAMMAs'ı modülün "gaz-yalnız" gamma'sı sayıyor ve karışım
@@ -666,6 +680,7 @@ def _df3_profil(govde):
     return sonuc, wall_profile_inputs_from_motor(sonuc), wp, i
 
 
+@pytest.mark.usefixtures('cea_kapali')
 def test_B11_DF3_eksenel_profil_bartz_gazini_motordan_alir():
     """Katı yanıt Bartz gaz çiftini ADIYLA ve kaynağıyla yayımlar; eksenel
     profil kurucusu onu okur. 2. tur denetimi: profil yayımlanan (genleşme)
@@ -877,9 +892,15 @@ def test_T4_taze_form_yolu_katalog_termokimyasini_cozer():
                                    headers=T4_BASLIK)
     assert yanit.status_code == 200, yanit.get_data(as_text=True)[:400]
     govde = yanit.get_json()
-    ref = propellants_db._APCP_REFERENCE
-    assert govde['chamber_temperature'] == ref['flame_temperature']
-    assert govde['gamma'] == ref['gamma']
+    # V301/N-CEA-2 (K1): taze form APCP'yi seçer; termokimya motorun Pc'sinde
+    # NASA CEA'dır (aynı kart). Eski literal yol (3200 K / 1,25) kapalı kalır.
+    from hrma.analysis.cea_karsilastirma import solid_cea_solution
+    assert govde['thermochemistry_source'] == 'nasa_cea_at_pc'
+    oda = solid_cea_solution('apcp', govde['chamber_pressure'],
+                             None)['chamber']
+    assert govde['chamber_temperature'] == oda['T_c_K']
+    assert govde['gamma'] == oda['gamma_s']
+    assert govde['chamber_temperature'] != 3200.0
 
 
 def _t4_node():

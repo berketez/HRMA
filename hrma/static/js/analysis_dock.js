@@ -1576,8 +1576,14 @@
     // ==================================================================
 
     //: Çözülmüş sayılmayan kaynak beyanları (bunlar geri beslenmez).
+    // V301/H-PANEL (H-termal DEVİR 2): hibrit kamara cidarı üç bölge
+    // modelinde ``hybrid_chamber_zone_protection`` kaynağı BEYANLI bir
+    // sıcaklıktır (yakıt bloğu altı kasa = başlangıç/ortam sıcaklığı,
+    // "DECLARED by the grain protection model, not computed"); çözülmüş bir
+    // cidar sıcaklığı değildir ve analiz paneline "çözüldü" diye tohumlanmaz.
     const WALL_TEMP_SOURCE_NOT_SOLVED = ['not_evaluated',
-                                         'chamber_temperature_estimate'];
+                                         'chamber_temperature_estimate',
+                                         'hybrid_chamber_zone_protection'];
 
     //: Motor tipine göre ÖLÇÜLMÜŞ cidar sıcaklığı yolları + kaynak beyanı.
     const WALL_TEMPERATURE_K_PATHS = {
@@ -1596,10 +1602,16 @@
             cold: 'structural_analysis.thermal_analysis.wall_temperature_outer_K',
             source: 'structural_analysis.thermal_analysis.wall_temperature_source',
         },
+        // L-B (v3.0.1, SV-05): sıvıda ``wall_temperature_hot`` toplu Bartz
+        // zincirinin DEĞERLENDİRİLDİĞİ cidardır — çoğu koşuda kullanıcının
+        // max_wall_temp HEDEFİ (kaynak "user input ..."). Ölçüldü: 2 mm
+        // cidarda panele 800 K tohumlanıyor, aynı yanıtın istasyon marşı
+        // 3094 K (erime) çözüyordu. Tohum artık yalnız ÇÖZÜLEN değerdir;
+        // çözüm yoksa kaynak null gelir ve alanlar boş kalır.
         liquid: {
-            hot: 'cooling_system.wall_temperature_hot',
-            cold: 'cooling_system.wall_temperature_cold',
-            source: 'cooling_system.wall_temperature_source',
+            hot: 'cooling_system.wall_temperature_solved_K',
+            cold: 'cooling_system.wall_temperature_solved_cold_K',
+            source: 'cooling_system.wall_temperature_solved_source',
         },
     };
 
@@ -1608,8 +1620,9 @@
         if (typeof source !== 'string' || source === '') return false;
         if (WALL_TEMP_SOURCE_NOT_SOLVED.indexOf(source) !== -1) return false;
         // Sıvı tarafı serbest metin kullanıyor; 'assumed ...' ile başlayan
-        // her beyan VARSAYIMDIR ('solved ...' ve 'user input ...' değildir).
-        return !/^assumed\b/i.test(source);
+        // her beyan VARSAYIMDIR. L-B (v3.0.1, SV-05): 'user input ...' de
+        // çözüm DEĞİLDİR — kullanıcının hedefidir; geri beslenmez.
+        return !/^(assumed|user input)\b/i.test(source);
     }
 
     // {hot, cold} (K) döner; beyan çözülmüş demiyorsa ya da ikisinden biri
@@ -1634,8 +1647,9 @@
         return 'ad_f_' + panelId + '_' + fieldId;
     }
 
-    // Alan tanımı: [id, etiket, varsayılan, adım, etiketAnahtarı?]
+    // Alan tanımı: [id, etiket, varsayılan, adım, etiketAnahtarı?, ipucuAnahtarı?]
     // 5. eleman verilirse etiket data-i18n taşır; dil değişince kendiliğinden çevrilir.
+    // 6. eleman (v3.0.1 N-girdi-1) alanın "?" ipucunun sözlük anahtarıdır.
     // Seçenek listesi öğeleri de [değer, etiket, etiketAnahtarı?] olabilir.
     // Alanın kaynak çipi kabı (E3) — içeriği applySuggestions doldurur.
     function fieldSourceSlotId(panelId, fieldId) {
@@ -1644,12 +1658,25 @@
 
     function fieldHtml(panelId, f) {
         const fid = f[0], label = f[1], defVal = f[2], step = f[3], labelKey = f[4];
+        // v3.0.1 N-girdi-1 (Berke 26 Eki: "Her bir inputun yanında açıklaması
+        // olmalı, istisnasız"). Alan tanımının 6. elemanı ipucu anahtarıdır;
+        // panel dosyasında LİTERAL yazılır (ölü-çeviri bekçileri anahtarı
+        // kaynakta arar). İşaretleme ortak bileşenden (field_help.js →
+        // HRMAHelp) gelir; metin `data-i18n` ile taşınır, sözlük sonradan
+        // yüklense de dil değişince de `I18N.apply` balonu çevirir. Bileşen
+        // yüklü değilse (node saplamalı testler) ipucu basılmaz — uydurma
+        // metin yok. Satır içi: fonksiyon gövdesi testlerde yalıtılıp koşar.
+        const helpKey = f[5];
+        const yardim = (helpKey && typeof window !== 'undefined' && window.HRMAHelp
+            && typeof window.HRMAHelp.html === 'function')
+            ? window.HRMAHelp.html(helpKey, T(helpKey, '')) : '';
         const domId = fieldDomId(panelId, fid);
         // Etiket ve kaynak çipi TEK satırda dursun diye küçük bir başlık
         // satırı: şablonlarda `.form-group label` display:block, çip
-        // sarmalayıcısız alt satıra düşerdi.
+        // sarmalayıcısız alt satıra düşerdi. İpucu ikonu etiketin hemen
+        // ardında, çipten önce durur.
         const lab = `<div class="ad-field-head"><label${i18nAttr(labelKey)}>${
-            T(labelKey, label)}</label><span class="ad-src-slot"
+            T(labelKey, label)}</label>${yardim}<span class="ad-src-slot"
             id="${fieldSourceSlotId(panelId, fid)}"></span></div>`;
         if (Array.isArray(step)) {
             // step bir seçenek listesi: [[value, label, labelKey?], ...] → <select>
@@ -1720,10 +1747,9 @@
         return `
         <div id="ad_sec_${spec.id}" style="border:1px solid var(--hd-line, rgba(0,229,255,0.14));
              border-radius:var(--hd-radius-sm, 8px); padding:12px 16px; margin:12px 0;">
-            <h3 style="margin:0 0 8px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
+            <h3 style="margin:0 0 8px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;"
+                data-endpoint="${spec.endpoint || ''}">
                 <span${i18nAttr(spec.titleKey)}>${T(spec.titleKey, spec.title)}</span>
-                <span style="font-family:var(--hd-mono); font-size:0.68rem;
-                      color:var(--hd-ink-faint, #6a8491);">${spec.endpoint || ''}</span>
             </h3>
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
                  gap:10px; margin:10px 0;">

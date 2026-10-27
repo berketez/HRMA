@@ -68,6 +68,8 @@ import tempfile
 
 import pytest
 
+from tests.support import form_defaults
+
 from tests.bagimlilik_kapisi import kurulu_mu
 
 
@@ -113,6 +115,11 @@ SIVI_GOVDE = {
     # 2,5 iniyordu ve kardeş alan onu "user input (safety factor)" diye
     # künyeliyordu — yani çizim kullanıcının girdisini geri okuyordu.
     'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (L-A SV-03); sayfanın
+    # gönderdiği şablon varsayılanı (tek kaynak, kopyalanmaz).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 #: Kullanıcının SF hedefi — çizimde AYRI alanda, ölçüm yerine geçmeden.

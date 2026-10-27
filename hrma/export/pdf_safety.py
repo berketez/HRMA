@@ -322,6 +322,20 @@ def build_pdf_safety(motor_data: Dict,
         'chamber_diameter': girdiler['chamber_diameter'],
         'wall_thickness': girdiler['wall_thickness'],
     }
+    # V301/K-C1 devri (KT-16): kasa boyu VARSA geçer — yoksa güvenlik
+    # modülü kasa kütlesini "ASSUMED L/D = 5" ile kuruyordu (ölçüldü:
+    # K-C1/guvenlik_once.json, üç motor tipinde de). Birim çapla AYNI
+    # merkezî bandlı kuraldan (resolve_length_m); bulunamazsa geçmez.
+    from hrma.export.motor_geometry import resolve_length_m
+    boy_m, boy_kaynak = resolve_length_m(md, 'chamber_length')
+    if boy_m is not None:
+        boy_kaynak = 'md:%s' % boy_kaynak
+    else:
+        boy_m, boy_kaynak = resolve_length_m(ar, 'chamber_length')
+        boy_kaynak = 'ar:%s' % boy_kaynak
+    if boy_m is not None:
+        analiz_motor_data['chamber_length'] = boy_m
+        kaynaklar['chamber_length'] = boy_kaynak
     # İsteğe bağlı ama VARSA geçen alanlar: uydurulmaz, yalnız taşınır.
     for alan in ('thrust', 'burn_time', 'chamber_temperature'):
         deger = _sonlu_pozitif(md.get(alan))

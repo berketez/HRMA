@@ -201,6 +201,15 @@ class TestP15B1_02PlakaKalinligi:
     thickness nor an L/D' diyor. İki modül artık aynı dili konuşuyor.
     """
 
+    #: V301/E2: L/D bant hükmünün metni "outside optimal range (3-5)" idi;
+    #: bandın kaynağı yok, "optimal" kelimesi kaldırıldı ve metin HRMA
+    #: buluşsal eşiği olduğunu söylüyor. Bekçi aynı hükmü YENİ metnin L/D'ye
+    #: özgü iki parçasıyla tanır (gevşetilmedi: hız bandının metni de
+    #: "HRMA heuristic" taşır, L/D önekiyle ayrılır).
+    @staticmethod
+    def _ld_bant_hukmu(w):
+        return ('L/D ratio (' in w and 'band (HRMA heuristic threshold' in w)
+
     @staticmethod
     def _inj(istemci, **ek):
         r = istemci.post('/calculate', json=dict(_HIB, **ek))
@@ -230,7 +239,7 @@ class TestP15B1_02PlakaKalinligi:
         assert any('NOT ISSUED' in w and 'L/D' in w for w in uyarilar), (
             f'L/D bandı hükmü kazanılmamış plakadan sessizce veriliyor: '
             f'{uyarilar}')
-        assert not any('outside optimal range' in w for w in uyarilar), (
+        assert not any(self._ld_bant_hukmu(w) for w in uyarilar), (
             f'kazanılmamış L/D üzerinden bant hükmü basılmış: {uyarilar}')
 
     def test_bant_hukmu_ANCAK_kazanilmis_plakadan_verilir(self, istemci):
@@ -243,6 +252,10 @@ class TestP15B1_02PlakaKalinligi:
         * plaka kalınlığı VERİLMEMİŞSE hüküm alıkonur ("NOT ISSUED"),
         * kullanıcı AYNI 3,0 mm'yi kendisi verirse hüküm basılır
           ("L/D ratio (2.0) outside optimal range (3-5)").
+
+        V301/E2: bant artık DEVRE planlayıcısına girer (delik planı
+        [1,5; 2,0] mm içinde kurulur: 4 × Ø1,83 mm, L/D 1,64 — yine bandın
+        dışında) ve metin "optimal" demez (``_ld_bant_hukmu``).
 
         Fark sayıda değil, sayının SAHİBİNDEDİR. Varsayılan çalışma
         noktasında (L/D 3,23) bant zaten içeride olduğu için kapı orada
@@ -258,11 +271,11 @@ class TestP15B1_02PlakaKalinligi:
 
         u_yok = kazanilmamis.get('warnings') or []
         u_var = kazanilmis.get('warnings') or []
-        assert not any('outside optimal range' in w for w in u_yok), (
+        assert not any(self._ld_bant_hukmu(w) for w in u_yok), (
             'kazanılmamış plakadan bant hükmü basıldı: '
             f'{[w for w in u_yok if "L/D" in w]}')
         assert any('NOT ISSUED' in w and 'L/D' in w for w in u_yok), u_yok
-        assert any('outside optimal range' in w for w in u_var), (
+        assert any(self._ld_bant_hukmu(w) for w in u_var), (
             'kullanıcı plakayı verdiği hâlde bant hükmü basılmadı — kapı '
             f'hükmü tamamen öldürmüş olur: {u_var}')
 
@@ -343,13 +356,19 @@ class TestP15B1_02PlakaKalinligi:
         # (docs/scofield/raw/OH/KITAP/p1a/kanit/tur2b/kahin_cea.json) +
         # önce/sonra (p1a rapor §12). Tolerans DEĞİŞMEDİ.
         #   L/D 1,4508095133895842 -> 1,4412796945529898
-        assert inj['L_D_ratio'] == pytest.approx(1.4412796945529898,
+        # v3.0.1 port kulvarı (20 Eki): grain dış çapı = son port (eski
+        # 1,5·D_son); kamara küçüldü -> gerçekleşen L* ↓ -> Isp ↓ -> ṁ ↑ ->
+        # delik çapı ↑ -> L/D = t/d ↓ (−%0,037). Ölçüldü (birleşik main):
+        #   L/D 1,4412796945529898 -> 1,4407513659900986
+        assert inj['L_D_ratio'] == pytest.approx(1.4407513659900986,
                                                  rel=1e-9)
         # Çapa TEK sayı değil: L/D = plaka / delik çapı özdeşliği de
         # kilitlenir, yoksa iki sayı sessizce ayrışabilir.
         # ÇAPA YENİLENDİ — kitap p1a B16: delik çapı 2,0678110891284276 ->
         # 2,08148356723394 mm (ṁ arttı; kâhin yukarıda).
-        assert inj['hole_diameter'] == pytest.approx(2.08148356723394,
+        # v3.0.1 port kulvarı (20 Eki): 2,08148356723394 -> 2,0822468545350783
+        # mm (+%0,037; L/D ile aynı oran, özdeşlik aşağıda kilitli).
+        assert inj['hole_diameter'] == pytest.approx(2.0822468545350783,
                                                      rel=1e-9)
         assert inj['L_D_ratio'] == pytest.approx(
             inj['plate_thickness'] / inj['hole_diameter'], rel=1e-12)

@@ -460,7 +460,15 @@ class TestP10B1_07XlsxEnjektorSayfasi:
         assert a.get('n_holes') == b.get('number_of_orifices'), (
             'iki blok farklı delik SAYISI veriyor — OH-ON-01 geri geldi: '
             f"injector={a.get('n_holes')} devre={b.get('number_of_orifices')}")
-        assert a.get('hole_diameter') == b.get('orifice_diameter_mm'), (
+        # v3.0.1 (21 Eki): çap eşitliği kayan nokta YUVARLAMASI düzeyinde
+        # sınanır. İmalat bloğu kanon planı ALAN olarak tüketir (mm² → m² →
+        # d = 2·√(A/(nπ))), devre bloğu çapı doğrudan yayımlar; v3.0.1 E2
+        # sonrası iki yol 1 ulp ayrışıyor (ölçüldü: 2,0822468545350783 ⟷
+        # ...787 mm, bağıl 2e-16) ve bekçi a367de3d2'de bu yüzden kırmızıydı.
+        # E2 birleşmesinin sözleşmesi "ekran = devre 1e-12"; bekçinin yakaladığı
+        # eski ayrışma %40 mertebesindeydi (32 × Ø0,887 ⟷ 3 × Ø2,068).
+        assert a.get('hole_diameter') == pytest.approx(
+            b.get('orifice_diameter_mm'), rel=1e-12), (
             'iki blok farklı delik ÇAPI veriyor — OH-ON-01 geri geldi: '
             f"injector={a.get('hole_diameter')} "
             f"devre={b.get('orifice_diameter_mm')}")

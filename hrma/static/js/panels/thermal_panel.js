@@ -698,15 +698,15 @@
         endpoint: '/analyze_thermal_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK'],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM'],
-            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
-            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.05, 'common.f.mdotTotal'],
-            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM'],
-            ['material', 'Wall Material', 'steel', MATERIALS, 'common.f.wallMaterial'],
-            ['cooling_type', 'Cooling Type', 'natural', COOLING, 'common.f.coolingType'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.thermal.help.chamber_pressure'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK', 'panel.thermal.help.chamber_temperature'],
+            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.thermal.help.chamber_diameter'],
+            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM', 'panel.thermal.help.chamber_length'],
+            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.thermal.help.burn_time'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
+            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.05, 'common.f.mdotTotal', 'panel.thermal.help.mdot_total'],
+            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM', 'panel.thermal.help.wall_thickness'],
+            ['material', 'Wall Material', 'steel', MATERIALS, 'common.f.wallMaterial', 'panel.thermal.help.material'],
+            ['cooling_type', 'Cooling Type', 'natural', COOLING, 'common.f.coolingType', 'panel.thermal.help.cooling_type'],
         ],
         fromResults: function (r) {
             const m = U.motorDict(r);

@@ -204,7 +204,13 @@ def test_hybrid_example_calculates_sensibly(client):
     # N2O/HTPB fiziksel bantları (Sutton & Biblarz; hibrit literatürü):
     # deniz seviyesi Isp ~200-260 s, c* ~1500-1700 m/s, Tc ~3100-3500 K
     assert 190 <= motor['isp'] <= 300, motor['isp']
-    assert 1450 <= motor['c_star'] <= 1800, motor['c_star']
+    # V301/H-PANEL (NK-15): manşet c* artık TESLİM c*'tır (η_c* · kuramsal;
+    # N2O/HTPB kaynaklı varsayılan 0,89). Literatür c* bandı KURAMSAL denge
+    # c*'ına aittir; teslim değeri η ile ondan türer.
+    verim = motor['c_star_efficiency']
+    assert 1450 <= verim['c_star_theoretical_m_s'] <= 1800, verim
+    assert motor['c_star'] == pytest.approx(
+        verim['eta_c_star'] * verim['c_star_theoretical_m_s'], rel=1e-12)
     assert 3000 <= motor['chamber_temperature'] <= 3700, \
         motor['chamber_temperature']
 

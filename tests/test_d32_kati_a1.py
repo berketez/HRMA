@@ -335,10 +335,17 @@ class TestCVarsayilanDegismedi:
         # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 248,579123105323 /
         # 272,1571436655543 APCP kaydının geri çözülmüş dörtlüsündendi;
         # ölçülen yeni taban CEA denge dörtlüsüyle (main a6c7e755 → dal).
+        # V301/T-ÇAPA-A: N-CEA-2 (Berke "hepsi, lüle dahil") katı
+        # termokimyayı ve lüleyi motorun Pc'sinde NASA CEA'dan alıyor
+        # (``thermochemistry_source`` nasa_cea_at_pc). Yeniden ölçüldü:
+        # 251,9975279966961 -> 250,8498930866734 (deniz), 278,47639678923076
+        # -> 277,96092362420086 (vakum). CEA kapalı aynı yük eski iki sayıyı
+        # BİT-AYNI verir (kayma yalnız N-CEA-2'den; çekirdek 30 mm 50 bar'da
+        # geçerli, girdi değişmedi).
         assert bos_yol['isp_sea_level'] == pytest.approx(
-            251.9975279966961, rel=1e-12)
+            250.8498930866734, rel=1e-12)
         assert bos_yol['isp_vacuum'] == pytest.approx(
-            278.47639678923076, rel=1e-12)
+            277.96092362420086, rel=1e-12)
 
     def test_kayip_en_fazla_BIR_KEZ_uygulanir(self, istemci):
         """Kullanıcı çarpanı verildiğinde toplam nozul verimi TAM olarak
@@ -362,11 +369,16 @@ class TestCVarsayilanDegismedi:
         aday = _kos(istemci, two_phase_loss=round(aday_eta, 6))
         # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 243,6236 / 248,5791 /
         # 236,7113 geri çözülmüş APCP dörtlüsündendi; ölçülen yeni taban.
-        assert kul['isp_sea_level'] == pytest.approx(246.9758469477623,
+        # V301/T-ÇAPA-A: N-CEA-2 sonrası yeniden ölçüldü (gerekçe üstteki
+        # düğümde): 246,9758469477623 -> 245,85152033355664;
+        # 251,9975279966961 -> 250,8498930866734; 239,78954243177694 ->
+        # 238,68178089908514. Karar tablosu (once.json Z2a/Z2b/Z2c) sayıları
+        # bu yüzden BAYAT — T-ÇAPA-A RAPOR'da ana modele not.
+        assert kul['isp_sea_level'] == pytest.approx(245.85152033355664,
                                                      rel=1e-9)
-        assert bos['isp_sea_level'] == pytest.approx(251.9975279966961,
+        assert bos['isp_sea_level'] == pytest.approx(250.8498930866734,
                                                      rel=1e-9)
-        assert aday['isp_sea_level'] == pytest.approx(239.78954243177694,
+        assert aday['isp_sea_level'] == pytest.approx(238.68178089908514,
                                                       rel=1e-9)
         # Aday model, boş yola göre yakıt kütlesini ARTIRIR (muhafazakâr).
         assert aday['propellant_mass'] > bos['propellant_mass']

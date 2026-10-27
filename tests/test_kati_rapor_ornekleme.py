@@ -48,9 +48,17 @@ import hrma.engines.solid_rocket_engine as solid_mod
 from hrma.engines.solid_rocket_engine import SolidRocketEngine
 from hrma.utils.numeric_compat import trapezoid
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 #: Bütün ölçümlerin alındığı referans geometri (dosya başındaki tablo).
 TABAN = dict(propellant_type='apcp', chamber_diameter=100.0,
-             grain_length=500.0, core_diameter=30.0, chamber_pressure=40)
+             grain_length=500.0, core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
 
 #: Deponun desteklediği grain tipleri (motorun kendi hata metninden).
 GRAIN_TIPLERI = ('bates', 'star', 'wagon_wheel', 'finocyl', 'slotted',
@@ -539,7 +547,7 @@ def test_uc_katmani_ile_ayni_cevap_veriliyor():
         resp = c.post('/calculate_solid', headers=shake.HEADERS, json={
             'chamber_pressure': 40, 'propellant_type': 'apcp',
             'chamber_diameter': 100, 'grain_length': 500,
-            'core_diameter': 30})
+            'core_diameter': _CEKIRDEK_MM})
     assert resp.status_code == 200, resp.get_data(as_text=True)[:300]
     ps = resp.get_json()['safety_analysis']['pressure_safety']
     assert ps['vessel_status'] == 'NOT_EVALUATED'

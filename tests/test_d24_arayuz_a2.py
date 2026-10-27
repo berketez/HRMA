@@ -251,36 +251,50 @@ class TestP4B327SahaListesi:
 # =====================================================================
 class TestOHD2107VeritabaniRozeti:
 
+    # ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1). OH-D21-07 rozet
+    # denetimi patlayınca "Offline" denmemesini ölçüyordu. ÖLÇÜLDÜ
+    # (docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/gorsel_once.json): denetim
+    # PATLAMADAN da rozet her makinede "Offline" diyordu (CEA kolu DAİMA
+    # 'local', NIST ayrıştırıcısı HİÇ eşleşmiyor) — yani "kazanılmış hüküm"
+    # dalı da yanlıştı. Rozet ve yoklama söküldü. OH-D21-07'nin kazanımı
+    # (bilinemeyen durum için hüküm uydurulmaz) veri kaynağı satırında
+    # ölçülür: yükleme başarısızsa satır kaynak İDDİA ETMEZ.
     SAYFALAR = ('liquid.html', 'solid.html', 'advanced.html')
 
     @pytest.mark.parametrize('sayfa', SAYFALAR)
     def test_acilis_rozeti_denetlenmedi_diyor(self, sayfa):
         html = oku(TPL, sayfa)
-        m = re.search(r'class="database-status\s+(status-\w+)\s+cea-status', html)
+        assert not re.search(r'class="[^"]*\b(?:database-status|cea-status|nist-status)\b', html), sayfa
+        m = re.search(r'<div class="data-source-line"[^>]*>([^<]*)</div>',
+                      html)
         assert m, sayfa
-        assert m.group(1) == 'status-unknown', (sayfa, m.group(1))
+        assert 'Offline' not in m.group(1) and 'Connected' not in m.group(1)
 
     @pytest.mark.parametrize('sayfa', SAYFALAR)
     def test_hata_yolunda_kapali_beyani_verilmiyor(self, sayfa):
-        """``catch`` dalı yalnız DENETİMİN kendisi patladığında çalışır."""
+        """Kaynak yüklenemezse satır 'yüklenemedi, kaynak bildirilmiyor'
+        der; kapalı/çevrimdışı hükmü vermez."""
         html = oku(TPL, sayfa)
-        i = html.index('async function checkDatabaseStatus')
-        # ÖH D24/a3 — SABİT PENCERE KIRILGANDI. 3.000 karakterlik pencere,
-        # `try` gövdesi büyüyünce (P17B3-05 künye onarımı) `} catch (`
-        # bloğunu pencerenin DIŞINDA bırakıyordu ve bekçi kusuru değil
-        # kendi penceresini ölçüyordu. Pencere yerine ARAMA kullanılır.
-        j = html.index('} catch (', i)
-        son = html.index('\n        }', j)
-        yakala = html[j:son]
-        assert 'status-disconnected' not in yakala, (sayfa, yakala)
-        assert 'status-unknown' in yakala, (sayfa, yakala)
-        assert 'check_failed' in yakala or 'CheckFailed' in yakala, sayfa
+        assert "fetch('/api/database-status')" not in html, sayfa
+        if sayfa == 'advanced.html':
+            i = html.index('function setOxidizerSourceFailed()')
+            assert "durum: 'failed'" in html[i:i + 300]
+            m = re.search(r"i18nText\('adv\.ds\.oxidizerFailed',\s*'([^']*)'",
+                          html)
+            assert m, 'başarısızlık metni yok'
+            assert 'Offline' not in m.group(1)
+            assert 'no source is stated' in m.group(1)
 
     @pytest.mark.parametrize('sayfa', SAYFALAR)
     def test_ucun_kendi_hukmu_hala_kapali_diyebiliyor(self, sayfa):
-        """Uç 'connected değil' derse 'Offline' KAZANILMIŞ hükümdür."""
+        """Aşırı kapanma ikizi: satır gerçek bir kaynağı söyleyebilmeli."""
         html = oku(TPL, sayfa)
-        assert re.search(r"(ceaOffline|nasa_cea_offline)", html), sayfa
+        beklenen = {
+            'advanced.html': r"adv\.ds\.oxidizerReference",
+            'liquid.html': r"liq\.js\.ds_combustion_cea",
+            'solid.html': r"solid\.ui\.data_source_catalogue",
+        }[sayfa]
+        assert re.search(beklenen, html), sayfa
 
 
 # =====================================================================

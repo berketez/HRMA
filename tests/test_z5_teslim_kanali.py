@@ -70,6 +70,12 @@ Z5_SIVI_INCE_CIDAR = {
     'chamber_wall_thickness': 1,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
+    # v3.0.1 (26 Eki, L-A SV-03): basınç beslemeli çevrimde besleme basıncı
+    # verilmezse uç 422 pressure_fed_feed_pressure_not_supplied döner (tank
+    # gereksinimi tek tanım: Pc + ΔP_enj + ceket + hat). Bu gövdenin konusu
+    # ince cidar uyarısının taşınması; besleme gereksinimi (ölçüldü: yakıt
+    # 126,03 bar) karşılanacak bir değer verilir.
+    'feed_pressure': 140,
 }
 
 Z5_CIDAR_UYARI_KODU = 'warn.liquid.wall_thickness_below_required'
@@ -128,6 +134,7 @@ function say(dom) {
         oge: (dom.match(/class="warning-item /g) || []).length,
         kritik_sinif: (dom.match(/warning-item warning-critical/g) || []).length,
         amber_sinif: (dom.match(/warning-item warning-regular/g) || []).length,
+        bilgi_sinif: (dom.match(/warning-item warning-info/g) || []).length,
         kritik_rozet: (dom.match(/>CRITICAL</g) || []).length,
         amber_rozet: (dom.match(/>WARNING</g) || []).length,
     };
@@ -157,6 +164,9 @@ const kanal = sandbox.collectResultWarnings(R);
 OUT.kaynak = {
     kanal_toplam: kanal.length,
     kanal_kritik: kanal.filter(sandbox.warnIsCritical).length,
+    // v3.0.1 (V301/H3): 'info' önemli kayıt (doymuş N2O girişi) amber DEĞİL,
+    // kendi sınıfıyla (warning-info) basılır; beklenti ayrı sayılır.
+    kanal_bilgi: kanal.filter(sandbox.warnIsInfo).length,
     validation_kritik: ((R.validation || {}).critical_warnings || []).length,
     validation_normal: ((R.validation || {}).regular_warnings || []).length,
     oneri: (sf.recommendations || []).length,
@@ -261,7 +271,16 @@ def client():
 
 @pytest.fixture(scope='module')
 def hibrit(client):
-    r = client.post('/calculate', json=Z5_HIBRIT_ISTEK)
+    # v3.0.1 (V301/H-termal): korunan yolda (yakıt bloğu + HRMA'nın
+    # boyutlandırdığı astar) bu hibritin ne kritik termal kaydı ne de UNSAFE
+    # yapısal hükmü kalır — ikisi de çıplak cidarı ≈ adyabatik sıcaklıkta
+    # değerlendiren model kusurundan doğuyordu. Bu dosyanın konusu TESLİM
+    # KANALIDIR (hüküm üretildiyse ekrana iniyor mu); hükmü üreten senaryo
+    # artık ürünün fail-closed termal yoludur (astar boyutlandırması
+    # koşmadı: kritik hüküm aynen kalır), ``tests.support.hibrit_termal``.
+    from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
+    with astar_boyutlandirmasi_kosmaz():
+        r = client.post('/calculate', json=Z5_HIBRIT_ISTEK)
     assert r.status_code == 200, r.get_data(as_text=True)[:400]
     return r.get_json()
 
@@ -368,10 +387,15 @@ class TestA2KritikUyariAyrimi:
             + dom['kaynak']['validation_kritik'] \
             + dom['kaynak']['validation_normal']
         amber = toplam - (dom['kaynak']['kanal_kritik']
-                          + dom['kaynak']['validation_kritik'])
+                          + dom['kaynak']['validation_kritik']
+                          + dom['kaynak']['kanal_bilgi'])
         assert dom['uyari']['amber_sinif'] == amber, (
             'amber öge sayısı beklenenden farklı: %d != %d'
             % (dom['uyari']['amber_sinif'], amber))
+        # v3.0.1 (V301/H3): BİLGİ kayıtları amber'a da kırmızıya da boyanmaz.
+        assert dom['uyari']['bilgi_sinif'] == dom['kaynak']['kanal_bilgi'], (
+            'bilgi öge sayısı kaynaktaki info kayıt sayısını tutmuyor: %d != %d'
+            % (dom['uyari']['bilgi_sinif'], dom['kaynak']['kanal_bilgi']))
 
     def test_durum_satiri_kritik_kayitla_kirmiziya_doner(self, hibrit):
         """Kaynak sözleşmesi: durum satırının sınıfı kanaldaki kritiği görür."""

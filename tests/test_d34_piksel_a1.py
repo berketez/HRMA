@@ -37,6 +37,13 @@ def test_ohp01_itki_zaman_grafigi_acik_yukseklik_beyan_eder():
 
 def test_ohp01_gosterge_yatay_ve_cizim_alaninin_altinda():
     blok = _thrust_layout_blogu()
+    # v3.0.1 (V301/N-grafik G3): üç iz ayrı alt grafiklerde, her biri
+    # kendi eksen başlığıyla adlı; lejant kaldırıldı (dikey lejant ⟷ sağ
+    # eksen çakışması kökten yok). Lejant geri gelirse eski sözleşme geçerli.
+    if re.search(r'showlegend:\s*false', blok):
+        assert 'yaxis3' not in blok and "overlaying: 'y'" not in blok, (
+            'lejant yok ama izler yine aynı çizim alanında (OH-P-01)')
+        return
     assert re.search(r"legend:\s*\{[^}]*orientation:\s*'h'", blok), 'dikey gösterge sağ kenardaki üçüncü y eksenine biniyor (OH-P-01)'
     m = re.search(r"legend:\s*\{[^}]*\by:\s*(-?[\d.]+)", blok)
     assert m and float(m.group(1)) < 0, 'gösterge çizim alanının altında (y<0) olmalı'

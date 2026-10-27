@@ -43,6 +43,8 @@ import subprocess
 
 import pytest
 
+from tests.support import form_defaults
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 LIQUID_HTML = REPO_ROOT / 'hrma' / 'templates' / 'liquid.html'
 
@@ -72,6 +74,12 @@ LIQUID_FORM = {
     'characteristic_length': 1.2, 'chamber_wall_thickness': 5,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` gönderilmezse uç
+    # 422 ``pressure_fed_feed_pressure_not_supplied`` döner (L-A SV-03).
+    # Sayfa bu alanı her hesapta gönderir; değer şablonun KENDİ varsayılanı
+    # (tek kaynak, kopyalanmaz). Ölçüldü: 200.
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 

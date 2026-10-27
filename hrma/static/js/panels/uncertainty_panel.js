@@ -135,6 +135,13 @@
     // ------------------------------------------------------------------
     // Özel kontrol satırı (level + seed + Run)
     // ------------------------------------------------------------------
+    // v3.0.1 N-girdi-1: girdinin "?" ipucu — ortak bileşen (field_help.js →
+    // HRMAHelp); anahtar çağrıda LİTERAL. Bileşen yoksa basılmaz.
+    function helpHtml(key) {
+        if (!window.HRMAHelp || typeof window.HRMAHelp.html !== 'function') return '';
+        return window.HRMAHelp.html(key, T(key, ''));
+    }
+
     function customFormHtml() {
         const opts = LEVELS.map(function (l) {
             return '<option value="' + l[0] + '" data-i18n="' + l[2] + '">'
@@ -143,13 +150,15 @@
         return `<div id="uq_custom" style="margin:10px 0;">
             <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
                 <div class="form-group" style="min-width:220px;">
-                    <label data-i18n="panel.uncertainty.fLevel">${
-                        T('panel.uncertainty.fLevel', 'Analysis Level')}</label>
+                    <div class="ad-field-head"><label data-i18n="panel.uncertainty.fLevel">${
+                        T('panel.uncertainty.fLevel', 'Analysis Level')}</label>${
+                        helpHtml('panel.uncertainty.help.level')}</div>
                     <select id="uq_level">${opts}</select>
                 </div>
                 <div class="form-group" style="width:110px;">
-                    <label data-i18n="panel.uncertainty.fSeed">${
-                        T('panel.uncertainty.fSeed', 'Seed')}</label>
+                    <div class="ad-field-head"><label data-i18n="panel.uncertainty.fSeed">${
+                        T('panel.uncertainty.fSeed', 'Seed')}</label>${
+                        helpHtml('panel.uncertainty.help.seed')}</div>
                     <input type="number" id="uq_seed" value="42" step="1">
                 </div>
                 <div class="form-group">

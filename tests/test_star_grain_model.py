@@ -113,10 +113,17 @@ class TestMassConservationAllGrains:
 
     def test_isp_physical_band_for_apcp(self):
         """Tüm grain tiplerinde APCP deniz seviyesi Isp fiziksel bantta."""
+        # V301/T-ÇAPA-A: tam çözüm (calculate_performance) K-A port
+        # kapısından geçer; 30 mm çekirdekte bates ve wagon_wheel portu
+        # boğuluyor (A_p/A_t 0,950 / 0,747 -> 422). Çekirdek tek tanımdan
+        # (48 mm: bates 2,218, wagon_wheel 1,915). Konu Isp bandıdır.
+        from hrma.engines.solid_rocket_engine import (
+            SOLID_DEFAULT_GEOMETRY_MM)
         for gt in ['bates', 'star', 'wagon_wheel', 'end_burner']:
             r = SolidRocketEngine(
                 grain_type=gt, propellant_type='apcp',
-                chamber_diameter=100, grain_length=500, core_diameter=30,
+                chamber_diameter=100, grain_length=500,
+                core_diameter=SOLID_DEFAULT_GEOMETRY_MM['core_diameter'],
                 chamber_pressure=40).calculate_performance()
             assert 200 < r['specific_impulse'] < 280, \
                 f"{gt}: Isp={r['specific_impulse']}"

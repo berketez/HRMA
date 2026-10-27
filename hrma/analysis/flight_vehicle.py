@@ -126,6 +126,34 @@ def _mm_to_m(value: Any) -> Optional[float]:
     return input_guard.mm_to_m_read(value)[0]
 
 
+def _envelope_od_m(od_m: Optional[float], od_kaynak: str,
+                   kd: Dict) -> Tuple[Optional[float], str]:
+    """Motorun dış ZARFI [m]: kasa/kamara dış çapı ile lüle çıkış çapının büyüğü.
+
+    v3.0.1 (26 Eki 2026, son kullanıcı testi NK-47): fırlatma sahası gövde
+    çapının alt sınırını ``engine_od_m``den kuruyor (launch_site.html
+    ``applyVehicle``). Sıvıda bu alan iç kamara çapıydı (örnek 25 kN
+    LOX/RP-1: 109,4 mm) ve 189,6 mm'lik lüle çıkışı hesaba girmiyordu; 0,15 m
+    gövdeli bir araç bu motorla 231 km apojeye "uçuyordu". Lüle çıkışı
+    motorun dış zarfının parçasıdır: gövde ondan küçük olamaz. Çıkış çapı
+    yanıtın ``design_summary.key_dimensions`` alanından (mm, adıyla) okunur;
+    yayımlanmamışsa UYDURULMAZ, eski değer ve kaynağı aynen kalır.
+    """
+    cikis_mm = _num(kd.get('nozzle_exit_mm'))
+    alan = 'design_summary.key_dimensions.nozzle_exit_mm'
+    if cikis_mm is None:
+        cikis_mm = _num(kd.get('nozzle_exit_diameter_mm'))
+        alan = 'design_summary.key_dimensions.nozzle_exit_diameter_mm'
+    if cikis_mm is None or cikis_mm <= 0.0:
+        return od_m, od_kaynak
+    cikis_m = cikis_mm / 1000.0
+    if od_m is None or cikis_m > od_m:
+        return cikis_m, (f'nozzle exit diameter ({alan}, mm) — larger than '
+                         f'the case/chamber diameter ({od_kaynak}); the body '
+                         'must enclose the nozzle exit')
+    return od_m, od_kaynak
+
+
 def _length_m(node: Any, key: str) -> Tuple[Optional[float], str]:
     """Uzunluğu ÜRETİCİNİN BEYANINDAN metreye çöz (P15B2-03).
 
@@ -280,7 +308,7 @@ def _normalize_hybrid(results: Dict) -> Dict[str, Any]:
     prop = _num(eng.get('propellant_mass_total'))
     transient = eng.get('transient') if isinstance(eng.get('transient'), dict) else {}
     curve = _curve(transient.get('time'), transient.get('thrust'))
-    od_m, od_kaynak = _hybrid_outer_diameter_m(eng)
+    od_m, od_kaynak = _envelope_od_m(*_hybrid_outer_diameter_m(eng), kd)
 
     return {
         'thrust_curve': curve,
@@ -323,6 +351,7 @@ def _normalize_solid(results: Dict) -> Dict[str, Any]:
         od_kaynak = 'cad_design.case_design.outer_diameter (mm, declared by name)'
     else:
         od_m, od_kaynak = _length_m(results, 'chamber_diameter')
+    od_m, od_kaynak = _envelope_od_m(od_m, od_kaynak, kd)
 
     return {
         'thrust_curve': _curve(tc.get('time'), tc.get('thrust')),
@@ -453,7 +482,8 @@ def _normalize_liquid(results: Dict) -> Dict[str, Any]:
     if inert is None:
         inert = _num(_get(results, 'feed_system', 'total_mass'))
     inert, inert_note = _liquid_inert_mass(results, inert)
-    od_m, od_kaynak = _length_m(results, 'chamber_diameter')
+    od_m, od_kaynak = _envelope_od_m(
+        *_length_m(results, 'chamber_diameter'), kd)
 
     return {
         # Kararlı sonuç itki eğrisi taşımaz (transient sıvıda modellenmiyor).

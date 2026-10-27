@@ -272,8 +272,14 @@ RAW_ENGINE_KEYS = ('advanced_performance', 'altitude_performance',
 
 SOLID_PROJECT_FIELDS = {
     'grain_type': 'bates', 'propellant_type': 'apcp',
+    # v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm (Ø100, boy 500 mm @ 40 bar,
+    # a = 0,005 / n = 0,35) port boğulan motordu; K-A kapısından beri 422
+    # ``port_smaller_than_throat``. Varsayılan çekirdek (48 mm) bu yanma hızı
+    # katsayılarıyla yine boğuluyor (A_p/A_t 0,958, ölçüldü). Konu port
+    # değil: açık geçerli port — çekirdek 70 mm, ölçülen boğaz 50,72 mm,
+    # A_p/A_t 1,90.
     'chamber_diameter': 100, 'grain_length': 500,
-    'core_diameter': 30, 'chamber_pressure': 40,
+    'core_diameter': 70, 'chamber_pressure': 40,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
 }
 

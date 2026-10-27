@@ -33,7 +33,10 @@ import subprocess
 
 import pytest
 
+from hrma.export.openrocket_integration import ENG_HEADER_DECIMALS
+
 from hrma.app import app
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
 from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
 from hrma.engines.liquid_rocket_engine import BURN_TIME_DEFAULT_S
 from hrma.export.openrocket_integration import OpenRocketExporter
@@ -74,10 +77,12 @@ def solid_results():
 # varsayılandan mı geldiğini ayırt edemiyordu. Fixture'ın SINADIĞI sayılar
 # değişmesin diye aynı değerler burada AÇIKÇA yazıldı — testin motoru artık
 # görünür.
+# v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+# (A_p/A_t 0,947); K-A kapısından beri 422 ``port_smaller_than_throat``.
+# Bu dosyanın konusu birim sözleşmesi: geometri tek tanım
+# ``SOLID_DEFAULT_GEOMETRY_MM``den (hazne Ø100, boy 500 aynı; kopyalanmaz).
 SOLID_FIXTURE_GIRDI = {
-    'chamber_diameter': 100,
-    'grain_length': 500,
-    'core_diameter': 30,
+    **SOLID_DEFAULT_GEOMETRY_MM,
     'chamber_pressure': 40,
     'propellant_type': 'apcp',
 }
@@ -230,7 +235,13 @@ class TestEngHeaderIsCaseDiameter:
         """Katı motorda kasa dış çapı CAD kasa tasarımından gelir."""
         expected_mm = solid_results['cad_design']['case_design']['outer_diameter']
         fields = _motor_line(_eng_for(solid_results, 'T_solid'))
-        assert float(fields[1]) == pytest.approx(expected_mm, rel=1e-6)
+        # v3.0.1 T-ÇAPA-B: RASP başlığı çapı ENG_HEADER_DECIMALS['diameter_mm']
+        # ondalıkla YAZAR (tek tanım). Eski motorun kasa çapı o hassasiyette
+        # tam temsil ediliyordu; geçerli porta taşınan motorda 108,992 mm →
+        # dosyada 109,0. Kâhin: kasa çapının dosyanın beyanlı hassasiyetine
+        # yuvarlanmış hâli (bire bir; tolerans gevşetilmedi).
+        assert float(fields[1]) == pytest.approx(
+            round(expected_mm, ENG_HEADER_DECIMALS['diameter_mm']), rel=1e-9)
 
     def test_case_diameter_exceeds_chamber_bore(self, hybrid_results):
         """Kasa dış çapı = iç çap + 2 x cidar kalınlığı."""

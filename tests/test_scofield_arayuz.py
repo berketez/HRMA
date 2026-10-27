@@ -402,6 +402,22 @@ def test_beyani_cozulmus_demeyen_cidar_sicakligi_geri_beslenmez(
         assert isinstance(kaynak, str) and kaynak.lower().startswith('assumed'), (
             'sıvı örnek motorun cidar sıcaklığı artık VARSAYIM değil '
             f'({kaynak!r}) — bu bekçinin dayanağı değişmiş, ölçüm yenilenmeli')
+        # L-B (v3.0.1, SV-05): panel artık toplu zincirin VARSAYIM cidarını
+        # (wall_temperature_hot/cold, 800/350 K) değil, ÇÖZÜCÜNÜN ÇÖZDÜĞÜ
+        # değeri (cooling_system.wall_temperature_solved_*) taşır. Örnek
+        # motorda RP-1 istasyon marşı koşuyor (ölçüldü: 2876,6 / 969,7 K);
+        # çözüm varsa panel TAM o sayıları önermeli, VARSAYIMI asla.
+        cs = m.get('cooling_system') or {}
+        sug = panel_out[motor_type]['panels']['structural']['suggestions']
+        if cs.get('wall_temperature_solved_K') is not None:
+            assert sug.get('wall_temperature_hot') == pytest.approx(
+                cs['wall_temperature_solved_K'], rel=1e-12)
+            assert sug.get('wall_temperature_cold') == pytest.approx(
+                cs['wall_temperature_solved_cold_K'], rel=1e-12)
+            assert sug.get('wall_temperature_hot') != pytest.approx(
+                cs['wall_temperature_hot'], rel=1e-6), (
+                'panel yine toplu zincirin varsayım cidarını öneriyor')
+            return
     else:
         th = (m.get('structural_analysis') or {}).get('thermal_analysis')
         assert not isinstance(th, dict) or not th.get('wall_temperature_source'), (

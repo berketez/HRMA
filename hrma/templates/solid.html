@@ -236,22 +236,26 @@
         }
         .override-banner button:hover { background: rgba(255, 140, 51, 0.18); }
 
-        /* Veritabanı rozetleri (advanced.html deseni) */
-        .database-status {
-            font-size: 11px;
-            padding: 5px 10px;
+        /* v3.0.1 K kulvarı — "NASA CEA / NIST WebBook" bağlantı rozetleri
+           söküldü (her makinede yanlışlıkla "Offline" diyordu ve hiçbiri bu
+           sayfanın kullandığı bir sayının kaynağı değildi). Yerinde veri
+           kaynağı satırı durur (advanced.html ile aynı desen). */
+        .data-source-line {
+            font-size: 12px;
+            line-height: 1.5;
+            margin: -6px 0 12px 0;
+            padding: 6px 10px;
+            border-left: 3px solid var(--hd-cyan, #00e5ff);
+            background: var(--hd-inset, #0a1524);
             border-radius: 4px;
-            margin-left: 10px;
         }
-        .status-connected { background: #d4edda; color: #155724; }
-        .status-disconnected { background: #f8d7da; color: #721c24; }
-        /* ÖH D21 / P17B2-07 — DENETLENMEMİŞ durum RENGİ HÜKÜM DEĞİLDİR.
-           Ölçüldü (a2/once.json M2): rozetler şablonda `status-connected`
-           ile, yani YEŞİL "Connected" olarak doğuyordu; sayfa o ana kadar
-           tek bir dış istek bile yapmamış oluyordu (P17 turu: engellenen
-           istek sayısı 0). Rozet bir DURUM göstergesidir, süsleme değil:
-           denetim koşana kadar nötr durur ve "denetlenmedi" der. */
-        .status-unknown { background: #e2e3e5; color: #383d41; }
+        /* V301/N-CEA (C4): NASA CEA karşılaştırma tablosu */
+        #solidCeaComparison table.data-table td.num { text-align: right;
+            font-variant-numeric: tabular-nums; }
+        #solidCeaComparison .cea-meta { font-size: 12px; line-height: 1.5;
+            margin-top: 10px; }
+        #solidCeaComparison .cea-unavailable { padding: 10px;
+            border-left: 3px solid var(--hd-orange, #ff8c33); }
 
         /* Uyarı paneli (advanced.html #warningsPanel deseni) */
         #warningsPanel { border-left: 3px solid var(--hd-orange, #ff8c33); }
@@ -327,68 +331,11 @@
             padding: 20px;
         }
         
-        /* Tooltip Styles */
-        .tooltip {
-            position: relative;
-            display: inline-block;
-            margin-left: 5px;
-        }
-        
-        .tooltip-icon {
-            width: 16px;
-            height: 16px;
-            background: #6c757d;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 10px;
-            font-weight: bold;
-            cursor: help;
-            transition: background 0.3s;
-        }
-        
-        .tooltip-icon:hover {
-            background: #f093fb;
-        }
-        
-        .tooltip-text {
-            visibility: hidden;
-            width: 280px;
-            background: #2c3e50;
-            color: white;
-            text-align: left;
-            border-radius: 6px;
-            padding: 12px;
-            position: absolute;
-            z-index: 1000;
-            bottom: 125%;
-            left: 50%;
-            margin-left: -140px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            font-size: 13px;
-            line-height: 1.4;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        
-        .tooltip-text::after {
-            content: "";
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            margin-left: -5px;
-            border-width: 5px;
-            border-style: solid;
-            border-color: #2c3e50 transparent transparent transparent;
-        }
-        
-        .tooltip:hover .tooltip-text {
-            visibility: visible;
-            opacity: 1;
-        }
-        
+        /* İpucu (.tooltip / .tooltip-icon / .tooltip-text) biçimi ve davranışı
+           v3.0.1 N-girdi-1'den beri TEK kaynakta: static/css/theme.css
+           "Alan ipucu (ortak bileşen)" + static/js/field_help.js. Bu blokta
+           duran kopya oraya taşındı (gizli balon sayfayı yatay taşırıyordu). */
+
         .form-group label {
             display: flex;
             align-items: center;
@@ -425,6 +372,8 @@
          import_ui.js, sixdof_panel ve validation panelinden önce yüklenmeli) -->
     <script src="/static/js/import_ui.js"></script>
     <script src="/static/js/project_bar.js"></script>
+    <!-- V301/N-YZ: "Yapay Zekâ ile Tasarla" ortak modülü (üç sayfa aynı). -->
+    <script src="/static/js/ai_assistant.js"></script>
     <script src="/static/js/step_import_ui.js"></script>
     <!-- Three.js (sabit sürüm) + OrbitControls + MotorViz3D simülasyon güvertesi.
          Sıra önemli: three -> OrbitControls -> viz3d -> viz_deck -->
@@ -480,10 +429,13 @@
              Satıra tıklayınca aşağıdaki form alanları otomatik dolar; kullanıcı
              elle değiştirdiği alanlar "override" işaretlenir ve EZİLMEZ. -->
         <div class="panel" id="propellantCatalogPanel">
-            <h2><span data-i18n="solid.ui.0_propellant_catalogue">0. Propellant Catalogue</span>
-                <span class="database-status status-unknown cea-status" id="cea_status" data-i18n="solid.ui.nasa_cea_not_checked">NASA CEA — not checked yet</span>
-                <span class="database-status status-unknown nist-status" id="nist_status" data-i18n="solid.ui.nist_webbook_not_checked">NIST WebBook — not checked yet</span>
-            </h2>
+            <h2><span data-i18n="solid.ui.0_propellant_catalogue">0. Propellant Catalogue</span></h2>
+            <!-- v3.0.1 K kulvarı: VERİ KAYNAĞI satırı. Kaynak bu panelde ZATEN
+                 satır satır yayımlanıyor (Source sütunu = /api/propellants
+                 kaydının kendi `source` künyesi, ör. NASA CEA koşusunun
+                 basıncı ve bileşimi); satır yalnız bunu söyler, bir kaynak
+                 tahmin etmez. -->
+            <div class="data-source-line" data-i18n="solid.ui.data_source_catalogue">Data source: every catalogue row below states its own reference in the Source column (HRMA propellant catalogue, served by /api/propellants).</div>
             <div class="chart-explanation">
                 <p><strong data-i18n="solid.ui.how_to_use">How to use:</strong> <span data-i18n="solid.ui.pick_a_propellant_row_to_load">Pick a propellant row to load its validated properties into the form below.</span></p>
                 <ul>
@@ -498,7 +450,7 @@
                 <button type="button" onclick="dismissOverrideBanner()" data-i18n="solid.ui.keep_my_edits">Keep my edits</button>
             </div>
             <div class="catalog-toolbar">
-                <label for="propellant_family_filter" style="font-size: 13px; font-weight: 600;" data-i18n="solid.ui.family">Family</label>
+                <label for="propellant_family_filter" style="font-size: 13px; font-weight: 600;" data-i18n="solid.ui.family">Family</label><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.family_help">Display filter for the propellant catalogue table below: shows only the chosen family. It does not change the selected propellant or any calculation.</span></span>
                 <select id="propellant_family_filter" onchange="renderPropellantCatalog()">
                     <option value="" data-i18n="solid.ui.all_families">All families</option>
                     <option value="composite" data-i18n="solid.ui.composite">Composite</option>
@@ -614,7 +566,7 @@
                         <span data-i18n="solid.ui.characteristic_velocity_c">Characteristic Velocity c*</span> <span class="unit">(m/s)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.theoretical_performance_parameter_independent_of">Theoretical performance parameter independent of nozzle design. Higher values indicate better propellant performance. APCP: 1500-1600 m/s, KNSU: 1200-1300 m/s.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.theoretical_performance_parameter_independent_of">Theoretical characteristic velocity c* in m/s, before the combustion efficiency. Selecting a catalogue row fills it with the record value; for propellants with a known composition the solver then uses NASA CEA at this chamber pressure instead. A value different from the record replaces the thermochemistry: the throat area (A_t = ṁ·c*/Pc) and the thrust use it, and NASA CEA is not applied. Empty: the record value (or NASA CEA for a known composition). Accepted range 700-2500 m/s; outside it the value is ignored with a warning.</span>
                         </div>
                     </label>
                     <!-- FAZ 6 (T51, 3 Ağustos 2026): bant EKLENDİ + teslim
@@ -633,7 +585,7 @@
                          Bant ipucu ve teslim edilen değer #char_velocity_band
                          içine JS ile yazılır (dile bağlı olmayan sayı + SI
                          simgesi; 'c*' testin çevrilmeyen kısaltma listesinde). -->
-                    <input type="number" id="char_velocity" value="{{ propellant_defaults.c_star }}" step="0.1" min="800" max="2500">
+                    <input type="number" id="char_velocity" value="{{ propellant_defaults.c_star }}" step="0.1" min="700" max="2500">
                     <small id="char_velocity_band" style="display:block; margin-top:4px; font-family:var(--hd-mono, monospace); font-size:0.72rem; color:#7d97a5;"></small>
                     <!-- Bant ipucu düğmeden SONRA tazelenir. Çağrı bilerek
                          calculateCharVelocity() içine konmadı: o fonksiyon
@@ -643,14 +595,25 @@
                     <button type="button" onclick="calculateCharVelocity(); updateCharVelocityBand(window.currentResults);" style="margin-top: 5px; padding: 5px 10px; font-size: 12px;" data-i18n="solid.ui.calculate">Calculate</button>
                 </div>
                 <div class="form-group">
+                    <!-- V301/K-B (KT-04): kip seçimi. 'catalogue' kipinde alan salt
+                         okurdur ve GÖNDERİLMEZ (hesaptan sonra çözücünün kullandığı
+                         k'yı basar); 'user' kipinde değer erosive_k_override ile
+                         gider. Eskiden alan her koşuda 0,0002 gönderiyor, çözücü
+                         onu kalibre tabloda yok sayıyordu (ölü alan). -->
                     <label for="erosive_k">
                         <span data-i18n="solid.ui.erosive_burning_coefficient_k">Erosive Burning Coefficient k</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.coefficient_for_burn_rate_enhancement_at">Coefficient for burn rate enhancement at high mass flux conditions. Accounts for increased burning rate due to convective heat transfer from hot gas flow.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.coefficient_for_burn_rate_enhancement_at">Erosive burning coefficient k of the mass-flux law (dimensionless here; the solver multiplies the base rate by 1 + k·(G/G_ref)^m with m from the field below). It raises the burn rate where the port gas mass flux G is high, so it changes the start of the thrust curve, the peak pressure and the burn time. Source selector: "Catalogue" uses the value calibrated in the propellant record (this box is then read-only and shows the value the solver used after Calculate); "My value" sends this number and the solver applies it. Blank in "My value" mode: nothing is sent and the catalogue value is used. Accepted range 0-1.</span>
                         </div>
                     </label>
-                    <input type="number" id="erosive_k" value="0.0002" step="0.0001" min="0" max="1">
+                    <select id="erosive_k_source" onchange="syncSolidCoeffSource('erosive_k')" autocomplete="off" style="margin-bottom:4px;">
+                        <option value="catalogue" selected data-i18n="solid.ui.coeff_source_catalogue">Catalogue (propellant record)</option>
+                        <option value="user" data-i18n="solid.ui.coeff_source_user">My value</option>
+                    </select>
+                    <input type="number" id="erosive_k" value="" step="0.0001" min="0" max="1" readonly
+                           placeholder="catalogue value after Calculate" data-i18n-placeholder="solid.attr.coeff_catalogue_after_calc">
+                    <small id="erosive_k_state" style="display:block; margin-top:3px; font-size:0.72rem; color:#7d97a5;"></small>
                 </div>
                 <div class="form-group">
                     <label for="erosive_m">
@@ -667,10 +630,17 @@
                         <span data-i18n="solid.ui.temperature_coefficient">Temperature Coefficient σ</span> <span class="unit">(1/K)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.temperature_sensitivity_coefficient_for_burn_rat">Temperature sensitivity coefficient for burn rate law: r = a·P^n·(1+σ·ΔT). Accounts for propellant temperature effects on burning rate.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.temperature_sensitivity_coefficient_for_burn_rat">Temperature sensitivity σp of the burn rate (1/K). The solver uses the exponential law a_T = a·exp(σp·(T0 − T_ref)), where T0 is the grain temperature (Initial Temperature field) and T_ref the record reference temperature; it shifts the burn rate, so chamber pressure, thrust and burn time change when T0 ≠ T_ref. It also sets the cold/hot-day sensitivity table. Source selector: "Catalogue" uses the propellant record value (read-only box, filled after Calculate); "My value" sends this number. Blank in "My value" mode: nothing is sent and the catalogue value is used. Accepted range 0-0.02 1/K.</span>
                         </div>
                     </label>
-                    <input type="number" id="temp_coeff" value="0.002" step="0.0001" min="0" max="0.02">
+                    <!-- V301/K-B (KT-05): erozif k ile aynı kip deseni. -->
+                    <select id="temp_coeff_source" onchange="syncSolidCoeffSource('temp_coeff')" autocomplete="off" style="margin-bottom:4px;">
+                        <option value="catalogue" selected data-i18n="solid.ui.coeff_source_catalogue">Catalogue (propellant record)</option>
+                        <option value="user" data-i18n="solid.ui.coeff_source_user">My value</option>
+                    </select>
+                    <input type="number" id="temp_coeff" value="" step="0.0001" min="0" max="0.02" readonly
+                           placeholder="catalogue value after Calculate" data-i18n-placeholder="solid.attr.coeff_catalogue_after_calc">
+                    <small id="temp_coeff_state" style="display:block; margin-top:3px; font-size:0.72rem; color:#7d97a5;"></small>
                 </div>
             </div>
         </div>
@@ -712,6 +682,10 @@
                      YARISI. Kullanıcı yanma süresini 35 mm üstünden okursa
                      o yapılandırmada 2 kat hata yapar. -->
                 <div class="form-group">
+                    <!-- V301/K-A (KT-20): türetilen çıktı BOŞ açılır; hesaptan sonra
+                         çözücünün web değeriyle dolar (updateWebThickness).
+                         Eskiden 35 yazıyordu ve çekirdek değişince bayat
+                         kalan sayı "girilen web" diye gönderiliyordu. -->
                     <label for="web_thickness">
                         <span data-i18n="solid.ui.web_thickness">Web Thickness</span> <span class="unit">(mm)</span>
                         <div class="tooltip">
@@ -719,7 +693,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.minimum_thickness_of_propellant_that_burns">Derived output: the propellant thickness implied by the grain geometry ((outer - core)/2). When the outer surface burns as well the web is consumed from both faces, so the thickness actually burnt is half of it (see web_burnout_mm).</span>
                         </div>
                     </label>
-                    <input type="number" id="web_thickness" value="35" step="0.1" readonly>
+                    <input type="number" id="web_thickness" value="" step="0.1" readonly>
                 </div>
                 <div class="form-group">
                     <label for="grain_type">
@@ -749,6 +723,16 @@
                     <input type="number" id="outer_diameter" value="100" step="0.1">
                 </div>
                 <div class="form-group">
+                    <!-- V301/K-A (KT-20; ana model kararı, 22 Eki): örnek motorun
+                         çekirdeği 48 mm — HRMA seçimi, geçerli port/boğaz
+                         oranlı örnek motor (literatür değeri değil). Tek tanım
+                         motor modülündeki SOLID_DEFAULT_GEOMETRY_MM; bu
+                         literal (ve outer_diameter / grain_length) ona bekçiyle
+                         bağlıdır (tests/test_v301_kati_geometri.py). Ölçüt
+                         motorun port/boğaz eşiği (port_to_throat_min = 2): 30
+                         mm'de A_port/A_t sayfada 1,14, eski API'de 0,947 idi
+                         (port boğuluyordu). Ölçüm:
+                         docs/scofield/raw/OH/V301/kati-sivi/K-A/RAPOR.md. -->
                     <label for="core_diameter">
                         <span data-i18n="solid.ui.core_diameter">Core Diameter</span> <span class="unit">(mm)</span>
                         <div class="tooltip">
@@ -756,7 +740,7 @@
                             <span class="tooltip-text" data-i18n="solid.ui.initial_diameter_of_the_central_core">Initial diameter of the central core hole (port diameter). Determines initial burning surface area and thrust profile. Measured in this solver for a BATES grain with burning ends (10-60 mm cores): the end plateau is below the start plateau at every core (end/start 0.09-0.49) and a larger core falls off less, but the trend is not monotonic (0.11 at 10 mm, 0.09 at 15 mm, 0.21 at 30 mm, 0.49 at 60 mm). At 10 mm the solver classifies the curve as Progressive-Regressive (thrust rises first, then falls), so this is not a single class over the whole core range. The published shape class comes from thrust_profile_analysis.thrust_curve_type in the result, not from this hint.</span>
                         </div>
                     </label>
-                    <input type="number" id="core_diameter" value="30" step="0.1">
+                    <input type="number" id="core_diameter" value="48" step="0.1">
                 </div>
                 <div class="form-group">
                     <label for="grain_length">
@@ -841,6 +825,63 @@
                         </label>
                         <input type="number" id="fin_length" value="20" step="0.1" min="1" max="200">
                     </div>
+                    <!-- V301/K-B (KT-09): çözücünün okuduğu ama sayfada alanı
+                         olmayan kanatlı boy oranı (FINOCYL_GRAIN fraction_range
+                         0,05-1; boşsa 0,4 beyanla uygulanır). -->
+                    <div class="form-group">
+                        <label for="finned_length_fraction">
+                            <span data-i18n="solid.ui.finned_length_fraction">Finned Length Fraction</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="solid.ui.finned_length_fraction_tip">Fraction of the grain length that carries the fins (dimensionless, 0.05-1); the rest of the grain is a plain cylindrical port. A larger fraction raises the initial burning area, so thrust at start-up and the curve shape change. Blank: nothing is sent and the solver applies 0.4 (HRMA default, declared in the result under "The solver assumed these inputs"). Accepted range 0.05-1.</span>
+                            </div>
+                        </label>
+                        <input type="number" id="finned_length_fraction" value="" step="0.01" min="0.05" max="1"
+                               placeholder="blank = 0.4 (declared)" data-i18n-placeholder="solid.attr.finned_length_fraction_blank">
+                    </div>
+                </div>
+            </div>
+
+            <!-- V301/K-B (KT-08): Wagon Wheel paneli. Motorun gerçek geometrisi:
+                 merkez delik + N çevre delik, hepsi aynı çapta, bölüm dairesi
+                 üzerinde. Boş alan gönderilmez; çözücü beyanlı varsayılanı
+                 (SOLID_WAGON_WHEEL_DEFAULTS, HRMA seçimi) uygular. -->
+            <div id="wagon_config" class="config-section" style="display: none; background: var(--hd-inset, #0a1524); padding: 15px; border-radius: 6px; margin: 15px 0;">
+                <h3 style="color: #e74c3c; margin-bottom: 15px;" data-i18n="solid.ui.wagon_configuration">Wagon Wheel Configuration</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="wagon_hole_count">
+                            <span data-i18n="solid.ui.wagon_hole_count">Number of Outer Holes</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="solid.ui.wagon_hole_count_tip">Number of outer port holes around the central hole (whole number). More holes raise the initial burning area and the start-up thrust. Blank: the solver uses 6 (HRMA selection, declared in the result). Accepted range 3-12; holes that would intersect are rejected with the largest usable hole diameter.</span>
+                            </div>
+                        </label>
+                        <input type="number" id="wagon_hole_count" value="" min="3" max="12" step="1"
+                               placeholder="blank = 6 (declared)" data-i18n-placeholder="solid.attr.wagon_hole_count_blank">
+                    </div>
+                    <div class="form-group">
+                        <label for="wagon_hole_diameter">
+                            <span data-i18n="solid.ui.wagon_hole_diameter">Hole Diameter</span> <span class="unit">(mm)</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="solid.ui.wagon_hole_diameter_tip">Diameter of every port hole, the central one and the outer ones (mm). It sets the initial port area and burning perimeter, so it changes the port-to-throat ratio, the start-up thrust and the burn time. Blank: core diameter / 2 (HRMA selection, declared in the result). Accepted: above 0.1 mm and below the limit where holes touch each other or the grain surface (the rejection names that limit).</span>
+                            </div>
+                        </label>
+                        <input type="number" id="wagon_hole_diameter" value="" step="0.1" min="0.1"
+                               placeholder="blank = core / 2" data-i18n-placeholder="solid.attr.wagon_hole_diameter_blank">
+                    </div>
+                    <div class="form-group">
+                        <label for="wagon_pitch_diameter">
+                            <span data-i18n="solid.ui.wagon_pitch_diameter">Pitch Circle Diameter</span> <span class="unit">(mm)</span>
+                            <div class="tooltip">
+                                <div class="tooltip-icon">?</div>
+                                <span class="tooltip-text" data-i18n="solid.ui.wagon_pitch_diameter_tip">Diameter of the circle through the centres of the outer holes (mm). It sets how far the outer holes sit from the central hole and from the grain surface, so it changes when the webs between holes burn through. Blank: grain outer diameter / 2 (HRMA selection, declared in the result). Accepted: 0.1 mm up to the grain outer diameter, with no hole intersecting another or the grain surface.</span>
+                            </div>
+                        </label>
+                        <input type="number" id="wagon_pitch_diameter" value="" step="0.1" min="0.1"
+                               placeholder="blank = grain OD / 2" data-i18n-placeholder="solid.attr.wagon_pitch_diameter_blank">
+                    </div>
                 </div>
             </div>
 
@@ -879,7 +920,11 @@
                                 <span class="tooltip-text" data-i18n="solid.ui.slot_depth_tooltip">Radial depth measured from the port wall. Deep slots reach the case early and make the curve regressive; shallow slots stay progressive. Must remain inside the available web.</span>
                             </div>
                         </label>
-                        <input type="number" id="slot_depth" value="25" step="0.1" min="1">
+                        <!-- V301/K-B (K-A DEVİR 8): 25 mm, varsayılan tanede (çekirdek 48 mm)
+                             0,85·web = 22,1 mm sınırını aşıyor ve eskiden SESSİZCE 22,1'e
+                             kırpılıyordu; kırpma artık 422. Açılış değeri 20 mm (HRMA
+                             seçimi, sınırın içinde). -->
+                        <input type="number" id="slot_depth" value="20" step="0.1" min="1">
                     </div>
                 </div>
             </div>
@@ -912,7 +957,12 @@
                  doğruydu (solid_rocket_engine.py:1413-1415: front=False,
                  rear=False, outer=True); form onları koşulsuz gönderdiği için
                  motorun BATES tanımını sessizce eziyordu. -->
-            <div style="margin: 15px 0;">
+            <!-- V301/K-B (KT-07): BATES dışı tiplerde tane sayısı, tane arası
+                 boşluk ve inhibitörler HESABA GİRMEZ (tane tek segment; yüzey
+                 düzeni tipin tanımından). Bu tiplerde alanlar devre dışı kalır,
+                 gönderilmez ve nedeni aşağıda yazılır. -->
+            <small id="bates_only_note" style="display:none; margin: 8px 0; font-size:0.75rem; color: var(--hd-orange, #ff8c33);" data-i18n="solid.msg.bates_only_note">Number of grains, grain-to-grain gap and the inhibitor boxes apply to BATES grains only: this grain type is solved as one segment with its own surface layout, so these fields are disabled and not sent.</small>
+            <div style="margin: 15px 0;" id="inhibitor_group">
                 <h3 style="color: #2c3e50; margin-bottom: 10px;" data-i18n="solid.ui.inhibitor_coating">Inhibitor Coating</h3>
                 <div style="display: flex; gap: 20px; flex-wrap: wrap;">
                     <label style="display: flex; align-items: center; gap: 8px;">
@@ -981,7 +1031,7 @@
                  Yakıt kataloğuyla AYNI desen: satır tıklaması alanları doldurur,
                  elle düzenlenen alan override işaretlenir ve ezilmez. -->
             <div class="catalog-toolbar">
-                <label for="material_catalog_target" style="font-size: 13px; font-weight: 600;" data-i18n="solid.ui.structural_material_catalogue_apply_to">Structural material catalogue - apply to</label>
+                <label for="material_catalog_target" style="font-size: 13px; font-weight: 600;" data-i18n="solid.ui.structural_material_catalogue_apply_to">Structural material catalogue - apply to</label><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.structural_material_catalogue_apply_to_help">Which part a click on a catalogue row fills: case/chamber or nozzle. Choosing here changes nothing by itself; the clicked row writes its properties into that part's material fields, except fields you edited by hand (kept and counted as skipped).</span></span>
                 <select id="material_catalog_target">
                     <option value="case" data-i18n="solid.ui.case_chamber">Case / chamber</option>
                     <option value="nozzle" data-i18n="solid.ui.nozzle">Nozzle</option>
@@ -1006,6 +1056,13 @@
             </div>
             <div class="form-grid">
                 <div class="form-group">
+                    <!-- V301/K-A (KT-01/KT-20; ana model kararı A): bu alan DAİMA
+                         kasa iç çapıdır. Boş bırakılırsa sunucu kasayı
+                         tane dış çapı + 2·(astar + yalıtım) olarak türetir ve
+                         case_bore künyesiyle beyan eder; yazılırsa bu kurala
+                         sığmayan değer 422 grain_does_not_fit_case alır.
+                         Eskiden 100 yazıyordu (tane de 100) ve sunucu onu
+                         sessizce 106 mm'ye büyütüyordu. -->
                     <label for="chamber_diameter">
                         <span data-i18n="solid.ui.chamber_diameter">Chamber Diameter</span> <span class="unit">(mm)</span>
                         <div class="tooltip">
@@ -1013,9 +1070,16 @@
                             <span class="tooltip-text" data-i18n="solid.ui.internal_diameter_of_the_motor_casing">Internal diameter of the motor casing that contains the propellant grain. Determines the maximum grain outer diameter and affects chamber volume. Typical range: 50-200mm for amateur motors.</span>
                         </div>
                     </label>
-                    <input type="number" id="chamber_diameter" value="100" step="1">
+                    <input type="number" id="chamber_diameter" value="" step="0.1"
+                           placeholder="blank: grain+2×(liner+insulation)"
+                           data-i18n-placeholder="solid.attr.chamber_diameter_blank">
                 </div>
                 <div class="form-group">
+                    <!-- V301/K-A (KT-20): serbest hacim çözücüde TÜRETİLİR
+                         (kasa içi − yakıt). Sayfa 2,5 L yazıyordu, geometri
+                         1,17 L veriyordu: her varsayılan koşu
+                         case_volume_inconsistent uyarısıyla açılıyordu. Boş =
+                         gönderilmez; yazılırsa tutarlılık denetimi çalışır. -->
                     <label for="chamber_volume">
                         <span data-i18n="solid.ui.case_internal_volume">Case Internal Volume</span> <span class="unit">(L)</span>
                         <div class="tooltip">
@@ -1023,7 +1087,9 @@
                             <span class="tooltip-text" data-i18n="solid.ui.free_volume_inside_the_motor_case">Free volume inside the motor case excluding propellant volume. Affects chamber pressure buildup and combustion dynamics. Include volume of forward and aft chambers.</span>
                         </div>
                     </label>
-                    <input type="number" id="chamber_volume" value="2.5" step="0.001" min="0.01" max="16000">
+                    <input type="number" id="chamber_volume" value="" step="0.001" min="0.01" max="16000"
+                           placeholder="blank = derived from the geometry"
+                           data-i18n-placeholder="solid.attr.chamber_volume_blank">
                 </div>
                 <div class="form-group">
                     <label for="case_material">
@@ -1033,24 +1099,29 @@
                             <span class="tooltip-text" data-i18n="solid.ui.material_for_motor_casing_construction_steel">Material for motor casing construction. Steel: high strength, heavy. Aluminum: lighter, lower strength. Composite: lightweight, high strength but expensive.</span>
                         </div>
                     </label>
-                    <!-- Değerler backend sözleşmesi (SOLID_COST_PARAMS.case_materials)
-                         ile birebir: steel / aluminum / composite / titanium. -->
-                    <select id="case_material">
-                        <option value="steel" data-i18n="solid.ui.steel">Steel</option>
-                        <option value="aluminum" data-i18n="solid.ui.aluminum">Aluminum</option>
-                        <option value="composite" data-i18n="solid.ui.composite">Composite</option>
-                        <option value="titanium" data-i18n="solid.ui.titanium">Titanium</option>
-                    </select>
+                    <!-- V301/K-B (KT-12): seçenekler sunucunun malzeme kaydından
+                         (app.py _kati_malzeme_secim_kaydi <- solid_material_options);
+                         şablonda elle yazılmış seçenek YOK. Eski form değerleri
+                         (steel/aluminum/titanium/composite) korunur. -->
+                    <select id="case_material" onchange="syncSolidMaterial('case_material')" autocomplete="off"><!-- {% for o in solid_materials.case_material.options %} --><option value="{{ o.value }}"{% if o.value == solid_materials.case_material.default_value %} selected{% endif %} data-i18n="solid.mat.{{ o.material_key }}">{{ o.name }}</option><!-- {% endfor %} --></select>
+                    <div id="case_material_props" style="font-size:0.72rem; line-height:1.45; color:#7d97a5; margin-top:4px;"></div>
+                    <div id="solidMaterialRegistry" hidden data-registry='{{ solid_materials|tojson }}'></div>
                 </div>
                 <div class="form-group">
                     <label for="yield_strength">
                         <span data-i18n="solid.ui.yield_strength_y">Yield Strength σy</span> <span class="unit">(MPa)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.yield_strength_of_case_material_steel">Yield strength of case material. Steel: 200-400 MPa, Aluminum: 100-300 MPa, Composite: 300-800 MPa. Used for case stress analysis and wall thickness calculation.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.yield_strength_of_case_material_steel">Yield strength σy of the case material (MPa). It sizes the case wall (hoop stress with the safety factor) and sets the burst pressure and the burst margin. Source selector: "From material" uses the yield of the selected case material record for BOTH the wall sizing and the burst pressure (this box is then read-only and shows that value); "My value" sends this number, which sizes the wall, while the burst pressure still comes from the material record (a named warning says so when the two differ). Blank in "My value" mode: nothing is sent and the material record is used. Accepted range 10-3000 MPa.</span>
                         </div>
                     </label>
-                    <input type="number" id="yield_strength" value="250" step="0.1" min="10" max="3000">
+                    <!-- V301/K-B (KT-12): akma kaynağı kipi; 'material' kipinde alan
+                         salt okur, değer seçili kayıttan gelir ve GÖNDERİLMEZ. -->
+                    <select id="yield_strength_source" onchange="syncSolidYieldSource()" autocomplete="off" style="margin-bottom:4px;">
+                        <option value="material" selected data-i18n="solid.ui.yield_source_material">From material</option>
+                        <option value="user" data-i18n="solid.ui.coeff_source_user">My value</option>
+                    </select>
+                    <input type="number" id="yield_strength" value="250" step="0.1" min="10" max="3000" readonly>
                 </div>
                 <div class="form-group">
                     <label for="safety_factor">
@@ -1224,6 +1295,13 @@
                     <input type="number" id="nozzle_efficiency" value="0.95" step="0.001" min="0.8" max="1">
                 </div>
                 <div class="form-group">
+                    <!-- V301/K-A (KT-20): 0,001 mm/s kaynaksızdı ve grafitin
+                         yayımlanmış bandının (0,069-0,353 mm/s, Thakre & Yang
+                         2008 Tablo 8; transient_ballistics
+                         GRAPHITE_A_REF_BAND_CITATION) 69 kat altındaydı. Bandın
+                         tek bir "tipik" değeri yok: alan BOŞ açılır, çözücü
+                         beyanlı varsayılanını (rijit boğaz; ihmal edilemiyorsa
+                         warn.solid.rigid_throat_assumption) uygular. -->
                     <label for="erosion_factor">
                         <span data-i18n="solid.ui.erosion_factor">Erosion Factor</span> <span class="unit">(mm/s)</span>
                         <div class="tooltip">
@@ -1231,21 +1309,22 @@
                             <span class="tooltip-text" data-i18n="solid.ui.rate_of_throat_diameter_increase_due">Rate of throat diameter increase due to erosion during burn. Affects performance over burn time. Depends on propellant type and nozzle material. Graphite: ~0.001 mm/s.</span>
                         </div>
                     </label>
-                    <input type="number" id="erosion_factor" value="0.001" step="0.0001" min="0" max="5">
+                    <input type="number" id="erosion_factor" value="" step="0.0001" min="0" max="5"
+                           placeholder="blank = rigid throat (no erosion)"
+                           data-i18n-placeholder="solid.attr.erosion_factor_blank">
                 </div>
                 <div class="form-group">
                     <label for="nozzle_material">
                         <span data-i18n="solid.ui.nozzle_material">Nozzle Material</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.material_for_nozzle_construction_graphite_good">Material for nozzle construction. Graphite: good thermal properties, easy machining, moderate erosion. Phenolic: low cost, higher erosion. Tungsten: low erosion, expensive, difficult machining.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.material_for_nozzle_construction_graphite_good">Material of the nozzle throat insert. The throat thermal check compares the adiabatic wall temperature at the throat (uncooled throat, worst case T_wall → T_aw) with the allowable temperature of this material record; above it the verdict is EXCEEDS_ALLOWABLE (critical warning). Throat erosion uses a published coefficient band only where one exists (shown below); otherwise a rigid throat is assumed and stated. Options come from the server material records; a name the server cannot resolve is rejected (no verdict is derived from another material). Phenolic is not offered: there is no sourced throat record and no ablation model.</span>
                         </div>
                     </label>
-                    <select id="nozzle_material">
-                        <option value="graphite" data-i18n="solid.ui.graphite">Graphite</option>
-                        <option value="phenolic" data-i18n="solid.ui.phenolic">Phenolic</option>
-                        <option value="tungsten" data-i18n="solid.ui.tungsten">Tungsten</option>
-                    </select>
+                    <!-- V301/K-B (KT-10): seçenekler sunucunun malzeme kaydından;
+                         'phenolic' çıktı (kaynaklı kayıt + ablasyon modeli yok). -->
+                    <select id="nozzle_material" onchange="syncSolidMaterial('nozzle_material')" autocomplete="off"><!-- {% for o in solid_materials.nozzle_material.options %} --><option value="{{ o.value }}"{% if o.value == solid_materials.nozzle_material.default_value %} selected{% endif %} data-i18n="solid.mat.{{ o.material_key }}">{{ o.name }}</option><!-- {% endfor %} --></select>
+                    <div id="nozzle_material_props" style="font-size:0.72rem; line-height:1.45; color:#7d97a5; margin-top:4px;"></div>
                 </div>
                 <div class="form-group">
                     <label for="chamber_pressure">
@@ -1508,6 +1587,19 @@
                     </label>
                     <input type="number" id="insulation_mass" value="0.3" step="0.001" min="0" max="12000">
                 </div>
+                <!-- V301/K-B (NK-30): astar kütlesi ayrı satır. Çözücünün dökümünde
+                     liner_kg vardı, formda yoktu; "Motor kuru kütlesi" farkı (ör.
+                     örnek katıda −0,270 kg) tam olarak bu kalemdi. -->
+                <div class="form-group">
+                    <label for="liner_mass">
+                        <span data-i18n="solid.ui.liner_mass">Liner Mass</span> <span class="unit">(kg)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="solid.ui.liner_mass_tip">Mass of the liner ring between grain and insulation (kg), computed by the solver from the liner thickness and liner density fields (design_summary.masses.inert_breakdown.liner_kg). Output only: it is filled after Calculate and is not sent to the solver. Part of the motor dry mass.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="liner_mass" value="" step="0.001" readonly>
+                </div>
                 <div class="form-group">
                     <label for="avionics_mass">
                         <span data-i18n="solid.ui.avionics_mass">Avionics Mass</span> <span class="unit">(kg)</span>
@@ -1544,7 +1636,7 @@
                                  çözücü 20,283 kg (12,551 + 3,765 + 2,447 +
                                  0,704 + 0,816), form ise 4,300 kg (aviyonik
                                  0,200 kg dâhil) beyan ediyordu. -->
-                            <span class="tooltip-text" data-i18n="solid.ui.total_mass_excluding_propellant_case_nozzle">Sum of the component fields above (case + nozzle + insulation + avionics + closures). Avionics are a VEHICLE item, NOT part of the motor: the motor dry mass computed by the solver leaves them out. The reconciliation table below shows the solver value next to this one, component by component.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.total_mass_excluding_propellant_case_nozzle">Motor dry mass (kg): sum of the motor component fields above (case + nozzle + insulation + liner + closures, the closure field including igniter and mounting). With the fields as filled by the solver it equals the solver motor dry mass. Avionics are a VEHICLE item, NOT part of the motor, and are not included. Output only: not used by the solver. The reconciliation table below compares it with the solver, component by component.</span>
                         </div>
                     </label>
                     <input type="number" id="dry_mass" step="0.001" readonly min="0.1" max="65000">
@@ -1656,6 +1748,12 @@
             <button class="btn btn-secondary" onclick="resetForm()" data-i18n="solid.ui.reset">Reset</button>
         </div>
         
+        <!-- V301/N-YZ — "Yapay Zekâ ile Tasarla" paneli. İçeriği ortak modül
+             /static/js/ai_assistant.js kurar (üç sayfada aynı); burada yalnız
+             kap ve sayfanın motor tipi durur. Eski "Ask AI" (sonuç yorumlatma)
+             düğmesi ve sayfaya özgü askAI kopyası kaldırıldı. -->
+        <section id="hrmaAiPanel" class="hrma-ai" data-motor-type="solid" data-hrma-version="{{ app_version }}"></section>
+
         <!-- Loading indicator -->
         <div id="loading" class="loading">
             <div style="font-size: 24px; color: #007bff;" data-i18n="solid.ui.calculating">Calculating...</div>
@@ -1663,13 +1761,9 @@
         
         <!-- Results Section -->
         <div id="results" class="results">
-            <!-- AI Analysis Button -->
-            <div style="text-align: center; margin: 20px 0;">
-                <button type="button" class="btn btn-ai" onclick="askAI()" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 12px 30px; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;" data-i18n="solid.ui.ask_ai_to_analyze_results">
-                    Ask AI to Analyze Results
-                </button>
-            </div>
-            
+            <!-- V301/K-B (KT-09): çözücünün varsaydığı girdiler (grain_design.
+                 assumed_defaults) sonuç panelinin başında adıyla ve değeriyle. -->
+            <div id="solidAssumedLine" style="display:none; margin: 10px 0; padding: 8px 12px; border-left: 3px solid var(--hd-orange, #ff8c33); font-size: 0.85rem;"></div>
             <!-- PDF Export Buttons -->
             <div style="text-align: center; margin: 20px 0; display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
                 <button type="button" class="btn btn-pdf" onclick="exportPDF('summary')" style="background: linear-gradient(135deg, #ff7b7b 0%, #ff416c 100%); color: white; padding: 10px 25px; border: none; border-radius: 5px; font-size: 14px; cursor: pointer;" data-i18n="solid.ui.pdf_summary_report">
@@ -1861,20 +1955,26 @@
                     </ul>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 10px;">
-                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.initial_wet_mass_kg">Initial (Wet) Mass (kg)</span>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span><span data-i18n="solid.ui.initial_wet_mass_kg">Initial (Wet) Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.initial_wet_mass_kg_help">Vehicle mass at lift-off (kg), sent as initial_mass to /api/trajectory-analysis. After a motor calculation it is filled with the solver's total mass (design_summary.masses.total_mass_kg) unless you typed a value. Initial − final mass must match the propellant the motor burns (within the endpoint tolerance), otherwise no trajectory is computed and both masses are named. Empty or not a number: the panel sends 12 kg.</span></span></span>
                         <input type="number" id="traj_initial_mass" value="12" step="0.1" style="margin-top:4px;">
                     </label>
-                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.final_dry_mass_kg">Final (Dry) Mass (kg)</span>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span><span data-i18n="solid.ui.final_dry_mass_kg">Final (Dry) Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.final_dry_mass_kg_help">Vehicle mass after burnout (kg), sent as final_mass. After a motor calculation it is filled with the solver's dry mass (design_summary.masses.dry_mass_kg) unless you typed a value; add airframe and payload to both masses to fly a real vehicle. Empty or not a number: the panel sends 5 kg.</span></span></span>
                         <input type="number" id="traj_final_mass" value="5" step="0.1" style="margin-top:4px;">
                     </label>
-                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.drag_coefficient">Drag Coefficient</span>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span><span data-i18n="solid.ui.drag_coefficient">Drag Coefficient</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.drag_coefficient_help">Vehicle drag coefficient (dimensionless) on the reference area, sent as drag_coefficient; it scales the aerodynamic drag over the whole flight. Not filled from the motor calculation. Empty or not a number: the panel sends 0.5.</span></span></span>
                         <input type="number" id="traj_drag_coeff" value="0.5" step="0.05" style="margin-top:4px;">
                     </label>
-                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.reference_area_m2">Reference Area (m2)</span>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span><span data-i18n="solid.ui.reference_area_m2">Reference Area (m2)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.reference_area_m2_help">Drag reference area (m²), sent as reference_area. After a motor calculation it is filled with the motor case outer cross-section π(D/2)² (cad_design.case_design.outer_diameter) unless you typed a value. Empty or not a number: the panel sends 0.008 m².</span></span></span>
                         <input type="number" id="traj_ref_area" value="0.008" step="0.001" style="margin-top:4px;">
                     </label>
-                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.burn_time_s">Burn Time (s)</span>
-                        <input type="number" id="traj_burn_time" value="2" step="0.1" style="margin-top:4px;">
+                    <!-- V301/K-C1 (KT-15): yörünge ana tasarımın İTKİ EĞRİSİYLE
+                         uçurulur; yanma süresi o eğrinin son zaman noktasıdır.
+                         Alan artık hiçbir hesabı sürmüyor (gövdeye girmiyor):
+                         etkin görünen ama sonucu değiştirmeyen alan yanlış
+                         beyandır, kilitlenir (sıvı sayfası P12bB1-07 deseni).
+                         Hesap yapılmadan sayı göstermez (value yok). -->
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span><span data-i18n="solid.ui.burn_time_from_thrust_curve">Burn Time (s) — from the thrust curve (not an input)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.burn_time_from_thrust_curve_help">Burn time of this design, in seconds: the last time point of the thrust curve from the motor calculation. Not an input: the trajectory is flown on that whole thrust curve (thrust and propellant use follow F(t)), so this number only shows which burn is flown. Empty until a motor calculation has run; without one the trajectory is not computed.</span></span></span>
+                        <input type="number" id="traj_burn_time" step="0.001" disabled data-derived-from="thrust_curve" style="margin-top:4px; opacity:0.65;">
                     </label>
                     <!-- FAZ 6 (T68 kalan yarı, 3 Ağustos 2026): kurtarma
                          girdileri. İniş fazı bir PARAŞÜTLE çözülüyor ama
@@ -1888,13 +1988,13 @@
                          KONMAZ, böylece çözücü "verilmedi" ile "null geldi"
                          ayrımını yapıp varsayım damgasını basabiliyor
                          (trajectory_analysis.py:476-526). -->
-                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.parachute_area_m2">Parachute Area (m2)</span>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span><span data-i18n="solid.ui.parachute_area_m2">Parachute Area (m2)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_area_m2_help">Projected (canopy) area of the recovery parachute (m²), sent as parachute_area; descent speed scales as 1/√area. Empty: not sent — the solver uses its assumption of 2.0 m² and marks it as assumed in the results.</span></span></span>
                         <input type="number" id="parachute_area" step="0.1" min="0" placeholder="—" style="margin-top:4px;">
                     </label>
-                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.parachute_cd">Parachute Cd</span>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span><span data-i18n="solid.ui.parachute_cd">Parachute Cd</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_cd_help">Parachute drag coefficient referenced to its projected area (dimensionless), sent as parachute_cd. Empty: not sent — the solver uses 1.4 (Hoerner, hemispherical canopy) and marks it as assumed.</span></span></span>
                         <input type="number" id="parachute_cd" step="0.05" min="0" placeholder="—" style="margin-top:4px;">
                     </label>
-                    <label style="display:flex; flex-direction:column; font-size:13px;"><span data-i18n="solid.ui.parachute_deploy_delay_s">Deploy Delay after Apogee (s)</span>
+                    <label style="display:flex; flex-direction:column; font-size:13px;"><span><span data-i18n="solid.ui.parachute_deploy_delay_s">Deploy Delay after Apogee (s)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_deploy_delay_s_help">Time from apogee to canopy inflation (s), sent as parachute_deploy_delay; the vehicle falls ballistically during this delay. Empty: not sent — the solver uses 2.0 s and marks it as assumed.</span></span></span>
                         <input type="number" id="parachute_deploy_delay" step="0.5" min="0" placeholder="—" style="margin-top:4px;">
                     </label>
                 </div>
@@ -1905,6 +2005,17 @@
                 <!-- Kurtarma özeti: yalnız yanıttaki `recovery` bloğundan
                      doldurulur, hesap yoksa boş kalır (FAZ 6, T68). -->
                 <div id="trajectory_recovery" style="margin-top:10px;"></div>
+            </div>
+
+            <!-- V301/N-CEA (C4): NASA CEA karşılaştırması. Yalnız yanıttaki
+                 `cea_comparison` bloğundan çizilir (renderSolidCeaComparison);
+                 blok yoksa panel görünmez, sayı uydurulmaz. -->
+            <div class="panel" id="solidCeaComparisonPanel" style="display: none;">
+                <h2 data-i18n="solid.sec.cea_comparison">NASA CEA Comparison</h2>
+                <div class="chart-explanation">
+                    <p><strong data-i18n="solid.ui.what_this_shows">What this shows:</strong> <span data-i18n="solid.ui.cea_comparison_explain">The theoretical thermochemistry and the lossless ideal-nozzle values HRMA uses for this propellant, next to NASA CEA (through RocketCEA) solved for the same composition at this run's chamber pressure and ambient pressure. The line below states where HRMA's values come from.</span></p>
+                </div>
+                <div id="solidCeaComparison"></div>
             </div>
 
             <!-- Analysis Dock çapası: güverte JS ile bu çapanın ÖNÜNE kurulur
@@ -1939,6 +2050,15 @@
                     + ' display: flex; flex-direction: column; gap: 10px; align-items: flex-end;';
                 document.body.appendChild(stack);
             }
+            // V301/DİL (NK-42): ölçüldü — 1280 px'te üst menü iki satıra
+            // kırılıyor ve top:20px bildirim "Formüller / Sürüm Notları /
+            // Kılavuz" bağlantılarını örtüyordu. Yığın, her bildirimde
+            // menünün GÖRÜNEN alt kenarının altına iner (kaydırılmışsa 20 px).
+            const _nav = (typeof document.querySelector === 'function')
+                ? document.querySelector('.navbar') : null;
+            const _alt = (_nav && typeof _nav.getBoundingClientRect === 'function')
+                ? _nav.getBoundingClientRect().bottom : 0;
+            if (stack.style) stack.style.top = Math.max(20, Math.ceil(_alt || 0) + 8) + 'px';
             return stack;
         }
 
@@ -2090,16 +2210,20 @@
             if (lo <= 0 && hi >= 0) return false;        // sıfır bandın içinde
             var ref = Math.max(Math.abs(lo), Math.abs(hi));
             var pct = (hi - lo) / ref * 100;
-            var band = '0 ∉ [' + hrmaSigStr(lo) + ' … ' + hrmaSigStr(hi)
-                + ']  Δ ' + pctTxt(pct, pct < 1 ? 2 : 1);
-            if (typeof axis.title === 'string') {
-                axis.title = axis.title + '<br>' + band;
-            } else if (axis.title && typeof axis.title === 'object') {
-                axis.title.text = (axis.title.text || '') + '<br>' + band;
-            } else {
-                axis.title = band;
-            }
-            return true;
+            // v3.0.1 (V301/N-grafik G3): bant metni artık eksen başlığının
+            // ikinci satırı (döndürülmüş küçük not — ölçüldü, okunmuyordu)
+            // DEĞİL; DÖNDÜRÜLÜR ve hrmaPlotLayout onu çizim alanının sol
+            // üstüne YATAY not olarak koyar. Metin ve sayılar aynı.
+            // V301/K-C1 (NK-28): matematik gösterimi ("0 ∉ [a … b]  Δ %x")
+            // kullanıcıya anlamını söylemiyordu; aynı sayılar düz cümleyle
+            // (EN + TR). Sayılar ve basamaklar DEĞİŞMEDİ.
+            var _p = { lo: hrmaSigStr(lo), hi: hrmaSigStr(hi),
+                       pct: pctTxt(pct, pct < 1 ? 2 : 1) };
+            var _en = 'Axis does not start at 0: it shows {lo} – {hi} (span {pct})';
+            return (typeof TF === 'function')
+                ? TF('solid.js.axis_not_from_zero', _p, _en)
+                : _en.replace('{lo}', _p.lo).replace('{hi}', _p.hi)
+                     .replace('{pct}', _p.pct);
         }
 
         // Backend'den gelen HAZIR figürler (kesit, yörünge) için hafif dokunuş:
@@ -2165,8 +2289,16 @@
             var rng = hrmaAxisRange(yValues);
             if (rng && out.yaxis.range === undefined) {
                 out.yaxis.range = rng;
-                // Bandı ekseninde ilan et (FAZ 6, T69) — sıfır dışarıdaysa.
-                hrmaMarkSuppressedZero(out.yaxis, yValues);
+                // Bandı ilan et (FAZ 6, T69) — sıfır dışarıdaysa. v3.0.1
+                // (V301/N-grafik G3): yatay not, çizim alanının sol üstünde.
+                var bant = hrmaMarkSuppressedZero(out.yaxis, yValues);
+                if (bant) {
+                    out.annotations = (out.annotations || []).concat([{
+                        xref: 'paper', yref: 'paper', x: 0, y: 1,
+                        xanchor: 'left', yanchor: 'bottom', showarrow: false,
+                        align: 'left', text: bant, font: { size: 12 }
+                    }]);
+                }
             }
             return out;
         }
@@ -2187,27 +2319,13 @@
         ];
 
         // Malzeme kaydından form alanına harita (hedef bazlı).
-        // yield_strength katalogta Pa, formda MPa → scale 1e-6.
+        // V301/K-B (KT-12): akma artık kasa SEÇİCİSİNİN kaydından gelir
+        // (syncSolidYieldSource); katalog satırı seçiciyi kendi kaydına
+        // getirir, akmayı ayrıca yazmaz (iki kaynak = iki gerçek olurdu).
         var MATERIAL_FIELD_MAP = {
-            'case':   [{ id: 'yield_strength', field: 'yield_strength', scale: 1e-6, digits: 1 }],
+            'case':   [],
             'nozzle': []
         };
-
-        // Katalog anahtarı → backend'in TANIDIĞI gövde malzemesi ailesi
-        // (SOLID_COST_PARAMS.case_materials: steel/aluminum/composite/titanium).
-        // Eşleşme yoksa select'e DOKUNULMAZ (sessizce yanlış aile seçmeyiz).
-        var CASE_MATERIAL_FAMILY = [
-            { test: /^(steel|ss_|inconel)/,             value: 'steel' },
-            { test: /^(al_|aluminum)/,                  value: 'aluminum' },
-            { test: /^(carbon_carbon|graphite|ablative)/, value: 'composite' },
-            { test: /^(ti_|titanium)/,                  value: 'titanium' }
-        ];
-        // Katalog anahtarı → lüle malzemesi seçeneği (graphite/phenolic/tungsten)
-        var NOZZLE_MATERIAL_FAMILY = [
-            { test: /^graphite$/,                       value: 'graphite' },
-            { test: /^(ablative|carbon_carbon)$/,       value: 'phenolic' },
-            { test: /^tungsten$/,                       value: 'tungsten' }
-        ];
 
         // Katalog uçları düşerse kullanılan yerleşik liste. Sayılar sayfanın
         // KENDİ mevcut form varsayılanlarıdır (yeni değer uydurulmaz); KNDX/KNSB
@@ -2520,9 +2638,13 @@
                 applied++;
             });
 
-            var famList = (target === 'nozzle') ? NOZZLE_MATERIAL_FAMILY : CASE_MATERIAL_FAMILY;
+            // V301/K-B (KT-10/12): katalog kaydı seçicinin SUNUCU seçeneğine
+            // kanonik anahtarla TAM eşlenir; aile tahmini yok (eskiden
+            // karbon-karbon "phenolic"e, grafit "composite" kasaya düşüyordu).
             var selId = (target === 'nozzle') ? 'nozzle_material' : 'case_material';
-            var match = famList.filter(function (f) { return f.test.test(rec.key); })[0];
+            var match = ((SOLID_MATERIALS[selId] || {}).options || []).filter(function (o) {
+                return o.material_key === rec.key;
+            })[0];
             var famNote = '';
             if (match) {
                 _catalogValues[selId] = match.value;
@@ -2531,6 +2653,7 @@
                     skipped++;
                 } else if (sel) {
                     sel.value = match.value;
+                    syncSolidMaterial(selId);
                     applied++;
                 }
             } else {
@@ -2609,99 +2732,14 @@
             }
         }
 
-        // ==================== Veritabanı rozetleri ====================
-        function setNistStatus(text, cls) {
-            document.querySelectorAll('.nist-status').forEach(function (el) {
-                el.textContent = text;
-                el.className = 'database-status nist-status ' + cls;
-                // ÖH D21 / P17B2-07: gerçek bir denetim sonucu yazıldığı anda
-                // `data-i18n` KALDIRILIR. Aksi hâlde dil değişiminde I18N.apply
-                // sözlükteki BAŞLANGIÇ metnini ("denetlenmedi") canlı durumun
-                // üstüne geri yazar; rozet ölçülmüş durumu kaybeder.
-                // (Yetenek kapısı: bu iki ayarlayıcı, ürün kodunu
-                //  DOM'suz koşturan sözleşme testlerinde sahte bir
-                //  eleman nesnesiyle de çağrılıyor — orada yalnız
-                //  textContent/className var. Gerçek DOM'da dal her
-                //  zaman koşar; ters mutasyon bunu kanıtlıyor.)
-                if (typeof el.removeAttribute === 'function') {
-                    el.removeAttribute('data-i18n');
-                }
-            });
-        }
-        function setCeaStatus(text, cls) {
-            document.querySelectorAll('.cea-status').forEach(function (el) {
-                el.textContent = text;
-                el.className = 'database-status cea-status ' + cls;
-                // ÖH D21 / P17B2-07: gerçek bir denetim sonucu yazıldığı anda
-                // `data-i18n` KALDIRILIR. Aksi hâlde dil değişiminde I18N.apply
-                // sözlükteki BAŞLANGIÇ metnini ("denetlenmedi") canlı durumun
-                // üstüne geri yazar; rozet ölçülmüş durumu kaybeder.
-                // (Yetenek kapısı: bu iki ayarlayıcı, ürün kodunu
-                //  DOM'suz koşturan sözleşme testlerinde sahte bir
-                //  eleman nesnesiyle de çağrılıyor — orada yalnız
-                //  textContent/className var. Gerçek DOM'da dal her
-                //  zaman koşar; ters mutasyon bunu kanıtlıyor.)
-                if (typeof el.removeAttribute === 'function') {
-                    el.removeAttribute('data-i18n');
-                }
-            });
-        }
-        async function checkDatabaseStatus() {
-            try {
-                const response = await fetch('/api/database-status');
-                const status = await response.json();
-                if (status.nist && status.nist.status === 'connected') {
-                // ÖH D24 / P17B3-05 — ERİŞİLEBİLİRLİK ≠ KÖKEN.
-                // ÖLÇÜLDÜ (P17 tur-06): aynı tasarımın iki koşumunda
-                // rozet 'NIST WEBBOOK CONNECTED' ⟷ 'HRMA OXIDIZER
-                // DATABASE (CACHED)' arasında oynuyordu, sayısal sonuç
-                // 15.925/15.925 yaprak BİT-ÖZDEŞTİ. Sebep: TEK rozete İKİ
-                // ayrı olgu yazılıyordu — uzak ucun erişilebilirliği ve
-                // hesabın gerçek kaynağı. D23 veri katmanı gerçeği
-                // yayımladı (`supplies_calculation_data` +
-                // `calculation_data_source`); rozet artık ikisini BİRLİKTE
-                // söyler ve künye koşumdan koşuma oynamaz. Uç bu alanı
-                // beyan etmiyorsa köken İDDİA EDİLMEZ (fail-closed).
-                var _n = status.nist || {};
-                var _kaynak = _n.calculation_data_source;
-                var _metin;
-                if (_n.supplies_calculation_data === false && _kaynak) {
-                    _metin = T('solid.ui.nist_webbook_reachable_local',
-                        'NIST WebBook reachable - calculation data: ')
-                        + String(_kaynak);
-                } else if (_n.supplies_calculation_data === false) {
-                    _metin = T('solid.ui.nist_webbook_reachable_not_source',
-                        'NIST WebBook reachable - not the source of the '
-                        + 'numbers used by this calculation');
-                } else {
-                    _metin = T('solid.ui.nist_webbook_reachable_undeclared',
-                        'NIST WebBook reachable - the endpoint does not '
-                        + 'declare whether it supplied any number here');
-                }
-                setNistStatus(_metin, 'status-connected');
-                } else {
-                    setNistStatus(T('solid.msg.nist_webbook_offline', 'NIST WebBook Offline'),
-                                  'status-disconnected');
-                }
-                setCeaStatus(
-                    (status.cea && status.cea.status === 'connected')
-                        ? T('solid.ui.nasa_cea_connected', 'NASA CEA Connected') : T('solid.msg.nasa_cea_offline', 'NASA CEA Offline'),
-                    (status.cea && status.cea.status === 'connected')
-                        ? 'status-connected' : 'status-disconnected');
-            } catch (error) {
-                console.error(T('solid.msg.database_status_check_failed', 'Database status check failed:'), error);
-                // ÖH D24 · OH-D21-07 — DENETİM PATLARSA 'Offline' DEMEK
-                // KAZANILMAMIŞ HÜKÜMDÜR. Bu dal yalnız /api/database-status
-                // ÇAĞRISININ kendisi başarısız olduğunda çalışır (ağ hatası,
-                // JSON gövdesi yok, uç 5xx): hizmetin kapalı olduğu değil,
-                // DENETLENEMEDİĞİ bilinir. Rozet bu yüzden açılıştaki
-                // 'denetlenmedi' rengine (status-unknown) döner — kapalı
-                // beyanı yalnız ucun KENDİSİ 'connected değil' dediğinde
-                // verilir (yukarıdaki else dalı, hüküm kazanılmış).
-                setNistStatus(T('solid.msg.nist_webbook_check_failed', 'NIST WebBook - status check failed'), 'status-unknown');
-                setCeaStatus(T('solid.msg.nasa_cea_check_failed', 'NASA CEA - status check failed'), 'status-unknown');
-            }
-        }
+        // v3.0.1 K kulvarı — Veritabanı rozetleri (setNistStatus, setCeaStatus,
+        // checkDatabaseStatus ve açılıştaki /api/database-status yoklaması)
+        // SÖKÜLDÜ. Ölçülen kök neden (Ayberk tur 1): CEA kolu ağ çağrısı
+        // yapmayan yerel bir tablodur ve DAİMA 'local' döner, şablon yalnız
+        // 'connected'e "Connected" diyordu → her makinede "NASA CEA Offline";
+        // NIST kolunun ayrıştırıcısı NIST'in HTML'iyle eşleşmez → internet olsa
+        // bile "NIST WebBook Offline". Bu sayfanın hiçbir sayısı iki kaynaktan
+        // da gelmiyordu; kaynak katalog tablosunun Source sütununda yazılı.
 
         // ÖH D37 A1b sivi-kati-form · CW-A4E6 (KATI AYAĞI) — `defaults_applied`
         // KÜNYESİ EKRANDA. ÖLÇÜLDÜ: /calculate_solid künyeyi yayımlıyor
@@ -3180,15 +3218,35 @@
             // uydurulup sunucuya gönderiliyordu; dönen yörünge grafiği
             // kullanıcının motoruymuş gibi çiziliyordu. Bu bir gösterim
             // yedeği değil, ÇÖZÜCÜ GİRDİSİ — sahte giriş, sahte sonuç.
-            const trThrust = (typeof cr.average_thrust === 'number'
-                              && cr.average_thrust > 0) ? cr.average_thrust : null;
-            const trIsp = [cr.isp_vacuum, cr.isp_sea_level]
-                .find(v => typeof v === 'number' && v > 0) ?? null;
-            if (trThrust === null || trIsp === null) {
+            //
+            // V301/K-C1 (KT-15, NK-54) — AYNI KOŞULDA İTKİ VE Isp, ORTALAMA
+            // DEĞİL EĞRİ. ÖLÇÜLDÜ (K-C1/yorunge_once.json): gövde vakum
+            // Isp'yi (242,9 s) deniz seviyesi ortalama itkiyle (3707 N)
+            // eşliyordu; uç F·t_b/(Isp·g0) ile m_i − m_f'yi kıyaslıyor ve
+            // varsayılan BATES'te %10,6, yıldızda %16,8, wagon_wheel'de %28,0
+            // farkla 422 inconsistent_propellant_budget veriyordu — panel
+            // hiçbir varsayılan tasarımda çalışmıyordu. Kapı DOĞRU (aynı
+            // yanmanın iki tarifi çelişiyordu), kusur gövdedeydi. Şimdi:
+            //  * itki = ana tasarımın itki eğrisi {time, thrust} (ortalama
+            //    itkiyle dikdörtgen profil YOK; wagon_wheel'de tepe ivme
+            //    üç kat eksik çıkıyordu);
+            //  * Isp = isp_sea_level — eğrinin hesaplandığı ortam basıncındaki
+            //    Isp (= total_impulse / (m_p·g0), çözücü özdeşliği);
+            //  * lüle çıkış alanı + eğrinin ortam basıncı → uç itkiyi
+            //    irtifayla telafi eder (P4B3-22 sözleşmesi).
+            // Yanma süresi eğriden gelir; skaler itki/süre gönderilmez.
+            const trCurve = (cr.thrust_curve && Array.isArray(cr.thrust_curve.time)
+                             && Array.isArray(cr.thrust_curve.thrust)
+                             && cr.thrust_curve.time.length >= 2
+                             && cr.thrust_curve.time.length === cr.thrust_curve.thrust.length)
+                ? { time: cr.thrust_curve.time, thrust: cr.thrust_curve.thrust } : null;
+            const trIsp = (typeof cr.isp_sea_level === 'number' && isFinite(cr.isp_sea_level)
+                           && cr.isp_sea_level > 0) ? cr.isp_sea_level : null;
+            if (trCurve === null || trIsp === null) {
                 div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">'
-                    + T('solid.js.trajectory_needs_results',
-                        'Run a motor calculation first - the trajectory needs the '
-                        + 'computed thrust and specific impulse.')
+                    + T('solid.js.trajectory_needs_curve',
+                        'Run a motor calculation first - the trajectory is flown on the '
+                        + 'computed thrust curve and needs the sea-level specific impulse.')
                     + '</p>';
                 return;
             }
@@ -3197,10 +3255,21 @@
                 final_mass: getv('traj_final_mass', 5),
                 drag_coefficient: getv('traj_drag_coeff', 0.5),
                 reference_area: getv('traj_ref_area', 0.008),
-                burn_time: getv('traj_burn_time', 2),
-                thrust: trThrust,
+                thrust_curve: trCurve,
                 isp: trIsp
             };
+            // Lüle çıkış alanı (m²) yanıtın geometrik çıkış çapından (mm);
+            // eğrinin hesaplandığı ortam basıncı nozzle_design.performance
+            // .ambient_pressure'dan (bar → Pa). Alan yoksa anahtar KONMAZ ve
+            // uç telafinin kapalı olduğunu kendi uyarısıyla söyler.
+            if (typeof cr.exit_diameter === 'number' && isFinite(cr.exit_diameter)
+                    && cr.exit_diameter > 0) {
+                body.nozzle_exit_area = Math.PI * Math.pow(cr.exit_diameter / 2000, 2);
+                const pAmbBar = ((cr.nozzle_design || {}).performance || {}).ambient_pressure;
+                if (typeof pAmbBar === 'number' && isFinite(pAmbBar) && pAmbBar > 0) {
+                    body.thrust_reference_pressure = pAmbBar * 1e5;
+                }
+            }
             // ÖH D28 · P12bB2-16 — SAYFANIN SORDUĞU RÜZGÂR HIZI UCA GİDER.
             // ÖLÇÜLDÜ (a3/once_kosum.json + a3 rapor §P12bB2-16): sayfa
             // 'Environmental Conditions' panelinde `wind_speed` soruyor,
@@ -3247,6 +3316,19 @@
                     body: JSON.stringify(body)
                 });
                 const d = await resp.json();
+                if (!resp.ok) {
+                    // V301/K-C1 (KT-15): ret cümlesi ham makine kodu değil;
+                    // HRMAReject.metni (ortak çözücü) + bütçe reddinde iki
+                    // kütle ve fark sözlükten (EN + TR), sayılar gövdeden.
+                    const govde = Object.assign({}, d);
+                    if (d.error === 'inconsistent_propellant_budget' && d.message_params) {
+                        govde.message = TF('solid.msg.trajectory_propellant_budget_mismatch',
+                            d.message_params, d.message || d.error);
+                    }
+                    throw new Error(globalThis.HRMAReject
+                        ? HRMAReject.metni(govde, resp.status)
+                        : (govde.message || d.error || ('HTTP ' + resp.status)));
+                }
                 if (d.status !== 'success' || !d.plot_data) {
                     throw new Error(d.error || T('solid.msg.trajectory_data_could_not_be_retrieved', 'Trajectory data could not be retrieved'));
                 }
@@ -3374,7 +3456,15 @@
             const masses = (results.design_summary || {}).masses || {};
             setIfEmptyOrAuto('traj_initial_mass', masses.total_mass_kg, 3);
             setIfEmptyOrAuto('traj_final_mass', masses.dry_mass_kg, 3);
-            setIfEmptyOrAuto('traj_burn_time', results.burn_time, 3);
+            // V301/K-C1: kilitli alan — eğrinin son zaman noktası (gösterim).
+            const _tc = results.thrust_curve || {};
+            const _tbEgri = (Array.isArray(_tc.time) && _tc.time.length)
+                ? _tc.time[_tc.time.length - 1] : null;
+            const _tbAlan = document.getElementById('traj_burn_time');
+            if (_tbAlan) {
+                _tbAlan.value = (typeof _tbEgri === 'number' && isFinite(_tbEgri) && _tbEgri > 0)
+                    ? String(Math.round(_tbEgri * 1000) / 1000) : '';  // makine değeri (sayı girdisi); ham toFixed tavanı korunur
+            }
             // Referans alan: kasa DIŞ kesiti (mm çapından m² alana).
             // FAZ 6: burada results.chamber_diameter kullanılıyordu; o değer
             // grain dış çapıdır (100,0 mm), kasa dış çapı ise cidar + yalıtımla
@@ -3460,7 +3550,9 @@
         // Buradaki iki sayı da TEK doğruluk kaynağı olan motordan gelir:
         // bant sabitleri yukarıdaki satırın aynası, teslim edilen değer ise
         // hesabın döndürdüğü results.c_star'dır (uydurma yok).
-        var CSTAR_MIN_MS = 800;
+        // V301/N-CEA-2: alt sınır 700 m/s (propellants_db
+        // PROPELLANT_C_STAR_RANGE_M_S; kara barutun CEA c*'ı ~787 m/s).
+        var CSTAR_MIN_MS = 700;
         var CSTAR_MAX_MS = 2500;
         function updateCharVelocityBand(results) {
             const el = document.getElementById('char_velocity');
@@ -3621,6 +3713,9 @@
               parts: ['nozzle_kg'] },
             { id: 'insulation_mass', key: 'solid.ui.insulation_mass', fallback: 'Insulation Mass',
               parts: ['insulation_kg'] },
+            // V301/K-B (NK-30): astar ayrı satır (dökümün liner_kg kalemi).
+            { id: 'liner_mass',      key: 'solid.ui.liner_mass',      fallback: 'Liner Mass',
+              parts: ['liner_kg'] },
             { id: 'closure_mass',    key: 'solid.ui.closure_mass',    fallback: 'Closure Mass',
               parts: ['closure_kg', 'igniter_misc_kg'] }
         ];
@@ -3672,9 +3767,14 @@
                 return isFinite(v) ? v : null;
             };
             var cell = function (v) { return (v === null) ? '—' : numTxt(v, 3); };
-            var delta = function (a, b) {
+            var delta = function (a, b, pay) {
                 if (a === null || b === null) return '—';
                 var d = b - a;
+                // V301/K-B (NK-30): toplam satırında her alan 3 haneye
+                // yuvarlandığı için N alanın yuvarlama payı (N·0,0005 kg)
+                // bir fark DEĞİLDİR (ölçüldü: örnek katıda beş alanın
+                // toplamı 3,733, çözücü 3,7344 kg).
+                if (pay && Math.abs(d) <= pay) return numTxt((0), 3);
                 // Gösterilen basamağa yuvarlandığında sıfır olan fark
                 // İŞARETSİZ yazılır: alanlar 3 haneye yuvarlandığı için
                 // -1e-7 gibi artıklar '-0.000' diye görünüyordu ve sistematik
@@ -3711,7 +3811,8 @@
                 + '<td style="' + numCss + '"><strong>'
                 + cell(sumKnown ? formSum : null) + '</strong></td>'
                 + '<td style="' + numCss + '"><strong>'
-                + delta(solverDry, sumKnown ? formSum : null) + '</strong></td></tr>');
+                + delta(solverDry, sumKnown ? formSum : null,
+                        0.0005 * INERT_FIELD_MAP.length) + '</strong></td></tr>');
 
             // Aviyonik: çözücünün dökümünde YOK, bu bir araç kalemi. Sütunu
             // '—' bırakmak bilinçli — orada bir sayı olsaydı motorun parçası
@@ -3849,6 +3950,19 @@
             informational: function () {
                 return T('solid.msg.unwired_informational',
                     'Reference only: not used by the solver');
+            },
+            // V301/K-B (KT-04/05/07/12): yeni beyan kategorileri.
+            overridden_by_catalogue: function () {
+                return T('solid.msg.unwired_overridden_by_catalogue',
+                    'Not applied: catalogue mode uses the propellant record value');
+            },
+            overridden_by_material: function () {
+                return T('solid.msg.unwired_overridden_by_material',
+                    'Not applied: yield comes from the selected case material record');
+            },
+            not_applicable_to_grain_type: function () {
+                return T('solid.msg.unwired_not_applicable_to_grain_type',
+                    'Not used for this grain type');
             }
         };
 
@@ -3876,6 +3990,36 @@
         // Sayfada karşılığı olmayan beyan alanları (sessizce yutulmasın).
         var solidDeclaredFieldsNotOnPage = [];
 
+        // V301/K-B (KT-09): "Çözücü şu girdileri varsaydı: …" satırı. Liste
+        // ve değerler YANITTAN (grain_design); sayfada sayı yazılmaz.
+        function renderSolidAssumedLine(results) {
+            var kutu = document.getElementById('solidAssumedLine');
+            if (!kutu) return;
+            var gd = (results || {}).grain_design || {};
+            var liste = Array.isArray(gd.assumed_defaults) ? gd.assumed_defaults : [];
+            if (!liste.length) { kutu.style.display = 'none'; kutu.textContent = ''; return; }
+            var ww = gd.wagon_wheel || {};
+            var degerler = {
+                finned_length_fraction: gd.finned_length_fraction,
+                fin_count: gd.fin_count, slot_count: gd.slot_count,
+                fin_width: gd.fin_width_mm, fin_length: gd.fin_depth_mm,
+                slot_width: gd.slot_width_mm, slot_depth: gd.slot_depth_mm,
+                star_points: gd.star_points, star_radius: gd.point_depth,
+                wagon_hole_count: ww.hole_count,
+                wagon_hole_diameter: ww.hole_diameter_mm,
+                wagon_pitch_diameter: ww.pitch_diameter_mm
+            };
+            var parcalar = liste.map(function (id) {
+                var v = degerler[id];
+                if (typeof v !== 'number' || !isFinite(v)) return String(id);
+                return id + ' = ' + (Number.isInteger(v) ? String(v) : numTxt(v, 3));
+            });
+            kutu.textContent = TF('solid.msg.solver_assumed_inputs',
+                { list: parcalar.join(', ') },
+                'The solver assumed these inputs (not supplied): {list}');
+            kutu.style.display = 'block';
+        }
+
         function applySolidDeclarationBadges(results) {
             solidDeclaredFieldsNotOnPage = [];
             var eski = document.querySelectorAll('[data-solid-declaration-badge]');
@@ -3895,7 +4039,9 @@
                     if (!Array.isArray(idler)) return;
                     idler.forEach(function (id) {
                         var el = document.getElementById(id);
-                        var grup = el ? el.closest('.form-group') : null;
+                        // V301/K-B: inhibitör kutuları .form-group içinde değil.
+                        var grup = el ? (el.closest('.form-group')
+                                         || el.closest('label')) : null;
                         if (!grup) {
                             solidDeclaredFieldsNotOnPage.push(id);
                             return;
@@ -3942,6 +4088,7 @@
                         AMBER, 'grain_design.assumed_defaults/' + id));
                 });
             }
+            renderSolidAssumedLine(results);
             return solidDeclaredFieldsNotOnPage;
         }
         // <<< SOLID_UNWIRED_BADGES_END
@@ -4029,10 +4176,15 @@
             const caseMass = parseFloat(document.getElementById('case_mass').value) || 0;
             const nozzleMass = parseFloat(document.getElementById('nozzle_mass').value) || 0;
             const insulationMass = parseFloat(document.getElementById('insulation_mass').value) || 0;
-            const avionicsMass = parseFloat(document.getElementById('avionics_mass').value) || 0;
+            const linerEl = document.getElementById('liner_mass');
+            const linerMass = linerEl ? (parseFloat(linerEl.value) || 0) : 0;
             const closureMass = parseFloat(document.getElementById('closure_mass').value) || 0;
             
-            const dryMass = caseMass + nozzleMass + insulationMass + avionicsMass + closureMass;
+            // V301/K-B (NK-30): MOTOR kuru kütlesi — astar dâhil, aviyonik
+            // HARİÇ (çözücünün dry_mass_kg tanımı; aviyonik araç kalemidir).
+            // Eskiden aviyonik eklenip astar unutuluyordu: alan "çözücü
+            // hesaplıyor" derken çözücünün sayısını göstermiyordu.
+            const dryMass = caseMass + nozzleMass + insulationMass + linerMass + closureMass;
             const wetMass = dryMass + propellantMass;
             
             document.getElementById('dry_mass').value = dryMass.toFixed(3);
@@ -4160,6 +4312,24 @@
             }).join(' L') + ' Z';
         }
 
+        // V301/K-B (KT-07): BATES dışı tiplerde anlamı olmayan alanlar devre
+        // dışı (gönderilmez; bkz. collectAllParameters) ve neden yazılır.
+        var BATES_ONLY_FIELD_IDS = ['grain_count', 'grain_gap', 'inhibit_front',
+                                    'inhibit_rear', 'inhibit_outer'];
+        function syncBatesOnlyFields(grainType) {
+            const bates = (grainType === 'bates');
+            BATES_ONLY_FIELD_IDS.forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.disabled = !bates;
+            });
+            const not = document.getElementById('bates_only_note');
+            if (not) not.style.display = bates ? 'none' : 'block';
+        }
+        function isBatesSelected() {
+            const el = document.getElementById('grain_type');
+            return !el || el.value === 'bates';
+        }
+
         function updateGrainPreview() {
             const grainType = document.getElementById('grain_type').value;
             const preview = document.getElementById('grain_preview');
@@ -4169,6 +4339,10 @@
             document.getElementById('finocyl_config').style.display = (grainType === 'finocyl') ? 'block' : 'none';
             const slottedCfg = document.getElementById('slotted_config');
             if (slottedCfg) slottedCfg.style.display = (grainType === 'slotted') ? 'block' : 'none';
+            // V301/K-B (KT-08): wagon paneli; (KT-07) BATES-yalnız alanlar.
+            const wagonCfg = document.getElementById('wagon_config');
+            if (wagonCfg) wagonCfg.style.display = (grainType === 'wagon_wheel') ? 'block' : 'none';
+            syncBatesOnlyFields(grainType);
 
             const sh = grainPreviewShell();
             if (!sh) {
@@ -4233,13 +4407,19 @@
                 }).join(' L') + ' Z" ' + PORT + '/>';
 
             } else if (grainType === 'wagon_wheel') {
-                // r_delik = D_core/4, çevre delikleri R_pitch = D_dis/4.
-                const rHole = (sh.Di / 4) * sh.scale;
-                const rPitch = (sh.Do / 4) * sh.scale;
+                // V301/K-B (KT-08): önizleme çözücünün geometrisiyle AYNI —
+                // alanlar doluysa onlar, boşsa beyanlı varsayılan (6 delik,
+                // delik çapı = çekirdek/2, bölüm dairesi = dış çap/2).
+                const wN = grainPreviewNum('wagon_hole_count');
+                const wD = grainPreviewNum('wagon_hole_diameter');
+                const wP = grainPreviewNum('wagon_pitch_diameter');
+                const nHoles = (wN !== null && wN >= 3) ? Math.round(wN) : 6;
+                const rHole = ((wD !== null && wD > 0) ? wD / 2 : sh.Di / 4) * sh.scale;
+                const rPitch = ((wP !== null && wP > 0) ? wP / 2 : sh.Do / 4) * sh.scale;
                 label = T('solid.ui.wagon_wheel', 'Wagon Wheel');
                 body = '<circle cx="' + sh.c + '" cy="' + sh.c + '" r="' + svgAttrNum(rHole) + '" ' + PORT + '/>';
-                for (let k = 0; k < 6; k++) {
-                    const a = 2 * Math.PI * k / 6 - Math.PI / 2;
+                for (let k = 0; k < nHoles; k++) {
+                    const a = 2 * Math.PI * k / nHoles - Math.PI / 2;
                     body += '<circle cx="' + svgAttrNum(sh.c + rPitch * Math.cos(a))
                           + '" cy="' + svgAttrNum(sh.c + rPitch * Math.sin(a))
                           + '" r="' + svgAttrNum(rHole) + '" ' + PORT + '/>';
@@ -4290,6 +4470,44 @@
             preview.innerHTML = grainPreviewOpen(label, note).replace('@BODY@', body);
         }
         // <<< SOLID_GRAIN_PREVIEW_END
+
+        // V301 ana model: K-B (NK-28) eğri yardımcıları önizleme bloğunun DIŞINDA
+        // durur — önizleme bloğu node'da tek başına koşar ve numTxt kullanamaz
+        // (test_d36_kati_a1); bunlar Plotly notu (metin) yazar, SVG özniteliği değil.
+        // V301/K-B (NK-28): yayımlanan diziye çözücünün tükeniş beyanını
+        // (burnout_end: t_b'de itki ve basınç 0) ekler; dizi kopyalanır,
+        // sonuç nesnesi değişmez. Beyan yoksa dizi aynen döner.
+        function solidCurveWithBurnout(tc, alan) {
+            var x = ((tc || {}).time || []).slice();
+            var y = ((tc || {})[alan] || []).slice();
+            var son = (tc || {}).burnout_end;
+            var deger = son ? (alan === 'thrust' ? son.thrust_n : son.pressure_bar) : null;
+            if (son && typeof son.time_s === 'number' && typeof deger === 'number') {
+                x.push(son.time_s);
+                y.push(deger);
+            }
+            return { x: x, y: y };
+        }
+        // Rejim sınırında tutulan aralıklar: gölge + kısa adlı not (12 px).
+        function solidAddHoldWindows(layout, tc) {
+            var pencere = ((tc || {}).regime_boundary_hold) || [];
+            if (!pencere.length) return;
+            layout.shapes = (layout.shapes || []).slice();
+            layout.annotations = (layout.annotations || []).slice();
+            pencere.forEach(function (w) {
+                if (typeof w.t_start_s !== 'number' || typeof w.t_end_s !== 'number') return;
+                layout.shapes.push({ type: 'rect', xref: 'x', yref: 'paper',
+                    x0: w.t_start_s, x1: w.t_end_s, y0: 0, y1: 1, layer: 'below',
+                    fillcolor: 'rgba(255,140,51,0.14)', line: { width: 0 } });
+                layout.annotations.push({ xref: 'x', yref: 'paper', x: w.t_end_s,
+                    y: 0.97, xanchor: 'right', yanchor: 'top', showarrow: false,
+                    font: { size: 12, color: '#ff8c33' },
+                    hovertext: w.basis || '',
+                    text: TF('solid.msg.curve_boundary_hold',
+                        { p: numTxt(w.pressure_bar, 1) },
+                        'Held at burn-rate regime boundary {p} bar') });
+            });
+        }
 
         // P12bB2-02 — irtifa ⟷ ortam basıncı kilidi (tek beyan kuralı).
         // `test_altitude` sonlu ve > 0 ise ortam basıncını İRTİFA sürer:
@@ -4343,6 +4561,152 @@
             return Number.isFinite(v) ? v : undefined;
         }
 
+        // ===== V301/K-B — malzeme seçicileri, akma kaynağı, k/σ kipi =====
+        // Seçenekler ve gösterilen özellikler SUNUCUNUN kaydından gelir
+        // (app.py _kati_malzeme_secim_kaydi); burada sayı yazılmaz.
+        // Kayıt, düz HTML'deki gizli düğümün data-registry özniteliğinden
+        // okunur (hibrit M deseni; inline script node --check ile ayrışır).
+        var SOLID_MATERIALS = (function () {
+            var el = document.getElementById('solidMaterialRegistry');
+            try { return JSON.parse((el && el.dataset.registry) || '{}'); }
+            catch (e) { return {}; }
+        })();
+
+        function solidMaterialOption(alan, deger) {
+            var rol = SOLID_MATERIALS[alan];
+            if (!rol) return null;
+            for (var i = 0; i < rol.options.length; i++) {
+                if (rol.options[i].value === deger) return rol.options[i];
+            }
+            return null;
+        }
+
+        function _solidPropLine(etiket, deger) {
+            return '<div><span>' + etiket + '</span> ' + deger + '</div>';
+        }
+
+        function syncSolidMaterial(alan) {
+            var sel = document.getElementById(alan);
+            var kutu = document.getElementById(alan + '_props');
+            if (!sel || !kutu) return;
+            var o = solidMaterialOption(alan, sel.value);
+            if (!o) { kutu.innerHTML = ''; return; }
+            var satirlar = [];
+            var sayi = function (v, d) { return numTxt(v, d); };
+            if (alan === 'case_material') {
+                if (typeof o.yield_strength_mpa === 'number')
+                    satirlar.push(_solidPropLine(T('solid.mat.prop_yield', 'Yield strength:'),
+                        sayi(o.yield_strength_mpa, 0) + ' MPa'));
+                if (typeof o.density_kg_m3 === 'number')
+                    satirlar.push(_solidPropLine(T('solid.mat.prop_density', 'Density:'),
+                        sayi(o.density_kg_m3, 0) + ' kg/m³'));
+                satirlar.push(_solidPropLine(T('solid.mat.prop_service_temp', 'Service temperature limit (case thermal verdict):'),
+                    (typeof o.max_service_temp_k === 'number')
+                        ? sayi(o.max_service_temp_k, 0) + ' K'
+                        : T('solid.mat.no_temp_record', 'no record — case thermal verdict not evaluated')));
+                if (o.generic_allowable)
+                    satirlar.push('<div>' + T('solid.mat.generic_allowable_note',
+                        'HRMA generic allowable: enter your measured hoop allowable with "My value".') + '</div>');
+                satirlar.push('<div>' + T('solid.mat.closure_liner_note',
+                    'Closures = case material (closure mass = 30% of the shell); insulation and liner use the liner density field, not this material.') + '</div>');
+                syncSolidYieldSource();
+            } else {
+                satirlar.push(_solidPropLine(T('solid.mat.prop_allowable_temp', 'Allowable temperature (throat thermal verdict):'),
+                    (typeof o.allowable_temperature_k === 'number')
+                        ? sayi(o.allowable_temperature_k, 0) + ' K'
+                        : T('solid.mat.no_temp_record_nozzle', 'no record — throat thermal verdict not evaluated')));
+                satirlar.push(_solidPropLine(T('solid.mat.prop_erosion', 'Throat erosion band:'),
+                    o.erosion_band === 'published'
+                        ? T('solid.mat.erosion_published', 'published band (modelled)')
+                        : T('solid.mat.erosion_none', 'no published band (rigid throat assumed)')));
+            }
+            if (o.source) {
+                var src = String(o.source).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+                satirlar.push('<div style="opacity:0.85;">' + T('solid.mat.prop_source', 'Source:') + ' ' + src + '</div>');
+            }
+            kutu.innerHTML = satirlar.join('');
+        }
+
+        function syncSolidYieldSource() {
+            var kip = document.getElementById('yield_strength_source');
+            var alan = document.getElementById('yield_strength');
+            if (!kip || !alan) return;
+            var malzemeden = kip.value !== 'user';
+            alan.readOnly = malzemeden;
+            if (malzemeden) {
+                var o = solidMaterialOption('case_material',
+                    (document.getElementById('case_material') || {}).value);
+                if (o && typeof o.yield_strength_mpa === 'number') {
+                    alan.value = String(Math.round(o.yield_strength_mpa * 10) / 10);  // makine değeri (sayı girdisi nokta bekler); ham toFixed tavanı (test_d35) korunur
+                }
+            }
+        }
+
+        function solidYieldFields() {
+            var kip = document.getElementById('yield_strength_source');
+            var deger = (kip && kip.value === 'user') ? 'user' : 'material';
+            // 'material' kipinde ekrandaki sayı gönderilen kayıtla AYNI olsun
+            // (proje yüklemesi alanı başka bir sayıyla doldurmuş olabilir).
+            if (deger === 'material') syncSolidYieldSource();
+            var out = { yield_strength_source: deger };
+            if (deger === 'user') {
+                var v = solOptNum('yield_strength');
+                if (v !== undefined) out.yield_strength = v;
+            }
+            return out;
+        }
+
+        function syncSolidCoeffSource(id) {
+            var kip = document.getElementById(id + '_source');
+            var alan = document.getElementById(id);
+            var durum = document.getElementById(id + '_state');
+            if (!kip || !alan) return;
+            var katalog = kip.value !== 'user';
+            alan.readOnly = katalog;
+            if (durum) {
+                durum.textContent = katalog
+                    ? T('solid.msg.coeff_state_catalogue', 'Not sent: the solver uses the propellant record value (shown after Calculate).')
+                    : T('solid.msg.coeff_state_user', 'Sent with the override flag: the solver applies this value.');
+            }
+        }
+
+        // Alanlar ÇAĞIRANDA id'leriyle okunur (toplayıcı envanteri statik
+        // tarar; dinamik id birleştirmesi "okunmuyor" görünürdü).
+        function solidCoeffFields(id, kip, alan) {
+            if (!kip || kip.value !== 'user' || !alan) return {};
+            var ham = String(alan.value == null ? '' : alan.value).trim();
+            if (ham === '') return {};
+            var v = parseFloat(ham);
+            if (!Number.isFinite(v)) return {};
+            var out = {};
+            out[id] = v;
+            out[id + '_override'] = true;
+            return out;
+        }
+
+        // Hesaptan sonra 'catalogue' kipindeki salt okur alanlar çözücünün
+        // KULLANDIĞI değeri gösterir (yanıttan; sayı uydurulmaz).
+        function applySolidCoeffFeedback(results) {
+            var r = results || {};
+            var ero = ((((r.detailed_analysis || {}).grain_regression_analysis || {})
+                .erosive_burning_effects) || {}).erosive_coefficient_k;
+            var sig = ((r.environmental_analysis || {}).temperature_effects || {}).sigma_p_per_k;
+            [['erosive_k', ero], ['temp_coeff', sig]].forEach(function (p) {
+                var kip = document.getElementById(p[0] + '_source');
+                var alan = document.getElementById(p[0]);
+                if (!kip || !alan || kip.value === 'user') return;
+                alan.value = (typeof p[1] === 'number' && isFinite(p[1])) ? String(p[1]) : '';
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            syncSolidMaterial('case_material');
+            syncSolidMaterial('nozzle_material');
+            syncSolidYieldSource();
+            syncSolidCoeffSource('erosive_k');
+            syncSolidCoeffSource('temp_coeff');
+        });
+
         function collectAllParameters() {
             return {
                 // Propellant properties
@@ -4357,54 +4721,77 @@
                 // katalog değerini göndermek ile hiç göndermemek aynı yanıtı
                 // verir (rapor 4. tur, esdeger_* vakaları).
                 density: solOptNum('density'),
-                heat_value: parseFloat(document.getElementById('heat_value').value) || 2500,
+                heat_value: solOptNum('heat_value'),
                 flame_temp: solOptNum('flame_temp'),
                 molecular_weight: solOptNum('molecular_weight'),
                 gamma: solOptNum('gamma'),
                 char_velocity: solOptNum('char_velocity'),
-                erosive_k: parseFloat(document.getElementById('erosive_k').value) || 0.0002,
-                erosive_m: parseFloat(document.getElementById('erosive_m').value) || 0.8,
-                temp_coeff: parseFloat(document.getElementById('temp_coeff').value) || 0.002,
+                // V301/K-B (KT-04/05): 'catalogue' kipinde k ve σ GÖNDERİLMEZ;
+                // 'user' kipinde değer + override bayrağı gider (boşsa hiçbiri).
+                ...solidCoeffFields('erosive_k',
+                    document.getElementById('erosive_k_source'),
+                    document.getElementById('erosive_k')),
+                ...solidCoeffFields('temp_coeff',
+                    document.getElementById('temp_coeff_source'),
+                    document.getElementById('temp_coeff')),
+                erosive_m: solOptNum('erosive_m'),
                 
                 // Grain geometry
-                grain_count: parseFloat(document.getElementById('grain_count').value) || 3,
-                web_thickness: parseFloat(document.getElementById('web_thickness').value) || 25,
+                // V301/K-B (KT-07): BATES dışında gönderilmez (devre dışı).
+                grain_count: isBatesSelected() ? solOptNum('grain_count') : undefined,
+                // V301/K-A: türetilen web BOŞSA gönderilmez (`|| 25` ikamesi
+                // kalktı); doluysa çözücünün son yayımladığı değerdir.
+                web_thickness: solOptNum('web_thickness'),
                 grain_type: document.getElementById('grain_type').value,
-                outer_diameter: parseFloat(document.getElementById('outer_diameter').value) || 100,
-                core_diameter: parseFloat(document.getElementById('core_diameter').value) || 30,
-                grain_length: parseFloat(document.getElementById('grain_length').value) || 500,
-                grain_gap: parseFloat(document.getElementById('grain_gap').value) || 2,
-                insulation_thickness: parseFloat(document.getElementById('insulation_thickness').value) || 3,
+                // V301/K-A: tane çapları boşsa GÖNDERİLMEZ (`|| 100` / `|| 30`
+                // ikamesi kalktı). outer_diameter boşsa sunucu tek çaplı
+                // biçime düşer ve bunu case_bore künyesinde beyan eder;
+                // çekirdek boşsa uç 422 incomplete_input döner.
+                outer_diameter: solOptNum('outer_diameter'),
+                core_diameter: solOptNum('core_diameter'),
+                grain_length: solOptNum('grain_length'),
+                grain_gap: isBatesSelected() ? solOptNum('grain_gap') : undefined,
+                insulation_thickness: solOptNum('insulation_thickness'),
                 
                 // Star configuration
-                star_points: parseFloat(document.getElementById('star_points').value) || 6,
-                star_radius: parseFloat(document.getElementById('star_radius').value) || 15,
-                star_fillet: parseFloat(document.getElementById('star_fillet').value) || 2,
+                star_points: solOptNum('star_points'),
+                star_radius: solOptNum('star_radius'),
+                star_fillet: solOptNum('star_fillet'),
                 
                 // Finocyl configuration
-                fin_count: parseFloat(document.getElementById('fin_count').value) || 4,
-                fin_width: parseFloat(document.getElementById('fin_width').value) || 8,
-                fin_length: parseFloat(document.getElementById('fin_length').value) || 20,
+                fin_count: solOptNum('fin_count'),
+                fin_width: solOptNum('fin_width'),
+                fin_length: solOptNum('fin_length'),
+                // V301/K-B (KT-09): boşsa gönderilmez; çözücü 0,4'ü beyanla uygular.
+                finned_length_fraction: solOptNum('finned_length_fraction'),
+                // V301/K-B (KT-08): wagon wheel geometrisi (boşsa beyanlı varsayılan).
+                wagon_hole_count: solOptNum('wagon_hole_count'),
+                wagon_hole_diameter: solOptNum('wagon_hole_diameter'),
+                wagon_pitch_diameter: solOptNum('wagon_pitch_diameter'),
 
                 // Slotted configuration (motor slot_count / slot_width / slot_depth bekliyor)
-                slot_count: parseFloat((document.getElementById('slot_count') || {}).value) || 6,
-                slot_width: parseFloat((document.getElementById('slot_width') || {}).value) || 4,
-                slot_depth: parseFloat((document.getElementById('slot_depth') || {}).value) || 25,
+                slot_count: solOptNum('slot_count'),
+                slot_width: solOptNum('slot_width'),
+                slot_depth: solOptNum('slot_depth'),
 
                 // Inhibitor settings
-                inhibit_front: document.getElementById('inhibit_front').checked,
-                inhibit_rear: document.getElementById('inhibit_rear').checked,
-                inhibit_outer: document.getElementById('inhibit_outer').checked,
+                inhibit_front: isBatesSelected() ? document.getElementById('inhibit_front').checked : undefined,
+                inhibit_rear: isBatesSelected() ? document.getElementById('inhibit_rear').checked : undefined,
+                inhibit_outer: isBatesSelected() ? document.getElementById('inhibit_outer').checked : undefined,
                 
                 // Chamber properties
-                chamber_diameter: parseFloat(document.getElementById('chamber_diameter').value) || 100,
-                chamber_volume: parseFloat(document.getElementById('chamber_volume').value) || 2.5,
+                // V301/K-A (karar A): kasa iç çapı ve serbest hacim boşsa
+                // GÖNDERİLMEZ; sunucu türetir ve beyan eder (case_bore).
+                chamber_diameter: solOptNum('chamber_diameter'),
+                chamber_volume: solOptNum('chamber_volume'),
                 case_material: document.getElementById('case_material').value,
-                yield_strength: parseFloat(document.getElementById('yield_strength').value) || 250,
-                safety_factor: parseFloat(document.getElementById('safety_factor').value) || 2.5,
-                liner_thickness: parseFloat(document.getElementById('liner_thickness').value) || 2,
-                liner_density: parseFloat(document.getElementById('liner_density').value) || 1200,
-                initial_temp: parseFloat(document.getElementById('initial_temp').value) || 298,
+                // V301/K-B (KT-12): akma kaynağı her zaman gider; değer yalnız
+                // 'user' kipinde (boşsa gönderilmez, kayıt kullanılır).
+                ...solidYieldFields(),
+                safety_factor: solOptNum('safety_factor'),
+                liner_thickness: solOptNum('liner_thickness'),
+                liner_density: solOptNum('liner_density'),
+                initial_temp: solOptNum('initial_temp'),
                 case_thickness: solOptNum('case_thickness'),
                 // Kapak cıvata birleşimi: sayı BOŞ bırakılabilir. `|| n`
                 // kalıbı bilerek kullanılmadı — boş alan varsayılan bir
@@ -4417,15 +4804,16 @@
                 closure_bolt_class: document.getElementById('closure_bolt_class').value,
                 
                 // Nozzle properties
-                throat_diameter: parseFloat(document.getElementById('throat_diameter').value) || 15,
-                exit_diameter: parseFloat(document.getElementById('exit_diameter').value) || 35,
-                expansion_ratio: parseFloat(document.getElementById('expansion_ratio').value) || 5.44,
-                convergent_angle: parseFloat(document.getElementById('convergent_angle').value) || 45,
-                divergent_angle: parseFloat(document.getElementById('divergent_angle').value) || 15,
-                nozzle_efficiency: parseFloat(document.getElementById('nozzle_efficiency').value) || 0.95,
-                erosion_factor: parseFloat(document.getElementById('erosion_factor').value) || 0.001,
+                throat_diameter: solOptNum('throat_diameter'),
+                exit_diameter: solOptNum('exit_diameter'),
+                expansion_ratio: solOptNum('expansion_ratio'),
+                convergent_angle: solOptNum('convergent_angle'),
+                divergent_angle: solOptNum('divergent_angle'),
+                nozzle_efficiency: solOptNum('nozzle_efficiency'),
+                // V301/K-A: boş = gönderilmez (çözücü: rijit boğaz, beyanlı).
+                erosion_factor: solOptNum('erosion_factor'),
                 nozzle_material: document.getElementById('nozzle_material').value,
-                chamber_pressure: parseFloat(document.getElementById('chamber_pressure').value) || 40,
+                chamber_pressure: solOptNum('chamber_pressure'),
                 
                 // Burn rate parameters
                 // (v2.6.27, parametre tutarlılığı) Dokunulmamış alan payload'a
@@ -4449,18 +4837,18 @@
                 burn_rate_preset: (document.getElementById('burn_rate_preset') || {}).value || 'custom',
                 
                 // Efficiency factors
-                combustion_efficiency: parseFloat(document.getElementById('combustion_efficiency').value) || 0.95,
-                cf_efficiency: parseFloat(document.getElementById('cf_efficiency').value) || 0.98,
-                overall_efficiency: parseFloat(document.getElementById('overall_efficiency').value) || 0.92,
-                discharge_coeff: parseFloat(document.getElementById('discharge_coeff').value) || 0.98,
-                kinetic_efficiency: parseFloat(document.getElementById('kinetic_efficiency').value) || 0.97,
-                divergence_loss: parseFloat(document.getElementById('divergence_loss').value) || 0.02,
+                combustion_efficiency: solOptNum('combustion_efficiency'),
+                cf_efficiency: solOptNum('cf_efficiency'),
+                overall_efficiency: solOptNum('overall_efficiency'),
+                discharge_coeff: solOptNum('discharge_coeff'),
+                kinetic_efficiency: solOptNum('kinetic_efficiency'),
+                divergence_loss: solOptNum('divergence_loss'),
                 two_phase_loss: solOptNum('two_phase_loss'),
                 
                 // Environmental conditions
-                ignition_delay: parseFloat(document.getElementById('ignition_delay').value) || 50,
+                ignition_delay: solOptNum('ignition_delay'),
                 // Ateşleyici hedef basıncı (P_ateş / Pc) — tasarım seçimi.
-                igniter_pressure_fraction: parseFloat(document.getElementById('igniter_pressure_fraction').value) || 0.15,
+                igniter_pressure_fraction: solOptNum('igniter_pressure_fraction'),
                 // P12bB2-02 (ÖH D15/a2) — ORTAM BASINCI TEK KAYNAKTAN GİDER.
                 // Ölçüldü: motor önce `test_altitude`'u ISA basıncına çevirip
                 // `ambient_pressure_bar`'a yazıyor, HEMEN SONRA `atm_pressure`
@@ -4479,31 +4867,57 @@
                 // syncAmbientPressureInterlock() irtifa girildiği anda basınç
                 // alanını devre dışı bırakır (beyan değil, KİLİT).
                 ...solidAmbientFields(),
-                ambient_temp: parseFloat(document.getElementById('ambient_temp').value) || 298,
-                humidity: parseFloat(document.getElementById('humidity').value) || 60,
-                wind_speed: parseFloat(document.getElementById('wind_speed').value) || 0,
+                ambient_temp: solOptNum('ambient_temp'),
+                humidity: solOptNum('humidity'),
+                wind_speed: solOptNum('wind_speed'),
                 
                 // Mass breakdown
-                propellant_mass: parseFloat(document.getElementById('propellant_mass').value) || 0,
-                case_mass: parseFloat(document.getElementById('case_mass').value) || 2.5,
-                nozzle_mass: parseFloat(document.getElementById('nozzle_mass').value) || 0.5,
-                insulation_mass: parseFloat(document.getElementById('insulation_mass').value) || 0.3,
-                avionics_mass: parseFloat(document.getElementById('avionics_mass').value) || 0.2,
-                closure_mass: parseFloat(document.getElementById('closure_mass').value) || 0.8,
-                dry_mass: parseFloat(document.getElementById('dry_mass').value) || 0,
-                wet_mass: parseFloat(document.getElementById('wet_mass').value) || 0,
+                propellant_mass: solOptNum('propellant_mass'),
+                case_mass: solOptNum('case_mass'),
+                nozzle_mass: solOptNum('nozzle_mass'),
+                insulation_mass: solOptNum('insulation_mass'),
+                avionics_mass: solOptNum('avionics_mass'),
+                closure_mass: solOptNum('closure_mass'),
+                liner_mass: solOptNum('liner_mass'),
+                dry_mass: solOptNum('dry_mass'),
+                wet_mass: solOptNum('wet_mass'),
                 
                 // Measurement parameters
-                pressure_sensor_range: parseFloat(document.getElementById('pressure_sensor_range').value) || 10,
-                sampling_freq: parseFloat(document.getElementById('sampling_freq').value) || 1000,
-                load_cell_capacity: parseFloat(document.getElementById('load_cell_capacity').value) || 5000,
-                calibration_factor: parseFloat(document.getElementById('calibration_factor').value) || 1.0,
-                data_collection_time: parseFloat(document.getElementById('data_collection_time').value) || 10,
-                filter_cutoff: parseFloat(document.getElementById('filter_cutoff').value) || 100,
-                uncertainty_level: parseFloat(document.getElementById('uncertainty_level').value) || 2
+                pressure_sensor_range: solOptNum('pressure_sensor_range'),
+                sampling_freq: solOptNum('sampling_freq'),
+                load_cell_capacity: solOptNum('load_cell_capacity'),
+                calibration_factor: solOptNum('calibration_factor'),
+                data_collection_time: solOptNum('data_collection_time'),
+                filter_cutoff: solOptNum('filter_cutoff'),
+                uncertainty_level: solOptNum('uncertainty_level')
             };
         }
         
+        // V301/K-A — hesap ucunun ret gövdesi -> kullanıcı metni (TEK yer).
+        // Metin UYDURULMAZ: cümle, makine kodu ve alan adları sunucunun
+        // gövdesinden gelir; çeviri yoksa sunucunun EN cümlesi kalır.
+        function _solidRetMetni(govde, durum) {
+            if (!govde || typeof govde !== 'object') return 'HTTP ' + durum;
+            const kopya = Object.assign({}, govde);
+            const srv = function (v) {
+                return (typeof window !== 'undefined' && window.I18N
+                        && typeof window.I18N.serverText === 'function')
+                    ? window.I18N.serverText(v) : v;
+            };
+            if (typeof kopya.message === 'string' && kopya.message) {
+                kopya.message = srv(kopya.message);
+            } else if (typeof kopya.error === 'string' && kopya.error) {
+                kopya.error = srv(kopya.error);
+            }
+            if (typeof HRMAReject !== 'undefined' && HRMAReject
+                    && typeof HRMAReject.metni === 'function') {
+                return HRMAReject.metni(kopya, durum);
+            }
+            return (typeof kopya.message === 'string' && kopya.message)
+                || (typeof kopya.error === 'string' && kopya.error)
+                || ('HTTP ' + durum);
+        }
+
         async function calculateSolid() {
             const data = collectAllParameters();
             
@@ -4519,11 +4933,28 @@
                 });
                 
                 const results = await response.json();
-                
-                if (results.error) {
-                    throw new Error(results.error);
+
+                // V301/K-A: ret gövdesi (422 grain_does_not_fit_case,
+                // input_not_accepted, port_smaller_than_throat …) cümlesi
+                // kesilmeden, adlı alanlarla ve etkin dilde basılır — hibrit
+                // app.js `sunucuRetHatasi` deseni: sunucu cümlesi önce
+                // i18n_charts.js serverText'ten (MSG_PATTERNS) geçer, sonra
+                // ortak çözücü HRMAReject.metni kod + alanları ekler.
+                if (!response.ok || results.error) {
+                    if (typeof _retAlanlariniIsaretle === 'function') _retAlanlariniIsaretle(results);
+                    throw new Error(_solidRetMetni(results, response.status));
                 }
-                
+
+                // V301/DİL (kalem 3): başarılı hesap önceki hesap hatası
+                // bildirimini ve eski sonuç bandını kaldırır (sıvıdaki
+                // _liquidHesapHatalariniTemizle deseni).
+                if (typeof document.querySelectorAll === 'function') {
+                    Array.prototype.forEach.call(
+                        document.querySelectorAll('#toast-stack [data-solid-calc-error]'),
+                        function (el) { if (el.parentNode) el.parentNode.removeChild(el); });
+                }
+                if (typeof _retAlanlariniIsaretle === 'function') _retAlanlariniIsaretle(null);
+                if (typeof _eskiSonucBandi === 'function') _eskiSonucBandi(false);
                 currentResults = results;
                 // A1 — uçuş köprüsü (bkz. app.js'teki eş çağrı).
                 if (window.FlightHandoff) {
@@ -4536,11 +4967,65 @@
                 
             } catch (error) {
                 showError(T('solid.js.error_prefix', 'Error') + ': ' + (globalThis.escapeNoticeText || String)(error.message));
+                const _yigin = (typeof document.getElementById === 'function')
+                    ? document.getElementById('toast-stack') : null;
+                const _son = _yigin && _yigin.lastElementChild;
+                if (_son && typeof _son.setAttribute === 'function') {
+                    _son.setAttribute('data-solid-calc-error', '1');
+                }
+                if (typeof _eskiSonucBandi === 'function') _eskiSonucBandi(true);
             } finally {
                 showLoading(false);
             }
         }
         
+        // V301/DİL (kalem 3): sunucu reddinin ADLADIĞI alanlar formda
+        // işaretlenir (aria-invalid + .hd-alan-hatali; hibrit app.js deseni);
+        // başarılı hesapta işaretler kalkar. Ad ret gövdesinden okunur
+        // (invalid_fields[].field ya da field) — alan uydurulmaz.
+        function _retAlanlariniIsaretle(govde) {
+            if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+            Array.prototype.forEach.call(document.querySelectorAll('.hd-alan-hatali'), function (el) {
+                el.classList.remove('hd-alan-hatali');
+                el.removeAttribute('aria-invalid');
+            });
+            if (!govde || typeof govde !== 'object') return;
+            const adlar = [];
+            if (Array.isArray(govde.invalid_fields)) {
+                govde.invalid_fields.forEach(function (f) {
+                    const ad = (f && typeof f === 'object') ? f.field : f;
+                    if (typeof ad === 'string' && ad) adlar.push(ad);
+                });
+            }
+            if (typeof govde.field === 'string' && govde.field) adlar.push(govde.field);
+            adlar.forEach(function (ad) {
+                const el = document.getElementById(ad);
+                if (el && el.classList) {
+                    el.classList.add('hd-alan-hatali');
+                    el.setAttribute('aria-invalid', 'true');
+                }
+            });
+        }
+
+        // V301/DİL (kalem 3, NK-31/NK-38): başarısız hesaptan sonra ekranda
+        // kalan sonuç "eski sonuç" bandıyla işaretlenir; başarılı hesap
+        // bandı kaldırır. Sonuç SİLİNMEZ (kullanıcı neyle kıyasladığını
+        // görür) ama hangi girdiye ait olmadığı açıkça yazılır.
+        function _eskiSonucBandi(goster) {
+            const kap = document.getElementById('results');
+            if (!kap) return;
+            const eski = document.getElementById('hdEskiSonucBandi');
+            if (eski && eski.parentNode) eski.parentNode.removeChild(eski);
+            if (!goster || kap.style.display === 'none' || !currentResults) return;
+            const bant = document.createElement('div');
+            bant.id = 'hdEskiSonucBandi';
+            bant.className = 'hd-eski-sonuc-bandi';
+            bant.setAttribute('role', 'status');
+            bant.textContent = ortakMetin('common.staleResults',
+                'OLD RESULT: the last calculation failed; the results below belong to the previous successful calculation and do not reflect the current inputs.');
+            kap.insertBefore(bant, kap.firstChild);
+        }
+
         // >>> HRMA-HONEST-FORMATTERS-BEGIN <<<
         // ÖH D35 · OH-GT-25 — sayı biçimi yardımcıları BU BLOĞUN İÇİNDE.
         // Blok tests/test_ui_no_fabricated_numbers.py tarafından sökülüp
@@ -4800,6 +5285,10 @@
                     'Inadequate — case exceeds its service temperature':
                         T('solid.js.class.inadequate_service',
                           'Inadequate — case exceeds its service temperature'),
+                    // V301/K-B (KT-11): kaydı olmayan kasa malzemesi.
+                    'Not evaluated — no temperature limit on record for this case material':
+                        T('solid.js.class.not_evaluated_no_record',
+                          'Not evaluated — no temperature limit on record for this case material'),
                 };
                 return Object.prototype.hasOwnProperty.call(harita, kod) ? harita[kod]
                     : kod.replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -5204,11 +5693,36 @@
                 });
                 const mc = await response.json();
                 if (!response.ok || mc.status !== 'success') {
-                    throw new Error(mc.error || T('solid.msg.monte_carlo_analysis_failed', 'Monte Carlo analysis failed'));
+                    // V301/K-C1 (NK-53): ham makine kodu ('solid_monte_carlo_
+                    // missing_inputs') yerine ortak ret çözücüsü; eksik girdi
+                    // ret ise eksik alanlar ADIYLA, sözlükten (EN + TR).
+                    const govde = Object.assign({}, mc);
+                    if (mc.error === 'solid_monte_carlo_missing_inputs'
+                            && Array.isArray(mc.missing_fields)) {
+                        govde.message = TF('solid.msg.monte_carlo_missing_inputs',
+                            { fields: mc.missing_fields.join(', ') }, mc.message || mc.error);
+                        delete govde.missing_fields;
+                    }
+                    throw new Error(globalThis.HRMAReject
+                        ? HRMAReject.metni(govde, response.status)
+                        : (govde.message || mc.error
+                           || T('solid.msg.monte_carlo_analysis_failed', 'Monte Carlo analysis failed')));
                 }
                 renderSolidMonteCarlo(mc);
             } catch (error) {
-                showError(T('solid.msg.monte_carlo_error', 'Monte Carlo error: ') + (globalThis.escapeNoticeText || String)(error.message));
+                // V301/K-C1 (NK-53): hata panelin KENDİ kutusuna yazılır ve
+                // bir öncekinin yerini alır; her denemede yeni bir köşe
+                // bildirimi açılıp üst üste yığılmaz.
+                const box = document.getElementById('mc_results');
+                const metin = T('solid.msg.monte_carlo_error', 'Monte Carlo error: ')
+                    + (globalThis.escapeNoticeText || String)(error.message);
+                if (box) {
+                    box.innerHTML = '<p role="alert" style="color:#ff7a85; font-size:13px; margin:8px 0;"></p>';
+                    box.firstChild.textContent = metin;
+                    box.style.display = 'block';
+                } else {
+                    showError(metin);
+                }
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = origText || T('solid.ui.run_analysis', 'Run Analysis'); }
             }
@@ -5229,7 +5743,7 @@
                 '<table style="width:100%; font-size:13px; border-collapse:collapse;">' +
                 '<tr><td style="' + cellL + '">' + T('solid.js.nominal', 'Nominal') + '</td><td style="' + cellR + '">' + fmtNum(s.nominal, digits) + u + '</td></tr>' +
                 '<tr><td style="' + cellL + '">' + T('solid.js.mean', 'Mean ± σ') + '</td><td style="' + cellR + '">' + fmtNum(s.mean, digits) + ' ± ' + fmtNum(s.std, digits) + u + '</td></tr>' +
-                '<tr><td style="' + cellL + '">' + T('solid.js.cv', 'CV') + '</td><td style="' + cellR + '">%' + fmtNum(s.cv_percent, 1) + '</td></tr>' +
+                '<tr><td style="' + cellL + '">' + T('solid.js.cv', 'CV') + '</td><td style="' + cellR + '">' + pctTxt(s.cv_percent, 1) + '</td></tr>' +
                 '<tr><td style="' + cellL + '">' + T('solid.js.p5_p95', '[p5, p95]') + '</td><td style="' + cellR + '">[' + fmtNum(s.p5, digits) + ', ' + fmtNum(s.p95, digits) + ']' + u + '</td></tr>' +
                 '</table></div>';
         }
@@ -5294,13 +5808,24 @@
                     type: 'histogram',
                     marker: { color: 'rgba(0,229,255,0.35)', line: { color: '#00e5ff', width: 1 } }
                 }], {
-                    title: T('solid.msg.thrust_distribution', 'Thrust Distribution'),
+                    // V301/K-C1 (NK-53 sonrası ölçüm, K-C1/ekran.json): MC artık
+                    // örnek projede koşuyor ve histogram ilk kez görünür oldu;
+                    // `autosize` kabın o anki boyuyla ~60 px'lik bir çizim alanı
+                    // kuruyordu, y tikleri (0/10/20/30/40) üst üste biniyor,
+                    // başlık araç çubuğunun altında kalıyordu. Yükseklik kabın
+                    // kendi min-height'ı (.plot-compact 340 px) ile sabit; tik
+                    // ≥ 12 px, eksen başlığı ≥ 14 px; başlık sola (araç çubuğu
+                    // sağda), x tikleri 8 px aşağı (köşede y'nin 0'ıyla çakışmasın).
                     autosize: true,
-                    xaxis: { title: T('solid.msg.thrust_n', 'Thrust (N)') },
-                    yaxis: { title: T('solid.js.frequency_axis', 'Frequency') },
+                    height: 340,
+                    title: { text: T('solid.msg.thrust_distribution', 'Thrust Distribution'), x: 0.01, xanchor: 'left', y: 0.97, yanchor: 'top' },
+                    xaxis: { title: { text: T('solid.msg.thrust_n', 'Thrust (N)'), font: { size: 14 } }, tickfont: { size: 12 },
+                             ticks: 'outside', ticklen: 8 },
+                    yaxis: { title: { text: T('solid.js.frequency_axis', 'Frequency'), font: { size: 14 } },
+                             tickfont: { size: 12 }, nticks: 6 },
                     shapes: nominalLine(mc.thrust && mc.thrust.nominal, '#ff5d73'),
                     showlegend: false,
-                    margin: { t: 40, r: 20, b: 45, l: 55 }
+                    margin: { t: 64, r: 20, b: 55, l: 60 }
                 }, HRMA_PLOT_CONFIG);
             }
 
@@ -5310,13 +5835,24 @@
                     type: 'histogram',
                     marker: { color: 'rgba(255,140,51,0.35)', line: { color: '#ff8c33', width: 1 } }
                 }], {
-                    title: T('solid.msg.isp_distribution', 'Isp (sea level) Distribution'),
+                    // V301/K-C1 (NK-53 sonrası ölçüm, K-C1/ekran.json): MC artık
+                    // örnek projede koşuyor ve histogram ilk kez görünür oldu;
+                    // `autosize` kabın o anki boyuyla ~60 px'lik bir çizim alanı
+                    // kuruyordu, y tikleri (0/10/20/30/40) üst üste biniyor,
+                    // başlık araç çubuğunun altında kalıyordu. Yükseklik kabın
+                    // kendi min-height'ı (.plot-compact 340 px) ile sabit; tik
+                    // ≥ 12 px, eksen başlığı ≥ 14 px; başlık sola (araç çubuğu
+                    // sağda), x tikleri 8 px aşağı (köşede y'nin 0'ıyla çakışmasın).
                     autosize: true,
-                    xaxis: { title: T('solid.msg.isp_s', 'Isp (sea level) (s)') },
-                    yaxis: { title: T('solid.js.frequency_axis', 'Frequency') },
+                    height: 340,
+                    title: { text: T('solid.msg.isp_distribution', 'Isp (sea level) Distribution'), x: 0.01, xanchor: 'left', y: 0.97, yanchor: 'top' },
+                    xaxis: { title: { text: T('solid.msg.isp_s', 'Isp (sea level) (s)'), font: { size: 14 } }, tickfont: { size: 12 },
+                             ticks: 'outside', ticklen: 8 },
+                    yaxis: { title: { text: T('solid.js.frequency_axis', 'Frequency'), font: { size: 14 } },
+                             tickfont: { size: 12 }, nticks: 6 },
                     shapes: nominalLine(mc.isp && mc.isp.nominal, '#00e5ff'),
                     showlegend: false,
-                    margin: { t: 40, r: 20, b: 45, l: 55 }
+                    margin: { t: 64, r: 20, b: 55, l: 60 }
                 }, HRMA_PLOT_CONFIG);
             }
         }
@@ -5331,6 +5867,15 @@
                 { label: T('solid.msg.sea_level_isp', 'Sea Level Isp'), value: results.isp_sea_level, decimals: 1, unit: 's' },
                 { label: T('solid.msg.vacuum_isp', 'Vacuum Isp'), value: results.isp_vacuum, decimals: 1, unit: 's' },
                 { label: T('solid.msg.average_thrust', 'Average Thrust'), value: results.average_thrust, decimals: 0, unit: 'N' },
+                // V301/K-C1 (NK-28): katı motorun en kritik iki sayısı. Tepe
+                // itki yanıtın `max_thrust` alanı (yönetici özetinin
+                // 'Maximum Thrust'ı ile aynı); tepe oda basıncı çözücünün
+                // eğri taramasından `throat_sizing.peak_chamber_pressure_bar`
+                // (cidar ve boğaz bu basınçla boyutlanır). Alan yoksa kart
+                // 'n/a' basar; MEOP diye ayrı bir alan YAYIMLANMIYOR, bu
+                // yüzden kart uydurulmadı.
+                { label: T('solid.msg.peak_thrust', 'Peak Thrust'), value: results.max_thrust, decimals: 0, unit: 'N' },
+                { label: T('solid.msg.peak_chamber_pressure', 'Peak Chamber Pressure'), value: (results.throat_sizing || {}).peak_chamber_pressure_bar, decimals: 1, unit: 'bar' },
                 { label: T('solid.msg.burn_time', 'Burn Time'), value: results.burn_time, decimals: 2, unit: 's' },
                 { label: T('solid.msg.total_impulse', 'Total Impulse'), value: results.total_impulse / 1000, decimals: 1, unit: 'kN·s' },
                 { label: T('solid.msg.c_efficiency', 'C* Efficiency'), value: results.detailed_analysis?.performance_metrics?.c_star_efficiency_percent, decimals: 1, unit: '%' },
@@ -5429,6 +5974,8 @@
             // (unwired_inputs, clipped_inputs, assumed_defaults) ve
             // türetilen diverjans kaybı ekrana iner.
             applySolidDeclarationBadges(results);
+            // V301/K-B (KT-04/05): katalog kipindeki k / σ alanları.
+            applySolidCoeffFeedback(results);
             updateDivergenceLoss(results);
             // Yanma profili: çözücünün hükmü (ÖH D24 · OH-D23-08)
             updateBurnProfileLine(results);
@@ -5436,9 +5983,13 @@
             updateCharVelocityBand(results);
 
             // Thrust curve
+            // V301/K-B (NK-28): eğri tükenişte sıfıra iner (çözücünün
+            // thrust_curve.burnout_end beyanı) ve rejim sınırında tutulan
+            // düz aralık gölgeli + adlı (thrust_curve.regime_boundary_hold).
+            const _itkiEgri = solidCurveWithBurnout(results.thrust_curve, 'thrust');
             const thrustTrace = {
-                x: results.thrust_curve.time,
-                y: results.thrust_curve.thrust,
+                x: _itkiEgri.x,
+                y: _itkiEgri.y,
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Thrust',
@@ -5457,14 +6008,16 @@
                 yaxis: { title: T('solid.msg.thrust_n', 'Thrust (N)') },
                 showlegend: false,
                 height: 400
-            }, results.thrust_curve.thrust);
+            }, _itkiEgri.y);
+            solidAddHoldWindows(thrustLayout, results.thrust_curve);
 
             Plotly.newPlot('thrust_plot', [thrustTrace], thrustLayout, HRMA_PLOT_CONFIG);
             
             // Pressure curve
+            const _basincEgri = solidCurveWithBurnout(results.thrust_curve, 'pressure');
             const pressureTrace = {
-                x: results.thrust_curve.time,
-                y: results.thrust_curve.pressure,
+                x: _basincEgri.x,
+                y: _basincEgri.y,
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Pressure',
@@ -5477,7 +6030,8 @@
                 yaxis: { title: T('solid.msg.pressure_bar', 'Pressure (bar)') },
                 showlegend: false,
                 height: 400  // OH-P-13 (kati-02-r12.png)
-            }, results.thrust_curve.pressure);
+            }, _basincEgri.y);
+            solidAddHoldWindows(pressureLayout, results.thrust_curve);
 
             Plotly.newPlot('pressure_plot', [pressureTrace], pressureLayout, HRMA_PLOT_CONFIG);
             
@@ -5533,6 +6087,128 @@
 
             // Comprehensive analysis tabs like hybrid/liquid systems
             displayComprehensiveAnalysis(results);
+
+            // V301/N-CEA (C4): NASA CEA karşılaştırması (danışma; çizim
+            // düşerse sonuç gösterimi düşmez)
+            try { renderSolidCeaComparison(results); } catch (e) {
+                console.warn('CEA comparison rendering failed:', e);
+            }
+        }
+
+        // ==================================================================
+        // V301/N-CEA (C4) — NASA CEA KARŞILAŞTIRMASI (katı)
+        // Hibrit sayfasının renderCeaComparison deseni; metin T()/TF(),
+        // sayı numTxt (I18N.number). Blok yoksa panel GİZLİ kalır.
+        // ==================================================================
+        function renderSolidCeaComparison(results) {
+            var panel = document.getElementById('solidCeaComparisonPanel');
+            var kap = document.getElementById('solidCeaComparison');
+            if (!panel || !kap) return;
+            var cc = results && results.cea_comparison;
+            if (!cc || cc.schema !== 'hrma.cea_comparison/1') {
+                panel.style.display = 'none';
+                kap.innerHTML = '';
+                return;
+            }
+            panel.style.display = 'block';
+            var kacir = function (x) {
+                return String(x).replace(/[&<>"']/g, function (c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                });
+            };
+            var sayi = function (v, d) {
+                return (typeof v === 'number' && isFinite(v)) ? numTxt(v, d) : '—';
+            };
+            // V301/N-CEA-2: termokimya kaynak satırı (yanıtın
+            // thermochemistry_source alanından; bilinmeyen değerde satır yok).
+            var kaynakSatiri = {
+                nasa_cea_at_pc: T('solid.cea.src_cea', 'Thermochemistry source of this run: NASA CEA at this chamber pressure (composition card of this propellant).'),
+                catalogue_single_pressure: T('solid.cea.src_catalogue', 'Thermochemistry source of this run: the catalogue record at one pressure (no NASA CEA solution for this propellant here).'),
+                user_entered: T('solid.cea.src_user', 'Thermochemistry source of this run: the values entered in the form (NASA CEA is not applied).')
+            }[results.thermochemistry_source];
+            var kaynakHtml = kaynakSatiri ? ('<p class="cea-thermo-source"><strong>' + kacir(kaynakSatiri) + '</strong></p>') : '';
+            var ayni = cc.kind === 'solid_cea_at_pc_identical_source';
+            if (cc.status !== 'available') {
+                var kod = cc.reason && cc.reason.code;
+                var gerekce = {
+                    propellant_composition_nominal: T('solid.cea.reason_composition_nominal', 'this catalogue record gives its composition only approximately, so there is no exact propellant to hand to CEA.'),
+                    propellant_composition_not_defined: T('solid.cea.reason_composition_not_defined', 'no machine-readable composition is defined for this propellant.'),
+                    hrma_thermochemistry_not_catalogue: T('solid.cea.reason_thermo_changed', 'this run does not use the catalogue thermochemistry (a value was changed), so the CEA solution of the catalogue composition does not describe it.'),
+                    operating_point_not_defined: T('solid.cea.reason_operating_point', 'the chamber pressure must be above the ambient pressure.'),
+                    rocketcea_not_available: T('solid.cea.reason_rocketcea_missing', 'NASA CEA (RocketCEA) cannot be loaded in this installation.')
+                }[kod] || T('solid.cea.reason_cea_failed', 'NASA CEA did not return a usable solution for this point.');
+                kap.innerHTML = kaynakHtml + '<div class="cea-unavailable"><strong>'
+                    + kacir(T('solid.cea.unavailable', 'NASA CEA comparison unavailable:'))
+                    + '</strong> ' + kacir(gerekce) + '</div>';
+                return;
+            }
+            var ad = {
+                chamber_temperature: T('solid.cea.q_chamber_temperature', 'Chamber temperature'),
+                chamber_molecular_weight: T('solid.cea.q_molecular_weight', 'Molecular weight'),
+                chamber_gamma: T('solid.cea.q_chamber_gamma', 'Chamber γ (isentropic exponent)'),
+                c_star: T('solid.cea.q_c_star', 'c* (theoretical)'),
+                expansion_ratio_optimum: T('solid.cea.q_expansion_ratio', 'Optimum expansion ratio (p_e = p_a)'),
+                thrust_coefficient_optimum: T('solid.cea.q_thrust_coefficient', 'Thrust coefficient at optimum expansion'),
+                isp_optimum: T('solid.cea.q_isp', 'Ideal specific impulse at optimum expansion')
+            };
+            var basamak = { chamber_temperature: 1, chamber_molecular_weight: 3,
+                chamber_gamma: 4, c_star: 1, expansion_ratio_optimum: 3,
+                thrust_coefficient_optimum: 4, isp_optimum: 2 };
+            var np = cc.operating_point || {};
+            var html = kaynakHtml + '<p>' + kacir(ayni ? TF('solid.cea.point_line_identical',
+                { pc: sayi(np.chamber_pressure_bar, 3), pa: sayi(np.ambient_pressure_bar, 5),
+                  eps: sayi(np.expansion_ratio, 4) },
+                'Same operating point as this run (Pc = {pc} bar, ambient {pa} bar, ε = {eps}) and the same composition card the solver uses; equilibrium (shifting) expansion, infinite-area combustor.') : TF('solid.cea.point_line',
+                { pc: sayi(np.chamber_pressure_bar, 3), pa: sayi(np.ambient_pressure_bar, 5),
+                  eps: sayi(np.expansion_ratio, 4) },
+                'Same operating point as this run (Pc = {pc} bar, ambient {pa} bar, ε = {eps}) and the catalogue composition of this propellant; equilibrium (shifting) expansion, infinite-area combustor.')) + '</p>';
+            html += '<table class="data-table"><thead><tr><th>'
+                + kacir(T('solid.cea.col_quantity', 'Quantity')) + '</th><th>'
+                + kacir(T('solid.cea.col_unit', 'Unit')) + '</th><th>'
+                + kacir(ayni ? T('solid.cea.col_hrma_identical', 'HRMA (= NASA CEA at this Pc, before efficiencies)') : T('solid.cea.col_hrma', 'HRMA (theoretical, before efficiencies)')) + '</th><th>'
+                + kacir(T('solid.cea.col_cea', 'NASA CEA')) + '</th><th>'
+                + kacir(T('solid.cea.col_delta', 'Δ %')) + '</th></tr></thead><tbody>';
+            (cc.rows || []).forEach(function (s) {
+                var b = basamak[s.quantity];
+                var d = (typeof s.delta_pct === 'number' && isFinite(s.delta_pct))
+                    ? ((s.delta_pct > 0 ? '+' : '') + numTxt(s.delta_pct, 3)) : '—';
+                html += '<tr><td>' + kacir(ad[s.quantity] || s.quantity) + '</td><td>'
+                    + kacir(String(s.unit || '')) + '</td><td class="num">'
+                    + sayi(s.hrma, b) + '</td><td class="num">'
+                    + sayi(s.cea, b) + '</td><td class="num">' + d + '</td></tr>';
+            });
+            html += '</tbody></table><div class="cea-meta">';
+            if (ayni) {
+                html += '<p>' + kacir(T('solid.cea.identical_note', 'HRMA\'s theoretical thermochemistry (T_c, c*, γ, M) and its ideal nozzle (optimum expansion ratio and thrust coefficient) for this propellant ARE the NASA CEA solution at this chamber pressure. Equal columns show that the solver uses them unchanged; this is not an independent check of the thermochemistry.')) + '</p>';
+                var nom = cc.nominal_composition && cc.propellants && cc.propellants.key;
+                if (nom === 'black_powder') {
+                    html += '<p>' + kacir(T('solid.cea.nominal_black_powder', 'Low confidence: the record gives black powder only as KNO3 ~75 / charcoal ~15 / sulfur ~10 wt%. HRMA runs CEA with exactly 75/15/10 and takes charcoal as graphite, because no sourced charcoal formula exists in HRMA; real charcoal gives more gas.')) + '</p>';
+                } else if (nom === 'apcp_nonaluminized') {
+                    html += '<p>' + kacir(T('solid.cea.nominal_apcp_nonaluminized', 'Nominal composition chosen by HRMA: the record gives AP ~85 / HTPB ~15 wt%; CEA is run with exactly 85/15 and the R-45 binder card of the APCP evidence run.')) + '</p>';
+                }
+            }
+            if (typeof cc.record_pressure_bar === 'number') {
+                html += '<p>' + kacir(TF('solid.cea.record_pressure',
+                    { p: sayi(cc.record_pressure_bar, 2) },
+                    'The catalogue values come from one NASA CEA run at {p} bar; the solver does not model their dependence on chamber pressure, so at any other pressure the first four rows show that dependence.')) + '</p>';
+            }
+            html += '<p>' + kacir(ayni
+                ? T('solid.cea.m_convention_identical', 'Molecular weight convention the solver uses: M = 1/n, gas moles only, condensed products counted in the mass (NASA RP-1311 Part I eq. 2.3a), for every propellant on the NASA CEA path.')
+                : cc.molecular_weight_convention === 'MW'
+                ? T('solid.cea.m_convention_mw', 'Molecular weight convention of this record: MW over all species, condensed products counted as species (NASA RP-1311 Part I eq. 2.4a).')
+                : T('solid.cea.m_convention_m1n', 'Molecular weight convention of this record: M = 1/n, gas moles only, condensed products counted in the mass (NASA RP-1311 Part I eq. 2.3a).')) + '</p>';
+            html += '<p>' + kacir(ayni ? T('solid.cea.cstar_note_identical', 'c* is the theoretical NASA CEA value at this chamber pressure; the c* shown in the results is the delivered value (theoretical × combustion efficiency).') : T('solid.cea.cstar_note', 'c* is the theoretical catalogue value; the c* shown in the results is the delivered value (theoretical × combustion efficiency).')) + '</p>';
+            html += '<p>' + kacir(ayni ? T('solid.cea.nozzle_note_identical', 'The nozzle rows are CEA\'s shifting-equilibrium expansion, condensed products included. HRMA applies its combustion, two-phase (particle lag), kinetic, divergence and friction losses on top of this ideal, not inside it.') : T('solid.cea.nozzle_note', 'The last three rows compare HRMA\'s single-γ ideal nozzle (chamber γ) with CEA\'s shifting-equilibrium expansion that includes the condensed products.')) + '</p>';
+            if ((cc.rows_omitted || []).length) {
+                var nozulYok = (cc.rows_omitted[0] || {}).code === 'cea_nozzle_not_converged';
+                html += '<p>' + kacir(nozulYok ? T('solid.cea.rows_omitted_nozzle', 'The nozzle rows are not shown: NASA CEA did not solve the expansion at this point, so the solver uses the single-γ relations with the CEA chamber γ for the nozzle (see the warning).') : T('solid.cea.rows_omitted', 'The nozzle rows are not compared: HRMA publishes no theoretical Isp because the ambient pressure is not below the chamber pressure.')) + '</p>';
+            }
+            var cs = cc.cea_source || {};
+            html += '<p>' + kacir(TF('solid.cea.cea_source',
+                { version: String(cs.rocketcea_version || '—') },
+                'NASA CEA column: NASA CEA (Gordon & McBride, NASA RP-1311) through RocketCEA {version}, with its own thermo.lib data and the catalogue composition of this propellant.')) + '</p>';
+            html += '<p>' + kacir(T('solid.cea.delta_note', 'Δ % = 100 × (HRMA − CEA) / CEA. No pass/fail threshold is applied. Advisory only: this comparison changes none of the numbers HRMA publishes.')) + '</p></div>';
+            kap.innerHTML = html;
         }
         
         function displayComprehensiveAnalysis(results) {
@@ -5644,9 +6320,12 @@
             // opsiyonel/guard, aksi halde TypeError Reset'i çökertir.
             const pn = document.getElementById('propellant_name');
             if (pn) pn.value = 'APCP';
-            document.getElementById('chamber_diameter').value = '100';
+            // V301/K-A: açılış değerleri (kasa boş = türetilir, tane 100,
+            // çekirdek 48 mm; bkz. ilgili <input> notları).
+            document.getElementById('chamber_diameter').value = '';
+            document.getElementById('outer_diameter').value = '100';
             document.getElementById('grain_length').value = '500';
-            document.getElementById('core_diameter').value = '30';
+            document.getElementById('core_diameter').value = '48';
             document.getElementById('chamber_pressure').value = '40';
             // (v2.6.27) Reset yanma hızını BOŞ bırakır: sayı yazmak sayfa
             // varsayılanı ile katalog çözümünü yeniden yarıştırmak olurdu.
@@ -5793,153 +6472,6 @@
             updateCharVelocityBand(window.currentResults);
         });
 
-        // Ask AI Analysis
-        function askAI() {
-            if (!currentResults) {
-                showWarning(T('solid.msg.no_results_to_analyze_please_run', 'No results to analyze. Please run calculations first.'));
-                return;
-            }
-            
-            // Prepare AI-friendly JSON for solid motor
-            const aiData = {
-                analysis_type: T('solid.msg.solid_rocket_motor_design', "Solid Rocket Motor Design"),
-                timestamp: new Date().toISOString(),
-                
-                input_parameters: {
-                    grain_type: currentResults.grain_type,
-                    propellant_type: currentResults.propellant_type,
-                    propellant_name: currentResults.propellant_name,
-                    chamber_diameter_mm: currentResults.chamber_diameter,
-                    grain_length_mm: currentResults.grain_length,
-                    core_diameter_mm: currentResults.core_diameter,
-                    chamber_pressure_bar: currentResults.chamber_pressure,
-                    burn_rate_coefficient: currentResults.burn_rate_coefficient,
-                    burn_rate_exponent: currentResults.burn_rate_exponent
-                },
-                
-                performance_results: {
-                    total_impulse_ns: currentResults.total_impulse,
-                    specific_impulse_sec: currentResults.specific_impulse,
-                    average_thrust_n: currentResults.average_thrust,
-                    max_thrust_n: currentResults.max_thrust,
-                    burn_time_sec: currentResults.burn_time,
-                    propellant_mass_kg: currentResults.propellant_mass
-                },
-                
-                motor_geometry: {
-                    throat_diameter_mm: currentResults.throat_diameter,
-                    exit_diameter_mm: currentResults.exit_diameter,
-                    expansion_ratio: currentResults.expansion_ratio,
-                    c_star_ms: currentResults.c_star,
-                    chamber_temperature_k: currentResults.chamber_temperature,
-                    propellant_density_kgm3: currentResults.density
-                },
-                
-                thrust_curve_data: {
-                    time_points: currentResults.thrust_curve.time.length,
-                    peak_thrust: Math.max(...currentResults.thrust_curve.thrust),
-                    thrust_profile_type: "Progressive/Neutral/Regressive"
-                }
-            };
-            
-            // Create prompt
-            const prompt = `Please analyze this solid rocket motor design and provide insights:
-
-${JSON.stringify(aiData, null, 2)}
-
-Please provide:
-1. Performance assessment (thrust profile, efficiency)
-2. Safety considerations for solid propellant motors
-3. Grain geometry optimization suggestions
-4. Comparison to typical solid motor performance
-5. Manufacturing and handling considerations
-6. Potential issues or design improvements`;
-            
-            // Copy to clipboard
-            // OH-GT-07 (ÖH D34) — FAIL-CLOSED: güvensiz bağlamda
-            // `navigator.clipboard` UNDEFINED'dır ve `.writeText` SENKRON
-            // fırlatır; o hâlde `.catch` hiç koşmaz ve özellik sessizce
-            // kaybolurdu. Söz burada kurulur.
-            let panoSozu;
-            try {
-                panoSozu = (navigator.clipboard && navigator.clipboard.writeText)
-                    ? navigator.clipboard.writeText(prompt)
-                    : Promise.reject(new Error('clipboard API unavailable'));
-            } catch (err) {
-                panoSozu = Promise.reject(err);
-            }
-            panoSozu.then(() => {
-                showSuccess(T('solid.msg.solid_motor_analysis_data_copied_to', 'Solid motor analysis data copied to clipboard! Paste it into your favorite AI assistant.'));
-            }).catch(err => {
-                console.error(T('solid.msg.failed_to_copy', 'Failed to copy:'), panoHataMetni(err));
-                const uyari = T('solid.msg.failed_to_copy_data_check_console', 'Failed to copy data. Check console for details.');
-                showError(uyari);
-                // Kopyalanamadı ama veri kaybolmaz: pencerede açılır.
-                showAIDataModal(prompt, uyari);
-            });
-        }
-
-        // ------------------------------------------------------------------
-        // OH-GT-07 (ÖH D34, 21 Eylül) — PANO BAŞARISIZSA VERİ KAYBOLMAZ
-        // ------------------------------------------------------------------
-        // ÖLÇÜLDÜ (docs/scofield/raw/OH/D34/js-davranis/a1/once.json K1):
-        // bu sayfada pano reddedilince ekranda HİÇBİR ŞEY açılmıyordu
-        // (`hata_dalinda_modal: false`, `modal_fonksiyonu_tanimli: false`)
-        // ve konsola boş nesne "{}" düşüyordu. Veri o anda bellekte hazır;
-        // artık elle kopyalanabilecek bir pencerede gösterilir.
-        function panoHataMetni(err) {
-            if (!err) return 'unknown clipboard error';
-            if (err.name || err.message) {
-                return String(err.name || 'Error') + ': '
-                    + String(err.message || '');
-            }
-            return String(err);
-        }
-
-        function kacisliMetin(s) {
-            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-        }
-
-        /** Pano reddedildiğinde açılan veri penceresi.
-         *  Kapatma: sağ üstteki simge, arka perdeye tıklama ya da Esc.
-         *  NOT (devir): kapatma düğmesi metin yerine "×" simgesi taşıyor;
-         *  bu sayfanın sözlüğünde (i18n_pages.js) "Kapat" karşılığı olan
-         *  bir anahtar YOK ve o dosya metin-i18n kulvarının sahasıdır.
-         *  Anahtar açıldığında düğmeye etiket verilebilir. */
-        function showAIDataModal(metin, girisMetni) {
-            var eski = document.getElementById('aiModal');
-            if (eski && eski.remove) eski.remove();
-            var kapsayici = document.createElement('div');
-            kapsayici.id = 'aiModal';
-            kapsayici.setAttribute('role', 'dialog');
-            kapsayici.style.cssText = 'position:fixed;top:0;left:0;width:100%;'
-                + 'height:100%;background:rgba(0,0,0,0.8);z-index:9999;'
-                + 'display:flex;align-items:center;justify-content:center;';
-            kapsayici.innerHTML = `
-                <div style="background:#fff;color:#111;padding:24px;border-radius:10px;max-width:80%;max-height:80%;overflow-y:auto;">
-                    <div style="display:flex;align-items:center;gap:16px;">
-                        <h2 style="margin:0;flex:1;">${T('solid.ui.ask_ai_to_analyze_results', 'Ask AI to Analyze Results')}</h2>
-                        <button type="button" id="aiModalClose" style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:#111;">&times;</button>
-                    </div>
-                    <p style="margin:12px 0;">${kacisliMetin(girisMetni || '')}</p>
-                    <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto;max-height:400px;white-space:pre-wrap;">${kacisliMetin(metin)}</pre>
-                </div>
-            `;
-            function kapat() {
-                document.removeEventListener('keydown', esc);
-                if (kapsayici.remove) kapsayici.remove();
-            }
-            function esc(e) { if (e.key === 'Escape') kapat(); }
-            kapsayici.addEventListener('click', function (e) {
-                if (e.target === kapsayici) kapat();
-            });
-            document.body.appendChild(kapsayici);
-            var dugme = document.getElementById('aiModalClose');
-            if (dugme) dugme.addEventListener('click', kapat);
-            document.addEventListener('keydown', esc);
-        }
-        
         // Tab functionality
         function showTab(tabName) {
             // Hide all tab panels
@@ -6090,16 +6622,28 @@ Please provide:
                        + 'two_phase_correction_status: ' + String(durum);
                 renk = 'var(--hd-orange, #ff8c33)';
             }
+            // V301/K-C1 (NK-28): kartın altına kısa, ÇEVRİLİ bir not iner;
+            // çözücünün tam İngilizce künyesi (etiket + basis) değişmeden
+            // ipucunda (title) durur. Hüküm aynı: renk ve durum enum'u
+            // çözücüden, "doğrulandı" yalnız verified === true dalında.
+            let kisa;
+            if (durum === undefined || durum === null) {
+                kisa = T('solid.msg.two_phase_status_missing',
+                    'Two-phase correction: the solver published no status for this run (details in the tooltip).');
+            } else if (dogrulandi === true) {
+                kisa = TF('solid.msg.two_phase_status_verified', { status: String(durum) },
+                    'Two-phase correction status: {status}');
+            } else {
+                kisa = T('solid.msg.two_phase_not_verified_short',
+                    'Two-phase correction not verified: the Isp above is not a verified performance figure. Hover for the solver\'s full statement.');
+            }
             return '<div data-two-phase-status="'
                 + tpKacis(String(durum === undefined ? 'missing' : durum))
-                + '" title="' + tpKacis(kunye)
+                + '" title="' + tpKacis(etiket + (kunye ? ' — ' + kunye : ''))
                 + '" style="margin-top: 10px; padding: 8px 10px; font-size:'
                 + ' 12px; line-height: 1.45; color: ' + renk
-                + '; border-left: 3px solid ' + renk + ';">'
-                + '<strong>' + tpKacis(etiket) + '</strong>'
-                + (kunye ? '<div style="margin-top: 4px; color:'
-                           + ' var(--hd-ink-dim, #7d97a5);">'
-                           + tpKacis(kunye) + '</div>' : '')
+                + '; border-left: 3px solid ' + renk + '; cursor: help;">'
+                + '<strong>' + tpKacis(kisa) + '</strong>'
                 + '</div>';
         }
 
@@ -6257,12 +6801,22 @@ Please provide:
                 }
             });
             if (!satirlar) return '';
+            // V301/DİL (kalem 2): bu tablo çözücü kaydının HAM dökümüdür
+            // (`two_phase_loss.inputs_used`, `gamma_mixture` …) — ölçüldü:
+            // TR Performans sekmesinde 58 ham anahtar/İngilizce satır. Durum
+            // bandı (twoPhaseStatusBannerHTML) kullanıcıya konuşur; döküm
+            // kapalı "teknik ayrıntı" bölümüne iner, içerik değişmez.
             return '<div style="margin-top: 20px;">'
                 + '<h4 style="color: #495057; margin-bottom: 10px;">'
                 + T('solid.ui.two_phase_loss_factor', 'Two-Phase Loss Factor')
                 + '</h4>'
+                + '<details class="hd-teknik-ayrinti"><summary style="cursor: pointer;">'
+                + ((typeof ortakMetin === 'function')
+                    ? ortakMetin('common.techDetail', 'Technical detail (machine fields)')
+                    : 'Technical detail (machine fields)')
+                + '</summary>'
                 + '<table style="width: 100%; border-collapse: collapse;">'
-                + satirlar + '</table></div>';
+                + satirlar + '</table></details></div>';
         }
 
         function ispLossTitle(split, kok) {
@@ -7686,7 +8240,10 @@ Please provide:
             ['outer_diameter', 'core_diameter',
              'star_points', 'star_radius',
              'fin_count', 'fin_width', 'fin_length',
-             'slot_count', 'slot_width', 'slot_depth'].forEach(function (id) {
+             'slot_count', 'slot_width', 'slot_depth',
+             // V301/K-B (KT-08): wagon wheel alanları da önizlemeyi sürer.
+             'wagon_hole_count', 'wagon_hole_diameter',
+             'wagon_pitch_diameter'].forEach(function (id) {
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', function () {
                     try { updateGrainPreview(); } catch (e) { /* yok say */ }
@@ -7707,9 +8264,8 @@ Please provide:
             updateWebThickness();       // FAZ 6, T24 — türetilen web
             updateExpansionRatio();
 
-            // Katalog tabloları + veritabanı rozetleri
+            // Katalog tabloları (v3.0.1 K: rozet yoklaması söküldü)
             initCatalogs();
-            checkDatabaseStatus();
         });
         
         // PDF Export Function
@@ -7797,6 +8353,18 @@ Please provide:
                     // istenirse performans alanları hiç gitmez ve belge sayı
                     // uydurmaz.
                     max_thrust: _sonlu(_r.max_thrust),
+                    // V301/K-C1 (KT-16) — GÜVENLİK BÖLÜMÜNE GERÇEK İTKİ.
+                    // ÖLÇÜLDÜ (K-C1/guvenlik_once.json): bu yükte `thrust`
+                    // yoktu; sunucunun güvenlik çözücüsü (pdf_safety yalnız
+                    // `thrust` adını taşır) 1000 N'a düşüyor ve rapor
+                    // "required restraint force 4000 N / burnout 488 m/s"
+                    // basıyordu. Güvenlik modülü tek `thrust` ile hem bağlama
+                    // kuvvetini (thrust × SF, bir YÜK) hem impulsu kurar;
+                    // yük tepe itkiyle kurulmalıdır ve pdf_generator'ın
+                    // sözleşmesinde de `thrust` = 'Maximum Thrust'
+                    // (SOLVER_PERFORMANCE_ALIASES). Ortalama itki bu anahtara
+                    // KONMAZ (yönetici özetinin tepe itki hücresini bozardı).
+                    thrust: _sonlu(_r.max_thrust),
                     specific_impulse: _sonlu(_r.specific_impulse),
                     burn_time: _sonlu(_r.burn_time),
                     total_impulse: _sonlu(_r.total_impulse),
@@ -8054,6 +8622,8 @@ Please provide:
         });
     </script>
     <!-- Analysis Dock: önce çekirdek, sonra paneller (register sırası sözleşmesi) -->
+    <!-- v3.0.1 N-girdi-1: ortak alan ipucu bileşeni (HRMAHelp) — güverte ve panellerden ÖNCE -->
+    <script src="/static/js/field_help.js"></script>
     <script src="/static/js/analysis_dock.js"></script>
     <script src="/static/js/panels/structural_panel.js"></script>
     <script src="/static/js/panels/thermal_panel.js"></script>

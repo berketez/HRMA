@@ -280,10 +280,15 @@ class TestCGKunyesi:
 # P4B3-04 — recompute'un eksik girdi ikamesi BEYAN edilir
 # ===========================================================================
 
+# V301/T-ÇAPA-A: çekirdek 30 -> 76 mm. a = 0,005 (katalog APCP a'sının
+# ~2,24 katı) boğazı büyütür: 30 mm'de A_p/A_t 0,396, tek tanımın 48 mm'sinde
+# 0,958 (ikisi de K-A port kapısından 422). 76 mm ölçülen A_p/A_t 2,218
+# (tests/test_faz4_motor_kapilari.KATI_TABAN ile aynı ölçüm). Konu ikame
+# künyesidir, boğulan port değil (kural 1).
 KATI_TAM_PROJE = {
     'grain_type': 'bates', 'propellant_type': 'apcp',
     'chamber_diameter': 100, 'grain_length': 500,
-    'core_diameter': 30, 'chamber_pressure': 40,
+    'core_diameter': 76, 'chamber_pressure': 40,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
 }
 

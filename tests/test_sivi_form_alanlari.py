@@ -420,7 +420,10 @@ def test_basinclandirma_gazi_emniyet_vanasina_ulasiyor(client, taban):
 # ---------------------------------------------------------------------------
 def _motor_anahtarlari():
     src = read(ENGINE_PY)
-    keys = set(re.findall(r"_override_(?:val|choice)\(\s*'([a-z_0-9]+)'", src))
+    # v3.0.1 (26 Eki, L-A): bantlı okuyucu ``_override_band('…')`` eklendi
+    # (bantlar tek tablodan, LIQUID_INPUT_BANDS); o da bir override kanalıdır.
+    keys = set(re.findall(r"_override_(?:val|choice|band)\(\s*'([a-z_0-9]+)'",
+                          src))
     keys |= set(re.findall(r"overrides\.get\(\s*'([a-z_0-9]+)'", src))
     return keys
 

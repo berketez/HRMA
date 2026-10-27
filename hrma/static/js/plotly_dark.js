@@ -41,6 +41,18 @@
         'darkorange': '#ff8c33', 'teal': '#2dd4a8'
     };
 
+    // v3.0.1 (V301/N-grafik G3) — YAZI BOYU TABANI (px). Berke (26 Eki):
+    // "bazı grafikler hala okunamaz durumda". Tek kaynak burası; bekçi
+    // tests/test_v301_grafik_okunur.py. Taban, sayfa ya da sunucu daha
+    // küçük bir boyut verse de uygulanır; daha büyüğüne dokunulmaz.
+    var YAZI_TABANI = { tik: 12, eksenBasligi: 14, baslik: 16, lejant: 12 };
+
+    function enAzBoy(font, taban) {
+        var s = (font && typeof font.size === 'number' && isFinite(font.size))
+            ? font.size : taban;
+        return s < taban ? taban : s;
+    }
+
     function fixColor(c) {
         return (typeof c === 'string' && COLOR_FIX[c.toLowerCase()]) || c;
     }
@@ -54,6 +66,18 @@
             if (tr.marker.line) tr.marker.line.color = fixColor(tr.marker.line.color);
         }
         if (tr.textfont) tr.textfont.color = fixColor(tr.textfont.color);
+        // v3.0.1 (V301/N-grafik G3): renk çubuğu da eksendir — tik ve
+        // başlık aynı yazı tabanına çekilir (ölçüldü: Mach haritasında 12 px).
+        [tr.colorbar, tr.marker && tr.marker.colorbar].forEach(function (cb) {
+            if (!cb || typeof cb !== 'object') return;
+            cb.tickfont = Object.assign({}, cb.tickfont,
+                { size: enAzBoy(cb.tickfont, YAZI_TABANI.tik) });
+            if (typeof cb.title === 'string') cb.title = { text: cb.title };
+            if (cb.title && typeof cb.title === 'object') {
+                cb.title.font = Object.assign({}, cb.title.font,
+                    { size: enAzBoy(cb.title.font, YAZI_TABANI.eksenBasligi) });
+            }
+        });
         // v2.5.5 emniyet katmanı: gauge (indicator) renkleri — sunucu tarafı
         // paletten beslenmemiş eski/yabancı figürlerde koyu bar/step/threshold
         // renkleri koyu zeminde kayboluyordu. Python tarafı zaten PALETTE
@@ -89,13 +113,17 @@
         }
         // HUD ek 4: tick etiketleri JetBrains Mono (sayfa fontu öncelikli)
         // v3.0.0 (15 Eki): tik ve eksen başlığı INK_DIM'den INK'e — koyu
-        // zeminde 11/12 px soluk gri okunması zor bulundu (Berke). Boyut
-        // DEĞİŞMEDİ: çok panelli figürlerin satır aralıkları 11/12 px'e göre
-        // hesaplı (test_grafik_yerlesimi), büyütme ayrı yerleşim turu ister.
-        ax.tickfont = Object.assign({ size: 11, family: MONO }, ax.tickfont, { color: INK });
+        // zeminde 11/12 px soluk gri okunması zor bulundu (Berke).
+        // v3.0.1 (V301/N-grafik G3): boyut da TABAN ile kenetlenir — tik
+        // ≥ 12 px, eksen başlığı ≥ 14 px. Sayfanın/sunucunun verdiği daha
+        // BÜYÜK boyut korunur, daha küçüğü tabana çekilir (ölçüm:
+        // docs/scofield/raw/OH/V301/grafik/RAPOR.md; 15 Eki'de 11/12 px).
+        ax.tickfont = Object.assign({ family: MONO }, ax.tickfont,
+            { color: INK, size: enAzBoy(ax.tickfont, YAZI_TABANI.tik) });
         if (typeof ax.title === 'string') ax.title = { text: ax.title };
         if (ax.title) {
-            ax.title.font = Object.assign({ size: 12 }, ax.title.font, { color: INK });
+            ax.title.font = Object.assign({}, ax.title.font,
+                { color: INK, size: enAzBoy(ax.title.font, YAZI_TABANI.eksenBasligi) });
             // Eksen başlığı ile tick etiketleri arasına nefes payı
             if (ax.title.standoff === undefined) ax.title.standoff = 8;
         }
@@ -117,6 +145,17 @@
         if (typeof layout.title === 'string') layout.title = { text: layout.title };
         if (layout.title) {
             layout.title.font = Object.assign({}, layout.title.font, { color: '#eaf7fb' });
+            // Plotly varsayılanı genel boy × 1,4 (12 → 16,8 px). Etkin boy
+            // (açık değer ya da varsayılan) tabanın altındaysa tabana çekilir.
+            if (typeof layout.title.font.size !== 'number') {
+                var genel = (layout.font && typeof layout.font.size === 'number')
+                    ? layout.font.size : 12;
+                if (genel * 1.4 < YAZI_TABANI.baslik) {
+                    layout.title.font.size = YAZI_TABANI.baslik;
+                }
+            } else {
+                layout.title.font.size = enAzBoy(layout.title.font, YAZI_TABANI.baslik);
+            }
         }
         Object.keys(layout).forEach(function (k) {
             if (/^[xy]axis\d*$/.test(k)) darkenAxis(layout[k]);
@@ -136,6 +175,10 @@
         layout.legend.bgcolor = 'rgba(6, 13, 24, 0.7)';
         layout.legend.bordercolor = 'rgba(0, 229, 255, 0.2)';
         layout.legend.font = Object.assign({}, layout.legend.font, { color: INK_DIM });
+        // Lejant boyu verilmemişse genel boyu devralır; etkin boy tabana çekilir.
+        layout.legend.font.size = enAzBoy(
+            typeof layout.legend.font.size === 'number' ? layout.legend.font : layout.font,
+            YAZI_TABANI.lejant);
 
         // --- Okunabilirlik: başlık / üst-legend / marj çakışmaları -------
         var hasTitle = !!(layout.title && layout.title.text);
@@ -581,6 +624,79 @@
         return cfg;
     }
 
+    /* v3.0.1 (V301/N-grafik G3) — ALTTAN TAŞAN METİN.
+       ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/grafik/RAPOR.md, G2): iki kök.
+       (1) Kabına sabit yükseklik yazılan grafiklerde (app.js safePlotCreate:
+       style.height = layout.height) kabın iç dolgusu (~22 px) hesaba
+       girmiyordu; SVG kabın dibinden dolgu kadar taşıyor, alttaki lejant /
+       x eksen başlığı kabın dışına (altındaki açıklama satırının üstüne)
+       düşüyordu — hibrit sayfasında 5 grafik. (2) Çizim alanının altına
+       konan yatay lejant bazen figürün kendi dibini de aşıyordu.
+       Çizimden SONRA ölçülür: metin SVG'nin dibini aşıyorsa figür
+       yüksekliği ve alt kenar boşluğu AYNI miktarda büyütülür (çizim alanı
+       yerinde kalır); kabın yüksekliği yazılıysa dolgu payı eklenir. Grafik
+       başına tek düzeltme (döngü yok); yeni çizimde yeniden ölçülür. */
+    var ALT_TASMA_TOLERANS_PX = 2;
+    var ALT_TASMA_PAY_PX = 8;
+
+    function dikeyDolgu(gd) {
+        var cs = (typeof getComputedStyle === 'function') ? getComputedStyle(gd) : null;
+        if (!cs || cs.boxSizing !== 'border-box') return 0;
+        return ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth']
+            .reduce(function (t, k) { return t + (parseFloat(cs[k]) || 0); }, 0);
+    }
+
+    function altTasmayiKapat(gd) {
+        try {
+            if (!gd || !gd.getBoundingClientRect || !gd._fullLayout) return;
+            if (gd.__hrmaAltPay) return;
+            // Yalnız yüksekliği AÇIKÇA verilmiş figürler: yüksekliği kabından
+            // alan (autosize) figüre yükseklik yazmak, sayfanın sonradan
+            // yaptığı kaba oturtmayı (solid.html hrmaFitPlot, T20) kilitler —
+            // ara ölçümde katı Isp-irtifa grafiği 2 px'e çöktü.
+            if (!(gd.layout && typeof gd.layout.height === 'number')) return;
+            var svg = gd.querySelector && gd.querySelector('svg.main-svg');
+            if (!svg) return;
+            var rs = svg.getBoundingClientRect();
+            if (!(rs.height > 0)) return;
+            var enAlt = rs.bottom;
+            var metinler = gd.querySelectorAll('svg text');
+            for (var i = 0; i < metinler.length; i++) {
+                var t = metinler[i];
+                if (t.closest && (t.closest('.hoverlayer') || t.closest('.modebar'))) continue;
+                if (!(t.textContent || '').trim()) continue;
+                var b = t.getBoundingClientRect();
+                if (b.height > 0 && b.bottom > enAlt) enAlt = b.bottom;
+            }
+            var L = gd._fullLayout;
+            var tasma = Math.ceil(enAlt - rs.bottom);
+            var ek = tasma > ALT_TASMA_TOLERANS_PX ? tasma + ALT_TASMA_PAY_PX : 0;
+            var yeniH = Math.round((L.height || rs.height) + ek);
+            gd.__hrmaAltPay = ek || -1;
+            // Kap yalnız SVG kabın dibinden taşıyorsa (ya da figür büyüdüyse)
+            // ve yalnız BÜYÜTÜLÜR: kabın yüksekliğine göre sonradan çizim
+            // yüksekliği kuran sayfa düzeltmeleri (solid.html T20) bozulmaz.
+            if (gd.style && gd.style.height) {
+                var r0 = gd.getBoundingClientRect();
+                var cs = (typeof getComputedStyle === 'function') ? getComputedStyle(gd) : null;
+                var altDolgu = cs ? (parseFloat(cs.paddingBottom) || 0)
+                    + (parseFloat(cs.borderBottomWidth) || 0) : 0;
+                var kabTasma = rs.bottom - (r0.bottom - altDolgu);
+                var gerekli = yeniH + dikeyDolgu(gd);
+                if ((ek || kabTasma > ALT_TASMA_TOLERANS_PX)
+                        && gerekli > (parseFloat(gd.style.height) || 0)) {
+                    gd.style.height = gerekli + 'px';
+                }
+            }
+            if (ek) {
+                Plotly.relayout(gd, { height: yeniH,
+                                      'margin.b': ((L.margin && L.margin.b) || 0) + ek });
+            }
+        } catch (e) {
+            console.warn('HRMA: alt taşma ölçülemedi', e);
+        }
+    }
+
     function wrap(fnName) {
         var orig = Plotly[fnName] && Plotly[fnName].bind(Plotly);
         if (!orig) return;
@@ -595,7 +711,24 @@
             } catch (e) {
                 console.warn('HRMA dark theme patch failed, rendering as-is:', e);
             }
-            return orig(el, data, layout, config);
+            var gdEl = (typeof el === 'string' && typeof document !== 'undefined'
+                        && document.getElementById) ? document.getElementById(el) : el;
+            if (gdEl && typeof gdEl === 'object') gdEl.__hrmaAltPay = 0;
+            var sonuc = orig(el, data, layout, config);
+            if (sonuc && typeof sonuc.then === 'function') {
+                sonuc.then(function (gd) {
+                    altTasmayiKapat(gd);
+                    // Gizli kapta çizilen grafik (ör. sekme kapalıyken) o an
+                    // ölçülemez; görünür olup yeniden çizildiğinde ölçülür.
+                    if (gd && gd.on && !gd.__hrmaAltDinleyici) {
+                        gd.__hrmaAltDinleyici = true;
+                        gd.on('plotly_afterplot', function () {
+                            if (!gd.__hrmaAltPay) altTasmayiKapat(gd);
+                        });
+                    }
+                });
+            }
+            return sonuc;
         };
     }
 

@@ -1600,6 +1600,63 @@ def _nozzle_wall_design_m(motor_data):
     return design['thickness_m'], design['source']
 
 
+# ---------------------------------------------------------------------------
+# Lüle cidar profili — STEP, STL ve kütle için TEK kaynak (V301 bilinen C1)
+# ---------------------------------------------------------------------------
+#: Profil birimleri: çağıran kendi uzayında okur (STEP mm, trimesh metre).
+#: Ölçek BURADA uygulanır ki iki üretici aynı sayıyı aynı işlemle alsın.
+NOZZLE_PROFILE_UNITS = ('mm', 'm')
+
+
+def nozzle_wall_profile(motor_data, unit='mm', require_solved_length=False):
+    """Lüle cidar profili: iç kontur + et kuralı + dış kontur (TEK kaynak).
+
+    V301 bilinen C1 (22 Eki 2026). STEP (``step_export._revolve_smooth_
+    nozzle``), STL (``MotorCADDesigner._nozzle_solid``) ve kütle dökümü
+    (``_estimate_component_mass('nozzle')``) lüleyi buradan okur. Eskiden
+    üçü de ``sample_nozzle_inner_contour``u ve et çözümleyicisini AYRI AYRI
+    çağırıp dış konturu kendi içinde yeniden kuruyordu (STEP ``(z, r + et)``,
+    STL ``(r + et, z)`` ters sırayla, kütle ``r_orta + et``): et kuralı üç
+    yerde yazılıydı.
+
+    Kural: dış kontur iç konturun AYNI eksenel istasyonlarında yarıçapça
+    ``et`` kadar dışarı kaydırılmışıdır (radyal ofset; her istasyonda
+    et = ``wall``). Et ``_nozzle_wall_design``den gelir.
+
+    ``unit``: ``'mm'`` ya da ``'m'``. Noktalar ölçeklenir, et
+    ``thickness_m``den o birime çevrilir; dış kontur ölçeklenmiş iç kontur
+    + ölçeklenmiş et ile kurulur (kayan noktada çağıranların eski
+    işlemleriyle BİT-AYNI; ölçüm ``docs/scofield/raw/OH/V301/bilinen/cad``).
+
+    ``require_solved_length``: imalat STEP'i ``True`` geçirir — ıraksak boy
+    çözücüden gelmiyorsa örnekleyicinin adlı ``ValueError``u aynen yükselir
+    (A5, fail-closed). STL/görünüm yolu eski davranışı korur.
+
+    Döner sözlük:
+        inner       -> [(z, r), ...] iç kontur (z = 0 yakınsak girişi)
+        outer       -> [(z, r + wall), ...] AYNI istasyonlarda dış kontur
+        wall        -> et (``unit`` biriminde)
+        wall_design -> ``_nozzle_wall_design`` sözlüğü (künye, kaynak)
+        meta        -> örnekleyicinin ``meta``sı (mm: boğaz, çıkış, tür ...)
+        unit        -> ``unit``
+    """
+    if unit not in NOZZLE_PROFILE_UNITS:
+        raise ValueError(f'nozzle profile unit must be one of '
+                         f'{NOZZLE_PROFILE_UNITS}, got {unit!r}')
+    pts_mm, meta = sample_nozzle_inner_contour(
+        motor_data, require_solved_length=require_solved_length)
+    design = _nozzle_wall_design(motor_data)
+    if unit == 'mm':
+        inner = [(z, r) for z, r in pts_mm]
+        wall = design['thickness_m'] * 1000.0
+    else:
+        inner = [(z / 1000.0, r / 1000.0) for z, r in pts_mm]
+        wall = design['thickness_m']
+    outer = [(z, r + wall) for z, r in inner]
+    return {'inner': inner, 'outer': outer, 'wall': wall,
+            'wall_design': design, 'meta': meta, 'unit': unit}
+
+
 def _grain_outer_radius_m(motor_data):
     """Çizilecek yakıt tanesinin DIŞ yarıçapı [m] — ÇÖZÜCÜNÜN kendi çapından.
 
@@ -2290,9 +2347,19 @@ def grain_gate_body(refusals, artefact):
 #: nokta yuvarlamasıdır. Daha büyük bir fark yanıtta İKİ ayrı tank demektir.
 TANK_VOLUME_MATCH_REL_TOL = 1e-6
 #: Düz kapak beyanı (etiket ve paket metinleri bu cümleyi okur).
+#: ÖH V31 CV-0 (B1 §4.3 (c)): eski cümle "the structural adequacy of the
+#: drawn flat heads was NOT computed" diyordu ve imalat dosyası yine de
+#: iniyordu. ÖLÇÜLDÜ (19 Eki, ``docs/scofield/raw/OH/V31/cv0/once.json``):
+#: örnek sıvı tanklarında çizilen 3 mm düz kapağın akma tabanlı SF'si
+#: 0,12-0,47. Kapak artık imalat kapısında hesaplanır
+#: (``tank_head_assessment``); sayı ve hüküm ``tank_head_declaration``
+#: cümlesiyle bu beyanın yanına yazılır.
 TANK_FLAT_HEAD_DECLARATION = (
     'flat heads idealized as the flat-ended cylinder of the sizing model; '
-    'the structural adequacy of the drawn flat heads was NOT computed')
+    'each drawn flat head is checked by the manufacturing safety gate as a '
+    'simply supported flat circular plate under uniform pressure (Roark '
+    'Table 11.2 case 10a) at the qualification pressure, against the '
+    'material yield strength')
 
 
 def tank_shell_geometry_mm(key, diameter_mm, length_mm, wall_mm,
@@ -2333,6 +2400,21 @@ def tank_shell_geometry_mm(key, diameter_mm, length_mm, wall_mm,
         hacim_notu += f' = {key}.dimensions.volume {v_iddia:.4f} L'
     profil = [(-t, 0.0), (-t, R), (L + t, R), (L + t, 0.0), (L, 0.0),
               (L, r), (0.0, r), (0.0, 0.0)]
+    # v3.0.1: ``analysed_head_type`` istemci gövdesinden gelir
+    # (``POST /export_tank_cad`` -> ``pressure_vessel.head_type``). Etikete
+    # YALNIZ analizin tanıdığı başlık tipi (``pressure_vessel.HEAD_TYPES``)
+    # yazılır; başka bir değer ham YANSITILMAZ (STEP metnine giren istemci
+    # metni dosyayı bozabilir ya da içerik enjekte edebilir — §28-33).
+    from hrma.analysis.pressure_vessel import HEAD_TYPES
+    if not analysed_head_type:
+        baslik_notu = ''
+    elif isinstance(analysed_head_type, str) and analysed_head_type in HEAD_TYPES:
+        baslik_notu = (' - the pressure-vessel analysis of this tank '
+                       f'evaluates {analysed_head_type} heads '
+                       '(pressure_vessel.head_type), not the drawn flat heads')
+    else:
+        baslik_notu = (' - pressure_vessel.head_type in the request is not a '
+                       'recognised head type and is not echoed')
     label = (f'{key} (hollow shell, flat-ended cylinder = the tank sizing '
              f'model; cavity diameter {D:.2f} x length {L:.2f} mm from '
              f'{key}.diameter / '
@@ -2341,10 +2423,7 @@ def tank_shell_geometry_mm(key, diameter_mm, length_mm, wall_mm,
              f'heads -> overall diameter {D + 2 * t:.2f} x length '
              f'{L + 2 * t:.2f} mm, '
              f'x = {-t:.2f} to {L + t:.2f} mm; {TANK_FLAT_HEAD_DECLARATION}'
-             + (f' - the pressure-vessel analysis of this tank evaluates '
-                f'{analysed_head_type} heads (pressure_vessel.head_type), '
-                'not the drawn flat heads' if analysed_head_type else '')
-             + ')')
+             + baslik_notu + ')')
     return {'inner_diameter_mm': D, 'inner_length_mm': L, 'wall_mm': t,
             'outer_diameter_mm': D + 2 * t, 'outer_length_mm': L + 2 * t,
             'x_min_mm': -t, 'x_max_mm': L + t, 'inner_volume_mm3': v_ic,
@@ -2408,6 +2487,381 @@ def injector_plate_axial_span_mm(thickness_mm):
     return x0, x1, note
 
 
+# ---------------------------------------------------------------------------
+# V301 bilinen C2 — PINTLE ENJEKTÖRÜN CAD GEOMETRİSİ (STEP + STL TEK KAYNAK)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (22 Eki, ``docs/scofield/raw/OH/V301/bilinen/cad``): pintle seçilen
+# koşuda STEP ve STL enjektörü "düz plaka + devrenin EŞDEĞER orifis planı"
+# (hibrit 3 kN'de 3 delik) olarak çiziyordu; kanonik pintle (direk, anülüs,
+# uç delik sırası) hiçbir CAD dosyasında yoktu. Çözücünün kendi beyanı
+# (``injector_design.PINTLE_EQUIVALENT_ORIFICE_PLAN_BASIS``): "The pintle is
+# NOT drilled this way". Artık iki üretici de aşağıdaki TEK çözümleyiciden
+# okur; kanonik geometri yoksa ya da çizilemiyorsa ADLI ret (düz plakaya
+# sessiz dönüş YOK).
+
+#: Kanonik pintle geometrisinin arandığı bloklar (sıra = öncelik). Hibrit
+#: çözücü özet bloğa yazar (V301/E1, ``motor.injector_design.pintle_
+#: geometry``); sıvı çözücü devre ayrıntısına (``injector_design_detail``),
+#: sıvı dışa aktarım gövdesi (``motor_geometry``) onu ``injector_design``
+#: altına taşır (``motor_geometry.liquid_results_to_motor_geometry``).
+PINTLE_GEOMETRY_BLOCKS = ('injector_design', 'injector_design_detail')
+#: Enjektör tipinin okunduğu bloklar. Tip yalnız ``'pintle'`` değeriyle
+#: tanınır; bloklar çelişirse (biri pintle, öteki başka tip) çizim REDDEDİLİR.
+PINTLE_TYPE_BLOCKS = ('injector_design', 'injector_design_detail',
+                      'injector_results')
+PINTLE_TYPE_NAME = 'pintle'
+#: Uç delik kipleri: radyal delikler çizilir; 'none' deliksiz direk;
+#: teğetsel delikler çizilmez (aşağıdaki ret gerekçesi).
+PINTLE_DRAWABLE_MODES = ('radial', 'none')
+#: HRMA ÇİZİM SEÇİMİ — LİTERATÜR DEĞERİ YOK. Direğin ucu, uç delik
+#: sırasının akış yönündeki kenarından bu kadar DELİK ÇAPI ötede kapanır
+#: (direk ucu x = yüz + L_s + d/2 + k·d). Çözücü direğin delik sırasından
+#: sonraki boyunu yayımlamaz (Dressler & Bauer AIAA 2000-3871 de sayı
+#: vermez); delik kenarı ile uç arasında malzeme olsun diye seçildi.
+PINTLE_CAD_TIP_BEYOND_HOLE_EDGE_PER_D = 0.5
+#: HRMA KORUMASI — LİTERATÜR DEĞERİ YOK: uç delik sırası en çok bu kadar
+#: delikle çizilir; üstü ADLI ret (sıra KIRPILMAZ). İstemci gövdesinden gelen
+#: sınırsız bir sayı STEP/STL booleanını sınırsız işe sokmasın diye konuldu
+#: (güvenlik + kararlılık ilkesi); ölçülen çizim süresi RAPOR.md'de.
+PINTLE_CAD_MAX_TIP_HOLES = 512
+PINTLE_CAD_MAX_TIP_HOLES_BASIS = (
+    'HRMA guard, no literature value: bounds the boolean work of one '
+    'drawing')
+#: HRMA ÇİZİM SEÇİMİ — LİTERATÜR DEĞERİ YOK. Uç delikleri direk
+#: yüzeyinden radyal olarak, komşu deliklerin birbirine değeceği yarıçapa
+#: (r_c = d / (2*sin(pi/n)); tek delikte eksen) kadar olan yolun bu
+#: KESRİ derinliğe delinir. Çözücü ne direğin iç besleme kanalını ne de
+#: delik boyunu yayımlar. Delikleri eksene kadar indirmek ÖLÇÜLDÜ ve
+#: bırakıldı (22 Eki): eşit çaplı radyal delikler eksende tek noktada teğet
+#: buluşur, STL booleanı orada katı olmayan ağ veriyordu (156 vakanın 64'ü);
+#: sabit L/D = 1 derinliği ise geçerli planların bir kısmında (ör. n = 4,
+#: BF 0,58) delikleri direğin içinde birleştirip çizimi reddettiriyordu.
+#: Yarı yol, delikleri birbirinden ve eksenden uzak tutar; çizim yalnız
+#: delikler direk YÜZEYİNDE çakışırsa (geometrik olarak imkânsız plan)
+#: reddedilir.
+PINTLE_CAD_TIP_HOLE_DEPTH_FRACTION = 0.5
+#: STL TESSELASYON SEÇİMİ (geometri DEĞİL): direk 32 kesitli çokgendir
+#: (trimesh ``cylinder`` varsayılanı, STL'in öteki dönel katılarıyla aynı)
+#: ve çokgen köşeleri, kesit açısının altın oran kesri kadar döndürülür.
+#: ÖLÇÜLDÜ (22 Eki, 88 geçerli delik planı): köşe fazı 0'da delik eksenleri
+#: çokgen köşelerinden geçiyor ve boolean sonucu 51 vakada katı olmayan ağ
+#: veriyordu, yarım kesitte 46, 0,382'de 0. Delik açıları STEP ile aynıdır
+#: (2*pi*i/n); dönen yalnız çokgenin köşeleridir, hacmi değişmez.
+PINTLE_STL_POST_SECTIONS = 32
+PINTLE_STL_POST_PHASE_FRACTION = (3.0 - math.sqrt(5.0)) / 2.0
+#: Çizim kurallarının künyesi (STEP parça adına aynen basılır).
+PINTLE_CAD_DRAWING_BASIS = (
+    'HRMA drawing choices, no literature value: (1) the post root sits on '
+    'the closure-head inner face (x = 0, the plate seat); (2) the post tip '
+    f'ends {PINTLE_CAD_TIP_BEYOND_HOLE_EDGE_PER_D:g} x hole diameter beyond '
+    'the downstream edge of the tip-hole row; (3) tip holes are drilled '
+    'radially from the post surface '
+    f'{PINTLE_CAD_TIP_HOLE_DEPTH_FRACTION:g} of the way down to the radius '
+    'where neighbouring holes would meet (the axis for a single hole) - '
+    'the internal feed passage of the post and the manifold behind the '
+    'face are NOT published and NOT modelled')
+#: Kanonik geometrinin YAYIMLADIĞI ama çizilmeyen eşdeğer orifis planı.
+PINTLE_EQUIVALENT_PLAN_NOT_DRILLED = (
+    'the equivalent straight-orifice plan of the injector circuit '
+    '(number_of_orifices / orifice_diameter_mm) is a flow-area equivalent '
+    'and is NOT drilled')
+
+
+class PintleCADError(ValueError):
+    """Pintle seçili ama CAD geometrisi kurulamıyor (adlı ret).
+
+    ``invalid_fields`` ihracat ailesinin sözleşmesidir (``field`` +
+    ``reason``); STEP bunu ``StepExportDataError``a taşır."""
+
+    def __init__(self, message, invalid_fields=()):
+        super().__init__(message)
+        self.invalid_fields = [dict(k) for k in (invalid_fields or ())]
+
+
+def _pintle_red(field, reason, message, **ek):
+    kayit = {'field': field, 'reason': reason}
+    kayit.update(ek)
+    return PintleCADError(
+        f'pintle injector not drawable ({reason}): {message}; the injector '
+        'is not exported as a flat plate with equivalent holes instead',
+        invalid_fields=[kayit])
+
+
+def _pintle_type_claims(md):
+    """``{blok: tip}`` — tipi yayımlayan her blok (küçük harf)."""
+    out = {}
+    for blok in PINTLE_TYPE_BLOCKS:
+        b = md.get(blok)
+        if isinstance(b, dict):
+            tip = b.get('injector_type') or b.get('type')
+            if isinstance(tip, str) and tip.strip():
+                out[blok] = tip.strip().lower()
+    return out
+
+
+def pintle_type_claimed(motor_data):
+    """Koşu enjektörü pintle olarak yayımlıyor mu (herhangi bir blokta)?
+
+    Yalnız tip iddiasına bakar; geometri ve çelişki hükmü
+    :func:`pintle_cad_geometry`dedir. Düz plaka üreticileri bunu okuyup
+    pintle'da kendilerini KAPATIR (eşdeğer orifis planı delinmez)."""
+    md = motor_data if isinstance(motor_data, dict) else {}
+    return PINTLE_TYPE_NAME in _pintle_type_claims(md).values()
+
+
+def pintle_cad_geometry(motor_data, chamber_diameter_m=None):
+    """Pintle enjektörün çizim geometrisi [mm] — STEP ve STL TEK kaynak.
+
+    Döner: koşu pintle değilse ``None``; pintle ise sözlük:
+        d_post, gap, bore, mode, n_holes, d_hole, skip, plate_t, plate_r,
+        x0, x_face, x_holes, x_tip, source_path, notes (künye cümleleri).
+    Pintle ama kanonik geometri yok / okunamıyor / çizilemiyorsa
+    ``PintleCADError`` (adlı ret). Konum sözleşmesi: x = 0 kapak iç yüzü,
+    plaka [x0, x0 + t] (``injector_plate_axial_span_mm``); yüz = x_face.
+    """
+    md = motor_data if isinstance(motor_data, dict) else {}
+    tipler = _pintle_type_claims(md)
+    if PINTLE_TYPE_NAME not in tipler.values():
+        return None
+    diger = {b: t for b, t in tipler.items() if t != PINTLE_TYPE_NAME}
+    if diger:
+        raise _pintle_red(
+            next(iter(diger)) + '.injector_type', 'injector_type_conflict',
+            'the result names a pintle injector in '
+            + ', '.join(b for b, t in tipler.items()
+                        if t == PINTLE_TYPE_NAME)
+            + ' but another injector type in '
+            + ', '.join(f'{b} ({t})' for b, t in diger.items()),
+            claims=tipler)
+    pg, yol = None, None
+    for blok in PINTLE_GEOMETRY_BLOCKS:
+        b = md.get(blok)
+        if isinstance(b, dict) and b.get('pintle_geometry') is not None:
+            pg, yol = b.get('pintle_geometry'), f'{blok}.pintle_geometry'
+            break
+    if not isinstance(pg, dict):
+        raise _pintle_red(
+            yol or 'injector_design.pintle_geometry',
+            'pintle_geometry_not_published' if pg is None
+            else 'pintle_geometry_not_an_object',
+            'the canonical pintle geometry (post diameter, annular gap, '
+            'tip holes, skip distance) is not in this result (looked at: '
+            + ', '.join(f'{b}.pintle_geometry'
+                        for b in PINTLE_GEOMETRY_BLOCKS) + ')',
+            accepted_paths=[f'{b}.pintle_geometry'
+                            for b in PINTLE_GEOMETRY_BLOCKS])
+
+    def _uzunluk(anahtar):
+        v = finite_positive(pg.get(anahtar))
+        if v is None:
+            raise _pintle_red(
+                f'{yol}.{anahtar}', 'not_a_finite_positive_length',
+                f'{anahtar} = {_unreflected_value(pg.get(anahtar))} is not '
+                'a finite positive length')
+        return float(v)
+
+    d_post = _uzunluk('d_pintle_mm')
+    gap = _uzunluk('annulus_gap_mm')
+    notes = [f'canonical geometry {yol}']
+    bore_hesap = d_post + 2.0 * gap
+    bore_yay = pg.get('annulus_bore_diameter_mm')
+    if bore_yay is not None:
+        bore = _uzunluk('annulus_bore_diameter_mm')
+        if abs(bore - bore_hesap) > 1e-9 * max(1.0, bore):
+            raise _pintle_red(
+                f'{yol}.annulus_bore_diameter_mm', 'inconsistent_with_post',
+                f'the published annulus bore {bore:.6g} mm is not '
+                f'D_p + 2t = {bore_hesap:.6g} mm')
+        notes.append(f'annulus bore {bore:.3f} mm = D_p + 2t ({yol}'
+                     '.annulus_bore_diameter_mm)')
+    else:
+        bore = bore_hesap
+        notes.append(f'annulus bore {bore:.3f} mm = D_p + 2t (the annulus '
+                     'definition A = pi*(D_p + t)*t; the block publishes no '
+                     'annulus_bore_diameter_mm)')
+
+    mode_ham = pg.get('secondary_holes')
+    n_ham = pg.get('n_radial_holes')
+    if mode_ham is None:
+        # Sıvı çözücünün modeli (``pintle_tip_geometry``) TANIMI gereği
+        # radyal delik sırasıdır; kip alanı yayımlanmaz.
+        mode = 'radial' if n_ham else 'none'
+        notes.append(f'tip-hole mode {mode}: {yol} publishes no '
+                     'secondary_holes; its model (pintle_tip_geometry) is a '
+                     'radial hole row')
+    elif isinstance(mode_ham, str):
+        mode = mode_ham.strip().lower()
+    else:
+        mode = None
+    if mode not in PINTLE_DRAWABLE_MODES:
+        if mode == 'tangential':
+            raise _pintle_red(
+                f'{yol}.secondary_holes', 'tangential_holes_not_drawable',
+                'tangential tip holes need the hole-axis offset and drilling '
+                'depth, which are not published (the solver sizes them as '
+                'radial holes and does not model the tangential momentum)')
+        raise _pintle_red(
+            f'{yol}.secondary_holes', 'unknown_tip_hole_mode',
+            'tip-hole mode '
+            + (mode_ham if _reflectable_token(mode_ham)
+               else _unreflected_value(mode_ham))
+            + ' is not '
+            'one of ' + ', '.join(PINTLE_DRAWABLE_MODES))
+
+    bore_m = _real_scalar(chamber_diameter_m)
+    if bore_m is None:
+        bore_m = _real_scalar(md.get('chamber_diameter'))
+    if bore_m is None or not bore_m > 0.0:
+        raise _pintle_red(
+            'chamber_diameter', 'chamber_diameter_not_published',
+            'the chamber bore that must contain the pintle is not published')
+    if not bore / 2.0 < bore_m * 500.0:
+        raise _pintle_red(
+            f'{yol}.d_pintle_mm', 'annulus_bore_not_inside_chamber',
+            f'the annulus bore {bore:.4g} mm does not fit inside the '
+            f'{bore_m * 1000.0:.4g} mm chamber')
+    plate = _injector_plate_design(md, chamber_diameter_m)
+    if plate['thickness_m'] is None:
+        # Pintle çözümleri plaka/gövde kalınlığı YAYIMLAMAZ (app.py
+        # ``_plaka_kalinligi_kazanildi``). Kalınlık uydurulmaz (ÖH D15 /
+        # P9B1-13): yüz plakası ve onun içindeki anülüs deliği çizilmez;
+        # direk ve uç delikleri, eksen sözleşmesinin enjektör yüzünden
+        # (x = 0) ölçülerek çizilir.
+        plate_t = plate_r = None
+        x0 = x_face = INJECTOR_PLATE_SEAT_X_MM
+        plate_note = (
+            'injector faceplate / body NOT modelled: ' + plate['source']
+            + f'; the annulus bore d{bore:.3f} mm through it is therefore '
+            'NOT drawn, and the post and its tip holes are placed from the '
+            f'injector face x = {x_face:.2f} mm of the axis convention')
+    else:
+        if plate['radius_m'] is None:
+            raise _pintle_red(
+                'injector_results.plate_structural.plate_diameter_mm',
+                'plate_diameter_not_published',
+                'neither the plate analysis nor the chamber publishes the '
+                'plate diameter')
+        plate_t = plate['thickness_m'] * 1000.0
+        plate_r = plate['radius_m'] * 1000.0
+        if not bore / 2.0 < plate_r:
+            raise _pintle_red(
+                f'{yol}.d_pintle_mm', 'annulus_bore_not_inside_plate',
+                f'the annulus bore {bore:.4g} mm does not fit inside the '
+                f'{2.0 * plate_r:.4g} mm plate')
+        if plate_r > bore_m * 500.0 + _MONTAJ_GIRISIM_TOLERANS_MM:
+            raise _pintle_red(
+                'injector_results.plate_structural.plate_diameter_mm',
+                'plate_wider_than_chamber_bore',
+                f'the {2.0 * plate_r:.4g} mm injector plate does not fit in '
+                f'the {bore_m * 1000.0:.4g} mm chamber bore')
+        x0, x_face, plate_note = injector_plate_axial_span_mm(plate_t)
+
+    if mode == 'radial':
+        if isinstance(n_ham, bool) or not isinstance(n_ham, (int, float)) \
+                or not float(n_ham).is_integer() or int(n_ham) < 1:
+            raise _pintle_red(
+                f'{yol}.n_radial_holes', 'not_a_positive_integer',
+                f'n_radial_holes = {_unreflected_value(n_ham)} is not a '
+                'positive whole number')
+        n_holes = int(n_ham)
+        if n_holes > PINTLE_CAD_MAX_TIP_HOLES:
+            raise _pintle_red(
+                f'{yol}.n_radial_holes', 'too_many_tip_holes_to_draw',
+                f'{n_holes} tip holes exceed the drawing bound of '
+                f'{PINTLE_CAD_MAX_TIP_HOLES} ({PINTLE_CAD_MAX_TIP_HOLES_BASIS})'
+                '; the hole row is not truncated')
+        d_hole = _uzunluk('radial_hole_d_mm')
+        skip = _uzunluk('skip_distance_mm')
+        r_post = d_post / 2.0
+        # Komşu iki deliğin birbirine değdiği yarıçap: eksen aralığı (kiriş
+        # 2*r*sin(pi/n)) delik çapına eşit olduğu yer. Yüzeyde bile
+        # değiyorlarsa (r_c >= r) ayrı delikli bir sıra imkânsızdır — yay
+        # uzunluğuna dayalı BF < 1 bundan zayıf bir koşuldur.
+        r_c = (d_hole / (2.0 * np.sin(np.pi / n_holes)) if n_holes > 1
+               else 0.0)
+        if not (d_hole < d_post and r_post - r_c
+                > _MONTAJ_GIRISIM_TOLERANS_MM):
+            raise _pintle_red(
+                f'{yol}.n_radial_holes', 'tip_holes_overlap_on_post_surface',
+                f'{n_holes} holes of {d_hole:.4g} mm do not fit side by side '
+                f'on the {d_post:.4g} mm post (neighbouring holes would '
+                'overlap on its surface)')
+        hole_depth = PINTLE_CAD_TIP_HOLE_DEPTH_FRACTION * (r_post - r_c)
+        if not skip > d_hole / 2.0:
+            raise _pintle_red(
+                f'{yol}.skip_distance_mm', 'hole_row_inside_injector_face',
+                f'the tip-hole row at L_s = {skip:.4g} mm from the face would '
+                f'cut into the face (hole radius {d_hole / 2.0:.4g} mm)')
+        x_holes = x_face + skip
+        x_tip = (x_holes + d_hole / 2.0
+                 + PINTLE_CAD_TIP_BEYOND_HOLE_EDGE_PER_D * d_hole)
+        notes.append(f'{n_holes} x d{d_hole:.3f} mm tip holes ({yol}'
+                     f'.n_radial_holes, .radial_hole_d_mm) on a row at '
+                     f'L_s = {skip:.3f} mm from the face ({yol}'
+                     '.skip_distance_mm)')
+    else:
+        n_holes, d_hole, skip, hole_depth = 0, None, None, None
+        x_holes = None
+        x_tip = x_face
+        notes.append('no tip holes (secondary_holes = none) and no skip '
+                     'distance: the post is drawn up to the injector face')
+    not_drawn = None
+    if not x_tip - x0 > _MONTAJ_GIRISIM_TOLERANS_MM:
+        # Deliksiz pintle + yayımlanmamış yüz plakası: direk yüze kadar
+        # çizilir ama yüz x = 0'dadır; çizilecek hiçbir hacim kalmaz.
+        # Parça uydurulmaz; "çizilmedi" gerekçesi adıyla taşınır (yüz
+        # plakası yayımlanmamış enjektörün mevcut kanalı).
+        not_drawn = (
+            'pintle_not_drawable_without_faceplate: secondary_holes = none '
+            'leaves no post beyond the injector face and ' + plate_note)
+    notes.append(f'post d{d_post:.3f} mm ({yol}.d_pintle_mm), annular gap '
+                 f'{gap:.3f} mm ({yol}.annulus_gap_mm)')
+    od = finite_positive(pg.get('housing_outer_diameter_mm'))
+    notes.append(
+        f'injector body OD {od:.3f} mm published - represented by the '
+        'faceplate, not drawn as a separate part' if od is not None
+        else 'injector body OD not sized by the solver - the faceplate '
+             'carries the annulus bore')
+    notes.append(PINTLE_EQUIVALENT_PLAN_NOT_DRILLED)
+    notes.append(PINTLE_CAD_DRAWING_BASIS)
+    if plate_t is not None:
+        notes.append(f'faceplate {plate_t:.2f} mm x d{2.0 * plate_r:.2f} mm '
+                     f'with the annulus bore - {plate["source"]}')
+    notes.append(plate_note)
+    return {'d_post': d_post, 'gap': gap, 'bore': bore, 'mode': mode,
+            'n_holes': n_holes, 'd_hole': d_hole, 'skip': skip,
+            'hole_depth': hole_depth, 'not_drawn_reason': not_drawn,
+            'plate_t': plate_t, 'plate_r': plate_r, 'x0': x0,
+            'x_face': x_face, 'x_holes': x_holes, 'x_tip': x_tip,
+            'source_path': yol, 'notes': notes}
+
+
+def pintle_assembly_refusal(geo, chamber_length_mm, grain_front_mm=None,
+                            grain_port_radius_mm=None):
+    """Pintle direğinin montaj girişimi — STEP ve STL AYNI hüküm.
+
+    Direk kamaradan taşamaz; tane varsa direk ucu tanenin ön yüzünü geçip
+    direk tanenin portundan kalınsa iki katı iç içe geçer (eksenel + radyal
+    örtüşme). Döner: ``None`` ya da ``PintleCADError``."""
+    if geo['x_tip'] > chamber_length_mm + _MONTAJ_GIRISIM_TOLERANS_MM:
+        return _pintle_red(
+            'chamber_length', 'pintle_post_longer_than_chamber',
+            f'the pintle post ends at x = {geo["x_tip"]:.2f} mm but the '
+            f'chamber is only {chamber_length_mm:.2f} mm long')
+    if (grain_front_mm is not None and grain_port_radius_mm is not None
+            and geo['x_tip'] - grain_front_mm > _MONTAJ_GIRISIM_TOLERANS_MM
+            and geo['d_post'] / 2.0 - grain_port_radius_mm
+            > _MONTAJ_GIRISIM_TOLERANS_MM):
+        return _pintle_red(
+            f'{geo["source_path"]}.d_pintle_mm',
+            'pintle_post_intersects_fuel_grain',
+            f'the pintle post (d{geo["d_post"]:.2f} mm) reaches '
+            f'x = {geo["x_tip"]:.2f} mm, past the grain front at '
+            f'x = {grain_front_mm:.2f} mm, and is wider than the grain port '
+            f'(d{2.0 * grain_port_radius_mm:.2f} mm)')
+    return None
+
+
 
 # ---------------------------------------------------------------------------
 # ÖH V3 CAD A1 · H5 — İMALAT EMNİYET KAPISI (karar §28-21 (i), Astra)
@@ -2464,9 +2918,8 @@ SF_GATE_PART_KEYS = {
 #: eden, çözücünün ZATEN yayımladığı bayraklar (karar §28-24 (C): "erime
 #: noktası üstünde hesaplanan dayanım, SF ve kütle geçerli tasarım çıktısı
 #: gibi sunulmaz"). Her giriş: (structural_analysis'e göreli yol, ret
-#: değeri, gerekçe). Yapı SF kulvarının 2. turu kendi bayrağını
-#: adlandırdığında buraya TEK satır eklenir; bugün o alan yoktur ve adı
-#: tahmin edilmez.
+#: değeri, gerekçe). Kapının SF okuduğu bloğun KENDİ bayrağı
+#: (``STRUCTURAL_BLOCK_VALIDITY_FLAG``) ayrıca okunur; aşağıya bakın.
 STRUCTURAL_VALIDITY_MARKERS = (
     ('thermal_analysis.strength_derating.exceeds_melting_point', True,
      'the chamber wall was evaluated at or above its melting point; the '
@@ -2474,6 +2927,32 @@ STRUCTURAL_VALIDITY_MARKERS = (
      'last point), so the structural result is outside the model validity '
      'limit and its safety factor is not a valid design output'),
 )
+
+#: ÖH V301 / B5 (20 Eki makale ölçümleri) — SF'nin OKUNDUĞU BLOĞUN geçerlilik
+#: bayrağı. Yapısal modül her üç motor için kapının SF okuduğu blokta
+#: (hibrit ``chamber_analysis``, katı ``case_analysis``, sıvı
+#: ``chamber_structure``) ``model_validity_limit_exceeded`` yayımlıyor
+#: (``structural_analysis.structural_model_validity`` /
+#: ``model_validity_publication``); kapı yalnız hibrit erime işaretini
+#: okuyordu. ÖLÇÜLDÜ (``docs/scofield/raw/OH/V301/makale1/B5/once.json``):
+#: radyatif soğutmalı örnek sıvıda (inconel_718 cidarı 1800 K) ve sıcak
+#: kasalı katıda (aluminum_6061, kasa ~731 K) bayrak True iken STEP / STL /
+#: DXF HTTP 200 ile iniyordu. True = ret; None (değerlendirilmedi) ret
+#: değildir; bayrak gerçek bir mantıksal değer olmalıdır (numpy dâhil).
+STRUCTURAL_BLOCK_VALIDITY_FLAG = 'model_validity_limit_exceeded'
+#: Bloğun kendi künyesi (dize ise ``validity_basis`` olarak taşınır).
+STRUCTURAL_BLOCK_VALIDITY_BASIS = 'model_validity_limit_exceeded_basis'
+#: Blok künye yayımlamıyorsa ``validity_basis`` olarak yazılan sabit metin.
+STRUCTURAL_BLOCK_VALIDITY_DEFAULT_BASIS = (
+    'the structural block that publishes this safety factor declares its '
+    'result outside the validity limit of the structural model, so the '
+    'safety factor is not a valid design output')
+
+
+def _is_true_flag(deger):
+    """Kapının bayrak tanımı: gerçek ``bool`` / ``np.bool_`` ve True."""
+    return isinstance(deger, (bool, np.bool_)) and bool(deger) is True
+
 
 #: Kamara SF'sinin, yapısal bloğun ölçüm adayları yoksa okunduğu genel
 #: alanlar — ``_wall_safety_factor``in geriye dönük tek-sayı sırasıyla AYNI.
@@ -2597,6 +3076,17 @@ def manufacturing_safety_refusals(motor_data):
             if (isinstance(deger, (bool, np.bool_))
                     and bool(deger) is bad):
                 extra.append((f'structural_analysis.{rel}', text))
+        # ÖH V301 / B5: SF'nin okunduğu bloğun kendi bayrağı. Hibrit erime
+        # işareti bu parça için kayıt ürettiyse ikinci kayıt YAZILMAZ (aynı
+        # parça, aynı ret nedeni; o gövdelerin yanıtı bit-aynı kalır).
+        if (not extra and block_name
+                and _is_true_flag(block.get(STRUCTURAL_BLOCK_VALIDITY_FLAG))):
+            kunye = block.get(STRUCTURAL_BLOCK_VALIDITY_BASIS)
+            extra.append((
+                f'structural_analysis.{block_name}.'
+                f'{STRUCTURAL_BLOCK_VALIDITY_FLAG}',
+                kunye if isinstance(kunye, str) and kunye
+                else STRUCTURAL_BLOCK_VALIDITY_DEFAULT_BASIS))
         out += _sf_check(
             'chamber', sf_field, sf_raw, drawn_mm, design['as_designed_mm'],
             (f'structural_analysis.{block_name}.{used_key}'
@@ -2668,7 +3158,269 @@ def tank_manufacturing_safety_refusals(tank_data):
             part, f'{part}.structural.safety_factor',
             structural.get('safety_factor'), cizilen, sf_cidar,
             sf_cidar_alani)
+        # ÖH V31 CV-0 — çizilen düz kapak (B1 §4.3 (c)). Kapak gövdeyle
+        # AYNI kapsamda denetlenir: tank SF yayımlıyorsa.
+        out += _tank_head_refusals(part, tank_head_assessment(part, td))
     return out
+
+
+# ---------------------------------------------------------------------------
+# ÖH V31 CV-0 · TANK KAPAĞI KAPISI (B1 §4.3 (c); doktrin §28-42)
+# ---------------------------------------------------------------------------
+#
+# ÖLÇÜLDÜ (19 Eki; ``docs/scofield/raw/OH/V31/cv0/once.json``): tank STEP/STL
+# düz kapakları gövde cidarı kalınlığıyla (3 mm, asgari imalat kalınlığı)
+# çiziyor; kapağın yeterliliği hesaplanmıyordu ve imalat kapısı yalnız gövde
+# SF'sine bakıyordu. Örnek sıvı (25 kN, 30 s) oksitleyici tankında basit
+# mesnet gerilmesi 2938 MPa, akma 345 MPa: SF 0,117. Paket HTTP 200 ile
+# iniyordu.
+#
+# SF TABANI kapıdan ÖLÇÜLDÜ, yeni tanım icat edilmedi: gövde dalının okuduğu
+# ``structural.safety_factor`` = akma dayanımı / hesaplanan gerilme
+# (``_design_propellant_tanks``: izin = akma / SF, t = p·r / izin; yayımdan
+# geri hesap σ_akma·t_basınç/(p·r) = 2,5 = yayımlanan, once.json (A)).
+# Kapak SF'si aynı tabandadır: SF_kapak = σ_akma / σ_kapak, eşik
+# ``MANUFACTURING_SF_MIN``.
+#
+# Gerilme: Roark's Formulas for Stress and Strain, 7. baskı, Tablo 11.2,
+# durum 10a (r_o → 0; dış kenar basit mesnetli, tüm yüzeyde düzgün basınç):
+# σ_maks = 3(3+ν)·q·a² / (8·t²), merkezde. Sayfa doğrulanmadı (yerel kopya
+# yok). Aynı bağıntı depoda ``structural_analysis`` kapak analizinde de var.
+# Boyut: [Pa]·[mm²]/[mm²] = [Pa]. Çapa (B1 §4.1 girdisi, oksitleyici tankı):
+# a = 170,35 mm, t = 3 mm, q = 2,6947 bar, ν = 0,33 -> 1085,0 MPa.
+# q = nitelendirme basıncı = ``structural.pressure_rating`` (işletme) ×
+# ``RELIEF_VALVE_SET_PRESSURE_FACTOR`` (tankın kendi emniyet vanası açılmadan
+# ulaştığı basınç; basınçlı kap analizi de bu basınçta nitelendirir).
+# a = boşluk yarıçapı D/2 (kapak boşluğu kapatır; cidar dışarı eklidir).
+# t = çizilen kapak kalınlığı = ``dimensions.wall_thickness``
+# (``tank_shell_geometry_mm`` kapağı bu kalınlıkla çizer).
+# Malzeme: ``structural.material_key`` -> ``materials_db`` (akma, ν), oda
+# sıcaklığı; tank kartı da ortam sıcaklığını beyan eder.
+
+#: Kapak modelinin künyesi (ret kaydı bunu taşır).
+TANK_HEAD_MODEL = (
+    "Roark's Formulas for Stress and Strain, 7th ed., Table 11.2 case 10a "
+    '(r_o -> 0): simply supported flat circular plate, uniform pressure q '
+    'over the whole plate, sigma_max = 3 (3 + nu) q a^2 / (8 t^2) at the '
+    'centre; page not verified')
+
+#: Kapak kaydının parça adı (``sf_gate_body`` sözleşmesi).
+TANK_HEAD_PART = 'tank_head'
+
+#: Tank -> kapak parça adının i18n anahtarı.
+TANK_HEAD_PART_KEYS = {
+    'fuel_tank': 'out.export.sfGate.part.fuel_tank_head',
+    'oxidizer_tank': 'out.export.sfGate.part.oxidizer_tank_head',
+}
+
+#: Kapak ret nedeni -> i18n anahtarı (metinler i18n_common.js'te, EN = TR).
+TANK_HEAD_GATE_REASON_KEYS = {
+    'head_sf_below_one': 'out.export.sfGate.reason.head_sf_below_one',
+    'head_sf_not_computable':
+        'out.export.sfGate.reason.head_sf_not_computable',
+}
+
+#: Kapak hesabı girdisinin kullanılamama nedenleri (kayıtta kod olarak).
+TANK_HEAD_INPUT_PROBLEMS = ('missing', 'not_finite', 'not_positive',
+                            'unknown_material', 'material_data_invalid',
+                            'result_not_finite')
+
+#: Kapı hükmü (etiket cümlesi bunlardan birini taşır).
+TANK_HEAD_VERDICTS = ('cleared', 'refused', 'not_engaged')
+
+#: Malzeme anahtarının kabul edilen en uzun hâli (karakter). Daha uzun dize
+#: ``materials_db``ye sorulmaz (istemci metni sözlük aramasına sınırsız
+#: girmez); kanonik anahtar ve takma adlar bunun çok altındadır.
+TANK_HEAD_MATERIAL_KEY_MAX_LEN = 64
+
+#: Kapak hesabının girdileri (tank kaydına göreli yol).
+_TANK_HEAD_INPUT_FIELDS = ('dimensions.diameter', 'dimensions.wall_thickness',
+                           'structural.pressure_rating',
+                           'structural.material_key')
+
+
+def tank_head_assessment(part, td):
+    """Çizilen düz kapağın yapısal hükmü — TEK kaynak (kapı + künye).
+
+    ``part``: alan yollarının öneki (``fuel_tank`` / ``oxidizer_tank``);
+    ``td``: tank kaydı (``propellant_tanks.<tank>``). Döner sözlük:
+
+    * ``engaged``: kapı bu tankı denetliyor mu (gövdeyle aynı kapsam:
+      ``structural.safety_factor`` yayımlanıyorsa);
+    * ``computed``: kapak SF'si hesaplandı mı; hesaplanamadıysa
+      ``problem_field`` (tank kaydına göreli yol) ve ``problem``
+      (``TANK_HEAD_INPUT_PROBLEMS``);
+    * sayılar: ``safety_factor``, ``head_stress_mpa``,
+      ``yield_strength_mpa``, ``poisson_ratio``, ``operating_pressure_bar``,
+      ``qualification_pressure_bar``, ``relief_factor``, ``head_radius_mm``,
+      ``drawn_head_mm``, ``required_head_thickness_mm`` (SF = 1 olan düz
+      kapak kalınlığı, aynı bağıntıdan), ``material_key`` (kanonik);
+    * ``verdict``: ``TANK_HEAD_VERDICTS``.
+
+    Fail-closed: sayı ``bool`` olmayan SONLU ``int``/``float`` olmalıdır
+    (dize, NaN, ±inf kabul edilmez); çap, kalınlık ve basınç > 0. Basıncı
+    sıfır ya da negatif olan bir kap için kapak hükmü verilmez, kapı reddeder.
+    """
+    from hrma.data.materials_db import get_material_safe
+    from hrma.engines.liquid_rocket_engine import (
+        RELIEF_VALVE_SET_PRESSURE_FACTOR)
+    td = td if isinstance(td, dict) else {}
+    dims = td.get('dimensions')
+    dims = dims if isinstance(dims, dict) else {}
+    structural = td.get('structural')
+    structural = structural if isinstance(structural, dict) else {}
+    sonuc = {'part': part, 'engaged': 'safety_factor' in structural,
+             'computed': False, 'problem_field': None, 'problem': None,
+             'safety_factor': None, 'head_stress_mpa': None,
+             'yield_strength_mpa': None, 'poisson_ratio': None,
+             'operating_pressure_bar': None,
+             'qualification_pressure_bar': None,
+             'relief_factor': float(RELIEF_VALVE_SET_PRESSURE_FACTOR),
+             'head_radius_mm': None, 'drawn_head_mm': None,
+             'required_head_thickness_mm': None, 'material_key': None,
+             'model': TANK_HEAD_MODEL}
+
+    def hukum():
+        if not sonuc['engaged']:
+            sonuc['verdict'] = 'not_engaged'
+        elif (sonuc['computed']
+              and sonuc['safety_factor'] >= MANUFACTURING_SF_MIN):
+            sonuc['verdict'] = 'cleared'
+        else:
+            sonuc['verdict'] = 'refused'
+        return sonuc
+
+    def sorun(alan, neden):
+        sonuc['problem_field'], sonuc['problem'] = alan, neden
+        return hukum()
+
+    kaynak = {'dimensions.diameter': dims.get('diameter'),
+              'dimensions.wall_thickness': dims.get('wall_thickness'),
+              'structural.pressure_rating': structural.get('pressure_rating')}
+    sayi = {}
+    for alan, ham in kaynak.items():
+        if ham is None:
+            return sorun(alan, 'missing')
+        v = _strict_number(ham)
+        if v is None:
+            return sorun(alan, 'not_finite')
+        if v <= 0.0:
+            return sorun(alan, 'not_positive')
+        sayi[alan] = float(v)
+    ham_mat = structural.get('material_key')
+    if ham_mat is None:
+        return sorun('structural.material_key', 'missing')
+    if (not isinstance(ham_mat, str) or not ham_mat
+            or len(ham_mat) > TANK_HEAD_MATERIAL_KEY_MAX_LEN):
+        return sorun('structural.material_key', 'unknown_material')
+    try:
+        mat, mat_key = get_material_safe(ham_mat)
+    except KeyError:
+        return sorun('structural.material_key', 'unknown_material')
+    sy = _strict_number(mat.get('yield_strength'))         # Pa
+    nu = _strict_number(mat.get('poisson_ratio'))
+    if sy is None or sy <= 0.0 or nu is None or not 0.0 < nu < 0.5:
+        return sorun('structural.material_key', 'material_data_invalid')
+
+    a = sayi['dimensions.diameter'] / 2.0                  # mm
+    t = sayi['dimensions.wall_thickness']                  # mm
+    p_op = sayi['structural.pressure_rating']              # bar
+    q = p_op * 1e5 * float(RELIEF_VALVE_SET_PRESSURE_FACTOR)   # Pa
+    katsayi = 3.0 * (3.0 + nu) / 8.0
+    oran = a / t                                           # boyutsuz
+    # ``**`` taşmada OverflowError fırlatır; çarpım inf verir ve aşağıdaki
+    # sonluluk denetimi onu adıyla reddeder.
+    sigma = katsayi * q * oran * oran                      # Pa
+    t_gerekli = a * math.sqrt(katsayi * q / sy)            # mm
+    sf = sy / sigma if sigma > 0.0 else None
+    if not all(isinstance(x, float) and math.isfinite(x) and x > 0.0
+               for x in (sigma, t_gerekli, sf)):
+        return sorun('structural.pressure_rating', 'result_not_finite')
+    sonuc.update({
+        'computed': True, 'safety_factor': sf,
+        'head_stress_mpa': sigma / 1e6, 'yield_strength_mpa': sy / 1e6,
+        'poisson_ratio': nu, 'operating_pressure_bar': p_op,
+        'qualification_pressure_bar': q / 1e5, 'head_radius_mm': a,
+        'drawn_head_mm': t, 'required_head_thickness_mm': t_gerekli,
+        'material_key': mat_key})
+    return hukum()
+
+
+def _tank_head_refusals(part, h):
+    """Kapak hükmü -> ``sf_gate_body`` biçiminde ret kayıtları (boş = geçti)."""
+    if h['verdict'] != 'refused':
+        return []
+    base = {'part': TANK_HEAD_PART, 'part_key': TANK_HEAD_PART_KEYS[part],
+            'tank': part, 'head_model': TANK_HEAD_MODEL}
+    if not h['computed']:
+        alan = f"{part}.{h['problem_field']}"
+        return [dict(base, reason='head_sf_not_computable',
+                     reason_key=TANK_HEAD_GATE_REASON_KEYS[
+                         'head_sf_not_computable'],
+                     safety_factor=None, safety_factor_field=alan,
+                     head_input_field=alan, head_input_problem=h['problem'])]
+    return [dict(
+        base, reason='head_sf_below_one',
+        reason_key=TANK_HEAD_GATE_REASON_KEYS['head_sf_below_one'],
+        safety_factor=round(h['safety_factor'], 4),
+        # Kapının hükmettiği alan: çizilen kapak kalınlığı.
+        safety_factor_field=f'{part}.dimensions.wall_thickness',
+        drawn_head_mm=round(h['drawn_head_mm'], 4),
+        head_stress_mpa=round(h['head_stress_mpa'], 2),
+        yield_strength_mpa=round(h['yield_strength_mpa'], 2),
+        poisson_ratio=h['poisson_ratio'],
+        operating_pressure_bar=round(h['operating_pressure_bar'], 4),
+        qualification_pressure_bar=round(h['qualification_pressure_bar'], 4),
+        relief_factor=h['relief_factor'],
+        head_radius_mm=round(h['head_radius_mm'], 4),
+        required_head_thickness_mm=round(h['required_head_thickness_mm'], 3),
+        material_key=h['material_key'])]
+
+
+def tank_head_declaration(h):
+    """Kapak hükmünün etiket/paket cümlesi (EN).
+
+    ``h``: ``tank_head_assessment`` sonucu ya da ``None`` (üreteç kapı
+    sonucunu almadıysa). Cümle YALNIZ sayılardan (``_strict_number``
+    süzgeci) ve sabit kod listelerinden kurulur; sözlükte dize olarak ne
+    gelirse gelsin etikete ham girmez.
+    """
+    if not isinstance(h, dict):
+        return ('drawn flat head check: not supplied to this generator '
+                '(the manufacturing safety gate of the tank CAD export '
+                'computes it)')
+    hukum = h.get('verdict')
+    if hukum not in TANK_HEAD_VERDICTS:
+        return 'drawn flat head check: verdict unreadable'
+    kapi = {'cleared': 'manufacturing safety gate: head cleared',
+            'refused': ('manufacturing safety gate: head REFUSED - this is '
+                        'not a manufacturing file'),
+            'not_engaged': ('manufacturing safety gate not engaged: this '
+                            'tank card publishes no structural.'
+                            'safety_factor')}[hukum]
+    n = {k: _strict_number(h.get(k)) for k in (
+        'safety_factor', 'head_stress_mpa', 'yield_strength_mpa',
+        'operating_pressure_bar', 'qualification_pressure_bar',
+        'relief_factor', 'drawn_head_mm', 'required_head_thickness_mm')}
+    if h.get('computed') is True and None not in n.values():
+        alt = n['safety_factor'] < MANUFACTURING_SF_MIN
+        return (f"drawn flat head {n['drawn_head_mm']:.2f} mm: stress "
+                f"{n['head_stress_mpa']:.1f} MPa at the "
+                f"{n['qualification_pressure_bar']:.4f} bar qualification "
+                f"pressure ({n['operating_pressure_bar']:.4f} bar x "
+                f"{n['relief_factor']:g}), head safety factor "
+                f"{n['safety_factor']:.3f} against the "
+                f"{n['yield_strength_mpa']:.0f} MPa yield strength"
+                + (f" - BELOW 1.0, a flat head of this radius needs "
+                   f"{n['required_head_thickness_mm']:.2f} mm" if alt else '')
+                + f' -> {kapi}')
+    alan = h.get('problem_field')
+    neden = h.get('problem')
+    if alan not in _TANK_HEAD_INPUT_FIELDS or (
+            neden not in TANK_HEAD_INPUT_PROBLEMS):
+        alan, neden = 'input', 'unreadable'
+    return (f'drawn flat head: safety factor NOT computable ({alan} '
+            f'{neden}) -> {kapi}')
 
 
 #: Ret nedeninin EN cümlesi (HTTP gövdesi ``message``; i18n karşılığı
@@ -2694,6 +3446,20 @@ _SF_GATE_REASON_TEXT = {
                                 'published ({sf_wall_field}), so it cannot be '
                                 'matched to the drawn {drawn_wall_mm} mm '
                                 'wall'),
+    # ÖH V31 CV-0 — kapak dalı (anahtarlar ``TANK_HEAD_GATE_REASON_KEYS``).
+    'head_sf_below_one': ('{part} ({tank}): safety factor {safety_factor} is '
+                          'below 1.0 for the drawn {drawn_head_mm} mm flat '
+                          'head (simply supported flat circular plate, '
+                          'Roark Table 11.2 case 10a: {head_stress_mpa} MPa '
+                          'at the {qualification_pressure_bar} bar '
+                          'qualification pressure against the '
+                          '{yield_strength_mpa} MPa yield strength); a flat '
+                          'head of this radius needs at least '
+                          '{required_head_thickness_mm} mm'),
+    'head_sf_not_computable': ('{part} ({tank}): the structural adequacy of '
+                               'the drawn flat head cannot be computed '
+                               'because {head_input_field} is '
+                               '{head_input_problem}'),
 }
 
 
@@ -3302,8 +4068,11 @@ class MotorCADDesigner:
                 chamber_length_source = (
                     'user override (design_config.motor.chamber_length_override)')
 
-            # Nozul konturu: 2D kesit ve 3D görselleştirmeyle AYNI kaynak
-            noz_pts_mm, noz_meta = sample_nozzle_inner_contour(motor_data)
+            # Nozul konturu + eti: STEP ve kütle dökümüyle TEK kaynak
+            # (``nozzle_wall_profile``, V301 bilinen C1). Profil metre
+            # uzayında okunur — trimesh katısı metre kurulur.
+            noz_profile = nozzle_wall_profile(motor_data, unit='m')
+            noz_meta = noz_profile['meta']
             nozzle_length = noz_meta['z_exit'] / 1000.0
 
             # Duvar kalınlıkları
@@ -3314,11 +4083,10 @@ class MotorCADDesigner:
             wall_case, _wall_src = _chamber_wall_effective_m(motor_data,
                                                              chamber_diameter)
             # TEK KAYNAK (ÖH D15 / P9B1-18): lüle cidarı üç yerde ayrı ayrı
-            # yazılıydı (burada, kütle dökümünde ve ``step_export``te). Kural
-            # artık ``_nozzle_wall_design_m``de yaşar ve o da sayıları
-            # ``step_export``ten ithal eder — mesh, kütle ve STEP katısı aynı
-            # cidarı kullanmak zorundadır.
-            wall_noz, _noz_wall_src = _nozzle_wall_design_m(motor_data)
+            # yazılıydı (burada, kütle dökümünde ve ``step_export``te). Et
+            # ``_nozzle_wall_design``de yaşar; dış kontur kuralı (V301
+            # bilinen C1) ``nozzle_wall_profile``de — mesh, kütle ve STEP
+            # katısı aynı profili kullanmak zorundadır.
 
             # Grain: gerçek port + gerçek boy. H4-1: yoksa GRAIN ÇİZİLMEZ.
             # Eski kod portu ``chamber_diameter * 0.4``, boyu
@@ -3442,14 +4210,27 @@ class MotorCADDesigner:
             chamber_mesh = self._chamber_solid(chamber_diameter, chamber_length, wall_case, cap_t)
 
             print("CAD Debug - Creating nozzle mesh...")
-            nozzle_mesh = self._nozzle_solid(noz_pts_mm, wall_noz)
+            nozzle_mesh = self._nozzle_solid(noz_profile)
 
             # ÖH D15 (defter P9B1-12): enjektör artık KOŞULSUZ üretilmiyor.
             # Çözücü enjektör yayımlamadıysa (katı motor) plaka çizilmez,
             # tartılmaz ve STL'e yazılmaz — grain kapısıyla simetrik.
             injector_present, injector_reason = _injector_evidence(motor_data)
             inj_plate = _injector_plate_design(motor_data, chamber_diameter)
-            if injector_present and not inj_plate['thickness_m']:
+            # V301 bilinen C2: pintle seçiliyse KANONİK geometri çizilir
+            # (STEP ile TEK çözümleyici ``pintle_cad_geometry``); yoksa ya da
+            # çizilemiyorsa adlı ret (``PintleCADError``) yukarı taşınır —
+            # düz plaka + eşdeğer delik planına sessiz dönüş YOK. Yüz
+            # plakası kalınlığı yayımlanmamışsa (pintle çözümleri
+            # yayımlamaz) plaka çizilmez, direk ve uç delikleri çizilir.
+            pintle_geo = (pintle_cad_geometry(motor_data, chamber_diameter)
+                          if injector_present else None)
+            if pintle_geo is not None and pintle_geo['not_drawn_reason']:
+                injector_present = False
+                injector_reason = pintle_geo['not_drawn_reason']
+                pintle_geo = None
+            if (injector_present and pintle_geo is None
+                    and not inj_plate['thickness_m']):
                 # ÖH D15 (defter P9B1-13): enjektör VAR ama plaka kalınlığı
                 # yayımlanmamış -> plaka UYDURULMAZ (eski kod 30 mm çiziyordu).
                 injector_present = False
@@ -3458,7 +4239,10 @@ class MotorCADDesigner:
                 None if injector_present else injector_reason)
             motor_data['injector_source'] = (
                 injector_reason if injector_present else None)
-            if injector_present:
+            if pintle_geo is not None:
+                print("CAD Debug - Creating pintle injector mesh...")
+                injector_mesh = self._create_pintle_injector(pintle_geo)
+            elif injector_present:
                 print("CAD Debug - Creating injector mesh...")
                 injector_mesh = self._create_injector_head(chamber_diameter,
                                                            motor_data)
@@ -3538,7 +4322,32 @@ class MotorCADDesigner:
             # Artık plaka kapak iç yüzüne oturur ve tane ile eksenel
             # girişim ADIYLA reddedilir (fail-closed): çakışan bir montaj
             # imal edilemez, dolayısıyla yayımlanmaz. Beyan yeterli değildir.
-            if injector_mesh is not None:
+            if injector_mesh is not None and pintle_geo is not None:
+                # V301 bilinen C2: pintle mesh'i ZATEN montaj çerçevesinde
+                # kurulur (plaka [x0, yüz], direk kökü x0). Girişim hükmü
+                # STEP ile AYNI işlevden: direk kamarayı aşamaz, tanenin
+                # portundan kalın direk tanenin içine giremez; plaka tanenin
+                # önünde biter.
+                _tane_on = _tane_port_r = None
+                if fuel_grain_mesh is not None:
+                    _tane_on = float(fuel_grain_mesh.bounds[0][2]) * 1000.0
+                    _tane_port_r = port_diameter * 1000.0 / 2.0
+                _red = pintle_assembly_refusal(
+                    pintle_geo, chamber_length * 1000.0, _tane_on,
+                    _tane_port_r)
+                if _red is not None:
+                    raise _red
+                if (_tane_on is not None and pintle_geo['x_face'] - _tane_on
+                        > _MONTAJ_GIRISIM_TOLERANS_MM):
+                    raise ValueError(
+                        'injector_plate_intersects_fuel_grain: the injector '
+                        'plate ends at z = %.2f mm but the fuel grain starts '
+                        'at z = %.2f mm; no assembly is exported with '
+                        'interpenetrating parts.'
+                        % (pintle_geo['x_face'], _tane_on))
+                injector_mesh.visual.face_colors = [150, 150, 150, 200]
+                assembly_meshes.append(('Injector', injector_mesh))
+            elif injector_mesh is not None:
                 # Mesh z-merkezli üretiliyor; STEP ile TEK kural
                 # (``injector_plate_axial_span_mm``, ÖH V3 CAD A1 · H8):
                 # plaka kapak iç yüzüne oturur, [x0, x0 + t].
@@ -3658,14 +4467,20 @@ class MotorCADDesigner:
         ])
         return self._fix_solid(trimesh.creation.revolve(profile))
 
-    def _nozzle_solid(self, inner_pts_mm, wall: float) -> trimesh.Trimesh:
+    def _nozzle_solid(self, profile_m) -> trimesh.Trimesh:
         """Gerçek iç konturdan duvarlı nozul katısı.
 
-        inner_pts_mm: sample_nozzle_inner_contour çıktısı [(z_mm, r_mm), ...]
-        (z=0 konverjan başlangıcı). Dönen katı z=0'dan başlar (metre).
+        ``profile_m``: ``nozzle_wall_profile(..., unit='m')`` — iç ve dış
+        kontur STEP ile TEK kaynaktan (V301 bilinen C1); burada yalnız
+        trimesh'in (r, z) sırasına çevrilip kapalı halka profili kurulur:
+        iç kontur girişten çıkışa, dış kontur çıkıştan girişe. z = 0
+        konverjan başlangıcı (metre).
         """
-        inner = [(r / 1000.0, z / 1000.0) for z, r in inner_pts_mm]
-        outer = [(r + wall, z) for r, z in reversed(inner)]
+        if profile_m.get('unit') != 'm':
+            raise ValueError('the STL nozzle is built in metres; pass '
+                             "nozzle_wall_profile(..., unit='m')")
+        inner = [(r, z) for z, r in profile_m['inner']]
+        outer = [(r, z) for z, r in reversed(profile_m['outer'])]
         profile = np.array(inner + outer + [inner[0]])
         return self._fix_solid(trimesh.creation.revolve(profile))
 
@@ -3682,6 +4497,70 @@ class MotorCADDesigner:
         ])
         return self._fix_solid(trimesh.creation.revolve(profile))
 
+    def _create_pintle_injector(self, geo) -> trimesh.Trimesh:
+        """V301 bilinen C2 — pintle enjektör mesh'i (metre, montaj çerçevesi).
+
+        ``geo``: ``pintle_cad_geometry`` (STEP ``_pintle_injector_solids`` ile
+        TEK kaynak). Yüz plakası anülüs delikli disktir (kapalı profil
+        revolve), direk Ø D_p silindir; uç delikleri yüzeyden
+        ``hole_depth`` derinliğe radyal GERÇEK deliklerdir ve tek
+        ``difference`` ile açılır. Boolean
+        milimetre uzayında yapılır (ÖH D18 / OH-D16-06: küçük kesiciler metre
+        uzayında geçersiz ağ veriyordu), sonra metreye ölçeklenir. Plaka ile
+        direk iki ayrı kapalı kabuktur (aralarındaki anülüs boşluğu kanonik
+        geometridir). Sonuç kapalı hacim değilse ADIYLA reddedilir.
+        """
+        x0, x1 = geo['x0'], geo['x_face']
+        plaka = None
+        if geo['plate_t'] is not None:
+            R, rb = geo['plate_r'], geo['bore'] / 2.0
+            plaka = self._fix_solid(trimesh.creation.revolve(np.array([
+                [rb, x0], [R, x0], [R, x1], [rb, x1], [rb, x0]])))
+        r_post = geo['d_post'] / 2.0
+        boy = geo['x_tip'] - x0
+        direk = trimesh.creation.cylinder(radius=r_post, height=boy,
+                                          sections=PINTLE_STL_POST_SECTIONS)
+        direk.apply_transform(trimesh.transformations.rotation_matrix(
+            PINTLE_STL_POST_PHASE_FRACTION * 2.0 * np.pi
+            / PINTLE_STL_POST_SECTIONS, [0.0, 0.0, 1.0]))
+        direk.apply_translation([0.0, 0.0, x0 + boy / 2.0])
+        if geo['n_holes']:
+            # Kesici dipten (r_post - derinlik) başlar ve direk yüzeyini bir
+            # delik çapı aşar (yalnız kesme payı; STEP
+            # ``_pintle_injector_solids`` ile aynı kural).
+            r_dip = r_post - geo['hole_depth']
+            h = geo['hole_depth'] + geo['d_hole']
+            # Delik açıları STEP'in +X çerçevesinde tanımlıdır: (y, z) =
+            # (cos a, sin a). Mesh +Z ekseninde kurulur ve dosyaya
+            # ``export_axis_rotation`` ile yazılır; yön o dönmenin TERSİYLE
+            # mesh çerçevesine getirilir ki STL'deki delik STEP'tekiyle
+            # AYNI açıda dursun (ölçüldü 22 Eki: dönüşümsüz kurulan delikler
+            # dosyada 90 derece kayıyordu; 4'ün katı delik sayısında
+            # görünmüyor, 31 delikli sıvı pintle'da yakalandı).
+            ters = export_axis_rotation()[:3, :3].T
+            kesiciler = []
+            for i in range(geo['n_holes']):
+                a = 2.0 * np.pi * i / geo['n_holes']
+                yon = ters @ np.array([0.0, np.cos(a), np.sin(a)])
+                kesici = trimesh.creation.cylinder(radius=geo['d_hole'] / 2.0,
+                                                   height=h)
+                donus = trimesh.geometry.align_vectors([0.0, 0.0, 1.0], yon)
+                donus[:3, 3] = yon * (r_dip + h / 2.0) + np.array(
+                    [0.0, 0.0, geo['x_holes']])
+                kesici.apply_transform(donus)
+                kesiciler.append(kesici)
+            direk = direk.difference(kesiciler)
+        parcalar = [m for m in (plaka, direk) if m is not None]
+        if not all(bool(getattr(m, 'is_volume', False)) for m in parcalar):
+            raise ValueError(
+                'pintle_injector_not_a_solid: the pintle faceplate or post '
+                'mesh is not a closed volume after drilling; it cannot be '
+                'manufactured and is not exported')
+        mesh = (trimesh.util.concatenate(parcalar) if len(parcalar) > 1
+                else parcalar[0])
+        mesh.apply_scale(1.0 / 1000.0)
+        return mesh
+
     def _create_injector_head(self, chamber_diameter: float, motor_data: Dict) -> trimesh.Trimesh:
         """Create injector head with orifices.
 
@@ -3691,6 +4570,14 @@ class MotorCADDesigner:
         çiziyor, çizim 13,64 mm yazıyor, kütle üçüncü bir parçayı tartıyordu.
         """
         try:
+            # V301 bilinen C2: pintle'da bu DÜZ PLAKA yolu KAPALIDIR — devrenin
+            # eşdeğer orifis planı pintle'ın delik planı değildir.
+            if pintle_type_claimed(motor_data):
+                raise ValueError(
+                    'flat_plate_path_refused_for_pintle: the injector is a '
+                    'pintle; it is drawn from its canonical geometry '
+                    '(pintle_cad_geometry), never as a flat plate with the '
+                    'equivalent orifice plan')
             plate = _injector_plate_design(motor_data, chamber_diameter)
             radius = plate['radius_m']
             thickness = plate['thickness_m']
@@ -4342,7 +5229,39 @@ class MotorCADDesigner:
         plate_dia_mm = ((plate_design['radius_m'] * 2000.0)
                         if plate_design['radius_m'] else None)
         inj_present, inj_reason = _injector_evidence(motor_data)
-        if inj_present and plate_mm is None:
+        # V301 bilinen C2: pintle'da çizim sözlüğü de montajla AYNI hükmü
+        # verir (iki çıktı çelişemez): pintle, yüz plakası yayımlanmasa da
+        # direk + uç delikleriyle ÇİZİLİR; çizilemiyorsa gerekçe adıyla.
+        pintle_cizim = None
+        if inj_present and pintle_type_claimed(motor_data):
+            try:
+                _pg = pintle_cad_geometry(motor_data)
+            except PintleCADError as _hata:
+                pintle_cizim = {'drawn': False, 'not_drawn_reason': str(_hata),
+                                'invalid_fields': _hata.invalid_fields}
+                inj_present, inj_reason = False, str(_hata)
+            else:
+                pintle_cizim = {
+                    'drawn': not _pg['not_drawn_reason'],
+                    'not_drawn_reason': _pg['not_drawn_reason'],
+                    'post_diameter_mm': _pg['d_post'],
+                    'annulus_gap_mm': _pg['gap'],
+                    'annulus_bore_diameter_mm': _pg['bore'],
+                    'annulus_bore_drawn': _pg['plate_t'] is not None,
+                    'tip_hole_mode': _pg['mode'],
+                    'tip_hole_count': _pg['n_holes'],
+                    'tip_hole_diameter_mm': _pg['d_hole'],
+                    'skip_distance_mm': _pg['skip'],
+                    'tip_hole_depth_mm': _pg['hole_depth'],
+                    'post_tip_x_mm': _pg['x_tip'],
+                    'source': _pg['source_path'],
+                    'drawing_basis': PINTLE_CAD_DRAWING_BASIS,
+                    'equivalent_orifice_plan': (
+                        PINTLE_EQUIVALENT_PLAN_NOT_DRILLED),
+                }
+                if _pg['not_drawn_reason']:
+                    inj_present, inj_reason = False, _pg['not_drawn_reason']
+        if inj_present and plate_mm is None and pintle_cizim is None:
             # ÖH D15 (defter P9B1-13): enjektör var ama plakanın kalınlığı
             # yayımlanmamış -> plaka ÇİZİLMEZ; çizim sözlüğü bunu montajla
             # AYNI gerekçeyle söyler (iki çıktı çelişemez).
@@ -4567,6 +5486,8 @@ class MotorCADDesigner:
             'surface_finish': DRAWING_SURFACE_FINISH_INJECTOR,
             'finish_basis': DRAWING_SURFACE_FINISH_BASIS
         }
+        if pintle_cizim is not None:
+            drawings['injector']['pintle'] = pintle_cizim
 
         return drawings
 
@@ -5156,11 +6077,17 @@ class MotorCADDesigner:
             # AYNI ikisini okur, böylece "AUTHORITATIVE" cümlesi kendi
             # girdilerinin kaynağını doğru söyleyebilir.
             density_noz, noz_mat_src = _nozzle_density_resolved(motor_data)
-            wall_noz, noz_wall_src = _nozzle_wall_design_m(motor_data)
             try:
-                pts_mm, _meta = sample_nozzle_inner_contour(motor_data)
-                # Cidar iç kontura DIŞARI eklenir (_nozzle_solid:613 —
-                # `outer = [(r + wall, z) ...]`), yani halka hacmi
+                # V301 bilinen C1: iç kontur ve et STL/STEP ile TEK
+                # kaynaktan (``nozzle_wall_profile``). Halka, profilin
+                # kuralıyla aynıdır (dış = iç + et, aynı istasyonda); hacim
+                # doğrusal parçalarda TAM integral olarak iç kontur ve etten
+                # yazılır (kayan noktada önceki hesapla BİT-AYNI).
+                _noz_profile = nozzle_wall_profile(motor_data, unit='mm')
+                pts_mm = _noz_profile['inner']
+                wall_noz = _noz_profile['wall_design']['thickness_m']
+                # Cidar iç kontura DIŞARI eklenir (``nozzle_wall_profile``:
+                # `outer = [(z, r + wall) ...]`), yani halka hacmi
                 # pi*((r+t)^2 - r^2)*dz = pi*(2*r*t + t^2)*dz.
                 # Eski hesap kabuğu konturun ORTASINA koyup yalnız 2*pi*r*t*dz
                 # sayıyordu; pi*t^2*dz terimi düşüyordu. İnce cidarda fark

@@ -921,12 +921,29 @@
     }
 
     //: Sunucu beyanı (basis/gerekçe) — AYNEN basılır, kısaltılmaz.
+    //: V301/DİL (NK-67): ölçüldü — TR arayüzde çevrilmemiş uzun geliştirici
+    //: paragrafları ("This run is INVISCID…", "Effective iteration budget…")
+    //: ve kaynak yolları (`tests/cfd/…py`, `relax_implicit.py`, defter
+    //: kodu) açık metin olarak basılıyordu. Kural: TR'de çeviri kanalından
+    //: geçmeyen beyan ya da (her dilde) kaynak yolu / iç kimlik taşıyan
+    //: beyan KAPALI "teknik ayrıntı" bölümüne iner; metin aynen korunur,
+    //: yarım çeviri yapılmaz.
+    const KOD_IZI = /(\b[\w\-]+\.py\b|\btests\/|\bhrma[\/.][a-z_]|\bP\d+B\d+-\d+\b|\bOH-[A-Z0-9][A-Z0-9\-]*\b)/;
     function basisText(text) {
         if (!text) return '';
-        return '<p data-cfd-basis="1" style="font-family:var(--hd-mono, monospace);'
+        const metin = SRV(text);
+        const p = '<p data-cfd-basis="1" style="font-family:var(--hd-mono, monospace);'
             + ' font-size:0.66rem; line-height:1.45; color:var(--hd-ink-dim,'
             + ' #7d97a5); margin:6px 0; white-space:pre-wrap;">'
-            + esc(SRV(text)) + '</p>';
+            + esc(metin) + '</p>';
+        const dilTr = !!(window.I18N && window.I18N.lang === 'tr');
+        const cevrilmedi = dilTr && metin === text && /[A-Za-z]{4}/.test(text);
+        if (!cevrilmedi && !KOD_IZI.test(metin)) return p;
+        return '<details class="hd-teknik-ayrinti" style="margin:4px 0;">'
+            + '<summary style="cursor:pointer; font-size:0.66rem; color:'
+            + 'var(--hd-ink-dim, #7d97a5);">'
+            + esc(T('panel.cfd.techDetailSrv', 'Technical detail (solver statement, untranslated)'))
+            + '</summary>' + p + '</details>';
     }
 
     function note(text, kind) {
@@ -3101,23 +3118,23 @@
         // boş kalır ve body() isteği durdurur (uydurma sayı gösterilmez).
         fields: [
             ['P0_Pa', 'Chamber stagnation pressure P0 [Pa]', '', 'any',
-             'panel.cfd.fieldP0'],
+             'panel.cfd.fieldP0', 'panel.cfd.help.P0'],
             ['T0_K', 'Chamber stagnation temperature T0 [K]', '', 'any',
-             'panel.cfd.fieldT0'],
+             'panel.cfd.fieldT0', 'panel.cfd.help.T0'],
             ['gamma', 'Ratio of specific heats gamma [-]', '', 'any',
-             'panel.cfd.fieldGamma'],
+             'panel.cfd.fieldGamma', 'panel.cfd.help.gamma'],
             ['R_J_per_kgK', 'Specific gas constant R [J/(kg K)]', '', 'any',
-             'panel.cfd.fieldR'],
+             'panel.cfd.fieldR', 'panel.cfd.help.R'],
             ['P_ambient_Pa', 'Ambient pressure [Pa]', '', 'any',
-             'panel.cfd.fieldPamb'],
+             'panel.cfd.fieldPamb', 'panel.cfd.help.Pamb'],
             ['Pb_Pa', 'Back pressure Pb [Pa] — optional', '', 'any',
-             'panel.cfd.fieldPb'],
+             'panel.cfd.fieldPb', 'panel.cfd.help.Pb'],
             ['separation_factor', 'Summerfield k [-] — optional', '', 'any',
-             'panel.cfd.fieldK'],
+             'panel.cfd.fieldK', 'panel.cfd.help.k'],
             ['resolution', 'Grid resolution', 'coarse',
              [['coarse', 'Coarse', 'panel.cfd.resCoarse'],
               ['standard', 'Standard', 'panel.cfd.resStandard']],
-             'panel.cfd.fieldResolution'],
+             'panel.cfd.fieldResolution', 'panel.cfd.help.resolution'],
             // VİSKOZ KİP — varsayılan KAPALI (Euler). Isıl duvar koşulu
             // seçimin KENDİSİDİR: uçta varsayılanı yoktur çünkü izotermal
             // ve adyabatik duvar FARKLI çözümlerdir. Tek bir seçici
@@ -3129,18 +3146,18 @@
                'panel.cfd.wallIsothermal'],
               ['adiabatic', 'Viscous — adiabatic wall',
                'panel.cfd.wallAdiabatic']],
-             'panel.cfd.fieldViscousMode'],
+             'panel.cfd.fieldViscousMode', 'panel.cfd.help.viscousMode'],
             ['viscous_turbulence', 'Turbulence model', 'none',
              [['none', 'None (laminar)', 'panel.cfd.turbNone'],
               ['sa_neg', 'Spalart-Allmaras (negative variant)',
                'panel.cfd.turbSaNeg']],
-             'panel.cfd.fieldTurbulence'],
+             'panel.cfd.fieldTurbulence', 'panel.cfd.help.turbulence'],
             // SONLU VARSAYILAN YOK: duvar sıcaklığı uydurulamaz. Boş
             // bırakılırsa ve izotermal duvar seçilmişse body() isteği
             // GÖNDERMEZ ve eksiği adıyla yazar.
             ['viscous_T_wall_K',
              'Wall temperature T_w [K] — isothermal wall only', '', 'any',
-             'panel.cfd.fieldTwall'],
+             'panel.cfd.fieldTwall', 'panel.cfd.help.Twall'],
         ],
 
         fromResults: function (results) {

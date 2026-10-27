@@ -1797,11 +1797,11 @@
         endpoint: '/analyze_structural_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM'],
-            ['throat_diameter', 'Throat Diameter (m)', 0.02, 0.001, 'common.f.throatDiameterM'],
-            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
+            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.structural.help.chamber_pressure'],
+            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.structural.help.chamber_diameter'],
+            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM', 'panel.structural.help.chamber_length'],
+            ['throat_diameter', 'Throat Diameter (m)', 0.02, 0.001, 'common.f.throatDiameterM', 'panel.structural.help.throat_diameter'],
+            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.structural.help.burn_time'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
             // GAZ SICAKLIĞI (ÖH D15 birleştirme ölçümü, 1 Eyl 2026): bu alanın
             // varsayılanı 0 İDİ ve etiketi "0 = skip thermal" diyordu. Yapısal
             // kulvarın sıcaklık kapısı (app.py `_STRUCTURAL_TEMPERATURE_FIELDS`,
@@ -1828,14 +1828,14 @@
             // `safety_analysis.thermal_margin_ratio = None` — yani termal yol
             // eskisi gibi ATLANIR, uydurma bir termal hüküm üretilmez.
             ['chamber_temperature', 'Gas Temperature (K, blank = skip thermal)',
-             '', 50, 'common.f.gasTemperatureBlank'],
+             '', 50, 'common.f.gasTemperatureBlank', 'panel.structural.help.chamber_temperature'],
             // İtki alanı yoktu, bu yüzden hesap ucuna hiç gitmiyordu ve
             // eksenel burkulma DAİMA sıfır basma yüküyle koşuyordu
             // (uygulanan gerilme 0,0 MPa, emniyet katsayısı boş "—").
             // Varsayılan 0 = "eksenel yükü atla" (app.py:4398 `if
             // data.get('thrust')`), yani eski davranış korunur; sonuç
             // varsa fromResults gerçek itkiyi doldurur.
-            ['thrust', 'Thrust (N)', 0, 50, 'common.f.thrustN'],
+            ['thrust', 'Thrust (N)', 0, 50, 'common.f.thrustN', 'panel.structural.help.thrust'],
             // CİDAR KALINLIĞI (2026-08-09 ölçümü): bu alan listede YOKTU.
             // Panel /analyze_structural_safety'yi cidar bilgisi OLMADAN
             // çağırıyordu; uç da bu durumda cidarı KENDİ boyutlandırıp
@@ -1854,7 +1854,7 @@
             // vermediği bir cidarı vermiş gibi göstermek olurdu ve uç
             // sonucu "doğrulama" diye damgalardı.
             ['wall_thickness', 'Wall Thickness (m)', 0, 0.001,
-             'common.f.wallThicknessM'],
+             'common.f.wallThicknessM', 'panel.structural.help.wall_thickness'],
             // CİDAR SICAKLIĞI (F5-2, 2026-08-17 ölçümü): bu iki alan da
             // listede YOKTU. Uç ikisini de BİRİNCİ ÖNCELİKLE okuyor
             // (app.py `for wall_key in ('wall_temperature_hot',
@@ -1878,10 +1878,10 @@
             // doldurur (bkz. AnalysisDock.ui.readWallTemperaturesK).
             ['wall_temperature_hot', 'Hot-side Wall Temperature (K, blank = '
              + 'let HRMA estimate from gas temperature)', '', 10,
-             'common.f.wallTemperatureHotK'],
+             'common.f.wallTemperatureHotK', 'panel.structural.help.wall_temperature_hot'],
             ['wall_temperature_cold', 'Cold-side Wall Temperature (K, blank = '
              + 'let HRMA estimate from gas temperature)', '', 10,
-             'common.f.wallTemperatureColdK'],
+             'common.f.wallTemperatureColdK', 'panel.structural.help.wall_temperature_cold'],
             // TASARIM EMNİYET KATSAYISI HEDEFİ (V3 KK, YP7 devri): bu alan
             // listede YOKTU; uç hedefi hep malzeme kaydının varsayılanından
             // alıyordu. Varsayılan BOŞ dize = isteğe bağlı (buildPayload boş
@@ -1889,8 +1889,8 @@
             // design_safety_factor_source ile beyan eder). fromResults
             // motorun KENDİ hedefini doldurur (readMotorSfTarget).
             ['safety_factor', 'Design Safety Factor target (blank = material '
-             + 'database default)', '', 0.1, 'common.f.designSafetyFactorTarget'],
-            ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material'],
+             + 'database default)', '', 0.1, 'common.f.designSafetyFactorTarget', 'panel.structural.help.safety_factor'],
+            ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material', 'panel.structural.help.material'],
         ],
         fromResults: function (r) {
             const m = U.motorDict(r);

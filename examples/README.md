@@ -9,7 +9,7 @@ değildir.
 | Dosya | Motor tipi | Tasarım | `results_summary` (v3.0.0 ile ÜRÜNÜN KENDİ uçlarından ölçüldü) |
 |---|---|---|---|
 | `Example Hybrid N2O-HTPB 3kN.hrma` | Hibrit | N2O/HTPB, 3 kN, 10 s, 30 bar, O/F 7 | Isp 236,034 s, toplam impuls 29926,591 N·s |
-| `Example Solid KNDX BATES 75mm.hrma` | Katı | KNDX (KNO3/dekstroz 65/35), 3xBATES, 75 mm, 40 bar | tepe itki 1499,272 N, yanma 2,277 s, toplam impuls 2959,642 N·s, Isp 125,401 s |
+| `Example Solid KNDX BATES 75mm.hrma` | Katı | KNDX (KNO3/dekstroz 65/35), 3xBATES, 75 mm, 40 bar | tepe itki 1499,678 N, yanma 2,277 s, toplam impuls 2960,332 N·s, Isp 125,431 s |
 | `Example Liquid LOX-RP1 25kN.hrma` | Sıvı | LOX/RP-1, 25 kN, 70 bar, O/F 2.3, gaz jeneratörü çevrimi | Isp(deniz) 277,449 s, Isp(vakum) 309,182 s |
 
 Bu tablo **elle yazılmaz**: sayılar üç `.hrma` dosyasının `results_summary`

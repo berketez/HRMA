@@ -55,6 +55,37 @@ PIKSEL_KARAKTER = 8.4
 #: türü seçilerek ayrıca ölçüldü.
 #: simple.html (1) + uzaytek.html (3) ölçüm girdileri emekli — sayfa sökümü: Berke 23 Eyl, dalga36/sokum
 ALAN_GENISLIGI = {
+    # V301/E1: pintle dalının yeni yer tutuculu alanları — Python Playwright
+    # (headless shell 1208), 1440x900, en + tr; pintle seçilip teğet kipe
+    # geçilerek ölçüldü (ölçüm: docs/scofield/raw/OH/V301/ayberk1/
+    # enjektor-pintle/sonra_{en,tr}_ekran.json). Beşi de 312 px.
+    ('advanced.html', 'annular_gap'): 312,
+    ('advanced.html', 'pintle_radial_hole_count'): 312,
+    ('advanced.html', 'pintle_radial_hole_diameter'): 312,
+    ('advanced.html', 'pintle_tangential_angle'): 312,
+    ('advanced.html', 'skip_distance'): 312,
+    # v3.0.1 port kulvarı (20 Eki): artık et alanı — ana model ölçtü, Playwright
+    # 1440x900, en + tr; kalibrasyon: aynı formdaki chamber_diameter_input
+    # aynı yöntemle tablodaki 312 px'i verdi (clientWidth − yatay dolgu).
+    ('advanced.html', 'residual_web_thickness'): 312,
+    # V301/E2: pintle DIŞI enjektör kollarının yeni yer tutuculu alanları
+    # (ön-dolu sayılar söküldü; boş = çözücü/devre boyutlandırır, beyanlı).
+    # Python Playwright (headless shell 1208), 1440x900, en + tr; her tip
+    # seçilerek ölçüldü (docs/scofield/raw/OH/V301/ayberk1/enjektor-genel/
+    # yer_tutucu_genislik.json). Hepsi 312 px.
+    ('advanced.html', 'plate_thickness'): 312,
+    ('advanced.html', 'impingement_angle'): 312,
+    ('advanced.html', 'element_pairs'): 312,
+    ('advanced.html', 'orifice_diameter'): 312,
+    ('advanced.html', 'swirl_chamber_diameter'): 312,
+    # V301 ana model (26 Eki, H-PANEL birleşmesi): c* verimi alanı — Python
+    # Playwright (chromium 1208, headless, WebGL kapalı), 1440x900, en + tr;
+    # iç genişlik 305 px iki dilde (betik: scratchpad _ana_model/fs/genislik2.py).
+    ('advanced.html', 'combustion_efficiency'): 305,
+    ('advanced.html', 'swirl_angle'): 312,
+    ('advanced.html', 'slot_width'): 312,
+    ('advanced.html', 'slot_height'): 312,
+    ('advanced.html', 'coaxial_inner_flow_fraction'): 312,
     ('advanced.html', 'ambient_temp'): 302,
     ('advanced.html', 'burn_time_impulse'): 403,
     ('advanced.html', 'chamber_diameter_input'): 312,
@@ -109,6 +140,20 @@ ALAN_GENISLIGI = {
     ('solid.html', 'parachute_deploy_delay'): 206,
     ('solid.html', 'propellant_name'): 286,
     ('solid.html', 'two_phase_loss'): 286,
+    # V301 ana model (26 Eki, K-B birleşmesi): K-A/K-B'nin yer tutuculu
+    # alanları — Python Playwright (chromium 1208, headless, WebGL kapalı),
+    # 1440x900, en + tr; finocyl ve wagon alanları tane tipi seçilerek
+    # görünür kılınıp ölçüldü (iç genişlik = clientWidth − yatay dolgu; iki
+    # dilde aynı). Betik: scratchpad _ana_model/fs/genislik.py.
+    ('solid.html', 'chamber_diameter'): 286,
+    ('solid.html', 'chamber_volume'): 286,
+    ('solid.html', 'erosion_factor'): 286,
+    ('solid.html', 'erosive_k'): 286,
+    ('solid.html', 'temp_coeff'): 286,
+    ('solid.html', 'finned_length_fraction'): 278,
+    ('solid.html', 'wagon_hole_count'): 386,
+    ('solid.html', 'wagon_hole_diameter'): 386,
+    ('solid.html', 'wagon_pitch_diameter'): 386,
 }
 
 #: Çeviri anahtarı ARANMAYAN yer tutucular ve GEREKÇESİ.
@@ -327,10 +372,14 @@ def test_muafiyet_kumesi_beklenen_boyutta():
     sayı örneği (``1``, ``0.78``, ``293.15``). ÖH D36 sökümünden sonra 56 yer
     tutucu: sökülen dördü (simple 1, uzaytek 3) ÇEVRİLECEK sınıftaydı, muaf
     küme 17'de kaldı (tavan değişmedi).
+
+    v3.0.1 port kulvarı (20 Eki): tavan 17 -> 18. Yeni ``residual_web_thickness``
+    alanının yer tutucusu salt sayı örneği ``0``dır (boş alan = 0 mm, beyanlı
+    idealizasyon; açıklaması alanın İPUCU metninde). Dil taşımaz, muaf sınıftadır.
     """
     tire = [k for k in MUAFLAR if k['metin'] == UZUN_TIRE]
     sayi = [k for k in MUAFLAR if SAYI_ORNEGI.match(k['metin'])]
     assert len(tire) + len(sayi) == len(MUAFLAR)
-    assert len(MUAFLAR) <= 17, (
-        'muafiyet kümesi büyümüş (%d > 17): yeni muafiyet eklenmişse '
+    assert len(MUAFLAR) <= 18, (
+        'muafiyet kümesi büyümüş (%d > 18): yeni muafiyet eklenmişse '
         'gerekçesi bu dosyaya yazılmalı' % len(MUAFLAR))

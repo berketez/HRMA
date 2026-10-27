@@ -191,7 +191,6 @@ hrma/fea/structural_axisym.py | safe_verdict_tr | dfd574a06b19 | MEŞRU: yorum s
 # ---------------------------------------------------------------------------
 
 # --- AÇIK BORÇ — kazanılmamış doğruluk/doğrulama hükmü, sahibi başka kulvar
-hrma/engines/combustion_analysis.py | dogrulanmistir_tr | e559d6cb7de5 | AÇIK BORÇ: "c* zaten yalnızca %0-1.5 içinde doğrulanmıştır" — CEA'ya karşı kazanılmış bir doğruluk BANDI iddiası; 'cea_validated' kuralının kendi gerekçesi bunun tersini ölçmüş (fakir karışımda −%2,8..−%5,9). Dosya ÖH D22'de ÖK-06 ile KİLİTLİ (kayan denge bölgesi); sahibi fizik kulvarıdır.
 hrma/engines/hybrid_rocket_engine.py | dogrulanmistir_tr | 15aaa1af306a | AÇIK BORÇ: "NASA CEA'ya %0-1.5 içinde doğrulanmıştır" — aynı sınıf doğruluk bandı iddiası, altı yakıt × üç oksitleyici için genelleniyor; depoda bu bandı ölçen bir kod yolu koşmuyor. Sahibi hibrit kulvarıdır.
 hrma/engines/liquid_rocket_engine.py | dogrulanmistir_tr | c73395159330 | AÇIK BORÇ: "14 gerçek motorun TESLİM verisine karşı doğrulanmıştır" — doğrulama KAMPANYASI iddiası; depoda 14 motorluk bir teslim-verisi karşılaştırması koşmuyor. Sahibi sıvı kulvarıdır.
 

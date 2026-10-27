@@ -29,6 +29,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 
 import pytest
 from tests.support.kanit import kanit_gerekli
@@ -166,24 +167,38 @@ def test_ohd2209_fea_thermal_reddi_urunle_ayni(istemci, surum_notu):
 # ===========================================================================
 
 def test_ohd2107_rozet_bilinmeyen_durumla_dogar(surum_notu, kilavuzlar):
-    """Tasarım sayfaları rozeti ``status-unknown`` ile doğuruyor; beyan var.
+    """ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1): rozet SÖKÜLDÜ.
 
-    ÖLÇÜLDÜ (``once.json`` -> ``OH-D21-07_rozet_kod``): ``status-unknown``
-    advanced.html 8, solid.html 6, liquid.html 6 kez; ``NASA CEA Connected``
-    metni yalnız denetim YANITLADIKTAN sonraki yeşil durumda kalıyor.
-    Kalemin TUR yarısı konusuz (``tools/browser_harness`` içinde 'NASA CEA'
-    fixture'ı 0 — ``once.json`` -> ``OH-D21-07_harness_fixture``); EKRAN
-    GÖRÜNTÜSÜ yarısı kılavuz dalgasınındır (im: aşağıdaki ikiz bekçisi).
+    Eski hâli üç şablonda ``status-unknown`` rozetini ŞART koşuyordu.
+    ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/gorsel_once.json,
+    gerçek tarayıcı): rozet "denetlenmedi" diye doğuyor ama yoklamadan sonra
+    HER makinede "NASA CEA OFFLINE / NIST WEBBOOK OFFLINE" diyordu (CEA kolu
+    DAİMA 'local', NIST ayrıştırıcısı HİÇ eşleşmiyor) ve hiçbir sayının
+    kaynağı değildi. Şablon tarafı artık rozetin YOKLUĞUNU ölçer.
+
+    3.0.0 sürüm notu (yayımlanmış, tarihsel kayıt) rozetin o sürümdeki
+    davranışını anlatır ve DEĞİŞMEZ. Kılavuzların güncellenmesi bu kulvarın
+    dosyası değildir: aşağıdaki ``test_kilavuz_rozet_metni_devirde`` borcu
+    xfail(strict) ile adıyla taşır.
     """
     for sayfa in ('advanced.html', 'solid.html', 'liquid.html'):
         metin = _oku(os.path.join('hrma', 'templates', sayfa))
-        assert 'status-unknown' in metin, sayfa
+        assert not re.search(r'class="[^"]*\b(?:database-status|cea-status|nist-status)\b', metin), sayfa
+        assert 'class="data-source-line"' in metin, sayfa
 
     assert 'not checked yet' in surum_notu['notes_en']
     assert 'henüz denetlenmedi' in surum_notu['notes_tr']
-    assert 'not checked yet' in kilavuzlar['en']
-    assert 'henüz\ndenetlenmedi' in kilavuzlar['tr'] or \
-        'henüz denetlenmedi' in kilavuzlar['tr']
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    'DEVİR (v3.0.1 K kulvarı): kullanma kılavuzları (docs/user_guide/*.tex) '
+    'sökülen "NASA CEA / NIST WebBook — not checked yet" rozetini hâlâ '
+    'anlatıyor; kılavuz dalgası metni veri kaynağı satırı + NASA CEA '
+    'karşılaştırma paneliyle değiştirince bu test GEÇER ve strict xfail '
+    'kırmızıya döner — o zaman işaret kaldırılır.'))
+def test_kilavuz_rozet_metni_devirde(kilavuzlar):
+    assert 'not checked yet' not in kilavuzlar['en']
+    assert 'henüz denetlenmedi' not in kilavuzlar['tr'].replace('\n', ' ')
 
 
 # ===========================================================================

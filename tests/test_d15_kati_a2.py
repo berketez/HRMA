@@ -16,10 +16,21 @@ import pytest
 from hrma.engines.solid_rocket_engine import (
     SOLID_CONDENSED_MASS_FRACTION,
     SOLID_COST_PARAMS,
+    SOLID_DEFAULT_GEOMETRY_MM,
     SOLID_PROPELLANT_COST_FAMILY,
     SolidRocketEngine,
 )
 from hrma.utils.numeric_compat import trapezoid
+
+
+@pytest.fixture
+def cea_kapali(monkeypatch):
+    """V301/N-CEA-2: NASA CEA kapalı — katı motor katalog (tek basınçlı)
+    termokimyasına BEYANLA döner (desen ``tests/test_d17_kati_a1.py``).
+    Motor ⟷ katalog TEK KAYNAK öncülü bu yedek yolda korunur; CEA yolu
+    ``tests/test_v301_n_cea2.py``de."""
+    from hrma.engines import cea_bridge
+    monkeypatch.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
 
 
 def _sessiz(fn, *a, **kw):
@@ -29,14 +40,29 @@ def _sessiz(fn, *a, **kw):
 
 
 def _motor(**kw):
+    # V301/T-ÇAPA-A: çekirdek 30 mm -> tek tanım (SOLID_DEFAULT_GEOMETRY_MM,
+    # 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+    # (A_p/A_t 0,947) ve K-A'nın port kapısından 422 alıyor; bu dosyadaki
+    # sınıfların konusu boğulan port değil (K-A RAPOR §6, kural 1).
     ov = kw.pop('overrides', None)
     p = dict(grain_type='bates', propellant_type='apcp',
-             chamber_diameter=100, grain_length=500,
-             core_diameter=30, chamber_pressure=40)
+             chamber_diameter=SOLID_DEFAULT_GEOMETRY_MM['chamber_diameter'],
+             grain_length=SOLID_DEFAULT_GEOMETRY_MM['grain_length'],
+             core_diameter=SOLID_DEFAULT_GEOMETRY_MM['core_diameter'],
+             chamber_pressure=40)
     p.update(kw)
     if ov is not None:
         p['overrides'] = dict(ov)
     return SolidRocketEngine(**p)
+
+
+#: V301/T-ÇAPA-A: ``burn_rate_a=0.005`` (katalog APCP a'sının ~2,24 katı)
+#: çözücüye daha büyük bir boğaz boyutlandırtır; tek tanımın 48 mm çekirdeği
+#: bu hızda BATES/slotted/wagon_wheel'de boğulur (BATES A_p/A_t 0,958, 422).
+#: 76 mm, aynı motorda ölçülen A_p/A_t 2,218 verir (K-A'nın 48 mm için
+#: seçtiği 2,211 payıyla aynı; 72 mm 2,006, 74 mm 2,111). Ölçüm: T-ÇAPA-A
+#: RAPOR. Bu sınıfların konusu web tanımıdır, boğulan port değil.
+HIZLI_YAKIT_CEKIRDEK_MM = 76
 
 
 # ===========================================================================
@@ -163,7 +189,8 @@ class TestP2B4_02WebTanimlari:
 
     @pytest.mark.parametrize('gt', TIPLER)
     def test_burnout_fiilen_tuketilendir(self, gt):
-        e = _motor(grain_type=gt, burn_rate_a=0.005)
+        e = _motor(grain_type=gt, burn_rate_a=0.005,
+                   core_diameter=HIZLI_YAKIT_CEKIRDEK_MM)
         r = _sessiz(e.calculate_performance)
         c = _sessiz(e.calculate_thrust_curve)
         tuketilen = float(trapezoid(np.asarray(c['burn_rate'], float),
@@ -212,7 +239,8 @@ class TestP2B4_02WebTanimlari:
         ``_available_web_thickness()`` (port yüzeyinden kasaya kalan et).
         """
         for gt in self.TIPLER:
-            e = _motor(grain_type=gt, burn_rate_a=0.005)
+            e = _motor(grain_type=gt, burn_rate_a=0.005,
+                   core_diameter=HIZLI_YAKIT_CEKIRDEK_MM)
             c = _sessiz(e.calculate_thrust_curve)
             tuketilen = float(trapezoid(np.asarray(c['burn_rate'], float),
                                        np.asarray(c['time'], float)))
@@ -371,7 +399,7 @@ class TestP2B1_01KayitTutarliligi:
 
     @pytest.mark.parametrize('yakit', ['apcp', 'sugar', 'knsu',
                                        'black_powder', 'double_base'])
-    def test_motor_tablosu_katalogla_ayrisamaz(self, yakit):
+    def test_motor_tablosu_katalogla_ayrisamaz(self, yakit, cea_kapali):
         """TEK KAYNAK: onarım yalnız bir dosyada yapılamaz."""
         from hrma.data.propellants_db import PROPELLANTS
         e = _motor(propellant_type=yakit)
@@ -424,7 +452,13 @@ class TestP2B1_05YakitFiyati:
         """sugar ⟷ knsu aynı formülasyon: 3,50 kat fiyat farkı olamaz."""
         birim = {}
         for yakit in ('sugar', 'knsu'):
-            r = _sessiz(_motor(propellant_type=yakit).calculate_performance)
+            # V301/T-ÇAPA-A: maliyet kalemleri 0,1 USD'ye yuvarlanıyor; tek
+            # tanımın 48 mm çekirdeğinde yakıt kütlesi küçülünce yuvarlama
+            # payı tek başına 1e-3'ü aşıyor (ölçülen 1,04e-3). KN-şeker 40
+            # bar'da 30 mm çekirdekte port GEÇERLİ (ölçülen A_p/A_t sugar
+            # 1,663, knsu 1,568); konu aile fiyatıdır, geometri değil.
+            r = _sessiz(_motor(propellant_type=yakit, core_diameter=30)
+                        .calculate_performance)
             mat = r['cost_analysis']['material_costs_usd']
             birim[yakit] = mat['propellant'] / r['propellant_mass']
         assert birim['sugar'] == pytest.approx(birim['knsu'], rel=1e-3), birim
@@ -507,8 +541,13 @@ class TestP2B1_06BeyanCurumesi:
 
     def test_cozulen_uc_yaricapi_yayimlanir(self):
         """Ad ⟷ davranış farkı SAYIYLA görünür (girilen 4,000x'e kadar)."""
-        for girilen, beklenen in ((5.0, 20.0), (15.0, 30.0), (30.0, 43.0)):
-            e = _motor(grain_type='star',
+        # V301/T-ÇAPA-A: eski çapa (5->20, 15->30, 30->43) 30 mm çekirdekte
+        # ölçülmüştü; orada star_radius=5 portu boğuluyor (ölçülen A_p/A_t
+        # 0,991 -> 422). 40 mm çekirdek: A_p/A_t 1,662 (36 mm 1,372). Yeni
+        # çapa aynı bağıntıyla ölçüldü: uç = çekirdek/2 + derinlik ->
+        # 20+5, 20+15, 20+24 (30 mm derinlik 24,0'a kırpılıyor).
+        for girilen, beklenen in ((5.0, 25.0), (15.0, 35.0), (30.0, 44.0)):
+            e = _motor(grain_type='star', core_diameter=40,
                        overrides={'star_radius': girilen})
             gd = _sessiz(e.calculate_performance)['grain_design']
             assert gd['star_tip_radius_mm'] == pytest.approx(beklenen,
@@ -519,11 +558,14 @@ class TestP2B1_06BeyanCurumesi:
 
     def test_sessiz_kirpma_beyan_edilir(self):
         """star_radius=40 mm sessizce 28,0 mm'ye kırpılıyordu."""
-        e = _motor(grain_type='star', overrides={'star_radius': 40.0})
+        # V301/T-ÇAPA-A: 28,0 mm kırpma 30 mm çekirdekte ölçüldü; star
+        # portu orada geçerli (K-A RAPOR §6).
+        e = _motor(grain_type='star', core_diameter=30,
+                   overrides={'star_radius': 40.0})
         gd = _sessiz(e.calculate_performance)['grain_design']
         assert 'star_radius' in gd['clipped_inputs']
         assert gd['point_depth'] == pytest.approx(28.0, rel=1e-9)
-        temiz = _sessiz(_motor(grain_type='star',
+        temiz = _sessiz(_motor(grain_type='star', core_diameter=30,
                                overrides={'star_radius': 10.0})
                         .calculate_performance)['grain_design']
         assert temiz['clipped_inputs'] == []

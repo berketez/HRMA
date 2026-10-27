@@ -147,7 +147,16 @@ SHAKES = {
     # diye bağlam, İKİ gövdede birden geçerli bir besleme basıncı kuruyor
     # (260 bar; ``feed_pressure`` sarsmasının kendi değeriyle aynı sayı,
     # yeni sabit yazılmadı). Sarsma değeri ve iddia DEĞİŞMEDİ.
-    'chamber_pressure': (160.0, {'feed_pressure': 260.0}),
+    #
+    # V301/L-A (SV-01): taban yükün oda çapı (200 mm) Pc = 160 bar'da
+    # çözülen 22,78 mm boğazla daralma oranını 77'ye çıkarıyor (bant
+    # 1,5-60). Çözücü eskiden bu çapı SESSİZCE atıp daralma oranına
+    # düşüyordu; uç artık 422 ``chamber_diameter_out_of_band`` veriyor.
+    # Sarsmanın ölçtüğü şey (Pc'nin fiziği) korunsun diye bağlam iki
+    # gövdede de bandın içinde kalan bir oda çapı kurar (150 mm: Pc 100'de
+    # CR 23,7, Pc 160'ta CR 43,4).
+    'chamber_pressure': (160.0, {'feed_pressure': 260.0,
+                                 'chamber_diameter': 150.0}),
     'feed_pressure': (260.0, {}),
     'turbopump_efficiency': (55.0, {}),
     'generator_gas_temp': (1600.0, {}),
@@ -215,6 +224,17 @@ SHAKES = {
 # kullanıcı 120 m/s enjeksiyon hızı girince motor kendi hesapladığı 41 m/s ile
 # karşılaştırıp uyarı üretir -> input_warnings listesi kayar. Bu MEŞRUDUR.
 ECHO_PREFIXES = ('$.input_warnings', '$.unwired_inputs', '$.warnings')
+
+#: V301/L-A (SV-11) — boyutlandırmayan ama bir EMNİYET hükmünü yöneten
+#: alanlar. ``fuel_boiling_point`` "informational (kullanılmıyor)" diye
+#: beyan ediliyordu; oysa ``warn.liquid.coolant_exit_above_boiling`` t_boil'ü
+#: ondan okur (A-sivi SV-11: 565 K girilince t_boil 565; bant dışı 1400 K
+#: atılınca uyarı TAMAMEN kayboluyordu). Bu alanlar için ölçüt "fiziksel
+#: yaprak" değil, yönettikleri uyarının kaydıdır; blanket kural değil, her
+#: satır adıyla ve hükmüyle yazılır.
+WARNING_DRIVING_FIELDS = {
+    'fuel_boiling_point': 'warn.liquid.coolant_exit_above_boiling',
+}
 
 # Alana özel izinler. Blanket kural DEĞİL: her satır adıyla ve gerekçesiyle
 # yazılır ki bir gün gerçek bir sızıntı buraya sessizce eklenmesin.
@@ -391,6 +411,16 @@ def test_field_matches_its_declaration(client, declared, field):
       yasak — alan ya fiziğe bağlanır ya `unwired_inputs()` ile bildirilir.
     """
     physical, echo = _shake(client, field)
+    if field in WARNING_DRIVING_FIELDS:
+        # V301/L-A (SV-11): alan bir EMNİYET hükmünü yönetir; beyan
+        # edilmez ve sarsıldığında o hükmün kaydı değişmelidir.
+        assert field not in declared, (
+            '%s bir uyarıyı yönetiyor ama "%s" diye beyan edilmiş'
+            % (field, declared.get(field)))
+        assert any(p.startswith('$.input_warnings') for p in echo), (
+            '%s sarsıldı ama yönettiği uyarı (%s) değişmedi'
+            % (field, WARNING_DRIVING_FIELDS[field]))
+        return
     if field in declared:
         assert not physical, (
             "%s '%s' diye beyan edilmiş ama %d fiziksel yaprağı oynatıyor: %s"
@@ -469,7 +499,30 @@ def test_chamber_diameter_out_of_band_does_not_claim_false_precedence(client):
     """
     payload = copy.deepcopy(BASE_PAYLOAD)
     payload['chamber_diameter'] = 4000.0   # CR ~ 17000, bandın çok dışında
-    result = _calculate(client, payload)
+    # V301/L-A (SV-01) — BEKLENTİ DEĞİŞTİ: uç bu girdiyi artık 200 + sessiz
+    # daralma oranı yerine 422 ``chamber_diameter_out_of_band`` ile adıyla
+    # reddeder (en az / en çok çapla). Bekçinin asıl iddiası (gerçekleşmeyen
+    # öncelik duyurulmaz) motorun Python API yolunda aynen sınanır.
+    response = client.post('/calculate_liquid', json=payload,
+                           headers=LOCAL_HOST)
+    assert response.status_code == 422
+    body = response.get_json()
+    assert body['error'] == 'chamber_diameter_out_of_band'
+    assert body['invalid_fields'][0]['field'] == 'chamber_diameter'
+    assert 'motor_geometry' not in body
+    from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):
+        engine = LiquidRocketEngine(
+            thrust=payload['thrust'],
+            chamber_pressure=payload['chamber_pressure'],
+            mixture_ratio=payload['mixture_ratio'],
+            fuel_type=payload['fuel_type'],
+            oxidizer_type=payload['oxidizer_type'],
+            cooling_type=payload['cooling_type'],
+            injector_type=payload['injector_type'], overrides=payload)
+        result = engine.calculate_performance()
     codes = {w.get('code') for w in result['input_warnings']
              if isinstance(w, dict)}
     assert 'warn.liquid.contraction_ratio_out_of_band' in codes

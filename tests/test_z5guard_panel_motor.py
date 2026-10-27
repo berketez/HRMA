@@ -824,8 +824,13 @@ def liquid_kaynak():
     # i18n.js kanonu). Tarayıcıda ikisi de aynı küresel kapsamdadır;
     # söküm listesi bayat kalırsa node `numTxt is not defined` der.
     # Kusur yine ÜRÜNDE değil SÖKÜMDE.
+    # v3.0.1 T-ÇAPA-B — AYNI DERS, ÜÇÜNCÜ KEZ: kart üreticisi model
+    # geçerlilik rozetini ortak sözlük yardımcısı ``ortakMetin`` (ÖH D37 A1b,
+    # liquid.html) ile yazıyor; söküm listesi bayattı → node
+    # ``ortakMetin is not defined``. Kusur ÜRÜNDE değil SÖKÜMDE.
     return '\n'.join([_sablon_fonksiyonu(html, 'numTxt'),
                       _sablon_fonksiyonu(html, 'hrmaFmt'),
+                      _sablon_fonksiyonu(html, 'ortakMetin'),
                       _sablon_fonksiyonu(html, 'liquidOverallLengthMm'),
                       _sablon_fonksiyonu(html, 'displayEngineeringCards')])
 
@@ -1124,7 +1129,9 @@ def test_d1_yerel_tablo_degerine_gercek_zamanli_rozeti_basilmiyor(
                 '%s: hâl çözümü rozeti hâli adıyla anmıyor' % ad)
             assert prov['badgeColor'] == '#28a745'
         else:
-            assert prov['badgeText'] == 'Using cached data', (
+            # v3.0.1: eski metin 'Using cached data' kullanılmayan bir önbelleği
+            # iddia ediyordu; değer çözülmemiş ve alan değiştirilmiyor.
+            assert prov['badgeText'] == 'No state-resolved value: field not changed', (
                 '%s: hâl çözülmemişken rozet dürüst değil (%r)'
                 % (ad, prov['badgeText']))
             assert prov['badgeColor'] == '#ffc107', (
@@ -1152,8 +1159,23 @@ def test_d2_rozet_yalniz_gercek_canli_kaynakta(prov_kaynak, tmp_path):
         {'name': 'yerel', 'payload': {
             'source': 'CoolProp (NIST REFPROP-based)',
             'properties': {'density': 1141.0}}},
+        # v3.0.1: web_propellant_api._damgala canlı OLMAYAN dönüşü damgalar;
+        # adında 'WebBook' geçse de paket/önbellek kaydı canlı DEĞİLDİR.
+        {'name': 'kayitli_kopya', 'payload': {
+            'source': ('NIST WebBook via nist-api.fly.dev third-party '
+                       'crawler (Stored copy)'),
+            'properties': {'density': 1141.0}}},
+        {'name': 'bayat', 'payload': {
+            'source': ('NIST WebBook via nist-api.fly.dev third-party '
+                       'crawler (Stale cache)'),
+            'properties': {'density': 1141.0}}},
     ]
     out = _prov_kos(tmp_path, prov_kaynak, 'd2', provenanceCases=vakalar)
+    for ad in ('kayitli_kopya', 'bayat'):
+        assert out['provenance'][ad]['live'] is False, (
+            '%s: damgalı (canlı olmayan) kayıt canlı sayılıyor' % ad)
+        assert out['provenance'][ad]['badgeText'] != 'Real-time Data', (
+            '%s: paket/önbellek kaydına "Real-time Data" basılıyor' % ad)
     for ad in ('pubchem', 'webbook', 'nistgov'):
         assert out['provenance'][ad]['live'] is True, (
             '%s: gerçek canlı kaynak canlı sayılmıyor' % ad)
@@ -1204,7 +1226,7 @@ def test_d3_kategori_yedegi_form_alanini_ezmiyor(itici_yanitlari, prov_kaynak,
     span = out['spans'].get('fuel-properties-rp1') or ''
     assert 'Real-time Data' not in span, (
         'yakıt künye şeridinde sahte rozet basılıyor: %s' % _metin(span)[:300])
-    assert 'Using cached data' in span, (
+    assert 'No state-resolved value: field not changed' in span, (
         'çözülmemiş değerin künyesi dürüst değil: %s' % _metin(span)[:300])
 
 

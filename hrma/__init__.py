@@ -53,7 +53,7 @@ def _set_blas_thread_default() -> None:
 
 _set_blas_thread_default()
 
-__version__ = "3.0.0"
+__version__ = "3.0.1"
 __author__ = "Berke Tezgöçen"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

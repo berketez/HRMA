@@ -22,16 +22,77 @@
         }
     }
 
+    /* V301/DİL (NK-46): bağlantı tarayıcıda "hiçbir şey yapmıyordu" —
+       sunucu PDF'i KENDİ makinesindeki görüntüleyicide açıyor (200,
+       opened:true) ama sayfa bunu söylemiyordu; uzak sunucuda kılavuz
+       kullanıcıya hiç ulaşmıyordu. Artık her sonuçta bildirim çıkar ve
+       paketlenmiş PDF'in tarayıcı bağlantısı (Flask /static/docs/…) verilir. */
+    function bildir(metin, href, hrefMetni) {
+        var eski = document.getElementById('userGuideNotice');
+        if (eski && eski.parentNode) eski.parentNode.removeChild(eski);
+        var kutu = document.createElement('div');
+        kutu.id = 'userGuideNotice';
+        kutu.setAttribute('role', 'status');
+        kutu.style.cssText = 'position:fixed; right:20px; bottom:20px; z-index:9999;'
+            + ' max-width:380px; padding:10px 12px; border-radius:8px; font-size:13px;'
+            + ' line-height:1.45; background:var(--hd-bg1, #0b1624);'
+            + ' color:var(--hd-ink, #cfe8f2);'
+            + ' border:1px solid var(--hd-line, rgba(0,229,255,0.3));';
+        var govde = document.createElement('span');
+        govde.textContent = metin;
+        kutu.appendChild(govde);
+        if (href) {
+            var a = document.createElement('a');
+            a.href = href; a.target = '_blank'; a.rel = 'noopener';
+            a.textContent = hrefMetni;
+            a.style.cssText = 'display:block; margin-top:6px; color:var(--hd-cyan, #00e5ff);';
+            kutu.appendChild(a);
+        }
+        var kapat = document.createElement('button');
+        kapat.type = 'button';
+        kapat.textContent = T('guide.close', 'Close');
+        kapat.style.cssText = 'margin-top:8px; cursor:pointer; font-size:12px;';
+        kapat.onclick = function () {
+            if (kutu.parentNode) kutu.parentNode.removeChild(kutu);
+        };
+        kutu.appendChild(kapat);
+        document.body.appendChild(kutu);
+    }
+
+    function pdfAdresi(res) {
+        var yol = res && typeof res.path === 'string' ? res.path : '';
+        var ad = yol.split(/[\\/]/).pop();
+        return ad ? '/static/docs/' + encodeURIComponent(ad) : null;
+    }
+
     function openGuide() {
         var lang = String(currentLang()).toLowerCase().indexOf('tr') === 0 ? 'tr' : 'en';
+        var tarayicida = T('guide.openInBrowser', 'Open the PDF in the browser');
         fetch('/api/user-guide/open?lang=' + lang, { method: 'POST' })
             .then(function (r) { return r.json(); })
             .then(function (res) {
-                if (!res.opened && res.url) window.open(res.url, '_blank');
+                var pdf = pdfAdresi(res);
+                if (res.opened) {
+                    bildir(T('guide.opened',
+                        'The user guide PDF was opened in the PDF viewer of the computer running HRMA.'),
+                        pdf, tarayicida);
+                } else if (pdf) {
+                    bildir(T('guide.notLaunched',
+                        'No PDF viewer was launched by the server; open the user guide here:'),
+                        pdf, tarayicida);
+                } else if (res.url) {
+                    bildir(T('guide.notPackaged',
+                        'The user guide PDF is not packaged with this installation; the online copy:'),
+                        res.url, res.url);
+                    window.open(res.url, '_blank');
+                }
             })
             .catch(function () {
-                window.open('https://github.com/berketez/HRMA/tree/main/docs/user_guide',
-                            '_blank');
+                var url = 'https://github.com/berketez/HRMA/tree/main/docs/user_guide';
+                bildir(T('guide.notPackaged',
+                    'The user guide PDF is not packaged with this installation; the online copy:'),
+                    url, url);
+                window.open(url, '_blank');
             });
     }
 

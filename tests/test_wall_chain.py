@@ -159,10 +159,20 @@ class TestEngineLevelChain:
 
     @pytest.fixture(scope='class')
     def engine_results(self):
+        # v3.0.1 T-ÇAPA-B: V301/H-termal'den beri korunan yolda (yakıt bloğu
+        # + HRMA'nın boyutlandırdığı astar) yapı zinciri BEYANLI kasa
+        # sıcaklığını kullanır (ölçüldü: 293,15 K; ısıl gerilme 0 → iki SF
+        # eşit 4,8). Bu sınıfın konusu ısı → yapı zinciri: çıplak cidar
+        # sıcaklıklarının yapıya aktığı ürün yolu (astar boyutlandırması
+        # koşmadı, fail-closed) ``tests.support.hibrit_termal`` ile adıyla
+        # kurulur; iddialar değişmedi.
         from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
-        engine = HybridRocketEngine(
-            thrust=1000, burn_time=10, of_ratio=6.0, chamber_pressure=20.0)
-        return engine.calculate()
+        from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
+        with astar_boyutlandirmasi_kosmaz():
+            engine = HybridRocketEngine(
+                thrust=1000, burn_time=10, of_ratio=6.0,
+                chamber_pressure=20.0)
+            return engine.calculate()
 
     def test_structural_uses_heat_wall_temperatures(self, engine_results):
         r = engine_results

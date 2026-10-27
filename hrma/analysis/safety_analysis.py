@@ -253,6 +253,42 @@ UNRESTRAINED_BURN_TIME_FIELDS = (
     'burnout_velocity_ms',
     'kinetic_energy_j',
 )
+# ---------------------------------------------------------------------------
+# V301/K-C1 (KT-16) — İTKİ UYDURULMAZ (yanma süresiyle aynı desen).
+#
+# ÖLÇÜLDÜ (K-C1/guvenlik_once.json): ``motor_data.get('thrust', 1000)``
+# satırı, itki göndermeyen her çağıranda serbest kalan motor kolunu 1000 N
+# ile kuruyordu. Katı sayfanın PDF yükü itkiyi ``max_thrust`` adıyla
+# taşıdığından rapor 3890 N'luk varsayılan motor için "required restraint
+# force 4000 N, total impulse 3142,7 N·s, burnout 488 m/s" basıyordu (doğru
+# girdiyle 15 561 N / 1899 m/s). Girdi künyesinde (inputs_resolved) itki
+# yoktu: varsayılan beyansızdı.
+#
+# Artık itki verilmezse itkiye bağlı kollar adıyla geri çekilir; itkiden
+# bağımsız kollar (yapısal, basınçlı kap, termal, TNT, toksik, yangın,
+# parça hızı) AYNEN kalır. İtki verildiğinde yayımlanan her sayı bit-aynıdır.
+#
+# İTKİNİN TANIMI (bu modülde): tek ``thrust`` iki yerde kullanılır —
+# bağlama kuvveti = thrust × yapısal SF (bir YÜK; tepe itkiyle kurulmalı)
+# ve toplam impuls = thrust × burn_time (impuls–momentum; ortalama itkiyle
+# tam). Katı PDF'i tepe itkiyi gönderir (pdf_generator 'thrust' =
+# 'Maximum Thrust'); impuls ve ondan türeyen hız/enerji o zaman ÜST
+# SINIRDIR (sabit itkili yanmada tam). Hibrit/sıvı yolları bit-aynı kalsın
+# diye bu beyan yanıta alan olarak EKLENMEDİ; K-C1/RAPOR.md'de yazılıdır.
+# ---------------------------------------------------------------------------
+#: İtki verilmediğinde serbest kalan motor kolunun gerekçesi — TEK tanım.
+THRUST_NOT_SUPPLIED_REASON = (
+    'thrust not supplied: motor_data carries no thrust and none is assumed '
+    '(the previous code silently used 1000 N), so the tie-down force and '
+    'the loose-motor impulse, burnout velocity and kinetic energy were not '
+    'evaluated. Supply thrust [N] to get them.')
+#: İtki yokken geri çekilen SERBEST KALAN MOTOR alanları.
+UNRESTRAINED_THRUST_FIELDS = (
+    'total_impulse_ns',
+    'burnout_velocity_ms',
+    'kinetic_energy_j',
+    'required_restraint_force_n',
+)
 
 
 def _yanma_suresi(value):
@@ -1058,7 +1094,9 @@ class SafetyAnalyzer:
 
         # Extract motor parameters
         chamber_pressure = motor_data.get('chamber_pressure', 20.0)  # bar
-        thrust = motor_data.get('thrust', 1000)  # N
+        # V301/K-C1 (KT-16): verilmediyse None — 1000 N UYDURULMAZ; itkiye
+        # bağlı kollar adıyla geri çekilir (``thrust_dependent_not_evaluated``).
+        thrust = motor_data.get('thrust')  # N | None
         # ÖH D36 / onemli2-sivi a2: süre verilmediyse None — 10 s UYDURULMAZ;
         # süreye bağlı kollar adıyla geri çekilir (THERMAL_/UNRESTRAINED_
         # BURN_TIME_FIELDS, sonuçta ``burn_time_dependent_not_evaluated``).
@@ -1163,6 +1201,20 @@ class SafetyAnalyzer:
                 'facility_type': facility_type,
             },
         }
+        if thrust is None:
+            # V301/K-C1 (KT-16): itkiye bağlı kollar tek yerde, noktalı
+            # yoluyla (yanma süresi bloğunun deseni).
+            _um_itki = ((explosive_hazards.get('fragment_hazards') or {})
+                        .get('unrestrained_motor') or {})
+            sonuc['thrust_dependent_not_evaluated'] = {
+                'status': BURN_TIME_NOT_EVALUATED,
+                'reason': THRUST_NOT_SUPPLIED_REASON,
+                'fields': (
+                    ['inputs_used.thrust_n']
+                    + ['explosive_hazards.fragment_hazards.'
+                       'unrestrained_motor.' + ad
+                       for ad in _um_itki.get('not_evaluated') or []]),
+            }
         if burn_time is None:
             # ÖH D36 / onemli2-sivi a2: geri çekilen HER kol tek yerde,
             # yanıttaki noktalı yoluyla sayılır (bloklar kendi damgalarını da
@@ -1843,7 +1895,7 @@ class SafetyAnalyzer:
         return float(power / (4.0 * np.pi * distance ** 2))
 
     def _analyze_explosive_hazards(self, propellant_mass: float, propellant_type: str,
-                                   thrust: float,
+                                   thrust: Optional[float],
                                    burn_time: Optional[float] = None,
                                    motor_type: Optional[str] = None,
                                    motor_data: Optional[Dict] = None,
@@ -2379,7 +2431,8 @@ class SafetyAnalyzer:
                 f"EMPIRICAL case mass fraction {frac:.2f} of propellant mass "
                 f"(chamber geometry was not supplied)")
 
-    def _calculate_fragment_hazards(self, propellant_mass: float, thrust: float,
+    def _calculate_fragment_hazards(self, propellant_mass: float,
+                                    thrust: Optional[float],
                                     burn_time: Optional[float] = None,
                                     motor_data: Optional[Dict] = None,
                                     material: str = 'steel_4130') -> Dict:
@@ -2401,7 +2454,10 @@ class SafetyAnalyzer:
         # iki sayısı birbirini yalanlıyordu. ``max(x, 0)`` bir emniyet
         # önlemi değil, girdinin sessizce yok sayılmasıdır.
         _fizik_disi_degilse('propellant_mass', propellant_mass)
-        _fizik_disi_degilse('thrust', thrust)
+        # V301/K-C1 (KT-16): itki verilmediyse None kalır (kapı yalnız
+        # verilmiş değere uygulanır).
+        if thrust is not None:
+            _fizik_disi_degilse('thrust', thrust)
         # ÖH D36 / onemli2-sivi a2: imza varsayılanı 10,0 s idi (doğrudan
         # çağıran süre vermezse uydurulurdu). Süre verilmediyse None kalır ve
         # serbest kalan motorun süreye bağlı üç alanı aşağıda adıyla geri
@@ -2441,7 +2497,7 @@ class SafetyAnalyzer:
         # ÖH D36 / onemli2-sivi a2: süre yoksa impuls (ve ondan türeyen hız
         # ile enerji) HESAPLANMAZ; ortalama kütle ve bağlama kuvveti süreye
         # bağlı değildir, kalır.
-        total_impulse = (None if burn_time is None
+        total_impulse = (None if (burn_time is None or thrust is None)
                          else float(thrust) * float(burn_time))
         # Ortalama uçuş kütlesi: kasa + yakıtın yarısı (yanma boyunca ortalama)
         mean_mass = max(case_mass + propellant_mass / 2.0, 1e-6)
@@ -2451,7 +2507,7 @@ class SafetyAnalyzer:
                         else 0.5 * mean_mass * loose_velocity ** 2)   # J
         # Bağlama elemanlarının karşılaması gereken kuvvet (yapısal emniyet
         # katsayısıyla) — itkinin doğrudan emniyet karşılığı.
-        restraint_force = (float(thrust)
+        restraint_force = (None if thrust is None else float(thrust)
                            * self.safety_margins.structural_safety_factor)
 
         serbest_motor = {
@@ -2467,7 +2523,15 @@ class SafetyAnalyzer:
                      'trajectory range is quoted because it depends on '
                      'drag and attitude, which this model does not solve.'),
         }
-        if burn_time is None:
+        if thrust is None:
+            # V301/K-C1 (KT-16): itki yoksa bu kolun dört sayısı da itkiye
+            # bağlıdır (süre verilmiş olsa bile); anahtarlar SİLİNMEZ.
+            serbest_motor.update({
+                'status': BURN_TIME_NOT_EVALUATED,
+                'reason': THRUST_NOT_SUPPLIED_REASON,
+                'not_evaluated': list(UNRESTRAINED_THRUST_FIELDS),
+            })
+        elif burn_time is None:
             # Adıyla geri çekme — anahtarlar SİLİNMEZ (tüketiciler anahtar
             # arar), değer None + durum + gerekçe + hangi alanlar.
             serbest_motor.update({

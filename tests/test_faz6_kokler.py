@@ -15,6 +15,9 @@ import json
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import (
+    SOLID_DEFAULT_GEOMETRY_MM, SOLID_INSULATION)
+
 from hrma.app import app
 from hrma.export.motor_geometry import solid_results_to_motor_geometry
 
@@ -96,9 +99,24 @@ def test_t11_tank_basinci_yoksa_cubuk_tank_demez(istemci):
 # T07 — son port çapı
 # ---------------------------------------------------------------------------
 
+# v3.0.1 T-ÇAPA-B: eski gövde (hazne = tane = 100 mm, çekirdek 30 mm) iki
+# K-A kapısına takılıyordu: 422 ``grain_does_not_fit_case`` (100 mm tane +
+# 2 mm astar 104 mm hazne ister) ve port ⟷ boğaz (A_p/A_t < 1). Konu son
+# port: tane Ø100 korunur, hazne kanonik astar kalınlığı kadar genişler
+# (SOLID_INSULATION), çekirdek tek tanım SOLID_DEFAULT_GEOMETRY_MM'den.
+# Geometrik çapalar (web, son port) bu sabitlerden TÜRETİLİR; ölçüldü
+# (117d704da): tek cephe 25,99793 mm (hedef 26; eksik %0,008), iki cephe
+# 12,99091 mm (hedef 13; eksik %0,070), son port 99,996 / 73,982 mm.
+T07_TANE_MM = 100.0
+T07_CEKIRDEK_MM = float(SOLID_DEFAULT_GEOMETRY_MM['core_diameter'])
+T07_HAZNE_MM = T07_TANE_MM + 2.0 * SOLID_INSULATION['thickness_m'] * 1000.0
+
+
 def _kati_sonuc(istemci, inhibit_outer):
-    g = {'motor_type': 'solid', 'chamber_diameter': 100, 'outer_diameter': 100,
-         'core_diameter': 30, 'grain_length': 500, 'grain_count': 3,
+    g = {'motor_type': 'solid', 'chamber_diameter': T07_HAZNE_MM,
+         'outer_diameter': T07_TANE_MM,
+         'core_diameter': T07_CEKIRDEK_MM, 'grain_length': 500,
+         'grain_count': 3,
          'propellant_type': 'apcp', 'chamber_pressure': 40,
          'inhibit_outer': inhibit_outer}
     y = istemci.post('/calculate_solid', json=g)
@@ -145,7 +163,8 @@ def test_t07_son_port_inhibitor_duzenine_gore_degisir(istemci):
     # olmalı (tüketilen kalınlık hedefi AŞAMAZ — aşarsa çözücü var
     # olmayan yakıt yakmış olur). İkinci iddia eski bekçide YOKTU.
     gw = gd_tek['web_thickness_mm']          # geometrik web [mm]
-    assert gw == pytest.approx(35.0, rel=1e-12), 'geometrik web bayat'
+    assert gw == pytest.approx((T07_TANE_MM - T07_CEKIRDEK_MM) / 2.0,
+                               rel=1e-12), 'geometrik web bayat'
     assert gd_tek['web_burnout_mm'] == pytest.approx(gw, rel=2e-3)
     assert gd_cift['web_burnout_mm'] == pytest.approx(gw / 2.0, rel=2e-3)
     for gd, hedef in ((gd_tek, gw), (gd_cift, gw / 2.0)):
@@ -159,9 +178,12 @@ def test_t07_son_port_inhibitor_duzenine_gore_degisir(istemci):
     p_cift = solid_results_to_motor_geometry(cift)['port_diameter_final'] * 1000
 
     # Tek cepheli: web tamamen tükenir, son port = grain dış çapı
-    assert p_tek == pytest.approx(100.0, abs=0.5)
-    # İki cepheli: son port = çekirdek + 2 × tükenen web = 30 + 2×17,5 = 65
-    assert p_cift == pytest.approx(65.0, abs=0.5), (
+    assert p_tek == pytest.approx(T07_TANE_MM, abs=0.5)
+    # İki cepheli: son port = çekirdek + 2 × tükenen web (yarı web)
+    # = 48 + 2×13 = 74 (eski gövdede 30 + 2×17,5 = 65)
+    assert p_cift == pytest.approx(
+        T07_CEKIRDEK_MM + (T07_TANE_MM - T07_CEKIRDEK_MM) / 2.0,
+        abs=0.5), (
         'iki cepheli yanmada son port %s mm — grain dış çapı yazılmış olabilir' % p_cift)
     assert p_cift < p_tek, 'son port inhibitör düzeninden bağımsız çıkıyor'
 

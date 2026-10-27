@@ -31,12 +31,14 @@
     // anahtarlarıyla birebir (get_material; regen_cooling.py wall_material).
     // Bakır/CuCrZr yüksek iletkenlikleriyle tipik rejeneratif liner.
     // Katalog gelirse 'liner'+'shell' etiketli tam liste bunun yerine geçer.
+    // V301/DİL (NK-67): çevrilebilen adlar ortak malzeme anahtarlarıyla
+    // (protection_panel.js ile aynı); özel adlar (CuCrZr, Inconel) aynen.
     const WALL_MATERIALS = [
-        ['copper', 'Copper (OFHC)'],
-        ['cucrzr', 'CuCrZr alloy'],
+        ['copper', 'Copper (OFHC)', 'mat.copperOfhc'],
+        ['cucrzr', 'CuCrZr'],
         ['inconel_718', 'Inconel 718'],
-        ['ss_304', 'Stainless 304'],
-        ['steel_4130', 'Steel AISI 4130'],
+        ['ss_304', 'Stainless 304', 'mat.stainless304'],
+        ['steel_4130', 'Steel AISI 4130', 'mat.steelAisi4130'],
     ];
 
     // ÖH A2 sivi-sogutma · 7. tur (F-17): soğutucu ön-dolgusu 'water' idi —
@@ -397,12 +399,12 @@
         motorTypes: ['liquid'],
         long: true,
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar'],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3400, 10, 'common.f.chamberTemperatureK'],
-            ['throat_diameter', 'Throat Diameter (m)', 0.05, 0.001, 'common.f.throatDiameterM'],
-            ['expansion_ratio', 'Expansion Ratio', 8, 0.1, 'common.f.expansionRatio'],
-            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen'],
-            ['molecular_weight', 'Molecular Weight (g/mol)', 22, 0.5, 'common.f.molecularWeight'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar', 'panel.regen.help.chamber_pressure'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3400, 10, 'common.f.chamberTemperatureK', 'panel.regen.help.chamber_temperature'],
+            ['throat_diameter', 'Throat Diameter (m)', 0.05, 0.001, 'common.f.throatDiameterM', 'panel.regen.help.throat_diameter'],
+            ['expansion_ratio', 'Expansion Ratio', 8, 0.1, 'common.f.expansionRatio', 'panel.regen.help.expansion_ratio'],
+            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen', 'panel.regen.help.gamma'],
+            ['molecular_weight', 'Molecular Weight (g/mol)', 22, 0.5, 'common.f.molecularWeight', 'panel.regen.help.molecular_weight'],
             // ÖH A2 sivi-sogutma · 7. tur (F-17 ilkesi: kaynaksız ön-dolgu
             // yok): soğutucu 'water', giriş sıcaklığı 300 K, giriş basıncı
             // 60 bar, kanal genişliği 2,0 mm, derinliği 3,0 mm ve astar
@@ -411,22 +413,22 @@
             // sonlu pozitif, yalnız kanal devresi varken). Yayımlanmamışsa
             // alan boş kalır ve ZORUNLUDUR (spec.required): güverte isteği
             // göndermez, eksik alanı adıyla söyler.
-            ['coolant', 'Coolant', '', COOLANTS, 'panel.regen.fCoolant'],
-            ['coolant_mdot', 'Coolant Mass Flow (kg/s)', 2.0, 0.05, 'panel.regen.fCoolantMdot'],
-            ['coolant_inlet_temp', 'Coolant Inlet T (K)', '', 5, 'panel.regen.fInletT'],
-            ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', '', 1, 'panel.regen.fInletP'],
+            ['coolant', 'Coolant', '', COOLANTS, 'panel.regen.fCoolant', 'panel.regen.help.coolant'],
+            ['coolant_mdot', 'Coolant Mass Flow (kg/s)', 2.0, 0.05, 'panel.regen.fCoolantMdot', 'panel.regen.help.coolant_mdot'],
+            ['coolant_inlet_temp', 'Coolant Inlet T (K)', '', 5, 'panel.regen.fInletT', 'panel.regen.help.coolant_inlet_temp'],
+            ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', '', 1, 'panel.regen.fInletP', 'panel.regen.help.coolant_inlet_pressure'],
             // ÖH A2 sivi-sogutma · 6. tur (F-17 ilkesi: kaynaksız ön-dolgu
             // yok): eskiden 80 yazılı geliyordu — hiçbir hesaptan değil. Ön-dolgu
             // artık /calculate_liquid'in YAYIMLADIĞI kanal sayısıdır
             // (cooling_system.cooling_channels, fromResults); motor sonucu yoksa
             // ya da N yayımlanmadıysa alan BOŞ kalır ve uç n_channels'ı adıyla
             // ister (HTTP 400) — uydurma sayıyla hesap yapılmaz.
-            ['n_channels', 'Number of Channels', '', 1, 'panel.regen.fChannels'],
-            ['channel_width', 'Channel Width (mm)', '', 0.1, 'panel.regen.fChannelW'],
-            ['channel_height', 'Channel Height (mm)', '', 0.1, 'panel.regen.fChannelH'],
-            ['wall_thickness', 'Liner Thickness (mm)', '', 0.1, 'panel.regen.fLinerThickness'],
-            ['wall_material', 'Liner Material', 'copper', WALL_MATERIALS, 'panel.regen.fLinerMaterial'],
-            ['flow_direction', 'Flow Direction', 'counterflow', FLOW_DIRECTIONS, 'panel.regen.fFlowDir'],
+            ['n_channels', 'Number of Channels', '', 1, 'panel.regen.fChannels', 'panel.regen.help.n_channels'],
+            ['channel_width', 'Channel Width (mm)', '', 0.1, 'panel.regen.fChannelW', 'panel.regen.help.channel_width'],
+            ['channel_height', 'Channel Height (mm)', '', 0.1, 'panel.regen.fChannelH', 'panel.regen.help.channel_height'],
+            ['wall_thickness', 'Liner Thickness (mm)', '', 0.1, 'panel.regen.fLinerThickness', 'panel.regen.help.wall_thickness'],
+            ['wall_material', 'Liner Material', 'copper', WALL_MATERIALS, 'panel.regen.fLinerMaterial', 'panel.regen.help.wall_material'],
+            ['flow_direction', 'Flow Direction', 'counterflow', FLOW_DIRECTIONS, 'panel.regen.fFlowDir', 'panel.regen.help.flow_direction'],
         ],
         // 'BOŞ + ZORUNLU' beyanı (analysis_dock.requiredFieldInfo): tanım
         // değeri boş olan bu alanlar isteğe bağlı DEĞİL — uç n_channels'ı

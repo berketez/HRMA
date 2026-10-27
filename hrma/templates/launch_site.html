@@ -29,6 +29,7 @@
          settings_panel.js'ten ÖNCE yüklenir; yüklenmezse ayarlar
          panelinde "Hata bildir" bölümü hiç çizilmez. -->
     <script src="/static/js/bug_report.js"></script>
+    <script src="/static/js/field_help.js"></script>
     <script src="/static/js/settings_panel.js"></script>
     <!-- ÖH D21 / P12aB5-07 — ÖLÇÜLEN KUSUR: bu sayfa altı sayfa arasında
          `update_check.js`i yüklemeyen TEK sayfaydı. Ayarlar > "Şimdi denetle"
@@ -210,6 +211,14 @@
             color: var(--hd-ink-strong, #eaf7fb); font-size: 14px;
         }
         .ls-iconbtn:hover { border-color: var(--hd-line-strong, rgba(0,229,255,0.42)); }
+        /* v3.0.1 (NK-48): kapalı oynatma düğmesi etkin GİBİ görünüyordu. */
+        .ls-iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .ls-check input:disabled, .ls-check input:disabled + span { opacity: 0.45; cursor: not-allowed; }
+        /* v3.0.1 (NK-69): kuru kütle dayanağı (alan yollu künye) ana metinde
+           değil, açılır bölümde. */
+        .ls-basis { margin-top: 4px; }
+        .ls-basis summary { cursor: pointer; color: var(--hd-ink-dim, #7d97a5); }
+        .ls-basis > div { margin-top: 3px; }
         #ls-time { flex: 1; accent-color: var(--hd-orange, #ff8c33); }
         #ls-tlabel { font-family: var(--hd-mono, monospace); font-size: 11px; color: var(--hd-ink-dim, #7d97a5); min-width: 62px; text-align: right; }
 
@@ -229,6 +238,11 @@
             background: rgba(6,14,26,0.8); border: 1px solid var(--hd-line, rgba(0,229,255,0.18));
             border-left: 3px solid var(--hd-orange, #ff8c33);
             border-radius: 8px; padding: 9px 12px;
+            /* v3.0.1 (NK-69): 1440×900'de kutu ~400 px'e uzayıp sağ panelin
+               uçuş özetini örtüyordu; tavan + kendi kaydırması. Sağ panelin
+               tavanı bu kutunun ÖLÇÜLEN yüksekliğinden kurulur
+               (layoutBottomReserve). */
+            max-height: 30vh; overflow-y: auto;
         }
         #ls-notes .warn { color: var(--hd-orange, #ff8c33); }
 
@@ -284,11 +298,11 @@
             <div class="ls-hint" data-i18n="site.selectHint">Rotate with drag, zoom with wheel, click the globe to pick a point.</div>
             <div class="ls-row" style="margin-top:10px">
                 <div class="ls-field">
-                    <label data-i18n="site.lat">Latitude</label>
+                    <label><span data-i18n="site.lat">Latitude</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.lat">Site latitude, decimal degrees (WGS84, north positive). Apply moves the globe there; Resolve site and Fly this site read it (the flight sends it as latitude_deg for Earth rotation). Empty or not a number: those buttons do nothing. Accepted −90 to 90.</span></span></label>
                     <input id="ls-lat" type="number" step="0.0001" value="28.6084">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.lon">Longitude</label>
+                    <label><span data-i18n="site.lon">Longitude</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.lon">Site longitude, decimal degrees (WGS84, east positive). Apply moves the globe there and Resolve site reads it; the flight path is placed at this point. Empty or not a number: those buttons do nothing. Accepted −180 to 180.</span></span></label>
                     <input id="ls-lon" type="number" step="0.0001" value="-80.6043">
                 </div>
             </div>
@@ -307,7 +321,7 @@
                 <span class="v" id="ls-vehicle-name">--</span>
             </div>
             <div class="ls-field" style="margin-top:6px">
-                <label data-i18n="site.vehicleSource">Source</label>
+                <label><span data-i18n="site.vehicleSource">Source</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vehicleSource">Which vehicle is flown: the last motor calculated on a motor page (handed over through this browser's storage), a saved .hrma project (recalculated on the server, since a project stores only inputs) or the built-in example vehicle. Changing it disables the previous flight until you fly again.</span></span></label>
                 <select id="ls-vehicle-source">
                     <option value="session" data-i18n="site.srcSession">Last motor calculated</option>
                     <option value="project" data-i18n="site.srcProject">Saved project (.hrma)</option>
@@ -315,7 +329,7 @@
                 </select>
             </div>
             <div class="ls-field" id="ls-project-wrap" style="margin-top:6px; display:none">
-                <label data-i18n="site.selectProject">Project</label>
+                <label><span data-i18n="site.selectProject">Project</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.project">Saved project whose motor is flown; it is recalculated on the server from its stored inputs. Shown only when Source is a saved project.</span></span></label>
                 <select id="ls-project"></select>
             </div>
             <div class="ls-hint" id="ls-vehicle-note" style="margin-top:6px"></div>
@@ -325,21 +339,21 @@
                  motor olmaz. Salt okunur + kilit rozeti. -->
             <div class="ls-row" style="margin-top:8px">
                 <div class="ls-field">
-                    <label data-i18n="site.vThrust">Thrust (N)</label>
+                    <label><span data-i18n="site.vThrust">Thrust (N)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vThrust">Thrust of the flown motor (N), read-only: it comes from the selected vehicle and is sent as thrust. If the vehicle does not provide it, the page sends 6500 N.</span></span></label>
                     <input id="ls-v-thrust" type="number" readonly class="ls-locked">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.vBurnTime">Burn time (s)</label>
+                    <label><span data-i18n="site.vBurnTime">Burn time (s)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vBurnTime">Burn time of the flown motor (s), read-only, from the selected vehicle; sent as burn_time. If the vehicle does not provide it, the page sends 7.5 s.</span></span></label>
                     <input id="ls-v-burntime" type="number" readonly class="ls-locked">
                 </div>
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.vPropMass">Propellant (kg)</label>
+                    <label><span data-i18n="site.vPropMass">Propellant (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vPropMass">Propellant mass of the flown motor (kg), read-only, from the selected vehicle; sent as propellant_mass. If the vehicle does not provide it, the page sends 18 kg.</span></span></label>
                     <input id="ls-v-propmass" type="number" readonly class="ls-locked">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.vInertMass">Engine inert (kg)</label>
+                    <label><span data-i18n="site.vInertMass">Engine inert (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vInertMass">Engine inert mass (kg: case, nozzle, injector), read-only, from the selected vehicle. It is added to Airframe dry mass and the sum is sent as dry_mass; if the vehicle does not provide it, 0 is added.</span></span></label>
                     <input id="ls-v-inertmass" type="number" readonly class="ls-locked">
                 </div>
             </div>
@@ -347,31 +361,31 @@
             <!-- Kullanıcı alanları: gövde ve kanatlar motordan türetilemez. -->
             <div class="ls-row" style="margin-top:8px">
                 <div class="ls-field">
-                    <label data-i18n="site.bodyDiameter">Body OD (m)</label>
+                    <label><span data-i18n="site.bodyDiameter">Body OD (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.bodyDia">Body outer diameter (m), sent as body_diameter (reference area and fin scaling of the 6-DOF solver). When the vehicle gives the engine diameter, that becomes the field minimum and a smaller value is raised to it. Empty or not a number: 0.15 m is sent.</span></span></label>
                     <input id="ls-a-bodydia" type="number" step="0.001" value="0.15">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.bodyLength">Body length (m)</label>
+                    <label><span data-i18n="site.bodyLength">Body length (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.bodyLen">Body length (m), sent as body_length. When the vehicle gives the engine length, a value shorter than max(2.0 m, engine length + 1.0 m) is raised to it. Empty or not a number: 3.0 m is sent. Nose length 0.50 m (ogive) is fixed on this page.</span></span></label>
                     <input id="ls-a-bodylen" type="number" step="0.01" value="3.0">
                 </div>
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.airframeDryMass">Airframe dry (kg)</label>
+                    <label><span data-i18n="site.airframeDryMass">Airframe dry (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.dryMass">Airframe dry mass (kg), EXCLUDING the engine inert mass shown above; the page adds the two and sends the sum as dry_mass. Empty or not a number: 18 kg is used.</span></span></label>
                     <input id="ls-a-drymass" type="number" step="0.1" value="18">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.cd0">Cd0</label>
+                    <label><span data-i18n="site.cd0">Cd0</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.cd0">Zero-lift drag coefficient (dimensionless), sent as cd0; the endpoint accepts 0–5. Empty or not a number: 0.45 is sent.</span></span></label>
                     <input id="ls-a-cd0" type="number" step="0.01" value="0.45">
                 </div>
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.finCount">Fins</label>
+                    <label><span data-i18n="site.finCount">Fins</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finCount">Number of fins, sent as fin_count; must be a whole number ≥ 0 (0 = no fins), otherwise the endpoint refuses the flight. Empty: 4 is sent. Fin root chord 0.20 m, tip chord 0.10 m and sweep 0.08 m are fixed on this page.</span></span></label>
                     <input id="ls-a-fincount" type="number" step="1" value="4">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.finSpan">Fin span (m)</label>
+                    <label><span data-i18n="site.finSpan">Fin span (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finSpan">Fin span (m), sent as fin_span; must be ≥ 0. Empty or not a number: 0.11 m is sent.</span></span></label>
                     <input id="ls-a-finspan" type="number" step="0.01" value="0.11">
                 </div>
             </div>
@@ -388,35 +402,35 @@
                  yük uydurmaz. -->
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.windSpeed">Wind speed (m/s)</label>
+                    <label><span data-i18n="site.windSpeed">Wind speed (m/s)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.windSpeed">Wind speed (m/s), sent as wind_speed; must be ≥ 0 and below the ISA sea-level speed of sound. Default 0 (no wind); empty or not a number: 0 is sent.</span></span></label>
                     <input id="ls-a-windspeed" type="number" step="0.5" min="0" value="0">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.windDir">Wind direction (deg)</label>
+                    <label><span data-i18n="site.windDir">Wind direction (deg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.windDir">Direction the wind blows FROM (degrees from north), sent as wind_direction_deg; accepted 0–360. Empty or not a number: 270 is sent.</span></span></label>
                     <input id="ls-a-winddir" type="number" step="5" min="0" max="360" value="270">
                 </div>
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.launchElevation">Launch elevation (deg)</label>
+                    <label><span data-i18n="site.launchElevation">Launch elevation (deg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.elev">Launch elevation above the horizon (degrees), sent as launch_elevation_deg; accepted 0–90 (90 = vertical). Empty or not a number: 84 is sent. The launch rail is fixed at 5 m on this page.</span></span></label>
                     <input id="ls-a-elev" type="number" step="1" value="84">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.azimuth">Azimuth (deg)</label>
+                    <label><span data-i18n="site.azimuth">Azimuth (deg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.azim">Launch azimuth (degrees from north), sent as launch_azimuth_deg; any finite number. Empty or not a number: 90 is sent.</span></span></label>
                     <input id="ls-a-azim" type="number" step="1" value="90">
                 </div>
             </div>
             <div class="ls-hint" data-i18n="site.airframeHint">Airframe dry mass EXCLUDES the engine inert mass shown above — the solver adds them.</div>
 
             <div class="ls-field" style="margin-top:10px">
-                <label data-i18n="site.presets">Shortcuts (not a limit — any point is selectable)</label>
+                <label><span data-i18n="site.presets">Shortcuts (not a limit — any point is selectable)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.presets">Shortcut list of known sites: choosing one writes its latitude and longitude into the fields and moves the globe there. Not a limit — any point can be picked on the globe.</span></span></label>
                 <select id="ls-presets"></select>
             </div>
 
             <div class="ls-sep"></div>
             <label class="ls-check">
                 <input type="checkbox" id="ls-online">
-                <span data-i18n="site.online">Use online enrichment (Open-Meteo)</span>
+                <span data-i18n="site.online">Use online enrichment (Open-Meteo)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.online">Off (default): Resolve site uses only packaged offline data. On: it first tries Open-Meteo over the internet for elevation and current surface temperature/pressure, which sends the coordinates to that service; any failure falls back to the offline data.</span></span>
             </label>
             <button class="ls-btn" id="ls-resolve" data-i18n="site.resolve">Resolve site</button>
             <div id="ls-resolve-out" style="margin-top:10px; display:none">
@@ -428,19 +442,24 @@
                 <div class="ls-kv"><span class="k" data-i18n="site.pressure">Pressure</span><span class="v" id="ls-r-press">--</span></div>
                 <div class="ls-kv"><span class="k" data-i18n="site.earthRotSpeed">Earth rotation speed (info only)</span><span class="v" id="ls-r-erot">--</span></div>
             </div>
-            <div id="ls-status"></div>
         </div>
 
         <!-- SAĞ: uçuş yolu + oynatım -->
         <div class="ls-panel" id="ls-right">
             <h2 data-i18n="site.flight">Flight path</h2>
             <button class="ls-btn accent" id="ls-fly" data-i18n="site.launch">Fly this site</button>
+            <!-- v3.0.1 (NK-48, son kullanıcı testi): durum satırı sol panelin
+                 EN ALTINDAYDI; uzun araç künyesi paneli kaydırınca "Uçuş
+                 çözülüyor…" ve "araç kararsız — oynatma kapalı" iletileri hiç
+                 görünmüyordu (oynatma düğmeleri açıklamasız kapalı kalıyordu).
+                 Uçuşu başlatan düğmenin hemen altına taşındı. -->
+            <div id="ls-status" role="status" aria-live="polite"></div>
 
             <div class="ls-player">
                 <button class="ls-iconbtn" id="ls-playpause" data-i18n-title="site.play"
                         title="Play" aria-label="Play">&#9658;</button>
                 <input id="ls-time" type="range" min="0" max="1000" value="0" disabled>
-                <span id="ls-tlabel">0.0 s</span>
+                <span id="ls-tlabel">0.0 s</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.time">Flight playback timeline: scrubs the solved flight from lift-off (left) to the end (right). Enabled only after Fly this site; display only — nothing is recalculated.</span></span>
             </div>
             <div class="ls-btnrow">
                 <button class="ls-iconbtn" id="ls-reset" data-i18n-title="site.reset" title="Reset" style="width:auto;flex:1" data-i18n="site.reset">Reset</button>
@@ -450,12 +469,12 @@
 
             <label class="ls-check">
                 <input type="checkbox" id="ls-exagg">
-                <span data-i18n="site.exaggerate">Exaggerate altitude</span>
+                <span data-i18n="site.exaggerate">Exaggerate altitude</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.exaggerate">Display only: stretches the vertical scale of the drawn flight path for readability; off means true scale. The flight is not recalculated.</span></span>
             </label>
             <div class="ls-hint" data-i18n="site.exaggerateHint">Off by default — scale is true. Only enlarges the vertical for readability.</div>
             <label class="ls-check">
                 <input type="checkbox" id="ls-follow">
-                <span data-i18n="site.follow">Camera follows rocket</span>
+                <span data-i18n="site.follow">Camera follows rocket</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.follow">Display only: the camera follows the rocket during playback. The flight is not recalculated.</span></span>
             </label>
 
             <div class="ls-sep"></div>
@@ -606,7 +625,7 @@
                  Metinler i18n sözlüğünden, textContent ile basılır. -->
             <label class="ls-hint" style="margin-top:6px; display:flex; align-items:center; gap:6px">
                 <input type="checkbox" id="ls-tile-network">
-                <span data-i18n="site.tileNetworkToggle">Online satellite tiles (NASA GIBS)</span>
+                <span data-i18n="site.tileNetworkToggle">Online satellite tiles (NASA GIBS)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.tileNetwork">Off (default): no map request leaves this computer; areas outside the map cache show the packaged offline texture. On: satellite tiles are fetched from NASA GIBS and each request tells the provider which area you are viewing. The choice is stored in this browser.</span></span>
             </label>
             <div id="ls-tile-netwarn" class="warn" style="margin-top:3px; display:none"
                  data-i18n="site.tileNetworkWarn">Online tiles are on: each tile request tells the provider (NASA GIBS) which area you are looking at.</div>
@@ -908,6 +927,18 @@
             // cümle uydurulmaz.
             var inertNote = (v && typeof v.engine_inert_mass_note === 'string'
                 && v.engine_inert_mass_note.trim()) ? v.engine_inert_mass_note.trim() : '';
+            // v3.0.1 (NK-69, son kullanıcı testi): künyenin "; basis: "
+            // kuyruğu (motorun dry_mass_basis cümlesi, ham alan yollarıyla:
+            // structural_analysis.weight_analysis.total_weight …) panelin ana
+            // metninde basılıyor ve sol paneli ekranın altına taşırıyordu.
+            // Kısa cümle görünür kalır; dayanak AYNEN, açılır "Kuru kütle
+            // dayanağı" bölümüne iner (silinmez, kısaltılmaz).
+            var dayanak = '';
+            var ayrac = inertNote.indexOf('; basis: ');
+            if (ayrac >= 0) {
+                dayanak = inertNote.slice(ayrac + '; basis: '.length).trim();
+                inertNote = inertNote.slice(0, ayrac);
+            }
             if (inertNote) {
                 msg += (msg ? ' ' : '') + srv(inertNote);
             } else if (v && v.engine_inert_mass_is_estimate) {
@@ -932,6 +963,17 @@
                     + yuklemeUyarilari.map(yuklemeUyarisiMetni).join(' · ');
             }
             note.textContent = msg;
+            if (dayanak) {
+                var det = document.createElement('details');
+                det.className = 'ls-basis';
+                var ozetSatiri = document.createElement('summary');
+                ozetSatiri.textContent = t('site.dryMassBasis', 'Dry-mass basis');
+                var dayanakMetni = document.createElement('div');
+                dayanakMetni.textContent = srv(dayanak);
+                det.appendChild(ozetSatiri);
+                det.appendChild(dayanakMetni);
+                note.appendChild(det);
+            }
             // Uyarı VARSA künye nötr kalmaz: renk kanalı tek başına yeter
             // sayılmadığı için alan adı metinde de duruyor (yukarıda).
             note.classList.toggle('ls-note-warn', yuklemeUyarilari.length > 0);
@@ -1189,6 +1231,15 @@
     }
     layoutBottomReserve();
     window.addEventListener('resize', layoutBottomReserve);
+    // v3.0.1 (NK-69): notlar sonradan dolunca (karo/gökyüzü künyesi, dil
+    // değişimi) pay yalnız pencere boyu değişince ölçülüyordu; kutu büyüyüp
+    // panelin üstüne biniyordu. Boy değişimi de izlenir.
+    if (typeof ResizeObserver === 'function') {
+        var payGozcu = new ResizeObserver(layoutBottomReserve);
+        ['ls-scalebar', 'ls-notes'].forEach(function (id) {
+            if (el(id)) payGozcu.observe(el(id));
+        });
+    }
     el('ls-clear-tiles').addEventListener('click', function () {
         var b = this; b.disabled = true;
         fetch('/api/tile/cache/clear', { method: 'POST' })
@@ -1420,7 +1471,15 @@
             globe.setFlightPath(d.series, la, lo, h0);
             el('ls-time').disabled = false;
             renderEvents();
-            setStatus('');
+            // v3.0.1 (NK-48): burada koşulsuz setStatus('') vardı ve az
+            // yukarıda yazılan "araç kararsız — oynatma kapalı" iletisini
+            // aynı karede siliyordu; kullanıcı kapalı düğmeleri gerekçesiz
+            // görüyordu. İleti yalnız kararlı araçta temizlenir.
+            if (!unstable) setStatus('');
+            // Özet satırları panelin altında kalmasın (NK-69): çözüm gelince
+            // sağ panel özet bloğunu görünür alana kaydırır.
+            var ozet = el('ls-range');
+            if (ozet && ozet.scrollIntoView) ozet.scrollIntoView({ block: 'nearest' });
         }).catch(function () {
             el('ls-fly').disabled = false;
             setStatus(t('site.solveError', 'The flight solver returned an error.'));

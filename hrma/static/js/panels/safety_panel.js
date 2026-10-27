@@ -162,10 +162,10 @@
     // varsayılan künyesi (defaultsBlock) etiketleri buradan okur; ikinci
     // bir etiket listesi tutmak iki listenin ayrışmasını davet ederdi.
     const FIELDS = [
-        ['motor_type', 'Motor Type', 'hybrid', MOTOR_TYPES, 'common.f.motorType'],
-        ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
-        ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK'],
-        ['thrust', 'Thrust (N)', 1000, 50, 'common.f.thrustN'],
+        ['motor_type', 'Motor Type', 'hybrid', MOTOR_TYPES, 'common.f.motorType', 'panel.safety.help.motor_type'],
+        ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.safety.help.chamber_pressure'],
+        ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK', 'panel.safety.help.chamber_temperature'],
+        ['thrust', 'Thrust (N)', 1000, 50, 'common.f.thrustN', 'panel.safety.help.thrust'],
         // ÖH D36 / onemli2-sivi a2 — SÜRE VE KÜTLE UYDURULMAZ.
         // ÖLÇÜLDÜ (docs/scofield/raw/OH/D36/onemli2-sivi/a2/once.json K2):
         // süre verilmeyen sıvı motorda çözücü `burn_time` ve itici kütlesi
@@ -183,13 +183,13 @@
         // ADINI basar (hüküm, verisi olmayan motor için üretilmez). Süre ve
         // kütle çözücüde varsa (hibrit, katı, süreli sıvı) öneri alanı
         // doldurur: gönderilen gövde bit-aynıdır (a2/sonra.json K2).
-        ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'],
-        ['propellant_mass', 'Propellant Mass (kg)', '', 0.5, 'common.f.propellantMassKg'],
-        ['propellant_type', 'Propellant Type', 'composite', PROPELLANT_OPTIONS, 'common.f.propellantType'],
-        ['facility_type', 'Facility Type', 'test_stand', FACILITIES, 'common.f.facilityType'],
-        ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
-        ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM'],
-        ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material'],
+        ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.safety.help.burn_time'],
+        ['propellant_mass', 'Propellant Mass (kg)', '', 0.5, 'common.f.propellantMassKg', 'panel.safety.help.propellant_mass'],
+        ['propellant_type', 'Propellant Type', 'composite', PROPELLANT_OPTIONS, 'common.f.propellantType', 'panel.safety.help.propellant_type'],
+        ['facility_type', 'Facility Type', 'test_stand', FACILITIES, 'common.f.facilityType', 'panel.safety.help.facility_type'],
+        ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.safety.help.chamber_diameter'],
+        ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM', 'panel.safety.help.wall_thickness'],
+        ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material', 'panel.safety.help.material'],
         // ISI ZİNCİRİ ÇİFTİ (OH-Z3-01). Varsayılanı BOŞ DİZE: güvertenin
         // zorunlu-alan sözleşmesinde (analysis_dock::requiredFieldInfo)
         // sonlu sayı olmayan varsayılan = isteğe bağlı alan. Boş kalırsa
@@ -215,16 +215,16 @@
         // çeker (sayı UYDURULMAZ, ne panelde ne uçta).
         ['chamber_length',
          'Chamber Length (m, blank = thermal verdict is withheld)',
-         '', 0.01, 'common.f.chamberLengthM'],
+         '', 0.01, 'common.f.chamberLengthM', 'panel.safety.help.chamber_length'],
         ['throat_diameter',
          'Throat Diameter (m, blank = thermal verdict is withheld)',
-         '', 0.001, 'common.f.throatDiameterM'],
+         '', 0.001, 'common.f.throatDiameterM', 'panel.safety.help.throat_diameter'],
         ['wall_temperature_hot',
          'Hot-side Wall Temperature (K, blank = let HRMA estimate from gas temperature)',
-         '', 5, 'common.f.wallTemperatureHotK'],
+         '', 5, 'common.f.wallTemperatureHotK', 'panel.safety.help.wall_temperature_hot'],
         ['wall_temperature_cold',
          'Cold-side Wall Temperature (K, blank = let HRMA estimate from gas temperature)',
-         '', 5, 'common.f.wallTemperatureColdK'],
+         '', 5, 'common.f.wallTemperatureColdK', 'panel.safety.help.wall_temperature_cold'],
     ];
 
     function esc(s) {
@@ -1590,6 +1590,17 @@
                 // bildiriyordu (panel o alanı da okumuyor).
                 wall_thickness: U.readWallThicknessM(r),
                 material: U.readChamberMaterial(r),
+                // V301/H-PANEL (NK-17): ısı zinciri geometrisi motorun
+                // HESAPLADIĞI değerlerden tohumlanır. ÖLÇÜLDÜ (son kullanıcı
+                // testi, örnek hibrit): iki alan boş ve "MODELLENMEDİ"
+                // kalıyordu, uç kabuk kütlesini ve ışınım alanını VARSAYILAN
+                // L/D = 5 ile kuruyordu (gerçek kamara L/D = 12,2); aynı
+                // güvertenin TERMAL sekmesi oda boyunu 0,983 m tohumluyordu.
+                // Okuyucu güvertenin ortak birim tablosundan (LENGTH_UNITS:
+                // hibrit m, sıvı mm, katıda chamber_length yayımlanmaz →
+                // alan boş kalır, uç adıyla geri çeker).
+                chamber_length: U.readLengthM(r, 'chamber_length'),
+                throat_diameter: U.readLengthM(r, 'throat_diameter'),
             };
             // ISI ZİNCİRİ (OH-Z3-01) — güvertenin MEVCUT okuyucusu.
             // `readWallTemperaturesK` çözücünün kaynak beyanını denetler ve

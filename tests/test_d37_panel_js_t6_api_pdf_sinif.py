@@ -212,12 +212,19 @@ class TestCidarKaynagi:
         m = motorlar['hybrid']['motor']
         gsa = m['heat_transfer_analysis']['gas_side_analysis']
         ta = m['structural_analysis']['thermal_analysis']
-        # Ölçülen kusurun kendisi: çözücü bayrağı koyuyor, yapısal blok
-        # aynı sayıyı 'heat_transfer_module' kaynağıyla aktarıyor.
+        # Çözücü çıplak cidara 'fiziksel değil' bayrağını koyuyor.
         assert gsa['wall_temperature_unphysical'] is True
-        assert ta['wall_temperature_source'] == 'heat_transfer_module'
+        # v3.0.1 (V301/H-termal) — ÇEVİRİ, gerekçeli: eski beklenti yapısal
+        # bloğun çıplak cidarın ≈ adyabatik sayısını 'heat_transfer_module'
+        # kaynağıyla taşımasını istiyordu; bu, kusurun kendisiydi. Yapısal
+        # blok artık bölgelerin BEYANLI kasa sıcaklığını taşır (yakıt bloğu
+        # + HRMA astarı) ve kaynağını adıyla söyler. Panelin iddiası
+        # (bayraklı yanıtta çift gönderilmez) aşağıda AYNEN sınanır.
+        assert ta['wall_temperature_source'] == \
+            'hybrid_chamber_zone_protection'
         assert ta['wall_temperature_inner_K'] == pytest.approx(
-            gsa['estimated_wall_temperature'], rel=1e-12)
+            m['chamber_wall_zones']['structural_casing_temperature_K'],
+            rel=1e-12)
         out = _node({'loadCatalog': True, 'catalog': katalog_json,
                      'vakalar': {'h': {'motorType': 'hybrid',
                                        'results': motorlar['hybrid']}}})

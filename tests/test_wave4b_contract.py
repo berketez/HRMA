@@ -942,6 +942,25 @@ TERS_MUAFIYET = {
         'T_recovery_K': 'ham istasyon dizisi — panel `q_MW_m2` yükünü çiziyor',
         'h_gas_W_m2K': 'ham istasyon dizisi — bkz. `T_recovery_K`',
         'h_coolant_W_m2K': 'ham istasyon dizisi — bkz. `T_recovery_K`',
+        # V301/L-REJ (26 Eki): kanat modeli ve Sieder-Tate su/RP-1 yolunda
+        # da uygulanıyor; iki istasyon dizisi `h_coolant_W_m2K`nin
+        # çarpanlarıdır (künyeleri model_note'ta, tepe değeri summary'de).
+        'fin_area_ratio': 'ham istasyon dizisi — `h_coolant_W_m2K`nin kanat '
+                          'alan oranı çarpanı; tepe değeri summary.'
+                          'fin_area_ratio_max',
+        'sieder_tate_factor': 'ham istasyon dizisi — `h_coolant_W_m2K`ye '
+                              'giren Sieder-Tate çarpanı; künyesi '
+                              'model_note',
+        # V301/L-KARBON (26 Eki): LOX/RP-1 karbon birikimi beyanı. Bağımsız
+        # API çağrısında itici bağlamı yok -> durum 'not_evaluated' (4
+        # çocuk: status/applied/reason/basis); ürün yolunda aynı blok
+        # station_march.carbon_deposit olarak sıvı motor yanıtına çıkar ve
+        # kullanıcıya görünen kısa not marş `warnings` kanalından (panelin
+        # bastığı kanal) EN+TR yayımlanır. Panel baskısı kulvar dışı.
+        'carbon_deposit': 'karbon birikimi beyanı — kullanıcı notu marş '
+                          '`warnings` kanalında (CARBON DEPOSIT: ...), '
+                          'künyesi model_note; blok makine tüketicisi '
+                          'içindir',
         # ÖH D16 (bekci-cevirisi/a1, OH-B4-07): gerekçe ARTIK MAKİNEYLE
         # SINANIYOR. Ölçüt panelin OKUMA envanteri DEĞİL panel KAYNAĞIDIR:
         # bu iki ad cooling_panel.js'de yanıt alanı olarak değil FORM ALANI
@@ -1475,6 +1494,9 @@ class TestTersYonBorcEnvanteri:
         # v3 fea-yuk (OH-DK-04): `load_model` künyesinin 10 çocuğu
         # (ölçüldü 14 Eki 2026); gerekçe TERS_MUAFIYET['fea/structural'].
         'fea/structural': {'consumed_paths': 4, 'load_model': 10},
+        # V301/L-KARBON: `/api/regen-cooling` karbon birikimi beyanı (itici
+        # bağlamsız çağrıda 4 çocuk); gerekçe TERS_MUAFIYET['cooling/ust'].
+        'cooling/ust': {'carbon_deposit': 4},
         # ÖH D28 / arayuz a1 (OH-D27-16): `thermal_fea/wall_profile`
         # satırı DÜŞTÜ — panel hem `contour_basis`i hem `column_basis`i
         # adıyla okuyup künye bölümünde basıyor, dolayısıyla ikisi de

@@ -25,9 +25,14 @@ import numpy as np
 import pytest
 
 from hrma.engines.solid_rocket_engine import (
+    SOLID_DEFAULT_GEOMETRY_MM,
     SOLID_DESIGN_POINT,
     SolidRocketEngine,
 )
+
+#: V301/K-A (22 Eki): kurucunun varsayılan çekirdeği [m] — TEK tanımdan.
+#: Eski sabit 0,030 m; eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu.
+VARSAYILAN_CEKIRDEK_M = SOLID_DEFAULT_GEOMETRY_MM['core_diameter'] / 1000.0
 
 TOL = SOLID_DESIGN_POINT['tolerance']
 
@@ -246,7 +251,7 @@ def test_infeasible_bates_target_reports_instead_of_pretending():
     # Geometri girdisine dönülmüş olmalı (uydurma boyut yok)
     assert eng.D_chamber == pytest.approx(0.100)
     assert eng.L_grain == pytest.approx(0.500)
-    assert eng.D_core == pytest.approx(0.030)
+    assert eng.D_core == pytest.approx(VARSAYILAN_CEKIRDEK_M)
 
 
 def test_infeasible_note_is_actionable_and_self_consistent():
@@ -353,13 +358,17 @@ def _assert_valid_warning_records(records):
 # ---------------------------------------------------------------------------
 
 def test_default_geometry_flags_choked_port_and_erosive_flux():
-    """Varsayılan 100/500/30 mm geometrisi 50 bar'da yapılabilir DEĞİL.
+    """100/500/30 mm geometrisi 50 bar'da port/akı uyarısını basar.
 
-    12 kN tepe / 2 s yanma bir hesap hatası değil, port alanının boğaz
-    alanından küçük olmasının (A_port/A_t = 0.45) ve G ~ 7000 kg/m2s
-    erozif rejiminin sonucudur — kullanıcı bunu görmelidir.
+    V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu; bu düğüm o
+    geometrinin uyarılarını ölçer, o yüzden çekirdek 30 mm AÇIKÇA verilir
+    (varsayılan artık 48 mm ve uyarısız). 50 bar'da katalog yanma hızıyla
+    A_p/A_t = 1,12 > 1 (kapıdan geçer, 1-2 bandının uyarısı çıkar); 0,45
+    değeri a = 0,005'in eski ölçümüydü (o oranda tasarım artık RET, KT-23).
     """
-    res = _engine().calculate_performance()
+    res = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
+                            chamber_pressure=50,
+                            core_diameter=30).calculate_performance()
     codes = _codes(res.get('design_warnings'))
     assert 'warn.solid.port_to_throat_low' in codes
     assert 'warn.solid.initial_mass_flux_high' in codes
@@ -400,7 +409,7 @@ def test_no_target_means_no_sizing():
     assert eng.design_point is None
     assert eng.D_chamber == pytest.approx(0.100)
     assert eng.L_grain == pytest.approx(0.500)
-    assert eng.D_core == pytest.approx(0.030)
+    assert eng.D_core == pytest.approx(VARSAYILAN_CEKIRDEK_M)
     stats = _curve_stats(eng)
     # 2026-08-11 ölçümü (A1-1: boğaz artık maks Kn'de boyutlandırılıyor).
     # Çapa 5008.16 -> 4999.52 N kaydı (-%0.17), yanma süresi 4.487814 ->
@@ -414,14 +423,20 @@ def test_no_target_means_no_sizing():
     # ÖH KİTAP p1b (B11, §28-36 Ş-3): 4999.52 N geri çözülmüş APCP
     # dörtlüsündendi; CEA denge dörtlüsüyle ölçülen yeni taban 5070.33 N
     # (+%1.42, tasarım noktası C_F'i). Yanma süresi değişmedi.
-    assert stats['peak'] == pytest.approx(5070.33, rel=1e-3)
+    # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu. Varsayılan
+    # çekirdek 30 -> 48 mm: tepe 5070.33 -> 5550.69 N (ölçüldü; tolerans
+    # aynı).
+    # V301/T-ÇAPA-A: N-CEA-2 (katı termokimya motorun Pc'sinde NASA CEA'dan) sonrası: tepe
+    # 5550.69 -> 5525.91 N (5525,906804756501; CEA kapalı 5550,69 bandı).
+    assert stats['peak'] == pytest.approx(5525.91, rel=1e-3)
     # v2.5.2 (Codex bulgusu): yanma suresi ve impuls son integrasyon adimini
     # atliyordu — ornekler t ilerlemeden once saklaniyor, son web artisindan
     # sonraki araligi trapz disarida birakiyordu. Terminal tukenis ornegi
     # eklendikten sonra sure yarim adim uzadi. Bu kapanis davranisi hâlâ
     # yerinde; asagidaki deger onun F024 sonrasi karsiligidir.
     # 2026-08-11 (A1-1) yeniden ölçüm: 4.487814 -> 4.493747 s (+%0.13).
-    assert stats['burn_time'] == pytest.approx(4.493747, abs=1e-5)
+    # V301/K-A: 4.493747 -> 3.251096 s (çekirdek 48 mm; tolerans aynı).
+    assert stats['burn_time'] == pytest.approx(3.251096, abs=1e-5)
 
     # F024'un tek suclu oldugunun bekcisi: eski (hatali) katsayiyla eski
     # sayilar geri gelmeli (docstring'deki olcume bak).
@@ -429,9 +444,23 @@ def test_no_target_means_no_sizing():
     # A_t 0.0015761860795333138 m² geri çözülmüş APCP dörtlüsündendi (c*
     # 1598.2 boğazı boyutluyor); CEA denge dörtlüsüyle ölçülen yeni taban.
     # Süre değişmedi (yanma hızı yasası aynı).
-    legacy = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
-                               chamber_pressure=50, burn_rate_a=0.005)
-    legacy_curve = legacy.calculate_thrust_curve()
+    # V301/K-A: bu blok ESKİ sayıların geri geldiğini ölçer, o yüzden eski
+    # geometri (çekirdek 30 mm) AÇIKÇA verilir; çapalar bit-aynı kalır
+    # (calculate_thrust_curve port kapısından geçmez, kapı
+    # calculate_performance'tadır).
+    # V301/T-ÇAPA-A: bu "eski sayılar eski geometride geri gelir" bloğu
+    # K-A'nın yalnız geometriyi değiştirdiğini kanıtlar; sayılar KATALOG
+    # termokimyasıyla ölçülmüştü. N-CEA-2'den sonra aynı izolasyon CEA
+    # kapalıyken kurulur (N-CEA-2 ``cea_kapali`` deseni); CEA kapalı eski
+    # çapalar BİT-AYNI (ölçüldü).
+    from hrma.engines import cea_bridge
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
+        legacy = SolidRocketEngine(grain_type='bates',
+                                   propellant_type='apcp',
+                                   chamber_pressure=50, burn_rate_a=0.005,
+                                   core_diameter=30)
+        legacy_curve = legacy.calculate_thrust_curve()
     legacy_peak = float(np.asarray(legacy_curve['thrust']).max())
     assert legacy_peak == pytest.approx(12231.399903085883, rel=1e-12)
     assert float(legacy_curve['throat_area']) == pytest.approx(

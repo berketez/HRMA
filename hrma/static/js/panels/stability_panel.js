@@ -2040,13 +2040,13 @@
         // kalır ve body() isteği durdurur (uydurma sayı gösterilmez).
         fields: [
             ['sound_speed_m_s', 'Chamber sound speed a [m/s]', '', 'any',
-             'panel.stab.fieldSoundSpeed'],
+             'panel.stab.fieldSoundSpeed', 'panel.stab.help.soundSpeed'],
             ['chamber_length_m', 'Acoustic cavity length L [m]', '', 'any',
-             'panel.stab.fieldChamberLength'],
+             'panel.stab.fieldChamberLength', 'panel.stab.help.chamberLength'],
             ['gamma', 'Ratio of specific heats gamma [-]', '', 'any',
-             'panel.stab.fieldGamma'],
+             'panel.stab.fieldGamma', 'panel.stab.help.gamma'],
             ['nozzle_entrance_mach', 'Nozzle entrance mean-flow Mach M_N [-]',
-             '', 'any', 'panel.stab.fieldMachN'],
+             '', 'any', 'panel.stab.fieldMachN', 'panel.stab.help.machN'],
         ],
 
         fromResults: function (results) {
@@ -2073,32 +2073,32 @@
 
         fields: [
             ['dp_ratio_j', 'Injector pressure drop ratio J = dP_inj/Pc [-]',
-             '', 'any', 'panel.stab.fieldJ'],
+             '', 'any', 'panel.stab.fieldJ', 'panel.stab.help.J'],
             ['tau_s', 'Sensitive time lag tau [s]', '', 'any',
-             'panel.stab.fieldTau'],
+             'panel.stab.fieldTau', 'panel.stab.help.tau'],
             ['tau_c_s', 'Chamber time constant tau_c [s]', '', 'any',
-             'panel.stab.fieldTauC'],
+             'panel.stab.fieldTauC', 'panel.stab.help.tauC'],
             ['tau_f_s', 'Feed inertance time constant tau_f [s] — optional',
-             '', 'any', 'panel.stab.fieldTauF'],
+             '', 'any', 'panel.stab.fieldTauF', 'panel.stab.help.tauF'],
             ['feed_line_length_m', 'Feed line length [m] — optional group',
-             '', 'any', 'panel.stab.fieldFeedLen'],
+             '', 'any', 'panel.stab.fieldFeedLen', 'panel.stab.help.feedLen'],
             ['feed_line_diameter_mm',
              'Feed line inner diameter [mm] — optional group', '', 'any',
-             'panel.stab.fieldFeedDia'],
+             'panel.stab.fieldFeedDia', 'panel.stab.help.feedDia'],
             ['feed_line_area_m2', 'Feed line flow area [m2] — optional group',
-             '', 'any', 'panel.stab.fieldFeedArea'],
+             '', 'any', 'panel.stab.fieldFeedArea', 'panel.stab.help.feedArea'],
             ['feed_line_mass_flow_kg_s',
              'Feed line mass flow [kg/s] — optional group', '', 'any',
-             'panel.stab.fieldFeedMdot'],
+             'panel.stab.fieldFeedMdot', 'panel.stab.help.feedMdot'],
             // Parti 28 artçısı: ΔP_inj grubun ZORUNLU üyesi (uç sözleşmesi
             // τ_f = L·ṁ/(2A·ΔP_inj)); yoğunluk isteğe bağlı, uçta yalnız
             // yankılanır — buildChugBody'deki grup kapısıyla aynı sözleşme.
             ['feed_line_dp_injector_Pa',
              'Injector pressure drop dP_inj [Pa] — required with the '
-             + 'feed-line group', '', 'any', 'panel.stab.fieldFeedDp'],
+             + 'feed-line group', '', 'any', 'panel.stab.fieldFeedDp', 'panel.stab.help.feedDp'],
             ['feed_line_density_kg_m3',
              'Propellant density in the line [kg/m3] — optional, echoed only',
-             '', 'any', 'panel.stab.fieldFeedRho'],
+             '', 'any', 'panel.stab.fieldFeedRho', 'panel.stab.help.feedRho'],
         ],
 
         fromResults: function (results) {

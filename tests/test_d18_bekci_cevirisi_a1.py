@@ -243,6 +243,16 @@ UC_BEKCISI_OLMAYAN_URUN_ROTALARI = frozenset({
 #: Bu uçların sözleşmesini tek başına test yazıyor; listenin BÜYÜMESİ
 #: yeni bir "yalnız testin tanımladığı uç" demektir ve kırmızıdır.
 YALNIZ_TESTIN_CAGIRDIGI_ROTALAR = frozenset({
+    # v3.0.1 (Ayberk tur 1, kulvar K; 20 Eki 2026) — BORÇ KAYDI, AF DEĞİL.
+    # Hibrit/katı/sıvı sayfalarının açılışta çağırdığı '/api/database-status'
+    # yoklaması SÖKÜLDÜ: her makinede yanlışlıkla "NASA CEA / NIST WebBook
+    # Offline" rozeti basıyordu (CEA kolu ağsız yerel tablo, NIST ayrıştırıcısı
+    # gerçek HTML'le eşleşmiyordu; ikisi de hesaba sayı vermiyordu). Uç API
+    # uyumu için kaldı ve dürüstleşti (NIST: connection connected/not_connected
+    # + data_parsed ayrı; CEA: bağlantı kavramı yok); sözleşmesini artık
+    # tests/test_v301_kaynak_baglanti.py yazıyor. Gerçek çözüm: tüketicisi
+    # yoksa v3.1'de emekliye ayırmak.
+    '/api/database-status',
     # fix-8: 8 rota (advanced-performance-analysis, analysis/wall-profile,
     # comparative-analysis, correlation-report, flow-analysis,
     # kinetic-efficiency, uncertainty-analysis, validation/upload-csv)

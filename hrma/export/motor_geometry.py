@@ -967,6 +967,19 @@ def liquid_results_to_motor_geometry(results):
         # 'chamber_structure' bloğunda yayımlanır.
         'structural_analysis': r.get('structural_analysis') or {},
     }
+    # V301 bilinen C2 — KANONİK PINTLE GEOMETRİSİ dışa aktarım gövdesine
+    # AYNEN taşınır (sayı üretilmez, kopyalanır). Sıvı çözücü onu devre
+    # ayrıntısında yayımlar (``injection_system.injector_design_detail
+    # .pintle_geometry``); bu gövde onu taşımadığı için STEP/STL pintle'ı
+    # çizemiyordu. CAD (``cad_visualization.pintle_cad_geometry``) onu
+    # ``injector_design.pintle_geometry``den okur — hibritteki yerle aynı.
+    _sistem = r.get('injection_system')
+    _ayrinti = (_sistem.get('injector_design_detail')
+                if isinstance(_sistem, dict) else None)
+    _pintle = (_ayrinti.get('pintle_geometry')
+               if isinstance(_ayrinti, dict) else None)
+    if isinstance(_pintle, dict):
+        out['injector_design']['pintle_geometry'] = dict(_pintle)
     # Ölçüler: çözülen yazılır, çözülemeyen KÜNYEYE düşer (anahtar yazılmaz).
     # Birim uyarısı yukarıdaki docstring'de: chamber_* MM gelir, boğaz/çıkış
     # zaten METRE gelir.

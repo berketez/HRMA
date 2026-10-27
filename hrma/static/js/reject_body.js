@@ -77,6 +77,26 @@
         }).filter(function (t) { return t; });
     }
 
+    /** Ret gövdesinin makine durum kodu (``[invalid_input]`` öneki) için
+     *  etkin dilde karşılık.
+     *
+     * V301/K-C1 (K-A DEVİR 13): önek TR arayüzde İngilizce makine kodu
+     * olarak kalıyordu (katı, sıvı ve hibrit sayfalarında aynı). Karşılık
+     * TEK yerde, i18n_charts.js ``HAT_ONEKLERI`` sözlüğündedir ve
+     * ``I18N.serverText`` onu ``[kod] metin`` biçiminde zaten çözüyor; burada
+     * yalnız o çözücü sorulur. Sözlük yüklü değilse ya da kod tanınmıyorsa
+     * kod AYNEN kalır (uydurma çeviri yok).
+     */
+    function _kodMetni(kod) {
+        var I = kok.I18N;
+        if (!I || typeof I.serverText !== 'function') return kod;
+        var nobet = '\u2060';
+        var t = I.serverText('[' + kod + '] ' + nobet);
+        var m = (typeof t === 'string')
+            ? /^\[([^\]]+)\]\s+\u2060$/.exec(t) : null;
+        return m ? m[1] : kod;
+    }
+
     /** Sunucu ret gövdesi → tek satır kullanıcı metni.
      *
      * Sıra: [makine kodu] cümle · geçersiz alanlar · eksik alanlar.
@@ -87,7 +107,7 @@
         var parcalar = [];
         var kod = (typeof govde.status === 'string'
                    && govde.status !== 'error') ? govde.status : '';
-        if (kod) parcalar.push('[' + kod + ']');
+        if (kod) parcalar.push('[' + _kodMetni(kod) + ']');
         var cumle = (typeof govde.message === 'string' && govde.message)
             ? govde.message
             : ((typeof govde.error === 'string' && govde.error)

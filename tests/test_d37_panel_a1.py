@@ -973,7 +973,11 @@ class TestK6KosuNoktasiKunyesi:
         f = json.loads(create_combustion_analysis_plots(cd))
         kosu = [t for t in f['data'] if t.get('name') == 'This run (solver)']
         assert len(kosu) == 1
-        notlar = ' '.join(x.get('text', '') for x in f['layout']['annotations'])
+        # v3.0.1 (V301/N-grafik G3): pano dipnotu satırlara sarılır (sağdan
+        # taşıyordu); satır sonu sunumdur, cümle aynıdır — '<br>' + girinti
+        # tek boşluğa indirgenerek karşılaştırılır.
+        notlar = re.sub(r'<br>\s*', ' ', ' '.join(
+            x.get('text', '') for x in f['layout']['annotations']))
         return cd, kosu[0], notlar
 
     def test_deniz_seviyesi_capasi_ayni_capa_notu(self):

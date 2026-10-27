@@ -696,9 +696,20 @@ class TestOHD3307SwirlZarfi:
 
     @pytest.mark.parametrize('aci', [3.7, 45.0, 71.2])
     def test_zarf_ICI_deger_cozulur(self, istemci, aci):
-        kod, _g = _gonder(istemci, '/calculate', dict(SWIRL_TABAN,
-                                                    swirl_angle=aci))
-        assert kod == 200
+        # V301/E2: yuva ölçüsü (genişlik × yükseklik) atomizör sabiti K'yı ve
+        # onunla sprey açısını ZATEN belirler; eskiden hedef açı bu durumda
+        # yalnız bir uyarıyla YOK SAYILIYOR ve HTTP 200 dönüyordu (kullanıcının
+        # açısı yayımlanan enjektörün açısı değildi — OH-D33-07'nin kardeşi).
+        # Artık ikisi birden 422'dir (``conflicts_with_slot_geometry``,
+        # tests/test_v301_enjektor_genel_*.py). Zarf İÇİ açının ÇÖZÜLDÜĞÜNÜ
+        # ölçmek için yuva ölçüsü gönderilmez; açı devreye girer ve
+        # yayımlanan yarı açı istenen açıdır (iddia güçlendi).
+        govde = {k: v for k, v in SWIRL_TABAN.items()
+                 if k not in ('slot_width', 'slot_height')}
+        kod, g = _gonder(istemci, '/calculate', dict(govde, swirl_angle=aci))
+        assert kod == 200, g
+        assert g['injector']['spray_half_angle_deg'] == pytest.approx(
+            aci, rel=1e-9)
 
     def test_alan_verilmeyince_KAPI_DOKUNMAZ(self, istemci):
         kod, _g = _gonder(istemci, '/calculate', dict(SWIRL_TABAN))

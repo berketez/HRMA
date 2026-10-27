@@ -357,7 +357,7 @@
                 $I_{sp} = \frac{F}{\dot{m} \cdot g_0} = \frac{v_e}{g_0}$
             </div>
             <div class="formula-box">
-                $I_{sp} = \frac{c^*}{g_0 \sqrt{\gamma}} \sqrt{\frac{2\gamma}{\gamma-1}} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}} \sqrt{1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}}$
+                $I_{sp} = \frac{c^* \sqrt{\gamma}}{g_0} \sqrt{\frac{2\gamma}{\gamma-1}} \left(\frac{2}{\gamma+1}\right)^{\frac{\gamma+1}{2(\gamma-1)}} \sqrt{1-\left(\frac{p_e}{p_c}\right)^{\frac{\gamma-1}{\gamma}}}$
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s1_1.desc">Specific impulse is the fundamental performance metric in rocket propulsion, quantifying the efficiency of propellant utilization. It represents the thrust generated per unit weight flow rate of propellant consumed per second. Physically, it measures how long one pound of propellant can produce one pound of thrust. Higher specific impulse indicates more efficient propellant use and better rocket performance. This parameter is critical for mission planning, propellant loading calculations, and comparing different propulsion systems. In practice, it determines the rocket's capability to achieve desired velocity increments and payload capacity.</span></p>
             <table class="variable-table">
@@ -385,7 +385,7 @@
             </div>
             <p><strong data-i18n="fx.label.description">Description:</strong> <span data-i18n="fx.s1_2.desc">Characteristic velocity (c*) is a fundamental combustion chamber parameter that characterizes the efficiency of the chemical energy release process, independent of nozzle expansion. It serves as a "signature" of the propellant combination and combustion conditions. c* is particularly valuable because it isolates combustion performance from nozzle effects, allowing engineers to evaluate injector design, mixing efficiency, and heat losses separately. A higher c* indicates more complete combustion and better energy release. This parameter is essential for combustor design optimization, propellant selection, and diagnosing performance issues in rocket engines during development testing.</span></p>
             <div class="info">
-                <strong data-i18n="fx.label.physical_meaning">Physical Meaning:</strong> <span data-i18n="fx.s1_2.info">c* represents the velocity gas would achieve if expanded isentropically from chamber pressure to zero pressure.</span>
+                <strong data-i18n="fx.label.physical_meaning">Physical Meaning:</strong> <span data-i18n="fx.s1_2.info">c* (characteristic velocity) measures the combustion performance of the propellant and chamber, independent of the nozzle: c* = p_c·A_t/ṁ. It is not a physical gas velocity; the velocity reached by expanding isentropically to zero pressure is the maximum exhaust velocity v_max = √(2γ/(γ−1)·R·T_c) (Sutton & Biblarz, 9th ed., Ch. 3).</span>
             </div>
             <table class="variable-table">
                 <tr><th data-i18n="fx.th.variable">Variable</th><th data-i18n="fx.th.description">Description</th><th data-i18n="fx.th.unit">Unit</th><th data-i18n="fx.th.typical_values">Typical Values</th></tr>
@@ -1578,6 +1578,7 @@
          settings_panel.js'ten ÖNCE yüklenir; yüklenmezse ayarlar
          panelinde "Hata bildir" bölümü hiç çizilmez. -->
     <script src="/static/js/bug_report.js"></script>
+    <script src="/static/js/field_help.js"></script>
     <script src="/static/js/settings_panel.js"></script>
     <script>
         /* Dil seçici + belge başlığı senkronu. <title> data-i18n TAŞIMAZ

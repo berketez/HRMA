@@ -236,7 +236,10 @@ class TestGT32KunyeSahaDisi:
         assert m['tek_satir_zinciri'] is True, (
             'künye hâlâ tek " · " zinciri; satır satır kurulunca bu iddia '
             'düşer ve bekçi devrin yapıldığını söyler')
-        assert 'minimum_earned_safety_factor' in m['ham_anahtarlar']
+        # V301/DİL (NK-4, devir D1 yapıldı): künye satırları okunur cümleye
+        # indi; ham `minimum_earned_safety_factor` / `binding` anahtarı kalmadı.
+        assert 'minimum_earned_safety_factor' not in m['ham_anahtarlar']
+        assert 'binding' not in m['ham_anahtarlar']
 
 
 # ===========================================================================

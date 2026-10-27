@@ -276,16 +276,16 @@
         endpoint: '/api/pressure-vessel-analysis',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['code_mode', 'Design Code', 'aiaa_s080', CODE_MODES, 'panel.vessel.fDesignCode'],
-            ['meop_bar', 'MEOP (bar)', 60, 1, 'panel.vessel.fMeop'],
-            ['inner_diameter_mm', 'Inner Diameter (mm)', 150, 1, 'common.f.innerDiameterMm'],
+            ['code_mode', 'Design Code', 'aiaa_s080', CODE_MODES, 'panel.vessel.fDesignCode', 'panel.vessel.help.code_mode'],
+            ['meop_bar', 'MEOP (bar)', 60, 1, 'panel.vessel.fMeop', 'panel.vessel.help.meop_bar'],
+            ['inner_diameter_mm', 'Inner Diameter (mm)', 150, 1, 'common.f.innerDiameterMm', 'panel.vessel.help.inner_diameter_mm'],
             ['wall_thickness_mm', 'Wall Thickness (mm, blank = auto-size)', '', 0.1,
-             'panel.vessel.fWallAuto'],
-            ['material', 'Material', VARSAYILAN_MALZEME, MATERIALS, 'common.f.material'],
-            ['temperature_K', 'Design Temperature (K)', 293.15, 5, 'common.f.designTemperatureK'],
+             'panel.vessel.fWallAuto', 'panel.vessel.help.wall_thickness_mm'],
+            ['material', 'Material', VARSAYILAN_MALZEME, MATERIALS, 'common.f.material', 'panel.vessel.help.material'],
+            ['temperature_K', 'Design Temperature (K)', 293.15, 5, 'common.f.designTemperatureK', 'panel.vessel.help.temperature_K'],
             ['weld_efficiency', 'Weld Joint Efficiency (UW-12)', '1.00', WELD_EFF,
-             'panel.vessel.fWeld'],
-            ['head_type', 'Head Type', 'ellipsoidal_2_1', HEAD_TYPES, 'panel.vessel.fHeadType'],
+             'panel.vessel.fWeld', 'panel.vessel.help.weld_efficiency'],
+            ['head_type', 'Head Type', 'ellipsoidal_2_1', HEAD_TYPES, 'panel.vessel.fHeadType', 'panel.vessel.help.head_type'],
         ],
         fromResults: function (r) {
             var m = (r && r.motor) || r || {};
@@ -303,6 +303,27 @@
             var idMm = U.readLengthMM(r, 'chamber_diameter');
             if (Number.isFinite(idMm)) {
                 out.inner_diameter_mm = idMm;
+            }
+            // V301/K-C1 (KT-22): katı sayfada malzeme ana tasarımın KASA
+            // malzemesidir (structural_analysis.case_analysis.case_material).
+            // ÖLÇÜLDÜ (denetim A-kati ekran_en.json): panel kasa 'steel' iken
+            // kendi varsayılanıyla (aluminum_6061) hesaplıyordu. Yanıtta
+            // malzeme yoksa varsayılan kalır ve bu ADIYLA beyan edilir
+            // (güvertenin __withheld künyesi); seçenek listesinde olmayan ad
+            // güvertenin kendi kapısında durur (istek gönderilmez).
+            if (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function'
+                    && window.AnalysisDock.getMotorType() === 'solid') {
+                var kasaMalz = U.readChamberMaterial ? U.readChamberMaterial(r) : undefined;
+                if (typeof kasaMalz === 'string' && kasaMalz) {
+                    out.material = kasaMalz;
+                } else {
+                    out.material = VARSAYILAN_MALZEME;
+                    var gk = {};
+                    gk.material = 'case_material_not_in_results: the solid motor result '
+                        + 'publishes no case material, so the panel default '
+                        + VARSAYILAN_MALZEME + ' is used';
+                    out[U.WITHHELD_KEY || '__withheld'] = gk;
+                }
             }
             return out;
         },

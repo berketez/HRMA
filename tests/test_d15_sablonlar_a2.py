@@ -485,73 +485,27 @@ def test_b3_03_katman_tablosu_deponun_tablosuyla_ayni(advanced_src):
 
 
 # =========================================================== P12bB3-05
-@node_gerekli
 def test_b3_05_nist_rozeti_guncelleyicinin_erisiminde_kalir(advanced_src):
-    """Başarılı çekim rozeti YETİM bırakmaz; iki rozet de güncellenir.
+    """ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1) — rozet SÖKÜLDÜ.
 
-    Ölçüldü: ezme satırı `className`'i tümüyle yeniden yazıyor ve
-    `nist-status` sınıfı kayboluyordu; `setNistStatus` hedefini
-    `.nist-status` ile bulduğu için sonraki "Offline" yazımı rozeti
-    BULAMIYOR ve ekranda yeşil "connected" asılı kalıyordu. Sayfada iki
-    NIST rozeti var; eski satır yalnız id'liyi güncelliyordu.
+    P12bB3-05 başarılı oksitleyici çekiminin NIST rozetini YETİM bıraktığını
+    (sınıfı ezdiğini) ölçmüş, D24/a3 de çekim yolunun rozete yazmasını
+    yasaklamıştı; bekçi rozetin ve tek güncelleyicisinin (setNistStatus)
+    VARLIĞINI node altında koşturarak şart koşuyordu. ÖLÇÜLDÜ
+    (docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/gorsel_once.json): rozet
+    her makinede "NIST WebBook Offline" diyordu ve hesabın hiçbir sayısının
+    kaynağı değildi; söküldü. Kalemin kazanımı (göstergeyi TEK yetkili
+    yazıcı yazar, çekim yolu sınıf/metin EZMEZ) yeni oksitleyici veri
+    kaynağı satırında ölçülür.
     """
-    # ÖH D24/a3 — BEKÇİ ÇEVRİLDİ (P17B3-05).
-    # Bu satır, oksitleyici çekim yolunun `.nist-status` rozetine ÇEKİLEN
-    # VERİNİN kaynağını ("HRMA Oxidizer Database (Cached)") yazmasını ZORUNLU
-    # kılıyordu. D15'te amaç doğruydu (rozeti yetim bırakma), ama şart yanlış
-    # yerden bağlanmıştı: aynı rozete `checkDatabaseStatus` uzak ucun
-    # ERİŞİLEBİLİRLİĞİNİ yazıyor. İki farklı olgu tek rozete yazılınca künye
-    # koşumdan koşuma değişiyordu (P17 tur-06: 'NIST WEBBOOK CONNECTED' ⟷
-    # 'HRMA OXIDIZER DATABASE (CACHED)', sayısal sonuç 15.925/15.925 yaprak
-    # BİT-ÖZDEŞ). Bekçi böylece kusuru KORUYORDU.
-    # Yeni şart D15'in gerçek kazanımını korur — rozetin sınıfı doğrudan
-    # ezilmez, tek yetkili güncelleyici setNistStatus'tur — ama çekim yolunun
-    # o rozete yazmasını ARTIK İSTEMEZ.
-    assert not re.search(
-        r"setNistStatus\(`\$\{source\}", advanced_src), (
-        'oksitleyici çekim yolu erişilebilirlik rozetini yine eziyor '
-        '(P17B3-05)')
-    assert not re.search(
-        r"getElementById\('nist_status'\)\.className\s*=", advanced_src), (
-        'rozetin sınıfı yine doğrudan eziliyor')
-
-    parcalar = [
-        _fonksiyon_kaynagi(advanced_src, 'setNistStatus'),
-        """
-class El { constructor(id, cls) { this.id = id; this.className = cls;
-                                  this.textContent = ''; } }
-const els = [new El('', 'database-status status-connected nist-status'),
-             new El('nist_status', 'database-status status-connected nist-status')];
-globalThis.document = {
-  getElementById: (id) => els.find(e => e.id === id) || null,
-  querySelectorAll: (sel) => {
-    const c = sel.replace('.', '');
-    return els.filter(e => (' ' + e.className + ' ').includes(' ' + c + ' '));
-  }
-};
-""",
-    ]
-    # ÖH D24/a3 — çekim yolu artık bu rozete yazmıyor (P17B3-05), bu
-    # yüzden ölçüm doğrudan tek yetkili güncelleyiciyi çağırır. D15'in
-    # ölçtüğü özellik değişmedi: sınıf korunur, İKİ rozete de ulaşılır,
-    # sonraki 'Offline' yazımı ekranda görünür.
-    govde = "setNistStatus('NIST WebBook (Live)', 'status-connected');" + """
-setNistStatus('NIST WebBook Offline', 'status-error');
-console.log(JSON.stringify({
-  sinif_korunuyor: els.every(e => e.className.includes('nist-status')),
-  ulasilan: document.querySelectorAll('.nist-status').length,
-  cevrimdisi_gorunuyor: els.every(e => e.textContent.includes('Offline')
-                                    && e.className.includes('status-error'))
-}));
-"""
-    r = _node_kos(parcalar, govde)
-    assert r['sinif_korunuyor'] is True, (
-        'nist-status sınıfı kayboluyor — rozet güncelleyicinin erişemeyeceği '
-        'bir yetim oluyor')
-    assert r['ulasilan'] == 2, (
-        'iki NIST rozetinden %s tanesine ulaşılıyor' % r['ulasilan'])
-    assert r['cevrimdisi_gorunuyor'] is True, (
-        'NIST düştüğünde ekranda hâlâ yeşil "connected" asılı kalıyor')
+    assert 'setNistStatus(' not in advanced_src
+    assert not re.search(r"getElementById\('nist_status'\)", advanced_src)
+    govde = _fonksiyon_kaynagi(advanced_src, 'updateOxidizerProperties')
+    # Çekim yolu satıra DOĞRUDAN yazmaz; künyeyi tek yazıcıya devreder.
+    assert 'oxidizer_data_source' not in govde
+    assert 'setOxidizerSourceKunye(result);' in govde
+    assert _fonksiyon_kaynagi(advanced_src, 'renderDataSourceLines').count(
+        "getElementById('oxidizer_data_source')") == 1
 
 
 # =========================================================== P12bB3-08

@@ -336,8 +336,10 @@ ELS['propellant_mass'].value = '19.833';   // eski hatalı form değeri
 applyMassFeedback(SONUC);
 yakin(parseFloat(ELS['propellant_mass'].value), 6.611, 0.001,
       'çözücünün yakıt kütlesi forma yazılmadı');
-// Islak kütle yeniden türetilmeli (4,300 + 6,611)
-yakin(parseFloat(ELS['wet_mass'].value), 10.911, 0.001,
+// Islak kütle yeniden türetilmeli. V301/K-B (NK-30): toplam kuru kütle artık
+// MOTOR kuru kütlesidir — astar dâhil, aviyonik (0,2) HARİÇ (çözücünün
+// dry_mass_kg tanımı): 2,5 + 0,5 + 0,3 + 0,8 = 4,100; ıslak 4,100 + 6,611.
+yakin(parseFloat(ELS['wet_mass'].value), 10.711, 0.001,
       'toplam kütleler tazelenmedi');
 // Çözücü değer vermezse ALAN BOZULMAZ (uydurma yok)
 ELS['propellant_mass'].value = '6.611';

@@ -397,8 +397,11 @@ def test_final_port_factor_comes_from_the_regression_series(client,
     path = ('detailed_analysis.grain_regression_analysis.'
             'erosive_burning_effects')
     bates = leaf(run(client, base_payload), path)
+    # V301/K-B (K-A DEVİR 8): 18 mm, örnek tanede (web 21,5 mm) 0,8·web =
+    # 17,2 mm sınırını aşıyor; eskiden SESSİZCE 17,2'ye kırpılıyordu, artık
+    # 422. Test kırpmayı değil port çarpanını ölçer: sınırın içinde 15 mm.
     star = leaf(run(client, base_payload, grain_type='star', star_points=6,
-                    star_radius=18), path)
+                    star_radius=15), path)
     assert bates['port_diameter_factor_final'] != \
         star['port_diameter_factor_final']
     assert 'solver regression series' in \
@@ -477,14 +480,28 @@ class TestGrainOuterDiameter:
 
     def test_case_bore_smaller_than_the_grain_is_reported(self, client,
                                                           base_payload):
-        body = run(client, base_payload, outer_diameter=75,
-                   chamber_diameter=70, insulation_thickness=3)
-        codes = {w.get('code') for w in body.get('warnings', [])
-                 if isinstance(w, dict)}
-        assert 'warn.solid.case_bore_too_small' in codes
-        # Geometrik alt sınır uygulanmalı: grain + 2 x yalıtım.
-        assert leaf(body, 'cad_design.case_design.inner_diameter') == \
-            pytest.approx(81.0)
+        # V301/K-A (KT-01; ana model kararı 1) — TERS KAPIYA ÇEVRİLDİ. Bu
+        # düğüm "uyar + kasayı sessizce geometrik en küçüğe büyüt" yolunu
+        # KİLİTLİYORDU (70 mm beyan -> 81 mm kasa, 200). Kasa beyanı artık
+        # büyütülmez: 422 grain_does_not_fit_case, gereken en küçük çapla.
+        # Kural astarı da sayar (KT-03): 75 + 2·(2 + 3) = 85 mm.
+        payload = dict(base_payload, outer_diameter=75, chamber_diameter=70,
+                       insulation_thickness=3)
+        resp = client.post('/calculate_solid', json=payload,
+                           headers=LOCAL_HOST)
+        assert resp.status_code == 422, resp.get_data(as_text=True)[:400]
+        body = resp.get_json()
+        assert body['error_code'] == 'grain_does_not_fit_case'
+        kunye = body['invalid_fields'][0]
+        assert kunye['field'] == 'chamber_diameter'
+        assert kunye['submitted'] == pytest.approx(70.0)
+        assert kunye['required_min'] == pytest.approx(85.0)
+        # Önerilen en küçük çap kapıdan GEÇER (hibrit KARAR 3 deseni).
+        tamam = run(client, base_payload, outer_diameter=75,
+                    chamber_diameter=kunye['required_min'],
+                    insulation_thickness=3)
+        assert leaf(tamam, 'cad_design.case_design.inner_diameter') == \
+            pytest.approx(85.0)
 
     def test_field_is_no_longer_declared_unwired(self, client, base_payload):
         declared = []

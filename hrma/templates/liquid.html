@@ -223,68 +223,11 @@
             color: #495057;
         }
         
-        /* Tooltip Styles */
-        .tooltip {
-            position: relative;
-            display: inline-block;
-            margin-left: 5px;
-        }
-        
-        .tooltip-icon {
-            width: 16px;
-            height: 16px;
-            background: #6c757d;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 10px;
-            font-weight: bold;
-            cursor: help;
-            transition: background 0.3s;
-        }
-        
-        .tooltip-icon:hover {
-            background: #4facfe;
-        }
-        
-        .tooltip-text {
-            visibility: hidden;
-            width: 280px;
-            background: #2c3e50;
-            color: white;
-            text-align: left;
-            border-radius: 6px;
-            padding: 12px;
-            position: absolute;
-            z-index: 1000;
-            bottom: 125%;
-            left: 50%;
-            margin-left: -140px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            font-size: 13px;
-            line-height: 1.4;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        
-        .tooltip-text::after {
-            content: "";
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            margin-left: -5px;
-            border-width: 5px;
-            border-style: solid;
-            border-color: #2c3e50 transparent transparent transparent;
-        }
-        
-        .tooltip:hover .tooltip-text {
-            visibility: visible;
-            opacity: 1;
-        }
-        
+        /* İpucu (.tooltip / .tooltip-icon / .tooltip-text) biçimi ve davranışı
+           v3.0.1 N-girdi-1'den beri TEK kaynakta: static/css/theme.css
+           "Alan ipucu (ortak bileşen)" + static/js/field_help.js. Bu blokta
+           duran kopya oraya taşındı (gizli balon sayfayı yatay taşırıyordu). */
+
         .form-group label {
             display: flex;
             align-items: center;
@@ -380,18 +323,26 @@
             font-size: 18px;
         }
 
-        /* Veri tabanı rozetleri (advanced.html deseni) — NASA CEA + NIST */
-        .database-status {
-            font-size: 11px;
-            padding: 5px 10px;
+        /* v3.0.1 K kulvarı — "NASA CEA / NIST WebBook" bağlantı rozetleri
+           söküldü (her makinede yanlışlıkla "Offline"; hiçbiri bu sayfanın
+           kullandığı bir sayının kaynağı değildi). Yerinde veri kaynağı
+           satırı durur (advanced.html ile aynı desen). */
+        .data-source-line {
+            font-size: 12px;
+            line-height: 1.5;
+            margin: -6px 0 12px 0;
+            padding: 6px 10px;
+            border-left: 3px solid var(--hd-cyan, #00e5ff);
+            background: var(--hd-inset, #0a1524);
             border-radius: 4px;
-            margin-left: 10px;
         }
-        .status-connected { background: #d4edda; color: #155724; }
-        .status-disconnected { background: #f8d7da; color: #721c24; }
-        /* ÖH D23 / P13B2-05: denetim koşmadan önceki nötr durum
-           (solid.html:240 ile aynı değerler — tek desen). */
-        .status-unknown { background: #e2e3e5; color: #383d41; }
+        /* V301/N-CEA (C4): NASA CEA karşılaştırma tablosu */
+        #liquidCeaComparison table.data-table td.num { text-align: right;
+            font-variant-numeric: tabular-nums; }
+        #liquidCeaComparison .cea-meta { font-size: 12px; line-height: 1.5;
+            margin-top: 10px; }
+        #liquidCeaComparison .cea-unavailable { padding: 10px;
+            border-left: 3px solid var(--hd-orange, #ff8c33); }
 
         /* Uyarı paneli (advanced.html deseni) — renkler theme.css değişkenlerinden */
         #warningsPanel {
@@ -593,20 +544,15 @@
 
         <!-- 1. Propellant Data -->
         <div class="panel">
-            <h2><span data-i18n="liq.ui.1_propellant_data_fuel_oxidizer">1. Propellant Data (Fuel + Oxidizer)</span>
-                {# ÖH D23 / P13B2-05 — ROZET HÜKÜM KAZANMADAN YEŞİL YANMAZ.
-                   ÖLÇÜLDÜ (once.json P13B2-05): ilk boyada sınıf
-                   "status-connected" + metin "NASA CEA Connected" idi;
-                   oysa /api/database-status daha ÇAĞRILMAMIŞTI. Yani sayfa
-                   açılır açılmaz kullanıcıya kazanılmamış bir hüküm
-                   gösteriliyordu. Kardeş şablonda (solid.html) tam bu kusur
-                   P17B2-07 olarak ölçülüp ÖH D21'de onarıldı; liquid.html
-                   onarımın dışında kalmıştı. İlk boya artık "denetlenmedi"
-                   der; checkDatabaseStatus() sonucu sınıfı ve metni birlikte
-                   değiştirir (setCeaStatus/setNistStatus). #}
-                <span class="database-status status-unknown cea-status" id="cea_status" data-i18n="liq.ui.nasa_cea_not_checked">NASA CEA — not checked yet</span>
-                <span class="database-status status-unknown nist-status" id="nist_status" data-i18n="liq.ui.nist_webbook_not_checked">NIST WebBook — not checked yet</span>
-            </h2>
+            <h2><span data-i18n="liq.ui.1_propellant_data_fuel_oxidizer">1. Propellant Data (Fuel + Oxidizer)</span></h2>
+            {# v3.0.1 K kulvarı — VERİ KAYNAĞI satırı (eski "NASA CEA / NIST
+               WebBook" rozetlerinin yeri; ÖH D23 / P13B2-05 rozet geçmişi
+               rozetle birlikte söküldü). Satır kaynak TAHMİN ETMEZ: itici
+               özelliklerinin kaynağı her itici kartında sunucu künyesiyle
+               (/api/get-propellant-properties) yazılı; bir koşumun yanma
+               verisi kaynağı (combustion_data_source) sonuç tablosundaki
+               "Data Sources" satırında yayımlanır. #}
+            <div class="data-source-line" data-i18n="liq.ui.data_source_line">Data source: each propellant card below states the source of its properties; the combustion data source of a run (NASA CEA through RocketCEA, or the static 100-bar table) is stated in the results after CALCULATE.</div>
             <div class="form-grid">
                 <div class="form-group">
                     <label for="fuel_type">
@@ -1398,8 +1344,15 @@
                          Boş/0 bırakılırsa film yoktur; soğutma tipi film
                          seçiliyken boş bırakılırsa çözücü etiketli literatür
                          varsayılanını uygular ve kaynağını çıktıda söyler. -->
+                    <!-- L-B (v3.0.1, SV-08): ipucu koddan (LiquidRocketEngine.
+                         _film_coolant_flow_kg_s / _film_cooling_performance,
+                         FILM_COOLING_PCT_MAX = 30, FILM_COOLING_PCT_DEFAULT = 5). -->
                     <label for="film_cooling_percent">
                         <span data-i18n="liq.ui.film_cooling">Film Cooling</span> <span class="unit" data-i18n="liq.ui.unit_pct_of_fuel_flow">(% of fuel flow)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.film_cooling_tip">Film coolant flow as a percentage of the TOTAL fuel flow (burning core fuel + film). The film is fuel bled before the injector and laid along the chamber wall; it does not burn. Accepted range 0-30 %. Effect: at constant thrust the film flow is ADDED to the core flow, so the total mass flow rises and the delivered Isp drops (Isp_core x core flow / (core + film); the film's thrust contribution is neglected, a conservative lower bound). The film also absorbs part of the chamber wall heat. Empty: with the Film Cooling type HRMA applies a declared 5 % default; with other cooling types there is no film. 0 % with the Film Cooling type leaves the wall uncooled and is flagged as a critical warning.</span>
+                        </div>
                     </label>
                     <input type="number" id="film_cooling_percent" value="0" step="0.5" min="0" max="30">
                 </div>
@@ -1853,6 +1806,12 @@
             </button>
         </div>
         
+        <!-- V301/N-YZ — "Yapay Zekâ ile Tasarla" paneli. İçeriği ortak modül
+             /static/js/ai_assistant.js kurar (üç sayfada aynı); burada yalnız
+             kap ve sayfanın motor tipi durur. Eski "Ask AI" (sonuç yorumlatma)
+             düğmesi ve sayfaya özgü askAI kopyası kaldırıldı. -->
+        <section id="hrmaAiPanel" class="hrma-ai" data-motor-type="liquid" data-hrma-version="{{ app_version }}"></section>
+
         <!-- Loading indicator -->
         <div id="loading" class="loading">
             <div style="font-size: 24px; color: #4facfe;" data-i18n="liq.ui.calculating">Calculating...</div>
@@ -1860,13 +1819,6 @@
         
         <!-- Results Section -->
         <div id="results" class="results">
-            <!-- AI Analysis Button -->
-            <div style="text-align: center; margin: 20px 0;">
-                <button type="button" class="btn btn-ai" onclick="askAI()" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 12px 30px; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;" data-i18n="liq.ui.ask_ai_to_analyze_results">
-                    Ask AI to Analyze Results
-                </button>
-            </div>
-            
             <!-- PDF Export Buttons -->
             <div style="text-align: center; margin: 20px 0; display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
                 <button type="button" class="btn btn-pdf" onclick="exportPDF('summary')" style="background: linear-gradient(135deg, #ff7b7b 0%, #ff416c 100%); color: white; padding: 10px 25px; border: none; border-radius: 5px; font-size: 14px; cursor: pointer;" data-i18n="liq.ui.pdf_summary_report">
@@ -2168,19 +2120,19 @@
                         <div class="subsystem-card" style="margin: 15px 0;">
                             <h3 data-i18n="liq.ui.trajectory_inputs">Trajectory Inputs</h3>
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 10px;">
-                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span data-i18n="liq.ui.initial_mass_kg">Initial Mass (kg)</span>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.initial_mass_kg">Initial Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.initial_mass_kg_help">Vehicle mass at lift-off, in kg. When the trajectory is computed and you have not typed in this field, it is filled from the engine: engine dry mass + propellant mass (design_summary.masses), i.e. the engine alone without airframe or payload. Initial minus final mass is the propellant burned; the burn time is that mass divided by the engine mass flow. Must be greater than the final mass, otherwise no trajectory is computed.</span></span></span>
                                     <input type="number" id="traj_initial_mass" value="5000" step="100" style="margin-top:4px;">
                                 </label>
-                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span data-i18n="liq.ui.final_dry_mass_kg">Final (Dry) Mass (kg)</span>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.final_dry_mass_kg">Final (Dry) Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.final_dry_mass_kg_help">Vehicle mass after burnout, in kg. When the trajectory is computed and you have not typed in this field, it is filled with the engine dry mass (design_summary.masses.engine_mass_kg). Add airframe and payload to both masses to fly a real vehicle; a value you type is kept. Must be smaller than the initial mass.</span></span></span>
                                     <input type="number" id="traj_final_mass" value="2000" step="100" style="margin-top:4px;">
                                 </label>
-                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span data-i18n="liq.ui.drag_coefficient">Drag Coefficient</span>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.drag_coefficient">Drag Coefficient</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.drag_coefficient_help">Vehicle drag coefficient (dimensionless) on the reference area, sent as drag_coefficient; it scales the aerodynamic drag over the whole flight. Not filled from the engine calculation. Empty or not a number: the panel sends 0.5.</span></span></span>
                                     <input type="number" id="traj_drag_coeff" value="0.5" step="0.05" style="margin-top:4px;">
                                 </label>
-                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span data-i18n="liq.ui.reference_area_m2">Reference Area (m²)</span>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.reference_area_m2">Reference Area (m²)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.reference_area_m2_help">Drag reference area of the vehicle (m²), sent as reference_area. Not filled from the engine calculation. Empty or not a number: the panel sends 0.05 m².</span></span></span>
                                     <input type="number" id="traj_ref_area" value="0.05" step="0.01" style="margin-top:4px;">
                                 </label>
-                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span data-i18n="liq.ui.burn_time_derived_from_mdot">Burn Time (s) — derived from &#7745; (not an input)</span>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.burn_time_derived_from_mdot">Burn Time (s) — derived from &#7745; (not an input)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.burn_time_derived_from_mdot_help">Burn time flown by the trajectory, in seconds: (initial mass - final mass) divided by the engine total mass flow from the engine calculation. Not an input: it is written here when the trajectory is computed and is empty before that.</span></span></span>
                                     <!-- ÖH D17 / P12bB1-07 ŞARTI: bu alan HİÇBİR hesabı sürmüyor.
                                          Yanma süresi computeTrajectory() içinde itici bütçesi ile
                                          motorun kendi debisinden türetiliyor (mItici / trMdot); D15
@@ -2204,6 +2156,17 @@
                         <div id="trajectory_plots" style="height: 400px; margin: 20px 0;"></div>
                     </div>
                 </div>
+            </div>
+
+            <!-- V301/N-CEA (C4): NASA CEA karşılaştırması. Yalnız yanıttaki
+                 `cea_comparison` bloğundan çizilir (renderLiquidCeaComparison);
+                 blok yoksa panel görünmez, sayı uydurulmaz. -->
+            <div class="panel" id="liquidCeaComparisonPanel" style="display: none;">
+                <h2 data-i18n="liq.sec.cea_comparison">NASA CEA Comparison</h2>
+                <div class="chart-explanation">
+                    <p><strong data-i18n="liq.ui.what_this_shows">What this shows:</strong> <span data-i18n="liq.ui.cea_comparison_explain">NASA CEA's ideal (theoretical) values for this run next to the values HRMA publishes after its loss chain, row by row, with the published factor that explains each difference.</span></p>
+                </div>
+                <div id="liquidCeaComparison"></div>
             </div>
 
             <!-- Analysis Dock çapası: güverte JS ile bu çapanın ÖNÜNE kurulur
@@ -2286,6 +2249,53 @@
         // denetler). Ortak sözlükteki anahtarlar (app.defaultsApplied.*,
         // common.close) bu yardımcıyla okunur — solid.html ile AYNI desen
         // (D36 onemli2-kati `ortakMetin`).
+        // V301/DİL (kalem 3): sunucu reddinin ADLADIĞI alanlar formda
+        // işaretlenir (aria-invalid + .hd-alan-hatali; hibrit app.js deseni);
+        // başarılı hesapta işaretler kalkar. Ad ret gövdesinden okunur
+        // (invalid_fields[].field ya da field) — alan uydurulmaz.
+        function _retAlanlariniIsaretle(govde) {
+            if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+            Array.prototype.forEach.call(document.querySelectorAll('.hd-alan-hatali'), function (el) {
+                el.classList.remove('hd-alan-hatali');
+                el.removeAttribute('aria-invalid');
+            });
+            if (!govde || typeof govde !== 'object') return;
+            const adlar = [];
+            if (Array.isArray(govde.invalid_fields)) {
+                govde.invalid_fields.forEach(function (f) {
+                    const ad = (f && typeof f === 'object') ? f.field : f;
+                    if (typeof ad === 'string' && ad) adlar.push(ad);
+                });
+            }
+            if (typeof govde.field === 'string' && govde.field) adlar.push(govde.field);
+            adlar.forEach(function (ad) {
+                const el = document.getElementById(ad);
+                if (el && el.classList) {
+                    el.classList.add('hd-alan-hatali');
+                    el.setAttribute('aria-invalid', 'true');
+                }
+            });
+        }
+
+        // V301/DİL (kalem 3, NK-31/NK-38): başarısız hesaptan sonra ekranda
+        // kalan sonuç "eski sonuç" bandıyla işaretlenir; başarılı hesap
+        // bandı kaldırır. Sonuç SİLİNMEZ (kullanıcı neyle kıyasladığını
+        // görür) ama hangi girdiye ait olmadığı açıkça yazılır.
+        function _eskiSonucBandi(goster) {
+            const kap = document.getElementById('results');
+            if (!kap) return;
+            const eski = document.getElementById('hdEskiSonucBandi');
+            if (eski && eski.parentNode) eski.parentNode.removeChild(eski);
+            if (!goster || kap.style.display === 'none' || !currentResults) return;
+            const bant = document.createElement('div');
+            bant.id = 'hdEskiSonucBandi';
+            bant.className = 'hd-eski-sonuc-bandi';
+            bant.setAttribute('role', 'status');
+            bant.textContent = ortakMetin('common.staleResults',
+                'OLD RESULT: the last calculation failed; the results below belong to the previous successful calculation and do not reflect the current inputs.');
+            kap.insertBefore(bant, kap.firstChild);
+        }
+
         function ortakMetin(anahtar, yedek, degiskenler) {
             return degiskenler ? TF(anahtar, degiskenler, yedek) : T(anahtar, yedek);
         }
@@ -2310,6 +2320,15 @@
                     + ' display: flex; flex-direction: column; gap: 10px; align-items: flex-end;';
                 document.body.appendChild(stack);
             }
+            // V301/DİL (NK-42): ölçüldü — 1280 px'te üst menü iki satıra
+            // kırılıyor ve top:20px bildirim "Formüller / Sürüm Notları /
+            // Kılavuz" bağlantılarını örtüyordu. Yığın, her bildirimde
+            // menünün GÖRÜNEN alt kenarının altına iner (kaydırılmışsa 20 px).
+            const _nav = (typeof document.querySelector === 'function')
+                ? document.querySelector('.navbar') : null;
+            const _alt = (_nav && typeof _nav.getBoundingClientRect === 'function')
+                ? _nav.getBoundingClientRect().bottom : 0;
+            if (stack.style) stack.style.top = Math.max(20, Math.ceil(_alt || 0) + 8) + 'px';
             return stack;
         }
 
@@ -2472,7 +2491,14 @@
             const props = (payload && payload.properties) || {};
             const state = props.storage_state;
             const source = String((payload && payload.source) || '');
-            const live = /pubchem|webbook|nist\.gov/i.test(source);
+            // v3.0.1 (Berke: online/offline dili sökülür): kaynak metni bir
+            // canlı servisin adını taşısa da web_propellant_api._damgala canlı
+            // OLMAYAN dönüşü '(Cached)' / '(Stale cache)' / '(Stored copy)' ile
+            // damgalar. Ölçüldü: paket kaydından gelen 'NIST WebBook via ...
+            // (Offline store)' metni 'webbook' içerdiği için yeşil "Real-time
+            // Data" basılıyordu. Damgalı kayıt canlı sayılmaz.
+            const canliDegil = /\((cached|stale cache|stored copy|offline store)\)/i.test(source);
+            const live = !canliDegil && /pubchem|webbook|nist\.gov/i.test(source);
             const stateResolved = !!(state && typeof props.density === 'number');
             return {
                 props: props,
@@ -2482,7 +2508,7 @@
                     ? T('liq.js.real_time_data', 'Real-time Data')
                     : (stateResolved
                         ? (liqStateTempText(state.description) || source)
-                        : T('liq.js.using_cached_data', 'Using cached data')),
+                        : T('liq.js.state_not_resolved', 'No state-resolved value: field not changed')),
                 badgeColor: (live || stateResolved) ? '#28a745' : '#ffc107',
                 sourceText: source + ((stateResolved && state.description)
                     ? ' — ' + liqStateTempText(state.description) : '')
@@ -2713,7 +2739,7 @@
                         // çözümlü değerle güncellenir. Kategori yedeği
                         // (ölçüldü: rp1/mmh/udmh için 800 kg/m³) kullanıcının
                         // alanını EZMEZ; alan uyarı rengine boyanır ve rozet
-                        // "Using cached data" der.
+                        // "hâl çözümlü değer yok: alan değiştirilmedi" der (v3.0.1).
                         // T45: veri tabanı değeri ham float olarak yazılınca alanda
                         // 17 basamak görünüyordu; anlamlı basamağa yuvarlanır.
                         markFieldProvenance('fuel_density', prov.stateResolved);
@@ -2736,10 +2762,10 @@
                             liquidClearUnresolvedField('fuel_viscosity');
                         }
                     } else {
-                        fuelSpan.innerHTML = `<div style="color: #ffc107;">${T('liq.js.using_cached_data', 'Using cached data')}</div>`;
+                        fuelSpan.innerHTML = `<div style="color: #ffc107;">${T('liq.js.properties_not_available', 'No properties returned: fields not changed')}</div>`;
                     }
                 } else {
-                    if (fuelSpan) fuelSpan.innerHTML = `<div style="color: #dc3545;">${T('liq.js.connection_failed', 'Connection Failed')}</div><div style="font-size: 9px;">${T('liq.js.using_cached_data', 'Using cached data')}</div>`;
+                    if (fuelSpan) fuelSpan.innerHTML = `<div style="color: #dc3545;">${T('liq.js.fuel_properties_not_loaded', 'Fuel properties could not be loaded')}</div><div style="font-size: 9px;">HTTP ${fuelResponse.status} · ${T('liq.js.fields_not_changed', 'fields not changed')}</div>`;
                 }
                 
                 // Fetch REAL oxidizer properties
@@ -2786,31 +2812,32 @@
                             liquidClearUnresolvedField('oxidizer_viscosity');
                         }
                     } else {
-                        oxSpan.innerHTML = `<div style="color: #ffc107;">${T('liq.js.using_cached_data', 'Using cached data')}</div>`;
+                        oxSpan.innerHTML = `<div style="color: #ffc107;">${T('liq.js.properties_not_available', 'No properties returned: fields not changed')}</div>`;
                     }
                 } else {
-                    if (oxSpan) oxSpan.innerHTML = `<div style="color: #dc3545;">${T('liq.js.connection_failed', 'Connection Failed')}</div><div style="font-size: 9px;">${T('liq.js.using_cached_data', 'Using cached data')}</div>`;
+                    if (oxSpan) oxSpan.innerHTML = `<div style="color: #dc3545;">${T('liq.js.ox_properties_not_loaded', 'Oxidizer properties could not be loaded')}</div><div style="font-size: 9px;">HTTP ${oxResponse.status} · ${T('liq.js.fields_not_changed', 'fields not changed')}</div>`;
                 }
                 
             } catch (error) {
                 console.error(T('liq.msg.real_time_property_loading_error', 'Real-time property loading error:'), error);
                 
-                // Show detailed error and fallback
+                // Hata ayrıntısı: alanlar DEĞİŞTİRİLMEZ (önbellek kullanılmıyor; eski
+                // 'Using cached ...' metinleri kullanılmayan bir yedeği iddia ediyordu).
                 const fuelSpan = document.getElementById(`fuel-properties-${fuelType}`);
                 const oxSpan = document.getElementById(`ox-properties-${oxType}`);
                 
                 if (fuelSpan) {
                     fuelSpan.innerHTML = `
-                        <div style="color: #ffc107;">${T('liq.js.connection_failed', 'Connection Failed')}</div>
-                        <div style="font-size: 10px;">${T('liq.js.using_cached_nasa_data', 'Using cached NASA data')}</div>
+                        <div style="color: #ffc107;">${T('liq.js.fuel_properties_not_loaded', 'Fuel properties could not be loaded')}</div>
+                        <div style="font-size: 10px;">${T('liq.js.fields_not_changed', 'fields not changed')}</div>
                         <div style="font-size: 10px;">Error: ${(globalThis.escapeNoticeText || String)(error.message)}</div>
                     `;
                 }
                 
                 if (oxSpan) {
                     oxSpan.innerHTML = `
-                        <div style="color: #ffc107;">${T('liq.js.nist_unavailable', 'NIST Unavailable')}</div>
-                        <div style="font-size: 10px;">${T('liq.js.using_cached_properties', 'Using cached properties')}</div>
+                        <div style="color: #ffc107;">${T('liq.js.ox_properties_not_loaded', 'Oxidizer properties could not be loaded')}</div>
+                        <div style="font-size: 10px;">${T('liq.js.fields_not_changed', 'fields not changed')}</div>
                         <div style="font-size: 10px;">Error: ${(globalThis.escapeNoticeText || String)(error.message)}</div>
                     `;
                 }
@@ -2838,6 +2865,106 @@
         // okuyan "bu yedi alan gönderiliyor" sanıyordu, oysa yükün alan
         // kümesi bambaşka. `.value` erişimleri de yan etkisiz değildi: alan
         // kaldırılsa `null.value` atardı ve hesap hiç başlamazdı.
+        // V301/L-A (SV-15) — HESAP UCUNUN RET GÖVDESİ -> KULLANICI METNİ.
+        // ÖLÇÜLDÜ (A-sivi denetimi, ui_en.json / ui_tr.json): Cd 1,2 reddi
+        // ekranda yalnız "Error: invalid_discharge_coefficient" diye, TR
+        // arayüzde de İngilizce basılıyordu; zorunlu alan reddinde HANGİ
+        // alanların eksik olduğu yazılmıyordu; hata bildirimi sonraki
+        // BAŞARILI hesaptan sonra da ekranda kalıyordu. Desen katı sayfanın
+        // `_solidRetMetni` ve hibritin `sunucuRetHatasi` yardımcısıdır:
+        // sunucu cümlesi önce i18n_charts.js serverText'ten (MSG_PATTERNS)
+        // geçer, sonra ortak çözücü HRMAReject.metni kodu ve adlı/eksik
+        // alanları ekler. Metin UYDURULMAZ: cümle, kod ve alan adları
+        // gövdeden gelir; çeviri yoksa sunucunun EN cümlesi kalır.
+        // Makine kodu sıvı ucunda `error_code`da ya da (cümle `message`ta
+        // iken) `error`dadır; HRMAReject.metni kodu `status`tan okur.
+        function _liquidRetMetni(govde, durum) {
+            if (!govde || typeof govde !== 'object') return 'HTTP ' + durum;
+            const kopya = Object.assign({}, govde);
+            const srv = function (v) {
+                return (typeof window !== 'undefined' && window.I18N
+                        && typeof window.I18N.serverText === 'function')
+                    ? window.I18N.serverText(v) : v;
+            };
+            const kod = (typeof govde.error_code === 'string' && govde.error_code)
+                ? govde.error_code
+                : ((typeof govde.message === 'string' && govde.message
+                    && typeof govde.error === 'string'
+                    && /^[a-z0-9_]+$/.test(govde.error)) ? govde.error : '');
+            if (kod && (!kopya.status || kopya.status === 'error')) kopya.status = kod;
+            if (typeof kopya.message === 'string' && kopya.message) {
+                kopya.message = srv(kopya.message);
+            } else if (typeof kopya.error === 'string' && kopya.error) {
+                kopya.error = srv(kopya.error);
+            }
+            if (typeof HRMAReject !== 'undefined' && HRMAReject
+                    && typeof HRMAReject.metni === 'function') {
+                return HRMAReject.metni(kopya, durum);
+            }
+            return (typeof kopya.message === 'string' && kopya.message)
+                || (typeof kopya.error === 'string' && kopya.error)
+                || ('HTTP ' + durum);
+        }
+
+        // Hesap hatası bildirimleri `data-liquid-calc-error` ile imlenir;
+        // yeni bir hesap sonucu (başarı ya da yeni ret) gelince eskileri
+        // kaldırılır. Başka kaynaklı bildirimlere (dışa aktarım vb.)
+        // dokunulmaz.
+        function _liquidHesapHatalariniTemizle() {
+            document.querySelectorAll('#toast-stack [data-liquid-calc-error]')
+                .forEach(function (el) { el.remove(); });
+        }
+
+        // Yazı çakışması (V301/L-A Playwright ölçümü, ekran/ret_tank_tr_1280):
+        // tema `.alert-danger` zemini yarı saydamdır (theme.css
+        // rgba(140,30,40,0.2)); uzun ret metni alttaki form etiketlerinin
+        // ("Yakıt Isıl Kapasitesi", "2090") ÜSTÜNE biniyordu. Bildirimin
+        // KENDİ zemin rengi temanın kök zemini (html, --hd-bg0) üstüne
+        // harmanlanıp opak yapılır: görünen renk aynı kalır, alttaki yazı
+        // görünmez. Kök zemin okunamazsa (opak değilse) renk UYDURULMAZ,
+        // dokunulmaz.
+        function _liquidOpakZemin(el) {
+            if (!el || typeof getComputedStyle !== 'function') return;
+            const ayir = function (s) {
+                const m = String(s || '').match(/rgba?\(([^)]+)\)/);
+                if (!m) return null;
+                const p = m[1].split(',').map(function (x) { return parseFloat(x); });
+                return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+            };
+            const on = ayir(getComputedStyle(el).backgroundColor);
+            const kok = ayir(getComputedStyle(document.documentElement).backgroundColor);
+            if (!on || !kok || on.a >= 1 || kok.a < 1) return;
+            const k = function (u, a) { return Math.round(on.a * u + (1 - on.a) * a); };
+            el.style.backgroundColor = 'rgb(' + k(on.r, kok.r) + ', ' + k(on.g, kok.g)
+                + ', ' + k(on.b, kok.b) + ')';
+        }
+
+        // V301/DİL (NK-61): alt sistem kartları çözücünün MAKİNE değerini
+        // basıyordu ("Tip: regenerative", "Çevrim: gas_generator_cycle",
+        // "Soğutucu: METHANE"). Ad, formdaki aynı seçeneğin ÇEVRİLMİŞ
+        // metninden alınır (tek kaynak: seçenek etiketleri); eşleşme yoksa
+        // ham değer AYNEN kalır — uydurma çeviri yapılmaz.
+        function _liqAdi(selectId, ham) {
+            if (ham === null || ham === undefined || ham === '') return '—';
+            const d = String(ham);
+            if (selectId === 'feed_type' && d === 'turbopump') {
+                return T('liq.js.feed_turbopump', 'Turbopump-fed');
+            }
+            const sel = document.getElementById(selectId === 'feed_type' ? 'engine_cycle' : selectId);
+            const adaylar = [d, d.toLowerCase(), d.replace(/_cycle$/, ''),
+                             d.toLowerCase().replace(/_cycle$/, '')];
+            if (sel && sel.options) {
+                for (let i = 0; i < adaylar.length; i++) {
+                    for (let j = 0; j < sel.options.length; j++) {
+                        if (sel.options[j].value === adaylar[i]) {
+                            return sel.options[j].textContent.trim();
+                        }
+                    }
+                }
+            }
+            return d;
+        }
+
         async function calculateLiquid() {
             showLoading(true);
             
@@ -2851,12 +2978,26 @@
                                                        collectClosureAndFeedLineParams()))
                 });
                 
-                const results = await response.json();
-                
-                if (results.error) {
-                    throw new Error(results.error);
+                // Gövde JSON değilse (ör. HTML hata sayfası) yalnız durum
+                // kodu basılır; sahte bir gerekçe yazılmaz.
+                let results = null;
+                try { results = await response.json(); } catch (e) { results = null; }
+                if (!results || typeof results !== 'object') {
+                    const hata = new Error('HTTP ' + response.status);
+                    hata.liquidStatus = response.status;
+                    throw hata;
                 }
                 
+                if (!response.ok || results.error) {
+                    if (typeof _retAlanlariniIsaretle === 'function') _retAlanlariniIsaretle(results);
+                    const hata = new Error(_liquidRetMetni(results, response.status));
+                    hata.liquidStatus = response.status;
+                    throw hata;
+                }
+                
+                _liquidHesapHatalariniTemizle();
+                if (typeof _retAlanlariniIsaretle === 'function') _retAlanlariniIsaretle(null);
+                if (typeof _eskiSonucBandi === 'function') _eskiSonucBandi(false);
                 currentResults = results;
                 // A1 — uçuş köprüsü (bkz. app.js'teki eş çağrı).
                 if (window.FlightHandoff) {
@@ -2868,7 +3009,20 @@
                 if (window.AnalysisDock) AnalysisDock.refreshSuggestions();
                 
             } catch (error) {
-                showError('Error: ' + (globalThis.escapeNoticeText || String)(error.message));
+                const durum = error && error.liquidStatus;
+                const onEk = (durum >= 400 && durum < 500)
+                    ? TF('liq.js.server_rejected', { status: durum },
+                         'Input rejected by the server (HTTP {status})')
+                    : T('liq.js.error_prefix', 'Error');
+                _liquidHesapHatalariniTemizle();
+                showError(onEk + ': ' + (globalThis.escapeNoticeText || String)(error.message));
+                const yigin = document.getElementById('toast-stack');
+                const son = yigin && yigin.lastElementChild;
+                if (son) {
+                    son.setAttribute('data-liquid-calc-error', '1');
+                    _liquidOpakZemin(son);
+                }
+                if (typeof _eskiSonucBandi === 'function') _eskiSonucBandi(true);
             } finally {
                 showLoading(false);
             }
@@ -2994,27 +3148,71 @@
             // (ek kartlar + grafikler) MUTLAKA bu innerHTML atamasından SONRA
             // çağrılmalı; aksi halde eklenen kartlar bu satırda siliniyordu.
             const subsystemsDiv = document.getElementById('subsystemsGrid');
+            // L-B (v3.0.1, SV-05): cidar sıcaklığı satırı kullanıcının
+            // HEDEFİNİ (max_wall_temp) "sonuç" diye basıyordu — ölçüldü:
+            // 2 mm cidarda bu kart "Wall Temp 800 K", aynı ekrandaki Isıl
+            // Koruma kartı "3094 K CRITICAL". Artık çözücünün ÇÖZDÜĞÜ değer
+            // (cooling_system.wall_temperature_solved_K), hedef ve limit
+            // hükmü AYRI satırlardadır; çözüm yoksa "—" ve nedeni yazılır
+            // (neden makine kodundan çevrilir; ayrıntısı Isıl Koruma kartında).
+            const coolCs = results.cooling_system || {};
+            const coolLimit = coolCs.wall_temperature_limit_status;
+            const coolLimitTxt = coolLimit === 'MET'
+                ? T('liq.js.wall_temp_limit_met', 'MET')
+                : coolLimit === 'EXCEEDED'
+                    ? T('liq.js.wall_temp_limit_exceeded', 'EXCEEDED')
+                    : coolLimit === 'NOT_EVALUATED'
+                        ? T('liq.js.wall_temp_limit_not_evaluated', 'NOT EVALUATED')
+                        : '—';
+            const coolNotSolvedTxt = {
+                station_march_not_run: T('liq.js.wall_temp_not_solved_march',
+                    'Not solved: the 1D station march did not run for this design (reason in the Thermal Protection card).'),
+                station_march_not_available: T('liq.js.wall_temp_not_solved_unavailable',
+                    'Not solved: the 1D station march covers RP-1 regenerative cooling (and the supercritical methane/LH2 march); it did not solve this design.'),
+                passive_cooling_no_solver: T('liq.js.wall_temp_not_solved_passive',
+                    'Not solved: HRMA has no wall-temperature solver for passive (ablative/radiative) cooling.'),
+                cooling_type_no_solver: T('liq.js.wall_temp_not_solved_type',
+                    'Not solved: no 1D wall solver exists for this cooling type.'),
+            }[coolCs.wall_temperature_not_solved_code] || '';
+            const coolWallRows =
+                `<tr><td>${T('liq.js.wall_temp', 'Wall Temp (solved):')}</td><td>${hrmaFmt(coolCs.wall_temperature_solved_K, 0, 'K')}</td></tr>`
+                + (typeof coolCs.wall_temperature_solved_K === 'number' || !coolNotSolvedTxt ? ''
+                   : `<tr><td colspan="2" style="white-space:normal;line-height:1.4;font-size:12px;color:#9fb6c2;">${coolNotSolvedTxt}</td></tr>`)
+                + `<tr><td>${T('liq.js.wall_temp_target', 'Wall Temp Target:')}</td><td>${hrmaFmt(coolCs.wall_temperature_target_K, 0, 'K')}</td></tr>`
+                + `<tr><td>${T('liq.js.wall_temp_limit', 'Limit Check:')}</td><td${coolLimit === 'EXCEEDED' ? ' style="color:#ff7a85;font-weight:600;"' : ''}>${coolLimitTxt}</td></tr>`;
+            // L-B (v3.0.1, SV-08): film bloğu kendi satırlarıyla — film
+            // debisi ve başlık Isp'sine işlenen kaybı (çözücünün
+            // cooling_system.film_cooling.performance alanından; kopya
+            // hesap yok). Film tipinde ceket yoktur: ceket debisi "—".
+            const coolFilm = coolCs.film_cooling || {};
+            const coolFilmPerf = coolFilm.performance || {};
+            const coolFilmRows = (typeof coolFilmPerf.film_coolant_flow_kg_s === 'number'
+                                  && coolFilmPerf.film_coolant_flow_kg_s > 0)
+                ? `<tr><td>${T('liq.js.film_flow', 'Film Flow:')}</td><td>${hrmaFmt(coolFilmPerf.film_coolant_flow_kg_s, 3, 'kg/s')} (${hrmaFmt(coolFilmPerf.film_cooling_percent, 1, '%')})</td></tr>`
+                  + `<tr><td>${T('liq.js.film_isp_loss', 'Isp Loss (film):')}</td><td>${hrmaFmt(coolFilmPerf.isp_loss_pct, 2, '%')}</td></tr>`
+                : '';
             subsystemsDiv.innerHTML = `
                 <div class="subsystem-card">
                     <h3>${T('liq.js.cooling_system', 'Cooling System')}</h3>
                     <table class="spec-table">
-                        <tr><td>${T('liq.js.type', 'Type:')}</td><td>${results.cooling_type}</td></tr>
+                        <tr><td>${T('liq.js.type', 'Type:')}</td><td>${((typeof _liqAdi === 'function') ? _liqAdi('cooling_type', results.cooling_type) : (results.cooling_type))}</td></tr>
                         <tr><td>${T('liq.js.heat_load', 'Heat Load:')}</td><td>${numTxt(results.cooling_system.total_heat_load, 0)} kW</td></tr>
                         <tr><td>${T('liq.js.chamber_heat', 'Chamber Heat:')}</td><td>${numTxt(results.cooling_system.chamber_heat_load, 0)} kW</td></tr>
-                        <tr><td>${T('liq.js.coolant_flow', 'Coolant Flow:')}</td><td>${numTxt(results.cooling_system.coolant_flow_rate, 2)} kg/s</td></tr>
+                        <tr><td>${T('liq.js.coolant_flow', 'Coolant Flow:')}</td><td>${hrmaFmt(results.cooling_system.coolant_flow_rate, 2, 'kg/s')}</td></tr>
+                        ${coolFilmRows}
                         ${results.feed_system.feed_lines.cooling_lines && results.feed_system.feed_lines.cooling_lines.length > 0 ? 
                             `<tr><td>${T('liq.js.channels', 'Channels:')}</td><td>${results.feed_system.feed_lines.cooling_lines.length}</td></tr>
                              <tr><td>${T('liq.js.channel_size', 'Channel Size:')}</td><td>${numTxt((results.feed_system.feed_lines.cooling_lines[0].width * 1000), 1)}×${numTxt((results.feed_system.feed_lines.cooling_lines[0].height * 1000), 1)} mm</td></tr>` : 
                             ''
                         }
-                        <tr><td>${T('liq.js.wall_temp', 'Wall Temp:')}</td><td>${numTxt(results.cooling_system.wall_temperature_hot, 0)} K</td></tr>
+                        ${coolWallRows}
                     </table>
                 </div>
                 
                 <div class="subsystem-card">
                     <h3>${T('liq.js.injection_system', 'Injection System')}</h3>
                     <table class="spec-table">
-                        <tr><td>${T('liq.js.type', 'Type:')}</td><td>${results.injection_system.injector_type}</td></tr>
+                        <tr><td>${T('liq.js.type', 'Type:')}</td><td>${((typeof _liqAdi === 'function') ? _liqAdi('injector_type', results.injection_system.injector_type) : (results.injection_system.injector_type))}</td></tr>
                         <tr><td>${T('liq.js.fuel_vel', 'Fuel Vel:')}</td><td>${hrmaFmt(results.injection_system.fuel_injection_velocity, LIQUID_DEC_VELOCITY_MS)} m/s</td></tr>
                         <tr><td>${T('liq.js.ox_vel', 'Ox Vel:')}</td><td>${hrmaFmt(results.injection_system.ox_injection_velocity, LIQUID_DEC_VELOCITY_MS)} m/s</td></tr>
                         <tr><td>${T('liq.js.fuel_p', 'Fuel ΔP:')}</td><td>${numTxt(results.injection_system.fuel_pressure_drop, 1)} bar</td></tr>
@@ -3024,7 +3222,7 @@
                 <div class="subsystem-card">
                     <h3>${T('liq.js.feed_system', 'Feed System')}</h3>
                     <table class="spec-table">
-                        <tr><td>${T('liq.js.type', 'Type:')}</td><td>${results.feed_system.type}</td></tr>
+                        <tr><td>${T('liq.js.type', 'Type:')}</td><td>${((typeof _liqAdi === 'function') ? _liqAdi('feed_type', results.feed_system.type) : (results.feed_system.type))}</td></tr>
                         <tr><td>${T('liq.js.ox_flow', 'Ox Flow:')}</td><td>${numTxt(results.feed_system.mass_flow_rates.oxidizer, 2)} kg/s</td></tr>
                         <tr><td>${T('liq.js.fuel_flow', 'Fuel Flow:')}</td><td>${numTxt(results.feed_system.mass_flow_rates.fuel, 2)} kg/s</td></tr>
                         <tr><td>${T('liq.js.ox_tank', 'Ox Tank:')}</td><td>${hrmaFmt(results.feed_system.tanks.oxidizer_tank.volume, 1, 'm³')}</td></tr>
@@ -3038,11 +3236,11 @@
                 <div class="subsystem-card">
                     <h3>${T('liq.js.turbopump_system', 'Turbopump System')}</h3>
                     <table class="spec-table">
-                        <tr><td>${T('liq.js.cycle', 'Cycle:')}</td><td>${results.feed_system.turbopump.type}</td></tr>
+                        <tr><td>${T('liq.js.cycle', 'Cycle:')}</td><td>${((typeof _liqAdi === 'function') ? _liqAdi('engine_cycle', results.feed_system.turbopump.type) : (results.feed_system.turbopump.type))}</td></tr>
                         <tr><td>${T('liq.js.ox_pump_power', 'Ox Pump Power:')}</td><td>${numTxt(results.feed_system.turbopump.oxidizer_pump.power, 1)} kW</td></tr>
                         <tr><td>${T('liq.js.fuel_pump_power', 'Fuel Pump Power:')}</td><td>${numTxt(results.feed_system.turbopump.fuel_pump.power, 1)} kW</td></tr>
                         <tr><td>${T('liq.js.turbine_power', 'Turbine Power:')}</td><td>${numTxt(results.feed_system.turbopump.turbine.power, 1)} kW</td></tr>
-                        <tr><td>${T('liq.js.rpm', 'RPM:')}</td><td>${results.feed_system.turbopump.oxidizer_pump.rpm.toLocaleString()}</td></tr>
+                        <tr><td>${T('liq.js.rpm', 'RPM:')}</td><td>${numTxt(results.feed_system.turbopump.oxidizer_pump.rpm, 0)}</td></tr>
                         <tr><td>${T('liq.js.reliability', 'Reliability:')}</td><td>${
                             _liquidReliabilityCell(results.feed_system.turbopump)}</td></tr>
                     </table>
@@ -3156,14 +3354,121 @@
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.js.data_sources', 'Data Sources:')}</strong></td>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14)); font-size: 11px;">
-                            <div>${T('liq.js.nasa_cea_database', 'NASA CEA Database')}</div>
-                            <div>${T('liq.js.nist_thermophysical_properties', 'NIST Thermophysical Properties')}</div>
-                            <div>${T('liq.js.flight_heritage_data', 'Flight Heritage Data')}</div>
-                            <div style="color: #28a745;">${T('liq.js.real_time_propellant_data_integration', 'Real-time propellant data integration')}</div>
+                            ${liquidCombustionSourceText(results)}
                         </td>
                     </tr>
                 </table>
             `;
+
+            // V301/N-CEA (C4): NASA CEA karşılaştırması (danışma; çizim
+            // düşerse sonuç gösterimi düşmez)
+            try { renderLiquidCeaComparison(results); } catch (e) {
+                console.warn('CEA comparison rendering failed:', e);
+            }
+        }
+
+        // ==================================================================
+        // V301/N-CEA (C4) — NASA CEA KARŞILAŞTIRMASI (sıvı)
+        // Teorik sayılar CEA'nın kendisiyken teorik (CEA) ⟷ teslim (HRMA);
+        // statik tabloya düşülmüşse tablo ⟷ CEA. Hibrit sayfasının
+        // renderCeaComparison deseni; metin T()/TF(), sayı numTxt.
+        // ==================================================================
+        function renderLiquidCeaComparison(results) {
+            var panel = document.getElementById('liquidCeaComparisonPanel');
+            var kap = document.getElementById('liquidCeaComparison');
+            if (!panel || !kap) return;
+            var cc = results && results.cea_comparison;
+            if (!cc || cc.schema !== 'hrma.cea_comparison/1') {
+                panel.style.display = 'none';
+                kap.innerHTML = '';
+                return;
+            }
+            panel.style.display = 'block';
+            var kacir = function (x) {
+                return String(x).replace(/[&<>"']/g, function (c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                });
+            };
+            var sayi = function (v, d) {
+                return (typeof v === 'number' && isFinite(v)) ? numTxt(v, d) : '—';
+            };
+            if (cc.status !== 'available') {
+                var kod = cc.reason && cc.reason.code;
+                var gerekce = {
+                    rocketcea_not_available: T('liq.cea.reason_rocketcea_missing', 'this run fell back to the static table and NASA CEA (RocketCEA) cannot be solved in this installation either.'),
+                    hrma_values_missing: T('liq.cea.reason_values_missing', 'this run does not publish all the values the comparison needs.'),
+                    hrma_values_not_modelled: T('liq.cea.reason_not_modelled', 'this run has no combustion data source, so there is nothing to compare.')
+                }[kod] || T('liq.cea.reason_cea_failed', 'NASA CEA did not return a usable solution for this point.');
+                kap.innerHTML = '<div class="cea-unavailable"><strong>'
+                    + kacir(T('liq.cea.unavailable', 'NASA CEA comparison unavailable:'))
+                    + '</strong> ' + kacir(gerekce) + '</div>';
+                return;
+            }
+            var tablo = cc.kind === 'liquid_static_table_vs_cea';
+            var ad = {
+                c_star: T('liq.cea.q_c_star', 'c*'),
+                isp_vacuum: T('liq.cea.q_isp_vacuum', 'Vacuum specific impulse'),
+                isp_sea_level: T('liq.cea.q_isp_sea_level', 'Sea-level specific impulse'),
+                chamber_temperature: T('liq.cea.q_chamber_temperature', 'Chamber temperature'),
+                molecular_weight: T('liq.cea.q_molecular_weight', 'Molecular weight'),
+                gamma: T('liq.cea.q_gamma', 'γ')
+            };
+            var basamak = { c_star: 1, isp_vacuum: 2, isp_sea_level: 2,
+                chamber_temperature: 1, molecular_weight: 3, gamma: 4 };
+            var carpanAdi = {
+                'combustion_efficiency (eta_c*)': T('liq.cea.factor_eta_cstar', 'combustion efficiency η_c*'),
+                'efficiency_breakdown.applied_delivery_efficiency_pct / 100': T('liq.cea.factor_delivery', 'applied delivery efficiency')
+            };
+            var np = cc.operating_point || {};
+            var html = '<p>' + kacir(tablo
+                ? T('liq.cea.static_table_note', 'This run fell back to the static 100-bar table. The table values are compared with NASA CEA at this run\'s chamber pressure and O/F (vacuum Isp at area ratio 200).')
+                : T('liq.cea.theory_is_cea', 'This run\'s theoretical numbers are NASA CEA\'s own (RocketCEA). The table compares them with what HRMA delivers after its loss chain; it is not an independent check of the thermochemistry.')) + '</p>';
+            html += '<p>' + kacir(TF('liq.cea.point_line',
+                { pc: sayi(np.chamber_pressure_bar, 3), mr: sayi(np.mixture_ratio, 3),
+                  eps: sayi(np.expansion_ratio, 3) },
+                'Operating point: Pc = {pc} bar, O/F = {mr}, ε = {eps}.')) + '</p>';
+            html += '<table class="data-table"><thead><tr><th>'
+                + kacir(T('liq.cea.col_quantity', 'Quantity')) + '</th><th>'
+                + kacir(T('liq.cea.col_unit', 'Unit')) + '</th><th>'
+                + kacir(tablo ? T('liq.cea.col_table', 'HRMA static table')
+                              : T('liq.cea.col_hrma', 'HRMA (published, delivered)')) + '</th><th>'
+                + kacir(tablo ? T('liq.cea.col_cea', 'NASA CEA')
+                              : T('liq.cea.col_cea_theory', 'NASA CEA (theoretical)')) + '</th><th>'
+                + kacir(T('liq.cea.col_delta', 'Δ %'))
+                + (tablo ? '' : '</th><th>' + kacir(T('liq.cea.col_explained', 'Explained by')))
+                + '</th></tr></thead><tbody>';
+            (cc.rows || []).forEach(function (s) {
+                var b = basamak[s.quantity];
+                var d = (typeof s.delta_pct === 'number' && isFinite(s.delta_pct))
+                    ? ((s.delta_pct > 0 ? '+' : '') + numTxt(s.delta_pct, 3)) : '—';
+                var aciklama = '';
+                if (!tablo) {
+                    var eb = s.explained_by;
+                    if (s.relation === 'identical_source') {
+                        aciklama = T('liq.cea.identical_source', 'same number: HRMA publishes the CEA value');
+                    } else if (s.relation === 'different_definition') {
+                        aciklama = T('liq.cea.different_definition', 'different definition: HRMA γ is the equivalent exponent that reproduces the CEA thrust coefficient');
+                    } else if (eb && eb.exact === true && typeof eb.value === 'number') {
+                        aciklama = TF('liq.cea.explained_factor',
+                            { name: carpanAdi[eb.factor] || String(eb.factor), value: numTxt(eb.value * 100, 3) },
+                            '{name} = {value} % (exact)');
+                    } else {
+                        aciklama = T('liq.cea.explained_see_breakdown', 'not a single published factor; see the efficiency breakdown');
+                    }
+                }
+                html += '<tr><td>' + kacir(ad[s.quantity] || s.quantity) + '</td><td>'
+                    + kacir(String(s.unit || '')) + '</td><td class="num">'
+                    + sayi(s.hrma, b) + '</td><td class="num">'
+                    + sayi(s.cea, b) + '</td><td class="num">' + d
+                    + (tablo ? '' : '</td><td>' + kacir(aciklama)) + '</td></tr>';
+            });
+            html += '</tbody></table><div class="cea-meta">';
+            var cs = cc.cea_source || {};
+            html += '<p>' + kacir(TF('liq.cea.cea_source',
+                { version: String(cs.rocketcea_version || '—') },
+                'NASA CEA column: NASA CEA (Gordon & McBride, NASA RP-1311) through RocketCEA {version}, with RocketCEA\'s built-in propellant cards; infinite-area combustor, shifting equilibrium.')) + '</p>';
+            html += '<p>' + kacir(T('liq.cea.delta_note', 'Δ % = 100 × (HRMA − CEA) / CEA. No pass/fail threshold is applied. Advisory only: this comparison changes none of the numbers HRMA publishes.')) + '</p></div>';
+            kap.innerHTML = html;
         }
         
         // Hibrit sayfası paritesi: Motor Tasarımı tablosu + Motor Kesiti Plotly çizimi
@@ -3743,7 +4048,13 @@
             } else if (ag.status === 'not_applicable') {
                 abox.innerHTML = '<p style="font-size:12px;color:var(--hd-ink-dim,#7d97a5);">'
                     + esc(T('liq.cyc.autogenous', 'Autogenous pressurization')) + ': '
-                    + esc(ag.reason || T('liq.cyc.not_applicable', 'not applicable for this configuration')) + '</p>';
+                    // V301/DİL: gerekçe cümlesi çeviri kanalından (ölçüldü: TR'de
+                    // "Autogenous basınçlandırma: autogenous pressurisation is…"
+                    // yarı Türkçe yarı İngilizce basılıyordu); eşleşme yoksa aynen.
+                    + esc(ag.reason
+                          ? ((window.I18N && window.I18N.serverText)
+                             ? window.I18N.serverText(String(ag.reason)) : ag.reason)
+                          : T('liq.cyc.not_applicable', 'not applicable for this configuration')) + '</p>';
             }
 
             panel.style.display = shown ? '' : 'none';
@@ -5038,177 +5349,6 @@
             return out;
         }
 
-        // Ask AI Analysis
-        function askAI() {
-            if (!currentResults) {
-                showWarning(T('liq.msg.no_results_to_analyze_please_run', 'No results to analyze. Please run calculations first.'));
-                return;
-            }
-            
-            // Prepare AI-friendly JSON for liquid engine
-            const aiData = {
-                analysis_type: T('liq.msg.liquid_bipropellant_rocket_engine_design', "Liquid Bipropellant Rocket Engine Design"),
-                timestamp: new Date().toISOString(),
-                
-                input_parameters: {
-                    propellant_combination: currentResults.propellant_name,
-                    fuel_type: currentResults.fuel_type,
-                    oxidizer_type: currentResults.oxidizer_type,
-                    thrust_n: currentResults.thrust,
-                    chamber_pressure_bar: currentResults.chamber_pressure,
-                    mixture_ratio: currentResults.mixture_ratio,
-                    cooling_type: currentResults.cooling_type,
-                    injector_type: currentResults.injection_system.injector_type
-                },
-                
-                performance_results: {
-                    isp_sea_level_sec: currentResults.isp_sea_level,
-                    isp_vacuum_sec: currentResults.isp_vacuum,
-                    c_star_ms: currentResults.c_star,
-                    chamber_temperature_k: currentResults.chamber_temperature,
-                    thrust_to_weight_ratio: currentResults.thrust_to_weight,
-                    mixture_ratio_efficiency_percent: currentResults.mixture_ratio_efficiency,
-                    total_mass_flow_kgs: currentResults.total_mass_flow
-                },
-                
-                engine_geometry: {
-                    // throat/exit backend'den METRE gelir, chamber mm (bkz. buildLiquidVizData notu)
-                    throat_diameter_mm: currentResults.throat_diameter * 1000,
-                    exit_diameter_mm: currentResults.exit_diameter * 1000,
-                    expansion_ratio: currentResults.expansion_ratio,
-                    chamber_diameter_mm: currentResults.chamber_diameter,
-                    chamber_length_mm: currentResults.chamber_length
-                },
-                
-                subsystems: {
-                    cooling_system: {
-                        type: currentResults.cooling_type,
-                        total_heat_load_kw: currentResults.cooling_system.total_heat_load,
-                        coolant_flow_rate_kgs: currentResults.cooling_system.coolant_flow_rate
-                    },
-                    injection_system: {
-                        type: currentResults.injection_system.injector_type,
-                        fuel_velocity_ms: currentResults.injection_system.fuel_injection_velocity,
-                        ox_velocity_ms: currentResults.injection_system.ox_injection_velocity,
-                        pressure_drops_bar: {
-                            fuel: currentResults.injection_system.fuel_pressure_drop,
-                            oxidizer: currentResults.injection_system.ox_pressure_drop
-                        }
-                    },
-                    feed_system: {
-                        turbopumps_required: currentResults.turbopump_system.turbopumps_required,
-                        total_pump_power_kw: currentResults.turbopump_system.total_pump_power || 0
-                    }
-                },
-                
-                propellant_properties: {
-                    fuel_density_kgm3: currentResults.fuel_density,
-                    oxidizer_density_kgm3: currentResults.oxidizer_density,
-                    molecular_weight_gmol: currentResults.molecular_weight,
-                    gamma: currentResults.gamma
-                }
-            };
-            
-            // Create prompt
-            const prompt = `Please analyze this liquid bipropellant rocket engine design and provide insights:
-
-${JSON.stringify(aiData, null, 2)}
-
-Please provide:
-1. Performance assessment (Isp efficiency, thrust-to-weight ratio)
-2. Propellant combination analysis and optimization suggestions
-3. Cooling system adequacy and recommendations
-4. Injection system design evaluation
-5. Feed system (tank-fed vs turbopump) recommendations
-6. Operational considerations (ignition, throttling, restart capability)
-7. Manufacturing complexity and cost considerations
-8. Comparison to existing engines (F-1, Merlin, RS-25, etc.)`;
-            
-            // Copy to clipboard
-            // OH-GT-07 (ÖH D34) — FAIL-CLOSED: güvensiz bağlamda
-            // `navigator.clipboard` UNDEFINED'dır ve `.writeText` SENKRON
-            // fırlatır; o hâlde `.catch` hiç koşmaz ve özellik sessizce
-            // kaybolurdu. Söz burada kurulur.
-            let panoSozu;
-            try {
-                panoSozu = (navigator.clipboard && navigator.clipboard.writeText)
-                    ? navigator.clipboard.writeText(prompt)
-                    : Promise.reject(new Error('clipboard API unavailable'));
-            } catch (err) {
-                panoSozu = Promise.reject(err);
-            }
-            panoSozu.then(() => {
-                showSuccess(T('liq.msg.liquid_engine_analysis_data_copied_to', 'Liquid engine analysis data copied to clipboard! Paste it into your favorite AI assistant.'));
-            }).catch(err => {
-                console.error(T('liq.msg.failed_to_copy', 'Failed to copy:'), panoHataMetni(err));
-                const uyari = T('liq.msg.failed_to_copy_data_check_console', 'Failed to copy data. Check console for details.');
-                showError(uyari);
-                // Kopyalanamadı ama veri kaybolmaz: pencerede açılır.
-                showAIDataModal(prompt, uyari);
-            });
-        }
-
-        // ------------------------------------------------------------------
-        // OH-GT-07 (ÖH D34, 21 Eylül) — PANO BAŞARISIZSA VERİ KAYBOLMAZ
-        // ------------------------------------------------------------------
-        // ÖLÇÜLDÜ (docs/scofield/raw/OH/D34/js-davranis/a1/once.json K1):
-        // bu sayfada pano reddedilince ekranda HİÇBİR ŞEY açılmıyordu
-        // (`hata_dalinda_modal: false`, `modal_fonksiyonu_tanimli: false`)
-        // ve konsola boş nesne "{}" düşüyordu. Veri o anda bellekte hazır;
-        // artık elle kopyalanabilecek bir pencerede gösterilir.
-        function panoHataMetni(err) {
-            if (!err) return 'unknown clipboard error';
-            if (err.name || err.message) {
-                return String(err.name || 'Error') + ': '
-                    + String(err.message || '');
-            }
-            return String(err);
-        }
-
-        function kacisliMetin(s) {
-            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-        }
-
-        /** Pano reddedildiğinde açılan veri penceresi.
-         *  Kapatma: sağ üstteki simge, arka perdeye tıklama ya da Esc.
-         *  NOT (devir): kapatma düğmesi metin yerine "×" simgesi taşıyor;
-         *  bu sayfanın sözlüğünde (i18n_pages.js) "Kapat" karşılığı olan
-         *  bir anahtar YOK ve o dosya metin-i18n kulvarının sahasıdır.
-         *  Anahtar açıldığında düğmeye etiket verilebilir. */
-        function showAIDataModal(metin, girisMetni) {
-            var eski = document.getElementById('aiModal');
-            if (eski && eski.remove) eski.remove();
-            var kapsayici = document.createElement('div');
-            kapsayici.id = 'aiModal';
-            kapsayici.setAttribute('role', 'dialog');
-            kapsayici.style.cssText = 'position:fixed;top:0;left:0;width:100%;'
-                + 'height:100%;background:rgba(0,0,0,0.8);z-index:9999;'
-                + 'display:flex;align-items:center;justify-content:center;';
-            kapsayici.innerHTML = `
-                <div style="background:#fff;color:#111;padding:24px;border-radius:10px;max-width:80%;max-height:80%;overflow-y:auto;">
-                    <div style="display:flex;align-items:center;gap:16px;">
-                        <h2 style="margin:0;flex:1;">${T('liq.ui.ask_ai_to_analyze_results', 'Ask AI to Analyze Results')}</h2>
-                        <button type="button" id="aiModalClose" style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:#111;">&times;</button>
-                    </div>
-                    <p style="margin:12px 0;">${kacisliMetin(girisMetni || '')}</p>
-                    <pre style="background:#f5f5f5;padding:15px;border-radius:5px;overflow-x:auto;max-height:400px;white-space:pre-wrap;">${kacisliMetin(metin)}</pre>
-                </div>
-            `;
-            function kapat() {
-                document.removeEventListener('keydown', esc);
-                if (kapsayici.remove) kapsayici.remove();
-            }
-            function esc(e) { if (e.key === 'Escape') kapat(); }
-            kapsayici.addEventListener('click', function (e) {
-                if (e.target === kapsayici) kapat();
-            });
-            document.body.appendChild(kapsayici);
-            var dugme = document.getElementById('aiModalClose');
-            if (dugme) dugme.addEventListener('click', kapat);
-            document.addEventListener('keydown', esc);
-        }
-        
         // Tab Management Functions
         function showAnalysisTab(tabName) {
             // Hide all tab contents
@@ -6024,6 +6164,15 @@ Please provide:
             liquidPlot(div, [], layout, { displayModeBar: false });
         }
 
+        // V301/K-C1 (NK-71): kullanıcı kütle alanına yazınca tohumlama onu
+        // bir daha ezmez (katı sayfasının data-user-override deseni).
+        document.addEventListener('input', function (e) {
+            const t = e.target;
+            if (t && (t.id === 'traj_initial_mass' || t.id === 'traj_final_mass')) {
+                t.dataset.userOverride = 'true';
+            }
+        });
+
         // TASK 5 — Yörünge > Yörünge Analizi: form girdileriyle /api/trajectory-analysis
         // çağrılır, dönen Plotly figürü çizilir. thrust/isp currentResults'tan otomatik.
         async function computeTrajectory() {
@@ -6039,10 +6188,18 @@ Please provide:
             // Hesap yokken `thrust: 50000` / `isp: 300` uydurulup sunucuya
             // gönderiliyor, dönen grafik kullanıcının motoruymuş gibi
             // çiziliyordu. Bu gösterim yedeği değil, çözücü girdisi.
-            const trThrust = (typeof cr.thrust === 'number' && cr.thrust > 0)
-                ? cr.thrust : null;
-            const trIsp = [cr.isp_vacuum, cr.isp_sea_level]
-                .find(v => typeof v === 'number' && v > 0) ?? null;
+            // V301/K-C1 (NK-71) — İTKİ VE Isp AYNI KOŞULDAN. ÖLÇÜLDÜ
+            // (K-C1/yorunge_once.json): gövde vakum Isp'yi (337,4 s) deniz
+            // seviyesi itkisiyle (10 kN) eşliyordu; uç F·t_b/(Isp·g0) ile
+            // m_i − m_f'yi kıyaslıyor ve motorla TUTARLI kütlelerde bile
+            // (2000 + ṁ·30 s / 2000 kg) %27,4 farkla 422 veriyordu. Çift
+            // artık yanıtın kendi deniz seviyesi çiftidir
+            // (design_summary.performance thrust_sl_N + isp_sl_s;
+            // F = ṁ·Isp·g0 özdeşliği), yoksa hüküm verilmez.
+            const _perf = ((cr.design_summary || {}).performance) || {};
+            const _pozitif = v => (typeof v === 'number' && isFinite(v) && v > 0);
+            const trThrust = _pozitif(_perf.thrust_sl_N) ? _perf.thrust_sl_N : null;
+            const trIsp = _pozitif(_perf.isp_sl_s) ? _perf.isp_sl_s : null;
             // v2.6.27 (ÖH D15 · P12bB1-07): itki ve Isp motordan alınıyordu ama
             // yanma süresi FORM alanından geliyordu; ikisi birbirinden bağımsız
             // olduğu için itici bütçesi 24,0× tutarsızdı (form 3000 kg / 30 s
@@ -6061,6 +6218,22 @@ Please provide:
                         + 'computed thrust and specific impulse.')
                     + '</p>';
                 return;
+            }
+            // V301/K-C1 (NK-71) — KÜTLELER MOTORDAN TOHUMLANIR. Formun
+            // 5000/2000 kg değerleri hiçbir motora ait değildi. Kullanıcı
+            // alana dokunmadıysa (data-user-override yok) ilk kütle = motor
+            // kuru kütlesi + itici kütlesi, son kütle = motor kuru kütlesi
+            // (design_summary.masses; sonuç yalnız MOTORUN yörüngesidir,
+            // gövde/faydalı yük eklenmemiştir). Kullanıcının yazdığı değer
+            // EZİLMEZ.
+            const _mas = ((cr.design_summary || {}).masses) || {};
+            if (_pozitif(_mas.engine_mass_kg) && _pozitif(_mas.propellant_mass_kg)) {
+                const _tohum = (id, v) => {
+                    const el = document.getElementById(id);
+                    if (el && el.dataset.userOverride !== 'true') el.value = v.toFixed(3);
+                };
+                _tohum('traj_initial_mass', _mas.engine_mass_kg + _mas.propellant_mass_kg);
+                _tohum('traj_final_mass', _mas.engine_mass_kg);
             }
             const mBas = getv('traj_initial_mass', 5000);
             const mSon = getv('traj_final_mass', 2000);
@@ -6097,6 +6270,18 @@ Please provide:
                     body: JSON.stringify(body)
                 });
                 const d = await resp.json();
+                if (!resp.ok) {
+                    // V301/K-C1 (NK-71): ham makine kodu yerine HRMAReject
+                    // metni; bütçe reddinde iki kütle ve fark sözlükten.
+                    const govde = Object.assign({}, d);
+                    if (d.error === 'inconsistent_propellant_budget' && d.message_params) {
+                        govde.message = TF('liq.js.trajectory_propellant_budget_mismatch',
+                            d.message_params, d.message || d.error);
+                    }
+                    throw new Error(globalThis.HRMAReject
+                        ? HRMAReject.metni(govde, resp.status)
+                        : (govde.message || d.error || ('HTTP ' + resp.status)));
+                }
                 if (d.status !== 'success' || !d.plot_data) {
                     throw new Error(d.error || T('liq.msg.trajectory_data_could_not_be_retrieved', 'Trajectory data could not be retrieved'));
                 }
@@ -6297,7 +6482,7 @@ Please provide:
 
                 addCard(T('liq.msg.thermal_protection', 'Thermal Protection'),
                     row(T('liq.ui.cooling_type_2', 'Cooling Type'), tprot.cooling_type || '—') +
-                    row(T('liq.js.row_coolant', 'Coolant'), tprot.coolant_type || '—') +
+                    row(T('liq.js.row_coolant', 'Coolant'), ((typeof _liqAdi === 'function') ? _liqAdi('fuel_type', tprot.coolant_type) : (tprot.coolant_type || '—'))) +
                     row(T('liq.msg.channel_size', 'Channel Size'), tprot.channel_dimensions || '—') +
                     row(T('liq.msg.channel_count', 'Channel Count'), hrmaFmt(tprot.cooling_channels, 0)) +
                     row(T('liq.msg.coolant_velocity', 'Coolant Velocity'), hrmaFmt(tprot.coolant_velocity, 1, 'm/s')) +
@@ -6609,78 +6794,35 @@ Please provide:
             });
         }
 
-        // ==================================================================
-        // VERİ TABANI ROZETLERİ — /api/database-status (advanced.html deseni)
-        // Sınıf üzerinden güncellenir; sayfaya rozet eklendikçe kod değişmez.
-        // ==================================================================
-        function setNistStatus(text, cls) {
-            document.querySelectorAll('.nist-status').forEach(function (el) {
-                el.textContent = text;
-                el.className = 'database-status nist-status ' + cls;
-            });
-        }
-        function setCeaStatus(text, cls) {
-            document.querySelectorAll('.cea-status').forEach(function (el) {
-                el.textContent = text;
-                el.className = 'database-status cea-status ' + cls;
-            });
-        }
-        async function checkDatabaseStatus() {
-            try {
-                const response = await fetch('/api/database-status');
-                const status = await response.json();
-
-                if (status.nist && status.nist.status === 'connected') {
-                // ÖH D24 / P17B3-05 — ERİŞİLEBİLİRLİK ≠ KÖKEN.
-                // ÖLÇÜLDÜ (P17 tur-06): aynı tasarımın iki koşumunda
-                // rozet 'NIST WEBBOOK CONNECTED' ⟷ 'HRMA OXIDIZER
-                // DATABASE (CACHED)' arasında oynuyordu, sayısal sonuç
-                // 15.925/15.925 yaprak BİT-ÖZDEŞTİ. Sebep: TEK rozete İKİ
-                // ayrı olgu yazılıyordu — uzak ucun erişilebilirliği ve
-                // hesabın gerçek kaynağı. D23 veri katmanı gerçeği
-                // yayımladı (`supplies_calculation_data` +
-                // `calculation_data_source`); rozet artık ikisini BİRLİKTE
-                // söyler ve künye koşumdan koşuma oynamaz. Uç bu alanı
-                // beyan etmiyorsa köken İDDİA EDİLMEZ (fail-closed).
-                var _n = status.nist || {};
-                var _kaynak = _n.calculation_data_source;
-                var _metin;
-                if (_n.supplies_calculation_data === false && _kaynak) {
-                    _metin = T('liq.ui.nist_webbook_reachable_local',
-                        'NIST WebBook reachable - calculation data: ')
-                        + String(_kaynak);
-                } else if (_n.supplies_calculation_data === false) {
-                    _metin = T('liq.ui.nist_webbook_reachable_not_source',
-                        'NIST WebBook reachable - not the source of the '
-                        + 'numbers used by this calculation');
-                } else {
-                    _metin = T('liq.ui.nist_webbook_reachable_undeclared',
-                        'NIST WebBook reachable - the endpoint does not '
-                        + 'declare whether it supplied any number here');
-                }
-                setNistStatus(_metin, 'status-connected');
-                } else {
-                    setNistStatus(T('liq.msg.nist_webbook_offline', 'NIST WebBook Offline'), 'status-disconnected');
-                }
-                if (status.cea && status.cea.status === 'connected') {
-                    setCeaStatus(T('liq.ui.nasa_cea_connected', 'NASA CEA Connected'), 'status-connected');
-                } else {
-                    setCeaStatus(T('liq.msg.nasa_cea_offline', 'NASA CEA Offline'), 'status-disconnected');
-                }
-            } catch (error) {
-                console.error(T('liq.msg.database_status_check_failed', 'Database status check failed:'), error);
-                // ÖH D24 · OH-D21-07 — DENETİM PATLARSA 'Offline' DEMEK
-                // KAZANILMAMIŞ HÜKÜMDÜR. Bu dal yalnız /api/database-status
-                // ÇAĞRISININ kendisi başarısız olduğunda çalışır (ağ hatası,
-                // JSON gövdesi yok, uç 5xx): hizmetin kapalı olduğu değil,
-                // DENETLENEMEDİĞİ bilinir. Rozet bu yüzden açılıştaki
-                // 'denetlenmedi' rengine (status-unknown) döner — kapalı
-                // beyanı yalnız ucun KENDİSİ 'connected değil' dediğinde
-                // verilir (yukarıdaki else dalı, hüküm kazanılmış).
-                setNistStatus(T('liq.msg.nist_webbook_check_failed', 'NIST WebBook - status check failed'), 'status-unknown');
-                setCeaStatus(T('liq.msg.nasa_cea_check_failed', 'NASA CEA - status check failed'), 'status-unknown');
+        // v3.0.1 K kulvarı — sonuç tablosundaki "Data Sources" satırı.
+        // ÖLÇÜLEN KUSUR: satır DÖRT SABİT metin basıyordu ("NASA CEA
+        // Database", "NIST Thermophysical Properties", "Flight Heritage
+        // Data" ve yeşil "Real-time propellant data integration"); hiçbiri
+        // koşumdan okunmuyordu — gerçek zamanlı bir bütünleşme YOKTUR, NIST
+        // bu hesaba sayı vermez (sahte veri yasağı). Satır artık koşumun
+        // KENDİ künyesini (`combustion_data_source`, cea_bridge) söyler;
+        // künye yoksa kaynak İDDİA EDİLMEZ.
+        function liquidCombustionSourceText(results) {
+            var src = results && results.combustion_data_source;
+            var metin;
+            if (src === 'rocketcea') {
+                metin = T('liq.js.ds_combustion_cea', 'Combustion properties: NASA CEA through RocketCEA, solved at the chamber pressure and mixture ratio of this run (ideal equilibrium).');
+            } else if (src === 'static_table') {
+                metin = T('liq.js.ds_combustion_table', 'Combustion properties: static 100-bar anchor table (RocketCEA unavailable or propellant pair not mapped); no chamber-pressure dependence.');
+            } else {
+                metin = T('liq.js.ds_combustion_unstated', 'Combustion properties: the server did not state their source for this run.');
             }
+            return '<div>' + metin + '</div><div>' + T('liq.js.ds_propellant_cards', 'Propellant properties: as stated on each propellant card (server source note).') + '</div>';
         }
+
+        // v3.0.1 K kulvarı — VERİ TABANI ROZETLERİ SÖKÜLDÜ (setNistStatus,
+        // setCeaStatus, checkDatabaseStatus ve açılıştaki /api/database-status
+        // yoklaması). Ölçülen kök neden (Ayberk tur 1): CEA kolu ağ çağrısı
+        // yapmayan yerel bir tablodur ve DAİMA 'local' döner → her makinede
+        // "NASA CEA Offline"; NIST kolunun ayrıştırıcısı NIST'in HTML'iyle
+        // eşleşmez → "NIST WebBook Offline". Bu sayfanın yanma verisi
+        // cea_bridge'ten (RocketCEA) gelir ve kaynağı her koşumun
+        // `combustion_data_source` künyesinde yayımlanır.
 
         // ==================================================================
         // UYARI PANELİ — app.js displayWarnings ile aynı DOM sözleşmesi.
@@ -7911,9 +8053,9 @@ Please provide:
                         <div>
                             <h4>${T('liq.js.component_details', 'Component Details:')}</h4>
                             <ul>
-                                <li><strong>${T('liq.js.injector', 'Injector:')}</strong> ${componentDetails.injector.type} (${componentDetails.injector.hole_count} holes)</li>
-                                <li><strong>${T('liq.js.cooling', 'Cooling:')}</strong> ${componentDetails.cooling.type} (${componentDetails.cooling.channel_count} channels)</li>
-                                <li><strong>${T('liq.js.coolant', 'Coolant:')}</strong> ${componentDetails.cooling.coolant}</li>
+                                <li><strong>${T('liq.js.injector', 'Injector:')}</strong> ${((typeof _liqAdi === 'function') ? _liqAdi('injector_type', componentDetails.injector.type) : (componentDetails.injector.type))} (${TF('liq.js.n_holes', { n: componentDetails.injector.hole_count }, '{n} holes')})</li>
+                                <li><strong>${T('liq.js.cooling', 'Cooling:')}</strong> ${((typeof _liqAdi === 'function') ? _liqAdi('cooling_type', componentDetails.cooling.type) : (componentDetails.cooling.type))} (${TF('liq.js.n_channels', { n: componentDetails.cooling.channel_count }, '{n} channels')})</li>
+                                <li><strong>${T('liq.js.coolant', 'Coolant:')}</strong> ${((typeof _liqAdi === 'function') ? _liqAdi('fuel_type', componentDetails.cooling.coolant) : (componentDetails.cooling.coolant))}</li>
                             </ul>
                         </div>
                         <div>
@@ -8432,7 +8574,7 @@ Please provide:
         updatePropellantPreview();
         markUnwiredInputs();
         markInputScopeNotes();
-        checkDatabaseStatus();
+        // v3.0.1 K: checkDatabaseStatus() (rozet yoklaması) söküldü.
 
         // Gimbal girdileri değişince panel tazelenir — ama yalnız bir hesap
         // sonucu VARSA (çözülmüş itki olmadan panel sayı basmaz).
@@ -8459,6 +8601,8 @@ Please provide:
          import_ui.js, sixdof_panel ve validation panelinden önce yüklenmeli) -->
     <script src="/static/js/import_ui.js"></script>
     <script src="/static/js/project_bar.js"></script>
+    <!-- V301/N-YZ: "Yapay Zekâ ile Tasarla" ortak modülü (üç sayfa aynı). -->
+    <script src="/static/js/ai_assistant.js"></script>
     <script src="/static/js/step_import_ui.js"></script>
     <!-- Three.js (sabit sürüm) + OrbitControls + parametrik motor simülasyon güvertesi -->
     <script src="/static/vendor/three-0.128.0.min.js"></script>
@@ -8615,6 +8759,8 @@ Please provide:
         });
     </script>
     <!-- Analysis Dock: önce çekirdek, sonra paneller (register sırası sözleşmesi) -->
+    <!-- v3.0.1 N-girdi-1: ortak alan ipucu bileşeni (HRMAHelp) — güverte ve panellerden ÖNCE -->
+    <script src="/static/js/field_help.js"></script>
     <script src="/static/js/analysis_dock.js"></script>
     <script src="/static/js/panels/structural_panel.js"></script>
     <script src="/static/js/panels/thermal_panel.js"></script>
