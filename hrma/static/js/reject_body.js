@@ -40,6 +40,90 @@
         }).filter(function (t) { return t; });
     }
 
+    /** V301/DİL-2 (DİL §6 AÇIK 11, L-D DEVİR 5): alanın EKRANDAKİ etiketi.
+     *
+     * ÖLÇÜLDÜ (26-27 Eki): katı/sıvı ret iletisi `core_diameter
+     * (core_too_large_for_grain)` / `chamber_pressure (out_of_range)` ile,
+     * hibrit bildirimi `thrust (not_supplied) missing_fields: thrust`
+     * kuyruğuyla bitiyordu — TR ekranda ham makine adı. Alan formda
+     * işaretli; iletide de kullanıcının gördüğü etiketle anılır. Kural
+     * app.js `alanEkranEtiketi` ile aynı: <label for> içindeki ilk çevrili
+     * metin (ipucu balonu ve birim hariç). Etiket bulunamazsa null (çağıran
+     * makine adını AYNEN basar — uydurma ad yok). Makine adları kaybolmaz:
+     * `makineEki` onları bildirimin ipucuna (title) taşır. */
+    function _etiket(ad) {
+        var d = kok.document;
+        if (typeof ad !== 'string' || !ad || !d
+                || typeof d.querySelector !== 'function') {
+            return null;
+        }
+        var lab = null;
+        try {
+            var el = (typeof d.getElementById === 'function')
+                ? d.getElementById(ad) : null;
+            lab = (el && el.labels && el.labels.length) ? el.labels[0]
+                : d.querySelector('label[for="' + ad.replace(/["\\]/g, '') + '"]');
+        } catch (e) { lab = null; }
+        if (!lab) return null;
+        var ilk = lab.querySelector('[data-i18n]:not(.unit):not(.tooltip-text)');
+        var t = ilk ? ilk.textContent : '';
+        if (!t && typeof lab.cloneNode === 'function') {
+            var kopya = lab.cloneNode(true);
+            Array.prototype.forEach.call(
+                kopya.querySelectorAll('.tooltip, .unit'),
+                function (x) { if (x.parentNode) x.parentNode.removeChild(x); });
+            t = kopya.textContent;
+        }
+        t = String(t || '').replace(/\s+/g, ' ').trim();
+        return t || null;
+    }
+
+    /** Ekran kipi: tarayıcıda (DOM + sözlük) alan adları etiketle basılır. */
+    function _ekranKipi() {
+        var d = kok.document, I = kok.I18N;
+        return !!(d && typeof d.querySelector === 'function'
+                  && I && typeof I.tf === 'function');
+    }
+
+    /** Yapılı alan listesi → ekran dizeleri (etiket; etiket yoksa ad). */
+    function _alanEtiketleri(ham, haric) {
+        if (!Array.isArray(ham)) return [];
+        var gorulen = {};
+        return ham.map(function (x) {
+            var ad = (typeof x === 'string') ? x
+                : ((x && typeof x.field === 'string') ? x.field : '');
+            if (!ad || (haric && haric[ad]) || gorulen[ad]) return '';
+            gorulen[ad] = true;
+            return _etiket(ad) || ad;
+        }).filter(function (t) { return t; });
+    }
+
+    function _adlar(ham) {
+        var o = {};
+        if (!Array.isArray(ham)) return o;
+        ham.forEach(function (x) {
+            var ad = (typeof x === 'string') ? x
+                : ((x && typeof x.field === 'string') ? x.field : '');
+            if (ad) o[ad] = true;
+        });
+        return o;
+    }
+
+    /** Ret gövdesinin makine eki: '[durum] ad (gerekçe) · missing_fields: …'.
+     *  Bildirim kutusunun ipucuna (title) iner; ekran metnine girmez. */
+    function makineEki(govde) {
+        if (!govde || typeof govde !== 'object') return '';
+        var p = [];
+        if (typeof govde.status === 'string' && govde.status !== 'error') {
+            p.push('[' + govde.status + ']');
+        }
+        var g = _alanlar(govde.invalid_fields);
+        if (g.length) p.push(g.join(', '));
+        var e = _alanlar(govde.missing_fields);
+        if (e.length) p.push('missing_fields: ' + e.join(', '));
+        return p.join(' ');
+    }
+
     /** Sözlükten çeviri; sözlük yoksa ya da anahtar yoksa `yedek`. */
     function _ceviri(anahtar, params, yedek) {
         var I = kok.I18N;
@@ -77,6 +161,26 @@
         }).filter(function (t) { return t; });
     }
 
+    /** Ret gövdesinin makine durum kodu (``[invalid_input]`` öneki) için
+     *  etkin dilde karşılık.
+     *
+     * V301/K-C1 (K-A DEVİR 13): önek TR arayüzde İngilizce makine kodu
+     * olarak kalıyordu (katı, sıvı ve hibrit sayfalarında aynı). Karşılık
+     * TEK yerde, i18n_charts.js ``HAT_ONEKLERI`` sözlüğündedir ve
+     * ``I18N.serverText`` onu ``[kod] metin`` biçiminde zaten çözüyor; burada
+     * yalnız o çözücü sorulur. Sözlük yüklü değilse ya da kod tanınmıyorsa
+     * kod AYNEN kalır (uydurma çeviri yok).
+     */
+    function _kodMetni(kod) {
+        var I = kok.I18N;
+        if (!I || typeof I.serverText !== 'function') return kod;
+        var nobet = '\u2060';
+        var t = I.serverText('[' + kod + '] ' + nobet);
+        var m = (typeof t === 'string')
+            ? /^\[([^\]]+)\]\s+\u2060$/.exec(t) : null;
+        return m ? m[1] : kod;
+    }
+
     /** Sunucu ret gövdesi → tek satır kullanıcı metni.
      *
      * Sıra: [makine kodu] cümle · geçersiz alanlar · eksik alanlar.
@@ -87,7 +191,7 @@
         var parcalar = [];
         var kod = (typeof govde.status === 'string'
                    && govde.status !== 'error') ? govde.status : '';
-        if (kod) parcalar.push('[' + kod + ']');
+        if (kod) parcalar.push('[' + _kodMetni(kod) + ']');
         var cumle = (typeof govde.message === 'string' && govde.message)
             ? govde.message
             : ((typeof govde.error === 'string' && govde.error)
@@ -106,11 +210,33 @@
         }
         // Gerekçe satırları alan adlarını zaten taşır; `invalid_fields`
         // listesi ikinci kez basılmaz.
-        var gecersiz = (gerekceler !== null && gerekceler.length)
-            ? [] : _alanlar(govde.invalid_fields);
-        if (gecersiz.length) parcalar.push(gecersiz.join(', '));
-        var eksik = _alanlar(govde.missing_fields);
-        if (eksik.length) {
+        var ekran = _ekranKipi();
+        var gecersiz, eksik;
+        if (ekran) {
+            // V301/DİL-2: ekranda etiket; eksik listesindeki alan geçersiz
+            // listesinde ikinci kez anılmaz (L-D DEVİR 5: "thrust
+            // (not_supplied) missing_fields: thrust" aynı alanı iki kez,
+            // ikisinde de makine adıyla söylüyordu). Makine eki → title.
+            var eksikAd = _adlar(govde.missing_fields);
+            gecersiz = (gerekceler !== null && gerekceler.length)
+                ? [] : _alanEtiketleri(govde.invalid_fields, eksikAd);
+            eksik = _alanEtiketleri(govde.missing_fields, null);
+            if (gecersiz.length) {
+                parcalar.push(_ceviri('common.reject.fieldsLabel', null, 'Field:')
+                              + ' ' + gecersiz.join(', '));
+            }
+            if (eksik.length) {
+                parcalar.push(_ceviri('common.reject.missingLabel', null, 'Missing:')
+                              + ' ' + eksik.join(', '));
+            }
+            API.sonMakineEki = makineEki(govde);
+        } else {
+            gecersiz = (gerekceler !== null && gerekceler.length)
+                ? [] : _alanlar(govde.invalid_fields);
+            eksik = _alanlar(govde.missing_fields);
+            if (gecersiz.length) parcalar.push(gecersiz.join(', '));
+        }
+        if (!ekran && eksik.length) {
             // Eksik alan ile geçersiz alan AYRI hükümlerdir; birleştirmek
             // kullanıcıya "yanlış girdin" der, oysa uç "hiç göndermedin"
             // diyor. Ayrımı koruyan ön ek sunucunun kendi anahtarıdır.
@@ -124,7 +250,17 @@
                 .filter(function (d) { return typeof d === 'string' && d; })
                 .join(' · '));
         }
-        return parcalar.length ? parcalar.join(' ') : ('HTTP ' + durum);
+        var sonuc = parcalar.length ? parcalar.join(' ') : ('HTTP ' + durum);
+        if (ekran) API.sonMetin = sonuc;
+        return sonuc;
+    }
+
+    /** Bildirim kutusunun ipucu: ileti son ret metnini taşıyorsa onun makine
+     *  eki, yoksa boş (bayat ek başka bir bildirime yapışmaz). */
+    function ipucu(ileti) {
+        var m = API.sonMetin, e = API.sonMakineEki;
+        if (!m || !e || typeof ileti !== 'string') return '';
+        return (ileti.indexOf(m) !== -1) ? e : '';
     }
 
     /** `Response` → kullanıcı metni. Gövde JSON değilse ham metne düşer.
@@ -152,7 +288,9 @@
         return oku(response).then(function (m) { return new Error(m); });
     }
 
-    var API = { metni: metni, oku: oku, hata: hata };
+    var API = { metni: metni, oku: oku, hata: hata, makineEki: makineEki,
+                etiket: _etiket,
+                ipucu: ipucu, sonMetin: '', sonMakineEki: '' };
     kok.HRMAReject = API;
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = API;

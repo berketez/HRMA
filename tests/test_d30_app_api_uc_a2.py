@@ -108,16 +108,35 @@ class TestP16B214KasaCidarKapisi:
     ÖH D24 a1 / P16B2-06). O yola ikinci bir kapı KURULMADI.
     """
 
-    @pytest.mark.parametrize('t_mm', [50.0, 100.0])
-    def test_cidar_ic_yaricapa_ulasirsa_hukum_yayimlanmaz(self, C, t_mm):
+    # V301/K-D (T-çapa-B DEVİR 1) — ÖNCÜL ÖLÇÜMLE YENİLENDİ. Gövde tasarım
+    # noktası kipindedir (5000 N / 3 s): istekteki Ø100 yalnız boyutlandırma
+    # tohumudur, motor taneyi Ø124,45 mm'ye boyutlar. K-A (KT-01/KT-03)
+    # kapının hoop yarıçapını istek alanı yerine motorun KENDİ kasa iç
+    # yarıçapından okutuyor (tane + 2·astar = 128,45 mm -> r = 64,226 mm).
+    # "iç yarıçap 50 mm" öncülü bu yüzden yanlıştı; kalınlık artık yanıtın
+    # yayımladığı kasa iç çapından türetilir: yarıçapın TAM KENDİSİ ve
+    # kabul bandının üst ucu (100 mm). İkisi de r'nin üstünde/üzerinde.
+    @pytest.fixture(scope='class')
+    def kasa_ic_yaricapi(self, C):
+        r, g = _kati_iste(C)
+        assert r.status_code == 200
+        return float(g['case_bore']['case_inner_diameter_mm']) / 2.0
+
+    @pytest.mark.parametrize('kip', ['yaricapin_kendisi', 'bandin_ust_ucu'])
+    def test_cidar_ic_yaricapa_ulasirsa_hukum_yayimlanmaz(
+            self, C, kasa_ic_yaricapi, kip):
+        t_mm = (kasa_ic_yaricapi if kip == 'yaricapin_kendisi' else 100.0)
+        assert t_mm >= kasa_ic_yaricapi
         r, g = _kati_iste(C, case_thickness=t_mm)
         assert r.status_code == 422, (
-            'case_thickness=%g mm (iç yarıçap 50 mm) hâlâ HTTP %s ve emniyet '
-            'katsayısı yayımlanıyor' % (t_mm, r.status_code))
+            'case_thickness=%g mm (iç yarıçap %g mm) hâlâ HTTP %s ve emniyet '
+            'katsayısı yayımlanıyor' % (t_mm, kasa_ic_yaricapi,
+                                        r.status_code))
         assert g.get('error') == 'invalid_case_geometry'
         kunye = (g.get('invalid_fields') or [{}])[0]
         assert kunye.get('reason') == 'case_thickness_at_or_above_inner_radius'
-        assert kunye.get('chamber_inner_radius_mm') == pytest.approx(50.0)
+        assert kunye.get('chamber_inner_radius_mm') == pytest.approx(
+            kasa_ic_yaricapi, rel=1e-12)
         assert _case_analizi(g).get('safety_factor') is None
 
     def test_saglikli_envanter_gevsemez(self, C):
@@ -128,8 +147,16 @@ class TestP16B214KasaCidarKapisi:
         # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 2,404567428606375 /
         # 49,99496445310755 geri çözülmüş APCP dörtlüsündendi (MEOP ve
         # tasarım noktası); CEA denge dörtlüsüyle ölçülen yeni taban.
-        for t_mm, beklenen_sf in ((2.4, 2.416737508317951),
-                                  (49.9, 50.24800069377741)):
+        # V301/K-D: 2,416737508317951 / 50,24800069377741 -> aşağıdakiler.
+        # İki birleşmenin ölçülmüş toplamı (iki SF de AYNI 0,96638 çarpanıyla
+        # kaydı, yani yalnız hoop yarıçapı ve MEOP değişti):
+        #   K-A KT-03: kasa = tane + 2·astar (+4 mm): 124,134 -> 128,134 mm
+        #     (CEA kapalı koşu: SF 2,3412936 / 48,6793964 = eski × 0,96879);
+        #   V301/N-CEA-2: termokimya motorun Pc'sinde CEA'dan, boyutlanan
+        #     tane 124,134 -> 124,453 mm (× 0,99752).
+        # Kanıt: docs/scofield/raw/OH/V301/kati-sivi/K-D/capa_olcum.json.
+        for t_mm, beklenen_sf in ((2.4, 2.33548899546175),
+                                  (49.9, 48.558708697308894)):
             r, g = _kati_iste(C, case_thickness=t_mm)
             assert r.status_code == 200, 'meşru cidar %g reddedildi' % t_mm
             ca = _case_analizi(g)
@@ -138,25 +165,27 @@ class TestP16B214KasaCidarKapisi:
             assert ca.get('safety_factor') == pytest.approx(beklenen_sf,
                                                             rel=1e-9)
 
-    @pytest.mark.parametrize('deger', [101, 'abc', True])
-    def test_dusen_deger_yolu_bit_ayni_kalir(self, C, deger):
-        """İLK YARININ ÇÜRÜTÜLMESİ: hüküm ZATEN geri çekiliyor; bu kulvar
-        oraya ikinci bir kapı koymadı (D24 bekçisi + hibrit kardeş alanın
-        sözleşmesi korunur)."""
+    # V301/K-D — TERS KAPIYA ÇEVRİLDİ (K-A KT-06/KT-13, ana model kararı 3;
+    # kardeş bekçi test_d24_app_api_a1::TestP16B206KasaCidariTekKapi aynı
+    # çevrimi 22 Eki'de aldı, bu dosya unutulmuştu). Okunamayan / bant dışı
+    # cidar eskiden 200 + "kullanılmadı" künyesiyle yayımlanıyordu; artık
+    # tasarım HİÇ yayımlanmaz: 422 input_not_accepted, gerekçe kodu ADIYLA.
+    # Kalemin iddiası (kullanılmayan değer kullanıcının cidarı diye
+    # sunulmaz) daha güçlü biçimde korunur: hiçbir cidar sunulmaz.
+    @pytest.mark.parametrize('deger,beklenen_durum', [
+        (101, 'out_of_accepted_range'),
+        ('abc', 'not_a_number'),
+        (True, 'boolean_is_not_a_number'),
+    ])
+    def test_dusen_deger_yolu_bit_ayni_kalir(self, C, deger, beklenen_durum):
         r, g = _kati_iste(C, case_thickness=deger)
-        assert r.status_code == 200
-        press = None
-        for kok in (g.get('results'), g):
-            if isinstance(kok, dict):
-                aday = ((kok.get('safety_analysis') or {})
-                        .get('pressure_safety'))
-                if isinstance(aday, dict):
-                    press = aday
-                    break
-        assert press is not None, 'pressure_safety bloğu yanıtta yok'
-        assert press['wall_thickness_source'] == 'user_value_not_applied'
-        assert press['vessel_status'] == 'NOT_EVALUATED'
-        assert press['vessel_status_is_tautological'] is True
+        assert r.status_code == 422, r.status_code
+        assert g['error_code'] == 'input_not_accepted'
+        assert 'structural_analysis' not in g and 'safety_analysis' not in g
+        kayit = [k for k in g['invalid_fields']
+                 if k['field'] == 'case_thickness']
+        assert kayit and kayit[0]['reason'] == beklenen_durum, (
+            g['invalid_fields'])
 
     def test_kardes_kapinin_deseni_kopyalanmadi_atifla_duruyor(self):
         """Sınır yeni bir ayar sayısı değil; kardeş kapı ADLA anılıyor."""

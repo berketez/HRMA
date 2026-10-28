@@ -30,7 +30,14 @@ def _govde(ad):
 def test_her_for_hedefi_statik_govdede_tek_id(ad):
     g = _govde(ad)
     fors = re.findall(r'<label\b[^>]*\bfor="([^"]+)"', g)
-    taban = {'advanced': 65, 'solid': 75, 'liquid': 85}[ad]   # 22 Eyl ölçümü: 70 / 82 / 90
+    # 22 Eyl ölçümü: 70 / 82 / 90. T-ÇAPA-C2 (27 Eki): sıvı tabanı 85 → 72.
+    # V301/L-D SV-09 (4b0a0ee09) çözücünün OKUMADIĞI 26 girdiyi etiketleriyle
+    # birlikte formdan söktü (geçici rejim 6, kayıt/etiket 14, itici özelliği
+    # 6: acoustic_level … vibration_environment); V301/L-C ve L-KABUK 8
+    # etiketli alan ekledi (pintle 5, enjektör malzemesi, kapatma malzemesi +
+    # kalınlığı). Ölçülen: 90 − 26 + 8 = 72. Etiket KAYBI yok: ikinci bekçi
+    # (her kontrolün etiketi var) sıvıda yeşil.
+    taban = {'advanced': 65, 'solid': 75, 'liquid': 72}[ad]
     assert len(fors) >= taban, f'{ad}: for= sayısı beklenenin altında ({len(fors)} < {taban})'
     sayim = Counter(re.findall(r'\bid="([^"]+)"', g))
     eksik = [f for f in fors if sayim.get(f, 0) == 0]

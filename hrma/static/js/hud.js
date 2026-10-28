@@ -8,7 +8,9 @@
  * alır; yoksa bugünkü nokta davranışı korunur (sayı değişmez).
  *
  * window.HRMAHud:
- *   countUp(el)              — .hd-count sayacını data-target'a doğru sayar
+ *   countUp(el)              — .hd-count kartına data-target'ı yazar
+ *                              (v3.0.1 NK-60: sayaç animasyonu yok,
+ *                              ara sayı basılmaz)
  *   termLog(lines, el, opts) — terminal günlüğü oynatması (100-150 ms/satır)
  *   bindState(el, status)    — yapısal hüküm sözcüğü → data-state
  *                              (SAFE|ACCEPTABLE|MARGINAL|UNSAFE|NOT_EVALUATED);
@@ -20,7 +22,6 @@
 (function () {
     'use strict';
 
-    var COUNT_MS = 700;          // sayaç süresi (prototiple aynı)
     var LOG_MS_MIN = 100;        // günlük satır aralığı alt sınır
     var LOG_MS_MAX = 150;        // günlük satır aralığı üst sınır
     var LOG_MS_DEFAULT = 130;
@@ -49,7 +50,16 @@
        sayı ne değişir ne uydurulur, yalnız yerelleştirme düşer.
        Makine öznitelikleri (`data-target`) DOKUNULMAZ: onları
        `parseFloat` okur ve nokta beklerler. */
-    /* Sayı sayacı: rAF + cubic ease-out; reduced-motion'da anında yazar. */
+    /* Sayı kartı: SON değeri hemen yazar (ara sayı YOK).
+       v3.0.1 (NK-60, son kullanıcı testi 26 Eki): burada rAF + cubic
+       ease-out bir sayaç 700 ms boyunca 0'dan hedefe ARA sayılar basıyordu
+       ("Deniz Seviyesi Isp" 11,8 s → 254,0 s → 287,0 s). Kare gelmeyen
+       (arka plandaki/yavaş) sekmede kart ARA değerde kalıyordu: 10 s sonra
+       274,4 s okundu, son değerin %95,6'sı; ekran görüntüsü alan ya da hızlı
+       okuyan kullanıcı yanlış Isp kaydeder. Ara sayı uydurma sayıdır (sahte
+       animasyon yasağı): sayaç kaldırıldı. Ad ve imza aynı (çağıranlar ve
+       `hudCounted` koruması değişmez); P17B4-03'ün "ilk karede negatif"
+       kusuru da kare olmadığından artık oluşamaz. */
     function countUp(el) {
         if (!el || el.dataset.hudCounted) return;
         var target = parseFloat(el.dataset.target);
@@ -57,38 +67,15 @@
         var dec = parseInt(el.dataset.decimals || '1', 10);
         /* Yardımcı BİLEREK bu işlevin İÇİNDE: `raw/OH/D22/arayuz/a1/
            kanit_node.js` `countUp` GÖVDESİNİ kaynaktan çıkarıp ayrı bir
-           `new Function` içinde koşuyor (negatif kare bekçisi). Modül
-           kapsamındaki bir yardımcı o kopyada tanımsız kalır ve bekçi
-           ReferenceError ile patlar — ölçüldü, D33-3 ilk turu. */
+           `new Function` içinde koşuyor. Modül kapsamındaki bir yardımcı o
+           kopyada tanımsız kalır ve bekçi ReferenceError ile patlar —
+           ölçüldü, D33-3 ilk turu. */
         var ondalik = function (text) {
             return (window.I18N && typeof window.I18N.decimalText === 'function')
                 ? window.I18N.decimalText(text) : text;
         };
         el.dataset.hudCounted = '1';
-        if (reducedMotion() || !window.requestAnimationFrame) {
-            el.textContent = ondalik(target.toFixed(dec));
-            return;
-        }
-        var start = performance.now();
-        (function frame(now) {
-            // ÖH D22 / P17B4-03 — İLERLEME İKİ UÇTAN DA KIRPILIR.
-            // ÖLÇÜLDÜ (raw/OH/D22/arayuz/a1/once.json M3, taban b84b10a):
-            // burada yalnız ÜST sınır (Math.min(1, …)) kırpılıyordu. `start`
-            // performance.now() ile alınır; `now` ise requestAnimationFrame
-            // geri çağrısına gelen KARE BAŞLANGICI zaman damgasıdır ve
-            // çağrıdan ÖNCE olabilir (tek karelik ~16-21 ms rAF sapması).
-            // now < start iken p < 0 -> (1-p)³ > 1 -> e < 0 ve ekrana
-            // FİZİKÇE İMKÂNSIZ sayılar basılıyordu: P17 turunda gerçek bir
-            // hesaplamada beş manşet kartının BEŞİ birden (itki −95 N,
-            // Isp −21,7 s, oda basıncı −1,9 bar, ṁ −0,043 kg/s, min SF −0,08).
-            // Alt kırpma animasyonu değiştirmez (p ∈ [0,1] zaten tasarım
-            // aralığıdır), yalnız aralık dışına taşan kareyi başlangıç
-            // değerine oturtur. Uydurma yok: hedef sayı DEĞİŞMEZ.
-            var p = Math.max(0, Math.min(1, (now - start) / COUNT_MS));
-            var e = 1 - Math.pow(1 - p, 3); // cubic ease-out
-            el.textContent = ondalik((target * e).toFixed(dec));
-            if (p < 1) window.requestAnimationFrame(frame);
-        })(start);
+        el.textContent = ondalik(target.toFixed(dec));
     }
 
     /* Terminal günlüğü oynatması. lines: her öğe string ya da

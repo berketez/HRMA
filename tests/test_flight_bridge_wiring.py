@@ -16,6 +16,14 @@ import pytest
 
 from hrma.app import app
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 
 @pytest.fixture
 def client():
@@ -81,7 +89,7 @@ class TestFlightVehicleEndpoint:
         from hrma.engines.solid_rocket_engine import SolidRocketEngine
         eng = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
                                 chamber_diameter=100, grain_length=500,
-                                core_diameter=30, chamber_pressure=40)
+                                core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
         res = eng.calculate_performance()
         r = client.post('/api/flight-vehicle',
                         json={'source': 'results', 'motor_type': 'solid',
@@ -103,7 +111,7 @@ class TestFlightVehicleEndpoint:
         from hrma.engines.solid_rocket_engine import SolidRocketEngine
         eng = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
                                 chamber_diameter=100, grain_length=500,
-                                core_diameter=30, chamber_pressure=40)
+                                core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
         res = eng.calculate_performance()
         v = client.post('/api/flight-vehicle',
                         json={'source': 'results', 'motor_type': 'solid',
@@ -122,7 +130,7 @@ def test_full_chain_motor_to_flight(client):
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
     eng = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
                             chamber_diameter=100, grain_length=500,
-                            core_diameter=30, chamber_pressure=40)
+                            core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
     v = client.post('/api/flight-vehicle',
                     json={'source': 'results', 'motor_type': 'solid',
                           'results': eng.calculate_performance()}

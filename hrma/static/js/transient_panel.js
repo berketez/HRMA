@@ -145,9 +145,98 @@
         });
     }
 
-    // advanced.html form alanlarından motor parametrelerini topla
-    // (calculate() payload'ıyla aynı ID'ler; yalnız transient'in ihtiyacı olanlar)
+    // v3.0.1 (22 Eki) — GEÇİCİ ANALİZ SONUÇ EKRANINDAKİ MOTORU KOŞAR.
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ana-model/gecici-uc/once.txt):
+    // toplayıcı yalnız 14 form alanı gönderiyordu; port_count ve
+    // residual_web_thickness hiç gitmiyordu. 4 portlu ana tasarımın (yanma
+    // sonu port 32,75 mm) geçici eğrisi tek portlu motor olarak (53,74 mm)
+    // çözülüyordu. Ana hesap yapıldıysa gövde, app.js'in sakladığı SON ANA
+    // İSTEĞİN (window.currentRequest) kopyasıdır — enjektör paneliyle aynı
+    // desen (V301/E2). Uç sözleşmesi gereği okunmayan alan çıkarılır:
+    // soğutma seçimi geçici yürüyüşe girmez ve uç onu adıyla 422 ile
+    // reddeder (ÖH D27 / OH-D26-05).
+    const GECICI_UCUN_REDDETTIGI_ALANLAR = ['cooling_channels'];
+
+    // v3.0.1 (V301/H4): blowdown kipi kendinden basınçlı N₂O tankını
+    // modeller. Ana tasarım kullanıcı tank kipindeyse (basınçlandırılmış
+    // besleme) bu eğri o tasarımın eğrisi değildir: seçenek kapanır ve nedeni
+    // yazılır; uç da aynı durumu adıyla reddeder
+    // (feed_mode_conflicts_with_tank_pressure_source).
+    const KULLANICI_TANK_KIPI = 'user';
+
+    function kullaniciTankKipindeMi() {
+        const ana = (typeof window !== 'undefined') ? window.currentRequest : null;
+        if (ana && typeof ana === 'object' && !Array.isArray(ana)) {
+            return ana.tank_pressure_source === KULLANICI_TANK_KIPI;
+        }
+        const el = document.getElementById('tank_pressure_source');
+        return !!(el && el.value === KULLANICI_TANK_KIPI);
+    }
+
+    // V301/H-PANEL (NK-50): ana tasarım kendinden basınçlı N₂O mu?
+    // (Blowdown modeli N₂O'ya özgüdür: hrma/analysis/tank_blowdown.py.)
+    function kendindenBasincliN2OMu() {
+        if (kullaniciTankKipindeMi()) return false;
+        const ana = (typeof window !== 'undefined') ? window.currentRequest : null;
+        let ox = null;
+        if (ana && typeof ana === 'object' && !Array.isArray(ana)) {
+            ox = ana.oxidizer_type;
+        }
+        if (!ox) {
+            const el = document.getElementById('oxidizer_type');
+            ox = el ? el.value : null;
+        }
+        return String(ox || '').toLowerCase() === 'n2o';
+    }
+
+    function beslemeKipiniEsle() {
+        const sel = document.getElementById('tp_feed_mode');
+        if (!sel) return;
+        const kullanici = kullaniciTankKipindeMi();
+        const secenekler = sel.options || [];
+        for (let i = 0; i < secenekler.length; i++) {
+            if (secenekler[i].value === 'blowdown') {
+                secenekler[i].disabled = kullanici;
+            }
+        }
+        if (kullanici && sel.value === 'blowdown') {
+            sel.value = 'regulated';
+            ['tp_tank_temp_group', 'tp_fill_group'].forEach(function (id) {
+                const g = document.getElementById(id);
+                if (g) g.style.display = 'none';
+            });
+        }
+        // V301/H-PANEL (NK-50): ana formda "kendinden basınçlı" N₂O tankı
+        // seçiliyse geçici analizin VARSAYILAN besleme kipi blowdown'dur
+        // (ana hesabın "Tank Boşalması" bloğuyla aynı fizik). Kullanıcı
+        // panelde kipi elle seçtiyse o seçim ezilmez.
+        if (!kullanici && kendindenBasincliN2OMu()
+                && (sel.dataset || {}).kullaniciSecti !== '1'
+                && sel.value !== 'blowdown') {
+            sel.value = 'blowdown';
+            ['tp_tank_temp_group', 'tp_fill_group'].forEach(function (id) {
+                const g = document.getElementById(id);
+                if (g) g.style.display = '';
+            });
+        }
+        const not = document.getElementById('tp_feed_note');
+        if (not) not.style.display = kullanici ? '' : 'none';
+    }
+
+    function anaIstekGovdesi() {
+        const ana = (typeof window !== 'undefined') ? window.currentRequest : null;
+        if (!ana || typeof ana !== 'object' || Array.isArray(ana)) return null;
+        const govde = Object.assign({}, ana);
+        GECICI_UCUN_REDDETTIGI_ALANLAR.forEach(function (k) { delete govde[k]; });
+        return govde;
+    }
+
+    // Ana hesap yoksa advanced.html form alanlarından motor parametrelerini
+    // topla (calculate() payload'ıyla aynı ID'ler; yalnız transient'in
+    // ihtiyacı olanlar).
     function collectMotorParams() {
+        const ana = anaIstekGovdesi();
+        if (ana) return ana;
         const num = (id, d) => {
             const el = document.getElementById(id);
             const v = el ? parseFloat(el.value) : NaN;
@@ -157,7 +246,7 @@
             const el = document.getElementById(id);
             return el && el.value ? el.value : d;
         };
-        return {
+        const govde = {
             thrust: num('thrust', 1000),
             burn_time: num('burn_time', 10),
             of_ratio: num('of_ratio', 7.0),
@@ -177,6 +266,91 @@
             fuel_type: str('fuel_type', 'htpb'),
             oxidizer_type: str('oxidizer_type', 'n2o'),
         };
+        // Port sayısı ve artık et formda boş bırakılabilir (uç 1 port ve
+        // idealizasyon varsayılanını adıyla beyan eder); doluysa gider.
+        const portSayisi = num('port_count', NaN);
+        if (isFinite(portSayisi)) govde.port_count = portSayisi;
+        const artikEt = num('residual_web_thickness', NaN);
+        if (isFinite(artikEt)) govde.residual_web_thickness = artikEt;
+        if (kullaniciTankKipindeMi()) govde.tank_pressure_source = KULLANICI_TANK_KIPI;
+        return govde;
+    }
+
+    // ------------------------------------------------------------------
+    // v3.0.1 (V301/N-grafik G1.4) — ÜÇ GİRDİNİN "?" İPUCU
+    // ------------------------------------------------------------------
+    // Berke (26 Eki): her girdinin yanında açıklama. İçerik koddan:
+    //   * boş bırakılan tank girdisi → ucun beyanlı varsayılanıyla AYNI sayı
+    //     (hrma/engines/hybrid_rocket_engine.py TANK_TEMPERATURE_DEFAULT_K =
+    //     293,15 K, TANK_FILL_FRACTION_DEFAULT = 0,85);
+    //   * kabul bandı → hrma/analysis/tank_blowdown.py: sıcaklık
+    //     SAT_TABLE_T_MIN..SAT_TABLE_T_MAX (doyma tablosu, 240..309 K),
+    //     doluluk 0,05..0,98 (N2OTankBlowdown.__init__ reddi).
+    // Sayılar JS'de BİR KEZ yazılır; tests/test_v301_gecici_zaman_ekseni.py
+    // bunları Python kaynaklarıyla karşılaştırır (ayrışırsa KIRMIZI).
+    // Eski hâl: `parseFloat(...) || 293.15` — 0 yazan kullanıcının girdisi
+    // de sessizce 293,15'e dönüyordu. Artık yalnız BOŞ alan varsayılana
+    // gider (ipucu bunu söyler); yazılan sayı aynen gönderilir, bant
+    // dışındaysa uç nedeniyle reddeder.
+    const BOS_TANK_SICAKLIGI_K = 293.15;
+    const BOS_DOLULUK_ORANI = 0.85;
+    const TANK_T_BANDI_K = [240, 309];
+    const DOLULUK_BANDI = [0.05, 0.98];
+
+    function tankGirdisi(id, bos) {
+        const el = document.getElementById(id);
+        const ham = el ? String(el.value === undefined ? '' : el.value).trim() : '';
+        return ham === '' ? bos : parseFloat(ham);
+    }
+
+    function ipucuHtml(id) {
+        return '<span class="tooltip"><span class="tooltip-icon">?</span>'
+            + '<span class="tooltip-text" id="' + id + '"></span></span>';
+    }
+
+    // İpucu metinleri parametreli (bant ve varsayılan sabitlerden); bu
+    // yüzden `data-i18n` ile değil burada yazılır ve dil değişince tazelenir.
+    function ipuclariniYaz() {
+        const yaz = function (id, metin) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = metin;
+        };
+        yaz('tp_feed_mode_tip', T('transient.feedModeTip',
+            'How the oxidizer reaches the injector in this time march. '
+            + 'Regulated: the oxidizer mass flow is held at its design value '
+            + 'for the whole burn; no tank is modelled, so the fill fraction '
+            + 'changes nothing and the tank temperature only enters as the N2O '
+            + 'inlet temperature. N2O blowdown: a '
+            + 'self-pressurising N2O tank holding the design oxidizer mass '
+            + 'drives the flow; as it empties, tank pressure, thrust and Pc '
+            + 'fall and the run can end before the design burn time (the end '
+            + 'event is marked on the chart). Blowdown is disabled when the '
+            + 'main design uses a user-set tank pressure. Choices: Regulated '
+            + '(default) or N2O blowdown.'));
+        yaz('tp_tank_temp_tip', TF('transient.tankTempTip', {
+            t0: ekranSayisi(BOS_TANK_SICAKLIGI_K, 2),
+            tmin: ekranSayisi(TANK_T_BANDI_K[0], 0),
+            tmax: ekranSayisi(TANK_T_BANDI_K[1], 0),
+        }, 'Initial N2O tank temperature, in K. In N2O blowdown mode it sets '
+           + 'the starting vapour pressure and liquid density from the N2O '
+           + 'saturation table, so it drives the flow. In Regulated mode the '
+           + 'oxidizer flow is prescribed, so it does not drive the feed; it is '
+           + 'still passed to the engine as the N2O inlet temperature, which '
+           + 'shifts the curves only slightly. Empty: {t0} K is sent (the '
+           + 'solver\'s default tank temperature). Accepted (blowdown): '
+           + '{tmin}–{tmax} K (saturation table band); a temperature outside '
+           + 'the N2O liquid range is rejected in both modes with the reason.'));
+        yaz('tp_fill_tip', TF('transient.fillFractionTip', {
+            f0: ekranSayisi(BOS_DOLULUK_ORANI, 2),
+            fmin: ekranSayisi(DOLULUK_BANDI[0], 2),
+            fmax: ekranSayisi(DOLULUK_BANDI[1], 2),
+        }, 'Fraction of the tank volume filled with liquid N2O at the start '
+           + '(dimensionless, 0–1); the rest is vapour ullage. Read only in '
+           + 'N2O blowdown mode: with the design oxidizer mass fixed it sets '
+           + 'the tank volume, and so how fast the tank pressure falls. In '
+           + 'Regulated mode it changes no number. Empty: {f0} is sent (the '
+           + 'solver\'s default). Accepted: {fmin}–{fmax}; outside it the '
+           + 'blowdown run is rejected with the reason.'));
     }
 
     function panelHtml() {
@@ -196,23 +370,28 @@
             </div>
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:12px 0;">
                 <div class="form-group">
-                    <label data-i18n="transient.feedMode">${T('transient.feedMode', 'Feed Mode')}</label>
+                    <label for="tp_feed_mode"><span data-i18n="transient.feedMode">${
+                        T('transient.feedMode', 'Feed Mode')}</span>${ipucuHtml('tp_feed_mode_tip')}</label>
                     <select id="tp_feed_mode">
                         <option value="regulated" data-i18n="transient.feedRegulated">${
                             T('transient.feedRegulated', 'Regulated (constant mass flow)')}</option>
                         <option value="blowdown" data-i18n="transient.feedBlowdown">${
                             T('transient.feedBlowdown', 'N2O Blowdown (self-pressurizing)')}</option>
                     </select>
+                    <small id="tp_feed_note" style="display:none;" data-i18n="transient.blowdownUserTank">${
+                        T('transient.blowdownUserTank', 'Blowdown is not available: this design uses a user-set tank pressure (pressurised feed), not a self-pressurising N2O tank. Use Regulated.')}</small>
                 </div>
                 <div class="form-group" id="tp_tank_temp_group" style="display:none;">
-                    <label data-i18n="transient.tankTemp">${T('transient.tankTemp',
-                        'Tank Temperature (K)')}</label>
-                    <input type="number" id="tp_tank_temp" value="293.15" step="0.5" min="245" max="305">
+                    <label for="tp_tank_temp"><span data-i18n="transient.tankTemp">${
+                        T('transient.tankTemp', 'Tank Temperature (K)')}</span>${ipucuHtml('tp_tank_temp_tip')}</label>
+                    <input type="number" id="tp_tank_temp" value="${BOS_TANK_SICAKLIGI_K}" step="0.5"
+                           min="${TANK_T_BANDI_K[0]}" max="${TANK_T_BANDI_K[1]}">
                 </div>
                 <div class="form-group" id="tp_fill_group" style="display:none;">
-                    <label data-i18n="transient.fillFraction">${T('transient.fillFraction',
-                        'Liquid Fill Fraction')}</label>
-                    <input type="number" id="tp_fill" value="0.85" step="0.01" min="0.5" max="0.95">
+                    <label for="tp_fill"><span data-i18n="transient.fillFraction">${
+                        T('transient.fillFraction', 'Liquid Fill Fraction')}</span>${ipucuHtml('tp_fill_tip')}</label>
+                    <input type="number" id="tp_fill" value="${BOS_DOLULUK_ORANI}" step="0.01"
+                           min="${DOLULUK_BANDI[0]}" max="${DOLULUK_BANDI[1]}">
                 </div>
                 <div class="form-group" style="align-self:end;">
                     <button class="btn" type="button" id="tp_run"
@@ -259,7 +438,27 @@
     // rozet yok.
     function tankStateRoleBadge(tr) {
         const tsr = tr && tr.tank_state_role;
-        if (!tsr || typeof tsr !== 'object' || tsr.used_by_this_model !== false) {
+        if (!tsr || typeof tsr !== 'object') return '';
+        // V301/PANEL (C-7, Grafik G1): N2O'da motor tank sıcaklığını GİRİŞ
+        // DURUMU olarak yakar — sayılar onunla (az da olsa) değişir. Rozet
+        // ucun beyanını aynen söyler; "kullanılmadı" yalnız uç öyle derse.
+        if (tsr.used_by_this_model === true
+            && tsr.used_as === 'motor_oxidizer_inlet_state') {
+            const tKul = tsr.tank_temperature_K_received;
+            return badge(T('transient.badgeTankTempInletOnly',
+                           'TANK TEMPERATURE USED (regulated) · N2O inlet state only, feed not driven'),
+                         'info',
+                         TF('transient.tankTempInletOnlyTip', {
+                             t: (typeof tKul === 'number' && isFinite(tKul))
+                                 ? ekranSayisi(tKul, 1) : '?',
+                         }, 'Regulated feed: the oxidizer flow is prescribed at its '
+                            + 'design value, so the tank does not drive the feed and '
+                            + 'the fill fraction changes no published number. The '
+                            + 'motor burns N2O at the tank temperature you entered '
+                            + '({t} K) as its inlet state, so the curves shift '
+                            + 'slightly with it.'));
+        }
+        if (tsr.used_by_this_model !== false) {
             return '';
         }
         const tAl = tsr.tank_temperature_K_received;
@@ -292,10 +491,11 @@
         status.textContent = T('transient.solving', 'SOLVING TRANSIENT BALLISTICS…');
         badges.innerHTML = '';
 
+        beslemeKipiniEsle();
         const payload = collectMotorParams();
         payload.feed_mode = document.getElementById('tp_feed_mode').value;
-        payload.tank_temperature = parseFloat(document.getElementById('tp_tank_temp').value) || 293.15;
-        payload.liquid_fill_fraction = parseFloat(document.getElementById('tp_fill').value) || 0.85;
+        payload.tank_temperature = tankGirdisi('tp_tank_temp', BOS_TANK_SICAKLIGI_K);
+        payload.liquid_fill_fraction = tankGirdisi('tp_fill', BOS_DOLULUK_ORANI);
 
         try {
             const resp = await fetch('/api/transient-analysis', {
@@ -526,51 +726,193 @@
         (tr.warnings || []).forEach(w => { html += uyariRozeti(w); });
         badges.innerHTML = html;
 
-        // F(t) + Pc(t) çift eksen (plotly_dark otomatik koyu temalar)
+        // v3.0.1 (V301/N-grafik G1) — F(t) ve Pc(t) İKİ AYRI ALT GRAFİK,
+        // ORTAK ZAMAN EKSENİ. Düzen saf `zamanDuzeni` / `ikiAltGrafik`
+        // yardımcılarından gelir (aşağıda; node bekçisi onları ölçer).
         // react: aynı div'e her koşuda / dil değişiminde tekrar çizilir;
         // newPlot'un tam yıkım+kurulumu yerine fark tabanlı güncelleme
         // (plotly 1.34+; ilk çizimde kendiliğinden newPlot'a düşer)
+        const duzen = zamanDuzeni(tr, dp);
         const plotDiv = document.getElementById('tp_plot');
         plotDiv.style.display = 'block';
-        Plotly.react(plotDiv, [
-            { x: tr.time, y: tr.thrust, name: T('transient.sThrust', 'Thrust [N]'),
-              mode: 'lines', line: { width: 3 } },
-            { x: tr.time, y: toBar(tr.chamber_pressure),
-              name: T('transient.sPc', 'Chamber Pressure [bar]'), mode: 'lines', yaxis: 'y2',
-              line: { width: 2, dash: 'dot' } },
-        ], {
-            title: T('transient.chartMain', 'Transient Thrust & Chamber Pressure'),
-            xaxis: { title: T('common.axis.timeS2', 'Time [s]') },
-            yaxis: { title: T('transient.sThrust', 'Thrust [N]'), rangemode: 'tozero' },
-            yaxis2: { title: 'P_c [bar]', overlaying: 'y', side: 'right',
-                      rangemode: 'tozero' },
-            height: 420,
-            legend: { orientation: 'h', y: 1.12 },
-        }, { responsive: true, displaylogo: false });
+        const ana = ikiAltGrafik(duzen, tr.time,
+            { y: tr.thrust, name: T('transient.sThrust', 'Thrust [N]'),
+              axis: T('transient.sThrust', 'Thrust [N]'), tozero: true },
+            { y: toBar(tr.chamber_pressure),
+              name: T('transient.sPc', 'Chamber Pressure [bar]'),
+              axis: 'P_c [bar]', tozero: true },
+            T('transient.chartMain', 'Transient Thrust & Chamber Pressure'),
+            GECICI_ANA_YUKSEKLIK_PX);
+        Plotly.react(plotDiv, ana.data, ana.layout,
+                     { responsive: true, displaylogo: false });
 
-        // Blowdown tank geçmişi
+        // Blowdown tank geçmişi — aynı ilke: P_tank ve T_tank ayrı alt
+        // grafiklerde, ana grafikle AYNI zaman aralığı ve işaretler.
         const tankDiv = document.getElementById('tp_tank_plot');
         if (tr.feed_mode === 'blowdown' && tr.tank_pressure && tr.tank_pressure.length) {
             tankDiv.style.display = 'block';
-            // react: aynı div'e tekrar çizim (bkz. tp_plot notu)
-            Plotly.react(tankDiv, [
-                { x: tr.time, y: toBar(tr.tank_pressure),
-                  name: T('transient.sTankP', 'Tank Pressure [bar]'), mode: 'lines',
-                  line: { width: 3 } },
-                { x: tr.time, y: tr.tank_temperature,
-                  name: T('transient.sTankT', 'Tank Temperature [K]'), mode: 'lines', yaxis: 'y2',
-                  line: { width: 2, dash: 'dot' } },
-            ], {
-                title: T('transient.chartTank', 'N2O Tank Blowdown History'),
-                xaxis: { title: T('common.axis.timeS2', 'Time [s]') },
-                yaxis: { title: 'P_tank [bar]' },
-                yaxis2: { title: 'T_tank [K]', overlaying: 'y', side: 'right' },
-                height: 360,
-                legend: { orientation: 'h', y: 1.14 },
-            }, { responsive: true, displaylogo: false });
+            const tank = ikiAltGrafik(duzen, tr.time,
+                { y: toBar(tr.tank_pressure),
+                  name: T('transient.sTankP', 'Tank Pressure [bar]'),
+                  axis: 'P_tank [bar]' },
+                { y: tr.tank_temperature,
+                  name: T('transient.sTankT', 'Tank Temperature [K]'),
+                  axis: 'T_tank [K]' },
+                T('transient.chartTank', 'N2O Tank Blowdown History'),
+                GECICI_TANK_YUKSEKLIK_PX);
+            Plotly.react(tankDiv, tank.data, tank.layout,
+                         { responsive: true, displaylogo: false });
         } else {
             tankDiv.style.display = 'none';
         }
+    }
+
+    // ------------------------------------------------------------------
+    // v3.0.1 (V301/N-grafik G1) — ZAMAN EKSENİ: TASARIM YANMA SÜRESİ +
+    // ERKEN BİTİŞ GÖRÜNÜR
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/grafik/RAPOR.md, G1 önce):
+    // x ekseni yalnız çözücünün döndürdüğü aralığı gösteriyordu
+    // ([t_ilk, t_son]); blowdown koşusu 9,10 s'de `injector_unstable` ile
+    // bittiğinde tasarımın 10 s'lik yanmasına göre ne kadar erken bittiği
+    // ekranda okunmuyordu. F(t) ile Pc(t) aynı çizim alanında iki eksendeydi;
+    // regüleli kipte iki eğri normalize değerde tam üst üste biniyordu
+    // (binme oranı 1,000) ve lejant başlığın hemen altına sıkışıyordu.
+    //
+    // Kural: eksen en az [0, max(t_son, t_b)] — t_b ucun `design_point.
+    // burn_time` alanı (sayı TÜRETİLMEZ; alan yoksa çizgi de yok). Eğri
+    // YALNIZ çözücünün noktalarından çizilir: t = 0 noktası dönmüyorsa
+    // eklenmez, eksen aralığı nokta değildir. Çözücü tasarım süresinden
+    // önce ya da başka bir olayla bittiyse bitiş anı dikey çizgi + olay
+    // etiketiyle (endEventLabel, fail-closed) işaretlenir.
+    const GECICI_ANA_YUKSEKLIK_PX = 560;
+    const GECICI_TANK_YUKSEKLIK_PX = 480;
+    // Alt grafiklerin dikey payları (kâğıt kesri): üst [0,54 – 1],
+    // alt [0 – 0,44]; aradaki boşluk bitiş etiketinin şeridi.
+    const UST_ALAN = [0.54, 1];
+    const ALT_ALAN = [0, 0.44];
+    // Eksenin sağ ucuna pay: t_b çizgisi çerçeveye yapışmasın (görsel pay,
+    // veri değil).
+    const ZAMAN_PAYI = 0.025;
+    // Grafikteki bitiş işaretinin rengi rozetle AYNI tema rengi: değerler
+    // `badge()`taki tema jetonlarının yedek onaltılıklarıdır (rozet kendi
+    // içinde kapalı kalmalı — test_v3_taban_b onu kaynaktan tek başına
+    // çıkarıp koşar). Eşitliği tests/test_v301_gecici_zaman_ekseni.py ölçer.
+    // Plotly CSS değişkeni okuyamadığı için onaltılık gerekir.
+    const OLAY_RENGI = {
+        ok: '#2dd4a8', info: '#00e5ff', warn: '#ff8c33', err: '#ff5d73',
+    };
+    const TB_RENGI = 'rgba(207, 232, 242, 0.8)';
+
+    function sonluSon(dizi) {
+        if (!Array.isArray(dizi)) return null;
+        for (let i = dizi.length - 1; i >= 0; i--) {
+            const v = dizi[i];
+            if (typeof v === 'number' && isFinite(v)) return v;
+        }
+        return null;
+    }
+
+    // SAF: DOM'a dokunmaz. {xMax, tSon, tb, erken, olay, shapes, annotations}
+    // `secenek.bitisY` / `secenek.bitisYanchor`: bitiş etiketinin dikey yeri
+    // (kâğıt kesri). Varsayılan iki alt grafiğin arasındaki şerit; tek
+    // çizim alanlı grafikte (blowdown paneli) çizim alanının dibi.
+    function zamanDuzeni(tr, dp, secenek) {
+        tr = tr || {};
+        secenek = secenek || {};
+        const tSon = sonluSon(tr.time);
+        const tbHam = dp ? dp.burn_time : null;
+        const tb = (typeof tbHam === 'number' && isFinite(tbHam) && tbHam > 0)
+            ? tbHam : null;
+        const ust = Math.max(tSon === null ? 0 : tSon, tb === null ? 0 : tb);
+        const xMax = ust > 0 ? ust * (1 + ZAMAN_PAYI) : null;
+        const olay = (tr.end_event === null || tr.end_event === undefined)
+            ? '' : String(tr.end_event);
+        // Erken / farklı bitiş: olay `burn_time_reached` değilse ya da
+        // çözücü tasarım süresinden belirgin önce durduysa (bir adımdan
+        // fazla). Olay adı yoksa etiket "?" olur — sessizce "tamam" sayılmaz.
+        const adim = (Array.isArray(tr.time) && tr.time.length > 1)
+            ? Math.abs(tr.time[1] - tr.time[0]) : 0;
+        const erken = tSon !== null && (olay !== 'burn_time_reached'
+            || (tb !== null && tSon < tb - Math.max(adim, 1e-9)));
+        const shapes = [];
+        const annotations = [];
+        const yon = function (x) {
+            return (xMax && x / xMax > 0.5) ? 'right' : 'left';
+        };
+        if (tb !== null) {
+            shapes.push({ type: 'line', xref: 'x', yref: 'paper',
+                x0: tb, x1: tb, y0: 0, y1: 1,
+                line: { color: TB_RENGI, width: 1.5, dash: 'dash' } });
+            annotations.push({ xref: 'x', yref: 'paper', x: tb, y: 1,
+                xanchor: yon(tb), yanchor: 'bottom', showarrow: false,
+                font: { size: 12, color: TB_RENGI },
+                text: TF('transient.designBurnMarker', { s: ekranSayisi(tb, 2) },
+                         'design burn time t_b = {s} s') });
+        }
+        if (erken) {
+            const renk = OLAY_RENGI[endEventKind(olay)] || OLAY_RENGI.warn;
+            shapes.push({ type: 'line', xref: 'x', yref: 'paper',
+                x0: tSon, x1: tSon, y0: 0, y1: 1,
+                line: { color: renk, width: 2, dash: 'dot' } });
+            annotations.push({ xref: 'x', yref: 'paper', x: tSon,
+                y: (typeof secenek.bitisY === 'number')
+                    ? secenek.bitisY : (UST_ALAN[0] + ALT_ALAN[1]) / 2,
+                xanchor: yon(tSon), yanchor: secenek.bitisYanchor || 'middle',
+                showarrow: false,
+                font: { size: 12, color: renk },
+                text: TF('transient.endMarker', {
+                    event: endEventLabel(olay) || '?',
+                    s: ekranSayisi(tSon, 2),
+                }, 'end: {event} · t = {s} s') });
+        }
+        return { xMax: xMax, tSon: tSon, tb: tb, erken: erken, olay: olay,
+                 shapes: shapes, annotations: annotations };
+    }
+
+    // Eski çizimle aynı ölçek kuralı: F ve Pc sıfırdan (rangemode
+    // 'tozero'), tank basıncı/sıcaklığı kendi aralığında (tozero yok —
+    // 300 → 280 K'lik düşüş sıfırdan başlayan eksende düz çizgi olurdu).
+    function yEkseni(alan, xId, iz) {
+        const ax = { domain: alan.slice(), anchor: xId, title: iz.axis };
+        if (iz.tozero) ax.rangemode = 'tozero';
+        return ax;
+    }
+
+    // SAF: iki izi iki alt grafiğe dağıtır (ortak zaman ekseni, x = tr.time
+    // AYNEN). Lejant kapalı: her alt grafiğin kendi eksen başlığı izi adlar;
+    // ad hover'da da görünür.
+    function ikiAltGrafik(duzen, zaman, ust, alt, baslik, yukseklik) {
+        const aralik = duzen.xMax ? [0, duzen.xMax] : undefined;
+        const xOrtak = function (ek) {
+            const ax = Object.assign({ zeroline: false }, ek);
+            if (aralik) { ax.range = aralik.slice(); ax.autorange = false; }
+            return ax;
+        };
+        return {
+            data: [
+                // Renk tema renk sırasından (plotly_dark COLORWAY).
+                { x: zaman, y: ust.y, name: ust.name, mode: 'lines',
+                  xaxis: 'x', yaxis: 'y', line: { width: 2.5 } },
+                { x: zaman, y: alt.y, name: alt.name, mode: 'lines',
+                  xaxis: 'x2', yaxis: 'y2', line: { width: 2.5 } },
+            ],
+            layout: {
+                title: { text: baslik },
+                showlegend: false,
+                height: yukseklik,
+                margin: { t: 96, b: 64, l: 84, r: 36 },
+                xaxis: xOrtak({ anchor: 'y', matches: 'x2', showticklabels: false }),
+                xaxis2: xOrtak({ anchor: 'y2',
+                                 title: T('common.axis.timeS2', 'Time [s]') }),
+                yaxis: yEkseni(UST_ALAN, 'x', ust),
+                yaxis2: yEkseni(ALT_ALAN, 'x2', alt),
+                shapes: duzen.shapes.map(function (s) {
+                    return JSON.parse(JSON.stringify(s)); }),
+                annotations: duzen.annotations.map(function (a) {
+                    return JSON.parse(JSON.stringify(a)); }),
+            },
+        };
     }
 
     function init(opts) {
@@ -588,14 +930,22 @@
         const expBtn = document.getElementById('tp_export');
         if (expBtn) expBtn.addEventListener('click', exportCurves);
         document.getElementById('tp_feed_mode').addEventListener('change', function () {
+            this.dataset.kullaniciSecti = '1';
             const bd = this.value === 'blowdown';
             document.getElementById('tp_tank_temp_group').style.display = bd ? '' : 'none';
             document.getElementById('tp_fill_group').style.display = bd ? '' : 'none';
         });
+        // v3.0.1 (V301/H4): seçici her açılışta ana tasarımın tank kipine eşlenir.
+        ['focus', 'mousedown'].forEach(function (ev) {
+            document.getElementById('tp_feed_mode').addEventListener(ev, beslemeKipiniEsle);
+        });
+        beslemeKipiniEsle();
         if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(panel);
+        ipuclariniYaz();
         // Dil değişince rozetler/grafik başlıkları saklanan sonuçla yeniden basılır
         if (window.I18N && window.I18N.onChange) {
             window.I18N.onChange(function () {
+                ipuclariniYaz();
                 if (lastResult) {
                     try { render(lastResult); } catch (e) { /* çizim yoksa sessiz */ }
                 }
@@ -706,5 +1056,19 @@
         // ÖH D37 A1b panel-js · OH-D33-09 bekçisi: rozet şeridi DOM
         // saplamasıyla node'da ölçülsün diye (yalnız test/hata ayıklama).
         _render: render,
+        // v3.0.1 bekçisi: gövde ana istekten mi formdan mı kuruluyor,
+        // node'da DOM saplamasıyla ölçülsün diye (yalnız test/hata ayıklama).
+        _collectMotorParams: collectMotorParams,
+        // v3.0.1 (V301/H4) bekçisi: blowdown seçeneğinin tank kipine eşlenmesi.
+        _beslemeKipiniEsle: beslemeKipiniEsle,
+        // v3.0.1 (V301/N-grafik G1/G3): zaman ekseni düzeni TEK uygulama;
+        // hibrit sayfasının blowdown paneli de aynı işlevi kullanır
+        // (eksen [0, max(t_son, t_b)], t_b çizgisi, bitiş işareti).
+        zamanEkseniDuzeni: zamanDuzeni,
+        // Bekçi: zaman ekseni düzeni ve alt grafik figürü DOM'suz ölçülsün
+        // diye (yalnız test/hata ayıklama).
+        _zamanDuzeni: zamanDuzeni,
+        _ikiAltGrafik: ikiAltGrafik,
+        _tankGirdisi: tankGirdisi,
         get result() { return lastResult; } };
 })();

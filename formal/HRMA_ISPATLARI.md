@@ -9,6 +9,12 @@
 > `formal/registry.json`'dadır; denetim `python3 formal/check.py` ile yapılır.
 > Çalıştırma komutları için `formal/README.md`'ye bak (proje artık
 > `~/Desktop/dosyalar/lean-lab`'dan bu depoya taşındı).
+>
+> **Not (21 Ekim 2026):** Aşağıdaki tablodaki **Toplam 19** de o günün
+> sayısıdır. 20 Ekim 2026'da kayıt defterinde **64 teorem** var (8 Lean
+> dosyasında 85 `theorem`/`lemma` bildirimi; tam derleme temiz, hiçbirinde
+> `sorryAx` yok). Güncel liste `formal/registry.json`, ölçülen durum
+> `formal/README.md`.
 
 Bu dosya, HRMA'nın koduna gömülü **sözlü varsayımların** hangilerinin makine
 düzeyinde ispatlandığını gösterir. Her teorem genel matematik değil, koddaki

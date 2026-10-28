@@ -37,6 +37,8 @@ import json
 
 import pytest
 
+from tests.support.fea_lule import ag_malzemesi
+
 
 def _quiet(fn, *args, **kwargs):
     buf = io.StringIO()
@@ -253,33 +255,40 @@ class TestP7B330ZincirAyniMalzeme:
                    headers={'Host': '127.0.0.1:8080'})
         return r.status_code, r.get_json()
 
+    # V301/PANEL (NK-12) — ROLLER ÇEVRİLDİ, kapı AYNI (gerekçeli): termal
+    # alan yalnız lüledir ve ağ motorun LÜLE malzemesiyle (bu motorda
+    # grafit) çözülür. "Aynı malzeme" artık grafit, "farklı" kamaranın
+    # çeliği; P7B3-30 sözleşmesi (iki uç aynı cidarı anlatır) değişmedi.
     def test_ayni_malzeme_gecer(self, client, motor):
-        kod, j = self._fea(client, motor,
-                           self._profil(client, motor, 'steel_4130'))
+        ag = ag_malzemesi(motor, 'steel_4130')
+        assert ag == 'graphite'
+        kod, j = self._fea(client, motor, self._profil(client, motor, ag))
         assert kod == 200, str(j)[:400]
         assert j['fea']['status'] == 'ok', str(j['fea'])[:300]
-        assert j['fea']['scalars']['material_key'] == 'steel_4130'
+        assert j['fea']['scalars']['material_key'] == ag
 
     def test_farkli_malzeme_adiyla_reddedilir(self, client, motor):
         kod, j = self._fea(client, motor,
-                           self._profil(client, motor, 'graphite'))
+                           self._profil(client, motor, 'steel_4130'))
         assert kod == 422, str(j)[:400]
         assert j['error'] == 'axial_profile_material_mismatch'
         alan = j['invalid_fields'][0]
         assert alan['field'] == 'axial_profile.material'
-        assert alan['value'] == 'graphite'
-        assert alan['expected_material'] == 'steel_4130'
+        assert alan['value'] == 'steel_4130'
+        assert alan['expected_material'] == 'graphite'
 
     def test_redde_hicbir_sicaklik_alani_yayimlanmaz(self, client, motor):
+        # V301/PANEL (NK-12): "farklı malzeme" artık kamaranın çeliği
+        # (ağ lüle malzemesiyle — grafit — çözülür); kapı aynı.
         kod, j = self._fea(client, motor,
-                           self._profil(client, motor, 'graphite'))
+                           self._profil(client, motor, 'steel_4130'))
         assert kod == 422
         gov = json.dumps(j, ensure_ascii=False)
         for yasak in ('peak_wall_T_K', 'temperature_final_K',
                       'material_limits', '"mesh"'):
             assert yasak not in gov, yasak
         # Uydurma malzeme konmadı: red, çözülecek malzemeyi ADIYLA söyler.
-        assert j['expected_material'] == 'steel_4130'
+        assert j['expected_material'] == 'graphite'
 
 
 # ===========================================================================

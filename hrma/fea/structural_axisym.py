@@ -491,12 +491,19 @@ class InnerPressureLoad:
         değişimi). Bu noktaları İÇİNDE taşıyan kenarlar integralde ikiye
         bölünür; Gauss kuralı her parçada düzgün bir fonksiyon görür.
     kunye : dict — dağılımın ve kuvvetin beyanı (köprü doldurur).
+    yalniz_radyal : bool — True ise basıncın tutarlı düğüm kuvvetlerinin
+        EKSENEL bileşeni sıfırlanır, yalnız radyal izdüşüm kalır (V3.0.5
+        SIVI-CIDAR: iki katmanlı rejeneratif cidarın dış kabuğu — ince ceket
+        halkasında soğutucu basıncının kabuk iç yüzüne ve astar dış yüzüne
+        etkiyen eksenel izdüşümleri birbirini kaburgalar üstünden dengeler).
+        Varsayılan False: eski yollar bit-aynı.
     """
     p_ref_pa: float
     pressure_fn: Optional[object] = None
     end_force_n: float = 0.0
     z_kesimleri: tuple = ()
     kunye: dict = field(default_factory=dict)
+    yalniz_radyal: bool = False
 
     def __post_init__(self):
         if not (np.isfinite(self.p_ref_pa) and self.p_ref_pa >= 0.0):
@@ -797,6 +804,10 @@ def _ic_basinc_yukunu_kur(F: np.ndarray, mesh: AxisymMesh,
                                      yuk.pressure_fn, +1.0,
                                      z_kesimleri=yuk.z_kesimleri)
             dagilim = "istasyon"
+        if yuk.yalniz_radyal:
+            # V3.0.5 SIVI-CIDAR: yalnız radyal izdüşüm (bkz. alan beyanı).
+            F_bas[0::2] = 0.0
+            dagilim += "_yalniz_radyal"
         if yuk.end_force_n:
             _add_end_axial_force(F_uc, mesh, float(yuk.end_force_n))
     else:

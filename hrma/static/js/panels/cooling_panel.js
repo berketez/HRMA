@@ -31,12 +31,14 @@
     // anahtarlarıyla birebir (get_material; regen_cooling.py wall_material).
     // Bakır/CuCrZr yüksek iletkenlikleriyle tipik rejeneratif liner.
     // Katalog gelirse 'liner'+'shell' etiketli tam liste bunun yerine geçer.
+    // V301/DİL (NK-67): çevrilebilen adlar ortak malzeme anahtarlarıyla
+    // (protection_panel.js ile aynı); özel adlar (CuCrZr, Inconel) aynen.
     const WALL_MATERIALS = [
-        ['copper', 'Copper (OFHC)'],
-        ['cucrzr', 'CuCrZr alloy'],
+        ['copper', 'Copper (OFHC)', 'mat.copperOfhc'],
+        ['cucrzr', 'CuCrZr'],
         ['inconel_718', 'Inconel 718'],
-        ['ss_304', 'Stainless 304'],
-        ['steel_4130', 'Steel AISI 4130'],
+        ['ss_304', 'Stainless 304', 'mat.stainless304'],
+        ['steel_4130', 'Steel AISI 4130', 'mat.steelAisi4130'],
     ];
 
     // ÖH A2 sivi-sogutma · 7. tur (F-17): soğutucu ön-dolgusu 'water' idi —
@@ -149,8 +151,11 @@
         }
         refLine(sm.material_allowable_temp_K, T('panel.regen.allowableWall', 'Allowable wall limit'), '#ff8c33');
         refLine(sm.material_melting_K, T('panel.thermal.meltingPoint', 'Melting point'), '#ff5d73');
-        // RP-1 koklaşma çizgisi (yalnız RP-1: coking_threshold_K dolu)
-        refLine(sm.coking_threshold_K, T('panel.regen.cokingLine', 'RP-1 coking threshold'), '#c678dd');
+        // RP-1 koklaşma çizgileri (yalnız RP-1) — V301/L-KABUK iki kademe:
+        // coking_threshold_K = 728 K NASA SP-8087 ölçütü (hüküm),
+        // coking_warning_threshold_K = 561 K birikim riski uyarısı.
+        refLine(sm.coking_threshold_K, T('panel.regen.cokingLine', 'RP-1 limit (SP-8087)'), '#c678dd');
+        refLine(sm.coking_warning_threshold_K, T('panel.regen.cokingRiskLine', 'RP-1 deposit-risk warning'), '#d19a66');
 
         // Boğaz konumu işareti
         const throatX = (typeof cooling.x_throat_mm === 'number'
@@ -232,6 +237,125 @@
     }
 
     // ------------------------------------------------------------------
+    /* V301/L-E (L-KARBON DEVİR 3) — KARBON BİRİKİMİ BANDI, AYRI BÖLÜM.
+
+       Motor çözümü (``thermal_protection.station_march.carbon_deposit``)
+       LOX/RP-1 gaz tarafı birikim direncini uygular ve bir BANT yayımlar:
+       nominal = SP-125 Şk. 4-25 (birikimli), tutucu uç = aynı soğutucu
+       durumunda birikimsiz/dökülmüş yerel cidar (SP-8087 §3.4.1); iyimser uç
+       YOK (gerekçesi optimistic_note'ta). Kullanıcı bunu yalnız marş uyarı
+       satırından görüyordu. Bu bölüm bandı ve durum rozetini basar.
+
+       KAYNAK AYRIMI (uydurma yok): bant MOTOR ÇÖZÜMÜNDEN okunur ve öyle
+       etiketlenir; bu panelin kendi koşusunun birikim durumu
+       (``data.cooling.carbon_deposit.status``) ayrı rozette yazar —
+       bağımsız /api/regen-cooling itici bağlamı taşımadığı için orada çoğu
+       zaman 'not_evaluated' döner. Alan yoksa bölüm bunu söyler.
+       Mevcut render satırlarına dokunulmaz; bölüm kendi kabını ekler. */
+    const CARBON_STATUS = {
+        applied: ['ok', 'panel.regen.cdStatusApplied', 'APPLIED'],
+        out_of_envelope: ['warn', 'panel.regen.cdStatusOutOfEnvelope',
+                          'NOT MODELLED (outside envelope)'],
+        not_applicable: ['dim', 'panel.regen.cdStatusNotApplicable',
+                         'NOT APPLICABLE (not LOX/RP-1)'],
+        not_evaluated: ['dim', 'panel.regen.cdStatusNotEvaluated',
+                        'NOT EVALUATED'],
+    };
+
+    function carbonStatusBadge(status, prefix) {
+        const kayit = CARBON_STATUS[status];
+        const metin = kayit ? T(kayit[1], kayit[2]) : String(status || '—');
+        return U.badge(prefix + ': ' + metin, kayit ? kayit[0] : 'dim');
+    }
+
+    function carbonDepositSection(data, root) {
+        if (!root) return null;
+        const cooling = (data && data.cooling) || {};
+        let motor = null;
+        try {
+            const r = (typeof window.currentResults === 'object')
+                ? window.currentResults : null;
+            const m = (r && r.motor) || r || {};
+            const tp = m.thermal_protection || {};
+            motor = (tp.station_march && tp.station_march.carbon_deposit) || null;
+        } catch (e) { motor = null; }
+        const panelCd = cooling.carbon_deposit || null;
+        if (!motor && !panelCd) return null;
+
+        const kutu = document.createElement('div');
+        kutu.className = 'regen-carbon-deposit';
+        const dim = '<p style="margin:4px 0; color:var(--hd-ink-dim, #7d97a5);'
+            + ' font-size:0.8rem; white-space:normal;">';
+        let html = U.sectionTitle(T('panel.regen.cdTitle',
+            'Carbon deposit (LOX/RP-1 gas side)'));
+        let rozet = '';
+        if (motor) {
+            rozet += carbonStatusBadge(motor.status,
+                T('panel.regen.cdEngine', 'ENGINE SOLUTION'));
+        }
+        if (panelCd) {
+            rozet += carbonStatusBadge(panelCd.status,
+                T('panel.regen.cdPanelRun', 'THIS PANEL RUN'));
+        }
+        html += '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
+            + rozet + '</div>';
+
+        const band = motor && motor.band;
+        if (motor && motor.status === 'applied' && band
+                && band.nominal && band.conservative) {
+            const nom = band.nominal, kon = band.conservative;
+            // Ondalık ayracı dile bağlı (U.num -> I18N.number); sayı yoksa "—".
+            const sayi = function (v, d) {
+                return (typeof v === 'number' && Number.isFinite(v))
+                    ? U.num(v, d) : '—';
+            };
+            const satir = function (etiket, a, b, birim, d) {
+                return [etiket, sayi(a, d) + ' ' + birim + ' ⟷ '
+                    + sayi(b, d) + ' ' + birim];
+            };
+            html += dim + T('panel.regen.cdBandHead',
+                'Band from the engine station march: nominal (with the deposit, SP-125 Fig. 4-25) ⟷ spalled (no deposit at the same coolant state, SP-8087 sec. 3.4.1).')
+                + '</p>';
+            html += U.kvTable([
+                satir(T('panel.regen.cdPeakHot', 'Peak hot wall'),
+                      nom.peak_wall_hot_K, kon.peak_wall_hot_K, 'K', 0),
+                satir(T('panel.regen.cdPeakCold', 'Peak coolant-side wall'),
+                      nom.peak_wall_cold_K, kon.peak_wall_cold_K, 'K', 0),
+                satir(T('panel.regen.cdPeakFlux', 'Peak heat flux (coupled wall balance)'),
+                      nom.peak_heat_flux_MW_m2, kon.peak_heat_flux_MW_m2,
+                      'MW/m²', 2),
+            ]);
+            if (motor.spalled_above_melting === true) {
+                html += '<div style="margin:8px 0;">' + U.badge(
+                    T('panel.regen.cdSpallMelt',
+                      'WHERE THE DEPOSIT SPALLS THE WALL EXCEEDS MELTING'),
+                    'err') + '</div>';
+            } else if (motor.spalled_above_allowable === true) {
+                html += '<div style="margin:8px 0;">' + U.badge(
+                    T('panel.regen.cdSpallAllow',
+                      'WHERE THE DEPOSIT SPALLS THE WALL EXCEEDS THE ALLOWABLE'),
+                    'warn') + '</div>';
+            }
+            if (band.optimistic === null || band.optimistic === undefined) {
+                html += dim + T('panel.regen.cdNoOptimistic',
+                    'No optimistic end is published: no source gives a deposit more insulating than SP-125 Fig. 4-25.')
+                    + '</p>';
+            }
+        } else if (motor) {
+            html += dim + T('panel.regen.cdNoBand',
+                'No band: the engine solution applied no deposit resistance for this design (see the status).')
+                + '</p>';
+        } else {
+            html += dim + T('panel.regen.cdNoEngine',
+                'Engine solution band not available: run the main liquid calculation first.')
+                + '</p>';
+        }
+        kutu.innerHTML = html;
+        root.appendChild(kutu);
+        return kutu;
+    }
+
+    // ------------------------------------------------------------------
     // Ana render
     // ------------------------------------------------------------------
     function render(data, root) {
@@ -274,11 +398,27 @@
                 + 'earned for T_wall,hot = '
                 + U.fmt(sm.max_wall_hot_K, 1) + ' K.');
         }
+        // V301/L-KABUK: kırmızı rozet YALNIZ SP-8087 hüküm kademesinde (728 K);
+        // 561 K uyarı kademesi sarı rozettir (tek başına UNSAFE değildir).
+        // V3.0.5 T-ÇAPA-C1: ucun iki kademe künyesi (sm.coking_basis — bir
+        // dürüstlük alanı) iki rozetin ipucuna eklenir; çeviri kanalından
+        // (I18N.serverText), tanınmazsa AYNEN.
+        const cokingBasis = (typeof sm.coking_basis === 'string' && sm.coking_basis)
+            ? ' ' + ((window.I18N && typeof window.I18N.serverText === 'function')
+                ? window.I18N.serverText(sm.coking_basis) : sm.coking_basis)
+            : '';
         if (sm.coking) {
-            badges += U.badge(T('panel.regen.coking', 'RP-1 COKING'), 'err',
+            badges += U.badge(T('panel.regen.coking', 'RP-1 COKING LIMIT'), 'err',
                 T('panel.regen.cokingTip',
-                  'Coolant-side wall temperature exceeds the ~561 K RP-1 coking threshold — '
-                  + 'carbon deposition and channel fouling likely (Huzel & Huang Ch. 4).'));
+                  'Coolant-side wall temperature exceeds the 728 K NASA SP-8087 '
+                  + 'design criterion for RP-1 liquid-wall temperature: the design '
+                  + 'does not meet this criterion.') + cokingBasis);
+        } else if (sm.coking_risk) {
+            badges += U.badge(T('panel.regen.cokingRisk', 'RP-1 DEPOSIT RISK'), 'warn',
+                T('panel.regen.cokingRiskTip',
+                  'Coolant-side wall temperature exceeds the 561 K deposit-risk '
+                  + 'warning level (software warning based on NASA CR-168277; '
+                  + 'validate for your conditions).') + cokingBasis);
         }
 
         // ---- Sayısal kartlar ----
@@ -316,6 +456,8 @@
         // ---- Grafikler ----
         temperaturePlot(root, cooling);
         fluxPressurePlot(root, cooling);
+        // V301/L-E (L-KARBON DEVİR 3): karbon birikimi bandı — ayrı bölüm.
+        carbonDepositSection(data, root);
 
         // ---- Uyarılar + model notu ----
         const tail = document.createElement('div');
@@ -397,12 +539,12 @@
         motorTypes: ['liquid'],
         long: true,
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar'],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3400, 10, 'common.f.chamberTemperatureK'],
-            ['throat_diameter', 'Throat Diameter (m)', 0.05, 0.001, 'common.f.throatDiameterM'],
-            ['expansion_ratio', 'Expansion Ratio', 8, 0.1, 'common.f.expansionRatio'],
-            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen'],
-            ['molecular_weight', 'Molecular Weight (g/mol)', 22, 0.5, 'common.f.molecularWeight'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar', 'panel.regen.help.chamber_pressure'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3400, 10, 'common.f.chamberTemperatureK', 'panel.regen.help.chamber_temperature'],
+            ['throat_diameter', 'Throat Diameter (m)', 0.05, 0.001, 'common.f.throatDiameterM', 'panel.regen.help.throat_diameter'],
+            ['expansion_ratio', 'Expansion Ratio', 8, 0.1, 'common.f.expansionRatio', 'panel.regen.help.expansion_ratio'],
+            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen', 'panel.regen.help.gamma'],
+            ['molecular_weight', 'Molecular Weight (g/mol)', 22, 0.5, 'common.f.molecularWeight', 'panel.regen.help.molecular_weight'],
             // ÖH A2 sivi-sogutma · 7. tur (F-17 ilkesi: kaynaksız ön-dolgu
             // yok): soğutucu 'water', giriş sıcaklığı 300 K, giriş basıncı
             // 60 bar, kanal genişliği 2,0 mm, derinliği 3,0 mm ve astar
@@ -411,22 +553,22 @@
             // sonlu pozitif, yalnız kanal devresi varken). Yayımlanmamışsa
             // alan boş kalır ve ZORUNLUDUR (spec.required): güverte isteği
             // göndermez, eksik alanı adıyla söyler.
-            ['coolant', 'Coolant', '', COOLANTS, 'panel.regen.fCoolant'],
-            ['coolant_mdot', 'Coolant Mass Flow (kg/s)', 2.0, 0.05, 'panel.regen.fCoolantMdot'],
-            ['coolant_inlet_temp', 'Coolant Inlet T (K)', '', 5, 'panel.regen.fInletT'],
-            ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', '', 1, 'panel.regen.fInletP'],
+            ['coolant', 'Coolant', '', COOLANTS, 'panel.regen.fCoolant', 'panel.regen.help.coolant'],
+            ['coolant_mdot', 'Coolant Mass Flow (kg/s)', 2.0, 0.05, 'panel.regen.fCoolantMdot', 'panel.regen.help.coolant_mdot'],
+            ['coolant_inlet_temp', 'Coolant Inlet T (K)', '', 5, 'panel.regen.fInletT', 'panel.regen.help.coolant_inlet_temp'],
+            ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', '', 1, 'panel.regen.fInletP', 'panel.regen.help.coolant_inlet_pressure'],
             // ÖH A2 sivi-sogutma · 6. tur (F-17 ilkesi: kaynaksız ön-dolgu
             // yok): eskiden 80 yazılı geliyordu — hiçbir hesaptan değil. Ön-dolgu
             // artık /calculate_liquid'in YAYIMLADIĞI kanal sayısıdır
             // (cooling_system.cooling_channels, fromResults); motor sonucu yoksa
             // ya da N yayımlanmadıysa alan BOŞ kalır ve uç n_channels'ı adıyla
             // ister (HTTP 400) — uydurma sayıyla hesap yapılmaz.
-            ['n_channels', 'Number of Channels', '', 1, 'panel.regen.fChannels'],
-            ['channel_width', 'Channel Width (mm)', '', 0.1, 'panel.regen.fChannelW'],
-            ['channel_height', 'Channel Height (mm)', '', 0.1, 'panel.regen.fChannelH'],
-            ['wall_thickness', 'Liner Thickness (mm)', '', 0.1, 'panel.regen.fLinerThickness'],
-            ['wall_material', 'Liner Material', 'copper', WALL_MATERIALS, 'panel.regen.fLinerMaterial'],
-            ['flow_direction', 'Flow Direction', 'counterflow', FLOW_DIRECTIONS, 'panel.regen.fFlowDir'],
+            ['n_channels', 'Number of Channels', '', 1, 'panel.regen.fChannels', 'panel.regen.help.n_channels'],
+            ['channel_width', 'Channel Width (mm)', '', 0.1, 'panel.regen.fChannelW', 'panel.regen.help.channel_width'],
+            ['channel_height', 'Channel Height (mm)', '', 0.1, 'panel.regen.fChannelH', 'panel.regen.help.channel_height'],
+            ['wall_thickness', 'Liner Thickness (mm)', '', 0.1, 'panel.regen.fLinerThickness', 'panel.regen.help.wall_thickness'],
+            ['wall_material', 'Liner Material', 'copper', WALL_MATERIALS, 'panel.regen.fLinerMaterial', 'panel.regen.help.wall_material'],
+            ['flow_direction', 'Flow Direction', 'counterflow', FLOW_DIRECTIONS, 'panel.regen.fFlowDir', 'panel.regen.help.flow_direction'],
         ],
         // 'BOŞ + ZORUNLU' beyanı (analysis_dock.requiredFieldInfo): tanım
         // değeri boş olan bu alanlar isteğe bağlı DEĞİL — uç n_channels'ı
@@ -473,20 +615,30 @@
                 if (w !== null) sug.channel_width = w;
                 const h = pozitif(cs.channel_height_mm);
                 if (h !== null) sug.channel_height = h;
-                // Marşın ısıyı İLETTİĞİ sıcak cidar (RP-1: hazne cidarı;
-                // süperkritik: astar) — sığma bloğunda künyesiyle yayımlanır.
+                // Marşın ısıyı İLETTİĞİ sıcak cidar — V301/L-KABUK: her
+                // rejeneratif yolda iki katmanlı cidarın ASTARI — sığma
+                // bloğunda künyesiyle yayımlanır.
                 const fit = (cs.channel_count_fit && typeof cs.channel_count_fit === 'object')
                     ? cs.channel_count_fit : {};
                 const tw = pozitif(fit.hot_wall_thickness_mm);
                 if (tw !== null) sug.wall_thickness = tw;
                 const tin = pozitif(cs.coolant_inlet_temperature);
                 if (tin !== null) sug.coolant_inlet_temp = tin;
-                // Giriş basıncını motor YALNIZ süperkritik marşta yayımlar;
-                // RP-1 marşının giriş basıncı yanıtta yok → alan boş kalır.
+                // Giriş basıncı: motorun KENDİ marşının giriş basıncı —
+                // süperkritik marşta cooling_system.regen_supercritical,
+                // RP-1 marşında (V301/L-KABUK; eskiden yanıtta yoktu ve
+                // zorunlu alan boş kalıp istek kurulamıyordu)
+                // thermal_protection.station_march.coolant_inlet_pressure_bar.
+                // İkisi de yoksa alan boş kalır ve güverte adıyla reddeder.
                 const sc = (cs.regen_supercritical && typeof cs.regen_supercritical === 'object')
                     ? cs.regen_supercritical : {};
+                const tpb = (r && typeof r.thermal_protection === 'object' && r.thermal_protection) || {};
+                const smr = (tpb.station_march && typeof tpb.station_march === 'object')
+                    ? tpb.station_march : {};
                 const pin = pozitif(sc.inlet_pressure_bar);
+                const pinRp1 = pozitif(smr.coolant_inlet_pressure_bar);
                 if (pin !== null) sug.coolant_inlet_pressure = pin;
+                else if (pinRp1 !== null) sug.coolant_inlet_pressure = pinRp1;
                 // Soğutucu = yakıt (motorun marşı da yakıtı soğutucu alır).
                 // Seçicide olmayan ad güvertenin kapısına düşer (seçim
                 // değişmez, koşum durur, gerekçe ekranda).
@@ -565,4 +717,6 @@
         _ablatifAnahtarlar: ablatifAnahtarlar,
         _wallMaterials: WALL_MATERIALS,
     };
+    // V301/L-E: karbon birikimi bölümü (ayrı işlev; test erişimi).
+    window.CoolingPanel._carbonDepositSection = carbonDepositSection;
 })();

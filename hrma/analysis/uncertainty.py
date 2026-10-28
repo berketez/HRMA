@@ -300,8 +300,16 @@ DEFAULT_UQ_MODELS = {
                 'literature fits (Zilliac & Karabeyoglu, AIAA 2006-4504, '
                 'Table 2 fits). Kept narrow and independent of lambda_r by '
                 'approved design (a-n correlation note above).')),
-        # nominal_override=1.0: ana sayfa /calculate rotasi eta_c_star'i HIC
-        # gecmiyor (HybridRocketEngine varsayilani None -> teorik c*). Nominal
+        # V301/H-PANEL (NK-20): /calculate ARTIK eta_c_star'i geciriyor
+        # (kullanici degeri ya da kaynakli varsayilan; kaynaksiz ciftte
+        # ideal c*). Uc yolunda bu girdi
+        # ``uq_adapters.center_hybrid_eta_distribution`` ile ayni eta'ya
+        # oturtulur (nominal = ortalama = eta); asagidaki 1.0/0.93 ikilisi
+        # yalniz kaynaksiz ciftte ve cekirdegi dogrudan cagiran yollarda
+        # gecerlidir.
+        # nominal_override=1.0 (TARIHCE): ana sayfa /calculate rotasi
+        # eta_c_star'i HIC gecmiyordu (HybridRocketEngine varsayilani None ->
+        # teorik c*). Nominal
         # 0.93 birakildiginda UQ paneli Isp=214.2 s, ana sayfa 230.3 s
         # gosteriyordu — TAM -%7.00 sessiz sapma (2026-07-25 fizik denetimi
         # F029, olculdu). eta_c*'in TANIMI dogru (Sutton & Biblarz 9. baski

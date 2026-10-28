@@ -408,14 +408,23 @@ class TestHybridImpossibleChamberGeometry:
         assert 'chamber diameter' in message.lower()
         assert 'port' in message.lower()
 
-    def test_endpoint_returns_400(self, client):
+    def test_endpoint_returns_422_named(self, client):
+        # v3.0.1 kulvar P (ana model kararı): imkânsız zarf artık genel
+        # istemci-reddi dalının 400'ü değil, adlı 422'dir — ret
+        # ``GrainEnvelopeError`` künyesini (alan, neden, gereken en küçük
+        # çap) ``invalid_fields`` ile taşır. Bekçinin özü (hesap sessizce
+        # devam etmez, gövde kamara çapını anar) aynen korunur.
         payload = dict(HYBRID_ENDPOINT_PAYLOAD, chamber_diameter_input=40)
         r = client.post('/calculate', json=payload)
-        assert r.status_code == 400, (
-            'Imkansiz geometri (port >= kamara) 400 yerine '
+        assert r.status_code == 422, (
+            'Imkansiz geometri (port >= kamara) 422 yerine '
             f'{r.status_code} dondu — hesap sessizce devam ediyor.')
         body = r.get_json()
         assert 'chamber diameter' in json.dumps(body).lower()
+        alan = body['invalid_fields'][0]
+        assert alan['field'] == 'chamber_diameter_input'
+        assert alan['reason'] == 'grain_envelope_too_small_for_final_ports'
+        assert alan['required_min'] > 40.0
 
     def test_valid_geometry_has_no_negative_masses(self):
         from hrma.engines.hybrid_rocket_engine import HybridRocketEngine

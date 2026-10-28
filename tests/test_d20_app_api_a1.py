@@ -201,6 +201,15 @@ class TestP15B1_02PlakaKalinligi:
     thickness nor an L/D' diyor. İki modül artık aynı dili konuşuyor.
     """
 
+    #: V301/E2: L/D bant hükmünün metni "outside optimal range (3-5)" idi;
+    #: bandın kaynağı yok, "optimal" kelimesi kaldırıldı ve metin HRMA
+    #: buluşsal eşiği olduğunu söylüyor. Bekçi aynı hükmü YENİ metnin L/D'ye
+    #: özgü iki parçasıyla tanır (gevşetilmedi: hız bandının metni de
+    #: "HRMA heuristic" taşır, L/D önekiyle ayrılır).
+    @staticmethod
+    def _ld_bant_hukmu(w):
+        return ('L/D ratio (' in w and 'band (HRMA heuristic threshold' in w)
+
     @staticmethod
     def _inj(istemci, **ek):
         r = istemci.post('/calculate', json=dict(_HIB, **ek))
@@ -230,7 +239,7 @@ class TestP15B1_02PlakaKalinligi:
         assert any('NOT ISSUED' in w and 'L/D' in w for w in uyarilar), (
             f'L/D bandı hükmü kazanılmamış plakadan sessizce veriliyor: '
             f'{uyarilar}')
-        assert not any('outside optimal range' in w for w in uyarilar), (
+        assert not any(self._ld_bant_hukmu(w) for w in uyarilar), (
             f'kazanılmamış L/D üzerinden bant hükmü basılmış: {uyarilar}')
 
     def test_bant_hukmu_ANCAK_kazanilmis_plakadan_verilir(self, istemci):
@@ -244,6 +253,10 @@ class TestP15B1_02PlakaKalinligi:
         * kullanıcı AYNI 3,0 mm'yi kendisi verirse hüküm basılır
           ("L/D ratio (2.0) outside optimal range (3-5)").
 
+        V301/E2: bant artık DEVRE planlayıcısına girer (delik planı
+        [1,5; 2,0] mm içinde kurulur: 4 × Ø1,83 mm, L/D 1,64 — yine bandın
+        dışında) ve metin "optimal" demez (``_ld_bant_hukmu``).
+
         Fark sayıda değil, sayının SAHİBİNDEDİR. Varsayılan çalışma
         noktasında (L/D 3,23) bant zaten içeride olduğu için kapı orada
         GÖRÜNMEZ — bu bekçi kapıyı gerçekten ölçen tek kesittir.
@@ -252,17 +265,21 @@ class TestP15B1_02PlakaKalinligi:
         kazanilmamis = self._inj(istemci, **_BANT_DISI)
         kazanilmis = self._inj(istemci, plate_thickness=3.0, **_BANT_DISI)
 
-        assert kazanilmamis['L_D_ratio'] == pytest.approx(
-            kazanilmis['L_D_ratio'], rel=1e-9), 'kurgu bozuldu: L/D ayrıştı'
-        assert kazanilmamis['L_D_ratio'] < 3.0, kazanilmamis['L_D_ratio']
+        # V301/HİBRİT-DIŞA (kalem 4): kazanılmamış plakada L/D artık
+        # YAYIMLANMAZ (null). Kurgunun dayanağı (iki koşu aynı delik planı)
+        # delik çapıyla denetlenir; bant dışı L/D kazanılmış koşudan okunur.
+        assert kazanilmamis['L_D_ratio'] is None, kazanilmamis['L_D_ratio']
+        assert kazanilmamis['hole_diameter'] == pytest.approx(
+            kazanilmis['hole_diameter'], rel=1e-9), 'kurgu bozuldu: delik planı ayrıştı'
+        assert kazanilmis['L_D_ratio'] < 3.0, kazanilmis['L_D_ratio']
 
         u_yok = kazanilmamis.get('warnings') or []
         u_var = kazanilmis.get('warnings') or []
-        assert not any('outside optimal range' in w for w in u_yok), (
+        assert not any(self._ld_bant_hukmu(w) for w in u_yok), (
             'kazanılmamış plakadan bant hükmü basıldı: '
             f'{[w for w in u_yok if "L/D" in w]}')
         assert any('NOT ISSUED' in w and 'L/D' in w for w in u_yok), u_yok
-        assert any('outside optimal range' in w for w in u_var), (
+        assert any(self._ld_bant_hukmu(w) for w in u_var), (
             'kullanıcı plakayı verdiği hâlde bant hükmü basılmadı — kapı '
             f'hükmü tamamen öldürmüş olur: {u_var}')
 
@@ -336,20 +353,41 @@ class TestP15B1_02PlakaKalinligi:
         L/D = t/d özdeşliği onunla yeniden kurulur. Sayı bu kulvarın
         fiziğinden değil, iki çözümün uzlaştırılmasından geliyor.
         """
-        inj = self._inj(istemci)
+        # V301/HİBRİT-DIŞA (kalem 4, 28 Eki): kazanılmamış plakada
+        # plate_thickness / L_D_ratio artık null (fail-closed yayın); çapa
+        # sayıları DEĞİŞMEDİ, kullanıcının AYNI 3,0 mm'yi verdiği koşudan
+        # okunur (delik planı iki koşuda aynı — test_bant_hukmu_ANCAK_*).
+        # V301/T-ÇAPA-D: H-PANEL (74b55500a, Berke onaylı yayımlanan sayı)
+        # hibrit c* verimini alan yokken kaynaklı η = 0,89 ile çözüyor →
+        # ṁ ↑, delik çapı ↑, L/D 1,4407513659900986 → 1,3596282508507027
+        # (oran ≈ √0,89). Bu çapa plaka onarımının SAYIYI OYNATMADIĞINI
+        # ölçer; η'dan bağımsız kalsın diye koşu ideal c* (η = %100) ile
+        # yapılır. ÖLÇÜLDÜ (28 Eki): η = %100'de L/D bit-aynı 1,4407513659900986
+        # (C1'in hibrit kenar vakalarıyla aynı çözüm).
+        bos = self._inj(istemci, combustion_efficiency=100)
+        assert bos['plate_thickness'] is None and bos['L_D_ratio'] is None, (
+            bos['plate_thickness'], bos['L_D_ratio'])
+        inj = self._inj(istemci, plate_thickness=3.0, combustion_efficiency=100)
+        assert inj['hole_diameter'] == pytest.approx(bos['hole_diameter'], rel=1e-12)
         assert inj['plate_thickness'] == pytest.approx(3.0)
         # ÇAPA YENİLENDİ — kitap p1a B16 (karar §28-18 (a)): N₂O 293,15 K
         # doymuş SIVI giriş entalpisi. Kâhin: CEA kök denetimi
         # (docs/scofield/raw/OH/KITAP/p1a/kanit/tur2b/kahin_cea.json) +
         # önce/sonra (p1a rapor §12). Tolerans DEĞİŞMEDİ.
         #   L/D 1,4508095133895842 -> 1,4412796945529898
-        assert inj['L_D_ratio'] == pytest.approx(1.4412796945529898,
+        # v3.0.1 port kulvarı (20 Eki): grain dış çapı = son port (eski
+        # 1,5·D_son); kamara küçüldü -> gerçekleşen L* ↓ -> Isp ↓ -> ṁ ↑ ->
+        # delik çapı ↑ -> L/D = t/d ↓ (−%0,037). Ölçüldü (birleşik main):
+        #   L/D 1,4412796945529898 -> 1,4407513659900986
+        assert inj['L_D_ratio'] == pytest.approx(1.4407513659900986,
                                                  rel=1e-9)
         # Çapa TEK sayı değil: L/D = plaka / delik çapı özdeşliği de
         # kilitlenir, yoksa iki sayı sessizce ayrışabilir.
         # ÇAPA YENİLENDİ — kitap p1a B16: delik çapı 2,0678110891284276 ->
         # 2,08148356723394 mm (ṁ arttı; kâhin yukarıda).
-        assert inj['hole_diameter'] == pytest.approx(2.08148356723394,
+        # v3.0.1 port kulvarı (20 Eki): 2,08148356723394 -> 2,0822468545350783
+        # mm (+%0,037; L/D ile aynı oran, özdeşlik aşağıda kilitli).
+        assert inj['hole_diameter'] == pytest.approx(2.0822468545350783,
                                                      rel=1e-9)
         assert inj['L_D_ratio'] == pytest.approx(
             inj['plate_thickness'] / inj['hole_diameter'], rel=1e-12)

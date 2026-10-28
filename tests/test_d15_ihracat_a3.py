@@ -152,8 +152,22 @@ class TestB226NegatifTank:
 
     def test_saglikli_tank_hala_paket_uretiyor(self, istemci):
         """ÖK-22: sağlıklı envanter gevşetilmez — 200 ve dolu ZIP."""
-        r = _sessiz(istemci.post, '/export_tank_cad',
-                    json=_tank_govdesi(743.7556))
+        # ÖH V31 CV-0 — ÇEVRİLDİ (19 Eki; ana model izni, dört koşul, koşul
+        # 1; docs/scofield/raw/OH/V31/cv0/etkilenen_dugumler.md). İmalat
+        # kapısı artık çizilen düz kapağı da hesaplar; bu gövde SF yayımladığı
+        # hâlde kapak girdisi ``structural.material_key``i taşımıyordu
+        # (-> adlı 422) ve 60 bar / Ø743,8 mm / 3 mm ile kapağı zaten
+        # yetersizdi. "Sağlıklı" girdi, kapağı YETERLİ açık bir gövdeye
+        # çevrildi: malzeme anahtarı gövdenin kendi 'Al 2024-T3' beyanıdır;
+        # işletme basıncı kapak SF'si 2 olacak biçimde düşürülür ve SF
+        # ``kapagi_yeterli`` içinde bağıntıdan hesaplanıp denetlenir.
+        # Geometri ve iddia (200 + dolu ZIP) AYNEN durur.
+        from tests.test_cv0_tank_kapak import kapagi_yeterli
+        govde = _tank_govdesi(743.7556)
+        for tank in govde['tank_data'].values():
+            tank['structural']['material_key'] = 'al_2024_t3'
+        govde['tank_data'] = kapagi_yeterli(govde['tank_data'])
+        r = _sessiz(istemci.post, '/export_tank_cad', json=govde)
         assert r.status_code == 200
         assert r.get_data()[:2] == b'PK'
         assert len(r.get_data()) > 10000

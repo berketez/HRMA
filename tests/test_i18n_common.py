@@ -304,6 +304,40 @@ def used_keys():
     # Sunucudan gelen uyarı kodları (aşağıdaki açıklamaya bakın)
     for key, kaynak in python_dispatched_keys().items():
         found.setdefault(key, set()).update(kaynak)
+    # JS önek + sunucunun ürettiği kod (aşağıdaki açıklamaya bakın)
+    for key, kaynak in dinamik_py_aileleri().items():
+        found.setdefault(key, set()).update(kaynak)
+    return found
+
+
+#: T-ÇAPA-C2 (27 Eki) — ÖNEK + SUNUCU KODU ile KURULAN aileler.
+#: V301/L-KABUK (823e59841) FEA köprüsünün hüküm geri çekme gerekçelerini
+#: ekrana getirdi: ``fea_panel.js`` ``T('panel.fea.withheld.' + k, k)`` yazar,
+#: ``k`` ise ``hrma/fea/bridge.py``nin ``hukum_gerekceleri`` listesine
+#: eklediği kod literalidir (ör. ``"kuvvet_dengesi_tutmadi"``). Ne JS'te ne
+#: Python'da TAM anahtar literal geçer; 12 canlı anahtar "ölü" sayılıyordu.
+#: Ölü çeviri koruması zayıflamaz: aile ancak (1) JS önek birleştirmesi
+#: kaynakta duruyorsa ve (2) son ek, verilen Python dizininde YORUM DIŞI bir
+#: dize literali olarak geçiyorsa "kullanılıyor" sayılır — üretilmeyen kodun
+#: çevirisi yine yakalanır.
+DINAMIK_PY_AILELERI = {
+    'panel.fea.withheld.': ('fea_panel.js', REPO_ROOT / 'hrma' / 'fea'),
+}
+
+
+def dinamik_py_aileleri():
+    found = {}
+    for onek, (js_ad, py_dizin) in DINAMIK_PY_AILELERI.items():
+        js = strip_comments(read(STATIC_JS / js_ad))
+        if ("'%s' +" % onek) not in js:
+            continue          # önek birleştirmesi söküldüyse aile canlı değil
+        kodlar = set()
+        for path in py_dizin.rglob('*.py'):
+            src = re.sub(r'(?m)#.*$', '', path.read_text(encoding='utf-8'))
+            kodlar.update(re.findall(r"""['"]([a-z][a-z0-9_]*)['"]""", src))
+        for key in EN:
+            if key.startswith(onek) and key[len(onek):] in kodlar:
+                found.setdefault(key, set()).update({js_ad, py_dizin.name})
     return found
 
 
@@ -314,8 +348,19 @@ def used_keys():
 # görmediği için sözlüğe eklenmeleri "ölü çeviri" sayılıyordu. Ön ek listesi
 # Python'ın GERÇEKTEN gönderdiği ad alanlarını yansıtmalı, yoksa bekçi doğru
 # eklemeyi engeller.
+#: v3.0.1 (26 Eki, V301/H3 birleşmesi): ``info`` öneki eklendi. H3, sunucunun
+#: ürettiği ilk BİLGİ düzeyli kodu getirdi (``info.injector.saturated_inlet_two_phase``,
+#: ``hrma/utils/injector_design.py`` SATURATED_INLET_NOTE_CODE; EN + TR sözlükte).
+#: Kod Python'da literal duruyor ama önek listesi onu görmediği için anahtar
+#: "ölü" sayılıyordu — warn.* ile aynı yanlış pozitif sınıfı.
+#: T-ÇAPA-C2 (27 Eki): ``err`` öneki eklendi. V301/L-KABUK (823e59841) sıvı
+#: ret gövdelerine ``message_key: 'err.liquid.…'`` koydu (``hrma/app.py``);
+#: ekran o anahtarı ``reject_body.js`` ``_ceviri(govde.message_key, …)`` ile
+#: genel olarak çevirir, kaynakta literal geçmez. Ölçüldü: Python'da 2 err.*
+#: literali var, ikisi de sözlükte; önek yalnız bu ikisini "kullanılıyor"
+#: yapar.
 PY_KEY_RE = re.compile(
-    r"['\"]((?:warn|panel|common|risk|out|status)\.[\w.]+)['\"]")
+    r"['\"]((?:warn|info|panel|common|risk|out|status|err)\.[\w.]+)['\"]")
 
 
 def python_dispatched_keys():
@@ -549,8 +594,14 @@ def test_en_tr_key_sets_match_and_values_non_empty():
 def test_english_block_has_no_turkish_letters():
     """EN bloğuna yanlışlıkla Türkçe metin sızmasın (blokların karışması)."""
     turkish = re.compile(r'[çğıİöşüÇĞÖŞÜ]')
+
+    def _metin(k, v):
+        # v3.0.1 (NK-51): proj.nameRule izin verilen Türkçe harfleri SAYAR;
+        # o liste metin değil karakter kümesidir. Yalnız tam liste çıkarılır,
+        # değerin geri kalanı yine denetlenir.
+        return v.replace('ç ğ ı İ ö ş ü', '') if k == 'proj.nameRule' else v
     slips = sorted(k for k, v in EN.items()
-                   if turkish.search(v) and 'Türkçe' not in v)
+                   if turkish.search(_metin(k, v)) and 'Türkçe' not in v)
     assert not slips, 'EN bloğunda Türkçe karakterli değerler: %s' % slips[:10]
 
 

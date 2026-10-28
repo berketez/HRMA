@@ -46,6 +46,64 @@ MANUFACTURING_ALLOWANCE_FACTOR = 1.2
 THIN_WALL_T_OVER_R_LIMIT = 0.1
 
 # ---------------------------------------------------------------------------
+# V301 CAD-2 / KABUL K4 (27 Eki 2026) — LÜLE BOĞAZI CİDAR KURALI, TEK TANIM.
+#
+# ÖLÇÜLDÜ (örnek hibrit, ``docs/scofield/raw/OH/V301/bilinen/cad2/
+# once_sf.json``): aynı lüle iki ayrı kuralla iki ayrı ete boyutlanıyordu.
+# Lüle tasarımcısı (``nozzle_design._calculate_nozzle_geometry``) grafit
+# lüleyi 1,0·Pc, SCF'siz ince cidar hoop ile 7,1846 mm'ye; bu modül boğazı
+# KAMARA malzemesiyle (ss_304) 1,5·Pc ve SCF 2,0 ile 2,5063 mm'ye
+# boyutluyordu. CAD 7,1846 mm çiziyor, imalat kapısı beş dışa aktarımı
+# ``sf_wall_mismatch`` ile reddediyordu. Artık çizilen lüle eti bu kuraldan
+# (lülenin KENDİ malzemesiyle) gelir ve yapısal analiz o eti doğrular.
+#
+#: Tasarım basıncı katsayısı (tasarım basıncı = Pc x katsayı). HRMA SEÇİMİ,
+#: literatür değeri değildir: v2.6.x'ten beri hibrit/uç çağrılarında sabit
+#: 1,5 olarak geçiliyordu (MEOP üstü kanıt/patlama payı; kullanıcının
+#: emniyet katsayısıyla ÇARPILIR, onun yerine geçmez). Tek tanım burası.
+STRUCTURAL_DESIGN_PRESSURE_FACTOR = 1.5
+STRUCTURAL_DESIGN_PRESSURE_FACTOR_BASIS = (
+    'HRMA choice (no literature value): design pressure = chamber pressure '
+    'x 1.5, the proof/burst margin over MEOP the structural analysis has '
+    'applied since v2.6; it compounds with the design safety factor')
+#: Boğaz geçiş bölgesi gerilme yığılma katsayısı (konik / çan). HRMA SEÇİMİ:
+#: iç basınçlı kabuk geçişi için tipik K_t bandı 1,5-3,0 içinde BEYANLI
+#: tasarım kabulü; boğaz fileto geometrisinden türetilmez (Peterson'da
+#: "konik lüle boğazı = 2,0" tablo girdisi yoktur, F182).
+NOZZLE_THROAT_SCF_CONICAL = 2.0
+NOZZLE_THROAT_SCF_OTHER = 1.5
+NOZZLE_THROAT_SCF_BASIS = (
+    'HRMA choice (declared design assumption, no literature value): throat '
+    'transition stress concentration 2.0 for a conical nozzle, 1.5 '
+    'otherwise, inside the typical 1.5-3.0 K_t band of a pressurised shell '
+    'transition; not derived from the throat fillet geometry')
+
+
+def nozzle_throat_stress_concentration(nozzle_type):
+    """Boğaz SCF'si (``NOZZLE_THROAT_SCF_*``; konik 2,0, diğer 1,5)."""
+    return (NOZZLE_THROAT_SCF_CONICAL if nozzle_type == 'conical'
+            else NOZZLE_THROAT_SCF_OTHER)
+
+
+def nozzle_throat_wall_sizing(pressure_pa, throat_radius_m, yield_pa,
+                              safety_factor, nozzle_type):
+    """Lüle boğazı cidar boyutlandırması — TEK kural (V301 CAD-2 / K4).
+
+    İnce cidar hoop (Sutton & Biblarz Ch. 8 / Roark Ch. 13) x boğaz SCF'si:
+    ``t = SCF * p * r_t / (sigma_y / SF)``. ``pressure_pa`` TASARIM
+    basıncıdır (Pc x ``STRUCTURAL_DESIGN_PRESSURE_FACTOR``). Lüle tasarımcısı
+    çizilen eti, ``_analyze_nozzle_structure`` boyutlandırma kipini buradan
+    okur; ikinci kopya yazılmaz.
+    """
+    allowable_stress = yield_pa / safety_factor
+    min_throat_thickness = pressure_pa * throat_radius_m / allowable_stress
+    scf = nozzle_throat_stress_concentration(nozzle_type)
+    return {'allowable_stress_pa': allowable_stress,
+            'min_throat_thickness_m': min_throat_thickness,
+            'stress_concentration_factor': scf,
+            'required_throat_thickness_m': min_throat_thickness * scf}
+
+# ---------------------------------------------------------------------------
 # V3 yapi-sf (7 Eki 2026, §28-21) — BOYUTLANDIRMA ISIL YÜKÜ DE TAŞIR.
 #
 # ÖLÇÜLDÜ (main 393960ce, örnek "Example Hybrid N2O-HTPB 3kN"): cidar
@@ -1412,11 +1470,14 @@ class StructuralAnalyzer:
         }
     
     def analyze_structure(self, motor_data: Dict, material: str = 'steel_4130',
-                         design_pressure_factor: float = 1.5,
+                         design_pressure_factor: float = STRUCTURAL_DESIGN_PRESSURE_FACTOR,
                          design_safety_factor: Optional[float] = None,
                          actual_wall_thickness: Optional[float] = None,
                          actual_throat_thickness: Optional[float] = None,
-                         actual_end_cap_thickness: Optional[float] = None) -> Dict:
+                         actual_end_cap_thickness: Optional[float] = None,
+                         nozzle_material: Optional[str] = None,
+                         actual_throat_thickness_source: Optional[str] = None
+                         ) -> Dict:
         """
         Complete structural analysis
 
@@ -1440,6 +1501,19 @@ class StructuralAnalyzer:
             actual_end_cap_thickness: Kullanıcının GERÇEK kapak kalınlığı [m].
                 Aynı gerekçe; ``_analyze_end_caps`` argümanı destekliyordu,
                 çağrı satırı geçirmiyordu. None -> boyutlandırma modu.
+            nozzle_material: Lülenin KENDİ malzemesi (malzeme tablosu
+                anahtarı). V301 CAD-2 / KABUL K4 (27 Eki): lüle boğazı
+                kamara malzemesiyle değerlendiriliyordu — örnek hibritte
+                grafit lüle ss_304 akmasıyla (215 MPa) boyutlandırılıp
+                2,5063 mm yayımlanıyor, çizilen grafit lüle 7,1846 mm idi;
+                imalat kapısı bütün dışa aktarımları ``sf_wall_mismatch``
+                ile reddediyordu. Verilirse boğaz bu malzemeyle
+                değerlendirilir; tabloda yoksa ADLI ``ValueError`` (kamara
+                malzemesine sessiz düşüş yok). None -> eski davranış
+                (kamara malzemesi) birebir.
+            actual_throat_thickness_source: ``actual_throat_thickness``in
+                hangi yayımlanan alandan geldiği (künye; ``nozzle_analysis
+                .throat_thickness_source`` olarak yazılır).
 
         Returns:
             Structural analysis results
@@ -1684,11 +1758,39 @@ class StructuralAnalyzer:
         # motorda iki farklı tasarım emniyet katsayısı kullanılıyordu.
         # v2.6.27 (F4-2): gerçek boğaz cidarı da artık İLETİLİYOR — verilirse
         # lüle doğrulama moduna geçer ve SF'si totolojik olmaktan çıkar.
+        # V301 CAD-2 / KABUL K4: lüle boğazı lülenin KENDİ malzemesiyle
+        # değerlendirilir (verildiyse); kamara malzemesi yalnız lüle
+        # malzemesi verilmediğinde kullanılır ve bu künyede yazar.
+        if nozzle_material is not None:
+            noz_props = self.materials.get(nozzle_material)
+            if noz_props is None:
+                raise ValueError(
+                    f'nozzle_material {nozzle_material!r} has no structural '
+                    'material record; the nozzle throat is not evaluated '
+                    'with the chamber material instead')
+            noz_material_key = nozzle_material
+            noz_material_source = ('nozzle material selected by this run '
+                                   '(nozzle_material)')
+        else:
+            noz_props = mat_props
+            noz_material_key = material
+            noz_material_source = ('chamber material: no separate nozzle '
+                                   'material was supplied to the structural '
+                                   'analysis')
         nozzle_analysis = self._analyze_nozzle_structure(
-            design_pressure, throat_diameter, chamber_diameter, mat_props,
+            design_pressure, throat_diameter, chamber_diameter, noz_props,
             nozzle_type, design_safety_factor=design_safety_factor,
             actual_throat_thickness=actual_throat_thickness
         )
+        if nozzle_material is not None or actual_throat_thickness_source:
+            # Künye yalnız yeni yol kullanıldığında yazılır: eski çağıranların
+            # (katı/sıvı/uç) yanıtı bit-aynı kalır.
+            nozzle_analysis['material_key'] = noz_material_key
+            nozzle_analysis['material_name'] = noz_props.get('name')
+            nozzle_analysis['material_source'] = noz_material_source
+            if actual_throat_thickness_source:
+                nozzle_analysis['throat_thickness_source'] = (
+                    actual_throat_thickness_source)
 
         # End cap analysis
         end_cap_analysis = self._analyze_end_caps(
@@ -2634,8 +2736,13 @@ class StructuralAnalyzer:
             yield_for_design = yield_strength
 
         # Throat section is critical (smallest diameter, highest stress)
-        allowable_stress = yield_for_design / safety_factor
-        min_throat_thickness = pressure * throat_radius / allowable_stress
+        # V301 CAD-2 / K4: kural TEK yerde (``nozzle_throat_wall_sizing``);
+        # lüle tasarımcısının çizilen eti de aynı işlevden gelir.
+        _boyut = nozzle_throat_wall_sizing(pressure, throat_radius,
+                                           yield_for_design, safety_factor,
+                                           nozzle_type)
+        allowable_stress = _boyut['allowable_stress_pa']
+        min_throat_thickness = _boyut['min_throat_thickness_m']
 
         # Boğaz geçiş bölgesi gerilme yığılması. 2.0 (konik) / 1.5 (çan)
         # değerleri BEYAN EDİLEN tasarım kabulüdür: iç basınçlı kabuk geçiş
@@ -2644,10 +2751,10 @@ class StructuralAnalyzer:
         # türetilmemiştir — Peterson'da "konik nozul boğazı = 2.0" diye bir
         # tablo girdisi yoktur (F182). Doğrulama modunda bu katsayı SF'yi
         # doğrudan etkiler; geometriden hesaplanan K_t ile değiştirilmelidir.
-        stress_concentration_factor = 2.0 if nozzle_type == 'conical' else 1.5
+        stress_concentration_factor = _boyut['stress_concentration_factor']
 
         # Required thickness considering stress concentration
-        required_throat_thickness = min_throat_thickness * stress_concentration_factor
+        required_throat_thickness = _boyut['required_throat_thickness_m']
 
         # Effective (peak) stress at throat.
         # DUZELTME (2026-07-16): Eski kod effective_stress'u min_throat_thickness

@@ -45,6 +45,8 @@ import os
 
 import pytest
 
+from tests.support import form_defaults
+
 from tests.bagimlilik_kapisi import kurulu_mu
 from tests.support.kanit import kanit_gerekli
 
@@ -67,6 +69,11 @@ Z5_SIVI = {
     'characteristic_length': 1.2, 'chamber_wall_thickness': 1,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (L-A SV-03); sayfanın
+    # gönderdiği şablon varsayılanı (tek kaynak, kopyalanmaz).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 

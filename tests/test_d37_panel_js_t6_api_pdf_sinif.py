@@ -212,12 +212,19 @@ class TestCidarKaynagi:
         m = motorlar['hybrid']['motor']
         gsa = m['heat_transfer_analysis']['gas_side_analysis']
         ta = m['structural_analysis']['thermal_analysis']
-        # Ölçülen kusurun kendisi: çözücü bayrağı koyuyor, yapısal blok
-        # aynı sayıyı 'heat_transfer_module' kaynağıyla aktarıyor.
+        # Çözücü çıplak cidara 'fiziksel değil' bayrağını koyuyor.
         assert gsa['wall_temperature_unphysical'] is True
-        assert ta['wall_temperature_source'] == 'heat_transfer_module'
+        # v3.0.1 (V301/H-termal) — ÇEVİRİ, gerekçeli: eski beklenti yapısal
+        # bloğun çıplak cidarın ≈ adyabatik sayısını 'heat_transfer_module'
+        # kaynağıyla taşımasını istiyordu; bu, kusurun kendisiydi. Yapısal
+        # blok artık bölgelerin BEYANLI kasa sıcaklığını taşır (yakıt bloğu
+        # + HRMA astarı) ve kaynağını adıyla söyler. Panelin iddiası
+        # (bayraklı yanıtta çift gönderilmez) aşağıda AYNEN sınanır.
+        assert ta['wall_temperature_source'] == \
+            'hybrid_chamber_zone_protection'
         assert ta['wall_temperature_inner_K'] == pytest.approx(
-            gsa['estimated_wall_temperature'], rel=1e-12)
+            m['chamber_wall_zones']['structural_casing_temperature_K'],
+            rel=1e-12)
         out = _node({'loadCatalog': True, 'catalog': katalog_json,
                      'vakalar': {'h': {'motorType': 'hybrid',
                                        'results': motorlar['hybrid']}}})
@@ -231,15 +238,43 @@ class TestCidarKaynagi:
         r = copy.deepcopy(motorlar['hybrid'])
         r['motor']['heat_transfer_analysis']['gas_side_analysis'][
             'wall_temperature_unphysical'] = False
+        ta = r['motor']['structural_analysis']['thermal_analysis']
+        # V301/PANEL — KURGU ÇEVRİLDİ, iddia AYNI (gerekçeli): bu test
+        # "bayraksız ÇÖZÜLMÜŞ çift aynen gider" der. V301/H-termal'den beri
+        # örnek hibritin yapısal çifti çözülmüş değil, yakıt bloğu
+        # bölgelerinin BEYANLI kasa sıcaklığıdır
+        # (``hybrid_chamber_zone_protection``) ve H-PANEL onu, H-termal
+        # DEVİR 2 uyarınca ``WALL_TEMP_SOURCE_NOT_SOLVED``e koydu. Yani
+        # örnek artık bu testin öncülünü (çözülmüş çift) taşımıyordu;
+        # kırmızı bir kusur değil, bayat kurguydu. Çözülmüş çift kurgusu
+        # kaynağı ısı modülüne çevirerek kurulur; beyanlı çiftin GİTMEDİĞİ
+        # aşağıdaki ayrı testte kilitlenir.
+        ta['wall_temperature_source'] = 'heat_transfer_module'
         out = _node({'loadCatalog': True, 'catalog': katalog_json,
                      'vakalar': {'h': {'motorType': 'hybrid',
                                        'results': r}}})
-        ta = r['motor']['structural_analysis']['thermal_analysis']
         govde = out['govdeler']['h']
         assert govde['wall_temperature_hot'] == pytest.approx(
             ta['wall_temperature_inner_K'], rel=1e-5)
         assert govde['wall_temperature_cold'] == pytest.approx(
             ta['wall_temperature_outer_K'], rel=1e-5)
+
+    def test_bayraksiz_beyanli_bolge_cifti_cozulmus_diye_gitmez(
+            self, motorlar, katalog_json):
+        """V301/PANEL (H-termal DEVİR 2): beyanlı kasa çifti tohumlanmaz."""
+        import copy
+        r = copy.deepcopy(motorlar['hybrid'])
+        r['motor']['heat_transfer_analysis']['gas_side_analysis'][
+            'wall_temperature_unphysical'] = False
+        ta = r['motor']['structural_analysis']['thermal_analysis']
+        assert ta['wall_temperature_source'] == \
+            'hybrid_chamber_zone_protection'
+        out = _node({'loadCatalog': True, 'catalog': katalog_json,
+                     'vakalar': {'h': {'motorType': 'hybrid',
+                                       'results': r}}})
+        govde = out['govdeler']['h']
+        assert 'wall_temperature_hot' not in govde
+        assert 'wall_temperature_cold' not in govde
 
     def test_uc_termal_hukmu_ve_birlesik_katsayiyi_geri_ceker(
             self, client, motorlar, katalog_json):

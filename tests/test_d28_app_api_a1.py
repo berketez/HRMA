@@ -194,11 +194,17 @@ class TestP7B419BelirsizlikBandKapisi:
     # dönen gövdenin denetlenmemiş alanı KENDİSİNİN söylediğini doğrular.
     # Bant SAYISI burada da YAZILMAZ — katı formun itki zarfı bir veri
     # kararıdır (OH-UC-12, Berke).
+    # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu
+    # varsayılan motoru kilitliyordu — burada UQ fabrikasının kendi
+    # varsayılanları (çekirdek 30, a = 0,005; uq_adapters.py, K-A kapsamı
+    # dışı, DEVİR) 20 bar'da A_p/A_t = 0,26 veriyor ve nominal artık
+    # yayımlanmıyor (KT-23). Düğümün konusu itki bandı künyesidir; geçerli
+    # portlu kısa tane verilir (L 100, çekirdek 70 mm).
     SOLID_TABAN = {
         'motor_type': 'solid', 'level': 'fast', 'seed': 7, 'n_samples': 2,
         'inputs': {'thrust': 1e12, 'chamber_pressure': 20.0,
                    'burn_time': 10.0, 'chamber_diameter': 100.0,
-                   'grain_length': 500.0},
+                   'grain_length': 100.0, 'core_diameter': 70.0},
     }
 
     def test_kati_itki_bandi_HENUZ_YOK_olculen_durum(self, istemci):

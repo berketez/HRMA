@@ -118,9 +118,16 @@ def kati_motor(client):
     # çevrildi; ``outer_diameter`` da ucun okuduğu ada getirildi (uç
     # zaten aynı 100 mm'yi tohumluyordu). ÖLÇÜLDÜ: yanıt tasarım noktası
     # bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148, 186.659 bayt).
+    # V3.0.5 T-ÇAPA-C1 — ÇEKİRDEK 35 -> 40 mm. Port ⟷ boğaz kapısı (V301/K-A
+    # 1b71ef5a3, K-D dd329b831) bu gövdeyi 422 ile reddediyor: çekirdek
+    # 35 mm'de ilk port alanı 962,1 mm² < boğaz 1040,0 mm² (oran 0,925) —
+    # akış lülede değil portta boğulur; bu bir tasarım DEĞİLDİR. Uç
+    # 'en az 36,6 mm' diyor. ÖLÇÜLDÜ (e038d626f): 40 mm -> 200, ort. itki
+    # 4516,64 N, t_b 1,829 s, kritik uyarı yok. Test motorun sayısını
+    # kilitlemiyor; geçerli bir katı tasarım istiyor.
     yuk = {'motor_name': 'bridge-s', 'chamber_pressure': 40,
            'grain_type': 'bates', 'chamber_diameter': 100,
-           'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+           'core_diameter': 40, 'grain_length': 300, 'segments': 1,
            'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
            'chamber_temperature': 3000, 'c_star': 1550,
            'propellant_density': 1800, 'propellant_type': 'apcp'}

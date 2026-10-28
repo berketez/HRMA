@@ -69,10 +69,16 @@ HIBRIT_YAPISAL_GIRDISIZ = {
 
 #: Katı motorun en küçük geometri gövdesi; yanma hızı katsayısı YOK.
 #: (``propellant_type`` uçun zorunlu yakıt kimliği kapısını karşılar.)
+# v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+# (A_p/A_t 0,947); K-A kapısından beri 422 ``port_smaller_than_throat``.
+# Bu dosyanın Kalem 3'ü gövdeye a = 0,005 / n = 0,35 ekliyor; o katsayılarla
+# varsayılan çekirdek (48 mm, SOLID_DEFAULT_GEOMETRY_MM) de boğuluyor
+# (A_p/A_t 0,958, ölçüldü). Konu katsayı kaynağı, port değil: açık geçerli
+# port — çekirdek 70 mm (a = 0,005 ile ölçülen A_p/A_t 1,90).
 KATI_KATSAYISIZ = {
     'chamber_diameter': 100,   # mm
     'grain_length': 500,       # mm
-    'core_diameter': 30,       # mm
+    'core_diameter': 70,       # mm
     'chamber_pressure': 40,    # bar
     'propellant_type': 'apcp',
 }
@@ -181,10 +187,19 @@ class TestKalem1YapisalHukumKapisi:
         assert basis['chamber_material_source'] == 'user_supplied'
         assert basis['is_verification'] is True
         yapisal = cidarli['motor']['structural_analysis']
-        assert malzeme_kaydina_gore_gecerlilik_disi(yapisal) is True
+        # v3.0.1 (V301/H-termal) — ÇEVİRİ, gerekçeli: eski beklenti bu
+        # hibritin kamarasını erime üstünde (geçerlilik DIŞI) değerlendiriyor
+        # ve hükmü o gerekçeyle geri çekiyordu; bu, çıplak cidarı ≈ adyabatik
+        # sıcaklıkta sayan model kusurunun sonucuydu. Korunan yolda (yakıt
+        # bloğu + HRMA astarı) kasa beyanlı ortam sıcaklığındadır: geçerlilik
+        # İÇİ. Hüküm YİNE verilmez — bu kez dürüst gerekçesiyle: kullanıcının
+        # cidarı doğrulandı ama diğer istasyonları HRMA boyutlandırdı
+        # (``stations_not_verified``). Onay hâlâ basılmaz.
+        assert malzeme_kaydina_gore_gecerlilik_disi(yapisal) is False
         assert basis['verdict'] == 'withheld'
-        assert STRUCTURAL_MODEL_VALIDITY_WITHHELD_REASON in basis[
+        assert STRUCTURAL_MODEL_VALIDITY_WITHHELD_REASON not in basis[
             'verdict_withheld_reasons']
+        assert 'stations_not_verified' in basis['verdict_withheld_reasons']
         assert yapisal['safety_analysis']['status'] not in (
             'SAFE', 'ACCEPTABLE')
 
@@ -247,7 +262,13 @@ class TestKalem1YapisalHukumKapisi:
     def test_cidar_sicakliginin_kaynagi_beyan_ediliyor(self, girdisiz):
         """Hesaplanmış sıcaklık ile "termal model kapalı" ayrılabilmeli."""
         thermal = girdisiz['motor']['structural_analysis']['thermal_analysis']
-        assert thermal['wall_temperature_source'] == 'heat_transfer_module'
+        # v3.0.1 (V301/H-termal): hibritin korunan yolunda sıcaklık ısı
+        # modülünün çıplak cidar sayısı DEĞİL, kamara bölgelerinin beyanlı
+        # kasa sıcaklığıdır ve kaynağı bu adla yazılır; "model kapalı"dan
+        # (``not_evaluated``) ayırt edilebilirlik iddiası aynen geçerli.
+        assert thermal['wall_temperature_source'] == \
+            'hybrid_chamber_zone_protection'
+        assert thermal['wall_temperature_source'] != 'not_evaluated'
         assert thermal['thermal_model_ran'] is True
 
     def test_sicaklik_girdisi_yokken_termal_model_kapali_deniyor(self):

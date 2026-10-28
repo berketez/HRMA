@@ -48,6 +48,14 @@ from hrma.engines.solid_rocket_engine import (
     SolidRocketEngine, THROAT_EROSION_SIGNIFICANT_AREA_GROWTH)
 from tests.support.kanit import kanit_gerekli
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 # --- BAĞIMSIZ literatür transkripsiyonu (üründen ithal EDİLMEZ) ------------
 # Thakre & Yang 2008, Tablo 8 — Geisler [6] BATES bulk grafit, p_t = 6,9 MPa:
 #   %15 Al 0,353 · %18 0,284 · %21 0,200 · %24 0,124 · %27 0,069 mm/s
@@ -67,7 +75,7 @@ def _kodlar(a_ref):
     """Grafit boğazda kullanıcı katsayısıyla dönen uyarı kodları."""
     e = SolidRocketEngine(
         grain_type='bates', propellant_type='apcp', chamber_diameter=100,
-        grain_length=500, core_diameter=30, chamber_pressure=40,
+        grain_length=500, core_diameter=_CEKIRDEK_MM, chamber_pressure=40,
         overrides={'nozzle_material': 'graphite',
                    'throat_erosion_a_ref_mm_s': a_ref})
     r = _sessiz(e.calculate_performance)
@@ -182,7 +190,7 @@ class TestCCKatsayisiOlcumeCapali:
         """Bandı olmayan malzemede 'bant dışı' kapısı ateşlenemez."""
         e = SolidRocketEngine(
             grain_type='bates', propellant_type='apcp', chamber_diameter=100,
-            grain_length=500, core_diameter=30, chamber_pressure=40,
+            grain_length=500, core_diameter=_CEKIRDEK_MM, chamber_pressure=40,
             overrides={'nozzle_material': 'carbon_carbon',
                        'throat_erosion_a_ref_mm_s': 0.60})
         r = _sessiz(e.calculate_performance)

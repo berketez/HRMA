@@ -240,6 +240,42 @@ def template_keys(html):
     # tarayıcı bunu görmediği için canlı anahtar 'kullanılmıyor' sayılıyordu.
     keys |= set(re.findall(r"I18N\.t\(\s*'([^']+)'", html))
     keys |= set(re.findall(r"\bTF?\('([^']+)'", html))
+    # V301/K-B (KT-10/12; hibrit M-6 deseni): katı malzeme seçeneklerinin
+    # anahtarları sunucu kaydından basılır (``solid.mat.{{ o.material_key }}``).
+    # YALNIZ bu tek Jinja ifadesi kaydın anahtar kümesiyle değiştirilir; genel
+    # ``{{ }}`` muafiyeti yok, ölü/eksik anahtar bekçisi aynen sıkı.
+    jinja = 'solid.mat.{{ o.material_key }}'
+    if jinja in keys:
+        from hrma.engines.solid_rocket_engine import solid_material_options
+        keys.discard(jinja)
+        for alan in ('case_material', 'nozzle_material'):
+            keys |= {'solid.mat.' + o['material_key']
+                     for o in solid_material_options(alan)}
+    # V301/L-C (SV-12): sıvı enjektör plakası malzemesi seçenekleri aynı
+    # desenle sunucu kaydından basılır (``liq.injmat.{{ o.material_key }}``);
+    # YALNIZ bu tek ifade kaydın anahtar kümesiyle değiştirilir.
+    jinja = 'liq.injmat.{{ o.material_key }}'
+    if jinja in keys:
+        from hrma.app import _sivi_enjektor_malzeme_secenekleri
+        keys.discard(jinja)
+        keys |= {'liq.injmat.' + o['material_key']
+                 for o in _sivi_enjektor_malzeme_secenekleri()['options']}
+    # V301/K-C2 (NK-29): katı yakıt seçicisinin seçenekleri de sunucu
+    # kaydından (``solid.prop.{{ o.key }}``) — aynı tek-ifade deseni.
+    jinja = 'solid.prop.{{ o.key }}'
+    if jinja in keys:
+        from hrma.data.propellants_db import PROPELLANTS
+        keys.discard(jinja)
+        keys |= {'solid.prop.' + k for k in PROPELLANTS}
+    # V301/L-D (SV-12): sıvı kamara malzemesi seçenekleri sunucu kaydından
+    # (``liq.mat.{{ o.value }}``, app.py ``_sivi_form_kaydi``) — aynı
+    # tek-ifade deseni; anahtarlar kaydın seçenek değerleriyle değişir.
+    jinja = 'liq.mat.{{ o.value }}'
+    if jinja in keys:
+        from hrma.app import _sivi_form_kaydi
+        keys.discard(jinja)
+        keys |= {'liq.mat.' + o['value']
+                 for o in _sivi_form_kaydi()['chamber_material']['options']}
     return keys
 
 

@@ -54,7 +54,11 @@ NOTES_MAX_CHARS = 16000
 _LANG_MARK_RE = re.compile(r"<!--\s*HRMA-LANG:([a-z]{2})\s*-->", re.I)
 # Atom yedek yolunda GitHub HTML yorumlarını düşürür (2026-07-29'da canlı
 # akışta ölçüldü: im sayısı 0); orada bölümler sürüm başlıklarından ayrılır.
-_SECTION_HEAD_RE = re.compile(r"(?m)^(?=[ \t]*#{0,3}[ \t]*HRMA[ \t]+v?\d)")
+# V3.0.5 T-ÇAPA-C1: '#' imsiz satır ancak 'HRMA v<sürüm>' biçimindeyse
+# başlıktır ("HRMA 3.0.5 is a corrections release." gövde cümlesidir).
+# İkizi: hrma/static/js/update_check.js SECTION_HEAD.
+_SECTION_HEAD_RE = re.compile(
+    r"(?m)^(?=[ \t]*(?:#{1,3}[ \t]*HRMA[ \t]+v?\d|HRMA[ \t]+v\d))")
 
 
 def split_notes_by_language(body):

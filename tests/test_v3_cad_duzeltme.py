@@ -105,10 +105,32 @@ def hibrit_md(client):
     return md
 
 
-def _kati_veya_sivi_md(client, tip):
+def _kapi_red_govdesi(hibrit_md):
+    """Kapının REDDETTİĞİ hibrit gövde (SINAMA girdisi, ürün sayısı değil).
+
+    V301 CAD-2 / KABUL K4 (27 Eki): örnek hibrit artık kapıdan GEÇER (lüle
+    eti tek kuraldan; kamara cidarı 26 Eki H-termal'den beri SF ≥ 1).
+    Kapının ret davranışını sınayan bekçiler (aynı ret her uçta, ret ağır
+    çekirdeği yüklemez, STL paketi kapıdan geçer) örnek gövdenin kamara
+    SF'sini 1'in altına çeken bu kopyayı kullanır; iddiaları aynen durur.
+    """
+    md = json.loads(json.dumps(hibrit_md))
+    ca = md['structural_analysis']['chamber_analysis']
+    for k in ('safety_factor_total', 'hoop_safety_factor'):
+        ca[k] = 0.5
+    return md
+
+
+def _kati_veya_sivi_md(client, tip, ezme=None):
     doc = load_example_doc(tip)
+    alanlar = dict(doc['inputs']['fields'])
+    for anahtar, deger in (ezme or {}).items():
+        if deger is None:
+            alanlar.pop(anahtar, None)   # alan gövdede YOK (kullanıcı vermedi)
+        else:
+            alanlar[anahtar] = deger
     r = _sessiz(client.post, ENDPOINTS[tip],
-                json=calculate_payload(tip, doc['inputs']['fields']),
+                json=calculate_payload(tip, alanlar),
                 headers=HEADERS)
     assert r.status_code == 200
     md = dict(r.get_json()['motor_geometry'])
@@ -307,6 +329,32 @@ def _step_olc(yollar, d):
     return olcum
 
 
+#: V301 bilinen C1 (22 Eki 2026): lüle HACMİ uyarlamalı integralle okunur.
+#: ÖLÇÜLDÜ (``docs/scofield/raw/OH/V301/bilinen/cad/once_c1.json``): OCC'nin
+#: varsayılan hacmi (build123d ``.volume`` = FreeCAD ``Shape.Volume`` yolu)
+#: dönel B-spline lüle yüzeyinde örnek hibritte +%2,50, katıda +%1,48
+#: yanılıyor; ``BRepGProp.VolumeProperties_s(.., eps, True)`` analitik
+#: kâhine (aynı noktalar + et ile pi*int(2rw + w^2)dz) 1,4e-4 içinde. Ürün
+#: aynı okumayı STEP README'sinde salık verir (``STEP_NOZZLE_VOLUME_NOTE``).
+#: Bu sayı bir kabul eşiği DEĞİL, okuyucunun integral hassasiyetidir; hacim
+#: toleransı (``TOLERANS['hacim_bagil']``) DEĞİŞMEDİ.
+STEP_HACIM_EPS = 1e-7
+
+
+def _step_hacim_uyarlamali(yol):
+    """STEP dosyasındaki katıların toplam hacmi — OCC uyarlamalı integral."""
+    pytest.importorskip('build123d')
+    from build123d import import_step
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    toplam = 0.0
+    for kati in import_step(yol).solids():
+        g = GProp_GProps()
+        BRepGProp.VolumeProperties_s(kati.wrapped, g, STEP_HACIM_EPS, True)
+        toplam += g.Mass()
+    return toplam
+
+
 @pytest.fixture(scope='module')
 def step_olcum(hibrit_paket):
     """Hibrit paketin STEP ölçümü (``_step_olc``)."""
@@ -376,9 +424,17 @@ class TestH2LuleEti:
                                               ['lule_eti'],
                                               abs=_tol('stl_mm'))
 
-    def test_ayni_paketteki_iki_lule_hacmi_esit(self, hibrit_paket,
-                                                step_olcum):
-        v_step = step_olcum['nozzle']['volume']
+    def test_ayni_paketteki_iki_lule_hacmi_esit(self, hibrit_paket):
+        """V301 bilinen C1 (22 Eki): eski xfail BORÇ KAYDI kapandı.
+
+        Kayıt 'profiller farklı' diyordu; ÖLÇÜLDÜ (``docs/scofield/raw/OH/
+        V301/bilinen/cad``): iki üretecin iç konturu aynı noktalardan geçiyor
+        (B-spline ⟷ çokgen int r dz bağıl farkı 2e-7). %3,06'nın +%2,50'si
+        STEP'i okuyan OCC VARSAYILAN hacmiydi, -%0,64'ü STL'in 32 kesitli
+        çokgen açığı. Profil artık ayrıca TEK kaynaktan
+        (``cad_visualization.nozzle_wall_profile``) ve STEP hacmi uyarlamalı
+        integralle okunur (``_step_hacim_uyarlamali``)."""
+        v_step = _step_hacim_uyarlamali(hibrit_paket['step']['nozzle'])
         v_stl = float(_stl(hibrit_paket, 'nozzle').volume)
         assert abs(v_stl / v_step - 1.0) <= _tol('hacim_bagil'), (
             f'STEP {v_step:.0f} mm³ ⟷ STL {v_stl:.0f} mm³')
@@ -386,7 +442,9 @@ class TestH2LuleEti:
     def test_step_kunyesi_gercegi_soyler(self, hibrit_paket):
         ad = _step_adi(hibrit_paket['step']['nozzle'])
         assert 'nozzle_geometry.wall_thicknesspublishedbythisrun' in ad, ad
-        assert 'thin_wall_hoop' in ad
+        # V301 CAD-2 / K4: lüle eti yapısal boğaz kuralından (eskiden
+        # 'thin_wall_hoop'); künye çözücünün yeni dayanağını taşır.
+        assert 'structural_throat_rule' in ad
         assert 'NOTfromastructuralorthermalanalysis' not in ad, (
             'yayımlanan et çizilirken künye hâlâ "analiz yok" diyor')
 
@@ -621,11 +679,26 @@ class TestH5KapiDallari:
     def test_tank_dallari(self):
         from hrma.export.cad_visualization import (
             tank_manufacturing_safety_refusals as tank)
+        from tests.test_cv0_tank_kapak import KARAR_SF_ESIGI, kapak_kahini
+
+        # ÖH V31 CV-0 — ÇEVRİLDİ (19 Eki; ana model izni, dört koşul, koşul
+        # 1; docs/scofield/raw/OH/V31/cv0/etkilenen_dugumler.md). Bu düğüm
+        # GÖVDE dallarını sınar; kapı artık çizilen düz kapağı da hesaplar
+        # ve kapak girdisi (çap, işletme basıncı, malzeme) olmayan gövdeyi
+        # adıyla reddeder. Girdiye kapağı YETERLİ, açık bir kapak eklendi;
+        # kapak SF'si aşağıda bağıntıdan (Roark 11.2 durum 10a) hesaplanıp
+        # eşiğin üstünde gösterilir. Gövde iddiaları AYNEN durur.
+        kapak = {'diameter': 300.0, 'pressure_rating': 0.1,
+                 'material_key': 'al_2024_t3'}
 
         def t(sf=2.5, cizilen=3.0, pv=3.0):
-            return {'dimensions': {'wall_thickness': cizilen},
-                    'structural': {'safety_factor': sf},
+            return {'dimensions': {'wall_thickness': cizilen,
+                                   'diameter': kapak['diameter']},
+                    'structural': {'safety_factor': sf,
+                                   'pressure_rating': kapak['pressure_rating'],
+                                   'material_key': kapak['material_key']},
                     'pressure_vessel': {'wall_thickness_used_mm': pv}}
+        assert kapak_kahini(t())['sf'] >= KARAR_SF_ESIGI
         assert tank({'fuel_tank': t(), 'oxidizer_tank': t()}) == []
         r = tank({'fuel_tank': t(sf=0.8), 'oxidizer_tank': t(pv=2.0)})
         assert sorted((x['part'], x['reason']) for x in r) == [
@@ -648,9 +721,14 @@ class TestH5KapiDallari:
         """Kapı ile STEP künyesi aynı sayıyı okur (tek kaynak)."""
         from hrma.export.cad_visualization import _chamber_wall_design
         from hrma.export.motor_geometry import normalise_export_geometry
-        md, _ = normalise_export_geometry(hibrit_md)
+        # V3.0.5 T-ÇAPA-C1 — GİRDİ ÇEVRİLDİ (V301/CAD-2 b0ee4e6ae deseni):
+        # örnek hibrit artık kapıdan GEÇER (H-termal + CAD-2); kapının
+        # künyeyle aynı sayıya hükmettiğini sınamak için kamara SF'si 1'in
+        # altına çekilmiş kopya (_kapi_red_govdesi) kullanılır. İddia aynı.
+        red = _kapi_red_govdesi(hibrit_md)
+        md, _ = normalise_export_geometry(red)
         sf_kunye = _chamber_wall_design(md)['safety_factor']
-        r = [x for x in _kapi(hibrit_md)
+        r = [x for x in _kapi(red)
              if x['part'] == 'chamber' and x['reason'] == 'sf_below_one']
         assert r and r[0]['safety_factor'] == pytest.approx(
             round(sf_kunye, 4))
@@ -668,23 +746,38 @@ def _post(client, uc, md, motor_type='hybrid'):
 class TestH5Uclar:
     @pytest.mark.parametrize('uc', ['/api/export-step', '/api/export-dxf',
                                     '/api/export-complete-zip'])
-    def test_ornek_hibrit_imalat_dosyasi_almaz(self, client, hibrit_md, uc):
+    def test_ornek_hibrit_imalat_dosyasi_alir(self, client, hibrit_md, uc):
+        """Örnek hibrit kapıdan GEÇER; çizilen et = SF'nin ait olduğu et.
+
+        V301 CAD-2 / KABUL K4 (27 Eki) — GEREKÇELİ GÜNCELLEME (eski ad
+        ``test_ornek_hibrit_imalat_dosyasi_almaz``). Eski öncül (14 Eki KAB
+        ölçümü): örnek hibritin kamarası SF < 1 ve erime üstü, kapı
+        ``sf_below_one`` + ``outside_model_validity`` ile reddeder. 26 Eki
+        H-termal'den beri kamara SF ≥ 1 (öncül main'de zaten bozuktu, düğüm
+        kırmızıydı); tek kalan ret lülenin ``sf_wall_mismatch``ıydı ve
+        lüle eti tek kurala bağlanınca kapandı (ölçüm
+        ``docs/scofield/raw/OH/V301/bilinen/cad2/sonra_sf2.json``). Kapının
+        ret davranışı ``_kapi_red_govdesi`` ile ayrıca sınanır.
+        """
+        assert _kapi(hibrit_md) == []
         r = _post(client, uc, hibrit_md)
-        assert r.status_code == 422, r.status_code
-        g = r.get_json()
-        assert g['status'] == 'manufacturing_safety_gate_closed'
-        assert g['message_key'] == 'out.export.sfGate.refused'
-        kamara = {x['reason']: x for x in g['refusals']
-                  if x['part'] == 'chamber'}
-        assert 'sf_below_one' in kamara
-        assert kamara['sf_below_one']['safety_factor'] < 1.0
-        assert kamara['sf_below_one']['drawn_wall_mm'] == pytest.approx(
-            hibrit_md['structural_analysis']['chamber_analysis']
-            ['wall_thickness_used_mm'], abs=1e-3)
-        assert 'outside_model_validity' in kamara
-        assert all(x['reason_key'].startswith('out.export.sfGate.reason.')
-                   for x in g['refusals'])
-        assert {f['field'] for f in g['invalid_fields']}
+        assert r.status_code == 200, (uc, r.status_code,
+                                      r.get_data(as_text=True)[:400])
+        assert len(r.get_data()) > 1000
+        # Çizilen et = SF'nin ait olduğu et (kamara ve lüle)
+        from hrma.export.cad_visualization import (
+            _chamber_wall_design, _nozzle_wall_design)
+        from hrma.export.motor_geometry import normalise_export_geometry
+        md, _ = normalise_export_geometry(hibrit_md)
+        sa = hibrit_md['structural_analysis']
+        kamara = _chamber_wall_design(md)
+        assert kamara['thickness_m'] * 1000.0 == pytest.approx(
+            sa['chamber_analysis']['wall_thickness_used_mm'], abs=1e-6)
+        lule = _nozzle_wall_design(md)
+        assert lule['published'] is True
+        assert lule['thickness_m'] * 1000.0 == pytest.approx(
+            sa['nozzle_analysis']['throat_thickness_used_mm'], abs=1e-9)
+        assert sa['nozzle_analysis']['design_mode'] == 'verify'
 
     def test_sf_bir_ustunde_ayni_govde_gecer(self, client, hibrit_md):
         """Kapı GENELDİR: aynı hibrit gövde SF ≥ 1 ve geçerlilik içinde
@@ -696,6 +789,12 @@ class TestH5Uclar:
             ca[k] = 1.5
         md['structural_analysis']['thermal_analysis']['strength_derating'][
             'exceeds_melting_point'] = False
+        # ÖH V301 / B5 (20 Eki) — GEREKÇELİ GÜNCELLEME: kapı artık SF'nin
+        # okunduğu bloğun KENDİ geçerlilik bayrağını da okur
+        # (``chamber_analysis.model_validity_limit_exceeded``; örnek hibritte
+        # True). Testin öncülü "geçerlilik içinde yayımlasaydı" olduğu için
+        # o bayrak da False'a çekilir; iddia (STEP iner) aynen durur.
+        ca['model_validity_limit_exceeded'] = False
         md['structural_analysis']['nozzle_analysis'][
             'throat_thickness_used_mm'] = md['nozzle_geometry'][
                 'wall_thickness']
@@ -716,7 +815,7 @@ class TestH5Uclar:
         """H3-B14 ilkesi kapı için de geçerli: SF reddi build123d/OCC
         yığınını (+433 MB) yüklemeden verilir. Taze süreçte ölçülür."""
         govde = tmp_path / 'g.json'
-        govde.write_text(json.dumps({'motor_data': hibrit_md,
+        govde.write_text(json.dumps({'motor_data': _kapi_red_govdesi(hibrit_md),
                                      'motor_type': 'hybrid'}),
                          encoding='utf-8')
         kok = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -747,9 +846,10 @@ class TestH5Uclar:
         dosyayla dolaşmaz; KAB devir 8): STL eklemeli imalatta doğrudan
         kullanılır, 'önizleme' istisnası kaldırıldı. Eski beklenti (200)
         o istisnadan türemişti."""
-        r = _post(client, '/api/export-stl-zip', hibrit_md)
+        md = _kapi_red_govdesi(hibrit_md)
+        r = _post(client, '/api/export-stl-zip', md)
         assert r.status_code == 422
-        assert r.get_json()['refusals'] == _kapi(hibrit_md)
+        assert r.get_json()['refusals'] == _kapi(md)
 
 
 # ===========================================================================
@@ -805,7 +905,13 @@ def test_ret_govdesi_arayuzde_turkce_basilir(client, hibrit_md, tmp_path):
     node = shutil.which('node')
     if node is None:
         pytest.skip('node yok: ön yüz çözücüsü bu ortamda koşturulamaz')
-    g = _post(client, '/api/export-step', hibrit_md).get_json()
+    # T-ÇAPA-C2 (27 Eki): V301/CAD-2 (b0ee4e6ae) sonrası örnek hibrit
+    # kapıdan GEÇER (200, ret gövdesi yok); kapının ret gövdesini sınayan
+    # öteki bekçiler gibi bu da ``_kapi_red_govdesi`` kopyasını kullanır
+    # (kamara SF'si 0,5'e çekilmiş SINAMA girdisi). İddia aynen durur.
+    r = _post(client, '/api/export-step', _kapi_red_govdesi(hibrit_md))
+    assert r.status_code == 422, r.status_code
+    g = r.get_json()
     govde = tmp_path / 'g.json'
     govde.write_text(json.dumps(g), encoding='utf-8')
     kok = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -863,7 +969,11 @@ def _kati_tam(client, alanlar=None):
     """Örnek katı, ÜRÜN yolundan (/calculate_solid) — tam yanıt."""
     doc = load_example_doc('solid')
     f = dict(doc['inputs']['fields'])
-    f.update(alanlar or {})
+    for anahtar, deger in (alanlar or {}).items():
+        if deger is None:
+            f.pop(anahtar, None)   # alan gövdede YOK (kullanıcı vermedi)
+        else:
+            f[anahtar] = deger
     r = _sessiz(client.post, ENDPOINTS['solid'],
                 json=calculate_payload('solid', f), headers=HEADERS)
     assert r.status_code == 200, r.get_data(as_text=True)[:300]
@@ -1109,7 +1219,12 @@ class TestH1KesitKapisiUclar:
         assert r.get_json()['status'] == 'grain_section_not_drawable'
 
     def test_finocyl_de_reddedilir(self, client):
-        tam = _kati_tam(client, {'grain_type': 'finocyl'})
+        # V301/T-ÇAPA-D: örnek katı (ÖRNEK 5fa435893) sayfanın finocyl
+        # varsayılanlarını (fin_length 20, fin_count 4, fin_width 8) taşıyor
+        # ve bu tanede fin_length 20 adıyla 422 (ÖRNEK DEVİR 10). Önceki
+        # dosya fin alanı taşımıyordu: motorun kendi finocyl boyutlandırması.
+        tam = _kati_tam(client, {'grain_type': 'finocyl', 'fin_length': None,
+                                 'fin_count': None, 'fin_width': None})
         r = _post(client, '/api/export-step', dict(tam['motor_geometry']),
                   motor_type='solid')
         assert r.status_code == 422
@@ -1252,7 +1367,17 @@ def tank_paket(client, tmp_path_factory):
     r = _sessiz(client.post, ENDPOINTS['liquid'],
                 json=calculate_payload('liquid', f), headers=HEADERS)
     assert r.status_code == 200
-    pt = r.get_json()['propellant_tanks']
+    # ÖH V31 CV-0 — ÇEVRİLDİ (19 Eki; ana model izni, dört koşul, koşul 1;
+    # docs/scofield/raw/OH/V31/cv0/etkilenen_dugumler.md). Bu fikstürün
+    # testleri tank STEP/STL GEOMETRİSİNİ sınar. Örnek tankların çizilen
+    # 3 mm düz kapağı artık imalat kapısında hesaplanır ve yetersizdir
+    # (SF < 1 -> 422; tests/test_cv0_tank_kapak.py). Girdi, AYNI geometrinin
+    # kapağı YETERLİ açık gövdesine çevrildi: yalnız işletme basıncı
+    # düşürülür (σ ∝ q); ``kapagi_yeterli`` her tankın kapak SF'sini
+    # bağıntıdan hesaplayıp hedefe eşit olduğunu denetler. Çap, boy, cidar,
+    # hacim, kütle ve iç yapılar değişmez; geometri iddiaları AYNEN durur.
+    from tests.test_cv0_tank_kapak import kapagi_yeterli
+    pt = kapagi_yeterli(r.get_json()['propellant_tanks'])
     rr = _sessiz(client.post, '/export_tank_cad', json={'tank_data': pt},
                  headers=HEADERS)
     assert rr.status_code == 200, rr.get_data(as_text=True)[:400]
@@ -1329,7 +1454,18 @@ class TestH4Tank:
         kunye = _step_adi(os.path.join(tank_paket['dir'], f'{ad}.step'))
         duz = kunye.replace('_', '')
         assert 'flat-endedcylinder' in duz
-        assert 'structuraladequacyofthedrawnflatheadswasNOTcomputed' in duz
+        # ÖH V31 CV-0 kalem 3 — ÇEVRİLDİ (19 Eki; ana model izni, dört
+        # koşul, koşul 1 + 3). Eski iddia künyenin "adequacy ... NOT
+        # computed" demesiydi; kart bu beyanı hesaplanan kapak SF'si ve
+        # kapının hükmüyle DEĞİŞTİRİR. Beklenti ürün çıktısından kopyalanmaz:
+        # SF bu testte bağıntıdan (Roark 11.2 durum 10a, ``kapak_kahini``)
+        # hesaplanır, cümle biçimi (3 ondalık) ``tank_head_declaration``
+        # sözleşmesidir. Girdi fikstürde kapağı yeterli gövdedir.
+        from tests.test_cv0_tank_kapak import kapak_kahini
+        assert 'NOTcomputed' not in duz
+        sf = kapak_kahini(tank_paket['pt'][ad])['sf']
+        assert f'headsafetyfactor{sf:.3f}' in duz, duz[-400:]
+        assert 'manufacturingsafetygate:headcleared' in duz
         hd = tank_paket['pt'][ad]['pressure_vessel']['head_type']
         assert f"evaluates{hd.replace('_', '')}heads" in duz
         assert 'hemisphericalheads-overall' not in duz
@@ -1418,7 +1554,23 @@ class TestU4MontajBoyu:
             iddia = tam['thermal_analysis']['heat_transfer'][
                 'liner_thickness_mm']
             assert f'claimsa{iddia:.2f}mmliner' in tane.replace('_', '')
-            assert 'doesNOTfit' in tane.replace('_', '')
+            # V3.0.5 T-ÇAPA-C1 — ÖRNEĞE BAĞLI SONUÇ YERİNE KURAL: eski düğüm
+            # örnek katı motorun astarının SIĞMADIĞINI kilitliyordu; bugünkü
+            # örnekte (K-D dd329b831 varsayılan geometri + ÖRNEK tazelemesi)
+            # astar çizilen paya SIĞIYOR. Künyenin hükmü, künyenin kendi
+            # bastığı pay ile iddianın kıyasından (cad_visualization
+            # .grain_radial_clearance_note, WALL_MATCH_TOLERANCE_MM) çıkmalı.
+            import re as _re
+            from hrma.export.cad_visualization import WALL_MATCH_TOLERANCE_MM
+            duz = tane.replace('_', '')
+            m = _re.search(r'chamberbore([0-9.]+)mm', duz)
+            assert m, duz[-600:]
+            pay = float(m.group(1))
+            if iddia > pay + WALL_MATCH_TOLERANCE_MM:
+                assert 'doesNOTfit' in duz, duz[-600:]
+            else:
+                assert 'wouldfitinthedrawnclearance' in duz, duz[-600:]
+                assert 'doesNOTfit' not in duz
 
     def test_ornek_hibritte_kontrol_kosar(self, hibrit_paket, hibrit_md):
         kunye = _step_adi(hibrit_paket['step']['assembly']).replace('_', '')
@@ -1537,7 +1689,15 @@ class TestS1UcKapilari:
                                                 sivi_tam_tankli):
         from hrma.export.cad_visualization import (
             tank_manufacturing_safety_refusals)
-        pt = _kopya(sivi_tam_tankli['propellant_tanks'])
+        from tests.test_cv0_tank_kapak import kapagi_yeterli
+        # ÖH V31 CV-0 — ÇEVRİLDİ (19 Eki; ana model izni, dört koşul,
+        # koşul 1; docs/scofield/raw/OH/V31/cv0/etkilenen_dugumler.md):
+        # bu düğüm GÖVDE dalını sınar; örnek tankların çizilen düz kapağı
+        # artık kapıda yetersizdir (SF < 1). Girdi AYNI geometrinin
+        # kapağı yeterli gövdesidir (yalnız işletme basıncı düşer; kapak
+        # SF'si ``kapagi_yeterli`` içinde bağıntıdan hesaplanır). Gövde
+        # iddiası (tam liste) AYNEN durur.
+        pt = kapagi_yeterli(sivi_tam_tankli['propellant_tanks'])
         assert tank_manufacturing_safety_refusals(pt) == [], (
             'ön koşul: örnek tanklar kapıdan geçer')
         pt['fuel_tank']['structural']['safety_factor'] = SART_SF_ALTINDA
@@ -1551,7 +1711,10 @@ class TestS1UcKapilari:
 
     def test_tank_cidar_uyusmazligi_paket_almaz(self, client,
                                                  sivi_tam_tankli):
-        pt = _kopya(sivi_tam_tankli['propellant_tanks'])
+        from tests.test_cv0_tank_kapak import kapagi_yeterli
+        # ÖH V31 CV-0 — ÇEVRİLDİ (koşul 1; bkz. üstteki düğüm): girdi
+        # AYNI geometrinin kapağı yeterli gövdesi; iddia AYNEN durur.
+        pt = kapagi_yeterli(sivi_tam_tankli['propellant_tanks'])
         ox = pt['oxidizer_tank']
         cizilen = float(ox['dimensions']['wall_thickness'])
         ox['pressure_vessel']['wall_thickness_used_mm'] = (
@@ -1582,18 +1745,30 @@ class TestS1UcKapilari:
         assert manufacturing_safety_refusals(cevir(tam)) == [], (
             'ön koşul: örnek kapıdan geçer')
         b = tam['structural_analysis'][blok]
-        alanlar = [k for k in ('safety_factor', 'hoop_safety_factor')
-                   if k in b]
-        assert alanlar, sorted(b)
-        for k in alanlar:
-            b[k] = SART_SF_ALTINDA
+        # V3.0.5 T-ÇAPA-C1 — İKİ KATMANLI CİDAR (V301/L-KABUK 6f8240043):
+        # rejeneratif sıvıda kapı HER KATMANIN kendi SF'sine bakar (parça
+        # 'chamber_closeout' / 'chamber_liner'; alan wall_layers[i]); bloğun
+        # üst düzey SF'si orada kapıyı yönetmez. Basıncı taşıyan dış kabuğun
+        # SF'si 1'in altına çekilir, iddia aynı: adlı sf_below_one reddi.
+        if b.get('wall_model') == 'two_layer_regenerative':
+            parca_adi = 'chamber_closeout'
+            i = [k.get('role') for k in b['wall_layers']].index('closeout')
+            b['wall_layers'][i]['safety_factor'] = SART_SF_ALTINDA
+            alan_oneki = f'structural_analysis.{blok}.wall_layers[{i}].'
+        else:
+            parca_adi = 'chamber'
+            alan_oneki = f'structural_analysis.{blok}.'
+            alanlar = [k for k in ('safety_factor', 'hoop_safety_factor')
+                       if k in b]
+            assert alanlar, sorted(b)
+            for k in alanlar:
+                b[k] = SART_SF_ALTINDA
         _r, g = _uc_reddi(client, uc, {'results': tam}, SF_GATE)
-        kamara = [x for x in g['refusals'] if x['part'] == 'chamber']
+        kamara = [x for x in g['refusals'] if x['part'] == parca_adi]
         assert [x['reason'] for x in kamara] == ['sf_below_one'], (
             g['refusals'])
         assert kamara[0]['safety_factor'] == pytest.approx(SART_SF_ALTINDA)
-        assert kamara[0]['safety_factor_field'].startswith(
-            f'structural_analysis.{blok}.')
+        assert kamara[0]['safety_factor_field'].startswith(alan_oneki)
 
 
 # Ş2 — sonda: uç x alan. Alan -> (status, neden, kayıttaki yansıyan alan).
@@ -1941,7 +2116,15 @@ def puruzsuz_vakalar(client, hibrit_md, tmp_path_factory):
     from hrma.export.step_export import (StepExportDataError,
                                          generate_step_assembly)
     out = tmp_path_factory.mktemp('v3cad_puruzsuz')
-    sivi = _kati_veya_sivi_md(client, 'liquid')
+    # V301 CAD-2 kalem 8 — GEREKÇELİ GÜNCELLEME: örnek sıvı rejeneratiftir
+    # ve L-KABUK'tan beri cidarı iki katmanlıdır; ceketli lüle artık İKİ katı
+    # gövdedir (astar + kanal katmanı, dış kabuk). Bu sınıf tek gövdeli lüle
+    # yüzeyinin pürüzsüzlüğünü sınar (yüz sayısı, tek geçerli katı, et);
+    # sıvı vakası aynı örneğin ablatif (tek katmanlı cidar) ikizidir. İki
+    # gövdeli ceketli lüle tests/test_v301_cad2_iki_katman.py'de sınanır
+    # (gövde başına B-spline yüz, hacim ⟷ kontur kâhini).
+    sivi = _kati_veya_sivi_md(client, 'liquid', ezme={'cooling_type':
+                                                      'ablative'})
     sivi_konik = _kopya(sivi)
     sivi_konik.setdefault('nozzle_contour', {}).setdefault(
         'divergent', {})['type'] = 'conical'
@@ -2144,7 +2327,11 @@ class TestPuruzsuzKonturKapisi:
         13-430 µm); −5 mm → yay geri döner. İkisi de ÖNCE OCC istisnasıyla
         500'dü; şimdi adlı 422, ileti istek değerini yansıtmaz."""
         pytest.importorskip('build123d')
-        md = _kati_veya_sivi_md(client, 'solid')
+        # V301/T-ÇAPA-D: örnek katı (ÖRNEK 5fa435893) sayfanın yakınsak açı
+        # varsayılanını (45°) taşıyor; ölçülen vaka (13-430 µm daralma) önceki
+        # dosyanın açı alanı TAŞIMADIĞI, motorun kendi açısıyla kurulan
+        # konturdu. Alan açıkça çıkarılır.
+        md = _kati_veya_sivi_md(client, 'solid', {'convergent_angle': None})
         md.setdefault('nozzle_contour', {}).setdefault(
             'convergent', {})['throat_radius_curvature'] = rn
         r = _post(client, '/api/export-step', md, motor_type='solid')
@@ -2201,14 +2388,33 @@ class TestImalatKapisiTutarliligi:
     @pytest.mark.parametrize('uc', IMALAT_UCLARI)
     def test_ornek_hibrit_hicbir_imalat_ucundan_dosya_almaz(
             self, client, hibrit_md, uc):
-        """Aynı kapı, aynı gövde: ret kayıtları STEP'inkiyle BİREBİR."""
-        r = _post_tip(client, uc, hibrit_md, 'hybrid')
+        """Aynı kapı, aynı gövde: ret kayıtları STEP'inkiyle BİREBİR.
+
+        V301 CAD-2 / KABUL K4 (27 Eki) — GEREKÇELİ GÜNCELLEME: eski öncül
+        "örnek hibrit kapıya takılmalı (KAB ölçümü, 14 Eki)" bugünkü örnekte
+        artık doğru değil (kamara SF ≥ 1, lüle eti tek kural; KABUL kapısı
+        örnek hibritten beş dışa aktarımın 200 dönmesini ister). Kapının
+        her uçta AYNI reddi verdiği iddiası kapının reddettiği sınama
+        gövdesiyle (``_kapi_red_govdesi``) aynen sınanır; örnek hibritin
+        bütün imalat uçlarından dosya aldığı ayrıca sınanır.
+        """
+        md = _kapi_red_govdesi(hibrit_md)
+        r = _post_tip(client, uc, md, 'hybrid')
         assert r.status_code == 422, (uc, r.status_code, r.get_data()[:300])
         g = r.get_json()
         assert g['status'] == 'manufacturing_safety_gate_closed'
         assert g['message_key'] == 'out.export.sfGate.refused'
-        assert g['refusals'] == _kapi(hibrit_md)
-        assert g['refusals'], 'örnek hibrit kapıya takılmalı (KAB ölçümü)'
+        assert g['refusals'] == _kapi(md)
+        assert g['refusals'], 'sınama gövdesi kapıya takılmalı'
+
+    @pytest.mark.parametrize('uc', IMALAT_UCLARI)
+    def test_ornek_hibrit_her_imalat_ucundan_dosya_alir(
+            self, client, hibrit_md, uc):
+        """V301 CAD-2 / KABUL K4: örnek hibrit kapıdan geçer (kapı açık)."""
+        assert _kapi(hibrit_md) == []
+        r = _post_tip(client, uc, hibrit_md, 'hybrid')
+        assert r.status_code == 200, (uc, r.status_code, r.get_data()[:300])
+        assert len(r.get_data()) > 1000
 
     @pytest.mark.parametrize('tip', ['solid', 'liquid'])
     @pytest.mark.parametrize('uc', ['/api/export-drawings-pdf',
@@ -2230,7 +2436,7 @@ class TestImalatKapisiTutarliligi:
     def test_kapi_reddi_agir_cekirdegi_yuklemez(self, hibrit_md, tmp_path):
         """STL paketi ve çizim PDF'i reddi build123d/OCC yüklemez (H3-B14)."""
         govde = tmp_path / 'g.json'
-        govde.write_text(json.dumps({'motor_data': hibrit_md,
+        govde.write_text(json.dumps({'motor_data': _kapi_red_govdesi(hibrit_md),
                                      'motor_type': 'hybrid'}),
                          encoding='utf-8')
         kok = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

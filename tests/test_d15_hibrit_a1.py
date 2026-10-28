@@ -64,8 +64,22 @@ def sonuc_ss304():
 
 @pytest.fixture(scope='module')
 def sonuc_kirpilmis():
-    m = _motor(burn_time=40.0, initial_port_diameter=0.050,
-               chamber_diameter_input=70.0, expansion_ratio=4.0, l_star=1.0)
+    """ESKİ kırpılan koşu — v3.0.1 kulvar P'de reddedilir; fikstür artık
+    AYNI görevin zarfa sığan en küçük kamarasıyla koşar.
+
+    Eski girdi (40 s, D_ilk 50 mm, kamara 70 mm) kaynaksız 0,8·D_ch
+    kırpmasıyla 2,8 s'te kesilip TARGET_NOT_MET yayımlanıyordu. Ana model
+    kararıyla kırpma söküldü: zarfı aşan istek ``GrainEnvelopeError`` ile
+    adıyla reddedilir ve ret gereken en küçük kamara çapını söyler. Özet ⟷
+    manşet sözleşmesi (P1B2-01) o çapla koşan GEÇERLİ tasarımda sınanır.
+    """
+    from hrma.engines.hybrid_rocket_engine import GrainEnvelopeError
+    kw = dict(burn_time=40.0, initial_port_diameter=0.050,
+              expansion_ratio=4.0, l_star=1.0)
+    with pytest.raises(GrainEnvelopeError) as e:
+        _motor(chamber_diameter_input=70.0, **kw).calculate()
+    gereken = e.value.invalid_fields[0]['required_min']
+    m = _motor(chamber_diameter_input=gereken, **kw)
     return m, m.calculate()
 
 
@@ -125,10 +139,12 @@ class TestP10B308KanonikMalzemeAdi:
 class TestP1B201OzetManseteBagli:
     """design_summary.performance manşetle AYNI sayıyı yayımlar."""
 
-    def test_kirpilma_gercekten_olustu(self, sonuc_kirpilmis):
+    def test_kirpma_yolu_kapandi_gereken_capla_tam_sure(self, sonuc_kirpilmis):
+        # v3.0.1 kulvar P: kırpma yolu kapandı (fikstür ret + en küçük
+        # çapla koşu). Gereken çapla tasarım TAM süreyle yayımlanır.
         _m, r = sonuc_kirpilmis
-        assert r['burn_time_clipped'] is True
-        assert r['design_summary']['status'] == 'TARGET_NOT_MET'
+        assert r['burn_time_clipped'] is False
+        assert r['design_summary']['status'] != 'TARGET_NOT_MET'
 
     def test_ozet_suresi_manset_suresiyle_ayni(self, sonuc_kirpilmis):
         _m, r = sonuc_kirpilmis
@@ -153,7 +169,7 @@ class TestP1B201OzetManseteBagli:
         assert perf['burn_time_requested_s'] == pytest.approx(40.0)
         assert perf['total_impulse_requested_Ns'] == pytest.approx(
             float(r['total_impulse_requested_Ns']))
-        assert perf['burn_time_clipped'] is True
+        assert perf['burn_time_clipped'] is False      # v3.0.1: kırpma yok
         assert 'burn_time_basis' in perf and perf['burn_time_basis']
         assert 'total_impulse_basis' in perf and perf['total_impulse_basis']
 

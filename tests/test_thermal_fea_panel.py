@@ -108,6 +108,13 @@ def panel_gazi_ve_kalinligi(motor):
 
 def panel_malzemesi(motor):
     """``buildWallProfileBody``in malzeme okumasının Python aynası."""
+    # V301/PANEL (NK-12): termal alan yalnız lüledir; panel ÖNCE motorun lüle
+    # malzemesini okur (köprü NOZZLE_MATERIAL_PATHS ile aynı sıra).
+    for blok, alan in (('nozzle_material_analysis', 'material'),
+                       ('nozzle_design', 'material_key')):
+        deger = (motor.get(blok) or {}).get(alan)
+        if isinstance(deger, str) and deger.strip():
+            return {'material': deger.strip()}
     sa = motor.get('structural_analysis')
     if not isinstance(sa, dict):
         return {}

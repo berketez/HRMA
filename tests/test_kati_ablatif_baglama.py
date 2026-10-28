@@ -71,19 +71,25 @@ def _on_kapak_bekcisi(blok):
     Bartz zinciri donmuş oda γ'sını (1,1862) kullanıyor: hazne T_aw
     3399,6 K, h_g 1698 W/m²K. Yeni taban: t = 0.459 mm, psi = 0.965,
     B' = 0.0888, sdot = 0.103 mm/s. Paylar DEĞİŞMEDİ.
+
+    YENİDEN ÖLÇÜLDÜ (V301/T-ÇAPA-A, 26 Eki): N-CEA-2 katı termokimyayı
+    motorun Pc'sinde NASA CEA'dan alıyor (T_c 3399,65 -> 3355,10 K, aynı
+    motor). Yeni taban: t = 0.3958 mm, psi = 0.9695, B' = 0.0770,
+    sdot = 0.0888 mm/s. CEA kapalı aynı motor eski tabanı verir (t 0.45861,
+    psi 0.96489, B' 0.08884, sdot 0.10294). Paylar DEĞİŞMEDİ.
     """
     assert blok['thickness_status'] == 'sized'
     assert blok['recession_regime'] == 'steady_ablation'
     assert blok['thickness'] is not None
-    assert blok['thickness'] == pytest.approx(0.4586, rel=0.05)
+    assert blok['thickness'] == pytest.approx(0.3958, rel=0.05)
     # Blokaj ÇÖZÜLMÜŞ olmalı: 0 < psi < 1 ve B' > 0. Sabit 0.5 bu noktada
     # q_net'in işaretini ters çevirirdi (aşağıdaki mutasyon testi).
     assert 0.0 < blok['blowing_blockage'] < 1.0
-    assert blok['blowing_blockage'] == pytest.approx(0.9649, abs=0.02)
+    assert blok['blowing_blockage'] == pytest.approx(0.9695, abs=0.02)
     assert blok['b_prime'] > 0.0
-    assert blok['b_prime'] == pytest.approx(0.0888, rel=0.10)
+    assert blok['b_prime'] == pytest.approx(0.0770, rel=0.10)
     assert 'SOLVED' in blok['blockage_basis']
-    assert blok['recession_rate_mm_s'] == pytest.approx(0.1029, rel=0.05)
+    assert blok['recession_rate_mm_s'] == pytest.approx(0.0888, rel=0.05)
     assert blok['recession_rate_mm_s'] <= RECESSION_VALID_MAX_MM_S
     # Malzeme beyan edilmiş tasarım seçimi: EPDM ailesi (SP-8093 kubbe).
     assert 'EPDM' in blok['material']

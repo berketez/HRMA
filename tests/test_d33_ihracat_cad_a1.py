@@ -181,8 +181,10 @@ def test_hibrit_tek_devresi_gerilemez():
 def test_mesh_kirpmasi_devreleri_dusurmez():
     """Kırpma sınırı aşılsa bile HER devre temsil edilir ve toplam sınırı
     aşmaz — tek devreyi düşürmek plakayı yanlış anlatırdı."""
-    devreler = [{'name': 'oxidizer', 'n': 200, 'd_mm': 1.0},
-                {'name': 'fuel', 'n': 40, 'd_mm': 0.8}]
+    # V301 CAD-2 kalem 5: sınır 16 -> 512 (STL plakası STEP ile aynı
+    # sayıda delinir); kırpma kuralı sınırın üstünde sınanır.
+    devreler = [{'name': 'oxidizer', 'n': 2000, 'd_mm': 1.0},
+                {'name': 'fuel', 'n': 400, 'd_mm': 0.8}]
     plan = _mesh_orifice_plan(devreler)
     assert {p['name'] for p in plan} == {'oxidizer', 'fuel'}
     assert all(p['n'] >= 1 for p in plan)

@@ -413,7 +413,13 @@ class TestAlevSicakligiKaynagiBeyanli:
         # (tests/test_kitap_p1a.py::TestCanteraKahini; ölçülen
         # 1094,9666 K, HRMA 1094,9716 K). Tolerans ±25 K KORUNDU; ampirik
         # zarfa uzaklık ayırt etmeye yeter.
-        assert oda['T'] == pytest.approx(1095.0, abs=25.0), oda['T']
+        # V301/B7 (21 Eki, ÖNEMLİ, Berke onaylı) — ÇAPA YENİLENDİ: O/F 1,0'da
+        # gaz dengesi karbonca aşırı doymuş; denge gaz + katı karbon C(gr)
+        # (NASA RP-1311 Part I eş. 2.11, 3.7). Önce 1095 K (gaz-yalnız) →
+        # sonra 1420,23 K; bağımsız kâhin (gaz + C(gr), test_kitap_p1a.py::
+        # TestCanteraKahini) 1420,2325 K. Ampirik zarf 1277,3 K'den 143 K
+        # uzak; tolerans ±25 K korundu (ayırt etme gücü aynı).
+        assert oda['T'] == pytest.approx(1420.2, abs=25.0), oda['T']
         assert 'warning' not in oda, 'denge yolunda uyarı taşınmamalı'
 
     def test_of03_ampirik_zarf_beyanli(self, denge):

@@ -960,9 +960,15 @@ class TestSafetyResponseContract:
                 f"{taban['individual_risks']['explosive']!r} → "
                 f"{agir['individual_risks']['explosive']!r} olarak DEĞİŞMEDİ "
                 "— eksen girdiye sağır (sabit üretiliyor)")
-        assert agir['overall_risk_score'] > taban['overall_risk_score'], (
-            "genel risk skoru itici kütlesindeki 100 kat artışa tepki "
-            "vermiyor")
+        # V301/FİZİK-2 (kalem 8b) — GEREKÇELİ: genel hüküm/skor artık
+        # MOTORUN eksenlerinden (yapısal, basınçlı kap, termal); itici
+        # MİKTARININ tehlikesi (patlayıcı, toksik, yangın) ayrı
+        # ``facility_hazard`` bloğundadır ve motora "yeniden tasarla"
+        # demez. Bekçinin iddiası (skor girdiye sağır değil) o blokta sınanır.
+        assert agir['facility_hazard']['score'] > \
+            taban['facility_hazard']['score'], (
+                "tesis tehlikesi skoru itici kütlesindeki 100 kat artışa "
+                "tepki vermiyor")
 
     def test_thermal_axis_ladder_reaches_the_ceiling(self, client):
         """ONARILDI/ÇÜRÜTÜLDÜ (ÖH D26 / P5B2-12): eksen 4,0 tavanlı DEĞİL.

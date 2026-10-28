@@ -117,7 +117,18 @@ def motorlar():
             # steel_4130 ile donduruldu; HB10 (hibrit 10. tur) tek
             # varsayılanı steel_304 yaptı. Çapa aynı koşulu ölçmeye devam
             # eder; bağımsız teyit (sabit 1024×16 ağ) aynen canlı.
-            'chamber_material': 'steel_4130'}),
+            'chamber_material': 'steel_4130',
+            # V3.0.5 T-ÇAPA-C1 — ÖLÇÜM KOŞULU AÇIKÇA (beşinci ve altıncı
+            # koşul): c* verimi %100 ve cidar 13,1278 mm. V301/H-termal
+            # (77d64c641, 26 Eki) korunan bölgeler yüzünden boyutlandırılan
+            # hibrit cidarını inceltti (hibrit min SF 38,45 → 5,30), V301/
+            # H-PANEL (74b55500a) N2O/HTPB c*'ına kaynaklı η=0,89 getirdi;
+            # ikisi de onaylı yayımlanan sayı değişimi, çapanın konusu FEA
+            # yakınsama bandı. Bu iki alanla köprü girdisi (cidar
+            # 0,013127827075655596 m, kontur toplamı 1,1219162663557958)
+            # H-termal öncesi c7776576f ağacının isteğiyle BİT-AYNI (ölçüldü).
+            'combustion_efficiency': 100.0,
+            'wall_thickness': 13.127827075655596}),
     }
     cikti = {}
     for ad, (yol, yuk) in istek.items():

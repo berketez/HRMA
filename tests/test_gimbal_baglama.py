@@ -440,6 +440,12 @@ def _beyan_alanlari(govde):
     yalnız ad artık parantezden okunur. Parantez yoksa (eski biçim) parça
     olduğu gibi alınır.
     """
+    # V301/DİL-2 (kök 7): etiket görünür metinde, alan adı data-field'da.
+    # Alan adı varsa oradan okunur (iddia DEĞİŞMEDİ: sunucu listesiyle
+    # birebir eşitlenen şey alan adlarıdır).
+    m2 = re.search(r'\[\[liq\.js\.gimbal_missing_inputs\]\]([\s\S]*?)</p>', govde)
+    if m2 and 'data-field="' in m2.group(1):
+        return re.findall(r'data-field="([A-Za-z0-9_]+)"', m2.group(1))
     m = re.search(r'\[\[liq\.js\.gimbal_missing_inputs\]\]\s*([^<]*)</p>', govde)
     assert m, 'eksik-girdi beyanı basılmamış; basılan gövde: %r' % govde[:300]
     adlar = []

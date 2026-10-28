@@ -78,12 +78,86 @@
         ['regenerative', 'Regenerative', 'cool.regenerative'],
     ];
 
+    // V301/ÖRNEK-PANEL — cidar koruması (heat_transfer_analysis.
+    // SUPPORTED_WALL_PROTECTIONS ile aynı değerler; uç başka değeri 422 ile
+    // adıyla reddeder).
+    const PROTECTION = [
+        ['none', 'None (bare wall)', 'panel.thermal.protNone'],
+        ['ablative_liner', 'Ablative liner sized by HRMA (Level-1 Q*)',
+         'panel.thermal.protAblativeLiner'],
+    ];
+
+    // Motor yanıtındaki ilk sonlu sayı / ilk dolu metin ('a.b.c' yolları).
+    function yolOku(o, yol) {
+        let v = o;
+        for (const p of String(yol).split('.')) {
+            v = (v && typeof v === 'object') ? v[p] : undefined;
+        }
+        return v;
+    }
+    function ilkSayi(o, yollar) {
+        for (const y of yollar) {
+            const v = yolOku(o, y);
+            if (typeof v === 'number' && Number.isFinite(v)) return v;
+        }
+        return undefined;
+    }
+    function ilkMetin(o, yollar) {
+        for (const y of yollar) {
+            const v = yolOku(o, y);
+            if (typeof v === 'string' && v !== '') return v;
+        }
+        return undefined;
+    }
+
+    /* V301/ÖRNEK-PANEL (KABUL K2) — GAZ GİRDİLERİ MOTORUN KENDİSİNDEN.
+       ÖLÇÜLDÜ (olcum/once_hybrid.json + betik/hibrit_girdi.py): panel
+       c*, γ, M, boğaz çapı ve ışıyan tür kesirlerini GÖNDERMİYORDU; uç onları
+       kendi varsayılanlarından türetiyordu: c* 1656,9 m/s (motor 1420,9,
+       +%16,6), boğaz akısı 21,93 MW/m² (motorun aynı modülle çözdüğü 28,45,
+       −%23), T_aw 3314,5 K (motor 3321,4). Aynı beş girdi gidince yanıt
+       motorun heat_transfer_analysis bloğuyla aynı sayıyı veriyor
+       (bit-aynı ham girdiyle; 6 anlamlı basamaklı öneriyle 0,003 K içinde).
+       Hibrit yolları motorun ısı modülüne verdiği sözlüğün aynısıdır
+       (hybrid_rocket_engine ``ht_input``); katıda Bartz gaz çifti motorun
+       kendi Bartz zincirinin çiftidir (heat_transfer_analysis.
+       bartz_gas_properties). Yol yoksa öneri yok, alan boş kalır ve uç
+       kendi türetimini adıyla beyan eder. */
+    const GAMMA_YOLLARI = ['heat_transfer_analysis.bartz_gas_properties.gamma', 'gamma'];
+    const MW_YOLLARI = ['heat_transfer_analysis.bartz_gas_properties.molecular_weight',
+                        'molecular_weight', 'thermochemistry.molecular_weight'];
+    const SOGUTMA_YOLLARI = ['cooling_type',
+                             'heat_transfer_analysis.design_parameters.cooling_type'];
+
     function riskKind(level) {
         const t = String(level || '').toUpperCase();
         if (t === 'LOW') return 'ok';
         if (t === 'MEDIUM') return 'warn';
         if (t === 'HIGH' || t === 'CRITICAL') return 'err';
         return 'info';
+    }
+
+    /* V3.0.5 SIVI-CIDAR (kalem 2): iki katmanlı rejeneratif sıvı cidarın
+       sıcak gaz katmanı (astar) — motorun KENDİ kaydından; değilse null.
+       Döner: { material: kanonik anahtar | undefined, thicknessM } */
+    function sicakGazAstari(m, mt) {
+        if (mt !== 'liquid') return null;
+        const cs = yolOku(m, 'structural_analysis.chamber_structure') || {};
+        const kat = Array.isArray(cs.wall_layers) ? cs.wall_layers : null;
+        if (cs.wall_model !== 'two_layer_regenerative' || !kat || !kat.length) {
+            return null;
+        }
+        const astar = kat.filter(function (k) {
+            return k && k.role === 'liner';
+        })[0] || {};
+        const mk = (typeof astar.material_key === 'string' && astar.material_key)
+            ? astar.material_key : undefined;
+        const t = astar.thickness_mm;
+        return {
+            material: mk,
+            thicknessM: (typeof t === 'number' && Number.isFinite(t) && t > 0)
+                ? t / 1000 : undefined,
+        };
     }
 
     function sfKind(sf) {
@@ -172,11 +246,12 @@
                 text];
     }
 
-    function temperaturePlot(root, ta) {
+    function temperaturePlot(root, ta, ps) {
         if (typeof Plotly === 'undefined') return;
         const gsa = ta.gas_side_analysis || {};
         const wa = ta.wall_analysis || {};
         const matp = ta.material_properties || {};
+        const kind = (ps && ps.kind) || 'bare';
 
         const cats = [];
         const vals = [];
@@ -188,8 +263,23 @@
         }
         push(T('panel.thermal.combustionGas', 'Combustion gas'), gsa.gas_temperature);
         push(T('panel.thermal.adiabaticWall', 'Adiabatic wall'), gsa.adiabatic_wall_temperature);
-        push(T('panel.thermal.wallInner', 'Wall (inner)'), wa.inner_temperature);
-        push(T('panel.thermal.wallOuter', 'Wall (outer)'), wa.outer_temperature);
+        // V301/ÖRNEK-PANEL: hüküm verilen cidardaysa çubuklar O cidarı, çıplak
+        // cidar dengesi ayrı ve adıyla; astar yolunda cidar çubukları çıplak
+        // cidar olduğunu adıyla söyler (sınır çizgisinin üstünde etiketsiz
+        // "Cidar" çubuğu korunan cidar hükmüyle çelişkili okunuyordu).
+        if (kind === 'supplied') {
+            push(T('panel.thermal.wallInnerSupplied', 'Wall inner (supplied)'),
+                 ps.block.wall_temperature_hot_K);
+            push(T('panel.thermal.wallOuterSupplied', 'Wall outer (supplied)'),
+                 ps.block.wall_temperature_cold_K);
+            push(T('panel.thermal.wallBareBound', 'Bare-wall bound'), wa.inner_temperature);
+        } else if (kind === 'liner') {
+            push(T('panel.thermal.wallInnerBare', 'Wall inner (bare, no liner)'), wa.inner_temperature);
+            push(T('panel.thermal.wallOuterBare', 'Wall outer (bare, no liner)'), wa.outer_temperature);
+        } else {
+            push(T('panel.thermal.wallInner', 'Wall (inner)'), wa.inner_temperature);
+            push(T('panel.thermal.wallOuter', 'Wall (outer)'), wa.outer_temperature);
+        }
         if (!cats.length) return;
 
         const div = document.createElement('div');
@@ -200,20 +290,26 @@
         // asla "series" olarak kullanılmaz; kimlik yalnız renkle taşınmaz)
         const shapes = [];
         const annotations = [];
-        function limitLine(v, label, color) {
+        // V301/ÖRNEK-PANEL: sınır etiketleri çizim alanının DIŞINDA, sağ
+        // kenar boşluğunda (x = 1, xanchor left). Eskiden çizim alanının sağ
+        // ucunda duruyor ve son çubuğun üstüne biniyordu (ölçüldü, 1280 px
+        // ekran görüntüsü: "İzin verilen sınır — 811 K" son çubukta).
+        // İzin etiketi çizginin altına, erime etiketi üstüne: iki etiket
+        // (izin < erime) birbirinden ayrışır. Yazı 12 px (ORTAK grafik kuralı).
+        function limitLine(v, label, color, yanchor) {
             if (typeof v !== 'number' || !Number.isFinite(v)) return;
             shapes.push({
                 type: 'line', xref: 'paper', x0: 0, x1: 1, y0: v, y1: v,
                 line: { color: color, width: 1.5, dash: 'dash' },
             });
             annotations.push({
-                xref: 'paper', x: 1, y: v, xanchor: 'right', yanchor: 'bottom',
+                xref: 'paper', x: 1, xshift: 6, y: v, xanchor: 'left', yanchor: yanchor,
                 text: label + ' — ' + Math.round(v) + ' K', showarrow: false,
-                font: { size: 10, color: color },
+                font: { size: 12, color: color },
             });
         }
-        limitLine(canonicalAllowableK(ta), T('panel.thermal.allowableLimit', 'Allowable limit'), '#ff8c33');
-        limitLine(matp.melting_point, T('panel.thermal.meltingPoint', 'Melting point'), '#ff5d73');
+        limitLine(canonicalAllowableK(ta), T('panel.thermal.allowableLimit', 'Allowable limit'), '#ff8c33', 'top');
+        limitLine(matp.melting_point, T('panel.thermal.meltingPoint', 'Melting point'), '#ff5d73', 'bottom');
 
         Plotly.newPlot(div, [{
             x: cats, y: vals, type: 'bar',
@@ -234,6 +330,8 @@
             // hiç nesne kurulmaz — niyet artık koddan okunur.
             shapes: shapes,
             annotations: annotations,
+            // Sağ kenar boşluğu sınır etiketleri için (yukarıdaki not).
+            margin: { r: annotations.length ? 200 : 40 },
             height: 360,
             showlegend: false,
         }, { responsive: true, displaylogo: false });
@@ -400,7 +498,7 @@
     }
 
     // Bölüm montajı: başlık + 'Compute Axial Profile' butonu + grafikler
-    function mountAxialSection(root) {
+    function mountAxialSection(root, superseded) {
         const sec = document.createElement('div');
         sec.innerHTML = U.sectionTitle(T('panel.thermal.secAxial',
                 'Axial Profile — Chamber to Nozzle Exit'))
@@ -408,7 +506,18 @@
                T('panel.thermal.axialIntro',
                  'Computes the axial distribution of heat flux, equilibrium wall '
                  + 'temperature and Mach number along the chamber-nozzle axis '
-                 + '(Bartz correlation with local area ratio).')}</p>`;
+                 + '(Bartz correlation with local area ratio).')}</p>`
+            // V301/ÖRNEK-PANEL: profil ucu (/api/analysis/wall-profile) çıplak
+            // cidarın kararlı dengesini çözer (yanma süresi girmez, astar/
+            // yalıtım yok — ucun kendi inputs_not_used beyanı). Hüküm korunan
+            // cidardayken bu adıyla söylenir.
+            + (superseded
+                ? `<p data-thermal-axial-bare="1" style="font-size:0.78rem; color:var(--hd-orange, #ff8c33); margin:0 0 8px;">${
+                   T('panel.thermal.axialBareNote',
+                     'This profile is the steady equilibrium of the BARE wall (no liner or '
+                     + 'insulation, no burn transient); the wall verdict is the protected-wall '
+                     + 'block above.')}</p>`
+                : '');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
@@ -466,6 +575,47 @@
         });
     }
 
+    // V301/ÖRNEK-PANEL — korunan cidar hükmü (heat_transfer_analysis.
+    // apply_wall_protection). Uç iki bloktan birini yayımlar; ikisi de yoksa
+    // hüküm bugünkü çıplak cidar kontrolüdür ve panel eskisi gibi çizer.
+    function protectionState(ta) {
+        const sw = ta.supplied_wall_check;
+        if (sw && sw.status === 'applied') return { kind: 'supplied', block: sw };
+        const cl = ta.chamber_liner_check;
+        if (cl && cl.status === 'applied') return { kind: 'liner', block: cl };
+        if (cl && cl.verdict === 'NOT_SIZED') return { kind: 'liner_not_sized', block: cl };
+        return { kind: 'bare', block: null };
+    }
+
+    function protectionBadges(ps) {
+        if (ps.kind === 'supplied') {
+            const b = ps.block;
+            return U.badge(T('panel.thermal.badgeSuppliedWall', 'WALL VERDICT: SUPPLIED WALL')
+                + ': ' + numL(b.wall_temperature_hot_K, 1) + ' / '
+                + numL(b.wall_temperature_cold_K, 1) + ' K', 'info',
+                T('panel.thermal.suppliedWallTip',
+                  'The verdict below is evaluated at the supplied wall temperature '
+                  + 'pair (here: the motor result\'s own solved wall). The bare-wall '
+                  + 'equilibrium is kept as a bound only.'));
+        }
+        if (ps.kind === 'liner') {
+            const b = ps.block;
+            return U.badge(U.tf('panel.thermal.badgeLinerRequired',
+                { mm: numL(b.required_thickness_mm, 2), material: String(b.material || '—') },
+                'LINER REQUIRED: {mm} mm {material} (HRMA-sized)'), 'warn',
+                T('panel.thermal.linerScopeTip',
+                  'One ablative liner sized by HRMA (Level-1 Q*) for the whole chamber '
+                  + 'wall at the chamber station. The wall temperature behind the liner '
+                  + 'is not solved, so no margin is published for it.'));
+        }
+        if (ps.kind === 'liner_not_sized') {
+            return U.badge(T('panel.thermal.badgeLinerNotSized',
+                'LINER NOT SIZED — bare-wall verdict stands'), 'err',
+                String(ps.block.reason || ''));
+        }
+        return '';
+    }
+
     function render(data, root) {
         const ta = data.thermal_analysis || {};
         const htc = ta.heat_transfer_coefficients || {};
@@ -475,12 +625,15 @@
         const safe = ta.safety_analysis || {};
         const matp = ta.material_properties || {};
         const dpp = ta.design_parameters || {};
+        const ps = protectionState(ta);
+        const superseded = ps.kind === 'supplied' || ps.kind === 'liner';
 
         // ---- Rozetler ----
-        let badges = '';
+        let badges = protectionBadges(ps);
         if (safe.risk_level) {
             badges += U.badge(T('panel.thermal.badgeRisk', 'THERMAL RISK') + ': ' + safe.risk_level,
-                              riskKind(safe.risk_level));
+                              riskKind(safe.risk_level),
+                              typeof safe.risk_level_basis === 'string' ? safe.risk_level_basis : '');
         }
         badges += U.badge(T('panel.thermal.badgeCooling', 'COOLING') + ': '
             + String(dpp.cooling_type || '—').toUpperCase(), 'info',
@@ -489,7 +642,15 @@
         if (htc.correlation) {
             badges += U.badge(T('panel.thermal.badgeModel', 'MODEL: BARTZ'), 'info', htc.correlation);
         }
-        if (gsa.wall_temperature_unphysical) {
+        if (gsa.wall_temperature_unphysical && superseded) {
+            // Çıplak cidar sınırı fiziksel değil, ama hüküm korunan cidarda:
+            // kırmızı "soğutma yetersiz" rozeti hükmü çelişkili gösterirdi.
+            badges += U.badge(T('panel.thermal.badgeBareBound',
+                'BARE-WALL BOUND UNPHYSICAL — superseded by the protected-wall verdict'), 'info',
+                T('panel.thermal.unphysicalTip',
+                  'Predicted steady-state wall temperature exceeds physical limits; '
+                  + 'the wall would fail before reaching it. Improve cooling.'));
+        } else if (gsa.wall_temperature_unphysical) {
             badges += U.badge(T('panel.thermal.badgeUnphysical',
                 'WALL T UNPHYSICAL — cooling insufficient'), 'err',
                 T('panel.thermal.unphysicalTip',
@@ -526,17 +687,34 @@
                   + 'equilibrium wall temperature'))
             + U.statCard(T('panel.thermal.cardQChamberRefWall', 'q_chamber (reference cooled wall)'),
                 numL(gsa.chamber_heat_flux / 1e6, 2), 'MW/m²')
-            + U.statCard(T('panel.thermal.cardTwallIn', 'T_wall inner'),
-                numL(wa.inner_temperature, 0), 'K', tempKind(wa.inner_temperature))
-            + U.statCard(T('panel.thermal.cardTwallOut', 'T_wall outer'),
-                numL(wa.outer_temperature, 0), 'K', tempKind(wa.outer_temperature))
+            + (ps.kind === 'supplied'
+                // Hüküm verilen çifte kurulur: kartlar o çifti, çıplak cidar
+                // sınırı ayrı ve renksiz (dim) kart olarak basılır.
+                ? U.statCard(T('panel.thermal.cardTwallInSupplied', 'T_wall inner (supplied)'),
+                    numL(ps.block.wall_temperature_hot_K, 0), 'K',
+                    tempKind(ps.block.wall_temperature_hot_K))
+                  + U.statCard(T('panel.thermal.cardTwallOutSupplied', 'T_wall outer (supplied)'),
+                    numL(ps.block.wall_temperature_cold_K, 0), 'K',
+                    tempKind(ps.block.wall_temperature_cold_K))
+                  + U.statCard(T('panel.thermal.cardBareBound', 'Bare-wall bound (no protection)'),
+                    numL(wa.inner_temperature, 0), 'K', 'dim', SRV(String(ps.block.bare_wall_basis || '')))
+                : U.statCard(superseded
+                    ? T('panel.thermal.cardTwallInBare', 'T_wall inner (bare wall, no liner)')
+                    : T('panel.thermal.cardTwallIn', 'T_wall inner'),
+                    numL(wa.inner_temperature, 0), 'K',
+                    superseded ? 'dim' : tempKind(wa.inner_temperature))
+                  + U.statCard(superseded
+                    ? T('panel.thermal.cardTwallOutBare', 'T_wall outer (bare wall, no liner)')
+                    : T('panel.thermal.cardTwallOut', 'T_wall outer'),
+                    numL(wa.outer_temperature, 0), 'K',
+                    superseded ? 'dim' : tempKind(wa.outer_temperature)))
             + U.statCard(T('panel.thermal.cardTaw', 'T_adiabatic wall'),
                 numL(gsa.adiabatic_wall_temperature, 0), 'K')
             + '</div>';
         root.appendChild(head);
 
         // ---- Plotly çubuk ----
-        temperaturePlot(root, ta);
+        temperaturePlot(root, ta, ps);
 
         const tail = document.createElement('div');
         let thtml = U.sectionTitle(T('panel.thermal.secHeatLoad', 'Heat Load & Cooling Assessment'));
@@ -576,23 +754,55 @@
                           { value: cool.heat_sink_mass })
             : null;
         const hsChip = (hsInfo && U.source.chip) ? U.source.chip(hsInfo) : '';
+        // V3.0.5 SIVI-CIDAR (KILAVUZ P4, DİL-2 deseni): TR ekranda ham makine
+        // adları (heat_sink_mass, heat_sink_delta_T_K …) GÖRÜNÜR satırdan
+        // kalktı: etiket ve ΔT/c_p/sınır özeti okunur metin (EN + TR);
+        // makine alanları ve ucun İngilizce beyanı kapalı "Teknik ayrıntı"
+        // kutusunda AYNEN durur (sayılar değişmedi).
+        const hsOzet = [];
+        if (typeof cool.heat_sink_delta_T_K === 'number') {
+            hsOzet.push(U.tf('panel.thermal.heatSinkDeltaT',
+                             { v: numL(cool.heat_sink_delta_T_K, 2) },
+                             'ΔT {v} K'));
+        }
+        if (typeof cool.heat_sink_specific_heat_J_kgK === 'number') {
+            hsOzet.push(U.tf('panel.thermal.heatSinkCp',
+                             { v: numL(cool.heat_sink_specific_heat_J_kgK, 1) },
+                             'specific heat {v} J/(kg·K)'));
+        }
+        if (typeof cool.heat_sink_temperature_limit_K === 'number') {
+            hsOzet.push(U.tf('panel.thermal.heatSinkLimit',
+                             { v: numL(cool.heat_sink_temperature_limit_K, 1) },
+                             'temperature limit {v} K'));
+        }
         const heatSinkRow = hsDeclared
-            ? ['<span style="font-family:var(--hd-mono); font-size:0.72rem;">'
-               + 'heat_sink_mass</span>',
+            ? [T('panel.thermal.heatSinkMassDeclared',
+                 'Heat-sink mass (selected material)'),
                numL(cool.heat_sink_mass, 1) + ' kg' + hsChip
+               + (hsOzet.length
+                  ? '<span style="font-size:0.72rem;'
+                    + ' color:var(--hd-ink-dim, #7d97a5);"> · '
+                    + hsOzet.join(' · ') + '</span>' : '')
+               + '<details class="hd-teknik-ayrinti" style="margin-top:2px;">'
+               + '<summary style="cursor:pointer; font-size:0.68rem;'
+               + ' color:var(--hd-ink-dim, #7d97a5);">'
+               + U.esc(T('common.techDetail', 'Technical detail (machine fields)'))
+               + '</summary>'
                + '<span style="font-family:var(--hd-mono); font-size:0.68rem;'
-               + ' color:var(--hd-ink-dim, #7d97a5);"> · heat_sink_delta_T_K '
+               + ' color:var(--hd-ink-dim, #7d97a5);">heat_sink_mass · '
+               + 'heat_sink_delta_T_K '
                + numL(cool.heat_sink_delta_T_K, 2)
                + ' · heat_sink_specific_heat_J_kgK '
                + numL(cool.heat_sink_specific_heat_J_kgK, 1)
-               + (hsSource ? ' · heat_sink_specific_heat_source ' + hsSource : '')
+               + (hsSource ? ' · heat_sink_specific_heat_source '
+                  + U.esc(hsSource) : '')
                + (typeof cool.heat_sink_temperature_limit_K === 'number'
                   ? ' · heat_sink_temperature_limit_K '
                     + numL(cool.heat_sink_temperature_limit_K, 1) : '')
                + (hsBasis
-                  ? '<br>heat_sink_delta_T_basis: ' + hsBasis : '')
-               + '</span>',
-               hsBasis || '']
+                  ? '<br>heat_sink_delta_T_basis: ' + U.esc(hsBasis) : '')
+               + '</span></details>',
+               '']
             : [T('panel.thermal.heatSinkMass', 'Heat sink mass (steel equiv.)'),
                numL(cool.heat_sink_mass, 1) + ' kg',
                T('panel.thermal.heatSinkTip',
@@ -621,19 +831,41 @@
             ? ('wetted_integral_contour_basis.generic_defaults_used: '
                + generics.join(', ') + ' — ' + SRV(String(wib.exit_diameter_source || '')))
             : '';
-        const derivedNote = wibNote
-            ? ('wetted_integral_contour_basis.generic_defaults_used: '
-               + generics.join(', '))
+        // V3.0.5 SIVI-CIDAR (KILAVUZ P4): görünür im OKUNUR metin (EN + TR);
+        // makine alan adı kapalı "Teknik ayrıntı"da aynen durur.
+        const genelAdlar = (generics || []).map(function (g) {
+            return {
+                exit_diameter: T('panel.thermal.genericField.exit_diameter',
+                                 'exit diameter'),
+                expansion_ratio: T('panel.thermal.genericField.expansion_ratio',
+                                   'expansion ratio'),
+                nozzle_type: T('panel.thermal.genericField.nozzle_type',
+                               'nozzle type'),
+            }[g] || g;
+        }).join(', ');
+        const genelOkunur = wibNote
+            ? U.tf('panel.thermal.genericContourMark', { fields: genelAdlar },
+                   'generic nozzle contour (not supplied: {fields})')
             : '';
+        const derivedNote = genelOkunur;
+        const teknikGenel = function () {
+            return '<details class="hd-teknik-ayrinti" style="display:inline;">'
+                + '<summary style="cursor:pointer; display:inline;'
+                + ' font-size:0.64rem; color:var(--hd-ink-dim, #7d97a5);"> '
+                + U.esc(T('common.techDetail', 'Technical detail (machine fields)'))
+                + '</summary><span style="font-family:var(--hd-mono);'
+                + ' font-size:0.64rem;"> wetted_integral_contour_basis.'
+                + 'generic_defaults_used: ' + U.esc(generics.join(', '))
+                + '</span></details>';
+        };
         // GÖRÜNÜR im: üzerine gelinmeden okunmayan bir `title` metni
         // "ekranda" sayılmaz (a2 turunda ölçülen bekçi zaafı). Islak alandan
         // TÜREYEN her satır beyanı kendi metninde taşır.
         const derivedMark = wibNote
             ? ('<span data-thermal-derived-generic="1"'
-               + ' style="font-family:var(--hd-mono); font-size:0.66rem;'
+               + ' style="font-size:0.66rem;'
                + ' color:var(--hd-orange, #ff8c33);"> · '
-               + 'wetted_integral_contour_basis.generic_defaults_used: '
-               + generics.join(', ') + '</span>')
+               + U.esc(genelOkunur) + ' ' + teknikGenel() + '</span>')
             : '';
         thtml += U.kvTable([
             [T('panel.thermal.totalHeatRate', 'Total heat rate'),
@@ -650,14 +882,28 @@
              + (wibNote
                 ? '<span data-thermal-generic-contour="'
                   + String(generics.length) + '"'
-                  + ' style="font-family:var(--hd-mono); font-size:0.68rem;'
+                  + ' style="font-size:0.68rem;'
                   + ' color:var(--hd-orange, #ff8c33);"> · '
+                  + U.esc(genelOkunur)
+                  + '<details class="hd-teknik-ayrinti" style="display:inline;">'
+                  + '<summary style="cursor:pointer; display:inline;'
+                  + ' font-size:0.64rem; color:var(--hd-ink-dim, #7d97a5);"> '
+                  + U.esc(T('common.techDetailSrv',
+                            'Technical detail (solver statement, untranslated)'))
+                  + '</summary><span style="font-family:var(--hd-mono);'
+                  + ' font-size:0.64rem;"> '
                   + U.esc(SRV(String(wib.exit_diameter_source))) + '</span>'
+                  + '</details></span>'
                 : ''),
-             wibNote],
+             derivedNote],
         ]);
 
-        thtml += U.sectionTitle(T('panel.thermal.secSafety', 'Thermal Safety Factors'));
+        thtml += U.sectionTitle(T('panel.thermal.secSafety', 'Thermal Safety Factors')
+            + (ps.kind === 'liner'
+                ? ' — ' + T('panel.thermal.sfBareSuffix', 'bare wall (bound; the liner verdict governs)')
+                : ps.kind === 'supplied'
+                ? ' — ' + T('panel.thermal.sfSuppliedSuffix', 'at the supplied wall temperatures')
+                : ''));
         const sfRow = function (label, v, note) {
             const c = U.kindColor(sfKind(v));
             return [label, `<span style="color:${c}; font-family:var(--hd-mono);">${numL(v)}</span>`, note];
@@ -676,18 +922,40 @@
                   '{allow} K allowable · {melt} K melting')],
             governingLimitRow(ta),
             [T('common.f.wallThickness', 'Wall thickness'), numL(dpp.wall_thickness, 1) + ' mm ('
-                + (dpp.material || '—') + ')'],
+                + U.esc(String(matp.name || dpp.material || '—')) + ')'],
         ].filter(Boolean));
 
-        const warns = [].concat(safe.warnings || [], gsa.warnings || []);
+        // V301/ÖRNEK-PANEL: korunan cidar hükmünün aştığı çıplak cidar
+        // kayıtları (superseded_by) ayrı, bilgi listesinde; aynı kayıt iki
+        // listede (güvenlik + gaz tarafı) çift basılmaz.
+        const tumu = [].concat(safe.warnings || [], gsa.warnings || []);
+        const gorulen = {};
+        const warns = [];
+        const asilan = [];
+        tumu.forEach(function (w) {
+            const anahtar = (w && typeof w === 'object')
+                ? JSON.stringify([w.code, w.params, w.severity]) : String(w);
+            if (gorulen[anahtar]) return;
+            gorulen[anahtar] = true;
+            if (w && typeof w === 'object' && w.superseded_by) asilan.push(w);
+            else warns.push(w);
+        });
         thtml += U.listBlock(T('common.warnings', 'Warnings'), warns, 'warn');
+        if (asilan.length) {
+            thtml += U.listBlock(T('panel.thermal.supersededList',
+                'Bare-wall check — superseded by the protected-wall verdict'), asilan, 'dim');
+        }
         const recs = [].concat(safe.recommendations || [], cool.recommendations || []);
-        thtml += U.listBlock(T('panel.thermal.coolingRecs', 'Cooling Recommendations'), recs, 'info');
+        // V301/ÖRNEK-PANEL: öneriler çıplak cidar dengesinin ısı yükünden
+        // türer; hüküm korunan cidardayken başlık bunu adıyla söyler.
+        thtml += U.listBlock(superseded
+            ? T('panel.thermal.coolingRecsBare', 'Cooling recommendations — for the bare wall (bound)')
+            : T('panel.thermal.coolingRecs', 'Cooling Recommendations'), recs, 'info');
         tail.innerHTML = thtml;
         root.appendChild(tail);
 
         // ---- Eksenel profil bölümü (ikinci buton + iki grafik) ----
-        mountAxialSection(root);
+        mountAxialSection(root, superseded);
     }
 
     window.AnalysisDock.register({
@@ -698,18 +966,104 @@
         endpoint: '/analyze_thermal_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK'],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM'],
-            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
-            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.05, 'common.f.mdotTotal'],
-            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM'],
-            ['material', 'Wall Material', 'steel', MATERIALS, 'common.f.wallMaterial'],
-            ['cooling_type', 'Cooling Type', 'natural', COOLING, 'common.f.coolingType'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.thermal.help.chamber_pressure'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK', 'panel.thermal.help.chamber_temperature'],
+            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.thermal.help.chamber_diameter'],
+            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM', 'panel.thermal.help.chamber_length'],
+            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.thermal.help.burn_time'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
+            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.05, 'common.f.mdotTotal', 'panel.thermal.help.mdot_total'],
+            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM', 'panel.thermal.help.hotWallThickness'],
+            ['material', 'Wall Material', 'steel', MATERIALS, 'common.f.wallMaterial', 'panel.thermal.help.hotWallMaterial'],
+            ['cooling_type', 'Cooling Type', 'natural', COOLING, 'common.f.coolingType', 'panel.thermal.help.cooling_type'],
+            // V301/ÖRNEK-PANEL — motorun ısı zincirine verdiği gaz girdileri
+            // (boşsa gönderilmez; uç kendi türetimini adıyla beyan eder).
+            ['throat_diameter', 'Throat Diameter (m)', '', 0.001, 'common.f.throatDiameterM', 'panel.thermal.help.throat_diameter'],
+            ['c_star', 'Characteristic velocity c* (m/s)', '', 10, 'panel.thermal.fCstar', 'panel.thermal.help.c_star'],
+            ['gamma', 'Gas gamma (Bartz)', '', 0.01, 'panel.thermal.fGammaGas', 'panel.thermal.help.gamma'],
+            ['molecular_weight', 'Molecular Weight (g/mol)', '', 0.5, 'common.f.molecularWeight', 'panel.thermal.help.molecular_weight'],
+            ['x_H2O', 'H2O mole fraction (radiation)', '', 0.01, 'panel.thermal.fXH2O', 'panel.thermal.help.x_H2O'],
+            ['x_CO2', 'CO2 mole fraction (radiation)', '', 0.01, 'panel.thermal.fXCO2', 'panel.thermal.help.x_CO2'],
+            // V301/ÖRNEK-PANEL — KORUNAN CİDAR (heat_transfer_analysis.
+            // apply_wall_protection). Boşsa / 'none' ise hüküm bugünkü
+            // çıplak cidar kontrolüdür.
+            ['wall_temperature_hot', 'Supplied hot-side wall temperature (K)', '', 5, 'panel.thermal.fWallHotSupplied', 'panel.thermal.help.wall_temperature_hot'],
+            ['wall_temperature_cold', 'Supplied cold-side wall temperature (K)', '', 5, 'panel.thermal.fWallColdSupplied', 'panel.thermal.help.wall_temperature_cold'],
+            ['wall_protection', 'Wall protection', 'none', PROTECTION, 'panel.thermal.fWallProtection', 'panel.thermal.help.wall_protection'],
         ],
+        // V301/ÖRNEK-PANEL (kalem 5): yanma süresi boşsa istek GÖNDERİLMEZ ve
+        // güverte alanı adıyla söyler (dock.missingFields); ipucu kullanıcıya
+        // süreyi nereye gireceğini söyler. Eskiden boş alan gövdeye girmiyor,
+        // uç 422 incomplete_thermal_input dönüyordu (ölçüldü: örnek sıvı,
+        // olcum/once_liquid.json — motorda yanma süresi girdisi yok).
+        required: ['burn_time'],
         fromResults: function (r) {
             const m = U.motorDict(r);
+            const mt = (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function')
+                ? window.AnalysisDock.getMotorType() : null;
+            /* V3.0.5 SIVI-CIDAR (kalem 2): iki katmanlı rejeneratif sıvı
+               cidarda ısı akısını taşıyan SICAK GAZ cidarı ASTARDIR
+               (structural_analysis.chamber_structure.wall_layers[0]).
+               Eskiden malzeme `chamber_structure.material_key` (= DIŞ KABUK,
+               Inconel 718) ve kalınlık YIĞIN (astar + kanal + kabuk, 5,5 mm)
+               okunuyordu; panel CuCrZr 1 mm astarın marş çiftini Inconel 718
+               sınırlarıyla (977 / 1533 K) değerlendiriyordu. ÖLÇÜLDÜ:
+               docs/scofield/raw/OH/V301/sivi-cidar/olcum/k2_once.json.
+               Astar kaydı eksikse kabuğa DÜŞÜLMEZ: alan önerilmez. */
+            const astar = sicakGazAstari(m, mt);
+            const sogutma = ilkMetin(m, SOGUTMA_YOLLARI);
+            const ek = {
+                throat_diameter: U.readLengthM(r, 'throat_diameter'),
+                c_star: ilkSayi(m, ['c_star']),
+                gamma: ilkSayi(m, GAMMA_YOLLARI),
+                molecular_weight: ilkSayi(m, MW_YOLLARI),
+            };
+            if (sogutma && COOLING.some(function (o) { return o[0] === sogutma; })) {
+                ek.cooling_type = sogutma;
+            }
+            // Işıyan tür kesirleri YALNIZ motorun kendi denge çözümünden
+            // geldiyse (künye 'caller supplied ...'); modül varsayılanı
+            // tohumlanmaz — uç onu zaten kendisi beyan ediyor.
+            const gsa = yolOku(m, 'heat_transfer_analysis.gas_side_analysis') || {};
+            if (/^caller supplied/i.test(String(gsa.radiation_composition_source || ''))) {
+                ek.x_H2O = ilkSayi(gsa, ['radiation_x_H2O']);
+                ek.x_CO2 = ilkSayi(gsa, ['radiation_x_CO2']);
+            }
+            /* KORUNAN CİDAR — motorun KENDİ hükmünün girdisi:
+               * katı: kasa yalıtım + astar arkasında; motor kasayı yanma
+                 boyunca geçici (lumped) ÇÖZÜYOR (solid_rocket_engine.
+                 _calculate_case_temperature; ölçüldü 313,55 K, sınır 811 K).
+                 Bu ÇÖZÜLMÜŞ sıcaklık verilmiş cidar çifti olarak gider
+                 (yığın kasa: iç = dış). Yanma süresi pozitif değilse
+                 sıcaklık çözülmemiştir, gönderilmez.
+               * sıvı: rejeneratif istasyon marşının ÇÖZDÜĞÜ cidar çifti —
+                 güvertenin ortak okuyucusu (readWallTemperaturesK) yalnız
+                 'solved' künyeli çifti döner (güvenlik paneliyle aynı sayı).
+               * hibrit: kasa sıcaklığı bölge modelinde BEYANLIDIR, çözülmüş
+                 değildir (V301/H-PANEL kararı: tohumlanmaz). Bölge modeli
+                 bütün bölgeleri koruyorsa astar burada YENİDEN
+                 boyutlandırılır (wall_protection = 'ablative_liner'). */
+            if (mt === 'solid') {
+                const ht = yolOku(m, 'thermal_analysis.heat_transfer') || {};
+                const tKasa = ht.case_temperature_k;
+                const tb = U.readBurnTime(r);
+                if (typeof tKasa === 'number' && Number.isFinite(tKasa) && tKasa > 0
+                        && typeof tb === 'number' && tb > 0) {
+                    ek.wall_temperature_hot = tKasa;
+                    ek.wall_temperature_cold = tKasa;
+                }
+            } else if (mt === 'liquid') {
+                const cift = U.readWallTemperaturesK(r) || {};
+                if (Number.isFinite(cift.hot) && Number.isFinite(cift.cold)) {
+                    ek.wall_temperature_hot = cift.hot;
+                    ek.wall_temperature_cold = cift.cold;
+                }
+            } else if (mt === 'hybrid') {
+                const zones = yolOku(m, 'chamber_wall_zones') || {};
+                if (zones.status === 'modelled' && zones.all_zones_protected === true) {
+                    ek.wall_protection = 'ablative_liner';
+                }
+            }
+            return Object.assign(ek, {
             // BİRİM SÖZLEŞMESİ (2026-07-30 yeniden ölçüldü):
             // Buradaki eski `mmToM` yardımcısı çözücüden gelen
             // chamber_diameter / chamber_length değerlerini KOŞULSUZ 1000'e
@@ -721,7 +1075,6 @@
             // yüksek, ısı kuyusu kütlesi 6,7 kat düşük çıkıyordu.
             // Çevirme artık panelde değil, ölçülmüş birim tablosunu tutan
             // merkezi AnalysisDock.ui.readLengthM içinde yapılıyor.
-            return {
                 chamber_pressure: m.chamber_pressure,
                 chamber_temperature: m.chamber_temperature,
                 chamber_diameter: U.readLengthM(r, 'chamber_diameter'),
@@ -735,9 +1088,10 @@
                 // Aşağıdaki iki alan hiç bağlı DEĞİLDİ: kullanıcı sayfada
                 // AISI 304 / 8 mm seçmişken panel 'steel' ve 5 mm ile
                 // hesaplıyordu (hesap ucu varsayılanları).
-                material: U.readChamberMaterial(r),
-                wall_thickness: U.readWallThicknessM(r),
-            };
+                material: (astar ? astar.material : U.readChamberMaterial(r)),
+                wall_thickness: (astar ? astar.thicknessM
+                                 : U.readWallThicknessM(r)),
+            });
         },
         render: render,
     });

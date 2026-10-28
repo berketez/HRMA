@@ -129,45 +129,68 @@ class TestP17B207RozetAcilistaYesilDegil:
             '%s: %d rozet daha hiçbir denetim koşmadan YEŞİL "Connected"'
             % (sablon, len(onceden)))
 
-    @pytest.mark.parametrize('sablon', ROZET_SABLONLARI)
-    def test_baslangic_durumu_notr_ve_adlandirilmis(self, sablon):
+    # ------------------------------------------------------------------
+    # ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1). Aşağıdaki dört bekçi
+    # ROZETİN kendisini (``database-status`` span'ları, "not checked"
+    # metni, setNistStatus/setCeaStatus ve /api/database-status yoklaması)
+    # şart koşuyordu. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ayberk1/
+    # kaynak-cea/gorsel_once.json, gerçek tarayıcı): rozetler yoklamadan
+    # sonra HER makinede "NASA CEA OFFLINE / NIST WEBBOOK OFFLINE" diyordu
+    # (CEA kolu DAİMA 'local', NIST ayrıştırıcısı HİÇ eşleşmiyor) ve hiçbiri
+    # hesabın bir sayısının kaynağı değildi. Bekçiler bu yüzden KUSURU
+    # kilitliyordu; rozet söküldü. P17B2-07'nin kazanımı (hesap koşmadan
+    # kazanılmamış bir hüküm gösterilmez; canlı künye yazılınca sözlük onu
+    # ezmez) YENİ veri kaynağı satırında aynen ölçülür.
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize('sablon, anahtar', [
+        ('hrma/templates/advanced.html', 'adv.ds.fuelPending'),
+        ('hrma/templates/advanced.html', 'adv.ds.oxidizerPending'),
+        ('hrma/templates/solid.html', 'solid.ui.data_source_catalogue'),
+    ])
+    def test_baslangic_durumu_notr_ve_adlandirilmis(self, sablon, anahtar):
         govde = oku(sablon)
-        rozetler = re.findall(
-            r'<span class="database-status ([^"]*)"[^>]*>([^<]*)</span>', govde)
-        assert rozetler, sablon
-        for sinif, metin in rozetler:
-            assert 'status-unknown' in sinif, (sablon, sinif, metin)
-            assert 'not checked' in metin, (sablon, metin)
-            # Bilgi kaybı ikizi: hangi veritabanı olduğu hâlâ yazıyor.
-            assert ('NASA CEA' in metin) or ('NIST' in metin), metin
-        assert '.status-unknown {' in govde
+        m = re.search(r'<div class="data-source-line"[^>]*data-i18n="%s">'
+                      r'([^<]*)</div>' % re.escape(anahtar), govde)
+        assert m, (sablon, anahtar)
+        metin = m.group(1)
+        # Kazanılmamış hüküm yok: bağlantı/çevrimdışı iddiası basılmaz.
+        for yasak in ('Connected', 'Offline', 'connected', 'offline'):
+            assert yasak not in metin, (sablon, metin)
+        assert metin.startswith('Data source:'), metin
+        assert not re.search(r'class="[^"]*\b(?:database-status|cea-status|nist-status)\b', govde)
 
-    @pytest.mark.parametrize('sablon', ROZET_SABLONLARI)
-    def test_gercek_durum_yazilinca_sozluk_ustune_yazamaz(self, sablon):
-        govde = oku(sablon)
-        for sinif in ('nist-status', 'cea-status'):
-            kalip = ("el.className = 'database-status %s ' + cls;" % sinif)
-            i = govde.find(kalip)
-            assert i != -1, (sablon, sinif)
-            assert "el.removeAttribute('data-i18n')" in govde[i:i + 1100], (
-                '%s/%s: durum yazıldıktan sonra data-i18n kaldırılmıyor'
-                % (sablon, sinif))
+    def test_gercek_durum_yazilinca_sozluk_ustune_yazamaz(self):
+        govde = oku('hrma/templates/advanced.html')
+        i = govde.index('function renderDataSourceLines()')
+        j = govde.index('\n        }\n', i)
+        blok = govde[i:j]
+        # Canlı künye iki satıra da yazılınca data-i18n kaldırılır.
+        assert blok.count("removeAttribute('data-i18n')") == 2, blok
 
     def test_sozluk_anahtarlari_EN_ve_TR(self):
         adv = oku('hrma/static/js/i18n_advanced.js')
         pages = oku('hrma/static/js/i18n_pages.js')
-        for anahtar in ("'adv.txt.ceaNotChecked'", "'adv.txt.nistNotChecked'"):
+        for anahtar in ("'adv.ds.fuelPending'", "'adv.ds.oxidizerPending'"):
             assert adv.count(anahtar) == 2, anahtar
+        assert pages.count("'solid.ui.data_source_catalogue'") == 2
+        # Sökülen rozet anahtarları sözlükte ölü kalmadı.
+        for anahtar in ("'adv.txt.ceaNotChecked'", "'adv.txt.nistNotChecked'"):
+            assert adv.count(anahtar) == 0, anahtar
         for anahtar in ("'solid.ui.nasa_cea_not_checked'",
                         "'solid.ui.nist_webbook_not_checked'"):
-            assert pages.count(anahtar) == 2, anahtar
+            assert pages.count(anahtar) == 0, anahtar
 
     def test_gercek_denetim_yolu_hala_yesile_donebiliyor(self):
-        """Aşırı kapanma ikizi: denetim geçince rozet YEŞİL olabilmeli."""
-        for sablon in ROZET_SABLONLARI:
-            govde = oku(sablon)
-            assert "'status-connected'" in govde, sablon
-            assert "fetch('/api/database-status')" in govde, sablon
+        """Aşırı kapanma ikizi: satır gerçek bir kaynağı SÖYLEYEBİLMELİ.
+
+        Hesap öncesi oksitleyici satırı /api/oxidizer-properties künyesiyle,
+        hesap sonrası yakıt satırı /calculate data_sources bloğuyla yazılır
+        (sayfa artık /api/database-status yoklamaz).
+        """
+        govde = oku('hrma/templates/advanced.html')
+        assert 'setOxidizerSourceKunye(result);' in govde
+        assert 'r.data_sources' in govde
+        assert "fetch('/api/database-status')" not in govde
 
 
 # ==========================================================================
@@ -449,7 +472,10 @@ class TestP17B203DilDugmesiUyariSilmiyor:
         # Künye yorumları kusurun ADINI anıyor; bekçi KODU ölçer.
         zincir = re.sub(r'//[^\n]*', '', m.group(1))
         cagrilar = re.findall(r"typeof (\w+) === 'function'\)", zincir)
-        assert cagrilar[-1] == 'checkDatabaseStatus', cagrilar
+        # v3.0.1 K: son halka checkDatabaseStatus (rozet yoklaması) idi;
+        # rozet söküldü, halkanın yerini aynı işi (dil değişince kaynak
+        # künyesini yeniden yazmak) yapan refreshDataSourceLines aldı.
+        assert cagrilar[-1] == 'refreshDataSourceLines', cagrilar
         assert 'updateMixtureDensity' not in zincir, (
             'fırlatan ölü çağrı zincire geri kondu')
 

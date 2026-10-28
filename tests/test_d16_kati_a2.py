@@ -208,13 +208,27 @@ class TestBogazBoyutlandirmaBeyaniOlcumeUyar:
 # ---------------------------------------------------------------------------
 # P2B3-08 — ısı açığa çıkma gücü çözülmüş eğrinin BİR anına karşılık gelir
 # ---------------------------------------------------------------------------
+#: V301/T-ÇAPA-A — gerekçe ``_egri_gucleri`` içinde.
+ISI_GUCU_CEKIRDEK_MM = 40.0
+
+
 def _egri_gucleri(tip):
     """(yayımlanan blok, eğriden hesaplanan t0/tepe/ortalama) [MW]."""
+    # V301/T-ÇAPA-A: boğaz boyutlandırma referans KAYDI eski ölçütün tarihî
+    # ölçümüdür (çekirdek 30 mm); orada bates/finocyl/wagon_wheel portu
+    # boğuluyor (ölçülen A_p/A_t 0,950 / 0,965 / 0,747 -> K-A kapısı 422).
+    # Bu sınıfın konusu ısı gücünün eğriden okunmasıdır (kural 1). Çekirdek
+    # 40 mm: beş tipte de port geçerli (A_p/A_t bates 1,605, slotted 1,411,
+    # star 2,182, finocyl 1,719, wagon_wheel 1,329) VE ilerleyici nöbetin
+    # istediği tepe/t0 korunuyor (star 1,543, finocyl 1,457, wagon_wheel
+    # 1,394). Tek tanımın 48 mm'si bu nöbeti taşıyamaz: orada wagon_wheel
+    # 1,063, finocyl 1,226 (ilerleyici değil). İtici, dış çap, boy ve
+    # basınç kayıttan.
     r = SOLID_THROAT_SIZING_REFERENCE
     ortak = dict(propellant_type=r['propellant_type'],
                  chamber_diameter=r['chamber_diameter_mm'],
                  grain_length=r['grain_length_mm'],
-                 core_diameter=r['core_diameter_mm'],
+                 core_diameter=ISI_GUCU_CEKIRDEK_MM,
                  chamber_pressure=r['chamber_pressure_bar'])
     m = _sessiz(SolidRocketEngine, grain_type=tip, **ortak)
     sonuc = _sessiz(m.calculate_performance)

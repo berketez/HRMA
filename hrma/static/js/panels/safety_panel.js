@@ -54,6 +54,93 @@
     // Son öneride çiftin bayrak yüzünden GÖNDERİLMEDİĞİ bilgisi (yalnız
     // ekran künyesi; uca giden gövdeye GİRMEZ). null = geri tutma yok.
     let wallPairWithheld = null;
+    // V301/PANEL (NK-18) — YAPISAL HÜKÜM MOTORUN ZİNCİRİNDEN.
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/panel/guvenlik_once.json): örnek
+    // hibritte Performans Özeti NOT_EVALUATED (HRMA'nın boyutlandırdığı
+    // cidar hüküm kazanmaz) derken bu sekme UNSAFE 5/5, PDF SAFE basıyordu;
+    // katı ve sıvı örnekte de sekme UNSAFE (çıplak cidar Bartz tahmini).
+    // Hüküm artık motorun KENDİ yapısal zincirinden gelir: panel motor
+    // sonucunun hüküm bloğunu bağlam olarak gönderir, uç onu TEK işlevden
+    // okur (safety_analysis.motor_structural_verdict). Yol tablosu
+    // sunucudaki MOTOR_STRUCTURAL_VERDICT_BLOCKS ile AYNI (bekçi eşler).
+    // Yollar parça dizisidir (noktalı dizge i18n anahtarıyla karışmasın).
+    const MOTOR_VERDICT_BLOCKS = {
+        hybrid: [['motor', 'structural_analysis', 'safety_analysis'],
+                 ['structural_analysis', 'safety_analysis']],
+        solid: [['safety_analysis', 'pressure_safety']],
+        liquid: [['structural_analysis', 'chamber_structure']],
+    };
+    // ÖRNEK-PANEL DEVİR 1: hibritte cidarın ısıl hükmü motorun bölge
+    // modelidir (yakıt bloğu altı korunur, açık bölgelere astar). Kasa
+    // sıcaklığı BEYANLIDIR (tohumlanmaz); hükmün gerekçesi bu blokla taşınır.
+    // Sunucudaki MOTOR_WALL_ZONE_BLOCKS ile AYNI (bekçi eşler).
+    const MOTOR_ZONE_BLOCKS = {
+        hybrid: [['motor', 'chamber_wall_zones'], ['chamber_wall_zones']],
+    };
+
+    function ilkBlok(r, yollar) {
+        for (const parcalar of (yollar || [])) {
+            let o = r;
+            for (const p of parcalar) {
+                o = (o && typeof o === 'object') ? o[p] : undefined;
+            }
+            if (o && typeof o === 'object' && !Array.isArray(o)
+                && Object.keys(o).length) {
+                return { parcalar: parcalar, blok: o };
+            }
+        }
+        return null;
+    }
+
+    function yolaKoy(kopya, parcalar, blok) {
+        let hedef = kopya;
+        parcalar.forEach(function (p, i) {
+            if (i === parcalar.length - 1) { hedef[p] = blok; return; }
+            if (!hedef[p] || typeof hedef[p] !== 'object') hedef[p] = {};
+            hedef = hedef[p];
+        });
+    }
+
+    // Motor sonucundan YALNIZ hüküm bloğunu (ve hibritte bölge bloğunu),
+    // sonucun kendi yol biçimiyle taşır (sunucu aynı yolu okur). Hüküm
+    // bloğu yoksa null: bağlam gönderilmez.
+    function motorVerdictResult(r, motorType) {
+        if (!r || typeof r !== 'object') return null;
+        const hukum = ilkBlok(r, MOTOR_VERDICT_BLOCKS[motorType]);
+        if (!hukum) return null;
+        const kopya = {};
+        yolaKoy(kopya, hukum.parcalar, hukum.blok);
+        const bolge = ilkBlok(r, MOTOR_ZONE_BLOCKS[motorType]);
+        if (bolge) yolaKoy(kopya, bolge.parcalar, bolge.blok);
+        return kopya;
+    }
+
+    // İtki tohumu — fromResults ile impuls bağlamının TEK okuyucusu.
+    // V301/PANEL: katıda modülün 'thrust' tanımı TEPE itkidir (bağlama
+    // kuvveti = itki × SF bir YÜK; K-C1 karar 4, PDF de max_thrust
+    // gönderiyor). ÖLÇÜLDÜ (guvenlik_once.json, örnek KNDX): sekme ortalama
+    // 1298,54 N, PDF tepe 1498,19 N basıyordu — aynı motor için iki bağlama
+    // kuvveti. Tepe itki yoksa güvertenin ortak okuyucusu (ortalama) kalır.
+    function seededThrust(r, motorType) {
+        const m = U.motorDict(r) || {};
+        if (motorType === 'solid' && Number.isFinite(m.max_thrust)) {
+            return m.max_thrust;
+        }
+        return U.readThrust(r);
+    }
+
+    // Hüküm bloğunun ait olduğu yapısal girdiler — fromResults ile AYNI
+    // okuyucular (tek yer). Uç, istekteki değerler bunlardan ayrışırsa
+    // (kullanıcı güvertede cidar/basınç/çap değiştirdi) motorun hükmünü
+    // benimsemez ve nedenini yazar.
+    function structuralSeeds(r) {
+        const m = U.motorDict(r);
+        return {
+            chamber_pressure: m.chamber_pressure,
+            chamber_diameter: U.readLengthM(r, 'chamber_diameter'),
+            wall_thickness: U.readWallThicknessM(r),
+        };
+    }
     const PROPELLANT_OPTIONS = PROPELLANTS.concat([[PROPELLANT_NOT_MODELLED,
         'Not modelled (no sourced TNT equivalent)', 'prop.notModelled']]);
     // Uç geri çekme kodu -> panelin kendi gerekçe metni (EN = TR sözlükte).
@@ -157,15 +244,23 @@
         structural: 'STRUCT', pressure: 'PRESS', thermal: 'THERM',
         explosive: 'EXPL', toxic: 'TOX', fire: 'FIRE',
     };
+    // V301/NK-19: ucun yayımladığı İngilizce eksen adı → sözlük anahtarı
+    // (safety_analysis._generate_risk_matrix 'axes').
+    const RISK_EKSEN_ANAHTARI = {
+        Rare: 'risk.rare', Unlikely: 'risk.unlikely', Possible: 'risk.possible',
+        Likely: 'risk.likely', Frequent: 'risk.frequent',
+        Negligible: 'risk.negligible', Minor: 'risk.minor', Major: 'risk.major',
+        Critical: 'risk.critical', Catastrophic: 'risk.catastrophic',
+    };
 
     // Koşum kartının alanları — TEK kaynak. register() bu diziyi verir,
     // varsayılan künyesi (defaultsBlock) etiketleri buradan okur; ikinci
     // bir etiket listesi tutmak iki listenin ayrışmasını davet ederdi.
     const FIELDS = [
-        ['motor_type', 'Motor Type', 'hybrid', MOTOR_TYPES, 'common.f.motorType'],
-        ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
-        ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK'],
-        ['thrust', 'Thrust (N)', 1000, 50, 'common.f.thrustN'],
+        ['motor_type', 'Motor Type', 'hybrid', MOTOR_TYPES, 'common.f.motorType', 'panel.safety.help.motor_type'],
+        ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.safety.help.chamber_pressure'],
+        ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK', 'panel.safety.help.chamber_temperature'],
+        ['thrust', 'Thrust (N)', 1000, 50, 'common.f.thrustN', 'panel.safety.help.thrust'],
         // ÖH D36 / onemli2-sivi a2 — SÜRE VE KÜTLE UYDURULMAZ.
         // ÖLÇÜLDÜ (docs/scofield/raw/OH/D36/onemli2-sivi/a2/once.json K2):
         // süre verilmeyen sıvı motorda çözücü `burn_time` ve itici kütlesi
@@ -183,13 +278,13 @@
         // ADINI basar (hüküm, verisi olmayan motor için üretilmez). Süre ve
         // kütle çözücüde varsa (hibrit, katı, süreli sıvı) öneri alanı
         // doldurur: gönderilen gövde bit-aynıdır (a2/sonra.json K2).
-        ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'],
-        ['propellant_mass', 'Propellant Mass (kg)', '', 0.5, 'common.f.propellantMassKg'],
-        ['propellant_type', 'Propellant Type', 'composite', PROPELLANT_OPTIONS, 'common.f.propellantType'],
-        ['facility_type', 'Facility Type', 'test_stand', FACILITIES, 'common.f.facilityType'],
-        ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
-        ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM'],
-        ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material'],
+        ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.safety.help.burn_time'],
+        ['propellant_mass', 'Propellant Mass (kg)', '', 0.5, 'common.f.propellantMassKg', 'panel.safety.help.propellant_mass'],
+        ['propellant_type', 'Propellant Type', 'composite', PROPELLANT_OPTIONS, 'common.f.propellantType', 'panel.safety.help.propellant_type'],
+        ['facility_type', 'Facility Type', 'test_stand', FACILITIES, 'common.f.facilityType', 'panel.safety.help.facility_type'],
+        ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.safety.help.chamber_diameter'],
+        ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM', 'panel.safety.help.wall_thickness'],
+        ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material', 'panel.safety.help.material'],
         // ISI ZİNCİRİ ÇİFTİ (OH-Z3-01). Varsayılanı BOŞ DİZE: güvertenin
         // zorunlu-alan sözleşmesinde (analysis_dock::requiredFieldInfo)
         // sonlu sayı olmayan varsayılan = isteğe bağlı alan. Boş kalırsa
@@ -215,16 +310,16 @@
         // çeker (sayı UYDURULMAZ, ne panelde ne uçta).
         ['chamber_length',
          'Chamber Length (m, blank = thermal verdict is withheld)',
-         '', 0.01, 'common.f.chamberLengthM'],
+         '', 0.01, 'common.f.chamberLengthM', 'panel.safety.help.chamber_length'],
         ['throat_diameter',
          'Throat Diameter (m, blank = thermal verdict is withheld)',
-         '', 0.001, 'common.f.throatDiameterM'],
+         '', 0.001, 'common.f.throatDiameterM', 'panel.safety.help.throat_diameter'],
         ['wall_temperature_hot',
          'Hot-side Wall Temperature (K, blank = let HRMA estimate from gas temperature)',
-         '', 5, 'common.f.wallTemperatureHotK'],
+         '', 5, 'common.f.wallTemperatureHotK', 'panel.safety.help.wall_temperature_hot'],
         ['wall_temperature_cold',
          'Cold-side Wall Temperature (K, blank = let HRMA estimate from gas temperature)',
-         '', 5, 'common.f.wallTemperatureColdK'],
+         '', 5, 'common.f.wallTemperatureColdK', 'panel.safety.help.wall_temperature_cold'],
     ];
 
     function esc(s) {
@@ -294,14 +389,18 @@
     function riskMatrixHtml(risk) {
         const rm = risk.risk_matrix || {};
         const axes = rm.axes || {};
-        const likelihood = axes.likelihood || [
-            T('risk.rare', 'Rare'), T('risk.unlikely', 'Unlikely'),
-            T('risk.possible', 'Possible'), T('risk.likely', 'Likely'),
-            T('risk.frequent', 'Frequent')];
-        const severity = axes.severity || [
-            T('risk.negligible', 'Negligible'), T('risk.minor', 'Minor'),
-            T('risk.major', 'Major'), T('risk.critical', 'Critical'),
-            T('risk.catastrophic', 'Catastrophic')];
+        // V301/NK-19 (28 Eki): uç eksen adlarını İngilizce yayımlıyor; panel
+        // onları aynen basıyordu (TR ekranda "Rare … Catastrophic"). Bilinen
+        // adın sözlük karşılığı basılır; bilinmeyen ad AYNEN kalır.
+        const eksenAdi = function (ad) {
+            const anahtar = RISK_EKSEN_ANAHTARI[ad];
+            return anahtar ? T(anahtar, ad) : ad;
+        };
+        const likelihood = (axes.likelihood || [
+            'Rare', 'Unlikely', 'Possible', 'Likely', 'Frequent']).map(eksenAdi);
+        const severity = (axes.severity || [
+            'Negligible', 'Minor', 'Major', 'Critical',
+            'Catastrophic']).map(eksenAdi);
         const LBL = areaLabels();
         const risks = risk.individual_risks || {};
 
@@ -370,11 +469,35 @@
                 .concat(accKeys.filter(function (k) {
                     return SIRA.indexOf(k) === -1;
                 }));
+            // V301/NK-19 (28 Eki): sol sütun ham makine yolunu
+            // ("risk_matrix.acceptance.LOW"), sağ sütun ucun İngilizce
+            // cümlesini basıyordu. Bant adı ve cümle sözlükten gelir; EN
+            // sözlük metni ucun metniyle aynıdır (bekçi:
+            // tests/test_v301_risk_matrisi_dil.py). Tanınmayan bant AYNEN.
+            // Anahtarlar SABİT adla çağrılır (kullanılmayan anahtar denetimi
+            // tests/test_i18n_common.py dinamik birleştirmeyi görmez).
+            const BANT_ADI = {
+                LOW: T('panel.safety.accBand.LOW', 'LOW'),
+                MEDIUM: T('panel.safety.accBand.MEDIUM', 'MEDIUM'),
+                HIGH: T('panel.safety.accBand.HIGH', 'HIGH'),
+                CRITICAL: T('panel.safety.accBand.CRITICAL', 'CRITICAL'),
+            };
+            const KABUL_CUMLESI = {
+                LOW: T('panel.safety.acc.LOW', String(acc.LOW)),
+                MEDIUM: T('panel.safety.acc.MEDIUM', String(acc.MEDIUM)),
+                HIGH: T('panel.safety.acc.HIGH', String(acc.HIGH)),
+                CRITICAL: T('panel.safety.acc.CRITICAL', String(acc.CRITICAL)),
+            };
             html += U.kvTable(sirali.map(function (k) {
-                return [machineLabel('risk_matrix.acceptance.' + k),
+                const bilinen = SIRA.indexOf(k) !== -1;
+                return ['<span data-safety-field="risk_matrix.acceptance.'
+                    + esc(k) + '">'
+                    + esc(bilinen ? BANT_ADI[k] : k)
+                    + '</span>',
                     '<span style="color:'
                     + U.kindColor(bandKind(String(k).toLowerCase()))
-                    + ';">' + esc(String(acc[k])) + '</span>'];
+                    + ';">' + esc(bilinen ? KABUL_CUMLESI[k] : String(acc[k]))
+                    + '</span>'];
             }));
         }
         return html;
@@ -861,7 +984,62 @@
     function structuralSafetyBlock(b) {
         if (!b) return '';
         const rows = [];
+        // V301/PANEL (NK-18): hükmün KAYNAĞI önce söylenir. Motorun zinciri
+        // ise Performans Özeti ile aynı kayıttır; geri çekme gerekçesi ve
+        // dayanak cümlesi çözücünün kendi metnidir (burada yazılmaz).
+        if (b.verdict_source === 'motor_structural_chain') {
+            rows.push([machineLabel('verdict_source'),
+                '<span data-safety-verdict-source="motor_structural_chain"'
+                + ' style="font-size:0.72rem; line-height:1.4;">'
+                + esc(T('panel.safety.verdictFromMotor',
+                    'This structural verdict is the motor\'s own structural '
+                    + 'chain — the same record the Performance Summary '
+                    + 'shows. The hoop numbers below are this panel\'s '
+                    + 'diagnostic check, not a second verdict.'))
+                + '</span>']);
+        } else if (b.verdict_source) {
+            rows.push([machineLabel('verdict_source'),
+                '<span data-safety-verdict-source="' + esc(b.verdict_source)
+                + '" style="font-size:0.72rem; line-height:1.4;">'
+                + esc(T('panel.safety.verdictFromModule',
+                    'This structural verdict is this panel\'s thin-wall hoop '
+                    + 'check at room-temperature yield; no motor result '
+                    + 'verdict applies to these inputs.'))
+                + '</span>']);
+        }
+        addRow(rows, 'verdict_block', b.verdict_block);
+        addRow(rows, 'verdict_withheld', b.verdict_withheld);
+        if (Array.isArray(b.verdict_withheld_reasons)
+            && b.verdict_withheld_reasons.length) {
+            rows.push([machineLabel('verdict_withheld_reasons'),
+                monoCell(esc(b.verdict_withheld_reasons.map(String)
+                    .join(', ')))]);
+        }
+        addRow(rows, 'verdict_basis', b.verdict_basis);
+        addRow(rows, 'verdict_risk_level', b.verdict_risk_level);
+        addRow(rows, 'motor_verdict_safety_factor',
+               b.motor_verdict_safety_factor, 2);
+        const red = b.motor_verdict_not_adopted;
+        if (red && typeof red === 'object') {
+            rows.push([machineLabel('motor_verdict_not_adopted'),
+                '<span data-safety-motor-verdict-not-adopted="1"'
+                + ' style="font-size:0.72rem; line-height:1.4;">'
+                + esc(T('panel.safety.motorVerdictNotAdopted',
+                    'The structural inputs here differ from the motor result '
+                    + 'they were filled from, so the motor\'s verdict does '
+                    + 'not apply to this design.'))
+                + (Array.isArray(red.fields) ? ' ' + monoCell(esc(
+                    red.fields.map(function (f) {
+                        return (f && f.field) + ': ' + (f && f.request)
+                            + ' ≠ ' + (f && f.motor_result);
+                    }).join('; '))) : '')
+                + '</span>']);
+            addRow(rows, 'motor_verdict_not_adopted.reason', red.reason);
+            addRow(rows, 'motor_verdict_not_adopted.basis', red.basis);
+        }
         addRow(rows, 'structural_integrity', b.structural_integrity);
+        addRow(rows, 'module_structural_integrity_basis',
+               b.module_structural_integrity_basis);
         addRow(rows, 'material', b.material);
         addRow(rows, 'material_name', b.material_name);
         addRow(rows, 'hoop_stress_mpa', b.hoop_stress_mpa, 2, 'MPa');
@@ -890,9 +1068,22 @@
         addRow(rows, 'failure_modes_basis', b.failure_modes_basis);
         const modes = b.failure_modes;
         if (Array.isArray(modes) && modes.length) {
+            // V301/PANEL (ÖRNEK-PANEL DEVİR 2): listedeki "CRITICAL" bu
+            // motorun hükmü DEĞİL, genel basınçlı kap kontrol listesinin
+            // SONUÇ ağırlığıdır (uç alanı artık consequence_severity). Ekran
+            // bunu adıyla söyler; hüküm yukarıdaki structural_integrity'dir.
             rows.push([machineLabel('failure_modes'),
-                modes.map(function (m) {
-                    return '<div>' + esc(m.mode) + ' — ' + esc(m.severity)
+                '<div style="font-size:0.72rem; line-height:1.4;"'
+                + ' data-safety-failure-modes-note="1">'
+                + esc(T('panel.safety.failureModesNotVerdict',
+                    'Generic pressure-vessel checklist: the word after each '
+                    + 'mode is the consequence if that failure occurred, not '
+                    + 'a verdict for this motor.'))
+                + '</div>'
+                + modes.map(function (m) {
+                    const agirlik = (m.consequence_severity !== undefined)
+                        ? m.consequence_severity : m.severity;
+                    return '<div>' + esc(m.mode) + ' — ' + esc(agirlik)
                         + ': ' + esc(m.consequences) + '</div>';
                 }).join('')]);
         }
@@ -1356,20 +1547,57 @@
             + esc(T(metin[0], metin[1])) + '</span></span>']);
     }
 
+    // V301/FİZİK-2 (kalem 8a): sıvı çift-iticide TNT eşdeğerinin dayanağı
+    // (14 CFR 420 Ek E Tablo E-5 ya da kaynaksız HRMA seçimi), EN+TR.
+    //: Tablo E-5 sütunları → sözlük anahtarı (harfî; anahtar taraması görür).
+    const TNT_SCENARIO_TEXT = {
+        static_test_stand: function () {
+            return T('panel.safety.scenario.static_test_stand',
+                     'static test stand');
+        },
+        launch_pad: function () {
+            return T('panel.safety.scenario.launch_pad', 'launch pad');
+        },
+    };
+    function tntBasisNote(b) {
+        const d = b && b.tnt_equivalent_basis;
+        if (!d || typeof d !== 'object') return '';
+        const oran = U.fmt(100 * Number(d.effective_factor), 3);
+        const tnt = U.fmt(Number(d.tnt_equivalent_kg), 4);
+        const senaryo = Object.prototype.hasOwnProperty.call(
+            TNT_SCENARIO_TEXT, d.scenario)
+            ? TNT_SCENARIO_TEXT[d.scenario]() : String(d.scenario || '—');
+        const metin = d.status === 'sourced'
+            ? U.tf('panel.safety.tntSourced',
+                   { factor: oran, tnt: tnt, scenario: senaryo },
+                   'TNT equivalent {factor} % of the propellant mass ({tnt} '
+                   + 'kg) — source: 14 CFR Part 420 Appendix E, Table E-5; '
+                   + 'scenario: {scenario}')
+            : U.tf('panel.safety.tntUnsourced', { factor: oran, tnt: tnt },
+                   'TNT equivalent {factor} % of the propellant mass ({tnt} '
+                   + 'kg) — unsourced HRMA choice: this propellant pair or '
+                   + 'facility type is not in 14 CFR Part 420 Appendix E, '
+                   + 'Table E-5');
+        return '<p data-safety-tnt-basis="' + esc(String(d.status)) + '"'
+            + ' style="font-size:0.72rem; margin:4px 0;">' + esc(metin)
+            + '</p>';
+    }
+
     function explosiveBasisBlock(b) {
         if (!b || typeof b !== 'object') return '';
+        const not = tntBasisNote(b);
         const rows = [];
         notModelledRow(rows, b.explosive_not_modelled);
         addReasonRow(rows, 'explosive_verdict_withheld_because',
                      b.explosive_verdict_withheld_because);
         addReasonRow(rows, 'requirements_scope', b.requirements_scope);
-        if (!rows.length) return '';
+        if (!rows.length) return not;
         // Beyanlı kolda (not_modelled) 'sınıf çözülemedi' notu basılmaz:
         // sınıf çözülemedi DEĞİL, modellenmediği beyan edildi (rozet yukarıda).
         const withheld = typeof b.explosive_verdict_withheld_because === 'string'
             && b.explosive_verdict_withheld_because.trim()
             && !b.explosive_not_modelled;
-        return basisSection('explosive_verdict',
+        return not + basisSection('explosive_verdict',
             T('panel.safety.secExplosiveBasis', 'Explosive verdict basis'),
             withheld ? T('panel.safety.explosiveWithheldNote',
                 'No TNT-equivalent class was resolved, so no TNT equivalent, blast distance or quantity-distance is published. The reason below is the solver\'s own.')
@@ -1443,7 +1671,12 @@
             : '';
         let badges = '';
         if (risk.risk_level) {
-            badges += U.badge(T('panel.safety.overallRisk', 'OVERALL RISK') + ': ' + risk.risk_level,
+            // V301/FİZİK-2 (kalem 8b): risk_level motorun KENDİ eksenlerinden
+            // (yapısal, basınçlı kap, termal); tesis ekseni ayrı rozette.
+            const etiket = risk.facility_hazard
+                ? T('panel.safety.motorDesignRisk', 'MOTOR DESIGN RISK')
+                : T('panel.safety.overallRisk', 'OVERALL RISK');
+            badges += U.badge(etiket + ': ' + risk.risk_level,
                 riskLevelKind(risk.risk_level),
                 U.tf('panel.safety.overallScoreTip', { value: U.fmt(risk.overall_risk_score, 2) },
                      'Weighted overall score {value} / 5'))
@@ -1460,6 +1693,24 @@
                 + U.fmt(risk.overall_risk_score, 2) + ' / 5',
                 bandKind(scoreBand(risk.overall_risk_score)))
                 + (risk.overall_risk_score_is_partial ? partialChip : '');
+        }
+        // V301/FİZİK-2 (kalem 8b): tesis / yerleşim tehlikesi motor
+        // hükmünden AYRI rozet; en yüksek sınıfta "güvenlik mesafesi / tesis
+        // önlemi gerekli" (uyarı) — motora "yeniden tasarla" denmez.
+        const fh = risk.facility_hazard;
+        if (fh && fh.risk_level) {
+            badges += U.badge(T('panel.safety.facilityHazard',
+                'FACILITY / SITING HAZARD') + ': ' + fh.risk_level,
+                riskLevelKind(fh.risk_level),
+                U.tf('panel.safety.overallScoreTip',
+                     { value: U.fmt(fh.score, 2) },
+                     'Weighted overall score {value} / 5'));
+            if (fh.requirement) {
+                badges += U.badge(T('panel.safety.facilityRequirement',
+                    'SAFETY DISTANCE / FACILITY MEASURES REQUIRED — a '
+                    + 'facility requirement of the propellant inventory, not '
+                    + 'a motor design defect'), 'warn');
+            }
         }
         let html = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`;
 
@@ -1560,19 +1811,21 @@
         fromResults: function (r) {
             const m = U.motorDict(r);
             const motorType = window.AnalysisDock.getMotorType();
+            const yapisal = structuralSeeds(r);
             const sug = {
                 motor_type: motorType,
-                chamber_pressure: m.chamber_pressure,
+                chamber_pressure: yapisal.chamber_pressure,
                 chamber_temperature: m.chamber_temperature,
                 // İTKİ: katı motor düz sözlükte 'thrust' ÜRETMİYOR (ortalama
                 // ve tepe itkiyi ayrı raporluyor) — alan 1000 N varsayılanında
-                // kalıyordu, gerçek ortalama 1670,6 N.
-                thrust: U.readThrust(r),
+                // kalıyordu, gerçek ortalama 1670,6 N. Tohum tek yardımcıdan
+                // (seededThrust): impuls bağlamı aynı sayıyı taşır.
+                thrust: seededThrust(r, motorType),
                 burn_time: U.readBurnTime(r),
                 // BİRİM: ham okunuyordu ve alan METRE etiketli; katı motorda
                 // 75,0 (mm) ve sıvıda 120,0 (mm) geliyor -> panel 75 m / 120 m
                 // çaplı bir kap için güvenlik hükmü üretiyordu.
-                chamber_diameter: U.readLengthM(r, 'chamber_diameter'),
+                chamber_diameter: yapisal.chamber_diameter,
                 // Motorun KENDİ iticisinden (5. tur; propellantClassFromMotor).
                 // Eski satır katı/hibritte daima 'composite' yazıyordu.
                 propellant_type: propellantClassFromMotor(r, motorType),
@@ -1588,8 +1841,19 @@
                 // CİDAR ve MALZEME hiç bağlı değildi: uç bunlar için
                 // varsayılana düşüyor ve bunu `defaults_applied` ile
                 // bildiriyordu (panel o alanı da okumuyor).
-                wall_thickness: U.readWallThicknessM(r),
+                wall_thickness: yapisal.wall_thickness,
                 material: U.readChamberMaterial(r),
+                // V301/H-PANEL (NK-17): ısı zinciri geometrisi motorun
+                // HESAPLADIĞI değerlerden tohumlanır. ÖLÇÜLDÜ (son kullanıcı
+                // testi, örnek hibrit): iki alan boş ve "MODELLENMEDİ"
+                // kalıyordu, uç kabuk kütlesini ve ışınım alanını VARSAYILAN
+                // L/D = 5 ile kuruyordu (gerçek kamara L/D = 12,2); aynı
+                // güvertenin TERMAL sekmesi oda boyunu 0,983 m tohumluyordu.
+                // Okuyucu güvertenin ortak birim tablosundan (LENGTH_UNITS:
+                // hibrit m, sıvı mm, katıda chamber_length yayımlanmaz →
+                // alan boş kalır, uç adıyla geri çeker).
+                chamber_length: U.readLengthM(r, 'chamber_length'),
+                throat_diameter: U.readLengthM(r, 'throat_diameter'),
             };
             // ISI ZİNCİRİ (OH-Z3-01) — güvertenin MEVCUT okuyucusu.
             // `readWallTemperaturesK` çözücünün kaynak beyanını denetler ve
@@ -1637,8 +1901,72 @@
             if (Number.isFinite(wall.hot) && Number.isFinite(wall.cold)) {
                 sug.wall_temperature_hot = wall.hot;
                 sug.wall_temperature_cold = wall.cold;
+            } else if (motorType === 'solid') {
+                // V301/PANEL (ÖRNEK-PANEL DEVİR 1): katıda cidar = kasa;
+                // motor onu yalıtım + astar arkasında yığın ÇÖZER (iç = dış).
+                // ÖLÇÜLDÜ (ornek-panel/olcum/devir_guvenlik_kati.txt): çift
+                // gitmeyince uç 1683,7 K çıplak cidara düşüyor, risk
+                // CRITICAL + do_not_proceed; motorun 313,553 K'iyle MEDIUM.
+                // Okuyucu güvertede tek: ısıl panel aynı yolu ve kapıyı
+                // kullanıyor, iki panel aynı çifti gönderir.
+                const tKasa = U.readSolvedCaseTemperatureK(r);
+                if (Number.isFinite(tKasa)) {
+                    sug.wall_temperature_hot = tKasa;
+                    sug.wall_temperature_cold = tKasa;
+                }
             }
             return sug;
+        },
+        // V301/PANEL (NK-18): form alanı OLMAYAN bağlam (güverte
+        // runPanel bunu gövdeye ekler; ekranda girdi değildir). Motor
+        // sonucu varken uç (1) yapısal hükmü motorun zincirinden okur,
+        // (2) çıplak cidar ısı tahminini KOŞMAZ: cidar sıcaklığı yalnız
+        // motorun çözülmüş çifti (yukarıda) olabilir.
+        contextFromResults: function (r) {
+            const motorType = window.AnalysisDock.getMotorType();
+            const ctx = {};
+            const blok = motorVerdictResult(r, motorType);
+            if (blok) {
+                const girdiler = {};
+                const tohum = structuralSeeds(r);
+                Object.keys(tohum).forEach(function (k) {
+                    if (typeof tohum[k] === 'number' && Number.isFinite(tohum[k])) {
+                        girdiler[k] = tohum[k];
+                    }
+                });
+                ctx.motor_result = blok;
+                ctx.motor_verdict_inputs = girdiler;
+            }
+            // V301/FİZİK-2 (KABUL 12): serbest kalan motorun impulsu motorun
+            // YAYIMLADIĞI toplam impulstur (PDF tablosu ve PDF güvenlik
+            // bölümüyle aynı sayı). ÖLÇÜLDÜ (fizik-2/k2_k3_pdf_guvenlik_
+            // once.json, örnek KNDX): sekme tepe itki × süre = 3411,5 N·s,
+            // motor 2956,9 N·s basıyordu. Kayıt, formu tohumlayan itki ve
+            // süreyle gider; kullanıcı ikisinden birini değiştirirse uç kaydı
+            // benimsemez ve itki × süreyi adıyla basar.
+            const m = U.motorDict(r) || {};
+            const ti = m.total_impulse;
+            const itki = seededThrust(r, motorType);
+            const sure = U.readBurnTime(r);
+            if (typeof ti === 'number' && Number.isFinite(ti) && ti > 0
+                    && Number.isFinite(itki) && Number.isFinite(sure)) {
+                ctx.motor_total_impulse = {
+                    total_impulse_ns: ti,
+                    source: 'motor result total_impulse',
+                    inputs: { thrust: itki, burn_time: sure },
+                };
+            }
+            // V301/FİZİK-2 (kalem 8a): sıvı çift-iticide TNT eşdeğeri itici
+            // ÇİFTİNE göre kaynaktan (14 CFR 420 Ek E Tablo E-5); çiftin
+            // adları motor sonucundan (form alanı değil, bağlam).
+            if (motorType === 'liquid') {
+                ['oxidizer_type', 'fuel_type'].forEach(function (k) {
+                    if (typeof m[k] === 'string' && m[k].trim()) {
+                        ctx[k] = m[k].trim();
+                    }
+                });
+            }
+            return Object.keys(ctx).length ? ctx : null;
         },
         render: render,
     });
@@ -1664,5 +1992,7 @@
         _fields: FIELDS,
         _propellantClassFromMotor: propellantClassFromMotor,
         _thermalSafetyBlock: thermalSafetyBlock,
+        _motorVerdictBlocks: MOTOR_VERDICT_BLOCKS,
+        _motorVerdictResult: motorVerdictResult,
     };
 })();

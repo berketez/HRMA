@@ -43,6 +43,8 @@ import subprocess
 
 import pytest
 
+from tests.support import form_defaults
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 LIQUID_HTML = REPO_ROOT / 'hrma' / 'templates' / 'liquid.html'
 
@@ -72,6 +74,12 @@ LIQUID_FORM = {
     'characteristic_length': 1.2, 'chamber_wall_thickness': 5,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` gönderilmezse uç
+    # 422 ``pressure_fed_feed_pressure_not_supplied`` döner (L-A SV-03).
+    # Sayfa bu alanı her hesapta gönderir; değer şablonun KENDİ varsayılanı
+    # (tek kaynak, kopyalanmaz). Ölçüldü: 200.
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 
@@ -119,15 +127,13 @@ def js_const(name, src=None):
 #: node bağlamına konacak sabitler ve fonksiyonlar (bağımlılık sırasıyla).
 JS_CONSTS = ['LOSS_LABEL_UNDERSCORE_RE', 'EFF_PRODUCT_TOL_PCT',
              'EFF_OUTSIDE_PRODUCT_RE', 'ALT_PROPORTIONAL_REL_TOL',
-             'ALT_RANGE_PAD_FRAC', 'LIQUID_G0', 'ALT_SL_ISP_REL_TOL',
-             'LIQUID_INJECTOR_FIELDS']
+             'ALT_RANGE_PAD_FRAC', 'LIQUID_G0', 'ALT_SL_ISP_REL_TOL']
 #: ``numTxt`` ürünün GERÇEK sayı biçimleyicisidir (D35 sayi-bicimi, 8f9313ca:
 #: ekran sayıları I18N kanonuna bağlandı); taklit yazılmaz, şablondan kesilir.
 #: Düzenekte ``window.I18N`` yok → ürünün kendi geri düşüşü (toFixed) koşar.
 JS_FUNCS = ['numTxt', '_lossLabel', '_effBudgetSplit', '_altSeriesRatio',
             '_altAnchorNote', '_buildAltitudeFigure', '_liquidSixDofDriveFrom',
             '_pdfNum', '_liquidPdfMotorData', '_liquidPdfAnalysisResults',
-            '_liquidInjectorSolverValues', 'markInjectorUserEdits',
             'syncInjectorPanelToSolver']
 
 #: i18n ve asgari DOM taklidi. DOM YALNIZ enjektör eşitlemesi için gerekir;
@@ -168,6 +174,10 @@ const document = {
     }
 };
 const window = { currentResults: null };
+// V301/L-C: panel eşlemesi injector_panel.js'in saf işlevlerine devredildi;
+// düzenek ürünün KENDİ panel dosyasını yükler (taklit yazılmaz).
+global.window = window;
+require(process.env.HRMA_INJECTOR_PANEL_JS);
 """
 
 JS_EPILOGUE = r"""
@@ -205,29 +215,14 @@ if (senaryo === 'pdf') {
 } else if (senaryo === 'etiket') {
     out = { etiket: _lossLabel(inp.anahtar) };
 } else if (senaryo === 'enjektor') {
-    ['injectorPanel', 'inj_status', 'inj_mdot_ox', 'inj_mdot_fuel', 'inj_pc',
-     'inj_rho_ox', 'inj_rho_fuel'].forEach(function (id) { __el(id); });
-    __el('inj_status').parentNode = __el('injectorPanel');
-    __el('inj_mdot_ox').value = String(inp.baslangic.inj_mdot_ox);
-    __el('inj_mdot_fuel').value = String(inp.baslangic.inj_mdot_fuel);
-    __el('inj_pc').value = String(inp.baslangic.inj_pc);
-    __el('inj_rho_ox').value = String(inp.baslangic.inj_rho_ox);
-    __el('inj_rho_fuel').value = String(inp.baslangic.inj_rho_fuel);
-    (inp.elle_degistirilen || []).forEach(function (id) {
-        __el(id).dataset.userEdited = '1';
-    });
+    // V301/L-C: sayfa eşlemesi ürünün panel işlevlerine gider; panel DOM'u
+    // yoksa hiçbir şey yazılmaz. Burada yalnız VERİ AKIŞI ölçülür: hangi
+    // değerlerle syncFromEngine çağrıldı.
+    __el('injectorPanel');
+    let alinan = null;
+    window.InjectorPanel.syncFromEngine = function (v) { alinan = v; return true; };
     syncInjectorPanelToSolver(inp.cr);
-    out = {
-        alanlar: {
-            inj_mdot_ox: __el('inj_mdot_ox').value,
-            inj_mdot_fuel: __el('inj_mdot_fuel').value,
-            inj_pc: __el('inj_pc').value,
-            inj_rho_ox: __el('inj_rho_ox').value,
-            inj_rho_fuel: __el('inj_rho_fuel').value
-        },
-        not: __el('injectorPanel').children.map(function (c) {
-            return c.innerHTML || ''; }).join(' ')
-    };
+    out = { alinan: alinan };
 } else {
     throw new Error('bilinmeyen senaryo: ' + senaryo);
 }
@@ -246,8 +241,13 @@ def run_js(tmp_path, payload):
     harness.write_text('\n'.join(parts), encoding='utf-8')
     inp = tmp_path / 'girdi.json'
     inp.write_text(json.dumps(payload), encoding='utf-8')
+    import os as _os
+    env = dict(_os.environ, HRMA_INJECTOR_PANEL_JS=str(
+        pathlib.Path(__file__).resolve().parents[1] / 'hrma' / 'static' / 'js'
+        / 'injector_panel.js'))
     proc = subprocess.run([NODE, str(harness), str(inp)],
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True, timeout=120,
+                          env=env)
     assert proc.returncode == 0, 'node hatası:\n%s' % proc.stderr[-2000:]
     return json.loads(proc.stdout)
 
@@ -408,13 +408,19 @@ def test_t01_bekci_kusuru_yeniden_uretiyor(client, cr):
             'kurtarılmıyor (defter P9B3-09, hrma/app.py '
             'SOLVER_PERFORMANCE_ALIASES besleme ayağı geri alınmış olabilir)'
             % beklenen)
-    # (b) Çözücünün yayımlamadığı büyüklük UYDURULMAZ, beyan edilir.
-    assert cr.get('total_impulse') is None, (
-        'fikstür değişmiş: çözücü artık total_impulse yayımlıyor, bu ayağın '
-        'ön koşulu kalmadı (eksik-beyan iddiası başka bir alana taşınmalı)')
-    assert 'Total Impulse: N/A' in text, (
-        'çözücünün hiç yayımlamadığı toplam impuls için ne beyan ne sayı '
-        'var — beyanlı eksik sözleşmesi bozulmuş')
+    # (b) V3.0.5 SIVI-CIDAR kalem 4 — BEKLENTİ DEĞİŞTİ (bu ayağın kendi
+    # notunun öngördüğü gibi: "çözücü artık total_impulse yayımlıyor").
+    # Çözücü süre verildiğinde toplam impulsu KENDİ tanımıyla yayımlıyor
+    # (total_impulse = thrust × burn_time, total_impulse_basis); PDF onu
+    # ham çözücü yükünden AYNEN basar — türetmez, 0.0 uydurmaz. Eksik-beyan
+    # iddiası süresiz yolda korunur (tests/test_v305_sivi_cidar.py::
+    # TestToplamImpuls::test_sure_yoksa_yayimlanmaz + test_d36 LU-1).
+    # Ölçüm: docs/scofield/raw/OH/V301/sivi-cidar/olcum/k4_once.json ⟷
+    # k4_sonra.json.
+    assert cr.get('total_impulse') == cr['thrust'] * cr['burn_time']
+    beklenen = 'Total Impulse: %.1f N⋅s' % float(cr['total_impulse'])
+    assert beklenen in text, (
+        'çözücünün yayımladığı toplam impuls PDF özetine inmiyor', beklenen)
     assert 'Total Impulse: 0.0' not in text, (
         'yayımlanmamış toplam impuls için 0.0 uyduruluyor')
 
@@ -670,37 +676,20 @@ def test_t40_cozucu_ifadesi_sablonun_aradigi_bicimde(cr):
 # T38 — Enjektör paneli çözücü debileriyle eşitleniyor
 # ===========================================================================
 
-#: injector_panel.js'in HTML varsayılanları (sıvı mod).
-INJECTOR_DEFAULTS = {'inj_mdot_ox': 2.0, 'inj_mdot_fuel': 0.8, 'inj_pc': 100,
-                     'inj_rho_ox': 1141, 'inj_rho_fuel': 810}
-
-
+# V301/L-C (SV-13): eski T38 düzeni (beş alan, "elle değiştirilen alan
+# korunur") hibrit E2 desenine taşındı — panel ana tasarımın devre girdisinin
+# TAMAMINI alır ve bir kez koşar; alanlar sonra elle değiştirilebilir, bir
+# sonraki ana hesap yeniden eşler. Eşitlik bekçisi (5+ vakada panel ⟷ ana
+# tasarım rel 1e-9): tests/test_v301_lc_sivi_enjektor_panel.py. Burada
+# sayfanın yalnız VERİ AKIŞI ölçülür.
 def test_t38_alanlar_cozucu_degerlerine_esitlenir(tmp_path, cr):
-    mfr = cr['feed_system']['mass_flow_rates']
-    # Kusurun ön koşulu: varsayılan ile çözücü GERÇEKTEN farklı
-    assert abs(INJECTOR_DEFAULTS['inj_mdot_ox'] - mfr['oxidizer']) > 0.1
-
-    out = run_js(tmp_path, {'senaryo': 'enjektor', 'cr': cr,
-                            'baslangic': INJECTOR_DEFAULTS,
-                            'elle_degistirilen': []})
-    alan = out['alanlar']
-    assert float(alan['inj_mdot_ox']) == pytest.approx(mfr['oxidizer'], rel=1e-5)
-    assert float(alan['inj_mdot_fuel']) == pytest.approx(mfr['fuel'], rel=1e-5)
-    assert float(alan['inj_pc']) == pytest.approx(cr['chamber_pressure'], rel=1e-5)
-    assert float(alan['inj_rho_ox']) == pytest.approx(cr['oxidizer_density'], rel=1e-5)
-    assert float(alan['inj_rho_fuel']) == pytest.approx(cr['fuel_density'], rel=1e-5)
-
-
-def test_t38_kullanicinin_elle_girdigi_alan_korunur_ve_fark_yazilir(tmp_path, cr):
-    out = run_js(tmp_path, {'senaryo': 'enjektor', 'cr': cr,
-                            'baslangic': INJECTOR_DEFAULTS,
-                            'elle_degistirilen': ['inj_mdot_ox']})
-    alan = out['alanlar']
-    # Elle girilen değer EZİLMEZ
-    assert float(alan['inj_mdot_ox']) == pytest.approx(
-        INJECTOR_DEFAULTS['inj_mdot_ox'])
-    # Ama sessiz kalınmaz: sapma panelde yazılır
-    assert 'inj_mdot_ox' in out['not']
-    # Dokunulmayan alanlar yine eşitlenir
-    mfr = cr['feed_system']['mass_flow_rates']
-    assert float(alan['inj_mdot_fuel']) == pytest.approx(mfr['fuel'], rel=1e-5)
+    out = run_js(tmp_path, {'senaryo': 'enjektor', 'cr': cr})
+    v = out['alinan']
+    assert v is not None, 'sayfa panele devre girdisini vermedi'
+    sp = cr['injection_system']['circuit_request']['spec']
+    assert v['injector_type'] == sp['injector_type']
+    assert v['mdot_ox'] == pytest.approx(sp['mdot_ox'], rel=1e-12)
+    assert v['mdot_fuel'] == pytest.approx(sp['mdot_fuel'], rel=1e-12)
+    assert v['Pc_bar'] == pytest.approx(cr['chamber_pressure'], rel=1e-12)
+    assert v['rho_ox'] == pytest.approx(cr['oxidizer_density'], rel=1e-12)
+    assert v['rho_fuel'] == pytest.approx(cr['fuel_density'], rel=1e-12)

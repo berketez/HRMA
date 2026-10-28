@@ -328,7 +328,11 @@ def test_s3_film_ceket_butcesi_kunyesi_hh_ch4_degil():
         c = m.calculate_cooling_requirements()
     b = _duz(c['coolant_flow_rate_basis'])
     assert 'upstream of the jacket (Huzel & Huang' not in b
-    assert 'mass conservation' in b
+    # v3.0.1 T-ÇAPA-B: V301/L-B SV-08 künyeyi yeniden yazdı (film çekirdeğe
+    # EK; "HRMA accounting, not a Huzel & Huang Ch. 4 model"). Kütle
+    # korunumu iddiası artık şu cümleyle söyleniyor (ölçüldü, 117d704da).
+    assert 'jacket + film can never exceed the total fuel flow' in b
+    assert 'not a Huzel & Huang Ch. 4 model' in b
     assert 'SP-125 Eq. 4-33, p. 115' in b
     k = _duz(_kaynak('hrma/engines/liquid_rocket_engine.py'))
     # Büyük kaynak dizgesinin pytest farkı basılmasın diye bool'a indirgenir.

@@ -27,6 +27,7 @@ import numpy as np
 import pytest
 
 from hrma.engines.solid_rocket_engine import (
+    SOLID_DEFAULT_GEOMETRY_MM,
     SOLID_CASE_MATERIAL_EXTRA,
     SOLID_COST_PARAMS,
     SolidRocketEngine,
@@ -58,13 +59,18 @@ def _params_of(warnings, code):
     return {}
 
 
+# V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan
+# motoru kilitliyordu (çekirdek 30 mm); örnek motorun TEK tanımı okunur.
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 def _engine(grain_type='bates', **overrides):
     return SolidRocketEngine(
         grain_type=grain_type,
         propellant_type='apcp',
         chamber_diameter=100,
         grain_length=500,
-        core_diameter=30,
+        core_diameter=_CEKIRDEK_MM,
         chamber_pressure=40,
         overrides=(overrides or None),
     )
@@ -214,11 +220,29 @@ def test_convergence_flag_true_on_well_posed_case():
     assert 'warn.solid.pressure_solver_not_converged' not in codes
 
 
-def test_convergence_flag_false_when_solver_fails():
-    """n = 0.9'da sabit-nokta zayıflar; bayrak artık dürüst olmalı."""
+def test_convergence_flag_false_when_solver_fails(monkeypatch):
+    """n = 0.9'da sabit-nokta zayıflar; bayrak artık dürüst olmalı.
+
+    V301/B6 (21 Eki): tavana takılan adımda artık parantezli ikiye bölme
+    yedeği devreye giriyor ve bu senaryonun gerçek kökünü aynı toleransla
+    buluyor (ÖLÇÜLDÜ, aynı motor ailesi: n = 0.9 126/213 -> 0/213;
+    docs/scofield/raw/OH/V301/makale1/B6/sonra.json). Bayrağın DÜRÜSTLÜĞÜ
+    hâlâ sözleşmedir; çözücünün gerçekten başaramadığı durum yedek
+    kapatılarak üretilir (yedek None -> son iterat aynen, B6 öncesiyle
+    birebir).
+    """
+    monkeypatch.setattr(SolidRocketEngine, '_equilibrium_pressure_fallback',
+                        lambda self, *a, **k: None)
+    # V301/K-A (22 Eki): bu sert rejim (a = 0,005, L = 500 mm) yalnız portu
+    # boğulan geometride kurulabiliyor (A_p/A_t = 0,186; geçerli portlu
+    # geometrilerde çözücü yakınsıyor, ölçüldü). Bu düğümün konusu port değil
+    # yakınsamama UYARI KANALIDIR; port kapısı (KT-23) burada BİLEREK
+    # devre dışıdır — kapının kendisi tests/test_v301_kati_geometri.py'de.
+    monkeypatch.setattr(SolidRocketEngine, '_check_port_throat',
+                        lambda self: None)
     eng = SolidRocketEngine(
         grain_type='bates', propellant_type='apcp', chamber_diameter=100,
-        grain_length=500, core_diameter=30, chamber_pressure=40,
+        grain_length=500, core_diameter=_CEKIRDEK_MM, chamber_pressure=40,
         burn_rate_a=0.005, burn_rate_n=0.9)
     curve = eng.calculate_thrust_curve(dt=0.01)
     assert curve['convergence_achieved'] is False, (
@@ -240,9 +264,13 @@ def test_convergence_flag_false_when_solver_fails():
 
 def test_exponent_ge_one_is_flagged():
     """n >= 1 sabit-nokta daralması varsayımını bozar; açıkça söylenmeli."""
+    # V301/K-A: eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan
+    # motoru kilitliyordu; a = 0,005 ile Ø100/500 tanede port boğaza hiç
+    # yetişmiyor (0,186). Geçerli portlu kısa tane (L 100, çekirdek 70 mm,
+    # A_p/A_t = 1,79) aynı n >= 1 uyarısını ölçer.
     eng = SolidRocketEngine(
         grain_type='bates', propellant_type='apcp', chamber_diameter=100,
-        grain_length=500, core_diameter=30, chamber_pressure=40,
+        grain_length=100, core_diameter=70, chamber_pressure=40,
         burn_rate_a=0.005, burn_rate_n=1.0)
     warns = eng.calculate_performance()['warnings']
     assert 'warn.solid.burn_rate_exponent_ge_one' in _codes(warns)
@@ -411,9 +439,14 @@ def test_entered_case_thickness_survives_into_the_summary():
     case = res['design_summary']['case_design']
     assert dims['wall_thickness_mm'] == pytest.approx(8.0, rel=1e-9)
     assert case['thickness_source'] == 'user_entered'
-    # Dış çap da aynı cidardan türer
+    # Dış çap da aynı cidardan türer. V301/K-A (KT-02): taban KASA iç
+    # çapıdır (tane + 2·(astar + yalıtım)); eski beklenti tane çapı + 2·cidar
+    # idi ve CAD'in dış çapından 4 mm küçük bir sayıyı kilitliyordu.
+    cad = res['cad_design']['case_design']
     assert dims['motor_outer_diameter_mm'] == pytest.approx(
-        res['chamber_diameter'] + 2 * 8.0, rel=1e-9)
+        cad['inner_diameter'] + 2 * 8.0, rel=1e-9)
+    assert dims['motor_outer_diameter_mm'] == pytest.approx(
+        cad['outer_diameter'], rel=1e-9)
 
 
 def test_summary_declares_material_and_strength():

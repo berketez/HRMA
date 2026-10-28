@@ -422,7 +422,15 @@ class TestSafetyEndpointFailsClosed:
         }, headers={'Host': '127.0.0.1:8080'})
         applied = resp.get_json()['defaults_applied']
         assert 'chamber_temperature' in applied
-        assert 'thrust' in applied
+        # V301/PANEL (K-C1 AÇIK 5) — ÇEVRİLDİ, gerekçeli: uç itkiye artık
+        # 1000 N VARSAYILANI UYGULAMIYOR (beyan çözüm değildi; bağlama
+        # kuvveti ve serbest motor kolu motorun olmayan bir itkisinden
+        # hesaplanıyordu). Verilmeyen itki gizlenmez: kol adıyla geri
+        # çekilir. Bekçinin niyeti (verilmeyen alan sessiz geçmez) korunur.
+        assert 'thrust' not in applied
+        s = resp.get_json()['safety_analysis']
+        assert s['inputs_used']['thrust_n'] is None
+        assert s['thrust_dependent_not_evaluated']['status'] == 'NOT_EVALUATED'
 
     def test_motor_type_reaches_the_analysis(self):
         """motor_type okunuyordu ama analize hiç geçirilmiyordu."""

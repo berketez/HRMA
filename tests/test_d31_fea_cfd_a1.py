@@ -69,7 +69,16 @@ def _sessiz(fn, *a, **kw):
 #: ÖLÇÜM FİKSTÜRLERİ — olcum_fea.py ile AYNI istekler.
 D31F_HIBRIT = {
     'thrust': 2000, 'burn_time': 10, 'of_ratio': 6.0,
-    'chamber_pressure': 30.0, 'fuel_type': 'htpb', 'oxidizer_type': 'n2o'}
+    'chamber_pressure': 30.0, 'fuel_type': 'htpb', 'oxidizer_type': 'n2o',
+    # V3.0.5 T-ÇAPA-C1 — ÖLÇÜM KOŞULU AÇIKÇA: c* verimi %100 ve cidar
+    # 14,1913 mm. V301/H-termal (77d64c641, 26 Eki) korunan bölgeler yüzünden
+    # boyutlandırılan hibrit cidarını inceltti, V301/H-PANEL (74b55500a)
+    # N2O/HTPB c*'ına kaynaklı η=0,89 varsayılanı getirdi; ikisi de onaylı
+    # yayımlanan sayı değişimidir, bekçinin konusu DEĞİL (FEA hüküm
+    # mekanizması). Bu iki alanla köprü girdisi (cidar 0,01419125260707569 m, kontur toplamı
+    # 1,0821779411399757) H-termal öncesi c7776576f ağacının varsayılan isteğiyle BİT-AYNI
+    # (ölçüldü).
+    'combustion_efficiency': 100.0, 'wall_thickness': 14.19125260707569}
 D31F_KATI = {
     'motor_name': 'D31-KATI', 'propellant_type': 'apcp', 'grain_type': 'bates',
     'chamber_pressure': 40.0, 'thrust': 5000.0, 'burn_time': 3.0,

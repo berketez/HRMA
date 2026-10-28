@@ -12,6 +12,24 @@ import io
 import numpy as np
 import pytest
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
+
+@pytest.fixture
+def cea_kapali(monkeypatch):
+    """V301/N-CEA-2: NASA CEA kapalı — katı motor katalog (tek basınçlı)
+    termokimyasına BEYANLA döner. Bu dosyadaki kayıt/katalog yolu bekçileri
+    öncüllerini (motor termokimyası = katalog kaydı) bu yolda korur; CEA
+    yolu tests/test_v301_n_cea2.py'de."""
+    from hrma.engines import cea_bridge
+    monkeypatch.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
+
 from hrma.engines.solid_rocket_engine import (
     SOLID_MIN_DESIGN_EXPANSION_RATIO,
     SOLID_NOZZLE_REFERENCE_HALF_ANGLE_DEG,
@@ -40,7 +58,7 @@ def _sessiz(fn, *a, **kw):
 
 def _motor(**kw):
     p = dict(grain_type='bates', propellant_type='apcp',
-             chamber_diameter=100, grain_length=500, core_diameter=30,
+             chamber_diameter=100, grain_length=500, core_diameter=_CEKIRDEK_MM,
              chamber_pressure=40)
     p.update(kw)
     return _sessiz(SolidRocketEngine, **p)
@@ -165,7 +183,7 @@ class TestP2B1_07SifirPortKapisi:
         assert r['specific_impulse'] > 0
 
     def test_saglikli_motor_kapiya_takilmiyor(self):
-        r = _sessiz(_motor(core_diameter=30).calculate_performance)
+        r = _sessiz(_motor(core_diameter=_CEKIRDEK_MM).calculate_performance)
         assert r.get('error') is None
 
     def test_negatif_cekirdek_ayri_adla_reddedilir(self):
@@ -206,8 +224,14 @@ class TestP2B2_04TukenisWebiPaydasi:
         assert _sessiz(e.calculate_burn_area, tukenis * 1.000001) <= 0.0
         assert _sessiz(e.calculate_burn_area, tukenis * 0.999) > 0.0
 
-    @pytest.mark.parametrize('gt,alt', (('star', 98.9), ('wagon_wheel', 98.3),
-                                        ('slotted', 98.2), ('finocyl', 99.9)))
+    # V301/T-ÇAPA-A: alt sınırlar 30 mm çekirdekte ölçülmüştü (star 98,9 /
+    # wagon_wheel 98,3 / slotted 98,2 / finocyl 99,9); orada wagon_wheel ve
+    # finocyl portu boğuluyor (A_p/A_t 0,747 / 0,965 -> 422). Tek tanımın
+    # 48 mm'sinde yeniden ölçüldü ve aynı kuralla (0,1'e aşağı) çapalandı:
+    # star 98,889 -> 98,8; wagon_wheel 97,931 -> 97,9; slotted 98,442 ->
+    # 98,4; finocyl 99,993 -> 99,9.
+    @pytest.mark.parametrize('gt,alt', (('star', 98.8), ('wagon_wheel', 97.9),
+                                        ('slotted', 98.4), ('finocyl', 99.9)))
     def test_tukenen_grain_tam_kullanim_okur(self, gt, alt):
         r = _sessiz(_motor(grain_type=gt).calculate_performance)
         y = r['detailed_analysis']['grain_regression_analysis'][
@@ -232,7 +256,11 @@ class TestP2B2_04TukenisWebiPaydasi:
 
     def test_payda_yayimlaniyor(self, apcp_bates_sonuc):
         g = apcp_bates_sonuc['detailed_analysis']['grain_regression_analysis']
-        assert g['web_consumable_mm'] == pytest.approx(35.0, abs=1e-9)
+        # V301/T-ÇAPA-A: BATES tükeniş webi (D - d)/2; çekirdek 30 -> 48 mm
+        # ile 35,0 -> 26,0 mm (tek tanımdan hesaplanır).
+        assert g['web_consumable_mm'] == pytest.approx(
+            (SOLID_DEFAULT_GEOMETRY_MM['chamber_diameter'] - _CEKIRDEK_MM) / 2,
+            abs=1e-9)
         assert 'the burning area vanishes' in g[
             'web_thickness_utilization_basis']
 
@@ -261,7 +289,13 @@ class TestP2B3_09GenislemeKelepcesi:
         e.ambient_pressure_bar = pa
         if hasattr(e, '_epsilon_cache'):
             del e._epsilon_cache
-        beklenen = optimum_genlesme_orani(CEA_DENGE_GAMMA_S, e.P_c / pa)
+        # V301/N-CEA-2 (K2): beklenen NASA CEA'nın kayan denge optimum alan
+        # oranı (aynı Pc ve ortam, motordan bağımsız çağrı); CEA o oranda
+        # lüleyi çözemezse motorun beyanlı yedeği: CEA oda γ_s'siyle tek-γ.
+        from hrma.analysis.cea_karsilastirma import solid_cea_solution
+        lule = solid_cea_solution('apcp', e.P_c, pa)['nozzle']
+        beklenen = (lule['expansion_ratio'] if lule else
+                    optimum_genlesme_orani(e.gamma, e.P_c / pa))
         assert float(_sessiz(e._estimate_expansion_ratio)) == pytest.approx(
             beklenen, rel=1e-6)
 
@@ -274,11 +308,16 @@ class TestP2B3_09GenislemeKelepcesi:
 
     def test_deniz_seviyesi_degismedi(self, apcp_bates_sonuc):
         # ÖH KİTAP p1b-F: eski 5,931748 γ = 1,1986'dan; beklenen kâhinden.
+        # V301/T-ÇAPA-A: ürün yolunda lüle N-CEA-2 K2 ile CEA'nın kayan
+        # denge optimumundan; beklenen kardeş test ``test_optimum_kirpilmiyor``
+        # ile AYNI desen (CEA o oranda çözemezse beyanlı tek-γ yedek).
+        from hrma.analysis.cea_karsilastirma import solid_cea_solution
         pc = _motor().P_c
+        lule = solid_cea_solution('apcp', pc, 1.01325)['nozzle']
+        beklenen = (lule['expansion_ratio'] if lule else
+                    optimum_genlesme_orani(CEA_DENGE_GAMMA_S, pc / 1.01325))
         assert apcp_bates_sonuc['nozzle_design'][
-            'expansion_ratio'] == pytest.approx(
-                optimum_genlesme_orani(CEA_DENGE_GAMMA_S, pc / 1.01325),
-                rel=1e-6)
+            'expansion_ratio'] == pytest.approx(beklenen, rel=1e-6)
         assert apcp_bates_sonuc['nozzle_design'][
             'expansion_ratio_bound'] is None
 
@@ -375,9 +414,12 @@ class TestP2B1_01CstarKimlikDenetimi:
         # geri çözülmüş dörtlüden; CEA denge dörtlüsü iki fazlıdır.
         ('apcp', 'two_phase_explained', CEA_DENGE_OZDESLIK_SAPMA_YUZDE),
         ('double_base', 'single_phase_consistent', 0.0018),
-        ('black_powder', 'two_phase_explained', -16.4676),
+        # V301/N-CEA-2 K5: kayıt artık nominal kartın CEA dörtlüsü (M = 1/n);
+        # eski -16,4676 kaynaksız c* 945,3'tendi.
+        ('black_powder', 'two_phase_explained', -0.0661),
         ('knsu', 'two_phase_explained', -5.8971),
     ))
+    @pytest.mark.usefixtures('cea_kapali')
     def test_kayitlarin_hukmu(self, pt, durum, sapma):
         e = _motor(propellant_type=pt)
         a = _c_star_identity_audit(pt, e.gamma, e.T_c, e.mw_exhaust, e.c_star)
@@ -402,10 +444,14 @@ class TestP2B1_01CstarKimlikDenetimi:
                                    400.0)
         assert a['status'] == 'unexplained_deficit'
 
-    def test_denetim_yayimlaniyor(self, apcp_bates_sonuc):
+    def test_denetim_yayimlaniyor(self, cea_kapali):
         # ÖH KİTAP p1b-F (B11): eski ('single_phase_consistent', 1598,2015)
         # geri çözülmüş dörtlüden; beklenen kâhinin denge dörtlüsünden.
-        a = apcp_bates_sonuc['c_star_identity_audit']
+        # V301/T-ÇAPA-A: beklenenler KAYIT dörtlüsünün (kâhin) sayılarıdır;
+        # N-CEA-2 kayıt yolu bekçilerini CEA kapalı koşturur (bkz.
+        # ``test_kayitlarin_hukmu``). CEA yolunun denetimi
+        # tests/test_v301_n_cea2.py'de.
+        a = _sessiz(_motor().calculate_performance)['c_star_identity_audit']
         assert a['status'] == 'two_phase_explained'
         assert a['ideal_single_phase_c_star_m_s'] == pytest.approx(
             CEA_DENGE_IDEAL_TEK_FAZ_CSTAR_M_S, abs=1e-3)
@@ -424,5 +470,5 @@ class TestP2B1_01CstarKimlikDenetimi:
     def test_bayat_muafiyet_etiketi_kalkti(self):
         from hrma.data.propellants_db import PROPELLANTS
         assert PROPELLANTS['double_base']['c_star_basis'] == 'eq3-32'
-        assert PROPELLANTS['black_powder']['c_star_basis'] == \
-            'measured-two-phase'
+        # V301/N-CEA-2 K5: kara barut kaydı nominal kartın CEA çözümü.
+        assert PROPELLANTS['black_powder']['c_star_basis'] == 'cea'

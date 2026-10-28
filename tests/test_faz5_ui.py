@@ -321,7 +321,12 @@ def test_advanced_json_okuyucu_tanimli_ve_kullaniliyor():
         'advanced.html katı JSON okuyucusunu tanımlamıyor')
     # Ölçülen iki sızıntı ucu bu okuyucudan geçmeli.
     for endpoint in ('/api/oxidizer-properties', '/api/regression-analysis'):
-        idx = src.index(endpoint)
+        # Pencere uç adının İLK geçtiği yerden değil, ``fetch(`` ÇAĞRISINDAN
+        # açılır. v3.0.1 (19 Eki, kaynak-CEA kulvarı) satır ~1720'ye bu uç
+        # adını anan bir yorum ekledi; ilk geçiş ona düştü ve gerçek çağrı
+        # (satır ~4243, katı okuyucuyu kullanıyor) pencerenin dışında kaldı.
+        # Test ürünü değil yorumun yerini ölçmeye başlamıştı (21 Eki).
+        idx = src.index("fetch('%s'" % endpoint)
         window = src[idx:idx + 2500]
         assert 'readJsonBodyStrict(response)' in window, (
             '%s çağrısı hâlâ korumasız response.json() kullanıyor' % endpoint)
@@ -445,6 +450,12 @@ def _run_badge_block(tmp_path, summary, name):
         "'use strict';\n"
         "const s = " + json.dumps(summary) + ";\n"
         "const usedCurve = true;\n"   # render(data, usedCurve) imzasından
+        # T-ÇAPA-C2 (27 Eki): imza render(data, usedCurve, sayfaMotoru,
+        # aracKuru) oldu (V301/H-PANEL 4e16c916e, V301/UÇUŞ 34996377f: rozet
+        # 'SAYFA HESABI' künyesi ve araç kuru kütlesi ⟷ motor kuru kütlesi
+        # notu). Bu bekçinin yükleri sayfa motoru taşımaz: ikisi de null.
+        "const sayfaMotoru = null;\n"
+        "const aracKuru = null;\n"
         "function badge(text, kind) { return '[' + kind + ']' + text + '\\n'; }\n"
         "function T(k, f) { return f; }\n"
         "function TF(k, p, f) {\n"

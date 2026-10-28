@@ -386,7 +386,14 @@ class TestP7B330SartZinciri:
         assert rf.status_code == 422
         jf = rf.get_json()
         assert jf['error'] == 'axial_profile_material_mismatch'
-        assert jf['expected_material'] == 'steel_4130'
+        # V301/T-ÇAPA-D: FİZİK-2 (fe72e04b5) hibrit termal FEA ağını LÜLENİN
+        # kendi malzemesiyle kurar (fea.bridge.NOZZLE_MATERIAL_PATHS; bu
+        # motorda grafit) — beklenen malzeme motorun yayımladığı lüle
+        # malzemesidir, kamara alaşımı değil. Ret yine adıyla.
+        lule = (motor.get('nozzle_material_analysis') or {}).get('material')
+        assert isinstance(lule, str) and lule, motor.keys()
+        assert jf['expected_material'] == lule
+        assert jf['expected_material'] != profil['material']
 
 
 # ===========================================================================

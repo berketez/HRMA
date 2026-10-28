@@ -272,7 +272,11 @@ _DURUM_ETIKETI = {
     DATA_STATE_LIVE: 'Live',
     DATA_STATE_CACHED: 'Cached',
     DATA_STATE_STALE: 'Stale cache',
-    DATA_STATE_OFFLINE: 'Offline store',
+    # v3.0.1 (Berke: "online/offline varsa sök"): kullanıcıya görünen künye
+    # eki 'Offline store' -> 'Stored copy'. Makine değeri DATA_STATE_OFFLINE
+    # ('offline') API uyumu için aynı kalır; değişen yalnız kaynak metnine
+    # eklenen etiket (kalıcı depo / paket anlık görüntüsü kaydı).
+    DATA_STATE_OFFLINE: 'Stored copy',
 }
 
 # En tazeden en bayata: bileşik sonucun durumu bileşenlerinin EN KÖTÜSÜDÜR
@@ -290,7 +294,7 @@ _LIVE_KELIME_RE = re.compile(r'\blive\b', re.IGNORECASE)
 # yalnız kimin verdiği doğru yazılır — kaynak adı gerçek kökeni söylemeli.
 #
 # '(Live)' eki KASITLI olarak korunuyor: ``_damgala`` bu eki bulup bayat/
-# çevrimdışı yollarda '(Stale cache)' / '(Offline store)' ile değiştiriyor.
+# çevrimdışı yollarda '(Stale cache)' / '(Stored copy)' ile değiştiriyor.
 NIST_UCUNCU_TARAF_KUNYE = ('NIST WebBook via nist-api.fly.dev '
                            'third-party crawler (Live)')
 NIST_UCUNCU_TARAF_ISLETMECI = ('third-party service (nist-api.fly.dev), '
