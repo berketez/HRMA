@@ -166,13 +166,30 @@ h1, h2, h3, h4, h5, h6 { color: var(--hd-ink-strong); }
    satıra sığmıyor (hibrit-01-r00, kati-02-r00, sivi-01-r00). Üç sayfa da bu
    kuralı paylaşır; başlık tek satırda kalır, gerekirse menü değil başlık
    daralır. `.header h1` (giriş sayfası manşeti) bilerek dışarıda. */
+/* v3.0.1 (26 Eki 2026, Berke ekran görüntüsü) — BAŞLIK MENÜNÜN ÜSTÜNE
+   BİNİYORDU. ÖLÇÜLDÜ (main a10db67ed, Playwright, Range kutuları): yukarıdaki
+   kural başlık KUTUSUNU daraltıyordu (min-width: 0) ama tek satırlık METİN
+   daralmıyor, kutudan taşıp menünün üstüne çiziliyordu; menü de daralıp
+   "Ana Sayfa", "Sürüm Notları", "Kullanma Kılavuzu"nu iki satıra kırıyordu.
+   Üç motor sayfası, TR ve EN, 1536 px'e kadar her genişlikte: 1440'ta
+   19-66 px, 1280'de 62-226 px, 1024'te 318-482 px üst üste. Yeni kural:
+   başlık daralmaz (tam metin, tek satır); menü kalan genişliği alır ve
+   sığmazsa KENDİ İÇİNDE satır kırar (sağa yaslı); bağlantı metni kırılmaz.
+   Menü dolgusu ve aralığı küçüldü ki geniş ekranda tek satıra sığsın. */
+.navbar { flex-wrap: wrap; column-gap: 16px; row-gap: 6px; }
 .navbar h1 {
     font-size: 19px;
-    letter-spacing: 2px;
+    letter-spacing: 1px;
     white-space: nowrap;
-    flex: 0 1 auto;
-    min-width: 0;
+    flex: 0 0 auto;
 }
+.navbar .nav-links {
+    flex: 1 1 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px 6px;
+}
+.navbar .nav-links a { white-space: nowrap; padding: 6px 10px; }
 
 .header p { color: var(--hd-ink-dim); letter-spacing: 1px; }
 
@@ -195,7 +212,8 @@ h1, h2, h3, h4, h5, h6 { color: var(--hd-ink-strong); }
    dar ekranda kalkar. Formül sayfasının kendi kuralı da aynı sonucu verir. */
 @media (max-width: 768px) {
     .navbar { flex-wrap: wrap; }
-    .navbar h1 { white-space: normal; }
+    .navbar h1 { white-space: normal; flex: 1 1 100%; }
+    .navbar .nav-links { flex: 1 1 100%; justify-content: center; }
     .nav-links { flex-wrap: wrap; justify-content: center; gap: 6px 12px; }
 }
 
@@ -505,6 +523,157 @@ html[lang="tr"] .plot-container:empty::before {
 }
 
 .tooltip-text::after { border-top-color: #0a1626; }
+
+/* ---------------- Alan ipucu (ortak bileşen) ----------------
+   v3.0.1 · N-girdi-1 (26 Eki 2026). Biçim ve davranışın TEK kaynağı;
+   işaretlemeyi `field_help.js` (`HRMAHelp.html`) üretir, şablonlardaki
+   `.tooltip > .tooltip-icon + .tooltip-text` de aynı kuralları kullanır.
+   Önce bu kurallar üç şablonun <style> bloğunda birer kopyaydı
+   (liquid/solid/advanced; renkler yukarıdaki "Tooltip" bölümünde).
+
+   KÖK (ölçüldü, 26 Eki, ana-model/baslik-serit/sonra_baslik.json):
+   `visibility:hidden` bir kutu ÇİZİLMEZ ama kaydırılabilir taşma alanına
+   GİRER. Sağ sütundaki 280 px gizli balon katı sayfasını 1024 → 1080 px,
+   sıvı sayfasını 1280 → 1328 px genişletiyordu (advanced.html aynı
+   onarımı ÖH D26 P17B1-19'da `scale(0)` ile almıştı; katı ve sıvı
+   almamıştı). Onarım artık hepsinde aynı: gizliyken `scale(0)`
+   (boyutsuz, taşma alanına katılmaz), açılınca `scale(1)`; solma
+   (0,3 s) korunur, çünkü dönüşüm açılışta anında, kapanışta solmadan
+   SONRA uygulanır. Açık balonu `field_help.js` `position: fixed` ile
+   ekran kenarına göre içeri hizalar (kırpılmaz, `overflow` kaplarının
+   dışına çıkar); JS yoksa aşağıdaki mutlak konum yedektir. Klavye: ikon
+   odak alır (`tabindex=0`), `:focus-within` balonu açar, Esc kapatır. */
+.tooltip {
+    position: relative;
+    display: inline-block;
+    margin-left: 5px;
+    vertical-align: middle;
+    line-height: 1;
+}
+
+.tooltip-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: help;
+    transition: background 0.3s;
+    flex: 0 0 auto;
+}
+
+.tooltip-icon:focus-visible {
+    outline: 2px solid var(--hd-cyan, #00e5ff);
+    outline-offset: 2px;
+}
+
+.tooltip-text {
+    visibility: hidden;
+    width: 280px;
+    max-width: calc(100vw - 16px);
+    text-align: left;
+    border-radius: 6px;
+    padding: 12px;
+    position: absolute;
+    z-index: 10000;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -140px;
+    opacity: 0;
+    transform: scale(0);
+    transform-origin: bottom center;
+    transition: opacity 0.3s, transform 0s linear 0.3s;
+    font-size: 13px;
+    font-weight: normal;
+    line-height: 1.4;
+    letter-spacing: normal;
+    text-transform: none;
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+
+.tooltip-text::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: var(--hrma-tip-arrow-x, 50%);
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #0a1626 transparent transparent transparent;
+}
+
+.tooltip.tip-below .tooltip-text { transform-origin: top center; }
+.tooltip.tip-below .tooltip-text::after {
+    top: auto;
+    bottom: 100%;
+    border-color: transparent transparent #0a1626 transparent;
+}
+
+.tooltip:hover .tooltip-text,
+.tooltip:focus-within .tooltip-text,
+.tooltip.tip-open .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+    transform: scale(1);
+    transition: opacity 0.3s, transform 0s;
+}
+
+/* v3.0.1 · UI-K — klavyeyle kapatılan balon (Esc / Enter / Boşluk).
+   Odak ikonda KALIR (eskiden Esc odağı bırakıyordu ve klavye kullanıcısı
+   sayfanın başına dönüyordu); `:focus-within`/`:hover` açık tutsa da bu
+   sınıf balonu gizler. Kural yukarıdaki açma kuralından SONRA durmalı
+   (aynı özgüllük, sıra kazanır). Odak ya da fare ayrılınca sınıf kalkar. */
+.tooltip.tip-dismissed .tooltip-text {
+    visibility: hidden;
+    opacity: 0;
+    transform: scale(0);
+    transition: opacity 0.3s, transform 0s linear 0.3s;
+}
+
+/* v3.0.1 · UI-K (N-girdi AÇIK) — UZUN ETİKETTE "?" TEK BAŞINA ALT SATIRA
+   İNİYORDU. ÖLÇÜLDÜ (ui-k/balon_once_*.json, ikon etiketin son metin
+   satırıyla aynı satırda değil): hibrit 9–14, katı 4–8 alan (1280/1440,
+   TR/EN). Kök: satır içi akışta metin ile atomik ikon kutusu arasında
+   her zaman bir kırılma fırsatı var; etiket satırı tam doluysa ikon tek
+   başına alt satıra düşüyor. Sözcük birleştirici (U+2060) Chromium'da bu
+   fırsatı KAPATMIYOR (ölçüldü). Onarım konumu birebir korur: ikondan
+   önceki satır içi öğe ikonun yerini (5 + 16 px) kendi sonunda ayırır,
+   ikonun sol payı −16 px olur → ikonun satıra katkısı sıfırdır, son
+   sözcükle birlikte taşınır; ikon yine metinden 5 px (arada boşluk
+   varsa 9 px) sonra çizilir. Flex başlıklarda (güverte/merkez, yapay
+   zekâ) etiket ve ikon ayrı flex öğeleridir; orada etiketin azami
+   genişliği ikon payı kadar kısılır, etiket kendi içinde sarar ve ikon
+   aynı satırda kalır. */
+:where(span, strong, b, em, small):has(+ .tooltip) {
+    padding-inline-end: 21px;
+}
+:where(span, strong, b, em, small) + .tooltip {
+    margin-left: -16px;
+}
+.ad-field-head > label,
+.hrma-ai-field-head > label {
+    max-width: calc(100% - 22px);
+}
+
+/* Güverte alan başlığı: etiket + ipucu ikonu + kaynak çipi aynı satırda
+   (`.ad-field-head` flex). İkon etiketin hemen ardında, satır kırılırsa
+   etiketten ayrılmaz.
+   I2 ikinci kök (ölçüldü, 26 Eki, N-girdi-1 i2_tr.json): sıvı sayfasında
+   hesap + ızgara kipinden sonra 1280 px'te sayfa 1371 px'e taşıyordu;
+   suçlu gizli balon DEĞİL, `ad_src_structural_wall_thickness` çipinin
+   altındaki geri çekilme notuydu (`.ad-withheld-note`, 447 px): not
+   `white-space: normal` taşıyor ama boşluksuz makine yolu
+   (`motor.structural…`) kırılamıyor, `inline-flex` yuva da en uzun
+   sözcük kadar genişliyordu. Yuva hücreyi aşmaz, uzun sözcük kırılır;
+   metin kesilmez (hepsi okunur), yalnız alt satıra iner. */
+.ad-field-head .tooltip { margin-left: 0; align-self: center; }
+.ad-field-head .ad-src-slot { max-width: 100%; min-width: 0; flex-wrap: wrap; }
+.ad-src-slot .ad-withheld-note,
+.ad-src-slot .ad-cleared-note { overflow-wrap: anywhere; max-width: 100%; }
 
 /* ---------------- Kod / çıktı blokları ---------------- */
 
@@ -930,3 +1099,231 @@ pre, code { color: #9fe8d8; }
    NE DEĞİŞMEZ: etiketin mono yazı tipi, punto, harf aralığı ve rengi —
    yalnız harf DÖNÜŞÜMÜ kalkar, metin sözlükte yazıldığı gibi görünür. */
 .ac-field > label { text-transform: none !important; }
+
+/* ==========================================================================
+   V301/N-YZ — "YAPAY ZEKÂ İLE TASARLA" PANELİ (ai_assistant.js)
+   --------------------------------------------------------------------------
+   Eskiden üç sayfanın üç ayrı "Ask AI" düğmesi vardı: satır içi stil ve
+   birbirinden farklı tema dışı gradyanlar (mor #667eea→#764ba2, pembe
+   #f093fb→#f5576c, mavi #4facfe→#00f2fe). Artık panel ve düğmeler üç
+   sayfada AYNI ve renkler YALNIZ --hd-* tokenlarından gelir (satır içi
+   stil yok). Uzun metinler sarılır (flex-wrap / overflow-wrap) — dar
+   pencerede bile yazı yazının üstüne binmez.
+   ========================================================================== */
+.hrma-ai {
+    display: block;
+    margin: 22px 0;
+    background: var(--hd-panel);
+    border: 1px solid var(--hd-line);
+    border-left: 3px solid var(--hd-cyan);
+    border-radius: var(--hd-radius);
+    box-shadow: var(--hd-shadow);
+    color: var(--hd-ink);
+    font-family: var(--hd-sans);
+}
+.hrma-ai-toggle {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 14px 18px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--hd-radius);
+    color: var(--hd-ink-strong);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.hrma-ai-toggle:hover { box-shadow: var(--hd-glow); }
+.hrma-ai-toggle:focus-visible,
+.hrma-ai-btn:focus-visible { outline: 2px solid var(--hd-cyan); outline-offset: 2px; }
+.hrma-ai-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--hd-line-strong);
+    border-radius: 50%;
+    color: var(--hd-cyan);
+    font-size: 18px;
+}
+.hrma-ai-toggle-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.hrma-ai-title {
+    color: var(--hd-ink-strong);
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+.hrma-ai-sub { color: var(--hd-ink-dim); font-size: 13px; line-height: 1.4; }
+.hrma-ai-caret { flex: 0 0 auto; color: var(--hd-cyan); font-size: 20px; line-height: 1; transition: transform 0.15s ease; }
+.hrma-ai-open .hrma-ai-caret { transform: rotate(180deg); }
+.hrma-ai-body { padding: 0 18px 16px; }
+.hrma-ai-intro, .hrma-ai-hint {
+    margin: 4px 0 10px;
+    color: var(--hd-ink-dim);
+    font-size: 14px;
+    line-height: 1.5;
+}
+.hrma-ai-steps { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.hrma-ai-step {
+    min-width: 0;
+    padding: 12px 14px;
+    background: var(--hd-inset);
+    border: 1px solid var(--hd-line);
+    border-radius: var(--hd-radius-sm);
+}
+.hrma-ai-step-head, .hrma-ai-field-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.hrma-ai-num {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--hd-cyan);
+    color: var(--hd-bg0);
+    font-family: var(--hd-mono);
+    font-size: 13px;
+    font-weight: 700;
+}
+.hrma-ai-step-title { color: var(--hd-ink-strong); font-weight: 600; }
+.hrma-ai-label { color: var(--hd-ink); font-weight: 500; }
+.hrma-ai textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 64px;
+    padding: 8px 10px;
+    font-family: var(--hd-mono);
+    font-size: 13px;
+    resize: vertical;
+}
+.hrma-ai-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
+.hrma-ai-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--hd-panel-solid);
+    border: 1px solid var(--hd-line-strong);
+    border-radius: var(--hd-radius-sm);
+    color: var(--hd-ink-strong);
+    font-family: var(--hd-sans);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.hrma-ai-btn:hover:not(:disabled) { border-color: var(--hd-cyan); box-shadow: var(--hd-glow); }
+.hrma-ai-btn-primary { background: var(--hd-cyan); border-color: var(--hd-cyan); color: var(--hd-bg0); }
+.hrma-ai-btn-ghost { background: transparent; color: var(--hd-ink-dim); }
+.hrma-ai-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.hrma-ai-status {
+    min-height: 1.2em;
+    margin: 10px 0 0;
+    color: var(--hd-ink-dim);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+.hrma-ai-status[data-kind="ok"] { color: var(--hd-green); }
+.hrma-ai-status[data-kind="warn"] { color: var(--hd-amber); }
+.hrma-ai-table-wrap { margin-top: 10px; overflow-x: auto; }
+.hrma-ai-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.hrma-ai-table th, .hrma-ai-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--hd-line);
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+.hrma-ai-table th { color: var(--hd-ink-dim); font-weight: 600; }
+.hrma-ai-mono { font-family: var(--hd-mono); }
+.hrma-ai-new { color: var(--hd-cyan-soft); }
+.hrma-ai-reason { max-width: 360px; color: var(--hd-ink); }
+.hrma-ai-note { color: var(--hd-amber); }
+.hrma-ai-error { margin: 8px 0 0; color: var(--hd-red); overflow-wrap: anywhere; }
+.hrma-ai-rejected-title { margin: 10px 0 4px; color: var(--hd-amber); font-weight: 600; }
+.hrma-ai-rejected { margin: 0; padding-left: 18px; color: var(--hd-ink); font-size: 13px; }
+.hrma-ai-rejected li { overflow-wrap: anywhere; }
+.hrma-ai-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(4, 7, 13, 0.82);
+    background: color-mix(in srgb, var(--hd-bg0) 82%, transparent);
+}
+.hrma-ai-modal-box {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(960px, 100%);
+    max-height: 86vh;
+    padding: 18px;
+    background: var(--hd-panel-solid);
+    border: 1px solid var(--hd-line-strong);
+    border-radius: var(--hd-radius);
+    box-shadow: var(--hd-shadow);
+    color: var(--hd-ink);
+}
+.hrma-ai-modal-head { display: flex; align-items: center; gap: 12px; }
+.hrma-ai-modal-title { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--hd-ink-strong); font-size: 18px; }
+.hrma-ai-modal-intro { margin: 0; color: var(--hd-ink-dim); }
+.hrma-ai-modal-text {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 320px;
+    font-family: var(--hd-mono);
+    font-size: 12px;
+    white-space: pre;
+}
+
+/* ==========================================================================
+   V301/DİL — HATA BİLDİRİMİ ZEMİNİ OPAK (kalem 3, üç sayfada aynı)
+   Tema .alert-danger zemini yarı saydamdır (rgba(140,30,40,0.2)); sabit
+   konumlu bildirim yığınında (katı/sıvı #toast-stack) ve hibrit bildirim
+   kabında alttaki form yazısı bildirimin içinden okunuyordu (NK-38; L-A
+   sıvıda _liquidOpakZemin ile JS'te çözmüştü). Aynı renk, kök zemin
+   (--hd-bg0) üstüne katman olarak çizilir: görünen ton DEĞİŞMEZ, renk
+   uydurulmaz, alttaki yazı görünmez. Eski sonuç işareti de burada.
+   ========================================================================== */
+#toast-stack .alert-danger:not([data-liquid-calc-error]),
+#hrmaNotices .alert-danger {
+    background-color: var(--hd-bg0, #04070d);
+    background-image: linear-gradient(rgba(140, 30, 40, 0.2), rgba(140, 30, 40, 0.2));
+}
+.hd-alan-hatali {
+    outline: 2px solid rgba(255, 90, 100, 0.85);
+    outline-offset: 1px;
+}
+.hd-eski-sonuc-bandi {
+    margin: 0 0 12px 0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 140, 51, 0.7);
+    background-color: var(--hd-bg0, #04070d);
+    background-image: linear-gradient(rgba(255, 140, 51, 0.12), rgba(255, 140, 51, 0.12));
+    color: #ffd2a8;
+    font-size: 0.85rem;
+}

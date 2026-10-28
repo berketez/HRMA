@@ -210,6 +210,16 @@ LANDING_WITHHELD_NO_PARACHUTE = (
 # uçuşa iki farklı "kalktı/kalkmadı" cevabı vermek demektir.
 LIFTOFF_ALTITUDE_EPS_M = 1e-6
 
+# --- MENZİL EKSENİ GÖRÜNÜMÜ (V301/NK-25, 28 Eki) ---------------------------
+# Dikey atışta yatay menzil kayan nokta gürültüsüdür (ölçüldü: ~1e-16 km).
+# Plotly kendiliğinden bu aralığa yakınlaşıp tikleri SI önekiyle basıyordu
+# ("0.2f" = 0,2 femto-km; TR ekranda "0,2f"). Açıklık 1 m'nin altındaysa eksen
+# sıfır merkezli, irtifa ölçeğinde bir pencereye sabitlenir. Bu yalnız GÖRÜNÜM
+# seçimidir (HRMA seçimi); veri ve yayımlanan menzil değişmez.
+MENZIL_EKSENI_DIKEY_ESIK_KM = 1e-3          # 1 m
+MENZIL_EKSENI_PENCERE_IRTIFA_ORANI = 0.1    # pencere yarı genişliği / tepe irtifa
+MENZIL_EKSENI_EN_KUCUK_PENCERE_KM = 0.1
+
 # --- RÜZGÂR BİLEŞENİ GÜRÜLTÜ TABANI (ÖH D17 / P4B3-14) --------------------
 # ``sin(pi)`` tam 0,0 değil −1,22e−16'dır; 180°'lik (tamamen düzlem-içi) bir
 # rüzgârda çapraz bileşen bu yüzden −1,84e−15 m/s çıkıyor. Bu SAYISAL
@@ -2822,6 +2832,20 @@ class TrajectoryAnalyzer:
 
         # Update axes labels
         fig.update_xaxes(title_text="Range (km)", row=1, col=1)
+        # V301/NK-25: SI öneki hiçbir durumda basılmaz; menzil açıklığı
+        # gürültü düzeyindeyse (dikey atış) eksen sabit pencereye alınır.
+        _menzil_km = np.asarray(trajectory['position_x'], dtype=float) / 1000.0
+        _irtifa_km = np.asarray(trajectory['altitude'], dtype=float) / 1000.0
+        _menzil_ekseni = {'exponentformat': 'none'}
+        if (_menzil_km.size and np.all(np.isfinite(_menzil_km))
+                and float(np.ptp(_menzil_km)) < MENZIL_EKSENI_DIKEY_ESIK_KM):
+            _tepe_km = (float(np.nanmax(np.abs(_irtifa_km)))
+                        if _irtifa_km.size else 0.0)
+            _pencere = max(MENZIL_EKSENI_PENCERE_IRTIFA_ORANI * _tepe_km,
+                           MENZIL_EKSENI_EN_KUCUK_PENCERE_KM)
+            _merkez = float(np.mean(_menzil_km))
+            _menzil_ekseni['range'] = [_merkez - _pencere, _merkez + _pencere]
+        fig.update_xaxes(row=1, col=1, **_menzil_ekseni)
         fig.update_yaxes(title_text="Altitude (km)", row=1, col=1)
         fig.update_xaxes(title_text="Time (s)", row=1, col=2)
         fig.update_yaxes(title_text="Altitude (km)", row=1, col=2)

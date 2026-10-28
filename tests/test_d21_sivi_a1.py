@@ -488,15 +488,20 @@ class TestP15B207EnjektorDPTekKaynak:
         m = _motor(injector_type=tip)
         with contextlib.redirect_stdout(io.StringIO()):
             inj = m.calculate_injector_design()
+        # V301/L-C (SV-06): 'impinging' artık 'unlike_impinging'in eski
+        # takma adıdır; tablo KANONİK adla okunur (ikisi aynı satır).
         beklenen = lre.INJECTOR_TYPE_DP_FRACTION.get(
-            tip, lre.INJECTOR_TYPE_DP_FRACTION_DEFAULT)
+            lre.canonical_injector_type(tip),
+            lre.INJECTOR_TYPE_DP_FRACTION_DEFAULT)
         assert inj['ox_pressure_drop'] / float(m.P_c) == pytest.approx(
             beklenen, rel=1e-12)
         assert m._injector_dp_fraction() == pytest.approx(beklenen, rel=1e-12)
 
     def test_tablo_degisince_yayimlanan_dp_DE_degisir(self, monkeypatch):
         """Kusur GİZİLDİ: bugün 5/5 eşit. Bekçi kopyayı davranışla arar."""
-        monkeypatch.setitem(lre.INJECTOR_TYPE_DP_FRACTION, 'impinging', 0.33)
+        # V301/L-C: satırın anahtarı kanonik ad ('impinging' onun takma adı).
+        monkeypatch.setitem(lre.INJECTOR_TYPE_DP_FRACTION, 'unlike_impinging',
+                            0.33)
         m = _motor(injector_type='impinging')
         with contextlib.redirect_stdout(io.StringIO()):
             inj = m.calculate_injector_design()

@@ -140,7 +140,11 @@ class TestP11B222OluKopya:
         kapısıyla eşleşmelidir.
         """
         kaynak = kodu(APP_JS)
-        cagri = len(re.findall(r'(?<![\w.])updateInjectorParams\(\)', kaynak))
+        # V301/T-ÇAPA-D: T-ÇAPA-C2 (1e78c9666) dil değişimi çağrısını
+        # ``updateInjectorParams(true)`` yaptı (alanları boşaltmayan kip);
+        # argümanlı çağrı da çağrıdır — sayım argümandan bağımsız.
+        cagri = len(re.findall(r'(?<![\w.])updateInjectorParams\([^)]*\)',
+                               kaynak))
         kapi = kaynak.count("typeof updateInjectorParams === 'function'")
         assert cagri >= 2, 'çağrı hiç kalmadı (kapsam kaydı)'
         assert kapi == cagri, (

@@ -24,6 +24,14 @@ import json
 import pytest
 from tests.support.kanit import kanit_gerekli
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 
 @pytest.fixture(scope='module')
 def istemci():
@@ -359,7 +367,7 @@ class TestP16B336NegatifTohum:
 # P16B3-40 — /api/solid-monte-carlo örnek sayısı + süre bütçesi
 # ===========================================================================
 MC_TABAN = {'chamber_pressure': 40, 'chamber_diameter': 100,
-            'grain_length': 500, 'core_diameter': 30,
+            'grain_length': 500, 'core_diameter': _CEKIRDEK_MM,
             'propellant_type': 'apcp'}
 
 

@@ -263,38 +263,50 @@ class TestEsikGecisi:
 # ===========================================================================
 class TestKunyeDurustlugu:
 
+    # v3.0.1 kulvar M (Ayberk tur 1): ``/calculate`` çözülemeyen kamara
+    # malzemesini artık ADLI 422 ile REDDEDER. Aşağıdaki üç bekçi eskiden
+    # HTTP 200 yanıtında künyenin dürüstlüğünü ve geri çekilmiş hükmü
+    # kilitliyordu; o yanıtın bütün sayıları kullanıcının SORMADIĞI
+    # malzemenindi (ölçüldü: docs/scofield/raw/OH/V301/ayberk1/malzeme/
+    # once.json S4 — 'peynir' -> 200, motor ss_304'le koşuyor). Künye
+    # iddiası (P16B1-02: "kullanıcı verdi" yalanı yok) aynen korunur ve
+    # ret gövdesinin KENDİSİNDE sınanır; motorun uyarı sözleşmesi doğrudan
+    # motor çağrısında sınanır (uç onu artık hiç çağırmıyor).
     def test_cozulemeyen_ad_user_supplied_diye_kunyelenmez(self, istemci):
         """ÖLÇÜLDÜ: ``chamber_material='peynir'`` isteğinde motor
         ``warn.hybrid.chamber_material_unknown`` üretirken künye aynı
-        yanıtta ``'user_supplied'`` yazıyordu."""
-        j = istemci.post('/calculate',
-                         json=dict(KIMLIK_HIBRIT,
-                                   chamber_material='peynir')).get_json()
-        kunye = j['structural_design_basis']
-        assert kunye['chamber_material_source'] == 'user_supplied_unresolved'
-        assert kunye['chamber_material_requested'] == 'peynir'
-        assert kunye['chamber_material_resolved_to'] is None
-        assert kunye['chamber_material_unresolved_reason']
+        yanıtta ``'user_supplied'`` yazıyordu. v3.0.1 M: istek reddedilir;
+        ret künyesi adı ÇÖZÜLMEMİŞ olarak söyler."""
+        r = istemci.post('/calculate',
+                         json=dict(KIMLIK_HIBRIT, chamber_material='peynir'))
+        assert r.status_code == 422
+        kunye = r.get_json()['invalid_fields'][0]
+        assert kunye['field'] == 'chamber_material'
+        assert kunye['source'] == 'user_supplied_unresolved'
+        assert kunye['requested'] == 'peynir'
+        assert kunye['resolved_to'] is None
+        assert kunye['reason']
 
     def test_cozulemeyen_kimlikte_yapisal_hukum_geri_cekilir(self, istemci):
-        """Z3/Z4 deseni: sayı silinmez, HÜKÜM geri çekilir."""
-        j = istemci.post('/calculate',
-                         json=dict(KIMLIK_HIBRIT,
-                                   chamber_material='peynir')).get_json()
-        kunye = j['structural_design_basis']
-        assert kunye['verdict'] == 'withheld'
-        assert 'material_identity_unresolved' in (
-            kunye['verdict_withheld_reasons'])
-        # Sayılar YERİNDE: geri çekilen şey hükümdür.
-        assert j['motor']['structural_analysis']['safety_factor'] is not None
+        """Z3/Z4 deseni bir adım öteye: çözülemeyen kimlikle ne HÜKÜM ne
+        SAYI yayımlanır (v3.0.1 M; eskiden sayılar ss_304'ündü)."""
+        r = istemci.post('/calculate',
+                         json=dict(KIMLIK_HIBRIT, chamber_material='peynir'))
+        assert r.status_code == 422
+        j = r.get_json()
+        assert j['error'] == 'unresolved_material'
+        assert 'motor' not in j and 'structural_design_basis' not in j
 
     def test_motorun_kendi_uyarisi_hala_kullaniciya_ulasiyor(self, istemci):
-        """Uç katmanı motorun uyarı sözleşmesini BOZMAZ."""
-        j = istemci.post('/calculate',
-                         json=dict(KIMLIK_HIBRIT,
-                                   chamber_material='peynir')).get_json()
-        kodlar = [w.get('code') for w in
-                  (j['motor'].get('design_warnings') or [])]
+        """Motorun uyarı sözleşmesi (doğrudan motor kullanımı) BOZULMADI."""
+        from hrma.engines.hybrid_rocket_engine import (
+            HybridRocketEngine, HYBRID_CHAMBER_MATERIAL_DEFAULT)
+        from hrma.data.materials_db import get_material_safe
+        e = HybridRocketEngine.__new__(HybridRocketEngine)
+        e.design_warnings = []
+        assert e._resolve_chamber_material('peynir') == get_material_safe(
+            HYBRID_CHAMBER_MATERIAL_DEFAULT)[1]
+        kodlar = [w.get('code') for w in e.design_warnings]
         assert 'warn.hybrid.chamber_material_unknown' in kodlar
 
     def test_takma_ad_cozumu_kunyede_adiyla_yazilir(self, istemci):
@@ -529,18 +541,29 @@ class TestUrunSozDagari:
                                         govde):
                     if not deger:
                         continue
+                    if '{{' in deger:
+                        # V301/K-B: sunucu kaydından basılan seçenek (Jinja
+                        # ifadesi, değer değil); katı kayıtlarının çözülmesi
+                        # tests/test_v301_kati_malzeme.py'de sınanır.
+                        continue
                     if _resolve_material_request(deger, 'material',
                                                  'steel')[0] is None:
                         cozulmeyen.add((yol.split('/')[-1], alan_id, deger))
-        assert cozulmeyen == {
-            # Sıvı çözücü bu değeri KENDİ künyesinde 'copper'a
-            # normalleştiriyor (ölçüldü: chamber_structure.material_key =
-            # 'copper'), yani panelin gönderdiği ad çözülüyor — form
-            # etiketi ile kayıt adı ayrışıyor ama ürün yolu SAĞLAM.
-            ('liquid.html', 'chamber_material', 'copper_c101'),
-            ('solid.html', 'case_material', 'composite'),
-            ('solid.html', 'nozzle_material', 'phenolic'),
-        }, ('Ürünün malzeme söz dağarı ile materials_db arasındaki fark '
+        assert cozulmeyen == set({
+            # V301/T-ÇAPA-D (28 Eki ölçümü): sıvı sayfasının 'copper_c101'
+            # seçeneği artık materials_db'de çözülüyor (V301/L-KABUK bakır
+            # söz dağarı; T-ÇAPA-C1 RAPOR §3 'copper_c101 söz dağarı'). Eski
+            # beklenti: ('liquid.html', 'chamber_material', 'copper_c101') —
+            # sıvı yarısı da KAPANDI; küme boş.
+            # V301/K-B (KT-10/KT-12): katı sayfasının seçenekleri artık
+            # sunucu kaydından (ham şablonda yalnız bir Jinja ifadesi var,
+            # değer değil): 'phenolic' listeden çıktı (kaynaklı boğaz kaydı ve
+            # ablasyon modeli yok; uçta 422), 'composite' motorun kendi ek
+            # kaydına (SOLID_CASE_MATERIAL_EXTRA) çözülür ve katı uç onu
+            # tanır. Kayıt altındaki boşluğun katı yarısı KAPANDI (eski
+            # beklenti: ('solid.html', 'case_material', 'composite') ve
+            # ('solid.html', 'nozzle_material', 'phenolic')).
+        }), ('Ürünün malzeme söz dağarı ile materials_db arasındaki fark '
             f'değişti: {sorted(cozulmeyen)}')
 
     def test_kati_kompozit_kasa_artik_sessiz_celik_hukmu_almiyor(

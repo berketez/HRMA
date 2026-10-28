@@ -28,6 +28,8 @@ import subprocess
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 from hrma.data import materials_db as mdb
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -709,8 +711,10 @@ class TestProjeYuklemeUyarisi:
 # propellant_type boşken uç "propellant_type = apcp endpoint_default" diyordu;
 # örnek katı motor (KNDX) 'kndx' çözüyordu. Kâhin: motorun kendi çözüm
 # kaynağı (``propellant_type_source``) — künye ile motor AYNI şeyi söylemeli.
-_KATI_TABAN = {'chamber_pressure': 40, 'chamber_diameter': 100,
-               'grain_length': 500, 'core_diameter': 30}
+# v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+# (A_p/A_t 0,947); K-A kapısından beri 422. Konu port değil: geometri
+# tek tanım SOLID_DEFAULT_GEOMETRY_MM'den (kopyalanmaz).
+_KATI_TABAN = {'chamber_pressure': 40, **SOLID_DEFAULT_GEOMETRY_MM}
 
 
 def _itici_kunyesi(j):
@@ -737,8 +741,12 @@ class TestKatiIticiBeyani:
 
     def test_uc_varsayilani_gercekten_cozulduyse_beyan_edilir(self, client):
         from hrma.app import SOLID_ENDPOINT_DEFAULTS
+        # v3.0.1 T-ÇAPA-B: a = 0,005 / n = 0,35 ile varsayılan çekirdek
+        # (48 mm) de boğuluyor (A_p/A_t 0,958, ölçüldü); konu itici künyesi,
+        # port değil → açık geçerli port: çekirdek 70 mm (A_p/A_t 1,90).
         r = client.post('/calculate_solid', json=dict(
-            _KATI_TABAN, burn_rate_a=0.005, burn_rate_n=0.35), headers=H)
+            _KATI_TABAN, burn_rate_a=0.005, burn_rate_n=0.35,
+            core_diameter=70), headers=H)
         assert r.status_code == 200, r.get_data(as_text=True)[:300]
         j = r.get_json()
         assert j['propellant_type_source'] == 'endpoint default'
@@ -1708,6 +1716,14 @@ class TestKk3GuvenlikCidarNedeni:
         r = copy.deepcopy(ornek_motorlar['hybrid'])
         r['motor']['heat_transfer_analysis']['gas_side_analysis'][
             'wall_temperature_unphysical'] = False
+        # V3.0.5 T-ÇAPA-C1 — ÖNCÜL AÇIKÇA (V301/H-termal 77d64c641 + PANEL):
+        # örnek hibritte cidar çiftinin kaynağı artık bölge beyanıdır
+        # ('hybrid_chamber_zone_protection', güvertenin ÇÖZÜLMEDİ listesinde),
+        # yani bayrak kalksa da çift önerilmez. Bu düğümün sorusu yalnız
+        # "bayrak yokken 'fiziksel değil' nedeni uydurulmaz mı"; kopyada
+        # kaynak, ısı modülünün kendi çözüm etiketine çekilir.
+        r['motor']['structural_analysis']['thermal_analysis'][
+            'wall_temperature_source'] = 'heat_transfer_module'
         out = _kk3(_DOCK_DOSYALARI + [_GUVENLIK_JS], _GUVENLIK_BETIK,
                    motor=r, uc=uc_geri)
         assert 'wall_temperature_hot' in out['sug']

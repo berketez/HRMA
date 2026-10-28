@@ -163,6 +163,19 @@
        bulunamazsa metin AYNEN döner (asla anahtar, asla boş).
        2026-08-03: bu dosyanın görünür metinlerinin tamamı sabit
        İngilizceydi — TR modda 3B güverte tek kelime Türkçe göstermiyordu. */
+    // v3.0.1 N-girdi-2: tasarım kaydırıcıları ve zaman çizgisi için alan
+    // ipucu ortak bileşenden (field_help.js → HRMAHelp); anahtarlar LİTERAL.
+    // Bileşen yüklü değilse ipucu basılmaz.
+    function deckYardimHtml(k) {
+        var H = window.HRMAHelp;
+        if (!H || typeof H.html !== 'function') return '';
+        if (k === 'dch') return H.html('viz.help.deckDch', T('viz.help.deckDch', ''));
+        if (k === 'len') return H.html('viz.help.deckLen', T('viz.help.deckLen', ''));
+        if (k === 'eps') return H.html('viz.help.deckEps', T('viz.help.deckEps', ''));
+        if (k === 'timeline') return H.html('viz.help.timeline', T('viz.help.timeline', ''));
+        return '';
+    }
+
     function TX(text) {
         var api = window.I18N || window.HRMAChartI18N;
         return (api && typeof api.chartText === 'function') ? api.chartText(text) : text;
@@ -466,8 +479,8 @@
                 '  <div class="viz-design" id="' + p + '_design" style="display: none;">' +
                 ctrls.map(function (c) {
                     return '<div class="viz-dctrl">' +
-                        '<div class="dk"><span id="' + p + '_dl_' + c.key + '">' +
-                        TX(c.label) + '</span>' +
+                        '<div class="dk"><span><span id="' + p + '_dl_' + c.key + '">' +
+                        TX(c.label) + '</span>' + deckYardimHtml(c.key) + '</span>' +
                         '<b id="' + p + '_dv_' + c.key + '">—</b></div>' +
                         '<input type="range" id="' + p + '_ds_' + c.key + '" min="0" max="' +
                         DESIGN_SLIDER_STEPS + '" value="0"></div>';
@@ -531,6 +544,7 @@
             '  <div class="viz-timeline">' +
             '    <button class="viz-play" id="' + p + '_play">&#9654;</button>' +
             '    <input type="range" id="' + p + '_slider" min="0" max="1000" value="0">' +
+            deckYardimHtml('timeline') +
             '    <div class="viz-clock" id="' + p + '_clock">t = ' + numTxt(0, 2) + ' s / — s</div>' +
             '  </div>' +
             '  <div class="viz-telemetry">' +

@@ -314,8 +314,11 @@ def _showerhead_hover(veri):
         elif isinstance(ht, list):
             metinler.extend([t for t in ht if isinstance(t, str)])
     # Yalnız DELİK izleri: plaka konturunun kendi hover'ı ayrı bir
-    # iddiadır ve bu kalemin konusu değildir.
-    return fig, [t for t in metinler if 'L/D:' in t]
+    # iddiadır ve bu kalemin konusu değildir. V301 (28 Eki): delik izi
+    # 'L/D:' satırıyla tanınıyordu; o satır plaka kalınlığı verilmeyince
+    # uydurulan 3,0 mm'den geliyordu ve artık basılmıyor. Deliğe özgü
+    # satır 'Angle in pattern:' (plaka balonunda yok).
+    return fig, [t for t in metinler if 'Angle in pattern:' in t]
 
 
 class TestP8B4_19KonumIddiasi:

@@ -135,6 +135,13 @@
     // ------------------------------------------------------------------
     // Özel kontrol satırı (level + seed + Run)
     // ------------------------------------------------------------------
+    // v3.0.1 N-girdi-1: girdinin "?" ipucu — ortak bileşen (field_help.js →
+    // HRMAHelp); anahtar çağrıda LİTERAL. Bileşen yoksa basılmaz.
+    function helpHtml(key) {
+        if (!window.HRMAHelp || typeof window.HRMAHelp.html !== 'function') return '';
+        return window.HRMAHelp.html(key, T(key, ''));
+    }
+
     function customFormHtml() {
         const opts = LEVELS.map(function (l) {
             return '<option value="' + l[0] + '" data-i18n="' + l[2] + '">'
@@ -143,13 +150,15 @@
         return `<div id="uq_custom" style="margin:10px 0;">
             <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
                 <div class="form-group" style="min-width:220px;">
-                    <label data-i18n="panel.uncertainty.fLevel">${
-                        T('panel.uncertainty.fLevel', 'Analysis Level')}</label>
+                    <div class="ad-field-head"><label data-i18n="panel.uncertainty.fLevel">${
+                        T('panel.uncertainty.fLevel', 'Analysis Level')}</label>${
+                        helpHtml('panel.uncertainty.help.level')}</div>
                     <select id="uq_level">${opts}</select>
                 </div>
                 <div class="form-group" style="width:110px;">
-                    <label data-i18n="panel.uncertainty.fSeed">${
-                        T('panel.uncertainty.fSeed', 'Seed')}</label>
+                    <div class="ad-field-head"><label data-i18n="panel.uncertainty.fSeed">${
+                        T('panel.uncertainty.fSeed', 'Seed')}</label>${
+                        helpHtml('panel.uncertainty.help.seed')}</div>
                     <input type="number" id="uq_seed" value="42" step="1">
                 </div>
                 <div class="form-group">
@@ -712,10 +721,29 @@
         let block = U.listBlock(T('panel.uncertainty.warningsTitle', 'Uncertainty warnings'),
                                 items, 'warn');
         if (note) {
+            // T-ÇAPA-C2 (BELGE §8.1-3): TR ekranda 'consistency_note MC mean
+            // differs …' makine adı + İngilizce paragraf basılıyordu. Etiket
+            // sözlükten; cümle sunucu çeviri kanalından (tanınırsa çevrili).
+            // TR'de tanınmazsa yarım çeviri YOK: Türkçe özet + kapalı "Teknik
+            // ayrıntı (çözücü beyanı, çevrilmedi)" altında tam metin AYNEN
+            // (DİL terim kararı 2 deseni). Makine adı title'da kalır.
+            const I = window.I18N;
+            const cevrili = (I && typeof I.serverText === 'function')
+                ? I.serverText(note) : note;
+            const tr = !!(I && I.lang === 'tr');
+            const etiket = '<span title="consistency_note" style="font-family:var(--hd-mono);">'
+                + escapeHtml(T('panel.uncertainty.consistencyNoteLabel', 'Consistency note'))
+                + ':</span> ';
+            const govde = (tr && cevrili === note)
+                ? escapeHtml(T('panel.uncertainty.consistencyNoteSummary',
+                    'The Monte Carlo mean differs from the nominal value; the nominal deterministic value remains the design point.'))
+                  + '<details class="hd-teknik-ayrinti"><summary style="cursor:pointer;">'
+                  + escapeHtml(T('common.techDetailSrv', 'Technical detail (solver statement, untranslated)'))
+                  + '</summary>' + escapeHtml(note) + '</details>'
+                : escapeHtml(cevrili);
             block += '<p data-uq-consistency-note="1"'
                 + ' style="font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);'
-                + ' margin:6px 0 10px;"><span style="font-family:var(--hd-mono);">'
-                + 'consistency_note</span> ' + escapeHtml(note) + '</p>';
+                + ' margin:6px 0 10px;">' + etiket + govde + '</p>';
         }
         return block;
     }

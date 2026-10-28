@@ -133,11 +133,35 @@ def function_body(source: str, name: str) -> str:
     return '\n'.join(bodies)
 
 
-def collected_fields(body: str) -> Set[str]:
-    """Toplayıcı gövdesinde okunan alan id'leri."""
+#: V3.0.5 T-ÇAPA-C1 — ADLI id LİSTESİ okuyucusu. V301/L-C (8ee59c845)
+#: sıvı enjektör alanlarını ``(tip === 'pintle' ? LIQ_PINTLE_FIELDS :
+#: LIQ_NOT_PINTLE_FIELDS).forEach(function (id) { … liqOptNum(id) … })``
+#: ile okuyor: id literal değil, adlı dizi sabitinin elemanı. Okuma biçimi
+#: optNum'un aynısıdır; liste adları ve elemanları şablonun kendisinden
+#: çözülür (yalnız ``*_FIELDS`` adlı ``const`` diziler, yalnız ``OptNum(id)``
+#: ile okunanlar — ``LIQ_CYCLE_UNREAD_FIELDS`` gibi OKUNMAYAN listeler
+#: bu desene girmez).
+_LIST_FOREACH_READ = re.compile(
+    r"\(([^()]*?)\)\s*\.forEach\(\s*function\s*\(\s*(\w+)\s*\)\s*\{"
+    r"[^{}]*?\b\w*[Oo]ptNum\(\s*\2\s*\)", re.S)
+_FIELDS_CONST = r"const\s+%s\s*=\s*\[([^\]]*)\]"
+
+
+def collected_fields(body: str, source: str = None) -> Set[str]:
+    """Toplayıcı gövdesinde okunan alan id'leri.
+
+    ``source`` verilirse (şablonun tamamı) adlı id listelerinin elemanları
+    oradan çözülür; verilmezse ``body`` içinde aranır.
+    """
     found: Set[str] = set()
     for pattern in _READ_PATTERNS:
         found.update(pattern.findall(body))
+    kaynak = body if source is None else source
+    for m in _LIST_FOREACH_READ.finditer(body):
+        for ad in re.findall(r"\b([A-Z][A-Z0-9_]*_FIELDS)\b", m.group(1)):
+            dizi = re.search(_FIELDS_CONST % re.escape(ad), kaynak)
+            if dizi:
+                found.update(re.findall(r"['\"]([\w-]+)['\"]", dizi.group(1)))
     return found
 
 
@@ -219,6 +243,55 @@ def _as_float(text):
         return None
 
 
+#: v3.0.1 kulvar M — sunucu kaydından basılan seçici seçenekleri. Hibrit
+#: sayfasının malzeme seçicileri seçeneklerini şablonda elle yazmaz; şablon
+#: başındaki ``malzeme_secenekleri`` makrosu sunucunun kaydını döker
+#: (app.py ``_hibrit_malzeme_secim_kaydi``). Ham metinde ``<option`` yoktur;
+#: seçenekler aynı kayıttan, sayfanın basacağı sırayla okunur. Üçüncü
+#: argüman ``true`` ise makro önce boş ("seçilmedi") seçeneği basar.
+_SUNUCU_SECENEK_MAKROSU = re.compile(
+    r'\{\{\s*malzeme_secenekleri\(\s*hybrid_materials\.(\w+)\s*,[^}]*?'
+    r'(,\s*true\s*)?\)\s*\}\}')
+
+
+def _sunucu_secenekleri(govde: str) -> List[str]:
+    m = _SUNUCU_SECENEK_MAKROSU.search(govde)
+    if not m:
+        return []
+    from hrma.app import _hibrit_malzeme_secim_kaydi
+    rol = _hibrit_malzeme_secim_kaydi()[m.group(1)]
+    return ([''] if m.group(2) else []) + [o['value'] for o in rol['options']]
+
+
+#: V301/K-B — katı sayfasının kasa/lüle seçicileri de seçeneklerini sunucu
+#: kaydından basar (``solid_materials.<alan>.options`` Jinja döngüsü; ham
+#: metindeki tek ``<option value="{{ o.value }}">`` bir ŞABLON ifadesidir,
+#: seçenek değil). Seçenekler aynı kayıttan, sayfanın basacağı sırayla.
+_KATI_SUNUCU_SECENEK = re.compile(r'solid_materials\.(\w+)\.options')
+
+
+def _kati_sunucu_secenekleri(govde: str):
+    m = _KATI_SUNUCU_SECENEK.search(govde)
+    if not m:
+        return None
+    from hrma.engines.solid_rocket_engine import solid_material_options
+    return [o['value'] for o in solid_material_options(m.group(1))]
+
+
+#: V301/L-D (SV-12) — sıvı sayfasının kamara malzemesi seçicisi de
+#: seçeneklerini sunucu kaydından basar (``liquid_form.<alan>.options``;
+#: app.py ``_sivi_form_kaydi`` <- motorun ``CHAMBER_MATERIAL_MAP``i).
+_SIVI_SUNUCU_SECENEK = re.compile(r'liquid_form\.(\w+)\.options')
+
+
+def _sivi_sunucu_secenekleri(govde: str):
+    m = _SIVI_SUNUCU_SECENEK.search(govde)
+    if not m:
+        return None
+    from hrma.app import _sivi_form_kaydi
+    return [o['value'] for o in _sivi_form_kaydi()[m.group(1)]['options']]
+
+
 def field_specs(html: str) -> Dict[str, TemplateField]:
     """Şablondaki her form alanı için tip, aralık, varsayılan ve seçenekler."""
     out: Dict[str, TemplateField] = {}
@@ -241,7 +314,14 @@ def field_specs(html: str) -> Dict[str, TemplateField]:
         if tag == 'select':
             end = html.find('</select>', match.start())
             if end != -1:
-                options = _OPTION.findall(html[match.start():end])
+                govde = html[match.start():end]
+                options = _kati_sunucu_secenekleri(govde)
+                if options is None:
+                    options = _sivi_sunucu_secenekleri(govde)
+                if options is None:
+                    options = _OPTION.findall(govde)
+                if not options:
+                    options = _sunucu_secenekleri(govde)
 
         value_match = _ATTR['value'].search(tag_text)
         out[field_id] = TemplateField(

@@ -314,11 +314,19 @@ class TestB4AssumedBeyani:
     def test_kati_sivi_lule_eti_stepl_ayni_kural(self, planlar):
         from hrma.export.step_export import (NOZZLE_WALL_MIN_MM,
                                              NOZZLE_WALL_THROAT_FRACTION)
-        for m, pid in (('solid', 'S09'), ('liquid', 'L10')):
+        # V301 CAD-2 kalem 8 — GEREKÇELİ GÜNCELLEME: örnek sıvı rejeneratif
+        # ve cidarı iki katmanlı; ceket lüleyi çıkışa kadar kaplar, lüle eti
+        # üreteç kuralı değil yayımlanan yığındır (STEP ile aynı kaynak).
+        for m, pid in (('solid', 'S09'),):
             d = _parca(planlar[m], pid)['dims']
             dt = d['throat_diameter_mm']['source']['raw']
             assert d['wall_thickness_mm']['value'] == max(
                 NOZZLE_WALL_MIN_MM, NOZZLE_WALL_THROAT_FRACTION * dt * 1000)
+        d = _parca(planlar['liquid'], 'L10')['dims']['wall_thickness_mm']
+        assert d['source']['kind'] == 'solver'
+        assert d['source']['field'] == ('structural_analysis.chamber_structure'
+                                        '.wall_stack_thickness_mm')
+        assert d['value'] == d['source']['raw']
 
 
 # ---------------------------------------------------------------------------
@@ -791,9 +799,27 @@ class TestB5GirisimTemas:
         assert _cizilmeyen(p, 'X01')['class'] == 'interference'
 
     def test_esit_oncelikte_ikisi_de_dusmez_kalmaz(self, yanitlar):
-        # Tam katı yanıtı: astar (2,0) + yalıtım (3,0) = 5,0 mm yığın,
-        # tane-kasa boşluğu 3,0 mm (K-6) -> ikisi de çizilmez.
-        p = build_plan(copy.deepcopy(yanitlar['solid']), 'solid')
+        # Ölçülen vaka (K-6): astar + yalıtım yığını tane-kasa boşluğundan
+        # 2,0 mm kalın -> eşit öncelikli iki ısıl katman da çizilmez.
+        # V301/T-ÇAPA-D: K-A kasa kapısı (1b71ef5a3) kasayı artık tane +
+        # 2·(astar + yalıtım) alacak kadar geniş kuruyor (sığmayan beyan 422);
+        # gerçek katı yanıtında girişim OLUŞMUYOR. Vaka aynı örtüşmeyle
+        # kurulur: yanıtın ısıl bariyer bloğunda astar 2,0 mm kalınlaştırılır
+        # (kasa ve tane yanıtın kendi sayıları).
+        g = copy.deepcopy(yanitlar['solid'])
+        tb = None
+        for yol in (('cad_design', 'insulation_system', 'thermal_barrier'),
+                    ('insulation_system', 'thermal_barrier')):
+            d = g
+            for parca in yol:
+                d = d.get(parca) if isinstance(d, dict) else None
+            if isinstance(d, dict):
+                tb = d
+                break
+        assert tb is not None and tb.get('liner_thickness'), (
+            'ön koşul: yanıt ısıl bariyer bloğunu (astar kalınlığı) taşımalı')
+        tb['liner_thickness'] = float(tb['liner_thickness']) + 2.0
+        p = build_plan(g, 'solid')
         dusen = {n['id'] for n in p['not_modelled']
                  if n.get('class') == 'interference'}
         assert dusen == {'S06', 'S07'}

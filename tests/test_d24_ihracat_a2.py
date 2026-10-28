@@ -13,6 +13,8 @@ import re
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -81,8 +83,11 @@ def client():
 
 def _solid(client, **kw):
     govde = {'motor_name': 'd24a2', 'propellant_type': 'apcp',
-             'chamber_pressure': 40, 'chamber_diameter': 100,
-             'grain_length': 500, 'core_diameter': 30,
+             'chamber_pressure': 40,
+             # v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+             # (A_p/A_t 0,947); K-A kapısından beri 422. Konu port değil: geometri
+             # tek tanım SOLID_DEFAULT_GEOMETRY_MM'den (kopyalanmaz).
+             **SOLID_DEFAULT_GEOMETRY_MM,
              'grain_outer_diameter': 90, 'nozzle_throat_diameter': 25,
              'nozzle_expansion_ratio': 8}
     govde.update(kw)

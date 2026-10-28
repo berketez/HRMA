@@ -135,7 +135,27 @@ def template_keys():
     keys |= set(re.findall(r"'(adv\.js\.port[A-Za-z]+)'", src))   # PORT_LABEL_KEYS
     # ['anahtar', 'İngilizce yedek'] biçimindeki eşleme tabloları (requiredFields)
     keys |= set(re.findall(r"\['(adv\.[\w.]+)',", src))
+    # v3.0.1 kulvar M: malzeme seçicilerinin seçenekleri sunucu kaydından
+    # Jinja makrosuyla basılır (malzeme_secenekleri); şablonda anahtar yerine
+    # TEK bir ifade durur. O ifade, kaydın ürettiği anahtar KÜMESİYLE
+    # değiştirilir — yalnız bu ifade (genel '{{ ... }}' muafiyeti yok).
+    if MALZEME_JINJA_ANAHTARI in keys:
+        keys.discard(MALZEME_JINJA_ANAHTARI)
+        keys |= sunucu_malzeme_anahtarlari()
     return keys
+
+
+#: Şablondaki malzeme seçeneği anahtarının Jinja ifadesi (advanced.html
+#: ``malzeme_secenekleri`` makrosu).
+MALZEME_JINJA_ANAHTARI = '{{ o.i18n_key }}'
+
+
+def sunucu_malzeme_anahtarlari():
+    """Malzeme panelinin sunucudan basılan seçenek anahtarları (adv.mat.*)."""
+    from hrma.engines.hybrid_rocket_engine import (
+        HYBRID_MATERIAL_ROLES, hybrid_material_role_options)
+    return {o['i18n_key'] for alan in HYBRID_MATERIAL_ROLES
+            for o in hybrid_material_role_options(alan)}
 
 
 def normalize(text):
@@ -267,7 +287,11 @@ def test_attribute_values_match_template():
 # ölçü çizgisi tireleri. Liste BİLİNÇLİ olarak dar tutuldu.
 IGNORE_TEXT = re.compile(r'^[\s\d.,:/()\[\]%×+\-—–…°&;#a-z]{0,4}$')
 SYMBOLIC = {'?', '—', '1&times;', '&#9654;', 't = 0.00 s / — s', 'N⋅s',
-            'P', '(t)', '(A', '/A)', '0.9', 't', '100%', '1050 kg/m³'}
+            'P', '(t)', '(A', '/A)', '0.9', 't', '100%', '1050 kg/m³',
+            # V301/H-PANEL (NK-6 ek): Motor Kesiti açıklamasındaki L_total
+            # simgesinin alt indisi (L<sub>total</sub>); tanımı yanındaki
+            # data-i18n'li tümcede.
+            'total'}
 
 
 def test_no_unmarked_visible_text_in_markup():

@@ -339,19 +339,39 @@ class TestParticleSpreadIsSourced:
 
 
 # ---------------------------------------------------------------------------
-# 5. İlk elmas: kaynaksız konum adlandırılmış ve beyanlı (K-4)
+# 5. İlk elmas: kaynaksız konum ÇİZİLMEZ (karar §27-15; v3.0.1)
 # ---------------------------------------------------------------------------
+#
+# Çevrilen beklenti (ana model izni, 19 Eki; dört koşul):
+#  1. Eski beklentinin gerekçesi: K-4 (KU-25 / LULE-2c) kaynaksız ilk elmas
+#     konumunu adlandırıp beyanla ÇİZMEYİ istiyordu (0,9·d_e).
+#  2. Yeni beklenti kod çıktısından kopyalanmadı; karar §27-15'ten türetildi
+#     (28 Eyl): "Künyesiz ilk şok elması 0,9·d_e SÖKÜLÜR. Plume modeli konum
+#     yayımlayana dek elmas ÇİZİLMEZ".
+#  3. Tolerans yok (kaynak metin sözleşmesi).
+#  4. Ters mutasyon: eski 'FIRST_DIAMOND_OFFSET_DE = 0.9' yerleşimi geri
+#     konursa iki test de KIRMIZI olur (ölçüldü).
 
-class TestFirstDiamondDeclared:
+def _diamond_body():
+    body = _source().split(
+        'MotorScene.prototype._updateDiamondPositions = function')[1]
+    return body[:body.index('MotorScene.prototype.')]
 
-    def test_named_constant_and_declaration(self):
-        body = _source().split(
-            'MotorScene.prototype._updateDiamondPositions = function')[1]
-        body = body[:body.index('MotorScene.prototype.')]
-        assert 'var FIRST_DIAMOND_OFFSET_DE = 0.9;' in body
-        assert 'KAYNAKSIZ GÖRSEL YERLEŞİM' in body
-        assert 'd.de * FIRST_DIAMOND_OFFSET_DE' in body
+
+class TestFirstDiamondNotFabricated:
+
+    def test_no_unsourced_offset(self):
+        body = _diamond_body()
+        assert 'FIRST_DIAMOND_OFFSET' not in body
         assert 'd.de * 0.9' not in body
+        assert 'd.de *' not in body.split('var yk')[1].split(';')[0]
+
+    def test_hidden_until_first_cell_published(self):
+        """İlk hücre konumu yayımlanmadıkça elmaslar gizlenir."""
+        body = _diamond_body()
+        assert 'var ilkHucreMm = info ? info.firstCellOffsetMm : undefined;' in body
+        assert '!(ilkHucreMm > 0)' in body
+        assert 'var yk = ilkHucreMm + k * info.diamondSpacing;' in body
 
     def test_old_mj_formula_is_gone(self):
         src = _extract('readNozzleExit')

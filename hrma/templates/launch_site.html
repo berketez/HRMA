@@ -29,6 +29,7 @@
          settings_panel.js'ten ÖNCE yüklenir; yüklenmezse ayarlar
          panelinde "Hata bildir" bölümü hiç çizilmez. -->
     <script src="/static/js/bug_report.js"></script>
+    <script src="/static/js/field_help.js"></script>
     <script src="/static/js/settings_panel.js"></script>
     <!-- ÖH D21 / P12aB5-07 — ÖLÇÜLEN KUSUR: bu sayfa altı sayfa arasında
          `update_check.js`i yüklemeyen TEK sayfaydı. Ayarlar > "Şimdi denetle"
@@ -200,6 +201,9 @@
            nötr griden çıkar. Renk TEK kanal değildir — alan adı
            ('load_warnings: ') metnin içinde de duruyor. */
         .ls-hint.ls-note-warn { color: var(--hd-orange, #ff8c33); }
+        /* V301/UÇUŞ C-25: uçuşu durduran boş/eksik alan işareti (renk tek
+           kanal değildir — durum satırı alanı ADIYLA söyler). */
+        .ls-input-invalid { outline: 2px solid var(--hd-orange, #ff8c33); outline-offset: 1px; }
 
         /* Zaman kaydırıcı + oynatım */
         .ls-player { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
@@ -210,6 +214,14 @@
             color: var(--hd-ink-strong, #eaf7fb); font-size: 14px;
         }
         .ls-iconbtn:hover { border-color: var(--hd-line-strong, rgba(0,229,255,0.42)); }
+        /* v3.0.1 (NK-48): kapalı oynatma düğmesi etkin GİBİ görünüyordu. */
+        .ls-iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .ls-check input:disabled, .ls-check input:disabled + span { opacity: 0.45; cursor: not-allowed; }
+        /* v3.0.1 (NK-69): kuru kütle dayanağı (alan yollu künye) ana metinde
+           değil, açılır bölümde. */
+        .ls-basis { margin-top: 4px; }
+        .ls-basis summary { cursor: pointer; color: var(--hd-ink-dim, #7d97a5); }
+        .ls-basis > div { margin-top: 3px; }
         #ls-time { flex: 1; accent-color: var(--hd-orange, #ff8c33); }
         #ls-tlabel { font-family: var(--hd-mono, monospace); font-size: 11px; color: var(--hd-ink-dim, #7d97a5); min-width: 62px; text-align: right; }
 
@@ -229,6 +241,11 @@
             background: rgba(6,14,26,0.8); border: 1px solid var(--hd-line, rgba(0,229,255,0.18));
             border-left: 3px solid var(--hd-orange, #ff8c33);
             border-radius: 8px; padding: 9px 12px;
+            /* v3.0.1 (NK-69): 1440×900'de kutu ~400 px'e uzayıp sağ panelin
+               uçuş özetini örtüyordu; tavan + kendi kaydırması. Sağ panelin
+               tavanı bu kutunun ÖLÇÜLEN yüksekliğinden kurulur
+               (layoutBottomReserve). */
+            max-height: 30vh; overflow-y: auto;
         }
         #ls-notes .warn { color: var(--hd-orange, #ff8c33); }
 
@@ -284,11 +301,11 @@
             <div class="ls-hint" data-i18n="site.selectHint">Rotate with drag, zoom with wheel, click the globe to pick a point.</div>
             <div class="ls-row" style="margin-top:10px">
                 <div class="ls-field">
-                    <label data-i18n="site.lat">Latitude</label>
+                    <label><span data-i18n="site.lat">Latitude</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.lat">Site latitude, decimal degrees (WGS84, north positive). Apply moves the globe there; Resolve site and Fly this site read it (the flight sends it as latitude_deg for Earth rotation). Empty or not a number: those buttons do nothing. Accepted −90 to 90.</span></span></label>
                     <input id="ls-lat" type="number" step="0.0001" value="28.6084">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.lon">Longitude</label>
+                    <label><span data-i18n="site.lon">Longitude</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.lon">Site longitude, decimal degrees (WGS84, east positive). Apply moves the globe there and Resolve site reads it; the flight path is placed at this point. Empty or not a number: those buttons do nothing. Accepted −180 to 180.</span></span></label>
                     <input id="ls-lon" type="number" step="0.0001" value="-80.6043">
                 </div>
             </div>
@@ -307,7 +324,7 @@
                 <span class="v" id="ls-vehicle-name">--</span>
             </div>
             <div class="ls-field" style="margin-top:6px">
-                <label data-i18n="site.vehicleSource">Source</label>
+                <label><span data-i18n="site.vehicleSource">Source</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vehicleSource">Which vehicle is flown: the last motor calculated on a motor page (handed over through this browser's storage), a saved .hrma project (recalculated on the server, since a project stores only inputs) or the built-in example vehicle. Changing it disables the previous flight until you fly again.</span></span></label>
                 <select id="ls-vehicle-source">
                     <option value="session" data-i18n="site.srcSession">Last motor calculated</option>
                     <option value="project" data-i18n="site.srcProject">Saved project (.hrma)</option>
@@ -315,7 +332,7 @@
                 </select>
             </div>
             <div class="ls-field" id="ls-project-wrap" style="margin-top:6px; display:none">
-                <label data-i18n="site.selectProject">Project</label>
+                <label><span data-i18n="site.selectProject">Project</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.project">Saved project whose motor is flown; it is recalculated on the server from its stored inputs. Shown only when Source is a saved project.</span></span></label>
                 <select id="ls-project"></select>
             </div>
             <div class="ls-hint" id="ls-vehicle-note" style="margin-top:6px"></div>
@@ -325,21 +342,21 @@
                  motor olmaz. Salt okunur + kilit rozeti. -->
             <div class="ls-row" style="margin-top:8px">
                 <div class="ls-field">
-                    <label data-i18n="site.vThrust">Thrust (N)</label>
+                    <label><span data-i18n="site.vThrust">Thrust (N)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vThrust">Thrust of the flown motor (N), read-only: it comes from the selected vehicle and is sent as thrust. If the vehicle does not provide it (and carries no thrust curve), the flight is refused by name — no number is substituted.</span></span></label>
                     <input id="ls-v-thrust" type="number" readonly class="ls-locked">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.vBurnTime">Burn time (s)</label>
+                    <label><span data-i18n="site.vBurnTime">Burn time (s)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vBurnTime">Burn time of the flown motor (s), read-only, from the selected vehicle; sent as burn_time. If the vehicle does not provide it (and carries no thrust curve), the flight is refused by name — no number is substituted. A liquid engine gives a burn time only when one was entered on the liquid page.</span></span></label>
                     <input id="ls-v-burntime" type="number" readonly class="ls-locked">
                 </div>
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.vPropMass">Propellant (kg)</label>
+                    <label><span data-i18n="site.vPropMass">Propellant (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vPropMass">Propellant mass of the flown motor (kg), read-only, from the selected vehicle; sent as propellant_mass. If the vehicle does not provide it, the flight is refused by name — no number is substituted.</span></span></label>
                     <input id="ls-v-propmass" type="number" readonly class="ls-locked">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.vInertMass">Engine inert (kg)</label>
+                    <label><span data-i18n="site.vInertMass">Flying inert mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vInertMass">Inert mass the motor adds to the vehicle in flight (kg), read-only, from the selected vehicle (engine_inert_mass): the motor dry mass (case or chamber, nozzle, injector); for a liquid engine also the propellant tank dry structure and the loaded-minus-nominal (reserve) propellant when the result publishes them. The breakdown is shown under the vehicle name. It is added to Airframe dry mass and the sum is sent as dry_mass. If the vehicle does not provide it, the flight is refused by name.</span></span></label>
                     <input id="ls-v-inertmass" type="number" readonly class="ls-locked">
                 </div>
             </div>
@@ -347,31 +364,31 @@
             <!-- Kullanıcı alanları: gövde ve kanatlar motordan türetilemez. -->
             <div class="ls-row" style="margin-top:8px">
                 <div class="ls-field">
-                    <label data-i18n="site.bodyDiameter">Body OD (m)</label>
+                    <label><span data-i18n="site.bodyDiameter">Body OD (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.bodyDia">Body outer diameter (m), sent as body_diameter (reference area and fin scaling of the 6-DOF solver). When the vehicle gives the engine diameter, that becomes the field minimum and a smaller value is raised to it; the solver also refuses the flight by name if the body is narrower than the engine. Empty or not a number: not sent — the solver applies its own declared default and names it under the result.</span></span></label>
                     <input id="ls-a-bodydia" type="number" step="0.001" value="0.15">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.bodyLength">Body length (m)</label>
+                    <label><span data-i18n="site.bodyLength">Body length (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.bodyLen">Body length (m), sent as body_length. When the vehicle gives the engine length, a value shorter than max(2.0 m, engine length + 1.0 m) is raised to it; the solver refuses the flight by name if the body is shorter than the engine. Empty or not a number: not sent — the solver applies its own declared default and names it under the result. Nose length 0.50 m (ogive) is fixed on this page.</span></span></label>
                     <input id="ls-a-bodylen" type="number" step="0.01" value="3.0">
                 </div>
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.airframeDryMass">Airframe dry (kg)</label>
+                    <label><span data-i18n="site.airframeDryMass">Airframe dry (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.dryMass">Airframe dry mass (kg), EXCLUDING the flying inert mass shown above; the page adds the two and sends the sum as dry_mass. Empty or not a number: the flight is refused by name (no mass is assumed).</span></span></label>
                     <input id="ls-a-drymass" type="number" step="0.1" value="18">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.cd0">Cd0</label>
+                    <label><span data-i18n="site.cd0">Cd0</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.cd0">Zero-lift drag coefficient (dimensionless), sent as cd0; the endpoint accepts 0–5. Empty or not a number: not sent — the solver applies its own declared default and names it under the result.</span></span></label>
                     <input id="ls-a-cd0" type="number" step="0.01" value="0.45">
                 </div>
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.finCount">Fins</label>
+                    <label><span data-i18n="site.finCount">Fins</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finCount">Number of fins, sent as fin_count; must be a whole number ≥ 0 (0 = no fins), otherwise the endpoint refuses the flight. Empty: not sent — the solver applies its own declared default and names it under the result. Fin root chord 0.20 m, tip chord 0.10 m and sweep 0.08 m are fixed on this page.</span></span></label>
                     <input id="ls-a-fincount" type="number" step="1" value="4">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.finSpan">Fin span (m)</label>
+                    <label><span data-i18n="site.finSpan">Fin span (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finSpan">Fin span (m), sent as fin_span; must be ≥ 0. Empty or not a number: not sent — the solver applies its own declared default and names it under the result.</span></span></label>
                     <input id="ls-a-finspan" type="number" step="0.01" value="0.11">
                 </div>
             </div>
@@ -388,35 +405,35 @@
                  yük uydurmaz. -->
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.windSpeed">Wind speed (m/s)</label>
+                    <label><span data-i18n="site.windSpeed">Wind speed (m/s)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.windSpeed">Wind speed (m/s), sent as wind_speed; must be ≥ 0 and below the ISA sea-level speed of sound. Default 0 (no wind). Empty or not a number: not sent — the solver applies its own declared default and names it under the result.</span></span></label>
                     <input id="ls-a-windspeed" type="number" step="0.5" min="0" value="0">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.windDir">Wind direction (deg)</label>
+                    <label><span data-i18n="site.windDir">Wind direction (deg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.windDir">Direction the wind blows FROM (degrees from north), sent as wind_direction_deg; accepted 0–360. Empty or not a number: not sent — the solver applies its own declared default and names it under the result.</span></span></label>
                     <input id="ls-a-winddir" type="number" step="5" min="0" max="360" value="270">
                 </div>
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label data-i18n="site.launchElevation">Launch elevation (deg)</label>
+                    <label><span data-i18n="site.launchElevation">Launch elevation (deg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.elev">Launch elevation above the horizon (degrees), sent as launch_elevation_deg; accepted 0–90 (90 = vertical). Empty or not a number: not sent — the solver applies its own declared default and names it under the result. The launch rail is fixed at 5 m on this page.</span></span></label>
                     <input id="ls-a-elev" type="number" step="1" value="84">
                 </div>
                 <div class="ls-field">
-                    <label data-i18n="site.azimuth">Azimuth (deg)</label>
+                    <label><span data-i18n="site.azimuth">Azimuth (deg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.azim">Launch azimuth (degrees from north), sent as launch_azimuth_deg; any finite number. Empty or not a number: not sent — the solver applies its own declared default and names it under the result.</span></span></label>
                     <input id="ls-a-azim" type="number" step="1" value="90">
                 </div>
             </div>
-            <div class="ls-hint" data-i18n="site.airframeHint">Airframe dry mass EXCLUDES the engine inert mass shown above — the solver adds them.</div>
+            <div class="ls-hint" data-i18n="site.airframeHint">Airframe dry mass EXCLUDES the flying inert mass shown above — the solver adds them together.</div>
 
             <div class="ls-field" style="margin-top:10px">
-                <label data-i18n="site.presets">Shortcuts (not a limit — any point is selectable)</label>
+                <label><span data-i18n="site.presets">Shortcuts (not a limit — any point is selectable)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.presets">Shortcut list of known sites: choosing one writes its latitude and longitude into the fields and moves the globe there. Not a limit — any point can be picked on the globe.</span></span></label>
                 <select id="ls-presets"></select>
             </div>
 
             <div class="ls-sep"></div>
             <label class="ls-check">
                 <input type="checkbox" id="ls-online">
-                <span data-i18n="site.online">Use online enrichment (Open-Meteo)</span>
+                <span data-i18n="site.online">Use online enrichment (Open-Meteo)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.online">Off (default): Resolve site uses only packaged offline data. On: it first tries Open-Meteo over the internet for elevation and current surface temperature/pressure, which sends the coordinates to that service; any failure falls back to the offline data.</span></span>
             </label>
             <button class="ls-btn" id="ls-resolve" data-i18n="site.resolve">Resolve site</button>
             <div id="ls-resolve-out" style="margin-top:10px; display:none">
@@ -428,19 +445,31 @@
                 <div class="ls-kv"><span class="k" data-i18n="site.pressure">Pressure</span><span class="v" id="ls-r-press">--</span></div>
                 <div class="ls-kv"><span class="k" data-i18n="site.earthRotSpeed">Earth rotation speed (info only)</span><span class="v" id="ls-r-erot">--</span></div>
             </div>
-            <div id="ls-status"></div>
         </div>
 
         <!-- SAĞ: uçuş yolu + oynatım -->
         <div class="ls-panel" id="ls-right">
             <h2 data-i18n="site.flight">Flight path</h2>
             <button class="ls-btn accent" id="ls-fly" data-i18n="site.launch">Fly this site</button>
+            <!-- v3.0.1 (NK-48, son kullanıcı testi): durum satırı sol panelin
+                 EN ALTINDAYDI; uzun araç künyesi paneli kaydırınca "Uçuş
+                 çözülüyor…" ve "araç kararsız — oynatma kapalı" iletileri hiç
+                 görünmüyordu (oynatma düğmeleri açıklamasız kapalı kalıyordu).
+                 Uçuşu başlatan düğmenin hemen altına taşındı. -->
+            <div id="ls-status" role="status" aria-live="polite"></div>
 
             <div class="ls-player">
                 <button class="ls-iconbtn" id="ls-playpause" data-i18n-title="site.play"
                         title="Play" aria-label="Play">&#9658;</button>
-                <input id="ls-time" type="range" min="0" max="1000" value="0" disabled>
-                <span id="ls-tlabel">0.0 s</span>
+                <!-- V301/HİBRİT-DIŞA (KILAVUZ P8): zaman çizgisinin "?"
+                     açıklaması vardı ama kaydırıcıyla İLİŞKİLİ değildi (ortak
+                     kap yok, aria-describedby yok) — ölçümde "açıklamasız
+                     kontrol" sayıldı. Kaydırıcı, süre etiketi ve ipucu aynı
+                     <label> içinde; display:contents düzeni değiştirmez. -->
+                <label class="ls-timewrap" style="display:contents">
+                    <input id="ls-time" type="range" aria-describedby="ls-time-help" min="0" max="1000" value="0" disabled>
+                    <span id="ls-tlabel">0.0 s</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" id="ls-time-help" role="tooltip" data-i18n="site.help.time">Flight playback timeline: scrubs the solved flight from lift-off (left) to the end (right). Enabled only after Fly this site; display only — nothing is recalculated.</span></span>
+                </label>
             </div>
             <div class="ls-btnrow">
                 <button class="ls-iconbtn" id="ls-reset" data-i18n-title="site.reset" title="Reset" style="width:auto;flex:1" data-i18n="site.reset">Reset</button>
@@ -450,12 +479,12 @@
 
             <label class="ls-check">
                 <input type="checkbox" id="ls-exagg">
-                <span data-i18n="site.exaggerate">Exaggerate altitude</span>
+                <span data-i18n="site.exaggerate">Exaggerate altitude</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.exaggerate">Display only: stretches the vertical scale of the drawn flight path for readability; off means true scale. The flight is not recalculated.</span></span>
             </label>
             <div class="ls-hint" data-i18n="site.exaggerateHint">Off by default — scale is true. Only enlarges the vertical for readability.</div>
             <label class="ls-check">
                 <input type="checkbox" id="ls-follow">
-                <span data-i18n="site.follow">Camera follows rocket</span>
+                <span data-i18n="site.follow">Camera follows rocket</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.follow">Display only: the camera follows the rocket during playback. The flight is not recalculated.</span></span>
             </label>
 
             <div class="ls-sep"></div>
@@ -606,7 +635,7 @@
                  Metinler i18n sözlüğünden, textContent ile basılır. -->
             <label class="ls-hint" style="margin-top:6px; display:flex; align-items:center; gap:6px">
                 <input type="checkbox" id="ls-tile-network">
-                <span data-i18n="site.tileNetworkToggle">Online satellite tiles (NASA GIBS)</span>
+                <span data-i18n="site.tileNetworkToggle">Online satellite tiles (NASA GIBS)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.tileNetwork">Off (default): no map request leaves this computer; areas outside the map cache show the packaged offline texture. On: satellite tiles are fetched from NASA GIBS and each request tells the provider which area you are viewing. The choice is stored in this browser.</span></span>
             </label>
             <div id="ls-tile-netwarn" class="warn" style="margin-top:3px; display:none"
                  data-i18n="site.tileNetworkWarn">Online tiles are on: each tile request tells the provider (NASA GIBS) which area you are looking at.</div>
@@ -864,8 +893,11 @@
     // hiçbir koşulda çalışmıyordu. İki işlev de AYRIŞIK adlandırıldı; artık
     // `num` diye bir ad kalmadı, aynı tuzak sessizce tekrarlanamaz.
     function num_(v) { var n = parseFloat(v); return isFinite(n) ? n : null; }
-    // Girdi alanından sayı OKU (id ile); alan boş/geçersizse yedeğe düş.
-    function fieldNum(id, fb) { var n = parseFloat((el(id) || {}).value); return isFinite(n) ? n : fb; }
+    // Girdi alanından sayı OKU (id ile). V301/UÇUŞ C-25: alan boş/geçersizse
+    // YEDEK SAYI YOK — null döner; uçuş gövdesinde null anahtar gönderilmez
+    // ve 6-DOF ucu kendi beyanlı varsayılanını ADIYLA uygular
+    // (defaults_applied), ya da alan uçuşu durdurur (adlı ret).
+    function fieldNum(id) { var n = parseFloat((el(id) || {}).value); return isFinite(n) ? n : null; }
     function setRO(id, v, digits) {
         var e = el(id); if (!e) return;
         e.value = (v === null || v === undefined || !isFinite(v))
@@ -888,8 +920,9 @@
         var nameEl = el('ls-vehicle-name');
         if (nameEl) {
             var name = (v && (v.name_key ? t(v.name_key, v.motor_name) : v.motor_name)) || '--';
-            var src = (v && v.source) || 'example';
-            nameEl.textContent = name + ' (' + t('site.src.' + src, src) + ')';
+            // V301/UÇUŞ C-25: araç YOKSA köken uydurulmaz ('example' yazılmaz).
+            var src = v && v.source;
+            nameEl.textContent = src ? (name + ' (' + t('site.src.' + src, src) + ')') : name;
         }
         var note = el('ls-vehicle-note');
         if (note) {
@@ -908,6 +941,18 @@
             // cümle uydurulmaz.
             var inertNote = (v && typeof v.engine_inert_mass_note === 'string'
                 && v.engine_inert_mass_note.trim()) ? v.engine_inert_mass_note.trim() : '';
+            // v3.0.1 (NK-69, son kullanıcı testi): künyenin "; basis: "
+            // kuyruğu (motorun dry_mass_basis cümlesi, ham alan yollarıyla:
+            // structural_analysis.weight_analysis.total_weight …) panelin ana
+            // metninde basılıyor ve sol paneli ekranın altına taşırıyordu.
+            // Kısa cümle görünür kalır; dayanak AYNEN, açılır "Kuru kütle
+            // dayanağı" bölümüne iner (silinmez, kısaltılmaz).
+            var dayanak = '';
+            var ayrac = inertNote.indexOf('; basis: ');
+            if (ayrac >= 0) {
+                dayanak = inertNote.slice(ayrac + '; basis: '.length).trim();
+                inertNote = inertNote.slice(0, ayrac);
+            }
             if (inertNote) {
                 msg += (msg ? ' ' : '') + srv(inertNote);
             } else if (v && v.engine_inert_mass_is_estimate) {
@@ -932,6 +977,17 @@
                     + yuklemeUyarilari.map(yuklemeUyarisiMetni).join(' · ');
             }
             note.textContent = msg;
+            if (dayanak) {
+                var det = document.createElement('details');
+                det.className = 'ls-basis';
+                var ozetSatiri = document.createElement('summary');
+                ozetSatiri.textContent = t('site.dryMassBasis', 'Dry-mass basis');
+                var dayanakMetni = document.createElement('div');
+                dayanakMetni.textContent = srv(dayanak);
+                det.appendChild(ozetSatiri);
+                det.appendChild(dayanakMetni);
+                note.appendChild(det);
+            }
             // Uyarı VARSA künye nötr kalmaz: renk kanalı tek başına yeter
             // sayılmadığı için alan adı metinde de duruyor (yukarıda).
             note.classList.toggle('ls-note-warn', yuklemeUyarilari.length > 0);
@@ -964,18 +1020,21 @@
     // içindeki `readLast`/`clear` ise hiç çağrılmıyordu (ölçüldü: 0 çağrı).
     // Anahtar bir tarafta değişse köprü sessizce koparcaktı.
     function loadSessionVehicle(quiet) {
+        // V301/UÇUŞ C-25: araç bulunamazsa ÖRNEK ARAÇ SESSİZCE UÇURULMAZ;
+        // araç boş kalır ve "Bu sahadan uçur" adıyla reddeder. Örnek araç
+        // yalnız kullanıcı Kaynak = "Örnek araç"ı açıkça seçtiğinde uçar.
         if (!window.FlightHandoff || !FlightHandoff.readLast) {
             // FAIL-CLOSED: köprü betiği yüklenmediyse "hesap yapılmamış"
             // denmez — okuyamadığımız söylenir.
-            applyVehicle(EXAMPLE_VEHICLE, 'site.handoffUnreadable',
-                'Stored vehicle could not be read — showing the example vehicle.');
+            applyVehicle(null, 'site.handoffUnreadable',
+                'Stored vehicle could not be read — no vehicle is selected. Calculate a motor on a motor page, or choose a saved project or the example vehicle.');
             return false;
         }
         var durum = {};
         var doc = FlightHandoff.readLast(durum);
         if (durum.status === 'empty') {
-            if (!quiet) applyVehicle(EXAMPLE_VEHICLE, 'site.noSessionVehicle',
-                'No motor calculated in this session yet — showing the example vehicle.');
+            if (!quiet) applyVehicle(null, 'site.noSessionVehicle',
+                'No motor calculated in this session yet — no vehicle is selected. Calculate a motor on a motor page, or choose a saved project or the example vehicle.');
             return false;
         }
         var v = doc && (doc.vehicle || doc);
@@ -988,8 +1047,8 @@
         // kullanıcı verisi değil, son hesaptan türetilmiş kullanılamaz bir
         // önbellek kaydıdır.
         if (FlightHandoff.clear) FlightHandoff.clear();
-        applyVehicle(EXAMPLE_VEHICLE, 'site.handoffUnreadable',
-            'Stored vehicle could not be read — showing the example vehicle.');
+        applyVehicle(null, 'site.handoffUnreadable',
+            'Stored vehicle could not be read — no vehicle is selected. Calculate a motor on a motor page, or choose a saved project or the example vehicle.');
         return false;
     }
 
@@ -1053,12 +1112,14 @@
                 setStatus('');
                 return;
             }
-            applyVehicle(EXAMPLE_VEHICLE, 'site.projectLoadFailed',
-                'Project could not be recomputed — showing the example vehicle.');
+            // V301/UÇUŞ C-25: hesaplanamayan proje yerine ÖRNEK ARAÇ
+            // uçurulmaz; araç boş kalır, ucun kendi gerekçesi durum satırında.
+            applyVehicle(null, 'site.projectLoadFailed',
+                'Project could not be recomputed — no vehicle is selected; the reason is shown below.');
             setStatus(projeHataNedeni(httpDurum, d, name));
         }).catch(function () {
-            applyVehicle(EXAMPLE_VEHICLE, 'site.projectLoadFailed',
-                'Project could not be recomputed — showing the example vehicle.');
+            applyVehicle(null, 'site.projectLoadFailed',
+                'Project could not be recomputed — no vehicle is selected; the reason is shown below.');
             setStatus(projeHataNedeni(httpDurum, null, name));
         });
     }
@@ -1189,6 +1250,15 @@
     }
     layoutBottomReserve();
     window.addEventListener('resize', layoutBottomReserve);
+    // v3.0.1 (NK-69): notlar sonradan dolunca (karo/gökyüzü künyesi, dil
+    // değişimi) pay yalnız pencere boyu değişince ölçülüyordu; kutu büyüyüp
+    // panelin üstüne biniyordu. Boy değişimi de izlenir.
+    if (typeof ResizeObserver === 'function') {
+        var payGozcu = new ResizeObserver(layoutBottomReserve);
+        ['ls-scalebar', 'ls-notes'].forEach(function (id) {
+            if (el(id)) payGozcu.observe(el(id));
+        });
+    }
     el('ls-clear-tiles').addEventListener('click', function () {
         var b = this; b.disabled = true;
         fetch('/api/tile/cache/clear', { method: 'POST' })
@@ -1335,44 +1405,141 @@
     });
 
     // ---- Uçuş: 6-DOF çözücüyü çağır, yolu küreye koy ----
+    // V301/UÇUŞ C-25 — UÇUŞU DURDURAN ALANLAR ADIYLA İŞARETLENİR.
+    var UCUS_ISARETLI = [];
+    function alanIsaretle(id) {
+        var e = el(id); if (!e) return;
+        e.classList.add('ls-input-invalid');
+        e.setAttribute('aria-invalid', 'true');
+        UCUS_ISARETLI.push(id);
+    }
+    function alanIsaretleriniTemizle() {
+        UCUS_ISARETLI.forEach(function (id) {
+            var e = el(id); if (!e) return;
+            e.classList.remove('ls-input-invalid');
+            e.removeAttribute('aria-invalid');
+        });
+        UCUS_ISARETLI = [];
+    }
+    // Motordan/araçtan gelmesi gereken büyüklükler (itki, yanma süresi,
+    // itici, motor atıl kütlesi) ve gövde kuru kütlesi yoksa SAYI
+    // UYDURULMAZ: uçuş adıyla reddedilir. (Eskiden 6500 N / 7,5 s / 18 kg /
+    // atıl 0 / gövde 18 kg sessizce gidiyordu; araç seçilmemişse ÖRNEK araç
+    // uçuyordu.) Döner: ret metni ya da null.
+    function ucusReddi(veh) {
+        if (!veh) {
+            alanIsaretle('ls-vehicle-source');
+            return t('site.noVehicleToFly',
+                'No vehicle is selected — calculate a motor on a motor page, or choose a saved project or the example vehicle under Source. Nothing was flown.');
+        }
+        var eksik = [];
+        var egri = veh.thrust_curve;
+        var egriVar = !!(egri && egri.time && egri.time.length);
+        if (!egriVar) {
+            if (!(num_(veh.thrust) > 0)) { eksik.push('thrust'); alanIsaretle('ls-v-thrust'); }
+            if (!(num_(veh.burn_time) > 0)) { eksik.push('burn_time'); alanIsaretle('ls-v-burntime'); }
+        }
+        if (!(num_(veh.propellant_mass) > 0)) { eksik.push('propellant_mass'); alanIsaretle('ls-v-propmass'); }
+        if (num_(veh.engine_inert_mass) === null || num_(veh.engine_inert_mass) < 0) {
+            eksik.push('engine_inert_mass'); alanIsaretle('ls-v-inertmass');
+        }
+        if (eksik.length) {
+            return tf('site.vehicleIncomplete', { fields: eksik.join(', ') },
+                'The selected vehicle does not give {fields} — calculate the motor on its motor page (a liquid engine needs a burn time) and fly again. No number is substituted; nothing was flown.');
+        }
+        // Alan burada ham okunur: gövdeye giden TEK okuma aşağıdaki
+        // dryTotal satırıdır (fieldNum; şablon ⟷ okuyucu küme bekçisi).
+        var kuruEl = el('ls-a-drymass');
+        if (!isFinite(parseFloat(kuruEl && kuruEl.value))) {
+            alanIsaretle('ls-a-drymass');
+            return t('site.airframeDryMassEmpty',
+                'Airframe dry mass is empty — enter the airframe dry mass in kg (without the engine). Nothing was flown.');
+        }
+        return null;
+    }
+    // Sunucunun 6-DOF ucu boş bırakılan gövde/çevre alanına kendi beyanlı
+    // varsayılanını uyguladıysa (defaults_applied) bu, ADIYLA ve DEĞERİYLE
+    // durum satırına yazılır; sayı sayfada uydurulmaz, yanıttan okunur.
+    function sunucuVarsayilanMetni(d) {
+        var liste = (d && Array.isArray(d.defaults_applied)) ? d.defaults_applied : [];
+        var parcalar = liste.filter(function (k) {
+            return k && typeof k.field === 'string';
+        }).map(function (k) {
+            var deger = (typeof k.value === 'number') ? fmtNum_(k.value, 3) : String(k.value);
+            return k.field + ' = ' + deger + (k.unit && k.unit !== 'dimensionless' ? ' ' + k.unit : '');
+        });
+        if (!parcalar.length) return '';
+        return tf('site.serverDefaultsApplied', { list: parcalar.join(', ') },
+            'Empty fields were not sent; the flight solver applied its own declared defaults (not your input): {list}.');
+    }
+    // Ucun adlı reddi: alan adları ve gerekçe metni (EN sunucu cümlesi
+    // srv() ile aktif dile çevrilir; eşleşme yoksa aynen kalır).
+    function ucRetMetni(d, durum) {
+        var p = [t('site.solveError', 'The flight solver returned an error.')];
+        if (durum) p.push('HTTP ' + durum);
+        if (d && typeof d.error === 'string' && d.error) p.push(d.error);
+        if (d && typeof d.message === 'string' && d.message) p.push(srv(d.message));
+        var alanlar = (d && Array.isArray(d.invalid_fields)) ? d.invalid_fields.map(function (f) {
+            return f && f.field; }).filter(Boolean) : [];
+        if (alanlar.length) p.push('fields: ' + alanlar.join(', '));
+        return p.join(' · ');
+    }
+
     el('ls-fly').addEventListener('click', function () {
         var la = parseFloat(el('ls-lat').value), lo = parseFloat(el('ls-lon').value);
         if (!isFinite(la) || !isFinite(lo)) return;
-        el('ls-fly').disabled = true;
-        setStatus(t('site.launching', 'Solving flight…'));
 
         // ÇİFT SAYIM TUZAĞI: çözücünün beklediği dry_mass, uçan aracın
         // propelan HARİÇ toplam kuru kütlesidir. Motorun atıl kütlesi (kasa,
         // nozul, enjektör) ile gövde kuru kütlesi AYRI iki kalemdir; ikisi
         // burada TOPLANIR, propelan ise ayrı alan olarak gider. Panelde
         // "Airframe dry" alanı motor atılını İÇERMEZ (ipucu metni bunu söyler).
-        var veh = currentVehicle || EXAMPLE_VEHICLE;
-        var dryTotal = fieldNum('ls-a-drymass', 18) + (num_(veh.engine_inert_mass) || 0);
+        // V301/UÇUŞ C-25: araç seçilmemişse ÖRNEK ARAÇ uçmaz (adlı ret).
+        var veh = currentVehicle;
+        alanIsaretleriniTemizle();
+        var red = ucusReddi(veh);
+        if (red) {
+            setFlightControlsEnabled(false);
+            setStatus(red);
+            return;
+        }
+        el('ls-fly').disabled = true;
+        setStatus(t('site.launching', 'Solving flight…'));
+        var dryTotal = fieldNum('ls-a-drymass') + num_(veh.engine_inert_mass);
 
         var body = {
-            body_diameter: fieldNum('ls-a-bodydia', 0.15),
-            body_length: fieldNum('ls-a-bodylen', 3.0),
+            body_diameter: fieldNum('ls-a-bodydia'),
+            body_length: fieldNum('ls-a-bodylen'),
             nose_length: LS_FIXED_AIRFRAME.nose_length,
             nose_type: LS_FIXED_AIRFRAME.nose_type,
             dry_mass: dryTotal,
-            propellant_mass: num_(veh.propellant_mass) || 18,
-            thrust: num_(veh.thrust) || 6500,
-            burn_time: num_(veh.burn_time) || 7.5,
-            cd0: fieldNum('ls-a-cd0', 0.45),
-            fin_count: fieldNum('ls-a-fincount', 4),
+            propellant_mass: num_(veh.propellant_mass),
+            thrust: num_(veh.thrust),
+            burn_time: num_(veh.burn_time),
+            cd0: fieldNum('ls-a-cd0'),
+            fin_count: fieldNum('ls-a-fincount'),
             fin_root_chord: LS_FIXED_AIRFRAME.fin_root_chord,
             fin_tip_chord: LS_FIXED_AIRFRAME.fin_tip_chord,
-            fin_span: fieldNum('ls-a-finspan', 0.11),
+            fin_span: fieldNum('ls-a-finspan'),
             fin_sweep: LS_FIXED_AIRFRAME.fin_sweep,
-            launch_elevation_deg: fieldNum('ls-a-elev', 84),
-            launch_azimuth_deg: fieldNum('ls-a-azim', 90),
+            launch_elevation_deg: fieldNum('ls-a-elev'),
+            launch_azimuth_deg: fieldNum('ls-a-azim'),
             rail_length: LS_FIXED_AIRFRAME.rail_length,
-            wind_speed: fieldNum('ls-a-windspeed', 0),
-            wind_direction_deg: fieldNum('ls-a-winddir', 270), t_max: 400,
+            wind_speed: fieldNum('ls-a-windspeed'),
+            wind_direction_deg: fieldNum('ls-a-winddir'), t_max: 400,
             // B1 — Coriolis: çözücü saha enlemini alınca Dünya dönüşünü
             // modelleyebilir (düz-Dünya varsayımı kalkar).
-            latitude_deg: la
+            latitude_deg: la,
+            // V301/UÇUŞ NK-47: motor zarfı. "Gövde bu motoru taşıyabilir
+            // mi" hükmü 6-DOF ucunda TEK işlevle verilir
+            // (flight_vehicle.airframe_fit_conflicts); motor sayfalarının
+            // 6-DOF paneli de aynı alanları gönderir.
+            engine_od_m: num_(veh.engine_od_m),
+            engine_length_m: num_(veh.engine_length_m)
         };
+        // Boş alan (null) GÖNDERİLMEZ: uç kendi beyanlı varsayılanını adıyla
+        // uygular (defaults_applied) — sayfada gizli sayı yok.
+        Object.keys(body).forEach(function (k) { if (body[k] === null) delete body[k]; });
         // ÖH defter P4B3-01 — SAHA RAKIMI ÇÖZÜCÜYE GEÇMELİ.
         // Çözücü ve uç launch_altitude alanını zaten kabul ediyor
         // (app.py /api/six-dof-analysis) ve atmosfer artık MUTLAK irtifadan
@@ -1390,14 +1557,26 @@
         if (veh.thrust_curve && veh.thrust_curve.time && veh.thrust_curve.time.length) {
             body.thrust_curve = veh.thrust_curve;
         }
+        var ucDurum = 0;
         fetch('/api/six-dof-analysis', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
-        }).then(function (r) { return r.json(); }).then(function (d) {
+        }).then(function (r) {
+            ucDurum = r.status;
+            return r.json().catch(function () { return null; });
+        }).then(function (d) {
             el('ls-fly').disabled = false;
-            if (d.status !== 'success' || !d.series) {
+            if (!d || d.status !== 'success' || !d.series) {
                 setFlightControlsEnabled(false);
-                setStatus(t('site.solveError', 'The flight solver returned an error.')); return;
+                // V301/UÇUŞ NK-47: ucun adlı reddi (ör. airframe_cannot_carry_
+                // engine) gerekçesi ve alanlarıyla basılır; gövde alanı işaretlenir.
+                if (d && Array.isArray(d.invalid_fields)) {
+                    d.invalid_fields.forEach(function (f) {
+                        if (f && f.field === 'body_diameter') alanIsaretle('ls-a-bodydia');
+                        if (f && f.field === 'body_length') alanIsaretle('ls-a-bodylen');
+                    });
+                }
+                setStatus(ucRetMetni(d, ucDurum)); return;
             }
             // A3 — KARARLILIK KAPISI (istemcide Barrowman TEKRARLANMAZ):
             // çözücü zaten static_margin_full / stable / end_reason döndürüyor.
@@ -1420,7 +1599,24 @@
             globe.setFlightPath(d.series, la, lo, h0);
             el('ls-time').disabled = false;
             renderEvents();
-            setStatus('');
+            // v3.0.1 (NK-48): burada koşulsuz setStatus('') vardı ve az
+            // yukarıda yazılan "araç kararsız — oynatma kapalı" iletisini
+            // aynı karede siliyordu; kullanıcı kapalı düğmeleri gerekçesiz
+            // görüyordu. İleti yalnız kararlı araçta temizlenir.
+            if (!unstable) setStatus('');
+            // V301/UÇUŞ C-25: sunucunun boş alana uyguladığı beyanlı
+            // varsayılanlar (defaults_applied) durum satırına EKLENİR —
+            // kararsızlık iletisini silmez.
+            var varsayilanNotu = sunucuVarsayilanMetni(d);
+            if (varsayilanNotu) {
+                var durumEl = el('ls-status');
+                durumEl.textContent = durumEl.textContent
+                    ? durumEl.textContent + ' ' + varsayilanNotu : varsayilanNotu;
+            }
+            // Özet satırları panelin altında kalmasın (NK-69): çözüm gelince
+            // sağ panel özet bloğunu görünür alana kaydırır.
+            var ozet = el('ls-range');
+            if (ozet && ozet.scrollIntoView) ozet.scrollIntoView({ block: 'nearest' });
         }).catch(function () {
             el('ls-fly').disabled = false;
             setStatus(t('site.solveError', 'The flight solver returned an error.'));

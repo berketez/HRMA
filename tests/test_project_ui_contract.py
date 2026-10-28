@@ -120,8 +120,12 @@ def test_project_bar_dirty_tracking_and_beforeunload():
 
 def test_project_bar_client_side_name_rule():
     src = read(PROJECT_BAR)
-    assert re.search(r'A-Za-z0-9 _\.\\?-', src), \
-        'istemci tarafı ad beyaz listesi ([A-Za-z0-9 _.-]) kayboldu'
+    # v3.0.1 (NK-51): istemci beyaz listesi sunucununkiyle (Türkçe harfler
+    # dahil) birebir aynı karakter sınıfıdır.
+    from hrma.utils import projects as store
+    sinif = store._NAME_CHARS.replace('\\-', '\\-')
+    assert ('/^[' + sinif + ']{1,80}$/') in src, \
+        'istemci tarafı ad beyaz listesi sunucunun _NAME_CHARS sınıfından ayrıştı'
     assert '{1,80}' in src, 'ad uzunluk sınırı (1-80) kayboldu'
 
 

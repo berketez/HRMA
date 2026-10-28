@@ -59,7 +59,15 @@ def _html() -> str:
 
 
 def _ornek_alanlar() -> dict:
-    return json.loads(ORNEK.read_text(encoding='utf-8'))['inputs']['fields']
+    # V301/T-ÇAPA-D: ÖRNEK kulvarı (5fa435893) örnek sıvıya yanma süresi
+    # (max_burn_duration = 30 s) ve sayfanın boş alanlarını ('') yazdı. Bu
+    # dosyanın senaryosu SÜRESİZ sıvıdır (kullanıcı süreyi girmedi): süre
+    # açıkça çıkarılır, boş alanlar sayfa gibi gönderilmez
+    # (tests/support/ornek_alanlari.py).
+    from tests.support.ornek_alanlari import ornek_alanlari
+    alanlar = ornek_alanlari(ORNEK)
+    alanlar.pop('max_burn_duration', None)
+    return alanlar
 
 
 def _js_blok(kaynak: str, bas: str) -> str:
@@ -267,6 +275,10 @@ def _eng_dugmesi_kos(cr: dict, yanit: dict, mutasyon=None) -> dict:
     blok = '\n'.join([
         _js_blok(html, 'function _liquidExportStatus(text)'),
         _js_blok(html, 'function _liquidMotorName()'),
+        # V301/T-ÇAPA-D: HİBRİT-DIŞA (99ccab2ea) .eng düğmesinin gövdesini
+        # ``_liquidEngMotorData`` ile kuruyor (tam sonuç + ad); koşuma
+        # sayfanın kendi yardımcısı alınır (iddialar aynı).
+        _js_blok(html, 'function _liquidEngMotorData()'),
         _js_blok(html, 'function _ihracRetMetni(govde, durum)'),
         _js_blok(html, 'async function downloadLiquidEng()'),
     ])
@@ -301,7 +313,14 @@ class TestLU2EngDugmesi:
         assert md['propellant_tanks'] == cr['propellant_tanks']
         assert md['burn_time'] == cr['burn_time']
         assert md['motor_name'] == 'HRMA_LIQUID'
-        assert 'total_impulse' not in md and 'propellant_mass_total' not in md
+        # V3.0.5 SIVI-CIDAR kalem 4 — BEKLENTİ DEĞİŞTİ: çözücü süre
+        # verildiğinde toplam impulsu KENDİ tanımıyla yayımlıyor
+        # (total_impulse = thrust × burn_time, total_impulse_basis); düğme
+        # sayıyı TÜRETMEZ, çözücünün alanını aynen taşır (iddia aynı: düğme
+        # sayı uydurmuyor). Ölçüm: docs/scofield/raw/OH/V301/sivi-cidar/
+        # olcum/k4_once.json ⟷ k4_sonra.json.
+        assert md.get('total_impulse') == cr.get('total_impulse')
+        assert 'propellant_mass_total' not in md
         assert ['download', 1] in kos['bildirim']
 
     @needs_node
@@ -593,6 +612,34 @@ _SAYFA_ISLEVLERI = (
     'function tankKunye(alan, deger)', 'function tankKriyoSatiri(cs)',
     'function tankMalzemeHucresi(st)', 'function _liquidExportStatus(text)',
     'function liquidEngGateStatus(results)',
+    # v3.0.1 K kulvarı (kaynak-cea, 5e6a70514): displayResults veri kaynağı
+    # satırını bu yardımcıyla kurar; ikiz onu almazsa 'not defined' der
+    # (26 Eki çapraz denetimde taban kırmızısı olarak ölçüldü).
+    'function liquidCombustionSourceText(results)',
+    # V301/L-A (SV-15): calculateLiquid zincirinin iki yeni yardımcısı (ret
+    # gövdesi -> metin; eski hesap hatası bildirimlerinin temizliği).
+    'function _liquidRetMetni(govde, durum)',
+    'function _liquidHesapHatalariniTemizle()',
+    'function _liquidOpakZemin(el)',
+    # V301/L-E (NK-61, L-A DEVİR 3): displayResults alt sistem kartlarının
+    # devir seçimi / özgül hız / tank basıncı satırlarını bu yardımcılarla
+    # kurar; ikiz onları almazsa '_liqFeedTankRows is not defined' der.
+    'function _liqNum(v)', 'function _liqPumpCard(results)',
+    'function _liqSpeedBasisCell(results)',
+    'function _liqSpecificSpeedCell(results)',
+    'function _liqFeedTankRows(results)',
+    # T-ÇAPA-C2 (27 Eki): V301/L-C (8ee59c845, SV-06/SV-07) toplayıcı
+    # enjektör tipini kanonik ada çözer ve pintle ⟷ pintle-dışı alanları
+    # tipe göre gönderir; ikiz bunları almazsa calculateLiquid istek
+    # atmadan 'liqInjectorCanonical is not defined' ile düşüyordu.
+    'const LIQ_INJECTOR_LEGACY', 'function liqInjectorCanonical(v)',
+    'const LIQ_PINTLE_FIELDS', 'const LIQ_NOT_PINTLE_FIELDS',
+    'function liqInjectorFieldPayload()',
+    # T-ÇAPA-C2: Soğutma kartının iki katmanlı cidar modeli satırı ortak
+    # sözlük metnini sayfanın ``ortakMetin`` yardımcısıyla, çözücü yedeğini
+    # ``escapeNoticeText`` ile basar.
+    'function ortakMetin(anahtar, yedek, degiskenler)',
+    'function escapeNoticeText(v)',
 )
 
 
@@ -702,6 +749,10 @@ _SAYFA_TASLAKLARI = (
     'updateEfficiencyTab', 'updateManufacturingTab', 'liquidPlot', '_liquidPlotNote',
     'syncInjectorPanelToSolver', 'updateSixDofEngineNote', 'createTankVisualization',
     'exportTankCAD',
+    # T-ÇAPA-C2 (27 Eki): V301/UÇUŞ (f75da1023, 2433377ec) hesaptan hemen
+    # sonra yörünge ve 6-DOF formlarını aynı motordan tohumlar; bu
+    # düğümler yörünge formunu ÖLÇMEZ (kendi bekçileri test_v301_ucus*).
+    'liquidTrajectorySeed',
 )
 
 
@@ -863,11 +914,16 @@ class TestSart1dGimbalBeyani:
         cikti = self._kos(alanlar)
         esleme = dict(re.findall(r"(\w+): function \(\) \{ return T\('([a-z0-9_.]+)'",
                                  _js_blok(_html(), 'const GIMBAL_FIELD_LABELS')))
+        # V301/DİL-2 (yayın kapısı 7, kök 7): görünen metinde YALNIZ etiket;
+        # makine adı span'ın data-field + title niteliğinde (DİL terim kararı 1).
+        # Eskiden 'Etiket (anahtar)' biçimi kilitliydi; parantezdeki anahtar
+        # TR ekran ölçümünde ham anahtar sayılıyordu (dil-2/once.json).
         for k in alanlar:
             etiket = _sozluk_tr(esleme[k])
-            assert '%s (%s)' % (etiket, k) in cikti, (k, cikti)
-            # Anahtar YALNIZ parantez içinde geçer (çıplak ham anahtar yok).
-            assert cikti.count(k) == cikti.count('(%s)' % k) == 1, (k, cikti)
+            assert ('<span data-field="%s" title="%s">%s</span>' % (k, k, etiket)) in cikti, (k, cikti)
+            assert '(%s)' % k not in cikti, (k, cikti)
+            gorunen = re.sub(r'<[^>]+>', '', cikti)
+            assert k not in gorunen, (k, gorunen)
 
 
 class TestSart2BayatSatir:
@@ -908,21 +964,25 @@ class TestSart3KapiSatiriDili:
         alanlar = uc['bos']['openrocket']['eng_error']['missing_fields']
         assert set(alanlar) <= set(self.ETIKET), alanlar
         durum = ikiz['tr']['anlar'][0]['durum']
-        alan_metni = ', '.join('%s (%s)' % (_etiket_tr(self.ETIKET[k]), k) for k in alanlar)
+        # V301/DİL-2 (kök 7): görünür satırda yalnız etiket; anahtar title'da.
+        alan_metni = ', '.join(_etiket_tr(self.ETIKET[k]) for k in alanlar)
         detay = _sozluk_tr('liq.msg.eng_gate_fields_missing').replace('{fields}', alan_metni)
         assert durum == _sozluk_tr('liq.msg.eng_not_generated_status').replace('{detail}', detay)
         assert 'NOT generated' not in durum and 'missing_fields' not in durum
-        assert 'Yanma Süresi (burn_time)' in durum
+        assert 'Yanma Süresi' in durum and '(burn_time)' not in durum
         for k in alanlar:
-            assert durum.count(k) == 1, (k, durum)
+            assert durum.count(k) == 0, (k, durum)
         assert len(durum) < 300, len(durum)
 
     def test_en_satiri_ayni_kisa_cumle(self, ikiz, uc):
         durum = ikiz['en']['anlar'][0]['durum']
-        assert durum.startswith('.eng not generated: the design result lacks Burn Time (burn_time), ')
+        assert durum.startswith('.eng not generated: the design result lacks Burn Time, ')
         assert 'NOT generated' not in durum and 'missing_fields' not in durum
+        # T-ÇAPA-C2 (27 Eki): V301/DİL-2 (kök 7, 803727196/571d6506e) ret
+        # satırında makine adını İKİ dilde de görünür metinden title'a
+        # taşıdı; EN satırı da yalnız etiketi basar (TR bekçisiyle aynı ölçüt).
         for k in uc['bos']['openrocket']['eng_error']['missing_fields']:
-            assert durum.count(k) == 1, (k, durum)
+            assert durum.count(k) == 0, (k, durum)
         assert len(durum) < 300, len(durum)
 
 

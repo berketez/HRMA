@@ -122,12 +122,22 @@ def test_none_secildiginde_pintle_olmadigi_uyarilir(uc_secim):
 # C) İki blok çelişmesin: künye pintle çapının kaynağını söylesin
 # --------------------------------------------------------------------------
 
-def test_ekran_blogu_pintle_capinin_kaynagini_beyan_eder(uc_secim):
+def test_ekran_blogu_pintle_capinin_kaynagini_beyan_eder(uc_secim, istemci):
+    """V301/E1 — BEKLENTİ ÇEVRİLDİ (gerekçeli).
+
+    Eski düğüm, D_p GÖNDERİLMEMİŞ koşuda künyenin 'user input' demesini
+    istiyordu; o künye sunucunun 25 mm yedeğini kullanıcı girdisi diye
+    etiketliyordu (kusurun kendisi: 1 kN'de 437 × Ø0,104 mm delik). Artık
+    boş D_p devre çözücüsünde akıştan boyutlandırılır ve ekran bloğu AYNI
+    geometriyi tüketir; künye bunu söyler. Kullanıcı D_p verdiğinde
+    künye yine 'user input' der.
+    """
     g = uc_secim['radial'].get('pintle_geometry') or {}
-    assert 'user input' in (g.get('d_pintle_source') or ''), (
-        'ekran bloğu pintle çapının kullanıcı girdisi olduğunu söylemiyor; '
-        'aynı yanıttaki motor bloğu akıştan çözülen BAŞKA bir çap taşıyor ve '
-        'kullanıcı iki sayının neden farklı olduğunu göremiyor')
+    assert 'flow-sized by the injector circuit' in (
+        g.get('d_pintle_source') or ''), g.get('d_pintle_source')
+    verilen = _enjektor(istemci, secondary_holes='radial', pintle_diameter=8)
+    assert 'user input' in ((verilen.get('pintle_geometry') or {}).get(
+        'd_pintle_source') or '')
 
 
 def test_akistan_boyutlandirilan_karsilik_da_yayimlanir(uc_secim):

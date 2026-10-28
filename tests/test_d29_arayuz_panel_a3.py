@@ -208,8 +208,11 @@ def test_p11b215_mass_flow_izi_var(appjs):
         'debi izi uzunluk kapısı olmadan ekleniyor'
     assert 'v => typeof v === \'number\' && isFinite(v)' in g
     # Kör nokta kapısı: iz sadece TANIMLI değil, koşulsuz-ölü de olmamalı.
-    assert re.search(r'\n    if \(massFlowCizilir\) \{\n        traces\.push\(\{',
+    # v3.0.1 (V301/N-grafik G3): izler artık alt grafik listesinden
+    # (`paneller`) kurulur — debi izi kendi alt grafiğinde; kapı aynı.
+    assert re.search(r'\n    if \(massFlowCizilir\) \{\n        paneller\.push\(\{',
                      g), 'debi izi ölü dala alınmış'
+    assert 'paneller.forEach(function (p, i) {' in g and 'traces.push(' in g
 
 
 def test_p11b215_kunye_basiliyor(appjs):

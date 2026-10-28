@@ -419,6 +419,10 @@ def ascii_slip(text):
     """
     for token in TECH_TOKENS:
         text = text.replace(token, ' ')
+    # Yer tutucular ({disagreement_pct} gibi) kod kimliğidir, Türkçe metin
+    # değil (V301 ana model: 'disagreement' içindeki 'dis' kökü yanlış alarm
+    # veriyordu). Yalnız süslü parantezli tam kimlikler çıkarılır.
+    text = re.sub(r'\{[A-Za-z_][A-Za-z0-9_]*\}', ' ', text)
     for word in WORD_RE.findall(text):
         if len(word) > 1 and word.isupper():
             continue                      # 'YAKIT' meşru büyük harf yazımı

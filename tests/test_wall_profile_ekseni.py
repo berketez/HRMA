@@ -108,10 +108,14 @@ KUNYE_PROFIL_MM = 171.0
 KUNYE_KONTUR_MM = 124.0
 KUNYE_SAPMA_ORANI = (KUNYE_PROFIL_MM - KUNYE_KONTUR_MM) / KUNYE_KONTUR_MM
 
-#: Konik ve bell eksen boylarının ÖLÇÜLEN farkı (2 kN / 30 bar hibrit,
-#: 2026-08-26): 126,158257 mm − 87,306353 mm = 38,851905 mm (bell boyunun
-#: %44,5'i). Meta bekçi bu farkı TOL ile değil bu ölçümle sınar.
-KONIK_BELL_FARK_MM = 38.851905
+#: Konik ve bell eksen boylarının ÖLÇÜLEN farkı (2 kN / 30 bar hibrit).
+#: 2026-08-26 ölçümü 126,158257 − 87,306353 = 38,851905 mm idi (bell boyunun
+#: %44,5'i). v3.0.1'de kamara tane zarfından boyutlanır (port-kamara kulvarı;
+#: bu gövdede D_ch 68,66 mm) ve çapa main bd05a6f9e'de kırmızıydı. 2026-10-22
+#: YENİDEN ÖLÇÜLDÜ: 97,595082 − 70,919630 = 26,675452 mm (bell boyunun
+#: %37,6'sı); ön koşul ("iki geometri gerçekten ayrı", > %25) aynen sağlanıyor.
+#: Meta bekçi bu farkı TOL ile değil bu ölçümle sınar.
+KONIK_BELL_FARK_MM = 26.675452
 
 
 def _quiet(fn, *args, **kwargs):
@@ -185,6 +189,14 @@ def panel_govdesi(motor):
     # ÖH D19 / P7B3-30: panel motorun kendi malzemesini de gönderiyor —
     # profil ve mesh AYNI cidarı anlatmak zorunda (yoksa /api/fea/thermal
     # adlı 422 ``axial_profile_material_mismatch`` verir).
+    # V301/PANEL (NK-12): termal alan yalnız lüledir; panel ÖNCE motorun
+    # lüle malzemesini okur (köprü NOZZLE_MATERIAL_PATHS ile aynı sıra).
+    for blok, alan in (('nozzle_material_analysis', 'material'),
+                       ('nozzle_design', 'material_key')):
+        deger = (motor.get(blok) or {}).get(alan)
+        if isinstance(deger, str) and deger.strip():
+            govde['material'] = deger.strip()
+            return govde
     sa = motor.get('structural_analysis')
     if isinstance(sa, dict):
         for blok, alan in (('design_parameters', 'material'),
@@ -332,8 +344,8 @@ class TestEksenKimligi:
         ÖLÇÜLMÜŞ yan etkisini yazdı: kapı 10× gevşetildiğinde kırmızıya dönen
         TEK test buydu — yani "yakalama" doğru sebepten değildi; bu test
         emniyet gerilemesini değil ÖN KOŞULU ölçer. Sınır artık ölçülen
-        farka çapalı (2 kN / 30 bar hibrit: 126,158257 − 87,306353 =
-        38,851905 mm, bell boyunun %44,5'i); kapının gevşemesi bu testte
+        farka çapalı (2 kN / 30 bar hibrit, v3.0.1 kamarasıyla: 97,595082 −
+        70,919630 = 26,675452 mm, bell boyunun %37,6'sı); kapının gevşemesi bu testte
         artık sahte sinyal üretmez. Kapının gevşemesini ölçen bekçi
         ``test_kopru_kunye_vakasini_reddeder``dir.
         """

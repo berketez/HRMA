@@ -77,22 +77,47 @@ def govdeler():
 @node_gerekli
 class TestTankDurumuRozeti:
 
-    def test_regule_kipte_rozet_ucun_carpanini_basar(self, govdeler):
+    def test_regule_kipte_n2o_rozeti_giris_durumu_der(self, govdeler):
+        """V301/PANEL (C-7, Grafik G1) — ÇEVRİLDİ, gerekçeli: eski bekçi
+        N2O'da ``used_by_this_model: false`` + "TANK STATE NOT USED"
+        rozetini kilitliyordu; ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/panel/
+        tank_rozeti_once.json) bu yanlış beyandı — motor tank sıcaklığını
+        N2O giriş durumu olarak yakıyor, 293,15 → 250 K impulsu %0,006
+        değiştiriyor. Beyan ve rozet artık ölçülen davranışı söyler."""
         reg, _ = govdeler
         tsr = reg['tank_state_role']
-        assert tsr['used_by_this_model'] is False
+        assert tsr['used_by_this_model'] is True
+        assert tsr['used_as'] == 'motor_oxidizer_inlet_state'
+        assert tsr['drives_feed'] is False
+        html = _rozet(reg)
+        assert 'TANK TEMPERATURE USED' in html, html
+        assert 'NOT USED' not in html, html
+        # İpucu kullanıcının girdiği sıcaklığı yankılar (ucun alanı).
+        assert ('%.1f K' % tsr['tank_temperature_K_received']) in html, html
+
+    def _kullanilmayan(self, reg):
+        """Uç "kullanılmadı" dediğinde (LOX, ya da motor başka sıcaklıkla
+        kurulmuşsa) rozet dalı: kurgu ucun beyanını çevirir."""
+        tr = json.loads(json.dumps(reg))
+        tr['tank_state_role'].update(used_by_this_model=False, used_as=None)
+        return tr
+
+    def test_regule_kipte_kullanilmayan_rozet_ucun_carpanini_basar(
+            self, govdeler):
+        reg, _ = govdeler
+        tr = self._kullanilmayan(reg)
+        tsr = tr['tank_state_role']
         f = tsr['regulated_flow_temperature_sensitivity'][
             'implied_mdot_factor_sqrt_rho_ratio']
-        html = _rozet(reg)
+        html = _rozet(tr)
         assert 'TANK STATE NOT USED' in html, html
         # Sayı ucun alanından (i18n yokken nokta ondalıklı toFixed(3)).
         assert ('= %.3f' % f) in html, (f, html)
-        # İpucu kullanıcının girdiği sıcaklığı yankılar (ucun alanı).
         assert ('%.1f K' % tsr['tank_temperature_K_received']) in html, html
 
     def test_carpan_yoksa_OLCULMEDI_der_sayi_uydurmaz(self, govdeler):
         reg, _ = govdeler
-        tr = json.loads(json.dumps(reg))
+        tr = self._kullanilmayan(reg)
         tr['tank_state_role']['regulated_flow_temperature_sensitivity'] = None
         html = _rozet(tr)
         assert 'NOT MEASURED' in html, html

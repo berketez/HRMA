@@ -363,7 +363,25 @@ class TestOHD1611CalculateItkiEgrisi:
         # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
         # AYNI kod 1,8e-6 bağıl sapma verdi (koşum 38770162288, ODE).
         # Tolerans referans platformda aynen; başkasında 1e-5.
-        assert apoje == pytest.approx(6481.69696338075,
+        # V301/UÇUŞ C-24 (27 Eki) — ÇAPA ÖLÇÜMLE YENİLENDİ: 6481,69696338075
+        # -> 14599,14805824316 m. Kayma ZİNCİRİ main ilk-ebeveyn commit'lerinde
+        # ölçüldü (git archive + bu düğüm; docs/scofield/raw/OH/V301/ucus/
+        # RAPOR.md §C-24):
+        #   a0dca0dc0^1 6481,697 -> a0dca0dc0 (19 Eki, v301/port-kamara:
+        #     yanma sonu port grain dış çapına ulaşır, kaynaksız
+        #     D_ch = 1,5·√N·… söküldü) 15081,555 m — motor küçüldü/hafifledi;
+        #   77d64c641 (26 Eki, H-termal: cidar üç bölge) 16300,040 m;
+        #   74b55500a (26 Eki, H-PANEL: η_c* 0,89 kaynaklı varsayılan)
+        #     14599,148 m.
+        # Bu istek ARAÇ GİRDİSİ TAŞIMAZ: yörünge motoru tek başına uçurur
+        # (kuru kütle = motor atıl alt sınırı 0,9448 kg, çap = kasa 57,4 mm,
+        # Cd 0,5; vehicle_parameters). Bağımsız 1-B nokta kütle kâhini
+        # (c24_apoje_kahin.py: aynı kütle/alan/Cd/impuls, sabit itki, ISA)
+        # ≈ 16,4 km verir — mertebe aynı (−%11 fark kâhinin sabit itki /
+        # telafisiz / sabit Cd basitliğinden). Eski 6,48 km çapası 14,34 kg'lık
+        # ESKİ (aşırı büyük kamaralı) motora aitti. Bekçinin sorusu
+        # (dikdörtgen profil apojesi yayımlanmıyor) DEĞİŞMEDİ; tolerans aynı.
+        assert apoje == pytest.approx(14599.14805824316,
                                       rel=capa_rel(1e-6, 1e-5))
         assert apoje != pytest.approx(5656.753349589398, rel=1e-6)
 

@@ -410,8 +410,12 @@ class TestOHD2006:
     def test_kapanis_carpanlari_yuku_yeniden_uretir(self, taban):
         k = _iz(taban, 'cooling_system', 'chamber_heat_load_closure')
         assert isinstance(k, dict), 'kapanış bloğu yayımlanmıyor'
-        yeniden = (k['h_gas_chamber_W_m2K'] * k['driving_delta_T_K']
-                   * k['chamber_lateral_area_m2'])
+        # V301/L-KARBON (26 Eki): LOX/RP-1 karbon birikimi (SP-125 Eş. 4-18)
+        # kapanışa ADLI çarpan olarak girdi (h_gc/h_g; birikim yoksa 1).
+        # Eski çarpım bu çarpanı içermiyordu; tolerans aynı.
+        yeniden = (k['h_gas_chamber_W_m2K']
+                   * k['carbon_deposit_conductance_ratio']
+                   * k['driving_delta_T_K'] * k['chamber_lateral_area_m2'])
         assert yeniden == pytest.approx(k['chamber_heat_load_W'], rel=1e-9)
         assert k['chamber_heat_load_W'] / 1000.0 == pytest.approx(
             float(_iz(taban, 'cooling_system', 'chamber_heat_load')),

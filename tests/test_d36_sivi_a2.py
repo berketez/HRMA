@@ -127,8 +127,14 @@ def client():
 
 @pytest.fixture(scope='module')
 def sivi(client):
-    alanlar = json.loads(ORNEK.read_text(encoding='utf-8'))['inputs']['fields']
-    assert 'max_burn_duration' not in alanlar, 'örnek proje süre taşımamalı'
+    # V301/T-ÇAPA-D: ÖRNEK kulvarı (5fa435893) örnek sıvıya yanma süresi
+    # (max_burn_duration = 30 s) ve sayfanın boş alanlarını ('') yazdı. Bu
+    # dosyanın senaryosu SÜRESİZ sıvıdır (kullanıcı süreyi girmedi): süre
+    # açıkça çıkarılır, boş alanlar sayfa gibi gönderilmez
+    # (tests/support/ornek_alanlari.py).
+    from tests.support.ornek_alanlari import ornek_alanlari
+    alanlar = ornek_alanlari(ORNEK)
+    alanlar.pop('max_burn_duration', None)
     bos = client.post('/calculate_liquid', json=dict(alanlar)).get_json()
     sureli = client.post('/calculate_liquid', json=dict(
         alanlar, max_burn_duration=SIVI_SURE_S)).get_json()

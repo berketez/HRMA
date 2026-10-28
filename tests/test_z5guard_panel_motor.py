@@ -824,8 +824,13 @@ def liquid_kaynak():
     # i18n.js kanonu). Tarayıcıda ikisi de aynı küresel kapsamdadır;
     # söküm listesi bayat kalırsa node `numTxt is not defined` der.
     # Kusur yine ÜRÜNDE değil SÖKÜMDE.
+    # v3.0.1 T-ÇAPA-B — AYNI DERS, ÜÇÜNCÜ KEZ: kart üreticisi model
+    # geçerlilik rozetini ortak sözlük yardımcısı ``ortakMetin`` (ÖH D37 A1b,
+    # liquid.html) ile yazıyor; söküm listesi bayattı → node
+    # ``ortakMetin is not defined``. Kusur ÜRÜNDE değil SÖKÜMDE.
     return '\n'.join([_sablon_fonksiyonu(html, 'numTxt'),
                       _sablon_fonksiyonu(html, 'hrmaFmt'),
+                      _sablon_fonksiyonu(html, 'ortakMetin'),
                       _sablon_fonksiyonu(html, 'liquidOverallLengthMm'),
                       _sablon_fonksiyonu(html, 'displayEngineeringCards')])
 
@@ -971,7 +976,12 @@ const [srcPath, payloadPath] = process.argv.slice(2);
 const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf8'));
 
 function Field(id, v) { this.id = id; this.value = String(v); this.style = {};
-    this.innerHTML = ''; }
+    this.innerHTML = '';
+    // T-ÇAPA-C2: V301/L-D NK-41 vurguyu tema sınıfına taşıdı (classList).
+    const cls = new Set();
+    this.classList = { add: function (c) { cls.add(c); },
+                       remove: function (c) { cls.delete(c); },
+                       contains: function (c) { return cls.has(c); } }; }
 const FIELDS = {};
 ['fuel_density', 'fuel_viscosity', 'oxidizer_density', 'oxidizer_viscosity']
     .forEach(function (id) { FIELDS[id] = new Field(id, payload.fieldStart); });
@@ -1015,7 +1025,9 @@ vm.runInContext(fs.readFileSync(srcPath, 'utf8'), sandbox,
         await sandbox.loadPropellantProperties(payload.load.fuel, payload.load.ox);
         Object.keys(FIELDS).forEach(function (id) {
             out.fields[id] = { value: FIELDS[id].value,
-                               background: FIELDS[id].style.backgroundColor };
+                               background: FIELDS[id].style.backgroundColor || '',
+                               unresolved: FIELDS[id].classList.contains(
+                                   'liq-field-unresolved') };
         });
         Object.keys(SPANS).forEach(function (id) { out.spans[id] = SPANS[id].innerHTML; });
     }
@@ -1079,6 +1091,21 @@ def prov_kaynak():
         _sablon_fonksiyonu(html, 'liquidAutofillMi'),
         _sablon_fonksiyonu(html, 'liquidAutofillField'),
         _sablon_fonksiyonu(html, 'liquidClearUnresolvedField'),
+        # T-ÇAPA-C2 (27 Eki): V301/L-D NK-59 (4b0a0ee09) yakıt değişince
+        # eski yakıtın kaynama noktası/Cp/viskozitesini silen
+        # ``liqClearStaleFuelFields``i ``loadPropellantProperties`` içine
+        # bağladı; ikiz onu (ve alan listesini) taşımıyordu ->
+        # 'liqClearStaleFuelFields is not defined' (yukarıdaki notun SAHTE
+        # kırmızı sınıfı). Liste kaynaktan AYNEN alınır, kopya yazılmaz.
+        re.search(r'const LIQ_FUEL_DEPENDENT_FIELDS = \[[^\]]*\];',
+                  html).group(0),
+        _sablon_fonksiyonu(html, 'liqClearStaleFuelFields'),
+        # Aynı turda (V301/L-D SV-17) yakıt kartı ve boş alan notu, çözücünün
+        # kullandığı TABLO yoğunluğunu ``liqTableDensity`` ← ``liqFormRegistry``
+        # ile okur; ikizde yoksa ``loadPropellantProperties``in try bloğu
+        # sessizce düşer ve işaret HİÇ konmaz (yine SAHTE kırmızı).
+        _sablon_fonksiyonu(html, 'liqFormRegistry'),
+        _sablon_fonksiyonu(html, 'liqTableDensity'),
         _sablon_fonksiyonu(html, 'loadPropellantProperties'),
     ])
 
@@ -1124,7 +1151,9 @@ def test_d1_yerel_tablo_degerine_gercek_zamanli_rozeti_basilmiyor(
                 '%s: hâl çözümü rozeti hâli adıyla anmıyor' % ad)
             assert prov['badgeColor'] == '#28a745'
         else:
-            assert prov['badgeText'] == 'Using cached data', (
+            # v3.0.1: eski metin 'Using cached data' kullanılmayan bir önbelleği
+            # iddia ediyordu; değer çözülmemiş ve alan değiştirilmiyor.
+            assert prov['badgeText'] == 'No state-resolved value: field not changed', (
                 '%s: hâl çözülmemişken rozet dürüst değil (%r)'
                 % (ad, prov['badgeText']))
             assert prov['badgeColor'] == '#ffc107', (
@@ -1152,8 +1181,23 @@ def test_d2_rozet_yalniz_gercek_canli_kaynakta(prov_kaynak, tmp_path):
         {'name': 'yerel', 'payload': {
             'source': 'CoolProp (NIST REFPROP-based)',
             'properties': {'density': 1141.0}}},
+        # v3.0.1: web_propellant_api._damgala canlı OLMAYAN dönüşü damgalar;
+        # adında 'WebBook' geçse de paket/önbellek kaydı canlı DEĞİLDİR.
+        {'name': 'kayitli_kopya', 'payload': {
+            'source': ('NIST WebBook via nist-api.fly.dev third-party '
+                       'crawler (Stored copy)'),
+            'properties': {'density': 1141.0}}},
+        {'name': 'bayat', 'payload': {
+            'source': ('NIST WebBook via nist-api.fly.dev third-party '
+                       'crawler (Stale cache)'),
+            'properties': {'density': 1141.0}}},
     ]
     out = _prov_kos(tmp_path, prov_kaynak, 'd2', provenanceCases=vakalar)
+    for ad in ('kayitli_kopya', 'bayat'):
+        assert out['provenance'][ad]['live'] is False, (
+            '%s: damgalı (canlı olmayan) kayıt canlı sayılıyor' % ad)
+        assert out['provenance'][ad]['badgeText'] != 'Real-time Data', (
+            '%s: paket/önbellek kaydına "Real-time Data" basılıyor' % ad)
     for ad in ('pubchem', 'webbook', 'nistgov'):
         assert out['provenance'][ad]['live'] is True, (
             '%s: gerçek canlı kaynak canlı sayılmıyor' % ad)
@@ -1191,8 +1235,14 @@ def test_d3_kategori_yedegi_form_alanini_ezmiyor(itici_yanitlari, prov_kaynak,
         '(%r)' % alanlar['fuel_density']['value'])
     assert alanlar['fuel_viscosity']['value'] == ALAN_BASLANGICI, (
         'kategori yedeği viskozite alanını ezdi')
-    assert alanlar['fuel_density']['background'] == '#fff3cd', (
+    # T-ÇAPA-C2 (27 Eki): V301/L-D NK-41 (4b0a0ee09) satır içi açık zemini
+    # (#fff3cd; koyu temada metin okunmuyordu) tema belirteçli
+    # ``liq-field-unresolved`` sınıfına + alanın altındaki neden notuna
+    # çevirdi. Görünürlük iddiası aynı; ölçtüğü işaret sınıftır.
+    assert alanlar['fuel_density']['unresolved'] is True, (
         'çözülmemiş alan görünür kılınmıyor')
+    assert not alanlar['fuel_density']['background'], (
+        'satır içi açık zemin geri geldi (koyu temada okunmaz, NK-41)')
 
     beklenen = float((oks.get('properties') or {})['density'])
     okunan = float(alanlar['oxidizer_density']['value'])
@@ -1200,11 +1250,13 @@ def test_d3_kategori_yedegi_form_alanini_ezmiyor(itici_yanitlari, prov_kaynak,
         'hâl çözümlü değer alana yazılmıyor: %r ⟷ uç %r' % (okunan, beklenen))
     assert not alanlar['oxidizer_density']['background'], (
         'hâl çözümlü alan gereksiz yere uyarı rengine boyanıyor')
+    assert alanlar['oxidizer_density']['unresolved'] is False, (
+        'hâl çözümlü alan gereksiz yere çözülmemiş diye işaretleniyor')
 
     span = out['spans'].get('fuel-properties-rp1') or ''
     assert 'Real-time Data' not in span, (
         'yakıt künye şeridinde sahte rozet basılıyor: %s' % _metin(span)[:300])
-    assert 'Using cached data' in span, (
+    assert 'No state-resolved value: field not changed' in span, (
         'çözülmemiş değerin künyesi dürüst değil: %s' % _metin(span)[:300])
 
 

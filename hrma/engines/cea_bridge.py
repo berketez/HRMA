@@ -930,3 +930,136 @@ def get_combustion_properties(
     else:
         reason = 'RocketCEA not installed and no fallback provided.'
     return _not_modelled(pc_bar, reason)
+
+
+# --------------------------------------------------------------------------
+# HİBRİT İTİCİ KARTLARI — HRMA'NIN KENDİ İTİCİ TANIMI (v3.0.1, K kulvarı)
+# --------------------------------------------------------------------------
+# Amaç: hibrit sonucunun SONUNDAKİ "NASA CEA karşılaştırması"
+# (``hrma/analysis/cea_karsilastirma.py``) iki ÇÖZÜCÜYÜ karşılaştırır, iki
+# İTİCİ TANIMINI değil. Bunun için CEA'ya HRMA'nın yanma çözücüsüne verdiği
+# itici tanımının AYNISI verilir: kapalı formül (element sayıları) + oluşum
+# entalpisi (kJ/mol, formül birimi başına).
+#
+# RocketCEA'nın yerleşik 'HTPB' kartı (R-45, C 7.3165 H 10.3360 O 0.1063,
+# h = +1200 cal/mol) HRMA'nın HTPB'si DEĞİLDİR: HRMA HTPB'yi C4H6 birimi ve
+# +2,7 kJ/mol ile tanımlar (``CombustionAnalyzer.propellant_specs``). Yerleşik
+# kart kullanılsaydı karşılaştırmaya bir TANIM farkı karışırdı (ölçüldü,
+# N2O/HTPB O/F 7, Pc 30 bar: yerleşik kartla CEA c* 1608,07 m/s, HRMA
+# tanımlı kartla 1596,29 m/s; fark %0,74 — bu fark çözücüden gelmez).
+#
+# Kart biçimi RocketCEA'nın kendi çok satırlı kart desenidir (bkz. yukarıda
+# ``CUSTOM_FUEL_CARDS``): ' fuel <ad> <element sayı ...> wt%=100.00' satırı
+# ve ' h,cal=<entalpi>' satırı. ``t(k)`` YAZILMAZ: entalpi verildiğinde CEA
+# reaktan sıcaklığını kullanmaz (ölçüldü: t(k)=298,15 / 500 / yok — c*, T_c,
+# Isp_vac, M, γ 16 hanede bit-aynı); yazılsaydı tanımın bir parçası gibi
+# okunurdu.
+#
+# KAYIT: kart adı İÇERİK ADRESLİDİR (kart metninin SHA-1 özeti). RocketCEA
+# aynı adla YENİDEN tanımlanan kartta süreç-global sonuç önbelleğini
+# boşaltır (``add_new_card``: ``if name in propD: _CacheObjDict.clear()``) ve
+# bu, sıvı yolun önbellekteki ``CEA_Obj`` kayıtlarını düşürürdü (K-1 sınıfı,
+# bkz. ``cea_record_alive``). İçerik adresli adla aynı metin ikinci kez
+# kaydedilmez, farklı metin farklı ada gider: önbellek hiçbir zaman
+# boşaltılmaz.
+
+#: Kart adı öneki (RocketCEA kütüphane sözlüğündeki anahtar).
+HYBRID_CARD_NAME_PREFIX = 'HRMA_'
+#: Bu süreçte kaydedilebilecek en çok hibrit kart sayısı. HRMA seçimi —
+#: literatür değeri yok: RocketCEA her kart çifti için süreç ömrü boyunca
+#: bir önbellek kaydı tutar (boşaltılmaz); sınır bellek büyümesini keser.
+#: Yakıt kartları sabittir (katalogdaki yakıt sayısı kadar), oksitleyici
+#: kartı N2O giriş sıcaklığına göre değişir; 256 farklı giriş durumu bir
+#: masaüstü oturumu için bol bir paydır. Sınır aşılırsa karşılaştırma
+#: "kullanılamıyor" der (sayı üretilmez).
+HYBRID_CARD_REGISTRY_MAX = 256
+#: CEA reaktan adı üst sınırı (karakter) — NASA RP-1311 Kısım II, 'reac'
+#: veri kümesi: reaktan adı en çok 15 karakter.
+CEA_REACTANT_NAME_MAX_CHARS = 15
+#: Kartta izin verilen element sembolleri (CEA büyük harf yazımı).
+HYBRID_CARD_ELEMENTS = ('C', 'H', 'O', 'N', 'AL')
+#: Kart rolü -> RocketCEA rol sözcüğü.
+_HYBRID_CARD_ROLES = {'fuel': 'fuel', 'oxidizer': 'oxid'}
+
+_HYBRID_CARDS: Dict[str, str] = {}
+
+
+class HybridCardError(ValueError):
+    """Hibrit itici kartı kurulamadı ya da kaydedilemedi (sayı üretilmez)."""
+
+
+def hybrid_reactant_card(role: str, label: str,
+                         formula: Dict[str, float],
+                         enthalpy_kj_mol: float) -> str:
+    """HRMA itici tanımından CEA reaktan kartı metni üret.
+
+    Parametreler
+    ------------
+    role : 'fuel' | 'oxidizer'
+    label : CEA reaktan adı (boşluksuz, en çok 15 karakter)
+    formula : {element: sayı} — elementler ``HYBRID_CARD_ELEMENTS`` içinden,
+        sayılar sonlu ve pozitif
+    enthalpy_kj_mol : formül birimi başına oluşum (ya da atanmış) entalpi
+
+    Entalpi kJ/mol'den termokimyasal kaloriye ``CAL_TO_J`` ile çevrilir
+    (kesin tanım). Geçersiz girdi ``HybridCardError`` verir — kırpma yok.
+    """
+    rol = _HYBRID_CARD_ROLES.get(role)
+    if rol is None:
+        raise HybridCardError('unknown card role %r' % (role,))
+    ad = str(label or '')
+    if (not ad or len(ad) > CEA_REACTANT_NAME_MAX_CHARS
+            or any(ch.isspace() for ch in ad)):
+        raise HybridCardError('invalid CEA reactant name %r' % (label,))
+    if not isinstance(formula, dict) or not formula:
+        raise HybridCardError('empty formula')
+    parcalar = []
+    for el in sorted(formula):
+        sayi = formula[el]
+        if el not in HYBRID_CARD_ELEMENTS:
+            raise HybridCardError('element %r is not allowed' % (el,))
+        if (isinstance(sayi, bool) or not isinstance(sayi, (int, float))
+                or not math.isfinite(float(sayi)) or float(sayi) <= 0.0):
+            raise HybridCardError('element count for %r must be a finite '
+                                  'positive number' % (el,))
+        parcalar.append('%s %s' % (el, repr(float(sayi))))
+    if (isinstance(enthalpy_kj_mol, bool)
+            or not isinstance(enthalpy_kj_mol, (int, float))
+            or not math.isfinite(float(enthalpy_kj_mol))):
+        raise HybridCardError('enthalpy must be a finite number')
+    h_cal = float(enthalpy_kj_mol) * 1000.0 / CAL_TO_J
+    return (' %s %s  %s  wt%%=100.00 \n h,cal=%r \n'
+            % (rol, ad, ' '.join(parcalar), h_cal))
+
+
+def ensure_hybrid_card(role: str, card_text: str) -> str:
+    """Kartı RocketCEA kütüphanesine BİR KEZ tanıt; kart adını döndür.
+
+    Ad içerik adreslidir (bkz. bölüm başı). RocketCEA kurulu değilse ya da
+    kayıt sınırı dolduysa ``HybridCardError`` verir.
+    """
+    import hashlib
+    if role not in _HYBRID_CARD_ROLES:
+        raise HybridCardError('unknown card role %r' % (role,))
+    if not is_rocketcea_available():
+        raise HybridCardError('RocketCEA is not importable')
+    ozet = hashlib.sha1(card_text.encode('utf-8')).hexdigest()[:12]
+    ad = '%s%s_%s' % (HYBRID_CARD_NAME_PREFIX,
+                      'F' if role == 'fuel' else 'O', ozet)
+    with _CEA_STATE_LOCK:
+        if ad in _HYBRID_CARDS:
+            return ad
+        if len(_HYBRID_CARDS) >= HYBRID_CARD_REGISTRY_MAX:
+            raise HybridCardError(
+                'hybrid card registry is full (%d cards in this process)'
+                % HYBRID_CARD_REGISTRY_MAX)
+        from rocketcea.cea_obj import (add_new_fuel, add_new_oxidizer,
+                                       fuelCards, oxCards)
+        hedef = fuelCards if role == 'fuel' else oxCards
+        # İçerik adresli ad zaten kütüphanedeyse metin AYNIDIR; yeniden
+        # tanımlamak RocketCEA önbelleğini boşaltırdı — yapılmaz.
+        if ad not in hedef:
+            (add_new_fuel if role == 'fuel' else add_new_oxidizer)(
+                ad, card_text)
+        _HYBRID_CARDS[ad] = card_text
+        return ad

@@ -47,6 +47,20 @@ from tools.browser_harness import denetimler, esikler  # noqa: E402
 
 KANIT = ROOT / 'docs/scofield/raw/OH/D26/arayuz/a4'
 SABLON = ROOT / 'hrma/templates/advanced.html'
+#: v3.0.1 N-girdi-1 (26 Eki 2026): ipucu balonu kuralları üç şablondaki
+#: kopyalardan TEK kaynağa (theme.css "Alan ipucu (ortak bileşen)")
+#: taşındı; aynı ``scale(0)`` onarımı artık katı ve sıvı sayfasını da
+#: kapsar. Balonu üreten kurallar bu yüzden şablon + tema metninde aranır
+#: (girinti farkı yok sayılır: şablonda 12, temada 4 boşluk).
+TEMA = ROOT / 'hrma/static/css/theme.css'
+
+
+def _kural_metni():
+    return SABLON.read_text(encoding='utf-8') + '\n' + TEMA.read_text(encoding='utf-8')
+
+
+def _satirlar(metin):
+    return '\n'.join(x.strip() for x in metin.splitlines())
 
 #: OH-F0-01'in gövdesi: enjektör tablosunun satır etiketleri. Kalem
 #: metninde ölçülen çiftler tam bunlardı ('80.0 mm' ⟂ 'L/D Ratio', …).
@@ -192,12 +206,12 @@ class TestOHF001VeP17B119Yerlesim:
 
     def test_kural_muhru_bugunku_sablonda_duruyor(self, sonra):
         """Kayıtlı ölçüm ancak onu üreten kurallar yerindeyse geçerlidir."""
-        metin = SABLON.read_text(encoding='utf-8')
+        metin = _satirlar(_kural_metni())
         muhur = sonra['kural_muhru']
         assert muhur, 'sonra ölçümünde kural mührü yok'
         for ad, kural in muhur.items():
             assert kural is not None, 'mühür ölçüm anında da yoktu: %s' % ad
-            assert kural in metin, (
+            assert _satirlar(kural) in metin, (
                 'ölçümü üreten kural %s bugünkü advanced.html içinde YOK — '
                 'kayıtlı sayı artık bu dosyayı temsil etmiyor' % ad)
 
@@ -214,8 +228,10 @@ class TestOHF001VeP17B119Yerlesim:
         ``scale(0)`` yalnız gizli hâlde uygulanır; ``:hover`` kuralı
         ``scale(1)`` ile geri alır ve solma süresi korunur.
         """
-        metin = SABLON.read_text(encoding='utf-8')
-        hover = metin[metin.index('.tooltip:hover .tooltip-text {'):]
+        metin = _kural_metni()
+        # v3.0.1 N-girdi-1: kural tek kaynakta, seçici listesi klavye
+        # (``:focus-within``) ve dokunma (``.tip-open``) ile genişledi.
+        hover = metin[metin.index('.tooltip:hover .tooltip-text'):]
         hover = hover[:hover.index('}')]
         assert 'transform: scale(1);' in hover, hover
         assert 'visibility: visible;' in hover

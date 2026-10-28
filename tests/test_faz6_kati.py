@@ -537,8 +537,11 @@ def test_t68_panel_offers_the_three_recovery_inputs(html):
         assert alan, '%s alanı yok' % ident
         assert 'value=' not in alan.group(0), \
             '%s alanına varsayılan sayı konmuş: %s' % (ident, alan.group(0))
+        # V301/N-girdi-2: etiket metninin hemen ardında (aynı satırda) ipucu
+        # balonu durabilir (.tooltip > .tooltip-icon + .tooltip-text).
         assert re.search(
-            r'<span data-i18n="[^"]+">[^<]+</span>\s*\n\s*<input[^>]*id="%s"'
+            r'<span data-i18n="[^"]+">[^<]+</span>(?:<span class="tooltip">[^\n]*)?'
+            r'\s*\n\s*<input[^>]*id="%s"'
             % ident, html), '%s alanının etiketi yok' % ident
 
 
@@ -547,13 +550,20 @@ def test_t68_empty_recovery_fields_are_not_sent(html):
     """Boş alan isteğe KONMAZ — 'verilmedi' ile 'değer geldi' ayrımı bozulmaz."""
     body = r"""
 formuKur();
-window.currentResults = { average_thrust: 12602.1, isp_vacuum: 199.1 };
+// V301/K-C1 (KT-15): gövde artık ortalama itki + vakum Isp değil, ana
+// tasarımın itki eğrisi + deniz seviyesi Isp'sidir (uç F·t_b/(Isp·g0) ile
+// m_i − m_f'yi kıyaslıyor; eski çift varsayılan tasarımda 422 veriyordu).
+window.currentResults = { thrust_curve: { time: [0, 0.5, 1.024],
+                                          thrust: [12000, 13000, 12602.1] },
+                          isp_sea_level: 199.1 };
 computeTrajectory().then(() => {
     const g = GONDERILEN[0];
     ok(!('parachute_area' in g), 'boş alan gönderildi: parachute_area');
     ok(!('parachute_cd' in g), 'boş alan gönderildi: parachute_cd');
     ok(!('parachute_deploy_delay' in g), 'boş alan gönderildi: parachute_deploy_delay');
-    ok(g.thrust === 12602.1, 'itki gönderilmedi');
+    ok(g.thrust_curve && g.thrust_curve.thrust[2] === 12602.1, 'itki eğrisi gönderilmedi');
+    ok(!('thrust' in g), 'ortalama itki gönderildi (eğriyle dikdörtgen çelişkisi)');
+    ok(g.isp === 199.1, 'deniz seviyesi Isp gönderilmedi');
 
     // Şimdi doldur: üçü de gitmeli
     ELS['parachute_area'].value = '9';
@@ -575,7 +585,8 @@ const hrmaFigureLayout = (l) => l;
 const HRMA_PLOT_CONFIG = {};
 async function fetch(url, opts) {
     GONDERILEN.push(JSON.parse(opts.body));
-    return { json: async () => ({
+    // V301/K-C1: gövde artık önce resp.ok'a bakıyor (ret → HRMAReject).
+    return { ok: true, status: 200, json: async () => ({
         status: 'success',
         plot_data: JSON.stringify({ data: [], layout: {} }),
         trajectory_data: { recovery: REC },

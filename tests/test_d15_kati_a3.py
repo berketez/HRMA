@@ -18,6 +18,7 @@ from hrma.constants import ISA_TABLE_TOP_M, isa_pressure, isa_temperature
 from hrma.engines.solid_rocket_engine import (
     AL_TO_AL2O3_MASS_RATIO,
     SOLID_CONDENSED_MASS_FRACTION,
+    SOLID_DEFAULT_GEOMETRY_MM,
     SolidGeometryError,
     SolidRocketEngine,
     _condensed_mass_fraction,
@@ -32,9 +33,13 @@ def _sessiz(fn, *a, **kw):
 
 def _motor(**kw):
     ov = kw.pop('overrides', None)
+    # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu
+    # varsayılan motoru kilitliyordu (çekirdek 30 mm); örnek motorun TEK
+    # tanımı okunur.
     p = dict(grain_type='bates', propellant_type='apcp',
              chamber_diameter=100, grain_length=500,
-             core_diameter=30, chamber_pressure=40)
+             core_diameter=SOLID_DEFAULT_GEOMETRY_MM['core_diameter'],
+             chamber_pressure=40)
     p.update(kw)
     if ov is not None:
         p['overrides'] = dict(ov)
@@ -157,7 +162,11 @@ class TestP2B1_07KurucuKapisi:
             assert kardes.status_code >= 400
             # sağlıklı girdi İKİ uçta da geçmeye devam ediyor
             for yol in ('/api/solid-monte-carlo', '/calculate_solid'):
-                iyi = _sessiz(c.post, yol, json=dict(govde, core_diameter=30))
+                # V301/K-A: eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu;
+                # sağlıklı girdi örnek motorun geçerli çekirdeğidir.
+                iyi = _sessiz(c.post, yol, json=dict(
+                    govde,
+                    core_diameter=SOLID_DEFAULT_GEOMETRY_MM['core_diameter']))
                 assert iyi.status_code == 200, yol
 
 
@@ -228,27 +237,30 @@ class TestP2B2_03YanmaDuzgunlugu:
                                     (1500, 40), (2000, 40), (2500, 40)]
     SLOT = {'slot_count': 8}
 
+    # V301/K-A (22 Eki) — TERS KAPIYA ÇEVRİLDİ. Negatif ham düzgünlük
+    # yalnız portu BOĞULAN geometrilerde ölçülüyordu (çekirdek 30 mm, uzun
+    # slotted tane: A_p/A_t < 1). Geçerli portlu geometrilerde ham değer
+    # pozitif kalıyor (ölçüldü: L 1000-2500 mm, çekirdek 70-80 mm, 10-47).
+    # Bu girdiler artık YAYIMLANMAZ: port boğazdan küçük (KT-23) -> RET.
     @pytest.mark.parametrize('L,P', NEGATIF_SMOOTHNESS_GIRDILERI)
     def test_negatif_yuzde_yayimlanmaz(self, L, P):
-        r = _sessiz(_motor(grain_type='slotted', grain_length=L,
-                           chamber_pressure=P,
+        from hrma.engines.solid_rocket_engine import SolidDesignRejected
+        with pytest.raises(SolidDesignRejected) as exc:
+            _sessiz(_motor(grain_type='slotted', grain_length=L,
+                           chamber_pressure=P, core_diameter=30,
                            overrides=self.SLOT).calculate_performance)
-        tp = r['detailed_analysis']['thrust_profile_analysis']
-        assert tp['combustion_smoothness'] >= 0.0, (
-            f'L={L} P={P}: {tp["combustion_smoothness"]}')
-        assert tp['combustion_smoothness'] <= 100.0
+        assert exc.value.code == 'port_smaller_than_throat', (L, P)
 
     @pytest.mark.parametrize('L,P', NEGATIF_SMOOTHNESS_GIRDILERI)
     def test_kirpma_beyan_edilir_ve_ham_buyukluk_yaninda_durur(self, L, P):
-        r = _sessiz(_motor(grain_type='slotted', grain_length=L,
-                           chamber_pressure=P,
+        from hrma.engines.solid_rocket_engine import SolidDesignRejected
+        with pytest.raises(SolidDesignRejected) as exc:
+            _sessiz(_motor(grain_type='slotted', grain_length=L,
+                           chamber_pressure=P, core_diameter=30,
                            overrides=self.SLOT).calculate_performance)
-        tp = r['detailed_analysis']['thrust_profile_analysis']
-        ham = 100.0 - tp['pressure_oscillations_percent']
-        assert ham < 0.0, f'L={L} P={P}: bu girdi negatif üretmiyor ({ham})'
-        assert tp['combustion_smoothness_was_clamped'] is True
-        assert tp['combustion_smoothness'] == 0.0
-        assert 'clamped to [0, 100]' in tp['combustion_smoothness_basis']
+        kunye = exc.value.invalid_fields[0]
+        assert kunye['port_to_throat_area_ratio'] <= 1.0, (L, P)
+        assert kunye['field'] == 'core_diameter'
 
     def test_kirpilmayan_girdide_bayrak_yanlis_ve_ozdeslik_tutuyor(self):
         r = _sessiz(_motor().calculate_performance)
@@ -329,7 +341,11 @@ class TestP2B2_04WebKullanimi:
         raporunda yeni bulgu olarak bildirildi); %99'luk eşik onu buraya
         borç yazardı, %98 ise paydanın onarımını kilitler.
         """
-        e = _motor(grain_type=gt)
+        # V301/K-A: eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu (wagon_wheel
+        # çekirdek 30 mm'de A_p/A_t < 1, reddediliyor). Ölçüm çekirdeği
+        # 36 mm: dört tipte de port geçerli; wagon_wheel 48 mm'de %97,93
+        # okuyor (eşiğin altındaki sonlandırma kalemi, bkz. yukarıdaki not).
+        e = _motor(grain_type=gt, core_diameter=36)
         r = _sessiz(e.calculate_performance)
         yayin = r['detailed_analysis']['grain_regression_analysis'][
             'web_thickness_utilization']
@@ -399,9 +415,17 @@ class TestP2B2_05PortKesitiTekTanim:
                 return (w.get('params') or w).get('mass_flux_kg_m2s')
         return None
 
+    #: V301/K-A: eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu. Akı ve
+    #: port/boğaz uyarısının ÜÇ tipte de çıktığı geçerli portlu çekirdek
+    #: 36 mm (ölçüldü: bates/slotted/wagon_wheel ikisi de var; 38 mm'de
+    #: wagon_wheel akı uyarısı düşüyor).
+    UYARILI_CEKIRDEK_MM = 36
+
     @pytest.mark.parametrize('gt', AKI_TIPLERI)
     def test_uyari_metnindeki_akis_cozucununkiyle_ayni(self, gt):
-        r = _sessiz(_motor(grain_type=gt).calculate_performance)
+        r = _sessiz(_motor(grain_type=gt,
+                           core_diameter=self.UYARILI_CEKIRDEK_MM
+                           ).calculate_performance)
         cozucu = r['detailed_analysis']['grain_regression_analysis'][
             'erosive_burning_effects']['mass_flux_kg_m2s']
         uyari = self._uyari_akisi(r)
@@ -413,7 +437,7 @@ class TestP2B2_05PortKesitiTekTanim:
     @pytest.mark.parametrize('gt', AKI_TIPLERI)
     def test_uyari_bloğu_kendi_port_alanini_kurmuyor(self, gt):
         """Kullanılan kesit _port_flow_area(0) olmalı, π(D_core/2)² değil."""
-        e = _motor(grain_type=gt)
+        e = _motor(grain_type=gt, core_diameter=self.UYARILI_CEKIRDEK_MM)
         c = _sessiz(e.calculate_thrust_curve)
         gercek = float(e._port_flow_area(0.0))
         dairesel = float(np.pi * (e.D_core / 2.0) ** 2)
@@ -434,7 +458,9 @@ class TestP2B2_05PortKesitiTekTanim:
         Doğru akı eşiğin (1400 kg/m2s) ALTINDA olduğu için uyarı artık
         çıkmıyor — susturma değil, yanlış alarmın kalkması.
         """
-        e = _motor(grain_type='star')
+        # V301/K-A: star çekirdek 30 mm'de port geçerli (kapıdan geçer);
+        # ölçümün kendi geometrisi açıkça verilir.
+        e = _motor(grain_type='star', core_diameter=30)
         r = _sessiz(e.calculate_performance)
         cozucu = r['detailed_analysis']['grain_regression_analysis'][
             'erosive_burning_effects']['mass_flux_kg_m2s']
@@ -446,8 +472,14 @@ class TestP2B2_05PortKesitiTekTanim:
         assert float(c['mass_flow'][0]) / dairesel > 1400.0
 
     def test_saglikli_uyari_sozlesmesi_bozulmadi(self):
-        """Varsayılan geometride uyarı yine çıkmalı (uyarı susturulmadı)."""
-        r = _sessiz(_motor().calculate_performance)
+        """Uyarılı geometride uyarı yine çıkmalı (uyarı susturulmadı).
+
+        V301/K-A: varsayılan motor artık geçerli portlu (A_p/A_t >= 2) ve
+        bu uyarıları BİLEREK basmıyor (KT-20); sözleşme uyarılı geçerli
+        geometride (çekirdek 36 mm) ölçülür.
+        """
+        r = _sessiz(_motor(core_diameter=self.UYARILI_CEKIRDEK_MM
+                           ).calculate_performance)
         kodlar = [w.get('code') for w in (r.get('design_warnings') or [])]
         assert 'warn.solid.initial_mass_flux_high' in kodlar
         assert 'warn.solid.port_to_throat_low' in kodlar
@@ -467,7 +499,9 @@ class TestP2B2_07StarBeyani:
 
     @pytest.mark.parametrize('sr', [30, 45, 60])
     def test_kirpma_beyan_ediliyor(self, sr):
-        e = _motor(grain_type='star',
+        # V301/K-A: kırpma sınırı (28 mm) çekirdeğe bağlı; ölçümün kendi
+        # geometrisi (çekirdek 30 mm, star portu geçerli) açıkça verilir.
+        e = _motor(grain_type='star', core_diameter=30,
                    overrides={'star_radius': sr, 'star_points': 8})
         r = _sessiz(e.calculate_performance)
         gd = r['grain_design']
@@ -478,7 +512,7 @@ class TestP2B2_07StarBeyani:
     @pytest.mark.parametrize('sr', [15, 28])
     def test_kirpilmayan_girdide_beyan_yok(self, sr):
         gd = _sessiz(_motor(
-            grain_type='star',
+            grain_type='star', core_diameter=30,
             overrides={'star_radius': sr,
                        'star_points': 8}).calculate_performance)['grain_design']
         assert 'star_radius' not in (gd.get('clipped_inputs') or []), sr
@@ -516,10 +550,16 @@ class TestP2B2_10BulkModeKunyesi:
     a = 0,005 & n ∈ {1,05; 1,30} -> yayımlanıyor (43394,82 N).
     """
 
-    @staticmethod
-    def _kapi(a, n):
-        r = _sessiz(_motor(burn_rate_a=a,
-                           burn_rate_n=n).calculate_performance)
+    #: V301/K-A: eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu; a = 0,005 /
+    #: n > 1 ile Ø100/500 tanede port boğaza HİÇ yetişmiyor (A_p/A_t 0,19-0,86).
+    #: Aynı üç davranışın (yayımlanan n > 1, fail-closed n >= 1 yakınsamaz,
+    #: n = 0,35) ölçüldüğü geçerli portlu kısa tane: L 150, çekirdek 70 mm.
+    GEOMETRI = {'grain_length': 150, 'core_diameter': 70}
+
+    @classmethod
+    def _kapi(cls, a, n):
+        r = _sessiz(_motor(burn_rate_a=a, burn_rate_n=n,
+                           **cls.GEOMETRI).calculate_performance)
         return r, (r.get('combustion_stability') or {}).get('bulk_mode') or {}
 
     @pytest.mark.parametrize('a,n', [(0.0005, 1.30), (0.005, 1.05),
@@ -551,8 +591,8 @@ class TestP2B2_10BulkModeKunyesi:
     def test_fail_closed_bandi_hala_kapali(self):
         """Yakınsamayan koşu yayımlanmamaya devam ediyor (ÖK-22 tersi)."""
         for a, n in ((0.0005, 1.05), (0.0005, 1.00)):
-            r = _sessiz(_motor(burn_rate_a=a,
-                               burn_rate_n=n).calculate_performance)
+            r = _sessiz(_motor(burn_rate_a=a, burn_rate_n=n,
+                               **self.GEOMETRI).calculate_performance)
             assert r.get('error'), f'a={a} n={n} yayımlanmamalıydı'
             assert 'combustion_stability' not in r
 

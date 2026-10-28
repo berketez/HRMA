@@ -187,13 +187,30 @@
         'font-family:var(--hd-mono, monospace);white-space:pre;';
 
     /* Alan etiketi (data-i18n taşır; dil değişince I18N.apply tazeler) */
-    function fieldLabel(key, fallback) {
+    function fieldLabel(key, fallback, helpKey) {
         var node = el('div',
             'font-size:' + PX_TABAN + 'px;font-weight:600;margin:12px 0 4px;' +
             'color:var(--hd-ink, #cfe8f2);',
-            escapeHtml(T(key, fallback)));
-        node.setAttribute('data-i18n', key);
+            helpKey ? '' : escapeHtml(T(key, fallback)));
+        if (!helpKey) {
+            node.setAttribute('data-i18n', key);
+            return node;
+        }
+        // v3.0.1 N-girdi-2: ipuçlu etiket — metin iç <span>'da çevrilir
+        // (kaptaki data-i18n textContent'i yazınca ipucunu silerdi).
+        var metin = el('span', '', escapeHtml(T(key, fallback)));
+        metin.setAttribute('data-i18n', key);
+        node.appendChild(metin);
+        yardim(node, helpKey);
         return node;
+    }
+
+    // v3.0.1 N-girdi-2: alan ipucu ortak bileşenden (field_help.js →
+    // HRMAHelp); anahtar çağıranda LİTERAL. Bileşen yoksa basılmaz.
+    function yardim(node, key) {
+        if (node && window.HRMAHelp && typeof window.HRMAHelp.attach === 'function') {
+            window.HRMAHelp.attach(node, key, '');
+        }
     }
 
     function setPlaceholder(node, key, fallback) {
@@ -321,7 +338,7 @@
         box.appendChild(preview);
 
         // ---- adım 1: form ----
-        form.appendChild(fieldLabel('shell.bug.titleLabel', 'Title'));
+        form.appendChild(fieldLabel('shell.bug.titleLabel', 'Title', 'shell.bug.help.title'));
         var titleIn = document.createElement('input');
         titleIn.type = 'text';
         titleIn.id = 'hrma-bug-title';
@@ -331,23 +348,24 @@
                        'Short summary of the problem');
         form.appendChild(titleIn);
 
-        form.appendChild(fieldLabel('shell.bug.whatLabel', 'What happened?'));
+        form.appendChild(fieldLabel('shell.bug.whatLabel', 'What happened?',
+                                    'shell.bug.help.what'));
         var whatIn = makeArea('shell.bug.whatPlaceholder',
             'Describe what went wrong.');
         whatIn.id = 'hrma-bug-what';
         form.appendChild(whatIn);
 
         form.appendChild(fieldLabel('shell.bug.expectedLabel',
-                                    'What did you expect?'));
+                                    'What did you expect?', 'shell.bug.help.expected'));
         var expectedIn = makeArea('shell.bug.expectedPlaceholder',
             'What should have happened instead?');
         expectedIn.id = 'hrma-bug-expected';
         form.appendChild(expectedIn);
 
         form.appendChild(fieldLabel('shell.bug.stepsLabel',
-                                    'Steps to reproduce'));
+                                    'Steps to reproduce', 'shell.bug.help.steps'));
         var stepsIn = makeArea('shell.bug.stepsPlaceholder',
-            '1. Open the hybrid page\n2. Enter …\n3. Press Analyze');
+            '1. Open the hybrid page\n2. Enter …\n3. Press Calculate');
         stepsIn.id = 'hrma-bug-steps';
         form.appendChild(stepsIn);
 
@@ -367,6 +385,7 @@
         diagLabel.setAttribute('data-i18n', 'shell.bug.diagnostics');
         diagRow.appendChild(diagBox);
         diagRow.appendChild(diagLabel);
+        yardim(diagRow, 'shell.bug.help.diagnostics');
         form.appendChild(diagRow);
         /* ÖH D18 / P12aB5-05: "kaldırılanlar" listesi yalnız dosya yolu /
            kullanıcı adı / e-posta sayıyordu; oysa /launch-site'ın enlem ve
@@ -401,7 +420,8 @@
             'You can still edit it. HRMA opens GitHub with this text '
             + 'pre-filled; you press "Submit new issue" there.'));
 
-        preview.appendChild(fieldLabel('shell.bug.titleLabel', 'Title'));
+        preview.appendChild(fieldLabel('shell.bug.titleLabel', 'Title',
+                                       'shell.bug.help.previewTitle'));
         var pTitleIn = document.createElement('input');
         pTitleIn.type = 'text';
         pTitleIn.id = 'hrma-bug-preview-title';
@@ -411,6 +431,10 @@
 
         var bodyArea = document.createElement('textarea');
         bodyArea.id = 'hrma-bug-body';
+        // Gövdenin kendi etiketi yok (başlık alanının hemen altında):
+        // açıklaması `title`da, dil değişiminde data-i18n-title ile tazelenir.
+        bodyArea.setAttribute('title', T('shell.bug.help.body', ''));
+        bodyArea.setAttribute('data-i18n-title', 'shell.bug.help.body');
         bodyArea.style.cssText = MONO_AREA_STYLE + 'margin-top:10px;';
         preview.appendChild(bodyArea);
 
@@ -448,7 +472,7 @@
 
         // Yeni sekme engellendiyse bağlantı elle kopyalanabilsin
         var urlBox = el('div', 'display:none;margin-top:8px;');
-        urlBox.appendChild(fieldLabel('shell.bug.urlLabel', 'Issue link'));
+        urlBox.appendChild(fieldLabel('shell.bug.urlLabel', 'Issue link', 'shell.bug.help.url'));
         var urlIn = document.createElement('input');
         urlIn.type = 'text';
         urlIn.id = 'hrma-bug-url';
@@ -602,6 +626,7 @@
             if (window.I18N && window.I18N.setLang) window.I18N.setLang(langSel.value);
         });
         langRow.appendChild(langSel);
+        yardim(langRow, 'shell.settings.languageDesc');
         box.appendChild(langRow);
         box.appendChild(descLine('shell.settings.languageDesc',
             'Interface language. The selector on the home page stays in sync.'));
@@ -633,6 +658,7 @@
         autoLabel.setAttribute('data-i18n', 'shell.settings.autoCheck');
         autoRow.appendChild(autoBox);
         autoRow.appendChild(autoLabel);
+        yardim(autoRow, 'shell.settings.autoCheckDesc');
         box.appendChild(autoRow);
         box.appendChild(descLine('shell.settings.autoCheckDesc',
             'When off, HRMA does not contact the update server at startup.'));

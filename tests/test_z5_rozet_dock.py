@@ -51,6 +51,9 @@ import warnings
 from pathlib import Path
 
 import pytest
+
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+from tests.support import form_defaults
 from tests.support.platform_capa import capa_rel
 
 warnings.filterwarnings('ignore')
@@ -91,9 +94,16 @@ KATI_GOVDE = {
     # ile yayımlanıyordu — yani buradaki 1500 N hiçbir zaman etkili olmadı.
     # Zarf kapısı fail-closed olduğundan gövde ZATEN ÖLÇÜLEN geometri kipine
     # çevrildi; yanıt tasarım noktası bloğu dışında BİT-AYNI.
+    # v3.0.1 T-ÇAPA-B: eski çekirdek 35 mm (Ø100, boy 300 mm @ 40 bar,
+    # a = 0,005 / n = 0,35) A_p/A_t 0,925 ile port boğulan motordu; K-A
+    # kapısından beri 422 ``port_smaller_than_throat``. Konu port boğulması
+    # değil: çekirdek tek tanım ``SOLID_DEFAULT_GEOMETRY_MM``den (48 mm,
+    # kopyalanmaz); hazne/boy bu gövdenin kendi değerleri. Ölçüldü: boğaz
+    # 37,54 mm, A_p/A_t 1,64. (Ø100/boy 500 tam varsayılan bu yanma hızı
+    # katsayılarıyla yine boğuluyor: A_p/A_t 0,958.)
     'motor_name': 'z5c', 'chamber_pressure': 40,
-    'grain_type': 'bates', 'chamber_diameter': 100,
-    'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+    'grain_type': 'bates', 'chamber_diameter': 100, 'grain_length': 300,
+    'core_diameter': SOLID_DEFAULT_GEOMETRY_MM['core_diameter'], 'segments': 1,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35, 'chamber_temperature': 3000,
     'c_star': 1550, 'propellant_density': 1800, 'propellant_type': 'apcp',
 }
@@ -104,6 +114,11 @@ SIVI_TABAN = {
     'contraction_ratio': 4, 'characteristic_length': 1.2,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (L-A SV-03); sayfanın
+    # gönderdiği şablon varsayılanı (tek kaynak, kopyalanmaz).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 SIVI_RP1 = dict(SIVI_TABAN, fuel_type='rp1')
 SIVI_METAN = dict(SIVI_TABAN, fuel_type='methane')
@@ -173,7 +188,24 @@ CIVATA_GOVDE = {
 #: (docs/scofield/raw/OH/KITAP/p1a/kanit/tur2b/kahin_cea.json) + önce/sonra
 #: (p1a rapor §12). Tolerans DEĞİŞMEDİ.
 #: 5665947.829137343 -> 5443058.87619067 W/m² (−%3,93): daha soğuk oda.
-HIBRIT_BOGAZ_AKISI_W_M2 = 5443058.87619067
+#: v3.0.1 port kulvarı (20 Eki): grain dış çapı = son port (eski 1,5·D_son);
+#: kamara/yakınsak geometrisi ve ṁ değişti -> boğaz akısı −%0,0011.
+#: Ölçüldü (birleşik main): 5443058.87619067 -> 5442998.239863697 W/m².
+#: v3.0.1 B7 (21 Eki, ÖNEMLİ, Berke onaylı): bu gövde O/F 2,5 N2O/HTPB —
+#: gaz karbonca aşırı doymuş, dengeye katı karbon C(gr) girdi; T_c
+#: 1834 -> 2037 K (CEA 2037,6 K) -> boğaz akısı +%18,34. Ölçüldü aynı
+#: süreçte: yoğun yol KAPALI 5442998.239863697 (eski çapa, bit-aynı),
+#: AÇIK 6441514.278282809 W/m². Tolerans DEĞİŞMEDİ.
+#: v3.0.1 H-PANEL (26 Eki, ÖNEMLİ, Berke kararı 'girdi + kaynaklı
+#: varsayılan'; birleşme 74b55500a): N2O/HTPB c* verimi varsayılanı 0,89 (26
+#: ölçülmüş ateşlemenin ortancası; Heydari 2017, Scaramuzzino/Carmicino
+#: 2013). Bu gövde verimi vermez -> varsayılan uygulanır; Bartz
+#: h ∝ (Pc/c*)^0,8 olduğundan boğaz akısı (1/0,89)^0,8 = 1,097711 kat.
+#: T-ÇAPA-C2 ölçümü (27 Eki, ağaç dökümüyle ikiye bölme: 41733c22f
+#: 6441514.278282809, 74b55500a 7070956.591500392; e0f0db0a5 ve e038d626f
+#: aynı): oran 1,097717, bağımsız kâhinden sapma 5,1e-6 (geri kalan,
+#: c*'a bağlı ikincil terimler). Tolerans DEĞİŞMEDİ.
+HIBRIT_BOGAZ_AKISI_W_M2 = 7070956.591500392
 
 
 def _sessiz(fn, *a, **k):
@@ -375,7 +407,8 @@ console.log(JSON.stringify({
     geriCekildi: !!gerekceler.wall_thickness,
     alanDegeri: w,
     alanTipi: typeof w,
-    gerekce: gerekceler.wall_thickness || null
+    gerekce: gerekceler.wall_thickness || null,
+    baglam: spec.contextFromResults ? spec.contextFromResults(sonuc) : null
 }));
 """
 
@@ -402,18 +435,23 @@ def test_c1_hrma_kendi_cidarini_uca_geri_gondermez(tmp_path, hibrit_cidarsiz):
     assert d['kunyeDesignMode'] == 'size'
     assert d['kunyeBlockPath'] == 'structural_analysis.chamber_analysis', (
         f"künye bloğu adıyla taşınmıyor: {d['kunyeBlockPath']!r}")
-    assert d['geriCekildi'] is True, (
-        "HRMA'nın kendi boyutlandırdığı cidar hâlâ uca öneriliyor "
-        f"(alan değeri {d['alanDegeri']!r}) — kendi kendini doğrulatma "
-        'döngüsü geri geldi')
-    assert d['alanDegeri'] == 0, (
-        "geri çekilen alan 'sen boyutlandır' nöbetçisine (0) çekilmiyor: "
-        f"{d['alanDegeri']!r}")
-    # Gerekçe MAKİNE ADLARINI taşımalı: kullanıcı hangi alanın ne dediğini
-    # görebilmeli (çeviri anahtarı açılmaz — Z4 NOT_KEYS kaçışı).
-    for parca in ('design_mode', 'wall_thickness_source', 'sized_by_hrma'):
-        assert parca in d['gerekce'], (
-            f'geri çekme gerekçesi {parca!r} adını taşımıyor: {d["gerekce"]!r}')
+    # V301/FİZİK-2 (kalem 9, S1) — SÖZLEŞME ÇEVRİLDİ, gerekçeli (ana model
+    # kararı 27 Eki): sekme 0 nöbetçisiyle koşunca uç cidarı kendisi
+    # boyutlandırıp motorunkinden FARKLI bir hüküm basıyordu (katı "UNSAFE ·
+    # HIGH", hibrit SF 0,566; motorun kaydı NOT_EVALUATED — fizik-2/
+    # k9_yapisal_once.json). Cidar artık GERÇEK değeriyle gider; C1'in
+    # asıl korunan iddiası (HRMA'nın cidarı "kullanıcının cidarı" diye
+    # DOĞRULANMAZ) uçta bağlam künyesiyle tutulur: ``motor_wall_source:
+    # sized_by_hrma`` → is_verification false (tests/test_v301_fizik2_
+    # yapisal.py uç tarafını sınar).
+    assert d['geriCekildi'] is False
+    assert d['alanDegeri'] == pytest.approx(d['kunyeValueMm'] / 1000.0,
+                                            rel=1e-12)
+    baglam = d['baglam'] or {}
+    assert baglam.get('motor_wall_source') == 'sized_by_hrma', baglam
+    assert baglam['motor_verdict_inputs']['wall_thickness'] == pytest.approx(
+        d['alanDegeri'], rel=1e-12)
+    assert baglam['motor_result'], 'hüküm bloğu bağlamda yok'
 
 
 @pytest.mark.skipif(NODE is None, reason='node kurulu değil')
@@ -788,8 +826,22 @@ def test_c4_bos_katliya_rozet_basilmaz(tmp_path):
 #: onlar taşır. Yeni bir katlı eklendiğinde bekçi ADIYLA güncelleme ister.
 URUN_KATLI_ALANLARI = [
     ("analysis_dock.js", 1, ('data-src-ledger', 'style')),
+    # T-ÇAPA-C2 (27 Eki): v3.0.1 DİL (dddc72cd1, a601ebf4b), DİL-2
+    # (f36795100), K-C2 (1b3ec145b) ve T-ÇAPA-C2'nin katlıları ADIYLA
+    # eklendi (hepsi varsayılan KAPALI; ikinci iddia ölçer):
+    #   * app.js:1002, blowdown_panel.js:722, cfd_panel.js:942, solid.html
+    #     son katlı — "Teknik ayrıntı (çevrilmedi)" kutusu (hd-teknik-ayrinti,
+    #     DİL kalem 1-2: TR ekranda çözücünün İngilizce cümlesi kapalı kutuda)
+    #   * blowdown_panel.js:854 — DİL NK-16 TR özeti altında asıl cümle
+    #   * solid.html:2145/2164 — kunyeHTML / srvBeyanHTML (DİL-2 kök 7)
+    #   * solid.html:2684 — malzeme özelliği kaynak künyesi (K-C2)
+    #   * liquid.html:3399 — iki katmanlı cidar modeli dayanağı (T-ÇAPA-C2)
+    ("app.js", 1, ('class', 'style')),
     ("blowdown_panel.js", 1, ('id', 'style')),
-    ("blowdown_panel.js", 2, ()),
+    ("blowdown_panel.js", 2, ('class', 'style')),
+    ("blowdown_panel.js", 3, ('style',)),
+    ("blowdown_panel.js", 4, ()),
+    ("cfd_panel.js", 1, ('class', 'style')),
     ("fea_panel.js", 1, ('id', 'style')),
     ("fea_panel.js", 2, ('id', 'style')),
     ("fea_panel.js", 3, ('id', 'style')),
@@ -802,17 +854,37 @@ URUN_KATLI_ALANLARI = [
     # katlanmış <details> içinde (correlation_panel.js:400). Varsayılan
     # KAPALI — ``open`` yok; ikinci iddia ayrıca ölçer. (ana model, 14 Eyl)
     ("correlation_panel.js", 2, ('style',)),
-    ("stability_panel.js", 1, ('data-stab-fold', 'style')),
+    # V301/PANEL-SAYI (28 Eki): TR ekranda çevrilemeyen çözücü cümlesi
+    # kapalı "Teknik ayrıntı (çözücü beyanı, çevrilmedi)" kutusunda
+    # (stability_panel.js teknikAyrinti — dosyada fold'dan ÖNCE tanımlı;
+    # flow_panel.js rejim cümlesi, sürtünme künyesi ve model varsayımları
+    # TR'de çevrilemiyorsa). Varsayılan KAPALI.
+    ("stability_panel.js", 1, ('data-stab-srv', 'style')),
+    ("stability_panel.js", 2, ('data-stab-fold', 'style')),
+    ("flow_panel.js", 1, ('style',)),
+    ("flow_panel.js", 2, ('style',)),
+    ("flow_panel.js", 3, ('style',)),
+    # V301/PANEL-SAYI: besleme paneli çözücü düzyazısı TR'de çevrilemiyorsa
+    # kapalı kutuda (feed_panel.js duzyaziBlok). Varsayılan KAPALI.
+    ("feed_panel.js", 1, ('style',)),
     # D30 arayuz-panel a2 (edf29b73, P11B4-19): UQ dağılım künyesi.
     # Varsayılan KAPALI (nitelikler arasında ``open`` yok — aşağıdaki
     # ikinci iddia bunu ayrıca ölçer).
     ("uncertainty_panel.js", 1, ('data-uq-distributions', 'style')),
+    # T-ÇAPA-C2 (27 Eki, BELGE §8.1-3): tutarlılık notu TR'de tanınmazsa
+    # çözücünün tam cümlesi kapalı "Teknik ayrıntı (çevrilmedi)" kutusunda.
+    ("uncertainty_panel.js", 2, ('class',)),
     # ÖH D36 onemli2-kati (a1, 1e93ae89 — main'de birleşti): E-2 iki-faz
     # künyesi katlı (solid.html). Varsayılan KAPALI: nitelikler arasında
     # ``open`` yok (aşağıdaki ikinci iddia ayrıca ölçer). Envantere
     # onemli2-sivi a2 turunda eklendi: bekçi main birleşmesinden beri
     # kırmızıydı (kulvar dışı kök, kulvar-taban kıyasında yakalandı).
-    ("solid.html", 1, ('data-hd-declaration', 'style')),
+    ("liquid.html", 1, ()),
+    ("solid.html", 1, ()),
+    ("solid.html", 2, ('style',)),
+    ("solid.html", 3, ()),
+    ("solid.html", 4, ('data-hd-declaration', 'style')),
+    ("solid.html", 5, ('class',)),
 ]
 
 

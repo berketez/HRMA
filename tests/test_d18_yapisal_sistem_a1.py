@@ -451,8 +451,27 @@ class TestP5B219UQBandKapisi:
 #: ``P5B218_GOVDE_FARKLI_DEGERLER``) DEĞİŞMEDİ: türetim gövdeye tek bir
 #: sayı bile gömmedi. Kanıt:
 #: ``docs/scofield/raw/OH/D29/yapisal-sistem/a1/``.
-P5B218_DEGISMEZ_TAVANI = 235
-P5B218_FARKLI_DEGER_TAVANI = 66
+#: V3.0.5 T-ÇAPA-C1 (27 Eki): 235 -> 243, 66 -> 69. SEBEP ADIYLA: V301/PANEL
+#: (e0546fa2f, d70627de8) yapısal hükmü TEK işleve topladı
+#: (``motor_structural_verdict`` + ``motor_solved_wall_pair`` +
+#: ``motor_wall_zone_summary``). ÖLÇÜLDÜ (sabah tabanı ad0737bd4: 231 / 66;
+#: bugün 243 / 69). Üç yeni farklı değerin ÜÇÜ de modül düzeyinde ADLI
+#: sabittir (``MOTOR_VERDICT_INPUT_REL_TOL`` 1e-5; gövdede ``[:8]`` /
+#: ``[:1200]`` olarak gelen iki kırpma bu kulvarda
+#: ``MOTOR_WALL_ZONE_ROWS_MAX`` / ``MOTOR_WALL_ZONE_DECLARATION_CHARS_MAX``
+#: adlarına taşındı, ``max(|x|, 1e-300)`` tabanı kalktı). GÖVDE mandalı
+#: (``P5B218_GOVDE_FARKLI_DEGERLER``) DEĞİŞMEDİ: gövdeye yeni adsız değer
+#: girmedi.
+#: V301/T-ÇAPA-D (28 Eki): FİZİK-2 (ce7d13e1b kaynaklı sıvı TNT eşdeğeri,
+#: 537bf587b motor impuls kaydı) 243 / 69 -> 258 / 71. ÖLÇÜLDÜ
+#: (docs/scofield/raw/OH/V301/tcapa-d/olcum/safety_kunye_sayim.py; FİZİK-2
+#: öncesi 537bf587b~1: 244 / 70). Yeni iki farklı değer modül düzeyinde
+#: ADLI kaynaklı sabit (LIQUID_TNT_LOX_LH2_FRACTION 0,14,
+#: LIQUID_TNT_LOX_RP1_LAUNCH_BREAK_LB 500000); 1e-300 tabanı ve yerel
+#: KG_PER_LB literali main 64c2713fd'de kalktı. GÖVDE mandalı DEĞİŞMEDİ
+#: (gövde içinde 50 farklı değer, küme aynı).
+P5B218_DEGISMEZ_TAVANI = 258
+P5B218_FARKLI_DEGER_TAVANI = 71
 
 #: FONKSİYON GÖVDESİNDEKİ farklı sayısal değer mandalı (ÖH D27 fix-26a).
 #: Sayım ``SAFETY_MODEL`` bloğunu VE modül düzeyindeki adlı atamaları
@@ -492,7 +511,18 @@ P5B218_GOVDE_FARKLI_DEGERLER = frozenset({
 #:   * ``w13 = ... if tnt_equivalent > 0 else 0.0``    (küp kök tanımlı mı)
 #: Kalibrasyon literali sayısı (0/1 dışındaki değerler) DEĞİŞMEDİ: 0.
 #: Bu mandalın asıl ayağı zaten aşağıdaki ``kalibrasyon == []`` iddiasıdır.
-P5B218_ESIK_TAVANI = 19
+#: V3.0.5 T-ÇAPA-C1 (27 Eki): 19 -> 21. ÖLÇÜLDÜ — gelen İKİ literalin ikisi
+#: de ``0`` ve ikisi de V301/PANEL ``motor_solved_wall_pair``ın cebirsel
+#: işaret denetimi: ``if t is not None and t > 0 and tb is not None and
+#: tb > 0`` (kasa sıcaklığı K > 0, yanma süresi > 0). Kalibrasyon literali
+#: (0/1 dışı) sayısı DEĞİŞMEDİ: 0.
+#: V301/T-ÇAPA-D (28 Eki): 21 -> 23. ÖLÇÜLDÜ — gelen İKİ literalin ikisi de
+#: ``0`` ve ikisi de FİZİK-2'nin cebirsel işaret denetimi:
+#: ``effective_factor=(tnt_kg / m if m > 0 else None)`` (itici kütlesi
+#: pozitif mi; ce7d13e1b) ve ``kayit_degeri > 0`` (motorun impuls kaydı
+#: pozitif mi; 537bf587b). Kalibrasyon literali (0/1 dışı) sayısı
+#: DEĞİŞMEDİ: 0.
+P5B218_ESIK_TAVANI = 23
 
 
 def _safety_analysis_agaci():

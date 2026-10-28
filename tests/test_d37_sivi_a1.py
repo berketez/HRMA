@@ -285,8 +285,13 @@ def test_f20_normal_yolda_toplam_kimligi_ve_anahtarlar():
     assert d['injector_drop_status'] == 'computed'
     assert d['injector'] > 0.0
     for yan, hat in (('ox', 'oxidizer_line'), ('fuel', 'fuel_line')):
-        toplam = sum(d[hat][k] for k in ('tank_outlet', 'main_valve',
-                                         'filters', 'feed_lines', 'injector'))
+        # V301/L-REJ kalem 7 (NK-36): yakıt hattında rejeneratif ceket
+        # kalemi ('regen_jacket') de toplamın bir kalemidir; kimlik "toplam =
+        # kalemlerin toplamı" aynen sınanır (oksitleyicide kalem yok).
+        kalemler = ('tank_outlet', 'main_valve', 'filters', 'feed_lines',
+                    'injector') + (('regen_jacket',)
+                                   if 'regen_jacket' in d[hat] else ())
+        toplam = sum(d[hat][k] for k in kalemler)
         assert d['total_' + yan] == toplam
         assert d['pump_discharge_pressure_' + yan] == 100.0 + toplam
     assert d['feed_budget_is_lower_bound'] is False
@@ -439,10 +444,15 @@ class _KurulanRegen:
 _CIDAR_MM = 6.0
 
 
+# V301/L-KABUK: iki katmanlı rejeneratif cidarda chamber_wall_thickness
+# BÜTÜN rejeneratif yollarda ASTARDIR (kanal tabanı gaz yüzünden o kadar
+# uzakta); metan/LH2 yolu kullanıcının sayısını artık yok saymaz. Eski
+# beklenti (metan/LH2'de girdiden bağımsız 1 mm) iki ayrı cidar anlamı
+# taşıyordu.
 @pytest.mark.parametrize('yakit,mr,beklenen_mm', [
     ('rp1', 2.5, 6.0),
-    ('methane', 3.2, 1.0),
-    ('lh2', 6.0, 1.0),
+    ('methane', 3.2, 6.0),
+    ('lh2', 6.0, 6.0),
 ])
 def test_d1_d2_sicak_cidar_yakit_yoluna_gore_sabit_deger(istemci, yakit, mr,
                                                         beklenen_mm):
@@ -460,7 +470,9 @@ def test_d1_d2_sicak_cidar_yakit_yoluna_gore_sabit_deger(istemci, yakit, mr,
     # RP-1 marşı ince cidar zarfında koşsun diye 2 mm (6 mm'de marş zarf
     # dışı diye kurulmuyor — F-19 yan etkisi, rapor DEVİR 2).
     ('rp1', 2.5, 2.0),
-    ('methane', 3.2, _CIDAR_MM),
+    # V301/L-KABUK: metan yolu da kullanıcının astarını iletir; süperkritik
+    # marşın ince cidar zarfında koşsun diye 1 mm (6 mm astar zarf dışı).
+    ('methane', 3.2, 1.0),
 ])
 def test_d1_d2_motor_cidari_marsin_kurdugu_regen_cidari(istemci, monkeypatch,
                                                        yakit, mr, cidar_mm):
@@ -573,14 +585,22 @@ def test_s2_kunye_imalat_tabani_baglayinca_bunu_soyler(istemci):
     (örnek proje sınıfı: basınç tek başına daha ince cidar ister)."""
     from hrma.engines.liquid_rocket_engine import (
         WALL_THICKNESS_MANUFACTURING_MIN_M)
-    d = _sivi(istemci, chamber_pressure=30, mixture_ratio=2.2)
+    # L-B (v3.0.1, SV-05): RP-1 rejeneratifte 2 mm cidarda istasyon marşı
+    # tepe cidarı erime üstünde çözüyor -> yapı hükmü geri çekilir ve
+    # safety_factor_basis tanı metnine döner. Kipe göre kurulan cümle
+    # GEÇERLİLİK İÇİ koşumda sınanır: film tipi (1B cidar çözücüsü yok,
+    # hüküm beyanlı hedef sıcaklıkta). Kalınlık ve gereksinim zarfı
+    # soğutma tipinden bağımsızdır.
+    d = _sivi(istemci, chamber_pressure=30, mixture_ratio=2.2,
+              cooling_type='film_cooling', film_cooling_percent=5.0)
     cs = d['structural_analysis']['chamber_structure']
     assert cs['design_mode'] == 'size'
+    assert cs['model_validity_limit_exceeded'] is False
     # Bağımsız ölçüm: basıncın tek başına istediği kalınlık = p·d/(2·σ_izin)
     # (yanıtın kendi yayımladığı iç basınç [bar], çap [mm], izin [MPa]).
     p_pa = float(cs['internal_pressure']) * 1e5
     d_c = float(cs['chamber_diameter']) / 1000.0
-    izin = float(cs['allowable_stress']) * 1e6
+    izin = float(cs['allowable_stress_sizing']) * 1e6
     t_basinc = p_pa * d_c / (2.0 * izin)
     assert t_basinc < WALL_THICKNESS_MANUFACTURING_MIN_M
     assert _TABAN_IMI in cs['safety_factor_basis']
@@ -612,8 +632,51 @@ def _ornek_govdesi():
 
 
 @pytest.fixture(scope='module')
+def ornek_marssiz(istemci):
+    """L-B (v3.0.1, SV-05): ÖRNEK'in film tipli hâli. RP-1 rejeneratif
+    örnekte istasyon marşı 2 mm cidarı 2876,6 K çözüyor (erime üstü) ve
+    yapı hükmü geri çekiliyor; GEÇERLİLİK İÇİ referans gereken bekçiler
+    (FEA hedefi, imalat tabanı cümlesi) aynı geometriyi film tipinde koşar
+    (1B cidar çözücüsü yok, hüküm beyanlı 800 K hedefte)."""
+    g = _ornek_govdesi()
+    g.update(cooling_type='film_cooling', film_cooling_percent=5.0)
+    # V301/T-ÇAPA-D: ÖRNEK kulvarı (5fa435893) örnek sıvıyı CuCrZr + kullanıcı
+    # cidarı 1 mm ile yeniden kurdu; bu fikstürün bekçileri (Ş2 FEA hedefi,
+    # Ş5 imalat tabanı) HRMA'nın BOYUTLANDIRDIĞI cidarın fiziğini ölçer ve
+    # ölçümleri önceki örneğin malzemesiyle (Inconel 718) alındı. Koşul
+    # açıkça sabitlenir: kamara Inconel 718, cidar verilmez. ÖLÇÜLDÜ (28 Eki):
+    # yapısal levha 1,0 mm, çizilen 2,0 mm (taban levhayı değiştirdi) —
+    # docstring'deki ölçümle aynı; CuCrZr'de levha 8 mm, taban değiştirmez.
+    g['chamber_material'] = 'inconel_718'
+    g.pop('chamber_wall_thickness', None)
+    r = _sessiz(istemci.post, '/calculate_liquid', json=g)
+    assert r.status_code == 200, r.get_json()
+    j = r.get_json()
+    assert j['structural_analysis']['chamber_structure'][
+        'model_validity_limit_exceeded'] is False
+    return j
+
+
+@pytest.fixture(scope='module')
 def ornek(istemci):
     r = _sessiz(istemci.post, '/calculate_liquid', json=_ornek_govdesi())
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()
+
+
+#: V301/L-KABUK — TEK KATMANLI yapı zinciri (hazne çemberi P_c ile + boğaz
+#: eksenel zar yükü + imalat tabanı) artık yalnız ceketsiz soğutma
+#: tiplerinde koşar; rejeneratif cidar iki katmanlıdır (basıncı dış kabuk
+#: taşır, test_v301_l_kabuk). Bu dosyanın Ş2/Ş5 bekçileri tek katmanlı
+#: zincirin fiziğini kilitler; aynı motorların film soğutmalı ikizinde koşar.
+TEK_KATMAN = dict(cooling_type='film_cooling', film_cooling_percent=5.0)
+
+
+@pytest.fixture(scope='module')
+def ornek_tek_katman(istemci):
+    g = _ornek_govdesi()
+    g.update(TEK_KATMAN)
+    r = _sessiz(istemci.post, '/calculate_liquid', json=g)
     assert r.status_code == 200, r.get_json()
     return r.get_json()
 
@@ -659,7 +722,10 @@ def _bogaz_ikinci_yol(d):
     s_yukari = vm(n_yukari * pc * a_t / (2 * math.pi * r_t * t))
     s_asagi = vm(-n_asagi * pc * a_t / (2 * math.pi * r_t * t))
     s_eq = max(s_yukari, s_asagi)
-    izin = float(cs['allowable_stress']) * 1e6
+    # L-B (v3.0.1, SV-05): gereken kalınlık BOYUTLANDIRMA izin gerilmesiyle
+    # (hedef cidar sıcaklığında); allowable_stress artık hükmün (çözülmüş)
+    # sıcaklığındadır.
+    izin = float(cs['allowable_stress_sizing']) * 1e6
     return {'asagi_kn': n_asagi * pc * a_t / 1e3,
             'yukari_kn': n_yukari * pc * a_t / 1e3,
             'p_t_bar': p_t * pc / 1e5,
@@ -679,10 +745,12 @@ def _bogaz_ikinci_yol(d):
     {'chamber_material': 'steel_304'},       # hazne çemberi bağlar
     {'thrust': 250000, 'chamber_pressure': 20},
 ], ids=['ornek', '10kN-100bar', 'ss304', '250kN-20bar'])
-def test_s2_bogaz_eksenel_yuk_ikinci_yol(istemci, ornek, govde):
+def test_s2_bogaz_eksenel_yuk_ikinci_yol(istemci, ornek_tek_katman, govde):
     """Ş2: boğaz eksenel zar kuvveti (iki serbest cisim), boğaz statik
-    basıncı, eşdeğer gerilme ve gereken kalınlık BAĞIMSIZ integralle aynı."""
-    d = ornek if govde is None else _sivi(istemci, **govde)
+    basıncı, eşdeğer gerilme ve gereken kalınlık BAĞIMSIZ integralle aynı.
+    (V301/L-KABUK: tek katmanlı zincir — film soğutmalı ikiz.)"""
+    d = (ornek_tek_katman if govde is None
+         else _sivi(istemci, **dict(govde, **TEK_KATMAN)))
     cs = d['structural_analysis']['chamber_structure']
     b = cs['throat_meridional_check']
     assert b['status'] == 'evaluated'
@@ -722,12 +790,12 @@ def test_s2_bogaz_eksenel_yuk_ikinci_yol(istemci, ornek, govde):
         e['sabit_pc_yukari_kn'], rel=1e-12)
 
 
-def test_s2_sabit_pc_bandi_fea_yukunu_iddia_etmez(ornek):
+def test_s2_sabit_pc_bandi_fea_yukunu_iddia_etmez(ornek_tek_katman):
     """Karar §28-18 (B): sabit-P_c bandının künyesi bir ÜST SINIR
     karşılaştırmasıdır; FEA'nın yükünü iddia etmez (FEA yükünü kendi
     fea.load_model'inde yazar — fea-yuk ile birlikte birleşince 'FEA lüle
     boyunca P_c uygular' cümlesi yanlış olurdu)."""
-    b = ornek['structural_analysis']['chamber_structure'][
+    b = ornek_tek_katman['structural_analysis']['chamber_structure'][
         'throat_meridional_check']
     metin = b['constant_pc_basis']
     assert 'upper-bound comparison' in metin
@@ -736,12 +804,13 @@ def test_s2_sabit_pc_bandi_fea_yukunu_iddia_etmez(ornek):
     assert 'expected until the FEA load' not in metin
 
 
-def test_s2_gereksinim_zarfi_ve_etiketi(istemci, ornek):
+def test_s2_gereksinim_zarfi_ve_etiketi(istemci, ornek_tek_katman):
     """Ş2: gereken kalınlık = max(hazne çemberi, boğaz eşdeğeri, taban)."""
     from hrma.engines.liquid_rocket_engine import (
         WALL_THICKNESS_MANUFACTURING_MIN_M)
     taban = WALL_THICKNESS_MANUFACTURING_MIN_M * 1e3
-    for d in (ornek, _sivi(istemci, chamber_material='steel_304')):
+    for d in (ornek_tek_katman,
+              _sivi(istemci, chamber_material='steel_304', **TEK_KATMAN)):
         cs = d['structural_analysis']['chamber_structure']
         bilesen = {'chamber_hoop': cs['required_wall_thickness_hoop'],
                    'throat_meridional': cs['required_wall_thickness_throat'],
@@ -753,7 +822,7 @@ def test_s2_gereksinim_zarfi_ve_etiketi(istemci, ornek):
         # Hazne çemberi bileşeni bağımsız: p·d/(2·σ_izin).
         assert cs['required_wall_thickness_hoop'] == pytest.approx(
             float(cs['internal_pressure']) * 1e5 * cs['chamber_diameter']
-            / (2.0 * float(cs['allowable_stress']) * 1e6), rel=1e-9)
+            / (2.0 * float(cs['allowable_stress_sizing']) * 1e6), rel=1e-9)
 
 
 def test_s2_zarf_bogaz_baglayinca_kalinligi_o_belirler(monkeypatch):
@@ -784,7 +853,7 @@ def _fea(istemci, d):
     return r.get_json()['fea']
 
 
-def test_s2_ornek_fea_fiziksel_yukte_hedefi_saglar(istemci, ornek):
+def test_s2_ornek_fea_fiziksel_yukte_hedefi_saglar(istemci, ornek_marssiz):
     """Ş2 FEA ikinci yolu: ÖRNEK'in HRMA boyutlu cidarı (2,00 mm), AYNI FEA
     çözücüsünde fiziksel yükle (izantropik P(x)) min SF >= 1 ve >= hedef
     (ölçüldü 29 Eyl: 2,630 ⟷ hedef 2,5; sabit P_c yüküyle 0,819).
@@ -800,6 +869,10 @@ def test_s2_ornek_fea_fiziksel_yukte_hedefi_saglar(istemci, ornek):
     yayımladığı γ, kuvvet dengesi tutuyor. Beklenti (SF >= 1 ve >= hedef)
     DEĞİŞMEDİ; ters mutasyon (eski sabit P_c yükü) bu düğümü KIRMIZI yapar
     (0,819 < 1)."""
+    # L-B (v3.0.1, SV-05): ölçüldü — RP-1 rejeneratif örnekte FEA artık
+    # çözülmüş 2876,6 K cidar akmasını alıyor (min SF 1,458 < hedef 2,5);
+    # örnek geçerlilik dışı. Yük modeli bekçisi geçerlilik içi ikizde.
+    ornek = ornek_marssiz
     cs = ornek['structural_analysis']['chamber_structure']
     f = _fea(istemci, ornek)
     lm = f.get('load_model') or {}
@@ -829,10 +902,19 @@ def test_s2_ornek_fea_zinciri_min_sf_en_az_1(istemci, ornek):
     """
     f = _fea(istemci, ornek)
     lm = f.get('load_model') or {}
-    assert lm.get('distribution') == 'isentropic_1d', (
-        'FEA iç yüzey yükü izantropik değil (load_model yok ya da sabit '
-        'P_c): bu dal dalga37/v3-fea-yuk ile birlikte birleşir, karar '
-        '§28-18 (B)', lm.get('distribution'))
+    # V3.0.5 SIVI-CIDAR kalem 3 — BEKLENTİ DEĞİŞTİ (yalnız iki katmanlı
+    # rejeneratif cidar): FEA gövdesi artık DIŞ KABUKTUR ve fiziksel yükü
+    # ceket soğutucu basıncıdır (yalnız radyal izdüşüm, kuvvet dengesi
+    # kapısı aynen), gaz basıncıyla yüklenen homojen yığın değil. Tek
+    # katmanlı yolda beklenti (izantropik P(x)) DEĞİŞMEDİ. Ölçüm:
+    # docs/scofield/raw/OH/V301/sivi-cidar/olcum/k3_sonra.json.
+    iki_katman = (ornek['structural_analysis']['chamber_structure']
+                  .get('wall_model') == 'two_layer_regenerative')
+    beklenen = ('coolant_uniform_closeout' if iki_katman
+                else 'isentropic_1d')
+    assert lm.get('distribution') == beklenen, (
+        'FEA iç yüzey yükü beklenen fiziksel yük modeli değil',
+        lm.get('distribution'), beklenen)
     assert (lm.get('force_balance') or {}).get('holds') is True
     assert f['scalars']['min_safety_factor'] >= 1.0
 
@@ -870,11 +952,12 @@ def _taban_cumlesi_var(cs):
     return _TABAN_IMI in cs['safety_factor_basis']
 
 
-def test_s5_taban_ornekte_levhayi_degistirir(ornek):
+def test_s5_taban_ornekte_levhayi_degistirir(ornek_marssiz):
     """ÖRNEK: basınç gerilmeleri 1,0 mm levhayla karşılanır, çizilen 2,0 mm
-    → taban levhayı DEĞİŞTİRDİ, cümle VAR."""
+    → taban levhayı DEĞİŞTİRDİ, cümle VAR. (L-B: geçerlilik içi ikizde —
+    rejeneratif örnekte hüküm geri çekildiği için künye tanı metnidir.)"""
     from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
-    cs = ornek['structural_analysis']['chamber_structure']
+    cs = ornek_marssiz['structural_analysis']['chamber_structure']
     t_yapi = max(cs['required_wall_thickness_hoop'],
                  cs['required_wall_thickness_throat']) / 1e3
     std, _ = LiquidRocketEngine._next_standard_plate_m(t_yapi)
@@ -888,7 +971,7 @@ def test_s5_taban_bandinda_levha_ayni_cumle_yok(istemci):
     ister, bir üst standart 2,0 mm = çizilen → taban levhayı DEĞİŞTİRMEDİ,
     cümle YOK (eski yüklem t < 2 mm burada yanlış VAR diyordu)."""
     d = _sivi(istemci, thrust=100000, chamber_pressure=70,
-              chamber_material='inconel_718')
+              chamber_material='inconel_718', **TEK_KATMAN)
     cs = d['structural_analysis']['chamber_structure']
     assert 1.5 < cs['required_wall_thickness_hoop'] < 2.0
     assert cs['wall_thickness'] == pytest.approx(2.0, abs=1e-12)
@@ -898,7 +981,7 @@ def test_s5_taban_bandinda_levha_ayni_cumle_yok(istemci):
 
 def test_s5_basinc_baglarken_cumle_yok(istemci):
     """304 / 100 bar: basınç 8 mm levhayı seçtirir → cümle YOK."""
-    d = _sivi(istemci, chamber_material='steel_304')
+    d = _sivi(istemci, chamber_material='steel_304', **TEK_KATMAN)
     cs = d['structural_analysis']['chamber_structure']
     assert cs['manufacturing_floor_changed_plate'] is False
     assert not _taban_cumlesi_var(cs)
@@ -919,11 +1002,19 @@ def test_s6_a1_a8_sigan_kullanici_n_beyani_kendi_sayisi(istemci):
 
 
 def test_s6_a3_film_sogutmada_sigmayan_n_kritik(istemci):
-    """A3: film soğutma + N = 80 (sığmıyor) → kritik exceed_fit_limit."""
+    """A3 — L-B (v3.0.1, SV-08) ile SÖZLEŞME DEĞİŞTİ: film tipinde
+    rejeneratif ceket YOKTUR (FILM_COOLING_NO_JACKET_BASIS), dolayısıyla
+    kanal sığma hükmü de yoktur. Eski beklenti (film + N = 80 → kritik
+    exceed_fit_limit) var olmayan bir ceketin kanalına hüküm veriyordu.
+    Rejeneratif tipte aynı hüküm aşağıdaki karşı ölçümde DURUR."""
     d = _sivi(istemci, cooling_type='film_cooling', cooling_channels=80)
-    fit = d['cooling_system']['channel_count_fit']
-    assert fit['status'] == 'does_not_fit'
-    uy = [w for w in d['input_warnings'] if w.get('code')
+    cs = d['cooling_system']
+    assert cs['channel_count_fit'] is None
+    assert cs['regenerative_jacket_status'] == 'NOT_APPLICABLE'
+    assert not [w for w in d['input_warnings'] if w.get('code')
+                == 'warn.liquid.cooling_channels_exceed_fit_limit']
+    r = _sivi(istemci, cooling_type='regenerative', cooling_channels=80)
+    uy = [w for w in r['input_warnings'] if w.get('code')
           == 'warn.liquid.cooling_channels_exceed_fit_limit']
     assert len(uy) == 1 and uy[0]['severity'] == 'critical'
     assert uy[0]['params']['n'] == 80
@@ -941,7 +1032,9 @@ def test_s6_a4_step_kunyesi_derinligi_yayimlanan_derinlik(istemci):
     assert 'h=%.2f mm)' % cs['channel_height_mm'] in notu, notu
 
 
-@pytest.mark.parametrize('sogutma', ['regenerative', 'film_cooling'])
+# L-B (v3.0.1, SV-08): film tipinde ceket yok (channel_count_fit None);
+# yüklem yalnız ceketli tipte sınanır.
+@pytest.mark.parametrize('sogutma', ['regenerative'])
 @pytest.mark.parametrize('yakit,mr', [('rp1', 2.5), ('methane', 3.2),
                                       ('lh2', 6.0)])
 def test_s6_a7_kanal_cidari_ve_superkritik_mars_ayni_yuklem(
@@ -960,11 +1053,12 @@ def test_s6_a7_kanal_cidari_ve_superkritik_mars_ayni_yuklem(
     d = _sivi(istemci, fuel_type=yakit, mixture_ratio=mr,
               cooling_type=sogutma, chamber_wall_thickness=6.0)
     fit = d['cooling_system']['channel_count_fit']
-    liner = fit['hot_wall_thickness_mm'] == pytest.approx(
-        lre.REGEN_LINER_THICKNESS_M * 1e3, abs=1e-12)
-    assert liner == bool(cagri), (sogutma, yakit, fit['hot_wall_thickness_mm'],
-                                  len(cagri))
-    assert liner == (sogutma == 'regenerative' and yakit != 'rp1')
+    # V301/L-KABUK: sığma ölçütünün cidarı HER rejeneratif yolda astardır
+    # (kullanıcının 6 mm'si); süperkritik marş yalnız metan/LH2'de koşar —
+    # iki kapı hâlâ tek yüklemden (_supercritical_march_applies).
+    assert fit['hot_wall_thickness_mm'] == pytest.approx(6.0, abs=1e-12)
+    assert bool(cagri) == (sogutma == 'regenerative' and yakit != 'rp1'), (
+        sogutma, yakit, len(cagri))
 
 
 # =========================================================================
@@ -995,14 +1089,19 @@ def test_s4_kucuk_basinc_beslemeli_motorda_en_buyuk_tank_basinci_yok(
     d = _sivi(istemci, engine_cycle='pressure_fed',
               feed_system_type='pressure_fed', **_KUCUK)
     assert d['injection_system']['required_fuel_tank_pressure'] is None
-    assert d['injection_system']['required_ox_tank_pressure'] is not None
-    assert d['turbopump_system']['max_tank_pressure'] is None
+    # V301/L-A (SV-03) — BEKLENTİ DEĞİŞTİ: gerekli tank basıncı TEK tanımdır
+    # (engine_cycle_solution.required_tank_pressure_*); çevrim çözümü bu
+    # koşuda sayı yayımlamadığı için oksitleyici tarafı da kısmi bir toplamla
+    # (Pc + ΔP + 8 bar pay, hat kaybı yok) doldurulmaz. Basınç beslemeli
+    # çevrimin pompa bloğu artık tank basıncı hiç yayımlamaz.
+    assert d['injection_system']['required_ox_tank_pressure'] is None
+    assert 'max_tank_pressure' not in d['turbopump_system']
 
 
 def test_s5_dogrulama_kipinde_taban_bayragi_yok(istemci):
     """Ş5 (X16): cidarı KULLANICI verdiğinde (doğrulama kipi, 5 mm) imalat
     tabanı seçilen levhayı DEĞİŞTİRMEMİŞTİR — levhayı HRMA seçmedi."""
-    d = _sivi(istemci, chamber_wall_thickness=5.0)
+    d = _sivi(istemci, chamber_wall_thickness=5.0, **TEK_KATMAN)
     cs = d['structural_analysis']['chamber_structure']
     assert cs['design_mode'] == 'verify'
     assert cs['wall_thickness'] == pytest.approx(5.0, abs=1e-12)
@@ -1082,9 +1181,14 @@ def test_28_31c_regen_esikleri_kanonik_merdivenden(malzeme):
         tl['allowable_K'] - sm['max_wall_hot_K'], rel=1e-12)
 
 
+# V301/L-REJ (26 Eki): su/RP-1 yoluna kanat modeli + Sieder-Tate girdi;
+# aynı debide cidar daha soğuk. Bekçinin iddiası (dal ERİŞİLİR) aynı kaldı,
+# yalnız dala düşen vaka yeniden seçildi — ölçüldü: copper 1,5 kg/s artık
+# 605,5 K (izin altı), 0,6 kg/s 729,8 K (723 < T < 1358); steel_4130
+# 1,0 kg/s 1029,8 K (811 < T < erime, değişmeden dalda).
 @pytest.mark.parametrize('malzeme,debi,ham_izin', [
-    ('copper', 1.5, 1000.0),       # T 854 K: ham izinle hüküm YOKTU
-    ('steel_4130', 1.0, 1000.0),   # T 1156 K: ham izinle yalnız WARNING
+    ('copper', 0.6, 1000.0),       # T 729,8 K: ham izinle hüküm YOKTU
+    ('steel_4130', 1.0, 1000.0),   # T 1029,8 K: ham izinle yalnız WARNING
 ])
 def test_28_31c_unsafe_dali_erisilir_kanonik_izinde(malzeme, debi, ham_izin):
     """§28-31 (c): UNSAFE dalı artık ERİŞİLİR ve kanonik izin basamağında
@@ -1106,7 +1210,9 @@ def test_28_31c_unsafe_dali_erisilir_kanonik_izinde(malzeme, debi, ham_izin):
 def test_28_31c_erime_ustunde_critical():
     """§28-31 (c): erime basamağı CRITICAL olarak kalır (inconel 718,
     zayıf soğutma: tepe cidar > 1533 K)."""
-    sm = _regen(wall_material='inconel_718', coolant_mdot=1.0).solve()[
+    # V301/L-REJ (26 Eki): kanat + Sieder-Tate ile 1,0 kg/s artık 1503,4 K
+    # (erime altı, UNSAFE); erime dalına düşen vaka 0,5 kg/s (1590,6 K).
+    sm = _regen(wall_material='inconel_718', coolant_mdot=0.5).solve()[
         'summary']
     assert sm['max_wall_hot_K'] > sm['material_melting_K']
     hukum = [w for w in sm['warnings']
@@ -1147,7 +1253,10 @@ def test_28_31c_motor_marsi_ayni_esigi_yayimlar(istemci):
     d = _sivi(istemci, chamber_material='copper_c101',
               chamber_wall_thickness=2.0)
     sm = d['thermal_protection']['station_march']
-    mat = d['structural_analysis']['chamber_structure']['material_key']
+    # V301/L-KABUK: marşın cidarı iki katmanlı cidarın ASTARIDIR; bloğun
+    # material_key'i basıncı taşıyan dış kabuğundur. Eşik astarınki.
+    mat = d['structural_analysis']['chamber_structure']['wall_layers'][0][
+        'material_key']
     assert mat == 'copper'
     izin = temperature_limits(mat)['allowable_K']
     assert sm['material_allowable_K'] == izin == 723.0

@@ -227,10 +227,16 @@ def _uyari_kodlari(eng):
 
 class TestOHD2507ZarfKapisi:
 
+    # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu; üç gövdenin
+    # üçü de portu boğulan geometriydi (A_p/A_t 0,95 / 0,35 / 0,89) ve artık
+    # yayımlanmıyor (KT-23). Çekirdekler, aynı gövdede çıkışın zarfı aştığı
+    # GEÇERLİ portlu değerlere taşındı (ölçüldü): 30 -> 48 (A_p/A_t 2,21,
+    # çıkış 0,375 m), 20 -> 48 (1,86; 0,350 m), 40 -> 80 (1,50; 0,949 m —
+    # mutlak 1,0 m kapısına %5,1 pay).
     @pytest.mark.parametrize('ov', [
-        {'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 30,
+        {'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 48,
          'chamber_pressure': 40, 'test_altitude': 25000},
-        {'chamber_diameter': 80, 'grain_length': 900, 'core_diameter': 20,
+        {'chamber_diameter': 80, 'grain_length': 900, 'core_diameter': 48,
          'chamber_pressure': 60, 'test_altitude': 20000},
         # ÖH KİTAP p1b (B11, §28-36 Ş-3) — KURULUŞ YENİDEN SEÇİLDİ (ov2):
         # eski irtifa 30 km idi. APCP kaydı CEA denge dörtlüsüne geçince
@@ -240,7 +246,7 @@ class TestOHD2507ZarfKapisi:
         # Niyet (büyük gövdeli, yüksek irtifa motorunda zarfı aşan ama mutlak
         # eşiğin altında kalan lüle) 27 km ile korunur: çıkış 0,912 m (eski
         # dörtlüyle 0,796 m); 1,0 m'ye %8,8 pay.
-        {'chamber_diameter': 150, 'grain_length': 1500, 'core_diameter': 40,
+        {'chamber_diameter': 150, 'grain_length': 1500, 'core_diameter': 80,
          'chamber_pressure': 50, 'test_altitude': 27000},
     ])
     def test_zarfi_asan_lule_sessiz_kalmaz(self, ov):
@@ -253,14 +259,16 @@ class TestOHD2507ZarfKapisi:
         assert 'warn.solid.exit_cone_exceeds_case' in _uyari_kodlari(eng)
 
     def test_zarfin_icinde_kalan_lulede_uyari_yok(self):
+        # V301/K-A: eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu.
         eng = _motor(chamber_diameter=100, grain_length=500,
-                     core_diameter=30, chamber_pressure=40)
+                     core_diameter=48, chamber_pressure=40)
         assert float(eng._design_exit_diameter()) < float(eng.D_chamber)
         assert 'warn.solid.exit_cone_exceeds_case' not in _uyari_kodlari(eng)
 
     def test_uyari_iki_capi_ve_orani_tasir(self):
+        # V301/K-A: eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu.
         eng = _motor(chamber_diameter=100, grain_length=500,
-                     core_diameter=30, chamber_pressure=40,
+                     core_diameter=48, chamber_pressure=40,
                      test_altitude=25000)
         res = _sessiz(eng.calculate_performance)
         kayit = [w for w in res['warnings']
@@ -367,9 +375,20 @@ class TestOHD2508TekKabulKumesi:
 # ---------------------------------------------------------------------------
 # OH-D25-10 — TEK boğaz kaynağı, üç kapı
 # ---------------------------------------------------------------------------
+# V301/K-A (22 Eki): ilk gövde eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu
+# (çekirdek 30 -> 48). Öteki üç gövde boğazın gövdeyi aştığı (100/3000,
+# 700/5000) ya da 500 mm'yi aştığı (900/6000, eski kelepçe bölgesi)
+# vakalardır; üçünde de port boğazdan küçüktür (A_p/A_t < 1; radyal yanan
+# tanede boğaz gövdeyi aşınca bu kaçınılmazdır) ve tasarım artık
+# YAYIMLANMAZ (KT-23). Bu gövdeler ters kapı düğümlerine taşındı
+# (``TestV301BogulanGovdeler``): ret künyesinin boğazı yine TEK kaynaktan
+# (``_estimate_throat_diameter``) gelir.
 _KAPI_GOVDELERI = (
-    {'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 30,
+    {'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 48,
      'chamber_pressure': 40},
+)
+
+_BOGULAN_GOVDELER = (
     {'chamber_diameter': 100, 'grain_length': 3000, 'core_diameter': 15,
      'chamber_pressure': 10},
     {'chamber_diameter': 900, 'grain_length': 6000, 'core_diameter': 60,
@@ -377,6 +396,25 @@ _KAPI_GOVDELERI = (
     {'chamber_diameter': 700, 'grain_length': 5000, 'core_diameter': 40,
      'chamber_pressure': 5},
 )
+
+
+class TestV301BogulanGovdeler:
+    """Boğazı gövdeyi aşan motorlar YAYIMLANMAZ; ret boğazı tek kaynaktan."""
+
+    @pytest.mark.parametrize('ov', _BOGULAN_GOVDELER)
+    def test_bogulan_govde_reddedilir_ve_bogaz_tek_kaynaktan(self, ov):
+        from hrma.engines.solid_rocket_engine import SolidDesignRejected
+        eng = _motor(**dict(ov))
+        d_t = float(eng._estimate_throat_diameter())
+        # Gövde hükmü yine tek ölçütten (bağımsız kurulur).
+        assert eng._throat_exceeds_case(d_t) is (d_t >= float(eng.D_chamber))
+        with pytest.raises(SolidDesignRejected) as exc:
+            _sessiz(eng.calculate_performance)
+        assert exc.value.code == 'port_smaller_than_throat'
+        kunye = exc.value.invalid_fields[0]
+        assert kunye['throat_diameter_mm'] == pytest.approx(d_t * 1000.0,
+                                                            rel=1e-9)
+        assert kunye['port_to_throat_area_ratio'] < 1.0
 
 
 class TestOHD2510TekBogazKaynagi:

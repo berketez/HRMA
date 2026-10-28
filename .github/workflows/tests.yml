@@ -803,6 +803,12 @@ jobs:
                  'tests/test_d30_ihracat_a1.py::TestOHD2909ReddinYoluIZLENEBILIR::test_reddin_adlandirdigi_yolu_dolduran_govde_200_alir[/api/export-step]' \
                  tests/test_d35_onemli_kati_cad_a1.py \
                  tests/test_d37_pdf_a1.py \
+                 tests/test_v301_cad_lule.py \
+                 tests/test_v301_cad_pintle.py \
+                 tests/test_v301_cad2_iki_katman.py \
+                 tests/test_v301_cad2_pintle_sahne.py \
+                 tests/test_v301_cad2_plaka.py \
+                 tests/test_v301_cad2_toplam_boy.py \
                  'tests/test_d23_altyapi_a1.py::TestTabanYuklerCanli::test_taban_yuk_200_veriyor[/api/export-step]' \
                  tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_iki_dosya_ayni_kasa_capini_yaziyor \
                  tests/test_z5guard_urun_tur.py::TestP17S1_01EngStepCapEsitligi::test_capin_kaynagi_uydurma_degil \

@@ -88,7 +88,24 @@ def _hibrit_motor():
 
 @pytest.fixture(scope='module')
 def motor():
-    return _hibrit_motor()
+    """Kapı MEKANİĞİ fikstürü: lüle malzemesi kamarayla AYNI hibrit.
+
+    V301/FİZİK-2 (NK-12) — GEREKÇELİ DEĞİŞİKLİK: termal ağ artık motorun
+    lüle malzemesiyle çözülür; ürünün varsayılan hibrit lülesi grafittir ve
+    h(z) çapası (motorun boğaz katsayıları) kamara malzemesiyle kurulu
+    olduğundan o motorda lüle bölgesi kapının DIŞINDA kalır (beyanlı;
+    ``tests/test_v301_fizik2_fea_capa.py``). Bu sınıfın iddiası kapının
+    istasyon ve red mekaniğidir (malzemeden bağımsız); mekaniği sınamak için
+    lüle malzemesi kamara malzemesine eşitlenir — çapa ile ağ aynı
+    malzemeyi anlatır ve kapı eskisi gibi KOŞAR.
+    """
+    import copy
+    import hrma.fea.bridge as BR
+    m = copy.deepcopy(_hibrit_motor())
+    kamara = BR.extract_structural_inputs(m, include_chamber=False)[
+        'material_key']
+    m.setdefault('nozzle_material_analysis', {})['material'] = kamara
+    return m
 
 
 @pytest.fixture(scope='module')

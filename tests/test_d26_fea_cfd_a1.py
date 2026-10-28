@@ -420,8 +420,13 @@ class TestP8B209KisitYeriDuyarliligi:
         # oran 1,2006576 → fark 0,20066); (b) aşağıda köprüden BAĞIMSIZ
         # doğrudan çözüm — ürünün son mesh'inde iki kip ayrı ayrı çözülür,
         # oran ondan kurulur. Pay (abs=5e-3) DEĞİŞMEDİ.
-        assert kapi['bagil_fark'] == pytest.approx(0.20066, abs=5e-3), (
-            f"ölçülen fark {kapi['bagil_fark']} — fea-yuk çapası 0,20066")
+        # V301/K-D: 0,20066 -> 0,21104 (V301/N-CEA-2). Gövde tasarım noktası
+        # kipinde; termokimya motorun Pc'sinde CEA'dan geldiği için
+        # boyutlanan tane 124,134 -> 124,453 mm. Ölçüldü (K-D/capa_olcum.json):
+        # köprü 0,21104364784837215 = (b) doğrudan çözüm 0,21104364784837215
+        # (bit-aynı); CEA kapalı koşu 0,19946 (eski çapanın payı içinde).
+        assert kapi['bagil_fark'] == pytest.approx(0.21104, abs=5e-3), (
+            f"ölçülen fark {kapi['bagil_fark']} — fea-yuk çapası 0,21104")
         from hrma.fea import mesh_axisym as MA
         from hrma.fea import structural_axisym as SA
         from hrma.fea.bridge import extract_structural_inputs

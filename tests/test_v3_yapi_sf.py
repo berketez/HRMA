@@ -267,6 +267,35 @@ def ornek_hibrit(tmp_path_factory):
     return r.get_json()
 
 
+@pytest.fixture(scope='module')
+def ornek_hibrit_astarsiz(ornek_hibrit):
+    """Örnek hibrit, FAIL-CLOSED termal yolda (v3.0.1 V301/H-termal).
+
+    V301/H-termal'den sonra örnek hibritin kasası bölge korumasıyla ortam
+    sıcaklığında değerlendirilir (yakıt bloğu + HRMA'nın boyutlandırdığı
+    astar) ve geçerlilik sınırı AŞILMAZ — eski "3368 K'de değerlendirilen
+    kamara" bir model kusuruydu ve bu dosyanın aşağıdaki bekçileri onu
+    senaryo olarak kullanıyordu. Sıcak cidar değerlendirmesi artık yalnız
+    astar boyutlandırması koşmadığında görülür (kritik hüküm aynen kalır,
+    yapı zinciri çıplak cidar sıcaklığını kullanır). Bu fikstür o ürün
+    yolunu ``tests.support.hibrit_termal`` ile ADIYLA kurar; bekçilerin
+    iddiaları değişmez.
+    """
+    from tests.test_example_projects import (
+        HEADERS, NAMES, calculate_payload)
+    from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
+    from hrma.app import app
+    with open(REPO_ROOT / 'examples' / (NAMES['hybrid'] + '.hrma'),
+              encoding='utf-8') as f:
+        fields = json.load(f)['inputs']['fields']
+    with astar_boyutlandirmasi_kosmaz():
+        r = app.test_client().post('/calculate',
+                                   json=calculate_payload('hybrid', fields),
+                                   headers=HEADERS)
+    assert r.status_code == 200, r.get_data(as_text=True)[:300]
+    return r.get_json()
+
+
 class TestOrnekHibrit:
 
     def test_kamara_hedefi_tutmuyorsa_fail_closed_beyan(self, ornek_hibrit):
@@ -305,7 +334,8 @@ class TestOrnekHibrit:
         assert kd['dry_mass_estimate_kg'] == w['total_weight']
 
     # --- 2. tur (12 Eki 2026) -------------------------------------------
-    def test_referans_cidar_isi_modulunun_cidari(self, ornek_hibrit):
+    def test_referans_cidar_isi_modulunun_cidari(self, ornek_hibrit,
+                                                 ornek_hibrit_astarsiz):
         """Ş2 (denetim U2): hibrit sabit nokta döngüsü ısı modülünün koştuğu
         cidarı yapısal boyutlandırmaya REFERANS olarak geçirir. Kâhin ısı
         modülünün KENDİ yayımladığı cidar
@@ -320,23 +350,31 @@ class TestOrnekHibrit:
         assert ref == pytest.approx(isi_mm, rel=1e-12)
         # Sabit noktada yayımlanan cidar ısı zincirinin cidarıdır.
         assert ref == pytest.approx(ca['recommended_thickness'], rel=1e-12)
-        assert 'scaled with thickness' in (ca['sizing_infeasible_reason']
+        # v3.0.1 (V301/H-termal): ulaşılamaz boyutlandırma gerekçesi SICAK
+        # CİDAR senaryosuna aittir (korunan yolda kasa ortam sıcaklığında,
+        # boyutlandırma ulaşılabilir); o dal fail-closed yolda sınanır.
+        ca_sicak = ornek_hibrit_astarsiz['motor']['structural_analysis'][
+            'chamber_analysis']
+        assert ca_sicak['thermal_reference_wall_thickness_mm'] is not None
+        assert 'scaled with thickness' in (ca_sicak['sizing_infeasible_reason']
                                            or '')
 
-    def test_kontrol_senaryosu_yoneten_senaryodur(self, ornek_hibrit):
+    def test_kontrol_senaryosu_yoneten_senaryodur(self, ornek_hibrit_astarsiz):
         """Ş1: ulaşılamaz örnek hibritte ``sizing_controlling_case``
         ulaşılabilir en iyi SF'yi sınırlayan senaryodur ve yayımlanan
         yöneten senaryoya (``governing_thermal_scenario``) eşittir."""
+        ornek_hibrit = ornek_hibrit_astarsiz  # V301/H-termal: fail-closed yol
         ca = ornek_hibrit['motor']['structural_analysis']['chamber_analysis']
         assert ca['sizing_feasible'] is False
         assert ca['sizing_controlling_case'] == ca[
             'governing_thermal_scenario']
 
-    def test_model_gecerlilik_siniri_ornek_hibrit(self, ornek_hibrit):
+    def test_model_gecerlilik_siniri_ornek_hibrit(self, ornek_hibrit_astarsiz):
         """(C) — karar §28-24: örnek hibritte kamara 3368 K'de (erime
         1705 K) değerlendiriliyor. Bayrak yanar; OLUMLU ya da SAYISAL
         tasarım hükmü verilmez; sayılar tanı künyesiyle kalır; ulaşılamaz
         gerekçesi MODEL sınırını söyler."""
+        ornek_hibrit = ornek_hibrit_astarsiz  # V301/H-termal: fail-closed yol
         s = ornek_hibrit['motor']['structural_analysis']
         ca, sa = s['chamber_analysis'], s['safety_analysis']
         ta = s['thermal_analysis']
@@ -926,8 +964,21 @@ _KATI_ERIME_USTU = {'case_material': 'aluminum_6061',
                     'insulation_thickness': 0, 'grain_type': 'end_burner',
                     'grain_length': 1500, 'flame_temp': 3200,
                     'case_thickness': 4}
-#: F1 ``varyant:liquid:cooling_type=radiative``.
-_SIVI_RADYATIF = {'cooling_type': 'radiative'}
+#: F1 ``varyant:liquid:cooling_type=radiative``. V301/T-ÇAPA-D: ÖRNEK
+#: kulvarı (5fa435893) örnek sıvıya max_wall_temp = 800 (sayfa varsayılanı)
+#: yazdı; bu vaka kullanıcı sıcak cidar hedefi VERMEDİĞİNDE radyatif
+#: soğutmanın beyanlı varsayılanını (WALL_TEMP_DEFAULT_K['radiative'] =
+#: 1800 K) ölçer. Önceki örnek dosyası alanı taşımıyordu; alan açıkça
+#: çıkarılır (``None`` = alan gövdede yok, ``_sivi_kati_yanit``).
+_SIVI_RADYATIF = {'cooling_type': 'radiative', 'max_wall_temp': None}
+#: L-B (v3.0.1, SV-05): yapı hükmü artık ÇÖZÜLMÜŞ cidar sıcaklığında
+#: verilir. Örnek sıvı projenin 2 mm cidarında RP-1 istasyon marşı tepe
+#: sıcak cidarı 2876,6 K çözüyor (erime üstü; ölçüm docs/scofield/raw/OH/
+#: V301/kati-sivi/L-B/olcum_sonra.json ``ornek_dosya``), yani örnek proje
+#: AYNEN geçerlilik DIŞINA düştü. "Geçerlilik içi" referansı aynı projenin
+#: 8 mm cidarlı hâlidir: marş ince cidar zarfı dışında kalır, hüküm hedef
+#: sıcaklıkta (800 K, beyanlı varsayım) verilir ve sınırın içindedir.
+_ORNEK_SIVI_GECERLILIK_ICI = {'chamber_wall_thickness': 8.0}
 #: Kapta onay sayılan hükümler (motor ve uç kapısıyla aynı küme).
 _KAP_ONAY = ('PASS', 'SAFE', 'ACCEPTABLE', 'OK')
 
@@ -952,7 +1003,11 @@ def _sivi_kati_yanit(tur, ek, gecerlilik_kapali=False):
     with open(REPO_ROOT / 'examples' / (NAMES[tur] + '.hrma'),
               encoding='utf-8') as f:
         fields = json.load(f)['inputs']['fields']
-    fields.update(ek)
+    for anahtar, deger in ek.items():
+        if deger is None:
+            fields.pop(anahtar, None)   # alan gövdede YOK (kullanıcı vermedi)
+        else:
+            fields[anahtar] = deger
     yuk = calculate_payload(tur, fields)
     eski = sa.model_validity_publication
     if gecerlilik_kapali:
@@ -976,7 +1031,8 @@ def sivi_kati(tmp_path_factory):
                           str(tmp_path_factory.mktemp('hrma_projeler_b')))
     vakalar = {'sivi_radyatif': ('liquid', _SIVI_RADYATIF),
                'kati_erime_ustu': ('solid', _KATI_ERIME_USTU),
-               'ornek_sivi': ('liquid', {}), 'ornek_kati': ('solid', {})}
+               'ornek_sivi': ('liquid', _ORNEK_SIVI_GECERLILIK_ICI),
+               'ornek_kati': ('solid', {})}
     return {ad: {'yeni': _sivi_kati_yanit(tur, ek),
                  'eski': _sivi_kati_yanit(tur, ek, gecerlilik_kapali=True)}
             for ad, (tur, ek) in vakalar.items()}
@@ -1703,12 +1759,13 @@ class TestDockPaneliBasarisizSusturulmaz:
         assert n >= 1, ad   # ön koşul: bu koşumda başarısız hüküm var
         assert len(re.findall(_DOCK_BASARISIZ, dock_paneli[ad]['metin'])) == n
 
-    def test_hibrit_sicaklik_tasininca_panel_karismaz(self, ornek_hibrit):
+    def test_hibrit_sicaklik_tasininca_panel_karismaz(self, ornek_hibrit_astarsiz):
         """Hibrit örnek: motorun chamber_analysis bayrağı TRUE ama motorun
         çözülmüş cidar sıcaklığı (heat_transfer_module) uca gidiyor; uç aynı
         ölçütü o sıcaklıkta KENDİSİ uyguluyor (kendi bayrağı TRUE, gerekçesi
         MODEL_VALIDITY_VERDICT_BASIS). Panel ikinci kez karışmaz: çıktı,
         bayrak alanları silinmiş motor yanıtıyla bit-aynı."""
+        ornek_hibrit = ornek_hibrit_astarsiz  # V301/H-termal: fail-closed yol
         from hrma.analysis.structural_analysis import (
             MODEL_VALIDITY_VERDICT_BASIS)
         md = ornek_hibrit.get('motor') or ornek_hibrit
@@ -1889,9 +1946,14 @@ def _elle_sicak_yuk(motor, tur):
 
 
 @pytest.fixture(scope='module')
-def uc_gecerlilik_disi(sivi_kati, ornek_hibrit):
+def uc_gecerlilik_disi(sivi_kati, ornek_hibrit_astarsiz):
     """Üç geçerlilik dışı uç yanıtı: hibrit örnek DOCK AKIŞI (motor sıcaklığı
-    uca gider) + katı / sıvı uç çağrısı (sıcaklık elle)."""
+    uca gider) + katı / sıvı uç çağrısı (sıcaklık elle).
+
+    V301/H-termal: hibrit örnek fail-closed termal yolda (astar
+    boyutlandırması koşmadı) — korunan yolda kasa ortam sıcaklığındadır ve
+    geçerlilik dışı değildir (``ornek_hibrit_astarsiz`` künyesi)."""
+    ornek_hibrit = ornek_hibrit_astarsiz
     d = _dock_akisi('hybrid', ornek_hibrit)
     ev = _dock_node('hybrid', _json_guvenli(ornek_hibrit))
     hibrit_yuk = _dock_yuku(ev['fields'], ev['suggested'])
@@ -2162,19 +2224,23 @@ class TestModulGecerlilikOnayYok:
 
 
 @pytest.fixture(scope='module')
-def hibrit_motor_t7(ornek_hibrit):
-    """Örnek hibrit ``/calculate`` (yeni) + aynı yük, geri çekme kapalı."""
+def hibrit_motor_t7(ornek_hibrit_astarsiz):
+    """Örnek hibrit ``/calculate`` (yeni) + aynı yük, geri çekme kapalı.
+
+    V301/H-termal: iki koşu da fail-closed termal yolda (astar
+    boyutlandırması koşmadı; ``ornek_hibrit_astarsiz`` künyesi)."""
     from hrma.app import app
+    from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
     from tests.test_example_projects import HEADERS, NAMES, calculate_payload
     with open(REPO_ROOT / 'examples' / (NAMES['hybrid'] + '.hrma'),
               encoding='utf-8') as f:
         fields = json.load(f)['inputs']['fields']
-    with _geri_cekme_kapali():
+    with _geri_cekme_kapali(), astar_boyutlandirmasi_kosmaz():
         r = app.test_client().post('/calculate',
                                    json=calculate_payload('hybrid', fields),
                                    headers=HEADERS)
     assert r.status_code == 200, r.get_data(as_text=True)[:300]
-    return {'yeni': ornek_hibrit, 'eski': r.get_json()}
+    return {'yeni': ornek_hibrit_astarsiz, 'eski': r.get_json()}
 
 
 class TestHibritMotorCiktisi:
@@ -2227,6 +2293,23 @@ class TestHibritMotorCiktisi:
 
 #: KAB devri (i) vakası (docs/kabul/kanit_2026-10-14 gd_sivi_radyatif).
 _KAB_SIVI_RADYATIF_1800 = {'cooling_type': 'radiative', 'max_wall_temp': 1800.0}
+#: L-B (v3.0.1, SV-05): dock paneli artık yalnız ÇÖZÜLMÜŞ cidar sıcaklığını
+#: tohumlar (cooling_system.wall_temperature_solved_*); radyatif 1800 K
+#: kullanıcının HEDEFİdir, çözülmez ve panele gitmez (eski davranış onu
+#: 'user input' kaynağıyla çözülmüş sayıyordu — SV-05 kusuru). Bu bekçinin
+#: konusu dock'un GEÇERLİLİK DIŞI bir cidar sıcaklığında onay basmamasıdır;
+#: KAB ölçümünün aynı girdisini (1800 / 1800 K) üretmek için motor yanıtına
+#: TEST İÇİNDE çözülmüş-alan tohumu eklenir (sayılar yanıtın kendi
+#: wall_temperature_hot/cold değerleridir). Denendi ve elendi: gerçek
+#: çözülmüş erime-üstü vaka (2 mm cidar, 2876,6 K) eski davranışta da HİÇ
+#: onay basmıyor — bekçi boşa koşardı (L-B RAPOR.md).
+def _kab_cozulmus_tohum(motor):
+    cs = motor['cooling_system']
+    cs['wall_temperature_solved_K'] = cs['wall_temperature_hot']
+    cs['wall_temperature_solved_cold_K'] = cs['wall_temperature_cold']
+    cs['wall_temperature_solved_source'] = (
+        'solved: test seed reproducing the KAB 1800 K measurement')
+    return motor
 
 #: KAB ölçümü (14 Eki) form yolunda KULLANICI cidarıyla alındı: liquid.html
 #: o gün ``chamber_wall_thickness`` alanını 5 mm ön-dolguyla açıyordu. Sıvı
@@ -2262,6 +2345,9 @@ def kab_sivi_1800(tmp_path_factory):
     os.environ.setdefault('HRMA_PROJECTS_DIR',
                           str(tmp_path_factory.mktemp('hrma_projeler_t7')))
     motor = _form_sivi(_KAB_SIVI_RADYATIF_1800)
+    # Ürün: radyatif tipte çözüm YOK, hedef tohumlanmaz (SV-05).
+    assert motor['cooling_system']['wall_temperature_solved_K'] is None
+    motor = _kab_cozulmus_tohum(motor)
     yeni = _dock_akisi('liquid', motor)
     with _geri_cekme_kapali():
         eski = _dock_akisi('liquid', motor)
@@ -2304,7 +2390,12 @@ class TestSiviKartiSfAdlari:
 
     def test_farkli_buyuklukler_kahin(self, kab_sivi_1800):
         # KAB ölçümünün yolu: FORM yolu örnek sıvı (kullanıcı cidarı 5 mm).
-        motor = _form_sivi({})
+        # V301/L-KABUK: kahin TEK katmanlı cidarın (P_c çemberi) iki
+        # yolunu kıyaslar; rejeneratif cidar artık iki katmanlıdır (kart
+        # çemberi dış kabuğun soğutucu basıncıyla, panel tohumu ise yığını
+        # P_c ile çözüyor — DEVİR, analysis_dock). Tek katmanlı ikiz: film.
+        motor = _form_sivi({'cooling_type': 'film_cooling',
+                            'film_cooling_percent': 5.0})
         cs = motor['structural_analysis']['chamber_structure']
         uc = _dock_akisi('liquid', motor)['uc']['structural_analysis']
         ch = uc['chamber_analysis']

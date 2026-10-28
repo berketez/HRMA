@@ -465,9 +465,31 @@ def test_p12ab2_09_curutme_kilidi_tum_anahtarlar_iki_dilde():
         for a in sozluk(src, 'tr'):
             tum.setdefault(a, set()).add('tr')
     liq = oku(TPL / 'liquid.html')
-    kullanilan = sorted(set(re.findall(
-        r'data-i18n(?:-title|-placeholder)?="([^"]+)"', liq)))
-    assert len(kullanilan) > 400, len(kullanilan)
+    kullanilan = set(re.findall(
+        r'data-i18n(?:-title|-placeholder)?="([^"]+)"', liq))
+    # V301/L-D (SV-12): kamara malzemesi seçenek anahtarları sunucu
+    # kaydından basılır (``liq.mat.{{ o.value }}``); tek Jinja ifadesi
+    # kaydın gerçek anahtarlarıyla açılır (test_i18n_pages deseni).
+    if 'liq.mat.{{ o.value }}' in kullanilan:
+        from hrma.app import _sivi_form_kaydi
+        kullanilan.discard('liq.mat.{{ o.value }}')
+        kullanilan |= {'liq.mat.' + o['value'] for o in
+                       _sivi_form_kaydi()['chamber_material']['options']}
+    # T-ÇAPA-C2 (27 Eki): V301/L-C (SV-12) enjektör plakası malzemesi
+    # seçenekleri de aynı tek-ifade deseniyle sunucu kaydından basılır
+    # (``liq.injmat.{{ o.material_key }}``; test_i18n_pages ile aynı açılım).
+    if 'liq.injmat.{{ o.material_key }}' in kullanilan:
+        from hrma.app import _sivi_enjektor_malzeme_secenekleri
+        kullanilan.discard('liq.injmat.{{ o.material_key }}')
+        kullanilan |= {'liq.injmat.' + o['material_key'] for o in
+                       _sivi_enjektor_malzeme_secenekleri()['options']}
+    kullanilan = sorted(kullanilan)
+    # V301/L-D (SV-09) — TABAN ÖLÇÜMLE GÜNCELLENDİ: bu satır ayrıştırıcının
+    # boş dönmediğinin sağlamasıdır (ölçüm 454). Çözücünün okumadığı 26
+    # girdi formdan kalkınca (etiket + ipucu + seçenek anahtarlarıyla)
+    # ölçülen sayı 383 oldu; taban o ölçümün altında tutuldu. Asıl iddia
+    # (her anahtar iki dilde) aşağıda aynen.
+    assert len(kullanilan) > 350, len(kullanilan)
     eksik = {a: sorted(tum.get(a, set())) for a in kullanilan
              if len(tum.get(a, set())) < 2}
     assert not eksik, eksik
@@ -512,7 +534,12 @@ def test_p11b5_21_kapandi_panel_kacisli_description_okuyor():
     inj = maske_yorum(oku(JS / 'injector_panel.js'))
     assert 'description_tr' not in inj, \
         'yalan "_tr" anahtarı panele geri geldi'
-    assert re.search(r'\$\{escText\(dz\.pattern\.description\)\}', inj), \
+    # T-ÇAPA-C2 (27 Eki): V301/DİL-2 (803727196, NK-35) tanımı çeviri
+    # kanalından geçirdi: ``escText(… serverText(dz.pattern.description) …
+    # : dz.pattern.description)``. Değişmez aynı: metin escText'ten geçer ve
+    # dilden bağımsız ``description`` alanını okur (kaçış ÇEVİRİNİN dışında).
+    m = re.search(r'\$\{escText\(((?:(?!\}</p>).)*?)\)\}</p>', inj, re.S)
+    assert m and 'dz.pattern.description' in m.group(1), \
         'açıklama kaçışsız/yanlış anahtarla basılıyor'
 
 

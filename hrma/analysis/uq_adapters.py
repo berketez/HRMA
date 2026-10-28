@@ -336,6 +336,82 @@ def _pick_outputs(motor_type, resolved):
 
 # --- Hibrit ------------------------------------------------------------------
 
+def hybrid_eta_c_star_nominal(inputs):
+    """V301/H-PANEL (NK-20) — hibrit belirsizlik nominalinin c* verimi.
+
+    ``/calculate`` ile aynı çözümleyici
+    (``resolve_hybrid_c_star_efficiency``): kullanıcı değeri, yoksa itici
+    çiftinin kaynaklı varsayılanı, o da yoksa ideal c* (``eta_engine`` None).
+    Geçersiz değer ``ValueError`` (uç 400'e çevirir).
+    """
+    from hrma.engines.hybrid_rocket_engine import (
+        resolve_hybrid_c_star_efficiency, C_STAR_EFFICIENCY_FIELD)
+    data = dict(inputs or {})
+    return resolve_hybrid_c_star_efficiency(
+        data.get('oxidizer_type', 'n2o'), data.get('fuel_type', 'htpb'),
+        data.get(C_STAR_EFFICIENCY_FIELD))
+
+
+def center_hybrid_eta_distribution(distributions, inputs):
+    """V301/H-PANEL (NK-20) — η_c* dağılımını deterministik η'ya oturtur.
+
+    ÖLÇÜLDÜ (taban 52165c557, örnek hibrit, tohum 42): nominal 1,00 (ideal
+    c*) ⟷ dağılım ortalaması 0,93 → manşet c* 1596,6 m/s / Isp 235,9 s
+    P5-P95 bandının ÜSTÜNDE, ``mean_shift_percent`` c* -%7,2. ``/calculate``
+    artık η'yı uyguladığı için (kullanıcı ya da kaynaklı varsayılan) dağılım
+    aynı η'nın ETRAFINDA kurulur: nominal = ortalama = η; σ ve kesme bandı
+    korunur (η bandın dışındaysa bant η'yı kapsayacak kadar genişler).
+    Kaynaksız çiftte (ideal c*, verim uygulanmadı) dağılım DEĞİŞMEZ: nominal
+    1,00 ⟷ ortalama 0,93 farkı ``mean_shift_percent`` ile görünür kalır.
+    """
+    import dataclasses
+    d = distributions.get('eta_c_star') if distributions else None
+    if d is None:
+        return distributions
+    cozum = hybrid_eta_c_star_nominal(inputs)
+    eta = cozum['eta_engine']
+    if eta is None:
+        return distributions
+    # V301/PANEL (C-6, H-PANEL AÇIK 2) — KAYNAKLI VARSAYILANDA σ VE KESME
+    # KAYITLARDAN. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/panel/
+    # eta_bandi_once.json): varsayılan η 0,89 26 kaydın ortancasıyken
+    # dağılım σ 0,03 / kesme 0,80-1,00 kullanıyordu; aynı kayıtların örnek
+    # σ'sı (n − 1) 0,0574, aralığı 0,77-0,99 — bant gözlenen saçılımın
+    # yaklaşık yarısıydı. Kaynaklı varsayılanda dağılım o kayıtların KENDİ
+    # σ'sı ve ölçüm aralığıyla kurulur (sayılar ``HYBRID_ETA_C_STAR_
+    # MEASURED``'dan, tek yer). Kullanıcı η'sında ölçüm saçılımı yoktur:
+    # beyanlı σ ve kesme (aşağıdaki kol) aynen kalır.
+    sigma = d.sigma
+    if (cozum.get('source') == 'sourced_default'
+            and isinstance(cozum.get('sample_stdev'), (int, float))
+            and cozum['sample_stdev'] > 0
+            and isinstance(cozum.get('measured_band'), (list, tuple))
+            and len(cozum['measured_band']) == 2):
+        sigma = float(cozum['sample_stdev'])
+        low = min(float(cozum['measured_band'][0]), eta)
+        high = max(float(cozum['measured_band'][1]), eta)
+        dagilim_notu = (
+            f"sigma = {sigma:g} is the sample standard deviation (n - 1) "
+            f"and the clip band [{low:g}, {high:g}] the measured range of "
+            f"the same {cozum.get('n_tests')} records the default is the "
+            f"{cozum.get('statistic')} of")
+    else:
+        low = d.low if d.low is None else min(float(d.low), eta)
+        high = d.high if d.high is None else max(float(d.high), eta)
+        dagilim_notu = ('sigma and clip band as declared (no measured '
+                        'scatter belongs to a user-entered efficiency): '
+                        + str(d.source_note))
+    distributions = dict(distributions)
+    distributions['eta_c_star'] = dataclasses.replace(
+        d, mean=eta, nominal_override=eta, sigma=sigma, low=low, high=high,
+        source_note=(
+            f"Centred on the deterministic c* efficiency of this run "
+            f"(eta_c* = {eta:g}, {cozum['source']}: {cozum['basis']}) so "
+            f"that the UQ nominal and mean equal the /calculate design "
+            f"point; {dagilim_notu}"))
+    return distributions
+
+
 def make_hybrid_factory(inputs, track_performance=False):
     """/calculate kurucu bloğunu birebir izleyen hibrit UQ fabrikası.
 
@@ -436,6 +512,12 @@ def make_hybrid_factory(inputs, track_performance=False):
     except Exception:
         optimum_of = None
 
+    # V301/H-PANEL (NK-20): /calculate ile AYNI c* verimi (tek çözümleyici).
+    # Dağılım devre dışı bırakılırsa (``disabled``) örnek bu değeri kullanır;
+    # dağılımın nominali ve ortalaması da aynı değere oturtulur
+    # (``hybrid_eta_c_star_nominal`` + app.py ``_run_uq_analysis``).
+    eta_det = hybrid_eta_c_star_nominal(data)['eta_engine']
+
     def factory(sample):
         kwargs = dict(ctor)
         kwargs['regression_a'] = a_nom * float(
@@ -447,7 +529,7 @@ def make_hybrid_factory(inputs, track_performance=False):
             sample.get('fuel_density', 1.0))
         kwargs['chamber_pressure'] = pc_nom * float(
             sample.get('chamber_pressure', 1.0))
-        eta = sample.get('eta_c_star')
+        eta = sample.get('eta_c_star', eta_det)
         engine = HybridRocketEngine(
             uq_mode=True,
             track_performance=track_performance,
@@ -469,9 +551,11 @@ def make_solid_factory(inputs, track_performance=False):
     """/calculate_solid kurucu bloğunu izleyen katı UQ fabrikası.
 
     Mevcut ``run_monte_carlo`` kalıbının genelleştirilmiş eşidir: yoğunluk ve
-    c* overrides üzerinden çarpılır, a çarpanı ve n offseti kurucu
-    argümanlarına işlenir, ``initial_temp`` düzeltmesi nominal a'ya bir kez
-    uygulanır (örnek kurulumunda ikinci kez uygulanmaz). ``track_performance``
+    c* motorun parti kanalından (``propellant_lot``, V301/K-D) çarpılır, a
+    çarpanı ve n offseti kurucu argümanlarına işlenir; a çarpanı kurucunun
+    DÜZELTİLMEMİŞ a'sına uygulanır ve ``initial_temp`` örneğe aynen geçer,
+    böylece sıcaklık düzeltmesi örnekte bir kez uygulanır (parçalı yasada
+    da). ``track_performance``
     katı motorda kullanılmaz; imza tutarlılığı için kabul edilir.
 
     ÖH D26 / P5B2-06 (yüksek) — DONANIM SABİTLENMESİ EKLENDİ
@@ -499,28 +583,82 @@ def make_solid_factory(inputs, track_performance=False):
     girmez; sabitleme yapılamazsa (alan sonlu-pozitif değilse) eski davranış
     aynen sürer.
     """
-    from hrma.engines.solid_rocket_engine import SolidRocketEngine
+    from hrma.engines.solid_rocket_engine import (
+        SolidRocketEngine, _catalog_burn_rate)
 
     data = dict(inputs or {})
-    ctor = dict(
-        grain_type=data.get('grain_type', 'bates'),
-        propellant_type=data.get('propellant_type', 'apcp'),
-        chamber_diameter=data.get('chamber_diameter', 100),
-        grain_length=data.get('grain_length', 500),
-        core_diameter=data.get('core_diameter', 30),
-        chamber_pressure=data.get('chamber_pressure', 40),
-        burn_rate_a=data.get('burn_rate_a', 0.005),
-        burn_rate_n=data.get('burn_rate_n', 0.35),
-    )
+
+    def _dolu(ad):
+        return data.get(ad) not in (None, '')
+
+    # --- V301/K-C1 (K-A DEVİR 10) — KURULUM /calculate_solid İLE AYNI ------
+    # ÖLÇÜLDÜ (K-C1/uq_once.json): (1) sayfa yükü (kasa boş = türetilir,
+    # tane çapı ``outer_diameter``da) bu fabrikada ``chamber_diameter``
+    # None ile kurucuya gidiyor ve ``SolidGeometryError`` ile düşüyordu;
+    # (2) a/n verilmeyen tek çaplı yükte uydurma a = 0,005 / n = 0,35 ve
+    # çekirdek yedeği 30 mm, ana tasarımın boğazından büyük bir boğaz
+    # kurduruyor ve port boğuluyordu (``SolidDesignRejected``), oysa aynı
+    # yük ``/calculate_solid``de 200 alıyor. Kural artık kardeşinki:
+    #  * geometri yedekleri kurucunun KENDİ varsayılanlarıdır
+    #    (``SOLID_DEFAULT_GEOMETRY_MM``) — gelmeyen anahtar geçirilmez;
+    #  * ``outer_diameter`` dolu ve kasa boşsa çap tane dış çapıdır ve
+    #    kasa motorca türetilir (``/calculate_solid`` ``_kasa_turetilir``);
+    #  * a/n gelmediyse seçilen yakıtın merkezî katalog kaydından
+    #    (``_catalog_burn_rate``, ``app._build_solid_engine`` ile aynı).
+    _kasa_turetilir = _dolu('outer_diameter') and not _dolu('chamber_diameter')
+    if _kasa_turetilir:
+        data['chamber_diameter'] = None
+    ctor = {}
+    for ad in ('grain_type', 'propellant_type', 'grain_length',
+               'core_diameter', 'chamber_pressure', 'burn_rate_a',
+               'burn_rate_n'):
+        if ad in data and data.get(ad) is not None:
+            ctor[ad] = data[ad]
+    if _kasa_turetilir:
+        ctor['chamber_diameter'] = data['outer_diameter']
+    elif _dolu('chamber_diameter'):
+        ctor['chamber_diameter'] = data['chamber_diameter']
+    for ad in ('burn_rate_a', 'burn_rate_n'):
+        if ctor.get(ad) == '':
+            ctor.pop(ad)
+        elif ad in ctor:
+            ctor[ad] = float(ctor[ad])
     probe = SolidRocketEngine(overrides=data, **ctor)
-    a_nom = float(probe.a)          # initial_temp düzeltmesi dahil
+    if 'burn_rate_a' not in ctor or 'burn_rate_n' not in ctor:
+        a_cat, n_cat = _catalog_burn_rate(probe.propellant_type)
+        degisti = False
+        if 'burn_rate_a' not in ctor and a_cat is not None:
+            ctor['burn_rate_a'] = float(a_cat)
+            degisti = True
+        if 'burn_rate_n' not in ctor and n_cat is not None:
+            ctor['burn_rate_n'] = float(n_cat)
+            degisti = True
+        if degisti:
+            probe = SolidRocketEngine(overrides=data, **ctor)
+    # V301/K-C1 (K-A DEVİR 11): port ⟷ boğaz kapısı (KT-23) nominal motorda
+    # ÖRNEKLEMEDEN ÖNCE sınanır. ÖLÇÜLDÜ (K-C1/diger_uclar_once.json, çekirdek
+    # 20 mm): ret nominal referans koşusunun içinde doğuyor, koşucu onu
+    # tipsiz 'Nominal referans hesabi basarisiz: …' hatasına çeviriyor ve uç
+    # HTTP 500 dönüyordu. Burada ``SolidDesignRejected`` adıyla fırlar; uç
+    # onu /calculate_solid ile aynı 422 gövdesine çevirir.
+    probe._check_port_throat()
+    # V301/K-D: a çarpanı kurucunun DÜZELTİLMEMİŞ a'sına uygulanır ve
+    # ``initial_temp`` örneğe AYNEN geçer (``run_monte_carlo`` ile aynı
+    # kural): sıcaklık düzeltmesi örnekte bir kez uygulanır. Eski yol
+    # düzeltilmiş a'yı geçirip anahtarı atıyordu; parçalı yasada a ölü
+    # olduğu için düzeltme kayboluyordu (K-D/uq_once.json, örnek KNDX).
+    a_nom = float(probe._ctor_args['burn_rate_a'])
     n_nom = float(probe.n)
-    rho_nom = float(probe.rho_p)    # form override'ı uygulanmış nominal
-    cstar_nom = float(probe.c_star)
+    # V301/K-D (K-C1 AÇIK 1): yoğunluk ve c* örnekleri artık ``overrides``
+    # üzerinden MUTLAK değer olarak basılmaz; motorun parti kanalına
+    # (``propellant_lot``) ÇARPAN olarak gider ve motorun KENDİ kaynağına
+    # (CEA / katalog / kullanıcının girdiği değer) uygulanır. Eski yol
+    # ``char_velocity = probe.c_star`` (TESLİM edilen c*, verimli) basıyordu:
+    # çarpan 1 iken de motor CEA yolundan ``user_entered`` yoluna geçiyor ve
+    # yanma verimi iki kez uygulanıyordu (ölçüldü, K-C1/uq_sonra.json: sayfa
+    # yükünde nominal Isp 205,00 ⟷ ana tasarım 217,18 s).
 
     base_overrides = dict(data)
-    # initial_temp düzeltmesi a_nom'a zaten işlendi (run_monte_carlo kalıbı)
-    base_overrides.pop('initial_temp', None)
 
     # ÖH D26 / P5B2-06: DONANIM tektir, yakıt partisi değişkendir.
     # ``run_monte_carlo``:8023 ile aynı tanım noktası ve aynı fail-closed
@@ -536,15 +674,18 @@ def make_solid_factory(inputs, track_performance=False):
 
     def factory(sample):
         overrides = dict(base_overrides)
-        overrides['density'] = rho_nom * float(sample.get('density', 1.0))
-        overrides['char_velocity'] = cstar_nom * float(
-            sample.get('c_star', 1.0))
         kwargs = dict(ctor)
         kwargs['burn_rate_a'] = a_nom * float(sample.get('burn_rate_a', 1.0))
         kwargs['burn_rate_n'] = _clip(
             n_nom + float(sample.get('burn_rate_n_delta', 0.0)),
             SOLID_N_BAND)
-        engine = SolidRocketEngine(overrides=overrides, **kwargs)
+        engine = SolidRocketEngine(
+            overrides=overrides,
+            propellant_lot={
+                'density_scale': float(sample.get('density', 1.0)),
+                'c_star_scale': float(sample.get('c_star', 1.0)),
+            },
+            **kwargs)
         if nom_throat_area is not None:
             engine.pin_throat_area(nom_throat_area)
         result = engine.calculate_performance()

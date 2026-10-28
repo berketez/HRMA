@@ -92,7 +92,14 @@ class TestUtilsContract:
     def test_l_d_ratio_lowercase_and_consistent(self):
         """JS küçük harfli 'l_d_ratio' okuyor; showerhead'de eski
         'L_D_ratio' ile aynı değeri taşımalı (N/A regresyonu)."""
-        r = _injector('showerhead').calculate()
+        # V301/HİBRİT-DIŞA (kalem 4): plaka kalınlığı verilmezse L/D
+        # yayımlanmaz (iki ad da None, kazanılmamış); verilince ikisi aynı.
+        bos = _injector('showerhead').calculate()
+        assert bos['l_d_ratio'] is None and bos['L_D_ratio'] is None
+        assert bos['l_d_ratio_earned'] is False
+        ish = _injector('showerhead')
+        ish.set_showerhead_params(plate_thickness=3.0)
+        r = ish.calculate()
         assert r['l_d_ratio'] == pytest.approx(r['L_D_ratio'])
         assert r['l_d_ratio'] > 0
         # Anüler geçitlerde L/D tanımsızdır → None (sıfır DEĞİL)

@@ -31,9 +31,17 @@ from hrma.engines.solid_rocket_engine import (
     _conical_divergence_efficiency,
 )
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 TABAN = dict(grain_type='bates', propellant_type='apcp',
              chamber_diameter=100, grain_length=500,
-             core_diameter=30, chamber_pressure=40)
+             core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
 
 
 def _motor(**kw):
@@ -149,12 +157,24 @@ class TestKatalogAdiKendiKaydinaDoner:
         ad = PROPELLANTS[anahtar].get('name')
         assert _catalog_key_from_text(ad) == anahtar, ad
 
-    def test_metalsiz_apcp_aluminyumlu_kayda_dusmez(self):
+    def test_metalsiz_apcp_aluminyumlu_kayda_dusmez(self, monkeypatch):
+        # V301/T-ÇAPA-A: N-CEA-2 K4 kaydı 'tipik' bant (T_c 2550) yerine
+        # nominal kartın CEA dörtlüsüne çevirdi; ürün yolunda T_c motorun
+        # Pc'sinde CEA'dan gelir. Konu "kendi KAYDINA döner" olduğu için
+        # beklenen literal değil kaydın kendisi; kayıt yolu CEA kapalı koşar
+        # (N-CEA-2 deseni, ``cea_kapali``).
+        from hrma.engines import cea_bridge
+        monkeypatch.setattr(cea_bridge, 'is_rocketcea_available',
+                            lambda: False)
         e = _motor(overrides={
             'propellant_name': 'AP/HTPB Composite (non-aluminized)'})
         assert e.propellant_type == 'apcp_nonaluminized'
-        assert e.T_c == pytest.approx(2550.0), (
-            'alüminyumlu APCP alev sıcaklığı (3614,8 K) devralınmış')
+        assert e.T_c == pytest.approx(
+            PROPELLANTS['apcp_nonaluminized']['flame_temperature']), (
+            'metalsiz APCP kendi kaydının alev sıcaklığını almadı')
+        assert e.T_c != pytest.approx(
+            PROPELLANTS['apcp']['flame_temperature']), (
+            'alüminyumlu APCP alev sıcaklığı devralınmış')
 
     def test_serbest_metin_yolu_hala_calisiyor(self):
         """Kısaltma yolu kaldırılmadı: katalog adı olmayan serbest metinde

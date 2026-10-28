@@ -96,6 +96,8 @@ from tests.test_cfd_endpoint import (
     gercek_kontur,
     govde,
 )
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+from tests.support import form_defaults
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 STATIC_JS = REPO_ROOT / 'hrma' / 'static' / 'js'
@@ -141,10 +143,17 @@ HIBRIT_GOVDE = {
 # ``outer_diameter`` ucun okuduğu ada getirildi (uç zaten aynı 100 mm'yi
 # tohumluyordu). ÖLÇÜLDÜ (taban ağacında, iki gövde yan yana): yanıt tasarım
 # noktası bloğu dışında BİT-AYNI — sha16 4d1937768e61fc7c.
+# v3.0.1 T-ÇAPA-B: eski çekirdek 35 mm (Ø100, boy 300 mm @ 40 bar,
+# a = 0,005 / n = 0,35) A_p/A_t 0,925 ile port boğulan motordu; K-A
+# kapısından beri 422 ``port_smaller_than_throat``. Konu port boğulması
+# değil: çekirdek tek tanım ``SOLID_DEFAULT_GEOMETRY_MM``den (48 mm,
+# kopyalanmaz); hazne/boy bu gövdenin kendi değerleri. Ölçüldü: boğaz
+# 37,54 mm, A_p/A_t 1,64. (Ø100/boy 500 tam varsayılan bu yanma hızı
+# katsayılarıyla yine boğuluyor: A_p/A_t 0,958.)
 KATI_GOVDE = {
     'motor_name': 'cfd_panel', 'chamber_pressure': 40,
-    'grain_type': 'bates', 'chamber_diameter': 100,
-    'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+    'grain_type': 'bates', 'chamber_diameter': 100, 'grain_length': 300,
+    'core_diameter': SOLID_DEFAULT_GEOMETRY_MM['core_diameter'], 'segments': 1,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35, 'chamber_temperature': 3000,
     'c_star': 1550, 'propellant_density': 1800, 'propellant_type': 'apcp',
 }
@@ -156,6 +165,12 @@ SIVI_GOVDE = {
     'chamber_wall_thickness': 5, 'cooling_type': 'regenerative',
     'injector_type': 'impinging', 'engine_cycle': 'pressure_fed',
     'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` gönderilmezse uç
+    # 422 ``pressure_fed_feed_pressure_not_supplied`` döner (L-A SV-03).
+    # Sayfa bu alanı her hesapta gönderir; değer şablonun KENDİ varsayılanı
+    # (tek kaynak, kopyalanmaz). Ölçüldü: marj +5,21 bar, 200.
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 
@@ -303,22 +318,9 @@ def yanit_yakinsamayan(client):
     return r.get_json()
 
 
-@pytest.fixture(scope='module')
-def yanit_hibrit_gercek(client, motor_hibrit):
-    """GERÇEK hibrit motorun kendi konturu + kendi gaz durumu.
-
-    İki şeyi aynı anda taşıdığı için değerli: (a) koşum bu konturla
-    yapıldığından duvar poliçizgisi kapısı AÇILIR, (b) ucun koşu öncesi
-    BÜTÇE uyarısı ATEŞLENİR ama koşu YİNE DE yakınsar — yani "uyarı hüküm
-    değildir" cümlesinin canlı kanıtıdır.
-
-    ÖLÇÜLDÜ (16 Ağu 2026 akşamı, bu fixture tazelenirken, 'coarse'):
-    CR 9,766 / giriş Mach 0,0605 → uyarı ATEŞLİYOR (ölçülen yavaş bant;
-    en yakın ölçüm satırı CR 11,106 / 13563 iterasyon), koşu 12330
-    iterasyonda (bütçenin %62'si) YAKINSIYOR. Yani uyarı da hüküm de
-    doğru — eski Mach eşikli sözleşmede uyarı YANLIŞ ateşliyordu. (~8 s)
-    """
-    m = motor_hibrit['motor']
+def _cfd_gercek_kosu(client, motor_sonuc):
+    """Motorun KENDİ konturu + KENDİ gaz durumuyla CFD ucu koşusu."""
+    m = motor_sonuc['motor']
     q = m['nozzle_flow_quasi1d']['inputs']
     body = {
         'nozzle_contour': m['nozzle_contour'],
@@ -330,6 +332,53 @@ def yanit_hibrit_gercek(client, motor_hibrit):
     r = _sessiz(client.post, UC, json=body)
     assert r.status_code == 200, r.get_data(as_text=True)[:400]
     return r.get_json()
+
+
+@pytest.fixture(scope='module')
+def yanit_hibrit_gercek(client, motor_hibrit):
+    """GERÇEK hibrit motorun kendi konturu + kendi gaz durumu.
+
+    Koşum bu konturla yapıldığından duvar poliçizgisi kapısı AÇILIR.
+
+    v3.0.1 (21 Eki): bu fixture eskiden BÜTÇE uyarısının da canlı kanıtıydı
+    (16 Ağu ölçümü CR 9,766 → yavaş bantta, koşu 12330 iterasyonda
+    yakınsıyordu). v3.0.1 tane zarfı kamara çapını son port çapına indirdi
+    (eski kural 1,5 × D_son): aynı gövdede D_ch 100,66 mm, D_t 48,94 mm,
+    CR 4,231 — coarse yavaş bandın (CR ≥ 8,867) dışında, uyarı ateşlemiyor
+    (a367de3d2'de bu yüzden kırmızıydı). Bütçe vakası artık aşağıdaki
+    ``yanit_hibrit_butce`` fixture'ındadır.
+    """
+    return _cfd_gercek_kosu(client, motor_hibrit)
+
+
+#: Bütçe uyarısı vakasının daralma oranı — 16 Ağu 2026'da ölçülen ve
+#: "uyarı ateşler, koşu yine yakınsar" hâlini veren değer (yukarıya bakınız).
+#: Kullanıcı kamara çapıyla bu orana geri kurulur; boğaz çapı motorun
+#: KENDİ çözümünden okunur (sayı uydurulmaz).
+BUTCE_VAKASI_CR = 9.766
+
+
+@pytest.fixture(scope='module')
+def motor_hibrit_butce(client, motor_hibrit):
+    """HIBRIT_GOVDE + kullanıcı kamara çapı D_ch = D_t·√9,766.
+
+    Çözücünün okuduğu alan ``chamber_diameter_input`` (mm); yanıttaki
+    ``throat_diameter`` metredir.
+    """
+    d_t_mm = float(motor_hibrit['motor']['throat_diameter']) * 1000.0
+    govde = dict(HIBRIT_GOVDE,
+                 chamber_diameter_input=d_t_mm * math.sqrt(BUTCE_VAKASI_CR))
+    r = _sessiz(client.post, '/calculate', json=govde,
+                headers={'Host': '127.0.0.1:8080'})
+    assert r.status_code == 200, r.get_data(as_text=True)[:400]
+    return r.get_json()
+
+
+@pytest.fixture(scope='module')
+def yanit_hibrit_butce(client, motor_hibrit_butce):
+    """Bütçe uyarısı ATEŞLER ama koşu YAKINSAR — "uyarı hüküm değildir"in
+    canlı kanıtı (16 Ağu vakasının CR'si, v3.0.1 geometrisiyle)."""
+    return _cfd_gercek_kosu(client, motor_hibrit_butce)
 
 
 # ---------------------------------------------------------------------------
@@ -1280,7 +1329,7 @@ class TestDurustluk:
             'şüphe etiketi ekranda görünmüyor')
 
     def test_butce_uyarisi_gorunur_ve_hukum_degil(
-            self, tmp_path, motor_hibrit, yanit_hibrit_gercek):
+            self, tmp_path, motor_hibrit_butce, yanit_hibrit_butce):
         """Uyarı ATEŞLENDİ ama koşu YAKINSADI — "hüküm değildir"in canlı kanıtı.
 
         NÖBET DEĞİŞİMİ (16 Ağu 2026): ucun uyarısı eskiden giriş Mach EŞİĞİNE
@@ -1291,12 +1340,12 @@ class TestDurustluk:
         (bütçenin %62'si) sürüyor ve YAKINSIYOR. Yani uyarı da doğru, hüküm
         de doğru; panel ikisini ÇELİŞKİSİZ göstermek zorunda.
         """
-        cfd = yanit_hibrit_gercek['cfd']
+        cfd = yanit_hibrit_butce['cfd']
         inlet = cfd['inlet_conditioning']
         assert inlet['budget_advisory'] is True, 'vaka değişmiş: uyarı beklenirdi'
         assert 'measured_slow_band' in inlet['budget_advisory_reasons']
-        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit,
-                        response=yanit_hibrit_gercek,
+        out = kos_panel(tmp_path, motorType='hybrid', results=motor_hibrit_butce,
+                        response=yanit_hibrit_butce,
                         select=['nozzle_flow', 'cfd'], runs=1)
         html = gorunum(out)
         assert 'panel.cfd.secInlet' in html, 'giriş koşullandırma bölümü yok'

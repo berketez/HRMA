@@ -252,13 +252,25 @@ class TestP9B304UydurmaToplamImpuls:
             'sıvı çözücü artık total_impulse yayımlıyor — dayanak değişti')
 
     def test_ozet_F_carpi_t_turetmiyor(self, sivi_sureli):
+        """V3.0.5 SIVI-CIDAR kalem 4 — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: rapor
+        F × t TÜRETMEZ. Çözücü süreli tasarımda toplam impulsu artık KENDİ
+        tanımıyla yayımlıyor (total_impulse = thrust × burn_time); özet o
+        sayıyı basar. Rapor katmanının kendisi türetmediği için alan
+        çıkarıldığında özet yine N/A der (ölçüm: docs/scofield/raw/OH/V301/
+        sivi-cidar/olcum/k4_*.json)."""
         sivi = sivi_sureli
+        uydurma = float(sivi['thrust']) * float(sivi['burn_time'])
+        assert sivi['total_impulse'] == uydurma
         ozet, _yapi, _hucre, _not = _rapor_hikayesi(sivi)
         metin = ' '.join(ozet)
-        uydurma = float(sivi['thrust']) * float(sivi['burn_time'])
-        assert '%.1f' % uydurma not in metin, (
+        assert 'Total Impulse: %.1f' % sivi['total_impulse'] in metin
+        yayimsiz = {k: v for k, v in sivi.items()
+                    if k not in ('total_impulse', 'total_impulse_basis')}
+        ozet2, _y2, _h2, _n2 = _rapor_hikayesi(yayimsiz)
+        metin2 = ' '.join(ozet2)
+        assert '%.1f' % uydurma not in metin2, (
             'toplam impuls itki x yanma süresinden türetilmiş: %s' % uydurma)
-        assert 'Total Impulse: N/A' in metin
+        assert 'Total Impulse: N/A' in metin2
 
     def test_birim_sayisiz_yazilmiyor(self, sivi):
         """P9B3-25'in özet ayağı: 'N/A N⋅s' diye bir büyüklük yoktur."""

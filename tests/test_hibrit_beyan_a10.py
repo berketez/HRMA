@@ -59,8 +59,15 @@ def boru_motor():
 
 @pytest.fixture(scope='module')
 def kompakt_motor():
-    """Aynı görev, port_count=4: kamara L/D ≈ 8,6 — eşiğin altında."""
-    return _kos(port_count=4)
+    """Aynı görev, port_count=5: kamara L/D ≈ 9,2 — eşiğin altında.
+
+    v3.0.1 kulvar P: eski kaynaksız 1,5·√N·D_son kuralı grain dış çapını
+    şişiriyordu; N = 4'te L/D 8,6 bu şişkinlikten geliyordu. Tek halka
+    zarfıyla (D_o = D_son·(1 + 1/sin(π/N))) ölçüldü: N = 4 -> 10,52,
+    N = 5 -> 9,17, N = 6 -> 8,11 (kamara L/D). Bekçinin iddiası (çok port
+    narinliği eşiğin altına indirir) aynen; örnek N = 5'e taşındı.
+    """
+    return _kos(port_count=5)
 
 
 # ---------------------------------------------------------------------------
@@ -300,10 +307,15 @@ def test_t60_iki_uzunluk_alani_ayrik_ve_tutarli(boru_motor):
     assert kapak is not None and kapak > 0
     assert boyutlar['total_motor_length_with_caps_mm'] == pytest.approx(
         boyutlar['total_motor_length_mm'] + kapak, rel=1e-9)
-    # Kapak boyu yapısal kapak analizinin GERÇEK değeri (uydurma değil)
+    # Kapak boyu yapısal kapak analizinin GERÇEK değeri (uydurma değil).
+    # V301 CAD-2 kalem 7 (NK-6) — GEREKÇELİ GÜNCELLEME: eski beklenti
+    # ``head_thickness_used_mm`` idi; o alan önerilen kapak TİPİNİN
+    # (dişlide cidar kalınlığı) değerlendirildiği kalınlıktır, eksenel boy
+    # değildir ve çizimler DÜZ kapak çizer. Toplam boy artık çizilen düz
+    # kapağı sayar (alan adı ``head_thickness_field_by_type['flat']``).
     kapak_analizi = sonuc['structural_analysis']['end_cap_analysis']
-    assert kapak == pytest.approx(
-        kapak_analizi['head_thickness_used_mm'], rel=1e-9)
+    duz_alan = kapak_analizi['head_thickness_field_by_type']['flat']
+    assert kapak == pytest.approx(kapak_analizi[duz_alan], rel=1e-9)
 
 
 def test_t60_beyani_iki_tanimi_da_anlatiyor(boru_motor):

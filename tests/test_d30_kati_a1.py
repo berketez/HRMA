@@ -47,6 +47,14 @@ from hrma.engines import solid_rocket_engine as kati
 from hrma.engines import warning_records
 from hrma.engines.solid_rocket_engine import SolidRocketEngine
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 KOK = pathlib.Path(kati.__file__).resolve().parents[2]
 KOD = 'warn.solid.erosion_exponent_extrapolated'
 
@@ -61,7 +69,7 @@ def _motor(pc_bar, **ov):
     return _sessiz(
         SolidRocketEngine, propellant_type='apcp', grain_type='bates',
         chamber_pressure=pc_bar, chamber_diameter=100.0, grain_length=500.0,
-        core_diameter=30.0, overrides=ov)
+        core_diameter=_CEKIRDEK_MM, overrides=ov)
 
 
 def _uyarilar(motor):
