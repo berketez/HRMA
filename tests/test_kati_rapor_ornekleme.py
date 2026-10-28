@@ -41,6 +41,8 @@ Bu dosyadaki ``monkeypatch`` sahteleri test altyapısıdır (kullanıcıya
 gösterilen veri değildir).
 """
 
+import shutil
+
 import numpy as np
 import pytest
 
@@ -48,9 +50,17 @@ import hrma.engines.solid_rocket_engine as solid_mod
 from hrma.engines.solid_rocket_engine import SolidRocketEngine
 from hrma.utils.numeric_compat import trapezoid
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 #: Bütün ölçümlerin alındığı referans geometri (dosya başındaki tablo).
 TABAN = dict(propellant_type='apcp', chamber_diameter=100.0,
-             grain_length=500.0, core_diameter=30.0, chamber_pressure=40)
+             grain_length=500.0, core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
 
 #: Deponun desteklediği grain tipleri (motorun kendi hata metninden).
 GRAIN_TIPLERI = ('bates', 'star', 'wagon_wheel', 'finocyl', 'slotted',
@@ -494,13 +504,81 @@ def test_kazanilmamis_kap_onayi_geri_cekiliyor():
 
 
 def test_kullanici_cidariyla_kap_hukmu_veriliyor():
+    """V3.0.5 T-ÇAPA-C1 — YOL DEĞİŞTİ (V301/K-D 1167a5053): kasa sıcaklığı
+    ÇÖZÜLMEDİYSE oda sıcaklığı dayanımıyla kurulan kap onayı geri çekilir
+    (NOT_EVALUATED). ``_calculate_safety_analysis``i tek başına çağırmak kasa
+    sıcaklığını hiç çözmüyordu (``_case_temperature_status`` yok); hüküm
+    motorun TAM zincirinden (calculate_performance: kasa sıcaklığı 'solved')
+    okunur. ÖLÇÜLDÜ (e038d626f): tam zincirde vessel_status PASS.
+    """
     m = motor(overrides={'case_thickness': 6.0})
-    ps = m._calculate_safety_analysis(
-        m.calculate_thrust_curve())['pressure_safety']
+    ps = m.calculate_performance()['safety_analysis']['pressure_safety']
+    assert (getattr(m, '_case_temperature_status', None) or {}).get(
+        'source') == 'solved'
     assert ps['vessel_status'] not in (None, 'NOT_EVALUATED')
     assert ps['vessel_status_is_tautological'] is False
     assert ps['wall_thickness_source'] == 'user_supplied'
     assert 'evaluation of that wall' in ps['vessel_status_basis']
+
+
+def _cozulmemis_kasa_sicakligi_kap_blogu(**overrides):
+    """Kasa sıcaklığı ÇÖZÜLMEMİŞ kap bloğu: ``_calculate_safety_analysis``
+    tek başına çağrılınca yanma süresi çözülmediği için kasa ısınması
+    integre edilmez (``_case_temperature_status.source == 'not_solved'``)."""
+    m = motor(overrides=overrides) if overrides else motor()
+    ps = m._calculate_safety_analysis(
+        m.calculate_thrust_curve())['pressure_safety']
+    assert (getattr(m, '_case_temperature_status', None) or {}).get(
+        'source') == 'not_solved', 'ön koşul: kasa sıcaklığı çözülmemiş olmalı'
+    return ps
+
+
+def test_geri_cekilen_kap_hukmunde_dayanak_hukumle_celismez():
+    """V301/T-ÇAPA-D kalem 1 (T-ÇAPA-C1 RAPOR §3 BULGU). K-D geri çekme
+    kuralı (kasa sıcaklığı çözülmedi) kullanıcı cidarlı kabı NOT_EVALUATED'a
+    çekiyordu ama ``vessel_status_basis`` "the burst margin and the vessel
+    status are an evaluation of that wall" diyordu — metin hükümle
+    çelişiyordu. Dayanak artık hükmün NEDEN verilmediğini söyler."""
+    ps = _cozulmemis_kasa_sicakligi_kap_blogu(case_thickness=6.0)
+    assert ps['wall_thickness_source'] == 'user_supplied'
+    assert ps['vessel_status'] == 'NOT_EVALUATED'
+    gerekce = ps['vessel_status_basis']
+    assert 'evaluation of that wall' not in gerekce
+    assert gerekce.startswith('No acceptance is issued: ')
+    assert 'case wall temperature was not solved' in gerekce
+    assert 'diagnostic numbers only' in gerekce
+
+
+def test_boyutlandirilan_cidarda_cozulmemis_sicaklik_dogrulama_vaat_etmez():
+    """Boyutlandırma cümlesi doğru kalır (hedefin geri okunması), ama
+    "case_thickness verirsen doğrulama alırsın" vaadi kasa sıcaklığı
+    çözülmemişken yanlıştır — dayanak bunu söylemez."""
+    ps = _cozulmemis_kasa_sicakligi_kap_blogu()
+    assert ps['wall_thickness_source'] == 'sized_by_hrma'
+    gerekce = ps['vessel_status_basis']
+    assert 'not an independent verification' in gerekce
+    assert "Supply 'case_thickness' (mm) to obtain one" not in gerekce
+    assert 'case wall temperature was not solved' in gerekce
+
+
+@pytest.mark.skipif(shutil.which('node') is None, reason='node yok')
+def test_kap_dayanak_cumleleri_turkce_ekranda_cevrilir(tmp_path):
+    """Kap hükmü dayanak cümleleri (bu dosyanın ölçtüğü motor çıktıları)
+    TR ekranda serverText'ten Türkçe döner, EN ekranda aynen kalır."""
+    from tests.test_i18n_dinamik import _server_translate
+    cumleler = [
+        _cozulmemis_kasa_sicakligi_kap_blogu(case_thickness=6.0)[
+            'vessel_status_basis'],
+        _cozulmemis_kasa_sicakligi_kap_blogu()['vessel_status_basis'],
+    ]
+    m = motor(overrides={'case_thickness': 6.0})
+    cumleler.append(m.calculate_performance()['safety_analysis'][
+        'pressure_safety']['vessel_status_basis'])
+    sonuc = _server_translate(tmp_path, cumleler)
+    assert sonuc['en'] == cumleler
+    for en, tr in zip(cumleler, sonuc['tr']):
+        assert tr != en, 'TR karşılığı yok: %s' % en[:80]
+        assert tr.startswith(('Onay VERİLMEZ', 'Gövde cidar')), tr[:80]
 
 
 def test_uyari_susturulmuyor_yalniz_onay_geri_cekiliyor(monkeypatch):
@@ -539,7 +617,7 @@ def test_uc_katmani_ile_ayni_cevap_veriliyor():
         resp = c.post('/calculate_solid', headers=shake.HEADERS, json={
             'chamber_pressure': 40, 'propellant_type': 'apcp',
             'chamber_diameter': 100, 'grain_length': 500,
-            'core_diameter': 30})
+            'core_diameter': _CEKIRDEK_MM})
     assert resp.status_code == 200, resp.get_data(as_text=True)[:300]
     ps = resp.get_json()['safety_analysis']['pressure_safety']
     assert ps['vessel_status'] == 'NOT_EVALUATED'

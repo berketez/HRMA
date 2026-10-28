@@ -29,6 +29,39 @@
 
     const U = window.AnalysisDock.ui;
     const T = U.t;                       // çeviri kısayolu
+    // V301/PANEL-SAYI (KILAVUZ P4) — ekrandaki sayı dile göre ayraçla
+    // (TR virgül). Sayı yoksa EM TİRE (U.fmt sözleşmesi); sayı DEĞİŞMEZ.
+    function fmtL(x, d) {
+        return (typeof x !== 'number' || !Number.isFinite(x)) ? '—' : U.num(x, d);
+    }
+
+    /* V301/PANEL-SAYI (KILAVUZ P4) — ÇÖZÜCÜ DÜZYAZISI TR EKRANDA.
+       Uçların model notu, büyüklük zarfı dayanağı, su koçu önerisi, uyarı ve
+       varsayım cümleleri sözlükte yoksa TR ekranda İngilizce basılıyordu.
+       TR'de sözlükte karşılığı olmayan düz metin listesi kapalı "Teknik
+       ayrıntı" kutusuna girer; özet satırı başlığı ve kalem sayısını Türkçe
+       söyler (uyarılarda turuncu — varlıkları görünür kalır). Kodlu uyarı
+       (sözlükten çevrilen) ya da çevrilmiş metin olduğu gibi basılır. */
+    function duzyaziBlok(baslik, maddeler, kind) {
+        const liste = (Array.isArray(maddeler) ? maddeler : [maddeler])
+            .filter(function (x) { return x !== null && x !== undefined && x !== ''; });
+        if (!liste.length) return '';
+        const srv = (window.I18N && typeof window.I18N.serverText === 'function')
+            ? window.I18N.serverText : function (x) { return x; };
+        const tr = !!(window.I18N && window.I18N.lang === 'tr');
+        const cevrilmedi = tr && liste.every(function (x) {
+            return typeof x === 'string' && srv(x) === x;
+        });
+        const blok = U.listBlock(baslik, liste, kind);
+        if (!cevrilmedi) return blok;
+        const renk = (kind === 'warn' || kind === 'err')
+            ? 'var(--hd-orange, #ff8c33)' : 'var(--hd-ink-dim, #7d97a5)';
+        return '<details style="margin:8px 0;"><summary style="cursor:pointer;'
+            + ' font-size:0.78rem; color:' + renk + ';">'
+            + U.esc(U.tf('panel.feed.proseUntranslated', { title: baslik, n: liste.length },
+                         '{title} - {n} solver statement(s), untranslated'))
+            + '</summary>' + blok + '</details>';
+    }
     const PANEL_ID = 'feed';
     const lastTabData = {};              // sekme -> son yanıt (dil değişiminde yeniden çizilir)
 
@@ -91,10 +124,10 @@
         rows.push([
             T('panel.feed.szBand', 'Canonical tank-radius band'),
             (bantVar
-                ? U.fmt(bant[0], 3) + ' – ' + U.fmt(bant[1], 3) + ' m'
+                ? fmtL(bant[0], 3) + ' – ' + fmtL(bant[1], 3) + ' m'
                 : T('panel.feed.szNoBand',
                     'NOT DECLARED — this quantity has no canonical band in '
-                    + 'the product, and none is invented here'))
+                    + 'the product'))
             + '  ·  ' + U.esc(String(z.radius_band_status)),
             T('panel.feed.szBandTip',
               'This status string is the declaration made by the endpoint; '
@@ -111,7 +144,7 @@
             //: sayı Number() ile ZORLANMAZ — `Number(null) === 0` olurdu ve
             //: "Bond sayısı DEĞERLENDİRİLEMEDİ" diyen bir yükte ekrana
             //: "0,000" basılırdı.
-            U.fmt(z.bond_number, 3)
+            fmtL(z.bond_number, 3)
             + '  ·  ' + U.esc(String(z.bond_number_status)),
             T('panel.feed.szBondTip',
               'Bo separates the gravity-dominated slosh regime from the '
@@ -125,7 +158,7 @@
             'Size envelope — what the endpoint could and could NOT judge'))
             + U.kvTable(rows);
         if (z.basis) {
-            html += U.listBlock(T('panel.feed.szBasis',
+            html += duzyaziBlok(T('panel.feed.szBasis',
                 'Basis of the size-envelope declaration'), [z.basis], 'dim');
         }
         return html;
@@ -135,17 +168,17 @@
     function renderSlosh(data, root) {
         const s = (data && data.slosh) || {};
         const cards = '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard(T('panel.feed.cardF1', 'SLOSH FREQ f1'), U.fmt(s.f1_hz, 3), 'Hz', 'info',
+            + U.statCard(T('panel.feed.cardF1', 'SLOSH FREQ f1'), fmtL(s.f1_hz, 3), 'Hz', 'info',
                 T('panel.feed.cardF1Tip', 'Fundamental lateral slosh natural frequency (SP-106 Eq. 2.4)'))
-            + U.statCard(T('panel.feed.cardMassFrac', 'SLOSH MASS FRACTION'), U.fmt(s.slosh_mass_ratio, 3), '', 'dim',
+            + U.statCard(T('panel.feed.cardMassFrac', 'SLOSH MASS FRACTION'), fmtL(s.slosh_mass_ratio, 3), '', 'dim',
                 T('panel.feed.cardMassFracTip',
                   'm1/m_liquid — fraction of liquid that participates in the fundamental mode'))
-            + U.statCard(T('panel.feed.cardSloshMass', 'SLOSH MASS'), U.fmt(s.slosh_mass_kg, 1), 'kg',
+            + U.statCard(T('panel.feed.cardSloshMass', 'SLOSH MASS'), fmtL(s.slosh_mass_kg, 1), 'kg',
                 (s.slosh_mass_kg == null ? 'dim' : 'dim'),
                 T('panel.feed.cardSloshMassTip', 'Absolute fundamental slosh mass (needs density/mass)'))
-            + U.statCard(T('panel.feed.cardPendulum', 'PENDULUM LENGTH'), U.fmt(s.pendulum_length, 3), 'm', 'dim',
+            + U.statCard(T('panel.feed.cardPendulum', 'PENDULUM LENGTH'), fmtL(s.pendulum_length, 3), 'm', 'dim',
                 T('panel.feed.cardPendulumTip', 'Equivalent-pendulum length of the slosh mass'))
-            + U.statCard(T('panel.feed.cardFill', 'FILL RATIO h/R'), U.fmt(s.fill_ratio, 2), '', 'dim', '')
+            + U.statCard(T('panel.feed.cardFill', 'FILL RATIO h/R'), fmtL(s.fill_ratio, 2), '', 'dim', '')
             + '</div>';
 
         const head = document.createElement('div');
@@ -204,18 +237,18 @@
         if (baffle.damping_ratio != null) {
             rows.push([T('panel.feed.baffleDamping', 'Ring-baffle damping ratio'),
                 U.tf('panel.feed.baffleBand',
-                     { v: U.fmt(baffle.damping_ratio, 4), lo: U.fmt(baffle.damping_ratio_low, 4),
-                       hi: U.fmt(baffle.damping_ratio_high, 4) },
+                     { v: fmtL(baffle.damping_ratio, 4), lo: fmtL(baffle.damping_ratio_low, 4),
+                       hi: fmtL(baffle.damping_ratio_high, 4) },
                      '{v} (band {lo}-{hi})'),
                 T('panel.feed.baffleTip',
                   'Miles (1958) single flat ring baffle — approximate (factor ~2 band)')]);
             rows.push([T('panel.feed.blockedArea', 'Blocked-area ratio'),
-                       U.fmt(baffle.blocked_area_ratio, 3)]);
+                       fmtL(baffle.blocked_area_ratio, 3)]);
         } else if (baffle.recommended_width_ratio != null) {
             rows.push([T('panel.feed.baffleWidthRec', 'Recommended baffle width w/R'),
-                U.fmt(baffle.recommended_width_ratio, 3), baffle.note || '']);
+                fmtL(baffle.recommended_width_ratio, 3), baffle.note || '']);
             rows.push([T('panel.feed.targetDamping', 'Target damping ratio'),
-                       U.fmt(baffle.target_damping_ratio, 4)]);
+                       fmtL(baffle.target_damping_ratio, 4)]);
         }
         if (rows.length) {
             html += U.sectionTitle(T('panel.feed.secBaffle',
@@ -234,7 +267,7 @@
         // göndermezse satır HİÇ çıkmaz (fail-closed; panel mod UYDURMAZ).
         if (Number.isFinite(s.liquid_mass_kg)) {
             html += U.kvTable([[T('panel.feed.liquidMass', 'Liquid mass'),
-                U.fmt(s.liquid_mass_kg, 1) + ' kg',
+                fmtL(s.liquid_mass_kg, 1) + ' kg',
                 T('panel.feed.liquidMassTip',
                   'Total liquid mass in the tank; the slosh mass is a '
                   + 'fraction of it')]]);
@@ -245,11 +278,12 @@
                 + U.kvTable(s.modes.map(function (m) {
                     return [U.tf('panel.feed.modeRow', { m: m.mode },
                                  'Mode {m}'),
-                            U.fmt(m.f_hz, 3) + ' Hz'];
+                            fmtL(m.f_hz, 3) + ' Hz'];
                 }));
         }
         html += sizeEnvelopeHtml(s);
-        if (s.model_note) html += U.listBlock(T('common.modelAssumptions',
+        html += defaultsAppliedHtml(data, 'slosh');   // V301/PANEL-SAYI
+        if (s.model_note) html += duzyaziBlok(T('common.modelAssumptions',
             'Model assumptions & limits'), [s.model_note], 'dim');
         html += confidenceHtml(data, s);
         tail.innerHTML = html;
@@ -308,15 +342,15 @@
         if (typeof p.expulsion_efficiency === 'number'
                 && Number.isFinite(p.expulsion_efficiency)) {
             rows.push(['expulsion_efficiency',
-                U.fmt(p.expulsion_efficiency, 4)]);
+                fmtL(p.expulsion_efficiency, 4)]);
         }
         if (typeof p.swept_volume_m3 === 'number'
                 && Number.isFinite(p.swept_volume_m3)) {
             // Litre ikizi TÜRETİMDİR ve m³ değerinin YANINDA durur; ham
             // sayı saklanmaz (panelin kendi kalıbı: bottle_water_volume_m3).
             rows.push(['swept_volume_m3',
-                U.fmt(p.swept_volume_m3, 6) + ' m3 ('
-                + U.fmt(p.swept_volume_m3 * 1000, 2) + ' L)']);
+                fmtL(p.swept_volume_m3, 6) + ' m3 ('
+                + fmtL(p.swept_volume_m3 * 1000, 2) + ' L)']);
         }
         return rows.length ? U.kvTable(rows) : '';
     }
@@ -327,8 +361,10 @@
         const mode = (data && data.mode) || 'regulated';
         const head = document.createElement('div');
         let cards = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + U.badge(T('panel.feed.badgeMode', 'MODE') + ': ' + mode.toUpperCase(), 'info')
-            + U.badge(T('panel.feed.badgeGas', 'GAS') + ': ' + String(p.gas || '—').toUpperCase(), 'dim')
+            + U.badge(T('panel.feed.badgeMode', 'MODE') + ': '
+                + secimEtiketi(PRESS_MODES, mode).toUpperCase(), 'info')
+            + U.badge(T('panel.feed.badgeGas', 'GAS') + ': '
+                + secimEtiketi(GASES, p.gas).toUpperCase(), 'dim')
             + '</div><div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">';
         if (mode === 'regulated') {
             const iso = p.isothermal || {};
@@ -344,34 +380,34 @@
             // sayının GERÇEK dayanağını söyler; sınır kartlarının bu sayının
             // dayanağı OLMADIĞINI da söyler.
             cards += U.statCard(T('panel.feed.cardDelivered', 'DELIVERED GAS'),
-                U.fmt(p.recommended_delivered_mass_kg, 3), 'kg', 'info',
+                fmtL(p.recommended_delivered_mass_kg, 3), 'kg', 'info',
                 T('panel.feed.cardDeliveredTip',
                   'Gas delivered into the tank, from the closed-form energy '
                   + 'balance that sizes the bottle (Sutton Ch. 6 / Huzel & '
                   + 'Huang Ch. 5). The isothermal/adiabatic cards beside it '
                   + 'are diagnostic bounds, NOT the basis of this number.'))
-                + U.statCard(T('panel.feed.cardIso', 'ISOTHERMAL BOUND'), U.fmt(iso.gas_mass_kg, 3), 'kg', 'dim',
+                + U.statCard(T('panel.feed.cardIso', 'ISOTHERMAL BOUND'), fmtL(iso.gas_mass_kg, 3), 'kg', 'dim',
                     T('panel.feed.cardIsoTip', 'Slow (dense-gas) minimum mass'))
-                + U.statCard(T('panel.feed.cardAdia', 'ADIABATIC BOUND'), U.fmt(adia.gas_mass_kg, 3), 'kg', 'dim',
+                + U.statCard(T('panel.feed.cardAdia', 'ADIABATIC BOUND'), fmtL(adia.gas_mass_kg, 3), 'kg', 'dim',
                     T('panel.feed.cardAdiaTip', 'Fast (cold-gas) maximum mass'))
                 + U.statCard(T('panel.feed.cardBottleVol', 'BOTTLE VOLUME'),
-                    U.fmt(st.bottle_water_volume_m3 * 1000, 1), 'L', 'dim',
+                    fmtL(st.bottle_water_volume_m3 * 1000, 1), 'L', 'dim',
                     T('panel.feed.cardBottleVolTip', 'Required storage bottle water volume'))
-                + U.statCard(T('panel.feed.cardBottleCount', 'BOTTLE COUNT'), U.fmt(st.bottle_count, 0), '×', 'info',
+                + U.statCard(T('panel.feed.cardBottleCount', 'BOTTLE COUNT'), fmtL(st.bottle_count, 0), '×', 'info',
                     T('panel.feed.cardBottleCountTip', '50 L standard bottles (ceil)'))
-                + U.statCard(T('panel.feed.cardResidual', 'RESIDUAL GAS'), U.fmt(st.residual_mass_kg, 3), 'kg', 'dim',
+                + U.statCard(T('panel.feed.cardResidual', 'RESIDUAL GAS'), fmtL(st.residual_mass_kg, 3), 'kg', 'dim',
                     T('panel.feed.cardResidualTip', 'Unusable gas left below P_min'));
         } else {
             const bdKind = (Number.isFinite(p.blowdown_ratio) && p.blowdown_ratio > 4) ? 'warn' : 'ok';
-            cards += U.statCard(T('panel.feed.cardBdRatio', 'BLOWDOWN RATIO'), U.fmt(p.blowdown_ratio, 2), '', bdKind,
+            cards += U.statCard(T('panel.feed.cardBdRatio', 'BLOWDOWN RATIO'), fmtL(p.blowdown_ratio, 2), '', bdKind,
                 T('panel.feed.cardBdRatioTip',
                   'P_initial / P_final — engine must tolerate this pressure range'))
-                + U.statCard(T('panel.feed.cardPInit', 'INITIAL PRESSURE'), U.fmt(p.initial_pressure / 1e5, 1), 'bar', 'dim', '')
-                + U.statCard(T('panel.feed.cardPFinal', 'FINAL PRESSURE'), U.fmt(p.final_pressure / 1e5, 1), 'bar', 'info', '')
-                + U.statCard(T('panel.feed.cardTFinal', 'FINAL TEMP'), U.fmt(p.final_temperature_K, 0), 'K', 'dim',
+                + U.statCard(T('panel.feed.cardPInit', 'INITIAL PRESSURE'), fmtL(p.initial_pressure / 1e5, 1), 'bar', 'dim', '')
+                + U.statCard(T('panel.feed.cardPFinal', 'FINAL PRESSURE'), fmtL(p.final_pressure / 1e5, 1), 'bar', 'info', '')
+                + U.statCard(T('panel.feed.cardTFinal', 'FINAL TEMP'), fmtL(p.final_temperature_K, 0), 'K', 'dim',
                     T('panel.feed.cardTFinalTip', 'Polytropic cooling of the trapped gas'))
-                + U.statCard(T('panel.feed.cardTrapped', 'TRAPPED GAS'), U.fmt(p.gas_mass_kg, 3), 'kg', 'dim', '')
-                + U.statCard(T('panel.feed.cardPolytropic', 'POLYTROPIC n'), U.fmt(p.polytropic_n, 2), '', 'dim',
+                + U.statCard(T('panel.feed.cardTrapped', 'TRAPPED GAS'), fmtL(p.gas_mass_kg, 3), 'kg', 'dim', '')
+                + U.statCard(T('panel.feed.cardPolytropic', 'POLYTROPIC n'), fmtL(p.polytropic_n, 2), '', 'dim',
                     T('panel.feed.cardPolytropicTip', '1.0 isothermal .. gamma adiabatic'));
         }
         cards += '</div>';
@@ -380,9 +416,10 @@
 
         const tail = document.createElement('div');
         let html = '';
-        if (p.model_note) html += U.listBlock(T('common.modelAssumptions',
+        if (p.model_note) html += duzyaziBlok(T('common.modelAssumptions',
             'Model assumptions & limits'), [p.model_note], 'dim');
         html += expulsionHtml(p);   // OH-D27-16 (ÖH D28 / arayuz a1)
+        html += defaultsAppliedHtml(data, 'pressurant');   // V301/PANEL-SAYI
         html += confidenceHtml(data, p);
         tail.innerHTML = html;
         root.appendChild(tail);
@@ -394,6 +431,34 @@
         // katmandı. Defter ucun KENDİ beyanını ortak sınıflandırıcıdan
         // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
         U.source.ledgerInto(root, p, { deep: true });
+    }
+
+    // V301/PANEL-SAYI (KILAVUZ P4) — makine kelimeleri ekran dilinde.
+    // Seçenek tablosundaki etiket (sözlükten); tanınmayan değer AYNEN.
+    function secimEtiketi(tablo, deger, yedek) {
+        const k = String(deger == null ? '' : deger);
+        for (let i = 0; i < tablo.length; i++) {
+            if (tablo[i][0] === k) return T(tablo[i][2], tablo[i][1]);
+        }
+        return (yedek !== undefined) ? yedek : (k || '—');
+    }
+    const WH_DURUM = {
+        SAFE: ['panel.feed.whStatus.SAFE', 'SAFE'],
+        MARGINAL: ['panel.feed.whStatus.MARGINAL', 'MARGINAL'],
+        UNSAFE: ['panel.feed.whStatus.UNSAFE', 'UNSAFE'],
+    };
+    function whDurumMetni(status) {
+        const d = WH_DURUM[status];
+        return d ? T(d[0], d[1]) : String(status || '—');
+    }
+    const KAPANMA = {
+        instantaneous: ['panel.feed.closure.instantaneous', 'instantaneous'],
+        rapid: ['panel.feed.closure.rapid', 'rapid'],
+        slow: ['panel.feed.closure.slow', 'slow'],
+    };
+    function kapanmaMetni(rejim) {
+        const d = KAPANMA[rejim];
+        return d ? T(d[0], d[1]) : String(rejim || '—');
     }
 
     // ---- Water hammer render ------------------------------------------
@@ -410,13 +475,13 @@
         const kind = whKind(w.status);
         const head = document.createElement('div');
         let html = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + U.badge(T('common.statusUpper', 'STATUS') + ': ' + String(w.status || '—'), kind,
+            + U.badge(T('common.statusUpper', 'STATUS') + ': ' + whDurumMetni(w.status), kind,
                 T('panel.feed.whStatusTip', 'SAFE ≤ MAWP · MARGINAL ≤ hoop yield · UNSAFE > hoop yield'))
             + U.badge(T('panel.feed.badgeFluid', 'FLUID') + ': '
-                + String(w.fluid_name || w.fluid || '—'), 'dim',
+                + (secimEtiketi(WH_FLUIDS, w.fluid, '') || String(w.fluid_name || w.fluid || '—')), 'dim',
                 (w.fluid_properties && w.fluid_properties.source) || '')
             + U.badge(T('panel.feed.badgeClosure', 'CLOSURE') + ': '
-                + String(w.closure_regime || '—').toUpperCase(), 'info')
+                + kapanmaMetni(w.closure_regime).toUpperCase(), 'info')
             + '</div>';
         // ÖH D15 / P11B4-20 — HÜKMÜN DAYANDIĞI SAYI EKRANDA YOKTU.
         // ÖLÇÜLDÜ (once.json, gerçek /api/water-hammer, su/20 m/Ø25/t=2/20 bar,
@@ -436,23 +501,23 @@
             && typeof w.peak_pressure_bar === 'number'
             && Math.abs(govPeak - w.peak_pressure_bar) > 1e-9);
         html += '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
-            + U.statCard(T('panel.feed.cardPeakP', 'PEAK PRESSURE'), U.fmt(w.peak_pressure_bar, 1), 'bar',
+            + U.statCard(T('panel.feed.cardPeakP', 'PEAK PRESSURE'), fmtL(w.peak_pressure_bar, 1), 'bar',
                 govDiffers ? 'dim' : kind,
                 T('panel.feed.cardPeakPTip', 'Working pressure + applied transient rise'))
             + (govPeak === null ? '' : U.statCard('design_peak_pressure_bar',
-                U.fmt(govPeak, 1), 'bar', kind,
+                fmtL(govPeak, 1), 'bar', kind,
                 String(w.model_note || '')))
-            + U.statCard(T('panel.feed.cardJoukowsky', 'JOUKOWSKY RISE'), U.fmt(w.joukowsky_pressure_rise_bar, 1), 'bar', 'dim',
+            + U.statCard(T('panel.feed.cardJoukowsky', 'JOUKOWSKY RISE'), fmtL(w.joukowsky_pressure_rise_bar, 1), 'bar', 'dim',
                 T('panel.feed.cardJoukowskyTip', 'Instantaneous-closure rise ρ·a·Δv (Joukowsky 1898)'))
-            + U.statCard(T('panel.feed.cardApplied', 'APPLIED RISE'), U.fmt(w.applied_pressure_rise_bar, 1), 'bar', 'info',
+            + U.statCard(T('panel.feed.cardApplied', 'APPLIED RISE'), fmtL(w.applied_pressure_rise_bar, 1), 'bar', 'info',
                 T('panel.feed.cardAppliedTip', 'Rise for the actual closure time (Michaud reduction if slow)'))
-            + U.statCard(T('panel.feed.cardWave', 'WAVE SPEED'), U.fmt(w.wave_speed_m_s, 0), 'm/s', 'dim',
+            + U.statCard(T('panel.feed.cardWave', 'WAVE SPEED'), fmtL(w.wave_speed_m_s, 0), 'm/s', 'dim',
                 T('panel.feed.cardWaveTip', 'Elastic-pipe corrected (Wylie & Streeter Eq. 1-10)'))
-            + U.statCard(T('panel.feed.cardCritTime', 'CRITICAL TIME 2L/a'), U.fmt(w.critical_closure_time_ms, 1), 'ms', 'dim',
+            + U.statCard(T('panel.feed.cardCritTime', 'CRITICAL TIME 2L/a'), fmtL(w.critical_closure_time_ms, 1), 'ms', 'dim',
                 T('panel.feed.cardCritTimeTip', 'Closure faster than this → full Joukowsky pressure'))
-            + U.statCard(T('panel.feed.cardPipeMawp', 'PIPE MAWP'), U.fmt(pipe.mawp_bar, 1), 'bar', 'dim',
+            + U.statCard(T('panel.feed.cardPipeMawp', 'PIPE MAWP'), fmtL(pipe.mawp_bar, 1), 'bar', 'dim',
                 (pipe.mawp_source || '') + ' · ' + (pipe.material_name || ''))
-            + U.statCard(T('panel.feed.cardRecClosure', 'RECOMMENDED CLOSURE'), U.fmt(w.recommended_closure_time_ms, 1), 'ms',
+            + U.statCard(T('panel.feed.cardRecClosure', 'RECOMMENDED CLOSURE'), fmtL(w.recommended_closure_time_ms, 1), 'ms',
                 (w.recommended_closure_time_ms == null ? 'ok' : 'warn'),
                 T('panel.feed.cardRecClosureTip',
                   'Minimum valve closure time to keep the peak within the pipe MAWP'))
@@ -492,22 +557,29 @@
             const v = row[1];
             if (v === null || v === undefined) return;
             const shown = (typeof v === 'number')
-                ? U.fmt(v, row[2]) + row[3] : U.esc(String(v));
+                ? fmtL(v, row[2]) + row[3] : U.esc(String(v));
             govRows.push(['<span style="font-family:var(--hd-mono);'
                 + ' font-size:0.72rem;">' + row[0] + '</span>', shown]);
         });
         if (govRows.length) t += U.kvTable(govRows);
         if (w.recommendation) {
-            t += '<p style="font-size:0.85rem; color:var(--hd-ink, #cfe8f2); margin:8px 0;">'
-                + U.esc(w.recommendation) + '</p>';
+            const srvO = (window.I18N && typeof window.I18N.serverText === 'function')
+                ? window.I18N.serverText : function (x) { return x; };
+            t += (window.I18N && window.I18N.lang === 'tr'
+                  && srvO(String(w.recommendation)) === String(w.recommendation))
+                ? duzyaziBlok(T('panel.feed.whRecommendation', 'Recommendation'),
+                              [String(w.recommendation)], 'info')
+                : '<p style="font-size:0.85rem; color:var(--hd-ink, #cfe8f2); margin:8px 0;">'
+                  + U.esc(srvO(String(w.recommendation))) + '</p>';
         }
         if (Array.isArray(w.warnings) && w.warnings.length) {
-            t += U.listBlock(T('common.warnings', 'Warnings'), w.warnings, kind === 'err' ? 'err' : 'warn');
+            t += duzyaziBlok(T('common.warnings', 'Warnings'), w.warnings, kind === 'err' ? 'err' : 'warn');
         }
         if (Array.isArray(w.assumptions) && w.assumptions.length) {
-            t += U.listBlock(T('common.modelAssumptions', 'Model assumptions & limits'),
+            t += duzyaziBlok(T('common.modelAssumptions', 'Model assumptions & limits'),
                              w.assumptions, 'dim');
         }
+        t += defaultsAppliedHtml(data, 'water_hammer');   // V301/PANEL-SAYI
         tail.innerHTML = t;
         root.appendChild(tail);
         // ÖH D26 / P11B2-10 — DEĞER KAYNAĞI SINIFLANDIRICISI BAĞLI.
@@ -529,26 +601,59 @@
             endpoint: '/api/slosh-analysis',
             motorTypes: ['liquid', 'hybrid'], render: renderSlosh,
             fields: [
-                ['radius', 'Tank Radius (m)', 0.3, 0.01, 'panel.feed.fTankRadius'],
-                ['fill_height', 'Fill Height (m)', 0.6, 0.01, 'panel.feed.fFillHeight'],
-                ['g_eff', 'Axial Acceleration (m/s²)', 9.81, 0.1, 'panel.feed.fAxialAccel'],
-                ['fluid_density', 'Propellant Density (kg/m³)', 810, 1, 'panel.feed.fPropDensity'],
-                ['baffle_width_ratio', 'Baffle Width w/R', 0.15, 0.01, 'panel.feed.fBaffleW'],
-                ['baffle_depth_ratio', 'Baffle Depth d/R', 0.10, 0.01, 'panel.feed.fBaffleD'],
+                // T-ÇAPA-C2 (BELGE §8.1-5, S1, 27 Eki): alanlar SAYISIZ doğar.
+                // ÖLÇÜLDÜ: hibrit N2O örneğinde sekme 0,3 / 0,6 / 9,81 / 810 /
+                // 0,15 / 0,10 ile açılıyordu — hiçbiri motordan değildi (810
+                // kg/m³ N2O'nun yoğunluğu değil; motorun kendi çalkalanma
+                // bloğu 785,10 kg/m³, Ø 213,45 mm, dolum 453,58 mm diyor).
+                // Değerler motor sonucundan tohumlanır (aşağıda); tohum yoksa
+                // alan boş kalır ve uç zorunlu alanı ADIYLA reddeder.
+                ['radius', 'Tank Radius (m)', '', 0.01, 'panel.feed.fTankRadius', 'panel.feed.help.slosh.radius'],
+                ['fill_height', 'Fill Height (m)', '', 0.01, 'panel.feed.fFillHeight', 'panel.feed.help.slosh.fill_height'],
+                ['g_eff', 'Axial Acceleration (m/s²)', '', 0.1, 'panel.feed.fAxialAccel', 'panel.feed.help.slosh.g_eff'],
+                ['fluid_density', 'Propellant Density (kg/m³)', '', 1, 'panel.feed.fPropDensity', 'panel.feed.help.slosh.fluid_density'],
+                ['baffle_width_ratio', 'Baffle Width w/R', '', 0.01, 'panel.feed.fBaffleW', 'panel.feed.help.slosh.baffle_width_ratio'],
+                ['baffle_depth_ratio', 'Baffle Depth d/R', '', 0.01, 'panel.feed.fBaffleD', 'panel.feed.help.slosh.baffle_depth_ratio'],
             ],
             suggest: function (m) {
                 const sug = {};
-                const ox = m.propellant_tanks && m.propellant_tanks.oxidizer_tank;
-                const dim = ox && ox.dimensions;
-                if (dim && Number.isFinite(dim.diameter)) {
-                    sug.radius = Number((dim.diameter / 2 / 1000).toPrecision(4)); // mm → m radius
+                // Hibrit: motorun KENDİ oksitleyici tankı çalkalanma bloğu
+                // (``oxidizer_tank_slosh``: tek tank, tek geometri, aynı
+                // çözücü). Panel bu bloğun girdileriyle koşar; perde genişliği
+                // verilmez (motor bloğu gibi öneri kipi), derinlik bloğun
+                // yayımladığı değerdir.
+                const hs = m.oxidizer_tank_slosh;
+                if (hs && hs.status === 'modelled') {
+                    if (Number.isFinite(hs.tank_diameter_m)) sug.radius = hs.tank_diameter_m / 2;
+                    if (Number.isFinite(hs.fill_height_m)) sug.fill_height = hs.fill_height_m;
+                    if (Number.isFinite(hs.g_eff_m_s2)) sug.g_eff = hs.g_eff_m_s2;
+                    if (Number.isFinite(hs.liquid_density_kg_m3)) sug.fluid_density = hs.liquid_density_kg_m3;
+                    const bf = hs.slosh && hs.slosh.baffle;
+                    if (bf && Number.isFinite(bf.depth_ratio)) sug.baffle_depth_ratio = bf.depth_ratio;
+                    return sug;
                 }
-                if (dim && Number.isFinite(dim.length)) {
-                    sug.fill_height = Number((dim.length / 1000 * 0.9).toPrecision(4)); // ~90% dolu
+                // V301/PANEL-SAYI (28 Eki; T-ÇAPA-C2 AÇIK 4) — SIVI MOTOR DA
+                // KENDİ ÇALKALANMA BLOĞUNU YAYIMLIYOR. Eski yol tank boyunun
+                // %90'ını (HRMA seçimi) dolum yüksekliği sayıyor, yarıçapı ve
+                // yoğunluğu 4 anlamlı basamağa yuvarlıyordu. ÖLÇÜLDÜ (örnek
+                // sıvı LOX/RP-1): motorun ``propellant_tanks.oxidizer_tank.
+                // slosh`` bloğu R = 0,237471 m, h = 1,127987 m (tank boyu ×
+                // 0,9 = 1,069 m DEĞİL), g = 9,80665, tankın GERÇEK halka
+                // perdesi w/R = 0,75, d/R = 1,4167 ile aynı çözücüden
+                // (slosh_analysis) koşuyor. Panel bu bloğun girdileriyle
+                // koşar (ölçüldüğü gibi, yuvarlamasız); blok yoksa alan boş
+                // kalır ve uç zorunlu alanı ADIYLA reddeder.
+                const ls = yolOku(m, 'propellant_tanks.oxidizer_tank.slosh');
+                if (ls && typeof ls === 'object') {
+                    tohumSayi(sug, 'radius', ls, 'radius');
+                    tohumSayi(sug, 'fill_height', ls, 'fill_height');
+                    tohumSayi(sug, 'g_eff', ls, 'g_eff');
+                    tohumSayi(sug, 'baffle_width_ratio', ls, 'baffle.width_ratio');
+                    tohumSayi(sug, 'baffle_depth_ratio', ls, 'baffle.depth_ratio');
+                    // Bloğun yoğunluk kaynağı motorun oksitleyici yoğunluğu
+                    // (``density_source``); aynı sayı düz anahtarda.
+                    tohumSayi(sug, 'fluid_density', m, 'oxidizer_density');
                 }
-                let rho = m.oxidizer_density;
-                if (!Number.isFinite(rho) && ox && ox.propellant_data) rho = ox.propellant_data.density;
-                if (Number.isFinite(rho)) sug.fluid_density = Math.round(rho);
                 return sug;
             },
         },
@@ -559,27 +664,45 @@
             note: 'Regulated uses tank/storage pressure; Blowdown uses initial ullage '
                 + 'volume and initial pressure. Unused fields are ignored per mode.',
             noteKey: 'panel.feed.pressurantNote',
+            // V301/PANEL-SAYI (28 Eki, S1) — ALANLAR SAYISIZ DOĞAR.
+            // ÖLÇÜLDÜ (örnekler, hesap sonrası): sekme 0,5 / 293 / 20 / 200 /
+            // 0,1 / 1,0 / 0,10 / 30 / 1,2 ile açılıyordu; motordan gelen
+            // yalnız Pc idi ve o da TANK basıncı alanına yazılıyordu (sıvı
+            // örnekte tank 3,647 bar — pompa NPSH'ından —, ekranda 50 bar).
+            // Motorun kendi sonucunda karşılığı olan büyüklük oradan
+            // tohumlanır (suggest); karşılığı olmayan zorunlu alan boşsa uç
+            // adıyla reddeder, isteğe bağlı alan boşsa modülün varsayılanı
+            // uygulanır ve yanıtın ``defaults_applied`` künyesiyle ekranda
+            // beyan edilir (defaultsAppliedHtml).
             fields: [
-                ['mode', 'Architecture', 'regulated', PRESS_MODES, 'panel.feed.fArchitecture'],
-                ['gas', 'Pressurant Gas', 'helium', GASES, 'panel.feed.fGas'],
-                ['propellant_volume', 'Propellant Volume (m³)', 0.5, 0.01, 'panel.feed.fPropVolume'],
-                ['initial_temperature', 'Gas Temperature (K)', 293, 1, 'panel.feed.fGasTemp'],
-                ['tank_pressure', 'Tank Pressure (bar) [reg]', 20, 1, 'panel.feed.fTankPressure'],
-                ['storage_pressure', 'Storage Pressure (bar) [reg]', 200, 5, 'panel.feed.fStoragePressure'],
-                ['regulator_margin', 'Regulator Margin [reg]', 0.10, 0.01, 'panel.feed.fRegMargin'],
-                ['collapse_factor', 'Collapse Factor [reg]', 1.0, 0.05, 'panel.feed.fCollapse'],
-                ['initial_ullage_volume', 'Initial Ullage Vol (m³) [bd]', 0.10, 0.01, 'panel.feed.fUllage'],
-                ['initial_pressure', 'Initial Pressure (bar) [bd]', 30, 1, 'panel.feed.fInitialPressure'],
-                ['polytropic_n', 'Polytropic n [bd]', 1.2, 0.05, 'panel.feed.fPolytropic'],
+                ['mode', 'Architecture', 'regulated', PRESS_MODES, 'panel.feed.fArchitecture', 'panel.feed.help.pressurant.mode'],
+                ['gas', 'Pressurant Gas', 'helium', GASES, 'panel.feed.fGas', 'panel.feed.help.pressurant.gas'],
+                ['propellant_volume', 'Propellant Volume (m³)', '', 0.01, 'panel.feed.fPropVolume', 'panel.feed.help.pressurant.propellant_volume'],
+                ['initial_temperature', 'Gas Temperature (K)', '', 1, 'panel.feed.fGasTemp', 'panel.feed.help.pressurant.initial_temperature'],
+                ['tank_pressure', 'Tank Pressure (bar) [reg]', '', 1, 'panel.feed.fTankPressure', 'panel.feed.help.pressurant.tank_pressure'],
+                ['storage_pressure', 'Storage Pressure (bar) [reg]', '', 5, 'panel.feed.fStoragePressure', 'panel.feed.help.pressurant.storage_pressure'],
+                ['regulator_margin', 'Regulator Margin [reg]', '', 0.01, 'panel.feed.fRegMargin', 'panel.feed.help.pressurant.regulator_margin'],
+                ['collapse_factor', 'Collapse Factor [reg]', '', 0.05, 'panel.feed.fCollapse', 'panel.feed.help.pressurant.collapse_factor'],
+                ['initial_ullage_volume', 'Initial Ullage Vol (m³) [bd]', '', 0.01, 'panel.feed.fUllage', 'panel.feed.help.pressurant.initial_ullage_volume'],
+                ['initial_pressure', 'Initial Pressure (bar) [bd]', '', 1, 'panel.feed.fInitialPressure', 'panel.feed.help.pressurant.initial_pressure'],
+                ['polytropic_n', 'Polytropic n [bd]', '', 0.05, 'panel.feed.fPolytropic', 'panel.feed.help.pressurant.polytropic_n'],
             ],
             suggest: function (m) {
                 const sug = {};
-                if (Number.isFinite(m.chamber_pressure)) sug.tank_pressure = Number(m.chamber_pressure.toPrecision(4));
-                const ox = m.propellant_tanks && m.propellant_tanks.oxidizer_tank;
-                const dim = ox && ox.dimensions;
-                if (dim && Number.isFinite(dim.volume)) {
-                    sug.propellant_volume = Number((dim.volume / 1000).toPrecision(4)); // L → m³
-                }
+                // Sıvı: motorun KENDİ oksitleyici tankı (propellant_tanks) ve
+                // besleme bloğu (feed_system). Hacimler motorda LİTRE.
+                // Hibrit: N2O tankı KENDİNDEN basınçlıdır (buhar basıncı,
+                // ``tank_blowdown.feed_mode``); bu sekme depolanmış gazlı
+                // (He/N2) bir sistemi boyutlar — hibrit sonucunda karşılığı
+                // olan büyüklük YOKTUR, hiçbir alan doldurulmaz.
+                const pd = yolOku(m, 'propellant_tanks.oxidizer_tank.propellant_data');
+                const vReq = sayiOku(pd, 'volume_required');
+                if (vReq !== undefined) sug.propellant_volume = vReq / 1000;   // L → m³
+                const vUll = sayiOku(pd, 'ullage_volume');
+                if (vUll !== undefined) sug.initial_ullage_volume = vUll / 1000; // L → m³
+                tohumSayi(sug, 'tank_pressure', m, 'feed_system.tank_pressure_bar');
+                const gaz = metinOku(m, 'feed_system.pressurization.type');
+                if (gaz && GASES.some(function (g) { return g[0] === gaz; })) sug.gas = gaz;
                 return sug;
             },
         },
@@ -587,12 +710,21 @@
             key: 'water_hammer', label: 'Water Hammer', labelKey: 'panel.feed.tabWaterHammer',
             endpoint: '/api/water-hammer',
             motorTypes: ['liquid', 'hybrid', 'solid'], render: renderWaterHammer,
+            // V301/PANEL-SAYI (28 Eki, S1) — ALANLAR SAYISIZ DOĞAR.
+            // ÖLÇÜLDÜ: sekme 20 / 25 / 2 / 20 / 5 / 50 ile açılıyordu; çalışma
+            // basıncına Pc yazılıyordu (katı motorda bile, katı motorda sıvı
+            // hattı yok). Sıvı motor oksitleyici hattını KENDİSİ çözüyor
+            // (``detailed_feed_system.valve_feedline.oxidizer_line``): akışkan,
+            // boy, iç çap, pompa çıkış basıncı, debi, boru alaşımı oradan.
+            // Cidar kalınlığını HİÇBİR motor hesaplamıyor (motorun kendi
+            // su koçu bloğu bu yüzden NOT_MODELLED) — alan boş kalır, uç
+            // adıyla reddeder.
             fields: [
-                ['fluid', 'Line Fluid', 'water', WH_FLUIDS, 'panel.feed.fLineFluid'],
-                ['line_length_m', 'Line Length (m)', 20, 0.5, 'panel.feed.fLineLength'],
-                ['line_id_mm', 'Line Inner Diameter (mm)', 25, 1, 'panel.feed.fLineId'],
-                ['wall_thickness_mm', 'Wall Thickness (mm)', 2, 0.1, 'common.f.wallThicknessMm'],
-                ['working_pressure_bar', 'Working Pressure (bar)', 20, 1, 'panel.feed.fWorkingPressure'],
+                ['fluid', 'Line Fluid', 'water', WH_FLUIDS, 'panel.feed.fLineFluid', 'panel.feed.help.water_hammer.fluid'],
+                ['line_length_m', 'Line Length (m)', '', 0.5, 'panel.feed.fLineLength', 'panel.feed.help.water_hammer.line_length_m'],
+                ['line_id_mm', 'Line Inner Diameter (mm)', '', 1, 'panel.feed.fLineId', 'panel.feed.help.water_hammer.line_id_mm'],
+                ['wall_thickness_mm', 'Wall Thickness (mm)', '', 0.1, 'common.f.wallThicknessMm', 'panel.feed.help.water_hammer.wall_thickness_mm'],
+                ['working_pressure_bar', 'Working Pressure (bar)', '', 1, 'panel.feed.fWorkingPressure', 'panel.feed.help.water_hammer.working_pressure_bar'],
                 // ÖH D22 / OH-D18-09 — ÇALIŞMA BASINCININ REFERANS DÜZLEMİ.
                 // D18'de (termo P4B4-09) modül bu sayıyı iki ZIT sözleşmeyle
                 // kullandığı için kapı kondu: düzlem verilmezse modül İKİ
@@ -610,21 +742,82 @@
                 // aynıysa yayımlanır, ayrışırsa 400 gelir ve kullanıcı bu
                 // alandan düzlemi seçerek hükmü kazanır.
                 ['working_pressure_reference', 'Working Pressure Reference', '',
-                 WH_PRESSURE_REFS, 'panel.feed.fWorkingPressureRef'],
-                ['mdot_kg_s', 'Mass Flow (kg/s)', 5, 0.1, 'panel.feed.fMassFlow'],
-                ['valve_closure_time_ms', 'Valve Closure Time (ms)', 50, 1, 'panel.feed.fValveTime'],
-                ['pipe_material', 'Pipe Material', 'ss_304', PIPE_MATERIALS, 'panel.feed.fPipeMaterial'],
+                 WH_PRESSURE_REFS, 'panel.feed.fWorkingPressureRef', 'panel.feed.help.water_hammer.working_pressure_reference'],
+                ['mdot_kg_s', 'Mass Flow (kg/s)', '', 0.1, 'panel.feed.fMassFlow', 'panel.feed.help.water_hammer.mdot_kg_s'],
+                ['valve_closure_time_ms', 'Valve Closure Time (ms)', '', 1, 'panel.feed.fValveTime', 'panel.feed.help.water_hammer.valve_closure_time_ms'],
+                ['pipe_material', 'Pipe Material', 'ss_304', PIPE_MATERIALS, 'panel.feed.fPipeMaterial', 'panel.feed.help.water_hammer.pipe_material'],
             ],
             suggest: function (m) {
                 const sug = {};
-                if (Number.isFinite(m.chamber_pressure)) sug.working_pressure_bar = Number(m.chamber_pressure.toPrecision(4));
-                let mdotOx = m.mdot_ox;
-                if (!Number.isFinite(mdotOx)) mdotOx = m.oxidizer_flow;
-                if (Number.isFinite(mdotOx) && mdotOx > 0) sug.mdot_kg_s = Number(mdotOx.toPrecision(4));
+                // Sıvı: motorun KENDİ oksitleyici hattı (vananın sonunda,
+                // pompa çıkışında; motorun su koçu bloğu da bu basıncı
+                // kullanır — ``inlet_pressure_basis``).
+                const hat = yolOku(m, 'detailed_feed_system.valve_feedline.oxidizer_line');
+                if (hat && typeof hat === 'object') {
+                    tohumSecim(sug, 'fluid', metinOku(hat, 'water_hammer_fluid_key'), WH_FLUIDS);
+                    tohumSayi(sug, 'line_length_m', hat, 'line.inputs.line_length_m');
+                    const d = sayiOku(hat, 'line.inputs.line_id_m');
+                    if (d !== undefined) sug.line_id_mm = d * 1000;            // m → mm
+                    tohumSayi(sug, 'working_pressure_bar', hat, 'inlet_pressure_bar');
+                    tohumSayi(sug, 'mdot_kg_s', hat, 'line.inputs.mass_flow_kg_s');
+                    const alasim = metinOku(hat, 'pipe_materials.structural_key');
+                    if (alasim) sug.pipe_material = alasim;
+                    return sug;
+                }
+                // Hibrit: motor besleme HATTI çözmüyor (``feed_water_hammer``
+                // NOT_MODELLED: boy, çap, cidar, kapanma yok). Karşılığı olan
+                // dördü: oksitleyici kimliği, oksitleyici debisi, enjektör
+                // devresinin besleme basıncı P1 (= hattın vana ucundaki
+                // basınç; motor hat kaybı çözmüyor) ve — kullanıcı hibrit
+                // sayfasında verdiyse — chug döngüsünün hat boyu / iç çapı.
+                tohumSecim(sug, 'fluid', metinOku(m, 'combustion_analysis.inputs.oxidizer_type'), WH_FLUIDS);
+                const mdOx = sayiOku(m, 'mdot_ox');
+                if (mdOx !== undefined && mdOx > 0) sug.mdot_kg_s = mdOx;
+                tohumSayi(sug, 'working_pressure_bar', m, 'injector_design.feed_pressure_bar');
+                const fl = yolOku(m, 'combustion_stability.chug_loop.feed_line');
+                if (fl && typeof fl === 'object') {
+                    tohumSayi(sug, 'line_length_m', fl, 'line_length_m');
+                    tohumSayi(sug, 'line_id_mm', fl, 'line_inner_diameter_mm');
+                }
+                // Katı: sıvı besleme hattı yok — hiçbir alan doldurulmaz.
                 return sug;
             },
         },
     ];
+
+    // ------------------------------------------------------------------
+    // V301/PANEL-SAYI — motor sonucundan YOL ile okuma (tek sözleşme):
+    // yalnız sonlu sayı / dolu dize döner; sayı yuvarlanmaz, uydurulmaz.
+    // ------------------------------------------------------------------
+    function yolOku(o, yol) {
+        let v = o;
+        const parca = String(yol).split('.');
+        for (let i = 0; i < parca.length; i++) {
+            if (v === null || typeof v !== 'object') return undefined;
+            v = v[parca[i]];
+        }
+        return v;
+    }
+    function sayiOku(o, yol) {
+        const v = yolOku(o, yol);
+        return (typeof v === 'number' && Number.isFinite(v)) ? v : undefined;
+    }
+    function metinOku(o, yol) {
+        const v = yolOku(o, yol);
+        return (typeof v === 'string' && v !== '') ? v : undefined;
+    }
+    function tohumSayi(sug, alan, o, yol) {
+        const v = sayiOku(o, yol);
+        if (v !== undefined) sug[alan] = v;
+    }
+    // Seçim alanı: motorun değeri listede VARSA (büyük/küçük harf duyarsız).
+    function tohumSecim(sug, alan, deger, secenekler) {
+        if (typeof deger !== 'string' || deger === '') return;
+        const k = deger.toLowerCase();
+        for (let i = 0; i < secenekler.length; i++) {
+            if (String(secenekler[i][0]).toLowerCase() === k) { sug[alan] = secenekler[i][0]; return; }
+        }
+    }
 
     // ------------------------------------------------------------------
     // Form yardımcıları
@@ -637,8 +830,18 @@
         return '<label' + (key ? ' data-i18n="' + key + '"' : '') + '>' + T(key, text) + '</label>';
     }
 
+    // v3.0.1 N-girdi-1: 6. eleman alanın ipucu anahtarı (TABS'ta LİTERAL);
+    // işaretleme ortak bileşenden (field_help.js → HRMAHelp), yoksa basılmaz.
+    function helpHtml(key) {
+        if (!key || !window.HRMAHelp || typeof window.HRMAHelp.html !== 'function') return '';
+        return window.HRMAHelp.html(key, T(key, ''));
+    }
+
     function fieldHtml(tabKey, f) {
         const fid = f[0], label = f[1], def = f[2], step = f[3], labelKey = f[4];
+        // Etiket + ipucu tek satırda (güvertenin `.ad-field-head` başlığı).
+        const head = '<div class="ad-field-head">' + labelHtml(labelKey, label)
+            + helpHtml(f[5]) + '</div>';
         const id = fieldDom(tabKey, fid);
         if (Array.isArray(step)) {
             const opts = step.map(function (o) {
@@ -646,10 +849,10 @@
                     + (o[2] ? ' data-i18n="' + o[2] + '"' : '')
                     + '>' + T(o[2], o[1]) + '</option>';
             }).join('');
-            return '<div class="form-group">' + labelHtml(labelKey, label)
+            return '<div class="form-group">' + head
                 + '<select id="' + id + '" data-field="' + fid + '">' + opts + '</select></div>';
         }
-        return '<div class="form-group">' + labelHtml(labelKey, label)
+        return '<div class="form-group">' + head
             + '<input type="number" id="' + id + '" data-field="' + fid + '" value="'
             + def + '" step="' + step + '"></div>';
     }
@@ -665,7 +868,12 @@
         return payload;
     }
 
-    // Motor sonucundan önerileri (dirty olmayan alanlara) uygula
+    // Motor sonucundan önerileri (dirty olmayan alanlara) uygula.
+    // V301/PANEL-SAYI: (1) seçim alanı yalnız listede VAR olan değere
+    // çekilir (yoksa dokunulmaz — tarayıcı boş seçime düşmesin); (2) önceki
+    // hesaptan TOHUMLANMIŞ ama yeni sonuçta karşılığı kalmayan sayı alanı
+    // boşaltılır — ekrandaki her sayı EN SON motor sonucundandır ya da
+    // kullanıcının kendi girdisidir (dirty alana hiç dokunulmaz).
     function applyTabSuggestions(tab, paneEl) {
         if (typeof tab.suggest !== 'function') return;
         const r = window.currentResults;
@@ -678,9 +886,117 @@
             const el = document.getElementById(fieldDom(tab.key, k));
             if (!el || el.dataset.dirty === '1') return;
             const v = sug[k];
-            if (el.tagName === 'SELECT') { if (v != null) el.value = String(v); return; }
-            if (Number.isFinite(v)) el.value = v;
+            if (el.tagName === 'SELECT') {
+                if (v == null) return;
+                const var_ = Array.prototype.some.call(el.options, function (o) {
+                    return o.value === String(v);
+                });
+                if (var_) el.value = String(v);
+                return;
+            }
+            if (Number.isFinite(v)) { el.value = v; el.dataset.seeded = '1'; }
         });
+        if (!paneEl) return;
+        paneEl.querySelectorAll('input[data-field]').forEach(function (el) {
+            const k = el.getAttribute('data-field');
+            if (el.dataset.dirty === '1' || el.dataset.seeded !== '1') return;
+            if (!Object.prototype.hasOwnProperty.call(sug, k)) {
+                el.value = '';
+                delete el.dataset.seeded;
+            }
+        });
+    }
+
+    // Her hesaptan sonra (güverte fromResults kancası) bütün sekmeler
+    // yeniden tohumlanır — kullanıcı alt sekmeye tıklamasa da.
+    function applyAllTabSuggestions() {
+        const root = document.getElementById('ad_root_' + PANEL_ID);
+        if (!root) return;
+        TABS.forEach(function (tab) {
+            const pane = root.querySelector('.feed-pane[data-pane="' + tab.key + '"]');
+            if (pane) applyTabSuggestions(tab, pane);
+        });
+    }
+
+    /* V301/PANEL-SAYI (28 Eki) — UCUN BEYANLI VARSAYILANLARI EKRANDA.
+       Uç, boş bırakılan isteğe bağlı alana uyguladığı değeri yanıtın
+       ``defaults_applied`` künyesiyle ADIYLA söyler (app.py
+       ``_besleme_varsayilan_kunyesi``). Panel sayı ÜRETMEZ: değeri uçtan
+       aynen alır, yalnız ondalık ayırıcıyı dile göre basar; gerekçe
+       sözlükten (EN + TR), sözlükte yoksa ucun kendi cümlesi. */
+    // Gerekçe anahtarları LİTERAL (sözlük bekçisi önek birleştirmesini
+    // göremez); sözlükte olmayan alan ucun kendi cümlesiyle basılır.
+    const VARSAYILAN_GEREKCE = {
+        g_eff: 'panel.feed.defaultBasis.g_eff',
+        baffle_depth_ratio: 'panel.feed.defaultBasis.baffle_depth_ratio',
+        mode: 'panel.feed.defaultBasis.mode',
+        gas: 'panel.feed.defaultBasis.gas',
+        initial_temperature: 'panel.feed.defaultBasis.initial_temperature',
+        storage_pressure: 'panel.feed.defaultBasis.storage_pressure',
+        regulator_margin: 'panel.feed.defaultBasis.regulator_margin',
+        collapse_factor: 'panel.feed.defaultBasis.collapse_factor',
+        expulsion_efficiency: 'panel.feed.defaultBasis.expulsion_efficiency',
+        polytropic_n: 'panel.feed.defaultBasis.polytropic_n',
+        fluid: 'panel.feed.defaultBasis.fluid',
+        pipe_material: 'panel.feed.defaultBasis.pipe_material',
+        valve_closure_time_ms: 'panel.feed.defaultBasis.valve_closure_time_ms',
+    };
+    // Formda alanı olmayan, uçta uygulanan büyüklüğün etiketi.
+    const EK_ETIKET = {
+        expulsion_efficiency: ['panel.feed.fExpulsion', 'Expulsion efficiency'],
+    };
+
+    function defaultsAppliedHtml(data, tabKey) {
+        const kunye = data && data.defaults_applied;
+        if (!Array.isArray(kunye) || !kunye.length) return '';
+        const tab = TABS.filter(function (t) { return t.key === tabKey; })[0];
+        const satirlar = kunye.map(function (k) {
+            const ad = String((k && k.field) || '');
+            const f = tab && tab.fields.filter(function (x) { return x[0] === ad; })[0];
+            const ek = EK_ETIKET[ad];
+            const etiket = f ? T(f[4], f[1]) : (ek ? T(ek[0], ek[1]) : ad);
+            let deger;
+            if (k.value === null || k.value === undefined) {
+                deger = T('panel.feed.defaultNoNumber', 'no number');
+            } else if (typeof k.value === 'number') {
+                deger = U.num(k.value) + (k.unit ? ' ' + k.unit : '');
+            } else {
+                const sec = (f && Array.isArray(f[3]))
+                    ? f[3].filter(function (o) { return o[0] === k.value; })[0] : null;
+                deger = sec ? T(sec[2], sec[1]) : String(k.value);
+            }
+            const anahtar = VARSAYILAN_GEREKCE[ad];
+            const neden = anahtar ? T(anahtar, String(k.basis || ''))
+                                  : String(k.message || k.basis || '');
+            return etiket + ' = ' + deger + ' — ' + neden;
+        });
+        return U.listBlock(T('panel.structural.defaultsApplied',
+            'Assumed on your behalf - these were NOT supplied'), satirlar, 'warn');
+    }
+
+    /* V301/PANEL-SAYI — RET METNİ EKRAN DİLİNDE.
+       Alanlar sayısız doğduğu için boş zorunlu alanın adlı reddi artık
+       olağan yol; ölçüldü: TR ekranda "HATA: 'propellant_volume' is
+       required (m^3)" basılıyordu (makine adı + İngilizce). Uç cümlesi
+       "'<alan>' is required" kalıbındaysa alanın EKRANDAKİ etiketiyle
+       sözlükten basılır; başka ret cümlesi çeviri kanalından (serverText,
+       tanınmazsa aynen). Makine kodlu gövdede (ör. invalid_pipe_geometry)
+       okunur cümle ``message``tadır. */
+    function retMetni(tab, data, httpKod) {
+        const govde = (data && typeof data === 'object') ? data : {};
+        const ham = String(govde.error || ('HTTP ' + httpKod));
+        const zorunlu = /^'(\w+)' is required/.exec(ham);
+        if (zorunlu) {
+            const f = tab.fields.filter(function (x) { return x[0] === zorunlu[1]; })[0];
+            const etiket = f ? T(f[4], f[1]) : zorunlu[1];
+            return U.tf('panel.feed.requiredEmpty', { field: etiket },
+                'Required field is empty: {field}. The endpoint rejected the '
+                + 'request; nothing was computed.');
+        }
+        const cumle = (/^[a-z][a-z0-9_]*$/.test(ham) && govde.message)
+            ? String(govde.message) : ham;
+        return (window.I18N && typeof window.I18N.serverText === 'function')
+            ? window.I18N.serverText(cumle) : cumle;
     }
 
     // ------------------------------------------------------------------
@@ -703,7 +1019,7 @@
             let data = null;
             try { data = await resp.json(); } catch (e) { data = null; }
             if (!resp.ok || !data || data.status === 'error') {
-                throw new Error((data && data.error) || ('HTTP ' + resp.status));
+                throw new Error(retMetni(tab, data, resp.status));
             }
             U.purgePlots(result);   // eski grafiklerin resize dinleyicileri sızmasın
             result.innerHTML = '';
@@ -789,7 +1105,13 @@
         if (st) st.style.display = 'none';
         // Bölüm başlığındaki tek-endpoint ipucunu üç endpoint özetiyle değiştir
         const hint = sec.querySelector('h3 span');
-        if (hint) hint.textContent = 'slosh · pressurant · water-hammer';
+        // T-ÇAPA-C2 (BELGE §8.1-3): TR ekranda İngilizce kalıyordu; sözlükten
+        // (data-i18n: dil değişiminde I18N.apply yeniden yazar).
+        if (hint) {
+            hint.setAttribute('data-i18n', 'panel.feed.sectionHint');
+            hint.textContent = T('panel.feed.sectionHint',
+                                 'slosh · pressurant · water hammer');
+        }
         // Dil değişince sekme çıktıları saklanan yanıtla yeniden çizilir
         if (window.I18N && window.I18N.onChange) window.I18N.onChange(rerenderTabs);
 
@@ -885,7 +1207,12 @@
         fields: [],
         // Öneriler sekme bazında uygulanır (applyTabSuggestions); dock
         // alan-öneri mekanizması bu panelde kullanılmaz.
-        fromResults: function () { return {}; },
+        // V301/PANEL-SAYI: güverte her hesaptan sonra bu kancayı çağırır;
+        // sekmeler burada yeniden tohumlanır (dock alanı yok: {} döner).
+        fromResults: function () {
+            try { applyAllTabSuggestions(); } catch (e) { /* tohum yoksa alan boş kalır */ }
+            return {};
+        },
         render: function () { mountFeedTools(); },
     });
 
@@ -907,5 +1234,9 @@
         _whKind: whKind,
         _tabs: TABS,
         _mountFeedTools: mountFeedTools,
+        _defaultsAppliedHtml: defaultsAppliedHtml,
+        _retMetni: retMetni,
+        _duzyaziBlok: duzyaziBlok,
+        _applyAllTabSuggestions: applyAllTabSuggestions,
     };
 })();

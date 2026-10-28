@@ -358,7 +358,18 @@ class TestF54KanalDevresi:
         # takma adın YERİNE geçmedi, YANINA çıktı (üst katmanda ayrı ad + ayrı
         # künye). Takma ad hâlâ bulk_chain'i taşır, dolayısıyla bu KİLİT
         # AYNEN GEÇERLİDİR ve kaldırılmaz; yalnız ters yön borç imi söküldü.
-        assert bulk['coolant_exit_temperature_K'] == \
+        # L-B (v3.0.1, SV-05 karar 5) — REÇETENİN (2) HÂLİ UYGULANDI:
+        # kullanıcıya tek "coolant exit temperature" yayımlanır, marş
+        # koştuysa marşınki. Takma adın YENİ kaynağı istasyon marşıdır; toplu
+        # kestirim temeli yazılı ayrı tanı alanına indi
+        # (coolant_exit_temperature_bulk_estimate_K). Kimlik iki yönde de
+        # kilitli: takma ad = marş, tanı alanı = bulk_chain.
+        assert march['coolant_exit_temperature_K'] == \
+            pytest.approx(tp['coolant_exit_temperature'], rel=1e-12)
+        assert bulk['coolant_exit_temperature_K'] == pytest.approx(
+            tp['coolant_exit_temperature_bulk_estimate_K'], rel=1e-12)
+        assert 'station march' in tp['coolant_exit_temperature_basis']
+        assert march['coolant_exit_temperature_K'] == \
             pytest.approx(tp['coolant_exit_temperature'], rel=1e-12), (
             'takma ad ⟷ bulk_chain kimliği koptu (üst katman %r, bulk %r).\n'
             'BU BEKÇİ BİLİNÇLİ KİLİTTİR (ÖH defteri P15B1-06 / ÖK-14): '
@@ -378,8 +389,12 @@ class TestF54KanalDevresi:
             'birbirini tutuyor.'
             % (tp['coolant_exit_temperature'],
                bulk['coolant_exit_temperature_K']))
-        assert bulk['temperature_rise_K'] == \
-            pytest.approx(tp['temperature_rise'], rel=1e-12)
+        # Sıcaklık artışı çıkışla çifttir (çıkış = giriş + artış): o da marşa
+        # geçti, toplu artış tanı alanında.
+        assert march['temperature_rise_K'] == \
+            pytest.approx(tp['temperature_rise'], rel=1e-9)
+        assert bulk['temperature_rise_K'] == pytest.approx(
+            tp['temperature_rise_bulk_estimate_K'], rel=1e-12)
         assert bulk['pressure_drop_bar'] == \
             pytest.approx(tp['pressure_drop'], rel=1e-12)
         sm = tp['station_march']
@@ -410,11 +425,33 @@ class TestF54KanalDevresi:
     #: (Dördüncü takma ad ``temperature_rise``'ın marş karşılığı ayrı bir
     #: adla değil ``coolant_exit_temperature_K − inlet`` olarak türer; o
     #: yüzden doğrudan eşleşen üçlü kilitlenir.)
+    #: L-B (v3.0.1, SV-05 karar 5): ``coolant_exit_temperature`` bu listeden
+    #: ÇIKTI — takma ad artık marşı taşır (bkz. yukarıdaki kimlik ve
+    #: ``test_cikis_takma_adi_marsa_bagli``). Akı ve ΔP hâlâ bulk_chain'dir.
     TAKMA_AD_CIFTLERI = (
         ('heat_flux', 'peak_heat_flux_MW_m2'),
-        ('coolant_exit_temperature', 'coolant_exit_temperature_K'),
         ('pressure_drop', 'coolant_pressure_drop_bar'),
     )
+
+    def test_cikis_takma_adi_marsa_bagli(self, gg_zarf):
+        """L-B (v3.0.1, SV-05 karar 5): tek yayımlanan çıkış sıcaklığı marşınki.
+
+        Ters mutasyon (L-B RAPOR.md): ``_resolve_wall_temperature`` içinde
+        takma ad ataması kaldırılırsa burası kırmızıdır (toplu 1283 K ⟷
+        marş 459 K mertebesi).
+        """
+        _, res = gg_zarf
+        tp = res['thermal_protection']
+        cs = res['cooling_system']
+        sm = tp['station_march']
+        assert tp['coolant_exit_temperature'] == pytest.approx(
+            sm['coolant_exit_temperature_K'], rel=1e-12)
+        assert cs['coolant_exit_temperature'] == pytest.approx(
+            sm['coolant_exit_temperature_K'], rel=1e-12)
+        assert cs['coolant_exit_temperature_bulk_estimate_K'] == \
+            pytest.approx(tp['channel_circuit_reconciliation']['bulk_chain'][
+                'coolant_exit_temperature_K'], rel=1e-12)
+        assert 'DIAGNOSTIC' in cs['coolant_exit_temperature_bulk_estimate_basis']
 
     @staticmethod
     def _ust_katman_skalerleri(tp):

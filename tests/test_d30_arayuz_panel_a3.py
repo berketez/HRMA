@@ -332,31 +332,40 @@ class TestP12bB2_24YedekKatalogSapmasi:
 
 # ===================================================================== B3-04
 class TestP12bB3_04RozetRenkleri:
-    """Iki basarisizlik yolu tanimsiz CSS sinifi kullaniyordu."""
+    """ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1).
+
+    P12bB3-04 rozet ayarlayıcısının kullandığı iki tanımsız CSS sınıfını
+    (``status-offline`` / ``status-error``) onarmıştı. ÖLÇÜLDÜ
+    (docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/gorsel_once.json): rozet
+    her makinede "Offline" diyordu ve hiçbir sayının kaynağı değildi;
+    rozet, ayarlayıcıları ve renk ailesi SÖKÜLDÜ. Bekçi artık (1) sökümün
+    tam olduğunu (yarım kalan sınıf/çağrı yok), (2) yerine gelen veri
+    kaynağı satırının biçiminin tanımlı olduğunu ve (3) satırda renk
+    hükmünün YALNIZ ölçülmüş bir koşula (oda sıcaklığı termo tavanının
+    üstünde) bağlı olduğunu ölçer.
+    """
 
     def test_kullanilan_her_sinif_tanimli(self, advanced):
-        css = advanced + oku('hrma', 'static', 'css', 'theme.css')
-        siniflar = sorted(set(re.findall(
-            r"set(?:Nist|Cea)Status\([^;]*?'(status-[a-z-]+)'\s*\)", advanced)))
-        assert siniflar, 'rozet ayarlayici cagrisi bulunamadi'
-        eksik = [c for c in siniflar
-                 if not re.search(r'\.%s\b\s*(?:,|\{)' % c, css)]
-        assert not eksik, 'tanimsiz rozet sinifi: %s' % eksik
+        assert not re.search(r"set(?:Nist|Cea)Status\(", advanced)
+        for sinif in ('data-source-line', 'ds-label', 'ds-cite', 'ds-flag'):
+            assert re.search(r'\.(?:data-source-line\s+\.)?%s\s*\{' % sinif,
+                             advanced), sinif
 
     @pytest.mark.parametrize('sinif', ['status-offline', 'status-error'])
     def test_iki_tema_da_kapsiyor(self, advanced, sinif):
-        assert re.search(r'\.%s\s*\{' % sinif, advanced), (
-            'acik tema karsiligi yok: ' + sinif)
-        assert re.search(r'\.%s\s*\{' % sinif,
-                         oku('hrma', 'static', 'css', 'theme.css')), (
-            'koyu tema karsiligi yok: ' + sinif)
+        # Rozet ailesi şablondan tamamen çıktı: ne kullanılıyor ne tanımlı.
+        assert sinif not in advanced, sinif
 
     def test_renk_siddeti_metni_izliyor(self, advanced):
-        # baglanti hatasi kirmizi ailededir (disconnected ile ayni)
-        kirmizi = re.search(r'\.status-error \{ background: (#\w+);', advanced)
-        kesik = re.search(r'\.status-disconnected \{ background: (#\w+);',
-                          advanced)
-        assert kirmizi and kesik and kirmizi.group(1) == kesik.group(1)
+        # Satırda tek renk vurgusu (ds-flag) yalnız ölçülmüş bir koşulda
+        # basılır: oda sıcaklığı mekanizmanın termo tavanının üstünde.
+        bloklar = re.findall(r"\{\s*\n?[^{}]*class=\"ds-flag\"[^{}]*\}",
+                             advanced)
+        kosullar = re.findall(r"if \(([^)]*)\) \{\s*\n\s*[^\n]*ds-flag",
+                              advanced)
+        assert kosullar, bloklar
+        for k in kosullar:
+            assert 'above_ceiling === true' in k, k
 
 
 # ===================================================================== B3-07

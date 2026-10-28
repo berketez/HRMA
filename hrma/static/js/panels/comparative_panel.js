@@ -197,12 +197,20 @@
     // ------------------------------------------------------------------
     // Özel blok (ad girişi + snapshot listesi + Compare butonu)
     // ------------------------------------------------------------------
+    // v3.0.1 N-girdi-1: girdinin "?" ipucu — ortak bileşen (field_help.js →
+    // HRMAHelp); anahtar çağrıda LİTERAL. Bileşen yoksa basılmaz.
+    function helpHtml(key) {
+        if (!window.HRMAHelp || typeof window.HRMAHelp.html !== 'function') return '';
+        return window.HRMAHelp.html(key, T(key, ''));
+    }
+
     function customFormHtml() {
         return `<div id="cmp_custom" style="margin:10px 0;">
             <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
                 <div class="form-group" style="flex:1; min-width:180px;">
-                    <label data-i18n="panel.comparative.fName">${
-                        T('panel.comparative.fName', 'Configuration name')}</label>
+                    <div class="ad-field-head"><label data-i18n="panel.comparative.fName">${
+                        T('panel.comparative.fName', 'Configuration name')}</label>${
+                        helpHtml('panel.comparative.help.name')}</div>
                     <input type="text" id="cmp_name" maxlength="40"
                         data-i18n-placeholder="panel.comparative.namePlaceholder"
                         placeholder="${T('panel.comparative.namePlaceholder',
@@ -306,13 +314,15 @@
                 T('panel.comparative.secOverlay', 'Overlay two designs')}</h4>
             <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
                 <div class="form-group">
-                    <label data-i18n="panel.comparative.overlayA">${
-                        T('panel.comparative.overlayA', 'Design A')}</label>
+                    <div class="ad-field-head"><label data-i18n="panel.comparative.overlayA">${
+                        T('panel.comparative.overlayA', 'Design A')}</label>${
+                        helpHtml('panel.comparative.help.overlayA')}</div>
                     <select id="cmp_ov_a"></select>
                 </div>
                 <div class="form-group">
-                    <label data-i18n="panel.comparative.overlayB">${
-                        T('panel.comparative.overlayB', 'Design B')}</label>
+                    <div class="ad-field-head"><label data-i18n="panel.comparative.overlayB">${
+                        T('panel.comparative.overlayB', 'Design B')}</label>${
+                        helpHtml('panel.comparative.help.overlayB')}</div>
                     <select id="cmp_ov_b"></select>
                 </div>
                 <div class="form-group">

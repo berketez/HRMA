@@ -99,17 +99,16 @@ CLIENT_ONLY = {
 #                             yazılıyordu (kendini doğrulayan döngü)
 DECLARED_UNMODELLED = {
     'hybrid': {
-        'annular_gap': ('koaksiyel/pintle anulus araligi - cozucu bunu ic ve '
-                        'dis captan TURETIR (D_avg ve hedef alandan), girdi '
-                        'olarak alinsa cozumle celisirdi'),
-        'skip_distance': ('pintle skip mesafesi - yayimlanmis korelasyon yok; '
-                          'uydurma katsayi yasak (BORC)'),
+        # V301/E1 (Ayberk tur 1) — bu listenin son üç kalemi KAPANDI:
+        #   annular_gap        -> isteğe bağlı ezme; devre çözücüsünün pintle
+        #                         tutarlılık kapısına girer (boş = türetilir)
+        #   skip_distance      -> isteğe bağlı L_s (boş = L_s/D_p = 1, HRMA
+        #                         seçimi); geometri/çizim ölçüsü, beyanlı
+        #   pintle_spray_angle -> girdi KALDIRILDI (sprey yarı açısı TMR'den
+        #                         çıktıdır, sonuç tablosunda)
         # 'hole_pattern' 14 Agu 2026'da BAGLANDI (form->istek->400
         # dogrulama->yanit; test_hole_pattern_baglama.py) ve bu listeden
         # cikarildi - bekci tam da bunu yakaladi (rot testi, 15 Agu).
-        'pintle_spray_angle': ('pintle sprey acisi - cozucu bunu toplam '
-                               'momentum oranindan HESAPLAR; sonuctaki degere '
-                               'bakiniz'),
     },
     'solid': {},
     'liquid': {},

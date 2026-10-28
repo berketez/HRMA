@@ -13,6 +13,18 @@ import math
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
+
+@pytest.fixture
+def cea_kapali(monkeypatch):
+    """V301/N-CEA-2: NASA CEA kapalı — katı motor katalog (tek basınçlı)
+    termokimyasına BEYANLA döner. Bu dosyadaki kayıt/katalog yolu bekçileri
+    öncüllerini (motor termokimyası = katalog kaydı) bu yolda korur; CEA
+    yolu tests/test_v301_n_cea2.py'de."""
+    from hrma.engines import cea_bridge
+    monkeypatch.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
+
 from hrma.engines.solid_rocket_engine import (
     SolidRocketEngine, _condensed_mass_fraction, _ideal_single_phase_c_star)
 
@@ -23,13 +35,21 @@ KATI_YAKITLAR = ('apcp', 'double_base', 'knsu', 'sugar', 'kndx', 'knsb',
 
 def _kati(yakit):
     m = SolidRocketEngine(propellant_type=yakit, grain_type='bates',
-                          chamber_pressure=40.0, chamber_diameter=100.0,
-                          grain_length=500.0, core_diameter=30.0)
+                          chamber_pressure=40.0,
+                          # v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+                          # (A_p/A_t 0,947); K-A kapısından beri 422. Konu port değil: geometri
+                          # tek tanım SOLID_DEFAULT_GEOMETRY_MM'den (kopyalanmaz).
+                          **SOLID_DEFAULT_GEOMETRY_MM)
     return m, m.calculate_performance()
 
 
+@pytest.mark.usefixtures('cea_kapali')
 class TestP2B101EgzozHiziTekKaynak:
-    """Katı motorun yayımladığı egzoz hızı, itki zincirinin c*'ına bağlıdır."""
+    """Katı motorun yayımladığı egzoz hızı, itki zincirinin c*'ına bağlıdır.
+
+    V301/N-CEA-2: bu sınıf KAYIT yolunun (tek-γ, kaydın c* açığı) egzoz hızı
+    ayrıştırmasını denetler ve CEA kapalı koşar; CEA yolunda çıkış durumu
+    CEA'nın kendisidir (tests/test_v301_n_cea2.py)."""
 
     @pytest.mark.parametrize('yakit', KATI_YAKITLAR)
     def test_panel_hizi_ile_irtifa_hizi_arasinda_yalniz_nozul_verimi_kalir(
@@ -51,8 +71,11 @@ class TestP2B101EgzozHiziTekKaynak:
     # (-%5,93 / -%5,75) taşıyor. Bu yüzden aşağıdaki DAHA SIKI bekçinin
     # listesine EKLENDİLER; sıradaki (tek-faz) bekçiden çıkarıldılar.
     # Gevşetme değil sıkılaştırma: oran < 0,95 ve hız < gaz-faz hızı.
-    @pytest.mark.parametrize('yakit', ('knsu', 'sugar', 'black_powder',
-                                       'kndx', 'knsb'))
+    # V301/N-CEA-2 K5: 'black_powder' ÇIKARILDI — kayıt artık nominal kartın
+    # CEA dörtlüsü (M = 1/n); c*'ı kendi Eq. 3-32 idealinin %0,07 içinde,
+    # yani iki-faz "açığı" beyan eden bir kayıt değil (eski açık kaynaksız
+    # c* 945,3 ile M 33,21'in uyumsuzluğuydu).
+    @pytest.mark.parametrize('yakit', ('knsu', 'sugar', 'kndx', 'knsb'))
     def test_iki_faz_acigi_beyan_eden_kayitta_hiz_duzeltilir(self, yakit):
         """c*'ı tek fazlı idealin ALTINDA olan kayıtta hız o açıyı taşır."""
         m, res = _kati(yakit)
@@ -87,8 +110,7 @@ class TestP2B101EgzozHiziTekKaynak:
             from tests.test_kitap_p1b import CEA_DENGE_IDEAL_TEK_FAZ_CSTAR_M_S
             m = SolidRocketEngine(
                 propellant_type=yakit, grain_type='bates',
-                chamber_pressure=40.0, chamber_diameter=100.0,
-                grain_length=500.0, core_diameter=30.0,
+                chamber_pressure=40.0, **SOLID_DEFAULT_GEOMETRY_MM,
                 overrides={'char_velocity': CEA_DENGE_IDEAL_TEK_FAZ_CSTAR_M_S})
             res = m.calculate_performance()
         else:
@@ -129,8 +151,8 @@ class TestP2B101EgzozHiziTekKaynak:
     def test_c_star_cozulemezse_hiz_yayimlanmaz(self, monkeypatch):
         """FAIL-CLOSED: oran kurulamıyorsa sayı uydurulmaz."""
         m = SolidRocketEngine(propellant_type='knsu', grain_type='bates',
-                              chamber_pressure=40.0, chamber_diameter=100.0,
-                              grain_length=500.0, core_diameter=30.0)
+                              chamber_pressure=40.0,
+                              **SOLID_DEFAULT_GEOMETRY_MM)
         monkeypatch.setattr(
             'hrma.engines.solid_rocket_engine._ideal_single_phase_c_star',
             lambda *a, **k: None)

@@ -306,23 +306,26 @@
     }
 
     const PERF_FIELDS = [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar'],
-            ['optimal_of_ratio', 'Optimal O/F Ratio', 3.5, 0.1, 'common.f.optimalOf'],
-            ['base_isp', 'Base Isp (s)', 300, 5, 'common.f.baseIsp'],
-            ['expansion_ratio', 'Expansion Ratio', 16, 0.5, 'common.f.expansionRatio'],
-            ['throat_area', 'Throat Area (m²)', 0.001, 0.0001, 'common.f.throatAreaM2'],
-            ['nozzle_length', 'Nozzle Length (m)', 0.1, 0.01, 'common.f.nozzleLengthM'],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM'],
-            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
-            ['base_heat_flux', 'Base Heat Flux (W/m²)', 2000000, 100000, 'common.f.baseHeatFlux'],
-            ['critical_heat_flux', 'Critical Heat Flux (MW/m²)', 4.0, 0.5, 'common.f.criticalHeatFlux'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar', 'panel.performance.help.chamber_pressure'],
+            // V301/H-PANEL (NK-73): alan TASARIM noktasının O/F'sidir (yardım
+            // metni ve tohum: motorun of_ratio'su) — etiket "Optimum" diyordu.
+            // Alan kimliği (optimal_of_ratio) uç sözleşmesidir, değişmez.
+            ['optimal_of_ratio', 'Design O/F Ratio', 3.5, 0.1, 'panel.performance.f.designOf', 'panel.performance.help.optimal_of_ratio'],
+            ['base_isp', 'Base Isp (s)', 300, 5, 'common.f.baseIsp', 'panel.performance.help.base_isp'],
+            ['expansion_ratio', 'Expansion Ratio', 16, 0.5, 'common.f.expansionRatio', 'panel.performance.help.expansion_ratio'],
+            ['throat_area', 'Throat Area (m²)', 0.001, 0.0001, 'common.f.throatAreaM2', 'panel.performance.help.throat_area'],
+            ['nozzle_length', 'Nozzle Length (m)', 0.1, 0.01, 'common.f.nozzleLengthM', 'panel.performance.help.nozzle_length'],
+            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM', 'panel.performance.help.chamber_length'],
+            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.performance.help.burn_time'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
+            ['base_heat_flux', 'Base Heat Flux (W/m²)', 2000000, 100000, 'common.f.baseHeatFlux', 'panel.performance.help.base_heat_flux'],
+            ['critical_heat_flux', 'Critical Heat Flux (MW/m²)', 4.0, 0.5, 'common.f.criticalHeatFlux', 'panel.performance.help.critical_heat_flux'],
             // Bartz ısı akısı çözücüsünün gaz hâli girdileri (bulgu 6): bunlar
             // gönderilmediğinde backend 3000 K / gamma 1.2 / 1 kg/s
             // varsayılanlarına düşüyor ve farklı itergaçlar aynı grafiği veriyordu.
-            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 50, 'common.f.chamberTemperatureK'],
-            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen'],
-            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.1, 'common.f.mdotTotal'],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.01, 'common.f.chamberDiameterM'],
+            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 50, 'common.f.chamberTemperatureK', 'panel.performance.help.chamber_temperature'],
+            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen', 'panel.performance.help.gamma'],
+            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.1, 'common.f.mdotTotal', 'panel.performance.help.mdot_total'],
+            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.01, 'common.f.chamberDiameterM', 'panel.performance.help.chamber_diameter'],
     ];
 
     window.AnalysisDock.register({
@@ -345,7 +348,7 @@
         endpoint: ENDPOINT,
         motorTypes: ['solid'],
         fields: [['analysis_type', 'Figure', SOLID_FIGURES[0][0], SOLID_FIGURES,
-                  'panel.performance.figChoice']].concat(
+                  'panel.performance.figChoice', 'panel.performance.help.analysis_type']].concat(
             PERF_FIELDS.filter(function (f) {
                 return SURFACE_ONLY_FIELDS.indexOf(f[0]) === -1;
             })),
@@ -408,6 +411,14 @@
             sug.mdot_total = mdot;
         } else if (thrust !== null && isp !== null && isp > 0) {
             sug.mdot_total = Number((thrust / (isp * 9.80665)).toPrecision(6));
+        }
+        // V301/H-PANEL (NK-73): ıraksak lüle boyu çözücünün yayımladığı
+        // değerden (design_summary.nozzle.divergent_length_mm, kaynak
+        // nozzle_contour.divergent.length); yoksa alan boş kalır (uydurma yok).
+        const noz = ((m.design_summary || {}).nozzle || {});
+        if (typeof noz.divergent_length_mm === 'number'
+                && isFinite(noz.divergent_length_mm) && noz.divergent_length_mm > 0) {
+            sug.nozzle_length = Number((noz.divergent_length_mm / 1000).toPrecision(6));
         }
         // Backend alan (m²) ister; sonuçta çap var → A = π d²/4
         const throatD = geoLength(m, geo, 'throat_diameter', r);

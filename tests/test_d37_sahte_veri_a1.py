@@ -699,16 +699,33 @@ class TestDKesirSayimi:
         kalan = {a: n for a, n in sayim['capT_turevi'].items() if n}
         assert not kalan, 'kapak kesrinden türeyen ölçü kalmış: %s' % kalan
 
+    #: V3.0.5 T-ÇAPA-C1 — ÖDENEN DEVİRLER (bugün CAD-2 kalemleri, ölçüldü:
+    #: desen motor_viz3d.js'te 0 kez). Ödenen kalem sayımda 0'a iner ve
+    #: ADIYLA burada durur; ödenmeyenler tabanla AYNEN kalmalı (sessiz
+    #: artış/azalış yok).
+    ODENEN_DEVIRLER = {
+        'pintle_boyu_25pR_12injT': 'c8734a5ad (V301/CAD-2 kalem 2-3-4: '
+                                   'pintle 3B sahne kanonik geometriden)',
+        'lule_eti_kirpma_25_025dt6': 'c6acfb89b (V301/CAD-2, KABUL K4: '
+                                     'lüle eti tek kuraldan)',
+    }
+
+    def _beklenen(self, taban_sayim):
+        return {ad: (0 if ad in self.ODENEN_DEVIRLER else n)
+                for ad, n in taban_sayim.items()}
+
     def test_ek_kesirler_adiyla_devir_ve_sayi_degismedi(self, sayim, taban):
-        assert sayim['ek_devir'] == taban['sayim']['ek_devir']
+        assert sayim['ek_devir'] == self._beklenen(taban['sayim']['ek_devir'])
 
     def test_denetci_lule_eti_adiyla_devir_ve_sayi_degismedi(self, sayim,
                                                                taban):
         """Ş4: lüle eti yedeği + kırpması tabanda da tek kez vardı, bu
         kulvarda dokunulmadı (DEVİR A6a cm-3-sahne)."""
         assert sayim['ek_devir_denetci'] == \
-            {ad: 1 for ad in KESIR_EK_DEVIR_DENETCI}
-        assert sayim['ek_devir_denetci'] == taban['sayim']['ek_devir_denetci']
+            {ad: (0 if ad in self.ODENEN_DEVIRLER else 1)
+             for ad in KESIR_EK_DEVIR_DENETCI}
+        assert sayim['ek_devir_denetci'] == self._beklenen(
+            taban['sayim']['ek_devir_denetci'])
 
     def test_oh_d27_13_haric_yedekler_yerinde(self, sayim, taban):
         assert sayim['oh_d27_13_haric'] == taban['sayim']['oh_d27_13_haric']

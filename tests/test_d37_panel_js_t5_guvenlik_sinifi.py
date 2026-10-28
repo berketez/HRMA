@@ -110,6 +110,15 @@ run(path.join(staticDir, 'panels', 'safety_panel.js'));
       if (typeof sug[k] === 'number' && isFinite(sug[k])) val = Number(sug[k].toPrecision(6));
       if (typeof val === 'number' && isFinite(val)) govde[k] = val;
     });
+    // V301/PANEL (NK-18): güvertenin runPanel kuralı — form dışı bağlam
+    // (spec.contextFromResults: motorun yapısal hüküm bloğu) alanı EZMEDEN
+    // eklenir; boş bağlam gönderilmez.
+    if (typeof spec.contextFromResults === 'function') {
+      const ctx = spec.contextFromResults(v.results);
+      if (ctx && typeof ctx === 'object') Object.keys(ctx).forEach(function (k) {
+        if (!(k in govde) && ctx[k] !== undefined && ctx[k] !== null) govde[k] = ctx[k];
+      });
+    }
     out.govdeler[ad] = govde;
   });
   Object.keys(girdi.render || {}).forEach(function (ad) {
@@ -171,8 +180,14 @@ def motorlar(client):
         'kndx': _sessiz(client.post, '/calculate_solid', json=kati).get_json(),
         # APCP: aynı örnek geometri, itici kimliği açık alanla (öncelik
         # propellant_type > ön ayar; solid_rocket_engine çözümleyicisi).
+        # V301/PANEL — KURGU DÜZELTİLDİ (main f77564ee5'te de kırmızıydı):
+        # örnek KNDX kaydının ``burn_rate_preset: 'kndx'`` alanı APCP
+        # kimliğiyle KARIŞIK kayıttı; V301/K-C2 (NK-29/NK-70) bunu haklı
+        # olarak 422 ``burn_rate_law_propellant_mismatch`` ile reddediyor.
+        # APCP vakası kendi yanma hızı tablosuyla kurulur; iddialar aynı.
         'apcp': _sessiz(client.post, '/calculate_solid',
-                        json=dict(kati, propellant_type='apcp')).get_json(),
+                        json=dict(kati, propellant_type='apcp',
+                                  burn_rate_preset='apcp')).get_json(),
         'liquid': _sessiz(client.post, '/calculate_liquid', json=dict(
             alanlar(ORNEK_SIVI), max_burn_duration=SIVI_SURE_S)).get_json(),
     }

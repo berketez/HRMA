@@ -921,12 +921,29 @@
     }
 
     //: Sunucu beyanı (basis/gerekçe) — AYNEN basılır, kısaltılmaz.
+    //: V301/DİL (NK-67): ölçüldü — TR arayüzde çevrilmemiş uzun geliştirici
+    //: paragrafları ("This run is INVISCID…", "Effective iteration budget…")
+    //: ve kaynak yolları (`tests/cfd/…py`, `relax_implicit.py`, defter
+    //: kodu) açık metin olarak basılıyordu. Kural: TR'de çeviri kanalından
+    //: geçmeyen beyan ya da (her dilde) kaynak yolu / iç kimlik taşıyan
+    //: beyan KAPALI "teknik ayrıntı" bölümüne iner; metin aynen korunur,
+    //: yarım çeviri yapılmaz.
+    const KOD_IZI = /(\b[\w\-]+\.py\b|\btests\/|\bhrma[\/.][a-z_]|\bP\d+B\d+-\d+\b|\bOH-[A-Z0-9][A-Z0-9\-]*\b)/;
     function basisText(text) {
         if (!text) return '';
-        return '<p data-cfd-basis="1" style="font-family:var(--hd-mono, monospace);'
+        const metin = SRV(text);
+        const p = '<p data-cfd-basis="1" style="font-family:var(--hd-mono, monospace);'
             + ' font-size:0.66rem; line-height:1.45; color:var(--hd-ink-dim,'
             + ' #7d97a5); margin:6px 0; white-space:pre-wrap;">'
-            + esc(SRV(text)) + '</p>';
+            + esc(metin) + '</p>';
+        const dilTr = !!(window.I18N && window.I18N.lang === 'tr');
+        const cevrilmedi = dilTr && metin === text && /[A-Za-z]{4}/.test(text);
+        if (!cevrilmedi && !KOD_IZI.test(metin)) return p;
+        return '<details class="hd-teknik-ayrinti" style="margin:4px 0;">'
+            + '<summary style="cursor:pointer; font-size:0.66rem; color:'
+            + 'var(--hd-ink-dim, #7d97a5);">'
+            + esc(T('panel.cfd.techDetailSrv', 'Technical detail (solver statement, untranslated)'))
+            + '</summary>' + p + '</details>';
     }
 
     function note(text, kind) {
@@ -1892,6 +1909,67 @@
             + esc(T('panel.cfd.sepNotModelled',
                     'NOT MODELLED BY THE SEPARATION JUDGEMENT ITSELF'))
             + '</strong>' + listBlock(yok) + '</div>';
+    }
+
+    /* V301/L-E (NK-66) — ÇIKIŞ BASINCI MUTABAKATI (ayrı bölüm).
+
+       ÖLÇÜLEN (örnek sıvı, O/F 2,3, ε 12, Pc 70, kaba ızgara): CFD "AYRILMA
+       YOK" derken ana sonuç "0,301 bar < 0,4·p_a → akış ayrılır" diyordu.
+       Kök: o ileti %40 KISMA noktasınındı (Pc 28 bar); motor ucu artık onu
+       kendi anahtarıyla yayımlar. Tasarım noktasında üç sayı yan yana
+       konunca çelişki kalmaz: 1B izantropik çıkış basıncı 0,753 bar, CFD
+       çıkış KESİT ORTALAMASI 0,776 bar (+%3), CFD çıkış DUVAR basıncı
+       1,173 bar. Ayrılma hükmü duvar basıncıyla verilir; çan lülede çıkıştaki
+       duvar basıncı kesit ortalamasından yüksektir (akış duvar boyunca
+       eksene döndürülürken sıkışır). Sayılar YANITLARDAN okunur: motor
+       çözümü yoksa ya da koşu motorun basınç/γ girdileriyle yapılmadıysa
+       1B satırı basılmaz (farklı lüle kıyaslanmaz). */
+    function exitReconciliationHtml(vm) {
+        const sonIdx = function (a) {
+            return (Array.isArray(a) && a.length) ? a[a.length - 1] : null;
+        };
+        const duvarBar = sonIdx(vm.wall && vm.wall.pBar);
+        const sa = vm.sectionAverage || {};
+        const saPa = sonIdx(numArray(sa.pressure_Pa));
+        const saBar = isNum(saPa) ? saPa / PA_PER_BAR : null;
+        let motorBar = null;
+        try {
+            const r = (typeof window.currentResults === 'object')
+                ? window.currentResults : null;
+            const m = motorDict(r) || {};
+            const giris = vm.inputs || {};
+            const pe = pick(m, 'nozzle_design.performance.exit_pressure');
+            const ayniP0 = isNum(m.chamber_pressure) && isNum(giris.P0_Pa)
+                && Math.abs(m.chamber_pressure * PA_PER_BAR - giris.P0_Pa)
+                    <= 1e-6 * giris.P0_Pa;
+            const ayniG = isNum(m.gamma) && isNum(giris.gamma)
+                && Math.abs(m.gamma - giris.gamma) <= 1e-9;
+            if (isNum(pe) && ayniP0 && ayniG) motorBar = pe;
+        } catch (e) { motorBar = null; }
+        if (!isNum(duvarBar) && !isNum(saBar)) return '';
+        const satirlar = [];
+        if (isNum(motorBar)) {
+            satirlar.push([T('panel.cfd.exitRec1d',
+                'Engine 1-D exit pressure at the design point [bar]'),
+                fmt(motorBar, 3)]);
+        }
+        if (isNum(saBar)) {
+            satirlar.push([T('panel.cfd.exitRecSection',
+                'CFD exit section average [bar]'), fmt(saBar, 3)]);
+        }
+        if (isNum(duvarBar)) {
+            satirlar.push([T('panel.cfd.exitRecWall',
+                'CFD exit wall pressure [bar] (the separation verdict uses this)'),
+                fmt(duvarBar, 3)]);
+        }
+        return '<div data-cfd-block="exit-reconciliation" style="margin-top:8px;">'
+            + sectionTitle('panel.cfd.secExitRec',
+                'Exit pressure: 1-D engine result ⟷ CFD')
+            + kvTable(satirlar)
+            + note(T('panel.cfd.exitRecNote',
+                'Compare the 1-D exit pressure with the CFD SECTION AVERAGE: both are cross-section values. The separation verdict uses the WALL pressure, which in a bell nozzle sits above the section average at the exit (the wall turns the flow back towards the axis and compresses it there). A separation warning in the engine result that names a throttle point refers to a lower chamber pressure, not to this design-point run.'),
+                'dim')
+            + '</div>';
     }
 
     // ------------------------------------------------------------------
@@ -2939,6 +3017,8 @@
         html += basisText(sep.criterion_basis);
         html += basisText(sep.judgment_basis);
         if (sep.not_applicable_reason) html += basisText(sep.not_applicable_reason);
+        // V301/L-E (NK-66): 1B ⟷ CFD çıkış basıncı mutabakatı (ayrı bölüm).
+        html += exitReconciliationHtml(vm);
 
         // 2) Alan haritası
         html += sectionTitle('panel.cfd.secField',
@@ -3101,23 +3181,23 @@
         // boş kalır ve body() isteği durdurur (uydurma sayı gösterilmez).
         fields: [
             ['P0_Pa', 'Chamber stagnation pressure P0 [Pa]', '', 'any',
-             'panel.cfd.fieldP0'],
+             'panel.cfd.fieldP0', 'panel.cfd.help.P0'],
             ['T0_K', 'Chamber stagnation temperature T0 [K]', '', 'any',
-             'panel.cfd.fieldT0'],
+             'panel.cfd.fieldT0', 'panel.cfd.help.T0'],
             ['gamma', 'Ratio of specific heats gamma [-]', '', 'any',
-             'panel.cfd.fieldGamma'],
+             'panel.cfd.fieldGamma', 'panel.cfd.help.gamma'],
             ['R_J_per_kgK', 'Specific gas constant R [J/(kg K)]', '', 'any',
-             'panel.cfd.fieldR'],
+             'panel.cfd.fieldR', 'panel.cfd.help.R'],
             ['P_ambient_Pa', 'Ambient pressure [Pa]', '', 'any',
-             'panel.cfd.fieldPamb'],
+             'panel.cfd.fieldPamb', 'panel.cfd.help.Pamb'],
             ['Pb_Pa', 'Back pressure Pb [Pa] — optional', '', 'any',
-             'panel.cfd.fieldPb'],
+             'panel.cfd.fieldPb', 'panel.cfd.help.Pb'],
             ['separation_factor', 'Summerfield k [-] — optional', '', 'any',
-             'panel.cfd.fieldK'],
+             'panel.cfd.fieldK', 'panel.cfd.help.k'],
             ['resolution', 'Grid resolution', 'coarse',
              [['coarse', 'Coarse', 'panel.cfd.resCoarse'],
               ['standard', 'Standard', 'panel.cfd.resStandard']],
-             'panel.cfd.fieldResolution'],
+             'panel.cfd.fieldResolution', 'panel.cfd.help.resolution'],
             // VİSKOZ KİP — varsayılan KAPALI (Euler). Isıl duvar koşulu
             // seçimin KENDİSİDİR: uçta varsayılanı yoktur çünkü izotermal
             // ve adyabatik duvar FARKLI çözümlerdir. Tek bir seçici
@@ -3129,18 +3209,18 @@
                'panel.cfd.wallIsothermal'],
               ['adiabatic', 'Viscous — adiabatic wall',
                'panel.cfd.wallAdiabatic']],
-             'panel.cfd.fieldViscousMode'],
+             'panel.cfd.fieldViscousMode', 'panel.cfd.help.viscousMode'],
             ['viscous_turbulence', 'Turbulence model', 'none',
              [['none', 'None (laminar)', 'panel.cfd.turbNone'],
               ['sa_neg', 'Spalart-Allmaras (negative variant)',
                'panel.cfd.turbSaNeg']],
-             'panel.cfd.fieldTurbulence'],
+             'panel.cfd.fieldTurbulence', 'panel.cfd.help.turbulence'],
             // SONLU VARSAYILAN YOK: duvar sıcaklığı uydurulamaz. Boş
             // bırakılırsa ve izotermal duvar seçilmişse body() isteği
             // GÖNDERMEZ ve eksiği adıyla yazar.
             ['viscous_T_wall_K',
              'Wall temperature T_w [K] — isothermal wall only', '', 'any',
-             'panel.cfd.fieldTwall'],
+             'panel.cfd.fieldTwall', 'panel.cfd.help.Twall'],
         ],
 
         fromResults: function (results) {

@@ -1,24 +1,33 @@
 # HRMA: Validation Status & Known Limitations
 
-*Last updated: 2026-08-02. This document states honestly what HRMA has been verified
+*Last updated: 2026-10-21. This document states honestly what HRMA has been verified
 against, where it is reliable, and where it is not. HRMA is a **preliminary-design
 and educational tool**, not a flight-qualification tool.*
 
 **Provenance of the machine-generated block.** The table between the
-`AUTO-CORRELATION` markers below was regenerated on **2026-08-02 (UTC)** by
+`AUTO-CORRELATION` markers below was regenerated on **2026-10-21 (UTC)** by
 `python3 -m hrma.validation.status_report` — correlation runner **v1**, record
-adapter **v1** — from the working tree based on commit **`a7ff1e7`**
-(`a7ff1e7591ea8acf58cfede3a08acda88be8b7e9`). Two independent runs produced a
-byte-identical block, so the numbers are reproducible, not a single draw.
+adapter **v1** — from the working tree based on commit **`dcb5a762e`**
+(`dcb5a762ecb7ca294a0c7219fe970d9f4e1ae328`, v3.0.1 candidate). The guard test
+`tests/test_faz4_yayin_kapisi.py::test_otomatik_blok_bugunku_kodun_urettigiyle_ayni`
+re-ran the correlation independently and reproduced the block exactly, so the
+numbers are reproducible, not a single draw.
 
-Before this regeneration the block was **stale**: it still carried the
-2026-07-24 run, whose `hybrid | thrust | main` row had since been deliberately
-removed from the runner (F022 — thrust error is an algebraic copy of the isp
-error, so it is not an independent validation metric) and whose hybrid
-regression-rate figures no longer matched the code. Staleness is now checked
-mechanically: `tests/test_faz4_yayin_kapisi.py` re-runs the correlation and
-fails if this block is not what today's code produces. If that test is red,
-regenerate — do not hand-edit the table.
+What changed against the previous block (generated 2026-10-07 from the v3.0.0
+code): since v3.0.1 the hybrid equilibrium includes solid carbon C(gr) where
+the gas is carbon-supersaturated, which brings HRMA within 0.1 % of NASA CEA
+on the fuel-rich side. Against the measured firings this raises the hybrid Isp
+bias from +5.4 % to +5.9 % and moves the four out-of-scope Heydari 2017
+records further away (c\* +12.1 % → +18.3 %); the hybrid c\* bias moves from
+−2.4 % to −2.1 %. The equilibrium now matches theory; the remaining gap is the
+lower combustion efficiency of real fuel-rich motors, which HRMA does not
+model. Before this fix the other v3.0.1 changes had moved the hybrid Isp bias
+only from +5.4 % to +5.3 %.
+
+Staleness is checked mechanically: the guard test above re-runs the
+correlation and fails if this block is not what today's code produces (an
+earlier block once stayed 9 days stale with a row the runner no longer
+produced). If that test is red, regenerate — do not hand-edit the table.
 
 ## 2026-07-18: Correlation-driven physics review (v2.5.0)
 
@@ -157,13 +166,13 @@ knockdown exact, ISA layers exact). Defects found and **fixed** the same day:
 
 | Area | Result |
 |---|---|
-| Hybrid combustion c\*, Tc, Isp | 18/18 fuel×oxidizer pairs (HTPB, paraffin, PE, PMMA, ABS, PLA × N2O, LOX, H2O2) within **≤1.5 %** of NASA CEA; mean ~0.4 %. Real Cantera equilibrium, no fallback. |
-| Liquid c\* | LH2/LOX, RP-1/LOX within **<2 %** of NASA CEA (SSME c\* matches to ~0.5 %). |
+| Hybrid combustion c\*, Tc, Isp | Measured 2026-10-21 against NASA CEA (RocketCEA, same propellant definitions) at 78 points: N2O/HTPB O/F 1.5–8 at 10/20/40 bar (ε 4 and 15) plus spot points for LOX/HTPB, LOX/paraffin, N2O/paraffin, N2O/PE, N2O/PMMA and H2O2/HTPB. Largest deviation **0.10 %** in Tc and **0.04 %** in c\* and vacuum Isp, including the fuel-rich side where solid carbon C(gr) forms (part of the equilibrium since v3.0.1). Not every supported pair has been swept. Real Cantera equilibrium; a fallback to the empirical envelope (e.g. below O/F ≈ 0.5) is declared in the result. |
+| Liquid c\* | Liquid thermochemistry *is* NASA CEA (RocketCEA), so agreement with CEA is by construction, not an independent check; the independent evidence is the published-engine correlation below. |
 | Nozzle CF / isentropic flow | Matches Sutton Eq. 3-30 and CEA rocket-mode to ~0.03 %. |
 | Solid APCP c\* | Within **~1.2 %** of full AP/Al/HTPB CEA composite (two-phase). |
 | Sugar propellants (KNSU/sugar) | c\*≈921 m/s, Tc≈1719 K, consistent with NASA CEA + Nakka experimental (corrected 2026-06; previous values were non-physical). |
 | Solid delivered Isp (APCP ref.) | 251 s vs 265 s rated literature value (−5.4 %). *Note (2026-07-12): the earlier +2.5 % agreement was an artifact of the monolithic grain model over-pressuring the chamber; the segmented model runs at rated pressure and the delivered value sits inside the 240–270 s literature band.* |
-| Test suite | 1,000+ automated tests passing (pytest). |
+| Test suite | 27,000+ automated tests (pytest; 27,216 collected on 2026-10-21). |
 | Export round-trips (2026-07-13) | DXF re-read via ezdxf (layers + >30-pt contour), STEP re-imported via build123d (ISO-10303), drawing PDF ≥3 pages, injector STL volume check proves orifices are drilled; fake-STL fallbacks removed (errors now raise). |
 
 ## What is validated against real data (partial)
@@ -183,16 +192,16 @@ markers is machine-generated; the rest of this document remains hand-written.
 <!-- AUTO-CORRELATION:BEGIN -->
 *This block is auto-generated from the real-experiment correlation run; do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
 
-- Generated: 2026-10-07 (runner v1, adapter v1)
+- Generated: 2026-10-27 (runner v1, adapter v1)
 - Experiment DB content hash: `19cf1d9587eae349d4950f8b85f74fd2403a579e47d6c0563badfb6a9c4ecb63`
 - Records: 212 total, adapter ok 98 (with at least one scored quantity: 92), insufficient inputs 107, not supported (v1) 7, runner errors 0
 - Signed error convention: (predicted - measured) / measured x 100. Outliers (modified z-score |0.6745*(error - median)/MAD| > 3.5) are flagged, never dropped; records excluded from the headline are aggregated in their own layer and the reason is kept distinct: `anomaly` means the EXPERIMENT is suspect (data quality), `out_of_scope` means HRMA's own declared model does not cover the configuration. An `out_of_scope` row is 'measured and withheld', not 'not measured'. Cells marked 'single observation' report the signed error only (with n=1 the scatter columns would repeat that one number). Dependence column: 'in-sample' entries are scored against the fit's own source data (an implementation check, not an independent validation); 'weak-evidence' entries carry a curator caveat; u_meas is the median reported measurement uncertainty.
 
 | Motor | Quantity | Layer | N | Bias % | Median APE % | RMS % | Worst test | Dependence |
 |---|---|---|---|---|---|---|---|---|
-| hybrid | c_star | main | 18 | -2.4 | 3.3 | 4.0 | hyb-rezaei2018-htpb-n2o-t68 | u_meas~0.81% (n=18) |
-| hybrid | chamber_pressure | main | 35 | +15.5 | 10.9 | 20.4 | hyb-karabeyoglu2003-paraffin-gox-t4thr-1 | u_meas~0.14% (n=18) |
-| hybrid | isp | main | 18 | +5.4 | 5.0 | 6.7 | hyb-rezaei2018-htpb-n2o-t69 | u_meas~0.81% (n=18) |
+| hybrid | c_star | main | 18 | -2.1 | 3.3 | 3.6 | hyb-rezaei2018-htpb-n2o-t59 | u_meas~0.81% (n=18) |
+| hybrid | chamber_pressure | main | 35 | +15.7 | 10.9 | 20.5 | hyb-karabeyoglu2003-paraffin-gox-t4thr-1 | u_meas~0.14% (n=18) |
+| hybrid | isp | main | 18 | +5.9 | 5.0 | 7.7 | hyb-rezaei2018-htpb-n2o-t69 | u_meas~0.81% (n=18) |
 | hybrid | port_diameter_final | main | 18 | -9.4 | 10.1 | 10.6 | hyb-rezaei2018-htpb-n2o-t65 | - |
 | hybrid | regression_rate | main | 35 | -24.9 | 36.7 | 35.4 | hyb-rezaei2018-htpb-n2o-t69 | 17/35 in-sample; u_meas~0.33% (n=18) |
 | liquid | isp_sl | main | 4 | +2.0 | 2.0 | 2.2 | liq-rd180-atlas-spec | - |
@@ -200,23 +209,23 @@ markers is machine-generated; the rest of this document remains hand-written.
 | liquid | thrust_vac | main | 4 | -0.4 | 0.2 | 0.6 | liq-rd0120-energia-spec | 4/4 weak-evidence |
 | solid | burn_rate | main | 27 | -0.4 | 0.5 | 2.0 | sol-nakka1999-knsb-p09 | 27/27 in-sample |
 | solid | burn_time (single observation) | main | 1 | -20.3 | - | - | sol-nakka2000-kappa-ksb002 | - |
-| solid | isp (single observation) | main | 1 | +18.4 | - | - | sol-nakka2000-kappa-ksb002 | - |
+| solid | isp (single observation) | main | 1 | +18.9 | - | - | sol-nakka2000-kappa-ksb002 | - |
 | solid | propellant_mass (single observation) | main | 1 | +9.6 | - | - | sol-nakka2000-kappa-ksb002 | - |
-| solid | thrust_peak (single observation) | main | 1 | -7.6 | - | - | sol-nakka2000-kappa-ksb002 | - |
+| solid | thrust_peak (single observation) | main | 1 | -7.2 | - | - | sol-nakka2000-kappa-ksb002 | - |
 | solid | burn_time (single observation) | low_confidence | 1 | -14.8 | - | - | sol-nakka2000-kappa-kdx002 | - |
-| solid | isp (single observation) | low_confidence | 1 | +10.5 | - | - | sol-nakka2000-kappa-kdx002 | - |
+| solid | isp (single observation) | low_confidence | 1 | +10.7 | - | - | sol-nakka2000-kappa-kdx002 | - |
 | solid | propellant_mass (single observation) | low_confidence | 1 | +4.7 | - | - | sol-nakka2000-kappa-kdx002 | - |
-| solid | thrust_peak (single observation) | low_confidence | 1 | +9.6 | - | - | sol-nakka2000-kappa-kdx002 | - |
+| solid | thrust_peak (single observation) | low_confidence | 1 | +9.8 | - | - | sol-nakka2000-kappa-kdx002 | - |
 | hybrid | chamber_pressure | anomaly | 9 | +66.4 | 33.3 | 116.9 | hyb-karabeyoglu2003-paraffin-gox-t4f-2 | - |
 | hybrid | regression_rate | anomaly | 9 | -4.9 | 14.7 | 20.1 | hyb-karabeyoglu2003-paraffin-gox-t4l-12 | - |
 | solid | burn_time (single observation) | anomaly | 1 | -22.0 | - | - | sol-nakka2000-kappa-ksb001 | - |
-| solid | isp (single observation) | anomaly | 1 | +22.8 | - | - | sol-nakka2000-kappa-ksb001 | - |
+| solid | isp (single observation) | anomaly | 1 | +23.3 | - | - | sol-nakka2000-kappa-ksb001 | - |
 | solid | propellant_mass (single observation) | anomaly | 1 | +5.1 | - | - | sol-nakka2000-kappa-ksb001 | - |
-| solid | thrust_peak (single observation) | anomaly | 1 | -9.6 | - | - | sol-nakka2000-kappa-ksb001 | - |
-| hybrid | c_star | out_of_scope | 4 | +12.1 | 12.1 | 14.0 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
-| hybrid | chamber_pressure | out_of_scope | 4 | +21.8 | 22.0 | 23.3 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
+| solid | thrust_peak (single observation) | anomaly | 1 | -9.2 | - | - | sol-nakka2000-kappa-ksb001 | - |
+| hybrid | c_star | out_of_scope | 4 | +18.3 | 18.8 | 19.4 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
+| hybrid | chamber_pressure | out_of_scope | 4 | +28.6 | 29.3 | 29.5 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
 | hybrid | port_diameter_final | out_of_scope | 4 | -8.1 | 8.0 | 8.2 | hyb-heydari2017-htpb-n2o-s4a1-1 | - |
-| hybrid | thrust | out_of_scope | 4 | +24.6 | 24.0 | 25.2 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
+| hybrid | thrust | out_of_scope | 4 | +32.6 | 32.5 | 33.0 | hyb-heydari2017-htpb-n2o-s4a1-3 | - |
 - Non-converged runs (flagged, kept): 2 scored quantities from 1 record(s): hyb-karabeyoglu2003-paraffin-gox-t4p-04
 <!-- AUTO-CORRELATION:END -->
 

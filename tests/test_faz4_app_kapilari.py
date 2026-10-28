@@ -49,6 +49,8 @@ import sys
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
@@ -428,8 +430,11 @@ class TestEksikKritikGirdiKapisi:
         assert r.get_json()['status'] == 'incomplete_input'
 
     def test_solid_geometri_kipi_gecer(self, client):
+        # v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+        # (A_p/A_t 0,947); K-A kapısından beri 422. Konu port değil: geometri
+        # tek tanım SOLID_DEFAULT_GEOMETRY_MM'den (kopyalanmaz).
         r = client.post('/calculate_solid', json={
-            'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 30,
+            **SOLID_DEFAULT_GEOMETRY_MM,
             'chamber_pressure': 40, 'propellant_type': 'apcp'})
         assert r.status_code == 200
 

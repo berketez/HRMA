@@ -23,6 +23,7 @@ from hrma.analysis.igniter_sizing import pyrotechnic_charge_mass
 from hrma.constants import R_UNIVERSAL
 from hrma.engines.solid_rocket_engine import (
     SOLID_CONDENSED_MASS_FRACTION,
+    SOLID_DEFAULT_GEOMETRY_MM,
     SOLID_IGNITER,
     SUMMERFIELD_SEPARATION_RATIO,
     SolidRocketEngine,
@@ -32,9 +33,16 @@ from hrma.engines.solid_rocket_engine import (
 
 # Temel motor: metalize APCP — yoğuşmuş faz kütle kesri tablolu, boğaz çapı
 # ve kalış süresi iki-fazlı modülün yayımlanmış veri penceresinin içinde.
+# V301/T-ÇAPA-A: çekirdek 30 mm -> tek tanım (SOLID_DEFAULT_GEOMETRY_MM,
+# 48 mm). Eski çekirdekte port boğuluyordu (A_p/A_t 0,947) ve K-A'nın port
+# kapısından 422 alıyor; bu dosyanın konusu boğulan port değil (kural 1).
 TEMEL_MOTOR = dict(grain_type='bates', propellant_type='apcp',
-                   chamber_diameter=100.0, grain_length=500.0,
-                   core_diameter=30.0, chamber_pressure=40.0)
+                   chamber_diameter=float(
+                       SOLID_DEFAULT_GEOMETRY_MM['chamber_diameter']),
+                   grain_length=float(SOLID_DEFAULT_GEOMETRY_MM['grain_length']),
+                   core_diameter=float(
+                       SOLID_DEFAULT_GEOMETRY_MM['core_diameter']),
+                   chamber_pressure=40.0)
 
 
 def _motor(**degisiklik):
@@ -59,7 +67,12 @@ def asiri_genisleyen():
     TETİKLENDİĞİ gerçek bir çalışma noktası (uydurma senaryo değil,
     2 bar geri basınçta yapılan bir yer testinin karşılığı).
     """
-    e = _motor(chamber_pressure=5.0, overrides={'atm_pressure': 200.0})
+    # V301/T-ÇAPA-A: 5 bar'da boğaz büyür; tek tanımın 48 mm çekirdeği bu
+    # noktada boğulur (422, gereken en küçük 64,7 mm). 84 mm ölçülen
+    # A_p/A_t 1,609 verir (76 mm 1,337, 80 mm 1,469); konu ayrılmadır,
+    # boğulan port değil (kural 1).
+    e = _motor(chamber_pressure=5.0, core_diameter=84.0,
+               overrides={'atm_pressure': 200.0})
     return e, e.calculate_performance()
 
 
@@ -111,8 +124,13 @@ def test_iki_faz_girdileri_cozucunun_kendi_buyuklukleri(temel):
     assert kullanilan['gamma'] == pytest.approx(float(e._frozen_gas_gamma()))
     assert kullanilan['gamma'] == pytest.approx(CEA_DONMUS_GAMMA_S,
                                                 abs=TOL_GAMMA)
-    assert kullanilan['molecular_weight_g_mol'] == pytest.approx(
-        float(e.mw_exhaust))
+    # V301/N-CEA-2 K3: termokimya CEA'dansa modüle GAZ-YALNIZ M girer
+    # ((1 − x_c)·M(1/n), ``mw_gas_only``); yedek yolda ``mw_exhaust``. İkisi
+    # de çözücünün kendi büyüklüğüdür (sahte veri yasağı korunur).
+    mw_bekl = (float(e.mw_gas_only)
+               if e._cea_active() and e.mw_gas_only is not None
+               else float(e.mw_exhaust))
+    assert kullanilan['molecular_weight_g_mol'] == pytest.approx(mw_bekl)
 
     # Kalış süresi çözücünün kendi bağıntısından yeniden üretilebilmeli.
     tau = e._chamber_gas_residence_time_ms()

@@ -408,8 +408,16 @@ class TestP8B317BeslemeButcesiIkiDevre:
             # PARANTEZ ÖNCESİNDEN türetilir; testin ölçtüğü şey (çubuk
             # değerleri = çözücü sayıları) aynen korunur.
             anahtar = etiket.split('(')[0].strip().lower().replace(' ', '_')
-            assert ox['y'][i] == pytest.approx(
-                drops['oxidizer_line'][anahtar])
+            # V3.0.5 T-ÇAPA-C1: V301/L-E (ffcc018bb, NK-36) 'Cooling Jacket'
+            # kalemini ekledi; etiketi çözücü anahtarından (regen_jacket)
+            # türemez. Ceket yalnız yakıt hattındadır: oksitleyici
+            # devresinde anahtar yok → o çubuk ÇİZİLMEZ (None, uydurma 0 yok).
+            anahtar = {'cooling_jacket': 'regen_jacket'}.get(anahtar, anahtar)
+            ox_beklenen = drops['oxidizer_line'].get(anahtar)
+            if ox_beklenen is None:
+                assert ox['y'][i] is None, (etiket, ox['y'][i])
+            else:
+                assert ox['y'][i] == pytest.approx(ox_beklenen)
             assert fuel['y'][i] == pytest.approx(
                 drops['fuel_line'][anahtar])
 

@@ -232,8 +232,14 @@ class TestOHD2525DumpSogutmaCeketi:
         # debiler bit-aynı.
         assert r['cooling_pressure_drop'] == pytest.approx(
             3.30847250671198, rel=1e-12)
-        assert f['coolant_flow_rate'] == pytest.approx(
-            2.4333853600726125, rel=1e-12)
+        # v3.0.1 T-ÇAPA-B: V301/L-B SV-08 — film tipinde rejeneratif ceket
+        # YOK (film debisi çekirdeğe EK; L-B RAPOR §SV-08). Eski beklenti
+        # film tipinin ceket debisiydi (2,4333853600726125 kg/s); ürün artık
+        # o debiyi yayımlamıyor ve nedenini adıyla söylüyor (ölçüldü,
+        # 117d704da). Rejeneratif ayak yukarıda bit-aynı.
+        assert f['coolant_flow_rate'] is None
+        assert f['coolant_flow_rate_basis'].startswith(
+            'no regenerative jacket in this cooling type')
         assert r['dump_cooling_jacket_status'] is None
         assert r['cooling_channels'] == 44
         assert r['cooling_channels'] == r['channel_count_fit']['n_max']

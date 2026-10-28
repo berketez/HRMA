@@ -434,7 +434,14 @@ vm.runInContext('exportReport', sandbox)().then(() => process.stdout.write(JSON.
 
 
 def _disa_aktar(basarisiz: bool) -> dict:
-    kod = _islev(_oku(APP_JS), 'async function exportReport(')
+    kaynak = _oku(APP_JS)
+    kod = _islev(kaynak, 'async function exportReport(')
+    # v3.0.1 (kaynak-CEA kulvarı, 19 Eki): metin yedeği artık CEA
+    # karşılaştırma satırlarını da yazıyor (``ceaKarsilastirmaMetni``,
+    # app.js). Düzenek yalnız exportReport'u yüklediği için PDF düştüğünde
+    # ReferenceError ile ölüyordu (a367de3d2'de kırmızıydı, 21 Eki); kardeş
+    # test_d17 düzeneği 20 Eki'de aynı işlevi yüklemişti. Ürün değişmedi.
+    kod += '\n' + _islev(kaynak, 'function ceaKarsilastirmaMetni(')
     r = subprocess.run([NODE],
                        input=_stdin_betigi(_DISA_KOSUCU, {'kod': kod,
                                                          'basarisiz': basarisiz}),

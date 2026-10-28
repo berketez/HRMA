@@ -219,6 +219,12 @@ class TestUrunYuzeyi:
         j = r.get_json()
         a = j['c_star_identity_audit']
         assert a['record_c_star_basis'] == 'cea', (yakit, a)
-        assert a['status'] == 'two_phase_explained', (yakit, a)
-        # yayımlanan c* katalogla AYNI kaynaktan (tek kaynak)
-        assert j['c_star'] == pytest.approx(PROPELLANTS[yakit]['c_star'])
+        # V301/N-CEA-2 (K1/K3): termokimya motorun Pc'sinde CEA ve M = 1/n
+        # (KN-şeker de); Eq. 3-32 bu M ile CEA c*'ını %0,05 içinde kapatır,
+        # hüküm 'single_phase_consistent' (eski 'two_phase_explained' MW =
+        # 1/totn uzlaşımından geliyordu, ölçülen sapma -%5,9).
+        assert j['thermochemistry_source'] == 'nasa_cea_at_pc'
+        assert a['status'] == 'single_phase_consistent', (yakit, a)
+        # yayımlanan c* termokimyayla AYNI kaynaktan (tek kaynak, η = 1)
+        assert j['c_star'] == pytest.approx(
+            j['thermochemistry']['c_star_theoretical_m_s'])

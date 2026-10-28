@@ -299,8 +299,13 @@ def fea_anahtarlari(kok):
     kume = set(re.findall(r'\bTF?\(\s*' + anahtar, src))
     kume |= set(re.findall(r'\b(?:acSection|acNoBlockHtml)\(\s*' + anahtar, src))
     kume |= set(re.findall(r"""data-i18n(?:-[a-z]+)?=\\?["']([\w.]+)\\?["']""", src))
-    # GRAIN_FIELDS benzeri tablolar: satırın SON öğesi anahtar ('panel.grain.x')
-    kume |= set(re.findall(r""",\s*\n?\s*'((?:panel|fea|common)\.[\w.]+)'\s*\]""", src))
+    # GRAIN_FIELDS benzeri tablolar: satırın etiket ve ipucu anahtarları
+    # ('panel.grain.x'). T-ÇAPA-C2 (27 Eki): v3.0.1 N-girdi-1/2 satıra 6.
+    # öğe olarak '?' ipucu anahtarını ekledi; etiket anahtarı artık SON öğe
+    # değil ('panel.grain.fieldOuter', 'panel.grain.help.outer']) ve tarama
+    # onu kaçırıyordu. Virgülden sonra gelen ve ',' ya da ']' ile biten her
+    # panel/fea/common anahtarı alınır (ikisi de sözlükte aranır).
+    kume |= set(re.findall(r""",\s*\n?\s*'((?:panel|fea|common)\.[\w.]+)'\s*[\],]""", src))
     return sorted(kume)
 
 

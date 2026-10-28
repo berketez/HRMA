@@ -67,6 +67,9 @@ from hrma.analysis.acoustic_modes import (
 # Kullanıcı Cd bandının TEK tanımı enjektör modülündedir (bkz. USER_CD_RANGE
 # künyesi); bu modül bandı kendi literalleriyle YENİDEN YAZMAZ.
 from hrma.engines.injector_design import USER_CD_RANGE
+# V301/L-C: kullanıcının enjektör ölçü planı hataları (uçta 422).
+from hrma.engines.injector_design import (ElementPlanInputError,
+                                          PintleGeometryInputError)
 # ÖH D24 · P15B2-09 (Fable-D18 ŞARTI): kapak/flanş cıvata birleşiminin
 # varsayılan sözleşmesi birleşimi ÇÖZEN modülde tek kez yazılıdır; sıvı
 # motor onu literal olarak yeniden yazmaz, buradan türetir
@@ -222,16 +225,32 @@ LIQUID_UNKNOWN_PAIR_OX_DENSITY = 1200.0    # ARTIK KULLANILMIYOR (P3B1-01)
 # dışındaydı). Tablo modül düzeyine alındı; bant artık TABLODAN türetiliyor
 # (bkz. unknown_pair_gas_reference) ve iki yerde yazılmıyor.
 # ---------------------------------------------------------------------------
+# V301/N-CEA-2 (D7, 26 Eki 2026): TERMOKİMYA alanları (c_star, T_c, mw,
+# gamma) NASA CEA2'den (RocketCEA, HRMA köprüsü cea_bridge, kayan denge)
+# BEYANLI referans koşulunda yeniden üretildi: Pc = 100 bar, O/F = satırın
+# optimal_mr'si; mw = MW (1/totn); gamma = C_F,vak(ε = 200)'ı tek-γ
+# bağıntısıyla veren EŞDEĞER üs (ana yolun _equivalent_gamma tanımı, CEA oda
+# γ_s'si değil). Eski değerler kendi çapasında CEA'dan c* -%4,5…+%7,2, T_c
+# -%6,0…-%0,9, MW -%8,4…+%18,0 sapıyordu (RAPOR C2-S4).
+# isp_vac / isp_sl BİLEREK DEĞİŞTİRİLMEDİ: yedek yol bu iki sayıyı KAYIP
+# ZİNCİRİ UYGULAMADAN yayımlar (ölçüldü, kati-gecis/RAPOR.md D7), yani
+# teslim düzeyi çapalardır; CEA idealiyle değiştirmek yedek yolun Isp'sini
+# ana yolun teslim Isp'sinin ÜSTÜNE çıkarırdı (RP-1/LOX 100 bar: ideal
+# isp_sl 310,3 s ⟷ ana yol teslim 299,0 s). Kaynakları bilinmiyor; doğru
+# onarım yedek yola ana yolun kayıp zincirini uygulamaktır (DEVİR, sıvı
+# motor kodu). Üretici betik ve çıktı: docs/scofield/raw/OH/V301/cea/
+# kati-gecis/sivi_tablo_uret.py, sivi_tablo.json. Tablo YALNIZ CEA düşünce
+# kullanılır; CEA'lı ana yol bu değerlerden etkilenmez (bit-aynı, md5).
 LIQUID_PROPELLANT_REFERENCE_TABLE = {
     ('rp1', 'lox'): {
         'name': 'RP-1/LOX (Kerosene/Liquid Oxygen)',
         # NASA CEA data at Pc=100 bar, optimized expansion
-        'isp_vac': 353.2,  # s (Area ratio 200:1)
-        'isp_sl': 311.8,   # s (Area ratio 16:1) 
-        'c_star': 1823.4,  # m/s (NASA Glenn verified)
-        'T_c': 3670.2,     # K (Adiabatic flame temperature)
-        'gamma': 1.2165,   # Real gas expansion coefficient
-        'mw': 22.86,       # g/mol (Exhaust molecular weight)
+        'isp_vac': 353.2,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 380.8)
+        'isp_sl': 311.8,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 310.3)
+        'c_star': 1803.8,  # V301/N-CEA-2: CEA2 (eski 1823.4)
+        'T_c': 3726.8,  # V301/N-CEA-2: CEA2 (eski 3670.2)
+        'gamma': 1.155,  # V301/N-CEA-2: CEA2 (eski 1.2165)
+        'mw': 23.53,  # V301/N-CEA-2: CEA2 (eski 22.86)
         'density_fuel': 815.0,     # kg/m³ at 15°C
         'density_ox': 1141.7,      # kg/m³ at NBP
         'optimal_mr': 2.577,       # Max Isp O/F ratio
@@ -249,12 +268,12 @@ LIQUID_PROPELLANT_REFERENCE_TABLE = {
     },
     ('lh2', 'lox'): {
         'name': 'LH2/LOX (Liquid Hydrogen/Liquid Oxygen)',
-        'isp_vac': 451.8,  # SSME performance level
-        'isp_sl': 366.2,
-        'c_star': 2356.7,  # Highest c* of chemical propellants
-        'T_c': 3357.4,
-        'gamma': 1.2398,
-        'mw': 15.96,       # Very low molecular weight
+        'isp_vac': 451.8,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 477.7)
+        'isp_sl': 366.2,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 393.4)
+        'c_star': 2308.8,  # V301/N-CEA-2: CEA2 (eski 2356.7)
+        'T_c': 3528.3,  # V301/N-CEA-2: CEA2 (eski 3357.4)
+        'gamma': 1.1786,  # V301/N-CEA-2: CEA2 (eski 1.2398)
+        'mw': 13.559,  # V301/N-CEA-2: CEA2 (eski 15.96)
         'density_fuel': 70.85,     # kg/m³ at NBP
         'density_ox': 1141.7,
         'optimal_mr': 6.026,       # Very high O/F due to H2
@@ -270,12 +289,12 @@ LIQUID_PROPELLANT_REFERENCE_TABLE = {
     },
     ('mmh', 'n2o4'): {
         'name': 'MMH/N2O4 (Monomethylhydrazine/Nitrogen Tetroxide)',
-        'isp_vac': 323.1,  # Apollo Service Module level
-        'isp_sl': 294.8,
-        'c_star': 1682.4,
-        'T_c': 3156.7,
-        'gamma': 1.2456,
-        'mw': 25.84,
+        'isp_vac': 323.1,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 354.6)
+        'isp_sl': 294.8,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 295.2)
+        'c_star': 1762.0,  # V301/N-CEA-2: CEA2 (eski 1682.4)
+        'T_c': 3357.5,  # V301/N-CEA-2: CEA2 (eski 3156.7)
+        'gamma': 1.2134,  # V301/N-CEA-2: CEA2 (eski 1.2456)
+        'mw': 21.9,  # V301/N-CEA-2: CEA2 (eski 25.84)
         'density_fuel': 874.5,
         'density_ox': 1443.2,
         'optimal_mr': 1.896,       # Hypergolic optimum
@@ -291,12 +310,12 @@ LIQUID_PROPELLANT_REFERENCE_TABLE = {
     },
     ('udmh', 'n2o4'): {
         'name': 'UDMH/N2O4 (Unsymmetrical Dimethylhydrazine/NTO)',
-        'isp_vac': 336.4,  # Titan II performance
-        'isp_sl': 307.2,
-        'c_star': 1721.6,
-        'T_c': 3234.8,
-        'gamma': 1.2389,
-        'mw': 24.67,
+        'isp_vac': 336.4,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 347.9)
+        'isp_sl': 307.2,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 290.1)
+        'c_star': 1743.2,  # V301/N-CEA-2: CEA2 (eski 1721.6)
+        'T_c': 3304.8,  # V301/N-CEA-2: CEA2 (eski 3234.8)
+        'gamma': 1.2244,  # V301/N-CEA-2: CEA2 (eski 1.2389)
+        'mw': 21.82,  # V301/N-CEA-2: CEA2 (eski 24.67)
         'density_fuel': 791.3,
         'density_ox': 1443.2,
         'optimal_mr': 2.089,
@@ -312,12 +331,12 @@ LIQUID_PROPELLANT_REFERENCE_TABLE = {
     },
     ('methane', 'lox'): {
         'name': 'Methane/LOX (Liquid Methane/Liquid Oxygen)',
-        'isp_vac': 382.4,  # Raptor-class performance
-        'isp_sl': 334.2,
-        'c_star': 1958.7,
-        'T_c': 3556.2,
-        'gamma': 1.2287,
-        'mw': 20.49,
+        'isp_vac': 382.4,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 395.4)
+        'isp_sl': 334.2,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 317.4)
+        'c_star': 1827.2,  # V301/N-CEA-2: CEA2 (eski 1958.7)
+        'T_c': 3612.9,  # V301/N-CEA-2: CEA2 (eski 3556.2)
+        'gamma': 1.1281,  # V301/N-CEA-2: CEA2 (eski 1.2287)
+        'mw': 22.371,  # V301/N-CEA-2: CEA2 (eski 20.49)
         'density_fuel': 422.8,     # kg/m³ at NBP
         'density_ox': 1141.7,
         'optimal_mr': 3.634,       # Near-stoichiometric optimum
@@ -333,12 +352,12 @@ LIQUID_PROPELLANT_REFERENCE_TABLE = {
     },
     ('ethanol', 'lox'): {  # Added for completeness
         'name': 'Ethanol/LOX (75% Ethanol/25% Water)',
-        'isp_vac': 318.6,
-        'isp_sl': 278.9,
-        'c_star': 1678.3,
-        'T_c': 3241.5,
-        'gamma': 1.2198,
-        'mw': 24.23,
+        'isp_vac': 318.6,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 356.9)
+        'isp_sl': 278.9,  # V301/N-CEA-2: DEĞİŞMEDİ — yedek yol bunu kayıp zincirsiz yayımlar (CEA2 ideal 287.7)
+        'c_star': 1658.2,  # V301/N-CEA-2: CEA2 (eski 1678.3)
+        'T_c': 3269.4,  # V301/N-CEA-2: CEA2 (eski 3241.5)
+        'gamma': 1.134,  # V301/N-CEA-2: CEA2 (eski 1.2198)
+        'mw': 24.649,  # V301/N-CEA-2: CEA2 (eski 24.23)
         'density_fuel': 891.2,
         'density_ox': 1141.7,
         'optimal_mr': 1.524,
@@ -617,13 +636,30 @@ REGEN_MARCH_SIZING_REL_TOL = 0.01
 # 6,70 mm). Üstelik beyan ``_calculate_thermal_protection_system`` bloğunda,
 # sayı ise ``cooling_system`` bloğundaydı: sayı bir yerde, gerekçesi başka
 # yerde. Artık iki AYRI metin var ve ikisi de kendi sayısının yanında duruyor.
+# V301/L-REJ kalem 2 (26 Eki): iki künye kaynak iddiasını DÜZELTİR, sayı
+# değişmez. "Huzel & Huang Ch. 4, typical 1-3 mm milled channel" iddiası
+# NASA SP-125 (1967) metninde yok ('milled' kelimesi geçmiyor; yerel metin
+# taraması) ve AIAA 1992 baskısı okunmadı -> değer HRMA SEÇİMİDİR. Kaynaklı
+# olan iki sınır yazılır: kanal/kaburga genişliği alt sınırı 0,889 mm (NASA
+# NAS8-98042 s. 6, COOLING_CHANNEL_LAND_BASIS) ve yüksek ısı akılı bölgede
+# genişlik/yükseklik < 2 önerisi (NASA SP-8087 1972 s. 58): 3/2 = 1,5.
 COOLING_CHANNEL_WIDTH_BASIS = (
-    'fixed design default channel width (Huzel & Huang Ch. 4, typical 1-3 mm '
-    'milled channel); NOT auto-sized and not a user input. The same width '
-    'also sets the geometric channel count through the channel-base '
-    'circumference at the throat (see cooling_system.channel_count_fit)')
+    'fixed design default channel width of '
+    f'{COOLING_CHANNEL_WIDTH_DEFAULT_M * 1e3:g} mm: an HRMA CHOICE (source for '
+    'the value itself: NOT VERIFIED - NASA SP-125 (1967) gives no milled-'
+    'channel width); it is above the 0.889 mm minimum channel/land width of '
+    'NASA NAS8-98042 (1999, p. 6). NOT auto-sized and not a user input. The '
+    'same width also sets the geometric channel count through the channel-'
+    'base circumference at the throat (see cooling_system.channel_count_fit)')
 COOLING_CHANNEL_HEIGHT_BASIS = (
-    'default channel height (depth), which IS auto-sized: when the resulting '
+    'default channel height (depth) of '
+    f'{COOLING_CHANNEL_HEIGHT_DEFAULT_M * 1e3:g} mm is an HRMA CHOICE; with '
+    f'the {COOLING_CHANNEL_WIDTH_DEFAULT_M * 1e3:g} mm width it gives '
+    'width/height = '
+    f'{COOLING_CHANNEL_WIDTH_DEFAULT_M / COOLING_CHANNEL_HEIGHT_DEFAULT_M:g}'
+    ', inside the width/height < 2 '
+    'recommendation for high-heat-flux regions of NASA SP-8087 (1972, '
+    'p. 58). The height IS auto-sized: when the resulting '
     f'coolant velocity exceeds the {COOLANT_CHANNEL_TARGET_VELOCITY_MS:.0f} '
     'm/s design target the depth is increased to meet it, up to the '
     f'{COOLING_CHANNEL_HEIGHT_MAX_M * 1e3:.0f} mm milled-channel ceiling. It '
@@ -665,6 +701,30 @@ WALL_TEMP_DEFAULT_K = {'regenerative': 800.0, 'film_cooling': 900.0,
                        'dump_cooling': 850.0, 'ablative': 1200.0,
                        'radiative': 1800.0}
 
+# L-B (v3.0.1, SV-05) — HEDEF ⟷ ÇÖZÜLEN CİDAR SICAKLIĞI. Kullanıcının
+# max_wall_temp'i bir GEREKSİNİMDİR; çözülen tepe sıcak cidar (RP-1 istasyon
+# marşı ya da metan/LH2 süperkritik marşı) bir SONUÇTUR. İkisi ayrı alanlarda
+# yayımlanır ve limit hükmü yalnız çözülen değerle verilir; çözüm yoksa hüküm
+# bu adla 'NOT_EVALUATED' olur (sessiz 'MET' yok).
+WALL_LIMIT_NOT_EVALUATED = 'NOT_EVALUATED'
+#: Çözülmüş sıcaklıkta değerlendirilen sıvı hazne geçerlilik künyesi
+#: (``LIQUID_MODEL_VALIDITY_BASIS``in çözülmüş-cidar eşi; o metin "the
+#: cooling-type default or your maximum wall temperature input" der ve
+#: çözülmüş sıcaklıkta yanlış olurdu).
+LIQUID_SOLVED_WALL_VALIDITY_BASIS = (
+    'TRUE means: the SOLVED peak hot-wall temperature this chamber wall was '
+    'evaluated at (wall_temperature, wall_temperature_source: the 1D station '
+    'march of the cooling circuit) is at or above the melting point of the '
+    'chamber material, or above the last point of its strength-derating '
+    'data. Above that point the derated yield strength is held at the last '
+    'curve value (an upper bound, not a conservative value), and at or '
+    'above melting the wall has no load-carrying capacity at all. The yield '
+    'strength at wall temperature, the allowable stress, stress_margin and '
+    'hoop_safety_factor are therefore outside the validity limit of the '
+    'structural model: they are published as diagnostic numbers only, not '
+    'as valid design outputs, and no acceptance and no numeric design '
+    'verdict is issued.')
+
 # ÖH D31 · OH-D25-25 — DUMP SOĞUTMA CEKET DEBİSİ / ΔP: MODELLENMEDİ.
 # ÖLÇÜLDÜ (docs/scofield/raw/OH/D31/sivi/a1/once_dump.json, 25 kN RP-1/LOX):
 # dump_cooling seçen kullanıcı rejeneratif sayılarının TA KENDİSİNİ alıyordu
@@ -695,6 +755,10 @@ COOLING_TYPES_PASSIVE = ('ablative', 'radiative')
 COOLING_TYPES_RECOGNISED = tuple(WALL_TEMP_DEFAULT_K)
 COOLING_TYPES_ACTIVE = tuple(t for t in COOLING_TYPES_RECOGNISED
                              if t not in COOLING_TYPES_PASSIVE)
+# Film soğutma tipinin kanonik adı — uç kapıları (app.py film %0 kapısı)
+# dizeyi buradan okur; beyaz listenin ikinci kopyası uç gövdesine yazılmaz
+# (tests/test_d15_app_api_a2.py::TestP7B208SogutmaTipiKapisi).
+COOLING_TYPE_FILM = 'film_cooling'
 
 # Performans haritası tarama çözünürlükleri (maliyet/çözünürlük dengesi).
 PERF_MAP_MR_POINTS = 13
@@ -802,7 +866,8 @@ NOZZLE_PROCESS_BY_COOLING = {
 NOZZLE_PROCESS_DEFAULT = 'Machined contour'
 
 INJECTOR_PROCESS_BY_TYPE = {
-    'impinging': 'CNC drilled impinging orifices',
+    'unlike_impinging': 'CNC drilled impinging orifices',
+    'like_impinging': 'CNC drilled impinging orifices',
     'coaxial': 'CNC machined coaxial elements',
     'showerhead': 'CNC drilled showerhead orifices',
     'pintle': 'CNC machined pintle assembly',
@@ -1000,7 +1065,9 @@ REGEN_CHANNEL_INLET_PRESSURE_FACTOR = 1.5
 # tip bazlı seçim; calculate_injector_design ve çevrim çözücüsü AYNI
 # tabloyu kullanır — tek tanım yeri).
 INJECTOR_TYPE_DP_FRACTION = {
-    'impinging': 0.22,    # flight-proven impinging
+    # V301/L-C: anahtar kanonik ad (eski 'impinging' bu satırın takma adıdır,
+    # ``canonical_injector_type``); sayı DEĞİŞMEDİ.
+    'unlike_impinging': 0.22,    # flight-proven impinging
     'coaxial': 0.18,      # coax shear (düşük ΔP)
     'showerhead': 0.28,   # atomizasyon için yüksek ΔP
     'pintle': 0.15,       # düşük ΔP (kısılabilir)
@@ -1014,6 +1081,11 @@ INJECTOR_TYPE_DP_FRACTION = {
 # olarak "klasik tasarım kuralının tavsiye ettiği oran"dır — ayrı bir
 # büyüklük değildir. Sayı DEĞİŞMEDİ (0,20); ikinci tanım noktası kalktı.
 INJECTOR_TYPE_DP_FRACTION_DEFAULT = CHUG_DP_RATIO_RECOMMENDED
+# V301/L-D (SV-16): ``injection_system.pressure_drop_source`` künyeleri TEK
+# tanımda (metinler DEĞİŞMEDİ, yalnız sabite alındı). Formun ΔP ipucu bu iki
+# künyeyi anar; bekçi: tests/test_d15_sablonlar_a1.py (ÖK-10).
+INJECTOR_DP_SOURCE_USER = 'user input (injector pressure drop)'
+INJECTOR_DP_SOURCE_TYPE_RATIO = 'NASA SP-8089 dP/Pc ratio for the element type'
 
 # Enjektör tipi TANINAN değerler — TEK tanım noktası (ÖH D17 · P3B1-12).
 # COOLING_TYPES_RECOGNISED ile AYNI desen: küme yazılmaz, ΔP/Pc tablosundan
@@ -1033,14 +1105,42 @@ INJECTOR_TYPE_DP_FRACTION_DEFAULT = CHUG_DP_RATIO_RECOMMENDED
 # tip-bağımsız varsayılandan alıyordu. Modülün ``impinging_doublet``i zaten
 # FARKLI akışkanların çarpıştığı doublet'tir, yani eşleme uydurma değil
 # adlandırmanın düzeltilmesidir.
+#
+# V301/L-C (SV-06): formun varsayılan seçeneği 'impinging' "Like-on-Like
+# Impinging" diye etiketliydi ama BU tabloda 'impinging_doublet'e, yani
+# FARKLI akışkanların çarpıştığı doublet'e gidiyordu; 'unlike_impinging'
+# ile sayıları bit-aynıydı (denetim s6_sarsim_pressure_fed.json). Seçenek
+# artık tasarladığı şeyin adını taşır: kanonik ad 'unlike_impinging'; eski
+# 'impinging' değeri geriye uyum için KABUL edilir ve kanonik ada çözülür
+# (``INJECTOR_TYPE_LEGACY_ALIASES``). Gerçek benzer-akışkan çift
+# 'like_impinging': her devre kendi çiftleriyle, devre çözücüsünün
+# ``design_like_doublet``i üzerinden (çift sayıda delik).
 INJECTOR_TYPE_CIRCUIT_MODEL = {
-    'impinging': 'impinging_doublet',
     'unlike_impinging': 'impinging_doublet',
+    'like_impinging': 'like_impinging',
     'coaxial': 'coax_swirl',
     'showerhead': 'showerhead',
     'pintle': 'pintle',
     'swirl': 'swirl',
+    # Geriye uyum (eski form/.hrma değeri): kanonik ada çözülür.
+    'impinging': 'impinging_doublet',
 }
+#: Eski enjektör tipi değeri -> kanonik ad (V301/L-C, SV-06).
+INJECTOR_TYPE_LEGACY_ALIASES = {'impinging': 'unlike_impinging'}
+
+
+def canonical_injector_type(raw):
+    """Enjektör tipini kanonik ada çözer (küçük harf, eski takma ad).
+
+    Tanınmayan değer OLDUĞU GİBİ döner (küçük harfe indirilmeden): kapılar
+    onu adıyla reddeder, burada sessiz ikame yapılmaz.
+    """
+    if not isinstance(raw, str):
+        return raw
+    anahtar = raw.strip().lower()
+    if anahtar not in INJECTOR_TYPE_CIRCUIT_MODEL:
+        return raw
+    return INJECTOR_TYPE_LEGACY_ALIASES.get(anahtar, anahtar)
 #: Uç kapısının beyaz listesi — küme YAZILMAZ, yönlendirme tablosundan
 #: TÜRETİLİR (COOLING_TYPES_RECOGNISED ile aynı desen).
 INJECTOR_TYPES_RECOGNISED = tuple(INJECTOR_TYPE_CIRCUIT_MODEL)
@@ -1079,12 +1179,66 @@ FILM_COOLING_PCT_MAX = 30.0
 # sayıyı değiştirmiyordu (film debisi 0 -> film yok).
 FILM_COOLING_PCT_DEFAULT = 5.0
 
+# L-B (v3.0.1, SV-08) — FİLM TİPİNDE REJENERATİF CEKET YOKTUR.
+FILM_COOLING_NO_JACKET_BASIS = (
+    'NOT APPLICABLE: the film cooling type protects the wall with the film '
+    'coolant only; there is no regenerative jacket, so the jacket flow, '
+    'pressure drop, channel section, coolant velocity and coolant exit '
+    'temperature are not published (no number is carried over from the '
+    'regenerative chain). A regenerative jacket WITH a film is the '
+    "'regenerative' cooling type plus film_cooling_percent.")
+
+# L-B (v3.0.1, SV-08) — FİLM SOĞUTUCUSUNUN PERFORMANS BEDELİ.
+# Model (HRMA seçimi, ihtiyatlı ALT sınır): film yanmaz, itkiye katkısı yok
+# sayılır; itki sabit tasarımda Isp_teslim = Isp_çekirdek·ṁ_çekirdek /
+# (ṁ_çekirdek + ṁ_film). Literatür kıyası (depoda okunmuş kaynak,
+# docs/arastirma/2026-10-05/notlar/ASYA/kari_film_sogutma_2011_2012.md):
+# Joh, Kim, Choi, KSPE 2012 Bahar Konferansı s. 35-41, Şek. 2 (grafik
+# okuması, ±0,5 s): kerosen/LOX, Pc 60 bar, toplam O/F 2,44, ε 12, film
+# yakıtın %12'si -> Isp_vak 325,5 -> 316,5 s (-%2,8); ~%0,23 / %1 film.
+# Aynı koşulda bu model -%3,5 verir (ṁ_film/ṁ_toplam = 3,10/88,8), yani
+# teslim Isp'si için ALT sınırdır. Kaynak bildiri düzeyi ve tek ekiptir
+# (güven: orta); Huzel & Huang / Sutton & Biblarz bandı bu kulvarda bir
+# metinden doğrulanmadı ve sabit olarak KULLANILMAZ.
+FILM_COOLING_PERFORMANCE_BASIS = (
+    'HRMA choice, a conservative LOWER bound on the delivered Isp: the film '
+    'coolant does not burn and its thrust contribution is neglected. At '
+    'constant thrust the core flow (core O/F = the entered mixture ratio, '
+    'core Isp) is unchanged and the film flow is ADDED to it: total mass '
+    'flow = core + film, Isp_delivered = Isp_core x core / (core + film); '
+    'the headline isp_sea_level, isp_vacuum, total_mass_flow and fuel_flow '
+    'carry these delivered values. Literature check: Joh, Kim & Choi (KSPE '
+    '2012 spring conf., pp. 35-41, Fig. 2; kerosene/LOX, Pc 60 bar, O/F '
+    '2.44, eps 12) report about -2.8 % vacuum Isp for a film of 12 % of the '
+    'fuel, where this model gives about -3.5 %: a heated film expands '
+    'through the nozzle and does produce some thrust, so the real loss is '
+    'smaller than the one charged here.')
+
 # Damlacık ikincil parçalanma (atomizasyon) süresi için boyutsuz süre T*:
 #     t_b = T* · d_jet / v_rel · sqrt(rho_l / rho_gas)
 # Pilch & Erdman (1987), Int. J. Multiphase Flow 13(6), 741-757; Nicholls
 # (1972) — torba/çok modlu parçalanma rejiminde T* ≈ 5. Yanma odasındaki
 # karakteristik karışma/atomizasyon zamanı bu ölçekten gelir.
 DROPLET_BREAKUP_TIME_CONST = 5.0
+
+# V301/L-C (ana model kararı, 27 Eki 2026): pintle chug hükmü İKİ atomizasyon
+# ölçeğiyle. Nominal (beyanlı HRMA seçimi) ölçek oksitleyici tabakasının
+# kalınlığı t; ikincisi radyal yakıt jeti çapı d.
+PINTLE_CHUG_NOMINAL_SCALE = 'annulus_gap_t'
+PINTLE_CHUG_SCALE_BASIS = (
+    'Pintle: there is no single universal atomisation length scale. The '
+    'oxidizer annular sheet thickness t stands for SHEET breakup and the '
+    'fuel radial tip-hole diameter d for JET breakup; both enter the same '
+    'secondary-breakup time t_b = T*·L/v·sqrt(rho_l/rho_gas) (T* = 5, Pilch & '
+    'Erdman 1987; Nicholls 1972) with their own stream velocity and liquid '
+    'density, and neither is calibrated for a pintle injector. The chug loop '
+    '(hrma.stability.chug) is run with both: if the verdicts agree it is '
+    'published; if they differ the published verdict is MARGINAL (sensitive '
+    'to the atomisation scale) and the nominal-scale numbers (t, an HRMA '
+    'choice) stay published unchanged. No percentage uncertainty band is '
+    'applied: no sourced universal band exists (Szuch & Wenzel, NASA TN '
+    'D-4564, report experimental scatter in the location of the chug '
+    'boundary).')
 
 # --- τ_c ÇAPRAZI (sıvı + hibrit ORTAK yardımcısı, v2.6.27 parti 31) --------
 # Kamara zaman sabitine İKİ bağımsız yol vardır ve ikisi de aynı fiziksel
@@ -1234,6 +1388,16 @@ TURBINE_INPUT_UNUSED_REASON = 'no_turbine_in_this_cycle'
 TURBOPUMP_INPUT_FIELDS = ('turbopump_efficiency', 'generator_gas_temp')
 #: Turbopompa alanları beyanının ``inputs_not_used`` gerekçe adı.
 TURBOPUMP_INPUT_UNUSED_REASON = 'no_turbopump_in_this_cycle'
+#: V301/L-A (SV-10): turbopompalı çevrimde ``feed_pressure`` OKUNMAZ — tank
+#: NPSH'den boyutlanır (``_tank_pressure_bar`` turbopompa dalı), pompa basma
+#: basıncı çevrim dengesinden gelir. ÖLÇÜLDÜ (A-sivi SV-10; L-A once.json
+#: ``gg_fp_yok`` ⟷ ``v_gg``): 130 ⟷ gönderilmedi farkı yalnız yankı yaprağı
+#: ``detailed_feed_system.feed_pressure_input_bar``. Gönderildiyse
+#: ``inputs_not_used`` ile ADIYLA beyan edilir; uç kapısı onu bu çevrimde
+#: tutarlılık (chug) kapısına sokmaz.
+FEED_PRESSURE_UNUSED_FIELDS = ('feed_pressure',)
+#: Bu beyanın ``inputs_not_used`` gerekçe adı.
+FEED_PRESSURE_UNUSED_REASON = 'not_read_in_turbopump_cycle'
 
 
 def _pump_ns_band_status(rpm, q_m3_s, head_m):
@@ -1283,7 +1447,15 @@ def tank_feeds_injector(request_data):
 # Liquid-Propellant Rocket Engines", AIAA 1992, Ch. 4 — KU-K1/SP-H1 K3/K13:
 # bu baskı okunmadı, sayfa doğrulanmadı; NASA SP-125 (1967) ayrı kitaptır ve
 # bu bandı içermez). Yapısal dış cidar ayrıdır.
+# V301/L-KABUK: aynı sabit artık BÜTÜN rejeneratif yolların (RP-1 istasyon
+# marşı + metan/LH2 süperkritik marş) varsayılan astar kalınlığıdır;
+# kullanıcı chamber_wall_thickness girerse astar o olur.
 REGEN_LINER_THICKNESS_M = 1.0e-3
+REGEN_LINER_THICKNESS_BASIS = (
+    'HRMA choice inside the milled-channel liner practice band 0.5-2 mm '
+    '(Huzel & Huang, AIAA 1992 Ch. 4 - that edition was not read, page NOT '
+    'verified); NASA SP-125 1967 sample 4-4 sizes the A-1 tube wall at '
+    '0.020 in (0.51 mm), p. 110')
 
 # Rejeneratif ceketin kapladığı azami genişleme oranı: ana yanma odası
 # ceketi tipik olarak ε≈5-6'ya kadar frezeli kanallıdır (RS-25 ana yanma
@@ -1359,6 +1531,14 @@ BURN_TIME_SOURCE_USER = 'user input (max burn duration)'
 BURN_TIME_SOURCE_TUTORIAL = ('tutorial default (%g s, use_tutorial_defaults)'
                              % BURN_TIME_DEFAULT_S)
 BURN_TIME_SOURCE_NOT_SUPPLIED = 'not_supplied'
+#: V3.0.5 SIVI-CIDAR (kalem 4) — sıvı motorun toplam impuls tanımı (TEK yer).
+TOTAL_IMPULSE_BASIS = (
+    'total_impulse = thrust x burn_time: the design thrust (thrust) held '
+    'for the burn time (burn_time, see burn_time_source), a steady-state '
+    'constant-thrust burn at the design operating point; start-up and '
+    'shut-down transients and throttling are not included. The design '
+    'report, the PDF performance table and safety section and the '
+    'OpenRocket export read this number.')
 #: Süre verilmediğinde süreye bağlı her bloğun ortak gerekçe cümlesi.
 BURN_TIME_NOT_SUPPLIED_REASON = (
     'the burn time was not supplied (max_burn_duration is empty) and no '
@@ -1806,6 +1986,201 @@ CHAMBER_MATERIAL_MAP = {
     'aluminum_6061': 'aluminum_6061', 'copper_c101': 'copper',
     'cucrzr': 'cucrzr', 'steel_4130': 'steel_4130',
 }
+
+# ---------------------------------------------------------------------------
+# V301/L-KABUK (27 Eki 2026) — ÇİFT KATMANLI REJENERATİF CİDAR
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/kati-sivi/L-KABUK/olcum_once.json):
+# rejeneratif yolda sıcak gaz cidarı = yapısal hazne cidarıydı (tek katman).
+# Isıl zincir ince cidar ister (CuCrZr 0,6-1,0 mm), basınç çemberi kalın
+# cidar ister (CuCrZr SF 2,5 ile 6,6-8,1 mm); biri ötekini bozuyordu ve
+# örnek sıvı motor ya kritik bayrakla ya da çözülmemiş ısıl zincirle
+# açılıyordu. Gerçek kanallı cidarlar iki katmanlıdır: NASA SP-8087 (1972)
+# s. 26 "channel-wall construction where the coolant passages are integral
+# with the inner shell, and the outer shell is electroformed nickel"; s. 58
+# "spin liners with milled channels ... electroformed or brazed closures";
+# §3.1.3.1.2 s. 66 "The outer wall of double-wall construction ... provide[s]
+# primary structural support". Yapı bunu iki katmanla kurar:
+#   * astar (liner): sıcak gaz cidarı, kanallı; malzeme = chamber_material;
+#     kalınlık = gaz yüzü ⟷ kanal tabanı (chamber_wall_thickness alanı
+#     rejeneratif yolda BU anlama gelir);
+#   * dış kabuk (closeout): kanalların üstünü kapatan, soğutucu basıncını
+#     taşıyan kabuk; malzeme ``closeout_material``, kalınlık
+#     ``closeout_thickness`` (boşsa HRMA boyutlandırır).
+WALL_MODEL_TWO_LAYER = 'two_layer_regenerative'
+WALL_MODEL_SINGLE = 'single_wall'
+#: Dış kabuk malzeme seçenekleri — form anahtarları (``CHAMBER_MATERIAL_MAP``
+#: sözlüğünün anahtarları; DB kaydı oradan çözülür, ikinci eşleme yazılmaz).
+#: materials_db'de elektrodökme nikel kaydı YOK (SP-8087'nin örnek kabuğu);
+#: mevcut yapısal kayıtlar sunulur, yeni malzeme kaydı eklenmedi.
+CLOSEOUT_MATERIAL_CHOICES = ('inconel_718', 'inconel_625', 'steel_304',
+                             'steel_316')
+#: HRMA seçimi: motorun varsayılan yapısal hazne malzemesi — tek katmanlı
+#: modelde basıncı taşıyan cidarın malzemesiydi, iki katmanda basıncı
+#: taşıyan katman dış kabuktur (aynı rol, aynı varsayılan).
+CLOSEOUT_MATERIAL_DEFAULT = CHAMBER_MATERIAL_DEFAULT
+CLOSEOUT_MATERIAL_SOURCE_USER = 'user input (closeout material)'
+CLOSEOUT_MATERIAL_SOURCE_DEFAULT = (
+    f"not supplied -> '{CLOSEOUT_MATERIAL_DEFAULT}' (HRMA choice: the "
+    'default structural chamber material, the pressure-bearing layer of the '
+    'single-wall model; electroformed nickel, the closeout of NASA SP-8087 '
+    'p. 26, has no materials_db record)')
+CLOSEOUT_MATERIAL_SOURCE_REJECTED = (
+    'supplied value not recognised (see input_warnings) -> '
+    f"'{CLOSEOUT_MATERIAL_DEFAULT}' default")
+#: RP-1 istasyon marşının soğutucu giriş basıncı = P_c + bu pay [bar].
+#: KAYNAKSIZ HRMA varsayımı (L-REJ AÇIK-8; eskiden satır içi literal 10.0):
+#: yalnız marşın basınç profilini başlatır (RP-1 özellik tablosu basınca
+#: bağlı değildir). İki katmanlı cidarın katman denetimi bunu DEĞİL, besleme
+#: bütçesinin yakıt zinciri basıncını kullanır (üst sınır).
+RP1_MARCH_INLET_MARGIN_BAR = 10.0
+RP1_MARCH_INLET_MARGIN_BASIS = (
+    'chamber pressure + 10 bar: an UNSOURCED HRMA assumption that only '
+    'starts the coolant pressure profile of the RP-1 station march (the RP-1 '
+    'property table is not pressure dependent); the wall-layer checks use '
+    'the fuel feed budget pressure instead (chamber_structure.wall_layers'
+    '[*].coolant_pressure_bar)')
+#: Yanıtta ``chamber_structure.wall_model_basis`` (EN; ekranın çevirdiği
+#: anahtar ``WALL_MODEL_BASIS_KEYS``).
+WALL_MODEL_TWO_LAYER_BASIS = (
+    'Two-layer regenerative wall (NASA SP-8087 1972 p. 26 and sec. '
+    '3.1.3.1.2 p. 66: channel-wall construction, the outer wall provides the '
+    'primary structural support). Layer 1, the liner, is the channelled '
+    'hot-gas wall: its thickness (gas side to channel base) is the hot wall '
+    'of the thermal chain, and it is checked for the coolant-to-gas pressure '
+    'difference across the channel span between lands plus the thermal '
+    'stress through its thickness. Layer 2, the closeout, covers the '
+    'channels and carries the coolant pressure as a hoop shell. The drawn '
+    'chamber wall is the stack liner + channel depth + closeout; the '
+    'governing safety factor of the stack is the smaller of the two layers.')
+WALL_MODEL_SINGLE_BASIS = (
+    'Single wall: this cooling type has no regenerative jacket, so the hot '
+    'wall and the pressure-bearing chamber wall are the same wall.')
+WALL_MODEL_BASIS_KEYS = {
+    WALL_MODEL_TWO_LAYER: 'liq.wall.model.two_layer_basis',
+    WALL_MODEL_SINGLE: 'liq.wall.model.single_basis',
+}
+#: Astar gerilme modeli künyesi.
+LINER_STRESS_BASIS = (
+    'liner stress at the hot face at the land root, per jacket station: '
+    'bending of the liner strip spanning one channel between two lands, '
+    'clamped at the lands (Euler-Bernoulli beam with both ends fixed under '
+    'the uniform pressure difference dp: M = dp*w^2/12, sigma_b = 6M/t^2 = '
+    'dp*w^2/(2*t^2); the 6M/t^2 bending term of NASA SP-125 1967 eq. 4-27, '
+    'p. 108) plus the thermal stress through the liner thickness '
+    'sigma_th = E*alpha*dT/(2*(1-nu)) (second term of NASA SP-125 eq. 4-31, '
+    'p. 109, E*alpha*q*t/(2(1-nu)k) with dT = q*t/k), both compressive at '
+    'the hot face and added; the transverse shear at the land root '
+    'tau = 0.75*dp*w/t (1.5 x the mean shear of the strip end) is combined '
+    'as sigma_eq = sqrt(sigma^2 + 3*tau^2). dp = coolant pressure - local '
+    'gas static pressure (isentropic, the station Mach number). The yield '
+    'strength is taken at the liner MEAN temperature (hot + coolant side)/2 '
+    '(materials_db derating curve). The ring-compression term '
+    '(p_co - p_g)*R/t of SP-125 eq. 4-31 belongs to an unbonded coaxial '
+    'inner shell and is NOT applied: the lands are bonded to the closeout, '
+    'which is checked for the full coolant-pressure hoop. E, alpha and nu '
+    'are the room-temperature materials_db values (their temperature '
+    'dependence is not modelled).')
+#: Dış kabuk gerilme modeli künyesi.
+CLOSEOUT_STRESS_BASIS = (
+    'closeout hoop stress under the coolant pressure, thin shell with the '
+    'OUTER radius (Barlow form, conservative): sigma = p_co*r_out/t, at the '
+    'largest jacket radius with the highest coolant pressure (envelope; NASA '
+    'SP-125 1967 p. 109: "the outer shell is subjected only to the hoop '
+    'stress induced by the coolant pressure"); yield strength at the '
+    'closeout temperature (materials_db derating curve); safety factor rule '
+    'and sizing rule of the single-wall chamber (allowable = yield / '
+    'safety_factor, WALL_THICKNESS_MANUFACTURING_MIN_M floor, next standard '
+    'plate).')
+#: Dış kabuk sıcaklık modeli künyesi.
+CLOSEOUT_TEMPERATURE_BASIS = (
+    'closeout temperature = the highest coolant bulk temperature along the '
+    'jacket (station march): model with an ADIABATIC outer surface (no heat '
+    'leaves through the closeout, so in steady state it reaches the '
+    'temperature of the coolant it encloses); conservative for strength '
+    'because the hottest coolant is applied to the whole closeout.')
+#: İki katmanlı cidarda ``chamber_structure`` geçerlilik bayrağının künyesi.
+TWO_LAYER_WALL_VALIDITY_BASIS = (
+    'TRUE means: a layer of the two-layer regenerative wall is at or above '
+    'its melting point or above the last point of its strength-derating '
+    'data - the liner at its peak hot-wall temperature '
+    '(wall_layers[0].max_temperature_K) or the closeout at its temperature '
+    '(wall_layers[1].max_temperature_K). The strength of that layer there is '
+    'an extrapolation or zero, so the structural result of the stack is '
+    'outside the validity limit of the structural model and no design '
+    'verdict is issued (verdict_withheld).')
+#: Katman hükmünde modellenmeyen kipler (adıyla; kritik değildir).
+WALL_LAYERS_NOT_MODELLED = (
+    'low_cycle_fatigue', 'creep', 'liner_closeout_thermal_expansion_mismatch',
+    'bond_strength_between_lands_and_closeout', 'buckling')
+WALL_LAYERS_NOT_MODELLED_BASIS = (
+    'not modelled in this release: low-cycle (thermal strain) fatigue of the '
+    'liner, creep, the thermal-expansion mismatch between liner and closeout, '
+    'the bond strength between lands and closeout, and buckling. They are '
+    'named, not judged: the layer verdicts cover strength under the steady '
+    'pressure and thermal loads only.')
+#: V3.0.5 SIVI-CIDAR (kalem 1, Berke 28 Eki "madem çözülmemiş, çözelim") —
+#: istasyon marşı KOŞMAYAN rejeneratif yolda astarın sıcaklığı boğaz
+#: istasyonunda 1B SERİ DEVREYLE ÇÖZÜLÜR. Eskiden sıcak cidar tasarım
+#: varsayılanında (800 K) TUTULUP soğuk yüz T_sıcak − q·t/k diye kuruluyordu;
+#: kalın astarda soğuk yüz negatif çıkıyordu. ÖLÇÜLDÜ (taban 379e35f23,
+#: Pc 100 bar, Inconel 718 astar 5 mm, marş ince-cidar zarfıyla reddedildi):
+#: q·t/k = 2964,87 K → T_soğuk −2164,87 K, ortalama −682,44 K, SF 0,2026
+#: (docs/scofield/raw/OH/V301/sivi-cidar/olcum/k1_once.json).
+#: Devre: gaz tarafı iletkenliği (bu koşunun Bartz + karbon birikimi h_gc'si)
+#: ⟷ SİLİNDİRİK astar iletimi ⟷ soğutucu konveksiyonu (marşın AYNI
+#: korelasyonları ve özellik tablosu). Soğutucu yığın sıcaklığı boğazda marş
+#: olmadan bilinmez; devre ceketin İKİ ucunda (giriş ve toplu çıkış
+#: sıcaklığı) çözülür, küçük SF yönetir.
+LINER_THROAT_SOLUTION_BASIS = (
+    'SOLVED at the throat station (no station march on this run): 1D series '
+    'circuit per unit gas-side area, q = (T_c - T_coolant) / (1/h_gc + '
+    'r1*ln(r2/r1)/k_liner + 1/(h_c*A_eff/A_gas)), T_hot = T_c - q/h_gc, '
+    'T_cold = T_coolant + q/(h_c*A_eff/A_gas). h_gc is the gas-side '
+    'conductance at the throat of this run '
+    '(cooling_system.gas_side_conductance_throat: Bartz, Sutton & Biblarz '
+    '9th ed. Eq. 8-23, with the carbon-deposit resistance of NASA SP-125 '
+    'Eq. 4-18 where it applies) and T_c is the same driving temperature as '
+    'cooling_system.peak_heat_flux; the liner conducts through the '
+    'CYLINDRICAL wall (Incropera & DeWitt 6th ed. Eq. 3.28, r1 = throat '
+    'radius, r2 = r1 + liner thickness), which holds for the thick liners '
+    'the station march refuses with its flat-plate formula; the coolant side '
+    'is Dittus-Boelter (Incropera Eq. 8.60) with the Sieder-Tate '
+    'wall-viscosity factor (NASA SP-125 Eq. 4-23) and the lands as straight '
+    'fins (regen_cooling.fin_area_ratio, Incropera Ch. 3.6) referred to the '
+    'gas-side area by r2/r1 - the same correlations and coolant property '
+    'table as the station march. Without the march the coolant bulk '
+    'temperature at the throat is not known, so the circuit is solved at '
+    'BOTH ends of the jacket - the coolant inlet temperature and the bulk '
+    'coolant exit temperature (cooling_system.coolant_exit_temperature) - '
+    'and the lower liner safety factor governs.')
+#: Karbon birikimi UYGULANMIYORSA h_gc Bartz σ'sının tasarım cidarındaki
+#: değeridir (birikimde σ SP-125'e göre T_wg/T_c = 0,8'de sabittir).
+LINER_THROAT_SIGMA_AT_DESIGN_WALL_NOTE = (
+    ' No carbon deposit applies on this run, so h_gc is the Bartz '
+    'coefficient of the bulk chain evaluated at the design hot-wall '
+    'temperature; its weak wall-temperature dependence (the Bartz sigma '
+    'factor) is not re-iterated at the solved wall.')
+#: Çözüm yolu yoksa (soğutucunun özellik tablosu yok ya da devre girdisi
+#: eksik) eski varsayım dalı kalır; künye eksik girdiyi ADIYLA söyler.
+LINER_THROAT_ASSUMPTION_BASIS = (
+    'ASSUMPTION - no station march and no throat solution on this run '
+    '({missing}): the throat is evaluated at the design hot-wall '
+    'temperature {t_hot:g} K with the bulk Bartz peak heat flux '
+    '(cooling_system.peak_heat_flux)')
+#: Varsayım tutarsızsa (astarın iletim düşümü sıcak cidar ile soğutucu
+#: arasındaki aralığı aşıyorsa) katman hükmü GERİ ÇEKİLİR; sıcaklık, gerilme,
+#: SF yayımlanmaz. Gerekçe EN (TR: warn.liquid.liner_wall_assumption_
+#: inconsistent).
+LINER_ASSUMPTION_INCONSISTENT_REASON = (
+    'liner verdict WITHHELD: no wall temperature is solved on this run '
+    '({missing}) and the design hot-wall assumption is inconsistent - the '
+    'conduction drop across the liner q*t/k = {drop_K:.1f} K exceeds the '
+    'room between the assumed hot wall and the coolant, '
+    'T_hot - T_coolant = {room_K:.1f} K ({t_hot_K:g} K - {t_coolant_K:.1f} '
+    'K, coolant at the bulk exit temperature the closeout uses): the liner '
+    'cannot carry this heat flux at the assumed hot-wall temperature, so no '
+    'temperature, stress or safety factor is published for it')
 
 # Nozul tipi geometrisi. length_fraction: 15 derece konik nozul uzunluğuna
 # oranla kontur uzunluğu (Rao %80 / %60 bell). exit_angle: bell çıkış açısı,
@@ -2355,6 +2730,106 @@ LIQUID_UNREAD_INPUT_FIELDS = {
 #: eşikle cevaplasın diye.
 LIQUID_INPUT_ECHO_REL_TOL = 1e-6
 
+#: V301/L-A (SV-01) — SIVI FORM ALANLARININ KABUL BANTLARI, TEK KAYNAK.
+#:
+#: ``_override_val`` okuyucusunun bantları eskiden her çağrı satırına elle
+#: yazılıydı; ``/calculate_liquid`` ucu bu bantları göremediği için bant
+#: dışı değer HTTP 200 alıyor, çözücü değeri atıp BAŞKA bir sayıyla tasarım
+#: yayımlıyordu (A-sivi denetimi SV-01, ölçüm ``docs/scofield/raw/OH/V301/
+#: kati-sivi/L-A/once.json``: η 150 % -> Isp 244,86 -> 252,44 s, ε 1000 ->
+#: başka ε, kesirli 2,5 eleman -> sessizce 2). Bantlar artık BURADA durur;
+#: motor (``_override_band``) ve uç (``app.py`` sıvı bant kapısı) AYNI
+#: tabloyu okur. Sayıların HİÇBİRİ DEĞİŞMEDİ: her satır, taşındığı çağrının
+#: birebir aynı alt/üst sınırı, etiketi ve birim ekidir (kanıt: geçerli
+#: girdide yanıt md5'i önce = sonra).
+#:
+#: Biçim: alan -> (alt, üst, EN etiket, birim eki). Birim eki uyarı
+#: metnine olduğu gibi eklendiği için baştaki boşluk korunur.
+LIQUID_INPUT_BANDS = {
+    'fuel_density': (20.0, 2500.0, 'Fuel density', ' kg/m3'),
+    'oxidizer_density': (20.0, 2500.0, 'Oxidizer density', ' kg/m3'),
+    'fuel_viscosity': (1e-7, 10.0, 'Fuel viscosity', ' Pa.s'),
+    'oxidizer_viscosity': (1e-7, 10.0, 'Oxidizer viscosity', ' Pa.s'),
+    'fuel_heat_capacity': (500.0, 20000.0, 'Fuel heat capacity',
+                           ' J/kg.K'),
+    'fuel_thermal_conductivity': (0.01, 500.0, 'Fuel thermal conductivity',
+                                  ' W/m.K'),
+    'fuel_boiling_point': (20.0, 900.0, 'Fuel boiling point', ' K'),
+    'of_max_isp': (0.2, 20.0, 'O/F at maximum Isp', ''),
+    'of_max_thrust': (0.2, 20.0, 'O/F at maximum thrust', ''),
+    'of_min': (0.2, 20.0, 'O/F minimum', ''),
+    'of_max': (0.2, 20.0, 'O/F maximum', ''),
+    'combustion_efficiency': (COMBUSTION_EFFICIENCY_INPUT_BAND_PERCENT[0],
+                              COMBUSTION_EFFICIENCY_INPUT_BAND_PERCENT[1],
+                              'Combustion efficiency', ' %'),
+    'characteristic_length': (L_STAR_MIN_M, L_STAR_MAX_M,
+                              'Characteristic length L*', ' m'),
+    'contraction_ratio': (CONTRACTION_RATIO_MIN, CONTRACTION_RATIO_MAX,
+                          'Contraction ratio', ''),
+    'chamber_diameter': (10.0, 5000.0, 'Chamber diameter', ' mm'),
+    'nozzle_expansion_ratio': (1.5, 300.0, 'Nozzle expansion ratio', ''),
+    'throat_diameter': (1.0, 3000.0, 'Throat diameter', ' mm'),
+    'injector_pressure_drop': (0.2, 200.0, 'Injector pressure drop',
+                               ' bar'),
+    'discharge_coefficient': (USER_CD_RANGE[0], USER_CD_RANGE[1],
+                              'Discharge coefficient', ''),
+    'injector_elements': (1.0, 20000.0, 'Injector element count', ''),
+    'fuel_injection_velocity': (0.5, 300.0, 'Fuel injection velocity',
+                                ' m/s'),
+    'oxidizer_injection_velocity': (0.5, 300.0,
+                                    'Oxidizer injection velocity', ' m/s'),
+    'fuel_orifice_diameter': (0.05, 50.0, 'Fuel orifice diameter', ' mm'),
+    'oxidizer_orifice_diameter': (0.05, 50.0, 'Oxidizer orifice diameter',
+                                  ' mm'),
+    'cooling_channels': (float(COOLING_CHANNEL_COUNT_MIN),
+                         float(COOLING_CHANNEL_COUNT_MAX),
+                         'Cooling channel count', ''),
+    'coolant_flow_percent': (5.0, 100.0, 'Coolant flow fraction', ' %'),
+    'coolant_inlet_temp': (20.0, 700.0, 'Coolant inlet temperature', ' K'),
+    'max_wall_temp': (300.0, 3000.0, 'Maximum wall temperature', ' K'),
+    'chamber_roughness': (0.05, 100.0, 'Chamber surface roughness', ' um'),
+    'safety_factor': (SAFETY_FACTOR_MIN, SAFETY_FACTOR_MAX, 'Safety factor',
+                      ''),
+    'chamber_wall_thickness': (0.2, 500.0, 'Chamber wall thickness', ' mm'),
+    # V301/L-KABUK: dış kabuk kalınlığı — bant chamber_wall_thickness ile
+    # aynı (iki kalınlık alanı aynı kabul aralığını paylaşır).
+    'closeout_thickness': (0.2, 500.0, 'Closeout thickness', ' mm'),
+    'engine_life_cycles': (1.0, 100000.0, 'Engine life cycles', ''),
+    'target_thrust_to_weight': (1.0, 500.0, 'Target thrust-to-weight', ''),
+    'max_burn_duration': (BURN_TIME_MIN_S, BURN_TIME_MAX_S, 'Burn duration',
+                          ' s'),
+    'feed_pressure': (1.0, 1000.0, 'Feed pressure', ' bar'),
+    'turbopump_efficiency': (20.0, 95.0, 'Turbopump efficiency', ' %'),
+    'generator_gas_temp': (400.0, 2500.0, 'Gas generator temperature', ' K'),
+    'turbine_inlet_pressure': (1.0, 1000.0, 'Turbine inlet pressure',
+                               ' bar'),
+    'turbine_expansion_ratio': (1.2, 60.0, 'Turbine expansion ratio', ''),
+    'film_cooling_percent': (0.0, FILM_COOLING_PCT_MAX, 'Film cooling flow',
+                             ' %'),
+    'min_throttle': (5.0, 100.0, 'Minimum throttle', ' %'),
+    'feed_line_wall_thickness': (0.1, 50.0, 'Feed line wall thickness',
+                                 ' mm'),
+    'valve_closure_time_ms': (0.1, 6e5, 'Valve closure time', ' ms'),
+    'feed_line_length_m': (0.05, 50.0, 'Feed line length', ' m'),
+    'feed_line_area_m2': (1e-8, 1.0, 'Feed line flow area', ' m²'),
+    'feed_line_diameter_mm': (0.5, 500.0, 'Feed line inner diameter',
+                              ' mm'),
+    'closure_bolt_count': (_BOLTED_JOINT_CLOSURE_DEFAULTS[
+                               'bolt_count_range'][0],
+                           _BOLTED_JOINT_CLOSURE_DEFAULTS[
+                               'bolt_count_range'][1],
+                           'Closure bolt count', ''),
+}
+
+#: V301/L-A (SV-01) — ADET alanları. Çözücü bunları ``int(round(v))`` ile
+#: okuyordu: 2,5 eleman sessizce 2 oluyordu (ölçüldü, ``once.json``
+#: ``bd_injector_elements_2.5``; 40,5 kanal -> başka tasarım). Uç bu
+#: alanlarda kesirli değeri ADIYLA reddeder; motorun Python API yolu
+#: değişmedi.
+LIQUID_INPUT_COUNT_FIELDS = frozenset({
+    'injector_elements', 'cooling_channels', 'engine_life_cycles',
+    'closure_bolt_count'})
+
 
 class LiquidRocketEngine:
     """Liquid bipropellant rocket engine analysis module"""
@@ -2404,7 +2879,9 @@ class LiquidRocketEngine:
             self._warn('warn.liquid.option_not_recognised', 'warning',
                        field='cooling_type', field_label_en='Cooling type',
                        raw=str(cooling_type))
-        self.injector_type = injector_type
+        # V301/L-C (SV-06): eski 'impinging' kanonik 'unlike_impinging'e
+        # çözülür; yanıt kanonik adı yayımlar.
+        self.injector_type = canonical_injector_type(injector_type)
         self.feed_system_type = feed_system_type
 
         # Web-enhanced propellant database — TEMBEL yükleme (v2.5.0, Berke
@@ -2613,6 +3090,16 @@ class LiquidRocketEngine:
             return None
         return f
 
+    def _override_band(self, key):
+        """``_override_val`` — bant, etiket ve birim TEK tablodan.
+
+        V301/L-A (SV-01): bant ``LIQUID_INPUT_BANDS``tadır; ``/calculate_
+        liquid`` ucu da aynı tabloyu okuyup bant dışını motordan ÖNCE 422 ile
+        reddeder. Bu yol (uyarı + None) Python API için olduğu gibi kalır.
+        """
+        lo, hi, label, unit = LIQUID_INPUT_BANDS[key]
+        return self._override_val(key, lo, hi, label, unit)
+
     def _override_choice(self, key, allowed, label=None):
         """Metin seçimi doğrular; tanınmayan değer uyarı üretir."""
         raw = self.overrides.get(key)
@@ -2656,49 +3143,40 @@ class LiquidRocketEngine:
         raporlanır (UI orada devre dışı bırakır) — sessiz düşme yok.
         """
         # --- yakıt/oksitleyici özellikleri ---------------------------------
-        v = self._override_val('fuel_density', 20.0, 2500.0,
-                               'Fuel density', ' kg/m3')
+        v = self._override_band('fuel_density')
         if v is not None:
             self.rho_fuel = v
-        v = self._override_val('oxidizer_density', 20.0, 2500.0,
-                               'Oxidizer density', ' kg/m3')
+        v = self._override_band('oxidizer_density')
         if v is not None:
             self.rho_ox = v
-        v = self._override_val('fuel_viscosity', 1e-7, 10.0,
-                               'Fuel viscosity', ' Pa.s')
+        v = self._override_band('fuel_viscosity')
         self.mu_fuel = v  # None -> alt katmanlar kendi varsayılanına düşer
-        v = self._override_val('oxidizer_viscosity', 1e-7, 10.0,
-                               'Oxidizer viscosity', ' Pa.s')
+        v = self._override_band('oxidizer_viscosity')
         self.mu_ox = v
-        v = self._override_val('fuel_heat_capacity', 500.0, 20000.0,
-                               'Fuel heat capacity', ' J/kg.K')
+        v = self._override_band('fuel_heat_capacity')
         self.cp_coolant_input = v
         # ÖH A2 sivi-sogutma (uc-kapi devri): kanonik cp KURUCUDA çözülür ve
         # künyesiyle tutulur (tek tanım COOLANT_CP_TABLE_J_KGK).
         self.coolant_cp_J_kgK, self.coolant_cp_source = \
             self._resolve_coolant_cp(v)
-        v = self._override_val('fuel_thermal_conductivity', 0.01, 500.0,
-                               'Fuel thermal conductivity', ' W/m.K')
+        v = self._override_band('fuel_thermal_conductivity')
         self.k_coolant_input = v
-        v = self._override_val('fuel_boiling_point', 20.0, 900.0,
-                               'Fuel boiling point', ' K')
+        v = self._override_band('fuel_boiling_point')
         self.fuel_boiling_point = v
 
         # --- O/F optimum noktaları (harita ve verim cezası bunları kullanır)
-        v = self._override_val('of_max_isp', 0.2, 20.0,
-                               'O/F at maximum Isp')
+        v = self._override_band('of_max_isp')
         if v is not None:
             self.optimal_mr = v
             self.optimal_mr_source = 'user input (of_max_isp)'
-        v = self._override_val('of_max_thrust', 0.2, 20.0,
-                               'O/F at maximum thrust')
+        v = self._override_band('of_max_thrust')
         if v is not None:
             self.optimal_mr_thrust = v
             # P3B1-04: kullanıcı yazdıysa künye onu söyler — 'çözüldü' ile
             # 'kullanıcı yazdı' aynı yaprakta ayırt edilemiyordu.
             self.optimal_mr_thrust_source = 'user input (of_max_thrust)'
-        self.of_scan_min = self._override_val('of_min', 0.2, 20.0, 'O/F minimum')
-        self.of_scan_max = self._override_val('of_max', 0.2, 20.0, 'O/F maximum')
+        self.of_scan_min = self._override_band('of_min')
+        self.of_scan_max = self._override_band('of_max')
         if (self.of_scan_min is not None and self.of_scan_max is not None
                 and self.of_scan_min >= self.of_scan_max):
             self._warn('warn.liquid.of_scan_band_invalid', 'warning')
@@ -2717,11 +3195,7 @@ class LiquidRocketEngine:
         # 2026-07-22: çarpma burada YAPILMAZ — teslim verim zinciri tek yerde
         # (_finalize_performance_reference / _calculate_mixture_ratio_effects)
         # uygulanır; iki yerde uygulanırsa η_c* ÇİFT SAYILIR.
-        eta_c = self._override_val(
-            'combustion_efficiency',
-            COMBUSTION_EFFICIENCY_INPUT_BAND_PERCENT[0],
-            COMBUSTION_EFFICIENCY_INPUT_BAND_PERCENT[1],
-            'Combustion efficiency', ' %')
+        eta_c = self._override_band('combustion_efficiency')
         # P16B2-07: KESİR biçimli değer (0 < x <= 1) yüzde bandının dışına
         # düşer ve reddedilir. Reddin GEREKÇESİ adıyla söylenir; değer
         # SESSİZCE yüzdeye çevrilmez (kullanıcı gerçekten %0,97 demiş
@@ -2758,9 +3232,7 @@ class LiquidRocketEngine:
                   'efficiency - HRMA does not model that link'))
 
         # --- hazne geometrisi ----------------------------------------------
-        _ham_l_star = self._override_val(
-            'characteristic_length', L_STAR_MIN_M, L_STAR_MAX_M,
-            'Characteristic length L*', ' m')
+        _ham_l_star = self._override_band('characteristic_length')
         # P3B2-02: L*'ın KULLANICIDAN mı MODEL TABANINDAN mı geldiği
         # kaydedilir. Geometri çelişkisinde hükmü kimin verdiği buna bağlıdır:
         # kullanıcı yazdıysa çelişki fail-closed reddedilir, model tabanıysa
@@ -2799,71 +3271,53 @@ class LiquidRocketEngine:
                        l_star_m=float(L_STAR_DEFAULT_M),
                        band_low_m=float(L_STAR_GENERIC_BAND_M[0]),
                        band_high_m=float(L_STAR_GENERIC_BAND_M[1]))
-        self.contraction_ratio_input = self._override_val(
-            'contraction_ratio', CONTRACTION_RATIO_MIN, CONTRACTION_RATIO_MAX,
-            'Contraction ratio')
+        self.contraction_ratio_input = self._override_band('contraction_ratio')
         self.chamber_diameter_input_m = None
-        v = self._override_val('chamber_diameter', 10.0, 5000.0,
-                               'Chamber diameter', ' mm')
+        v = self._override_band('chamber_diameter')
         if v is not None:
             self.chamber_diameter_input_m = v / 1000.0
 
         # --- lüle ----------------------------------------------------------
-        self.expansion_ratio_input = self._override_val(
-            'nozzle_expansion_ratio', 1.5, 300.0, 'Nozzle expansion ratio')
+        self.expansion_ratio_input = self._override_band('nozzle_expansion_ratio')
         self.nozzle_type = (self._override_choice(
             'nozzle_type', set(NOZZLE_TYPE_GEOMETRY), 'Nozzle type')
             or NOZZLE_TYPE_DEFAULT)
         self.throat_diameter_input_m = None
-        v = self._override_val('throat_diameter', 1.0, 3000.0,
-                               'Throat diameter', ' mm')
+        v = self._override_band('throat_diameter')
         if v is not None:
             self.throat_diameter_input_m = v / 1000.0
 
         # --- enjektör -------------------------------------------------------
-        self.injector_dp_input_bar = self._override_val(
-            'injector_pressure_drop', 0.2, 200.0,
-            'Injector pressure drop', ' bar')
+        self.injector_dp_input_bar = self._override_band('injector_pressure_drop')
         # Band TEK KAYNAKTAN (injector_design.USER_CD_RANGE): hibrit ayağı
         # aynı bandı kullanır, iki motor kullanıcıya farklı kapı açamaz.
         # Sayılar DEĞİŞMEDİ (0,20-1,0) — yalnız tanım tekleşti.
-        self.injector_cd_input = self._override_val(
-            'discharge_coefficient', USER_CD_RANGE[0], USER_CD_RANGE[1],
-            'Discharge coefficient')
-        v = self._override_val('injector_elements', 1.0, 20000.0,
-                               'Injector element count')
+        self.injector_cd_input = self._override_band('discharge_coefficient')
+        v = self._override_band('injector_elements')
         self.injector_elements_input = None if v is None else int(round(v))
-        self.fuel_velocity_input = self._override_val(
-            'fuel_injection_velocity', 0.5, 300.0,
-            'Fuel injection velocity', ' m/s')
-        self.ox_velocity_input = self._override_val(
-            'oxidizer_injection_velocity', 0.5, 300.0,
-            'Oxidizer injection velocity', ' m/s')
-        self.fuel_orifice_input_mm = self._override_val(
-            'fuel_orifice_diameter', 0.05, 50.0,
-            'Fuel orifice diameter', ' mm')
-        self.ox_orifice_input_mm = self._override_val(
-            'oxidizer_orifice_diameter', 0.05, 50.0,
-            'Oxidizer orifice diameter', ' mm')
+        # V301/L-C (SV-07): sıvı pintle ölçüleri (istek adları hibritle
+        # aynı). Tel/aralık kapısı uçtadır (/calculate_liquid); çözücü de
+        # ``resolve_liquid_pintle_geometry`` içinde aynı kapıdan geçirir.
+        from hrma.engines.injector_design import PINTLE_REQUEST_FIELDS
+        self.pintle_inputs = {}
+        for _anahtar in LIQUID_PINTLE_SPEC_KEYS:
+            _ham = self.overrides.get(PINTLE_REQUEST_FIELDS[_anahtar])
+            if _ham is not None and _ham != '':
+                self.pintle_inputs[_anahtar] = _ham
+        self.fuel_velocity_input = self._override_band('fuel_injection_velocity')
+        self.ox_velocity_input = self._override_band('oxidizer_injection_velocity')
+        self.fuel_orifice_input_mm = self._override_band('fuel_orifice_diameter')
+        self.ox_orifice_input_mm = self._override_band('oxidizer_orifice_diameter')
 
         # --- soğutma --------------------------------------------------------
-        v = self._override_val('cooling_channels',
-                               float(COOLING_CHANNEL_COUNT_MIN),
-                               float(COOLING_CHANNEL_COUNT_MAX),
-                               'Cooling channel count')
+        v = self._override_band('cooling_channels')
         self.cooling_channels_input = None if v is None else int(round(v))
-        v = self._override_val('coolant_flow_percent', 5.0, 100.0,
-                               'Coolant flow fraction', ' %')
+        v = self._override_band('coolant_flow_percent')
         self.coolant_flow_fraction = (COOLANT_FLOW_FRACTION_DEFAULT
                                       if v is None else v / 100.0)
-        self.coolant_inlet_temp = self._override_val(
-            'coolant_inlet_temp', 20.0, 700.0,
-            'Coolant inlet temperature', ' K') or COOLANT_INLET_TEMP_DEFAULT_K
-        self.max_wall_temp_input = self._override_val(
-            'max_wall_temp', 300.0, 3000.0,
-            'Maximum wall temperature', ' K')
-        v = self._override_val('chamber_roughness', 0.05, 100.0,
-                               'Chamber surface roughness', ' um')
+        self.coolant_inlet_temp = self._override_band('coolant_inlet_temp') or COOLANT_INLET_TEMP_DEFAULT_K
+        self.max_wall_temp_input = self._override_band('max_wall_temp')
+        v = self._override_band('chamber_roughness')
         self.channel_roughness_m = (COOLING_CHANNEL_ROUGHNESS_DEFAULT_M
                                     if v is None else v * 1e-6)
 
@@ -2875,9 +3329,7 @@ class LiquidRocketEngine:
         # varsayılan kullanıldı. (c) durumunda 'kullanıcı girdi' demek YALAN
         # olurdu; eski davranış ikisini de sessizce aynı sayıya düşürüyordu.
         sf_raw = self.overrides.get('safety_factor')
-        sf_val = self._override_val(
-            'safety_factor', SAFETY_FACTOR_MIN, SAFETY_FACTOR_MAX,
-            'Safety factor')
+        sf_val = self._override_band('safety_factor')
         if sf_val is not None:
             self.safety_factor = sf_val
             self.safety_factor_source = SAFETY_FACTOR_SOURCE_USER
@@ -2897,27 +3349,38 @@ class LiquidRocketEngine:
             self.chamber_material_source = (
                 CHAMBER_MATERIAL_SOURCE_REJECTED if mat_raw not in (None, '')
                 else CHAMBER_MATERIAL_SOURCE_DEFAULT)
-        v = self._override_val('chamber_wall_thickness', 0.2, 500.0,
-                               'Chamber wall thickness', ' mm')
+        v = self._override_band('chamber_wall_thickness')
         self.wall_thickness_input_m = None if v is None else v / 1000.0
-        v = self._override_val('engine_life_cycles', 1.0, 100000.0,
-                               'Engine life cycles')
+        # V301/L-KABUK: rejeneratif cidarın dış kabuğu (closeout). Seçim
+        # künyesi chamber_material ile aynı üç hâli ayırır (kullanıcı /
+        # varsayılan / tanınmadı); kalınlık boşsa HRMA boyutlandırır.
+        v = self._override_band('closeout_thickness')
+        self.closeout_thickness_input_m = None if v is None else v / 1000.0
+        co_raw = self.overrides.get('closeout_material')
+        co_val = self._override_choice(
+            'closeout_material', set(CLOSEOUT_MATERIAL_CHOICES),
+            'Closeout material')
+        if co_val is not None:
+            self.closeout_material = co_val
+            self.closeout_material_source = CLOSEOUT_MATERIAL_SOURCE_USER
+        else:
+            self.closeout_material = CLOSEOUT_MATERIAL_DEFAULT
+            self.closeout_material_source = (
+                CLOSEOUT_MATERIAL_SOURCE_REJECTED
+                if co_raw not in (None, '') else
+                CLOSEOUT_MATERIAL_SOURCE_DEFAULT)
+        v = self._override_band('engine_life_cycles')
         self.thermal_cycles = THERMAL_CYCLES_DEFAULT if v is None else int(round(v))
-        self.target_thrust_to_weight = self._override_val(
-            'target_thrust_to_weight', 1.0, 500.0, 'Target thrust-to-weight')
+        self.target_thrust_to_weight = self._override_band('target_thrust_to_weight')
 
         # --- görev / besleme -------------------------------------------------
-        self.burn_time_input = self._override_val(
-            'max_burn_duration', BURN_TIME_MIN_S, BURN_TIME_MAX_S,
-            'Burn duration', ' s')
+        self.burn_time_input = self._override_band('max_burn_duration')
         # ÖH D36 / LU-1: öğretici kip bayrağı; yalnız bu bayrakla
         # BURN_TIME_DEFAULT_S uygulanır (bkz. _burn_time).
         self.tutorial_defaults = _flag_true(
             self.overrides.get('use_tutorial_defaults'))
-        self.feed_pressure_input_bar = self._override_val(
-            'feed_pressure', 1.0, 1000.0, 'Feed pressure', ' bar')
-        v = self._override_val('turbopump_efficiency', 20.0, 95.0,
-                               'Turbopump efficiency', ' %')
+        self.feed_pressure_input_bar = self._override_band('feed_pressure')
+        v = self._override_band('turbopump_efficiency')
         self.pump_efficiency = (PUMP_EFFICIENCY_DEFAULT if v is None
                                 else v / 100.0)
         # ÖH defter P3B3-09'un kardeşi P3B3-08 (D18): pompa verimi künyesi
@@ -2951,18 +3414,12 @@ class LiquidRocketEngine:
         # TIT 1200 K / 1,976 kg/s (-%18,7). Kabul EDİLMİŞ olma durumu artık
         # ayrı bir bayrakta durur ve karar noktaları ONU okur (doktrin:
         # 'reddedilen girdiye sahip çıkılmaz', bkz. test_sivi_baglama_beyan).
-        _tit = self._override_val(
-            'generator_gas_temp', 400.0, 2500.0,
-            'Gas generator temperature', ' K')
+        _tit = self._override_band('generator_gas_temp')
         self.turbine_inlet_temp_accepted = _tit is not None
         self.turbine_inlet_temp = (_tit if _tit is not None
                                    else GAS_GENERATOR_TEMP_DEFAULT_K)
-        self.turbine_inlet_pressure_bar = self._override_val(
-            'turbine_inlet_pressure', 1.0, 1000.0,
-            'Turbine inlet pressure', ' bar')
-        _tpr = self._override_val(
-            'turbine_expansion_ratio', 1.2, 60.0,
-            'Turbine expansion ratio')
+        self.turbine_inlet_pressure_bar = self._override_band('turbine_inlet_pressure')
+        _tpr = self._override_band('turbine_expansion_ratio')
         self.turbine_pressure_ratio_accepted = _tpr is not None
         self.turbine_pressure_ratio = (_tpr if _tpr is not None
                                        else TURBINE_PRESSURE_RATIO_DEFAULT)
@@ -2990,12 +3447,18 @@ class LiquidRocketEngine:
         # 'film_cooling' seçtiyse 0 dönmek seçimi ölü bırakıyordu (film
         # bloğunun beş yaprağı da sabit 0'dı). O durumda etiketli literatür
         # varsayılanı uygulanır ve kaynağı çıktıda bildirilir.
-        v = self._override_val('film_cooling_percent', 0.0,
-                               FILM_COOLING_PCT_MAX,
-                               'Film cooling flow', ' %')
+        v = self._override_band('film_cooling_percent')
         if v is not None:
             self.film_cooling_percent = v
             self.film_cooling_percent_source = 'user input (film cooling flow)'
+            # L-B (v3.0.1, SV-08): film tipi + %0 film = SOĞUTUCUSUZ cidar
+            # (film tipinde rejeneratif ceket yoktur). Çelişki sessiz
+            # geçmez: adlı kritik uyarı (uç 422'si app.py'nin işidir; bu
+            # kulvar motoru beyan eder — rapor: L-B RAPOR.md).
+            if self.cooling_type == 'film_cooling' and v <= 0.0:
+                self._warn('warn.liquid.film_cooling_type_without_film',
+                           'critical', pct=float(v),
+                           default_pct=float(FILM_COOLING_PCT_DEFAULT))
         elif self.cooling_type == 'film_cooling':
             self.film_cooling_percent = FILM_COOLING_PCT_DEFAULT
             self.film_cooling_percent_source = (
@@ -3015,8 +3478,7 @@ class LiquidRocketEngine:
             'pressurization_type', {'auto', 'autogenous', 'helium',
                                     'nitrogen'}, 'Pressurization type')
         # Derin kısma alt sınırı (% itki) — kısma taramasıyla karşılaştırılır.
-        self.min_throttle_pct = self._override_val(
-            'min_throttle', 5.0, 100.0, 'Minimum throttle', ' %')
+        self.min_throttle_pct = self._override_band('min_throttle')
 
         # --- girdi tutarlılık denetimleri -----------------------------------
         # Oda çapı / daralma oranı çakışması BURADA duyurulmaz: bu noktada d_t
@@ -3077,7 +3539,7 @@ class LiquidRocketEngine:
         if (getattr(self, '_chamber_diameter_source', None) == 'chamber_diameter'
                 and getattr(self, 'contraction_ratio_input', None) is not None):
             comparison.append('contraction_ratio')
-        return {
+        beyan = {
             # kayıt/etiket alanları (fiziksel çözücü girdisi değil)
             'informational': [
                 'fuel_freezing_point', 'oxidizer_freezing_point',
@@ -3086,13 +3548,14 @@ class LiquidRocketEngine:
                 # kendi özellik tablosuyla) kullanılır; Bartz zincirinde girdi
                 # değildir, bu yüzden burada bildirilir.
                 'fuel_thermal_conductivity',
-                # Yakıt kaynama noktası hiçbir şeyi BOYUTLANDIRMAZ: çözücü
-                # soğutucu çıkış sıcaklığını kendi hesaplar, kaynama noktası
-                # yalnız 'warn.liquid.coolant_exit_above_boiling' sınır
-                # denetiminde okunur. Kanal sayısı/debi ona göre iterasyona
-                # sokulmadığı için burada bildirilir (2026-07-29 ölçümü:
-                # 500 K -> 800 K değişimi hiçbir sayıyı oynatmıyor).
-                'fuel_boiling_point',
+                # V301/L-A (SV-11): 'fuel_boiling_point' BU LİSTEDEN
+                # ÇIKARILDI — beyan çürümüştü ('min_throttle' dersinin
+                # aynısı). Alan bir EMNİYET hükmünü yönetiyor:
+                # 'warn.liquid.coolant_exit_above_boiling' t_boil'ü ondan
+                # okur (A-sivi SV-11 ölçümü: 565 K girilince t_boil 565;
+                # 1400 K bant dışı atılınca uyarı TAMAMEN kayboluyordu).
+                # "Kullanılmıyor" demek kullanıcıya yalan söylemekti. Bant
+                # dışı değer artık uçta 422 alır (LIQUID_INPUT_BANDS).
                 'stoichiometric_of', 'throttling_of_strategy',
                 'stability_margin', 'ignition_system', 'engine_mount',
                 'vibration_environment', 'acoustic_level', 'gimbal_range',
@@ -3123,6 +3586,20 @@ class LiquidRocketEngine:
             # karşılaştırma amaçlı: çözücü kendi değerini hesaplar
             'reported_for_comparison': comparison,
         }
+        # V301/L-D (SV-09): beyan formla TUTARLI kalır. Sıvı formu artık
+        # çözücünün okumadığı 26 alanı sunmuyor ve göndermiyor; motor yine de
+        # her koşuda bütün statik listeyi yayımlarsa sayfa bu adları "bu
+        # sayfada karşılığı olmayan alan" diye uyarı panelinde basıyordu.
+        # Gövde VARKEN beyan yalnız GERÇEKTEN gönderilmiş (boş olmayan)
+        # alanları adlandırır: "gönderdiğiniz şu değer kullanılmadı".
+        # Gövdesiz çağrı (``unwired_inputs(None)``, overrides'sız Python
+        # API) tam listeyi döndürür — çözücünün okumadığı alanların kataloğu.
+        if _ov:
+            beyan = {
+                kategori: [a for a in alanlar
+                           if _ov.get(a) not in (None, '')]
+                for kategori, alanlar in beyan.items()}
+        return beyan
 
     def _declare_turbine_inputs_unused(self):
         """Türbinsiz çevrimde GÖNDERİLMİŞ türbin alanlarını beyan eder.
@@ -3163,6 +3640,25 @@ class LiquidRocketEngine:
             'turbopump (no pump, no turbine): the field was not evaluated '
             'and changed no result. It is read only in turbopump cycles.')
         self._turbopump_inputs_unused = beyanlar
+        return beyanlar
+
+    def _declare_feed_pressure_unused(self):
+        """Turbopompalı çevrimde GÖNDERİLMİŞ ``feed_pressure``ı beyan eder.
+
+        V301/L-A (SV-10). Türbin/turbopompa beyanlarıyla aynı yankı kuralı
+        ve ayrı gerekçe adı (``FEED_PRESSURE_UNUSED_REASON``); beyan YALNIZ
+        ``inputs_not_used`` kanalındadır (form alanı her çevrimde gönderir,
+        uyarı listesine eklenmez).
+        """
+        beyanlar = self._declare_cycle_inputs_unused(
+            FEED_PRESSURE_UNUSED_FIELDS, FEED_PRESSURE_UNUSED_REASON,
+            "'{field}' was supplied but this turbopump-fed cycle does not "
+            'read it: the tank pressure is sized from the pump NPSH '
+            'requirement (detailed_feed_system.tank_pressure_bar) and the '
+            'pump discharge pressure comes from the cycle power balance, so '
+            'the field changed no result. It is read only in the '
+            'pressure-fed cycle, where the tank itself feeds the injector.')
+        self._feed_pressure_unused = beyanlar
         return beyanlar
 
     def _declare_cycle_inputs_unused(self, fields, reason, message):
@@ -3267,6 +3763,8 @@ class LiquidRocketEngine:
         beyanlar.extend(getattr(self, '_turbine_inputs_unused', None) or [])
         # 7. tur: aynı çevrimde gönderilen turbopompa alanları.
         beyanlar.extend(getattr(self, '_turbopump_inputs_unused', None) or [])
+        # V301/L-A (SV-10): turbopompalı çevrimde gönderilen feed_pressure.
+        beyanlar.extend(getattr(self, '_feed_pressure_unused', None) or [])
         return beyanlar
 
     # ------------------------------------------------------------------
@@ -3293,6 +3791,26 @@ class LiquidRocketEngine:
             d_c = self.chamber_diameter_input_m
             cr = (d_c / d_t) ** 2
             if not (CONTRACTION_RATIO_MIN <= cr <= CONTRACTION_RATIO_MAX):
+                # V301/L-A (SV-01): uç bu kaydı okuyup tasarımı 422 ile
+                # reddeder (çap atılıp daralma oranına düşülüyordu: ölçüldü
+                # once.json bd_chamber_diameter_20/31/2000 -> D_c 61,62 mm).
+                # Kayıt yalnız boğaz GERÇEKTEN çözülmüşken yazılır; erken
+                # (0,03 m varsayılanlı) çağrılar hüküm kurmaz. Python API
+                # yolu (uyarı + daralma oranı) değişmedi.
+                if d_t_solved:
+                    self.chamber_diameter_band_rejection = {
+                        'field': 'chamber_diameter',
+                        'value_mm': float(d_c) * 1000.0,
+                        'throat_diameter_mm': float(d_t) * 1000.0,
+                        'contraction_ratio': float(cr),
+                        'contraction_ratio_band': [
+                            float(CONTRACTION_RATIO_MIN),
+                            float(CONTRACTION_RATIO_MAX)],
+                        'min_mm': float(d_t) * 1000.0 * float(
+                            np.sqrt(CONTRACTION_RATIO_MIN)),
+                        'max_mm': float(d_t) * 1000.0 * float(
+                            np.sqrt(CONTRACTION_RATIO_MAX)),
+                    }
                 self._warn('warn.liquid.contraction_ratio_out_of_band',
                            'warning',
                            d_c_mm=round(float(d_c) * 1000.0, 1),
@@ -3554,6 +4072,37 @@ class LiquidRocketEngine:
         return bool(self.cooling_type == 'regenerative'
                     and self.fuel_type in ('methane', 'lh2'))
 
+    def _two_layer_wall_applies(self):
+        """V301/L-KABUK — cidar iki katmanlı mı (astar + dış kabuk)?
+
+        TEK yüklem: rejeneratif soğutmada (ceket var) evet; ablatif,
+        ışınımlı, yalnız film ve dump soğutmada cidar tek katmandır ve o
+        yolların sayıları bit-aynı kalır.
+        """
+        return bool(getattr(self, 'cooling_type', None) == 'regenerative')
+
+    def _liner_thickness(self):
+        """(t_astar [m], künye) — rejeneratif cidarın sıcak gaz astarı.
+
+        Kullanıcının ``chamber_wall_thickness`` girdisi rejeneratif yolda
+        astarın gaz yüzü ⟷ kanal tabanı kalınlığıdır; boşsa
+        ``REGEN_LINER_THICKNESS_M`` (künyeli HRMA seçimi). Isıl zincirin
+        sıcak cidarı, sığma ölçütünün yarıçapı ve astar yapı denetimi bu
+        sayıyı okur.
+        """
+        t_in = getattr(self, 'wall_thickness_input_m', None)
+        if t_in is not None:
+            return float(t_in), (
+                'liner (hot-gas wall) thickness = your chamber_wall_thickness '
+                'input: on a regenerative wall this field is the liner, gas '
+                'side to channel base; the coolant pressure is carried by the '
+                'closeout (closeout_thickness)')
+        return float(REGEN_LINER_THICKNESS_M), (
+            'liner (hot-gas wall) thickness = REGEN_LINER_THICKNESS_M '
+            f'{REGEN_LINER_THICKNESS_M * 1e3:g} mm, used because '
+            'chamber_wall_thickness was left empty ('
+            + REGEN_LINER_THICKNESS_BASIS + ')')
+
     def _channel_base_wall_thickness(self):
         """(t_sıcak_cidar [m], künye) — kanal TABANININ gaz yüzeyinden uzaklığı.
 
@@ -3563,18 +4112,16 @@ class LiquidRocketEngine:
         motorun kanal sayısı ile aynı yanıttaki istasyon marşının kendi
         sığma denetimi iki ayrı geometriye bakar (F-17'nin kapattığı kusur):
 
-        * rejeneratif + metan/LH2: süperkritik marş ``REGEN_LINER_THICKNESS_M``
-          liner'ı üzerinden iletir (``_solve_supercritical_regen``);
-        * diğer yollar: hazne cidarı (``_chamber_wall_thickness_m``) — RP-1
-          istasyon marşı ``thermal_protection``da bu cidarla koşar; bu yolda
-          modelin ayrı bir liner'ı YOKTUR (beyan künyede).
+        * V301/L-KABUK: BÜTÜN rejeneratif yollar (RP-1 istasyon marşı +
+          metan/LH2 süperkritik marş) iki katmanlı cidarın ASTARI üzerinden
+          iletir (``_liner_thickness``: kullanıcının chamber_wall_thickness
+          değeri ya da ``REGEN_LINER_THICKNESS_M``). Eskiden RP-1 yolu
+          yapısal hazne cidarından iletiyordu (ayrı liner yoktu) ve yapısal
+          kalınlık ısıl zinciri kapatıyordu (L-KARBON §6);
+        * diğer yollar (ceketsiz): hazne cidarı (``_chamber_wall_thickness_m``).
         """
-        if self._supercritical_march_applies():
-            return float(REGEN_LINER_THICKNESS_M), (
-                'regenerative liner (hot-gas wall) thickness '
-                f'{REGEN_LINER_THICKNESS_M * 1e3:g} mm: the wall the '
-                'supercritical station march of this fuel conducts through '
-                '(REGEN_LINER_THICKNESS_M)')
+        if self._two_layer_wall_applies():
+            return self._liner_thickness()
         return float(self._chamber_wall_thickness_m()), (
             'chamber wall thickness (structural_analysis.chamber_structure.'
             'wall_thickness): on this path the model has no separate liner, '
@@ -3649,7 +4196,9 @@ class LiquidRocketEngine:
         # cooling_channels 0, channel_count_fit None yayımlanır) — sığma
         # hükmü de o blokla aynı kapıdan geçer: yayımlanmayan bir n_max/c_ref
         # ile kritik uyarı basılmaz.
-        ceket_var = self.cooling_type in ('regenerative', 'film_cooling')
+        # L-B (v3.0.1, SV-08): film tipinde de ceket YOKTUR
+        # (FILM_COOLING_NO_JACKET_BASIS).
+        ceket_var = self.cooling_type == 'regenerative'
         if boyutlanamadi and ceket_var:
             self._warn('warn.liquid.cooling_channels_min_count_does_not_fit',
                        'critical', n_min=int(COOLING_CHANNEL_COUNT_MIN),
@@ -3716,6 +4265,141 @@ class LiquidRocketEngine:
                  'and describe a geometry that cannot be built')),
         }
         return n, width, height, source
+
+    def _carbon_deposit_context(self):
+        """İstasyon marşına giden itici bağlamı (V301/L-KARBON)."""
+        return {'oxidizer': self.oxidizer_type, 'fuel': self.fuel_type,
+                'mixture_ratio': float(self.MR)}
+
+    def _carbon_deposit_state(self):
+        """Karbon birikimi zarf hükmü — toplu zincir + marş için TEK kapı.
+
+        Yalnız rejeneratif soğutmada değerlendirilir (SP-125 verisi
+        rejeneratif soğutulmuş bir LOX/RP-1 odasından); başka soğutma
+        tipinde ``not_evaluated`` beyanı döner. Zarf ve kaynak:
+        ``hrma.analysis.regen_cooling.carbon_deposit_envelope``.
+        """
+        from hrma.analysis.regen_cooling import (
+            carbon_deposit_envelope, CARBON_DEPOSIT_BASIS,
+            CARBON_DEPOSIT_STATUS_NOT_EVALUATED)
+        if self.cooling_type != 'regenerative':
+            return {'status': CARBON_DEPOSIT_STATUS_NOT_EVALUATED,
+                    'applied': False,
+                    'reason': (f"cooling type '{self.cooling_type}': the "
+                               'carbon deposit resistance is modelled in '
+                               'the regenerative chain only'),
+                    'basis': CARBON_DEPOSIT_BASIS}
+        ctx = self._carbon_deposit_context()
+        env = carbon_deposit_envelope(ctx['oxidizer'], ctx['fuel'],
+                                      ctx['mixture_ratio'],
+                                      float(self.P_c) * PA_PER_BAR)
+        return dict(env, basis=CARBON_DEPOSIT_BASIS)
+
+    def _regen_march_channel_inputs(self, cooling):
+        """RP-1 istasyon marşının kanal girdileri — TEK kaynak (V301/L-REJ).
+
+        Marş, motorun ``cooling_system`` bloğunda YAYIMLADIĞI kanalı çözer:
+        sayı (``cooling_channels``), genişlik ve yükseklik
+        (``channel_width_mm`` / ``channel_height_mm``; yükseklik toplu
+        zincirin hız hedefiyle büyüttüğü değer ise o), sıcak cidar
+        (sığma ölçütünün kullandığı ``_channel_base_wall_thickness`` —
+        ``channel_count_fit.hot_wall_thickness_mm`` ile aynı sayı) ve
+        pürüzlülük (toplu zincirin ΔP'sine giren ``channel_roughness_m``,
+        form varsayılanı ``COOLING_CHANNEL_ROUGHNESS_DEFAULT_M``). Kaburga
+        genişliği iki tarafta da ``regen_cooling.COOLING_CHANNEL_LAND_M``.
+
+        Alan eksikse sayı UYDURULMAZ: ``ValueError`` (çağıran marşı koşmaz,
+        nedeni ``station_march_status``ta adıyla yazar).
+        """
+        n = cooling.get('cooling_channels')
+        w_mm = cooling.get('channel_width_mm')
+        h_mm = cooling.get('channel_height_mm')
+        for ad, deger in (('cooling_channels', n), ('channel_width_mm', w_mm),
+                          ('channel_height_mm', h_mm)):
+            if (deger is None or isinstance(deger, bool)
+                    or not np.isfinite(float(deger)) or not float(deger) > 0):
+                raise ValueError(
+                    f'cooling_system.{ad} = {deger!r}: the station march '
+                    'solves the channel the engine publishes and has no '
+                    'fallback geometry')
+        return {
+            'n_channels': int(n),
+            'channel_width': float(w_mm) / MM_PER_M,
+            'channel_height': float(h_mm) / MM_PER_M,
+            'wall_thickness': float(self._channel_base_wall_thickness()[0]),
+            'wall_roughness': float(getattr(
+                self, 'channel_roughness_m',
+                COOLING_CHANNEL_ROUGHNESS_DEFAULT_M)),
+        }
+
+    def _regen_jacket_motor_data(self):
+        """Rejeneratif marşa giden motor sözlüğü (V301/L-REJ kalem 4).
+
+        ``chamber_length`` = çizilen silindirik kamara boyu
+        (``_chamber_volume_split``; ``cooling_system.chamber_length`` ile
+        aynı sayı) — ceket silindirik gövdeyi de kaplar
+        (``RegenCooling._build_stations`` gövdeyi konturun başına ekler).
+        Eskiden bu alan geçmiyordu ve marş künyesi "the jacket covers the
+        NOZZLE CONTOUR ONLY ... lower bound" diyordu.
+        """
+        md = {'chamber_diameter': self._chamber_diameter(),
+              'chamber_length': float(self._chamber_volume_split()[3]),
+              'mdot_total': self.mdot_total,
+              'nozzle_type': getattr(self, 'nozzle_type',
+                                     NOZZLE_TYPE_DEFAULT),
+              # V301/L-KARBON: itici bağlamı (karbon birikimi zarfı).
+              'carbon_deposit_context': self._carbon_deposit_context()}
+        md.update(self._bartz_gas_property_set())
+        return md
+
+    def _bartz_gas_property_set(self):
+        """Bartz gaz özellik kümesi — toplu zincir + RP-1 marşı TEK kaynak.
+
+        V301/L-KABUK (L-KARBON AÇIK 1). ÖLÇÜLDÜ (L-KARBON §3): istasyon
+        marşı Bartz'ın c_p ve Pr'sini γ_eff'ten (CEA itki katsayısını
+        üreten eşdeğer izentropik üs, 1,170) kuruyordu (c_p 2563 J/kgK),
+        aynı motorun toplu zinciri CEA oda c_p'sini (2088) ve tablo μ/Pr'yi
+        kullanıyordu — aynı motorda iki gaz özelliği kümesi. Tek küme
+        toplu zincirinkidir (motorun ``cp_chamber`` / ``mu_chamber`` /
+        ``pr_chamber`` alanları; kaynakları aşağıdaki künyede) ve
+        ``HeatTransferAnalyzer._get_gas_properties``'in 1. öncelik yolundan
+        (``gas_cp`` / ``gas_viscosity`` / ``prandtl``) marşa geçer.
+        Sayısal olmayan bir alan varsa küme GEÇMEZ (marş eski yoluna döner)
+        ve neden künyede yazar — sayı uydurulmaz.
+        """
+        def _pozitif(x):
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return None
+            return v if (np.isfinite(v) and v > 0.0) else None
+        cp = _pozitif(getattr(self, 'cp_chamber', None))
+        mu = _pozitif(getattr(self, 'mu_chamber', None))
+        pr = _pozitif(getattr(self, 'pr_chamber', None))
+        kaynak = {
+            'cp_chamber_source': getattr(self, 'cp_chamber_source', None),
+            # V3.0.5 T-ÇAPA-C1: künye yoksa künye UYDURULMAZ (None) — eski
+            # yedek, değerin itici tablosundan geldiğini ölçmeden iddia
+            # ediyordu (tools/iddia_lint kuralı builtin_table_claim).
+            'mu_chamber_source': getattr(self, 'mu_chamber_source', None),
+            'pr_chamber_source': getattr(self, 'pr_chamber_source', None),
+        }
+        if None in (cp, mu, pr):
+            return {'gas_property_set': dict(
+                kaynak, applied=False,
+                basis=('NOT passed: the bulk Bartz chain property set is '
+                       'incomplete on this run (cp, mu, Pr = '
+                       f'{cp!r}, {mu!r}, {pr!r}); the station march derives '
+                       'its own frozen set from gamma'))}
+        return {'gas_cp': cp, 'gas_viscosity': mu, 'prandtl': pr,
+                'gas_property_set': dict(
+                    kaynak, applied=True, cp_J_kgK=cp, mu_Pa_s=mu, Pr=pr,
+                    basis=('one Bartz gas property set for the bulk chain and '
+                           'the RP-1 station march of this engine: the '
+                           'chamber cp, viscosity and Prandtl number of the '
+                           'bulk chain (sources in this block), passed to '
+                           'the march instead of the frozen set it used to '
+                           'derive from the equivalent isentropic exponent'))}
 
     # ------------------------------------------------------------------
     # İzentropik lüle yardımcıları (tek doğruluk kaynağı)
@@ -4310,7 +4994,7 @@ class LiquidRocketEngine:
                     # kullandığı sabitin ta kendisi.
                     'length': FEED_LINE_LENGTH_DEFAULT_M,  # m
                     'length_basis': FEED_LINE_LENGTH_BASIS,
-                    'material': 'Stainless Steel 316L',
+                    **self._feed_line_material_label(),
                     'insulation': True if self.oxidizer_type in ['lox', 'lh2'] else False,
                     'valves': ['isolation_valve', 'throttle_valve', 'shutoff_valve'],
                     'filters': ['main_filter', 'fine_filter'],
@@ -4324,7 +5008,7 @@ class LiquidRocketEngine:
                     **self._line_leg_declaration(mdot_fuel, 'fuel'),
                     'length': FEED_LINE_LENGTH_DEFAULT_M,  # m
                     'length_basis': FEED_LINE_LENGTH_BASIS,
-                    'material': 'Stainless Steel 316L',
+                    **self._feed_line_material_label(),
                     'insulation': True if self.fuel_type in ['lh2', 'methane'] else False,
                     'valves': ['isolation_valve', 'throttle_valve', 'shutoff_valve'],
                     'filters': ['main_filter', 'fine_filter']
@@ -4627,6 +5311,11 @@ class LiquidRocketEngine:
                 'built-in propellant table entry for this exact pair')
             self.mu_chamber = props['mu_chamber']
             self.pr_chamber = props['pr_chamber']
+            # V3.0.5 T-ÇAPA-C1: μ ve Pr aynı tablo satırından okunur; künye
+            # açıkça yazılır (eskiden yalnız Bartz kümesindeki getattr
+            # yedeği bunu söylüyordu).
+            self.mu_chamber_source = self.cp_chamber_source
+            self.pr_chamber_source = self.cp_chamber_source
             self.frozen_performance = props['frozen_performance']
             self.dissociation_temp = props['dissociation_temp']
             
@@ -5793,6 +6482,23 @@ class LiquidRocketEngine:
         # sigma = 1 / { [0.5(T_w/T_0)(1+(g-1)/2 M^2)+0.5]^0.68 [1+(g-1)/2 M^2]^0.12 }
         gamma_g = self.gamma
         Tw_T0 = T_wall_hot / self.T_c
+        # V301/L-KARBON — LOX/RP-1 karbon birikimi: toplu zincir ve istasyon
+        # marşı AYNI işlevi (regen_cooling.carbon_deposit_resistance) ve AYNI
+        # zarfı (carbon_deposit_envelope) kullanır. Birikim varken Bartz
+        # sigma'sı T_wg/T_c = 0,8'de (SP-125 Örnek 4-3, s. 102-103).
+        _karbon = self._carbon_deposit_state()
+        if _karbon['applied']:
+            from hrma.analysis.regen_cooling import (
+                CARBON_DEPOSIT_SIGMA_TWG_OVER_TC)
+            Tw_T0 = CARBON_DEPOSIT_SIGMA_TWG_OVER_TC
+
+        def _rd(area_ratio_local, supersonic):
+            """Karbon birikimi direnci [m²K/W]; uygulanmıyorsa 0."""
+            if not _karbon['applied']:
+                return 0.0
+            from hrma.analysis.regen_cooling import carbon_deposit_resistance
+            rd = carbon_deposit_resistance(area_ratio_local, supersonic)
+            return 0.0 if rd is None else float(rd)
 
         def bartz_sigma(mach):
             """Bartz sınır tabakası özellik düzeltme faktörü (Bartz 1957)."""
@@ -5822,8 +6528,17 @@ class LiquidRocketEngine:
         # Recovery faktoru r = Pr^(1/3) (turbulent; Bartz 1957 / NASA SP-8124).
         r_recovery = Pr_g ** (1.0 / 3.0)
 
+        # V301/L-KARBON: SP-125 Eş. 4-18 h_gc = 1/(1/h_g + R_d); birikim
+        # yoksa R_d = 0 ve h_gc = h_g (bit-aynı).
+        _rd_chamber = _rd(A_chamber_cross / max(A_throat, 1e-30), False)
+        h_gc_chamber = (h_g_chamber if _rd_chamber == 0.0
+                        else 1.0 / (1.0 / h_g_chamber + _rd_chamber))
+        _rd_throat = _rd(1.0, False)
+        h_gc_throat = (h_g_throat if _rd_throat == 0.0
+                       else 1.0 / (1.0 / h_g_throat + _rd_throat))
+
         # Chamber heat flux (haznede T_aw ~ T_c, M~0)
-        q_dot_chamber = h_g_chamber * (self.T_c - T_wall_hot)  # W/m²
+        q_dot_chamber = h_gc_chamber * (self.T_c - T_wall_hot)  # W/m²
         Q_chamber = q_dot_chamber * A_chamber  # W
         # --- ÖH D20 / OH-D20-06 -------------------------------------------
         # Hazne ısı yükü D18 fizik-a2 sonrası 120,95 -> 1232,36 kW'a çıktı
@@ -5845,10 +6560,15 @@ class LiquidRocketEngine:
                 sigma_chamber / sigma_throat),
             'contraction_ratio': float(A_chamber_cross / max(A_throat, 1e-30)),
             'driving_delta_T_K': float(self.T_c - T_wall_hot),
+            # V301/L-KARBON: h_gc/h_g (SP-125 Eş. 4-18); birikim yoksa 1.
+            'carbon_deposit_conductance_ratio': float(
+                h_gc_chamber / h_g_chamber),
             'chamber_lateral_area_m2': float(A_chamber),
             'chamber_heat_load_W': float(Q_chamber),
             'basis': (
-                'Q_chamber = h_g_chamber * (T_c - T_wall_hot) * A_chamber '
+                'Q_chamber = h_g_chamber * carbon_deposit_conductance_ratio '
+                '* (T_c - T_wall_hot) * A_chamber (the ratio is h_gc/h_g of '
+                'NASA SP-125 Eq. 4-18, 1 without a carbon deposit) '
                 'with h_g_chamber = h_g_throat * (A_t/A_c)^0.9 * '
                 '(sigma_chamber/sigma_throat) (Bartz 1957; Sutton & Biblarz '
                 '9th ed. Eq. 8-23) and A_chamber = pi * D_c * L_c. Every '
@@ -5951,6 +6671,9 @@ class LiquidRocketEngine:
                 # Kesik koni yanal alani: pi*(D1+D2)/2 * egik uzunluk
                 slant = np.sqrt(dx ** 2 + (0.5 * (D2 - D1)) ** 2)
                 dA = np.pi * 0.5 * (D1 + D2) * slant
+                _rd_local = _rd(area_ratio_local, section == 'div')
+                if _rd_local > 0.0:
+                    h_g_local = 1.0 / (1.0 / h_g_local + _rd_local)
                 q_dot_local = h_g_local * (T_aw_local - T_wall_hot)
                 Q_nozzle += q_dot_local * dA
                 A_nozzle_total += dA
@@ -6031,7 +6754,13 @@ class LiquidRocketEngine:
                             if getattr(self, 'max_wall_temp_input', None)
                             is not None else
                             'assumed (cooling-type default)')
-        if self.cooling_type in ('regenerative', 'film_cooling', 'dump_cooling'):
+        # L-B (v3.0.1, SV-08): 'film_cooling' tipinde rejeneratif ceket
+        # YOKTUR (duvarı yalnız film korur; rejeneratif + film birleşimi
+        # 'regenerative' tipi + film_cooling_percent ile seçilir). Ölçüldü
+        # (olcum_once.json film_tip0/10/30): film tipinde ceket debisi, ΔP'si
+        # ve çıkış sıcaklığı rejeneratifle bit-aynı yayımlanıyordu.
+        _film_no_jacket = (self.cooling_type == 'film_cooling')
+        if self.cooling_type in ('regenerative', 'dump_cooling'):
             # Use fuel as coolant (most common)
             coolant_flow_fraction = getattr(self, 'coolant_flow_fraction',
                                             COOLANT_FLOW_FRACTION_DEFAULT)
@@ -6045,16 +6774,20 @@ class LiquidRocketEngine:
             # gelir. Ceket debisi artık film payı DÜŞÜLDÜKTEN sonra kalan
             # yakıttan alınır; böylece ceket + film <= mdot_fuel korunur ve
             # ceketin ΔT'si / cidar sıcaklığı iki kez iyimser olmaz.
-            jacket_budget = max(float(self.mdot_fuel)
-                                - float(film_cooling_flow), 0.0)
+            # L-B (v3.0.1, SV-08): film debisi artık çekirdek yakıta EK
+            # olarak çekilir (_film_coolant_flow_kg_s); ceketten geçip yanan
+            # yakıt çekirdek yakıttır. Toplam yakıt = çekirdek + film, yani
+            # ceket + film <= toplam yakıt korunur (P3B2-10).
+            jacket_budget = max(float(self.mdot_fuel), 0.0)
             coolant_flow = jacket_budget * coolant_flow_fraction
             coolant_flow_basis = (
-                'regenerative jacket flow = (fuel flow - film coolant flow) '
-                'x coolant_flow_fraction. The film coolant is bled from the '
-                'SAME fuel budget upstream of the jacket (mass conservation; '
+                'regenerative jacket flow = core (burning) fuel flow x '
+                'coolant_flow_fraction. The film coolant is bled from the '
+                'fuel supply upstream of the jacket IN ADDITION to the core '
+                'fuel (film_cooling.performance: total fuel = core + film; '
                 'HRMA accounting, not a Huzel & Huang Ch. 4 model - the film '
                 'efficiency of NASA SP-125 Eq. 4-33, p. 115 is not modelled), '
-                'so jacket + film can never exceed the fuel flow')
+                'so jacket + film can never exceed the total fuel flow')
 
             # Fuel properties for cooling
             # (2026-07-22: metan/LH2 için bu NBP sabitleri yalnız süperkritik
@@ -6261,6 +6994,12 @@ class LiquidRocketEngine:
             self._warn('warn.liquid.coolant_exit_above_boiling', 'warning',
                        t_exit=round(float(t_exit)),
                        t_boil=round(float(t_boil)))
+        elif t_boil is None and coolant_flow > 0:
+            # V301/L-D (SV-04/NK-59): sayfa boş kaynama noktasını artık gizli
+            # 500 K ile göndermiyor. Değer yoksa denetim YAPILMAZ ve bu
+            # sessiz kalmaz (beyan; sayı uydurulmaz).
+            self._warn('warn.liquid.coolant_boiling_check_not_evaluated',
+                       'info', t_exit=round(float(t_exit)))
 
         result = {
             'total_heat_load': total_heat_load / 1000,  # kW
@@ -6272,7 +7011,7 @@ class LiquidRocketEngine:
             # (çözülmüş cidarla eş-çözüm), yoksa Bartz varsayılan cidarla.
             'peak_heat_flux': (peak_heat_flux_kw
                                if peak_heat_flux_kw is not None
-                               else h_g_throat * (self.T_c - T_wall_hot)
+                               else h_gc_throat * (self.T_c - T_wall_hot)
                                / 1000),  # kW/m² (boğaz)
             'chamber_heat_flux': q_dot_chamber / 1000,  # kW/m²
             # P3B2-11: istasyon sürücü sıcaklığının künyesi.
@@ -6304,11 +7043,20 @@ class LiquidRocketEngine:
                 'used, not a re-computation'),
             # ÖH D31 · OH-D25-25: dump soğutmada ceket debisi ve ΔP
             # YAYIMLANMAZ (bkz. DUMP_COOLING_BLEED_NOT_MODELLED).
-            'coolant_flow_rate': (None if _dump_jacket_not_modelled
+            # L-B (v3.0.1, SV-08): film tipinde ceket YOK -> ceket alanları
+            # yayımlanmaz (None) ve regenerative_jacket_status söyler.
+            'coolant_flow_rate': (None if (_dump_jacket_not_modelled
+                                           or _film_no_jacket)
                                   else coolant_flow),  # kg/s
-            'coolant_temperature_rise': coolant_temp_rise,  # K
-            'cooling_pressure_drop': (None if _dump_jacket_not_modelled
+            'coolant_temperature_rise': (None if _film_no_jacket
+                                         else coolant_temp_rise),  # K
+            'cooling_pressure_drop': (None if (_dump_jacket_not_modelled
+                                               or _film_no_jacket)
                                       else pressure_drop),  # bar
+            'regenerative_jacket_status': (
+                'NOT_APPLICABLE' if _film_no_jacket else None),
+            'regenerative_jacket_basis': (
+                FILM_COOLING_NO_JACKET_BASIS if _film_no_jacket else None),
             'wall_temperature_hot': T_wall_hot,  # K
             'wall_temperature_cold': T_wall_cold,  # K
             # 2026-07-22 (denetim madde 3): cidar sıcaklığının VARSAYIM mı
@@ -6324,8 +7072,13 @@ class LiquidRocketEngine:
                 float(self.max_wall_temp_input)
                 if getattr(self, 'max_wall_temp_input', None) is not None
                 else None),
+            # L-B (v3.0.1, SV-05): hüküm yalnız ÇÖZÜLMÜŞ cidarla verilir.
+            # Burada yalnız süperkritik marş çözer; RP-1 istasyon marşının
+            # sonucu ısıl korumada gelir ve _resolve_wall_temperature bu
+            # alanı yayımdan önce kesinleştirir. Çözüm yoksa 'MET' denmez.
             'wall_temperature_limit_status': (
                 None if getattr(self, 'max_wall_temp_input', None) is None
+                else WALL_LIMIT_NOT_EVALUATED if regen_march is None
                 else ('EXCEEDED'
                       if T_wall_hot > float(self.max_wall_temp_input)
                       else 'MET')),
@@ -6360,25 +7113,32 @@ class LiquidRocketEngine:
             'cooling_channels': (
                 0 if (_dump_jacket_not_modelled or n_channels is None)
                 else (n_channels if coolant_flow > 0 else 0)),
-            'channel_width_mm': channel_width * 1000,
-            'channel_width_basis': COOLING_CHANNEL_WIDTH_BASIS,
-            'channel_height_mm': channel_height * 1000,
-            'channel_height_basis': COOLING_CHANNEL_HEIGHT_BASIS,
-            'channel_height_auto_sized': bool(
-                channel_height > COOLING_CHANNEL_HEIGHT_DEFAULT_M + 1e-12),
-            'channel_count_source': channel_source,
+            'channel_width_mm': (None if _film_no_jacket
+                                 else channel_width * 1000),
+            'channel_width_basis': (None if _film_no_jacket
+                                    else COOLING_CHANNEL_WIDTH_BASIS),
+            'channel_height_mm': (None if _film_no_jacket
+                                  else channel_height * 1000),
+            'channel_height_basis': (None if _film_no_jacket
+                                     else COOLING_CHANNEL_HEIGHT_BASIS),
+            'channel_height_auto_sized': (None if _film_no_jacket else bool(
+                channel_height > COOLING_CHANNEL_HEIGHT_DEFAULT_M + 1e-12)),
+            'channel_count_source': (None if _film_no_jacket
+                                     else channel_source),
             # ÖH A2 sivi-sogutma · F-17: sığma ölçütü, sınırı ve hükmü sayının
             # YANINDA (tek tanım regen_cooling.channel_fit_limit). Ceket yoksa
             # (ablatif/ışınımsal, dump'ta ceket modellenmedi) blok yayımlanmaz.
             'channel_count_fit': (
                 None if (_dump_jacket_not_modelled or not coolant_flow > 0)
                 else getattr(self, '_channel_count_fit', None)),
-            'coolant_velocity': v_coolant,  # m/s (kanal içi, hesaplanmış)
+            'coolant_velocity': (None if _film_no_jacket
+                                 else v_coolant),  # m/s (kanal içi)
             # ÖH A2 sivi-sogutma (uc-kapi devri fuel_heat_capacity): toplu
             # ceket ΔT'sine giren cp ve künyesi sayının yanında (kurucuda
             # çözüldü; ceket yoksa None). Süperkritik marş çözdüyse ΔT marştan
             # gelir ve bu cp yalnız yedek zincirin değeridir (künye söyler).
-            'coolant_heat_capacity': (None if _dump_jacket_not_modelled
+            'coolant_heat_capacity': (None if (_dump_jacket_not_modelled
+                                               or _film_no_jacket)
                                       else cp_coolant),  # J/kg·K
             'coolant_heat_capacity_source': (
                 None if (_dump_jacket_not_modelled or cp_coolant is None)
@@ -6386,12 +7146,13 @@ class LiquidRocketEngine:
                     '; NOT used for the published temperature rise: the '
                     'supercritical station march solved it with CoolProp '
                     'properties' if regen_march is not None else ''))),
-            'coolant_reynolds': reynolds,
-            'coolant_inlet_temperature': getattr(
-                self, 'coolant_inlet_temp', COOLANT_INLET_TEMP_DEFAULT_K),  # K
-            'coolant_exit_temperature': getattr(
+            'coolant_reynolds': None if _film_no_jacket else reynolds,
+            'coolant_inlet_temperature': (None if _film_no_jacket else getattr(
                 self, 'coolant_inlet_temp',
-                COOLANT_INLET_TEMP_DEFAULT_K) + coolant_temp_rise,  # K
+                COOLANT_INLET_TEMP_DEFAULT_K)),  # K
+            'coolant_exit_temperature': (None if _film_no_jacket else getattr(
+                self, 'coolant_inlet_temp',
+                COOLANT_INLET_TEMP_DEFAULT_K) + coolant_temp_rise),  # K
             'coolant_flow_fraction': getattr(
                 self, 'coolant_flow_fraction', COOLANT_FLOW_FRACTION_DEFAULT),
             # P3B2-10: ceket debisinin hangi bütçeden alındığı sayının yanında.
@@ -6411,9 +7172,11 @@ class LiquidRocketEngine:
             'wall_temperature_default_basis': WALL_TEMP_DEFAULT_BASIS,
             'coolant_plus_film_flow_kg_s': float(coolant_flow
                                                  + film_cooling_flow),
+            # L-B (v3.0.1, SV-08): payda TOPLAM yakıttır (çekirdek + film).
             'coolant_plus_film_fraction_of_fuel': (
                 float((coolant_flow + film_cooling_flow)
-                      / max(float(self.mdot_fuel), 1e-12))),
+                      / max(float(self.mdot_fuel)
+                            + float(film_cooling_flow), 1e-12))),
             # P3B2-02: yayımlanan L* ÇİZİLEN geometrinin kendisidir
             # (V_toplam/A_t, konverjan koni dâhil). Eski satır istenen değeri
             # basıyordu; ölçüldü: 1,2 m yayımlanırken aynı yanıtın kendi
@@ -6446,10 +7209,18 @@ class LiquidRocketEngine:
             'chamber_length_diameter_status': self._chamber_slenderness_status(
                 chamber_length, chamber_diameter),
             'bartz_coefficient': h_g_throat,  # W/m²·K
+            # V301/L-KARBON: boğazın toplam gaz tarafı iletkenliği (SP-125
+            # Eş. 4-18; birikim yoksa bartz_coefficient'e eşit) ve beyan.
+            'gas_side_conductance_throat': h_gc_throat,  # W/m²·K
+            'carbon_deposit': dict(
+                _karbon,
+                resistance_throat_m2K_W=_rd_throat,
+                resistance_chamber_m2K_W=_rd_chamber),
             'film_cooling_flow': film_cooling_flow,  # kg/s
             # --- Film soğutma dökümü (2026-07-22, madde 6) ---
             'film_cooling': film,
-            'heat_load_to_regen_coolant': heat_to_regen / 1000,  # kW
+            'heat_load_to_regen_coolant': (
+                None if _film_no_jacket else heat_to_regen / 1000),  # kW
         }
         if regen_march is not None:
             # Süperkritik marş özeti + istasyon dizileri (UI grafiği için).
@@ -6472,9 +7243,96 @@ class LiquidRocketEngine:
         else:
             if self._supercritical_march_applies():
                 result['regen_supercritical'] = 'not_modelled'
+        # V3.0.5 T-ÇAPA-C1: ceket beyanı yalnız ceketin OLMADIĞI film
+        # tipinde yayımlanır (L-B SV-08); öteki tiplerde alanlar None'du —
+        # içi boş beyan (tests/test_liquid_declarations_v2626.py). Okuyan
+        # tek yer (pdf_generator) .get ile okur.
+        if not _film_no_jacket:
+            result.pop('regenerative_jacket_status', None)
+            result.pop('regenerative_jacket_basis', None)
 
         self._cooling_memo = (memo_key, copy.deepcopy(result))
         return result
+
+    def _film_coolant_flow_kg_s(self):
+        """Film soğutucu debisi [kg/s] — TEK tanım (L-B, v3.0.1, SV-08).
+
+        ``film_cooling_percent`` = f, TOPLAM yakıt debisinin (yanan çekirdek
+        yakıt + film) yüzdesidir; film yanmaya katılmaz. Çekirdek yakıt
+        debisi (``self.mdot_fuel``) itki ve çekirdek Isp'den gelir ve
+        DEĞİŞMEZ; film ona EK olarak çekilir:
+
+            ṁ_film = f · (ṁ_yakıt,çekirdek + ṁ_film)
+                   = f/(1 − f) · ṁ_yakıt,çekirdek
+
+        ÖLÇÜLDÜ (önceki tanım, docs/scofield/raw/OH/V301/kati-sivi/L-B/
+        olcum_once.json): ṁ_film = f · ṁ_yakıt idi ve aynı ṁ_yakıt hem
+        tamamen yanıyor hem de ceketten film payı kadar eksik geçiyordu;
+        film %0 / %10 / %30'da toplam debi ve Isp bit-aynıydı.
+        """
+        pct = float(getattr(self, 'film_cooling_percent', 0.0) or 0.0)
+        if pct <= 0:
+            return 0.0
+        f = pct / 100.0
+        return f / (1.0 - f) * float(self.mdot_fuel)
+
+    def _film_cooling_performance(self):
+        """Film soğutucusunun performans muhasebesi (L-B, v3.0.1, SV-08).
+
+        Model (ihtiyatlı ALT sınır, beyanlı): film yanmaz ve itkiye katkısı
+        yok sayılır. İtki sabit tasarımda çekirdek akış (ṁ_çekirdek = F /
+        (Isp_çekirdek·g0), O/F = kullanıcının O/F'u) değişmez, film ona EKLENİR:
+
+            ṁ_toplam   = ṁ_çekirdek + ṁ_film
+            Isp_teslim = Isp_çekirdek · ṁ_çekirdek / (ṁ_çekirdek + ṁ_film)
+
+        Literatür kıyası ``FILM_COOLING_PERFORMANCE_BASIS``te; model kaybı
+        o kıyastan BÜYÜKTÜR (alt sınır), çünkü gerçekte ısınan film
+        lüleden genişleyip bir miktar itki üretir.
+        """
+        pct = float(getattr(self, 'film_cooling_percent', 0.0) or 0.0)
+        core = float(self.mdot_total)
+        core_fuel = float(self.mdot_fuel)
+        film = self._film_coolant_flow_kg_s()
+        total = core + film
+        oran = core / total if total > 0 else 1.0
+        blok = {
+            'status': 'APPLIED' if film > 0 else 'NO_FILM_FLOW',
+            'film_cooling_percent': pct,
+            'film_cooling_percent_definition': (
+                'percent of the TOTAL fuel flow (burning core fuel + film '
+                'coolant); the film is bled in addition to the core fuel'),
+            'core_mass_flow_kg_s': core,
+            'core_fuel_flow_kg_s': core_fuel,
+            'film_coolant_flow_kg_s': film,
+            'total_mass_flow_kg_s': total,
+            'total_fuel_flow_kg_s': core_fuel + film,
+            'core_mixture_ratio': float(self.MR),
+            'overall_mixture_ratio': (float(self.mdot_ox) / (core_fuel + film)
+                                      if (core_fuel + film) > 0 else None),
+            'isp_core_sea_level_s': float(self.isp_sl),
+            'isp_core_vacuum_s': float(self.isp_vac),
+            'isp_delivered_sea_level_s': float(self.isp_sl) * oran,
+            'isp_delivered_vacuum_s': float(self.isp_vac) * oran,
+            'core_flow_fraction': oran,
+            'isp_loss_pct': (1.0 - oran) * 100.0,
+            'basis': FILM_COOLING_PERFORMANCE_BASIS,
+            'core_value_blocks': [
+                'performance_maps', 'throttle_map', 'isp_identity',
+                'cycle_isp_accounting'],
+            'core_value_blocks_basis': (
+                'these blocks describe the burning core flow only: the film '
+                'coolant is NOT charged in them (their Isp is the core Isp)'),
+            'subsystems_sized_on_core_fuel_flow': [
+                'injection_system', 'turbopump_system', 'propellant_tanks'],
+            'subsystems_sized_on_core_fuel_flow_basis': (
+                'NOT YET CHARGED: these subsystems are sized with the core '
+                'fuel flow; the film coolant flow (film_coolant_flow_kg_s) '
+                'must also be delivered by the feed system and stored in '
+                'the fuel tank, so their fuel-side numbers are lower bounds '
+                'when a film flow is set'),
+        }
+        return blok
 
     def _film_cooling_analysis(self, q_dot_chamber, chamber_diameter,
                                chamber_length):
@@ -6524,7 +7382,9 @@ class LiquidRocketEngine:
         if pct <= 0:
             return out
 
-        mdot_film = pct / 100.0 * float(self.mdot_fuel)
+        # L-B (v3.0.1, SV-08): film debisi TEK tanımdan (yüzde = TOPLAM
+        # yakıt debisinin kesri; çekirdek yakıta EK olarak bölünür).
+        mdot_film = self._film_coolant_flow_kg_s()
         t_in = float(getattr(self, 'coolant_inlet_temp',
                              COOLANT_INLET_TEMP_DEFAULT_K))
         t_limit, _ = self._wall_temperatures()
@@ -6724,7 +7584,10 @@ class LiquidRocketEngine:
             n_channels=int(n_channels),
             channel_width=float(channel_width),
             channel_height=float(channel_height),
-            wall_thickness=REGEN_LINER_THICKNESS_M,
+            # V301/L-KABUK: astar kalınlığı TEK kaynaktan (sığma ölçütüyle
+            # aynı sayı); kullanıcı girmediyse REGEN_LINER_THICKNESS_M —
+            # eskisiyle bit-aynı.
+            wall_thickness=float(self._channel_base_wall_thickness()[0]),
             wall_material=mat_key,
             wall_roughness=float(getattr(
                 self, 'channel_roughness_m',
@@ -6735,6 +7598,10 @@ class LiquidRocketEngine:
                                                NOZZLE_TYPE_DEFAULT)},
         )
         march = rc.solve()
+        # V301/L-KABUK: istasyon dizileri astar yapı denetiminin girdisidir
+        # (``_wall_stack_assessment``); yanıta yayımlanmaz, motor nesnesinde
+        # son çözüm olarak tutulur (boyutlandırma döngüsünün son marşı).
+        self._regen_march_arrays_sc = march
         march['jacket_eps'] = eps_jacket
         march['jacket_note'] = jacket_note
         march['inlet_temp_K'] = t_in
@@ -6897,13 +7764,14 @@ class LiquidRocketEngine:
         pressure_drop_factor = self._injector_dp_fraction()
 
         # Discharge coefficients based on injector type
-        if self.injector_type == 'impinging':
+        _tip_k = canonical_injector_type(self.injector_type)
+        if _tip_k in ('unlike_impinging', 'like_impinging'):
             Cd_fuel = 0.7   # Sharp-edged orifices
             Cd_ox = 0.7
-        elif self.injector_type == 'coaxial':
+        elif _tip_k == 'coaxial':
             Cd_fuel = 0.85  # Well-rounded entries
             Cd_ox = 0.8
-        elif self.injector_type == 'showerhead':
+        elif _tip_k == 'showerhead':
             Cd_fuel = 0.65  # Many small holes
             Cd_ox = 0.65
         else:
@@ -7081,7 +7949,7 @@ class LiquidRocketEngine:
             n_elements = max(1, int(n_user))
             d_fuel_orifice = 2 * np.sqrt((A_fuel / n_elements) / np.pi)
             d_ox_orifice = 2 * np.sqrt((A_ox / n_elements) / np.pi)
-        elif self.injector_type == 'impinging':
+        elif _tip_k in ('unlike_impinging', 'like_impinging'):
             # Size individual elements
             max_element_area = 5e-6  # 5 mm² maximum per element
             n_fuel_elements = max(1, int(np.ceil(A_fuel / max_element_area)))
@@ -7342,16 +8210,36 @@ class LiquidRocketEngine:
             # eleman = devre başına bir delik (unlike doublet, koaksiyel,
             # showerhead). Modül çapı kendi toplam alanından bu sayıya böler,
             # sonra alanı n·π/4·d² ile geri kurar → aritmetik TAM tutar.
-            if n_user is not None:
+            # V301/L-C (SV-07): pintle TEK elemandır; kullanıcının eleman
+            # sayısı devreye GİTMEZ (eskiden devreler 100 + 100 delik
+            # planlıyor, özet blok bu kopyayı yayımlıyordu). Benzer-akışkan
+            # çiftte (SV-06) eleman sayısı DEVRE BAŞINA ÇİFT sayısıdır.
+            _devre_modeli = inj_spec['injector_type']
+            if n_user is not None and _devre_modeli not in (
+                    'pintle', 'like_impinging'):
                 inj_spec['n_orifices_ox'] = n_elements
                 inj_spec['n_orifices_fuel'] = n_elements
+            if n_user is not None and _devre_modeli == 'like_impinging':
+                inj_spec['impingement'] = {'pairs': int(n_user)}
+            _pin_in = dict(getattr(self, 'pintle_inputs', None) or {})
+            if _devre_modeli == 'pintle' and _pin_in:
+                inj_spec['pintle'] = _pin_in
             gas_spec = self._gas_gas_injector_spec()
             if gas_spec is not None:
                 inj_spec = gas_spec
-            detail = design_injector(inj_spec)
-            if detail.get('status') == 'success':
+            if inj_spec.get('injector_type') == 'gas_gas_coaxial':
+                detail = design_injector(inj_spec)
                 cd_applied = self._apply_user_discharge_coefficient(
-                    detail, cd_user)
+                    detail, cd_user) if detail.get('status') == 'success' \
+                    else True
+            else:
+                # V301/L-C (SV-13): TEK sıvı devre çağrısı — ayrı panelin
+                # ucu (/api/injector-design) da bu işlevden geçer.
+                detail, cd_applied = design_liquid_injector_circuit(
+                    inj_spec, cd_user)
+            result['circuit_request'] = liquid_circuit_request_record(
+                inj_spec, cd_user)
+            if detail.get('status') == 'success':
                 oxc, fc = detail['ox_circuit'], detail.get('fuel_circuit')
                 result['injector_design_detail'] = detail
                 result['number_of_elements'] = detail['pattern']['n_elements']
@@ -7383,7 +8271,13 @@ class LiquidRocketEngine:
                                entered=float(cd_user), unit='')
                 # Eleman sayısını modül tipe göre kendi kurduysa (ör. pintle
                 # tek elemandır) kullanıcıya bildirilir.
-                if (n_user is not None
+                _plan = detail.get('element_plan') or {}
+                _cift_tamam = (_devre_modeli == 'like_impinging'
+                               and n_user is not None
+                               and _plan.get('pairs') == int(n_user)
+                               and _plan.get('fuel_pairs', int(n_user))
+                               == int(n_user))
+                if (n_user is not None and not _cift_tamam
                         and int(result['number_of_elements']) != int(n_elements)):
                     self._warn('warn.liquid.entered_value_is_comparison_only',
                                'info', label='Injector element count',
@@ -7392,6 +8286,11 @@ class LiquidRocketEngine:
                 smd = detail['atomization'].get('smd_ox_um')
                 if smd:
                     result['droplet_diameter'] = smd  # microns (modül SMD'si)
+                if detail.get('injector_type') == 'pintle':
+                    # V301/L-C (SV-07): tek kanon = pintle geometrisi.
+                    publish_liquid_pintle_plan(result, detail)
+                if detail.get('element_plan'):
+                    result['element_plan'] = detail['element_plan']
                 if detail.get('injector_type') == 'gas_gas_coaxial':
                     result['injector_type'] = 'gas_gas_coaxial'
                     result['main_injection_phase'] = 'gas-gas'
@@ -7400,6 +8299,23 @@ class LiquidRocketEngine:
                     result['droplet_diameter'] = None
                     result['droplet_diameter_basis'] = (
                         'not_modelled (gas-gas injection: no liquid droplets)')
+        except ElementPlanInputError as _girdi_hatasi:
+            # V301/L-C: kullanıcının benzer-akışkan çift sayısı tutmuyorsa
+            # hata ADIYLA yükselir; aşağıdaki genel ``except`` onu "modül
+            # kullanılamadı" diye YUTUP eski hesabı yayımlıyordu (ölçüldü:
+            # 100 çift → 422 yerine 200 + eski Bernoulli tahmini). Alan adı
+            # sıvı isteğinin adıdır.
+            for _h in _girdi_hatasi.invalid_fields:
+                if _h.get('field') == 'element_pairs':
+                    _h['field'] = 'injector_elements'
+                    _h['message'] = (
+                        "'injector_elements' is, for the like-on-like "
+                        'doublet, the number of same-fluid pairs PER CIRCUIT '
+                        '(two holes each). ' + str(_h.get('message', '')))
+            raise
+        except PintleGeometryInputError:
+            # V301/L-C: pintle ölçüleri akışla tutmuyor (aynı gerekçe).
+            raise
         except UnsupportedInjectorTypeError:
             # ÖH D19 / P3B1-12 (Fable-D17 ŞARTI): tanınmayan enjektör tipi
             # HATASI genel ``except``e YUTULUYORDU. Ölçüldü (once.json
@@ -7432,10 +8348,19 @@ class LiquidRocketEngine:
         result['element_count_source'] = (
             'user input' if n_user is not None
             else 'sized by the injector model')
+        if _tip_k == 'pintle':
+            # V301/L-C (SV-07): pintle TEK elemandır; eleman sayısı girdisi
+            # devreye gitmez (gönderildiyse yukarıdaki bilgi kaydı söyler).
+            result['element_count_source'] = (
+                'not applicable: a pintle is a single injection element; '
+                'the element-count input is not used')
+        elif _tip_k == 'like_impinging' and n_user is not None:
+            result['element_count_source'] = (
+                'user input (like-doublet pairs per circuit)')
         result['pressure_drop_source'] = (
-            'user input (injector pressure drop)'
+            INJECTOR_DP_SOURCE_USER
             if getattr(self, 'injector_dp_input_bar', None) is not None
-            else 'NASA SP-8089 dP/Pc ratio for the element type')
+            else INJECTOR_DP_SOURCE_TYPE_RATIO)
 
         # Girdi-çıktı tutarlılık uyarıları: hız ve orifis çapı ÇIKTIDIR
         # (ΔP + Cd + debi zincirinden gelir). Kullanıcının girdiği değerle
@@ -7470,92 +8395,123 @@ class LiquidRocketEngine:
     # Cd'si tablo yerine swirl geometrisinden (Giffen-Muraszew) gelen tipler:
     # bunlarda düz orifis Cd'si fiziksel olarak YANLIŞ sınıftır, kullanıcı
     # değeri uygulanmaz (uygulanmadığı açıkça bildirilir).
-    _SWIRL_CD_INJECTOR_TYPES = ('swirl', 'coax_swirl')
+    _SWIRL_CD_INJECTOR_TYPES = ('swirl', 'coax_swirl')  # bkz. SWIRL_CD_INJECTOR_TYPES
 
     def _apply_user_discharge_coefficient(self, detail, cd_user):
-        """Modül enjektör çözümünü kullanıcının Cd'sine TAM cebirle taşır.
+        """Kullanıcı Cd'sini modül çözümüne uygular — TEK tanım modül düzeyinde.
 
-        injector_design.design_injector sözleşmesinde SIVI devreleri için Cd
-        giriş alanı yoktur (yalnız gaz-gaz dalı spec['cd'] okur); Cd, orifis
-        giriş geometrisi + L/D tablosundan gelir. Kullanıcının ölçtüğü Cd'yi
-        AYRI bir hesapla uygulamak K3 çelişkisini doğuruyordu. Burada modülün
-        KENDİ SPI cebriyle tam ölçekleme yapılır ve sonuç modül çıktısına
-        GERİ YAZILIR; böylece geriye tek sayı kümesi kalır:
-
-            ṁ = Cd·A·√(2ρΔP),  v = Cd·√(2ΔP/ρ),  d = √(4A/(π·n))
-            r = Cd_model / Cd_user  ⇒  A ∝ r,  d ∝ √r,  v ∝ 1/r
-
-        ΔP, ρ, ṁ, ΔP/Pc, kavitasyon sayısı, chug ve hidrolik flip kalemleri
-        Cd'den bağımsızdır; dokunulmaz.
-
-        Dönüş: uygulandı mı (bool). False dönerse çağıran taraf kullanıcıya
-        'bu yolda kullanılmıyor' bildirimini yapar.
+        V301/L-C (SV-13): ayrı enjektör panelinin ucu (/api/injector-design)
+        aynı cebri kullansın diye gövde ``apply_user_discharge_coefficient``
+        işlevine taşındı (davranış bit-aynı).
         """
-        if cd_user is None:
-            return True   # kullanıcı Cd vermedi: modül Cd'si zaten tek kaynak
-        inj_type = detail.get('injector_type')
-        if inj_type == 'gas_gas_coaxial':
-            return True   # gaz-gaz dalı spec['cd'] ile Cd'yi zaten aldı
-        if inj_type in self._SWIRL_CD_INJECTOR_TYPES:
-            return False  # swirl Cd'si geometriden gelir, düz orifis Cd'si değil
-        circuits = {k: detail.get(k) for k in ('ox_circuit', 'fuel_circuit')}
-        live = [c for c in circuits.values() if c]
-        if not live:
-            return False
-        # Ölçekleme yalnız tek fazlı orifis (SPI) çözümünde tam geçerlidir;
-        # NHNE (flaşlayan N₂O) devresinde Cd doğrusal ölçeklenmez.
-        if any(c.get('flow_model') != 'SPI' for c in live):
-            return False
+        return apply_user_discharge_coefficient(detail, cd_user)
 
-        cd_user = float(cd_user)
-        ratios = {}
-        for key, c in circuits.items():
-            if not c:
+    def _unify_required_feed_pressure(self, injector, feed):
+        """GEREKLİ TANK BASINCI — TEK TANIM (V301/L-A, SV-03 madde 2).
+
+        ÖLÇÜLDÜ (``docs/scofield/raw/OH/V301/kati-sivi/L-A/once.json`` v_pf;
+        10 kN RP-1/LOX, Pc 100 bar, ΔP_enj 20 bar, basınç beslemeli): AYNI
+        yanıtta iki "gerekli yakıt tankı basıncı" vardı —
+        ``injection_system.required_fuel_tank_pressure = 130,015`` (Pc + ΔP +
+        ceket 2,015 + 8 bar beyanlı PAY, hat kaybı YOK; oksitleyici 128,0) ⟷
+        ``engine_cycle_solution.required_tank_pressure_fuel_bar = 122,536``
+        (hat kaybı VAR, pay YOK). 115 bar tankta birincisi 15 bar, ikincisi
+        7,5 bar açık söylüyordu.
+
+        Tek tanım fiziksel gereksinimdir: Pc + ΔP_enjektör + ceket ΔP + hat
+        kayıpları. Bu toplamı çevrim çözücüsü zaten kuruyor
+        (``cycle_power_balance.solve_cycle`` basınç beslemeli dal) ve uç
+        kapısı (``pressure_fed_tank_below_required``) da ONU okuyor; enjektör
+        bloğu artık aynı sayıyı taşır. 8 bar beyanlı pay
+        (``INJECTOR_FEED_MARGIN_BAR``) gereksinime KARIŞMAZ: ayrı
+        ``recommended_*_tank_pressure_with_margin`` alanında yayımlanır.
+
+        Turbopompalı çevrimde tank enjektörü beslemez (yalnız pompa NPSH'ı
+        için basınçlanır, ``detailed_feed_system.tank_pressure_bar``); çevrim
+        çözümü orada gerekli tank basıncı YAYIMLAMAZ (None). Enjektör bloğu
+        da aynı tek kaynaktan okur ve None yayımlar — Pc + ΔP + 8 bar'ı
+        "gerekli tank basıncı" diye basmak 3 bar'lık bir NPSH tankının
+        yanında yanlış bir hüküm olurdu. Enjektörü besleyen basınç orada
+        pompa basma basıncıdır (``detailed_feed_system.
+        required_pump_discharge_bar``).
+
+        Ceket ΔP'si çözülemediği için enjektör bloğu yakıt gereksinimini
+        zaten None yayımladıysa (Denetçi Ş4, fail-closed) None korunur.
+        """
+        if not isinstance(injector, dict):
+            return
+        cyc = (feed or {}).get('engine_cycle_solution') or {}
+        pressure_fed = (getattr(self, 'engine_cycle', '')
+                        == PRESSURE_FED_CYCLE_NAME)
+        margin = float(INJECTOR_FEED_MARGIN_BAR)
+
+        def _sonlu(v):
+            return (isinstance(v, (int, float)) and not isinstance(v, bool)
+                    and np.isfinite(v))
+
+        injector.pop('required_fuel_tank_pressure_terms', None)
+        if not pressure_fed:
+            neden = (
+                'not published: in a turbopump-fed cycle the tank does not '
+                'feed the injector - it only pressurises for pump NPSH '
+                '(detailed_feed_system.tank_pressure_bar) and the cycle '
+                'solution publishes no required tank pressure '
+                '(engine_cycle_solution.required_tank_pressure_*_bar = '
+                'null). The pressure that feeds the injector is the pump '
+                'discharge pressure (detailed_feed_system.'
+                'required_pump_discharge_bar).')
+            for taraf in ('fuel', 'ox'):
+                injector[f'required_{taraf}_tank_pressure'] = None
+                injector[f'required_{taraf}_tank_pressure_basis'] = neden
+                injector[f'recommended_{taraf}_tank_pressure_with_margin'] = \
+                    None
+            injector['recommended_tank_pressure_basis'] = neden
+            return
+        for taraf, adi in (('fuel', 'FUEL'), ('ox', 'OXIDIZER')):
+            onceki = injector.get(f'required_{taraf}_tank_pressure')
+            cyc_deger = cyc.get(f'required_tank_pressure_{taraf}_bar')
+            if onceki is None or not _sonlu(cyc_deger):
+                # Ceket ΔP'si çözülemedi (enjektör bloğu None) ya da çevrim
+                # çözümü sayı yayımlamadı: gereksinim YAYIMLANMAZ.
+                injector[f'required_{taraf}_tank_pressure'] = None
+                injector[f'recommended_{taraf}_tank_pressure_with_margin'] = \
+                    None
+                if onceki is not None:
+                    injector[f'required_{taraf}_tank_pressure_basis'] = (
+                        'not published: the cycle solution published no '
+                        f'required {taraf} tank pressure for this run (see '
+                        'detailed_feed_system.engine_cycle_solution.status); '
+                        'no partial sum is substituted.')
                 continue
-            r = float(c['cd']) / cd_user
-            ratios[key] = r
-            root = float(np.sqrt(r))
-            c['total_area_mm2'] = float(c['total_area_mm2']) * r
-            c['orifice_d_mm'] = float(c['orifice_d_mm']) * root
-            c['velocity_m_s'] = float(c['velocity_m_s']) / r
-            c['cd'] = cd_user
-            c['cd_basis'] = (
-                'user input (discharge coefficient); the model value '
-                f"({float(r) * cd_user:.3f}) was replaced through the same "
-                'SPI orifice equation')
-            man = c.get('manifold')
-            if man:
-                man['d_mm'] = float(man['d_mm']) * root
-                man['velocity_m_s'] = float(man['velocity_m_s']) / r
-
-        r_ox = ratios.get('ox_circuit', 1.0)
-        r_fuel = ratios.get('fuel_circuit', r_ox)
-        # Çarpışma geometrisi doğrudan d_ox ile ölçekli (3·d ve 6·d kuralları)
-        imp = (detail.get('pattern') or {}).get('impingement')
-        if imp:
-            root_ox = float(np.sqrt(r_ox))
-            for key in ('free_jet_length_mm', 'element_spacing_mm'):
-                if imp.get(key):
-                    imp[key] = float(imp[key]) * root_ox
-        # SMD: impinging korelasyonu D32 = C·d·We^(-1/3) ⇒ d^(2/3)·v^(-2/3) ∝ r.
-        # Elkotb ve Lefebvre-swirl korelasyonları yalnız ΔP / eleman başına
-        # debi / akışkan özelliklerine bağlıdır — Cd'den etkilenmez.
-        atom = detail.get('atomization') or {}
-        if atom.get('correlation') == 'impinging-We13':
-            if atom.get('smd_ox_um'):
-                atom['smd_ox_um'] = float(atom['smd_ox_um']) * r_ox
-            if atom.get('smd_fuel_um'):
-                atom['smd_fuel_um'] = float(atom['smd_fuel_um']) * r_fuel
-        # Pintle geometrisinin tüm uzunlukları √alan ile ölçekli; BF, delik
-        # sayısı ve L_s/D_p oranları boyutsuzdur ve değişmez.
-        pin = detail.get('pintle_geometry')
-        if pin:
-            root_ox = float(np.sqrt(r_ox))
-            for key in ('d_pintle_mm', 'skip_distance_mm', 'annulus_gap_mm',
-                        'radial_hole_d_mm'):
-                if pin.get(key):
-                    pin[key] = float(pin[key]) * root_ox
-        return True
+            if taraf == 'fuel':
+                ceket = ' + regenerative jacket dP'
+                ceket_notu = (
+                    ' The jacket term is the cooling circuit pressure drop '
+                    'this same answer publishes (cooling_system.'
+                    'cooling_pressure_drop); fuel IS the coolant, so it pays '
+                    'the jacket before it reaches the injector.')
+            else:
+                ceket = ''
+                ceket_notu = (' No jacket term: the oxidizer does not pass '
+                              'through the cooling channels in this design.')
+            injector[f'required_{taraf}_tank_pressure'] = float(cyc_deger)
+            injector[f'required_{taraf}_tank_pressure_basis'] = (
+                f'required {adi} tank pressure (physical requirement, no '
+                f'margin) = chamber pressure + injector dP{ceket} + '
+                f'{taraf} feed line losses. Single source: detailed_feed_'
+                f'system.engine_cycle_solution.required_tank_pressure_'
+                f'{taraf}_bar - the same number the pressure-fed tank gate '
+                'checks. The declared margin is NOT included here; see '
+                f'recommended_{taraf}_tank_pressure_with_margin.'
+                + ceket_notu)
+            injector[f'recommended_{taraf}_tank_pressure_with_margin'] = \
+                float(cyc_deger) + margin
+        injector['recommended_tank_pressure_basis'] = (
+            f'recommended tank pressure = required tank pressure + '
+            f'{margin:g} bar declared margin (INJECTOR_FEED_MARGIN_BAR, an '
+            'HRMA choice, not a sourced value). It is a recommendation for '
+            'sizing the tank, not the physical requirement: the design is '
+            'rejected only when the tank is below the REQUIRED pressure.')
 
     def calculate_turbopump_requirements(self):
         """Turbopompa özeti — çevrimden ve TEK pompa zincirinden.
@@ -7578,12 +8534,14 @@ class LiquidRocketEngine:
                 'not_applicable_reason': (
                     'pressure-fed cycle: the propellants are pushed by tank '
                     'pressure, there is no turbopump'),
-                # Denetçi Ş4 (4. tur): yakıt tarafı hesaplanmadıysa (None)
-                # en büyük değer de yayımlanmaz.
-                'max_tank_pressure': (
-                    None if injector['required_fuel_tank_pressure'] is None
-                    else max(injector['required_fuel_tank_pressure'],
-                             injector['required_ox_tank_pressure'])),
+                # V301/L-A (SV-03 madde 3): ``max_tank_pressure`` bu dalda
+                # ARTIK YAYIMLANMAZ. Ölçüldü (A-sivi s4_basinc.json, L-A
+                # once.json v_pf): pompasız çevrimin "turbopompa" bloğu
+                # 130,015 bar basıyordu (= Pc + ΔP + ceket + 8 bar pay);
+                # pompa yokken pompa bloğunda tank basıncı yayımlanmaz.
+                # Gerekli tank basıncının TEK yeri ``injection_system.
+                # required_*_tank_pressure`` = ``detailed_feed_system.
+                # engine_cycle_solution.required_tank_pressure_*_bar``.
             }
 
         # Turbopompalı çevrim: sayılar ayrıntılı pompa tasarımından gelir.
@@ -7824,7 +8782,37 @@ class LiquidRocketEngine:
                 # ayrılan lülede ideal CF gerçek itkiyi temsil etmez.
                 sl_anchor_ok = sl_anchor_ok and bool(
                     pe_fixed_bar >= NOZZLE_SEPARATION_PRESSURE_RATIO * self.P_a)
-            if sl_anchor_ok:
+            # V301/L-E (NK-39): SABİT lüle deniz seviyesinde DOLU akıyorsa
+            # (ayrılmasız) satır AYNI LÜLE ÖZDEŞLİĞİYLE kurulur:
+            #     F(h) = F_vac − p_a(h)·A_e   (Sutton & Biblarz 9th ed.,
+            #     Eq. 2-14: F = ṁv₂ + (p₂ − p₃)A₂, sabit ṁ, v₂, p₂)
+            # ⇒ Isp(h) = Isp_vac − (Isp_vac − Isp_sl)·p_a(h)/p_a,SL.
+            # Eğim yayımlanan iki Isp'den alınır (A_e/(ṁ·g0) =
+            # (Isp_vac − Isp_sl)/p_a,SL — kartlar bu özdeşliği taşır, NK-33
+            # denetimi). Ölçülen kusur (örnek sıvı, O/F 2,6, ε 12): eski
+            # zincir Isp'yi deniz seviyesine tek-γ ideal CF ORANIYLA
+            # demirliyordu (isp_sl·CF(h)/CF_sl) ve 100 km satırı 309,174 s
+            # yayımlıyordu; aynı ekranın "Vakum Isp" kartı 311,010 s (CEA,
+            # aynı lüle). Fark tek-γ CF ile CEA'nın Isp_sl/Isp_vac oranının
+            # ayrışmasıdır (−%0,59); iki koşu arasında bayat önbellek YOK
+            # (ölçüldü: O/F 2,3 → 2,6 → 2,3 aynı süreçte birebir tekrar).
+            # Artık eğri iki uçta da kartlara oturur (yapı gereği).
+            ayni_lule_ozdesligi = bool(
+                sl_anchor_ok and pe_fixed_bar is not None
+                and float(self.P_a) > 0.0
+                and float(self.isp_sl) > 0.0
+                and float(self.isp_vac) >= float(self.isp_sl))
+            if ayni_lule_ozdesligi:
+                isp_per_cf = self.isp_sl / CF_ideal_sl
+                isp_anchor_basis = (
+                    'delivered Isp anchored at the sea-level design point '
+                    '(attached flow) AND the vacuum value of the same fixed '
+                    'nozzle: same-nozzle identity F(h) = F_vac - p_a(h)*A_e '
+                    '(Sutton & Biblarz '
+                    '9th ed., Eq. 2-14), i.e. Isp(h) = Isp_vac - (Isp_vac - '
+                    'Isp_sl) * p_a(h) / p_a(sea level) between the published '
+                    'sea-level and vacuum Isp of this nozzle')
+            elif sl_anchor_ok:
                 isp_per_cf = self.isp_sl / CF_ideal_sl
                 isp_anchor_basis = (
                     'delivered Isp anchored at the sea-level design point '
@@ -7871,9 +8859,16 @@ class LiquidRocketEngine:
                 # Doğru tavan satırın KENDİ lülesinin vakum Isp'sidir; o
                 # tavan tanım gereği hiçbir ortam basıncında bağlamaz, çünkü
                 # CF(ε, P_a>0) < CF(ε, 0).
-                isp_altitude = isp_per_cf * CF_ideal
-                if CF_vac_eps is not None:
-                    isp_altitude = min(isp_altitude, isp_per_cf * CF_vac_eps)
+                if ayni_lule_ozdesligi:
+                    isp_altitude = (float(self.isp_vac)
+                                    - (float(self.isp_vac)
+                                       - float(self.isp_sl))
+                                    * float(pressure_atm) / float(self.P_a))
+                else:
+                    isp_altitude = isp_per_cf * CF_ideal
+                    if CF_vac_eps is not None:
+                        isp_altitude = min(isp_altitude,
+                                           isp_per_cf * CF_vac_eps)
                 # Thrust at altitude (constant mass flow)
                 thrust_altitude = self.mdot_total * isp_altitude * self.g0
                 # Actual thrust coefficient (zincirle tutarli: CF = F/(Pc*A_t))
@@ -8071,6 +9066,11 @@ class LiquidRocketEngine:
 
     def calculate_performance(self):
         """Calculate overall engine performance"""
+        # V301/L-KABUK: iki katmanlı cidarın yığın çözümü bu koşuya özgüdür
+        # (kütle dökümü ve yapı zinciri AYNI yığını okur); önceki koşudan
+        # kalan önbellek taşınmaz.
+        self._wall_stack_cache = None
+        self._thermal_protection_cache = None
         # Basic geometry
         nozzle_geom = self.calculate_nozzle_geometry()
         
@@ -8109,8 +9109,22 @@ class LiquidRocketEngine:
         # taramasından gelir (aşağıda performance_maps çözüldükten sonra
         # okunur); self.mr_efficiency canlı CEA yolunda koşulsuz 1.0'dır ve
         # yaprağı her motorda %100'e çiviliyordu.
-        actual_isp_sl = self.isp_sl
-        actual_isp_vac = self.isp_vac
+        # L-B (v3.0.1, SV-08): film soğutucusunun bedeli BAŞLIĞA işlenir
+        # (FILM_COOLING_PERFORMANCE_BASIS). Film yoksa oran 1, sayılar
+        # bit-aynı kalır. Çekirdek zincir (self.isp_sl, self.mdot_total,
+        # boğaz, irtifa tablosu) DEĞİŞMEZ; teslim değerler yayın katmanıdır.
+        film_performance = self._film_cooling_performance()
+        _film_var = film_performance['film_coolant_flow_kg_s'] > 0.0
+        actual_isp_sl = (film_performance['isp_delivered_sea_level_s']
+                         if _film_var else self.isp_sl)
+        actual_isp_vac = (film_performance['isp_delivered_vacuum_s']
+                          if _film_var else self.isp_vac)
+        published_mdot_total = (film_performance['total_mass_flow_kg_s']
+                                if _film_var else self.mdot_total)
+        published_mdot_fuel = (film_performance['total_fuel_flow_kg_s']
+                               if _film_var else self.mdot_fuel)
+        if isinstance(cooling.get('film_cooling'), dict):
+            cooling['film_cooling']['performance'] = film_performance
 
         # Özgül itki kontrolü
         if actual_isp_sl < 100 or actual_isp_sl > 500:
@@ -8193,6 +9207,18 @@ class LiquidRocketEngine:
         # Altitude performance analysis
         altitudes = [0, 1000, 5000, 10000, 20000, 50000, 80000, 100000]  # m
         altitude_performance = self.calculate_altitude_performance(altitudes)
+        # L-B (v3.0.1, SV-08): irtifa tablosunun Isp'si başlıkla AYNI
+        # muhasebeden — film varsa teslim Isp (itki aynı, debi film dâhil);
+        # aksi hâlde sayfa "iki deniz seviyesi Isp'si" notu basardı.
+        if _film_var:
+            _oran = film_performance['core_flow_fraction']
+            for _satir in altitude_performance or []:
+                _v = (_satir.get('specific_impulse')
+                      if isinstance(_satir, dict) else None)
+                if isinstance(_v, (int, float)) and np.isfinite(_v):
+                    _satir['specific_impulse_core'] = float(_v)
+                    _satir['specific_impulse'] = float(_v) * _oran
+                    _satir['film_isp_charged'] = True
 
         # Nozul çıkış durumu (plume sözleşmesi): deniz seviyesi satırının
         # GERÇEK değerleri hibritle aynı şema adları altında yayımlanır —
@@ -8203,6 +9229,9 @@ class LiquidRocketEngine:
         # Advanced subsystem analysis
         propellant_tanks = self._design_propellant_tanks()
         detailed_feed_system = self._analyze_detailed_feed_system()
+        # V301/L-A (SV-03 madde 2): gerekli tank basıncı TEK tanım — enjektör
+        # bloğu çevrim çözümünün sayısını okur (bkz. metot notu).
+        self._unify_required_feed_pressure(injector, detailed_feed_system)
         # F1-1 (bebek-Scofield): başlık Isp'si ile çevrim çözümünün motor
         # Isp'si aynı yanıtta çelişiyordu ve fark hiçbir yerde beyan
         # edilmiyordu — ilişki artık adıyla yayımlanır (blok, motorun gerçek
@@ -8210,15 +9239,28 @@ class LiquidRocketEngine:
         cycle_isp_accounting = self._cycle_isp_accounting_block(
             detailed_feed_system.get('engine_cycle_solution') or {})
         combustion_analysis = self._analyze_combustion_chamber_detailed()
-        structural_analysis = self._calculate_structural_loads()
+        # Isıl koruma tek kaynak: yukarıdaki GERÇEK soğutma çözümünden türetilir.
+        # L-B (v3.0.1, SV-05): ısıl koruma (RP-1 istasyon marşı) ARTIK yapı
+        # zincirinden ÖNCE koşar; hedef ⟷ çözülen cidar kararı tek yerde
+        # verilir ve yapı hükmü çözülen sıcaklığı okur. Isıl koruma yapıya
+        # bağlı değildir (cidar kalınlığını _structural_design'dan alır).
+        # V301/L-KABUK: iki katmanlı cidarda ısıl koruma kütle dökümü için
+        # ZATEN çözüldü (``_wall_stack_cached``); aynı çözüm yeniden
+        # kullanılır (marş ikinci kez koşmaz, iki blok aynı sayıyı okur).
+        thermal_protection = getattr(self, '_thermal_protection_cache', None)
+        if thermal_protection is None:
+            thermal_protection = self._calculate_thermal_protection_system(
+                cooling)
+        wall_resolution = self._resolve_wall_temperature(
+            cooling, thermal_protection)
+        structural_analysis = self._calculate_structural_loads(
+            wall_resolution, self._wall_stack_cached())
         # ÖH D24 · P9B2-24 — ön kapak boyu, imalat STEP'iyle TEK KAYNAKTAN.
         # İhraç katmanı kapağı DÜZ modeller ve kalınlığını
         # ``end_cap_analysis.flat_head_thickness``tan okur; yayımlanan boy da
         # aynı alandan okunur ki panel ile indirilen katı aynı cümleyi kursun.
         _forward_closure_mm, _forward_closure_basis = \
             self._forward_closure_length_mm(structural_analysis)
-        # Isıl koruma tek kaynak: yukarıdaki GERÇEK soğutma çözümünden türetilir.
-        thermal_protection = self._calculate_thermal_protection_system(cooling)
         # Güverte ısı haritasının okuduğu şema (Z5-C5 / OH-Z3-03): AYNI
         # soğutma çözümünden yayımlanır, yeni fizik hesabı YOKTUR.
         heat_transfer_analysis = self._build_heat_transfer_analysis(cooling)
@@ -8258,14 +9300,22 @@ class LiquidRocketEngine:
                 _cf_sl = _row.get('thrust_coefficient')
                 break
         _cd = float(self.CD_throat)
-        if (_cf_sl and actual_isp_sl and getattr(self, 'c_star', None)
+        # L-B (v3.0.1, SV-08): özdeşlik ÇEKİRDEK odanındır (C_F, c*, C_D
+        # çekirdek akışı anlatır); film bedeli düşülmüş başlık Isp'si ona
+        # girmez. Film yoksa iki sayı aynıdır (bit-aynı).
+        _isp_kimlik = float(self.isp_sl)
+        if (_cf_sl and _isp_kimlik and getattr(self, 'c_star', None)
                 and _cd > 0):
             _pred = float(_cf_sl) * float(self.c_star) / (G_0 * _cd)
-            _res = (float(actual_isp_sl) - _pred) / float(actual_isp_sl) * 100.0
+            _res = (_isp_kimlik - _pred) / _isp_kimlik * 100.0
             isp_identity = {
                 'identity': 'isp_sea_level = thrust_coefficient(0 m) * '
                             'c_star / (g0 * throat_discharge_coefficient)',
-                'isp_sea_level_s': float(actual_isp_sl),
+                'isp_sea_level_s': _isp_kimlik,
+                'isp_sea_level_basis': (
+                    'core (main-chamber) sea-level Isp; equals the headline '
+                    'isp_sea_level unless a film coolant flow is charged '
+                    '(cooling_system.film_cooling.performance)'),
                 'thrust_coefficient_sea_level': float(_cf_sl),
                 'c_star_m_s': float(self.c_star),
                 'throat_discharge_coefficient': _cd,
@@ -8418,9 +9468,11 @@ class LiquidRocketEngine:
                 .get('mr_efficiency_basis', 'not_modelled')),
             
             # Mass flow rates
-            'total_mass_flow': self.mdot_total,
+            # L-B (v3.0.1, SV-08): film varsa toplam ve yakıt debisi filmi
+            # İÇERİR (film_cooling.performance); yoksa çekirdekle bit-aynı.
+            'total_mass_flow': published_mdot_total,
             'oxidizer_flow': self.mdot_ox,
-            'fuel_flow': self.mdot_fuel,
+            'fuel_flow': published_mdot_fuel,
             
             # Geometry
             'throat_diameter': nozzle_geom['throat_diameter'],
@@ -8715,7 +9767,7 @@ class LiquidRocketEngine:
                     # (yayım kapısı) SİLİNİR ve basis gerekçeyi taşır.
                     'propellant_mass_kg': (
                         None if burn_time is None
-                        else self.mdot_total * burn_time),
+                        else published_mdot_total * burn_time),
                     # A11: tank kartındaki kütle bu sayının 1.15 katıdır ve
                     # bunu KENDİ beyan eder — iki sayı aynı kavram değildir.
                     'propellant_mass_basis': (
@@ -8736,7 +9788,7 @@ class LiquidRocketEngine:
                     'isp_vac_s': actual_isp_vac,
                     'c_star_m_s': self.c_star,
                     'mixture_ratio': self.MR,
-                    'total_mass_flow_kg_s': self.mdot_total,
+                    'total_mass_flow_kg_s': published_mdot_total,
                 },
                 # v2.6.26 (bulgu B1): metin koşulsuz "design optimised" diyordu.
                 # Hiçbir eniyileme çalışmadığında bu iddia yanlıştı; fiil artık
@@ -8867,7 +9919,34 @@ class LiquidRocketEngine:
                 str(detay.get('injector_type') or '').lower())
             n_ox = int(oxc.get('n_orifices') or 0)
             n_fuel = int((fc or {}).get('n_orifices') or 0)
-            if desen_sozcugu and (n_ox + n_fuel) >= 1:
+            pg_desen = (detay.get('pintle_geometry')
+                        if desen_sozcugu == 'pintle' else None)
+            if isinstance(pg_desen, dict):
+                # V301/L-C (SV-07): pintle deseni KANON geometriden — uçta n
+                # radyal yakıt deliği + tek oksitleyici anülüsü. Devrelerin
+                # eşdeğer düz orifis planı (n_orifices) delinmez, desene girmez.
+                results['injector_pattern'] = {
+                    'n_holes': int(pg_desen['n_radial_holes']),
+                    'hole_diameter_m': float(
+                        pg_desen['radial_hole_d_mm']) / 1000.0,
+                    'pattern_type': 'pintle',
+                    'pintle_diameter_m': float(
+                        pg_desen['d_pintle_mm']) / 1000.0,
+                    'annulus_gap_m': float(
+                        pg_desen['annulus_gap_mm']) / 1000.0,
+                    'skip_distance_m': float(
+                        pg_desen['skip_distance_mm']) / 1000.0,
+                    '_basis': (
+                        'canonical pintle geometry (injector_design_detail.'
+                        'pintle_geometry): n_holes radial FUEL tip holes in '
+                        'the pintle post + one OXIDIZER annulus of gap '
+                        'annulus_gap_m around the post. The circuits\' '
+                        'equivalent plain-orifice plan is a flow-area sizing '
+                        'device and is NOT drilled, so it is not part of '
+                        'this pattern. n_rings is not computed by any solver '
+                        'and is therefore not published.'),
+                }
+            elif desen_sozcugu and (n_ox + n_fuel) >= 1:
                 desen = {
                     # Yüzeydeki TOPLAM delik sayısı: oksitleyici + yakıt
                     # devresi (iki-devreli yüzde her delik gerçektir).
@@ -8920,6 +9999,11 @@ class LiquidRocketEngine:
         # ancak sonuç sözlüğü tamamlandığında bellidir. Uyarı listesi de
         # yeniden anlık görüntülenir — 'input_warnings' yukarıda kopyalandığı
         # için burada üretilen uyarı aksi hâlde kullanıcıya ulaşmazdı.
+        # V301/FİZİK-2 (kalem 4, CAD-2 DEVİR 2): iki katmanlı cidarda kamara
+        # ve lüle kütlesi ÇİZİLEN geometriden, CAD'in tek işleviyle; kuru
+        # toplam, T/W, Tasarım Özeti ve uçuş aracının okuduğu alanlar ondan.
+        self._iki_katmanli_kutle_tek_kaynak(results)
+
         okunmayanlar = self._declare_unread_inputs(results)
         if okunmayanlar:
             results['inputs_not_used'] = okunmayanlar
@@ -8938,6 +10022,16 @@ class LiquidRocketEngine:
             if isinstance(_masses, dict):
                 _masses.pop('propellant_mass_kg', None)
                 _masses.pop('burn_time_s', None)
+        else:
+            # V3.0.5 SIVI-CIDAR (kalem 4, FİZİK-2 DEVİR 2): motor toplam
+            # impulsu KENDİ tanımıyla TEK sayı olarak yayımlar. ÖLÇÜLDÜ (main
+            # 379e35f23, docs/scofield/raw/OH/V301/sivi-cidar/olcum/
+            # k4_once.json): üst düzeyde alan yoktu; sunucu PDF tablosu "N/A",
+            # güvenlik bölümü kendi itki × süresini, sayfa F·t_b'yi
+            # türetiyordu. Tanım sayfanın ve dışa aktarımın kullandığıyla
+            # aynı: tasarım itkisi × yanma süresi (sürekli rejim).
+            results['total_impulse'] = float(self.F) * float(burn_time)
+            results['total_impulse_basis'] = TOTAL_IMPULSE_BASIS
         return results
 
     # ------------------------------------------------------------------
@@ -9900,6 +10994,60 @@ class LiquidRocketEngine:
             'friction_factor': f,
         }
 
+    def _feed_budget_jacket_dp(self):
+        """(ΔP [bar] | None, durum, künye) — yakıt bütçesinin ceket kalemi.
+
+        V301/L-REJ kalem 7 (NK-36). Sayı TEK kaynaktan:
+        ``cooling_system.cooling_pressure_drop`` — tank basıncı
+        (``required_tank_pressure_fuel``) ve çevrim güç dengesi
+        (``regen_dp_bar``) aynı alanı okur, bu yüzden üç panel aynı sayıyı
+        söyler. Durumlar: ``computed`` (rejeneratif, ceket hidroliği
+        hesaplandı), ``not_computed`` (rejeneratif ama ΔP yok — yakıt toplamı
+        yayımlanmaz), ``not_modelled`` (dump soğutma: ceket modellenmedi,
+        kalem yok, çevrim dengesiyle aynı beyan), ``not_applicable`` (ceket
+        yok: ablatif/ışınımsal/film).
+        """
+        if self.cooling_type == 'dump_cooling':
+            return None, 'not_modelled', (
+                'not_modelled: the dump-cooling jacket is NOT_MODELLED '
+                "(cooling_system.dump_cooling_jacket_status); its pressure "
+                'drop is not in this budget, so if that jacket is fed in '
+                'series from the fuel line the fuel totals here are lower '
+                'bounds (same statement as the cycle power balance)')
+        if self.cooling_type != 'regenerative':
+            return None, 'not_applicable', (
+                f"not_applicable: cooling_type '{self.cooling_type}' has no "
+                'regenerative jacket, so the fuel line carries no jacket '
+                'pressure drop')
+        try:
+            cooling = self.calculate_cooling_requirements()
+        except Exception as exc:
+            return None, 'not_computed', (
+                'not_computed: the cooling solution failed '
+                f'({type(exc).__name__}: {str(exc)[:160]}); the jacket sits '
+                'in series in the fuel line, so total_fuel and '
+                'pump_discharge_pressure_fuel are not published')
+        dp = cooling.get('cooling_pressure_drop')
+        if (cooling.get('jacket_hydraulics_status') == 'not_computed'
+                or dp is None or isinstance(dp, bool)
+                or not np.isfinite(float(dp)) or float(dp) < 0.0):
+            return None, 'not_computed', (
+                'not_computed: the regenerative jacket pressure drop is not '
+                f'available on this run (cooling_system.cooling_pressure_drop '
+                f'= {dp!r}, jacket_hydraulics_status = '
+                f"{cooling.get('jacket_hydraulics_status')!r}); the jacket "
+                'sits in series in the fuel line, so total_fuel and '
+                'pump_discharge_pressure_fuel are not published (no zero or '
+                'partial sum)')
+        return float(dp), 'computed', (
+            'computed: fuel_line.regen_jacket is the regenerative cooling '
+            'jacket pressure drop of this same answer (cooling_system.'
+            f'cooling_pressure_drop = {float(dp):.4f} bar) - the number the '
+            'fuel tank pressure and the cycle power balance also use. Fuel '
+            'IS the coolant and passes the jacket before the injector, so '
+            'the item is part of total_fuel and pump_discharge_pressure_fuel '
+            '(series circuit)')
+
     def _calculate_feed_system_pressure_drops(self) -> Dict:
         """Besleme hattı basınç düşümleri — GERÇEK akış hesabı.
 
@@ -9977,10 +11125,25 @@ class LiquidRocketEngine:
         fuel = self._line_pressure_drops(mdot_fuel, self.rho_fuel, mu_fuel,
                                          dp_inj_fuel, 'fuel')
         keys = ('tank_outlet', 'main_valve', 'filters', 'feed_lines', 'injector')
+        # V301/L-REJ kalem 7 (son kullanıcı testi NK-36): rejeneratif ceket
+        # ΔP'si yakıt hattı bütçesine ADIYLA girer. ÖLÇÜLDÜ (örnek sıvı motor,
+        # L-REJ/once.json): bütçenin "Besleme (Fuel)" toplamı 92,83 bar
+        # (Pc + hat + enjektör, ceketsiz) iken çevrim panelinin yakıt pompa
+        # çıkışı ceketi seri zincirde sayıyordu (~+5 bar) — aynı büyüklük iki
+        # panelde iki sayı. Ceket kalemi çevrim dengesinin ve tank basıncının
+        # kullandığı sayının KENDİSİDİR (cooling_system.cooling_pressure_drop);
+        # yakıt ceketten geçip enjektöre gelir, bu yüzden yakıt toplamına
+        # girer. Ceket ΔP'si hesaplanmadıysa yakıt toplamı da yayımlanmaz
+        # (fail-closed; tank basıncı ve çevrim dengesiyle aynı kapı).
+        jacket_dp, jacket_status, jacket_basis = self._feed_budget_jacket_dp()
+        if jacket_status == 'computed':
+            fuel['regen_jacket'] = jacket_dp
         # F-20: enjektör kalemi yoksa toplam da YOK (kısmi toplam alt sınırdır,
         # tasarım değeri gibi yayımlanmaz).
         total_ox = (sum(ox[k] for k in keys) if inj_dp_resolved else None)
-        total_fuel = (sum(fuel[k] for k in keys) if inj_dp_resolved
+        total_fuel = (sum(fuel[k] for k in keys)
+                      + (jacket_dp if jacket_status == 'computed' else 0.0)
+                      if inj_dp_resolved and jacket_status != 'not_computed'
                       else None)
 
         return {
@@ -10001,6 +11164,9 @@ class LiquidRocketEngine:
             'method': ('Darcy-Weisbach with Haaland friction factor plus '
                        'local loss coefficients (Crane TP-410); the injector '
                        'item is taken from the injector design'),
+            # V301/L-REJ kalem 7 (NK-36): ceket kaleminin durumu ve künyesi.
+            'regen_jacket_drop_status': jacket_status,
+            'regen_jacket_drop_basis': jacket_basis,
             # ÖH D25 · OH-D24-13: enjektör kalemi çözülemediyse SUSMAZ;
             # metin 'computed:' ile mi 'not_modelled:' ile mi başlıyor,
             # kalemin gerçekten hesaplanıp hesaplanmadığını o söyler.
@@ -10087,8 +11253,9 @@ class LiquidRocketEngine:
         dp_user = getattr(self, 'injector_dp_input_bar', None)
         if dp_user is not None and self.P_c > 0:
             return float(dp_user) / float(self.P_c)
-        return INJECTOR_TYPE_DP_FRACTION.get(self.injector_type,
-                                             INJECTOR_TYPE_DP_FRACTION_DEFAULT)
+        return INJECTOR_TYPE_DP_FRACTION.get(
+            canonical_injector_type(self.injector_type),
+            INJECTOR_TYPE_DP_FRACTION_DEFAULT)
 
     def _solve_cycle_balance(self, force=False):
         """Çevrim güç dengesini cycle_power_balance.solve_cycle ile kapatır.
@@ -12113,6 +13280,26 @@ class LiquidRocketEngine:
             'through a gearbox or a separate shaft, and HRMA does not size '
             'that gearing.')
 
+    def _feed_line_material_label(self):
+        """``feed_lines.*`` malzeme metni — su koçu ve hat bütçesinin okuduğu
+        TEK boru malzemesinden (``_feed_pipe_material``).
+
+        V301/L-D (SV-12): aynı yanıtta ``feed_lines.fuel_main.material =
+        'Stainless Steel 316L'`` (sabit metin) ⟷ ``valve_feedline.*.
+        pipe_structural_material = 'ss_304'`` (hesabın kullandığı) duruyordu.
+        Metin artık kullanılan kaydın ADIDIR; kayıt çözülemezse anahtarın
+        kendisi yazılır (ad uydurulmaz).
+        """
+        anahtar, kaynak = self._feed_pipe_material()
+        try:
+            from hrma.data.materials_db import get_material_safe
+            kayit, kanonik = get_material_safe(anahtar)
+            ad = kayit.get('name') or kanonik
+        except KeyError:
+            kanonik, ad = anahtar, anahtar
+        return {'material': ad, 'material_key': kanonik,
+                'material_source': kaynak}
+
     def _feed_pipe_material(self):
         """(ad, kaynak) — besleme borusunun YAPISAL malzemesi (tek tanım).
 
@@ -12162,10 +13349,8 @@ class LiquidRocketEngine:
             iticiler için (WATER_HAMMER_FLUID_KEY); tablosuz itici hattı
             NOT_MODELLED döner.
         """
-        wall_mm = self._override_val('feed_line_wall_thickness', 0.1, 50.0,
-                                     'Feed line wall thickness', ' mm')
-        closure_ms = self._override_val('valve_closure_time_ms', 0.1, 6e5,
-                                        'Valve closure time', ' ms')
+        wall_mm = self._override_band('feed_line_wall_thickness')
+        closure_ms = self._override_band('valve_closure_time_ms')
         pipe_material, pipe_material_source = self._feed_pipe_material()
 
         def _line_block(label, propellant, line, working_bar, rho):
@@ -12747,10 +13932,8 @@ class LiquidRocketEngine:
             return {'status': 'NOT_MODELLED', '_basis': basis,
                     'reason': f'valve_feedline module unavailable: {exc}'}
 
-        wall_mm = self._override_val('feed_line_wall_thickness', 0.1, 50.0,
-                                     'Feed line wall thickness', ' mm')
-        closure_ms = self._override_val('valve_closure_time_ms', 0.1, 6e5,
-                                        'Valve closure time', ' ms')
+        wall_mm = self._override_band('feed_line_wall_thickness')
+        closure_ms = self._override_band('valve_closure_time_ms')
         # Su koçu bloğuyla AYNI tek tanım (P4B4-08): yapısal boru malzemesi
         # materials_db anahtarıdır; pürüzlülük ayrıca ÖLÇÜYLE verilir.
         pipe_material, pipe_material_source = self._feed_pipe_material()
@@ -13127,6 +14310,9 @@ class LiquidRocketEngine:
         pr = float(getattr(self, 'turbine_pressure_ratio',
                            TURBINE_PRESSURE_RATIO_DEFAULT))
         p_in = getattr(self, 'turbine_inlet_pressure_bar', None)
+        if not pressure_fed:
+            # V301/L-A (SV-10): bu çevrimde feed_pressure okunmaz; beyan.
+            self._declare_feed_pressure_unused()
         if pressure_fed:
             # V3 taban-a: türbinsiz çevrimde türbin alanları DEĞERLENDİRİLMEZ;
             # gönderilenler adıyla beyan edilir (sessizce yutulmaz).
@@ -13141,12 +14327,24 @@ class LiquidRocketEngine:
             # ve tutarsızlık uyarısı HER koşuda basılıyordu. Referans artık
             # çözücünün KENDİ türbin çıkış basıncıdır.
             p_exhaust, exhaust_basis = self._turbine_exhaust_pressure_bar()
-            pr_from_inlet = max(p_in / p_exhaust, 1.2)
+            # V301/L-E (NK-34): ileti "ortama karşı" diyordu; oysa kıyas
+            # 2026-08'den beri çözücünün TÜRBİN ÇIKIŞ basıncına göredir
+            # (ölçüldü, örnek sıvı GG: 150 / 20,14 bar = 7,4 — bir BASINÇ
+            # oranı; iticiyle değişmesi çıkış basıncının basınç
+            # merdiveninden gelmesindendir, alan oranı değildir). İleti artık
+            # karşı basıncı ADIYLA ve sayısıyla verir, girilen oranın
+            # kullanıldığını ve bu oranla tutarlı giriş basıncını söyler.
+            # Eski 1,2 alt kırpması kaldırıldı: giriş basıncı çıkışın 1,2
+            # katından küçükse ham oran yazılır (sessiz kırpma yok).
+            pr_from_inlet = p_in / p_exhaust
             if abs(pr_from_inlet - pr) / pr > INPUT_CONSISTENCY_TOLERANCE:
                 self._warn('warn.liquid.turbine_pr_inconsistent', 'warning',
                            inlet_bar=float(p_in),
                            pr_from_inlet=round(float(pr_from_inlet), 1),
-                           pr_entered=round(float(pr), 1))
+                           pr_entered=round(float(pr), 1),
+                           exhaust_bar=round(float(p_exhaust), 1),
+                           inlet_consistent_bar=round(
+                               float(p_exhaust) * float(pr), 1))
         # Δh = cp·T_in·(1 − PR^(−(γ−1)/γ)) (izentropik iş, Sutton Ch. 10)
         # KU-26 beyanı: cp/γ (ve girdi yoksa T_in) kaynaksız yedektir —
         # TURBINE_FALLBACK_GAS_BASIS; çevrim kapanırsa aşağıda ezilir.
@@ -13383,6 +14581,22 @@ class LiquidRocketEngine:
         if not pressure_fed:
             self._reconcile_turbine_geometry(
                 turbine_card, (turbopump_sizing or {}).get('turbine'))
+            # V301/L-E (L-A DEVİR 4): negatif tek kademe özgül iş payı,
+            # kademe sayısı mutabık kılındıktan sonra adıyla uyarılır.
+            _kisa = getattr(self, '_power_margin_short', None)
+            if _kisa:
+                _kademe = turbine_card.get('stage_count')
+                self._warn('warn.liquid.turbine_single_stage_work_short',
+                           'warning',
+                           deficit_pct=_kisa['deficit_pct'],
+                           dh_ideal_kj=_kisa['dh_ideal_kj'],
+                           dh_limit_kj=_kisa['dh_limit_kj'],
+                           tip_limit_ms=float(TURBINE_TIP_SPEED_LIMIT_MS),
+                           velocity_ratio=float(TURBINE_VELOCITY_RATIO),
+                           stage_count=(int(_kademe)
+                                        if isinstance(_kademe, (int, float))
+                                        and not isinstance(_kademe, bool)
+                                        else '—'))
             # ÖH defter P3B4-01: uyarı YAYIMLANAN çevre hızına karşı verilir.
             # Boyutlandırma modülü işi kademelere böldüğünde gerçek türbin
             # sınırın altındadır ve uyarı ÇIKMAMALIDIR; modül geometri
@@ -13682,7 +14896,28 @@ class LiquidRocketEngine:
                 'optimistic by exactly 1/eta. A multi-stage turbine relaxes '
                 'this limit. The shaft power balance itself closes exactly, '
                 'so turbine-minus-pump power is zero by construction.')
+            # V301/L-E (L-A DEVİR 4 / C-9): negatif özgül iş payı kapanmış
+            # çevrimde UYARISIZ yayımlanıyordu (ölçüldü: GG örneği −%11,03,
+            # L-A tabanında −%21,86). Hüküm merdiveni: mil güç dengesinin
+            # KAPANMAMASI ayrı ve kritiktir (SV-19: 'turbopump_cycle_not_
+            # closed' -> 422); kapanmış çevrimde negatif pay tek kademenin
+            # bu işi taşıyamadığını söyler, tasarımı geçersiz kılmaz
+            # (boyutlandırma işi kademelere böler) -> 'warning'. Kapanmamış
+            # çevrimde bu ileti basılmaz: "güç dengesi kapandı" cümlesi orada
+            # yanlış olurdu, hüküm kapanma uyarısınındır.
+            # Kademe sayısı boyutlandırma bloğundan SONRA bellidir; ileti
+            # orada basılır (_emit_turbine_single_stage_warning). Burada
+            # yalnız sayılar saklanır (yayımlanmayan özel alan).
+            _cyc = getattr(self, '_cycle_result', None)
+            _kapandi = (isinstance(_cyc, dict)
+                        and _cyc.get('status') == 'converged')
+            self._power_margin_short = (
+                {'deficit_pct': round(-float(margins['power_margin']), 1),
+                 'dh_ideal_kj': round(dh_ideal / 1000.0, 1),
+                 'dh_limit_kj': round(dh_limit / 1000.0, 1)}
+                if (margins['power_margin'] < 0.0 and _kapandi) else None)
         else:
+            self._power_margin_short = None
             margins['power_margin'] = None
             margins['power_margin_specific_work_J_kg'] = None
             margins['power_margin_specific_work_source'] = None
@@ -13940,6 +15175,18 @@ class LiquidRocketEngine:
         ox = (detail or {}).get('ox_circuit') or {}
         d_jet_mm = ox.get('orifice_d_mm')
         v_jet = ox.get('velocity_m_s')
+        olcek = 'd_jet'
+        # V301/L-C (SV-07): pintle'da oksitleyici delikten değil anülüsten
+        # girer; devrenin ``orifice_d_mm``i DELİNMEYEN eşdeğer düz orifis
+        # planıdır (eskiden kullanıcının eleman sayısıyla 100 delik → 0,895
+        # mm, 1 delik → 8,9 mm: süre ve chug hükmü ilgisiz bir girdiye
+        # bağlıydı). Ölçek kanon geometrinin oksitleyici tabakası kalınlığı
+        # (anülüs boşluğu t) — HRMA seçimi, beyanlı.
+        pg = (detail or {}).get('pintle_geometry') if (
+            (detail or {}).get('injector_type') == 'pintle') else None
+        if isinstance(pg, dict) and pg.get('annulus_gap_mm'):
+            d_jet_mm = pg.get('annulus_gap_mm')
+            olcek = 'oxidizer annular sheet thickness t (pintle)'
         if not d_jet_mm or not v_jet or not rho_gas or rho_gas <= 0:
             return None, ('not_modelled: the injector jet diameter/velocity '
                           'is unavailable, so the atomisation time scale is '
@@ -13954,7 +15201,127 @@ class LiquidRocketEngine:
             f'sqrt(rho_l/rho_gas) with T* = {DROPLET_BREAKUP_TIME_CONST:g} '
             f'(Pilch & Erdman 1987; Nicholls 1972); d_jet = '
             f'{float(d_jet_mm):.3f} mm and v_jet = {float(v_jet):.1f} m/s '
-            'come from the injector design model')
+            'come from the injector design model'
+            + ('' if olcek == 'd_jet' else
+               f'; length scale: {olcek} from injector_design_detail.'
+               'pintle_geometry (HRMA choice: the sheet thickness stands for '
+               'the jet diameter; the equivalent plain-orifice plan of the '
+               'circuit is not drilled)'))
+
+    def _pintle_atomisation_scales(self, rho_gas):
+        """Pintle'ın İKİ ikincil parçalanma süresi (V301/L-C, ana model kararı).
+
+        Pintle için evrensel tek atomizasyon ölçeği yoktur: oksitleyici
+        anülüsünden çıkan tabaka (kalınlık t) TABAKA parçalanmasını, radyal
+        yakıt deliklerinden çıkan jetler (çap d) JET parçalanmasını temsil
+        eder; ikisi de pintle için kalibre edilmemiştir. Süre aynı bağıntıdan
+        (``_atomisation_time``) — t_b = T*·L/v·sqrt(rho_l/rho_gas) — her
+        akımın KENDİ uzunluk ölçeği, hızı ve sıvı yoğunluğuyla. Pintle dışı
+        tipte ya da geometri/hız yoksa None (uydurma yok).
+        """
+        detail = self._injector_detail() or {}
+        if detail.get('injector_type') != 'pintle':
+            return None
+        pg = detail.get('pintle_geometry')
+        oxc = detail.get('ox_circuit') or {}
+        fc = detail.get('fuel_circuit') or {}
+        if not isinstance(pg, dict) or not rho_gas or rho_gas <= 0:
+            return None
+        olcekler = {}
+        for ad, uzunluk, v, rho_l, akim in (
+                ('annulus_gap_t', pg.get('annulus_gap_mm'),
+                 oxc.get('velocity_m_s'), getattr(self, 'rho_ox', None),
+                 'oxidizer annular sheet (thickness t)'),
+                ('radial_hole_d', pg.get('radial_hole_d_mm'),
+                 fc.get('velocity_m_s'), getattr(self, 'rho_fuel', None),
+                 'fuel radial tip-hole jets (diameter d)')):
+            try:
+                uzunluk, v, rho_l = float(uzunluk), float(v), float(rho_l)
+            except (TypeError, ValueError):
+                return None
+            if not (uzunluk > 0 and v > 0 and rho_l > 0):
+                return None
+            olcekler[ad] = {
+                'tau_s': float(DROPLET_BREAKUP_TIME_CONST * uzunluk * 1e-3 / v
+                               * np.sqrt(rho_l / float(rho_gas))),
+                'length_scale_mm': uzunluk,
+                'velocity_m_s': v,
+                'liquid_density_kg_m3': rho_l,
+                'stream': akim,
+            }
+        return olcekler
+
+    def _pintle_chug_scale_check(self, loop, scales, dp_pc, tau_c, tau_f,
+                                 feed_echo):
+        """Chug çevrimini İKİ pintle ölçeğiyle koşar ve hükmü yayımlar.
+
+        Ana model kararı (27 Eki, V301/L-C): iki ölçeğin hükmü aynıysa o
+        hüküm yayımlanır; farklıysa hüküm ``marginal`` — "SINIRDA
+        (atomizasyon ölçeğine duyarlı)". Nominal (beyanlı seçim t) çevrimin
+        hükmü, büyüme oranı ve τ/τ_c GİZLENMEZ: ``growth_rate_1_s``,
+        ``tau_over_tau_c`` ve ``tau_s`` nominal ölçeğin sayıları olarak
+        yerinde kalır, ``nominal_verdict`` adıyla da durur. Kaynaksız bir
+        yüzde bandı EKLENMEZ.
+        """
+        from hrma.stability.chug import assess_chug
+        sonuc = {}
+        for ad, olcek in scales.items():
+            try:
+                cevrim = assess_chug(dp_ratio_j=float(dp_pc),
+                                     tau_s=float(olcek['tau_s']),
+                                     tau_c_s=tau_c['tau_c_s'],
+                                     tau_f_s=tau_f, feed_line=feed_echo)
+            except Exception as exc:
+                loop['atomisation_scale_check'] = {
+                    'status': 'NOT_EVALUATED',
+                    'reason': (f"the chug loop rejected the '{ad}' scale: "
+                               f'{exc}')}
+                return
+            sonuc[ad] = dict(olcek, verdict=cevrim.get('verdict'),
+                             growth_rate_1_s=cevrim.get('growth_rate_1_s'),
+                             frequency_hz=cevrim.get('frequency_hz'),
+                             tau_over_tau_c=cevrim.get('tau_over_tau_c'))
+        nom = sonuc[PINTLE_CHUG_NOMINAL_SCALE]
+        alt_ad = next(a for a in sonuc if a != PINTLE_CHUG_NOMINAL_SCALE)
+        alt = sonuc[alt_ad]
+        ayni = nom['verdict'] == alt['verdict']
+        loop['atomisation_scale_check'] = {
+            'status': 'modelled',
+            'nominal_scale': PINTLE_CHUG_NOMINAL_SCALE,
+            'scales': sonuc,
+            'verdicts_agree': bool(ayni),
+            'published_verdict': (nom['verdict'] if ayni else 'marginal'),
+            'basis': PINTLE_CHUG_SCALE_BASIS,
+        }
+        if ayni:
+            return
+        loop['nominal_verdict'] = loop.get('verdict')
+        loop['nominal_verdict_basis'] = loop.get('verdict_basis')
+        loop['verdict'] = 'marginal'
+        loop['verdict_basis'] = (
+            'MARGINAL (sensitive to the atomisation scale): the nominal model '
+            f"(oxidizer annular sheet, t = {nom['length_scale_mm']:.3f} mm) "
+            f"is {nom['verdict']}, growth rate "
+            f"{nom['growth_rate_1_s']:+.3g} 1/s, tau/tau_c "
+            f"{nom['tau_over_tau_c']:.3f}; with the fuel radial-hole jet "
+            f"scale (d = {alt['length_scale_mm']:.3f} mm) it is "
+            f"{alt['verdict']}, growth rate {alt['growth_rate_1_s']:+.3g} "
+            f"1/s, tau/tau_c {alt['tau_over_tau_c']:.3f}. Neither scale is "
+            'calibrated for a pintle; no uncertainty band is applied. '
+            + PINTLE_CHUG_SCALE_BASIS)
+        # V3.0.5 T-ÇAPA-C1: kod çağrının İÇİNDE (iki dalı da 'warn.' kodu) —
+        # uyarı sözleşmesi bekçisi (test_v262_release_gate) ham metni böyle
+        # ayırır; davranış aynı.
+        self._warn(('warn.liquid.chug_scale_sensitive_nominal_unstable'
+                    if nom['verdict'] == 'unstable'
+                    else 'warn.liquid.chug_scale_sensitive_nominal_stable'),
+                   'warning',
+                   t_mm=round(float(nom['length_scale_mm']), 3),
+                   growth=round(float(nom['growth_rate_1_s']), 2),
+                   tau_ratio=round(float(nom['tau_over_tau_c']), 3),
+                   d_mm=round(float(alt['length_scale_mm']), 3),
+                   alt_growth=round(float(alt['growth_rate_1_s']), 2),
+                   alt_tau_ratio=round(float(alt['tau_over_tau_c']), 3))
 
     def _injector_momentum_criterion(self):
         """(momentum_orani, hedef, gerekçe) — enjektör modelinin TEK kaynağı.
@@ -14051,6 +15418,10 @@ class LiquidRocketEngine:
         # çözümünden gelir (jet çapı, jet hızı, sıvı ve gaz yoğunluğu).
         mixing_time, mixing_time_basis = self._atomisation_time(
             rho_gas_chamber)
+        # V301/L-C (ana model kararı, 27 Eki): pintle'da İKİ atomizasyon
+        # ölçeği (anülüs tabakası t, radyal yakıt jeti d). Pintle dışı tipte
+        # None — o yollar bit-aynı.
+        pintle_olcekleri = self._pintle_atomisation_scales(rho_gas_chamber)
 
         # --- Momentum oranı: TEK KAYNAK enjektör tasarım modeli -------------
         # Eski kod burada kendi momentum oranını ((ṁ_ox/ṁ_f)·sqrt(ρ_f/ρ_ox))
@@ -14138,12 +15509,13 @@ class LiquidRocketEngine:
                 # +%379). Kamara zaman sabiti FİİLEN ÇİZİLEN hacmin
                 # özelliğidir (V_c/(A_t·c*·Γ²)); istenen değer çizilmeyen
                 # bir hazneye aitti ve hüküm o yüzden ters dönüyordu.
-                l_star_m=l_star_achieved, residence_time_s=residence_time)
+                l_star_m=l_star_achieved, residence_time_s=residence_time,
+                pintle_scales=pintle_olcekleri)
         }
 
     def _stability_assessment(self, a_chamber, chamber_length, chamber_diameter,
                               mixing_time, l_star_m=None,
-                              residence_time_s=None):
+                              residence_time_s=None, pintle_scales=None):
         """Yanma kararlılığı: HESAPLANABİLİR ölçütler + dürüst 'unknown'.
 
         SAHA HATASI (2026-07-23 denetimi): burada 'stability_rating' HER motor
@@ -14219,7 +15591,8 @@ class LiquidRocketEngine:
             chamber_diameter, chamber_length, dp_pc)
         # --- chug ÇEVRİMİ (F2b-2): oran kuralı değil, gerçek kök yeri ------
         chug_loop = self._chug_loop_block(dp_pc, mixing_time, l_star_m, rating,
-                                          residence_time_s)
+                                          residence_time_s,
+                                          pintle_scales=pintle_scales)
 
         return {
             'acoustic_frequency': f_1l,                 # Hz (1L modu)
@@ -14383,8 +15756,7 @@ class LiquidRocketEngine:
         Returns:
             (tau_f_s veya None, beyan sözlüğü veya None)
         """
-        length = self._override_val('feed_line_length_m', 0.05, 50.0,
-                                    'Feed line length', ' m')
+        length = self._override_band('feed_line_length_m')
         if length is None:
             return None, None
         # --- ÖH D22 / P6B4-05 · ZİNCİR YANITIN KENDİ HATTINI KULLANIR -----
@@ -14409,14 +15781,11 @@ class LiquidRocketEngine:
         #      çelişki adıyla yayımlanır (``solved_line_cross_check``) ve
         #      hangi çapın hükmü ürettiği açıkça yazılır.
         cozulmus_d_mm = self._cozulmus_hat_capi_mm()
-        area = self._override_val('feed_line_area_m2', 1e-8, 1.0,
-                                  'Feed line flow area', ' m²')
+        area = self._override_band('feed_line_area_m2')
         kesit_kaynagi = 'user input (feed_line_area_m2)'
         kullanici_d_mm = None
         if area is None:
-            kullanici_d_mm = self._override_val(
-                'feed_line_diameter_mm', 0.5, 500.0,
-                'Feed line inner diameter', ' mm')
+            kullanici_d_mm = self._override_band('feed_line_diameter_mm')
             if kullanici_d_mm is not None:
                 area = np.pi * (float(kullanici_d_mm) / 1000.0) ** 2 / 4.0
                 kesit_kaynagi = 'user input (feed_line_diameter_mm)'
@@ -14521,7 +15890,7 @@ class LiquidRocketEngine:
         return d if np.isfinite(d) and d > 0 else None
 
     def _chug_loop_block(self, dp_pc, mixing_time, l_star_m, rule_rating,
-                         residence_time_s=None):
+                         residence_time_s=None, pintle_scales=None):
         """Gerçek chug çevrimi (hrma.stability.chug) + oran kuralıyla İLİŞKİ.
 
         Oran kuralı (ΔP/Pc ≥ 0,20) yalnız enjektör kazancına bakar; gecikmeyi
@@ -14659,6 +16028,10 @@ class LiquidRocketEngine:
             loop['tau_c_vs_residence_time'] = tau_c_vs_residence_time_field(
                 tau_c['tau_c_s'], residence_time_s, LIQUID_TAU_C_RESIDUAL,
                 residual_terms=terimler)
+        # --- V301/L-C: pintle'da İKİ atomizasyon ölçeği (ana model kararı) --
+        if pintle_scales:
+            self._pintle_chug_scale_check(loop, pintle_scales, dp_pc, tau_c,
+                                          tau_f, feed_echo)
         # --- oran kuralı ile çevrimin İLİŞKİSİ (ölçülür, varsayılmaz) ---
         rule_says_safe = rule_rating in ('chug_margin_ok',
                                          'chug_margin_marginal')
@@ -14715,8 +16088,7 @@ class LiquidRocketEngine:
         # (ızgaranın kendisi değişmez; yalnız bir nokta eklenir ki hüküm
         # gerçekten sorulan yerde verilsin).
         try:
-            _min_pct = self._override_val('min_throttle', 5.0, 100.0,
-                                          'Minimum throttle', ' %')
+            _min_pct = self._override_band('min_throttle')
         except Exception:
             _min_pct = None
         if _min_pct:
@@ -14829,12 +16201,50 @@ class LiquidRocketEngine:
             ayrilmis = (pe_f is not None
                         and pe_f < ayrilma_esigi * (1.0 - 1e-9))
             if ayrilmis and not ayrilma_uyarildi:
-                # Mevcut anahtar (yeni i18n anahtarı açılmadı).
-                self._warn('warn.liquid.flow_separation', 'warning',
-                           eps=float(getattr(self, 'expansion_ratio', 0) or 0),
-                           pe_bar=round(float(pe_f), 3),
-                           ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
+                # V301/L-E (NK-66): bu uyarı eskiden TASARIM NOKTASI anahtarını
+                # ('warn.liquid.flow_separation') KISMA noktasının çıkış
+                # basıncıyla basıyordu. Ölçüldü (örnek sıvı, O/F 2,3, ε 12,
+                # Pc 70): ana sonuç "12 genişleme oranı deniz seviyesinde
+                # 0,301 bar çıkış basıncı veriyor … akış ayrılır" diyordu;
+                # 0,301 bar %40 kısmanın (Pc 28 bar) değeriydi, tasarım
+                # noktasında P_e 0,753 bar > 0,405 bar (ayrılma yok). Aynı
+                # lülenin CFD'si (tasarım noktası) "AYRILMA YOK" dediği için
+                # iki panel zıt hüküm veriyor gibi görünüyordu. Kısma
+                # noktasının hükmü artık KENDİ anahtarıyla, kısma oranı ve
+                # ayrılma başlangıcıyla yayımlanır; tasarım noktası ayrıksa
+                # onun hükmü _warn_flow_separation'dadır (aşağıdaki dal).
                 ayrilma_uyarildi = True
+                tasarim_ayrik = (pe_design is None
+                                 or float(pe_design)
+                                 < ayrilma_esigi * (1.0 - 1e-9))
+                if not tasarim_ayrik:
+                    # P_e ∝ Pc (aynı ε, γ): ayrılma başlangıcı kesin kısma
+                    # oranı f_sep = eşik / P_e(tasarım).
+                    f_sep = ayrilma_esigi / float(pe_design)
+                    self._warn('warn.liquid.throttle_flow_separation',
+                               'warning',
+                               onset_pct=round(100.0 * f_sep, 1),
+                               onset_pc_bar=round(base_pc * f_sep, 1),
+                               throttle_pct=round(100.0 * f, 1),
+                               pc_bar=round(float(pc), 1),
+                               pe_bar=round(float(pe_f), 3),
+                               threshold_bar=round(float(ayrilma_esigi), 3),
+                               ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO),
+                               design_pe_bar=round(float(pe_design), 3))
+                elif not any(
+                        isinstance(_w, dict)
+                        and _w.get('code') == 'warn.liquid.flow_separation'
+                        for _w in (getattr(self, 'design_warnings', None)
+                                   or [])):
+                    # Tasarım noktası da ayrık ve henüz söylenmemiş: hüküm
+                    # TASARIM değerleriyle basılır (kısma değeriyle değil).
+                    self._warn('warn.liquid.flow_separation', 'warning',
+                               eps=float(getattr(self, 'expansion_ratio', 0)
+                                         or 0),
+                               pe_bar=(round(float(pe_design), 3)
+                                       if pe_design is not None
+                                       else round(float(pe_f), 3)),
+                               ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
 
             # --- İtki: haritanın KENDİ Isp'si ve KENDİ debi varsayımıyla.
             thrust_n = None
@@ -14948,6 +16358,25 @@ class LiquidRocketEngine:
                     'published and neither overrides the other - the same '
                     'contract the design point uses (rule_vs_loop).'),
             }
+            # V301/FİZİK-2 (L-C §10): pintle'da tasarım noktası hükmü İKİ
+            # atomizasyon ölçeğiyle verilir (``atomisation_scale_check``);
+            # bu harita her noktayı yalnız NOMİNAL ölçeğin τ'suyla koşar.
+            # Haritaya iki ölçeği taşımak ayrı iş; burada adıyla beyan edilir.
+            if (self._injector_detail() or {}).get('injector_type') == 'pintle':
+                cevrim_beyani.update({
+                    'atomisation_scale_used': PINTLE_CHUG_NOMINAL_SCALE,
+                    'atomisation_scale_check_applied': False,
+                    'atomisation_scale_basis': (
+                        'Pintle: every throttle point runs the chug loop with '
+                        'the NOMINAL atomisation scale only (oxidizer annular '
+                        'sheet thickness t, tau_s above). The two-scale check '
+                        '(t and the fuel radial-hole diameter d; MARGINAL when '
+                        'their verdicts differ) is applied at the design '
+                        'point only (chug_loop.atomisation_scale_check), so a '
+                        'throttle-point loop verdict here may differ from the '
+                        'one the d scale would give; such points are not '
+                        'marked.'),
+                })
         else:
             cevrim_beyani = {
                 'status': 'NOT_EVALUATED',
@@ -15225,6 +16654,10 @@ class LiquidRocketEngine:
             0.2, optimal_mr * (1.0 - PERF_MAP_MR_SPAN))
         mr_hi = getattr(self, 'of_scan_max', None) or (
             optimal_mr * (1.0 + PERF_MAP_MR_SPAN))
+        # V301/L-D (SV-04): taramanın GERÇEKTEN kullandığı bant kaydedilir;
+        # /calculate_liquid of_min/of_max gönderilmediyse bunu
+        # ``defaults_applied`` ile adıyla beyan eder (sayı değişmez).
+        self.of_scan_band_used = (float(mr_lo), float(mr_hi))
         mr_range = np.linspace(mr_lo, mr_hi, PERF_MAP_MR_POINTS)
         # FAZ 5 / H2-5 DÜZELTMESİ — `mixture_ratio_efficiency` kendi tanımını
         # aşıyordu. Gösterge "seçilen O/F'nin Isp'si / bu taramanın maksimumu"
@@ -15880,7 +17313,12 @@ class LiquidRocketEngine:
         if getattr(self, 'wall_thickness_input_m', None) is not None:
             t_used = self.wall_thickness_input_m
             thickness_source = 'user input (chamber wall thickness)'
-            if t_used < t_required:
+            # V301/L-KABUK: rejeneratif yolda bu alan ASTARIN kalınlığıdır;
+            # basınç çemberini dış kabuk taşır ve hüküm katman katman
+            # verilir (``_wall_stack_assessment``). Tek katmanlı çember
+            # gereksinimiyle astarı kıyaslamak yanlış bir kritik üretirdi
+            # (ölçüldü: CuCrZr 1,0 mm astar ⟷ "gerekli 8,07 mm").
+            if t_used < t_required and not self._two_layer_wall_applies():
                 self._warn('warn.liquid.wall_thickness_below_required', 'critical',
                            t_used_mm=round(float(t_used) * 1000, 2),
                            t_required_mm=round(float(t_required) * 1000, 2),
@@ -16154,41 +17592,1047 @@ class LiquidRocketEngine:
                       'joint.'),
         }
 
-    def _calculate_structural_loads(self):
-        """Structural analysis for chamber and nozzle design"""
-        s = self._structural_design()
+    # ------------------------------------------------------------------
+    # V301/L-KABUK — ÇİFT KATMANLI REJENERATİF CİDAR: YAPI DENETİMİ
+    # ------------------------------------------------------------------
+    def _closeout_material_record(self):
+        """(dış kabuk kaydı, kanonik ad) — merkezi materials_db'den."""
+        from hrma.data.materials_db import get_material_safe
+        form = getattr(self, 'closeout_material', CLOSEOUT_MATERIAL_DEFAULT)
+        return get_material_safe(CHAMBER_MATERIAL_MAP.get(form, form))
+
+    def _coolant_jacket_pressure_max_bar(self):
+        """(p [bar] | None, künye) — ceketteki en yüksek soğutucu basıncı.
+
+        TEK kaynak: besleme bütçesinin yakıt zinciri
+        (``_calculate_feed_system_pressure_drops``): P_c + total_fuel
+        (hat + vana + süzgeç + rejeneratif ceket + enjektör; yakıt ceketten
+        geçip enjektöre gelir — L-REJ kalem 7). Ceket bu zincirin içinde
+        olduğu için hiçbir ceket basıncı onu aşmaz (üst sınır). Bütçe yakıt
+        toplamını yayımlamıyorsa sayı UYDURULMAZ: ``None`` + gerekçe.
+        """
+        try:
+            drops = self._calculate_feed_system_pressure_drops()
+        except Exception as exc:  # noqa: BLE001 — gerekçe yayımlanır
+            return None, ('not available: the fuel feed pressure budget '
+                          f'failed ({type(exc).__name__}: {str(exc)[:120]})')
+        p = drops.get('pump_discharge_pressure_fuel') \
+            if isinstance(drops, dict) else None
+        try:
+            p = float(p)
+        except (TypeError, ValueError):
+            p = None
+        if p is None or not np.isfinite(p) or p <= 0.0:
+            return None, ('not available: the fuel feed pressure budget does '
+                          'not publish pump_discharge_pressure_fuel on this '
+                          'run (see feed_system.pressure_drops)')
+        return p, (
+            'feed_system.pressure_drops.pump_discharge_pressure_fuel = P_c + '
+            'total_fuel (lines, valves, filters, regenerative jacket and '
+            'injector in series): the pressure at the start of the fuel '
+            'circuit that runs through the jacket, so no coolant pressure in '
+            'the jacket exceeds it (upper bound). A preburner pressure ladder '
+            'of a staged cycle is not part of this budget.')
+
+    @staticmethod
+    def _wall_layer_verdict(sf, target, withheld):
+        """Katman hükmü: pass / below_target / fail / withheld / not_evaluated.
+
+        ``fail``: SF < 1 — hesaplanan gerilme o sıcaklıktaki akmayı aşıyor
+        (SF'nin tanımı; seçilmiş bir eşik değildir). ``below_target``:
+        akmanın altında ama tasarım hedefinin (``safety_factor``) altında.
+        """
+        if withheld:
+            return 'withheld'
+        if sf is None or not np.isfinite(float(sf)):
+            return 'not_evaluated'
+        if float(sf) < 1.0:
+            return 'fail'
+        if float(sf) < float(target):
+            return 'below_target'
+        return 'pass'
+
+    def _wall_stack_cached(self):
+        """Bu koşunun iki katmanlı cidar yığını (önbellekli; tek katmanda None).
+
+        Kütle dökümü (``_detailed_component_sizing``) yapı zincirinden ÖNCE
+        koşar; yığın ilk istendiğinde ısıl koruma (istasyon marşı) çözülür
+        ve ikisi de önbelleğe girer — ana akış aynı ısıl koruma çözümünü
+        yeniden kullanır (``calculate_performance``).
+        """
+        if not self._two_layer_wall_applies():
+            return None
+        onbellek = getattr(self, '_wall_stack_cache', None)
+        if onbellek is not None:
+            return onbellek
+        cooling = self.calculate_cooling_requirements()
+        tp = getattr(self, '_thermal_protection_cache', None)
+        if tp is None:
+            tp = self._calculate_thermal_protection_system(cooling)
+            self._thermal_protection_cache = tp
+        self._wall_stack_cache = self._wall_stack_assessment(cooling, tp)
+        return self._wall_stack_cache
+
+    def _liner_throat_series_solution(self, cooling, liner_rec, t_l):
+        """V3.0.5 SIVI-CIDAR — marş koşmayan yolda boğazın 1B seri devresi.
+
+        Formüller ve kaynaklar ``LINER_THROAT_SOLUTION_BASIS``ta. Girdiler bu
+        koşunun kendi alanları (gaz tarafı iletkenliği, T_c, ceket debisi,
+        kanal kesiti ve sayısı, soğutucu giriş/çıkış sıcaklığı) ve astarın
+        malzeme kaydı; soğutucu korelasyonları ve özellik tablosu istasyon
+        marşınınkiyle aynı işlevlerdir (``hrma.analysis.regen_cooling``).
+
+        Döner: ``{'status': 'solved', 'stations': [...], 'basis': str}`` ya da
+        ``{'status': 'not_solvable', 'missing': [ad, ...]}`` — eksik girdi
+        ADIYLA; hiçbir sayı uydurulmaz.
+        """
+        from hrma.analysis.regen_cooling import (
+            canonical_coolant_name, rp1_properties, dittus_boelter_nu,
+            sieder_tate_factor, hydraulic_diameter_rect, fin_area_ratio,
+            REGEN_LIQUID_WALL_MAX_ITER, REGEN_LIQUID_WALL_TOL_K)
+
+        def _poz(x):
+            if isinstance(x, bool):
+                return None
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return None
+            return v if (np.isfinite(v) and v > 0.0) else None
+
+        # Sıvı soğutucu özellik tablosu: marşın sıvı yolu yalnız RP-1'i
+        # taşır (su yakıt değildir); metan/LH2 süperkritik marşın işidir.
+        tablo = {'rp1': rp1_properties}.get(
+            canonical_coolant_name(getattr(self, 'fuel_type', None)))
+        n_kanal = cooling.get('cooling_channels')
+        n_kanal = (int(n_kanal) if (isinstance(n_kanal, (int, float))
+                                    and not isinstance(n_kanal, bool)
+                                    and np.isfinite(n_kanal)
+                                    and int(n_kanal) > 0) else None)
+        girdiler = (
+            ('gas-side conductance at the throat '
+             '(cooling_system.gas_side_conductance_throat)',
+             _poz(cooling.get('gas_side_conductance_throat'))),
+            ('chamber temperature (T_c)', _poz(getattr(self, 'T_c', None))),
+            ('jacket coolant flow (cooling_system.coolant_flow_rate)',
+             _poz(cooling.get('coolant_flow_rate'))),
+            ('channel count (cooling_system.cooling_channels)', n_kanal),
+            ('channel width (cooling_system.channel_width_mm)',
+             _poz(cooling.get('channel_width_mm'))),
+            ('channel height (cooling_system.channel_height_mm)',
+             _poz(cooling.get('channel_height_mm'))),
+            ('liner thermal conductivity (materials_db)',
+             _poz(liner_rec.get('thermal_conductivity'))),
+            ('coolant inlet temperature '
+             '(cooling_system.coolant_inlet_temperature)',
+             _poz(cooling.get('coolant_inlet_temperature'))),
+            ('coolant exit temperature '
+             '(cooling_system.coolant_exit_temperature)',
+             _poz(cooling.get('coolant_exit_temperature'))),
+        )
+        eksik = [ad for ad, v in girdiler if v is None]
+        if tablo is None:
+            eksik.insert(0, (
+                f"liquid-coolant property table for fuel "
+                f"'{getattr(self, 'fuel_type', None)}' (the throat solution "
+                "uses the station march's RP-1 table; methane and LH2 are "
+                "solved by the supercritical station march)"))
+        if eksik:
+            return {'status': 'not_solvable', 'missing': eksik}
+        (h_gc, T_c, mdot, n_kanal, w_mm, h_mm, k_w, T_giris,
+         T_cikis) = (v for _ad, v in girdiler)
+        if not T_c > max(T_giris, T_cikis):
+            return {'status': 'not_solvable', 'missing': [
+                'a chamber temperature above the coolant temperature '
+                f'(T_c {T_c:.1f} K, coolant up to '
+                f'{max(T_giris, T_cikis):.1f} K)']}
+        r1 = float(self.d_t) / 2.0
+        r2 = r1 + float(t_l)
+        w_m, h_m = w_mm / MM_PER_M, h_mm / MM_PER_M
+        d_h = hydraulic_diameter_rect(w_m, h_m)
+        adim = 2.0 * np.pi * r2 / n_kanal       # kanal tabanı çevresinden
+        kaburga = adim - w_m
+        r_gaz = 1.0 / h_gc
+        r_cidar = r1 * float(np.log(r2 / r1)) / k_w
+        istasyonlar = []
+        for uc, T_sog in (('coolant_inlet', T_giris),
+                          ('coolant_exit', T_cikis)):
+            ozellik = tablo(T_sog)
+            rho, mu_b = ozellik['density'], ozellik['viscosity']
+            hiz = mdot / (n_kanal * rho * w_m * h_m)
+            re = rho * hiz * d_h / mu_b
+            h_db = (dittus_boelter_nu(re, ozellik['prandtl'], heating=True)
+                    * ozellik['conductivity'] / d_h)
+            t_wc = T_sog
+            yakinsadi = False
+            kenar = False
+            for _ in range(REGEN_LIQUID_WALL_MAX_ITER):
+                duvar = tablo(t_wc)
+                kenar = bool(t_wc > duvar['table_t_max_K'])
+                h_c = h_db * sieder_tate_factor(mu_b, duvar['viscosity'])
+                a_oran = (fin_area_ratio(w_m, h_m, adim, kaburga, h_c, k_w)
+                          * r2 / r1)
+                r_sog = 1.0 / (h_c * a_oran)
+                q = (T_c - T_sog) / (r_gaz + r_cidar + r_sog)
+                t_hot = T_c - q * r_gaz
+                t_cold = T_sog + q * r_sog
+                if abs(t_cold - t_wc) < REGEN_LIQUID_WALL_TOL_K:
+                    yakinsadi = True
+                    break
+                t_wc = t_cold
+            if not yakinsadi:
+                return {'status': 'not_solvable', 'missing': [
+                    'a converged coolant-side wall temperature at the '
+                    f'throat with the coolant at {T_sog:.1f} K '
+                    f'({REGEN_LIQUID_WALL_MAX_ITER} Sieder-Tate iterations)']}
+            istasyonlar.append({
+                'coolant_bound': uc,
+                'T_coolant_K': float(T_sog),
+                'T_hot_K': float(t_hot),
+                'T_cold_K': float(t_cold),
+                'heat_flux_MW_m2': float(q) / 1e6,
+                'gas_side_conductance_W_m2K': float(h_gc),
+                'coolant_htc_W_m2K': float(h_c),
+                'fin_area_ratio_gas_side': float(a_oran),
+                'coolant_reynolds': float(re),
+                'coolant_prandtl': float(ozellik['prandtl']),
+                'coolant_properties_clamped': bool(ozellik['clamped']),
+                'wall_viscosity_held_at_table_edge': kenar,
+            })
+        kunye = LINER_THROAT_SOLUTION_BASIS
+        if not self._carbon_deposit_state().get('applied'):
+            kunye += LINER_THROAT_SIGMA_AT_DESIGN_WALL_NOTE
+        return {'status': 'solved', 'stations': istasyonlar, 'basis': kunye}
+
+    def _wall_stack_assessment(self, cooling, thermal_protection):
+        """İki katmanlı rejeneratif cidarın katman denetimi (V301/L-KABUK).
+
+        Rejeneratif olmayan yolda ``None`` döner (tek katman, bit-aynı).
+        Girdiler bu koşunun kendi çözümleri: astar kalınlığı
+        (``_liner_thickness``), kanal kesiti (``cooling_system``), istasyon
+        marşının dizileri (RP-1 ``thermal_protection.station_march`` ya da
+        metan/LH2 süperkritik marş), ceket basıncı
+        (``_coolant_jacket_pressure_max_bar``). Formüller ve kaynaklar
+        ``LINER_STRESS_BASIS`` / ``CLOSEOUT_STRESS_BASIS`` künyelerinde.
+        """
+        if not self._two_layer_wall_applies():
+            return None
+        from hrma.analysis.structural_analysis import (
+            structural_model_validity_at)
+        cooling = cooling if isinstance(cooling, dict) else {}
+        tp = thermal_protection if isinstance(thermal_protection, dict) else {}
+        sf_hedef = float(getattr(self, 'safety_factor', SAFETY_FACTOR_DEFAULT))
+
+        def _sayi(x):
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return None
+            return v if np.isfinite(v) else None
+
+        t_l, t_l_kunye = self._liner_thickness()
+        w = _sayi(cooling.get('channel_width_mm'))
+        h = _sayi(cooling.get('channel_height_mm'))
+        w = None if w is None else w / MM_PER_M
+        h = None if h is None else h / MM_PER_M
+        liner_rec, liner_key = self._material_record()
+        co_rec, co_key = self._closeout_material_record()
+        p_co_bar, p_co_kunye = self._coolant_jacket_pressure_max_bar()
+        gamma = float(self.gamma)
+        p_c = float(self.P_c) * PA_PER_BAR
+
+        # --- İstasyon dizileri (çözülmüş marş) ---------------------------
+        if self._supercritical_march_applies():
+            arr = getattr(self, '_regen_march_arrays_sc', None)
+            cozucu = 'supercritical station march (methane/LH2)'
+        elif isinstance(tp.get('station_march'), dict):
+            arr = getattr(self, '_regen_march_arrays_rp1', None)
+            cozucu = 'RP-1 station march (thermal_protection.station_march)'
+        else:
+            arr, cozucu = None, None
+        if not isinstance(arr, dict) or not arr.get('T_wall_hot_K'):
+            arr = None
+
+        # --- Katman 1: astar ---------------------------------------------
+        E = _sayi(liner_rec.get('elastic_modulus'))
+        alpha = _sayi(liner_rec.get('thermal_expansion'))
+        nu = _sayi(liner_rec.get('poisson_ratio'))
+        liner = {
+            'role': 'liner',
+            'material': liner_rec.get('name', liner_key),
+            'material_key': liner_key,
+            'material_selection_source': self._chamber_material_source(),
+            'thickness_mm': t_l * MM_PER_M,
+            'thickness_source': t_l_kunye,
+            'safety_factor_target': sf_hedef,
+            'basis': LINER_STRESS_BASIS,
+        }
+        eksik = [ad for ad, v in (('channel width', w), ('channel height', h),
+                                  ('jacket coolant pressure', p_co_bar),
+                                  ('elastic modulus', E),
+                                  ('thermal expansion', alpha),
+                                  ('Poisson ratio', nu)) if v is None]
+        istasyonlar = []
+        #: V3.0.5 SIVI-CIDAR: varsayım dalının tutarsızlık kaydı (varsa
+        #: katman hükmü geri çekilir; sayı yayımlanmaz).
+        tutarsiz = None
+        sicaklik_yok = None
+        if not eksik:
+            p_co = p_co_bar * PA_PER_BAR
+            if arr is not None:
+                t_h = [float(v) for v in arr['T_wall_hot_K']]
+                t_c = [float(v) for v in arr['T_wall_cold_K']]
+                mach = [float(v) for v in (arr.get('mach') or [])]
+                x_mm = [float(v) for v in (arr.get('x_mm') or [])]
+                r_mm = [float(v) for v in (arr.get('r_mm') or [])]
+                n = min(len(t_h), len(t_c), len(mach), len(x_mm), len(r_mm))
+                kaynak = 'solved: ' + cozucu
+                # V3.0.5 SIVI-CIDAR: istasyonun soğutucu yığın sıcaklığı da
+                # katman kaydına iner (fiziksel sıra T_sıcak ≥ T_soğuk ≥
+                # T_soğutucu okunabilsin; marşın kendi dizisi).
+                t_sog = [float(v) for v in (arr.get('T_coolant_K') or [])]
+                for i in range(n):
+                    istasyonlar.append({
+                        'index': i, 'x_mm': x_mm[i], 'r_mm': r_mm[i],
+                        'mach': mach[i], 'T_hot_K': t_h[i],
+                        'T_cold_K': t_c[i]})
+                    if i < len(t_sog):
+                        istasyonlar[-1]['T_coolant_K'] = t_sog[i]
+                bogaz = int(arr.get('throat_index', 0) or 0)
+            else:
+                # V3.0.5 SIVI-CIDAR (Berke 28 Eki): marş koşmadıysa astarın
+                # boğaz sıcaklığı 1B seri devreyle ÇÖZÜLÜR
+                # (``_liner_throat_series_solution``). Çözüm yolu yoksa eski
+                # varsayım (tasarım sıcak cidarı + toplu Bartz akısı) kalır,
+                # eksik girdi ADIYLA yazılır ve varsayım FİZİKSEL TUTARLILIK
+                # kapısından geçer: soğuk yüz soğutucunun altına düşüyorsa
+                # (ölçüldü: −2164,9 K) hiçbir sayı yayımlanmaz.
+                cozum = self._liner_throat_series_solution(
+                    cooling, liner_rec, t_l)
+                if cozum['status'] == 'solved':
+                    for j, s in enumerate(cozum['stations']):
+                        st = {'index': j, 'x_mm': None,
+                              'r_mm': float(self.d_t) / 2.0 * MM_PER_M,
+                              'mach': 1.0}
+                        st.update(s)
+                        istasyonlar.append(st)
+                    # İki uç da boğazdır; boğaz kaydı = yöneten uç.
+                    bogaz = -1
+                    kaynak = cozum['basis']
+                else:
+                    t_hot, _ = self._wall_temperatures()
+                    q = _sayi(cooling.get('peak_heat_flux'))
+                    k = _sayi(liner_rec.get('thermal_conductivity'))
+                    neden = '; '.join(cozum['missing'])
+                    if q is not None and k:
+                        dT = q * 1000.0 * t_l / k
+                        T_sog = _sayi(cooling.get('coolant_exit_temperature'))
+                        oda = (None if T_sog is None or T_sog <= 0.0
+                               else float(t_hot) - T_sog)
+                        if oda is None:
+                            sicaklik_yok = (
+                                'the bulk coolant exit temperature needed to '
+                                'check the design hot-wall assumption '
+                                '(cooling_system.coolant_exit_temperature)')
+                        elif dT < oda:
+                            istasyonlar.append({
+                                'index': 0, 'x_mm': None,
+                                'r_mm': float(self.d_t) / 2.0 * MM_PER_M,
+                                'mach': 1.0, 'T_hot_K': float(t_hot),
+                                'T_cold_K': float(t_hot) - dT,
+                                'T_coolant_K': T_sog})
+                        else:
+                            tutarsiz = {
+                                'missing': neden,
+                                'drop_K': float(dT),
+                                'room_K': oda,
+                                't_hot_K': float(t_hot),
+                                't_coolant_K': T_sog}
+                    bogaz = 0
+                    kaynak = LINER_THROAT_ASSUMPTION_BASIS.format(
+                        missing=neden, t_hot=float(t_hot))
+            for st in istasyonlar:
+                M = max(float(st['mach']), 0.0)
+                p_g = p_c * (1.0 + 0.5 * (gamma - 1.0) * M * M) ** (
+                    -gamma / (gamma - 1.0))
+                dp = abs(p_co - p_g)
+                sig_b = dp * w * w / (2.0 * t_l * t_l)
+                tau = 0.75 * dp * w / t_l
+                dT = max(st['T_hot_K'] - st['T_cold_K'], 0.0)
+                sig_th = E * alpha * dT / (2.0 * (1.0 - nu))
+                sig_n = sig_b + sig_th
+                sig_eq = float(np.sqrt(sig_n * sig_n + 3.0 * tau * tau))
+                t_ort = 0.5 * (st['T_hot_K'] + st['T_cold_K'])
+                sy, _f, _b = self._derated_yield(liner_rec, t_ort,
+                                                 with_basis=True)
+                st.update({
+                    'gas_static_pressure_bar': p_g / PA_PER_BAR,
+                    'pressure_difference_bar': dp / PA_PER_BAR,
+                    'bending_stress_MPa': sig_b / 1e6,
+                    'thermal_stress_MPa': sig_th / 1e6,
+                    'shear_stress_MPa': tau / 1e6,
+                    'stress_MPa': sig_eq / 1e6,
+                    'mean_temperature_K': t_ort,
+                    'yield_at_mean_temperature_MPa': sy / 1e6,
+                    'safety_factor': (sy / sig_eq if sig_eq > 0
+                                      else float('inf')),
+                    '_derating_basis': _b,
+                })
+        if istasyonlar:
+            yon = min(istasyonlar, key=lambda s: s['safety_factor'])
+            bog = (istasyonlar[bogaz] if 0 <= bogaz < len(istasyonlar)
+                   else yon)
+            t_max = max(s['T_hot_K'] for s in istasyonlar)
+            gec_l = structural_model_validity_at(
+                liner_rec, {'liner_hot_wall': t_max})
+
+            def _ozet(s):
+                ozet = {k: s[k] for k in (
+                    'x_mm', 'r_mm', 'gas_static_pressure_bar',
+                    'pressure_difference_bar', 'bending_stress_MPa',
+                    'thermal_stress_MPa', 'shear_stress_MPa', 'stress_MPa',
+                    'T_hot_K', 'T_cold_K', 'mean_temperature_K',
+                    'yield_at_mean_temperature_MPa', 'safety_factor')}
+                # V3.0.5 SIVI-CIDAR: soğutucu sıcaklığı ve (boğaz çözümünde)
+                # devrenin kendi sayıları — yalnız VARSA (eski anahtarlar
+                # bit-aynı).
+                for k in ('T_coolant_K', 'coolant_bound', 'heat_flux_MW_m2',
+                          'gas_side_conductance_W_m2K', 'coolant_htc_W_m2K',
+                          'fin_area_ratio_gas_side', 'coolant_reynolds',
+                          'coolant_prandtl', 'coolant_properties_clamped',
+                          'wall_viscosity_held_at_table_edge'):
+                    if k in s:
+                        ozet[k] = s[k]
+                return ozet
+            withheld_l = bool(gec_l and gec_l.get(
+                'model_validity_limit_exceeded'))
+            if arr is None and 'coolant_bound' in yon:
+                # Boğaz çözümünün İKİ ucu da kayıtta (yöneten tek başına
+                # görünmesin; okuyan bandı görür).
+                liner['throat_solution_bounds'] = [
+                    _ozet(s) for s in istasyonlar]
+            liner.update({
+                'mean_temperature_K': yon['mean_temperature_K'],
+                'max_temperature_K': t_max,
+                'stress_MPa': yon['stress_MPa'],
+                'yield_at_temperature_MPa':
+                    yon['yield_at_mean_temperature_MPa'],
+                'allowable_MPa': yon['yield_at_mean_temperature_MPa']
+                / sf_hedef,
+                'safety_factor': yon['safety_factor'],
+                'governing_station': _ozet(yon),
+                'throat_station': _ozet(bog),
+                'stations_evaluated': len(istasyonlar),
+                'temperature_source': kaynak,
+                'coolant_pressure_bar': p_co_bar,
+                'coolant_pressure_basis': p_co_kunye,
+                'derating_basis': yon['_derating_basis'],
+                'model_validity': gec_l,
+                'verdict': self._wall_layer_verdict(
+                    yon['safety_factor'], sf_hedef, withheld_l),
+            })
+        elif tutarsiz is not None:
+            # V3.0.5 SIVI-CIDAR: çözüm yolu yok VE varsayım fiziksel olarak
+            # tutarsız → hüküm geri çekilir; gerekçe tutarsızlığın KENDİSİ
+            # (sayılarıyla), uydurma SF değil. Kapı (imalat) SF'siz katmanı
+            # zaten reddeder (sf_missing); uyarı kanalı nedeni EN + TR söyler.
+            gec_l = None
+            liner.update({
+                'mean_temperature_K': None, 'max_temperature_K': None,
+                'stress_MPa': None, 'yield_at_temperature_MPa': None,
+                'allowable_MPa': None, 'safety_factor': None,
+                'coolant_pressure_bar': p_co_bar,
+                'coolant_pressure_basis': p_co_kunye,
+                'temperature_source': kaynak,
+                'verdict': 'withheld',
+                'withheld_reason': LINER_ASSUMPTION_INCONSISTENT_REASON.format(
+                    **tutarsiz),
+                'assumption_check': {
+                    'conduction_drop_K': tutarsiz['drop_K'],
+                    'hot_wall_minus_coolant_K': tutarsiz['room_K'],
+                    'assumed_hot_wall_K': tutarsiz['t_hot_K'],
+                    'coolant_temperature_K': tutarsiz['t_coolant_K'],
+                    'missing_for_solution': tutarsiz['missing'],
+                },
+            })
+            self._warn('warn.liquid.liner_wall_assumption_inconsistent',
+                       'critical', material=liner['material'],
+                       drop_K=round(tutarsiz['drop_K'], 1),
+                       room_K=round(tutarsiz['room_K'], 1),
+                       t_hot_K=round(tutarsiz['t_hot_K'], 1),
+                       t_coolant_K=round(tutarsiz['t_coolant_K'], 1),
+                       missing=tutarsiz['missing'])
+        else:
+            gec_l = None
+            nedenler = list(eksik)
+            if sicaklik_yok:
+                nedenler.append(sicaklik_yok)
+            liner.update({
+                'mean_temperature_K': None, 'max_temperature_K': None,
+                'stress_MPa': None, 'yield_at_temperature_MPa': None,
+                'allowable_MPa': None, 'safety_factor': None,
+                'coolant_pressure_bar': p_co_bar,
+                'coolant_pressure_basis': p_co_kunye,
+                'verdict': 'not_evaluated',
+                'not_evaluated_reason': (
+                    'liner NOT evaluated: '
+                    + (', '.join(nedenler) + ' not available on this run'
+                       if nedenler else 'no wall temperature to evaluate it '
+                       'at') + '; no stress is invented in its place'),
+            })
+
+        # --- Katman 2: dış kabuk -----------------------------------------
+        if arr is not None and arr.get('r_mm'):
+            r_gaz = max(float(v) for v in arr['r_mm']) / MM_PER_M
+            r_kunye = ('largest gas-side radius of the jacket stations ('
+                       + cozucu + ')')
+        else:
+            r_gaz = max(float(self._chamber_diameter()),
+                        float(self.d_e)) / 2.0
+            r_kunye = ('largest gas-side radius of the contour (chamber or '
+                       'nozzle exit; no station march on this run)')
+        if arr is not None and arr.get('T_coolant_K'):
+            T_co = max(float(v) for v in arr['T_coolant_K'])
+            T_co_kunye = CLOSEOUT_TEMPERATURE_BASIS
+            T_co_cozuldu = True
+        else:
+            T_co = _sayi(cooling.get('coolant_exit_temperature'))
+            T_co_kunye = (
+                'ASSUMPTION - no station march on this run: the closeout '
+                'temperature is the bulk coolant exit estimate '
+                '(cooling_system.coolant_exit_temperature) with an adiabatic '
+                'outer surface')
+            T_co_cozuldu = False
+        if T_co is not None and not T_co > 0.0:
+            # V3.0.5 SIVI-CIDAR: mutlak sıfırın altı/eşiği bir sıcaklık
+            # değildir; kabuk 'closeout temperature' adıyla değerlendirilmez.
+            T_co = None
+        t_co_in = getattr(self, 'closeout_thickness_input_m', None)
+        closeout = {
+            'role': 'closeout',
+            'material': co_rec.get('name', co_key),
+            'material_key': co_key,
+            'material_selection_source': getattr(
+                self, 'closeout_material_source',
+                CLOSEOUT_MATERIAL_SOURCE_DEFAULT),
+            'safety_factor_target': sf_hedef,
+            'basis': CLOSEOUT_STRESS_BASIS,
+            'temperature_basis': T_co_kunye,
+            'temperature_solved': T_co_cozuldu,
+            'coolant_pressure_bar': p_co_bar,
+            'coolant_pressure_basis': p_co_kunye,
+        }
+        if None in (p_co_bar, T_co, h):
+            closeout.update({
+                'thickness_mm': (None if t_co_in is None
+                                 else t_co_in * MM_PER_M),
+                'thickness_source': ('user input (closeout_thickness)'
+                                     if t_co_in is not None else None),
+                'mean_temperature_K': T_co, 'max_temperature_K': T_co,
+                'stress_MPa': None, 'yield_at_temperature_MPa': None,
+                'allowable_MPa': None, 'safety_factor': None,
+                'verdict': 'not_evaluated',
+                'not_evaluated_reason': (
+                    'closeout NOT evaluated: '
+                    + ', '.join(ad for ad, v in (
+                        ('jacket coolant pressure', p_co_bar),
+                        ('closeout temperature', T_co),
+                        ('channel height', h)) if v is None)
+                    + ' not available on this run; no thickness or stress '
+                    'is invented in its place'),
+            })
+            gec_c = None
+        else:
+            p = p_co_bar * PA_PER_BAR
+            r_in = r_gaz + t_l + h
+            sy_c, _fc, _bc = self._derated_yield(co_rec, T_co,
+                                                 with_basis=True)
+            izin = sy_c / sf_hedef
+            if izin > p:
+                t_hoop = p * r_in / (izin - p)
+            else:
+                t_hoop = None
+            t_gerek = (None if t_hoop is None
+                       else max(t_hoop, WALL_THICKNESS_MANUFACTURING_MIN_M))
+            yonetici = (None if t_hoop is None else
+                        ('manufacturing_floor'
+                         if t_gerek > t_hoop else 'coolant_hoop'))
+            if t_co_in is not None:
+                t_co = float(t_co_in)
+                t_co_kunye = 'user input (closeout_thickness)'
+            elif t_gerek is not None:
+                t_co, std = self._next_standard_plate_m(t_gerek)
+                t_co_kunye = (
+                    'sized by HRMA: '
+                    + ('next standard plate above the requirement'
+                       if std else 'computed requirement (above standard '
+                       'sizes)')
+                    + f' ({yonetici}; '
+                    + 'hoop under the jacket coolant pressure at the largest '
+                    'jacket radius, yield at the closeout temperature / '
+                    'safety_factor, WALL_THICKNESS_MANUFACTURING_MIN_M '
+                    'floor)')
+            else:
+                t_co = None
+                t_co_kunye = None
+            if t_co is not None:
+                sig = p * (r_in + t_co) / t_co
+                sf_c = sy_c / sig if sig > 0 else float('inf')
+            else:
+                sig, sf_c = None, None
+            gec_c = structural_model_validity_at(co_rec, {'closeout': T_co})
+            withheld_c = bool(gec_c and gec_c.get(
+                'model_validity_limit_exceeded'))
+            closeout.update({
+                'thickness_mm': None if t_co is None else t_co * MM_PER_M,
+                'thickness_source': t_co_kunye,
+                'required_thickness_mm': (None if t_gerek is None
+                                          else t_gerek * MM_PER_M),
+                'required_thickness_hoop_mm': (None if t_hoop is None
+                                               else t_hoop * MM_PER_M),
+                'requirement_governing': yonetici,
+                'inner_radius_mm': r_in * MM_PER_M,
+                'outer_radius_mm': (None if t_co is None
+                                    else (r_in + t_co) * MM_PER_M),
+                'radius_basis': r_kunye,
+                'mean_temperature_K': T_co, 'max_temperature_K': T_co,
+                'stress_MPa': None if sig is None else sig / 1e6,
+                'yield_at_temperature_MPa': sy_c / 1e6,
+                'allowable_MPa': izin / 1e6,
+                'safety_factor': sf_c,
+                'derating_basis': _bc,
+                'model_validity': gec_c,
+                'verdict': (self._wall_layer_verdict(sf_c, sf_hedef,
+                                                     withheld_c)
+                            if t_co is not None else 'not_evaluated'),
+            })
+            if t_co is None:
+                closeout['not_evaluated_reason'] = (
+                    'closeout NOT sized: the jacket coolant pressure '
+                    f'{p_co_bar:.2f} bar reaches the allowable stress of '
+                    f"{closeout['material']} at {T_co:.1f} K "
+                    f'({izin / 1e6:.2f} MPa = yield / {sf_hedef:g}); no '
+                    'shell thickness holds it - enter a stronger closeout '
+                    'material')
+                self._warn('warn.liquid.closeout_cannot_be_sized',
+                           'critical', material=closeout['material'],
+                           pressure_bar=round(p_co_bar, 2),
+                           temperature_K=round(T_co, 1),
+                           allowable_MPa=round(izin / 1e6, 2))
+
+        # --- Yığın + kök uyarılar ----------------------------------------
+        katmanlar = [liner, closeout]
+        for kat in katmanlar:
+            mv = kat.get('model_validity')
+            if (kat.get('verdict') == 'withheld' and isinstance(mv, dict)
+                    and mv.get('model_validity_limit_exceeded')):
+                # V3.0.5 SIVI-CIDAR: geri çekilen katman hükmü ekranda HANGİ
+                # sıcaklıkta, HANGİ sınırın aşıldığını sayılarıyla söyler
+                # (Berke 28 Eki). Sayılar geçerlilik ölçümünün kendisinden.
+                for olcum in (mv.get('model_validity_evaluations')
+                              or {}).values():
+                    if not (isinstance(olcum, dict) and _sayi(
+                            olcum.get('wall_temperature_K')) is not None):
+                        continue
+                    self._warn(('warn.liquid.liner_outside_validity'
+                                if kat['role'] == 'liner' else
+                                'warn.liquid.closeout_outside_validity'),
+                               'critical', material=kat['material'],
+                               temperature_K=round(float(
+                                   olcum.get('wall_temperature_K')), 1),
+                               melting_K=('\u2014' if olcum.get(
+                                   'melting_point_K') is None else round(
+                                   float(olcum['melting_point_K']), 1)),
+                               curve_last_K=('\u2014' if olcum.get(
+                                   'derating_curve_last_point_K') is None
+                                   else round(float(olcum[
+                                       'derating_curve_last_point_K']), 1)))
+            if kat.get('verdict') in ('below_target', 'fail'):
+                # Katman başına AYRI kod (TR metni katmanı adıyla kurar).
+                self._warn(('warn.liquid.liner_below_target'
+                            if kat['role'] == 'liner' else
+                            'warn.liquid.closeout_below_target'), 'critical',
+                           material=kat['material'],
+                           safety_factor=round(float(kat['safety_factor']),
+                                               3),
+                           target=round(sf_hedef, 2),
+                           stress_MPa=round(float(kat['stress_MPa']), 2),
+                           yield_MPa=round(float(
+                               kat['yield_at_temperature_MPa']), 2))
+        sf_l, sf_c2 = liner.get('safety_factor'), closeout.get('safety_factor')
+        if sf_l is not None and sf_c2 is not None:
+            yonetici_kat = 'liner' if sf_l <= sf_c2 else 'closeout'
+            yigin_sf = min(sf_l, sf_c2)
+        else:
+            yonetici_kat, yigin_sf = None, None
+        t_co_mm = closeout.get('thickness_mm')
+        yigin_mm = (None if (t_co_mm is None or h is None)
+                    else t_l * MM_PER_M + h * MM_PER_M + float(t_co_mm))
+        return {
+            'wall_model': WALL_MODEL_TWO_LAYER,
+            'wall_model_basis': WALL_MODEL_TWO_LAYER_BASIS,
+            'wall_model_basis_key': WALL_MODEL_BASIS_KEYS[
+                WALL_MODEL_TWO_LAYER],
+            'wall_layers': katmanlar,
+            'channel_depth_mm': None if h is None else h * MM_PER_M,
+            'channel_width_mm': None if w is None else w * MM_PER_M,
+            'wall_stack_thickness_mm': yigin_mm,
+            'wall_stack_thickness_basis': (
+                'drawn chamber wall = liner + channel depth + closeout (one '
+                'solid in this release; the channels are not drawn)'),
+            'wall_stack_safety_factor': yigin_sf,
+            'wall_stack_governing_layer': yonetici_kat,
+            'wall_layers_not_modelled': list(WALL_LAYERS_NOT_MODELLED),
+            'wall_layers_not_modelled_basis': WALL_LAYERS_NOT_MODELLED_BASIS,
+            '_validity': (gec_l, gec_c),
+        }
+
+    def _two_layer_wall_areal_mass(self, stack):
+        """[kg/m²] astar + kaburgalar + dış kabuk birim alan kütlesi | None.
+
+        Kaburga payı hazne çevresinde: f_kaburga = 1 − N·w/(π·d_kanal),
+        d_kanal = d_c + 2·t_astar + h (kanal orta çapı). Yığın ölçülemediyse
+        (kabuk kalınlığı yok) None — kütle tek katman formülüne düşmez,
+        çağıran da bunu bilir.
+        """
+        liner, closeout = stack['wall_layers']
+        h_mm = stack.get('channel_depth_mm')
+        w_mm = stack.get('channel_width_mm')
+        t_co_mm = closeout.get('thickness_mm')
+        n = getattr(self, '_channel_count_fit', {}) or {}
+        n = n.get('n_used')
+        if None in (h_mm, w_mm, t_co_mm, n):
+            return None
+        liner_rec, _ = self._material_record()
+        co_rec, _ = self._closeout_material_record()
+        t_l = float(liner['thickness_mm']) / MM_PER_M
+        h = float(h_mm) / MM_PER_M
+        w = float(w_mm) / MM_PER_M
+        t_co = float(t_co_mm) / MM_PER_M
+        d_kanal = self._chamber_diameter() + 2.0 * t_l + h
+        f_kaburga = max(0.0, 1.0 - float(n) * w / (np.pi * d_kanal))
+        return (float(liner_rec.get('density', 7850.0)) * (t_l + f_kaburga * h)
+                + float(co_rec.get('density', 7850.0)) * t_co)
+
+    def _two_layer_structural_design(self, stack):
+        """``_structural_design`` ile AYNI anahtarlar — iki katmanlı cidar.
+
+        Basıncı taşıyan üye dış kabuktur: çember gerilmesi, izin, marj ve
+        çevre emniyet katsayısı kabuğun kendi sıcaklığında; çizilen cidar
+        (``thickness_m``) yığının toplamıdır (CAD tek katı gövde çizer).
+        Kalınlık kabuk için boyutlandırıldıysa ``design_mode = 'size'``.
+        """
+        liner, closeout = stack['wall_layers']
+        co_rec, co_key = self._closeout_material_record()
+        sf = float(getattr(self, 'safety_factor', SAFETY_FACTOR_DEFAULT))
+        sy_c = closeout.get('yield_at_temperature_MPa')
+        user_co = getattr(self, 'closeout_thickness_input_m', None) is not None
+        design_mode = 'verify' if user_co else 'size'
+        h_mm = stack.get('channel_depth_mm') or 0.0
+        t_l_mm = float(liner['thickness_mm'])
+        req_mm = closeout.get('required_thickness_mm')
+        hoop_mm = closeout.get('required_thickness_hoop_mm')
+        stack_mm = stack.get('wall_stack_thickness_mm')
+        T_co = closeout.get('mean_temperature_K')
+        if T_co is not None:
+            _sy, derate, derate_beyani = self._derated_yield(
+                co_rec, T_co, with_basis=True)
+        else:
+            _sy, derate, derate_beyani = (None, None, None)
+        sig = closeout.get('stress_MPa')
+        izin = closeout.get('allowable_MPa')
+        floor_governs = bool(closeout.get('requirement_governing')
+                             == 'manufacturing_floor' and not user_co)
+        return {
+            'material': co_rec,
+            'design_mode': design_mode,
+            'hoop_safety_factor': closeout.get('safety_factor'),
+            'safety_factor_is_tautological': bool(design_mode == 'size'),
+            'safety_factor_basis': (
+                'two-layer regenerative wall (wall_model): safety_factor is '
+                'the DESIGN TARGET read back (safety_factor_source). '
+                'hoop_safety_factor is computed on the CLOSEOUT, the layer '
+                'that carries the coolant pressure: derated yield at the '
+                'closeout temperature divided by its hoop stress '
+                + ('(closeout thickness supplied by you, so this one is a '
+                   'verification). ' if user_co else
+                   '(closeout thickness chosen by HRMA, so it is not a '
+                   'verification of a shell you built). ')
+                + 'The liner is checked separately (wall_layers); the stack '
+                'factor is wall_stack_safety_factor.'),
+            'material_key': co_key,
+            'material_selection_source': closeout.get(
+                'material_selection_source'),
+            'safety_factor': sf,
+            'safety_factor_source': self._safety_factor_source(),
+            'yield_strength_pa': float(co_rec['yield_strength']),
+            'derated_yield_pa': (None if sy_c is None else sy_c * 1e6),
+            'derating_factor': derate,
+            'derating_basis': derate_beyani,
+            'allowable_pa': (None if izin is None else izin * 1e6),
+            'chamber_diameter_m': self._chamber_diameter(),
+            'required_thickness_m': (
+                None if req_mm is None else (t_l_mm + h_mm + req_mm) / 1e3),
+            'required_thickness_hoop_m': (
+                None if hoop_mm is None else
+                (t_l_mm + h_mm + hoop_mm) / 1e3),
+            'required_thickness_throat_m': None,
+            'requirement_governing': (
+                None if closeout.get('requirement_governing') is None
+                else 'closeout_' + closeout['requirement_governing']),
+            'manufacturing_floor_governs': floor_governs,
+            'throat_check': {
+                'status': 'not_evaluated', 'required_thickness_m': None,
+                'basis': ('two-layer regenerative wall: the throat '
+                          'meridional membrane check of the single-wall '
+                          'model is not repeated on the closeout (the '
+                          'closeout hoop envelope at the largest jacket '
+                          'radius and the liner checks are in wall_layers)'),
+            },
+            'thickness_m': None if stack_mm is None else stack_mm / 1e3,
+            'thickness_source': (
+                'two-layer regenerative wall stack: liner '
+                f"{t_l_mm:.2f} mm ({liner.get('thickness_source')}) + "
+                f'channel depth {h_mm:.2f} mm + closeout '
+                + ('-' if closeout.get('thickness_mm') is None else
+                   f"{float(closeout['thickness_mm']):.2f} mm")
+                + f" ({closeout.get('thickness_source')})"),
+            'hoop_stress_pa': (None if sig is None else sig * 1e6),
+            'stress_margin_pct': (
+                None if (sig is None or not izin) else
+                (izin - sig) / izin * 100.0),
+            # Yayımlanan ``wall_temperature_design_target_K`` anlamını
+            # korur: kullanıcının (ya da tipin) tasarım sıcak cidar hedefi.
+            # Hükmün sıcaklığı kabuğunkidir (``closeout_temperature_k``).
+            'wall_temperature_k': self._wall_temperatures()[0],
+            'closeout_temperature_k': T_co,
+        }
+
+    def _structural_verdict_at_wall(self, s, wall_resolution=None):
+        """Hazne cidarı hüküm büyüklükleri — hükmün verildiği sıcaklıkta.
+
+        L-B (v3.0.1, SV-05). ``s`` = ``_structural_design()`` (kalınlık
+        hedef/varsayılan sıcaklıkta boyutlandı). Çözülmüş tepe sıcaklık
+        varsa akma o sıcaklıkta yeniden düşürülür ve çizilen cidarın
+        gerilmesi (``hoop_stress_pa``, değişmez) ona bölünür; yoksa ``s``nin
+        kendi sayıları AYNEN döner (bit-aynı) ve varsayım beyan edilir.
+        """
+        res = wall_resolution if isinstance(wall_resolution, dict) else {}
+        t_cozulen = res.get('hot_K') if res.get('solved') else None
+        if t_cozulen is None:
+            hedef_mi = getattr(self, 'max_wall_temp_input', None) is not None
+            neden = res.get('reason') or (
+                'no wall solver result was handed to the structural chain '
+                'on this run')
+            kaynak = ('ASSUMPTION - your design target (max_wall_temp), '
+                      'NOT solved' if hedef_mi else
+                      'ASSUMPTION - cooling-type default '
+                      '(WALL_TEMP_DEFAULT_K), NOT solved')
+            varsayim = (
+                f"the structural verdict of this block (allowable_stress, "
+                f"stress_margin, hoop_safety_factor, model validity) is "
+                f"evaluated at {float(s['wall_temperature_k']):g} K, which "
+                + ('is your maximum wall temperature TARGET'
+                   if hedef_mi else
+                   'is the unsourced cooling-type default wall temperature')
+                + ' - a requirement, not a solved result. No solved wall '
+                'temperature exists on this run: ' + str(neden))
+            return {
+                'solved': False,
+                'wall_temperature_k': s['wall_temperature_k'],
+                'derated_yield_pa': s['derated_yield_pa'],
+                'derating_factor': s['derating_factor'],
+                'derating_basis': s['derating_basis'],
+                'allowable_pa': s['allowable_pa'],
+                'stress_margin_pct': s['stress_margin_pct'],
+                'hoop_safety_factor': s['hoop_safety_factor'],
+                'throat_check': s['throat_check'],
+                'source': kaynak,
+                'basis': varsayim,
+                'verdict_assumption': varsayim,
+            }
+        t_cozulen = float(t_cozulen)
         material = s['material']
-        chamber_internal_pressure = self.P_c * PA_PER_BAR  # Pa
-        # --- V3 yapi-sf 3. tur B (karar §28-37 Ş2-3 (a)): (C) MODEL
-        # GEÇERLİLİK SINIRI. Ölçüt hibritteki TEK kaynaktan gelir; burada
-        # yalnız çağrılır. Cidar, yayımlanan ``wall_temperature``ta
-        # değerlendirildiği için ölçüt o sıcaklığı okur. Sınır aşıldıysa
-        # sayılar tanı amaçlı kalır, onay/sayısal tasarım hükmü verilmez.
+        sigma_y, derate, derate_beyani = self._derated_yield(
+            material, t_cozulen, with_basis=True)
+        allowable = sigma_y / float(s['safety_factor'])
+        hoop = float(s['hoop_stress_pa'])
+        margin = (allowable - hoop) / allowable * 100.0
+        hoop_sf = (sigma_y / hoop) if hoop > 0 else float('inf')
+        throat = s['throat_check']
+        if isinstance(throat, dict) and throat.get('status') == 'evaluated' \
+                and throat.get('equivalent_stress_pa'):
+            throat = dict(throat)
+            throat['safety_factor'] = (
+                sigma_y / float(throat['equivalent_stress_pa']))
+        return {
+            'solved': True,
+            'wall_temperature_k': t_cozulen,
+            'derated_yield_pa': sigma_y,
+            'derating_factor': derate,
+            'derating_basis': derate_beyani,
+            'allowable_pa': allowable,
+            'stress_margin_pct': margin,
+            'hoop_safety_factor': hoop_sf,
+            'throat_check': throat,
+            'source': res.get('source'),
+            'basis': (
+                'the verdict quantities (yield_strength_at_wall_temp, '
+                'allowable_stress, stress_margin, hoop_safety_factor, the '
+                'throat meridional safety factor and the model validity '
+                'check) are evaluated at the SOLVED peak hot-wall '
+                f'temperature {t_cozulen:.1f} K ({res.get("source")}). The '
+                'wall THICKNESS was sized at the design wall temperature '
+                f"wall_temperature_design_target_K = "
+                f"{float(s['wall_temperature_k']):g} K: the solver itself "
+                'runs on the drawn wall, so a solved peak above the target '
+                'shows up here as a lower safety factor on that wall, not '
+                'as a re-sized wall.'),
+            'verdict_assumption': None,
+        }
+
+    def _calculate_structural_loads(self, wall_resolution=None,
+                                    wall_stack=None):
+        """Structural analysis for chamber and nozzle design.
+
+        L-B (v3.0.1, SV-05) — HÜKÜM HANGİ CİDAR SICAKLIĞINDA VERİLİR.
+        ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/kati-sivi/L-B/olcum_once.json,
+        ``cidar2``): istasyon marşı 2 mm cidarda tepe sıcak cidarı 3094,2 K
+        bulup "liner failure" derken bu blok 800 K (kullanıcının
+        ``max_wall_temp`` HEDEFİ) akmasıyla 115,36 MPa, ``hoop_safety_factor``
+        0,749 ve ``model_validity_limit_exceeded = False`` yayımlıyordu;
+        metan rejeneratifte süperkritik marş 2702 K çözerken de 800 K.
+
+        Artık ``wall_resolution`` (``_resolve_wall_temperature``) bir
+        ÇÖZÜLMÜŞ tepe sıcaklık taşıyorsa akma, izin gerilmesi, marj, çevre
+        ve boğaz emniyet katsayıları ve model geçerlilik ölçütü O sıcaklıkta
+        değerlendirilir; erime noktası aşılırsa ölçüt hükmü geri çeker
+        (``verdict_withheld``). Cidar KALINLIĞI hedef sıcaklıkta
+        boyutlandırılmış kalır: marşın kendisi çizilen kalınlıkla koşar
+        (``_chamber_wall_thickness_m``), kalınlığı marş sonucuna bağlamak
+        döngü kurardı. Çözülmüş sıcaklık yoksa hedef/varsayılan kullanılır
+        ve bu ``verdict_assumption`` ile hükmün YANINDA beyan edilir.
+        """
+        # --- V301/L-KABUK: İKİ KATMANLI REJENERATİF CİDAR -----------------
+        # Rejeneratif yolda (``wall_stack``) basıncı taşıyan üye DIŞ KABUKTUR:
+        # bu bloğun çember/izin/marj/SF sayıları kabuğun kendi sıcaklığında,
+        # çizilen ``wall_thickness`` yığının toplamıdır, astar ayrıca
+        # ``wall_layers``ta hükümlenir. Diğer yollar AYNEN (bit-aynı).
         from hrma.analysis.structural_analysis import (
             LIQUID_MODEL_VALIDITY_BASIS,
             LIQUID_MODEL_VALIDITY_SAFETY_FACTOR_BASIS,
             model_validity_publication, structural_model_validity_at)
-        gecerlilik = model_validity_publication(
-            structural_model_validity_at(
-                material, {'chamber_hot_wall': s['wall_temperature_k']}),
-            LIQUID_MODEL_VALIDITY_BASIS)
+        iki_katman = bool(isinstance(wall_stack, dict) and wall_stack.get(
+            'wall_model') == WALL_MODEL_TWO_LAYER)
+        chamber_internal_pressure = self.P_c * PA_PER_BAR  # Pa
+        if iki_katman:
+            s = self._two_layer_structural_design(wall_stack)
+            material = s['material']
+            kabuk = wall_stack['wall_layers'][1]
+            cozuldu = bool(kabuk.get('temperature_solved'))
+            yapi = {
+                'solved': cozuldu,
+                'wall_temperature_k': s['closeout_temperature_k'],
+                'derated_yield_pa': s['derated_yield_pa'],
+                'derating_factor': s['derating_factor'],
+                'derating_basis': s['derating_basis'],
+                'allowable_pa': s['allowable_pa'],
+                'stress_margin_pct': s['stress_margin_pct'],
+                'hoop_safety_factor': s['hoop_safety_factor'],
+                'throat_check': s['throat_check'],
+                'source': ('closeout temperature: '
+                           + ('solved - the highest coolant bulk temperature '
+                              'of the station march'
+                              if cozuldu else
+                              'ASSUMPTION - bulk coolant exit estimate')),
+                'basis': (
+                    'two-layer regenerative wall: the verdict quantities of '
+                    'this block (yield_strength_at_wall_temp, '
+                    'allowable_stress, stress_margin, hoop_safety_factor) '
+                    'belong to the CLOSEOUT, the layer that carries the '
+                    'coolant pressure, at its own temperature; the liner is '
+                    'judged at its own temperatures in wall_layers. '
+                    + CLOSEOUT_TEMPERATURE_BASIS),
+                'verdict_assumption': (
+                    None if cozuldu else kabuk.get('temperature_basis')),
+            }
+            gl, gc = wall_stack.get('_validity') or (None, None)
+            asildi = any(bool(g and g.get('model_validity_limit_exceeded'))
+                         for g in (gl, gc))
+            if gl is None and gc is None:
+                birlesik = None
+            elif (gl is None or gc is None) and not asildi:
+                # Bir katman ölçülemedi: "geçerli" denmez (fail-closed).
+                birlesik = None
+            else:
+                birlesik = {
+                    'model_validity_limit_exceeded': asildi,
+                    'model_validity_reasons': (
+                        list((gl or {}).get('model_validity_reasons') or [])
+                        + list((gc or {}).get('model_validity_reasons')
+                               or [])),
+                    'model_validity_evaluations': dict(
+                        **((gl or {}).get('model_validity_evaluations')
+                           or {}),
+                        **((gc or {}).get('model_validity_evaluations')
+                           or {})),
+                }
+            gecerlilik = model_validity_publication(
+                birlesik, TWO_LAYER_WALL_VALIDITY_BASIS)
+            iki_katman_alanlari = {
+                k: v for k, v in wall_stack.items() if not k.startswith('_')}
+        else:
+            s = self._structural_design()
+            material = s['material']
+            yapi = self._structural_verdict_at_wall(s, wall_resolution)
+            # --- V3 yapi-sf 3. tur B (karar §28-37 Ş2-3 (a)): (C) MODEL
+            # GEÇERLİLİK SINIRI. Ölçüt hibritteki TEK kaynaktan gelir;
+            # burada yalnız çağrılır. Cidar, yayımlanan ``wall_temperature``ta
+            # değerlendirildiği için ölçüt o sıcaklığı okur. Sınır aşıldıysa
+            # sayılar tanı amaçlı kalır, onay/sayısal tasarım hükmü
+            # verilmez.
+            gecerlilik = model_validity_publication(
+                structural_model_validity_at(
+                    material,
+                    {'chamber_hot_wall': yapi['wall_temperature_k']}),
+                (LIQUID_SOLVED_WALL_VALIDITY_BASIS if yapi['solved']
+                 else LIQUID_MODEL_VALIDITY_BASIS))
+            iki_katman_alanlari = {}
         gecerlilik_disi = gecerlilik.get('model_validity_limit_exceeded') is True
+
+        def _olc(x, k):
+            # Ölçek dönüşümü (çarpma); iki katmanlı yolda ölçülemeyen
+            # büyüklük None kalır (sayı uydurulmaz). Tek katmanlı yolda x hep
+            # sayıdır ve sonuç eski ``x * k`` ile bit-aynıdır.
+            return None if x is None else x * k
+
+        def _bol(x, d):
+            # Aynı kural, bölme (eski ``x / d`` ile bit-aynı; ``x * 1e-6``
+            # son bitte farklı olabilirdi).
+            return None if x is None else x / d
 
         return {
             'chamber_structure': {
                 'internal_pressure': chamber_internal_pressure / 1e5,  # bar
                 'chamber_diameter': s['chamber_diameter_m'] * 1000,  # mm
-                'wall_thickness': s['thickness_m'] * 1000,  # mm
-                'required_wall_thickness': s['required_thickness_m'] * 1000,  # mm
+                'wall_thickness': _olc(s['thickness_m'], 1000),  # mm
+                'required_wall_thickness': _olc(
+                    s['required_thickness_m'], 1000),  # mm
                 'wall_thickness_source': s['thickness_source'],
-                'hoop_stress': s['hoop_stress_pa'] / 1e6,  # MPa
-                'allowable_stress': s['allowable_pa'] / 1e6,  # MPa
-                'stress_margin': s['stress_margin_pct'],  # %
+                'hoop_stress': _bol(s['hoop_stress_pa'], 1e6),  # MPa
+                'allowable_stress': _bol(yapi['allowable_pa'], 1e6),  # MPa
+                # L-B (v3.0.1, SV-05): kalınlığı BOYUTLANDIRAN izin gerilmesi
+                # (hedef/varsayılan cidar sıcaklığında). Çözülmüş sıcaklık
+                # yoksa allowable_stress ile aynıdır; varsa hüküm sayıları
+                # (allowable_stress, stress_margin, hoop_safety_factor)
+                # çözülmüş sıcaklıktadır, required_wall_thickness* bununla.
+                'allowable_stress_sizing': _bol(s['allowable_pa'], 1e6),  # MPa
+                'stress_margin': yapi['stress_margin_pct'],  # %
                 'safety_factor': s['safety_factor'],
                 # OH-Z2-02: hedef ⟷ ölçüm ayrımı (tek üretim noktası
                 # _structural_design; burada yalnız taşınır).
                 'design_mode': s['design_mode'],
-                'hoop_safety_factor': s['hoop_safety_factor'],
+                'hoop_safety_factor': yapi['hoop_safety_factor'],
                 'safety_factor_is_tautological':
                     s['safety_factor_is_tautological'],
                 'safety_factor_basis': (
@@ -16206,17 +18650,25 @@ class LiquidRocketEngine:
                 'material_key': s['material_key'],
                 'material_selection_source': s['material_selection_source'],
                 'yield_strength': s['yield_strength_pa'] / 1e6,  # MPa (20 C)
-                'yield_strength_at_wall_temp': s['derated_yield_pa'] / 1e6,  # MPa
-                'derating_factor': s['derating_factor'],
+                'yield_strength_at_wall_temp': _bol(
+                    yapi['derated_yield_pa'], 1e6),  # MPa
+                'derating_factor': yapi['derating_factor'],
                 # Z4: derating eğrisinin zarfı dışına çıkıldıysa SESSİZ
                 # kalmaz (yön: dayanımı yüksek gösterir).
-                'derating_basis': s['derating_basis'],
-                'wall_temperature': s['wall_temperature_k'],  # K
+                'derating_basis': yapi['derating_basis'],
+                'wall_temperature': yapi['wall_temperature_k'],  # K
+                # L-B (v3.0.1, SV-05): hükmün sıcaklığı ÇÖZÜLMÜŞ mü yoksa
+                # VARSAYIM mı — sayının yanında, makine-okur.
+                'wall_temperature_solved': yapi['solved'],
+                'wall_temperature_source': yapi['source'],
+                'wall_temperature_basis': yapi['basis'],
+                'wall_temperature_design_target_K': s['wall_temperature_k'],
+                'verdict_assumption': yapi['verdict_assumption'],
                 'material_source': material.get('source', 'materials_db'),
                 # Denetçi Ş2 (4. tur, Berke §27-18): gereksinim zarfının
                 # bileşenleri ve boğaz eksenel yük denetimi yanıtta.
-                'required_wall_thickness_hoop': (
-                    s['required_thickness_hoop_m'] * 1000),  # mm
+                'required_wall_thickness_hoop': _olc(
+                    s['required_thickness_hoop_m'], 1000),  # mm
                 'required_wall_thickness_throat': (
                     None if s['required_thickness_throat_m'] is None
                     else s['required_thickness_throat_m'] * 1000),  # mm
@@ -16227,7 +18679,11 @@ class LiquidRocketEngine:
                 'manufacturing_floor_changed_plate':
                     s['manufacturing_floor_governs'],
                 'throat_meridional_check':
-                    self._throat_check_publication(s['throat_check']),
+                    self._throat_check_publication(yapi['throat_check']),
+                # V301/L-KABUK: iki katmanlı cidarın katmanları, yığın
+                # kalınlığı ve yönetici SF'si (yalnız rejeneratif yolda;
+                # diğer yollarda blok bit-aynı kalır, alan eklenmez).
+                **iki_katman_alanlari,
             },
             'design_requirements': {
                 'proof_pressure':
@@ -16545,8 +19001,12 @@ class LiquidRocketEngine:
                 'cooling_system.peak_heat_flux (throat) and '
                 'cooling_system.chamber_heat_flux, converted kW/m^2 '
                 '-> W/m^2'),
+            # V301/L-KARBON: boğazın TOPLAM gaz tarafı iletkenliği (SP-125
+            # Eş. 4-18 h_gc; birikim yoksa = bartz_coefficient) — akıyla
+            # (throat_heat_flux) aynı katsayı, kamara satırıyla aynı anlam.
             'gas_side_coefficient_throat': _pozitif(
-                cooling.get('bartz_coefficient')),
+                cooling.get('gas_side_conductance_throat',
+                            cooling.get('bartz_coefficient'))),
         }
         t_c = _pozitif(getattr(self, 'T_c', None))
         if t_c is None:
@@ -16828,6 +19288,14 @@ class LiquidRocketEngine:
             try:
                 from hrma.analysis.regen_cooling import RegenCooling
                 material, mat_key = self._material_record()
+                # V301/L-REJ kalem 2+4: kanal geometrisi, pürüzlülük ve
+                # kamara boyu TEK kaynaktan (_regen_march_channel_inputs —
+                # motorun yayımladığı cooling_system bloğu). Eski satırlar
+                # genişlik/yükseklik için kaynaksız 3,0/2,0 mm yedeği
+                # taşıyordu, pürüzlülüğü modülün 5 µm varsayılanına
+                # bırakıyordu (motorun kendi ΔP'si 3,2 µm ile) ve kamara
+                # boyunu hiç geçirmiyordu (ceket yalnız lüleyi kaplıyordu).
+                kanal = self._regen_march_channel_inputs(cooling)
                 rc = RegenCooling(
                     chamber_pressure=self.P_c * PA_PER_BAR,
                     chamber_temperature=self.T_c,
@@ -16839,18 +19307,20 @@ class LiquidRocketEngine:
                     coolant_mdot=max(cooling.get('coolant_flow_rate', 0.0),
                                      1e-6),
                     coolant_inlet_temp=result['coolant_inlet_temperature'],
-                    coolant_inlet_pressure=(self.P_c + 10.0) * PA_PER_BAR,
-                    n_channels=int(cooling['cooling_channels']),
-                    channel_width=cooling.get('channel_width_mm', 3.0) / 1000.0,
-                    channel_height=cooling.get('channel_height_mm', 2.0) / 1000.0,
-                    wall_thickness=self._chamber_wall_thickness_m(),
+                    coolant_inlet_pressure=(self.P_c + RP1_MARCH_INLET_MARGIN_BAR)
+                    * PA_PER_BAR,
+                    n_channels=kanal['n_channels'],
+                    channel_width=kanal['channel_width'],
+                    channel_height=kanal['channel_height'],
+                    wall_thickness=kanal['wall_thickness'],
+                    wall_roughness=kanal['wall_roughness'],
                     wall_material=mat_key,
-                    motor_data={'chamber_diameter': self._chamber_diameter(),
-                                'mdot_total': self.mdot_total,
-                                'nozzle_type': getattr(self, 'nozzle_type',
-                                                       NOZZLE_TYPE_DEFAULT)},
+                    motor_data=self._regen_jacket_motor_data(),
                 )
                 march = rc.solve()
+                # V301/L-KABUK: astar yapı denetiminin istasyon girdisi
+                # (yayımlanmaz; ``_wall_stack_assessment`` okur).
+                self._regen_march_arrays_rp1 = march
                 summary = march['summary']
                 result['station_march'] = {
                     'peak_wall_temperature_K': summary['max_wall_hot_K'],
@@ -16861,8 +19331,37 @@ class LiquidRocketEngine:
                     'max_coolant_velocity_m_s':
                         summary['max_coolant_velocity_m_s'],
                     'material_allowable_K': summary['material_allowable_temp_K'],
+                    # L-B (v3.0.1, SV-05): hükmün KENDİ eşikleri ve soğuk
+                    # (soğutucu tarafı) cidar tepesi de sayı olarak çıkar;
+                    # kök uyarılar ve yapı zinciri metni ayrıştırmaz, bunları
+                    # okur (_resolve_wall_temperature).
+                    'material_melting_K': summary.get('material_melting_K'),
+                    'peak_coolant_side_wall_temperature_K':
+                        summary.get('max_wall_cold_K'),
+                    'coking': summary.get('coking'),
+                    'coking_threshold_K': summary.get('coking_threshold_K'),
+                    # V301/L-KABUK: iki kademe — coking/coking_threshold_K
+                    # SP-8087 hüküm kademesi (728 K), coking_risk 561 K uyarı.
+                    'coking_risk': summary.get('coking_risk'),
+                    'coking_warning_threshold_K':
+                        summary.get('coking_warning_threshold_K'),
+                    'coking_basis': summary.get('coking_basis'),
+                    # V301/L-KABUK: marşın KENDİ giriş basıncı yanıtta (soğutma
+                    # paneli isteğini bununla kurar; eskiden yoktu).
+                    'coolant_inlet_pressure_bar':
+                        float(self.P_c) + RP1_MARCH_INLET_MARGIN_BAR,
+                    'coolant_inlet_pressure_basis':
+                        RP1_MARCH_INLET_MARGIN_BASIS,
+                    # V301/L-KABUK (L-KARBON AÇIK 1): marşın Bartz gaz
+                    # özellik kümesi = toplu zincirinki (tek kaynak).
+                    'gas_property_set': (self._regen_jacket_motor_data()
+                                         .get('gas_property_set')),
+                    'material_name': material.get('name', mat_key),
                     'warnings': summary['warnings'],
                     'model_note': march['model_note'],
+                    # V301/L-KARBON: birikim beyanı + bant (nominal ⟷
+                    # dökülmüş); marşın kendi bloğu, sayı yeniden yazılmaz.
+                    'carbon_deposit': march.get('carbon_deposit'),
                 }
                 # ÖH defter P15B1-06 (Z5S/PK1): aynı soğutma devresinin İKİ
                 # çözümünden yalnız biri (toplu Bartz zinciri) üst katmanın
@@ -16960,6 +19459,308 @@ class LiquidRocketEngine:
         # --- A5 (v2.6.27): ablatif/radyatif ısıl koruma boyutlandırması ----
         result.update(self._passive_thermal_protection(cooling))
         return result
+
+    def _resolve_wall_temperature(self, cooling, thermal_protection):
+        """Hedef ⟷ çözülen cidar sıcaklığı — TEK karar noktası (L-B, SV-05).
+
+        ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/kati-sivi/L-B/olcum_once.json,
+        taban b07272a71): 2 mm cidarda RP-1 istasyon marşı tepe sıcak cidarı
+        3094,2 K bulup "liner failure" CRITICAL derken AYNI yanıt
+        ``cooling_system.wall_temperature_hot = 800`` (kullanıcının
+        ``max_wall_temp`` HEDEFİ), ``wall_temperature_limit_status = 'MET'``
+        ve yapı zincirini 800 K akmasıyla yayımlıyordu; hiçbir çözümün
+        olmadığı koşuda (varsayılan form, 8 mm cidar: marş ince cidar zarfı
+        dışında) ve ablatif/ışınımsal tipte de hüküm 'MET' idi. Kök
+        ``input_warnings`` erime hükmünü hiç taşımıyordu.
+
+        Bu metot yayımlanacak ``cooling`` ve ``thermal_protection``
+        sözlüklerini YERİNDE tamamlar ve yapı zincirinin okuyacağı çözümü
+        döndürür:
+
+        * ``wall_temperature_target_K`` (gereksinim) ve
+          ``wall_temperature_solved_K`` (sonuç) AYRI alanlardır;
+        * ``wall_temperature_limit_status`` yalnız çözülen değerle verilir
+          (MET / EXCEEDED); çözüm yoksa ``NOT_EVALUATED`` + adlı gerekçe;
+        * çözücünün erime / izin / koklaşma hükümleri kök uyarılara iner;
+        * RP-1 marşı koştuysa kullanıcıya tek "coolant exit temperature"
+          yayımlanır: marşınki. Toplu Bartz kestirimi temeli yazılı ayrı tanı
+          alanına iner (``coolant_exit_temperature_bulk_estimate_K``).
+
+        ``cooling_system.wall_temperature_hot`` anlamını KORUR: toplu Bartz
+        zincirinin değerlendirildiği cidar (süperkritik marşta çözülen değer,
+        diğer yollarda hedef/varsayılan); yanındaki ``wall_temperature_source``
+        bunu zaten söyler. Isı akısı ⟷ cidar kimliği (q = h_g·(T_c − T_w))
+        bu alana bağlıdır, o yüzden ÇÖZÜLEN değer AYRI adla çıkar.
+        """
+        def _sonlu(x):
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return None
+            return v if np.isfinite(v) else None
+
+        tp = thermal_protection if isinstance(thermal_protection, dict) else {}
+        march = tp.get('station_march')
+        march = march if isinstance(march, dict) else None
+        hedef_K = (float(self.max_wall_temp_input)
+                   if getattr(self, 'max_wall_temp_input', None) is not None
+                   else None)
+        cs_kaynak = str(cooling.get('wall_temperature_source') or '')
+        cozum = None
+        if march is not None and _sonlu(
+                march.get('peak_wall_temperature_K')) is not None:
+            cozum = {
+                'solver': 'station_march',
+                'hot_K': _sonlu(march.get('peak_wall_temperature_K')),
+                'cold_K': _sonlu(
+                    march.get('peak_coolant_side_wall_temperature_K')),
+                'melting_K': _sonlu(march.get('material_melting_K')),
+                'allowable_K': _sonlu(march.get('material_allowable_K')),
+                'coking': bool(march.get('coking')),
+                'coking_threshold_K': _sonlu(march.get('coking_threshold_K')),
+                'coking_risk': bool(march.get('coking_risk')),
+                'coking_warning_threshold_K': _sonlu(
+                    march.get('coking_warning_threshold_K')),
+                'material': march.get('material_name'),
+                'source': ('solved: 1D RP-1 regenerative station march, '
+                           'peak hot-gas-side wall '
+                           '(thermal_protection.station_march.'
+                           'peak_wall_temperature_K)'),
+            }
+        elif cs_kaynak.startswith('solved'):
+            sc = cooling.get('regen_supercritical')
+            ozet = (sc.get('summary') if isinstance(sc, dict) else None) or {}
+            malzeme, _ = self._material_record()
+            cozum = {
+                'solver': 'supercritical_march',
+                'hot_K': _sonlu(cooling.get('wall_temperature_hot')),
+                'cold_K': _sonlu(cooling.get('wall_temperature_cold')),
+                'melting_K': _sonlu(ozet.get('material_melting_K')),
+                'allowable_K': _sonlu(ozet.get('material_allowable_temp_K')),
+                'coking': bool(ozet.get('coking')),
+                'coking_threshold_K': _sonlu(ozet.get('coking_threshold_K')),
+                'coking_risk': bool(ozet.get('coking_risk')),
+                'coking_warning_threshold_K': _sonlu(
+                    ozet.get('coking_warning_threshold_K')),
+                'material': malzeme.get('name', self.chamber_material),
+                'source': ('solved: 1D supercritical regenerative station '
+                           'march, peak hot-gas-side wall '
+                           '(cooling_system.wall_temperature_hot, '
+                           + cs_kaynak + ')'),
+            }
+            if cozum['hot_K'] is None:
+                cozum = None
+        neden_kodu = None
+        if cozum is None:
+            if self.cooling_type == 'regenerative':
+                neden_kodu = ('station_march_not_run'
+                              if 'not run' in str(
+                                  tp.get('station_march_status') or '')
+                              else 'station_march_not_available')
+            elif self.cooling_type in COOLING_TYPES_PASSIVE:
+                neden_kodu = 'passive_cooling_no_solver'
+            else:
+                neden_kodu = 'cooling_type_no_solver'
+            if tp.get('station_march_status') and \
+                    self.cooling_type == 'regenerative':
+                neden = str(tp.get('station_march_status'))
+            elif self.cooling_type in COOLING_TYPES_PASSIVE:
+                neden = (f"cooling_type '{self.cooling_type}': HRMA has no "
+                         'wall-temperature solver for a passively cooled '
+                         'wall in this chain (passive_thermal_protection '
+                         'sizes the liner/heat sink, it does not publish an '
+                         'equilibrium wall temperature)')
+            elif self.cooling_type == 'regenerative':
+                neden = str(tp.get('station_march_status') or
+                            'the 1D station march did not run')
+            else:
+                neden = (f"cooling_type '{self.cooling_type}': no 1D wall "
+                         'solver exists for this cooling type (the station '
+                         'march covers regenerative cooling only)')
+        else:
+            neden = None
+
+        hot = cozum['hot_K'] if cozum else None
+        if hedef_K is None:
+            limit_durum = None
+            limit_basis = (
+                'no maximum wall temperature was entered (max_wall_temp), '
+                'so there is no limit to compare against; '
+                'wall_temperature_hot is the unsourced cooling-type default '
+                '(wall_temperature_default_basis)')
+        elif cozum is None:
+            limit_durum = WALL_LIMIT_NOT_EVALUATED
+            limit_basis = (
+                f'NOT EVALUATED: your limit {hedef_K:g} K can only be checked '
+                'against a SOLVED wall temperature and none exists on this '
+                f'run - {neden}. The cooling numbers were evaluated AT your '
+                'target (a requirement); that does not show the wall stays '
+                'below it.')
+        else:
+            limit_durum = 'EXCEEDED' if hot > hedef_K else 'MET'
+            limit_basis = (
+                f'solved peak hot-wall temperature {hot:.1f} K '
+                f'({cozum["source"]}) compared with your maximum wall '
+                f'temperature {hedef_K:g} K')
+
+        cooling['wall_temperature_target_K'] = hedef_K
+        cooling['wall_temperature_target_basis'] = (
+            'your maximum wall temperature input (max_wall_temp): a design '
+            'REQUIREMENT the cooling must hold, not a result'
+            if hedef_K is not None else
+            'no maximum wall temperature was entered (max_wall_temp)')
+        cooling['wall_temperature_solved_K'] = hot
+        cooling['wall_temperature_solved_cold_K'] = (
+            cozum['cold_K'] if cozum else None)
+        cooling['wall_temperature_solved_source'] = (
+            cozum['source'] if cozum else None)
+        cooling['wall_temperature_solved_status'] = (
+            'SOLVED' if cozum else WALL_LIMIT_NOT_EVALUATED)
+        cooling['wall_temperature_not_solved_reason'] = neden
+        # Ekranın çevirdiği makine kodu (metin serbest İngilizcedir).
+        cooling['wall_temperature_not_solved_code'] = neden_kodu
+        cooling['wall_temperature_limit_status'] = limit_durum
+        cooling['wall_temperature_limit_basis'] = limit_basis
+        cooling['wall_temperature_hot_basis'] = (
+            'the hot-wall temperature the bulk Bartz chain of this block was '
+            'evaluated AT (see wall_temperature_source). It is the solved '
+            'wall only when wall_temperature_source says solved; the solved '
+            'peak of this run is wall_temperature_solved_K')
+
+        # --- Kök uyarılar: çözücünün kendi hükümleri (sayılarla) ----------
+        if cozum is not None:
+            mat = str(cozum.get('material') or self.chamber_material)
+            if cozum['melting_K'] is not None and hot > cozum['melting_K']:
+                self._warn('warn.liquid.solved_wall_above_melting',
+                           'critical', solved_K=round(hot, 1),
+                           melting_K=round(cozum['melting_K'], 1),
+                           material=mat)
+            elif cozum['allowable_K'] is not None \
+                    and hot > cozum['allowable_K']:
+                self._warn('warn.liquid.solved_wall_above_allowable',
+                           'critical', solved_K=round(hot, 1),
+                           allowable_K=round(cozum['allowable_K'], 1),
+                           material=mat)
+            # V301/L-KARBON — SP-8087 §3.4.1: birikim dökülürse yerel cidar
+            # ERİMEYİ aşıyorsa hüküm kritiktir. Metin marşın kendi cümlesi
+            # (EN; TR karşılığı i18n_charts.js), kod mevcut marş notu kodu.
+            if cozum['solver'] == 'station_march':
+                _cd = (march or {}).get('carbon_deposit') or {}
+                if _cd.get('spalled_above_melting'):
+                    for _w in (march.get('warnings') or []):
+                        if str(_w).startswith(
+                                'CRITICAL: where the carbon deposit spalls'):
+                            # V301/DİL (L-KARBON DEVİR 1): kendi kodu ve
+                            # parametreleriyle iner (TR/EN sözlükten). Sayılar
+                            # marşın KENDİ cümlesinden okunur — hüküm ve sayı
+                            # aynı; ayrıştırılamazsa eski not kodu korunur.
+                            import re as _re
+                            _m = _re.search(
+                                r'reaches (\S+) K, above the (.+) melting '
+                                r'point (\S+) K', str(_w))
+                            if _m:
+                                self._warn(
+                                    'warn.liquid.deposit_spall_above_melting',
+                                    'critical', spall_K=_m.group(1),
+                                    melting_K=_m.group(3),
+                                    material=_m.group(2))
+                            else:
+                                self._warn('warn.liquid.regen_march_note',
+                                           'critical', detail=str(_w))
+            # V301/L-KABUK — RP-1 kok eşiği İKİ KADEME (regen_cooling.
+            # RP1_COKING_BASIS): 728 K NASA SP-8087 tasarım ölçütü aşıldıysa
+            # hüküm KRİTİK; yalnız 561 K uyarı kademesi aşıldıysa UYARI
+            # (tek başına UNSAFE/CRITICAL üretmez).
+            if cozum['coking'] and cozum['cold_K'] is not None \
+                    and cozum['coking_threshold_K'] is not None:
+                self._warn('warn.liquid.coolant_wall_above_rp1_limit',
+                           'critical', cold_K=round(cozum['cold_K'], 1),
+                           limit_K=round(cozum['coking_threshold_K'], 1))
+            elif cozum.get('coking_risk') and cozum['cold_K'] is not None \
+                    and cozum.get('coking_warning_threshold_K') is not None:
+                self._warn('warn.liquid.solved_coolant_side_coking',
+                           'warning', cold_K=round(cozum['cold_K'], 1),
+                           threshold_K=round(
+                               cozum['coking_warning_threshold_K'], 1),
+                           limit_K=round(cozum['coking_threshold_K'], 1))
+            # Süperkritik yol bu uyarıyı marş içinde zaten basıyor; RP-1
+            # marşı için aynı kod, aynı parametre biçimi.
+            if cozum['solver'] == 'station_march' and hedef_K is not None \
+                    and hot > hedef_K:
+                self._warn('warn.liquid.wall_temp_limit_exceeded',
+                           'critical', limit_K=round(hedef_K, 1),
+                           solved_K=round(hot, 1),
+                           ratio=round(hot / hedef_K, 2))
+
+        # --- Soğutucu çıkış sıcaklığı: tek yayın (karar 5) ----------------
+        if cozum is not None and cozum['solver'] == 'station_march':
+            giris = _sonlu(cooling.get('coolant_inlet_temperature'))
+            cikis_mars = _sonlu(march.get('coolant_exit_temperature_K'))
+            cikis_toplu = _sonlu(cooling.get('coolant_exit_temperature'))
+            artis_toplu = _sonlu(cooling.get('coolant_temperature_rise'))
+            if cikis_mars is not None and giris is not None:
+                toplu_basis = (
+                    'DIAGNOSTIC bulk estimate, not the published exit '
+                    'temperature: the bulk Bartz chain holds the hot wall AT '
+                    'the design temperature (wall_temperature_hot) and puts '
+                    'the whole heat load that wall would draw '
+                    '(heat_load_to_regen_coolant) into the coolant, '
+                    'dT = Q/(mdot*cp) - a requirement. The station march '
+                    'solves the same channels, the same coolant flow and the '
+                    'same material: there the wall runs hotter, the gas-side '
+                    'driving difference (T_aw - T_wall) shrinks and the '
+                    'coolant takes less heat. Their measured gap is in '
+                    'thermal_protection.channel_circuit_reconciliation')
+                cooling['coolant_exit_temperature_bulk_estimate_K'] = \
+                    cikis_toplu
+                cooling['coolant_temperature_rise_bulk_estimate_K'] = \
+                    artis_toplu
+                cooling['coolant_exit_temperature_bulk_estimate_basis'] = \
+                    toplu_basis
+                cooling['coolant_exit_temperature'] = cikis_mars
+                cooling['coolant_temperature_rise'] = cikis_mars - giris
+                cooling['coolant_exit_temperature_source'] = (
+                    'solved: 1D RP-1 regenerative station march '
+                    '(thermal_protection.station_march.'
+                    'coolant_exit_temperature_K)')
+                mars_basis = (
+                    'coupled 1D station march of this cooling circuit '
+                    '(solved equilibrium) - the single published coolant '
+                    'exit temperature; the bulk Bartz estimate is '
+                    'coolant_exit_temperature_bulk_estimate_K')
+                tp['coolant_exit_temperature_bulk_estimate_K'] = cikis_toplu
+                tp['temperature_rise_bulk_estimate_K'] = artis_toplu
+                tp['coolant_exit_temperature'] = cikis_mars
+                tp['temperature_rise'] = cikis_mars - giris
+                tp['coolant_exit_temperature_basis'] = mars_basis
+                tp['temperature_rise_basis'] = mars_basis
+                # Kaynama uyarısı yayımlanan çıkışa göre yeniden kurulur
+                # (toplu 1314 K ile verilmiş uyarı, yayımlanan 546 K'nin
+                # yanında yanlış sayı söylerdi).
+                t_kaynama = getattr(self, 'fuel_boiling_point', None)
+                self.design_warnings[:] = [
+                    w for w in self.design_warnings
+                    if not (isinstance(w, dict) and w.get('code')
+                            == 'warn.liquid.coolant_exit_above_boiling')]
+                if t_kaynama is not None and cikis_mars > float(t_kaynama):
+                    self._warn('warn.liquid.coolant_exit_above_boiling',
+                               'warning', t_exit=round(float(cikis_mars)),
+                               t_boil=round(float(t_kaynama)))
+        elif cooling.get('coolant_exit_temperature') is not None \
+                and cooling.get('cooling_channels'):
+            cooling['coolant_exit_temperature_source'] = (
+                cs_kaynak if cs_kaynak.startswith('solved') else
+                'bulk Bartz chain evaluated at the design wall temperature '
+                '(a requirement, no station march on this run: '
+                + str(neden) + ')')
+
+        return {
+            'solved': cozum is not None,
+            'hot_K': hot,
+            'source': cozum['source'] if cozum else None,
+            'reason': neden,
+            'target_K': hedef_K,
+        }
 
     def _channel_circuit_reconciliation(self, cooling, summary, march):
         """Aynı soğutma devresinin iki çıktı kümesini ADIYLA mutabık kılar.
@@ -17233,7 +20034,9 @@ class LiquidRocketEngine:
             return v * olcek if np.isfinite(v) and v > 0 else None
 
         h_eff = _pozitif(q_chamber / (t_c - t_hot)) if t_c - t_hot > 0 else None
-        h_throat = _pozitif(cooling.get('bartz_coefficient'))
+        # V301/L-KARBON: akıyla aynı (h_gc; birikim yoksa bartz_coefficient).
+        h_throat = _pozitif(cooling.get('gas_side_conductance_throat',
+                                        cooling.get('bartz_coefficient')))
         r_chamber = _pozitif(cooling.get('chamber_diameter'), 1.0 / 2000.0)
         r_throat = _pozitif(getattr(self, 'd_t', None), 0.5)
         # v2.6.27 blokaj denetimi: kenar gazı c_p'si, Bartz katsayılarını
@@ -17645,6 +20448,123 @@ class LiquidRocketEngine:
             'cost_and_schedule_status': MANUFACTURING_COST_STATUS,
         }
     
+    def _iki_katmanli_kutle_tek_kaynak(self, results):
+        """V301/FİZİK-2 (kalem 4) — iki katmanlı cidarda kütle TEK kaynak.
+
+        ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/fizik-2/k4_kutle_once.json, örnek
+        sıvı 5fa435893): kütle dökümü kamara 5,776 / lüle 3,542 kg ⟷ CAD
+        4,817 / 6,380 kg. BAĞIMSIZ ölçüm — çizilen iki katmanın kesik koni
+        hacmi × yoğunluk (astar + yerel kaburga payı × kanal katmanı astar
+        malzemesiyle + dış kabuk kabuk malzemesiyle) — 4,8167 / 6,3799 kg:
+        CAD'in sayısı. Motorun sayısı iki KAYNAKSIZ çarpandan sapıyordu:
+        ``CHAMBER_MASS_JOINT_FACTOR`` 1,20 (çizilmeyen flanş/takviye payı) ve
+        ``NOZZLE_WALL_THICKNESS_RATIO`` 0,60 (oysa ceket lüleyi çıkışa kadar
+        tam yığınla kaplar ve öyle çizilir) + 30° yakınsak koni varsayımı.
+
+        Kural: iki katmanlı cidarda kamara ve lüle kütlesi CAD'in TEK
+        işlevinden (``MotorCADDesigner._estimate_component_mass``, CAD'in
+        kendi girdi normalleştirmesiyle) okunur; kuru toplam, T/W, kütle
+        oranları, ``engine_mass_estimate`` ve Tasarım Özeti (uçuş aracı onu
+        okur) bu sayılardan yeniden kurulur. Çizilen geometri çözülemezse
+        sayı uydurulmaz: eski model kalır ve nedeni
+        ``component_sizing.two_layer_mass_single_source`` alanında adıyla
+        yazılır. Tek katmanlı cidar bu işlevden geçmez (bit-aynı).
+        """
+        cs = ((results.get('structural_analysis') or {})
+              .get('chamber_structure') or {})
+        if cs.get('wall_model') != WALL_MODEL_TWO_LAYER:
+            return
+        sizing = results.get('component_sizing')
+        cm = sizing.get('component_masses') if isinstance(sizing, dict) \
+            else None
+        if not isinstance(cm, dict):
+            return
+        kaynak = ('hrma.export.cad_visualization.MotorCADDesigner.'
+                  '_estimate_component_mass (as-drawn two-layer wall; the '
+                  'same function as the CAD mass_breakdown)')
+        try:
+            from hrma.export.cad_visualization import (
+                MotorCADDesigner, nozzle_wall_profile,
+                two_layer_wall_cad_geometry)
+            from hrma.export.motor_geometry import normalise_export_geometry
+            md, _rapor = normalise_export_geometry(copy.deepcopy(results))
+            geo = two_layer_wall_cad_geometry(md)
+            prof = nozzle_wall_profile(md, unit='mm')
+            if geo is None or prof.get('two_layer') is None:
+                raise ValueError('the drawn two-layer wall did not resolve '
+                                 'for the chamber and the jacketed nozzle')
+            cad = MotorCADDesigner()
+            m_ch = float(cad._estimate_component_mass('chamber', md))
+            m_nz = float(cad._estimate_component_mass('nozzle', md))
+            if not (np.isfinite(m_ch) and np.isfinite(m_nz)
+                    and m_ch > 0 and m_nz > 0):
+                raise ValueError('non-positive drawn mass')
+        except Exception as exc:          # fail-closed: eski model + beyan
+            sizing['two_layer_mass_single_source'] = {
+                'status': 'NOT_APPLIED',
+                'reason': ('the as-drawn two-layer masses could not be '
+                           f'computed ({type(exc).__name__}: {exc})')[:400],
+                'source': kaynak,
+            }
+            return
+        eski = {k: cm.get(k) for k in ('combustion_chamber',
+                                       'nozzle_assembly', 'total_dry_mass')}
+        cm['combustion_chamber'] = m_ch
+        cm['nozzle_assembly'] = m_nz
+        toplam = float(sum(float(cm.get(k) or 0.0) for k in (
+            'combustion_chamber', 'nozzle_assembly', 'injector_assembly',
+            'turbopump_assembly', 'feed_system', 'controls_avionics')))
+        cm['total_dry_mass'] = toplam
+        tw = self.F / (toplam * G_0)
+        oranlar = sizing.get('mass_ratios')
+        if isinstance(oranlar, dict):
+            eski_toplam = float(eski['total_dry_mass'] or 0.0)
+            pompa_kw = (float(oranlar.get('power_to_weight') or 0.0)
+                        * eski_toplam)
+            oranlar['thrust_to_weight'] = tw
+            oranlar['power_to_weight'] = (pompa_kw / toplam
+                                          if toplam > 0 else 0.0)
+            oranlar['chamber_loading'] = self.F / m_ch
+        yontem = sizing.get('mass_method')
+        if isinstance(yontem, dict):
+            eski_metin = str(yontem.get('chamber_nozzle_injector') or '')
+            i = eski_metin.find('injector plate')
+            yontem['chamber_nozzle_injector'] = (
+                'chamber and nozzle: as-drawn two-layer regenerative wall '
+                '(liner + local rib fraction x channel layer in the liner '
+                'material + closeout in the closeout material, along the '
+                'drawn contour; the same function as the CAD mass_breakdown); '
+                'flanges and joints are not drawn and not weighed'
+                + ('; ' + eski_metin[i:] if i >= 0 else ''))
+        sizing['two_layer_mass_single_source'] = {
+            'status': 'applied',
+            'source': kaynak,
+            'previous_model_kg': eski,
+            'previous_model_basis': (
+                'shell areal mass x mid-diameter area with the unsourced '
+                f'CHAMBER_MASS_JOINT_FACTOR {CHAMBER_MASS_JOINT_FACTOR:g} and '
+                f'NOZZLE_WALL_THICKNESS_RATIO {NOZZLE_WALL_THICKNESS_RATIO:g} '
+                '(replaced; independent volume x density check in '
+                'docs/scofield/raw/OH/V301/fizik-2/k4_kutle_once.json)'),
+        }
+        eski_tw = results.get('thrust_to_weight')
+        results['thrust_to_weight'] = tw
+        results['engine_mass_estimate'] = toplam
+        ozet = results.get('design_summary')
+        if isinstance(ozet, dict):
+            kutle = ozet.get('masses')
+            if isinstance(kutle, dict):
+                kutle['engine_mass_kg'] = toplam
+                kutle['thrust_to_weight'] = tw
+                kutle['engine_mass_source'] = (
+                    'component_sizing.total_dry_mass; chamber and nozzle '
+                    'from the as-drawn two-layer wall (same function as the '
+                    'CAD mass_breakdown)')
+            oneri = ozet.get('recommendation')
+            if isinstance(oneri, str) and isinstance(eski_tw, (int, float)):
+                ozet['recommendation'] = oneri.replace(
+                    f'T/W={eski_tw:.1f}', f'T/W={tw:.1f}', 1)
+
     def _detailed_component_sizing(self):
         """Bileşen boyutlandırma ve kütle dökümü — GEOMETRİ + MALZEME.
 
@@ -17655,19 +20575,35 @@ class LiquidRocketEngine:
         geometrisinden (kalınlık x yüzey x yoğunluk) hesaplanır; turbopompa,
         hat ve kontrol kütleleri ETİKETLİ ampirik korelasyonlardır.
         """
-        structural = self._structural_design()
-        material = structural['material']
-        rho_mat = float(material.get('density', 7850.0))
-        t_wall = structural['thickness_m']
-        d_c = structural['chamber_diameter_m']
+        yigin = self._wall_stack_cached()
+        iki_katman_kutle = None
+        if yigin is not None:
+            iki_katman_kutle = self._two_layer_wall_areal_mass(yigin)
+        if iki_katman_kutle is not None:
+            # V301/L-KABUK: cidar = astar + kaburgalar + dış kabuk; birim
+            # alan kütlesi iki malzemeden (``_two_layer_wall_areal_mass``).
+            material, _mk = self._material_record()
+            rho_mat = float(material.get('density', 7850.0))
+            t_wall = float(yigin['wall_stack_thickness_mm']) / MM_PER_M
+            d_c = self._chamber_diameter()
+        else:
+            structural = self._structural_design()
+            material = structural['material']
+            rho_mat = float(material.get('density', 7850.0))
+            t_wall = structural['thickness_m']
+            d_c = structural['chamber_diameter_m']
 
         cooling = self.calculate_cooling_requirements()
         l_chamber = cooling['chamber_length'] / 1000.0    # m
         l_nozzle = cooling['nozzle_length'] / 1000.0      # m
 
         # Hazne: silindirik kabuk (orta çap üzerinden) + flanş/takviye payı
-        chamber_mass = (np.pi * (d_c + t_wall) * t_wall * l_chamber
-                        * rho_mat * CHAMBER_MASS_JOINT_FACTOR)
+        if iki_katman_kutle is not None:
+            chamber_mass = (np.pi * (d_c + t_wall) * l_chamber
+                            * iki_katman_kutle * CHAMBER_MASS_JOINT_FACTOR)
+        else:
+            chamber_mass = (np.pi * (d_c + t_wall) * t_wall * l_chamber
+                            * rho_mat * CHAMBER_MASS_JOINT_FACTOR)
 
         # Yakınsak koni (D_c -> d_t) ve ıraksak koni (d_t -> d_e) kesik koni
         # yanal yüzeyleri: A = pi·(r1+r2)·slant
@@ -17676,9 +20612,14 @@ class LiquidRocketEngine:
         l_conv = max((r_c - r_t) / np.tan(np.radians(30.0)), 1e-4)
         slant_conv = np.hypot(r_c - r_t, l_conv)
         slant_div = np.hypot(r_e - r_t, l_nozzle)
-        nozzle_mass = ((np.pi * (r_c + r_t) * slant_conv
-                        + np.pi * (r_t + r_e) * slant_div)
-                       * t_nozzle * rho_mat)
+        if iki_katman_kutle is not None:
+            nozzle_mass = ((np.pi * (r_c + r_t) * slant_conv
+                            + np.pi * (r_t + r_e) * slant_div)
+                           * iki_katman_kutle * NOZZLE_WALL_THICKNESS_RATIO)
+        else:
+            nozzle_mass = ((np.pi * (r_c + r_t) * slant_conv
+                            + np.pi * (r_t + r_e) * slant_div)
+                           * t_nozzle * rho_mat)
 
         # Enjektör plakası: dolu disk (delik payı ihmal, muhafazakâr)
         t_injector = t_wall * INJECTOR_PLATE_THICKNESS_RATIO
@@ -17723,9 +20664,22 @@ class LiquidRocketEngine:
             },
             'mass_method': {
                 'chamber_nozzle_injector': (
-                    f"shell geometry x {t_wall * 1000:.2f} mm wall x "
-                    f"{material.get('name', structural['material_key'])} "
-                    f"density {rho_mat:.0f} kg/m3"),
+                    (f"shell geometry x {t_wall * 1000:.2f} mm wall x "
+                     f"{material.get('name', structural['material_key'])} "
+                     f"density {rho_mat:.0f} kg/m3")
+                    if iki_katman_kutle is None else
+                    # V301/L-KABUK: iki katmanlı cidarın birim alan kütlesi.
+                    (f'shell geometry x two-layer regenerative wall: liner '
+                     f"{float(yigin['wall_layers'][0]['thickness_mm']):.2f}"
+                     f" mm {yigin['wall_layers'][0]['material']} + lands "
+                     f"over {float(yigin['channel_depth_mm']):.2f} mm "
+                     f'channel depth + closeout '
+                     f"{float(yigin['wall_layers'][1]['thickness_mm']):.2f}"
+                     f" mm {yigin['wall_layers'][1]['material']} = "
+                     f'{iki_katman_kutle:.1f} kg/m2; injector plate on the '
+                     f"{t_wall * 1000:.2f} mm stack x "
+                     f"{material.get('name', '')} density "
+                     f'{rho_mat:.0f} kg/m3')),
                 'turbopump': ('empirical mass-power correlation '
                               f'({TURBOPUMP_MASS_BASE_KG:g} kg + '
                               f'{TURBOPUMP_MASS_PER_KW:g} kg/kW x '
@@ -17756,3 +20710,199 @@ class LiquidRocketEngine:
                 'chamber_loading': self.F / chamber_mass  # N/kg
             }
         }
+
+
+# ---------------------------------------------------------------------------
+# V301/L-C — SIVI ENJEKTÖR DEVRESİ: TEK ÇAĞRI (motor + ayrı panel ucu)
+# ---------------------------------------------------------------------------
+#: Cd'si tablo yerine swirl geometrisinden gelen devre tipleri (kullanıcı
+#: Cd'si uygulanmaz). Sınıf özniteliği ``_SWIRL_CD_INJECTOR_TYPES`` aynı küme.
+SWIRL_CD_INJECTOR_TYPES = LiquidRocketEngine._SWIRL_CD_INJECTOR_TYPES
+
+#: /calculate_liquid pintle ölçü alanları (istek adı) -> ``spec['pintle']``
+#: anahtarı. Adlar hibrit /calculate ile AYNI (``PINTLE_REQUEST_FIELDS``);
+#: sıvıda yalnız yakıt merkezli modelin okuduğu ölçüler.
+LIQUID_PINTLE_SPEC_KEYS = ('d_pintle_mm', 'annulus_gap_mm', 'n_radial_holes',
+                           'radial_hole_d_mm', 'skip_distance_mm')
+
+LIQUID_PINTLE_ORIFICE_PLAN_BASIS = (
+    'pintle: the published fuel orifice count and diameter are the radial '
+    'tip holes of the canonical pintle geometry (injector_design_detail.'
+    'pintle_geometry); the oxidizer enters through the annulus around the '
+    'post (pintle_diameter_mm, ox_annulus_gap_mm), which has no discrete '
+    'orifices, so ox_orifice_count and ox_orifice_diameter are not '
+    'applicable (null). The circuits\' n_orifices / orifice_d_mm are the '
+    'equivalent plain-orifice plan the circuit model sizes the flow area '
+    'with; that plan is NOT drilled.')
+
+LIQUID_CIRCUIT_REQUEST_BASIS = (
+    'the exact input the liquid injector circuit was solved with (spec) and '
+    'the user discharge coefficient, applied by the same liquid circuit '
+    'call (design_liquid_injector_circuit). The separate Injector Design '
+    'panel sends this input to /api/injector-design and reproduces the '
+    'circuit numbers of this design.')
+
+
+def apply_user_discharge_coefficient(detail, cd_user):
+    """Modül enjektör çözümünü kullanıcının Cd'sine TAM cebirle taşır.
+
+    injector_design.design_injector sözleşmesinde SIVI devreleri için Cd
+    giriş alanı yoktur (yalnız gaz-gaz dalı spec['cd'] okur); Cd, orifis
+    giriş geometrisi + L/D tablosundan gelir. Kullanıcının ölçtüğü Cd'yi
+    AYRI bir hesapla uygulamak K3 çelişkisini doğuruyordu. Burada modülün
+    KENDİ SPI cebriyle tam ölçekleme yapılır ve sonuç modül çıktısına
+    GERİ YAZILIR; böylece geriye tek sayı kümesi kalır:
+
+        ṁ = Cd·A·√(2ρΔP),  v = Cd·√(2ΔP/ρ),  d = √(4A/(π·n))
+        r = Cd_model / Cd_user  ⇒  A ∝ r,  d ∝ √r,  v ∝ 1/r
+
+    ΔP, ρ, ṁ, ΔP/Pc, kavitasyon sayısı, chug ve hidrolik flip kalemleri
+    Cd'den bağımsızdır; dokunulmaz.
+
+    Dönüş: uygulandı mı (bool). False dönerse çağıran taraf kullanıcıya
+    'bu yolda kullanılmıyor' bildirimini yapar.
+    """
+    if cd_user is None:
+        return True   # kullanıcı Cd vermedi: modül Cd'si zaten tek kaynak
+    inj_type = detail.get('injector_type')
+    if inj_type == 'gas_gas_coaxial':
+        return True   # gaz-gaz dalı spec['cd'] ile Cd'yi zaten aldı
+    if inj_type in SWIRL_CD_INJECTOR_TYPES:
+        return False  # swirl Cd'si geometriden gelir, düz orifis Cd'si değil
+    circuits = {k: detail.get(k) for k in ('ox_circuit', 'fuel_circuit')}
+    live = [c for c in circuits.values() if c]
+    if not live:
+        return False
+    # Ölçekleme yalnız tek fazlı orifis (SPI) çözümünde tam geçerlidir;
+    # NHNE (flaşlayan N₂O) devresinde Cd doğrusal ölçeklenmez.
+    if any(c.get('flow_model') != 'SPI' for c in live):
+        return False
+
+    cd_user = float(cd_user)
+    ratios = {}
+    for key, c in circuits.items():
+        if not c:
+            continue
+        r = float(c['cd']) / cd_user
+        ratios[key] = r
+        root = float(np.sqrt(r))
+        c['total_area_mm2'] = float(c['total_area_mm2']) * r
+        c['orifice_d_mm'] = float(c['orifice_d_mm']) * root
+        c['velocity_m_s'] = float(c['velocity_m_s']) / r
+        c['cd'] = cd_user
+        c['cd_basis'] = (
+            'user input (discharge coefficient); the model value '
+            f"({float(r) * cd_user:.3f}) was replaced through the same "
+            'SPI orifice equation')
+        man = c.get('manifold')
+        if man:
+            man['d_mm'] = float(man['d_mm']) * root
+            man['velocity_m_s'] = float(man['velocity_m_s']) / r
+
+    r_ox = ratios.get('ox_circuit', 1.0)
+    r_fuel = ratios.get('fuel_circuit', r_ox)
+    # Çarpışma geometrisi doğrudan d_ox ile ölçekli (3·d ve 6·d kuralları)
+    imp = (detail.get('pattern') or {}).get('impingement')
+    if imp:
+        root_ox = float(np.sqrt(r_ox))
+        for key in ('free_jet_length_mm', 'element_spacing_mm'):
+            if imp.get(key):
+                imp[key] = float(imp[key]) * root_ox
+    # SMD: impinging korelasyonu D32 = C·d·We^(-1/3) ⇒ d^(2/3)·v^(-2/3) ∝ r.
+    # Elkotb ve Lefebvre-swirl korelasyonları yalnız ΔP / eleman başına
+    # debi / akışkan özelliklerine bağlıdır — Cd'den etkilenmez.
+    atom = detail.get('atomization') or {}
+    if atom.get('correlation') == 'impinging-We13':
+        if atom.get('smd_ox_um'):
+            atom['smd_ox_um'] = float(atom['smd_ox_um']) * r_ox
+        if atom.get('smd_fuel_um'):
+            atom['smd_fuel_um'] = float(atom['smd_fuel_um']) * r_fuel
+    # Pintle geometrisinin tüm uzunlukları √alan ile ölçekli; BF, delik
+    # sayısı ve L_s/D_p oranları boyutsuzdur ve değişmez.
+    pin = detail.get('pintle_geometry')
+    if pin:
+        root_ox = float(np.sqrt(r_ox))
+        for key in ('d_pintle_mm', 'skip_distance_mm', 'annulus_gap_mm',
+                    'radial_hole_d_mm'):
+            if pin.get(key):
+                pin[key] = float(pin[key]) * root_ox
+    return True
+
+
+def _pintle_olculeri_var(spec):
+    pin = (spec or {}).get('pintle') or {}
+    return isinstance(pin, dict) and any(
+        pin.get(k) not in (None, '') for k in LIQUID_PINTLE_SPEC_KEYS)
+
+
+def design_liquid_injector_circuit(spec, cd_user=None):
+    """Sıvı enjektör devresinin TEK çağrısı: ``(detail, cd_uygulandı)``.
+
+    * ``like_impinging`` -> ``design_like_doublet`` (her devre kendi çift
+      sayıda delikli benzer-akışkan çiftleriyle); diğerleri
+      ``design_injector``.
+    * Kullanıcı Cd'si motorun eski cebriyle çözümden SONRA uygulanır
+      (``apply_user_discharge_coefficient``; sayılar bit-aynı). İstisna:
+      pintle ölçüleri sabitlenmişse Cd devre çözücüsüne GİRDİ olur — sonradan
+      ölçekleme kullanıcının sabitlediği D_p / n / d'yi değiştirirdi ve ölçü
+      denetimi gerçek (kullanıcı Cd'li) akış alanına karşı yapılmalıdır.
+    ``spec`` içinde ``cd`` anahtarı varsa yok sayılmaz: ``cd_user`` yoksa
+    o kullanılır.
+    """
+    from hrma.engines.injector_design import (design_injector,
+                                              design_like_doublet)
+    s = dict(spec)
+    if cd_user is None and s.get('cd') is not None:
+        cd_user = s.get('cd')
+    s.pop('cd', None)
+    cozucude = (cd_user is not None and s.get('injector_type') == 'pintle'
+                and _pintle_olculeri_var(s))
+    if cozucude:
+        s['cd'] = float(cd_user)
+    tasarimci = (design_like_doublet if s.get('injector_type')
+                 == 'like_impinging' else design_injector)
+    detail = tasarimci(s)
+    if not isinstance(detail, dict) or detail.get('status') != 'success':
+        return detail, True
+    if cozucude:
+        return detail, bool((detail.get('user_cd') or {}).get('applied'))
+    return detail, apply_user_discharge_coefficient(detail, cd_user)
+
+
+def liquid_circuit_request_record(spec, cd_user):
+    """Yanıtta yayımlanan devre girdisi (ayrı panelin eşlemesi için)."""
+    temiz = {}
+    for k, v in (spec or {}).items():
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            temiz[k] = (float(v) if isinstance(v, (np.floating,)) else v)
+        elif isinstance(v, dict):
+            temiz[k] = {a: b for a, b in v.items()
+                        if isinstance(b, (str, int, float, bool))}
+    temiz.pop('cd', None)
+    return {'spec': temiz,
+            'user_discharge_coefficient': (None if cd_user is None
+                                           else float(cd_user)),
+            'basis': LIQUID_CIRCUIT_REQUEST_BASIS}
+
+
+def publish_liquid_pintle_plan(result, detail):
+    """Pintle'da özet bloğun delik planı KANON geometriden (SV-07)."""
+    pg = (detail or {}).get('pintle_geometry')
+    if not isinstance(pg, dict):
+        return
+    d_p = float(pg['d_pintle_mm'])
+    t = float(pg['annulus_gap_mm'])
+    result['fuel_orifice_count'] = int(pg['n_radial_holes'])
+    result['fuel_orifice_diameter'] = float(pg['radial_hole_d_mm'])
+    result['ox_orifice_count'] = None
+    result['ox_orifice_diameter'] = None
+    result['pintle_diameter_mm'] = d_p
+    result['ox_annulus_gap_mm'] = t
+    result['ox_annulus_bore_diameter_mm'] = float(
+        pg.get('annulus_bore_diameter_mm', d_p + 2.0 * t))
+    result['skip_distance_mm'] = float(pg['skip_distance_mm'])
+    result['orifice_plan_basis'] = LIQUID_PINTLE_ORIFICE_PLAN_BASIS
+    result['orifice_geometry_source'] = (
+        'canonical pintle geometry (injector_design_detail.pintle_geometry):'
+        ' radial fuel tip holes + oxidizer annulus; flow areas, velocities '
+        'and Cd from the injector circuit model')

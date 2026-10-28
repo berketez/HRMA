@@ -208,7 +208,9 @@ class TestOHD3211DilDegisimiZinciri:
             'function updateInjectorParams() { cagrilanlar.push("inj"); }\n'
             'function refreshPressureModeLabels() { cagrilanlar.push("prs"); }\n'
             'function updateCalculatedImpulse() { cagrilanlar.push("imp"); }\n'
-            'function checkDatabaseStatus() { cagrilanlar.push("db"); }\n'
+            # v3.0.1 K: son halka checkDatabaseStatus (rozet yoklaması)
+            # idi; rozet söküldü, yerini refreshDataSourceLines aldı.
+            'function refreshDataSourceLines() { cagrilanlar.push("db"); }\n'
             + self._zincir_govdesi() + '\n'
             'process.stdout.write(JSON.stringify('
             '{cagrilanlar: cagrilanlar, uyarilar: uyarilar}));\n')
@@ -219,7 +221,8 @@ class TestOHD3211DilDegisimiZinciri:
         assert p.returncode == 0, p.stderr
         out = json.loads(p.stdout)
         assert 'db' in out['cagrilanlar'], (
-            'dil değiştirildiğinde checkDatabaseStatus() çalışmıyor: zincir '
+            'dil değiştirildiğinde son halka (refreshDataSourceLines) '
+            'çalışmıyor: zincir '
             'kendisinden önceki bir halkada fırlatıp catch e düşüyor — '
             'veritabanı durumu bayat kalıyor (çalışan halkalar: %s, '
             'uyarılar: %s)' % (out['cagrilanlar'], out['uyarilar']))

@@ -90,17 +90,30 @@ class TestP13B2_05RozetIlkBoya:
         assert 'database-status status-connected cea-status' not in liquid_html
         assert 'database-status status-connected nist-status' not in liquid_html
 
+    # ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1). Aşağıdaki üç bekçi
+    # rozetin "denetlenmedi" ilk boyasını ve onun sözlük çiftini ŞART
+    # koşuyordu. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/
+    # gorsel_once.json): yoklamadan sonra rozet HER makinede "Offline"a
+    # dönüyordu ve hesabın hiçbir sayısının kaynağı değildi; bekçi kusurlu
+    # göstergenin VARLIĞINI kilitliyordu. Rozet söküldü. P13B2-05'in
+    # kazanımı (ilk boyada kazanılmamış hüküm yok) yeni veri kaynağı
+    # satırında ölçülür.
     def test_ilk_boya_denetlenmedi_diyor(self, liquid_html):
-        assert liquid_html.count('database-status status-unknown') == 2
-        assert 'liq.ui.nasa_cea_not_checked' in liquid_html
-        assert 'liq.ui.nist_webbook_not_checked' in liquid_html
+        assert not re.search(r'class="[^"]*\b(?:database-status|cea-status|nist-status)\b', liquid_html)
+        m = re.search(r'<div class="data-source-line"[^>]*'
+                      r'data-i18n="liq.ui.data_source_line">([^<]*)</div>',
+                      liquid_html)
+        assert m, 'veri kaynağı satırı yok'
+        for yasak in ('Connected', 'Offline'):
+            assert yasak not in m.group(1), m.group(1)
 
     def test_nötr_durum_sinifi_tanimli(self, liquid_html):
-        # Sınıf CSS'te yoksa rozet biçimsiz kalır (kardeş: solid.html:240).
-        assert re.search(r'\.status-unknown\s*\{', liquid_html)
+        # Satırın biçimi CSS'te tanımlı (rozet sınıflarının halefi).
+        assert re.search(r'\.data-source-line\s*\{', liquid_html)
 
     @pytest.mark.parametrize('anahtar', [
-        'liq.ui.nasa_cea_not_checked', 'liq.ui.nist_webbook_not_checked'])
+        'liq.ui.data_source_line', 'liq.js.ds_combustion_cea',
+        'liq.js.ds_combustion_table', 'liq.js.ds_combustion_unstated'])
     def test_i18n_cifti_var(self, i18n_pages_js, anahtar):
         assert _anahtar_cift(i18n_pages_js, anahtar) == 2, (
             '%s EN+TR çifti eksik' % anahtar)

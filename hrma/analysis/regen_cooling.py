@@ -35,10 +35,11 @@ Coolant side (forced convection in the channels):
     below the turbulent floor. Rectangular-channel hydraulic diameter
     D_h = 4*A_c / P_wet = 2*w*h/(w+h) (Incropera Ch. 8).
   - This is the classic first-cut regenerative-cooling coolant correlation
-    (Huzel & Huang Ch. 4). More elaborate curved-channel / high-heat-flux
-    corrections (e.g. wall-to-bulk viscosity ratio, entrance, curvature
-    enhancement) are NOT applied; the bulk Dittus-Boelter value is a mildly
-    conservative estimate and is tagged 'approximate' in the model note.
+    (Huzel & Huang Ch. 4). For the single-phase LIQUID coolants (water,
+    RP-1) the wall-to-bulk viscosity ratio IS applied as the Sieder-Tate
+    factor (mu_b/mu_w)^0.14 at the solved coolant-side wall temperature
+    (NASA SP-125 Eq. 4-23, p. 106; V301/L-REJ, 26 Oct 2026). Entrance and
+    curvature enhancements are NOT applied (conservative).
 
 Wall conduction (radial, thin-liner flat-plate approximation):
   - The inner liner is treated as a flat plate of thickness t_w and
@@ -50,9 +51,11 @@ Wall conduction (radial, thin-liner flat-plate approximation):
         T_wall_cold = T_coolant + q / h_c
     (Huzel & Huang Ch. 4 one-dimensional wall model; Sutton & Biblarz 9th ed.
     Ch. 8). The thin-wall flat-plate approximation is valid when t_w << r_wall
-    and neglects channel-land (fin) conduction spreading — coolant-side heat
-    transfer area is taken equal to the gas-side area (fin efficiency ~ 1),
-    which is the standard analysis-mode assumption and tagged 'approximate'.
+    The coolant-side heat-transfer area is NOT taken equal to the gas-side
+    area: on EVERY coolant path (water, RP-1, methane, hydrogen) the channel
+    bottom plus the two side walls (lands as straight fins, ``fin_area_ratio``)
+    carry the heat, A_eff/A_gas = (w + 2*eta_f*h)/pitch (V301/L-REJ; before
+    26 Oct 2026 the water/RP-1 path assumed A_eff/A_gas = 1).
 
 Coolant temperature march (station-to-station enthalpy balance):
   - Steady thin-wall energy balance: all gas-side heat over a wall segment is
@@ -117,8 +120,9 @@ Supercritical methane / hydrogen coolants (added 2026-07-22):
     the two channel side walls act as straight rectangular fins,
     eta_f = tanh(mL)/(mL), m = sqrt(2 h_c/(k_w t_land)) (Incropera &
     DeWitt 6th ed. Ch. 3.6; lands-as-fins treatment per Huzel & Huang
-    Ch. 4). The legacy water/RP-1 path keeps its original coolant-side
-    area = gas-side area assumption unchanged.
+    Ch. 4). V301/L-REJ: the SAME function and the same pitch/land geometry
+    are applied on the water/RP-1 path too (one method,
+    ``RegenCooling._fin_ratio``).
   - Channel pressure drop adds the ACCELERATION (momentum) term to the
     Darcy-Weisbach friction term:
         dP_acc = G^2 * (1/rho_out - 1/rho_in)
@@ -184,17 +188,26 @@ __all__ = [
     'water_properties',
     'rp1_properties',
     'RP1_COKING_TEMP_K',
+    'RP1_COKING_LIMIT_TEMP_K',
+    'RP1_COKING_BASIS',
     'jackson_nu',
     'jackson_exponent_n',
     'pseudocritical_temperature',
     'acceleration_dp',
     'fin_area_ratio',
+    'sieder_tate_factor',
+    'SIEDER_TATE_EXPONENT',
+    'SIEDER_TATE_BASIS',
     'SUPERCRITICAL_COOLANT_FLUIDS',
     'BOILING_MARGIN_K',
     'COOLING_CHANNEL_LAND_M',
     'COOLING_CHANNEL_LAND_BASIS',
     'CHANNEL_FIT_BASIS',
     'channel_fit_limit',
+    'carbon_deposit_resistance',
+    'carbon_deposit_envelope',
+    'CARBON_DEPOSIT_BASIS',
+    'CARBON_DEPOSIT_SIGMA_TWG_OVER_TC',
 ]
 
 
@@ -340,9 +353,29 @@ def _ozgul_isi_orani(md):
 #     cümlesi yoktur (SP-H1 K16). Eski künye "H&H Böl. 4" eşik iddiasıydı.
 #   * 728 K = SINIR kademesi: NASA SP-8087 (1972) §3.1.1.5.4 s. 62 — RP-1
 #     sıvı cidar sıcaklığı 850 °F (728 K) üstünde işletilmez (yerel metinden
-#     doğrulandı). Bu kademe kodda YOKTUR; ``coking`` bayrağı 561 K'de kalır.
-#     Kademe eklemek yeni alan işidir (devir).
+#     doğrulandı).
+# V301/L-KABUK (ana model kararı, 27 Eki): iki kademe ARTIK KODDA.
+#   * ``RP1_COKING_LIMIT_TEMP_K`` = 728 K HÜKÜM eşiğidir: aşılırsa
+#     ``coking = True`` ve ileti "SP-8087 RP-1 cidar sıcaklığı tasarım
+#     ölçütü aşıldı" (UNSAFE bu ölçüte uygunsuzluk anlamında).
+#   * ``RP1_COKING_TEMP_K`` = 561 K yalnız UYARI eşiğidir
+#     (``coking_risk = True``): deneysel bulgulara (CR-168277) dayalı
+#     yazılım uyarı eşiği; tek başına UNSAFE/CRITICAL üretmez. SP-125
+#     Örnek 4-4'ün 556 K'si bir tasarım seçimidir, eşiğin kanıtı değildir.
+#   * 728 K altı "birikimsiz" ya da "güvenli" DEMEK DEĞİLDİR (künye).
 RP1_COKING_TEMP_K = 561.0
+RP1_COKING_LIMIT_TEMP_K = 728.0
+RP1_COKING_BASIS = (
+    f'RP-1 coolant-side wall temperature, two tiers: {RP1_COKING_LIMIT_TEMP_K:.0f}'
+    ' K is the design criterion of NASA SP-8087 (1972) sec. 3.1.1.5.4 p. 62 '
+    '("do not operate with liquid-wall temperatures above 850 F (728 K) for '
+    'RP-1") - above it the design does not meet that criterion; '
+    f'{RP1_COKING_TEMP_K:.0f} K is a deposit-risk WARNING level of this '
+    'software, based on experimental findings (NASA CR-168277: deposits in '
+    'copper tubes at 560-750 K) that must be validated for the application '
+    'conditions; it does not by itself make the design unsafe. Staying below '
+    f'{RP1_COKING_LIMIT_TEMP_K:.0f} K does NOT mean the wall stays free of '
+    'deposits or is safe.')
 
 # ÖH KU H-11 (KU-30, KARS-IS Bulgu 10) — RP-1 KRİTİK ISI AKISI EKRANI.
 # Yalnız kritik-altı istasyonda UYARI (yeni alan devirde); hiçbir çözülen
@@ -584,9 +617,210 @@ DB_PR_MIN, DB_PR_MAX = 0.6, 160.0
 DB_LD_MIN = 10.0
 DB_REPORTED_SCATTER_PCT = 25.0
 
+# ---------------------------------------------------------------------------
+# V301 / L-REJ (26 Eki, Berke "Modeli bugün düzelt") — SIEDER-TATE DÜZELTMESİ
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/kati-sivi/L-REJ/once.json): örnek sıvı
+# motorda (25 kN LOX/RP-1, Pc 70 bar) bakır 1,0 mm astarda soğutucu tarafı
+# cidar 1790 K, yığın ~350 K; sıvı viskozitesi bu aralıkta kat kat düşer ve
+# Dittus-Boelter bunu hiç görmüyordu. Sıvı soğutucu kanallarında tasarım
+# bağıntısı Sieder-Tate biçimidir: NASA SP-125 (Huzel & Huang 1967) Eş. 4-23,
+# s. 106: Nu = C1 Re^0,8 Pr^0,4 (mu/mu_w)^0,14 — "nonboiling subcritical
+# temperature regions of both subcritical and supercritical coolant
+# pressures" için; mu yığın, mu_w soğutucu tarafı cidar sıcaklığında. Üs
+# Sieder & Tate (1936, Ind. Eng. Chem. 28) ve Incropera & DeWitt 6. bs.
+# Eş. 8.61 ile aynıdır. HRMA C1'i Dittus-Boelter'in 0,023'ü olarak tutar
+# (SP-125'in RP-1 deney sabiti 0,0214 Örnek 4-4'te, s. 111 verilir; o sayı
+# bu kulvarda katsayıya ALINMADI — korelasyon sabiti değişikliği ayrı karar).
+SIEDER_TATE_EXPONENT = 0.14
+SIEDER_TATE_BASIS = (
+    'Sieder-Tate wall-viscosity correction (mu_b/mu_w)^0.14 applied to the '
+    'Dittus-Boelter Nusselt number for single-phase LIQUID coolants (water, '
+    'RP-1): NASA SP-125 (Huzel & Huang 1967) Eq. 4-23, p. 106 '
+    '(Nu = C1 Re^0.8 Pr^0.4 (mu/mu_w)^0.14 for the nonboiling region of '
+    'liquid coolants, mu_w at the coolant-side wall temperature); exponent '
+    'per Sieder & Tate (1936) and Incropera & DeWitt 6th ed. Eq. 8.61. Both '
+    'viscosities come from the internal liquid property table of the '
+    'coolant; where the coolant-side wall is above the table band, mu_w is '
+    'held at the band edge, which UNDER-states the correction (liquid '
+    'viscosity falls with temperature), i.e. the coolant-side coefficient '
+    'there is a conservative lower bound and the station count is declared')
+#: Kuple (Sieder-Tate + kanat) istasyon dengesinin sabit nokta sınırı ve
+#: toleransı — HRMA sayısal ayarı (kaynak değil); tolerans süperkritik
+#: dengenin 1e-3 K'siyle aynı.
+REGEN_LIQUID_WALL_MAX_ITER = 50
+REGEN_LIQUID_WALL_TOL_K = 1.0e-3
+
+
+# ---------------------------------------------------------------------------
+# V301/L-KARBON — LOX/RP-1 GAZ TARAFI KARBON BİRİKİMİ ISIL DİRENCİ (TEK TANIM)
+# ---------------------------------------------------------------------------
+# Kaynak: NASA SP-125 (Huzel & Huang 1967), yerel metin
+# HRMA-kaynaklar/metin-nasa/NASA_SP-125_1967_Huzel_Huang_design_of_LPRE.txt
+# (satır numaraları kanıt dizininde: docs/scofield/raw/OH/V301/kati-sivi/
+# L-KARBON/RAPOR.md §1):
+#   * s. 101-102 (satır 7028-7100): "In the case of the LO2/RP-1 combination,
+#     carbon solids are deposited on the chamber walls ... This carbon deposit
+#     significantly increases the gas-side thermal resistance"; Eş. 4-17
+#     q = h_gc (T_aw - T_wg), Eş. 4-18 h_gc = 1 / (1/h_g + R_d);
+#   * Şekil 4-25 (s. 102): "Thermal resistance of carbon deposit on chamber
+#     walls LO2/RP-1, mixture ratio = 2.35, (Pc)ns = 1000 psia" — TEK eğri,
+#     saçılım bandı YOK;
+#   * Örnek 4-3 (s. 102-103, satır 7100-7175): R_d = 1670 (yanma odası),
+#     1125 (boğaz), 1645 (eps = 5) in²·s·°F/Btu; ve "Since the carbon deposit
+#     temperature approaches the gas temperature, a (T_wg/(T_c)ns) value of
+#     0.8 is used to determine the sigma values from figure 4-24".
+# Eğrinin ara noktaları şekilden sayısallaştırıldı (400 dpi tarama, ızgara
+# çizgilerine kalibre; betik ve noktalar kanıt dizininde
+# ``fig425_sayisallastirma.py`` / ``fig425_sayisal.json``); metindeki üç
+# değer şekille örtüşür (eps 5: şekil ~1646, metin 1645).
+#: SP-125 R_d birimi (in²·s·°F/Btu) -> SI (m²·K/W): 1 in = 0,0254 m,
+#: 1 °F aralığı = 5/9 K, 1 Btu = 1055,05585262 J (IT).
+CARBON_DEPOSIT_RD_US_TO_SI = (0.0254 ** 2) * (5.0 / 9.0) / 1055.05585262
+#: Daralma tarafı (A/A_t, R_d [in²·s·°F/Btu]): boğaz 1125 (metin), 1,30 /
+#: 1,55 / 1,70 şekilden, 1,71'de eğrinin üst ucu = metindeki yanma odası
+#: değeri 1670. A/A_t > 1,71 (silindirik oda ve daralmanın üst kısmı):
+#: Örnek 4-3'ün "at the combustion chamber" değeri 1670 tutulur.
+CARBON_DEPOSIT_RD_CONTRACTION_US = (
+    (1.00, 1125.0), (1.30, 1210.0), (1.55, 1395.0), (1.70, 1555.0),
+    (1.71, 1670.0))
+#: Genişleme tarafı (A/A_t, R_d): 1 ve 5 metinden, diğerleri şekilden;
+#: eğri eps ~ 14,8'de biter (ötesi şekil dışı — uygulanmaz).
+CARBON_DEPOSIT_RD_EXPANSION_US = (
+    (1.0, 1125.0), (2.0, 1267.0), (3.0, 1405.0), (4.0, 1532.0),
+    (5.0, 1645.0), (6.0, 1747.0), (7.0, 1839.0), (8.0, 1915.0),
+    (9.0, 1970.0), (10.0, 2003.0), (12.0, 2043.0), (14.0, 2066.0),
+    (14.8, 2070.0))
+#: Birikim varken Bartz sigma'sının değerlendirildiği T_wg/T_c oranı
+#: (SP-125 Örnek 4-3, s. 102-103: birikim yüzeyi gaz sıcaklığına yaklaşır).
+CARBON_DEPOSIT_SIGMA_TWG_OVER_TC = 0.8
+#: Uygulama zarfı. İtici: LOX/RP-1 (SP-125 Şekil 4-25; NASA TP-2862 1988).
+#: O/F ve P_c: birikimin DENEYLE gözlendiği aralık — NASA TP-2862 (Masters,
+#: Armstrong & Price 1988, LOX/RP-1 kalorimetre) Özet: "nominal chamber
+#: pressures of 4.1, 8.3, and 13.8 MPa abs", "mixture ratios ranging from
+#: 1.77 to 3.32", "development of carbon deposits (soot) ... over the mixture
+#: ratio range tested". Direncin BÜYÜKLÜĞÜ yalnız SP-125'in tek noktasından
+#: (O/F 2,35, P_c 6,89 MPa) gelir; zarfın geri kalanında bu bir dış değer
+#: atamasıdır ve künyede yazar.
+CARBON_DEPOSIT_OXIDIZERS = ('lox',)
+CARBON_DEPOSIT_FUELS = ('rp1', 'rp-1')
+CARBON_DEPOSIT_MIXTURE_RATIO_BAND = (1.77, 3.32)
+CARBON_DEPOSIT_CHAMBER_PRESSURE_BAND_PA = (4.1e6, 13.8e6)
+CARBON_DEPOSIT_BASIS = (
+    'NASA SP-125 (Huzel & Huang 1967) Eq. 4-17/4-18 (p. 101-102: '
+    'q = h_gc (T_aw - T_wg), h_gc = 1/(1/h_g + R_d)), Fig. 4-25 (p. 102: '
+    'experimental thermal resistance of the carbon deposit, LO2/RP-1, '
+    'mixture ratio 2.35, Pc 1000 psia; a single curve, no scatter band) and '
+    'Sample Calculation 4-3 (p. 102-103: R_d = 1670 / 1125 / 1645 '
+    'in^2 s F/Btu at the chamber / throat / eps 5; Bartz sigma evaluated at '
+    'T_wg/T_c = 0.8 because the deposit surface approaches the gas '
+    'temperature). Application envelope: LOX/RP-1, O/F 1.77-3.32 and Pc '
+    '4.1-13.8 MPa, the range over which NASA TP-2862 (Masters, Armstrong & '
+    'Price 1988) observed the deposit; the magnitude is the SP-125 point '
+    '(O/F 2.35, 6.89 MPa) everywhere in that envelope. Literature scatter: '
+    'SP-125 lowers the throat conductance by about 75 %, TP-2862 reports '
+    'about 40 % (4.1 MPa) and 60 % (13.8 MPa, zoned injector), so the '
+    'SP-125 curve is the optimistic end of the local literature. Local '
+    'spalling: NASA SP-8087 (1972) sec. 3.4.1, p. 98, "localized spalling '
+    'of the insulation coating in a chamber shall not result in chamber '
+    'failure ... local cooling at all stations within the coated area must '
+    'be sufficient even in the absence of the coating"; the no-deposit wall '
+    'at the same coolant state is therefore solved too and published as the '
+    'conservative end of the band')
+#: Durum kodları (yayımlanan ``carbon_deposit.status``).
+CARBON_DEPOSIT_STATUS_APPLIED = 'applied'
+CARBON_DEPOSIT_STATUS_OUT_OF_ENVELOPE = 'out_of_envelope'
+CARBON_DEPOSIT_STATUS_NOT_APPLICABLE = 'not_applicable'
+CARBON_DEPOSIT_STATUS_NOT_EVALUATED = 'not_evaluated'
+
+
+def carbon_deposit_resistance(area_ratio: float,
+                              supersonic: bool) -> Optional[float]:
+    """Karbon birikimi ısıl direnci R_d [m²·K/W] — TEK işlev (SP-125 Şk. 4-25).
+
+    ``area_ratio`` = A/A_t (>= 1). Daralma tarafında (``supersonic=False``)
+    A/A_t şeklin üst ucundan (1,71) büyükse yanma odası değeri (1670) döner.
+    Genişleme tarafında şeklin bittiği eps 14,8'in ötesi ŞEKİL DIŞIDIR:
+    ``None`` döner (çağıran R_d = 0 kullanır ve istasyonu sayıp beyan eder —
+    birikimsiz cidar daha sıcaktır, yani yön tutucudur).
+    """
+    ar = float(area_ratio)
+    if not math.isfinite(ar) or ar <= 0.0:
+        raise ValueError(f'area_ratio must be positive and finite; got '
+                         f'{area_ratio!r}')
+    ar = max(ar, 1.0)
+    tablo = (CARBON_DEPOSIT_RD_EXPANSION_US if supersonic
+             else CARBON_DEPOSIT_RD_CONTRACTION_US)
+    xs = [p[0] for p in tablo]
+    ys = [p[1] for p in tablo]
+    if ar > xs[-1]:
+        if supersonic:
+            return None
+        return ys[-1] * CARBON_DEPOSIT_RD_US_TO_SI
+    return float(np.interp(ar, xs, ys)) * CARBON_DEPOSIT_RD_US_TO_SI
+
+
+def carbon_deposit_envelope(oxidizer, fuel, mixture_ratio,
+                            chamber_pressure_pa) -> Dict:
+    """Karbon birikimi modeli bu koşuya uygulanır mı? (fail-closed).
+
+    Döner: ``{'status', 'applied', 'reason'}``. ``status``:
+    ``applied`` | ``out_of_envelope`` (LOX/RP-1 ama O/F ya da P_c bandın
+    dışında — direnç UYGULANMAZ ve sonuç bunu söyler) |
+    ``not_applicable`` (itici LOX/RP-1 değil: metan, LH2 ... — kaynak yok).
+    """
+    ox = str(oxidizer or '').strip().lower()
+    fu = str(fuel or '').strip().lower()
+    if ox not in CARBON_DEPOSIT_OXIDIZERS or fu not in CARBON_DEPOSIT_FUELS:
+        return {'status': CARBON_DEPOSIT_STATUS_NOT_APPLICABLE,
+                'applied': False,
+                'reason': (f'propellant {fu or "?"}/{ox or "?"} is not '
+                           'LOX/RP-1: the source data (SP-125 Fig. 4-25, '
+                           'NASA TP-2862) cover LOX/RP-1 only; no carbon '
+                           'deposit resistance is modelled')}
+    try:
+        mr = float(mixture_ratio)
+        pc = float(chamber_pressure_pa)
+    except (TypeError, ValueError):
+        mr = pc = float('nan')
+    sorun = []
+    lo, hi = CARBON_DEPOSIT_MIXTURE_RATIO_BAND
+    if not (math.isfinite(mr) and lo <= mr <= hi):
+        sorun.append(f'O/F {mr:.3g} outside {lo:g}-{hi:g}')
+    plo, phi = CARBON_DEPOSIT_CHAMBER_PRESSURE_BAND_PA
+    if not (math.isfinite(pc) and plo <= pc <= phi):
+        sorun.append(f'Pc {pc / 1e5:.3g} bar outside {plo / 1e5:.0f}-'
+                     f'{phi / 1e5:.0f} bar')
+    if sorun:
+        return {'status': CARBON_DEPOSIT_STATUS_OUT_OF_ENVELOPE,
+                'applied': False,
+                'reason': ('carbon deposit not modelled (out of envelope): '
+                           + '; '.join(sorun)
+                           + ' (the deposit was observed experimentally only '
+                           'in that range, NASA TP-2862)')}
+    return {'status': CARBON_DEPOSIT_STATUS_APPLIED, 'applied': True,
+            'reason': (f'LOX/RP-1, O/F {mr:.3g}, Pc {pc / 1e5:.4g} bar inside '
+                       'the envelope; SP-125 Fig. 4-25 resistance applied')}
+
+
+def sieder_tate_factor(mu_bulk: float, mu_wall: float) -> float:
+    """Sieder-Tate viskozite oranı çarpanı (mu_b/mu_w)^0,14.
+
+    NASA SP-125 Eş. 4-23 (s. 106); Sieder & Tate (1936); Incropera Eş. 8.61.
+    Girdiler pozitif ve sonlu olmalı; değilse ``ValueError`` (sayı
+    uydurulmaz).
+    """
+    for ad, deger in (('mu_bulk', mu_bulk), ('mu_wall', mu_wall)):
+        if (isinstance(deger, bool) or not isinstance(deger, (int, float))
+                or not math.isfinite(deger) or not deger > 0.0):
+            raise ValueError(f'{ad} must be a positive finite viscosity '
+                             f'[Pa*s]; got {deger!r}')
+    return (float(mu_bulk) / float(mu_wall)) ** SIEDER_TATE_EXPONENT
+
 
 def dittus_boelter_envelope(reynolds: float, prandtl: float,
-                            length_over_diameter: float = None) -> dict:
+                            length_over_diameter: float = None,
+                            sieder_tate_applied: bool = False) -> dict:
     """Dittus-Boelter geçerlilik zarfını tarar (v2.6.2 fizik denetimi, F154).
 
     Kodda yalnız Reynolds taranıyordu; Prandtl bandı ve giriş-uzunluğu
@@ -595,9 +829,10 @@ def dittus_boelter_envelope(reynolds: float, prandtl: float,
     +/-%25 saçılımı geçerli değildir — kullanıcı bunu bilmeden ısı akısına
     güvenemez.
 
-    Ayrıca büyük cidar/yığın özellik farkında Dittus-Boelter'in bilinen
-    sapması için Sieder-Tate (mu_b/mu_w)^0.14 düzeltmesi UYGULANMAZ; bu da
-    burada niceliksel olarak beyan edilir.
+    Büyük cidar/yığın özellik farkı için Sieder-Tate (mu_b/mu_w)^0.14
+    düzeltmesinin uygulanıp uygulanmadığı ``sieder_tate_applied`` ile
+    beyan edilir (V301/L-REJ: sıvı tablo soğutucularında UYGULANIR; metan/
+    hidrojenin kritik-altı Dittus-Boelter yedeğinde UYGULANMAZ).
 
     Dönüş: ``{'in_envelope': bool, 'violations': [...], 'scatter_pct': 25.0}``
     """
@@ -617,11 +852,13 @@ def dittus_boelter_envelope(reynolds: float, prandtl: float,
         'in_envelope': not violations,
         'violations': violations,
         'scatter_pct': DB_REPORTED_SCATTER_PCT,
-        'sieder_tate_correction_applied': False,
+        'sieder_tate_correction_applied': bool(sieder_tate_applied),
         'note': ('Dittus-Boelter reported scatter is about '
                  f'+/-{DB_REPORTED_SCATTER_PCT:.0f}%; the Sieder-Tate '
                  '(mu_b/mu_w)^0.14 correction for large wall-to-bulk property '
-                 'differences is NOT applied.'),
+                 'differences is '
+                 + ('APPLIED (NASA SP-125 Eq. 4-23).' if sieder_tate_applied
+                    else 'NOT applied.')),
     }
 
 
@@ -898,9 +1135,10 @@ class RegenCooling:
         is INVALID for methane/hydrogen (no table exists).
     fin_effect : bool
         Apply the coolant-side extended-surface (channel-land fin) area model
-        (``fin_area_ratio``; Huzel & Huang Ch. 4, Incropera Ch. 3.6). Applies
-        ONLY to the methane/hydrogen path; the water/RP-1 legacy path always
-        keeps coolant-side area = gas-side area (behaviour contract).
+        (``fin_area_ratio``; Huzel & Huang Ch. 4, Incropera Ch. 3.6) on
+        EVERY coolant path (V301/L-REJ, 26 Oct 2026: before that the
+        water/RP-1 path ignored it). False = coolant-side area equals the
+        gas-side area (ratio 1).
     motor_data : dict, optional
         Repo-style motor dictionary forwarded to the contour sampler and the
         gas-property resolver (chamber diameter, nozzle type, bell angles,
@@ -1123,9 +1361,13 @@ class RegenCooling:
                     t=self.wall_thickness * 1e3, r=_r_throat * 1e3,
                     e=self.wall_curvature_error_rel,
                     m=WALL_CURVATURE_MAX_REL))
-        # Fin (kanal sırtı) genişletilmiş-yüzey modeli: YALNIZ metan/hidrojen
-        # süperkritik yolunda uygulanır. Su/RP-1 yolu eski davranış
-        # sözleşmesini (soğutucu alanı = gaz alanı) birebir korur.
+        # Fin (kanal sırtı) genişletilmiş-yüzey modeli. V301/L-REJ (26 Eki,
+        # Berke "Modeli bugün düzelt"): artık HER soğutucu yolunda uygulanır.
+        # Eskiden yalnız metan/hidrojen süperkritik yolundaydı; su/RP-1 yolu
+        # soğutucu alanını gaz alanına eşit sayıyordu ("fin efficiency ~1").
+        # ÖLÇÜLDÜ (L-REJ/once.json, örnek sıvı motor, bakır 1,0 mm): etkin
+        # h_c ≈ 22 000 W/m²K ve soğutucu tarafı cidar 1790 K. Tek işlev:
+        # ``_fin_ratio`` (iki yol aynı geometri ve aynı formül).
         self.fin_effect = bool(fin_effect)
 
         # --- süperkritik-yetenekli soğutucu: EOS sınırları + giriş durumu ---
@@ -1174,6 +1416,38 @@ class RegenCooling:
         self._md_gas['molecular_weight'] = self.molecular_weight
         self._md_gas['throat_diameter'] = self.throat_diameter
         self._md_gas.setdefault('exit_diameter', self.exit_diameter)
+
+        # V301/L-KARBON — gaz tarafı karbon birikimi: itici bağlamı
+        # ``motor_data['carbon_deposit_context']`` = ``{'oxidizer', 'fuel',
+        # 'mixture_ratio'}`` (motor sözlüğüyle gelir; kurucu imzası
+        # değişmez — uç sözleşmesi test_d29). Verilmezse model
+        # DEĞERLENDİRİLMEZ ve bu adıyla yayımlanır (bağımsız API çağrısı
+        # gazın hangi iticiden geldiğini bilmez; uydurulmaz).
+        carbon_deposit = self.motor_data.get('carbon_deposit_context')
+        if carbon_deposit is None:
+            self.carbon_deposit_envelope = {
+                'status': CARBON_DEPOSIT_STATUS_NOT_EVALUATED,
+                'applied': False,
+                'reason': ('no propellant context (oxidizer, fuel, O/F) was '
+                           'supplied to the station march, so the carbon '
+                           'deposit envelope cannot be checked; no deposit '
+                           'resistance is modelled')}
+        else:
+            cd = dict(carbon_deposit)
+            self.carbon_deposit_envelope = carbon_deposit_envelope(
+                cd.get('oxidizer'), cd.get('fuel'), cd.get('mixture_ratio'),
+                self.chamber_pressure)
+        if (self.carbon_deposit_envelope['applied']
+                and self.coolant in SUPERCRITICAL_COOLANT_FLUIDS):
+            # Süperkritik soğutucu yolu (metan/hidrojen ceketi) birikim
+            # modelini taşımaz — bit-aynı sözleşmesi (L-REJ), beyanlı.
+            self.carbon_deposit_envelope = {
+                'status': CARBON_DEPOSIT_STATUS_NOT_APPLICABLE,
+                'applied': False,
+                'reason': ('the supercritical (methane/hydrogen) coolant '
+                           'path does not carry the carbon deposit model')}
+        self.carbon_deposit_applied = bool(
+            self.carbon_deposit_envelope['applied'])
 
     # ------------------------------------------------------------------
     @classmethod
@@ -1486,16 +1760,36 @@ class RegenCooling:
     def _station_wall_balance(self, taw: float, t_coolant: float, h_c: float,
                               throat_d: float, c_star: float, rc_over_dt: float,
                               gas: Dict, area_ratio_local: float, mach: float,
-                              k_wall: float):
+                              k_wall: float, r_deposit: float = 0.0):
         """Solve the local (h_g, q, T_wall_hot, T_wall_cold) fixed point.
 
         ``h_g`` depends on the hot-wall temperature through the Bartz sigma
         correction; iterate until the wall temperature is self-consistent.
         Series circuit per unit gas-side area:
-            q = (Taw - T_coolant) / (1/h_g + t_w/k_w + 1/h_c).
+            q = (Taw - T_coolant) / (1/h_g + R_d + t_w/k_w + 1/h_c).
+
+        V301/L-KARBON: ``r_deposit`` = carbon-deposit resistance R_d
+        (``carbon_deposit_resistance``; NASA SP-125 Eq. 4-18). With
+        R_d > 0 the Bartz sigma is evaluated at T_wg/T_c = 0.8 (SP-125
+        Sample Calc. 4-3: the deposit surface approaches the gas
+        temperature) and the returned hot-wall temperature is the METAL
+        surface under the deposit, T_metal = Taw - q*(1/h_g + R_d).
+        With R_d = 0 the arithmetic is the pre-L-KARBON one bit for bit.
         """
         r_cond = self.wall_thickness / k_wall     # m^2*K/W
         r_cool = 1.0 / h_c                          # m^2*K/W
+        if r_deposit > 0.0:
+            # Birikim: sigma sabit oranda (SP-125), yineleme gerekmez.
+            h_g = self._hta._bartz_coefficient(
+                throat_d, self.chamber_pressure, c_star, gas,
+                self.chamber_temperature,
+                CARBON_DEPOSIT_SIGMA_TWG_OVER_TC * self.chamber_temperature,
+                rc_over_dt, area_ratio_local=area_ratio_local,
+                mach_local=mach)
+            q = (taw - t_coolant) / (1.0 / h_g + r_deposit + r_cond + r_cool)
+            t_wall_hot = taw - q * (1.0 / h_g + r_deposit)
+            t_wall_cold = t_coolant + q * r_cool
+            return h_g, q, t_wall_hot, t_wall_cold
         allowable = self._seed_allowable_K()      # başlangıç; hüküm değil
         t_wall_hot = max(min(allowable, 0.8 * taw), t_coolant)
         h_g = 0.0
@@ -1514,6 +1808,91 @@ class RegenCooling:
             t_wall_hot = new_hot
         t_wall_cold = t_coolant + q * r_cool
         return h_g, q, t_wall_hot, t_wall_cold
+
+    # ------------------------------------------------------------------
+    # V301/L-REJ — kanat (fin) alan oranı: TEK işlev, her soğutucu yolu
+    # ------------------------------------------------------------------
+    def _channel_pitch_land(self, r_local: float):
+        """(adım, kaburga genişliği) [m] — yerel gaz yarıçapında.
+
+        Adım kanal TABANI çevresinden (r_gaz + t_cidar; ``channel_fit_limit``
+        ile aynı yarıçap tanımı) kanal sayısına bölünür; kaburga = adım − w.
+        """
+        pitch = (2.0 * math.pi * (r_local + self.wall_thickness)
+                 / self.n_channels)
+        return pitch, pitch - self.channel_width
+
+    def _fin_ratio(self, r_local: float, h_c: float, k_wall: float) -> float:
+        """Soğutucu tarafı genişletilmiş yüzey oranı A_eff/A_gaz.
+
+        ``fin_effect`` kapalıysa 1 (soğutucu alanı = gaz alanı). Açıksa
+        ``fin_area_ratio`` (Incropera Böl. 3.6, uç adyabatik; kaburgalar
+        kanat, Huzel & Huang Böl. 4). İletkenlik astarın
+        ``thermal_conductivity`` değeridir — cidar iletim direnciyle AYNI
+        sayı (tek kaynak); malzeme veritabanının sıcaklığa bağlı ``k_curve``
+        alanı yalnız cucrzr'de var ve bu modelde kullanılmaz (künyede
+        beyanlı).
+        """
+        if not self.fin_effect:
+            return 1.0
+        pitch, land = self._channel_pitch_land(r_local)
+        return fin_area_ratio(self.channel_width, self.channel_height, pitch,
+                              land, h_c, k_wall)
+
+    def _liquid_wall_viscosity_ratio(self, t_bulk: float, t_wall: float):
+        """(mu_b, mu_w, mu_w tablo kenarında mı) — Sieder-Tate oranı için.
+
+        İki viskozite de soğutucunun İÇ sıvı tablosundan okunur (oran tek
+        kaynaktan; su CoolProp'la sürülse bile cidar tarafı buhar özelliğine
+        kaymaz). Cidar tablo bandının üstündeyse mu_w bant kenarındaki
+        değerde tutulur ve bu ``True`` olarak döner (çağıran sayar, beyan
+        eder).
+        """
+        tablo = _WATER_TABLE if self.coolant == 'water' else _RP1_TABLE
+        mu_b = _interp_table(tablo, t_bulk)['viscosity']
+        duvar = _interp_table(tablo, t_wall)
+        return mu_b, duvar['viscosity'], bool(t_wall > duvar['table_t_max_K'])
+
+    def _station_wall_balance_liquid(self, taw: float, t_coolant: float,
+                                     h_db: float, throat_d: float,
+                                     c_star: float, rc_over_dt: float,
+                                     gas: Dict, area_ratio_local: float,
+                                     mach: float, k_wall: float,
+                                     r_local: float, r_deposit: float = 0.0):
+        """Sıvı (su/RP-1) istasyon dengesi: Sieder-Tate + kanat kuple.
+
+        ``r_deposit``: karbon birikimi direnci (V301/L-KARBON; 0 = yok).
+
+        h_c = h_DB · (mu_b/mu_w(T_wc))^0,14 (NASA SP-125 Eş. 4-23) ve
+        h_etkin = h_c · A_eff/A_gaz (``_fin_ratio``). İkisi de soğutucu
+        tarafı cidar sıcaklığına bağlıdır; sabit nokta T_wc üzerinden
+        kurulur (başlangıç T_wc = T_yığın, yani çarpan 1).
+
+        Döner: (h_g, q, T_hot, T_cold, h_c, a_ratio, st_factor,
+        mu_w_clamped, converged).
+        """
+        t_wc = float(t_coolant)
+        h_g = q = tw_hot = tw_cold = 0.0
+        h_c = h_db
+        a_ratio = 1.0
+        st = 1.0
+        kenar = False
+        yakinsadi = False
+        for _ in range(REGEN_LIQUID_WALL_MAX_ITER):
+            mu_b, mu_w, kenar = self._liquid_wall_viscosity_ratio(
+                t_coolant, t_wc)
+            st = sieder_tate_factor(mu_b, mu_w)
+            h_c = h_db * st
+            a_ratio = self._fin_ratio(r_local, h_c, k_wall)
+            h_g, q, tw_hot, tw_cold = self._station_wall_balance(
+                taw, t_coolant, h_c * a_ratio, throat_d, c_star, rc_over_dt,
+                gas, area_ratio_local=area_ratio_local, mach=mach,
+                k_wall=k_wall, r_deposit=r_deposit)
+            if abs(tw_cold - t_wc) < REGEN_LIQUID_WALL_TOL_K:
+                yakinsadi = True
+                break
+            t_wc = tw_cold
+        return (h_g, q, tw_hot, tw_cold, h_c, a_ratio, st, kenar, yakinsadi)
 
     # ------------------------------------------------------------------
     # Süperkritik istasyon dengesi (Jackson — cidar özellik oranlı)
@@ -1556,10 +1935,7 @@ class RegenCooling:
         h_b = bulk['enthalpy']
         k_b = bulk['conductivity']
         pr_b = bulk['prandtl']
-        # Kanal adımı (soğutucu tarafı çevresi / kanal sayısı) — fin geometrisi
-        pitch = (2.0 * math.pi * (r_local + self.wall_thickness)
-                 / self.n_channels)
-        land = pitch - self.channel_width
+        # Kanat geometrisi (adım/kaburga) ``_fin_ratio`` içinde — tek işlev.
         damping = 0.6            # sabit nokta sönümü (cp_bar hassasiyeti için)
         tol = 1.0e-3             # K
         h_g = 0.0
@@ -1587,10 +1963,7 @@ class RegenCooling:
             nu = jackson_nu(reynolds, pr_b, rho_w / rho_b,
                             cp_bar / cp_b, n_exp)
             h_c = nu * k_b / self.hydraulic_diameter
-            if self.fin_effect:
-                a_ratio = fin_area_ratio(self.channel_width,
-                                         self.channel_height, pitch, land,
-                                         h_c, k_wall)
+            a_ratio = self._fin_ratio(r_local, h_c, k_wall)
             h_g = self._hta._bartz_coefficient(
                 throat_d, self.chamber_pressure, c_star, gas,
                 self.chamber_temperature, t_wall_hot, rc_over_dt,
@@ -1674,6 +2047,26 @@ class RegenCooling:
         else:
             order = list(range(n))               # kamara -> çıkış
 
+        # V301/L-KARBON — istasyon başına karbon birikimi direnci (TEK
+        # işlev ``carbon_deposit_resistance``). Şekil 4-25'in genişleme
+        # ucunun (eps 14,8) ötesindeki istasyonlarda direnç UYGULANMAZ
+        # (R_d = 0, tutucu yön) ve sayısı beyan edilir.
+        r_dep = np.zeros(n)
+        rd_figure_out = 0
+        if self.carbon_deposit_applied:
+            for i in range(n):
+                rd = carbon_deposit_resistance(area_ratio[i],
+                                               supersonic=i > throat_index)
+                if rd is None:
+                    rd_figure_out += 1
+                else:
+                    r_dep[i] = rd
+        # Birikimsiz (dökülmüş) yerel cidar — SP-8087 §3.4.1 denetimi; aynı
+        # soğutucu durumunda R_d = 0 ile çözülür (yalnız birikim varsa).
+        t_wall_hot_spall = np.full(n, np.nan)
+        t_wall_cold_spall = np.full(n, np.nan)
+        q_spall = np.full(n, np.nan)
+
         # Çıktı dizileri (geometrik indekse göre doldurulur).
         t_coolant = np.empty(n)
         p_coolant = np.empty(n)
@@ -1743,7 +2136,11 @@ class RegenCooling:
             h_bulk = 0.0
             h_inlet = 0.0
             coolant_h = np.full(n, np.nan)   # J/kg (yalnız sc modda dolar)
-            fin_ratio = np.ones(n)           # A_eff/A_gas (sc modda hesaplanır)
+            fin_ratio = np.ones(n)           # A_eff/A_gas (V301/L-REJ: her yol)
+            # V301/L-REJ: Sieder-Tate çarpanı (yalnız su/RP-1; diğerlerinde 1)
+            # ve mu_w'nun tablo kenarında tutulduğu istasyon sayısı.
+            st_factor = np.ones(n)
+            st_wall_edge_stations = 0
             dp_friction_total = 0.0
             dp_accel_total = 0.0
             n_jackson = 0                    # Jackson kullanılan istasyon sayısı
@@ -1808,22 +2205,50 @@ class RegenCooling:
                     db_pr_min = min(db_pr_min, pr)
                     db_pr_max = max(db_pr_max, pr)
 
-                    h_c_eff = h_c
-                    if sc_mode and self.fin_effect:
-                        # Fin alan oranı (h_c cidara bağlı değil -> kapalı form).
-                        pitch = (2.0 * math.pi * (r_m[idx] + self.wall_thickness)
-                                 / self.n_channels)
-                        a_ratio = fin_area_ratio(
-                            self.channel_width, self.channel_height, pitch,
-                            pitch - self.channel_width, h_c, k_wall)
+                    if sc_mode:
+                        # Metan/hidrojen kritik-altı yedeği: kanat oranı
+                        # (h_c cidara bağlı değil -> kapalı form); Sieder-
+                        # Tate bu yedekte UYGULANMAZ (sıvı tablosu yok;
+                        # süperkritik yol bit-aynı kalır — L-REJ sınırı).
+                        a_ratio = self._fin_ratio(r_m[idx], h_c, k_wall)
                         fin_ratio[idx] = a_ratio
-                        h_c_eff = h_c * a_ratio
-
-                    # --- kuple gaz-cidar dengesi ---
-                    h_g, q, tw_hot, tw_cold = self._station_wall_balance(
-                        taw[idx], t_c, h_c_eff, throat_d, c_star, rc_over_dt, gas,
-                        area_ratio_local=1.0 / area_ratio[idx], mach=mach[idx],
-                        k_wall=k_wall)
+                        h_g, q, tw_hot, tw_cold = self._station_wall_balance(
+                            taw[idx], t_c, h_c * a_ratio, throat_d, c_star,
+                            rc_over_dt, gas,
+                            area_ratio_local=1.0 / area_ratio[idx],
+                            mach=mach[idx], k_wall=k_wall)
+                    else:
+                        # V301/L-REJ: su/RP-1 — Sieder-Tate + kanat, kuple
+                        # (yayımlanan h_c Sieder-Tate düzeltmeli konveksiyon
+                        # katsayısıdır; kanat oranı fin_area_ratio dizisinde,
+                        # süperkritik yolla aynı yayım biçimi).
+                        h_db = h_c
+                        (h_g, q, tw_hot, tw_cold, h_c, a_ratio, st_carpan,
+                         st_kenar, st_yakinsadi) = \
+                            self._station_wall_balance_liquid(
+                                taw[idx], t_c, h_db, throat_d, c_star,
+                                rc_over_dt, gas,
+                                area_ratio_local=1.0 / area_ratio[idx],
+                                mach=mach[idx], k_wall=k_wall,
+                                r_local=r_m[idx], r_deposit=r_dep[idx])
+                        if r_dep[idx] > 0.0:
+                            # V301/L-KARBON — SP-8087 §3.4.1: aynı yığın
+                            # durumunda birikim dökülmüş yerel cidar.
+                            _sp = self._station_wall_balance_liquid(
+                                taw[idx], t_c, h_db, throat_d, c_star,
+                                rc_over_dt, gas,
+                                area_ratio_local=1.0 / area_ratio[idx],
+                                mach=mach[idx], k_wall=k_wall,
+                                r_local=r_m[idx], r_deposit=0.0)
+                            q_spall[idx] = _sp[1]
+                            t_wall_hot_spall[idx] = _sp[2]
+                            t_wall_cold_spall[idx] = _sp[3]
+                        fin_ratio[idx] = a_ratio
+                        st_factor[idx] = st_carpan
+                        if st_kenar:
+                            st_wall_edge_stations += 1
+                        if not st_yakinsadi:
+                            wall_balance_unconverged += 1
 
                     if sc_mode:
                         # Kritik-altı basınç: kaynama riski denetimi (yerel Tsat).
@@ -1980,15 +2405,97 @@ class RegenCooling:
                 f"{self.material.get('name', self.wall_material)} service limit "
                 f"{max_service:.0f} K.")
 
-        # koklaşma (yalnız RP-1): yakıt tarafı cidar sıcaklığı
-        coking = False
-        if self.coolant == 'rp1' and max_wall_cold > RP1_COKING_TEMP_K:
-            coking = True
+        # V301/L-KARBON — birikim beyanı ve SP-8087 §3.4.1 dökülme denetimi.
+        # Yayımlanan tepe cidar (max_wall_hot) birikimin ALTINDAKİ metaldir
+        # (nominal, SP-125). Bandın tutucu ucu aynı soğutucu durumunda
+        # birikimsiz yerel cidardır; o ERİMEYİ aşarsa hüküm KRİTİK'tir
+        # ("localized spalling ... shall not result in chamber failure").
+        cd_env = self.carbon_deposit_envelope
+        cd_block = {
+            'status': cd_env['status'],
+            'applied': bool(cd_env['applied']),
+            'reason': cd_env['reason'],
+            'basis': CARBON_DEPOSIT_BASIS,
+        }
+        if self.carbon_deposit_applied:
+            _ti = int(throat_index)
+            spall_peak = float(np.nanmax(t_wall_hot_spall))
+            spall_cold_peak = float(np.nanmax(t_wall_cold_spall))
+            cd_block.update({
+                'resistance_throat_m2K_W': float(r_dep[_ti]),
+                'resistance_throat_in2sF_Btu': float(
+                    r_dep[_ti] / CARBON_DEPOSIT_RD_US_TO_SI),
+                'resistance_max_m2K_W': float(np.max(r_dep)),
+                'sigma_twg_over_tc': CARBON_DEPOSIT_SIGMA_TWG_OVER_TC,
+                'stations_with_deposit': int(np.count_nonzero(r_dep > 0.0)),
+                'stations_beyond_figure_not_applied': int(rd_figure_out),
+                'deposit_surface_temperature_throat_K': float(
+                    taw[_ti] - q_flux[_ti] / h_gas[_ti]),
+                'band': {
+                    'nominal': {
+                        'source': 'SP-125 Fig. 4-25 (with deposit)',
+                        'peak_wall_hot_K': max_wall_hot,
+                        'peak_wall_cold_K': max_wall_cold,
+                        'peak_heat_flux_MW_m2': float(np.max(q_flux)) / 1e6,
+                    },
+                    'conservative': {
+                        'source': ('no deposit / locally spalled, same '
+                                   'coolant state (SP-8087 sec. 3.4.1)'),
+                        'peak_wall_hot_K': spall_peak,
+                        'peak_wall_cold_K': spall_cold_peak,
+                        'peak_heat_flux_MW_m2': float(
+                            np.nanmax(q_spall)) / 1e6,
+                    },
+                    'optimistic': None,
+                    'optimistic_note': (
+                        'no source gives a deposit more insulating than '
+                        'SP-125 Fig. 4-25 (single curve, no band); NASA '
+                        'TP-2862 measured smaller reductions, so no '
+                        'optimistic end is published'),
+                },
+                'spalled_above_melting': bool(spall_peak > melting),
+                'spalled_above_allowable': bool(spall_peak > allowable),
+            })
             warnings_list.append(
-                f"COKING: RP-1 coolant-side wall temperature reaches "
-                f"{max_wall_cold:.0f} K, above the ~{RP1_COKING_TEMP_K:.0f} K "
-                f"coking threshold (Huzel & Huang Ch. 4) — carbon deposition "
-                f"and channel fouling likely.")
+                f"CARBON DEPOSIT: LOX/RP-1 gas-side carbon deposit resistance "
+                f"applied (NASA SP-125 Fig. 4-25; throat R_d "
+                f"{r_dep[_ti] * 1e4:.2f}e-4 m2K/W). Peak hot wall "
+                f"{max_wall_hot:.0f} K with the deposit, {spall_peak:.0f} K "
+                f"where it spalls (no deposit, same coolant state).")
+            if spall_peak > melting:
+                warnings_list.append(
+                    f"CRITICAL: where the carbon deposit spalls the hot wall "
+                    f"reaches {spall_peak:.0f} K, above the "
+                    f"{self.material.get('name', self.wall_material)} melting "
+                    f"point {melting:.0f} K — local liner failure (NASA "
+                    f"SP-8087 sec. 3.4.1: spalling shall not cause failure).")
+        elif cd_env['status'] == CARBON_DEPOSIT_STATUS_OUT_OF_ENVELOPE:
+            warnings_list.append(
+                "CARBON DEPOSIT: " + cd_env['reason'] + ".")
+
+        # koklaşma (yalnız RP-1): yakıt tarafı cidar sıcaklığı — İKİ KADEME
+        # (V301/L-KABUK; ``RP1_COKING_BASIS``): 728 K hüküm, 561 K uyarı.
+        coking = False
+        coking_risk = False
+        if self.coolant == 'rp1' and max_wall_cold > RP1_COKING_LIMIT_TEMP_K:
+            coking = True
+            coking_risk = True
+            warnings_list.append(
+                f"COKING LIMIT: RP-1 coolant-side wall temperature reaches "
+                f"{max_wall_cold:.0f} K, above the "
+                f"{RP1_COKING_LIMIT_TEMP_K:.0f} K design criterion of NASA "
+                f"SP-8087 sec. 3.1.1.5.4 for RP-1 liquid-wall temperature — "
+                f"the design does not meet this criterion.")
+        elif self.coolant == 'rp1' and max_wall_cold > RP1_COKING_TEMP_K:
+            coking_risk = True
+            warnings_list.append(
+                f"COKING RISK: RP-1 coolant-side wall temperature reaches "
+                f"{max_wall_cold:.0f} K, above the {RP1_COKING_TEMP_K:.0f} K "
+                f"deposit-risk warning level (software warning based on NASA "
+                f"CR-168277 copper-tube deposits at 560-750 K; validate for "
+                f"the application) and below the "
+                f"{RP1_COKING_LIMIT_TEMP_K:.0f} K NASA SP-8087 criterion — "
+                f"not a statement that the wall stays deposit-free.")
 
         # DÜZELTME (v2.6.2, fizik denetimi F057): soğutucu özellik TABLOSUNUN
         # geçerlilik zarfı dışına taşan istasyonlar artık bildiriliyor.
@@ -2077,7 +2584,8 @@ class RegenCooling:
                         else (db_pr_max if db_pr_max > DB_PR_MAX
                               else db_pr_min))
             db_zarf = dittus_boelter_envelope(
-                float(min_re), float(pr_worst), l_over_d)
+                float(min_re), float(pr_worst), l_over_d,
+                sieder_tate_applied=not sc_mode)
             db_zarf['stations_using_dittus_boelter'] = int(db_stations)
             db_zarf['prandtl_min'] = float(db_pr_min)
             db_zarf['prandtl_max'] = float(db_pr_max)
@@ -2094,6 +2602,27 @@ class RegenCooling:
                     + ". The reported +/-"
                     f"{db_zarf['scatter_pct']:.0f}% scatter does NOT apply "
                     "there.")
+
+        # V301/L-REJ — Sieder-Tate cidar viskozitesi tablo bandı dışında:
+        # sessiz sayı yok; çarpanın bant kenarında tutulduğu (düzeltmenin
+        # EKSİK sayıldığı, yani h_c'nin alt sınır olduğu) istasyonlar adıyla.
+        if not sc_mode and st_wall_edge_stations > 0:
+            _tablo = _WATER_TABLE if self.coolant == 'water' else _RP1_TABLE
+            warnings_list.append(
+                f"PROPERTY RANGE (WALL): the {self.coolant} coolant-side wall "
+                f"temperature is above the internal property table band "
+                f"({_tablo[0, 0]:.0f}-{_tablo[-1, 0]:.0f} K) at "
+                f"{st_wall_edge_stations} station(s); the Sieder-Tate wall "
+                f"viscosity there is held at the band edge, so the "
+                f"(mu_b/mu_w)^0.14 correction is UNDER-stated and the "
+                f"coolant-side coefficient is a conservative lower bound "
+                f"(peak correction factor used {float(np.max(st_factor)):.3f}).")
+        if not sc_mode and wall_balance_unconverged > 0:
+            warnings_list.append(
+                f"CONVERGENCE: the coupled Sieder-Tate/fin wall balance did "
+                f"not converge to {REGEN_LIQUID_WALL_TOL_K:g} K at "
+                f"{wall_balance_unconverged} station(s) — wall temperatures "
+                f"there carry iteration residual.")
 
         # ÖH D15 / P4B2-09 — ince-cidar zarfının UYARI bandı (%2..%10).
         # Reddin altındaki bant sessiz kalmaz: düz-levha yaklaşımının kendi
@@ -2284,8 +2813,17 @@ class RegenCooling:
             'material_service_limit_K': max_service,
             'material_melting_K': melting,
             'wall_temp_margin_K': allowable - max_wall_hot,
+            # V301/L-KABUK: ``coking`` = SP-8087 hüküm kademesi (728 K) aşıldı;
+            # ``coking_risk`` = uyarı kademesi (561 K) aşıldı. İki eşik de
+            # sayı olarak çıkar; künye RP1_COKING_BASIS.
             'coking': coking,
-            'coking_threshold_K': RP1_COKING_TEMP_K if self.coolant == 'rp1' else None,
+            'coking_threshold_K': (RP1_COKING_LIMIT_TEMP_K
+                                   if self.coolant == 'rp1' else None),
+            'coking_risk': coking_risk,
+            'coking_warning_threshold_K': (RP1_COKING_TEMP_K
+                                           if self.coolant == 'rp1' else None),
+            'coking_basis': (RP1_COKING_BASIS if self.coolant == 'rp1'
+                             else None),
             'flow_direction': self.flow_direction,
             'coolant_correlation': coolant_correlation,
             'pressure_drop_friction_bar': dp_friction_total / 1e5,
@@ -2300,9 +2838,11 @@ class RegenCooling:
             'supercritical_pressure': (
                 bool(self.coolant_inlet_pressure > self.coolant_pcrit)
                 if sc_mode else None),
-            'fin_effect': self.fin_effect if sc_mode else None,
-            'fin_area_ratio_max': (float(np.max(fin_ratio))
-                                   if sc_mode else None),
+            # V301/L-REJ: kanat modeli her yolda — iki alan artık su/RP-1'de
+            # de dolu (eskiden None; yeni anahtar EKLENMEDİ, ters yön
+            # sözleşmesi tests/test_wave4b_contract.py).
+            'fin_effect': self.fin_effect,
+            'fin_area_ratio_max': float(np.max(fin_ratio)),
             # NOT (ÖH D15) — P4B2-07 (özellik kaynağı), P4B2-08 (Bartz'ı
             # süren c*) ve P4B2-09 (ince-cidar zarfı ölçüsü) beyanları
             # ``summary``ye YENİ ALAN olarak EKLENMEDİ; PK5'in aynı gerekçesi
@@ -2368,11 +2908,29 @@ class RegenCooling:
                 "Bartz correlation (Sutton & Biblarz 9th ed. Eq. 8-22) driven by the "
                 "adiabatic-wall temperature. Coolant side: Dittus-Boelter "
                 "Nu=0.023 Re^0.8 Pr^0.4 (Incropera Eq. 8.60; valid Re>=1e4, "
-                "0.6<=Pr<=160). Wall: thin flat-plate radial conduction, coolant-side "
-                "area = gas-side area (fin efficiency ~1, 'approximate'). Pressure "
+                "0.6<=Pr<=160) times the Sieder-Tate wall-viscosity factor "
+                "(mu_b/mu_w)^0.14 evaluated at the solved coolant-side wall "
+                "temperature (NASA SP-125 Eq. 4-23, p. 106; peak factor "
+                f"{float(np.max(st_factor)):.3f}; mu_w held at the property-"
+                f"table edge at {st_wall_edge_stations} station(s), where the "
+                "correction is under-stated). Wall: thin flat-plate radial "
+                "conduction; coolant-side area uses the channel-land "
+                "extended-surface (fin) model "
+                + ("(eta=tanh(mL)/mL with an adiabatic fin tip, Incropera Ch. "
+                   "3.6; lands-as-fins per Huzel & Huang Ch. 4; "
+                   "A_eff/A_gas = (w + 2*eta*h)/pitch, peak "
+                   f"{float(np.max(fin_ratio)):.3f}, minimum "
+                   f"{float(np.min(fin_ratio)):.3f}; the fin conductivity is "
+                   "the same constant liner conductivity as the wall "
+                   "resistance)" if self.fin_effect else
+                   "switched OFF (fin_effect=False: coolant-side area = "
+                   "gas-side area)")
+                + ". Pressure "
                 "drop: Darcy-Weisbach with the Haaland friction factor. RP-1 "
-                "properties are approximate engineering values; coking threshold "
-                f"{RP1_COKING_TEMP_K:.0f} K (Huzel & Huang Ch. 4). Single-phase "
+                "properties are approximate engineering values; coking: "
+                f"{RP1_COKING_LIMIT_TEMP_K:.0f} K NASA SP-8087 design "
+                f"criterion, {RP1_COKING_TEMP_K:.0f} K deposit-risk warning "
+                "level (NASA CR-168277). Single-phase "
                 "coolant assumed; no boiling / supercritical model. Channel "
                 "dimensions are user inputs (no auto-sizing)."
             )
@@ -2431,6 +2989,34 @@ class RegenCooling:
             f"melting_K = {_tl['melting_K']:.0f} K; above the allowable the "
             "verdict is UNSAFE, above the melting point CRITICAL."
         )
+        # V301/L-KARBON — birikim künyesi (yalnız LOX/RP-1 bağlamında).
+        if self.carbon_deposit_applied:
+            model_note += (
+                " Gas side includes the LOX/RP-1 carbon deposit resistance in "
+                "series, q = (T_aw - T_c)/(1/h_g + R_d + t_w/k_w + 1/h_c) "
+                "(NASA SP-125 Eq. 4-18, Fig. 4-25, Sample Calc. 4-3; Bartz "
+                f"sigma at T_wg/T_c = {CARBON_DEPOSIT_SIGMA_TWG_OVER_TC:g}); "
+                "the published hot wall is the metal under the deposit, and "
+                "the no-deposit (spalled) wall at the same coolant state is "
+                "published as the conservative end (NASA SP-8087 sec. 3.4.1).")
+        elif cd_env['status'] == CARBON_DEPOSIT_STATUS_OUT_OF_ENVELOPE:
+            model_note += (" Carbon deposit: " + cd_env['reason'] + ".")
+        if not sc_mode:
+            # V301/L-REJ (b): marşın FİİLEN çözdüğü kanal geometrisi künyede
+            # (motorun cooling_system bloğuyla aynı olduğu bekçiyle
+            # sınanır: tests/test_v301_l_rej.py).
+            _p_bogaz, _s_bogaz = self._channel_pitch_land(
+                geo['r_throat_mm'] / 1000.0)
+            model_note += (
+                f" Channel geometry solved: {self.n_channels} channels, "
+                f"width {self.channel_width * 1e3:.2f} mm, height "
+                f"{self.channel_height * 1e3:.2f} mm, roughness "
+                f"{self.wall_roughness * 1e6:.2f} um, hot wall "
+                f"{self.wall_thickness * 1e3:.2f} mm; land between channels "
+                f"{_s_bogaz * 1e3:.2f} mm at the throat (pitch "
+                f"{_p_bogaz * 1e3:.2f} mm), wider downstream (constant "
+                "channel width)."
+            )
         barrel_mm = float(geo.get('chamber_barrel_length_mm') or 0.0)
         if barrel_mm > 0.0:
             model_note += (
@@ -2453,7 +3039,10 @@ class RegenCooling:
                 f" Coolant-side Dittus-Boelter: reported scatter about "
                 f"+/-{db_zarf['scatter_pct']:.0f}%, and the Sieder-Tate "
                 f"(mu_b/mu_w)^0.14 correction for large wall-to-bulk "
-                f"property differences is NOT applied. Validity envelope "
+                f"property differences is "
+                + ("APPLIED (see above)" if not sc_mode else
+                   "NOT applied on this subcritical fallback")
+                + f". Validity envelope "
                 f"(Re >= {DB_RE_MIN:.0g}, {DB_PR_MIN} <= Pr <= {DB_PR_MAX}, "
                 f"L/D >= {DB_LD_MIN:.0f}) was scanned over the "
                 f"{db_zarf['stations_using_dittus_boelter']} station(s) that "
@@ -2495,10 +3084,21 @@ class RegenCooling:
             # alan None döner — uydurma zarf yayımlanmaz.
             'dittus_boelter_envelope': db_zarf,
         }
+        # V301/L-REJ: kanat alan oranı dizisi artık HER yolda yayımlanır
+        # (kanat modeli her yolda); Sieder-Tate çarpanı yalnız su/RP-1'de.
         if sc_mode:
-            # İstasyon yığın entalpisi [kJ/kg] ve fin alan oranı — yalnız
-            # metan/hidrojen yolunda (su/RP-1 çıktı sözleşmesi değişmez;
-            # JSON'a NaN sızdırmayız).
+            # İstasyon yığın entalpisi [kJ/kg] — yalnız metan/hidrojen
+            # yolunda (JSON'a NaN sızdırmayız). Anahtar sırası eskisiyle aynı.
             result['coolant_enthalpy_kJ_kg'] = (coolant_h / 1e3).tolist()
             result['fin_area_ratio'] = fin_ratio.tolist()
+        else:
+            result['fin_area_ratio'] = fin_ratio.tolist()
+            result['sieder_tate_factor'] = st_factor.tolist()
+        # V301/L-KARBON — birikim beyanı (her yolda; dizi yalnız uygulandıysa).
+        result['carbon_deposit'] = cd_block
+        if self.carbon_deposit_applied:
+            result['carbon_deposit_resistance_m2K_W'] = r_dep.tolist()
+            result['T_wall_hot_no_deposit_K'] = [
+                (float(v) if math.isfinite(v) else None)
+                for v in t_wall_hot_spall]
         return result

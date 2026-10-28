@@ -148,7 +148,9 @@ class TestP17B205AyarlarYaziOlcegi:
         "function warnChip(w) {",
         "urlIn.style.cssText = INPUT_STYLE +",
         # "önce" ölçümünde 12 px basılan satırlar
-        "function fieldLabel(key, fallback) {",
+        # V3.0.5 T-ÇAPA-C1 — imza değişti (V301/N-girdi-2 e16219b14: ipucu
+        # anahtarı üçüncü parametre); ölçülen satır aynı üretici.
+        "function fieldLabel(key, fallback, helpKey) {",
         "var MONO_AREA_STYLE = INPUT_STYLE +",
         "var counter = el('div',",
         "var vBasis = el('span',",

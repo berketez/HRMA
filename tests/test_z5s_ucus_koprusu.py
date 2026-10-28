@@ -280,10 +280,15 @@ class TestCGKunyesi:
 # P4B3-04 — recompute'un eksik girdi ikamesi BEYAN edilir
 # ===========================================================================
 
+# V301/T-ÇAPA-A: çekirdek 30 -> 76 mm. a = 0,005 (katalog APCP a'sının
+# ~2,24 katı) boğazı büyütür: 30 mm'de A_p/A_t 0,396, tek tanımın 48 mm'sinde
+# 0,958 (ikisi de K-A port kapısından 422). 76 mm ölçülen A_p/A_t 2,218
+# (tests/test_faz4_motor_kapilari.KATI_TABAN ile aynı ölçüm). Konu ikame
+# künyesidir, boğulan port değil (kural 1).
 KATI_TAM_PROJE = {
     'grain_type': 'bates', 'propellant_type': 'apcp',
     'chamber_diameter': 100, 'grain_length': 500,
-    'core_diameter': 30, 'chamber_pressure': 40,
+    'core_diameter': 76, 'chamber_pressure': 40,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
 }
 
@@ -293,56 +298,94 @@ def _recompute(fields, motor_type='solid'):
         {'motor_type': motor_type, 'inputs': {'fields': dict(fields)}})[1]
 
 
+def _red(fields, motor_type='solid'):
+    """Recompute'un ucun KENDİ adlı reddini taşıdığını doğrular, reddi döndürür."""
+    with pytest.raises(fv.ProjectCalculationRejected) as bilgi:
+        _recompute(fields, motor_type)
+    return bilgi.value
+
+
+#: Katı ucun (``/calculate_solid``) "eksik zorunlu girdi" reddinde andığı alan
+#: kümesi (ölçüldü, V301/UÇUŞ C-1: boş proje -> 422 ``incomplete_input``).
+#: KATI_TAM_PROJE'nin sekiz alanından ÜÇÜ (``grain_type``, ``burn_rate_a/n``)
+#: zorunlu değildir: uç onları yakıt kaydından ya da beyanlı varsayılandan
+#: alır; ``propellant_type`` ise "yakıt kimliği" ailesinin adıdır.
+KATI_ZORUNLU_ALANLAR = {'chamber_pressure', 'propellant_type',
+                        'chamber_diameter', 'grain_length', 'core_diameter'}
+
+
 class TestIkameKunyesi:
-    """Uydurma-veri-yasağının recompute tarafındaki karşılığı."""
+    """Uydurma-veri-yasağının recompute tarafındaki karşılığı.
+
+    V301/UÇUŞ C-1 (T-ÇAPA-A DEVİR 1) — İKAME KÜNYESİ ARTIK UÇTAN GELİR.
+    Eskiden ``_recompute_solid`` motoru KENDİSİ kuruyor, eksik alana modül
+    yedeği koyuyor ve bunu ``input_defaults_substituted`` künyesiyle
+    söylüyordu (sekiz alan, 30 mm çekirdek dahil — o yedek motor port
+    kapısından 422 aldığı için üç düğüm kırmızıydı). Bugün recompute
+    sayfanın hesap ucunun GÖVDESİNİ koşar; eksik alan için recompute SAYI
+    KOYMAZ. Sözleşme aynı kalır ve güçlenir: eksik girdi ya ucun beyanlı
+    varsayılanıdır (``defaults_applied``) ya da ucun ADLI reddidir — sessiz
+    ikame yoktur.
+    """
 
     def test_tam_proje_kunye_uretmez(self):
-        """Hiçbir ikame yoksa sonuç sözlüğüne DOKUNULMAZ (bit-aynı yol)."""
+        """Tam proje: sonuç, AYNI yükle sayfa ucunun yanıtıyla BİT-AYNI.
+
+        Recompute sonuca kendi künyesini eklemez; ucun beyanları
+        (``defaults_applied``) ucun yazdığı gibi durur.
+        """
         res = _recompute(KATI_TAM_PROJE)
-        assert fv.SUBSTITUTION_FIELD_KEY not in res
-        assert fv.SUBSTITUTION_NOTE_KEY not in res
+        durum, govde = fv.run_page_calculation(
+            'solid', fv.page_payload('solid', KATI_TAM_PROJE))
+        assert durum == 200
+        assert res == govde
+        assert 'input_defaults_substituted' not in res
 
     def test_bos_proje_ikameyi_ad_ad_soyler(self):
-        res = _recompute({})
-        adlar = res.get(fv.SUBSTITUTION_FIELD_KEY)
-        assert adlar, 'boş projeden tam sonuç geldi ve ikame beyanı yok'
-        # Beyan GERÇEK alan adlarını taşır (sayı değil, ad).
-        assert set(adlar) == set(KATI_TAM_PROJE), (
-            f'ikame listesi eksik/fazla: {sorted(adlar)}')
-        assert isinstance(res.get(fv.SUBSTITUTION_NOTE_KEY), str)
+        """Boş proje tam sonuç ÜRETMEZ: ucun adlı reddi, alan alan."""
+        red = _red({})
+        assert red.status == 422
+        assert red.endpoint == '/calculate_solid'
+        assert red.body.get('status') == 'incomplete_input'
+        assert set(red.body.get('missing_fields') or ()) == KATI_ZORUNLU_ALANLAR, (
+            f"ret listesi eksik/fazla: {red.body.get('missing_fields')}")
+        assert isinstance(red.body.get('error'), str) and red.body['error']
 
     def test_tek_eksik_alan_adiyla_beyan_edilir(self):
         eksik = {k: v for k, v in KATI_TAM_PROJE.items()
                  if k != 'chamber_pressure'}
-        res = _recompute(eksik)
-        assert res.get(fv.SUBSTITUTION_FIELD_KEY) == ['chamber_pressure']
+        red = _red(eksik)
+        assert red.body.get('missing_fields') == ['chamber_pressure']
 
     def test_bos_string_de_ikame_sayilir(self):
-        """Form boş bırakılmışsa ('' değeri) de bir varsayılan KONUYOR."""
+        """Form boş bırakılmışsa ('' değeri) alan EKSİK sayılır (sayı konmaz)."""
         alanlar = dict(KATI_TAM_PROJE, core_diameter='')
-        res = _recompute(alanlar)
-        assert res.get(fv.SUBSTITUTION_FIELD_KEY) == ['core_diameter']
+        red = _red(alanlar)
+        assert red.body.get('missing_fields') == ['core_diameter']
 
     def test_kunye_normalize_semasina_sizmaz(self):
-        """İkame künyesi SONUÇ sözlüğündedir; araç şemasına anahtar EKLEMEZ.
+        """Ucun künyeleri SONUÇ sözlüğündedir; araç şemasına anahtar EKLEMEZ.
 
         Uç sözleşmesi (tests/test_faz6_f5_app.py) araç şemasının DIŞINDA
-        anahtar kabul etmiyor; künye o yüzden motor sonucunda taşınır.
+        anahtar kabul etmiyor; ``defaults_applied`` o yüzden motor
+        sonucunda taşınır.
         """
-        v = fv.normalize('solid', _recompute({}), source='project')
-        assert fv.SUBSTITUTION_FIELD_KEY not in v
-        assert fv.SUBSTITUTION_NOTE_KEY not in v
+        res = _recompute(KATI_TAM_PROJE)
+        assert res.get('defaults_applied'), 'uç beyanı yok (ölçüm değişti mi?)'
+        v = fv.normalize('solid', res, source='project')
+        for anahtar in ('defaults_applied', 'input_defaults_substituted',
+                        'input_defaults_substituted_note'):
+            assert anahtar not in v
 
     def test_varsayilani_olmayan_alan_ikame_sayilmaz(self):
-        """``default is None`` olan alanda sayı İCAT EDİLMİYOR → ikame yok.
+        """Ret YALNIZ gerçekten eksik zorunlu alanı anar.
 
-        Hibrit kolda ``thrust``/``burn_time`` gibi alanlar motora "verilmedi"
-        olarak geçer; onları ikame diye saymak künyeyi gürültüye boğardı.
+        Geometri kipi tamken tasarım noktası alanları (``thrust``/
+        ``burn_time``) eksik sayılmaz; onları anmak reddi gürültüye boğardı.
         """
         eksik = {k: v for k, v in KATI_TAM_PROJE.items()
                  if k != 'chamber_pressure'}
-        res = _recompute(eksik)
-        adlar = res.get(fv.SUBSTITUTION_FIELD_KEY) or []
+        adlar = _red(eksik).body.get('missing_fields') or []
         assert 'thrust' not in adlar and 'burn_time' not in adlar
 
 

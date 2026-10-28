@@ -26,6 +26,16 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture
+def cea_kapali(monkeypatch):
+    """V301/N-CEA-2: NASA CEA kapalı — katı motor katalog (tek basınçlı)
+    termokimyasına BEYANLA döner. Bu dosyadaki kayıt/katalog yolu bekçileri
+    öncüllerini (motor termokimyası = katalog kaydı) bu yolda korur; CEA
+    yolu tests/test_v301_n_cea2.py'de."""
+    from hrma.engines import cea_bridge
+    monkeypatch.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
+
 from hrma.constants import G_0, isa_pressure
 from hrma.engines.solid_rocket_engine import SolidRocketEngine
 
@@ -127,16 +137,35 @@ class TestPhysicalConsistency:
     def test_ambient_pressure_is_positive(self, exit_perf):
         assert exit_perf['ambient_pressure'] > 0.0
 
-    def test_exit_pressure_matches_isentropic_mach(self, results, exit_perf):
-        """P_e/P_c = [1+(γ-1)/2·M_e²]^(-γ/(γ-1)) alanlar arasında kapanmalı."""
+    def test_exit_pressure_matches_isentropic_mach(self, cea_kapali):
+        """P_e/P_c = [1+(γ-1)/2·M_e²]^(-γ/(γ-1)) alanlar arasında kapanmalı.
+
+        V301/N-CEA-2: tek-γ (katalog) yolunun kapanışı — CEA kapalı, motor
+        bu testte kurulur. CEA yolunda çıkış durumu CEA'nın kayan denge
+        çıkış istasyonudur ve tek oda γ'sıyla kapanmaz (bekçi:
+        tests/test_v301_n_cea2.py::TestK2CikisDurumuCea)."""
+        # Çekirdek 40 mm: varsayılan 30 mm çekirdek katalog c*'ıyla port/
+        # boğaz kapısına takılıyor (K-A kapısı, taban kırmızısı); geometri
+        # bu testin konusu değil.
+        results = _quiet(_quiet(SolidRocketEngine, core_diameter=40.0)
+                         .calculate_performance)
+        exit_perf = results['nozzle_design']['performance']
         g = results['gamma']
         me = exit_perf['exit_mach']
         expected = (1.0 + 0.5 * (g - 1.0) * me * me) ** (-g / (g - 1.0))
         assert exit_perf['exit_pressure'] / results['chamber_pressure'] == \
             pytest.approx(expected, rel=1e-6)
 
-    def test_exit_temperature_is_isentropic(self, results, exit_perf):
-        """T_e = T_c / (1+(γ-1)/2·M_e²) — readNozzleExit'in kendi bağıntısı."""
+    def test_exit_temperature_is_isentropic(self, cea_kapali):
+        """T_e = T_c / (1+(γ-1)/2·M_e²) — readNozzleExit'in kendi bağıntısı.
+
+        V301/N-CEA-2: tek-γ (katalog) yolunda; bkz. üstteki test."""
+        # Çekirdek 40 mm: varsayılan 30 mm çekirdek katalog c*'ıyla port/
+        # boğaz kapısına takılıyor (K-A kapısı, taban kırmızısı); geometri
+        # bu testin konusu değil.
+        results = _quiet(_quiet(SolidRocketEngine, core_diameter=40.0)
+                         .calculate_performance)
+        exit_perf = results['nozzle_design']['performance']
         g = results['gamma']
         me = exit_perf['exit_mach']
         expected = results['chamber_temperature'] / (

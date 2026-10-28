@@ -269,6 +269,19 @@ class TestGuvenlikYaprakBorcuSimetrisi:
 #: yönlüdür: yeni bir yer doğarsa da, buradaki bir yer ölürse de kırmızı
 #: yanar (envanter "unutulmuş af listesi"ne dönüşemez).
 JETON_YUVARLAMA_MESRU = {
+    # V3.0.5 T-ÇAPA-C1: iki yer de basamağı ÜRÜNÜN beyanından alır, basılan
+    # jetondan değil (OH-D27-17'nin kusuru jetonun kendi basamağıydı).
+    ('tests/test_d22_arayuz_a1.py', 'test_ilk_cagrida_son_deger_basilir'):
+        'V3.0.5 T-ÇAPA-C1 (ÖH D28 ölçütü, OH-D27-17; düğüm ÖH D22 arayuz '
+        'a1) — basamak kartın data-decimals beyanından '
+        '(kanıt harness kaydında ``ondalik``); karşılaştırma basılan dizgeyle '
+        'TAM eşitliktir (toFixed biçimi).',
+    ('tests/test_unit_contract.py',
+     'test_solid_case_diameter_matches_case_design'):
+        'V3.0.5 T-ÇAPA-C1 (ÖH D28 ölçütü, OH-D27-17) — basamak ürünün '
+        'adlı sabitinden '
+        '(``ENG_HEADER_DECIMALS[\'diameter_mm\']``, çizim başlığının '
+        'yayımladığı basamak), basılan jetondan değil.',
     ('tests/test_d15_ui_paneller_a1.py', '_deger_bolgede'):
         'ÖH D28 / OH-D27-17 — ölçütün DEĞER katmanı. Yuvarlama burada '
         'kalabilir çünkü havuz artık TÜM ekran değil, yaprağı ADLAYAN tek '

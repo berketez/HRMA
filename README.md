@@ -27,8 +27,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-3.0.0.exe**](https://github.com/berketez/HRMA/releases/download/v3.0.0/HRMA-Setup-3.0.0.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-3.0.0-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v3.0.0/HRMA-Setup-3.0.0-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-3.0.5.exe**](https://github.com/berketez/HRMA/releases/download/v3.0.5/HRMA-Setup-3.0.5.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-3.0.5-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v3.0.5/HRMA-Setup-3.0.5-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -43,12 +43,12 @@ you can ignore them entirely.
 - **Interactive Design Mode**: Chamber diameter / L* / expansion ratio sliders with ~1 s geometry recompute (`/api/quick-geometry`); 3D model and 2D cross-section update live
 - **Grain Port Cross-Sections**: Circular, star, multi-port, and finocyl port shapes (area-equivalent visualization; ballistics solved with the circular-equivalent port)
 - **Wall Heat-Flux Map**: Chamber/nozzle surface colored by Bartz-distributed heat flux with real q and T_wall anchors from the heat transfer module
-- **Real-Geometry CAD Export**: STL solids revolved from the same nozzle contour used by the solver and the 2D drawing (watertight, single source of truth); injector orifices actually drilled (manifold3d booleans)
+- **Real-Geometry CAD Export**: STL solids revolved from the same nozzle contour used by the solver and the 2D drawing (single source of truth; each part solid is a closed mesh, but the combined assembly STL is not a single closed solid, so use STEP for CAD work); injector orifices actually drilled (manifold3d booleans)
 - **STEP / DXF / Drawing PDF**: true parametric STEP solids (build123d/OpenCascade), layered DXF manufacturing profiles (ezdxf), and multi-page dimensioned technical-drawing PDFs, plus a one-click complete design package ZIP (STL+STEP+DXF+PDF+.eng+geometry)
-- **Transient Ballistics Panel**: time-resolved Pc(t)/F(t) with regulated or self-pressurizing N₂O blowdown feed, SP-8089 injector-stability margins; the OpenRocket `.eng` export uses the real computed thrust curve
+- **Transient Ballistics Panel**: time-resolved Pc(t)/F(t) with regulated or self-pressurizing N₂O blowdown feed and injector ΔP/Pc chug-stability margins (Sutton & Biblarz 9th ed. Ch. 8; NASA SP-194 Ch. 5-6); the OpenRocket `.eng` export uses the real computed thrust curve
 - **Full Feature Parity Across Motor Types**: motor design tables, engineering cross-section drawings, working CAD/PDF/.eng exports, trajectory and safety reports on the hybrid, solid **and** liquid pages
 - **Solid Motor Monte Carlo**: manufacturing-tolerance uncertainty analysis (burn-rate a/n, density, C*; 300 samples in <1 s) with success rate, statistics and thrust/Isp histograms
-- **Uncertainty Quantification (v2.5.0 Confidence Release)**: full-design Monte Carlo with Latin Hypercube sampling, reported as P50 median with a [P5, P95] 90 % credible interval per output, plus a Spearman rank-correlation sensitivity tornado that ranks which input uncertainties drive each result; three explicit effort levels (`fast` / `engineering` / `high_fidelity`, 200 / 1000 / 3000 samples) and a fixed seed for reproducibility (`/api/uncertainty-analysis`, available on the hybrid, solid and liquid pages)
+- **Uncertainty Quantification (v2.5.0 Confidence Release)**: full-design Monte Carlo with Latin Hypercube sampling, reported as the P50 median and the P5-P95 spread per output (the spread produced by the sampled input distributions alone, not a confidence interval on true motor performance: model-form error is not sampled), plus a Spearman rank-correlation sensitivity tornado that ranks which input uncertainties drive each result; three explicit effort levels (`fast` / `engineering` / `high_fidelity`, 200 / 1000 / 3000 samples) and a configurable random seed (default 42) for reproducibility (`/api/uncertainty-analysis`, available on the hybrid, solid and liquid pages)
 - **Real-Experiment Validation Database (v2.5.0 Confidence Release)**: a git-tracked JSON database of published, fully-cited real firing data (hybrid, solid and liquid static-fire points plus published engine specs and strand burn-rate data) with a hard `inputs`/`measured` separation that structurally prevents circular validation; an automatic correlation report (`/api/correlation-report`, cached by database content hash) scores HRMA predictions against the measurements and writes the summary into VALIDATION_STATUS.md
 - **Exact Star Grain Regression**: burning perimeter computed by geometric offset of the true star profile (Huygens principle, validated against the analytic circular-port solution). Point count and depth feed directly into the thrust curve
 - **Liquid Engine Flow Schematic**: feed-system diagram (tanks → turbopump/pressure-fed → injector → chamber → nozzle) generated from computed flow rates and pressures
@@ -58,7 +58,7 @@ you can ignore them entirely.
 - **Staged Combustion Kinetics**: three explicit fidelity levels (Fast Screening / Engineering / High-Fidelity finite-rate Cantera integration) with honest `fidelity_used` reporting and graceful fallback when Cantera is absent
 - **Materials Database**: 24 engineering materials (steels, aluminium alloys, titanium, Inconel, coppers, refractories, graphite, carbon-carbon, ablative liner) with temperature-derated properties feeding the structural and thermal panels
 - **Material Verdicts (v2.6.26)**: the selected nozzle material gets a throat thermal margin (Bartz axial profile at the throat station vs its allowable temperature) and, where a published coefficient band exists, an erosion recession rate and throat growth — tungsten has no published band and is reported as "no published data" rather than given an invented coefficient; the selected injector material sizes the injector plate (stress, safety factor, required thickness, mass) from an edge-fixed circular plate with an ASME ligament efficiency
-- **Injector Design Module**: seven element types with the Dyer NHNE two-phase model for self-pressurizing N₂O (not the optimistic single-phase orifice equation)
+- **Injector Design Module**: eight element types with the Dyer NHNE two-phase model for self-pressurizing N₂O (not the optimistic single-phase orifice equation)
 - **Gas Radiation (Leckner)**: chamber radiation uses Leckner H₂O/CO₂ gas emissivity correlations instead of a black-body assumption
 - **Native Desktop App**: opens in its own window (macOS WKWebView / Windows WebView2, no Chrome required), splash screen appears in ~1 s while engines load in the background; closing the window closes the app
 - **Automatic Updates**: checks GitHub Releases at startup and offers one-click download & install of new versions
@@ -69,15 +69,21 @@ you can ignore them entirely.
 
 ## Validation
 
-HRMA's thermochemistry is cross-checked against **NASA CEA** (via RocketCEA):
-hybrid combustion (c\*, Tc, Isp) agrees within **≤1.5 %** across all supported
-fuel/oxidizer pairs, and liquid c\* within **<2 %**. The test suite runs on a
-clean machine on every push — see the badge at the top of this page for the
-current count and result.
+HRMA's hybrid thermochemistry (the built-in Cantera equilibrium, which since
+v3.0.5 includes solid carbon C(gr) on the fuel-rich side) is cross-checked
+against **NASA CEA** (via RocketCEA, with the same propellant definitions). On
+78 points measured on 21 October 2026 (N₂O/HTPB at O/F 1.5–8 and 10–40 bar,
+plus spot points for LOX/HTPB, LOX/paraffin, N₂O/paraffin, N₂O/PE, N₂O/PMMA
+and H₂O₂/HTPB) chamber temperature agrees within **0.1 %** and c\* and vacuum
+Isp within **0.04 %**; not every supported pair has been swept. Liquid-engine
+thermochemistry is CEA itself, so agreement with CEA there is not an
+independent check. The test suite runs on a clean machine on every push — see
+the badge at the top of this page for the current count and result.
 
-**How to read the liquid-engine numbers (v2.6.2).** Across fourteen published
-engine operating points from six countries, the median absolute error in vacuum
-specific impulse is about 1.2 % (bias +0.9 %). That figure supports one specific
+**How to read the liquid-engine numbers (correlation run of 21 October
+2026).** Across fourteen published engine operating points from six countries,
+the median absolute error in vacuum specific impulse is about 1.0 % (bias
++0.8 %). That figure supports one specific
 claim and no more: *given the real operating point (chamber pressure, mixture
 ratio) and the real published expansion ratio, HRMA reproduces the published
 specific impulse.* It does not demonstrate accuracy when the nozzle geometry is
@@ -105,9 +111,10 @@ pressure and Isp errors, which remain much larger) are machine-generated — see
 the `AUTO-CORRELATION` block in
 [VALIDATION_STATUS.md](docs/VALIDATION_STATUS.md), never hand-edited numbers
 here. That block is **generated by an explicit command, not live**: it carries
-the run date, the runner and adapter version, and the commit it was produced
-from, and a guard test re-runs the correlation and fails if it has drifted from
-what the current code produces. It was in fact 9 days stale once — it still
+the run date, the runner and adapter version and the content hash of the
+experiment database (the commit it was produced from is named in the provenance
+paragraph at the top of that document), and a guard test re-runs the
+correlation and fails if it has drifted from what the current code produces. It was in fact 9 days stale once — it still
 listed a `hybrid | thrust` row that the runner had deliberately stopped
 producing — which is why the guard test exists. Read the provenance line at the
 top of that document before quoting a number from it.
@@ -126,9 +133,14 @@ runner version produced them. The signed-error convention there is
 × 100`; outliers are flagged but never dropped, and anomaly-flagged records are
 aggregated separately from the main statistics.
 
-HRMA is a **preliminary-design and educational tool**, not a flight-qualification
-tool. Predicted performance should be cross-checked against an independent code
-(CEA / RPA / openMotor) and verified by physical testing before firing any motor.
+HRMA is a **preliminary-design and analysis tool**, not a flight-qualification
+tool. Results should be verified by physical testing before firing any motor.
+
+**Basis of results.** Every value on screen comes from your input, from a value
+whose source is stated, or from the model's own solution. When a required input is
+missing, the calculation stops and names the field; when a default value is used,
+it is reported with its name and source; outside the model's validity limits no
+verdict is given and the reason is shown.
 See [VALIDATION_STATUS.md](docs/VALIDATION_STATUS.md) for full verification results,
 uncertainty bands, and known limitations.
 
@@ -142,15 +154,17 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-3.0.0.exe`](https://github.com/berketez/HRMA/releases/download/v3.0.0/HRMA-Setup-3.0.0.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-3.0.0-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v3.0.0/HRMA-Setup-3.0.0-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-3.0.5.exe`](https://github.com/berketez/HRMA/releases/download/v3.0.5/HRMA-Setup-3.0.5.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-3.0.5-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v3.0.5/HRMA-Setup-3.0.5-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
 
 The installers are unsigned: Windows SmartScreen shows "More info → Run anyway",
-macOS Gatekeeper needs right-click → Open once. CAD and drawing outputs are
-written to `Documents/HRMA`. Build pipeline and reproduction instructions:
+macOS Gatekeeper needs right-click → Open once. Reports, CAD files and
+drawings are saved through a save dialog that starts in the Downloads folder;
+`Documents/HRMA` holds the project files (menu: Open Output Folder). Build
+pipeline and reproduction instructions:
 [`packaging/`](packaging/README.md).
 
 ## Quick Start (Developers)
@@ -196,7 +210,7 @@ HRMA/
 │   │   └── ...
 │   ├── data/               # Data sources & databases
 │   │   ├── propellant_database.py
-│   │   ├── materials_db.py         # 11 engineering materials
+│   │   ├── materials_db.py         # 24 engineering materials
 │   │   ├── chemical_database.py
 │   │   └── ...
 │   ├── export/             # Output generation
@@ -211,7 +225,7 @@ HRMA/
 │   └── static/             # Dark theme CSS + JS (Three.js viz, Analysis Deck panels)
 ├── data/                   # Runtime databases & cache
 ├── packaging/              # Installer build scripts (dmg / exe) & release tooling
-├── tests/                  # Test suite (1,000+ automated tests)
+├── tests/                  # Test suite (27,000+ automated tests)
 └── docs/                   # Documentation
 ```
 
@@ -237,10 +251,10 @@ HRMA/
 
 ## Version
 
-**HRMA v3.0.0**
+**HRMA v3.0.5**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
-- A preliminary-design and educational rocket-propulsion analysis tool
+- A preliminary-design and analysis tool for rocket propulsion
   (not a flight-qualification tool — see the scope note above)
 - Last Updated: October 2026
 

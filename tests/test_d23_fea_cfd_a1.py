@@ -310,7 +310,12 @@ class TestP8B324EksenBasliklari:
         assert _eksen(f, 'yaxis3') == 'Port Diameter (mm)'
 
     def test_birim_kunyesi_ureticiyi_anıyor(self, f):
-        assert any('build_time_history' in n for n in _notlar(f)), _notlar(f)
+        # V301/T-ÇAPA-D: DİL-2 (d5aa98c8d) not satırı 1280 px'te sağ kenardan
+        # taşıyordu; makine adı (build_time_history) metinden çıktı, üretici
+        # "the solver time history" diye anılır, birimler aynı.
+        notlar = _notlar(f)
+        assert any('solver time history' in n and '[mm/s]' in n
+                   and 'port diameter [mm]' in n for n in notlar), notlar
 
     def test_gostergeler_anlik_degil_diyor(self, f):
         # P8B3-23 (kısmi): başlık dizgesi i18n anahtarı olduğu için

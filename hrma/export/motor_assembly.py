@@ -934,7 +934,8 @@ def build_plan(motor_data, motor_type, injector=None, extra_groups=None):
     # ---- Plaka parçası (çözüldüyse) -----------------------------------------
     if plaka is not None:
         plaka_id = plaka['id']
-        k.parca(plaka_id, _dikdortgen(plaka['x0'], plaka['x1'], 0.0, rc),
+        k.parca(plaka_id, _dikdortgen(plaka['x0'], plaka['x1'],
+                                      plaka.get('r_in', 0.0), rc),
                 plaka['dims'], declared=plaka['declared'],
                 material=plaka['material'], holes=plaka['holes'])
         k.temas(plaka_id, kasa_id, 'radial_face', 0.0,
@@ -1020,6 +1021,35 @@ def _enjektor_plakasi(md, k, motor_type, rc, kurallar):
         basis=(inj.get('plate_thickness_basis')
                if isinstance(inj.get('plate_thickness_basis'), str)
                else None))}
+    # V301 CAD-2 kalem 2/4: pintle yüz plakasında TEK delik vardır, kanonik
+    # anülüs deliği (STEP/STL/sahne ile aynı çözümleyici); devrenin eşdeğer
+    # orifis planı delinmez.
+    from hrma.export.cad_visualization import (
+        PintleCADError, pintle_cad_geometry, pintle_type_claimed)
+    if pintle_type_claimed(md):
+        from hrma.export.motor_geometry import normalise_export_geometry
+        try:
+            _pg = pintle_cad_geometry(normalise_export_geometry(md)[0])
+        except PintleCADError as _hata:
+            k.cizilmez(pid, 'not_modelled',
+                       f'pintle faceplate refused: {_hata}')
+            return None
+        from hrma.export.cad_visualization import \
+            injector_plate_axial_span_mm as _span
+        x0, x1, yerlesim = _span(t)
+        dims['axial_position_mm'] = _dim(
+            x0, 'assumed', rule='INJECTOR_PLATE_SEAT_RULE', basis=yerlesim)
+        return {'id': pid, 't': float(t), 'x0': float(x0), 'x1': float(x1),
+                'r_in': float(_pg['bore']) / 2.0, 'dims': dims,
+                'declared': [yerlesim, 'pintle faceplate: one central hole, '
+                             'the canonical annulus bore '
+                             f"d{_pg['bore']:.3f} mm (pintle_cad_geometry); "
+                             'the equivalent orifice plan is NOT drilled'],
+                'holes': [],
+                'material': _malzeme(md, ('injector_results.plate_structural'
+                                          '.material',
+                                          'injector_design.plate_material_key',
+                                          'injector_material'))}
     fraksiyonlar = kurallar['INJECTOR_RING_RADIUS_FRACTIONS']
     halka_verilen = _pozitif((blok or {}).get('orifice_ring_radius_mm'))
     delikler = []
@@ -1486,9 +1516,9 @@ def _sivi_parcalar(md, k, L, rc, t_w, kurallar, kasa_id, plaka):
 
 
 def _lule(md, k, L, rc, t_w, kurallar, kasa_id):
-    """Lüle gövdesi: iç kontur tek kaynaktan, et yayımlanmış ya da ADLI
+    """Lüle gövdesi: iç kontur, et ve dış kontur TEK kaynaktan
+    (``cad_visualization.nozzle_wall_profile``); et yayımlanmış ya da ADLI
     istisna kuralı (katı/sıvı)."""
-    from hrma.engines.nozzle_design import sample_nozzle_inner_contour
     from hrma.export.motor_geometry import normalise_export_geometry
     pid = {'solid': 'S09', 'hybrid': 'H10', 'liquid': 'L10'}[k.motor_type]
     ek_id = {'solid': 'S10', 'hybrid': 'H11', 'liquid': None}[k.motor_type]
@@ -1501,37 +1531,53 @@ def _lule(md, k, L, rc, t_w, kurallar, kasa_id):
                    fields=['throat_diameter', 'exit_diameter'])
     else:
         md_n, _rap = normalise_export_geometry(md)
+        # V301 CAD-2 kalem 1: iç kontur, et ve dış kontur TEK kaynaktan
+        # (``cad_visualization.nozzle_wall_profile``; STEP, STL ve kütle
+        # dökümü de onu okur). Eskiden bu fonksiyon örnekleyiciyi ayrıca
+        # çağırıp eti ``NOZZLE_WALL_GENERATOR_RULE``den kendisi hesaplıyor,
+        # dış konturu ``r + et`` diye kendisi kuruyordu (et kuralının
+        # dördüncü kopyası). Ölçüm: ``docs/scofield/raw/OH/V301/bilinen/
+        # cad2`` (once_k1 / sonra_k1).
+        from hrma.export.cad_visualization import nozzle_wall_profile
         try:
-            pts, meta = sample_nozzle_inner_contour(
-                md_n, require_solved_length=True)
+            prof = nozzle_wall_profile(md_n, unit='mm',
+                                       require_solved_length=True)
         except ValueError as exc:
             k.cizilmez(pid, 'not_modelled',
                        f'nozzle contour refused: {exc}')
-            pts = None
-        if pts is not None:
-            geo_ok, ng = _yol(md, 'nozzle_geometry')
-            et = _pozitif((ng or {}).get('wall_thickness')) \
-                if isinstance(ng, dict) else None
+            prof = None
+        if prof is not None:
+            meta = prof['meta']
+            tasarim = prof['wall_design']
+            et = float(prof['wall'])
             beyan = []
-            if et is not None:
+            if tasarim.get('two_layer') is not None:
+                # V301 CAD-2 kalem 8: ceketli lüle eti iki katmanlı cidarın
+                # yayımlanan yığınıdır (üreteç kuralı değil).
                 et_dim = _dim(et, 'solver',
-                              field='nozzle_geometry.wall_thickness', raw=et,
-                              unit='mm',
-                              solver_code=(ng or {}).get(
-                                  'wall_thickness_basis'))
+                              field='structural_analysis.chamber_structure'
+                                    '.wall_stack_thickness_mm',
+                              raw=tasarim['two_layer']['stack_mm'],
+                              unit='mm', basis=tasarim['source'])
+            elif tasarim.get('published'):
+                ng = md_n.get('nozzle_geometry')
+                et_dim = _dim(et, 'solver',
+                              field='nozzle_geometry.wall_thickness',
+                              raw=tasarim.get('published_mm'), unit='mm',
+                              solver_code=(ng.get('wall_thickness_basis')
+                                           if isinstance(ng, dict)
+                                           else None))
             else:
                 en_az, oran = kurallar['NOZZLE_WALL_GENERATOR_RULE']
-                throat_m = md_n.get('throat_diameter')
-                # STEP ile AYNI ifade (bit-aynı: step_export wall_noz).
-                et = max(en_az, oran * float(throat_m) * 1000)
                 et_dim = _dim(et, 'assumed',
                               rule='NOZZLE_WALL_GENERATOR_RULE',
                               basis=f'max({en_az:g} mm, {oran:g} x throat '
                                     'diameter)')
                 beyan.append(ASSUMED_RULES['NOZZLE_WALL_GENERATOR_RULE']
                              ['text'])
-            ic = [(L + float(z), float(r)) for z, r in pts]
-            dis = [(x, r + et) for x, r in reversed(ic)]
+            ic = [(L + float(z), float(r)) for z, r in prof['inner']]
+            dis = [(L + float(z), float(r))
+                   for z, r in reversed(prof['outer'])]
             dims = {'wall_thickness_mm': et_dim,
                     'throat_diameter_mm': _dim(Dt, 'solver',
                                                field=Dt_k['field'],
@@ -1551,10 +1597,11 @@ def _lule(md, k, L, rc, t_w, kurallar, kasa_id):
                         'source': {'kind': 'solver',
                                    'basis': 'sample_nozzle_inner_contour '
                                             '(single contour source)'}}}
-            beyan.append('inner contour = sample_nozzle_inner_contour (the '
-                         'one contour source of STEP/STL/DXF/scene); outer '
-                         'surface = inner radius + wall (radial offset, as '
-                         'the STEP draws it)')
+            beyan.append('inner contour, wall and outer contour = '
+                         'cad_visualization.nozzle_wall_profile (the one '
+                         'nozzle wall source of STEP/STL/mass/plan); outer '
+                         'surface = inner radius + wall at the same axial '
+                         'stations (radial offset)')
             if k.motor_type == 'solid':
                 beyan.append('exit cone is part of this housing (S11 is not a '
                              'separate part)')

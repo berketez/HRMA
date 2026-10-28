@@ -47,6 +47,8 @@ import json
 
 import pytest
 
+from tests.support.fea_lule import ag_malzemesi
+
 THERMAL_ENDPOINT = '/api/fea/thermal'
 
 #: OH-D17-07 — KÖPRÜ REDDEDERSE ZARF DA REDDEDER.
@@ -126,7 +128,8 @@ def profil(client, motor):
         'exit_diameter': motor['exit_diameter'],
         'expansion_ratio': motor['expansion_ratio'],
         'nozzle_type': 'conical',
-        'material': 'steel_4130',
+        # V301/PANEL (NK-12): profil termal AĞIN malzemesiyle (lüle).
+        'material': ag_malzemesi(motor, 'steel_4130'),
         'wall_thickness': 0.005,
     }, headers={'Host': '127.0.0.1:8080'})
     assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
@@ -200,8 +203,13 @@ class TestGercekKosu:
     def test_malzeme_ve_kalinlik_motordan_geliyor(self, kosu, motor):
         """Sayılar uydurulmaz: malzeme ve cidar motor sonucundan okunur."""
         ca = motor['structural_analysis']['chamber_analysis']
-        assert kosu['scalars']['material_key'] == motor[
-            'structural_analysis']['design_parameters']['material']
+        # V301/PANEL (NK-12) — ÇEVRİLDİ, gerekçeli: termal alan yalnız
+        # lüledir; ağın malzemesi motorun LÜLE malzemesidir (eski beklenti
+        # kamara malzemesiydi — kusurun kendisi: grafit lüle ss_304/çelik
+        # diye çözülüp "eriyor" deniyordu). Kaynak hâlâ motor sonucudur.
+        assert kosu['scalars']['material_key'] == ag_malzemesi(
+            motor, motor['structural_analysis']['design_parameters'][
+                'material'])
         assert kosu['scalars']['wall_thickness_m'] == pytest.approx(
             ca['wall_thickness_used_mm'] / 1000.0, rel=1e-9)
         assert kosu['scalars']['burn_time_s'] == pytest.approx(

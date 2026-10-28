@@ -1153,8 +1153,17 @@ HIBRIT_A2_GOVDE = {'motor_type': 'hybrid', 'thrust': 5000,
 #: cidar 1063,77 K — pencerenin ALTINDA. Çapa birleşik ağaçta yeniden
 #: ölçüldü (sart9/olcum/s9_S.json hib steel_304:22): T_iç 1089,68 K
 #: (kenarlara 16,68 / 53,32 K), sınıra süre 21,2604 s; rel 1e-3 AYNEN.
-HIBRIT_PENCERE_YANMA_S = 22
-HIBRIT_STEEL_304_PENCERE_SINIRA_SURE_S = 21.2604
+#: v3.0.1 (21 Eki): iki değişiklik cidarı ısıttı ve 22 s vakası pencereden
+#: çıktı (a367de3d2'de T_iç 22 s'de pencerenin üstündeydi; B7 sonrası
+#: 1602,97 K): (1) tane zarfı kamara çapını son port çapına indirdi (eski
+#: 1,5 × D_son), (2) B7 — bu gövde O/F 2,5, dengeye katı karbon C(gr) girdi,
+#: T_c 1834 → 2037 K. Pencere birleşik main'de yanma süresi taranarak
+#: yeniden ölçüldü (4 s 1030,70 K; 4,5 s 1064,35 K; 5 s 1095,99 K; 5,5 s
+#: 1125,80 K; 6 s 1153,93 K): 5 s'de T_iç 1095,99 K (kenarlara 22,99 /
+#: 47,01 K), sınıra süre 4,7084 s; rel 1e-3 AYNEN. Bekçinin özü
+#: (yayımlanan sınır İZİN 1073, servis 1143 DEĞİL) değişmedi.
+HIBRIT_PENCERE_YANMA_S = 5
+HIBRIT_STEEL_304_PENCERE_SINIRA_SURE_S = 4.7084
 #: /api/thermal-protection ısı-yutucu çapası (denetim-6 Ş1 a) ve ss_304
 #: 13 s vakasının ölçülen sınıra süresi [s].
 KORUMA_ISI_YUTUCU_CAPA = {'mode': 'heat_sink', 'h_gas_W_m2K': 500,
@@ -1178,7 +1187,8 @@ class TestIsiYutucuSinirPenceresi:
 
     def test_hibrit_steel_304_20s_hukum_doner(self, hibrit_steel_304_pencere):
         """max_service_temp_K == İZİN 1073 (servis 1143 DEĞİL); iç cidar
-        pencerede; exceeds_limit True ve sınıra süre ≈ 19,5116 s."""
+        pencerede; exceeds_limit True ve sınıra süre ≈ 4,7084 s (v3.0.1
+        geometrisi ve C(gr) dengesiyle 5 s vakası; 21 Eki)."""
         merd = SIVI_STEEL_304_MERDIVEN_K
         w = hibrit_steel_304_pencere['thermal_protection'][
             'wall_temperature_history']

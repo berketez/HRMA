@@ -5,6 +5,7 @@ from hrma.utils.numeric_compat import trapezoid as _trapezoid
 from functools import lru_cache
 
 from hrma.constants import STEFAN_BOLTZMANN
+from hrma.constants import AMBIENT_TEMPERATURE_BAND_K
 from scipy.integrate import odeint
 from scipy.optimize import fsolve, newton
 from scipy.interpolate import interp1d
@@ -147,12 +148,14 @@ def _cached_star_polygon(n_pts, r_i, depth):
 
 
 @lru_cache(maxsize=64)
-def _cached_wagon_polygon(r_core, r_pitch):
+def _cached_wagon_polygon(r_core, r_pitch, n_holes=6):
     """Wagon-wheel port kesiti — _wagon_port_polygon ile AYNI kurulum
-    (merkez + 6 çevre delik, sıralı union)."""
+    (merkez + ``n_holes`` çevre delik, hepsi aynı yarıçap, sıralı union).
+    V301/K-B (KT-08): çevre delik sayısı parametre oldu (varsayılan 6 =
+    eski sabit; aynı girdi bit-aynı poligon)."""
     holes = [_ShapelyPoint(0.0, 0.0).buffer(r_core, quad_segs=48)]
-    for k in range(6):
-        a = 2.0 * np.pi * k / 6.0
+    for k in range(n_holes):
+        a = 2.0 * np.pi * k / float(n_holes)
         holes.append(_ShapelyPoint(r_pitch * np.cos(a),
                                    r_pitch * np.sin(a))
                      .buffer(r_core, quad_segs=48))
@@ -339,8 +342,134 @@ SOLID_CASE_MATERIAL_EXTRA = {
         'density': 1600.0,          # kg/m3 — kompozitin TEK tanım noktası
         'yield_strength': 300.0e6,  # Pa (UI beyan bandının alt ucu)
         'generic_allowable': True,  # kullanıcı ölçülen değeri girmeli
+        # V301/K-B (KT-11): reçine sınırı (Tg / servis sıcaklığı) için bu
+        # depoda KAYNAKLI bir kayıt YOK. Eskiden ısıl sınır sessizce çeliğin
+        # 811 K'i oluyordu (ısıl pay ~390 K fazla). Sayı uydurulmaz: None,
+        # ısıl hüküm "değerlendirilmedi" (case_limit_status = 'no_record').
+        'max_service_temp': None,
     },
 }
+
+#: V301/K-B (KT-11) — kasa ısıl sınırının durum etiketleri (yanıtta
+#: ``material_temperature_limits.case_limit_status``).
+SOLID_CASE_LIMIT_STATUS_RECORD = 'materials_db'
+SOLID_CASE_LIMIT_STATUS_NO_RECORD = 'no_record'
+#: Kayıt yokken ısıl koruma sınıfının kodu (sayfa bunu çevirir).
+SOLID_CASE_THERMAL_NOT_EVALUATED = (
+    'Not evaluated — no temperature limit on record for this case material')
+
+# ---------------------------------------------------------------------------
+# V301/K-B (KT-10 / KT-12) — KATI SAYFASININ MALZEME SEÇENEKLERİ (TEK KAYNAK)
+#
+# Sayfanın kasa ve lüle seçicileri bu kayıttan üretilir (``/solid`` rotası
+# ``_kati_malzeme_secim_kaydi``). Seçenek kümesi İCAT EDİLMEZ: materials_db
+# etiketleri (``shell`` = basınçlı kabuk adayı; ``insert`` = boğaz eki
+# adayı) + motorun kendi ek kaydı (kompozit). Kümenin seçimi bir HRMA
+# seçimidir (literatür değeri değil). Eski form değerleri (v3.0.0 sayfası:
+# 'aluminum', 'titanium') aynen korunur ki kayıtlı projeler aynı yanıtı alsın.
+# 'phenolic' listeden ÇIKTI: materials_db'de lüle boğazı için kaynaklı kaydı
+# yok ve ablasyon modeli yok (KT-10, ana model kararı 5); API'de 422.
+# ---------------------------------------------------------------------------
+SOLID_CASE_MATERIAL_TAG = 'shell'
+SOLID_NOZZLE_MATERIAL_TAG = 'insert'
+SOLID_NOZZLE_DEFAULT_MATERIAL = 'graphite'
+#: v3.0.0 sayfasının form değerleri -> kanonik kayıt (eski projeler).
+SOLID_MATERIAL_FORM_LEGACY_VALUES = {
+    'case_material': ('steel', 'aluminum', 'titanium', 'composite'),
+    'nozzle_material': ('graphite', 'tungsten'),
+}
+
+
+def solid_case_material_record(material):
+    """Kasa malzemesinin kanonik anahtarı + özellikleri; çözülemezse None.
+
+    Sıra ``SolidRocketEngine._case_material_properties`` ile aynıdır:
+    materials_db (takma ad dâhil) -> ``SOLID_CASE_MATERIAL_EXTRA``.
+    """
+    from hrma.data.materials_db import (canonical_name, get_material,
+                                        temperature_limits)
+    if not isinstance(material, str) or not material.strip():
+        return None
+    ham = material.strip()
+    kanonik = canonical_name(ham.lower().replace(' ', '_'))
+    if kanonik is not None:
+        rec = get_material(kanonik)
+        return {
+            'material_key': kanonik,
+            'name': rec.get('name', kanonik),
+            'yield_strength_mpa': float(rec['yield_strength']) / 1e6,
+            'density_kg_m3': float(rec['density']),
+            'max_service_temp_k': temperature_limits(rec)['service_K'],
+            'source': rec.get('source'),
+            'generic_allowable': False,
+        }
+    extra = SOLID_CASE_MATERIAL_EXTRA.get(ham.lower())
+    if extra is None:
+        return None
+    return {
+        'material_key': ham.lower(),
+        'name': extra['name'],
+        'yield_strength_mpa': float(extra['yield_strength']) / 1e6,
+        'density_kg_m3': float(extra['density']),
+        'max_service_temp_k': extra.get('max_service_temp'),
+        'source': ('SOLID_CASE_MATERIAL_EXTRA (HRMA generic allowable; '
+                   'no resin temperature limit on record)'),
+        'generic_allowable': bool(extra.get('generic_allowable', False)),
+    }
+
+
+def solid_nozzle_material_record(material):
+    """Lüle malzemesinin kanonik anahtarı + ısıl özellikleri; yoksa None."""
+    from hrma.data.materials_db import (canonical_name, get_material,
+                                        temperature_limits)
+    if not isinstance(material, str) or not material.strip():
+        return None
+    kanonik = canonical_name(material.strip().lower().replace(' ', '_'))
+    if kanonik is None:
+        return None
+    rec = get_material(kanonik)
+    return {
+        'material_key': kanonik,
+        'name': rec.get('name', kanonik),
+        'allowable_temperature_k': temperature_limits(rec)['allowable_K'],
+        'thermal_conductivity_w_mk': rec.get('thermal_conductivity'),
+        'erosion_band': ('published' if kanonik in SOLID_NOZZLE_EROSION_MATERIAL
+                         else 'none'),
+        'source': rec.get('source'),
+    }
+
+
+def solid_material_options(alan):
+    """Sayfanın ``alan`` seçicisinin seçenekleri (sıra: materials_db sırası).
+
+    Her seçenek: ``value`` (form değeri), ``material_key`` (kanonik) ve
+    hesabın o rol için OKUDUĞU özellikler. Kayıtta olmayan özellik ``None``
+    kalır (sayfa onu basmaz; sayı uydurulmaz).
+    """
+    from hrma.data.materials_db import MATERIALS
+    if alan == 'case_material':
+        etiket, cozucu = SOLID_CASE_MATERIAL_TAG, solid_case_material_record
+        ek = list(SOLID_CASE_MATERIAL_EXTRA)
+    elif alan == 'nozzle_material':
+        etiket = SOLID_NOZZLE_MATERIAL_TAG
+        cozucu = solid_nozzle_material_record
+        ek = []
+    else:
+        raise KeyError(alan)
+    eski = {}
+    for deger in SOLID_MATERIAL_FORM_LEGACY_VALUES.get(alan, ()):
+        kayit = cozucu(deger)
+        if kayit is not None:
+            eski.setdefault(kayit['material_key'], deger)
+    anahtarlar = [k for k, r in MATERIALS.items()
+                  if etiket in (r.get('tags') or [])] + ek
+    secenekler = []
+    for k in anahtarlar:
+        kayit = cozucu(k)
+        if kayit is None:
+            raise RuntimeError(f'{alan} option {k!r} does not resolve')
+        secenekler.append(dict(kayit, value=eski.get(k, k)))
+    return secenekler
 
 # ---------------------------------------------------------------------------
 # TEK KAPTA TEK MALZEME KİMLİĞİ (v2.6.27, bebek-Scofield F2-1)
@@ -656,6 +785,24 @@ SUPPORTED_GRAIN_TYPES = (
 #: kümeye göre ayrışır. Küme iki yerde iki farklı liste olamaz.
 SOLID_POLYGON_GRAIN_TYPES = ('star', 'wagon_wheel', 'finocyl', 'slotted')
 
+# V301/K-B (KT-08) — WAGON WHEEL GEOMETRİSİ (TEK TANIM NOKTASI)
+# Motorun kullandığı geometri: merkez delik + N çevre delik, HEPSİ AYNI çapta,
+# çevre delikler bölüm dairesi üzerinde eşit aralıklı. Kullanıcı vermezse
+# eski sabit geometri uygulanır ve BEYAN edilir: N = 6, delik çapı = çekirdek
+# çapının yarısı, bölüm dairesi çapı = tane dış çapının yarısı. Bu üç sayı
+# HRMA seçimidir — literatür değeri yok (kaynaklı bir wagon-wheel
+# "standardı" bulunmadı). Delik sayısı bandı [3, 12] de HRMA seçimidir
+# (star uç sayısı bandıyla aynı); geometrik tutarlılık ayrıca sınanır.
+SOLID_WAGON_WHEEL_DEFAULTS = {
+    'hole_count': 6,
+    'hole_diameter_over_core': 0.5,
+    'pitch_diameter_over_grain': 0.5,
+    'hole_count_range': (3, 12),
+    'basis': ('HRMA selection - no literature value: 6 outer holes, hole '
+              'diameter = core diameter / 2, pitch circle diameter = grain '
+              'outer diameter / 2 (the solver geometry before v3.0.5)'),
+}
+
 # Finocyl (FIN-O-CYLinder): silindirik port + ondan radyal uzanan N kanatçık
 # yuvası. Kanatçıklar grain'in yalnız bir BÖLÜMÜNÜ kaplar (klasik olarak arka
 # uç); geri kalan boy düz silindirik porttur. Nötre yakın davranışın kaynağı
@@ -762,6 +909,37 @@ SOLID_GRAIN_MECHANICS = {
     },
 }
 SOLID_GRAIN_MECHANICS_DEFAULT = _HTPB_GRAIN_MECHANICS
+
+# V301/S1-6 (28 Eki) — TANE YERLEŞİMİ. Gerinim çözümü yalnız gövdeye
+# yapıştırılmış (case-bonded) taneyi biliyordu ve bunu kendisi beyan ediyordu
+# ("this solver has no input for that configuration"). ÖLÇÜLDÜ (örnek KNDX
+# BATES, 40 bar): port gerinimi %2,209'un %1,833'ü kürleme/soğuma
+# büzülmesinin gövdeyle KISITLANMASINDAN geliyordu; kalıpta dökülüp gövdeye
+# takılan tanede bu kısıt yoktur. Kaynak: NASA SP-8073 (1973) §1 "cartridge-
+# loaded grains ... the propellant is not cast and cured within the case but
+# rather in a mold outside the case ... Frequently they are left free-
+# standing, i.e., bonded only at the ends" ve §2.5.3 "gas pressures can be
+# exerted between the case and the grain".
+GRAIN_SUPPORT_CASE_BONDED = 'case_bonded'
+GRAIN_SUPPORT_CARTRIDGE = 'cartridge_loaded'
+GRAIN_SUPPORT_OPTIONS = (GRAIN_SUPPORT_CASE_BONDED, GRAIN_SUPPORT_CARTRIDGE)
+GRAIN_SUPPORT_DEFAULT = GRAIN_SUPPORT_CASE_BONDED
+GRAIN_SUPPORT_BASIS = {
+    GRAIN_SUPPORT_CASE_BONDED: (
+        'case-bonded grain: cast and cured inside the case and bonded to its '
+        'liner. The case restrains the cure/cool-down shrinkage, so the bore '
+        'carries that thermal strain in addition to the pressure strain '
+        '(plane-strain hollow cylinder, Timoshenko & Goodier; NASA SP-8073).'),
+    GRAIN_SUPPORT_CARTRIDGE: (
+        'cartridge-loaded grain: cast in a mold or liner outside the case and '
+        'inserted, bonded at most at its ends (NASA SP-8073 §1). The case '
+        'does not restrain the cure/cool-down shrinkage, so no thermal strain '
+        'is carried at the bore. The pressure strain is computed with the '
+        'case supporting the grain outer surface (snug fit, no gas between '
+        'grain and case): this is the upper bound of the two support states, '
+        'because chamber gas reaching the case-grain gap (SP-8073 §2.5.3) '
+        'loads the grain almost hydrostatically and lowers the bore strain.'),
+}
 
 # ---------------------------------------------------------------------------
 # Yoğuşmuş (iki-fazlı) ürün kütle kesirleri — iki-fazlı Isp kaybının TEK
@@ -1053,6 +1231,12 @@ BURN_RATE_A_MISMATCH_RATIO = 1.8
 # iddia; F069) — çözücüyü uçuk girdide (a·P^n taşması) korumak içindir ve
 # aşıldığı her koşuda kullanıcıya uyarı olarak bildirilir.
 BURN_RATE_NUMERIC_CEILING_MPS = 0.1
+
+# Basınç denge çözücüsünün adım başına yineleme tavanı. Sönümlü sabit-nokta
+# yinelemesi (ilk yol) ve onun yerine geçen parantezli ikiye bölme yedeği
+# (V301/B6) AYNI tavanı kullanır; yayımlanan 'basis' / 'note' metinleri de
+# sayıyı buradan okur (eskiden döngüde ve iki metinde ayrı ayrı '100' yazılıydı).
+SOLID_PRESSURE_SOLVER_MAX_ITER = 100
 
 # Akış ayrılması ölçütü (Summerfield): sabit geometrili nozulda aşırı
 # genişlemede P_e ≲ 0.4·P_a olduğunda çıkış konisinde ayrılma beklenir ve
@@ -1350,6 +1534,34 @@ SOLID_MIN_DESIGN_EXPANSION_RATIO = 2.5
 #: -%0,0001, double_base +%0,0018, kndx -%0,0008, knsb -%0,0051).
 SOLID_CSTAR_IDENTITY_TOLERANCE_PCT = 0.05
 
+#: V301/N-CEA-2 — c*'ı bağımsız bir NASA CEA denge çözümünden gelen
+#: (``c_star_basis = 'cea'``) kayıtta Eq. 3-32'nin oda γ_s'siyle verdiği
+#: "ideal" ile CEA c*'ı arasında beklenen fark [%]: CEA c*'ı boğazdaki KAYAN
+#: bileşimle çözer, Eq. 3-32 tek bir γ varsayar. ÖLÇÜLDÜ (M = 1/n ile,
+#: 10-150 bar): AP/HTPB 85/15 (tek faz) -%0,18…-%0,23; APCP -%0,04…-%0,07;
+#: KN-şeker -%0,01…+%0,05; kara barut -%0,06…-%0,09 (kati-gecis/RAPOR.md).
+#: Bant HRMA SEÇİMİDİR (ölçülen en büyük farkın ~2 katı), kaynaklı bir
+#: geçti/kaldı ölçütü değil.
+SOLID_CSTAR_EQUILIBRIUM_IDENTITY_BAND_PCT = 0.5
+
+#: V301/N-CEA-2 (K1) — katı termokimyanın KAYNAĞI (yanıtta
+#: ``thermochemistry_source``). Tek tanım noktası:
+#:   * ``nasa_cea_at_pc``: bileşimi bilinen itici; T_c, c*, γ_s ve M motorun
+#:     KENDİ Pc'sinde NASA CEA'dan (RocketCEA = CEA2, kayan denge);
+#:   * ``catalogue_single_pressure``: bileşim yok ya da CEA çözümü yok;
+#:     katalog dörtlüsü (tek basınçta) kullanılır ve gerekçesiyle BEYAN
+#:     edilir (sessiz yedek yok);
+#:   * ``user_entered``: kullanıcı c*/γ/T_c/M'den en az birini kaydın
+#:     değerinden farklı girdi; girilen değerler kullanılır.
+SOLID_THERMO_SOURCE_CEA = 'nasa_cea_at_pc'
+SOLID_THERMO_SOURCE_CATALOGUE = 'catalogue_single_pressure'
+SOLID_THERMO_SOURCE_USER = 'user_entered'
+
+#: V301/N-CEA-2 (K2) — lüle eşdeğer üssünün kök arama aralığı. Fiziksel
+#: izentropik üs bandını (tek atomlu gaz 5/3'e kadar) kapsayan sayısal
+#: aralık; HRMA seçimi. Kök yoksa CEA lülesi kullanılmaz ve beyan edilir.
+SOLID_NOZZLE_GAMMA_BRACKET = (1.005, 1.70)
+
 
 def _ideal_single_phase_c_star(gamma, T_c, molecular_weight):
     """Tek fazlı ideal gaz c* [m/s] — Sutton & Biblarz 9. baskı Eq. 3-32.
@@ -1413,7 +1625,7 @@ def _c_star_basis_of_record(propellant_type, c_star):
 
 
 def _c_star_identity_audit(propellant_type, gamma, T_c, molecular_weight,
-                           c_star):
+                           c_star, basis_override=None):
     """Kaydın c*'ı kendi (gamma, T_c, M) üçlüsüyle tutarlı mı? — TEK nokta.
 
     ÖH D17 (P2B1-01). Modülün kendi ölçütü zaten yazılıydı ("(gamma, M, T_c,
@@ -1488,6 +1700,11 @@ def _c_star_identity_audit(propellant_type, gamma, T_c, molecular_weight,
     x_p, x_kaynak, _ = _condensed_mass_fraction(propellant_type)
     tol = float(SOLID_CSTAR_IDENTITY_TOLERANCE_PCT)
     kayit_basis = _c_star_basis_of_record(propellant_type, c)
+    # V301/N-CEA-2 (K1): termokimya motorun Pc'sinde NASA CEA'dan geldiyse
+    # c*'ın kökeni katalog kaydının beyanı DEĞİL, bu koşumun bağımsız denge
+    # çözümüdür ('cea'); çağıran bunu açıkça verir.
+    if basis_override is not None:
+        kayit_basis = str(basis_override)
     if (abs(sapma) <= tol and x_p is not None and x_p > 0.0
             and kayit_basis == 'eq3-32'):
         # ÖH D21 a1 (OH-D19-22). Bu dal, D17 ölçütünün GÖREMEDİĞİ hâli
@@ -1530,6 +1747,20 @@ def _c_star_identity_audit(propellant_type, gamma, T_c, molecular_weight,
                  f'ideal {ideal:.4f} m/s implied by the gamma, T_c and '
                  f'molecular weight of this same record. The ideal is an '
                  f'upper bound, so the record is internally inconsistent.')
+    elif (kayit_basis == 'cea' and sapma < 0.0
+          and (x_p is None or x_p <= 0.0)
+          and abs(sapma) <= float(SOLID_CSTAR_EQUILIBRIUM_IDENTITY_BAND_PCT)):
+        # V301/N-CEA-2: tek fazlı CEA kaydı; fark kayan denge ⟷ tek-γ
+        # özdeşliği farkıdır (bant künyesi sabitte).
+        durum = 'single_phase_consistent'
+        kunye = (f'c* = {c:.4f} m/s is {sapma:+.4f}% below the single-gamma '
+                 f'Eq. 3-32 value {ideal:.4f} m/s. This c* is an independent '
+                 f'NASA CEA equilibrium solution (c_star_basis = cea), which '
+                 f'solves the throat with a shifting composition; a deficit '
+                 f'within {SOLID_CSTAR_EQUILIBRIUM_IDENTITY_BAND_PCT}% '
+                 f'(SOLID_CSTAR_EQUILIBRIUM_IDENTITY_BAND_PCT, HRMA choice '
+                 f'from measured CEA points) is that difference, not a '
+                 f'loss.')
     elif x_p is not None and x_p > 0.0 and (abs(sapma) / 100.0) <= x_p:
         durum = 'two_phase_explained'
         kunye = (f'c* = {c:.4f} m/s is {sapma:+.4f}% below the single-phase '
@@ -1807,6 +2038,34 @@ def _catalog_burn_rate(propellant_type):
 # `with warnings.catch_warnings():` bloğuyla ve gerekçesiyle yapılır.
 
 
+def _propellant_lot_scales(lot):
+    """Yakıt partisi çarpanları (V301/K-D) — doğrulanmış sözlük ya da None.
+
+    ``{'c_star_scale': x, 'density_scale': y}``; verilmeyen çarpan 1,0'dır.
+    Çarpan sonlu ve pozitif olmalıdır, aksi hâlde ``ValueError`` (sessiz
+    yedek yok). ``None`` ya da boş sözlük "bozulma yok" demektir ve motor
+    hiçbir çarpma YAPMAZ (çarpan 1,0 ile de sonuç bit-aynıdır: x·1,0 = x).
+    """
+    if not lot:
+        return None
+    bilinen = ('c_star_scale', 'density_scale')
+    fazla = set(lot) - set(bilinen)
+    if fazla:
+        raise ValueError('unknown propellant_lot keys: %s'
+                         % ', '.join(sorted(fazla)))
+    olcek = {}
+    for ad in bilinen:
+        deger = lot.get(ad, 1.0)
+        if isinstance(deger, bool):
+            raise ValueError('propellant_lot %s must be a number' % ad)
+        deger = float(deger)
+        if not (np.isfinite(deger) and deger > 0.0):
+            raise ValueError('propellant_lot %s must be finite and > 0, '
+                             'got %r' % (ad, deger))
+        olcek[ad] = deger
+    return olcek
+
+
 class SolidGeometryError(ValueError):
     """Kurucunun reddettiği fiziksel olmayan girdi — makine-okur künyeli.
 
@@ -1819,6 +2078,40 @@ class SolidGeometryError(ValueError):
     def __init__(self, message, kunye):
         super().__init__(message)
         self.kunye = kunye
+
+
+class SolidDesignRejected(SolidGeometryError):
+    """Tasarımı YAYIMLANMAYAN girdi reddi — uçta 422 (v3.0.1, V301/K-A).
+
+    ``SolidGeometryError`` alt sınıfıdır: kurucunun mevcut ret kanalını
+    tanıyan her çağıran (``/api/solid-monte-carlo`` 422 dalı, örneklem
+    başına ``except Exception``) onu bugünkü gibi işler. ``/calculate_solid``
+    bu sınıfı AYRICA yakalar ve 422 ``invalid_fields`` gövdesine çevirir
+    (hibrit ``GrainEnvelopeError`` deseni, ``port-kamara/RAPOR.md`` KARAR 3).
+
+    Alanlar:
+      * ``code`` — makine kodu (``grain_does_not_fit_case``,
+        ``port_smaller_than_throat``, ``core_not_inside_grain`` …);
+      * ``invalid_fields`` — yapılı künye listesi (alan, gönderilen değer,
+        gereken/kabul edilen değer, birim, EN cümle);
+      * ``kunye`` — ilk künye (üst sınıfın tek-künye sözleşmesi).
+    """
+
+    def __init__(self, message, invalid_fields, code):
+        alanlar = list(invalid_fields or [])
+        super().__init__(message, alanlar[0] if alanlar else {})
+        self.invalid_fields = alanlar
+        self.code = code
+
+
+def _ceil_tenth_mm(value_mm):
+    """Gereken en küçük ölçü 0,1 mm'ye YUKARI yuvarlanır.
+
+    Hibrit zarf reddiyle aynı kural (``hybrid_rocket_engine``
+    ``np.ceil(gereken * 1e4 - 1e-9) / 10``): önerilen sayı kapıdan GEÇER;
+    aşağı yuvarlanan bir öneri kullanıcıyı ikinci bir redde sokardı.
+    """
+    return float(np.ceil(float(value_mm) * 10.0 - 1e-9) / 10.0)
 
 
 def _core_diameter_domain(grain_type, chamber_diameter_mm):
@@ -1982,16 +2275,133 @@ def _solid_geometry_gate(grain_type, chamber_diameter, grain_length,
                  **_core_diameter_domain(grain_type, D)))
 
 
+#: ``overrides`` alanlarının BİRİMİ — ret künyesinde (``rejected_inputs`` /
+#: ``/calculate_solid`` 422 ``invalid_fields``) aralığın yanında yayımlanır
+#: (v3.0.1, V301/K-A, KT-06/KT-13). Sayı DEĞİL, yalnız birim etiketi; aralık
+#: her ``_override_val`` çağrısının kendi argümanıdır (ikinci kopya yok).
+#: Birimler çağrı yerindeki dönüşümden okundu (ör. ``m / 1000.0`` -> mm,
+#: ``m * 1e6`` -> MPa, ``m / 100.0`` -> kPa); boyutsuz alanlar ``''``.
+#: Tabloda olmayan alan künyeye ``unit: None`` ile geçer (uydurulmaz).
+SOLID_OVERRIDE_FIELD_UNITS = {
+    'density': 'kg/m^3', 'char_velocity': 'm/s', 'gamma': '',
+    'flame_temp': 'K', 'molecular_weight': 'g/mol',
+    'nozzle_efficiency': '', 'combustion_efficiency': '',
+    'cf_efficiency': '', 'kinetic_efficiency': '', 'two_phase_loss': '',
+    'divergence_loss': '', 'discharge_coeff': '', 'overall_efficiency': '',
+    'divergent_angle': 'deg', 'convergent_angle': 'deg',
+    'erosive_k': '', 'erosive_m': '', 'temp_coeff': '1/K',
+    'initial_temp': 'K', 'ambient_temp': 'K',
+    'yield_strength': 'MPa', 'safety_factor': '', 'case_thickness': 'mm',
+    'liner_thickness': 'mm', 'liner_density': 'kg/m^3',
+    'insulation_thickness': 'mm', 'grain_gap': 'mm', 'outer_diameter': 'mm',
+    'test_altitude': 'm', 'atm_pressure': 'kPa',
+    'grain_count': 'segments', 'n_segments': 'segments',
+    'web_thickness': 'mm', 'chamber_volume': 'L',
+    'erosion_factor': 'mm/s', 'throat_erosion_a_ref_mm_s': 'mm/s',
+    'closure_bolt_count': 'bolts', 'igniter_pressure_fraction': 'P/Pc',
+    'thrust': 'N', 'target_thrust': 'N', 'burn_time': 's',
+    'target_burn_time': 's', 'star_points': 'points', 'star_radius': 'mm',
+}
+
+#: Kasa sığma kuralının yayımlanan metni (V301/K-A, KT-01/KT-03). Kaynak:
+#: geometrinin kendisi — tane, yapışık astar ve yalıtım halkaları kasanın
+#: içinde eş merkezli durur (``SOLID_THERMAL_LAYER_ORDER``; Sutton & Biblarz
+#: 9. baskı Böl. 12, yalıtım payı). Sayı içermez; ret künyesi ve ``case_bore``
+#: beyanı bu TEK metni taşır.
+SOLID_CASE_FIT_RULE = ('case inner diameter >= grain outer diameter + '
+                       '2 x (liner_thickness + insulation_thickness)')
+
+#: ``outer_diameter`` (tane dış çapı, mm) kabul aralığı — TEK tanım noktası.
+#: Sayı v2.6.26 kalem 29'dan beri ``_apply_overrides`` 7c'de satır içiydi
+#: (1-5000 mm; üst uç kamara çapı kanonunun mm görünümüyle aynı). V301/K-A:
+#: ``/calculate_solid`` kasa türetme biçiminde aynı aralığı uçta da
+#: uyguladığı için sabite çekildi; değer DEĞİŞMEDİ.
+SOLID_OUTER_DIAMETER_RANGE_MM = (1.0, 5000.0)
+
+#: ``web_thickness`` (girilen tane ağı, mm) kabul aralığı — TEK tanım noktası
+#: (V301/K-D, T-çapa-B DEVİR 2). Eski bant satır içiydi (0,1-1000 mm) ve
+#: tane dış çapı bandıyla (1-5000 mm, kamara çapı kanonunun mm görünümü)
+#: çelişiyordu: ölçüldü, Ø3700 / çekirdek 1500 mm (ağ 1100 mm) tutarlı SRB
+#: ölçekli motor 422 ``web_thickness = 1100 is outside the accepted range
+#: 0.1 to 1000 mm`` alıyordu; sayfa bu alanı geometriden doldurup HER hesapta
+#: gönderdiği için 2000 mm'nin üstündeki her tane sayfadan çözülemiyordu.
+#: Üst uç YENİ bir sayı değildir, geometriden türer: ağ = (D_dış − D_çekirdek)/2
+#: < D_dış/2, yani tane dış çapı bandının yarısı. Alt uç değişmedi.
+SOLID_WEB_THICKNESS_RANGE_MM = (0.1, SOLID_OUTER_DIAMETER_RANGE_MM[1] / 2.0)
+
+#: Varsayılan (örnek) katı motor geometrisi [mm] — TEK tanım noktası.
+#: HRMA seçimi — geçerli port/boğaz oranlı örnek motor; literatür değeri
+#: DEĞİLDİR. Kurucunun varsayılan argümanları, ``/calculate_solid``ın
+#: ``SOLID_ENDPOINT_DEFAULTS`` tablosu ve ``solid.html`` açılış değerleri
+#: (``outer_diameter`` / ``grain_length`` / ``core_diameter``; bekçi
+#: ``tests/test_v301_kati_geometri.py``) bu sözlüğü okur.
+#:
+#: V301/K-A (22 Eki, ana model kararı): çekirdek 30 -> 48 mm. Eski örnek
+#: motorda (Ø100 / 500 / 30, APCP, 40 bar, motorun varsayılan verimleri)
+#: çözücünün boğazı 30,83 mm, yani A_port,0/A_t = 0,947 idi: port boğuluyor,
+#: ses noktası lüle boğazı değildi ve yayımlanan Pc/itki modelin dışındaydı.
+#: Ölçüt motorun kendi eşiği ``SOLID_DESIGN_POINT['port_to_throat_min']``
+#: (= 2): oran çekirdeğe göre YENİDEN çözülerek tarandı (boğazı çözücü
+#: boyutlar) — 44 mm 1,895, 46 mm 2,051, 48 mm 2,211 (eski API biçimi,
+#: motor varsayılan verimleri; sayfa verimleriyle oran daha büyüktür).
+#: 48 mm eşiğin %10 üstünde pay bırakan ilk çift sayıdır. Ölçüm:
+#: ``docs/scofield/raw/OH/V301/kati-sivi/K-A/RAPOR.md``.
+#:
+#: V301/K-D (27 Eki, K-C2 DEVİR D1): tane boyu 500 -> 400 mm. Varsayılan yakıt
+#: KNDX olunca (``SOLID_DEFAULT_PROPELLANT_TYPE``) eski tek çaplı API gövdesi
+#: (``SOLID_ENDPOINT_DEFAULTS``; segment sayısı verilmediği için L/D kuralıyla
+#: 5 segment) başlangıç kütle akısında motorun KENDİ eşiğini aşıyordu:
+#: G0 = 1435,9 > ``SOLID_DESIGN_POINT['mass_flux_warn']`` = 1400 kg/m²s
+#: (``warn.solid.initial_mass_flux_high``; sayfa gövdesi 3 segmentle 1057,8).
+#: Uyarı gerçek bir bulgudur, yumuşatılmadı; varsayılan motor değişti.
+#: Ölçüldü (``docs/scofield/raw/OH/V301/kati-sivi/K-D/``, varsayilan_*):
+#: çekirdek 50/52 mm G0'ı eşiğin altına indiriyor ama sayfanın wagon_wheel
+#: varsayılanını 422'ye düşürüyordu (delik geometrisi 48 mm çekirdeğe
+#: kurulu); boy 400 mm'de çekirdek AYNI kalır, API gövdesi 4 segmente iner:
+#: G0 1141,2 (eşiğin %18,5 altında), sayfa 1000,2; altı tane tipinin sayfa
+#: varsayılanı 200 ve kritiksiz; APCP kurucusunda A_port,0/A_t 2,218 -> 2,789.
+#: Boy/çap 4 (ipucunun 3:1-8:1 bandında).
+SOLID_DEFAULT_GEOMETRY_MM = {
+    'chamber_diameter': 100,
+    'grain_length': 400,
+    'core_diameter': 48,
+}
+
+#: Ürünün varsayılan (örnek) katı yakıt KİMLİĞİ — TEK tanım noktası. Okuyanlar:
+#: ``/calculate_solid`` ve ``/api/solid-monte-carlo`` (``SOLID_ENDPOINT_DEFAULTS``),
+#: ``/solid`` sayfasının açılışta seçili katalog satırı ve form termokimyası
+#: (``propellant_form_values``), ``_resolve_propellant_type`` son dalı.
+#:
+#: V301/K-C2 (27 Eki, ana model kararı; K-B DEVİR 10): 'apcp' -> 'kndx'.
+#: HRMA seçimi, literatür değeri değil. Gerekçe (ölçüm K-B/RAPOR.md §5
+#: madde 8): APCP'li varsayılan motor ``nozzle_material_over_temp`` KRİTİĞİ
+#: taşıyordu (T_aw 3338,5 K CEA ⟷ grafit 3300 K) ve kayıtlı hiçbir lüle
+#: malzemesi o sıcaklığı taşımıyor; hüküm doğru, tek tasarım kolu yakıt.
+#: KNDX kaydı ``validated: true``, ``c_star_basis: cea`` ve örnek projeyle
+#: aynı yakıt.
+SOLID_DEFAULT_PROPELLANT_TYPE = 'kndx'
+
+#: Kütüphane kurucusunun (``SolidRocketEngine(...)``) varsayılan yakıt
+#: argümanı — DEĞİŞMEDİ. Doğrudan kurucu çağıranlar (testler, uçuş aracı
+#: yeniden hesabı) bugünkü sayılarını korur; ürün varsayılanı yukarıdaki
+#: sabittir. İkisi de ``_resolve_propellant_type`` için "kimlik seçilmedi"
+#: anlamı taşır (açık kimlik yalnız ``overrides['propellant_type']``).
+SOLID_CONSTRUCTOR_PROPELLANT_TYPE = 'apcp'
+
+
 class SolidRocketEngine:
     """Solid rocket motor analysis module"""
-    
-    def __init__(self, grain_type='bates', propellant_type='apcp',
-                 chamber_diameter=100, grain_length=500,
-                 core_diameter=30, chamber_pressure=40,
+
+    def __init__(self, grain_type='bates',
+                 propellant_type=SOLID_CONSTRUCTOR_PROPELLANT_TYPE,
+                 chamber_diameter=SOLID_DEFAULT_GEOMETRY_MM['chamber_diameter'],
+                 grain_length=SOLID_DEFAULT_GEOMETRY_MM['grain_length'],
+                 core_diameter=SOLID_DEFAULT_GEOMETRY_MM['core_diameter'],
+                 chamber_pressure=40,
                  burn_rate_a=DEFAULT_BURN_RATE_A,
                  burn_rate_n=DEFAULT_BURN_RATE_N,
                  burn_rate_temp_coeff=0.002, temp_ref=293.15,
-                 overrides=None):
+                 overrides=None, propellant_lot=None):
 
         # Grain geometry
         # Tanınmayan tip SESSİZCE end_burner'a düşmez (2026-07-19 denetim):
@@ -2023,6 +2433,10 @@ class SolidRocketEngine:
         # sayısı, star geometrisi...). Monte Carlo yeniden kurulum için
         # constructor argümanları da saklanır.
         self.overrides = dict(overrides or {})
+        # V301/K-D (K-C1 AÇIK 1): yakıt PARTİSİ bozulması — üretim toleransı
+        # Monte Carlo'su ve UQ örnekleri içindir; istek gövdesinden GELMEZ
+        # (``overrides`` kanalı kullanıcıya açık olduğu için ayrı argüman).
+        self._propellant_lot = _propellant_lot_scales(propellant_lot)
         # Boğaz alanı sabitlemesi (T19): None = normal tasarım akışı, boğaz
         # tasarım noktasından boyutlandırılır. Yalnız ``pin_throat_area``
         # doldurur (üretim toleransı Monte Carlo'su).
@@ -2068,6 +2482,10 @@ class SolidRocketEngine:
         # bu hedeflere göre BOYUTLANDIRILIR. Hedef yoksa davranış birebir
         # eskisi gibidir (geometri girdisi tek belirleyicidir).
         self._apply_design_point_sizing()
+        # V301/K-A: boyutlandırma tane dış çapını değiştirmiş olabilir;
+        # kullanıcı kasa beyan ettiyse sığma kuralı YENİ taneyle yeniden
+        # sınanır (hedef yoksa ya da kasa türetildiyse işlem yoktur).
+        self._check_case_fit()
 
     def _override_val(self, key, lo, hi):
         """overrides[key] sonlu ve [lo, hi] içindeyse float döndürür, yoksa None.
@@ -2099,7 +2517,8 @@ class SolidRocketEngine:
                 'a boolean flag is not a numeric value; float(True) would '
                 'have injected 1.0 into a field the user never filled in. '
                 'The field was ignored and the built-in/catalog value was '
-                'used instead.')
+                'used instead.',
+                code='boolean_is_not_a_number', accepted_range=(lo, hi))
             return None
         try:
             f = float(raw)
@@ -2114,7 +2533,8 @@ class SolidRocketEngine:
                     'could not be read as a number (check the decimal '
                     "separator: HRMA reads 5.0, not 5,0). The field was "
                     'ignored and the built-in/catalog value was used '
-                    'instead.')
+                    'instead.',
+                    code='not_a_number', accepted_range=(lo, hi))
             return None
         if np.isfinite(f) and lo <= f <= hi:
             return f
@@ -2133,16 +2553,18 @@ class SolidRocketEngine:
                 key, raw,
                 'value {} is outside the accepted range [{}, {}]; the field '
                 'was ignored and the built-in/catalog value was used '
-                'instead.'.format(round(f, 6), lo, hi))
+                'instead.'.format(round(f, 6), lo, hi),
+                code='out_of_accepted_range', accepted_range=(lo, hi))
         elif not np.isfinite(f):
             # NaN / Infinity: eskiden hiçbir kanala girmeden yutuluyordu.
             self._reject_input(
                 key, raw,
                 'value is not finite (NaN or infinity); the field was '
-                'ignored and the built-in/catalog value was used instead.')
+                'ignored and the built-in/catalog value was used instead.',
+                code='not_finite', accepted_range=(lo, hi))
         return None
 
-    def _reject_input(self, key, raw, reason):
+    def _reject_input(self, key, raw, reason, code=None, accepted_range=None):
         """Reddedilen bir girdiyi BEYAN listesine işler (Z2, sessiz red yok).
 
         ``design_warnings`` i18n kodlu bir kanaldır; bu liste ise ham veri
@@ -2152,20 +2574,40 @@ class SolidRocketEngine:
         "hangi alanım çözücüye ULAŞMADI" sorusunu makine-okur biçimde
         cevaplar. Alan başına TEK kayıt tutulur (itki eğrisi döngüsü aynı
         anahtarı yüzlerce kez okuyabilir).
+
+        v3.0.1 (V301/K-A, KT-06/KT-13): kayıt makine kodunu
+        (``reason_code``), kabul aralığını ve birimi de taşır.
+        ``/calculate_solid`` bu listeyi 422 ``invalid_fields`` gövdesine
+        çevirir: aralık dışı bir değerle tasarım YAYIMLANMAZ. Öteki
+        çağıranlar (Monte Carlo örneklemleri, doğrudan Python API) listeyi
+        bugünkü gibi beyan kanalı olarak okur. Dize değer 200 karaktere
+        kısaltılır (aşırı uzun girdi gövdeye aynen yansımaz).
         """
         kayitlar = getattr(self, 'rejected_inputs', None)
         if kayitlar is None:
             kayitlar = self.rejected_inputs = []
         if any(k.get('field') == key for k in kayitlar):
             return
-        kayitlar.append({
+        if isinstance(raw, str):
+            gonderilen = raw[:200]
+        elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            gonderilen = raw
+        else:
+            gonderilen = repr(raw)[:200]
+        kayit = {
             'field': key,
             'submitted_type': type(raw).__name__,
-            'submitted_value': (raw if isinstance(raw, (int, float, str))
-                                and not isinstance(raw, bool) else repr(raw)),
+            'submitted_value': gonderilen,
             'reason': reason,
             'reached_solver': False,
-        })
+        }
+        if code is not None:
+            kayit['reason_code'] = code
+        if accepted_range is not None:
+            kayit['accepted_range'] = [float(accepted_range[0]),
+                                       float(accepted_range[1])]
+            kayit['unit'] = SOLID_OVERRIDE_FIELD_UNITS.get(key)
+        kayitlar.append(kayit)
 
     def _flag_true(self, key):
         """overrides[key] açıkça doğru mu? ('1', 'true', True, 1 kabul edilir)"""
@@ -2306,6 +2748,8 @@ class SolidRocketEngine:
             'structural_output': [
                 'case_mass', 'nozzle_mass', 'closure_mass',
                 'insulation_mass', 'avionics_mass',
+                # V301/K-B (NK-30): astar kütlesi satırı (çıktı).
+                'liner_mass',
             ],
             # Statik ateş test DÜZENEĞİ parametreleri: ölçüm zincirini
             # tanımlarlar, motorun kendisini değil. Motor performansına
@@ -2382,13 +2826,39 @@ class SolidRocketEngine:
                 ['burn_rate_coefficient', 'burn_rate_exponent']
                 if getattr(self, 'burn_rate_law_key', None) else []
             ),
+            # V301/K-B (KT-04/05): gönderilen erozif k / σ kalibre yakıt
+            # tablosu varken bayraksız geldi ve UYGULANMADI (kip 'katalog').
+            'overridden_by_catalogue': (
+                (['erosive_k'] if getattr(self, '_erosive_k_not_applied',
+                                          False) else [])
+                + (['temp_coeff'] if getattr(self, '_temp_coeff_not_applied',
+                                             False) else [])),
+            # V301/K-B (KT-12): akma kaynağı 'material' iken gönderilen
+            # yield_strength uygulanmadı (cidar ve patlama aynı kayıttan).
+            'overridden_by_material': (
+                ['yield_strength'] if getattr(self, '_yield_not_applied',
+                                              False) else []),
+            # V301/K-B (KT-07): tane tipine göre anlamı olmayan alanlar —
+            # YALNIZ gönderildiyse listelenir (beyan çürümesi olmasın).
+            'not_applicable_to_grain_type': [
+                ad for ad in self._grain_type_inapplicable_fields()
+                if self.overrides.get(ad) not in (None, '')],
         }
 
     def _nozzle_material_key(self):
-        """Kullanıcının seçtiği lüle malzemesinin normalleştirilmiş anahtarı."""
-        return str(self.overrides.get('nozzle_material')
-                   or self.overrides.get('throat_material')
-                   or 'graphite').strip().lower().replace(' ', '_')
+        """Kullanıcının seçtiği lüle malzemesinin normalleştirilmiş anahtarı.
+
+        V301/K-B (KT-10): materials_db takma adı KANONİK ada çözülür
+        ('c-c' -> 'carbon_carbon'); hibrit M deseniyle aynı. Çözülemeyen ad
+        ham kalır (doğrudan motor kullanımında ``not_analyzed`` + gerekçe;
+        ``/calculate_solid`` onu 422 ile reddeder).
+        """
+        ham = str(self.overrides.get('nozzle_material')
+                  or self.overrides.get('throat_material')
+                  or SOLID_NOZZLE_DEFAULT_MATERIAL).strip().lower().replace(
+                      ' ', '_')
+        kayit = solid_nozzle_material_record(ham)
+        return kayit['material_key'] if kayit is not None else ham
 
     def analyze_nozzle_material(self):
         """Seçilen lüle malzemesinin boğaz termal marjı + erozyon durumu.
@@ -2496,9 +2966,7 @@ class SolidRocketEngine:
         döner (grafit, C-C). Fenolik/tungsten için yayımlanmış bant yok →
         katsayı uydurulmaz, None döner.
         """
-        key = str(self.overrides.get('nozzle_material')
-                  or self.overrides.get('throat_material')
-                  or 'graphite').strip().lower().replace(' ', '_')
+        key = self._nozzle_material_key()
         mapped = SOLID_NOZZLE_EROSION_MATERIAL.get(key)
         if not mapped:
             return None
@@ -2722,10 +3190,21 @@ class SolidRocketEngine:
         default'ları (15/35 mm) fiziksel boğaz boyutlandırmasını ezmesin
         diye motor kendi kütle dengesinden boyutlandırmaya devam eder.
         """
+        # V301/N-CEA-2 (K1): kaydın termokimya dörtlüsü form ezmelerinden
+        # ÖNCE saklanır; CEA yalnız kullanıcı bunları değiştirmediyse
+        # uygulanır (sayfa katalog satırını seçince aynı değerleri gönderir).
+        kayit_termo = (self.c_star, self.gamma, self.T_c,
+                       getattr(self, 'mw_exhaust', None))
         m = self._override_val('density', 500.0, 3000.0)
         if m is not None:
             self.rho_p = m
-        m = self._override_val('char_velocity', 800.0, 2500.0)
+        # V301/K-D: parti yoğunluk çarpanı motorun KENDİ yoğunluğuna (kayıt
+        # ya da kullanıcının girdiği değer) uygulanır; çarpan 1 iken bit-aynı.
+        if self._propellant_lot is not None:
+            self.rho_p = self.rho_p * self._propellant_lot['density_scale']
+        from hrma.data.propellants_db import PROPELLANT_C_STAR_RANGE_M_S
+        m = self._override_val('char_velocity',
+                               *PROPELLANT_C_STAR_RANGE_M_S)
         if m is not None:
             self.c_star = m
         m = self._override_val('gamma', 1.05, 1.5)
@@ -2778,6 +3257,8 @@ class SolidRocketEngine:
         # ------------------------------------------------------------------
         kalibre = getattr(self, '_table_coeff_present', {})
         table_k = getattr(self, 'erosive_burning_coeff', 0.0)
+        self._erosive_k_not_applied = False
+        self._temp_coeff_not_applied = False
         m = self._override_val('erosive_k', 0.0, 1.0)
         self.erosive_coefficient_source = (
             'propellant table ({0})'.format(self.propellant_type)
@@ -2798,6 +3279,9 @@ class SolidRocketEngine:
                         form_value=float(m), table_value=float(table_k),
                         propellant=self.propellant_type))
             else:
+                # V301/K-B (KT-04): gönderilip UYGULANMAYAN değer adıyla
+                # bildirilir (unwired_inputs.overridden_by_catalogue).
+                self._erosive_k_not_applied = True
                 self.erosive_coefficient_source = (
                     'propellant table ({0}): k = {1:g}. The form field '
                     'erosive_k sent {2:g}, which was NOT applied - the page '
@@ -2828,6 +3312,8 @@ class SolidRocketEngine:
                         form_value=float(m), table_value=float(table_sigma),
                         propellant=self.propellant_type))
             else:
+                # V301/K-B (KT-05): aynı beyan (overridden_by_catalogue).
+                self._temp_coeff_not_applied = True
                 self.temp_coeff_source = (
                     'propellant table ({0}): sigma_p = {1:g} 1/K. The form '
                     'field temp_coeff sent {2:g}, which was NOT applied - the '
@@ -2868,6 +3354,19 @@ class SolidRocketEngine:
         #    değer artık ayrı saklanır ve TÜM verim/teorik-Isp raporları ona
         #    normalize edilir. char_velocity override'ı bu satırdan ÖNCE
         #    uygulandığı için kullanıcının girdiği c* da teorik kabul edilir.
+        # V301/N-CEA-2 (K1): bileşimi bilinen itici için T_c, c*, γ_s, M
+        # motorun KENDİ Pc'sinde NASA CEA'dan (yanma verimi bundan SONRA).
+        self._apply_cea_thermochemistry(kayit_termo)
+        # V301/K-D (K-C1 AÇIK 1): parti c* çarpanı TEORİK c*'a, motorun kendi
+        # termokimya kaynağından (CEA / katalog / kullanıcı) SONRA uygulanır.
+        # Eski yol c*'ı ``char_velocity`` girdisi olarak basıyordu: çarpan 1
+        # iken de motor CEA yolundan ``user_entered`` yoluna geçiyor (γ, T_c,
+        # M kaydın tek basınç değerlerine dönüyor) ve UQ'da teslim edilen c*
+        # teorik sanıldığı için yanma verimi İKİ KEZ uygulanıyordu. Ölçüldü
+        # (K-C1/uq_sonra.json, sayfa yükü): UQ nominali Isp 205,00 ⟷ ana
+        # tasarım 217,18 s, c* 1426,35 ⟷ 1501,42 m/s.
+        if self._propellant_lot is not None:
+            self.c_star = self.c_star * self._propellant_lot['c_star_scale']
         self.c_star_theoretical = self.c_star
         self.combustion_efficiency = 1.0
         m = self._override_val('combustion_efficiency', 0.50, 1.0)
@@ -2929,16 +3428,43 @@ class SolidRocketEngine:
             # _case_material_properties ya kayıt bulur ya açık hata verir.
             props = self._case_material_properties(self.case_material)
             self.case_yield_strength = props['yield_strength']
-            if props['generic_allowable'] and self.overrides.get(
-                    'yield_strength') in (None, ''):
+            _kip_malz = str(self.overrides.get('yield_strength_source')
+                            or '').strip().lower() == 'material'
+            if props['generic_allowable'] and (self.overrides.get(
+                    'yield_strength') in (None, '') or _kip_malz):
                 self.design_warnings.append(_w(
                     'warn.solid.case_generic_allowable', 'warning',
                     material=self.case_material,
                     yield_strength_mpa=round(props['yield_strength'] / 1e6),
                     density_kg_m3=round(props['density'])))
+        # V301/K-B (KT-12): akmanın KAYNAĞI açık kiple seçilir.
+        #   'material' -> seçilen kaydın akması; cidar boyutlandırması ve
+        #                 patlama basıncı AYNI kayıttan (kimlik bölünmesi yok).
+        #                 Gönderilen yield_strength UYGULANMAZ ve adıyla
+        #                 bildirilir (unwired_inputs.overridden_by_material).
+        #   'user'     -> kullanıcının değeri cidarı boyutlandırır; kayıttan
+        #                 farklıysa adlı uyarı (patlama basıncı kaydın
+        #                 akmasıyla hesaplanır, iki sayı ayrı yazılır).
+        #   (yok)      -> eski API sözleşmesi: değer gönderildiyse 'user'.
+        self.case_yield_strength_source = 'material_record'
+        self._yield_not_applied = False
+        kip = self.overrides.get('yield_strength_source')
+        kip = kip.strip().lower() if isinstance(kip, str) else None
         m = self._override_val('yield_strength', 10.0, 3000.0)   # MPa
-        if m is not None:
+        if m is not None and kip == 'material':
+            self._yield_not_applied = True
+        elif m is not None:
             self.case_yield_strength = m * 1e6
+            self.case_yield_strength_source = 'user'
+            kayit = solid_case_material_record(self.case_material)
+            if (kayit is not None and not kayit['generic_allowable']
+                    and not np.isclose(m, kayit['yield_strength_mpa'],
+                                       rtol=1e-9, atol=0.0)):
+                self.design_warnings.append(_w(
+                    'warn.solid.case_yield_differs_from_material', 'warning',
+                    material=str(self.case_material),
+                    user_mpa=float(m),
+                    record_mpa=float(kayit['yield_strength_mpa'])))
         self.case_safety_factor = SOLID_CASE_DESIGN['design_safety_factor']
         m = self._override_val('safety_factor', 1.1, 10.0)
         if m is not None:
@@ -2966,7 +3492,13 @@ class SolidRocketEngine:
         if m is not None:
             self.ambient_pressure_bar = m / 100.0
         self.ambient_temperature = SOLID_THERMAL['ambient_temperature_k']
-        m = self._override_val('ambient_temp', 200.0, 350.0)
+        # V301/CI-ÜRÜN (28 Eki): bant TEK KAYNAKTAN — değer kapısının
+        # (``motor_validation`` -> ``AMBIENT_TEMPERATURE_BAND_K``) okuduğu
+        # sayı. ÖLÇÜLDÜ (``docs/scofield/raw/OH/V301/ci-urun/k2_once.json``):
+        # eski literal 200-350 ile kapı 180-340 ayrışıyordu; 180-199,9 K
+        # kapıdan geçip burada reddediliyor (298 K varsayılanı), 340,1-350 K
+        # formdan geçip kapıda 400 alıyordu.
+        m = self._override_val('ambient_temp', *AMBIENT_TEMPERATURE_BAND_K)
         if m is not None:
             self.ambient_temperature = m
 
@@ -3037,14 +3569,70 @@ class SolidRocketEngine:
         # _case_inner_diameter'da yazılıydı: D_kasa_iç >= D_grain + 2·yalıtım
         # (Sutton & Biblarz 9. baskı Böl. 12: hacimsel doluluk ve yalıtım
         # payı). Alan verilmediğinde eski davranış BİT-AYNI kalır.
+        #
+        # v3.0.1 (V301/K-A, KT-01/KT-03; ana model kararı A, 22 Eki) —
+        # İKİ GİRDİ BİÇİMİ, TEK KURAL:
+        #   * ``outer_diameter`` VERİLDİ (sayfa her zaman gönderir): tane dış
+        #     çapı odur ve ``chamber_diameter`` DAİMA kasa iç çapı beyanıdır.
+        #     Eski "iki alan eşitse beyan sayma" özel durumu KALKTI (ölçüldü:
+        #     100/100 + 3 mm yalıtım kasa beyanını sessizce 106 mm'ye
+        #     büyütüyordu, uyarısız). ``chamber_diameter`` boş gönderilirse
+        #     (anahtar var, değer None/'') kasa türetilir ve beyan edilir.
+        #   * ``outer_diameter`` VERİLMEDİ (tek çaplı eski API biçimi): değer
+        #     tane dış çapı okunur, kasa türetilir; yorum ``case_bore``
+        #     künyesinde adıyla yazılır (eski API kullanıcılarının yayımlanmış
+        #     performans sayıları değişmez).
+        # Kural: kasa iç çapı >= tane dış çapı + 2·(astar + yalıtım). Astar
+        # radyal yer KAPLAR (KT-03: kütle ve ısıl dirençte vardı, çapta
+        # yoktu). Beyan edilen kasa sığmıyorsa tasarım YAYIMLANMAZ:
+        # ``SolidDesignRejected`` -> uçta 422 ``grain_does_not_fit_case``,
+        # gereken en küçük çapla (``_check_case_fit``). Sessiz büyütme ve
+        # "büyüt + uyar" yolu yok (hibrit port-kamara KARAR 3 deseni).
         # ------------------------------------------------------------------
         self.case_bore_input_m = None
-        m = self._override_val('outer_diameter', 1.0, 5000.0)       # mm
-        if m is not None and abs(m / 1000.0 - self.D_chamber) > 1e-9:
-            # chamber_diameter kullanıcının kasa iç çapı beyanıdır; grain dış
-            # çapı ayrı bir alandan gelir.
-            self.case_bore_input_m = self.D_chamber
+        self.case_bore_source = 'derived_from_grain'
+        self.grain_outer_diameter_source = 'chamber_diameter_single_diameter_form'
+        m = self._override_val('outer_diameter',
+                               *SOLID_OUTER_DIAMETER_RANGE_MM)      # mm
+        if m is not None:
+            self.grain_outer_diameter_source = 'outer_diameter'
+            # Anahtar YOKSA (doğrudan Python API) kurucu argümanı kasa
+            # beyanıdır (kalem 29'dan beri öyle); anahtar VAR ama boşsa
+            # kullanıcı kasayı HRMA'ya bırakmıştır.
+            _ch_ham = self.overrides.get('chamber_diameter', self)
+            if _ch_ham is None or _ch_ham == '':
+                self.case_bore_source = 'derived_from_grain'
+            else:
+                self.case_bore_input_m = self.D_chamber
+                self.case_bore_source = 'chamber_diameter'
             self.D_chamber = m / 1000.0
+            # KT-14 (motor ayağı): kurucu kapısı çekirdeği KURUCU ARGÜMANINA
+            # (kasa) karşı sınadı; tane dış çapı ayrı geldiğinde çekirdek
+            # TANEYE sığmak zorundadır (radyal yanan tipte). Uç katmanı
+            # buna imalat payını ayrıca ekler (``/calculate_solid``).
+            if (self.grain_type != 'end_burner'
+                    and self.D_core >= self.D_chamber - 1e-12):
+                _od = self.D_chamber * 1000.0
+                _c = self.D_core * 1000.0
+                _mesaj = (
+                    f'No design was published: the core diameter {_c:g} mm '
+                    f'is not smaller than the grain outer diameter '
+                    f'{_od:g} mm (outer_diameter), so the '
+                    f'{self.grain_type} grain has no propellant web. Enter '
+                    f'a core diameter below {_od:g} mm or a larger grain '
+                    f'outer diameter.')
+                raise SolidDesignRejected(_mesaj, [{
+                    'field': 'core_diameter',
+                    'reason': 'core_not_inside_grain',
+                    'submitted': _c,
+                    'grain_outer_diameter_mm': _od,
+                    'accepted_range': [0.0, _od],
+                    'accepted_range_exclusive': [True, True],
+                    'unit': 'mm',
+                    'motor_form': 'solid',
+                    'message': _mesaj,
+                }], 'core_not_inside_grain')
+        self._check_case_fit()
 
         # ------------------------------------------------------------------
         # 8) PARÇALI yanma hızı yasası (F025, 2026-07-25)
@@ -3070,6 +3658,41 @@ class SolidRocketEngine:
         self.burn_rate_law_key = None
         law_key = (self.overrides.get('burn_rate_law')
                    or self.overrides.get('burn_rate_preset'))
+        # V301/K-C2 (NK-70, ana model kararı "karışık kayıt OLMAZ"): açık
+        # seçilen rejim tablosu başka bir yakıtınsa (APCP kimliği + KNDX
+        # rejim tablosu) motor ÇÖZÜLMEZ. Ölçüldü (taban 688bc30b2, örnek →
+        # katalogda APCP): ekranda APCP a/n varken çözücü KNDX tablosuyla
+        # koştu (yanma süresi 2,27 s; APCP a-n ile beklenen 2,6-2,7 s).
+        # Uyarı + devam yerine RET: itki eğrisi, süre ve basınç yanlış yakıta
+        # ait olurdu. Yasası olmayan ön ayar ('custom', 'knsu') bu kapıya
+        # girmez — o zaman tek a-n çifti kullanılır ve kimliğe bağlı değildir.
+        if law_key and _brdb.has_law(law_key):
+            _yasa = str(law_key).strip().lower()
+            _kimlik_ham = str(self.propellant_type or '').strip().lower()
+            _kimlik_kanon = _catalog_key_for(_kimlik_ham) or _kimlik_ham
+            if _kimlik_kanon != (_catalog_key_for(_yasa) or _yasa):
+                _kimlik = _kimlik_ham
+                _alan = ('burn_rate_law' if self.overrides.get('burn_rate_law')
+                         else 'burn_rate_preset')
+                _mesaj = (
+                    f"No design was published: the burn-rate regime table "
+                    f"'{_yasa}' ({_alan}) belongs to a different propellant "
+                    f"than the selected propellant '{_kimlik}' "
+                    f"(propellant_type). The thrust curve, burn time and "
+                    f"pressure would come from '{_yasa}' while the identity "
+                    f"says '{_kimlik}'. Select the preset of the same "
+                    f"propellant, or 'custom' to use the a-n pair.")
+                raise SolidDesignRejected(_mesaj, [{
+                    'field': _alan,
+                    'reason': 'burn_rate_law_propellant_mismatch',
+                    'submitted': str(law_key),
+                    'propellant_type': _kimlik,
+                    'accepted_values': sorted(
+                        {'custom'} | ({_kimlik} if _brdb.has_law(_kimlik)
+                                      else set())),
+                    'motor_form': 'solid',
+                    'message': _mesaj,
+                }], 'burn_rate_law_propellant_mismatch')
         if not law_key and _brdb.has_law(self.propellant_type):
             law_key = self.propellant_type
         if law_key and _brdb.has_law(law_key):
@@ -3115,6 +3738,296 @@ class SolidRocketEngine:
             "record for it, and falling back to steel would silently report "
             "the wrong dry mass and structural margin. Pick a supported "
             "material or enter density and yield strength explicitly.")
+
+    # ------------------------------------------------------------------
+    # V301/N-CEA-2 — termokimya (K1/K3) ve lüle (K2) NASA CEA'dan
+    # ------------------------------------------------------------------
+    def _cea_composition_key(self):
+        """CEA bileşim kartı olan katalog anahtarı (yoksa None)."""
+        from hrma.analysis.cea_karsilastirma import SOLID_CEA_COMPOSITIONS
+        raw = str(self.propellant_type or '').strip().lower()
+        if raw in SOLID_CEA_COMPOSITIONS:
+            return raw
+        key = _catalog_key_for(raw)
+        return key if key in SOLID_CEA_COMPOSITIONS else None
+
+    def _apply_cea_thermochemistry(self, kayit_termo):
+        """K1 + K3: T_c, c*, γ_s ve M motorun KENDİ Pc'sinde NASA CEA'dan.
+
+        Kural (fail-closed, sessiz yedek YOK):
+          * kullanıcı c*/γ/T_c/M'den birini kaydın değerinden farklı girdiyse
+            girilen değerler kalır (``user_entered``);
+          * itici bileşimi bilinmiyorsa ya da CEA çözümü yoksa katalog
+            dörtlüsü (tek basınçta) kalır ve gerekçesiyle BEYAN edilir
+            (``catalogue_single_pressure`` + ``warn.solid.thermochemistry_
+            single_pressure``);
+          * aksi hâlde CEA: T_c, c* (teorik), γ_s (oda, kayan denge).
+            M (K3, tek tanım): genleşme/karışım bağıntılarına giren
+            ``mw_exhaust`` = CEA M(1/n) (gaz molü başına karışım kütlesi;
+            c* özdeşliği bu M ile kapanır), gaz-yalnız M =
+            (1 − x_c)·M(1/n) ve oda yoğun faz kütle kesri x_c ayrı alanlarda
+            tutulur (iki faz modülü gaz-yalnız M'i okur). Katalogdaki iki
+            uzlaşım (APCP 1/n, KN-şeker 1/totn) CEA yolunda artık KULLANILMAZ.
+        """
+        from hrma.analysis.cea_karsilastirma import (
+            SOLID_COMPOSITION_UNAVAILABLE, solid_cea_solution)
+        self._cea_solution = None
+        self._cea_nozzle_cache = None
+        self.mw_gas_only = None
+        self.condensed_mass_fraction_chamber = None
+        self.thermochemistry_reason = None
+        simdi = (self.c_star, self.gamma, self.T_c,
+                 getattr(self, 'mw_exhaust', None))
+        alanlar = ('char_velocity', 'gamma', 'flame_temp', 'molecular_weight')
+        degisen = []
+        for ad, eski, yeni in zip(alanlar, kayit_termo, simdi):
+            if eski is None or yeni is None:
+                if eski is not yeni:
+                    degisen.append(ad)
+            elif not self._matches_record_value(yeni, eski):
+                degisen.append(ad)
+        if degisen:
+            self.thermochemistry_source = SOLID_THERMO_SOURCE_USER
+            self.thermochemistry_reason = {
+                'code': 'user_entered_thermochemistry',
+                'message': ('the user entered %s different from the '
+                            'propellant record; the entered values are used '
+                            'and NASA CEA is not applied'
+                            % ', '.join(degisen))}
+            return
+        key = self._cea_composition_key()
+        if key is None:
+            anahtar = (_catalog_key_for(self.propellant_type)
+                       or str(self.propellant_type or '').strip().lower())
+            kod, mesaj = SOLID_COMPOSITION_UNAVAILABLE.get(
+                anahtar, ('propellant_composition_not_defined',
+                          'no machine-readable composition is defined for '
+                          '%r' % (anahtar,)))
+            sol = {'status': 'unavailable',
+                   'reason': {'code': kod, 'message': mesaj}}
+        else:
+            sol = solid_cea_solution(key, float(self.P_c), None)
+        if sol.get('status') != 'available':
+            self.thermochemistry_source = SOLID_THERMO_SOURCE_CATALOGUE
+            self.thermochemistry_reason = dict(sol.get('reason') or {})
+            self.design_warnings.append(dict(_w(
+                'warn.solid.thermochemistry_single_pressure', 'info',
+                propellant=str(self.propellant_type)),
+                fallback=("Thermochemistry of '{propellant}' (T_c, c*, gamma, "
+                          "M) is the catalogue record at ONE pressure, not "
+                          "NASA CEA at this chamber pressure (no composition "
+                          "is defined for it, or CEA returned no solution; "
+                          "the reason is in thermochemistry.reason).")))
+            return
+        oda = sol['chamber']
+        self._cea_solution = sol
+        self.thermochemistry_source = SOLID_THERMO_SOURCE_CEA
+        self.T_c = float(oda['T_c_K'])
+        self.c_star = float(oda['c_star_m_s'])
+        self.gamma = float(oda['gamma_s'])
+        self.mw_exhaust = float(oda['M_1_n'])
+        self.mw_gas_only = float(oda['M_gas_only'])
+        self.condensed_mass_fraction_chamber = float(
+            oda['condensed_mass_fraction'])
+        # Donmuş oda gamma'sı (Bartz/iki faz) kaydın tek basınçlı CEA
+        # değeridir; aynı itici olduğu için kural sürer (beyanlı:
+        # thermochemistry bloğu ``frozen_gamma_source``).
+        if getattr(self, 'gamma_frozen_chamber', None) is not None:
+            self._gamma_frozen_equilibrium_ref = self.gamma
+            self._mw_frozen_record_ref = self.mw_exhaust
+        nominal = sol.get('nominal_composition')
+        if nominal:
+            dusuk = nominal.get('confidence') == 'low'
+            self.design_warnings.append(dict(_w(
+                ('warn.solid.thermochemistry_nominal_low_confidence' if dusuk
+                 else 'warn.solid.thermochemistry_nominal_composition'),
+                'warning' if dusuk else 'info',
+                propellant=str(self.propellant_type)),
+                fallback=(
+                    "NASA CEA thermochemistry of '{propellant}' uses a "
+                    "nominal composition chosen by HRMA (the record gives it "
+                    "only approximately). LOW CONFIDENCE: charcoal is taken "
+                    "as graphite; real charcoal gives more gas."
+                    if dusuk else
+                    "NASA CEA thermochemistry of '{propellant}' uses a "
+                    "nominal composition chosen by HRMA (the record gives it "
+                    "only approximately, e.g. ~85/~15 wt%).")))
+
+    def _cea_active(self):
+        return (getattr(self, 'thermochemistry_source', None)
+                == SOLID_THERMO_SOURCE_CEA
+                and getattr(self, '_cea_solution', None) is not None)
+
+    def _cea_point(self, pc_bar, pa_bar):
+        """CEA çözümü (oda + optimum lüle) — önbellekli, asla fırlatmaz."""
+        from hrma.analysis.cea_karsilastirma import solid_cea_solution
+        return solid_cea_solution(self._cea_composition_key(), float(pc_bar),
+                                  float(pa_bar))
+
+    def _cea_nozzle_state(self):
+        """K2: tasarım Pc ve ortamında CEA kayan denge lülesi + eşdeğer üs.
+
+        CEA optimum genişlemeyi (P_e = P_a) yoğun faz dahil kayan dengeyle
+        çözer: ε_opt, C_F, P_e, T_e, M_e. HRMA'nın tasarım dışı (yanma
+        boyunca Pc(t)) ve ayrılma zinciri tek-γ bağıntılarıyla kuruludur;
+        CEA bunlara İKİ sayıyla bağlanır (sıvı motorun eşdeğer üs deseni):
+
+          * γ_n: tek-γ alan oranı bağıntısı CEA'nın (P_e/P_c, ε_opt) çiftini
+            TAM üretsin (S&B 9. baskı Eş. 3-25/3-26 tersi, kök arama);
+          * κ = C_F,mom,CEA / C_F,mom,1B(γ_n): momentum terimi CEA'nınkine
+            tasarım noktasında TAM eşit olsun.
+
+        Tasarım noktasında ε, P_e, C_F CEA'nın kendisidir; sabit geometrili
+        lülede P_e/P_c ve momentum terimi Pc'den bağımsız alınır (CEA'da
+        zayıf bağımlılık; beyanlı). Çözüm yoksa None (+ gerekçe); çağıranlar
+        tek-γ (oda γ_s) bağıntısına BEYANLA döner.
+        """
+        if not self._cea_active():
+            return None
+        p_amb = float(getattr(self, 'ambient_pressure_bar',
+                              SEA_LEVEL_PRESSURE_BAR))
+        anahtar = (round(float(self.P_c), 12), round(p_amb, 12))
+        onb = getattr(self, '_cea_nozzle_cache', None)
+        if onb is not None and onb[0] == anahtar:
+            return onb[1]
+        durum = None
+        gerekce = None
+        sol = self._cea_point(self.P_c, p_amb)
+        lule = sol.get('nozzle') if sol.get('status') == 'available' else None
+        if lule is None:
+            gerekce = (sol.get('nozzle_reason') or sol.get('reason')
+                       or {'code': 'cea_nozzle_unavailable', 'message': ''})
+        else:
+            eps_d = float(lule['expansion_ratio'])
+            pr_d = 1.0 / float(lule['pc_over_pe'])
+
+            def _eps_1b(g):
+                m2 = (2.0 / (g - 1.0)) * (pr_d ** (-(g - 1.0) / g) - 1.0)
+                if m2 <= 1.0:
+                    return float('nan')
+                m = np.sqrt(m2)
+                return float((1.0 / m) * ((2.0 / (g + 1.0)) * (
+                    1.0 + (g - 1.0) / 2.0 * m2)) ** ((g + 1.0) / (
+                        2.0 * (g - 1.0))) - eps_d)
+            try:
+                from scipy.optimize import brentq
+                lo, hi = SOLID_NOZZLE_GAMMA_BRACKET
+                g_n = float(brentq(_eps_1b, lo, hi, xtol=1e-13))
+            except Exception:
+                g_n = None
+            if g_n is None or not np.isfinite(g_n):
+                gerekce = {'code': 'nozzle_equivalent_exponent_not_found',
+                           'message': ('no isentropic exponent in %r '
+                                       'reproduces the CEA area ratio %.6g at '
+                                       'Pe/Pc = %.6g'
+                                       % (SOLID_NOZZLE_GAMMA_BRACKET, eps_d,
+                                          pr_d))}
+            else:
+                cf_mom_1b = self._cf_momentum_1d(pr_d, g_n)
+                kappa = float(lule['cf_momentum']) / cf_mom_1b
+                durum = dict(lule, gamma_nozzle=g_n, cf_anchor=kappa,
+                             pressure_ratio=pr_d,
+                             ambient_pressure_bar=p_amb)
+        if durum is None and not getattr(self, '_cea_nozzle_warned', False):
+            self._cea_nozzle_warned = True
+            self.design_warnings.append(dict(_w(
+                'warn.solid.cea_nozzle_unavailable', 'warning',
+                propellant=str(self.propellant_type),
+                pressure_bar=round(float(self.P_c), 2)),
+                fallback=("NASA CEA did not solve the nozzle expansion of "
+                          "'{propellant}' at {pressure_bar} bar; the nozzle "
+                          "(area ratio, thrust coefficient) uses the "
+                          "single-gamma isentropic relations with the CEA "
+                          "chamber gamma instead (reason in "
+                          "thermochemistry.nozzle.reason).")))
+        self._cea_nozzle_reason = gerekce
+        self._cea_nozzle_cache = (anahtar, durum)
+        return durum
+
+    def _nozzle_gamma(self):
+        """Lüle bağıntılarının üssü: CEA lülesi varsa γ_n, yoksa self.gamma."""
+        d = self._cea_nozzle_state()
+        return float(d['gamma_nozzle']) if d else float(self.gamma)
+
+    def _nozzle_cf_anchor(self):
+        """Momentum teriminin CEA çapası κ (CEA lülesi yoksa 1)."""
+        d = self._cea_nozzle_state()
+        return float(d['cf_anchor']) if d else 1.0
+
+    @staticmethod
+    def _cf_momentum_1d(pressure_ratio, gamma):
+        """S&B Eş. 3-30 momentum terimi, γ parametreli (çapasız)."""
+        g = float(gamma)
+        genisleme = max(0.0, 1 - float(pressure_ratio) ** ((g - 1) / g))
+        return float(np.sqrt(2 * g ** 2 / (g - 1)
+                             * (2 / (g + 1)) ** ((g + 1) / (g - 1))
+                             * genisleme))
+
+    def thermochemistry_report(self):
+        """Yanıtın ``thermochemistry`` bloğu: kaynak, değerler, lüle tabanı."""
+        sol = getattr(self, '_cea_solution', None)
+        lule = self._cea_nozzle_state() if self._cea_active() else None
+        blok = {
+            'source': getattr(self, 'thermochemistry_source',
+                              SOLID_THERMO_SOURCE_CATALOGUE),
+            'reason': getattr(self, 'thermochemistry_reason', None),
+            'chamber_pressure_bar': float(self.P_c),
+            'chamber_temperature_K': float(self.T_c),
+            'c_star_theoretical_m_s': float(self._c_star_theoretical()),
+            'gamma_chamber': float(self.gamma),
+            'molecular_weight': float(getattr(self, 'mw_exhaust', 0.0)),
+            'molecular_weight_convention': (
+                'M = 1/n (NASA RP-1311 Part I eq. 2.3a): mixture mass per mole '
+                'of gas, condensed phase included in the mass'
+                if self._cea_active() else
+                'catalogue record convention (see the record source text)'),
+            'molecular_weight_gas_only': getattr(self, 'mw_gas_only', None),
+            'condensed_mass_fraction_chamber': getattr(
+                self, 'condensed_mass_fraction_chamber', None),
+        }
+        if self._cea_active():
+            blok.update({
+                'program': ('NASA CEA (Gordon & McBride, NASA RP-1311) '
+                            'through RocketCEA (CEA2); rocket problem, '
+                            'equilibrium (shifting) composition, infinite-area '
+                            'combustor, condensed species in equilibrium'),
+                'composition_key': self._cea_composition_key(),
+                'nominal_composition': sol.get('nominal_composition'),
+                'frozen_gamma_source': (
+                    'catalogue record (one NASA CEA run at the record '
+                    'pressure); its chamber-pressure dependence is not '
+                    'modelled' if getattr(self, 'gamma_frozen_chamber', None)
+                    is not None else None),
+            })
+        if lule:
+            blok['nozzle'] = {
+                'basis': ('NASA CEA shifting-equilibrium expansion (condensed '
+                          'phase included) to P_e = P_ambient at the design '
+                          'chamber pressure; off-design steps keep the fixed '
+                          'geometry with an equivalent single-gamma exponent '
+                          'gamma_nozzle that reproduces the CEA (P_e/P_c, '
+                          'area ratio) pair and a momentum anchor cf_anchor '
+                          'that reproduces the CEA thrust coefficient'),
+                'expansion_ratio_optimum': lule['expansion_ratio'],
+                'thrust_coefficient_optimum': lule['cf_optimum'],
+                'thrust_coefficient_vacuum': lule['cf_vac'],
+                'exit_pressure_bar': lule['exit_pressure_bar'],
+                'exit_temperature_K': lule['exit_temperature_K'],
+                'exit_mach': lule['exit_mach'],
+                'gamma_nozzle': lule['gamma_nozzle'],
+                'cf_anchor': lule['cf_anchor'],
+            }
+        elif self._cea_active():
+            blok['nozzle'] = {
+                'basis': ('single-gamma isentropic relations with the CEA '
+                          'chamber gamma: CEA did not solve the nozzle'),
+                'reason': getattr(self, '_cea_nozzle_reason', None),
+            }
+        else:
+            blok['nozzle'] = {
+                'basis': ('single-gamma isentropic relations with the '
+                          'propellant gamma (S&B 9th ed. Eq. 3-25/3-30)')}
+        return blok
 
     def _c_star_theoretical(self):
         """Teorik (kayıpsız) karakteristik hız [m/s] — TEK tanım noktası.
@@ -3191,14 +4104,121 @@ class SolidRocketEngine:
         grain fiziksel olarak kasaya sığmak zorundadır. Sığmıyorsa geometrik
         alt sınır uygulanır ve tutarsızlık koşu uyarısıyla bildirilir
         (bkz. calculate_performance, warn.solid.case_bore_too_small).
+
+        v3.0.1 (V301/K-A, KT-01/KT-03): (1) radyal yığın astar + yalıtımdır
+        — ``_thermal_barrier_thickness`` (kütle zinciri ``_insulation_liner_
+        masses`` ve ısıl direnç aynı iki katmanı zaten görüyordu; çap
+        görmüyordu: 60 mm astarlı tane 3 mm'lik boşluğa "sığıyordu").
+        (2) Beyan edilen kasa artık SESSİZCE büyütülmez: sığmıyorsa kurucu
+        ``_check_case_fit`` ile reddeder, buraya sığan beyan ulaşır ve
+        AYNEN kullanılır. ``warn.solid.case_bore_too_small`` kalktı.
         """
-        geometric_minimum = (self.D_chamber
-                             + 2.0 * getattr(self, 'insulation_thickness_m',
-                                             0.0))
         declared = getattr(self, 'case_bore_input_m', None)
         if declared is not None:
-            return max(float(declared), geometric_minimum)
-        return geometric_minimum
+            return float(declared)
+        return self._case_inner_diameter_required()
+
+    def _case_inner_diameter_required(self):
+        """Tanenin sığdığı en küçük kasa iç çapı [m] — TEK tanım noktası.
+
+        D_kasa_iç,min = D_tane + 2·(t_astar + t_yalıtım). Yığın sırası
+        ``SOLID_THERMAL_LAYER_ORDER``dadır (astar taneye yapışık, yalıtım
+        onun dışında); iki katmanın toplamı ``_thermal_barrier_thickness``.
+        """
+        return float(self.D_chamber
+                     + 2.0 * self._thermal_barrier_thickness())
+
+    def _check_case_fit(self):
+        """Beyan edilen kasa tane + astar + yalıtımı alıyor mu? Almıyorsa RET.
+
+        V301/K-A (KT-01; ana model kararı 1, 22 Eki). Ret cümlesinin BAŞINDA
+        eyleme dönük sayı (gereken en küçük çap) durur: hibritte ölçüldü,
+        arayüz uzun sunucu cümlesini kesebiliyordu (``hybrid_rocket_engine``
+        zarf reddi notu). Gereken çap 0,1 mm'ye YUKARI yuvarlanır ki öneri
+        kapıdan geçsin. Tolerans 1e-9 m: eski uyarı kapısının toleransı.
+        """
+        declared = getattr(self, 'case_bore_input_m', None)
+        if declared is None:
+            return
+        gereken = self._case_inner_diameter_required()
+        if float(declared) >= gereken - 1e-9:
+            return
+        gereken_mm = _ceil_tenth_mm(gereken * 1000.0)
+        beyan_mm = float(declared) * 1000.0
+        tane_mm = float(self.D_chamber) * 1000.0
+        astar_mm = max(float(getattr(self, 'liner_thickness', 0.0)), 0.0) \
+            * 1000.0
+        yalitim_mm = max(float(getattr(self, 'insulation_thickness_m', 0.0)),
+                         0.0) * 1000.0
+        mesaj = (
+            f'No design was published: the case inner diameter '
+            f'(chamber_diameter) {beyan_mm:g} mm is below the '
+            f'{gereken_mm:.1f} mm minimum that the {tane_mm:g} mm grain '
+            f'needs with its {astar_mm:g} mm liner and {yalitim_mm:g} mm '
+            f'insulation (case inner diameter >= grain outer diameter + '
+            f'2 x (liner + insulation)). Enter at least {gereken_mm:.1f} mm, '
+            f'leave chamber_diameter empty so HRMA derives the case from the '
+            f'grain, or reduce outer_diameter, liner_thickness or '
+            f'insulation_thickness; the case is not enlarged silently.')
+        raise SolidDesignRejected(mesaj, [{
+            'field': 'chamber_diameter',
+            'reason': 'grain_does_not_fit_case',
+            'submitted': beyan_mm,
+            'required_min': gereken_mm,
+            'unit': 'mm',
+            'grain_outer_diameter_mm': tane_mm,
+            'liner_thickness_mm': astar_mm,
+            'insulation_thickness_mm': yalitim_mm,
+            'rule': SOLID_CASE_FIT_RULE,
+            'motor_form': 'solid',
+            'message': mesaj,
+        }], 'grain_does_not_fit_case')
+
+    def _case_bore_block(self):
+        """``case_bore`` künyesi: kasa iç çapı NEREDEN geldi (V301/K-A).
+
+        Ana model kararı A (22 Eki): iki girdi biçiminin hangisinin
+        kullanıldığı ve kasa çapının kuralı yanıtta ADIYLA durur. Sayılar
+        motorun kullandığı değerlerdir (burada yeniden hesaplanmaz).
+        """
+        gereken = self._case_inner_diameter_required()
+        kullanilan = self._case_inner_diameter()
+        tane_kaynak = getattr(self, 'grain_outer_diameter_source',
+                              'chamber_diameter_single_diameter_form')
+        kasa_kaynak = getattr(self, 'case_bore_source', 'derived_from_grain')
+        tane_mm = float(self.D_chamber) * 1000.0
+        if kasa_kaynak == 'chamber_diameter':
+            mesaj = (
+                f'chamber_diameter is the case inner diameter you declared '
+                f'({kullanilan * 1000.0:g} mm); the {tane_mm:g} mm grain '
+                f'(outer_diameter) fits it with its liner and insulation '
+                f'(minimum {gereken * 1000.0:g} mm).')
+        elif tane_kaynak == 'outer_diameter':
+            mesaj = (
+                f'chamber_diameter was left empty, so the case inner '
+                f'diameter was derived from the {tane_mm:g} mm grain '
+                f'(outer_diameter): {kullanilan * 1000.0:g} mm = grain outer '
+                f'diameter + 2 x (liner + insulation).')
+        else:
+            mesaj = (
+                f'outer_diameter was not supplied, so chamber_diameter '
+                f'({tane_mm:g} mm) was read as the grain outer diameter '
+                f'(single-diameter form); the case inner diameter was '
+                f'derived as grain outer diameter + 2 x (liner + insulation) '
+                f'= {kullanilan * 1000.0:g} mm.')
+        return {
+            'case_inner_diameter_mm': kullanilan * 1000.0,
+            'case_inner_diameter_source': kasa_kaynak,
+            'grain_outer_diameter_mm': tane_mm,
+            'grain_outer_diameter_source': tane_kaynak,
+            'required_min_case_inner_diameter_mm': gereken * 1000.0,
+            'liner_thickness_mm': max(float(getattr(
+                self, 'liner_thickness', 0.0)), 0.0) * 1000.0,
+            'insulation_thickness_mm': max(float(getattr(
+                self, 'insulation_thickness_m', 0.0)), 0.0) * 1000.0,
+            'rule': SOLID_CASE_FIT_RULE,
+            'message': mesaj,
+        }
 
     def _case_inner_length(self):
         """Kasa iç boyu [m] = grain yığını + BATES segment araları + kapaklar.
@@ -3372,9 +4392,15 @@ class SolidRocketEngine:
 
     #: /calculate_solid uç noktasının kurucu varsayılanı. İstemci
     #: 'propellant_type' göndermediğinde uç nokta bu değeri koyduğu için
-    #: "kullanıcı gerçekten APCP seçti" ile "alan hiç gelmedi" ayrımı yalnız
-    #: overrides sözlüğüne bakarak yapılabilir.
-    _DEFAULT_PROPELLANT_TYPE = 'apcp'
+    #: "kullanıcı gerçekten seçti" ile "alan hiç gelmedi" ayrımı yalnız
+    #: overrides sözlüğüne bakarak yapılabilir. V301/K-C2: son dalın
+    #: düştüğü değer tek tanımdan (``SOLID_DEFAULT_PROPELLANT_TYPE``).
+    #: "Seçilmedi" sayılan kurucu argümanı YALNIZ kütüphane varsayılanıdır
+    #: (``SOLID_CONSTRUCTOR_PROPELLANT_TYPE``); ``/calculate_solid`` alan
+    #: gelmediğinde kurucuya boş dize verir (açık 'kndx' argümanı bir seçimdir,
+    #: kütüphane çağıranlarının davranışı değişmez).
+    _DEFAULT_PROPELLANT_TYPE = SOLID_DEFAULT_PROPELLANT_TYPE
+    _UNCHOSEN_PROPELLANT_TYPES = (SOLID_CONSTRUCTOR_PROPELLANT_TYPE,)
 
     def _resolve_propellant_type(self):
         """Yakıt kimliğini formun GERÇEKTEN gönderdiği alanlardan çözer.
@@ -3406,24 +4432,54 @@ class SolidRocketEngine:
         # sayılmaz; aksi hâlde ad/ön ayar üzerinden türetme yolu kapanır ve
         # motor yine sessizce APCP çözerdi.
         given = str(self.propellant_type or '').strip().lower()
-        # Uç noktanın koyduğu varsayılanı "kullanıcı seçimi" saymayız.
-        if given and given != self._DEFAULT_PROPELLANT_TYPE:
+        # Uç noktanın (ve kütüphane kurucusunun) koyduğu varsayılanı
+        # "kullanıcı seçimi" saymayız.
+        if given and given not in self._UNCHOSEN_PROPELLANT_TYPES:
             self.propellant_type = given
             self.propellant_type_source = 'constructor argument'
             return
+        # V301/K-C2 (NK-29/NK-70): açık kimlik yoksa ön ayar ve ad AYRI AYRI
+        # çözülür. İkisi FARKLI katalog kayıtlarına iniyorsa (ör. ad 'APCP',
+        # ön ayar 'kndx') hangisinin yakıt olduğu girdiden okunamaz; birini
+        # seçmek karışık kayıt üretir (yanma hızı bir yakıttan, ad/termokimya
+        # ötekinden). Fail-closed: 422 + iki alan adıyla.
+        adaylar = []
         for field, label in (('burn_rate_preset', 'burn-rate preset'),
                              ('propellant_name', 'propellant name')):
             candidate = _catalog_key_from_text(self.overrides.get(field))
-            if not candidate:
-                continue
+            if candidate:
+                adaylar.append((field, label, candidate))
+        if len({c for _, _, c in adaylar}) > 1:
+            (f1, _, c1), (f2, _, c2) = adaylar[0], adaylar[1]
+            _mesaj = (
+                f"No design was published: no propellant_type was sent and "
+                f"the two fields that name a propellant disagree - {f1} = "
+                f"'{self.overrides.get(f1)}' is the catalogue record '{c1}', "
+                f"{f2} = '{self.overrides.get(f2)}' is '{c2}'. Choosing one "
+                f"would mix two propellants (burn rate from one, identity "
+                f"from the other). Send propellant_type (the solid page's "
+                f"catalogue selector) or make the two fields agree.")
+            raise SolidDesignRejected(_mesaj, [{
+                'field': 'propellant_type',
+                'reason': 'propellant_identity_conflict',
+                'submitted': None,
+                'conflicting_fields': {f1: str(self.overrides.get(f1)),
+                                       f2: str(self.overrides.get(f2))},
+                'resolved_records': {f1: c1, f2: c2},
+                'motor_form': 'solid',
+                'message': _mesaj,
+            }], 'propellant_identity_conflict')
+        for field, label, candidate in adaylar[:1]:
             self.propellant_type = candidate
             self.propellant_type_source = f'{label} ({field})'
             self.design_warnings.append(dict(_w(
                 'warn.solid.propellant_type_derived', 'info',
                 propellant=candidate, field=field,
                 value=str(self.overrides.get(field))),
-                fallback=("The solid motor page has no explicit propellant "
-                          "selector, so the propellant identity was derived "
+                fallback=("This request did not send propellant_type (the "
+                          "solid page sends its catalogue selector; a "
+                          "project saved before v3.0.5 or an API call may "
+                          "not), so the propellant identity was derived "
                           "from '{field}' = '{value}' and resolved to "
                           "'{propellant}'. Grain mechanics, two-phase loss "
                           "and the published mixture come from that record.")))
@@ -3431,9 +4487,9 @@ class SolidRocketEngine:
         self.propellant_type = given or self._DEFAULT_PROPELLANT_TYPE
         self.propellant_type_source = 'endpoint default'
         # Kullanıcı bir yakıt ADI yazdı ama hiçbir katalog kaydına
-        # oturmadı: motor varsayılan kompozit kaydını çözer ve bu SESSİZ
-        # KALAMAZ. _grain_mechanics burada uyarmaz, çünkü 'apcp' kaydı
-        # vardır — kullanıcı kendi karışımı için HTPB sayılarını görür.
+        # oturmadı: motor varsayılan kaydı çözer ve bu SESSİZ KALAMAZ.
+        # _grain_mechanics burada uyarmaz, çünkü varsayılan kayıt vardır —
+        # kullanıcı kendi karışımı için o kaydın sayılarını görür.
         typed_name = str(self.overrides.get('propellant_name') or '').strip()
         if typed_name and not _catalog_key_from_text(typed_name):
             self.design_warnings.append(dict(_w(
@@ -3475,11 +4531,16 @@ class SolidRocketEngine:
                 'nozzle_efficiency': 0.985  # Divergence + friction losses
             },
             'black_powder': {
-                'rho': 1650,
-                'c_star': 945.3,  # Verified from ballistics data
-                'gamma': 1.251,
-                'T_c': 2216.4,
-                'molecular_weight': 33.21,
+                # V301/N-CEA-2 K5: termokimya İKİNCİ KEZ YAZILMAZ, merkezi
+                # katalogdan okunur (apcp deseni). Eski kopya (c* 945,3 —
+                # CEA idealinin %20 üstü, kaynaksız) kaldırıldı.
+                'rho': _PROPELLANT_CATALOG['black_powder']['density'],
+                'c_star': _PROPELLANT_CATALOG['black_powder']['c_star'],
+                'gamma': _PROPELLANT_CATALOG['black_powder']['gamma'],
+                'T_c': _PROPELLANT_CATALOG['black_powder'][
+                    'flame_temperature'],
+                'molecular_weight': _PROPELLANT_CATALOG['black_powder'][
+                    'molecular_weight'],
                 'name': 'Black Powder (KNO3/C/S)',
                 'density_temp_coeff': -0.9e-3,
                 'c_star_pressure_coeff': 1.8,
@@ -3736,10 +4797,45 @@ class SolidRocketEngine:
         adıdır; ikincisi eskiden sessizce yok sayılıyordu.
         """
         n_max = SOLID_DESIGN_POINT['max_segments']
-        user_n = self._override_val('grain_count', 1, n_max)
+        anahtar = 'grain_count'
+        user_n = self._override_val(anahtar, 1, n_max)
         if user_n is None:
-            user_n = self._override_val('n_segments', 1, n_max)
-        return int(round(user_n)) if user_n is not None else None
+            anahtar = 'n_segments'
+            user_n = self._override_val(anahtar, 1, n_max)
+        if user_n is None:
+            return None
+        # v3.0.1 (V301/K-A, KT-13): segment sayısı TAM SAYIDIR. 2,5 eskiden
+        # ``int(round(2.5)) = 2`` ile sessizce kesiliyordu (ölçüldü: HTTP
+        # 200, itki 3114 N, ret yok). Tam olmayan değer reddedilir ve
+        # ``rejected_inputs``e işlenir; ``/calculate_solid`` onu 422'ye
+        # çevirir. Tam sayıya eşit bir ondalık (3.0) kabul edilir.
+        if abs(float(user_n) - round(float(user_n))) > 1e-9:
+            self._reject_input(
+                anahtar, self.overrides.get(anahtar),
+                'value {} is not a whole number of grain segments; the '
+                'field was ignored and the built-in segment count was used '
+                'instead.'.format(round(float(user_n), 6)),
+                code='not_a_whole_number', accepted_range=(1, n_max))
+            return None
+        return int(round(user_n))
+
+    #: V301/K-B (KT-07): BATES dışı tiplerde anlamı olmayan alanlar. Ölçüldü
+    #: (denetim ``tane_tipi.json``): star / finocyl / slotted / wagon_wheel /
+    #: end_burner'da bu alanların her biri değiştirildiğinde 0 sonuç yaprağı
+    #: değişiyor (tane tek segment, uç/dış yüzey düzeni tipin kendi
+    #: tanımından). Uç yanmalı tanede çekirdek de yoktur.
+    _BATES_ONLY_FIELDS = ('grain_count', 'n_segments', 'grain_gap',
+                          'inhibit_front', 'inhibit_rear', 'inhibit_outer')
+
+    def _grain_type_inapplicable_fields(self):
+        """Bu tane tipinde hesaba GİRMEYEN girdi alanları (beyan listesi)."""
+        tip = str(getattr(self, 'grain_type', '') or '').strip().lower()
+        if tip == 'bates':
+            return ()
+        alanlar = self._BATES_ONLY_FIELDS
+        if tip == 'end_burner':
+            alanlar = alanlar + ('core_diameter',)
+        return alanlar
 
     # ------------------------------------------------------------------
     # Tasarım noktası: hedef ortalama itki + yanma süresinden boyutlandırma
@@ -3752,10 +4848,12 @@ class SolidRocketEngine:
         önbelleklenir (itki eğrisi her adımda çağırır, ε sabittir).
         """
         cache = getattr(self, '_pe_ratio_cache', None)
-        key = (round(float(self.gamma), 12), round(float(epsilon), 12))
+        # V301/N-CEA-2 (K2): lüle bağıntılarının üssü (CEA lülesi varsa
+        # eşdeğer üs γ_n; tasarım ε'unda CEA'nın P_e/P_c'sini TAM verir).
+        gamma = float(self._nozzle_gamma())
+        key = (round(gamma, 12), round(float(epsilon), 12))
         if cache is not None and cache[0] == key:
             return cache[1]
-        gamma = float(self.gamma)
         eps = max(float(epsilon), 1.0000001)
 
         def area_ratio(M):
@@ -3795,7 +4893,7 @@ class SolidRocketEngine:
         _exit_pressure_ratio sayısal çözümü başaramazsa (ratio = 0 döner)
         alanlar None kalır — sayı UYDURULMAZ, egzoz çizilmez.
         """
-        gamma = float(self.gamma)
+        gamma = float(self._nozzle_gamma())
         epsilon = float(self._estimate_expansion_ratio())
         pe_ratio = float(self._exit_pressure_ratio(epsilon))
         p_amb = float(getattr(self, 'ambient_pressure_bar',
@@ -3823,6 +4921,17 @@ class SolidRocketEngine:
         #     M_e*sqrt(g*R_s*T_e) == CF_momentum(eps) * c*_tek_faz_ideal
         # (ikisi de sqrt(2*g*R_s*(T_c - T_e)/(g-1))'e indirgenir).
         v_gaz = float(m_e * np.sqrt(gamma * r_specific * t_exit))
+        # V301/N-CEA-2 (K2): CEA lülesi tasarım ε'undaysa çıkış Mach'ı,
+        # sıcaklığı ve (karışım) hızı CEA'nın kayan denge çözümünden:
+        # u_e = C_F,mom,CEA · c*_CEA (NASA RP-1311: Isp(P_e) = u_e/g0).
+        lule = self._cea_nozzle_state()
+        cea_cikis = bool(lule) and abs(
+            epsilon / float(lule['expansion_ratio']) - 1.0) <= 1e-9
+        if cea_cikis:
+            m_e = float(lule['exit_mach'])
+            t_exit = float(lule['exit_temperature_K'])
+            v_gaz = float(lule['cf_momentum']) * float(
+                self._c_star_theoretical())
         # --- ÖH D20 / P2B1-01 · TEK KAYNAK: EGZOZ HIZI TESLİM EDİLEN c*'TAN --
         # ÖLÇÜLDÜ (docs/scofield/raw/OH/D20/fizik/a1/once.json): bu blok
         # egzoz hızını kaydın (gamma, MW, T_c) ÜÇLÜSÜNDEN çözüyordu, yani
@@ -3854,7 +4963,8 @@ class SolidRocketEngine:
         # FAIL-CLOSED: tek fazlı ideal c* çözülemezse oran kurulamaz ve
         # hız YAYIMLANMAZ (uydurma sayı yok, egzoz çizilmez).
         c_star_teslim = float(getattr(self, 'c_star', 0.0) or 0.0)
-        c_star_ideal = _ideal_single_phase_c_star(gamma, self.T_c, mw)
+        c_star_ideal = (float(self._c_star_theoretical()) if cea_cikis else
+                        _ideal_single_phase_c_star(gamma, self.T_c, mw))
         if (c_star_ideal is None or not np.isfinite(c_star_ideal)
                 or c_star_ideal <= 0.0 or c_star_teslim <= 0.0):
             v_exit = None
@@ -3881,7 +4991,19 @@ class SolidRocketEngine:
                 'gas+condensed mixture, not the velocity of a hypothetical '
                 'single-phase gas. No nozzle efficiency is applied (that is '
                 'what separates this number from Isp*g0)')
+        if cea_cikis:
+            hiz_temeli = (
+                'v_e = CF_momentum_CEA(eps) * c*_delivered: NASA CEA '
+                'shifting-equilibrium exit state (condensed phase included, '
+                'mass-averaged velocity) at the design chamber pressure, '
+                'scaled by the combustion efficiency; exit Mach number and '
+                'temperature are the CEA exit-station values. No nozzle '
+                'efficiency is applied (that is what separates this number '
+                'from Isp*g0)') if v_exit is not None else hiz_temeli
         state.update({
+            'exit_state_source': ('nasa_cea_shifting_equilibrium'
+                                  if cea_cikis else
+                                  'single_gamma_isentropic'),
             'exit_pressure_bar': float(pe_ratio * self.P_c),
             'exit_mach': m_e,
             'exit_temperature_k': t_exit,
@@ -3931,11 +5053,10 @@ class SolidRocketEngine:
         hem vakum zinciri bu bağıntıyı kullanır; ikisi ayrı yazılırsa aynı
         motorun iki farklı fiziği olur (v2.6.27, F2-2).
         """
-        gamma = float(self.gamma)
-        gamma_term = 2 * gamma ** 2 / (gamma - 1)
-        stagnation_term = (2 / (gamma + 1)) ** ((gamma + 1) / (gamma - 1))
-        genisleme = max(0.0, 1 - float(pressure_ratio) ** ((gamma - 1) / gamma))
-        return float(np.sqrt(gamma_term * stagnation_term * genisleme))
+        # V301/N-CEA-2 (K2): CEA lülesi varsa γ_n ve CEA çapası κ (tasarım
+        # P_e/P_c'sinde momentum terimi CEA'nınkine TAM eşit).
+        return float(self._nozzle_cf_anchor() * self._cf_momentum_1d(
+            pressure_ratio, self._nozzle_gamma()))
 
     def _thrust_coefficient_vacuum(self):
         """Bu motorun KENDİ lülesinin vakum itki katsayısı (verim uygulanmış).
@@ -4020,7 +5141,7 @@ class SolidRocketEngine:
         Dönüş alanları: cf, cf_ideal, cf_attached_ideal, separated,
         separation_area_ratio, pe_bar, pe_over_pa, choked, status, criterion.
         """
-        gamma = float(self.gamma)
+        gamma = float(self._nozzle_gamma())
         p_amb = float(getattr(self, 'ambient_pressure_bar',
                               SEA_LEVEL_PRESSURE_BAR))
         durum = {
@@ -4200,8 +5321,20 @@ class SolidRocketEngine:
         return (float(np.mean(curve['thrust'])), float(curve['time'][-1]),
                 float(np.max(curve['thrust'])))
 
-    def _bates_geometry_for(self, thrust, burn_time, locked_segments=None):
+    def _bates_geometry_for(self, thrust, burn_time, locked_segments=None,
+                            detay=None, kapi=True):
         """Hedefi tutturan BATES geometrisi (orta-web nötr aile) veya None.
+
+        ``kapi=False`` yalnız boyutlandırma döngüsünün KEŞİF adımı içindir
+        (V301/K-D): kapıdan geçen aday yoksa döngü etkin hedefi düzeltmek
+        için eski seçimi (kapı sınanmadan) ölçer; o geometri SONUÇ olamaz.
+
+        ``detay`` sözlüğü verilirse çözümsüzlüğün NEDENİ yazılır
+        (``geometric_candidates``: boyut sınırlarından geçen aday sayısı,
+        ``port_rejected``: port kapısına takılan aday sayısı,
+        ``best_port_to_throat``: sınanan adayların en büyük kapı oranı). Zarf
+        notu çözümsüzlüğün port kapısından mı, boyut sınırlarından mı
+        geldiğini bu sayılardan söyler (V301/K-D).
 
         Zincir (Sutton & Biblarz Böl. 12):
           mdot = F/(CF·c*)          — boğulmuş akış + itki katsayısı
@@ -4216,6 +5349,9 @@ class SolidRocketEngine:
         en küçük BATES yığınından bile küçükse) çözüm YOKTUR.
         """
         lim = SOLID_DESIGN_POINT
+        if detay is not None:
+            detay.update(geometric_candidates=0, port_rejected=0,
+                         best_port_to_throat=None)
         r_design = self._design_burn_rate()
         if r_design <= 0 or thrust <= 0 or burn_time <= 0:
             return None
@@ -4264,18 +5400,102 @@ class SolidRocketEngine:
                 'slenderness': slenderness,
             })
 
+        if detay is not None:
+            detay['geometric_candidates'] = len(feasible)
         if not feasible:
             return None
-        preferred = [g for g in feasible
-                     if g['port_to_throat'] >= lim['port_to_throat_target']]
-        if not preferred:
-            preferred = [g for g in feasible
-                         if g['port_to_throat'] >= lim['port_to_throat_min']]
-        if not preferred:
-            preferred = feasible
-        return min(preferred,
-                   key=lambda g: abs(g['slenderness']
-                                     - lim['target_slenderness']))
+        if not kapi:
+            # Keşif: eski seçim kuralı aynen (ilk dolu kademe, inceltme).
+            kademe = ([g for g in feasible if g['port_to_throat']
+                       >= lim['port_to_throat_target']]
+                      or [g for g in feasible if g['port_to_throat']
+                          >= lim['port_to_throat_min']]
+                      or feasible)
+            return min(kademe, key=lambda g: abs(g['slenderness']
+                                                 - lim['target_slenderness']))
+        # V301/K-D (T-çapa-A DEVİR 2 + T-çapa-B DEVİR 1): PORT ⟷ BOĞAZ
+        # KAPISI BOYUTLANDIRMANIN KISITIDIR. Eski seçim yukarıdaki kapalı
+        # form oranını (A_t = F/(CF·Pc), ortalama itkinin boğazı) yalnız
+        # TERCİH için okuyordu; ≥ 2 aday yoksa "uygun olan herhangi biri"
+        # seçiliyordu. Ölçüldü (taban 2facae6a0, Ø100/35/300 BATES, APCP,
+        # 40 bar, 3 s): 300 N -> çekirdek 6,76 mm, kapı oranı 0,655 ->
+        # boyutlandırıcının ürettiği tasarımı motorun kendi port kapısı
+        # (``_check_port_throat``) 422 ile reddediyordu. Zarf da aynı
+        # çözücüye sorulduğu için duyurduğu sınır (287,50 N) çözülemiyordu.
+        #
+        # Artık her aday kapının KENDİ ölçütüyle (``_port_throat_areas``:
+        # A_port,0 > A_t; yayımlanan geometrik boğaz, çözücünün boğaz
+        # boyutlandırması) sınanır; geçemeyen aday seçilmez. Zarf ikiye
+        # bölmesi bu fonksiyona sorduğu için duyurduğu sınır kapıyla aynı
+        # sayıdır (tek kaynak). Tercih kademeleri (≥ 4, ≥ 2) ve inceltme
+        # ölçütü DEĞİŞMEDİ, yalnız kapıdan geçemeyen aday atlanır: eski
+        # seçim kapıdan geçiyorsa ilk sınanan aday odur -> geometri
+        # bit-aynı.
+        kademeler = (
+            [g for g in feasible
+             if g['port_to_throat'] >= lim['port_to_throat_target']],
+            [g for g in feasible
+             if g['port_to_throat'] >= lim['port_to_throat_min']],
+            feasible,
+        )
+        denenen = set()
+        for kademe in kademeler:
+            for g in sorted(kademe,
+                            key=lambda g: abs(g['slenderness']
+                                              - lim['target_slenderness'])):
+                if id(g) in denenen:
+                    continue
+                denenen.add(id(g))
+                alanlar = self._candidate_port_throat_areas(g)
+                oran = (alanlar[0] / alanlar[1]
+                        if alanlar is not None else None)
+                if detay is not None and oran is not None and (
+                        detay['best_port_to_throat'] is None
+                        or oran > detay['best_port_to_throat']):
+                    detay['best_port_to_throat'] = float(oran)
+                if alanlar is None or not alanlar[0] > alanlar[1]:
+                    if detay is not None:
+                        detay['port_rejected'] += 1
+                    continue
+                # Yayımlanan oran kapının oranıdır, kapalı form tahmini
+                # değil: kullanıcı bu sayıyı ekrandaki boğazla doğrular.
+                g['port_to_throat'] = float(oran)
+                return g
+        return None
+
+    def _candidate_port_throat_areas(self, geom):
+        """Aday geometrinin port kapısı alanları — motorun durumu DEĞİŞMEZ.
+
+        V301/K-D. Aday (``_bates_geometry_for`` sözlüğü) geçici olarak
+        kurulur, ``_port_throat_areas`` (``_check_port_throat`` ile AYNI
+        ölçüt) okunur, geometri ve segment anahtarı eski hâline döner.
+        Geometri memoları ``_grain_geometry_key`` ile anahtarlıdır, bayat
+        sonuç dönmez. Boğaz taraması yanma hızı tavanına dokunduysa
+        ``_burn_rate_clipped_max`` kaydı da geri alınır: atılan bir adayın
+        izi kullanıcı uyarısına sızmaz (``_equilibrium_pressure_fallback``
+        deseni). Aday boğazı boyutlandırılamıyorsa ``None`` (fail-closed:
+        boyutlandırıcı o adayı kabul etmez).
+        """
+        eski = (self.D_chamber, self.D_core, self.L_grain)
+        seg_vardi = 'grain_count' in self.overrides
+        seg_eski = self.overrides.get('grain_count')
+        kirpma_vardi = '_burn_rate_clipped_max' in self.__dict__
+        kirpma_eski = self.__dict__.get('_burn_rate_clipped_max')
+        try:
+            self._install_geometry(geom)
+            return self._port_throat_areas()
+        except SolidGeometryError:
+            return None
+        finally:
+            self.D_chamber, self.D_core, self.L_grain = eski
+            if seg_vardi:
+                self.overrides['grain_count'] = seg_eski
+            else:
+                self.overrides.pop('grain_count', None)
+            if kirpma_vardi:
+                self._burn_rate_clipped_max = kirpma_eski
+            else:
+                self.__dict__.pop('_burn_rate_clipped_max', None)
 
     def _end_burner_geometry_for(self, thrust, burn_time):
         """Hedefi tutturan sigara-yanması geometrisi veya None.
@@ -4513,7 +5733,7 @@ class SolidRocketEngine:
         }
 
     def _bates_envelope_note(self, thrust, burn_time, locked_segments=None,
-                             bounds=None):
+                             bounds=None, port_limited_ratio=None):
         """BATES ailesinin ulaşılamayan hedef için yapısal (dilsiz) açıklaması.
 
         Tek bir ``{code, params, severity}`` kaydı döner. Seçenek listesi
@@ -4521,6 +5741,16 @@ class SolidRocketEngine:
         ``params['options']`` içinde kendi kodlarıyla taşınır; frontend her
         seçeneği yerelleştirip birleştirir ve ``{options}`` yer tutucusuna
         yerleştirir. Metnin anlamı ve sayıları eski sürümle birebir aynıdır.
+
+        V301/K-D: çözümsüzlüğü PORT KAPISI bağlıyorsa (boyut sınırlarından
+        geçen her aday A_port,0 ≤ A_t; ``port_limited_ratio`` = sınanan
+        adayların en büyük kapı oranı) eski metin YANLIŞ olurdu ("uç
+        yüzeyler fazla yanma alanı üretiyor" bu durumda neden değildir).
+        O durumda kod ``warn.solid.bates_envelope_port``tır ve seçenekler
+        yalnız çözücünün kendisiyle doğrulanmış olanlardır (itki tabanı,
+        süre tavanı — ikisi de kapıyı içeren ikiye bölmeden) ve uç-yanmalı
+        tane (portu tam kesittir); yönü kapıya göre belirsiz olan basınç
+        önerisi bu kodda verilmez.
         """
         r_design = self._design_burn_rate()
         # ÖH D26 (P15B3-02): sınırlar çağıran tarafından ZATEN hesaplandıysa
@@ -4538,6 +5768,19 @@ class SolidRocketEngine:
         if np.isfinite(t_max):
             options.append(_w('warn.solid.opt_shorten_burn', 'info',
                               max_burn_time_s=round(t_max * 0.99, 2)))
+        if port_limited_ratio is not None:
+            options.append(_w('warn.solid.opt_select_end_burner', 'info'))
+            return _w('warn.solid.bates_envelope_port', 'warning',
+                      chamber_pressure_bar=round(self.P_c, 1),
+                      burn_rate_mm_s=round(r_design * 1000, 1),
+                      burn_time_s=round(burn_time, 2),
+                      web_mm=round(r_design * burn_time * 1000),
+                      thrust_N=round(thrust),
+                      # Aşağı yuvarlanır: oran ≤ 1 iken yazılan sayı 1'e
+                      # yuvarlanıp "1'i aşmalı" cümlesiyle çelişmesin.
+                      port_to_throat=float(np.floor(
+                          float(port_limited_ratio) * 1000.0) / 1000.0),
+                      options=options)
         options.append(_w('warn.solid.opt_lower_chamber_pressure', 'info'))
         options.append(_w('warn.solid.opt_select_end_burner', 'info'))
         return _w('warn.solid.bates_envelope', 'warning',
@@ -4714,6 +5957,18 @@ class SolidRocketEngine:
         best = None
         for _ in range(lim['max_iterations']):
             geom = solver(thrust_eff, time_eff, locked_segments)
+            # V301/K-D: port kapısı SONUCUN kısıtıdır, keşfin değil. Kapalı
+            # form etkin hedefi ölçülen eğriyle düzeltir; ilk turdaki aday
+            # kapıdan geçmese de düzeltilmiş hedefte geçen tasarım vardır.
+            # Ölçüldü (D32 gövdesi, double_base 5000 N / 5 s): 1. tur çekirdek
+            # 29,55 mm (kapı oranı 0,93), 2. tur (5840,2 N, 4,369 s) çekirdek
+            # 51,33 mm (oran 2,48) — eski döngü buraya ulaşıyordu; ilk turda
+            # durmak yanlış bir zarf reddi üretirdi. Kapıdan geçen aday yoksa
+            # tur yalnız KEŞİF olarak ölçülür (eski seçim), sonuç olamaz.
+            uygun = geom is not None
+            if geom is None and self.grain_type == 'bates':
+                geom = self._bates_geometry_for(thrust_eff, time_eff,
+                                                locked_segments, kapi=False)
             if geom is None:
                 break
             self._install_geometry(geom)
@@ -4722,7 +5977,7 @@ class SolidRocketEngine:
                 break
             err = max(abs(thrust_avg / thrust_target - 1.0),
                       abs(burn_time / time_target - 1.0))
-            if best is None or err < best[0]:
+            if uygun and (best is None or err < best[0]):
                 best = (err, geom, thrust_avg, burn_time, thrust_peak)
             if err <= lim['tolerance']:
                 break
@@ -4762,10 +6017,25 @@ class SolidRocketEngine:
                                         thrust_target, t, locked_segments)
                                     is not None, time_target))
                 _zarf_sebebi = DESIGN_POINT_REASON_BATES_ENVELOPE
+                # V301/K-D: çözümsüzlüğü bağlayan kısıt ADIYLA. İstenen
+                # noktada boyut sınırlarından geçen aday varsa ve hepsi
+                # port kapısına takıldıysa bağlayan kısıt kapıdır.
+                _neden = {}
+                self._bates_geometry_for(thrust_target, time_target,
+                                         locked_segments, detay=_neden)
+                _port_bagli = (
+                    _neden.get('geometric_candidates', 0) > 0
+                    and _neden.get('port_rejected', 0)
+                    == _neden.get('geometric_candidates', 0)
+                    and _neden.get('best_port_to_throat') is not None)
                 note = self._bates_envelope_note(
                     thrust_target, time_target, locked_segments,
-                    bounds=(_f_min, _t_max))
+                    bounds=(_f_min, _t_max),
+                    port_limited_ratio=(_neden['best_port_to_throat']
+                                        if _port_bagli else None))
             else:
+                _neden = {}
+                _port_bagli = False
                 _itki_siniri, _sure_siniri = self._end_burner_envelope_bounds(
                     thrust_target, time_target)
                 _zarf_sebebi = DESIGN_POINT_REASON_END_BURNER_ENVELOPE
@@ -4802,7 +6072,22 @@ class SolidRocketEngine:
                     'value, so it is reachable in practice and not a '
                     'closed-form estimate. The options in design_warnings '
                     'repeat the same bounds with a small rounding margin so '
-                    'that the printed number still solves.'),
+                    'that the printed number still solves.'
+                    + (' For the BATES family the sizing solver accepts a '
+                       'grain only if its initial port flow area is larger '
+                       'than the published throat area (the same port-to-'
+                       'throat check that rejects a given geometry), so the '
+                       'bounds already include that constraint.'
+                       if self.grain_type == 'bates' else '')),
+                # V301/K-D: çözümsüzlüğü bağlayan kısıt (yapısal, dilsiz).
+                'binding_constraint': (
+                    'port_to_throat' if _port_bagli else
+                    ('grain_size_limits' if self.grain_type == 'bates'
+                     and _neden.get('geometric_candidates') == 0
+                     else None)),
+                'best_candidate_port_to_throat_ratio': (
+                    _neden.get('best_port_to_throat') if _port_bagli
+                    else None),
             }
             self.design_warnings.append(note)
             self.design_point = self._hedef_dusuruldu_kunyesi(
@@ -4865,6 +6150,16 @@ class SolidRocketEngine:
             'sizing_applied': True,
             'segments': geom['n_segments'],
             'port_to_throat_ratio': geom['port_to_throat'],
+            # V301/K-D: BATES'te bu oran port kapısının oranıdır (A_port,0 /
+            # yayımlanan geometrik boğaz); eskiden kapalı form tahminiydi
+            # (A_t = F/(CF·Pc)) ve aynı yanıttaki boğazla tutmuyordu.
+            'port_to_throat_basis': (
+                'initial port flow area / published (geometric) throat '
+                'area of the sized grain - the same ratio the port-to-'
+                'throat check uses; the sizing accepts only grains with a '
+                'ratio above 1' if self.grain_type == 'bates' else
+                'end burner: full grain cross-section / design throat area '
+                '(closed form)'),
             'tolerance_pct': 100.0 * lim['tolerance'],
             'published_geometry_source': 'sized_to_design_point',
             'input_geometry_mm': self._geometri_mm(geom_0),
@@ -5147,10 +6442,29 @@ class SolidRocketEngine:
         Uç derinliği web'i negatife düşürmesin diye fiziksel üst sınırla kırpılır.
         """
         _pts = self._override_val('star_points', 3, 12)
+        # V301/K-B (K-A DEVİR 9): uç sayısı TAM SAYIDIR; 6,5 eskiden
+        # sessizce 6'ya yuvarlanıyordu. Ret -> /calculate_solid 422.
+        if _pts is not None and abs(float(_pts) - round(float(_pts))) > 1e-9:
+            self._reject_input(
+                'star_points', self.overrides.get('star_points'),
+                'value {} is not a whole number of star points'.format(
+                    round(float(_pts), 6)),
+                code='not_a_whole_number', accepted_range=(3, 12))
         star_points = int(round(_pts)) if _pts is not None else 6
         _dep = self._override_val('star_radius', 2.0, 60.0)
         point_depth = (_dep / 1000.0) if _dep is not None else 0.015
         max_depth = 0.8 * max((self.D_chamber - self.D_core) / 2.0, 0.002)
+        # V301/K-B (K-A DEVİR 8): fiziksel sınırı aşan derinlik artık
+        # SESSİZCE KIRPILMAZ; alan reddedilir (uç 422, en büyük değerle).
+        # Doğrudan motor kullanımı (MC/UQ) için kırpılmış değerle sürer ama
+        # ret kaydı ``rejected_inputs``te durur.
+        if _dep is not None and point_depth > max_depth + 1e-12:
+            self._reject_input(
+                'star_radius', self.overrides.get('star_radius'),
+                'point depth {:g} mm exceeds the geometric limit {:.3f} mm '
+                '(0.8 x web)'.format(_dep, max_depth * 1000.0),
+                code='exceeds_geometric_limit',
+                accepted_range=(2.0, round(max_depth * 1000.0, 3)))
         return star_points, min(point_depth, max_depth)
 
     def _star_input_report(self):
@@ -5189,17 +6503,95 @@ class SolidRocketEngine:
         n_pts, depth = self._star_params()
         return _cached_star_polygon(n_pts, self.D_core / 2.0, depth)
 
-    def _wagon_port_polygon(self):
-        """Wagon-wheel port kesiti: merkez + 6 çevre delik (shapely, metre).
+    def _wagon_params(self):
+        """Wagon-wheel geometrisi — TEK tanım noktası (model + rapor + kapı).
 
-        Delik yarıçapı r_core = D_core/4 (eski modelle aynı), çevre delikler
-        R_pitch = D_chamber/4 dairesi üzerinde eşit aralıklı. D_core <
-        D_chamber/2 olduğu sürece delikler çakışmaz; çakışırsa union bunu
-        geometrik olarak zaten doğru ele alır.
+        V301/K-B (KT-08). Dönüş: ``{'hole_count', 'hole_diameter_m',
+        'pitch_diameter_m', 'assumed_defaults', 'basis'}``. Girdi alanları:
+        ``wagon_hole_count`` (çevre delik sayısı, tam sayı),
+        ``wagon_hole_diameter`` (mm, merkez + çevre deliklerin ortak çapı),
+        ``wagon_pitch_diameter`` (mm, çevre delik merkezlerinin dairesi).
+        Verilmeyen alan ``SOLID_WAGON_WHEEL_DEFAULTS`` ile doldurulur ve
+        ``assumed_defaults`` ile beyan edilir. Geometri tutarsızsa (delikler
+        kesişiyor ya da tane dışına taşıyor) alan ``rejected_inputs``e
+        işlenir; ``/calculate_solid`` bunu 422'ye çevirir, künyede kabul
+        edilen en büyük değer yazar.
+        """
+        cfg = SOLID_WAGON_WHEEL_DEFAULTS
+        assumed = []
+        n_lo, n_hi = cfg['hole_count_range']
+        n = self._override_val('wagon_hole_count', n_lo, n_hi)
+        if n is None:
+            n = cfg['hole_count']
+            assumed.append('wagon_hole_count')
+        elif abs(float(n) - round(float(n))) > 1e-9:
+            self._reject_input(
+                'wagon_hole_count', self.overrides.get('wagon_hole_count'),
+                'value {} is not a whole number of holes'.format(
+                    round(float(n), 6)),
+                code='not_a_whole_number', accepted_range=(n_lo, n_hi))
+            n = cfg['hole_count']
+        n = int(round(n))
+        d_grain_mm = self.D_chamber * 1000.0
+        # Yarıçaplar METRE olarak tutulur; varsayılan dal eski kurulumla
+        # (D_core/4, D_chamber/4) aynı işlemle hesaplanır -> bit-aynı poligon.
+        d_h = self._override_val('wagon_hole_diameter', 0.1, d_grain_mm)
+        if d_h is None:
+            r_hole_m = self.D_core * cfg['hole_diameter_over_core'] / 2.0
+            assumed.append('wagon_hole_diameter')
+            hole_field = 'core_diameter'
+        else:
+            r_hole_m = d_h / 2000.0
+            hole_field = 'wagon_hole_diameter'
+        d_p = self._override_val('wagon_pitch_diameter', 0.1, d_grain_mm)
+        if d_p is None:
+            r_pitch_m = (self.D_chamber * cfg['pitch_diameter_over_grain']
+                         / 2.0)
+            assumed.append('wagon_pitch_diameter')
+        else:
+            r_pitch_m = d_p / 2000.0
+        d_h = r_hole_m * 2000.0
+        d_p = r_pitch_m * 2000.0
+        # Geometrik tutarlılık (yeni ayar sayısı yok: sınırlar dairelerin
+        # kesişmeme koşullarıdır). r_h: delik yarıçapı, R_p: bölüm yarıçapı.
+        r_h, r_p, r_g = d_h / 2.0, d_p / 2.0, d_grain_mm / 2.0
+        # (1) çevre delik merkez delikle kesişmez: R_p > 2·r_h
+        # (2) komşu çevre delikler kesişmez: 2·R_p·sin(π/N) > 2·r_h
+        # (3) çevre delik tane dışına taşmaz: R_p + r_h < R_g
+        d_max = min(r_p, 2.0 * r_p * np.sin(np.pi / n), 2.0 * (r_g - r_p))
+        if d_h >= d_max:
+            self._reject_input(
+                hole_field, self.overrides.get(hole_field),
+                'wagon wheel holes of {:.2f} mm diameter on a {:.2f} mm pitch '
+                'circle ({} outer holes, {:.2f} mm grain) intersect each '
+                'other or the grain outer surface; the largest hole diameter '
+                'for this pitch circle is below {:.2f} mm'.format(
+                    d_h, d_p, n, d_grain_mm, d_max),
+                code='wagon_holes_intersect',
+                accepted_range=(0.1, round(float(d_max), 3)))
+        return {
+            'hole_count': n,
+            'hole_radius_m': r_hole_m,
+            'pitch_radius_m': r_pitch_m,
+            'hole_diameter_m': 2.0 * r_hole_m,
+            'pitch_diameter_m': 2.0 * r_pitch_m,
+            'assumed_defaults': assumed,
+            'basis': (cfg['basis'] if assumed else 'user input'),
+        }
+
+    def _wagon_port_polygon(self):
+        """Wagon-wheel port kesiti: merkez + N çevre delik (shapely, metre).
+
+        V301/K-B (KT-08): geometri ``_wagon_params``tan (kullanıcı ya da
+        beyanlı varsayılan). Varsayılanlar eski modelle bit-aynı: delik
+        yarıçapı D_core/4, bölüm yarıçapı D_chamber/4, 6 çevre delik.
         """
         # Kurulum _cached_wagon_polygon'da (modül önbelleği): 7 buffer + 6
         # union'lık sabit kesit her zaman adımında yeniden kuruluyordu.
-        return _cached_wagon_polygon(self.D_core / 4.0, self.D_chamber / 4.0)
+        wp = self._wagon_params()
+        return _cached_wagon_polygon(wp['hole_radius_m'],
+                                     wp['pitch_radius_m'],
+                                     wp['hole_count'])
 
     # ------------------------------------------------------------------
     # Finocyl / slotted: radyal yuvalı port kesitleri (2026-07-19)
@@ -5271,6 +6663,13 @@ class SolidRocketEngine:
         if n is None:
             n = cfg[count_key]
             assumed.append(count_key)
+        elif abs(float(n) - round(float(n))) > 1e-9:
+            # V301/K-B (K-A DEVİR 9): sayı alanları tam sayıdır; sessiz
+            # yuvarlama yok, ret (uç 422).
+            self._reject_input(
+                count_key, self.overrides.get(count_key),
+                'value {} is not a whole number'.format(round(float(n), 6)),
+                code='not_a_whole_number', accepted_range=(c_lo, c_hi))
         n = int(round(n))
 
         w_lo, w_hi = cfg['width_range_mm']
@@ -5299,12 +6698,30 @@ class SolidRocketEngine:
         # port yarıçapında çakışmamalı.
         r_port = max(self.D_core / 2.0, 1e-4)
         r_outer = self.D_chamber / 2.0
+        # V301/K-B (K-A DEVİR 8): sınırı aşan KULLANICI değeri sessizce
+        # kırpılmaz; ret kaydı düşer (uç 422 + en büyük değer). Doğrudan motor
+        # kullanımı kırpılmış değerle sürer, ret ``rejected_inputs``te durur.
+        # Varsayılan (beyanlı) değer sınırı aşarsa eski kırpma + beyan sürer.
         max_depth = cfg['max_depth_fraction'] * max(r_outer - r_port, 1e-4)
         if depth > max_depth:
+            if depth_keys[0] not in assumed:
+                self._reject_input(
+                    depth_keys[0], self.overrides.get(depth_keys[0]),
+                    'depth {:.3f} mm exceeds the geometric limit {:.3f} mm'
+                    .format(depth * 1000.0, max_depth * 1000.0),
+                    code='exceeds_geometric_limit',
+                    accepted_range=(d_lo, round(max_depth * 1000.0, 3)))
             depth = max_depth
             clipped.append(depth_keys[0])
         max_width = cfg['max_width_fraction'] * (2.0 * np.pi * r_port / n)
         if width > max_width:
+            if width_keys[0] not in assumed:
+                self._reject_input(
+                    width_keys[0], self.overrides.get(width_keys[0]),
+                    'width {:.3f} mm exceeds the geometric limit {:.3f} mm'
+                    .format(width * 1000.0, max_width * 1000.0),
+                    code='exceeds_geometric_limit',
+                    accepted_range=(w_lo, round(max_width * 1000.0, 3)))
             width = max_width
             clipped.append(width_keys[0])
         return n, width, depth, assumed, clipped
@@ -5927,7 +7344,9 @@ class SolidRocketEngine:
             # Tam izentropik Mach-alan bağıntısı (Sutton & Biblarz 9. baskı,
             # Denk. 3-25/3-26). Pe = Pa (optimal genişleme) alınarak çıkış Mach
             # sayısı basınç oranından kapalı formda çözülür; iterasyon gerekmez.
-            gamma = self.gamma
+            # V301/N-CEA-2 (K2): lüle bağıntılarının üssü (CEA lülesi varsa
+            # eşdeğer üs γ_n; yoksa self.gamma — bit-aynı eski yol).
+            gamma = self._nozzle_gamma()
             Pe_Pc_opt = max(pressure_atm, 1e-6) / self.P_c
             epsilon_opt = self._expansion_ratio_from_pressure_ratio(Pe_Pc_opt)
             # v2.6.26 — KIRPMA BEYAN EDİLİYOR.
@@ -5976,6 +7395,11 @@ class SolidRocketEngine:
 
             CF_momentum_ideal = np.sqrt(
                 gamma_term * stagnation_term * expansion_term)
+            if self._cea_nozzle_state():
+                # V301/N-CEA-2 (K2): momentum terimi itki zincirinin TEK
+                # tanımından (γ_n + CEA çapası κ); deniz seviyesi satırı
+                # CEA'nın optimum C_F'üne eşittir.
+                CF_momentum_ideal = self._cf_momentum_term(Pe_Pc_row)
             CF_ideal = CF_momentum_ideal + pressure_thrust_term
             
             # Nozul verimi — ana itki eğrisiyle (satır ~1777) TUTARLI olmalı.
@@ -6643,6 +8067,13 @@ class SolidRocketEngine:
             mw_gas_karisim = (mw_ref is not None
                               and self._matches_record_value(
                                   self.mw_exhaust, mw_ref))
+            # V301/N-CEA-2 (K3): termokimya CEA'dansa modüle GERÇEK gaz-yalnız
+            # M girer: (1 − x_c)·M(1/n), CEA oda tür kütle kesirlerinden.
+            mw_gaz = float(self.mw_exhaust)
+            if (self._cea_active()
+                    and getattr(self, 'mw_gas_only', None) is not None):
+                mw_gaz = float(self.mw_gas_only)
+                mw_gas_karisim = False
             yogusuk_termokimyada = bool(gamma_gas_donmus or mw_gas_karisim)
             sonuc = _tpl.evaluate(
                 condensed_mass_fraction=float(beta),
@@ -6650,7 +8081,7 @@ class SolidRocketEngine:
                 chamber_pressure=float(p_c),
                 residence_time_ms=float(tau_ms),
                 gamma_gas=gamma_gas,
-                molecular_weight_gas=float(self.mw_exhaust),
+                molecular_weight_gas=mw_gaz,
                 condensed_phase_in_thermochemistry=yogusuk_termokimyada)
         except Exception as exc:
             return {
@@ -6692,7 +8123,12 @@ class SolidRocketEngine:
                     'tau = V_free*c*/(R*T_c*A_t), derived from the solver '
                     'quantities only (see _chamber_gas_residence_time_ms)'),
                 'gamma': gamma_gas,
-                'molecular_weight_g_mol': float(self.mw_exhaust),
+                'molecular_weight_g_mol': mw_gaz,
+                'molecular_weight_gas_source': (
+                    'NASA CEA gas-only molecular weight (1 - x_c) * M(1/n) at '
+                    'this chamber pressure (V301/N-CEA-2 K3)'
+                    if mw_gaz != float(self.mw_exhaust) else
+                    'mw_exhaust (see gas_property_source)'),
                 'gas_property_source': (
                     'propellant record (NASA CEA mixture): gamma is the '
                     'record\'s frozen-composition chamber GAMMAs (field '
@@ -8077,6 +9513,8 @@ class SolidRocketEngine:
 
         # Grain structural integrity — gerçek elastisite çözümü
         grain = self._calculate_grain_structural()
+        # V301/FİZİK-2 (kalem 10): gerinim kapasitesi aşıldıysa adlı uyarı.
+        self._tane_gerinim_uyarisi(grain)
         grain_stress = grain['max_grain_stress_mpa']
 
         # Kapak (baş/arka kapak) — ÖH D22 (P9B2-02). Basınç sınırının
@@ -8606,16 +10044,46 @@ class SolidRocketEngine:
         insulation_effectiveness = self._insulation_effectiveness_percent()
 
         # --- Malzeme sıcaklık sınırları: materials_db (sabit 673 K değil)
+        # V301/K-B (KT-11): kaydı olmayan malzemede (kompozit) sınır SESSİZCE
+        # çeliğin 811 K'i OLMAZ. Eskiden ``except: case_limit = 811.0``
+        # kompozit kasaya ~390 K uydurma ısıl pay yayımlıyordu. Artık sınır
+        # ``solid_case_material_record``dan (materials_db / motorun ek
+        # kaydı) okunur; sınır yoksa pay ve sınıf YAYIMLANMAZ, hüküm
+        # "değerlendirilmedi" ve adlı bir uyarı basılır.
         case_material, _sy, _sf, _t = self._case_design()
-        try:
-            from hrma.data.materials_db import get_material
-            case_limit = float(get_material(case_material)['max_service_temp'])
-        except Exception:
-            case_limit = 811.0
+        _kasa_kaydi = solid_case_material_record(case_material)
+        case_limit = (_kasa_kaydi or {}).get('max_service_temp_k')
+        case_limit = float(case_limit) if case_limit else None
+        case_limit_status = (SOLID_CASE_LIMIT_STATUS_RECORD
+                             if case_limit is not None
+                             else SOLID_CASE_LIMIT_STATUS_NO_RECORD)
         grain_limit = float(self._grain_mechanics()['cure_temperature_k'])
-        margin = case_limit - case_temperature
+        _kasa_sicaklik_durumu = dict(getattr(
+            self, '_case_temperature_status', None)
+            or {'source': 'solved', 'reason': None})
+        margin = (case_limit - case_temperature
+                  if case_limit is not None and case_temperature is not None
+                  else None)
 
-        if margin > 0.5 * case_limit:
+        if case_temperature is None:
+            # V301/K-D: kasa sıcaklığı ÇÖZÜLMEDİ — pay ve sınıf yayımlanmaz,
+            # neden adıyla söylenir (malzeme sınırı uyarısı burada yanlış
+            # sebep olurdu).
+            rating = SOLID_CASE_THERMAL_NOT_EVALUATED
+            _uyari = _w('warn.solid.case_temperature_not_solved', 'warning')
+            if all(_warning_identity(_uyari) != _warning_identity(u)
+                   for u in self.design_warnings
+                   if isinstance(u, dict)):
+                self.design_warnings.append(_uyari)
+        elif margin is None:
+            rating = SOLID_CASE_THERMAL_NOT_EVALUATED
+            _uyari = _w('warn.solid.case_thermal_not_evaluated', 'warning',
+                        material=str(case_material))
+            if all(_warning_identity(_uyari) != _warning_identity(u)
+                   for u in self.design_warnings
+                   if isinstance(u, dict)):
+                self.design_warnings.append(_uyari)
+        elif margin > 0.5 * case_limit:
             rating = 'Excellent'
         elif margin > 0.2 * case_limit:
             rating = 'Adequate'
@@ -8663,6 +10131,11 @@ class SolidRocketEngine:
             'heat_transfer': {
                 'convective_heat_flux_kw_m2': convective_heat_flux,
                 'case_temperature_k': case_temperature,
+                # V301/K-D: kasa sıcaklığının KAYNAĞI (çözüldü / çözülmedi)
+                # ve çözülmediyse nedeni; çözülmeyen değer yerine sayı yok.
+                'case_temperature_source': _kasa_sicaklik_durumu['source'],
+                'case_temperature_not_solved_reason': (
+                    _kasa_sicaklik_durumu.get('reason')),
                 'insulation_effectiveness': float(insulation_effectiveness),
                 # v2.6.26 (Y2): bu alan LİNER kalınlığını 'yalıtım' adıyla
                 # raporluyordu; kullanıcının yalıtım girdisi hiç görünmüyordu.
@@ -8696,8 +10169,21 @@ class SolidRocketEngine:
                 'cooling_requirements': 'Passive',
                 'material_temperature_limits': {
                     'case_max_temp_k': case_limit,
+                    # V301/K-B (KT-11): sınırın kaynağı adıyla; kayıt yoksa
+                    # pay None ve hüküm "değerlendirilmedi".
+                    'case_limit_status': case_limit_status,
+                    'case_limit_basis': (
+                        'max_service_temp of the case material record '
+                        '(materials_db.temperature_limits service_K)'
+                        if case_limit is not None else
+                        f"no temperature limit on record for case material "
+                        f"'{case_material}' (no sourced resin Tg / service "
+                        f"temperature in this repository); the thermal "
+                        f"verdict was NOT evaluated and no steel value was "
+                        f"substituted"),
                     'grain_max_temp_k': grain_limit,
-                    'safety_margin_k': float(margin),
+                    'safety_margin_k': (float(margin) if margin is not None
+                                        else None),
                     # ÖH D18 (P2B3-14): bu marj YALNIZ KASA marjıdır
                     # (case_max_temp_k - case_temperature_k) ama İKİ limitin
                     # altında ETİKETSİZ duruyordu. ÖLÇÜLDÜ (APCP bates
@@ -8991,10 +10477,16 @@ class SolidRocketEngine:
         if not np.isfinite(nom_throat_area) or nom_throat_area <= 0.0:
             nom_throat_area = None
 
-        # initial_temp düzeltmesi self.a'ya zaten işlendi — örneklem
-        # kurulumunda ikinci kez uygulanmasın
+        # V301/K-D: ``initial_temp`` örnek motora AYNEN geçer ve a çarpanı
+        # kurucunun DÜZELTİLMEMİŞ a'sına uygulanır (aşağıda): sıcaklık
+        # düzeltmesi örnekte bir kez, nominaldeki gibi uygulanır. Eski yol
+        # anahtarı atıp düzeltilmiş a'yı geçiriyordu; parçalı yanma hızı
+        # yasasında (KN-şeker ön ayarları) a/n ölüdür ve düzeltme
+        # ``initial_grain_temperature``den okunur, yani örnekte sessizce
+        # KAYBOLUYORDU (ölçüldü, örnek KNDX projesi T0 = 298 K: bozulmasız
+        # örnek Isp 124,246 ⟷ nominal 125,284 s; K-D/uq_once.json).
         base_ov = dict(self.overrides)
-        base_ov.pop('initial_temp', None)
+        a_kurucu = float(self._ctor_args['burn_rate_a'])
 
         # ÖH D15 a2 (P2B3-02): bu motorun yanma hızı parçalı rejim
         # tablosundan mı okunuyor? Öyleyse a/n ctor argümanları ölüdür ve
@@ -9008,17 +10500,23 @@ class SolidRocketEngine:
 
         for _ in range(n_samples):
             ov = dict(base_ov)
-            ov['density'] = self.rho_p * (
-                1.0 + rng.normal(0.0, mc['density_rel_sigma']))
-            # TEORİK c* örneklenir: base_ov 'combustion_efficiency' anahtarını
-            # taşıdığından alt motor verimi bir kez daha uygular. Teslim
-            # edilen c* verilseydi eta İKİ KEZ çarpılırdı (eta=0.8'de MC
-            # ortalaması nominalin %20 altına düşüyordu — 2026-07-19 ölçümü).
-            ov['char_velocity'] = self._c_star_theoretical() * (
-                1.0 + rng.normal(0.0, mc['c_star_rel_sigma']))
+            # V301/K-D (K-C1 AÇIK 1 / NK-53 kalanı): yoğunluk ve c* örneği
+            # motorun PARTİ kanalına çarpan olarak gider (``propellant_lot``)
+            # ve örnek motorun KENDİ kaynağına uygulanır. Eski yol c*'ı
+            # ``char_velocity`` girdisi olarak basıyordu: CEA'lı nominalde
+            # örnek motor ``user_entered`` termokimya yoluna geçiyor (γ, T_c,
+            # M kaydın tek basınç değerleri), yani dağılımın merkezi nominal
+            # motor DEĞİLDİ. Çarpan teorik c*'a uygulanır, yanma verimi
+            # örnekte bir kez (base_ov) çarpılır — eski TEORİK c* kuralı
+            # (2026-07-19, eta iki kez çarpılmaz) aynen korunur. Çekiliş
+            # sırası (yoğunluk, c*, a, n) DEĞİŞMEDİ.
+            parti = {'density_scale': 1.0 + rng.normal(
+                0.0, mc['density_rel_sigma'])}
+            parti['c_star_scale'] = 1.0 + rng.normal(
+                0.0, mc['c_star_rel_sigma'])
             args = dict(self._ctor_args)
             eps_a = rng.normal(0.0, mc['burn_rate_a_rel_sigma'])
-            args['burn_rate_a'] = self.a * (1.0 + eps_a)
+            args['burn_rate_a'] = a_kurucu * (1.0 + eps_a)
             # Alt sınır -0.5: KN-şeker plateau/mesa rejimlerinde n negatif
             # (burn_rate_db preset'leri); eski 0.1 tabanı fiziği sessizce
             # değiştiriyordu (app.py doğrulama aralığıyla tutarlı).
@@ -9029,7 +10527,8 @@ class SolidRocketEngine:
             # uygulanır ki iki yol aynı bozulmayı görsün.
             d_n = float(args['burn_rate_n']) - float(self.n)
             try:
-                sample_engine = SolidRocketEngine(overrides=ov, **args)
+                sample_engine = SolidRocketEngine(
+                    overrides=ov, propellant_lot=parti, **args)
                 if nom_throat_area is not None:
                     sample_engine.pin_throat_area(nom_throat_area)
                 # ÖH D15 a2 (P2B3-02): parçalı rejim yasası etkinse a/n
@@ -9925,9 +11424,17 @@ class SolidRocketEngine:
                           else f"{_ero_rate:.3f} mm/s")
         # CAD lüle bloğunun malzeme alanı da kullanıcının seçimini izler;
         # sabit 'Graphite' metni P2B3-03'ün ikinci yaprağıydı.
-        _nozzle_material_text = (
-            erosion_estimate.get('material_display')
-            or self._nozzle_material_key().replace('_', ' ').title())
+        # V301/K-B (KT-10): erozyon modelinin yer tutucu adı ('User-supplied
+        # coefficient') MALZEME ADI DEĞİLDİR; tungsten/fenolik lüle CAD'de bu
+        # adla yazılıyordu. Kullanıcı katsayısı verdiyse ad malzeme kaydından.
+        _nozzle_material_text = erosion_estimate.get('material_display')
+        if (not _nozzle_material_text
+                or _nozzle_material_text == 'User-supplied coefficient'):
+            _lule_kaydi = solid_nozzle_material_record(
+                self._nozzle_material_key())
+            _nozzle_material_text = (
+                _lule_kaydi['name'] if _lule_kaydi is not None
+                else self._nozzle_material_key().replace('_', ' ').title())
 
         return {
             'type': 'De Laval Nozzle',
@@ -11169,6 +12676,10 @@ class SolidRocketEngine:
             key += tuple(self._finocyl_params()[:4])
         elif self.grain_type == 'slotted':
             key += tuple(self._slotted_params()[:3])
+        elif self.grain_type == 'wagon_wheel':
+            _wp = self._wagon_params()
+            key += (_wp['hole_count'], _wp['hole_diameter_m'],
+                    _wp['pitch_diameter_m'])
         return key
 
     def _burn_area_scan(self):
@@ -11759,7 +13270,7 @@ class SolidRocketEngine:
 
         Kelepçe uygulanmaz; çağıran taraf fiziksel sınırları kendisi koyar.
         """
-        gamma = self.gamma
+        gamma = self._nozzle_gamma()
         Pe_Pc = min(max(Pe_Pc, 1e-9), 0.999999)
 
         M_e_sq = (2 / (gamma - 1)) * (Pe_Pc ** (-(gamma - 1) / gamma) - 1)
@@ -11792,8 +13303,14 @@ class SolidRocketEngine:
         deniz seviyesinde (5.93) kalıyordu — yani rapor edilen nozul, itkiyi
         üreten nozul DEĞİLDİ. Artık tek kaynak: self.ambient_pressure_bar.
         (Deniz seviyesinde, yani varsayılanda, sonuç birebir aynıdır.)
+
+        V301/N-CEA-2 (K2): bileşimi bilinen iticide ε, NASA CEA'nın kayan
+        denge (yoğun faz dahil) genişlemesinin P_e = P_ortam alan oranıdır;
+        γ_n bu oranı tek-γ bağıntısıyla aynen üretir (kök), sonuç CEA'nın
+        sayısıyla değiştirilir. Kullanıcı ε girdisi katı çözücüde yoktur
+        (``unwired_inputs`` 'computed_by_solver').
         """
-        gamma = self.gamma
+        gamma = self._nozzle_gamma()
         P_atm = float(getattr(self, 'ambient_pressure_bar',
                               SEA_LEVEL_PRESSURE_BAR))  # bar
         # İtki eğrisi her adımda çağırır; ε yalnız (gamma, Pc, P_ortam)
@@ -11847,6 +13364,9 @@ class SolidRocketEngine:
         term = 1 + (gamma - 1) / 2 * M_e ** 2
         exp_ar = (gamma + 1) / (2 * (gamma - 1))
         epsilon = (1 / M_e) * ((2 / (gamma + 1)) * term) ** exp_ar
+        _lule = self._cea_nozzle_state()
+        if _lule:
+            epsilon = float(_lule['expansion_ratio'])
 
         # ÖH D17 (P2B3-09): burada `epsilon = max(2.5, min(epsilon, 25.0))`
         # yazıyordu. ÜST kelepçe (25) hiçbir fizikten türemiyordu ve
@@ -12204,6 +13724,9 @@ class SolidRocketEngine:
                 # ÖH D15 (P2B1-02): sigma_p'nin kaynağı yayımlanır.
                 'sigma_p_source': str(getattr(self, 'temp_coeff_source',
                                               'propellant table')),
+                # V301/K-B (KT-05): KULLANILAN σp sayı olarak da yayımlanır;
+                # sayfanın 'katalog' kipindeki salt okur alan bunu basar.
+                'sigma_p_per_k': float(sigma_p),
                 'basis': (
                     f'Computed from this motor: sigma_p={sigma_p:.5f} 1/K, '
                     f'T_ref={t_ref:.2f} K, n={n_exp:.3f}. Burn rate follows '
@@ -12349,7 +13872,14 @@ class SolidRocketEngine:
         from hrma.analysis.structural_analysis import (
             STRUCTURAL_VERDICT_NOT_EVALUATED)
         kasa_gecerlilik = self._case_model_validity()
-        if (kasa_gecerlilik.get('model_validity_limit_exceeded') is True
+        # V301/K-D: kasa sıcaklığı ÇÖZÜLMEDİYSE (``_calculate_case_
+        # temperature`` None) geçerlilik ölçülemez; oda sıcaklığı
+        # dayanımıyla kurulan kap onayı kazanılmamıştır ve geri çekilir.
+        _kasa_sicaklik_cozulmedi = ((getattr(
+            self, '_case_temperature_status', None) or {}).get('source')
+            == 'not_solved')
+        if ((kasa_gecerlilik.get('model_validity_limit_exceeded') is True
+                or _kasa_sicaklik_cozulmedi)
                 and str(vessel_status or '').upper() in kap_onay_hukumleri):
             vessel_status = STRUCTURAL_VERDICT_NOT_EVALUATED
         # Z2 (P2B2-01): kullanıcının cidarı artık kırpılmadığı için kapın
@@ -12366,16 +13896,63 @@ class SolidRocketEngine:
                     vessel_prov['used_mm'],
                     vessel_prov['manufacturing_floor_mm'],
                     vessel_prov['hoop_required_mm']))
-        vessel_status_basis = (
-            'The case wall thickness was supplied by the user, so the burst '
-            'margin and the vessel status are an evaluation of that wall.'
-            if vessel_user_wall else
-            'No acceptance is issued: no case thickness was supplied, so HRMA '
-            'sized the wall itself from the hoop stress to meet the design '
-            'safety factor. Checking that wall and reporting a pass is the '
-            'design target read back, not an independent verification. Supply '
-            "'case_thickness' (mm) to obtain one. A remaining MARGINAL/FAIL "
-            'status is a warning and is never suppressed.')
+        # V301/T-ÇAPA-D (kalem 1; T-ÇAPA-C1 RAPOR §3 BULGU): yukarıdaki iki
+        # geri çekme kuralı (kasa sıcaklığı çözülmedi / model geçerlilik
+        # sınırı aşıldı) hükmü NOT_EVALUATED'a çektiğinde dayanak cümlesi
+        # "the burst margin and the vessel status are an evaluation of that
+        # wall" demeye devam ediyordu — hükümle çelişen metin. Geri çekme
+        # koşulu varsa dayanak, cidarı kim vermiş olursa olsun, hükmün NEDEN
+        # verilmediğini söyler (FAIL/MARGINAL kalmışsa o uyarıdır,
+        # susturulmaz; sayılar tanı amaçlıdır). Geçerlilik dışı cümlesi uç
+        # katmanınınkiyle (app.py _withhold_unearned_vessel_verdict) aynı
+        # sözleşme.
+        _boyutlandirma_cumlesi = (
+            'No acceptance is issued: no case thickness was supplied, so '
+            'HRMA sized the wall itself from the hoop stress to meet the '
+            'design safety factor. Checking that wall and reporting a pass '
+            'is the design target read back, not an independent '
+            'verification.')
+        _uyari_cumlesi = (' A remaining MARGINAL/FAIL status is a warning '
+                          'and is never suppressed.')
+        if _kasa_sicaklik_cozulmedi:
+            _geri_cekme = (
+                'the case wall temperature was not solved '
+                '(case_temperature_status), so the structural model cannot '
+                'be checked against the temperature of this case wall. The '
+                'burst pressure, burst margin and safety factor in this block '
+                'use the room-temperature case strength, so they are '
+                'diagnostic numbers only and not a check of this case wall; '
+                "sending 'case_thickness' does not change that.")
+        elif kasa_gecerlilik.get('model_validity_limit_exceeded') is True:
+            _geri_cekme = (
+                'the case wall temperature computed by the heat-transfer '
+                'model is outside the validity limit of the structural model '
+                '(model_validity_limit_exceeded, model_validity_reasons). The '
+                'burst pressure, burst margin and safety factor in this block '
+                'use the room-temperature case strength, so they are '
+                'diagnostic numbers only and not a check of this case wall; '
+                "sending 'case_thickness' does not change that at this case "
+                'temperature.')
+        else:
+            _geri_cekme = None
+        if _geri_cekme is not None and vessel_user_wall:
+            vessel_status_basis = ('No acceptance is issued: ' + _geri_cekme
+                                   + _uyari_cumlesi)
+        elif _geri_cekme is not None:
+            # Boyutlandırma cümlesi doğru kalır; yalnız "case_thickness
+            # verirsen doğrulama alırsın" vaadi bu koşulda yanlış olur.
+            vessel_status_basis = (_boyutlandirma_cumlesi + ' In addition, '
+                                   + _geri_cekme + _uyari_cumlesi)
+        elif vessel_user_wall:
+            vessel_status_basis = (
+                'The case wall thickness was supplied by the user, so the '
+                'burst margin and the vessel status are an evaluation of that '
+                'wall.')
+        else:
+            vessel_status_basis = (
+                _boyutlandirma_cumlesi
+                + " Supply 'case_thickness' (mm) to obtain one."
+                + _uyari_cumlesi)
 
         relief_setting_bar = (design_pressure_bar
                               * SOLID_CASE_DESIGN['relief_fraction_of_design'])
@@ -12837,6 +14414,21 @@ class SolidRocketEngine:
             return None
         Pe_Pc = max(Pe_Pc, 1e-6)
 
+        # V301/N-CEA-2 (K2): bileşimi bilinen iticide optimum C_F NASA
+        # CEA'nın o basınçtaki kayan denge genişlemesidir (P_e = P_a). CEA
+        # o basınçta lüleyi çözemezse tasarım noktasının çapalı eşdeğer
+        # bağıntısı (γ_n, κ) kullanılır; o da yoksa tek-γ (beyanlı uyarı
+        # ``warn.solid.cea_nozzle_unavailable`` _cea_nozzle_state'te).
+        if self._cea_active():
+            sol = self._cea_point(P_ref, Pe_Pc * P_ref)
+            lule = sol.get('nozzle') if sol.get('status') == 'available' \
+                else None
+            if lule is not None:
+                return float(float(lule['cf_optimum'])
+                             * self._c_star_theoretical() / self.g0)
+            return float(self._cf_momentum_term(Pe_Pc)
+                         * self._c_star_theoretical() / self.g0)
+
         gamma_term = 2 * gamma**2 / (gamma - 1)
         stagnation_term = (2 / (gamma + 1)) ** ((gamma + 1) / (gamma - 1))
         expansion_term = 1 - Pe_Pc ** ((gamma - 1) / gamma)
@@ -12982,6 +14574,55 @@ class SolidRocketEngine:
             return dict(mech, inherited_from=source)
         return mech
 
+    def _grain_support(self):
+        """Tane yerleşimi (V301/S1-6): ('case_bonded'|'cartridge_loaded', kaynak).
+
+        Alan gelmediyse varsayılan gövdeye yapıştırılmış tanedir ve kaynağı
+        'default (not supplied)' diye yayımlanır. Tanınmayan değer sessizce
+        varsayılana DÜŞMEZ: ``rejected_inputs`` kaydına girer ve
+        ``/calculate_solid`` hesaptan sonraki kapıda 422 verir.
+        """
+        ham = self.overrides.get('grain_support')
+        if ham is None or (isinstance(ham, str) and not ham.strip()):
+            return GRAIN_SUPPORT_DEFAULT, 'default (not supplied)'
+        deger = str(ham).strip().lower() if isinstance(ham, str) else None
+        if deger in GRAIN_SUPPORT_OPTIONS:
+            return deger, 'user input'
+        self._reject_input(
+            'grain_support', ham,
+            'grain support must be one of: ' + ', '.join(GRAIN_SUPPORT_OPTIONS),
+            code='unknown_option')
+        for kayit in self.rejected_inputs:
+            if kayit.get('field') == 'grain_support':
+                kayit['accepted_values'] = list(GRAIN_SUPPORT_OPTIONS)
+        return GRAIN_SUPPORT_DEFAULT, 'default (submitted value rejected)'
+
+    def _tane_gerinim_uyarisi(self, grain):
+        """V301/FİZİK-2 (kalem 10) — tane gerinimi kapasiteyi aşıyorsa adlı uyarı.
+
+        Model sonucu (gerinim SF < 1) ekranda "Çatlak riski Yüksek" diye
+        duruyor ama hiçbir uyarı üretilmiyordu. Önem 'warning': gerinim
+        kapasitesi literatür bandından bir GİRDİDİR (grain_property_source),
+        bu partide ölçülmemiştir. Yalnız bir kez eklenir (kimlik: kod).
+        """
+        sf = grain.get('strain_safety_factor') if isinstance(grain, dict) \
+            else None
+        if not (isinstance(sf, (int, float)) and np.isfinite(sf) and sf < 1.0):
+            return
+        kod = 'warn.solid.grain_strain_exceeds_capability'
+        if any(isinstance(w, dict) and w.get('code') == kod
+               for w in self.design_warnings):
+            return
+        # Kod literal yazılır: yayın kapısı (test_v262_release_gate::
+        # test_no_raw_warnings_left_in_engines) _w'nin ilk argümanını
+        # sözdizimiyle 'warn.' dizesi olarak denetler.
+        self.design_warnings.append(_w(
+            'warn.solid.grain_strain_exceeds_capability', 'warning',
+            strain_percent=round(float(grain['bore_strain_percent']), 3),
+            capability_percent=round(
+                float(grain['strain_capability_percent']), 3),
+            safety_factor=round(float(sf), 3)))
+
     def _calculate_grain_structural(self):
         """Case-bonded grain gerilme/gerinim analizi — GERÇEK elastisite.
 
@@ -13033,6 +14674,12 @@ class SolidRocketEngine:
         T_store = float(getattr(self, 'ambient_temperature',
                                 SOLID_THERMAL['ambient_temperature_k']))
         dT = T_store - T_cure                     # kürlemeden soğuma (negatif)
+        # V301/S1-6: kartuş yüklü tanede gövde büzülmeyi kısıtlamaz; serbest
+        # cisimde üniform sıcaklık değişimi gerilme/gerinim üretmez (T0 = 0).
+        # Basınç yükü aynı sınır koşuluyla (u(b) = u_kasa, sıkı geçme) çözülür.
+        support, support_source = self._grain_support()
+        if support == GRAIN_SUPPORT_CARTRIDGE:
+            dT = 0.0
 
         one_m_2nu = 1.0 - 2.0 * nu
         K = E / ((1.0 + nu) * one_m_2nu)
@@ -13106,6 +14753,28 @@ class SolidRocketEngine:
                                              / strain_capability)))),
             'crack_propagation_risk': crack_risk,
             'thermal_expansion_compatibility': thermal_compat,
+            # V301/FİZİK-2 (kalem 10): üç satırın DAYANAĞI. ÖLÇÜLDÜ (örnek
+            # KNDX, fizik-2/k10_tane_yapisal_olcum.txt): port gerinimi %2,21
+            # ⟷ gerinim kapasitesi %2,0 → gerinim SF 0,906; ekran "Yapısal
+            # Verim %0 · Çatlak riski Yüksek · Isıl uyum Zayıf" basıyor,
+            # dayanağı yoktu ve hiçbir uyarı çıkmıyordu. Sınıf bantları
+            # KAYNAKSIZ HRMA seçimidir (kaynaklı kabul ölçütü değildir).
+            'thermal_bore_strain_ratio': float(thermal_ratio),
+            'crack_propagation_risk_basis': (
+                'class of the strain safety factor (strain capability / '
+                'bore hoop strain with the stress concentration factor): '
+                '>= 2 Low, >= 1 Medium, < 1 High - the band edges are an '
+                'unsourced HRMA choice, not a sourced acceptance criterion'),
+            'thermal_expansion_compatibility_basis': (
+                'class of the cure-cooldown bore strain over the strain '
+                'capability (thermal_bore_strain_ratio): < 0.25 Good, '
+                '< 0.6 Marginal, else Poor - the band edges are an '
+                'unsourced HRMA choice'),
+            'structural_efficiency_basis': (
+                '100 x (1 - bore strain / strain capability), clipped to '
+                '[0, 100]: the unused share of the strain capability, not '
+                'an efficiency of the structure; 0 means the bore strain '
+                'reaches or exceeds the capability'),
             'stress_concentration_factor': kt,
             'cure_temperature_k': T_cure,
             'storage_temperature_k': T_store,
@@ -13133,14 +14802,15 @@ class SolidRocketEngine:
             # burada açıkça yazar (sessiz devralma yasak).
             'grain_property_inherited_from': mech.get('inherited_from'),
             'propellant_type': str(self.propellant_type),
-            'bonding_assumption': (
-                'case-bonded grain (worst case). A free-standing / cartridge-'
-                'loaded grain is unconstrained at its outer surface and sees '
-                'far lower cure-shrinkage strain; this solver has no input '
-                'for that configuration.'),
+            # V301/S1-6: yerleşim artık girdidir (grain_support); eski
+            # "this solver has no input for that configuration" beyanı kalktı.
+            'grain_support': support,
+            'grain_support_source': support_source,
+            'bonding_assumption': GRAIN_SUPPORT_BASIS[support],
             'model_note': (
-                'Plane-strain elasticity of a case-bonded hollow cylinder '
-                '(Timoshenko & Goodier) with cure-shrinkage and bore pressure; '
+                'Plane-strain elasticity of a hollow cylinder supported by '
+                'the case (Timoshenko & Goodier) with bore pressure and, for '
+                'a case-bonded grain, the case-restrained cure shrinkage; '
                 'acceptance is judged on bore strain against the propellant '
                 'strain capability (NASA SP-8073). Star and wagon-wheel ports '
                 'use a nominal stress-concentration factor of '
@@ -13610,13 +15280,33 @@ class SolidRocketEngine:
             burn_time = float(getattr(self, '_last_burn_time', 0.0) or 0.0)
         T_amb = float(getattr(self, 'ambient_temperature',
                               SOLID_THERMAL['ambient_temperature_k']))
+        # V301/K-D (ÖRNEK-PANEL devri; fail-closed): eski gövde iki durumda
+        # SESSİZCE ortam sıcaklığını döndürüyordu — çözülmüş yanma yokken ve
+        # hazne gaz tarafı (Bartz) istisna verdiğinde. Ortam sıcaklığındaki
+        # bir kasa en iyimser cevaptır: ısıl panel "Excellent" sınıfı, güvenlik
+        # paneli oda sıcaklığı dayanımıyla kap onayı basabiliyordu. Artık
+        # sayı UYDURULMAZ: dönüş ``None`` ve neden ``_case_temperature_status``
+        # künyesinde (``source = 'not_solved'``); tüketiciler hükmü geri çeker.
+        self._case_temperature_status = {'source': 'solved', 'reason': None}
         if burn_time <= 0:
-            return T_amb
+            self._case_temperature_status = {
+                'source': 'not_solved',
+                'reason': {'code': 'burn_not_solved',
+                           'message': 'no solved burn time is available, so '
+                                      'the case heating was not integrated'}}
+            return None
 
         try:
             h_g, T_aw, _cp = self._chamber_gas_side()
-        except Exception:
-            return T_amb
+        except Exception as exc:
+            self._case_temperature_status = {
+                'source': 'not_solved',
+                'reason': {'code': 'chamber_gas_side_failed',
+                           'message': ('the chamber gas-side heat transfer '
+                                       '(Bartz) could not be evaluated: '
+                                       '%s: %s' % (type(exc).__name__,
+                                                   str(exc)[:200]))}}
+            return None
 
         material, _sy, _sf, t_wall = self._case_design()
         # Yoğunluk TEK kaynaktan (_case_density) gelir; kompozit gibi
@@ -13692,6 +15382,281 @@ class SolidRocketEngine:
                 break
         return lo
 
+    def _equilibrium_pressure_fallback(self, A_burn, A_port, A_t, port_ratio,
+                                       temperature, p_start, p_image, tol,
+                                       max_iter=SOLID_PRESSURE_SOLVER_MAX_ITER):
+        """Sönümlü yineleme yakınsamadığında denge basıncı yedeği (V301/B6).
+
+        YALNIZ ilk yol (sönümlü sabit-nokta yinelemesi) tavana takıldığında
+        çağrılır; yakınsayan adımlar buraya hiç gelmez, dolayısıyla bit-aynı
+        kalır.
+
+        Kusur (ölçüm 20-21 Eki): KNDX Nakka rejim tablosu sınırlarda
+        süreksiz (r(P_b−) → r(P_b+): 0,779 MPa −%0,54; 2,57 MPa −%1,80;
+        5,93 MPa +%1,14; 8,5 MPa −%1,77). Hız basınçla AŞAĞI sıçrıyorsa,
+        belirli bir Kn aralığında iki daldan hiçbirinde denge yoktur: alt
+        dalın dengesi sınırın üstünde, üst dalınki altında kalır. Yineleme
+        sınır çevresinde salınır, artık ≈ sıçrama (örnek motorda 228 adımın
+        9'u, en büyük artık %1,7).
+
+        Yöntem. Kütle dengesi artığı [bar]
+            f(P) = ρ_p·A_b·r(P)·c*/(A_t·1e5) − P
+        sabit-nokta yinelemesiyle AYNI işlem sırasıyla kurulur. Erozif
+        çarpanın girdisi olan port kütle akısı P'nin fonksiyonu olarak
+        tutarlı verilir: dengede ṁ = P·1e5·A_t/c*, G(P) = ṁ/A_port
+        (yineleme ise akıyı bir önceki iteratın ṁ'sinden alır).
+          1. Parantez son iteratlardan (son sönümlü iterat ile onun
+             sabit-nokta görüntüsü) başlar; işaret f(a) > 0 > f(b) olana
+             dek genişletilir (genişlik her turda iki katı). Bu yön, yarı
+             durağan kamaranın dP/dt ∝ f(P) dinamiğinde KARARLI dengenin
+             yönüdür; f'nin artarak sıfırı kestiği (n ≥ 1) kararsız denge
+             parantezlenmez.
+          2. İkiye bölme, ilk yolun ölçütüyle (|f| ≤ tol·max(P, 1)) sürekli
+             kök arar. Bulunursa adım yakınsamış sayılır. Kök sayısal
+             yanma hızı tavanında (BURN_RATE_NUMERIC_CEILING_MPS) ise
+             reddedilir: o bir taşma korumasının izi, yasanın dengesi değil.
+          3. Parantez komşu iki kayan noktalı sayıya çöker ve |f| hâlâ
+             toleransın üstündeyse f orada sıçrar. Sıçrama parçalı yasanın
+             bir rejim sınırıysa denge genelleştirilmiş (küme değerli /
+             Filippov) anlamda P = P_b'dir: kütle dengesini kapatan hız
+             r_eq = P_b·1e5·A_t/(ρ_p·A_b·c*) olur. r_eq sıçramanın iki ucu
+             (aynı r(P) tanımıyla, erozif/sıcaklık/parti çarpanları dahil)
+             arasında kalmak ZORUNDADIR; değilse adım yakınsamamış sayılır.
+             Kaynak: A. F. Filippov, Differential Equations with
+             Discontinuous Righthand Sides, Kluwer, 1988, Böl. 2 (süreksiz
+             sağ taraflı denklemde denge, sağ tarafın küme değerli
+             uzantısının sıfırı içerdiği noktadır).
+        Parantez kurulamaz, değerlerden biri sonlu değil ya da sıçrama bir
+        rejim sınırı değilse ``None`` döner (fail-closed): çağıran, adımı
+        bugünkü gibi yakınsamamış sayar ve son iteratı korur.
+
+        Yan etki sözleşmesi: değerlendirmeler ``self.mass_flux``'ı değiştirir.
+        Başarıda akı çözümdeki G(P)'ye, başarısızlıkta çağrı öncesi değerine
+        döner. ``_burn_rate_clipped_max`` (tavan kırpma kaydı) değerlendirme
+        boyunca ne yazılırsa yazılsın çağrı öncesi hâline geri alınır; kabul
+        edilen kökte tavan zaten reddedilir.
+
+        Returns:
+            None ya da sözlük: ``kind`` ('root' | 'boundary'),
+            ``pressure_bar``, ``mass_flux``, ``residual`` (bağıl kütle dengesi
+            artığı); 'boundary' ek olarak ``burn_rate_mps`` (r_eq),
+            ``boundary_pressure_bar`` (tablonun yayımladığı sınır),
+            ``law_jump_percent``, ``rate_below_mps``, ``rate_above_mps``.
+        """
+        try:
+            sayilar = [float(v) for v in (A_burn, A_t, self.rho_p,
+                                          self.c_star, p_start, p_image, tol)]
+            a_port = float(A_port)
+            # Yalnız doğrulanır; burn_rate()'e ilk yolla AYNI nesneler gider
+            oran_f = float(port_ratio)
+            sicaklik_f = float(temperature)
+            max_iter = int(max_iter)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if (not all(np.isfinite(v) and v > 0.0 for v in sayilar)
+                or not np.isfinite(a_port) or a_port < 0.0
+                or not np.isfinite(oran_f) or not np.isfinite(sicaklik_f)
+                or max_iter < 1):
+            return None
+        A_burn, A_t, rho_p, c_star, p_start, p_image, tol = sayilar
+
+        aki_once = getattr(self, 'mass_flux', 0.0)
+        kirpma_vardi = '_burn_rate_clipped_max' in self.__dict__
+        kirpma_once = self.__dict__.get('_burn_rate_clipped_max')
+        basarili = False
+
+        def artik(p):
+            # Dengede ṁ = P·1e5·A_t/c* — erozif akı P'nin tutarlı fonksiyonu
+            g = p * 1e5 * A_t / (c_star * a_port) if a_port > 0 else 0.0
+            self.mass_flux = g
+            r = float(self.burn_rate(p, temperature, port_ratio))
+            # İlk yoldaki P_new ile AYNI işlem sırası
+            f = (rho_p * A_burn * r) * c_star / (A_t * 1e5) - p
+            if not (np.isfinite(f) and np.isfinite(r)):
+                raise FloatingPointError('non-finite residual')
+            return f, r, g
+
+        def kabul(p, f):
+            return abs(f) <= tol * max(abs(p), 1.0)
+
+        def kok(p, f, r, g):
+            # Tavanda kırpılmış hızla kurulan "denge" yasanın değil sayısal
+            # korumanın sonucudur; sıfır hızda denge yoktur.
+            if not (0.0 < r < BURN_RATE_NUMERIC_CEILING_MPS):
+                return None
+            return {'kind': 'root', 'pressure_bar': float(p),
+                    'mass_flux': float(g),
+                    'residual': float(abs(f) / max(abs(p), 1.0))}
+
+        try:
+            a, b = sorted((p_start, p_image))
+            fa, ra, ga = artik(a)
+            if kabul(a, fa):
+                sonuc = kok(a, fa, ra, ga)
+                basarili = sonuc is not None
+                return sonuc
+            fb, rb, gb = artik(b)
+            if kabul(b, fb):
+                sonuc = kok(b, fb, rb, gb)
+                basarili = sonuc is not None
+                return sonuc
+
+            # 1. Parantez: f(a) > 0 > f(b) (kararlı denge yönü)
+            w = max(b - a, tol * max(b, 1.0))
+            for _ in range(max_iter):
+                if fa > 0.0 and fb < 0.0:
+                    break
+                if fb >= 0.0:
+                    # Kök daha yukarıda: b alt uca geçer, üst uç genişler
+                    a, fa, ra, ga = b, fb, rb, gb
+                    b = b + w
+                    fb, rb, gb = artik(b)
+                    if kabul(b, fb):
+                        sonuc = kok(b, fb, rb, gb)
+                        basarili = sonuc is not None
+                        return sonuc
+                else:
+                    # f(a) <= 0 ve f(b) < 0: kök daha aşağıda
+                    b, fb, rb, gb = a, fa, ra, ga
+                    a = a - w if a - w > 0.0 else 0.5 * a
+                    fa, ra, ga = artik(a)
+                    if kabul(a, fa):
+                        sonuc = kok(a, fa, ra, ga)
+                        basarili = sonuc is not None
+                        return sonuc
+                w *= 2.0
+            if not (fa > 0.0 and fb < 0.0):
+                return None
+
+            # 2. İkiye bölme: sürekli kök ya da komşu kayan noktalılara çöküş
+            cokti = False
+            for _ in range(max_iter):
+                m = 0.5 * (a + b)
+                if not (a < m < b):
+                    cokti = True
+                    break
+                fm, rm, gm = artik(m)
+                if kabul(m, fm):
+                    sonuc = kok(m, fm, rm, gm)
+                    basarili = sonuc is not None
+                    return sonuc
+                if fm > 0.0:
+                    a, fa, ra, ga = m, fm, rm, gm
+                else:
+                    b, fb, rb, gb = m, fm, rm, gm
+            if not cokti:
+                return None
+
+            # 3. Sıçrama: yalnız parçalı yasanın rejim sınırı kabul edilir
+            law_key = getattr(self, 'burn_rate_law_key', None)
+            if not law_key:
+                return None
+            from hrma.data import burn_rate_db as _brdb
+            law = _brdb.BURN_RATE_LAWS[law_key]
+            # burn_rate() ile AYNI dönüşüm (p_mpa = P_bar / 10) ve AYNI seçici
+            reg_alt = _brdb._select_regime(law, a / 10.0)
+            reg_ust = _brdb._select_regime(law, b / 10.0)
+            if reg_alt is reg_ust:
+                return None
+            if not (0.0 < ra < BURN_RATE_NUMERIC_CEILING_MPS
+                    and 0.0 < rb < BURN_RATE_NUMERIC_CEILING_MPS):
+                return None
+            p_b = b   # üst rejimin başladığı ilk kayan noktalı basınç
+            r_eq = self._boundary_equilibrium_rate(
+                p_b, ra, rb, A_t, A_burn, rho_p, c_star)
+            if r_eq is None:
+                return None
+            mdot = rho_p * A_burn * r_eq
+            sonuc = {
+                'kind': 'boundary',
+                'pressure_bar': float(p_b),
+                'mass_flux': float(gb),
+                'burn_rate_mps': float(r_eq),
+                'residual': float(abs(mdot * c_star / (A_t * 1e5) - p_b)
+                                  / max(p_b, 1.0)),
+                'boundary_pressure_bar': float(reg_ust['p_min_mpa']) * 10.0,
+                'law_jump_percent': float((rb - ra) / ra * 100.0),
+                'rate_below_mps': float(ra),
+                'rate_above_mps': float(rb),
+            }
+            basarili = True
+            return sonuc
+        except (FloatingPointError, ValueError, KeyError, ZeroDivisionError,
+                OverflowError):
+            return None
+        finally:
+            if kirpma_vardi:
+                self._burn_rate_clipped_max = kirpma_once
+            else:
+                self.__dict__.pop('_burn_rate_clipped_max', None)
+            if not basarili:
+                self.mass_flux = aki_once
+
+    @staticmethod
+    def _boundary_equilibrium_rate(p_b, r_below, r_above, A_t, A_burn, rho_p,
+                                   c_star):
+        """Rejim sınırında kütle dengesini kapatan hız r_eq [m/s] ya da None.
+
+        r_eq = P_b·1e5·A_t/(ρ_p·A_b·c*) — boğaz akışı (P_b·A_t/c*) ile üretim
+        (ρ_p·A_b·r) eşitliğinden. Genelleştirilmiş denge YALNIZ r_eq yasanın
+        o basınçtaki sıçramasının iki ucu [r(P_b−), r(P_b+)] arasındaysa
+        geçerlidir (Filippov: küme değerli sağ taraf sıfırı içermeli);
+        değilse ya da herhangi bir değer sonlu/pozitif değilse None
+        (fail-closed). Kuralın TEK tanım yeri burasıdır (V301/B6).
+        """
+        try:
+            sayilar = [float(v) for v in (p_b, r_below, r_above, A_t, A_burn,
+                                          rho_p, c_star)]
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not all(np.isfinite(v) and v > 0.0 for v in sayilar):
+            return None
+        p_b, r_below, r_above, A_t, A_burn, rho_p, c_star = sayilar
+        r_eq = p_b * 1e5 * A_t / (rho_p * A_burn * c_star)
+        if not np.isfinite(r_eq):
+            return None
+        if not (min(r_below, r_above) <= r_eq <= max(r_below, r_above)):
+            return None
+        return float(r_eq)
+
+    #: Rejim sınırında tutulan adımların İngilizce künyesi (V301/B6). Tanı
+    #: bloklarının ikisi de (yakınsama kapısı ve tam sonuç) bu metni yayımlar.
+    PRESSURE_SOLVER_BOUNDARY_BASIS = (
+        'The piecewise burn-rate law is discontinuous at its regime '
+        'boundaries. Where the rate drops with pressure across a boundary, a '
+        'band of Kn has no equilibrium on either branch: the lower branch '
+        'balances above the boundary and the upper branch below it. Such a '
+        'time step is held at the boundary pressure as a generalized '
+        '(set-valued, Filippov) equilibrium. The burn rate used there is the '
+        'one that closes the mass balance, r_eq = Pc*A_t/(rho_p*A_b*c*), and '
+        'it is required to lie inside the jump of the law at that pressure '
+        '(otherwise the step counts as unconverged), so the deviation from '
+        'either branch is bounded by the law\'s own discontinuity '
+        '(law_jump_percent). Held steps are counted separately and are not '
+        'solver failures. Source: A. F. Filippov, Differential Equations '
+        'with Discontinuous Righthand Sides, Kluwer, 1988, Ch. 2.')
+
+    @classmethod
+    def _pressure_solver_boundary_publication(cls, curve):
+        """Yedek çözücünün tanı alanları — iki tanı bloğu için TEK kaynak."""
+        sinirlar = []
+        for kayit in (curve.get('pressure_solver_regime_boundaries') or []):
+            sinirlar.append({
+                'boundary_pressure_bar': float(
+                    kayit['boundary_pressure_bar']),
+                'held_steps': int(kayit['held_steps']),
+                'law_jump_percent': float(kayit['law_jump_percent']),
+            })
+        return {
+            'pressure_solver_fallback_root_steps': int(
+                curve.get('pressure_solver_fallback_root_steps', 0) or 0),
+            'pressure_solver_boundary_held_steps': int(
+                curve.get('pressure_solver_boundary_held_steps', 0) or 0),
+            'pressure_solver_regime_boundaries': sinirlar,
+            'pressure_solver_boundary_basis':
+                cls.PRESSURE_SOLVER_BOUNDARY_BASIS,
+        }
+
     def calculate_thrust_curve(self, dt=0.01, convergence_tol=1e-6):
         """High-precision thrust curve with iterative pressure-burn rate coupling.
 
@@ -13749,6 +15714,14 @@ class SolidRocketEngine:
         solver_steps = 0
         solver_failed_steps = 0
         solver_max_residual = 0.0
+        # V301/B6: ilk yol tavana takıldığında yedek çözücünün sonucu. Sürekli
+        # kökle kurtarılan adımlar yakınsamış sayılır; rejim sınırında
+        # (genelleştirilmiş denge) tutulan adımlar başarısız SAYILMAZ, ayrı
+        # sayılır ve sınır başına yayımlanır.
+        solver_fallback_root_steps = 0
+        solver_boundary_steps = 0
+        solver_boundary_step_indices = []
+        solver_boundaries = {}
         termination = 'not_started'
         last_web = 0.0
         last_rate = 0.0
@@ -13821,23 +15794,73 @@ class SolidRocketEngine:
             r_burn_actual = self.burn_rate(P_c_actual, current_temp, port_ratio)
             step_converged = False
             step_residual = float('inf')
-            for _ in range(100):
+            for _yineleme in range(SOLID_PRESSURE_SOLVER_MAX_ITER):
                 m_dot_iter = self.rho_p * A_burn * r_burn_actual
                 self.mass_flux = m_dot_iter / A_port if A_port > 0 else 0.0
                 P_new = m_dot_iter * self.c_star / (A_t * 1e5)  # bar
                 step_residual = (abs(P_new - P_c_actual)
                                  / max(abs(P_c_actual), 1.0))
                 if abs(P_new - P_c_actual) <= convergence_tol * max(abs(P_c_actual), 1.0):
+                    # V301/B6 ardılı (21 Eki) — İLK YİNELEMEDE AKI TUTARLILIĞI.
+                    # Döngüden önceki r, ÖNCEKİ zaman adımının port kütle
+                    # akısıyla hesaplanır (erozif çarpanın girdisi); basınç ilk
+                    # yinelemede tolerans içindeyse adım o eski akıyla kabul
+                    # ediliyordu. ÖLÇÜLDÜ (B6 RAPOR, KNSB eşdeğeri 116. adım):
+                    # tutarlı akıyla kütle dengesi artığı 7,8e-5 (tolerans
+                    # 1e-6), basınca etkisi ~1e-4. Hız güncel akıyla yeniden
+                    # hesaplanır; aynı toleransta değişmiyorsa adım aynen kabul
+                    # edilir (erozif terimi etkisiz adımlar bit-aynı), değişiyorsa
+                    # yineleme tutarlı akıyla sürer.
+                    if _yineleme == 0:
+                        r_tutarli = self.burn_rate(P_c_actual, current_temp,
+                                                   port_ratio)
+                        if (abs(r_tutarli - r_burn_actual)
+                                > convergence_tol * max(abs(r_burn_actual),
+                                                        1e-12)):
+                            r_burn_actual = r_tutarli
+                            continue
                     P_c_actual = P_new
                     step_converged = True
                     break
                 P_c_actual = 0.5 * (P_c_actual + P_new)  # sönümlü güncelleme
                 r_burn_actual = self.burn_rate(P_c_actual, current_temp, port_ratio)
 
-            # Basınç çözücü sağlığı: 100 iterasyon bittiyse SON İTERAT
+            # V301/B6 — YALNIZ tavana takılan adımda yedek: kütle dengesi
+            # artığı parantezlenip ikiye bölünür (bkz.
+            # _equilibrium_pressure_fallback). Yakınsayan adımlar bu dala
+            # girmez, dolayısıyla bit-aynı kalır. Yedek de başarısızsa
+            # (None) son iterat ve akı aynen korunur — bugünkü uyarı yolu.
+            boundary_hold = None
+            if not step_converged:
+                yedek = self._equilibrium_pressure_fallback(
+                    A_burn, A_port, A_t, port_ratio, current_temp,
+                    P_c_actual, P_new, convergence_tol)
+                if yedek is not None:
+                    P_c_actual = yedek['pressure_bar']
+                    self.mass_flux = yedek['mass_flux']
+                    step_residual = yedek['residual']
+                    if yedek['kind'] == 'root':
+                        step_converged = True
+                        solver_fallback_root_steps += 1
+                    else:
+                        boundary_hold = yedek
+
+            # Basınç çözücü sağlığı: tavan + yedek bittiyse SON İTERAT
             # döndürülüyor; bu artık sessizce 'yakınsadı' diye raporlanamaz.
             solver_steps += 1
-            if not step_converged:
+            if boundary_hold is not None:
+                solver_boundary_steps += 1
+                solver_boundary_step_indices.append(len(time))
+                kayit = solver_boundaries.setdefault(
+                    boundary_hold['boundary_pressure_bar'], {
+                        'boundary_pressure_bar':
+                            boundary_hold['boundary_pressure_bar'],
+                        'held_steps': 0,
+                        'law_jump_percent':
+                            boundary_hold['law_jump_percent'],
+                    })
+                kayit['held_steps'] += 1
+            elif not step_converged:
                 solver_failed_steps += 1
             if np.isfinite(step_residual):
                 solver_max_residual = max(solver_max_residual,
@@ -13847,8 +15870,15 @@ class SolidRocketEngine:
                 termination = 'pressure_collapse'
                 break
 
-            # Yakınsayan basınçta son yanma hızı ve kütle üretimi
-            r_burn_actual = self.burn_rate(P_c_actual, current_temp, port_ratio)
+            # Yakınsayan basınçta son yanma hızı ve kütle üretimi. Rejim
+            # sınırında tutulan adımda yasa P_b'de tek değer vermez; kütle
+            # dengesini kapatan r_eq (sıçramanın içinde, yedekte denetlendi)
+            # web ilerlemesini ve ṁ_üretim'i belirler.
+            if boundary_hold is not None:
+                r_burn_actual = boundary_hold['burn_rate_mps']
+            else:
+                r_burn_actual = self.burn_rate(P_c_actual, current_temp,
+                                               port_ratio)
             if r_burn_actual <= 0:
                 termination = 'burn_rate_zero'
                 break
@@ -14053,6 +16083,16 @@ class SolidRocketEngine:
             'pressure_solver_failed_steps': int(solver_failed_steps),
             'pressure_solver_max_residual': float(solver_max_residual),
             'pressure_solver_tolerance': float(convergence_tol),
+            # V301/B6: yedek çözücünün izi. Sınırda tutulan adımlar başarısız
+            # sayılmaz; hangi örneklerde olduğu (indeks) ve sınır başına
+            # özet (basınç, adım sayısı, yasanın oradaki sıçraması) ayrıca.
+            'pressure_solver_fallback_root_steps': int(
+                solver_fallback_root_steps),
+            'pressure_solver_boundary_held_steps': int(solver_boundary_steps),
+            'pressure_solver_boundary_step_indices': list(
+                solver_boundary_step_indices),
+            'pressure_solver_regime_boundaries': [
+                dict(solver_boundaries[k]) for k in sorted(solver_boundaries)],
             'termination_reason': termination,
             'burnout_time_s': (float(burnout_time)
                                if burnout_time is not None else None),
@@ -14161,10 +16201,271 @@ class SolidRocketEngine:
                 'total impulse, average thrust, curve shape, stability, '
                 'warnings',
                 max_points=SOLID_THRUST_CURVE_MAX_POINTS),
+            # V301/K-B (NK-28): eğrinin SONU ve düz bölümleri beyanlı.
+            'burnout_end': self._curve_burnout_end(curve),
+            'regime_boundary_hold': self._curve_boundary_hold_windows(curve),
         }
+
+    @staticmethod
+    def _curve_burnout_end(curve):
+        """Tükenişte itkinin sıfıra inişi (yarı-durağan modelin ifadesi).
+
+        V301/K-B (NK-28). Ölçüldü (örnek katı KNDX BATES 75 mm): yayımlanan
+        eğri 2,2771 s'de 904,2 N'da BİTİYORDU; sıfıra iniş çizilmiyordu.
+        Kök: tükeniş kapanışı son örneği t_b'ye kadar tutar (sıfırıncı
+        mertebe, integral O(dt²)) ama yarı-durağan modelde web tükenince
+        yanma yüzeyi SÜREKSİZ sıfırlanır -> üretim, basınç ve itki o anda
+        sıfırdır. Bu blok o adımı adıyla verir; diziler DEĞİŞMEZ (toplam
+        impuls ve yanma süresi aynı). Tükeniş sonrası oda boşalması
+        (blow-down) modellenmez; iniş bu yüzden basamaktır.
+        Basınç sönümüyle bitişte (pressure_collapse) dizi zaten 0'la biter.
+        """
+        t_b = curve.get('burnout_time_s')
+        if (t_b is None or curve.get('termination_reason') not in (
+                'web_exhausted', 'burn_area_vanished')):
+            return None
+        return {
+            'time_s': float(t_b),
+            'thrust_n': 0.0,
+            'pressure_bar': 0.0,
+            'basis': ('quasi-steady burn-back model: at web burnout the '
+                      'burning surface vanishes, so mass generation, chamber '
+                      'pressure and thrust fall to zero at burnout_time_s. '
+                      'The last solved sample is held up to burnout '
+                      '(zero-order hold closure of the time march). Chamber '
+                      'blow-down after burnout is NOT modelled, so the drop '
+                      'is a step.'),
+        }
+
+    @staticmethod
+    def _curve_boundary_hold_windows(curve):
+        """Parçalı yanma hızı yasasının rejim sınırında TUTULAN aralıklar.
+
+        V301/K-B (NK-28). Süreksiz yasada (KNDX Nakka tablosu) dengenin iki
+        dalda da olmadığı adımlar sınır basıncında tutulur (V301/B6,
+        Filippov). Bu aralıkta basınç ve itki SABİTTİR; eskiden yalnız
+        ``solver_diagnostics``te sayı olarak duruyordu, grafikte düz çizgi
+        beyansız görünüyordu. Ardışık örnek indeksleri pencerelere toplanır.
+        """
+        idx = sorted(int(i) for i in (
+            curve.get('pressure_solver_boundary_step_indices') or []))
+        zaman = np.asarray(curve.get('time', []), dtype=float)
+        basinc = np.asarray(curve.get('pressure', []), dtype=float)
+        if not idx or zaman.size == 0:
+            return []
+        pencereler, bas = [], [idx[0], idx[0]]
+        for i in idx[1:]:
+            if i == bas[1] + 1:
+                bas[1] = i
+            else:
+                pencereler.append(tuple(bas))
+                bas = [i, i]
+        pencereler.append(tuple(bas))
+        cikti = []
+        for i0, i1 in pencereler:
+            if i0 >= zaman.size:
+                continue
+            j = min(i1 + 1, zaman.size - 1)
+            cikti.append({
+                't_start_s': float(zaman[i0]),
+                't_end_s': float(zaman[j]),
+                'held_steps': int(i1 - i0 + 1),
+                'pressure_bar': (float(basinc[i0]) if basinc.size > i0
+                                 else None),
+                'basis': ('chamber pressure held at a regime boundary of '
+                          'the piecewise burn-rate law: the law is '
+                          'discontinuous there and neither branch has an '
+                          'equilibrium (generalised Filippov equilibrium), '
+                          'so pressure and thrust are constant in this '
+                          'window'),
+            })
+        return cikti
+
+    def _geometric_throat_area(self):
+        """Yayımlanan (imal edilen, Cd'li) boğaz çapının alanı [m²].
+
+        ``_estimate_throat_diameter`` ile AYNI sayı: kullanıcının ekranda
+        okuduğu ``throat_diameter``. Boğaz boyutlandırılamıyorsa ``None``
+        (o durumun adlı reddi ``_throat_exceeds_case`` / tasarım akışında).
+        """
+        try:
+            d_t = float(self._estimate_throat_diameter())
+        except SolidDesignRejected:
+            raise
+        except Exception:
+            return None
+        if not np.isfinite(d_t) or d_t <= 0.0:
+            return None
+        return float(np.pi * d_t * d_t / 4.0)
+
+    def _port_throat_ratio_at_core(self, d_core_m):
+        """A_port,0 / A_t (geometrik) — çekirdek ``d_core_m`` olsaydı.
+
+        Boğazı çözücü boyutlandırır (en büyük Kn), yani çekirdek değişince
+        boğaz da değişir: oran her çekirdek için YENİDEN çözülür. Geometri
+        memoları ``_grain_geometry_key`` ile anahtarlıdır (D_core içerir),
+        bayat sonuç dönmez; ``D_core`` her durumda geri konur.
+        """
+        eski = self.D_core
+        try:
+            self.D_core = float(d_core_m)
+            alanlar = self._port_throat_areas()
+        finally:
+            self.D_core = eski
+        if alanlar is None:
+            return None
+        return alanlar[0] / alanlar[1]
+
+    def _port_throat_areas(self):
+        """``(A_port,0, A_t)`` [m²] — port ⟷ boğaz kapısının TEK ölçütü.
+
+        V301/K-D: kapı (``_check_port_throat``), gereken en küçük çekirdek
+        araması (``_port_throat_ratio_at_core``) ve tasarım noktası
+        boyutlandırıcısı (``_bates_geometry_for``) bu iki alanı buradan
+        okur; kapının sınırı (A_port,0 > A_t) üçünde de aynı sayıdır.
+        A_t yayımlanan GEOMETRİK boğazdır (``_geometric_throat_area``),
+        A_port,0 çözücünün kesit tanımıdır (``_port_flow_area(0)``). Boğaz
+        boyutlandırılamıyorsa ya da port kesiti sonlu değilse ``None``.
+        """
+        a_t = self._geometric_throat_area()
+        if a_t is None:
+            return None
+        a_p = float(self._port_flow_area(0.0))
+        if not np.isfinite(a_p):
+            return None
+        return a_p, a_t
+
+    def _check_port_throat(self):
+        """Başlangıç port alanı boğazdan büyük mü? Değilse RET (KT-23).
+
+        V301/K-A (ana model kararı 5, 22 Eki). ÖLÇÜLDÜ (``A-kati``
+        denetimi, ``port_bogaz.txt``): çekirdek 10 mm'de başlangıç port
+        alanı 78,5 mm², çözücünün boğazı 563,7 mm² iken motor
+        ``CALCULATED`` + ``choked = True`` yayımlıyordu; akış porttan
+        geçerken boğulur, lüle boğazı sonik nokta DEĞİLDİR (Sutton &
+        Biblarz 9. baskı Böl. 12, port/boğaz alan oranı ve erozif yanma).
+        A_port,0 ≤ A_t ise tasarım yayımlanmaz: ``SolidDesignRejected`` ->
+        uçta 422 ``port_smaller_than_throat``. 1 < oran < 2 bandının UYARISI
+        (``warn.solid.port_to_throat_low``) aynen kalır.
+
+        Sınır 1 bir ayar sayısı değildir: boğulmanın tanımıdır (en küçük
+        akış kesiti sonik noktadır). Karşılaştırılan boğaz YAYIMLANAN
+        (geometrik) boğazdır — kullanıcı ret cümlesini ekrandaki çaplarla
+        doğrulayabilir; etkin (Cd'li) boğazdan büyük olduğu için kapı daha
+        sıkıdır (fail-closed).
+
+        Gereken en küçük çekirdek: oran çekirdeğe göre yeniden çözülerek
+        ikiye bölmeyle bulunur, 0,1 mm'ye yukarı yuvarlanır ve yuvarlanmış
+        değerin kapıdan geçtiği DOĞRULANIR. Tane içinde böyle bir çekirdek
+        yoksa ``required_min`` None'dır ve cümle bunu söyler.
+        """
+        alanlar = self._port_throat_areas()
+        if alanlar is None or alanlar[0] > alanlar[1]:
+            return
+        a_p, a_t = alanlar
+        d_core_mm = float(self.D_core) * 1000.0
+        d_t_mm = float(np.sqrt(4.0 * a_t / np.pi)) * 1000.0
+        tane_mm = float(self.D_chamber) * 1000.0
+        gereken_mm = None
+        if self.grain_type != 'end_burner':
+            # Üst arama sınırı: tanenin içinde kalan en büyük çekirdek
+            # (web > 0). Uç katmanının imalat payı ayrıca uygulanır; burada
+            # yalnız fiziksel sınır aranır.
+            ust = float(self.D_chamber) * (1.0 - 1e-6)
+            alt = float(self.D_core)
+            r_ust = self._port_throat_ratio_at_core(ust)
+            if r_ust is not None and r_ust > 1.0:
+                for _ in range(40):
+                    if ust - alt <= 1e-5:      # 0,01 mm
+                        break
+                    orta = 0.5 * (alt + ust)
+                    r = self._port_throat_ratio_at_core(orta)
+                    if r is not None and r > 1.0:
+                        ust = orta
+                    else:
+                        alt = orta
+                aday = _ceil_tenth_mm(ust * 1000.0)
+                # Yuvarlanan öneri kapıdan GEÇMELİ (monoton olmayan aile
+                # için birkaç 0,1 mm adımı); geçmezse öneri yayımlanmaz.
+                for _ in range(20):
+                    if aday >= tane_mm:
+                        break
+                    r = self._port_throat_ratio_at_core(aday / 1000.0)
+                    if r is not None and r > 1.0:
+                        gereken_mm = aday
+                        break
+                    aday = round(aday + 0.1, 1)
+        oran = a_p / a_t
+        if gereken_mm is not None:
+            eylem = (f'Enter a core diameter of at least {gereken_mm:.1f} mm '
+                     f'(the throat is re-sized with the core), or lower the '
+                     f'burning area or raise the chamber pressure')
+        elif self.grain_type == 'end_burner':
+            eylem = ('An end burner flows through the full grain cross-'
+                     'section, so enlarge the grain outer diameter or reduce '
+                     'the burning area / raise the chamber pressure')
+        else:
+            eylem = (f'No core diameter inside the {tane_mm:g} mm grain makes '
+                     f'the port larger than the throat; enlarge the grain '
+                     f'outer diameter, shorten the grain or raise the chamber '
+                     f'pressure')
+        mesaj = (
+            f'No design was published: the initial port flow area '
+            f'{a_p * 1e6:.1f} mm^2 (core diameter {d_core_mm:g} mm, '
+            f'{self.grain_type}) is not larger than the throat area '
+            f'{a_t * 1e6:.1f} mm^2 (throat diameter {d_t_mm:.2f} mm, sized by '
+            f'the solver), port/throat area ratio {oran:.3f}. The flow would '
+            f'choke in the port, not at the nozzle throat. {eylem}.')
+        raise SolidDesignRejected(mesaj, [{
+            'field': 'core_diameter',
+            'reason': 'port_smaller_than_throat',
+            'submitted': d_core_mm,
+            'required_min': gereken_mm,
+            'unit': 'mm',
+            'grain_type': self.grain_type,
+            'initial_port_area_mm2': a_p * 1e6,
+            'throat_area_mm2': a_t * 1e6,
+            'throat_diameter_mm': d_t_mm,
+            'port_to_throat_area_ratio': oran,
+            'limit': 'A_port,0 > A_throat (choking at the nozzle throat)',
+            'motor_form': 'solid',
+            'message': mesaj,
+        }], 'port_smaller_than_throat')
 
     def calculate_performance(self):
         """Calculate overall motor performance with comprehensive analysis"""
+        # V301/K-A (KT-23): port boğazdan küçükse eğri hiç koşmaz (RET).
+        #
+        # V301/K-D (T-çapa-A DEVİR 4 + T-çapa-B DEVİR 1) — KAPI SIRASI.
+        # Port kapısının ölçtüğü boğaz, tasarım basıncındaki kararlı denge
+        # için boyutlandırılır: A_t = ρ·A_b·r(P_c)·c*/P_c. Bu boğaz bir
+        # çalışma noktası tanımlar ancak yanma hızı üssü n < 1 ise:
+        # P_c = (K_n·a·ρ·c*)^(1/(1−n)) dengesi yalnız n < 1'de vardır ve
+        # kararlıdır (Sutton & Biblarz 9. baskı Böl. 12, yanma hızı ve oda
+        # basıncı dengesi). n = 1'de kütle dengesi P_c'den bağımsızdır
+        # (A_t = ρ·A_b·a·c*: o boğaz HİÇBİR basıncı seçmez), n > 1'de denge
+        # kararsızdır. Yani n ≥ 1'de "port boğazdan küçük" hükmü var olmayan
+        # bir çalışma noktasının boğazına göre verilir; kullanıcıya doğru
+        # söylenecek şey, geometriden BAĞIMSIZ olan "çözüm yok"tur
+        # (çekirdeği büyütmek motoru çözülür yapmaz). Bu yüzden n ≥ 1'de
+        # önce çözücü koşar ve yakınsamama tanısı (``solver_diagnostics``)
+        # olduğu gibi döner; çözücü yine de yakınsarsa port kapısı eğriden
+        # SONRA uygulanır (kapı atlanmaz). n < 1'de denge vardır ve kapı
+        # çözücünün modelinin ÖNKOŞULUDUR (lüle boğazı sonik nokta olmalı):
+        # kapı eğriden önce koşar, boğulan portta çözücü sonucu zaten
+        # geçersiz bir modelin sonucudur.
+        #
+        # Tasarım noktası hedefi TUTTURULAMADIYSA (``design_point_not_
+        # reached``) motorun geometrisi çözücüye verilen TOHUM geometridir,
+        # istenen tasarım değildir: o tohumun port hükmü isteğin cevabı
+        # olamaz ve zarf reddinin önüne geçemez (uç 422 ``TARGET_NOT_MET``
+        # ile zarfı söyler). Kapı yalnız boyutlandırılmış ya da kullanıcının
+        # verdiği geometride uygulanır.
+        _tohum_geometri = ((getattr(self, 'design_point', None) or {})
+                           .get('status') == DESIGN_POINT_STATUS_NOT_REACHED)
+        _n_denge_yok = float(self.n) >= 1.0
+        if not _tohum_geometri and not _n_denge_yok:
+            self._check_port_throat()
         # Get thrust curve
         curve = self.calculate_thrust_curve()
 
@@ -14268,6 +16569,7 @@ class SolidRocketEngine:
                     'termination_reason': curve.get('termination_reason'),
                     'burn_rate_exponent': float(self.n),
                     'time_step_s': curve.get('time_step_s'),
+                    **self._pressure_solver_boundary_publication(curve),
                 },
                 # Son (KABUL EDİLMEYEN) iterat yalnız teşhis içindir: adı
                 # performans alanlarıyla karışmayacak biçimde seçilmiştir ve
@@ -14286,6 +16588,11 @@ class SolidRocketEngine:
                 'design_warnings': tum_uyarilar,
                 'warnings': tum_uyarilar,
             }
+
+        # V301/K-D: n ≥ 1'de çözücü yakınsadıysa port kapısı burada (sıranın
+        # gerekçesi yukarıda, ``_n_denge_yok``). Kapı atlanmaz.
+        if not _tohum_geometri and _n_denge_yok:
+            self._check_port_throat()
 
         # Calculate performance metrics
         burn_time = curve['time'][-1]
@@ -14600,7 +16907,8 @@ class SolidRocketEngine:
         # bu üç alan çözücüde TÜRETİLEN büyüklüklerdir; kullanıcı girdisi
         # sessizce yok sayılamaz — belirgin sapma uyarıya dönüşür.
         # ------------------------------------------------------------------
-        web_user_mm = self._override_val('web_thickness', 0.1, 1000.0)
+        web_user_mm = self._override_val('web_thickness',
+                                         *SOLID_WEB_THICKNESS_RANGE_MM)
         web_derived_mm = ((web_thickness_val * 1000.0)
                           if web_thickness_val is not None else 0.0)
         if (self.grain_type == 'bates' and web_user_mm is not None
@@ -14617,25 +16925,11 @@ class SolidRocketEngine:
 
         # Kalem 29: 'outer_diameter' artık grain dış çapının doğruluk
         # kaynağıdır (bkz. _apply_overrides 7c), bu yüzden eski
-        # "alan kullanılmıyor" uyarısı KALKTI. Yerine gerçek geometri
-        # denetimi geldi: kullanıcının beyan ettiği kasa iç çapı grain'i
-        # yalıtımıyla birlikte içine alabiliyor mu?
-        bore_user_m = getattr(self, 'case_bore_input_m', None)
-        if bore_user_m is not None:
-            required_m = (self.D_chamber
-                          + 2.0 * getattr(self, 'insulation_thickness_m', 0.0))
-            if bore_user_m < required_m - 1e-9:
-                run_warnings.append(dict(_w(
-                    'warn.solid.case_bore_too_small', 'warning',
-                    entered_mm=round(bore_user_m * 1000.0, 1),
-                    required_mm=round(required_m * 1000.0, 1),
-                    grain_mm=round(self.D_chamber * 1000.0, 1)),
-                    fallback=('Declared case bore {entered_mm} mm cannot '
-                              'contain a {grain_mm} mm grain plus its '
-                              'insulation: at least {required_mm} mm is '
-                              'needed. The solver used the geometric '
-                              'minimum for the case, the grain outer '
-                              'diameter is unchanged.')))
+        # "alan kullanılmıyor" uyarısı KALKTI. V301/K-A (KT-01): kasa
+        # beyanının sığma denetimi artık burada UYARI değil, kurucuda RET'tir
+        # (``_check_case_fit`` -> 422 ``grain_does_not_fit_case``). Buraya
+        # ulaşan her beyan sığar; ``warn.solid.case_bore_too_small`` ve
+        # "kasa geometrik en küçüğe büyütüldü" yolu kalktı.
 
         cv_user_l = self._override_val('chamber_volume', 1e-3, 1e5)  # L
         cv_calc_l = case_free_volume * 1000.0
@@ -14885,6 +17179,21 @@ class SolidRocketEngine:
                 'roots are included; end faces are inhibited. Fields listed '
                 'in assumed_defaults were not supplied and use built-in '
                 'defaults.')
+        if self.grain_type == 'wagon_wheel':
+            # V301/K-B (KT-08): çözücünün KULLANDIĞI geometri yanıtta; sabit
+            # varsayılanlar 'HRMA seçimi' künyesiyle beyan edilir.
+            _wp = self._wagon_params()
+            grain_design['wagon_wheel'] = {
+                'hole_count': _wp['hole_count'],
+                'hole_diameter_mm': _wp['hole_diameter_m'] * 1000.0,
+                'pitch_diameter_mm': _wp['pitch_diameter_m'] * 1000.0,
+                'center_hole': True,
+                'basis': _wp['basis'],
+                'geometry': ('central hole + hole_count outer holes on the '
+                             'pitch circle, all of hole_diameter_mm'),
+            }
+            grain_design['assumed_defaults'] = list(_wp['assumed_defaults'])
+            grain_design['clipped_inputs'] = []
 
         # --- Design Summary ---
         # CODEX BULGUSU DÜZELTMESİ (2026-07-19, satır ~3871): özet tablo
@@ -14896,7 +17205,13 @@ class SolidRocketEngine:
         # _case_design().
         (_summary_case_material, _sigma_y_summary,
          _SF_summary, t_wall_summary) = self._case_design()
-        motor_od = self.D_chamber + 2 * t_wall_summary
+        # V301/K-A (KT-02): motor dış çapı TEK kaynaktan — kasa iç çapı +
+        # 2·cidar; ``cad_design.case_design.outer_diameter`` ile AYNI
+        # formül ve aynı iki çağrı (``_case_inner_diameter`` /
+        # ``_case_design``). Eskiden tane dış çapı + 2·cidar yazılıyordu:
+        # yalıtım/astar ve beyan edilen kasa yok sayılıyor, özet CAD'den
+        # 6-100 mm küçük çıkıyordu (ölçüldü: 104,24 ⟷ 110,24 mm).
+        motor_od = self._case_inner_diameter() + 2 * t_wall_summary
         # Kasa boyu, CAD ile AYNI kaynaktan (_case_inner_length); aşağıdaki
         # key_dimensions bunu kullanır.
         case_length = self._case_inner_length()
@@ -14930,6 +17245,17 @@ class SolidRocketEngine:
         # Artık status uyarıyla AYNI şeyi söyler ve performans/CAD bloklarının
         # hangi basınç geçmişinden geldiği açıkça beyan edilir.
         cozucu_yakinsadi = bool(getattr(self, '_solver_converged', True))
+        # V301/B6: rejim sınırında tutulan adımlar başarısız değildir ama
+        # yasanın o basınçta tek değeri yoktur; not bunu sayısıyla söyler.
+        _tutulan = int(curve.get('pressure_solver_boundary_held_steps', 0)
+                       or 0)
+        _sinir_notu = (
+            f' {_tutulan} of them sit on a regime boundary of the piecewise '
+            'burn-rate law, where the law itself is discontinuous; there the '
+            'equilibrium is held at the boundary pressure with a burn rate '
+            'inside the jump (see solver_diagnostics.'
+            'pressure_solver_boundary_basis).'
+            if _tutulan > 0 else '')
         design_summary = {
             'title': f'Solid Motor - {self.grain_type.upper()} / {self.propellant_name}',
             'status': (DESIGN_STATUS_CALCULATED if cozucu_yakinsadi
@@ -14940,10 +17266,13 @@ class SolidRocketEngine:
             'numerical_validity': {
                 'convergence_achieved': cozucu_yakinsadi,
                 'note': (
-                    'Every time step met the pressure solver tolerance.'
+                    ('Every time step met the pressure solver tolerance.'
+                     + _sinir_notu)
                     if cozucu_yakinsadi else
-                    'Some time steps reached the 100-iteration cap without '
-                    'meeting the pressure solver tolerance. The burn still ran '
+                    f'Some time steps reached the '
+                    f'{SOLID_PRESSURE_SOLVER_MAX_ITER}-iteration cap and the '
+                    'bracketed fallback without meeting the pressure solver '
+                    'tolerance. The burn still ran '
                     'to completion with a burn-rate exponent below 1, so the '
                     'result is published, but every performance and CAD number '
                     'below is derived from that pressure history and must be '
@@ -15104,8 +17433,9 @@ class SolidRocketEngine:
                 'value': self.D_chamber * 1000,
                 'same_name_elsewhere': [
                     {'path': 'motor_geometry.chamber_diameter',
-                     'quantity': 'case INNER diameter '
-                                 '(grain OD + 2 x insulation thickness)',
+                     'quantity': 'case INNER diameter (the declared case '
+                                 'bore, or grain OD + 2 x (liner + '
+                                 'insulation) thickness; see case_bore)',
                      'unit': 'm',
                      'owner': 'hrma/export/motor_geometry.py'},
                     {'path': 'acoustic_modes.inputs.'
@@ -15116,15 +17446,25 @@ class SolidRocketEngine:
                      'owner': 'SolidRocketEngine._acoustic_mode_report',
                      'renamed_from': 'chamber_diameter'},
                 ],
+                # V301/K-A (ana model kararı A, 22 Eki): İSTEĞİN aynı adlı
+                # alanı iki biçimde iki ayrı şeydir; yanıttaki çıplak ad
+                # değişmedi (tane dış çapı — tüketiciler onu okuyor).
                 'basis': (
                     "The bare name 'chamber_diameter' in this response means "
-                    'the grain outer diameter in millimetres - the same '
-                    'quantity the request field of that name carries, so the '
-                    'value can be sent back unchanged. Sibling blocks that '
-                    'reuse the name for a DIFFERENT quantity are listed '
-                    'above with their own quantity and unit; do not compare '
-                    'them numerically without reading that list.'),
+                    'the grain outer diameter in millimetres. The REQUEST '
+                    'field of that name is the case inner diameter whenever '
+                    'outer_diameter is sent; only in the single-diameter '
+                    'form (no outer_diameter) is it read as the grain outer '
+                    'diameter, and then this value can be sent back '
+                    'unchanged. case_bore states which form was used. '
+                    'Sibling blocks that reuse the name for a DIFFERENT '
+                    'quantity are listed above with their own quantity and '
+                    'unit; do not compare them numerically without reading '
+                    'that list.'),
             },
+            # V301/K-A (KT-01/KT-03, karar A): kasa iç çapının kaynağı ve
+            # sığma kuralı ADIYLA (beyan / türetme / tek-çap eski biçim).
+            'case_bore': self._case_bore_block(),
             'grain_length': self.L_grain * 1000,  # mm
             'core_diameter': self.D_core * 1000,  # mm
 
@@ -15158,9 +17498,18 @@ class SolidRocketEngine:
             # katıda CEA/Cantera bileşim çözümü yok, gamma yakıt kaydından
             # gelir ve itki/genişleme çözümünün kullandığı değerin AYNISIDIR.
             'gamma': float(self.gamma),
-            'gamma_basis': ('isentropic expansion coefficient from the '
-                            'propellant record; the same value the thrust '
-                            'coefficient and expansion-ratio solutions use'),
+            'gamma_basis': (
+                'NASA CEA equilibrium chamber gamma_s at this chamber '
+                'pressure (condensed phase included); the nozzle solution '
+                'is the CEA shifting-equilibrium expansion (see '
+                'thermochemistry.nozzle)' if self._cea_nozzle_state() else
+                'NASA CEA equilibrium chamber gamma_s at this chamber '
+                'pressure; CEA did not solve the nozzle, so the thrust '
+                'coefficient and expansion-ratio solutions use this value '
+                'in the single-gamma relations' if self._cea_active() else
+                'isentropic expansion coefficient from the '
+                'propellant record; the same value the thrust '
+                'coefficient and expansion-ratio solutions use'),
 
             # Propellant properties
             'density': self.rho_p,
@@ -15168,9 +17517,21 @@ class SolidRocketEngine:
             # ÖH D17 (P2B1-01): kaydın c*'ı kendi (gamma, T_c, M) üçlüsüyle
             # tutarlı mı? Denetim ARTIK yayımlanıyor; kayıtlar kendi
             # 'c_star_basis' beyanlarıyla muaf tutulamıyor.
+            # V301/N-CEA-2 D1: denetlenen sayı TEORİK (kayıpsız) c*'tır.
+            # Eskiden TESLİM EDİLEN self.c_star (eta_c* uygulanmış) veriliyor
+            # ve 'record_c_star_m_s' diye yayımlanıyordu; kendi içinde
+            # tutarlı bir kayıt (double_base, eta %95) 'unexplained_deficit
+            # -%5,00' alıyordu. Kanıt: docs/scofield/raw/OH/V301/cea/RAPOR.md
+            # C3 D1.
             'c_star_identity_audit': _c_star_identity_audit(
                 self.propellant_type, self.gamma, self.T_c,
-                getattr(self, 'mw_exhaust', None), self.c_star),
+                getattr(self, 'mw_exhaust', None),
+                self._c_star_theoretical(),
+                basis_override=('cea' if self._cea_active() else None)),
+            # V301/N-CEA-2 (K1/K2/K3): termokimyanın ve lülenin KAYNAĞI.
+            'thermochemistry_source': getattr(
+                self, 'thermochemistry_source', SOLID_THERMO_SOURCE_CATALOGUE),
+            'thermochemistry': self.thermochemistry_report(),
             # FAZ 5 / H2-4 DÜZELTMESİ — katalog yakıtında (KNDX/KNSB) yanma
             # hızı PARÇALI rejim tablosundan okunur ve kullanıcının a/n çifti
             # HİÇ kullanılmaz. Ölçüldü (kndx, Pc=30 bar, aynı geometri):
@@ -15263,10 +17624,17 @@ class SolidRocketEngine:
                 'burn_rate_exponent': float(self.n),
                 'basis': (
                     'Equilibrium chamber pressure is solved with a damped '
-                    'fixed-point iteration (max 100 per time step). The '
+                    'fixed-point iteration (max '
+                    f'{SOLID_PRESSURE_SOLVER_MAX_ITER} per time step). The '
                     'contraction argument requires a burn-rate exponent '
-                    'n < 1. convergence_achieved is true only when every '
-                    'time step met the tolerance.'),
+                    'n < 1. A step that does not meet the tolerance is '
+                    're-solved by bracketing and bisecting the mass-balance '
+                    'residual to the same tolerance; if the bracket collapses '
+                    'onto a regime boundary of a piecewise burn-rate law the '
+                    'step is held there (pressure_solver_boundary_basis). '
+                    'convergence_achieved is true only when every time step '
+                    'met the tolerance or was held at such a boundary.'),
+                **self._pressure_solver_boundary_publication(curve),
             },
         }
 
@@ -15460,4 +17828,67 @@ class SolidRocketEngine:
                 'there.'),
         }
 
+        # V301/FİZİK-2 (kalem 6, KABUL 13): toplam boy ÇİZİLEN geometriden —
+        # CAD-2'nin hibrit tek tanımı (kasa + çizilen lüle + çizilen ön kapak).
+        self._cizilen_boy_tek_tanim(results)
+
         return results
+
+    def _cizilen_boy_tek_tanim(self, results):
+        """V301/FİZİK-2 (kalem 6) — katı toplam boyu çizilen geometriden.
+
+        ÖLÇÜLDÜ (KABUL K3 katı; docs/scofield/raw/OH/V301/fizik-2/
+        k6_olcu_once.json): STEP/STL lüle arka ucu x = 547,646 mm ⟷
+        yayımlanan ``total_length_mm`` 547,183 mm (çözücünün yakınsak +
+        ıraksak boyu; çizim örnekleyicisi konik lülede boğaz yayıyla çıkışa
+        0,463 mm daha ileride varır); kapaklı boy (STEP max x − min x
+        557,088 mm, ön kapak x < 0'da) YAYIMLANMIYORDU. Tek tanım CAD-2'nin
+        hibritteki tanımıdır: toplam = kasa + ÇİZİLEN lüle (STEP/STL/DXF ve
+        kesitin tek kontur örnekleyicisi ``sample_nozzle_inner_contour``,
+        CAD'in kendi girdi normalleştirmesiyle) ve kapaklı toplam = + ÇİZİLEN
+        düz ön kapak (``cad_visualization._front_cap_design``, STEP'in
+        okuduğu aynı işlev). Örnekleyici çözülemezse eski toplam kalır ve
+        künye bunu adıyla söyler (sayı uydurulmaz).
+        """
+        kd = (results.get('design_summary') or {}).get('key_dimensions')
+        if not isinstance(kd, dict) or kd.get('motor_length_mm') is None \
+                or kd.get('total_length_mm') is None:
+            return
+        try:
+            import copy
+            from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+            from hrma.export.cad_visualization import _front_cap_design
+            from hrma.export.motor_geometry import normalise_export_geometry
+            md, _rapor = normalise_export_geometry(copy.deepcopy(results))
+            _pts, meta = sample_nozzle_inner_contour(md)
+            lule_mm = float(meta['z_exit'])
+            if not (np.isfinite(lule_mm) and lule_mm > 0.0):
+                raise ValueError('the sampled exit station is not a '
+                                 'positive finite number')
+            kapak = _front_cap_design(md)
+            kapak_mm = (float(kapak['thickness_mm'])
+                        if isinstance(kapak, dict)
+                        and kapak.get('thickness_mm') is not None else None)
+        except Exception as hata:  # noqa: BLE001 — künyeye adıyla yazılır
+            kd['total_length_basis'] = (
+                'case length + solver nozzle sections (convergent + '
+                'divergent); the drawn nozzle length could not be resolved '
+                f'({type(hata).__name__}: {hata})')[:400]
+            return
+        toplam = float(kd['motor_length_mm']) + lule_mm
+        kd['total_length_mm'] = toplam
+        kd['nozzle_drawn_length_mm'] = lule_mm
+        if kapak_mm is not None and np.isfinite(kapak_mm) and kapak_mm > 0:
+            kd['forward_closure_length_mm'] = kapak_mm
+            kd['total_length_with_closure_mm'] = toplam + kapak_mm
+        kd['total_length_basis'] = (
+            'total_length_mm = case length (motor_length_mm) + the DRAWN '
+            'nozzle (nozzle_drawn_length_mm: convergent inlet to exit plane '
+            'of the one contour sampler the STEP/STL/DXF and the Motor '
+            'Cross-Section use; for a conical nozzle the throat arc moves '
+            'the exit plane beyond the solver nozzle sections). '
+            'total_length_with_closure_mm adds the flat forward closure the '
+            'manufacturing STEP draws at x < 0 (forward_closure_length_mm, '
+            'the same function the exporter reads). It is THE total motor '
+            'length, the same definition as the hybrid '
+            'total_motor_length_with_caps_mm.')

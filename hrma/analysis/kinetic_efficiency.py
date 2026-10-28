@@ -646,6 +646,23 @@ class KineticEfficiency:
                                 nozzle_profile: Optional[Dict]) -> Dict:
         if not CANTERA_AVAILABLE or ct is None:
             raise HighFidelityUnavailable("Cantera is not installed")
+        # V301/B7 (21 Eki) — YOĞUN FAZ VARKEN BU YOL TUTARSIZDIR. Yanma
+        # sonucunun T_c'si gaz + katı karbon C(gr) dengesinden gelir; bu yol
+        # ise odayı ve izentropu kendi GAZ-yalnız dengesiyle kurar, yani h_0
+        # artık reaktan entalpisi değildir (ölçüldü, N2O/HTPB O/F 2,5 /
+        # 20 bar: Isp 177,20 → 187,92 s, B7 kanıtı RAPOR §6). Sonlu-hız
+        # entegrasyonu yoğun fazı modellemez; sayı uydurmak yerine yol kendi
+        # zarif düşüş sözleşmesiyle beyanlı engineering korelasyonuna geçer.
+        # Yoğun faz yoksa ('absent' / beyan yok) davranış bit-aynıdır.
+        yogun = cres.get('condensed_phases')
+        if isinstance(yogun, dict) and yogun.get('status') == 'present':
+            istasyonlar = ', '.join(
+                str(a) for a in (yogun.get('stations_with_condensed_phase')
+                                 or [])) or 'one or more stations'
+            raise HighFidelityUnavailable(
+                'the combustion equilibrium contains condensed carbon C(gr) '
+                f'({istasyonlar}); the finite-rate integration is gas-phase '
+                'only and does not model a condensed phase')
         x, t_arr, p_arr, u_arr = self._validate_profile(nozzle_profile)
 
         gas = self._get_kinetics_gas()

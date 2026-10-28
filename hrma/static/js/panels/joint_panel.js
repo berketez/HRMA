@@ -348,18 +348,18 @@
         endpoint: '/api/bolted-joint',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['pressure_bar', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
-            ['seal_diameter_mm', 'Seal / Effective Diameter (mm)', 100, 1, 'panel.joint.fSealDiameter'],
-            ['bolt_count', 'Bolt Count', 8, 1, 'panel.joint.fBoltCount'],
-            ['size', 'Bolt Size', 'M8', SIZES, 'panel.joint.fBoltSize'],
-            ['property_class', 'Property Class', '8.8', CLASSES, 'panel.joint.fPropertyClass'],
-            ['grip_length_mm', 'Grip Length (mm)', 20, 1, 'panel.joint.fGripLength'],
+            ['pressure_bar', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.joint.help.pressure_bar'],
+            ['seal_diameter_mm', 'Seal / Effective Diameter (mm)', 100, 1, 'panel.joint.fSealDiameter', 'panel.joint.help.seal_diameter_mm'],
+            ['bolt_count', 'Bolt Count', 8, 1, 'panel.joint.fBoltCount', 'panel.joint.help.bolt_count'],
+            ['size', 'Bolt Size', 'M8', SIZES, 'panel.joint.fBoltSize', 'panel.joint.help.size'],
+            ['property_class', 'Property Class', '8.8', CLASSES, 'panel.joint.fPropertyClass', 'panel.joint.help.property_class'],
+            ['grip_length_mm', 'Grip Length (mm)', 20, 1, 'panel.joint.fGripLength', 'panel.joint.help.grip_length_mm'],
             ['member_material', 'Member Material', VARSAYILAN_MALZEME, MEMBER_MATERIALS,
-             'panel.joint.fMemberMaterial'],
-            ['lubricated', 'Thread Condition', 'false', LUBRICATION, 'panel.joint.fThreadCondition'],
-            ['reusable', 'Connection Type', 'true', REUSE, 'panel.joint.fConnectionType'],
+             'panel.joint.fMemberMaterial', 'panel.joint.help.member_material'],
+            ['lubricated', 'Thread Condition', 'false', LUBRICATION, 'panel.joint.fThreadCondition', 'panel.joint.help.lubricated'],
+            ['reusable', 'Connection Type', 'true', REUSE, 'panel.joint.fConnectionType', 'panel.joint.help.reusable'],
             ['external_axial_load_n', 'Extra Axial Load (N, optional)', '', 100,
-             'panel.joint.fExtraAxial'],
+             'panel.joint.fExtraAxial', 'panel.joint.help.external_axial_load_n'],
         ],
         fromResults: function (r) {
             var m = (r && r.motor) || r || {};
@@ -375,6 +375,27 @@
             var sealMm = U.readLengthMM(r, 'chamber_diameter');
             if (Number.isFinite(sealMm)) {
                 out.seal_diameter_mm = sealMm;
+            }
+            // V301/K-C1 (KT-22): katı sayfada malzeme ana tasarımın KASA
+            // malzemesidir (structural_analysis.case_analysis.case_material).
+            // ÖLÇÜLDÜ (denetim A-kati ekran_en.json): panel kasa 'steel' iken
+            // kendi varsayılanıyla (VARSAYILAN_MALZEME, Al 6061) hesaplıyordu. Yanıtta
+            // malzeme yoksa varsayılan kalır ve bu ADIYLA beyan edilir
+            // (güvertenin __withheld künyesi); seçenek listesinde olmayan ad
+            // güvertenin kendi kapısında durur (istek gönderilmez).
+            if (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function'
+                    && window.AnalysisDock.getMotorType() === 'solid') {
+                var kasaMalz = U.readChamberMaterial ? U.readChamberMaterial(r) : undefined;
+                if (typeof kasaMalz === 'string' && kasaMalz) {
+                    out.member_material = kasaMalz;
+                } else {
+                    out.member_material = VARSAYILAN_MALZEME;
+                    var gk = {};
+                    gk.member_material = 'case_material_not_in_results: the solid motor result '
+                        + 'publishes no case material, so the panel default '
+                        + VARSAYILAN_MALZEME + ' is used';
+                    out[U.WITHHELD_KEY || '__withheld'] = gk;
+                }
             }
             return out;
         },

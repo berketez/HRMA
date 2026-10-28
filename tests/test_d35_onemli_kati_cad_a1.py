@@ -304,7 +304,12 @@ def test_kati_ucu_cozucunun_boyutlandirdigi_cidari_beyan_ediyor(client):
     Beyan kardeş kanaldadır (``case_geometry``), ``head_geometry`` gibi.
     """
     sonuc = _kati_sonuc(client)
-    alanlar = load_example_doc('solid')['inputs']['fields']
+    # V301/T-ÇAPA-D: örnek (ÖRNEK 5fa435893) sayfanın bütün alanlarını
+    # taşıyor; boş bırakılan cidar dosyada ``case_thickness = ''`` ve sayfa
+    # onu GÖNDERMEZ (tests/support/ornek_alanlari.py). Ön koşul: gönderilen
+    # gövdede cidar yok.
+    from tests.support.ornek_alanlari import sayfa_gibi
+    alanlar = sayfa_gibi(load_example_doc('solid')['inputs']['fields'])
     assert 'case_thickness' not in alanlar, (
         'bu bekçi cidarın BOŞ bırakıldığı koşumu ölçer')
     cg = sonuc.get('case_geometry')

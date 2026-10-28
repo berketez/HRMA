@@ -376,7 +376,12 @@ class TestP9B510CeaRozeti:
         assert yanit.status_code == 200
         govde = yanit.get_json()
         assert govde['cea']['status'] != 'connected'
-        assert govde['nist']['status'] == 'error'
+        # v3.0.1 K (Berke ek maddesi): NIST kolu bağlantıyı ADIYLA söyler.
+        # Ağ kapalıyken eski değer 'error' idi; artık 'not_connected'
+        # (bağlanamadı) ve CEA kolunda bağlantı kavramı yok.
+        assert govde['nist']['status'] == 'not_connected'
+        assert govde['nist']['connection'] == 'not_connected'
+        assert govde['cea']['connection'] == 'not_applicable'
 
     def test_nist_dogru_calisirken_connected_kalir(self):
         """Aşırı düzeltme yok: gerçek ağ kaynağı hâlâ 'connected' diyebilir."""
@@ -422,9 +427,24 @@ class TestP9B511BosAyristirma:
         assert 'density_source' in sonuc['data']
 
     def test_bos_sonuc_rozeti_yesil_yakamaz(self):
+        """ÇEVRİLDİ (v3.0.1 K kulvarı — Berke ek maddesi).
+
+        Eski beklenti ``status == 'error'`` idi: sayfa GELDİĞİ hâlde uç
+        "hata" yayımlıyor, arayüz bunu "NIST WebBook Offline" diye okuyordu
+        (bağlanmış kaynağa "bağlanamadı" demek — beklenti kusuru
+        kilitliyordu). Bağlantı ve veri artık ayrı: bağlandı, ama veri
+        ayrıştırılmadı ve hesaba sayı vermiyor. P9B5-11'in kazanımı (boş
+        ayrıştırma BAŞARI değildir, NIST'e değer atfedilmez) ``data_parsed``
+        ile korunur.
+        """
         with _AgBosSayfa():
             durum = DatabaseManager().test_connections()
-        assert durum['nist']['status'] == 'error'
+        assert durum['nist']['status'] == 'connected'
+        assert durum['nist']['connection'] == 'connected'
+        assert durum['nist']['http_status'] == 200
+        assert durum['nist']['data_parsed'] is False
+        assert durum['nist']['supplies_calculation_data'] is False
+        assert 'no value is attributed to NIST' in durum['nist']['message']
 
     def test_ayristirilabilen_sayfa_hala_success(self):
         """Aşırı düzeltme yok: gerçekten ayrıştırılan sayfa başarıdır."""

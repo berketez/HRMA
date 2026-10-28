@@ -58,9 +58,24 @@ def _sessiz(cagrilabilir, *args, **kwargs):
 
 # Ölçülen yakınsayan katı motor tabanı (n = 0.35, APCP): 0/219 adım başarısız.
 # app.py /calculate_solid varsayılanlarıyla aynı; birimler mm ve bar.
+# V301/T-ÇAPA-A: çekirdek 30 -> 76 mm. a = 0,005 (katalog APCP a'sının ~2,24
+# katı) boğazı büyütür; 30 mm'de A_p/A_t 0,396, tek tanımın 48 mm'sinde
+# 0,958 (ikisi de K-A port kapısından 422). 76 mm ölçülen A_p/A_t 2,218
+# (K-A'nın 48 mm için bıraktığı 2,211 payıyla aynı; 72 mm 2,006). Bu
+# tabanı okuyanların konusu yakınsama/kararlılık, boğulan port değil.
 KATI_TABAN = dict(grain_type='bates', propellant_type='apcp',
-                  chamber_diameter=100, grain_length=500, core_diameter=30,
+                  chamber_diameter=100, grain_length=500, core_diameter=76,
                   chamber_pressure=40, burn_rate_a=0.005)
+
+#: V301/T-ÇAPA-A: YAKINSAMA SÖZLEŞMESİ senaryoları (n >= 0,88; a = 0,005).
+#: Bu sert rejimler yalnız portu boğulan geometride kurulabiliyor: n = 1,0'da
+#: boğaz 100 mm tanenin İÇİNDEKİ hiçbir çekirdekle porttan küçük kalmıyor
+#: (76 mm'de ölçülen A_p/A_t 0,416, kapı "no core diameter inside the 100 mm
+#: grain" diyor). Senaryolar ölçüldükleri geometride (çekirdek 30 mm) kalır
+#: ve port kapısı (KT-23) ``port_kapisi_kapali`` ile BİLEREK devre dışıdır —
+#: K-A'nın ``test_solid_codex_fixes`` deseni. Bu düğümlerin konusu port değil
+#: yakınsamama kanalıdır; kapının kendisi tests/test_v301_kati_geometri.py'de.
+KATI_TABAN_YAKINSAMA = dict(KATI_TABAN, core_diameter=30)
 
 
 # ---------------------------------------------------------------------------
@@ -238,14 +253,15 @@ def test_a3_arayuzun_sundugu_ciftler_kapiya_takilmiyor(yakit, oksitleyici):
 # B2 — yakınsamayan katı çözüm performans/CAD üretmiyor
 # ---------------------------------------------------------------------------
 
-def test_b2_ustel_bire_esitse_performans_ve_cad_yayimlanmiyor():
+def test_b2_ustel_bire_esitse_performans_ve_cad_yayimlanmiyor(
+        port_kapisi_kapali):
     """1. kademe: n >= 1 -> sabit-nokta daralma savı geçersiz.
 
     Ölçüm: n = 1.0 -> 1/35 adım başarısız, term='burn_rate_zero'. Daralma
     garantisi olmadan hiçbir adımın basıncına güvenilemez; eskiden bu koşu
     status='CALCULATED', Isp dolu ve cad_design 9 anahtar dolu dönüyordu.
     """
-    motor = SolidRocketEngine(burn_rate_n=1.0, **KATI_TABAN)
+    motor = SolidRocketEngine(burn_rate_n=1.0, **KATI_TABAN_YAKINSAMA)
     sonuc = _sessiz(motor.calculate_performance)
 
     assert sonuc.get('error'), 'n >= 1 yakınsamazsa hata sözleşmesine düşmeli'
@@ -269,14 +285,46 @@ def test_b2_ustel_bire_esitse_performans_ve_cad_yayimlanmiyor():
     assert 'warn.solid.burn_rate_exponent_ge_one' in kodlar
 
 
-def test_b2_basinc_cokusu_yildiz_grainde_normal_burnout_sayilir():
+@pytest.fixture()
+def port_kapisi_kapali(monkeypatch):
+    """K-A port ⟷ boğaz kapısını (KT-23) kapatır; gerekçe
+    ``KATI_TABAN_YAKINSAMA`` künyesinde."""
+    monkeypatch.setattr(SolidRocketEngine, '_check_port_throat',
+                        lambda self: None)
+
+
+@pytest.fixture()
+def yedek_cozucu_kapali(monkeypatch):
+    """Basınç çözücüsünün V301/B6 yedeğini kapatır (yedek hep başarısız).
+
+    GEREKÇE (V301/B6, 21 Eki): sönümlü yineleme tavana takıldığında artık
+    parantezli ikiye bölme yedeği devreye giriyor. Bu dosyanın 2. kademe
+    senaryoları (n = 0.88 / 0.95) yavaş daralan ama gerçek kökü OLAN
+    çözümlerdi; yedek kökü aynı toleransla buluyor. ÖLÇÜLDÜ
+    (docs/scofield/raw/OH/V301/makale1/B6/{once,sonra}.json,
+    ``ek_tek_ustel_yavas_daralma``): n = 0.88 96/223 -> 0/223, n = 0.95
+    103/135 -> 0/136 başarısız adım. Kapının kendisi (yakınsamayan ama normal
+    biten çözüm 'CALCULATED' diyemez) hâlâ geçerli bir sözleşmedir; o yüzden
+    senaryo yedek KAPALIYKEN koşulur. Yedek ``None`` döndürdüğünde çözücü son
+    iteratı ve akıyı AYNEN korur, yani bu senaryo B6 öncesi davranışın
+    birebir aynısıdır (eğri bit-aynı; bekçisi tests/test_v301_kati_rejim.py).
+    """
+    monkeypatch.setattr(SolidRocketEngine, '_equilibrium_pressure_fallback',
+                        lambda self, *a, **k: None)
+
+
+def test_b2_basinc_cokusu_yildiz_grainde_normal_burnout_sayilir(
+        yedek_cozucu_kapali, port_kapisi_kapali):
     """Bekçi: 'pressure_collapse' bir sapma DEĞİL, tükenişin doğal sonudur.
 
     Çözücünün kendi tükeniş kapanışı (solid_rocket_engine.py:6472-6474) bu sonu
     burnout sayıp eğriye sıfır itkili son noktayı ekliyor. İlk uygulamada bu son
     'anormal' sanıldı ve deponun kendi yıldız grainli KNDX örneği kesildi.
+
+    V301/B6: yakınsamama senaryosu yedek kapalıyken üretilir (bkz.
+    ``yedek_cozucu_kapali``).
     """
-    motor = SolidRocketEngine(burn_rate_n=0.95, **KATI_TABAN)
+    motor = SolidRocketEngine(burn_rate_n=0.95, **KATI_TABAN_YAKINSAMA)
     sonuc = _sessiz(motor.calculate_performance)
 
     assert sonuc['solver_diagnostics']['termination_reason'] == \
@@ -287,7 +335,8 @@ def test_b2_basinc_cokusu_yildiz_grainde_normal_burnout_sayilir():
         solid_mod.DESIGN_STATUS_NOT_CONVERGED
 
 
-def test_b2_tavana_takilan_ama_normal_biten_cozum_calculated_diyemiyor():
+def test_b2_tavana_takilan_ama_normal_biten_cozum_calculated_diyemiyor(
+        yedek_cozucu_kapali, port_kapisi_kapali):
     """2. kademe: NORMAL biten (web tükenen) ama tavana takılan çözüm.
 
     Sonuç yayımlanır (tolerans 1e-6'dan 1e-2'ye gevşetildiğinde toplam impuls
@@ -310,8 +359,12 @@ def test_b2_tavana_takilan_ama_normal_biten_cozum_calculated_diyemiyor():
 
     Senaryo n = 0.88'e çekildi; iddiaların hiçbiri gevşetilmedi (aynı dört
     alan, aynı değerler) — yalnız senaryoyu HÂLÂ üreten girdi seçildi.
+
+    V301/B6: yedek açıkken n = 0.88 artık 0/223 ile yakınsıyor (gerçek kök
+    vardı, yineleme yavaştı); senaryo yedek kapalıyken üretilir (bkz.
+    ``yedek_cozucu_kapali``), iddialar aynen.
     """
-    motor = SolidRocketEngine(burn_rate_n=0.88, **KATI_TABAN)
+    motor = SolidRocketEngine(burn_rate_n=0.88, **KATI_TABAN_YAKINSAMA)
     sonuc = _sessiz(motor.calculate_performance)
 
     assert not sonuc.get('error')
@@ -361,9 +414,10 @@ def test_b2_katalog_iticisi_mesru_calisma_noktasinda_kesilmiyor():
     assert len(sonuc['cad_design']) > 0
 
 
-def test_b2_monte_carlo_yakinsamayan_nominali_kabul_etmiyor():
+def test_b2_monte_carlo_yakinsamayan_nominali_kabul_etmiyor(
+        port_kapisi_kapali):
     """Hata sözleşmesi zaten tanınıyor: MC nominali düşürüp gerekçe döner."""
-    motor = SolidRocketEngine(burn_rate_n=1.0, **KATI_TABAN)
+    motor = SolidRocketEngine(burn_rate_n=1.0, **KATI_TABAN_YAKINSAMA)
     mc = _sessiz(motor.run_monte_carlo, n_samples=20)
     assert mc.get('error')
     assert 'converge' in mc['error'].lower()

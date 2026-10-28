@@ -137,9 +137,13 @@ def test_orbitcontrols_vendor_has_dispose():
 
 def test_tick_hidden_container_guard():
     src = _read(VIZ3D)
+    # T-ÇAPA-C2 (27 Eki): bekçi gövdesi controls.update()'in dönüşünü
+    # ``this._camMoved``a yazıyor (V301/K-C1 e0b6cde1d boşta çizim döngüsü:
+    # kamera kıpırdamadıysa render yok). Bekçinin kendisi (görünmez
+    # konteynerde erken dönüş, render'dan ÖNCE) aynen duruyor.
     m = re.search(
         r'if \(!this\.container\.offsetParent\) \{\s*'
-        r'this\.controls\.update\(\);\s*'
+        r'(?:this\._camMoved = )?this\.controls\.update\(\);\s*'
         r'return;', src)
     assert m, '_tick görünmez konteyner bekçisi (offsetParent) kaldırılmış'
     # Bekçi render çağrısından ÖNCE olmalı

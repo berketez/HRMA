@@ -64,10 +64,53 @@ def sivi_size(client):
 @pytest.fixture(scope='module')
 def sivi_verify(client):
     """Kalınlığı KULLANICI verdi -> ``design_mode == 'verify'``."""
+    # V301/L-KABUK: rejeneratif cidar iki katmanlı — basıncı taşıyan dış
+    # kabuğun kalınlığını da KULLANICI verince doğrulama kipidir (astar
+    # chamber_wall_thickness, kabuk closeout_thickness).
     r = client.post('/calculate_liquid', json=_sivi_yuk(
-        chamber_wall_thickness=3.0, safety_factor=2.0))
+        chamber_wall_thickness=3.0, closeout_thickness=6.0,
+        safety_factor=2.0))
     assert r.status_code == 200, r.get_data(as_text=True)[:400]
     return r.get_json()
+
+
+# L-B (v3.0.1, SV-05): yapı hükmü artık ÇÖZÜLMÜŞ cidar sıcaklığında
+# verilir. Yukarıdaki iki fikstürde (2-3 mm cidar, RP-1 rejeneratif) istasyon
+# marşı tepe cidarı erime üstünde çözüyor -> hüküm geri çekilir ve
+# ``safety_factor_basis`` geçerlilik-dışı tanı metnine döner (beklenen,
+# LIQUID_MODEL_VALIDITY_SAFETY_FACTOR_BASIS). Kipe göre kurulan cümlenin
+# bekçileri GEÇERLİLİK İÇİ koşumda koşar: verify -> 8 mm cidar (marş ince
+# cidar zarfı dışında, hüküm beyanlı hedef sıcaklıkta); size -> film tipi
+# (1B cidar çözücüsü yok, aynı beyan).
+@pytest.fixture(scope='module')
+def sivi_verify_gecerli(client):
+    # V3.0.5 SIVI-CIDAR kalem 1 — FİKSTÜR TAŞINDI, İDDİA AYNI: 8 mm Inconel
+    # astarda marş ince-cidar zarfıyla reddedilince hüküm eskiden 800 K
+    # tasarım varsayımında (çözülmemiş) veriliyordu. Marşsız boğaz artık 1B
+    # seri devreyle ÇÖZÜLÜYOR: aynı gövdede astarın sıcak cidarı 3069,4 K
+    # (Inconel erime 1533 K) → geçerlilik dışı, fiziksel. Geçerlilik İÇİ
+    # doğrulama (verify) kipi: CuCrZr 1 mm astar + kullanıcının 6 mm dış
+    # kabuğu, Pc 50 bar — ölçüldü: sıcak cidar 753,5 K, astar 'pass',
+    # design_mode 'verify', model_validity_limit_exceeded False.
+    r = client.post('/calculate_liquid', json=_sivi_yuk(
+        chamber_material='cucrzr', chamber_wall_thickness=1.0,
+        closeout_thickness=6.0, safety_factor=2.0, chamber_pressure=50.0))
+    assert r.status_code == 200, r.get_data(as_text=True)[:400]
+    j = r.get_json()
+    assert j['structural_analysis']['chamber_structure'][
+        'model_validity_limit_exceeded'] is False
+    return j
+
+
+@pytest.fixture(scope='module')
+def sivi_size_gecerli(client):
+    r = client.post('/calculate_liquid', json=_sivi_yuk(
+        cooling_type='film_cooling', film_cooling_percent=5.0))
+    assert r.status_code == 200, r.get_data(as_text=True)[:400]
+    j = r.get_json()
+    assert j['structural_analysis']['chamber_structure'][
+        'model_validity_limit_exceeded'] is False
+    return j
 
 
 def _yollar(dugum, yol=''):
@@ -202,19 +245,19 @@ class TestZ401IhracDogrulamaDamgasi:
             blok, 'chamber_structure')
         assert olculdu is False
 
-    def test_verify_kunyesi_sized_cumlesi_kurmaz(self, sivi_verify):
+    def test_verify_kunyesi_sized_cumlesi_kurmaz(self, sivi_verify_gecerli):
         """verify kipinde "cidar hedefe boyutlandırıldı" cümlesi YANLIŞTIR."""
-        basis = sivi_verify['structural_analysis']['chamber_structure'][
-            'safety_factor_basis']
+        basis = sivi_verify_gecerli['structural_analysis'][
+            'chamber_structure']['safety_factor_basis']
         assert 'this one is a verification' in basis
         assert 'the wall was sized so that' not in basis, (
             'Aynı künye hem "cidar hedefe boyutlandırıldı" hem "bu bir '
             'doğrulamadır" diyor — çelişik cümle geri gelmiş.')
 
-    def test_size_kunyesi_sized_cumlesini_korur(self, sivi_size):
+    def test_size_kunyesi_sized_cumlesini_korur(self, sivi_size_gecerli):
         """size kipinde cümle DEĞİŞMEMELİ (onarım kapsamı dar)."""
-        basis = sivi_size['structural_analysis']['chamber_structure'][
-            'safety_factor_basis']
+        basis = sivi_size_gecerli['structural_analysis'][
+            'chamber_structure']['safety_factor_basis']
         assert 'the wall was sized so that' in basis
 
 
@@ -547,8 +590,18 @@ class TestP12aB201EnjektorDeltaPBirimi:
 
     @pytest.mark.parametrize('goreli', DOSYALAR)
     def test_iki_kip_de_yaziyor(self, goreli):
-        """ÖK-10: otomatik kip ve kullanıcı kipi AYRI AYRI anlatılmalı."""
-        from hrma.utils.injector_design import DP_SOURCE_AUTO, DP_SOURCE_USER
+        """ÖK-10: otomatik kip ve kullanıcı kipi AYRI AYRI anlatılmalı.
+
+        V301/L-D (SV-16) — BEKLENTİ DEĞİŞTİ: künyeler hibrit enjektör
+        aracınınkiydi ('auto (20% of Pc)' / 'user override'); SIVI yanıtı bu
+        iki metni HİÇ basmıyor (ölçüldü: kati-sivi/L-D/onceson_sonra.json'da
+        0 geçiş; A-sivi SV-16 bulgusunun kendisi). Kip künyeleri sıvı
+        çözücünün tek tanımından (``injection_system.pressure_drop_source``)
+        okunur; iddia (iki kip ayrı ayrı anlatılır) aynen duruyor.
+        """
+        from hrma.engines.liquid_rocket_engine import (
+            INJECTOR_DP_SOURCE_TYPE_RATIO as DP_SOURCE_AUTO,
+            INJECTOR_DP_SOURCE_USER as DP_SOURCE_USER)
         satirlar = self._ipucu_satirlari(goreli)
         assert satirlar, f'{goreli}: ipucu anahtarı kaybolmuş.'
         for satir in satirlar:
@@ -562,12 +615,11 @@ class TestP12aB201EnjektorDeltaPBirimi:
     @pytest.mark.parametrize('goreli', DOSYALAR)
     def test_ipucu_cozucunun_bandini_soyluyor(self, goreli):
         """Metindeki kabul bandı, çözücünün GERÇEK bandı olmalı."""
-        import re
-        kaynak = _oku('engines/liquid_rocket_engine.py')
-        m = re.search(r"'injector_pressure_drop',\s*([0-9.]+),\s*([0-9.]+)",
-                      kaynak)
-        assert m, 'Çözücü bandı kaynakta bulunamadı.'
-        alt, ust = float(m.group(1)), float(m.group(2))
+        # V301/L-A (SV-01): bant artık çözücünün TEK tablosundadır
+        # (``LIQUID_INPUT_BANDS``; motor ve uç kapısı aynı satırı okur).
+        # Kaynak metnini regex'le taramak yerine tablonun kendisi okunur.
+        from hrma.engines.liquid_rocket_engine import LIQUID_INPUT_BANDS
+        alt, ust = LIQUID_INPUT_BANDS['injector_pressure_drop'][:2]
         # TR metni ondalık AYIRACI virgüldür (0,2); iki yazım da kabul.
         alt_yazimlar = (f'{alt:g}', f'{alt:g}'.replace('.', ','))
         for satir in self._ipucu_satirlari(goreli):

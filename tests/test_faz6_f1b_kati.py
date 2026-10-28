@@ -168,7 +168,11 @@ def form_defaults(html_text):
         chosen = (re.search(r'<option value="([^"]*)"[^>]*\bselected\b',
                             match.group(2))
                   or re.search(r'<option value="([^"]*)"', match.group(2)))
-        if chosen:
+        # V301/K-B: malzeme seçicilerinin seçenekleri sunucudan (Jinja
+        # döngüsü, `{{ o.value }}`) gelir; ham şablonda değer yer tutucudur.
+        # Tarayıcıda seçili olan sunucunun varsayılanıdır — alan gönderilmez,
+        # uç aynı varsayılanı uygular.
+        if chosen and '{{' not in chosen.group(1):
             out[ident.group(1)] = chosen.group(1)
     return out
 
@@ -227,13 +231,29 @@ def test_t49_sablon_varsayilani_motorun_varsayilaniyla_ayni(html):
 def test_t49_varsayilan_bates_notr_yaniyor(html, client):
     """Varsayılan koşu 'BATES (neutral)' iddiasını tutmalı.
 
-    Ölçüm (3 Ağustos 2026, /calculate_solid, şablon varsayılanları):
+    Ölçüm (3 Ağustos 2026, /calculate_solid, şablon varsayılanları, APCP):
     6114 -> 6236 N (+%2,0), tepe/ortalama 1,10.
+
+    V301/K-C2 (27 Eki; varsayılan yakıt KNDX, K-B DEVİR 10): BATES nötrlüğü
+    bir GEOMETRİ (yanma yüzeyi) iddiasıdır; tanık yanma yüzeyinin kendisidir.
+    İtki oranı yakıtın basınç üssüyle büyür (P ∝ Kn^(1/(1-n))): aynı tane
+    ölçüldü (bu ağaç, şablon varsayılanları) — A_b 1116,6 -> 1084,9 cm²
+    (−%2,8), A_b,max/A_b,0 1,0697; KNDX (n 0,688, Nakka rejimi) itki 2338 ->
+    1897 N (−%18,9), APCP (n 0,35) 2118 -> 1921 N (−%9,3). Yanlış inhibitör
+    düzeni yüzeyi değiştirir ve bu tanıkta görünür; yakıt değişimi görünmez.
     """
+    body = client.post('/calculate_solid', json=form_defaults(html))
+    assert body.status_code == 200, body.get_data(as_text=True)[:400]
+    data = body.get_json()
+    gd = data['grain_design']
+    ilk = gd['burning_surface_initial_cm2']
+    son = gd['burning_surface_final_cm2']
+    oran_max = data['throat_sizing']['burn_area_ratio_max_over_initial']
+    assert abs(son - ilk) / ilk < 0.10, (
+        'varsayılan tane yüzeyi nötr değil: %.1f -> %.1f cm²' % (ilk, son))
+    assert oran_max < 1.10, ('varsayılan tane yüzeyi nötr değil: '
+                             'A_b,max/A_b,0 = %.4f' % oran_max)
     shape = thrust_shape(form_defaults(html), client)
-    assert abs(shape['degisim']) < 0.10, (
-        'varsayılan yanma nötr değil: %.0f -> %.0f N (%+.1f%%)'
-        % (shape['ilk'], shape['son'], 100 * shape['degisim']))
     assert shape['tepe_ortalama'] < 1.20, (
         'tepe/ortalama %.3f — nötr bir BATES eğrisi için fazla tümsekli'
         % shape['tepe_ortalama'])
@@ -247,9 +267,21 @@ def test_t49_varsayilan_bates_notr_yaniyor(html, client):
     assert shape['profil'] == (shape['sinif'] or '').lower(), (
         'burn_profile %r ⟷ thrust_curve_type %r — iki alan yine ayrıştı'
         % (shape['profil'], shape['sinif']))
-    assert shape['profil'] == 'progressive-regressive', (
-        'çözücü varsayılan koşuyu %r diye sınıflandırıyor (ölçülen: '
-        'progressive-regressive)' % shape['profil'])
+    # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu
+    # varsayılan motoru kilitliyordu (sayfada 1,14; çekirdek 30 mm). Yeni
+    # örnek motorda (çekirdek 48 mm, A_p/A_t >= 2) çözücünün TEK sınıfı
+    # 'neutral' — sayfanın "BATES (neutral)" iddiasıyla artık AYNI (ölçüldü).
+    # V301/K-C2 (27 Eki): çözücünün sınıfı İTKİ eğrisinin şeklidir ve yakıtın
+    # basınç üssüne bağlıdır; varsayılan KNDX'te (n 0,688) aynı nötr tane
+    # 'progressive-regressive' çıkar (APCP gövdesiyle 'neutral', ölçüldü).
+    # Sayfanın nötrlük iddiası (inhibitör ipuçları: "uçlar açık → Kn sabit")
+    # bir Kn iddiasıdır; tanık Kn'nin kendisidir: varsayılanda 225,3 -> 218,9
+    # (−%2,8); eski ters düzende 229,5 -> 186,7 (−%18,7, aşağıdaki negatif
+    # kontrol).
+    kn = data['grain_design']
+    assert abs(kn['Kn_final'] / kn['Kn_initial'] - 1.0) < 0.10, (
+        'varsayılan Kn nötr değil: %.1f -> %.1f'
+        % (kn['Kn_initial'], kn['Kn_final']))
     assert shape['inhibitor'] == 'outer_surface', (
         'inhibitör düzeni BATES değil: %r' % shape['inhibitor'])
 
@@ -304,10 +336,14 @@ def test_t50_durum_satiri_cizimden_once_siliniyor(html):
 def test_t51_alan_bandi_motorun_bandiyla_ayni(html):
     """HTML5 min/max, motorun kabul aralığının aynası olmalı."""
     source = ENGINE.read_text(encoding='utf-8')
-    band = re.search(r"_override_val\('char_velocity',\s*([\d.]+),\s*([\d.]+)\)",
-                     source)
-    assert band, 'motorun c* bandı okunamadı'
-    alt, ust = float(band.group(1)), float(band.group(2))
+    # v3.0.1 (26 Eki, N-CEA-2): bant motor kaynağında literal değil, katalogla
+    # ORTAK sabitten okunur (PROPELLANT_C_STAR_RANGE_M_S; alt sınır 800 → 700,
+    # kara barutun NASA CEA c*'ı 784,6-788,7 m/s). Ayna testi o sabitin motorca
+    # okunduğunu ve formun aynı iki sayıyı taşıdığını sınar.
+    assert re.search(r"_override_val\('char_velocity',\s*\*PROPELLANT_C_STAR_RANGE_M_S\)",
+                     source), 'motor c* bandını ortak sabitten okumuyor'
+    from hrma.data.propellants_db import PROPELLANT_C_STAR_RANGE_M_S
+    alt, ust = (float(x) for x in PROPELLANT_C_STAR_RANGE_M_S)
 
     tag = re.search(r'<input[^>]*id="char_velocity"[^>]*>', html)
     assert tag, '#char_velocity alanı yok'
@@ -392,17 +428,29 @@ def test_t51_cozucu_bant_disini_gercekten_dusuruyor(html, client):
     m/s; form 2400 -> 2280,0 m/s (uygulanıyor). Bu test bandın gerçek
     olduğunu kanıtlar; band değişirse yukarıdaki ayna testi de kırılır.
     """
+    # V301/K-A (KT-06/KT-13; ana model kararı 3) — TERS KAPIYA ÇEVRİLDİ.
+    # Bant dışı değer eskiden SESSİZCE yerleşik c*'a dönüyordu (200; iki
+    # farklı girdi aynı sonucu veriyordu — bu düğüm o kusuru KİLİTLİYORDU).
+    # Artık tasarım yayımlanmaz: 422 input_not_accepted, alan + kabul
+    # aralığı adıyla. Bant içi değer eskisi gibi uygulanır.
     payload = form_defaults(html)
-    sonuc = {}
-    for value in (508.7, 3000.0, 2400.0):
+    for value in (508.7, 3000.0):
         payload['char_velocity'] = value
         body = client.post('/calculate_solid', json=payload)
-        assert body.status_code == 200, body.get_data(as_text=True)[:300]
-        sonuc[value] = body.get_json()['c_star']
-    assert sonuc[508.7] == pytest.approx(sonuc[3000.0], rel=1e-9), (
-        'bant dışı iki değer artık farklı sonuç veriyor: %r' % sonuc)
-    assert sonuc[2400.0] > sonuc[3000.0] * 1.2, (
-        'bant içi 2400 m/s uygulanmıyor: %r' % sonuc)
+        assert body.status_code == 422, body.get_data(as_text=True)[:300]
+        j = body.get_json()
+        assert j['error_code'] == 'input_not_accepted', j
+        kayit = [k for k in j['invalid_fields']
+                 if k['field'] == 'char_velocity']
+        from hrma.data.propellants_db import PROPELLANT_C_STAR_RANGE_M_S
+        assert kayit and kayit[0]['accepted_range'] == [
+            float(x) for x in PROPELLANT_C_STAR_RANGE_M_S], j
+        assert kayit[0]['submitted'] == pytest.approx(value)
+    payload['char_velocity'] = 2400.0
+    body = client.post('/calculate_solid', json=payload)
+    assert body.status_code == 200, body.get_data(as_text=True)[:300]
+    assert body.get_json()['c_star'] > 1518.3 * 1.2, (
+        'bant içi 2400 m/s uygulanmıyor')
 
 
 # ---------------------------------------------------------------------------
@@ -488,16 +536,29 @@ const out = hrmaPlotLayout({
     showlegend: false
 }, y);
 
-ok(String(out.yaxis.title).indexOf('Thrust (N)') === 0,
-   'eksen başlığı kayboldu: ' + out.yaxis.title);
-ok(String(out.yaxis.title).indexOf('0 ∉ [530.41 … 532.66]') >= 0,
-   'bant ilan edilmiyor: ' + out.yaxis.title);
+// v3.0.1 (V301/N-grafik G3): bant metni eksen başlığının döndürülmüş
+// ikinci satırından çizim alanının sol üstündeki YATAY nota taşındı
+// (ölçüm: docs/scofield/raw/OH/V301/grafik/RAPOR.md). Eksen başlığı
+// yalın kalır; metin ve sayılar aynı.
+// V301/K-C1 (NK-28): matematik gösterimi ("0 ∉ [a … b]  Δ x%") düz
+// cümleye çevrildi ("Axis does not start at 0: it shows a – b (span x%)");
+// sayılar ve basamaklar AYNI (ölçüm: K-C1/RAPOR.md NK-28).
+const bantNotu = ((out.annotations || []).find(
+    (a) => String(a.text).indexOf('does not start at 0') >= 0) || {}).text || '';
+ok(String(out.yaxis.title) === 'Thrust (N)',
+   'eksen başlığına not eklenmiş: ' + out.yaxis.title);
+ok(bantNotu.indexOf('it shows 530.41 – 532.66') >= 0,
+   'bant ilan edilmiyor: ' + bantNotu);
 // D35 sayi-bicimi OH-GT-28 (rapor §5, 8f9313ca): yüzde I18N.percent
 // kanonundan; EN'de işaret sayıya BİTİŞİK ve sonra ('0.42%'), TR'de önce
 // ('%0,42'). Düzenekte sözlük yok → ürünün geri düşüşü EN biçimi basar.
 // Sayının kendisi (2 basamak, 0.4213 → '0.42') DEĞİŞMEDİ.
-ok(String(out.yaxis.title).indexOf('Δ 0.42%') >= 0,
-   'göreli genişlik ilan edilmiyor: ' + out.yaxis.title);
+ok(bantNotu.indexOf('(span 0.42%)') >= 0,
+   'göreli genişlik ilan edilmiyor: ' + bantNotu);
+const bantKutusu = (out.annotations || []).find(
+    (a) => String(a.text).indexOf('does not start at 0') >= 0) || {};
+ok(bantKutusu.textangle === undefined || bantKutusu.textangle === 0,
+   'bant notu döndürülmüş');
 
 // Aralık hâlâ veri bandına oturuyor (0'a çekilmedi).
 ok(out.yaxis.range && out.yaxis.range[0] > 500,
@@ -507,19 +568,19 @@ ok(out.yaxis.rangemode !== 'tozero', "rangemode 'tozero' olmuş");
 // Negatif kontrol 1: sıfır zaten bandın içindeyse işaret KONMAZ.
 const out2 = hrmaPlotLayout({ yaxis: { title: 'Acceleration (g)' } },
                             [-3.0, 0.0, 12.0]);
-ok(String(out2.yaxis.title) === 'Acceleration (g)',
+ok(String(out2.yaxis.title) === 'Acceleration (g)' && !(out2.annotations || []).length,
    'sıfır bandın içindeyken işaret kondu: ' + out2.yaxis.title);
 
 // Negatif kontrol 2: eksende zaten aralık varsa dokunulmaz.
 const out3 = hrmaPlotLayout({ yaxis: { title: 'Thrust (N)', range: [0, 600] } }, y);
-ok(String(out3.yaxis.title) === 'Thrust (N)',
+ok(String(out3.yaxis.title) === 'Thrust (N)' && !(out3.annotations || []).length,
    'kullanıcı aralığı varken işaret kondu: ' + out3.yaxis.title);
 
 // Büyük bantta yüzde tek ondalıkla yazılır (BATES varsayılanı: 6114 -> 8244).
 const out4 = hrmaPlotLayout({ yaxis: { title: 'Thrust (N)' } },
                             [6114.499, 8243.776, 6236.400]);
-ok(String(out4.yaxis.title).indexOf('Δ 25.8%') >= 0,
-   'geniş bant yüzdesi yanlış: ' + out4.yaxis.title);
+ok(JSON.stringify(out4.annotations || []).indexOf('(span 25.8%)') >= 0,
+   'geniş bant yüzdesi yanlış: ' + JSON.stringify(out4.annotations));
 """
     proc = run_node(
         # numTxt/pctTxt (D35 sayi-bicimi) ve hrmaPlotSeparators (D36

@@ -11,6 +11,19 @@ from scipy.optimize import brentq
 from hrma.constants import G_0
 from hrma.data.materials_db import get_material
 
+
+def _STRUCT_DPF_BASIS():
+    """Tasarım basıncı katsayısının künyesi (yapısal modülden, tek kaynak)."""
+    from hrma.analysis.structural_analysis import (
+        STRUCTURAL_DESIGN_PRESSURE_FACTOR_BASIS)
+    return STRUCTURAL_DESIGN_PRESSURE_FACTOR_BASIS
+
+
+def _STRUCT_SCF_BASIS():
+    """Boğaz SCF künyesi (yapısal modülden, tek kaynak)."""
+    from hrma.analysis.structural_analysis import NOZZLE_THROAT_SCF_BASIS
+    return NOZZLE_THROAT_SCF_BASIS
+
 # --- ÖH D20 / B1-12 · SÜRTÜNME VERİMİ TEK TANIM NOKTASI --------------------
 # Bu sayı iki imza varsayılanında (design_nozzle ve
 # _calculate_nozzle_performance) ve motor tarafındaki manşet kayıp kümesinde
@@ -1018,15 +1031,31 @@ class NozzleDesigner:
         sf = (float(wall_safety_factor) if wall_safety_factor
               else float(mat.get('safety_factor', 4.0)))
 
+        # V301 CAD-2 / KABUL K4 (27 Eki): cidar YAPISAL modülün boğaz
+        # kuralından (``structural_analysis.nozzle_throat_wall_sizing``) —
+        # tasarım basıncı Pc x ``STRUCTURAL_DESIGN_PRESSURE_FACTOR`` ve
+        # boğaz SCF'si, lülenin KENDİ malzemesiyle. Eski hesap 1,0·Pc ve
+        # SCF'siz ince cidar hoop'tu (``thin_wall_hoop``); yapısal analiz
+        # aynı lüleyi 1,5·Pc + SCF ile değerlendirdiği için çizilen et ile
+        # SF'nin ait olduğu et ayrışıyor, imalat kapısı dışa aktarımları
+        # reddediyordu (ölçüm: docs/scofield/raw/OH/V301/bilinen/cad2).
+        from hrma.analysis.structural_analysis import (
+            STRUCTURAL_DESIGN_PRESSURE_FACTOR, nozzle_throat_wall_sizing)
+        boyut = None
         if chamber_pressure is not None and float(chamber_pressure) > 0.0:
-            p_design_pa = float(chamber_pressure) * 1e5     # bar -> Pa
-            t_pressure = sf * p_design_pa * rt / sigma_yield
-            thickness_basis = 'thin_wall_hoop'
+            p_design_pa = (float(chamber_pressure) * 1e5    # bar -> Pa
+                           * STRUCTURAL_DESIGN_PRESSURE_FACTOR)
+            boyut = nozzle_throat_wall_sizing(p_design_pa, rt, sigma_yield,
+                                              sf, nozzle_type)
+            t_pressure = boyut['required_throat_thickness_m']
+            thickness_basis = 'structural_throat_rule'
         else:
+            p_design_pa = None
             t_pressure = 0.0
             thickness_basis = 'manufacturing_minimum'
         wall_thickness = max(self._MIN_WALL_THICKNESS_M, t_pressure)
-        if thickness_basis == 'thin_wall_hoop' and wall_thickness > t_pressure:
+        if (thickness_basis == 'structural_throat_rule'
+                and wall_thickness > t_pressure):
             thickness_basis = 'manufacturing_minimum'
 
         # v2.6.26 — kütle ÇİZİLEN katıyla aynı tanımdan gelir.
@@ -1081,6 +1110,24 @@ class NozzleDesigner:
             'wall_yield_strength': sigma_yield,       # Pa
             'wall_safety_factor': sf,                 # [-]
             'wall_thickness_basis': thickness_basis,  # nereden geldiği
+            # V301 CAD-2 / K4: cidarın boyutlandırıldığı yük ve kural künyesi
+            # (yapısal analizin boğaz doğrulamasıyla AYNI sayılar).
+            'wall_design_pressure_bar': (p_design_pa / 1e5
+                                         if p_design_pa is not None else None),
+            'wall_design_pressure_factor': (
+                STRUCTURAL_DESIGN_PRESSURE_FACTOR
+                if p_design_pa is not None else None),
+            'wall_stress_concentration_factor': (
+                boyut['stress_concentration_factor'] if boyut else None),
+            'wall_sizing_rule': (
+                'structural_analysis.nozzle_throat_wall_sizing: t = SCF x '
+                'p_design x r_t x SF / sigma_y (thin-wall hoop, Sutton & '
+                'Biblarz Ch. 8 / Roark Ch. 13), p_design = Pc x design '
+                'pressure factor; the same rule and numbers the structural '
+                'analysis verifies the drawn wall with. '
+                'Design pressure factor: ' + _STRUCT_DPF_BASIS() + '. '
+                'Throat SCF: ' + _STRUCT_SCF_BASIS()
+                if boyut else None),
             # --- v2.6.26 (O3) malzeme dürüstlüğü ---
             # 'caller' dışındaki her değer, kütlenin KULLANICININ seçtiği lüle
             # malzemesine ait OLMADIĞI anlamına gelir.

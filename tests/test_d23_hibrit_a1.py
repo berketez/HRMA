@@ -213,7 +213,13 @@ class TestOHD2201LStarTavani:
         assert l_star_band_for_pair('htpb', 'n2o')[2] == \
             'sp125_table_4_1_generic'
 
-    @pytest.mark.parametrize('deger', (4.0, 6.0))
+    # v3.0.1 kulvar P: modelin tavanı art-yanma odasının 3·D_ch kelepçesidir
+    # ve D_ch artık son port çapıdır (eski 1,5·D_son değil) -> bu gövdede
+    # ölçülen tavan L*_ach 3,862 m (4,0 ve 6,0 artık 422
+    # 'above_model_ceiling'; ret gerekçesi bu koşunun kendi geometrisi).
+    # İddia (sıvı literatür bandının 3,05 m üstü kesilmez) tavanın altındaki
+    # 3,3 / 3,7 m ile sınanır.
+    @pytest.mark.parametrize('deger', (3.3, 3.7))
     def test_modelin_kurabildigi_l_star_kesilmez(self, client, deger):
         """ÖLÇÜLDÜ: 3,05 m üstü 422 iken aynı koşu 3,5438 m L* kuruyordu."""
         r = client.post('/calculate', json=dict(HIBRIT, l_star=deger))
@@ -247,7 +253,7 @@ class TestOHD2201LStarTavani:
     def test_bos_not_ile_200_yayimlanmiyor(self, client):
         """D22 bekçisinin amacı korunur: 200 dönen hiçbir gövdede 'yankı var,
         not yok' hâli kalmaz."""
-        for deger in (1e-6, 1.0, 3.05, 4.0, 6.0):
+        for deger in (1e-6, 1.0, 3.05, 3.3, 3.7):   # v3.0.1: tavan 3,862 m
             r = client.post('/calculate', json=dict(HIBRIT, l_star=deger))
             assert r.status_code == 200
             m = r.get_json()['motor']

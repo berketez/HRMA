@@ -155,6 +155,21 @@ def basincli():
 
 
 @pytest.fixture(scope='module')
+def basincli_ablatif():
+    """``basincli``nın ABLATİF kardeşi (V301/L-A, SV-03).
+
+    P3B2-01 düzeneği turbopompalı koşudaydı; V301/L-A'dan beri gerekli tank
+    basıncı TEK tanımdır (``engine_cycle_solution.required_tank_pressure_*``)
+    ve turbopompalı çevrimde tank enjektörü beslemediği için YAYIMLANMAZ
+    (None). İddia (talep ceket ΔP'sini görür) basınç beslemeli çiftte aynen
+    ölçülür.
+    """
+    return _kos(TABAN_25KN, dict(SURE, engine_cycle='pressure_fed',
+                                 feed_pressure=105),
+                cooling_type='ablative')
+
+
+@pytest.fixture(scope='module')
 def tek_tanim_yamali():
     """``_tank_pressure_bar()`` bellekte 12,0 bara alınmış turbo koşu.
 
@@ -205,7 +220,8 @@ def _sayi_var_mi(nesne):
 # ===========================================================================
 class TestP3B2GerekenBasincCeketiGoruyor:
 
-    def test_talep_farki_ceket_dp_farkina_esit(self, turbo, turbo_ablatif):
+    def test_talep_farki_ceket_dp_farkina_esit(self, basincli,
+                                               basincli_ablatif):
         """İki koşu YALNIZ soğutma tipinde ayrılır; yakıt tarafındaki talep
         farkı ceket ΔP farkının ta kendisi olmalıdır.
 
@@ -213,8 +229,8 @@ class TestP3B2GerekenBasincCeketiGoruyor:
         0,0000 bara döner (rejeneratif ve ablatif koşuda AYNI sayı) ve bu
         bekçi düşer.
         """
-        _, regen = turbo
-        _, abl = turbo_ablatif
+        _, regen = basincli
+        _, abl = basincli_ablatif
         r_dp = float(regen['cooling_system']['cooling_pressure_drop'])
         a_dp = float(abl['cooling_system']['cooling_pressure_drop'])
         assert r_dp > 0.0 and a_dp == 0.0, (
@@ -229,39 +245,48 @@ class TestP3B2GerekenBasincCeketiGoruyor:
             r_dp - a_dp, rel=1e-9), (
             'gereken yakıt tank basıncı soğutma ceketi ΔP\'sini görmüyor')
 
-    def test_oksitleyici_tarafi_ceketten_etkilenmez(self, turbo,
-                                                    turbo_ablatif):
+    def test_oksitleyici_tarafi_ceketten_etkilenmez(self, basincli,
+                                                    basincli_ablatif):
         """Oksitleyici ceketten geçmez; o taraf hareket ETMEMELİDİR."""
-        _, regen = turbo
-        _, abl = turbo_ablatif
+        _, regen = basincli
+        _, abl = basincli_ablatif
         assert abl['injection_system']['required_ox_tank_pressure'] == \
             pytest.approx(regen['injection_system'][
                 'required_ox_tank_pressure'], rel=1e-12)
 
-    @pytest.mark.parametrize('senaryo', ['turbo', 'turbo_ablatif'])
+    @pytest.mark.parametrize('senaryo', ['basincli', 'basincli_ablatif'])
     def test_talep_kendi_dokumunden_yeniden_uretilir(self, senaryo, request):
-        """Yayımlanan sayı, yayımlanan dökümün TOPLAMI olmalı (kimlik).
+        """Yayımlanan sayı TEK kaynağın sayısıdır; pay ayrı alandadır.
 
-        Beyan ile sayının ayrışması bu sınıfın öteki yüzüdür: döküm bloğu
-        süslü bir metin değil, sayının kendisidir.
+        V301/L-A (SV-03) — BEKLENTİ DEĞİŞTİ, gerekçe ölçülü: eski döküm
+        (``required_fuel_tank_pressure_terms`` = Pc + ΔP + ceket + 8 bar pay)
+        hat kayıplarını içermiyor, 8 bar payı "gerekli" sayıya katıyordu ve
+        aynı yanıtta ikinci bir gereklilik sayısı vardı (A-sivi SV-03:
+        130,015 ⟷ 122,536 bar). Döküm kalktı; sayı artık çevrim çözümünün
+        Pc + ΔP + ceket + hat toplamıdır ve pay
+        ``recommended_*_tank_pressure_with_margin`` alanındadır.
         """
         _, sonuc = request.getfixturevalue(senaryo)
         inj = sonuc['injection_system']
-        d = inj['required_fuel_tank_pressure_terms']
-        assert d['chamber_pressure_bar'] + d['injector_pressure_drop_bar'] \
-            + d['cooling_jacket_pressure_drop_bar'] + d['declared_margin_bar'] \
-            == pytest.approx(inj['required_fuel_tank_pressure'], rel=1e-12)
-        assert d['declared_margin_bar'] == pytest.approx(
-            INJECTOR_FEED_MARGIN_BAR), (
-            'pay tek tanım noktasından (INJECTOR_FEED_MARGIN_BAR) gelmiyor')
-        assert d['cooling_jacket_pressure_drop_bar'] == pytest.approx(
-            sonuc['cooling_system']['cooling_pressure_drop'], rel=1e-12), (
-            'döküm, aynı yanıtın yayımladığı ceket ΔP\'sinden başka bir '
-            'sayı taşıyor — iki ceket ΔP\'si olamaz')
+        cyc = sonuc['detailed_feed_system']['engine_cycle_solution']
+        assert 'required_fuel_tank_pressure_terms' not in inj
+        for taraf in ('fuel', 'ox'):
+            assert inj[f'required_{taraf}_tank_pressure'] == \
+                cyc[f'required_tank_pressure_{taraf}_bar']
+            assert inj[f'recommended_{taraf}_tank_pressure_with_margin'] == \
+                pytest.approx(inj[f'required_{taraf}_tank_pressure']
+                              + INJECTOR_FEED_MARGIN_BAR, rel=1e-12), (
+                'pay tek tanım noktasından (INJECTOR_FEED_MARGIN_BAR) '
+                'gelmiyor')
 
-    def test_beyan_ceket_terimini_adiyla_soyluyor(self, turbo):
+    def test_beyan_ceket_terimini_adiyla_soyluyor(self, basincli, turbo):
         """Sayının yanında künyesi olacak: hangi kalemlerden kuruldu?"""
-        inj = turbo[1]['injection_system']
+        # V301/L-A: turbopompalı çevrimde gerekli tank basıncı yayımlanmaz;
+        # künye NEDENİNİ söyler.
+        t_inj = turbo[1]['injection_system']
+        assert t_inj['required_fuel_tank_pressure'] is None
+        assert 'turbopump-fed' in t_inj['required_fuel_tank_pressure_basis']
+        inj = basincli[1]['injection_system']
         yakit = inj['required_fuel_tank_pressure_basis']
         oks = inj['required_ox_tank_pressure_basis']
         assert 'jacket' in yakit.lower()
@@ -700,8 +725,12 @@ class TestP15B1MarsKarsiligi:
         bulk = tp['channel_circuit_reconciliation']['bulk_chain']
         assert tp['heat_flux'] == pytest.approx(
             bulk['peak_heat_flux_MW_m2'], rel=1e-12)
+        # L-B (v3.0.1, SV-05 karar 5): çıkış sıcaklığı takma adı artık
+        # MARŞI taşır (tek yayımlanan çıkış); toplu değer tanı alanında.
         assert tp['coolant_exit_temperature'] == pytest.approx(
-            bulk['coolant_exit_temperature_K'], rel=1e-12)
+            tp['station_march']['coolant_exit_temperature_K'], rel=1e-12)
+        assert tp['coolant_exit_temperature_bulk_estimate_K'] == \
+            pytest.approx(bulk['coolant_exit_temperature_K'], rel=1e-12)
         assert tp['pressure_drop'] == pytest.approx(
             bulk['pressure_drop_bar'], rel=1e-12)
 
@@ -711,6 +740,14 @@ class TestP15B1MarsKarsiligi:
         tp = sonuc['thermal_protection']
         for cıplak, ust_ad, _ in self.MARS_UCLULERI:
             assert cıplak != ust_ad
+            if cıplak == 'coolant_exit_temperature':
+                # L-B (v3.0.1, SV-05 karar 5): bu çift BİLEREK aynı sayıya
+                # indi (tek yayımlanan çıkış = marş); ayrışan toplu değer
+                # artık coolant_exit_temperature_bulk_estimate_K adını taşır.
+                assert tp[cıplak] == pytest.approx(tp[ust_ad], rel=1e-12)
+                assert tp['coolant_exit_temperature_bulk_estimate_K'] != \
+                    pytest.approx(tp[ust_ad], rel=1e-6)
+                continue
             assert tp[cıplak] != pytest.approx(tp[ust_ad], rel=1e-6), (
                 f'{cıplak} ile {ust_ad} aynı sayıya indi — iki zincir tek '
                 'kaynağa mı düştü? O gün bu bekçi yeni sözleşmeye göre '

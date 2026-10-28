@@ -101,6 +101,15 @@ HYBRID_CONTEXTS = {
                            'feed_line_inner_diameter_mm': 12.0},
     'feed_line_inner_diameter_mm': {'feed_line_length_m': 1.5,
                                     'feed_line_inner_diameter_mm': 12.0},
+    # v3.0.1 (kulvar T) — tank basıncı kaynağı seçimi. Taban yükte alan yok;
+    # ``perturb`` seçim alanında şablonun İLK seçeneğini ('default') seçer ve
+    # bu, alanın hiç gönderilmemesiyle BİT-AYNIDIR (oksitleyicinin varsayılan
+    # kipi) — alan YALANCI ölü görünürdü (calculate_trajectory ile aynı
+    # sınıf). Taban açıkça 'default' verilince sarsım 'user'a gider: taban
+    # yükün tank_pressure = 50 bar'ı (N₂O, T 293 K, P_sat 50,37 bar, pay
+    # içi) devreye girer ve enjektör çözümü değişir (ölçüldü: ΔP 30,37 →
+    # 30,00 bar).
+    'tank_pressure_source': {'tank_pressure_source': 'default'},
     'outer_diameter': {'injector_type': 'pintle', 'pintle_diameter': 25,
                        'outer_diameter': 50},
     'pintle_diameter': {'injector_type': 'pintle', 'pintle_diameter': 25,
@@ -114,6 +123,20 @@ HYBRID_CONTEXTS = {
     # üç seçimin enjektör bloğu birbirinden farklı.
     'secondary_holes': {'injector_type': 'pintle', 'pintle_diameter': 25,
                         'outer_diameter': 50, 'secondary_holes': 'radial'},
+    # V301/E1 (Ayberk tur 1): pintle'ın isteğe bağlı geometri ezmeleri. Hepsi
+    # YALNIZ pintle dalında anlamlıdır (outer_diameter ile aynı sınıf); taban
+    # değerleri 5 kN tabanında tutarlı bir geometri verir, sarsım (x1,5)
+    # da tutarlı kalır (tutarsız olsaydı uç 422 verirdi). Teğet açı yalnız
+    # 'tangential' kipinde girdi olduğu için kip de refakat eder.
+    'annular_gap': {'injector_type': 'pintle', 'annular_gap': 0.6},
+    'pintle_radial_hole_count': {'injector_type': 'pintle',
+                                 'pintle_radial_hole_count': 16},
+    'pintle_radial_hole_diameter': {'injector_type': 'pintle',
+                                    'pintle_radial_hole_diameter': 1.4},
+    'skip_distance': {'injector_type': 'pintle', 'skip_distance': 12.0},
+    'pintle_tangential_angle': {'injector_type': 'pintle',
+                                'secondary_holes': 'tangential',
+                                'pintle_tangential_angle': 30.0},
     'n_slots': {'injector_type': 'swirl', 'n_slots': 6},
     'slot_width': {'injector_type': 'swirl', 'n_slots': 6,
                    'slot_width': 1.0, 'slot_height': 2.0},
@@ -194,8 +217,26 @@ HYBRID_CONTEXTS = {
     # 15'e yeniden çözülüyordu. 16 üstü bölgede kullanıcının değeri korunur.
     'element_pairs': {'injector_type': 'impingement', 'element_pairs': 16,
                       'impingement_angle': 60},
-    'orifice_diameter': {'injector_type': 'impingement', 'element_pairs': 16,
+    # V301/E2: çift sayısı + delik çapı birlikte AŞIRI BELİRLER (devre planı
+    # hedef debiyi %5 içinde tutmazsa 422 — design_like_doublet); çapın
+    # canlılığı tek başına ölçülür: çift sayısı çaptan çözülür (1,0 mm →
+    # 37 çift, 1,5 mm → 17 çift; ölçüldü).
+    'orifice_diameter': {'injector_type': 'impingement',
                          'impingement_angle': 60, 'orifice_diameter': 1.0},
+    # V301/E2: koaksiyel iç jet debi payı (eski iç/dış çap çiftinin yerini
+    # aldı; boş = 0,6, beyanlı). Yalnız koaksiyel dalda anlamlıdır.
+    'coaxial_inner_flow_fraction': {'injector_type': 'coaxial'},
+    # v3.0.1 kulvar M — kamara malzemesi seçicisinin seçenekleri artık
+    # sunucu kaydından gelir (16 kayıt, materials_db sırası: steel_4130,
+    # steel, steel_304, ...). ``shake.perturb`` ilk FARKLI seçeneği alır:
+    # taban steel_4130 iken bu 'steel' (A36) olur — aynı MMPDS düşük alaşım
+    # eğrisi, aynı servis sınırı (811 K), aynı E (200 GPa); 15 malzeme
+    # sınırı yaprağı oynamaz ve "uydurma sabit" görünür (ölçüldü:
+    # docs/scofield/raw/OH/V301/ayberk1/malzeme/RAPOR.md §5). v3.0.0'daki
+    # sarsım çifti steel_4130 -> steel_304 idi (şablonun ilk seçeneği); bu
+    # alan ölçülürken taban sayfanın varsayılanına (steel_304) alınır ve
+    # sarsım steel_4130'a gider — AYNI çift, ters yönde.
+    'chamber_material': {'chamber_material': 'steel_304'},
 }
 
 #: Çözücünün "bu alanı TÜKETMİYORUM" diye AÇIKÇA beyan ettiği alanlar.
@@ -264,6 +305,11 @@ PAYLOAD_RANGE = {
     # yuvarlanmaz) — ölçüldü, alan 'sarsım HTTP 400' ile ölçülemez kalıyordu.
     # Kapı doğru, pencere yanlıştı: (1, 7) orta noktayı 4 porta oturtur.
     'port_count': (1.0, 7.0),            # adet (ölçüm penceresi, ürün tavanı değil)
+    # v3.0.1 kulvar P — ``residual_web_thickness`` (mm) forma eklendi. Şablonda
+    # ÜST SINIR YOK (motorun tek tavanı kamara çapı bandının yarısı, 2500 mm);
+    # alan taban yükte yok, ``shake.perturb`` orta noktayı (2 mm) gönderir ve
+    # grain dış çapı 2·t = 4 mm büyür. ÖLÇÜM PENCERESİDİR, ürün sınırı değil.
+    'residual_web_thickness': (0.0, 4.0),  # mm
 }
 
 # Ayrı uç noktaya giden ya da istemci tarafında kalan alanlar Katman B'nin
@@ -446,7 +492,8 @@ LEGITIMATE_CONSTANTS = (
     # Yayın örnekleme TAVANI: THRUST_CURVE_MAX_POINTS = 400
     # (curve_sampling.py:40; sampling_block :157'de yayımlar) — iki motorun
     # ortak, beyanlı yayın sözleşmesi. Kardeş points_published /
-    # points_computed alanları CANLIDIR.
+    # points_computed alanları bu ölçümün O/F 2,5 tabanında v3.0.1 B7'den
+    # beri 200 adım tabanında sabittir (yukarıdaki B7 notu).
     'of_shift_performance.sampling.max_points',
     'thrust_curve.sampling.max_points',
     # Kontur/istasyon ORİJİNİ: örnekleyicinin İLK noktası konverjan girişi
@@ -474,6 +521,22 @@ LEGITIMATE_CONSTANTS = (
     # design_cycles = beyanlı tasarım hedefi 25 (structural_analysis.py:
     # 1459-1461; :1551) — hesap değil, tasarım girdisinin yayımı.
     'structural_analysis.design_parameters.design_pressure_factor',
+    # V301/CI-ÜRÜN (28 Eki): AYNI beyanlı çarpanın lüle yankısı. V301 CAD-2
+    # (c6acfb89b) lüle etini yapısal boğaz kuralına bağladığında künyeye
+    # ``wall_design_pressure_factor`` alanını ekledi; değer KOD GEREĞİ
+    # ``structural_analysis.STRUCTURAL_DESIGN_PRESSURE_FACTOR``dır
+    # (nozzle_design.py ``'wall_design_pressure_factor': (STRUCTURAL_DESIGN_
+    # PRESSURE_FACTOR if p_design_pa is not None else None)``) — yukarıdaki
+    # imli yaprakla aynı tek sabit, "HRMA choice" künyesi
+    # (STRUCTURAL_DESIGN_PRESSURE_FACTOR_BASIS) aynı blokta
+    # ``wall_sizing_rule`` içinde yayımlanır. Formda bu çarpanı besleyen alan
+    # YOKTUR ve yapısal doğrulama da aynı sabitle koştuğu için girdiye
+    # bağlanması iki kuralı yeniden ayrıştırırdı (CAD-2'nin kapattığı
+    # ``sf_wall_mismatch`` kusuru). Kardeşi ``wall_design_pressure_bar``
+    # (Pc x çarpan) CANLIDIR ve bekçi onu korumaya devam eder. İkiz
+    # bekçi: tests/test_v301_cad2_lule_sf.py (değer = sabit, rel 0).
+    'nozzle_design.geometry.wall_design_pressure_factor',
+    'nozzle_geometry.wall_design_pressure_factor',
     'structural_analysis.chamber_analysis.manufacturing_allowance_factor',
     'structural_analysis.fatigue_analysis.stress_ratio_R',
     'structural_analysis.fatigue_analysis.design_cycles',
@@ -489,6 +552,33 @@ LEGITIMATE_CONSTANTS = (
     'nozzle_design.performance.particle_mass_fraction',
     'nozzle_design.performance.two_phase_efficiency',
     'nozzle_design.performance.two_phase_loss_coeff',
+    # v3.0.1 (Ayberk tur 1, kulvar K) — ``data_sources`` künye bloğu:
+    # ``fuel.regression.catalogue_match_rtol`` motorun KENDİ katalog
+    # kapısının tolerans sabitidir (hybrid_rocket_engine
+    # REGRESSION_COEFF_CATALOG_MATCH_RTOL); "katalogla eşit mi" hükmü
+    # denetlenebilsin diye yayımlanır, hesap sonucu değildir.
+    # ``oxidizer.viscosity_pa_s_request`` istekteki ``oxidizer_viscosity``
+    # alanının YANKISIDIR; bu ölçüm o alanı sarsmadığı için sabit görünür.
+    'data_sources.fuel.regression.catalogue_match_rtol',
+    'data_sources.oxidizer.viscosity_pa_s_request',
+    # v3.0.1 B7 (21 Eki; ÖNEMLİ, Berke onaylı) — AYRIKLAŞTIRMA SAYAÇLARI.
+    # Yanma yürüyüşünün adım sayısı num_steps = max(200, ⌈t_b·2·ṙ/
+    # (0,01·D_port)⌉) (hybrid_rocket_engine.py ~4996); yayımlanan eğri ve
+    # O/F kayması örnekleri bu sayıdan (+ t = 0) gelir. Bu ölçümün tabanı
+    # O/F 2,5 N2O/HTPB, yani katı karbon C(gr) bölgesi. B7'den ÖNCE sarsım
+    # vakalarından en az biri tabanın üstüne çıkıyor ve sayaçlar canlı
+    # görünüyordu; B7'den sonra (c* 1307 → 1371 m/s, tasarım geometrisi
+    # değişti) sarsımın her tasarımı 200 adım tabanında: sayaçlar 201
+    # (ölçüldü: taban + itki 1500 + Pc 30 → 201/201/201). İkiye bölme:
+    # 5c88b0ae8 (B7 öncesi) bu test geçiyor, dcb5a762e sonrası kırmızı.
+    # Sabitlik tabanın KURALIDIR, uydurma sayı değildir; yayın tavanı
+    # kardeşi 'sampling.max_points' (aşağıda) aynı doğadadır.
+    'thrust_curve.sampling.points_computed',
+    'thrust_curve.sampling.points_published',
+    'of_shift.regulated.samples',
+    'of_shift_performance.sampling.points_computed',
+    'of_shift_performance.sampling.points_published',
+    'trajectory.thrust_input.points',
 ) + tuple(
     # İtki-irtifa TARAMA IZGARASI ve standart atmosfer sütunları:
     # altitudes_thrust = [0, 1000, 5000, 10000, 15000, 20000] m SABİT
@@ -1466,21 +1556,40 @@ def test_impingement_without_angle_does_not_crash(client):
     kullanılıyor ama import edilmiyordu; alanı temizleyen kullanıcı ya da
     bu anahtarı göndermeyen API çağrısı NameError ile HTTP 500 alıyordu.
     """
+    # V301/E2: çift sayısı + delik çapı birlikte planı AŞIRI BELİRLER ve
+    # devre planı hedef debiyi %5 içinde tutmazsa 422'dir (8 çift × 1,0 mm
+    # bu tabanda tutmuyor). Bekçinin konusu açısız istekte ÇÖKMEMEK olduğu
+    # için yalnız çift sayısı gönderilir; açı yine YOK.
     payload = dict(HYBRID_BASE, injector_type='impingement',
-                   element_pairs=8, orifice_diameter=1.0)
+                   element_pairs=8)
     payload.pop('target_velocity', None)
+    payload.pop('impingement_angle', None)
     resp = client.post('/calculate', json=payload, headers=shake.HEADERS)
     assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
+    # Açı verilmediğinde devrenin beyanlı varsayılanı (60°) kullanıldı.
+    assert resp.get_json()['injector']['impingement_angle_deg'] == 60.0
 
 
-def test_injector_detail_never_fabricates_a_hole_plan(client):
+def test_injector_detail_never_fabricates_a_hole_plan(client, monkeypatch):
     """Devre modeli boyutlandıramazsa delik planı UYDURULMAZ.
 
     Eski yedek yol her hatada ``n_orifices = 12`` ("typical showerhead
     pattern") ve ``Cd = 0.65`` üretiyor, sonucu kullanıcının seçtiği
     enjektör tipiyle etiketliyordu: 'coaxial' yazan 12 delikli bir
     showerhead. Uyarı yalnız sunucu günlüğüne gidiyordu.
+
+    v3.0.1 (26 Eki, V301/H2 birleşmesi): bu bekçi hata yolunu eskiden
+    'coaxial' tipiyle kuruyordu, çünkü devre koaksiyeli çözemiyordu. H2
+    koaksiyeli devreye tek akışkanlı eleman olarak ekledi (hibrit RAPOR H2:
+    önce "Invalid injector_type: 'coaxial'" → not_analyzed). Hata yolu artık
+    devre çağrısının kendisi bilerek hata verdirilerek kurulur; sözleşme
+    aynı: delik planı yok, adlı uyarı ekranda.
     """
+    import hrma.engines.hybrid_rocket_engine as hre
+
+    def _devre_cozemedi(*_a, **_k):
+        raise RuntimeError('circuit could not size this injector (test)')
+    monkeypatch.setattr(hre, 'eleman_girdileriyle_tasarla', _devre_cozemedi)
     payload = dict(HYBRID_BASE, injector_type='coaxial',
                    inner_diameter=5, outer_annulus_diameter=10)
     resp = client.post('/calculate', json=payload, headers=shake.HEADERS)
@@ -1503,7 +1612,9 @@ def test_injector_detail_never_fabricates_a_hole_plan(client):
     ('pintle', True),
     ('swirl', True),
     ('impingement', True),   # v2.6.26: like_impinging'e eşlendi
-    ('coaxial', False),      # devre modeli hibritte koaksiyel desteklemiyor
+    # v3.0.1 (V301/H2): koaksiyel devrede tek akışkanlı eleman olarak
+    # çözülüyor (eşdeğer düz orifis planı + coaxial_geometry kanonu).
+    ('coaxial', True),
 ])
 def test_injector_type_vocabulary_is_mapped(client, ui_type, expect_detail):
     """Arayüz sözcüğü ile modül sözcüğü arasındaki eşleme çürümemeli.

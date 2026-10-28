@@ -20,6 +20,16 @@
     var STORAGE_KEY = 'hrma.flight.lastVehicle';
     var ENDPOINT = '/api/flight-vehicle';
 
+    /* V301/UÇUŞ NK-47 — SON YAYIMLANAN ARACIN HANGİ HESABA AİT OLDUĞU.
+     * Motor sayfasının 6-DOF paneli "gövde bu motoru taşıyabilir mi"
+     * hükmü için motorun dış zarfını (engine_od_m / engine_length_m) aynı
+     * hesabın normalize edilmiş aracından alır; Fırlatma Sahası da aynı
+     * alanları gönderir ve hüküm 6-DOF ucunda TEK işlevle verilir
+     * (flight_vehicle.airframe_fit_conflicts). Eşleşme NESNE KİMLİĞİYLE
+     * kurulur: araç yalnız o sonuç nesnesi (window.currentResults) için
+     * döner, bayat bir hesabın aracı başka bir hesaba yapışmaz. */
+    var lastPublished = { results: null, vehicle: null };
+
     /* Motor tipini belirle: açık değer > sayfa yolu (solid/liquid) > hibrit. */
     function detectMotorType(explicit) {
         if (explicit) return String(explicit).toLowerCase();
@@ -83,6 +93,17 @@
             // Route {status, vehicle} ya da doğrudan araç döndürebilir.
             var vehicle = (data && data.vehicle) ? data.vehicle : data;
             if (!vehicle || typeof vehicle !== 'object') return null;
+            lastPublished = { results: results, vehicle: vehicle };
+            // NK-14/NK-47: aynı sayfanın panelleri (yörünge, 6-DOF) aracı
+            // beklemeden kurulur; araç gelince haber verilir ki kütleler ve
+            // motor zarfı TEK kaynaktan (sunucu normalize) tohumlansın.
+            try {
+                if (typeof document !== 'undefined' && document.dispatchEvent
+                        && typeof CustomEvent === 'function') {
+                    document.dispatchEvent(new CustomEvent('hrma:flight-vehicle',
+                        { detail: { results: results, vehicle: vehicle } }));
+                }
+            } catch (e) { /* olay yayımlanamazsa paneller vehicleFor ile okur */ }
             var record = {
                 vehicle: vehicle,
                 motor_name: vehicle.motor_name || name || null,
@@ -142,8 +163,48 @@
         try { window.localStorage.removeItem(STORAGE_KEY); } catch (e) { /* geç */ }
     }
 
+    /* V301/UÇUŞ NK-14 / NK-24 — HESAPTAN SONRA MOTOR FORMU DEĞİŞTİ Mİ?
+     * Hibrit sayfa (app.js yorungeIcinDegisenMotorAlanlari) yörüngeyi bayat
+     * motorla koşmuyordu; katı ve sıvı sayfaları koşuyordu (ölçüldü:
+     * nk_paneller_sonra.json — katıda Pc 40 -> 55, sıvıda itki 25 -> 30 kN
+     * değiştirilip hesaplanmadan yörünge 200 aldı, eski motorla). Tek yardımcı:
+     * son hesabın form anlığı ile bugünkü formu karşılaştırır; çözücünün
+     * OKUMADIĞINI kendisi beyan ettiği alanlar (results.unwired_inputs her
+     * kategori + results.inputs_not_used) motoru değiştirmediği için dışarıda
+     * kalır. Dönüş: değişen alan adları (sıralı) ya da anlık yoksa null. */
+    function changedMotorFields(lastForm, nowForm, results) {
+        if (!lastForm || typeof lastForm !== 'object') return null;
+        var haric = {};
+        var uw = results && results.unwired_inputs;
+        if (uw && typeof uw === 'object') {
+            Object.keys(uw).forEach(function (k) {
+                (Array.isArray(uw[k]) ? uw[k] : []).forEach(function (f) {
+                    var ad = (typeof f === 'string') ? f : (f && f.field);
+                    if (ad) haric[ad] = true;
+                });
+            });
+        }
+        (Array.isArray(results && results.inputs_not_used) ? results.inputs_not_used : [])
+            .forEach(function (f) {
+                var ad = (typeof f === 'string') ? f : (f && f.field);
+                if (ad) haric[ad] = true;
+            });
+        var simdi = nowForm || {};
+        return Object.keys(Object.assign({}, lastForm, simdi)).filter(function (k) {
+            return !haric[k] && JSON.stringify(lastForm[k]) !== JSON.stringify(simdi[k]);
+        }).sort();
+    }
+
+    /* NK-47: verilen sonuç nesnesinin (aynı hesap) normalize aracı ya da null. */
+    function vehicleFor(results) {
+        return (results && lastPublished.results === results)
+            ? lastPublished.vehicle : null;
+    }
+
     window.FlightHandoff = {
         publish: publish,
+        vehicleFor: vehicleFor,
+        changedMotorFields: changedMotorFields,
         readLast: readLast,
         clear: clear,
         detectMotorType: detectMotorType,

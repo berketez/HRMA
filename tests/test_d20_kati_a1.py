@@ -29,8 +29,16 @@ from hrma.engines.solid_rocket_engine import (  # noqa: E402
     _solid_geometry_gate,
 )
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 TEMEL = dict(grain_type='bates', propellant_type='apcp', chamber_diameter=100,
-             grain_length=500, core_diameter=30, chamber_pressure=40)
+             grain_length=500, core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
 
 
 def _motor(**kw):
@@ -190,7 +198,7 @@ class TestCstarSessizKalmiyor:
                'grain_type': 'bates', 'chamber_pressure': 40.0,
                'thrust': 5000.0, 'burn_time': 3.0,
                'chamber_diameter': 100.0, 'grain_length': 500.0,
-               'core_diameter': 30.0, 'expansion_ratio': 8.0}
+               'core_diameter': _CEKIRDEK_MM, 'expansion_ratio': 8.0}
         taban = cli.post('/calculate_solid', json=yuk).get_data(as_text=True)
         for v in (900.0, 2400.0):
             y = dict(yuk, c_star=v)
@@ -210,28 +218,48 @@ class TestBogazGovdeyiAsincaEkranUyarisi:
         return _motor(grain_length=3000, core_diameter=15,
                       chamber_pressure=10)
 
+    # V301/T-ÇAPA-A — TERS KAPI (kural 2). K-A (KT-23): boğaz gövdeyi
+    # aşıyorsa port boğazdan zaten küçüktür; bu motor (L 3000 / çekirdek 15 /
+    # 10 bar) artık yayımlanmaz: ölçülen A_p/A_t 0,009, boğaz 154,93 mm >
+    # gövde 100 mm, 100 mm tanenin içinde portu boğazdan büyük yapan çekirdek
+    # yok. Eski üç düğüm (CAD boyu yok, ekran uyarısı, kritik uyarı sayıları)
+    # aynı hükmü şimdi 422 künyesinden okur: kullanıcı SEBEBİ yine görür.
+    # Uyarı kodu ve iki dilli metni duruyor (aşağıdaki düğüm); calculate_
+    # performance yolunda erişilemez (K-A RAPOR KT-23).
+    def _ret(self):
+        from hrma.engines.solid_rocket_engine import SolidDesignRejected
+        eng = self._asan_motor()
+        d_t = float(eng._estimate_throat_diameter())
+        with pytest.raises(SolidDesignRejected) as exc:
+            eng.calculate_performance()
+        return eng, d_t, exc.value
+
     def test_asim_gerceklesiyor_ve_boy_yayimlanmiyor(self):
-        r = self._asan_motor().calculate_performance()
-        nd = r['cad_design']['nozzle_design']
-        assert nd['throat_exceeds_case'] is True
-        assert nd['convergent_length'] is None
-        assert nd['convergent_length_status'] == 'not_physical'
+        eng, d_t, ret = self._ret()
+        # Gövde hükmü tek ölçütten, bağımsız kurulur: aşım GERÇEKTEN var.
+        assert eng._throat_exceeds_case(d_t) is True
+        assert d_t >= float(eng.D_chamber)
+        assert ret.code == 'port_smaller_than_throat'
 
     def test_ekran_uyarisi_var(self):
-        r = self._asan_motor().calculate_performance()
-        kodlar = {w['code'] for w in r['warnings'] if isinstance(w, dict)}
-        assert 'warn.solid.throat_exceeds_case' in kodlar, sorted(kodlar)
+        _eng, _d_t, ret = self._ret()
+        kunye = ret.invalid_fields[0]
+        assert kunye['field'] == 'core_diameter'
+        assert kunye['reason'] == 'port_smaller_than_throat'
+        # Tane içinde çözüm yok: eylem cümlesi dış çap/boy/basınç önerir.
+        assert kunye['required_min'] is None
+        assert 'No core diameter inside' in str(ret)
 
     def test_uyari_kritik_ve_olculen_sayilari_tasiyor(self):
-        r = self._asan_motor().calculate_performance()
-        uy = [w for w in r['warnings']
-              if isinstance(w, dict)
-              and w['code'] == 'warn.solid.throat_exceeds_case'][0]
-        assert uy['severity'] == 'critical'
-        p = uy['params']
-        assert p['throat_diameter_mm'] > p['chamber_diameter_mm']
-        assert p['ratio'] == pytest.approx(
-            p['throat_diameter_mm'] / p['chamber_diameter_mm'], rel=1e-3)
+        eng, d_t, ret = self._ret()
+        kunye = ret.invalid_fields[0]
+        assert kunye['throat_diameter_mm'] == pytest.approx(d_t * 1000.0,
+                                                            rel=1e-9)
+        assert kunye['throat_diameter_mm'] > float(eng.D_chamber) * 1000.0
+        assert kunye['port_to_throat_area_ratio'] == pytest.approx(
+            kunye['initial_port_area_mm2'] / kunye['throat_area_mm2'],
+            rel=1e-9)
+        assert kunye['port_to_throat_area_ratio'] < 1.0
 
     def test_saglikli_motorda_uyari_YOK(self):
         """Kapı gevşemiyor da daralmıyor da: normal motorda uyarı çıkmaz."""

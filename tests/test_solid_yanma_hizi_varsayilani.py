@@ -26,10 +26,21 @@ SOLID_SAYFA_HTML = (ROOT / 'hrma' / 'templates' / 'solid.html').read_text(
 LOCAL_HOST = {'Host': '127.0.0.1:8080'}
 
 #: Sayfanın varsayılan yakıtıyla tutarlı, yanma hızı alanları OLMAYAN taban.
+#: V301/T-ÇAPA-A: ``chamber_diameter`` 75 kaldırıldı. K-A karar A + KT-01:
+#: ``outer_diameter`` gönderilince ``chamber_diameter`` kasa İÇ çapıdır ve
+#: 75 mm tane 2 mm astarla en az 79,0 mm ister (422
+#: ``grain_does_not_fit_case``). Sayfa da kasa çapını boş açar (KT-20) ve
+#: kasa türetilip ``case_bore`` künyesiyle beyan edilir. Konu yanma hızı
+#: varsayılanıdır, kasa değil (kural 1).
+#: V301/T-ÇAPA-A: çekirdek 32 -> 44 mm (web 21,5 -> 15,5 = (75 - 44)/2).
+#: Karşılaştırmanın "eski sayfa" kolu a = 0,005 gönderiyor; 32 mm'de o kolun
+#: portu boğuluyor (ölçülen A_p/A_t 0,955, 422, gereken 32,9 mm). 44 mm'de
+#: a = 0,005 kolu A_p/A_t 1,653 (40 mm 1,407, 42 mm 1,528); katalog kolu
+#: daha geniş paylı.
 APCP_TABAN_YUK = {
     'propellant_name': 'APCP', 'grain_type': 'bates', 'grain_count': 3,
-    'outer_diameter': 75.0, 'core_diameter': 32.0, 'grain_length': 360.0,
-    'web_thickness': 21.5, 'grain_gap': 2.0, 'chamber_diameter': 75.0,
+    'outer_diameter': 75.0, 'core_diameter': 44.0, 'grain_length': 360.0,
+    'web_thickness': 15.5, 'grain_gap': 2.0,
     'chamber_pressure': 40.0,
 }
 

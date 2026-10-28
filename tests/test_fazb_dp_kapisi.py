@@ -142,6 +142,20 @@ def istek_govdesi(pc, tank_bar):
         # ilan etmesidir.
         'engine_cycle': 'pressure_fed',
         'tank_pressure': tank_bar,
+        # V301/L-A (SV-03) — BEKLENTİ KORUNDU, GÖVDE TAMAMLANDI. Bu gövde
+        # yalnız ``tank_pressure`` gönderiyordu; çözücü basınç beslemeli
+        # çevrimde tankı ``feed_pressure``dan okur, yani "sağlıklı" 0,20
+        # vakası aslında 3 bar'lık yedek tankla (marj -119 bar, critical
+        # uyarı) 200 alıyordu. V301/L-A'dan beri o yedek tasarım 422
+        # ``pressure_fed_feed_pressure_not_supplied`` ile reddediliyor.
+        # Ölçüldü (L-A sonda, Pc 100 / tank 120): ΔP_enj varsayılanı (%22)
+        # ile gerekli besleme 123,76 bar -> 422; bu yüzden gövde aynı tankı
+        # ``feed_pressure`` olarak da verir ve enjektör ΔP'sini 0,10·Pc
+        # (Pc 100'de 10 bar, Pc 40'ta 4 bar) seçer — iki ölçek noktası da
+        # 200 (marj 8,25 / 2,13 bar). Chug kapısının ölçtüğü oran (tank −
+        # Pc) DEĞİŞMEDİ; ısıran vakalar aynı 400'ü aynı gerekçeyle alır.
+        'feed_pressure': tank_bar,
+        'injector_pressure_drop': 0.10 * pc,
     }
 
 

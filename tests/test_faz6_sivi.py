@@ -604,7 +604,11 @@ class TestT47EnjektorDili:
         panel = (REPO_ROOT / 'hrma/static/js/injector_panel.js').read_text(
             encoding='utf-8')
         assert 'pattern.description_tr' not in panel
-        assert 'escText(dz.pattern.description)' in panel
+        # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/DİL-2 803727196, NK-35):
+        # tanım çeviri kanalından (I18N.serverText) geçip escText'e girer;
+        # kaçış en dış katman olarak kalır (aynı şablon yuvası).
+        assert re.search(r'\$\{escText\((?:(?!\$\{|`).)*?'
+                         r'dz\.pattern\.description\)\}', panel, re.S)
 
     @pytest.mark.parametrize('tip', INJ_TIPLERI)
     def test_reference_entries_are_single_language(self, tasarimlar, tip):

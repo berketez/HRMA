@@ -164,6 +164,15 @@ class TestZ501KunyelerCidarKaynaginaBagli:
         h_c = gaz['gas_side_coefficient_chamber']
         h_t = gaz['gas_side_coefficient_throat']
         assert h_c and h_t
+        # V301/L-KARBON (26 Eki): LOX/RP-1 karbon birikimi uygulandığında
+        # iki yayımlanan katsayı TOPLAM iletkenliktir, h_gc = 1/(1/h_g + R_d)
+        # (SP-125 Eş. 4-18). Bartz alan ölçeklemesi h_g üzerindedir; R_d
+        # yayımlanan dirençlerle (cooling_system.carbon_deposit) çıkarılır.
+        # Birikim yoksa R_d = 0 ve iddia eskisiyle aynıdır (bant aynı).
+        cd = taban['cooling_system'].get('carbon_deposit') or {}
+        if cd.get('applied'):
+            h_c = 1.0 / (1.0 / h_c - cd['resistance_chamber_m2K_W'])
+            h_t = 1.0 / (1.0 / h_t - cd['resistance_throat_m2K_W'])
         d_c = taban['cooling_system']['chamber_diameter'] / 1000.0   # m
         d_t = taban['nozzle_angles']['throat_diameter_mm'] / 1000.0  # m
         alan_orani = (d_t / d_c) ** 2
@@ -340,14 +349,24 @@ class TestP3B210FilmCeketButcesi:
         assert cs['coolant_plus_film_fraction_of_fuel'] <= 1.0 + 1e-9
 
     def test_film_payi_ceketten_DUSULUR(self, client):
+        """Kütle korunumu (P3B2-10) — L-B (v3.0.1, SV-08) modeliyle.
+
+        ESKİ beklenti: ceket = yakıt − film (film ceketten DÜŞÜLÜYOR, ama
+        aynı yakıt tamamen yanıyordu; ölçüldü: film %0/%10/%30'da toplam
+        debi ve Isp bit-aynı). YENİ model (brif kararı): film yanmaz ve
+        çekirdek yakıta EK olarak çekilir — yanan yakıt ceketten geçer, film
+        ondan önce ayrılır. Ceket debisi film payıyla DEĞİŞMEZ; toplam yakıt
+        debisi tam film kadar artar (ölçüm: L-B olcum_sonra.json).
+        """
         y0 = _post(client, film_cooling_percent=0.0)
         y2 = _post(client, film_cooling_percent=20.0)
-        assert y2['cooling_system']['coolant_flow_rate'] < (
-            y0['cooling_system']['coolant_flow_rate'] * 0.999), (
-            'Film payı arttığı hâlde ceket debisi hiç azalmıyor.')
+        film = y2['cooling_system']['film_cooling_flow']
+        assert film > 0.0
         assert y2['cooling_system']['coolant_flow_rate'] == pytest.approx(
-            y0['cooling_system']['coolant_flow_rate']
-            - y2['cooling_system']['film_cooling_flow'], rel=1e-9)
+            y0['cooling_system']['coolant_flow_rate'], rel=1e-12)
+        assert y2['fuel_flow'] == pytest.approx(y0['fuel_flow'] + film,
+                                                rel=1e-12)
+        assert film == pytest.approx(0.20 * y2['fuel_flow'], rel=1e-12)
 
     def test_ceket_debisinin_kunyesi_var(self, client):
         y = _post(client, film_cooling_percent=20.0)
@@ -485,17 +504,29 @@ class TestP3B307PompaKartiKapanir:
 # ---------------------------------------------------------------------------
 class TestP3B308ReddedilenPompaVerimi:
 
-    @pytest.mark.parametrize('deger', [150.0, 5.0, 'abc'])
-    def test_reddedilen_girdi_user_input_kunyesi_almaz(self, client, deger):
-        y = _post(client, engine_cycle='gas_generator',
-                  turbopump_efficiency=deger)
-        kart = y['detailed_feed_system']['turbopump_analysis']['fuel_pump']
-        src = kart['efficiency_source']
-        assert not src.startswith('user input'), (
-            f'{deger!r} reddedildi (verim {kart["design_efficiency"]}) ama '
-            f'künye hâlâ kullanıcıyı gösteriyor: {src!r}')
-        assert 'REJECTED' in src
-        assert kart['design_efficiency'] == pytest.approx(75.0, rel=1e-9)
+    # v3.0.1 (26 Eki, L-A ⟷ L-B birleşmesi): bant dışı / sayı olmayan girdi
+    # artık motor kurulmadan 422 ``input_not_accepted`` alır (L-A SV-01:
+    # "200 + sessizce başka değer" yolu kapandı). Eski beklenti (200 +
+    # 'REJECTED' künyesi + 75 varsayılanıyla yayımlanan tasarım) o yolu
+    # kilitliyordu. Testin konusu aynen korunur, daha sıkı biçimde:
+    # reddedilen değer hiçbir yerde kullanıcı girdisi sayılmaz, çünkü tasarım
+    # hiç yayımlanmaz ve alan adıyla reddedilir. Ölçüm (main 4441eebff):
+    # 150 → out_of_accepted_range, 5 → out_of_accepted_range,
+    # 'abc' → not_a_number; 80 → 200.
+    @pytest.mark.parametrize('deger,neden', [
+        (150.0, 'out_of_accepted_range'), (5.0, 'out_of_accepted_range'),
+        ('abc', 'not_a_number')])
+    def test_reddedilen_girdi_user_input_kunyesi_almaz(self, client, deger,
+                                                       neden):
+        r = client.post('/calculate_liquid', json=_yuk(
+            engine_cycle='gas_generator', turbopump_efficiency=deger))
+        assert r.status_code == 422, r.get_data(as_text=True)[:400]
+        j = r.get_json()
+        assert j['error'] == 'input_not_accepted'
+        alanlar = {f['field']: f['reason'] for f in j['invalid_fields']}
+        assert alanlar.get('turbopump_efficiency') == neden, alanlar
+        assert 'detailed_feed_system' not in j, (
+            'reddedilen girdiyle tasarım yayımlanmamalı')
 
     def test_kabul_edilen_girdi_kunyesini_KORUR(self, client):
         y = _post(client, engine_cycle='gas_generator',

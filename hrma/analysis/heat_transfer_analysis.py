@@ -56,6 +56,23 @@ from hrma.analysis.structural_analysis import published_material_record
 # g/mol cinsinden kullanılır.
 
 
+#: ÇIPLAK CİDAR kararlı denge kontrolünün KRİTİK kodları (aşağıdaki
+#: ``_analyze_gas_side_heat_transfer`` ve ``_analyze_thermal_safety``
+#: üretir). v3.0.1 (V301/H-termal): yalnız hibrit motor okur — kamara bölge
+#: hükmü (yakıt bloğu koruması + astar) bu kayıtların yerini ancak bütün
+#: bölgeler korunduğunda alır (``hybrid_rocket_engine.
+#: _chamber_wall_zones_block``). Bu modülün hesabı ve çıktısı DEĞİŞMEZ;
+#: tanım burada durur çünkü kodların sahibi bu modüldür (tek kaynak).
+BARE_WALL_CRITICAL_CODES = (
+    'warn.thermal.wall_exceeds_melting',
+    'warn.thermal.wall_exceeds_service',
+    'warn.thermal.wall_nonphysical',
+    'warn.thermal.wall_pinned_adiabatic',
+    'warn.thermal.temp_exceeds_allowable',
+    'warn.thermal.max_temp_exceeds_melting',
+)
+
+
 def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
     """Yapılandırılmış iki-dilli uyarı/öneri kaydı (D-track sözleşmesi).
 
@@ -3943,3 +3960,296 @@ def material_name(mat_props: Dict, materials_db: Dict) -> str:
         if props is mat_props:
             return name
     return 'material'
+
+
+# ===========================================================================
+# V301/ÖRNEK-PANEL — KORUNAN CİDAR: çıplak cidar kararlı kontrolünün YERİNE
+# geçen iki yol (``/analyze_thermal_safety``; analiz güvertesi termal paneli)
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ornek-panel/olcum/once_*.json; KABUL
+# K2, dal v301/kabul f0eb3e8d6): bu modülün kararlı denge cidarı TEK
+# istasyondur (boğaz koşulları, M = 1) ve doğal soğutmada dış direnç
+# 1/25 m²K/W'tır: etkin soğutma yoksa cidar T_aw'a yapışır
+# (``wall_pinned_adiabatic``). Termal panel bu kontrolü motorun hazne/kasa
+# malzemesiyle kuruyordu:
+#   * örnek KATI (2 mm çelik kasa, 3 mm yalıtım + 2 mm astar, 2,28 s):
+#     çıplak cidar 1683,7 K -> wall_pinned_adiabatic + temp_exceeds_allowable
+#     KRİTİK. Motorun kendi zinciri AYNI kasayı yalıtım + kasa üzerinden
+#     yanma boyunca geçici (lumped) çözüyor: 313,55 K, sınır 811 K,
+#     "Excellent" (solid_rocket_engine._calculate_case_temperature).
+#   * örnek HİBRİT: ana zincir AYNI modülle AYNI çıplak cidarı koşuyor
+#     (3313,4 K) ve kritik kayıtlarını bölge hükmüyle (yakıt bloğu + HRMA'nın
+#     boyutlandırdığı astar, V301/H-termal) ``superseded_by`` ile bilgiye
+#     çeviriyor; uç bölge bilgisini taşımadığı için aynı kayıtları KRİTİK
+#     basıyordu.
+# İki yol, ikisi de İSTEKLE açılır (alan yoksa yanıt BİT-AYNI kalır):
+#   (1) SUPPLIED WALL — istek ``wall_temperature_hot`` + ``wall_temperature_
+#       cold`` taşıyorsa hüküm o çifte kurulur (``_analyze_thermal_safety``,
+#       aynı eşik merdiveni). Kardeş uç ``/analyze_safety``nin "motor_data
+#       wall_temperature_hot/cold contract" sözleşmesinin aynısı.
+#   (2) ABLATIVE LINER — istek ``wall_protection = 'ablative_liner'``
+#       taşıyorsa ve çıplak cidar kritikse astar BURADA boyutlandırılır
+#       (``ThermalProtectionAnalyzer.ablative_thickness``; girdiler hibrit
+#       zincirinin ``_thermal_protection_block::_liner`` reçetesiyle aynı:
+#       hazne tasarım akısı, h = q/(T_aw - T_w,ref), T_aw, gaz c_p, hazne
+#       yarıçapı, yanma süresi). Geçerliyse hüküm H-termal açık bölge
+#       kuralıdır: LINER_REQUIRED (warning). Geçersizse kritik kayıtlar AYNEN
+#       kalır (fail-closed).
+# Her iki yolda da çıplak cidar SAYISI kalır; kritik kayıtları H-termal
+# sözleşmesiyle (severity info + superseded_by + bare_wall_severity)
+# yayımlanır.
+# ===========================================================================
+WALL_PROTECTION_NONE = 'none'
+WALL_PROTECTION_ABLATIVE_LINER = 'ablative_liner'
+#: ``wall_protection`` isteğinin kabul ettiği değerler (tek tanım noktası).
+SUPPORTED_WALL_PROTECTIONS = (WALL_PROTECTION_NONE,
+                              WALL_PROTECTION_ABLATIVE_LINER)
+
+#: ``superseded_by`` değerleri — hükmü veren blok ADIYLA.
+SUPERSEDED_BY_SUPPLIED_WALL = 'supplied_wall_check'
+SUPERSEDED_BY_CHAMBER_LINER = 'chamber_liner_check'
+
+SUPPLIED_WALL_SOURCE = (
+    'request fields wall_temperature_hot / wall_temperature_cold: SUPPLIED '
+    'wall temperatures (for example the solved wall of the motor result the '
+    'analysis deck was seeded from), NOT solved by this endpoint. The safety '
+    'factors and the risk level of safety_analysis are evaluated at this '
+    'pair with the same threshold ladder as the bare-wall check '
+    '(materials_db.temperature_limits); the bare-wall check is kept in '
+    'bare_wall_safety_analysis.')
+
+BARE_WALL_BOUND_BASIS = (
+    'steady bare-wall equilibrium of this module at its design station '
+    '(throat conditions, M = 1) with the requested cooling class: no liner, '
+    'no insulation and no burn transient. It is kept as a NUMBER (an '
+    'unprotected-wall bound); its critical records are published with '
+    'severity info, superseded_by and bare_wall_severity because a '
+    'protected-wall verdict governs.')
+
+CHAMBER_LINER_RISK_BASIS = (
+    'risk level of the governing verdict, chamber_liner_check: '
+    'LINER_REQUIRED has severity warning, which is MEDIUM on this module\'s '
+    'LOW / MEDIUM / HIGH scale (MEDIUM: acceptable with the documented '
+    'mitigation, here the HRMA-sized liner). The bare-wall risk level is '
+    'kept in bare_wall_risk_level.')
+
+CHAMBER_LINER_SCOPE = (
+    'This endpoint sizes ONE liner for the whole chamber wall at the chamber '
+    'station; it does not model the fuel-grain coverage of a hybrid case (the '
+    'motor result\'s chamber_wall_zones does). The temperature of the wall '
+    'behind the liner is not solved: the Level-1 Q* model has no back-face '
+    'conduction, so no wall temperature or margin is published for it.')
+
+
+def bare_wall_critical_codes(result) -> List[str]:
+    """Sonuçtaki ÇIPLAK CİDAR kritik kayıtlarının kodları (sıralı, tekil)."""
+    kodlar = set()
+
+    def _gez(node, depth=0):
+        if depth > 3 or not isinstance(node, dict):
+            return
+        for w in node.get('warnings') or []:
+            if (isinstance(w, dict) and w.get('code') in BARE_WALL_CRITICAL_CODES
+                    and str(w.get('severity', '')).lower() == 'critical'):
+                kodlar.add(w['code'])
+        for deger in node.values():
+            if isinstance(deger, dict):
+                _gez(deger, depth + 1)
+    _gez(result)
+    return sorted(kodlar)
+
+
+def supersede_bare_wall_records(result, superseded_by: str, nodes) -> int:
+    """Korunan cidar hüküm verdiğinde ÇIPLAK CİDAR düğümlerinin BÜTÜN kayıtları.
+
+    H-termal sözleşmesinin (``hybrid_rocket_engine.
+    _apply_chamber_zone_verdicts``) genellemesi: kayıt silinmez;
+    ``severity: info``, ``superseded_by`` ve ``bare_wall_severity`` (kaydın
+    ASIL önemi) ile yayımlanır — sayı kalır, hüküm koruma bloğuna geçer.
+    H-termal yalnız kritik kodları çeviriyordu; burada uyarı düzeyindeki
+    çıplak cidar kayıtları da çevrilir. ÖLÇÜLDÜ (katı örnek, ilk sürüm):
+    ``warn.thermal.wall_exceeds_allowable`` ("denge cidar sıcaklığı 1690 K
+    ... izin verilen 811 K değerini aşıyor — dayanım marjı kayboldu")
+    verilen kasa hükmünün (313,6 K, risk LOW) yanında güncel uyarı gibi
+    duruyordu. ``nodes``: çıplak cidar dengesinin kayıtlarını taşıyan
+    düğüm adları. Yerinde değiştirir; çevrilen kayıt sayısını döner.
+    """
+    sayac = 0
+    for ad in nodes:
+        node = result.get(ad)
+        if not isinstance(node, dict) or not isinstance(node.get('warnings'), list):
+            continue
+        yeni = []
+        for w in node['warnings']:
+            if isinstance(w, dict) and not w.get('superseded_by'):
+                yeni.append(dict(w, severity='info', superseded_by=superseded_by,
+                                 bare_wall_severity=w.get('severity')))
+                sayac += 1
+            else:
+                yeni.append(w)
+        node['warnings'] = yeni
+    return sayac
+
+
+def apply_wall_protection(analyzer, result: Dict, motor_data: Dict,
+                          material: str, wall_thickness: float, *,
+                          wall_temperature_hot: Optional[float] = None,
+                          wall_temperature_cold: Optional[float] = None,
+                          wall_protection: str = WALL_PROTECTION_NONE
+                          ) -> Optional[Dict]:
+    """Korunan cidar hükmünü ``analyze_heat_transfer`` sonucuna işler.
+
+    Öncelik: verilmiş cidar çifti (1) > ablatif astar (2) > hiçbiri (yanıt
+    değişmez, ``None`` döner). Çağıran (uç) girdileri kapıdan geçirmiştir:
+    çift ya ikisi birden ya hiç, sonlu ve pozitif, ``hot >= cold``.
+    """
+    if wall_temperature_hot is not None and wall_temperature_cold is not None:
+        return _apply_supplied_wall(analyzer, result, motor_data, material,
+                                    wall_thickness, float(wall_temperature_hot),
+                                    float(wall_temperature_cold))
+    if wall_protection == WALL_PROTECTION_ABLATIVE_LINER:
+        return _apply_chamber_liner(result, motor_data)
+    return None
+
+
+def _apply_supplied_wall(analyzer, result, motor_data, material,
+                         wall_thickness, t_hot, t_cold):
+    mat_props = analyzer.materials[resolve_material_key(material)]
+    basinc_pa = float(motor_data['chamber_pressure']) * 1e5
+    yaricap = float(motor_data['chamber_diameter']) / 2.0
+    guvenlik = analyzer._analyze_thermal_safety(
+        t_hot, mat_props, wall_thickness, basinc_pa,
+        wall_delta_T=t_hot - t_cold, chamber_radius_m=yaricap)
+    guvenlik['wall_temperature_basis'] = SUPPLIED_WALL_SOURCE
+    duvar = result.get('wall_analysis') or {}
+    result['bare_wall_safety_analysis'] = result.get('safety_analysis')
+    result['safety_analysis'] = guvenlik
+    cevrilen = supersede_bare_wall_records(
+        result, SUPERSEDED_BY_SUPPLIED_WALL,
+        ('gas_side_analysis', 'wall_analysis', 'bare_wall_safety_analysis'))
+    blok = {
+        'status': 'applied',
+        'governs': True,
+        'wall_temperature_hot_K': t_hot,
+        'wall_temperature_cold_K': t_cold,
+        'source': SUPPLIED_WALL_SOURCE,
+        'bare_wall_temperature_K': duvar.get('max_temperature'),
+        'bare_wall_basis': BARE_WALL_BOUND_BASIS,
+        'superseded_bare_wall_records': cevrilen,
+    }
+    result['supplied_wall_check'] = blok
+    return blok
+
+
+def _apply_chamber_liner(result, motor_data):
+    kodlar = bare_wall_critical_codes(result)
+    gs = result.get('gas_side_analysis') or {}
+    if not kodlar:
+        blok = {'status': 'not_applied', 'verdict': 'BARE_WALL_OK',
+                'severity': 'info', 'governs': False,
+                'basis': ('the bare-wall check of this request has no critical '
+                          'record, so no liner requirement is issued')}
+        result['chamber_liner_check'] = blok
+        return blok
+
+    q_kamara = _positive_length(gs.get('chamber_heat_flux'))
+    t_aw = _positive_length(gs.get('adiabatic_wall_temperature'))
+    t_ref = _positive_length(gs.get('reference_wall_temperature'))
+    t_yanma = _positive_length(motor_data.get('burn_time'))
+    yaricap = _positive_length(motor_data.get('chamber_diameter'))
+    cp_gaz = _positive_length((result.get('heat_transfer_coefficients') or {})
+                            .get('gas_cp'))
+    eksik = [ad for ad, deger in (
+        ('gas_side_analysis.chamber_heat_flux', q_kamara),
+        ('gas_side_analysis.adiabatic_wall_temperature', t_aw),
+        ('gas_side_analysis.reference_wall_temperature', t_ref),
+        ('burn_time', t_yanma), ('chamber_diameter', yaricap)) if deger is None]
+    if not eksik and t_aw <= t_ref:
+        eksik.append('adiabatic_wall_temperature > reference_wall_temperature')
+
+    def _sizing_yok(neden):
+        blok = {'status': 'not_applied', 'verdict': 'NOT_SIZED',
+                'severity': 'critical', 'governs': False,
+                'bare_wall_codes': kodlar, 'reason': neden,
+                'basis': ('fail-closed: no liner could be sized, so the '
+                          'bare-wall critical records stand unchanged')}
+        result['chamber_liner_check'] = blok
+        return blok
+
+    if eksik:
+        return _sizing_yok('the liner sizing needs: ' + ', '.join(eksik))
+
+    h_kamara = q_kamara / (t_aw - t_ref)
+    yaricap = yaricap / 2.0
+    # Astar malzemesi hibrit zincirinin BEYANLI seçimidir (tek kaynak); geç
+    # içe aktarma: motor modülü bu modülü içe aktarıyor (döngü yok).
+    from hrma.engines.hybrid_rocket_engine import LINER_MATERIAL_DEFAULT
+    from hrma.analysis.thermal_protection import ThermalProtectionAnalyzer
+    ek = {'h_gas_W_m2K': h_kamara, 'T_recovery_K': t_aw,
+          'station_radius_m': yaricap}
+    if cp_gaz is not None:
+        ek['gas_cp_J_kgK'] = cp_gaz
+    try:
+        sizing = ThermalProtectionAnalyzer().ablative_thickness(
+            q_net_W_m2=q_kamara, burn_time_s=t_yanma,
+            material=LINER_MATERIAL_DEFAULT, **ek)
+    except Exception as exc:  # çekirdek kapısı: sayı uydurulmaz
+        return _sizing_yok(f'ablative sizing failed: {exc}')
+    kalinlik_mm = sizing.get('required_thickness_mm')
+    gecerli = (sizing.get('thickness_status') == 'sized'
+               and sizing.get('model_valid') is True
+               and _positive_length(kalinlik_mm) is not None)
+    if not gecerli:
+        return _sizing_yok(sizing.get('validity_note')
+                           or ('liner thickness status '
+                               f"{sizing.get('thickness_status')!r}"))
+
+    # Astar yolunda ``safety_analysis`` ÇIPLAK cidarın kendisidir (astar
+    # arkası çözülmez): onun kayıtları da aşılır; astar uyarısı ARDINDAN
+    # eklenir.
+    cevrilen = supersede_bare_wall_records(
+        result, SUPERSEDED_BY_CHAMBER_LINER,
+        ('gas_side_analysis', 'wall_analysis', 'safety_analysis'))
+    guvenlik = result.get('safety_analysis')
+    if isinstance(guvenlik, dict):
+        guvenlik['bare_wall_risk_level'] = guvenlik.get('risk_level')
+        guvenlik['risk_level'] = 'MEDIUM'
+        guvenlik['risk_level_basis'] = CHAMBER_LINER_RISK_BASIS
+        guvenlik['warnings'] = [_mk_warning(
+            'warn.thermal.chamber_liner_required', 'warning',
+            liner_mm=round(float(kalinlik_mm), 2),
+            material=str(sizing.get('material_name') or LINER_MATERIAL_DEFAULT))
+        ] + list(guvenlik.get('warnings') or [])
+    blok = {
+        'status': 'applied',
+        'verdict': 'LINER_REQUIRED',
+        'severity': 'warning',
+        'governs': True,
+        'required_thickness_mm': float(kalinlik_mm),
+        'material': sizing.get('material_name'),
+        'material_key': LINER_MATERIAL_DEFAULT,
+        'bare_wall_codes': kodlar,
+        'bare_wall_temperature_K': (result.get('wall_analysis') or {})
+        .get('max_temperature'),
+        'bare_wall_basis': BARE_WALL_BOUND_BASIS,
+        'superseded_bare_wall_records': cevrilen,
+        'inputs': {
+            'chamber_heat_flux_W_m2': q_kamara,
+            'h_gas_W_m2K': h_kamara,
+            'h_gas_source': ('chamber coefficient recovered from the chamber '
+                             'design flux of this request: h_g = q_chamber/'
+                             '(T_aw - T_wall_ref)'),
+            'T_recovery_K': t_aw,
+            'burn_time_s': t_yanma,
+            'station_radius_m': yaricap,
+            'gas_cp_J_kgK': cp_gaz,
+        },
+        'sizing': sizing,
+        'scope': CHAMBER_LINER_SCOPE,
+        'source': ('Level-1 Q* ablation sizing (hrma.analysis.thermal_protection.'
+                   'ThermalProtectionAnalyzer.ablative_thickness), the same '
+                   'call and inputs as the hybrid chain\'s chamber liner '
+                   '(hybrid_rocket_engine._thermal_protection_block)'),
+    }
+    result['chamber_liner_check'] = blok
+    return blok

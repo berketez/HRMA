@@ -197,7 +197,7 @@ class TestP9B5_33UcuncuTarafKunyesi:
         canli = {'compound': 'lox', 'density': 1141.7, 'status': 'success',
                  'source': wpa.NIST_UCUNCU_TARAF_KUNYE}
         for durum, beklenen in ((wpa.DATA_STATE_STALE, 'Stale cache'),
-                                (wpa.DATA_STATE_OFFLINE, 'Offline store'),
+                                (wpa.DATA_STATE_OFFLINE, 'Stored copy'),  # v3.0.1: 'Offline store' etiketi söküldü
                                 (wpa.DATA_STATE_CACHED, 'Cached')):
             damgali = api._damgala(dict(canli), durum, 10.0)
             assert 'live' not in damgali['source'].lower(), damgali['source']

@@ -76,19 +76,29 @@ BANT_TOL = 1.0
 # (skipped_derived) — ölçülen kimlikler test_tahmin_tarafi_cebirsel_bag ve
 # test_kopya_zinciri_skor_disi bekçilerinde. Eski kilitli bantlar kayıt
 # olarak: kdx +15.26 / ksb001 +28.24 / ksb002 +28.94 (≈ kütle∘Isp bileşimi).
+#
+# V3.0.5 T-ÇAPA-C1 (27 Eki) — BİLİNÇLİ MODEL DEĞİŞİKLİĞİ, BANT ÖLÇÜLDÜ.
+# V301/N-CEA-2 (78a27382e, 26 Eki; Berke kararı "Hepsi, lüle dahil"): katı
+# termokimya (T_c, c*, γ_s, M) ve lüle motorun KENDİ Pc'sinde NASA CEA'dan.
+# Çatal: c7776576f'de 12/12 yeşil, 78a27382e'de bu 6 bant kırmızı (ölçüldü).
+# Isp ve tepe itki hataları değişti (kdx002 isp +9,60 → +10,68; ksb001 isp
+# +21,94 → +23,33; ksb002 isp +17,56 → +18,90; tepe itkiler kdx002 +8,72 →
+# +9,81, ksb001 −10,27 → −9,21, ksb002 −8,26 → −7,18); burn_time ve
+# propellant_mass DEĞİŞMEDİ. Ölçüm betiği:
+# docs/scofield/raw/OH/V301/tcapa-c1/f3_bant_olcum.py. Tolerans aynı (±1,0).
 BANTLAR = {
     ("sol-nakka2000-kappa-kdx002", "burn_time"): -14.80,
-    ("sol-nakka2000-kappa-kdx002", "isp"): +9.60,
+    ("sol-nakka2000-kappa-kdx002", "isp"): +10.68,
     ("sol-nakka2000-kappa-kdx002", "propellant_mass"): +4.74,
-    ("sol-nakka2000-kappa-kdx002", "thrust_peak"): +8.72,
+    ("sol-nakka2000-kappa-kdx002", "thrust_peak"): +9.81,
     ("sol-nakka2000-kappa-ksb001", "burn_time"): -22.02,
-    ("sol-nakka2000-kappa-ksb001", "isp"): +21.94,
+    ("sol-nakka2000-kappa-ksb001", "isp"): +23.33,
     ("sol-nakka2000-kappa-ksb001", "propellant_mass"): +5.14,
-    ("sol-nakka2000-kappa-ksb001", "thrust_peak"): -10.27,
+    ("sol-nakka2000-kappa-ksb001", "thrust_peak"): -9.21,
     ("sol-nakka2000-kappa-ksb002", "burn_time"): -20.29,
-    ("sol-nakka2000-kappa-ksb002", "isp"): +17.56,
+    ("sol-nakka2000-kappa-ksb002", "isp"): +18.90,
     ("sol-nakka2000-kappa-ksb002", "propellant_mass"): +9.57,
-    ("sol-nakka2000-kappa-ksb002", "thrust_peak"): -8.26,
+    ("sol-nakka2000-kappa-ksb002", "thrust_peak"): -7.18,
 }
 
 
