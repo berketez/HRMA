@@ -52,6 +52,12 @@ from hrma.stability.hybrid_lfi import RT_AV_M2_S2
 # sessizce başka bir motoru ölçmesi demektir.
 # ---------------------------------------------------------------------------
 from tests.test_faz4_motor_kapilari import KATI_TABAN     # noqa: E402
+# V301/T-ÇAPA-A: n >= 1 yakınsama senaryosu ölçüldüğü geometride (çekirdek
+# 30 mm) ve port kapısı kapalı koşar — gerekçe KATI_TABAN_YAKINSAMA künyesinde.
+from tests.test_faz4_motor_kapilari import (                # noqa: E402
+    KATI_TABAN_YAKINSAMA,
+    port_kapisi_kapali,  # noqa: F401  (fikstür)
+)
 
 
 @pytest.fixture(scope='module')
@@ -437,7 +443,7 @@ def test_kati_bulk_modu_ve_cozucu_kapisi_AYNI_seyi_soyluyor(kati):
     assert 'zero thermal-lag' in bulk['verdict_scope']
 
 
-def test_kati_n_bir_ustunde_UC_yol_da_ayni_seyi_soyluyor():
+def test_kati_n_bir_ustunde_UC_yol_da_ayni_seyi_soyluyor(port_kapisi_kapali):
     """n >= 1: çekirdek 'unstable', çözücü kritik uyarı, koşu FAIL-CLOSED.
 
     Üç yol da aynı fiziği söylemek zorundadır. ÖLÇÜLEN nokta n = 1,0'dır ve
@@ -460,7 +466,7 @@ def test_kati_n_bir_ustunde_UC_yol_da_ayni_seyi_soyluyor():
     n >= 1'de YAYIMLANAN bir koşu da ayrıca ölçülüyor.
     """
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
-    motor = SolidRocketEngine(burn_rate_n=1.0, **KATI_TABAN)
+    motor = SolidRocketEngine(burn_rate_n=1.0, **KATI_TABAN_YAKINSAMA)
     sonuc = motor.calculate_performance()
     # (1) çözücü fail-closed: performans sonucu YOK
     assert sonuc.get('error'), 'n = 1,0 koşusu sonuç üretmemeliydi'
@@ -482,7 +488,7 @@ def test_kati_n_bir_ustunde_UC_yol_da_ayni_seyi_soyluyor():
 
     # (4) ve n >= 1'de YAYIMLANAN bir koşu gerçekten var: künyenin
     # iddiası aynı sözlükten doğrulanabilir olmalı.
-    taban = dict(KATI_TABAN)
+    taban = dict(KATI_TABAN_YAKINSAMA)
     taban.update(burn_rate_a=0.0005, burn_rate_n=1.30)
     yayimlanan = SolidRocketEngine(**taban).calculate_performance()
     assert not yayimlanan.get('error'), 'a=0,0005 n=1,30 yayımlanmalıydı'

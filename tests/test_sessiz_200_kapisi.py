@@ -23,6 +23,8 @@ kullanıcıya gösterilen veri değildir.
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 import hrma.app as hrma_app
 from hrma.app import EngineContractViolation, app
 from tests.support import shake
@@ -62,6 +64,14 @@ def _sozlesmeyi_bozan_motor(donen):
         def __init__(self, *args, **kwargs):
             pass
 
+        def _grain_geometry_key(self):
+            # v3.0.1 T-ÇAPA-B: K-A'dan beri uç, hesaptan ÖNCE tane geometrisi
+            # anahtarını bir kez okur (hrma/app.py, "_grain_geometry_key";
+            # saf okuma, reddedilen alanları ``rejected_inputs``e toplar).
+            # Sahte motor o yüzeyi taşımıyordu → AttributeError 500'ü testin
+            # ölçtüğü sözlük-dışı 500 yerine geçiyordu. Reddedilen alan yok.
+            return None
+
         def calculate_performance(self):
             return donen
 
@@ -71,7 +81,10 @@ def _sozlesmeyi_bozan_motor(donen):
 #: Katı ucun 422 kritik-girdi kapısını geçen asgari geometri-kipi girdisi.
 SOLID_GIRDI = {
     'chamber_pressure': 40, 'propellant_type': 'apcp',
-    'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 30,
+    # v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+    # (A_p/A_t 0,947); K-A kapısından beri 422. Konu port değil: geometri
+    # tek tanım SOLID_DEFAULT_GEOMETRY_MM'den (kopyalanmaz).
+    **SOLID_DEFAULT_GEOMETRY_MM,
 }
 
 #: Sıvı ucun 422 kritik-girdi kapısını geçen beş zorunlu alan.

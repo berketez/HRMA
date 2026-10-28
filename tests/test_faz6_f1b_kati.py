@@ -168,7 +168,11 @@ def form_defaults(html_text):
         chosen = (re.search(r'<option value="([^"]*)"[^>]*\bselected\b',
                             match.group(2))
                   or re.search(r'<option value="([^"]*)"', match.group(2)))
-        if chosen:
+        # V301/K-B: malzeme seçicilerinin seçenekleri sunucudan (Jinja
+        # döngüsü, `{{ o.value }}`) gelir; ham şablonda değer yer tutucudur.
+        # Tarayıcıda seçili olan sunucunun varsayılanıdır — alan gönderilmez,
+        # uç aynı varsayılanı uygular.
+        if chosen and '{{' not in chosen.group(1):
             out[ident.group(1)] = chosen.group(1)
     return out
 
@@ -224,34 +228,242 @@ def test_t49_sablon_varsayilani_motorun_varsayilaniyla_ayni(html):
             % (flag, sablon.get(flag), beklenen))
 
 
-def test_t49_varsayilan_bates_notr_yaniyor(html, client):
-    """Varsayılan koşu 'BATES (neutral)' iddiasını tutmalı.
+# ---------------------------------------------------------------------------
+# T49 — BATES nötrlüğü (V305/C1-t49, 28 Eki 2026; ana model kararı)
+#
+# Eski bekçi "varsayılan koşu nötr yanar" diyordu. V301/K-A çekirdeği 48 mm'ye,
+# V301/K-D (52da83f12, 27 Eki) toplam tane boyunu 500 -> 400 mm'ye indirdi
+# (KNDX varsayılanında G0 kütle akısı eşiği; gerekçe hrma/app.py
+# SOLID_DEFAULT_GEOMETRY_MM). Varsayılan GERİ ALINMADI (ana model kararı);
+# yanlış olan kullanıcıya görünen "varsayılan blokta nötr" metniydi. Bekçi
+# üçe ayrıldı:
+#   (i)   nötrlük bir GEOMETRİ özelliğidir ve açık nötr geometride sınanır;
+#   (ii)  varsayılan tanenin azalan (regressive) olduğu K-D'ye çapalanır;
+#   (iii) ipucu, HTML yedeği ve iki kılavuzdaki sayılar ürünün ölçümüyle
+#         aynıdır (metin bir daha bayatlarsa kırmızı).
+#
+# Nötr koşul (dış yüzü kaplı, uçları açık BATES tanesi; D dış, d çekirdek
+# çapı, L tane boyu, x yanan web): A(x) = π(d+2x)(L−2x) + (π/2)(D² − (d+2x)²).
+# A(0) = πdL + (π/2)(D² − d²), A(w) = πD(L − D + d), w = (D − d)/2;
+# A(0) = A(w) ⟺ L = (3D + d)/2 (R. Nakka, "Solid Rocket Motor Theory —
+# Grain Design"; kapalı biçim burada türetildi). A(x) x'te içbükey ikinci
+# derecedir (A'' = −12π), tepe x* = (L − 2d)/6'da.
+# ---------------------------------------------------------------------------
+def _t49_kos(client, payload):
+    body = client.post('/calculate_solid', json=payload)
+    assert body.status_code == 200, body.get_data(as_text=True)[:400]
+    data = body.get_json()
+    gd = data['grain_design']
+    return {
+        'ab0': gd['burning_surface_initial_cm2'],
+        'ab1': gd['burning_surface_final_cm2'],
+        'abmax': data['throat_sizing']['burn_area_ratio_max_over_initial'],
+        'kn0': gd['Kn_initial'],
+        'kn1': gd['Kn_final'],
+        'profil': gd.get('burn_profile'),
+        'inhibitor': gd.get('inhibitor_config'),
+        'boy': gd.get('grain_length_mm'),
+        'tane': gd.get('number_of_segments'),
+    }
 
-    Ölçüm (3 Ağustos 2026, /calculate_solid, şablon varsayılanları):
-    6114 -> 6236 N (+%2,0), tepe/ortalama 1,10.
+
+def _t49_notr_govde(html_text):
+    """Sayfa varsayılanı + tane boyu nötr koşulda: L_tane = (3D + d)/2."""
+    payload = form_defaults(html_text)
+    dis, cek = payload['outer_diameter'], payload['core_diameter']
+    adet = int(payload['grain_count'])
+    payload['grain_length'] = adet * (3.0 * dis + cek) / 2.0
+    return payload, dis, cek, adet
+
+
+def _t49_alan_mm2(dis, cek, boy, x):
+    """Tek tane yanma alanı (dış yüz kaplı, iki uç açık), mm²."""
+    import math
+    ic = cek + 2.0 * x
+    return math.pi * ic * (boy - 2.0 * x) + math.pi / 2.0 * (dis ** 2 - ic ** 2)
+
+
+def test_t49_bates_notr_kosulunda_notr_yaniyor(html, client):
+    """(i) Nötrlük açık geometride: L_tane = (3D + d)/2, uçlar açık.
+
+    Ölçüldü (28 Eki, 100/48 mm, 3 × 174 mm, KNDX): A_b 1149,8 -> 1153,6 cm²
+    (+%0,33; son örnek web sonundan hemen önce), A_b,max/A_b,0 1,0827
+    (kapalı biçim 1,0832; fark çözücünün web adımı), Kn 222,7 -> 223,4,
+    itki tepe/ortalama 1,100. Eşikler eski bekçinin eşikleridir (|ΔA_b| <
+    %10, A_b,max/A_b,0 < 1,10, tepe/ortalama < 1,20); gevşetilmedi,
+    sınandıkları geometri açık yazıldı.
     """
-    shape = thrust_shape(form_defaults(html), client)
-    assert abs(shape['degisim']) < 0.10, (
-        'varsayılan yanma nötr değil: %.0f -> %.0f N (%+.1f%%)'
-        % (shape['ilk'], shape['son'], 100 * shape['degisim']))
-    assert shape['tepe_ortalama'] < 1.20, (
-        'tepe/ortalama %.3f — nötr bir BATES eğrisi için fazla tümsekli'
-        % shape['tepe_ortalama'])
-    # ÖH D18 (P2B4-01): burada 'profil == neutral' aranıyordu ve bu, ESKİ
-    # (ilk/son çeyrek ortalaması) sınıflandırıcısının hükmüydü. O kopya
-    # söküldüğü için beklenti de ölçülene çevrildi: çözücünün TEK sınıfı
-    # bu koşuda 'Progressive-Regressive'dir (tepe/ortalama 1,10, tepe eğrinin
-    # İÇİNDE) ve sayfanın nötrlük iddiası eğri SAYILARIYLA yukarıda zaten
-    # sınanıyor (|değişim| < %10). Kilitlenen asıl şey artık TEK KAYNAK
-    # olmasıdır: iki alan aynı sınıfı söylemek ZORUNDA.
+    payload, dis, cek, adet = _t49_notr_govde(html)
+    boy = payload['grain_length'] / adet
+    r = _t49_kos(client, payload)
+    assert r['tane'] == adet and r['inhibitor'] == 'outer_surface'
+    # Başlangıç alanı kapalı biçimle (saf geometri).
+    assert r['ab0'] == pytest.approx(
+        adet * _t49_alan_mm2(dis, cek, boy, 0.0) / 100.0, rel=1e-9)
+    # Nötr koşulun tanımı: web sonundaki alan başlangıçtakine eşit.
+    web = (dis - cek) / 2.0
+    assert _t49_alan_mm2(dis, cek, boy, web) == pytest.approx(
+        _t49_alan_mm2(dis, cek, boy, 0.0), rel=1e-12)
+    assert abs(r['ab1'] - r['ab0']) / r['ab0'] < 0.01, (
+        'nötr geometride yanma alanı korunmuyor: %.1f -> %.1f cm²'
+        % (r['ab0'], r['ab1']))
+    assert r['abmax'] < 1.10, ('nötr geometride A_b,max/A_b,0 = %.4f'
+                               % r['abmax'])
+    # Tepe kapalı biçimin tepesini AŞAMAZ (ayrık örnekleme yalnız altında
+    # kalabilir); altında kalma payı web adımıdır (ölçülen 4,4e-4).
+    x_tepe = (boy - 2.0 * cek) / 6.0
+    assert 0.0 < x_tepe < web
+    kapali = (_t49_alan_mm2(dis, cek, boy, x_tepe)
+              / _t49_alan_mm2(dis, cek, boy, 0.0))
+    assert kapali * (1.0 - 2e-3) <= r['abmax'] <= kapali * (1.0 + 1e-9), (
+        r['abmax'], kapali)
+    assert abs(r['kn1'] / r['kn0'] - 1.0) < 0.01
+    shape = thrust_shape(payload, client)
+    assert shape['tepe_ortalama'] < 1.20, shape['tepe_ortalama']
     assert shape['profil'] == (shape['sinif'] or '').lower(), (
         'burn_profile %r ⟷ thrust_curve_type %r — iki alan yine ayrıştı'
         % (shape['profil'], shape['sinif']))
-    assert shape['profil'] == 'progressive-regressive', (
-        'çözücü varsayılan koşuyu %r diye sınıflandırıyor (ölçülen: '
-        'progressive-regressive)' % shape['profil'])
-    assert shape['inhibitor'] == 'outer_surface', (
-        'inhibitör düzeni BATES değil: %r' % shape['inhibitor'])
+
+
+def test_t49_varsayilan_tane_regresif_kd_capasi(html, client):
+    """(ii) Varsayılan tane nötr DEĞİL, azalan: K-D 52da83f12 çapası.
+
+    Ölçüldü (28 Eki, sayfa varsayılanları 100/48/400 mm, 3 tane, KNDX,
+    uçlar açık + dış kaplı): A_b 965,851245419646 -> 772,3260968968261 cm²
+    (−%20,0), Kn 235,0 -> 187,9, burn_profile 'regressive'. Tane boyu
+    133,3 mm, nötr koşulun (174 mm) altında. Değer bilerek böyle: K-D varsayılan
+    boyu G0 eşiği için indirdi; bu bekçi o kararın SONUCUNU adıyla kilitler.
+    """
+    payload = form_defaults(html)
+    assert payload['grain_length'] == 400.0, (
+        'varsayılan tane boyu K-D (52da83f12) çapasından kaydı: %r'
+        % payload['grain_length'])
+    r = _t49_kos(client, payload)
+    assert r['inhibitor'] == 'outer_surface', (
+        'inhibitör düzeni BATES değil: %r' % r['inhibitor'])
+    dis, cek = payload['outer_diameter'], payload['core_diameter']
+    adet = int(payload['grain_count'])
+    boy = payload['grain_length'] / adet
+    assert boy < (3.0 * dis + cek) / 2.0, 'varsayılan artık nötr boyda'
+    assert r['ab0'] == pytest.approx(
+        adet * _t49_alan_mm2(dis, cek, boy, 0.0) / 100.0, rel=1e-9)
+    assert r['ab0'] == pytest.approx(965.851245419646, rel=1e-9)
+    assert r['ab1'] == pytest.approx(772.3260968968261, rel=1e-9)
+    assert r['kn1'] / r['kn0'] == pytest.approx(r['ab1'] / r['ab0'],
+                                                rel=1e-9)
+    assert r['profil'] == 'regressive'
+
+
+def _t49_bicim(x, dil):
+    """Bir ondalık; tam sayı ise ondalıksız (174, 133.3). TR'de virgül."""
+    s = '%.1f' % x
+    if s.endswith('.0') and abs(x - round(x)) < 1e-9:
+        s = s[:-2]
+    return s.replace('.', ',') if dil == 'tr' else s
+
+
+def _t49_yuzde(oran, dil):
+    """Bağıl değişim: EN '+8.3%' / '-20.0%', TR '+%8,3' / '-%20,0'."""
+    deger = 100.0 * oran
+    isaret = '-' if deger < 0 else '+'
+    sayi = ('%.1f' % abs(deger))
+    if dil == 'tr':
+        return '%s%%%s' % (isaret, sayi.replace('.', ','))
+    return '%s%s%%' % (isaret, sayi)
+
+
+def _t49_kn(a, b, dil):
+    f = (lambda v: ('%.1f' % v).replace('.', ',')) if dil == 'tr' else (
+        lambda v: '%.1f' % v)
+    return 'Kn %s -> %s' % (f(a), f(b))
+
+
+def test_t49_ipucu_sayilari_urun_olcumuyle_ayni(html, client):
+    """(iii) İpucu, HTML yedeği ve iki kılavuz ürünün ölçtüğü sayıyı söyler.
+
+    Sayılar burada ÜRÜNDEN ölçülür ve metne biçimlenir; metin bir daha
+    bayatlarsa (varsayılan, model ya da metin değişirse) bu bekçi kırmızıdır.
+    """
+    import html as html_mod
+    notr_govde, dis, cek, adet = _t49_notr_govde(html)
+    notr = _t49_kos(client, notr_govde)
+    vars_govde = form_defaults(html)
+    vars_ = _t49_kos(client, vars_govde)
+    kapli_govde = dict(vars_govde, inhibit_front=True, inhibit_rear=True)
+    kapli = _t49_kos(client, kapli_govde)
+    assert kapli['inhibitor'] == 'outer_surface_and_front_face_and_rear_face'
+    l_notr = notr_govde['grain_length'] / adet
+    l_vars = vars_govde['grain_length'] / adet
+
+    parca = {}
+    for dil in ('en', 'tr'):
+        b = lambda v: _t49_bicim(v, dil)  # noqa: E731
+        y = lambda v: _t49_yuzde(v, dil)  # noqa: E731
+        k = lambda a, c: _t49_kn(a, c, dil)  # noqa: E731
+        if dil == 'en':
+            parca[dil] = [
+                'each grain is (3D + d)/2 long',
+                'Measured at %s/%s mm, %d × %s mm: %s, peak %s' % (
+                    b(dis), b(cek), adet, b(l_notr),
+                    k(notr['kn0'], notr['kn1']), y(notr['abmax'] - 1.0)),
+                'The default grain (%d × %s mm) is shorter and burns '
+                'regressive: %s (%s)' % (
+                    adet, b(l_vars), k(vars_['kn0'], vars_['kn1']),
+                    y(vars_['kn1'] / vars_['kn0'] - 1.0)),
+                '(default grain: %s, peak %s)' % (
+                    k(kapli['kn0'], kapli['kn1']), y(kapli['abmax'] - 1.0)),
+            ]
+        else:
+            parca[dil] = [
+                'her tane (3D + d)/2 boyunda olduğunda yanma nötrdür',
+                '%s/%s mm çaplı, %d × %s mm tanelerle ölçüldü: %s, tepe %s' % (
+                    b(dis), b(cek), adet, b(l_notr),
+                    k(notr['kn0'], notr['kn1']), y(notr['abmax'] - 1.0)),
+                'Varsayılan tane (%d × %s mm) bundan kısadır ve azalan '
+                'profille yanar: %s (%s)' % (
+                    adet, b(l_vars), k(vars_['kn0'], vars_['kn1']),
+                    y(vars_['kn1'] / vars_['kn0'] - 1.0)),
+                '(varsayılan tane: %s, tepe %s)' % (
+                    k(kapli['kn0'], kapli['kn1']), y(kapli['abmax'] - 1.0)),
+            ]
+
+    sayfalar = (REPO_ROOT / 'hrma' / 'static' / 'js' / 'i18n_pages.js'
+                ).read_text(encoding='utf-8')
+    anahtarlar = ('solid.ui.prevents_burning_on_forward_end_face',
+                  'solid.ui.prevents_burning_on_aft_end_face')
+    metinler = {'en': [], 'tr': []}
+    for anahtar in anahtarlar:
+        bulunan = re.findall(r"'%s': '([^']*)'" % re.escape(anahtar),
+                             sayfalar)
+        assert len(bulunan) == 2, (anahtar, len(bulunan))  # EN, TR blokları
+        metinler['en'].append(('i18n EN ' + anahtar, bulunan[0]))
+        metinler['tr'].append(('i18n TR ' + anahtar, bulunan[1]))
+        yedek = re.search(r'data-i18n="%s">([^<]*)</span>'
+                          % re.escape(anahtar), html)
+        assert yedek, anahtar
+        assert html_mod.unescape(yedek.group(1)) == bulunan[0], (
+            '%s: HTML yedeği EN metinden ayrıştı' % anahtar)
+
+    def _tex(yol, isaret):
+        satirlar = [s for s in (REPO_ROOT / 'docs' / 'user_guide' / yol)
+                    .read_text(encoding='utf-8').splitlines() if isaret in s]
+        assert len(satirlar) == 2, (yol, len(satirlar))
+        return [(yol, s.replace('-\\textgreater{}', '->')
+                 .replace('\\%', '%').replace(' -- ', ' — '))
+                for s in satirlar]
+
+    metinler['en'] += _tex('HRMA-User-Guide-EN.tex',
+                           'In a BATES stack the end faces')
+    metinler['tr'] += _tex('HRMA-Kullanma-Kilavuzu-TR.tex',
+                           'BATES yığınında uç yüzler')
+    for dil in ('en', 'tr'):
+        for nerede, metin in metinler[dil]:
+            for beklenen in parca[dil]:
+                assert beklenen in metin, (
+                    '%s: ürün ölçümü metinde yok (bayat sayı?)\n  '
+                    'beklenen: %s\n  metin: %s' % (nerede, beklenen, metin))
+            assert 'default grain: Kn 160' not in metin
+            assert 'varsayılan blokta ölçüldü' not in metin
 
 
 def test_t49_negatif_kontrol_eski_duzen_gerileyici(html, client):
@@ -304,10 +516,14 @@ def test_t50_durum_satiri_cizimden_once_siliniyor(html):
 def test_t51_alan_bandi_motorun_bandiyla_ayni(html):
     """HTML5 min/max, motorun kabul aralığının aynası olmalı."""
     source = ENGINE.read_text(encoding='utf-8')
-    band = re.search(r"_override_val\('char_velocity',\s*([\d.]+),\s*([\d.]+)\)",
-                     source)
-    assert band, 'motorun c* bandı okunamadı'
-    alt, ust = float(band.group(1)), float(band.group(2))
+    # v3.0.1 (26 Eki, N-CEA-2): bant motor kaynağında literal değil, katalogla
+    # ORTAK sabitten okunur (PROPELLANT_C_STAR_RANGE_M_S; alt sınır 800 → 700,
+    # kara barutun NASA CEA c*'ı 784,6-788,7 m/s). Ayna testi o sabitin motorca
+    # okunduğunu ve formun aynı iki sayıyı taşıdığını sınar.
+    assert re.search(r"_override_val\('char_velocity',\s*\*PROPELLANT_C_STAR_RANGE_M_S\)",
+                     source), 'motor c* bandını ortak sabitten okumuyor'
+    from hrma.data.propellants_db import PROPELLANT_C_STAR_RANGE_M_S
+    alt, ust = (float(x) for x in PROPELLANT_C_STAR_RANGE_M_S)
 
     tag = re.search(r'<input[^>]*id="char_velocity"[^>]*>', html)
     assert tag, '#char_velocity alanı yok'
@@ -392,17 +608,29 @@ def test_t51_cozucu_bant_disini_gercekten_dusuruyor(html, client):
     m/s; form 2400 -> 2280,0 m/s (uygulanıyor). Bu test bandın gerçek
     olduğunu kanıtlar; band değişirse yukarıdaki ayna testi de kırılır.
     """
+    # V301/K-A (KT-06/KT-13; ana model kararı 3) — TERS KAPIYA ÇEVRİLDİ.
+    # Bant dışı değer eskiden SESSİZCE yerleşik c*'a dönüyordu (200; iki
+    # farklı girdi aynı sonucu veriyordu — bu düğüm o kusuru KİLİTLİYORDU).
+    # Artık tasarım yayımlanmaz: 422 input_not_accepted, alan + kabul
+    # aralığı adıyla. Bant içi değer eskisi gibi uygulanır.
     payload = form_defaults(html)
-    sonuc = {}
-    for value in (508.7, 3000.0, 2400.0):
+    for value in (508.7, 3000.0):
         payload['char_velocity'] = value
         body = client.post('/calculate_solid', json=payload)
-        assert body.status_code == 200, body.get_data(as_text=True)[:300]
-        sonuc[value] = body.get_json()['c_star']
-    assert sonuc[508.7] == pytest.approx(sonuc[3000.0], rel=1e-9), (
-        'bant dışı iki değer artık farklı sonuç veriyor: %r' % sonuc)
-    assert sonuc[2400.0] > sonuc[3000.0] * 1.2, (
-        'bant içi 2400 m/s uygulanmıyor: %r' % sonuc)
+        assert body.status_code == 422, body.get_data(as_text=True)[:300]
+        j = body.get_json()
+        assert j['error_code'] == 'input_not_accepted', j
+        kayit = [k for k in j['invalid_fields']
+                 if k['field'] == 'char_velocity']
+        from hrma.data.propellants_db import PROPELLANT_C_STAR_RANGE_M_S
+        assert kayit and kayit[0]['accepted_range'] == [
+            float(x) for x in PROPELLANT_C_STAR_RANGE_M_S], j
+        assert kayit[0]['submitted'] == pytest.approx(value)
+    payload['char_velocity'] = 2400.0
+    body = client.post('/calculate_solid', json=payload)
+    assert body.status_code == 200, body.get_data(as_text=True)[:300]
+    assert body.get_json()['c_star'] > 1518.3 * 1.2, (
+        'bant içi 2400 m/s uygulanmıyor')
 
 
 # ---------------------------------------------------------------------------
@@ -488,16 +716,29 @@ const out = hrmaPlotLayout({
     showlegend: false
 }, y);
 
-ok(String(out.yaxis.title).indexOf('Thrust (N)') === 0,
-   'eksen başlığı kayboldu: ' + out.yaxis.title);
-ok(String(out.yaxis.title).indexOf('0 ∉ [530.41 … 532.66]') >= 0,
-   'bant ilan edilmiyor: ' + out.yaxis.title);
+// v3.0.1 (V301/N-grafik G3): bant metni eksen başlığının döndürülmüş
+// ikinci satırından çizim alanının sol üstündeki YATAY nota taşındı
+// (ölçüm: docs/scofield/raw/OH/V301/grafik/RAPOR.md). Eksen başlığı
+// yalın kalır; metin ve sayılar aynı.
+// V301/K-C1 (NK-28): matematik gösterimi ("0 ∉ [a … b]  Δ x%") düz
+// cümleye çevrildi ("Axis does not start at 0: it shows a – b (span x%)");
+// sayılar ve basamaklar AYNI (ölçüm: K-C1/RAPOR.md NK-28).
+const bantNotu = ((out.annotations || []).find(
+    (a) => String(a.text).indexOf('does not start at 0') >= 0) || {}).text || '';
+ok(String(out.yaxis.title) === 'Thrust (N)',
+   'eksen başlığına not eklenmiş: ' + out.yaxis.title);
+ok(bantNotu.indexOf('it shows 530.41 – 532.66') >= 0,
+   'bant ilan edilmiyor: ' + bantNotu);
 // D35 sayi-bicimi OH-GT-28 (rapor §5, 8f9313ca): yüzde I18N.percent
 // kanonundan; EN'de işaret sayıya BİTİŞİK ve sonra ('0.42%'), TR'de önce
 // ('%0,42'). Düzenekte sözlük yok → ürünün geri düşüşü EN biçimi basar.
 // Sayının kendisi (2 basamak, 0.4213 → '0.42') DEĞİŞMEDİ.
-ok(String(out.yaxis.title).indexOf('Δ 0.42%') >= 0,
-   'göreli genişlik ilan edilmiyor: ' + out.yaxis.title);
+ok(bantNotu.indexOf('(span 0.42%)') >= 0,
+   'göreli genişlik ilan edilmiyor: ' + bantNotu);
+const bantKutusu = (out.annotations || []).find(
+    (a) => String(a.text).indexOf('does not start at 0') >= 0) || {};
+ok(bantKutusu.textangle === undefined || bantKutusu.textangle === 0,
+   'bant notu döndürülmüş');
 
 // Aralık hâlâ veri bandına oturuyor (0'a çekilmedi).
 ok(out.yaxis.range && out.yaxis.range[0] > 500,
@@ -507,19 +748,19 @@ ok(out.yaxis.rangemode !== 'tozero', "rangemode 'tozero' olmuş");
 // Negatif kontrol 1: sıfır zaten bandın içindeyse işaret KONMAZ.
 const out2 = hrmaPlotLayout({ yaxis: { title: 'Acceleration (g)' } },
                             [-3.0, 0.0, 12.0]);
-ok(String(out2.yaxis.title) === 'Acceleration (g)',
+ok(String(out2.yaxis.title) === 'Acceleration (g)' && !(out2.annotations || []).length,
    'sıfır bandın içindeyken işaret kondu: ' + out2.yaxis.title);
 
 // Negatif kontrol 2: eksende zaten aralık varsa dokunulmaz.
 const out3 = hrmaPlotLayout({ yaxis: { title: 'Thrust (N)', range: [0, 600] } }, y);
-ok(String(out3.yaxis.title) === 'Thrust (N)',
+ok(String(out3.yaxis.title) === 'Thrust (N)' && !(out3.annotations || []).length,
    'kullanıcı aralığı varken işaret kondu: ' + out3.yaxis.title);
 
 // Büyük bantta yüzde tek ondalıkla yazılır (BATES varsayılanı: 6114 -> 8244).
 const out4 = hrmaPlotLayout({ yaxis: { title: 'Thrust (N)' } },
                             [6114.499, 8243.776, 6236.400]);
-ok(String(out4.yaxis.title).indexOf('Δ 25.8%') >= 0,
-   'geniş bant yüzdesi yanlış: ' + out4.yaxis.title);
+ok(JSON.stringify(out4.annotations || []).indexOf('(span 25.8%)') >= 0,
+   'geniş bant yüzdesi yanlış: ' + JSON.stringify(out4.annotations));
 """
     proc = run_node(
         # numTxt/pctTxt (D35 sayi-bicimi) ve hrmaPlotSeparators (D36

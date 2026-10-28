@@ -225,19 +225,32 @@ def test_b3_15_pintle_dali_outer_diameter_uretiyor(advanced_src):
 
 
 def test_b3_15_dis_cap_yuk_tasiyor(istemci):
-    """Sabit sayı atıl değildi: 50 -> 120 mm gövde et kalınlığını değiştirir."""
+    """Sabit sayı atıl değildi: 50 -> 70 mm gövde et kalınlığını değiştirir.
+
+    V301/E1: eski üst değer 120 mm idi; bu gövdenin çözülen kamarası
+    79,8 mm iç çaplıdır ve 120 mm'lik enjektör gövdesi kamaraya SIĞMAZ —
+    uç artık bunu 422 ``pintle_wider_than_chamber`` ile reddediyor
+    (geometrik kapı, kaynaksız eşik yok). Kalemin iddiası (dış çap yük
+    taşır) kamaraya sığan iki değerle aynen ölçülür.
+
+    v3.0.1 port kulvarı: grain dış çapı artık son port çapı olduğu için bu
+    gövdenin kendiliğinden çözülen kamarası ~53 mm'ye indi ve 70 mm'lik gövde
+    yine sığmadı. Kalemin iddiası kamara boyutuna bağlı değildir; kamara iç
+    çapı açıkça 100 mm verilir (kullanıcı kamara çapı korunur, artık yakıt
+    yayımlanır), iki gövde de sığar.
+    """
     sonuc = {}
-    for dc in (50.0, 120.0):
+    for dc in (50.0, 70.0):
         d, y = _post(istemci, '/calculate', {
             'thrust': 1000, 'burn_time': 10, 'of_ratio': 6.0,
             'chamber_pressure': 20.0, 'fuel_type': 'htpb',
             'oxidizer_type': 'n2o', 'injector_type': 'pintle',
             'outer_diameter': dc, 'pintle_diameter': 25.0,
-            'secondary_holes': 'radial'})
+            'secondary_holes': 'radial', 'chamber_diameter_input': 100.0})
         assert d == 200
         sonuc[dc] = ((y or {}).get('injector') or {}).get('body_wall_thickness')
-    assert sonuc[50.0] is not None and sonuc[120.0] is not None
-    assert abs(sonuc[120.0] - sonuc[50.0]) > 1.0, \
+    assert sonuc[50.0] is not None and sonuc[70.0] is not None
+    assert abs(sonuc[70.0] - sonuc[50.0]) > 1.0, \
         'dış çap artık yük taşımıyor — kalemin gerekçesi düştü'
 
 
@@ -297,7 +310,13 @@ def test_b4_16_ikinci_isp_kutusunda_g0_var(formulas_src, istemci):
         # rapor §12).
         'oxidizer_phase': 'gas'})
     m = (y or {}).get('motor') or {}
-    gam, cstar = m['gamma'], m['c_star']
+    # T-ÇAPA-C2 (27 Eki): kutu İDEAL Isp ifadesidir; V301/H-PANEL (74b55500a,
+    # Berke kararı) N2O/HTPB'ye c* verimi 0,89 uyguladı ve ``c_star`` artık
+    # TESLİM edilen c*'tır (ideal × η). İdeal ifade teorik c*'la kurulur
+    # (``c_star_theoretical``, verim uygulanmışsa yayımlanır); ölçüldü:
+    # teslim c*'la 179,47 s (bant dışı) = 0,89 × ideal.
+    gam = m['gamma']
+    cstar = m.get('c_star_theoretical', m['c_star'])
     pe_pc = 1.0 / 20.0
     ideal = (cstar / (9.80665 * math.sqrt(gam))
              * math.sqrt(2 * gam / (gam - 1))

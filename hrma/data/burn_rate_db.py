@@ -182,8 +182,16 @@ def has_law(prop_key: Optional[str]) -> bool:
 def _select_regime(law: dict, p_mpa: float) -> dict:
     """Basınca göre rejim seçer.
 
-    Rejim sınırında alt rejim geçerlidir (p_max dahil değil; son rejimde
-    dahil) — sınır komşuluğundaki süreksizlik deterministik çözülür.
+    Rejim aralıkları yarı açıktır, [p_min, p_max): TAM sınırda
+    (p == bir rejimin p_max'ı == sonrakinin p_min'i) ÜST rejim geçerlidir.
+    Son rejimin p_max'ı ve üstü son rejime düşer. Sınır komşuluğundaki
+    süreksizlik böylece deterministik çözülür; yasanın kendisi orada iki
+    değerlidir (V301/B6 — katı motor çözücüsü bu sınırları genelleştirilmiş
+    denge olarak ele alır, bkz. SolidRocketEngine.
+    _equilibrium_pressure_fallback).
+    (V301/B6 düzeltmesi: bu belge eskiden "sınırda alt rejim geçerlidir"
+    diyordu; kod hep üst rejimi seçiyordu. Davranış değişmedi, belge koda
+    uyduruldu.)
     Tablo aralığı dışında en yakın uç rejim ekstrapole edilir ve çağıran
     tarafça notlanmalıdır (kaynak fitin geçerlilik aralığı dışıdır).
     """

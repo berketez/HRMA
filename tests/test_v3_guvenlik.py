@@ -424,11 +424,15 @@ class TestSG06ArayuzCagrilariAyniKoken:
         ('hrma/static/js/settings_panel.js', "fetch('/api/update/check')"),
         ('hrma/static/js/panels/correlation_panel.js',
          "ENDPOINT = '/api/correlation-report'"),
-        # SG-2 şart turu (Ş1): veri tabanı rozeti, üç sayfa (13 Eki git grep:
-        # advanced.html:5629, liquid.html:6453, solid.html:2638).
-        ('hrma/templates/advanced.html', SG06_DB_GORELI_CAGRI),
-        ('hrma/templates/liquid.html', SG06_DB_GORELI_CAGRI),
-        ('hrma/templates/solid.html', SG06_DB_GORELI_CAGRI),
+        # SG-2 şart turu (Ş1): veri tabanı rozeti üç sayfada (advanced,
+        # liquid, solid) /api/database-status'u çağırıyordu. v3.0.1 K kulvarı
+        # (Ayberk tur 1): rozet HER makinede yanlışlıkla "Offline" dediği ve
+        # hiçbir sayının kaynağı olmadığı için söküldü; üç çağrı yeri de
+        # kalktı. Uç API uyumu için sunucuda durur ve yan etki kapısı
+        # (TestSG06YanEtkiliGet) onu ölçmeye devam eder. Aşağıdaki
+        # ``test_db_durumu_her_cagri_goreli`` artık BOŞ çağıran kümesini
+        # kilitler: yeni bir ön yüz çağrısı listeye (göreli biçimde)
+        # girmeden geçemez.
     ]
 
     @pytest.mark.parametrize('dosya, desen', CAGRI_YERLERI)
@@ -1088,11 +1092,14 @@ _SG05_SARMAL = (r"^(?:\(globalThis\.escapeNoticeText \|\| String\)\("
 
 #: (kimlik, dosya, iğne, işaretlenecek adlar) — sink ifadesi tekildir.
 _SG05_SITELER = [
-    ('L1a', LIQ_HTML, ("'liq.js.connection_failed'", 'error.message'),
+    ('L1a', LIQ_HTML, ("'liq.js.fuel_properties_not_loaded'", 'error.message'),
      ['error']),
-    ('L1b', LIQ_HTML, ("'liq.js.nist_unavailable'", 'error.message'),
+    ('L1b', LIQ_HTML, ("'liq.js.ox_properties_not_loaded'", 'error.message'),
      ['error']),
-    ('L2', LIQ_HTML, re.compile(r"^'Error: ' \+"), ['error']),
+    # v3.0.1 (26 Eki, L-A SV-15): hesap hatası bildirimi artık ret durumuna
+    # göre önek kurar (onEk = 'Girdi sunucu tarafından reddedildi (HTTP …)'
+    # ya da 'Hata'); sunucu metni yine escapeNoticeText'ten geçer.
+    ('L2', LIQ_HTML, re.compile(r"^onEk \+ ': ' \+"), ['error']),
     ('L3', LIQ_HTML, "'liq.msg.error_generating_cad_files'", ['error']),
     ('L4', LIQ_HTML, "'liq.msg.cad_export_failed_prefix', 'CAD export failed: ') +",
      ['error']),
@@ -1135,7 +1142,8 @@ class TestSG05DomIsaret:
         for kimlik, yol, igne, isaretli in _SG05_SITELER:
             (_satir, ifade), = _sg05_sink_ifadesi(yol, igne)
             kalemler.append({'kimlik': kimlik, 'ifade': ifade,
-                             'isaretli': isaretli, 'bag': {'label': "'CAD'"}})
+                             'isaretli': isaretli, 'bag': {'label': "'CAD'",
+                                                           'onEk': "'Error'"}})
         # Katı sayfanın escapeNoticeText'i sıvıdakiyle bayt-aynı mı?
         assert _sg05_fn(SOLID_HTML.read_text(encoding='utf-8'),
                         'escapeNoticeText') == self._fonksiyonlar()[
@@ -1156,8 +1164,9 @@ class TestSG05DomIsaret:
             (_satir, ifade), = _sg05_sink_ifadesi(yol, igne)
             kalemler.append({'kimlik': kimlik, 'ifade': ifade,
                              'isaretli': [], 'bag': {
-                                 ad: f'vekil({json.dumps(duz)})'
-                                 for ad in isaretli}})
+                                 'onEk': "'Error'",
+                                 **{ad: f'vekil({json.dumps(duz)})'
+                                    for ad in isaretli}}})
         sonuc = _sg05_kos(kalemler, self._fonksiyonlar())
         assert all(duz in h for h in sonuc.values()), sonuc
 
@@ -1210,7 +1219,11 @@ class TestSG05PanelSunucuMetni:
 
     @pytest.mark.parametrize('dosya, desen, beklenen', [
         ('panels/structural_panel.js', r'wallSuggestion\.reason\}', 0),
-        ('panels/structural_panel.js', r'\$\{U\.esc\(wallSuggestion\.reason\)\}', 1),
+        # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/DİL-2 571d6506e): gerekçe
+        # görünen cümle (reasonVisible) ve ipucu (reasonTitle) olarak İKİ
+        # yuvada basılır; ikisi de U.esc içinde.
+        ('panels/structural_panel.js',
+         r'\$\{U\.esc\(reason(?:Title|Visible)\(wallSuggestion\.reason\)\)\}', 2),
         ('panels/structural_panel.js', r'\$\{U\.esc\(rec\.reason \|\| \'\'\)\}', 2),
         ('panels/structural_panel.js', r'\$\{String\(rec\.(?:reason|value)', 0),
         ('panels/structural_panel.js', r'\$\{U\.esc\(rec\.value\)\}\$\{U\.esc\(birim\)\}', 1),
@@ -1409,14 +1422,25 @@ class TestSG05SunucuRetMetni:
         assert ("document.getElementById('optimum_of_result').textContent "
                 "= msg;") in adv
 
+    # V3.0.5 (28 Eki, ana model): PANEL-SAYI öneri cümlesini sunucu çeviri
+    # kanalından (srvO) geçirip EN yolunda U.esc ile, TR'de çevrilemezse
+    # duzyaziBlok → U.listBlock (analysis_dock escAttr) ile basar. Sözleşme
+    # aynı: sunucu metni HER yolda kaçışlanır, ham birleştirme yok.
     @pytest.mark.parametrize('desen, beklenen', [
-        (r"\+ U\.esc\(w\.recommendation\) \+", 1),
+        (r"\+ U\.esc\(srvO\(String\(w\.recommendation\)\)\) \+", 1),
         (r"\+ w\.recommendation \+", 0),
+        (r"\+ srvO\(String\(w\.recommendation\)\) \+", 0),
         (r": U\.esc\(String\(v\)\);", 1),
     ])
     def test_besleme_paneli(self, desen, beklenen):
         kaynak = (JS_DIR / 'panels/feed_panel.js').read_text(encoding='utf-8')
         assert len(re.findall(desen, kaynak)) == beklenen
+
+    def test_besleme_paneli_tr_yolu_kacislanir(self):
+        kaynak = (JS_DIR / 'panels/feed_panel.js').read_text(encoding='utf-8')
+        assert 'U.listBlock(baslik, liste, kind)' in kaynak
+        dock = (JS_DIR / 'analysis_dock.js').read_text(encoding='utf-8')
+        assert re.search(r"items\.map\(w => `<li>\$\{escAttr\(warnText\(w\)\)\}</li>`\)", dock)
 
 
 # ===========================================================================

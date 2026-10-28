@@ -160,6 +160,12 @@ _SIVI_YUK = {
     # geçerdi). Çevrim ilan edilince tank gerçekten enjektör beslemesidir,
     # istek 200 döner ve beyan zinciri eskisi gibi ölçülür.
     'engine_cycle': 'pressure_fed',
+    # V301/T-ÇAPA-D: L-A SV-03 (T-ÇAPA-B'den beri) basınç beslemede
+    # ``feed_pressure`` ZORUNLU (yoksa 422 pressure_fed_feed_pressure_not_
+    # supplied; ölçüldü 28 Eki: gereken 38,5 bar + 8 bar pay = 46,5 bar).
+    # Besleme basıncı kanonik alandan 55 bar verilir; ``tank_pressure``
+    # bekçinin konusu olarak (kabul edilen ama okunmayan alan) kalır.
+    'feed_pressure': 55.0,
 }
 
 

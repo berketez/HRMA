@@ -400,7 +400,8 @@ class TestInjectorSingleSource:
         many['injector_design_detail']['ox_circuit']['n_orifices'] = 41
         drawings = MotorCADDesigner()._generate_technical_drawings(many)
         assert drawings['injector']['orifice_count'] == 41
-        assert drawings['injector']['orifice_count_in_mesh'] == 16
+        # V301 CAD-2 kalem 5: mesh sınırı 16 -> 512; 41 delik STL'de de 41.
+        assert drawings['injector']['orifice_count_in_mesh'] == 41
 
     def test_injector_panel_result_wins(self, motor):
         """Kullanıcının enjektör paneli sonucu varsa export onu kullanır."""

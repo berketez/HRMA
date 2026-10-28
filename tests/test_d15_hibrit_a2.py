@@ -244,9 +244,24 @@ class TestP1B106MakullukKapilariKullaniciyaUlasir:
         assert k['value'] == pytest.approx(
             0.30 * k['c_star_theoretical'], rel=1e-9)
 
-    def test_anormal_cstar_of_orani_bir(self):
-        kapilar = self._kapilar(of_ratio=1.0)
-        assert kapilar['c_star_plausibility']['status'] == 'out_of_band'
+    def test_of_orani_bir_cstar_artik_fiziksel(self):
+        """v3.0.1 B7 (21 Eki, ÖNEMLİ, Berke onaylı) — bekçi ÇEVRİLDİ.
+
+        Eski hâli ``test_anormal_cstar_of_orani_bir`` O/F 1'de 'out_of_band'
+        bekliyordu: gaz-yalnız denge orada c* ≈ 941 m/s veriyordu (bant alt
+        ucu 950). O "anormallik" kusurun kendisiydi: gaz karbonca aşırı
+        doymuştu ve katı karbon C(gr) dengede yoktu. B7'den sonra aynı
+        girdide c* 1167,3 m/s (ölçüldü; O/F 0,3–20 taramasının hiçbiri bant
+        dışına düşmüyor). Kapının bant dışı hükmü TESLİM EDİLEN değerde
+        ``test_cstar_bandi_TESLIM_EDILEN_degere_uygulanir`` (η_c* = 0,30)
+        ile sınanmaya devam eder.
+        """
+        k = self._kapilar(of_ratio=1.0)['c_star_plausibility']
+        assert k['status'] == 'pass'
+        assert k['band'][0] < k['value'] < k['band'][1]
+        assert k['value'] > 1100.0, (
+            'O/F 1 c* yine gaz-yalnız dengenin düşük değerine indi '
+            f"({k['value']:.1f} m/s) — C(gr) dengeden düşmüş olabilir")
 
     def test_eta_bandi_disi_yanitta(self):
         kapilar = self._kapilar(eta_c_star=0.30)

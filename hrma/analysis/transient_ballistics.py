@@ -714,20 +714,75 @@ class TransientBallistics:
                     f'this tank temperature ({type(exc).__name__}: '
                     f'{str(exc)[:120]}), so no sensitivity factor is '
                     'published rather than implying the effect is zero.')
+            # V301/PANEL (C-7, Grafik G1) — BEYAN ÖLÇÜLEN DAVRANIŞLA AYNI.
+            # ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/panel/tank_rozeti_once.json,
+            # örnek N2O/HTPB, regüleli): tank 293,15 → 250 K toplam impulsu
+            # 29 847,26 → 29 849,05 N·s (+%0,0060) değiştiriyor ve eğri
+            # md5'i farklı; blok ise "used_by_this_model: false … bit-
+            # identical" diyordu. Kök: N2O'da motor bu sıcaklığı GİRİŞ
+            # DURUMU olarak yakar (``_oxidizer_inlet_request`` → yanma
+            # dengesine giren doymuş sıvı entalpisi; yanıtta
+            # ``oxidizer_inlet_state``). Besleme yine sürülmez (ṁ_ox
+            # verilir); doluluk oranı hiçbir sayıyı değiştirmez (aynı
+            # ölçüm: 0,85 ⟷ 0,60 bit-aynı) ve LOX'ta giriş durumu sabit
+            # referanstır (85 ⟷ 95 K bit-aynı). Hüküm motorun KENDİ giriş
+            # isteğinden okunur, varsayılmaz.
+            _ox = str(getattr(engine, 'oxidizer_type', None) or 'n2o').lower()
+            _giris_T = None
+            if _ox == 'n2o' and hasattr(engine, '_oxidizer_inlet_request'):
+                try:
+                    _giris_T = float(engine._oxidizer_inlet_request()[0])
+                except Exception:
+                    _giris_T = None
+            _giris_olarak = (_giris_T is not None and abs(
+                _giris_T - float(tank_temperature)) <= 1e-9 * max(
+                    1.0, abs(float(tank_temperature))))
+            if _giris_olarak:
+                _kullanim = {
+                    'used_by_this_model': True,
+                    'used_as': 'motor_oxidizer_inlet_state',
+                    'drives_feed': False,
+                    'liquid_fill_fraction_used': False,
+                    'reason': (
+                        "In feed_mode='regulated' the oxidizer mass flow is "
+                        'PRESCRIBED at its design value, so the tank state '
+                        'does not drive the feed (no tank pressure, fill or '
+                        'blowdown is solved) and the fill fraction changes '
+                        'no published number. The tank temperature IS used: '
+                        'the motor burns N2O at this temperature as its '
+                        'inlet state (oxidizer_inlet_state: the saturated-'
+                        'liquid enthalpy entering the chamber equilibrium), '
+                        'so the chamber solution and every curve derived '
+                        'from it move slightly with it. Use '
+                        "feed_mode='blowdown' to let the tank state drive "
+                        'the flow.'),
+                }
+            else:
+                _kullanim = {
+                    'used_by_this_model': False,
+                    'used_as': None,
+                    'drives_feed': False,
+                    'liquid_fill_fraction_used': False,
+                    'reason': (
+                        "In feed_mode='regulated' the oxidizer mass flow is "
+                        'PRESCRIBED at its design value, so no tank state '
+                        '(temperature, fill fraction, liquid density, '
+                        'vapour pressure) enters the solution'
+                        + (' and this oxidizer burns at a fixed reference '
+                           'inlet state' if _ox != 'n2o' else
+                           ' (the motor was built with a different inlet '
+                           'temperature, %s K)' % (
+                               'unknown' if _giris_T is None
+                               else '%.2f' % _giris_T))
+                        + '. The tank temperature you supplied was accepted '
+                          'and is echoed here, but it changes no published '
+                          "number. Use feed_mode='blowdown' to let the tank "
+                          'state drive the flow.'),
+                }
             self._tank_state_role = {
                 'tank_temperature_K_received': float(tank_temperature),
                 'liquid_fill_fraction_received': float(liquid_fill_fraction),
-                'used_by_this_model': False,
-                'reason': (
-                    "In feed_mode='regulated' the oxidizer mass flow is "
-                    'PRESCRIBED at its design value, so no tank state '
-                    '(temperature, fill fraction, liquid density, vapour '
-                    'pressure) enters the solution. The tank temperature you '
-                    'supplied was accepted and is echoed here, but it '
-                    'changes NO published number: the response is '
-                    'bit-identical for every accepted tank temperature. Use '
-                    "feed_mode='blowdown' to let the tank state drive the "
-                    'flow.'),
+                **_kullanim,
                 'not_modelled': (
                     'A real pressure regulator holds the ullage PRESSURE, '
                     'not the propellant density. The injector flow '
@@ -1013,6 +1068,80 @@ class TransientBallistics:
 
     # ---------------- ana çözüm ----------------
 
+    def _blowdown_kapanisi(self, D_port, A_port, N_port, At, Pc_tahmin):
+        """Blowdown adımında Pc ↔ ṁ_ox yarı-kararlı kapanışının KÖKÜ.
+
+        V301/H-PANEL (NK-9 / NK-50). Denklem:
+
+            g(Pc) = Pc − (ṁ_ox(Pc) + ṁ_f(ṁ_ox)) · c*(O/F) / (C_D·A_t),
+            ṁ_ox(Pc) = K·√(2·ρ_l(T_tank)·(P_tank − Pc))   (SPI)
+
+        g, Pc'de kesin artandır: Pc büyüdükçe ΔP küçülür, ṁ_ox ve onunla
+        ṁ_f = f(G_ox) küçülür, Pc_yeni küçülür. g(P_tank) = P_tank > 0
+        (ΔP = 0 → akış yok → Pc_yeni = 0) ve g(0⁺) < 0 olduğu için
+        (0, P_tank) aralığında TEK kök vardır. Eski 6 turluk sabit-nokta
+        döngüsü, ΔP küçüldükçe |dPc_yeni/dPc| > 1 olduğundan ıraksıyor ve
+        birbirini tutmayan (Pc, ṁ_ox) çifti yayımlıyordu — tank basıncı
+        düşerken itki/Pc/ṁ_ox'un yükselmesinin kökü buydu.
+
+        Yöntem: önceki adımın Pc'si başlangıç tahminidir; kök ondan köşeye
+        alınır (gerekirse alt uç yarılanarak) ve Brent (scipy.optimize.
+        brentq, xtol 1 Pa) ile çözülür. Arama sırasında denenen O/F
+        değerleri motorun "katedilen O/F aralığı" tanısını (A9) GENİŞLETMEZ:
+        tanı yalnız çözülen O/F'yi kaydeder.
+
+        Döner: (Pc_pa, ṁ_ox, ṁ_f, O/F, ṙ, c*) — aynı çözümden, tutarlı.
+        """
+        from scipy.optimize import brentq
+
+        e = self.e
+        P_tank = float(self.tank.pressure)
+        rho_l = self.tank.props.rho_l(self.tank.T)
+        cd_at = self._cd_nozzle * At
+
+        def akis(Pc):
+            dP = P_tank - Pc
+            if dP <= 0.0:
+                return 0.0, 0.0, 0.0, 0.0, None
+            mox = self._K_inj * np.sqrt(2.0 * rho_l * dP)
+            reg = RegressionAnalyzer.regression_rate(
+                e.a, e.n, mox / A_port, rho_f=e.rho_f,
+                port_diameter=D_port, grain_length=e.L_grain,
+                flux_mode=e.flux_mode)
+            r = reg['r_dot']
+            mf = fuel_mass_flow_kg_s(e.rho_f, D_port, e.L_grain, r,
+                                     port_count=N_port)
+            of = mox / max(mf, 1e-9)
+            cs, _ = e._instantaneous_performance(of)
+            return mox, mf, of, r, cs
+
+        def g(Pc):
+            mox, mf, _of, _r, cs = akis(Pc)
+            if mox <= 0.0:
+                return Pc
+            return Pc - (mox + mf) * cs / cd_at
+
+        if P_tank <= 0.0:
+            return Pc_tahmin, 0.0, 0.0, 0.0, 0.0, None
+        of_min0 = getattr(e, '_perf_of_min', None)
+        of_max0 = getattr(e, '_perf_of_max', None)
+        try:
+            ust = P_tank
+            alt = min(max(float(Pc_tahmin), 1.0), P_tank * (1.0 - 1e-9))
+            if g(alt) >= 0.0:
+                ust = alt
+                while alt > 1.0 and g(alt) >= 0.0:
+                    alt *= 0.5
+            Pc = brentq(g, alt, ust, xtol=1.0, maxiter=200)
+        finally:
+            # Arama noktaları A9 tanısına girmez (yukarıdaki künye).
+            if of_min0 is not None:
+                e._perf_of_min = of_min0
+            if of_max0 is not None:
+                e._perf_of_max = of_max0
+        mox, mf, of, r, cs = akis(Pc)
+        return Pc, mox, mf, of, r, cs
+
     def solve(self):
         """Geçici iç balistik çözümünü koşar. **TEK KULLANIMLIKTIR.**
 
@@ -1056,7 +1185,7 @@ class TransientBallistics:
         e = self.e
         dt = self.dt
         D_port = float(e.D_port_initial)
-        D_max = float(getattr(e, 'D_ch', D_port * 10)) * 0.8  # web sınırı
+        _web = web_limit(e)   # web sınırı tane zarfından (V301/A1)
         # ÖH D23 / OH-D21-08 — PORT SAYISI. Geçici seri motorun port
         # sayısını hiç taşımıyordu: yanma çevresi ve port alanı TEK portun
         # değeriydi, oysa motorun kendi tanımı N portludur
@@ -1065,9 +1194,8 @@ class TransientBallistics:
         # 0,18373 kg/s ⟷ geçici seri t=0 0,07729 kg/s = 2,3772×. Tek portlu
         # motorda (varsayılan) N = 1 ve aritmetik BİT-ÖZDEŞTİR.
         N_port = int(getattr(e, 'port_count', 1) or 1)
-        fuel_available = float(getattr(e, 'm_fuel', None) or
-                               N_port * e.rho_f * np.pi / 4.0
-                               * (D_max ** 2 - D_port ** 2) * e.L_grain)
+        D_max = _web['port_diameter_m']
+        fuel_available = _web['fuel_available_kg']
 
         # Boğaz durumu (Dalga 3): erozyon kapalıyken At tasarım değerinde
         # SABİT kalır (eski davranışla bit-özdeş aritmetik); açıkken her
@@ -1103,17 +1231,23 @@ class TransientBallistics:
             A_port = N_port * np.pi * (D_port / 2.0) ** 2
 
             # --- besleme + kamara yarı-kararlı kapanışı ---
-            # Pc ↔ mdot_ox (blowdown'da ΔP üzerinden) sabit-nokta iterasyonu
+            # V301/H-PANEL (NK-9/NK-50): blowdown'da Pc ↔ ṁ_ox kapanışı
+            # KÖKLÜ (köşeli) çözülür, sabit-nokta iterasyonuyla değil.
+            # ÖLÇÜLDÜ (örnek 3 kN N2O/HTPB, taban 52165c557): son ~0,5 s'de
+            # eski 6 turluk Picard döngüsü YAKINSAMIYORDU — ΔP küçüldükçe
+            # Pc_yeni(Pc) eşlemesinin eğimi |dPc_yeni/dPc| 1'i aşıyor ve
+            # döngü salınıp ıraksıyor; yayımlanan (Pc, ṁ_ox) çifti birbirini
+            # tutmuyordu (t=9,30 s: ṁ_ox 1,1835 kg/s, aynı Pc'de SPI
+            # 0,4164 kg/s). Sonuç: tank basıncı düşerken Pc, ṁ_ox ve itki
+            # YUKARI sıçrıyordu (3000 → 3124 N). Kök ``_blowdown_kapanisi``
+            # künyesinde. Regüleli kip DEĞİŞMEDİ (aşağıdaki döngü; ṁ_ox
+            # sabit olduğu için Pc_yeni Pc'den bağımsızdır) — bit-aynı.
             mdot_ox = float(e.mdot_ox)
-            for _ in range(6):
-                if self.feed_mode == 'blowdown':
-                    dP = self.tank.pressure - Pc_pa
-                    if dP <= 0:
-                        mdot_ox = 0.0
-                        break
-                    rho_l = self.tank.props.rho_l(self.tank.T)
-                    mdot_ox = self._K_inj * np.sqrt(2.0 * rho_l * dP)
-
+            if self.feed_mode == 'blowdown':
+                (Pc_pa, mdot_ox, mdot_f, of_inst, r_dot,
+                 cstar_inst) = self._blowdown_kapanisi(
+                    D_port, A_port, N_port, At, Pc_pa)
+            for _ in range(6 if self.feed_mode != 'blowdown' else 0):
                 G_ox = mdot_ox / A_port
                 reg = RegressionAnalyzer.regression_rate(
                     e.a, e.n, G_ox, rho_f=e.rho_f, port_diameter=D_port,
@@ -1443,3 +1577,90 @@ class TransientBallistics:
                                if len(t_arr) else 0.0),
             'warnings': warnings_list,
         }
+
+
+# ---------------------------------------------------------------------------
+# WEB SINIRI (v3.0.1, V301/A1) — yürüyüşün port üst sınırı tane zarfından
+# ---------------------------------------------------------------------------
+# ESKİ KURAL (kaynaksız): ``D_max = 0,8·D_ch``. v3.0.1 tane zarfıyla (kulvar
+# P) tek portlu otomatik boyutta D_ch = D_port_son oldu; 0,8 katsayısı geçici
+# yürüyüşü son port çapının %80'inde durduruyordu. ÖLÇÜLDÜ
+# (docs/scofield/raw/OH/V301/makale1/A1/once.json, taban a367de3d2; 1 kN /
+# 10 s / 20 bar / HTPB-N2O, N = 1): danışma blowdown eğrisi O/F 2,5'te
+# 2,75 s'de, O/F 7,5'te 2,70 s'de ``web_exhausted`` ile bitiyordu (tasarım
+# yanması 10 s), port 43,01 mm'de (= 0,8 × 53,77) duruyor, tankta 3,11 kg
+# N2O kalıyordu; /api/transient-analysis düzenlenmiş koşusu 2,675 s'de aynı
+# biçimde bitiyordu. N = 4'te tersine sınır 0,8·k(4)·D_son ≈ 1,93·D_son idi:
+# tek halka yerleşiminde portlar D_son'da birbirine değer, ötesi model dışı.
+#
+# YENİ KURAL (ana model kararı): sınır tane zarfının TEK tanımından okunur —
+# ``max_port_diameter_in_envelope_m(D_ch, N, t_artık)`` (hybrid_rocket_engine;
+# burada yeniden yazılmaz). Otomatik boyutta bu tam olarak son port çapıdır;
+# kullanıcı kamarasında N = 1 için D_ch − 2t, N >= 2 için zarfın kabul ettiği
+# en büyük halka portu. Yakıt bütçesi aynı sınırdan:
+# N·ρ_f·π/4·(D_web² − D_ilk²)·L_grain (``m_fuel`` verilmişse önceliklidir).
+# ``D_ch`` taşımayan nesnelerde (ördek tipli taklitler) eski sayısal değer
+# BİT-AYNI kalır: (10·D_ilk)·0,8.
+#
+# Yer: işlev modülün SONUNDADIR, çünkü formal/registry.json bu dosyada 890.
+# satıra (``brentq`` çapası) altı Lean bağı tutar; sınıfın önüne eklemek o
+# satırı kaydırırdı. ``solve()`` işlevi çalışma anında çağırır.
+
+
+def _web_sayisi(deger, ad, kapi, birim):
+    """Web sınırı girdisi için değer kapısı (dize de reddedilir).
+
+    ``_input_guards`` kapıları sayı-benzeri dizeyi BİLEREK kabul eder (o
+    modülün künyesi); bir motor özniteliği ise dize taşımaz — taşıyorsa
+    nesne bozuktur ve sınır uydurulmaz.
+    """
+    if isinstance(deger, (str, bytes)):
+        raise ValueError(
+            f'{ad} must be a number, not text; got {str(deger)[:40]!r}. '
+            'The transient web limit is not computed from a text value.')
+    return kapi(deger, ad, birim)
+
+
+def web_limit(engine):
+    """Geçici yürüyüşün web sınırı: port üst çapı ve yanabilir yakıt.
+
+    Döner: ``{'port_diameter_m', 'fuel_available_kg', 'source'}``.
+    ``source`` ``'grain_envelope'`` (motor ``D_ch`` taşıyor) ya da
+    ``'legacy_no_chamber_diameter'`` (taklit nesne; eski sayı bit-aynı).
+
+    Fail-closed: ``D_ch`` / ``residual_web`` / ``m_fuel`` NaN, inf, bool,
+    dize ya da işaretçe geçersizse ``ValueError``. Eskiden NaN sınır
+    ``D >= NaN`` karşılaştırmasını hep False yapıp web sınırını SESSİZCE
+    kapatıyordu.
+    """
+    from hrma.analysis._input_guards import (
+        require_non_negative, require_positive)
+    D_port = float(engine.D_port_initial)
+    N_port = int(getattr(engine, 'port_count', 1) or 1)
+    D_ch_ham = getattr(engine, 'D_ch', None)
+    if D_ch_ham is None:
+        D_max = float(D_port * 10) * 0.8
+        kaynak = 'legacy_no_chamber_diameter'
+    else:
+        # İthal GEÇ yapılır (bu modüldeki öteki hibrit ithalleriyle aynı
+        # desen: modül düzeyinde döngüsel import riski).
+        from hrma.engines.hybrid_rocket_engine import (
+            max_port_diameter_in_envelope_m)
+        D_ch = _web_sayisi(D_ch_ham, 'D_ch', require_positive, '[m]')
+        t_artik_ham = getattr(engine, 'residual_web', None)
+        t_artik = (0.0 if t_artik_ham is None else _web_sayisi(
+            t_artik_ham, 'residual_web', require_non_negative, '[m]'))
+        D_max = float(max_port_diameter_in_envelope_m(D_ch, N_port, t_artik))
+        kaynak = 'grain_envelope'
+    m_fuel = getattr(engine, 'm_fuel', None)
+    if m_fuel:
+        # ``m_fuel`` verilmişse ÖNCELİKLİDİR (eski sözleşme; 0/None ->
+        # geometri). Doğruluk değeri NaN/inf/bool/dize olan kütle sınırı
+        # sessizce kapatırdı: kapıdan geçer.
+        fuel_available = _web_sayisi(m_fuel, 'm_fuel', require_positive,
+                                     '[kg]')
+    else:
+        fuel_available = float(N_port * engine.rho_f * np.pi / 4.0
+                               * (D_max ** 2 - D_port ** 2) * engine.L_grain)
+    return {'port_diameter_m': D_max, 'fuel_available_kg': fuel_available,
+            'source': kaynak}

@@ -174,6 +174,16 @@ def _sivi_govde(cevrim):
     alanlar = json.loads(_oku(ORNEK_SIVI))['inputs']['fields']
     govde = {k: v for k, v in alanlar.items() if v not in (None, '')}
     govde['engine_cycle'] = cevrim
+    if cevrim == 'pressure_fed':
+        # V301/T-ÇAPA-D: örnek sıvı (ÖRNEK 5fa435893) gaz jeneratörü
+        # çevrimi için feed_pressure = 75 bar taşıyor; basınç beslemede uç
+        # gereken tank basıncını (yakıt tarafı 76,3 bar) adıyla istiyor
+        # (422 pressure_fed_tank_below_required, ölçüldü 28 Eki). Vaka
+        # geçerli besleme basıncıyla kurulur: sayfanın şablon varsayılanı
+        # (tek kaynak; tests/test_d32_ihracat_a1.py Z5_SIVI ile aynı yol).
+        from tests.support import form_defaults
+        govde['feed_pressure'] = form_defaults.sayisal_varsayilanlar(
+            'liquid')['feed_pressure']
     return govde
 
 
@@ -193,8 +203,14 @@ class TestCevrimFormu:
         betik += 'process.stdout.write(JSON.stringify(o));\n'
         o = _node(betik)
         assert sorted(o['pressure_fed']) == sorted(TURBIN_ALANLARI)
-        for c in FORM_CEVRIM_SECENEKLERI[1:] + ('bilinmeyen',):
-            assert o[c] == [], c
+        # V301/L-D (L-A DEVİR 2) — BEKLENTİ DEĞİŞTİ: turbopompalı çevrimde
+        # sunucu ``feed_pressure``ı okumuyor ve ``inputs_not_used`` ile
+        # beyan ediyor (L-A SV-10, FEED_PRESSURE_UNUSED_REASON); form artık
+        # alanı o beş çevrimde gizler ve göndermez. Tanınmayan çevrimde
+        # hiçbir alan gizlenmez.
+        for c in FORM_CEVRIM_SECENEKLERI[1:]:
+            assert o[c] == ['feed_pressure'], c
+        assert o['bilinmeyen'] == []
 
     @node_gerekli
     @pytest.mark.parametrize('cevrim,gizli', [('pressure_fed', True),
@@ -208,6 +224,14 @@ class TestCevrimFormu:
             _blok(html, 'const LIQ_CYCLE_FIELDS_WATCHED'),
             _fn(html, 'liqCycleUnreadFields'),
             _fn(html, 'liqOptNum'),
+            # V3.0.5 T-ÇAPA-C1 (altyapı): V301/L-C (8ee59c845) toplayıcıya
+            # enjektör tipinin kanon adı ve pintle/pintle-dışı alan yükünü
+            # ekledi; ikiz bu gerçek tanımları da taşır (vekil yok).
+            _blok(html, 'const LIQ_INJECTOR_LEGACY'),
+            _fn(html, 'liqInjectorCanonical'),
+            _blok(html, 'const LIQ_PINTLE_FIELDS'),
+            _blok(html, 'const LIQ_NOT_PINTLE_FIELDS'),
+            _fn(html, 'liqInjectorFieldPayload'),
             _fn(html, 'collectAllParameters'),
             _fn(html, 'syncLiquidCycleFields'),
         ])
@@ -264,8 +288,13 @@ process.stdout.write(JSON.stringify({ anahtarlar: Object.keys(govde), gorunum: g
             else:
                 assert alan in o['anahtarlar'], alan
                 assert o['gorunum'][alan] == '', alan
-        # feed_pressure HİÇBİR çevrimde düşmez; notun anlamı çevrime göre.
-        assert 'feed_pressure' in o['anahtarlar']
+        # V301/L-D (L-A DEVİR 2) — BEKLENTİ DEĞİŞTİ: feed_pressure yalnız
+        # basınç beslemede gövdeye girer (tank basıncı); turbopompalı
+        # çevrimde sunucu onu okumuyor, form gizler ve göndermez.
+        if cevrim == 'pressure_fed':
+            assert 'feed_pressure' in o['anahtarlar']
+        else:
+            assert 'feed_pressure' not in o['anahtarlar']
         assert o['not_anahtari'] == ('liq.ui.feed_pressure_note_pressure_fed'
                                      if cevrim == 'pressure_fed'
                                      else 'liq.ui.feed_pressure_note_turbopump')
@@ -344,6 +373,12 @@ process.stdout.write(JSON.stringify({ anahtarlar: Object.keys(govde), gorunum: g
             _fn(html, 'liqCycleUnreadFields'),
             _fn(html, 'syncLiquidCycleFields'),
             atama.group(0).strip(),
+            # V3.0.5 T-ÇAPA-C1 (altyapı): V301/L-C (8ee59c845) sıfırlamaya
+            # pintle alanlarını boşaltma + enjektör eşitlemesini ekledi.
+            _blok(html, 'const LIQ_INJECTOR_LEGACY'),
+            _fn(html, 'liqInjectorCanonical'),
+            _blok(html, 'const LIQ_PINTLE_FIELDS'),
+            _fn(html, 'syncLiquidInjectorFields'),
             _fn(html, 'resetForm'),
         ])
         betik = r"""
@@ -367,7 +402,7 @@ function oge(id) {
   }
   return ogeler[id];
 }
-global.document = { getElementById: oge };
+global.document = { getElementById: oge, querySelectorAll() { return []; } };
 function T(k, f) { return f; }
 function updatePropellantPreview() {}
 %(kod)s
@@ -1048,13 +1083,20 @@ process.stdout.write(JSON.stringify({ fields: w.params.fields, panel: panel, sat
 
     @node_gerekli
     def test_tr_panelde_etiket_anahtar_bicimi(self):
+        # V301/DİL-2 (yayın kapısı 7, Berke 26 Eki: TR ekranda ham anahtar
+        # yok; DİL terim kararı 1: makine adı title/data-field'da). ÖNCE bu
+        # iddia 'Etiket (anahtar)' biçimini kilitliyordu (OH-D37-S1); ekran
+        # ölçümünde (dil-2/once.json liquid#warningsList) parantezdeki
+        # anahtar ham anahtar sayılıyordu. Artık tanınan alan YALNIZ etiketle
+        # basılır; makine adı uyarı kaydının ham `fields` parametresinde ve
+        # durum satırının title'ında kalır.
         o = self._kos('tr')
         for k in ('burn_time', 'propellant_mass'):
-            assert '(%s)' % k in o['panel']
-        # Etiketsiz ham anahtar tek başına 0: parantez içindekiler çıkarılınca
-        # tanınan anahtar metinde kalmaz; tanınmayan ad sözlük cümlesiyle gelir.
-        kalan = re.sub(r'\([a-z_]+\)', '', o['panel'])
-        assert 'burn_time' not in kalan and 'propellant_mass' not in kalan
+            assert '(%s)' % k not in o['panel'], o['panel']
+            assert k not in o['panel'], o['panel']
+        for etk in (_sozluk_degeri('liq.js.burn_time', 'tr').rstrip(': '),
+                    _sozluk_degeri('liq.js.propellant_mass', 'tr').rstrip(': ')):
+            assert etk in o['panel'], (etk, o['panel'])
         onek = _sozluk_degeri('liq.js.eng_gate_unlabelled_field', 'tr').split('{field}')[0]
         assert onek + 'zz_unlabelled' in o['panel']
         # Makine metni (`fields`) Excel/sözleşme için ham kalır.

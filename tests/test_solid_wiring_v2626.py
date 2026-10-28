@@ -54,7 +54,21 @@ def client():
 
 def run(client, base_payload, **degisim):
     payload = dict(base_payload)
-    payload.update(degisim)
+    # V301/K-C2 (NK-70): taban yük örnek KNDX projesidir (``burn_rate_preset``
+    # = 'kndx'). Sayfa yakıt kimliği değişince ön ayarı o yakıtınkine ya da
+    # 'custom'a alır; uç artık başka yakıtın rejim tablosuyla çözmez (422
+    # ``burn_rate_law_propellant_mismatch``). Testler sayfanın yaptığını yapar.
+    if 'propellant_type' in degisim and 'burn_rate_preset' not in degisim:
+        from hrma.data import burn_rate_db
+        yeni = str(degisim['propellant_type'] or '').strip().lower()
+        if yeni and yeni != str(payload.get('burn_rate_preset', '')).lower():
+            payload['burn_rate_preset'] = (yeni if burn_rate_db.has_law(yeni)
+                                           else 'custom')
+    for anahtar, deger in degisim.items():
+        if deger is None:
+            payload.pop(anahtar, None)   # alan gövdede YOK (kullanıcı vermedi)
+        else:
+            payload[anahtar] = deger
     resp = client.post('/calculate_solid', json=payload, headers=LOCAL_HOST)
     assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
     body = resp.get_json()
@@ -100,7 +114,12 @@ class TestPropellantIdentityReachesSolver:
         """Sayfada yakıt kimliği alanı yok: ön ayar anahtarı kimliği taşır."""
         payload = dict(base_payload)
         payload.pop('propellant_type', None)
-        body = run(client, payload, burn_rate_preset='knsu')
+        # V301/K-C2: örnek projenin adı ('KNDX - ...') ön ayarla (knsu)
+        # çelişirse uç 422 propellant_identity_conflict verir (karışık kayıt
+        # yok, bekçi test_v301_kati_yakit_kimligi); ön ayar yolunu ölçmek için
+        # ad katalogla eşleşmeyen bir etikettir.
+        body = run(client, payload, burn_rate_preset='knsu',
+                   propellant_name='Benim karışımım')
         assert body['propellant_type'] == 'knsu'
 
     def test_identity_is_derived_from_the_free_text_name(
@@ -253,7 +272,12 @@ class TestNozzlePanel:
         path = 'cad_design.nozzle_design.performance.thrust_coefficient'
         low = leaf(run(client, base_payload, chamber_pressure=30), path)
         high = leaf(run(client, base_payload, chamber_pressure=90), path)
-        altitude = leaf(run(client, base_payload, test_altitude=10000), path)
+        # V301/T-ÇAPA-D: örnek katı (ÖRNEK 5fa435893) sayfanın gövdesini
+        # taşıyor, içinde atm_pressure = 101,325 kPa; irtifa 10 km ile o basınç
+        # çelişir ve uç iki kanalı ADIYLA reddeder (ambient_pressure_channel_
+        # conflict, 422). İrtifa vakasında açık basınç alanı gövdeden çıkar.
+        altitude = leaf(run(client, base_payload, test_altitude=10000,
+                            atm_pressure=None), path)
         assert low != high != altitude
         assert low != pytest.approx(1.65), 'eski sabit geri geldi'
 
@@ -397,8 +421,11 @@ def test_final_port_factor_comes_from_the_regression_series(client,
     path = ('detailed_analysis.grain_regression_analysis.'
             'erosive_burning_effects')
     bates = leaf(run(client, base_payload), path)
+    # V301/K-B (K-A DEVİR 8): 18 mm, örnek tanede (web 21,5 mm) 0,8·web =
+    # 17,2 mm sınırını aşıyor; eskiden SESSİZCE 17,2'ye kırpılıyordu, artık
+    # 422. Test kırpmayı değil port çarpanını ölçer: sınırın içinde 15 mm.
     star = leaf(run(client, base_payload, grain_type='star', star_points=6,
-                    star_radius=18), path)
+                    star_radius=15), path)
     assert bates['port_diameter_factor_final'] != \
         star['port_diameter_factor_final']
     assert 'solver regression series' in \
@@ -460,12 +487,18 @@ class TestGrainOuterDiameter:
 
     def test_chamber_diameter_is_the_case_bore(self, client, base_payload):
         """Etiketi 'kasa iç çapı': kasa zincirini o belirlemeli."""
+        # V301/T-ÇAPA-D: K-A kasa kapısı (1b71ef5a3) D_kasa ≥ D_tane +
+        # 2·(astar + yalıtım) ister; örnek katı astar 2 + yalıtım 3 mm taşıyor
+        # (en küçük kasa 85 mm, 80 mm adıyla 422). Dar kasa gövdenin kendi
+        # yığınından + 1 mm.
+        dar = 75.0 + 2.0 * (float(base_payload['liner_thickness'])
+                            + float(base_payload['insulation_thickness'])) + 1.0
         narrow = run(client, base_payload, outer_diameter=75,
-                     chamber_diameter=80)
+                     chamber_diameter=dar)
         wide = run(client, base_payload, outer_diameter=75,
                    chamber_diameter=95)
         assert leaf(narrow, 'cad_design.case_design.inner_diameter') == \
-            pytest.approx(80.0)
+            pytest.approx(dar)
         assert leaf(wide, 'cad_design.case_design.inner_diameter') == \
             pytest.approx(95.0)
         # Grain aynı kaldığı için yakıt kütlesi DEĞİŞMEMELİ.
@@ -477,14 +510,28 @@ class TestGrainOuterDiameter:
 
     def test_case_bore_smaller_than_the_grain_is_reported(self, client,
                                                           base_payload):
-        body = run(client, base_payload, outer_diameter=75,
-                   chamber_diameter=70, insulation_thickness=3)
-        codes = {w.get('code') for w in body.get('warnings', [])
-                 if isinstance(w, dict)}
-        assert 'warn.solid.case_bore_too_small' in codes
-        # Geometrik alt sınır uygulanmalı: grain + 2 x yalıtım.
-        assert leaf(body, 'cad_design.case_design.inner_diameter') == \
-            pytest.approx(81.0)
+        # V301/K-A (KT-01; ana model kararı 1) — TERS KAPIYA ÇEVRİLDİ. Bu
+        # düğüm "uyar + kasayı sessizce geometrik en küçüğe büyüt" yolunu
+        # KİLİTLİYORDU (70 mm beyan -> 81 mm kasa, 200). Kasa beyanı artık
+        # büyütülmez: 422 grain_does_not_fit_case, gereken en küçük çapla.
+        # Kural astarı da sayar (KT-03): 75 + 2·(2 + 3) = 85 mm.
+        payload = dict(base_payload, outer_diameter=75, chamber_diameter=70,
+                       insulation_thickness=3)
+        resp = client.post('/calculate_solid', json=payload,
+                           headers=LOCAL_HOST)
+        assert resp.status_code == 422, resp.get_data(as_text=True)[:400]
+        body = resp.get_json()
+        assert body['error_code'] == 'grain_does_not_fit_case'
+        kunye = body['invalid_fields'][0]
+        assert kunye['field'] == 'chamber_diameter'
+        assert kunye['submitted'] == pytest.approx(70.0)
+        assert kunye['required_min'] == pytest.approx(85.0)
+        # Önerilen en küçük çap kapıdan GEÇER (hibrit KARAR 3 deseni).
+        tamam = run(client, base_payload, outer_diameter=75,
+                    chamber_diameter=kunye['required_min'],
+                    insulation_thickness=3)
+        assert leaf(tamam, 'cad_design.case_design.inner_diameter') == \
+            pytest.approx(85.0)
 
     def test_field_is_no_longer_declared_unwired(self, client, base_payload):
         declared = []

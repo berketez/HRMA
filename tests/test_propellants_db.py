@@ -18,6 +18,16 @@ import math
 
 import pytest
 
+
+@pytest.fixture
+def cea_kapali(monkeypatch):
+    """V301/N-CEA-2: NASA CEA kapalı — katı motor katalog (tek basınçlı)
+    termokimyasına BEYANLA döner. Bu dosyadaki kayıt/katalog yolu bekçileri
+    öncüllerini (motor termokimyası = katalog kaydı) bu yolda korur; CEA
+    yolu tests/test_v301_n_cea2.py'de."""
+    from hrma.engines import cea_bridge
+    monkeypatch.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
+
 from hrma.data import burn_rate_db
 from hrma.data.propellants_db import (
     PROPELLANTS, ALIASES, REQUIRED_FIELDS, VALID_FAMILIES,
@@ -74,7 +84,11 @@ class TestSchema:
     def test_physical_bands(self):
         for key, rec in PROPELLANTS.items():
             assert 500 <= rec['density'] <= 3000, key
-            assert 800 <= rec['c_star'] <= 2500, key
+            # V301/N-CEA-2: c* bandı katalog doğrulayıcısının demeti
+            # (alt sınır 700; kara barutun CEA c*'ı ~787 m/s).
+            from hrma.data.propellants_db import PROPELLANT_C_STAR_RANGE_M_S
+            lo, hi = PROPELLANT_C_STAR_RANGE_M_S
+            assert lo <= rec['c_star'] <= hi, key
             assert 1.05 <= rec['gamma'] <= 1.5, key
             assert 1000 <= rec['flame_temperature'] <= 4500, key
             assert 10 <= rec['molecular_weight'] <= 80, key
@@ -193,8 +207,13 @@ class TestBurnRateConsistency:
             burn_rate_mps('apcp', 0.0)
 
 
+@pytest.mark.usefixtures('cea_kapali')
 class TestEngineConsistency:
-    """Katalog, motorun referans setiyle ÇELİŞMEZ."""
+    """Katalog, motorun referans setiyle ÇELİŞMEZ.
+
+    V301/N-CEA-2: bileşimi bilinen itici CEA yolunda motorun Pc'sinde CEA
+    değerini alır; bu sınıf motor tablosunun KATALOG yedeğiyle tek kaynaklı
+    olduğunu denetler, bu yüzden CEA kapalı koşar (cea_kapali)."""
 
     @staticmethod
     def _engine_table():

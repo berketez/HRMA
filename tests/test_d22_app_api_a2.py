@@ -84,9 +84,18 @@ class TestP16B2_05CozulemeyenHesap422:
             assert alan in j, f'{alan} rette kayboldu'
 
     def test_yakinsayan_kosum_200_kaldi(self, client):
-        """Sağlıklı yol kıpırdamadı (n = 0,35)."""
+        """Sağlıklı yol kıpırdamadı (n = 0,35).
+
+        V301/K-D: aynı gövde (a = 0,005, 5000 N / 3 s) port ⟷ boğaz kısıtlı
+        BATES zarfının DIŞINDA: ölçüldü, en küçük itki 5112,12 N, en uzun
+        süre 2,967 s. Eski akışta boyutlandırıcı çekirdeği 32,92 mm'ye
+        kuruyor ve motorun kendi port kapısından 422 alıyordu (kapı oranı
+        0,955). Sağlıklı karşılık zarfın içindeki 2,5 s (ölçülen kapı oranı
+        1,746). 3 s'nin adlı zarf reddi tests/test_v301_kd_tasarim_noktasi.py'de.
+        """
         r = client.post('/calculate_solid',
-                        json=dict(KATI, burn_rate_n=0.35, burn_rate_a=0.005))
+                        json=dict(KATI, burn_rate_n=0.35, burn_rate_a=0.005,
+                                  burn_time=2.5))
         assert r.status_code == 200
         assert r.get_json().get('status') != DESIGN_STATUS_NOT_CONVERGED
 
@@ -153,9 +162,14 @@ class TestP16B2_08SiviTankBasinciKapisi:
         reddedilir (422, ``invalid_tank_pressure`` DEĞİL).
         """
         # Bant içi değer + tank gerçekten enjektörü besliyor -> 200.
+        # v3.0.1 T-ÇAPA-B: çözücü basınç beslemede tankı ``feed_pressure``dan
+        # okur; o yoksa uç 422 ``pressure_fed_feed_pressure_not_supplied``
+        # (L-A SV-03; L-A RAPOR §değişen testler: test_d15_app_api_a2 /
+        # test_d27_sivi_a1 için aynı onarım — gövde tankı ``feed_pressure``
+        # olarak da verir).
         assert client.post('/calculate_liquid',
                            json=dict(SIVI, engine_cycle='pressure_fed',
-                                     tank_pressure=45.0)
+                                     tank_pressure=45.0, feed_pressure=45.0)
                            ).status_code == 200
         # Alan hiç gönderilmedi -> çözücünün kendi çözümü, dokunulmaz.
         assert client.post('/calculate_liquid',
@@ -197,9 +211,27 @@ class TestP16B1_19LStarUstUcu:
         assert kunye['reason'] == 'above_model_ceiling'
         assert float(kunye['achieved']) > 0.0
 
-    @pytest.mark.parametrize('deger', [3.06, 4.0, 6.0])
-    def test_kurulabilen_deger_kesilmez(self, client, deger):
-        """Genel bandın üstü ama MODELİN kurabildiği L*: 200 + dolu not."""
+    @pytest.mark.parametrize('kesir', [0.0, 0.5, 0.99])
+    def test_kurulabilen_deger_kesilmez(self, client, kesir):
+        """Genel bandın üstü ama MODELİN kurabildiği L*: 200 + dolu not.
+
+        v3.0.1 (21 Eki): değerler sabit yazılmaz, bu gövdede modelin KENDİ
+        yayımladığı tavandan türetilir. Eski parametreler (3,06 / 4,0 /
+        6,0 m) tavanın 6,385 m olduğu geometriye göre seçilmişti; v3.0.1 tane
+        zarfı kamara çapını son port çapına indirdi, art-yanma odası tavanı
+        (POST_CHAMBER_D_FACTOR_MAX × D_ch) da küçüldü ve tavan 3,862 m oldu
+        (ölçüldü). 4 ve 6 m artık gerçekten KURULAMAYAN değerlerdir ve 422
+        almaları doğrudur; bekçi kurulabilirliği kilitler, sayıyı değil.
+        Aralık: genel bandın 1 cm üstü ile tavan arası.
+        """
+        r = client.post('/calculate', json=dict(HIBRIT, l_star=1000.0))
+        assert r.status_code == 422, r.status_code
+        tavan = float(r.get_json()['invalid_fields'][0]['achieved'])
+        alt = L_STAR_GENERIC_BAND_M[1] + 0.01
+        assert tavan > alt, (
+            f'tavan ({tavan:.3f} m) genel bandın üstünde değil; bu bekçinin '
+            'öncülü (bandın üstü ama kurulabilir değer) artık yok')
+        deger = alt + kesir * (tavan - alt)
         r = client.post('/calculate', json=dict(HIBRIT, l_star=deger))
         assert r.status_code == 200, f'l_star={deger} HTTP {r.status_code}'
         assert r.get_json()['motor']['l_star_clamped_high'] is False
@@ -306,12 +338,21 @@ class TestP16B2_10KatiLuleMalzemesi:
     """
 
     def test_phenolic_sessiz_degil(self, client):
+        # V301/T-ÇAPA-D: V301/K-B (36db0dad5) katı malzeme seçeneklerini
+        # sunucu kaydından kurdu ve kayıtta olmayan malzemeyi hesaptan ÖNCE
+        # adıyla reddediyor (422 unresolved_material; sayfa 'phenolic'
+        # seçeneği sunmuyor: page_options). Eski 'not_analyzed' bloğu yerine
+        # ret — iddia aynı: sessiz değil, istenen ad ve gerekçe yanıtta.
         r = client.post('/calculate_solid',
                         json=dict(KATI, nozzle_material='phenolic'))
-        blok = r.get_json()['nozzle_material_analysis']
-        assert blok['status'] == 'not_analyzed'
-        assert blok.get('reason'), 'not_analyzed gerekçesiz'
-        assert 'phenolic' in blok['reason']
+        assert r.status_code == 422, r.get_data(as_text=True)[:300]
+        g = r.get_json()
+        assert g['error'] == 'unresolved_material'
+        alan = [f for f in g['invalid_fields']
+                if f.get('field') == 'nozzle_material']
+        assert alan and alan[0]['requested'] == 'phenolic'
+        assert alan[0].get('reason') and 'phenolic' in alan[0]['reason']
+        assert 'phenolic' not in alan[0].get('page_options', [])
 
     @pytest.mark.parametrize('malzeme', ['graphite', 'copper'])
     def test_kayitli_malzemede_kritik_uyari_var(self, client, malzeme):

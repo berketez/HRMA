@@ -22,6 +22,8 @@ import pathlib
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_INSULATION
+
 from hrma.validation.motor_validation import (
     CANONICAL_LIMITS, FIELD_ALIASES, FORM_LIMITS, MotorDataValidator,
     _bant_kanonu_denetimi, kanon_gorunumu)
@@ -37,10 +39,28 @@ def client():
         yield c
 
 
+#: Kanonik astar kalınlığı (mm) — ürünün tek tanımı, kopyalanmaz.
+_ASTAR_MM = SOLID_INSULATION['thickness_m'] * 1000.0
+
+
 def _kati_taban():
     """``/calculate_solid`` taban yükü — merkezî katalogdan (tek kaynak)."""
     from tests.support import uc_katalogu
     return dict(uc_katalogu.taban_yuk('/calculate_solid'))
+
+
+def _radyal_yigin_mm(govde):
+    """Kasa kapısının tane ile kasa arasında istediği radyal yığın [mm]:
+    astar + yalıtım (``SolidRocketEngine._case_inner_diameter_required``:
+    D_kasa,min = D_tane + 2·(t_astar + t_yalıtım)). V301/T-ÇAPA-D: taban yük
+    (katı örnek, ÖRNEK 5fa435893) artık yalıtım (3 mm) ve astar (2 mm) taşıyor;
+    eski hesap yalnız kanonik astarı (``_ASTAR_MM``) düşüyordu. Değerler
+    gövdenin GÖNDERDİĞİ alanlardan; alan yoksa astar kanonik varsayılandır,
+    yalıtım 0."""
+    def _mm(anahtar, yoksa):
+        deger = govde.get(anahtar)
+        return float(deger) if isinstance(deger, (int, float)) else yoksa
+    return _mm('liner_thickness', _ASTAR_MM) + _mm('insulation_thickness', 0.0)
 
 
 def _hibrit_taban():
@@ -213,7 +233,11 @@ class TestP16B149KatiUcDavranisi:
         govde = _kati_taban()
         govde[alan] = deger
         if alan == 'chamber_diameter':
-            govde['outer_diameter'] = deger
+            # v3.0.1 T-ÇAPA-B: K-A kasa kapısı (``grain_does_not_fit_case``)
+            # hazne ≥ tane + 2·astar ister; eskiden tane = hazne veriliyordu
+            # ve 422 alan adı olarak ``chamber_diameter``i taşıyordu. Tane,
+            # kanonik astar kalınlığı (SOLID_INSULATION) kadar içeri alınır.
+            govde['outer_diameter'] = deger - 2.0 * _radyal_yigin_mm(govde)
             govde['core_diameter'] = round(deger * 0.4, 3)
         r = client.post('/calculate_solid', json=govde)
         assert r.status_code != 400, (
@@ -263,7 +287,10 @@ class TestP16B149KatiUcDavranisi:
         katı motor tasarımı bant çelişkisi yüzünden hiç hesaplanamıyordu.
         """
         govde = _kati_taban()
-        govde.update({'chamber_diameter': 3700.0, 'outer_diameter': 3700.0,
+        # v3.0.1 T-ÇAPA-B: hazne = tane + 2·astar (K-A kasa kapısı); kalan
+        # kırmızı web_thickness bandı (≤ 1000 mm) — DEVİR, test/RAPOR.md.
+        govde.update({'chamber_diameter': 3700.0 + 2.0 * _radyal_yigin_mm(govde),
+                      'outer_diameter': 3700.0,
                       'core_diameter': 1500.0, 'web_thickness': 1100.0,
                       'grain_length': 9000.0, 'grain_count': 1})
         r = client.post('/calculate_solid', json=govde)

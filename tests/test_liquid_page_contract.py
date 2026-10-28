@@ -165,64 +165,37 @@ def test_results_grid_absent(html):
 # ---------------------------------------------------------------------------
 # 2. Parite: rozetler / kesit açıklaması / uyarı paneli / exportlar
 # ---------------------------------------------------------------------------
-#: Rozet sınıfı ⟷ rozet metni sözleşmesi (ÖH D22 · P13B2-05). Her sınıf
-#: kendi metnini ZORUNLU kılar; hangi sınıfın ilk boyada durduğu ŞART
-#: DEĞİLDİR. Böylece rozet sınıfı ileride "status-unknown"a çevrilse de
-#: (P17B2-07 onarımı) bekçi bir DÜZELTMEyi kırmızıya çevirmez.
-ROZET_SINIF_METNI = {
-    'status-connected': ('Connected',),
-    'status-disconnected': ('Offline',),
-    'status-unknown': ('not checked',),
-}
+#: ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1) — ROZET SÖZLEŞMESİNİN HALEFİ.
+#: ÖH D22 · P13B2-05'te bu bölüm rozet sınıfı ⟷ metni tutarlılığını
+#: (``ROZET_SINIF_METNI``) ve /api/database-status yoklamasını ŞART
+#: koşuyordu. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/
+#: gorsel_once.json, gerçek tarayıcı): yoklamadan sonra rozetler HER
+#: makinede "NASA CEA OFFLINE / NIST WEBBOOK OFFLINE" diyordu (CEA kolu
+#: DAİMA 'local', NIST ayrıştırıcısı HİÇ eşleşmiyor) ve sayfanın hiçbir
+#: sayısının kaynağı değildi. Rozet söküldü; sözleşme artık rozetin
+#: YOKLUĞUNU ve yerine gelen veri kaynağı satırını ölçer. Satırda
+#: bağlantı/çevrimdışı iddiası basılmaz.
+VERI_KAYNAGI_YASAK_IDDIALAR = ('Connected', 'Offline', 'not checked')
 
 
 def test_database_status_badges_present(html):
-    """Rozetler var, iki durum da tanımlı ve sınıf ⟷ metin çelişmiyor.
-
-    ÇEVRİLDİ (ÖH D22 · P13B2-05). Eski hâli statik
-    ``class="database-status status-connected cea-status"`` dizesini ŞART
-    koşuyordu — yani hiçbir denetim koşmadan YEŞİL yanan rozeti. Kardeş
-    şablonlarda (advanced.html, solid.html) tam bu kusur P17B2-07 olarak
-    ölçüldü ve ÖH D21'de onarıldı; liquid.html onarımın dışında kaldı
-    ÇÜNKÜ bu bekçi kusuru kilitliyordu (``tests/test_d21_arayuz_a2.py``
-    ``ROZET_SABLONLARI`` bu yüzden yalnız iki şablon sayıyor).
-
-    Kilit kaldırıldı; yerine iki fail-closed iddia kondu:
-
-    1. Rozetler ve İKİ durum sınıfı da tanımlı olmalı (kaybolma bekçisi).
-    2. Bir rozetin İLAN ETTİĞİ sınıf ile YAZDIĞI metin çelişemez —
-       "status-unknown" taşıyıp "Connected" yazan ya da "status-connected"
-       taşıyıp "not checked" yazan rozet, hangi yönde olursa olsun
-       kullanıcıya yalan söyler.
-
-    Şablonun kendisi (``hrma/templates/liquid.html``) ÖH D22'de sivi ve
-    arayuz kulvarlarının sahasındadır; bu kulvar ürün dosyasına dokunmaz.
-    """
-    for sinif in ('cea-status', 'nist-status'):
-        assert 'class="database-status' in html, 'rozet kabı yok'
-        assert sinif in html, sinif
-    assert '.status-connected' in html and '.status-disconnected' in html
-    rozetler = re.findall(
-        r'<span class="database-status ([^"]*)"[^>]*>([^<]*)</span>', html)
-    assert rozetler, 'sayfada hiç veri tabanı rozeti bulunamadı'
-    for siniflar, metin in rozetler:
-        durum = [d for d in ROZET_SINIF_METNI if d in siniflar]
-        assert len(durum) == 1, (siniflar, metin)
-        beklenen = ROZET_SINIF_METNI[durum[0]]
-        assert any(b in metin for b in beklenen), (
-            'rozet sınıfı %r ile metni %r çelişiyor (beklenen: %s)'
-            % (durum[0], metin, ' / '.join(beklenen)))
-        # Ters yön: başka bir durumun metnini taşıyamaz.
-        for baska, metinler in ROZET_SINIF_METNI.items():
-            if baska == durum[0]:
-                continue
-            assert not any(m in metin for m in metinler), (siniflar, metin)
+    """Rozetler YOK; yerinde sunucu künyesine yönlendiren satır var."""
+    assert not re.search(r'class="[^"]*\b(?:database-status|cea-status|nist-status)\b', html)
+    m = re.search(r'<div class="data-source-line"[^>]*'
+                  r'data-i18n="liq.ui.data_source_line">([^<]*)</div>', html)
+    assert m, 'veri kaynağı satırı yok'
+    for iddia in VERI_KAYNAGI_YASAK_IDDIALAR:
+        assert iddia not in m.group(1), (iddia, m.group(1))
 
 
 def test_database_status_is_fetched(html):
-    assert "fetch('/api/database-status')" in html
-    assert 'function checkDatabaseStatus' in html
-    assert 'checkDatabaseStatus();' in html, 'rozet güncelleyici hiç çağrılmıyor'
+    """ÇEVRİLDİ (v3.0.1 K): sayfa /api/database-status'u ARTIK YOKLAMAZ.
+
+    Uç API uyumu için sunucuda durur; sayfada okuyan kalmadı.
+    """
+    assert "fetch('/api/database-status')" not in html
+    assert 'function checkDatabaseStatus' not in html
+    assert 'checkDatabaseStatus();' not in html
 
 
 def test_cross_section_explanation_present(html):
@@ -290,7 +263,12 @@ def test_eng_export_uses_declared_burn_time(html):
     block = block[:block.index('async function exportLiquidExcel')]
     assert "getElementById('max_burn_duration')" not in block
     assert 'thrust * burnTime' not in block
-    assert 'Object.assign({}, cr, { motor_name: _liquidMotorName() })' in block
+    # V301/HİBRİT-DIŞA (kalem 2): gövde kurucusu .eng düğmesi ve komple
+    # paket arasında paylaşılan ``_liquidEngMotorData``da (iddia aynı).
+    assert 'const motorData = _liquidEngMotorData();' in block
+    kurucu = html[html.index('function _liquidEngMotorData()'):]
+    kurucu = kurucu[:kurucu.index('\n        }\n')]
+    assert 'Object.assign({}, cr, { motor_name: _liquidMotorName() })' in kurucu
 
 
 # ---------------------------------------------------------------------------
@@ -452,9 +430,19 @@ def test_unwired_inputs_are_marked(html):
     m = re.search(r'const UNWIRED_INPUT_IDS = \[(.*?)\];', html, re.S)
     assert m, 'UNWIRED_INPUT_IDS listesi bulunamadı'
     unwired = set(re.findall(r"'([^']+)'", m.group(1)))
-    # Görev metninde açıkça adı geçen alanlar mutlaka listede olmalı
+    # V301/L-D (SV-09) — BEKLENTİ DEĞİŞTİ: geçici rejim alanları
+    # (startup_sequence, throttle_response …) formdan KALKTI (v3.5 işi);
+    # hesaptan önce işaretlenen alanlar artık çözücünün kendisinin
+    # boyutlandırdığı karşılaştırma girdileridir ve motorun
+    # 'reported_for_comparison' beyanıyla AYNI kümedir.
+    from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
+    karsilastirma = set(LiquidRocketEngine.unwired_inputs(None)[
+        'reported_for_comparison'])
+    for field in ('throat_diameter', 'fuel_injection_velocity'):
+        assert field in unwired, f'{field} karşılaştırma alanı ama işaretlenmiyor'
+    assert unwired <= karsilastirma, sorted(unwired - karsilastirma)
     for field in ('startup_sequence', 'throttle_response'):
-        assert field in unwired, f'{field} bağlanmamış olduğu halde işaretlenmiyor'
+        assert f'id="{field}"' not in html, f'{field} formdan kalkmalıydı'
     # ÖH D15 · P12bB1-09 — BEKÇİ ÇEVRİLDİ. Bu satır 'min_throttle' alanının
     # statik "Not wired to the solver yet" yaftasını KİLİTLİYORDU. Çözücü o
     # alanı 2026-07'de kendi unwired_inputs() beyanından çıkardı (gerekçe
@@ -525,14 +513,16 @@ def test_all_plots_go_through_shared_renderer(html):
     # varsayılanı → kabın gerçek genişliği); bu yüzden satır sonundaki ';'
     # artık sözleşmenin parçası değil. Çağrının YERİ ve argümanları öyle.
     body = html[html.index('function liquidPlot('):]
-    body = body[:body.index('function setNistStatus')]
+    # v3.0.1 K: gövdenin bitiş çapası setNistStatus idi (söküldü);
+    # liquidPlot'tan sonraki ilk bildirim artık liquidCombustionSourceText.
+    body = body[:body.index('function liquidCombustionSourceText')]
     assert 'return Plotly.newPlot(el, traces, lay, cfg)' in body, \
         'tek Plotly.newPlot çağrısı liquidPlot gövdesinde değil'
 
 
 def test_shared_renderer_applies_quality_defaults(html):
     block = html[html.index('function liquidPlot('):]
-    block = block[:block.index('function setNistStatus')]
+    block = block[:block.index('function liquidCombustionSourceText')]
     assert 'delete lay.width;' in block, 'sabit width kaldırılmıyor'
     assert "lay.hovermode = 'x unified'" in block
     assert 'responsive: true' in block

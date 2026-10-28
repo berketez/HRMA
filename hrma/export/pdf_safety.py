@@ -177,6 +177,14 @@ SAFETY_CONTEXT_SOURCES = {
                       ('ar:motor.combustion_analysis.inputs.oxidizer_type',
                        None),
                       ('ar:injector.oxidizer_type', None)),
+    # V301/FİZİK-2 (kalem 8a): sıvı çiftin yakıt adı — TNT eşdeğerinin 14 CFR
+    # 420 Ek E Tablo E-5 satırını oksitleyiciyle birlikte seçer. Yollar
+    # ``oxidizer_type`` satırının ikizidir (aynı üreticiler aynı blokta).
+    # Yalnız sıvıda okunur; başka motorda çözülemezse beyan edilmez.
+    'fuel_type': (('md:fuel_type', None),
+                  ('ar:fuel_type', None),
+                  ('md:combustion_analysis.inputs.fuel_type', None),
+                  ('ar:motor.combustion_analysis.inputs.fuel_type', None)),
 }
 
 #: Birim çevrim çarpanları — metreye/bara. Yeni birim eklenmeden kaynak
@@ -322,6 +330,20 @@ def build_pdf_safety(motor_data: Dict,
         'chamber_diameter': girdiler['chamber_diameter'],
         'wall_thickness': girdiler['wall_thickness'],
     }
+    # V301/K-C1 devri (KT-16): kasa boyu VARSA geçer — yoksa güvenlik
+    # modülü kasa kütlesini "ASSUMED L/D = 5" ile kuruyordu (ölçüldü:
+    # K-C1/guvenlik_once.json, üç motor tipinde de). Birim çapla AYNI
+    # merkezî bandlı kuraldan (resolve_length_m); bulunamazsa geçmez.
+    from hrma.export.motor_geometry import resolve_length_m
+    boy_m, boy_kaynak = resolve_length_m(md, 'chamber_length')
+    if boy_m is not None:
+        boy_kaynak = 'md:%s' % boy_kaynak
+    else:
+        boy_m, boy_kaynak = resolve_length_m(ar, 'chamber_length')
+        boy_kaynak = 'ar:%s' % boy_kaynak
+    if boy_m is not None:
+        analiz_motor_data['chamber_length'] = boy_m
+        kaynaklar['chamber_length'] = boy_kaynak
     # İsteğe bağlı ama VARSA geçen alanlar: uydurulmaz, yalnız taşınır.
     for alan in ('thrust', 'burn_time', 'chamber_temperature'):
         deger = _sonlu_pozitif(md.get(alan))
@@ -384,8 +406,63 @@ def build_pdf_safety(motor_data: Dict,
             _uygulanan[ad] = repr(_vars)
     if _uygulanan:
         kunye['defaults_applied'] = _uygulanan
+    # V301/FİZİK-2: yakıt adı yalnız sıvı çift-iticide bir sayı seçer; başka
+    # motorda çözülememesi bir eksiklik değildir ve künyeye yazılmaz.
+    if str(kwargs.get('motor_type') or '').strip().lower() != 'liquid':
+        _cozulemeyen = [a for a in _cozulemeyen if a != 'fuel_type']
     if _cozulemeyen:
         kunye['unresolved_identity_fields'] = sorted(_cozulemeyen)
+
+    # --- V301/PANEL (NK-18 + ÖRNEK-PANEL DEVİR 1) · TEK HÜKÜM KAYNAĞI ----
+    # Belgenin güvenlik bölümü, Performans Özeti ve güverte GÜVENLİK sekmesi
+    # AYNI kaydı basar: yapısal hüküm ``motor_structural_verdict`` (tek
+    # işlev), cidar sıcaklığı motorun ÇÖZDÜĞÜ çift ``motor_solved_wall_pair``
+    # (katı: kasa yalıtım arkasında; sıvı: rejeneratif marş; hibritte beyanlı
+    # bölge sıcaklığı çift sayılmaz). Kayıt bulunamazsa modülün kendi
+    # denetimi koşar ve kaynağı ``verdict_source`` ile adıyla yazılır.
+    if 'motor_verdict' in imza:
+        from hrma.analysis.safety_analysis import (
+            motor_solved_wall_pair, motor_structural_verdict)
+        _mt = kwargs.get('motor_type')
+        _mv = (motor_structural_verdict(_mt, ar)
+               or motor_structural_verdict(_mt, md))
+        if _mv is not None:
+            kwargs['motor_verdict'] = _mv
+            kaynaklar['motor_verdict'] = _mv.get('block')
+            _cift = (motor_solved_wall_pair(_mt, ar)
+                     or motor_solved_wall_pair(_mt, md))
+            if _cift is not None:
+                analiz_motor_data['wall_temperature_hot'] = _cift['hot']
+                analiz_motor_data['wall_temperature_cold'] = _cift['cold']
+                kaynaklar['wall_temperature_hot'] = _cift['source']
+                kaynaklar['wall_temperature_cold'] = _cift['source']
+
+    # --- V301/FİZİK-2 (KABUL 12) · TOPLAM İMPULS TABLONUN SAYISIDIR --------
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/fizik-2/k2_k3_pdf_guvenlik_once.json):
+    # aynı belgede "Total Impulse 2956,9 N·s" (tablo, çözücünün integrali) ⟷
+    # güvenlik bölümü "total impulse ns: 3411,51" (tepe itki × süre); hibrit
+    # 29930,2 ⟷ 30000. Güvenlik bölümü artık tablonun KENDİ çözücüsünden
+    # (``PDFReportGenerator._resolve_performance``, aynı iki kaynak, aynı
+    # sıra) okunan sayıyı, tohumlandığı itki ve süreyle birlikte kayıt olarak
+    # geçirir; modül eşleşmeyi denetler. Tablo sayı bulamazsa kayıt gitmez
+    # ve modülün eski tanımı (itki × süre) adıyla kalır.
+    if 'motor_total_impulse' in imza:
+        from hrma.export.pdf_generator import PDFReportGenerator
+        _perf = ar.get('performance')
+        _ti = PDFReportGenerator._resolve_performance(
+            'total_impulse', _perf if isinstance(_perf, dict) else {}, md)
+        if _ti is not None and _ti > 0:
+            kwargs['motor_total_impulse'] = {
+                'total_impulse_ns': _ti,
+                'source': ('report Performance Metrics "Total Impulse" '
+                           '(analysis_results.performance, then motor_data '
+                           'total_impulse)'),
+                'inputs': {
+                    'thrust': analiz_motor_data.get('thrust'),
+                    'burn_time': analiz_motor_data.get('burn_time'),
+                },
+            }
+            kaynaklar['total_impulse'] = 'report_performance:total_impulse'
 
     try:
         safety = SafetyAnalyzer().analyze_comprehensive_safety(**kwargs)

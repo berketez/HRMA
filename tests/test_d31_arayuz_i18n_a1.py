@@ -129,7 +129,14 @@ class TestOHD3010DinamikOnekAilesi:
         Değerler ezberden yazılmaz, iki koşulan yoldan okunur:
           * sunucu: ``/api/flight-vehicle`` uç gövdesindeki ``source == '…'``
             dalları (kabul edilen değerler; gerisi 400),
-          * arayüz: ``launch_site.html``in kendi ``|| '…'`` yedeği.
+          * arayüz: ``launch_site.html``in kendi kurduğu araç nesnelerindeki
+            ``source: '…'`` değerleri (ör. örnek araç ``source: 'example'``).
+
+        T-ÇAPA-C2 (27 Eki): eskiden arayüz tarafı ``(v && v.source) ||
+        'example'`` yedeğinden okunuyordu. V301/UÇUŞ C-25 (34996377f) o yedeği
+        bilerek söktü: araç YOKSA köken uydurulmaz, 'example' yazılmaz. Arayüz
+        değerleri artık sayfanın kendi atadığı ``source:`` değerlerinden okunur
+        ve yedeğin geri gelmediği ayrıca denetlenir.
         """
         app_src = oku(KOK / 'hrma' / 'app.py')
         bas = app_src.index("@app.route('/api/flight-vehicle'")
@@ -139,9 +146,13 @@ class TestOHD3010DinamikOnekAilesi:
         assert sunucu, '/api/flight-vehicle kolu `source` dalı taşımıyor'
 
         html = oku(TPL / 'launch_site.html')
-        m = re.search(r"var src = \(v && v\.source\) \|\| '(\w+)';", html)
-        assert m, 'launch_site.html araç kaynağı yedeği bulunamadı'
-        kosulan = sunucu | {m.group(1)}
+        assert not re.search(r"v\.source\)\s*\|\|\s*'\w+'", html), (
+            'araç kaynağına uydurma yedek geri geldi (C-25: araç yoksa köken '
+            'yazılmaz)')
+        sayfa = set(re.findall(r"\bsource:\s*'(\w+)'", html))
+        assert 'example' in sayfa, (
+            'launch_site.html örnek aracı source alanıyla kurulmuyor')
+        kosulan = sunucu | sayfa
 
         i18n = oku(JS / 'i18n_launch_site.js')
         en = nokta_anahtarli_sozluk(i18n, 'en')

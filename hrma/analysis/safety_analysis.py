@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from hrma.constants import G_0 as _G_0
 from hrma.utils.input_guard import finite_number
 from hrma.constants import STEFAN_BOLTZMANN as _STEFAN_BOLTZMANN
+from hrma.constants import LB_KG as _LB_KG
 from hrma.data.materials_db import get_material
 
 
@@ -81,8 +82,8 @@ def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
 #      çiğnemez, gövdeye gömülü ADSIZ sayı çiğner. Aynı P5B2-05
 #      değişikliğinde bu sayı 55 -> 50 DÜŞTÜ (el tablosu gövdeden çıktı).
 #
-# BUGÜNKÜ ÖLÇÜM (aynı betik, bu ağaç): blok dışında 232 sayısal değişmez,
-# 66 farklı değer; gövde içinde 50 farklı değer. (Eşiklerin taşınmasıyla
+# BUGÜNKÜ ÖLÇÜM (aynı betik, bu ağaç): blok dışında 258 sayısal değişmez,
+# 71 farklı değer; gövde içinde 50 farklı değer. (Eşiklerin taşınmasıyla
 # 246 -> 212 ve 58 -> 55 düşmüştü;
 # ÖH D26 / P5B2-05 patlama modelini elle yazılmış Z tablosundan Kinney-Graham
 # BAĞINTISINA çevirince 212 -> 227 ve 55 -> 60 çıktı: bağıntının katsayıları
@@ -105,6 +106,27 @@ def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
 # iletileri üç yeni literal getirdi (iki ``[:60]`` ad kırpma uzunluğu, bir
 # ``[0]`` dizini) → 229 -> 232. Farklı değer sayısı (66) ve gövde içindeki
 # farklı değer sayısı (50) değişmedi: 60 ve 0 başka yerlerde de geçiyor.
+# v3.0.1/3.0.5 (27 Eki, sabah tabanı ad0737bd4'te ölçüm 231'di — künye 232
+# diyordu, bekçi kırmızıydı): V301/PANEL tek hüküm işlevi
+# (``motor_structural_verdict``, ``motor_solved_wall_pair``,
+# ``motor_wall_zone_summary``) 231 -> 243 ve 66 -> 69 getirdi. Yeni üç farklı
+# değerin üçü de modül düzeyinde ADLI (``MOTOR_VERDICT_INPUT_REL_TOL`` 1e-5,
+# ``MOTOR_WALL_ZONE_ROWS_MAX`` 8, ``MOTOR_WALL_ZONE_DECLARATION_CHARS_MAX``
+# 1200 — son ikisi T-ÇAPA-C1'de gövdeden adlı sabite taşındı, bir de
+# ``max(|x|, 1e-300)`` tabanı kalktı); kalan yeni değişmezler yol dizinleri
+# (``yollar[0..2]``), ad kırpmaları (``[:60]``, ``[:20]``) ve iki cebirsel
+# işaret denetimi (``t > 0``, ``tb > 0``). Gövde içindeki farklı değer
+# sayısı (50) DEĞİŞMEDİ.
+# V301/FİZİK-2 (ce7d13e1b, 537bf587b; kaynaklı sıvı TNT eşdeğeri + motor
+# impuls kaydı) 243 -> 258 ve 69 -> 71 getirdi (T-ÇAPA-D ölçümü, 28 Eki,
+# docs/scofield/raw/OH/V301/tcapa-d/olcum/safety_kunye_sayim.py). Yeni iki
+# farklı değerin ikisi de modül düzeyinde ADLI kaynaklı sabit
+# (``LIQUID_TNT_LOX_LH2_FRACTION`` 0,14; ``LIQUID_TNT_LOX_RP1_LAUNCH_BREAK_LB``
+# 500000); yerel ``KG_PER_LB`` ikizi ``hrma.constants.LB_KG``ye bağlandı ve
+# ``max(abs(beklenen), 1e-300)`` tabanı kalktı. Kalan yeni değişmezler
+# ``LIQUID_TNT_*`` tablosunun adlı satırları ve iki cebirsel işaret
+# denetimi (``m > 0``, ``kayit_degeri > 0``). Gövde içindeki farklı değer
+# sayısı (50) DEĞİŞMEDİ.
 # Sayı düşerse ya da yükselirse künye BAYATLAR, bu yüzden
 # ``tests/test_d20_yapisal_sistem_a1.py::TestP5B218KunyeOlcumleSenkron``
 # künyeyi ölçümle karşılaştırır.)
@@ -253,6 +275,490 @@ UNRESTRAINED_BURN_TIME_FIELDS = (
     'burnout_velocity_ms',
     'kinetic_energy_j',
 )
+# ---------------------------------------------------------------------------
+# V301/K-C1 (KT-16) — İTKİ UYDURULMAZ (yanma süresiyle aynı desen).
+#
+# ÖLÇÜLDÜ (K-C1/guvenlik_once.json): ``motor_data.get('thrust', 1000)``
+# satırı, itki göndermeyen her çağıranda serbest kalan motor kolunu 1000 N
+# ile kuruyordu. Katı sayfanın PDF yükü itkiyi ``max_thrust`` adıyla
+# taşıdığından rapor 3890 N'luk varsayılan motor için "required restraint
+# force 4000 N, total impulse 3142,7 N·s, burnout 488 m/s" basıyordu (doğru
+# girdiyle 15 561 N / 1899 m/s). Girdi künyesinde (inputs_resolved) itki
+# yoktu: varsayılan beyansızdı.
+#
+# Artık itki verilmezse itkiye bağlı kollar adıyla geri çekilir; itkiden
+# bağımsız kollar (yapısal, basınçlı kap, termal, TNT, toksik, yangın,
+# parça hızı) AYNEN kalır. İtki verildiğinde yayımlanan her sayı bit-aynıdır.
+#
+# İTKİNİN TANIMI (bu modülde): tek ``thrust`` iki yerde kullanılır —
+# bağlama kuvveti = thrust × yapısal SF (bir YÜK; tepe itkiyle kurulmalı)
+# ve toplam impuls = thrust × burn_time (impuls–momentum; ortalama itkiyle
+# tam). Katı PDF'i tepe itkiyi gönderir (pdf_generator 'thrust' =
+# 'Maximum Thrust'); impuls ve ondan türeyen hız/enerji o zaman ÜST
+# SINIRDIR (sabit itkili yanmada tam). Hibrit/sıvı yolları bit-aynı kalsın
+# diye bu beyan yanıta alan olarak EKLENMEDİ; K-C1/RAPOR.md'de yazılıdır.
+# ---------------------------------------------------------------------------
+#: İtki verilmediğinde serbest kalan motor kolunun gerekçesi — TEK tanım.
+THRUST_NOT_SUPPLIED_REASON = (
+    'thrust not supplied: motor_data carries no thrust and none is assumed '
+    '(the previous code silently used 1000 N), so the tie-down force and '
+    'the loose-motor impulse, burnout velocity and kinetic energy were not '
+    'evaluated. Supply thrust [N] to get them.')
+#: İtki yokken geri çekilen SERBEST KALAN MOTOR alanları.
+UNRESTRAINED_THRUST_FIELDS = (
+    'total_impulse_ns',
+    'burnout_velocity_ms',
+    'kinetic_energy_j',
+    'required_restraint_force_n',
+)
+
+
+# ---------------------------------------------------------------------------
+# V301/PANEL (NK-18) — YAPISAL HÜKÜM TEK İŞLEVDEN
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (``docs/scofield/raw/OH/V301/panel/guvenlik_once.json``, taban
+# 2facae6a0): aynı tasarım için üç tüketici üç ayrı yapısal hüküm basıyordu.
+#
+#   vaka                 Performans Özeti     GÜVENLİK sekmesi   PDF güvenlik
+#   örnek hibrit 3 kN    NOT_EVALUATED        UNSAFE (5/5)       SAFE
+#   hibrit, cidar 1 mm   UNSAFE / HIGH        UNSAFE (5/5)       UNSAFE (4/5)
+#   örnek katı KNDX      NOT_EVALUATED (kap)  UNSAFE (5/5)       MARGINAL
+#   örnek sıvı LOX/RP-1  VERDICT WITHHELD     UNSAFE (5/5)       SAFE
+#
+# Kök: bu modülün yapısal kolu motorun yapısal zincirinden AYRI, daha kaba
+# bir model kuruyordu (ince cidar çember gerilmesi, oda sıcaklığı akması;
+# GÜVENLİK sekmesinde ayrıca çıplak cidar Bartz tahmini). Motorun zinciri
+# ise cidarın ısıl girdisini (hibritte yakıt bloğu bölgeleri, katıda yalıtım
+# üstünden kasa, sıvıda rejeneratif marş), sıcak cidar akma düşürmesini ve
+# "HRMA'nın boyutlandırdığı cidar hüküm kazanmaz" kuralını uyguluyor.
+#
+# Kural: hesaplanmış bir motorun yapısal hükmü o motorun KENDİ yapısal
+# zincirinin hükmüdür. Bu modül onu YENİDEN TÜRETMEZ; aşağıdaki tek işlev
+# hükmü motor sonucundan okur, analizci benimser (``motor_verdict``).
+# Kendi çember denetimi tanı sayısı olarak kalır, hüküm sözcüğü üretmez.
+#: Motor tipine göre çözücünün yapısal hükmünü taşıyan bloklar (yol sırası
+#: önceliktir; hibritte sayfa sonucu ``motor`` altında, PDF ``motor_data``sı
+#: ise doğrudan motor sözlüğüdür). Panel aynı tabloyu taşır
+#: (``safety_panel.js`` ``MOTOR_VERDICT_BLOCKS``; bekçi ikisini eşler).
+MOTOR_STRUCTURAL_VERDICT_BLOCKS = {
+    'hybrid': ('motor.structural_analysis.safety_analysis',
+               'structural_analysis.safety_analysis'),
+    'solid': ('safety_analysis.pressure_safety',),
+    'liquid': ('structural_analysis.chamber_structure',),
+}
+#: ÖRNEK-PANEL DEVİR 1: hibritte cidarın ısıl hükmü motorun BÖLGE modelidir
+#: (``motor.chamber_wall_zones``; V301/H-termal). Kasa sıcaklığı beyanlıdır,
+#: çözülmüş değildir; güvenlik analizi ondan sayı türetmez, hükmün
+#: gerekçesini bu bloktan söyler. Panel aynı tabloyu taşır
+#: (``safety_panel.js`` ``MOTOR_ZONE_BLOCKS``).
+MOTOR_WALL_ZONE_BLOCKS = {
+    'hybrid': ('motor.chamber_wall_zones', 'chamber_wall_zones'),
+}
+#: Bölge özetinin yanıt boyu kırpması (HRMA seçimi, yalnız yanıtın boyunu
+#: sınırlar; sayı üretmez): en çok bu kadar bölge satırı ve bu kadar
+#: karakterlik beyan taşınır. Hibrit çözücü bugün 3 bölge yayımlar
+#: (ön yanma, port, son yanma; ``hybrid_rocket_engine
+#: ._chamber_wall_zones_block``).
+MOTOR_WALL_ZONE_ROWS_MAX = 8
+MOTOR_WALL_ZONE_DECLARATION_CHARS_MAX = 1200
+#: Hükmün kaynağı (yanıtta ``verdict_source``).
+STRUCTURAL_VERDICT_SOURCE_MOTOR = 'motor_structural_chain'
+STRUCTURAL_VERDICT_SOURCE_MODULE = 'safety_module_hoop_check'
+#: Katı kap hükmü sözcükleri → bu modülün sözcükleri. Eşleme bir yeniden
+#: adlandırmadır, yeni sınıf değildir: katı çözücünün kendi onay kümesi
+#: ``('PASS', 'SAFE', 'ACCEPTABLE', 'OK')`` PASS ile SAFE'i aynı hüküm sayar
+#: (``solid_rocket_engine.py`` ``kap_onay_hukumleri``).
+SOLID_VESSEL_STATUS_TO_INTEGRITY = {
+    'PASS': 'SAFE', 'SAFE': 'SAFE', 'ACCEPTABLE': 'SAFE', 'OK': 'SAFE',
+    'MARGINAL': 'MARGINAL', 'FAIL': 'UNSAFE', 'UNSAFE': 'UNSAFE',
+}
+#: Benimsenen hükmün kabul edilen sözcükleri.
+STRUCTURAL_VERDICT_STATUSES = ('SAFE', 'MARGINAL', 'UNSAFE',
+                               'NOT_EVALUATED')
+#: Çözücünün risk sözcüğü → bu modülün 1-5 ölçeği. Sayı YENİ DEĞİLDİR:
+#: her sözcük, ``_calculate_overall_risk``in sınıflandırma bandının üst
+#: ucudur (``SAFETY_MODEL['risk_score_*_max']``); böylece skor geri
+#: sınıflandırıldığında çözücünün sözcüğü aynen çıkar.
+_RISK_WORD_BAND_KEY = {'LOW': 'risk_score_low_max',
+                       'MEDIUM': 'risk_score_medium_max',
+                       'HIGH': 'risk_score_high_max'}
+#: Benimseme için girdi eşleşme toleransı: güverte sayıları
+#: ``toPrecision(6)`` ile yazar (analysis_dock.js applySuggestions), yani
+#: aynı sayı en çok 5e-6 göreli kayar. 1e-5 bu yuvarlamayı kapsar, gerçek
+#: bir düzenlemeyi (ör. cidar 4,49 → 3 mm) kapsamaz.
+MOTOR_VERDICT_INPUT_REL_TOL = 1e-5
+#: Benimseme öncesi istekle karşılaştırılan yapısal girdiler.
+MOTOR_VERDICT_INPUT_FIELDS = ('chamber_pressure', 'chamber_diameter',
+                              'wall_thickness')
+
+# ---------------------------------------------------------------------------
+# V301/FİZİK-2 (KABUL 12) — SERBEST KALAN MOTORUN İMPULSU MOTORUN SAYISIDIR
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/fizik-2/k2_k3_pdf_guvenlik_once.json):
+# aynı PDF'te katı tablo "Total Impulse 2956,9 N·s" (çözücünün itki
+# integrali) ⟷ güvenlik bölümü "total impulse ns: 3411,51" (tepe itki
+# 1498,19 N × 2,277 s); hibrit 29930,2 ⟷ 30000 (3000 N × 10 s). Güverte
+# GÜVENLİK sekmesi de aynı modülden itki × süreyi basıyordu. Kural: motorun
+# yayımladığı toplam impuls kayıt olarak gelirse ve kaydın tohumlandığı itki
+# ile süre istekle eşleşiyorsa (yapısal hükmün benimseme deseni ve aynı
+# tolerans) impuls, yanma sonu hızı ve enerji o sayıdan kurulur. Gelmezse
+# ya da girdiler düzenlenmişse eski tanım (verilen itki × süre) kalır ve
+# kaynak ``total_impulse_source`` alanında adıyla yazılır.
+#: Kaynağın makine kodları.
+TOTAL_IMPULSE_SOURCE_MOTOR = 'motor_total_impulse'
+TOTAL_IMPULSE_SOURCE_THRUST_X_TIME = 'thrust_x_burn_time'
+#: Benimseme öncesi istekle karşılaştırılan girdiler (kaydın ``inputs``i).
+MOTOR_IMPULSE_INPUT_FIELDS = ('thrust', 'burn_time')
+
+# ---------------------------------------------------------------------------
+# V301/FİZİK-2 (kalem 8a) — SIVI ÇİFT-İTİCİ TNT EŞDEĞERİ: KAYNAKLI, ÇİFTE GÖRE
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/fizik-2/k8_guvenlik_once.json): sıvı
+# örnekte TNT = 0,35 × itici kütlesi; 0,35 kaynaksızdı ve LOX/RP-1, LOX/LH2
+# ve hipergolik çiftlere AYNI sayıyı veriyordu (bu modülün eski satırı
+# ``'liquid_biprop': 0.35, # LOX/RP-1, LOX/LH2``).
+# KAYNAK (birincil mevzuat metni, okundu 27 Eki 2026): 14 CFR Part 420,
+# Appendix E, Table E-5 "Energetic Liquid Explosive Equivalents" (CFR 2024
+# baskısı, govinfo.gov, CFR-2024-title14-vol4-part420-appE). Satırlar:
+#   LO2/RP-1        statik test standı %10 · fırlatma rampası %20 (500 000
+#                   lb'ye kadar) + 500 000 lb üstü için %10
+#   LO2/LH2         Not 3: büyüğü — 8·W^(2/3) (W: LO2/LH2 ağırlığı, lb;
+#                   sonuç lb TNT) ya da W'nin %14'ü (iki senaryoda aynı)
+#   N2O4/UDMH+N2H4  statik test standı %5 · fırlatma rampası %10 (Not 2:
+#                   MMH, N2H4 ya da UDMH yerine geçebilir)
+# Senaryo ``facility_type``tan: 'test_stand' → statik test standı, 'launch'
+# → fırlatma rampası (künyede adıyla). Tabloda OLMAYAN çift (ör. LOX/CH4,
+# LOX/etanol, H2O2/RP-1) ya da senaryo (imalat, taşıma) için katsayı
+# DEĞİŞMEZ: modülün eski sayısı kalır ve "kaynaksız HRMA seçimi" diye adıyla
+# beyan edilir (RAPOR KARAR k8-1).
+LIQUID_TNT_SOURCE = ('14 CFR Part 420, Appendix E, Table E-5 "Energetic '
+                     'Liquid Explosive Equivalents" (CFR 2024 edition)')
+#: lb ⟷ kg — tanım gereği tam (uluslararası avoirdupois libresi); TEK tanım
+#: hrma.constants.LB_KG (V301/T-ÇAPA-D DEVİR 1a, 28 Eki: ikiz sabit kaldırıldı).
+KG_PER_LB = _LB_KG
+#: Tablo E-5 fırlatma rampası LO2/RP-1 eşiği [lb].
+LIQUID_TNT_LOX_RP1_LAUNCH_BREAK_LB = 500000.0
+#: Tablo E-5 sütunları (senaryo kodu → ``facility_type`` değeri).
+LIQUID_TNT_SCENARIOS = {'test_stand': 'static_test_stand',
+                        'launch': 'launch_pad'}
+#: Tablo E-5 satırları (sabit oranlı olanlar): (oksitleyici ailesi, yakıt
+#: ailesi) → {senaryo: oran}. LO2/RP-1 fırlatma rampası ve LO2/LH2 kuralı
+#: kademelidir; ``liquid_biprop_tnt_equivalent`` içinde adıyla uygulanır.
+LIQUID_TNT_TABLE_E5 = {
+    ('lox', 'rp1'): {'static_test_stand': 0.10, 'launch_pad': 0.20},
+    ('n2o4', 'hydrazine_family'): {'static_test_stand': 0.05,
+                                   'launch_pad': 0.10},
+}
+#: LO2/RP-1 fırlatma rampasında 500 000 lb üstü kısmın oranı.
+LIQUID_TNT_LOX_RP1_LAUNCH_OVER = 0.10
+#: LO2/LH2 Not 3: 8·W^(2/3) [lb] ile oran 0,14'ün büyüğü.
+LIQUID_TNT_LOX_LH2_COEF_LB = 8.0
+LIQUID_TNT_LOX_LH2_FRACTION = 0.14
+#: Ad ⟷ tablo ailesi (yalnız kimlik eşlemesi; sayı değil). Tablonun adını
+#: andığı itici dışında hiçbir ad bir aileye bağlanmaz (ör. kerosen ≠ RP-1).
+_LIQUID_OX_FAMILY = {'lox': 'lox', 'lo2': 'lox', 'liquid_oxygen': 'lox',
+                     'n2o4': 'n2o4', 'nto': 'n2o4'}
+_LIQUID_FUEL_FAMILY = {'rp1': 'rp1', 'rp-1': 'rp1', 'rp_1': 'rp1',
+                       'lh2': 'lh2', 'liquid_hydrogen': 'lh2',
+                       'udmh': 'hydrazine_family', 'n2h4': 'hydrazine_family',
+                       'hydrazine': 'hydrazine_family',
+                       'mmh': 'hydrazine_family',
+                       'a50': 'hydrazine_family',
+                       'aerozine_50': 'hydrazine_family',
+                       'aerozine50': 'hydrazine_family'}
+
+
+# ---------------------------------------------------------------------------
+# V301/FİZİK-2 (kalem 8b) — MOTOR TASARIM HÜKMÜ ⟷ TESİS (MİKTAR/MESAFE) GEREĞİ
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (k8_guvenlik_once.json): sıvı örnekte yapısal blok SAFE (SF 12,9)
+# iken TNT eşdeğeri 100 kg'ı aştığı için patlayıcı ekseni 5,0 → genel hüküm
+# UNACCEPTABLE → ``do_not_proceed`` + ``redesign_required`` (KRİTİK). Oysa
+# patlayıcı, toksik ve yangın eksenleri motorun tasarım kusuru değil, itici
+# MİKTARININ tesis gereğidir: yerleşim, miktar-mesafe, KKD, söndürme. Bu
+# eksenler motora "yeniden tasarla" demez; "güvenlik mesafesi / tesis önlemi
+# gerekli" der ve motor tasarım hükmünden AYRI durur. Kritik hüküm yalnız
+# motorun kendi eksenlerinden (yapısal, basınçlı kap, termal) çıkar.
+#: Motorun KENDİSİNİ yargılayan eksenler.
+MOTOR_DESIGN_RISK_AXES = ('structural', 'pressure', 'thermal')
+#: Tesis / yerleşim gereği olan eksenler (itici miktarı ve kimliğinden).
+FACILITY_HAZARD_AXES = ('explosive', 'toxic', 'fire')
+#: Tesis ekseni en yüksek sınıftaysa yayımlanan gereğin makine kodu.
+FACILITY_REQUIREMENT_MEASURES = 'safety_distance_and_facility_measures_required'
+
+
+def liquid_biprop_tnt_equivalent(oxidizer, fuel, facility_type,
+                                 propellant_mass_kg, unsourced_factor):
+    """Sıvı çift-iticinin TNT eşdeğeri [kg] ve dayanağı (Tablo E-5).
+
+    Dönüş ``{'status', 'tnt_equivalent_kg', 'effective_factor', 'pair',
+    'scenario', 'source', 'rule'}``. ``status``:
+    ``'sourced'`` (çift ve senaryo tabloda) ya da
+    ``'unsourced_hrma_choice'`` (tabloda yok: ``unsourced_factor`` aynen
+    kalır, neden ``reason`` alanında adıyla).
+    """
+    ox = _LIQUID_OX_FAMILY.get(str(oxidizer or '').strip().lower())
+    fu = _LIQUID_FUEL_FAMILY.get(str(fuel or '').strip().lower())
+    senaryo = LIQUID_TNT_SCENARIOS.get(str(facility_type or '').strip()
+                                       .lower())
+    m = float(propellant_mass_kg)
+    kayit = {'pair': {'oxidizer': oxidizer, 'fuel': fuel,
+                      'oxidizer_family': ox, 'fuel_family': fu},
+             'facility_type': facility_type, 'scenario': senaryo}
+
+    def _kaynaksiz(neden):
+        return dict(kayit, status='unsourced_hrma_choice',
+                    tnt_equivalent_kg=m * float(unsourced_factor),
+                    effective_factor=float(unsourced_factor),
+                    source=None, reason=neden,
+                    rule=('unsourced HRMA choice: TNT = %.2f x propellant '
+                          'mass (the module default; no sourced factor for '
+                          'this case)' % float(unsourced_factor)))
+
+    if ox is None or fu is None:
+        return _kaynaksiz(
+            'propellant pair %r/%r is not a row of %s (rows: LO2/RP-1, '
+            'LO2/LH2, N2O4/UDMH+N2H4)' % (oxidizer, fuel, LIQUID_TNT_SOURCE))
+    if senaryo is None:
+        return _kaynaksiz(
+            'facility_type %r has no column in %s (columns: static test '
+            'stands = test_stand, launch pads = launch)'
+            % (facility_type, LIQUID_TNT_SOURCE))
+    w_lb = m / KG_PER_LB
+    if (ox, fu) == ('lox', 'lh2'):
+        tnt_lb = max(LIQUID_TNT_LOX_LH2_COEF_LB * w_lb ** (2.0 / 3.0),
+                     LIQUID_TNT_LOX_LH2_FRACTION * w_lb)
+        kural = ('Note 3: larger of 8*W^(2/3) (W in lb) and 14 % of W')
+    elif (ox, fu) == ('lox', 'rp1') and senaryo == 'launch_pad':
+        esik = LIQUID_TNT_LOX_RP1_LAUNCH_BREAK_LB
+        tnt_lb = (LIQUID_TNT_TABLE_E5[('lox', 'rp1')]['launch_pad']
+                  * min(w_lb, esik)
+                  + LIQUID_TNT_LOX_RP1_LAUNCH_OVER * max(w_lb - esik, 0.0))
+        kural = ('launch pads: 20 % up to 500,000 lb plus 10 % over '
+                 '500,000 lb')
+    elif (ox, fu) in LIQUID_TNT_TABLE_E5:
+        oran = LIQUID_TNT_TABLE_E5[(ox, fu)][senaryo]
+        tnt_lb = oran * w_lb
+        kural = '%s: %g %% of the propellant weight' % (
+            senaryo.replace('_', ' '), 100.0 * oran)
+    else:
+        return _kaynaksiz(
+            'propellant pair %r/%r is not a row of %s' % (
+                oxidizer, fuel, LIQUID_TNT_SOURCE))
+    tnt_kg = tnt_lb * KG_PER_LB
+    return dict(kayit, status='sourced', tnt_equivalent_kg=tnt_kg,
+                effective_factor=(tnt_kg / m if m > 0 else None),
+                source=LIQUID_TNT_SOURCE, rule=kural)
+
+
+def _yol_oku(kok, yol):
+    o = kok
+    for parca in yol.split('.'):
+        if not isinstance(o, dict):
+            return None
+        o = o.get(parca)
+    return o
+
+
+def _sonlu_sayi(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if np.isfinite(v) else None
+
+
+def motor_structural_verdict(motor_type, results) -> Optional[Dict]:
+    """TEK İŞLEV — hesaplanmış motorun yapısal hükmü (V301/PANEL, NK-18).
+
+    Performans Özeti şeridi (hibrit: ``structural_analysis.safety_analysis``
+    ``status`` / ``risk_level`` / ``verdict_withheld``), GÜVENLİK sekmesi
+    (``/analyze_safety`` → ``motor_verdict``) ve PDF güvenlik bölümü aynı
+    kaydı okur. Hüküm burada HESAPLANMAZ; çözücünün yayımladığı alanlar
+    tek sözlüğe çevrilir:
+
+    * hibrit: ``status``, ``risk_level``, ``verdict_withheld(_reasons)``,
+      ``verdict_safety_factor``, ``verdict_basis``;
+    * katı: ``vessel_status`` (PASS → SAFE, FAIL → UNSAFE; yukarıdaki
+      eşleme), ``vessel_status_is_tautological``, ``safety_factor``,
+      ``vessel_status_basis``;
+    * sıvı: ``verdict_withheld(_reasons)``; çözücü boyutlandırdığı cidarı
+      ``safety_factor_is_tautological`` diye imler ve kartında "tasarım
+      hedefi geri okunur, ölçüm değildir" yazar — hibrit ve katının kuralıyla
+      aynı, bu cidar hüküm kazanmaz. Sıvı çözücü ayrı bir hüküm sözcüğü
+      yayımlamaz; ikisi de yoksa kayıt adlı gerekçeyle geri çekilir.
+
+    Blok yoksa ``None`` döner (çağıran adıyla reddeder; hüküm uydurulmaz).
+    """
+    mt = str(motor_type or '').strip().lower()
+    yollar = MOTOR_STRUCTURAL_VERDICT_BLOCKS.get(mt)
+    if not yollar or not isinstance(results, dict):
+        return None
+    blok, kaynak = None, None
+    for yol in yollar:
+        aday = _yol_oku(results, yol)
+        if isinstance(aday, dict) and aday:
+            blok, kaynak = aday, yol
+            break
+    if blok is None:
+        return None
+
+    nd = 'NOT_EVALUATED'
+    kayit = {'source': STRUCTURAL_VERDICT_SOURCE_MOTOR, 'block': kaynak,
+             'motor_type': mt}
+    if mt == 'hybrid':
+        status = str(blok.get('status') or '').upper() or None
+        nedenler = [str(n) for n in (blok.get('verdict_withheld_reasons')
+                                     or []) if n]
+        withheld = (blok.get('verdict_withheld') is True or status == nd)
+        kayit.update({
+            'status': status,
+            'risk_level': (str(blok.get('risk_level')).upper()
+                           if blok.get('risk_level') else None),
+            'withheld': withheld,
+            'reasons': nedenler,
+            'safety_factor': (None if withheld else
+                              _sonlu_sayi(blok.get('verdict_safety_factor'))),
+            'basis': blok.get('verdict_basis'),
+        })
+    elif mt == 'solid':
+        ham = str(blok.get('vessel_status') or '').upper() or None
+        status = (nd if ham in (None, nd)
+                  else SOLID_VESSEL_STATUS_TO_INTEGRITY.get(ham))
+        nedenler = []
+        if blok.get('vessel_status_is_tautological') is True:
+            nedenler.append('safety_factor_is_tautological')
+        if blok.get('model_validity_limit_exceeded') is True:
+            nedenler.append('model_validity_limit_exceeded')
+        if status is None:
+            nedenler.append('unrecognised_vessel_status:%s' % ham)
+            status = nd
+        withheld = status == nd
+        kayit.update({
+            'status': status, 'risk_level': None, 'withheld': withheld,
+            'reasons': nedenler,
+            'safety_factor': (None if withheld else
+                              _sonlu_sayi(blok.get('safety_factor'))),
+            'basis': blok.get('vessel_status_basis'),
+        })
+    else:   # liquid
+        nedenler = [str(n) for n in (blok.get('verdict_withheld_reasons')
+                                     or []) if n]
+        if blok.get('safety_factor_is_tautological') is True:
+            nedenler.append('safety_factor_is_tautological')
+        if not nedenler:
+            nedenler.append('solver_publishes_no_structural_verdict')
+        kayit.update({
+            'status': nd, 'risk_level': None, 'withheld': True,
+            'reasons': nedenler, 'safety_factor': None,
+            'basis': (blok.get('safety_factor_basis')
+                      or blok.get('model_validity_limit_exceeded_basis')),
+        })
+    if kayit['status'] not in STRUCTURAL_VERDICT_STATUSES:
+        kayit['reasons'] = list(kayit['reasons']) + [
+            'unrecognised_status:%s' % kayit['status']]
+        kayit.update(status=nd, withheld=True, safety_factor=None)
+    bolge = motor_wall_zone_summary(mt, results)
+    if bolge is not None:
+        kayit['wall_zones'] = bolge
+    return kayit
+
+
+#: Çözülmüş SAYILMAYAN cidar sıcaklığı kaynakları — güvertenin
+#: ``WALL_TEMP_SOURCE_NOT_SOLVED`` listesiyle AYNI (bekçi eşler).
+WALL_TEMP_SOURCES_NOT_SOLVED = ('not_evaluated', 'chamber_temperature_estimate',
+                                'hybrid_chamber_zone_protection')
+#: Motor tipine göre ÇÖZÜLMÜŞ cidar çifti yolları — güvertenin
+#: ``WALL_TEMPERATURE_K_PATHS`` + ``readSolvedCaseTemperatureK`` ile AYNI.
+SOLID_CASE_TEMPERATURE_PATH = 'thermal_analysis.heat_transfer.case_temperature_k'
+WALL_PAIR_PATHS = {
+    'hybrid': ('structural_analysis.thermal_analysis.wall_temperature_inner_K',
+               'structural_analysis.thermal_analysis.wall_temperature_outer_K',
+               'structural_analysis.thermal_analysis.wall_temperature_source'),
+    'liquid': ('cooling_system.wall_temperature_solved_K',
+               'cooling_system.wall_temperature_solved_cold_K',
+               'cooling_system.wall_temperature_solved_source'),
+}
+
+
+def motor_solved_wall_pair(motor_type, results):
+    """Motorun ÇÖZDÜĞÜ cidar çifti (K) ya da ``None`` — Python tüketicileri.
+
+    Güverte okuyucusunun (``analysis_dock.js`` ``readWallTemperaturesK`` +
+    ``readSolvedCaseTemperatureK``) Python ikizi; PDF güvenlik bölümü aynı
+    çifti bununla okur (ÖRNEK-PANEL DEVİR 1). Kural: hibrit/sıvıda kaynak
+    beyanı "çözüldü" demeli (beyanlı / varsayım / kullanıcı hedefi değil) ve
+    ısı modülü "fiziksel değil" imi koymamış olmalı; katıda kasa yalıtım +
+    astar arkasında yığın çözülür (iç = dış) ve yanma süresi > 0 olmalı.
+    """
+    import re as _re
+    mt = str(motor_type or '').strip().lower()
+    if not isinstance(results, dict):
+        return None
+    m = results.get('motor') if isinstance(results.get('motor'), dict) else results
+    if mt == 'solid':
+        t = _sonlu_sayi(_yol_oku(m, SOLID_CASE_TEMPERATURE_PATH))
+        tb = _sonlu_sayi(m.get('burn_time'))
+        if tb is None:
+            tb = _sonlu_sayi(_yol_oku(m, 'motor_geometry.burn_time'))
+        if t is not None and t > 0 and tb is not None and tb > 0:
+            return {'hot': t, 'cold': t, 'source': SOLID_CASE_TEMPERATURE_PATH}
+        return None
+    yollar = WALL_PAIR_PATHS.get(mt)
+    if not yollar:
+        return None
+    if _yol_oku(m, 'heat_transfer_analysis.gas_side_analysis.'
+                   'wall_temperature_unphysical') is True:
+        return None
+    hot, cold = (_sonlu_sayi(_yol_oku(m, yollar[0])),
+                 _sonlu_sayi(_yol_oku(m, yollar[1])))
+    src = _yol_oku(m, yollar[2])
+    if (not isinstance(src, str) or not src
+            or src in WALL_TEMP_SOURCES_NOT_SOLVED
+            or _re.match(r'^(assumed|user input)\b', src, _re.I)):
+        return None
+    if hot is None or cold is None:
+        return None
+    return {'hot': hot, 'cold': cold, 'source': src}
+
+
+def motor_wall_zone_summary(motor_type, results) -> Optional[Dict]:
+    """Hibrit bölge modelinin özeti (ÖRNEK-PANEL DEVİR 1) — sayı üretmez.
+
+    Döner: ``{'block', 'all_zones_protected', 'zones': [{zone, verdict,
+    severity, length_mm, liner_thickness_mm?}], 'declaration'}`` ya da blok
+    yoksa ``None``. Alanlar çözücünün kendi alanlarıdır (``hybrid_rocket_
+    engine._chamber_wall_zones_block``); eksik alan uydurulmaz.
+    """
+    mt = str(motor_type or '').strip().lower()
+    yollar = MOTOR_WALL_ZONE_BLOCKS.get(mt)
+    if not yollar or not isinstance(results, dict):
+        return None
+    for yol in yollar:
+        blok = _yol_oku(results, yol)
+        if not isinstance(blok, dict) or not isinstance(
+                blok.get('zones'), list):
+            continue
+        bolgeler = []
+        for z in blok['zones'][:MOTOR_WALL_ZONE_ROWS_MAX]:
+            if not isinstance(z, dict):
+                continue
+            kayit = {'zone': str(z.get('zone'))[:60],
+                     'verdict': str(z.get('verdict'))[:60],
+                     'severity': str(z.get('severity'))[:20]}
+            for ad in ('length_mm', 'liner_thickness_mm'):
+                v = _sonlu_sayi(z.get(ad))
+                if v is not None:
+                    kayit[ad] = v
+            bolgeler.append(kayit)
+        return {
+            'block': yol,
+            'all_zones_protected': blok.get('all_zones_protected') is True,
+            'zones': bolgeler,
+            'declaration': (None if blok.get('declaration') is None
+                            else str(blok.get('declaration'))[
+                                :MOTOR_WALL_ZONE_DECLARATION_CHARS_MAX]),
+        }
+    return None
 
 
 def _yanma_suresi(value):
@@ -1007,7 +1513,11 @@ class SafetyAnalyzer:
                                    facility_type: str = 'test_stand',
                                    material: str = 'steel_4130',
                                    motor_type: Optional[str] = None,
-                                   oxidizer_type: Optional[str] = None) -> Dict:
+                                   oxidizer_type: Optional[str] = None,
+                                   motor_verdict: Optional[Dict] = None,
+                                   motor_total_impulse: Optional[Dict] = None,
+                                   fuel_type: Optional[str] = None
+                                   ) -> Dict:
         """
         Complete safety analysis including all hazard types
 
@@ -1030,6 +1540,25 @@ class SafetyAnalyzer:
                 TNT eşdeğerini yakıt grain'i değil OKSİTLEYİCİ belirler;
                 verilirse sınıf ondan çözülür, verilmezse ürünün varsayılan
                 oksitleyicisi ADIYLA BEYAN EDİLEREK kullanılır (mevcut kol).
+            motor_verdict: V301/PANEL (NK-18) — hesaplanmış motorun yapısal
+                hükmü (``motor_structural_verdict`` kaydı). Verilirse yapısal
+                eksen o hükmü BENİMSER (kendi çember denetimi tanı sayısı
+                kalır) ve modül çıplak cidar ısı zincirini KOŞMAZ: motorun
+                cidar sıcaklığı motorun kendi modelidir (çözülmüş çift
+                gelirse kullanılır, gelmezse termal hüküm adıyla geri
+                çekilir). Kaydın ``inputs`` alanı varsa istekle eşleşmeyen
+                yapısal girdide kayıt benimsenmez ve neden yazılır.
+            motor_total_impulse: V301/FİZİK-2 (KABUL 12) — motorun
+                yayımladığı toplam impuls kaydı ``{'total_impulse_ns',
+                'source', 'inputs': {'thrust', 'burn_time'}}``. İstekteki
+                itki ve süre kaydın ``inputs``iyle eşleşirse serbest kalan
+                motorun impulsu bu sayıdır (itki × süre değil); eşleşmezse
+                benimsenmez ve neden yazılır.
+            fuel_type: V301/FİZİK-2 (kalem 8a) — sıvı çift-iticide yakıtın
+                adı (ör. 'rp1', 'lh2', 'udmh'). Oksitleyici (``oxidizer_type``)
+                ve ``facility_type`` ile birlikte TNT eşdeğerinin kaynaklı
+                satırını seçer (14 CFR 420 App. E Tablo E-5); verilmezse ya
+                da çift tabloda yoksa eski katsayı kaynaksız diye kalır.
 
         Returns:
             Comprehensive safety analysis results
@@ -1037,6 +1566,24 @@ class SafetyAnalyzer:
         # OH-D29-01: istek alanı, sınıfı çözen üç tüketicinin ortak
         # kaynağına konur (patlayıcı / yangın / depolama aynı sınıfı görür).
         self._requested_oxidizer = oxidizer_type
+        # V301/FİZİK-2 (kalem 8a): sıvı çiftin yakıtı ve senaryo (Tablo E-5
+        # sütunu) aynı istek kapsamlı kanaldan.
+        self._requested_fuel = fuel_type
+        self._facility_type = facility_type
+        # V301/PANEL (NK-18): motor sonucuyla gelen istekte cidar sıcaklığı
+        # motorun modelidir; ``_resolve_wall_temperatures`` çıplak cidar
+        # tahminine düşmez (aynı istek-kapsamlı kanal, oksitleyici deseni).
+        self._motor_result_supplied = motor_verdict is not None
+        self._motor_wall_zones = (motor_verdict or {}).get('wall_zones')
+        # V301/FİZİK-2 (KABUL 12): aynı istek kapsamlı kanal. Kaydın değeri
+        # fizik kapısından geçer (negatif / NaN impuls adıyla reddedilir).
+        if isinstance(motor_total_impulse, dict) and (
+                motor_total_impulse.get('total_impulse_ns') is not None):
+            _fizik_disi_degilse('motor_total_impulse.total_impulse_ns',
+                                motor_total_impulse['total_impulse_ns'])
+        self._motor_total_impulse = (
+            motor_total_impulse if isinstance(motor_total_impulse, dict)
+            else None)
 
         # --- FİZİK KAPISI (ÖH D15 / a3; P5B2-15, P5B2-16, P5B2-17) --------
         # Uç katmanı bu kapıyı Z5S'te aldı; MODÜL yüzü açıktı. Ölçüldü
@@ -1058,7 +1605,9 @@ class SafetyAnalyzer:
 
         # Extract motor parameters
         chamber_pressure = motor_data.get('chamber_pressure', 20.0)  # bar
-        thrust = motor_data.get('thrust', 1000)  # N
+        # V301/K-C1 (KT-16): verilmediyse None — 1000 N UYDURULMAZ; itkiye
+        # bağlı kollar adıyla geri çekilir (``thrust_dependent_not_evaluated``).
+        thrust = motor_data.get('thrust')  # N | None
         # ÖH D36 / onemli2-sivi a2: süre verilmediyse None — 10 s UYDURULMAZ;
         # süreye bağlı kollar adıyla geri çekilir (THERMAL_/UNRESTRAINED_
         # BURN_TIME_FIELDS, sonuçta ``burn_time_dependent_not_evaluated``).
@@ -1095,6 +1644,9 @@ class SafetyAnalyzer:
         # katsayı YOK, yalnız iki mevcut sayının aynı bölüme uygulanması.
         self._merge_thermal_stress_into_structural(
             structural_safety, thermal_safety)
+        # V301/PANEL (NK-18): hesaplanmış motorun hükmü TEK kaynaktır.
+        self._adopt_motor_structural_verdict(
+            structural_safety, motor_verdict, motor_data)
 
         # Explosive hazard analysis
         explosive_hazards = self._analyze_explosive_hazards(
@@ -1163,6 +1715,20 @@ class SafetyAnalyzer:
                 'facility_type': facility_type,
             },
         }
+        if thrust is None:
+            # V301/K-C1 (KT-16): itkiye bağlı kollar tek yerde, noktalı
+            # yoluyla (yanma süresi bloğunun deseni).
+            _um_itki = ((explosive_hazards.get('fragment_hazards') or {})
+                        .get('unrestrained_motor') or {})
+            sonuc['thrust_dependent_not_evaluated'] = {
+                'status': BURN_TIME_NOT_EVALUATED,
+                'reason': THRUST_NOT_SUPPLIED_REASON,
+                'fields': (
+                    ['inputs_used.thrust_n']
+                    + ['explosive_hazards.fragment_hazards.'
+                       'unrestrained_motor.' + ad
+                       for ad in _um_itki.get('not_evaluated') or []]),
+            }
         if burn_time is None:
             # ÖH D36 / onemli2-sivi a2: geri çekilen HER kol tek yerde,
             # yanıttaki noktalı yoluyla sayılır (bloklar kendi damgalarını da
@@ -1235,21 +1801,25 @@ class SafetyAnalyzer:
         # Olası arıza modları — jenerik basınçlı kap kontrol listesi.
         # Mod başına sayısal olasılık bilinçli olarak YOKTUR (eski
         # 0.3/0.5/0.2 payları uydurmaydı); şiddet sınıfı niteldir.
+        # V301/PANEL (ÖRNEK-PANEL DEVİR 2): alan ``severity`` idi ve KABUL
+        # süzgeci ile ekran "CRITICAL"ı bu motorun hükmü sanıyordu; oysa
+        # değer, mod OLUŞURSA sonucunun ağırlığıdır (her motorda aynı liste,
+        # ``failure_modes_basis``). Ad anlamı söyler: ``consequence_severity``.
         failure_modes = [
             {
                 'mode': 'Catastrophic Rupture',
                 'consequences': 'Complete vessel destruction, debris field',
-                'severity': 'CRITICAL'
+                'consequence_severity': 'CRITICAL'
             },
             {
                 'mode': 'Crack Propagation',
                 'consequences': 'Gradual pressure loss, possible flame jet',
-                'severity': 'HIGH'
+                'consequence_severity': 'HIGH'
             },
             {
                 'mode': 'Seal Failure',
                 'consequences': 'Pressure loss, possible fire',
-                'severity': 'MEDIUM'
+                'consequence_severity': 'MEDIUM'
             }
         ]
 
@@ -1331,6 +1901,97 @@ class SafetyAnalyzer:
         else:
             structural_safety['governing_safety_factor'] = float(
                 structural_safety.get('yield_safety_factor'))
+
+    def _adopt_motor_structural_verdict(self, structural_safety: Dict,
+                                        motor_verdict: Optional[Dict],
+                                        motor_data: Dict) -> None:
+        """V301/PANEL (NK-18) — yapısal hüküm motorun zincirinden (yerinde).
+
+        Kayıt yoksa (motor sonucu gelmeyen bağımsız istek) bu modülün kendi
+        çember denetimi hüküm verir ve kaynağı ``verdict_source`` alanında
+        adıyla yazılır. Kayıt varsa ve yapısal girdiler eşleşiyorsa hüküm
+        sözcüğü, geri çekme gerekçeleri, hükmün katsayısı ve risk sözcüğü
+        motorun kaydıdır; modülün çember / birleşik sayıları SİLİNMEZ (tanı
+        sayısıdır) ama artık hüküm sözcüğü üretmez. Eşleşmezse (kullanıcı
+        güvertede cidar/basınç/çap değiştirdi) kayıt BENİMSENMEZ, neden
+        yazılır: değiştirilmiş tasarım motorun hükmünü kazanmaz.
+        """
+        if motor_verdict is None:
+            structural_safety['verdict_source'] = \
+                STRUCTURAL_VERDICT_SOURCE_MODULE
+            return
+        girdiler = motor_verdict.get('inputs') or {}
+        ayrisan = []
+        for ad in MOTOR_VERDICT_INPUT_FIELDS:
+            beklenen = _sonlu_sayi(girdiler.get(ad))
+            gelen = _sonlu_sayi(motor_data.get(ad))
+            if beklenen is None:
+                continue
+            if gelen is None or abs(gelen - beklenen) > (
+                    MOTOR_VERDICT_INPUT_REL_TOL * abs(beklenen)):
+                ayrisan.append({'field': ad, 'request': gelen,
+                                'motor_result': beklenen})
+        if ayrisan:
+            structural_safety['verdict_source'] = \
+                STRUCTURAL_VERDICT_SOURCE_MODULE
+            structural_safety['motor_verdict_not_adopted'] = {
+                'reason': 'structural_inputs_differ_from_motor_result',
+                'fields': ayrisan,
+                'basis': (
+                    'The structural inputs of this request differ from the '
+                    'motor result they were seeded from, so the motor\'s '
+                    'own structural verdict does not describe this design '
+                    'and was not used. The verdict below is this module\'s '
+                    'thin-wall hoop check at room-temperature yield.'),
+            }
+            return
+
+        withheld = motor_verdict.get('withheld') is True
+        status = motor_verdict.get('status') or 'NOT_EVALUATED'
+        sf = None if withheld else _sonlu_sayi(
+            motor_verdict.get('safety_factor'))
+        structural_safety['module_structural_integrity_basis'] = (
+            'hoop_stress_mpa, yield_safety_factor, ultimate_safety_factor '
+            'and combined_* are this module\'s thin-wall check at '
+            'room-temperature yield (plus the through-wall thermal stress '
+            'when a solved wall pair was supplied). They are diagnostic '
+            'numbers, not the verdict: the verdict is the motor\'s own '
+            'structural chain (verdict_source), the same record the '
+            'Performance Summary prints.')
+        structural_safety.update({
+            'verdict_source': STRUCTURAL_VERDICT_SOURCE_MOTOR,
+            'verdict_block': motor_verdict.get('block'),
+            'structural_integrity': status,
+            'verdict_withheld': withheld,
+            'verdict_withheld_reasons': list(
+                motor_verdict.get('reasons') or []),
+            'verdict_basis': motor_verdict.get('basis'),
+            'verdict_risk_level': motor_verdict.get('risk_level'),
+            'motor_verdict_safety_factor': sf,
+            'governing_safety_factor': sf,
+        })
+        if withheld or sf is None:
+            structural_safety['failure_likelihood'] = {
+                'likelihood_class': None,
+                'basis': ('not evaluated: the motor\'s structural verdict '
+                          'is withheld, so no likelihood class is derived'),
+            }
+            structural_safety['recommended_inspection_interval'] = None
+            return
+        if sf < SAFETY_MODEL['sf_band_marginal']:
+            sinif = 'HIGH'
+        elif sf < SAFETY_MODEL['sf_band_safe']:
+            sinif = 'MEDIUM'
+        else:
+            sinif = 'LOW'
+        structural_safety['failure_likelihood'] = {
+            'likelihood_class': sinif,
+            'basis': ('deterministic safety-factor proxy on the motor\'s '
+                      'verdict safety factor - not a calibrated '
+                      'probability'),
+        }
+        structural_safety['recommended_inspection_interval'] = \
+            self._calculate_inspection_interval(sf)
 
     def _calculate_inspection_interval(self, yield_safety_factor: float) -> str:
         """Emniyet katsayısına göre önerilen muayene aralığı.
@@ -1618,6 +2279,26 @@ class SafetyAnalyzer:
                     'wall_temperature_hot/cold pair. Solver report: '
                     + str(wall_source)),
             })
+            # ÖRNEK-PANEL DEVİR 1: hibritte cidarın ısıl hükmü motorun bölge
+            # modelidir. Gerekçe o modelin KENDİ hükümleriyle söylenir; kasa
+            # sıcaklığı beyanlı olduğu için ondan katsayı/mesafe türetilmez.
+            bolge = getattr(self, '_motor_wall_zones', None)
+            if isinstance(bolge, dict) and bolge.get('zones'):
+                ozet = '; '.join(
+                    '%s: %s' % (z.get('zone'), z.get('verdict'))
+                    + (' (HRMA-sized liner %.2f mm)' % z['liner_thickness_mm']
+                       if isinstance(z.get('liner_thickness_mm'), float)
+                       else '')
+                    for z in bolge['zones'])
+                sonuc['motor_wall_zones'] = bolge
+                sonuc['thermal_verdict_withheld_because'] = (
+                    'The thermal verdict of this chamber wall is the motor\'s '
+                    'own wall-zone model (the same record the result page '
+                    'prints): ' + ozet + '. Under the grain the casing '
+                    'temperature is DECLARED by that model, not solved, so '
+                    'this module computes no thermal safety factor, stress '
+                    'or radiant-hazard distance from it; a bare uncooled wall '
+                    'estimate is not substituted.')
             if burn_time is None:
                 self._burn_time_kolunu_geri_cek(sonuc, THERMAL_BURN_TIME_FIELDS)
             return sonuc
@@ -1793,6 +2474,27 @@ class SafetyAnalyzer:
             return (float(hot), float(cold),
                     'motor_data wall_temperature_hot/cold contract')
 
+        if getattr(self, '_motor_result_supplied', False):
+            # V301/PANEL (NK-18) — ÇIPLAK CİDAR TAHMİNİ MOTORUN YERİNE
+            # GEÇMEZ. ÖLÇÜLDÜ (panel/guvenlik_once.json): NK-17 tohumlaması
+            # oda boyu + boğaz çapını göndermeye başlayınca bu dal örnek
+            # hibritte soğutmasız, korumasız bir cidar için Bartz denge
+            # sıcaklığını (3304 K, ss_304; erime 1673 K) ve örnek katıda
+            # yalıtımsız kasa için 1684 K'yi "çözülmüş" diye kullanıyordu:
+            # termal 5,0, yapısal 5,0, 'do_not_proceed'. Oysa motorun kendi
+            # modeli hibrit kasayı yakıt bloğu bölgeleriyle, katı kasayı
+            # yalıtım üstünden çözüyor ve ikisi de kritik değil. Motor
+            # sonucu varken cidar sıcaklığı YALNIZ motorun çözülmüş
+            # çiftidir; yoksa hüküm adıyla geri çekilir.
+            return (float(ambient), float(ambient),
+                    f'{WALL_TEMP_NOT_COMPUTED} - the request carries a motor '
+                    f'result and no solved wall temperature pair: the wall '
+                    f'temperature of a computed motor is that motor\'s own '
+                    f'thermal model (hybrid grain-protection zones, solid '
+                    f'case through insulation, liquid regenerative march), '
+                    f'and a bare uncooled wall estimate from this module '
+                    f'is not substituted for it')
+
         try:
             from hrma.analysis.heat_transfer_analysis import HeatTransferAnalyzer
             ht = HeatTransferAnalyzer().analyze_heat_transfer(
@@ -1843,7 +2545,7 @@ class SafetyAnalyzer:
         return float(power / (4.0 * np.pi * distance ** 2))
 
     def _analyze_explosive_hazards(self, propellant_mass: float, propellant_type: str,
-                                   thrust: float,
+                                   thrust: Optional[float],
                                    burn_time: Optional[float] = None,
                                    motor_type: Optional[str] = None,
                                    motor_data: Optional[Dict] = None,
@@ -1921,6 +2623,19 @@ class SafetyAnalyzer:
 
         tnt_factor = self.propellant_tnt_equivalents[class_key]
         tnt_equivalent = propellant_mass * tnt_factor
+        # V301/FİZİK-2 (kalem 8a): sıvı çift-iticide TNT eşdeğeri itici
+        # ÇİFTİNE ve senaryoya göre kaynaktan (14 CFR 420 App. E Tablo E-5);
+        # tabloda olmayan çift/senaryoda eski sayı kalır ve kaynaksız diye
+        # beyan edilir (``liquid_biprop_tnt_equivalent``).
+        tnt_dayanak = None
+        if class_key == 'liquid_biprop':
+            tnt_dayanak = liquid_biprop_tnt_equivalent(
+                getattr(self, '_requested_oxidizer', None),
+                getattr(self, '_requested_fuel', None),
+                getattr(self, '_facility_type', None),
+                propellant_mass, tnt_factor)
+            tnt_equivalent = tnt_dayanak['tnt_equivalent_kg']
+            tnt_factor = tnt_dayanak['effective_factor']
 
         # Blast overpressure distances (Hopkinson-Cranz law)
         distances = self._calculate_blast_distances(tnt_equivalent)
@@ -1932,6 +2647,8 @@ class SafetyAnalyzer:
             'propellant_mass_kg': propellant_mass,
             'tnt_equivalent_kg': tnt_equivalent,
             'tnt_equivalent_factor': tnt_factor,
+            **({'tnt_equivalent_basis': tnt_dayanak}
+               if tnt_dayanak is not None else {}),
             'explosive_class': class_key,
             'explosive_class_basis': class_basis,
             'blast_distances': distances,
@@ -2379,7 +3096,8 @@ class SafetyAnalyzer:
                 f"EMPIRICAL case mass fraction {frac:.2f} of propellant mass "
                 f"(chamber geometry was not supplied)")
 
-    def _calculate_fragment_hazards(self, propellant_mass: float, thrust: float,
+    def _calculate_fragment_hazards(self, propellant_mass: float,
+                                    thrust: Optional[float],
                                     burn_time: Optional[float] = None,
                                     motor_data: Optional[Dict] = None,
                                     material: str = 'steel_4130') -> Dict:
@@ -2401,7 +3119,10 @@ class SafetyAnalyzer:
         # iki sayısı birbirini yalanlıyordu. ``max(x, 0)`` bir emniyet
         # önlemi değil, girdinin sessizce yok sayılmasıdır.
         _fizik_disi_degilse('propellant_mass', propellant_mass)
-        _fizik_disi_degilse('thrust', thrust)
+        # V301/K-C1 (KT-16): itki verilmediyse None kalır (kapı yalnız
+        # verilmiş değere uygulanır).
+        if thrust is not None:
+            _fizik_disi_degilse('thrust', thrust)
         # ÖH D36 / onemli2-sivi a2: imza varsayılanı 10,0 s idi (doğrudan
         # çağıran süre vermezse uydurulurdu). Süre verilmediyse None kalır ve
         # serbest kalan motorun süreye bağlı üç alanı aşağıda adıyla geri
@@ -2441,8 +3162,48 @@ class SafetyAnalyzer:
         # ÖH D36 / onemli2-sivi a2: süre yoksa impuls (ve ondan türeyen hız
         # ile enerji) HESAPLANMAZ; ortalama kütle ve bağlama kuvveti süreye
         # bağlı değildir, kalır.
-        total_impulse = (None if burn_time is None
+        total_impulse = (None if (burn_time is None or thrust is None)
                          else float(thrust) * float(burn_time))
+        # V301/FİZİK-2 (KABUL 12): motorun yayımladığı toplam impuls kaydı
+        # geldiyse ve tohumlandığı itki + süre bu istekle eşleşiyorsa impuls
+        # O sayıdır (çözücünün itki integrali); itki × süre yalnız kayıt
+        # yokken ya da girdiler düzenlenmişken kalır. Kayıt gelmeyen istekte
+        # yanıt bit-aynıdır (kaynak alanı da eklenmez).
+        impuls_kaydi = getattr(self, '_motor_total_impulse', None)
+        impuls_kaynagi, impuls_red = None, None
+        if isinstance(impuls_kaydi, dict) and total_impulse is not None:
+            impuls_kaynagi = TOTAL_IMPULSE_SOURCE_THRUST_X_TIME
+            kayit_degeri = _sonlu_sayi(impuls_kaydi.get('total_impulse_ns'))
+            kayit_girdisi = impuls_kaydi.get('inputs')
+            kayit_girdisi = (kayit_girdisi if isinstance(kayit_girdisi, dict)
+                             else {})
+            istek = {'thrust': thrust, 'burn_time': burn_time}
+            ayrisan = []
+            for ad in MOTOR_IMPULSE_INPUT_FIELDS:
+                beklenen = _sonlu_sayi(kayit_girdisi.get(ad))
+                gelen = _sonlu_sayi(istek.get(ad))
+                if (beklenen is None or gelen is None
+                        or abs(gelen - beklenen) > MOTOR_VERDICT_INPUT_REL_TOL
+                        * abs(beklenen)):
+                    ayrisan.append({'field': ad, 'request': gelen,
+                                    'motor_result': beklenen})
+            if kayit_degeri is not None and kayit_degeri > 0 and not ayrisan:
+                total_impulse = kayit_degeri
+                impuls_kaynagi = TOTAL_IMPULSE_SOURCE_MOTOR
+            else:
+                impuls_red = {
+                    'reason': ('motor_total_impulse_value_missing'
+                               if kayit_degeri is None
+                               else 'impulse_inputs_differ_from_motor_result'),
+                    'fields': ayrisan,
+                    'basis': (
+                        'The thrust and burn time of this request are not the '
+                        'ones the motor\'s published total impulse was seeded '
+                        'with (or the record carries no value), so that '
+                        'impulse does not describe this request and was not '
+                        'used: total_impulse_ns is the supplied thrust x burn '
+                        'time.'),
+                }
         # Ortalama uçuş kütlesi: kasa + yakıtın yarısı (yanma boyunca ortalama)
         mean_mass = max(case_mass + propellant_mass / 2.0, 1e-6)
         loose_velocity = (None if total_impulse is None
@@ -2451,7 +3212,7 @@ class SafetyAnalyzer:
                         else 0.5 * mean_mass * loose_velocity ** 2)   # J
         # Bağlama elemanlarının karşılaması gereken kuvvet (yapısal emniyet
         # katsayısıyla) — itkinin doğrudan emniyet karşılığı.
-        restraint_force = (float(thrust)
+        restraint_force = (None if thrust is None else float(thrust)
                            * self.safety_margins.structural_safety_factor)
 
         serbest_motor = {
@@ -2467,7 +3228,22 @@ class SafetyAnalyzer:
                      'trajectory range is quoted because it depends on '
                      'drag and attitude, which this model does not solve.'),
         }
-        if burn_time is None:
+        if impuls_kaynagi is not None:
+            serbest_motor['total_impulse_source'] = impuls_kaynagi
+            if impuls_kaynagi == TOTAL_IMPULSE_SOURCE_MOTOR:
+                serbest_motor['total_impulse_path'] = str(
+                    impuls_kaydi.get('source') or '')[:200] or None
+        if impuls_red is not None:
+            serbest_motor['motor_total_impulse_not_adopted'] = impuls_red
+        if thrust is None:
+            # V301/K-C1 (KT-16): itki yoksa bu kolun dört sayısı da itkiye
+            # bağlıdır (süre verilmiş olsa bile); anahtarlar SİLİNMEZ.
+            serbest_motor.update({
+                'status': BURN_TIME_NOT_EVALUATED,
+                'reason': THRUST_NOT_SUPPLIED_REASON,
+                'not_evaluated': list(UNRESTRAINED_THRUST_FIELDS),
+            })
+        elif burn_time is None:
             # Adıyla geri çekme — anahtarlar SİLİNMEZ (tüketiciler anahtar
             # arar), değer None + durum + gerekçe + hangi alanlar.
             serbest_motor.update({
@@ -2675,6 +3451,19 @@ class SafetyAnalyzer:
             yanit['evacuation_distance_reason'] = beyan['reason']
         return prosedurler
     
+    @staticmethod
+    def _risk_band(skor):
+        """Skor → (risk_level, acceptability); bantlar SAFETY_MODEL'den."""
+        if skor is None:
+            return THERMAL_VERDICT_NOT_EVALUATED, THERMAL_VERDICT_NOT_EVALUATED
+        if skor <= SAFETY_MODEL['risk_score_low_max']:
+            return 'LOW', 'ACCEPTABLE'
+        if skor <= SAFETY_MODEL['risk_score_medium_max']:
+            return 'MEDIUM', 'ACCEPTABLE_WITH_CONTROLS'
+        if skor <= SAFETY_MODEL['risk_score_high_max']:
+            return 'HIGH', 'REQUIRES_MITIGATION'
+        return 'CRITICAL', 'UNACCEPTABLE'
+
     def _calculate_overall_risk(self, structural_safety: Dict, pressure_safety: Dict,
                                thermal_safety: Dict, explosive_hazards: Dict,
                                toxic_hazards: Dict, fire_hazards: Dict) -> Dict:
@@ -2707,68 +3496,126 @@ class SafetyAnalyzer:
             'thermal': thermal_risk, 'explosive': explosive_risk,
             'toxic': toxic_risk, 'fire': fire_risk,
         }
+        # V301/FİZİK-2 (kalem 8b): genel hüküm (risk_level, acceptability,
+        # overall_risk_score) MOTORUN eksenlerinden; tesis eksenleri ayrı
+        # ``facility_hazard`` bloğunda (MOTOR_DESIGN_RISK_AXES /
+        # FACILITY_HAZARD_AXES). Kısmilik de grup başına.
+        # ``risks_not_evaluated`` BÜTÜN eksenleri sayar (panel ölçülmeyen
+        # ekseni bununla gösterir; toksik öneri kapısı bunu okur); motor
+        # hükmünün kısmiliği yalnız motor eksenlerinden.
         degerlendirilmeyen = [ad for ad, skor in eksenler.items()
                               if skor is None]
-        olculen = [skor for skor in eksenler.values() if skor is not None]
+        motor_olculmeyen = [ad for ad in MOTOR_DESIGN_RISK_AXES
+                            if eksenler[ad] is None]
+        olculen = [eksenler[ad] for ad in MOTOR_DESIGN_RISK_AXES
+                   if eksenler[ad] is not None]
         overall_risk_score = max(olculen) if olculen else None
-
-        # Risk level classification
-        if overall_risk_score is None:
-            risk_level = THERMAL_VERDICT_NOT_EVALUATED
-            acceptability = THERMAL_VERDICT_NOT_EVALUATED
-        elif overall_risk_score <= SAFETY_MODEL['risk_score_low_max']:
-            risk_level = 'LOW'
-            acceptability = 'ACCEPTABLE'
-        elif overall_risk_score <= SAFETY_MODEL['risk_score_medium_max']:
-            risk_level = 'MEDIUM'
-            acceptability = 'ACCEPTABLE_WITH_CONTROLS'
-        elif overall_risk_score <= SAFETY_MODEL['risk_score_high_max']:
-            risk_level = 'HIGH'
-            acceptability = 'REQUIRES_MITIGATION'
-        else:
-            risk_level = 'CRITICAL'
-            acceptability = 'UNACCEPTABLE'
+        risk_level, acceptability = self._risk_band(overall_risk_score)
+        tesis_olculmeyen = [ad for ad in FACILITY_HAZARD_AXES
+                            if eksenler[ad] is None]
+        tesis_olculen = {ad: eksenler[ad] for ad in FACILITY_HAZARD_AXES
+                         if eksenler[ad] is not None}
+        tesis_skoru = (max(tesis_olculen.values()) if tesis_olculen
+                       else None)
+        tesis_duzeyi, _ = self._risk_band(tesis_skoru)
+        tesis_kritik = sorted(
+            ad for ad, sk in tesis_olculen.items()
+            if sk > SAFETY_MODEL['risk_score_high_max'])
+        facility_hazard = {
+            'axes': list(FACILITY_HAZARD_AXES),
+            'score': tesis_skoru,
+            'risk_level': tesis_duzeyi,
+            'axes_not_evaluated': tesis_olculmeyen,
+            'axes_in_highest_class': tesis_kritik,
+            'requirement': (FACILITY_REQUIREMENT_MEASURES if tesis_kritik
+                            else None),
+            'basis': (
+                'Facility / siting hazard of the propellant inventory '
+                '(explosive TNT-equivalent quantity-distance, toxic cloud, '
+                'fire). It sets safety distances, siting and facility '
+                'controls; it is NOT a motor design verdict and does not '
+                'call for a redesign. The motor verdict is risk_level / '
+                'acceptability above, from the structural, pressure and '
+                'thermal axes only.'),
+        }
 
         sonuc = {
             'individual_risks': eksenler,
             'risks_not_evaluated': degerlendirilmeyen,
             'overall_risk_score': overall_risk_score,
-            'overall_risk_score_is_partial': bool(degerlendirilmeyen),
+            'overall_risk_score_is_partial': bool(motor_olculmeyen),
             'risk_level': risk_level,
             'acceptability': acceptability,
-            'aggregation_basis': ('worst-axis (max of individual risk '
+            'motor_design_axes': list(MOTOR_DESIGN_RISK_AXES),
+            'facility_hazard': facility_hazard,
+            'aggregation_basis': ('worst motor-design axis (max of the '
+                                  'structural, pressure and thermal risk '
                                   'scores) - uncalibrated weighted '
                                   'averaging removed 2026-07-28; axes that '
                                   'could not be evaluated are excluded from '
                                   'the maximum and listed in '
-                                  'risks_not_evaluated'),
+                                  'risks_not_evaluated. The explosive, '
+                                  'toxic and fire axes are the facility / '
+                                  'siting hazard of the propellant '
+                                  'inventory and are aggregated separately '
+                                  'in facility_hazard (V301/FIZIK-2)'),
             'risk_matrix': self._generate_risk_matrix(),
             'mitigation_priority': self._determine_mitigation_priority(
                 **eksenler),
             'mitigation_priority_not_evaluated': degerlendirilmeyen,
         }
 
-        if degerlendirilmeyen:
+        if motor_olculmeyen:
             # ONAY geri çekilir, UYARI çekilmez (kardeş kural:
             # app.py::_withhold_unearned_structural_verdict). Eksik bir eksen
             # varken 'ACCEPTABLE' bir kazanılmamış onaydır; 'REQUIRES_
             # MITIGATION' / 'UNACCEPTABLE' ise gerçek bir uyarıdır ve
-            # susturulmaz.
+            # susturulmaz. V301/FİZİK-2: motor hükmü için yalnız MOTOR
+            # eksenleri sayılır; tesis eksenlerinin kısmiliği aşağıda.
             sonuc['risk_level_is_partial'] = True
             sonuc['partial_assessment_basis'] = (
-                'The overall score is the worst of the axes that COULD be '
-                'evaluated; '
-                + ', '.join(degerlendirilmeyen)
+                'The motor-design score is the worst of the motor axes that '
+                'COULD be evaluated; '
+                + ', '.join(motor_olculmeyen)
                 + ' did not run, so the true worst axis may be higher. A '
                   'missing evaluation is not a low risk.')
             if acceptability in ('ACCEPTABLE', 'ACCEPTABLE_WITH_CONTROLS'):
                 sonuc['acceptability'] = THERMAL_VERDICT_NOT_EVALUATED
                 sonuc['acceptability_withheld_because'] = (
                     sonuc['partial_assessment_basis'])
+        if tesis_olculmeyen:
+            facility_hazard['is_partial'] = True
+            facility_hazard['partial_basis'] = (
+                ', '.join(tesis_olculmeyen) + ' did not run; the facility '
+                'hazard level is the worst of the facility axes that could '
+                'be evaluated. A missing evaluation is not a low hazard.')
+            if facility_hazard['risk_level'] in ('LOW', 'MEDIUM'):
+                facility_hazard['risk_level_withheld_because'] = (
+                    facility_hazard['partial_basis'])
+                facility_hazard['risk_level'] = THERMAL_VERDICT_NOT_EVALUATED
         return sonuc
     
     # Helper methods for risk scoring
-    def _score_structural_risk(self, structural_safety: Dict) -> float:
+    def _score_structural_risk(self, structural_safety: Dict
+                               ) -> Optional[float]:
+        # V301/PANEL (NK-18): hüküm motorun zincirindense eksen ONU izler.
+        # Geri çekilmiş hüküm "düşük risk" değildir — eksen değerlendirilmedi
+        # (``risks_not_evaluated``). Çözücü bir risk sözcüğü yayımladıysa
+        # skor o sözcüğün bandıdır (geri sınıflandırınca aynı sözcük çıkar);
+        # yayımlamadıysa aynı SF bantları motorun hükmünün katsayısına
+        # uygulanır.
+        if structural_safety.get('verdict_source') == \
+                STRUCTURAL_VERDICT_SOURCE_MOTOR:
+            if structural_safety.get('verdict_withheld') is True:
+                return None
+            kelime = str(structural_safety.get('verdict_risk_level') or '')
+            if kelime.upper() == 'CRITICAL':
+                return 5.0
+            if kelime.upper() in _RISK_WORD_BAND_KEY:
+                return float(SAFETY_MODEL[_RISK_WORD_BAND_KEY[kelime.upper()]])
+            if _sonlu_sayi(structural_safety.get(
+                    'motor_verdict_safety_factor')) is None:
+                return None
         # P5B2-13: YÖNETEN katsayı — birleşik (basınç + termal) katsayı
         # hesaplanabildiyse odur, yoksa basınç-tek katsayısı. Eksen artık
         # 4045 MPa'lık bir termal gerilmeyi görmezden gelmiyor.
@@ -3021,6 +3868,14 @@ class SafetyAnalyzer:
                 'warn.safety.increase_structural_sf', 'warning'))
             recommendations.append(_mk_warning(
                 'warn.safety.higher_strength_materials', 'warning'))
+
+        # V301/FİZİK-2 (kalem 8b): tesis ekseni en yüksek sınıftaysa motora
+        # "yeniden tasarla" denmez; güvenlik mesafesi / tesis önlemi gereği
+        # yayımlanır (uyarı — motorun kendi kusuru değil).
+        _tesis = risk_assessment.get('facility_hazard') or {}
+        if _tesis.get('requirement') == FACILITY_REQUIREMENT_MEASURES:
+            recommendations.append(_mk_warning(
+                'warn.safety.facility_measures_required', 'warning'))
 
         if self._risk_at_least(risk_assessment, 'explosive', 4.0):
             recommendations.append(_mk_warning(

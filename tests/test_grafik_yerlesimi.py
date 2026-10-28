@@ -140,8 +140,9 @@ def test_irtifa_panosu_satir_araligi_yazi_yiginini_kaldirir():
     """Satır arası boşluk, üst satırın eksen yığınına + alt başlığa yeter.
 
     Şeride sırayla giren yazılar (plotly_dark.js'teki boyutlarla):
-    x tik etiketi 11 px, eksen başlığı standoff'u 8 px, eksen başlığı
-    12 px, alt satırın panel başlığı ~17 px = ~48 px. Eski değerlerde
+    x tik etiketi 12 px, eksen başlığı standoff'u 8 px, eksen başlığı
+    14 px, alt satırın panel başlığı ~17 px = ~51 px (v3.0.1 tabanı;
+    eskiden 11/12 px ile ~48 px). Eski değerlerde
     (600 px yükseklik, 0,12 aralık) şerit 50,4 px'ti ve tarayıcıda iki
     sütunda da 8 px örtüşme ölçüldü — yani hesap "sığıyor" dese de
     sığmıyordu; bu yüzden test yalnız toplamı değil, ÖLÇÜLMÜŞ paylı
@@ -155,7 +156,10 @@ def test_irtifa_panosu_satir_araligi_yazi_yiginini_kaldirir():
     cizim_h = ALTITUDE_PLOT_HEIGHT - 100 - 80
     serit_px = ALTITUDE_PLOT_V_SPACING * cizim_h
 
-    gereken_px = 11 + 8 + 12 + 17          # tik + standoff + eksen başlığı + panel başlığı
+    # v3.0.1 (V301/N-grafik G3): tema yazı tabanı tik 12 px, eksen başlığı
+    # 14 px (plotly_dark.js YAZI_TABANI; eskiden 11/12 px). Ölçülen taşma
+    # payı aynen korunur (tolerans gevşetilmedi); yeni yığın 51 px.
+    gereken_px = 12 + 8 + 14 + 17          # tik + standoff + eksen başlığı + panel başlığı
     olculen_tasma_px = 8                   # eski yerleşimde ölçülen örtüşme
     assert serit_px >= gereken_px + olculen_tasma_px, (
         "satır arası boşluk %.1f px; ölçülen yığın %d px + %d px taşma payı"

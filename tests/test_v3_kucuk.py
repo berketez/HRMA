@@ -28,6 +28,8 @@ import subprocess
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 from hrma.data import materials_db as mdb
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -317,11 +319,26 @@ class TestDockMotorSfHedefi:
         assert 'material database default' not in d['metin']
 
     def test_sivi_olculen_vaka(self, client, ornek_motorlar):
-        """YP7 devri: örnek sıvı hedefi 2,5; dock eskiden 3,0 notluyordu."""
+        """YP7 devri: örnek sıvı hedefi 2,5; dock eskiden 3,0 notluyordu.
+
+        V3.0.5 (28 Eki, A1): hedef girdiden AYNEN taşınır (tam eşitlik
+        kalır). ``target_derived_minimum_safety_factor`` ise bir girdi
+        değil, HRMA'nın hedefe göre boyutlandırdığı istasyonların (kapak,
+        lüle) kendi geometrisinden YENİDEN HESAPLANAN emniyet katsayısıdır.
+        Ürün bu sayıyı hedefle 1e-9 bağıl bant içinde "hedefi geri okuyor"
+        diye sınıflar (``structural_analysis``: deger >= hedef·(1 − 1e-9)).
+        ÖLÇÜLDÜ (RAPOR A1 §6): örnek sıvı gerçek sayfa gövdesiyle yeniden
+        üretildikten sonra (V301/ÖRNEK 5fa435893) kapak 2,4999999999999996
+        çıkıyor (1 ulp, bağıl 1,8e-16; eski örnek bugünkü kodla tam 2,5).
+        Ekranda 2.50 basılıyor. Bu bir kayan nokta artığıdır, gerileme
+        değildir. Sayı hedefe "yuvarlanıp" yayımlanmaz, çünkü hesaplanan
+        değerdir. Kıyas: bağıl 1e-12 (ürünün kendi bandının bin kat
+        içi)."""
         d = _dock_akisi(client, 'liquid', ornek_motorlar['liquid'])
         dta = _dta(d['uc'])
         assert dta['design_safety_factor_target'] == 2.5
-        assert dta['target_derived_minimum_safety_factor'] == 2.5
+        assert dta['target_derived_minimum_safety_factor'] == pytest.approx(
+            2.5, rel=1e-12)
 
     @pytest.mark.parametrize('tur', ('hybrid', 'solid', 'liquid'))
     def test_hedef_yoksa_malzeme_varsayilani_adiyla(self, client,
@@ -709,8 +726,10 @@ class TestProjeYuklemeUyarisi:
 # propellant_type boşken uç "propellant_type = apcp endpoint_default" diyordu;
 # örnek katı motor (KNDX) 'kndx' çözüyordu. Kâhin: motorun kendi çözüm
 # kaynağı (``propellant_type_source``) — künye ile motor AYNI şeyi söylemeli.
-_KATI_TABAN = {'chamber_pressure': 40, 'chamber_diameter': 100,
-               'grain_length': 500, 'core_diameter': 30}
+# v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+# (A_p/A_t 0,947); K-A kapısından beri 422. Konu port değil: geometri
+# tek tanım SOLID_DEFAULT_GEOMETRY_MM'den (kopyalanmaz).
+_KATI_TABAN = {'chamber_pressure': 40, **SOLID_DEFAULT_GEOMETRY_MM}
 
 
 def _itici_kunyesi(j):
@@ -737,8 +756,12 @@ class TestKatiIticiBeyani:
 
     def test_uc_varsayilani_gercekten_cozulduyse_beyan_edilir(self, client):
         from hrma.app import SOLID_ENDPOINT_DEFAULTS
+        # v3.0.1 T-ÇAPA-B: a = 0,005 / n = 0,35 ile varsayılan çekirdek
+        # (48 mm) de boğuluyor (A_p/A_t 0,958, ölçüldü); konu itici künyesi,
+        # port değil → açık geçerli port: çekirdek 70 mm (A_p/A_t 1,90).
         r = client.post('/calculate_solid', json=dict(
-            _KATI_TABAN, burn_rate_a=0.005, burn_rate_n=0.35), headers=H)
+            _KATI_TABAN, burn_rate_a=0.005, burn_rate_n=0.35,
+            core_diameter=70), headers=H)
         assert r.status_code == 200, r.get_data(as_text=True)[:300]
         j = r.get_json()
         assert j['propellant_type_source'] == 'endpoint default'
@@ -1040,14 +1063,27 @@ class TestFeaYukModeli:
     @pytest.mark.parametrize('oran,banta', [(1.5, True), (0.5, False)])
     def test_ham_tepe_bant_tanisi(self, fea_ornek_kati, oran, banta):
         """Bant d_SV'si tepe düğümünün uç kesite UZAKLIĞINA göre kurulur
-        (kâhin Python'da): içerideyse tanı basılır, dışarıdaysa basılmaz."""
+        (kâhin Python'da): içerideyse tanı basılır, dışarıdaysa basılmaz.
+
+        V3.0.5 (28 Eki, A1): bekçi eskiden yük ucunu sabit z_min alıyordu.
+        Örnek katı motor gerçek sayfa gövdesiyle yeniden üretildi (V301/ÖRNEK
+        5fa435893, main'e 9ece56015: lüle girdileri açık — boğaz 18,4 mm,
+        yakınsak 45°, grafit lüle, kartuş yüklü tane). ÖLÇÜLDÜ (RAPOR A1):
+        ham tepe artık z_min uç kesitinin İÇ KÖŞE düğümünde (d = 0; eski
+        örnekle bugünkü kodda 28,6 mm). d = 0 iken sınıflandırma sınırı
+        (d·oran) boşalır. Ürünün gerçek durumu (tepe yük uygulanan uçta →
+        tanı basılır) ``test_gercek_uc_yaniti``nda ucun kendi bandıyla
+        sınanıyor; bu bekçi sınıflandırıcıyı tepenin kesitine UZAK uçla
+        sürer (yük ucu o uç, kip karşıtı). Ölçüt ve parametreler aynen."""
         fea = json.loads(json.dumps(fea_ornek_kati))
         k, p = _beklenen_tepe(fea)
         fea['scalars']['peak_safety_factor'] = fea['fields']['safety_factor'][k]
-        d = _uc_uzakligi(fea, p, 'z_min')
-        assert d > 0, 'ön koşul: tepe uç kesitin üstünde değil'
+        uzaklik = {u: _uc_uzakligi(fea, p, u) for u in ('z_min', 'z_max')}
+        uc = max(uzaklik, key=uzaklik.get)
+        d = uzaklik[uc]
+        assert d > 0, 'ön koşul: tepe en az bir uç kesitin üstünde değil'
         fea.setdefault('meta', {}).setdefault('cozucu', {})['saint_venant'] = {
-            'axial_fix': 'z_max',
+            'axial_fix': 'z_max' if uc == 'z_min' else 'z_min',
             'bantlar': [{'neden': 'kisit', 'd_SV_m': 1.0},
                         {'neden': 'yuk_uygulama', 'd_SV_m': d * oran}]}
         ev = _fea_kos(fea)
@@ -1055,7 +1091,7 @@ class TestFeaYukModeli:
             assert ev['peak_band'] is None
             return
         pb = ev['peak_band']
-        assert pb['end'] == 'z_min'
+        assert pb['end'] == uc
         assert pb['z_m'] == p[0] and pb['r_m'] == p[1]
         satir = dict((a, m) for a, m in ev['satirlar'])['peak_band']
         assert satir.startswith('Diagnosis (not a verdict): the raw peak '
@@ -1708,6 +1744,14 @@ class TestKk3GuvenlikCidarNedeni:
         r = copy.deepcopy(ornek_motorlar['hybrid'])
         r['motor']['heat_transfer_analysis']['gas_side_analysis'][
             'wall_temperature_unphysical'] = False
+        # V3.0.5 T-ÇAPA-C1 — ÖNCÜL AÇIKÇA (V301/H-termal 77d64c641 + PANEL):
+        # örnek hibritte cidar çiftinin kaynağı artık bölge beyanıdır
+        # ('hybrid_chamber_zone_protection', güvertenin ÇÖZÜLMEDİ listesinde),
+        # yani bayrak kalksa da çift önerilmez. Bu düğümün sorusu yalnız
+        # "bayrak yokken 'fiziksel değil' nedeni uydurulmaz mı"; kopyada
+        # kaynak, ısı modülünün kendi çözüm etiketine çekilir.
+        r['motor']['structural_analysis']['thermal_analysis'][
+            'wall_temperature_source'] = 'heat_transfer_module'
         out = _kk3(_DOCK_DOSYALARI + [_GUVENLIK_JS], _GUVENLIK_BETIK,
                    motor=r, uc=uc_geri)
         assert 'wall_temperature_hot' in out['sug']

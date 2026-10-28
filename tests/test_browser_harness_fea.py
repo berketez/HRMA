@@ -841,3 +841,221 @@ class TestOlcumBetikleri:
         for ad, tanim in esikler.ROZET_IMZALARI.items():
             assert tanim.get('gerekce'), ad
             assert tanim.get('varyantlar'), ad
+
+
+# ---------------------------------------------------------------------------
+# V305/G3 — termal sınır hükmünün GERİ ÇEKİLMİŞ hâli (ürün kuralı aynası)
+# ---------------------------------------------------------------------------
+#
+# Yayın kapısı turu (28 Eki, /hybrid) iki denetimle kalıyordu: ürün olumlu
+# hükmü geri çekip ("NO SAFETY VERDICT — …; the peak is shown against the
+# allowable 3300 K for information only") doğru basarken, aynada bu dal
+# YOKTU. İmza 'ALLOWABLE'ı büyük harf arıyordu (rozette küçük harf), yük
+# çaprazı da sunucunun geri çekmede null'a çektiği olumlu bayrağı "izin
+# yayımlanmamış" sanıyordu — yükte allowable_temperature_K = 3300 DURURKEN.
+#
+# Aşağıdaki ölçüm 28 Eki turunda gerçekten okunan değerlerdir
+# (~/HRMA-calisma/2026-10-28/v305-ci/G1/tur_once/tour_report.json,
+# olcumler.fea.termal); sentetik olan yalnız BOZULMUŞ varyantlardır.
+
+THERMAL_PANEL_JS = ROOT / 'hrma/static/js/thermal_fea_panel.js'
+
+GERI_CEKME_ROZETI_EN = (
+    'NO SAFETY VERDICT — numerical convergence not achieved; the h(z) '
+    'magnitude cross-check did not run for the nozzle wall (the motor '
+    'publishes its throat coefficient only for the chamber material ss_304; '
+    'this wall is graphite); the peak is shown against the allowable 3300 K '
+    'for information only')
+GERI_CEKME_ROZETI_TR = (
+    'GÜVENLİK HÜKMÜ YOK — sayısal yakınsama sağlanmadı; nozul cidarında h(z) '
+    'mertebe denetimi yapılamadı (motor boğaz katsayısını yalnız kamara '
+    'malzemesi ss_304 için yayımlıyor; bu cidar graphite); tepe sıcaklık '
+    'izin sınırı 3300 K ile yalnız bilgi için gösterilir')
+
+
+def termal_geri_cekilmis_olcum(sinir_rozeti: str = GERI_CEKME_ROZETI_EN,
+                               sinir_rengi: str = 'warn',
+                               **ml_degisiklik) -> Dict[str, Any]:
+    """28 Eki hibrit turu: olumlu hüküm geri çekilmiş termal panel."""
+    ml = {'allowable_temperature_K': 3300, 'melting_point_K': 3900,
+          'exceeds_allowable': None, 'exceeds_melting': None,
+          'verdict_withheld': True, 'hg_anchor_material': 'ss_304',
+          'hg_mesh_material': 'graphite'}
+    ml.update(ml_degisiklik)
+    rozetler = [
+        rozet('ENGINE: HYBRID'),
+        rozet('MESH 1024 elements / 1105 nodes'),
+        rozet('PEAK WALL T 3292 K at t = 10.00 s'),
+    ]
+    if sinir_rozeti is not None:
+        rozetler.append(rozet(sinir_rozeti, sinir_rengi))
+    rozetler += [
+        rozet('WALL MATERIAL: graphite — the motor\'s nozzle material (this '
+              'field covers the nozzle wall only)'),
+        rozet('ENERGY RESIDUAL 9.6e-13 (relative)'),
+        rozet('TIME STEP CONVERGED (time axis only)', 'ok'),
+    ]
+    yuk = {
+        'scalars': {'peak_wall_T_K': 3292.028412790944, 'peak_time_s': 10},
+        'material_limits': ml,
+        'time_step': {'converged': True},
+        'energy': {'residual_rel': 9.6e-13},
+        'engine_layout': 'hybrid',
+        'mesh_info': {'n_elems': 1024, 'n_nodes': 1105},
+    }
+    return termal_olcum(rozetler=rozetler, rozet_sayisi=len(rozetler),
+                        yuk_ozeti=yuk)
+
+
+def _render_badges_govdesi() -> str:
+    """thermal_fea_panel.js renderBadges gövdesi (ürün kuralının kaynağı)."""
+    kod = THERMAL_PANEL_JS.read_text(encoding='utf-8')
+    bas = kod.index('function renderBadges(el, vm)')
+    son = kod.index('el.innerHTML = html;', bas)
+    return kod[bas:son]
+
+
+class TestTermalGeriCekilmisHukum:
+
+    @pytest.mark.parametrize('metin', [GERI_CEKME_ROZETI_EN,
+                                       GERI_CEKME_ROZETI_TR],
+                             ids=['en', 'tr'])
+    def test_geri_cekilmis_hukum_sinir_imzasini_tasir(self, metin):
+        """Sınır bilgisini taşıyan geri çekme rozeti imza ailesindendir."""
+        hukum = denetimler.fea_rozet_denetimi(
+            'termal', termal_geri_cekilmis_olcum(sinir_rozeti=metin),
+            sayfalar.TERMAL_FEA.beklenen_imzalar)
+        assert hukum.gecti is True, hukum.ozet
+        assert 'termal_sinir_hukmu [warn]' in hukum.ozet
+
+    @pytest.mark.parametrize('metin', [GERI_CEKME_ROZETI_EN,
+                                       GERI_CEKME_ROZETI_TR],
+                             ids=['en', 'tr'])
+    def test_geri_cekilmis_hukum_yukle_tutar(self, metin):
+        hukum = denetimler.fea_yuk_caprazi_denetimi(
+            'termal', termal_geri_cekilmis_olcum(sinir_rozeti=metin))
+        assert hukum.gecti is True, hukum.ozet
+        assert 'olumlu hüküm geri çekildi' in hukum.ozet
+
+    def test_izin_varken_izin_yayimlanmadi_beklentisi_dogmaz(self):
+        """Yükte allowable_temperature_K varken 'izin yayımlanmadı' aranmaz."""
+        olcum = termal_geri_cekilmis_olcum()
+        adlar = [b['ad'] for b in denetimler._capraz_beklentileri(
+            'termal', olcum['yuk_ozeti'])]
+        assert 'malzeme sınırı hükmü (olumlu hüküm geri çekildi)' in adlar
+        assert 'malzeme sınırı hükmü (izin yayımlanmadı)' not in adlar
+
+    def test_izin_gercekten_yoksa_izin_yayimlanmadi_beklenir(self):
+        """Geri çekme yok + izin bayrağı yok → ürünün son dalı (:1235)."""
+        olcum = termal_geri_cekilmis_olcum(
+            sinir_rozeti='ALLOWABLE NOT PUBLISHED — below melting point 3900 K',
+            sinir_rengi='dim', allowable_temperature_K=None,
+            verdict_withheld=False)
+        adlar = [b['ad'] for b in denetimler._capraz_beklentileri(
+            'termal', olcum['yuk_ozeti'])]
+        assert 'malzeme sınırı hükmü (izin yayımlanmadı)' in adlar
+        hukum = denetimler.fea_yuk_caprazi_denetimi('termal', olcum)
+        assert hukum.gecti is True, hukum.ozet
+
+    # --- ters mutasyonlar: gevşetme gerçek eksikliği gizlemiyor ----------
+
+    def test_geri_cekme_rozeti_silinirse_iki_denetim_de_kalir(self):
+        olcum = termal_geri_cekilmis_olcum(sinir_rozeti=None)
+        rozet_hukmu = denetimler.fea_rozet_denetimi(
+            'termal', olcum, sayfalar.TERMAL_FEA.beklenen_imzalar)
+        assert rozet_hukmu.gecti is False
+        assert 'termal_sinir_hukmu' in rozet_hukmu.ozet
+        capraz_hukmu = denetimler.fea_yuk_caprazi_denetimi('termal', olcum)
+        assert capraz_hukmu.gecti is False
+        assert 'YÜKTE VAR EKRANDA YOK' in capraz_hukmu.ozet
+        assert 'olumlu hüküm geri çekildi' in capraz_hukmu.ozet
+
+    def test_sinir_sayisi_bozulursa_kalir(self):
+        olcum = termal_geri_cekilmis_olcum(
+            sinir_rozeti=GERI_CEKME_ROZETI_EN.replace('3300 K', '3500 K'))
+        hukum = denetimler.fea_yuk_caprazi_denetimi('termal', olcum)
+        assert hukum.gecti is False
+        assert 'SAYI yükle tutmuyor' in hukum.ozet
+
+    def test_geri_cekme_rozeti_yesile_boyanirsa_kalir(self):
+        olcum = termal_geri_cekilmis_olcum(sinir_rengi='ok')
+        hukum = denetimler.fea_yuk_caprazi_denetimi('termal', olcum)
+        assert hukum.gecti is False
+        assert 'RENK yükle tutmuyor' in hukum.ozet
+
+    def test_geri_cekilmisken_olumlu_hukum_basilirsa_kalir(self):
+        """Yük hükmü geri çekti; ekran 'izin içinde' derse yalan söyler.
+
+        İmza katmanı bunu YAKALAMAZ (aile aynı: 'ALLOWABLE'); kapı yük
+        çaprazıdır — gevşetmenin olumlu hükmü sızdırmadığının kanıtı.
+        """
+        olcum = termal_geri_cekilmis_olcum(
+            sinir_rozeti='WITHIN ALLOWABLE 3300 K', sinir_rengi='ok')
+        hukum = denetimler.fea_yuk_caprazi_denetimi('termal', olcum)
+        assert hukum.gecti is False
+        assert 'olumlu hüküm geri çekildi' in hukum.ozet
+
+    def test_geri_cekilmemisken_hukum_yok_basilirsa_kalir(self):
+        """Yük 'izin içinde' diyor; ekran hükmü geri çekerse de yanlıştır."""
+        olcum = termal_geri_cekilmis_olcum(
+            verdict_withheld=False, exceeds_allowable=False,
+            exceeds_melting=False)
+        hukum = denetimler.fea_yuk_caprazi_denetimi('termal', olcum)
+        assert hukum.gecti is False
+        assert 'sınır içinde' in hukum.ozet
+
+    def test_asim_korunurken_gerekce_rozeti_aranir(self):
+        """:1336-1342 — geri çekme + aşım → ayrıca 'ALSO NOTE' rozeti."""
+        asim = 'EXCEEDS ALLOWABLE 3300 K (melting point 3900 K)'
+        olcum = termal_geri_cekilmis_olcum(
+            sinir_rozeti=asim, exceeds_allowable=True)
+        hukum = denetimler.fea_yuk_caprazi_denetimi('termal', olcum)
+        assert hukum.gecti is False
+        assert 'geri çekme gerekçesi' in hukum.ozet
+        olcum['rozetler'].append(rozet(
+            'ALSO NOTE: numerical convergence not achieved — the exceedance '
+            'above stands (only a positive verdict is withheld)', 'warn'))
+        hukum = denetimler.fea_yuk_caprazi_denetimi('termal', olcum)
+        assert hukum.gecti is True, hukum.ozet
+
+    # --- ayna ⟷ ürün kaynağı bağı ---------------------------------------
+
+    def test_ayna_urun_zincirinin_sirasini_izler(self):
+        """Ürün zinciri sırası değişirse ayna sessizce bayatlamaz."""
+        govde = _render_badges_govdesi()
+        sira = ["'feaT.badgeOverMelting'", "'feaT.badgeOverAllowable'",
+                'ml.verdict_withheld === true', 'withheldBadge(ml)',
+                "'feaT.badgeWithinLimits'", "'feaT.badgeAllowMissing'",
+                "'feaT.badgeLimitsMissing'"]
+        yerler = [govde.find(p) for p in sira]
+        assert all(y >= 0 for y in yerler), dict(zip(sira, yerler))
+        assert yerler == sorted(yerler), dict(zip(sira, yerler))
+        # Aynada da aynı sıra (geri çekme, 'sınır içinde'den ÖNCE).
+        kod = (ROOT / 'tools/browser_harness/denetimler.py').read_text(
+            encoding='utf-8')
+        bas = kod.index("elif panel_adi == 'termal':")
+        dilim = kod[bas:kod.index("elif panel_adi == 'tane':", bas)]
+        ayna = ["(erime aşıldı)", "(izin aşıldı)",
+                "(olumlu hüküm geri çekildi)", "(sınır içinde)",
+                "(izin yayımlanmadı)", "(sınır kaydı yok)"]
+        ayna_yer = [dilim.find(p) for p in ayna]
+        assert all(y >= 0 for y in ayna_yer), dict(zip(ayna, ayna_yer))
+        assert ayna_yer == sorted(ayna_yer), dict(zip(ayna, ayna_yer))
+
+    def test_geri_cekme_rozeti_uyari_rengi_ve_izin_sayisi_basar(self):
+        """withheldBadge: 'warn' + fmt(allowable, 0) — aynanın renk/sayısı."""
+        kod = THERMAL_PANEL_JS.read_text(encoding='utf-8')
+        bas = kod.index('function withheldBadge(ml)')
+        govde = kod[bas:kod.index('\n    }', bas)]
+        assert "'feaT.badgeVerdictWithheld'" in govde
+        assert 'fmt(ml.allowable_temperature_K, 0)' in govde
+        assert "'warn')" in govde
+
+    def test_asim_gerekce_rozeti_kosulu_urunle_ayni(self):
+        govde = _render_badges_govdesi()
+        bas = govde.index("'feaT.badgeWithheldOnExceedance'")
+        kosul = govde[govde.rindex('if (ml', 0, bas):bas]
+        assert 'ml.verdict_withheld === true' in kosul
+        assert 'ml.exceeds_allowable === true' in kosul
+        assert 'ml.exceeds_melting === true' in kosul
+        assert "'warn')" in govde[bas:bas + 400]

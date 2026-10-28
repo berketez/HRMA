@@ -344,10 +344,18 @@ class TestK2TauSecimi:
                                   '(mixing_residence_time → selected), '
                                   'ratio 2,1563'),
             'growth_is_tau_sensitive': 'NOT MEASURED (null)',
+            # V301/PANEL-SAYI (28 Eki, FİZİK-2 DEVİR 5): TR ekranda
+            # ÇEVRİLEMEYEN sunucu gerekçesi hücreye İngilizce basılmaz;
+            # hücrede sözlük cümlesi (bu koşum sözlüksüz: yedek metin),
+            # gerekçenin kendisi tablonun altında kapalı "Teknik ayrıntı
+            # (çözücü beyanı, çevrilmedi)" içinde AYNEN.
             'growth_rate_1_s_span': ('-40 – -12,5 1/s '
                                      '(selected → mixing_residence_time), '
-                                     'span 27,5 1/s — sign change'),
+                                     'span 27,5 1/s — no ratio is published '
+                                     '(reason: solver statement below)'),
         }, hucre
+        assert re.search(r'<details data-stab-srv="1"[^>]*>.*?sign change',
+                         o['html'], flags=re.S), o['html'][-600:]
 
     @staticmethod
     def _bayrak_hucreleri(html):
@@ -910,7 +918,11 @@ class TestK5EkranOndaligi:
         const bas = kaynak.indexOf('const numOf = (v) =>');
         const son = kaynak.indexOf('badges.innerHTML = html;', bas);
         function kos(pencere) {
-          const ctx = {s: %s, usedCurve: true, Number, Math, String, isFinite,
+          // T-ÇAPA-C2: render(data, usedCurve, sayfaMotoru, aracKuru) imzası
+          // (V301/H-PANEL 4e16c916e, UÇUŞ 34996377f); yük sayfa motoru
+          // taşımaz -> ikisi de null (test_faz5_ui ile aynı kesim).
+          const ctx = {s: %s, usedCurve: true, sayfaMotoru: null, aracKuru: null,
+            Number, Math, String, isFinite,
             badge: (t, k) => '[' + k + ']' + t + '\n', T: (k, f) => f, TF: tf};
           if (pencere) ctx.window = pencere;
           vm.createContext(ctx);
@@ -973,7 +985,11 @@ class TestK6KosuNoktasiKunyesi:
         f = json.loads(create_combustion_analysis_plots(cd))
         kosu = [t for t in f['data'] if t.get('name') == 'This run (solver)']
         assert len(kosu) == 1
-        notlar = ' '.join(x.get('text', '') for x in f['layout']['annotations'])
+        # v3.0.1 (V301/N-grafik G3): pano dipnotu satırlara sarılır (sağdan
+        # taşıyordu); satır sonu sunumdur, cümle aynıdır — '<br>' + girinti
+        # tek boşluğa indirgenerek karşılaştırılır.
+        notlar = re.sub(r'<br>\s*', ' ', ' '.join(
+            x.get('text', '') for x in f['layout']['annotations']))
         return cd, kosu[0], notlar
 
     def test_deniz_seviyesi_capasi_ayni_capa_notu(self):

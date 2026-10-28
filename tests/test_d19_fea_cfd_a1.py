@@ -98,10 +98,48 @@ def yapisal_girdiler_kati(kati_motor_sozlugu):
     return gir
 
 
+#: V3.0.5 A2 — ÖLÇÜM KOŞULU AÇIKÇA SABİTLENDİ (28 Eki).
+#: TestF4'ün iddiası "yayımlanan SF kısıt tekilliğinden ALINMAZ"; bunu
+#: ancak kısıtlı ucun ham tepesi hükmü ele geçirebilen bir geometri
+#: sınayabilir. Hibrit varsayılan geometrisi iki kez bilinçli değişti:
+#:
+#: * a0dca0dc0 (19 Eki, v301/port-kamara): kamara çapı yanma sonu port
+#:   çapına iner (kaynaksız 1,5·√N·D_port_son ve 0,8 kırpması söküldü).
+#:   Bu gövdede kamara 102,16 → ~68 mm, cidar 21,28 → 14,19 mm. Bekçi
+#:   YEŞİL kaldı ama DİŞİNİ yitirdi: hükmü ham düğüm tepesine döndüren
+#:   ters mutasyon (D19 öncesi kusur) 14,19 mm cidarda z_max'ı yalnız
+#:   %0,286 oynatıyor, kip oranı 1,0578 — iki eşiğin de altında.
+#: * 77d64c641 (26 Eki, H-termal): korunan bölgelerle boyutlandırılan cidar
+#:   3,61 mm'ye indi (bugün 3,78 mm; H-PANEL 74b55500a c* verimi η=0,89).
+#:   Bekçi burada KIRMIZI oldu (256→512 %3,127, kip oranı 1,2573), ama
+#:   kırmızının yeri kısıt bandı DEĞİL: hüküm istasyonu boğazda
+#:   (z ≈ 0,039 m, bant z > 0,072 m) ve Saint-Venant maskesi tümüyle
+#:   kapatıldığında sayılar BİREBİR aynı. Sebep bu sınıfın ``_coz``
+#:   aracının skaler sabit P_c yükü (kapalı uç kuvveti yok): ürün 14 Eki'den
+#:   beri bu yükü çözmüyor (fea-yuk 2. tur, karar §28-18 (B)); ince cidarda
+#:   o yükün yapay net eksenel kuvveti boğazı zorluyor. Aynı ince geometri
+#:   ÜRÜNÜN yüküyle (``pressure_load``) yakınsıyor: z_max 256→512 %0,178,
+#:   kip oranı 1,0017. Ürün gerilemesi yok.
+#:
+#: Bu yüzden geometri, mekanizmanın ölçülebildiği port-kamara ÖNCESİ
+#: hâline sabitlenir: kamara çapı, cidar ve c* verimi açıkça verilir. Bu üç
+#: alanla köprü girdisi af9e4ee37 ağacındaki varsayılan istekle BİT-AYNI
+#: (cidar 0,0212843818764787 m, kontur toplamı 2,14223033; ölçüldü,
+#: docs/scofield/raw/OH/V305/ci/A2/RAPOR.md). Bu fikstürde:
+#:   bantlı ürün   : z_max 256→512 %0,077, kip oranı 1,0748 (YEŞİL)
+#:   ham tepe hükmü: z_max 256→512 %3,769, kip oranı 1,4099 (KIRMIZI)
+#: yani bekçi D19'un kapattığı kusuru yeniden yakalıyor. Toleranslar
+#: (DEFAULT_REFINE_TOL, 1,10) değişmedi.
+HIBRIT_GOVDE_SV = dict(HIBRIT_GOVDE,
+                       combustion_efficiency=100.0,
+                       wall_thickness=21.2843818764787,
+                       chamber_diameter_input=102.16083061250222)
+
+
 @pytest.fixture(scope='module')
 def yapisal_girdiler(client):
     from hrma.fea.bridge import extract_structural_inputs
-    r = _sessiz(client.post, '/calculate', json=HIBRIT_GOVDE)
+    r = _sessiz(client.post, '/calculate', json=HIBRIT_GOVDE_SV)
     assert r.status_code == 200, r.get_data(as_text=True)[:300]
     gir = extract_structural_inputs(r.get_json()['motor'])
     assert gir.get('status') == 'ok', gir.get('reason')

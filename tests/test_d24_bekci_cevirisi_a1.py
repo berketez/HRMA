@@ -471,6 +471,88 @@ OLU_GIRDI_ENVANTERI = {
 }
 
 
+# ---------------------------------------------------------------------------
+# V305/C1 (28 Eki) — ``/calculate_solid`` taban yükü artık katı örneğin GERÇEK
+# sayfa gövdesi (``uc_katalogu``: 'examples/*.hrma (kati)', 106 alan; V301/
+# ÖRNEK 5fa435893 + KABUL hasadı). Sayfa Hesapla'da her paneldeki alanı bu
+# uca gönderir; eski taban (dar API gövdesi) bu alanları hiç taşımadığı için
+# matris onları görmüyordu. Ölçüldü: 37 alan bu uçta ölü. Hepsi ADIYLA iki
+# beyan katmanından birine girer; ikisi de fail-closed:
+#
+#   (1) ÜRÜN BEYANI (23 alan) — motor taban yanıtında ``unwired_inputs`` ile
+#       hangi alanı NEDEN kullanmadığını söyler (``computed_by_solver``,
+#       ``structural_output``, ``test_bench_only``, ``informational``,
+#       ``overridden_by_material``, ``geometry_not_modelled``). Sayfa ölçümü
+#       (``tools/wiring_map.measure_page``) aynı beyanı ``declared_unwired``
+#       diye zaten okuyor; uç ölçümü okumuyordu. Beyan STATİK DEĞİL, her
+#       koşumda yanıttan okunur. Beyanlı ama bu uçta CANLI alan kırmızıdır
+#       (beyan çürümesi). Beyan yalnız ``URUN_BEYANI_OKUNAN_UCLAR``da okunur.
+#   (2) BAŞKA TÜKETİCİ (14 alan, ``BASKA_TUKETICI_BEYANI``) — ürünün beyan
+#       etmediği alanlar bu uçta değil başka yerde tüketilir; tüketici ADIYLA
+#       yazılır ve ``test_baska_tuketici_beyani_olculuyor`` onu ÖLÇER (tane
+#       tipine bağlı alanlar o tipte, yörünge alanları yörünge ucunda canlı).
+#       Burada canlanan alan listede kalamaz (``olu_a`` kapısı).
+# ---------------------------------------------------------------------------
+URUN_BEYANI_OKUNAN_UCLAR = ('/calculate_solid',)
+
+#: Alan -> (tüketici, ölçüm bağlamı). Bağlam ``None`` ise uç tüketicisi yoktur
+#: ve gerekçe metindedir (ölçülecek ikinci uç yok).
+BASKA_TUKETICI_BEYANI = {
+    '/calculate_solid': {
+        # Yörünge paneli: solid.html computeTrajectory() bu dört alanı
+        # /api/trajectory-analysis'e initial_mass / final_mass /
+        # drag_coefficient / reference_area adıyla gönderir.
+        'traj_initial_mass': ('/api/trajectory-analysis', 'initial_mass'),
+        'traj_final_mass': ('/api/trajectory-analysis', 'final_mass'),
+        'traj_drag_coeff': ('/api/trajectory-analysis', 'drag_coefficient'),
+        'traj_ref_area': ('/api/trajectory-analysis', 'reference_area'),
+        # Devre dışı gösterge (solid.html: disabled, data-derived-from=
+        # "thrust_curve"): kullanıcı GİREMEZ, itki eğrisinden doldurulur;
+        # yörünge gövdesi de onu göndermez. Yutulan kullanıcı değeri yok.
+        'traj_burn_time': (None, 'disabled derived display field'),
+        # Tane FEA panelinin istemci tarafı ağ çizimi onay kutusu
+        # (hrma/static/js/fea_panel.js gShowMesh); hesap girdisi değil.
+        'grainfea_show_mesh': (None, 'client-side FEA mesh overlay toggle'),
+        # Tane tipine bağlı kesit alanları: taban tane BATES, bu alanlar
+        # yalnız kendi tiplerinde canlı (aynı uç, grain_type bağlamı).
+        'star_points': ('/calculate_solid', {'grain_type': 'star'}),
+        'star_radius': ('/calculate_solid', {'grain_type': 'star'}),
+        'fin_count': ('/calculate_solid', {'grain_type': 'finocyl',
+                                           'fin_length': 10}),
+        'fin_width': ('/calculate_solid', {'grain_type': 'finocyl',
+                                           'fin_length': 10}),
+        'fin_length': ('/calculate_solid', {'grain_type': 'finocyl',
+                                            'fin_length': 10}),
+        'slot_count': ('/calculate_solid', {'grain_type': 'slotted',
+                                            'slot_depth': 10}),
+        'slot_width': ('/calculate_solid', {'grain_type': 'slotted',
+                                            'slot_depth': 10}),
+        'slot_depth': ('/calculate_solid', {'grain_type': 'slotted',
+                                            'slot_depth': 10}),
+    },
+}
+
+
+def _urun_beyani(istemci, yol):
+    """Ucun taban yanıtındaki ``unwired_inputs`` beyanı (alan kümesi).
+
+    Çağrı LİTERAL rota ile yazılır (TestOHD2312RotaCikarimi tavanı:
+    değişken rota çözülemeyen çağrı sayılır); tek okunan uç katı ucudur.
+    """
+    import contextlib
+    from tests.support import uc_katalogu
+    assert yol == '/calculate_solid' == uc_katalogu.kayit(yol).cagri_yolu, (
+        'ürün beyanı yalnız katı ucunda okunur; yeni uç literal çağrıyla '
+        'eklenmeli')
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        r = istemci.post('/calculate_solid',
+                         json=uc_katalogu.taban_yuk('/calculate_solid'))
+    assert r.status_code == 200, r.get_data(as_text=True)[:300]
+    beyan = (r.get_json() or {}).get('unwired_inputs') or {}
+    return {a for alanlar in beyan.values() for a in (alanlar or [])}
+
+
 def _hafif_uclar():
     from tests.support import uc_katalogu
     return [y for y in uc_katalogu.olculebilir_uclar()
@@ -535,7 +617,17 @@ class TestP15B310SarsimKapsami:
                 contextlib.redirect_stderr(io.StringIO()):
             rapor = wiring_map.measure_endpoint(istemci, yol)
         beklenen = set(OLU_GIRDI_ENVANTERI.get(yol, ()))
-        yeni = sorted(set(rapor.dead_inputs) - beklenen)
+        # V305/C1: başka tüketicili alanlar (ölçümlü beyan) burada ölü
+        # OLMALI; canlanırsa aşağıdaki ``olu_a`` kapısı kırmızı verir.
+        beklenen |= set(BASKA_TUKETICI_BEYANI.get(yol, {}))
+        urun_beyani = (_urun_beyani(istemci, yol)
+                       if yol in URUN_BEYANI_OKUNAN_UCLAR else set())
+        canli_beyan = sorted(urun_beyani & set(rapor.live_inputs))
+        assert not canli_beyan, (
+            '%s: ürün bu alanları unwired_inputs ile kullanılmıyor diye '
+            'beyan ediyor ama sarsım sonucu değiştiriyor (beyan çürümesi): '
+            '%s' % (yol, canli_beyan))
+        yeni = sorted(set(rapor.dead_inputs) - beklenen - urun_beyani)
         assert not yeni, (
             '%s: YENİ ölü girdi (kullanıcı değeri giriyor, sonuca hiç '
             'girmiyor): %s' % (yol, yeni))
@@ -543,6 +635,71 @@ class TestP15B310SarsimKapsami:
         assert not olu_a, (
             '%s: ölü girdi envanteri ölü satır taşıyor (bu alanlar artık '
             'canlı, listeden çıkarın): %s' % (yol, olu_a))
+
+    @pytest.mark.parametrize('yol, alan', sorted(
+        (y, a) for y, d in BASKA_TUKETICI_BEYANI.items() for a in d))
+    def test_baska_tuketici_beyani_olculuyor(self, istemci, yol, alan):
+        """V305/C1: beyan edilen tüketici alanı GERÇEKTEN tüketiyor.
+
+        Bağlamlı tüketici: taban yük + bağlam 200 döner ve alan sarsılınca
+        (sayaçlar +1, ötekiler ×1,1) yanıt değişir. Tüketicisi olmayan iki
+        alan (gösterge, istemci onay kutusu) için sayfa gerçeği ölçülür.
+        """
+        import contextlib
+        import json as _json
+        import pathlib
+        import re
+        from tests.support import uc_katalogu
+        tuketici, baglam = BASKA_TUKETICI_BEYANI[yol][alan]
+        kok = pathlib.Path(KOK)
+        sayfa = (kok / 'hrma' / 'templates' / 'solid.html').read_text(
+            encoding='utf-8')
+        if tuketici is None:
+            if alan == 'traj_burn_time':
+                assert re.search(r'id="traj_burn_time"[^>]*\bdisabled\b'
+                                 r'[^>]*data-derived-from="thrust_curve"',
+                                 sayfa), 'gösterge artık devre dışı değil'
+            else:
+                fea = (kok / 'hrma' / 'static' / 'js' / 'fea_panel.js'
+                       ).read_text(encoding='utf-8')
+                assert 'id="%s"' % alan in fea and 'gShowMesh' in fea
+            return
+        if isinstance(baglam, dict):
+            taban = dict(uc_katalogu.taban_yuk(yol), **baglam)
+            anahtar = alan
+        else:
+            # computeTrajectory() YORUNGE_ALAN_KIMLIGI eşlemesi.
+            assert "%s: '%s'" % (baglam, alan) in sayfa, (
+                'sayfa %s alanını %s anahtarıyla göndermiyor' % (alan,
+                                                                 baglam))
+            taban = uc_katalogu.taban_yuk(tuketici)
+            anahtar = baglam
+
+        def _post(govde):
+            # Literal rotalar (çözülemeyen rota çağrısı tavanı, d18).
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                if tuketici == '/api/trajectory-analysis':
+                    r = istemci.post('/api/trajectory-analysis', json=govde)
+                else:
+                    assert tuketici == '/calculate_solid', tuketici
+                    r = istemci.post('/calculate_solid', json=govde)
+            assert r.status_code == 200, r.get_data(as_text=True)[:300]
+            return _json.dumps(r.get_json(), sort_keys=True, default=str)
+
+        once = _post(taban)
+        sarsik = dict(taban)
+        deger = taban[anahtar]
+        sarsik[anahtar] = (deger + 1 if anahtar.endswith(('_count', 'points'))
+                           else deger * 1.1)
+        assert _post(sarsik) != once, (
+            '%s: beyan edilen tüketici %s alanı (%s) tüketmiyor'
+            % (alan, tuketici, anahtar))
+
+    def test_baska_tuketici_beyani_buyumez(self):
+        """Beyan bir borç kaydı değil ama SINIRLI: büyümesi kırmızıdır."""
+        toplam = sum(len(v) for v in BASKA_TUKETICI_BEYANI.values())
+        assert toplam <= 14, 'başka tüketici beyanı büyüdü: %d' % toplam
 
     def test_olu_girdi_envanteri_bayat_uc_tasimaz(self):
         from tests.support import uc_katalogu

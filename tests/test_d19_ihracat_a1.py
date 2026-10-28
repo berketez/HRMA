@@ -196,21 +196,31 @@ class TestP9B123EnjektorKirpmasiBildiriliyor:
                          dict(SIVI_125))
         return (montaj.get('technical_drawings') or {}).get('injector') or {}
 
+    # V301 CAD-2 kalem 5 (27 Eki) — GEREKÇELİ GÜNCELLEME: mesh sınırı
+    # 16 -> 512. 16 sınırı aynı paketin STL plakasını STEP'ten ayırıyordu
+    # (ölçüm docs/scofield/raw/OH/V301/bilinen/cad2/once_k5.json); 125
+    # delikli plaka artık STL'de de 125 delikle delinir. Kırpma bildirimi
+    # sınırın üstünde (ret) sınanır.
     def test_mesh_delik_sayisi_YAYIMLANIYOR(self, cizim):
         assert cizim['orifice_count'] == 125, 'tasarım sayısı korunmalı'
-        assert cizim['orifice_count_in_mesh'] == CV.MESH_MAX_INJECTOR_ORIFICES
+        assert cizim['orifice_count_in_mesh'] == 125
 
     def test_kunye_farki_ADIYLA_soyluyor(self, cizim):
         kunye = str(cizim['orifice_count_in_mesh_basis'])
-        assert '125' in kunye and str(CV.MESH_MAX_INJECTOR_ORIFICES) in kunye
+        assert 'all 125 design orifices' in kunye
         assert 'MESH_MAX_INJECTOR_ORIFICES' in kunye, (
             'kullanıcı sınırı hangi kuralın koyduğunu görmeli')
-        assert 'not a drilling master' in kunye
+        fazla = CV.MESH_MAX_INJECTOR_ORIFICES + 100
+        kunye_fazla = CV._mesh_orifice_basis(fazla)
+        assert str(fazla) in kunye_fazla
+        assert 'not a drilling master' in kunye_fazla
 
     def test_sinir_IKINCI_KEZ_yazilmiyor(self):
         """Kırpma kuralı TEK tanım noktasından: üretici ile çizim aynı
         yardımcıyı okur."""
-        assert CV._mesh_orifice_count(125) == CV.MESH_MAX_INJECTOR_ORIFICES
+        assert CV._mesh_orifice_count(125) == 125
+        assert CV._mesh_orifice_count(CV.MESH_MAX_INJECTOR_ORIFICES + 1) == \
+            CV.MESH_MAX_INJECTOR_ORIFICES
         assert CV._mesh_orifice_count(3) == 3
         assert CV._mesh_orifice_count(0) == 0
         assert CV._mesh_orifice_count(None) == 0

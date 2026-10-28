@@ -64,9 +64,15 @@ SIXDOF_VEHICLE = {
 }
 
 #: /solid sayfasının varsayılan katı motoru (app.py::solid_monte_carlo)
+#: V301/T-ÇAPA-A: çekirdek 30 -> 76 mm. a = 0,005 (katalog APCP a'sının
+#: ~2,24 katı) boğazı büyütür: 30 mm'de A_p/A_t 0,396, tek tanımın 48 mm'sinde
+#: 0,958 (ikisi de K-A port kapısından 422). 76 mm ölçülen A_p/A_t 2,218
+#: (tests/test_faz4_motor_kapilari.KATI_TABAN ile aynı ölçüm). Not: sayfanın
+#: bugünkü varsayılanı çekirdek 48 mm + katalog a'dır; bu sözlük yalnız
+#: T19/T03 bekçilerinin taban motorudur, konuları boğulan port değil.
 SOLID_DEFAULTS = {
     'grain_type': 'bates', 'propellant_type': 'apcp',
-    'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 30,
+    'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 76,
     'chamber_pressure': 40, 'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
 }
 
@@ -573,6 +579,10 @@ def test_t68_ballistic_run_does_not_claim_a_parachute():
 # ===========================================================================
 # 1. DALGADAN DEVREDİLEN, MOTOR DOSYASINA DÜŞEN KALEMLER
 # ===========================================================================
+#: V301/T-ÇAPA-A — gerekçe test_t24 içindeki ``_motor``da.
+_T24_CEKIRDEK_MM = 64.0
+
+
 def test_t24_grain_design_separates_geometric_and_burnt_web():
     """Geometrik web ile TÜKENEN web ayrı alanlarda olmalı.
 
@@ -599,8 +609,14 @@ def test_t24_grain_design_separates_geometric_and_burnt_web():
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
 
     def _motor(inhibit_outer):
+        # V301/T-ÇAPA-A: çekirdek 30 -> 64 mm. 30 mm'de port boğuluyordu
+        # (A_p/A_t 0,947 -> K-A 422); dış yüzey de yanınca (inhibit_outer
+        # False) yanma alanı büyür ve tek tanımın 48 mm'si de boğulur
+        # (0,997). 64 mm iki cepheli ölçülen A_p/A_t 1,753 (60 mm 1,546).
+        # Konu geometrik ⟷ tükenen web ayrımıdır, port değil (kural 1).
         return SolidRocketEngine(grain_type='bates', chamber_diameter=100,
-                                 grain_length=500, core_diameter=30,
+                                 grain_length=500,
+                                 core_diameter=_T24_CEKIRDEK_MM,
                                  chamber_pressure=40,
                                  overrides={'inhibit_outer': inhibit_outer})
 
@@ -614,11 +630,13 @@ def test_t24_grain_design_separates_geometric_and_burnt_web():
 
     single = _web(True)
     double = _web(False)
-    assert single['web_thickness_mm'] == pytest.approx(35.0, rel=1e-9)
+    # V301/T-ÇAPA-A: geometrik web (D - d)/2: 35,0 -> 18,0 mm (çekirdek 64).
+    geo_web = (100.0 - _T24_CEKIRDEK_MM) / 2.0
+    assert single['web_thickness_mm'] == pytest.approx(geo_web, rel=1e-9)
     assert single['web_burnout_mm'] == pytest.approx(_tuketilen_mm(True),
                                                      rel=1e-9)
     assert single['web_basis'] == 'single_sided'
-    assert double['web_thickness_mm'] == pytest.approx(35.0, rel=1e-9)
+    assert double['web_thickness_mm'] == pytest.approx(geo_web, rel=1e-9)
     assert double['web_burnout_mm'] == pytest.approx(_tuketilen_mm(False),
                                                      rel=1e-9)
     assert double['web_basis'] == 'two_sided'
@@ -708,9 +726,14 @@ def test_t03_kuru_kutle_100g_TABANINA_carpmiyor():
     için taban hiç devreye girmiyordu. Bu test KÜÇÜK motorda sorar.
     """
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
+    # V301/T-ÇAPA-A (K-A KT-03 deseni, test_d18_kati_a1 ile aynı): astar
+    # radyal yer kaplayınca bu motorun fiziksel kütlesi 0,128446 kg oldu
+    # (100 g eşiğinin ÜSTÜ — taban değil, gerçek kütle). Düğümün iddiası
+    # (100 g tabanı yok) ince astarla (0,5 mm) ölçülür.
     e = SolidRocketEngine(grain_type='bates', propellant_type='apcp',
                           chamber_diameter=10.0, grain_length=10.0,
-                          core_diameter=3.0, chamber_pressure=40.0)
+                          core_diameter=3.0, chamber_pressure=40.0,
+                          overrides={'liner_thickness': 0.5})
     dokum = e._dry_mass_breakdown()
     toplam = float(e._calculate_dry_mass())
     assert toplam == pytest.approx(dokum['total_kg'], rel=1e-12), (

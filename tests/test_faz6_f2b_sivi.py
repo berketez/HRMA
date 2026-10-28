@@ -46,6 +46,8 @@ import subprocess
 
 import pytest
 
+from tests.support import form_defaults
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 LIQUID_HTML = REPO_ROOT / 'hrma' / 'templates' / 'liquid.html'
 COMMON_JS = REPO_ROOT / 'hrma' / 'static' / 'js' / 'i18n_common.js'
@@ -63,6 +65,12 @@ LIQUID_FORM = {
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
     # Sığmayan kanal sayısı kusurun ÖN KOŞULU: sayfanın varsayılanı da budur.
     'cooling_channels': 80,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` gönderilmezse uç
+    # 422 ``pressure_fed_feed_pressure_not_supplied`` döner (L-A SV-03).
+    # Sayfa bu alanı her hesapta gönderir; değer şablonun KENDİ varsayılanı
+    # (tek kaynak, kopyalanmaz). Ölçüldü: 200.
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 #: Sığmama uyarısının kodu (hrma/engines/liquid_rocket_engine.py::_cooling_channels).
@@ -300,6 +308,7 @@ if (senaryo === 'excel') {
     bitir({ html: __KUNYE_LITERAL__ });
 } else if (senaryo === 'altsistem') {
     const results = __in.cr;
+    __ALTSISTEM_YERELLERI__
     bitir({ html: __ALTSISTEM_LITERAL__ });
 } else if (senaryo === 'tank_karti') {
     const tankData = __in.tanklar;
@@ -341,7 +350,23 @@ JS_FUNCS = ['liquidSigFig', 'hrmaFmt', 'liquidWarnText',
             # 'antiVortexMm is not defined' ile düşer.
             'antiVortexMm',
             'createRingTrace', 'createTankVisualization',
-            'createAltitudePerformanceChart', 'displayCombustionEfficiency']
+            'createAltitudePerformanceChart', 'displayCombustionEfficiency',
+            # v3.0.1 T-ÇAPA-B: künye literali yanma kaynağı satırını bu
+            # yardımcıyla yazıyor; listede yoksa node
+            # 'liquidCombustionSourceText is not defined' ile düşer.
+            'liquidCombustionSourceText',
+            # V301/L-E (NK-61, L-A DEVİR 3): alt sistem kartları devir
+            # seçimi / özgül hız / tank basıncı satırlarını bu yardımcılarla
+            # kuruyor; listede yoksa node '_liqFeedTankRows is not defined'
+            # ile düşer (koşum eksiği, T45 iddiaları aynen).
+            '_liqNum', '_liqPumpCard', '_liqSpeedBasisCell',
+            '_liqSpecificSpeedCell', '_liqFeedTankRows',
+            # V301/T-ÇAPA-D: alt sistem kartının iki katmanlı cidar satırı
+            # (V301/L-KABUK, liquid.html 'liq.wall.model.two_layer_basis')
+            # sözlük metnini ortakMetin ile, sunucu cümlesini
+            # escapeNoticeText ile basıyor; listede yoksa node 'ortakMetin is
+            # not defined' ile düşer (koşum eksiği, T45 iddiaları aynen).
+            'ortakMetin', 'escapeNoticeText']
 
 
 def _common_dictionary():
@@ -354,6 +379,13 @@ def _common_dictionary():
     return dict(re.findall(r"^\s*'([^']+)':\s*'(.*?)',?$", body, re.M))
 
 
+def _sablon_blogu(bas, son, src):
+    """Şablonda ``bas`` ile başlayıp ``son``dan hemen önce biten blok."""
+    i = src.index(bas)
+    j = src.index(son, i)
+    return src[i:j]
+
+
 def run_js(tmp_path, payload):
     """Şablondan kesilen JS'i node içinde koşturur, JSON çıktısını döndürür."""
     src = _template_source()
@@ -362,6 +394,14 @@ def run_js(tmp_path, payload):
     epilogue = epilogue.replace(
         '__ALTSISTEM_LITERAL__',
         js_template_literal('subsystemsDiv.innerHTML = ', src))
+    # v3.0.1 T-ÇAPA-B: L-B (SV-08) alt sistem kartının literali artık şablonun
+    # hemen önünde kurduğu yerel sabitleri okuyor (``coolCs`` … ``coolFilmRows``:
+    # çözülen cidar sıcaklığı, film bloğu). Düzenek yalnız literali kestiği
+    # için node 'coolFilmRows is not defined' ile düşüyordu — ürünü değil
+    # eksik koşumu ölçüyordu. KOPYA YAZILMAZ: blok şablondan kesilir.
+    epilogue = epilogue.replace(
+        '__ALTSISTEM_YERELLERI__',
+        _sablon_blogu('const coolCs = ', 'subsystemsDiv.innerHTML = ', src))
     epilogue = epilogue.replace(
         '__TANKKART_LITERAL__',
         js_template_literal('internalsCard.innerHTML = ', src))

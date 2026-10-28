@@ -74,6 +74,10 @@ def _thrust_curve_label(curve):
 MASS_SOURCE_LABELS = {
     'structural': 'inert mass from structural analysis (chamber + nozzle + end caps)',
     'reported': 'inert mass reported by solver',
+    # V301/HİBRİT-DIŞA (kalem 2): sıvı motor kuru kütlesi.
+    'engine_dry': ('engine dry mass reported by the solver '
+                   '(design_summary.masses.engine_mass_kg); propellant tanks '
+                   'and reserve propellant are not part of the motor file'),
     'none': ('inert (case/structure) mass NOT available in this export; '
              'loaded mass = propellant mass only - enter case mass in OpenRocket'),
 }
@@ -1608,6 +1612,18 @@ class OpenRocketExporter:
             mass = _finite_positive(motor_data.get(key))
             if mass is not None:
                 return mass, 'reported'
+
+        # V301/HİBRİT-DIŞA (kalem 2, 28 Eki): sıvı sonuç motor kuru kütlesini
+        # ``design_summary.masses.engine_mass_kg`` olarak YAYIMLIYOR, bu çözücü
+        # onu okumuyordu. ÖLÇÜLDÜ (hibrit-disa/olcum/sivi_paket_sonra.json):
+        # örnek sıvı .eng 'P 297.451 297.451' (yüklü = itici) ve "inert mass
+        # could NOT be resolved from this result" yazıyordu; sonuçta 78,649 kg
+        # duruyordu. Tank yapısı ve yedek itici motor dosyasına girmez (uçuş
+        # aracının engine_inert_mass'ı onları ayrıca taşır).
+        mass = _finite_positive(
+            _nested(motor_data, 'design_summary', 'masses', 'engine_mass_kg'))
+        if mass is not None:
+            return mass, 'engine_dry'
 
         return None, 'none'
 

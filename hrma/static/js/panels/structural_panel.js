@@ -303,6 +303,12 @@
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // Gerekçe dizesinde insan cümlesi ⟷ makine künyesi ayırıcısı (güverte
+    // analysis_dock.js aynı ayırıcıyla böler: görünen = ilk parça).
+    const WALL_REASON_DETAIL_SEP = '\u001e';
+    function reasonVisible(x) { return String(x || '').split(WALL_REASON_DETAIL_SEP)[0]; }
+    function reasonTitle(x) { return String(x || '').split(WALL_REASON_DETAIL_SEP).join(' — '); }
+
     function wallThicknessSuggestion(r) {
         const wp = U.readWallThicknessProvenance(r);
         const yol = wp.blockPath ? ('motor.' + wp.blockPath) : 'motor';
@@ -313,23 +319,89 @@
                 withheld: false,
                 source: wp.source,
                 valueMm: wp.value_mm,
-                reason: 'wall_thickness from ' + yol + '.design_mode: '
+                // V301/DİL-2 (kök 7): görünen metin insan cümlesi (EN + TR);
+                // makine künyesi U+001E'den sonra durur ve yalnız ipucuna
+                // (title) iner (DİL terim kararı 1: makine adı title'da).
+                reason: T('panel.structural.wallFromUserReason',
+                    'Wall thickness taken from the wall you supplied; the solver checked it (verification run).')
+                    + WALL_REASON_DETAIL_SEP
+                    + 'wall_thickness from ' + yol + '.design_mode: '
                     + String(wp.designMode)
                     + ' (wall_thickness_source: ' + String(wp.declared) + ')',
             };
             return wp.value_m;
         }
+        // V301/FİZİK-2 (kalem 9, S1): HRMA'nın boyutlandırdığı cidar artık
+        // 0 nöbetçisi yerine GERÇEK değeriyle gider; uç onu bağlamdaki
+        // ``motor_wall_source: sized_by_hrma`` künyesiyle "kullanıcının
+        // cidarı" saymaz (doğrulama değildir) ve hükmü motorun TEK
+        // kaydından alır (``contextFromResults``). Değer yoksa nöbetçi kalır.
+        motorSizedWallM = (wp.source === U.WALL_PROV_SOLVER && isNum(wp.value_m))
+            ? wp.value_m : null;
         wallSuggestion = {
-            withheld: true,
+            withheld: motorSizedWallM === null,
+            sizedByMotor: motorSizedWallM !== null,
             source: wp.source,
             valueMm: wp.value_mm,
-            reason: 'wall_thickness suggestion withheld: ' + yol
+            reason: T('panel.structural.wallWithheldReason',
+                'Wall thickness suggestion withheld: HRMA sized this wall itself, so writing it back into the form would make it read as a wall you supplied (a verification run).')
+                + WALL_REASON_DETAIL_SEP
+                + 'wall_thickness suggestion withheld: ' + yol
                 + '.design_mode: ' + String(wp.designMode)
                 + ' · wall_thickness_source: ' + String(wp.declared)
                 + ' — HRMA sized this wall, so sending it back would be read '
                 + 'as a user-supplied wall (is_verification: true)',
         };
+        if (motorSizedWallM !== null) {
+            wallSuggestion.reason = T('panel.structural.wallFromMotorSized',
+                'Wall thickness taken from the motor result, where HRMA sized it; it is not a wall you supplied, and the verdict shown is the motor\'s own structural verdict.')
+                + WALL_REASON_DETAIL_SEP
+                + 'wall_thickness from ' + yol + ' (design_mode: '
+                + String(wp.designMode) + ' · wall_thickness_source: '
+                + String(wp.declared) + '); sent with motor_wall_source: '
+                + 'sized_by_hrma';
+            return motorSizedWallM;
+        }
         return WALL_FIELD_SIZE_SENTINEL;
+    }
+
+    // V301/FİZİK-2 (kalem 9, S1): motorun boyutlandırdığı cidar (metre) —
+    // `wallThicknessSuggestion` doldurur, bağlam okur; yoksa null.
+    let motorSizedWallM = null;
+
+    // V301/FİZİK-2 (kalem 9, S1) — YAPISAL HÜKÜM MOTORUN TEK KAYDINDAN.
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/fizik-2/k9_yapisal_once.json):
+    // güverte sekmesi cidarı 0 nöbetçisiyle koşuyor, uç cidarı kendisi
+    // boyutlandırıp katı örnekte "UNSAFE · HIGH" (aynı yanıtta hüküm geri
+    // çekili), hibritte SF 0,566 "UNSAFE" basıyordu; motorun kendi kaydı
+    // (safety_analysis.motor_structural_verdict) ikisinde de NOT_EVALUATED.
+    // Yol tablosu sunucudaki MOTOR_STRUCTURAL_VERDICT_BLOCKS ile AYNI
+    // (güvenlik panelinin tablosu; bekçi eşler).
+    const MOTOR_VERDICT_BLOCKS = {
+        hybrid: [['motor', 'structural_analysis', 'safety_analysis'],
+                 ['structural_analysis', 'safety_analysis']],
+        solid: [['safety_analysis', 'pressure_safety']],
+        liquid: [['structural_analysis', 'chamber_structure']],
+    };
+    function motorVerdictBlock(r, motorType) {
+        for (const parcalar of (MOTOR_VERDICT_BLOCKS[motorType] || [])) {
+            let o = r;
+            for (const p of parcalar) {
+                o = (o && typeof o === 'object') ? o[p] : undefined;
+            }
+            if (o && typeof o === 'object' && !Array.isArray(o)
+                    && Object.keys(o).length) {
+                const kopya = {};
+                let hedef = kopya;
+                parcalar.forEach(function (p, i) {
+                    if (i === parcalar.length - 1) { hedef[p] = o; return; }
+                    hedef[p] = {};
+                    hedef = hedef[p];
+                });
+                return kopya;
+            }
+        }
+        return null;
     }
 
     // İki koşumun AYNI hazneyi anlatıp anlatmadığı: dört künye alanı. İkisi
@@ -988,7 +1060,7 @@
         // Z5-C1: önerinin GERİ ÇEKİLDİĞİ durumda gerekçe rozetin ipucuna da
         // iner (kaynak çipiyle aynı makine dizesi).
         if (wallSuggestion && wallSuggestion.withheld) {
-            tip += ' | ' + wallSuggestion.reason;
+            tip += ' | ' + reasonTitle(wallSuggestion.reason);
         }
         return tip;
     }
@@ -1068,7 +1140,7 @@
                  font-family:var(--hd-mono); font-size:0.75rem;">${
                     wallSuggestion.withheld ? 'withheld' : 'applied'}</span>
                  <span style="color:var(--hd-ink-dim, #7d97a5);
-                  font-size:0.72rem;"> · ${U.esc(wallSuggestion.reason)}</span>${
+                  font-size:0.72rem;" title="${U.esc(reasonTitle(wallSuggestion.reason))}"> · ${U.esc(reasonVisible(wallSuggestion.reason))}</span>${
                     wallSuggestion.withheld
                         ? `<br><span style="color:${U.kindColor('warn')};
                             font-size:0.75rem;">${T(
@@ -1430,8 +1502,16 @@
                               statusKind(onayGeriCek(fat.fatigue_status)));
         }
         if (dp.material) {
+            // T-ÇAPA-C2 (BELGE §8.1-3): makine anahtarı ('STEEL') yerine
+            // seçicinin kendi okunur adı (MATERIALS; EN+TR anahtarlı).
+            // Listede olmayan anahtar AYNEN basılır (uydurma ad yok).
+            const matSatir = MATERIALS.filter(function (r) {
+                return r[0] === String(dp.material); })[0];
+            const matAd = matSatir
+                ? (matSatir[2] ? T(matSatir[2], matSatir[1]) : matSatir[1])
+                : String(dp.material);
             badges += U.badge(T('common.material', 'MATERIAL') + ': '
-                + String(dp.material).toUpperCase(), 'info',
+                + matAd, 'info',
                 U.tf('panel.structural.designPressureTip',
                      { p: U.fmt(dp.design_pressure, 1), f: U.fmt(dp.design_pressure_factor, 2) },
                      'Design pressure {p} bar (factor {f})'));
@@ -1797,11 +1877,11 @@
         endpoint: '/analyze_structural_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar'],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM'],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM'],
-            ['throat_diameter', 'Throat Diameter (m)', 0.02, 0.001, 'common.f.throatDiameterM'],
-            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
+            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.structural.help.chamber_pressure'],
+            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.structural.help.chamber_diameter'],
+            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM', 'panel.structural.help.chamber_length'],
+            ['throat_diameter', 'Throat Diameter (m)', 0.02, 0.001, 'common.f.throatDiameterM', 'panel.structural.help.throat_diameter'],
+            ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.structural.help.burn_time'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
             // GAZ SICAKLIĞI (ÖH D15 birleştirme ölçümü, 1 Eyl 2026): bu alanın
             // varsayılanı 0 İDİ ve etiketi "0 = skip thermal" diyordu. Yapısal
             // kulvarın sıcaklık kapısı (app.py `_STRUCTURAL_TEMPERATURE_FIELDS`,
@@ -1828,14 +1908,14 @@
             // `safety_analysis.thermal_margin_ratio = None` — yani termal yol
             // eskisi gibi ATLANIR, uydurma bir termal hüküm üretilmez.
             ['chamber_temperature', 'Gas Temperature (K, blank = skip thermal)',
-             '', 50, 'common.f.gasTemperatureBlank'],
+             '', 50, 'common.f.gasTemperatureBlank', 'panel.structural.help.chamber_temperature'],
             // İtki alanı yoktu, bu yüzden hesap ucuna hiç gitmiyordu ve
             // eksenel burkulma DAİMA sıfır basma yüküyle koşuyordu
             // (uygulanan gerilme 0,0 MPa, emniyet katsayısı boş "—").
             // Varsayılan 0 = "eksenel yükü atla" (app.py:4398 `if
             // data.get('thrust')`), yani eski davranış korunur; sonuç
             // varsa fromResults gerçek itkiyi doldurur.
-            ['thrust', 'Thrust (N)', 0, 50, 'common.f.thrustN'],
+            ['thrust', 'Thrust (N)', 0, 50, 'common.f.thrustN', 'panel.structural.help.thrust'],
             // CİDAR KALINLIĞI (2026-08-09 ölçümü): bu alan listede YOKTU.
             // Panel /analyze_structural_safety'yi cidar bilgisi OLMADAN
             // çağırıyordu; uç da bu durumda cidarı KENDİ boyutlandırıp
@@ -1854,7 +1934,7 @@
             // vermediği bir cidarı vermiş gibi göstermek olurdu ve uç
             // sonucu "doğrulama" diye damgalardı.
             ['wall_thickness', 'Wall Thickness (m)', 0, 0.001,
-             'common.f.wallThicknessM'],
+             'common.f.wallThicknessM', 'panel.structural.help.wall_thickness'],
             // CİDAR SICAKLIĞI (F5-2, 2026-08-17 ölçümü): bu iki alan da
             // listede YOKTU. Uç ikisini de BİRİNCİ ÖNCELİKLE okuyor
             // (app.py `for wall_key in ('wall_temperature_hot',
@@ -1878,10 +1958,10 @@
             // doldurur (bkz. AnalysisDock.ui.readWallTemperaturesK).
             ['wall_temperature_hot', 'Hot-side Wall Temperature (K, blank = '
              + 'let HRMA estimate from gas temperature)', '', 10,
-             'common.f.wallTemperatureHotK'],
+             'common.f.wallTemperatureHotK', 'panel.structural.help.wall_temperature_hot'],
             ['wall_temperature_cold', 'Cold-side Wall Temperature (K, blank = '
              + 'let HRMA estimate from gas temperature)', '', 10,
-             'common.f.wallTemperatureColdK'],
+             'common.f.wallTemperatureColdK', 'panel.structural.help.wall_temperature_cold'],
             // TASARIM EMNİYET KATSAYISI HEDEFİ (V3 KK, YP7 devri): bu alan
             // listede YOKTU; uç hedefi hep malzeme kaydının varsayılanından
             // alıyordu. Varsayılan BOŞ dize = isteğe bağlı (buildPayload boş
@@ -1889,8 +1969,8 @@
             // design_safety_factor_source ile beyan eder). fromResults
             // motorun KENDİ hedefini doldurur (readMotorSfTarget).
             ['safety_factor', 'Design Safety Factor target (blank = material '
-             + 'database default)', '', 0.1, 'common.f.designSafetyFactorTarget'],
-            ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material'],
+             + 'database default)', '', 0.1, 'common.f.designSafetyFactorTarget', 'panel.structural.help.safety_factor'],
+            ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material', 'panel.structural.help.material'],
         ],
         fromResults: function (r) {
             const m = U.motorDict(r);
@@ -1967,6 +2047,32 @@
             if (!motorSfTarget) gerekce.safety_factor = MOTOR_SF_TARGET_ABSENT;
             if (Object.keys(gerekce).length) out[U.WITHHELD_KEY] = gerekce;
             return out;
+        },
+        // V301/FİZİK-2 (kalem 9, S1): form alanı OLMAYAN bağlam (güverte
+        // runPanel gövdeye ekler). Uç hükmü motorun TEK kaydından alır;
+        // istekteki basınç / çap / cidar tohumlardan ayrışırsa (kullanıcı
+        // değiştirdi) kayıt benimsenmez ve uç kendi denetimini koşar.
+        contextFromResults: function (r) {
+            const motorType = window.AnalysisDock.getMotorType();
+            const ctx = {};
+            const blok = motorVerdictBlock(r, motorType);
+            if (blok) {
+                const m = U.motorDict(r) || {};
+                const girdiler = {};
+                const tohum = {
+                    chamber_pressure: m.chamber_pressure,
+                    chamber_diameter: U.readLengthM(r, 'chamber_diameter'),
+                    wall_thickness: motorSizedWallM,
+                };
+                Object.keys(tohum).forEach(function (k) {
+                    if (isNum(tohum[k])) girdiler[k] = tohum[k];
+                });
+                ctx.motor_type = motorType;
+                ctx.motor_result = blok;
+                ctx.motor_verdict_inputs = girdiler;
+            }
+            if (motorSizedWallM !== null) ctx.motor_wall_source = 'sized_by_hrma';
+            return Object.keys(ctx).length ? ctx : null;
         },
         render: render,
     });

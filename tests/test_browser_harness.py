@@ -574,6 +574,187 @@ class TestOlcumBetikleri:
 
 
 # ---------------------------------------------------------------------------
+# 7b. Yerleşim ölçümü GLİF kutusuyla (V305/G1, 28 Eki) — gerçek Chromium
+# ---------------------------------------------------------------------------
+#
+# v3.0.5 yayın kapısında hibrit/katı/sıvı sayfaları 25'er "etiket ⟂ '?'"
+# örtüşmesiyle kaldı; ekranda harfler ve ikon ÇAKIŞMIYORDU. Kök: UI-K
+# (cdddf753a) ikondan önceki öğeye 21 px sağ dolgu verip ikonu −16 px
+# kaydırıyor; ``JS_YERLESIM`` metni ELEMAN kutusuyla ölçtüğü için dolgu da
+# "metin" sayılıyordu. Onarım ölçümü metin düğümünün glif kutusuna
+# (Range.getClientRects) taşıdı. Bu sınıf iki yönü de gerçek tarayıcıda
+# kilitler: dolgu örtüşme DEĞİLDİR, glif üstüne glif örtüşmedir. Eşikler
+# ürünün eşikleridir (``esikler``); burada gevşetilmiş sayı yoktur.
+
+#: UI-K kuralının birebir kopyası (theme.css "UZUN ETİKETTE '?'" bloğu ve
+#: ``.tooltip``/``.tooltip-icon`` kuralları). Ürün CSS'i dosyadan okunmaz:
+#: bekçi DEDEKTÖRÜ sınar, ürünün bugünkü stilini değil.
+_IPUCU_CSS = (
+    'body{margin:8px;font:16px sans-serif}'
+    '.tooltip{position:relative;display:inline-block;margin-left:5px;'
+    'vertical-align:middle;line-height:1}'
+    '.tooltip-icon{width:16px;height:16px;border-radius:50%;'
+    'display:inline-flex;align-items:center;justify-content:center;'
+    'font-size:10px;font-weight:bold;background:#345;color:#fff}'
+    'span:has(+ .tooltip){padding-inline-end:21px}'
+    'span + .tooltip{margin-left:-16px}')
+
+#: (ad, gövde, beklenen örtüşme sayısı, örtüşmede beklenen metin çifti)
+_GLIF_VAKALARI = (
+    # (a) UI-K deseni: dolgulu etiket + komşu '?' — kutular kesişir, glifler
+    # kesişmez → örtüşme YOK.
+    ('dolgulu_kutu_komsu_simge',
+     '<label><span id="e1">Motor Name</span><div class="tooltip">'
+     '<div id="e2" class="tooltip-icon">?</div></div></label>', 0, None),
+    # (b) Gerçek glif çakışması: negatif pay ile iki metin üst üste → VAR.
+    ('negatif_pay_glif_cakismasi',
+     '<div><span id="e1">Motor Name</span><span id="e2" '
+     'style="margin-left:-40px">Overlap text</span></div>', 1,
+     {'Motor Name', 'Overlap text'}),
+    # (c) '?' ikonunun KENDİ glifi etiketin harflerine biniyor → VAR
+    # (ikon metni de yapraktır; yalnız dolgu dışarıda kalır).
+    ('simge_glifi_metne_biniyor',
+     '<label><span id="e1">Motor Name</span><div class="tooltip" '
+     'style="margin-left:-70px"><div id="e2" class="tooltip-icon" '
+     'style="font-size:16px">?</div></div></label>', 1,
+     {'Motor Name', '?'}),
+    # (d) Kırpma korunur: max-height:0 + overflow:hidden altında başlığın
+    # üstüne kaydırılmış metin ekranda yok → örtüşme YOK.
+    ('kirpilmis_metin_sayilmaz',
+     '<div>Başlık metni burada</div><div style="max-height:0;'
+     'overflow:hidden"><div style="margin-top:-18px">gizli metin '
+     'burada duruyor</div></div>', 0, None),
+    # (e) Çok satıra sarılan satır içi metin, önündeki etiketle örtüşmez
+    # (eski inline getClientRects yolunun kilidi).
+    ('sarilan_satir_ici_metin',
+     '<div style="width:220px"><strong>Etiket:</strong> <span>uzun bir '
+     'açıklama metni ki en az iki satıra sarılsın ve ilk satırı etiketin '
+     'yanında başlasın</span></div>', 0, None),
+)
+
+_ESIK_ARGUMANI = {
+    'sinir': esikler.ORTUSME_TARAMA_UST_SINIRI,
+    'min_alan': esikler.ORTUSME_MIN_KESISIM_PX2,
+    'oran': esikler.ORTUSME_MIN_KESISIM_ORANI,
+    'ornek': esikler.RAPOR_ORNEK_UST_SINIRI,
+}
+
+#: e1/e2 ELEMAN kutularının kesişim alanı (px²) — vakanın eski ölçümde
+#: (eleman kutusu) kırmızı vereceğini kanıtlamak için.
+_JS_KUTU_KESISIMI = """
+() => {
+  const a = document.getElementById('e1'), b = document.getElementById('e2');
+  if (!a || !b) return null;
+  const A = a.getBoundingClientRect(), B = b.getBoundingClientRect();
+  const gx = Math.min(A.right, B.right) - Math.max(A.left, B.left);
+  const gy = Math.min(A.bottom, B.bottom) - Math.max(A.top, B.top);
+  return (gx > 0 && gy > 0) ? gx * gy : 0;
+}
+"""
+
+
+@pytest.fixture(scope='module')
+def gercek_baglam():
+    import importlib.util
+    if importlib.util.find_spec('playwright') is None:
+        pytest.skip('playwright paketi bu ortamda yok (find_spec): glif '
+                    'ölçümü yalnız gerçek tarayıcıda sınanabilir')
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        try:
+            tarayici, _, _ = tur._tarayici_ac(pw, 'auto', False)
+        except Exception as hata:
+            pytest.skip('Chromium yapısı açılamadı (%s) — denenen: paketli, '
+                        'chrome, msedge' % str(hata)[:200])
+        try:
+            yield tarayici.new_context(viewport={'width': 800, 'height': 600})
+        finally:
+            tarayici.close()
+
+
+def _yerlesim_olc(baglam, govde):
+    p = baglam.new_page()
+    try:
+        p.set_content('<!doctype html><html lang="tr"><head><meta '
+                      'charset="utf-8"><style>%s</style></head><body>%s'
+                      '</body></html>' % (_IPUCU_CSS, govde))
+        return (p.evaluate(tur.JS_YERLESIM, _ESIK_ARGUMANI),
+                p.evaluate(_JS_KUTU_KESISIMI))
+    finally:
+        p.close()
+
+
+class TestYerlesimGlifKutusu:
+
+    # kabul_ui (V3.0.5, 28 Eki): gerçek Chromium ister; Linux CI'da
+    # SEÇİLMEZ (tests.yml -m "not kabul_ui") — atlansaydı atlama bütçesini
+    # aşıyordu (CI 40685381788: 71 → 80 > 76). Yayın kapısı 5/10 yerelde koşar.
+    @pytest.mark.kabul_ui
+    @pytest.mark.parametrize('ad,govde,beklenen,cift', _GLIF_VAKALARI,
+                             ids=[v[0] for v in _GLIF_VAKALARI])
+    def test_glif_kutusu_olcumu(self, gercek_baglam, ad, govde, beklenen, cift):
+        olcum, kutu_kesisimi = _yerlesim_olc(gercek_baglam, govde)
+        assert not olcum.get('hata'), olcum
+        ortusmeler = olcum['ortusmeler']
+        assert len(ortusmeler) == beklenen, (ad, ortusmeler)
+        if cift is not None:
+            assert {ortusmeler[0]['a'], ortusmeler[0]['b']} == cift
+            # Rapor alanları korunur: onarım yeri HTML'iyle gösterilir.
+            for alan in ('alan', 'konum', 'a_ata', 'b_ata', 'a_html', 'b_html'):
+                assert alan in ortusmeler[0], alan
+        hukum = denetimler.yerlesim_ortusme_denetimi(olcum)
+        assert hukum.gecti is (beklenen == 0), hukum.ozet
+
+    @pytest.mark.kabul_ui
+    def test_dolgu_vakasi_ESKI_olcumde_kirmiziydi(self, gercek_baglam):
+        """(a) vakası anlamlı: eleman kutuları eşiğin ÜSTÜNDE kesişiyor.
+
+        Eski dedektör (eleman kutusu) bu sayfada örtüşme bildirirdi; glif
+        ölçümü bildirmiyor. Kesişim ürün eşiğini aşmıyorsa vaka hiçbir
+        şeyi sınamıyor demektir.
+        """
+        govde = _GLIF_VAKALARI[0][1]
+        olcum, kutu_kesisimi = _yerlesim_olc(gercek_baglam, govde)
+        assert kutu_kesisimi is not None
+        assert kutu_kesisimi >= esikler.ORTUSME_MIN_KESISIM_PX2, kutu_kesisimi
+        assert olcum['ortusmeler'] == []
+
+    @pytest.mark.kabul_ui
+    def test_simge_metni_de_yaprak(self, gercek_baglam):
+        """'?' ikonu ölçümden düşmez: etiket + ikon = iki metin yaprağı."""
+        olcum, _ = _yerlesim_olc(gercek_baglam, _GLIF_VAKALARI[0][1])
+        assert olcum['yaprak_sayisi'] == 2, olcum
+
+    @pytest.mark.kabul_ui
+    def test_kapali_details_gizli_govdesi_yaprak_degil(self, gercek_baglam):
+        """Kapalı <details>in özet dışı metni ekranda yok; yaprak = özet.
+
+        V305/G1 ilk tur koşumu: Range bu gizli metne de kutu döndürdü ve
+        katı sayfasında 7 sahte örtüşme çıktı (kapalı 'Source' katlaması).
+        Açık <details>in aynı metni ise görünür ve ölçülür.
+        """
+        govde = ('<details><summary>Kaynak</summary>gizli kaynak metni '
+                 'burada uzun bir açıklama</details>')
+        kapali, _ = _yerlesim_olc(gercek_baglam, govde)
+        assert kapali['yaprak_sayisi'] == 1, kapali
+        acik, _ = _yerlesim_olc(gercek_baglam,
+                                govde.replace('<details>', '<details open>'))
+        assert acik['yaprak_sayisi'] == 2, acik
+
+    @pytest.mark.kabul_ui
+    def test_bos_metinli_textarea_eski_kutuya_duser(self, gercek_baglam):
+        """Range ölçü vermeyen metin (TEXTAREA varsayılanı) kaybolmaz."""
+        olcum, _ = _yerlesim_olc(
+            gercek_baglam, '<textarea rows="2">varsayılan metin</textarea>')
+        assert olcum['yaprak_sayisi'] == 1, olcum
+
+    def test_kaynak_glif_kutusunu_olcuyor(self):
+        js = tur.JS_YERLESIM
+        assert 'document.createRange()' in js
+        assert 'aralik.getClientRects()' in js
+
+
+# ---------------------------------------------------------------------------
 # 8. Sunucu ömrü (süreç başlatmadan)
 # ---------------------------------------------------------------------------
 

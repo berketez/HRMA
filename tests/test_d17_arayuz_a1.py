@@ -111,7 +111,9 @@ const document = { getElementById: (id) => alanlar[id] || null };
 function updateInjectorParams() { cagrilar.push('inj'); }
 function refreshPressureModeLabels() { cagrilar.push('prs'); }
 function updateCalculatedImpulse() { cagrilar.push('imp'); }
-function checkDatabaseStatus() { cagrilar.push('db'); }
+// v3.0.1 K: zincirin son halkası checkDatabaseStatus (rozet yoklaması)
+// idi; rozet söküldü, yerini refreshDataSourceLines aldı.
+function refreshDataSourceLines() { cagrilar.push('db'); }
 const uyari = [];
 const console = { warn: (a, b) => uyari.push(String(a) + ' ' + String(b)) };
 eval(m[1]);
@@ -245,6 +247,9 @@ vm.createContext(sandbox);
 // ÖH D36: exportReport sayıları artık numTxt (D35 sayi-bicimi) ile basıyor;
 // yardımcı da kum havuzuna alınır (yoksa eski app.js — atlanır).
 { const nt = grab(src, 'numTxt'); if (nt) vm.runInContext(nt, sandbox); }
+// v3.0.1 E2: exportReport metin dışa aktarımına CEA karşılaştırması ekledi;
+// yardımcı da kum havuzuna alınır (yoksa eski app.js — atlanır).
+{ const ck = grab(src, 'ceaKarsilastirmaMetni'); if (ck) vm.runInContext(ck, sandbox); }
 vm.runInContext(grab(src, 'assertPdfBlob'), sandbox);
 vm.runInContext(grab(src, 'exportReport'), sandbox);
 vm.runInContext('exportReport', sandbox)().then(function () {

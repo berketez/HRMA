@@ -37,6 +37,7 @@ from pathlib import Path
 
 import pytest
 from tests.support.kanit import kanit_gerekli
+from tests.support import form_defaults
 
 KOK = Path(__file__).resolve().parent.parent
 
@@ -57,6 +58,12 @@ Z5_SIVI = {
     'characteristic_length': 1.2, 'chamber_wall_thickness': 1,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
+    # V3.0.5 T-ÇAPA-C1: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (V301/L-A a6cf9790b, SV-03:
+    # çözücü tank basıncı varsaymaz); sayfanın gönderdiği şablon varsayılanı
+    # (tek kaynak, kopyalanmaz — T-ÇAPA-B'nin test_d32_ihracat_a1 deseni).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 
@@ -73,9 +80,25 @@ def client():
         yield c
 
 
+#: V3.0.5 T-ÇAPA-C1 — dışa aktarım uçlarının koştuğu sıvı tasarım. İmalat
+#: kapısı V301/L-KABUK'tan (6f8240043, 823e59841) beri iki katmanlı
+#: rejeneratif cidarı KATMAN KATMAN denetler; ``Z5_SIVI`` (Pc 100 bar,
+#: Inconel 1 mm astar) o kapıdan geçmez — ÖLÇÜLDÜ (e038d626f): export-cad
+#: ve paket 422 ``chamber_liner`` geçerlilik dışı; 5 mm astar SF 0,2026 ile
+#: 422. Kapı doğru çalışıyor (fail-closed), test ise "uç gerçek çözücü
+#: çıktısını kabul ediyor mu" diye soruyor. Gövde bu yüzden L-KABUK'un
+#: ölçtüğü geçerli noktaya (``GECERLI_NOKTA``: CuCrZr 1 mm astar, O/F 2,0,
+#: Pc 50 bar, besleme 75 bar — tek kaynak, kopyalanmaz) çekildi: export-cad
+#: 200, paket (motor_type ile) 200, motor_type'sız paket 422
+#: ``incomplete_geometry`` (bilinen sınır, aşağıdaki sınıf).
+from tests.test_v301_l_kabuk import GECERLI_NOKTA  # noqa: E402
+
+DISA_AKTARIM_SIVI = dict(Z5_SIVI, **GECERLI_NOKTA)
+
+
 @pytest.fixture(scope='module')
 def sivi(client):
-    r = _quiet(client.post, '/calculate_liquid', json=Z5_SIVI)
+    r = _quiet(client.post, '/calculate_liquid', json=DISA_AKTARIM_SIVI)
     assert r.status_code == 200, r.get_data(as_text=True)[:400]
     return r.get_json()
 

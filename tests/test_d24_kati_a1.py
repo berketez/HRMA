@@ -144,7 +144,10 @@ class TestOHD2310KatmanSirasi:
         # Ölçülen sayılar (once.json = sonra.json bu satırda):
         assert ins + lin == pytest.approx(7.068583471, rel=1e-9)
         dokum = _sessiz(e._dry_mass_breakdown)
-        assert dokum['total_kg'] == pytest.approx(17.926904842, rel=1e-9)
+        # V301/K-A (22 Eki, KT-03): astar artık radyal yer kaplar (kasa iç çapı = tane + 2·(astar + yalıtım)); kasa 2·t_astar büyüdü, çapa yeniden ölçüldü (tolerans aynı).
+        # 17,926904842 -> 19,533493209 kg (halka kütleleri DEĞİŞMEDİ).
+        assert dokum['total_kg'] == pytest.approx(19.533493208595875,
+                                                  rel=1e-9)
 
     def test_dokum_kalemleri_olculen_sayilarda(self):
         e = _motor(**self.KALIN)
@@ -195,7 +198,9 @@ class TestOHD2310KatmanSirasi:
         assert dokum['liner_kg'] == pytest.approx(0.4614371289592694,
                                                   rel=1e-12)
         assert dokum['insulation_kg'] == 0.0
-        assert dokum['total_kg'] == pytest.approx(6.001397012523196,
+        # V301/K-A (22 Eki, KT-03): astar artık radyal yer kaplar (kasa iç çapı = tane + 2·(astar + yalıtım)); kasa 2·t_astar büyüdü, çapa yeniden ölçüldü (tolerans aynı).
+        # 6,001397012523196 -> 6,4534577390220145 kg.
+        assert dokum['total_kg'] == pytest.approx(6.4534577390220145,
                                                   rel=1e-12)
 
 

@@ -68,6 +68,13 @@ YENI_SECIM_ALANLARI = ('closure_bolt_size', 'closure_bolt_class',
 #: Motorun okuduğu ama formda BİLEREK alanı olmayan anahtarlar.
 #: Her satır gerekçelidir; gerekçesiz genişletmek bu bekçiyi anlamsızlaştırır.
 BILINCLI_ISTISNALAR = {
+    # V301/L-D (SV-09): motor ``fuel_thermal_conductivity``yi bant
+    # kapısından okuyup ``k_coolant_input``a yazıyor ama HİÇBİR hesap onu
+    # kullanmıyor (istasyon marşı kendi özellik tablosunu kullanır; motorun
+    # unwired_inputs 'informational' notu). Formdaki alan kullanıcıya
+    # "soğutmayı etkiler" izlenimi veriyordu; bu yüzden formdan kalktı.
+    # Kanal API için açık (bant kapısı geçerli), kapısı bilinçli yok.
+    'fuel_thermal_conductivity',
     # liquid.html (collectAllParameters, 2026-07-23 notu): çözücü optimum
     # O/F'yi gerçek Pc'de CEA taramasıyla KENDİSİ bulur; elle girilen değer
     # hesabı etkilemediği için alan ölü girdi olurdu. Kanal API/proje
@@ -420,7 +427,10 @@ def test_basinclandirma_gazi_emniyet_vanasina_ulasiyor(client, taban):
 # ---------------------------------------------------------------------------
 def _motor_anahtarlari():
     src = read(ENGINE_PY)
-    keys = set(re.findall(r"_override_(?:val|choice)\(\s*'([a-z_0-9]+)'", src))
+    # v3.0.1 (26 Eki, L-A): bantlı okuyucu ``_override_band('…')`` eklendi
+    # (bantlar tek tablodan, LIQUID_INPUT_BANDS); o da bir override kanalıdır.
+    keys = set(re.findall(r"_override_(?:val|choice|band)\(\s*'([a-z_0-9]+)'",
+                          src))
     keys |= set(re.findall(r"overrides\.get\(\s*'([a-z_0-9]+)'", src))
     return keys
 

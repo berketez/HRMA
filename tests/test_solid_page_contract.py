@@ -202,35 +202,59 @@ def test_propellant_field_map_matches_api_contract(client, script_text):
 
 
 def test_material_map_units_and_backend_families(script_text, client):
-    """yield_strength Pa→MPa ölçeklenir; gövde ailesi backend listesiyle uyumlu."""
-    assert "field: 'yield_strength', scale: 1e-6" in script_text
+    """Katalog satırı kasa/lüle seçicisini SUNUCU seçeneğine kanonik adla eşler.
+
+    V301/K-B (KT-10/KT-12) — beklenti değişti (eski: ``yield_strength``
+    1e-6 ölçekle katalogdan forma yazılır + ``CASE_MATERIAL_FAMILY`` 4 aileye
+    eşler). Ölçüldü (denetim A-kati KT-10/12): aile tahmini karbon-karbonu
+    'phenolic' lüleye, grafiti 'composite' kasaya düşürüyordu ve akma kasa
+    seçicisinden bağımsız ikinci bir kaynaktan yazılıyordu. Yeni sözleşme:
+    eşleme ``o.material_key === rec.key`` (tam), akma kasa seçicisinin
+    kaydından (``syncSolidYieldSource``); ailesi olmayan kayıt seçiciye
+    dokunmaz ve bunu söyler.
+    """
+    assert "o.material_key === rec.key" in script_text
+    assert 'CASE_MATERIAL_FAMILY' not in script_text
+    assert 'NOZZLE_MATERIAL_FAMILY' not in script_text
+    assert "'case':   []" in script_text
+    assert 'function syncSolidYieldSource(' in script_text
 
     resp = client.get('/api/materials')
     assert resp.status_code == 200
     materials = resp.get_json()['materials']
-    # Katalogta yield_strength Pa mertebesinde (MPa değil) olmalı — aksi halde
-    # 1e-6 ölçeği yanlış olur.
-    steel = materials.get('steel_4130') or next(iter(materials.values()))
-    assert steel['yield_strength'] > 1e6
-
-    from hrma.engines.solid_rocket_engine import SOLID_COST_PARAMS
-    backend_families = set(SOLID_COST_PARAMS['case_materials'])
-    mapped = set(re.findall(r"value: '(\w+)' \}",
-                            re.search(r'var CASE_MATERIAL_FAMILY = \[(.*?)\];',
-                                      script_text, re.S).group(1)))
-    assert mapped, 'CASE_MATERIAL_FAMILY boş'
-    assert mapped <= backend_families, (
-        f'backend tanımıyor: {mapped - backend_families}')
+    # Katalog anahtarları sunucu seçeneklerinin kanonik anahtarlarıyla aynı
+    # uzaydadır (eşleme bu yüzden tam yapılabilir).
+    from hrma.engines.solid_rocket_engine import solid_material_options
+    for alan in ('case_material', 'nozzle_material'):
+        for o in solid_material_options(alan):
+            if o['material_key'] != 'composite':
+                assert o['material_key'] in materials, o
 
 
-def test_case_material_options_match_backend(html):
-    """case_material seçenekleri backend maliyet tablosuyla birebir."""
-    from hrma.engines.solid_rocket_engine import SOLID_COST_PARAMS
-    block = re.search(r'<select id="case_material">(.*?)</select>', html, re.S)
-    assert block
-    options = set(re.findall(r'value="(\w+)"', block.group(1)))
-    assert options <= set(SOLID_COST_PARAMS['case_materials']), (
-        f'backend tanımıyor: {options - set(SOLID_COST_PARAMS["case_materials"])}')
+def test_case_material_options_match_backend(client):
+    """Kasa/lüle seçenekleri sunucu kaydından; her seçenek uçta çözülür.
+
+    V301/K-B (KT-10/KT-12) — beklenti değişti (eski: ham şablondaki 4
+    seçenek ⊆ maliyet tablosu). Seçenekler artık şablonda elle yazılmaz;
+    ``/solid`` sayfası ``solid_material_options`` kaydını basar. Maliyet
+    ailesi olmayan malzeme fiyatlanmaz ve bunu ``eksik_kalem`` ile söyler
+    (sessiz alüminyum yok, Faz 5 / H4-8 kuralı aynen).
+    """
+    from hrma.engines.solid_rocket_engine import (
+        solid_case_material_record, solid_material_options,
+        solid_nozzle_material_record)
+    html = client.get('/solid').get_data(as_text=True)
+    for alan, cozucu in (('case_material', solid_case_material_record),
+                         ('nozzle_material', solid_nozzle_material_record)):
+        block = re.search(r'<select id="%s"[^>]*>(.*?)</select>' % alan,
+                          html, re.S)
+        assert block, alan
+        sayfa = re.findall(r'value="([\w-]+)"', block.group(1))
+        kayit = [o['value'] for o in solid_material_options(alan)]
+        assert sayfa == kayit, (alan, sayfa, kayit)
+        for v in sayfa:
+            assert cozucu(v) is not None, (alan, v)
+    assert 'value="phenolic"' not in html
 
 
 def test_override_contract(html, script_text):
@@ -314,9 +338,14 @@ def test_excel_sheets_cover_solid_motor(script_text):
 
 def test_solid_result_feeds_exports(client):
     """/calculate_solid gerçekten motor_geometry ve thrust_curve döndürüyor."""
+    # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu
+    # varsayılan motoru kilitliyordu; a = 0,005 ile bu gövdede oran 0,40 idi
+    # ve tasarım artık yayımlanmıyor (KT-23). Düğümün konusu ihracat
+    # alanlarıdır: örnek motorun geçerli çekirdeği (48 mm) ve katalog yanma
+    # hızı kullanılır.
     payload = {
-        'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 30,
-        'chamber_pressure': 40, 'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
+        'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 48,
+        'chamber_pressure': 40, 'propellant_type': 'apcp',
         'grain_type': 'bates',
     }
     resp = client.post('/calculate_solid', json=payload)
@@ -342,11 +371,30 @@ def test_trajectory_wired(html, script_text):
 
 
 def test_database_badges_present(html, script_text):
-    assert 'database-status' in html
-    assert 'cea-status' in html and 'nist-status' in html
-    assert '.status-connected' in html and '.status-disconnected' in html
-    assert 'async function checkDatabaseStatus(' in script_text
-    assert "fetch('/api/database-status')" in script_text
+    """ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1): rozetler SÖKÜLDÜ.
+
+    Eski hâli "NASA CEA / NIST WebBook" rozetlerini ve /api/database-status
+    yoklamasını ŞART koşuyordu. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ayberk1/
+    kaynak-cea/gorsel_once.json): yoklamadan sonra rozetler her makinede
+    "Offline" diyordu ve bu sayfanın hiçbir sayısının kaynağı değildi; kaynak
+    katalog tablosunun Source sütununda (``/api/propellants`` kaydının kendi
+    ``source`` künyesi) zaten satır satır yazılı. Bekçi artık rozetin
+    YOKLUĞUNU ve yerine gelen veri kaynağı satırını ölçer. Uç sunucuda API
+    uyumu için durur (aşağıdaki ``test_export_endpoints_exist_in_app``).
+    """
+    assert not re.search(r'class="[^"]*\b(?:database-status|cea-status|nist-status)\b', html)
+    assert 'checkDatabaseStatus(' not in script_text
+    assert "fetch('/api/database-status')" not in script_text
+    assert re.search(r'<div class="data-source-line"[^>]*'
+                     r'data-i18n="solid.ui.data_source_catalogue">', html)
+    # V301/T-ÇAPA-D: V301/DİL-2 (f36795100) kaynak hücresini künye
+    # yardımcısıyla basıyor — ``kunyeHTML(p.source)``: boş kaynak '-' (eski
+    # ``(p.source || '-')`` ile aynı), EN'de kaçışlı metin, TR'de "çevrilmemiş
+    # künye" açılır kutusu. Hücre yine kaydın KENDİ ``source`` alanından.
+    assert 'Source' in html and 'kunyeHTML(p.source)' in script_text
+    govde = re.search(r'function kunyeHTML\(metin\) \{(.*?)\n        \}',
+                      script_text, re.S)
+    assert govde and "if (!ham) return '-';" in govde.group(1)
 
 
 def test_warnings_panel_is_silent_without_data(html, script_text):
@@ -389,8 +437,11 @@ def test_thrust_and_pressure_axes_follow_data(script_text):
     assert 'function hrmaAxisRange(' in script_text
     assert 'HRMA_PLOT_Y_PAD_FRACTION' in script_text
     assert 'hrmaPlotLayout({' in script_text
-    assert 'results.thrust_curve.thrust);' in script_text
-    assert 'results.thrust_curve.pressure);' in script_text
+    # V301/K-B (NK-28): eksen, çözücünün tükeniş beyanı eklenmiş diziden
+    # (solidCurveWithBurnout) kurulur; dizi yine yanıtın kendisidir.
+    assert '}, _itkiEgri.y);' in script_text
+    assert '}, _basincEgri.y);' in script_text
+    assert "solidCurveWithBurnout(results.thrust_curve, 'thrust')" in script_text
     # rangemode 'tozero' kullanılmamalı — eğri düzleşir
     assert "rangemode: 'tozero'" not in script_text
 

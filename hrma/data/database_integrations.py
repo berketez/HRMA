@@ -36,6 +36,15 @@ class NistWebBookAPI:
         Returns:
             Dict with density, viscosity, etc.
         """
+        # v3.0.1 K kulvarı (Berke ek maddesi: "online offline varsa sök,
+        # aynen bağlandı bağlanmadı olmalı") — BAĞLANTI ile VERİ iki ayrı
+        # olgudur. ``status`` bu işlevde VERİ hükmüdür ('success' yalnız bir
+        # özellik gerçekten ayrıştırıldıysa; P9B5-11 sözleşmesi değişmedi);
+        # yanına bağlantı olgusu ayrı alanla yazılır: bir HTTP yanıtı
+        # geldiyse ``connection = 'connected'`` (+ ``http_status``), ağ
+        # hatası / zaman aşımında ``'not_connected'``. ``test_connections``
+        # uç durumunu bu iki alandan AYRI AYRI kurar.
+        response = None
         try:
             # Search for compound
             params = {
@@ -83,28 +92,48 @@ class NistWebBookAPI:
                               f'expects). No value is attributed to NIST.'),
                     'source': 'NIST WebBook (unparsable response)',
                     'temperature': temperature,
-                    'data': self._get_fallback_properties(formula, temperature)
+                    'data': self._get_fallback_properties(formula, temperature),
+                    **self._baglanti_alanlari(response),
                 }
 
             return {
                 'status': 'success',
                 'data': properties,
                 'source': 'NIST WebBook',
-                'temperature': temperature
+                'temperature': temperature,
+                **self._baglanti_alanlari(response),
             }
             
         except requests.RequestException as e:
+            # HTTPError (ör. 503) bir YANIT taşır: bağlandı, veri yok.
+            # ConnectionError / Timeout yanıtsızdır: bağlanamadı.
+            # (``requests.Response`` 4xx/5xx'te FALSY'dir: ``or`` değil
+            # açık None denetimi.)
+            yanit = getattr(e, 'response', None)
+            if yanit is None:
+                yanit = response
             return {
                 'status': 'error',
                 'error': f'NIST API connection failed: {str(e)}',
-                'data': self._get_fallback_properties(formula, temperature)
+                'data': self._get_fallback_properties(formula, temperature),
+                **self._baglanti_alanlari(yanit),
             }
         except Exception as e:
             return {
                 'status': 'error', 
                 'error': f'Data parsing failed: {str(e)}',
-                'data': self._get_fallback_properties(formula, temperature)
+                'data': self._get_fallback_properties(formula, temperature),
+                **self._baglanti_alanlari(response),
             }
+
+    @staticmethod
+    def _baglanti_alanlari(response) -> Dict:
+        """Bağlantı olgusu: yanıt geldiyse 'connected' + HTTP kodu."""
+        if response is None:
+            return {'connection': 'not_connected', 'http_status': None}
+        kod = getattr(response, 'status_code', None)
+        return {'connection': 'connected',
+                'http_status': kod if isinstance(kod, int) else None}
     
     def _parse_nist_response(self, html: str, temperature: float) -> Dict:
         """Parse NIST HTML response to extract properties.
@@ -567,32 +596,73 @@ class DatabaseManager:
         # ayağıdır (advanced/liquid/solid şablonlarındaki setNistStatus);
         # veri katmanı artık gerçeği yayımlıyor.
         # ------------------------------------------------------------------
+        # v3.0.1 K kulvarı — BERKE EK MADDESİ ("online offline varsa sök,
+        # aynen bağlandı bağlanmadı olmalı"). ÖLÇÜLDÜ (taban c6fc59aad,
+        # docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/): NIST'e istek
+        # gidiyor ve sayfa GELİYORDU, ama ayrıştırıcı eşleşmediği için bu kol
+        # ``status = 'error'`` yayımlıyordu; arayüz bunu "NIST WebBook
+        # Offline" diye okuyordu — bağlanmış bir kaynağa "bağlanamadı"
+        # demek. Bağlantı ile veri artık AYRI alanlardır:
+        #   connection   'connected' (HTTP yanıtı geldi) | 'not_connected'
+        #                (ağ hatası / zaman aşımı; ``error`` metniyle)
+        #   data_parsed  True/False — sayfadan bir özellik ayrıştırıldı mı
+        # ``status`` geriye uyum için aynı BAĞLANTI anlamını taşır
+        # ('connected' | 'not_connected'); "sayfa geldi, ayrıştırılamadı"
+        # artık 'error' DEĞİLDİR, bağlandı + data_parsed=False'tur.
+        _kunye = {
+            'network_source': True,
+            'kind': 'http_api',
+            'supplies_calculation_data': False,
+            'calculation_data_source': 'HRMA Oxidizer Database (local)',
+        }
+        _yerel = ('The oxidizer and propellant numbers used by the '
+                  'calculation come from the local HRMA reference tables '
+                  '(hrma/data/external_data_fetcher.py, which performs no '
+                  'network request), not from this endpoint.')
         try:
             nist_result = self.nist.get_compound_properties('N2O')
-            _ok = nist_result['status'] == 'success'
+            _ayristi = nist_result.get('status') == 'success'
+            _baglanti = nist_result.get('connection')
+            if _baglanti not in ('connected', 'not_connected'):
+                # Bağlantı alanı yoksa (eski biçimli bir sonuç) yalnız
+                # ayrıştırılmış veri bağlantıyı KANITLAR; gerisi iddia
+                # edilmez.
+                _baglanti = 'connected' if _ayristi else 'not_connected'
+            _http = nist_result.get('http_status')
+            if _baglanti == 'connected' and _ayristi:
+                _mesaj = ('Connected to NIST WebBook%s and a property was '
+                          'parsed. This probe measures REACHABILITY ONLY: '
+                          % (' (HTTP %d)' % _http if _http else '')) + _yerel
+            elif _baglanti == 'connected':
+                _mesaj = ('Connected to NIST WebBook%s, but no property could '
+                          'be parsed from the page (data_parsed = false); no '
+                          'value is attributed to NIST. This probe measures '
+                          'REACHABILITY ONLY: '
+                          % (' (HTTP %d)' % _http if _http else '')) + _yerel
+            else:
+                _mesaj = ('Could not connect to NIST WebBook. The calculation '
+                          'does not depend on it: ') + _yerel
             results['nist'] = {
-                'status': 'connected' if _ok else 'error',
-                'message': (nist_result.get('error')
-                            or ('Endpoint reachable. This probe measures '
-                                'REACHABILITY ONLY: the oxidizer and '
-                                'propellant numbers used by the calculation '
-                                'come from the local HRMA reference tables '
-                                '(hrma/data/external_data_fetcher.py, which '
-                                'performs no network request), not from this '
-                                'endpoint.')),
-                'network_source': True,
-                'kind': 'http_api',
-                'supplies_calculation_data': False,
-                'calculation_data_source': 'HRMA Oxidizer Database (local)',
+                'status': _baglanti,
+                'connection': _baglanti,
+                'http_status': _http,
+                'data_parsed': _ayristi,
+                'message': _mesaj,
+                **({'error': nist_result.get('error')}
+                   if _baglanti == 'not_connected' and nist_result.get('error')
+                   else {}),
+                **_kunye,
             }
         except Exception as e:
             results['nist'] = {
-                'status': 'error',
-                'message': str(e),
-                'network_source': True,
-                'kind': 'http_api',
-                'supplies_calculation_data': False,
-                'calculation_data_source': 'HRMA Oxidizer Database (local)',
+                'status': 'not_connected',
+                'connection': 'not_connected',
+                'http_status': None,
+                'data_parsed': False,
+                'message': ('Could not connect to NIST WebBook. The '
+                            'calculation does not depend on it: ') + _yerel,
+                'error': str(e),
+                **_kunye,
             }
         
         # ------------------------------------------------------------------
@@ -618,26 +688,54 @@ class DatabaseManager:
         # KULLANILABİLİR olması ayrı bir gerçektir ve öyle bildirilir
         # ('local'); tüketici üçüncü durumu tanımıyorsa yeşil rozeti
         # yakmaz — ki doğrusu budur.
+        # v3.0.1 K kulvarı — BERKE EK MADDESİ: CEA kolunda BAĞLANTI KAVRAMI
+        # YOK. NASA CEA bu üründe yerel bir kütüphanedir (RocketCEA'nın
+        # Fortran sarmalayıcısı; hibrit sonucunun NASA CEA karşılaştırması ve
+        # sıvı çözücünün yanma verisi onu kullanır). ``connection`` alanı
+        # 'not_applicable'dır; durum yalnız kütüphanenin BU kurulumda içe
+        # aktarılıp aktarılamadığını söyler (``available``). Bu kol için
+        # bağlantı/çevrimdışı sözcüğü hiçbir yerde kullanılmaz.
+        # Ayrıca yerel CEA tür tablosu (NasaCeaAPI, /api/validate-fuel)
+        # ağ çağrısı yapmaz (P9B5-10 ölçümü aynen geçerli).
+        try:
+            from hrma.engines.cea_bridge import (
+                is_rocketcea_available as _rc_var)
+            _var = bool(_rc_var())
+        except Exception:  # noqa: BLE001 — içe aktarılamıyorsa yok sayılır
+            _var = False
+        _surum = None
+        if _var:
+            try:
+                import rocketcea as _rc
+                _surum = str(getattr(_rc, '__version__', '') or '') or None
+            except Exception:  # noqa: BLE001
+                _surum = None
         try:
             cea_result = self.cea.validate_fuel_composition([('C4H6', 100.0)])
-            calisiyor = cea_result.get('status') == 'success'
-            results['cea'] = {
-                'status': (self.CEA_LOCAL_STATUS if calisiyor else 'error'),
-                'message': (cea_result.get('error')
-                            or (f'Local CEA species table '
-                                f'({len(self.cea.cea_species)} species) is '
-                                f'available. This source performs no network '
-                                f'request: there is no NASA CEA connection to '
-                                f'report.')),
-                'network_source': False,
-                'kind': 'local_table',
-            }
-        except Exception as e:
-            results['cea'] = {
-                'status': 'error',
-                'message': str(e),
-                'network_source': False,
-                'kind': 'local_table',
-            }
+            _tablo = cea_result.get('status') == 'success'
+        except Exception:  # noqa: BLE001
+            _tablo = False
+        results['cea'] = {
+            'status': (self.CEA_LOCAL_STATUS if _var else 'unavailable'),
+            'connection': 'not_applicable',
+            'kind': 'local_library',
+            'available': _var,
+            'library': ('RocketCEA %s (NASA CEA, Gordon & McBride, NASA '
+                        'RP-1311)' % _surum) if _var else None,
+            'network_source': False,
+            'local_species_table_available': _tablo,
+            'message': (
+                ('NASA CEA runs locally through the RocketCEA library%s; it '
+                 'makes no network request and there is nothing to connect '
+                 'to. ' % (' ' + _surum if _surum else ''))
+                if _var else
+                ('The RocketCEA library (NASA CEA) cannot be imported in this '
+                 'installation: a local installation issue, the library '
+                 'makes no network request. '))
+            + ('Local CEA species table (%d species, used by '
+               '/api/validate-fuel) %s.' % (
+                   len(self.cea.cea_species),
+                   'is available' if _tablo else 'could not be read')),
+        }
         
         return results

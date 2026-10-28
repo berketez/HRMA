@@ -21,9 +21,26 @@ fea-yuk/mutasyon.md):
      (docs/scofield/raw/OH/V3/fea-yuk/toleranslar_once.md, commit b109c322).
   6. Kapsam: sonuç YALNIZ basınç yüklemesidir (ısıl yük ve sıcaklığa bağlı
      dayanım kapsam dışı) — künyede ve uç yanıtında.
+  7. (V3.0.5) İki katmanlı rejeneratif cidarın dış kabuk yükü: ceket
+     soğutucu basıncı kabuk iç yüzeyinde düzgün, YALNIZ radyal, uç kuvveti
+     yok; yükün iç yüzey integrali, mesnet tepkisi ve kabuk silindirinin
+     Lamé çözümü bağımsız kökten.
 
-Örnek motor tek kez (modül kapsamı) hesaplanır; FEA ürün ucundan
+Motorlar tek kez (modül kapsamı) hesaplanır; FEA ürün ucundan
 (/api/fea/structural) ya da köprüden, ürün varsayılanlarıyla sürülür.
+
+V3.0.5 TAŞIMA (28 Eki 2026, A1): 1-6'nın vakası eskiden examples/ sıvı
+örneğiydi. SIVI-CIDAR kalem 3 (a58f5afa9, main'e e1aca361e) iki katmanlı
+rejeneratif cidarda FEA gövdesini DIŞ KABUĞA taşıdı: yük artık soğutucu
+basıncıdır (``coolant_uniform_closeout``), izantropik p(x), kapalı uç
+kuvveti ve γ yolu orada KOŞMAZ. Bu bilinçli ürün kararıdır (Berke 28 Eki:
+sıvıda dış kabuk FEA'sıyla gerçek hüküm). Örnek sıvı rejeneratif olduğundan
+1-6 boşa düşüyordu; izantropik yol ürünün TEK KATMANLI cidarında
+(``_two_layer_wall_applies`` yalnız rejeneratifte doğru: ablatif, ışınımlı,
+film, dump; ayrıca hibrit ve katı) aynen koşar. Bekçiler aynı örnek sıvının
+ışınımlı soğutmalı (tek cidar) hâline taşındı; cidar 5 mm, ön kayıtlı
+toleransların ANA vakası (toleranslar_once.md: "cidar 5,00 mm (main)").
+Toleranslar DEĞİŞMEDİ. Örneğin kendi (iki katmanlı) yolu 7'de sınanır.
 """
 
 import contextlib
@@ -65,13 +82,25 @@ def istemci():
     return app.test_client()
 
 
-@pytest.fixture(scope='module')
-def ornek_sivi(istemci):
+#: Tek katmanlı cidar vakası: örnek sıvının soğutma türü ve cidarı. Işınımlı
+#: soğutmada ceket yoktur (``WALL_MODEL_SINGLE_BASIS``: sıcak cidar = basınç
+#: taşıyan cidar). 5 mm: ön kayıtlı toleransların ana vakası. ÖLÇÜLDÜ (28 Eki,
+#: docs/scofield/raw/OH/V305/ci/A1/RAPOR.md): aynı vakada 2 mm'de istasyon
+#: kıyası iki kipte de tutar, kaba ağ (16/32 istasyon) yük integrali ise
+#: 6,5e-4 / 1,6e-4 çıkar (lülede 9/18 istasyon; Gauss kesmesi: 64 / 128
+#: istasyonda 3,3e-5 / 4,4e-6; bölünmemiş 2,2e-3) — 8 istasyon notundaki
+#: mekanizma; kuvvet dengesi kapısı (1e-3) her durumda tutar.
+TEK_CIDAR_SOGUTMA = 'radiative'
+TEK_CIDAR_KALINLIK_MM = '5'
+
+
+def _ornek_sivi_kos(istemci, **degisen):
     """examples/ sıvı örnek motoru, FORM yolu (F1 'ornek:liquid' kurulumu)."""
     from tests.support import form_defaults
     from tests.test_example_projects import (ENDPOINTS, HEADERS,
                                              load_example_doc)
     alanlar = dict(load_example_doc('liquid')['inputs']['fields'])
+    alanlar.update(degisen)
     govde = form_defaults.form_yuku('liquid', alanlar)
     r = _sessiz(istemci.post, ENDPOINTS['liquid'], json=govde,
                 headers=HEADERS)
@@ -79,11 +108,42 @@ def ornek_sivi(istemci):
     return r.get_json()
 
 
+def _cidar_modeli(motor):
+    return (((motor.get('structural_analysis') or {})
+             .get('chamber_structure') or {}).get('wall_model'))
+
+
+@pytest.fixture(scope='module')
+def ornek_sivi(istemci):
+    """Tek katmanlı cidarlı sıvı: örnek motor, ışınımlı soğutma, 5 mm cidar.
+    İzantropik yük yolunun koştuğu ürün vakası (bkz. modül notu)."""
+    m = _ornek_sivi_kos(istemci, cooling_type=TEK_CIDAR_SOGUTMA,
+                        chamber_wall_thickness=TEK_CIDAR_KALINLIK_MM)
+    # Ön koşul: köprü iki katman yoluna GİRMEZ (girerse bekçiler boşa düşer).
+    assert _cidar_modeli(m) != bridge.SIVI_IKI_KATMAN_MODELI
+    return m
+
+
 @pytest.fixture(scope='module')
 def ornek_fea(ornek_sivi):
     """Ürün varsayılanlarıyla köprü koşusu (uçla aynı tur bütçesi)."""
     from hrma.app import FEA_STRUCTURAL_DEFAULT_ROUNDS
     return _sessiz(bridge.run_structural_from_motor, ornek_sivi,
+                   max_rounds=FEA_STRUCTURAL_DEFAULT_ROUNDS)
+
+
+@pytest.fixture(scope='module')
+def iki_katman_sivi(istemci):
+    """examples/ sıvı örnek motoru OLDUĞU GİBİ (rejeneratif, iki katman)."""
+    m = _ornek_sivi_kos(istemci)
+    assert _cidar_modeli(m) == bridge.SIVI_IKI_KATMAN_MODELI
+    return m
+
+
+@pytest.fixture(scope='module')
+def iki_katman_fea(iki_katman_sivi):
+    from hrma.app import FEA_STRUCTURAL_DEFAULT_ROUNDS
+    return _sessiz(bridge.run_structural_from_motor, iki_katman_sivi,
                    max_rounds=FEA_STRUCTURAL_DEFAULT_ROUNDS)
 
 
@@ -594,3 +654,209 @@ def test_kapsam_yalniz_basinc_ve_uc_yaniti(istemci, ornek_sivi):
     assert fea['meta']['hukum']['yuk_kapsami'] == lm['scope']
     assert any('ısıl yük ve sıcaklığa bağlı dayanım' in n
                for n in fea['meta']['not_modelled'] if isinstance(n, str))
+
+
+# =========================================================================
+# 7. (V3.0.5) İki katmanlı cidar: dış kabuk yükü — yalnız radyal soğutucu
+#    basıncı (SIVI-CIDAR kalem 3, a58f5afa9; ``SIVI_KABUK_MODEL_BASIS``)
+# =========================================================================
+#: Kabuk yükünün iç yüzey integrali ⟷ p·2π·∫r dz kıyas tavanı. HESAPTAN ÖNCE
+#: (28 Eki, A1): her ağ kenarında r doğrusal, p sabit; 3 noktalı Gauss bu
+#: integrandı TAM alır, fark yalnız yüzlerce terimin toplama yuvarlamasıdır.
+KABUK_YUK_INTEGRAL_TOL = 1e-12
+
+
+def _kabuk_kaydi(motor):
+    cs = motor['structural_analysis']['chamber_structure']
+    return next(k for k in cs['wall_layers'] if k.get('role') == 'closeout')
+
+
+def test_iki_katman_kabuk_yuku_sozlesmesi(iki_katman_sivi):
+    """Yük = kabuk kaydının soğutucu basıncı, kalınlık = kabuk kalınlığı,
+    düzgün dağılım, uç kuvveti YOK (ürün beyanı: yalnız radyal); γ bu yolda
+    tüketilmez."""
+    kabuk = _kabuk_kaydi(iki_katman_sivi)
+    inp = _ornek_yuk(iki_katman_sivi)
+    lm, yuk = inp['load_model'], inp['pressure_load']
+    p = float(kabuk['coolant_pressure_bar']) * 1e5
+    assert lm['distribution'] == bridge.SIVI_KABUK_YUK_DAGILIMI
+    assert lm['p_c_pa'] == pytest.approx(p, rel=1e-12)
+    assert yuk.p_ref_pa == pytest.approx(p, rel=1e-12)
+    assert inp['thickness_m'] == pytest.approx(
+        float(kabuk['thickness_mm']) / 1000.0, rel=1e-12)
+    assert yuk.pressure_fn is None and yuk.yalniz_radyal is True
+    assert lm['radial_only'] is True
+    assert yuk.end_force_n == 0.0 and lm['end_force']['force_n'] == 0.0
+    gamma_yolu = [c for c in inp['consumed_paths'] if c['path'] == 'gamma']
+    assert gamma_yolu and gamma_yolu[0]['applied'] is False
+
+
+@pytest.mark.parametrize('n_axial', [16, 64])
+def test_iki_katman_kabuk_yuku_ic_yuzey_integrali(iki_katman_sivi, n_axial):
+    """Çözücünün kurduğu düğüm kuvvetleri: radyal toplam = p·2π·∫r dz
+    (kabuk iç yüzeyinin radyal izdüşümü, ağ çokgeninde kapalı biçim),
+    eksenel bileşen her düğümde SIFIR. Bağımsız kök: ağ düğümlerinden
+    yamuk toplamı (ürünün Gauss kuralı ve normalleri kullanılmaz)."""
+    inp = _ornek_yuk(iki_katman_sivi)
+    yuk = inp['pressure_load']
+    p = float(_kabuk_kaydi(iki_katman_sivi)['coolant_pressure_bar']) * 1e5
+    mesh = build_wall_mesh(inp['contour'], inp['thickness_m'], n_axial, 4)
+    F = np.zeros(2 * mesh.n_nodes)
+    sa._ic_basinc_yukunu_kur(F, mesh, yuk)
+    ic = np.asarray(mesh.nodes)[np.asarray(mesh.node_index_grid)[:, 0]]
+    beklenen = p * 2.0 * math.pi * float(np.sum(
+        0.5 * (ic[1:, 1] + ic[:-1, 1]) * np.diff(ic[:, 0])))
+    assert beklenen > 0.0
+    assert F[1::2].sum() == pytest.approx(beklenen,
+                                          rel=KABUK_YUK_INTEGRAL_TOL)
+    assert np.all(F[0::2] == 0.0)
+
+
+def test_iki_katman_kuvvet_dengesi_mesnet_tepkisi_sifir(iki_katman_sivi,
+                                                        iki_katman_fea):
+    """Yalnız radyal yükte eksenel bileşke tanım gereği sıfırdır: yayımlanan
+    çözümün mesnet eksenel tepkisi, p·π·r_0² ölçeğinde (r_0 kabuk iç
+    yüzeyinin z_min ucu) ürün sabiti KUVVET_DENGESI_TOL içinde sıfırdır."""
+    lm = iki_katman_fea['load_model']
+    kd = lm['force_balance']
+    assert kd['measured'] is True and kd['holds'] is True
+    assert kd['tol'] == bridge.KUVVET_DENGESI_TOL
+    p = float(_kabuk_kaydi(iki_katman_sivi)['coolant_pressure_bar']) * 1e5
+    r0 = float(np.asarray(iki_katman_fea['inputs']['contour'])[0, 1])
+    olcek = p * math.pi * r0 * r0
+    meta = iki_katman_fea['result'].meta['kuvvet_dengesi']
+    assert meta['ic_basinc_eksenel_n'] == 0.0
+    assert meta['uc_kuvveti_eksenel_n'] == 0.0
+    assert abs(meta['mesnet_eksenel_tepkisi_n']) / olcek <= \
+        bridge.KUVVET_DENGESI_TOL
+    assert 'kuvvet_dengesi_tutmadi' not in \
+        iki_katman_fea['verdict']['geri_cekme_gerekceleri']
+
+
+def test_iki_katman_kuvvet_dengesi_tutmazsa_hukum_geri_cekilir(
+        iki_katman_sivi, monkeypatch):
+    """Kapı bu yolda da canlı: analitik net bozulursa hüküm fail-closed."""
+    asil = bridge._ag_yuzeyi_analitik_net
+    monkeypatch.setattr(bridge, '_ag_yuzeyi_analitik_net',
+                        lambda k, m: asil(k, m) + 0.01 * k['axial_scale_n'])
+    out = _sessiz(bridge.run_structural_from_motor, iki_katman_sivi,
+                  n_axial0=16, n_radial0=4, max_rounds=1)
+    assert out['load_model']['distribution'] == \
+        bridge.SIVI_KABUK_YUK_DAGILIMI
+    assert out['load_model']['force_balance']['holds'] is False
+    assert 'kuvvet_dengesi_tutmadi' in out['verdict']['geri_cekme_gerekceleri']
+    assert out['verdict']['verildi'] is False
+
+
+@pytest.mark.parametrize('kip', ['z_min', 'z_max'])
+def test_iki_katman_kabuk_silindiri_lame(iki_katman_sivi, kip):
+    """Kabuğun hazne silindiri ortası (uçlardan ≥ 5·√(R·t) uzakta): uç
+    kuvvetsiz, yalnız radyal iç basınçlı kalın silindir = AÇIK uçlu Lamé
+    (Timoshenko & Goodier Böl. 4): σ_θ(a) = p(a²+b²)/(b²−a²), σ_z = 0.
+    Ağ: istasyon bekçisinin sabit ağı; tolerans projenin Lamé çapası."""
+    inp = _ornek_yuk(iki_katman_sivi)
+    p = float(_kabuk_kaydi(iki_katman_sivi)['coolant_pressure_bar']) * 1e5
+    mesh = build_wall_mesh(inp['contour'], inp['thickness_m'], *ISTASYON_AGI)
+    res = sa.solve_pressure(mesh, inp['material'], inp['pressure_load'],
+                            axial_fix=kip)
+    z1 = -0.5 * float(inp['chamber_extension_m'])
+    _, P, S = _cizgi(mesh, res, z1)
+    a, b = P[0, 1], P[-1, 1]
+    s_th = p * (a * a + b * b) / (b * b - a * a)
+    assert S[0, 2] == pytest.approx(s_th, rel=S1_TOL)
+    assert _vm(S[0, 0], S[0, 1], S[0, 2]) == pytest.approx(
+        _vm(0.0, -p, s_th), rel=S1_TOL)
+    assert abs(_alan_agirlikli_sz(P, S)) <= S1_TOL * s_th
+
+
+# =========================================================================
+# 8. (V3.0.5 A1 ek tur) Künye ⟷ çözücü: ``consumed_paths``teki her yolun
+#    motor sonucundaki DEĞERİ çözücünün kullandığı değerdir
+# =========================================================================
+#: Ölçülen kusur (28 Eki, main ba0167bc2, örnek sıvı iki katman): künye
+#: kalınlık için yığını (chamber_structure.wall_thickness 5,5 mm), yük için
+#: chamber_pressure (50 bar) yazıyordu; çözücü kabuğun 2,5 mm'sini ve
+#: soğutucunun 76,29 bar'ını kullanıyordu. Kabuk ötelemesinin girdileri
+#: listede yoktu (docs/scofield/raw/OH/V305/ci/A1/RAPOR.md §5).
+
+#: Tek katmanlı yolun künyesi — düzeltmeden ÖNCEKİ hâliyle aynı (ölçüldü:
+#: hibrit, katı, tek cidarlı sıvı künyeleri taban ⟷ yeni birebir,
+#: olcum/kunye_bitayni.json).
+TEK_CIDAR_SIVI_YOLLARI = [
+    'nozzle_contour.points', 'structural_analysis',
+    'structural_analysis.chamber_structure.wall_thickness',
+    'structural_analysis.chamber_structure.material_key',
+    'structural_analysis.chamber_structure.yield_strength_at_wall_temp',
+    'chamber_pressure', 'gamma', 'chamber_length']
+
+
+def _yol_degeri(motor, yol):
+    """'a.b[rol].c' yolunu motor sonucunda çöz; [rol] listede role == rol."""
+    d = motor
+    for parca in yol.split('.'):
+        ad, _, rol = parca.partition('[')
+        d = d[ad]
+        if rol:
+            d = next(k for k in d if k.get('role') == rol.rstrip(']'))
+    return d
+
+
+def kunye_celiskileri(motor, inp):
+    """Künyenin söylediği değer ⟷ çözücüye giden değer; çelişki listesi."""
+    cel = []
+    yollar = {c['consumer']: c['path'] for c in inp['consumed_paths']}
+    t = float(_yol_degeri(motor, yollar['mesh (thickness)'])) / 1000.0
+    if t != pytest.approx(inp['thickness_m'], rel=1e-12):
+        cel.append(('kalinlik', t, inp['thickness_m']))
+    p_kayit = [c for c in inp['consumed_paths'] if c['unit'] == 'bar -> Pa']
+    p = float(_yol_degeri(motor, p_kayit[0]['path'])) * 1e5 \
+        if len(p_kayit) == 1 else None
+    if p is None or p != pytest.approx(inp['inner_pressure_pa'], rel=1e-12) \
+            or p != pytest.approx(inp['load_model']['p_c_pa'], rel=1e-12):
+        cel.append(('basinc', p, inp['inner_pressure_pa']))
+    kabuk = inp.get('two_layer_closeout')
+    oteleme = [c['path'] for c in inp['consumed_paths']
+               if c['consumer'] == 'mesh contour offset (build_wall_mesh)']
+    if kabuk is not None:
+        top = sum(float(_yol_degeri(motor, y)) for y in oteleme) / 1000.0
+        if len(oteleme) != 2 or top != pytest.approx(kabuk['offset_m'],
+                                                     rel=1e-12):
+            cel.append(('oteleme', oteleme, kabuk['offset_m']))
+    elif oteleme:
+        cel.append(('oteleme_tek_katmanda', oteleme, None))
+    if _yol_degeri(motor, yollar['material E, nu (+ thermal rho, cp, k)']) \
+            != inp['material_key']:
+        cel.append(('malzeme', yollar, inp['material_key']))
+    for c in inp['consumed_paths']:
+        try:
+            _yol_degeri(motor, c['path'])
+        except (KeyError, StopIteration, TypeError):
+            cel.append(('cozulmeyen_yol', c['path'], None))
+    return cel
+
+
+def test_kunye_iki_katmanda_cozucunun_girdisini_soyler(iki_katman_sivi):
+    inp = _ornek_yuk(iki_katman_sivi)
+    assert inp['two_layer_closeout'] is not None
+    assert kunye_celiskileri(iki_katman_sivi, inp) == []
+    yollar = [c['path'] for c in inp['consumed_paths']]
+    assert 'chamber_pressure' not in yollar
+    assert 'structural_analysis.chamber_structure.wall_thickness' \
+        not in yollar
+    # _basis aynı yolları söyler (ekrandaki cidar satırı ve yük bloğu).
+    gy = inp['two_layer_closeout']['girdi_yollari']
+    assert inp['_basis']['cidar'].startswith(
+        gy['closeout_thickness_mm']['path'] + ' [mm] / 1000')
+    assert gy['coolant_pressure_bar']['path'] in inp['_basis']['yuk'][
+        'kaynak']
+    assert inp['_basis']['yuk']['p_Pa'] == inp['inner_pressure_pa']
+
+
+def test_kunye_tek_katmanda_aynen(ornek_sivi):
+    inp = _ornek_yuk(ornek_sivi)
+    assert inp.get('two_layer_closeout') is None
+    assert kunye_celiskileri(ornek_sivi, inp) == []
+    assert [c['path'] for c in inp['consumed_paths']] == \
+        TEK_CIDAR_SIVI_YOLLARI
+    assert inp['_basis']['yuk']['kaynak'] == \
+        "results['chamber_pressure'] [bar] * PA_PER_BAR"

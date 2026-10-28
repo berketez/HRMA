@@ -26,6 +26,7 @@ durumda kanıtlanmıştır (``a1/mutasyon.json``).
 
 import importlib.util
 import json
+import re
 import pathlib
 import shutil
 import subprocess
@@ -80,6 +81,20 @@ def _node(betik):
 # ---------------------------------------------------------------------------
 
 class TestGT07PanoDali:
+    """OH-GT-07 — pano reddedilince veri kaybolmaz.
+
+    V301/N-YZ (26 Eki 2026) — KOD TAŞINDI, KORUMA KALDI. Üç sayfanın ayrı
+    ``askAI`` / pano / veri penceresi kopyası (app.js, solid.html,
+    liquid.html) tek ortak modüle ``hrma/static/js/ai_assistant.js``
+    ("Yapay Zekâ ile Tasarla") taşındı. Bu sınıfın sayfa başına ölçtüğü üç
+    koruma (hata dalında pencere, adıyla loglama, pano API'si yokken senkron
+    fırlatmama) artık o modülde ve node altında GERÇEK gövdeyle
+    ``tests/test_v301_yapay_zeka.py::TestPanoDaliOrtakModul`` tarafından
+    koşturuluyor. Burada kalan: taban kusurunun kaydı + sayfaların kendi
+    pano kopyasını yeniden edinmediği + modülün üç korumayı taşıdığı.
+    """
+
+    YZ_MODUL_YOLU = REPO_ROOT / 'hrma' / 'static' / 'js' / 'ai_assistant.js'
 
     def test_taban_kusuru_gerceklesti(self, taban):
         """Taban: üç sayfanın HİÇBİRİNDE hata dalında modal yoktu."""
@@ -88,107 +103,29 @@ class TestGT07PanoDali:
             [False, False, False]
 
     @pytest.mark.parametrize('sayfa', SAYFALAR)
-    def test_hata_dalinda_veri_penceresi_acilir(self, olcum, sayfa):
+    def test_sayfa_kendi_pano_kopyasini_tasimaz(self, olcum, sayfa):
+        """Üç sayfa ortak modülü kullanır; ikinci bir pano yolu doğmaz."""
         k1 = olcum.k1()
-        assert k1[sayfa]['hata_dalinda_modal'], (
-            '%s: pano reddedilince veri penceresi açılmıyor — özellik '
-            'sessizce kayboluyor (OH-GT-07)' % sayfa)
+        assert not k1[sayfa]['zincir_var'], (
+            '%s yeniden kendi pano kopyasını taşıyor; ortak modül '
+            'ai_assistant.js kullanılmalı (V301/N-YZ)' % sayfa)
+        assert not k1['modal_fonksiyonu_tanimli'][sayfa]
 
-    @pytest.mark.parametrize('sayfa', SAYFALAR)
-    def test_ham_hata_nesnesi_loglanmiyor(self, olcum, sayfa):
-        """``console.error(..., err)`` DOMException'ı "{}" diye basıyordu."""
-        k1 = olcum.k1()
-        assert not k1[sayfa]['ham_err_logluyor'], (
-            '%s: hata nesnesi ham loglanıyor; ad + ileti yazılmalı' % sayfa)
-
-    @pytest.mark.parametrize('sayfa', SAYFALAR)
-    def test_pano_apisi_yoksa_senkron_firlatmaz(self, olcum, sayfa):
-        """Güvensiz bağlamda ``navigator.clipboard`` UNDEFINED'dır."""
-        k1 = olcum.k1()
-        assert k1[sayfa]['pano_api_yoksa_korumasi'], (
-            '%s: clipboard API yokluğu karşılanmıyor; `.writeText` senkron '
-            'fırlatır ve `.catch` hiç koşmaz' % sayfa)
-
-    @pytest.mark.parametrize('sayfa', ('liquid.html', 'solid.html'))
-    def test_modal_davranisi_node_altinda(self, olcum, sayfa):
-        """ÜRÜN KOŞUMU: şablonun kendi ``showAIDataModal``ı koşturulur."""
-        src = olcum.oku(olcum.SABLON / sayfa)
-        parcalar = [olcum.govde(src, ad)
-                    for ad in ('kacisliMetin', 'showAIDataModal')]
-        assert all(parcalar), '%s: modal yardımcıları bulunamadı' % sayfa
-        betik = """
-'use strict';
-var _eklenen = [];
-function dugum() {
-    return { attrs: {}, style: { cssText: '' }, __html: '',
-        setAttribute: function (k, v) { this.attrs[k] = String(v); },
-        getAttribute: function (k) { return this.attrs[k] || null; },
-        addEventListener: function () {}, remove: function () {},
-        appendChild: function (c) { _eklenen.push(c); return c; },
-        get innerHTML() { return this.__html; },
-        set innerHTML(v) { this.__html = String(v); } };
-}
-var _body = dugum();
-global.document = {
-    createElement: function () { return dugum(); },
-    getElementById: function () { return null; },
-    addEventListener: function () {}, removeEventListener: function () {},
-    body: _body
-};
-global.window = global;
-function T(key, fallback) { return fallback; }
-""" + '\n'.join(parcalar) + """
-showAIDataModal('VERI <script>alert(1)</script> SON', 'PANO REDDEDILDI');
-var m = _eklenen[0] || null;
-process.stdout.write(JSON.stringify({
-    eklendi: !!m,
-    id: m && m.id,
-    role: m && m.getAttribute('role'),
-    giris_var: !!(m && m.innerHTML.indexOf('PANO REDDEDILDI') >= 0),
-    veri_var: !!(m && m.innerHTML.indexOf('VERI') >= 0),
-    ham_etiket_var: !!(m && m.innerHTML.indexOf('<script>alert') >= 0),
-    kacisli: !!(m && m.innerHTML.indexOf('&lt;script&gt;') >= 0)
-}));
-"""
-        out = _node(betik)
-        assert out['eklendi'], '%s: pencere belgeye eklenmiyor' % sayfa
-        assert out['id'] == 'aiModal'
-        assert out['role'] == 'dialog'
-        assert out['giris_var'], '%s: uyarı metni pencerede yok' % sayfa
-        assert out['veri_var'], '%s: veri pencerede yok' % sayfa
-        assert not out['ham_etiket_var'] and out['kacisli'], (
-            '%s: veri HTML olarak kaçışsız basılıyor' % sayfa)
-
-    def test_app_js_modal_giris_metni_devralinabilir(self, olcum):
-        """``showAIDataModal(data, prompt, giris)`` üçüncü argümanı basmalı.
-
-        Aksi hâlde hata dalında "panoya kopyalandı" YALANI görünürdü.
-        """
-        src = olcum.oku(olcum.APP_JS)
-        fn = olcum.govde(src, 'showAIDataModal')
-        assert fn, 'app.js showAIDataModal bulunamadı'
-        betik = """
-'use strict';
-var _eklenen = [];
-global.document = { body: { insertAdjacentHTML: function (nerede, html) {
-    _eklenen.push(html); } } };
-global.window = global;
-function T(key, fallback) { return fallback; }
-""" + fn + """
-showAIDataModal({}, 'PROMPT', 'KOPYALANAMADI');
-showAIDataModal({}, 'PROMPT');
-process.stdout.write(JSON.stringify({
-    ozel: _eklenen[0].indexOf('KOPYALANAMADI') >= 0,
-    ozelde_varsayilan_yok: _eklenen[0].indexOf('copied to your clipboard') < 0,
-    varsayilan: _eklenen[1].indexOf('copied to your clipboard') >= 0
-}));
-"""
-        out = _node(betik)
-        assert out['ozel'], 'giriş metni devralınmıyor'
-        assert out['ozelde_varsayilan_yok'], (
-            'hata dalında hâlâ "panoya kopyalandı" metni basılıyor')
-        assert out['varsayilan'], 'varsayılan giriş metni kayboldu'
-
+    def test_modul_uc_korumayi_tasir(self):
+        """Hata dalında pencere + adıyla log + senkron fırlatma koruması."""
+        src = self.YZ_MODUL_YOLU.read_text(encoding='utf-8')
+        k = src.find('Panel.prototype.metniVer')
+        assert k >= 0, 'ai_assistant.js metniVer bulunamadı'
+        govde = src[k:src.find('\n    };', k)]
+        catch = govde[govde.find('.catch('):]
+        assert 'metinPenceresi(' in catch, 'hata dalında pencere açılmıyor'
+        assert 'panoHataMetni(err)' in catch, 'hata adıyla yazılmıyor'
+        assert not re.search(r'console\.(?:error|warn)\([^;]*,\s*err\s*\)', catch)
+        p = src.find('function panoyaYaz(')
+        assert re.search(r'nav\.clipboard\s*&&', src[p:p + 600]), (
+            'clipboard API yokluğu karşılanmıyor')
+        assert 'Promise.reject(err)' in src[p:p + 600], (
+            'senkron fırlatma söze çevrilmiyor')
 
 # ---------------------------------------------------------------------------
 # OH-GT-08 — 3B ölçü künyesinin dayanağı kaynağa bakar
@@ -262,6 +199,22 @@ class TestGT09KapaliDugme:
 # OH-GT-10 — yayın sürümünde geliştirme günlüğü yok
 # ---------------------------------------------------------------------------
 
+#: T-ÇAPA-C2 (27 Eki): tabandan (5c07c625) sonra ``console.error`` taşıyan
+#: KOD YOLUNUN KENDİSİ sökülen ya da ortak modüle taşınan yerler. Bunlar
+#: süpürmenin teşhis kanalını vakumlaması DEĞİLDİR; her biri commit'iyle
+#: adlıdır ve sayı yalnız bu kadar düşebilir (fazlası yine kırmızı):
+#:   * ``failed_to_copy`` (sıvı + katı): V301/N-YZ 12a557d0a, sayfaların ayrı
+#:     askAI kopyası ``ai_assistant.js``e taşındı; pano hatası orada
+#:     ``console.warn('HRMA AI clipboard:', …)`` ile hâlâ teşhis edilir.
+#:   * ``database_status_check_failed`` (sıvı + katı): v3.0.1 K kulvarı
+#:     5e6a70514, NASA CEA/NIST veritabanı yoklaması rozetleriyle birlikte
+#:     söküldü (yoklanacak uç yok, teşhis edilecek hata yok).
+SOKULEN_HATA_YOLU = {
+    'liquid.html': {'console_error': 2},
+    'solid.html': {'console_error': 2},
+}
+
+
 class TestGT10KonsolGurultusu:
 
     def test_taban_kusuru_gerceklesti(self, taban):
@@ -281,8 +234,12 @@ class TestGT10KonsolGurultusu:
         """``console.error``/``warn`` TEŞHİSTİR — süpürme onları almamalı."""
         k4 = olcum.k4()
         t = taban['K4_OH_GT_10_konsol_gurultusu'][ad]
-        assert k4[ad]['console_error'] >= t['console_error']
-        assert k4[ad]['console_warn'] >= t['console_warn']
+        sokulen = SOKULEN_HATA_YOLU.get(ad, {})
+        for kanal in ('console_error', 'console_warn'):
+            assert k4[ad][kanal] >= t[kanal] - sokulen.get(kanal, 0), (
+                '%s: %s %d < taban %d - adlı söküm %d (süpürme teşhis '
+                'kanalını aldı mı?)' % (ad, kanal, k4[ad][kanal], t[kanal],
+                                        sokulen.get(kanal, 0)))
 
 
 # ---------------------------------------------------------------------------

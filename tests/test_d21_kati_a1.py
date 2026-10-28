@@ -14,6 +14,24 @@ import re
 
 import pytest
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
+
+@pytest.fixture
+def cea_kapali(monkeypatch):
+    """V301/N-CEA-2: NASA CEA kapalı — katı motor katalog (tek basınçlı)
+    termokimyasına BEYANLA döner. Bu dosyadaki kayıt/katalog yolu bekçileri
+    öncüllerini (motor termokimyası = katalog kaydı) bu yolda korur; CEA
+    yolu tests/test_v301_n_cea2.py'de."""
+    from hrma.engines import cea_bridge
+    monkeypatch.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
+
 import hrma.engines.solid_rocket_engine as SRE
 from hrma.data.propellants_db import PROPELLANTS
 from hrma.engines.solid_rocket_engine import (
@@ -34,7 +52,7 @@ def _sessiz(fn, *a, **kw):
 
 def _motor(**kw):
     p = dict(grain_type='bates', propellant_type='apcp',
-             chamber_diameter=100, grain_length=500, core_diameter=30,
+             chamber_diameter=100, grain_length=500, core_diameter=_CEKIRDEK_MM,
              chamber_pressure=40)
     p.update(kw)
     return _sessiz(SolidRocketEngine, **p)
@@ -186,6 +204,7 @@ class TestP2B4_10TeorikIspKirpmasi:
         assert e._calculate_theoretical_isp(1.0) is None
         assert e._calculate_theoretical_isp(0.5) is None
 
+    @pytest.mark.usefixtures('cea_kapali')
     def test_gecerli_bandda_sayi_bit_ayni_kaldi(self):
         # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 247,8934603651343 /
         # 176,94719509884675 APCP kaydının geri çözülmüş dörtlüsünden
@@ -206,7 +225,12 @@ class TestP2B4_10TeorikIspKirpmasi:
         # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 238,95657975449012 geri
         # çözülmüş APCP dörtlüsündendi; ortalama hazne basıncında (tam motor
         # çözümü) ölçülen yeni taban.
-        assert blok['theoretical_isp'] == pytest.approx(240.97355643245413,
+        # V301/T-ÇAPA-A: 240,97355643245413 30 mm çekirdekte (boğulan port,
+        # K-A 422) ve N-CEA-2 öncesi katalog termokimyasıyla ölçülmüştü.
+        # Yeniden ölçüldü: tek tanımın 48 mm'si + ürün yolu (γ, c* motorun
+        # Pc'sinde NASA CEA'dan, ``thermochemistry_source`` nasa_cea_at_pc)
+        # -> 241,3367656363926 (CEA kapalı aynı motor 242,84579887675298).
+        assert blok['theoretical_isp'] == pytest.approx(241.3367656363926,
                                                         rel=1e-12)
         assert 'Eq. 3-30' in (blok.get('theoretical_isp_basis') or '')
 
@@ -335,6 +359,7 @@ class TestP2B4_13UydurmaUcusSabitleri:
 # =====================================================================
 class TestOHD1922YogusmusFazHukmu:
 
+    @pytest.mark.usefixtures('cea_kapali')
     def test_kndx_knsb_artik_tutarli_sayilmiyor(self):
         """D21'de KUSURU KORUYAN hâliyle yazılmıştı, D31'de ÇEVRİLDİ.
 
@@ -356,6 +381,7 @@ class TestOHD1922YogusmusFazHukmu:
             assert a['identity_is_independent'] is True
             assert a['record_c_star_basis'] == 'cea'
 
+    @pytest.mark.usefixtures('cea_kapali')
     def test_koken_alanlari_iki_sinifi_ayirt_ediyor(self):
         """D31'de ÇEVRİLDİ: D21 "iki sınıf var ama sebebi yayımlanıyor"
         hâlini kilitliyordu; D31 (OH-D19-22 / P9B4-23) SINIF FARKINI
@@ -376,6 +402,7 @@ class TestOHD1922YogusmusFazHukmu:
         assert {h['status'] for h in hukumler.values()} == {
             'two_phase_explained'}
 
+    @pytest.mark.usefixtures('cea_kapali')
     def test_bagimsiz_kayitlarin_hukmu_degismedi(self):
         """Onarım yalnız kör noktayı kapatır; bağımsız kaynaklı kayıtlar
         D17'deki hükümlerini korur (once.json ile bit-aynı)."""

@@ -310,11 +310,18 @@ def test_bantlar_sivi_ile_birebir():
     """Sınır kopyası tek yerde: hibrit sabitleri sıvı bandıyla aynı sayılar."""
     assert FEED_LINE_LENGTH_RANGE_M == (0.05, 50.0)
     assert FEED_LINE_INNER_DIAMETER_RANGE_MM == (0.5, 500.0)
-    sivi = oku(LIQUID_PY)
-    assert re.search(r"_override_val\('feed_line_length_m',\s*0\.05,\s*50\.0",
-                     sivi), 'sıvı bandı değişmiş — hibrit sabiti eskidi'
-    assert re.search(r"'feed_line_diameter_mm',\s*0\.5,\s*500\.0", sivi), (
+    # V301/T-ÇAPA-D: V301/L-A (a6cf9790b) sıvı uç kapılarını tek bant
+    # tablosuna topladı (``LIQUID_INPUT_BANDS``; ``_override_band`` okur);
+    # eski ``_override_val('feed_line_length_m', 0.05, 50.0`` çağrısı yok.
+    # Karşılaştırma kaynak metni değil tablonun KENDİSİNİ okur.
+    from hrma.engines.liquid_rocket_engine import LIQUID_INPUT_BANDS
+    assert LIQUID_INPUT_BANDS['feed_line_length_m'][:2] == (0.05, 50.0), (
+        'sıvı bandı değişmiş — hibrit sabiti eskidi')
+    assert LIQUID_INPUT_BANDS['feed_line_diameter_mm'][:2] == (0.5, 500.0), (
         'sıvı çap bandı değişmiş — hibrit sabiti eskidi')
+    sivi = oku(LIQUID_PY)
+    assert "self._override_band('feed_line_length_m')" in sivi
+    assert "self._override_band('feed_line_diameter_mm')" in sivi
     # Form min/max motor sınırlarıyla birebir
     html = oku(ADVANCED_HTML)
     uzunluk = re.search(r'<input[^>]*id="feed_line_length_m"[^>]*>', html)

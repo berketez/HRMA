@@ -751,9 +751,11 @@ def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, 
     """Panelin yükünden EKRANDA olması gereken hüküm rozetlerini türetir.
 
     Türetim ürünün kendi basım kurallarının BAĞIMSIZ (Python) aynasıdır:
-    yapısal/tane SF-renk eşikleri fea_panel.js:695/:1199, termal sınır
-    hükmü thermal_fea_panel.js:669-698. Ürün kuralı değişirse bu tablo ve
-    birim bekçileri kırmızı verir — sessiz ayrışma yok.
+    yapısal/tane SF-renk eşikleri fea_panel.js:1362 (sfRozetTuru) ve :2351
+    (strainMarginKind), termal sınır hükmü thermal_fea_panel.js:1214-1244
+    (+ geri çekme rozetleri :1162-1168 ve :1336-1342). Ürün kuralı
+    değişirse bu tablo ve birim bekçileri kırmızı verir — sessiz ayrışma
+    yok.
 
     Her beklenti: ``metinler`` (dil varyantı çekirdekleri — herhangi biri),
     ``haric`` (eşleşmeyi düşüren negatif bağlam), ``renk`` (data-badge
@@ -903,6 +905,17 @@ def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, 
         if _sayi_mi(s.get('peak_wall_T_K')):
             ekle('tepe cidar sıcaklığı', ('PEAK WALL T', 'TEPE CİDAR T'),
                  'info', sayi=(s['peak_wall_T_K'], 0))
+        # Ürün kuralı (thermal_fea_panel.js renderBadges :1214-1244) — zincir
+        # SIRASIYLA aynalanır, ilk tutan dal basılır:
+        #   erime aşıldı (:1217) → izin aşıldı (:1222) → OLUMLU HÜKÜM GERİ
+        #   ÇEKİLDİ (:1228, verdict_withheld === true → withheldBadge
+        #   :1162-1168) → izin içinde (:1230) → izin yayımlanmamış (:1235);
+        #   sınır kaydı hiç yoksa "sınırlar yayımlanmamış" (:1241).
+        # V305/G3: geri çekme dalı aynada YOKTU. Sunucu geri çekmede olumlu
+        # bayrakları null'a çeker (hrma/fea/bridge.py _olumlu_hukum_kapisi:
+        # "olumlu bayraklar (False) None'a çekilir, True AYNEN kalır"); ayna
+        # bu null'u "izin yayımlanmamış" sanıp yükte allowable_temperature_K
+        # DURURKEN ekranda 'ALLOWABLE NOT PUBLISHED' arıyordu.
         ml = yuk.get('material_limits')
         ml = ml if isinstance(ml, dict) else None
         if ml and (_sayi_mi(ml.get('allowable_temperature_K'))
@@ -915,6 +928,15 @@ def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, 
             elif ml.get('exceeds_allowable') is True:
                 ekle('malzeme sınırı hükmü (izin aşıldı)',
                      ('EXCEEDS ALLOWABLE', 'K AŞILIYOR'), 'warn',
+                     sayi=((ml['allowable_temperature_K'], 0)
+                           if _sayi_mi(ml.get('allowable_temperature_K')) else None))
+            elif ml.get('verdict_withheld') is True:
+                # withheldBadge (:1162-1168): 'warn'; sınır sayısı
+                # fmt(allowable, 0) ile basılır. Neden kodları dizi olduğu
+                # için yük özetine girmez (tur.py yukOzeti dizileri atar);
+                # çaprazlanan, başlık + renk + sınır sayısıdır.
+                ekle('malzeme sınırı hükmü (olumlu hüküm geri çekildi)',
+                     ('NO SAFETY VERDICT', 'GÜVENLİK HÜKMÜ YOK'), 'warn',
                      sayi=((ml['allowable_temperature_K'], 0)
                            if _sayi_mi(ml.get('allowable_temperature_K')) else None))
             elif ml.get('exceeds_allowable') is False:
@@ -930,6 +952,15 @@ def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, 
             ekle('malzeme sınırı hükmü (sınır kaydı yok)',
                  ('MATERIAL LIMITS NOT PUBLISHED',
                   'MALZEME SINIRLARI YAYIMLANMAMIŞ'), 'dim')
+        # Ürün kuralı (thermal_fea_panel.js:1336-1342, V301/FİZİK-2): aşım
+        # hükmü korunduğunda geri çekme gerekçeleri AYRI bir 'warn' rozetiyle
+        # söylenir (feaT.badgeWithheldOnExceedance). Koşul ürünle aynı:
+        # verdict_withheld === true VE (izin ya da erime aşımı true).
+        if (ml and ml.get('verdict_withheld') is True
+                and (ml.get('exceeds_allowable') is True
+                     or ml.get('exceeds_melting') is True)):
+            ekle('geri çekme gerekçesi (aşım korunurken)',
+                 ('ALSO NOTE:', 'AYRICA:'), 'warn')
         ts = yuk.get('time_step')
         if isinstance(ts, dict) and 'converged' in ts:
             if ts['converged']:
@@ -1030,7 +1061,8 @@ def fea_yuk_caprazi_denetimi(panel_adi: str,
     ad = 'fea_%s_yuk_caprazi' % panel_adi
     dayanak = ('window.<panel>.payload içeriği (yuk_ozeti) ⟷ #<panel>_badges '
                'rozet metni + data-badge rengi; eşikler ürün kuralının aynası '
-               '(fea_panel.js:695/:1199, thermal_fea_panel.js:669-698)')
+               '(fea_panel.js:1362/:2351, thermal_fea_panel.js:1214-1244 '
+               've :1336-1342)')
     esik = {'sf_err': esikler.FEA_SF_ERR_ESIGI,
             'sf_warn': esikler.FEA_SF_WARN_ESIGI,
             'marj_err': esikler.TANE_MARJ_ERR_ESIGI,
@@ -1958,7 +1990,10 @@ def yerlesim_ortusme_denetimi(olcum: Optional[Dict[str, Any]]) -> Denetim:
     FAIL-CLOSED: ölçüm alınamadıysa kapı kapanır.
     """
     ad = 'yerlesim_metin_ortusmesi'
-    dayanak = ('görünür metin yapraklarının getBoundingClientRect kutuları; '
+    # V305/G1 (main e8df707dd): ölçüm tur.py'de eleman kutusundan metnin
+    # glif kutusuna taşındı; dayanak beyanı ölçümün kendisini söyler.
+    dayanak = ('görünür metin yapraklarının GLİF kutuları '
+               '(Range.getClientRects; dolgu/kenarlık hariç); '
                'ata-torun çiftleri ve çizim kapları dışarıda')
     esik = {'min_kesisim_px2': esikler.ORTUSME_MIN_KESISIM_PX2,
             'min_kesisim_orani': esikler.ORTUSME_MIN_KESISIM_ORANI,

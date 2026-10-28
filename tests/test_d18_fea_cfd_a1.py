@@ -16,6 +16,8 @@ import sys
 
 import numpy as np
 import pytest
+
+from tests.support.fea_lule import ag_malzemesi
 from tests.support.kanit import kanit_gerekli
 
 KOK = pathlib.Path(__file__).resolve().parents[1]
@@ -97,7 +99,9 @@ def profil(client, motor):
         'throat_diameter': motor['throat_diameter'],
         'exit_diameter': motor['exit_diameter'],
         'expansion_ratio': motor['expansion_ratio'],
-        'nozzle_type': 'conical', 'material': 'steel_4130',
+        # V301/PANEL (NK-12): profil termal AĞIN malzemesiyle (lüle).
+        'nozzle_type': 'conical',
+        'material': ag_malzemesi(motor, 'steel_4130'),
         'wall_thickness': 0.005,
     }, headers=BASLIK)
     assert r.status_code == 200, r.get_data(as_text=True)[:300]
@@ -226,7 +230,16 @@ class TestP8B103GeometriKapisiBOSLUKSUZ:
             'motor_name': 'd18a1g', 'thrust': 2000, 'burn_time': 10,
             'of_ratio': 6.0, 'chamber_pressure': 30.0,
             'fuel_type': 'htpb', 'oxidizer_type': 'n2o',
-            'chamber_material': 'steel_4130'}, headers=BASLIK)
+            'chamber_material': 'steel_4130',
+            # V3.0.5 T-ÇAPA-C1 — ÖLÇÜM KOŞULU AÇIKÇA: c* verimi %100 ve cidar
+            # 13,0281 mm. V301/H-termal (77d64c641) korunan bölgeler yüzünden
+            # boyutlandırılan hibrit cidarını inceltti, V301/H-PANEL (74b55500a)
+            # N2O/HTPB c*'ına η=0,89 varsayılanı getirdi (onaylı yayımlanan sayı
+            # değişimleri; bekçinin konusu değil). Bu iki alanla köprü girdisi
+            # H-termal öncesi c7776576f ağacının isteğiyle BİT-AYNI (cidar
+            # 0,013028095219365316 m, kontur toplamı 1,0821779411399757; ölçüldü — test_d22/test_d27 ile aynı gövde).
+            'combustion_efficiency': 100.0,
+            'wall_thickness': 13.028095219365316}, headers=BASLIK)
         motor = (r.get_json() or {}).get('motor') or {}
         gir = extract_structural_inputs(motor)
         assert gir['status'] == 'ok', gir.get('reason')

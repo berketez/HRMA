@@ -89,6 +89,8 @@ class TestProjectsDir:
 class TestNameValidation:
     @pytest.mark.parametrize('name', [
         'Motor 1', 'test_projesi', 'a', 'A' * 80, 'v2.5-final', 'x-y_z.1',
+        # v3.0.1 (NK-51): Türkçe harfler (yalnız NFC) harf sayılır
+        'Şimşek-1', 'Gök Börü', 'projeı', 'İzmir ÇĞÖŞÜ çğöşü', 'Ç' * 80,
     ])
     def test_valid_names(self, name):
         assert store.validate_name(name) == name
@@ -100,9 +102,11 @@ class TestNameValidation:
         '/etc/passwd',        # mutlak yol
         'a/b',                # ayraç
         'a\\b',               # Windows ayracı
-        'projeı',        # unicode hile (Türkçe ı — beyaz liste dışı)
-        'proj​e',        # sıfır genişlikli boşluk
-        'café',               # aksanlı harf
+        'proj\u200be',       # sıfır genişlikli boşluk
+        'café',               # Türkçe dışı aksanlı harf
+        'S\u0327imşek',      # NFD: s + birleştirici çengel (NFC değil)
+        '\u041cotor',        # Kiril M (benzer görünen harf hilesi)
+        'Ş' * 81,             # Türkçe harfle de çok uzun
         '',                   # boş
         'A' * 81,             # çok uzun
         'ad.',                # nokta ile bitiyor (Windows)

@@ -54,10 +54,28 @@
     var isLanding = (path === '/');
     if (!motorType && !isLanding) return;      // formulas vb. — şerit yok
 
-    // Proje adı kuralı (sunucudaki beyaz listenin istemci aynası):
-    // [A-Za-z0-9 _.-] 1-80, nokta ile başlayamaz, nokta/boşluk ile bitemez,
-    // Windows'ta ayrılmış aygıt adı olamaz.
-    var NAME_RE = /^[A-Za-z0-9 _.\-]{1,80}$/;
+    // Proje adı kuralı (sunucudaki beyaz listenin istemci aynası,
+    // hrma/utils/projects.py _NAME_CHARS): İngilizce ve Türkçe harfler
+    // (yalnız önceden birleşik/NFC), rakam, boşluk, _ . - ; 1-80, nokta ile
+    // başlayamaz, nokta/boşluk ile bitemez, Windows'ta ayrılmış aygıt adı
+    // olamaz. v3.0.1 (NK-51): Türkçe harfli ad ("Şimşek-1") reddediliyordu.
+    var NAME_RE = /^[A-Za-z0-9çğıöşüÇĞİÖŞÜ _.\-]{1,80}$/;
+    var NAME_CHAR_RE = /^[A-Za-z0-9çğıöşüÇĞİÖŞÜ _.\-]$/;
+    // Reddedilen karakterleri adıyla göster (NK-51: ileti hangi karakterin
+    // sorun olduğunu söylemiyordu). Görünmez/birleştirici karakter U+XXXX
+    // olarak yazılır.
+    function yasakKarakterler(name) {
+        var gorulen = {}, liste = [];
+        Array.from(String(name)).forEach(function (ch) {
+            if (NAME_CHAR_RE.test(ch) || gorulen[ch]) return;
+            gorulen[ch] = true;
+            var gorunmez = /[\s\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]|\p{M}/u.test(ch);
+            liste.push(gorunmez
+                ? 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')
+                : ch);
+        });
+        return liste;
+    }
     // ÖH D20 / P12aB4-16 — ÖLÇÜLDÜ (once.json): sunucunun reddettiği 22
     // ayrılmış adın 22'si de istemci doğrulamasından geçiyordu; modal
     // kapanıyor, POST gidiyor, sunucu 400 dönüyor ve kullanıcı adı baştan
@@ -139,6 +157,11 @@
     }
 
     var NEW_NAME_SS_KEY = 'hrma_pending_new_project';
+    // v3.0.1 UI-K (NK-26 ek): kaydedilmemiş son hesabın özeti. Tasarım
+    // sayfasından ayrılırken (pagehide) sonuç diske KAYDEDİLMEMİŞSE buraya
+    // yazılır; ana sayfa "Son Projeler" listesine KARIŞTIRMADAN ayrı ve
+    // adıyla "kaydedilmedi" diye gösterir. Kaydedilince silinir.
+    var UNSAVED_RUN_LS_KEY = 'hrma.project.unsavedRun';
 
     var state = {
         name: null,          // aktif proje adı (null = kaydedilmemiş)
@@ -154,6 +177,10 @@
            olmayanda kayıt penceresindeki alan doldurur, açılan projede de
            kaybolmaz. */
         description: '',
+        /* v3.0.1 UI-K (NK-26 ek): diske yazılan (ya da yüklemede ekranda
+           duran, kullanıcının attığı) sonuç nesnesi. Sayfadan ayrılırken
+           `window.currentResults` bundan farklıysa son hesap KAYDEDİLMEMİŞTİR. */
+        savedResults: null,
     };
 
     // ÖH D21 / P12aB4-23 — `escapeHtml` KALDIRILDI. Ölçüldü: dosyada tek
@@ -332,11 +359,13 @@
             put('burn_time_s', m.burn_time);
             put('chamber_pressure_bar', m.chamber_pressure);
             put('total_impulse_Ns', m.total_impulse);
+            if ('isp_s' in out) out.isp_basis = 'design_point';
         } else if (motorType === 'solid') {
             put('total_impulse_Ns', cr.total_impulse);
             put('burn_time_s', cr.burn_time);
             put('chamber_pressure_bar', cr.chamber_pressure);
             put('isp_s', cr.isp_sea_level);
+            if ('isp_s' in out) out.isp_basis = 'sea_level';
             if (cr.thrust_curve && Array.isArray(cr.thrust_curve.thrust)
                 && cr.thrust_curve.thrust.length) {
                 put('peak_thrust_N', Math.max.apply(null, cr.thrust_curve.thrust));
@@ -344,6 +373,7 @@
         } else if (motorType === 'liquid') {
             put('thrust_N', cr.thrust);
             put('isp_s', cr.isp_sea_level);
+            if ('isp_s' in out) out.isp_basis = 'sea_level';
             put('isp_vacuum_s', cr.isp_vacuum);
             put('chamber_pressure_bar', cr.chamber_pressure);
             // ÖH D37 · A1b dil-cozucu-nesri · CW-D4 — SIVI SATIRINDA It.
@@ -365,8 +395,19 @@
             }
         }
         if (!Object.keys(out).length) return null;
-        if (typeof window.HRMA_VERSION === 'string') {
-            out.computed_with_version = window.HRMA_VERSION;
+        var surumSimdi = window.HRMA_VERSION || window.HRMA_APP_VERSION;
+        // v3.0.1 UI-K (NK-26 ek): katı ve sıvı sayfası window'a sürüm
+        // yazmıyor; özet DAMGASIZ kaydediliyor ve ana sayfa az önce bu
+        // sürümle kaydedilen projeyi "daha eski bir sürümle hesaplandı"
+        // diye işaretliyordu (ölçüldü: ui-k/son_projeler_once.json, adım 3).
+        // İki sayfa da sürümü yapay zekâ panelinin `data-hrma-version`
+        // özniteliğinde taşır (sunucunun app_version'ı; tek kaynak).
+        if (!surumSimdi && typeof document !== 'undefined' && document.querySelector) {
+            var surumEl = document.querySelector('[data-hrma-version]');
+            surumSimdi = surumEl ? surumEl.getAttribute('data-hrma-version') : null;
+        }
+        if (typeof surumSimdi === 'string' && surumSimdi.trim()) {
+            out.computed_with_version = surumSimdi.trim();
         }
         return out;
     }
@@ -436,20 +477,106 @@
         }
     }
 
-    function restoreFields(fields) {
-        var skipped = 0;
-        Object.keys(fields || {}).forEach(function (id) {
-            var el = document.getElementById(id);
-            if (!el || el.closest(DYNAMIC_ROOTS)) { skipped += 1; return; }
-            var v = fields[id];
-            var type = (el.getAttribute('type') || '').toLowerCase();
-            if (type === 'checkbox') {
-                el.checked = !!v;
-            } else {
-                el.value = (v === null || v === undefined) ? '' : String(v);
+    // V301/H-PANEL (NK-68): kayıtta OLMAYAN seçiciler sayfa varsayılanına
+    // döner. ÖLÇÜLDÜ (son kullanıcı testi, hibrit): "Kullanıcının verdiği
+    // tank basıncı" kipi seçilip örnek proje yeniden açılınca kip ESKİ
+    // kalıyordu — örnek proje kaydı ``tank_pressure_source`` alanını
+    // taşımıyor (kip, kayıttan sonra eklendi) ve geri yükleme yalnız
+    // kayıttaki alanları yazıyordu. Seçici kayıtta yoksa varsayılan seçeneğe
+    // (``defaultSelected``, yoksa ilk seçenek) döner ve bağımlı işleyiciler
+    // tetiklenir; köken kapılı alanın damgası silinir (kullanıcı girdisi
+    // sayılmasın). Kayıttaki alanlar bundan SONRA yazılır.
+    function resetUnsavedSelects(fields) {
+        var n = 0;
+        var kayit = fields || {};
+        var nodes = document.querySelectorAll('select[id]');
+        for (var i = 0; i < nodes.length; i++) {
+            var el = nodes[i];
+            if (el.id === 'langSelect') continue;
+            if (el.closest && el.closest(DYNAMIC_ROOTS)) continue;
+            if (Object.prototype.hasOwnProperty.call(kayit, el.id)) continue;
+            var hedef = null;
+            for (var j = 0; j < el.options.length; j++) {
+                if (el.options[j].defaultSelected) { hedef = el.options[j].value; break; }
             }
+            if (hedef === null && el.options.length) hedef = el.options[0].value;
+            if (hedef === null || el.value === hedef) continue;
+            el.value = hedef;
             dispatchFieldEvents(el);
+            if (el.dataset && el.dataset.hrmaSourceGate === '1') {
+                delete el.dataset.hrmaSource;
+            }
+            n += 1;
+        }
+        return n;
+    }
+
+    // V301/HİBRİT-DIŞA (28 Eki, S1 veri kaybı) — GERİ YÜKLEME SIRADAN
+    // BAĞIMSIZ. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/hibrit-disa/olcum/
+    // gidis_donus_*_once.json): /api/projects/load yanıtı Flask jsonify ile
+    // anahtarları ALFABETİK sıralı döndürür ve alanlar bu sırayla tek turda
+    // yazılıyordu. Bir alanın olay işleyicisi başka bir alanı yeniden kurar
+    // ya da üzerine yazarsa, alfabede ÖNCE gelen kayıtlı değer kayboluyordu:
+    // hibritte injector_type'ın change olayı parametre alanlarını boş
+    // yeniden kurar (hole_diameter_min/max, element_pairs, impingement_angle,
+    // annular_gap, coaxial_inner_flow_fraction silinip sunucu varsayılanı
+    // uygulanıyordu), fuel_type yoğunluğu tablodan ezer (fuel_density),
+    // itki sekmesinin üçgeni yanma süresini yeniden hesaplar
+    // (burn_time_impulse). Artık: (1) önce seçiciler (yapıyı kurarlar),
+    // sonra öbür alanlar olaylarla yazılır; (2) kayıtlı değerinden sapan
+    // alan en çok 3 düzeltme turunda olaylarla yeniden yazılır; (3) hâlâ
+    // sapan alan (birbirini yeniden hesaplayan alanlar) OLAYSIZ kayıtlı
+    // değerine konur — kaydedilen değer kullanıcının kendi değeridir.
+    // Hiçbir turda öğesi bulunamayan alan "atlandı" sayılır (yapı kuran bir
+    // seçicinin sonradan yarattığı alan artık atlanmaz).
+    function restoreFields(fields) {
+        try { resetUnsavedSelects(fields); } catch (e) { /* DOM yoksa */ }
+        var kayit = fields || {};
+        var ids = Object.keys(kayit);
+        function oge(id) {
+            var el = document.getElementById(id);
+            return (el && !el.closest(DYNAMIC_ROOTS)) ? el : null;
+        }
+        function seciciMi(id) {
+            var el = oge(id);
+            return !!(el && el.tagName === 'SELECT');
+        }
+        // Seçiciler önce, kayıt sırası her grupta korunur.
+        ids = ids.filter(seciciMi).concat(ids.filter(function (id) {
+            return !seciciMi(id);
+        }));
+        function hedef(v) {
+            return (v === null || v === undefined) ? '' : String(v);
+        }
+        function onayKutusu(el) {
+            return (el.getAttribute('type') || '').toLowerCase() === 'checkbox';
+        }
+        function ayni(el, v) {
+            return onayKutusu(el) ? (el.checked === !!v) : (el.value === hedef(v));
+        }
+        function yaz(el, v, olayli) {
+            if (onayKutusu(el)) el.checked = !!v;
+            else el.value = hedef(v);
+            if (olayli) dispatchFieldEvents(el);
+        }
+        ids.forEach(function (id) {
+            var el = oge(id);
+            if (el) yaz(el, kayit[id], true);
         });
+        for (var tur = 0; tur < 3; tur++) {
+            var sapan = 0;
+            ids.forEach(function (id) {
+                var el = oge(id);
+                if (el && !ayni(el, kayit[id])) { yaz(el, kayit[id], true); sapan += 1; }
+            });
+            if (!sapan) break;
+        }
+        ids.forEach(function (id) {
+            var el = oge(id);
+            if (el && !ayni(el, kayit[id])) yaz(el, kayit[id], false);
+        });
+        var skipped = 0;
+        ids.forEach(function (id) { if (!oge(id)) skipped += 1; });
         return skipped;
     }
 
@@ -506,6 +633,17 @@
                 restoreCompositionRows(inputs.dynamic.composition_rows);
             }
             restoreDockOverrides(inputs.dock_overrides);
+            // V301/K-C2 (NK-70, K-B AÇIK 3): sayfa, dosyanın HANGİ alanları
+            // taşıdığını bilmeden eski kayıtların göçünü yapamaz (kayıtta
+            // olmayan kip seçicisi varsayılana döner, değer sessizce düşerdi).
+            // Olay geri yükleme bitmeden (restoring = true) yayılır; dinleyicinin
+            // yazdığı alanlar kullanıcı düzenlemesi sayılmaz.
+            try {
+                document.dispatchEvent(new CustomEvent('hrma:project-applied', {
+                    detail: { fields: Object.assign({}, inputs.fields || {}),
+                              motor_type: doc.motor_type || null }
+                }));
+            } catch (e) { /* eski tarayıcı — sessiz */ }
             if (skipped > 0) {
                 toast(TF('proj.loadedWithSkips', { n: skipped },
                     '{n} saved field(s) have no matching input on this page and were skipped.'),
@@ -623,11 +761,13 @@
        geçerli adla çağrılır. ÖH D22 / P12aB4-24: sayfada `#motor_description`
        YOKSA (ölçüldü: /solid, /liquid) açıklama alanı BURADA sorulur;
        varsa sorulmaz — aynı veri iki yerde istenmez (tek kaynak). */
-    function promptNameModal(titleText, defaultName, onSubmit) {
+    function promptNameModal(titleText, defaultName, onSubmit, yeniProje) {
         var box = openModalShell(titleText);
         var label = document.createElement('div');
         label.style.cssText = 'font-size:13px; margin-bottom:6px;';
         label.textContent = T('proj.nameLabel', 'Project name');
+        // v3.0.1 N-girdi-2: alan ipucu ortak bileşenden (field_help.js).
+        if (window.HRMAHelp) window.HRMAHelp.attach(label, 'proj.help.name', T('proj.help.name', ''));
         var input = document.createElement('input');
         input.type = 'text';
         input.value = defaultName || '';
@@ -654,11 +794,19 @@
         if (!sayfaDesc) {
             descLabel = document.createElement('div');
             descLabel.style.cssText = 'font-size:13px; margin-bottom:6px;';
-            descLabel.textContent = T('proj.descLabel',
+            // Metin iç <span>'da çevrilir (data-i18n kabın textContent'ini
+            // yazınca ipucunu silerdi); ipucu ortak bileşenden.
+            var descMetin = document.createElement('span');
+            descMetin.textContent = T('proj.descLabel',
                 'Description (optional)');
-            descLabel.setAttribute('data-i18n', 'proj.descLabel');
+            descMetin.setAttribute('data-i18n', 'proj.descLabel');
+            descLabel.appendChild(descMetin);
+            if (window.HRMAHelp) window.HRMAHelp.attach(descLabel, 'proj.help.desc', T('proj.help.desc', ''));
             descIn = document.createElement('textarea');
-            descIn.value = String(state.description || '');
+            // V301/DİL (NK-65): "Yeni Proje" boş açıklamayla başlar —
+            // ölçüldü: açık örneğin açıklaması yeni projenin kutusuna
+            // doluyordu. Farklı Kaydet'te mevcut açıklama korunur.
+            descIn.value = yeniProje ? '' : String(state.description || '');
             descIn.rows = 2;
             descIn.maxLength = 400;
             descIn.style.cssText =
@@ -680,14 +828,18 @@
                 // ÖH D20 / P12aB4-16: red GEREKÇESİ adlandırılır. Ayrılmış
                 // aygıt adı kural metninde geçmiyor; genel "kurala bakın"
                 // uyarısı kullanıcıyı doğru düzeltmeye götürmüyordu.
+                var yasak = yasakKarakterler(name);
                 err.textContent =
                     (WINDOWS_RESERVED.indexOf(name.toUpperCase()) !== -1)
                         ? T('proj.nameReserved',
                             'This name is reserved by Windows for a device '
                             + '(CON, PRN, AUX, NUL, COM1-9, LPT1-9) and cannot '
                             + 'be used as a file name.')
-                        : T('proj.nameInvalid',
-                            'Invalid project name — check the naming rule.');
+                        : (yasak.length
+                            ? TF('proj.nameBadChars', {chars: yasak.join('  ')},
+                                'Not allowed in a project name: {chars}')
+                            : T('proj.nameInvalid',
+                                'Invalid project name — check the naming rule.'));
                 err.style.display = 'block';
                 return;
             }
@@ -766,6 +918,8 @@
             state.name = info.name || name;
             state.savedName = state.name;
             state.dirty = false;
+            state.savedResults = window.currentResults || null;
+            unsavedRunClear();
             renderBar();
             toast(TF('proj.saved', { name: state.name }, 'Project "{name}" saved.'), 'ok');
         } catch (err) {
@@ -812,7 +966,7 @@
                 catch (e) { /* gizli mod */ }
                 state.dirty = false;    // onay alındı; beforeunload tekrar sormasın
                 location.href = location.pathname;      // temiz varsayılanlar
-            });
+            }, true);
         }
         if (state.dirty) {
             // ÖH D20 / P12aB4-11: onay düğmesi nötr "TAMAM" idi; oysa bu
@@ -839,6 +993,7 @@
                 return;
             }
             applyProject(doc);
+            state.savedResults = window.currentResults || null;
             state.name = doc.name || name;
             state.savedName = state.name;
             renderBar();
@@ -888,7 +1043,7 @@
             : value.toFixed(digits);
     }
 
-    function summaryMini(summary) {
+    function summaryMini(summary, motorTypeOfSummary) {
         if (!summary) return '';
         var bits = [];
         if (typeof summary.thrust_N === 'number' && isFinite(summary.thrust_N)) {
@@ -898,7 +1053,25 @@
             bits.push('Fpk ' + nf(summary.peak_thrust_N, 0) + ' N');
         }
         if (typeof summary.isp_s === 'number' && isFinite(summary.isp_s)) {
-            bits.push('Isp ' + nf(summary.isp_s, 1) + ' s');
+            // v3.0.1 UI-K (NK-26 ek): listedeki Isp'nin hangisi olduğu
+            // yazmıyordu (katı/sıvı deniz seviyesi, hibrit tasarım noktası).
+            // Taban kayıttaysa ondan; değilse motor tipinden — özet
+            // yazıcısı (serializeResultsSummary) isp_s'yi v2.5.5'ten
+            // (f812b524b) beri değişmeden katı/sıvıda isp_sea_level,
+            // hibritte motor.isp'den alır (git log -L ile doğrulandı).
+            // Tip de taban da bilinmiyorsa etiket UYDURULMAZ.
+            var ispTaban = (summary.isp_basis === 'sea_level'
+                            || summary.isp_basis === 'design_point')
+                ? summary.isp_basis
+                : ({ solid: 'sea_level', liquid: 'sea_level',
+                     hybrid: 'design_point' })[motorTypeOfSummary] || null;
+            var ispMetni = 'Isp ' + nf(summary.isp_s, 1) + ' s';
+            if (ispTaban === 'sea_level') {
+                ispMetni += ' (' + T('proj.ispBasisSeaLevel', 'sea level') + ')';
+            } else if (ispTaban === 'design_point') {
+                ispMetni += ' (' + T('proj.ispBasisDesign', 'design point') + ')';
+            }
+            bits.push(ispMetni);
         }
         if (typeof summary.total_impulse_Ns === 'number' && isFinite(summary.total_impulse_Ns)) {
             bits.push('It ' + nf(summary.total_impulse_Ns, 0) + ' N·s');
@@ -907,6 +1080,31 @@
             // sayı basılmaz. Künye yoksa (eski kayıt) hiçbir şey eklenmez:
             // nedeni bilinmeyen yokluğa neden uydurulmaz.
             bits.push(T('proj.itNoBurnTime', 'It: burn time not supplied'));
+        }
+        // v3.0.1 (NK-26, son kullanıcı testi): listedeki özet ESKİ bir
+        // sürümün koşusundan geliyordu (katı örnek "Fpk 1642 N · Isp 140,1 s"
+        // ⟷ bugünkü hesap 1499,7 N · 125,4 s) ve bu hiçbir yerde
+        // söylenmiyordu; kullanıcı sayıyı motorun bugünkü başarımı sanıyordu.
+        // Özet başka sürümle hesaplandıysa sürümüyle söylenir; sürüm
+        // bilinmiyorsa (damgasız eski kayıt) bu da söylenir. Güncel sürüm
+        // sayfada yayımlanmıyorsa karşılaştırma yapılmaz.
+        // Güncel sürüm: hibrit HRMA_VERSION, ana sayfa ve Fırlatma Sahası
+        // HRMA_APP_VERSION yazar; ikisi de yoksa bilinmiyor (uydurulmaz).
+        // Kod BİLEREK bu işlevin içinde: tests/test_d21_electron_a1.py
+        // summaryMini gövdesini kaynaktan çıkarıp ayrı bir sandıkta koşuyor;
+        // modül kapsamındaki bir yardımcı orada tanımsız kalır (ölçüldü).
+        var simdi = window.HRMA_VERSION || window.HRMA_APP_VERSION;
+        simdi = (typeof simdi === 'string' && simdi.trim()) ? simdi.trim() : null;
+        if (bits.length && simdi) {
+            var ozetSurum = (typeof summary.computed_with_version === 'string')
+                ? summary.computed_with_version.trim() : '';
+            if (!ozetSurum) {
+                bits.push(T('proj.summaryVersionUnknown',
+                    'computed with an older version'));
+            } else if (ozetSurum !== simdi) {
+                bits.push(TF('proj.summaryOldVersion', { version: ozetSurum },
+                    'computed with v{version}'));
+            }
         }
         return bits.join(' · ');
     }
@@ -970,7 +1168,7 @@
             date.textContent = String(p.updated_at).slice(0, 16).replace('T', ' ');
             row.appendChild(date);
         }
-        var mini = summaryMini(p.results_summary);
+        var mini = summaryMini(p.results_summary, p.motor_type);
         if (mini) {
             var sum = document.createElement('span');
             sum.style.cssText =
@@ -1055,6 +1253,16 @@
             status.textContent = TF('proj.listFailed', { message: srv(err.message) },
                 'Could not load the project list: {message}');
             status.style.color = 'var(--hd-red, #ff5d73)';
+        } finally {
+            // V301/DİL (NK-3): "Proje Aç" penceresinde kapat/iptal düğmesi
+            // yoktu (yalnız dış alana tıklama kapatıyordu). Liste, boş liste
+            // ve hata hâlinde de görünür bir İptal düğmesi bulunur.
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex; justify-content:flex-end; margin-top:12px;';
+            var iptal = modalButton(T('proj.btnCancel', 'Cancel'), false);
+            iptal.onclick = closeModal;
+            row.appendChild(iptal);
+            box.appendChild(row);
         }
     }
 
@@ -1183,6 +1391,34 @@
         });
     }
 
+    // v3.0.1 UI-K (NK-26 ek) — kaydedilmemiş son hesap kaydı.
+    function unsavedRunClear() {
+        try {
+            var ham = window.localStorage.getItem(UNSAVED_RUN_LS_KEY);
+            var k = ham ? JSON.parse(ham) : null;
+            // Yalnız BU sayfanın tipindeki kayıt silinir: başka tipte
+            // kaydedilmeden bırakılmış hesap hâlâ kaydedilmemiştir.
+            if (!k || k.motor_type === motorType) {
+                window.localStorage.removeItem(UNSAVED_RUN_LS_KEY);
+            }
+        } catch (e) { /* gizli kip */ }
+    }
+
+    function unsavedRunRecordOnLeave() {
+        var cr = window.currentResults;
+        if (!cr || cr === state.savedResults) return;   // hesap yok ya da kaydedildi
+        var ozet = serializeResultsSummary();
+        if (!ozet) return;
+        try {
+            window.localStorage.setItem(UNSAVED_RUN_LS_KEY, JSON.stringify({
+                format: 1,
+                name: state.name || null,
+                motor_type: motorType,
+                summary: ozet,
+            }));
+        } catch (e) { /* gizli kip / dolu depo: kayıt yok, liste etkilenmez */ }
+    }
+
     // ==================================================================
     // LANDING — Recent Projects şeridi (boşsa / uç yoksa hiç görünmez)
     // ==================================================================
@@ -1196,7 +1432,26 @@
             return;                          // uç yok / hata → şerit yok
         }
         var usable = projects.filter(function (p) { return !p.corrupt; }).slice(0, 5);
-        if (!usable.length) return;
+        // v3.0.1 UI-K (NK-26 ek, son kullanıcı): "liste kaydetmeden
+        // güncelleniyor; hangi koşu, hangi Isp belli değil". Liste YALNIZ
+        // diskteki kayıtlı projelerdir (kaydetme tarihiyle); tasarım
+        // sayfasında kaydedilmeden bırakılan son hesap listeye KARIŞMAZ,
+        // altında ayrı ve adıyla "kaydedilmedi" diye gösterilir.
+        // Kayıt okuma bu gövdenin İÇİNDE: bekçiler (test_d35/test_d37)
+        // gövdeyi söküp ayrı sandıkta koşuyor; yardımcı orada tanımsız kalır.
+        var kaydedilmemis = null;
+        try {
+            var depo = (typeof window !== 'undefined') ? window.localStorage : null;
+            var ham = depo ? depo.getItem('hrma.project.unsavedRun') : null;
+            var adayKayit = ham ? JSON.parse(ham) : null;
+            if (adayKayit && typeof adayKayit === 'object'
+                && adayKayit.summary && typeof adayKayit.summary === 'object'
+                && (adayKayit.name === null || (typeof adayKayit.name === 'string'
+                                                && adayKayit.name.length <= 80))) {
+                kaydedilmemis = adayKayit;
+            }
+        } catch (e) { kaydedilmemis = null; }   // gizli kip / bozuk kayıt → gösterilmez
+        if (!usable.length && !kaydedilmemis) return;
         var container = document.querySelector('.container');
         if (!container) return;
         var section = document.createElement('div');
@@ -1215,7 +1470,7 @@
             var target = TYPE_PATH[p.motor_type] || '/hybrid';
             a.href = target + '?project=' + encodeURIComponent(p.name);
             a.className = 'aux-link';
-            var mini = summaryMini(p.results_summary);
+            var mini = summaryMini(p.results_summary, p.motor_type);
             // ÖH D35 · OH-GT-33 — KULLANICININ YAZDIĞI AD BÜYÜTÜLMEZ.
             // ÖLÇÜLDÜ (a1/once.json M3_buyutme): şeridin kabı `.aux-link`,
             // index.html o sınıfa `text-transform: uppercase` veriyor
@@ -1267,9 +1522,54 @@
                 em.textContent = ' — ' + mini;
                 a.appendChild(em);
             }
+            // Hangi koşu: özet, projenin diske KAYDEDİLDİĞİ koşudur.
+            if (p.updated_at) {
+                var tarihEl = document.createElement('span');
+                tarihEl.style.textTransform = 'none';
+                var tarih = String(p.updated_at).slice(0, 16).replace('T', ' ');
+                tarihEl.textContent = ' · ' + ((typeof TF === 'function')
+                    ? TF('proj.savedAt', { date: tarih }, 'saved {date}')
+                    : 'saved ' + tarih);
+                a.appendChild(tarihEl);
+            }
             list.appendChild(a);
         });
         section.appendChild(list);
+        if (kaydedilmemis) {
+            var kBaslik = document.createElement('div');
+            kBaslik.className = 'section-label';
+            kBaslik.setAttribute('data-i18n', 'proj.unsavedRunTitle');
+            kBaslik.textContent = T('proj.unsavedRunTitle', 'Last calculation (not saved)');
+            kBaslik.style.cssText = 'margin-top:22px;';
+            section.appendChild(kBaslik);
+            var kSatir = document.createElement('div');
+            kSatir.id = 'hrmaUnsavedRun';
+            kSatir.setAttribute('data-unsaved-run', '1');
+            kSatir.style.cssText = 'display:flex; justify-content:center;';
+            var kKutu = document.createElement('span');
+            kKutu.className = 'aux-link';
+            kKutu.style.cssText = 'cursor:default; text-transform:none;';
+            var kTipEtiketi = {
+                liquid: T('proj.typeLiquid', 'LIQUID'),
+                solid: T('proj.typeSolid', 'SOLID'),
+                hybrid: T('proj.typeHybrid', 'HYBRID')
+            };
+            var kTip = Object.prototype.hasOwnProperty.call(kTipEtiketi, kaydedilmemis.motor_type)
+                ? kTipEtiketi[kaydedilmemis.motor_type] : '?';
+            var kMini = summaryMini(kaydedilmemis.summary, kaydedilmemis.motor_type);
+            kKutu.textContent = (kaydedilmemis.name || T('proj.untitled', 'Untitled'))
+                + ' [' + kTip + ']' + (kMini ? ' — ' + kMini : '')
+                + ' · ' + T('proj.notSaved', 'not saved');
+            kSatir.appendChild(kKutu);
+            section.appendChild(kSatir);
+            var kNot = document.createElement('div');
+            kNot.setAttribute('data-i18n', 'proj.unsavedRunNote');
+            kNot.style.cssText = 'margin-top:6px; text-align:center; font-size:0.72rem;'
+                + ' color:var(--hd-ink-dim, #7d97a5);';
+            kNot.textContent = T('proj.unsavedRunNote',
+                'This calculation was not saved; the list above shows saved projects only.');
+            section.appendChild(kNot);
+        }
         var aux = container.querySelector('.aux-links');
         if (aux) container.insertBefore(section, aux);
         else container.appendChild(section);
@@ -1283,6 +1583,7 @@
     function initDesignPage() {
         buildBar();
         watchDirty();
+        window.addEventListener('pagehide', unsavedRunRecordOnLeave);
         // Dil değişince serbest metinler (proje adı yer tutucusu, kaynak notu)
         // yeniden basılır; data-i18n taşıyan düğmeleri I18N.apply zaten çevirir
         if (window.I18N && window.I18N.onChange) window.I18N.onChange(renderBar);
@@ -1345,6 +1646,11 @@
         markDirty: function () {
             state.dirty = true;
             renderBar();
+        },
+        // V301/K-C2: geri yükleme sürerken gelen input/change olayları
+        // kullanıcı düzenlemesi değildir (sayfaların override sayımı okur).
+        isRestoring: function () {
+            return !!state.restoring;
         },
         // Test / hata ayıklama kancaları (saf yardımcılar)
         _validName: validName,

@@ -36,6 +36,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 from hrma.engines.nozzle_design import sample_nozzle_inner_contour
 from hrma.export import export_workspace
 from hrma.export.cad_visualization import (
@@ -68,8 +70,11 @@ def hybrid_results():
 @pytest.fixture(scope='module')
 def solid_results():
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
+    # v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+    # (A_p/A_t 0,947); K-A kapısından beri 422. Konu port değil: geometri
+    # tek tanım SOLID_DEFAULT_GEOMETRY_MM'den (kopyalanmaz).
     r = _quiet(SolidRocketEngine(
-        chamber_diameter=100, grain_length=500, core_diameter=30,
+        **SOLID_DEFAULT_GEOMETRY_MM,
         chamber_pressure=40).calculate_performance)
     r['motor_name'] = 'FAZ4B_SOLID'
     return r

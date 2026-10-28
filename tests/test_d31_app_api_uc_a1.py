@@ -132,9 +132,13 @@ class TestP12bB206UcVarsayilanlariBeyanEdilir:
         yazılmaz; form ön-dolgusu K6 sökümünde kalkacak).
         """
         from hrma.app import _KATI_KANONIK_VARSAYILAN_OKUYUCULARI
+        from hrma.engines.solid_rocket_engine import (
+            SOLID_DEFAULT_GEOMETRY_MM)
+        # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu.
         alti = {'chamber_pressure': 40, 'propellant_type': 'apcp',
                 'chamber_diameter': 100, 'grain_length': 500,
-                'core_diameter': 30, 'grain_type': 'bates'}
+                'core_diameter': SOLID_DEFAULT_GEOMETRY_MM['core_diameter'],
+                'grain_type': 'bates'}
         j_alti = istemci.post('/calculate_solid', json=alti).get_json()
         beyan = {k['field']: k['value']
                  for k in j_alti.get('defaults_applied') or []}

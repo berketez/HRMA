@@ -459,7 +459,13 @@ def test_cwb3_kart_iki_soru_iki_sayi_kunye(dil):
     assert '3323 K' in metin and '2724 K' in metin, metin
     assert ('10,00' if dil == 'tr' else '10.00') in metin, metin
     # Künye: iki sayının kaynağı adıyla.
-    assert 'heat_transfer_analysis.wall_analysis.max_temperature' in metin
+    # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/DİL-2 f36795100): ana
+    # zincirin makine yolu ekranda HAM basılmaz (TR ekranda ham anahtar
+    # yasağı); yol öğenin data-field / title özniteliğinde, görünen metin
+    # app.wallT.srcMain etiketidir. Kaynak yine ADIYLA durur.
+    assert ('data-field="heat_transfer_analysis.wall_analysis.max_temperature"'
+            in html), html
+    assert deger('app.wallT.srcMain') in metin, metin
     assert 'scalars.peak_wall_T_K' in metin
     # Soğutma sınıfı çevrilmiş adıyla (ham 'natural' değil).
     assert deger('app.wallT.clsNatural') in metin

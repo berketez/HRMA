@@ -68,6 +68,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.fea_lule import ag_malzemesi
+
 from hrma.app import app
 # ÖH D30 a3: cidar sentineli künyesinin TEK KAYNAĞI (a1 · P16B1-33/-42);
 # ad bu bekçiye KOPYALANMAZ, uçtan okunur.
@@ -698,7 +700,13 @@ def profil(client, motor):
         'throat_diameter': motor['throat_diameter'],
         'exit_diameter': motor['exit_diameter'],
         'expansion_ratio': motor['expansion_ratio'],
-        'nozzle_type': 'conical', 'material': 'steel_4130',
+        # V301/FİZİK-2 (NK-12) — ÇEVRİLDİ, gerekçeli: termal alan yalnız
+        # lüledir ve ağ motorun LÜLE malzemesiyle (bu motorda grafit)
+        # çözülür; profil de ağın malzemesiyle istenir (P7B3-30 kapısı).
+        # Eski 'steel_4130' kamara malzemesiydi — kusurun kendisi. Bu
+        # sınıfın iddiası (profil beyanları düşmüyor) malzemeden bağımsızdır.
+        'nozzle_type': 'conical',
+        'material': ag_malzemesi(motor, 'steel_4130'),
         'wall_thickness': 0.005,
     }, headers=FEA_BASLIK)
     assert yanit.status_code == 200, yanit.get_data(as_text=True)[:300]

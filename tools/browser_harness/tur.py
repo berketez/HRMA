@@ -178,10 +178,12 @@ JS_SAYFA_METNI = """
 #: ÖH Faz 0 — sayfa yerleşimi ölçümü: yatay taşma + görünür metin
 #: yapraklarının örtüşmesi. Metin yaprağı = DOĞRUDAN metin düğümü dolu,
 #: görünür, çizim kaplarının (canvas/svg/.js-plotly-plot altı) dışında bir
-#: eleman. Ata-torun çiftleri örtüşme sayılmaz (bir paragrafın kutusu kendi
-#: satır içi çocuğunu meşru olarak kapsar); kalan her metin⟂metin kesişimi
-#: eşiklerin üstündeyse yerleşim kusurudur. Eşikler ``esikler.py``den
-#: geçirilir; burada sayı YOKTUR.
+#: eleman. Yaprağın kutusu ELEMANIN değil, doğrudan metin düğümlerinin
+#: GLİF kutusudur (Range.getClientRects; dolgu/kenarlık dahil değil —
+#: V305/G1, 28 Eki). Ata-torun çiftleri örtüşme sayılmaz (bir paragrafın
+#: metni kendi satır içi çocuğunu meşru olarak kapsayabilir); kalan her
+#: metin⟂metin kesişimi eşiklerin üstündeyse yerleşim kusurudur. Eşikler
+#: ``esikler.py``den geçirilir; burada sayı YOKTUR.
 JS_YERLESIM = """
 (c) => {
   const yapiskanlar = [];
@@ -273,16 +275,59 @@ JS_YERLESIM = """
         if (dugum.nodeType === 3) oz += dugum.textContent;
       }
       oz = oz.replace(/\\s+/g, ' ').trim();
-      if (oz) {
-        // Çok satıra sarılmış INLINE elemanın sınır kutusu, ilk satırın
-        // önündeki komşu etiketi de kapsar (satır kutularının birleşimi) —
-        // örtüşme SATIR PARÇALARI üstünden ölçülür (getClientRects), yoksa
-        // '<strong>etiket</strong> <span>uzun metin</span>' deseni sahte
-        // örtüşme üretir (ilk canlı koşumda ölçüldü).
-        let parcalar = [r];
-        if (st.display.indexOf('inline') === 0) {
-          const satirlar = el.getClientRects();
-          if (satirlar.length > 1) parcalar = Array.from(satirlar);
+      // Kapalı <details>in DOĞRUDAN metni (özetin dışındaki gövde) ekranda
+      // yoktur; ekrandaki tek parçası <summary>dir ve o aşağıda ayrıca
+      // yürünür. Glif ölçümü bu gizli metne de kutu döndürüyor (Chromium
+      // atlanan içeriği ölçüm için yerleştiriyor) — ölçüldü, V305/G1 ilk
+      // koşum: katı sayfasında kapalı 'Source' katlamasının gizli gövdesi
+      // 7 sahte örtüşme üretti. Eski eleman kutusu ölçümünde bu yaprak
+      // özetin kutusuydu (özetin kendi yaprağıyla aynı yer), yani düşen
+      // görünür metin yoktur.
+      if (oz && !(ad === 'DETAILS' && !el.open)) {
+        // V305/G1 (28 Eki) — ÖLÇÜLEN ŞEY METNİN KAPLADIĞI ALANDIR, ELEMAN
+        // KUTUSU DEĞİL. Denetimin tanımı "görünür METİNLER üst üste binmiş
+        // mi"; eleman kutusu (getBoundingClientRect) dolguyu ve kenarlığı
+        // da içerir. Ölçüldü (v3.0.5 yayın kapısı): UI-K onarımı '?'
+        // ipucundan önceki öğeye 21 px sağ dolgu verip ikonu −16 px
+        // kaydırıyor; ikon o DOLGUNUN üstüne oturuyor, harflerle değil —
+        // hibrit/katı/sıvıda her biri 25 çift (rapor tavanı) sahte örtüşme.
+        // Onarım: elemanın her DOĞRUDAN metin düğümü için Range kurulur
+        // (baştaki/sondaki boşluk dışarıda: boşluk glif değildir) ve
+        // getClientRects() satır parçalarını verir — dolgu/kenarlık yok,
+        // çok satıra sarılan metin satır satır ölçülür (eski inline
+        // getClientRects yolunun işini de görür). Yaprak yine SAHİBİ
+        // elemana bağlanır: ata-torun dışlaması ve rapordaki a_html/b_html
+        // aynı kalır. '?' ikonunun kendisi de bir metin yaprağıdır; onun
+        // da glif kutusu ölçülür, iki metnin glifleri üst üste binerse
+        // örtüşme hâlâ yakalanır (bekçi: tests/test_browser_harness.py
+        // TestYerlesimGlifKutusu).
+        let parcalar = [];
+        for (const dugum of el.childNodes) {
+          if (dugum.nodeType !== 3) continue;
+          const ham = dugum.textContent || '';
+          const bas = ham.search(/\\S/);
+          if (bas < 0) continue;
+          let son = ham.length;
+          while (son > bas && /\\s/.test(ham.charAt(son - 1))) son--;
+          const aralik = document.createRange();
+          aralik.setStart(dugum, bas);
+          aralik.setEnd(dugum, son);
+          for (const kutu of aralik.getClientRects()) {
+            if (kutu.width > 0 && kutu.height > 0) parcalar.push(kutu);
+          }
+        }
+        if (!parcalar.length) {
+          // Metin düğümü ölçü vermiyorsa (ör. TEXTAREA'nın varsayılan
+          // metni tarayıcının iç düzenleyicisinde çizilir) ESKİ ölçüme
+          // düşülür: yaprak sessizce kaybolmaz, hata yönü örtüşmeyi
+          // fazla saymaktır. Çok satıra sarılmış INLINE elemanın sınır
+          // kutusu ilk satırın önündeki komşuyu da kapsar — orada satır
+          // parçaları (getClientRects) kullanılır.
+          parcalar = [r];
+          if (st.display.indexOf('inline') === 0) {
+            const satirlar = el.getClientRects();
+            if (satirlar.length > 1) parcalar = Array.from(satirlar);
+          }
         }
         for (const parca of parcalar) {
           if (yapraklar.length >= c.sinir) { kirpildi = true; break; }
