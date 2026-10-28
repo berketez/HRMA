@@ -210,8 +210,14 @@ def test_b1_05_ipucu_metni_yuzde_semantigi_tasimaz():
     # anmak ZORUNDA — o künyeler makine damgasıdır, ipucunun "yüzde gir"
     # öğretisi değil. Künyeler ürünün kendi sabitinden okunur (tek
     # kaynak) ve yasak taramasından ÇIKARILIR.
-    from hrma.utils.injector_design import DP_SOURCE_AUTO, DP_SOURCE_USER
-    kunyeler = (DP_SOURCE_AUTO, DP_SOURCE_USER)
+    # V301/L-D (SV-16) — BEKLENTİ DEĞİŞTİ: künyeler hibrit enjektör
+    # aracınınkiydi ('auto (20% of Pc)' / 'user override'); SIVI yanıtı bu
+    # iki metni HİÇ basmıyor (ölçüldü: kati-sivi/L-D/onceson_sonra.json'da
+    # 0 geçiş). Sıvı çözücünün GERÇEK künyeleri motorun tek tanımından
+    # (``injection_system.pressure_drop_source``) okunur.
+    from hrma.engines.liquid_rocket_engine import (
+        INJECTOR_DP_SOURCE_TYPE_RATIO, INJECTOR_DP_SOURCE_USER)
+    kunyeler = (INJECTOR_DP_SOURCE_TYPE_RATIO, INJECTOR_DP_SOURCE_USER)
     pages = (KOK / 'hrma' / 'static' / 'js' / 'i18n_pages.js').read_text(
         encoding='utf-8')
     metinler = re.findall(r"'" + re.escape(anahtar) + r"':\s*'"
@@ -242,11 +248,10 @@ def test_b1_05_ipucu_metni_yuzde_semantigi_tasimaz():
 
 def test_b1_05_tarayici_kapisi_cozucunun_bandiyla_ayni():
     """HTML min/max, motorun kendi bandından türetilir (tek kaynak)."""
-    motor = MOTOR_SIVI.read_text(encoding='utf-8')
-    b = re.search(r"_override_val\(\s*'injector_pressure_drop',\s*"
-                  r"([0-9.]+),\s*([0-9.]+)", motor)
-    assert b, 'motorun ΔP bandı okunamadı'
-    alt, ust = float(b.group(1)), float(b.group(2))
+    # V301/L-A (SV-01): bant çözücünün TEK tablosundan (LIQUID_INPUT_BANDS)
+    # okunur; motor ``_override_band`` ile, uç kapısı da aynı satırla okur.
+    from hrma.engines.liquid_rocket_engine import LIQUID_INPUT_BANDS
+    alt, ust = LIQUID_INPUT_BANDS['injector_pressure_drop'][:2]
     inp = re.search(r'<input[^>]*id="injector_pressure_drop"[^>]*>',
                     LIQUID.read_text(encoding='utf-8'))
     assert inp, 'ΔP girdi alanı bulunamadı'

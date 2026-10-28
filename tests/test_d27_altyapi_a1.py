@@ -416,7 +416,10 @@ class TestOHD2619SurumNotu:
     def surum(self):
         ham = json.loads((KOK / 'hrma/data/changelog.json').read_text(
             encoding='utf-8'))
-        return ham['versions'][0]
+        # Kaldırılan API'yi ve 422 sözleşmesini getiren sürüm 3.0.0'dır; kaydı
+        # tarihseldir ve listede kalır. Eskiden ``versions[0]`` okunuyordu: 27 Eki
+        # 2026'da 3.0.1 kaydı en başa eklenince test yanlış sürümün notuna baktı.
+        return next(v for v in ham['versions'] if v['version'] == '3.0.0')
 
     def test_kaldirilan_API_kamu_yuzeyinde_YOK(self):
         stability = importlib.import_module('hrma.stability')
@@ -578,6 +581,8 @@ class TestDokunulanKaynaklarSaglam:
     def test_changelog_JSON_gecerli_ve_TR_karakterli(self):
         ham = (KOK / 'hrma/data/changelog.json').read_text(encoding='utf-8')
         d = json.loads(ham)
-        # karar §28-19/§28-46: yayımlanmamış 2.6.27 kaydı 3.0.0 adıyla çıkar.
-        assert d['versions'][0]['version'] == '3.0.0'
+        # En yeni kayıt uygulamanın sürümüdür (tek kaynak: hrma.__version__;
+        # 27 Eki 2026 3.0.1 ile sihirli sayıdan çıkarıldı).
+        import hrma
+        assert d['versions'][0]['version'] == hrma.__version__
         assert re.search(r'[çğıöşüÇĞİÖŞÜ]', d['versions'][0]['notes_tr'])

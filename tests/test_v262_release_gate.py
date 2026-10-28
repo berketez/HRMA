@@ -739,8 +739,15 @@ class TestInputGuardCagriEnvanteri:
     # sonsuz/NaN girdiler sessiz varsayılana düşmek yerine adıyla reddediliyor.
     # Alt taban (``>= TABAN_DEGER``) sökülmeyi, üst taban (``<=``) sessiz
     # büyümeyi yakalamaya devam eder.
-    TABAN_DEGER = 51
-    TABAN_DEGER_DOSYA = {'hrma/engines/hybrid_rocket_engine.py': 6,
+    # V3.0.5 T-ÇAPA-C1 (27 Eki): taban 51 -> 52 (hibrit motoru 6 -> 7).
+    # Sınıfın KENDİ yönergesi: kapsam büyüdü, ölçülen değere çekildi.
+    # EKLENEN TEK ÇAĞRI ÖLÇÜLDÜ (AST envanteri, e038d626f; sabah tabanı
+    # ad0737bd4'te de 52): ``hrma/engines/hybrid_rocket_engine.py``
+    # ``resolve_hybrid_c_star_efficiency`` içindeki ``input_guard.num`` —
+    # V301/H-PANEL (74b55500a) c* verimi girdisi bant dışı / sayı olmayan
+    # değeri adıyla reddediyor (kırpma yok).
+    TABAN_DEGER = 52
+    TABAN_DEGER_DOSYA = {'hrma/engines/hybrid_rocket_engine.py': 7,
                          'hrma/utils/common_fixes.py': 7,
                          'hrma/app.py': 38}
     TABAN_AD = 23

@@ -71,6 +71,8 @@ import sys
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
@@ -95,8 +97,12 @@ YAPISAL_YUKU = {
 }
 
 #: Katı motor gövdesi (Z2-A ölçüm koşumlarıyla aynı).
+# v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+# (A_p/A_t < 1) ve K-A kapısından beri 422 ``port_smaller_than_throat``.
+# Bu dosyanın konusu port boğulması değil: geometri tek tanım
+# ``SOLID_DEFAULT_GEOMETRY_MM``den (değer kopyalanmaz).
 KATI_YUKU = {
-    'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 30,
+    **SOLID_DEFAULT_GEOMETRY_MM,
     'chamber_pressure': 40, 'propellant_type': 'apcp',
 }
 
@@ -606,8 +612,11 @@ def test_e1_iki_blok_KESISIMDE_celismiyor(kati_yanitlar, etiket):
         f'aynı yanıtta iki case_design bloğu çelişiyor: {catisma}')
 
 
+# v3.0.1 T-ÇAPA-B: çevresel gerilmeyle boyutlanan cidar 2,4 → 2,496 mm
+# (ölçüldü, taban 117d704da): gövde çekirdek 30 → 48 mm geçerli porta
+# taşındı (KATI_YUKU), MEOP ve dolayısıyla boyutlanan cidar değişti.
 @pytest.mark.parametrize('etiket,beklenen,cidar', (
-    ('yok', 'hoop_stress_sized', 2.4000000000000004),
+    ('yok', 'hoop_stress_sized', 2.4960000000000004),
     ('3.0', 'user_entered', 3.0),
     ('8.0', 'user_entered', 8.0),
 ))

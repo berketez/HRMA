@@ -521,7 +521,10 @@ class TestLegacyPathUnchanged:
         assert s['coolant_pseudocritical_T_K'] is None
         assert s['coolant_inlet_enthalpy_J_kg'] is None
         assert s['supercritical_pressure'] is None
-        assert s['fin_effect'] is None
+        # V301/L-REJ (26 Eki, Berke "Modeli bugün düzelt"): kanat modeli
+        # artık su/RP-1 yolunda da uygulanır; alan None değil, bayrağın
+        # kendisi (eski sözleşme: None).
+        assert s['fin_effect'] is True
 
     def test_water_no_acceleration_term(self):
         # Eski yol: ivmelenme terimi uygulanmaz; sürtünme = toplam.
@@ -533,16 +536,19 @@ class TestLegacyPathUnchanged:
     def test_water_no_supercritical_arrays(self):
         res = self.make_water().solve()
         assert 'coolant_enthalpy_kJ_kg' not in res
-        assert 'fin_area_ratio' not in res
+        # V301/L-REJ: kanat oranı dizisi artık her yolda yayımlanır.
+        assert len(res['fin_area_ratio']) == res['n_stations']
 
-    def test_fin_effect_flag_does_not_touch_water(self):
-        # Su yolunda fin_effect parametresi sonucu DEĞİŞTİRMEZ (sözleşme).
+    def test_fin_effect_flag_changes_water(self):
+        # V301/L-REJ (26 Eki): eski sözleşme "su yolunda fin_effect sonucu
+        # DEĞİŞTİRMEZ" idi — kanat modeli yalnız süperkritik yoldaydı.
+        # Berke'nin "Modeli bugün düzelt" kararıyla kanat her yolda: bayrak
+        # su sonucunu DEĞİŞTİRİR, kapalıyken oran tam 1'dir.
         s_on = self.make_water(fin_effect=True).solve()['summary']
         s_off = self.make_water(fin_effect=False).solve()['summary']
-        assert s_on['total_heat_W'] == pytest.approx(
-            s_off['total_heat_W'], rel=1e-12)
-        assert s_on['max_wall_hot_K'] == pytest.approx(
-            s_off['max_wall_hot_K'], rel=1e-12)
+        assert s_off['fin_area_ratio_max'] == pytest.approx(1.0, abs=0.0)
+        assert s_on['fin_area_ratio_max'] > 1.0
+        assert s_on['max_wall_hot_K'] != s_off['max_wall_hot_K']
 
 
 if __name__ == '__main__':

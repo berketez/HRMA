@@ -378,7 +378,11 @@ class TestP17B3_05KunyeKokeni:
 
     def test_erisilemez_yoklamada_da_koken_alani_KORUNUR(self, monkeypatch):
         n = self._durum(monkeypatch, False)['nist']
-        assert n['status'] == 'error'
+        # v3.0.1 K (Berke ek maddesi): erişilemeyen yoklama 'error' değil
+        # ADIYLA 'not_connected' (bağlanamadı) yayımlar.
+        assert n['status'] == 'not_connected'
+        assert n['connection'] == 'not_connected'
+        assert n['data_parsed'] is False
         assert n['supplies_calculation_data'] is False
 
     def test_hesabin_gercek_kaynagi_aga_CIKMIYOR(self):

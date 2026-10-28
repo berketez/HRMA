@@ -375,6 +375,51 @@ YENI_TAU = {
     'rp1_lox_pintle': 9.250394780734892,
 }
 
+# ===========================================================================
+# YEDİNCİ SINIF (27 Eki 2026, V301/L-C SV-07; manifestoya V305/C1 28 Eki
+# ölçümle girdi) — PINTLE ATOMİZASYON UZUNLUK ÖLÇEĞİ.
+#
+# L-C pintle'ı tek kanon geometriye bağladı (ARA KAYIT ad14456be, main'e
+# 8ee59c845 birleşmesi, 27 Eki 10:20). Pintle'da oksitleyici delikten değil
+# merkez gövdenin çevresindeki ANÜLÜSTEN girer; ``ox_circuit.orifice_d_mm``
+# DELİNMEYEN eşdeğer düz orifis planıdır (eskiden kullanıcının eleman
+# sayısına bağlıydı: 100 delik -> 0,895 mm, 1 delik -> 8,9 mm). ``_atomisation
+# _time`` pintle'da uzunluk ölçeği olarak artık o planın çapını değil kanon
+# ``pintle_geometry.annulus_gap_mm`` tabaka kalınlığını (t) kullanır — HRMA
+# seçimi, motor çıktısında beyanlı. Birleşme commit'i hükmü ADIYLA yazar
+# ("atomizasyon ölçeği anülüs boşluğu; eskisi var olmayan eşdeğer orifisten").
+#
+# ÇATAL (V305/C1, docs'suz arşiv ağaçları, aynı kurucu):
+#   8ee59c845^1 (d95e9f3a2)  τ = 9,250394780734892 ms  (YENI_TAU ile bit-aynı)
+#   8ee59c845                τ = 3,191689424252705 ms
+#   49f6a86eb^1 / 49f6a86eb  τ = 3,191689424252705 ms  (iki ölçek turu τ'ya
+#                            dokunmadı; yalnız chug hükmünü iki ölçekle verdi)
+# Kayan TEK çarpan uzunluk ölçeğidir: v_jet (25,28769386092896 m/s), ρ_gaz,
+# ρ_ox ve devrenin orifis planı (2,412131472815058 mm) ile d_t iki tarafta
+# BİT-AYNI; τ_LC/τ_D18 = t/d_plan = 0,832264426997709/2,412131472815058
+# (bağıl fark ~1e-16, aşağıdaki kimlik). Diğer iki motor (impinging,
+# coaxial) bu sınıfın DIŞINDA, YENI_TAU'da bit-özdeş kaldı.
+# Gevşetme değil sınıf değişikliği: eski çapa (YENI_TAU) TARİHSEL olarak
+# yerinde durur, yeni çapa ayrı dondurulur ve türetme kimliği daralır.
+LC_PINTLE_OLCEK_KAYMASI = {
+    'combustion_response_time': (
+        'V301/L-C SV-07 (ad14456be, merged in 8ee59c845): the pintle '
+        'atomisation length scale is now the canonical '
+        'pintle_geometry.annulus_gap_mm oxidizer sheet thickness t instead '
+        'of the undrilled equivalent plain-orifice plan diameter of the ox '
+        'circuit; v_jet, rho_gas, rho_ox and d_t are bit-identical across '
+        'the change, so tau moves by exactly t/d_plan'),
+}
+
+#: Bu sınıfa giren vakalar (yalnız pintle enjektörlü motor).
+LC_PINTLE_VAKALARI = ('rp1_lox_pintle',)
+
+#: L-C SONRASI pintle çapası (ölçüldü: 8ee59c845, 49f6a86eb ve ae1dae910'da
+#: bit-aynı; ürün kodunun çıktısından alındı).
+YENI_TAU_LC = {
+    'rp1_lox_pintle': 3.191689424252705,
+}
+
 #: Yaprakları üreten ara büyüklükler (aynı koşum, türetme için).
 D18_ARA = {
     'ch4_lox_coaxial': {'sound_speed': 1253.8565684256523, 'chamber_length': 0.2713967503351357, 'chamber_diameter': 0.11980515079199273, 'throat_diameter': 0.060064421856747825, 'l_star': 1.2},
@@ -486,6 +531,15 @@ def ara_buyuklukler(kosular):
             'c_star': float(eng.c_star),
             'mdot_total': float(eng.mdot_total),
             'jet_diameter_mm': float(ox['orifice_d_mm']),
+            # YEDİNCİ SINIF (L-C SV-07): τ'nun uzunluk ölçeği. Pintle'da
+            # kanon geometrinin anülüs boşluğu t, diğer tiplerde jet çapı.
+            # Değer motorun kendi yanıtından okunur; ikinci hesap yok.
+            'atomisation_scale_mm': (
+                float(detay['pintle_geometry']['annulus_gap_mm'])
+                if (detay.get('injector_type') == 'pintle'
+                    and (detay.get('pintle_geometry') or {})
+                    .get('annulus_gap_mm'))
+                else float(ox['orifice_d_mm'])),
             'jet_velocity_m_s': float(ox['velocity_m_s']),
             # Motorun ``_analyze_combustion_chamber_detailed`` içinde
             # kurduğu AYNI ifade (ideal gaz, kmol tabanlı R).
@@ -750,22 +804,44 @@ def test_cea_eps_kaymasi_yapraklari_donduruldu(yeni_merkez, ara_buyuklukler,
     ORANTILI. Yani zincir tek bir sebebe iniyor: B3-07.
     """
     yeni = float(yeni_merkez[ad][anahtar])
-    assert yeni == pytest.approx(YENI_TAU[ad],
-                                 rel=PLATFORM_GURULTU_TABANI_REL), (
-        'GÖÇ MANİFESTOSU İHLALİ (yeni çapadan sapma)\n'
-        + manifest_satiri(ad, anahtar, YENI_TAU[ad], yeni)
-        + f'\nkayıtlı sebep: {CEA_EPS_KAYMASI[anahtar]}')
-
     ara, onceki = ara_buyuklukler[ad], ONCEKI_B307[ad]
+    if ad in LC_PINTLE_VAKALARI:
+        # YEDİNCİ SINIF (L-C SV-07): çapa L-C sonrası değerde dondurulur...
+        assert yeni == pytest.approx(YENI_TAU_LC[ad],
+                                     rel=PLATFORM_GURULTU_TABANI_REL), (
+            'GÖÇ MANİFESTOSU İHLALİ (yeni çapadan sapma)\n'
+            + manifest_satiri(ad, anahtar, YENI_TAU_LC[ad], yeni)
+            + f'\nkayıtlı sebep: {LC_PINTLE_OLCEK_KAYMASI[anahtar]}')
+        # ...ve D18 çapasından farkı TEK çarpana iner: uzunluk ölçeği
+        # orifis planı d -> anülüs tabakası t. v_jet, ρ_gaz, ρ_ox, d_t
+        # L-C'de bit-aynı kaldı (çatal), dolayısıyla oran tam t/d olmalı.
+        assert (YENI_TAU_LC[ad] / YENI_TAU[ad]) == pytest.approx(
+            ara['atomisation_scale_mm'] / ara['jet_diameter_mm'],
+            rel=PLATFORM_GURULTU_TABANI_REL), (
+            'L-C kayması t/d oranından sapıyor: τ\'yu ölçekten BAŞKA bir '
+            'çarpan da oynatmış; adı manifestoya yazılmalı')
+        assert ara['atomisation_scale_mm'] < ara['jet_diameter_mm'], (
+            'pintle ölçeği hâlâ orifis planı çapı gibi görünüyor')
+    else:
+        assert yeni == pytest.approx(YENI_TAU[ad],
+                                     rel=PLATFORM_GURULTU_TABANI_REL), (
+            'GÖÇ MANİFESTOSU İHLALİ (yeni çapadan sapma)\n'
+            + manifest_satiri(ad, anahtar, YENI_TAU[ad], yeni)
+            + f'\nkayıtlı sebep: {CEA_EPS_KAYMASI[anahtar]}')
+
     tau_orani = yeni / onceki[anahtar]
     jet_orani = ara['jet_diameter_mm'] / onceki['jet_diameter_mm']
+    # YEDİNCİ SINIF: τ zincirinin uzunluk çarpanı ölçeğin kendisidir. Pintle
+    # dışında ölçek = jet çapı, yani bu oran jet_orani ile AYNI sayıdır
+    # (kimlik değişmedi); pintle'da t / d_jet(B3-07 tabanı).
+    olcek_orani = ara['atomisation_scale_mm'] / onceki['jet_diameter_mm']
     bogaz_orani = ara['throat_diameter'] / onceki['throat_diameter']
     # DARALTILDI (ALTINCI SINIF, fix-29b): τ = T*·d_jet/v_jet·sqrt(ρ_l/ρ_gaz).
     # Kimlik eskiden yalnız d_jet oranına bakıyordu, çünkü o gün v_jet ve
     # ρ_gaz bit-özdeş kalıyordu. Psi bacağı ρ_gaz'ı ~5e-11 oynattı (v_jet
     # bit-özdeş kaldı, ölçüldü). Tolerans büyütülmedi: kimlik τ'yu üreten ÜÇ
     # çarpanın ÜÇÜNÜ birden okuyacak biçimde yazıldı.
-    beklenen_tau_orani = (jet_orani
+    beklenen_tau_orani = (olcek_orani
                           * (onceki['jet_velocity_m_s']
                              / ara['jet_velocity_m_s'])
                           * math.sqrt(onceki['gas_density']
@@ -779,6 +855,9 @@ def test_cea_eps_kaymasi_yapraklari_donduruldu(yeni_merkez, ara_buyuklukler,
         f'jet çapı oranı {jet_orani!r}, boğaz çapı oranı {bogaz_orani!r} ile '
         'tutmuyor — enjektör jet çapı artık d_t ile orantılı değil, yani '
         'zincir B3-07\'den başka bir sebep de taşıyor')
+    # YEDİNCİ SINIF: pintle dışında ölçek = jet çapı (bit-aynı nesne).
+    if ad not in LC_PINTLE_VAKALARI:
+        assert ara['atomisation_scale_mm'] == ara['jet_diameter_mm']
 
 
 # ===========================================================================
@@ -1047,11 +1126,18 @@ def test_manifest_tablosu_uretilebiliyor(yeni_merkez, capsys):
         for anahtar in sutunlar:
             eski = ESKI_YEREL[ad][anahtar]
             yeni = yeni_merkez[ad][anahtar]
-            sebep = (BIT_OZDES.get(anahtar) or CEA_EPS_KAYMASI.get(anahtar)
+            # YEDİNCİ SINIF (L-C SV-07) pintle satırında öncelikli.
+            lc = (LC_PINTLE_OLCEK_KAYMASI.get(anahtar)
+                  if ad in LC_PINTLE_VAKALARI else None)
+            sebep = (lc or BIT_OZDES.get(anahtar)
+                     or CEA_EPS_KAYMASI.get(anahtar)
                      or GEOMETRI_KAYMASI.get(anahtar) or KOK_SEBEBI)
             satirlar.append(manifest_satiri(ad, anahtar, eski, yeni)
                             + f' | reason={sebep}')
     print('\n'.join(satirlar))
     assert len(satirlar) == len(ESKI_YEREL) * len(sutunlar)
+    assert sum(LC_PINTLE_OLCEK_KAYMASI['combustion_response_time'] in r
+               for r in satirlar) == len(LC_PINTLE_VAKALARI), (
+        'YEDİNCİ SINIF tabloya girmedi')
     assert len(sutunlar) == (len(BIT_OZDES) + len(CEA_EPS_KAYMASI)
                              + len(GEOMETRI_KAYMASI) + 1)

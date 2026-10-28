@@ -47,9 +47,17 @@ TRASH_DIRNAME = '.trash'
 # Tek proje dosyası için üst sınır (ARGE raporu: 1 MB)
 MAX_PROJECT_BYTES = 1024 * 1024
 
-# Ad kuralı: [A-Za-z0-9 _.-] 1-80 karakter (nokta ile başlama ayrıca denetlenir)
+# Ad kuralı: İngilizce ve Türkçe harfler, rakam, boşluk, _ . - ; 1-80 karakter
+# (nokta ile başlama ayrıca denetlenir). v3.0.1 (NK-51, son kullanıcı testi):
+# kural metni "harf" diyordu ama "Şimşek-1" reddediliyordu. Yalnız önceden
+# birleşik (NFC) Türkçe harfler eklendi; birleştirici işaretli (NFD) yazım,
+# öteki alfabeler ve görünmez karakterler reddedilir (benzer görünen ad
+# hilesine kapı açılmaz). İstemci aynası: hrma/static/js/project_bar.js
+# NAME_RE (tests/test_project_ui_contract.py iki sınıfı karşılaştırır).
 NAME_MAX_LEN = 80
-_NAME_RE = re.compile(r'^[A-Za-z0-9 _.\-]{1,80}$')
+_NAME_CHARS = 'A-Za-z0-9çğıöşüÇĞİÖŞÜ _.\\-'
+_NAME_RE = re.compile('^[' + _NAME_CHARS + ']{1,80}$')
+_NAME_CHAR_RE = re.compile('[' + _NAME_CHARS + ']')
 
 # Windows'ta dosya adı olarak kullanılamayan ayrılmış adlar
 _WINDOWS_RESERVED = frozenset(
@@ -250,6 +258,157 @@ def seed_examples() -> Dict:
     return result
 
 
+# --- Eski örnek kopyalarının tazelenmesi (v3.0.1) ---------------------------
+# ÖLÇÜLDÜ (26 Eki 2026, geliştirme makinesi): tohumlama örnekleri kullanıcı
+# dizinine BİR KEZ kopyalar (.seeded_v1) ve sonra hiç güncellemez. Dizindeki
+# üç örnek 796a56aab (2.6.27) sürümündeydi; katı örnek eski "tek çap"
+# anlamıyla chamber_diameter = outer_diameter = 75 mm taşıyordu ve 3.0.1'in
+# kasa kapısında 422 alıyordu ("kasa iç çapı 75 mm … en az 85,0 mm") —
+# 3.0.0'dan yükselten her kullanıcı örneği açınca hata görecekti.
+#
+# Kural: kullanıcı dizinindeki örnek, paketle DAĞITILMIŞ bir örnek
+# sürümüyle BAYT BAYT aynıysa (kullanıcı hiç değiştirmemiş) güncel sürümle
+# atomik olarak değiştirilir. Değiştirilmiş kopyaya DOKUNULMAZ (kullanıcının
+# işi ezilmez); kullanıcının sildiği örnek geri GETİRİLMEZ. Her sürüm bir
+# kez çalışır (damga: EXAMPLE_REFRESH_STAMP_FILENAME, app_version alanı).
+# Dağıtılmış sürümlerin karmaları paketle gelir:
+# examples/SHIPPED_EXAMPLE_HASHES_FILENAME (git geçmişinden üretildi;
+# examples/generate_examples.py her üretimde yeni sürümü ekler).
+
+#: Tazeleme damgası (nokta dosyası: list_projects onu proje saymaz).
+EXAMPLE_REFRESH_STAMP_FILENAME = '.examples_refresh.json'
+#: Paketle gelen "dağıtılmış örnek sürümleri" karma dosyası (examples/ içinde;
+#: .hrma olmadığı için tohumlama onu kopyalamaz).
+SHIPPED_EXAMPLE_HASHES_FILENAME = 'shipped_example_hashes.json'
+
+
+def _sha256_of_file(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for blok in iter(lambda: f.read(65536), b''):
+            h.update(blok)
+    return h.hexdigest()
+
+
+def _shipped_example_hashes(source: str) -> Dict[str, set]:
+    """examples/ yanındaki karma dosyası: {dosya adı: {sha256, ...}}.
+
+    Dosya yoksa ya da okunamıyorsa BOŞ sözlük döner — hiçbir kopya
+    "dağıtılmış sürüm" sayılmaz, yani hiçbir şey ezilmez (fail-closed).
+    """
+    try:
+        with open(os.path.join(source, SHIPPED_EXAMPLE_HASHES_FILENAME),
+                  'r', encoding='utf-8') as f:
+            belge = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    karmalar = belge.get('hashes') if isinstance(belge, dict) else None
+    if not isinstance(karmalar, dict):
+        return {}
+    return {ad: {h for h in liste if isinstance(h, str)}
+            for ad, liste in karmalar.items() if isinstance(liste, list)}
+
+
+def refresh_seeded_examples() -> Dict:
+    """Kullanıcının DEĞİŞTİRMEDİĞİ eski örnek kopyalarını güncel sürümle değiştir.
+
+    Dönüş: {'status': 'refreshed'|'already_refreshed'|'not_seeded'|'no_source',
+            'refreshed': [...], 'kept_modified': [...], 'up_to_date': [...],
+            'skipped_missing': [...], 'source_dir': str|None}
+    """
+    dest = projects_dir()
+    result: Dict[str, Any] = {
+        'refreshed': [], 'kept_modified': [], 'up_to_date': [],
+        'skipped_missing': [], 'source_dir': None,
+    }
+    # Hiç tohumlanmamış dizin seed_examples'ın işidir (ilk kurulum).
+    if not os.path.exists(os.path.join(dest, SEED_STAMP_FILENAME)):
+        result['status'] = 'not_seeded'
+        return result
+    stamp_path = os.path.join(dest, EXAMPLE_REFRESH_STAMP_FILENAME)
+    try:
+        with open(stamp_path, 'r', encoding='utf-8') as f:
+            onceki = json.load(f)
+        if not isinstance(onceki, dict):
+            onceki = {}
+    except (OSError, ValueError):
+        onceki = {}
+    if onceki.get('app_version') == APP_VERSION:
+        result['status'] = 'already_refreshed'
+        return result
+
+    source = examples_source_dir()
+    result['source_dir'] = source
+    if source is None:
+        result['status'] = 'no_source'
+        return result
+    dagitilmis = _shipped_example_hashes(source)
+    onceki_yazilan = onceki.get('written') if isinstance(
+        onceki.get('written'), dict) else {}
+    yazilan: Dict[str, str] = {}
+    try:
+        filenames = sorted(os.listdir(source))
+    except OSError:
+        result['status'] = 'no_source'
+        return result
+
+    for filename in filenames:
+        if filename.startswith('.') or not filename.endswith(FILE_EXT):
+            continue
+        try:
+            validate_name(filename[:-len(FILE_EXT)])
+        except ProjectNameError:
+            continue
+        kaynak = os.path.join(source, filename)
+        hedef = os.path.join(dest, filename)
+        guncel = _sha256_of_file(kaynak)
+        if not os.path.exists(hedef):
+            # Kullanıcı silmiş: geri getirilmez.
+            result['skipped_missing'].append(filename)
+            continue
+        mevcut = _sha256_of_file(hedef)
+        if mevcut == guncel:
+            result['up_to_date'].append(filename)
+            yazilan[filename] = guncel
+            continue
+        bilinen = set(dagitilmis.get(filename, set()))
+        if isinstance(onceki_yazilan.get(filename), str):
+            bilinen.add(onceki_yazilan[filename])
+        if mevcut not in bilinen:
+            # Kullanıcı değiştirmiş (ya da bilinmeyen bir sürüm): dokunma.
+            result['kept_modified'].append(filename)
+            continue
+        with open(kaynak, 'rb') as f:
+            blob = f.read()
+        fd, tmp_path = tempfile.mkstemp(
+            prefix='.hrma_seed_', suffix='.tmp', dir=dest)
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                f.write(blob)
+            os.replace(tmp_path, hedef)  # atomik: tmp + rename
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        result['refreshed'].append(filename)
+        yazilan[filename] = guncel
+
+    _atomic_write_json(stamp_path, {
+        'refreshed_at': datetime.now().isoformat(timespec='seconds'),
+        'app_version': APP_VERSION,
+        'source_dir': source,
+        'refreshed': result['refreshed'],
+        'kept_modified': result['kept_modified'],
+        'skipped_missing': result['skipped_missing'],
+        'written': yazilan,
+    })
+    result['status'] = 'refreshed'
+    return result
+
+
 # --- Ad ve yol denetimi -----------------------------------------------------
 
 def validate_name(name: Any) -> str:
@@ -257,9 +416,14 @@ def validate_name(name: Any) -> str:
     if not isinstance(name, str):
         raise ProjectNameError('Project name must be a string')
     if not _NAME_RE.match(name):
+        # Hangi karakterin sorun olduğu söylenir (NK-51); repr görünmez
+        # karakterleri de (\u200b vb.) okunur kılar.
+        yasak = sorted({ch for ch in name if not _NAME_CHAR_RE.match(ch)})
+        ek = f' (not allowed: {"".join(yasak)!r})' if yasak else ''
         raise ProjectNameError(
-            'Invalid project name: only letters, digits, space, underscore, '
-            f'dot and hyphen are allowed (1-{NAME_MAX_LEN} characters)')
+            'Invalid project name: only letters (A-Z and Turkish '
+            'ç ğ ı İ ö ş ü), digits, space, underscore, dot and hyphen are '
+            f'allowed (1-{NAME_MAX_LEN} characters){ek}')
     if name.startswith('.'):
         raise ProjectNameError('Project name must not start with a dot')
     if name.endswith('.') or name.endswith(' '):
@@ -529,6 +693,20 @@ def load_project(name: str) -> Tuple[Dict, List[str]]:
 
     Eksik alanlar SESSİZCE doldurulmaz: belge diskteki haliyle döner,
     yalnızca uyarı listesi eklenir (ör. farklı app_version ile kaydedilmiş).
+    Tek istisna beyanlı sürüm göçüdür (v3.0.1: eski katı projede tane çapı
+    anlamındaki kasa çapı boşaltılır); göç bellekteki belgeye uygulanır,
+    diskteki dosya değişmez ve adlı bir uyarı kaydı eklenir.
+    """
+    doc, records = load_project_records(name)
+    warnings = [load_warning_text(r) for r in records]
+    return doc, warnings
+
+
+def load_project_records(name: str) -> Tuple[Dict, List[Dict]]:
+    """``load_project``ın kayıt biçimi: (belge, uyarı kayıtları).
+
+    Uyarı metinleri (``load_project``) ve makine kayıtları (projeler API'si)
+    AYNI listeden kurulur; göç kaydı ikisinde de aynı sırada durur.
     """
     path = _project_path(name)
     if not os.path.exists(path):
@@ -540,8 +718,11 @@ def load_project(name: str) -> Tuple[Dict, List[str]]:
     except ProjectValidationError as e:
         raise ProjectCorruptError(f'Project file does not match the schema: {e}')
 
-    warnings = [load_warning_text(r) for r in load_warning_records(doc)]
-    return doc, warnings
+    records = load_warning_records(doc)
+    goc = _solid_legacy_case_bore_migration(doc)
+    if goc is not None:
+        records.append(goc)
+    return doc, records
 
 
 # --------------------------------------------------------------------------
@@ -555,6 +736,7 @@ def load_project(name: str) -> Tuple[Dict, List[str]]:
 # (aynı kayıtlardan, bu sözlükten kurulur; bayt-aynı).
 LOAD_WARNING_APP_VERSION_MISMATCH = 'warn.project.app_version_mismatch'
 LOAD_WARNING_MISSING_STAMP = 'warn.project.missing_stamp'
+LOAD_WARNING_SOLID_LEGACY_CASE_BORE = 'warn.project.solid_legacy_case_bore'
 #: Sunucunun İngilizce yedek metinleri (i18n_common.js 'en' ile birebir;
 #: bekçi tests/test_v3_kucuk.py::TestProjeYuklemeUyarisi).
 _LOAD_WARNING_TEXT_EN = {
@@ -562,7 +744,78 @@ _LOAD_WARNING_TEXT_EN = {
         'Project was saved with app version {saved_version}; '
         'current version is {current_version}'),
     LOAD_WARNING_MISSING_STAMP: "Project file is missing the '{stamp}' stamp",
+    LOAD_WARNING_SOLID_LEGACY_CASE_BORE: (
+        'This solid project was saved with app version {saved_version}: its '
+        'Chamber Diameter ({chamber_diameter_mm} mm) is not larger than the '
+        'grain outer diameter ({outer_diameter_mm} mm). Versions before 3.0.5 '
+        'read that field as the grain diameter; from 3.0.5 on it is the case '
+        'inner diameter, which must hold the grain, liner and insulation. The '
+        'field was left empty, so the case is derived from the grain, liner '
+        'and insulation. Enter your own case inner diameter if you have one.'),
 }
+
+#: Katı sayfada ``chamber_diameter``ın KASA İÇ ÇAPI anlamına geçtiği sürüm
+#: (V301/K-A karar A, 22 Eki 2026: ``outer_diameter`` gönderilirse
+#: ``chamber_diameter`` daima kasa iç çapıdır).
+_SOLID_CASE_BORE_SEMANTICS_FROM = (3, 0, 1)
+
+
+def _version_tuple(value: Any) -> Optional[Tuple[int, ...]]:
+    """'3.0.0' → (3, 0, 0); çözülemeyen sürüm None (göç uygulanmaz)."""
+    if not isinstance(value, str):
+        return None
+    m = re.match(r'^\s*(\d+)\.(\d+)\.(\d+)', value)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def _finite_number(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _solid_legacy_case_bore_migration(doc: Dict) -> Optional[Dict]:
+    """3.0.1 öncesi katı projede tane çapı anlamındaki kasa çapını boşalt.
+
+    ÖLÇÜLDÜ (26 Eki 2026): 3.0.0'dan kalan katı örnek ``chamber_diameter``
+    = ``outer_diameter`` = 75 mm taşıyordu; 3.0.1 bu alanı kasa iç çapı
+    okuduğu için tasarım 422 ile reddediliyordu (75 mm < 75 + 2·(2 + 3)).
+    Eski sürümlerde alan tane çapı anlamındaydı; kasa ondan türetiliyordu.
+
+    Göç YALNIZ şu imzada uygulanır: katı proje, kayıt sürümü 3.0.1'den eski,
+    ``chamber_diameter`` ≤ ``outer_diameter`` (kasa taneden büyük değil —
+    kasa iç çapı olarak fiziksel olarak olanaksız, eski anlamın imzası).
+    Alan boşaltılır (sayfa göndermez, sunucu kasayı türetir ve
+    ``case_bore`` künyesiyle beyan eder); diskteki dosya DEĞİŞMEZ ve göç
+    adlı bir yükleme uyarısıyla kullanıcıya söylenir (sessiz değil).
+    Kasa taneden büyükse alana dokunulmaz: o artık gerçek bir kasa çapıdır,
+    sığmıyorsa 3.0.1'in adlı 422'si gereken en küçük çapı söyler.
+    """
+    if doc.get('motor_type') != 'solid':
+        return None
+    surum = _version_tuple(doc.get('app_version'))
+    if surum is None or surum >= _SOLID_CASE_BORE_SEMANTICS_FROM:
+        return None
+    fields = (doc.get('inputs') or {}).get('fields')
+    if not isinstance(fields, dict):
+        return None
+    kasa = _finite_number(fields.get('chamber_diameter'))
+    tane = _finite_number(fields.get('outer_diameter'))
+    if kasa is None or tane is None or kasa > tane:
+        return None
+    fields['chamber_diameter'] = ''
+
+    def _yaz(v: float):
+        return int(v) if float(v).is_integer() else round(v, 3)
+    return {'code': LOAD_WARNING_SOLID_LEGACY_CASE_BORE,
+            'severity': 'warning',
+            'params': {'saved_version': doc.get('app_version'),
+                       'chamber_diameter_mm': _yaz(kasa),
+                       'outer_diameter_mm': _yaz(tane)}}
 _LOAD_STAMPS = ('app_version', 'created_at', 'updated_at')
 
 

@@ -74,10 +74,20 @@ def varsayilan():
 
 @pytest.fixture(scope='module')
 def kirpilan():
-    """Web'i erken tükenen motor: istenen 30 s, grain bunu tutturamıyor."""
+    """ESKİ kırpılan koşu (5 kN, 30 s, kamara 150 mm) — v3.0.1'de TAM süre.
+
+    v3.0.1 kulvar P (ana model kararı): kaynaksız port <= 0,8·D_ch/√N
+    kırpması söküldü. Zarf artık geometriden gelir (N = 1: D_son + 2t <=
+    D_ch); bu girdinin son portu 129,6 mm ve 150 mm'ye SIĞAR, yanma istenen
+    30 s'yi tamamlar (eskiden 22,35 s'te kırpılıyordu, ölçüm: docs/scofield/
+    raw/OH/V301/ayberk1/port-kamara/once.json ⟷ sonra.json, tasarım G).
+    Sığmayan zarf artık KIRPILMAZ, adıyla reddedilir (bkz.
+    ``test_kirpma_yolu_kapandi_sigmayan_zarf_adiyla_reddedilir``).
+    Ad geçmişe atıf için korunur; bu fikstürde süre/impuls/oksitleyici
+    sözleşmeleri KIRPILMAYAN koşuda sınanır (sözleşmeler hâlâ geçerli).
+    """
     motor, sonuc = kos(thrust=5000, burn_time=30, chamber_diameter_input=150)
-    assert motor.t_burn_effective < 30.0, (
-        'sınama kurgusu bozulmuş: bu tasarımda web erken tükenmiyor')
+    assert motor.t_burn_effective == 30.0
     return motor, sonuc
 
 
@@ -156,14 +166,29 @@ class TestGercekSureMansete:
         assert sonuc['burn_time_effective_s'] == pytest.approx(motor.t_b)
 
     def test_kirpilan_kosuda_manset_teslim_edileni_gosterir(self, kirpilan):
+        # v3.0.1: aynı girdi artık kırpılmıyor; manşet = teslim = istenen.
         motor, sonuc = kirpilan
         t_etkin = float(motor.t_burn_effective)
-        assert sonuc['burn_time_clipped'] is True
+        assert sonuc['burn_time_clipped'] is False
         assert sonuc['burn_time'] == pytest.approx(t_etkin)
-        assert sonuc['burn_time'] < sonuc['burn_time_requested_s']
+        assert sonuc['burn_time'] == sonuc['burn_time_requested_s']
         # İstenen değer KAYBOLMAZ, yanında durur.
         assert sonuc['burn_time_requested_s'] == pytest.approx(motor.t_b)
         assert sonuc['burn_time_effective_s'] == pytest.approx(t_etkin)
+
+    def test_kirpma_yolu_kapandi_sigmayan_zarf_adiyla_reddedilir(self):
+        """v3.0.1 kulvar P: zarfı aşan istek KIRPILMAZ, adıyla reddedilir.
+
+        Aynı motor 120 mm kamarayla: son port ~130 mm, zarf ~22 s'de aşılır.
+        Eski davranış 0,8·120 = 96 mm'de kırpıp TARGET_NOT_MET yayımlıyordu.
+        """
+        from hrma.engines.hybrid_rocket_engine import GrainEnvelopeError
+        with pytest.raises(GrainEnvelopeError) as e:
+            kos(thrust=5000, burn_time=30, chamber_diameter_input=120)
+        k = e.value.invalid_fields[0]
+        assert k['reason'] == 'grain_envelope_too_small_for_final_ports'
+        assert 0.0 < k['envelope_reached_at_s'] < 30.0
+        assert k['required_min'] > 120.0
 
     def test_kirpilan_kosuda_impuls_egrinin_kendi_impulsudur(self, kirpilan):
         _, sonuc = kirpilan
@@ -172,7 +197,14 @@ class TestGercekSureMansete:
         assert sonuc['total_impulse'] == pytest.approx(beklenen, rel=1e-9)
         assert sonuc['total_impulse_delivered_Ns'] == pytest.approx(beklenen,
                                                                    rel=1e-9)
-        assert sonuc['total_impulse'] < sonuc['total_impulse_requested_Ns']
+        # v3.0.1: kırpma yok — teslim edilen istenenden yalnız O/F kayması
+        # kadar sapar (eskiden %25 eksikti: 111 756 ⟷ 150 000 Ns).
+        # V301/B7 (21 Eki, ÖNEMLİ, Berke onaylı): O/F 2,5 N2O/HTPB'de dengeye
+        # katı karbon C(gr) girdi; c*(O/F) eğrisinin şekli değiştiği için O/F
+        # kaymasının payı büyüdü. Ölçüldü: 149 551,97 Ns (−%0,299; önce
+        # 5e-4 içindeydi). Tolerans %0,5 (aynı ölçü port-kamara bekçisinde).
+        assert sonuc['total_impulse'] == pytest.approx(
+            sonuc['total_impulse_requested_Ns'], rel=5e-3)
 
     def test_manset_ile_of_shift_ayni_sureyi_soyler(self, kirpilan):
         """İki blok aynı koşuda İKİ FARKLI süre söyleyemez."""
@@ -186,16 +218,19 @@ class TestGercekSureMansete:
         harcanan = sonuc['oxidizer_mass_consumed_kg']
         artik = sonuc['oxidizer_mass_residual_kg']
         assert yuklenen == pytest.approx(harcanan + artik, rel=1e-9)
-        # Tank İSTENEN süreye göre yüklenir (donanım kararı), grain'e göre
-        # değil: kırpılan yanmada artık oksitleyici KALIR ve bu görünür.
+        # Tank İSTENEN süreye göre yüklenir (donanım kararı). v3.0.1: yanma
+        # artık kırpılmadığı için harcanan = yüklenen, artık oksitleyici 0.
         assert harcanan == pytest.approx(
             motor.mdot_ox * motor.t_burn_effective, rel=1e-9)
-        assert artik > 0.0
+        assert artik == pytest.approx(0.0, abs=1e-12)
         assert 'LOADED mass' in sonuc['oxidizer_mass_basis']
 
     def test_kirpilma_uyariyla_beyan_edilir(self, kirpilan):
+        # v3.0.1: kırpma yolu kapandı; erken web tükenmesi uyarısı da
+        # yayımlanmaz (yerini adlı ret aldı, yukarıdaki bekçi).
         _, sonuc = kirpilan
-        assert 'warn.hybrid.web_exhausted_early' in kodlar(sonuc)
+        assert 'warn.hybrid.web_exhausted_early' not in kodlar(sonuc)
+        assert sonuc['design_summary']['status'] != 'TARGET_NOT_MET'
 
 
 # ---------------------------------------------------------------------------

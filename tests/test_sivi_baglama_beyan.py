@@ -609,14 +609,33 @@ class TestPasifIsilKorumaBaglamasi:
 # ---------------------------------------------------------------------------
 # KALEM 2 — emniyet katsayısı ve malzeme KAYNAK beyanı
 # ---------------------------------------------------------------------------
+def _secilen_malzeme_katmani(hazne):
+    """``chamber_material`` seçiminin İŞLENDİĞİ kayıt.
+
+    V3.0.5 T-ÇAPA-C1 — V301/L-KABUK (6f8240043): rejeneratif cidar İKİ
+    katmandır; ``chamber_material`` sıcak gaz cidarı olan ASTARIN
+    malzemesidir (``wall_layers[0]``), ``chamber_structure``ın üst düzey
+    ``material_key``/``material_selection_source`` alanları ise basıncı
+    taşıyan DIŞ KABUĞUN (``closeout_material``, varsayılan Inconel 718).
+    Seçimin künyesi bu yüzden astarda okunur; tek katmanlı yolda blok
+    aynen.
+    """
+    if hazne.get('wall_model') == 'two_layer_regenerative':
+        astar = hazne['wall_layers'][0]
+        assert astar['role'] == 'liner'
+        return astar
+    return hazne
+
+
 class TestYapisalKaynakBeyani:
 
     def test_varsayilan_kullanildiginda_varsayilan_denir(self, taban):
         hazne = taban['structural_analysis']['chamber_structure']
         assert hazne['safety_factor'] == pytest.approx(SAFETY_FACTOR_DEFAULT)
         assert hazne['safety_factor_source'] == SAFETY_FACTOR_SOURCE_DEFAULT
-        assert hazne['material_key'] == CHAMBER_MATERIAL_DEFAULT
-        assert (hazne['material_selection_source']
+        secim = _secilen_malzeme_katmani(hazne)
+        assert secim['material_key'] == CHAMBER_MATERIAL_DEFAULT
+        assert (secim['material_selection_source']
                 == CHAMBER_MATERIAL_SOURCE_DEFAULT)
 
     def test_kullanici_girdisi_kullanici_diye_beyan_edilir(self):
@@ -625,8 +644,9 @@ class TestYapisalKaynakBeyani:
         hazne = sonuc['structural_analysis']['chamber_structure']
         assert hazne['safety_factor'] == pytest.approx(1.6)
         assert hazne['safety_factor_source'] == SAFETY_FACTOR_SOURCE_USER
-        assert hazne['material_key'] == 'ss_304'
-        assert (hazne['material_selection_source']
+        secim = _secilen_malzeme_katmani(hazne)
+        assert secim['material_key'] == 'ss_304'
+        assert (secim['material_selection_source']
                 == CHAMBER_MATERIAL_SOURCE_USER)
 
     def test_reddedilen_girdiye_sahip_cikilmaz(self):
@@ -636,8 +656,9 @@ class TestYapisalKaynakBeyani:
         hazne = sonuc['structural_analysis']['chamber_structure']
         assert hazne['safety_factor'] == pytest.approx(SAFETY_FACTOR_DEFAULT)
         assert hazne['safety_factor_source'] == SAFETY_FACTOR_SOURCE_REJECTED
-        assert hazne['material_key'] == CHAMBER_MATERIAL_DEFAULT
-        assert (hazne['material_selection_source']
+        secim = _secilen_malzeme_katmani(hazne)
+        assert secim['material_key'] == CHAMBER_MATERIAL_DEFAULT
+        assert (secim['material_selection_source']
                 == CHAMBER_MATERIAL_SOURCE_REJECTED)
         kodlar = {u['code'] for u in sonuc['input_warnings']}
         assert 'warn.liquid.input_out_of_range' in kodlar

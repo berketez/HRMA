@@ -40,7 +40,12 @@ APP_KAYNAK = KOK / 'hrma' / 'app.py'
 FAZB_BEKCI = KOK / 'tests' / 'test_fazb_serilestirici_esligi.py'
 
 #: Sağlıklı referans gövde — üç kalemde de "bozulmadı" çapası budur.
-SAGLAM = dict(chamber_diameter=100, grain_length=500, core_diameter=30,
+# V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu.
+# Çekirdek örnek motorun TEK tanımından (30 -> 48 mm).
+from hrma.engines.solid_rocket_engine import (  # noqa: E402
+    SOLID_DEFAULT_GEOMETRY_MM as _KA_GEOMETRI)
+SAGLAM = dict(chamber_diameter=100, grain_length=500,
+              core_diameter=_KA_GEOMETRI['core_diameter'],
               chamber_pressure=40)
 
 

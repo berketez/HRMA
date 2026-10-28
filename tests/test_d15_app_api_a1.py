@@ -275,7 +275,13 @@ class TestP7B201BagliOlmayanSupurme:
 # ---------------------------------------------------------------------------
 # P7B2-06 — /api/solid-monte-carlo girdi kapısı
 # ---------------------------------------------------------------------------
-_MC_GECERLI = {'chamber_diameter': 100.0, 'core_diameter': 30.0,
+# V301/K-C1: çekirdek 30 -> SOLID_DEFAULT_GEOMETRY_MM (48 mm). K-A'dan beri
+# Ø100/30 mm motorun portu boğazdan küçük (A_port,0/A_t = 0,950) ve tasarım
+# 422 port_smaller_than_throat ile reddediliyor; "geçerli gövde" bekçisi
+# main'de de kırmızıydı (K-C1/RAPOR.md, değiştirilen test beklentileri).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM as _SDG
+_MC_GECERLI = {'chamber_diameter': 100.0,
+               'core_diameter': float(_SDG['core_diameter']),
                'grain_length': 500.0, 'chamber_pressure': 40.0,
                'propellant_type': 'apcp', 'n_samples': 60}
 
@@ -620,12 +626,36 @@ class TestP7B106CozulenGeometriBandi:
         # (docs/scofield/raw/OH/KITAP/p1a/kanit/tur2b/kahin_cea.json) +
         # önce/sonra (p1a rapor §12). Tolerans DEĞİŞMEDİ.
         #   d_c 0,0794332055737502 -> 0,07983065065803656
+        # ÇAPA YENİLENDİ — v3.0.1 kulvar P (ana model kararı): kaynaksız
+        # 1,5·√N·D_son kuralı söküldü, grain dış çapı = son port çapı
+        # (N = 1, artık et 0). Eski çapa 1,5 katsayısını KİLİTLİYORDU.
+        # Kamara boyu L_pre = 0,5·D_ch ve L_post bandı D_ch'ye bağlı olduğu
+        # için o da kısaldı. Ölçüm: docs/scofield/raw/OH/V301/ayberk1/
+        # port-kamara/RAPOR.md.
+        #   d_c 0,07983065065803656 -> 0,05323547085323697 (= D_port_son)
+        #   L_c 0,6938044063822819  -> 0,6727638085755462
+        # ÇAPA YENİLENDİ — v3.0.1 H-PANEL (NK-15/NK-20, Berke: 'girdi +
+        # kaynaklı varsayılan'): hibrit c* verimi varsayılanı 0,89 (26
+        # ölçülmüş N2O/HTPB ateşlemesinin ortancası; docs/scofield/raw/OH/
+        # V301/hibrit-panel/RAPOR.md). Teslim c* düşünce aynı itki için ṁ
+        # artar, son port (= kamara) genişler. ÖLÇÜLDÜ (ana model, birleşik
+        # ağaç): η = %100 verilince ESKİ çapa BİT-AYNI döner (aşağıdaki ikinci
+        # istek), yani değişimin tek kaynağı η'dır. Tolerans DEĞİŞMEDİ.
+        #   d_c 0,05323547085323697 -> 0,05562952212024063
+        #   L_c 0,6727638085755462  -> 0,7122747385131958
         assert motor['chamber_diameter'] == pytest.approx(
-            0.07983065065803656, rel=1e-12)  # fix-18: D22 hibrit OH-D21-03 (gerçekleşen L* sabit-noktası)
-        # ÇAPA YENİLENDİ — kitap p1a B16: L_c 0,6893372399552533 ->
-        # 0,6938044063822819 (kâhin ve satır yukarıda).
+            0.05562952212024063, rel=1e-12)
+        assert motor['chamber_diameter'] == motor['port_diameter_final']
         assert motor['chamber_length'] == pytest.approx(
-            0.6938044063822819, rel=1e-12)  # fix-18: D22 hibrit OH-D21-03
+            0.7122747385131958, rel=1e-12)
+        ideal = _sessiz_post(istemci, '/calculate',
+                             dict(HIBRIT_TABAN, combustion_efficiency=100.0))
+        assert ideal.status_code == 200
+        m_ideal = ideal.get_json()['motor']
+        assert m_ideal['chamber_diameter'] == pytest.approx(
+            0.05323547085323697, rel=1e-12)
+        assert m_ideal['chamber_length'] == pytest.approx(
+            0.6727638085755462, rel=1e-12)
 
     def test_bant_urunun_kendi_tablosundan_okunur(self):
         """Tek kaynak: eşik app.py'ye YAZILMAZ, limits'ten gelir."""
@@ -668,13 +698,29 @@ class TestP7B101BeyanKendiGovdesiyleOlculur:
     #: gövdesine karşı ölçülmesidir; bu yüzden yük, kapıyı geçen ve AYNI
     #: kırpılmayı üreten en yakın komşusuna taşındı: 10 s istenir, çözücü
     #: 2,55 s sürdürür (``burn_time_clipped: true``), beyan yine doğar.
+    #:
+    #: v3.0.1 kulvar P (ana model kararı) — KIRPMA YOLU KAPANDI. Kaynaksız
+    #: port <= 0,8·D_ch/√N kırpması söküldü; zarfı aşan istek (bu fikstürün
+    #: eski gövdesi: D_ilk 50 mm, kamara 70 mm) artık 422
+    #: ``grain_envelope_too_small_for_final_ports`` alır (ölçüldü). Ürünün
+    #: /calculate yolunda gönderilen ``burn_time``ı hâlâ GÖSTEREN yaprak
+    #: üreten tek yol kırpmaydı. Beyan yine doğar: aşırı belirlenmiş girdi
+    #: (itki 3000 N, süre 10 s, toplam impuls 45 000 N·s -> çözücü 15 s)
+    #: ``burn_time``ı ``solved_by_model`` diye beyan eder; o koşuda gönderilen
+    #: değerin yankısı 0'dır (ölçüldü). Yankı > 0 hâlinin ÖLÇÜMÜ ayrıca
+    #: ``test_yankili_govdede_her_yol_olculur`` ile ``_beyan_yankilarini_olc``
+    #: üzerinden doğrudan sınanır — kapsam kaybolmaz, aracı değişir.
     @pytest.fixture(scope='class')
     def kirpilmis(self, request):
         istemci = app_modulu.app.test_client()
         app_modulu.app.config['TESTING'] = True
-        r = _sessiz_post(istemci, '/calculate', dict(
+        eski = _sessiz_post(istemci, '/calculate', dict(
             HIBRIT_TABAN, thrust=3000.0, burn_time=10.0,
             initial_port_diameter=0.05, chamber_diameter_input=70.0))
+        assert eski.status_code == 422, eski.get_data(as_text=True)[:300]
+        r = _sessiz_post(istemci, '/calculate', dict(
+            HIBRIT_TABAN, thrust=3000.0, burn_time=10.0,
+            total_impulse=45000.0))
         assert r.status_code == 200, r.get_data(as_text=True)[:300]
         return r.get_json()
 
@@ -687,12 +733,12 @@ class TestP7B101BeyanKendiGovdesiyleOlculur:
             self, kirpilmis):
         beyan = kirpilmis['inputs_not_used'][0]
         yollar = beyan['submitted_value_still_shown_at']
-        assert beyan['submitted_value_echo_count'] == len(yollar) > 0
-        # ÖH D15 birleştirme: kardeş kulvar tasarım-noktası yaprağını
-        # ``burn_time_s`` -> ``burn_time_requested_s`` / ``..._effective_s``
-        # çiftine ayırdı (istenen ⟷ sürdürülen). Ayrım korunur; beyanın
-        # o yaprağı ADIYLA yayımlaması şartı korunur.
-        assert 'design_summary.performance.burn_time_requested_s' in yollar
+        assert beyan['field'] == 'burn_time'
+        # v3.0.1: bu araçta gönderilen değerin yankısı 0 (ölçüldü); sayaç
+        # ile liste yine birbirini tutmak zorunda. Yankı > 0 hâli (eskiden
+        # ``design_summary.performance.burn_time_requested_s``) aşağıdaki
+        # doğrudan ölçüm bekçisinde.
+        assert beyan['submitted_value_echo_count'] == len(yollar)
         assert beyan['solved_value_echo_count'] > 0
 
     def test_gonderilen_degeri_tasiyan_HICBIR_yaprak_atlanmiyor(
@@ -728,7 +774,8 @@ class TestP7B101BeyanKendiGovdesiyleOlculur:
             if math.isclose(float(deger), beyan['submitted'], rel_tol=1e-9):
                 tasiyan.add(yol)
 
-        assert tasiyan, 'fikstür dayanağı düştü: gönderilen değer hiç yankılanmıyor'
+        # v3.0.1: bu araçta gönderilen değer hiç yankılanmıyor (kırpma yolu
+        # kapandı); ölçüm yine "listede olmayan taşıyıcı yok" şartını sınar.
         assert not (tasiyan - yayimlanan), (
             'beyan "her yol listelendi" diyor ama şu yapraklar gönderilen '
             'değeri taşıdığı hâlde yayımlanmıyor: %s'
@@ -747,6 +794,30 @@ class TestP7B101BeyanKendiGovdesiyleOlculur:
         for yol in beyan['submitted_value_still_shown_at']:
             assert _oku(kirpilmis, yol) == pytest.approx(
                 beyan['submitted'], rel=1e-9), yol
+
+    def test_yankili_govdede_her_yol_olculur(self):
+        """v3.0.1 kulvar P: yankı > 0 hâli ``_beyan_yankilarini_olc``
+        üzerinden DOĞRUDAN ölçülür (ürün yolunda kırpma kalmadığı için).
+        Gövde test düzeneğidir: istenen değer tasarım noktası bloklarında,
+        çözülen değer manşette durur — eski kırpılan yanıtın biçimi."""
+        govde = {
+            'design_summary': {'performance': {
+                'burn_time_requested_s': 40.0, 'burn_time_s': 2.5}},
+            'impulse_input_resolution': {'burn_time_s': 40.0},
+            'burn_time': 2.5, 'burn_time_effective_s': 2.5,
+        }
+        beyan = [{'field': 'burn_time', 'submitted': 40.0,
+                  'used_by_model': 2.5, 'reason': 'solved_by_model',
+                  'message': "'burn_time' was supplied as 40"}]
+        olculen = app_modulu._beyan_yankilarini_olc(govde, beyan)[0]
+        yollar = set(olculen['submitted_value_still_shown_at'])
+        assert yollar == {'design_summary.performance.burn_time_requested_s',
+                          'impulse_input_resolution.burn_time_s'}
+        assert olculen['submitted_value_echo_count'] == 2
+        # Ad kümesi (burn_time, burn_time_s, burn_time_requested_s):
+        # ``burn_time_effective_s`` sayılmaz -> çözülen yankı 2.
+        assert olculen['solved_value_echo_count'] == 2
+        assert 'every echo' not in olculen['message']
 
     def test_yankisi_olmayan_kosuda_liste_bos_kalir(self, istemci):
         """``burn_time`` gerçekten kullanılıyorsa beyan hiç üretilmez."""

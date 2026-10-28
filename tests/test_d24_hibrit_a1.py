@@ -21,12 +21,40 @@ import math
 
 import pytest
 
+from hrma.analysis.trajectory_analysis import TRAJECTORY_PROPELLANT_REL_TOL
 from hrma.constants import G_0
 
 HIBRIT_YUK = {
     'thrust': 1000, 'burn_time': 10, 'of_ratio': 1.0,
     'chamber_pressure': 20.0, 'fuel_type': 'htpb', 'oxidizer_type': 'n2o',
 }
+
+#: V305/C2 (28 Eki) — AYRIŞAN KOL, AÇIKÇA KURULDU.
+#:
+#: ``HIBRIT_YUK`` (HTPB, O/F 1,0) bekçinin yazıldığı gün iki Isp'yi
+#: %1,2151 ayırıyordu; yörünge kapısının bandı
+#: (``TRAJECTORY_PROPELLANT_REL_TOL`` = %1) o kolda ``/calculate``
+#: yörüngesini düşürüyordu. Ayrışma iki BİLİNÇLİ ürün değişikliğiyle küçüldü
+#: (main ilk-ebeveyn zincirinde aynı gövdeyle ölçüldü, docs'suz ağaç;
+#: docs/scofield/raw/OH/V305/ci/C2/):
+#:   dcb5a762e (21 Eki, B7 — Berke onaylı, hibrit dengeye yoğun faz C(gr)):
+#:     O/F 1,0'da c* 919,26 -> 1165,00 m/s, Isp 129,58 -> 162,50 s; yakıtça
+#:     zengin uçta Isp(O/F) eğrisi yassılaştı, ayrışma %-1,2151 -> %-0,3086;
+#:   74b55500a (26 Eki, H-PANEL, η_c* 0,89 kaynaklı varsayılan):
+#:     %-0,3086 -> %-0,2947 (η = %100 ile %-0,3086 aynen kalıyor).
+#: O/F 1,0 kolunda artık kapı bandının ALTINDAYIZ: teslim edilen Isp'yi
+#: uçurma onarımı geri alınsa bile kapı tetiklenmez, yani o kol bekçinin
+#: ölçtüğü olguyu (iki tarif ayrışınca fark sayıyla yayımlanır ve yörünge
+#: teslim edileni uçurur) artık sınamıyor.
+#:
+#: Ayrışan kol: kaynaklı regresyon yasası n = 0,62 olan parafin
+#: (Karabeyoglu ve ark. 2004; Zilliac & Karabeyoglu AIAA 2006-4504 Tablo 2;
+#: ``HYBRID_REGRESSION_COEFFICIENTS['paraffin']``). Tek dairesel portta
+#: ṁ_f ∝ D^(1-2n) = D^-0,24: port açıldıkça yakıt debisi düşer, O/F
+#: 2,0 -> 2,43 kayar (ÖLÇÜLDÜ, ``of_shift.regulated``). Elle yasa yok, sayı
+#: uydurulmadı. Ölçülen ayrışma %-2,1352 (Isp 170,008 ⟷ teslim 173,718 s),
+#: kapı bandının iki katından fazla.
+AYRISAN_YUK = dict(HIBRIT_YUK, fuel_type='paraffin', of_ratio=2.0)
 
 
 @pytest.fixture(scope='module')
@@ -47,6 +75,21 @@ def hibrit_yanit(istemci):
 @pytest.fixture(scope='module')
 def hibrit_motor(hibrit_yanit):
     m = hibrit_yanit.get('motor')
+    assert isinstance(m, dict)
+    return m
+
+
+@pytest.fixture(scope='module')
+def ayrisan_yanit(istemci):
+    """İki Isp'nin kapı bandının ÜSTÜNDE ayrıştığı kol (``AYRISAN_YUK``)."""
+    r = istemci.post('/calculate', json=AYRISAN_YUK)
+    assert r.status_code == 200, r.get_data(as_text=True)[:400]
+    return r.get_json()
+
+
+@pytest.fixture(scope='module')
+def ayrisan_motor(ayrisan_yanit):
+    m = ayrisan_yanit.get('motor')
     assert isinstance(m, dict)
     return m
 
@@ -79,16 +122,39 @@ class TestOHD2318TeslimEdilenIsp:
         assert hibrit_motor['isp'] == pytest.approx(beklenen, rel=1e-12), (
             'manşet Isp tasarım noktası kümesinden koptu')
 
-    def test_iki_isp_farki_SAYIYLA_yayimlaniyor(self, hibrit_motor):
-        """Fark gizlenmiyor: yüzdesi alanla bildiriliyor (ölçülen ~%1,20)."""
-        sapma = hibrit_motor.get('isp_design_point_delta_pct')
+    def test_iki_isp_farki_SAYIYLA_yayimlaniyor(self, ayrisan_motor):
+        """Fark gizlenmiyor: yüzdesi alanla bildiriliyor.
+
+        V305/C2: kol ``AYRISAN_YUK`` (gerekçe tanımının yanında); ölçülen
+        %-2,1352. Eşik yörünge kapısının KENDİ bandıdır (eskiden literal 1,0).
+        """
+        sapma = ayrisan_motor.get('isp_design_point_delta_pct')
         assert isinstance(sapma, float) and math.isfinite(sapma)
-        beklenen = (hibrit_motor['isp']
-                    / hibrit_motor['isp_delivered_avg_s'] - 1.0) * 100.0
+        beklenen = (ayrisan_motor['isp']
+                    / ayrisan_motor['isp_delivered_avg_s'] - 1.0) * 100.0
         assert sapma == pytest.approx(beklenen, rel=1e-12)
-        assert abs(sapma) > 1.0, (
-            'bu koşuda ayrışma %1 bandının ÜSTÜNDE olmalıydı; yük değiştiyse '
-            'bekçinin ölçtüğü kol da değişmiştir')
+        assert abs(sapma) > TRAJECTORY_PROPELLANT_REL_TOL * 100.0, (
+            'bu koşuda ayrışma yörünge kapısının bandının ÜSTÜNDE olmalıydı; '
+            'yük değiştiyse bekçinin ölçtüğü kol da değişmiştir '
+            f'(ölçülen %{sapma!r})')
+
+    def test_ayrisan_kolda_yorunge_cozuluyor_ve_teslim_edileni_ucuruyor(
+            self, ayrisan_yanit, ayrisan_motor):
+        """V305/C2: ``test_yorunge_ARTIK_cozuluyor`` sorusu AYRIŞAN kolda.
+
+        O/F 1,0 kolu kapı bandının altına indiği için onarım geri alınsa da
+        orada yörünge çözülür; bu kolda manşet Isp uçurulsaydı kapı
+        (``TRAJECTORY_PROPELLANT_REL_TOL``) adıyla reddederdi. Ters mutasyon
+        (app.py'de teslim edilen Isp devri kapatıldı): bu test KIRMIZI,
+        O/F 1,0 kolundaki ``test_yorunge_ARTIK_cozuluyor`` YEŞİL kaldı.
+        """
+        tr = ayrisan_yanit.get('trajectory')
+        assert isinstance(tr, dict)
+        assert 'error' not in tr, tr.get('error')
+        assert 'invalid_fields' not in tr
+        assert 'trajectory' in tr and 'performance' in tr
+        assert tr['flown_isp_s'] == ayrisan_motor['isp_delivered_avg_s']
+        assert tr['flown_isp_s'] != ayrisan_motor['isp']
 
     def test_egrinin_harcadigi_kutle_de_yayimlaniyor(self, hibrit_motor):
         """``isp_delivered_avg_basis`` bu alanın adını anıyor; alan olmalı."""

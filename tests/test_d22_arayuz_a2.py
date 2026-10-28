@@ -289,7 +289,8 @@ class TestKarisimYogunlugPaylasilanAlaniEzmez:
             function updateInjectorParams() { cagrilar.push('inj'); }
             function refreshPressureModeLabels() { cagrilar.push('prs'); }
             function updateCalculatedImpulse() { cagrilar.push('imp'); }
-            function checkDatabaseStatus() { cagrilar.push('db'); }
+            // v3.0.1 K: son halka checkDatabaseStatus (rozet) idi.
+            function refreshDataSourceLines() { cagrilar.push('db'); }
             var uyari = [];
             var console = { warn: function (m, e) {
                 uyari.push(String(m) + ' ' + String(e)); } };
@@ -330,6 +331,6 @@ class TestKarisimYogunlugPaylasilanAlaniEzmez:
         o = _node(self.ZINCIR_KOSUMU % self._zincir_govdesi())
         assert o['cagrilar'] == ['inj', 'prs', 'imp', 'db'], (
             'dil degisimi zinciri kesildi (olculen kusur: %r); '
-            'checkDatabaseStatus calismiyor' % (o['cagrilar'],))
+            'son halka (refreshDataSourceLines) calismiyor' % (o['cagrilar'],))
         assert o['uyari'] == [], (
             'zincir hala firlatiyor: %r' % (o['uyari'],))

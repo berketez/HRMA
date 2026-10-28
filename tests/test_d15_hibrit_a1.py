@@ -64,8 +64,22 @@ def sonuc_ss304():
 
 @pytest.fixture(scope='module')
 def sonuc_kirpilmis():
-    m = _motor(burn_time=40.0, initial_port_diameter=0.050,
-               chamber_diameter_input=70.0, expansion_ratio=4.0, l_star=1.0)
+    """ESKİ kırpılan koşu — v3.0.1 kulvar P'de reddedilir; fikstür artık
+    AYNI görevin zarfa sığan en küçük kamarasıyla koşar.
+
+    Eski girdi (40 s, D_ilk 50 mm, kamara 70 mm) kaynaksız 0,8·D_ch
+    kırpmasıyla 2,8 s'te kesilip TARGET_NOT_MET yayımlanıyordu. Ana model
+    kararıyla kırpma söküldü: zarfı aşan istek ``GrainEnvelopeError`` ile
+    adıyla reddedilir ve ret gereken en küçük kamara çapını söyler. Özet ⟷
+    manşet sözleşmesi (P1B2-01) o çapla koşan GEÇERLİ tasarımda sınanır.
+    """
+    from hrma.engines.hybrid_rocket_engine import GrainEnvelopeError
+    kw = dict(burn_time=40.0, initial_port_diameter=0.050,
+              expansion_ratio=4.0, l_star=1.0)
+    with pytest.raises(GrainEnvelopeError) as e:
+        _motor(chamber_diameter_input=70.0, **kw).calculate()
+    gereken = e.value.invalid_fields[0]['required_min']
+    m = _motor(chamber_diameter_input=gereken, **kw)
     return m, m.calculate()
 
 
@@ -112,23 +126,66 @@ class TestP10B308KanonikMalzemeAdi:
             'olmayan değer sessizce steel_4130 gösterir')
 
     def test_ss304_ve_4130_gercekten_ayrisiyor(self):
-        """Kusurun ŞİDDET çapası: yanlış malzeme 3,4 kat iyimser SF verir."""
-        r304 = _motor(chamber_material='steel_304').calculate()
-        r4130 = _motor(chamber_material='steel_4130').calculate()
-        sf304 = r304['structural_analysis']['safety_factor']
-        sf4130 = r4130['structural_analysis']['safety_factor']
-        assert sf4130 / sf304 > 3.0, (
+        """Kusurun ŞİDDET çapası: yanlış malzeme kat kat iyimser SF verir.
+
+        V305/C2 (28 Eki) — YÜK VE ÇAPA ÖLÇÜMLE YENİLENDİ. Kaydıran:
+        77d64c641 (26 Eki, H-termal; Berke "Modeli bugün düzelt", ÖNEMLİ
+        fizik, onaylı). Öncesinde (c7776576f) yapı zinciri ısı modülünün
+        ÇIPLAK CİDAR denge sıcaklığını kullanıyordu: bu motorda 3219-3254 K,
+        iki çeliğin de erime noktasının üstünde; dayanım o sayıyla
+        düşürülüyordu (varsayılan cidar SF 0,34399 / 1,17351, oran 3,41;
+        eski 3,0 eşiği bu sıcak-cidar ölçümlerinden, D15 tabanında 3,3768).
+        Sonra: bütün bölgeler korunduğu için kasa
+        beyanlı 293,15 K'de (``wall_temperature_source =
+        hybrid_chamber_zone_protection``), koruma kurulamazsa eski yol aynen
+        (bekçisi tests/test_v301_hibrit_termal.py). Ürün gerilemesi DEĞİL.
+
+        Aynı değişiklikle cidarı kullanıcı vermeyince HRMA boyutlandırıyor
+        (``design_mode = size``) ve SF iki malzemede de hedefe eşit
+        (4,8 / 4,8): o yük malzemeyi AYIRT ETMİYOR. Bekçi bu yüzden kullanıcı
+        cidarıyla (3 mm, ``design_mode = verify``) kurulur. ÖLÇÜLDÜ:
+        SF 304 = 3,5757104870094714, 4130 = 7,65035732104352, oran
+        2,13953 = σ_y(4130) / σ_y(304) = 460 / 215 MPa (293,15 K'de
+        dayanım düşürme katsayısı 1). Eşik 2,0 bu ölçümün altında ve
+        "yanlış malzeme SF'yi iki kattan fazla iyimser gösterir" demektir;
+        oranın malzeme kayıtlarının akma oranına BİREBİR eşitliği ayrıca
+        sınanır.
+        """
+        r304 = _motor(chamber_material='steel_304',
+                      wall_thickness=0.003).calculate()
+        r4130 = _motor(chamber_material='steel_4130',
+                       wall_thickness=0.003).calculate()
+        sa304 = r304['structural_analysis']
+        sa4130 = r4130['structural_analysis']
+        for sa in (sa304, sa4130):
+            ca = sa['chamber_analysis']
+            assert ca['design_mode'] == 'verify'
+            assert ca['safety_factor_is_tautological'] is False
+            assert ca['wall_thickness_used_mm'] == pytest.approx(3.0)
+            assert sa['design_parameters']['wall_temperature_K'] == \
+                pytest.approx(293.15)
+        sf304 = sa304['safety_factor']
+        sf4130 = sa4130['safety_factor']
+        oran = sf4130 / sf304
+        assert oran > 2.0, (
             'iki malzemenin emniyet katsayısı ayrışmıyorsa bu bekçi kusuru '
             f'göremez (sf4130={sf4130!r}, sf304={sf304!r})')
+        akma_orani = (MATERIALS['steel_4130']['yield_strength']
+                      / MATERIALS['ss_304']['yield_strength'])
+        assert oran == pytest.approx(akma_orani, rel=1e-9), (
+            f'aynı cidar ve basınçta SF oranı {oran!r}, akma oranı '
+            f'{akma_orani!r} olmalıydı')
 
 
 class TestP1B201OzetManseteBagli:
     """design_summary.performance manşetle AYNI sayıyı yayımlar."""
 
-    def test_kirpilma_gercekten_olustu(self, sonuc_kirpilmis):
+    def test_kirpma_yolu_kapandi_gereken_capla_tam_sure(self, sonuc_kirpilmis):
+        # v3.0.1 kulvar P: kırpma yolu kapandı (fikstür ret + en küçük
+        # çapla koşu). Gereken çapla tasarım TAM süreyle yayımlanır.
         _m, r = sonuc_kirpilmis
-        assert r['burn_time_clipped'] is True
-        assert r['design_summary']['status'] == 'TARGET_NOT_MET'
+        assert r['burn_time_clipped'] is False
+        assert r['design_summary']['status'] != 'TARGET_NOT_MET'
 
     def test_ozet_suresi_manset_suresiyle_ayni(self, sonuc_kirpilmis):
         _m, r = sonuc_kirpilmis
@@ -153,7 +210,7 @@ class TestP1B201OzetManseteBagli:
         assert perf['burn_time_requested_s'] == pytest.approx(40.0)
         assert perf['total_impulse_requested_Ns'] == pytest.approx(
             float(r['total_impulse_requested_Ns']))
-        assert perf['burn_time_clipped'] is True
+        assert perf['burn_time_clipped'] is False      # v3.0.1: kırpma yok
         assert 'burn_time_basis' in perf and perf['burn_time_basis']
         assert 'total_impulse_basis' in perf and perf['total_impulse_basis']
 

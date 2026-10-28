@@ -282,24 +282,43 @@ class TestRaoBellAngles:
 class TestWallThicknessAndMass:
 
     def test_thickness_matches_thin_wall_hoop(self, designer):
-        """t = SF·p·r_t/σ_akma (Huzel & Huang SP-125 Böl. 4)."""
+        """t = SCF·SF·p_d·r_t/σ_akma, p_d = 1,5·Pc (yapısal boğaz kuralı).
+
+        V301 CAD-2 / KABUL K4 (27 Eki): eski beklenti t = SF·Pc·r_t/σ idi
+        (1,0·Pc, SCF'siz ince cidar hoop). Yapısal analiz AYNI lüleyi
+        tasarım basıncında (1,5·Pc) ve boğaz SCF'siyle değerlendirdiği için
+        çizilen et ile SF'nin ait olduğu et ayrışıyor, imalat kapısı örnek
+        hibritin bütün dışa aktarımlarını reddediyordu. Kural artık TEK:
+        ``structural_analysis.nozzle_throat_wall_sizing`` (ana model onayı).
+        """
+        from hrma.analysis.structural_analysis import (
+            STRUCTURAL_DESIGN_PRESSURE_FACTOR, NOZZLE_THROAT_SCF_OTHER)
         At = 0.05
         res = designer.design_nozzle(At, 25.0, PC, 1.01325, 'bell', gamma=GAMMA)
         g = res['geometry']
         rt = np.sqrt(At / np.pi)                      # m
-        expected = (g['wall_safety_factor'] * PC * 1e5 * rt
+        expected = (NOZZLE_THROAT_SCF_OTHER * g['wall_safety_factor']
+                    * PC * 1e5 * STRUCTURAL_DESIGN_PRESSURE_FACTOR * rt
                     / g['wall_yield_strength']) * 1000.0
         assert g['wall_thickness'] == pytest.approx(expected, rel=1e-9)
-        assert g['wall_thickness_basis'] == 'thin_wall_hoop'
+        assert g['wall_thickness_basis'] == 'structural_throat_rule'
+        assert g['wall_stress_concentration_factor'] == NOZZLE_THROAT_SCF_OTHER
+        assert g['wall_design_pressure_bar'] == pytest.approx(
+            PC * STRUCTURAL_DESIGN_PRESSURE_FACTOR, rel=1e-12)
 
     def test_old_ten_percent_rule_is_gone(self, designer):
-        """Eski kural: t = maks(3 mm, 0.1·d_t) -> At=0.05 m² için 25.2 mm."""
+        """Eski kural: t = maks(3 mm, 0.1·d_t) -> At=0.05 m² için 25.2 mm.
+
+        V301 CAD-2 / K4: et yapısal boğaz kuralından gelir (bell SCF 1,5 x
+        tasarım basıncı 1,5·Pc -> eski hoop'un 8,07 mm'sinin 2,25 katı,
+        18,16 mm); %10 kuralının 25,2 mm'si DEĞİLDİR.
+        """
         res = designer.design_nozzle(0.05, 25.0, PC, 1.01325, 'bell',
                                      gamma=GAMMA)
         g = res['geometry']
         dt_mm = res['basic_dimensions']['throat_diameter']
-        assert g['wall_thickness'] < 0.5 * (0.1 * dt_mm)
-        assert g['wall_thickness'] == pytest.approx(8.07, abs=0.05)
+        assert g['wall_thickness'] != pytest.approx(0.1 * dt_mm, rel=0.05)
+        assert g['wall_thickness'] == pytest.approx(8.07 * 2.25, abs=0.12)
 
     def test_thickness_scales_with_pressure_not_only_size(self, designer):
         """Kalınlık oda basıncıyla DOĞRUSAL büyümeli (eski kural görmüyordu)."""

@@ -111,8 +111,17 @@ class TestDesignWarningsReachTheUser:
                 if key.endswith('.code') and '.warnings[' in key]
 
     def test_unknown_material_produces_a_warning(self, client):
-        data = _calc(client, chamber_material='ZIRVAAA')
-        assert 'warn.hybrid.chamber_material_unknown' in self._warning_codes(data)
+        """v3.0.1 kulvar M: tanınmayan malzeme artık uyarıyla ÇELİĞE düşmez,
+        ADIYLA reddedilir (422). Eski beklenti 200 + uyarı + ss_304 sayılarını
+        kilitliyordu (ölçüldü: docs/scofield/raw/OH/V301/ayberk1/malzeme/
+        once.json S4). "Sessiz yedek yasak" iddiası güçlenerek korunur."""
+        resp = client.post('/calculate',
+                           json=dict(BASE, chamber_material='ZIRVAAA'),
+                           headers=HEADERS)
+        assert resp.status_code == 422, resp.status_code
+        body = resp.get_json()
+        assert body['error'] == 'unresolved_material'
+        assert body['invalid_fields'][0]['field'] == 'chamber_material'
 
     def test_valid_material_produces_no_material_warning(self, client):
         data = _calc(client, chamber_material='aluminum_6061')

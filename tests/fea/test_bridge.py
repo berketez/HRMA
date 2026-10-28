@@ -118,9 +118,16 @@ def kati_motor(client):
     # çevrildi; ``outer_diameter`` da ucun okuduğu ada getirildi (uç
     # zaten aynı 100 mm'yi tohumluyordu). ÖLÇÜLDÜ: yanıt tasarım noktası
     # bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148, 186.659 bayt).
+    # V3.0.5 T-ÇAPA-C1 — ÇEKİRDEK 35 -> 40 mm. Port ⟷ boğaz kapısı (V301/K-A
+    # 1b71ef5a3, K-D dd329b831) bu gövdeyi 422 ile reddediyor: çekirdek
+    # 35 mm'de ilk port alanı 962,1 mm² < boğaz 1040,0 mm² (oran 0,925) —
+    # akış lülede değil portta boğulur; bu bir tasarım DEĞİLDİR. Uç
+    # 'en az 36,6 mm' diyor. ÖLÇÜLDÜ (e038d626f): 40 mm -> 200, ort. itki
+    # 4516,64 N, t_b 1,829 s, kritik uyarı yok. Test motorun sayısını
+    # kilitlemiyor; geçerli bir katı tasarım istiyor.
     yuk = {'motor_name': 'bridge-s', 'chamber_pressure': 40,
            'grain_type': 'bates', 'chamber_diameter': 100,
-           'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+           'core_diameter': 40, 'grain_length': 300, 'segments': 1,
            'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
            'chamber_temperature': 3000, 'c_star': 1550,
            'propellant_density': 1800, 'propellant_type': 'apcp'}
@@ -141,12 +148,40 @@ def _kosuyu_dogrula(out, motor, cidar_mm, beklenen_tip):
     motor_pts = np.asarray(motor['nozzle_contour']['points'], dtype=float)
     assert np.array_equal(ins['nozzle_points'], motor_pts), \
         'köprünün kontur noktaları motorun yayımladığından sapmış'
-    # Kamara uzantısı varsa kontur = [uzantı noktası] + motor noktaları;
-    # kuyruk yine birebir motor noktaları olmalı.
-    assert np.array_equal(ins['contour'][-motor_pts.shape[0]:], motor_pts)
-    assert ins['thickness_m'] == cidar_mm / 1000.0, \
-        'cidar kalınlığı çözücünün yayımladığı değerden sapmış'
-    assert ins['inner_pressure_pa'] == float(motor['chamber_pressure']) * 1e5
+    # V3.0.5 SIVI-CIDAR kalem 3 — SÖZLEŞME DEĞİŞTİ (yalnız iki katmanlı
+    # rejeneratif sıvı): FEA gövdesi DIŞ KABUKTUR. Kontur gaz konturunun
+    # (astar + kanal derinliği) kadar normal ötelemesi, kalınlık motorun
+    # kabuk kalınlığı, iç basınç ceket soğutucu basıncı (yalnız radyal
+    # bileşen) — üçü de motorun KENDİ katman kaydından (wall_layers[closeout],
+    # channel_depth_mm). Tek katmanlı yollar ve öteki motorlar AYNEN.
+    cs = ((motor.get('structural_analysis') or {}).get('chamber_structure')
+          or {})
+    iki_katman = (beklenen_tip == 'liquid'
+                  and cs.get('wall_model') == 'two_layer_regenerative')
+    if iki_katman:
+        astar, kabuk = cs['wall_layers']
+        assert ins['thickness_m'] == kabuk['thickness_mm'] / 1000.0, \
+            'kabuk kalınlığı motorun katman kaydından sapmış'
+        assert ins['inner_pressure_pa'] == \
+            float(kabuk['coolant_pressure_bar']) * 1e5
+        ik = ins['two_layer_closeout']
+        assert ik['offset_m'] == (astar['thickness_mm']
+                                  + cs['channel_depth_mm']) / 1000.0
+        # Kabuk iç yüzeyi gaz konturunun DIŞINDA, öteleme kadar (en büyük
+        # yarıçap lüle çıkışında).
+        assert float(np.asarray(ins['contour'])[:, 1].max()) == \
+            pytest.approx(float(motor_pts[:, 1].max()) + ik['offset_m'],
+                          rel=1e-3)
+        assert ins['pressure_load'].yalniz_radyal is True
+    else:
+        # Kamara uzantısı varsa kontur = [uzantı noktası] + motor noktaları;
+        # kuyruk yine birebir motor noktaları olmalı.
+        assert np.array_equal(ins['contour'][-motor_pts.shape[0]:],
+                              motor_pts)
+        assert ins['thickness_m'] == cidar_mm / 1000.0, \
+            'cidar kalınlığı çözücünün yayımladığı değerden sapmış'
+        assert ins['inner_pressure_pa'] == \
+            float(motor['chamber_pressure']) * 1e5
 
     # (1) Fizik: von Mises sonlu-pozitif, SF alanı her düğümde pozitif.
     vm = out['von_mises_nodal']
@@ -171,7 +206,8 @@ def _kosuyu_dogrula(out, motor, cidar_mm, beklenen_tip):
     for alan in ('kontur', 'cidar', 'malzeme', 'yuk', 'kamara_uzantisi',
                  'yuk_modeli'):
         assert alan in basis, f'_basis zincirinde {alan} beyanı yok'
-    assert basis['yuk_modeli']['distribution'] == 'isentropic_1d'
+    assert basis['yuk_modeli']['distribution'] == (
+        'coolant_uniform_closeout' if iki_katman else 'isentropic_1d')
     assert out['meta']['not_modelled'], 'modellenmeyen fizik beyanı boş'
 
 

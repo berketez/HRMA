@@ -148,12 +148,23 @@ class TestSayacNegatifKareBasmaz:
     def test_basilanlar_hedefin_isaretini_korur(self, kanit):
         for k in kanit['M3_hud']['kareler']:
             assert float(k['basilan']) >= 0.0, k
-            assert abs(float(k['basilan'])) <= abs(k['hedef']) + 1e-9, k
+            # v3.0.1 (NK-60): son değer yuvarlanarak basılır; aşım en çok
+            # yarım son basamak olabilir (0,80766 → "0.81").
+            dec = len(k['basilan'].split('.')[-1]) if '.' in k['basilan'] else 0
+            assert abs(float(k['basilan'])) <= abs(k['hedef']) + 0.5 * 10 ** -dec + 1e-12, k
 
-    def test_alt_kirpma_kaynakta(self, kanit):
-        assert kanit['M3_hud']['alt_kirpma_var'] is True
-        assert kanit['M3_hud']['ust_kirpma_var'] is True, (
-            'üst kırpma sökülmüş — sayaç hedefi aşabilir')
+    def test_ilk_cagrida_son_deger_basilir(self, kanit):
+        # v3.0.1 (NK-60): sayaç animasyonu kaldırıldı (ara sayı uydurma
+        # sayıdır). Kırpma artık gerekmez: kare yok, ilk ve tek yazım hedefin
+        # kendisidir. Eski bekçi (Math.max/Math.min kaynakta) bu yüzden
+        # "son değer hemen basılır" bekçisine dönüştü.
+        # V3.0.5 T-ÇAPA-C1 (OH-D27-17): basamak basılan jetondan DEĞİL, kartın
+        # beyanlı ondalığından (data-decimals; kanıt harness'ı kayda yazar) —
+        # jetonun kendi basamağıyla yuvarlamak her basımı kendisiyle aklar.
+        for k in kanit['M3_hud']['kareler']:
+            dec = int(k['ondalik'])
+            assert k['basilan'] == ('%.' + str(dec) + 'f') % round(
+                k['hedef'], dec), k
 
 
 # ===========================================================================

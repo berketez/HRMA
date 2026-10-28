@@ -402,23 +402,46 @@ class TestDevirVeMil:
         (36 146 → 51 380) ve ESKİ sınıf tavanının (60 000) %86'sına
         geldi. Kırmızı değil ama yön eski sınıfa DOĞRU; bir sonraki
         besleme değişikliği bu tavanı zorlarsa bekçi kıracaktır.
+
+        ÇAPA YENİDEN YENİLENDİ (V301/CI-FİZİK, 28 Eki). Bu kez kod değil
+        ÖRNEK değişti: V301/ÖRNEK (5fa435893, 27 Eki) örnekleri gerçek
+        sayfa gövdesiyle yeniden üretti (Pc 70→50 bar, O/F 2,3→2,0,
+        besleme 105→75 bar, fuel_density 810→boş: 815). Yakıt emme hızı
+        7,00→4,13 m/s, emme kaybı 2,18→0,76 bar, NPSH_a 16,33→35,97 m.
+        DEĞİŞİM TÜRETİLDİ: devir ∝ NPSH^0,75/√Q ⇒
+        51 382·(35,97/16,33)^0,75·√(0,003630/0,004206) ≈ 86 4xx rpm;
+        ÖLÇÜLEN 86 298,5 rpm. Oks 14 103,7 → 14 513,1 rpm.
+        Yakıt için eski 60 000 tavanı bir SAYI SINIFIYDI: o sınıfı doğuran
+        kusur yanlış NPSH idi (sabit 1,013 bar buhar basıncı, hat kaybı
+        yok) ve onu bu dosyadaki tek-kaynak sözleşme testleri kilitliyor
+        (gerçek buhar basıncı, yalnız emme kaybı, devrin kendi
+        NPSH/debi künyesinden türetilmesi — üçü de yeşil). Bugünkü 86 299
+        rpm DOĞRU NPSH'tan gelir; 60 000 artık o kusuru ayırt edemez.
+        Yakıtın tavanı motorun kendi pratik mil hızı tavanıdır
+        (PUMP_MAX_SPEED_RPM) ve devir KIRPILMAMIŞ olmalıdır (speed_source
+        emme sınırının derate katı). Oks tavanı (45 000) değişmedi.
+        YENİ ÇAPA: oks 14 513,1 / yakıt 86 298,5 rpm, aynı ±%20 pay.
         """
+        from hrma.engines.liquid_rocket_engine import PUMP_MAX_SPEED_RPM
         oks = besleme['turbopump_analysis']['oxidizer_pump']
         yakit = besleme['turbopump_analysis']['fuel_pump']
-        # 1) ASIL İDDİA — eski şişkin sınıfa dönüş yok (tavanlar sabit).
+        # 1) ASIL İDDİA — eski şişkin sınıfa dönüş yok.
         assert oks['rotational_speed'] < 45000, (
             f"Oks devri {oks['rotational_speed']:.0f} rpm ESKİ şişkin "
             'sınıfa (>45 000) döndü')
-        assert yakit['rotational_speed'] < 60000, (
-            f"Yakıt devri {yakit['rotational_speed']:.0f} rpm ESKİ şişkin "
-            'sınıfa (>60 000) döndü')
+        assert yakit['rotational_speed'] < PUMP_MAX_SPEED_RPM, (
+            f"Yakıt devri {yakit['rotational_speed']:.0f} rpm motorun "
+            f'pratik mil hızı tavanına ({PUMP_MAX_SPEED_RPM:.0f}) dayandı')
+        for p in (oks, yakit):
+            assert p['speed_source'].startswith(
+                'suction specific speed limit derated by'), p['speed_source']
         # 2) YENİLENEN ÇAPA — ölçülen sınıf ±%20 (pay büyütülmedi).
-        assert 11283 < oks['rotational_speed'] < 16925, (
+        assert 11610 < oks['rotational_speed'] < 17416, (
             f"Oks devri {oks['rotational_speed']:.0f} rpm yenilenen "
-            'çapanın (14 103,9 ±%20) dışında')
-        assert 41104 < yakit['rotational_speed'] < 61656, (
+            'çapanın (14 513,1 ±%20) dışında')
+        assert 69039 < yakit['rotational_speed'] < 103558, (
             f"Yakıt devri {yakit['rotational_speed']:.0f} rpm yenilenen "
-            'çapanın (51 380,2 ±%20) dışında')
+            'çapanın (86 298,5 ±%20) dışında')
         # Türbin oks miline boyutlanır.
         turbin = besleme['turbopump_analysis']['turbine']
         assert turbin['rotational_speed'] == pytest.approx(

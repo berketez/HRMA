@@ -23,10 +23,16 @@ def _sessiz(fn, *a, **kw):
 
 
 def _motor(**kw):
-    from hrma.engines.solid_rocket_engine import SolidRocketEngine
+    from hrma.engines.solid_rocket_engine import (
+        SOLID_DEFAULT_GEOMETRY_MM, SolidRocketEngine)
+    # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu
+    # varsayılan motoru kilitliyordu (çekirdek 30 mm); örnek motorun TEK
+    # tanımı okunur. Kuru kütle çapaları çekirdekten bağımsızdır (kasa
+    # zinciri; ölçüldü: 30 ve 48 mm'de rel 1e-9 içinde aynı).
     p = dict(grain_type='bates', propellant_type='apcp',
              chamber_diameter=100.0, grain_length=500.0,
-             core_diameter=30.0, chamber_pressure=40.0)
+             core_diameter=float(SOLID_DEFAULT_GEOMETRY_MM['core_diameter']),
+             chamber_pressure=40.0)
     p.update(kw)
     return SolidRocketEngine(**p)
 
@@ -112,6 +118,11 @@ class TestBogazGovdeyiAsinca:
                  core_diameter=15.0, chamber_pressure=5.0)
     NORMAL = dict(chamber_diameter=100.0, grain_length=500.0,
                   core_diameter=30.0, chamber_pressure=40.0)
+    #: V301/K-A: NORMAL'in çapası (``_design_nozzle_geometry``) port
+    #: kapısından geçmez ve bit-aynı kalır; ``calculate_performance`` yolu
+    #: ise eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru
+    #: kilitliyordu -> o yolda örnek motorun geçerli çekirdeği (48 mm).
+    NORMAL_GECERLI = dict(NORMAL, core_diameter=48.0)
 
     def test_asiri_bogazda_sayi_YAYIMLANMIYOR_ve_gerekce_var(self):
         nz = _sessiz(_motor(**self.ASIRI)._design_nozzle_geometry)
@@ -130,7 +141,10 @@ class TestBogazGovdeyiAsinca:
         # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 59,793950180294374 geri
         # çözülmüş APCP dörtlüsündendi (boğaz c* 1598,2 ile boyutlanıyordu);
         # CEA denge dörtlüsüyle ölçülen yeni taban (boğaz −%0,40).
-        assert nz['convergent_length'] == pytest.approx(59.901521132815716,
+        # V301/T-ÇAPA-A: N-CEA-2 (katı termokimya motorun Pc'sinde NASA CEA'dan) sonrası yeniden
+        # ölçüldü: 59,901521132815716 -> 59,94333101222664 mm (CEA kapalı aynı
+        # motor eski sayıyı verir).
+        assert nz['convergent_length'] == pytest.approx(59.94333101222664,
                                                         rel=1e-9)
         assert nz['convergent_length_status'] == 'computed'
 
@@ -138,25 +152,23 @@ class TestBogazGovdeyiAsinca:
         """``export/motor_geometry.py:511`` ÖNCE ``nozzle_angles.
         convergent_length_mm`` alanını okur; kapı yalnız cad_design'a
         konsaydı negatif boy STEP/STL yoluna oradan sızmaya devam ederdi.
-        Bu yüzden kapı İKİ kopyada da ölçülür."""
-        res = _sessiz(_motor(**self.ASIRI).calculate_performance)
-        ang = res['nozzle_angles']
-        assert ang['throat_exceeds_case'] is True, ang
-        assert ang['convergent_length_mm'] is None, ang
-        assert ang['nozzle_length_mm'] is None, ang
-        assert ang['convergent_length_status'] == 'not_physical'
-        # Motor toplam boyu da kazanılmamıştır.
-        ozet = res['design_summary']['key_dimensions']
-        assert ozet['total_length_mm'] is None, ozet
-        assert ozet['total_length_status'] == 'not_computable'
-        # Ve hiçbir yerde NEGATİF boy kalmadı.
-        noz = (res.get('cad_design') or {}).get('nozzle_design') or {}
-        for alan in ('convergent_length', 'total_length'):
-            deger = noz.get(alan)
-            assert deger is None or deger > 0, '%s = %r' % (alan, deger)
+        Bu yüzden kapı İKİ kopyada da ölçülür.
+
+        V301/K-A (22 Eki) — TERS KAPIYA ÇEVRİLDİ: boğazı gövdeyi aşan motorda
+        port boğazdan da küçüktür (A_p/A_t < 1); tasarım artık HİÇ
+        yayımlanmaz (KT-23), yani ihraç yoluna ne negatif ne de başka bir
+        boy ulaşabilir. Ret, boğazı tek kaynaktan taşır."""
+        from hrma.engines.solid_rocket_engine import SolidDesignRejected
+        e = _motor(**self.ASIRI)
+        with pytest.raises(SolidDesignRejected) as exc:
+            _sessiz(e.calculate_performance)
+        assert exc.value.code == 'port_smaller_than_throat'
+        kunye = exc.value.invalid_fields[0]
+        assert kunye['throat_diameter_mm'] == pytest.approx(
+            float(_sessiz(e._estimate_throat_diameter)) * 1000.0, rel=1e-9)
 
     def test_normal_geometride_IKINCI_kopya_da_sayi_veriyor(self):
-        res = _sessiz(_motor(**self.NORMAL).calculate_performance)
+        res = _sessiz(_motor(**self.NORMAL_GECERLI).calculate_performance)
         ang = res['nozzle_angles']
         assert ang['throat_exceeds_case'] is False
         assert ang['convergent_length_mm'] > 0
@@ -208,10 +220,14 @@ class TestTekBicimSiniflandirici:
     sınıf söylüyordu (ör. star 100/500/30 @40 bar: 'regressive' ⟷
     'Progressive-Regressive'). Onarımdan sonra 0/54."""
 
-    IZGARA = [('bates', 100.0, 500.0, 30.0, 40.0),
+    #: V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu
+    #: varsayılan motoru kilitliyordu. bates 30 -> 48 mm (örnek motor),
+    #: finocyl 150/800 @20 bar 40 -> 70 mm (A_p/A_t 0,67 -> 1,31); ikisi de
+    #: boğulan portluydu ve artık yayımlanmıyor. Öteki satırlar geçerli.
+    IZGARA = [('bates', 100.0, 500.0, 48.0, 40.0),
               ('star', 100.0, 500.0, 30.0, 40.0),
               ('wagon_wheel', 100.0, 300.0, 50.0, 90.0),
-              ('finocyl', 150.0, 800.0, 40.0, 20.0),
+              ('finocyl', 150.0, 800.0, 70.0, 20.0),
               ('slotted', 100.0, 300.0, 50.0, 20.0),
               ('end_burner', 100.0, 500.0, 30.0, 40.0)]
 
@@ -283,8 +299,12 @@ class TestKuruKutleZinciri:
             'döküm %r ⟷ _calculate_dry_mass %r' % (dokum['total_kg'], toplam))
 
     def test_kucuk_motorda_100g_TABANI_yok(self):
+        # V301/K-A (KT-03): astar radyal yer kaplayınca 10 mm'lik motorun
+        # kasası 14 mm'ye çıktı ve fiziksel kütle 0,128 kg oldu (100 g
+        # eşiğinin ÜSTÜ — taban değil, gerçek kütle). Düğümün iddiası
+        # (100 g tabanı yok) ince astarla (0,5 mm; 0,0953 kg) ölçülür.
         e = _motor(chamber_diameter=10.0, grain_length=10.0,
-                   core_diameter=3.0)
+                   core_diameter=3.0, overrides={'liner_thickness': 0.5})
         toplam = float(_sessiz(e._calculate_dry_mass))
         dokum = _sessiz(e._dry_mass_breakdown)
         assert toplam == pytest.approx(dokum['total_kg'], rel=1e-12)
@@ -395,9 +415,12 @@ def test_olculen_sayilar_capasi():
     yerde kilitler; sayı kayarsa yeniden ölçüm gerekir."""
     e = _motor()
     dokum = _sessiz(e._dry_mass_breakdown)
-    assert dokum['total_kg'] == pytest.approx(6.001397012523196, rel=1e-9)
+    # V301/K-A (22 Eki, KT-03): astar artık radyal yer kaplar (kasa iç çapı = tane + 2·(astar + yalıtım)); kasa 2·t_astar büyüdü, çapa yeniden ölçüldü (tolerans aynı).
+    # 6,001397012523196 -> 6,4534577390220145 kg; küçük motor
+    # 0,0945908415254658 -> 0,12844615192502312 kg.
+    assert dokum['total_kg'] == pytest.approx(6.4534577390220145, rel=1e-9)
     assert dokum['liner_kg'] == pytest.approx(0.4614371289592694, rel=1e-6)
     kucuk = _motor(chamber_diameter=10.0, grain_length=10.0,
                    core_diameter=3.0)
     assert float(_sessiz(kucuk._calculate_dry_mass)) == pytest.approx(
-        0.0945908415254658, rel=1e-9)
+        0.12844615192502312, rel=1e-9)

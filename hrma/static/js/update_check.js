@@ -59,7 +59,12 @@
     var LANG_MARK = /<!--\s*HRMA-LANG:([a-z]{2})\s*-->/gi;
     // İm silinmiş gövdede dil bölümlerinin sınırı: her bölüm kendi sürüm
     // başlığıyla başlar ('# HRMA v2.6.25 — ...'; Atom yolunda '#' düşer).
-    var SECTION_HEAD = /^[ \t]*#{0,3}[ \t]*HRMA[ \t]+v?\d/i;
+    // V3.0.5 T-ÇAPA-C1: '#' imsiz satır ancak 'HRMA v<sürüm>' biçimindeyse
+    // başlıktır — gövde cümlesi "HRMA 3.0.5 is a corrections release."
+    // bölüm sınırı sayılıp tek dilli notu ikiye bölüyordu (ölçüldü,
+    // tests/test_release_notes_language.py::test_tek_dilli_not_gizlenmez).
+    // İkizi: hrma/utils/update_checker.py _SECTION_HEAD_RE.
+    var SECTION_HEAD = /^[ \t]*(?:#{1,3}[ \t]*HRMA[ \t]+v?\d|HRMA[ \t]+v\d)/i;
     var TR_LETTERS = /[çğıİöşüÇĞÖŞÜ]/g;
     /* ÖH D22 / P12aB5-14 — İMSİZ GÖVDEDE SIRA KURALI (yedek ayraç).
        Türkçe harf sezgisi mutlak eşikli: Türkçe bölüm hiç Türkçe harf

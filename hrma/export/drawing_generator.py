@@ -7,9 +7,10 @@ popup butonları alert'ten ibaretti. Bu modül:
    (create_improved_motor_cross_section — çözücüyle AYNI geometri kaynağı)
    rasterleştirip reportlab ile antetli, boyut tablolu çok sayfalı çizim
    PDF'ine dönüştürür (kesit + enjektör yüz deseni + boyut/malzeme tabloları).
-2. `generate_dxf` — ezdxf ile 2D imalat çizimi: iç akış yolu konturu
-   (sample_nozzle_inner_contour, TEK kontur kaynağı), kamara dış duvarı,
-   grain profili; katman ayrımı (CONTOUR / OUTLINE / CENTERLINE / TEXT).
+2. `generate_dxf` — ezdxf ile 2D imalat çizimi: iç akış yolu konturu ve
+   lüle dış duvarı (``cad_visualization.nozzle_wall_profile``, STEP/STL ile
+   TEK lüle kaynağı), kamara dış duvarı, grain profili; katman ayrımı
+   (CONTOUR / OUTLINE / NOZZLE_WALL / CENTERLINE / TEXT).
    DXF her CAD yazılımında açılır (DWG kapalı format olduğundan DXF verilir).
 
 Her iki üretici de dosya YOLU döndürür; Flask endpoint'i dosyayı stream eder.
@@ -23,7 +24,6 @@ from datetime import datetime
 
 import numpy as np
 
-from hrma.engines.nozzle_design import sample_nozzle_inner_contour
 from hrma.export.export_workspace import (
     atomic_produce, new_workspace, purge_stale_workspaces)
 from hrma.utils.input_guard import (
@@ -90,6 +90,33 @@ NOZZLE_WALL_NOT_DRAWN_NOTE = (
 )
 
 
+#: V301 CAD-2 kalem 6: DXF lüle dış duvarının katmanı. Kamara dış duvarı
+#: ``OUTLINE``da kalır (``WALL THICKNESS`` ölçüsü ve bekçileri o katmanın
+#: kamaraya ait olduğunu okur); lüle duvarı ayrı katmanda çizilir.
+DXF_NOZZLE_WALL_LAYER = 'NOZZLE_WALL'
+#: V301 CAD-2 kalem 8: iki katmanlı rejeneratif cidarın katman sınırları
+#: (astar dış yüzü = kanal tabanı; kanal katmanı dış yüzü = dış kabuk iç yüzü).
+DXF_WALL_LAYERS_LAYER = 'WALL_LAYERS'
+
+
+def _nozzle_wall_note_dxf(profile):
+    """DXF lüle et satırı (V301 CAD-2 kalem 6) — çizilen duvarın kaynağı.
+
+    ``profile``: ``cad_visualization.nozzle_wall_profile(..., unit='mm')``.
+    Satır ``NOZZLE WALL:`` ile başlar (bekçi önekiyle bulur) ve
+    ``WALL THICKNESS`` ile BAŞLAMAZ (kardeş bekçi o önekten kamara cidarını
+    okur).
+    """
+    design = profile['wall_design']
+    return ('NOZZLE WALL: outer profile DRAWN in this view on layer '
+            f"{DXF_NOZZLE_WALL_LAYER} (outer = inner contour + "
+            f"{profile['wall']:.2f} mm at the same axial stations, "
+            'cad_visualization.nozzle_wall_profile - the same profile the '
+            'STEP and STL nozzle solids use); wall source: '
+            f"{design['source']}. The WALL THICKNESS dimension above belongs "
+            'to the chamber only')
+
+
 def _nozzle_wall_note(motor_results):
     """Lüle et beyanı — STEP'in GERÇEKTEN kullandığı kaynağı söyler.
 
@@ -98,6 +125,10 @@ def _nozzle_wall_note(motor_results):
     (``NOZZLE_WALL_NOT_DRAWN_NOTE``) "generator rule, not from an analysis"
     diyordu; hibritte bu artık YANLIŞ olurdu. Et yayımlanmamışsa sabit not
     aynen basılır.
+
+    V301 CAD-2 kalem 6: bu metin artık YALNIZ PDF ölçü tablosu içindir
+    (PDF kesiti lüle etini ölçülendirmez). DXF lüle duvarını çizer ve kendi
+    satırını :func:`_nozzle_wall_note_dxf` ile basar.
     """
     from hrma.export.cad_visualization import _nozzle_wall_design
     design = _nozzle_wall_design(motor_results)
@@ -414,9 +445,16 @@ def _injector_face_png(motor_results, size=700):
     import plotly.graph_objects as go
     import plotly.io as pio
 
-    from hrma.export.cad_visualization import _injector_spec
+    from hrma.export.cad_visualization import (
+        _injector_spec, pintle_type_claimed)
 
     md = motor_results or {}
+    # V301 bilinen C2: pintle'da yüz deseni EŞDEĞER orifis planı değildir
+    # (çözücünün beyanı: "The pintle is NOT drilled this way"); yüz görünüşü
+    # STEP/STL ile TEK çözümleyiciden (``pintle_cad_geometry``) çizilir.
+    if pintle_type_claimed(md):
+        return _render_or_raise(_pintle_face_figure(md, size), width=size,
+                                height=size)
     spec = _injector_spec(md)
     D_ch = _num(md.get('chamber_diameter'), 0.1) * 1000
     n = spec['n_orifices']
@@ -480,6 +518,93 @@ def _injector_face_png(motor_results, size=700):
     return _render_or_raise(fig, width=size, height=size)
 
 
+def _pintle_face_figure(motor_results, size=700):
+    """V301 bilinen C2 — pintle enjektörün yüz görünüşü (plotly figürü).
+
+    Sayılar STEP/STL ile AYNI çözümleyiciden (``pintle_cad_geometry``):
+    kamara deliği, yüz plakası yayımlanmışsa anülüs deliği, direk ve uç
+    deliklerinin açısal yerleri (delikler direğin YAN yüzündedir; yüzden
+    bakışta direk çevresinde radyal çentik olarak gösterilir). Kanonik
+    geometri yoksa ``PintleCADError`` yükselir; sayfa adlı gerekçeyi basar,
+    eşdeğer orifisli düz plaka ÇİZİLMEZ.
+    """
+    import plotly.graph_objects as go
+
+    from hrma.export.cad_visualization import pintle_cad_geometry
+
+    md = motor_results or {}
+    geo = pintle_cad_geometry(md)
+    R = _num(md.get('chamber_diameter'), None) * 1000.0 / 2.0
+    theta = np.linspace(0, 2 * np.pi, 181)
+    fig = go.Figure()
+
+    def daire(r, renk, kalinlik, kesik=False):
+        fig.add_trace(go.Scatter(
+            x=r * np.cos(theta), y=r * np.sin(theta), mode='lines',
+            line=dict(color=renk, width=kalinlik,
+                      dash='dash' if kesik else 'solid')))
+
+    daire(R, '#1a2733', 2)
+    if geo['plate_t'] is not None:
+        daire(geo['bore'] / 2.0, '#1a2733', 1.5)
+    else:
+        daire(geo['bore'] / 2.0, '#8a93a0', 1, kesik=True)
+    daire(geo['d_post'] / 2.0, '#c0392b', 1.5)
+    r_p = geo['d_post'] / 2.0
+    for i in range(geo['n_holes']):
+        a = 2 * np.pi * i / geo['n_holes']
+        fig.add_shape(type='line', x0=r_p * np.cos(a), y0=r_p * np.sin(a),
+                      x1=(r_p - geo['hole_depth']) * np.cos(a),
+                      y1=(r_p - geo['hole_depth']) * np.sin(a),
+                      line=dict(color='#c0392b', width=1.5))
+    if geo['n_holes']:
+        delik = (f"{geo['n_holes']} x d{geo['d_hole']:.2f} mm radial tip "
+                 f"holes at L_s {geo['skip']:.2f} mm")
+    else:
+        delik = 'no tip holes'
+    plaka = (f"annulus bore d{geo['bore']:.2f} mm"
+             if geo['plate_t'] is not None else
+             f"annulus bore d{geo['bore']:.2f} mm (dashed: faceplate not "
+             'modelled)')
+    fig.update_layout(
+        title=dict(text=(
+            f"INJECTOR FACE - pintle: post d{geo['d_post']:.2f} mm<br>"
+            f"{plaka}<br>{delik}<br>the equivalent orifice plan is NOT "
+            'drilled'), font=dict(size=13)),
+        margin=dict(t=130),
+        paper_bgcolor='white', plot_bgcolor='white',
+        font=dict(color='#1a2733'),
+        xaxis=dict(title='mm', scaleanchor='y', scaleratio=1,
+                   range=[-R * 1.15, R * 1.15]),
+        yaxis=dict(title='mm', range=[-R * 1.15, R * 1.15]),
+        showlegend=False, width=size, height=size,
+    )
+    return fig
+
+
+def _pintle_schedule_value(motor_results, spec):
+    """V301 bilinen C2 — ölçü tablosunun pintle satırı (çizimle aynı
+    çözümleyiciden). Eşdeğer orifis planı adıyla 'delinmez' diye yazılır;
+    kanonik geometri çizilemiyorsa adlı gerekçe basılır."""
+    from hrma.export.cad_visualization import (
+        NOT_AVAILABLE_SPEC, PintleCADError, pintle_cad_geometry)
+    try:
+        geo = pintle_cad_geometry(motor_results)
+    except PintleCADError as exc:
+        return f'{NOT_AVAILABLE_SPEC} - {exc.invalid_fields[0]["reason"]}'
+    parca = [f"post d{geo['d_post']:.2f} mm",
+             f"annulus bore d{geo['bore']:.2f} mm"]
+    if geo['n_holes']:
+        parca.append(f"{geo['n_holes']} x d{geo['d_hole']:.2f} mm tip holes "
+                     f"at L_s {geo['skip']:.2f} mm")
+    else:
+        parca.append('no tip holes')
+    if spec.get('n_orifices') and spec.get('orifice_diameter_mm'):
+        parca.append(f"equivalent plan {spec['n_orifices']} x "
+                     f"d{spec['orifice_diameter_mm']:.2f} mm NOT drilled")
+    return '; '.join(parca)
+
+
 #: Ölçü tablosunda bir değer sütununun sığdığı karakter sayısı (Helvetica 10,
 #: 140 mm sütun başlangıcı). Satır kırma ve sayfa hesabı AYNI sayıyı kullanır.
 SCHEDULE_WRAP_COLUMNS = 62
@@ -503,7 +628,7 @@ def _schedule_rows(motor_results, d):
     from hrma.export.cad_visualization import (
         NOT_AVAILABLE_SPEC, _chamber_material, _chamber_wall_design,
         _injector_spec, _nozzle_exit_angle_deg, _nozzle_family,
-        _nozzle_half_angles, _wall_sf_basis_text)
+        _nozzle_half_angles, _wall_sf_basis_text, pintle_type_claimed)
 
     wall_design = _chamber_wall_design(motor_results)
     wall_m, wall_src = wall_design['thickness_m'], wall_design['source']
@@ -607,11 +732,13 @@ def _schedule_rows(motor_results, d):
          f"{('%.1f deg' % conv_deg) if conv_deg else 'n/a'}, div "
          f"{('%.1f deg' % div_deg) if div_deg else 'n/a'} "
          + _nozzle_angle_source_tag(motor_results)),
-        ('Injector orifices',
-         (f"{spec['n_orifices']} x d{spec['orifice_diameter_mm']:.2f} mm "
-          f"({spec['type'] or 'type n/a'})")
-         if (spec['n_orifices'] and spec['orifice_diameter_mm'])
-         else NOT_AVAILABLE_SPEC),
+        (('Injector (pintle)', _pintle_schedule_value(motor_results, spec))
+         if pintle_type_claimed(motor_results) else
+         ('Injector orifices',
+          (f"{spec['n_orifices']} x d{spec['orifice_diameter_mm']:.2f} mm "
+           f"({spec['type'] or 'type n/a'})")
+          if (spec['n_orifices'] and spec['orifice_diameter_mm'])
+          else NOT_AVAILABLE_SPEC)),
         ('Injector pressure drop',
          f"{spec['pressure_drop_bar']:.2f} bar" if spec['pressure_drop_bar']
          else NOT_AVAILABLE_SPEC),
@@ -935,14 +1062,67 @@ def generate_dxf(motor_results, out_path=None):
     msp = doc.modelspace()
 
     L, rc = d['L'], d['D_ch'] / 2
-    # İç akış yolu: enjektör yüzünden nozul çıkışına (tek kontur kaynağı)
-    pts, meta = sample_nozzle_inner_contour(motor_results)
-    noz = [(L + z, r) for z, r in pts]
+    # İç akış yolu: enjektör yüzünden nozul çıkışına. V301 CAD-2 kalem 6:
+    # iç kontur, et ve dış kontur STEP/STL/kütle/montaj planıyla TEK
+    # kaynaktan (``cad_visualization.nozzle_wall_profile``). Eskiden DXF
+    # örnekleyiciyi kendisi çağırıyor ve lüle dış duvarını hiç çizmiyordu.
+    from hrma.export.cad_visualization import nozzle_wall_profile
+    noz_profile = nozzle_wall_profile(motor_results, unit='mm')
+    meta = noz_profile['meta']
+    noz = [(L + z, r) for z, r in noz_profile['inner']]
+    noz_dis = [(L + z, r) for z, r in noz_profile['outer']]
+    noz_et = noz_profile['wall']
 
     upper = [(0.0, rc)] + noz
     lower = [(z, -r) for z, r in upper]
     msp.add_lwpolyline(upper, dxfattribs={'layer': 'CONTOUR'})
     msp.add_lwpolyline(lower, dxfattribs={'layer': 'CONTOUR'})
+    # Lüle duvarı: dış kontur + giriş ve çıkış yüzleri (STEP katısının
+    # kapalı kesiti: iç kontur + ters dış kontur), iki yanda.
+    doc.layers.add(DXF_NOZZLE_WALL_LAYER, color=4)
+    for s in (1, -1):
+        msp.add_lwpolyline([(x, s * r) for x, r in noz_dis],
+                           dxfattribs={'layer': DXF_NOZZLE_WALL_LAYER})
+        for (x_i, r_i), (x_d, r_d) in ((noz[0], noz_dis[0]),
+                                       (noz[-1], noz_dis[-1])):
+            msp.add_lwpolyline([(x_i, s * r_i), (x_d, s * r_d)],
+                               dxfattribs={'layer': DXF_NOZZLE_WALL_LAYER})
+
+    # V301 CAD-2 kalem 8 (L-KABUK DEVİR 1a/1c): iki katmanlı rejeneratif
+    # cidarın katman sınırları — kamara (0..L) ve ceketli lüle boyunca,
+    # STEP/STL ile TEK çözümleyiciden (``two_layer_wall_cad_geometry``).
+    katman_satiri = None
+    iki = noz_profile.get('two_layer')
+    if iki is None:
+        from hrma.export.cad_visualization import two_layer_wall_cad_geometry
+        try:
+            iki = two_layer_wall_cad_geometry(motor_results)
+        except ValueError as _hata:
+            iki = None
+            katman_satiri = ('TWO-LAYER WALL: layers NOT drawn - '
+                             + str(_hata))
+    if iki is not None:
+        doc.layers.add(DXF_WALL_LAYERS_LAYER, color=6)
+        for ofset in (iki['liner_mm'], iki['interface_mm']):
+            for s_ in (1, -1):
+                msp.add_lwpolyline([(0.0, s_ * (rc + ofset)),
+                                    (L, s_ * (rc + ofset))],
+                                   dxfattribs={'layer': DXF_WALL_LAYERS_LAYER})
+                if noz_profile.get('two_layer') is not None:
+                    msp.add_lwpolyline(
+                        [(x, s_ * (r + ofset)) for x, r in noz],
+                        dxfattribs={'layer': DXF_WALL_LAYERS_LAYER})
+        katman_satiri = (
+            f"TWO-LAYER WALL (layer {DXF_WALL_LAYERS_LAYER}): liner "
+            f"{iki['liner_mm']:.2f} mm + channel/rib layer "
+            f"{iki['channel_mm']:.2f} mm ({iki['liner']['material']}) | "
+            f"closeout {iki['closeout_mm']:.2f} mm "
+            f"({iki['closeout']['material']}); "
+            + ('chamber and jacketed nozzle' if noz_profile.get('two_layer')
+               else 'chamber only (the jacket does not reach the nozzle '
+                    'exit)')
+            + f"; {iki['n_channels'] if iki['n_channels'] else '-'} channels "
+            'NOT cut (channel/rib layer drawn as its envelope)')
 
     # Kamara dış duvarı — kalınlık YALNIZ yapısal analizden gelir.
     # A8: burası da ``chamber_analysis`` anahtarını arıyor, katı/sıvı motorda
@@ -1100,8 +1280,9 @@ def generate_dxf(motor_results, out_path=None):
         # P9B2-10: açıların kaynağı çözücünün kendi beyanından.
         'NOZZLE HALF ANGLES: ' + _nozzle_angle_source(motor_results),
         # P9B2-29: "WALL THICKNESS" ölçüsü YALNIZ kamaraya ait. ÖH V3 CAD
-        # A1 · H2: STEP'in lüle eti kaynağı artık gerçeği söyler.
-        _nozzle_wall_note(motor_results),
+        # A1 · H2: STEP'in lüle eti kaynağı artık gerçeği söyler. V301
+        # CAD-2 kalem 6: DXF lüle duvarını çizer; satır çizileni anlatır.
+        _nozzle_wall_note_dxf(noz_profile),
         # P9B2-28: eksen sözleşmesi.
         AXIS_CONVENTION_NOTE,
         'ALL DIMENSIONS IN MILLIMETRES ($INSUNITS=4)',
@@ -1114,6 +1295,8 @@ def generate_dxf(motor_results, out_path=None):
     if grain_clearance_note is not None:
         tail_lines.insert(2, grain_clearance_note)
     tail_lines.insert(0, cap_line)
+    if katman_satiri is not None:
+        tail_lines.insert(1, katman_satiri)
 
     labels = [
         (L / 2, y_wall + 12, f"L_chamber = {L:.1f} mm"),
@@ -1151,6 +1334,10 @@ def generate_dxf(motor_results, out_path=None):
     if wall is not None:
         _olcu((L * 0.5, rc), (L * 0.5, rc + wall),
               (L * 0.5 + 15.0, rc), angle=90.0)                    # cidar
+    # V301 CAD-2 kalem 6: lüle eti çıkış yüzünde ölçülendirilir.
+    x_cikis, r_cikis = noz[-1]
+    _olcu((x_cikis, r_cikis), (x_cikis, r_cikis + noz_et),
+          (x_cikis + 15.0, r_cikis), angle=90.0)                   # lüle eti
 
     # Yazma ATOMİK (D1): yarım DXF HTTP 200 ile indirilmesin. Sınıf
     # tablosu yazımdan önce SABİT sırayla kurulur (CADI D-T6-2).

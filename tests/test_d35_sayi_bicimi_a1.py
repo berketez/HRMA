@@ -132,11 +132,24 @@ def test_bicimlendirici_kanona_bagli(etiket, yol, ad, delegator):
 #: dışa aktarım / form `.value` / `Number(x.toFixed())` yollarını kapsar —
 #: bunlar EKRAN METNİ DEĞİLDİR ve bilerek dokunulmamıştır. Sayı ARTARSA
 #: yeni bir çağrı yeri kanonu atlamış demektir.
+#:
+#: T-ÇAPA-C2 (27 Eki) ölçümü — tavan yükselen iki dosyada YENİ çağrıların
+#: hepsi ekran metni değil, satır satır denetlendi:
+#:   * liquid.html 4 → 5: V301/UÇUŞ 2433377ec (liquidSixDofSeed,
+#:     ``el.value = deger.toFixed(basamak)`` + gövde çapı
+#:     ``govde.value = (…).toFixed(3)``, +2); f75da1023 eski yörünge
+#:     tohumunun ``el.value = v.toFixed(3)``unu liquidTrajectorySeed'e taşıdı
+#:     (net 0); V301/L-C f8504d4a4 bir çağrı söktü (−1). Eklenenlerin ikisi de
+#:     sayı girdisinin ``.value``'su (tarayıcı ondalık NOKTA ister; TR virgülü
+#:     girdiyi bozardı).
+#:   * solid.html 18 → 20: V301/K-C2 1b3ec145b (primeCatalogValues ve
+#:     _kayitDegeriMi): ``Number(raw.toFixed(f.digits))`` — kayıt değerini
+#:     form basamağına yuvarlayıp SAYI olarak karşılaştırır, ekrana basmaz.
 TOFIXED_TAVANI = {
     'app.js': 4,
     'motor_viz3d.js': 1,
-    'liquid.html': 4,
-    'solid.html': 18,
+    'liquid.html': 5,
+    'solid.html': 20,
     'advanced.html': 11,
     'cfd_panel.js': 1,
     'stability_panel.js': 1,

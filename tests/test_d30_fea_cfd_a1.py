@@ -66,11 +66,32 @@ D30F_HIBRIT = {
     # kendi motoru 'gas' fazıyla sabitlendi (298,15 K gaz referansı = kalem
     # öncesi geometri, BİT-AYNI). Sıvı varsayılandaki yeni geometri sonucu
     # defter kalemi KITAP-P1A-D2 (p1a rapor §12).
-    'oxidizer_phase': 'gas'}
+    'oxidizer_phase': 'gas',
+    # V3.0.5 T-ÇAPA-C1 — ÖLÇÜM KOŞULU AÇIKÇA (bu dosyanın 'gas' fazı /
+    # steel_4130 deseni): c* verimi %100 ve cidar 14,2138 mm. V301/H-termal
+    # (77d64c641, 26 Eki) korunan bölgeler yüzünden boyutlandırılan hibrit
+    # cidarını inceltti, V301/H-PANEL (74b55500a) N2O/HTPB c*'ına kaynaklı
+    # η=0,89 varsayılanı getirdi; ikisi de onaylı yayımlanan sayı
+    # değişimidir, bekçinin konusu DEĞİL (FEA ağ/hüküm mekanizması). Bu
+    # iki alanla köprü girdisi (cidar 0,014213796857733331 m, kontur
+    # toplamı 1,1157379994088688) H-termal öncesi c7776576f ağacının
+    # varsayılan isteğiyle BİT-AYNI (ölçüldü).
+    'combustion_efficiency': 100.0, 'wall_thickness': 14.213796857733331,
+}
 D30F_SIVI = {
     'motor_name': 'OHD2903', 'thrust': 1000.0, 'burn_time': 30.0,
     'chamber_pressure': 10.0, 'mixture_ratio': 2.2, 'fuel_type': 'rp1',
-    'oxidizer_type': 'lox', 'expansion_ratio': 4.0}
+    'oxidizer_type': 'lox', 'expansion_ratio': 4.0,
+    # V3.0.5 T-ÇAPA-C1 — SOĞUTMA TİPİ AÇIKÇA 'radiative' (tek katmanlı
+    # cidar). V301/L-KABUK (6f8240043) rejeneratif yolda köprüye çizilen
+    # YIĞINI (astar + kanal + dış kabuk) veriyor: bu istek varsayılan
+    # rejeneratifle cidarı 2,0 → 5,0 mm yaptı ve çapalar (once_d2802.json /
+    # once_d2903.json, 2,0 mm cidarda ölçüldü) geometri değiştiği için
+    # tutmadı. ÖLÇÜLDÜ (e038d626f): 'radiative' ile köprü cidarı 0,002 m ve
+    # kontur (68 nokta, toplam 3,7933785254) sabah tabanı ad0737bd4'ün
+    # varsayılan isteğiyle BİREBİR — yani ölçüm fikstürünün geometrisi.
+    'cooling_type': 'radiative',
+}
 
 
 @pytest.fixture(scope='module')

@@ -166,6 +166,37 @@
         coaxial: ['sch.titleCoaxial', 'Coaxial element &#8212; axial cross-section']
     };
 
+    // V301/DİL-2 (kök 7): seçilen tipin EKRANDAKİ adı (formun seçenek
+    // metni); bulunamazsa makine adı AYNEN (uydurma ad yok).
+    function tipAdi(raw) {
+        var ad = null;
+        try {
+            if (typeof document !== 'undefined' && document
+                    && typeof document.querySelector === 'function') {
+                // Önce güverte enjektör panelinin tip seçicisi (değerleri
+                // kanonik adlardır), sonra sayfa formunun seçicisi.
+                var deger = String(raw).replace(/["\\]/g, '');
+                var o = document.querySelector('#inj_type option[value="' + deger + '"]')
+                    || document.querySelector('#injector_type option[value="' + deger + '"]');
+                if (o && o.textContent) ad = o.textContent.replace(/\s+/g, ' ').trim();
+                // Formun seçenek değeri eski adla durabilir (sıvı:
+                // 'unlike_impinging' → kanonik 'impinging_doublet'); seçili
+                // seçenek ancak sayfanın KENDİ eşlemesi aynı tipi verirse
+                // kullanılır (uydurma eşleme yok).
+                var sel = document.getElementById('injector_type');
+                if (!ad && sel && sel.selectedIndex >= 0
+                        && typeof liqInjectorCanonical === 'function'
+                        && liqInjectorCanonical(sel.value) === raw) {
+                    ad = sel.options[sel.selectedIndex].textContent.replace(/\s+/g, ' ').trim();
+                }
+            }
+        } catch (e) { ad = null; }
+        return String(ad || raw).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    }
+    function tipKimligi(raw) {
+        return T('sch.injectorTypeLabel', 'Injector type') + ': ' + tipAdi(raw);
+    }
+
     function titleOf(kind, raw) {
         var pair = TITLE_KEYS[kind];
         var fam = pair ? T(pair[0], pair[1]) : '';
@@ -173,7 +204,7 @@
         // Seçilen tip ailenin KANONİK üyesi değilse ailenin adı bir kimlik
         // iddiası olur; o iddia bu çizimle kazanılmadı.
         if (CANONICAL[kind] && raw !== CANONICAL[kind]) {
-            return 'injector_type: ' + raw;
+            return tipKimligi(raw);
         }
         return fam;
     }
@@ -507,7 +538,11 @@
         // `injector_type` değerinin kendisi).
         // (OH-P-18: kimlik satırı "← besleme manifoldu" ile aynı satıra
         // düşüyordu — artık not şeridinin ilk satırı.)
-        var kimlik = (raw && raw !== 'impingement') ? 'injector_type: ' + raw : null;
+        // V301/DİL-2: görünen satır tipin ekran adı; makine kimliği
+        // (injector_type: <değer>) aynı <text>'in <title> ipucunda.
+        var kimlik = (raw && raw !== 'impingement')
+            ? tipKimligi(raw) + '<title>injector_type: ' + String(raw).replace(/</g, '&lt;') + '</title>'
+            : null;
         s += label(px + pw + 52, cy + 76, T('sch.sprayFan', 'flat spray fan'), C.spray);
         // Açı künyesi levhanın (y = 55) üstünde; eleman künyesi bir satır
         // (LINE_DY) yukarıda — eskiden 12 px aralık, kutular biniyordu.

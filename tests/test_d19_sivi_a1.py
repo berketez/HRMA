@@ -484,20 +484,33 @@ def test_p3b3_07_pompa_karti_kendi_icinde_kapanir(istemci, cevrim, pompa):
 # =====================================================================
 # (B) P3B3-08 — REDDEDİLEN girdiye sahip çıkılmaz
 # =====================================================================
-@pytest.mark.parametrize('deger', [150, 5, 'abc'])
-def test_p3b3_08_reddedilen_verim_kullanici_kunyesi_almaz(istemci, deger):
+@pytest.mark.parametrize('deger,neden', [(150, 'out_of_accepted_range'),
+                                         (5, 'out_of_accepted_range'),
+                                         ('abc', 'not_a_number')])
+def test_p3b3_08_reddedilen_verim_kullanici_kunyesi_almaz(istemci, deger,
+                                                          neden):
+    """TERS KAPI (v3.0.1 T-ÇAPA-B): reddedilen verim artık hiçbir künyeye
+    girmez çünkü tasarım HİÇ yayımlanmaz.
+
+    Eski bekçi 200 + pompa künyesinde 'REJECTED' + %75 yedek verim
+    bekliyordu. L-A (SV-02, tek bant kapısı; K-A "ana model kararı 3"):
+    aralık dışı / okunamaz girdi yerleşik değerle değiştirilmez, adlı 422
+    döner. Ölçüldü (taban 117d704da): 150 / 5 → ``out_of_accepted_range``,
+    'abc' → ``not_a_number``; kabul aralığı 20-95 %. "Kullanıcı girdisi
+    diye künyelenmez" iddiası en güçlü biçimiyle korunur: yayımlanan pompa
+    kartı yok.
+    """
     st, j = _cagir(istemci, dict(TABAN_YUK, thrust=250000.0,
                                  chamber_pressure=150.0,
                                  turbopump_efficiency=deger))
-    assert st == 200
-    for pompa in ('oxidizer_pump', 'fuel_pump'):
-        p = _iz(j, 'detailed_feed_system', 'turbopump_analysis', pompa) or {}
-        kunye = str(p.get('efficiency_source') or '')
-        assert 'REJECTED' in kunye, (
-            f'{pompa}: reddedilen {deger!r} için künye {kunye!r}')
-        assert not kunye.startswith('user input'), (
-            f'{pompa}: reddedilen girdi hâlâ "user input" diye künyeleniyor')
-        assert float(p['design_efficiency']) == pytest.approx(75.0)
+    assert st == 422, (st, str(j)[:300])
+    assert j.get('error_code') == 'input_not_accepted'
+    kayit = [f for f in (j.get('invalid_fields') or [])
+             if f.get('field') == 'turbopump_efficiency']
+    assert kayit, j.get('invalid_fields')
+    assert kayit[0]['reason'] == neden
+    assert 'turbopump_efficiency' in str(j.get('message'))
+    assert _iz(j, 'detailed_feed_system', 'turbopump_analysis') is None
 
 
 def test_p3b3_08_kabul_edilen_verim_kullaniciyi_gosterir(istemci):

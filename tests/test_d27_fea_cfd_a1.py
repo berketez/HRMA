@@ -117,7 +117,18 @@ def motorlar():
             # steel_4130 ile donduruldu; HB10 (hibrit 10. tur) tek
             # varsayılanı steel_304 yaptı. Çapa aynı koşulu ölçmeye devam
             # eder; bağımsız teyit (sabit 1024×16 ağ) aynen canlı.
-            'chamber_material': 'steel_4130'}),
+            'chamber_material': 'steel_4130',
+            # V3.0.5 T-ÇAPA-C1 — ÖLÇÜM KOŞULU AÇIKÇA (beşinci ve altıncı
+            # koşul): c* verimi %100 ve cidar 13,1278 mm. V301/H-termal
+            # (77d64c641, 26 Eki) korunan bölgeler yüzünden boyutlandırılan
+            # hibrit cidarını inceltti (hibrit min SF 38,45 → 5,30), V301/
+            # H-PANEL (74b55500a) N2O/HTPB c*'ına kaynaklı η=0,89 getirdi;
+            # ikisi de onaylı yayımlanan sayı değişimi, çapanın konusu FEA
+            # yakınsama bandı. Bu iki alanla köprü girdisi (cidar
+            # 0,013127827075655596 m, kontur toplamı 1,1219162663557958)
+            # H-termal öncesi c7776576f ağacının isteğiyle BİT-AYNI (ölçüldü).
+            'combustion_efficiency': 100.0,
+            'wall_thickness': 13.127827075655596}),
     }
     cikti = {}
     for ad, (yol, yuk) in istek.items():
@@ -398,6 +409,27 @@ class TestD27UrunSayilariYenidenCapalandi:
         yok) iki kip, kötümser 2,59865 (ürün %0,042 uzakta); 256×8 2,60303,
         512×8 2,59939 — tekdüze yakınsıyor (kanit/tur2/aile_c.jsonl). Aynı
         teyit aşağıda CANLI koşulur. Çapa payı (abs=5e-4) DEĞİŞMEDİ.
+
+        V3.0.5 A2 YENİDEN ÇAPA (28 Eki) — 2,59974 → **2,68470**. Docs'suz
+        çatallarla ölçülen iki bilinçli ürün değişikliği (FEA çözücüsü
+        değişmedi; kayma köprü girdisinden):
+
+        1. a7ee84f3e (22 Eki, katı denetimi K-A, KT-01/02/03): kasa iç çapı
+           ≥ tane dış çapı + 2·(astar + yalıtım). Bu gövdede astar 2 mm →
+           kasa iç çapı 128,13 mm; boyutlandırılan cidar 2,97922 → 3,07522
+           mm (+%3,22), kontur aynı. Min SF 2,599743 → 2,685823 (+%3,31;
+           önceki commit ce365bdef'te 2,599743).
+        2. 78a27382e (26 Eki, N-CEA-2): APCP termokimyası motorun kendi
+           P_c'sinde NASA CEA'dan → lüle konturu (toplam 3,69760 → 3,71082)
+           ve cidar 3,08287 mm. Min SF 2,685823 → 2,684704 (önceki commit
+           77d64c641'de 2,685823).
+
+        Bugünkü S1-6 tane yerleşimi (629977083) bu gövdeyi DEĞİŞTİRMEDİ
+        (8ed2a35bc ve 629977083 sonrası aynı 2,684704). Yön: cidar
+        kalınlaştığı için SF yükseldi; bu hesap iyimserleşmesi değil, kasanın
+        astar payıyla büyümesinin doğal sonucu. Bağımsız teyit yeni
+        geometride: sabit 1024×16 ağ, iki kip kötümseri 2,683561 (ürün
+        %0,043 uzakta; a7ee84f3e'de %0,063). Hüküm VERİLİYOR, gerekçe yok.
         """
         k = motorlar['kati']['kopru']
         from tests.fea.yuk_modeli_araci import izantropik_yukte
@@ -405,8 +437,8 @@ class TestD27UrunSayilariYenidenCapalandi:
         akma = self._akma_pa(motorlar['kati']['girdi'])
         turetilmis = akma / k['scl_lineerlestirme']['hukum_paydasi_pa']
         assert k['min_safety_factor'] == pytest.approx(turetilmis, rel=1e-12)
-        assert turetilmis == pytest.approx(2.59974, abs=5e-4), (
-            f'katı min SF {turetilmis} — fea-yuk çapası 2,59974')
+        assert turetilmis == pytest.approx(2.68470, abs=5e-4), (
+            f'katı min SF {turetilmis} — V3.0.5 A2 çapası 2,68470')
         teyit = self._sabit_ag_kotumser(motorlar['kati']['girdi'])
         assert abs(turetilmis - teyit) / teyit < SA.DEFAULT_REFINE_TOL, (
             f'ürün {turetilmis} ⟷ sabit ağ {teyit}: bağımsız teyit tutmuyor')

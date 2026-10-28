@@ -52,17 +52,17 @@ REL_TOL = 1e-9
 # ---------------------------------------------------------------------------
 # Taban yük: liquid.html collectAllParameters() ile birebir aynı alan kümesi
 # ---------------------------------------------------------------------------
+# V301/L-D (SV-09): sıvı formu çözücünün okumadığı 26 girdiyi artık sunmuyor
+# ve engine_mount / gimbal_range'i /calculate_liquid'e göndermiyor (yalnız
+# gimbal paneli); bu 28 alan taban yükten ve sarsım tablosundan çıktı.
+# Alan seti hâlâ collectAllParameters() ile birebir aynıdır (bekçi aşağıda).
 BASE_PAYLOAD = {
     'fuel_type': 'rp1', 'oxidizer_type': 'lox',
     'fuel_density': 810, 'oxidizer_density': 1141,
-    'fuel_boiling_point': 500, 'oxidizer_boiling_point': 90.2,
-    'fuel_freezing_point': 200, 'oxidizer_freezing_point': 54.4,
-    'fuel_viscosity': 0.0012, 'oxidizer_viscosity': 0.00019,
-    'fuel_heat_combustion': 43.1, 'fuel_heat_capacity': 2090,
-    'fuel_thermal_conductivity': 0.145,
-    'mixture_ratio': 2.5, 'stoichiometric_of': 3.4,
-    'of_min': 2.0, 'of_max': 3.2,
-    'throttling_of_strategy': 'constant', 'combustion_efficiency': 97,
+    'fuel_boiling_point': 500, 'fuel_viscosity': 0.0012, 'oxidizer_viscosity': 0.00019,
+    'fuel_heat_capacity': 2090,
+    'mixture_ratio': 2.5, 'of_min': 2.0, 'of_max': 3.2,
+    'combustion_efficiency': 97,
     # v2.6.26 — film soğutma girdisi eklendi (analiz zaten vardı, onu
     # tetikleyecek alan yoktu; 6 çıktı yaprağı her motorda 0,0 kalıyordu).
     'film_cooling_percent': 0,
@@ -82,24 +82,15 @@ BASE_PAYLOAD = {
     # ile birebir aynı" iddiası iki alanda YANLIŞTI ve testler farkında olmadan
     # yedek yolu sınıyordu.
     'chamber_material': 'inconel_718', 'chamber_roughness': 3.2,
-    'stability_margin': 'medium', 'ignition_system': 'spark',
     'cooling_type': 'regenerative', 'nozzle_expansion_ratio': 50,
     # 'bell' liquid.html'de yok; seçenekler bell_80 / bell_60 (bkz. yukarıdaki not)
     'nozzle_type': 'bell_80', 'throat_diameter': 50,
     'cooling_channels': 80, 'coolant_flow_percent': 100,
     'coolant_inlet_temp': 300, 'max_wall_temp': 800,
-    'startup_sequence': 'sequential', 'engine_start_time': 2.0,
-    'engine_shutdown_time': 1.5, 'min_throttle': 40,
-    'throttle_response': 0.5, 'restart_capability': 'multiple',
-    'chill_down_time': 30, 'max_burn_duration': 400,
+    'min_throttle': 40,
+    'max_burn_duration': 400,
     'target_thrust_to_weight': 60, 'safety_factor': 2.5,
-    'engine_mount': 'gimbal', 'gimbal_range': 8, 'actuator_response': 50,
-    'engine_life_cycles': 10, 'vibration_environment': 'high',
-    'acoustic_level': 165,
-    'altitude_range': 'sea_to_vacuum', 'temp_range_min': 200,
-    'temp_range_max': 350, 'storage_duration': 12,
-    'contamination_sensitivity': 'medium', 'test_requirements': 'full',
-    'ground_support': 'standard', 'hazard_classification': 'class_1_3',
+    'engine_life_cycles': 10, 
 }
 
 # Alan -> (sarsım değeri, ek bağlam). Değerler alanın KABUL ARALIĞI İÇİNDE
@@ -113,19 +104,12 @@ SHAKES = {
     'fuel_density': (1000.0, {}),
     'oxidizer_density': (1300.0, {}),
     'fuel_boiling_point': (800.0, {}),
-    'oxidizer_boiling_point': (111.0, {}),
-    'fuel_freezing_point': (260.0, {}),
-    'oxidizer_freezing_point': (60.0, {}),
     'fuel_viscosity': (0.004, {}),
     'oxidizer_viscosity': (0.0009, {}),
-    'fuel_heat_combustion': (55.0, {}),
     'fuel_heat_capacity': (3500.0, {}),
-    'fuel_thermal_conductivity': (0.40, {}),
     'mixture_ratio': (3.4, {}),
-    'stoichiometric_of': (2.1, {}),
     'of_min': (2.6, {}),
     'of_max': (4.4, {}),
-    'throttling_of_strategy': ('variable', {}),
     'combustion_efficiency': (88.0, {}),
     # Kabul aralığı 0-30 (yakıt debisinin yüzdesi); %6 tipik bir film payı.
     'film_cooling_percent': (6.0, {}),
@@ -147,13 +131,36 @@ SHAKES = {
     # diye bağlam, İKİ gövdede birden geçerli bir besleme basıncı kuruyor
     # (260 bar; ``feed_pressure`` sarsmasının kendi değeriyle aynı sayı,
     # yeni sabit yazılmadı). Sarsma değeri ve iddia DEĞİŞMEDİ.
-    'chamber_pressure': (160.0, {'feed_pressure': 260.0}),
+    #
+    # V301/L-A (SV-01): taban yükün oda çapı (200 mm) Pc = 160 bar'da
+    # çözülen 22,78 mm boğazla daralma oranını 77'ye çıkarıyor (bant
+    # 1,5-60). Çözücü eskiden bu çapı SESSİZCE atıp daralma oranına
+    # düşüyordu; uç artık 422 ``chamber_diameter_out_of_band`` veriyor.
+    # Sarsmanın ölçtüğü şey (Pc'nin fiziği) korunsun diye bağlam iki
+    # gövdede de bandın içinde kalan bir oda çapı kurar (150 mm: Pc 100'de
+    # CR 23,7, Pc 160'ta CR 43,4).
+    'chamber_pressure': (160.0, {'feed_pressure': 260.0,
+                                 'chamber_diameter': 150.0}),
     'feed_pressure': (260.0, {}),
     'turbopump_efficiency': (55.0, {}),
     'generator_gas_temp': (1600.0, {}),
     'turbine_inlet_pressure': (320.0, {}),
     'turbine_expansion_ratio': (12.0, {}),
     'injector_type': ('pintle', {}),
+    # V3.0.5 T-ÇAPA-C1: V301/L-C (SV-12) enjektör plakası malzemesi; boş
+    # seçenek gönderilmez (koşullu alan), seçilince plaka denetimi koşar
+    # (taban yükün 'impinging' devresi delikli plakadır). Değer şablonun
+    # kendi seçeneklerinden (_hibrit_malzeme_secim_kaydi).
+    'injector_material': ('ss_304', {}),
+    # V3.0.5 T-ÇAPA-C1: pintle ölçüleri (V301/L-C SV-07) yalnız pintle
+    # tipinde gönderilir; boşken devre boyutlandırır. ÖLÇÜLDÜ (e038d626f,
+    # taban yük + pintle): çözücü D_p 19,50 mm, 33 × 1,07 mm delik,
+    # L_s = D_p seçiyor; sarsım değerleri bunların yakınında ve uç 200.
+    'pintle_diameter': (22.0, {'injector_type': 'pintle'}),
+    'annular_gap': (0.8, {'injector_type': 'pintle'}),
+    'pintle_radial_hole_count': (30.0, {'injector_type': 'pintle'}),
+    'pintle_radial_hole_diameter': (1.2, {'injector_type': 'pintle'}),
+    'skip_distance': (24.0, {'injector_type': 'pintle'}),
     'injector_elements': (600.0, {}),
     'fuel_injection_velocity': (90.0, {}),
     'oxidizer_injection_velocity': (120.0, {}),
@@ -169,8 +176,6 @@ SHAKES = {
     # yalnız 'option_not_recognised' uyarısı üretip alanı ölü gösterirdi.
     'chamber_material': ('copper_c101', {}),
     'chamber_roughness': (25.0, {}),
-    'stability_margin': ('high', {}),
-    'ignition_system': ('hypergolic', {}),
     'cooling_type': ('ablative', {}),
     'nozzle_expansion_ratio': (14.0, {}),
     'nozzle_type': ('conical', {}),
@@ -179,32 +184,13 @@ SHAKES = {
     'coolant_flow_percent': (45.0, {}),
     'coolant_inlet_temp': (120.0, {}),
     'max_wall_temp': (1200.0, {}),
-    'startup_sequence': ('simultaneous', {}),
-    'engine_start_time': (6.0, {}),
-    'engine_shutdown_time': (5.0, {}),
     # Izgara alt sınırının (%40) ALTINA sarsılır ki gerçek yol
     # sınansın: alt sınır taramaya yeni bir nokta ekliyor mu?
     'min_throttle': (20.0, {}),
-    'throttle_response': (3.0, {}),
-    'restart_capability': ('single', {}),
-    'chill_down_time': (120.0, {}),
     'max_burn_duration': (90.0, {}),
     'target_thrust_to_weight': (140.0, {}),
     'safety_factor': (1.6, {}),
-    'engine_mount': ('fixed', {}),
-    'gimbal_range': (15.0, {}),
-    'actuator_response': (90.0, {}),
     'engine_life_cycles': (900.0, {}),
-    'vibration_environment': ('low', {}),
-    'acoustic_level': (140.0, {}),
-    'altitude_range': ('vacuum_only', {}),
-    'temp_range_min': (240.0, {}),
-    'temp_range_max': (310.0, {}),
-    'storage_duration': (60.0, {}),
-    'contamination_sensitivity': ('high', {}),
-    'test_requirements': ('minimal', {}),
-    'ground_support': ('minimal', {}),
-    'hazard_classification': ('class_1_1', {}),
 }
 
 # ---------------------------------------------------------------------------
@@ -215,6 +201,17 @@ SHAKES = {
 # kullanıcı 120 m/s enjeksiyon hızı girince motor kendi hesapladığı 41 m/s ile
 # karşılaştırıp uyarı üretir -> input_warnings listesi kayar. Bu MEŞRUDUR.
 ECHO_PREFIXES = ('$.input_warnings', '$.unwired_inputs', '$.warnings')
+
+#: V301/L-A (SV-11) — boyutlandırmayan ama bir EMNİYET hükmünü yöneten
+#: alanlar. ``fuel_boiling_point`` "informational (kullanılmıyor)" diye
+#: beyan ediliyordu; oysa ``warn.liquid.coolant_exit_above_boiling`` t_boil'ü
+#: ondan okur (A-sivi SV-11: 565 K girilince t_boil 565; bant dışı 1400 K
+#: atılınca uyarı TAMAMEN kayboluyordu). Bu alanlar için ölçüt "fiziksel
+#: yaprak" değil, yönettikleri uyarının kaydıdır; blanket kural değil, her
+#: satır adıyla ve hükmüyle yazılır.
+WARNING_DRIVING_FIELDS = {
+    'fuel_boiling_point': 'warn.liquid.coolant_exit_above_boiling',
+}
 
 # Alana özel izinler. Blanket kural DEĞİL: her satır adıyla ve gerekçesiyle
 # yazılır ki bir gün gerçek bir sızıntı buraya sessizce eklenmesin.
@@ -336,6 +333,14 @@ def _collector_fields():
     govde = html[fn_bas:fn_son if fn_son > 0 else len(html)]
     alanlar += re.findall(r'^\s+params\.([A-Za-z_][A-Za-z_0-9]*)\s*=',
                           govde, re.M)
+    # V3.0.5 T-ÇAPA-C1: V301/L-C (8ee59c845) enjektör eleman/delik ve pintle
+    # ölçülerini ``...liqInjectorFieldPayload()`` yayılımıyla gönderiyor;
+    # id'ler şablondaki adlı listelerden (LIQ_PINTLE_FIELDS /
+    # LIQ_NOT_PINTLE_FIELDS) gelir — okuyucusu tests/support/inventory.py.
+    if '...liqInjectorFieldPayload()' in block.group(1):
+        from tests.support import inventory as _inv
+        alanlar += sorted(_inv.collected_fields(
+            _inv.function_body(html, 'liqInjectorFieldPayload'), html))
     return sorted(set(alanlar))
 
 
@@ -358,8 +363,12 @@ def test_shake_table_covers_every_field_the_form_sends():
     stale = sorted(set(SHAKES) - set(COLLECTED_FIELDS))
     assert not stale, ('sarsım tablosunda formda olmayan alanlar var: %s'
                        % stale)
-    # Koşullu gönderilen alan (preburner_type) dışında taban yük formla eş.
-    conditional = {'preburner_type'}
+    # Koşullu gönderilen alanlar dışında taban yük formla eş:
+    # preburner_type (çevrime bağlı) ve injector_material (boş seçenek
+    # gönderilmez — collectAllParameters 'value || undefined', V301/L-C).
+    conditional = {'preburner_type', 'injector_material', 'pintle_diameter',
+                   'annular_gap', 'pintle_radial_hole_count',
+                   'pintle_radial_hole_diameter', 'skip_distance'}
     assert set(BASE_PAYLOAD) == set(COLLECTED_FIELDS) - conditional
 
 
@@ -391,6 +400,16 @@ def test_field_matches_its_declaration(client, declared, field):
       yasak — alan ya fiziğe bağlanır ya `unwired_inputs()` ile bildirilir.
     """
     physical, echo = _shake(client, field)
+    if field in WARNING_DRIVING_FIELDS:
+        # V301/L-A (SV-11): alan bir EMNİYET hükmünü yönetir; beyan
+        # edilmez ve sarsıldığında o hükmün kaydı değişmelidir.
+        assert field not in declared, (
+            '%s bir uyarıyı yönetiyor ama "%s" diye beyan edilmiş'
+            % (field, declared.get(field)))
+        assert any(p.startswith('$.input_warnings') for p in echo), (
+            '%s sarsıldı ama yönettiği uyarı (%s) değişmedi'
+            % (field, WARNING_DRIVING_FIELDS[field]))
+        return
     if field in declared:
         assert not physical, (
             "%s '%s' diye beyan edilmiş ama %d fiziksel yaprağı oynatıyor: %s"
@@ -469,7 +488,30 @@ def test_chamber_diameter_out_of_band_does_not_claim_false_precedence(client):
     """
     payload = copy.deepcopy(BASE_PAYLOAD)
     payload['chamber_diameter'] = 4000.0   # CR ~ 17000, bandın çok dışında
-    result = _calculate(client, payload)
+    # V301/L-A (SV-01) — BEKLENTİ DEĞİŞTİ: uç bu girdiyi artık 200 + sessiz
+    # daralma oranı yerine 422 ``chamber_diameter_out_of_band`` ile adıyla
+    # reddeder (en az / en çok çapla). Bekçinin asıl iddiası (gerçekleşmeyen
+    # öncelik duyurulmaz) motorun Python API yolunda aynen sınanır.
+    response = client.post('/calculate_liquid', json=payload,
+                           headers=LOCAL_HOST)
+    assert response.status_code == 422
+    body = response.get_json()
+    assert body['error'] == 'chamber_diameter_out_of_band'
+    assert body['invalid_fields'][0]['field'] == 'chamber_diameter'
+    assert 'motor_geometry' not in body
+    from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):
+        engine = LiquidRocketEngine(
+            thrust=payload['thrust'],
+            chamber_pressure=payload['chamber_pressure'],
+            mixture_ratio=payload['mixture_ratio'],
+            fuel_type=payload['fuel_type'],
+            oxidizer_type=payload['oxidizer_type'],
+            cooling_type=payload['cooling_type'],
+            injector_type=payload['injector_type'], overrides=payload)
+        result = engine.calculate_performance()
     codes = {w.get('code') for w in result['input_warnings']
              if isinstance(w, dict)}
     assert 'warn.liquid.contraction_ratio_out_of_band' in codes

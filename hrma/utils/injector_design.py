@@ -38,8 +38,8 @@ from hrma.engines.injector_design import (
     # sanıyordu. Artık iki modül de aynı fonksiyonu çağırır.
     pintle_tip_geometry, pintle_spray_angle,
     PINTLE_HYBRID_RADIAL_FRACTION, PINTLE_BF_TARGET_DEFAULT, PINTLE_BF_BAND,
-    # Akıştan boyutlandırılan karşılaştırma çapı için (künye metninde geçiyor).
-    PINTLE_ANNULUS_T_OVER_DP,
+    # V301/E1: kanon pintle geometrisinin TEK çözücüsü + imalat alt sınırı.
+    resolve_pintle_geometry, PintleGeometryInputError, ANNULUS_GAP_MIN_MM,
     # ÖH D25 / P16B1-45: plaka çözücüsünün Cd'si artık kendi çıplak
     # varsayılanından değil, devrenin TEK kaynağından gelir.
     default_discharge_coefficient,
@@ -49,7 +49,9 @@ from hrma.engines.injector_design import (
     # ÖH D37 A2 hibrit · 7. tur (karar §28-25): kırpılmış planın hedef debi
     # denetimi — tolerans, künyesi, sınıf adı ve doğrulama kaydı TEK yerde.
     CLAMPED_PLAN_TARGET_FLOW_REL_TOL, CLAMPED_PLAN_TARGET_FLOW_TOL_BASIS,
-    TARGET_FLOW_NOT_MET, clamped_plan_target_flow_record, band_warning_decimals)
+    TARGET_FLOW_NOT_MET, clamped_plan_target_flow_record, band_warning_decimals,
+    # V301/E2: çarpışma yarı açısı ve girdap odası oranı TEK kaynaktan.
+    IMPINGE_HALF_ANGLE_DEG, SWIRL_CHAMBER_D_OVER_DO)
 # Chug ΔP/Pc eşiği: TEK SAYISAL TANIM acoustic_modes'tadır. v2.6.27 (parti 31)
 # öncesinde bu modül eşiği İKİ biçimde kopyalıyordu — hesapta çıplak 0.15/0.20
 # literalleri, kullanıcıya giden uyarı METNİNDE ise ">=15%" dizesi. Dize
@@ -143,7 +145,8 @@ DENSITY_SOURCE_NIST = 'NIST WebBook'      # artık ürün yolunda BASILMAZ
 DENSITY_SOURCE_LOCAL = 'local fallback'   # artık ürün yolunda BASILMAZ
 
 # Impingement (like-on-like doublet) sabitleri — NASA SP-8089 tipik değerleri
-IMPINGEMENT_HALF_ANGLE_DEG = 30.0   # 2θ = 60° çarpışma açısı
+# V301/E2: yarı açı devre modülünün sayısıdır (kimlik takma adı, kopya yok).
+IMPINGEMENT_HALF_ANGLE_DEG = IMPINGE_HALF_ANGLE_DEG   # 2θ = 60° çarpışma açısı
 IMPINGEMENT_DISTANCE_LD = 6.0       # çarpışma noktası ≈ 6·d_j (5-7 bandı ortası)
 
 # --------------------------------------------------------------------------
@@ -167,10 +170,36 @@ IMPINGEMENT_DISTANCE_LD = 6.0       # çarpışma noktası ≈ 6·d_j (5-7 band�
 PLATE_THICKNESS_DEFAULT_MM = 3.0            # showerhead plakası
 IMPINGEMENT_PLATE_THICKNESS_DEFAULT_MM = 5.0   # çarpışmalı doublet plakası
 
-# Koaksiyel (tek akışkan) sabitleri
-COAX_INNER_FLOW_FRACTION = 0.6      # iç jet debi payı (kalan: dış anülüs)
-COAX_RECESS_LD = 1.0                # iç jet girintisi ≈ 1·d_inner
-COAX_WALL_MIN_MM = 0.5              # iç boru et kalınlığı alt sınırı
+# V301/HİBRİT-DIŞA (kalem 4; T-ÇAPA-C2 D3 / DEVİR C1-FİZİK (a)) — KAZANILMAMIŞ
+# PLAKADA SAYI YAYIMLANMAZ. ÖLÇÜLDÜ (olcum/plaka_once.json): plaka kalınlığı
+# verilmeyen hibrit showerhead yanıtı ``injector.plate_thickness`` = 3,0 ve
+# ``L_D_ratio`` = 1,5547 yayımlıyordu (``plate_thickness_earned = false``);
+# arayüz/rapor "değerlendirilmedi" derken API sayıyı taşıyordu ve plaka yapısal
+# denetimi (app.py ``_injector_plate_report``) bu 3,0 mm'yi plaka kalınlığı
+# diye okuyordu. Artık kazanılmamışsa ``plate_thickness``, ``L_D_ratio`` ve
+# ``l_d_ratio`` ``null``; dayanak ``plate_thickness_basis`` / ``l_d_ratio_basis``
+# künyesinde, hüküm alıkonma uyarısında. Modülün iç hesabı (C_d için beyanlı
+# L/D) değişmedi; yalnız yayın.
+LD_NOT_ISSUED_WARNING = (
+    "L/D band check NOT ISSUED: no plate thickness (orifice length) was "
+    "supplied, so L/D is not computed for this design; supply plate_thickness "
+    "to obtain the 3-5 band verdict.")
+
+
+def _yayin_plaka_mm(params, kazanildi):
+    """Yayımlanan plaka kalınlığı [mm]: yalnız KAZANILMIŞSA sayı, değilse None."""
+    return params['t_plate'] * 1000 if kazanildi else None
+
+# Koaksiyel (tek akışkan) sabitleri — V301/H2: TEK tanım devre modülünde
+# (``hrma/engines/injector_design.py``): tek akışkanlı koaksiyel eleman
+# artık devrenin kanonudur (``design_coaxial_element``) ve bu blok onun
+# geometrisini tüketir. Buradaki adlar o sabitlerin KİMLİK takma adlarıdır
+# (E2'nin ``SWIRL_CHAMBER_D_RATIO`` deseni); sayılar DEĞİŞMEDİ. V301/E2:
+# pay bandın dışındaysa KIRPILMAZ — uçta HTTP 422, setter'da ValueError.
+from hrma.engines.injector_design import (  # noqa: E402
+    COAX_INNER_FLOW_FRACTION, COAX_INNER_FLOW_FRACTION_BAND,
+    COAX_INNER_FLOW_FRACTION_BASIS, COAX_RECESS_LD, COAX_WALL_MIN_MM,
+    COAX_RECESS_BASIS, COAX_ELEMENT_COUNT_BASIS, coaxial_element_geometry)
 
 # Yerel yoğunluk yedeği [kg/m³] — Z1 ONARIMI: ARTIK SABİT DEĞİL.
 #
@@ -199,14 +228,25 @@ def _local_density_fallback():
     except _DurumHatasi:      # pragma: no cover - bozuk kurulum
         return None
 
-# Pintle anülüs boşluğu imalat bandı [m] (0.3-3.0 mm)
-PINTLE_GAP_MIN_M = 0.0003
+# Pintle anülüs boşluğu imalat bandı [m] (0.3-3.0 mm; HRMA seçimi). Alt
+PINTLE_GAP_MIN_M = ANNULUS_GAP_MIN_MM * 1e-3   # sınır kardeş modülden (V301/E1)
 PINTLE_GAP_MAX_M = 0.003
 
 # Nurick kavitasyon kriteri (F044): K_c = (P₁−P_v)/(P₁−P₂); K_c < ~1.5 →
 # kavitasyon/hidrolik flip riski. Kaynak: Nurick, ASME J. Fluids Eng. 98
 # (1976). Kardeş modül (engines/injector_design.py FLIP_KC_LIMIT) ile aynı eşik.
 NURICK_KC_LIMIT = 1.5
+# v3.0.1 (V301/H3, E2 KARAR-8): kendinden basınçlı N₂O'da enjektör girişi
+# doymuş sıvıdır (P₁ = P_v), Nurick K_c = 0 TANIM GEREĞİDİR ve akış iki
+# fazlıdır; devre bunu Dyer NHNE ile modeller. "Cavitation risk" / "Flash
+# boiling risk detected" metinleri beklenen ve modellenen hâli risk diye
+# abartıyordu. Doymuş girişte bu iki uyarı yerine TEK bilgi kaydı basılır;
+# kullanıcı tank kipinde (P₁ > P_v) değerlendirme aynen kalır.
+SATURATED_INLET_NOTE_CODE = 'info.injector.saturated_inlet_two_phase'
+SATURATED_INLET_NOTE = (
+    'Saturated N2O inlet (K_c = 0): flashing two-phase flow is expected and '
+    'is modelled by Dyer NHNE in the injector circuit; hydraulic-flip '
+    'verdict: see the circuit')
 # N₂O dışı (depolanabilir) sıvılar için buhar basıncı varsayımı [bar] —
 # engines modülüyle aynı politika (~hava basıncı altı).
 VAPOR_PRESSURE_ASSUMED_BAR = 0.05
@@ -221,7 +261,30 @@ N2O_PSAT_FALLBACK_BAR = 50.525
 # - Girdap odası çapı oranı: D_s = 2.5·d_o (engines: r_s = 2.5·r_o).
 # Kaynak: Lefebvre & McDonell, Atomization and Sprays 2. baskı, Böl. 6.
 SWIRL_DEFAULT_HALF_ANGLE_DEG = 45.0
-SWIRL_CHAMBER_D_RATIO = 2.5
+SWIRL_CHAMBER_D_RATIO = SWIRL_CHAMBER_D_OVER_DO   # V301/E2: kimlik takma adı
+
+# V301/E2 — iki uyarı bandının KAYNAĞI YOK. Depoda ve kardeş modülde bu
+# bantlara atıf aranıp bulunamadı (grep: 20-50 m/s ve L/D 3-5); enjeksiyon
+# hızı göstergesinin 20-50 yeşil bandı da aynı gerekçeyle 3 Ağustos 2026'da
+# söküldü (visualization.py, T43). L/D için NASA SP-8089 s. 84 (devre
+# modülündeki FLIP_SENSITIVE_LD_BAND künyesi) "4-6 arası ara L/D hidrolik
+# flip'e özellikle duyarlıdır" der — yani 3-5 bir "optimum" değildir. Bantlar
+# HRMA buluşsal eşiği olarak kalır; uyarı metni "optimal" demez.
+INJECTION_VELOCITY_HEURISTIC_BAND_M_S = (20.0, 50.0)
+ORIFICE_LD_HEURISTIC_BAND = (3.0, 5.0)
+# Çarpışma tam açısı bandı [derece]. Uyarı metni bandı "NASA SP-8089"a
+# dayandırıyordu; deponun birincil metin okuması (docs/arastirma/
+# 2026-10-05/notlar/SP-S1/SP-8089.md, madde 10) SP-8089 s. 78-79'un bant
+# DEĞİL tek değer önerdiğini kaydediyor: unlike ve like-impinging için 60°.
+# 40-90° HRMA buluşsal eşiğidir; metin kaynağı doğru söyler.
+IMPINGEMENT_ANGLE_HEURISTIC_BAND_DEG = (40.0, 90.0)
+
+
+def _carpisma_acisi_bant_metni(tam_aci):
+    lo, hi = IMPINGEMENT_ANGLE_HEURISTIC_BAND_DEG
+    return (f"Impingement angle ({tam_aci:.0f} deg) outside the "
+            f"{lo:.0f}-{hi:.0f} deg band (HRMA heuristic threshold - no "
+            f"literature value; NASA SP-8089 pp. 78-79 recommends 60 deg)")
 
 # N₂O doyma tablosu — determinist (CoolProp'suz), engines modülüyle aynı
 # kaynak. OH-D30-01: örnek modül YÜKÜNDE değil, İLK KULLANIMDA kurulur ve
@@ -245,7 +308,7 @@ class InjectorDesign:
                  discharge_coefficient=None,
                  discharge_coefficient_basis=None,
                  injector_type='showerhead', oxidizer_temp=Ellipsis,
-                 oxidizer_type='n2o'):
+                 oxidizer_type='n2o', oxidizer_density_source=None):
         # Z1: ``oxidizer_viscosity`` varsayılanı 0.0002 Pa·s idi. O sayı
         # akışkandan bağımsızdı ve N₂O'nun ~247 K viskozitesine denk düşüyor;
         # 293 K'deki gerçeği 6,817e-5 (2,9 kat), LOX'unki 1,95e-4, H₂O₂'ninki
@@ -295,6 +358,10 @@ class InjectorDesign:
         # düşer; aşağıdaki kollar bunu görüp beyan eder / fail-closed olur.
         _ox_raw = '' if oxidizer_type is None else str(oxidizer_type).strip().lower()
         self.oxidizer_type = _ox_raw or OXIDIZER_UNSPECIFIED
+        # v3.0.1 (V301/H3): doymuş giriş bayrağı (P₁ = P_v). Uç, devrenin
+        # besleme kaynağına bakarak kurar; varsayılan kapalıdır (Python API ve
+        # kullanıcı tank kipi eski değerlendirmeyi aynen alır).
+        self.saturated_inlet = False
 
         print(f"Fetching oxidizer properties... "
               f"({self.oxidizer_type}, T={oxidizer_temp:.0f}K, P={tank_pressure:.1f} bar)")
@@ -327,7 +394,20 @@ class InjectorDesign:
         # ---------------------------------------------------------------
         self.density_state_warning = None
         user_gave_density = oxidizer_density is not None
-        if user_gave_density:
+        if user_gave_density and oxidizer_density_source:
+            # V301/E2 (devir madde 9) — YOĞUNLUK ÇAĞIRANIN ÇÖZÜCÜSÜNDEN.
+            # Kullanıcı tank basıncı kipinde devre, N₂O'yu enjektör GİRİŞ
+            # hâlinde (P₁, T) sıkıştırılmış sıvı olarak çözer; bu blok ise
+            # doymuş sıvı yoğunluğuyla hız basıyordu (ölçüldü, N₂O 60 bar:
+            # plaka 60,7 ⟷ devre 59,3 m/s). Çağıran (app.py) devrenin
+            # yoğunluğunu kaynağıyla verir: künye 'user input' DEĞİL o
+            # kaynaktır ve durum sapma ikazı uygulanmaz (değer bir durum
+            # denkleminin sonucudur, kullanıcı sayısı değil).
+            self.rho_ox = float(oxidizer_density)
+            self.density_source = str(oxidizer_density_source)
+            self.mu_ox = self._resolve_viscosity(
+                oxidizer_viscosity, nist_data if is_valid else {})
+        elif user_gave_density:
             self.rho_ox = float(oxidizer_density)  # kg/m³
             self.density_source = DENSITY_SOURCE_USER
             # Viskozite: referans geçerliyse oradan, değilse parametre.
@@ -646,37 +726,75 @@ class InjectorDesign:
                 'caller supplied no plate thickness / orifice length'),
         }
 
-    def set_pintle_params(self, outer_diameter=50, pintle_diameter=25,
-                          secondary_holes='radial'):
-        """Pintle parametreleri.
+    def set_pintle_params(self, outer_diameter=None, pintle_diameter=None,
+                          secondary_holes='radial', radial_hole_count=None,
+                          radial_hole_diameter=None, annular_gap=None,
+                          skip_distance=None, tangential_angle=None,
+                          canon_geometry=None, canon_basis=None):
+        """Pintle parametreleri (mm / adet / derece; ``None`` = verilmedi).
 
-        ``secondary_holes`` (v2.6.27) uçtaki ikincil delik dizisini seçer ve
-        ARTIK sonuca girer. Arayüzde v2.6.2'den beri duruyordu ama toplayıcı
-        okumuyordu ve arka uçta tek satır karşılığı yoktu; ölçüldü ki
-        none/radial/tangential için yayımlanan enjektör bloğu bayt bayt
-        aynıydı (Ayberk madde 2).
+        V301/E1 — TEK KANONİK GEOMETRİ. ``canon_geometry`` devre çözücüsünün
+        (``engines/injector_design.py::design_injector`` →
+        ``resolve_pintle_geometry``) yayımladığı ``pintle_geometry``dir;
+        verilirse bu blok onu TÜKETİR ve hiçbir ölçüyü yeniden türetmez
+        (showerhead ``A_inj_canon`` deseni, ÖH D35 / OH-ON-01). Verilmezse
+        (devre çözülemedi ya da modül doğrudan kullanılıyor) AYNI çözücü bu
+        modülün kendi sıkıştırılamaz orifis alanıyla çağrılır ve kaynak
+        ``pintle_geometry_source`` alanında ADIYLA yazılır.
 
-        * ``none``       — uçta delik yok, tüm oksitleyici anülüsten geçer.
-          Bu GERÇEK bir geometri değişikliğidir: pintle bir anüler enjektöre
-          dejenere olur, TMR tanımsızlaşır ve sprey konisi radyal jetlerden
-          değil yalnız eksenel akıştan gelir.
-        * ``radial``     — klasik radyal delik dizisi (varsayılan; TRW mirası).
-        * ``tangential`` — delikler teğetsel açıyla delinir. Delik SAYISI ve
-          ÇAPI radyal durumla aynı kalır (aynı toplam alan, aynı ΔP), ama
-          momentumun bir bileşeni teğete gider. HRMA bu bileşeni ve doğurduğu
-          girdabı MODELLEMEZ; sayı uydurmak yerine beyan eder.
+        Boş ölçü = çözücü boyutlandırır: ``pintle_diameter`` akıştan;
+        ``outer_diameter`` (enjektör GÖVDESİNİN dış çapı) HİÇ
+        boyutlandırılmaz, beyan edilir. ``secondary_holes``: ``none`` (uçta
+        delik yok → eleman anüler enjektördür), ``radial`` (varsayılan),
+        ``tangential`` (teğetsel momentum MODELLENMEZ, beyan). v2.6.27'de
+        tanınmayan kip sessizce 'radial'e çevriliyordu; artık çözücünün
+        kapısından adıyla döner (``PintleGeometryInputError``).
         """
-        secim = str(secondary_holes or 'radial').strip().lower()
-        if secim not in ('none', 'radial', 'tangential'):
-            secim = 'radial'
+        istek = (('secondary_holes', secondary_holes),
+                 ('d_pintle_mm', pintle_diameter),
+                 ('annulus_gap_mm', annular_gap),
+                 ('n_radial_holes', radial_hole_count),
+                 ('radial_hole_d_mm', radial_hole_diameter),
+                 ('skip_distance_mm', skip_distance),
+                 ('housing_outer_diameter_mm', outer_diameter),
+                 ('tangential_angle_deg', tangential_angle))
         self.pintle_params = {
-            'D_outer': outer_diameter / 1000,  # Convert mm to m
-            'D_pintle': pintle_diameter / 1000,
-            'secondary_holes': secim,
+            'pin': {ad: deger for ad, deger in istek if deger is not None},
+            'canon': (dict(canon_geometry)
+                      if isinstance(canon_geometry, dict) else None),
+            'canon_basis': canon_basis,
         }
+        self._pintle_onbellek = None
+
+    def pintle_geometry(self):
+        """``(geometri, kanon_mu, kaynak)`` — kanon ya da aynı çözücü.
+
+        Önbelleklidir (uç kapısı ve ``calculate`` aynı sonucu kullanır).
+        Geçersiz/tutarsız ölçüde ``PintleGeometryInputError`` yükseltir; uç
+        onu 422'ye çevirir.
+        """
+        if getattr(self, '_pintle_onbellek', None) is not None:
+            return self._pintle_onbellek
+        p = self.pintle_params
+        if p.get('canon'):
+            sonuc = (dict(p['canon']), True,
+                     p.get('canon_basis') or DP_SOURCE_SOLVER)
+        else:
+            a_toplam = self.mdot_ox / (
+                self.C_d * np.sqrt(2 * self.rho_ox * self.delta_P_inj * 1e5))
+            sonuc = (resolve_pintle_geometry(a_toplam, p['pin'],
+                                             mdot_target_kg_s=self.mdot_ox),
+                     False,
+                     'incompressible orifice equation A = mdot/(Cd*sqrt('
+                     '2*rho*dP)) of this module (no injector circuit '
+                     'solution was supplied), sized by the same pintle '
+                     'resolver')
+        self._pintle_onbellek = sonuc
+        return sonuc
 
     def set_swirl_params(self, n_slots=6, slot_width=0, slot_height=0,
-                         chamber_diameter=0, target_half_angle=0):
+                         chamber_diameter=0, target_half_angle=0,
+                         canon_element=None):
         """Swirl parametreleri. chamber_diameter [mm] verilirse D_s olarak
         K = A_p/(D_s·d_o) bağıntısında kullanılır (verilmezse eski
         D_s = 2.5·d_o oranı). target_half_angle [derece] verilirse sentez
@@ -690,12 +808,18 @@ class InjectorDesign:
             'D_s': chamber_diameter / 1000 if chamber_diameter > 0 else None,
             'theta_target': (float(target_half_angle)
                              if target_half_angle and target_half_angle > 0
-                             else None)
+                             else None),
+            # V301/E2: devrenin swirl elemanı (KANON). Verilirse eleman
+            # sayısı, çıkış orifis çapı, K/X/Cd/θ, oda çapı ve teğet giriş
+            # alanı ondan TÜKETİLİR; bu blok yalnız dikdörtgen yuva ölçüsünü
+            # (verilmediyse) aynı giriş alanından türetir.
+            'canon': (dict(canon_element) if isinstance(canon_element, dict)
+                      else None),
         }
 
     def set_impingement_params(self, n_pairs=0, impingement_angle=2 * IMPINGEMENT_HALF_ANGLE_DEG,
                                hole_diameter_min=None, hole_diameter_max=None,
-                               plate_thickness=None):
+                               plate_thickness=None, canon_plan=None):
         """Like-on-like doublet parametreleri (tek akışkan, kendi içinde çarpışan).
 
         P15B1-02 ikizi: plaka kalınlığı verilmediyse sayı modül
@@ -715,6 +839,11 @@ class InjectorDesign:
         self.impingement_params = {
             'n_pairs': int(n_pairs),
             'full_angle_deg': impingement_angle,
+            # V301/E2: devrenin benzer-akışkan çift planı (KANON). Verilirse
+            # delik sayısı, çapı, alanı ve açı ondan TÜKETİLİR; bu blok
+            # yeniden boyutlandırmaz (showerhead ``_kanon_plan`` / E1 deseni).
+            'canon': (dict(canon_plan) if isinstance(canon_plan, dict)
+                      else None),
             'd_min': hole_diameter_min / 1000,
             'd_max': hole_diameter_max / 1000,
             't_plate': t_mm / 1000,
@@ -728,11 +857,30 @@ class InjectorDesign:
         }
 
     def set_coaxial_params(self, inner_flow_fraction=COAX_INNER_FLOW_FRACTION,
-                           wall_thickness=0):
-        """Koaksiyel (iç jet + dış anülüs, tek akışkan hibrit ox) parametreleri."""
+                           wall_thickness=0, inner_flow_fraction_source=None,
+                           canon_element=None):
+        """Koaksiyel (iç jet + dış anülüs, tek akışkan hibrit ox) parametreleri.
+
+        V301/E2: pay ``COAX_INNER_FLOW_FRACTION_BAND`` dışındaysa SESSİZCE
+        kırpılmaz (eskiden ``min(max(f, 0,1), 0,9)``): ``ValueError``. Uç
+        (/calculate) aynı bandı 422 ile adıyla reddeder.
+
+        V301/H2: ``canon_element`` devrenin ``coaxial_geometry`` sözlüğüdür
+        (``design_coaxial_element``); verilirse blok toplam alanı, payı ve
+        geometriyi ONDAN tüketir (ekran = devre)."""
+        f = finite_number(inner_flow_fraction)
+        lo, hi = COAX_INNER_FLOW_FRACTION_BAND
+        if f is None or not (lo <= f <= hi):
+            raise ValueError(
+                f'inner_flow_fraction must be a finite number in [{lo:g}, '
+                f'{hi:g}] (got {inner_flow_fraction!r}); it is not clamped. '
+                + COAX_INNER_FLOW_FRACTION_BASIS)
         self.coaxial_params = {
-            'f_inner': min(max(inner_flow_fraction, 0.1), 0.9),
-            't_wall': wall_thickness / 1000 if wall_thickness > 0 else None
+            'f_inner': float(f),
+            'f_inner_source': inner_flow_fraction_source,
+            't_wall': wall_thickness / 1000 if wall_thickness > 0 else None,
+            'canon': (dict(canon_element) if isinstance(canon_element, dict)
+                      else None),
         }
 
     def calculate(self):
@@ -943,12 +1091,7 @@ class InjectorDesign:
         # ÖH D35 / OH-ON-01 — kanon planın bant ihlali de yanıtta durur.
         warn_list.extend(kanon_bant_kaydi)
         if not ld_kazanildi:
-            warn_list.append(
-                f"L/D band check NOT ISSUED: L/D = {L_D:.4g} is computed "
-                f"from the module default plate thickness "
-                f"({params['t_plate'] * 1000:.1f} mm), not from this "
-                "design; supply plate_thickness (orifice length) to obtain "
-                "the 3-5 band verdict.")
+            warn_list.append(LD_NOT_ISSUED_WARNING)
         # Hedef hız girdisi (F129): hız delik sayısıyla DEĞİL, ΔP ve Cd ile
         # belirlenir. Kullanıcının hedefi tutmuyorsa gereken ΔP bildirilir —
         # girdiyi sessizce yutmak yerine ne yapılması gerektiği söylenir.
@@ -969,10 +1112,10 @@ class InjectorDesign:
             'type': 'showerhead',
             'n_holes': n_holes,
             'hole_diameter': d_h * 1000,  # mm
-            'plate_thickness': params['t_plate'] * 1000,  # mm
+            'plate_thickness': _yayin_plaka_mm(params, ld_kazanildi),  # mm
             'plate_thickness_earned': ld_kazanildi,
             'plate_thickness_basis': params.get('t_plate_basis'),
-            'L_D_ratio': L_D,  # eski ad — geriye dönük uyum için korunur
+            'L_D_ratio': (L_D if ld_kazanildi else None),  # eski ad — geriye dönük uyum için korunur
             'exit_velocity': v_exit,
             'target_velocity': (float(v_target) if v_target else None),
             'pressure_drop_for_target_velocity_bar': (
@@ -990,7 +1133,7 @@ class InjectorDesign:
             'warnings': warn_list
         }
         result.update(self._common_outputs(
-            A_inj, v_exit, d_h, L_D,
+            A_inj, v_exit, d_h, (L_D if ld_kazanildi else None),
             l_d_earned=ld_kazanildi,
             l_d_basis=params.get('t_plate_basis')))
         # ÖH D37 A2 hibrit · 7. tur (karar §28-25): kırpılan kanon DIŞI planın
@@ -1005,235 +1148,121 @@ class InjectorDesign:
         return result
 
     def _calculate_pintle(self):
-        """Pintle enjektör — radyal delik dizisi + anülüs (tek akışkan).
+        """Pintle enjektör — uç delik sırası + anülüs (tek akışkan, hibrit).
 
-        v2.6.27 (B3) — BU DAL PINTLE'I ÇIPLAK BİR ANÜLÜS SANIYORDU.
-        Depoda iki bağımsız enjektör modülü vardı ve radyal delik modeli
-        YALNIZ kardeş modüldeydi (``engines/injector_design.py``). Ekrana
-        çizilen ve tabloya basılan model buydu; dolayısıyla hibrit sayfası
-        pintle'ın tanımlayıcı unsurunu — uçtaki radyal delik dizisini — HİÇ
-        göstermiyordu. Ölçüldü (ṁ_ox 1.80 kg/s, Pc 30 bar): bu blok
-        ``number_of_orifices``/radyal delik alanı taşımazken AYNI yanıttaki
-        ``injector_design_detail.pintle_geometry`` 17 × 1.43 mm radyal delik
-        + 0.63 mm anülüs raporluyordu. Kullanıcı "radyal delik üretilmiyor"
-        derken haklıydı.
+        v2.6.27 (B3) bu dalı çıplak anülüsten radyal delikli modele taşımıştı
+        ama ekran bloğu yine KENDİ geometrisini kuruyordu: pintle çapı formun
+        boş alanına düşen uç yedeğiydi (25 mm, motor boyutundan bağımsız) ve
+        aynı yanıtın devre çözücüsü başka bir çapla başka bir delik planı
+        yayımlıyordu. V301/E1 ÖLÇÜMÜ (``docs/scofield/raw/OH/V301/ayberk1/
+        enjektor-pintle/once.json``, 1 kN / Pc 20 bar / N2O-HTPB):
 
-        Sentez artık TEK kaynaktan gelir: ``engines/injector_design.py::
-        pintle_tip_geometry`` (aynı fonksiyonu ``design_injector``'ın iki
-        pintle dalı da çağırır), yani tablo, 2B kesit ve şema aynı geometriyi
-        anlatır.
+            ekran : D_p 25 mm    437 × Ø0,104 mm  anülüs 0,047 mm
+            devre : D_p 5,639 mm  16 × Ø0,646 mm  anülüs 0,282 mm
+            motor özeti: number_of_orifices = 3 (eşdeğer düz orifis planı)
 
-        GEOMETRİK TUTARSIZLIK DÜZELTMESİ: eski kod ``D_outer``'ı anülüsün DIŞ
-        duvarı sayıp ``D_avg = (D_o+D_p)/2`` ile boşluğu çözüyordu. Sonuç
-        kendi içinde çelişiyordu — aynı sözlükte D_o = 50.0 mm, D_p = 25.0 mm
-        ve gap = 0.57 mm yan yana duruyordu; oysa 50 ile 25 arasındaki gerçek
-        radyal boşluk 12.5 mm'dir. ``outer_diameter`` gerçekte GÖVDE (housing)
-        dış çapıdır — arayüzün kendi kullanımı da budur (``app.js``: gövde
-        çapı oda çapının %90'ını aşarsa uyarır) ve kesit çizimi de onu gövde
-        duvarı olarak çizer. Anülüs artık pintle miline oturur:
-        A_ann = π·(D_p+t)·t, kılıf deliği D_bore = D_p + 2t; gövde duvarı
-        (D_outer − D_bore)/2 olarak ayrıca raporlanır.
+        Kullanıcı üç sayı görüyordu ve ekrandaki imal edilemezdi.
+
+        Artık geometri ``pintle_geometry()``den gelir: devre çözücüsünün
+        kanonu (``resolve_pintle_geometry``) ya da — kanon yoksa — aynı
+        çözücü bu modülün alanıyla. Burada HİÇBİR ölçü yeniden türetilmez;
+        imalat bandı dışı ölçü KIRPILMAZ, adıyla bildirilir (kırpmak aynı
+        yanıtta ikinci bir enjektör yayımlamak olurdu — showerhead kanon
+        planının kuralı). Hız süreklilikten, Re anülüs boşluğundan.
+
+        ``outer_diameter`` GÖVDE (housing) dış çapıdır; verilmediyse ``None``
+        yayımlanır ve gövde boyutlandırılmaz (``housing_basis``). Kılıf
+        deliği D_bore = D_p + 2t her zaman yayımlanır.
         """
-        params = self.pintle_params
-        D_body = params['D_outer']       # gövde (housing) dış çapı [m]
-        D_pintle = params['D_pintle']    # merkez pintle mili çapı [m]
-
-        # Toplam oksitleyici akış alanı (orifis denklemi)
-        delta_P_Pa = self.delta_P_inj * 1e5
-        A_total = self.mdot_ox / (self.C_d * np.sqrt(2 * self.rho_ox * delta_P_Pa))
-
+        geo, kanon, kaynak = self.pintle_geometry()
+        pg = dict(geo)
+        secim = pg['secondary_holes']
+        gap = pg['annulus_gap_mm'] / 1000.0
+        a_inj = pg['total_flow_area_mm2'] * 1e-6
         extra_warnings = []
 
-        # Akış payı: radyal delikler / anülüs. Aynı akışkan ve aynı ΔP olduğu
-        # için hızlar eşittir, dolayısıyla TMR = f/(1−f) ve sprey konisi
-        # doğrudan bu paydan gelir (Cheng 2017).
-        # v2.6.27 — 'Secondary Holes' seçimi burada sonuca giriyor.
-        secim = params.get('secondary_holes', 'radial')
         if secim == 'none':
-            # Uçta delik yok: tüm akış anülüsten. Pintle bir anüler enjektöre
-            # dejenere olur; radyal jet olmadığı için TMR ve ondan türeyen
-            # sprey konisi TANIMSIZDIR (uydurulmaz, None yayımlanır).
-            f_rad = 0.0
-        else:
-            f_rad = float(PINTLE_HYBRID_RADIAL_FRACTION)
-        a_ann = (1.0 - f_rad) * A_total
-
-        # Anülüs boşluğu TAM ifadeden: A = π(D_p+t)·t
-        gap = (np.sqrt(D_pintle ** 2 + 4.0 * a_ann / np.pi) - D_pintle) / 2.0
-
-        # v2.6.2'den devralınan imalat bandı koruması (F016). Eski sürüm bandı
-        # bağladığında D_outer'ı yeniden çözüyordu; artık kullanıcının verdiği
-        # çaplar KORUNUR ve akış payı kaydırılarak TOPLAM alan (yani teslim
-        # debisi) korunur — f_rad modelin kendi büyüklüğüdür ve raporlanır.
-        gap_clamped = float(min(max(gap, PINTLE_GAP_MIN_M), PINTLE_GAP_MAX_M))
-        if not np.isclose(gap_clamped, gap, rtol=1e-9):
-            a_ann_clamped = np.pi * (D_pintle + gap_clamped) * gap_clamped
-            f_rad_new = 1.0 - a_ann_clamped / A_total
-            f_rad_lim = float(np.clip(f_rad_new, 0.1, 0.9))
-            if np.isclose(f_rad_lim, f_rad_new, rtol=1e-9):
-                f_rad = f_rad_lim
-                a_ann = a_ann_clamped
-                gap = gap_clamped
-                extra_warnings.append(
-                    f"Annulus gap clamped to the manufacturing band "
-                    f"({PINTLE_GAP_MIN_M * 1e3:.1f}-{PINTLE_GAP_MAX_M * 1e3:.1f} mm); "
-                    f"the radial/annular flow split was re-solved to "
-                    f"{f_rad * 100:.0f}% radial so the total injection area "
-                    f"(and therefore the target flow rate) is preserved.")
-            else:
-                # Payı bandına kırpmak toplam alanı bozar; geometri korunur ve
-                # boşluğun imalat sınırının dışında kaldığı SAYIYLA bildirilir.
-                extra_warnings.append(
-                    f"Annulus gap ({gap * 1e3:.2f} mm) falls outside the "
-                    f"manufacturing band "
-                    f"({PINTLE_GAP_MIN_M * 1e3:.1f}-{PINTLE_GAP_MAX_M * 1e3:.1f} mm) "
-                    f"and cannot be corrected by shifting the flow split; "
-                    f"resize D_pintle.")
-
-        a_rad = A_total - a_ann
-
-        # --- TEK KAYNAK: uç geometrisi kardeş modülden --------------------
-        tip = pintle_tip_geometry(a_rad, a_ann, d_pintle_m=D_pintle,
-                                  bf_target=PINTLE_BF_TARGET_DEFAULT)
-        if secim == 'none':
-            # Delik yok: sentez fonksiyonu alan sıfırken taban delik sayısı
-            # döndürür (n >= 4), o sayı burada YANLIŞ olur. Delik alanları
-            # sıfırlanır, BF tanımsızdır.
-            tip = dict(tip)
-            tip['n_radial_holes'] = 0
-            tip['radial_hole_d_mm'] = 0.0
-            tip['bf'] = 0.0
-        gap = tip['annulus_gap_mm'] / 1000.0
-        if secim == 'none':
-            tmr = None
-            spray_half_angle = None
-        else:
-            tmr = f_rad / max(1.0 - f_rad, 1e-9)
-            spray_half_angle = pintle_spray_angle(tmr)
-
-        pintle_geometry = dict(tip)
-        pintle_geometry['secondary_holes'] = secim
-        pintle_geometry['radial_flow_fraction'] = f_rad
-        pintle_geometry['single_fluid'] = True
-        pintle_geometry['spray_half_angle_deg'] = spray_half_angle
-        pintle_geometry['tmr'] = None if tmr is None else float(tmr)
-
-        if secim == 'none':
-            pintle_geometry['tmr_basis'] = (
-                'NOT_APPLICABLE: no secondary holes, so there is no radial jet '
-                'and the radial-to-annular momentum ratio is undefined. The '
-                'injector degenerates to a plain annular element; the spray '
-                'cone is set by the annular sheet, not by a pintle jet.')
             extra_warnings.append(
                 "Secondary holes set to 'none': the pintle tip has no radial "
                 "jets, so this is an annular injector, not a pintle. TMR and "
                 "the pintle spray-cone correlation do not apply and are not "
                 "reported.")
         elif secim == 'tangential':
-            pintle_geometry['tangential_momentum_modelled'] = False
-            pintle_geometry['tangential_basis'] = (
-                'NOT_MODELLED: the holes are drilled tangentially, so part of '
-                'the jet momentum goes into swirl. Hole count, hole diameter '
-                'and total area are the same as the radial case (same area, '
-                'same pressure drop), but the swirl component and the wider '
-                'spray cone it produces are NOT modelled. The reported spray '
-                'half-angle is the RADIAL-injection value and is therefore a '
-                'lower bound.')
             extra_warnings.append(
                 "Secondary holes set to 'tangential': HRMA sizes the holes "
                 "(count, diameter, area) but does not model the tangential "
                 "momentum component or the swirl it induces. The reported "
                 "spray half-angle is the radial-injection value, i.e. a lower "
                 "bound for the real cone.")
-        pintle_geometry['radial_hole_area_mm2'] = float(a_rad * 1e6)
-        pintle_geometry['annulus_area_mm2'] = float(a_ann * 1e6)
 
-        # --- İKİ BLOĞUN ÇELİŞMESİNİ ÖNLEYEN KÜNYE (B3 devamı, ana model) ---
-        # Aynı yanıtta iki pintle geometrisi yayımlanıyor: bu blok (ekran) ve
-        # ``injector_design_detail`` (motorun devre çözümü). İkisi AYNI
-        # ``pintle_tip_geometry`` fonksiyonunu çağırıyor ama FARKLI pintle
-        # çapıyla besleniyor: burada kullanıcının form değeri, orada akıştan
-        # kendinden tutarlı çözülen değer. ÖLÇÜLDÜ (1 kN, Pc 20 bar, HTPB/N2O):
-        # 25,0 mm -> 182 x 0,250 mm delik ; 5,74 mm -> 17 x 0,623 mm.
-        # Sayılar farklı olabilir — yanlış olan, hangisinin ne olduğunun
-        # yazmamasıydı. Künye artık ikisini de taşır, böylece kullanıcı iki
-        # bloğu karşılaştırabilir ve farkın SEBEBİNİ görür.
-        pintle_geometry['d_pintle_source'] = 'user input (pintle_diameter)'
-        akis_capi = pintle_tip_geometry(a_rad, a_ann, d_pintle_m=None,
-                                        bf_target=PINTLE_BF_TARGET_DEFAULT)
-        pintle_geometry['flow_sized_d_pintle_mm'] = akis_capi['d_pintle_mm']
-        pintle_geometry['flow_sized_n_radial_holes'] = akis_capi['n_radial_holes']
-        pintle_geometry['flow_sized_radial_hole_d_mm'] = akis_capi['radial_hole_d_mm']
-        pintle_geometry['flow_sizing_basis'] = (
-            'annulus gap/diameter rule t = %.3f * D_p (Dressler & Bauer, '
-            'AIAA 2000-3871); reported for comparison only, the geometry '
-            'above uses the supplied pintle diameter.'
-            % PINTLE_ANNULUS_T_OVER_DP)
-
-        # Radyal delik çapı imalat bandının ALTINA düşerse SESSİZ KALMA.
-        # Modül pintle özellikleri için 0,3 mm alt sınırını zaten beyan ediyor
-        # (PINTLE_GAP_MIN_M); aynı gerekçe delikler için de geçerlidir.
-        if tip['radial_hole_d_mm'] < PINTLE_GAP_MIN_M * 1e3:
+        # --- İmalat hükümleri: kanon KIRPILMAZ, beyan edilir --------------
+        if not (PINTLE_GAP_MIN_M <= gap <= PINTLE_GAP_MAX_M):
             extra_warnings.append(
-                f"Pintle radial holes come out at "
-                f"{tip['radial_hole_d_mm']:.3f} mm across "
-                f"{tip['n_radial_holes']} holes, below the "
+                f"Annulus gap ({gap * 1e3:.3f} mm) falls outside the "
+                f"manufacturing band "
+                f"({PINTLE_GAP_MIN_M * 1e3:.1f}-{PINTLE_GAP_MAX_M * 1e3:.1f} mm). "
+                f"The pintle geometry is NOT resized here: resizing would "
+                f"publish a second, different injector in the same answer. "
+                f"Change the pintle diameter or the annular gap.")
+        d_delik = pg['radial_hole_d_mm']
+        if secim != 'none' and d_delik < PINTLE_GAP_MIN_M * 1e3:
+            if pg['sizing_sources'].get('d_pintle_mm') == 'request':
+                surucu = (
+                    f"The supplied pintle diameter "
+                    f"({pg['d_pintle_mm']:.1f} mm) is the driver; the "
+                    f"flow-sized diameter for this mass flow is "
+                    f"{pg['flow_sized_d_pintle_mm']:.2f} mm "
+                    f"({pg['flow_sized_n_radial_holes']} x "
+                    f"{pg['flow_sized_radial_hole_d_mm']:.3f} mm).")
+            else:
+                surucu = ("Fix fewer holes (pintle_radial_hole_count) or a "
+                          "larger hole diameter.")
+            extra_warnings.append(
+                f"Pintle radial holes come out at {d_delik:.3f} mm across "
+                f"{pg['n_radial_holes']} holes, below the "
                 f"{PINTLE_GAP_MIN_M * 1e3:.2f} mm feature limit this module "
                 f"declares for pintle geometry: the tip is not manufacturable "
-                f"as drawn. The supplied pintle diameter "
-                f"({D_pintle * 1e3:.1f} mm) is the driver; the flow-sized "
-                f"diameter for this mass flow is "
-                f"{akis_capi['d_pintle_mm']:.2f} mm "
-                f"({akis_capi['n_radial_holes']} x "
-                f"{akis_capi['radial_hole_d_mm']:.3f} mm).")
-
-        if not (PINTLE_BF_BAND[0] <= tip['bf'] <= PINTLE_BF_BAND[1]):
+                f"as drawn. " + surucu)
+        elif secim != 'none' and pg.get('radial_hole_d_band_class') in (
+                ORIFICE_D_CLASS_BELOW, ORIFICE_D_CLASS_ABOVE):
+            lo, hi = pg['radial_hole_d_band_mm']
             extra_warnings.append(
-                f"Pintle blockage factor BF = {tip['bf']:.3f} is outside the "
-                f"TRW heritage band {PINTLE_BF_BAND[0]:.2f}-"
-                f"{PINTLE_BF_BAND[1]:.2f} (Dressler & Bauer, AIAA 2000-3871).")
-
-        # Kılıf deliği ve gövde duvarı — 'outer_diameter' GÖVDE çapıdır.
-        D_bore = D_pintle + 2.0 * gap
-        body_wall = (D_body - D_bore) / 2.0
-        if body_wall <= 0:
+                f"Pintle hole diameter {d_delik:.3f} mm is outside the "
+                f"orifice design band ({lo:.2f}-{hi:.2f} mm, "
+                f"{pg['radial_hole_d_band_source'].split(':')[0]}); the hole "
+                f"plan is NOT resized here.")
+        if secim != 'none' and not (
+                PINTLE_BF_BAND[0] <= pg['bf'] <= PINTLE_BF_BAND[1]):
             extra_warnings.append(
-                f"Injector body outer diameter ({D_body * 1e3:.1f} mm) does "
-                f"not enclose the annulus bore ({D_bore * 1e3:.2f} mm); the "
-                f"housing wall would be negative. Increase the outer diameter.")
+                f"Pintle blockage factor BF = {pg['bf']:.3f} is outside the "
+                f"HRMA design band {PINTLE_BF_BAND[0]:.2f}-"
+                f"{PINTLE_BF_BAND[1]:.2f} (band source not verified; it is "
+                f"not in Dressler & Bauer, AIAA 2000-3871).")
 
-        # Teslim edilebilir debi — toplam alan hedeften saparsa açıkça raporla
-        A_inj = a_rad + a_ann
-        mdot_delivered = self.C_d * A_inj * np.sqrt(2 * self.rho_ox * delta_P_Pa)
-        if abs(mdot_delivered - self.mdot_ox) > 0.01 * self.mdot_ox:
-            extra_warnings.append(
-                f"Delivered flow rate ({mdot_delivered:.3f} kg/s) deviates "
-                f"{(mdot_delivered / self.mdot_ox - 1) * 100:+.1f}% from the "
-                f"target ({self.mdot_ox:.3f} kg/s) because the annulus gap hit "
-                f"its manufacturing limit; resize D_pintle.")
-
-        # Süreklilikten hız (F042): v = ṁ_teslim/(ρ·A) = Cd·√(2ΔP/ρ) —
-        # ideal Bernoulli hızı DEĞİL (showerhead ile aynı tanım)
-        v_exit = self._exit_velocity(mdot_delivered, self.rho_ox, A_inj)
-
-        # Reynolds number — karakteristik boyut anülüs boşluğu
+        # Teslim debisi: aynı ΔP, aynı Cd ve aynı kütle akısı modelinde ṁ ∝ A;
+        # kanonun alan oranı (``flow_match.area_ratio``) 1'den yalnız aşırı
+        # belirlenmiş ve tolerans içinde kalan geometride ayrılır.
+        mdot_delivered = self.mdot_ox * pg['flow_match']['area_ratio']
+        # Süreklilikten hız (F042): v = ṁ/(ρ·A) — ideal Bernoulli hızı DEĞİL
+        v_exit = self._exit_velocity(mdot_delivered, self.rho_ox, a_inj)
+        # Reynolds sayısı — karakteristik boyut anülüs boşluğu
         Re = self.rho_ox * v_exit * gap / self.mu_ox
 
         result = {
             'type': 'pintle',
-            'outer_diameter': D_body * 1000,       # mm (GÖVDE dış çapı)
-            'pintle_diameter': D_pintle * 1000,    # mm
-            'gap': gap * 1000,                     # mm (anülüs boşluğu)
-            'annulus_bore_diameter': D_bore * 1000,   # mm (kılıf deliği)
-            'body_wall_thickness': body_wall * 1000,  # mm (gövde et kalınlığı)
-            'annular_area': a_ann * 1e6,           # mm² (eski ad — korunur)
-            # Uç geometrisi TEK sözlükte durur: radyal delik sayısı/çapı, BF,
-            # skip distance, akış payı, TMR ve sprey açısı. Aynı sayıları bir
-            # de düz anahtar olarak kopyalamıyoruz — bu modülün TAMİR ETTİĞİ
-            # kusur zaten "aynı büyüklüğün iki yerde iki gerçeği olması"ydı.
-            # Sözleşme kardeş modülün 'pintle_geometry' sözleşmesiyle aynıdır
-            # (injector_schematics.js ve injector_panel.js onu okur).
-            'pintle_geometry': pintle_geometry,
+            # mm; GÖVDE dış çapı — verilmediyse None (boyutlandırılmadı)
+            'outer_diameter': pg['housing_outer_diameter_mm'],
+            'pintle_diameter': pg['d_pintle_mm'],          # mm (D_p)
+            'gap': pg['annulus_gap_mm'],                   # mm (t)
+            'annulus_bore_diameter': pg['annulus_bore_diameter_mm'],  # mm
+            'body_wall_thickness': pg['housing_wall_mm'],  # mm ya da None
+            'housing_sized': pg['housing_sized'],
+            'annular_area': pg['annulus_area_mm2'],        # mm² (eski ad)
+            # Uç geometrisi TEK sözlükte: delik sırası, BF, L_s, akış payı,
+            # TMR, sprey yarı açısı, gövde ve künyeler (kanonun kendisi).
+            'pintle_geometry': pg,
+            'pintle_geometry_source': kaynak,
+            'pintle_geometry_is_canon': bool(kanon),
             'delivered_mdot': mdot_delivered,  # kg/s (F016 şeffaflık alanı)
             'exit_velocity': v_exit,
             'reynolds_number': Re,
@@ -1241,7 +1270,7 @@ class InjectorDesign:
         }
         # L/D anüler geçit için tanımsız (plaka kalınlığı modeli yok) → None;
         # Weber karakteristik boyutu = anülüs boşluğu (sıvı tabaka kalınlığı)
-        result.update(self._common_outputs(A_inj, v_exit, gap, None))
+        result.update(self._common_outputs(a_inj, v_exit, gap, None))
         return result
 
     def _calculate_swirl(self):
@@ -1265,6 +1294,8 @@ class InjectorDesign:
         yapıcıdaki düz orifis Cd'si basınç-swirl fiziğiyle tutarsızdır.
         """
         params = self.swirl_params
+        if params.get('canon'):
+            return self._calculate_swirl_canon(params)
         n_slots = params['n_slots']
 
         delta_P_Pa = self.delta_P_inj * 1e5
@@ -1425,6 +1456,101 @@ class InjectorDesign:
         result['discharge_coefficient_earned'] = True
         return result
 
+    def _calculate_swirl_canon(self, params):
+        """Swirl ekran bloğu — devrenin elemanını TÜKETİR (V301/E2).
+
+        ÖLÇÜLDÜ (once.json, 1 kN N₂O): API varsayılanında bu blok TEK eleman
+        d_o 5,40 mm (22,89 mm², SPI) yayımlarken devre 7 eleman × d_o 2,42 mm
+        (32,23 mm², Dyer NHNE) çözüyordu; form varsayılanında ekran K 0,052 /
+        θ 64,4°, devre K 0,326 / θ 45°. Artık eleman sayısı, çıkış orifisi,
+        K/X/Cd/θ, girdap odası çapı ve teğet giriş alanı devrenindir
+        (``design_swirl_element``). Bu blok yalnız teğet girişi dikdörtgen
+        yuva olarak yazar: yuva ölçüsü istekte varsa odur (devre K'yı ondan
+        çözdü), yoksa aynı giriş alanından w = 2h (eski sentez oranı).
+        Hızlar eleman başına süreklilikten: film çıkış hızı
+        ṁ_e/(ρ·A_o·(1−X)), yuva hızı ṁ_e/(ρ·n_yuva·w·h)."""
+        k = params['canon']
+        n_el = max(int(k['n_elements']), 1)
+        n_slots = int(params['n_slots'])
+        d_o = float(k['exit_orifice_d_mm']) * 1e-3
+        A_o = np.pi * d_o ** 2 / 4.0                     # eleman başına
+        K = float(k['K'])
+        X = float(k['X'])
+        cd_sw = float(k['cd'])
+        theta_half = float(k['theta_half_deg'])
+        D_s = float(k['swirl_chamber_d_mm']) * 1e-3
+        A_p = float(k['tangential_inlet_area_mm2']) * 1e-6   # eleman başına
+        mdot_e = self.mdot_ox / n_el
+        extra_warnings = []
+        if k.get('slot_w_mm') is not None and k.get('slot_h_mm') is not None:
+            w = float(k['slot_w_mm']) * 1e-3
+            h = float(k['slot_h_mm']) * 1e-3
+            yuva_kaynagi = 'request (slot_width x slot_height)'
+        else:
+            A_slot = A_p / n_slots
+            h = np.sqrt(A_slot / 2.0)
+            w = 2.0 * h
+            yuva_kaynagi = ('derived from the circuit tangential inlet area: '
+                            'w = 2h per slot (HRMA proportion, no literature '
+                            'value)')
+        if D_s < 1.25 * d_o:
+            extra_warnings.append(
+                f"Swirl chamber diameter {D_s * 1000:.1f} mm is below "
+                f"1.25x the exit orifice diameter ({d_o * 1000:.2f} mm); the "
+                f"Giffen-Muraszew geometry assumption breaks down. Increase "
+                f"the swirl chamber diameter to at least "
+                f"{1.25 * d_o * 1000:.1f} mm.")
+        A_slots = n_slots * w * h
+        A_eff = A_o * (1.0 - X)
+        film_t = float(k['film_thickness_mm']) * 1e-3
+        v_exit = self._exit_velocity(mdot_e, self.rho_ox, A_eff)
+        v_slot = self._exit_velocity(mdot_e, self.rho_ox, A_slots)
+        v_orifis = self._exit_velocity(mdot_e, self.rho_ox, A_o)
+        D_h = 2 * w * h / (w + h)
+        Re = self.rho_ox * v_slot * D_h / self.mu_ox
+        result = {
+            'type': 'swirl',
+            'n_elements': n_el,
+            'n_slots': n_slots,
+            'slot_width': w * 1000,  # mm
+            'slot_height': h * 1000,  # mm
+            'slot_size_source': yuva_kaynagi,
+            'total_slot_area': A_slots * 1e6,  # mm² (ELEMAN başına)
+            'effective_area': A_eff * 1e6,  # mm² (eleman başına sıvı halka)
+            'exit_orifice_area': A_o * 1e6,  # mm² (eleman başına)
+            'exit_orifice_diameter': d_o * 1000,  # mm
+            'atomizer_constant_K': K,
+            'air_core_ratio_X': X,
+            'swirl_chamber_diameter': D_s * 1000,  # mm
+            'swirl_chamber_d_source': k.get('chamber_source'),
+            'spray_half_angle_target_deg': k.get('theta_target_deg'),
+            'film_thickness_mm': film_t * 1000,
+            'spray_angle': float(2.0 * theta_half),  # TAM koni açısı [derece]
+            'spray_half_angle_deg': theta_half,
+            'slot_velocity': v_slot,  # m/s (teğet giriş)
+            'exit_velocity': v_exit,  # m/s (çıkış FİLMİ, süreklilikten)
+            'exit_velocity_basis': (
+                'liquid-film exit velocity per element: mdot_e/(rho*A_o*(1-X)) '
+                '(air core excluded); orifice_mean_velocity is the mean over '
+                'the full orifice area, as in the injector circuit table'),
+            'orifice_mean_velocity': v_orifis,
+            'reynolds_number': Re,
+            'swirl_k_source': k.get('k_source'),
+            'swirl_plan_source': k.get('basis'),
+            'element_plan': (dict(k['element_plan'])
+                             if isinstance(k.get('element_plan'), dict)
+                             else None),
+            'warnings': self._check_warnings(v_exit, Re) + extra_warnings
+        }
+        # Sözleşmedeki injection_area = ölçüm (metering) alanı: BÜTÜN
+        # elemanların orifis alanı (devre tablosunun toplam alanı).
+        result.update(self._common_outputs(n_el * A_o, v_exit, film_t, None))
+        result['discharge_coefficient'] = cd_sw
+        result['discharge_coefficient_basis'] = (
+            f"Giffen-Muraszew: K={K:.3f} -> X={X:.3f} -> Cd={cd_sw:.3f}")
+        result['discharge_coefficient_earned'] = True
+        return result
+
     def _impingement_clamp_delivery(self, a_teslim, a_gerekli, delta_P_Pa):
         """Kırpılan çarpışmalı planın teslim cümlesi (5. tur Ş-5).
 
@@ -1508,6 +1634,8 @@ class InjectorDesign:
         çift fanların ara-katmanlanmasıyla sağlanır; unlike MR kriteri
         burada uygulanmaz."""
         params = self.impingement_params
+        if params.get('canon'):
+            return self._calculate_impingement_canon(params)
         delta_P_Pa = self.delta_P_inj * 1e5
         A_required = self.mdot_ox / (self.C_d * np.sqrt(2 * self.rho_ox * delta_P_Pa))
 
@@ -1622,16 +1750,10 @@ class InjectorDesign:
         warn_list = self._check_warnings(
             v_exit, Re, L_D if ld_kazanildi else None) + extra_warnings
         if not ld_kazanildi:
-            warn_list.append(
-                f"L/D band check NOT ISSUED: L/D = {L_D:.4g} is computed "
-                f"from the module default plate thickness "
-                f"({params['t_plate'] * 1000:.1f} mm), not from this "
-                "design; supply plate_thickness (orifice length) to obtain "
-                "the 3-5 band verdict.")
-        if params['full_angle_deg'] < 40 or params['full_angle_deg'] > 90:
-            warn_list.append(
-                f"Impingement angle ({params['full_angle_deg']:.0f} deg) outside "
-                "typical 40-90 deg band (NASA SP-8089)")
+            warn_list.append(LD_NOT_ISSUED_WARNING)
+        if (params['full_angle_deg'] < IMPINGEMENT_ANGLE_HEURISTIC_BAND_DEG[0]
+                or params['full_angle_deg'] > IMPINGEMENT_ANGLE_HEURISTIC_BAND_DEG[1]):
+            warn_list.append(_carpisma_acisi_bant_metni(params['full_angle_deg']))
 
         result = {
             'type': 'impingement',
@@ -1643,10 +1765,10 @@ class InjectorDesign:
                                   if params['n_pairs'] > 0 else None),
             'n_holes': int(n_holes),
             'hole_diameter': d_h * 1000,  # mm
-            'plate_thickness': params['t_plate'] * 1000,  # mm
+            'plate_thickness': _yayin_plaka_mm(params, ld_kazanildi),  # mm
             'plate_thickness_earned': ld_kazanildi,
             'plate_thickness_basis': params.get('t_plate_basis'),
-            'L_D_ratio': L_D,
+            'L_D_ratio': (L_D if ld_kazanildi else None),
             'impingement_angle_deg': params['full_angle_deg'],
             'impingement_distance': impingement_distance * 1000,  # mm
             'axial_velocity': v_axial,
@@ -1658,7 +1780,7 @@ class InjectorDesign:
             'warnings': warn_list
         }
         result.update(self._common_outputs(
-            A_inj, v_exit, d_h, L_D,
+            A_inj, v_exit, d_h, (L_D if ld_kazanildi else None),
             l_d_earned=ld_kazanildi,
             l_d_basis=params.get('t_plate_basis')))
         # ÖH D37 A2 hibrit · 7. tur: alan YALNIZ kırpılmış ve hedefi tolerans
@@ -1667,54 +1789,161 @@ class InjectorDesign:
             result['target_flow_check'] = hedef_debi
         return result
 
+    def _calculate_impingement_canon(self, params):
+        """Çarpışmalı ekran bloğu — devrenin çift planını TÜKETİR (V301/E2).
+
+        ÖLÇÜLDÜ (once.json, 1 kN N₂O): bu blok kendi tek fazlı SPI alanıyla
+        2 çift × Ø1,541 mm (7,456 mm²) yayımlarken devre Dyer NHNE ile
+        10,495 mm² çözüyordu — ekran planı iki-fazlı akıda hedef debinin
+        ~%71'ini teslim ederdi. Artık delik sayısı, çapı ve toplam alan
+        devrenindir (``design_like_doublet``: çift sayıda delik); çarpışma
+        açısı da devrenin (istekten). Hız süreklilikten bu bloğun
+        yoğunluğuyla basılır (aynı alan, aynı debi)."""
+        kanon = params['canon']
+        n_holes = int(kanon['n_holes'])
+        d_h = float(kanon['hole_diameter_mm']) * 1e-3
+        A_inj = n_holes * np.pi * (d_h / 2) ** 2
+        v_exit = self._exit_velocity(self.mdot_ox, self.rho_ox, A_inj)
+        tam_aci = float(kanon['full_angle_deg'])
+        half_angle = tam_aci / 2.0
+        v_axial = v_exit * np.cos(np.radians(half_angle))
+        impingement_distance = IMPINGEMENT_DISTANCE_LD * d_h  # m
+        Re = self.rho_ox * v_exit * d_h / self.mu_ox
+        L_D = params['t_plate'] / d_h
+        ld_kazanildi = bool(params.get('t_plate_earned'))
+        warn_list = self._check_warnings(
+            v_exit, Re, L_D if ld_kazanildi else None)
+        if not ld_kazanildi:
+            warn_list.append(LD_NOT_ISSUED_WARNING)
+        if (tam_aci < IMPINGEMENT_ANGLE_HEURISTIC_BAND_DEG[0]
+                or tam_aci > IMPINGEMENT_ANGLE_HEURISTIC_BAND_DEG[1]):
+            warn_list.append(_carpisma_acisi_bant_metni(tam_aci))
+        plan = kanon.get('element_plan') or {}
+        result = {
+            'type': 'impingement',
+            'n_pairs': int(n_holes // 2),
+            'n_pairs_requested': plan.get('requested_pairs'),
+            'n_holes': n_holes,
+            'hole_diameter': d_h * 1000,  # mm
+            'hole_diameter_requested': plan.get('requested_hole_d_mm'),
+            'plate_thickness': _yayin_plaka_mm(params, ld_kazanildi),  # mm
+            'plate_thickness_earned': ld_kazanildi,
+            'plate_thickness_basis': params.get('t_plate_basis'),
+            'L_D_ratio': (L_D if ld_kazanildi else None),
+            'impingement_angle_deg': tam_aci,
+            'impingement_angle_basis': kanon.get('angle_basis'),
+            'impingement_distance': impingement_distance * 1000,  # mm
+            'impingement_distance_basis': (
+                f'computed: {IMPINGEMENT_DISTANCE_LD:g} x hole diameter '
+                '(free-jet length to the impingement point), inside the upper '
+                'limit of 5-7 orifice diameters given by NASA SP-8089 p. 80'),
+            'axial_velocity': v_axial,
+            'exit_velocity': v_exit,
+            'reynolds_number': Re,
+            'element_pattern': 'like_on_like_doublet',
+            'element_pattern_basis': (
+                'like-on-like doublet: a hybrid injects ONE liquid stream '
+                '(the oxidizer), so each hole pair impinges oxidizer on '
+                'oxidizer; unlike (fuel-on-oxidizer) doublets, triplets and '
+                'quadlets do not exist here'),
+            'impingement_plan_source': kanon.get('basis'),
+            'element_plan': dict(plan) if plan else None,
+            'mixing_note': ('Like-on-like doublet: mixing via interleaved spray '
+                            'fans (Rupe, JPL 20-195); no unlike momentum-ratio '
+                            'criterion applies'),
+            'warnings': warn_list
+        }
+        result.update(self._common_outputs(
+            A_inj, v_exit, d_h, (L_D if ld_kazanildi else None),
+            l_d_earned=ld_kazanildi,
+            l_d_basis=params.get('t_plate_basis')))
+        return result
+
     def _calculate_coaxial(self):
         """Koaksiyel eleman (tek akışkan hibrit): iç jet + dış anülüs, her
         ikisi oksitleyici. Debi payı f_inner iç jete gider; kalan dış
-        anülüsten enjekte edilir. Girinti (recess) tipik 1·d_inner."""
+        anülüsten enjekte edilir. Girinti (recess) tipik 1·d_inner.
+
+        V301/H2 — TEK KANON. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/bilinen/
+        hibrit/once.json): devrede tek akışkanlı koaksiyel eleman yoktu, bu
+        blok kendi ΔP'siyle (istekteki 4 bar) boyutlanıyordu; kendinden
+        basınçlı N₂O'da besleme gerçeği 30,54 bar'dır. Artık devre elemanı
+        çözer (``design_coaxial_element``) ve bu blok toplam alanı, iç jet
+        payını ve geometriyi devreden TÜKETİR (ekran = devre). ΔP istemcice
+        AÇIKÇA ezildiyse kanon yoktur: AYNI geometri işlevi
+        (``coaxial_element_geometry``) bu bloğun kendi ΔP'siyle çözülen
+        alana uygulanır (ALAN ve ΔP AYRILMAZ)."""
         params = self.coaxial_params
-        f_inner = params['f_inner']
-        delta_P_Pa = self.delta_P_inj * 1e5
-        A_total = self.mdot_ox / (self.C_d * np.sqrt(2 * self.rho_ox * delta_P_Pa))
+        kanon = params.get('canon')
+        if kanon:
+            f_inner = float(kanon['inner_flow_fraction'])
+            f_kaynak = kanon.get('inner_flow_fraction_source')
+            A_total = float(kanon['total_flow_area_mm2']) * 1e-6
+            d_inner_mm = float(kanon['inner_jet_diameter_mm'])
+            D_i_mm = float(kanon['annulus_inner_diameter_mm'])
+            D_o_mm = float(kanon['annulus_outer_diameter_mm'])
+            gap_mm = float(kanon['annulus_gap_mm'])
+            recess_mm = float(kanon['recess_length_mm'])
+            devre_cozumu = (
+                'consumed: total metering area, inner-jet share and element '
+                'geometry are the injector circuit\'s single-fluid coaxial '
+                'element (' + str(kanon.get('basis') or 'injector circuit')
+                + '); the pressure drop and discharge coefficient are the '
+                'circuit\'s (see pressure_drop_source)')
+        else:
+            f_inner = params['f_inner']
+            f_kaynak = params.get('f_inner_source')
+            delta_P_Pa = self.delta_P_inj * 1e5
+            A_total = self.mdot_ox / (self.C_d * np.sqrt(
+                2 * self.rho_ox * delta_P_Pa))
+            g = coaxial_element_geometry(A_total, f_inner, params['t_wall'])
+            d_inner_mm = g['d_inner'] * 1000
+            D_i_mm = g['D_i'] * 1000
+            D_o_mm = g['D_o'] * 1000
+            gap_mm = g['gap'] * 1000
+            recess_mm = g['recess'] * 1000
+            devre_cozumu = (
+                'not consumed: no circuit geometry was handed to this block '
+                '(the client overrode the pressure drop - pressure_drop_'
+                'source - or the circuit did not size the element), so the '
+                'element is sized here with this block\'s own pressure drop '
+                'through the same geometry rule (area and pressure drop are '
+                'not separated); the circuit reference design, if any, is in '
+                'motor.injector_design_detail.coaxial_geometry')
         # Süreklilikten hız (F042 — önceki dalga yalnız showerhead'i düzeltip
         # bu dalı ideal Bernoulli hızında bırakmıştı): v = ṁ/(ρ·A) = Cd·√(2ΔP/ρ)
         v_exit = self._exit_velocity(self.mdot_ox, self.rho_ox, A_total)
-
-        # İç jet
-        A_inner = f_inner * A_total
-        d_inner = 2 * np.sqrt(A_inner / np.pi)
-
-        # İç boru et kalınlığı: imalat alt sınırı ile orantılı üst değer
-        t_wall = params['t_wall']
-        if t_wall is None:
-            t_wall = max(COAX_WALL_MIN_MM / 1000, 0.1 * d_inner)
-
-        # Dış anülüs: iç çapı = d_inner + 2·t_wall; alanından boşluk çözülür
-        A_ann = A_total - A_inner
-        D_i = d_inner + 2 * t_wall
-        gap = (np.sqrt(D_i ** 2 + 4 * A_ann / np.pi) - D_i) / 2
-        D_o = D_i + 2 * gap
-
-        recess = COAX_RECESS_LD * d_inner  # m
-        Re = self.rho_ox * v_exit * d_inner / self.mu_ox
+        Re = self.rho_ox * v_exit * (d_inner_mm / 1000) / self.mu_ox
 
         result = {
             'type': 'coaxial',
-            'inner_jet_diameter': d_inner * 1000,  # mm
-            'annulus_inner_diameter': D_i * 1000,  # mm
-            'annulus_outer_diameter': D_o * 1000,  # mm
-            'annulus_gap': gap * 1000,  # mm
-            'recess_length': recess * 1000,  # mm
+            'inner_jet_diameter': d_inner_mm,  # mm
+            'annulus_inner_diameter': D_i_mm,  # mm
+            'annulus_outer_diameter': D_o_mm,  # mm
+            'annulus_gap': gap_mm,  # mm
+            'recess_length': recess_mm,  # mm
+            'recess_length_basis': COAX_RECESS_BASIS,
             'inner_flow_fraction': f_inner,
+            'inner_flow_fraction_source': (
+                f_kaynak
+                or ('module default ' + COAX_INNER_FLOW_FRACTION_BASIS)),
+            'element_count': 1,
+            'element_count_basis': COAX_ELEMENT_COUNT_BASIS,
+            'circuit_solution': devre_cozumu,
             # create_pintle_cross_section uyumlu takma adlar (kesit çizimi)
-            'outer_diameter': D_o * 1000,  # mm
-            'pintle_diameter': d_inner * 1000,  # mm
-            'gap': gap * 1000,  # mm
+            'outer_diameter': D_o_mm,  # mm
+            'pintle_diameter': d_inner_mm,  # mm
+            'gap': gap_mm,  # mm
             'exit_velocity': v_exit,
             'reynolds_number': Re,
             'warnings': self._check_warnings(v_exit, Re)
         }
         # Weber karakteristik boyutu = dış anülüs boşluğu (kırılan tabaka)
-        result.update(self._common_outputs(A_total, v_exit, gap, None))
+        result.update(self._common_outputs(A_total, v_exit, gap_mm / 1000,
+                                           None))
+        if kanon:
+            # Ölçüm alanı devrenin sayısıdır (mm² gidiş-dönüşü yok).
+            result['injection_area'] = float(kanon['total_flow_area_mm2'])
         return result
 
     def _optimize_showerhead_holes(self, A_required, params):
@@ -1846,17 +2075,27 @@ class InjectorDesign:
                 f"(<{CHUG_DP_RATIO_RECOMMENDED * 100:.0f}% of chamber "
                 f"pressure)")
 
-        # Exit velocity check
-        if v_exit < 20 or v_exit > 50:
-            warn_list.append(f"Exit velocity ({v_exit:.1f} m/s) outside optimal range (20-50 m/s)")
+        # Exit velocity check — V301/E2: bant kaynaksızdır, HRMA buluşsal
+        # eşiği olarak beyan edilir ("optimal" kelimesi kaldırıldı).
+        v_lo, v_hi = INJECTION_VELOCITY_HEURISTIC_BAND_M_S
+        if v_exit < v_lo or v_exit > v_hi:
+            warn_list.append(
+                f"Exit velocity ({v_exit:.1f} m/s) outside the "
+                f"{v_lo:.0f}-{v_hi:.0f} m/s band (HRMA heuristic threshold - "
+                f"no literature value; not a design limit)")
 
         # Reynolds number check
         if Re < 4000:
             warn_list.append(f"Low Reynolds number ({Re:.0f}) - laminar flow expected")
 
-        # L/D check for showerhead
-        if L_D is not None and (L_D < 3 or L_D > 5):
-            warn_list.append(f"L/D ratio ({L_D:.1f}) outside optimal range (3-5)")
+        # L/D check for showerhead — V301/E2: kaynaksız bant, beyanlı.
+        ld_lo, ld_hi = ORIFICE_LD_HEURISTIC_BAND
+        if L_D is not None and (L_D < ld_lo or L_D > ld_hi):
+            warn_list.append(
+                f"L/D ratio ({L_D:.1f}) outside the {ld_lo:.0f}-{ld_hi:.0f} "
+                f"band (HRMA heuristic threshold - no literature value; "
+                f"NASA SP-8089 p. 84 notes that intermediate L/D of about "
+                f"4-6 is susceptible to hydraulic flip)")
 
         # Kavitasyon (v2.6.2 DÜZELTMESİ, fizik denetimi F044): eski ölçüt
         # 'ΔP > 0.5·P_tank' buhar basıncını HİÇ içermiyordu — doymuş N₂O'da
@@ -1902,7 +2141,8 @@ class InjectorDesign:
         #
         # Beslemenin ΔP'yi sınırladığı dalda ``delta_P_inj = P_tank − P_c``
         # olduğu için iki biçim orada ZATEN aynı sayıyı verir.
-        if self.ox_phase == 'liquid':
+        doymus_giris = bool(getattr(self, 'saturated_inlet', False))
+        if self.ox_phase == 'liquid' and not doymus_giris:
             if self.p_vapor_bar is None:
                 # Buhar basıncı yoksa K_c HESAPLANAMAZ. Eski kod burada
                 # uydurma bir P_v ile "risk yok" ya da "risk var" diyordu.
@@ -1924,13 +2164,22 @@ class InjectorDesign:
 
         # Flash boiling risk for N2O — buhar basıncı artık sıcaklığa bağlı
         # doyma tablosundan (eski kod 51 bar @ 293 K sabitini kullanıyordu)
-        if self.ox_phase == 'liquid' and self.oxidizer_type == 'n2o':
+        if (self.ox_phase == 'liquid' and self.oxidizer_type == 'n2o'
+                and not doymus_giris):
             if self.p_vapor_bar is None:
                 warn_list.append(
                     f"Flash boiling risk NOT evaluated: "
                     f"{self.p_vapor_unavailable_reason}")
             elif self.P_c < self.p_vapor_bar * 0.8:
                 warn_list.append("Flash boiling risk detected")
+
+        if doymus_giris:
+            warn_list.append({
+                'code': SATURATED_INLET_NOTE_CODE,
+                'severity': 'info',
+                'message': SATURATED_INLET_NOTE,
+                'fallback': SATURATED_INLET_NOTE,
+            })
 
         return warn_list
 

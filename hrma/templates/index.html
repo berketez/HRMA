@@ -396,6 +396,7 @@
                 <option value="en" data-i18n="lang.en">English</option>
                 <option value="tr" data-i18n="lang.tr">Türkçe</option>
             </select>
+            <span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="lang.help">Interface language of HRMA (English or Turkish). The choice is stored in this browser and applied to every page; it changes no calculation.</span></span>
         </div>
         <!-- v2.6.26: burada "SYSTEM ONLINE - SOLVER READY" yazan, yanıp sönen
              noktalı bir rozet vardı. İki sorunu vardı: (1) hiçbir şey
@@ -498,6 +499,8 @@
          /api/projects yoksa ya da boşsa şerit hiç görünmez) -->
     <script src="/static/js/i18n_common.js"></script>
     <script src="/static/js/i18n_shell.js"></script>
+    <!-- v3.0.1 N-girdi-2: ortak alan ipucu bileşeni (proje/ayarlar/hata bildir pencereleri) -->
+    <script src="/static/js/field_help.js"></script>
     <script src="/static/js/project_bar.js"></script>
     <script src="/static/js/update_check.js"></script>
     <!-- Sürüm Notları modalı + Ayarlar paneli (anahtarlar i18n_shell.js'te) -->

@@ -15,6 +15,7 @@ istekle hiç TETİKLENEMEMESİYDİ. Bu yüzden testler doğrulayıcıyı doğrud
 """
 import json
 import math
+import os
 
 import pytest
 
@@ -459,9 +460,18 @@ class TestTuretilenBuyukluk:
         govde = {k: v for k, v in HIBRIT.items() if k != 'thrust'}
         r = client.post('/calculate', json=dict(govde, total_impulse=1e9))
         assert r.status_code == 400
-        assert any(k.get('reason') == 'missing_required'
-                   and k.get('field') == 'thrust'
-                   for k in (r.get_json() or {}).get('invalid_fields', []))
+        # V301/T-ÇAPA-D (28 Eki ölçümü): yukarıdaki bekçinin beklediği gün
+        # geldi — /calculate artık itkiyi ZORUNLU tutmuyor; toplam impuls +
+        # yanma süresinden türetiyor ve türetilen itki itkinin KENDİ bandına
+        # soruluyor. Uçtaki yanıt: thrust out_of_range, değer 1e8 N,
+        # resolved_as 'thrust', kabul bandı [10, 1e6] (eski 'missing_required'
+        # yerine). Kapı çalışıyor: türetilen büyüklük bant dışıysa adıyla 400.
+        kayitlar = (r.get_json() or {}).get('invalid_fields', [])
+        itki = [k for k in kayitlar if k.get('field') == 'thrust']
+        assert itki, kayitlar
+        assert itki[0]['reason'] == 'out_of_range'
+        assert itki[0]['value'] == pytest.approx(1e8)
+        assert itki[0]['accepted_range'] == [10, 1000000]
 
     def test_bant_ici_turetme_dokunulmadan_geciyor(self, client):
         """10.000 N·s / 1000 N = 10 s — banda uyar, hesap koşmalı."""
@@ -500,19 +510,54 @@ class TestHesapBombasi:
     yayımlanmadığını sınar (60 s'lik gerçek bütçeyi süitte beklemeden).
     """
 
-    def test_butce_dolunca_adli_hata_doner_ve_yarim_yorunge_yayimlanmaz(
-            self, client, monkeypatch):
-        import hrma.app as uygulama
-        monkeypatch.setattr(uygulama, '_CALCULATE_TRAJECTORY_BUDGET_S', 2.0)
-        r = client.post('/calculate', json=dict(HIBRIT, parachute_area=1e9))
-        assert r.status_code == 200, (
+    #: V3.0.5 (28 Eki) — bomba BELİRLENİMCİ: eskiden bütçe 2,0 s'ydi ve
+    #: "1e9 m² paraşüt 2 s'de bitmez" varsayımına dayanıyordu. CI 40672536264
+    #: (dilim 9) hızlı koşucuda yörünge 2 s'nin İÇİNDE bitti (alçalma evresi
+    #: kendi benzetim süresi sınırına ulaştı), bütçe dolmadı ve düğüm
+    #: kırmızıydı — saat hızına bağlı kararsız bir sınav. Bütçe artık
+    #: herhangi bir gerçek integrasyonun aşacağı kadar küçük; sınanan şey
+    #: aynı: bütçe dolunca adlı hata, yarım yörünge yok, motor sonucu kalır.
+    BOMBA_BUTCESI_S = 0.01
+
+    def test_butce_dolunca_adli_hata_doner_ve_yarim_yorunge_yayimlanmaz(self):
+        # T-ÇAPA-C2 (27 Eki) — AYRI SÜREÇTE koşar. ÖLÇÜLDÜ: bütçe aşılınca
+        # ``app._butce_ile_kos`` isteği döndürür ama integrasyonu taşıyan
+        # daemon iş parçacığı (ürünün beyanlı sınırı: "koşan çözücü
+        # öldürülemez") pytest SÜRECİNDE CPU/GIL yemeye devam ediyordu. Aynı
+        # süreçte sonra koşan test_d26_fea_cfd_a3::TestOHB405…::
+        # test_beyan_edilen_sayilar_YENIDEN_URETILIR tek başına 10,8 s iken
+        # bu düğümden sonra 240 s'de bitmedi (tam süpürme dilim 0'da 20+ dk
+        # "takılma"). Bomba gövdesi alt süreçte koşar; süreç bitince yetim
+        # iş parçacığı da biter. İddialar aynen.
+        import subprocess
+        import sys
+        betik = (
+            "import json, sys, io, contextlib\n"
+            "import hrma.app as uygulama\n"
+            "uygulama._CALCULATE_TRAJECTORY_BUDGET_S = %r\n"
+            % self.BOMBA_BUTCESI_S +
+            "uygulama.app.config['TESTING'] = True\n"
+            "govde = json.loads(sys.argv[1])\n"
+            "with contextlib.redirect_stdout(io.StringIO()):\n"
+            "    r = uygulama.app.test_client().post('/calculate', json=govde)\n"
+            "sys.stdout.write(json.dumps({'durum': r.status_code,\n"
+            "    'trajectory': (r.get_json() or {}).get('trajectory')},\n"
+            "    default=str))\n"
+            "sys.stdout.flush()\n")
+        kok = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        p = subprocess.run(
+            [sys.executable, '-c', betik,
+             json.dumps(dict(HIBRIT, parachute_area=1e9))],
+            capture_output=True, text=True, timeout=240, cwd=kok)
+        assert p.returncode == 0, p.stderr[-2000:]
+        cikti = json.loads(p.stdout.strip().splitlines()[-1])
+        assert cikti['durum'] == 200, (
             'motor sonucu da kayboldu — bütçe kapısı fazla geniş kesiyor')
-        govde = r.get_json() or {}
-        yorunge = govde.get('trajectory') or {}
+        yorunge = cikti['trajectory'] or {}
         assert yorunge.get('error') == 'trajectory_time_budget_exceeded', (
             'bütçe aşımı ADIYLA bildirilmiyor: %s'
             % json.dumps(yorunge, default=str)[:300])
-        assert yorunge.get('budget_s') == 2.0
+        assert yorunge.get('budget_s') == self.BOMBA_BUTCESI_S
         # Yarım integrasyondan güvenlik sayısı yayımlanmamalı.
         assert 'landing_velocity' not in json.dumps(yorunge, default=str)
 

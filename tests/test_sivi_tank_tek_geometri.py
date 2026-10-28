@@ -134,6 +134,16 @@ def basincli():
 
 
 @pytest.fixture(scope='module')
+def basincli_ablatif():
+    """``basincli``nın ABLATİF kardeşi (V301/L-A, SV-03): gerekli tank
+    basıncı artık TEK tanımdır ve yalnız basınç beslemeli çevrimde
+    yayımlanır; P3B2-01 düzeneği bu çifte taşındı."""
+    return _cift(overrides={'engine_cycle': 'pressure_fed',
+                            'feed_pressure': 105},
+                 cooling_type='ablative')
+
+
+@pytest.fixture(scope='module')
 def turbo_ablatif():
     """``turbo``nun ABLATİF kardeşi: soğutma ceketi ΔP'si SIFIRDIR.
 
@@ -357,8 +367,8 @@ class TestTankBasinciTekKaynak:
     # P_c + ΔP_enjektör + 8 bar çıplak paydı, soğutma ceketi ΔP'si formüle
     # HİÇ girmiyordu (ölçüldü: rejeneratif 3,7685 bar / ablatif 0,0000 bar
     # iken required_fuel_tank_pressure İKİSİNDE DE 93,4000 bar).
-    def test_gereken_tank_basinci_ceket_dp_sini_goruyor(self, turbo,
-                                                        turbo_ablatif):
+    def test_gereken_tank_basinci_ceket_dp_sini_goruyor(self, basincli,
+                                                        basincli_ablatif):
         """TAŞINAN BEKÇİ (P3B2-01): kardeş düğüm ``:233`` beş alanın AYNI
         sayı olduğunu doğruluyordu; beşi de ``_tank_pressure_bar()``'ı okuduğu
         için bu iddia yapı gereği doğrudur. Kilitlenmesi gereken şey teslim
@@ -368,8 +378,11 @@ class TestTankBasinciTekKaynak:
         eşit olmalıdır. Mutasyon yönü: ceket terimi formüle eklenirse bu
         bekçi yeşile döner (xfail kalkar), çıkarılırsa kırmızı kalır.
         """
-        _, regen = turbo
-        _, abl = turbo_ablatif
+        # V301/L-A (SV-03): gerekli tank basıncı turbopompalı çevrimde
+        # yayımlanmaz (tank enjektörü beslemez); iddia basınç beslemeli
+        # çiftte ölçülür.
+        _, regen = basincli
+        _, abl = basincli_ablatif
         r_inj, a_inj = regen['injection_system'], abl['injection_system']
         r_dp = float(regen['cooling_system']['cooling_pressure_drop'])
         a_dp = float(abl['cooling_system']['cooling_pressure_drop'])

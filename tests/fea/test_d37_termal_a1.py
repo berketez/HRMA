@@ -595,9 +595,35 @@ class TestF03Kurucu:
 # ---------------------------------------------------------------------------
 # B2-CP — consumed_paths + köprü uçtan uca (kanıt profiliyle)
 # ---------------------------------------------------------------------------
+def _lule_kamara_ayni(motor):
+    """v3.0.5 (28 Eki, V305/B): kayıtlı hibrit motorun lüle malzemesini
+    kamaranınkine eşitler (kopya üzerinde; test_d15fix2 fikstürüyle aynı yol).
+
+    Kök: fe72e04b5 (FİZİK-2 birleşmesi, NK-12, 27 Eki) — köprü termal ağı
+    artık motorun LÜLE malzemesiyle çözer (bilinçli). Kayıtlı kanıt
+    profilleri (once/wall_profile_panel.json, t7_wall_profile_panel.json)
+    NK-12 öncesi panelle KAMARA malzemesiyle (steel_4130) kurulmuştu,
+    kayıtlı motorların lülesi graphite: eşitlemeden köprü steel_4130
+    profilini graphite ağda çözer (ölçüldü: tepe 1886,998 K, T7'de merdiven
+    'non_monotonic') — profil ile ağ farklı malzemeyi anlatır; uç bu çifti
+    adlı 422 ``axial_profile_material_mismatch`` ile reddeder. Bu sınıfın
+    iddiası köprünün mesh/merdiven/uzlaştırma SÖZLEŞMESİ (malzemeden
+    bağımsız); kanıt zinciri korunur, ağ profilin malzemesiyle kurulur.
+    Ölçüldü (ae1dae910, eşitlenmiş): hibrit tepe 1787,720936924122 K
+    'converged'; T7 2609,3272 K, 'observed_order_below_min', dışdeğer
+    2640,2080 K, kalan hata +57,6622 K — kayıtlı çapalarla AYNI.
+    """
+    import copy
+    m = copy.deepcopy(motor)
+    kamara = bridge.extract_structural_inputs(
+        m, include_chamber=False)['material_key']
+    m.setdefault('nozzle_material_analysis', {})['material'] = kamara
+    return m
+
+
 @pytest.fixture(scope='module')
 def hibrit_kosu():
-    m = _kanit_json('hibrit_motor.json')
+    m = _lule_kamara_ayni(_kanit_json('hibrit_motor.json'))
     wp = _kanit_json('wall_profile_panel.json')['wall_profile']
     return m, bridge.run_thermal_from_motor(m, axial_profile=wp,
                                             ambient_temperature_K=293.15)
@@ -649,7 +675,7 @@ class TestB2CPveKopru:
         observed_order_below_min; dışdeğer ve kalan hata SAYILARI aynen
         (ölçüldü sart3/sonra/t7_fea_jenerik_gaz.json: 2640,2080 K, +57,6622 K),
         yalnız richardson_reliable False."""
-        m = _kanit_json('t7_motor.json')
+        m = _lule_kamara_ayni(_kanit_json('t7_motor.json'))   # v3.0.5 notu
         wp = _kanit_json('t7_wall_profile_panel.json')['wall_profile']
         o = bridge.run_thermal_from_motor(m, axial_profile=wp,
                                           ambient_temperature_K=293.15)

@@ -203,6 +203,9 @@ def hook_env(store, tmp_path, monkeypatch):
     # Süreç-başına bayrak monkeypatch ile geri sarılır: bu test diğer
     # testlerin kanca durumunu değiştirmiş olmaz.
     monkeypatch.setitem(app_module._example_seed_state, 'done', False)
+    # v3.0.1: kanca TESTING kipinde de diske dokunmaz; gerçek açılış taklidi
+    # için bayrak açıkça kapatılır (başka testler onu süreç boyunca açar).
+    monkeypatch.setitem(app_module.app.config, 'TESTING', False)
     return app_module, kaynak
 
 
@@ -239,4 +242,19 @@ def test_kanca_pytest_altinda_tohumlamaz(hook_env, store):
     assert not (dest / 'Example Hook.hrma').exists()
     assert not (dest / store.SEED_STAMP_FILENAME).exists()
     # Bayrak yanmaz: gerçek açılışta (pytest dışı) tohumlama hâlâ yapılabilir.
+    assert app_module._example_seed_state['done'] is False
+
+
+def test_kanca_testing_kipinde_tohumlamaz(hook_env, store, monkeypatch):
+    """v3.0.1: TESTING açık (ölçüm betiği / test istemcisi) iken kanca diske
+    DOKUNMAZ — 26 Eki'de pytest dışı bir ölçüm betiği gerçek kullanıcı
+    dizininde örnek tazelemeyi tetiklemişti."""
+    app_module, kaynak = hook_env
+    monkeypatch.delenv('PYTEST_CURRENT_TEST')
+    monkeypatch.setitem(app_module.app.config, 'TESTING', True)
+    client = app_module.app.test_client()
+    assert client.get('/').status_code == 200
+    dest = pathlib.Path(store.projects_dir())
+    assert not (dest / 'Example Hook.hrma').exists()
+    assert not (dest / store.SEED_STAMP_FILENAME).exists()
     assert app_module._example_seed_state['done'] is False

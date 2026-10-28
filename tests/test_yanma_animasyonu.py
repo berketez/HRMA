@@ -378,10 +378,21 @@ class TestSahteVeriYasagi:
         assert cikti['mode'] == 'not_modelled'
         assert cikti['r'][0] == cikti['r'][1], 'modellenmemis kesit animasyonlu'
 
-    def test_hibrit_port_gecmisi_yolu_korundu(self, katilar):
-        """Cozucu yaricapi KENDISI verdiginde (hibrit) o kullanilir."""
+    def test_hibrit_port_gecmisi_yolu_korundu(self):
+        """Cozucu yaricapi KENDISI verdiginde (hibrit) o kullanilir.
+
+        T-ÇAPA-C2 (27 Eki): sahne boyutları eskiden KATI öğretici koşusunun
+        tanesinden alınıyordu (iç çap o gün 30 mm). Katı öğretici çekirdeği
+        bugün 48 mm (rPort0 24 mm); port_history kipinin ``clamp(…, rPort0,
+        …)`` alt sınırı 30 mm'lik HİBRİT geçmişini 24 mm'ye kırpıyordu —
+        katı tanenin hibrit geçmişiyle ilgisi yok. Hibrit sahnenin kendi
+        başlangıç portu (15 mm) ve tane dış yarıçapı (50 mm) verilir; iddia
+        (çözücünün yarıçapı aynen kullanılır) değişmedi.
+        """
+        hibrit_dims = {'rPort0': 15.0, 'rGrainOut': 50.0, 'portHist': None,
+                       'burnTime': None}
         cikti = _run(
-            'const dims = %s;\n' % json.dumps(_dims(katilar['grain_design'])) +
+            'const dims = %s;\n' % json.dumps(hibrit_dims) +
             'dims.portHist = {time: [0, 5, 10], '
             'port_diameter: [0.030, 0.060, 0.080]};\n'
             'const mode = portRegressionMode({portShape: "circular", '

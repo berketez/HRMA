@@ -285,6 +285,140 @@ MECHANISM_CHAIN = ('gri30.yaml', 'h2o2.yaml')
 # çiftlerinin (H2/F2 dahil) adyabatik alev sıcaklıklarının üstündedir.
 FLAME_T_BRACKET_K = (250.0, 5500.0)
 
+# Alev sıcaklığı kök aramasının toleransları (brentq xtol [K], rtol [-]).
+# v2.6.27'den beri aynı sayılar ``_estimate_flame_temperature`` içinde satır
+# içi yazılıydı; V301/B7'de iki fazlı (gaz + C(gr)) ikinci kök araması da
+# AYNI toleransı kullandığı için tek tanıma taşındı (değer aynı, bit-aynı).
+FLAME_T_ROOT_XTOL_K = 1e-4
+FLAME_T_ROOT_RTOL = 1e-10
+
+
+# ---------------------------------------------------------------------------
+# V301/B7 — YOĞUN FAZ KATI KARBON C(gr) (Ayberk tur 1 sonrası, makale 1)
+# ---------------------------------------------------------------------------
+# Kusur: gri30 yalnız GAZ fazı içerir. Yakıtça zengin N2O/HTPB'de (O/C < 1)
+# dengede katı karbon çökmesi gerekirken karbon gaz türlerinde (C2H2, CH4,
+# HCN ...) kalıyordu. ÖLÇÜLDÜ (20 Eki, HRMA'nın kendi CEA karşılaştırması,
+# 20 bar): O/F 2,0'da Δc* −%6,73, ΔT_c −%11,49; 2,5'te −%4,64 / −%9,97.
+# Ayrıntı ve önce/sonra: docs/scofield/raw/OH/V301/makale1/B7/RAPOR.md.
+#
+# Model (NASA RP-1311 Part I, Gordon & McBride 1994):
+#   * Saf yoğun faz, kimyasal potansiyeli yalnız sıcaklığın işlevi:
+#     μ_C(gr) = μ°_C(gr)(T)                                  (eş. 2.11, j > NG)
+#   * Denge koşulu μ_j + Σ_i λ_i a_ij = 0 (eş. 2.10); yoğun türün dengeye
+#     GİRME ölçütü, girişinin Gibbs enerjisini düşürmesidir (eş. 3.7). Bunun
+#     karbon için karşılığı aktivite ölçütüdür:
+#         ln a_C = (λ_C − μ°_C(gr)) / RT > 0
+#     λ_C, gaz dengesinin karbon element potansiyelidir; μ_j = Σ_i a_ij λ_i
+#     işaretiyle (eş. 2.10'daki çarpanın eksi işaretlisi) gaz türlerinin
+#     kimyasal potansiyellerinden en küçük kareler ile çözülür. Eşik SIFIR
+#     tanım gereğidir (a_C = 1 doymuşluk), ayarlanabilir sayı değildir.
+#   * Durum denklemi PV = nRT, V ve n YALNIZ GAZA aittir, kütle tüm karışımın
+#     kütlesidir; yoğun faz hacmi ihmal edilir (§2.2, eş. 2.1). Dolayısıyla
+#     ρ = ρ_g/(1−ε), M = 1/n = M_g/(1−ε) (eş. 2.3a), h = Σ n_j H°_j (eş. 2.14).
+#   * Donmuş karışım özellikleri Sutton & Biblarz 9. baskı §3.5 "Multiphase
+#     Flow" (s. 84, eş. 3-35…3-39): V = V_g(1−β), R = (1−β)R_g,
+#     k = [(1−β)c_p + βc_s]/[(1−β)c_v + βc_s]. Burada β = ε (yoğun kütle
+#     kesri). Denge izentropik üssü RP-1311 eş. 2.71: γ_s = (∂lnP/∂lnρ)_s,
+#     ses hızı eş. 2.74: a² = nRTγ_s = γ_s·P/ρ.
+#
+# Uygulama: iç içe tek boyutlu çözüm. Sabit T, P'de gaz karışımından ε kadar
+# karbon çıkarılır ve mevcut SAĞLAM gaz dengesi (Cantera equilibrate('TP'))
+# ile ln a_C(ε) = 0 köklenir (ε'da monoton azalan). Entalpi/entropi hedefli
+# problemler (alev sıcaklığı, izentrop) bu TP çözümünün dışında T'de
+# köklenir. Yoğun yol YALNIZ gaz dengesi aşırı doymuşsa devreye girer; aksi
+# hâlde bütün yollar BİT-AYNI kalır (bekçi: tests/test_v301_yogun_karbon.py).
+# Cantera MultiPhase (gaz + grafit) DENENDİ ve SEÇİLMEDİ (ölçüm RAPOR.md,
+# 21 Eki): 'vcs' TP'de çalıştı ama HP ve SP'de CanteraError verdi; 'gibbs'
+# O/F 2,5'te TP'de yakınsamadı, HP'de düştü, SP'de 7094-7652 K fiziksel
+# olmayan sıcaklık döndürdü. Ayrıca graphite.yaml fazı sabit hacimli durum
+# denklemi taşır (μ basınca bağlı), CEA'nın kabulü değil.
+
+CONDENSED_PHASE_BASIS_TEXT = (
+    'gas + pure condensed C(gr): density, molecular_weight (M = 1/n), '
+    'enthalpy, entropy, cp and cv are mixture values per kg of mixture '
+    '(condensed volume neglected, NASA RP-1311 Part I Sec. 2.2); species '
+    'fractions are of the gas phase only')
+"""İki fazlı istasyon bileşiminin künye metni (kullanıcıya görünür, İngilizce)."""
+
+COMPOSITION_GAMMA_PRESSURE_PERTURBATION = 1.01
+"""İstasyon bileşimindeki denge izentropik üssü n_s = dlnP/dlnρ|_s için
+basınç pertürbasyonu (``_calculate_equilibrium_composition``). v2.x'ten beri
+satır içi 1.01 idi; V301/B7 iki fazlı yolu da aynı sayıyı kullandığı için tek
+tanıma taşındı (değer aynı, bit-aynı)."""
+
+COMPOSITION_GAMMA_PHYSICAL_BAND = (1.05, 1.70)
+"""n_s'in kabul bandı (dışındaysa donmuş c_p/c_v'ye düşülür). Satır içi
+(1.05, 1.70) idi; aynı gerekçeyle tek tanıma taşındı (değer aynı)."""
+
+CONDENSED_CARBON_SPECIES = 'C(gr)'
+"""Dengeye kabul edilen tek yoğun tür (grafit)."""
+
+CONDENSED_CARBON_THERMO_FILE = 'graphite.yaml'
+"""C(gr) NASA-7 termo verisinin Cantera veri dosyası (NASA SP-273 / TM-4513;
+dosyanın kendi künyesi). Yalnız TÜR termosu okunur: fazın sabit-hacim
+durum denklemi KULLANILMAZ, çünkü RP-1311 eş. 2.11 yoğun türü basınçtan
+bağımsız μ° ile alır (CEA ile aynı kabul)."""
+
+CONDENSED_CARBON_LN_ACTIVITY_THRESHOLD = 0.0
+"""Aşırı doymuşluk ölçütü ln a_C > 0 (RP-1311 eş. 3.7). Tanım: a_C = 1."""
+
+CONDENSED_ELEMENT_POTENTIAL_X_FLOOR = 1e-10
+"""Element potansiyeli en küçük kareler çözümüne giren türlerin mol kesri
+tabanı. Bileşim yayınının tür tabanıyla AYNI sayı (``_calculate_equilibrium_
+composition`` 'mole_fractions[i] > 1e-10'): tabanın altındaki türlerin
+kimyasal potansiyeli Cantera'nın log(max(X, küçük)) kırpmasına yaklaşır ve
+element potansiyelini bozar. Sayısal parametre, fizik değil."""
+
+CONDENSED_EPS_UPPER_GAPS = (1e-3, 1e-6, 1e-9, 1e-12)
+"""ε kökünün üst parantez adayları: ε_üst = Y_C·(1 − boşluk). Gaz karbonu
+sıfıra yaklaştıkça ln a_C → −∞; ilk negatif aday parantezi kapatır.
+Sayısal parametre."""
+
+CONDENSED_EPS_WARM_BRACKET_REL = 1e-2
+"""Sıcak başlangıçlı ε parantezinin bağıl genişliği (önceki çözümün
+±%1'i). Yalnız hız içindir: parantez kapanmazsa tam parantezle çözülür."""
+
+CONDENSED_EPS_XTOL_REL = 1e-13
+"""ε kökünün mutlak toleransı, Y_C'ye göre bağıl. ε'daki 1e-13·Y_C hata
+karışım entalpisine ~1e-6 J/kg yansır. Sayısal parametre."""
+
+CONDENSED_T_ROOT_XTOL_REL = 1e-11
+"""İki fazlı izentrop (s, P) çözümünde T kökünün bağıl toleransı. Denge ses
+hızı 1e-3 basınç pertürbasyonuyla alınır; ρ'da 1e-11 hata n_s'e ~1e-8
+yansır. Sayısal parametre."""
+
+CONDENSED_T_WARM_BRACKET_REL = (0.02, 0.08, 0.3)
+"""İki fazlı izentrop T kökü için tahmin etrafında denenen bağıl parantez
+genişlikleri (genişleyerek). Sonuncusu da kapanmazsa
+``FLAME_T_BRACKET_K`` tam parantezi kullanılır. Sayısal parametre."""
+
+CONDENSED_SECANT_MAX_ITER = 8
+"""İç (ε) ve dış (T) köklerde önce denenen PARANTEZSİZ kesen yönteminin
+yineleme sınırı. Kesen sıcak başlangıçtan genellikle 3-5 adımda kapanır;
+sınırda kapanmazsa ya da adım tanım aralığı dışına çıkarsa parantezli
+brentq yoluna dönülür (sağlamlık ondan gelir). Yalnız hız parametresi."""
+
+CONDENSED_LN_ACTIVITY_FTOL = 1e-11
+"""İç kesen kabulü |ln a_C| ≤ 1e-11 ⇒ ε bağıl hatası ≲ 1e-12 (ölçülen eğim
+d ln a_C / d ln ε ≈ −10, değer gürültüsü ~1e-14). Sayısal parametre."""
+
+CONDENSED_ENTROPY_FTOL_REL = 1e-13
+"""Dış kesen kabulü |s − s_0| ≤ 1e-13·|s_0| ⇒ T hatası ~1e-13·s_0·T/c_p
+(≲ 1e-9 K). Sayısal parametre."""
+
+CONDENSED_SECANT_FIRST_STEP_REL = (1e-3, 1e-4)
+"""Kesenin ikinci noktası için bağıl adım: (ε için, T için). Hız parametresi."""
+
+CONDENSED_FLAME_T_SECANT_STEP_REL = 0.05
+"""İki fazlı alev sıcaklığı kesen denemesinde gaz-yalnız kökten bağıl ilk
+adım (ölçülen iki fazlı yükselme +%2…+%14). Hız parametresi."""
+
+CONDENSED_FROZEN_T_MAX_ITER = 40
+"""Donmuş iki fazlı genişlemede (CEA nfz kipleri) sabit nokta yinelemesinin
+üst sınırı. Daralma oranı ~ε·c_s/((1−ε)·c_p,g) ≈ 0,05: 12 adım 1e-15'e
+iner, sınır yalnız patoloji korumasıdır."""
+
 
 # ---------------------------------------------------------------------------
 # Karışım oranı girdi kapısı (bebek-Scofield F4-5)
@@ -478,6 +612,48 @@ girdiyi değiştiriyor, cevap değişmiyor" kusurunu doğurmuştu.
 """
 
 
+def _eps_ongoru(gecmis, T: float, varsayilan: Optional[float]) -> Optional[float]:
+    """Dış kökte sıradaki T için ε sıcak başlangıcı: son iki (T, ε>0)
+    noktasından ln ε'da doğrusal öngörü (yalnız hız; kök ipucundan
+    bağımsızdır). Yeterli geçmiş yoksa ``varsayilan``."""
+    if len(gecmis) >= 2:
+        (T1, e1), (T2, e2) = gecmis[-2], gecmis[-1]
+        if T2 != T1:
+            ln_e = np.log(e2) + (np.log(e2) - np.log(e1)) * (T - T2) / (T2 - T1)
+            if np.isfinite(ln_e):
+                return float(np.exp(ln_e))
+    return varsayilan
+
+
+def _sekant_dene(f, x0: float, f0: float, x1: float, alt: float, ust: float,
+                 xtol: float, ftol: float = 0.0,
+                 max_iter: int = CONDENSED_SECANT_MAX_ITER):
+    """Parantezsiz kesen (secant) denemesi — V301/B7 iki fazlı çözücü hızı.
+
+    Kök bulunursa SON DEĞERLENDİRİLEN nokta döner (çağıranın değer belleğinde
+    durumu vardır); adım (alt, ust) dışına çıkarsa, eğim sıfırlanırsa ya da
+    ``max_iter`` adımda kapanmazsa None döner ve çağıran parantezli brentq
+    yoluna geçer. Kabul: |f(x_k)| ≤ ftol ya da |x_{k+1} − x_k| ≤ xtol
+    (kesen adımı köke uzaklığın kestirimidir).
+    """
+    if abs(f0) <= ftol:
+        return x0
+    f1 = f(x1)
+    for _ in range(max_iter):
+        if abs(f1) <= ftol:
+            return x1
+        if not np.isfinite(f1) or f1 == f0:
+            return None
+        x2 = x1 - f1 * (x1 - x0) / (f1 - f0)
+        if not (np.isfinite(x2) and alt < x2 < ust):
+            return None
+        if abs(x2 - x1) <= xtol:
+            return x1
+        x0, f0 = x1, f1
+        x1, f1 = x2, f(x2)
+    return None
+
+
 class CombustionAnalyzer:
     """Advanced combustion analysis with chemical equilibrium"""
 
@@ -527,6 +703,13 @@ class CombustionAnalyzer:
         # basıncı anahtara GİRMEZ çünkü boğaz onlardan bağımsızdır — ε
         # taraması ve irtifa taraması aynı izentropu yeniden çözmez.
         self._eq_station_cache = {}
+        # V301/B7: yoğun faz C(gr) verisi (gri30 kurulunca doldurulur).
+        # None ise karbonca aşırı doymuş dengeler çözülemez; bu durum analiz
+        # sonucunda 'condensed_phases' ile BEYAN edilir (sessiz düşüş yok).
+        self._yk = None
+        self._yk_neden = 'cantera_unavailable'
+        self._yk_ipucu = None
+        self._yk_eps_ipucu = None
         if CANTERA_AVAILABLE:
             for mech_file in MECHANISM_CHAIN:
                 try:
@@ -540,6 +723,7 @@ class CombustionAnalyzer:
                         "sıradaki mekanizma denenecek.", mech_file, exc)
             if self.cantera_available:
                 self._mechanism_T_ceiling_K = self._mechanism_temperature_ceiling()
+                self._yk, self._yk_neden = self._yogun_karbon_kur()
             else:
                 logger.warning(
                     "Zincirdeki hiçbir Cantera mekanizması yüklenemedi (%s); "
@@ -732,9 +916,19 @@ class CombustionAnalyzer:
                           chamber_temperature: float = None,
                           eta_c_star: Optional[float] = None,
                           expansion_ratio: Optional[float] = None,
-                          operating_point: Optional[str] = None) -> Dict:
+                          operating_point: Optional[str] = None,
+                          *, c_star_only: bool = False) -> Dict:
         """
         Comprehensive combustion analysis
+
+        ``c_star_only=True`` (V301/B7 ardılı, 21 Eki — HIZ): yalnız denge c*'ı
+        gereken çağıranlar için (hibrit c*(O/F) ızgarası ve ara değerleme
+        tanısı yalnız ``performance['c_star']`` okur). Alev sıcaklığı, oda
+        bileşimi ve kayan-denge BOĞAZ istasyonu aynen çözülür; boğaz/çıkış
+        bileşimi, çıkış istasyonu ve Isp'ler atlanır. c* tam yolla BİT-AYNIDIR
+        (aynı aşamalar, aşamalar ipucu taşımadan başlar). Denge boğazı
+        çözülemezse (Cantera yok / ıraksama) kısayol kullanılmaz, tam yol
+        koşar. Dönen sözlük ``c_star_only: True`` ile işaretlidir.
 
         Args:
             fuel_composition: {'formula': percentage} dict
@@ -777,6 +971,17 @@ class CombustionAnalyzer:
                 boğaz sıcaklığı ve negatif gaz yoğunluğu yayımlıyordu.
         """
         # --- GİRDİ KAPISI (F4-5 + ÖH D16 B3-08) — anahtar kurulmadan ÖNCE -
+        # V301/B7 ardılı (21 Eki) — ÇAĞRI DÜZEYİNDE BELİRLENİMCİLİK. İki fazlı
+        # (gaz + C(gr)) kökler sıcak başlangıçla çözülür ve ipuçları analizör
+        # nesnesinde tutulur. İpucu bir ÖNCEKİ çağrıdan kalırsa toleranslı kök
+        # başka bir noktada durur ve aynı girdi çağrı geçmişine göre ~1e-13
+        # bağıl farklı çıkar. ÖLÇÜLDÜ (D15 sağlıklı hibrit, O/F 2,5): yayımlanan
+        # (γ, M, T) üçlüsünün kapalı form c*'ı motorun c*_tek-γ'sından
+        # 1,375e-13 farklıydı ve yarı-1B kütle debisi çapraz denetimi bu
+        # gürültüyü 'divergent' sayıyordu (gaz-yalnız yolda artık 1e-16).
+        # İpuçları yalnız TEK çağrının içinde geçerlidir; her çağrı aynı
+        # başlangıçtan çözer, böylece aynı girdi aynı biti verir.
+        self._yk_ipucu_sifirla()
         of_ratio = _dogrula_karisim_orani(of_ratio)
         chamber_pressure = _dogrula_oda_basinci(chamber_pressure)
         if chamber_temperature is not None:
@@ -889,6 +1094,8 @@ class CombustionAnalyzer:
                     # iki farklı rolle sorulursa önbellek yanlış etiketi
                     # geri verirdi.
                     _op_nokta,
+                    # Kısmi (yalnız c*) sonuç tam isteğe dönmesin.
+                    bool(c_star_only),
                 )
             except (TypeError, ValueError):
                 cache_key = None  # anahtarlanamayan girdi: önbelleksiz devam
@@ -996,6 +1203,33 @@ class CombustionAnalyzer:
             throat_pressure = eq_stations['bogaz']['P'] / 1e5
             throat_temperature = eq_stations['bogaz']['T']
             station_basis = 'shifting_equilibrium'
+            if c_star_only:
+                # Tam yoldaki atamanın AYNISI (performance['c_star'] =
+                # eq_stations['c_star']); sonrasında c* değiştirilmez.
+                kisa = {
+                    'c_star_only': True,
+                    # Tam sonuçla AYNI düzen (conditions.chamber).
+                    'conditions': {'chamber': {
+                        'P': chamber_pressure, 'T': chamber_temperature}},
+                    'performance': {
+                        'c_star': eq_stations['c_star'],
+                        'c_star_basis': 'shifting_equilibrium_throat',
+                        'eta_c_star': eta_c_star,
+                        'c_star_delivered': (
+                            eta_c_star * eq_stations['c_star']
+                            if eta_c_star is not None
+                            else eq_stations['c_star']),
+                    },
+                    'condensed_phases': self._yk_beyan(chamber_composition),
+                }
+                if cache_key is not None:
+                    if (cache_key not in self._equilibrium_cache
+                            and len(self._equilibrium_cache)
+                            >= self._equilibrium_cache_max):
+                        self._equilibrium_cache.pop(
+                            next(iter(self._equilibrium_cache)))
+                    self._equilibrium_cache[cache_key] = copy.deepcopy(kisa)
+                return kisa
         throat_composition = self._calculate_equilibrium_composition(
             elements, throat_pressure, throat_temperature, 'throat'
         )
@@ -1047,8 +1281,10 @@ class CombustionAnalyzer:
                 # ε yok: çıkış basıncı ISA deniz seviyesine çapalı, ama
                 # istasyonun kendisi yine kayan-denge izentropundan gelir
                 # (tek-γ T_e hatası burada da giderilir).
+                self._yk_ipucu_sifirla()   # V301/B7 ardılı: belirlenimci başla
                 eq_exit = self._equilibrium_isentrope_state(
-                    eq_stations['s0'], eq_stations['h0'], exit_pressure * 1e5)
+                    eq_stations['s0'], eq_stations['h0'], exit_pressure * 1e5,
+                    eq_stations.get('yk'))
         if eq_exit is not None:
             exit_pressure = eq_exit['P'] / 1e5
             exit_temperature = eq_exit['T']
@@ -1260,6 +1496,9 @@ class CombustionAnalyzer:
             # (J/kg); istasyon tablosu kJ tabanındadır ve alan adlarında
             # birimi taşır. İki taban artık ad düzeyinde ayrıktır.
             'composition_units': dict(_COMPOSITION_UNITS),
+            # V301/B7 — yoğun faz beyanı (gaz + C(gr) dengesi devrede mi?).
+            'condensed_phases': self._yk_beyan(
+                chamber_composition, throat_composition, exit_composition),
         }
 
         if cache_key is not None:
@@ -1523,6 +1762,7 @@ class CombustionAnalyzer:
         uçta gri30'da katı karbon C(gr) bulunmadığı için denge eğrisi hedefe
         inemez) İSTİSNA FIRLATILMAZ: ampirik zarfa düşülür, ama artık BEYANLI.
         """
+        self._yk_ipucu_sifirla()   # V301/B7 ardılı: aşama belirlenimci başlar
         if not self.cantera_available:
             return self._empirical_flame_temperature_declared(
                 elements, pressure, of_ratio, 'cantera_unavailable')
@@ -1567,7 +1807,8 @@ class CombustionAnalyzer:
                 )
                 try:
                     T_ad = float(brentq(_kalan, T_lo, T_hi,
-                                        xtol=1e-4, rtol=1e-10))
+                                        xtol=FLAME_T_ROOT_XTOL_K,
+                                        rtol=FLAME_T_ROOT_RTOL))
                 except (ValueError, RuntimeError) as exc:
                     # Kök yok mu, gerçek çözücü hatası mı? Uçları ölçüp ayır
                     # (yalnız BAŞARISIZLIK yolunda ödenen iki denge çözümü).
@@ -1589,6 +1830,26 @@ class CombustionAnalyzer:
                 # gamma/MW okumaları bu durumdan devam eder.
                 self.gas.TPY = T_ad, p_pa, comp_str
                 self.gas.equilibrate('TP')
+
+                # V301/B7 — gaz-yalnız kökte karbon aşırı doymuşsa (ln a_C >
+                # 0) gerçek denge gaz + C(gr)'dir: entalpi kökü İKİ FAZLI
+                # karışım entalpisiyle yeniden aranır. Doymamışsa bu blok
+                # hiçbir şey yapmaz (bit-aynı): h(T) monoton olduğundan
+                # kökte doymamış gaz dengesi iki fazlı problemin de tek
+                # çözümüdür (RP-1311 eş. 3.7 ölçütü kökte sağlanmıyor).
+                if self._gaz_karbon_asiri_doymus():
+                    try:
+                        T_ad = self._yk_alev_sicakligi(p_pa, h_reactants, T_ad)
+                    except Exception as exc:  # noqa: BLE001 — beyanlı düşüş
+                        logger.warning(
+                            "İki fazlı (gaz + C(gr)) alev sıcaklığı çözülemedi "
+                            "(%s; O/F=%s, p=%.3f bar); ampirik alev sıcaklığı "
+                            "modeli kullanılıyor.", exc, of_ratio, pressure)
+                        self._yk_geri_yukle(T=T_ad, P_pa=p_pa,
+                                            y_el=self._yk_element_kutle())
+                        return self._empirical_flame_temperature_declared(
+                            elements, pressure, of_ratio,
+                            'condensed_carbon_unsolved')
 
             if not (200.0 < T_ad < 6000.0):
                 # Parantez zaten [250, 5500] olduğu için buraya ancak sayısal
@@ -1612,6 +1873,46 @@ class CombustionAnalyzer:
             return self._empirical_flame_temperature_declared(
                 elements, pressure, of_ratio, 'solver_error')
 
+    def _yk_alev_sicakligi(self, p_pa: float, h_reactants: float,
+                           T_gaz: float) -> float:
+        """Gaz + C(gr) dengesinde adyabatik alev sıcaklığı [K].
+
+        g(T) = h_karışım(T, p) − h_reaktan kökü (RP-1311 eş. 2.13a, h ile
+        eş. 2.14 tanımı, yoğun tür dahil). Parantez gaz-yalnız kökten
+        başlar: g(T_gaz) < 0 ise kök üstte (C(gr) oluşumu ekzotermiktir,
+        ölçülen bütün yakıtça zengin noktalarda böyle), değilse altta.
+        Gaz nesnesi kökte TOPLAM bileşimli gaz dengesine bırakılır
+        (çağıranın 'kökte dengede bırak' sözleşmesi).
+        """
+        y_el = self._yk_element_kutle()
+        son = {'eps': None}
+        bellek = {}   # T -> g: brentq uç yeniden değerlendirmesi
+        gecmis = []   # (T, ε>0) — ε sıcak başlangıç öngörüsü için
+
+        def g(T):
+            if T in bellek:
+                return bellek[T]
+            d = self._yk_tp(T, p_pa, y_el, _eps_ongoru(gecmis, T, son['eps']))
+            if d['eps'] > 0.0:
+                son['eps'] = d['eps']
+                gecmis.append((T, d['eps']))
+            bellek[T] = d['h'] - h_reactants
+            return bellek[T]
+
+        T_lo, T_hi = FLAME_T_BRACKET_K
+        g_gaz = g(T_gaz)
+        yon = 1.0 if g_gaz < 0.0 else -1.0
+        T_ad = _sekant_dene(
+            g, T_gaz, g_gaz,
+            T_gaz * (1.0 + yon * CONDENSED_FLAME_T_SECANT_STEP_REL),
+            T_lo, T_hi, FLAME_T_ROOT_XTOL_K)
+        if T_ad is None:
+            a, b = (T_gaz, T_hi) if g_gaz < 0.0 else (T_lo, T_gaz)
+            T_ad = float(brentq(g, a, b, xtol=FLAME_T_ROOT_XTOL_K,
+                                rtol=FLAME_T_ROOT_RTOL))
+        self._yk_geri_yukle(T=T_ad, P_pa=p_pa, y_el=y_el)
+        return T_ad
+
     def _empirical_flame_temperature_declared(
             self, elements: Dict, pressure: float,
             of_ratio: Optional[float], reason: str) -> Tuple[float, Dict]:
@@ -1624,7 +1925,10 @@ class CombustionAnalyzer:
         aynıdır ({'code', 'params', 'severity'}).
 
         reason ∈ {'cantera_unavailable', 'missing_formation_enthalpy',
-                  'no_enthalpy_root', 'solver_error', 'nonphysical_temperature'}
+                  'no_enthalpy_root', 'solver_error', 'nonphysical_temperature',
+                  'condensed_carbon_unsolved'}
+        ('condensed_carbon_unsolved', V301/B7: gaz dengesi karbonca aşırı
+        doymuş ama gaz + C(gr) entalpi kökü çözülemedi.)
         """
         T = self._empirical_flame_temperature(elements, pressure)
         return T, {
@@ -1933,9 +2237,540 @@ class CombustionAnalyzer:
                 comp_parts.append(f"{element}:{mass_frac:.6f}")
         return ",".join(comp_parts)
     
+    # ------------------------------------------------------------------
+    # V301/B7 — YOĞUN FAZ C(gr) YARDIMCILARI (model: modül başı not)
+    # ------------------------------------------------------------------
+    # DEĞİŞMEZ: bu yardımcılardan dönüldüğünde ``self.gas`` TOPLAM element
+    # bileşimli bir GAZ dengesi durumundadır (iki fazlı çözüm gaz nesnesini
+    # karbonu eksiltilmiş bileşimde bırakır; ``_yk_geri_yukle`` bunu geri
+    # alır). Sebep: mevcut yollar ``gas.SP = s, P`` ile bileşimi nesneden
+    # okur; eksiltilmiş bileşimle devam etmek SESSİZCE yanlış element
+    # dengesi demek olurdu.
+    def _yogun_karbon_kur(self):
+        """C(gr) termosu ve element matrisi. Dönüş: (veri | None, neden | None)."""
+        gas = self.gas
+        try:
+            if gas is None or 'C' not in gas.element_names:
+                return None, 'mechanism_has_no_carbon'
+            # Her element için TEK ATOMLU tür (bileşimi {e: 1}); ad eşlemesi
+            # kullanılmaz (gri30'da element 'Ar', türü 'AR').
+            atom = []
+            for e in gas.element_names:
+                adaylar = [k for k, sp in enumerate(gas.species())
+                           if sp.composition == {e: 1.0}]
+                if not adaylar:
+                    return None, 'mechanism_lacks_atomic_species'
+                atom.append(adaylar[0])
+            turler = [sp for sp in ct.Species.list_from_file(
+                CONDENSED_CARBON_THERMO_FILE)
+                if sp.name == CONDENSED_CARBON_SPECIES]
+            if len(turler) != 1:
+                return None, 'condensed_species_not_found'
+            A = np.array([[gas.n_atoms(k, m) for m in range(gas.n_elements)]
+                          for k in range(gas.n_species)], dtype=float)
+            iC = gas.element_index('C')
+            return {
+                'thermo': turler[0].thermo,
+                # Gaz tarafının element kütle defteriyle AYNI atom kütlesi
+                # (C(gr) bileşimi C:1); karbon kütlesi iki faz arasında
+                # birebir korunur.
+                'M': float(gas.atomic_weight('C')),
+                'A': A,
+                'iC': iC,
+                'C_tur': A[:, iC] > 0.0,
+                'atom_idx': np.array(atom, dtype=int),
+            }, None
+        except Exception as exc:  # noqa: BLE001 — beyanlı düşüş
+            logger.warning(
+                "Yoğun faz C(gr) termo verisi kurulamadı (%s); karbonca aşırı "
+                "doymuş dengeler 'condensed_phases' beyanıyla bildirilecek.",
+                exc)
+            return None, 'condensed_thermo_unavailable'
+
+    def _karbon_ln_aktivite(self) -> float:
+        """Gaz nesnesi DENGEDEYKEN ln a_C(gr) = (λ_C − μ°_C(gr))/RT.
+
+        λ (J/kmol) element potansiyelleri μ_j = Σ_i a_ij λ_i bağıntısından
+        (RP-1311 eş. 2.10) mol kesri ``CONDENSED_ELEMENT_POTENTIAL_X_FLOOR``
+        üstündeki türlerle en küçük kareler ile çözülür. μ°_C(gr) basınçtan
+        bağımsızdır (eş. 2.11, j > NG). R, Cantera'nın kimyasal
+        potansiyelleriyle AYNI sabittir (ct.gas_constant).
+
+        BOYUT: [λ] = [μ°] = J/kmol, [RT] = J/kmol ⇒ ln a_C boyutsuz ✔.
+        """
+        yk = self._yk
+        gas = self.gas
+        X = gas.X
+        mu = gas.chemical_potentials
+        maske = X > CONDENSED_ELEMENT_POTENTIAL_X_FLOOR
+        if not np.any(maske & yk['C_tur']):
+            # Karbon taşıyan hiçbir tür tabanı aşmıyor: en bol karbonlu tür
+            # eklenir (yoksa karbon aktivitesi sıfırdır).
+            Xc = np.where(yk['C_tur'], X, 0.0)
+            k = int(np.argmax(Xc))
+            if not Xc[k] > 0.0:
+                return float('-inf')
+            maske = maske.copy()
+            maske[k] = True
+        lam = np.linalg.lstsq(yk['A'][maske], mu[maske], rcond=None)[0]
+        T = float(gas.T)
+        th = yk['thermo']
+        g0 = th.h(T) - T * th.s(T)
+        return float((lam[yk['iC']] - g0) / (ct.gas_constant * T))
+
+    def _gaz_karbon_asiri_doymus(self) -> bool:
+        """Gaz dengesi karbonca aşırı doymuş mu (ln a_C > 0)? Durumu değiştirmez."""
+        if self._yk is None or self.gas is None:
+            return False
+        if not self.gas.elemental_mass_fraction('C') > 0.0:
+            return False
+        return (self._karbon_ln_aktivite()
+                > CONDENSED_CARBON_LN_ACTIVITY_THRESHOLD)
+
+    def _yk_element_kutle(self) -> np.ndarray:
+        """Gaz nesnesindeki TOPLAM element kütle kesirleri (element sırası)."""
+        gas = self.gas
+        return np.array([gas.elemental_mass_fraction(e)
+                         for e in gas.element_names], dtype=float)
+
+    def _yk_gaz_kur(self, T: float, P_pa: float, y_el: np.ndarray,
+                    eps: float) -> None:
+        """Kütlece ε kadar karbonu çıkarılmış gazı T, P'de TP dengesine getirir."""
+        yk = self._yk
+        y = np.array(y_el, dtype=float)
+        y[yk['iC']] -= eps
+        y /= (1.0 - eps)
+        Y = np.zeros(self.gas.n_species)
+        Y[yk['atom_idx']] = np.maximum(y, 0.0)
+        self.gas.TPY = float(T), float(P_pa), Y
+        self.gas.equilibrate('TP')
+
+    def _yk_karisim(self, eps: float) -> Dict:
+        """Gaz nesnesinin GAZ FAZI durumu + ε kütle kesirli C(gr) → karışım.
+
+        RP-1311 §2.2: hacim ve mol sayısı yalnız gaza, kütle tüm karışıma
+        aittir ⇒ ρ = ρ_g/(1−ε), M = M_g/(1−ε) (eş. 2.3a: M = 1/n),
+        h = (1−ε)h_g + ε·h_s (eş. 2.14), s = (1−ε)s_g + ε·s_s. Donmuş
+        c_p, c_v Sutton & Biblarz 9. baskı eş. 3-39'un pay/paydası:
+        (1−ε)c_p,g + ε·c_s, (1−ε)c_v,g + ε·c_s (yoğun fazda c_v ≈ c_p).
+
+        BOYUT: [h_s] = (J/kmol)/(kg/kmol) = J/kg ✔; [ρ_g/(1−ε)] = kg/m³ ✔.
+        """
+        gas = self.gas
+        yk = self._yk
+        th = yk['thermo']
+        M_C = yk['M']
+        T = float(gas.T)
+        g = 1.0 - eps
+        h_s = th.h(T) / M_C
+        s_s = th.s(T) / M_C
+        c_s = th.cp(T) / M_C
+        M_g = float(gas.mean_molecular_weight)
+        n_gaz = g / M_g          # kmol gaz / kg karışım
+        n_s = eps / M_C          # kmol C(gr) / kg karışım
+        return {
+            'T': T, 'P': float(gas.P), 'eps': float(eps),
+            'h': g * float(gas.enthalpy_mass) + eps * h_s,
+            's': g * float(gas.entropy_mass) + eps * s_s,
+            'rho': float(gas.density) / g,
+            'M': M_g / g,
+            'M_gas': M_g,
+            'rho_gas': float(gas.density),
+            'cp': g * float(gas.cp_mass) + eps * c_s,
+            'cv': g * float(gas.cv_mass) + eps * c_s,
+            # CEA tanımı: yoğun tür mol kesri TÜM türlere göre (eş. 2.4b x_j)
+            'x_s': n_s / (n_gaz + n_s),
+            'Y_gas': np.array(gas.Y, dtype=float),
+            'X_gas': np.array(gas.X, dtype=float),
+        }
+
+    def _yk_ipucu_sifirla(self) -> None:
+        """İki fazlı sıcak başlangıç ipuçlarını sıfırlar (V301/B7 ardılı, 21 Eki).
+
+        İpucu kullanan her aşama (alev sıcaklığı, istasyon bileşimi, boğaz,
+        çıkış, üçlü Isp, donmuş/kayan Isp) ve ``analyze_combustion`` kendi
+        başında çağırır. Gerekçe ölçüldü: boğaz istasyonu önbelleği
+        (``_eq_station_cache``) bir aşamayı atladığında sonraki aşama başka
+        bir ipucundan başlıyor, toleranslı kök ~1e-12 bağıl farklı bir noktada
+        duruyor ve aynı girdi çağrı geçmişine göre farklı bit veriyordu. Aşama
+        İÇİNDEKİ sıcak başlangıçlar (T kökünün ardışık denemeleri) korunur;
+        yalnız aşamalar ARASI taşıma kesilir. Gaz-yalnız yol ipucu okumaz,
+        bit-aynıdır.
+        """
+        self._yk_ipucu = None
+        self._yk_eps_ipucu = None
+
+    def _yk_tp(self, T: float, P_pa: float, y_el: np.ndarray,
+               eps_ipucu: Optional[float] = None) -> Dict:
+        """Sabit T, P'de gaz + C(gr) dengesi (iç tek boyutlu kök).
+
+        ln a_C(ε) = 0 köklenir; f(ε) ε'da monoton azalır (gazdan karbon
+        çıktıkça karbon aktivitesi düşer). f(0) ≤ 0 ise gaz doymamıştır ve
+        ε = 0 döner (gaz-yalnız denge, RP-1311 eş. 3.7 ölçütü). Her
+        değerlendirme MEVCUT gaz dengesidir (Cantera equilibrate('TP')).
+        Gaz nesnesi GAZ FAZI dengesinde kalır (çağıran geri yükler).
+        """
+        yk = self._yk
+        Y_C = float(y_el[yk['iC']])
+        if not Y_C > 0.0:
+            self._yk_gaz_kur(T, P_pa, y_el, 0.0)
+            return self._yk_karisim(0.0)
+        if eps_ipucu is None:
+            # Aynı element bileşimiyle çözülmüş son ε (yalnız sıcak başlangıç;
+            # sonuç ipucundan bağımsızdır — kök tektir).
+            onceki = self._yk_eps_ipucu
+            if onceki is not None and np.allclose(onceki[0], y_el,
+                                                  rtol=1e-9, atol=0.0):
+                eps_ipucu = onceki[1]
+        esik = CONDENSED_CARBON_LN_ACTIVITY_THRESHOLD
+        # Değer belleği: brentq parantez uçlarını YENİDEN değerlendirir;
+        # aynı ε için aynı sayı dönsün (işaret kararlılığı).
+        bellek = {}
+        son_e = [None]   # gaz nesnesinin şu an kurulu olduğu ε
+
+        def f(e):
+            if e in bellek:
+                return bellek[e]
+            self._yk_gaz_kur(T, P_pa, y_el, e)
+            son_e[0] = e
+            deger = self._karbon_ln_aktivite() - esik
+            bellek[e] = deger
+            return deger
+
+        xtol = CONDENSED_EPS_XTOL_REL * Y_C
+        alt = ust = None
+        if eps_ipucu is not None and 0.0 < eps_ipucu < Y_C:
+            fe = f(eps_ipucu)
+            # Hızlı yol: sıcak başlangıçtan kesen, u = ln ε değişkeninde
+            # (ölçüldü: ln a_C kök komşuluğunda ln ε'a göre neredeyse
+            # doğrusal, eğim ≈ −10). f monoton olduğundan (0, Y_C) içindeki
+            # kök tektir; kesen kapanmazsa aşağıdaki parantezli yol (değer
+            # belleği sayesinde ek maliyetsiz uçlarla) devralır.
+            u_kok = _sekant_dene(
+                lambda u: f(float(np.exp(u))), float(np.log(eps_ipucu)), fe,
+                float(np.log(eps_ipucu)
+                      + np.log1p(-CONDENSED_SECANT_FIRST_STEP_REL[0])),
+                float('-inf'), float(np.log(Y_C)), CONDENSED_EPS_XTOL_REL,
+                CONDENSED_LN_ACTIVITY_FTOL)
+            if u_kok is not None:
+                kok = float(np.exp(u_kok))
+                if son_e[0] != kok:
+                    self._yk_gaz_kur(T, P_pa, y_el, kok)
+                self._yk_eps_ipucu = (y_el, kok)
+                return self._yk_karisim(kok)
+            if fe > 0.0:
+                alt = eps_ipucu
+                aday = eps_ipucu * (1.0 + CONDENSED_EPS_WARM_BRACKET_REL)
+            else:
+                ust = eps_ipucu
+                aday = eps_ipucu * (1.0 - CONDENSED_EPS_WARM_BRACKET_REL)
+            if 0.0 < aday < Y_C:
+                fa = f(aday)
+                if fa > 0.0:
+                    alt = aday if alt is None else max(alt, aday)
+                else:
+                    ust = aday if ust is None else min(ust, aday)
+        if alt is None:
+            if not f(0.0) > 0.0:
+                return self._yk_karisim(0.0)
+            alt = 0.0
+        if ust is None:
+            for bosluk in CONDENSED_EPS_UPPER_GAPS:
+                aday = Y_C * (1.0 - bosluk)
+                if aday <= alt:
+                    continue
+                if f(aday) <= 0.0:
+                    ust = aday
+                    break
+                alt = aday
+            if ust is None:
+                raise RuntimeError(
+                    'condensed-carbon root not bracketed (T=%.3f K, '
+                    'P=%.6g Pa)' % (T, P_pa))
+        eps = float(brentq(f, alt, ust, xtol=xtol))
+        # Gaz nesnesini KÖKTE bırak (bellekten dönen değer durumu kurmaz).
+        if son_e[0] != eps:
+            self._yk_gaz_kur(T, P_pa, y_el, eps)
+        self._yk_eps_ipucu = (y_el, eps)
+        return self._yk_karisim(eps)
+
+    def _yk_sp(self, s_0: float, P_pa: float, y_el: np.ndarray,
+               T_tahmin: Optional[float] = None,
+               eps_tahmin: Optional[float] = None) -> Dict:
+        """s = s_0 (KARIŞIM entropisi), P'de gaz + C(gr) dengesi.
+
+        Dış kök T'de: s_karışım(T, P) − s_0 = 0; her T denemesi ``_yk_tp``.
+        s(T) sabit P'de monoton artar (c_p,eq/T > 0). Tahmin verilmezse
+        aynı izentroptaki son iki fazlı durumdan (``_yk_ipucu``) türetilir.
+        Gaz nesnesi GAZ FAZI dengesinde kalır (çağıran geri yükler).
+        """
+        T_lo, T_hi = FLAME_T_BRACKET_K
+        ipucu = getattr(self, '_yk_ipucu', None)
+        if T_tahmin is None:
+            if ipucu is not None and ipucu['s'] == s_0 and ipucu['P'] > 0:
+                T_tahmin = ipucu['T'] * (P_pa / ipucu['P']) ** ipucu['kappa']
+            elif ipucu is not None:
+                T_tahmin = ipucu['T']
+            else:
+                T_tahmin = 0.5 * (T_lo + T_hi)
+        if eps_tahmin is None and ipucu is not None:
+            eps_tahmin = ipucu['eps'] if ipucu['eps'] > 0.0 else None
+        son = {'eps': eps_tahmin, 'd': None}
+        bellek = {}   # T -> (g, durum): brentq uç yeniden değerlendirmesi
+        gecmis = []   # (T, ε>0) — ε sıcak başlangıç öngörüsü için
+
+        def g(T):
+            if T in bellek:
+                son['d'] = bellek[T][1]
+                return bellek[T][0]
+            d = self._yk_tp(T, P_pa, y_el,
+                            _eps_ongoru(gecmis, T, son['eps']))
+            if d['eps'] > 0.0:
+                son['eps'] = d['eps']
+                gecmis.append((T, d['eps']))
+            son['d'] = d
+            bellek[T] = (d['s'] - s_0, d)
+            return bellek[T][0]
+
+        T0 = float(np.clip(T_tahmin, T_lo, T_hi))
+        g0 = g(T0)
+        kok = None
+        if g0 != 0.0:
+            kok = _sekant_dene(
+                g, T0, g0, T0 * (1.0 + CONDENSED_SECANT_FIRST_STEP_REL[1]),
+                T_lo, T_hi, CONDENSED_T_ROOT_XTOL_REL * T0,
+                CONDENSED_ENTROPY_FTOL_REL * abs(s_0))
+        if g0 == 0.0:
+            d = son['d']
+        elif kok is not None:
+            d = bellek[kok][1]
+        else:
+            a = b = None
+            for w in CONDENSED_T_WARM_BRACKET_REL:
+                T1 = float(np.clip(T0 * (1.0 - w) if g0 > 0.0
+                                   else T0 * (1.0 + w), T_lo, T_hi))
+                if T1 == T0:
+                    break
+                g1 = g(T1)
+                if (g1 > 0.0) != (g0 > 0.0) or g1 == 0.0:
+                    a, b = min(T0, T1), max(T0, T1)
+                    break
+                T0, g0 = T1, g1
+            if a is None:
+                if (g(T_lo) > 0.0) == (g(T_hi) > 0.0):
+                    raise RuntimeError(
+                        'two-phase isentrope not bracketed (P=%.6g Pa)'
+                        % P_pa)
+                a, b = T_lo, T_hi
+            T = float(brentq(g, a, b,
+                             xtol=CONDENSED_T_ROOT_XTOL_REL * max(a, 1.0)))
+            if T not in bellek:
+                g(T)
+            d = bellek[T][1]
+        # NOT: gaz nesnesi son değerlendirilen durumda kalabilir; bütün
+        # çağıranlar ``_yk_geri_yukle`` ile değişmezi geri kurar.
+        # İpucu: aynı izentropta bir sonraki basınç için T ve (dlnT/dlnP)_s.
+        kappa = None
+        if ipucu is not None and ipucu['s'] == s_0 and ipucu['P'] != P_pa:
+            try:
+                kappa = (np.log(d['T'] / ipucu['T'])
+                         / np.log(P_pa / ipucu['P']))
+            except (FloatingPointError, ZeroDivisionError, ValueError):
+                kappa = None
+        if kappa is None or not np.isfinite(kappa):
+            kappa = (d['cp'] - d['cv']) / d['cp']
+        self._yk_ipucu = {'s': s_0, 'P': P_pa, 'T': d['T'],
+                          'eps': d['eps'], 'kappa': float(kappa)}
+        return d
+
+    def _yk_geri_yukle(self, kayit=None, T=None, P_pa=None, y_el=None):
+        """DEĞİŞMEZİ geri kurar: gaz nesnesi TOPLAM bileşimli gaz dengesinde.
+
+        ``kayit`` = (T, P, Y) gaz-yalnız denge durumu (çözüm yok, yalnız
+        atama); yoksa T, P'de toplam bileşimle gaz-yalnız TP dengesi kurulur.
+        """
+        if kayit is not None:
+            self.gas.TPY = kayit
+        else:
+            self._yk_gaz_kur(T, P_pa, y_el, 0.0)
+
+    def _yk_donmus_sp(self, Y_gaz: np.ndarray, eps: float, s_0: float,
+                      P_pa: float, T_tahmin: float) -> Dict:
+        """Bileşimi DONDURULMUŞ gaz + C(gr) karışımının s = s_0, P durumu.
+
+        CEA donmuş kipleri (nfz): gaz bileşimi ve yoğun kütle kesri sabit,
+        iki faz ısıl dengede. (1−ε)s_g(T, P) + ε·s_s(T) = s_0 sabit nokta
+        yinelemesiyle çözülür: s_g hedefi (s_0 − ε·s_s(T_k))/(1−ε), T_{k+1}
+        Cantera ``SP`` atamasıyla (bileşim sabit). Daralma oranı
+        ~ε·c_s/((1−ε)c_p,g) ≪ 1. Gaz nesnesi o durumda kalır.
+        """
+        gas = self.gas
+        th = self._yk['thermo']
+        M_C = self._yk['M']
+        g = 1.0 - eps
+        T = float(T_tahmin)
+        for _ in range(CONDENSED_FROZEN_T_MAX_ITER):
+            s_hedef = (s_0 - eps * th.s(T) / M_C) / g
+            gas.TPY = T, P_pa, Y_gaz
+            gas.SP = s_hedef, P_pa
+            T_yeni = float(gas.T)
+            if abs(T_yeni - T) <= CONDENSED_T_ROOT_XTOL_REL * T:
+                T = T_yeni
+                break
+            T = T_yeni
+        else:
+            raise RuntimeError('frozen two-phase expansion did not converge')
+        return self._yk_karisim(eps)
+
+    def _yk_bilesim(self, T: float, P_pa: float) -> Dict:
+        """Gaz + C(gr) istasyon bileşimi (``_calculate_equilibrium_composition``
+        sözleşmesi + yoğun faz beyanı).
+
+        Çağrıldığında gaz nesnesi T, P'de TOPLAM bileşimli gaz-yalnız
+        dengededir; dönüşte aynı duruma geri yüklenir.
+
+        Yayımlanan alanlar KARIŞIM tanımındadır (RP-1311 §2.2 / CEA):
+          density = ρ_g/(1−ε), molecular_weight = M = 1/n = M_g/(1−ε),
+          enthalpy/entropy karışım, cp/cv donmuş karışım (Sutton eş. 3-39),
+          gamma = γ_s = dlnP/dlnρ|_s,eq (eş. 2.71, iki fazlı izentrop),
+          'species' GAZ FAZININ kesirleridir (toplamı 1), yoğun tür ayrı
+          anahtarda: 'condensed_species' / 'condensed_mass_fraction'.
+        """
+        gas = self.gas
+        kayit = (float(gas.T), float(gas.P), np.array(gas.Y, dtype=float))
+        y_el = self._yk_element_kutle()
+        try:
+            d0 = self._yk_tp(T, P_pa, y_el)
+            names = gas.species_names
+            composition = {}
+            for i, species in enumerate(names):
+                if d0['X_gas'][i] > 1e-10:
+                    composition[species] = {
+                        'mole_fraction': d0['X_gas'][i],
+                        'mass_fraction': d0['Y_gas'][i],
+                    }
+            gamma_frozen = d0['cp'] / d0['cv']
+            gamma_eq = gamma_frozen
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        'ignore', message=r'.*outside valid range.*',
+                        category=UserWarning)
+                    d1 = self._yk_sp(
+                        d0['s'], d0['P'] * COMPOSITION_GAMMA_PRESSURE_PERTURBATION,
+                        y_el, T_tahmin=d0['T'],
+                        eps_tahmin=d0['eps'] if d0['eps'] > 0.0 else None)
+                n_s = np.log(d1['P'] / d0['P']) / np.log(d1['rho'] / d0['rho'])
+                if (COMPOSITION_GAMMA_PHYSICAL_BAND[0] < n_s
+                        < COMPOSITION_GAMMA_PHYSICAL_BAND[1]):
+                    gamma_eq = float(n_s)
+            except Exception:  # noqa: BLE001 — donmuş üsse düşülür (aynı sözleşme)
+                gamma_eq = gamma_frozen
+        finally:
+            self._yk_geri_yukle(kayit)
+        out = {
+            'species': composition,
+            'temperature': d0['T'],
+            'pressure': d0['P'] / 1e5,
+            'density': d0['rho'],
+            'molecular_weight': d0['M'],
+            'cp': d0['cp'],
+            'cv': d0['cv'],
+            'gamma': gamma_eq,
+            'gamma_frozen': gamma_frozen,
+            'enthalpy': d0['h'],
+            'entropy': d0['s'],
+        }
+        if d0['eps'] > 0.0:
+            out.update({
+                'condensed_species': {CONDENSED_CARBON_SPECIES: {
+                    'mass_fraction': d0['eps'],
+                    'mole_fraction': d0['x_s'],
+                }},
+                'condensed_mass_fraction': d0['eps'],
+                'gas_molecular_weight': d0['M_gas'],
+                'gas_density': d0['rho_gas'],
+                'phase_basis': CONDENSED_PHASE_BASIS_TEXT,
+            })
+        return out
+
+    def _yk_beyan(self, *istasyonlar) -> Dict:
+        """Analiz sonucunun 'condensed_phases' beyanı (V301/B7).
+
+        status:
+          'present'      — en az bir istasyon gaz + C(gr) dengesi; istasyon
+                           başına yoğun kütle kesri yayımlanır,
+          'absent'       — denge denetlendi, hiçbir istasyonda gaz karbonca
+                           aşırı doymuş değil (yalnız metin; sayı yok),
+          'unavailable'  — Cantera denge yolu var ama C(gr) verisi
+                           kurulamadı (adlı gerekçe),
+          'not_modelled' — Cantera yok, ampirik yol.
+        """
+        adlar = ('chamber', 'throat', 'exit')
+        olcut = ('C(gr) enters the equilibrium where the gas-phase '
+                 'equilibrium is carbon-supersaturated, ln a_C > 0 '
+                 '(NASA RP-1311 Part I eq. 3.7); evaluated at every state')
+        if not self.cantera_available:
+            return {'status': 'not_modelled',
+                    'reason': 'cantera_unavailable'}
+        if self._yk is None:
+            return {'status': 'unavailable', 'reason': self._yk_neden,
+                    'species_admitted': CONDENSED_CARBON_SPECIES}
+        kesir = {}
+        for ad, comp in zip(adlar, istasyonlar):
+            if isinstance(comp, dict) and 'condensed_mass_fraction' in comp:
+                kesir[ad] = comp['condensed_mass_fraction']
+        if not kesir:
+            return {'status': 'absent',
+                    'species_admitted': CONDENSED_CARBON_SPECIES,
+                    'criterion': olcut}
+        return {
+            'status': 'present',
+            'species_admitted': CONDENSED_CARBON_SPECIES,
+            'criterion': olcut,
+            'condensed_mass_fraction': {
+                ad: kesir.get(ad, 0.0) for ad in adlar},
+            'stations_with_condensed_phase': [
+                ad for ad in adlar if ad in kesir],
+            'basis': CONDENSED_PHASE_BASIS_TEXT,
+        }
+
+    def _denge_sp(self, s_0: float, P_pa: float, yk_baglam: Optional[Dict] = None,
+                  T_tahmin: Optional[float] = None,
+                  eps_tahmin: Optional[float] = None) -> Dict:
+        """s = s_0, P'de denge durumu; gerekirse gaz + C(gr).
+
+        * ``yk_baglam['aktif']`` (oda iki fazlı): doğrudan iki fazlı çözüm.
+        * Aksi hâlde BUGÜNKÜ gaz-yalnız SP dengesi (bit-aynı işlem sırası);
+          sonuç karbonca aşırı doymuşsa iki fazlı çözüme geçilir.
+        Dönüş: {'P', 'T', 'rho', 'h', 'eps', 'Y_gas'}; gaz nesnesi değişmezde.
+        """
+        gas = self.gas
+        if yk_baglam is not None and yk_baglam.get('aktif'):
+            y_el = yk_baglam['y_el']
+            d = self._yk_sp(s_0, P_pa, y_el, T_tahmin, eps_tahmin)
+            self._yk_geri_yukle(T=d['T'], P_pa=d['P'], y_el=y_el)
+            return d
+        gas.SP = s_0, P_pa
+        gas.equilibrate('SP')
+        if self._gaz_karbon_asiri_doymus():
+            kayit = (float(gas.T), float(gas.P), np.array(gas.Y, dtype=float))
+            y_el = self._yk_element_kutle()
+            try:
+                d = self._yk_sp(s_0, P_pa, y_el,
+                                T_tahmin if T_tahmin is not None
+                                else kayit[0], eps_tahmin)
+            finally:
+                self._yk_geri_yukle(kayit)
+            return d
+        return {'P': float(gas.P), 'T': float(gas.T),
+                'rho': float(gas.density), 'h': float(gas.enthalpy_mass),
+                'eps': 0.0, 'Y_gas': None}
+
     def _calculate_equilibrium_composition(self, elements: Dict, pressure: float, 
                                          temperature: float, station: str) -> Dict:
         """Calculate chemical equilibrium composition using Cantera"""
+        self._yk_ipucu_sifirla()   # V301/B7 ardılı: aşama belirlenimci başlar
         
         if not self.cantera_available:
             # Fallback basit model
@@ -1949,6 +2784,11 @@ class CombustionAnalyzer:
             comp_str = self._elements_to_cantera_composition(elements)
             self.gas.TPY = temperature, pressure * 1e5, comp_str
             self.gas.equilibrate('TP')  # Constant temperature and pressure
+
+            # V301/B7: gaz dengesi karbonca aşırı doymuşsa istasyon gaz +
+            # C(gr) dengesidir. Doymamışsa aşağıdaki yol BİT-AYNI.
+            if self._gaz_karbon_asiri_doymus():
+                return self._yk_bilesim(temperature, pressure * 1e5)
             
             # Sonuçları çıkar
             composition = {}
@@ -1995,12 +2835,23 @@ class CombustionAnalyzer:
                         message=r'.*outside valid range.*',
                         category=UserWarning,
                     )
-                    self.gas.SP = s0, P0 * 1.01
+                    self.gas.SP = s0, P0 * COMPOSITION_GAMMA_PRESSURE_PERTURBATION
                     self.gas.equilibrate('SP')
-                P1 = self.gas.P
-                rho1 = self.gas.density
+                    if self._gaz_karbon_asiri_doymus():
+                        # V301/B7: pertürbe durum karbonca aşırı doymuş
+                        # (sınır komşuluğu): o durum gaz + C(gr) dengesidir.
+                        _y_el = self._yk_element_kutle()
+                        _d1 = self._yk_sp(
+                            s0, P0 * COMPOSITION_GAMMA_PRESSURE_PERTURBATION,
+                            _y_el, T_tahmin=float(self.gas.T))
+                        P1, rho1 = _d1['P'], _d1['rho']
+                    else:
+                        P1 = self.gas.P
+                        rho1 = self.gas.density
                 n_s = np.log(P1 / P0) / np.log(rho1 / rho0)
-                if 1.05 < n_s < 1.70:  # fiziksel yanma gazı bandı
+                if (COMPOSITION_GAMMA_PHYSICAL_BAND[0] < n_s
+                        < COMPOSITION_GAMMA_PHYSICAL_BAND[1]):
+                    # fiziksel yanma gazı bandı
                     gamma_eq = n_s
             except Exception:
                 gamma_eq = gamma_frozen
@@ -2301,7 +3152,8 @@ class CombustionAnalyzer:
     # ÖH D18 fizik-a1 / F1 — kayan-denge istasyon çözücüsü (B3-05 + B3-02)
     # ------------------------------------------------------------------
     def _equilibrium_isentrope_state(self, s_0: float, h_0: float,
-                                     P_pa: float) -> Dict:
+                                     P_pa: float,
+                                     yk_baglam: Optional[Dict] = None) -> Dict:
         """s = s_0 izentropunda P_pa basıncındaki kayan-denge akış durumu.
 
         Döndürülen sözlük [SI]: P [Pa], T [K], rho [kg/m³], h [J/kg],
@@ -2314,18 +3166,23 @@ class CombustionAnalyzer:
         BOYUT SAĞLAMASI: [h] = J/kg = m²/s² ⇒ [sqrt(2Δh)] = m/s ✔;
         [G] = (kg/m³)(m/s) = kg/(m²·s) ✔.
         (Betik: ``docs/scofield/raw/OH/D18/fizik/a1/boyut.py``)
-        """
-        gas = self.gas
-        gas.SP = s_0, P_pa
-        gas.equilibrate('SP')
-        P0 = float(gas.P)
-        rho0 = float(gas.density)
-        h = float(gas.enthalpy_mass)
-        v = float(np.sqrt(2.0 * max(h_0 - h, 0.0)))
-        return {'P': P0, 'T': float(gas.T), 'rho': rho0, 'h': h, 'v': v,
-                'G': rho0 * v}
 
-    def _equilibrium_sound_speed(self, s_0: float, durum: Dict) -> float:
+        V301/B7: durum ``_denge_sp`` ile çözülür — gaz dengesi karbonca
+        aşırı doymuşsa (ya da oda iki fazlıysa, ``yk_baglam``) gaz + C(gr);
+        ρ ve h KARIŞIM değerleridir (RP-1311 §2.2), dolayısıyla G = ρv
+        toplam kütle akısıdır (c* = P_c/G_t tanımı yoğun fazla da geçerli).
+        Doymamış durumda işlem sırası ve sayılar bugünküyle BİT-AYNI.
+        """
+        d = self._denge_sp(s_0, P_pa, yk_baglam)
+        P0 = d['P']
+        rho0 = d['rho']
+        h = d['h']
+        v = float(np.sqrt(2.0 * max(h_0 - h, 0.0)))
+        return {'P': P0, 'T': d['T'], 'rho': rho0, 'h': h, 'v': v,
+                'G': rho0 * v, 'eps': d['eps']}
+
+    def _equilibrium_sound_speed(self, s_0: float, durum: Dict,
+                                 yk_baglam: Optional[Dict] = None) -> float:
         """``durum`` noktasında denge ses hızı a_eq [m/s].
 
         n_s = ln(P₂/P₁)/ln(ρ₂/ρ₁) sabit entropide sonlu farkla alınır
@@ -2333,12 +3190,25 @@ class CombustionAnalyzer:
         Donmuş γ DEĞİL denge üsteli kullanılır (RP-1311 §6.3.3).
 
         BOYUT SAĞLAMASI: [n_s·P/ρ] = Pa·m³/kg = m²/s² ⇒ [a] = m/s ✔.
+
+        V301/B7: iki fazlı durumda ρ karışım yoğunluğudur ve pertürbe durum
+        da gaz + C(gr) dengesidir: a² = γ_s·P/ρ = nRTγ_s (RP-1311 eş. 2.74).
         """
-        gas = self.gas
         P0, rho0 = durum['P'], durum['rho']
-        gas.SP = s_0, P0 * EQ_STATION_SOUND_SPEED_PERTURBATION
-        gas.equilibrate('SP')
-        n_s = float(np.log(gas.P / P0) / np.log(gas.density / rho0))
+        if durum.get('eps', 0.0) > 0.0 and not (
+                yk_baglam is not None and yk_baglam.get('aktif')):
+            # Gaz-yalnız odalı zincirde iki fazlı istasyon: pertürbe durum da
+            # iki fazlı çözülür (gaz nesnesi toplam bileşimde — değişmez).
+            y_el = self._yk_element_kutle()
+            d1 = self._yk_sp(s_0, P0 * EQ_STATION_SOUND_SPEED_PERTURBATION,
+                             y_el, T_tahmin=durum['T'],
+                             eps_tahmin=durum['eps'])
+            self._yk_geri_yukle(T=d1['T'], P_pa=d1['P'], y_el=y_el)
+        else:
+            d1 = self._denge_sp(s_0, P0 * EQ_STATION_SOUND_SPEED_PERTURBATION,
+                                yk_baglam, T_tahmin=durum['T'],
+                                eps_tahmin=durum.get('eps') or None)
+        n_s = float(np.log(d1['P'] / P0) / np.log(d1['rho'] / rho0))
         return float(np.sqrt(max(n_s, 1e-9) * P0 / rho0))
 
     def _solve_equilibrium_throat(self, comp_str: str, T_c: float,
@@ -2364,6 +3234,7 @@ class CombustionAnalyzer:
         Cantera yoksa ya da çözüm ıraksarsa ``None`` döner; çağıran tek-γ
         yoluna düşer ve bunu ``conditions.throat.basis`` ile BEYAN eder.
         """
+        self._yk_ipucu_sifirla()   # V301/B7 ardılı: aşama belirlenimci başlar
         if not self.cantera_available or self.gas is None:
             return None
         anahtar = (comp_str, float(T_c), float(P_c_bar))
@@ -2375,10 +3246,32 @@ class CombustionAnalyzer:
             P_c = float(P_c_bar) * 1e5
             gas.TPY = float(T_c), P_c, comp_str
             gas.equilibrate('TP')
-            h_0 = float(gas.enthalpy_mass)
-            s_0 = float(gas.entropy_mass)
-            T_0 = float(gas.T)
-            Y_0 = np.array(gas.Y, dtype=float)
+            yk_baglam = None
+            eps_0 = 0.0
+            if self._gaz_karbon_asiri_doymus():
+                # V301/B7: oda gaz + C(gr) dengesi. Durağan h_0, s_0 KARIŞIM
+                # değerleridir; izentrop boyunca bütün durumlar iki fazlı
+                # çözücüden geçer (yk_baglam['aktif']).
+                kayit = (float(gas.T), float(gas.P),
+                         np.array(gas.Y, dtype=float))
+                y_el = self._yk_element_kutle()
+                try:
+                    d_0 = self._yk_tp(float(T_c), P_c, y_el)
+                finally:
+                    self._yk_geri_yukle(kayit)
+                h_0, s_0, T_0 = d_0['h'], d_0['s'], d_0['T']
+                Y_0 = d_0['Y_gas']
+                eps_0 = d_0['eps']
+                Y_0_toplam = kayit[2]
+                yk_baglam = {'aktif': True, 'y_el': y_el}
+                self._yk_ipucu = {'s': s_0, 'P': P_c, 'T': T_0, 'eps': eps_0,
+                                  'kappa': (d_0['cp'] - d_0['cv']) / d_0['cp']}
+            else:
+                h_0 = float(gas.enthalpy_mass)
+                s_0 = float(gas.entropy_mass)
+                T_0 = float(gas.T)
+                Y_0 = np.array(gas.Y, dtype=float)
+                Y_0_toplam = Y_0
 
             alt = EQ_STATION_SONIC_BRACKET[0] * P_c
             ust = EQ_STATION_SONIC_BRACKET[1] * P_c
@@ -2389,7 +3282,8 @@ class CombustionAnalyzer:
                 if x1 >= x2 or x2 >= x3:
                     break
                 y1, y2, y3 = [
-                    self._equilibrium_isentrope_state(s_0, h_0, x)['G']
+                    self._equilibrium_isentrope_state(
+                        s_0, h_0, x, yk_baglam)['G']
                     for x in (x1, x2, x3)]
                 payda = (x1 - x2) * (y2 - y3) - (x2 - x3) * (y1 - y2)
                 if not np.isfinite(payda) or abs(payda) < 1e-30:
@@ -2404,13 +3298,17 @@ class CombustionAnalyzer:
                 if kapandi:
                     break
 
-            bogaz = self._equilibrium_isentrope_state(s_0, h_0, p)
-            bogaz['a'] = self._equilibrium_sound_speed(s_0, bogaz)
+            bogaz = self._equilibrium_isentrope_state(s_0, h_0, p, yk_baglam)
+            bogaz['a'] = self._equilibrium_sound_speed(s_0, bogaz, yk_baglam)
             if not (bogaz['G'] > 0.0 and bogaz['v'] > 0.0
                     and np.isfinite(bogaz['T']) and bogaz['a'] > 0.0):
                 return None
             sonuc = {
                 's0': s_0, 'h0': h_0, 'T0': T_0, 'P_c': P_c, 'Y0': Y_0,
+                # V301/B7: oda yoğun kütle kesri, toplam bileşimli gaz-yalnız
+                # oda durumu (değişmez geri yüklemesi için) ve iki fazlı
+                # bağlam. Gaz-yalnız odada eps0 = 0, Y0_total ≡ Y0, yk None.
+                'eps0': eps_0, 'Y0_total': Y_0_toplam, 'yk': yk_baglam,
                 'bogaz': bogaz,
                 'c_star': P_c / bogaz['G'],
                 # Sonik kapanış artığı |v/a − 1|: tepe araması yakınsadıysa
@@ -2439,6 +3337,7 @@ class CombustionAnalyzer:
 
         BOYUT SAĞLAMASI: ε = [kg/(m²s)]/[kg/(m²s)] = 1 ✔.
         """
+        self._yk_ipucu_sifirla()   # V301/B7 ardılı: aşama belirlenimci başlar
         h0, s0 = ist['h0'], ist['s0']
         G_t = ist['bogaz']['G']
         hedef = float(expansion_ratio)
@@ -2446,7 +3345,8 @@ class CombustionAnalyzer:
         log_alt = float(np.log(EQ_STATION_EXIT_PRESSURE_FLOOR_PA))
 
         def artik(x_log):
-            d = self._equilibrium_isentrope_state(s0, h0, float(np.exp(x_log)))
+            d = self._equilibrium_isentrope_state(s0, h0, float(np.exp(x_log)),
+                                                  ist.get('yk'))
             if d['G'] <= 0.0:
                 return None, d
             return float(np.log(G_t / d['G'] / hedef)), d
@@ -2506,27 +3406,45 @@ class CombustionAnalyzer:
         Kinetik verim bandı ``frozen_at_throat``–``equilibrium`` arasıdır
         (MIT 16.512 L14, SSME: 435 / 451 / 465 s).
         """
+        self._yk_ipucu_sifirla()   # V301/B7 ardılı: aşama belirlenimci başlar
         try:
             gas = self.gas
             h0, s0 = ist['h0'], ist['s0']
             bogaz = ist['bogaz']
+            yk_baglam = ist.get('yk')
+            eps_0 = ist.get('eps0', 0.0)
 
             # nfz=2 — boğaz denge bileşimini dondur, izentropik genişlet.
-            gas.SP = s0, bogaz['P']
-            gas.equilibrate('SP')
-            Y_t = np.array(gas.Y, dtype=float)
-            gas.TPY = float(gas.T), bogaz['P'], Y_t
-            gas.SP = s0, P_e_pa
-            v_ft = float(np.sqrt(2.0 * max(h0 - float(gas.enthalpy_mass), 0.0)))
+            # V301/B7: boğaz gaz + C(gr) ise yoğun kütle kesri de donar
+            # (CEA donmuş kipi: bileşim sabit, iki faz ısıl dengede).
+            d_t = self._denge_sp(s0, bogaz['P'], yk_baglam,
+                                 T_tahmin=bogaz['T'],
+                                 eps_tahmin=bogaz.get('eps') or None)
+            if d_t['eps'] > 0.0:
+                h_ft = self._yk_donmus_sp(d_t['Y_gas'], d_t['eps'], s0,
+                                          P_e_pa, d_t['T'])['h']
+            else:
+                Y_t = np.array(gas.Y, dtype=float)
+                gas.TPY = float(gas.T), bogaz['P'], Y_t
+                gas.SP = s0, P_e_pa
+                h_ft = float(gas.enthalpy_mass)
+            v_ft = float(np.sqrt(2.0 * max(h0 - h_ft, 0.0)))
 
             # nfz=1 — oda denge bileşimini dondur (mutlak alt sınır).
-            gas.TPY = ist['T0'], ist['P_c'], ist['Y0']
-            gas.SP = s0, P_e_pa
-            v_fc = float(np.sqrt(2.0 * max(h0 - float(gas.enthalpy_mass), 0.0)))
+            if eps_0 > 0.0:
+                h_fc = self._yk_donmus_sp(ist['Y0'], eps_0, s0, P_e_pa,
+                                          ist['T0'])['h']
+            else:
+                gas.TPY = ist['T0'], ist['P_c'], ist['Y0']
+                gas.SP = s0, P_e_pa
+                h_fc = float(gas.enthalpy_mass)
+            v_fc = float(np.sqrt(2.0 * max(h0 - h_fc, 0.0)))
 
             # Gaz durumunu oda dengesine geri yükle (sonraki çağrılar temiz
             # başlasın — mevcut _calculate_frozen_shifting_isp ile aynı desen).
-            gas.TPY = ist['T0'], ist['P_c'], ist['Y0']
+            # V301/B7: iki fazlı odada TOPLAM bileşimli gaz-yalnız oda durumu
+            # (Y0_total); gaz-yalnız odada Y0_total ≡ Y0 (bit-aynı).
+            gas.TPY = ist['T0'], ist['P_c'], ist.get('Y0_total', ist['Y0'])
             gas.equilibrate('TP')
 
             if not (v_e_eq >= v_ft >= v_fc > 0.0):
@@ -2631,18 +3549,21 @@ class CombustionAnalyzer:
         Doğrulama (tests/test_combustion_cea_validation.py, Pc=20 bar):
           N2O/HTPB  O/F=6.0:  frozen -3.1%, shifting -2.4% (CEA'ya göre)
           LOX/RP-1  O/F=2.5:  frozen +0.5%, shifting +2.2%
-        Frozen/shifting genişleme MANTIĞI CEA tanımıyla birebir uyumludur;
-        kalan ~%2-3 sapma oda (chamber) denge çözümünün c*/T_c belirsizliğinin
-        (gri30 mekanizması fuel-rich N2O/HTPB için T_c'yi ~%3.4 düşük verir;
-        c* zaten yalnızca %0-1.5 içinde doğrulanmıştır) Isp'e taşınmasıdır;
-        Isp ~ sqrt(T_c) olduğundan -%3.4 T_c ~ -%1.7 Isp tabanı yaratır. T_c'yi
-        DÜŞÜK vermek motor boyutlandırmada KONSERVATİF (güvenli) yöndür. Bu
-        nedenle Isp testleri %3.5 toleransla, oda c* doğruluğu ise %2.5 ile
-        denetlenir.
+        Frozen/shifting genişleme MANTIĞI CEA tanımıyla birebir uyumludur.
+        Yukarıdaki yüzdeler ESKİ bir ölçümdür. Bu paragraf eskiden "gri30
+        fuel-rich N2O/HTPB için T_c'yi ~%3.4 düşük verir" diyordu; bugünkü
+        kodla tutmuyor. v3.0.1'de (20 Eki 2026) /calculate yanıtındaki
+        ``cea_comparison`` bloğuyla yeniden ölçüldü: aynı Pc, O/F ve ε,
+        HRMA'nın kendi itici kartları, RocketCEA 1.2.1.
+          N2O/HTPB Pc=20 bar O/F=6: Δc* +%0.020, ΔT_c +%0.057, ΔIsp_vac +%0.011
+          N2O/HTPB Pc=20 bar O/F=7: Δc* +%0.017, ΔT_c +%0.044, ΔIsp_vac +%0.014
+        Isp testlerinin %3.5 ve oda c* doğruluğunun %2.5 toleransları
+        değiştirilmedi; artık geniş kalıyorlar. Daraltılması ayrı bir iş.
 
         Cantera yoksa veya denge çözülemezse (None, None, None) döner ve
         çağıran mevcut tek-gamma Isp değerini korur.
         """
+        self._yk_ipucu_sifirla()   # V301/B7 ardılı: aşama belirlenimci başlar
         if not self.cantera_available or self.gas is None:
             return None, None, None
         try:
@@ -2651,15 +3572,39 @@ class CombustionAnalyzer:
             # Oda denge durumu (durağan koşul) — h_0, s_0, bileşim okunur.
             gas.TPY = T_c, P_c * 1e5, comp_str
             gas.equilibrate('TP')
+            if self._gaz_karbon_asiri_doymus():
+                # V301/B7: oda gaz + C(gr). Aynı enerji denklemi, KARIŞIM
+                # entalpisi/entropisiyle (RP-1311 eş. 2.14); donmuş kipte
+                # gaz bileşimi ve yoğun kütle kesri sabit.
+                kayit = (float(gas.T), float(gas.P),
+                         np.array(gas.Y, dtype=float))
+                y_el = self._yk_element_kutle()
+                try:
+                    d_0 = self._yk_tp(float(T_c), P_c * 1e5, y_el)
+                    d_e = self._yk_sp(d_0['s'], P_e * 1e5, y_el,
+                                      eps_tahmin=d_0['eps'])
+                    h_e_froz = self._yk_donmus_sp(
+                        d_0['Y_gas'], d_0['eps'], d_0['s'], P_e * 1e5,
+                        d_e['T'])['h']
+                finally:
+                    self._yk_geri_yukle(kayit)
+                h_0 = d_0['h']
+                v_shift = float(np.sqrt(2.0 * max(h_0 - d_e['h'], 0.0)))
+                v_froz = float(np.sqrt(2.0 * max(h_0 - h_e_froz, 0.0)))
+                isp_froz = v_froz / G_0
+                isp_shift = v_shift / G_0
+                if not (isp_shift >= isp_froz > 0):
+                    return None, None, None
+                return isp_froz, isp_shift, v_shift
             h_0 = gas.enthalpy_mass      # J/kg, durağan entalpi (Hf dahil)
             s_0 = gas.entropy_mass       # J/(kg·K)
             T_0 = gas.T
             Y_0 = gas.Y                  # oda denge bileşimi (frozen referans)
 
-            # SHIFTING: çıkış basıncında dengeyi yeniden çöz.
-            gas.SP = s_0, P_e * 1e5
-            gas.equilibrate('SP')
-            h_e_shift = gas.enthalpy_mass
+            # SHIFTING: çıkış basıncında dengeyi yeniden çöz (V301/B7:
+            # karbonca aşırı doymuşsa gaz + C(gr); değilse bit-aynı).
+            d_e = self._denge_sp(s_0, P_e * 1e5)
+            h_e_shift = d_e['h']
             v_shift = float(np.sqrt(2.0 * max(h_0 - h_e_shift, 0.0)))
 
             # FROZEN: oda bileşimine dön, izentropik (equilibrate YOK).

@@ -57,6 +57,8 @@
 
     var DICT = {
         en: {            '(reference cooled wall)': '(reference cooled wall)',
+            // V3.0.5 T-ÇAPA-C1: regen_cooling.RP1_COKING_BASIS (soğutma paneli rozet ipucu).
+            'RP-1 coolant-side wall temperature, two tiers: 728 K is the design criterion of NASA SP-8087 (1972) sec. 3.1.1.5.4 p. 62 ("do not operate with liquid-wall temperatures above 850 F (728 K) for RP-1") - above it the design does not meet that criterion; 561 K is a deposit-risk WARNING level of this software, based on experimental findings (NASA CR-168277: deposits in copper tubes at 560-750 K) that must be validated for the application conditions; it does not by itself make the design unsafe. Staying below 728 K does NOT mean the wall stays free of deposits or is safe.': 'RP-1 coolant-side wall temperature, two tiers: 728 K is the design criterion of NASA SP-8087 (1972) sec. 3.1.1.5.4 p. 62 ("do not operate with liquid-wall temperatures above 850 F (728 K) for RP-1") - above it the design does not meet that criterion; 561 K is a deposit-risk WARNING level of this software, based on experimental findings (NASA CR-168277: deposits in copper tubes at 560-750 K) that must be validated for the application conditions; it does not by itself make the design unsafe. Staying below 728 K does NOT mean the wall stays free of deposits or is safe.',
             '3D Hybrid Rocket Motor Visualization': '3D Hybrid Rocket Motor Visualization',
             '3D Motor Assembly': '3D Motor Assembly',
             '3D Motor Visualization': '3D Motor Visualization',
@@ -183,6 +185,7 @@
             'Fallback schematic — the detailed injector view was not available for this run; plate outline is drawn, not computed.': 'Fallback schematic — the detailed injector view was not available for this run; plate outline is drawn, not computed.',
             'Fallback schematic — the solver nozzle contour was not available for this run;': 'Fallback schematic — the solver nozzle contour was not available for this run;',
             'Feed System Pressure Budget': 'Feed System Pressure Budget',
+            'Feed System Pressure Budget (per circuit)': 'Feed System Pressure Budget (per circuit)',
             'Feed System — Slosh, Pressurant & Water Hammer': 'Feed System — Slosh, Pressurant & Water Hammer',
             /* ÖH D27 / P12aB3-03 — ENJEKTÖR KÜNYESİNİN İKİ SATIRI.
                ÖLÇÜLDÜ (a3/once.json): `chartText()` TR modunda altı
@@ -378,6 +381,7 @@
             'Parachute deploy': 'Parachute deploy',
             'Paraffin Wax': 'Paraffin Wax',
             'Parametric Analysis: Of Ratio Sweep': 'Parametric Analysis: Of Ratio Sweep',
+            'Parametric Analysis: O/F Ratio Sweep': 'Parametric Analysis: O/F Ratio Sweep',
             'Performance Chart': 'Performance Chart',
             'Performance Summary': 'Performance Summary',
             'Pintle Injector - Cross Section': 'Pintle Injector - Cross Section',
@@ -406,6 +410,7 @@
             'Propellant Mass (kg)': 'Propellant Mass (kg)',
             'Propellant Mass Flow': 'Propellant Mass Flow',
             'Propellant Mass vs Of Ratio': 'Propellant Mass vs Of Ratio',
+            'Propellant Mass vs O/F Ratio': 'Propellant Mass vs O/F Ratio',
             'Quasi-1D: Mach is uniform across each cross-section — the radial axis shows geometry only, no boundary layer is modeled.': 'Quasi-1D: Mach is uniform across each cross-section — the radial axis shows geometry only, no boundary layer is modeled.',
             'Radial Position (mm)': 'Radial Position (mm)',
             'Radial distance': 'Radial distance',
@@ -447,6 +452,7 @@
             'Specific Impulse (s)': 'Specific Impulse (s)',
             'Specific Impulse vs Altitude': 'Specific Impulse vs Altitude',
             'Specific Impulse vs Of Ratio': 'Specific Impulse vs Of Ratio',
+            'Specific Impulse vs O/F Ratio': 'Specific Impulse vs O/F Ratio',
             /* T64 ile aynı gerekçe: visualization.py:3316 açı bildirilmediğinde
                bu metni üretir; birebir kayıt olmazsa 'Püskürtme konisi
                (angle not reported)' diye yarı İngilizce kalır. Kısa 'Spray cone'
@@ -460,6 +466,7 @@
             'Stress Amplitude (MPa)': 'Stress Amplitude (MPa)',
             'Structural Analysis Dashboard': 'Structural Analysis Dashboard',
             'Structural Min SF': 'Structural Min SF',
+            'injector circuit solution': 'injector circuit solution',
             'Structural Safety — Pressure Vessel, Buckling, Fatigue': 'Structural Safety — Pressure Vessel, Buckling, Fatigue',
             'Support Arms': 'Support Arms',
             'Sweep maximum': 'Sweep maximum',
@@ -490,6 +497,7 @@
             'Throat Diameter': 'Throat Diameter',
             'Throat Diameter (mm)': 'Throat Diameter (mm)',
             'Throat Diameter vs Of Ratio': 'Throat Diameter vs Of Ratio',
+            'Throat Diameter vs O/F Ratio': 'Throat Diameter vs O/F Ratio',
             'Throat station': 'Throat station',
             'Thrust': 'Thrust',
             'Thrust & Chamber Pressure vs Time': 'Thrust & Chamber Pressure vs Time',
@@ -510,6 +518,7 @@
             'Thrust [N]': 'Thrust [N]',
             'Thrust vs Altitude': 'Thrust vs Altitude',
             'Thrust vs Of Ratio': 'Thrust vs Of Ratio',
+            'Thrust vs O/F Ratio': 'Thrust vs O/F Ratio',
             'Time': 'Time',
             'Time (s)': 'Time (s)',
             'Time [s]': 'Time [s]',
@@ -585,8 +594,10 @@
             'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.': 'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.',
             'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results': 'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results',
             'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement': 'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement',
+            'a hybrid injects ONE liquid stream (the oxidizer); the fuel/oxidizer momentum-ratio criterion applies only to unlike (fuel-on-oxidizer) impingement': 'a hybrid injects ONE liquid stream (the oxidizer); the fuel/oxidizer momentum-ratio criterion applies only to unlike (fuel-on-oxidizer) impingement',
             'the model COMPUTES the recess from the inner jet diameter; see the value in the results': 'the model COMPUTES the recess from the inner jet diameter; see the value in the results',
             'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array': 'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array',
+            'this path sizes a single coaxial element for the whole oxidizer flow; multi-element arrays are not modelled': 'this path sizes a single coaxial element for the whole oxidizer flow; multi-element arrays are not modelled',
 
             /* ÖH D35 / OH-GT-19, OH-GT-21, OH-GT-22 (22 Eylül 2026) —
                TÜRKÇE EKRANDA KALAN ÇÖZÜCÜ CÜMLELERİ.
@@ -614,6 +625,13 @@
             'A solid motor has no injector and no feed system, so the classical chug criterion (injector pressure drop ratio decoupling the feed from the chamber) has no counterpart here. No injector input is passed to the module: its chug report is NOT_EVALUATED by construction, not because data is missing. The solid-motor low-frequency counterpart (L* / bulk-mode instability) is NOT modelled.': 'A solid motor has no injector and no feed system, so the classical chug criterion (injector pressure drop ratio decoupling the feed from the chamber) has no counterpart here. No injector input is passed to the module: its chug report is NOT_EVALUATED by construction, not because data is missing. The solid-motor low-frequency counterpart (L* / bulk-mode instability) is NOT modelled.',
             'No acceptance is issued: the wall was sized by HRMA to meet the target safety factor, so the reported safety factor is that target read back (target x manufacturing allowance), not an independent verification. Supply the real wall_thickness (m) to obtain a verification. A remaining MARGINAL/UNSAFE status is a warning and is never suppressed.': 'No acceptance is issued: the wall was sized by HRMA to meet the target safety factor, so the reported safety factor is that target read back (target x manufacturing allowance), not an independent verification. Supply the real wall_thickness (m) to obtain a verification. A remaining MARGINAL/UNSAFE status is a warning and is never suppressed.',
             'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. Supply \'case_thickness\' (mm) to obtain one. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. Supply \'case_thickness\' (mm) to obtain one. A remaining MARGINAL/FAIL status is a warning and is never suppressed.',
+            // V301/T-ÇAPA-D (kalem 1): kap hükmü dayanak cümleleri (katı motor + uç katmanı).
+            'No acceptance is issued: the case wall temperature was not solved (case_temperature_status), so the structural model cannot be checked against the temperature of this case wall. The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'No acceptance is issued: the case wall temperature was not solved (case_temperature_status), so the structural model cannot be checked against the temperature of this case wall. The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that. A remaining MARGINAL/FAIL status is a warning and is never suppressed.',
+            'No acceptance is issued: the case wall temperature computed by the heat-transfer model is outside the validity limit of the structural model (model_validity_limit_exceeded, model_validity_reasons). The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that at this case temperature. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'No acceptance is issued: the case wall temperature computed by the heat-transfer model is outside the validity limit of the structural model (model_validity_limit_exceeded, model_validity_reasons). The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that at this case temperature. A remaining MARGINAL/FAIL status is a warning and is never suppressed.',
+            'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. In addition, the case wall temperature was not solved (case_temperature_status), so the structural model cannot be checked against the temperature of this case wall. The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. In addition, the case wall temperature was not solved (case_temperature_status), so the structural model cannot be checked against the temperature of this case wall. The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that. A remaining MARGINAL/FAIL status is a warning and is never suppressed.',
+            'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. In addition, the case wall temperature computed by the heat-transfer model is outside the validity limit of the structural model (model_validity_limit_exceeded, model_validity_reasons). The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that at this case temperature. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. In addition, the case wall temperature computed by the heat-transfer model is outside the validity limit of the structural model (model_validity_limit_exceeded, model_validity_reasons). The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that at this case temperature. A remaining MARGINAL/FAIL status is a warning and is never suppressed.',
+            'The case wall thickness was supplied by the user, so the burst margin and the vessel status are an evaluation of that wall.': 'The case wall thickness was supplied by the user, so the burst margin and the vessel status are an evaluation of that wall.',
+            'The case wall thickness was supplied by the user and is the wall that was evaluated, so the burst margin and the vessel status are an evaluation of that wall.': 'The case wall thickness was supplied by the user and is the wall that was evaluated, so the burst margin and the vessel status are an evaluation of that wall.',
             'LOADED lift-off mass: dry mass + LOADED oxidizer (oxidizer_mass) + LOADED fuel grain (fuel_mass_loaded, which includes the unburnt sliver that flies as dead weight). The mass budget uses loaded values; the performance budget uses the consumed ones (fuel_mass, oxidizer_mass_consumed_kg) - same rule as oxidizer_mass_basis.': 'LOADED lift-off mass: dry mass + LOADED oxidizer (oxidizer_mass) + LOADED fuel grain (fuel_mass_loaded, which includes the unburnt sliver that flies as dead weight). The mass budget uses loaded values; the performance budget uses the consumed ones (fuel_mass, oxidizer_mass_consumed_kg) - same rule as oxidizer_mass_basis.',
             'The analysis reported that it does not apply, but named no reason.': 'The analysis reported that it does not apply, but named no reason.',
             'Total': 'Total',
@@ -630,6 +648,9 @@
             'Feed (Fuel)': 'Feed (Fuel)',
             'Feed (Ox)': 'Feed (Ox)',
             'Feed Lines': 'Feed Lines',
+            // V301/L-REJ (NK-36): yakıt bütçesinin rejeneratif ceket kalemi
+            // (fuel_line.regen_jacket) — 'Cooling Jacket' anahtarı bu sözlükte
+            // zaten vardı (yinelenen ikinci tanım kaldırıldı, ana model).
             'This run (solver)': 'This run (solver)',
             'injector plate': 'injector plate',
             'parallel axial jets': 'parallel axial jets',
@@ -742,6 +763,8 @@
             'engine dry mass not published by the motor model; tank structure and residual propellant are therefore not accounted for either': 'engine dry mass not published by the motor model; tank structure and residual propellant are therefore not accounted for either',
         },
         tr: {            '(reference cooled wall)': '(referans soğutulmuş cidar)',
+            // V3.0.5 T-ÇAPA-C1: regen_cooling.RP1_COKING_BASIS (soğutma paneli rozet ipucu).
+            'RP-1 coolant-side wall temperature, two tiers: 728 K is the design criterion of NASA SP-8087 (1972) sec. 3.1.1.5.4 p. 62 ("do not operate with liquid-wall temperatures above 850 F (728 K) for RP-1") - above it the design does not meet that criterion; 561 K is a deposit-risk WARNING level of this software, based on experimental findings (NASA CR-168277: deposits in copper tubes at 560-750 K) that must be validated for the application conditions; it does not by itself make the design unsafe. Staying below 728 K does NOT mean the wall stays free of deposits or is safe.': 'RP-1 soğutucu tarafı cidar sıcaklığı, iki kademe: 728 K, NASA SP-8087 (1972) bölüm 3.1.1.5.4 s. 62 tasarım ölçütüdür ("RP-1 için sıvı tarafı cidar sıcaklığı 850 F (728 K) üstünde çalıştırmayın") — bunun üstünde tasarım o ölçütü karşılamaz; 561 K bu yazılımın deneysel bulgulara (NASA CR-168277: bakır tüplerde 560-750 K arasında birikim) dayanan birikim riski UYARI düzeyidir ve uygulama koşulları için doğrulanmalıdır; tek başına tasarımı güvensiz yapmaz. 728 K altında kalmak cidarın birikimsiz ya da güvenli kaldığı anlamına GELMEZ.',
             '3D Hybrid Rocket Motor Visualization': 'Hibrit Roket Motoru 3B Görselleştirme',
             '3D Motor Assembly': '3B Motor Montajı',
             '3D Motor Visualization': '3B Motor Görselleştirmesi',
@@ -864,6 +887,7 @@
             'Fallback schematic — the detailed injector view was not available for this run; plate outline is drawn, not computed.': 'Yedek şema — bu koşuda ayrıntılı enjektör görünümü üretilemedi; plaka dış hattı çizilmiştir, hesaplanmamıştır.',
             'Fallback schematic — the solver nozzle contour was not available for this run;': 'Yedek şema — bu koşuda çözücü nozul konturu üretilemedi;',
             'Feed System Pressure Budget': 'Besleme Sistemi Basınç Bütçesi',
+            'Feed System Pressure Budget (per circuit)': 'Besleme Sistemi Basınç Bütçesi (devre başına)',
             'Feed System — Slosh, Pressurant & Water Hammer': 'Besleme Sistemi — Çalkantı, Basınçlandırıcı ve Su Koçu',
             'Face pattern': 'Yüz deseni',
             'Fill ratio h/R': 'Doluluk oranı h/R',
@@ -1042,6 +1066,7 @@
             'Parachute deploy': 'Paraşüt açılışı',
             'Paraffin Wax': 'Parafin Mumu',
             'Parametric Analysis: Of Ratio Sweep': 'Parametrik Analiz: O/F Oranı Taraması',
+            'Parametric Analysis: O/F Ratio Sweep': 'Parametrik Analiz: O/F Oranı Taraması',
             'Performance Chart': 'Performans Grafiği',
             'Performance Summary': 'Performans Özeti',
             'Pintle Injector - Cross Section': 'Pintle Enjektör - Kesit',
@@ -1070,6 +1095,7 @@
             'Propellant Mass (kg)': 'İtici Kütlesi (kg)',
             'Propellant Mass Flow': 'İtici kütle debisi',
             'Propellant Mass vs Of Ratio': 'İtici Kütlesi - O/F Oranı',
+            'Propellant Mass vs O/F Ratio': 'İtici Kütlesi - O/F Oranı',
             'Quasi-1D: Mach is uniform across each cross-section — the radial axis shows geometry only, no boundary layer is modeled.': 'Yarı-1B: Mach her kesitte türdeştir — radyal eksen yalnız geometriyi gösterir, sınır tabaka modellenmemiştir.',
             'Radial Position (mm)': 'Radyal Konum (mm)',
             'Radial distance': 'Eksenden uzaklık',
@@ -1078,7 +1104,9 @@
             'Rail Length (m)': 'Ray Uzunluğu (m)',
             'Range': 'Menzil',
             'Range (km)': 'Menzil (km)',
-            'Real-Time Motor Performance Dashboard': 'Gerçek Zamanlı Motor Performans Panosu',
+            // V301/DİL (NK-11): pano canlı ölçüm değil, TASARIM NOKTASIdır
+            // (EN başlık sunucu figür metni; EN değer anahtarla aynı kalmalı).
+            'Real-Time Motor Performance Dashboard': 'Tasarım Noktası Motor Performans Panosu',
             'Regenerative Cooling — 1D Station March (Bartz + Dittus-Boelter)': 'Rejeneratif Soğutma — 1B İstasyon Yürüyüşü (Bartz + Dittus-Boelter)',
             'Regression Rate': 'Regresyon hızı',
             'Regression Rate & Port Growth': 'Regresyon Hızı ve Port Büyümesi',
@@ -1111,6 +1139,7 @@
             'Specific Impulse (s)': 'Özgül itki (s)',
             'Specific Impulse vs Altitude': 'Özgül İtki - İrtifa',
             'Specific Impulse vs Of Ratio': 'Özgül İtki - O/F Oranı',
+            'Specific Impulse vs O/F Ratio': 'Özgül İtki - O/F Oranı',
             'Spray cone': 'Püskürtme konisi',
             'Spray cone (angle not reported)': 'Püskürtme konisi (açı bildirilmedi)',
             'Star': 'Yıldız',
@@ -1119,6 +1148,7 @@
             'Stress Amplitude (MPa)': 'Gerilme Genliği (MPa)',
             'Structural Analysis Dashboard': 'Yapısal Analiz Panosu',
             'Structural Min SF': 'Yapısal asgari emniyet katsayısı',
+            'injector circuit solution': 'enjektör devresi çözümü',
             'Structural Safety — Pressure Vessel, Buckling, Fatigue': 'Yapısal Güvenlik — Basınçlı Kap, Burkulma, Yorulma',
             'Support Arms': 'Destek kolları',
             'Sweep maximum': 'Tarama azamisi',
@@ -1149,6 +1179,7 @@
             'Throat Diameter': 'Boğaz çapı',
             'Throat Diameter (mm)': 'Boğaz çapı (mm)',
             'Throat Diameter vs Of Ratio': 'Boğaz Çapı - O/F Oranı',
+            'Throat Diameter vs O/F Ratio': 'Boğaz Çapı - O/F Oranı',
             'Throat station': 'Boğaz istasyonu',
             'Thrust': 'İtki',
             'Thrust & Chamber Pressure vs Time': 'İtki ve Oda Basıncı - Zaman',
@@ -1161,6 +1192,7 @@
             'Thrust [N]': 'İtki [N]',
             'Thrust vs Altitude': 'İtki - İrtifa',
             'Thrust vs Of Ratio': 'İtki - O/F Oranı',
+            'Thrust vs O/F Ratio': 'İtki - O/F Oranı',
             'Time': 'Zaman',
             'Time (s)': 'Zaman (s)',
             'Time [s]': 'Zaman [s]',
@@ -1236,8 +1268,10 @@
             'For the tutorial/demo scenario send "use_tutorial_defaults": true; the result declares which inputs came from defaults in the "defaults_applied" field.': 'Öğretici/tanıtım senaryosu için "use_tutorial_defaults": true gönderin; sonuç "defaults_applied" alanıyla hangi girdilerin varsayılandan geldiğini beyan eder.',
             'the model COMPUTES this distance from the impingement angle and hole diameter; see the value in the results': 'model bu mesafeyi çarpışma açısı ve delik çapından HESAPLAR; sonuçtaki değere bakınız',
             'this path models like-on-like doublets; the momentum-ratio criterion applies to unlike impingement': 'bu yol benzer-akışkan (like-on-like) doublet modeller; momentum oranı ölçütü farklı-akışkan çarpışmada geçerlidir',
+            'a hybrid injects ONE liquid stream (the oxidizer); the fuel/oxidizer momentum-ratio criterion applies only to unlike (fuel-on-oxidizer) impingement': 'hibrit TEK bir sıvı akım (oksitleyici) enjekte eder; yakıt/oksitleyici momentum oranı ölçütü yalnız farklı-akışkan (yakıta oksitleyici) çarpışmada geçerlidir',
             'the model COMPUTES the recess from the inner jet diameter; see the value in the results': 'model girintiyi iç jet çapından HESAPLAR; sonuçtaki değere bakınız',
             'this path sizes a single coaxial element; use the Injector Design panel for a multi-element array': 'bu yol tek koaksiyel eleman boyutlandırır; çok elemanlı dizilim için Enjektör Tasarımı panelini kullanınız',
+            'this path sizes a single coaxial element for the whole oxidizer flow; multi-element arrays are not modelled': 'bu yol bütün oksitleyici debisi için tek bir koaksiyel eleman boyutlandırır; çok elemanlı dizilim modellenmez',
 
             /* ÖH D35 / OH-GT-19, OH-GT-21, OH-GT-22 (22 Eylül 2026) —
                TÜRKÇE EKRANDA KALAN ÇÖZÜCÜ CÜMLELERİ.
@@ -1251,21 +1285,28 @@
                ÇEVİRİ BİREBİR: cümlenin fizik iddiası, sayıları, alan ve
                kaynak adları (F_L, p_v, IEC 60534-2-1, oxidizer_mass_basis)
                DEĞİŞMEZ. */
-            'the choked pressure drop dP = F_L^2*(p1 - F_F*p_v) was NOT computed because critical_pressure_Pa was not supplied (the liquid critical pressure ratio factor F_F needs it). Cavitation and flashing WERE screened from the vapour pressure alone; only the choked limit is missing.': 'boğulmuş basınç düşümü dP = F_L^2*(p1 - F_F*p_v) HESAPLANMADI: critical_pressure_Pa verilmedi (sıvı kritik basınç oranı çarpanı F_F bunu ister). Kavitasyon ve ani buharlaşma yalnız buhar basıncından TARANDI; eksik olan yalnızca boğulma sınırıdır.',
-            'the water-hammer coupling was NOT produced: wall_thickness_m is required, because the wave speed depends on the pipe wall elasticity.': 'su koçu bağlaması ÜRETİLMEDİ: wall_thickness_m zorunludur, çünkü dalga hızı boru cidarının esnekliğine bağlıdır.',
+            'the choked pressure drop dP = F_L^2*(p1 - F_F*p_v) was NOT computed because critical_pressure_Pa was not supplied (the liquid critical pressure ratio factor F_F needs it). Cavitation and flashing WERE screened from the vapour pressure alone; only the choked limit is missing.': 'boğulmuş basınç düşümü dP = F_L^2*(p1 - F_F*p_v) HESAPLANMADI: akışkanın kritik basıncı verilmedi (sıvı kritik basınç oranı çarpanı F_F bunu ister). Kavitasyon ve ani buharlaşma yalnız buhar basıncından TARANDI; eksik olan yalnızca boğulma sınırıdır.',
+            'the water-hammer coupling was NOT produced: wall_thickness_m is required, because the wave speed depends on the pipe wall elasticity.': 'su koçu bağlaması ÜRETİLMEDİ: boru cidar kalınlığı zorunludur, çünkü dalga hızı boru cidarının esnekliğine bağlıdır.',
             'the water-hammer coupling was NOT produced: no fluid key was supplied, and no default fluid label is substituted. The wave speed needs a tabulated liquid bulk modulus; pass the propellant\'s own key (or bulk_modulus_Pa with a custom label) to get the coupling.': 'su koçu bağlaması ÜRETİLMEDİ: akışkan anahtarı verilmedi ve yerine varsayılan bir akışkan etiketi KONMAZ. Dalga hızı tablolanmış bir sıvı hacimsel modülü ister; bağlamayı almak için iticinin kendi anahtarını (ya da özel etiketle birlikte bulk_modulus_Pa) geçirin.',
             'the water-hammer coupling was NOT produced: the line budget leaves no usable pressure at the valve, which is where the surge originates. Fix the line sizing first (the valve was not sized either, for the same reason).': 'su koçu bağlaması ÜRETİLMEDİ: hat bütçesi, basınç dalgasının doğduğu yer olan vanada kullanılabilir basınç bırakmıyor. Önce hat boyutlandırmasını düzeltin (aynı sebeple vana da boyutlandırılmadı).',
             'the valve was NOT sized: the line budget leaves no usable inlet pressure at the valve. Fix the line sizing first.': 'vana BOYUTLANDIRILMADI: hat bütçesi vanada kullanılabilir bir giriş basıncı bırakmıyor. Önce hat boyutlandırmasını düzeltin.',
             'non-choked turbulent liquid flow: the full valve pressure drop is used in the sizing equation.': 'boğulmamış türbülanslı sıvı akışı: boyutlandırma denkleminde vananın TAM basınç düşümü kullanılır.',
             'choked/flashing service: the sizing equation is evaluated at the choked pressure drop dP = F_L^2*(p1 - F_F*p_v), because flow stops rising beyond it (IEC 60534-2-1).': 'boğulmuş/ani buharlaşmalı servis: boyutlandırma denklemi boğulmuş basınç düşümünde dP = F_L^2*(p1 - F_F*p_v) değerlendirilir, çünkü akış bunun ötesinde artmaz (IEC 60534-2-1).',
-            'flashing service was detected from the vapour pressure, but the sizing equation could NOT be moved to the choked pressure drop because critical_pressure_Pa was not supplied. The Cv below is evaluated at the FULL valve pressure drop and is therefore a LOWER BOUND on the required capacity, not a verified non-choked sizing.': 'ani buharlaşmalı servis buhar basıncından saptandı, ancak boyutlandırma denklemi boğulmuş basınç düşümüne TAŞINAMADI: critical_pressure_Pa verilmedi. Aşağıdaki Cv, vananın TAM basınç düşümünde değerlendirilmiştir ve bu yüzden gereken kapasitenin bir ALT SINIRIDIR; doğrulanmış, boğulmamış bir boyutlandırma değildir.',
-            'the flow regime was NOT verified: without critical_pressure_Pa the choked limit dP = F_L^2*(p1 - F_F*p_v) cannot be evaluated, so this sizing is not known to be non-choked. The Cv below uses the full valve pressure drop and is a LOWER BOUND on the required capacity if the valve turns out to be choked.': 'akış rejimi DOĞRULANMADI: critical_pressure_Pa olmadan boğulma sınırı dP = F_L^2*(p1 - F_F*p_v) değerlendirilemez, dolayısıyla bu boyutlandırmanın boğulmamış olduğu BİLİNMİYOR. Aşağıdaki Cv vananın tam basınç düşümünü kullanır ve vana boğulmuş çıkarsa gereken kapasitenin bir ALT SINIRIDIR.',
-            'the flow regime was NOT verified: without vapor_pressure_Pa neither the cavitation index nor the choked limit can be evaluated, so this sizing is not known to be non-choked. The Cv below uses the full valve pressure drop and is a LOWER BOUND on the required capacity if the valve turns out to be choked.': 'akış rejimi DOĞRULANMADI: vapor_pressure_Pa olmadan ne kavitasyon indisi ne de boğulma sınırı değerlendirilebilir, dolayısıyla bu boyutlandırmanın boğulmamış olduğu BİLİNMİYOR. Aşağıdaki Cv vananın tam basınç düşümünü kullanır ve vana boğulmuş çıkarsa gereken kapasitenin bir ALT SINIRIDIR.',
-            'cavitation and flashing were NOT evaluated because vapor_pressure_Pa was not supplied. No safe/unsafe verdict is implied - supply the fluid properties to get one.': 'kavitasyon ve ani buharlaşma DEĞERLENDİRİLMEDİ: vapor_pressure_Pa verilmedi. Buradan güvenli/güvensiz bir hüküm çıkarılamaz — hüküm için akışkan özelliklerini verin.',
+            'flashing service was detected from the vapour pressure, but the sizing equation could NOT be moved to the choked pressure drop because critical_pressure_Pa was not supplied. The Cv below is evaluated at the FULL valve pressure drop and is therefore a LOWER BOUND on the required capacity, not a verified non-choked sizing.': 'ani buharlaşmalı servis buhar basıncından saptandı, ancak boyutlandırma denklemi boğulmuş basınç düşümüne TAŞINAMADI: akışkanın kritik basıncı verilmedi. Aşağıdaki Cv, vananın TAM basınç düşümünde değerlendirilmiştir ve bu yüzden gereken kapasitenin bir ALT SINIRIDIR; doğrulanmış, boğulmamış bir boyutlandırma değildir.',
+            'the flow regime was NOT verified: without critical_pressure_Pa the choked limit dP = F_L^2*(p1 - F_F*p_v) cannot be evaluated, so this sizing is not known to be non-choked. The Cv below uses the full valve pressure drop and is a LOWER BOUND on the required capacity if the valve turns out to be choked.': 'akış rejimi DOĞRULANMADI: akışkanın kritik basıncı olmadan boğulma sınırı dP = F_L^2*(p1 - F_F*p_v) değerlendirilemez, dolayısıyla bu boyutlandırmanın boğulmamış olduğu BİLİNMİYOR. Aşağıdaki Cv vananın tam basınç düşümünü kullanır ve vana boğulmuş çıkarsa gereken kapasitenin bir ALT SINIRIDIR.',
+            'the flow regime was NOT verified: without vapor_pressure_Pa neither the cavitation index nor the choked limit can be evaluated, so this sizing is not known to be non-choked. The Cv below uses the full valve pressure drop and is a LOWER BOUND on the required capacity if the valve turns out to be choked.': 'akış rejimi DOĞRULANMADI: akışkanın buhar basıncı olmadan ne kavitasyon indisi ne de boğulma sınırı değerlendirilebilir, dolayısıyla bu boyutlandırmanın boğulmamış olduğu BİLİNMİYOR. Aşağıdaki Cv vananın tam basınç düşümünü kullanır ve vana boğulmuş çıkarsa gereken kapasitenin bir ALT SINIRIDIR.',
+            'cavitation and flashing were NOT evaluated because vapor_pressure_Pa was not supplied. No safe/unsafe verdict is implied - supply the fluid properties to get one.': 'kavitasyon ve ani buharlaşma DEĞERLENDİRİLMEDİ: akışkanın buhar basıncı verilmedi. Buradan güvenli/güvensiz bir hüküm çıkarılamaz — hüküm için akışkan özelliklerini verin.',
             'A solid motor has no injector and no feed system, so the classical chug criterion (injector pressure drop ratio decoupling the feed from the chamber) has no counterpart here. No injector input is passed to the module: its chug report is NOT_EVALUATED by construction, not because data is missing. The solid-motor low-frequency counterpart (L* / bulk-mode instability) is NOT modelled.': 'Katı motorda enjektör ve besleme sistemi yoktur; bu yüzden klasik chug ölçütünün (beslemeyi odadan ayıran enjektör basınç düşümü oranı) burada bir karşılığı yoktur. Modüle hiçbir enjektör girdisi geçirilmez: chug raporu, veri eksik olduğu için değil, KURULUŞ GEREĞİ NOT_EVALUATED\'dir. Katı motorun alçak frekanslı karşılığı (L* / yığın kip kararsızlığı) MODELLENMEMİŞTİR.',
-            'No acceptance is issued: the wall was sized by HRMA to meet the target safety factor, so the reported safety factor is that target read back (target x manufacturing allowance), not an independent verification. Supply the real wall_thickness (m) to obtain a verification. A remaining MARGINAL/UNSAFE status is a warning and is never suppressed.': 'Onay VERİLMEZ: cidarı hedef emniyet katsayısını tutturmak için HRMA\'nın kendisi boyutlandırdı; dolayısıyla bildirilen emniyet katsayısı o hedefin geri okunmasıdır (hedef x imalat payı), bağımsız bir doğrulama değildir. Doğrulama için gerçek wall_thickness (m) değerini verin. Geriye kalan MARGINAL/UNSAFE durumu bir uyarıdır ve asla bastırılmaz.',
-            'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. Supply \'case_thickness\' (mm) to obtain one. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'Onay VERİLMEZ: gövde cidar kalınlığı verilmedi, bu yüzden HRMA cidarı tasarım emniyet katsayısını tutturmak üzere çember gerilmesinden kendisi boyutlandırdı. O cidarı denetleyip \'geçti\' demek, tasarım hedefinin geri okunmasıdır; bağımsız bir doğrulama değildir. Doğrulama için \'case_thickness\' (mm) verin. Geriye kalan MARGINAL/FAIL durumu bir uyarıdır ve asla bastırılmaz.',
-            'LOADED lift-off mass: dry mass + LOADED oxidizer (oxidizer_mass) + LOADED fuel grain (fuel_mass_loaded, which includes the unburnt sliver that flies as dead weight). The mass budget uses loaded values; the performance budget uses the consumed ones (fuel_mass, oxidizer_mass_consumed_kg) - same rule as oxidizer_mass_basis.': 'YÜKLÜ kalkış kütlesi: kuru kütle + YÜKLÜ oksitleyici (oxidizer_mass) + YÜKLÜ yakıt tanesi (fuel_mass_loaded; yanmadan ölü ağırlık olarak uçan artık dilim de içindedir). Kütle bütçesi yüklü değerleri, başarım bütçesi tüketilen değerleri (fuel_mass, oxidizer_mass_consumed_kg) kullanır — oxidizer_mass_basis ile aynı kural.',
+            'No acceptance is issued: the wall was sized by HRMA to meet the target safety factor, so the reported safety factor is that target read back (target x manufacturing allowance), not an independent verification. Supply the real wall_thickness (m) to obtain a verification. A remaining MARGINAL/UNSAFE status is a warning and is never suppressed.': 'Onay VERİLMEZ: cidarı hedef emniyet katsayısını tutturmak için HRMA\'nın kendisi boyutlandırdı; dolayısıyla bildirilen emniyet katsayısı o hedefin geri okunmasıdır (hedef x imalat payı), bağımsız bir doğrulama değildir. Doğrulama için gerçek cidar kalınlığını (m) girin. Geriye kalan MARGINAL/UNSAFE durumu bir uyarıdır ve asla bastırılmaz.',
+            'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. Supply \'case_thickness\' (mm) to obtain one. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'Onay VERİLMEZ: gövde cidar kalınlığı verilmedi, bu yüzden HRMA cidarı tasarım emniyet katsayısını tutturmak üzere çember gerilmesinden kendisi boyutlandırdı. O cidarı denetleyip \'geçti\' demek, tasarım hedefinin geri okunmasıdır; bağımsız bir doğrulama değildir. Doğrulama için gövde cidar kalınlığını (mm) girin. Geriye kalan MARGINAL/FAIL durumu bir uyarıdır ve asla bastırılmaz.',
+            // V301/T-ÇAPA-D (kalem 1): kap hükmü dayanak cümleleri (katı motor + uç katmanı).
+            'No acceptance is issued: the case wall temperature was not solved (case_temperature_status), so the structural model cannot be checked against the temperature of this case wall. The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'Onay VERİLMEZ: kasa cidar sıcaklığı çözülmedi (case_temperature_status); bu yüzden yapısal model bu kasa cidarının sıcaklığına karşı denetlenemez. Bu bloktaki patlama basıncı, patlama payı ve emniyet katsayısı oda sıcaklığındaki kasa dayanımını kullanır; yalnız tanı amaçlı sayılardır, bu kasa cidarının denetimi değildir. \'case_thickness\' göndermek bunu değiştirmez. Geriye kalan MARGINAL/FAIL durumu bir uyarıdır ve asla bastırılmaz.',
+            'No acceptance is issued: the case wall temperature computed by the heat-transfer model is outside the validity limit of the structural model (model_validity_limit_exceeded, model_validity_reasons). The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that at this case temperature. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'Onay VERİLMEZ: ısı aktarımı modelinin hesapladığı kasa cidar sıcaklığı yapısal modelin geçerlilik sınırının dışında (model_validity_limit_exceeded, model_validity_reasons). Bu bloktaki patlama basıncı, patlama payı ve emniyet katsayısı oda sıcaklığındaki kasa dayanımını kullanır; yalnız tanı amaçlı sayılardır, bu kasa cidarının denetimi değildir. Bu kasa sıcaklığında \'case_thickness\' göndermek bunu değiştirmez. Geriye kalan MARGINAL/FAIL durumu bir uyarıdır ve asla bastırılmaz.',
+            'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. In addition, the case wall temperature was not solved (case_temperature_status), so the structural model cannot be checked against the temperature of this case wall. The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'Onay VERİLMEZ: gövde cidar kalınlığı verilmedi, bu yüzden HRMA cidarı tasarım emniyet katsayısını tutturmak üzere çember gerilmesinden kendisi boyutlandırdı. O cidarı denetleyip \'geçti\' demek, tasarım hedefinin geri okunmasıdır; bağımsız bir doğrulama değildir. Ayrıca kasa cidar sıcaklığı çözülmedi (case_temperature_status); bu yüzden yapısal model bu kasa cidarının sıcaklığına karşı denetlenemez. Bu bloktaki patlama basıncı, patlama payı ve emniyet katsayısı oda sıcaklığındaki kasa dayanımını kullanır; yalnız tanı amaçlı sayılardır, bu kasa cidarının denetimi değildir. \'case_thickness\' göndermek bunu değiştirmez. Geriye kalan MARGINAL/FAIL durumu bir uyarıdır ve asla bastırılmaz.',
+            'No acceptance is issued: no case thickness was supplied, so HRMA sized the wall itself from the hoop stress to meet the design safety factor. Checking that wall and reporting a pass is the design target read back, not an independent verification. In addition, the case wall temperature computed by the heat-transfer model is outside the validity limit of the structural model (model_validity_limit_exceeded, model_validity_reasons). The burst pressure, burst margin and safety factor in this block use the room-temperature case strength, so they are diagnostic numbers only and not a check of this case wall; sending \'case_thickness\' does not change that at this case temperature. A remaining MARGINAL/FAIL status is a warning and is never suppressed.': 'Onay VERİLMEZ: gövde cidar kalınlığı verilmedi, bu yüzden HRMA cidarı tasarım emniyet katsayısını tutturmak üzere çember gerilmesinden kendisi boyutlandırdı. O cidarı denetleyip \'geçti\' demek, tasarım hedefinin geri okunmasıdır; bağımsız bir doğrulama değildir. Ayrıca ısı aktarımı modelinin hesapladığı kasa cidar sıcaklığı yapısal modelin geçerlilik sınırının dışında (model_validity_limit_exceeded, model_validity_reasons). Bu bloktaki patlama basıncı, patlama payı ve emniyet katsayısı oda sıcaklığındaki kasa dayanımını kullanır; yalnız tanı amaçlı sayılardır, bu kasa cidarının denetimi değildir. Bu kasa sıcaklığında \'case_thickness\' göndermek bunu değiştirmez. Geriye kalan MARGINAL/FAIL durumu bir uyarıdır ve asla bastırılmaz.',
+            'The case wall thickness was supplied by the user, so the burst margin and the vessel status are an evaluation of that wall.': 'Gövde cidar kalınlığını kullanıcı verdi; patlama payı ve kap durumu o cidarın değerlendirmesidir.',
+            'The case wall thickness was supplied by the user and is the wall that was evaluated, so the burst margin and the vessel status are an evaluation of that wall.': 'Gövde cidar kalınlığını kullanıcı verdi ve değerlendirilen cidar odur; patlama payı ve kap durumu o cidarın değerlendirmesidir.',
+            'LOADED lift-off mass: dry mass + LOADED oxidizer (oxidizer_mass) + LOADED fuel grain (fuel_mass_loaded, which includes the unburnt sliver that flies as dead weight). The mass budget uses loaded values; the performance budget uses the consumed ones (fuel_mass, oxidizer_mass_consumed_kg) - same rule as oxidizer_mass_basis.': 'YÜKLÜ kalkış kütlesi: kuru kütle + YÜKLÜ oksitleyici kütlesi + YÜKLÜ yakıt tanesi kütlesi (yanmadan ölü ağırlık olarak uçan artık dilim de içindedir). Kütle bütçesi yüklü değerleri, başarım bütçesi tüketilen yakıt ve oksitleyici kütlelerini kullanır — oksitleyici kütlesi dayanağıyla aynı kural.',
             'The analysis reported that it does not apply, but named no reason.': 'Analiz, uygulanamadığını bildirdi ama bunun sebebini adlandırmadı.',
             'Total': 'Toplam',
             'Peak': 'Tepe',
@@ -1281,6 +1322,8 @@
             'Feed (Fuel)': 'Besleme (yakıt)',
             'Feed (Ox)': 'Besleme (oksitleyici)',
             'Feed Lines': 'Besleme hatları',
+            // V301/L-REJ (NK-36): rejeneratif ceket kalemi — anahtar bu
+            // sözlükte zaten 'Soğutma Ceketi' olarak vardı (ikinci tanım kaldırıldı).
             'This run (solver)': 'Bu koşum (çözücü)',
             'injector plate': 'enjektör plakası',
             'parallel axial jets': 'paralel eksenel jetler',
@@ -1322,8 +1365,8 @@
             'total impulse, burn time, average thrust, O/F shift statistics, warnings': 'toplam itki, yanma süresi, ortalama itki, O/F kayması istatistikleri, uyarılar',
             'time-averaged c*, time-averaged Isp, O/F shift statistics': 'zaman ortalamalı c*, zaman ortalamalı Isp, O/F kayması istatistikleri',
             'total impulse, average thrust, curve shape, stability, warnings': 'toplam itki, ortalama itki, eğri biçimi, kararlılık, uyarılar',
-            'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + nozzle. SCOPE LIMITS: the nozzle share is a 30%-of-chamber rule of thumb (see nozzle_weight_basis), and the injector is NOT included. The CAD mass breakdown (cad_design.performance_summary.mass_breakdown.total_dry_mass) is a DIFFERENT total: it uses the as-drawn nozzle and the injector but omits the closures, so the two do not agree.': 'Uçuş zinciri (.eng, yörünge, T/W) için YETKİLİ kuru kütle: structural_analysis.weight_analysis.total_weight = kamara kabuğu (gerçek cidar kalınlığı x malzeme yoğunluğu) + uç kapakları + nozul. KAPSAM SINIRLARI: nozul payı kamaranın %30\'u kadar alınan bir başparmak kuralıdır (bkz. nozzle_weight_basis) ve enjektör DAHİL DEĞİLDİR. CAD kütle dökümü (cad_design.performance_summary.mass_breakdown.total_dry_mass) FARKLI bir toplamdır: çizilen nozulu ve enjektörü kullanır ama uç kapaklarını dışarıda bırakır; bu yüzden ikisi birbirini tutmaz.',
-            'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + the DRAWN nozzle (same number as cad_design.performance_summary.mass_breakdown.nozzle_mass). SCOPE LIMIT: the injector is NOT included; the CAD mass breakdown total (cad_design.performance_summary.mass_breakdown.total_dry_mass) includes the injector but omits the closures, so the two totals differ by exactly those two items.': 'Uçuş zinciri (.eng, yörünge, T/W) için YETKİLİ kuru kütle: structural_analysis.weight_analysis.total_weight = kamara kabuğu (gerçek cidar kalınlığı x malzeme yoğunluğu) + uç kapakları + ÇİZİLEN nozul (cad_design.performance_summary.mass_breakdown.nozzle_mass ile aynı sayı). KAPSAM SINIRI: enjektör DAHİL DEĞİLDİR; CAD kütle dökümü toplamı (cad_design.performance_summary.mass_breakdown.total_dry_mass) enjektörü içerir ama uç kapaklarını dışarıda bırakır, bu yüzden iki toplam tam olarak bu iki kalem kadar farklıdır.',
+            'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + nozzle. SCOPE LIMITS: the nozzle share is a 30%-of-chamber rule of thumb (see nozzle_weight_basis), and the injector is NOT included. The CAD mass breakdown (cad_design.performance_summary.mass_breakdown.total_dry_mass) is a DIFFERENT total: it uses the as-drawn nozzle and the injector but omits the closures, so the two do not agree.': 'Uçuş zinciri (.eng, yörünge, T/W) için YETKİLİ kuru kütle: yapısal analizin toplam ağırlığı = kamara kabuğu (gerçek cidar kalınlığı x malzeme yoğunluğu) + uç kapakları + nozul. KAPSAM SINIRLARI: nozul payı kamaranın %30\'u kadar alınan bir başparmak kuralıdır (bkz. nozul ağırlığı dayanağı) ve enjektör DAHİL DEĞİLDİR. CAD kütle dökümünün kuru toplamı FARKLI bir toplamdır: çizilen nozulu ve enjektörü kullanır ama uç kapaklarını dışarıda bırakır; bu yüzden ikisi birbirini tutmaz.',
+            'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + the DRAWN nozzle (same number as cad_design.performance_summary.mass_breakdown.nozzle_mass). SCOPE LIMIT: the injector is NOT included; the CAD mass breakdown total (cad_design.performance_summary.mass_breakdown.total_dry_mass) includes the injector but omits the closures, so the two totals differ by exactly those two items.': 'Uçuş zinciri (.eng, yörünge, T/W) için YETKİLİ kuru kütle: yapısal analizin toplam ağırlığı = kamara kabuğu (gerçek cidar kalınlığı x malzeme yoğunluğu) + uç kapakları + ÇİZİLEN nozul (CAD kütle dökümündeki nozul kütlesiyle aynı sayı). KAPSAM SINIRI: enjektör DAHİL DEĞİLDİR; CAD kütle dökümünün kuru toplamı enjektörü içerir ama uç kapaklarını dışarıda bırakır, bu yüzden iki toplam tam olarak bu iki kalem kadar farklıdır.',
             // V3 yapi-sf 2. tur: yapısal künyeler (karar §28-24 (C), Ş6) — TR.
             'TRUE means: a wall temperature used in this structural evaluation is at or above the melting point of the material, or above the last point of its strength-derating data. Above that point the strength is held at the last curve value (an upper bound, not a conservative value), and at or above melting the section has no load-carrying capacity at all. The strength, safety factors, wall thickness and masses computed from this evaluation are therefore outside the validity limit of the structural model: they are published as diagnostic numbers only, not as valid design outputs, and no acceptance and no numeric design verdict is issued. When the wall temperature comes from the heat-transfer module (wall_temperature_source = heat_transfer_module) it is a bare-wall steady-state estimate in which protection by the propellant grain, liner or insulation is not modelled, so an unreachable or failing result is a limit of the current model, not a statement that a real motor of this design is impossible.': 'TRUE şu demektir: bu yapısal değerlendirmede kullanılan bir cidar sıcaklığı malzemenin erime noktasında ya da üstünde, veya dayanım düşürme verisinin son noktasının üstündedir. O noktanın üstünde dayanım eğrinin son değerinde tutulur (bir üst sınırdır, muhafazakâr bir değer değildir); erime noktasında ya da üstünde kesitin hiç yük taşıma kapasitesi yoktur. Bu değerlendirmeden hesaplanan dayanım, emniyet katsayıları, cidar kalınlığı ve kütleler bu yüzden yapısal modelin geçerlilik sınırı dışındadır: geçerli tasarım çıktısı olarak değil, yalnız tanı amaçlı sayılar olarak yayımlanırlar; ne onay ne de sayısal tasarım hükmü verilir. Cidar sıcaklığı ısı transferi modülünden geldiğinde (wall_temperature_source = heat_transfer_module) bu, yakıt tanesi, astar ya da yalıtım korumasının modellenmediği çıplak cidar kararlı hâl tahminidir; bu yüzden ulaşılamaz ya da başarısız bir sonuç mevcut modelin sınırıdır, bu tasarımda gerçek bir motorun olanaksız olduğu anlamına gelmez.',
             'DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: this safety factor was computed at a wall temperature outside the validity limit of the structural model (chamber_analysis.model_validity_limit_exceeded, model_validity_reasons). How the wall was chosen is stated in design_mode, sizing_feasible and sizing_infeasible_reason.': 'YALNIZ TANI AMAÇLI, GEÇERLİ TASARIM ÇIKTISI DEĞİL: bu emniyet katsayısı, yapısal modelin geçerlilik sınırı dışındaki bir cidar sıcaklığında hesaplandı (chamber_analysis.model_validity_limit_exceeded, model_validity_reasons). Cidarın nasıl seçildiği design_mode, sizing_feasible ve sizing_infeasible_reason alanlarında yazılıdır.',
@@ -1331,7 +1374,7 @@
             'No acceptance and no numeric design verdict is issued: the chamber was evaluated outside the validity limit of the structural model (see chamber_analysis.model_validity_limit_exceeded). The safety factors in this response are diagnostic numbers. A remaining MARGINAL or UNSAFE status is a warning from the CURRENT model and is never suppressed, but it is not a statement that a real motor of this design is impossible.': 'Ne onay ne de sayısal tasarım hükmü verildi: hazne, yapısal modelin geçerlilik sınırı dışında değerlendirildi (bkz. chamber_analysis.model_validity_limit_exceeded). Bu yanıttaki emniyet katsayıları tanı amaçlı sayılardır. Kalan bir MARGINAL ya da UNSAFE durumu MEVCUT modelin uyarısıdır ve asla bastırılmaz; ama bu tasarımda gerçek bir motorun olanaksız olduğu anlamına gelmez.',
             'DRAWN SOLID (single source): the nozzle shell drawn by the CAD export - inner contour from nozzle_design.sample_nozzle_inner_contour, wall nozzle_geometry.wall_thickness added outward, density of the selected nozzle material (nozzle_material). The same number is cad_design.performance_summary.mass_breakdown.nozzle_mass and nozzle_geometry.estimated_mass. The former 30%-of-chamber rule of thumb is no longer used.': 'ÇİZİLEN KATI (tek kaynak): CAD dışa aktarımının çizdiği nozul kabuğu - iç kontur nozzle_design.sample_nozzle_inner_contour\'dan gelir, nozzle_geometry.wall_thickness cidarı dışa doğru eklenir, yoğunluk seçilen nozul malzemesinindir (nozzle_material). Aynı sayı cad_design.performance_summary.mass_breakdown.nozzle_mass ve nozzle_geometry.estimated_mass alanlarındadır. Eski "kamara kütlesinin %30\'u" başparmak kuralı artık kullanılmıyor.',
             'conical frustum annulus over the nozzle designer\'s OWN convergent cone (its own chamber radius, not this motor\'s chamber) and divergent section - a different geometry from the drawn nozzle, kept only for traceability': 'nozul tasarımcısının KENDİ yakınsak konisi (kendi kamara yarıçapı, bu motorun kamarası değil) ve ıraksak kesimi üzerinde kesik koni halkası - çizilen nozuldan farklı bir geometri, yalnız izlenebilirlik için tutuluyor',
-            'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + the DRAWN nozzle (same number as cad_design.performance_summary.mass_breakdown.nozzle_mass). SCOPE LIMIT: the injector is NOT included; the CAD mass breakdown total (cad_design.performance_summary.mass_breakdown.total_dry_mass) includes the injector but omits the closures, so the two totals differ by exactly those two items. DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: the chamber wall thickness behind this mass comes from a structural evaluation outside the validity limit of the structural model (structural_analysis.chamber_analysis.model_validity_limit_exceeded); the flight-chain numbers derived from it carry the same limit.': 'Uçuş zinciri (.eng, yörünge, T/W) için YETKİLİ kuru kütle: structural_analysis.weight_analysis.total_weight = kamara kabuğu (gerçek cidar kalınlığı x malzeme yoğunluğu) + uç kapakları + ÇİZİLEN nozul (cad_design.performance_summary.mass_breakdown.nozzle_mass ile aynı sayı). KAPSAM SINIRI: enjektör DAHİL DEĞİLDİR; CAD kütle dökümü toplamı (cad_design.performance_summary.mass_breakdown.total_dry_mass) enjektörü içerir ama uç kapaklarını dışarıda bırakır, bu yüzden iki toplam tam olarak bu iki kalem kadar farklıdır. YALNIZ TANI AMAÇLI, GEÇERLİ TASARIM ÇIKTISI DEĞİL: bu kütlenin arkasındaki kamara cidar kalınlığı, yapısal modelin geçerlilik sınırı dışındaki bir yapısal değerlendirmeden geliyor (structural_analysis.chamber_analysis.model_validity_limit_exceeded); ondan türeyen uçuş zinciri sayıları da aynı sınırı taşır.',
+            'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + the DRAWN nozzle (same number as cad_design.performance_summary.mass_breakdown.nozzle_mass). SCOPE LIMIT: the injector is NOT included; the CAD mass breakdown total (cad_design.performance_summary.mass_breakdown.total_dry_mass) includes the injector but omits the closures, so the two totals differ by exactly those two items. DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: the chamber wall thickness behind this mass comes from a structural evaluation outside the validity limit of the structural model (structural_analysis.chamber_analysis.model_validity_limit_exceeded); the flight-chain numbers derived from it carry the same limit.': 'Uçuş zinciri (.eng, yörünge, T/W) için YETKİLİ kuru kütle: yapısal analizin toplam ağırlığı = kamara kabuğu (gerçek cidar kalınlığı x malzeme yoğunluğu) + uç kapakları + ÇİZİLEN nozul (CAD kütle dökümündeki nozul kütlesiyle aynı sayı). KAPSAM SINIRI: enjektör DAHİL DEĞİLDİR; CAD kütle dökümünün kuru toplamı enjektörü içerir ama uç kapaklarını dışarıda bırakır, bu yüzden iki toplam tam olarak bu iki kalem kadar farklıdır. YALNIZ TANI AMAÇLI, GEÇERLİ TASARIM ÇIKTISI DEĞİL: bu kütlenin arkasındaki kamara cidar kalınlığı, yapısal modelin geçerlilik sınırı dışındaki bir yapısal değerlendirmeden geliyor (kamara analizinin model geçerlilik sınırı aşıldı bayrağı); ondan türeyen uçuş zinciri sayıları da aynı sınırı taşır.',
             'The through-wall temperature difference was computed on the wall named in thermal_reference_wall_thickness_mm. In size mode it is scaled to the evaluated wall by the thickness ratio (fixed heat flux, planar conduction drop q*t/k), so the sized wall and its published thermal stress come from the same model (equal values mean the same wall). With no reference wall the difference is held at the supplied value. In verify mode the difference belongs to the supplied wall and is not scaled.': 'Cidar boyunca sıcaklık farkı thermal_reference_wall_thickness_mm alanında adı geçen cidarda hesaplandı. Boyutlandırma kipinde bu fark kalınlık oranıyla değerlendirilen cidara ölçeklenir (sabit ısı akısı, düzlem iletim düşüşü q*t/k); böylece boyutlandırılan cidar ve yayımlanan ısıl gerilmesi aynı modelden gelir (eşit değerler aynı cidar demektir). Referans cidar yoksa fark verilen değerde tutulur. Doğrulama kipinde fark verilen cidara aittir ve ölçeklenmez.',
             'TRUE means: the evaluated wall was chosen by HRMA to meet the design safety factor target, so this section was not checked against a thickness you supplied. It does NOT by itself mean the published safety factor equals the target: sizing puts the TOTAL hoop stress (pressure + thermal, at the derated strength) on the target; when no thickness can reach it, sizing_feasible is false and the published factor is a measurement below the target. Use safety_factor_reads_back_target for that question.': 'TRUE şu demektir: değerlendirilen cidarı HRMA, tasarım emniyet katsayısı hedefini sağlayacak biçimde seçti; yani bu kesit sizin verdiğiniz bir kalınlığa karşı sınanmadı. Bu tek başına yayımlanan emniyet katsayısının hedefe eşit olduğu anlamına GELMEZ: boyutlandırma TOPLAM hoop gerilmesini (basınç + ısıl, düşürülmüş dayanımda) hedefe oturtur; hiçbir kalınlık ona ulaşamıyorsa sizing_feasible false olur ve yayımlanan katsayı hedefin altındaki bir ölçümdür. O soru için safety_factor_reads_back_target alanını kullanın.',
             '\'tautological\' here means the binding station\'s wall was SIZED by HRMA (design_mode == size), i.e. it was not checked against a thickness you supplied. It does NOT mean the number equals the design target: sizing puts the TOTAL hoop stress (pressure + thermal) on the target, and where no thickness reaches it the chamber reports sizing_feasible = false and the published factor is a measurement below the target. The sharp answer is binding_safety_factor_reads_back_target; the per-station inventory is stations_reading_back_target.': 'Buradaki \'totolojik\', bağlayan istasyonun cidarını HRMA\'nın BOYUTLANDIRDIĞI (design_mode == size), yani sizin verdiğiniz bir kalınlığa karşı sınanmadığı anlamına gelir. Sayının tasarım hedefine eşit olduğu anlamına GELMEZ: boyutlandırma TOPLAM hoop gerilmesini (basınç + ısıl) hedefe oturtur; hiçbir kalınlığın ulaşamadığı yerde hazne sizing_feasible = false bildirir ve yayımlanan katsayı hedefin altındaki bir ölçümdür. Keskin yanıt binding_safety_factor_reads_back_target alanıdır; istasyon başına döküm stations_reading_back_target alanındadır.',
@@ -1605,6 +1648,20 @@
         + 'çözüm, ayrılma, seyreltme).';
 
     var MSG_PATTERNS = [
+        /* V301/UÇUŞ NK-47 — 6-DOF UCUNUN "GÖVDE MOTORU TAŞIYAMAZ" REDDİ.
+           Üretici: hrma/app.py six_dof_analysis + hrma/analysis/
+           flight_vehicle.py airframe_fit_conflicts (çap ve boy cümleleri
+           isteğe bağlı, sırası sabit). Sayılar sunucudan gelir; burada
+           yalnız ondalık kanonundan geçer. */
+        [/^No flight was solved: the airframe is smaller than the engine it is asked to carry\.(?: The body outer diameter (\S+) mm is smaller than the engine envelope (\S+) mm \(case\/chamber outer diameter or nozzle exit, whichever is larger\): this airframe cannot carry this engine\.)?(?: The body length (\S+) m is shorter than the engine length (\S+) m: this airframe cannot carry this engine\.)?$/,
+         function (_t, cap, zarf, boy, motorBoy) {
+             return 'Uçuş çözülmedi: gövde, taşıması istenen motordan küçük.'
+                 + (cap ? ' Gövde dış çapı ' + I18N_SAYI(cap) + ' mm, motor zarfından ('
+                     + I18N_SAYI(zarf) + ' mm; kasa/kamara dış çapı ya da lüle çıkışı, '
+                     + 'hangisi büyükse) küçük: bu gövde bu motoru taşıyamaz.' : '')
+                 + (boy ? ' Gövde boyu ' + I18N_SAYI(boy) + ' m, motor boyundan ('
+                     + I18N_SAYI(motorBoy) + ' m) kısa: bu gövde bu motoru taşıyamaz.' : '');
+         }],
         /* V3 KK 3. tur (15 Eki, §28-50 (c)) — FIRLATMA SAHASI ARAÇ KÜNYESİ.
            Üretici: hrma/analysis/flight_vehicle.py _hybrid_inert_note /
            _liquid_inert_mass (engine_inert_mass_note). Dayanak kuyruğu
@@ -1877,6 +1934,15 @@
          'L/D oranı ($1) en uygun aralığın ($2) dışında'],
         [/^Exit velocity \((.+) m\/s\) outside optimal range \((.+)\)$/,
          'Çıkış hızı ($1 m/s) en uygun aralığın ($2) dışında'],
+        /* V301/E2: iki bandın kaynağı YOK — üretici (utils/injector_design.py
+           _check_warnings) artık "optimal" demiyor, HRMA buluşsal eşiği olduğunu
+           söylüyor. Eski iki desen kayıtlı sonuçlar için yerinde kalır. */
+        [/^Exit velocity \((.+) m\/s\) outside the (.+) m\/s band \(HRMA heuristic threshold - no literature value; not a design limit\)$/,
+         'Çıkış hızı ($1 m/s) $2 m/s bandının dışında (HRMA buluşsal eşiği - literatür değeri yok; tasarım sınırı değil)'],
+        [/^Impingement angle \((.+) deg\) outside the (.+) deg band \(HRMA heuristic threshold - no literature value; NASA SP-8089 pp\. 78-79 recommends 60 deg\)$/,
+         'Çarpışma açısı ($1 derece) $2 derece bandının dışında (HRMA buluşsal eşiği - literatür değeri yok; NASA SP-8089 s. 78-79 60 derece önerir)'],
+        [/^L\/D ratio \((.+)\) outside the (.+) band \(HRMA heuristic threshold - no literature value; NASA SP-8089 p\. 84 notes that intermediate L\/D of about 4-6 is susceptible to hydraulic flip\)$/,
+         'L/D oranı ($1) $2 bandının dışında (HRMA buluşsal eşiği - literatür değeri yok; NASA SP-8089 s. 84, yaklaşık 4-6 arası ara L/D değerlerinin hidrolik flip\'e duyarlı olduğunu belirtir)'],
         [/^Low Reynolds number \((.+)\) - laminar flow expected$/,
          'Düşük Reynolds sayısı ($1) - laminer akış bekleniyor'],
         [/^Port diameter \((.+)m\) is very large relative to chamber \((.+)m\)\. Check structural integrity\.$/,
@@ -1940,6 +2006,276 @@
          'Çıkış çapı ($1) boğaz çapından ($2) büyük olmalı'],
         [/^Tank pressure \((.+)\) must be higher than chamber pressure \((.+)\)$/,
          'Tank basıncı ($1) oda basıncından ($2) yüksek olmalı'],
+        /* v3.0.1 (22 Eki, V301/E2 devri 5) — KULLANICI TANK KİPİ 422
+           CÜMLELERİ. Üretici: hrma/engines/hybrid_rocket_engine.py kullanıcı
+           tank basıncı ret kayıtları (tank_pressure_required,
+           tank_pressure_not_above_chamber_pressure,
+           tank_pressure_below_saturation). Sayılar ondalık kanonundan geçer.
+           Birden çok ret kaydı tek cümlede birleşirse desen tutmaz ve cümle
+           İngilizce kalır (yarım çeviri yok). Bekçi:
+           tests/test_v301_tank_ret_dili.py */
+        [/^tank_pressure_source = 'user' takes the injector feed pressure from 'tank_pressure' \(bar, absolute\), which was not supplied\. No server default is used in this mode\.$/,
+         "tank_pressure_source = 'user' kipinde enjektör besleme basıncı "
+         + "'tank_pressure' alanından (bar, mutlak) alınır; bu alan "
+         + 'gönderilmedi. Bu kipte sunucu varsayılanı kullanılmaz.'],
+        [/^Injector pressure drop dP = P_1 - P_c = (\S+) - (\S+) = (\S+) bar is not positive \(P_1 = P_tank = (\S+) bar; feed line loss not included\)\. No oxidizer flow can be delivered: raise the tank pressure above the chamber pressure\.$/,
+         function (_t, p1, pc, dp, pt) {
+             return 'Enjektör basınç düşümü dP = P_1 - P_c = '
+                 + I18N_SAYI(p1) + ' - ' + I18N_SAYI(pc) + ' = '
+                 + I18N_SAYI(dp) + ' bar pozitif değil (P_1 = P_tank = '
+                 + I18N_SAYI(pt) + ' bar; besleme hattı kaybı dahil '
+                 + 'değil). Oksitleyici akışı sağlanamaz: tank basıncını '
+                 + 'oda basıncının üstüne çıkarın.';
+         }],
+        [/^Tank pressure (\S+) bar is below the N2O saturation pressure at the tank temperature, P_sat\((\S+) K\) = (\S+) bar \(HRMA tolerance (\S+) %\)\. This is inconsistent with the default equilibrium initial state: liquid N2O at T_tank cannot be held in equilibrium below its saturation pressure \(a metastable liquid is not modelled\)\. Raise the tank pressure to at least (\S+) bar or lower the tank temperature\.$/,
+         function (_t, pt, T, psat, tol, pmin) {
+             return 'Tank basıncı ' + I18N_SAYI(pt) + ' bar, tank '
+                 + 'sıcaklığındaki N2O doyma basıncının altında: P_sat('
+                 + I18N_SAYI(T) + ' K) = ' + I18N_SAYI(psat) + ' bar (HRMA '
+                 + 'toleransı %' + I18N_SAYI(tol) + '). Bu, varsayılan '
+                 + 'denge başlangıç durumuyla tutarsız: T_tank sıcaklığındaki '
+                 + 'sıvı N2O doyma basıncının altında dengede tutulamaz (yarı '
+                 + 'kararlı sıvı modellenmez). Tank basıncını en az '
+                 + I18N_SAYI(pmin) + ' bar yapın ya da tank sıcaklığını '
+                 + 'düşürün.';
+         }],
+        /* v3.0.1 (22 Eki, V301/K-A) — KATI TASARIM REDDİ 422 CÜMLELERİ.
+           Üreticiler: hrma/engines/solid_rocket_engine.py
+           (_check_case_fit, _check_port_throat, 7c core_not_inside_grain) ve
+           hrma/app.py /calculate_solid (_kati_reddedilen_girdi_hatasi,
+           _kati_gecersiz_tane_hatasi, core_too_large_for_grain). Sayılar
+           ondalık kanonundan geçer. Bir parça tanınmazsa (ör. çok alanlı ret
+           cümlesinde bilinmeyen madde) cümle İngilizce kalır (yarım çeviri
+           yok). Bekçi: tests/test_v301_kati_geometri.py */
+        [/^No design was published: the case inner diameter \(chamber_diameter\) (\S+) mm is below the (\S+) mm minimum that the (\S+) mm grain needs with its (\S+) mm liner and (\S+) mm insulation \(case inner diameter >= grain outer diameter \+ 2 x \(liner \+ insulation\)\)\. Enter at least (\S+) mm, leave chamber_diameter empty so HRMA derives the case from the grain, or reduce outer_diameter, liner_thickness or insulation_thickness; the case is not enlarged silently\.$/,
+         function (_t, beyan, gereken, tane, astar, yalitim, gir) {
+             return 'Tasarım yayımlanmadı: kasa iç çapı (chamber_diameter) '
+                 + I18N_SAYI(beyan) + ' mm; ' + I18N_SAYI(tane) + ' mm '
+                 + 'yakıt bloğunun ' + I18N_SAYI(astar) + ' mm astar ve '
+                 + I18N_SAYI(yalitim) + ' mm yalıtımla birlikte gerektirdiği '
+                 + 'en az ' + I18N_SAYI(gereken) + ' mm değerinin altında '
+                 + '(kasa iç çapı >= yakıt bloğu dış çapı + 2 x (astar + '
+                 + 'yalıtım)). En az ' + I18N_SAYI(gir) + ' mm girin, '
+                 + 'kasanın yakıt bloğundan türetilmesi için chamber_diameter '
+                 + 'alanını boş bırakın ya da outer_diameter, liner_thickness '
+                 + 'veya insulation_thickness değerini küçültün; kasa '
+                 + 'sessizce büyütülmez.';
+         }],
+        [/^No design was published: the core diameter (\S+) mm is not smaller than the grain outer diameter (\S+) mm \(outer_diameter\), so the (\S+) grain has no propellant web\. Enter a core diameter below (\S+) mm or a larger grain outer diameter\.$/,
+         function (_t, cekirdek, od, tip, od2) {
+             return 'Tasarım yayımlanmadı: çekirdek çapı '
+                 + I18N_SAYI(cekirdek) + ' mm, yakıt bloğu dış çapından ('
+                 + I18N_SAYI(od) + ' mm, outer_diameter) küçük değil; bu '
+                 + 'nedenle ' + tip + ' yakıt bloğunda et kalmıyor. '
+                 + I18N_SAYI(od2) + ' mm altında bir çekirdek çapı ya da daha '
+                 + 'büyük bir yakıt bloğu dış çapı girin.';
+         }],
+        /* V301/K-D (NK-31): ileti iki alanı adıyla ve sayısıyla söyler. */
+        [/^No design was published: the core diameter \(core_diameter\) (\S+) mm does not fit the grain outer diameter \(outer_diameter\) (\S+) mm: it leaves less than the (\S+) mm minimum web on each side\. The largest accepted core for this grain is (\S+) mm and the smallest grain outer diameter for this core is (\S+) mm\. Enter a core diameter of at most (\S+) mm or a grain outer diameter of at least (\S+) mm\.$/,
+         function (_t, cekirdek, od, web, enbuyuk, enkucukOd, enbuyuk2, enkucukOd2) {
+             return 'Tasarım yayımlanmadı: çekirdek çapı (core_diameter) '
+                 + I18N_SAYI(cekirdek) + ' mm, yakıt bloğu dış çapına '
+                 + '(outer_diameter) ' + I18N_SAYI(od) + ' mm sığmıyor: her '
+                 + 'iki yanda en az ' + I18N_SAYI(web) + ' mm et kalınlığı '
+                 + 'kalmıyor. Bu yakıt bloğu için kabul edilen en büyük '
+                 + 'çekirdek ' + I18N_SAYI(enbuyuk) + ' mm, bu çekirdek için '
+                 + 'en küçük yakıt bloğu dış çapı ' + I18N_SAYI(enkucukOd)
+                 + ' mm. En çok ' + I18N_SAYI(enbuyuk2) + ' mm çekirdek çapı '
+                 + 'ya da en az ' + I18N_SAYI(enkucukOd2) + ' mm yakıt bloğu '
+                 + 'dış çapı girin.';
+         }],
+        [/^No design was published: the initial port flow area (\S+) mm\^2 \(core diameter (\S+) mm, (\S+)\) is not larger than the throat area (\S+) mm\^2 \(throat diameter (\S+) mm, sized by the solver\), port\/throat area ratio (\S+)\. The flow would choke in the port, not at the nozzle throat\. (.+)\.$/,
+         function (_t, kanal, cekirdek, tip, bogaz, bogazCap, oran, eylem) {
+             var m, eylemTr = null;
+             if ((m = /^Enter a core diameter of at least (\S+) mm \(the throat is re-sized with the core\), or lower the burning area or raise the chamber pressure$/.exec(eylem))) {
+                 eylemTr = 'En az ' + I18N_SAYI(m[1]) + ' mm çekirdek çapı '
+                     + 'girin (boğaz çekirdekle yeniden boyutlanır) ya da '
+                     + 'yanma alanını küçültün veya oda basıncını yükseltin';
+             } else if (/^An end burner flows through the full grain cross-section, so enlarge the grain outer diameter or reduce the burning area \/ raise the chamber pressure$/.test(eylem)) {
+                 eylemTr = 'Uçtan yanan yakıt bloğunda akış bütün kesitten '
+                     + 'geçer; yakıt bloğu dış çapını büyütün ya da yanma '
+                     + 'alanını küçültün / oda basıncını yükseltin';
+             } else if ((m = /^No core diameter inside the (\S+) mm grain makes the port larger than the throat; enlarge the grain outer diameter, shorten the grain or raise the chamber pressure$/.exec(eylem))) {
+                 eylemTr = I18N_SAYI(m[1]) + ' mm yakıt bloğunun içinde '
+                     + 'kanalı boğazdan büyük yapan bir çekirdek çapı yok; '
+                     + 'yakıt bloğu dış çapını büyütün, bloğu kısaltın ya da '
+                     + 'oda basıncını yükseltin';
+             }
+             if (eylemTr === null) return _t;
+             return 'Tasarım yayımlanmadı: başlangıç kanal akış alanı '
+                 + I18N_SAYI(kanal) + ' mm^2 (çekirdek çapı '
+                 + I18N_SAYI(cekirdek) + ' mm, ' + tip + ') boğaz alanından '
+                 + '(' + I18N_SAYI(bogaz) + ' mm^2, boğaz çapı '
+                 + I18N_SAYI(bogazCap) + ' mm, çözücü boyutlandırdı) büyük '
+                 + 'değil; kanal/boğaz alan oranı ' + I18N_SAYI(oran) + '. '
+                 + 'Akış nozul boğazında değil kanalda boğulur. ' + eylemTr
+                 + '.';
+         }],
+        [/^No design was published: the solver found no burning surface for this (\S+) grain \(outer diameter (\S+) mm, core diameter (\S+) mm, length (\S+) mm\), so no thrust curve exists\. Check the grain dimensions and the (\S+) grain parameters\.$/,
+         function (_t, tip, od, cekirdek, boy, tip2) {
+             return 'Tasarım yayımlanmadı: çözücü bu ' + tip + ' yakıt '
+                 + 'bloğunda (dış çap ' + I18N_SAYI(od) + ' mm, çekirdek çapı '
+                 + I18N_SAYI(cekirdek) + ' mm, uzunluk ' + I18N_SAYI(boy)
+                 + ' mm) yanma yüzeyi bulamadı, itki eğrisi oluşmuyor. Yakıt '
+                 + 'bloğu ölçülerini ve ' + tip2 + ' parametrelerini '
+                 + 'denetleyin.';
+         }],
+        [/^No design was published: the solver could not build this (\S+) grain \(outer diameter (\S+) mm, core diameter (\S+) mm, length (\S+) mm; solver code (\S+)\)\. Check the grain dimensions\.$/,
+         function (_t, tip, od, cekirdek, boy, kod) {
+             return 'Tasarım yayımlanmadı: çözücü bu ' + tip + ' yakıt '
+                 + 'bloğunu kuramadı (dış çap ' + I18N_SAYI(od) + ' mm, '
+                 + 'çekirdek çapı ' + I18N_SAYI(cekirdek) + ' mm, uzunluk '
+                 + I18N_SAYI(boy) + ' mm; çözücü kodu ' + kod + '). Yakıt '
+                 + 'bloğu ölçülerini denetleyin.';
+         }],
+        /* v3.0.1 (27 Eki, V301/K-C2, NK-29/NK-70) — yakıt kimliği ⟷ yanma
+           hızı rejim tablosu çelişkisi (solid_rocket_engine.py
+           _resolve_propellant_type ve 8. blok). Bekçi:
+           tests/test_v301_kati_yakit_kimligi.py */
+        [/^No design was published: the burn-rate regime table '([^']+)' \((burn_rate_law|burn_rate_preset)\) belongs to a different propellant than the selected propellant '([^']+)' \(propellant_type\)\. The thrust curve, burn time and pressure would come from '[^']+' while the identity says '[^']+'\. Select the preset of the same propellant, or 'custom' to use the a-n pair\.$/,
+         function (_t, yasa, alan, kimlik) {
+             return 'Tasarım yayımlanmadı: \'' + yasa + '\' yanma hızı rejim '
+                 + 'tablosu (' + alan + ') seçili yakıttan (\'' + kimlik
+                 + '\', propellant_type) farklı bir yakıta ait. İtki eğrisi, '
+                 + 'yanma süresi ve basınç \'' + yasa + '\' yakıtından, kimlik '
+                 + 'ise \'' + kimlik + '\' yakıtından gelirdi. Aynı yakıtın '
+                 + 'hazır ayarını ya da a-n çiftini kullanmak için \'custom\' '
+                 + 'seçin.';
+         }],
+        [/^No design was published: no propellant_type was sent and the two fields that name a propellant disagree - (\w+) = '([^']*)' is the catalogue record '([^']+)', (\w+) = '([^']*)' is '([^']+)'\. Choosing one would mix two propellants \(burn rate from one, identity from the other\)\. Send propellant_type \(the solid page's catalogue selector\) or make the two fields agree\.$/,
+         function (_t, a1, d1, k1, a2, d2, k2) {
+             return 'Tasarım yayımlanmadı: propellant_type gönderilmedi ve '
+                 + 'yakıt adlandıran iki alan çelişiyor - ' + a1 + ' = \''
+                 + d1 + '\' \'' + k1 + '\' katalog kaydı, ' + a2 + ' = \''
+                 + d2 + '\' ise \'' + k2 + '\'. Birini seçmek iki yakıtı '
+                 + 'karıştırırdı (yanma hızı birinden, kimlik ötekinden). '
+                 + 'propellant_type gönderin (katı sayfasının katalog '
+                 + 'seçicisi) ya da iki alanı uyumlu yapın.';
+         }],
+        [/^No design was published: (\d+) input\(s\) could not be used as entered and HRMA does not replace them with built-in values: (.+)\. Correct the field\(s\) and calculate again\.$/,
+         function (_t, sayi, maddeler) {
+             var birimTr = {'segments': 'segment', 'bolts': 'cıvata',
+                            'points': 'uç', 'deg': '°'};
+             var parcalar = String(maddeler).split('; ');
+             var cevrilen = [];
+             for (var i = 0; i < parcalar.length; i++) {
+                 var p = parcalar[i], m, tr = null;
+                 if ((m = /^(\w+) = (.+) is outside the accepted range (\S+) to (\S+?)(?: (\S+))?$/.exec(p))) {
+                     var birim = m[5] ? (' ' + (birimTr[m[5]] || m[5])) : '';
+                     tr = alanAdi(m[1]) + ' = ' + I18N_SAYI(m[2]) + ', kabul edilen '
+                         + I18N_SAYI(m[3]) + ' - ' + I18N_SAYI(m[4]) + birim
+                         + ' aralığının dışında';
+                 } else if ((m = /^(\w+) = (.+) is not a whole number \(accepted (\S+) to (\S+)\)$/.exec(p))) {
+                     tr = alanAdi(m[1]) + ' = ' + I18N_SAYI(m[2]) + ' tam sayı değil '
+                         + '(kabul edilen ' + I18N_SAYI(m[3]) + ' - '
+                         + I18N_SAYI(m[4]) + ')';
+                 } else if ((m = /^(\w+) = (.+) is a true\/false flag, not a number$/.exec(p))) {
+                     tr = alanAdi(m[1]) + ' = ' + m[2] + ' bir doğru/yanlış bayrağı, '
+                         + 'sayı değil';
+                 } else if ((m = /^(\w+) is not a finite number$/.exec(p))) {
+                     tr = alanAdi(m[1]) + ' sonlu bir sayı değil';
+                 } else if ((m = /^(\w+) = (.+) is not a number \(use a dot as the decimal separator\)$/.exec(p))) {
+                     tr = alanAdi(m[1]) + ' = ' + m[2] + ' sayı değil (ondalık ayracı '
+                         + 'olarak nokta kullanın)';
+                 } else if ((m = /^(\w+) = (.+) could not be used$/.exec(p))) {
+                     tr = alanAdi(m[1]) + ' = ' + m[2] + ' kullanılamadı';
+                 }
+                 if (tr === null) return _t;
+                 cevrilen.push(tr);
+             }
+             return 'Tasarım yayımlanmadı: ' + sayi + ' girdi yazıldığı '
+                 + 'gibi kullanılamadı ve HRMA bunların yerine yerleşik '
+                 + 'değer koymaz: ' + cevrilen.join('; ') + '. Alan(lar)ı '
+                 + 'düzeltip yeniden hesaplayın.';
+         }],
+        /* v3.0.1 (26 Eki, V301/L-A) — SIVI TASARIM REDDİ 422 CÜMLELERİ.
+           Üretici: hrma/app.py ``_sivi_kapanis_reddi`` (oda çapı ⟷ boğaz,
+           basınç beslemeli tank < gerekli besleme basıncı, kapanmayan
+           turbopompa çevrimi) ve /calculate_liquid tank/chug kapısının 400
+           cümleleri (hrma/utils/common_fixes.py validate_pressure_
+           consistency). Bant dışı girdi reddi katı ucun AYNI cümlesini
+           kullanır ("KATI TASARIM REDDİ 422" bloğu). Sayılar ondalık
+           kanonundan geçer; tanınmayan biçimde cümle İngilizce kalır.
+           Bekçi: tests/test_v301_sivi_kapilar.py */
+        [/^No design was published: the chamber diameter (\S+) mm \(chamber_diameter\) gives a contraction ratio of (\S+) with the solved (\S+) mm throat, outside the accepted (\S+) to (\S+) band; the solver would otherwise drop it and size the chamber from the contraction ratio\. Enter a chamber diameter between (\S+) and (\S+) mm, or leave chamber_diameter empty\.$/,
+         function (_t, dc, cr, dt, lo, hi, enAz, enCok) {
+             return 'Tasarım yayımlanmadı: ' + I18N_SAYI(dc) + ' mm oda '
+                 + 'çapı (chamber_diameter), çözülen ' + I18N_SAYI(dt)
+                 + ' mm boğazla ' + I18N_SAYI(cr) + ' daralma oranı '
+                 + 'veriyor; bu, kabul edilen ' + I18N_SAYI(lo) + ' - '
+                 + I18N_SAYI(hi) + ' bandının dışında. Kabul edilseydi '
+                 + 'çözücü bu değeri atıp odayı daralma oranından '
+                 + 'boyutlandıracaktı. ' + I18N_SAYI(enAz) + ' ile '
+                 + I18N_SAYI(enCok) + ' mm arasında bir oda çapı girin ya da '
+                 + 'chamber_diameter alanını boş bırakın.';
+         }],
+        [/^No design was published: the pressure-fed tank pressure (\S+) bar \(feed_pressure\) is (\S+) bar below the (\S+) bar the feed chain requires \(chamber pressure \+ injector pressure drop \+ cooling jacket pressure drop \+ feed line losses; binding side: (fuel|oxidizer)\), so the tanks cannot deliver the design flow\. Enter a feed pressure of at least (\S+) bar; the recommended tank pressure with the (\S+) bar declared margin is (\S+) bar\.$/,
+         function (_t, tank, acik, gerekli, taraf, enAz, pay, oneri) {
+             return 'Tasarım yayımlanmadı: basınç beslemeli tank basıncı '
+                 + I18N_SAYI(tank) + ' bar (feed_pressure), besleme '
+                 + 'zincirinin gerektirdiği ' + I18N_SAYI(gerekli) + ' bar '
+                 + 'değerinin ' + I18N_SAYI(acik) + ' bar altında (oda '
+                 + 'basıncı + enjektör basınç düşümü + soğutma ceketi basınç '
+                 + 'düşümü + besleme hattı kayıpları; bağlayıcı taraf: '
+                 + (taraf === 'fuel' ? 'yakıt' : 'oksitleyici') + '); '
+                 + 'tanklar tasarım debisini veremez. En az '
+                 + I18N_SAYI(enAz) + ' bar besleme basıncı girin; '
+                 + I18N_SAYI(pay) + ' bar beyanlı pay dahil önerilen tank '
+                 + 'basıncı ' + I18N_SAYI(oneri) + ' bar.';
+         }],
+        [/^No design was published: feed_pressure was not supplied; in a pressure-fed cycle the tank pressure is the injector feed pressure and the solver does not assume one\. The feed chain requires at least (\S+) bar \(chamber pressure \+ injector pressure drop \+ cooling jacket pressure drop \+ feed line losses; binding side: (fuel|oxidizer)\)\. Enter a feed pressure of at least (\S+) bar; the recommended tank pressure with the (\S+) bar declared margin is (\S+) bar\.$/,
+         function (_t, gerekli, taraf, enAz, pay, oneri) {
+             return 'Tasarım yayımlanmadı: feed_pressure gönderilmedi; '
+                 + 'basınç beslemeli çevrimde tank basıncı enjektörü '
+                 + 'besleyen basıncın kendisidir ve çözücü bir değer '
+                 + 'varsaymaz. Besleme zinciri en az ' + I18N_SAYI(gerekli)
+                 + ' bar gerektiriyor (oda basıncı + enjektör basınç düşümü '
+                 + '+ soğutma ceketi basınç düşümü + besleme hattı kayıpları; '
+                 + 'bağlayıcı taraf: '
+                 + (taraf === 'fuel' ? 'yakıt' : 'oksitleyici') + '). En az '
+                 + I18N_SAYI(enAz) + ' bar besleme basıncı girin; '
+                 + I18N_SAYI(pay) + ' bar beyanlı pay dahil önerilen tank '
+                 + 'basıncı ' + I18N_SAYI(oneri) + ' bar.';
+         }],
+        [/^No design was published: the (\S+) cycle did not close at this design point - the cycle solver reports (.+)\. The pump, turbine and cycle numbers of a cycle that does not close do not describe a working engine, so they are not published\. Change the cycle, the propellants or the operating point\.$/,
+         function (_t, cevrim, kodlar) {
+             return 'Tasarım yayımlanmadı: ' + cevrim + ' çevrimi bu '
+                 + 'tasarım noktasında kapanmadı; çevrim çözücüsünün '
+                 + 'bildirdiği: ' + I18N_OLCU(kodlar) + '. Kapanmayan bir çevrimin '
+                 + 'pompa, türbin ve çevrim sayıları çalışan bir motoru '
+                 + 'anlatmaz, bu yüzden yayımlanmaz. Çevrimi, iticileri ya da '
+                 + 'çalışma noktasını değiştirin.';
+         }],
+        /* Sıvı ucunun Cd kapısı (app.py OH-D16-05, invalid_discharge_
+           coefficient) — sayfa artık cümleyi bastığı için TR karşılığı eklendi. */
+        [/^'discharge_coefficient' must be a number in \[(\S+), (\S+)\] \(given: (.+)\)\. A discharge coefficient is the ratio of actual to ideal mass flow through an orifice, so it is dimensionless and cannot exceed 1 or be zero or negative\. No substitute value is invented and the design is not published with a silently replaced coefficient\.$/,
+         function (_t, lo, hi, verilen) {
+             return "'discharge_coefficient' [" + I18N_SAYI(lo) + '; '
+                 + I18N_SAYI(hi) + '] aralığında bir sayı olmalı (verilen: '
+                 + verilen + '). Akış katsayısı bir orifisten geçen gerçek '
+                 + 'debinin ideal debiye oranıdır; boyutsuzdur, 1\'i aşamaz, '
+                 + 'sıfır ya da negatif olamaz. Yerine değer uydurulmaz ve '
+                 + 'tasarım sessizce değiştirilmiş bir katsayıyla '
+                 + 'yayımlanmaz.';
+         }],
+        [/^Tank pressure \((\S+) bar\) must be greater than chamber pressure \((\S+) bar\)$/,
+         function (_t, tank, pc) {
+             return 'Tank basıncı (' + I18N_SAYI(tank) + ' bar) oda '
+                 + 'basıncından (' + I18N_SAYI(pc) + ' bar) büyük olmalı';
+         }],
+        [/^Insufficient pressure drop\. Need at least (\S+) bar drop for proper injection$/,
+         function (_t, dp) {
+             return 'Basınç düşümü yetersiz. Düzgün enjeksiyon için en az '
+                 + I18N_SAYI(dp) + ' bar düşüm gerekir';
+         }],
+        /* v3.0.1 (V301/H4) — geçici uçta blowdown ⟷ kullanıcı tank kipi reddi
+           (app.py _gecici_besleme_kipi_kapisi). */
+        [/^feed_mode 'blowdown' models a self-pressurising N2O tank, but this design uses tank_pressure_source = 'user' \(a pressurised feed at the user-set tank pressure\), so a blowdown curve would describe a different motor\. Use feed_mode 'regulated' for this design\.$/,
+         "feed_mode 'blowdown' kendinden basınçlı bir N2O tankını modeller, "
+         + "ama bu tasarım tank_pressure_source = 'user' kullanıyor "
+         + '(kullanıcının verdiği tank basıncında basınçlandırılmış '
+         + 'besleme); blowdown eğrisi başka bir motoru anlatırdı. Bu tasarım '
+         + "için feed_mode 'regulated' kullanın."],
         [/^Total impulse \((.+)\) doesn['’]t match thrust×time \((.+)\)$/,
          'Toplam impuls ($1), itki×süre ile ($2) uyuşmuyor'],
 
@@ -2014,8 +2350,28 @@
     /* --- analysis/regen_cooling.py + enjektör uçları ---------------- */
         [/^COKING: RP-1 coolant-side wall temperature reaches (\S+) K, above the ~(\S+) K coking threshold \((.+)\) — carbon deposition and channel fouling likely\.$/,
          'KOKLAŞMA: RP-1 soğutucu tarafı cidar sıcaklığı $1 K değerine ulaşıyor, ~$2 K koklaşma eşiğinin üstünde ($3) — karbon birikmesi ve kanal tıkanması olası.'],
+        /* V301/DİL-2 — L-KABUK kulvarının iki eşikli koklaşma uyarıları
+           (regen_cooling.py; 728 K NASA SP-8087 ölçütü, 561 K yazılım
+           uyarı eşiği). Sayılar ve kaynak künyeleri AYNEN. */
+        [/^COKING LIMIT: RP-1 coolant-side wall temperature reaches (\S+) K, above the (\S+) K design criterion of NASA SP-8087 sec\. 3\.1\.1\.5\.4 for RP-1 liquid-wall temperature — the design does not meet this criterion\.$/,
+         'KOKLAŞMA SINIRI: RP-1 soğutucu tarafı cidar sıcaklığı $1 K değerine ulaşıyor; NASA SP-8087 bölüm 3.1.1.5.4\'ün RP-1 sıvı cidar sıcaklığı için koyduğu $2 K tasarım ölçütünün üstünde — tasarım bu ölçütü sağlamıyor.'],
+        [/^COKING RISK: RP-1 coolant-side wall temperature reaches (\S+) K, above the (\S+) K deposit-risk warning level \(software warning based on NASA CR-168277 copper-tube deposits at 560-750 K; validate for the application\) and below the (\S+) K NASA SP-8087 criterion — not a statement that the wall stays deposit-free\.$/,
+         'KOKLAŞMA RİSKİ: RP-1 soğutucu tarafı cidar sıcaklığı $1 K değerine ulaşıyor; $2 K birikim riski uyarı düzeyinin üstünde (NASA CR-168277\'deki 560-750 K bakır tüp birikimlerine dayanan yazılım uyarısı; uygulama için doğrulanmalı) ve $3 K NASA SP-8087 ölçütünün altında — cidarın birikimsiz kalacağı anlamına gelmez.'],
         [/^CRITICAL: peak hot-wall temperature (\S+) K exceeds (.+) melting point (\S+) K — liner failure\.$/,
          'KRİTİK: tepe sıcak cidar sıcaklığı $1 K, $2 malzemesinin $3 K erime sıcaklığını aşıyor — astar hasarı.'],
+        /* V301/L-KARBON — LOX/RP-1 karbon birikimi (regen_cooling.py). */
+        [/^CARBON DEPOSIT: LOX\/RP-1 gas-side carbon deposit resistance applied \(NASA SP-125 Fig\. 4-25; throat R_d (\S+) m2K\/W\)\. Peak hot wall (\S+) K with the deposit, (\S+) K where it spalls \(no deposit, same coolant state\)\.$/,
+         'KARBON BİRİKİMİ: LOX/RP-1 gaz tarafı karbon birikimi ısıl direnci uygulandı (NASA SP-125 Şekil 4-25; boğazda R_d $1 m2K/W). Tepe sıcak cidar birikimle $2 K, birikimin döküldüğü yerde $3 K (birikim yok, aynı soğutucu durumu).'],
+        [/^CRITICAL: where the carbon deposit spalls the hot wall reaches (\S+) K, above the (.+) melting point (\S+) K — local liner failure \(NASA SP-8087 sec\. 3\.4\.1: spalling shall not cause failure\)\.$/,
+         'KRİTİK: karbon birikiminin döküldüğü yerde sıcak cidar $1 K değerine ulaşıyor, $2 malzemesinin $3 K erime sıcaklığının üstünde — yerel astar hasarı (NASA SP-8087 §3.4.1: dökülme hasara yol açmamalı).'],
+        [/^CARBON DEPOSIT: carbon deposit not modelled \(out of envelope\): (.+) \(the deposit was observed experimentally only in that range, NASA TP-2862\)\.$/,
+         function (_t, ic) {
+             var tr = String(ic)
+                 .replace(/O\/F (\S+) outside (\S+)/g, 'O/F $1, $2 bandının dışında')
+                 .replace(/Pc (\S+) bar outside (\S+) bar/g, 'Pc $1 bar, $2 bar bandının dışında');
+             return 'KARBON BİRİKİMİ: modellenmedi (zarf dışı): ' + tr
+                 + ' (birikim deneyle yalnız bu aralıkta gözlendi, NASA TP-2862).';
+         }],
         /* OH-D33-43 — fix-38a'nın (OH-D33-34) AÇIK BIRAKTIĞI İKİ DESEN.
            ÖLÇÜLDÜ (tr-07-warnings karesi, kılavuzda yayımlandı): aynı Türkçe
            panelde hem virgül hem nokta duruyordu. Virgüllü olanlar
@@ -2068,6 +2424,42 @@
          'UYARI: tepe sıcak cidar sıcaklığı $1 K, $2 malzemesinin izin verilen $3 K sıcaklığını aşıyor — dayanım marjı azaldı.'],
         [/^PROPERTY RANGE: (.+?) bulk temperature leaves the internal property table band \((.+?) K\) at (\S+) station\(s\) \(T_bulk (.+?) K\); properties there are FROZEN at the nearest band edge — transport properties and the coolant-side coefficient are an extrapolation outside the source validity envelope\.$/,
          'ÖZELLİK ARALIĞI: $1 yığın sıcaklığı, iç özellik tablosunun bandını ($2 K) $3 istasyonda terk ediyor (T_bulk $4 K); oradaki özellikler en yakın bant kenarında DONDURULDU — taşınım özellikleri ve soğutucu tarafı katsayısı, kaynağın geçerlilik zarfının dışında bir dış değer atamasıdır.'],
+        // V301/DİL: duvar tarafı özellik bandı uyarısı (regen_cooling.py
+        // "PROPERTY RANGE (WALL)"); TR ekranda İngilizce kalıyordu ve
+        // test_backend_uyari_metinleri_kapsam_bekcisi main'de de kırmızıydı.
+        [/^PROPERTY RANGE \(WALL\): the (\S+) coolant-side wall temperature is above the internal property table band \((\S+)-(\S+) K\) at (\S+) station\(s\); the Sieder-Tate wall viscosity there is held at the band edge, so the \(mu_b\/mu_w\)\^0\.14 correction is UNDER-stated and the coolant-side coefficient is a conservative lower bound \(peak correction factor used (\S+)\)\.$/,
+         function (_t, sogutucu, alt, ust, n, f) {
+             return 'ÖZELLİK ARALIĞI (CİDAR): ' + sogutucu + ' soğutucu tarafı'
+                 + ' cidar sıcaklığı ' + n + ' istasyonda iç özellik tablosunun'
+                 + ' bandının (' + I18N_SAYI(alt) + '-' + I18N_SAYI(ust) + ' K)'
+                 + ' üstünde; oradaki Sieder-Tate cidar viskozitesi bant'
+                 + ' kenarında tutuluyor, bu yüzden (mu_b/mu_w)^0,14 düzeltmesi'
+                 + ' EKSİK hesaplanıyor ve soğutucu tarafı katsayısı ihtiyatlı'
+                 + ' bir alt sınırdır (kullanılan en büyük düzeltme çarpanı '
+                 + I18N_SAYI(f) + ').';
+         }],
+        // V301/DİL: sıvı otojen basınçlandırma kapsam gerekçesi
+        // (liquid_rocket_engine.py _autogenous_applicable).
+        [/^autogenous pressurisation is modelled only for methane\/LOX and LH2\/LOX; '([^']*)' is not supported \(the other propellants use stored helium\)$/,
+         function (_t, cift) {
+             return 'otojen basınçlandırma yalnız metan/LOX ve LH2/LOX için'
+                 + ' modellenir; \'' + cift + '\' desteklenmiyor (diğer'
+                 + ' iticiler depolanmış helyum kullanır)';
+         }],
+        // V301/DİL: N2O tank boşalmasının ideal-gaz kuyruğu (tank_blowdown.py).
+        [/^IDEAL-GAS TAIL-OFF: the liquid is exhausted at (\S+) K \/ (\S+) bar and the remaining vapour is expanded with the IDEAL-GAS adiabatic relation \(gamma = (\S+), the ideal-gas value of N2O: CoolProp 6\.8\.0 cp\/cv at 300 K \/ 1 bar = 1\.279\)\. At the SATURATED-VAPOUR state where it is applied the assumption does not hold: the real cp\/cv at 293 K saturated vapour is 3\.107 \(2\.4x\) and the real vapour density 158\.0 kg\/m3 versus 91\.2 kg\/m3 from p\/\(RT\) \(-42%\)\. The tail-off curve is an order-of-magnitude estimate only; the liquid-phase results up to this instant are unaffected\.$/,
+         function (_t, tK, pBar, gamma) {
+             return 'İDEAL-GAZ KUYRUĞU: sıvı ' + I18N_SAYI(tK) + ' K / '
+                 + I18N_SAYI(pBar) + ' bar\'da tükeniyor ve kalan buhar İDEAL-GAZ'
+                 + ' adyabatik bağıntısıyla genişletiliyor (gamma = '
+                 + I18N_SAYI(gamma) + ', N2O\'nun ideal-gaz değeri: CoolProp 6.8.0,'
+                 + ' 300 K / 1 bar\'da cp/cv = 1,279). Uygulandığı DOYMUŞ BUHAR'
+                 + ' durumunda bu varsayım tutmaz: 293 K doymuş buharda gerçek'
+                 + ' cp/cv 3,107 (2,4 kat) ve gerçek buhar yoğunluğu 158,0 kg/m3,'
+                 + ' p/(RT) ile bulunan 91,2 kg/m3\'e karşı (%-42). Kuyruk eğrisi'
+                 + ' yalnız mertebe kestirimidir; bu ana kadarki sıvı faz'
+                 + ' sonuçları etkilenmez.';
+         }],
         [/^NOTE: minimum channel Reynolds number (\S+) is below the Dittus-Boelter turbulent floor \(~1e4\); the coolant-side coefficient there is an extrapolation\.$/,
          'NOT: en düşük kanal Reynolds sayısı $1, Dittus-Boelter türbülanslı akış tabanının (~1e4) altında; oradaki soğutucu tarafı katsayısı bir dış değer atamasıdır.'],
         [/^GEOMETRY: (\S+) channels of width (\S+) mm exceed the throat circumference \((\S+) mm\) — channels do not physically fit; reduce count\/width\.$/,
@@ -2106,9 +2498,41 @@
            end_cap …) MAKİNE ADIDIR ve çevrilmez — grupla aynen taşınır.
            ================================================================ */
         [/^No acceptance is issued and no verdict is issued at all: every safety factor in this response \((.+?)\) is the design target read back - HRMA sized those sections to meet the target, so the number cannot fall below it and carries no information about a wall you built\. Supply the real wall \/ throat \/ head thickness to earn a verdict; the target itself is graded in design_target_assessment\.$/,
-         'Ne onay ne de hüküm verildi: bu yanıttaki her emniyet katsayısı ($1) tasarım hedefinin geri okunmasıdır — HRMA o kesitleri hedefi sağlayacak biçimde boyutlandırdı, dolayısıyla sayı hedefin altına düşemez ve sizin ürettiğiniz bir cidar hakkında hiçbir bilgi taşımaz. Hüküm kazanmak için gerçek cidar / boğaz / kapak kalınlığını girin; hedefin kendisi design_target_assessment içinde derecelendirilir.'],
+         function (tum, istasyonlar) {
+             /* V301/DİL-2 (kök 7): istasyon makine adları ekranda okunur
+                adla (app.js sfIstasyonAdi ile aynı app.sfst.* anahtarları);
+                tanınmayan ad varsa liste AYNEN (uydurma ad yok). */
+             var I = global.I18N, ADLAR = {nozzle: 'app.sfst.nozzle',
+                 end_cap: 'app.sfst.endCap', chamber_hoop: 'app.sfst.chamberHoop',
+                 chamber_von_mises: 'app.sfst.chamberVonMises',
+                 buckling_axial: 'app.sfst.bucklingAxial'};
+             var ad = istasyonlar.split(', ').map(function (x) {
+                 return (ADLAR[x] && I && typeof I.has === 'function' && I.has(ADLAR[x]))
+                     ? I.t(ADLAR[x]) : null;
+             });
+             var liste = (ad.indexOf(null) !== -1) ? istasyonlar : ad.join(', ');
+             return 'Ne onay ne de hüküm verildi: bu yanıttaki her emniyet katsayısı (' + liste + ') tasarım hedefinin geri okunmasıdır — HRMA o kesitleri hedefi sağlayacak biçimde boyutlandırdı, dolayısıyla sayı hedefin altına düşemez ve sizin ürettiğiniz bir cidar hakkında hiçbir bilgi taşımaz. Hüküm kazanmak için gerçek cidar / boğaz / kapak kalınlığını girin; hedefin kendisi design_target_assessment içinde derecelendirilir.';
+         }],
         [/^No acceptance is issued: the measured sections \((.+?)\) would pass, but (.+?) were sized by HRMA and therefore not verified\. An acceptance that does not cover every station is not an acceptance\. The measured-scope result is published separately in measured_scope_status\.$/,
-         'Onay verilmedi: ölçülen kesitler ($1) geçerdi, ama $2 kesitlerini HRMA boyutlandırdı ve bu yüzden doğrulanmadılar. Her istasyonu kapsamayan bir onay, onay değildir. Ölçülen kapsamın sonucu measured_scope_status alanında ayrıca yayımlanır.'],
+         function (tum, olculen, boyutlanan) {
+             /* V3.0.5 T-ÇAPA-C1: üstteki dalın kuralı (V301/DİL-2 kök 7) bu
+                dala da — istasyon makine adları ekranda app.sfst.* okunur
+                adıyla; tanınmayan ad varsa o liste AYNEN (uydurma ad yok).
+                Ölçüldü: tests/test_v301_dil_ekran.py hibrit TR şeridinde
+                'buckling_axial, chamber_hoop, …' ham kalıyordu. */
+             var I = global.I18N, ADLAR = {nozzle: 'app.sfst.nozzle',
+                 end_cap: 'app.sfst.endCap', chamber_hoop: 'app.sfst.chamberHoop',
+                 chamber_von_mises: 'app.sfst.chamberVonMises',
+                 buckling_axial: 'app.sfst.bucklingAxial'};
+             function adlar(liste) {
+                 var ad = liste.split(', ').map(function (x) {
+                     return (ADLAR[x] && I && typeof I.has === 'function' && I.has(ADLAR[x]))
+                         ? I.t(ADLAR[x]) : null;
+                 });
+                 return (ad.indexOf(null) !== -1) ? liste : ad.join(', ');
+             }
+             return 'Onay verilmedi: ölçülen kesitler (' + adlar(olculen) + ') geçerdi, ama ' + adlar(boyutlanan) + ' kesitlerini HRMA boyutlandırdı ve bu yüzden doğrulanmadılar. Her istasyonu kapsamayan bir onay, onay değildir. Ölçülen kapsamın sonucu ayrı bir alanda (ölçülen kapsam durumu) yayımlanır.';
+         }],
         [/^The verdict comes from verdict_safety_factor, the lowest safety factor actually measured on a drawn wall \((.+?)\)\. This is a measured warning and is never suppressed\. Sections not verified: (.+?); of those, (.+?) only read the design target back\.$/,
          'Hüküm verdict_safety_factor alanından geliyor: çizilmiş bir cidar üstünde gerçekten ölçülen en düşük emniyet katsayısı ($1). Bu ölçülmüş bir uyarıdır ve asla bastırılmaz. Doğrulanmayan kesitler: $2; bunlardan $3 yalnız tasarım hedefini geri okuyor.'],
         [/^Every station in the basket was evaluated against a user-supplied thickness \((.+?)\), so the verdict is an independent verification drawn from verdict_safety_factor\.$/,
@@ -2191,6 +2615,11 @@
            çevrilmemiş yakalamıştı. */
         [/^L\/D band check NOT ISSUED: L\/D = (.+) is computed from the module default plate thickness \((.+) mm\), not from this design; supply plate_thickness \(orifice length\) to obtain the 3-5 band verdict\.$/,
          'L/D bant denetimi VERİLMEDİ: L/D = $1 bu tasarımdan değil, modülün varsayılan plaka kalınlığından ($2 mm) hesaplandı; 3-5 bant hükmü için plate_thickness (delik uzunluğu) verin.'],
+        /* V301/HİBRİT-DIŞA (kalem 4): kazanılmamış plakada L/D artık
+           yayımlanmıyor; uyarı sayı taşımaz (injector_design.LD_NOT_ISSUED_WARNING).
+           Yukarıdaki eski biçim kayıtlı sonuçlar için kalır. */
+        [/^L\/D band check NOT ISSUED: no plate thickness \(orifice length\) was supplied, so L\/D is not computed for this design; supply plate_thickness to obtain the 3-5 band verdict\.$/,
+         'L/D bant denetimi VERİLMEDİ: plaka kalınlığı (delik uzunluğu) verilmedi, bu yüzden bu tasarım için L/D hesaplanmadı; 3-5 bant hükmü için plate_thickness verin.'],
         /* ÖH D33-3 / OH-D33-46 — HTPB YANLILIK BEYANININ ZARF GEREKÇESİ.
 
            ÖLÇÜLEN KUSUR (bu depo, 16 Eylül 2026; hibrit 1 kN, HTPB,
@@ -2330,7 +2759,7 @@
            _combustion dashboard (notlar '- ' ile başlar; tire kuralı
            translateSegment içinde ayrılır ve gövde buradan geçer). */
         [/^Sweep maximum O\/F (\S+) is a grid node of a (\d+)-point sea-level-exit sweep; the canonical optimum O\/F is the solver value \(motor\.optimum_of_ratio\), searched continuously at the design expansion ratio, so the two differ\.$/,
-         'Tarama azamisi O/F $1, $2 noktalı deniz seviyesi çıkışlı bir taramanın ızgara düğümüdür; kanonik optimum O/F çözücünün değeridir (motor.optimum_of_ratio) ve tasarım genişleme oranında sürekli aranır; bu yüzden ikisi farklıdır.'],
+         'Tarama azamisi O/F $1, $2 noktalı deniz seviyesi çıkışlı bir taramanın ızgara düğümüdür; kanonik optimum O/F çözücünün kendi değeridir ve tasarım genişleme oranında sürekli aranır; bu yüzden ikisi farklıdır.'],
         [/^This run O\/F (\S+) is OUTSIDE the swept band (\S+)-(\S+); the curve does not cover the operating point\.$/,
          'Bu koşumun O/F değeri $1, taranan $2-$3 bandının DIŞINDA; eğri çalışma noktasını kapsamıyor.'],
         [/^Sweep maximum sits on the END of the swept band \(O\/F (\S+)\); it is the largest value IN THIS BAND, not a proven optimum - the true peak may lie outside\.$/,
@@ -2355,8 +2784,150 @@
         /* DV-MIXED · karışım bileşimi köken notu —
            database_integrations.py:312 (bileşen adları MAKİNE, aynen). */
         [/^Mixed provenance: NASA CEA species table for (.+); molecular weight derived from formula for (.+)$/,
-         'Karma köken: $1 için NASA CEA tür tablosu; $2 için molekül ağırlığı formülden türetildi']
+         'Karma köken: $1 için NASA CEA tür tablosu; $2 için molekül ağırlığı formülden türetildi'],
+
+        /* V301/DİL-2 (ÖRNEK-PANEL devri) — /api/flow-analysis kinetik notları
+           (hrma/app.py _run_kinetic_chain + hızlı tarama dalı). Eksik alan
+           adları formdaki adlarla (yakıt / oksitleyici). */
+        [/^Fast Screening level: station arrays and the kinetic-efficiency chain require the Engineering fidelity level\.$/,
+         'Hızlı Tarama seviyesi: istasyon dizileri ve kinetik verim zinciri Mühendislik doğruluk seviyesini gerektirir.'],
+        [/^Kinetic-efficiency chain skipped: provide 'of_ratio' \(and optionally 'fuel_type', 'oxidizer_type'\) to evaluate nozzle kinetic losses\.$/,
+         'Kinetik verim zinciri atlandı: nozul kinetik kayıplarını değerlendirmek için O/F oranını (isteğe bağlı olarak yakıt ve oksitleyici türünü) verin.'],
+        [/^Kinetic-efficiency chain not evaluated: 'of_ratio' was supplied without (fuel_type|oxidizer_type|fuel_type and oxidizer_type); no propellant is assumed on your behalf\. Supply the fuel and the oxidizer to evaluate the nozzle kinetic losses\.$/,
+         function (_t, eksik) {
+             var ad = {'fuel_type': 'yakıt türü', 'oxidizer_type': 'oksitleyici türü',
+                       'fuel_type and oxidizer_type': 'yakıt ve oksitleyici türü'}[eksik];
+             return 'Kinetik verim zinciri değerlendirilmedi: O/F oranı ' + ad
+                 + ' olmadan verildi; sizin yerinize itici varsayılmaz. Nozul kinetik '
+                 + 'kayıplarını değerlendirmek için yakıtı ve oksitleyiciyi verin.';
+         }],
+
+        /* V301/DİL-2 (NK-35) — enjektör deseni tanımı
+           (hrma/engines/injector_design.py `desc`). Sayılar AYNEN; d_j jet
+           çapı simgesidir. */
+        [/^(\d+) unlike doublet pairs, 2θ=(\d+)°, free jet (\d+)·d_j$/,
+         '$1 farklı akışkanlı çift (unlike doublet), 2θ=$2°, serbest jet boyu $3·d_j'],
+        [/^(\d+) O-F-O triplets \(outer 2×ox\., centre fuel\), 2θ=(\d+)°$/,
+         '$1 O-Y-O üçlüsü (dışta 2 oksitleyici, ortada yakıt), 2θ=$2°'],
+        [/^(\d+) oxidizer \+ (\d+) fuel like-doublets \(same-fluid pairs\), 2θ=(\d+)° — no blowapart risk$/,
+         '$1 oksitleyici + $2 yakıt aynı akışkanlı çift (like doublet), 2θ=$3° — ayrışma (blowapart) riski yok'],
+        [/^(\d+) like-doublets \(same-fluid pairs\), 2θ=(\d+)° — no blowapart risk$/,
+         '$1 aynı akışkanlı çift (like doublet), 2θ=$2° — ayrışma (blowapart) riski yok'],
+        [/^(\d+)-orifice showerhead \(d=(\S+) mm, axial parallel jets\)$/,
+         '$1 delikli duş başlığı (d=$2 mm, eksenel paralel jetler)'],
+
+        /* V301/DİL-2 (K-C2 D5) — katı yanma profili dayanağı
+           (solid_rocket_engine.py _thrust_shape 'basis'). */
+        [/^Shape is decided on the burning window \(thrust above (\d+)% of peak\), using the time-weighted mean and the interior peak, not the first and last samples\.$/,
+         'Biçim yanma penceresinde (itkinin tepenin %$1 değerinin üstünde kaldığı bölüm) zaman ağırlıklı ortalama ve iç tepe ile belirlenir; ilk ve son örnekler kullanılmaz.'],
+
+        /* V301/DİL-2 (DİL §6 AÇIK 1) — hibrit grafik altı sunucu notları.
+           Kaynak: visualization.py (pano notları, yanma panosu bileşim
+           notu, 3B sahne notları) ve injector_design.py doymuş giriş notu.
+           Alan ve seri adları ADLA çevrilir; tanınmayan ad varsa desen
+           eşleşmeyi AYNEN döndürür (çevrilmedi sayılır, yarım çeviri yok). */
+        [/^The six gauges are this design point, not a live reading: they are the solved thrust, chamber pressure, mass flow, temperature, O\/F and Isp of the run, and they do not change with time\. Only the bottom row is a time history\.$/,
+         'Altı gösterge bu tasarım noktasıdır, canlı okuma değildir: koşumun çözülmüş itkisi, oda basıncı, kütle debisi, sıcaklığı, O/F değeri ve Isp değeridir; zamanla değişmez. Yalnız alt sıra zaman geçmişidir.'],
+        [/^Gauge scale from the solver time history — (.+)$/,
+         function (tum, liste) {
+             var parca = liste.split('; ').map(function (p) {
+                 var m = /^(\w+): full scale (\S+) from (\w+)\.(\w+) peak$/.exec(p);
+                 if (!m || !DIL2_PANO_ALAN_TR[m[1]]
+                         || !DIL2_PANO_SERI_TR[m[3] + '.' + m[4]]) return null;
+                 return DIL2_PANO_ALAN_TR[m[1]] + ': tam ölçek '
+                     + I18N_SAYI(m[2]) + ' (' + DIL2_PANO_SERI_TR[m[3] + '.' + m[4]]
+                     + ' tepesi)';
+             });
+             if (parca.indexOf(null) !== -1) return tum;
+             return 'Gösterge ölçeği çözücünün zaman geçmişinden — ' + parca.join('; ');
+         }],
+        [/^No published reference series for (.+): the value is shown as a number, no needle is drawn \(a needle without a reference would be a fabricated scale\)\.$/,
+         function (tum, liste) {
+             var ad = dil2Adlar(liste, DIL2_PANO_ALAN_TR);
+             if (ad === null) return tum;
+             return ad.charAt(0).toLocaleUpperCase('tr') + ad.slice(1)
+                 + ' için yayımlanmış referans serisi yok: değer sayı olarak '
+                 + 'gösterilir, ibre çizilmez (referanssız bir ibre uydurma bir ölçek olurdu).';
+         }],
+        [/^Not available for this run: (.+)\.$/,
+         function (tum, liste) {
+             var ad = dil2Adlar(liste, DIL2_PANO_ALAN_TR);
+             return (ad === null) ? tum : 'Bu koşumda yayımlanmadı: ' + ad + '.';
+         }],
+        [/^Bottom row units come from the solver time history: time \[s\], propellant mass \[kg\], regression rate r = \(dD\/dt\)\/2 \[mm\/s\] — the panel titled "Burn Rate" plots exactly this — and port diameter \[mm\]\.$/,
+         'Alt sıranın birimleri çözücünün zaman geçmişinden gelir: zaman [s], itici kütlesi [kg], regresyon hızı r = (dD/dt)/2 [mm/s] — "Yanma hızı" başlıklı panel tam olarak bunu çizer — ve port çapı [mm].'],
+        [/^Equilibrium composition: showing the (\d+) largest of (\d+) species reported by the solver; the (\d+) not drawn sum to (\S+) mole fraction\.$/,
+         'Denge bileşimi: çözücünün bildirdiği $2 türün en büyük $1 tanesi gösteriliyor; çizilmeyen $3 türün toplamı $4 mol kesri.'],
+        [/^Chamber wall drawn with its solved thickness (\S+) mm \(source: (.+)\) — the same value the 2-D section and the CAD export use\.$/,
+         function (tum, mm, kaynak) {
+             var k = dil2CidarKaynagi(kaynak);
+             if (k === null) return tum;
+             return 'Kamara cidarı çözülmüş kalınlığıyla çizildi: ' + I18N_SAYI(mm)
+                 + ' mm (kaynak: ' + k + ') — 2B kesit ve CAD dışa aktarımı da aynı değeri kullanır.';
+         }],
+        [/^Lengths resolved to SI from: (.+)$/,
+         function (tum, liste) {
+             var parca = liste.split(', ').map(function (p) {
+                 var m = /^(\w+) \(([^()]+)\)$/.exec(p);
+                 if (!m || !DIL2_UZUNLUK_TR[m[1]] || !DIL2_BIRIM_KAYNAGI_TR[m[2]]) return null;
+                 return DIL2_UZUNLUK_TR[m[1]] + ' (' + DIL2_BIRIM_KAYNAGI_TR[m[2]] + ')';
+             });
+             if (parca.indexOf(null) !== -1) return tum;
+             return 'Uzunlukların SI birimi şuradan çözüldü: ' + parca.join(', ');
+         }],
+        [/^Saturated N2O inlet \(K_c = 0\): flashing two-phase flow is expected and is modelled by Dyer NHNE in the injector circuit; hydraulic-flip verdict: see the circuit$/,
+         function (tum) {
+             var I = global.I18N;
+             var k = 'info.injector.saturated_inlet_two_phase';
+             return (I && typeof I.has === 'function' && I.has(k)) ? I.t(k) : tum;
+         }]
     ];
+
+    /* V301/DİL-2 — grafik notlarındaki makine adlarının TR karşılıkları.
+       Adlar visualization.py dosyasının yayımladığı alan/seri adlarıdır
+       (DASHBOARD_GAUGE_REFERANSLARI, _SCENE_3D_*_LENGTHS,
+       motor_geometry.resolve_length_m kaynak dizeleri). */
+    var DIL2_PANO_ALAN_TR = {
+        'thrust': 'itki', 'chamber_pressure': 'oda basıncı',
+        'mdot_total': 'toplam kütle debisi', 'chamber_temperature': 'oda sıcaklığı',
+        'of_ratio': 'O/F', 'isp': 'Isp', 'time history (row 3)': 'zaman geçmişi (3. sıra)'
+    };
+    var DIL2_PANO_SERI_TR = {
+        'thrust_curve.thrust': 'itki eğrisinin', 'thrust_curve.pressure': 'basınç eğrisinin',
+        'thrust_curve.mass_flow': 'kütle debisi eğrisinin'
+    };
+    var DIL2_UZUNLUK_TR = {
+        'chamber_diameter': 'oda çapı', 'chamber_length': 'oda boyu',
+        'throat_diameter': 'boğaz çapı', 'exit_diameter': 'çıkış çapı',
+        'port_diameter_initial': 'ilk port çapı'
+    };
+    var DIL2_BIRIM_KAYNAGI_TR = {
+        'declared:m': 'beyanlı birim: m', 'declared:mm': 'beyanlı birim: mm',
+        'motor_geometry': 'motor geometrisi kaydı', 'm': 'm', 'mm': 'mm'
+    };
+    function dil2Adlar(liste, tablo) {
+        var ad = liste.split(', ').map(function (x) {
+            return Object.prototype.hasOwnProperty.call(tablo, x) ? tablo[x] : null;
+        });
+        return (ad.indexOf(null) !== -1) ? null : ad.join(', ');
+    }
+    /* cad_visualization.py cidar kalınlığı künyesinin beş hâli. */
+    function dil2CidarKaynagi(k) {
+        var t = [
+            [/^structural analysis \(recommended thickness\) \[\w+\]$/,
+             'yapısal analiz, önerilen kalınlık'],
+            [/^structural analysis \(thickness used in the stress check\) \[\w+\]$/,
+             'yapısal analiz, gerilme denetiminde kullanılan kalınlık'],
+            [/^structural analysis \(as-designed wall thickness, verified against the pressure load\) \[\w+\]$/,
+             'yapısal analiz, tasarlanan cidar kalınlığı; basınç yüküne karşı doğrulandı'],
+            [/^structural analysis \(as-designed wall thickness, SIZED to the design safety factor target - NOT a pressure-load verification\) \[\w+\]$/,
+             'yapısal analiz, tasarlanan cidar kalınlığı; emniyet katsayısı hedefine göre BOYUTLANDIRILDI, basınç yükü doğrulaması DEĞİL'],
+            [/^structural analysis \(as-designed wall thickness; this analysis does not state whether the wall was checked against the pressure load\) \[\w+\]$/,
+             'yapısal analiz, tasarlanan cidar kalınlığı; analiz cidarın basınç yüküne karşı denetlenip denetlenmediğini söylemiyor']
+        ];
+        for (var i = 0; i < t.length; i++) if (t[i][0].test(k)) return t[i][1];
+        return null;
+    }
 
     /* "Etiket: değer" ve "Taban (birim)" kalıplarında yalnız etiket/taban
        çevrilir. Ayrılabilecek metinlerin sonunda kalan birim sözcükleri. */
@@ -2575,6 +3146,97 @@
         return applyUnitWords(raw);
     }
 
+    /* V301/L-E (NK-36): çevrilmiş adı `satir` satıra böler — en uzun satırı
+       en kısa yapan boşluktan; uzun kalan taraf kalan satır hakkıyla yeniden
+       bölünür (visualization._wrap_category_label ile aynı kural). Boşluksuz
+       ad olduğu gibi döner; KISALTMA yok. */
+    function yenidenSar(metin, satir) {
+        if (typeof metin !== 'string' || satir < 2 || metin.indexOf(' ') === -1) {
+            return metin;
+        }
+        var k = metin.split(' ');
+        var enIyi = null, enIyiMaks = null;
+        for (var i = 1; i < k.length; i++) {
+            var sol = k.slice(0, i).join(' '), sag = k.slice(i).join(' ');
+            var maks = Math.max(sol.length, sag.length);
+            if (enIyiMaks === null || maks < enIyiMaks) {
+                enIyi = [sol, sag]; enIyiMaks = maks;
+            }
+        }
+        if (enIyi[1].length >= enIyi[0].length) {
+            enIyi[1] = yenidenSar(enIyi[1], satir - 1);
+        } else {
+            enIyi[0] = yenidenSar(enIyi[0], satir - 1);
+        }
+        return enIyi[0] + '<br>' + enIyi[1];
+    }
+
+    /* V301/DİL-2 (DİL §6 AÇIK 1): SARILMIŞ DİPNOT MADDESİ BÜTÜN çevrilir.
+       N-grafik G3 dipnotu taşmasın diye maddeleri sunucuda satırlara
+       sarıyor (visualization.py textwrap: madde '- ' ile başlar, devam
+       satırı iki boşlukla). Parça parça çeviri her satırı ayrı aradığı için
+       tam cümle desenleri ("Sweep maximum O/F …", "This run point: …")
+       artık eşleşmiyor, TR ekranda madde İngilizce kalıyordu (ölçüldü:
+       dil-2/once.json, hybrid#combustion_analysis_plot). Madde satırları
+       birleştirilip tire kuralından (tireSatiri) geçer; çeviri AYNI satır
+       sayısına dengeli bölünür (sunucunun ayırdığı alt boşluk değişmez,
+       dipnot lejanta inmez). FAIL-CLOSED: madde çevrilemezse satırları eski
+       yoldan (parça parça) geçer; dipnot biçiminde olmayan metin null. */
+    function sarilmisMaddeler(body, lang) {
+        var satirlar = body.split(/<br\s*\/?>/i);
+        var gruplar = [], devam = false;
+        for (var i = 0; i < satirlar.length; i++) {
+            var s = satirlar[i];
+            if (/^-\s/.test(s)) {
+                gruplar.push([s]);
+            } else if (/^ {2}\S/.test(s) && gruplar.length) {
+                gruplar[gruplar.length - 1].push(s);
+                devam = true;
+            } else {
+                return null;
+            }
+        }
+        if (!devam) return null;
+        var cikti = [];
+        gruplar.forEach(function (g) {
+            if (g.length === 1) {
+                cikti.push(translateSegment(g[0], lang));
+                return;
+            }
+            var birlesik = normalize(g.join(' '));
+            var m = /^-\s+(\S[\s\S]*)$/.exec(birlesik);
+            var tr = m ? tireSatiri(m[1], lang) : null;
+            if (tr === null) {
+                g.forEach(function (x) { cikti.push(translateSegment(x, lang)); });
+                return;
+            }
+            dengeliSar('- ' + tr, g.length).forEach(function (x, k) {
+                cikti.push(k === 0 ? x : '  ' + x);
+            });
+        });
+        return cikti.join('<br>');
+    }
+
+    /* Metni en çok `n` satıra, satır boylarını dengeleyerek böler (sözcük
+       sınırında; sözcük kırılmaz). */
+    function dengeliSar(metin, n) {
+        var k = metin.split(' ');
+        var gen = Math.ceil(metin.length / n);
+        for (;;) {
+            var satir = [], cur = '';
+            k.forEach(function (w) {
+                if (cur && (cur.length + 1 + w.length) > gen) {
+                    satir.push(cur); cur = w;
+                } else {
+                    cur = cur ? cur + ' ' + w : w;
+                }
+            });
+            if (cur) satir.push(cur);
+            if (satir.length <= n) return satir;
+            gen += 4;
+        }
+    }
+
     /* Grafik metni çevirisi — dışa açılan ana giriş noktası. */
     function chartText(text) {
         if (typeof text !== 'string' || !text) return text;
@@ -2593,6 +3255,24 @@
 
         var patterned = applyPatterns(normalize(body), PATTERNS, lang);
         if (patterned !== null) return patterned + extra;
+
+        /* V301/L-E (NK-36): SARILMIŞ kategori adı BÜTÜN olarak çevrilir.
+           Sunucu kalabalık kategori eksenini satırlara böler
+           (visualization._wrap_category_label: "Cooling<br>Jacket",
+           "Filters<br>(assumed<br>K=10)"). Parça parça çeviri her satırı
+           ayrı aradığı için TR ekranda "Cooling Jacket", "Tank Outlet",
+           "Main Valve" İngilizce, "Feed Lines" yarı çevrili ("Besleme
+           Lines") kalıyordu — sözlükte tam adlar varken. Önce satırlar
+           boşlukla birleştirilip tam ad aranır; bulunursa çeviri AYNI
+           satır sayısına, en uzun satırı en kısa yapan boşluklardan yeniden
+           bölünür (sunucunun kuralının aynısı). Bulunamazsa eski yol. */
+        if (/<br\s*\/?>/i.test(body)) {
+            var satirSayisi = body.split(/<br\s*\/?>/i).length;
+            var butun = lookup(normalize(body.replace(/<br\s*\/?>/gi, ' ')), lang);
+            if (butun !== null) return yenidenSar(butun, satirSayisi) + extra;
+            var madde = sarilmisMaddeler(body, lang);
+            if (madde !== null) return madde + extra;
+        }
 
         /* <br> / <br /> ayırıcıları KORUNARAK parça parça çevrilir */
         var parts = body.split(/(<br\s*\/?>)/i);
@@ -2700,9 +3380,29 @@
        için sözlükte hat sayısı kadar ikinci kayıt gerekirdi.
        FAIL-CLOSED: tanınmayan ön ek çevrilmez, metin olduğu gibi normal
        yola devam eder (uydurma hat adı yazılmaz). */
+    /* V301/DİL-2 (kök 7): ret cümlesindeki makine alan adı ekranda formun
+       ETİKETİYLE (reject_body.js HRMAReject.etiket — <label for>); sayfada
+       etiketi yoksa ya da DOM yoksa ad AYNEN (uydurma ad yok). */
+    function alanAdi(ad) {
+        var R = global.HRMAReject;
+        var e = (R && typeof R.etiket === 'function') ? R.etiket(ad) : null;
+        return e || ad;
+    }
+
     var HAT_ONEKLERI = {
         'fuel line': 'yakıt hattı',
-        'oxidizer line': 'oksitleyici hattı'
+        'oxidizer line': 'oksitleyici hattı',
+        /* V301/K-C1 (K-A DEVİR 13): ret gövdelerinin durum kodu öneki
+           (reject_body.js HRMAReject.metni '[status] …'). Kod adları
+           hrma/app.py ret gövdelerindeki 'status' değerleridir. */
+        'invalid_input': 'geçersiz girdi',
+        'incomplete_input': 'eksik girdi',
+        'validation_error': 'doğrulama hatası',
+        'incomplete_geometry': 'eksik geometri',
+        'inconsistent_geometry': 'tutarsız geometri',
+        'unresolved_geometry_units': 'geometri birimi çözülemedi',
+        /* V301/DİL-2: sıvı ucunun bant reddi kodu (L-A tek bant kapısı). */
+        'input_not_accepted': 'girdi kabul edilmedi'
     };
 
     /* DV36-03 — hibrit patlayıcı dayanağının yakıt bloğu notu

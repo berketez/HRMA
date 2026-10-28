@@ -48,9 +48,14 @@ class TestP8B418PintleSemaBeyani:
 
     def test_bos_girdide_uydurma_olcu_basilmaz(self):
         _d, metin = self._bos()
+        # V301/E1: etiketler formdaki adları taşır (body OD, D_p, t); yasak
+        # liste eski ve yeni adların İKİSİNİ de kapsar.
         for yasak in ("D_outer = 50.0", "D_outer: 50.0",
                       "D_pintle = 25.0", "D_pintle: 25.0",
-                      "gap = 1.50", "Gap: 1.50"):
+                      "gap = 1.50", "Gap: 1.50",
+                      "body OD = 50.0", "body OD: 50.0",
+                      "D_p = 25.0", "D_p (pintle tip): 25.0",
+                      "t = 1.500", "t (annular gap): 1.500"):
             assert yasak not in metin, (
                 f"boş girdide uydurma ölçü basıldı: {yasak!r}")
 
@@ -79,9 +84,11 @@ class TestP8B418PintleSemaBeyani:
             create_pintle_cross_section)
         _d, metin = _metinler(create_pintle_cross_section(
             {"outer_diameter": 62.0, "pintle_diameter": 18.0, "gap": 0.9}))
-        assert "D_outer = 62.0 mm" in metin
-        assert "D_pintle = 18.0 mm" in metin
-        assert "gap = 0.90 mm" in metin
+        # V301/E1: ad değişti (form ⟷ çizim aynı adlandırma: body OD, D_p,
+        # t); sayı ve "gerçek girdide AYNEN yayımlanır" iddiası DEĞİŞMEDİ.
+        assert "body OD = 62.0 mm" in metin
+        assert "D_p = 18.00 mm" in metin
+        assert "t = 0.900 mm" in metin
         assert "Do not machine" not in metin
 
     def test_kardes_swirl_deseni_bozulmadi(self):
@@ -425,7 +432,16 @@ class TestP8B109YayimlananKipYakinsamasi:
             "motor_name": "D24A3AYR", "thrust": 2000.0, "burn_time": 30.0,
             "chamber_pressure": 15.0, "mixture_ratio": 2.2,
             "fuel_type": "rp1", "oxidizer_type": "lox",
-            "expansion_ratio": 5.0}).get_json()
+            "expansion_ratio": 5.0,
+            # V3.0.5 SIVI-CIDAR kalem 3 — FİKSTÜR UYARLANDI, İDDİA AYNI:
+            # rejeneratif cidar iki katmanlıdır ve köprü artık onun DIŞ
+            # KABUĞUNU soğutucu basıncıyla çözer (yalnız radyal yük); bu
+            # aracın konusu olan gaz basıncı (izantropik P(x)) yolu TEK
+            # KATMANLI cidardadır. Aynı motor film soğutmayla ölçüldü:
+            # birincil z_max → yayımlanan z_min (21,8966 ⟷ 22,0604),
+            # izantropik yük, iki kip de yakınsadı.
+            "cooling_type": "film_cooling",
+            "film_cooling_percent": 5.0}).get_json()
         # ARAÇ UYARLANDI (fea-yuk 2. tur, 14 Eki; karar §28-18 (B), kart
         # OH-DK-04): eski sabit-P_c yükünde bu fikstür birincil ``z_min``
         # ⟷ yayımlanan ``z_max`` (oran 1,7449) ayrışıyordu; ayrışma
@@ -564,7 +580,16 @@ class TestP8B109YayimlananKipYakinsamasi:
             "motor_name": "D24A3AYR", "thrust": 2000.0, "burn_time": 30.0,
             "chamber_pressure": 15.0, "mixture_ratio": 2.2,
             "fuel_type": "rp1", "oxidizer_type": "lox",
-            "expansion_ratio": 5.0}).get_json()
+            "expansion_ratio": 5.0,
+            # V3.0.5 SIVI-CIDAR kalem 3 — FİKSTÜR UYARLANDI, İDDİA AYNI:
+            # rejeneratif cidar iki katmanlıdır ve köprü artık onun DIŞ
+            # KABUĞUNU soğutucu basıncıyla çözer (yalnız radyal yük); bu
+            # aracın konusu olan gaz basıncı (izantropik P(x)) yolu TEK
+            # KATMANLI cidardadır. Aynı motor film soğutmayla ölçüldü:
+            # birincil z_max → yayımlanan z_min (21,8966 ⟷ 22,0604),
+            # izantropik yük, iki kip de yakınsadı.
+            "cooling_type": "film_cooling",
+            "film_cooling_percent": 5.0}).get_json()
 
         # ARAÇ UYARLANDI (fea-yuk 2. tur): yukarıdaki testle aynı araç —
         # birincil kip ürün parametresiyle ``z_max``; yayımlanan ``z_min``.
@@ -632,7 +657,17 @@ class TestP8B103GeometriKalinlikKapisi:
             # (298,15 K gaz referansı = kalem öncesi geometri, BİT-AYNI). Sıvı
             # varsayılandaki yeni geometri sonucu defter kalemi KITAP-P1A-D3
             # (p1a rapor §12).
-            "oxidizer_phase": "gas"}).get_json()
+            "oxidizer_phase": "gas",
+            # V3.0.5 T-ÇAPA-C1 — ÖLÇÜM KOŞULU AÇIKÇA: c* verimi %100 ve cidar
+            # 14,1082 mm. V301/H-termal (77d64c641) korunan bölgeler yüzünden
+            # boyutlandırılan hibrit cidarını inceltti, V301/H-PANEL
+            # (74b55500a) N2O/HTPB c*'ına η=0,89 varsayılanı getirdi (onaylı
+            # yayımlanan sayı değişimleri; bekçinin konusu değil). Bu iki
+            # alanla köprü girdisi H-termal öncesi c7776576f ağacının
+            # isteğiyle BİT-AYNI (cidar 0,014108212719314306 m, kontur
+            # toplamı 1,076595090230855; ölçüldü).
+            "combustion_efficiency": 100.0,
+            "wall_thickness": 14.108212719314306}).get_json()
             or {}).get("motor") or {}
         return extract_structural_inputs(hib)
 
@@ -707,10 +742,20 @@ class TestP8B103GeometriKalinlikKapisi:
         # 0,10 çapası KORUNDU — o operatör değişmedi.
         assert gk["toplam_kalinlik_sapma_orani"] > 0.0
         assert gk["kapama_taban_sapma_orani"] > 0.10
-        assert (gk["kapama_taban_sapma_orani"]
-                >= 0.9 * gk["toplam_kalinlik_sapma_orani"]), (
-            "kalınlaşmanın baskın kaynağı artık kapama değil — yeni bir "
-            f"kaynak doğmuş olabilir: {gk}")
+        # v3.0.1 port kulvarı (20 Eki): "kapama toplamın >= %90'ı" baskınlık
+        # sezgisi eski geometriye bağlıydı. Kamara artık son port çapında
+        # (80,6 -> 53,8 mm); bu kaba ızgarada (na=16) yerleşim payı %4,1'e
+        # çıktı (kapı eşiği %10, geçiyor). Bekçinin ASIL iddiası, "yeni bir
+        # kalınlaşma kaynağı doğmadı", doğrudan sınanır: toplam sapma kapama
+        # ile yerleşimin ÇARPIMIDIR ve kalan pay yoktur. Ölçüm: 1,2331 =
+        # 1,1841 × 1,0414. Yerleşim payı da kapının kendi eşiği içinde
+        # kalmalıdır.
+        assert (1.0 + gk["toplam_kalinlik_sapma_orani"]) == pytest.approx(
+            (1.0 + gk["kapama_taban_sapma_orani"])
+            * (1.0 + gk["yerlesim_sapma_orani"]), rel=1e-9), (
+            "toplam sapma kapama × yerleşim çarpımına ayrışmıyor — yeni bir "
+            f"kalınlaşma kaynağı doğmuş olabilir: {gk}")
+        assert gk["yerlesim_sapma_orani"] <= gk["esik"], gk
         # Kapı YERLEŞİM payını ölçüyor, toplamı değil.
         assert gk["sapma_orani"] == gk["yerlesim_sapma_orani"]
         assert gk["sapma_orani"] != gk["toplam_kalinlik_sapma_orani"]

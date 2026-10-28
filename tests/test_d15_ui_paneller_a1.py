@@ -450,7 +450,14 @@ class TestYapayZekaYuku:
         ic = o['ai']['injector_design']
         assert ic.get('discharge_coefficient') == inj.get('discharge_coefficient')
         if inj.get('type') == 'showerhead':
-            assert ic.get('l_over_d_ratio') == inj.get('L_D_ratio')
+            # T-ÇAPA-C2 (27 Eki, BELGE D3): L/D yalnız KAZANILMIŞ plakadan
+            # taşınır; plaka boşsa modül 3,0 mm varsayılanından türeyen sayı
+            # (``plate_thickness_earned = false``) yüke girmez (null).
+            if inj.get('plate_thickness_earned') is True:
+                assert ic.get('l_over_d_ratio') == inj.get('L_D_ratio')
+            else:
+                assert ic.get('l_over_d_ratio') is None, ic
+                assert ic.get('plate_thickness_mm') is None, ic
 
         # --- ÖH D17 (Fable-D15 ŞARTI + OH-D16-13): YÜKÜN *HER* NOZZLE AÇI
         # BLOĞU aynı çözücü değerini taşır. D15 onarımı yalnız

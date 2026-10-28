@@ -454,8 +454,14 @@ class TestLStarGeometry:
 
     def test_chamber_length_grows_with_l_star(self):
         """L* etkin bantta (geometrik tabanın üstünde) boyu ARTIRIR."""
-        base = _engine(l_star=4.0).calculate()
-        taller = _engine(l_star=6.0).calculate()
+        # v3.0.1 kulvar P: art-yanma odası [0,3; 3]·D_ch'ye kelepçeli ve
+        # D_ch artık son port çapıdır (eski 1,5·D_son değil), bu yüzden
+        # etkin bant aşağı kaydı. Ölçüldü (bu motor): L* <= 2,5 grain_limited,
+        # 3,0 ve 3,5 l_star_derived (L 0,6984 -> 0,7820 m), >= 4,0
+        # post_chamber_clamped_high (tavan L*_ach 3,862 m). Eski 4 -> 6 m
+        # çifti artık İKİSİ DE tavanda; bekçinin iddiası etkin bantta sınanır.
+        base = _engine(l_star=3.0).calculate()
+        taller = _engine(l_star=3.5).calculate()
         assert taller['chamber_length'] > base['chamber_length'] * 1.02
         assert taller['post_chamber_length'] > base['post_chamber_length']
 

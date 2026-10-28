@@ -773,6 +773,8 @@ class TankCADGenerator:
         # üretilmiyordu; artık kuruluysa üretir, değilse notunu pakete yazar.
         try:
             from hrma.export.step_export import generate_tank_step
+            from hrma.export.cad_visualization import (
+                tank_head_assessment)
             # BİRİM: tank_data['...']['dimensions'] MİLİMETRE taşır (sıvı motor
             # `ox_tank_diameter * 1000` yazar) ve generate_tank_step de mm bekler.
             # v2.6.2 öncesinde buradaki varsayılanlar METRE cinsindendi (0.3/0.8)
@@ -804,6 +806,9 @@ class TankCADGenerator:
                     'volume': tank_data['fuel_tank']['dimensions'].get('volume'),
                     'analysed_head_type': (tank_data['fuel_tank'].get(
                         'pressure_vessel') or {}).get('head_type'),
+                    # ÖH V31 CV-0: kapak hükmü etikete (tek kaynak).
+                    'head_assessment': tank_head_assessment(
+                        'fuel_tank', tank_data['fuel_tank']),
                 },
                 'oxidizer_tank': {
                     'diameter': tank_data['oxidizer_tank']['dimensions'].get('diameter'),
@@ -814,6 +819,8 @@ class TankCADGenerator:
                         tank_data['oxidizer_tank']['dimensions'].get('volume'),
                     'analysed_head_type': (tank_data['oxidizer_tank'].get(
                         'pressure_vessel') or {}).get('head_type'),
+                    'head_assessment': tank_head_assessment(
+                        'oxidizer_tank', tank_data['oxidizer_tank']),
                 },
             }, out_dir=output_dir)
             exported_files.extend(step_files.values())
@@ -831,7 +838,8 @@ class TankCADGenerator:
         
         dimensions = tank_config['dimensions']
         from hrma.export.cad_visualization import (
-            TANK_FLAT_HEAD_DECLARATION, tank_shell_geometry_mm)
+            TANK_FLAT_HEAD_DECLARATION, tank_head_assessment,
+            tank_head_declaration, tank_shell_geometry_mm)
         geo = tank_shell_geometry_mm(
             'tank', dimensions['diameter'], dimensions['length'],
             dimensions['wall_thickness'])
@@ -858,8 +866,12 @@ class TankCADGenerator:
             },
             'step3_boolean_cut': {
                 'operation': 'Boolean cut (outer - inner)',
+                # ÖH V31 CV-0: beyan + kapağın hesaplanan SF'si ve kapı
+                # hükmü (``cad_visualization.tank_head_declaration``).
                 'result': ('Hollow tank shell with flat heads: '
-                           + TANK_FLAT_HEAD_DECLARATION),
+                           + TANK_FLAT_HEAD_DECLARATION + '; '
+                           + tank_head_declaration(
+                               tank_head_assessment('tank', tank_config))),
             },
             'step4_baffles': {
                 'operation': 'Create slosh baffles',
@@ -1148,7 +1160,9 @@ class TankCADGenerator:
         boyutlandırmanın D x L'si boşluktur (``cavity_*``). Eskiden boşluk
         ölçüsü "overall" diye yazılıyordu.
         """
-        from hrma.export.cad_visualization import TANK_FLAT_HEAD_DECLARATION
+        from hrma.export.cad_visualization import (
+            TANK_FLAT_HEAD_DECLARATION, tank_head_assessment,
+            tank_head_declaration)
         geo = self._tank_geometries(tank_data)
         return {
             ad: {'overall_diameter': g['outer_diameter_mm'],
@@ -1156,7 +1170,10 @@ class TankCADGenerator:
                  'cavity_diameter': g['inner_diameter_mm'],
                  'cavity_length': g['inner_length_mm'],
                  'wall_thickness': g['wall_mm'],
-                 'heads': TANK_FLAT_HEAD_DECLARATION}
+                 # ÖH V31 CV-0: kapağın SF'si ve kapı hükmü.
+                 'heads': (TANK_FLAT_HEAD_DECLARATION + '; '
+                           + tank_head_declaration(
+                               tank_head_assessment(ad, tank_data[ad])))}
             for ad, g in geo.items()}
 
     def _generate_drawing_notes(self, tank_data: Dict) -> List[str]:

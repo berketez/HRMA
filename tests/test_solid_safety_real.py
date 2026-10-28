@@ -31,6 +31,7 @@ from hrma.analysis.safety_analysis import (
 )
 from hrma.engines.solid_rocket_engine import (
     SOLID_CASE_DESIGN,
+    SOLID_DEFAULT_GEOMETRY_MM,
     SOLID_CONDENSED_MASS_FRACTION,
     SOLID_GRAIN_MECHANICS,
     THROAT_EROSION_SIGNIFICANT_AREA_GROWTH,
@@ -41,9 +42,14 @@ from hrma.engines.solid_rocket_engine import (
 # ---------------------------------------------------------------------------
 # Yardımcılar
 # ---------------------------------------------------------------------------
+#: V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan
+#: motoru kilitliyordu (çekirdek 30 mm); örnek motorun TEK tanımı okunur.
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 def solid(overrides=None, **ctor):
-    params = dict(chamber_diameter=100, grain_length=500, core_diameter=30,
-                  chamber_pressure=40)
+    params = dict(chamber_diameter=100, grain_length=500,
+                  core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
     params.update(ctor)
     return SolidRocketEngine(overrides=overrides, **params).calculate_performance()
 
@@ -124,8 +130,14 @@ class TestSolidSafetyPressuresAreComputed:
 class TestSolidThermalIsComputed:
 
     def test_case_temperature_depends_on_burn_time(self):
-        short = solid(grain_length=200)
-        long = solid(grain_length=1200)
+        # V301/K-A: eski düğüm boyu (200 / 1200 mm, çekirdek 30) değiştirip
+        # süreyi uzatıyordu; 1200 mm tanede port boğulur (A_p/A_t < 1, RET)
+        # ve geçerli portlu çekirdekte BATES süresi boydan değil et
+        # kalınlığından gelir (ölçüldü: çekirdek 60 mm'de 200 / 1200 mm
+        # 2,67 / 2,64 s). Süre et kalınlığıyla değiştirilir: çekirdek 70
+        # (et 15 mm) ⟷ 40 mm (et 30 mm), ikisi de geçerli port (10,9 / 1,60).
+        short = solid(core_diameter=70)
+        long = solid(core_diameter=40)
         assert long['burn_time'] > short['burn_time']
         t_short = short['thermal_analysis']['heat_transfer']['case_temperature_k']
         t_long = long['thermal_analysis']['heat_transfer']['case_temperature_k']
@@ -235,7 +247,9 @@ class TestGrainStressIsRealElasticity:
         assert sugar['grain_elastic_modulus_mpa'] != htpb['grain_elastic_modulus_mpa']
 
     def test_stress_depends_on_grain_geometry(self):
-        narrow = solid(core_diameter=20)['structural_analysis']['grain_structural']
+        # V301/K-A: 20 mm'de port boğulur (A_p/A_t < 1, RET); geçerli dar
+        # port 40 mm (A_p/A_t 1,60).
+        narrow = solid(core_diameter=40)['structural_analysis']['grain_structural']
         wide = solid(core_diameter=70)['structural_analysis']['grain_structural']
         assert narrow['max_grain_stress_mpa'] != wide['max_grain_stress_mpa'], (
             'Grain gerilmesi port capina duyarli olmali (eski model yalniz '
@@ -268,7 +282,7 @@ class TestGrainStressIsRealElasticity:
     def test_second_grain_stress_source_agrees(self):
         """İkinci (eski) grain gerilme fonksiyonu artık aynı kaynağa bağlı."""
         engine = SolidRocketEngine(chamber_diameter=100, grain_length=500,
-                                   core_diameter=30, chamber_pressure=40)
+                                   core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
         assert engine._calculate_grain_hoop_stress() == pytest.approx(
             engine._calculate_grain_structural()['bore_hoop_stress_mpa'])
 
@@ -438,13 +452,40 @@ class TestOverridesActuallyApply:
         # v2.5.2 (Codex bulgusu): impuls hesabi son adimi atliyordu; terminal
         # tukenis ornegi eklenince ortalama itki %0.18 kaymisti. O kapanis
         # davranisi hâlâ yerinde; asagidaki deger onun F024+F068+A1-2 hâli.
-        assert res['average_thrust'] == pytest.approx(3089.80, abs=0.5)
-        legacy_a = solid(burn_rate_a=0.005)
-        assert legacy_a['average_thrust'] == pytest.approx(6787.43, abs=0.5)
+        # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu
+        # varsayılan motoru kilitliyordu. ÇAPA BEŞİNCİ KEZ ÖLÇÜLDÜ: örnek
+        # motorun çekirdeği 30 -> 48 mm (SOLID_DEFAULT_GEOMETRY_MM):
+        # 3089,80 -> 3633,53 N (tolerans aynı).
+        # V301/T-ÇAPA-A: ÇAPA ALTINCI KEZ ÖLÇÜLDÜ — N-CEA-2 (katı termokimya motorun Pc'sinde NASA CEA'dan) sonrası
+        # 3633,53 -> 3606,57 N (3606,570083993098); CEA kapalı aynı motor
+        # 3633,53'te kalır. Tolerans aynı.
+        assert res['average_thrust'] == pytest.approx(3606.57, abs=0.5)
+        # a = 0,005 kolu (F024 ayrıştırması): bu katsayıyla Ø100/500 tanede
+        # port HİÇBİR örnek çekirdekte boğaza yetişmiyor (30 mm: 0,40;
+        # 48 mm: 0,89) -> tasarım YAYIMLANMAZ (KT-23, ters kapı). Eski
+        # 6787,43 N ortalaması o boğulan motorun sayısıydı.
+        from hrma.engines.solid_rocket_engine import SolidDesignRejected
+        with pytest.raises(SolidDesignRejected) as exc:
+            solid(burn_rate_a=0.005)
+        assert exc.value.code == 'port_smaller_than_throat'
         # F068 ve A1-2 tepe itkiye dokunmaz (tasarim basincinda CF ayni,
-        # akis ekli): bu deger uc surumdur degismedi; B11 (CEA dörtlüsü)
-        # tasarım noktasının C_F'ini değiştirdi, çapa yeniden ölçüldü.
-        assert legacy_a['max_thrust'] == pytest.approx(10941.14, abs=1.0)
+        # akis ekli). Eğri çözücüsü kapıdan GEÇMEZ (kapı
+        # calculate_performance'tadır), bu yüzden ayrıştırmanın tepe-itki
+        # çapası eski geometride (çekirdek 30 mm) bit-aynı ölçülür.
+        # V301/T-ÇAPA-A: bu "eski sayılar eski geometride geri gelir" bloğu
+        # K-A'nın yalnız geometriyi değiştirdiğini kanıtlar; sayılar KATALOG
+        # termokimyasıyla ölçülmüştü. N-CEA-2'den sonra aynı izolasyon CEA
+        # kapalıyken kurulur (N-CEA-2 ``cea_kapali`` deseni); CEA kapalı eski
+        # çapalar BİT-AYNI (ölçüldü).
+        from hrma.engines import cea_bridge
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(cea_bridge, 'is_rocketcea_available', lambda: False)
+            legacy_curve = SolidRocketEngine(
+                chamber_diameter=100, grain_length=500, core_diameter=30,
+                chamber_pressure=40,
+                burn_rate_a=0.005).calculate_thrust_curve()
+        assert float(np.max(legacy_curve['thrust'])) == pytest.approx(
+            10941.14, abs=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +716,7 @@ class TestConstantsAreCentralised:
 
     def test_case_design_defaults_are_single_sourced(self):
         engine = SolidRocketEngine(chamber_diameter=100, grain_length=500,
-                                   core_diameter=30, chamber_pressure=40)
+                                   core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
         material, sigma_y, sf, t_wall = engine._case_design()
         assert material == SOLID_CASE_DESIGN['material']
         assert sigma_y == SOLID_CASE_DESIGN['yield_strength_pa']
@@ -702,7 +743,7 @@ class TestErosiveReportMatchesTheSolver:
 
     def _engine(self, **ov):
         return SolidRocketEngine(chamber_diameter=100, grain_length=500,
-                                 core_diameter=30, chamber_pressure=40,
+                                 core_diameter=_CEKIRDEK_MM, chamber_pressure=40,
                                  overrides=(ov or None))
 
     def test_reported_enhancement_is_the_applied_enhancement(self):
@@ -953,7 +994,7 @@ class TestThroatErosionIsWired:
         Kural artik iki yonlu ve fail-closed.
         """
         motor = SolidRocketEngine(chamber_diameter=100, grain_length=500,
-                                  core_diameter=30, chamber_pressure=40)
+                                  core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
         res = motor.calculate_performance()
         uyarilar = [w for w in (res.get('design_warnings') or [])
                     if w['code'] == 'warn.solid.rigid_throat_assumption']

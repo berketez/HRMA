@@ -108,7 +108,10 @@ def api_projects_load(name):
     tahminle doldurmaz) ve sözleşmeyi açıkça belgelemek için yanıtta durur.
     """
     try:
-        doc, warnings = project_store.load_project(name)
+        # v3.0.1: metinler ve makine kayıtları TEK listeden (sürüm göçü
+        # kaydı ikisinde aynı sırada; arayüz uzunluk eşitliğini şart koşar).
+        doc, records = project_store.load_project_records(name)
+        warnings = [project_store.load_warning_text(r) for r in records]
     except project_store.ProjectError as e:
         return _store_error(e)
     except OSError as e:
@@ -123,7 +126,7 @@ def api_projects_load(name):
         # V3 KK 2. tur (REL D-5): aynı uyarıların makine kodu + parametresi
         # (``warnings`` ile aynı sıra, birebir). Arayüz metni i18n
         # anahtarıyla kurar (EN = TR); düz liste geriye uyumlu kalır.
-        'warning_records': project_store.load_warning_records(doc),
+        'warning_records': records,
         'estimated': [],  # hiçbir alan tahminle doldurulmadı
     })
 

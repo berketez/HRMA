@@ -89,6 +89,7 @@
             'lang.label': 'Language',
             'lang.en': 'English',
             'lang.tr': 'Türkçe',
+            'lang.help': 'Interface language of HRMA (English or Turkish). The choice is stored in this browser and applied to every page; it changes no calculation.',
 
             'page.title': 'HRMA — Rocket Motor Analysis Suite',
             'hero.badge': 'VERSION',
@@ -150,6 +151,7 @@
             'lang.label': 'Dil',
             'lang.en': 'English',
             'lang.tr': 'Türkçe',
+            'lang.help': 'HRMA arayüz dili (İngilizce ya da Türkçe). Seçim bu tarayıcıda saklanır ve bütün sayfalara uygulanır; hiçbir hesabı değiştirmez.',
 
             'page.title': 'HRMA — Roket Motoru Analiz Paketi',
             'hero.badge': 'SÜRÜM',

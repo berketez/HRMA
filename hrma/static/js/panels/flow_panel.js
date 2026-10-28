@@ -7,7 +7,7 @@
    Fidelity seçici:
      fast        → izantropik özet (rejim + CF/itki kartları)
      engineering → tam istasyon dizileri (P(x), M(x)) + Bartz + kinetik zincir
-   High-Fidelity kinetik seçeneği yalnız Cantera mevcutsa listelenir —
+   Cantera sonlu hızlı kinetik seçeneği yalnız Cantera mevcutsa listelenir —
    tespit /api/kinetic-efficiency {probe:true} yanıtının fidelity_used
    alanından yapılır (backend sözleşmesi).
 
@@ -46,8 +46,149 @@
         return { label: String(type || T('common.unknown', 'UNKNOWN')).toUpperCase(), kind: 'dim' };
     }
 
+    // V301/PANEL-SAYI (KILAVUZ P4) — ekrandaki sayı dile göre ayraçla basılır
+    // (TR virgül). Sayı yoksa EM TİRE (U.fmt ile aynı sözleşme); sayı
+    // DEĞİŞMEZ, yalnız ayraç yerelleşir (U.num → I18N.number).
+    function fmtL(x, d) {
+        return (typeof x !== 'number' || !Number.isFinite(x)) ? '—' : U.num(x, d);
+    }
+
+    /* V301/PANEL-SAYI (KILAVUZ P4) — REJİM CÜMLESİ EKRAN DİLİNDE.
+       Çözücünün altı sabit rejim cümlesi (nozzle_flow_1d._classify_regime)
+       TR ekranda İngilizce basılıyordu ("Perfectly expanded: …"). TR'de
+       sözlükteki Türkçe karşılığı basılır; çözücünün cümlesi kapalı
+       "Teknik ayrıntı (çözücü beyanı, çevrilmedi)" altında AYNEN durur
+       (DİL-2 terim kararı 2 deseni). EN'de cümle olduğu gibi. */
+    const REJIM_CUMLESI = {
+        underexpanded: 'panel.nzl.regimeDesc.underexpanded',
+        perfectly_expanded: 'panel.nzl.regimeDesc.perfectly_expanded',
+        overexpanded: 'panel.nzl.regimeDesc.overexpanded',
+        separated: 'panel.nzl.regimeDesc.separated',
+        normal_shock_in_nozzle: 'panel.nzl.regimeDesc.normal_shock_in_nozzle',
+        unchoked: 'panel.nzl.regimeDesc.unchoked',
+    };
+    function dilTr() {
+        return !!(window.I18N && window.I18N.lang === 'tr');
+    }
+    function rejimCumlesiHtml(regime) {
+        const ham = String((regime && regime.description) || '');
+        if (!ham) return '';
+        const anahtar = REJIM_CUMLESI[regime.type];
+        if (!dilTr() || !anahtar) return U.esc(ham);
+        return U.esc(T(anahtar, ham))
+            + '<details style="margin-top:2px; font-size:0.75rem; color:var(--hd-ink-dim, #7d97a5);">'
+            + '<summary style="cursor:pointer;">'
+            + U.esc(T('common.techDetailSrv', 'Technical detail (solver statement, untranslated)'))
+            + '</summary>' + U.esc(ham) + '</details>';
+    }
+
+    /* V301/PANEL-SAYI (28 Eki, S1) — MOTORUN TESLİM ETTİĞİ DÖRT SAYI.
+       Yollar, ana sonuç ekranının bastığı sayıların yollarıdır (ölçüldü,
+       ``olcum/akis_once_tr.json``): hibrit itki 3000 N / ṁ 1,458 / c* 1423 /
+       C_F 1,445; sıvı itki (deniz seviyesi) 25000 N / ṁ 9,915 / c* 1738,3;
+       katı tasarım Pc'sindeki itki = tepe itki 1498 N, c* 868,75, C_F(Pc).
+       Katı motor tasarım noktası debisini başlık olarak yayımlamıyor: kart
+       basılmaz (türetilmez). Sayılar yalnız panelin girdileri motorun
+       girdileriyle AYNIYSA yan yana konur — kullanıcı paneli başka bir oda
+       basıncıyla koşturduysa motorun sayısı o çözüme ait değildir. */
+    const TESLIM_YOLLARI = {
+        hybrid: { thrust: ['thrust'], mdot: ['mdot_total'], cstar: ['c_star'],
+                  cf: ['cf'] },
+        liquid: { thrust: ['thrust'], mdot: ['total_mass_flow'], cstar: ['c_star'],
+                  cf: ['isp_identity.thrust_coefficient_sea_level'] },
+        solid: { thrust: ['design_summary.performance.peak_thrust_N'], mdot: [],
+                 cstar: ['c_star'], cf: ['nozzle_design.performance.thrust_coefficient'] },
+    };
+    function ilkSayi(o, yollar) {
+        for (let i = 0; i < yollar.length; i++) {
+            let v = o;
+            const parca = yollar[i].split('.');
+            for (let j = 0; j < parca.length; j++) {
+                v = (v && typeof v === 'object') ? v[parca[j]] : undefined;
+            }
+            if (typeof v === 'number' && Number.isFinite(v)) return v;
+        }
+        return undefined;
+    }
+    // Panel girdisi motor değerinin KENDİSİ mi? Güverte öneriyi alana
+    // anlamlı basamağa yuvarlayarak yazar (analysis_dock.js dockSigFig,
+    // 6 basamak; ölçüldü: Tc 3279,1066 → 3279,11); eşleşme o kuralın
+    // AYNISIYLA denetlenir, gevşek bir tolerans uydurulmaz.
+    function ayniSayi(a, b) {
+        if (typeof a !== 'number' || typeof b !== 'number'
+                || !Number.isFinite(a) || !Number.isFinite(b)) return false;
+        if (a === b) return true;
+        return (typeof U.sigFig === 'function') && a === U.sigFig(b, U.SIGFIG);
+    }
+    function teslimBlogu(flow) {
+        const r = window.currentResults;
+        const tip = motorTipi();
+        const yollar = TESLIM_YOLLARI[tip];
+        if (!r || !yollar) return '';
+        const m = U.motorDict(r);
+        const inp = (flow && flow.inputs) || {};
+        const pc = ilkSayi(m, ['chamber_pressure']);
+        const ciftler = [
+            [inp.chamber_pressure_Pa, (pc === undefined) ? undefined : pc * 1e5],
+            [inp.chamber_temperature_K, ilkSayi(m, ['chamber_temperature'])],
+            [inp.gamma, ilkSayi(m, ['gamma'])],
+            [inp.molecular_weight_g_mol, ilkSayi(m, ['molecular_weight', 'thermochemistry.molecular_weight'])],
+            [inp.throat_diameter_m, U.readLengthM(r, 'throat_diameter')],
+        ];
+        const de = U.readLengthM(r, 'exit_diameter');
+        if (Number.isFinite(de)) ciftler.push([inp.exit_diameter_m, de]);
+        const baslik = U.sectionTitle(T('panel.nzl.secDelivered',
+            'Delivered by the motor - the numbers of the main result'));
+        const notStil = 'font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5); margin:6px 0;';
+        if (!ciftler.every(function (c) { return ayniSayi(c[0], c[1]); })) {
+            return baslik + '<p style="' + notStil + '">' + U.esc(T('panel.nzl.delInputsDiffer',
+                'The inputs of this run differ from the motor result (chamber pressure, '
+                + 'chamber temperature, gamma, molecular weight, throat or exit diameter), '
+                + 'so the delivered numbers of the motor are not shown beside it.')) + '</p>';
+        }
+        const kartlar = [];
+        const itki = ilkSayi(m, yollar.thrust);
+        if (itki !== undefined) {
+            kartlar.push(U.statCard(tip === 'solid'
+                ? T('panel.nzl.delThrustPeak', 'THRUST AT THIS Pc (MOTOR, PEAK)')
+                : T('panel.nzl.delThrust', 'THRUST (MOTOR)'),
+                fmtL(itki, 0), 'N', 'info', yollar.thrust[0]));
+        }
+        const md = ilkSayi(m, yollar.mdot);
+        if (md !== undefined) {
+            kartlar.push(U.statCard(T('panel.nzl.delMassFlow', 'MASS FLOW (MOTOR)'),
+                fmtL(md, 3), 'kg/s', 'info', yollar.mdot[0]));
+        }
+        const cs = ilkSayi(m, yollar.cstar);
+        if (cs !== undefined) {
+            kartlar.push(U.statCard(T('panel.nzl.delCstar', 'C* DELIVERED (MOTOR)'),
+                fmtL(cs, tip === 'liquid' ? 1 : 0), 'm/s', 'info', yollar.cstar[0]));
+        }
+        const cf = ilkSayi(m, yollar.cf);
+        if (cf !== undefined) {
+            kartlar.push(U.statCard(tip === 'solid'
+                ? T('panel.nzl.delCfPc', 'C_F AT THIS Pc (MOTOR)')
+                : T('panel.nzl.delCf', 'C_F (MOTOR)'),
+                fmtL(cf, 3), '', 'info', yollar.cf[0]));
+        }
+        if (!kartlar.length) return '';
+        let not = T('panel.nzl.delNote',
+            'The cards above are the quasi-1D solution of this chamber state: '
+            + 'ideal c* of a calorically perfect gas (c* efficiency 1) and the '
+            + 'geometric throat (discharge coefficient 1). The motor delivers '
+            + 'its c* with its c* efficiency and its mass flow through its '
+            + 'throat discharge coefficient; these four numbers are the '
+            + 'motor result, unchanged.');
+        if (tip === 'solid') {
+            not += ' ' + T('panel.nzl.delNoMassFlowSolid',
+                'The solid motor publishes no design-point mass flow as a headline number, so none is shown.');
+        }
+        return baslik + '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
+            + kartlar.join('') + '</div><p style="' + notStil + '">' + U.esc(not) + '</p>';
+    }
+
     // ------------------------------------------------------------------
-    // High-Fidelity yetenek sondası: Cantera + reaksiyonlu mekanizma varsa
+    // Cantera sonlu hızlı kinetik yetenek sondası: Cantera + reaksiyonlu mekanizma varsa
     // kinetik model seçicisine 'high_fidelity' seçeneği eklenir.
     // ------------------------------------------------------------------
     let hfProbeDone = false;
@@ -58,7 +199,7 @@
         if (!sel.querySelector('option[value="high_fidelity"]')) {
             const opt = document.createElement('option');
             opt.value = 'high_fidelity';
-            opt.textContent = T('nzl.kinHigh', 'High-Fidelity (Cantera finite-rate)');
+            opt.textContent = T('nzl.kinHigh', 'Cantera finite-rate kinetics');
             sel.appendChild(opt);
         }
         return true;
@@ -179,11 +320,15 @@
     function kineticCard(kin, note) {
         if (!kin) {
             if (!note) return '';
+            // V301/DİL-2 (ÖRNEK-PANEL devri): uç notu çeviri kanalından
+            // (serverText; tanınmazsa AYNEN) ve kaçışlanarak basılır.
+            const srvNot = (window.I18N && typeof window.I18N.serverText === 'function')
+                ? window.I18N.serverText(String(note)) : String(note);
             return `<p style="font-family:var(--hd-mono); font-size:0.75rem;
-                color:var(--hd-ink-dim, #7d97a5); margin:8px 0;">${note}</p>`;
+                color:var(--hd-ink-dim, #7d97a5); margin:8px 0;">${U.esc(srvNot)}</p>`;
         }
         const band = kin.loss_band_pct || [null, null];
-        const lo = U.fmt(band[0], 2), hi = U.fmt(band[1], 2);
+        const lo = fmtL(band[0], 2), hi = fmtL(band[1], 2);
         const fidelityBadge = U.badge(
             T('panel.nzl.kineticsBadge', 'KINETICS') + ': '
             + String(kin.fidelity_used || '?').toUpperCase(),
@@ -207,14 +352,14 @@
             + ispWithheldNote
             + '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
             + U.statCard(T('panel.nzl.cardKineticLoss', 'KINETIC LOSS'),
-                U.fmt(kin.kinetic_loss_pct, 2), '%',
+                fmtL(kin.kinetic_loss_pct, 2), '%',
                 kin.kinetic_loss_pct > 3 ? 'warn' : 'ok',
                 T('panel.nzl.cardKineticLossTip', 'Isp loss vs shifting equilibrium'))
             + U.statCard(T('panel.nzl.cardLossBand', 'LOSS BAND'), lo + ' – ' + hi, '%', 'dim',
                 T('panel.nzl.cardLossBandTip', 'Honest uncertainty band on the kinetic loss'))
-            + U.statCard(T('panel.nzl.cardIspFrozen', 'ISP FROZEN'), U.fmt(kin.isp_frozen, 1), 's', 'dim', '')
-            + U.statCard(T('panel.nzl.cardIspPredicted', 'ISP PREDICTED'), U.fmt(kin.isp_predicted, 1), 's', 'info', '')
-            + U.statCard(T('panel.nzl.cardIspShifting', 'ISP SHIFTING'), U.fmt(kin.isp_shifting, 1), 's', 'dim', '')
+            + U.statCard(T('panel.nzl.cardIspFrozen', 'ISP FROZEN'), fmtL(kin.isp_frozen, 1), 's', 'dim', '')
+            + U.statCard(T('panel.nzl.cardIspPredicted', 'ISP PREDICTED'), fmtL(kin.isp_predicted, 1), 's', 'info', '')
+            + U.statCard(T('panel.nzl.cardIspShifting', 'ISP SHIFTING'), fmtL(kin.isp_shifting, 1), 's', 'dim', '')
             + '</div>'
             /* ÖH D26 / OH-B3-02 — KİNETİK TANI BLOĞU (8 alan) ekrana
                iner. ÖLÇÜLDÜ (a2/once.json: flow_kinetic_diagnostics = 0):
@@ -234,7 +379,7 @@
             return ['diagnostics.' + k,
                     (v === null || v === undefined)
                         ? T('panel.nzl.notSupplied', 'not supplied')
-                        : (typeof v === 'number' ? U.fmt(v, 4)
+                        : (typeof v === 'number' ? fmtL(v, 4)
                             : (typeof v === 'object' ? JSON.stringify(v)
                                 : U.esc(String(v))))];
         }));
@@ -357,17 +502,43 @@
        varsayılandan GÖRÜNMEZ varsayılana çevirmiş olurdu, yani kusuru
        derinleştirirdi. Metin SUNUCUDAN gelir; panel ne sayı ne gerekçe
        üretir. */
+    /* V301/PANEL-SAYI (KILAVUZ P4) — künye satırı DÜZ METİN ve ekran dilinde.
+       ÖLÇÜLDÜ (olcum/akis_once_tr.json): ``U.listBlock`` maddeleri
+       kaçışladığı için ekranda "<strong>separation_factor</strong>"
+       işaretlemesi harfiyen görünüyordu ve TR ekranda ucun İngilizce
+       cümlesi basılıyordu. Satır artık alanın ekrandaki etiketi = değer
+       (dile göre ondalık ayırıcı) + birim — gerekçe sözlükten; sözlükte
+       olmayan alanda ucun kendi cümlesi. */
+    const AKIS_VARSAYILAN_GEREKCE = {
+        chamber_pressure: 'panel.nzl.defaultBasis.chamber_pressure',
+        chamber_temperature: 'panel.nzl.defaultBasis.chamber_temperature',
+        gamma: 'panel.nzl.defaultBasis.gamma',
+        molecular_weight: 'panel.nzl.defaultBasis.molecular_weight',
+        throat_diameter: 'panel.nzl.defaultBasis.throat_diameter',
+        ambient_pressure: 'panel.nzl.defaultBasis.ambient_pressure',
+        n_stations: 'panel.nzl.defaultBasis.n_stations',
+        separation_factor: 'panel.nzl.defaultBasis.separation_factor',
+        wall_temperature: 'panel.nzl.defaultBasis.wall_temperature',
+    };
+    const AKIS_EK_ETIKET = {
+        separation_factor: ['panel.nzl.fSeparationFactor', 'Separation factor k (Summerfield)'],
+        wall_temperature: ['panel.nzl.fWallTemperature', 'Wall temperature (Bartz)'],
+    };
     function defaultsBlock(kunyeler) {
         if (!Array.isArray(kunyeler) || !kunyeler.length) return '';
         const satirlar = kunyeler.map(function (k) {
             const ad = String((k && k.field) || '');
-            const deger = (k && k.value !== undefined && k.value !== null)
-                ? String(k.value) : '';
-            const birim = (k && k.unit) ? (' ' + String(k.unit)) : '';
-            const mesaj = String((k && k.message) || '');
-            const esc = U.esc || function (x) { return x; };
-            return '<strong>' + esc(ad) + '</strong> = ' + esc(deger + birim)
-                 + (mesaj ? ' — ' + esc(mesaj) : '');
+            const f = TUM_ALANLAR.filter(function (x) { return x[0] === ad; })[0];
+            const ek = AKIS_EK_ETIKET[ad];
+            const etiket = f ? T(f[4], f[1]) : (ek ? T(ek[0], ek[1]) : ad);
+            const v = k ? k.value : null;
+            const birim = (k && k.unit && k.unit !== 'count') ? (' ' + String(k.unit)) : '';
+            const deger = (typeof v === 'number') ? fmtL(v) + birim
+                : ((v === null || v === undefined) ? '' : String(v) + birim);
+            const anahtar = AKIS_VARSAYILAN_GEREKCE[ad];
+            const neden = anahtar ? T(anahtar, String((k && k.message) || ''))
+                                  : String((k && k.message) || '');
+            return etiket + ' = ' + deger + (neden ? ' — ' + neden : '');
         });
         return U.listBlock(
             // ÖH D31 · arayuz-panel a3: a2'nin eklediği
@@ -394,8 +565,8 @@
             satir.push(U.badge(
                 (ok ? T('panel.nzl.xcheckOk', 'THRUST CROSS-CHECK OK')
                     : T('panel.nzl.xcheckFail', 'THRUST NOT CROSS-CHECKED'))
-                + ' · ' + U.fmt(cc.residual_rel * 100, 2) + ' % / '
-                + U.fmt(cc.tolerance_rel * 100, 0) + ' %',
+                + ' · ' + fmtL(cc.residual_rel * 100, 2) + ' % / '
+                + fmtL(cc.tolerance_rel * 100, 0) + ' %',
                 ok ? 'ok' : 'warn', cc.basis || ''));
         }
         if (perf.c_star_source) {
@@ -409,7 +580,7 @@
         if (twSrc) {
             satir.push(U.badge(
                 T('panel.nzl.wallTUsed', 'WALL T USED') + ' · '
-                + (twUsed === null ? '—' : U.fmt(twUsed, 0) + ' K') + ' · '
+                + (twUsed === null ? '—' : fmtL(twUsed, 0) + ' K') + ' · '
                 + U.esc(String(twSrc)),
                 'dim', T('panel.nzl.wallTUsedTip',
                     'Wall temperature the Bartz flux was actually built on')));
@@ -446,9 +617,30 @@
               + satir.join(' ') + '</div>'
             : '';
         if (kunyeler.length) {
-            blok += U.kvTable(kunyeler.map(function (p) {
-                return [p[0], U.esc(String(p[1]))];
-            }));
+            /* V301/PANEL-SAYI (KILAVUZ P4): sürtünme dayanağı çözücünün
+               uzun İngilizce beyanıdır (makine alanları). Ekranda kapalı
+               "Teknik ayrıntı (makine alanları)" altında AYNEN durur; görünen
+               satır kartın kaynak sınıfıdır (ölçüldü / sabit / kullanıcı). */
+            const kaynak = kayip.friction_loss_fraction_source;
+            const sinif = !kaynak ? ''
+                : (String(kaynak).indexOf('measured') !== -1
+                    ? T('panel.nzl.frictionMeasured',
+                        'Friction loss: measured (boundary-layer integral of this solution)')
+                    : (String(kaynak) === 'user'
+                        ? T('panel.nzl.frictionUser', 'Friction loss: your input')
+                        : T('panel.nzl.frictionConstant',
+                            'Friction loss: fixed bookkeeping constant (no measurement could be published)')));
+            if (sinif) {
+                blok += '<p style="font-size:0.78rem; color:var(--hd-ink, #cfe8f2); margin:6px 0;">'
+                    + U.esc(sinif) + '</p>';
+            }
+            blok += '<details style="margin:4px 0 8px;"><summary style="cursor:pointer;'
+                + ' font-size:0.75rem; color:var(--hd-ink-dim, #7d97a5);">'
+                + U.esc(T('common.techDetail', 'Technical detail (machine fields)'))
+                + '</summary>'
+                + U.kvTable(kunyeler.map(function (p) {
+                    return [p[0], U.esc(String(p[1]))];
+                })) + '</details>';
         }
         if (esikler && typeof esikler === 'object'
                 && Object.keys(esikler).length) {
@@ -457,7 +649,7 @@
                 return ['thresholds_Pa.' + k,
                         (v === null || v === undefined)
                             ? T('panel.nzl.notSupplied', 'not supplied')
-                            : U.fmt(v, 0) + ' Pa'];
+                            : fmtL(v, 0) + ' Pa'];
             }));
         }
         if (perf.reference_withheld_because) {
@@ -509,8 +701,8 @@
                 : '')
                 + `<p style="color:var(--hd-red, #ff5d73); font-size:0.8rem; margin:6px 0;">${
                 U.tf('panel.nzl.separationNote',
-                     { x: U.fmt(sepIst.station_x_mm, 1),
-                       ar: U.fmt(sepIst.area_ratio, 2) },
+                     { x: fmtL(sepIst.station_x_mm, 1),
+                       ar: fmtL(sepIst.area_ratio, 2) },
                      'Separation at x = {x} mm (area ratio {ar}) — Summerfield criterion.')}</p>`;
         } else if (regime.separation_criterion_met
                    || regime.separation_expected) {
@@ -578,21 +770,34 @@
                  ${data.fidelity === 'fast' ? T('nzl.fidelityFast', 'FAST SCREENING')
                                              : T('nzl.fidelityEng', 'ENGINEERING')} ·
                  ${U.esc(flow.model || '')}</span></div>`
-            + `<p style="font-size:0.82rem; color:var(--hd-ink, #cfe8f2); margin:6px 0;">
-                ${regime.description || ''}</p>`
+            + `<div style="font-size:0.82rem; color:var(--hd-ink, #cfe8f2); margin:6px 0;">
+                ${rejimCumlesiHtml(regime)}</div>`
             + sepNote
             + withheldNote
             + U.sectionTitle(T('panel.nzl.secThrust', 'Thrust & Thrust Coefficient'))
+            /* V301/PANEL-SAYI (28 Eki, S1, yayın kapısı 6) — İDEAL ADIYLA,
+               TESLİM YANINDA. ÖLÇÜLDÜ (``olcum/akis_once_tr.json``): bu
+               kartlar çözücünün İDEAL sayılarını ("İTKİ", "KÜTLE DEBİSİ",
+               "C*" adlarıyla) basıyordu — hibrit örnekte 3150 N / 1,323 kg/s
+               / 1602 m/s, ana sonuç 3000 N / 1,458 kg/s / 1423 m/s; sıvıda
+               26603 N / 9,927 / 1772, ana sonuç 25000 N / 9,915 / 1738,3.
+               Fark fizik değil, TANIM: quasi-1B çözüm oda hâlinin ideal
+               c*'ı (kalorik mükemmel gaz, η_c* = 1) ve geometrik boğazla
+               (C_D = 1) kurulur; motorun teslim ettiği c* η_c*'ı, debisi
+               boğaz akış katsayısını taşır. Çözümün sayıları artık İDEAL
+               adıyla durur; motorun teslim ettiği dört sayı (itki, ṁ, c*,
+               C_F) yanında, motor sonucundan AYNEN (tek kaynak). */
             + '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
-            + U.statCard('CF', U.fmt(perf.CF, 3), '',
+            + U.statCard(T('panel.nzl.cf1d', 'CF (1D, LOSS-FREE)'), fmtL(perf.CF, 3), '',
                 'info', T('panel.nzl.cfTip', 'Thrust coefficient F/(Pc·At)'))
-            + U.statCard(T('panel.nzl.cfIdeal', 'CF IDEAL'), U.fmt(perf.CF_ideal, 3), '',
+            + U.statCard(T('panel.nzl.cfIdeal', 'CF IDEAL'), fmtL(perf.CF_ideal, 3), '',
                 'dim', 'Sutton & Biblarz 9th ed. Eq. 3-30')
-            + U.statCard(T('panel.nzl.cfEffective', 'CF EFFECTIVE'), U.fmt(losses.CF_effective, 3), '',
+            + U.statCard(T('panel.nzl.cfEffective', 'CF EFFECTIVE'), fmtL(losses.CF_effective, 3), '',
                 frictionKind(losses), T('panel.nzl.cfEffectiveTip',
                          'After divergence + friction losses (approximate)')
                 + ' ' + frictionOriginText(losses))
-            + U.statCard(T('common.thrust', 'THRUST'), U.fmt(perf.thrust_N, 0), 'N', 'info',
+            + U.statCard(T('panel.nzl.thrustIdeal', 'IDEAL THRUST (1D, LOSS-FREE)'),
+                fmtL(perf.thrust_N, 0), 'N', 'info',
                 thrustDefinitionText(perf, losses))
             // ÖH D22 / P4B2-12 — lambda'yı ÜRETEN açı da bu künyeye iner.
             // Bell konturunda `divergence_half_angle_deg` (çıkış cidar
@@ -600,23 +805,46 @@
             // okuyucu momentum itkisinde %2,18 sapıyordu. Yeni i18n
             // ANAHTARI AÇILMADI (anahtar dosyaları arayuz kulvarında):
             // sayı ve künyesi mevcut kartın açıklamasına ekleniyor.
-            + U.statCard(T('panel.nzl.thrustEffective', 'EFFECTIVE THRUST'),
-                U.fmt(losses.thrust_effective_N, 0), 'N', 'dim',
+            + U.statCard(T('panel.nzl.thrust1dLosses', '1D THRUST, DIVERGENCE + FRICTION'),
+                fmtL(losses.thrust_effective_N, 0), 'N', 'dim',
                 (losses.note || '')
                 + ' Divergence factor evaluated at '
                 + U.fmt(losses.divergence_factor_angle_deg, 3)
                 + ' deg ('
                 + (losses.divergence_factor_angle_basis || '')
                 + ').')
-            + U.statCard(T('common.massFlow', 'MASS FLOW'), U.fmt(perf.mass_flow_kg_s, 3), 'kg/s', 'dim', '')
-            + U.statCard('C*', U.fmt(perf.c_star_m_s, 0), 'm/s', 'dim',
+            + U.statCard(T('panel.nzl.massFlowIdeal', 'IDEAL MASS FLOW (η_c* = 1, C_D = 1)'),
+                fmtL(perf.mass_flow_kg_s, 3), 'kg/s', 'dim', '')
+            + U.statCard(T('panel.nzl.cstarIdeal', 'IDEAL C* (CALORICALLY PERFECT GAS)'),
+                fmtL(perf.c_star_m_s, 0), 'm/s', 'dim',
                 T('panel.nzl.cstarTip', 'Analytic characteristic velocity (Sutton Eq. 3-32)'))
-            + U.statCard(T('panel.nzl.exitMach', 'EXIT MACH'), U.fmt(perf.exit && perf.exit.mach, 2), '',
+            + U.statCard(T('panel.nzl.exitMach', 'EXIT MACH'), fmtL(perf.exit && perf.exit.mach, 2), '',
                 'dim', '')
             + '</div>'
+            + teslimBlogu(flow)
             + honestyBlock(flow)
             + defaultsBlock(data.defaults_applied)
-            + kineticCard(data.kinetic_efficiency, data.kinetic_note);
+            + (katiMi()
+                // V301/K-C1 (KT-22): katı motorda hibrit kinetik kimyası
+                // (HTPB/N₂O, O/F 6) uca GİTMEZ; kart bunu adıyla söyler.
+                ? kineticCard(null, T('panel.nzl.kineticSolidNone',
+                    'Kinetic efficiency is not evaluated for a solid motor: '
+                    + 'the kinetics model needs an oxidizer/fuel pair and an '
+                    + 'O/F ratio, and HRMA has no finite-rate kinetics model '
+                    + 'for a solid propellant. The flow solution above uses '
+                    + 'the solid design\'s own gas properties.'))
+                : siviMi()
+                // V301/ÖRNEK-PANEL: sıvı motorda da kinetik üçlü gönderilmez
+                // (kinetik zincir yalnız hibrit yakıtlarını tanır).
+                ? kineticCard(null, T('panel.nzl.kineticLiquidNone',
+                    'Kinetic efficiency is not evaluated for a liquid motor: '
+                    + 'the kinetics chain is the hybrid combustion model and '
+                    + 'knows only hybrid fuels (HTPB, paraffin, PE, PMMA, ABS, '
+                    + 'PLA, aluminium); it has no liquid-fuel chemistry such as '
+                    + 'RP-1, LH2 or methane, so no fuel, oxidizer or O/F is sent. '
+                    + 'The flow solution above uses this motor\'s own gas '
+                    + 'properties.'))
+                : kineticCard(data.kinetic_efficiency, data.kinetic_note));
         root.appendChild(head);
 
         drawStationPlots(flow, root);
@@ -624,8 +852,24 @@
         // Varsayımlar — dürüst model sınırları (İngilizce, kullanıcıya görünür)
         if (Array.isArray(flow.assumptions) && flow.assumptions.length) {
             const div = document.createElement('div');
-            div.innerHTML = U.listBlock(T('common.modelAssumptions', 'Model assumptions & limits'),
-                flow.assumptions, 'dim');
+            // V301/PANEL-SAYI (KILAVUZ P4): çözücünün varsayım cümleleri
+            // sözlükte yoksa TR ekranda görünür liste İngilizce kalıyordu;
+            // TR'de sayılı özet + kapalı "Teknik ayrıntı" (cümleler AYNEN).
+            const srv = (window.I18N && typeof window.I18N.serverText === 'function')
+                ? window.I18N.serverText : function (x) { return x; };
+            const cevrilmedi = dilTr() && flow.assumptions.every(function (x) {
+                return srv(String(x)) === String(x);
+            });
+            div.innerHTML = cevrilmedi
+                ? '<details style="margin:10px 0;"><summary style="cursor:pointer;'
+                  + ' font-size:0.78rem; color:var(--hd-ink-dim, #7d97a5);">'
+                  + U.esc(U.tf('panel.nzl.assumptionsUntranslated',
+                      { n: flow.assumptions.length },
+                      'Model assumptions & limits - {n} solver statements, untranslated'))
+                  + '</summary>' + U.listBlock(T('common.modelAssumptions',
+                      'Model assumptions & limits'), flow.assumptions, 'dim') + '</details>'
+                : U.listBlock(T('common.modelAssumptions', 'Model assumptions & limits'),
+                    flow.assumptions, 'dim');
             root.appendChild(div);
         }
     }
@@ -633,7 +877,79 @@
     // ------------------------------------------------------------------
     // Kayıt
     // ------------------------------------------------------------------
-    window.AnalysisDock.register({
+    // V301/K-C1 (KT-22) — KATI MOTORDA KİNETİK ALANLARI YOK.
+    // ÖLÇÜLDÜ (denetim A-kati akis_paneli2.json): katı sayfada bu panel
+    // seçicilerin varsayılanını (HTPB / N₂O / O/F 6) her istekte gönderiyor,
+    // kinetik kart da APCP motoru o HİBRİT kimyayla çözüyordu (M 25,79,
+    // Isp_frozen 242,6 s). Katı itici tek bileşenlidir (O/F yok; güvertenin
+    // OF_RATIO_PATHS.solid = []) ve kinetik modülün katı kimliği yoktur:
+    // alanlar katı sayfada çizilmez, gövdeye girmez, kart kapanır.
+    const KINETIK_ALANLARI = ['kinetic_fidelity', 'of_ratio', 'fuel_type',
+                              'oxidizer_type'];
+    function motorTipi() {
+        return (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function')
+            ? window.AnalysisDock.getMotorType() : null;
+    }
+    function katiMi() {
+        return motorTipi() === 'solid';
+    }
+    // V301/ÖRNEK-PANEL (KABUL K2 sıvı) — SIVI MOTORDA DA KİNETİK ALANLARI YOK.
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ornek-panel/olcum/once_liquid.json):
+    // LOX/RP-1 örneğinde gövde `fuel_type: "htpb"`, `oxidizer_type: "N2O"`,
+    // `of_ratio: 2.3` gidiyordu — seçicilerin hibrit varsayılanı, motorun
+    // iticisi değil. Kinetik zincir (`app.py::_run_kinetic_chain` →
+    // `CombustionAnalyzer.analyze_combustion`) YALNIZ hibrit yakıtlarını
+    // tanır (`combustion_analysis.SUPPORTED_HYBRID_FUEL_KEYS`: htpb, paraffin,
+    // pe, pmma, abs, pla, aluminum); RP-1, LH2, metan gibi sıvı yakıtların
+    // hiçbiri o kümede yok. Yani sıvı motorda bu zincirin çözebileceği bir
+    // itici çifti YOKTUR: alanlar katıdaki gibi çizilmez, gövdeye girmez,
+    // kart nedenini adıyla söyler (panel.nzl.kineticLiquidNone).
+    function siviMi() {
+        return motorTipi() === 'liquid';
+    }
+    function kinetikYok() {
+        return katiMi() || siviMi();
+    }
+    // Hibrit motorun iticisi seçici değerine motor sonucundan eşlenir
+    // (büyük/küçük harf duyarsız; seçenek değerleri kinetik zincirin
+    // anahtarlarıdır). Eşleşme yoksa çözücünün HAM değeri önerilir: güverte
+    // onu listede bulamaz ve isteği adıyla durdurur (analysis_dock.js
+    // blockedSelects) — sessiz hibrit varsayılanı GİTMEZ.
+    function secenekEsle(secenekler, deger) {
+        if (typeof deger !== 'string' || deger === '') return undefined;
+        const k = deger.toLowerCase();
+        for (const o of secenekler) {
+            if (o[0] !== '' && String(o[0]).toLowerCase() === k) return o[0];
+        }
+        return deger;
+    }
+    // Hibrit yanıtının itici kimliği yolları (ÖLÇÜLDÜ, örnek hibrit:
+    // motor.fuel_type = 'htpb'; oksitleyici düz anahtarda YOK, yanma
+    // zincirinin girdisinde ve oksitleyici giriş hâlinde duruyor).
+    const YAKIT_YOLLARI = ['fuel_type'];
+    const OKSITLEYICI_YOLLARI = ['oxidizer_type',
+                                 'combustion_analysis.inputs.oxidizer_type',
+                                 'oxidizer_inlet_state.oxidizer'];
+    function ilkMetin(o, yollar) {
+        for (const yol of yollar) {
+            let v = o;
+            for (const p of yol.split('.')) {
+                v = (v && typeof v === 'object') ? v[p] : undefined;
+            }
+            if (typeof v === 'string' && v !== '') return v;
+        }
+        return undefined;
+    }
+    const YAKITLAR = [
+        ['', '— select —', 'panel.nzl.kineticPropellantSelect'],
+        ['htpb', 'HTPB'], ['paraffin', 'Paraffin', 'fuel.paraffin'], ['pe', 'PE'],
+        ['pmma', 'PMMA'], ['abs', 'ABS'], ['pla', 'PLA'],
+    ];
+    const OKSITLEYICILER = [
+        ['', '— select —', 'panel.nzl.kineticPropellantSelect'],
+        ['N2O', 'N2O'], ['LOX', 'LOX'], ['H2O2', 'H2O2'],
+    ];
+    const FLOW_SPEC = {
         id: PANEL_ID,
         title: 'Nozzle Flow — Quasi-1D Compressible (Regime, P(x), M(x), CF)',
         titleKey: 'panel.nzl.title',
@@ -644,12 +960,12 @@
             ['fidelity', 'Fidelity Level', 'engineering', [
                 ['fast', 'Fast Screening', 'nzl.fidelityFastOpt'],
                 ['engineering', 'Engineering', 'nzl.fidelityEngOpt'],
-            ], 'panel.nzl.fFidelity'],
+            ], 'panel.nzl.fFidelity', 'panel.nzl.help.fidelity'],
             ['kinetic_fidelity', 'Kinetic Model', 'engineering', [
                 ['fast', 'Fast (equilibrium reference)', 'nzl.kinFast'],
                 ['engineering', 'Engineering (JANNAF-style)', 'nzl.kinEng'],
                 // 'high_fidelity' seçeneği Cantera sondası başarılıysa eklenir
-            ], 'panel.nzl.fKineticModel'],
+            ], 'panel.nzl.fKineticModel', 'panel.nzl.help.kinetic_fidelity'],
             /* ÖH D31 · OH-D26-20 / OH-D27-10 / P12bS1-01 — ÖN-DOLU VARSAYILAN
                SÖKÜLDÜ (ÖK-21 form katmanı).
 
@@ -688,11 +1004,11 @@
                ambient_pressure — kapı bugün ``if not data`` (yalnız BOŞ
                gövde) hâlinde; form tarafı söküldüğü için alan-alan
                ``incomplete_flow_input`` (422) hâline inebilir. */
-            ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar'],
-            ['chamber_temperature', 'Chamber Temperature (K)', '', 50, 'common.f.chamberTemperatureK'],
-            ['gamma', 'Gamma (frozen)', '', 0.01, 'common.f.gammaFrozen'],
-            ['molecular_weight', 'Molecular Weight (g/mol)', '', 0.5, 'common.f.molecularWeight'],
-            ['throat_diameter', 'Throat Diameter (m)', '', 0.001, 'common.f.throatDiameterM'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar', 'panel.nzl.help.chamber_pressure'],
+            ['chamber_temperature', 'Chamber Temperature (K)', '', 50, 'common.f.chamberTemperatureK', 'panel.nzl.help.chamber_temperature'],
+            ['gamma', 'Gamma (frozen)', '', 0.01, 'common.f.gammaFrozen', 'panel.nzl.help.gamma'],
+            ['molecular_weight', 'Molecular Weight (g/mol)', '', 0.5, 'common.f.molecularWeight', 'panel.nzl.help.molecular_weight'],
+            ['throat_diameter', 'Throat Diameter (m)', '', 0.001, 'common.f.throatDiameterM', 'panel.nzl.help.throat_diameter'],
             /* exit_diameter SÖKÜLDÜ — ÖH D33-2 / app-api-uc a1 (OH-D32-13).
                D31 / arayuz-panel a2 bu satırı BİLEREK bırakmıştı: o gün uçta
                ne kapı ne kanonik varsayılan vardı, alan sökülürse geometri
@@ -707,18 +1023,23 @@
                düşürür) ve hüküm UÇTA verilir: kullanıcı iki yazımdan birini
                adıyla istenir, sayı uydurulmaz. SAYI TAŞINMADI: silinen 0,06
                başka bir yere yazılmadı. */
-            ['exit_diameter', 'Exit Diameter (m)', '', 0.001, 'common.f.exitDiameterM'],
-            ['ambient_pressure', 'Ambient Pressure (Pa)', '', 1000, 'common.f.ambientPressurePa'],
-            ['n_stations', 'Axial Stations (30-60)', 45, 1, 'panel.nzl.fStations'],
-            ['of_ratio', 'O/F Ratio (kinetics)', 6.0, 0.1, 'panel.nzl.fOfKinetics'],
-            ['fuel_type', 'Fuel (kinetics)', 'htpb', [
-                ['htpb', 'HTPB'], ['paraffin', 'Paraffin', 'fuel.paraffin'], ['pe', 'PE'],
-                ['pmma', 'PMMA'], ['abs', 'ABS'], ['pla', 'PLA'],
-            ], 'panel.nzl.fFuelKinetics'],
-            ['oxidizer_type', 'Oxidizer (kinetics)', 'N2O', [
-                ['N2O', 'N2O'], ['LOX', 'LOX'], ['H2O2', 'H2O2'],
-            ], 'panel.nzl.fOxKinetics'],
+            ['exit_diameter', 'Exit Diameter (m)', '', 0.001, 'common.f.exitDiameterM', 'panel.nzl.help.exit_diameter'],
+            ['ambient_pressure', 'Ambient Pressure (Pa)', '', 1000, 'common.f.ambientPressurePa', 'panel.nzl.help.ambient_pressure'],
+            ['n_stations', 'Axial Stations (30-60)', 45, 1, 'panel.nzl.fStations', 'panel.nzl.help.n_stations'],
+            /* V301/ÖRNEK-PANEL — İTİCİ VE O/F MOTORDAN GELİR, VARSAYILAN YOK.
+               Eski hâl: O/F 6,0 ve HTPB / N2O ön-dolu doğuyordu; motor
+               sonucu onları vermediğinde istek hibrit örneğin kimyasıyla
+               gidiyordu. Artık üçü de boş doğar ve ``required``dır: motor
+               sonucundan dolar, dolmazsa güverte isteği alan adıyla durdurur. */
+            ['of_ratio', 'O/F Ratio (kinetics)', '', 0.1, 'panel.nzl.fOfKinetics', 'panel.nzl.help.of_ratio'],
+            ['fuel_type', 'Fuel (kinetics)', '', YAKITLAR,
+             'panel.nzl.fFuelKinetics', 'panel.nzl.help.fuel_type'],
+            ['oxidizer_type', 'Oxidizer (kinetics)', '', OKSITLEYICILER,
+             'panel.nzl.fOxKinetics', 'panel.nzl.help.oxidizer_type'],
         ],
+        // Yalnız hibritte çizilen kinetik üçlü (katı/sıvıda alan listesinden
+        // düşer, bkz. kinetikYok): boşsa istek gönderilmez, alan adıyla söylenir.
+        required: ['of_ratio', 'fuel_type', 'oxidizer_type'],
         // Hibrit/katı/sıvı sayfalarında motor sonuçlarından otomatik dolum
         fromResults: function (r) {
             const m = (r && r.motor) || r || {};
@@ -743,12 +1064,54 @@
             }
             // O/F: sıvı çözücü bu anahtarı 'mixture_ratio' adıyla döndürüyor,
             // 'of_ratio' YOK — alan panel varsayılanında kalıyordu.
-            const of = U.readOfRatio(r);
-            if (Number.isFinite(of)) sug.of_ratio = of;
+            // Kinetik üçlü yalnız hibritte gönderilir (kinetikYok): O/F ve
+            // itici kimliği motorun KENDİ yanıtından.
+            if (!kinetikYok()) {
+                const of = U.readOfRatio(r);
+                if (Number.isFinite(of)) sug.of_ratio = of;
+                const yakit = secenekEsle(YAKITLAR, ilkMetin(m, YAKIT_YOLLARI));
+                if (yakit !== undefined) sug.fuel_type = yakit;
+                const oks = secenekEsle(OKSITLEYICILER, ilkMetin(m, OKSITLEYICI_YOLLARI));
+                if (oks !== undefined) sug.oxidizer_type = oks;
+            }
+            // V301/K-C1 (KT-22): katı yanıtı molekül ağırlığını düz anahtarda
+            // değil termokimya bloğunda yayımlar (M = 1/n, c* özdeşliğinin
+            // M'i: thermochemistry.molecular_weight).
+            if (katiMi()) {
+                const tk = (m.thermochemistry && typeof m.thermochemistry === 'object')
+                    ? m.thermochemistry : {};
+                if (!Number.isFinite(sug.molecular_weight)
+                        && Number.isFinite(tk.molecular_weight)) {
+                    sug.molecular_weight = tk.molecular_weight;
+                }
+            }
+            // ORTAM BASINCI — motorun lülesini çözdüğü tasarım ortam basıncı
+            // (bar → Pa). V301/ÖRNEK-PANEL: K-C1 bunu yalnız katıda okuyordu;
+            // ÖLÇÜLDÜ (olcum/once_hybrid.json, once_liquid.json) aynı yol
+            // hibritte (motor.nozzle_design.performance.ambient_pressure =
+            // 1,013 bar = atmospheric_pressure girdisi) ve sıvıda (1,01325 bar,
+            // ISA 0 m) da yayımlanıyor; alan boş kalıp uç 422
+            // incomplete_flow_input (ambient_pressure) dönüyordu.
+            const nperf = ((m.nozzle_design || {}).performance) || {};
+            if (Number.isFinite(nperf.ambient_pressure) && nperf.ambient_pressure > 0) {
+                sug.ambient_pressure = nperf.ambient_pressure * 1e5;   // bar → Pa
+            }
             return sug;
         },
         render: render,
+    };
+    // Alan listesi OKUNDUĞU anda motor tipine göre süzülür (güverte onu
+    // `init`ten sonra okur; kayıt anında motor tipi henüz yok).
+    const TUM_ALANLAR = FLOW_SPEC.fields;
+    Object.defineProperty(FLOW_SPEC, 'fields', {
+        enumerable: true,
+        get: function () {
+            return kinetikYok()
+                ? TUM_ALANLAR.filter(function (f) { return KINETIK_ALANLARI.indexOf(f[0]) === -1; })
+                : TUM_ALANLAR;
+        },
     });
+    window.AnalysisDock.register(FLOW_SPEC);
 
     // Test / hata ayıklama: saf yardımcılar (performance_panel deseni)
     window.FlowPanel = {
@@ -761,5 +1124,8 @@
         _frictionKind: frictionKind,
         _thrustDefinitionText: thrustDefinitionText,
         _cfContradictionBadge: cfContradictionBadge,
+        _teslimBlogu: teslimBlogu,
+        _rejimCumlesiHtml: rejimCumlesiHtml,
+        _fmtL: fmtL,
     };
 })();
