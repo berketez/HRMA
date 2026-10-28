@@ -58,10 +58,15 @@ def client():
 # ÖLÇÜLEN kipe — geometri kipine — çevrildi ve ``outer_diameter`` ucun
 # okuduğu ada getirildi (uç zaten aynı 100 mm'yi tohumluyordu). ÖLÇÜLDÜ:
 # yanıt tasarım noktası bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148).
+# V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan
+# motoru kilitliyordu — bu gövdenin kendisi de (a = 0,005, çekirdek 35 mm)
+# A_p/A_t = 0,922 ile boğulan portluydu ve artık yayımlanmıyor (KT-23).
+# Çekirdek 42 mm: A_p/A_t = 1,28 (ölçüldü); düğümlerin hiçbiri bu motorun
+# mutlak sayısına çapalı değil.
 SOLID_BASE = {
     'motor_name': 'faz5', 'chamber_pressure': 40,
     'grain_type': 'bates', 'chamber_diameter': 100,
-    'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+    'core_diameter': 42, 'grain_length': 300, 'segments': 1,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35, 'chamber_temperature': 3000,
     'c_star': 1550, 'propellant_density': 1800,
 }
@@ -408,9 +413,12 @@ class TestBurnRateEcho:
         assert 'burn_rate_exponent' not in beyan, (
             'Alan canlı olduğu hâlde "kullanılmıyor" diye bildiriliyor '
             '(beyan çürümesi).')
+        # V301/K-A: n = 0,688 bu gövdede (a = 0,005) portu boğuyor
+        # (A_p/A_t = 0,33, RET); iki geçerli üs (0,2 -> 2,28; 0,35 -> 1,28)
+        # aynı iddiayı ölçer: üs canlıysa süre değişir.
         sureler = [_post_solid(client, propellant_type='ozel_karisim',
                                burn_rate_n=n)['burn_time']
-                   for n in (0.2, 0.688)]
+                   for n in (0.2, 0.35)]
         assert sureler[0] != sureler[1]
 
 
@@ -450,12 +458,18 @@ class TestCaseCostMassConsistency:
         govde = _post_solid(client, case_material='steel_4130')
         kalem = govde['cost_analysis']['material_costs_usd']
 
+        # V301/K-A: uç gövdesi (SOLID_BASE) tek çaplı biçimdir (outer_diameter
+        # YOK): kasa tane + 2·(astar + yalıtım) olarak türetilir. Eski ayna
+        # ``outer_diameter`` = 100'ü override'a koyuyordu; karar A ile o,
+        # kurucunun 100 mm'sini kasa BEYANI yapar ve 2 mm astar sığmaz
+        # (RET). Ayna, ucun gerçekten kurduğu motorla aynı biçime getirildi.
         motor = _quiet(
             SolidRocketEngine, grain_type='bates', propellant_type='apcp',
-            chamber_diameter=100, grain_length=300, core_diameter=35,
+            chamber_diameter=100, grain_length=300,
+            core_diameter=SOLID_BASE['core_diameter'],
             chamber_pressure=40, burn_rate_a=0.005, burn_rate_n=0.35,
             overrides={'thrust': 1500, 'burn_time': 3, 'segments': 1,
-                       'outer_diameter': 100, 'chamber_temperature': 3000,
+                       'chamber_temperature': 3000,
                        'c_star': 1550, 'propellant_density': 1800,
                        'case_material': 'steel_4130'})
         _malzeme, _sy, _sf, t_wall = motor._case_design()

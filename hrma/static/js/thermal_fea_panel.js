@@ -117,6 +117,12 @@
     function T(key, fallback) {
         return (window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : fallback;
     }
+    // v3.0.1 N-girdi-2: alan ipucu ortak bileşenden (field_help.js →
+    // HRMAHelp); anahtar çağıranda LİTERAL. Bileşen yoksa ipucu basılmaz.
+    function yardimHtml(key) {
+        return (key && window.HRMAHelp && typeof window.HRMAHelp.html === 'function')
+            ? window.HRMAHelp.html(key, T(key, '')) : '';
+    }
     /* ÖH D23 / P17B4-07 + P17B1-18 — İSTEK ZAMAN AŞIMI.
        Süre sınırı TEK KAYNAKTAN gelir: fea_panel.js onu
        `window.HRMA_ISTEK_ZAMAN_ASIMI_MS` ile yayımlar (doktrin 4 — sayı
@@ -407,8 +413,19 @@
         // koymaz — o zaman uç varsayılanını ADIYLA ilan eder. Yanlış
         // okursa da sessiz kalmaz: /api/fea/thermal profilin malzemesi
         // mesh malzemesinden farklıysa adlı 422 verir (fail-closed).
+        // V301/PANEL (NK-12): termal alan YALNIZ LÜLEDİR (köprü
+        // include_chamber = false); ağ motorun LÜLE malzemesiyle çözülür
+        // (hrma/fea/bridge.py NOZZLE_MATERIAL_PATHS). Profil de aynı
+        // malzemeyle istenir; lüle malzemesi yayımlanmamışsa (sıvı:
+        // rejeneratif kamara cidarı) kamara malzemesi kalır.
         const sa = m.structural_analysis;
-        if (sa && typeof sa === 'object') {
+        const luleAday = [
+            (m.nozzle_material_analysis || {}).material,
+            (m.nozzle_design || {}).material_key,
+        ].filter(function (v) { return typeof v === 'string' && v.trim(); });
+        if (luleAday.length) {
+            body.material = luleAday[0].trim();
+        } else if (sa && typeof sa === 'object') {
             const adaylar = [
                 (sa.design_parameters || {}).material,
                 (sa.chamber_structure || {}).material_key,
@@ -822,7 +839,7 @@
                 <label style="font-family:var(--hd-mono); font-size:0.75rem;
                     color:var(--hd-ink-dim, #7d97a5); display:flex; gap:6px; align-items:center;">
                     <span data-i18n="feaT.ambientLabel">${T('feaT.ambientLabel',
-                        'Initial / ambient temperature [K]')}</span>
+                        'Initial / ambient temperature [K]')}</span>${yardimHtml('panel.feaT.help.ambient')}
                     <input type="number" id="fea_t_ambient"
                         value="${AMBIENT_PANEL_DEFAULT_K}" step="0.05"
                         style="width:90px;">
@@ -831,7 +848,7 @@
                     color:var(--hd-ink-dim, #7d97a5); display:flex; gap:6px; align-items:center;">
                     <input type="checkbox" id="fea_t_show_mesh" checked>
                     <span data-i18n="feaT.showMesh">${T('feaT.showMesh',
-                        'Show mesh wireframe')}</span>
+                        'Show mesh wireframe')}</span>${yardimHtml('panel.feaT.help.showMesh')}
                 </label>
             </div>
             <div id="fea_t_badges" style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;"></div>
@@ -1119,6 +1136,18 @@
                 return T('feaT.withheldGasUndeclared',
                     'the h(z) profile does not declare its gas properties');
             }
+            // V301/FİZİK-2 (NK-12): lüle bölgesi h(z) makullük kapısının
+            // dışında (çapa kamara malzemesiyle kurulu, ağ lüle malzemesiyle).
+            if (k === 'hg_cross_check_not_run_anchor_material') {
+                return TF('feaT.withheldHgAnchorMaterial',
+                    // Kaçış dış katmanda (withheldBadge → esc) yapılır.
+                    { chamber: String(ml.hg_anchor_material || '—'),
+                      mesh: String(ml.hg_mesh_material || '—') },
+                    'the h(z) magnitude cross-check did not run for the '
+                    + 'nozzle wall (the motor publishes its throat '
+                    + 'coefficient only for the chamber material {chamber}; '
+                    + 'this wall is {mesh})');
+            }
             return String(k);
         });
         return metin.join('; ');
@@ -1148,6 +1177,23 @@
             'TWO THERMAL PATHS: equilibrium (t→∞) {eq} K vs transient peak '
             + '{fe} K at t = {t} s — gap {gap} K (different questions, not '
             + 'a contradiction)'), 'info');
+    }
+
+    // V301/H-PANEL (NK-12): motorun lüle malzemesi kamara malzemesinden
+    // farklı mı? (İkisi de motor sonucundan; yoksa null — iddia kurulmaz.)
+    function lulMalzemesiFarki() {
+        const m = motorDictLocal(lastMotorResults) || {};
+        // V301/PANEL (NK-12): köprünün okuduğu alan da aday (tek kaynak).
+        const nozAday = [m.nozzle_material,
+                         (m.nozzle_material_analysis || {}).material]
+            .filter(function (v) { return typeof v === 'string' && v.trim(); });
+        const noz = nozAday.length ? nozAday[0].trim() : '';
+        const sa = m.structural_analysis || {};
+        const ch = ((sa.design_parameters || {}).material
+                    || (sa.chamber_structure || {}).material_key || '');
+        const kam = (typeof ch === 'string') ? ch.trim() : '';
+        if (!noz || !kam || noz.toLowerCase() === kam.toLowerCase()) return null;
+        return { chamber: kam, nozzle: noz };
     }
 
     function renderBadges(el, vm) {
@@ -1196,6 +1242,33 @@
             html += badge(T('feaT.badgeLimitsMissing',
                 'MATERIAL LIMITS NOT PUBLISHED (no temperature limit in the '
                 + 'material record)'), 'dim');
+        }
+        // V301/H-PANEL (NK-12): bu çözüm cidarın TAMAMINI (kamara + lüle)
+        // TEK malzemeyle, kamara malzemesiyle çözer (köprü tek malzemeli ağ
+        // kurar: hrma/fea/bridge.py::_extract_material). Kullanıcı lüle için
+        // başka bir malzeme seçtiyse (örnek: grafit) bu panelin erime hükmü
+        // lülenin malzemesine AİT DEĞİLDİR — sessiz ikame yerine adıyla
+        // söylenir; lülenin kendi hükmü ana sonuçtadır.
+        // V301/PANEL (NK-12): ağ artık lüle malzemesiyle çözülür; "lüle
+        // malzemesi kullanılmıyor" rozeti YALNIZ ucun bildirdiği ağ
+        // malzemesi lüle malzemesinden gerçekten farklıysa basılır. Aynıysa
+        // malzeme ve kaynağı bilgi rozetiyle söylenir.
+        const _lm = lulMalzemesiFarki();
+        const _ag = (vm.scalars && typeof vm.scalars.material_key === 'string')
+            ? vm.scalars.material_key.trim() : '';
+        if (_lm && _ag && _ag.toLowerCase() === _lm.nozzle.toLowerCase()) {
+            html += badge(TF('feaT.badgeNozzleMaterialUsed',
+                { nozzle: esc(_lm.nozzle) },
+                'WALL MATERIAL: {nozzle} — the motor\'s nozzle material '
+                + '(this field covers the nozzle wall only)'), 'info');
+        } else if (_lm) {
+            html += badge(TF('feaT.badgeNozzleMaterialNotUsed',
+                { chamber: esc(_lm.chamber), nozzle: esc(_lm.nozzle) },
+                'ONE MATERIAL FOR THE WHOLE WALL: {chamber} (chamber material). '
+                + 'The nozzle material you chose ({nozzle}) is NOT used here, '
+                + 'so the melting verdict above is for {chamber}, not for the '
+                + 'nozzle; the nozzle\'s own verdict is in Nozzle Material '
+                + 'Analysis of the main result.'), 'warn');
         }
 
         // P11B3-21 — GEOMETRİ DEĞİŞTİYSE HÜKÜM ŞERİDİNDE SÖYLENİR
@@ -1254,6 +1327,18 @@
         if (carpetFallback) {
             html += badge(T('feaT.badgeFallback',
                 'CONTOUR UNAVAILABLE — node point map drawn instead'), 'dim');
+        }
+        // V301/FİZİK-2 (NK-12, ekran ölçümü 27 Eki): aşım hükmü korunur
+        // (sunucu: "an exceedance is kept"), ama geri çekme gerekçeleri bu
+        // durumda da rozet katında söylenir. Yoksa örnek hibritte lüle
+        // bölgesinde h(z) mertebe denetiminin koşmadığı ekranda görünmezdi
+        // (yukarıdaki zincir aşım rozetini seçince withheldBadge basılmaz).
+        if (ml && ml.verdict_withheld === true
+                && (ml.exceeds_allowable === true || ml.exceeds_melting === true)) {
+            html += badge(TF('feaT.badgeWithheldOnExceedance',
+                { reasons: esc(withheldReasonText(ml)) },
+                'ALSO NOTE: {reasons} — the exceedance above stands (only a '
+                + 'positive verdict is withheld)'), 'warn');
         }
         el.innerHTML = html;
     }

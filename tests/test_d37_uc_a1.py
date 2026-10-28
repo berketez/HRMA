@@ -39,6 +39,9 @@ import subprocess
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+from tests.support import form_defaults
+
 from hrma.app import app
 
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -50,9 +53,12 @@ PANEL_JS = os.path.join(KOK, 'hrma', 'static', 'js', 'panels',
 UC_SIVI_TABAN = {'thrust': 10000.0, 'chamber_pressure': 30.0,
                  'mixture_ratio': 2.2, 'fuel_type': 'rp1',
                  'oxidizer_type': 'lox'}
+# v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+# (A_p/A_t 0,947) ve K-A kapısından beri 422 ``port_smaller_than_throat``.
+# Bu dosyanın konusu künye/ön-dolgu, port boğulması değil: geometri tek
+# tanım ``SOLID_DEFAULT_GEOMETRY_MM``den (değer kopyalanmaz).
 UC_KATI_TABAN = {'propellant_type': 'apcp', 'chamber_pressure': 40.0,
-                 'chamber_diameter': 100.0, 'grain_length': 500.0,
-                 'core_diameter': 30.0}
+                 **{k: float(v) for k, v in SOLID_DEFAULT_GEOMETRY_MM.items()}}
 
 #: Ölçülen ZORUNLU sınıf (once/alan_alan.json ``zorunlu_422`` + sıvının
 #: ``KRITIK_GIRDILER``i). Alan silinince 422 ve ad.
@@ -69,8 +75,14 @@ UC_KATI_ZORUNLU = ('chamber_pressure', 'chamber_diameter', 'grain_length',
 UC_SIVI_KANONIK = ('chamber_roughness', 'coolant_flow_percent',
                    'coolant_inlet_temp', 'safety_factor',
                    'turbopump_efficiency')
+#: V301/K-D (T-çapa-B DEVİR 3): ``outer_diameter`` bu sınıftan ÇIKTI — tek
+#: çaplı biçimde tane dış çapı uç varsayılanı değil ``chamber_diameter``in
+#: kendisidir; aynı sayı gönderilince istek iki çaplı biçime geçer ve 422
+#: ``grain_does_not_fit_case`` alır (künye "send the field to override it"
+#: diyerek yanlış söylüyordu). Gerçek kaynak ``case_bore`` künyesindedir;
+#: bekçisi tests/test_v301_kd_tasarim_noktasi.py::TestDisCapKunyesi.
 UC_KATI_KANONIK = ('ambient_temp', 'erosive_m', 'liner_density',
-                   'liner_thickness', 'outer_diameter', 'yield_strength',
+                   'liner_thickness', 'yield_strength',
                    'igniter_pressure_fraction')
 
 @pytest.fixture(scope='module')
@@ -427,14 +439,21 @@ class TestCMH1PlakaKalinligiKunyesi:
     def test_basis_sablonun_on_dolgusunu_aniyor(self, cmh1):
         """Metin ŞABLONUN gerçek ön-dolgusuyla eşlenir: A6b K6-h ön-dolguyu
         söktüğünde (ya da değer değiştiğinde) bu bekçi kırmızıya döner ve
-        künye metni güncellenir — bayat beyan kalmaz."""
+        künye metni güncellenir — bayat beyan kalmaz.
+
+        V301/DİL-2 (T-çapa-B DEVİR 5): ön-dolgu söküldü (şablonda
+        ``id="plate_thickness"`` artık ``value=`` taşımıyor); künye metni
+        ``hrma/app.py`` buna göre güncellendi — "pre-fills this field
+        (value=...)" iddiası kalktı, ``request_value`` etiketinin gerekçesi
+        (yüklenen proje dosyası değeri taşıyabilir) yazılı. Bekçi iki yönü
+        birlikte kilitler: ön-dolgu geri gelirse ya da metin yeniden ön-dolgu
+        iddia ederse kırmızı."""
         on_dolgu = _on_dolgu('advanced.html', 'plate_thickness')
-        assert on_dolgu == 3.0, on_dolgu
+        assert on_dolgu is None, on_dolgu
         j, _cad = cmh1['plaka_on_dolgu']
         metin = j['injector_design']['plate_thickness_basis']
-        assert 'pre-fill' in metin
-        assert 'value="%s"' % _on_dolgu_ham('advanced.html',
-                                            'plate_thickness') in metin
+        assert 'no longer pre-fills' in metin, metin
+        assert 'value="' not in metin, metin
         assert 'not user_supplied' in metin
 
     @pytest.mark.parametrize('kosul', ['plakasiz', 'plakasiz_malzemesiz'])
@@ -454,8 +473,11 @@ class TestCMH1PlakaKalinligiKunyesi:
         j, cad = cmh1[kosul]
         assert isinstance(cad['injector_results'], dict)
         assert 'plate_thickness' not in cad['injector_results']
-        # Yanıttaki ``injector`` bloğu DEĞİŞMEDİ (kopya süzüldü).
-        assert j['injector']['plate_thickness'] == 3.0
+        # V301/HİBRİT-DIŞA (kalem 4, 28 Eki): kazanılmamış plaka kalınlığı
+        # artık yanıtın ``injector`` bloğunda da YAYIMLANMAZ (eskiden 3,0 =
+        # modül varsayılanı); kazanılmamışlık bayrağı ve dayanağı durur.
+        assert j['injector']['plate_thickness'] is None
+        assert j['injector']['plate_thickness_earned'] is False
 
     def test_malzemesiz_plakasiz_cizim_panel_kalinligi_okumuyor(self, cmh1):
         """``plate_structural`` üretilmeyen koşulda CAD'in ikinci okuma yolu
@@ -679,9 +701,15 @@ def test_bekci_listesi_okuyucu_tablosuyla_ayni():
 def test_basinc_beslemede_pompa_verimi_kunyelenmez(istemci):
     """Ş2: basınç beslemeli çevrimde pompa yok → turbopump_efficiency
     künyede YOK; kalan dört kanonik alan VAR."""
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` gönderilmezse uç
+    # 422 ``pressure_fed_feed_pressure_not_supplied`` döner (L-A SV-03).
+    # Konu pompa verimi künyesi: sayfanın gönderdiği şablon varsayılanı
+    # verilir (tek kaynak, kopyalanmaz).
     kod, j = _post(istemci, '/calculate_liquid',
-                   dict(UC_SIVI_TABAN, engine_cycle='pressure_fed'))
-    assert kod == 200
+                   dict(UC_SIVI_TABAN, engine_cycle='pressure_fed',
+                        feed_pressure=form_defaults.sayisal_varsayilanlar(
+                            'liquid')['feed_pressure']))
+    assert kod == 200, j
     k = _kunye(j)
     assert 'turbopump_efficiency' not in k
     for alan in ('chamber_roughness', 'coolant_flow_percent',

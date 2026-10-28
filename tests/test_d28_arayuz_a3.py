@@ -168,11 +168,17 @@ class TestB215SayfaVarsayilanlari:
         assert 'warn.solid.case_volume_inconsistent' in kodlar, (
             'ÖK-21 kaydı bayatladı: chamber_volume varsayılanı artık uyarı '
             'doğurmuyorsa defter kalemi güncellenmelidir.')
+        # T-ÇAPA-C2 (27 Eki): ÖK-21'in FORM katmanı V301/K-A (KT-20,
+        # 1b71ef5a3) tarafından KAPATILDI — sayfa 2,5 L yazıyordu, geometri
+        # 1,17 L veriyordu ve her varsayılan koşu bu uyarıyla açılıyordu.
+        # Alan artık boş doğar (boş = gönderilmez, hacim çözücüde türetilir);
+        # yazılan değer yine tutarlılık denetiminden geçer (yukarıdaki
+        # iddia: bu gövdenin açıkça yazdığı 2,5 L uyarıyı üretir).
         s = metin(SOLID)
         m = re.search(r'id="chamber_volume"[^>]*value="([^"]*)"', s)
-        assert m and m.group(1) == '2.5', (
-            'ÖK-21 form katmanı bu dalgada sökülmez; değiştiyse kalem yeniden '
-            'ölçülmelidir.')
+        assert m and m.group(1) == '', (
+            'chamber_volume formda yine bir sayıyla doğuyor (KT-20: boş = '
+            'çözücü türetir, gizli varsayılan yok)')
 
 
 # ---------------------------------------------------------------- B2-16

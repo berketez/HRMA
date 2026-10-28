@@ -698,7 +698,12 @@ ETA_BORC_IMI = pytest.mark.xfail(
 class TestEtaCStarBorcu:
     """η_c* uygulanıyor mu? (bugün HAYIR — borç açık imli)"""
 
-    @ETA_BORC_IMI
+    # V301/H-PANEL (NK-15/NK-20): borcun bu ayağı ÖDENDİ — /calculate,
+    # geçici uç, parametrik tarama ve önizleme motoru η_c* ile kuruyor
+    # (kullanıcı değeri ya da kaynaklı varsayılan; kaynaksız çiftte beyanlı
+    # ideal c*). İm kaldırıldı; diğer iki ayak (motorun kendi varsayılanı,
+    # çekirdek modelin nominal_override'ı) bilerek açık: uç yolunda dağılım
+    # ``uq_adapters.center_hybrid_eta_distribution`` ile aynı η'ya oturur.
     def test_ana_akis_eta_c_star_gonderiyor(self):
         """Uç (app.py) motoru eta_c* ile kuruyor mu?"""
         import pathlib

@@ -436,6 +436,60 @@ def hibrit_kopru_ayrisan(hibrit_motor):
     return s
 
 
+@pytest.fixture(scope='module')
+def hibrit_kopru_ayrisan_tekil():
+    """Ham tepesi TEKİL olan hibrit geometride ayrışan kip aracı.
+
+    V3.0.5 A2 — ÖLÇÜM KOŞULU AÇIKÇA SABİTLENDİ (28 Eki). "Ham tepe
+    yayımlanan sayıdan KÖTÜ yakınsar" karşılaştırması ancak ham düğüm
+    tepesinin kontur köşesindeki zayıf tekillikte oturduğu bir geometride
+    anlamlıdır (D25 ölçümü: ham rel %19,285 ⟷ kapı %0,2558). Hibrit
+    varsayılanı bilinçli değişti ve tekil tepe ortadan kalktı:
+
+    * a0dca0dc0 (19 Eki, v301/port-kamara): kamara çapı yanma sonu port
+      çapına iner; bu gövdede kamara 102,94 → ~68 mm, cidar 19,69 →
+      13,13 mm. Ölçüldü (docs'suz çatal): af9e4ee37'de tepe rel %1,163 ⟷
+      yayımlanan %0,165 (bekçi YEŞİL); a0dca0dc0'da %0,179 ⟷ %0,232
+      (KIRMIZI). c7776576f ve 77d64c641 (H-termal, cidar 1,61 mm) da
+      kırmızı; bugün %0,243 ⟷ %0,302. Kök FİZİK-2 değil.
+    * Ürün gerilemesi yok: varsayılan geometride kapı yine hüküm
+      büyüklüğünü ölçüyor (``test_kapi_*`` yeşil) ve ham tepe kendi
+      alanında duruyor; yalnız "ham tepe tekil" önkoşulu artık o
+      geometride sağlanmıyor.
+
+    Bu fikstür port-kamara öncesi geometriyi kamara çapı, cidar ve c*
+    verimiyle açıkça kurar. Köprü girdisi 78fe2254f / af9e4ee37
+    ağacındaki istekle BİT-AYNI (ölçüldü: cidar 0,019689181 m, kontur
+    toplamı 2,19005420041, tepe rel 0,0116322, yayımlanan rel
+    0,0016475914767941924, min SF 38,4509 — d27 hibrit fea-yuk çapası
+    38,45093 ile aynı sayı). Diğer d25 bekçileri varsayılan ``hibrit_motor``
+    fikstüründe kalır.
+    """
+    from hrma.app import app
+    from hrma.fea import bridge
+    from tests.fea.yuk_modeli_araci import ARAC_BIRINCIL_KIP, izantropik_yukte
+    app.config['TESTING'] = True
+    cli = app.test_client()
+    r = cli.post('/calculate', json={
+        'motor_name': 'D25A2-HIBRIT-TEKIL', 'thrust': 2000.0,
+        'chamber_pressure': 30.0, 'burn_time': 10.0,
+        'fuel_type': 'htpb', 'oxidizer_type': 'n2o',
+        'of_ratio': 6.0, 'expansion_ratio': 8.0,
+        'chamber_material': 'steel_4130',
+        'combustion_efficiency': 100.0,
+        'wall_thickness': 19.689181049012443,
+        'chamber_diameter_input': 102.94158055298513})
+    assert r.status_code == 200, r.get_data(as_text=True)[:300]
+    md = r.get_json() or {}
+    s = bridge.run_structural_from_motor(md.get('motor', md),
+                                         axial_fix=ARAC_BIRINCIL_KIP)
+    izantropik_yukte(s)
+    kd = s['meta']['kisit_duyarliligi']
+    assert kd['yayimlanan_kip'] != kd['birincil_kip'], (
+        'araç önkoşulu: yayımlanan kip birincille aynı — kapı kurulmuyor')
+    return s
+
+
 class TestOHD1601YayimlananKipKapisi:
     """ŞART (Fable-D19): kapı, HÜKMÜ TAŞIYAN büyüklüğü ölçmeli.
 
@@ -525,10 +579,12 @@ class TestOHD1601YayimlananKipKapisi:
         assert yky['rel_change'] == pytest.approx(hukum_rel, rel=1e-9)
         assert yky['rel_change'] != pytest.approx(ham_rel, rel=1e-3)
 
-    def test_ham_tepe_SILINMEZ_kendi_alaninda_durur(self,
-                                                     hibrit_kopru_ayrisan):
+    def test_ham_tepe_SILINMEZ_kendi_alaninda_durur(
+            self, hibrit_kopru_ayrisan_tekil):
         # ARAÇ UYARLANDI (fea-yuk 2. tur): ayrışan kip aracı.
-        kd = hibrit_kopru_ayrisan['meta']['kisit_duyarliligi']
+        # V3.0.5 A2: ölçüm koşulu ham tepesi tekil geometride sabit
+        # (gerekçe ve ölçüm ``hibrit_kopru_ayrisan_tekil`` belgesinde).
+        kd = hibrit_kopru_ayrisan_tekil['meta']['kisit_duyarliligi']
         tepe = kd['tepe_F_yakinsamasi']
         assert tepe['hukum_kapisi_mi'] is False
         assert tepe['rel_change'] > kd['yayimlanan_kip_yakinsamasi'][

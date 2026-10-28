@@ -263,9 +263,13 @@ class TestKaynaksizOnDolgu:
             cs['channel_count_fit']['hot_wall_thickness_mm'])
         assert sug['coolant_inlet_temp'] == cs['coolant_inlet_temperature']
         assert sug['coolant'] == r['fuel_type'] == 'rp1'
-        # RP-1 marşının giriş basıncı yanıtta YOK → önerilmez (boş kalır).
+        # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/L-KABUK 823e59841): RP-1
+        # marşı giriş basıncını artık YAYIMLIYOR
+        # (thermal_protection.station_march.coolant_inlet_pressure_bar) ve
+        # panel onu motorun kendi değeriyle önerir; uydurma değil.
         assert cs.get('regen_supercritical') is None
-        assert 'coolant_inlet_pressure' not in sug
+        sm = r['thermal_protection']['station_march']
+        assert sug['coolant_inlet_pressure'] == sm['coolant_inlet_pressure_bar']
 
     def test_lh2_giris_basinci_suprkritik_marstan(self, sonuclar):
         from tests.test_panel_units_v2626 import _run_harness
@@ -333,12 +337,21 @@ class TestGuverteZorunluBeyan:
             assert 'endpoint applies its own rule' not in cip, (alan, cip)
 
     def test_rp1_sonucunda_yalniz_giris_basinci_eksik(self, sonuclar):
-        out = dock_kos(sonuclar['rp1'])
-        assert out['fetchCount'] == 0
-        assert 'Coolant Inlet P (bar)' in out['status']
-        for etiket in ('Number of Channels', 'Channel Width (mm)',
-                       'Liner Thickness (mm)', 'Coolant Inlet T (K)'):
+        """V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/L-KABUK 823e59841):
+        RP-1 marşı giriş basıncını yayımladığı için güvertenin bütün zorunlu
+        alanları motorun değerleriyle dolar ve istek KURULUR (eskiden giriş
+        basıncı boş kalıp adıyla reddediliyordu). Giriş basıncı yoksa adlı
+        ret ``test_bos_secim_govdeye_gitmez`` / kanal yok vakalarında durur.
+        """
+        r = sonuclar['rp1']
+        out = dock_kos(r)
+        assert out['fetchCount'] == 1, out['status']
+        for etiket in ('Coolant Inlet P (bar)', 'Number of Channels',
+                       'Channel Width (mm)', 'Liner Thickness (mm)',
+                       'Coolant Inlet T (K)'):
             assert etiket not in out['status'], (etiket, out['status'])
+        assert out['body']['coolant_inlet_pressure'] == pytest.approx(
+            r['thermal_protection']['station_march']['coolant_inlet_pressure_bar'])
 
     def test_kullanici_girince_istek_gider_motor_degerleriyle(self, sonuclar):
         r = sonuclar['rp1']
@@ -564,11 +577,17 @@ def _sablon(html, ad):
 def yogunluk_kaynagi(html):
     """liquid.html'den kapı + dinleyici birimi (ölçüm betiği de kullanır)."""
     parcalar = ['const LIQUID_SIGFIG_DENSITY = 6, LIQUID_SIGFIG_TRANSPORT = 4;']
+    # V301/L-D (SV-17/NK-59) — KOŞUM EKSİĞİ (iddialar aynen): dinleyici ve
+    # loadPropellantProperties yakıta bağlı alanların sahiplik listesini,
+    # bayat alan temizliğini ve kartın tablo yoğunluğu okuyucusunu kullanıyor.
+    parcalar.append(re.search(r'const LIQ_FUEL_DEPENDENT_FIELDS = \[[^\]]*\];',
+                              html).group(0))
     for ad in ('numTxt', 'liquidSigFig', 'liqStateTempText', 'liqExpTxt',
                'propellantProvenance', 'markFieldProvenance',
                'liquidAutofillBayragi', 'liquidAutofillMi',
                'liquidAutofillField', 'liquidClearUnresolvedField',
-               'loadPropellantProperties'):
+               'liqClearStaleFuelFields', 'liqFormRegistry',
+               'liqTableDensity', 'loadPropellantProperties'):
         parcalar.append(_sablon(html, ad))
     bas = html.index("        document.addEventListener('input', function (ev) {")
     son = html.index('\n        }, true);', bas) + len('\n        }, true);')

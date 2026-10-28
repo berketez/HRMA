@@ -237,10 +237,22 @@ AXIAL_FIX_KARSITI = {"z_min": "z_max", "z_max": "z_min",
 # künyesidir. ``olculen`` alanı, kaydı koyan dalganın kendi koşumudur.
 HUKUM_KAZANILAN_KANONIK_VAKA = {
     "uc": "/calculate_liquid",
+    # V3.0.5 SIVI-CIDAR (kalem 3, Berke 28 Eki): kanonik vaka ÇÖZÜLMÜŞ
+    # SICAKLIKLI iki katmanlı rejeneratif gövdeye taşındı. Eski gövde
+    # (8 kN / 25 bar / eps 8, Inconel 718 astar varsayılanı) iki katmanlı
+    # cidarda hükmü 'iki_katmanli_cidar_tek_govde_modeli' ve
+    # 'motor_cidar_hukmu_geri_cekildi' ile kaybediyordu (taban 379e35f23).
+    # Dış kabuk FEA'sıyla ızgarada ölçüldü (CuCrZr 1,0 mm astar,
+    # docs/scofield/raw/OH/V301/sivi-cidar/olcum/k3_kanonik_izgara.json):
+    # 25-35 bar adaylarında astarın çözülen sıcak cidarı 1386-1582 K
+    # (CuCrZr erime 1349 K) → motorun kendi hükmü fiziksel olarak geri
+    # çekili; 10 kN / 45 bar / eps 8 ve 25 kN / 50 bar / eps 14 hüküm
+    # kazanıyor (astar 765,8 K / 652,4 K, 'pass').
     "govde": {"motor_name": "Z5G-HUKUM", "fuel_type": "rp1",
               "oxidizer_type": "lox", "mixture_ratio": 2.3,
-              "thrust": 8000, "chamber_pressure": 25,
-              "expansion_ratio": 8.0, "burn_time": 10},
+              "thrust": 10000, "chamber_pressure": 45,
+              "expansion_ratio": 8.0, "burn_time": 10,
+              "chamber_material": "cucrzr", "chamber_wall_thickness": 1.0},
     "olculen": {
         "verildi": True,
         "geri_cekme_gerekceleri": [],
@@ -248,24 +260,23 @@ HUKUM_KAZANILAN_KANONIK_VAKA = {
         "converged_yayimlanan_kip": True,
         "onay_ardisik_tur_sayaci": 2,
         "onay_ardisik_tur_gerekli": 2,
-        "final_rel_change": 0.0014400105437911434,
-        "min_safety_factor": 6.537677943988373,
-        "n_axial": 1024,
-        "n_radial": 4,
+        "final_rel_change": 0.0017469432538483127,
+        "min_safety_factor": 3.9700777954622226,
+        "n_axial": 512,
     },
-    # Kanonik vaka düşerse taranacak adaylar. ÖH D28 taban ölçümünde
-    # (once_d2706.json) onunun ÜÇÜ hüküm kazanıyordu: 8 kN/25 bar/eps=8
-    # (kanonik), 8 kN/20 bar/eps=6 ve 6 kN/25 bar/eps=4. Izgara elle
-    # uydurulmuş bir "doğru cevap" değil, ARAMA UZAYIDIR: kazananı ölçüm
-    # seçer.
+    # Kanonik vaka düşerse taranacak adaylar (ilk aday kanonik vakanın
+    # kendisi). V3.0.5 ölçümünde (yukarıdaki kanıt) onun İKİSİ hüküm
+    # kazanıyor. Izgara elle uydurulmuş bir "doğru cevap" değil, ARAMA
+    # UZAYIDIR: kazananı ölçüm seçer.
     "arama_izgarasi": (
-        (8000, 25, 8.0), (5000, 20, 6.0), (12000, 30, 8.0),
-        (8000, 20, 6.0), (20000, 40, 10.0), (3000, 15, 5.0),
-        (15000, 35, 12.0), (6000, 25, 4.0), (10000, 45, 8.0),
-        (25000, 50, 14.0),
+        (10000, 45, 8.0), (25000, 50, 14.0), (8000, 25, 8.0),
+        (5000, 20, 6.0), (12000, 30, 8.0), (8000, 20, 6.0),
+        (20000, 40, 10.0), (3000, 15, 5.0), (15000, 35, 12.0),
+        (6000, 25, 4.0),
     ),
-    "kayit_dalgasi": "ÖH D28 · fea-cfd aşama-1 (OH-D27-06)",
-    "kanit": "docs/scofield/raw/OH/D28/fea-cfd/a1/once_d2706.json",
+    "kayit_dalgasi": "V3.0.5 · SIVI-CIDAR kalem 3 (iki katmanlı cidar FEA)",
+    "kanit": ("docs/scofield/raw/OH/V301/sivi-cidar/olcum/"
+              "k3_kanonik_izgara.json"),
     "basis": (
         "Köprünün hüküm kapıları (P17B1-02 yakınsama, P8B1-09 yayımlanan "
         "kip, P8B2-09 kısıt yeri duyarlılığı, geometri örnekleme tabanı) "
@@ -375,6 +386,12 @@ THERMAL_PROFILE_THROAT_TOL = 0.02
 #: (P8B2-10) bu bandın İÇİNDEDİR ve ürün yolunu kapatmaz; 50 kat / 99 kat /
 #: 1e9 kat sapmalar bandın DIŞINDADIR ve fail-closed reddedilir.
 THERMAL_HG_CROSS_CHECK_TOL = 0.25
+
+#: V301/FİZİK-2 (NK-12): h(z) makullük kapısının ÇALIŞTIRILAMADIĞI hâlin
+#: makine kodu — çapanın (motorun boğaz katsayılarının) malzemesi termal
+#: ağın malzemesinden farklı. ``makulluk_kapisi.neden`` alanında durur ve
+#: olumlu hükmü geri çeken neden kodunun (aşağıda) kaynağıdır.
+HG_GATE_NOT_RUN_ANCHOR_MATERIAL = "anchor_material_differs_from_mesh"
 
 #: Motorun boğaz gaz-tarafı ısı taşınım katsayısını [W/m²K] yayımladığı
 #: alanlar (ölçüldü, P8B2-10: aynı boğaz için üç ayrı değer duruyor).
@@ -847,6 +864,23 @@ def _extract_material(motor_results: dict, layout: str):
                                f"{y_wall_mpa:g} MPa olarak yayımladı ama o "
                                "değer oda sıcaklığınınkinden GEVŞEK — "
                                "sıkı olan alındı") + ")")
+        # V301/L-KABUK · L-B DEVİR 3: motor bu cidarın hükmünü GERİ
+        # ÇEKTİYSE (erime/derating zarfı üstü sıcaklık) okunan akma geçerli
+        # bir tasarım girdisi değildir; köprü sayıyı tanı olarak kullanır ve
+        # hükmünü de geri çeker (``_sivi_motor_cidar_kapisi``).
+        if yield_kaynak and cs.get("verdict_withheld") is True:
+            yield_kaynak += (
+                " — DİKKAT: motor bu cidarın yapı hükmünü GERİ ÇEKTİ "
+                "(chamber_structure.verdict_withheld); bu akma geçerli bir "
+                "tasarım girdisi değildir, köprü hükmü de geri çekilir "
+                "(motor_cidar_hukmu_geri_cekildi)")
+        if yield_kaynak and cs.get("wall_model") == "two_layer_regenerative":
+            yield_kaynak += (
+                " — iki katmanlı rejeneratif cidar: bu blok DIŞ KABUĞUN "
+                "(basıncı taşıyan katman) malzemesini ve kendi "
+                "sıcaklığındaki akmasını yayımlar; astar kendi "
+                "sıcaklığında ayrıca okunur (hukum.motor_cidar_kapisi."
+                "katman_akmalari)")
     elif layout == "solid":
         case = sa.get("case_analysis") or {}
         key = case.get("case_material")
@@ -1232,6 +1266,9 @@ def _ag_yuzeyi_analitik_net(kunye: dict, mesh):
     F_uc = float(kunye["end_force"]["force_n"])
     A0 = np.pi * r_ic[0] ** 2
     Ae = np.pi * r_ic[-1] ** 2
+    if kunye.get("radial_only"):
+        # V3.0.5 SIVI-CIDAR: yalnız radyal yükün eksenel bileşkesi sıfır.
+        return -F_uc
     if kunye.get("distribution") != YUK_DAGILIMI_IZANTROPIK:
         return -F_uc + p_c * (A0 - Ae)
     g = float(kunye["gamma"])
@@ -1273,6 +1310,10 @@ def _kuvvet_dengesi_hukmu(kunye: dict, cozucu_meta: dict, mesh=None) -> dict:
             net_ag = float(_ag_yuzeyi_analitik_net(kunye, mesh))
         except (KeyError, TypeError, ValueError) as exc:
             ag_hatasi = f"{type(exc).__name__}: {exc}"
+    # V3.0.5 SIVI-CIDAR: uç kuvveti olmayan (yalnız radyal) yükte ölçek
+    # künyenin ``axial_scale_n`` alanıdır; öteki yollar bit-aynı (F_uç).
+    if not F_uc and (kunye or {}).get("radial_only"):
+        F_uc = (kunye or {}).get("axial_scale_n")
     if tepki is None or net_ag is None or not F_uc:
         return {"measured": False, "holds": None, "tol": KUVVET_DENGESI_TOL,
                 "error": ag_hatasi,
@@ -1447,6 +1488,52 @@ def extract_structural_inputs(motor_results: dict,
     yuk_modeli, yuk_kunyesi = _yuk_modeli_kur(
         motor_results, contour, pts, pressure, ext_m)
 
+    # --- V3.0.5 SIVI-CIDAR (kalem 3): İKİ KATMANLI CİDAR → FEA GÖVDESİ DIŞ
+    # KABUK. Kabuk iç konturu, kalınlığı ve soğutucu basıncı motorun katman
+    # kaydından; bir alan eksikse yığın modeline DÜŞÜLMEZ, adıyla reddedilir.
+    iki_katman = None
+    if layout == "liquid":
+        _cs = ((motor_results.get("structural_analysis") or {})
+               .get("chamber_structure") or {})
+        if (isinstance(_cs, dict)
+                and _cs.get("wall_model") == SIVI_IKI_KATMAN_MODELI):
+            iki_katman, _eksik_kabuk = _iki_katman_kabuk_girdileri(
+                motor_results, contour)
+            if iki_katman is None:
+                return {
+                    "status": BRIDGE_STATUS_NOT_MODELLED,
+                    "engine_layout": layout,
+                    "missing": _eksik_kabuk,
+                    "reason": (
+                        "iki katmanlı rejeneratif cidarın FEA gövdesi (dış "
+                        "kabuk) kurulamadı; eksikler: "
+                        + "; ".join(_eksik_kabuk)),
+                    "notes": {"iki_katman": SIVI_KABUK_MODEL_BASIS},
+                    "warning": _warning(WARN_INPUTS_MISSING,
+                                        missing=", ".join(_eksik_kabuk)),
+                }
+            contour = iki_katman["contour"]
+            thickness = iki_katman["thickness_m"]
+            pressure = iki_katman["coolant_pressure_pa"]
+            yuk_modeli, yuk_kunyesi = _iki_katman_kabuk_yuku(
+                pressure, contour)
+            # V3.0.5 A1: cidar ve yük künyesi çözücünün KULLANDIĞI girdiyi
+            # söyler (eskiden yığın kalınlığı ve chamber_pressure yazıyordu;
+            # ölçüldü, örnek sıvı: künye 5,5 mm / 50 bar ⟷ çözücü 2,5 mm /
+            # 76,29 bar). Yol ve değer kabuk paketinden (tek kaynak).
+            _gy = iki_katman["girdi_yollari"]
+            t_beyan = (
+                f"{_gy['closeout_thickness_mm']['path']} [mm] / 1000; "
+                "kaynak='two-layer regenerative wall: the FEA body is the "
+                "closeout, the layer that carries the coolant pressure'")
+            p_beyan = {
+                "kaynak": (f"results['{_gy['coolant_pressure_bar']['path']}']"
+                           " [bar] * PA_PER_BAR"),
+                "p_bar": _gy["coolant_pressure_bar"]["value"],
+                "p_Pa": iki_katman["coolant_pressure_pa"],
+                "dagilim": (p_beyan or {}).get("dagilim"),
+            }
+
     # --- ÖH D37 A2-1 / B2-CP: OKUNAN MOTOR YOLLARI ADIYLA (consumed_paths) ---
     # Çıkarıcıların FİİLEN okuduğu alanlar; uç yanıtına AYNEN yazılır (K3s
     # A7b'nin girdisi). Sayı üretmez, sayıyı değiştirmez — hangi motor
@@ -1483,6 +1570,16 @@ def extract_structural_inputs(motor_results: dict,
             "path": "chamber_length", "purpose": "chamber cylinder extension",
             "unit": "m (hybrid) / mm (liquid)", "consumer": "mesh contour "
             "extension", "applied": bool(ext_m is not None)})
+    if iki_katman is not None:
+        # V3.0.5 A1: iki katmanda basınç yükü chamber_pressure DEĞİL, kabuk
+        # kaydının soğutucu basıncıdır; kabuk iç konturunun öteleme girdileri
+        # (astar + kanal derinliği) de okunan yollardır.
+        _kc = _kabuk_consumed_paths(iki_katman)
+        _degis = {"chamber_pressure": _kc["pressure"],
+                  _kc["thickness"]["path"]: _kc["thickness"]}
+        consumed_paths = [_degis.get(c.get("path"), c)
+                          for c in consumed_paths]
+        consumed_paths[1:1] = _kc["offset"]
     consumed_paths = [c for c in consumed_paths if c.get("path")]
 
     basis = {
@@ -1502,6 +1599,14 @@ def extract_structural_inputs(motor_results: dict,
         "yuk": p_beyan,
         "yuk_modeli": yuk_kunyesi,
     }
+    if iki_katman is not None:
+        basis["iki_katman_kabuk"] = {
+            "_basis": SIVI_KABUK_MODEL_BASIS,
+            "oteleme_m": iki_katman["offset_m"],
+            "kabuk_kalinligi_m": iki_katman["thickness_m"],
+            "sogutucu_basinci_pa": iki_katman["coolant_pressure_pa"],
+            "katmanlar": iki_katman["katmanlar"],
+        }
 
     return {
         "status": BRIDGE_STATUS_OK,
@@ -1519,6 +1624,9 @@ def extract_structural_inputs(motor_results: dict,
         "pressure_profile": yuk_kunyesi.get("distribution"),
         "load_model": yuk_kunyesi,
         "consumed_paths": consumed_paths,   # B2-CP
+        # V3.0.5 SIVI-CIDAR: iki katmanlı cidarda FEA gövdesi dış kabuk
+        # (None: tek katman, eski yol bit-aynı).
+        "two_layer_closeout": iki_katman,
         "_basis": basis,
     }
 
@@ -1578,6 +1686,395 @@ def _hukum_kapsami(mesh, inputs: dict, motor_results: dict) -> dict:
             "'güvenli' hükmü DEĞİLDİR (P8B2-14). Kapsam alanı hüküm "
             "sayısının YANINDA durur ki sayıyı okuyan kapsamı da görsün."),
     }
+
+
+#: V301/L-KABUK — sıvı motorun iki katmanlı cidar sözleşmesi
+#: (``chamber_structure.wall_model``; köprü motoru import etmez).
+SIVI_IKI_KATMAN_MODELI = "two_layer_regenerative"
+
+
+# --- V3.0.5 SIVI-CIDAR (kalem 3, Berke 28 Eki) — İKİ KATMANLI CİDARIN FEA'sı --
+# Eskiden köprü çizilen YIĞINI (astar + kanal + dış kabuk) tek homojen cidar
+# olarak, dış kabuğun malzemesiyle ve GAZ basıncıyla ağlıyor, sonra hükmü
+# ``iki_katmanli_cidar_tek_govde_modeli`` ile geri çekiyordu (örnek sıvı
+# motorun FEA paneli hiç hüküm vermiyordu). Gerçek cidarda soğutucu basıncını
+# DIŞ KABUK taşır; astar kanalların arasında kaburgalara oturan bir şerittir.
+#
+# Model (eksenel simetrik ağda temsil edilebilen kısım ÇÖZÜLÜR, edilemeyen
+# kısım kaynağıyla beyan edilir):
+#   * Dış kabuk = FEA gövdesi: iç yüzeyi gaz konturunun (astar + kanal
+#     derinliği) kadar normal ötelemesi (ağ üreticisinin AYNI öteleme kuralı),
+#     kalınlığı motorun kabuk kalınlığı, malzemesi ``closeout_material`` ve
+#     akması KENDİ sıcaklığındaki değer (``chamber_structure`` bloğu iki
+#     katmanda kabuğun kaydını yayımlar). Yük: ceket soğutucu basıncının üst
+#     sınırı iç yüzeyde düzgün, YALNIZ RADYAL izdüşüm; kapalı uç kuvveti YOK
+#     (eksenel izdüşüm astar dış yüzündeki ters izdüşümle kaburgalar üstünden
+#     dengelenir — ``SIVI_KABUK_MODEL_BASIS``, ``_iki_katman_kabuk_yuku``).
+#     [V3.0.5 A1, 28 Eki: bu satır eskiden "+ kapalı uç eşdeğer eksenel
+#     kuvveti" diyordu; çözüm a58f5afa9'dan beri uç kuvvetsizdi.] Kabuk
+#     adyabatik dış yüzeyle soğutucunun sıcaklığında eş sıcaklıktadır
+#     (motorun kabuk modeli) → kabukta sıcaklık farkı gerilmesi yoktur.
+#   * Astar FEA ağında YOKTUR: kanal şeridi 3B bir levhadır; eksenel simetrik
+#     ağ kanalları çözemez. Astarın hükmü motorun katman modelidir (NASA
+#     SP-125 Eş. 4-27 + Eş. 4-31, kendi çözülen sıcaklıklarında) ve köprü onu
+#     ``katman_hukumleri``nde yanına koyar.
+SIVI_KABUK_YUK_DAGILIMI = "coolant_uniform_closeout"
+#: Kabuk iç konturunun ön ağındaki en az istasyon sayısı (HRMA sayısal
+#: seçimi: öteleme yalnız geometri örneklemesidir; çözüm ağı inceltme
+#: sürücüsünde AYRICA kurulur).
+SIVI_KABUK_KONTUR_ISTASYON_MIN = 400
+SIVI_KABUK_MODEL_BASIS = (
+    "two-layer regenerative wall: the FEA body is the CLOSEOUT, the layer "
+    "that carries the jacket coolant pressure. Its inner surface is the gas "
+    "contour offset along the wall normal by the liner thickness plus the "
+    "channel depth (the offset rule the mesher uses for the drawn stack); "
+    "its thickness, material and yield at its own temperature are the "
+    "engine's closeout record; it is loaded by the upper bound of the jacket "
+    "coolant pressure (wall_layers[1].coolant_pressure_bar, the fuel pump "
+    "discharge) on its inner surface, RADIAL component only: the axial "
+    "projection of the same pressure on the closeout inner face and on the "
+    "liner outer face cancel through the ribs across the thin jacket annulus "
+    "(the small end-ring load p*pi*(r_closeout^2 - r_liner^2) of the "
+    "manifolds is not modelled). The closeout sits at the coolant "
+    "temperature with "
+    "an adiabatic outer surface (engine closeout model), so it carries no "
+    "through-wall thermal stress. The LINER is not meshed: between the lands "
+    "it is a plate strip on the ribs, a 3D feature an axisymmetric mesh "
+    "cannot represent (the channels are not resolved), so its verdict is the "
+    "engine layer model at its own solved temperatures (NASA SP-125 Eq. 4-27 "
+    "bending between lands plus Eq. 4-31 thermal stress), carried beside the "
+    "FEA verdict in katman_hukumleri. Not modelled: the liner-closeout "
+    "thermal-expansion mismatch through the ribs and the rib stresses.")
+
+
+#: İki katmanlı kabuk girdilerinin motor yolları (ad, yol, kullanım). Sıra
+#: eksik listesinin eski sırasıdır. ``consumed_paths`` kayıtları da buradan
+#: kurulur (``_kabuk_consumed_paths``); ikinci liste yazılmaz.
+_KABUK_GIRDI_YOLLARI = (
+    ("liner_thickness_mm",
+     "structural_analysis.chamber_structure.wall_layers[liner].thickness_mm",
+     "offset"),
+    ("channel_depth_mm",
+     "structural_analysis.chamber_structure.channel_depth_mm", "offset"),
+    ("closeout_thickness_mm",
+     "structural_analysis.chamber_structure.wall_layers[closeout]."
+     "thickness_mm", "thickness"),
+    ("coolant_pressure_bar",
+     "structural_analysis.chamber_structure.wall_layers[closeout]."
+     "coolant_pressure_bar", "pressure"),
+)
+
+
+def _kabuk_consumed_paths(iki_katman: dict) -> dict:
+    """İki katmanlı yolda çözücüye giden kalınlık, basınç ve öteleme
+    girdilerinin ``consumed_paths`` kayıtları (V3.0.5 A1).
+
+    Döner: {"thickness": kayıt, "pressure": kayıt, "offset": [kayıt, ...]}.
+    Yol ve değer ``_iki_katman_kabuk_girdileri``nin okuduğu ``girdi_yollari``
+    paketinden gelir.
+    """
+    gy = iki_katman["girdi_yollari"]
+    kullanim = {ad: k for ad, _yol, k in _KABUK_GIRDI_YOLLARI}
+    kayit = {
+        "thickness": {
+            "purpose": "wall thickness of the FEA body (closeout of the "
+                       "two-layer regenerative wall)",
+            "unit": "mm -> m", "consumer": "mesh (thickness)"},
+        "pressure": {
+            "purpose": "internal pressure load: jacket coolant pressure on "
+                       "the closeout inner surface (uniform, radial only)",
+            "unit": "bar -> Pa",
+            "consumer": "structural load model (V3.0.5 two-layer closeout)"},
+        "offset": {
+            "purpose": "closeout inner contour = gas contour offset along "
+                       "the wall normal by liner thickness + channel depth",
+            "unit": "mm -> m",
+            "consumer": "mesh contour offset (build_wall_mesh)"},
+    }
+    out = {"thickness": None, "pressure": None, "offset": []}
+    for ad, _yol, _k in _KABUK_GIRDI_YOLLARI:
+        rol = kullanim[ad]
+        k = dict({"path": gy[ad]["path"]}, **kayit[rol])
+        if rol == "offset":
+            out["offset"].append(k)
+        else:
+            out[rol] = k
+    return out
+
+
+def _iki_katman_kabuk_girdileri(motor_results: dict, contour):
+    """V3.0.5 SIVI-CIDAR — iki katmanlı cidarda FEA gövdesi = dış kabuk.
+
+    Döner: ``(paket, None)`` ya da ``(None, eksikler)``. ``paket``: kabuk
+    iç konturu [z, r] (m), kalınlık (m), soğutucu basıncı (Pa), katman
+    özeti ve künye. Eksik alan ADIYLA döner; yığın modeline düşülmez.
+    """
+    sa = motor_results.get("structural_analysis")
+    sa = sa if isinstance(sa, dict) else {}
+    cs = sa.get("chamber_structure")
+    cs = cs if isinstance(cs, dict) else {}
+    katmanlar = cs.get("wall_layers")
+    katmanlar = katmanlar if isinstance(katmanlar, list) else []
+    astar = next((k for k in katmanlar if isinstance(k, dict)
+                  and k.get("role") == "liner"), {})
+    kabuk = next((k for k in katmanlar if isinstance(k, dict)
+                  and k.get("role") == "closeout"), {})
+    t_l = _finite_positive(astar.get("thickness_mm"))
+    h = _finite_positive(cs.get("channel_depth_mm"))
+    t_co = _finite_positive(kabuk.get("thickness_mm"))
+    p_co = _finite_positive(kabuk.get("coolant_pressure_bar"))
+    # Okunan dört alanın yolu TEK YERDE: eksik listesi ve uç yanıtının
+    # ``consumed_paths`` / ``_basis`` künyesi bu sözlükten kurulur
+    # (V3.0.5 A1 — künye çözücünün kullandığı girdiyi söylesin).
+    yollar = {ad: yol for ad, yol, _v in _KABUK_GIRDI_YOLLARI}
+    degerler = {"liner_thickness_mm": t_l, "channel_depth_mm": h,
+                "closeout_thickness_mm": t_co, "coolant_pressure_bar": p_co}
+    eksik = [yollar[ad] for ad, _yol, _v in _KABUK_GIRDI_YOLLARI
+             if degerler[ad] is None]
+    if eksik:
+        return None, eksik
+    oteleme_m = (t_l + h) / 1000.0
+    kontur = np.asarray(contour, dtype=float)
+    on_ag = build_wall_mesh(
+        kontur, oteleme_m,
+        n_axial=int(max(SIVI_KABUK_KONTUR_ISTASYON_MIN,
+                        4 * kontur.shape[0])),
+        n_radial=1)
+    grid = np.asarray(on_ag.node_index_grid, dtype=int)
+    kabuk_kontur = np.asarray(on_ag.nodes, dtype=float)[grid[:, -1]]
+    paket = {
+        "contour": kabuk_kontur,
+        "thickness_m": t_co / 1000.0,
+        "coolant_pressure_pa": p_co * PA_PER_BAR,
+        "offset_m": oteleme_m,
+        # Okunan yollar + değerleri (künyenin tek kaynağı).
+        "girdi_yollari": {ad: {"path": yollar[ad], "value": degerler[ad]}
+                          for ad in yollar},
+        "katmanlar": {
+            "liner": {k: astar.get(k) for k in (
+                "material", "material_key", "thickness_mm",
+                "mean_temperature_K", "max_temperature_K", "safety_factor",
+                "safety_factor_target", "verdict", "temperature_source")},
+            "closeout": {k: kabuk.get(k) for k in (
+                "material", "material_key", "thickness_mm",
+                "mean_temperature_K", "yield_at_temperature_MPa",
+                "safety_factor", "safety_factor_target", "verdict",
+                "coolant_pressure_bar")},
+        },
+        "_basis": SIVI_KABUK_MODEL_BASIS,
+    }
+    return paket, None
+
+
+def _iki_katman_kabuk_yuku(p_co_pa: float, kabuk_kontur) -> tuple:
+    """Kabuk iç yüzeyinde düzgün soğutucu basıncı, YALNIZ RADYAL; uç kuvveti
+    yok (``end_force_n = 0``).
+
+    Künye ``radial_only`` taşır: ``_ag_yuzeyi_analitik_net`` bu kolda
+    eksenel bileşkeyi −F_uç = 0 döndürür ve kuvvet dengesi kapısı ölçeği
+    ``axial_scale_n`` = p·π·r_0² ile AYNEN koşar (mesnet eksenel tepkisi
+    sıfır olmalı). [V3.0.5 A1: eski docstring "+ kapalı uç kuvveti" ve
+    "sabit basınç kolu (−F_uç + p·(A_0 − A_çıkış))" diyordu; ikisi de
+    çözümle çelişiyordu.]
+    """
+    kontur = np.asarray(kabuk_kontur, dtype=float)
+    r0 = float(kontur[0, 1])
+    kunye = {
+        "distribution": SIVI_KABUK_YUK_DAGILIMI,
+        "p_c_pa": float(p_co_pa),
+        "radial_only": True,
+        "end_force": {"force_n": 0.0, "r0_m": r0,
+                      "formula": "none (radial-only coolant pressure)"},
+        # Kuvvet dengesi kapısının ölçeği: uç kuvveti yok, ölçek kabuk
+        # iç kesitinin p·π·r0² büyüklüğü (yalnız normalleştirme).
+        "axial_scale_n": float(p_co_pa) * np.pi * r0 * r0,
+        "analytic_axial": {
+            "end_force_n": 0.0,
+            "net_n": 0.0,
+            "_basis": ("yalnız radyal yük: eksenel bileşke tanım gereği "
+                       "sıfır; mesnet eksenel tepkisi sıfır olmalı"),
+        },
+        "scope": (
+            "YALNIZ BASINÇ YÜKLEMESİ (dış kabuk): ceket soğutucu basıncının "
+            "üst sınırı (pompa çıkışı) iç yüzeyde, YALNIZ RADYAL izdüşüm. "
+            "Eksenel izdüşüm, aynı basıncın astar dış yüzüne etkiyen ters "
+            "işaretli eksenel izdüşümüyle kaburgalar üstünden dengelenir "
+            "(ince ceket halkası); halka uç yüzlerinin küçük eksenel yükü "
+            "p·π(r_kabuk² − r_astar²) modellenmez. Kabuk soğutucu "
+            "sıcaklığında eş sıcaklıktadır (motorun kabuk modeli), ısıl "
+            "gerilme taşımaz; akma motorun kabuk sıcaklığındaki değeridir. "
+            "Astar bu ağda yoktur (katman hükmü motordan)."),
+        "_basis": SIVI_KABUK_MODEL_BASIS,
+    }
+    yuk = InnerPressureLoad(p_ref_pa=float(p_co_pa), pressure_fn=None,
+                            end_force_n=0.0, kunye=kunye,
+                            yalniz_radyal=True)
+    return yuk, kunye
+
+
+def _ortak_bolge_sf(mesh, sonuc, akma_pa):
+    """İki kısıt kipinin Saint-Venant bantlarının İKİSİNİN de DIŞINDA kalan
+    ortak bölgede ASME lineerleştirmeli hüküm katsayısı (V3.0.5 SIVI-CIDAR).
+
+    Yalnız radyal yüklü dış kabukta kullanılır: eksenel bileşke sıfır, zar
+    durumu kısıt yerinden bağımsızdır (N_φ = 0); iki kip arasındaki fark
+    yalnız kısıtlanan ucun kenar etkisi ve maskenin farklı uçları
+    dışlamasıdır. Kısıt seçiminin sayıyı değiştirip değiştirmediği bu yüzden
+    iki kipin AYNI bölgesinde ölçülür.
+    """
+    from hrma.fea.structural_axisym import (
+        ASME_MEMBRAN_KATI, saint_venant_hukum_maskesi, scl_lineerlestirme)
+    m1, _ = saint_venant_hukum_maskesi(mesh, "z_min")
+    m2, _ = saint_venant_hukum_maskesi(mesh, "z_max")
+    ortak = np.asarray(m1, dtype=bool) & np.asarray(m2, dtype=bool)
+    if not ortak.any() or not akma_pa:
+        return None
+    _pm, _plpb, beyan = scl_lineerlestirme(mesh, sonuc.stress_nodal, ortak)
+    if not beyan.get("gecerli"):
+        return None
+    payda = max(ASME_MEMBRAN_KATI * beyan["P_m_maks_pa"],
+                beyan["P_L_Pb_maks_pa"])
+    return float(akma_pa / payda) if payda > 0.0 else None
+
+
+def _iki_katman_hukumleri(inputs: dict, fea_min_sf, verildi: bool):
+    """Katman katman hüküm: astar = motor katman modeli, kabuk = bu FEA.
+
+    Yığının en küçük emniyet katsayısı iki kaynağın küçüğüdür; hangi
+    katmanın yönettiği adıyla yazılır. Tek katmanda None.
+    """
+    ik = inputs.get("two_layer_closeout")
+    if not isinstance(ik, dict):
+        return None
+    lin = (ik.get("katmanlar") or {}).get("liner") or {}
+    co = (ik.get("katmanlar") or {}).get("closeout") or {}
+    katmanlar = [
+        {"role": "liner",
+         "source": ("engine layer model: NASA SP-125 Eq. 4-27 bending "
+                    "between lands + Eq. 4-31 thermal stress, at the "
+                    "liner's own solved temperatures (not meshed: 3D "
+                    "channel strip)"),
+         "material": lin.get("material"),
+         "mean_temperature_K": lin.get("mean_temperature_K"),
+         "max_temperature_K": lin.get("max_temperature_K"),
+         "safety_factor": lin.get("safety_factor"),
+         "safety_factor_target": lin.get("safety_factor_target"),
+         "verdict": lin.get("verdict")},
+        {"role": "closeout",
+         "source": ("this axisymmetric FEA (closeout body, coolant "
+                    "pressure, yield at the closeout temperature)"),
+         "material": co.get("material"),
+         "mean_temperature_K": co.get("mean_temperature_K"),
+         "safety_factor": fea_min_sf,
+         "fea_verdict_given": bool(verildi),
+         "engine_safety_factor": co.get("safety_factor"),
+         "engine_verdict": co.get("verdict"),
+         "fea_to_engine_ratio": (
+             None if (fea_min_sf is None or not co.get("safety_factor"))
+             else float(fea_min_sf) / float(co["safety_factor"]))},
+    ]
+    # Yığının en küçük SF'si yalnız iki katmanın da TASARIM hükmü varken:
+    # astar motor hükmü pass/below_target/fail (geri çekilmiş ya da
+    # değerlendirilmemiş katmanın SF'si bir tasarım çıktısı değildir), kabuk
+    # bu FEA'nın verilen hükmü.
+    def _sf(k):
+        v = k.get("safety_factor")
+        return (v if isinstance(v, (int, float)) and not isinstance(v, bool)
+                else None)
+    adaylar = []
+    if _sf(katmanlar[0]) is not None and katmanlar[0].get("verdict") in (
+            "pass", "below_target", "fail"):
+        adaylar.append((_sf(katmanlar[0]), "liner"))
+    if _sf(katmanlar[1]) is not None and verildi:
+        adaylar.append((_sf(katmanlar[1]), "closeout"))
+    yon = min(adaylar) if len(adaylar) == 2 else None
+    return {
+        "layers": katmanlar,
+        "stack_min_safety_factor": None if yon is None else yon[0],
+        "stack_governing_layer": None if yon is None else yon[1],
+        "_basis": SIVI_KABUK_MODEL_BASIS,
+    }
+
+
+def _sivi_motor_cidar_kapisi(motor_results: dict, layout) -> dict:
+    """Motorun kendi cidar hükmü ⟷ köprü hükmü (V301/L-KABUK, L-B DEVİR 3).
+
+    İki gerekçe köprü hükmünü geri çeker (sayılar silinmez):
+
+    * ``motor_cidar_hukmu_geri_cekildi`` — motor ``chamber_structure.
+      verdict_withheld`` yayımladı (cidar, çözülen sıcaklığında yapı
+      modelinin geçerlilik sınırı dışında). ÖLÇÜLDÜ (L-B RAPOR DEVİR 3):
+      köprü bu bayrağa bakmadan erime üstü sıcaklıkta okunan akmayla
+      hüküm veriyordu (örnek sıvı FEA min SF 2,63 → 1,458).
+    * ``iki_katmanli_cidar_tek_govde_modeli`` — iki katmanlı rejeneratif
+      cidar: eksenel simetrik ağ çizilen yığını TEK homojen cidar ve gaz
+      basıncıyla yükler; gerçek cidar soğutucu basıncını kanallarında
+      taşır (dış kabuk çemberi + kaburgalar arası astar). Her katman
+      KENDİ sıcaklığında okunur (``katman_akmalari``) ve motorun katman
+      hükmü (``chamber_structure.wall_layers``) geçerlidir.
+    """
+    if layout != "liquid":
+        return {"uygulandi": False, "gerekceler": [], "katman_akmalari": None,
+                "beyan": None}
+    sa = motor_results.get("structural_analysis")
+    sa = sa if isinstance(sa, dict) else {}
+    cs = sa.get("chamber_structure")
+    cs = cs if isinstance(cs, dict) else {}
+    gerekceler, beyan = [], []
+    gecerlilik_olcumleri = None
+    if cs.get("verdict_withheld") is True:
+        gerekceler.append("motor_cidar_hukmu_geri_cekildi")
+        # V3.0.5 SIVI-CIDAR: hangi katman, hangi sıcaklıkta, hangi sınır —
+        # sayılarıyla (motorun geçerlilik ölçümünden; köprü sayı üretmez).
+        _olc = cs.get("model_validity_evaluations")
+        _olc = _olc if isinstance(_olc, dict) else {}
+        gecerlilik_olcumleri = {
+            ad: {k: (o or {}).get(k) for k in (
+                "wall_temperature_K", "melting_point_K",
+                "derating_curve_last_point_K", "at_or_above_melting_point",
+                "above_derating_curve_data")}
+            for ad, o in _olc.items() if isinstance(o, dict)}
+        _sayili = "; ".join(
+            f"{ad}: {o.get('wall_temperature_K')} K (melting point "
+            f"{o.get('melting_point_K')} K, last strength-derating point "
+            f"{o.get('derating_curve_last_point_K')} K)"
+            for ad, o in gecerlilik_olcumleri.items()
+            if o.get('at_or_above_melting_point')
+            or o.get('above_derating_curve_data'))
+        beyan.append(
+            "the engine withheld its own chamber wall verdict "
+            "(chamber_structure.verdict_withheld, reasons "
+            + str(cs.get("verdict_withheld_reasons") or []) + "): the wall "
+            "is outside the structural model validity limit at its solved "
+            "temperature"
+            + (f" ({_sayili})" if _sayili else "")
+            + ", so the yield strength read there is no valid design input "
+            "for this FEA either.")
+    katman_akmalari = None
+    katmanlar = cs.get("wall_layers")
+    if (cs.get("wall_model") == SIVI_IKI_KATMAN_MODELI
+            and isinstance(katmanlar, list) and katmanlar):
+        # V3.0.5 SIVI-CIDAR (kalem 3): FEA gövdesi artık DIŞ KABUKTUR
+        # (``_iki_katman_kabuk_girdileri``); "tek homojen gövde" gerekçesi
+        # (iki_katmanli_cidar_tek_govde_modeli) kalktı. Katman akmaları ve
+        # astarın motor hükmü bilgi olarak yanında durur.
+        katman_akmalari = []
+        for kat in katmanlar:
+            kat = kat if isinstance(kat, dict) else {}
+            katman_akmalari.append({
+                "role": kat.get("role"),
+                "material": kat.get("material"),
+                "temperature_K": kat.get("mean_temperature_K"),
+                "yield_at_temperature_MPa":
+                    kat.get("yield_at_temperature_MPa"),
+                "engine_safety_factor": kat.get("safety_factor"),
+                "engine_verdict": kat.get("verdict"),
+            })
+        beyan.append(SIVI_KABUK_MODEL_BASIS)
+    return {"uygulandi": bool(gerekceler), "gerekceler": gerekceler,
+            "katman_akmalari": katman_akmalari,
+            "gecerlilik_olcumleri": gecerlilik_olcumleri,
+            "beyan": " ".join(beyan) or None}
 
 
 def run_structural_from_motor(motor_results: dict,
@@ -1686,6 +2183,30 @@ def run_structural_from_motor(motor_results: dict,
             a, b = res.min_safety_factor, res_karsit.min_safety_factor
             if a and b:
                 kisit_duyarliligi["oran"] = max(a, b) / min(a, b)
+            # V3.0.5 SIVI-CIDAR: yalnız radyal yüklü dış kabukta kıyas iki
+            # kipin ORTAK hüküm bölgesinde (``_ortak_bolge_sf``); öteki
+            # yollar bit-aynı (``oran`` kapısı).
+            _yuk = inputs.get("pressure_load")
+            if (inputs.get("two_layer_closeout") is not None
+                    and getattr(_yuk, "yalniz_radyal", False)):
+                _akma = getattr(inputs.get("material"), "yield_strength",
+                                None)
+                _o1 = _ortak_bolge_sf(ref.mesh, res, _akma)
+                _o2 = _ortak_bolge_sf(ref.mesh, res_karsit, _akma)
+                kisit_duyarliligi["ortak_bolge"] = {
+                    "birincil_min_safety_factor": _o1,
+                    "karsit_min_safety_factor": _o2,
+                    "oran": (max(_o1, _o2) / min(_o1, _o2)
+                             if (_o1 and _o2) else None),
+                    "_basis": (
+                        "yalnız radyal yüklü dış kabuk (iki katmanlı "
+                        "rejeneratif cidar): eksenel bileşke sıfır, zar "
+                        "durumu kısıt yerinden bağımsız (N_phi = 0). İki "
+                        "kip, İKİ ucun Saint-Venant bandının da dışında "
+                        "kalan ortak bölgede kıyaslanır; kapı bu oranı "
+                        "okur. Yayımlanan sayı yine iki kipin KÖTÜMSERİDİR "
+                        "(tam hüküm bölgesi)."),
+                }
             if (b is not None and a is not None and b < a):
                 res = res_karsit
                 kip_kullanilan = karsit_kip
@@ -1741,6 +2262,9 @@ def run_structural_from_motor(motor_results: dict,
         else:
             _esik = kisit_yeri_duyarlilik_esigi(float(_nu))
             _oran = kisit_duyarliligi.get("oran")
+            if isinstance(kisit_duyarliligi.get("ortak_bolge"), dict):
+                # V3.0.5 SIVI-CIDAR: yalnız radyal kabukta ortak bölge oranı.
+                _oran = kisit_duyarliligi["ortak_bolge"].get("oran")
             _fark = None if _oran is None else float(_oran) - 1.0
             if _fark is None:
                 kisit_duyarliligi_olculemedi = True
@@ -2109,6 +2633,11 @@ def run_structural_from_motor(motor_results: dict,
                            else bool(_kapama_taban <= GEOMETRY_THICKNESS_TOL))
     if _kapama_taban_gecti is False:
         hukum_gerekceleri.append("kapama_taban_payi_asildi")
+    # V301/L-KABUK · L-B DEVİR 3: motorun cidar hükmü geri çekildiyse ya da
+    # cidar iki katmanlıysa köprü de hükmü tutar ve nedenini söyler.
+    motor_cidar_kapisi = _sivi_motor_cidar_kapisi(
+        motor_results, inputs.get("engine_layout"))
+    hukum_gerekceleri.extend(motor_cidar_kapisi["gerekceler"])
     kapama_tabani = {
         "kapi": _kapama_taban_gecti,
         "pay": _kapama_taban,
@@ -2170,6 +2699,12 @@ def run_structural_from_motor(motor_results: dict,
         # P8B1-03 ŞART: kapama tabanı payı artık hükmün MAKİNE-OKUR
         # alanında; beyan cümlesinin yanında kapının kendisi de durur.
         "kapama_tabani": kapama_tabani,
+        # V301/L-KABUK: motorun cidar hükmü + iki katmanlı cidar kapısı.
+        "motor_cidar_kapisi": motor_cidar_kapisi,
+        # V3.0.5 SIVI-CIDAR (kalem 3): iki katmanlı cidarda katman katman
+        # hüküm (astar motordan, kabuk bu FEA'dan); tek katmanda None.
+        "katman_hukumleri": _iki_katman_hukumleri(
+            inputs, res.min_safety_factor, not hukum_gerekceleri),
         "scl_lineerlestirme": _scl or None,
         # OH-DK-04: yük modelinin dengesi hükmün yanında (makine-okur).
         "kuvvet_dengesi": kuvvet_dengesi,
@@ -2467,6 +3002,27 @@ def _extract_burn_time_s(motor_results: dict):
     return v, beyan
 
 
+#: V301/PANEL (NK-12): motorun yayımladığı LÜLE malzemesinin yolları (öncelik
+#: sırasıyla; hibrit motor sözlüğü ve katı sonucu ``nozzle_material_analysis``
+#: taşır, katı ayrıca ``nozzle_design.material_key``). Sıvıda lüle
+#: rejeneratif kamara cidarının parçasıdır; blok yoksa kamara malzemesi kalır.
+NOZZLE_MATERIAL_PATHS = ("nozzle_material_analysis.material",
+                         "nozzle_design.material_key")
+
+
+def _lule_malzemesi(motor_results):
+    """(lüle malzemesi anahtarı, yol) ya da ``None`` — uydurma yok."""
+    if not isinstance(motor_results, dict):
+        return None
+    for yol in NOZZLE_MATERIAL_PATHS:
+        o = motor_results
+        for parca in yol.split("."):
+            o = o.get(parca) if isinstance(o, dict) else None
+        if isinstance(o, str) and o.strip():
+            return o.strip(), yol
+    return None
+
+
 def _extract_thermal_material(material_key: str):
     """materials_db kaydından ρ, c_p, k [SI] — eksikse red.
 
@@ -2577,6 +3133,34 @@ def extract_thermal_inputs(motor_results: dict,
             "reason": reason,
             "warning": _warning(code, **params),
         }
+
+    # --- V301/PANEL (NK-12) · TERMAL ALAN LÜLEDİR, MALZEMESİ LÜLENİN ------
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/panel/fea_malzeme_once.json, örnek
+    # hibrit, panelin kendi zinciri): alan yalnız lüle (include_chamber =
+    # False: h(z) yalnız lüle konturunda tanımlı) ama cidar KAMARA
+    # malzemesiyle (ss_304) çözülüyordu → tepe 3243,6 K, "erime noktası
+    # aşılıyor (1673 K)". Motor aynı lüleyi seçilen malzemeyle (grafit, izin
+    # 3300 K) değerlendiriyor. Lüle cidarı artık motorun YAYIMLADIĞI lüle
+    # malzemesiyle çözülür; kaynağı yazılır. Kamara da isteniyorsa ve iki
+    # malzeme farklıysa tek malzemeli ağ iki cidarı anlatamaz: adlı ret
+    # (kamara malzemesi lüleye sessizce uygulanmaz).
+    # V301/FİZİK-2: çözüm profil denetimlerinden ÖNCE yapılır — iki malzemeli
+    # ret profilden bağımsızdır, ağın malzemesini h(z) çapa kapısı da okur.
+    malzeme_anahtari = yapisal["material_key"]
+    malzeme_kaynagi = "kamara malzemesi (yapısal çıkarım)"
+    lule = _lule_malzemesi(motor_results)
+    if lule is not None and lule[0] != malzeme_anahtari:
+        if include_chamber:
+            return _red(
+                ["iki malzemeli cidar (kamara + lüle)"],
+                f"kamara '{malzeme_anahtari}' ve lüle '{lule[0]}' ({lule[1]}) "
+                "farklı malzeme; termal çözücü tek malzemeli ağ kurar ve "
+                "kamara malzemesi lüleye uygulanmaz. Lüle alanı "
+                "(include_chamber = False) lülenin kendi malzemesiyle "
+                "çözülür. Sıcaklık alanı ÜRETİLMEDİ.",
+                code=WARN_INPUTS_MISSING, missing="iki malzemeli ağ")
+        malzeme_anahtari = lule[0]
+        malzeme_kaynagi = f"motorun lüle malzemesi ({lule[1]})"
 
     if not isinstance(axial_profile, dict):
         return _red(
@@ -2787,11 +3371,53 @@ def extract_thermal_inputs(motor_results: dict,
     # boğazda 51.845,1 W/m²K, 6,18 kat) ve global maks çapası geçerli bir
     # profili mertebe dışı sayıp reddederdi. Çapa artık geometrik boğaza EN
     # YAKIN profil istasyonundan okunur.
+    # --- V301/FİZİK-2 (NK-12) · ÇAPA AĞIN MALZEMESİYLE TUTARLI OLMALI ------
+    # Motorun yayımladığı boğaz katsayıları (MOTOR_THROAT_HG_FIELDS) motorun
+    # ısı zincirinin malzemesiyle — kamara malzemesi — kurulur: Bartz σ
+    # düzeltmesi referans cidar sıcaklığına bağlıdır (Sutton & Biblarz Eş.
+    # 8-22; ``gas_side_reference_wall_temperature`` alanı, ss_304'te 1073 K).
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/fizik-2/k1_capa_once.json, panelin
+    # gövdesi, motorun gazı): aynı boğazda kamara malzemesiyle profil = çapa
+    # (sapma 0), grafitle %19,5-20,5 (yalnız σ farkı); gazı beyan etmeyen
+    # gövdede %38 → NOT_MODELLED. Malzemesi farklı iki katsayının farkı
+    # profilin bu motordan gelip gelmediğini SÖYLEMEZ; tolerans gevşetilmez,
+    # karşılaştırma da yapılmaz: motor ağın (lülenin) malzemesiyle bir boğaz
+    # katsayısı yayımlamadığından lüle bölgesi kapıdan ADIYLA dışarıda
+    # kalır ve bu beyan edilir. Olumlu malzeme-sınırı hükmü bu nedenle geri
+    # çekilir (VERDICT_WITHHELD_HG_ANCHOR_MATERIAL); aşım (True) kalır.
+    capa_malzemesi = yapisal["material_key"]
     bogaz_adaylari = _motor_bogaz_adaylari(motor_results)
     i_bogaz_profil = int(np.argmin(np.abs(x_m - z_bogaz_kontur)))
     hg_profil_tepe = float(h_g[i_bogaz_profil])
     hg_capalari = bogaz_adaylari["h_g_W_m2K"]
-    if hg_capalari:
+    if hg_capalari and malzeme_anahtari != capa_malzemesi:
+        hg_kapi = {
+            "durum": "calistirilamadi",
+            "neden": HG_GATE_NOT_RUN_ANCHOR_MATERIAL,
+            "profil_tepe_h_g_W_m2K": hg_profil_tepe,
+            "capa_alanlari_W_m2K": dict(hg_capalari),
+            "capa_malzemesi": capa_malzemesi,
+            "ag_malzemesi": malzeme_anahtari,
+            "capa_referans_cidar_K": _finite_positive(_nested_get(
+                motor_results, ("heat_transfer_analysis",
+                                "heat_transfer_coefficients",
+                                "gas_side_reference_wall_temperature"))),
+            "tolerans": THERMAL_HG_CROSS_CHECK_TOL,
+            "beyan": (
+                "motorun boğaz gaz-tarafı katsayıları ("
+                + "; ".join(sorted(hg_capalari))
+                + f") '{capa_malzemesi}' (kamara) malzemesinin referans "
+                "cidar sıcaklığıyla kurulmuştur; termal alan lüle cidarıdır "
+                f"ve '{malzeme_anahtari}' ile çözülür. Bartz σ düzeltmesi "
+                "cidar sıcaklığına bağlı olduğundan iki katsayı aynı "
+                "büyüklük değildir ve aralarındaki fark profilin bu "
+                "motordan gelip gelmediğini söylemez. Motor lüle "
+                "malzemesiyle bir boğaz katsayısı yayımlamıyor: LÜLE "
+                "BÖLGESİ bu kapıdan dışarıda kaldı, h(z) mertebesi ÇAPRAZ "
+                "DENETLENMEDİ. Tolerans gevşetilmedi; olumlu malzeme-sınırı "
+                "hükmü (exceeds_* = false) geri çekilir, aşım korunur."),
+        }
+    elif hg_capalari:
         # En YAKIN motor kanalına göre sapma: motorun kendi kanalları
         # arasındaki ayrışma (ölçülü %6,58) profili suçlamak için gerekçe
         # değildir; profil kanalların HİÇBİRİNE yakın değilse reddedilir.
@@ -2884,8 +3510,10 @@ def extract_thermal_inputs(motor_results: dict,
               "resolution_ok alanı kaldırılmalıdır. Sıcaklık alanı "
               "ÜRETİLMEDİ.")
 
-    termal_malzeme, m_beyan = _extract_thermal_material(
-        yapisal["material_key"])
+    # V301/PANEL (NK-12) + V301/FİZİK-2: ağın malzemesi (``malzeme_anahtari``)
+    # h(z) makullük kapısından ÖNCE çözüldü (aşağıda değil, kapının hemen
+    # üstünde) — kapı çapasının malzemesini ağın malzemesiyle karşılaştırır.
+    termal_malzeme, m_beyan = _extract_thermal_material(malzeme_anahtari)
     if termal_malzeme is None:
         return _red(["malzeme ısıl özellikleri (ρ, c_p, k)"], m_beyan,
                     code=WARN_INPUTS_MISSING,
@@ -2965,6 +3593,7 @@ def extract_thermal_inputs(motor_results: dict,
         },
     }
     basis["isil_malzeme"] = m_beyan
+    basis["isil_malzeme_kaynagi"] = malzeme_kaynagi
     basis["yanma_suresi"] = t_beyan
     basis["kamara_uzantisi_termal"] = (
         "kamara silindiri termal alana EKLENMEDİ — gaz tarafı h(z) yalnız "
@@ -2991,6 +3620,10 @@ def extract_thermal_inputs(motor_results: dict,
     out["h_g_W_m2K"] = h_g
     out["t_recovery_K"] = t_rec
     out["thermal_material"] = termal_malzeme
+    # V301/PANEL (NK-12): ağın malzemesi = termal malzeme (lüle alanında
+    # lülenin malzemesi); profil ⟷ ağ malzeme kapısı bu anahtarı okur.
+    out["material_key"] = malzeme_anahtari
+    out["thermal_material_source"] = malzeme_kaynagi
     out["burn_time_s"] = t_end
     out["profile_clamped"] = bool(kirpma)
     return out
@@ -3038,6 +3671,11 @@ VERDICT_WITHHELD_GAS = "gas_properties_assumed"
 #: ``VERDICT_WITHHELD_GAS``tan AYRI bir kodla yazılır: burada bilinen şey
 #: "varsayıldı" değil "beyan edilmedi"dir.
 VERDICT_WITHHELD_GAS_UNDECLARED = "gas_properties_not_declared"
+#: V301/FİZİK-2 (NK-12): h(z) makullük kapısı lüle bölgesinde ÇALIŞMADI
+#: (çapa kamara malzemesiyle kurulu, ağ lüle malzemesiyle çözülüyor;
+#: ``HG_GATE_NOT_RUN_ANCHOR_MATERIAL``). Mertebesi denetlenmemiş h(z) ile
+#: "izin içinde" denmez; aşım (True) yine gizlenmez.
+VERDICT_WITHHELD_HG_ANCHOR_MATERIAL = "hg_cross_check_not_run_anchor_material"
 
 #: Profil gaz künyesinin durumu (``material_limits.gas_properties_status``
 #: ve ``h_profili.gaz_beyani.status``) — makine kodları, tek yerde.
@@ -3084,7 +3722,8 @@ def _profil_gaz_beyani(gaz) -> tuple:
 
 def _olumlu_hukum_kapisi(sinir: dict, uzamsal: dict,
                          zaman_adimi: Optional[dict],
-                         axial_profile: Optional[dict]) -> dict:
+                         axial_profile: Optional[dict],
+                         hg_kapi: Optional[dict] = None) -> dict:
     """Termal FEA malzeme-sınırı hükmünün OLUMLU yarısının kapısı.
 
     Karar §28-24 §1 (Astra şartı c): yakınsamamış alan ("sayısal yakınsama
@@ -3118,6 +3757,12 @@ def _olumlu_hukum_kapisi(sinir: dict, uzamsal: dict,
         nedenler.append(VERDICT_WITHHELD_GAS_UNDECLARED)
     if varsayilan:
         nedenler.append(VERDICT_WITHHELD_GAS)
+    # V301/FİZİK-2 (NK-12): lüle bölgesi h(z) makullük kapısının dışında
+    # kaldıysa (çapanın malzemesi ağınkinden farklı) olumlu hüküm verilmez.
+    capa_disi = (isinstance(hg_kapi, dict) and hg_kapi.get("neden")
+                 == HG_GATE_NOT_RUN_ANCHOR_MATERIAL)
+    if capa_disi:
+        nedenler.append(VERDICT_WITHHELD_HG_ANCHOR_MATERIAL)
     guncel = {
         "numerical_convergence": sayisal,
         "gas_properties_status": gaz_durum,
@@ -3136,6 +3781,18 @@ def _olumlu_hukum_kapisi(sinir: dict, uzamsal: dict,
             "an exceedance (true) is always kept (ÖH D37 A2-1, decision "
             "§28-24 §1 c and §2 b; round 8, re-audit 7 S1)."),
     }
+    if capa_disi:
+        guncel["hg_anchor_material"] = hg_kapi.get("capa_malzemesi")
+        guncel["hg_mesh_material"] = hg_kapi.get("ag_malzemesi")
+        guncel["hg_cross_check_basis"] = (
+            "the h(z) magnitude cross-check (P8B2-01) did not run for the "
+            "nozzle wall: the motor's throat gas-side coefficients are built "
+            "with the chamber material's reference wall temperature, the "
+            "mesh is solved with the nozzle material, and the motor "
+            "publishes no throat coefficient for that material (Bartz sigma "
+            "depends on wall temperature). The tolerance was not widened; a "
+            "positive verdict is withheld, an exceedance is kept "
+            "(V301/FIZIK-2, NK-12).")
     if nedenler:
         for bayrak in ("exceeds_allowable", "exceeds_melting"):
             if sinir.get(bayrak) is False:
@@ -3410,8 +4067,10 @@ def run_thermal_from_motor(motor_results: dict,
             peak_wall_T_K=round(float(res.peak_wall_T), 1),
             allowable_K=allow,
             melting_K=melt))
-    sinir.update(_olumlu_hukum_kapisi(sinir, uzamsal, res.meta.get(
-        "zaman_adimi"), axial_profile))
+    sinir.update(_olumlu_hukum_kapisi(
+        sinir, uzamsal, res.meta.get("zaman_adimi"), axial_profile,
+        hg_kapi=((inputs.get("_basis") or {}).get("h_profili")
+                 or {}).get("makulluk_kapisi")))
 
     meta = {
         "_source": "hrma.fea.bridge.run_thermal_from_motor",

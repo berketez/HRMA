@@ -56,23 +56,13 @@ hrma/app.py | high_fidelity | 9cf03cbce7e4 | MEŞRU: hata mesajında kademe adı
 hrma/app.py | high_fidelity | 89b94c674fec | MEŞRU: kademe yolunun mevcut olup olmadığını anlatan docstring.
 hrma/app.py | high_fidelity | 84cf76d445ba | MEŞRU: panelin fidelity_used alanından kademeyi tespit ettiğini anlatan yorum.
 hrma/app.py | high_fidelity | cf003692dbd5 | MEŞRU: kademe kimliği ('high_fidelity') ile karşılaştırma.
-hrma/static/js/i18n_common.js | high_fidelity | 4c007a04b6a0 | MEŞRU: kademe ADI — belirsizlik işi rozetinin metni, çözücünün 'high_fidelity' kademesini adlandırır (ürün/paket sıfatı değil). ÖH D25 arayuz a3 sembol taraması, aşama-2'nin OH-D24-05 satırı.
-hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 347463b9e387 | MEŞRU: yukarıdaki anahtarın panel içindeki İngilizce yedek metni; aynı kademe adı, aynı gerekçe (ikizi i18n_common.js'te kayıtlı).
+hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 347463b9e387 | MEŞRU: seçenek kimliği 'high_fidelity' /api/uncertainty-analysis'in 3000 örneklik Monte Carlo KADEMESİNİN ADIDIR (ürün/paket sıfatı değil); ekrandaki etiket i18n_common.js 'uq.levelHigh' anahtarından gelir (28 Eki: 'Extended / Kapsamlı (3000 örnek)').
 hrma/analysis/kinetic_efficiency.py | high_fidelity | 5a15b861d655 | MEŞRU: kademeye ait kayıp bandının tanımı.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | f45191013b5c | MEŞRU: kademenin girdi şeması docstring'i.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | aa9bcf64c6bd | MEŞRU: kademe kullanılamadığında basılan durum mesajı.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | 568c15b8c4c6 | MEŞRU: kademe kullanılamadığında basılan durum mesajı.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | 77a91ae03822 | MEŞRU: "Level 3" kademesinin adı (Cantera sonlu-hızlı).
 hrma/analysis/uncertainty.py | high_fidelity | d8e39a1a995a | MEŞRU: kademenin ölçülmüş koşu süresi notu.
-hrma/static/js/i18n_common.js | high_fidelity | 45f8245d717c | MEŞRU: kademe seçeneğinin arayüz etiketi.
-hrma/static/js/i18n_common.js | high_fidelity | d39010d0b475 | MEŞRU: kademe koşusunun kuyruğa alındığını anlatan panel metni.
-hrma/static/js/i18n_common.js | high_fidelity | 734229b8214e | MEŞRU: kademe işinin ilerleme etiketi.
-hrma/static/js/i18n_common.js | high_fidelity | 0634201a7e20 | MEŞRU: kademe işinin zaman aşımı mesajı.
-hrma/static/js/i18n_common.js | high_fidelity | 223a6b8e6aeb | MEŞRU: kademe işi gönderilirken basılan durum.
-hrma/static/js/i18n_common.js | high_fidelity | 930a0297d018 | MEŞRU: kademe seçeneğinin süre etiketi.
-hrma/static/js/panels/flow_panel.js | high_fidelity | 8e974e3f006f | MEŞRU: kademenin yalnız Cantera varsa listelendiğini anlatan yorum.
-hrma/static/js/panels/flow_panel.js | high_fidelity | 4feef3820c3e | MEŞRU: kademe yetenek sondası yorumu.
-hrma/static/js/panels/flow_panel.js | high_fidelity | 5fb5a21df907 | MEŞRU: kademe seçeneğinin İngilizce yedek etiketi.
 hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 8d92f0f58c55 | MEŞRU: kademe kimliği + etiket çifti.
 hrma/static/js/panels/uncertainty_panel.js | high_fidelity | f4b0e3924392 | MEŞRU: kademe koşusunun kuyruğa alındığını anlatan yedek metin.
 hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 7016c69864ba | MEŞRU: kademe işi gönderilirken basılan yedek durum.
@@ -191,7 +181,6 @@ hrma/fea/structural_axisym.py | safe_verdict_tr | dfd574a06b19 | MEŞRU: yorum s
 # ---------------------------------------------------------------------------
 
 # --- AÇIK BORÇ — kazanılmamış doğruluk/doğrulama hükmü, sahibi başka kulvar
-hrma/engines/combustion_analysis.py | dogrulanmistir_tr | e559d6cb7de5 | AÇIK BORÇ: "c* zaten yalnızca %0-1.5 içinde doğrulanmıştır" — CEA'ya karşı kazanılmış bir doğruluk BANDI iddiası; 'cea_validated' kuralının kendi gerekçesi bunun tersini ölçmüş (fakir karışımda −%2,8..−%5,9). Dosya ÖH D22'de ÖK-06 ile KİLİTLİ (kayan denge bölgesi); sahibi fizik kulvarıdır.
 hrma/engines/hybrid_rocket_engine.py | dogrulanmistir_tr | 15aaa1af306a | AÇIK BORÇ: "NASA CEA'ya %0-1.5 içinde doğrulanmıştır" — aynı sınıf doğruluk bandı iddiası, altı yakıt × üç oksitleyici için genelleniyor; depoda bu bandı ölçen bir kod yolu koşmuyor. Sahibi hibrit kulvarıdır.
 hrma/engines/liquid_rocket_engine.py | dogrulanmistir_tr | c73395159330 | AÇIK BORÇ: "14 gerçek motorun TESLİM verisine karşı doğrulanmıştır" — doğrulama KAMPANYASI iddiası; depoda 14 motorluk bir teslim-verisi karşılaştırması koşmuyor. Sahibi sıvı kulvarıdır.
 
@@ -240,3 +229,13 @@ hrma/engines/solid_rocket_engine.py | provenance_label | 3bdf3af3dd82 | MEŞRU: 
 # "oxidizer_depleted" ile ölçülü. Yeni kural EKLENMEDİ, eşik GEVŞETİLMEDİ:
 # tarama sonrası kayıtsız isabet 0, kayıtlı 89/89.
 # ---------------------------------------------------------------------------
+# T-ÇAPA-C2 (27 Eki 2026): V301/L-KABUK (823e59841) ve V301/N-girdi-2 isabetleri, ölçüldü.
+# ---------------------------------------------------------------------------
+# V301/CI-ÜRÜN (28 Eki 2026, main 05d6d15a8 üzerinde ölçüldü): beş ÖLÜ kayıt silindi.
+# * liquid_rocket_engine.py | builtin_table_claim | 63cd886138bc — Bartz μ/Pr yedeğinin
+#   künye satırı T-ÇAPA-C1 parti 9 (43a81048b) ile değişti; ağaçta bu karmalı satır yok ve
+#   dosyada kayıtsız isabet de yok (iddia_lint: kayıtsız isabetlerin hiçbiri hrma/ altında değil).
+# * i18n_common.js 45f8245d717c, flow_panel.js 4feef3820c3e / 5fb5a21df907 / 8e974e3f006f —
+#   PANEL-SAYI (05d6d15a8) akış panelinin "High-Fidelity" etiketini "Cantera sonlu hızlı
+#   kinetik" yaptı; dört satır artık kuralın kalıbını taşımıyor.
+# Ürün metnine dokunulmadı; kural eklenmedi, eşik gevşetilmedi.

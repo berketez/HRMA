@@ -383,6 +383,17 @@ BANTSIZ_ALANLAR = {
     'characteristic_length', 'gimbal_actuator_arm', 'gimbal_ring_offset',
     'gimbal_bolt_circle', 'gimbal_bolt_count', 'traj_initial_mass',
     'traj_final_mass', 'traj_drag_coeff', 'traj_ref_area', 'traj_burn_time',
+    # T-ÇAPA-C2 (27 Eki) GEREKÇE: V301/L-C (8ee59c845, SV-07/SV-13) sıvı
+    # pintle ölçü alanları. Üst sınırları SABİT bir sayı değil, çözülen
+    # kamaranın kendisidir: uçta iki kapı var — (1) değer kapısı
+    # ``injector_design.pintle_clean_inputs`` (sonlu pozitif mm; delik
+    # sayısı tam sayı >= 1; aksi adlı 422), (2) geometri kapısı
+    # ``app._sivi_pintle_oda_siniri`` (D_p + 2t kamara çapından, L_s kamara
+    # boyundan küçük; aksi 'does_not_fit_chamber' 422). Sabit bir
+    # ``_override_val`` bandı uydurulmaz; tarayıcı yalnız alt sınırı (min)
+    # taşır.
+    'pintle_diameter', 'annular_gap', 'pintle_radial_hole_count',
+    'pintle_radial_hole_diameter', 'skip_distance',
 }
 
 

@@ -435,6 +435,12 @@ class TestBeyan:
         assert 'note' in b and 'did not enter' in b['note']
 
 
+#: V301/B7 — gaz + C(gr) kâhininin O/F 1,0 / 30 bar değeri [K] (aşağıdaki
+#: bağımsız kâhinle ölçüldü, 21 Eki 2026). Gaz-yalnız eski değer
+#: 1094,966551526537 K idi.
+KAHIN_OF1_GAZ_CGR_K = 1420.232512836792
+
+
 class TestCanteraKahini:
     """HRMA'nın HP kökü ⟷ Cantera'nın DOĞRUDAN dengesi (bağımsız kâhin).
 
@@ -444,8 +450,17 @@ class TestCanteraKahini:
     ``tests/test_combustion.py``deki iki HP çapasının yeni değerini verir.
     """
 
+    # V301/B7 (21 Eki, ÖNEMLİ, Berke onaylı) — O/F 1,0 ÇAPASI YENİLENDİ.
+    # O/F 1,0'da gaz dengesi karbonca aşırı doymuş (ln a_C > 0): gerçek
+    # denge gaz + katı karbon C(gr)'dir (NASA RP-1311 Part I eş. 2.11, 3.7).
+    # Kâhin de buna göre genişletildi ve HRMA'dan BAĞIMSIZ kaldı: karbon
+    # aktivitesi μ_CH4 − 2μ_H2 − μ°_C(gr) ile (HRMA en küçük kareler element
+    # potansiyeli kullanır), grafit termosu Cantera graphite.yaml türünden,
+    # iç kök ε'da brentq. Önce (gaz-yalnız) 1094,966551526537 K → sonra
+    # 1420,232512836792 K (HRMA 1420,23145 K, fark 1,1e-3 K). O/F 4,0'te
+    # gaz doymamış; kâhin ε = 0 ile eski değeri birebir verir. Kanıt: docs/scofield/raw/OH/V301/makale1/B7/RAPOR.md.
     @pytest.mark.parametrize('of, beklenen', [
-        (1.0, 1094.966551526537), (4.0, 2720.0317189114135)])
+        (1.0, KAHIN_OF1_GAZ_CGR_K), (4.0, 2720.0317189114135)])
     def test_hp_koku_cantera_ile_ayni(self, of, beklenen):
         ct = pytest.importorskip('cantera')
         from scipy.optimize import brentq
@@ -458,11 +473,33 @@ class TestCanteraKahini:
             ca.propellant_specs['n2o']['molecular_weight'])
         h_t = (h_y + of * h_o) / (1.0 + of)
         gaz = ct.Solution('gri30.yaml')
+        gr = [t for t in ct.Species.list_from_file('graphite.yaml')
+              if t.name == 'C(gr)'][0].thermo
+        M_C = gaz.atomic_weight('C')
+        y0 = {k: v for k, v in el.items() if v > 1e-10}
+        top = sum(y0.values())
+        y0 = {k: v / top for k, v in y0.items()}
+
+        def _gaz_kur(T, e):
+            y = dict(y0)
+            y['C'] -= e
+            gaz.TPY = T, 30e5, {k: v / (1.0 - e) for k, v in y.items()}
+            gaz.equilibrate('TP')
+
+        def _ln_aC(T, e):
+            _gaz_kur(T, e)
+            mu = gaz.chemical_potentials
+            lam = mu[gaz.species_index('CH4')] - 2 * mu[gaz.species_index('H2')]
+            return (lam - (gr.h(T) - T * gr.s(T))) / (ct.gas_constant * T)
 
         def _kalan(T):
-            gaz.TPY = T, 30e5, comp
-            gaz.equilibrate('TP')
-            return gaz.enthalpy_mass - h_t
+            e = 0.0
+            if _ln_aC(T, 0.0) > 0.0:
+                e = brentq(lambda x: _ln_aC(T, x), 0.0, y0['C'] * (1 - 1e-9),
+                           xtol=1e-15, rtol=1e-14)
+            _gaz_kur(T, e)
+            h_s = gr.h(T) / M_C
+            return (1.0 - e) * gaz.enthalpy_mass + e * h_s - h_t
 
         T_kahin = brentq(_kalan, 300.0, 5000.0, xtol=1e-10, rtol=1e-14)
         assert T_kahin == pytest.approx(beklenen, abs=1e-3)
@@ -723,8 +760,19 @@ class TestYanUclar:
         tg, ts = g['transient'], s['transient']
         for ad in GECICI_SAYISAL_YAPRAKLAR:
             assert tg[ad] != ts[ad], ad
+        # V301/T-ÇAPA-D: H-PANEL (74b55500a) uçların (/calculate, geçici
+        # analiz, belirsizlik) hibrit c* verimini TEK çözümleyiciden alır
+        # (``resolve_hybrid_c_star_efficiency``; alan yoksa kaynaklı η=0,89);
+        # doğrudan kurulan motor η verilmezse ideal c*'tır. Kıyas motoru aynı
+        # çözümleyicinin verdiği η ile kurulur — aynı form, aynı motor.
+        from hrma.engines.hybrid_rocket_engine import (
+            resolve_hybrid_c_star_efficiency)
+        eta = resolve_hybrid_c_star_efficiency(
+            GECICI_GOVDE['oxidizer_type'], GECICI_GOVDE['fuel_type'],
+            None)['eta_engine']
         with contextlib.redirect_stdout(io.StringIO()):
-            m = HybridRocketEngine(oxidizer_phase='gas', **GECICI_GOVDE)
+            m = HybridRocketEngine(oxidizer_phase='gas', eta_c_star=eta,
+                                   **GECICI_GOVDE)
             m.calculate()
             dogrudan = TransientBallistics(m).solve()
         for ad in GECICI_SAYISAL_YAPRAKLAR:
@@ -760,6 +808,13 @@ class TestUqFabrikasi:
         gaz = self._nominal(oxidizer_phase='gas')
         assert t == k  # takma ad ile kanonik ad aynı
         assert t['c_star'] < v['c_star'] < gaz['c_star']
+        # V301/T-ÇAPA-D: UQ fabrikası (uq_adapters) c* verimini H-PANEL'in
+        # TEK çözümleyicisinden alır (alan yoksa kaynaklı η=0,89; ölçüldü:
+        # UQ c* 1417,56 = 0,89 × 1592,76); doğrudan motor aynı η ile kurulur.
+        from hrma.engines.hybrid_rocket_engine import (
+            resolve_hybrid_c_star_efficiency)
+        eta = resolve_hybrid_c_star_efficiency(
+            g.get('oxidizer_type', 'n2o'), g['fuel_type'], None)['eta_engine']
         with contextlib.redirect_stdout(io.StringIO()):
             m = HybridRocketEngine(
                 thrust=g['thrust'], burn_time=g['burn_time'],
@@ -767,7 +822,8 @@ class TestUqFabrikasi:
                 of_ratio=g['of_ratio'], fuel_type=g['fuel_type'],
                 regression_a=g['regression_a'],
                 regression_n=g['regression_n'],
-                fuel_density=g['fuel_density'], tank_temperature=273.15)
+                fuel_density=g['fuel_density'], tank_temperature=273.15,
+                eta_c_star=eta)
             r = m.calculate()
         assert t['c_star'] == r['c_star']
         assert t['isp'] == r['isp']

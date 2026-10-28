@@ -1709,21 +1709,30 @@ class TestKullanilabilirlikK2:
             assert gen <= cizim_h, (
                 f'y başlık satırı {s!r} ({gen:.0f}px) çizim yüksekliğine '
                 f'({cizim_h}px) sığmıyor')
-        assert lay['margin']['b'] == p['bottomMargin'][0], (
+        # V301/PANEL-SAYI (28 Eki): lejant x-başlığının ALTINDA kendi
+        # bloğunda (yanchor top); blok yüksekliği alt marja eklenir. ÖLÇÜLDÜ:
+        # eski sözleşmede Plotly lejantı y <= 1/3'te ALT kenarından bağlayıp
+        # x-başlığının üstüne bindiriyordu (1280/1440 × TR/EN). Formül panelin
+        # KENDİ metriklerinden; sabit piksel tahmini yok.
+        lejant_blok = (metrikler['legendGapPx']
+                       + len(cagri['traces']) * metrikler['legendRowPx']
+                       + metrikler['legendPadPx'])
+        assert lay['margin']['b'] == p['bottomMargin'][0] + math.ceil(lejant_blok), (
             f"margin.b={lay['margin']['b']} panelin kendi alt marj "
-            f"fonksiyonundan ({p['bottomMargin'][0]}) ayrışmış — sabit "
-            'piksel tahmini geri gelmiş olabilir')
+            f"fonksiyonundan ({p['bottomMargin'][0]}) + lejant bloğundan "
+            f"({lejant_blok}) ayrışmış — sabit piksel tahmini geri gelmiş olabilir")
         assert lay['margin']['l'] == p['leftMargin'], (
             f"margin.l={lay['margin']['l']} panelin kendi sol marj "
             f"fonksiyonundan ({p['leftMargin']}) ayrışmış")
         # Lejant alt marjın DIŞ kenarında: Plotly y'yi çizim yüksekliğinin
         # kesri okur, marj büyüyünce lejant da inmeli — yoksa 3 satırlık
         # başlık lejantın üstüne biner.
-        assert yakin(lay['legend']['y'], -lay['margin']['b'] / cizim_h,
+        assert lay['legend'].get('yanchor') == 'top'
+        assert yakin(lay['legend']['y'],
+                     -(p['bottomMargin'][0] + metrikler['legendGapPx']) / cizim_h,
                      bagil=1e-9), (
-            f"lejant y={lay['legend']['y']} alt marjdan türetilmemiş "
-            f"(beklenen {-lay['margin']['b'] / cizim_h:.4f}) — başlık "
-            'satırları arttığında lejantın altına girer')
+            f"lejant y={lay['legend']['y']} x-başlık bölgesinden türetilmemiş "
+            '— başlık satırları arttığında lejantın altına girer')
 
     def test_kok_yer_x_basligi_dar_sutunda_sarilir_ve_alt_marj_olculu(
             self, tmp_path, motor_hibrit, motor_sivi):

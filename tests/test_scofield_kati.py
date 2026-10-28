@@ -146,9 +146,14 @@ class TestF2_1MalzemeKimligi:
     def test_kopma_basinci_kap_cozucusuyle_bit_uyumlu(self, varsayilan_sonuc):
         """Motorun yayımladığı burst, aynı malzemeyle kap çözücüsünün değeri."""
         ps = varsayilan_sonuc['safety_analysis']['pressure_safety']
+        # V301/T-ÇAPA-A: kap çözücüsüne motorun KENDİ kasa iç çapı verilir.
+        # K-A KT-03'ten beri astar radyal yer kaplıyor: varsayılan kasa iç
+        # çapı tane 100 mm değil, 100 + 2·(astar + yalıtım) (``case_bore``
+        # künyesi). Sabit 100,0 eski "kasa = tane" kuralını kilitliyordu.
         pv = PressureVesselAnalyzer().analyze(
             meop_bar=max(ps['max_operating_pressure_bar'], 1e-6),
-            inner_diameter_mm=100.0,
+            inner_diameter_mm=float(
+                varsayilan_sonuc['case_bore']['case_inner_diameter_mm']),
             material=ps['case_material'],
             wall_thickness_mm=ps['case_wall_thickness_mm'],
         )

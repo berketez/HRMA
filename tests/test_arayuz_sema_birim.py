@@ -318,8 +318,30 @@ def test_hibrit_pintle_radyal_pay_alani_var():
         "buildSpec çözücünün okuduğu 'pintle.radial_fraction' alanını "
         'göndermiyor — kullanıcının çevirdiği kolun karşılığı yok')
     # Hibritte artık TMR hedefi GÖNDERİLMEZ (TMR bir çıktıdır).
-    assert re.search(r'if\s*\(isHybrid\)\s*\{[^}]*radial_fraction', src, re.S), (
-        'radial_fraction yalnız hibrit kolunda gönderilmiyor')
+    #
+    # T-ÇAPA-C2 (27 Eki): bu kilit eskiden kaynak metninde
+    # ``if (isHybrid) { ... radial_fraction`` desenini arıyordu. V301/E2 ve
+    # V301/L-C (f8504d4a4, SV-13) yükü TEK işleve taşıdı: buildSpec() hibritte
+    # specFromValues(readHybridValues()), sıvıda liquidSpecFromValues() çağırır;
+    # desen artık yok ama sözleşme duruyor. Kilit kaynak metni yerine yükü
+    # ÜRETEN işlevi düğümde çağırarak ölçer: hibrit pintle yükü radyal payı
+    # taşır, TMR hedefini taşımaz; sıvı yükü radyal payı taşımaz.
+    body = """
+const P = sandbox.window.InjectorPanel;
+OUT.hibrit = P.specFromValues({motor_type: 'hybrid', injector_type: 'pintle',
+    mdot_ox: 1.2, Pc_bar: 20, radial_fraction: 0.37, tmr_target: 2.0});
+OUT.sivi = P.specFromValues({motor_type: 'liquid', injector_type: 'pintle',
+    radial_fraction: 0.37, tmr_target: 2.0});
+"""
+    out = _node([STATIC_JS / 'injector_panel.js'], body)
+    hib = out['hibrit'].get('pintle') or {}
+    assert hib.get('radial_fraction') == pytest.approx(0.37), (
+        'radial_fraction hibrit pintle yükünde gönderilmiyor')
+    assert 'tmr_target' not in hib, (
+        'hibrit pintle yükü TMR hedefini gönderiyor (TMR çıktıdır)')
+    siv = out['sivi'].get('pintle') or {}
+    assert 'radial_fraction' not in siv, (
+        'radial_fraction yalnız hibrit kolunda gönderilmeli; sıvı yükünde var')
 
 
 def test_sivi_tmr_hedefinin_salt_eko_oldugu_beyan_ediliyor():

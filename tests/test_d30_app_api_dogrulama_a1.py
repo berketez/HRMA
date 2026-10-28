@@ -139,7 +139,13 @@ def test_p11b5_21_panel_metni_ham_html_basmaz():
         'panel hâlâ yalan "_tr" anahtarını okuyor')
     assert not re.search(r'\$\{dz\.pattern\.description\}', panel), (
         'uçtan gelen metin şablona HAM giriyor (kaçış yok)')
-    assert re.search(r'\$\{escText\(dz\.pattern\.description\)\}', panel), (
+    # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/DİL-2 803727196, NK-35):
+    # tanım önce çeviri kanalından (I18N.serverText) geçer, SONRA escText'e
+    # girer. Desen artık ``${escText(`` ile açılan ve aynı şablon
+    # yuvasında ``dz.pattern.description)}`` ile kapanan ifadeyi arar
+    # (arada başka yuva ya da ters tırnak yok): kaçış hâlâ en dış katman.
+    assert re.search(r'\$\{escText\((?:(?!\$\{|`).)*?dz\.pattern\.description\)\}',
+                     panel, re.S), (
         'açıklama escText süzgecinden geçmiyor')
     assert re.search(r'function\s+escText', panel), 'escText tanımı yok'
 

@@ -436,8 +436,13 @@ class TestP4B2_09GeometriZarfi:
         r = _ceket(wall_thickness=0.001).solve()
         assert not [w for w in r['summary']['warnings']
                     if 'THIN-WALL' in w]
+        # V301/L-REJ (26 Eki, Berke "Modeli bugün düzelt"): su yolunda
+        # kanat modeli + Sieder-Tate düzeltmesi. ÖLÇÜLDÜ: 882,3096781389031
+        # (eski: kanat yok, çarpan yok) -> 881,841193846079 (yalnız
+        # Sieder-Tate, fin_effect=False) -> 799,6510060294399 (ikisi).
+        # Çapanın kendisi korunur (rel 1e-12), yalnız değeri güncellendi.
         assert r['summary']['max_wall_hot_K'] == pytest.approx(
-            882.3096781389031, rel=1e-12)
+            799.6510060294399, rel=1e-12)
 
     def test_uyari_bandinda_hata_adiyla_soylenir(self):
         r = _ceket(wall_thickness=0.005).solve()

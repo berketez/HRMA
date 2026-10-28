@@ -243,6 +243,16 @@ UC_BEKCISI_OLMAYAN_URUN_ROTALARI = frozenset({
 #: Bu uçların sözleşmesini tek başına test yazıyor; listenin BÜYÜMESİ
 #: yeni bir "yalnız testin tanımladığı uç" demektir ve kırmızıdır.
 YALNIZ_TESTIN_CAGIRDIGI_ROTALAR = frozenset({
+    # v3.0.1 (Ayberk tur 1, kulvar K; 20 Eki 2026) — BORÇ KAYDI, AF DEĞİL.
+    # Hibrit/katı/sıvı sayfalarının açılışta çağırdığı '/api/database-status'
+    # yoklaması SÖKÜLDÜ: her makinede yanlışlıkla "NASA CEA / NIST WebBook
+    # Offline" rozeti basıyordu (CEA kolu ağsız yerel tablo, NIST ayrıştırıcısı
+    # gerçek HTML'le eşleşmiyordu; ikisi de hesaba sayı vermiyordu). Uç API
+    # uyumu için kaldı ve dürüstleşti (NIST: connection connected/not_connected
+    # + data_parsed ayrı; CEA: bağlantı kavramı yok); sözleşmesini artık
+    # tests/test_v301_kaynak_baglanti.py yazıyor. Gerçek çözüm: tüketicisi
+    # yoksa v3.1'de emekliye ayırmak.
+    '/api/database-status',
     # fix-8: 8 rota (advanced-performance-analysis, analysis/wall-profile,
     # comparative-analysis, correlation-report, flow-analysis,
     # kinetic-efficiency, uncertainty-analysis, validation/upload-csv)
@@ -757,6 +767,40 @@ def _altsimge_degerleri(arg, sozlukler):
     return degerler
 
 
+def _ithal_sozluk_degerleri(arg, agac):
+    """``ENDPOINTS[tip]`` — ad bir ``from M import N [as A]`` ile ithal
+    edilmiş ve ÇALIŞMA ANINDA bir sözlükse, TÜM değerleri.
+
+    V301/T-ÇAPA-D (28 Eki): beşinci kesin kalıp. ``tests.test_example_
+    projects.ENDPOINTS`` V301/UÇUŞ C-1'den beri ürünün kendi tablosudur
+    (``hrma.analysis.flight_vehicle.CALCULATION_ENDPOINTS``) ve testler onu
+    ithal edip ``ENDPOINTS[tip]`` ile çağırır; modülde literal olmadığı
+    için 1. kalıp göremiyordu. Tahmin yok: değerlerden biri dizge değilse ya
+    da ithal çözülemezse boş küme döner (fail-closed, kör nokta kalır).
+    """
+    if not (isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Name)):
+        return set()
+    ad = arg.value.id
+    kaynak = None
+    for d in ast.walk(agac):
+        if isinstance(d, ast.ImportFrom) and d.module and not d.level:
+            for a in d.names:
+                if (a.asname or a.name) == ad:
+                    kaynak = (d.module, a.name)
+    if kaynak is None:
+        return set()
+    try:
+        import importlib
+        nesne = getattr(importlib.import_module(kaynak[0]), kaynak[1])
+    except Exception:  # noqa: BLE001 — çözülemeyen ithal kör nokta kalır
+        return set()
+    if not isinstance(nesne, dict) or not nesne:
+        return set()
+    if not all(isinstance(v, str) for v in nesne.values()):
+        return set()
+    return set(nesne.values())
+
+
 def _sorgu_ekli_somut_yol(arg, kapsam):
     """``'/api/tile/a/5/10/5' + sorgu`` -> sol SOMUT yol.
 
@@ -1055,7 +1099,8 @@ def _testin_cagirdiklari(rotalar=None):
             elif isinstance(arg, ast.Name):
                 adaylar = set(kapsam.get(arg.id, ()))
             elif isinstance(arg, ast.Subscript):
-                adaylar = _altsimge_degerleri(arg, sozlukler)
+                adaylar = (_altsimge_degerleri(arg, sozlukler)
+                           or _ithal_sozluk_degerleri(arg, agac))
             else:
                 onek = _statik_onek(arg)
                 if onek:
@@ -1098,7 +1143,8 @@ def _cozulemeyen_rota_cagrilari():
             # ÖH V3 taban-b: ``UC[tip]`` — sözlüğün HER değeri gerçek bir
             # Flask kuralına çözülüyorsa çözülmüştür (biri bile çözülmezse
             # kör nokta sayılır).
-            degerler = _altsimge_degerleri(arg, sozlukler)
+            degerler = (_altsimge_degerleri(arg, sozlukler)
+                        or _ithal_sozluk_degerleri(arg, agac))
             if degerler and all(d.startswith('/') and _rotaya_cevir(d, rotalar)
                                 for d in degerler):
                 continue

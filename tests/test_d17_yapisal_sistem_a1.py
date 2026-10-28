@@ -246,7 +246,13 @@ class TestP5B209KardesUretici:
         # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 4,652338212874558 geri
         # çözülmüş APCP dörtlüsündendi; CEA denge dörtlüsüyle ölçülen yeni
         # taban (−3·10⁻⁷ bağıl; tanım ve yön aynı).
-        assert basinc['burst_margin'] == pytest.approx(4.652336825318477,
+        # V301/K-D: 4,652336825318477 -> 4,652337530766883 (+1,5·10⁻⁷ bağıl)
+        # V301/N-CEA-2'den (termokimya motorun Pc'sinde CEA): CEA kapalı koşu
+        # eski sayıyı BİT-AYNI veriyor (K-D/capa_olcum.json). Kasa cidarını
+        # HRMA boyutladığı için oran yarıçaptan bağımsızdır (t ∝ r), K-A
+        # KT-03'ün +4 mm kasası bu sayıyı değiştirmez; kayan yalnız MEOP
+        # (40,0001617 -> 40,0001556 bar).
+        assert basinc['burst_margin'] == pytest.approx(4.652337530766883,
                                                        rel=1e-9)
 
     def test_tanim_adiyla_yayimlanir(self, basinc):

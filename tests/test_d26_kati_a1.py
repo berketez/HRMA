@@ -69,7 +69,10 @@ TABAN_ATIL_SURE = 4.479165439800482
 #: Ş-3): taban itkisi (yukarıda, tarihsel atıl üçlünün parçası olarak
 #: korunur) geri çözülmüş APCP dörtlüsündendi; CEA denge dörtlüsüyle ölçülen
 #: yeni taban. Yanma süresi değişmedi (TABAN_ATIL_SURE aynen geçerli).
-HEDEFSIZ_GEOMETRI_ITKI = 1946.6898189765143
+#: V301/T-ÇAPA-A: N-CEA-2 (termokimya motorun Pc'sinde NASA CEA'dan)
+#: sonrası yeniden ölçüldü: 1946,6898189765143 -> 1932,123297811677 N;
+#: CEA kapalı aynı gövde eski sayıyı BİT-AYNI verir, süre değişmedi.
+HEDEFSIZ_GEOMETRI_ITKI = 1932.123297811677
 
 
 @pytest.fixture(scope='module')
@@ -209,8 +212,15 @@ class TestZarfGerekcesi:
 # ---------------------------------------------------------------------------
 class TestSaglikliYolDegismedi:
 
+    # V301/K-D (T-çapa-A DEVİR 2): 300 N artık zarfın İÇİNDE DEĞİL. Zarf
+    # port ⟷ boğaz kapısını kısıt olarak taşıyor: ölçüldü (bu gövde), en
+    # küçük itki 287,50 N -> 334,27 N; 300 N'de boyutlandırılabilen tek aday
+    # (çekirdek 6,76 mm) kapı oranı 0,655 ile portta boğuluyordu ve eski
+    # akışta motorun kendi kapısından 422 alıyordu. Zarfın tuttuğu örnek
+    # nokta olarak 350 N alındı (ölçülen kapı oranı 1,164, HTTP 200).
+    # 300 N'nin ADLI reddi tests/test_v301_kd_tasarim_noktasi.py'de.
     @pytest.mark.parametrize('itki,beklenen_hedef', [
-        (300.0, 300.0),
+        (350.0, 350.0),
         (1500.0, 1500.0),
         (2500.0, 2500.0),
     ])
@@ -307,7 +317,17 @@ class TestKapiSirasi:
     #: D22'nin gövdesiyle aynı rejim: çözücü yakınsamaz (n = 1,0).
     YAKINSAMAYAN = {'burn_rate_n': 1.0, 'burn_rate_a': 0.005}
 
-    def test_yakinsamayan_kosum_zarf_kapisina_yakalanmaz(self, client):
+    def test_yakinsamayan_kosum_zarf_kapisina_yakalanmaz(self, client,
+                                                          monkeypatch):
+        # V301/T-ÇAPA-A: bu rejim (a = 0,005, n = 1,0) portu boğulan bir
+        # motor kurar ve K-A port kapısı (KT-23) çözücüden ÖNCE 422
+        # ``invalid_input`` döndürür. Bu düğümün konusu zarf kapısı ⟷ D22
+        # yakınsamama kapısı sırasıdır, port değil; port kapısı burada
+        # BİLEREK devre dışı (K-A ``test_solid_codex_fixes`` deseni). Port
+        # kapısının D22 tanı alanlarını taşımaması ayrı soru: RAPOR DEVİR.
+        from hrma.engines.solid_rocket_engine import SolidRocketEngine
+        monkeypatch.setattr(SolidRocketEngine, '_check_port_throat',
+                            lambda self: None)
         kod, govde = _post(client, thrust=20, **self.YAKINSAMAYAN)
         assert kod == 422, kod
         assert govde['status'] == 'NOT_CONVERGED', govde['status']

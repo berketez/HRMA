@@ -242,9 +242,15 @@ class TestT08UcusGovdesi:
 
     @staticmethod
     def _okunan_alanlar(js):
-        """JS'in ``fieldNum`` ile GERÇEKTEN okuduğu id'ler (bildirim değil)."""
+        r"""JS'in ``fieldNum`` ile GERÇEKTEN okuduğu id'ler (bildirim değil).
+
+        V301/UÇUŞ C-25: ``fieldNum`` artık TEK argümanlıdır (yedek sayı
+        parametresi söküldü — boş alan null döner ve gönderilmez); eski
+        ``fieldNum\((.*?),`` deseni yedek argümanının virgülüne dayanıyordu.
+        İlk argüman (id) okunur; çağrının biçimi değişse de küme ölçüsü aynı.
+        """
         return [c.strip().strip("'\"")
-                for c in re.findall(r'(?<!function )fieldNum\((.*?),', js)]
+                for c in re.findall(r'(?<!function )fieldNum\(\s*([^,)]*)', js)]
 
     @classmethod
     def _kume_esitligi(cls, html):
@@ -340,7 +346,7 @@ class TestT08UcusGovdesi:
         js = yorumsuz(inline_script(ls_html))
         assert not re.search(r'[^\w.]num\s*\(', js), 'çıplak num( çağrısı kaldı'
         # (?<!function ) → bildirim satırlarını değil, ÇAĞRILARI süz
-        cagrilar = re.findall(r'(?<!function )fieldNum\((.*?),', js)
+        cagrilar = re.findall(r'(?<!function )fieldNum\(\s*([^,)]*)', js)
         # Sayı yerine KÜME: okuyucunun gördüğü alanlar şablonunkilerle bire
         # bir aynı olmak zorunda (iki yönlü; yeni alan ikisini birlikte
         # büyütür).

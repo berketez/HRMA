@@ -135,12 +135,19 @@ class TestOHD2103GerceklesenLStar:
     d_t 21,8410 / 21,8055 / 21,7836 mm, L 0,69122 / 0,69012 / 0,68944 m,
     L*_ach 3,55036 / 3,54686 / 3,54470 m."""
 
+    # v3.0.1 kulvar P: grain dış çapı = son port çapı (eski 1,5·D_son
+    # değil); art-yanma odası bandı D_ch'ye bağlı olduğundan bantlar kaydı.
+    # Ölçüldü (bu motor): L* <= 2,5 grain_limited (L*_ach 3,0045 m), 3,0 ve
+    # 3,5 l_star_derived, >= 4,0 tavanda (3,862 m). Taban üçlüsü 1/2/3 ->
+    # 1/2/2,5; etkin bant çifti 4/6 -> 3/3,5.
+    UCLU = (1.0, 2.0, 2.5)
+
     @pytest.fixture(scope='class')
     def band(self):
-        return {ls: _kucuk(ls) for ls in (1.0, 2.0, 3.0)}
+        return {ls: _kucuk(ls) for ls in self.UCLU}
 
     def test_grain_limited_bantta_uc_kosum_BIT_AYNI(self, band):
-        (_, a), (_, b), (_, c) = (band[1.0], band[2.0], band[3.0])
+        (_, a), (_, b), (_, c) = (band[1.0], band[2.0], band[2.5])
         for r in (a, b, c):
             assert r['l_star_achieved'] > r['l_star']
         assert b['l_star_achieved'] == a['l_star_achieved']
@@ -149,12 +156,12 @@ class TestOHD2103GerceklesenLStar:
         assert c['chamber_length'] == a['chamber_length']
 
     def test_ulasilamayan_L_star_bogaz_capini_OYNATMAZ(self, band):
-        (ea, _), (eb, _), (ec, _) = (band[1.0], band[2.0], band[3.0])
+        (ea, _), (eb, _), (ec, _) = (band[1.0], band[2.0], band[2.5])
         assert eb.d_t == ea.d_t
         assert ec.d_t == ea.d_t
 
     def test_kinetik_verim_gerceklesen_L_star_ile_cozulur(self, band):
-        for ls in (1.0, 2.0, 3.0):
+        for ls in self.UCLU:
             e, r = band[ls]
             # Sabit nokta: kayıp modeline giren L*, GERÇEKLEŞEN L*'tır.
             assert e.l_star_kinetic_input_m == pytest.approx(
@@ -164,8 +171,8 @@ class TestOHD2103GerceklesenLStar:
 
     def test_etkin_bantta_L_star_hala_geometriyi_degistirir(self):
         """Onarım L*'ı ETKİSİZLEŞTİRMEDİ: tabanın üstünde hâlâ çalışır."""
-        _, dusuk = _kucuk(4.0)
-        _, yuksek = _kucuk(6.0)
+        _, dusuk = _kucuk(3.0)
+        _, yuksek = _kucuk(3.5)
         assert yuksek['chamber_length'] > dusuk['chamber_length'] * 1.02
         assert yuksek['l_star_achieved'] > dusuk['l_star_achieved']
 

@@ -230,12 +230,34 @@ class TestOHD2525DumpSogutmaCeketi:
         # dondurma, denetçi Ş5.6): kanal sayısı tek sığma ölçütünden
         # (41 -> 44) -> ceket ΔP 3,761542589148719 -> 3,30847250671198;
         # debiler bit-aynı.
+        # v3.0.5 V305/C1 (28 Eki, ölçüldü, çatal): V301/L-KABUK c80351439
+        # (27 Eki 09:04, main'e 6f8240043) rejeneratif cidarı iki katmana
+        # ayırdı; kanallar artık 2 mm odacık cidarının değil 1 mm astarın
+        # (REGEN_LINER_THICKNESS_M) dışına oturuyor. Kanal tabanı çevresi
+        # 2π(29,5508 + 2,0) = 198,24 mm -> 2π(29,5508 + 1,0) = 191,96 mm,
+        # sığma ölçütü N·(3 + 1,5) mm ≤ çevre: 44 -> 42 kanal; aynı debi
+        # daha az kanaldan geçtiği için ceket ΔP 3,30847250671198 ->
+        # 3,6002127648726874. c80351439~1 (688bc30b2) 44 kanal / 3,3085,
+        # c80351439 42 kanal / 3,6002 (V305/ci/C1 RAPOR §1). Debi bit-aynı
+        # kaldı; bekçinin özü (dump geri çekmesi rejeneratif ayağa
+        # dokunmaz) değişmedi, yalnız rejeneratif ayağın kendisi bilinçli
+        # olarak yeni cidar modeline geçti.
         assert r['cooling_pressure_drop'] == pytest.approx(
-            3.30847250671198, rel=1e-12)
-        assert f['coolant_flow_rate'] == pytest.approx(
-            2.4333853600726125, rel=1e-12)
+            3.6002127648726874, rel=1e-12)
+        assert r['channel_count_fit']['hot_wall_thickness_mm'] == (
+            pytest.approx(1.0, rel=1e-12)), (
+            'kanal tabanı astar kalınlığında (L-KABUK); çapa ona bağlı')
+        # v3.0.1 T-ÇAPA-B: V301/L-B SV-08 — film tipinde rejeneratif ceket
+        # YOK (film debisi çekirdeğe EK; L-B RAPOR §SV-08). Eski beklenti
+        # film tipinin ceket debisiydi (2,4333853600726125 kg/s); ürün artık
+        # o debiyi yayımlamıyor ve nedenini adıyla söylüyor (ölçüldü,
+        # 117d704da). Rejeneratif ayak yukarıda bit-aynı.
+        assert f['coolant_flow_rate'] is None
+        assert f['coolant_flow_rate_basis'].startswith(
+            'no regenerative jacket in this cooling type')
         assert r['dump_cooling_jacket_status'] is None
-        assert r['cooling_channels'] == 44
+        # V305/C1: 44 -> 42, L-KABUK astar tabanı (yukarıdaki ΔP notu).
+        assert r['cooling_channels'] == 42
         assert r['cooling_channels'] == r['channel_count_fit']['n_max']
 
     def test_dump_ISI_yuku_ve_cidar_zinciri_bozulmadi(self):

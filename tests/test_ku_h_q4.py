@@ -219,6 +219,9 @@ class TestHibritOluGirdi:
                    and not s.lstrip().startswith('#')]
             izinli = (
                 'throat_erosion_rate=None,',
+                # V3.0.5 T-ÇAPA-C1: kurucu imzası yeniden sarıldı, parametre
+                # komşusuyla aynı satırda (imza bildirimi; okuma değil).
+                'throat_erosion_rate=None, tank_pressure_source=None,',
                 'if throat_erosion_rate is None:',
                 'self.throat_erosion_rate = 0.0',
                 'self.throat_erosion_rate = max(0.0, float(throat_erosion_rate))',

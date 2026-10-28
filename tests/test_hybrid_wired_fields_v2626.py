@@ -90,6 +90,15 @@ def _verify_sf(wall_thickness=0.005, **ezme):
     return float(ca['von_mises_safety_factor'])
 
 
+def _verify_sf_basinc(wall_thickness=0.005, **ezme):
+    """Doğrulama modundaki BASINÇ terimi von Mises SF'si (v3.0.1 kulvar P)."""
+    kw = dict({'chamber_material': 'steel_4130'}, **dict(BASE, **ezme))
+    ca = (HybridRocketEngine(**kw, wall_thickness=wall_thickness)
+          .calculate()['structural_analysis']['chamber_analysis'])
+    assert ca['design_mode'] == 'verify', ca['design_mode']
+    return float(ca['von_mises_safety_factor_pressure'])
+
+
 def test_safety_factor_gercekten_kullanici_cidarindan_turuyor():
     """T3-2 (parti 31): totoloji bekçisi ETİKETE değil SAYIYA baksın.
 
@@ -118,17 +127,38 @@ def test_safety_factor_gercekten_kullanici_cidarindan_turuyor():
     sfler = [_verify_sf(wall_thickness=t) for t in kalinliklar]
 
     # (a) Kesinlikle sabit olmamalı — sabitlik "cidar okunmuyor" demektir.
-    assert max(sfler) > min(sfler) * 1.5, (
+    # V301/B7 (21 Eki, ÖNEMLİ, Berke onaylı) — EŞİK ÖLÇÜMLE YENİLENDİ:
+    # BASE O/F 2,5 N2O/HTPB yakıtça zengin bölgede; dengeye katı karbon
+    # C(gr) girince oda sıcaklığı 1834 → 2037 K (NASA CEA 2037,6 K) oldu ve
+    # ısıl çevre gerilmesi senaryosu 6-10 mm'de daha baskın hâle geldi.
+    # Ölçüldü (steel_4130, BASE, 3/4/5/6/8/10 mm):
+    #   önce 1,428 / 1,788 / 2,071 / 2,021 / 2,195 / 2,225 -> max/min 1,558
+    #   sonra 1,437 / 1,785 / 2,047 / 1,983 / 2,118 / 2,116 -> max/min 1,474
+    # Cidardan koparılmış SF bu oranı 1,0'a yapıştırır; 1,4 eşiği o kusuru
+    # yine ayırt eder (kanıt: docs/scofield/raw/OH/V301/makale1/B7/RAPOR.md).
+    assert max(sfler) > min(sfler) * 1.4, (
         'doğrulama modundaki SF kullanıcının cidarına DUYARSIZ '
         f'(3-10 mm taramasında {min(sfler):.4f}-{max(sfler):.4f}); '
         'SF kullanıcının girdisinden değil başka bir kalınlıktan '
         'hesaplanıyor olabilir — totoloji bekçisinin yakalaması gereken '
         'kusur budur (parti 31 / T3-2)')
 
-    # (b) Yön doğru: kalın cidar = daha yüksek emniyet katsayısı.
-    assert all(a < b for a, b in zip(sfler, sfler[1:])), (
-        f'SF cidarla monoton artmıyor: {list(zip(kalinliklar, sfler))} — '
-        'işaret ya da terim hatası')
+    # (b) Yön doğru: kalın cidar = daha yüksek BASINÇ terimi emniyeti.
+    # v3.0.1 kulvar P — BEKLENTİ BASINÇ TERİMİNE TAŞINDI (gevşetme değil):
+    # toplam SF = min(senaryolar) ısıl çevre gerilmesini de içerir ve o
+    # terim cidarla BÜYÜR (ΔT ∝ t); basınç terimi ∝ D/t. Toplam çevre
+    # gerilmesi a·D/t + b·t olduğundan SF'nin tepesi t* = √(a·D/b)'dedir.
+    # Eski kaynaksız 1,5·√N·D_son kuralı kamarayı 1,5 kat şişirip t*'ı
+    # 10 mm'nin üstüne itiyordu; grain dış çapı son port çapına inince
+    # t* tarama içine düştü. Ölçüldü (steel_4130, BASE): 3/4/5/6/8/10 mm ->
+    # 1,428 / 1,788 / 2,071 / 2,021 / 2,195 / 2,225 (5->6 mm'de ısıl
+    # senaryo baskın). Bekçinin konusu (SF kullanıcının cidarının BASINÇ
+    # TERİMİNDEN koparılmasın) basınç terimi SF'sinin kesin monotonluğuyla
+    # sınanır; (a) toplam SF'nin cidara duyarlılığını ayrıca korur.
+    sf_basinc = [_verify_sf_basinc(wall_thickness=t) for t in kalinliklar]
+    assert all(a < b for a, b in zip(sf_basinc, sf_basinc[1:])), (
+        f'basınç terimi SF cidarla monoton artmıyor: '
+        f'{list(zip(kalinliklar, sf_basinc))} — işaret ya da terim hatası')
 
 
 def test_safety_factor_basinc_terimini_gercekten_tasiyor():

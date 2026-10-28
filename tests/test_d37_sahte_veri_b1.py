@@ -339,10 +339,17 @@ def motor_sonuclari(client):
     """Üç örnek motor + süreli sıvı: /calculate ailesinin HAM yanıtları."""
     sonuc = {}
     for tip, yol in SVB_ORNEK_PROJELER.items():
-        alanlar = json.loads(yol.read_text(encoding='utf-8'))['inputs']['fields']
+        # V301/T-ÇAPA-D: ÖRNEK kulvarı (5fa435893) örneklere sayfanın boş
+        # alanlarını ('') ve sıvıya max_burn_duration = 30 s yazdı. Gövde
+        # sayfa gibi kurulur (boş alan gönderilmez; tests/support/
+        # ornek_alanlari.py); 'liquid' bu dosyanın SÜRESİZ sıvısıdır, süre
+        # açıkça çıkarılır.
+        from tests.support.ornek_alanlari import ornek_alanlari
+        alanlar = ornek_alanlari(yol)
+        if tip == 'liquid':
+            alanlar.pop('max_burn_duration', None)
         sonuc[tip] = client.post(UC[tip], json=dict(alanlar)).get_json()
         if tip == 'liquid':
-            assert 'max_burn_duration' not in alanlar
             sonuc['liquid_sureli'] = client.post(UC[tip], json=dict(
                 alanlar, max_burn_duration=SIVI_SURE_S)).get_json()
     return sonuc
@@ -396,14 +403,26 @@ class TestS4BayatOneri:
         for pid in SVB_SURE_PANELLERI:
             # önkoşul: süreli koşu alanı gerçekten doldurdu
             assert k1['paneller'][pid]['govde']['burn_time'] == SIVI_SURE_S, pid
+            assert k2['paneller'][pid]['alanlar']['burn_time'] == '', pid
+            if pid == 'thermal':
+                continue
             g = k2['paneller'][pid]['govde']
             assert g is not None, (pid, k2['paneller'][pid]['durum'])
             assert 'burn_time' not in g, (pid, g)
-            assert k2['paneller'][pid]['alanlar']['burn_time'] == '', pid
+        # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/ÖRNEK-PANEL 178aba381,
+        # kalem 5): ısıl panelde yanma süresi ZORUNLU; boşken güverte isteği
+        # GÖNDERMEZ ve alanı adıyla söyler (dock.missingFields). Bayat süre
+        # yine gövdeye gitmez — çünkü gövde hiç kurulmaz.
+        t2 = k2['paneller']['thermal']
+        assert t2['govde'] is None, t2['govde']
+        assert 'Required fields are empty' in t2['durum'], t2['durum']
         assert 'propellant_mass' in k1['paneller']['safety']['govde']
         assert 'propellant_mass' not in k2['paneller']['safety']['govde']
-        # uç kendi kuralını ADIYLA uygular (uydurma girdiyle 200 değil)
-        st, j = _post(client, '/analyze_thermal_safety', k2['paneller']['thermal']['govde'])
+        # uç kendi kuralını ADIYLA uygular (uydurma girdiyle 200 değil):
+        # süreli gövdeden süre çıkarılınca 422 missing_fields = burn_time.
+        suresiz = {k: v for k, v in k1['paneller']['thermal']['govde'].items()
+                   if k != 'burn_time'}
+        st, j = _post(client, '/analyze_thermal_safety', suresiz)
         assert st == 422 and j['missing_fields'] == ['burn_time'], (st, j)
         st, j = _post(client, '/analyze_safety', k2['paneller']['safety']['govde'])
         assert st == 422 and j['missing_fields'] == ['propellant_mass'], (st, j)
@@ -475,8 +494,17 @@ class TestS5BosAlanIkiHal:
             {'ad': 'k1', 'eylem': 'init', 'sonuc': motorlar['liquid']},
             {'ad': 'bos', 'eylem': 'bosalt',
              'alanlar': [['performance', 'base_heat_flux']]},
-        ], panel_kimlikleri=['thermal', 'performance'], anahtar_isaretle=True)
-        opt = d['olcumler'][0]['paneller']['thermal']['cipler']['burn_time']
+        ], panel_kimlikleri=['thermal', 'structural', 'performance'],
+            anahtar_isaretle=True)
+        # V3.0.5 T-ÇAPA-C1 — ÖRNEK DEĞİŞTİ (V301/ÖRNEK-PANEL 178aba381):
+        # ısıl panelde burn_time artık ZORUNLU (aşağıda zorunlu tarafta
+        # ölçülür); isteğe bağlı boş alan örneği yapısal paneldeki
+        # burn_time (o uç süreyi tüketmez, alan gönderilmez).
+        sure = d['olcumler'][0]['paneller']['thermal']
+        assert sure['cipler']['burn_time']['kind'] == 'missing'
+        assert '⟦dock.src.fieldMissing⟧' in sure['cipler']['burn_time']['title']
+        assert sure['govde'] is None and 'dock.missingFields' in sure['durum']
+        opt = d['olcumler'][0]['paneller']['structural']['cipler']['burn_time']
         assert opt['kind'] == 'missing'
         assert '⟦dock.src.fieldBlankOptional⟧' in opt['title'], opt['title']
         assert '⟦dock.src.fieldMissing⟧' not in opt['title']
@@ -488,7 +516,7 @@ class TestS5BosAlanIkiHal:
         # zorunlu boş alan isteği gerçekten durdurur (not doğru söylüyor)
         assert p['govde'] is None and 'dock.missingFields' in p['durum'], p['durum']
         # isteğe bağlı boş alan isteği durdurmaz (not doğru söylüyor)
-        assert d['olcumler'][0]['paneller']['thermal']['govde'] is not None
+        assert d['olcumler'][0]['paneller']['structural']['govde'] is not None
 
     def test_yeni_anahtarlar_en_ve_tr_var_ve_kullaniliyor(self):
         src = I18N_COMMON.read_text(encoding='utf-8')
@@ -543,11 +571,14 @@ class TestS6PanelNobetcileri:
             {'ad': 'k', 'eylem': 'init', 'sonuc': motorlar['liquid']}],
             panel_kimlikleri=['thermal', 'structural', 'performance'])
         p = d['olcumler'][0]['paneller']
-        for pid in ('thermal', 'structural', 'performance'):
+        for pid in ('structural', 'performance'):
             assert p[pid]['govde'] is not None, (pid, p[pid]['durum'])
             assert 'burn_time' not in p[pid]['govde'], (pid, p[pid]['govde'])
-        st, j = _post(client, '/analyze_thermal_safety', p['thermal']['govde'])
-        assert st == 422 and j['missing_fields'] == ['burn_time'], (st, j)
+        # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/ÖRNEK-PANEL 178aba381):
+        # ısıl panel süresiz sonuçta isteği HİÇ göndermez, alanı adıyla
+        # söyler; uç kuralı (422 burn_time) S4'te ayrıca ölçülür.
+        assert p['thermal']['govde'] is None, p['thermal']['govde']
+        assert 'Required fields are empty' in p['thermal']['durum']
         # performans: ana figür süre tüketmez (200); ısı akısı şelalesi
         # süreyi ADIYLA ister (uydurma 30 s ile çizilmez)
         st, _ = _post(client, '/api/advanced-performance-analysis', p['performance']['govde'])
@@ -691,9 +722,12 @@ class TestS7CadItki:
 # ---------------------------------------------------------------------------
 def _sentetik_sivi(**degisiklik):
     """Sentetik sıvı yanıtı; ``None`` verilen anahtar yanıttan ÇIKARILIR."""
+    # V3.0.5 T-ÇAPA-C1: 'burn_time' — ısıl panelde ZORUNLU alan
+    # (V301/ÖRNEK-PANEL 178aba381); bu kurgu süreyi sınamaz, iki koşuda da
+    # aynı değeri taşır ki ısıl gövde kurulsun.
     r = {'chamber_pressure': 70.0, 'chamber_temperature': 3500.0,
          'chamber_diameter': 120.0, 'chamber_length': 300.0,
-         'total_mass_flow': 5.5,
+         'total_mass_flow': 5.5, 'burn_time': 10.0,
          'structural_analysis': {'chamber_structure': {
              'material_key': 'ss_304', 'wall_thickness': 4.0}}}
     yapi = r['structural_analysis']['chamber_structure']

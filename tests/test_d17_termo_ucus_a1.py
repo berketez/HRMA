@@ -363,7 +363,41 @@ class TestOHD1611CalculateItkiEgrisi:
         # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
         # AYNI kod 1,8e-6 bağıl sapma verdi (koşum 38770162288, ODE).
         # Tolerans referans platformda aynen; başkasında 1e-5.
-        assert apoje == pytest.approx(6481.69696338075,
+        # V301/UÇUŞ C-24 (27 Eki) — ÇAPA ÖLÇÜMLE YENİLENDİ: 6481,69696338075
+        # -> 14599,14805824316 m. Kayma ZİNCİRİ main ilk-ebeveyn commit'lerinde
+        # ölçüldü (git archive + bu düğüm; docs/scofield/raw/OH/V301/ucus/
+        # RAPOR.md §C-24):
+        #   a0dca0dc0^1 6481,697 -> a0dca0dc0 (19 Eki, v301/port-kamara:
+        #     yanma sonu port grain dış çapına ulaşır, kaynaksız
+        #     D_ch = 1,5·√N·… söküldü) 15081,555 m — motor küçüldü/hafifledi;
+        #   77d64c641 (26 Eki, H-termal: cidar üç bölge) 16300,040 m;
+        #   74b55500a (26 Eki, H-PANEL: η_c* 0,89 kaynaklı varsayılan)
+        #     14599,148 m.
+        # Bu istek ARAÇ GİRDİSİ TAŞIMAZ: yörünge motoru tek başına uçurur
+        # (kuru kütle = motor atıl alt sınırı 0,9448 kg, çap = kasa 57,4 mm,
+        # Cd 0,5; vehicle_parameters). Bağımsız 1-B nokta kütle kâhini
+        # (c24_apoje_kahin.py: aynı kütle/alan/Cd/impuls, sabit itki, ISA)
+        # ≈ 16,4 km verir — mertebe aynı (−%11 fark kâhinin sabit itki /
+        # telafisiz / sabit Cd basitliğinden). Eski 6,48 km çapası 14,34 kg'lık
+        # ESKİ (aşırı büyük kamaralı) motora aitti. Bekçinin sorusu
+        # (dikdörtgen profil apojesi yayımlanmıyor) DEĞİŞMEDİ; tolerans aynı.
+        # V305/C2 (28 Eki) — ÇAPA ÖLÇÜMLE YENİLENDİ: 14599,14805824316 ->
+        # 15184,913880753711 m (+%4,01). Kaydıran: b0ee4e6ae (27 Eki 11:10,
+        # CAD-2 birleşmesi: hibrit lüle eti tek kuraldan, lülenin KENDİ
+        # malzemesiyle — bu gövdede grafit lüle eti 3,48 -> 10,45 mm, lüle
+        # kütlesi 0,0517 -> 0,1832 kg). Yörüngeye giren TEK değişen girdi kuru
+        # kütle: 0,9447670773222698 -> 1,0762786679903404 kg (çap 57,36 mm,
+        # Cd 0,5, itici 5,1218 kg, impuls 9974,76 N·s ikisinde aynı). İki
+        # yönlü kâhin (``vehicle_mass_dry`` ile kütle takası): CAD-2 öncesi
+        # ağaç (fdc48061a) 1,0762786679903404 kg ile 15184,913880753711 m,
+        # bugünkü ağaç 0,9447670773222698 kg ile 14599,14805824316 m —
+        # ikisi de BİT-AYNI. Ağır araç daha yükseğe çıkıyor çünkü bu 57 mm'lik
+        # araçta sürtünme baskın (balistik katsayı m/(Cd·A)); aynı ağaçta
+        # kuru kütle taraması 0,8 / 1,2 / 1,5 / 2,0 kg -> 13913 / 15704 /
+        # 16832 / 18304 m, tekdüze. Ölçümler: docs/scofield/raw/OH/V305/ci/C2/.
+        # Süit içinde aynı düğüm 15184,913366 m da verebiliyor (çağrı geçmişi,
+        # bağıl 3,4e-8 < 1e-6); tolerans DEĞİŞMEDİ, bekçinin sorusu değişmedi.
+        assert apoje == pytest.approx(15184.913880753711,
                                       rel=capa_rel(1e-6, 1e-5))
         assert apoje != pytest.approx(5656.753349589398, rel=1e-6)
 

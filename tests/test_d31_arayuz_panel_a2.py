@@ -273,9 +273,21 @@ class TestOksitleyiciYogunlugu:
     def test_uc_kendi_kaynakli_degerini_kullaniyor(self):
         """Sökümün karşı ayağı (doktrin §3 (b))."""
         app_py = _oku(KOK / 'hrma' / 'app.py')
-        assert "oxidizer_density=data.get('oxidizer_density')" in app_py, (
+        # T-ÇAPA-C2 (27 Eki): V301/E2 (fb5d4d56d, devir madde 9) okumayı
+        # plaka yoğunluğu tek kaynağına taşıdı: istek değeri YEDEKSİZ okunur
+        # (``_plaka_rho, _plaka_rho_kaynagi = data.get('oxidizer_density'),
+        # None``), kullanıcı tank kipinde devrenin giriş hâli yoğunluğu
+        # kaynağıyla geçer ve gönderilen sayı ``inputs_not_used``da adıyla
+        # beyan edilir; InjectorDesign'a ``oxidizer_density=_plaka_rho``
+        # gider. Doktrin aynı: uçta sayı yedeği YOK.
+        assert ("_plaka_rho, _plaka_rho_kaynagi = "
+                "data.get('oxidizer_density'), None") in app_py, (
             'uç tarafı yedekli okumaya dönmüş; söküm kullanıcıyı beyansız '
             'bırakır')
+        assert 'oxidizer_density=_plaka_rho,' in app_py
+        assert not re.search(
+            r"data\.get\('oxidizer_density',\s*[\d.]", app_py), (
+            'oxidizer_density sayı yedeğiyle okunuyor')
 
 
 # ====================================================================

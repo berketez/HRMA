@@ -68,6 +68,8 @@ import tempfile
 
 import pytest
 
+from tests.support import form_defaults
+
 from tests.bagimlilik_kapisi import kurulu_mu
 
 
@@ -113,6 +115,11 @@ SIVI_GOVDE = {
     # 2,5 iniyordu ve kardeş alan onu "user input (safety factor)" diye
     # künyeliyordu — yani çizim kullanıcının girdisini geri okuyordu.
     'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (L-A SV-03); sayfanın
+    # gönderdiği şablon varsayılanı (tek kaynak, kopyalanmaz).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 #: Kullanıcının SF hedefi — çizimde AYRI alanda, ölçüm yerine geçmeden.
@@ -161,7 +168,22 @@ class TestSiviCizimSFHedefinEkosuDegil:
         blok = motor['structural_analysis']['chamber_structure']
         cizim = _cizim_kamarasi(motor)
 
-        olculen = blok['hoop_safety_factor']
+        # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/L-KABUK 6f8240043,
+        # 823e59841): rejeneratif sıvıda cidar İKİ KATMANDIR (astar +
+        # kanal + dış kabuk, ``wall_model = two_layer_regenerative``);
+        # ``hoop_safety_factor`` yalnız dış kabuğun çemberidir, çizilen
+        # cidarın (yığının) yönetici katsayısı ``wall_stack_safety_factor``
+        # = katmanların küçüğü (CHAMBER_WALL_SF_SCHEMAS measured_keys
+        # sırası). ÖLÇÜLDÜ (e038d626f): size 0,57994 = astar, kabuk
+        # 2,85153; verify 0,20258 = astar, kabuk 2,76733. Bekçinin
+        # kilidi aynı: çizime inen sayı çözücünün ÇİZİLEN cidar için
+        # yayımladığı alanla aynı nesne.
+        if blok.get('wall_model') == 'two_layer_regenerative':
+            olculen = blok['wall_stack_safety_factor']
+            assert olculen == min(k['safety_factor']
+                                  for k in blok['wall_layers'])
+        else:
+            olculen = blok['hoop_safety_factor']
         basilan = cizim['safety_factor_at_drawn_wall']
         assert isinstance(basilan, float), (
             f'{kip}: çizime bir SAYI inmiyor -> {basilan!r}')
@@ -190,14 +212,34 @@ class TestSiviCizimSFHedefinEkosuDegil:
             SF_HEDEFI, rel=1e-9), (
             f'{kip}: çizim kullanıcının SF hedefini ölçüm gibi basıyor')
 
-    @pytest.mark.parametrize('kip,beklenen_mm', (('size', 2.0),
+    @pytest.mark.parametrize('kip,beklenen_mm', (('size', 1.0),
                                                  ('verify', 5.0)))
     def test_cizilen_kalinlik_gerilmelerin_ait_oldugu_cidar(
             self, kip, beklenen_mm, sivi_size, sivi_verify):
-        """Çizilen kalınlık ile SF'nin ait olduğu kalınlık aynı parça."""
+        """Çizilen kalınlık ile SF'nin ait olduğu kalınlık aynı parça.
+
+        V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/L-KABUK 6f8240043):
+        rejeneratif cidar iki katmandır; ``beklenen_mm`` artık ASTAR
+        kalınlığıdır (verify: kullanıcının 5 mm'si; size: girilmediğinde
+        ``REGEN_LINER_THICKNESS_M`` 1 mm künyeli HRMA seçimi — eskiden
+        tek katmanın 2,0 mm imalat tabanıydı). Çizilen ve yapısal blokta
+        ``wall_thickness`` olarak yayımlanan kalınlık YIĞINDIR: astar +
+        kanal derinliği + dış kabuk (ÖLÇÜLDÜ e038d626f: size 1+2+4 = 7,0;
+        verify 5+2+4 = 11,0 mm).
+        """
         motor = sivi_size if kip == 'size' else sivi_verify
         blok = motor['structural_analysis']['chamber_structure']
         cizim = _cizim_kamarasi(motor)
+        assert blok['wall_model'] == 'two_layer_regenerative'
+        astar, kabuk = blok['wall_layers']
+        assert (astar['role'], kabuk['role']) == ('liner', 'closeout')
+        assert astar['thickness_mm'] == pytest.approx(beklenen_mm, rel=0,
+                                                      abs=0)
+        yigin = (astar['thickness_mm'] + blok['channel_depth_mm']
+                 + kabuk['thickness_mm'])
+        assert blok['wall_stack_thickness_mm'] == pytest.approx(
+            yigin, rel=1e-12)
+        beklenen_mm = blok['wall_stack_thickness_mm']
         assert blok['wall_thickness'] == pytest.approx(beklenen_mm, rel=0,
                                                        abs=0)
         assert cizim['wall_thickness'] == pytest.approx(beklenen_mm, rel=0,

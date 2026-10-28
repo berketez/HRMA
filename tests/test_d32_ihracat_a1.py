@@ -45,6 +45,8 @@ import os
 
 import pytest
 
+from tests.support import form_defaults
+
 from tests.bagimlilik_kapisi import kurulu_mu
 from tests.support.kanit import kanit_gerekli
 
@@ -67,6 +69,11 @@ Z5_SIVI = {
     'characteristic_length': 1.2, 'chamber_wall_thickness': 1,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
     'engine_cycle': 'pressure_fed', 'safety_factor': 2.5,
+    # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (L-A SV-03); sayfanın
+    # gönderdiği şablon varsayılanı (tek kaynak, kopyalanmaz).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 
 
@@ -99,6 +106,27 @@ def client():
 @pytest.fixture(scope='module')
 def sivi(client):
     r = client.post('/calculate_liquid', json=Z5_SIVI)
+    assert r.status_code == 200, r.get_data(as_text=True)[:400]
+    return r.get_json()
+
+
+@pytest.fixture(scope='module')
+def sivi_ornek(client):
+    """Örnek sıvı motor (examples/, sayfanın gönderdiği gövde) — imalat
+    kapısından GEÇEN geçerli rejeneratif tasarım.
+
+    v3.0.5 SIVI-CIDAR (e1aca361e, 28 Eki): iki katmanlı cidarda astar artık
+    KENDİ çözülen sıcaklığında değerlendirilir. ``Z5_SIVI`` (1 mm astar,
+    Pc 100 bar, malzeme seçilmemiş) bu modelde astar SF 0,58 ve model
+    geçerlilik sınırı dışında çıkar; imalat kapısı onu HAKLI olarak 422 ile
+    reddeder (basınç taşıyan parçaya imalat dosyası yazılmaz). Paketin
+    yayımlandığını ölçen B bekçileri bu yüzden kapıdan geçen örnek gövdeyle
+    koşar; Z5_SIVI'nin üretici-parça bekçileri (A) değişmez.
+    """
+    from tests.support.form_defaults import form_yuku
+    from tests.test_example_projects import load_example_doc
+    yuk = form_yuku('liquid', load_example_doc('liquid')['inputs']['fields'])
+    r = _quiet(client.post, '/calculate_liquid', json=yuk)
     assert r.status_code == 200, r.get_data(as_text=True)[:400]
     return r.get_json()
 
@@ -223,7 +251,7 @@ class TestIkiUreticiAyniParcaListesi:
 class TestKomplePaketYayimlaniyor:
 
     @_kati_gerekli
-    def test_sivi_kosumda_paket_422_degil_200(self, client, sivi):
+    def test_sivi_kosumda_paket_422_degil_200(self, client, sivi_ornek):
         """ÖLÇÜLDÜ (taban dd1dcddc): 422 generators_disagree_on_parts.
 
         Paket üretilemiyordu; artık üretiliyor ve İÇİNDE iki üreticinin de
@@ -231,7 +259,8 @@ class TestKomplePaketYayimlaniyor:
         """
         import zipfile
         from io import BytesIO
-        r = client.post('/api/export-complete-zip', json={'motor_data': sivi})
+        r = client.post('/api/export-complete-zip',
+                        json={'motor_data': sivi_ornek})
         assert r.status_code == 200, r.get_data(as_text=True)[:400]
         adlar = zipfile.ZipFile(BytesIO(r.data)).namelist()
         stl = {os.path.splitext(os.path.basename(a))[0].lower()

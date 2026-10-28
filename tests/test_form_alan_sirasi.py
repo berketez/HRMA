@@ -102,6 +102,11 @@ EXPECTED_SECTIONS = [
     'adv.sec.oxidizerConfiguration',
     'adv.sec.mixtureRatio',
     'adv.sec.injectorConfiguration',
+    # v3.0.1 kulvar M (Ayberk tur 1, "malzeme seçim ekranı"): oda, nozul ve
+    # enjektör malzemesi hesaptan ÖNCE görünen panelde; enjektör tipinden
+    # sonra gelir (enjektör malzemesi plaka denetimini, oda/nozul malzemesi
+    # yapısal ve ısıl zinciri besler; hiçbiri önceki panellerin girdisi değil).
+    'adv.sec.materials',
     'adv.sec.analysisType',
 ]
 

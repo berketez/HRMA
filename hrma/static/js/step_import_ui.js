@@ -38,6 +38,13 @@
         });
     }
 
+    // v3.0.1 N-girdi-2: alan ipucu ortak bileşenden (field_help.js →
+    // HRMAHelp). Bileşen yüklü değilse ipucu basılmaz.
+    function stepYardimHtml(key, metin) {
+        return (window.HRMAHelp && typeof window.HRMAHelp.html === 'function')
+            ? window.HRMAHelp.html(key, metin) : '';
+    }
+
     function escapeHtml(s) {
         return String(s).replace(/[&<>"']/g, function (ch) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
@@ -310,7 +317,8 @@
             }).join('');
             html += '<div style="margin:8px 0;"><label style="font-size:0.82rem;'
                 + ' margin-right:8px;">'
-                + escapeHtml(T('stepimp.solids', 'Solid to analyze')) + '</label>'
+                + escapeHtml(T('stepimp.solids', 'Solid to analyze'))
+                + stepYardimHtml('stepimp.help.solids', T('stepimp.help.solids', '')) + '</label>'
                 + '<select id="si_solid_select" style="max-width:320px;">'
                 + opts + '</select></div>';
         }
@@ -390,7 +398,8 @@
             html += '<div style="border:1px solid var(--hd-line, rgba(0,229,255,0.14));'
                 + ' border-radius:8px; padding:10px 12px;">'
                 + '<div style="font-size:0.78rem; margin-bottom:4px;">'
-                + escapeHtml(label) + '</div>'
+                + escapeHtml(label)
+                + stepYardimHtml('stepimp.help.suggestion', T('stepimp.help.suggestion', '')) + '</div>'
                 + '<input type="number" step="0.01" class="si-sugg" data-key="' + key + '"'
                 + ' value="' + (s && typeof s.value === 'number' ? s.value : '') + '"'
                 + ((hasTarget || usableForEps) ? '' : ' disabled')

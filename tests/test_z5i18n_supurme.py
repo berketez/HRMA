@@ -567,11 +567,19 @@ def test_yapisal_hukum_gerekceleri_turkceye_geciyor(tmp_path):
         % '\n  '.join(cevrilmeyen))
     for r in sonuc:
         for ad in ('chamber_hoop', 'end_cap', 'nozzle_throat',
-                   'verdict_safety_factor', 'design_target_assessment',
-                   'measured_scope_status'):
+                   'verdict_safety_factor', 'design_target_assessment'):
             if ad in r['in']:
                 assert ad in r['out'], (
                     'Makine adı %r çeviride kayboldu: %r' % (ad, r['out'][:120]))
+        # V301/T-ÇAPA-D: T-ÇAPA-C1 parti 3 (d6e71d17b; DİL-2 kök 7'nin eksik
+        # dalı, test_v301_dil_ekran ham_anahtar[hybrid]) "ölçülen kapsamın
+        # sonucu ayrı bir ALANDA yayımlanır" cümlesinde ham alan adını
+        # (measured_scope_status) TR'de okunur adla basıyor; iki bekçi aynı
+        # cümlede çelişiyordu. Ad kaybolmaz, okunur karşılığıyla durur.
+        if 'measured_scope_status' in r['in']:
+            assert 'ölçülen kapsam durumu' in r['out'], (
+                'measured_scope_status çeviride adsız kaldı: %r'
+                % r['out'][:160])
 
 
 @needs_node

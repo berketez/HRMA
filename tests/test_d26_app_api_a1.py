@@ -133,8 +133,31 @@ class TestOHD2519OkunmayanKanonikAd:
         # v3.0.0 (15 Eki) — çapa darwin/arm64'te ölçüldü; CI linux/x86_64'te
         # AYNI kod 2,5e-12 mutlak bağıl sapma verdi (koşum 38770162288). Tolerans
         # referans platformda aynen; başkasında 1e-10 mutlak (tests/support/platform_capa.py).
-        assert r.get_json()['motor']['chamber_diameter'] == pytest.approx(
-            0.15401759407429375, abs=capa_rel(1e-12, 1e-10))
+        # ÇAPA YENİLENDİ — v3.0.1 kulvar P (ana model kararı): kaynaksız
+        # D_ch = 1,5·√N·D_son kuralı söküldü; N = 1, artık et 0 iken grain
+        # dış çapı = yanma sonu port çapı (Karabeyoglu ve ark. 2007 §VI.B).
+        # Eski çapa 1,5 katsayısını KİLİTLİYORDU (0,15402 / 1,5 = 0,10268).
+        # Ölçüm: docs/scofield/raw/OH/V301/ayberk1/port-kamara/RAPOR.md.
+        #   d_c 0,15401759407429375 -> 0,10268324142272364 (= D_port_son)
+        # V305/C2 (28 Eki) — ÇAPA ÖLÇÜMLE YENİLENDİ, İKİ BİLİNÇLİ KÖK
+        # (main ilk-ebeveyn zincirinde aynı gövdeyle ölçüldü, docs'suz ağaç;
+        # docs/scofield/raw/OH/V305/ci/C2/):
+        #   1) dcb5a762e (21 Eki, B7 — Berke onaylı): hibrit dengeye yoğun faz
+        #      C(gr). Bu gövde (O/F 2,5, yakıtça zengin) karbonca doymuş: c*
+        #      1307,369 -> 1370,771 m/s, ṁ 2,81860 -> 2,69448 kg/s,
+        #      d_c 0,10268324142272364 -> 0,10074226318866746.
+        #   2) 74b55500a (26 Eki, H-PANEL — Berke 'girdi + kaynaklı
+        #      varsayılan'): alan yokken N2O/HTPB c* verimi η = 0,89
+        #      (26 ölçülmüş ateşlemenin ortancası). c* 1370,771 -> 1219,986
+        #      m/s (= 0,89 ×), ṁ -> 3,02733 kg/s, d_c -> 0,10585066435651505.
+        #   Bağımsız kontrol: bugünkü ağaçta combustion_efficiency = 100 ile
+        #   d_c 0,1007422631886327 (B7 sonrası η'sız sayı, bağıl 4e-14).
+        # Bu gövde alan göndermediği için kaynaklı η'yı ölçer; bekçinin
+        # sorusu (alan yokken gövde ürünün kendi çözümü) ve tolerans aynı.
+        m = r.get_json()['motor']
+        assert m['chamber_diameter'] == pytest.approx(
+            0.10585066435651505, abs=capa_rel(1e-12, 1e-10))
+        assert m['chamber_diameter'] == m['port_diameter_final']
 
     def test_None_alan_yok_sayilir(self, client):
         """``chamber_diameter: null`` "alan gönderilmedi" demektir."""

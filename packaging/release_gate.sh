@@ -318,6 +318,17 @@ baslik "5/10  Tam test takımı"
 # ama ARTIK CI kontrolünü atlamaz.
 if [ "${TAKIMI_ATLA:-${HIZLI:-0}}" = "1" ]; then
     atlandi "tam takım atlandı (CI yeşil olduğu için); atlamayı kapatmak: TAKIMI_ATLA=0"
+    # 28 Eki (v3.0.5): ``kabul_ui`` tarayıcı düğümleri yerel Mac Chromium'una
+    # bağlıdır ve Linux CI'da SEÇİLMEZ (tests.yml ``-m "not kabul_ui"``) —
+    # CI yeşili onları KAPSAMAZ. Takım atlansa da burada koşarlar.
+    echo "  (kabul_ui tarayıcı düğümleri — CI'da seçilmez, burada koşar)"
+    if "$PY" -m pytest -q --no-header -p no:cacheprovider -m kabul_ui tests/ \
+            > /tmp/hrma_gate_kabul_ui.log 2>&1; then
+        basarili "kabul_ui: $(tail -1 /tmp/hrma_gate_kabul_ui.log)"
+    else
+        basarisiz "kabul_ui tarayıcı düğümleri kırmızı — /tmp/hrma_gate_kabul_ui.log"
+        grep -E '^FAILED|^ERROR' /tmp/hrma_gate_kabul_ui.log | head -20
+    fi
 else
     echo "  (tam takım ~15 dk sürer; alt küme koşturmak bu kapıyı GEÇMİŞ SAYMAZ)"
     if "$PY" -m pytest -q --no-header -p no:cacheprovider > /tmp/hrma_gate_pytest.log 2>&1; then

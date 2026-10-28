@@ -67,7 +67,16 @@ def client():
 
 @pytest.fixture(scope='module')
 def fea_yaniti(client):
-    r = client.post('/calculate', json=MOTOR_GOVDESI, headers=HEADERS)
+    # T-ÇAPA-C2 (27 Eki): kalemin senaryosu (motorun KENDİ katsayısı akmanın
+    # altında, köprü onun 35 katını yeşil basıyor) V301/H-termal (065b391dc)
+    # sonrası hibritin YALNIZ fail-closed termal yolunda görülür — korunan
+    # yolda kasa ortam sıcaklığında ve motor SF 4,80 (≥ 1,5, yeşil hak
+    # edilmiş). Ölçüldü (27 Eki): korunan yol motor 4,80 / köprü 5,49;
+    # astar boyutlandırması koşmazken motor 0,382 / köprü 19,40. Senaryo
+    # adıyla kurulur (``tests.support.hibrit_termal``; gerisi ürün kodu).
+    from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
+    with astar_boyutlandirmasi_kosmaz():
+        r = client.post('/calculate', json=MOTOR_GOVDESI, headers=HEADERS)
     assert r.status_code == 200, r.get_data(as_text=True)[:400]
     motor = (r.get_json() or {}).get('motor')
     assert isinstance(motor, dict) and motor, 'motor sözlüğü boş'

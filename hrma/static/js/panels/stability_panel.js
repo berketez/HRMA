@@ -124,6 +124,25 @@
         return (window.I18N && window.I18N.serverText)
             ? window.I18N.serverText(text) : text;
     }
+    //: V301/PANEL-SAYI (FİZİK-2 DEVİR 5) — TR ekranda ÇEVRİLEMEYEN sunucu
+    //: cümlesi görünür satıra İngilizce basılmaz: Türkçe özet görünür,
+    //: çözücünün cümlesi kapalı "Teknik ayrıntı (çözücü beyanı, çevrilmedi)"
+    //: altında AYNEN durur (DİL-2 terim kararı 2 deseni).
+    function dilTr() {
+        return !!(window.I18N && window.I18N.lang === 'tr');
+    }
+    function cevrilmedi(text) {
+        const ham = String(text == null ? '' : text);
+        return dilTr() && ham !== '' && SRV(ham) === ham;
+    }
+    function teknikAyrinti(text) {
+        return '<details data-stab-srv="1" style="margin:2px 0 4px;">'
+            + '<summary style="cursor:pointer; font-size:0.66rem; color:var(--hd-ink-dim, #7d97a5);">'
+            + esc(T('panel.stab.techDetailSrv', 'Technical detail (solver statement, untranslated)'))
+            + '</summary><p style="font-family:var(--hd-mono, monospace); font-size:0.66rem;'
+            + ' line-height:1.45; color:var(--hd-ink-dim, #7d97a5); margin:4px 0;'
+            + ' white-space:pre-wrap;">' + esc(String(text)) + '</p></details>';
+    }
     function esc(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
@@ -520,7 +539,39 @@
         return body;
     }
 
+    // V301/FİZİK-2 (L-C §10): pintle iki atomizasyon ölçeği. Ana sonucun
+    // chug_loop.atomisation_scale_check kaydı varsa iki ölçeğin τ'su ve
+    // uzunluk ölçeği uca bağlam olarak gider; uç hükmü motorun KENDİ
+    // kuralıyla kurar (hükümler aynıysa o, farklıysa marginal) ve formdaki
+    // τ nominal ölçeğin τ'su değilse (kullanıcı değiştirdi) uygulamaz —
+    // tolerans uçta tek yerde. Kayıt yoksa gövde eskisiyle bit-aynı.
+    const SCALE_FIELDS = ['tau_s', 'length_scale_mm', 'velocity_m_s',
+                          'liquid_density_kg_m3', 'stream'];
+    function atomisationScalesOf(loop) {
+        const chk = loop && loop.atomisation_scale_check;
+        if (!chk || chk.status !== 'modelled' || !chk.scales
+                || typeof chk.scales !== 'object') return null;
+        const out = {};
+        Object.keys(chk.scales).forEach(function (ad) {
+            const s = chk.scales[ad] || {};
+            const k = {};
+            SCALE_FIELDS.forEach(function (f) {
+                if (s[f] !== undefined && s[f] !== null) k[f] = s[f];
+            });
+            out[ad] = k;
+        });
+        return Object.keys(out).length ? out : null;
+    }
+
     function buildChugBody(formValues) {
+        const body = buildChugBodyCore(formValues);
+        // chugLoopOf {block, path} döndürür; kayıt bloğun içindedir.
+        const olcek = atomisationScalesOf(lastChugLoop && lastChugLoop.block);
+        if (olcek) body.atomisation_scales = olcek;
+        return body;
+    }
+
+    function buildChugBodyCore(formValues) {
         const v = formValues || {};
         const missing = CHUG_REQUIRED.filter(function (f) { return !isNum(v[f]); });
         if (missing.length) throw missingError(missing);
@@ -586,6 +637,37 @@
     }
 
     const VERDICT_KIND = { stable: 'ok', marginal: 'warn', unstable: 'err' };
+    const HUKUM_KELIMESI = {
+        stable: ['panel.stab.verdictWord.stable', 'STABLE'],
+        marginal: ['panel.stab.verdictWord.marginal', 'MARGINAL'],
+        unstable: ['panel.stab.verdictWord.unstable', 'UNSTABLE'],
+    };
+    const HUKUM_ROZETI = {
+        'stable|feed-coupled chug (modeled mechanism only)':
+            ['panel.stab.verdictBadge.stableChug',
+             'STABLE — feed-coupled chug (modeled mechanism only)'],
+        'marginal|feed-coupled chug (modeled mechanism only)':
+            ['panel.stab.verdictBadge.marginalChug',
+             'MARGINAL — feed-coupled chug (modeled mechanism only)'],
+        'unstable|feed-coupled chug (modeled mechanism only)':
+            ['panel.stab.verdictBadge.unstableChug',
+             'UNSTABLE — feed-coupled chug (modeled mechanism only)'],
+        'stable|feed-coupled chug (modeled mechanism only), inertance-free feed line':
+            ['panel.stab.verdictBadge.stableChugNoInertance',
+             'STABLE — feed-coupled chug (modeled mechanism only), inertance-free feed line'],
+        'marginal|feed-coupled chug (modeled mechanism only), inertance-free feed line':
+            ['panel.stab.verdictBadge.marginalChugNoInertance',
+             'MARGINAL — feed-coupled chug (modeled mechanism only), inertance-free feed line'],
+        'unstable|feed-coupled chug (modeled mechanism only), inertance-free feed line':
+            ['panel.stab.verdictBadge.unstableChugNoInertance',
+             'UNSTABLE — feed-coupled chug (modeled mechanism only), inertance-free feed line'],
+    };
+    const KAPSAM_CUMLESI = {
+        'feed-coupled chug (modeled mechanism only)':
+            'panel.stab.scope.chug',
+        'feed-coupled chug (modeled mechanism only), inertance-free feed line':
+            'panel.stab.scope.chugNoInertance',
+    };
 
     function chugVerdict(data) {
         if (!data || data.mode !== 'chug') return null;
@@ -603,9 +685,32 @@
                                + 'a bare verdict is not shown (design '
                                + 'decision 1)' };
         }
+        // V301/PANEL-SAYI (FİZİK-2 DEVİR 5): hüküm kelimesi ve kapsam TR
+        // ekranda İngilizce basılıyordu ("MARGINAL — feed-coupled chug
+        // (modeled mechanism only), inertance-free feed line"). Hüküm
+        // kümesi kapalıdır (hrma/stability/__init__.py: stable / unstable /
+        // marginal); kapsam cümlesi hrma/stability/chug.py'nin iki
+        // biçiminden biridir. Tanınmayan değer AYNEN basılır.
+        // Tanınan (hüküm, kapsam) çifti TEK sözlük anahtarıyla döner, metni
+        // parametresiz: Analiz Merkezi rozeti {key, params}'ı koşum anında
+        // saklayıp dil değişiminde TF ile yeniden basıyor — çevrilmiş
+        // parametre koşumun diline donup kalıyordu (ölçüldü: TR ekranda
+        // Merkez başlığında "…(modeled mechanism only), inertance-free feed
+        // line").
+        // Parametreler HAM taşınır (karar 1 disiplini: kapsam hükümle birlikte
+        // gezer, bekçiler onu okur); sözlük metni onları KULLANMAZ.
+        const tam = HUKUM_ROZETI[a.verdict + '|' + scope.trim()];
+        if (tam) {
+            return { kind: VERDICT_KIND[a.verdict] || 'info', key: tam[0],
+                     params: { verdict: a.verdict.toUpperCase(), scope: scope },
+                     fallback: tam[1] };
+        }
+        const kelime = HUKUM_KELIMESI[a.verdict];
+        const kapsam = KAPSAM_CUMLESI[scope.trim()];
         return { kind: VERDICT_KIND[a.verdict] || 'info',
                  key: 'panel.stab.verdictScoped',
-                 params: { verdict: a.verdict.toUpperCase(), scope: scope },
+                 params: { verdict: kelime ? T(kelime[0], kelime[1]) : a.verdict.toUpperCase(),
+                           scope: kapsam ? T(kapsam, scope) : scope },
                  fallback: '{verdict} — {scope}' };
     }
 
@@ -628,8 +733,14 @@
     // formülünü aynen yeniden hesaplar.
     // ------------------------------------------------------------------
     const AXIS_METRICS = {
-        titleFontPx: 11,        // y-ekseni başlık puntosu (çizimle aynı)
-        tickFontPx: 10,         // tik etiketi puntosu (çizimle aynı)
+        // V301/PANEL-SAYI (FİZİK-2 DEVİR 5): tema (plotly_dark.js
+        // YAZI_TABANI, V301/N-grafik G3) eksen başlığını ≥ 14 px, tiki
+        // ≥ 12 px'e YÜKSELTİYOR; sarma ve marj ise 11 / 10 px ile
+        // hesaplanıyordu. ÖLÇÜLDÜ: nötr eğri y-başlığı grafik başlığına,
+        // kök yeri x-başlığı lejanta biniyordu (1280/1440 × TR/EN). Ölçü
+        // çizilen puntoyla AYNI.
+        titleFontPx: 14,        // y-ekseni başlık puntosu (çizimle aynı)
+        tickFontPx: 12,         // tik etiketi puntosu (çizimle aynı)
         labelFontPx: 10,        // mod haritası etiket puntosu
         kvFontPx: 11.2,         // kvTable 0.7rem × 16px kök punto
         lineHeight: 1.35,       // başlık satır yüksekliği çarpanı
@@ -646,6 +757,25 @@
         //: sarma anlamsızlaşır (her kelime ayrı satıra düşer).
         minPlotWidthPx: 60,
         monoFamily: "'JetBrains Mono', 'SF Mono', Consolas, monospace",
+        //: V301/PANEL-SAYI — dikey lejantın satır başına ayrılan yükseklik
+        //: (lejant puntosu 12 px = plotly_dark.js YAZI_TABANI.lejant ×
+        //: satır yüksekliği + Plotly'nin öğe aralığı) ve blok tamponu.
+        //: Yerleşim ölçüsüdür, veri değildir.
+        legendRowPx: 22,
+        legendPadPx: 8,
+        //: Lejant ⟷ x-başlığı arası boşluk. ÖLÇÜLDÜ (Plotly 1.58.5, 14 px
+        //: başlık): başlık bloğu xAxisBottomMarginPx'in verdiğinden 4-12 px
+        //: aşağı iniyor (tik ⟷ başlık mesafesi Plotly'nin kendi standoff'u).
+        legendGapPx: 20,
+        //: Başlıklı şekilde üst marj: tema (plotly_dark.js) başlık varken
+        //: m.t < 60'ı 60'a YÜKSELTİYOR; 40 yazılınca çizim yüksekliği
+        //: hesaplanandan 20 px kısa çıkıyordu (y-başlığı sarması ve lejant
+        //: konumu yanlış yüksekliğe göre kuruluyordu).
+        titledTopMarginPx: 60,
+        //: Grafik başlığı puntosu = tema tabanı (plotly_dark.js
+        //: YAZI_TABANI.baslik); başlığa iki yandan bırakılan pay.
+        chartTitleFontPx: 16,
+        chartTitleSidePx: 24,
     };
 
     //: JetBrains Mono'nun kendi ilerleme genişliği 0,6 em'dir (fontun
@@ -935,7 +1065,10 @@
     }
 
     function note(text, kind) {
-        return '<p style="font-size:0.7rem; margin:6px 0; color:'
+        // V301/PANEL-SAYI: boşluksuz makine yolu ("Kaynak: combustion_analysis.
+        // stability_analysis.chug_loop.tau_choice_sensitivity") 1280 px'te
+        // Merkez sütunundan 26,8 px taşıyordu (ölçüldü) — satır sonunda kırılır.
+        return '<p style="font-size:0.7rem; margin:6px 0; overflow-wrap:anywhere; color:'
             + kindColor(kind || 'dim') + ';">' + esc(text) + '</p>';
     }
 
@@ -1047,18 +1180,32 @@
     function foldProse(which, key, fallback, text) {
         if (!text) return '';
         return fold(which, foldTitle(key, fallback),
-                    prosePreview(SRV(text)), basisText(text));
+                    cevrilmedi(text) ? onizlemeCevrilmedi() : prosePreview(SRV(text)),
+                    basisText(text));
+    }
+    function onizlemeCevrilmedi() {
+        return T('panel.stab.previewUntranslated',
+                 'solver statement, untranslated - open to read');
     }
 
     function plotBox(id, height) {
+        // V301/PANEL-SAYI: Plotly'nin görünmez köşe sürükleme tutamakları
+        // (nedrag/sedrag) ve SVG genişlik yuvarlaması kabı 1280 px'te 27 px
+        // yatay kaydırmaya zorluyordu (ÖLÇÜLDÜ, Merkez sütunu 351 px); kap
+        // kendi genişliğinde kırpar — yazı öğelerinin hiçbiri artık taşmıyor.
         return '<div id="' + esc(id) + '" data-stab-plot="1" style="width:100%;'
-            + ' height:' + (height || 280) + 'px;"></div>';
+            + ' height:' + (height || 280) + 'px; overflow:hidden;"></div>';
     }
 
     function drawFigure(id, figure) {
         const el = document.getElementById(id);
         if (!el || !window.Plotly || typeof window.Plotly.react !== 'function') {
             return false;
+        }
+        // V301/PANEL-SAYI: şekil kabından uzunsa (lejant bloğu) kap da uzar;
+        // yoksa SVG kabın dışına taşıp sonraki içeriğin üstüne biner.
+        if (figure && figure.layout && isNum(figure.layout.height)) {
+            el.style.height = figure.layout.height + 'px';
         }
         window.Plotly.react(el, figure.traces, figure.layout,
                             { responsive: true, displaylogo: false });
@@ -1211,7 +1358,7 @@
         // ("...-rate contribution alpha [1/s] (negative..." yarım). Başlık
         // kullanılabilir yüksekliğe ÖLÇÜLEREK sarılır, marj ölçülen tik +
         // satır sayısından türetilir.
-        const H = 280, mT = 40, mB = 60;
+        const H = 280, mT = AXIS_METRICS.titledTopMarginPx, mB = 60;
         const yVals = [];
         traces.forEach(function (t) {
             t.y.forEach(function (v) { if (isNum(v)) yVals.push(v); });
@@ -1242,7 +1389,7 @@
         };
     }
 
-    function neutralCurveFigure(data) {
+    function neutralCurveFigure(data, widthPx) {
         const nc = data.neutral_curve || {};
         const op = data.operating_point || {};
         const traces = [{
@@ -1263,33 +1410,66 @@
         }
         // K2 — uzun dikey başlık ölçülerek sarılır, sol marj ölçülen
         // tiklerden türetilir (sönüm çubuğu grafiğiyle aynı kural).
-        const H = 300, mT = 40, mB = 60;
+        // V301/PANEL-SAYI (FİZİK-2 DEVİR 5): x-başlığı da kök yeri gibi
+        // ölçülü çerçeveyle sarılır (ÖLÇÜLDÜ: 1280 px'te Merkez sütunu
+        // 351 px, tek satırlık "Enjektör kazancı J = dP_inj/Pc [-]" sağdan
+        // 19 px taşıyordu); lejant x-başlığının ALTINDA kendi bloğunda.
+        const H = 300, mR = 12;
+        const W = isNum(widthPx) && widthPx > 0 ? widthPx : AXIS_METRICS.defaultPlotWidthPx;
+        const baslikSatir = wrapChartTitle(T('panel.stab.chartNeutral',
+            'Chug neutral curve and the operating point'), W);
+        const mT = titledTopMarginPx(baslikSatir.length);
         const yVals = (Array.isArray(nc.tau_over_tau_c)
             ? nc.tau_over_tau_c.filter(isNum) : [])
             .concat(isNum(op.tau_over_tau_c) ? [op.tau_over_tau_c] : []);
-        const titleLines = wrapAxisTitle(
-            T('panel.stab.axisTauRatio',
-              'tau/tau_c [-] (above the curve = unstable within this '
-              + 'mechanism)'),
-            H - mT - mB, AXIS_METRICS.titleFontPx);
+        const frame = axisFrame({
+            widthPx: W, heightPx: H, marginTopPx: mT, marginRightPx: mR,
+            yTitle: T('panel.stab.axisTauRatio',
+                      'tau/tau_c [-] (above the curve = unstable within this '
+                      + 'mechanism)'),
+            xTitle: T('panel.stab.axisJ', 'Injector gain J = dP_inj/Pc [-]'),
+            yValues: yVals,
+        });
+        const titleFont = { size: AXIS_METRICS.titleFontPx,
+                            family: AXIS_METRICS.monoFamily };
         return {
             traces: traces,
             layout: {
-                title: T('panel.stab.chartNeutral',
-                         'Chug neutral curve and the operating point'),
-                xaxis: { title: T('panel.stab.axisJ',
-                                  'Injector gain J = dP_inj/Pc [-]') },
-                yaxis: { title: { text: titleLines.join('<br>'),
-                                  font: { size: AXIS_METRICS.titleFontPx,
-                                          family: AXIS_METRICS.monoFamily } },
+                title: baslikSatir.join('<br>'),
+                xaxis: { title: { text: frame.xTitleLines.join('<br>'),
+                                  font: titleFont },
                          tickfont: { size: AXIS_METRICS.tickFontPx,
                                      family: AXIS_METRICS.monoFamily } },
-                height: H,
-                legend: { orientation: 'h', y: -0.3 },
-                margin: { t: mT, r: 12, b: mB,
-                          l: yAxisLeftMarginPx(yVals, titleLines.length) },
+                yaxis: { title: { text: frame.yTitleLines.join('<br>'),
+                                  font: titleFont },
+                         tickfont: { size: AXIS_METRICS.tickFontPx,
+                                     family: AXIS_METRICS.monoFamily } },
+                height: H + legendBlockPx(traces.length),
+                legend: { orientation: 'v', x: 0, xanchor: 'left',
+                          y: -(frame.marginBottomPx + AXIS_METRICS.legendGapPx)
+                              / frame.plotHeightPx,
+                          yanchor: 'top' },
+                margin: { t: mT, r: mR,
+                          b: frame.marginBottomPx + legendBlockPx(traces.length),
+                          l: frame.marginLeftPx },
             },
         };
+    }
+
+    //: V301/PANEL-SAYI — grafik BAŞLIĞI dar sütunda sağdan taşıyordu
+    //: (ÖLÇÜLDÜ, 1280 px: "Chug kök yer eğrisi (sigma-frekans düzlemi)"
+    //: 16 px). Başlık, temanın başlık puntosuyla (plotly_dark.js
+    //: YAZI_TABANI.baslik = 16) ölçülerek kelime sınırında sarılır; tek
+    //: aralıklı yazı ölçüsü geniş yanılır (sığmama yönünde değil).
+    function wrapChartTitle(text, widthPx) {
+        const kullanilir = Math.max(widthPx - AXIS_METRICS.chartTitleSidePx,
+                                    AXIS_METRICS.minPlotWidthPx);
+        return wrapAxisTitle(text, kullanilir, AXIS_METRICS.chartTitleFontPx);
+    }
+    function titledTopMarginPx(satirSayisi) {
+        return Math.ceil(AXIS_METRICS.titledTopMarginPx
+            + Math.max(0, satirSayisi - 1) * AXIS_METRICS.chartTitleFontPx
+              * AXIS_METRICS.lineHeight);
     }
 
     /* ÖH D27 a4 · P11B4-29 — pencere simetrisi ölçütü (TEK KAYNAK).
@@ -1347,12 +1527,16 @@
         // deseninin yatay ikizi işliyor: başlık kullanılabilir GENİŞLİĞE
         // ölçülerek sarılır, alt marj satır sayısından türetilir, lejant
         // marjla birlikte iner (axisFrame sabit noktası).
-        const H = 300, mT = 40, mR = 12;
+        const H = 300, mR = 12;
+        const W = isNum(widthPx) && widthPx > 0 ? widthPx : AXIS_METRICS.defaultPlotWidthPx;
+        const baslikSatir = wrapChartTitle(T('panel.stab.chartLocus',
+            'Chug root locus (sigma-frequency plane)'), W);
+        const mT = titledTopMarginPx(baslikSatir.length);
         const yVals = (Array.isArray(rl.frequency_hz)
             ? rl.frequency_hz.filter(isNum) : [])
             .concat(isNum(a.frequency_hz) ? [a.frequency_hz] : []);
         const frame = axisFrame({
-            widthPx: widthPx, heightPx: H, marginTopPx: mT, marginRightPx: mR,
+            widthPx: W, heightPx: H, marginTopPx: mT, marginRightPx: mR,
             yTitle: T('panel.stab.axisLocusFreq', 'Frequency [Hz]'),
             xTitle: T('panel.stab.axisSigma',
                       'Dominant root growth rate sigma [1/s] '
@@ -1364,8 +1548,7 @@
         return {
             traces: traces,
             layout: {
-                title: T('panel.stab.chartLocus',
-                         'Chug root locus (sigma-frequency plane)'),
+                title: baslikSatir.join('<br>'),
                 xaxis: { title: { text: frame.xTitleLines.join('<br>'),
                                   font: titleFont },
                          tickfont: { size: AXIS_METRICS.tickFontPx,
@@ -1374,12 +1557,33 @@
                                   font: titleFont },
                          tickfont: { size: AXIS_METRICS.tickFontPx,
                                      family: AXIS_METRICS.monoFamily } },
-                height: H,
-                legend: { orientation: 'h', y: frame.legendY },
-                margin: { t: mT, r: mR, b: frame.marginBottomPx,
+                // V301/PANEL-SAYI (FİZİK-2 DEVİR 5) — LEJANT x-BAŞLIĞINA
+                // BİNMİYOR. ÖLÇÜLDÜ (olcum/kararlilik_sonra): yanchor
+                // verilmediğinde Plotly y <= 1/3 için lejantı ALT kenarından
+                // bağlar (plotly-1.58.5 isBottomAnchor), yani lejant alt
+                // marjın dış kenarından YUKARI, x-başlığının üstüne
+                // uzanıyordu ("Enjektör kazancı J boyunca baskın kök" ⟷
+                // "Baskın kök büyüme oranı sigma…", 1280/1440 × TR/EN).
+                // Lejant artık başlık bölgesinin ALTINDAN başlar (yanchor
+                // top), her öğe kendi satırında; yüksekliği alt marja ve
+                // şekil yüksekliğine eklenir — çizim yüksekliği (y-başlığı
+                // sarması) DEĞİŞMEZ.
+                height: H + legendBlockPx(traces.length),
+                legend: { orientation: 'v', x: 0, xanchor: 'left',
+                          y: -(frame.marginBottomPx + AXIS_METRICS.legendGapPx)
+                              / frame.plotHeightPx,
+                          yanchor: 'top' },
+                margin: { t: mT, r: mR,
+                          b: frame.marginBottomPx + legendBlockPx(traces.length),
                           l: frame.marginLeftPx },
             },
         };
+    }
+
+    function legendBlockPx(n) {
+        return Math.ceil(AXIS_METRICS.legendGapPx
+                         + Math.max(0, n) * AXIS_METRICS.legendRowPx
+                         + AXIS_METRICS.legendPadPx);
     }
 
     // ------------------------------------------------------------------
@@ -1657,7 +1861,10 @@
             if (isNum(bant.ratio)) {
                 metin += tauRatioText(bant.ratio);
             } else if (bant.ratio_not_applicable_reason) {
-                metin += ' — ' + SRV(bant.ratio_not_applicable_reason);
+                metin += ' — ' + (cevrilmedi(bant.ratio_not_applicable_reason)
+                    ? T('panel.stab.ratioNotPublished',
+                        'no ratio is published (reason: solver statement below)')
+                    : SRV(bant.ratio_not_applicable_reason));
             }
             return metin;
         }
@@ -1701,7 +1908,11 @@
                     'Growth-rate band across tau candidates'),
                     tauGrowthText(b.growth_rate_1_s_span,
                                   b.growth_span_not_resolved_reason))
-                + '</tbody></table>' + kaynak + '</div>';
+                + '</tbody></table>'
+                + ((b.growth_rate_1_s_span && !isNum(b.growth_rate_1_s_span.ratio)
+                    && cevrilmedi(b.growth_rate_1_s_span.ratio_not_applicable_reason))
+                    ? teknikAyrinti(b.growth_rate_1_s_span.ratio_not_applicable_reason) : '')
+                + kaynak + '</div>';
         } else if (v.state === 'not_measured') {
             html += greyBlock('tau-not-measured',
                 esc(tauTri(null)) + ' — ' + esc(SRV(v.reason)) + kaynak);
@@ -1720,6 +1931,42 @@
                     + 'published for these inputs.')) + kaynak);
         }
         return html;
+    }
+
+    // V301/FİZİK-2 (L-C §10): iki ölçek denetiminin ekran karşılığı. Metin
+    // uç kaydından ve uyarı kodundan (L-C'nin EN+TR sözlük kayıtları);
+    // kayıt yoksa hiçbir şey basılmaz.
+    function scaleCheckBadge(data) {
+        const a = (data && data.assessment) || {};
+        const chk = a.atomisation_scale_check;
+        if (!chk || typeof chk !== 'object') return { html: '', tip: '' };
+        if (chk.status === 'NOT_APPLIED') {
+            return { tip: '', html: badge(T('panel.stab.badgeScaleNotApplied',
+                'TWO-SCALE CHECK NOT APPLIED — tau differs from the nominal '
+                + 'atomisation scale of the main result'), 'info') };
+        }
+        if (chk.status !== 'modelled') {
+            return { tip: '', html: badge(T('panel.stab.badgeScaleNotEvaluated',
+                'TWO-SCALE CHECK NOT EVALUATED — the chug loop rejected one '
+                + 'of the atomisation scales'), 'warn') };
+        }
+        if (chk.verdicts_agree === true) {
+            // V301/PANEL-SAYI: hüküm kelimesi ekran dilinde (TR ekranda
+            // "İKİ ATOMİZASYON ÖLÇEĞİ DE STABLE VERİYOR" basılıyordu).
+            const kelime = HUKUM_KELIMESI[chk.published_verdict];
+            return { tip: '', html: badge(TF('panel.stab.badgeScaleAgree',
+                { verdict: kelime ? T(kelime[0], kelime[1])
+                    : String(chk.published_verdict || '').toUpperCase() },
+                'BOTH ATOMISATION SCALES GIVE {verdict}'), 'info') };
+        }
+        const w = (Array.isArray(data.warnings) ? data.warnings : [])
+            .filter(function (x) {
+                return x && typeof x.code === 'string'
+                    && x.code.indexOf('warn.liquid.chug_scale_sensitive_') === 0;
+            })[0];
+        const metin = w ? TF(w.code, w.params || {}, a.verdict_basis || '')
+            : SRV(a.verdict_basis || '');
+        return { tip: metin, html: badge(metin, 'warn') };
     }
 
     function renderChug(data, root) {
@@ -1743,10 +1990,12 @@
 
         let html = '<div data-stab-badges="1">';
         const v = chugVerdict(data);
+        const olcekRozet = scaleCheckBadge(data);
         if (v) {
             html += badge(TF(v.key, v.params, v.fallback), v.kind,
-                          SRV(a.verdict_basis || ''));
+                          olcekRozet.tip || SRV(a.verdict_basis || ''));
         }
+        html += olcekRozet.html;
         if (a.unconditionally_stable === true) {
             html += badge(T('panel.stab.badgeUnconditional',
                 'NO NEUTRAL POINT AT THIS J (gain 1/(2J) <= 1)'), 'info',
@@ -1881,23 +2130,36 @@
         if (locusBasis || sim) {
             let simetriMetni = '';
             if (sim) {
-                simetriMetni = (sim.symmetric
-                    ? 'Window IS symmetric about the operating point: '
-                    : 'Window is NOT symmetric about the operating point '
-                      + '(the centre was clamped into the neutral-curve '
-                      + 'band): ')
-                    + 'J_op = ' + sig(sim.jOp) + ', left arm = '
-                    + sig(sim.left) + ', right arm = ' + sig(sim.right)
-                    + ', relative difference = '
-                    + _pct(sigFig(sim.rel * 100)) + '.';
+                // V301/PANEL-SAYI: cümle sözlükten (EN + TR); sayılar aynı.
+                const simP = { jop: sig(sim.jOp), left: sig(sim.left),
+                               right: sig(sim.right),
+                               rel: _pct(sigFig(sim.rel * 100)) };
+                simetriMetni = sim.symmetric
+                    ? TF('panel.stab.locusSymText', simP,
+                         'Window IS symmetric about the operating point: '
+                         + 'J_op = {jop}, left arm = {left}, right arm = '
+                         + '{right}, relative difference = {rel}.')
+                    : TF('panel.stab.locusAsymText', simP,
+                         'Window is NOT symmetric about the operating point '
+                         + '(the centre was clamped into the neutral-curve '
+                         + 'band): J_op = {jop}, left arm = {left}, right arm = '
+                         + '{right}, relative difference = {rel}.');
                 html += badge(sim.symmetric
                     ? T('panel.stab.locusSymmetric', 'LOCUS WINDOW SYMMETRIC')
                     : T('panel.stab.locusAsymmetric',
                         'LOCUS WINDOW NOT CENTRED ON THE OPERATING POINT'),
                     sim.symmetric ? 'info' : 'warn', simetriMetni);
             }
-            html += greyBlock('locus-basis',
-                (locusBasis ? esc(SRV(locusBasis)) : '')
+            const kunyeHtml = !locusBasis ? ''
+                : (cevrilmedi(locusBasis)
+                    ? esc(T('panel.stab.locusBasisSummary',
+                        'Root locus: the rightmost characteristic root traced '
+                        + 'over a J window around the operating point, with '
+                        + 'tau, tau_c and tau_f held at their operating '
+                        + 'values; the window numbers are in the solver '
+                        + 'statement.')) + teknikAyrinti(locusBasis)
+                    : esc(SRV(locusBasis)));
+            html += greyBlock('locus-basis', kunyeHtml
                 + (simetriMetni ? '<br>' + esc(simetriMetni) : ''));
         }
 
@@ -1988,7 +2250,8 @@
                           'MODEL & VERDICT BASIS DECLARATIONS'),
                 TF('panel.stab.foldStatements', { n: basisProse.length },
                    '{n} statement(s)') + ' — '
-                    + prosePreview(SRV(basisProse[0])),
+                    + (cevrilmedi(basisProse[0]) ? onizlemeCevrilmedi()
+                       : prosePreview(SRV(basisProse[0]))),
                 basisProse.map(function (tx) { return basisText(tx); })
                     .join(''));
         }
@@ -1999,7 +2262,8 @@
             noPlotlyNote(root);
         } else {
             if (Array.isArray(nc.dp_ratio_j) && nc.dp_ratio_j.length) {
-                drawFigure(neutralId, neutralCurveFigure(data));
+                drawFigure(neutralId, neutralCurveFigure(
+                    data, plotContainerWidth(neutralId)));
             }
             if (Array.isArray(rl.sigma_1_s) && rl.sigma_1_s.length) {
                 drawFigure(locusId, rootLocusFigure(
@@ -2040,13 +2304,13 @@
         // kalır ve body() isteği durdurur (uydurma sayı gösterilmez).
         fields: [
             ['sound_speed_m_s', 'Chamber sound speed a [m/s]', '', 'any',
-             'panel.stab.fieldSoundSpeed'],
+             'panel.stab.fieldSoundSpeed', 'panel.stab.help.soundSpeed'],
             ['chamber_length_m', 'Acoustic cavity length L [m]', '', 'any',
-             'panel.stab.fieldChamberLength'],
+             'panel.stab.fieldChamberLength', 'panel.stab.help.chamberLength'],
             ['gamma', 'Ratio of specific heats gamma [-]', '', 'any',
-             'panel.stab.fieldGamma'],
+             'panel.stab.fieldGamma', 'panel.stab.help.gamma'],
             ['nozzle_entrance_mach', 'Nozzle entrance mean-flow Mach M_N [-]',
-             '', 'any', 'panel.stab.fieldMachN'],
+             '', 'any', 'panel.stab.fieldMachN', 'panel.stab.help.machN'],
         ],
 
         fromResults: function (results) {
@@ -2073,32 +2337,32 @@
 
         fields: [
             ['dp_ratio_j', 'Injector pressure drop ratio J = dP_inj/Pc [-]',
-             '', 'any', 'panel.stab.fieldJ'],
+             '', 'any', 'panel.stab.fieldJ', 'panel.stab.help.J'],
             ['tau_s', 'Sensitive time lag tau [s]', '', 'any',
-             'panel.stab.fieldTau'],
+             'panel.stab.fieldTau', 'panel.stab.help.tau'],
             ['tau_c_s', 'Chamber time constant tau_c [s]', '', 'any',
-             'panel.stab.fieldTauC'],
+             'panel.stab.fieldTauC', 'panel.stab.help.tauC'],
             ['tau_f_s', 'Feed inertance time constant tau_f [s] — optional',
-             '', 'any', 'panel.stab.fieldTauF'],
+             '', 'any', 'panel.stab.fieldTauF', 'panel.stab.help.tauF'],
             ['feed_line_length_m', 'Feed line length [m] — optional group',
-             '', 'any', 'panel.stab.fieldFeedLen'],
+             '', 'any', 'panel.stab.fieldFeedLen', 'panel.stab.help.feedLen'],
             ['feed_line_diameter_mm',
              'Feed line inner diameter [mm] — optional group', '', 'any',
-             'panel.stab.fieldFeedDia'],
+             'panel.stab.fieldFeedDia', 'panel.stab.help.feedDia'],
             ['feed_line_area_m2', 'Feed line flow area [m2] — optional group',
-             '', 'any', 'panel.stab.fieldFeedArea'],
+             '', 'any', 'panel.stab.fieldFeedArea', 'panel.stab.help.feedArea'],
             ['feed_line_mass_flow_kg_s',
              'Feed line mass flow [kg/s] — optional group', '', 'any',
-             'panel.stab.fieldFeedMdot'],
+             'panel.stab.fieldFeedMdot', 'panel.stab.help.feedMdot'],
             // Parti 28 artçısı: ΔP_inj grubun ZORUNLU üyesi (uç sözleşmesi
             // τ_f = L·ṁ/(2A·ΔP_inj)); yoğunluk isteğe bağlı, uçta yalnız
             // yankılanır — buildChugBody'deki grup kapısıyla aynı sözleşme.
             ['feed_line_dp_injector_Pa',
              'Injector pressure drop dP_inj [Pa] — required with the '
-             + 'feed-line group', '', 'any', 'panel.stab.fieldFeedDp'],
+             + 'feed-line group', '', 'any', 'panel.stab.fieldFeedDp', 'panel.stab.help.feedDp'],
             ['feed_line_density_kg_m3',
              'Propellant density in the line [kg/m3] — optional, echoed only',
-             '', 'any', 'panel.stab.fieldFeedRho'],
+             '', 'any', 'panel.stab.fieldFeedRho', 'panel.stab.help.feedRho'],
         ],
 
         fromResults: function (results) {
@@ -2140,6 +2404,8 @@
         _chugApplicability: chugApplicability,
         _buildDampingBody: buildDampingBody,
         _buildChugBody: buildChugBody,
+        _atomisationScalesOf: atomisationScalesOf,
+        _scaleCheckBadge: scaleCheckBadge,
         _chugVerdict: chugVerdict,
         _dampingVerdict: dampingVerdict,
         _acousticRunMatches: acousticRunMatches,

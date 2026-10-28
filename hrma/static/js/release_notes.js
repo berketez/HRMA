@@ -52,12 +52,39 @@
     }
 
     /* Escape edilmiş metne dar markdown dönüşümü uygular (yalnız #, ##, -, **). */
+    /* V301/DİL (NK-2): sürüm notu satırları markdown'da YUMUŞAK kırılır;
+       satır satır işlenince satıra bölünmüş vurgu ('**…\n…**', '*…*')
+       düz yıldız olarak görünüyordu. Başlık/madde/boş satır olmayan satır
+       bir öncekinin devamıdır ve ona eklenir; sonra vurgu işlenir. */
+    function birlestir(ham) {
+        var out = [];
+        for (var i = 0; i < ham.length; i++) {
+            var t = ham[i];
+            var yeni = (t.trim() === '' || t.indexOf('#') === 0
+                        || /^\s*- /.test(t));
+            var onceki = out.length ? out[out.length - 1] : null;
+            if (!yeni && onceki !== null && onceki.trim() !== ''
+                    && onceki.indexOf('#') !== 0) {
+                out[out.length - 1] = onceki.replace(/\s+$/, '') + ' ' + t.trim();
+            } else {
+                out.push(/^\s+- /.test(t) ? t.trim() : t);
+            }
+        }
+        return out;
+    }
+
+    function vurgu(line) {
+        return line.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+            .replace(/(^|[\s(])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?=[\s).,;:!?]|$)/g,
+                     '$1<i>$2</i>');
+    }
+
     function renderNotes(md) {
-        var lines = escapeHtml(md).split('\n');
+        var lines = birlestir(escapeHtml(md).split('\n'));
         var out = [];
         for (var i = 0; i < lines.length; i++) {
             var line = lines[i];
-            var bolded = line.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+            var bolded = vurgu(line);
             if (line.indexOf('# ') === 0) {
                 // Release gövdeleri "# HRMA vX.Y.Z" ile başlar; blok başlığı
                 // sürümü zaten gösterdiği için ham '#' basmak yerine başlık yap.

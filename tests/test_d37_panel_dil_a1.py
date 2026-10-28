@@ -1194,6 +1194,25 @@ def g2_uretici():
     return g2_uretici_metinleri()
 
 
+def _not_maddeleri(metin):
+    """Grafik notunun MADDELERİ ('- ' ile başlayan satır + sarılmış devamı).
+
+    T-ÇAPA-C2 (27 Eki): v3.0.1 N-grafik (f981eb6b4) uzun not maddesini
+    ``visualization._wrap_note_lines`` ile '<br>' satırlarına SARAR
+    (kısaltmaz; satırlar boşlukla birleşince özgün metin). Bekçi satır
+    yerine maddeyi ölçer: '- ' ile başlamayan satır bir önceki maddenin
+    devamıdır ve boşlukla birleştirilir (devam satırının hizalama girintisi
+    düşer; üretici devam satırlarını iki boşlukla girintiler).
+    """
+    maddeler = []
+    for satir in str(metin).split('<br>'):
+        if maddeler and not satir.startswith('- ') and maddeler[-1].startswith('- '):
+            maddeler[-1] += ' ' + satir.lstrip()
+        else:
+            maddeler.append(satir)
+    return maddeler
+
+
 class TestG2Uretici:
     @node_gerek
     def test_uretici_metinleri_TR_ve_kopyalar_birebir(self, g2_uretici, tmp_path):
@@ -1226,7 +1245,7 @@ class TestG2Uretici:
                 assert re.fullmatch(r'Exit: supplied nozzle ε, p_e \d+\.\d{3} bar', cikis), cikis
             else:
                 assert cikis in G2_IPUCU, (ad, cikis)
-            satir = [s for n in v['notlar'] for s in n.split('<br>')
+            satir = [s for n in v['notlar'] for s in _not_maddeleri(n)
                      if 'This run point' in s]
             assert len(satir) == 1, (ad, v['notlar'])
             sablon = G2_NOT_SABLONLARI[beklenen_sablon[ad]]
@@ -1243,7 +1262,7 @@ class TestG2Uretici:
             else:
                 assert tr_cikis == G2_IPUCU_TR[v['ipucu'].replace(
                     '<extra></extra>', '').split('<br>')[-1]], tr_cikis
-            tr_g2 = [s for n in v['notlar'] for s in tr[n].split('<br>')
+            tr_g2 = [s for n in v['notlar'] for s in _not_maddeleri(tr[n])
                      if 'This run point' in s or 'Bu koşum noktası' in s]
             assert len(tr_g2) == 1 and tr_g2[0].startswith('- Bu koşum noktası: '), (ad, tr_g2)
             # Ş1 (3. tur): TR not bekçinin kendi şablon tablosuna BİREBİR

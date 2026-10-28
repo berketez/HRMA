@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import form_defaults
+
 KOK = Path(__file__).resolve().parents[1]
 MOTOR = KOK / 'hrma' / 'engines' / 'liquid_rocket_engine.py'
 PANEL = KOK / 'hrma' / 'static' / 'js' / 'panels' / 'stability_panel.js'
@@ -128,8 +130,14 @@ class TestP17B1_10KarisikDil:
         (``engine_cycle='pressure_fed'``) reddi. Ekranda "Autogenous
         pressurization: Autogenous basınçlandırma turbopompalı çevrimler
         içindir…" diye çıkıyordu."""
+        # v3.0.1 T-ÇAPA-B: basınç beslemede ``feed_pressure`` yoksa uç 422
+        # ``pressure_fed_feed_pressure_not_supplied`` (L-A SV-03). Konu
+        # autogenous reddinin dili: sayfanın gönderdiği şablon varsayılanı
+        # verilir (tek kaynak, kopyalanmaz). Ölçüldü: 200.
         govde = _kos(client, fuel_type='methane', mixture_ratio=2.8,
-                     engine_cycle='pressure_fed')
+                     engine_cycle='pressure_fed',
+                     feed_pressure=form_defaults.sayisal_varsayilanlar(
+                         'liquid')['feed_pressure'])
         gerekce = (govde.get('autogenous_pressurization') or {}).get('reason')
         assert isinstance(gerekce, str) and gerekce, (
             'basınç beslemeli koşuda autogenous reddi yayımlanmadı')
@@ -171,18 +179,30 @@ class TestP16B2_07BirimSozlesmesi:
             'user input (combustion efficiency)')
 
     def test_kesir_girdi_reddedilir_ve_birim_adiyla_soylenir(self, client):
-        govde = _kos(client, combustion_efficiency=0.97)
-        inj = self._inj(govde)
-        # Sessiz dönüşüm YOK: değer uygulanmaz.
-        assert inj['combustion_efficiency'] == pytest.approx(1.0, abs=1e-9)
-        assert inj['combustion_efficiency_source'].startswith('not supplied')
-        # Ret GEREKÇESİ adıyla söylenir.
-        u = _uyari(govde, 'warn.liquid.efficiency_unit_is_percent')
-        assert u is not None, _uyari_kodlari(govde)
-        p = u['params']
-        assert p['field'] == 'combustion_efficiency'
-        assert p['value'] == pytest.approx(0.97)
-        assert p['as_percent'] == pytest.approx(97.0)
+        """TERS KAPI (v3.0.1 T-ÇAPA-B): kesir girdi artık tasarımı HİÇ
+        yayımlatmaz.
+
+        Eski bekçi 200 + %100'e düşen verim + 'not supplied' künyesi +
+        ``warn.liquid.efficiency_unit_is_percent`` uyarısı bekliyordu. L-A
+        SV-02 (tek bant kapısı) / K-A karar 3: aralık dışı girdi yerleşik
+        değerle değiştirilmez → adlı 422. Ölçüldü (117d704da): 0,97 →
+        ``input_not_accepted``, ``out_of_accepted_range``, bant 50-100 %,
+        ileti alan adını ve birimi (%) söyler. "Sessiz dönüşüm yok" ve
+        "birim adıyla söylenir" iddiaları korunur.
+        """
+        yuk = dict(TABAN_YUK, combustion_efficiency=0.97)
+        yanit = client.post('/calculate_liquid', json=yuk)
+        assert yanit.status_code == 422, yanit.get_data(as_text=True)[:300]
+        j = yanit.get_json()
+        assert j.get('error_code') == 'input_not_accepted'
+        kayit = [k for k in (j.get('invalid_fields') or [])
+                 if k.get('field') == 'combustion_efficiency']
+        assert kayit, j.get('invalid_fields')
+        assert kayit[0]['reason'] == 'out_of_accepted_range'
+        assert [kayit[0]['min'], kayit[0]['max']] == [50.0, 100.0]
+        assert 'combustion_efficiency' in j['message']
+        assert '%' in j['message']
+        assert 'injector' not in j and 'injection_system' not in j
 
     def test_birim_sozlesmesi_yanitta_yazili(self, taban):
         inj = self._inj(taban)

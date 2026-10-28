@@ -392,6 +392,16 @@ class TestSafetyPanelTermalEkseni:
         r = copy.deepcopy(motor_sonuclari['hybrid'])
         r['motor']['heat_transfer_analysis']['gas_side_analysis'][
             'wall_temperature_unphysical'] = False
+        # V301/PANEL — KURGU ÇEVRİLDİ, iddia AYNI (gerekçeli): V301/H-termal'den
+        # beri örnek hibritin yapısal çifti çözülmüş değil, yakıt bloğu
+        # bölgelerinin BEYANLI kasa sıcaklığıdır (``hybrid_chamber_zone_
+        # protection``); H-PANEL onu H-termal DEVİR 2 uyarınca
+        # ``WALL_TEMP_SOURCE_NOT_SOLVED``e koydu (beyanlı çift tohumlanmaz,
+        # bekçi test_d37_panel_js_t6 ``…beyanli_bolge_cifti…``). Örnek bu
+        # testin öncülünü (çözülmüş çift) artık taşımıyor; çözülmüş çift
+        # kurgusu kaynağı ısı modülüne çevirerek kurulur.
+        r['motor']['structural_analysis']['thermal_analysis'][
+            'wall_temperature_source'] = 'heat_transfer_module'
         cikti2 = kos_harness(tmp_path, panels=['panels/safety_panel.js'],
                              motorResult=r, motorType='hybrid',
                              fromResultsFor=['safety'])
@@ -409,14 +419,41 @@ class TestSafetyPanelTermalEkseni:
 
     def test_dock_veremiyorsa_alan_gonderilmez(self, tmp_path,
                                                motor_sonuclari):
-        """FAIL-CLOSED: katı zincir cidar sıcaklığı YAYIMLAMIYOR."""
+        """FAIL-CLOSED: çözülmüş kasa sıcaklığı yoksa çift gönderilmez.
+
+        V301/PANEL (ÖRNEK-PANEL DEVİR 1) — ÇEVRİLDİ, gerekçeli: eski öncül
+        "katı zincir cidar sıcaklığı YAYIMLAMIYOR" artık doğru değil; katı
+        motor kasayı yalıtım + astar arkasında yığın ÇÖZÜYOR ve
+        ``thermal_analysis.heat_transfer.case_temperature_k`` diye
+        yayımlıyor (örnek 313,553 K; ısıl panel aynı yolu kullanıyor).
+        Çift YALNIZ o çözülmüş sayıdır (uydurma yok); alan yoksa ya da yanma
+        süresi pozitif değilse (sıcaklık çözülmemiştir) çift gitmez.
+        """
+        import copy
         cikti = kos_harness(tmp_path, panels=['panels/safety_panel.js'],
                             motorResult=motor_sonuclari['solid'],
                             motorType='solid', fromResultsFor=['safety'])
         oneri = cikti['panels']['safety']['suggestion']
-        assert 'wall_temperature_hot' not in oneri, (
-            'katı motorda cidar sıcaklığı UYDURULMUŞ — kaynağı yok')
-        assert 'wall_temperature_cold' not in oneri
+        kasa = motor_sonuclari['solid']['thermal_analysis']['heat_transfer'][
+            'case_temperature_k']
+        assert oneri['wall_temperature_hot'] == pytest.approx(kasa)
+        assert oneri['wall_temperature_cold'] == pytest.approx(kasa)
+        # Fail-closed iki dal: çözülmüş sayı yok / yanma süresi yok.
+        for bozan in ('alan_yok', 'sure_yok'):
+            r = copy.deepcopy(motor_sonuclari['solid'])
+            if bozan == 'alan_yok':
+                del r['thermal_analysis']['heat_transfer']['case_temperature_k']
+            else:
+                r['burn_time'] = 0.0
+                (r.get('motor_geometry') or {}).pop('burn_time', None)
+            alt = tmp_path / bozan
+            alt.mkdir()
+            c2 = kos_harness(alt, panels=['panels/safety_panel.js'],
+                             motorResult=r, motorType='solid',
+                             fromResultsFor=['safety'])
+            o2 = c2['panels']['safety']['suggestion']
+            assert 'wall_temperature_hot' not in o2, (bozan, o2)
+            assert 'wall_temperature_cold' not in o2, (bozan, o2)
 
     def test_geri_cekme_beyanlari_ekranda(self, cikti):
         """Termal eksen artık matristen sessizce düşmüyor."""
@@ -448,6 +485,16 @@ class TestSafetyPanelTermalEkseni:
         r = copy.deepcopy(motor_sonuclari['hybrid'])
         r['motor']['heat_transfer_analysis']['gas_side_analysis'][
             'wall_temperature_unphysical'] = False
+        # V301/PANEL — KURGU ÇEVRİLDİ, iddia AYNI (gerekçeli): V301/H-termal'den
+        # beri örnek hibritin yapısal çifti çözülmüş değil, yakıt bloğu
+        # bölgelerinin BEYANLI kasa sıcaklığıdır (``hybrid_chamber_zone_
+        # protection``); H-PANEL onu H-termal DEVİR 2 uyarınca
+        # ``WALL_TEMP_SOURCE_NOT_SOLVED``e koydu (beyanlı çift tohumlanmaz,
+        # bekçi test_d37_panel_js_t6 ``…beyanli_bolge_cifti…``). Örnek bu
+        # testin öncülünü (çözülmüş çift) artık taşımıyor; çözülmüş çift
+        # kurgusu kaynağı ısı modülüne çevirerek kurulur.
+        r['motor']['structural_analysis']['thermal_analysis'][
+            'wall_temperature_source'] = 'heat_transfer_module'
         cikti = kos_harness(tmp_path, panels=['panels/safety_panel.js'],
                             motorResult=r,
                             motorType='hybrid', fromResultsFor=['safety'])

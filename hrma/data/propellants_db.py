@@ -96,7 +96,12 @@ VALID_FAMILIES = frozenset({'composite', 'sugar', 'double_base', 'other'})
 # bandıyla uyumlu olmalı ki katalog değeri sessizce reddedilmesin).
 _PHYSICAL_RANGES: Dict[str, Tuple[float, float]] = {
     'density': (500.0, 3000.0),            # kg/m^3
-    'c_star': (800.0, 2500.0),             # m/s
+    # V301/N-CEA-2: alt sınır 800 -> 700 m/s. Kara barutun NASA CEA c*'ı
+    # (nominal kart, 10-150 bar) 784,6-788,7 m/s; eski sınır CEA'nın
+    # kendi değerini reddederdi. 700 HRMA seçimi (ölçülen en düşük CEA
+    # değerinin ~%11 altı). Motorun form bandı bu demeti okur
+    # (PROPELLANT_C_STAR_RANGE_M_S).
+    'c_star': (700.0, 2500.0),             # m/s
     'gamma': (1.05, 1.5),                  # -
     'flame_temperature': (1000.0, 4500.0),  # K
     'molecular_weight': (10.0, 80.0),      # kg/kmol
@@ -113,6 +118,10 @@ _PHYSICAL_RANGES: Dict[str, Tuple[float, float]] = {
 #: ``_PHYSICAL_RANGES['density']`` demetinin kendisi yayımlanır.
 PROPELLANT_DENSITY_RANGE_KG_M3: Tuple[float, float] = _PHYSICAL_RANGES[
     'density']
+
+#: c* kabul bandı (m/s) — katalog doğrulayıcısı ve motorun 'char_velocity'
+#: form bandı AYNI demeti okur (V301/N-CEA-2; eskiden motorda satır içi).
+PROPELLANT_C_STAR_RANGE_M_S: Tuple[float, float] = _PHYSICAL_RANGES['c_star']
 
 
 def mm_mpa_to_m_bar(a_mm_mpa: float, n: float) -> float:
@@ -274,19 +283,29 @@ PROPELLANTS: Dict[str, Dict] = {
         'burn_rate_n': 0.36,
         'burn_rate_ref': ("a' = 4.5 mm/s at 1 MPa, n = 0.36 "
                           "(r = a'*P[MPa]^n); typical, indicative only."),
-        'c_star': 1425.9,
-        'gamma': 1.22,
-        'flame_temperature': 2550.0,
-        'molecular_weight': 24.5,
-        'source': ('[S&B] Ch. 12 - non-metallized AP/HTPB property band; c* '
-                   'from the Eq. 3-32 identity for the tabulated (gamma, '
-                   'Tc, M), which is legitimate here because the exhaust is '
-                   'essentially single phase.'),
-        'notes': ('Typical values. Removing aluminum lowers flame '
-                  'temperature and c* but leaves an essentially smoke-free '
-                  'single-phase exhaust.'),
+        # V301/N-CEA-2 K4 (26 Eki 2026): eski "tipik" bant (c* 1425,9,
+        # gamma 1,22, T_c 2550, M 24,5; S&B Böl. 12) kaydın KENDİ nominal
+        # bileşiminin NASA CEA çözümüyle değiştirildi: T_c -%10,2, c* -%5,7
+        # (docs/scofield/raw/OH/V301/cea/RAPOR.md C2-K4). Değerler: RocketCEA
+        # (CEA2), AP 85 / HTPB R-45 15 (APCP kanıt koşumunun R-45 kartı),
+        # 68,9 bar (_APCP_CEA_CHAMBER_PRESSURE_BAR), kayan denge; M = 1/n.
+        # Motor, bileşimi bildiği için kendi Pc'sinde CEA'yı yeniden koşar;
+        # bu dörtlü CEA yokken kullanılan beyanlı tek basınçlı yedektir.
+        'c_star': 1512.8,
+        'gamma': 1.1894,
+        'flame_temperature': 2838.9,
+        'molecular_weight': 24.580,
+        'source': ('NASA CEA (RocketCEA/CEA2), nominal composition AP 85 / '
+                   'HTPB (R-45 card of the APCP evidence run) 15 wt%, 68.9 '
+                   'bar, shifting equilibrium; M = 1/n. Nominal composition, '
+                   'HRMA choice: the formulation is only given as ~85/~15 '
+                   '(docs/scofield/raw/OH/V301/cea/kati-gecis).'),
+        'notes': ('Removing aluminum lowers flame temperature and c* and '
+                  'leaves an essentially smoke-free single-phase exhaust. '
+                  'Thermochemistry is the CEA solution of the nominal '
+                  'composition, not a measured value.'),
         'engine_key': None,
-        'c_star_basis': 'eq3-32',
+        'c_star_basis': 'cea',
         'validated': False,
     },
 
@@ -569,14 +588,28 @@ PROPELLANTS: Dict[str, Dict] = {
         'burn_rate_n': 0.30,
         'burn_rate_ref': ("a' = 12.0 mm/s at 1 MPa, n = 0.30 "
                           "(r = a'*P[MPa]^n); typical, indicative only."),
-        'c_star': 945.3,
-        'gamma': 1.251,
-        'flame_temperature': 2216.4,
-        'molecular_weight': 33.21,
-        'source': '[ENG] black powder reference set (ballistics data).',
+        # V301/N-CEA-2 K5 (26 Eki 2026): eski kayıt (c* 945,3, gamma 1,251,
+        # T_c 2216,4, M 33,21; künye "[ENG] black powder reference set",
+        # sayfasız, kaynağı bulunamadı) c*'ı CEA ideal dengesinin (~787 m/s)
+        # %20 ÜSTÜNDEYDİ — ölçülmüş bir c* ideal dengeyi aşamaz. Değerler:
+        # RocketCEA (CEA2), nominal KNO3 75 / C(gr) 15 / S 10, 1000 psia,
+        # kayan denge; M = 1/n. DÜŞÜK GÜVEN: odun kömürü için kaynaklı bir
+        # formül bulunamadı, kart grafit varsayıyor.
+        'c_star': 787.1,
+        'gamma': 1.0913,
+        'flame_temperature': 1915.7,
+        'molecular_weight': 65.411,
+        'source': ('NASA CEA (RocketCEA/CEA2), nominal composition KNO3 75 / '
+                   'charcoal 15 / sulfur 10 wt% with charcoal taken as '
+                   'graphite C(gr), 1000 psia, shifting equilibrium; M = 1/n. '
+                   'LOW CONFIDENCE: no sourced charcoal formula; the former '
+                   'value (c* 945.3 m/s, unsourced) was above the CEA ideal '
+                   'and was removed (docs/scofield/raw/OH/V301/cea/'
+                   'kati-gecis).'),
         'notes': ('Typical burn rate. Pressed black powder is used for '
                   'ejection charges and small motors; heavy condensed-phase '
-                  'products make measured c* far below the ideal value.'),
+                  'products (K2CO3, K2S) give a low c*. Real charcoal carries '
+                  'H and O and gives more gas than the graphite card.'),
         'engine_key': 'black_powder',
         # ÖH D17 (P2B1-01): 'engine-reference' bir MUAFİYET etiketiydi —
         # hiçbir test onu denetlemiyordu. Ölçülen c* tek fazlı Eq. 3-32
@@ -584,7 +617,7 @@ PROPELLANTS: Dict[str, Dict] = {
         # kendi yoğuşmuş faz kütle kesriyle (X_p = 0,55) sınırlıdır, yani
         # AÇIKLANMIŞTIR. Etiket artık ölçüyü adlandırıyor ve
         # _c_star_identity_audit ile denetleniyor.
-        'c_star_basis': 'measured-two-phase',
+        'c_star_basis': 'cea',
         'validated': False,
     },
 }

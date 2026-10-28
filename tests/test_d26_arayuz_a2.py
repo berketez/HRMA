@@ -579,6 +579,11 @@ class TestKatliSayaciYorumuSaymaz:
 # ===========================================================================
 # P11B3-15 — mesh yakınsaması rozet katında
 # ===========================================================================
+def _render_badges_govdesi(s):
+    """``thermal_fea_panel.js`` renderBadges işlevinin TAMAMI (re.Match)."""
+    return re.search(r'function renderBadges\([\s\S]*?\n    \}\n', s)
+
+
 class TestP11B315MeshYakinsamasi:
     """ÖLÇÜLDÜ (``a2/once.json``): mesh politikası beyanı YALNIZ katlanmış
     ``<details id="fea_t_basis">`` künye bloğundaydı
@@ -591,7 +596,12 @@ class TestP11B315MeshYakinsamasi:
         assert 'feaT.badgeMeshNotConverged' in s, (
             'mesh yakınsaması rozeti yok — beyan hâlâ katlı künyede')
         # Rozet, zaman adımı rozetiyle AYNI fonksiyonda basılmalı
-        m = re.search(r'function renderBadges\([\s\S]{0,4000}', s)
+        # T-ÇAPA-C2 (27 Eki): sabit 4000 karakterlik pencere yerine işlevin
+        # TAMAMI (4 boşluk girintili kapanışa kadar). V301/L-KABUK ve
+        # N-girdi-2 rozet katını uzattı; mesh rozeti (``spatialBadge`` ya da
+        # bildirilen dal) ve sahiplik rozeti pencere dışına kaydı — ikisi de
+        # hâlâ renderBadges içinde basılıyor.
+        m = _render_badges_govdesi(s)
         assert m and 'feaT.badgeMeshNotConverged' in m.group(0), (
             'mesh rozeti renderBadges dışında — aynı katta değil')
 
@@ -645,7 +655,7 @@ class TestP11B316OrtamSicakligi:
     def test_sahiplik_ROZET_katinda_ilan_ediliyor(self):
         """P11B3-15'in dersi: beyan katlı künyede kalırsa görünmez."""
         s = govde(JS / 'thermal_fea_panel.js')
-        m = re.search(r'function renderBadges\([\s\S]{0,4000}', s)
+        m = _render_badges_govdesi(s)
         assert m and 'feaT.badgeAmbientDefault' in m.group(0), (
             'sahiplik ilanı rozet katında değil')
 

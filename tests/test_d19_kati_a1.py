@@ -23,6 +23,14 @@ from hrma.analysis import transient_ballistics as tb
 from hrma.analysis.transient_ballistics import (
     THROAT_EROSION_MATERIALS, ThroatErosionModel)
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 
 # "0.05-0.25 mm/s" biçimindeki sayısal bant beyanları (metin içinde).
 _BANT_RE = re.compile(r'(\d+\.\d+)\s*-\s*(\d+\.\d+)\s*mm/s')
@@ -168,7 +176,7 @@ class TestKatiBantDisiUyarisiKunyeliBandaGore:
         from hrma.engines.solid_rocket_engine import SolidRocketEngine
         e = SolidRocketEngine(
             grain_type='bates', propellant_type='apcp', chamber_diameter=100,
-            grain_length=500, core_diameter=30, chamber_pressure=40,
+            grain_length=500, core_diameter=_CEKIRDEK_MM, chamber_pressure=40,
             overrides={'nozzle_throat_material': 'graphite',
                        'throat_erosion_a_ref_mm_s': a_ref})
         r = e.calculate_performance()
@@ -230,7 +238,7 @@ class TestKullaniciKatsayisiYoluAtfiTasir:
             m = SolidRocketEngine(
                 grain_type='bates', propellant_type='apcp',
                 chamber_diameter=100, grain_length=500,
-                core_diameter=30, chamber_pressure=40,
+                core_diameter=_CEKIRDEK_MM, chamber_pressure=40,
                 overrides={'nozzle_material': malzeme,
                            'throat_erosion_a_ref_mm_s': 0.20})
             return m._throat_erosion_model().describe()

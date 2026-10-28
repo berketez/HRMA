@@ -104,3 +104,12 @@ meshio>=5.3
 pyvista>=0.46
 pyNastran>=1.4.1
 ansys-mapdl-reader>=0.56
+
+# networkx — trimesh'in kesit yolu (trimesh.path) çevrim grafiği için ister;
+# trimesh onu isteğe bağlı bırakır ve ithal ancak kullanımda patlar.
+# 28 Eki 2026 (v3.0.5) CI ölçümü: `step-export` işinde
+# tests/test_v301_cad2_plaka.py::test_step_ve_stl_plakasi_ayni_delikler
+# (3 vaka) STL enjektör plakasının deliklerini kesitten sayarken
+# "ModuleNotFoundError: No module named 'networkx'" ile KIRMIZI. Uygulama
+# çalışma zamanında trimesh.path KULLANMAZ; yalnız test bağımlılığıdır.
+networkx>=3.0
