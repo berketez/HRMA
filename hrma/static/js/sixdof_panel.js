@@ -141,29 +141,29 @@
     // [id, label, default, step, rule]
     // rule: 'pos' (> 0 zorunlu), 'nonneg' (>= 0), 'any' (sonlu sayı yeter)
     const FIELDS = [
-        { id: 'sd_body_d', key: 'sixdof.fBodyD', label: 'Body Diameter (m)', def: 0.10, step: 0.005, rule: 'pos' },
-        { id: 'sd_body_l', key: 'sixdof.fBodyL', label: 'Total Length (m)', def: 2.0, step: 0.05, rule: 'pos' },
-        { id: 'sd_nose_l', key: 'sixdof.fNoseL', label: 'Nose Length (m)', def: 0.40, step: 0.01, rule: 'pos' },
-        { id: 'sd_nose_type', key: 'sixdof.fNoseType', label: 'Nose Type', def: 'ogive', type: 'select',
+        { id: 'sd_body_d', help: 'sixdof.help.bodyD', key: 'sixdof.fBodyD', label: 'Body Diameter (m)', def: 0.10, step: 0.005, rule: 'pos' },
+        { id: 'sd_body_l', help: 'sixdof.help.bodyL', key: 'sixdof.fBodyL', label: 'Total Length (m)', def: 2.0, step: 0.05, rule: 'pos' },
+        { id: 'sd_nose_l', help: 'sixdof.help.noseL', key: 'sixdof.fNoseL', label: 'Nose Length (m)', def: 0.40, step: 0.01, rule: 'pos' },
+        { id: 'sd_nose_type', help: 'sixdof.help.noseType', key: 'sixdof.fNoseType', label: 'Nose Type', def: 'ogive', type: 'select',
           options: [['ogive', 'Ogive', 'sixdof.noseOgive'], ['conical', 'Conical', 'sixdof.noseConical'],
                     ['parabolic', 'Parabolic', 'sixdof.noseParabolic']] },
-        { id: 'sd_fin_count', key: 'sixdof.fFinCount', label: 'Fin Count', def: '4', type: 'select',
+        { id: 'sd_fin_count', help: 'sixdof.help.finCount', key: 'sixdof.fFinCount', label: 'Fin Count', def: '4', type: 'select',
           options: [['3', '3'], ['4', '4']] },
-        { id: 'sd_fin_root', key: 'sixdof.fFinRoot', label: 'Fin Root Chord (m)', def: 0.20, step: 0.005, rule: 'pos' },
-        { id: 'sd_fin_tip', key: 'sixdof.fFinTip', label: 'Fin Tip Chord (m)', def: 0.10, step: 0.005, rule: 'nonneg' },
-        { id: 'sd_fin_span', key: 'sixdof.fFinSpan', label: 'Fin Span (m)', def: 0.11, step: 0.005, rule: 'pos' },
-        { id: 'sd_fin_sweep', key: 'sixdof.fFinSweep', label: 'Fin Sweep (m)', def: 0.08, step: 0.005, rule: 'nonneg' },
-        { id: 'sd_fin_pos', key: 'sixdof.fFinPos', label: 'Fin Root LE from Nose (m)', def: 1.80, step: 0.01, rule: 'nonneg' },
-        { id: 'sd_dry_m', key: 'sixdof.fDryMass', label: 'Dry Mass (kg)', def: 8.0, step: 0.1, rule: 'pos' },
-        { id: 'sd_prop_m', key: 'common.f.propellantMassKg', label: 'Propellant Mass (kg)', def: 4.0, step: 0.1, rule: 'pos' },
-        { id: 'sd_cd0', key: 'sixdof.fCd0', label: 'Cd₀ (subsonic)', def: 0.45, step: 0.01, rule: 'pos' },
-        { id: 'sd_wind', key: 'sixdof.fWind', label: 'Wind Speed (m/s)', def: 5.0, step: 0.5, rule: 'nonneg' },
-        { id: 'sd_wind_dir', key: 'sixdof.fWindDir', label: 'Wind From (° from N)', def: 0.0, step: 5, rule: 'any' },
-        { id: 'sd_elev', key: 'sixdof.fElevation', label: 'Launch Elevation (°)', def: 90.0, step: 0.5, rule: 'pos' },
-        { id: 'sd_azimuth', key: 'sixdof.fAzimuth', label: 'Launch Azimuth (° from N)', def: 0.0, step: 5, rule: 'any' },
-        { id: 'sd_rail', key: 'sixdof.fRail', label: 'Rail Length (m)', def: 5.0, step: 0.5, rule: 'pos' },
-        { id: 'sd_thrust', key: 'common.f.thrustN', label: 'Thrust (N)', def: 1200.0, step: 50, rule: 'pos' },
-        { id: 'sd_burn', key: 'common.f.burnTimeS', label: 'Burn Time (s)', def: 6.0, step: 0.5, rule: 'pos' },
+        { id: 'sd_fin_root', help: 'sixdof.help.finRoot', key: 'sixdof.fFinRoot', label: 'Fin Root Chord (m)', def: 0.20, step: 0.005, rule: 'pos' },
+        { id: 'sd_fin_tip', help: 'sixdof.help.finTip', key: 'sixdof.fFinTip', label: 'Fin Tip Chord (m)', def: 0.10, step: 0.005, rule: 'nonneg' },
+        { id: 'sd_fin_span', help: 'sixdof.help.finSpan', key: 'sixdof.fFinSpan', label: 'Fin Span (m)', def: 0.11, step: 0.005, rule: 'pos' },
+        { id: 'sd_fin_sweep', help: 'sixdof.help.finSweep', key: 'sixdof.fFinSweep', label: 'Fin Sweep (m)', def: 0.08, step: 0.005, rule: 'nonneg' },
+        { id: 'sd_fin_pos', help: 'sixdof.help.finPos', key: 'sixdof.fFinPos', label: 'Fin Root LE from Nose (m)', def: 1.80, step: 0.01, rule: 'nonneg' },
+        { id: 'sd_dry_m', help: 'sixdof.help.dryMass', key: 'sixdof.fDryMass', label: 'Dry Mass (kg)', def: 8.0, step: 0.1, rule: 'pos' },
+        { id: 'sd_prop_m', help: 'sixdof.help.propMass', key: 'common.f.propellantMassKg', label: 'Propellant Mass (kg)', def: 4.0, step: 0.1, rule: 'pos' },
+        { id: 'sd_cd0', help: 'sixdof.help.cd0', key: 'sixdof.fCd0', label: 'Cd₀ (subsonic)', def: 0.45, step: 0.01, rule: 'pos' },
+        { id: 'sd_wind', help: 'sixdof.help.wind', key: 'sixdof.fWind', label: 'Wind Speed (m/s)', def: 5.0, step: 0.5, rule: 'nonneg' },
+        { id: 'sd_wind_dir', help: 'sixdof.help.windDir', key: 'sixdof.fWindDir', label: 'Wind From (° from N)', def: 0.0, step: 5, rule: 'any' },
+        { id: 'sd_elev', help: 'sixdof.help.elev', key: 'sixdof.fElevation', label: 'Launch Elevation (°)', def: 90.0, step: 0.5, rule: 'pos' },
+        { id: 'sd_azimuth', help: 'sixdof.help.azimuth', key: 'sixdof.fAzimuth', label: 'Launch Azimuth (° from N)', def: 0.0, step: 5, rule: 'any' },
+        { id: 'sd_rail', help: 'sixdof.help.rail', key: 'sixdof.fRail', label: 'Rail Length (m)', def: 5.0, step: 0.5, rule: 'pos' },
+        { id: 'sd_thrust', help: 'sixdof.help.thrust', key: 'common.f.thrustN', label: 'Thrust (N)', def: 1200.0, step: 50, rule: 'pos' },
+        { id: 'sd_burn', help: 'sixdof.help.burn', key: 'common.f.burnTimeS', label: 'Burn Time (s)', def: 6.0, step: 0.5, rule: 'pos' },
     ];
 
     // Component modu varsayılan satırları (2 m / 12 kg temsili araç;
@@ -280,9 +280,30 @@
     // HTML kurulumları
     // ------------------------------------------------------------------
 
+    // v3.0.1 N-girdi-2 (Berke 26 Eki: "Her bir inputun yanında açıklaması
+    // olmalı, istisnasız"). İpucu ortak bileşenden (field_help.js →
+    // HRMAHelp); anahtar alan tanımında LİTERAL (`help`). Bileşen yüklü
+    // değilse ipucu basılmaz — uydurma metin yok.
+    function helpHtml(key) {
+        return (key && typeof window !== 'undefined' && window.HRMAHelp
+            && typeof window.HRMAHelp.html === 'function')
+            ? window.HRMAHelp.html(key, T(key, '')) : '';
+    }
+
+    // Bileşen tablosu hücreleri: her satıra "?" basmak tabloyu boğardı;
+    // açıklama sütun başlığındaki ipucunda, hücrede ise aynı anahtarın
+    // `title`ı (dil değişiminde `data-i18n-title` ile tazelenir).
+    function compTitle(key) {
+        return ' data-i18n-title="' + key + '" title="' + escapeHtml(T(key, '')) + '"';
+    }
+
     function fieldHtml(f) {
-        const lab = '<label' + (f.key ? ' data-i18n="' + f.key + '"' : '') + '>'
-            + T(f.key, f.label) + '</label>';
+        // Etiket metni iç <span>'da çevrilir: <label data-i18n> dil
+        // değişiminde textContent'i yazar ve içindeki ipucunu silerdi.
+        // V301/DİL-2: label[for] bağı — alan etiketi kimlikten bulunabilsin
+        // (tohum notu ve ret iletisi alanı etiketle anar; erişilebilirlik).
+        const lab = '<label for="' + f.id + '"><span' + (f.key ? ' data-i18n="' + f.key + '"' : '') + '>'
+            + T(f.key, f.label) + '</span>' + helpHtml(f.help) + '</label>';
         if (f.type === 'select') {
             const opts = f.options.map(function (o) {
                 const sel = String(o[0]) === String(f.def) ? ' selected' : '';
@@ -314,14 +335,15 @@
             '<td style="padding:2px 4px;' +
                 (c.estimated ? ' border-left:2px solid ' + COLORS.orange + ';' : '') +
                 '"><input type="text" class="sd-c-name" value="' +
-                escapeHtml(c.name) + '" ' + cell + '>' + estMark + '</td>' +
+                escapeHtml(c.name) + '" ' + cell + compTitle('sixdof.help.compName') + '>' + estMark + '</td>' +
             '<td style="padding:2px 4px;"><input type="number" class="sd-c-mass" value="' +
-                c.mass + '" step="0.1" min="0" ' + cell + '></td>' +
+                c.mass + '" step="0.1" min="0" ' + cell + compTitle('sixdof.help.compMass') + '></td>' +
             '<td style="padding:2px 4px;"><input type="number" class="sd-c-x" value="' +
-                c.x + '" step="0.01" min="0" ' + cell + '></td>' +
+                c.x + '" step="0.01" min="0" ' + cell + compTitle('sixdof.help.compX') + '></td>' +
             '<td style="padding:2px 4px; text-align:center;">' +
                 '<input type="checkbox" class="sd-c-prop"' +
-                (c.propellant ? ' checked' : '') + ' style="width:auto;"></td>' +
+                (c.propellant ? ' checked' : '') + ' style="width:auto;"' +
+                compTitle('sixdof.help.compProp') + '></td>' +
             '<td style="padding:2px 4px; text-align:center;">' +
                 '<button type="button" class="btn sd-c-del" ' +
                 'style="padding:2px 10px; font-size:0.75rem;" data-i18n="common.remove">'
@@ -340,26 +362,30 @@
                     '<input type="radio" name="sd_mass_mode" value="simple" style="width:auto;">' +
                     '<span data-i18n="sixdof.simpleMode">'
                     + T('sixdof.simpleMode', 'Simple mode — enter total masses manually')
-                    + '</span></label>' +
+                    + '</span>' + helpHtml('sixdof.help.modeSimple') + '</label>' +
                 '<label style="display:flex; align-items:center; gap:6px; cursor:pointer;">' +
                     '<input type="radio" name="sd_mass_mode" value="component" style="width:auto;">' +
                     '<span data-i18n="sixdof.componentMode">'
                     + T('sixdof.componentMode',
                         'Component mode — masses and CG derived from the table')
-                    + '</span></label>' +
+                    + '</span>' + helpHtml('sixdof.help.modeComponent') + '</label>' +
             '</div>' +
             '<div id="sd_comp_wrap" style="display:none;">' +
                 '<div style="overflow-x:auto;">' +
                 '<table id="sd_comp_table" style="width:100%; border-collapse:collapse; font-size:0.85rem;">' +
                     '<thead><tr>' +
-                        '<th style="text-align:left; padding:4px 6px;" data-i18n="sixdof.colComponent">'
-                            + T('sixdof.colComponent', 'Component') + '</th>' +
-                        '<th style="text-align:left; padding:4px 6px;" data-i18n="sixdof.colMass">'
-                            + T('sixdof.colMass', 'Mass (kg)') + '</th>' +
-                        '<th style="text-align:left; padding:4px 6px;" data-i18n="sixdof.colPosition">'
-                            + T('sixdof.colPosition', 'Position from nose tip (m)') + '</th>' +
-                        '<th style="padding:4px 6px;" data-i18n="sixdof.colPropellant">'
-                            + T('sixdof.colPropellant', 'Propellant') + '</th>' +
+                        '<th style="text-align:left; padding:4px 6px;"><span data-i18n="sixdof.colComponent">'
+                            + T('sixdof.colComponent', 'Component') + '</span>'
+                            + helpHtml('sixdof.help.compName') + '</th>' +
+                        '<th style="text-align:left; padding:4px 6px;"><span data-i18n="sixdof.colMass">'
+                            + T('sixdof.colMass', 'Mass (kg)') + '</span>'
+                            + helpHtml('sixdof.help.compMass') + '</th>' +
+                        '<th style="text-align:left; padding:4px 6px;"><span data-i18n="sixdof.colPosition">'
+                            + T('sixdof.colPosition', 'Position from nose tip (m)') + '</span>'
+                            + helpHtml('sixdof.help.compX') + '</th>' +
+                        '<th style="padding:4px 6px;"><span data-i18n="sixdof.colPropellant">'
+                            + T('sixdof.colPropellant', 'Propellant') + '</span>'
+                            + helpHtml('sixdof.help.compProp') + '</th>' +
                         '<th style="padding:4px 6px;"></th>' +
                     '</tr></thead>' +
                     '<tbody id="sd_comp_body"></tbody>' +
@@ -380,8 +406,8 @@
     function importControlsHtml() {
         return `
             <div class="form-group" style="grid-column: 1 / -1;">
-                <label data-i18n="sixdof.thrustSource">${T('sixdof.thrustSource',
-                    'Thrust source')}</label>
+                <label><span data-i18n="sixdof.thrustSource">${T('sixdof.thrustSource',
+                    'Thrust source')}</span>${helpHtml('sixdof.help.thrustSource')}</label>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     <!-- ÖH D37 A1b panel-js · DV36-04: seçici en uzun
                          seçeneğin metni kadar genişler (D36 OH-P-04 ölçümü:
@@ -395,7 +421,9 @@
                     </select>
                     <input type="file" id="sd_motor_file" accept=".eng,.rse"
                         style="display:none; font-size:0.78rem; color:${COLORS.dim};">
-                    <select id="sd_motor_select" style="display:none; max-width:220px;"></select>
+                    <select id="sd_motor_select" style="display:none; max-width:220px;"
+                        data-i18n-title="sixdof.help.motorSelect" title="${escapeHtml(
+                        T('sixdof.help.motorSelect', ''))}"></select>
                     <span id="sd_motor_status" style="font-family:var(--hd-mono);
                         font-size:0.72rem; color:${COLORS.dim};"></span>
                 </div>
@@ -430,7 +458,7 @@
                     <input type="checkbox" id="sd_use_curve" checked style="width:auto;">
                     <span data-i18n="sixdof.useCurve">${T('sixdof.useCurve',
                         'Use computed thrust curve (transient / motor solution) '
-                        + 'instead of constant thrust')}</span>
+                        + 'instead of constant thrust')}</span>${helpHtml('sixdof.help.useCurve')}
                 </label>
             </div>` : '';
         return `
@@ -916,6 +944,14 @@
             provided.thrust_curve.time && provided.thrust_curve.time.length > 3));
         const hasConst = !!(!hasCurve && provided && provided.thrust && provided.burn_time);
 
+        // V301/H-PANEL (NK-14): sayfa hesabı kullanılıyorsa form o motoru
+        // GÖSTERİR — itki/süre/itici kütlesi alanları koşunun gerçekten
+        // kullandığı sayılarla tohumlanır (eskiden 1200 N / 6 s / 4 kg
+        // varsayılanları görünürken 10 s'lik hesaplanan eğri uçuyordu ve
+        // itici kütlesi formdaki 4 kg kalıyordu).
+        const sayfaMotoru = !!(provided && !importedCurve && (hasCurve || hasConst));
+        if (sayfaMotoru) sayfaMotoruTohumla(provided);
+
         // Doğrulama: geçersiz girdiyle Run yok
         const check = validateAll(!hasCurve && !hasConst);
         if (!check.ok) {
@@ -983,6 +1019,26 @@
             payload.burn_time = num('sd_burn');
         }
 
+        // V301/UÇUŞ NK-47 — GÖVDE ⟷ MOTOR HÜKMÜ TEK YERDE. Sayfanın motoru
+        // uçuyorsa motorun dış zarfı (aynı hesabın FlightHandoff aracı:
+        // flight_vehicle.normalize'ın engine_od_m / engine_length_m'i)
+        // gönderilir; "bu gövde bu motoru taşıyamaz" hükmünü 6-DOF ucu
+        // Fırlatma Sahası'yla AYNI işlevle verir. İçe aktarılan motor ya da
+        // elle girilen itki kipinde sayfa motoru uçmadığı için zarf gitmez.
+        if (sayfaMotoru && window.FlightHandoff && FlightHandoff.vehicleFor) {
+            const ucanArac = FlightHandoff.vehicleFor(window.currentResults);
+            if (ucanArac) {
+                const zarfCap = Number(ucanArac.engine_od_m);
+                const zarfBoy = Number(ucanArac.engine_length_m);
+                if (ucanArac.engine_od_m != null && isFinite(zarfCap) && zarfCap > 0) {
+                    payload.engine_od_m = zarfCap;
+                }
+                if (ucanArac.engine_length_m != null && isFinite(zarfBoy) && zarfBoy > 0) {
+                    payload.engine_length_m = zarfBoy;
+                }
+            }
+        }
+
         try {
             const resp = await fetch('/api/six-dof-analysis', {
                 method: 'POST',
@@ -991,9 +1047,18 @@
             });
             const data = await resp.json();
             if (!resp.ok || data.status !== 'success') {
-                throw new Error(data.error || `HTTP ${resp.status}`);
+                // NK-47: ucun adlı reddinin CÜMLESİ de basılır (yalnız kod
+                // değil); sunucu cümlesi etkin dile serverText ile çevrilir.
+                let ileti = data.error || `HTTP ${resp.status}`;
+                if (typeof data.message === 'string' && data.message) {
+                    const I = window.I18N;
+                    ileti += ' — ' + ((I && typeof I.serverText === 'function')
+                        ? I.serverText(data.message) : data.message);
+                }
+                throw new Error(ileti);
             }
-            render(data, !!payload.thrust_curve);
+            render(data, !!payload.thrust_curve,
+                   sayfaMotoru ? provided : null, payload.dry_mass);
 
             // İstemci Barrowman ↔ backend tutarlılık bekçisi
             const client = computeBarrowman(g);
@@ -1558,8 +1623,34 @@
         return fig;
     }
 
-    function render(data, usedCurve) {
-        lastRender = { data: data, usedCurve: usedCurve };
+    // V301/H-PANEL (NK-14): sayfa hesabının motorunu forma yazar. Yalnız
+    // sağlayıcının VERDİĞİ sayılar yazılır (uydurma yok); bileşen kipinde
+    // kütleler tablodan türediği için itici kütlesine dokunulmaz.
+    function sayfaMotoruTohumla(p) {
+        const parts = [];
+        function yaz(id, v, d, birim) {
+            const el = $(id);
+            if (!el || typeof v !== 'number' || !isFinite(v) || v <= 0) return;
+            el.value = v.toFixed(d);
+            parts.push(id + ' = ' + sayiEkran(v, d) + (birim ? ' ' + birim : ''));
+        }
+        yaz('sd_thrust', (typeof p.thrust === 'number') ? p.thrust : p.thrust_design, 1, 'N');
+        yaz('sd_burn', (typeof p.burn_time === 'number') ? p.burn_time : p.burn_time_design, 2, 's');
+        if (massMode !== 'component') yaz('sd_prop_m', p.propellant_mass, 3, 'kg');
+        const note = $('sd_seed_note');
+        if (note && parts.length) {
+            const bas = T('sixdof.seedFromCalc', 'From the page calculation');
+            const eski = note.textContent && note.style.display !== 'none'
+                ? note.textContent.split('\n')[0] : '';
+            note.textContent = (eski ? eski + '\n' : '') + bas + ' → ' + parts.join('  ·  ');
+            note.style.whiteSpace = 'pre-line';
+            note.style.display = '';
+        }
+    }
+
+    function render(data, usedCurve, sayfaMotoru, aracKuru) {
+        lastRender = { data: data, usedCurve: usedCurve,
+                       sayfaMotoru: sayfaMotoru, aracKuru: aracKuru };
         const s = data.summary;
         const ser = data.series;
         const badges = $('sd_badges');
@@ -1723,9 +1814,24 @@
         if (cnAlpha !== null && xCp !== null) {
             html += badge(`CNα ${cnAlpha} · CP ${xCp} m`, 'info');
         }
+        // V301/H-PANEL (NK-14): rozet itkinin NEREDEN geldiğini de söyler
+        // (sayfa hesabının eğrisi / sayfa hesabının sabit itkisi / form).
         html += badge(T('sixdof.thrustBadge', 'THRUST') + ': '
             + (usedCurve ? T('sixdof.computedCurve', 'COMPUTED CURVE')
-                         : T('sixdof.constantThrust', 'CONSTANT')), 'info');
+                         : T('sixdof.constantThrust', 'CONSTANT'))
+            + (sayfaMotoru ? ' — ' + T('sixdof.fromPageCalc', 'PAGE CALCULATION')
+                           : ''), 'info');
+        // V301/H-PANEL (NK-14): araç kuru kütlesi motorun kendi kuru
+        // kütlesinden küçükse kütle bütçesi fiziksel olarak olanaksızdır.
+        if (sayfaMotoru && typeof sayfaMotoru.motor_dry_mass === 'number'
+                && typeof aracKuru === 'number' && isFinite(aracKuru)
+                && aracKuru < sayfaMotoru.motor_dry_mass) {
+            html += badge(TF('sixdof.dryBelowMotor',
+                { arac: rozetSayi(aracKuru, 2),
+                  motor: rozetSayi(sayfaMotoru.motor_dry_mass, 2) },
+                'IMPOSSIBLE MASS BUDGET: vehicle dry mass {arac} kg < the motor\'s own dry mass {motor} kg'),
+                'err');
+        }
         if (s.end_reason && s.end_reason !== 'apogee') {
             html += badge(T('transient.badgeEnd', 'END') + ': '
                 + s.end_reason.toUpperCase(), 'warn');
@@ -1868,6 +1974,10 @@
 
         const src = spec.fields || {};
         const parts = [];
+        const etk = tohumEtiketi;
+        // V301/DİL-2 (kök 7): görünen satır alan ETİKETLERİYLE; makine izi
+        // (alan kimlikleri) satırın ipucunda (title).
+        const partsEkran = [];
         function put(fieldId, specKey, digits, unit) {
             const value = spec[specKey];
             if (typeof value !== 'number' || !isFinite(value) || value <= 0) return;
@@ -1878,6 +1988,7 @@
             el.value = value.toFixed(digits);
             parts.push(fieldId + ' ← #' + (src[specKey] || '?')
                        + ' = ' + sayiEkran(value, digits) + (unit ? ' ' + unit : ''));
+            partsEkran.push([fieldId, src[specKey], sayiEkran(value, digits) + (unit ? ' ' + unit : '')]);
         }
         // Tohumlanan alanlar YALNIZ GÖVDE tanımıdır: kuru kütle, gövde çapı,
         // Cd₀. İtici kütlesi BİLEREK tohumlanmaz — o, itki/yanma süresiyle
@@ -1896,7 +2007,9 @@
         if (note) {
             // Hiçbir alan tohumlanamadıysa satır GÖSTERİLMEZ — boş bir
             // "kaynak" iddiası kullanıcıyı yanıltırdı.
-            note.textContent = parts.length
+            tohumNotu = parts.length ? { kaynak: spec.source, satir: partsEkran } : null;
+            if (tohumNotu) tohumNotunuYaz(); else note.textContent = '';
+            note.title = parts.length
                 ? (String(spec.source || 'page') + ' → ' + parts.join('  ·  ')) : '';
             note.style.display = parts.length ? '' : 'none';
         }
@@ -1907,6 +2020,29 @@
     // Kurulum — init imzası SABİT: 3 sayfa (advanced/solid/liquid) aynı
     // seçeneklerle çağırıyor ({anchorId, thrustProvider, defaults})
     // ------------------------------------------------------------------
+
+    // V301/DİL-2 (kök 7 + NK-40): tohum notunun görünen satırı alan
+    // ETİKETLERİYLE kurulur ve dil değişiminde yeniden yazılır; makine izi
+    // (alan kimlikleri) satırın ipucunda (title) kalır.
+    let tohumNotu = null;
+    function tohumEtiketi(id) {
+        return (typeof HRMAReject !== 'undefined' && HRMAReject
+                && typeof HRMAReject.etiket === 'function' && HRMAReject.etiket(id)) || null;
+    }
+    function tohumNotunuYaz() {
+        const note = $('sd_seed_note');
+        if (!note || !tohumNotu) return;
+        const kaynakAdi = (tohumNotu.kaynak === 'trajectory-panel')
+            ? T('sixdof.seed.srcTrajectory', 'Trajectory panel')
+            : String(tohumNotu.kaynak || 'page');
+        note.textContent = kaynakAdi + ' → ' + tohumNotu.satir.map(function (p) {
+            return (tohumEtiketi(p[0]) || p[0]) + ' ← '
+                + (tohumEtiketi(p[1]) || ('#' + (p[1] || '?'))) + ' = ' + p[2];
+        }).join('  ·  ');
+    }
+    if (typeof window !== 'undefined' && window.I18N && typeof window.I18N.onChange === 'function') {
+        window.I18N.onChange(function () { try { tohumNotunuYaz(); } catch (e) { /* panel yok */ } });
+    }
 
     function init(options) {
         cfg = options || {};
@@ -2027,7 +2163,8 @@
         function tazele() {
             updateLive();
             if (lastRender) {
-                try { render(lastRender.data, lastRender.usedCurve); }
+                try { render(lastRender.data, lastRender.usedCurve,
+                             lastRender.sayfaMotoru, lastRender.aracKuru); }
                 catch (e) { /* çizim yoksa sessiz */ }
             }
         }

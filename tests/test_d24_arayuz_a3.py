@@ -52,39 +52,70 @@ def canli(metin):
 # =====================================================================
 class TestP17B305KunyeSalinimi:
 
+    # ÇEVRİLDİ (v3.0.1 K kulvarı, Ayberk tur 1). P17B3-05 rozetin İKİ
+    # olguyu (erişilebilirlik ⟷ köken) karıştırmasını onarmıştı; bekçiler
+    # rozeti ve ``supplies_calculation_data`` künyesini okuyan dalları ŞART
+    # koşuyordu. ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ayberk1/kaynak-cea/
+    # gorsel_once.json): rozet yine de her makinede "Offline" diyordu ve
+    # hesabın hiçbir sayısının kaynağı değildi; söküldü. Dersin kendisi —
+    # TEK gösterge TEK olgu, köken yalnız sunucu künyesinden — yeni veri
+    # kaynağı satırında ölçülür.
     def test_oksitleyici_yolu_erisilebilirlik_rozetini_ezmiyor(self):
-        """`.nist-status` TEK olguyu taşır: uzak ucun erişilebilirliği.
-
-        Ölçülen kusur (P17 tur-06): oksitleyici çekim yolu aynı rozete
-        ÇEKİLEN VERİNİN kaynağını yazıyordu; iki farklı olgu tek rozete
-        yazılınca künye koşumdan koşuma değişiyordu.
-        """
-        adv = oku(TPL, 'advanced.html')
-        assert 'setNistStatus(`${source}' not in adv
-        # rozeti yazan tek yer denetim işlevidir
-        i = adv.index('async function checkDatabaseStatus')
-        assert adv.count('setNistStatus(') >= 3
+        """Oksitleyici satırını TEK bir yazıcı yazar; çekim yolu yalnız
+        künyeyi saklar (iki olgu tek göstergeye yarışarak yazılmaz)."""
+        adv = canli(oku(TPL, 'advanced.html'))
+        assert 'setNistStatus(' not in adv
+        assert adv.count("getElementById('oxidizer_data_source')") == 1
+        i = adv.index('function renderDataSourceLines()')
+        assert adv.index("getElementById('oxidizer_data_source')") > i
+        assert 'setOxidizerSourceKunye(result);' in adv
 
     @pytest.mark.parametrize('sayfa', SAYFALAR)
     def test_baglanti_rozeti_koken_iddia_etmiyor(self, sayfa):
         html = oku(TPL, sayfa)
         assert 'NIST WebBook Connected' not in html, sayfa
-        assert 'supplies_calculation_data' in html, sayfa
-        assert 'calculation_data_source' in html, sayfa
+        # Rozetin erişilebilirlik künyesi sayfadan çıktı (okuyan dal yok).
+        assert 'calculation_data_source' not in canli(html), sayfa
+        assert 'class="data-source-line"' in html, sayfa
 
     @pytest.mark.parametrize('sayfa', SAYFALAR)
     def test_uc_beyan_etmezse_koken_iddia_edilmiyor(self, sayfa):
-        """Fail-closed: uç `supplies_calculation_data` demiyorsa rozet
-        'kaynağıdır' da 'değildir' de demez."""
+        """Fail-closed: sunucu kaynağı beyan etmiyorsa satır da etmez."""
         html = oku(TPL, sayfa)
-        assert re.search(r'reachable_undeclared|ReachableUndeclared', html), sayfa
+        if sayfa == 'advanced.html':
+            i = html.index('function setOxidizerSourceKunye(result)')
+            govde = html[i:html.index('function setOxidizerSourceFailed', i)]
+            # property_sources yoksa durum 'failed' — köken uydurulmaz.
+            assert "{ durum: 'failed', kunye: null }" in govde
+            assert re.search(r"adv\.ds\.oxidizerFailed", html)
+        elif sayfa == 'liquid.html':
+            assert re.search(r"liq\.js\.ds_combustion_unstated", html)
+        else:
+            # Katı: satır kaynağı kendisi söylemez, tablonun Source
+            # sütununa (sunucu künyesi) yönlendirir.
+            #
+            # T-ÇAPA-C2 (27 Eki): V301/DİL-2 (f36795100) sütunu ortak künye
+            # yardımcısına bağladı: ``kunyeHTML(p.source)`` — kaynak yoksa
+            # yine '-' (köken uydurulmaz), varsa TR'de "çevrilmedi" başlıklı
+            # kapalı kutuda AYNEN. Eski ``(p.source || '-')`` kalıbı yerine
+            # aynı sözleşme yardımcının kendisinden okunur.
+            assert "kunyeHTML(p.source)" in html
+            i = html.index('function kunyeHTML(metin)')
+            govde = html[i:html.index('\n        }\n', i)]
+            assert "if (!ham) return '-';" in govde
 
     def test_sozlukte_her_iki_dilde_var(self):
         ortak = oku(JS, 'i18n_pages.js')
         adv = oku(JS, 'i18n_advanced.js')
-        assert ortak.count("'liq.ui.nist_webbook_reachable_local'") == 2
-        assert ortak.count("'solid.ui.nist_webbook_reachable_local'") == 2
-        assert adv.count("'adv.js.nistReachableLocalData'") == 2
+        for a in ('liq.ui.data_source_line', 'liq.js.ds_combustion_unstated',
+                  'solid.ui.data_source_catalogue'):
+            assert ortak.count("'%s'" % a) == 2, a
+        for a in ('adv.ds.oxidizerReference', 'adv.ds.oxidizerFailed'):
+            assert adv.count("'%s'" % a) == 2, a
+        # Sökülen rozet anahtarları ölü kalmadı.
+        assert ortak.count("'liq.ui.nist_webbook_reachable_local'") == 0
+        assert ortak.count("'solid.ui.nist_webbook_reachable_local'") == 0
+        assert adv.count("'adv.js.nistReachableLocalData'") == 0
 
 
 # =====================================================================
@@ -334,14 +365,14 @@ class TestP11B209BeyanEdilenSinirlar:
     #: sökmek onu kırmızıya döndürmez.
     BEYANSIZ_SAYI_ALANLARI = (
         'chamber_length_override',
-        'hole_diameter_max', 'hole_diameter_max',
-        'hole_diameter_min', 'hole_diameter_min',
         'oxidizer_density', 'oxidizer_temp', 'oxidizer_viscosity',
         'param_end', 'param_start',
-        'pintle_diameter',
-        'plate_thickness', 'plate_thickness',
-        'slot_height', 'slot_width',
-        'target_velocity', 'target_velocity',
+        # V301/E1: 'pintle_diameter' listeden DÜŞTÜ — alan artık min="0"
+        # beyan ediyor (iyileşme; bekçinin simetrik ayağı bunu istedi).
+        # V301/E2: enjektör kollarının on adı DÜŞTÜ — 'hole_diameter_max' ×2,
+        # 'hole_diameter_min' ×2, 'plate_thickness' ×2, 'target_velocity' ×2
+        # (statik kopya söküldü, kalan tek kopya min="0" beyanlı) ve
+        # 'slot_width' / 'slot_height' (min="0"). İyileşme; simetrik ayak.
     )
 
     def test_advanced_hala_min_max_beyan_ediyor(self):

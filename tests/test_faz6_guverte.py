@@ -545,15 +545,19 @@ def test_t52_tam_orantili_seri_birim_donusumu_oldugunu_soyler():
     thrust, pressure, burn_area, a_t = _ornek_kati()
     fig = _kati_pano(thrust, pressure, burn_area)
 
+    # v3.0.1 (V301/N-grafik G3): kısa beyan sağ eksen başlığının altındaki
+    # DÖNDÜRÜLMÜŞ <sub> notundan ikinci serinin ipucuna taşındı (ölçüm:
+    # docs/scofield/raw/OH/V301/grafik/RAPOR.md). Beyanın İÇERİĞİ aynı
+    # sözleşmeyle denetlenir; yeri ipucudur. Eksen başlığı yalın kalır.
     baslik = _eksen_basligi(fig, 'Kn (-)')
-    assert baslik is not None, 'Kn ekseni yok'
-    assert 'Burn Area' in baslik, (
-        'sağ eksen sol eksenden türediğini söylemiyor (T52): %r' % baslik)
-    # Beyan edilen sabit A_boğaz'ın ta kendisi olmalı (cm²)
-    assert '%.4g' % (a_t * 1e4) in baslik, (
-        'beyan edilen çarpan A_t ile uyuşmuyor: %r' % baslik)
-
+    assert baslik == 'Kn (-)', 'eksen başlığına döndürülmüş not eklenmiş: %r' % baslik
     ipucu = _ipucu(fig, 'Kn')
+    assert 'Burn Area' in ipucu, (
+        'sağ eksen sol eksenden türediğini söylemiyor (T52): %r' % ipucu)
+    # Beyan edilen sabit A_boğaz'ın ta kendisi olmalı (cm²)
+    assert '%.4g' % (a_t * 1e4) in ipucu, (
+        'beyan edilen çarpan A_t ile uyuşmuyor: %r' % ipucu)
+
     assert 'unit conversion' in ipucu, (
         'ipucu ikinci serinin bağımsız bilgi taşımadığını söylemiyor')
     assert 'A<sub>burn</sub>' in ipucu, 'ipucunda tanım formülü yok'
@@ -568,11 +572,11 @@ def test_t52_yaklasik_orantili_seri_yayilimi_sayiyla_bildirir():
     beklenen_ort = sum(oranlar) / len(oranlar)
     beklenen_yay = 100.0 * (max(oranlar) - min(oranlar)) / beklenen_ort
 
-    baslik = _eksen_basligi(fig, 'Pressure (bar)<br>')
-    assert baslik is not None, 'basınç ekseni beyanı yok'
-    assert 'Thrust' in baslik
-
+    baslik = _eksen_basligi(fig, 'Pressure (bar)')
+    assert baslik == 'Pressure (bar)', baslik   # v3.0.1 G3: not ipucunda
     ipucu = _ipucu(fig, 'Chamber Pressure')
+    assert '&asymp; Thrust' in ipucu, 'kısa beyan ipucunda yok: %r' % ipucu
+
     assert '%.4g' % beklenen_ort in ipucu, (
         'bildirilen oran ölçülenle uyuşmuyor (beklenen %.4g): %r'
         % (beklenen_ort, ipucu))

@@ -677,6 +677,22 @@ class PDFReportGenerator:
         # safety_factor_is_tautological alanlarından bilinir.
         story.extend(self._create_analysis_results(analysis_results, motor_data))
 
+        # v3.0.1: kanonik pintle geometrisi ve analiz sonu NASA CEA
+        # karşılaştırması (yalnız yanıtta varsa).
+        # L-B (v3.0.1, SV-14): sıvı teknik raporda termal ve enjektör
+        # bölümü yoktu; marşın "liner failure" hükmü rapora hiç inmiyordu.
+        for _ek_bolum in (
+                self._create_liquid_thermal_section(analysis_results,
+                                                    motor_data),
+                self._create_liquid_injector_section(analysis_results,
+                                                     motor_data),
+                self._create_pintle_injector_section(analysis_results),
+                self._create_thermochemistry_section(analysis_results),
+                self._create_cea_comparison_section(analysis_results)):
+            if _ek_bolum:
+                story.append(PageBreak())
+                story.extend(_ek_bolum)
+
         # Solver Warnings (ÖH Z5-A / OH-Z2-05) — çözücünün ürettiği uyarılar
         # rapora İNMİYORDU. Üç rapor tipinde de basılır: kritik bir girdi
         # hükmü (ör. cidar kalınlığı gerekenin altında) hangi raporu indiren
@@ -791,7 +807,7 @@ class PDFReportGenerator:
         
         # Disclaimer
         disclaimer = """
-        <b>DISCLAIMER:</b> This analysis is for educational and research purposes only. 
+        <b>DISCLAIMER:</b> This is a preliminary-design analysis, not a flight qualification. 
         Actual rocket motor design and testing should be performed by qualified engineers 
         following all applicable safety standards and regulations. The authors assume no 
         responsibility for the use of this analysis in actual motor design or testing.
@@ -920,16 +936,33 @@ class PDFReportGenerator:
 
         if risk_level or acceptability:
             lines = ['<b>Safety Assessment (model risk scale)</b><br/>']
+            # V301/FİZİK-2 (kalem 8b): hüküm motorun KENDİ eksenlerinden
+            # (yapısal, basınçlı kap, termal); itici miktarının tesis /
+            # yerleşim tehlikesi ayrı satırda ve motora "yeniden tasarla"
+            # demez (ekranla aynı ayrım).
+            tesis = risk.get('facility_hazard')
+            tesis = tesis if isinstance(tesis, dict) else None
+            etiket = ('Motor design risk level' if tesis is not None
+                      else 'Overall risk level')
             if risk_level:
-                lines.append(f'Overall risk level: {risk_level}<br/>')
+                lines.append(f'{etiket}: {risk_level}<br/>')
             if acceptability:
                 lines.append('Model risk acceptability: '
                              f"{str(acceptability).replace('_', ' ')}<br/>")
+            if tesis is not None and tesis.get('risk_level'):
+                lines.append('Facility / siting hazard of the propellant '
+                             f"inventory: {tesis['risk_level']}")
+                if tesis.get('requirement'):
+                    lines.append(' — safety distance / facility measures '
+                                 'required (a facility requirement, not a '
+                                 'motor design defect)')
+                lines.append('<br/>')
             lines.append(
                 'These classes come from the HRMA safety module risk '
-                'assessment (worst hazard axis governs). They are '
-                'model-internal classifications, not a regulatory or '
-                'certification judgement.')
+                'assessment (worst motor-design axis governs the motor '
+                'verdict; the explosive, toxic and fire axes form the '
+                'facility hazard). They are model-internal classifications, '
+                'not a regulatory or certification judgement.')
             safety_text = ''.join(lines)
         else:
             safety_text = (
@@ -2353,6 +2386,849 @@ class PDFReportGenerator:
                     seen.add(fingerprint)
                     rows.append((label, severity, code, detail, fallback))
         return rows
+
+    # ------------------------------------------------------------------
+    # v3.0.1 (Ayberk tur 1) — yanıtta olup PDF'e girmeyen iki blok.
+    # Kaynak/CEA kulvarı ``cea_comparison`` bloğunu, pintle kulvarı kanonik
+    # ``injector.pintle_geometry`` sözlüğünü yayımladı; ikisi de hibrit
+    # sayfasının indirdiği raporda yoktu (kulvar devirleri). Bölümler YALNIZ
+    # yanıttaki gerçek veriden basılır; blok yoksa bölüm yoktur, sayı
+    # uydurulmaz ve 'unavailable' blokta sayı basılmaz.
+    # ------------------------------------------------------------------
+    #: CEA karşılaştırma satır kimliği -> rapor etiketi.
+    CEA_ROW_LABELS = {
+        'c_star': 'Characteristic velocity c*',
+        'chamber_temperature': 'Chamber temperature T_c',
+        'chamber_gamma': 'Chamber isentropic exponent',
+        'chamber_molecular_weight': 'Chamber molecular weight M',
+        'exit_pressure': 'Exit pressure p_e',
+        'thrust_coefficient_at_pe': 'Thrust coefficient at p_e',
+        'isp_vacuum': 'Vacuum specific impulse (ideal)',
+    }
+
+    @staticmethod
+    def _fmt_comparison_number(value) -> str:
+        """Karşılaştırma tablosu sayısı: büyüklüğe göre anlamlı basamak."""
+        sayi = finite_number(value)
+        if sayi is None:
+            return 'N/A'
+        if abs(sayi) >= 100.0:
+            return '{:.1f}'.format(sayi)
+        if abs(sayi) >= 10.0:
+            return '{:.3f}'.format(sayi)
+        return '{:.4f}'.format(sayi)
+
+    def _simple_table(self, rows: List[List[str]], col_widths) -> Table:
+        """Bu dosyanın performans tablosuyla aynı üslupta tablo."""
+        tablo = Table(rows, colWidths=col_widths)
+        tablo.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+             [colors.white, colors.lightgrey]),
+        ]))
+        return tablo
+
+    # ------------------------------------------------------------------
+    # V301/UI-K (27 Eki) — katı ve sıvı ``cea_comparison`` bloğu PDF'te
+    # hibrit kalıbıyla basılıyordu. ÖLÇÜLDÜ (ui-k/pdf_once.json, örnek
+    # projeler, sayfanın kendi PDF düğmesi): satır adları ham makine
+    # anahtarıydı ('isp_optimum', 'expansion_ratio_optimum', 'gamma',
+    # 'molecular_weight', 'isp_sea_level'); çalışma noktası satırı hiç
+    # basılmıyordu (hibrit 'of_ratio' arıyor, sıvı 'mixture_ratio', katıda
+    # O/F yok); sıvıda HRMA sütununun TESLİM, CEA sütununun İDEAL olduğu ve
+    # farkı hangi verimin açıkladığı (panelin 'Explained by' sütunu) yoktu;
+    # sıvı Isp_vak satırı hibritin "(ideal)" etiketini alıp teslim edilen
+    # sayıyı ideal diye adlandırıyordu. Bu dal katı/sıvı türlerini panelin
+    # kendi satır adları, sütun anlamları ve notlarıyla basar; sayılar
+    # bloktan aynen gelir. Hibrit yolu (``kind`` yok) değişmez.
+    # ------------------------------------------------------------------
+    #: Katı/sıvı karşılaştırma türü -> satır kimliği -> rapor etiketi
+    #: (panelin İngilizce etiketleri; PDF yazı tipi Yunan harfi taşımaz).
+    CEA_KIND_ROW_LABELS = {
+        'solid': {
+            'chamber_temperature': 'Chamber temperature T_c',
+            'chamber_molecular_weight': 'Molecular weight M',
+            'chamber_gamma': 'Chamber gamma (isentropic exponent)',
+            'c_star': 'c* (theoretical)',
+            'expansion_ratio_optimum': 'Optimum expansion ratio (p_e = p_a)',
+            'thrust_coefficient_optimum':
+                'Thrust coefficient at optimum expansion',
+            'isp_optimum': 'Ideal specific impulse at optimum expansion',
+        },
+        'liquid': {
+            'c_star': 'Characteristic velocity c*',
+            'isp_vacuum': 'Vacuum specific impulse',
+            'isp_sea_level': 'Sea-level specific impulse',
+            'chamber_temperature': 'Chamber temperature T_c',
+            'molecular_weight': 'Molecular weight',
+            'gamma': 'gamma',
+        },
+    }
+
+    #: Sıvı satırında farkı TAM açıklayan yayımlanmış çarpanın adı.
+    CEA_FACTOR_LABELS = {
+        'combustion_efficiency (eta_c*)': 'combustion efficiency eta_c*',
+        'efficiency_breakdown.applied_delivery_efficiency_pct / 100':
+            'applied delivery efficiency',
+    }
+
+    #: Katı termokimya kaynağı -> rapor cümlesi (panelin kaynak satırı).
+    SOLID_THERMO_SOURCE_TEXT = {
+        'nasa_cea_at_pc': ('NASA CEA at this chamber pressure (composition '
+                           'card of this propellant).'),
+        'catalogue_single_pressure': ('the catalogue record at one pressure '
+                                      '(no NASA CEA solution for this '
+                                      'propellant here).'),
+        'user_entered': ('the values entered in the form (NASA CEA is not '
+                         'applied).'),
+    }
+
+    @staticmethod
+    def _cea_kind_family(blok: Dict) -> Optional[str]:
+        """'solid' | 'liquid' | None (hibrit/tanınmayan: eski yol)."""
+        from hrma.analysis.cea_karsilastirma import (
+            CEA_KIND_LIQUID_DELIVERED, CEA_KIND_LIQUID_TABLE, CEA_KIND_SOLID,
+            CEA_KIND_SOLID_IDENTICAL)
+        tur = blok.get('kind')
+        if tur in (CEA_KIND_SOLID, CEA_KIND_SOLID_IDENTICAL):
+            return 'solid'
+        if tur in (CEA_KIND_LIQUID_DELIVERED, CEA_KIND_LIQUID_TABLE):
+            return 'liquid'
+        return None
+
+    def _note(self, metin) -> List:
+        return [Spacer(1, 0.04 * inch),
+                Paragraph(escape(str(metin)), self.styles['Normal'])]
+
+    def _solid_liquid_cea_story(self, blok: Dict, aile: str) -> List:
+        """Katı/sıvı karşılaştırma tablosu + notlar (panelle aynı anlam)."""
+        from hrma.analysis.cea_karsilastirma import (
+            CEA_KIND_LIQUID_TABLE, CEA_KIND_SOLID_IDENTICAL)
+        story: List = []
+        ayni = blok.get('kind') == CEA_KIND_SOLID_IDENTICAL
+        tablo_turu = blok.get('kind') == CEA_KIND_LIQUID_TABLE
+        nokta = (blok.get('operating_point')
+                 if isinstance(blok.get('operating_point'), dict) else {})
+        pc = finite_number(nokta.get('chamber_pressure_bar'))
+        eps = finite_number(nokta.get('expansion_ratio'))
+        if aile == 'solid':
+            pa = finite_number(nokta.get('ambient_pressure_bar'))
+            if pc is not None and pa is not None and eps is not None:
+                story.extend(self._note(
+                    f'Same operating point as this run (Pc = {pc:.3f} bar, '
+                    f'ambient {pa:.5f} bar, expansion ratio {eps:.4f}) and '
+                    + ('the same composition card the solver uses'
+                       if ayni else
+                       'the catalogue composition of this propellant')
+                    + '; equilibrium (shifting) expansion, infinite-area '
+                    'combustor.'))
+        else:
+            mr = finite_number(nokta.get('mixture_ratio'))
+            if tablo_turu:
+                story.extend(self._note(
+                    'This run fell back to the static 100-bar table. The '
+                    'table values are compared with NASA CEA at this run\'s '
+                    'chamber pressure and O/F (vacuum Isp at area ratio '
+                    '200).'))
+            if pc is not None and mr is not None and eps is not None:
+                story.extend(self._note(
+                    f'Operating point: Pc = {pc:.3f} bar, O/F = {mr:.3f}, '
+                    f'expansion ratio = {eps:.3f}.'))
+        if blok.get('theoretical_source_note'):
+            story.extend(self._note(blok.get('theoretical_source_note')))
+
+        etiket = self.CEA_KIND_ROW_LABELS[aile]
+        aciklamali = aile == 'liquid' and not tablo_turu
+        if aile == 'solid':
+            hrma_bas = ('HRMA (= CEA at this Pc)' if ayni
+                        else 'HRMA (theoretical)')
+            cea_bas = 'NASA CEA'
+        else:
+            hrma_bas = ('HRMA static table' if tablo_turu
+                        else 'HRMA (published, delivered)')
+            cea_bas = 'NASA CEA' if tablo_turu else 'NASA CEA (theoretical)'
+        hucre = ParagraphStyle('CeaHucre', parent=self.styles['Normal'],
+                               fontSize=8, leading=10)
+        bas = ParagraphStyle('CeaBas', parent=hucre, fontName='Helvetica-Bold',
+                             textColor=colors.whitesmoke)
+
+        def p(metin, stil=hucre):
+            return Paragraph(escape(str(metin)), stil)
+
+        satirlar = [[p('Quantity', bas), p('Unit', bas), p(hrma_bas, bas),
+                     p(cea_bas, bas), p('Delta (%)', bas)]
+                    + ([p('Explained by', bas)] if aciklamali else [])]
+        for r in blok.get('rows') or []:
+            if not isinstance(r, dict):
+                continue
+            kimlik = str(r.get('quantity') or '')
+            fark = finite_number(r.get('delta_pct'))
+            satir = [p(etiket.get(kimlik, kimlik)), p(str(r.get('unit') or '')),
+                     p(self._fmt_comparison_number(r.get('hrma'))),
+                     p(self._fmt_comparison_number(r.get('cea'))),
+                     p('{:+.3f}'.format(fark) if fark is not None else 'N/A')]
+            if aciklamali:
+                eb = (r.get('explained_by')
+                      if isinstance(r.get('explained_by'), dict) else None)
+                if r.get('relation') == 'identical_source':
+                    neden = 'same number: HRMA publishes the CEA value'
+                elif r.get('relation') == 'different_definition':
+                    neden = ('different definition: HRMA gamma is the '
+                             'equivalent exponent that reproduces the CEA '
+                             'thrust coefficient')
+                elif (eb and eb.get('exact') is True
+                      and finite_number(eb.get('value')) is not None):
+                    neden = '{} = {:.3f} % (exact)'.format(
+                        self.CEA_FACTOR_LABELS.get(eb.get('factor'),
+                                                   str(eb.get('factor'))),
+                        finite_number(eb.get('value')) * 100.0)
+                else:
+                    neden = ('not a single published factor; see the '
+                             'efficiency breakdown')
+                satir.append(p(neden))
+            satirlar.append(satir)
+        if len(satirlar) > 1:
+            genislik = ([1.75, 0.55, 0.95, 0.95, 0.65, 1.45] if aciklamali
+                        else [2.25, 0.6, 1.3, 1.0, 0.8])
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(self._simple_table(
+                satirlar, [g * inch for g in genislik]))
+
+        if aile == 'solid':
+            if ayni:
+                bilesim = ((blok.get('propellants') or {}).get('key')
+                           if isinstance(blok.get('propellants'), dict)
+                           else None)
+                if blok.get('nominal_composition') and bilesim == 'black_powder':
+                    story.extend(self._note(
+                        'Low confidence: the record gives black powder only '
+                        'as KNO3 ~75 / charcoal ~15 / sulfur ~10 wt%. HRMA '
+                        'runs CEA with exactly 75/15/10 and takes charcoal '
+                        'as graphite, because no sourced charcoal formula '
+                        'exists in HRMA; real charcoal gives more gas.'))
+                elif (blok.get('nominal_composition')
+                      and bilesim == 'apcp_nonaluminized'):
+                    story.extend(self._note(
+                        'Nominal composition chosen by HRMA: the record gives '
+                        'AP ~85 / HTPB ~15 wt%; CEA is run with exactly 85/15 '
+                        'and the R-45 binder card of the APCP evidence run.'))
+            kayit_p = finite_number(blok.get('record_pressure_bar'))
+            if kayit_p is not None:
+                story.extend(self._note(
+                    f'The catalogue values come from one NASA CEA run at '
+                    f'{kayit_p:.2f} bar; the solver does not model their '
+                    'dependence on chamber pressure, so at any other '
+                    'pressure the first four rows show that dependence.'))
+            if ayni:
+                story.extend(self._note(
+                    'Molecular weight convention the solver uses: M = 1/n, '
+                    'gas moles only, condensed products counted in the mass '
+                    '(NASA RP-1311 Part I eq. 2.3a), for every propellant on '
+                    'the NASA CEA path.'))
+            elif blok.get('molecular_weight_convention') == 'MW':
+                story.extend(self._note(
+                    'Molecular weight convention of this record: MW over all '
+                    'species, condensed products counted as species (NASA '
+                    'RP-1311 Part I eq. 2.4a).'))
+            else:
+                story.extend(self._note(
+                    'Molecular weight convention of this record: M = 1/n, '
+                    'gas moles only, condensed products counted in the mass '
+                    '(NASA RP-1311 Part I eq. 2.3a).'))
+            story.extend(self._note(
+                'c* is the theoretical '
+                + ('NASA CEA value at this chamber pressure'
+                   if ayni else 'catalogue value')
+                + '; the c* shown in the results is the delivered value '
+                '(theoretical x combustion efficiency).'))
+            story.extend(self._note(
+                'The nozzle rows are CEA\'s shifting-equilibrium expansion, '
+                'condensed products included. HRMA applies its combustion, '
+                'two-phase (particle lag), kinetic, divergence and friction '
+                'losses on top of this ideal, not inside it.'
+                if ayni else
+                'The last three rows compare HRMA\'s single-gamma ideal '
+                'nozzle (chamber gamma) with CEA\'s shifting-equilibrium '
+                'expansion that includes the condensed products.'))
+        for eksik in blok.get('rows_omitted') or []:
+            if isinstance(eksik, dict):
+                story.extend(self._note(
+                    'Rows not compared: %s' % (eksik.get('message')
+                                               or eksik.get('code')
+                                               or 'no reason published')))
+        kaynak_c = (blok.get('cea_source')
+                    if isinstance(blok.get('cea_source'), dict) else {})
+        if kaynak_c.get('program'):
+            story.extend(self._note('NASA CEA column: %s, RocketCEA %s' % (
+                kaynak_c.get('program'),
+                kaynak_c.get('rocketcea_version') or 'version not published')))
+        if blok.get('delta_definition'):
+            story.extend(self._note('Delta (%%) = %s.'
+                                    % blok.get('delta_definition')))
+        if blok.get('advisory_note'):
+            story.extend(self._note(blok.get('advisory_note')))
+        return story
+
+    def _create_thermochemistry_section(self, analysis_results: Dict) -> List:
+        """V301/UI-K (K-C1 DEVİR 2, N-CEA-2 Y5) — katı termokimya bloğu.
+
+        ÖLÇÜLDÜ (ui-k/pdf_once.json): katı yanıtı ``thermochemistry``
+        bloğunu (kaynak, T_c, c*, γ, M, program, lüle tabanı) yayımlıyor ve
+        panel kaynağı söylüyordu; PDF'in hiçbir rapor türünde bu blok ya da
+        kaynak satırı yoktu. Bölüm YALNIZ yanıtta blok varsa basılır;
+        sayılar bloktan aynen gelir, eksik alan 'N/A' olur (uydurma yok).
+        Tanınmayan kaynak kodu adıyla basılır, yorumlanmaz.
+        """
+        termo = (analysis_results or {}).get('thermochemistry')
+        if not isinstance(termo, dict) or not termo.get('source'):
+            return []
+        kaynak = str(termo.get('source'))
+        story = [Paragraph('Thermochemistry', self.styles['SectionHeader'])]
+        cumle = self.SOLID_THERMO_SOURCE_TEXT.get(kaynak)
+        story.append(Paragraph(escape(
+            'Thermochemistry source of this run: '
+            + (cumle if cumle else
+               f"source code '{kaynak}' (not recognised by this report; "
+               'printed verbatim)')), self.styles['Normal']))
+        neden = termo.get('reason')
+        if isinstance(neden, dict) and (neden.get('message')
+                                        or neden.get('code')):
+            story.extend(self._note('Reason: %s' % (neden.get('message')
+                                                    or neden.get('code'))))
+        satirlar = [['Quantity', 'Value', 'Unit']]
+        for ad, anahtar, birim, bicim in (
+                ('Chamber pressure', 'chamber_pressure_bar', 'bar', '{:.3f}'),
+                ('Chamber temperature T_c', 'chamber_temperature_K', 'K',
+                 '{:.1f}'),
+                ('Characteristic velocity c* (theoretical)',
+                 'c_star_theoretical_m_s', 'm/s', '{:.1f}'),
+                ('Chamber gamma (isentropic exponent)', 'gamma_chamber', '-',
+                 '{:.4f}'),
+                ('Molecular weight M', 'molecular_weight', 'kg/kmol',
+                 '{:.3f}'),
+                ('Molecular weight, gas only', 'molecular_weight_gas_only',
+                 'kg/kmol', '{:.3f}'),
+                ('Condensed mass fraction (chamber)',
+                 'condensed_mass_fraction_chamber', '-', '{:.4f}')):
+            if anahtar not in termo:
+                continue
+            sayi = finite_number(termo.get(anahtar))
+            satirlar.append([ad, bicim.format(sayi) if sayi is not None
+                             else 'N/A', birim if sayi is not None else '-'])
+        story.append(Spacer(1, 0.08 * inch))
+        story.append(self._simple_table(satirlar, [3.0 * inch, 1.3 * inch,
+                                                   0.9 * inch]))
+        if termo.get('molecular_weight_convention'):
+            story.extend(self._note('Molecular weight convention: %s'
+                                    % termo.get('molecular_weight_convention')))
+        if termo.get('program'):
+            story.extend(self._note('Program: %s' % termo.get('program')))
+        if termo.get('nominal_composition'):
+            story.extend(self._note('Composition: %s'
+                                    % termo.get('nominal_composition')))
+        if termo.get('frozen_gamma_source'):
+            story.extend(self._note('Frozen chamber gamma: %s'
+                                    % termo.get('frozen_gamma_source')))
+        lule = (termo.get('nozzle') if isinstance(termo.get('nozzle'), dict)
+                else None)
+        if lule:
+            lule_satir = [['Nozzle (design point)', 'Value', 'Unit']]
+            for ad, anahtar, birim, bicim in (
+                    ('Optimum expansion ratio (p_e = p_a)',
+                     'expansion_ratio_optimum', '-', '{:.4f}'),
+                    ('Thrust coefficient, optimum',
+                     'thrust_coefficient_optimum', '-', '{:.4f}'),
+                    ('Thrust coefficient, vacuum',
+                     'thrust_coefficient_vacuum', '-', '{:.4f}'),
+                    ('Exit pressure p_e', 'exit_pressure_bar', 'bar',
+                     '{:.4f}'),
+                    ('Exit temperature T_e', 'exit_temperature_K', 'K',
+                     '{:.1f}'),
+                    ('Exit Mach number', 'exit_mach', '-', '{:.4f}'),
+                    ('Equivalent nozzle gamma', 'gamma_nozzle', '-',
+                     '{:.4f}'),
+                    ('Momentum anchor cf_anchor', 'cf_anchor', '-',
+                     '{:.4f}')):
+                if anahtar not in lule:
+                    continue
+                sayi = finite_number(lule.get(anahtar))
+                lule_satir.append([ad, bicim.format(sayi) if sayi is not None
+                                   else 'N/A',
+                                   birim if sayi is not None else '-'])
+            if len(lule_satir) > 1:
+                story.append(Spacer(1, 0.08 * inch))
+                story.append(self._simple_table(
+                    lule_satir, [3.0 * inch, 1.3 * inch, 0.9 * inch]))
+            if lule.get('basis'):
+                story.extend(self._note('Nozzle basis: %s' % lule.get('basis')))
+            lneden = lule.get('reason')
+            if isinstance(lneden, dict) and (lneden.get('message')
+                                             or lneden.get('code')):
+                story.extend(self._note('Nozzle reason: %s'
+                                        % (lneden.get('message')
+                                           or lneden.get('code'))))
+        return story
+
+    def _create_cea_comparison_section(self, analysis_results: Dict) -> List:
+        """Analiz sonu NASA CEA karşılaştırması (yanıtın ``cea_comparison``)."""
+        blok = (analysis_results or {}).get('cea_comparison')
+        if not isinstance(blok, dict) or blok.get('status') not in (
+                'available', 'unavailable'):
+            return []
+        story = [Paragraph('NASA CEA Comparison', self.styles['SectionHeader'])]
+        aile = self._cea_kind_family(blok)
+        if aile is not None and blok.get('status') == 'available':
+            story.extend(self._solid_liquid_cea_story(blok, aile))
+            return story
+        if blok.get('status') != 'available':
+            neden = (blok.get('reason')
+                     if isinstance(blok.get('reason'), dict) else {})
+            metin = (neden.get('message') or neden.get('code')
+                     or 'no reason published')
+            story.append(Paragraph(escape(
+                'The NASA CEA comparison was not available for this design: '
+                f'{metin}. No comparison numbers are reported.'),
+                self.styles['Normal']))
+            return story
+        nokta = (blok.get('operating_point')
+                 if isinstance(blok.get('operating_point'), dict) else {})
+        pc = finite_number(nokta.get('chamber_pressure_bar'))
+        of = finite_number(nokta.get('of_ratio'))
+        eps = finite_number(nokta.get('expansion_ratio'))
+        if pc is not None and of is not None and eps is not None:
+            story.append(Paragraph(escape(
+                f'Operating point of this run: Pc = {pc:.2f} bar, O/F = '
+                f'{of:.3f}, expansion ratio = {eps:.3f}.'),
+                self.styles['Normal']))
+        satirlar = [['Quantity', 'HRMA', 'NASA CEA', 'Delta (%)', 'Unit']]
+        for r in blok.get('rows') or []:
+            if not isinstance(r, dict):
+                continue
+            kimlik = str(r.get('quantity') or '')
+            fark = finite_number(r.get('delta_pct'))
+            satirlar.append([
+                self.CEA_ROW_LABELS.get(kimlik, kimlik),
+                self._fmt_comparison_number(r.get('hrma')),
+                self._fmt_comparison_number(r.get('cea')),
+                ('{:+.3f}'.format(fark) if fark is not None else 'N/A'),
+                str(r.get('unit') or ''),
+            ])
+        if len(satirlar) > 1:
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(self._simple_table(
+                satirlar, [2.2 * inch, 1.0 * inch, 1.0 * inch, 0.8 * inch,
+                           0.7 * inch]))
+        kaynak_h = (blok.get('hrma_source')
+                    if isinstance(blok.get('hrma_source'), dict) else {})
+        kaynak_c = (blok.get('cea_source')
+                    if isinstance(blok.get('cea_source'), dict) else {})
+        notlar = []
+        if kaynak_h.get('solver') or kaynak_h.get('mechanism'):
+            notlar.append('HRMA: %s (mechanism %s)' % (
+                kaynak_h.get('solver') or 'not published',
+                kaynak_h.get('mechanism') or 'not published'))
+        if kaynak_c.get('program'):
+            notlar.append('CEA: %s, RocketCEA %s' % (
+                kaynak_c.get('program'),
+                kaynak_c.get('rocketcea_version') or 'version not published'))
+        if blok.get('delta_definition'):
+            notlar.append('Delta: %s' % blok.get('delta_definition'))
+        if blok.get('advisory_note'):
+            notlar.append(str(blok.get('advisory_note')))
+        for parca in notlar:
+            story.append(Spacer(1, 0.04 * inch))
+            story.append(Paragraph(escape(str(parca)), self.styles['Normal']))
+        return story
+
+    #: Kanonik pintle geometrisi satırları: (anahtar, etiket, birim, biçim).
+    PINTLE_ROWS = (
+        ('n_radial_holes', 'Tip (radial) holes', '-', '{:.0f}'),
+        ('radial_hole_d_mm', 'Tip hole diameter', 'mm', '{:.3f}'),
+        ('d_pintle_mm', 'Pintle post diameter D_p', 'mm', '{:.3f}'),
+        ('annulus_gap_mm', 'Annular gap t', 'mm', '{:.3f}'),
+        ('annulus_bore_diameter_mm', 'Sleeve bore D_p + 2t', 'mm', '{:.3f}'),
+        ('bf', 'Blockage factor BF', '-', '{:.3f}'),
+        ('radial_flow_fraction', 'Radial flow fraction', '-', '{:.3f}'),
+        ('tmr', 'Total momentum ratio TMR', '-', '{:.3f}'),
+        ('spray_half_angle_deg', 'Spray half-angle', 'deg', '{:.1f}'),
+        ('skip_distance_mm', 'Skip distance L_s', 'mm', '{:.2f}'),
+    )
+
+    def _create_pintle_injector_section(self, analysis_results: Dict) -> List:
+        """Kanonik pintle geometrisi (yanıtın ``injector.pintle_geometry``)."""
+        enj = (analysis_results or {}).get('injector')
+        if not isinstance(enj, dict) or enj.get('type') != 'pintle':
+            return []
+        geo = enj.get('pintle_geometry')
+        if not isinstance(geo, dict):
+            return []
+        story = [Paragraph('Pintle Injector Geometry',
+                           self.styles['SectionHeader'])]
+        story.append(Paragraph(escape(
+            'Canonical geometry from the injector circuit solution; the '
+            'results table, the cross-section drawing and this report use '
+            'the same dictionary. Secondary holes: '
+            f"{geo.get('secondary_holes') or 'not published'}."),
+            self.styles['Normal']))
+        satirlar = [['Quantity', 'Value', 'Unit']]
+        for anahtar, etiket, birim, bicim in self.PINTLE_ROWS:
+            sayi = finite_number(geo.get(anahtar))
+            if sayi is None:
+                continue
+            satirlar.append([etiket, bicim.format(sayi), birim])
+        govde = finite_number(geo.get('housing_outer_diameter_mm'))
+        satirlar.append(['Housing outer diameter',
+                         ('{:.2f}'.format(govde) if govde is not None
+                          else 'not sized'),
+                         ('mm' if govde is not None else '-')])
+        story.append(Spacer(1, 0.08 * inch))
+        story.append(self._simple_table(satirlar, [2.6 * inch, 1.4 * inch,
+                                                   0.8 * inch]))
+        notlar = ['flow_split_basis']
+        if govde is None:
+            notlar.insert(0, 'housing_basis')
+        for anahtar in notlar:
+            if geo.get(anahtar):
+                story.append(Spacer(1, 0.04 * inch))
+                story.append(Paragraph(escape(str(geo.get(anahtar))),
+                                       self.styles['Normal']))
+        return story
+
+    # ------------------------------------------------------------------
+    # L-B (v3.0.1, SV-14) — SIVI TERMAL VE ENJEKTÖR BÖLÜMLERİ
+    # ------------------------------------------------------------------
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/kati-sivi/denetim/A-sivi/
+    # pdf_technical.txt, 2 mm cidar + pintle): teknik PDF'te soğutma, cidar
+    # sıcaklığı ve enjektör tablosu YOKTU; ekrandaki "CRITICAL: peak hot-wall
+    # temperature 3094 K exceeds ... melting point 1673 K - liner failure"
+    # hükmü rapora hiç inmiyordu. Bölümler yanıtın KENDİ alanlarını basar
+    # (kopya hesap yok); alan yoksa satır "not published" yazar, sayı
+    # uydurulmaz. Satır tanımları tek yerde (aşağıdaki iki tablo).
+
+    #: Sıvı termal tablo satırları: (blok, yol, etiket, birim, biçim).
+    #: blok: 'cs' = cooling_system, 'tp' = thermal_protection,
+    #: 'sm' = thermal_protection.station_march,
+    #: 'st' = structural_analysis.chamber_structure.
+    LIQUID_THERMAL_ROWS = (
+        ('tp', 'cooling_type', 'Cooling type', '-', None),
+        ('cs', 'wall_temperature_solved_K',
+         'Hot-wall temperature, SOLVED (peak)', 'K', '{:.0f}'),
+        ('cs', 'wall_temperature_target_K',
+         'Hot-wall temperature TARGET (max_wall_temp)', 'K', '{:.0f}'),
+        ('cs', 'wall_temperature_limit_status', 'Wall temperature limit check',
+         '-', None),
+        ('sm', 'peak_coolant_side_wall_temperature_K',
+         'Coolant-side wall peak (station march)', 'K', '{:.0f}'),
+        ('sm', 'material_melting_K', 'Liner material melting point', 'K',
+         '{:.0f}'),
+        ('sm', 'material_allowable_K', 'Liner material allowable temperature',
+         'K', '{:.0f}'),
+        ('cs', 'coolant_exit_temperature', 'Coolant exit temperature', 'K',
+         '{:.1f}'),
+        ('cs', 'coolant_exit_temperature_bulk_estimate_K',
+         'Coolant exit, bulk Bartz estimate (diagnostic)', 'K', '{:.1f}'),
+        ('cs', 'cooling_pressure_drop',
+         'Jacket pressure drop, bulk Bartz chain', 'bar', '{:.3f}'),
+        ('sm', 'coolant_pressure_drop_bar',
+         'Jacket pressure drop, station march', 'bar', '{:.3f}'),
+        ('tp', 'heat_flux', 'Throat heat flux at the design wall (Bartz)',
+         'MW/m2', '{:.2f}'),
+        ('st', 'wall_temperature', 'Structural verdict wall temperature', 'K',
+         '{:.0f}'),
+        ('st', 'verdict_withheld', 'Structural verdict withheld', '-', None),
+    )
+
+    #: V301/UI-K (L-KABUK DEVİR 2): iki katmanlı rejeneratif cidarın katman
+    #: satırları — ``structural_analysis.chamber_structure.wall_layers``
+    #: listesinin HER katmanı için (alan, etiket eki, birim, biçim). Isıl
+    #: tablonun sonuna katman başına eklenir; liste yoksa (tek katmanlı
+    #: ceket/ablatif) satır yoktur. ÖLÇÜLDÜ (örnek sıvı, LOX/RP-1 25 kN):
+    #: yanıt astar 1,0 mm SF 1,044 (hedef 2,5) 'below_target' ve kabuk
+    #: 2,5 mm SF 2,716 'pass' yayımlıyordu; PDF'te iki katmandan hiçbiri
+    #: yoktu, okuyucu tek cidar görüyordu.
+    LIQUID_WALL_LAYER_ROWS = (
+        ('material', 'material', '-', None),
+        ('thickness_mm', 'thickness', 'mm', '{:.2f}'),
+        ('safety_factor', 'safety factor', '-', '{:.3f}'),
+        ('safety_factor_target', 'safety factor target', '-', '{:.2f}'),
+        ('verdict', 'verdict', '-', None),
+    )
+    #: Katman rolü -> etiket (tanınmayan rol adıyla basılır).
+    LIQUID_WALL_ROLE_LABELS = {
+        'liner': 'Liner (hot-gas wall, layer 1)',
+        'closeout': 'Closeout (outer shell, layer 2)',
+    }
+    #: Katman hükmü -> rapor metni (motorun beş hükmü; tanınmayan aynen).
+    LIQUID_WALL_VERDICT_TEXT = {
+        'pass': 'pass (SF at or above the target)',
+        'below_target': 'BELOW TARGET (SF under the target)',
+        'fail': 'FAIL (yield exceeded, SF < 1)',
+        'withheld': 'withheld (inputs not solved)',
+        'not_evaluated': 'not evaluated',
+    }
+
+    #: Film soğutma satırları: (yol film_cooling altında, etiket, birim, biçim).
+    LIQUID_FILM_ROWS = (
+        ('film_cooling_percent', 'Film flow (% of total fuel flow)', '%',
+         '{:.2f}'),
+        ('film_cooling_flow_kg_s', 'Film coolant flow', 'kg/s', '{:.4f}'),
+        ('film_covered_length_mm', 'Film-covered chamber length', 'mm',
+         '{:.1f}'),
+        ('film_coverage_fraction_of_chamber', 'Coverage of the chamber barrel',
+         '-', '{:.3f}'),
+        ('performance.isp_core_sea_level_s', 'Core Isp (sea level)', 's',
+         '{:.2f}'),
+        ('performance.isp_delivered_sea_level_s',
+         'Delivered Isp (sea level, film charged)', 's', '{:.2f}'),
+        ('performance.isp_loss_pct', 'Isp loss charged for the film', '%',
+         '{:.2f}'),
+        ('performance.total_mass_flow_kg_s', 'Total mass flow (core + film)',
+         'kg/s', '{:.4f}'),
+    )
+
+    #: Sıvı enjektör satırları (``injection_system`` altında).
+    LIQUID_INJECTOR_ROWS = (
+        ('injector_type', 'Injector type', '-', None),
+        ('number_of_elements', 'Number of elements', '-', '{:.0f}'),
+        ('fuel_orifice_count', 'Fuel orifices', '-', '{:.0f}'),
+        ('fuel_orifice_diameter', 'Fuel orifice diameter', 'mm', '{:.3f}'),
+        ('ox_orifice_count', 'Oxidizer orifices', '-', '{:.0f}'),
+        ('ox_orifice_diameter', 'Oxidizer orifice diameter', 'mm', '{:.3f}'),
+        ('fuel_injection_area', 'Fuel injection area', 'mm2', '{:.2f}'),
+        ('ox_injection_area', 'Oxidizer injection area', 'mm2', '{:.2f}'),
+        ('fuel_injection_velocity', 'Fuel injection velocity', 'm/s',
+         '{:.2f}'),
+        ('ox_injection_velocity', 'Oxidizer injection velocity', 'm/s',
+         '{:.2f}'),
+        ('fuel_pressure_drop', 'Fuel injector pressure drop', 'bar',
+         '{:.2f}'),
+        ('ox_pressure_drop', 'Oxidizer injector pressure drop', 'bar',
+         '{:.2f}'),
+        ('discharge_coefficient_fuel', 'Discharge coefficient, fuel', '-',
+         '{:.3f}'),
+        ('discharge_coefficient_ox', 'Discharge coefficient, oxidizer', '-',
+         '{:.3f}'),
+        ('droplet_diameter', 'Droplet diameter (governing circuit)', 'um',
+         '{:.1f}'),
+    )
+
+    @staticmethod
+    def _yol_oku(blok, yol):
+        """Nokta ayrımlı yolu sözlükte okur; yoksa None (uydurma yok)."""
+        cur = blok
+        for parca in str(yol).split('.'):
+            if not isinstance(cur, dict) or parca not in cur:
+                return None
+            cur = cur[parca]
+        return cur
+
+    @staticmethod
+    def _hucre(deger, bicim):
+        """Tablo hücresi: sayı biçimlenir, metin/bool aynen, yoksa beyan."""
+        if deger is None:
+            return 'not published'
+        if isinstance(deger, bool):
+            return 'yes' if deger else 'no'
+        if bicim:
+            sayi = finite_number(deger)
+            if sayi is None:
+                return 'not published'
+            return bicim.format(sayi)
+        return str(deger)
+
+    @staticmethod
+    def _liquid_mu(analysis_results: Dict, motor_data: Optional[Dict]) -> bool:
+        """Bölüm yalnız SIVI yanıtta basılır (soğutma sözlüğü olan yanıt)."""
+        tur = str((motor_data or {}).get('motor_type') or '').lower()
+        if tur and tur != 'liquid':
+            return False
+        return isinstance((analysis_results or {}).get('cooling_system'),
+                          dict)
+
+    def _create_liquid_thermal_section(self, analysis_results: Dict,
+                                       motor_data: Optional[Dict] = None
+                                       ) -> List:
+        """Sıvı termal bölüm: çözülen ⟷ hedef cidar, hüküm, marş, film."""
+        if not self._liquid_mu(analysis_results, motor_data):
+            return []
+        ar = analysis_results or {}
+        cs = ar.get('cooling_system') or {}
+        tp = ar.get('thermal_protection')
+        tp = tp if isinstance(tp, dict) else {}
+        sm = tp.get('station_march')
+        sm = sm if isinstance(sm, dict) else {}
+        st = self._yol_oku(ar, 'structural_analysis.chamber_structure')
+        st = st if isinstance(st, dict) else {}
+        bloklar = {'cs': cs, 'tp': tp, 'sm': sm, 'st': st}
+        story = [Paragraph('Thermal Protection and Cooling',
+                           self.styles['SectionHeader'])]
+        story.append(Paragraph(escape(
+            'Values below are read from this design\'s own solver fields '
+            '(cooling_system, thermal_protection, structural_analysis); '
+            'nothing is recomputed for the report. The TARGET is your '
+            'requirement; only the SOLVED value is a result.'),
+            self.styles['Normal']))
+        satirlar = [['Quantity', 'Value', 'Unit']]
+        for blok, yol, etiket, birim, bicim in self.LIQUID_THERMAL_ROWS:
+            satirlar.append([etiket,
+                             self._hucre(self._yol_oku(bloklar[blok], yol),
+                                         bicim), birim])
+        katmanlar = st.get('wall_layers')
+        katmanlar = ([k for k in katmanlar if isinstance(k, dict)]
+                     if isinstance(katmanlar, list) else [])
+        for katman in katmanlar:
+            rol = str(katman.get('role') or 'layer')
+            ad = self.LIQUID_WALL_ROLE_LABELS.get(rol, rol)
+            for alan, ek, birim, bicim in self.LIQUID_WALL_LAYER_ROWS:
+                deger = katman.get(alan)
+                if alan == 'verdict' and isinstance(deger, str):
+                    deger = self.LIQUID_WALL_VERDICT_TEXT.get(deger, deger)
+                satirlar.append(['%s %s' % (ad, ek),
+                                 self._hucre(deger, bicim), birim])
+        if katmanlar:
+            for yol, etiket, birim, bicim in (
+                    ('wall_stack_thickness_mm', 'Wall stack thickness', 'mm',
+                     '{:.2f}'),
+                    ('wall_stack_safety_factor',
+                     'Wall stack safety factor (smallest layer)', '-',
+                     '{:.3f}'),
+                    ('wall_stack_governing_layer', 'Governing layer', '-',
+                     None)):
+                satirlar.append([etiket, self._hucre(st.get(yol), bicim),
+                                 birim])
+        story.append(Spacer(1, 0.08 * inch))
+        story.append(self._simple_table(satirlar, [3.0 * inch, 1.3 * inch,
+                                                   0.8 * inch]))
+        notlar = []
+        for etiket, deger in (
+                ('Solved by', cs.get('wall_temperature_solved_source')),
+                ('Not solved because', cs.get(
+                    'wall_temperature_not_solved_reason')),
+                ('Limit check', cs.get('wall_temperature_limit_basis')),
+                ('Coolant exit temperature source',
+                 cs.get('coolant_exit_temperature_source')),
+                ('Structural verdict wall temperature',
+                 st.get('wall_temperature_basis')),
+                ('Wall model', st.get('wall_model_basis')
+                 if katmanlar else None),
+                ('Not modelled for the wall layers', ', '.join(
+                    str(x) for x in st.get('wall_layers_not_modelled'))
+                 if katmanlar and isinstance(
+                     st.get('wall_layers_not_modelled'), list) else None),
+                ('Station march', tp.get('station_march_status'))):
+            if deger:
+                notlar.append('%s: %s' % (etiket, deger))
+        for parca in notlar:
+            story.append(Spacer(1, 0.04 * inch))
+            story.append(Paragraph(escape(str(parca)), self.styles['Normal']))
+        # Marşın KENDİ hükümleri (metin çözücüden, aynen).
+        hukumler = sm.get('warnings') if isinstance(sm.get('warnings'),
+                                                    list) else []
+        if hukumler:
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(Paragraph('Station march verdicts',
+                                   self.styles['Heading3']))
+            for h in hukumler:
+                story.append(Paragraph(escape(str(h)), self.styles['Normal']))
+        # Film bloğu (film tipi ya da film debisi varsa).
+        film = cs.get('film_cooling')
+        film = film if isinstance(film, dict) else {}
+        film_var = (finite_number(film.get('film_cooling_percent')) or 0) > 0
+        if film_var or str(ar.get('cooling_type') or '') == 'film_cooling':
+            story.append(Spacer(1, 0.1 * inch))
+            story.append(Paragraph('Film Cooling', self.styles['Heading3']))
+            frows = [['Quantity', 'Value', 'Unit']]
+            for yol, etiket, birim, bicim in self.LIQUID_FILM_ROWS:
+                frows.append([etiket,
+                              self._hucre(self._yol_oku(film, yol), bicim),
+                              birim])
+            story.append(self._simple_table(frows, [3.0 * inch, 1.3 * inch,
+                                                    0.8 * inch]))
+            for deger in (film.get('film_cooling_percent_source'),
+                          self._yol_oku(film, 'performance.basis'),
+                          cs.get('regenerative_jacket_basis')):
+                if deger:
+                    story.append(Spacer(1, 0.04 * inch))
+                    story.append(Paragraph(escape(str(deger)),
+                                           self.styles['Normal']))
+        return story
+
+    def _create_liquid_injector_section(self, analysis_results: Dict,
+                                        motor_data: Optional[Dict] = None
+                                        ) -> List:
+        """Sıvı enjektör bölümü: ``injection_system``in kanon satırları.
+
+        Pintle seçiliyse devre geometrisi ``PINTLE_ROWS`` deseniyle
+        (hibritin kanon satırları) ``injector_design_detail.pintle_geometry``
+        alanından basılır.
+        """
+        if not self._liquid_mu(analysis_results, motor_data):
+            return []
+        inj = (analysis_results or {}).get('injection_system')
+        if not isinstance(inj, dict):
+            return []
+        story = [Paragraph('Injector', self.styles['SectionHeader'])]
+        story.append(Paragraph(escape(
+            'Rows are the solver\'s injection_system fields; nothing is '
+            'recomputed for the report.'), self.styles['Normal']))
+        satirlar = [['Quantity', 'Value', 'Unit']]
+        # V301/L-C (L-B DEVİR 5, SV-07): pintle'da özet blok TEK kanondan
+        # (radyal yakıt uç delikleri + oksitleyici anülüsü) yayımlanır;
+        # oksitleyicinin ayrık deliği yoktur. Eskiden tablo 100/100 delik
+        # basıyordu (devrenin delinmeyen eşdeğer planı).
+        pintle = str(inj.get('injector_type') or '').lower() == 'pintle'
+        for yol, etiket, birim, bicim in self.LIQUID_INJECTOR_ROWS:
+            if pintle and yol in ('ox_orifice_count', 'ox_orifice_diameter'):
+                satirlar.append([etiket, 'not applicable (annulus)', birim])
+                continue
+            if pintle and yol == 'fuel_orifice_count':
+                etiket = 'Fuel radial tip holes (pintle)'
+            elif pintle and yol == 'fuel_orifice_diameter':
+                etiket = 'Fuel radial tip hole diameter (pintle)'
+            satirlar.append([etiket, self._hucre(inj.get(yol), bicim),
+                             birim])
+        if pintle:
+            for yol, etiket in (('pintle_diameter_mm', 'Pintle post diameter'),
+                                ('ox_annulus_gap_mm',
+                                 'Oxidizer annulus gap'),
+                                ('ox_annulus_bore_diameter_mm',
+                                 'Oxidizer annulus bore (D_p + 2t)'),
+                                ('skip_distance_mm', 'Skip distance')):
+                satirlar.append([etiket, self._hucre(inj.get(yol), '{:.3f}'),
+                                 'mm'])
+        story.append(Spacer(1, 0.08 * inch))
+        story.append(self._simple_table(satirlar, [3.0 * inch, 1.3 * inch,
+                                                   0.8 * inch]))
+        for etiket, anahtar in (('Element count', 'element_count_source'),
+                                ('Orifice plan', 'orifice_plan_basis'),
+                                ('Pressure drop', 'pressure_drop_source'),
+                                ('Discharge coefficient',
+                                 'discharge_coefficient_source')):
+            if inj.get(anahtar):
+                story.append(Spacer(1, 0.04 * inch))
+                story.append(Paragraph(escape('%s source: %s' % (
+                    etiket, inj.get(anahtar))), self.styles['Normal']))
+        geo = self._yol_oku(inj, 'injector_design_detail.pintle_geometry')
+        if isinstance(geo, dict) and geo:
+            story.append(Spacer(1, 0.1 * inch))
+            story.append(Paragraph('Pintle geometry (circuit solution)',
+                                   self.styles['Heading3']))
+            prow = [['Quantity', 'Value', 'Unit']]
+            for anahtar, etiket, birim, bicim in self.PINTLE_ROWS:
+                sayi = finite_number(geo.get(anahtar))
+                if sayi is None:
+                    continue
+                prow.append([etiket, bicim.format(sayi), birim])
+            story.append(self._simple_table(prow, [3.0 * inch, 1.3 * inch,
+                                                   0.8 * inch]))
+        return story
 
     def _create_solver_warnings_section(self, motor_data: Dict,
                                         analysis_results: Dict) -> List:

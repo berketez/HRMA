@@ -45,6 +45,20 @@ SOKULEN = {
     'outer_diameter': '50',
     'pintle_diameter': '25',
     'n_slots': '6',
+    # V301/E2 (Ayberk tur 1): aşağıdaki beş alanın DEVİR kilidi KAPANDI —
+    # kilidin şartı (uç kanonik varsayılanı ya da 422 kapısı) artık
+    # sağlanıyor: uç ``_eleman_istek_ezmeleri``/``element_clean_inputs``
+    # kapısı (tel biçimi + aralık + tutarlılık 422) ve
+    # ``_CALCULATE_UC_VARSAYILANLARI`` künyesi (0 = "çözücü türetir",
+    # ``defaults_applied``). Ön-dolu sayılar KULLANICININ SEÇMEDİĞİ bir
+    # tasarımı dayatıyordu (8 çift × 0,8 mm sabit; 1 × 2 mm yuva ile hedef
+    # açı yok sayılıyordu) — ölçüm: docs/scofield/raw/OH/V301/ayberk1/
+    # enjektor-genel/once.json ``form``.
+    'element_pairs': '8',
+    'slot_width': '1.0',
+    'slot_height': '2.0',
+    'swirl_chamber_diameter': '20',
+    'swirl_angle': '71.2',
 }
 
 #: SÖKÜLMEYEN alanlar: ön-dolu düşürülünce yayımlanan mühendislik sayısı
@@ -57,11 +71,6 @@ DEVIR = {
                         'HTTP 200 -> 400 (gecerli bir O/F degil)'),
     'oxidizer_temp': (4579, 'tank_temperature kolu yedeksiz: dusurulunce '
                             'enjektor Dp 30,373 -> 30,543 bar'),
-    'element_pairs': (26, 'orifis sayisi 16 -> 8, delik capi ve CAD agi kayar'),
-    'slot_width': (25, 'Giffen-Muraszew K/Cd/alan kayar'),
-    'slot_height': (25, 'Giffen-Muraszew K/Cd/alan kayar'),
-    'swirl_chamber_diameter': (20, 'Giffen-Muraszew D_s kaynagi degisir'),
-    'swirl_angle': (4, 'spray_half_angle_target_deg -> None'),
 }
 
 

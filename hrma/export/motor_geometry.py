@@ -967,6 +967,36 @@ def liquid_results_to_motor_geometry(results):
         # 'chamber_structure' bloğunda yayımlanır.
         'structural_analysis': r.get('structural_analysis') or {},
     }
+    # V301 bilinen C2 — KANONİK PINTLE GEOMETRİSİ dışa aktarım gövdesine
+    # AYNEN taşınır (sayı üretilmez, kopyalanır). Sıvı çözücü onu devre
+    # ayrıntısında yayımlar (``injection_system.injector_design_detail
+    # .pintle_geometry``); bu gövde onu taşımadığı için STEP/STL pintle'ı
+    # çizemiyordu. CAD (``cad_visualization.pintle_cad_geometry``) onu
+    # ``injector_design.pintle_geometry``den okur — hibritteki yerle aynı.
+    _sistem = r.get('injection_system')
+    _ayrinti = (_sistem.get('injector_design_detail')
+                if isinstance(_sistem, dict) else None)
+    _pintle = (_ayrinti.get('pintle_geometry')
+               if isinstance(_ayrinti, dict) else None)
+    if isinstance(_pintle, dict):
+        out['injector_design']['pintle_geometry'] = dict(_pintle)
+    # V301 CAD-2 kalem 8 — İKİ KATMANLI CİDARIN KANAL SAYISI dışa aktarım
+    # gövdesine AYNEN taşınır (sayı üretilmez). CAD kanal/kaburga katmanını
+    # bu sayıyla tartar (``cad_visualization.two_layer_rib_fraction``);
+    # gövde onu taşımadığı için kütle tek malzemeli yedeğe düşüyordu. Yalnız
+    # iki katmanlı rejeneratif cidarda yazılır (öteki yollar bit-aynı).
+    from hrma.export.cad_visualization import TWO_LAYER_WALL_MODEL
+    _cs = ((r.get('structural_analysis') or {}).get('chamber_structure')
+           if isinstance(r.get('structural_analysis'), dict) else None)
+    if (isinstance(_cs, dict)
+            and _cs.get('wall_model') == TWO_LAYER_WALL_MODEL
+            and isinstance(cooling.get('cooling_channels'), (int, float))
+            and not isinstance(cooling.get('cooling_channels'), bool)):
+        out['cooling_system'] = {
+            'cooling_channels': cooling['cooling_channels'],
+            'cooling_channels_source': (
+                'cooling_system.cooling_channels of /calculate_liquid '
+                '(copied for the CAD export)')}
     # Ölçüler: çözülen yazılır, çözülemeyen KÜNYEYE düşer (anahtar yazılmaz).
     # Birim uyarısı yukarıdaki docstring'de: chamber_* MM gelir, boğaz/çıkış
     # zaten METRE gelir.

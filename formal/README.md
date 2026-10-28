@@ -6,15 +6,20 @@ test yeşil kalır, sayı yanlış çıkar. Buradaki teoremler o varsayım sın�
 bir daha sessizce bozulamamasını sağlar; `check.py` kapısı da teorem ↔ Python
 bağının çürümesini engeller.
 
-**Ölçülen durum (16 Ağustos 2026):** `LeanLab/` altında 58 `theorem`/`lemma`
-bildirimi var; bunların 39'u kayıt defterindeki (registry.json) ana teoremlerdir,
-kalanı yardımcı lemma/ara adımdır. `lake build` bu depoda çalıştırıldı ve
-`Build completed successfully (8662 jobs)` ile bitti; 39 teoremin tamamının
-`#print axioms` çıktısı `[propext, Classical.choice, Quot.sound]` — hiçbirinde
-`sorryAx` yok. (16 Ağu eklemesi: CFD analitik referans kulvarı,
-`HRMACfdReferans.lean`, 20 teorem — izantropik özdeşlikler, normal şok
-Rankine-Hugoniot türetim tutarlılığı, HLLC ara-durum özdeşlikleri, boğulmuş
-debi türetimi; `docs/mimari/cfd-tasarimi.md` §"Lean biçimsel ayak".)
+**Ölçülen durum (20 Ekim 2026):** `LeanLab/` altında 8 dosyada 85
+`theorem`/`lemma` bildirimi var; bunların 64'ü kayıt defterindeki
+(registry.json) ana teoremlerdir, kalanı yardımcı lemma/ara adımdır. Tam
+`lake build` bu depoda çalıştırıldı ve 8664 işle temiz bitti;
+`python3 formal/check.py` 64 teoremin hiçbirinde `sorryAx` bulmadı ve bütün
+Lean ↔ Python bağlarını yerinde buldu.
+
+Tarihçe: 16 Ağustos 2026 ölçümü 58 bildirim / 39 kayıtlı teoremdi (`lake build`
+8662 iş). O gün CFD analitik referans kulvarı `HRMACfdReferans.lean` eklenmişti
+— izantropik özdeşlikler, normal şok Rankine-Hugoniot türetim tutarlılığı,
+HLLC ara-durum özdeşlikleri, boğulmuş debi türetimi;
+`docs/mimari/cfd-tasarimi.md` §"Lean biçimsel ayak". Sonra kanatçık ucu
+(`HRMAFinTip.lean`, 5 Eylül) ve gerilme sınıflandırma çizgisi
+(`HRMASCL.lean`, 8 Eylül) dosyaları geldi.
 
 ## Dizin
 
@@ -23,13 +28,15 @@ debi türetimi; `docs/mimari/cfd-tasarimi.md` §"Lean biçimsel ayak".)
 | `lean-toolchain` | Lean sürüm pini: `leanprover/lean4:v4.32.2` |
 | `lakefile.toml` | Lake proje tanımı; Mathlib `v4.32.2` pinli |
 | `lake-manifest.json` | Bağımlılık kilidi (Mathlib rev `905b9581...` dahil) — commit'lenir |
-| `LeanLab.lean` | Kök modül: altı HRMA ispat dosyasını içe aktarır |
+| `LeanLab.lean` | Kök modül: sekiz HRMA ispat dosyasını içe aktarır |
 | `LeanLab/HRMA.lean` | Alan/Mach bağıntısının süpersonik dalda tekliği |
 | `LeanLab/HRMANozzleBranch.lean` | Subsonik dal ve `brentq` alt sınırının (1.0001) gerekçesi |
 | `LeanLab/HRMAGeometry.lean` | Kesik koni halka hacmi; ince kabuk hatası tam `π·t²·L` |
 | `LeanLab/HRMAAtmosphere.lean` | ISA katman tablosunun sınır sürekliliği ve tepe sıcaklığı |
 | `LeanLab/HRMAInjector.lean` | Nurick kavitasyon sayısının `P_v`'ye göre hata yönü |
 | `LeanLab/HRMACfdReferans.lean` | CFD analitik referansları: izantropik özdeşlikler, normal şok RH türetimi, HLLC ara-durum özdeşlikleri, boğulmuş debi türetimi |
+| `LeanLab/HRMAFinTip.lean` | Kanatçık ucu Mach konisi kayıp payının kapalı biçimi (1/(4·β·AR_f)), kolların sürekliliği ve geçiş basamağı |
+| `LeanLab/HRMASCL.lean` | Gerilme sınıflandırma çizgisi (SCL) doğrusallaştırması: σ_m ve σ_b'nin kapalı formları ve L1 üst sınırları |
 | `registry.json` | **Kayıt defteri:** her teorem → koruduğu Python satırı (makine-okunur) |
 | `check.py` | **Kapı:** derleme + `sorryAx` + bağ denetimi; çıkış kodu 0/1 |
 | `HRMA_ISPATLARI.md` | 2 Ağustos 2026 tarihli ayrıntılı ispat kaydı (tarihî anlık görüntü) |
@@ -106,10 +113,11 @@ Dürüst sınırlar:
   değildir. İspatlanan, seçilen modelin matematiksel tutarlılığıdır.
 * **Kayan nokta aritmetiğini modellemez.** Teoremler gerçel sayılar (ℝ)
   üzerinde geçerlidir; yuvarlama/taşma davranışı ayrı bir konudur.
-* **Kapsam seçicidir.** 39 teorem, denetimlerde fiilen hata çıkmış üç sınıfı
-  (kök tekliği, hacim formülü, tablo tutarlılığı), bir hata-yönü analizini ve
+* **Kapsam seçicidir.** 64 teorem, denetimlerde fiilen hata çıkmış üç sınıfı
+  (kök tekliği, hacim formülü, tablo tutarlılığı), bir hata-yönü analizini,
   CFD test merdiveninin analitik referans bağıntılarını (izantropik, normal
-  şok, HLLC ara-durum, boğulmuş debi) kapsar; HRMA'nın bütün fiziği
+  şok, HLLC ara-durum, boğulmuş debi), kanatçık ucu kayıp payını ve SCL
+  doğrusallaştırmasının cebrini kapsar; HRMA'nın bütün fiziği
   biçimselleştirilmiş değildir. Sayısal çözücünün kendisi (ayrıklaştırma,
   akı seçimi, zaman ilerletme) ispat konusu değildir — test merdiveni
   doğrular. Yeni varsayımlar yukarıdaki akışla eklenir.

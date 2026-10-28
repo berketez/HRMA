@@ -12,6 +12,22 @@ body.or-kose-hazir .or-kose-tasindi {
     display: none !important;
 }
 
+/* v3.0.1 (22 Eki): sekme sabit konumlu olduğu için sayfa kaydıkça altından
+   geçen içeriği örtüyordu. ÖLÇÜLDÜ (1440x900, sayfa boyunca kaydırarak):
+   hibrit sayfasının tam genişlikli panelleri x = 1419'a uzanıyor, sekme
+   1410-1440'ta; 8 kontrolün sağ kenarı (Ae/At, artık et, regresyon n,
+   enjektör malzemesi seçicisinin oku vb.) sekmenin altında kalıyordu. Katı ve
+   sıvıda kenar boşluğu yettiği için çakışma yoktu. Sekme kurulunca sayfanın
+   sağında sekme genişliği kadar oluk ayrılır; içerik hiçbir sayfada altına
+   girmez. Genişlik tek yerde (değişken). */
+:root {
+    --or-kose-sekme-genislik: 30px;
+}
+
+body.or-kose-hazir {
+    padding-right: var(--or-kose-sekme-genislik);
+}
+
 .or-kose-sekme {
     position: fixed;
     right: 0;
@@ -21,7 +37,7 @@ body.or-kose-hazir .or-kose-tasindi {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 30px;
+    width: var(--or-kose-sekme-genislik);
     min-height: 112px;
     padding: 10px 0;
     margin: 0;

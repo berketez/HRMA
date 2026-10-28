@@ -49,10 +49,21 @@ def istemci():
 
 @pytest.fixture(scope='module')
 def yanit_cidar_1(istemci):
-    """``wall_thickness = 1`` (mm) — H1-Y3'ün ölçtüğü tam gövde."""
+    """``wall_thickness = 1`` (mm) — H1-Y3'ün ölçtüğü tam gövde.
+
+    v3.0.1 T-ÇAPA-B: V301/H-termal'den beri korunan yolda (yakıt bloğu +
+    HRMA'nın boyutlandırdığı astar) kamara cidarı beyanlı kasa sıcaklığında
+    değerlendirilir; 1 mm cidar orada GEÇERLİLİK İÇİ (ölçüldü: hüküm
+    ``issued``, SF 2,69). Bu fikstürü kullanan iki bekçinin (1) kolu SICAK
+    CİDAR (geçerlilik dışı) senaryosunu sınar: o ürün yolu (astar
+    boyutlandırması koşmadı, fail-closed; kritik hüküm aynen kalır)
+    ``tests.support.hibrit_termal`` ile adıyla kurulur. İddialar değişmedi.
+    """
+    from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
     yuk = dict(_HIBRIT)
     yuk['wall_thickness'] = 1
-    cevap = istemci.post('/calculate', json=yuk)
+    with astar_boyutlandirmasi_kosmaz():
+        cevap = istemci.post('/calculate', json=yuk)
     assert cevap.status_code == 200, cevap.status_code
     return cevap.get_json()
 

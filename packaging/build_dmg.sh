@@ -21,6 +21,19 @@ ln -s /Applications "$STAGE/Applications"
 cp "$B/README_MAC.txt" "$STAGE/README.txt"
 
 # ULMO = LZMA sıkıştırma (macOS 10.15+ açar; UDZO/zlib 651 MB veriyordu — 2026-07-14)
+#
+# 2026-10-28 (v3.0.5): `hdiutil create -srcfolder -format ULMO` bu macOS'ta imajı
+# kötü sıkıştırıyor. ÖLÇÜLDÜ: aynı içerikle 3.0.5 DMG'si 732,6 MB çıktı; o
+# imaj `hdiutil convert -format ULMO` ile 344,3 MB oldu ve iki imajda dosya
+# listesi ile bütün dosya boyutları birebir aynı (62 595 dosya, 1347,7 MB).
+# 3.0.0 DMG'si de aynı yolla 607,8 → 357,4 MB. Bu yüzden imaj önce geçici
+# olarak üretilir, sonra aynı biçime dönüştürülür; içerik bit düzeyinde aynı
+# kalır (dönüştürme kayıpsız, blok düzeyinde).
+HAM_DMG="$B/mac/build.noindex/HRMA-Setup-${VERSION}-ham.dmg"
+rm -f "$HAM_DMG"
 hdiutil create -volname "HRMA Setup" -srcfolder "$STAGE" -ov -format ULMO \
-    "$DIST/HRMA-Setup-${VERSION}-macOS.dmg"
+    "$HAM_DMG"
+hdiutil convert "$HAM_DMG" -format ULMO -ov \
+    -o "$DIST/HRMA-Setup-${VERSION}-macOS.dmg"
+rm -f "$HAM_DMG"
 ls -lh "$DIST"

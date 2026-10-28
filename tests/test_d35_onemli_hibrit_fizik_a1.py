@@ -49,6 +49,11 @@ ORNEK_H1 = {
     'injector_material': 'stainless_steel', 'chamber_material': 'steel_304',
     'wall_thickness': 5.0, 'safety_factor': 4.0,
     'pressure_drop': 4.0,          # advanced.html:4444 — gizli panel
+    # V3.0.5 (28 Eki, ana model): HİBRİT-DIŞA kalem 4 — plaka kalınlığı
+    # verilmezse plaka denetimi kazanılmamış 3,0 mm ile KOŞMAZ (null). Bu
+    # vakanın konusu plaka denetiminin matematiği; kalınlık açıkça 3,0 mm
+    # verilir (eski örtük değerle aynı → sayılar bit-aynı).
+    'plate_thickness': 3.0,
 }
 
 
@@ -154,10 +159,26 @@ def test_ON01_plaka_SF_yayimlanan_dP_ile_CAPRAZ_tutuyor(h1):
     assert plaka['bending_stress_MPa'] == pytest.approx(sigma / 1e6, rel=2e-3)
     sf = (plaka['yield_strength_MPa'] * 1e6) / sigma
     assert plaka['safety_factor'] == pytest.approx(sf, rel=2e-3)
-    # Ölçülen kusurun kapanışı: aynı plaka 4 bar'a göre SF 4,107 görüyordu.
-    assert plaka['safety_factor'] < 1.0, (
-        'Ornek-H1 plakası çözülen ΔP ile akmanın altında kalmalı; '
-        f"SF = {plaka['safety_factor']} — 4 bar'lık hüküm geri gelmiş olabilir")
+    # Ölçülen kusurun kapanışı: aynı plaka eskiden istekteki 4 bar'a göre
+    # denetleniyordu (D35 günü SF 4,107; çözülen ΔP ile 0,545). v3.0.1 tane
+    # zarfı kamara çapını, dolayısıyla plaka çapını küçülttü (σ ∝ a²) ve
+    # çözülen ΔP ile SF 1,192 oldu (d37 çapası 20 Eki'de güncellendi). Eski
+    # "SF < 1" beklentisi geometriye bağlı bir çapaydı ve bayatladı (21 Eki,
+    # temiz main'de kırmızıydı). Hükmün kendisi geometriden bağımsızdır:
+    # yayımlanan SF, AYNI plakanın 4 bar'daki SF'sinin ΔP oranı kadar
+    # küçültülmüş hâlidir; 4 bar'lık hüküm geri gelirse ikisi eşitlenir.
+    # Ölçüldü (21 Eki): ΔP 30,54 bar, SF 1,192, 4 bar SF 9,105 (oran 0,131);
+    # 0,5 payı "çözülen ΔP istekteki 4 bar'ın en az iki katı" demektir.
+    sigma_4bar = (0.75 * (ORNEK_H1['pressure_drop'] * 1e5) * a ** 2
+                  / (t ** 2 * eta))
+    sf_4bar = (plaka['yield_strength_MPa'] * 1e6) / sigma_4bar
+    assert plaka['safety_factor'] == pytest.approx(
+        sf_4bar * ORNEK_H1['pressure_drop'] / plaka['delta_P_bar'],
+        rel=2e-3)
+    assert plaka['safety_factor'] < 0.5 * sf_4bar, (
+        'Ornek-H1 plakası çözülen ΔP ile değil istekteki 4 bar ile '
+        f"denetleniyor olabilir: SF = {plaka['safety_factor']}, "
+        f'4 bar SF = {sf_4bar:.3f}')
 
 
 def test_ON01_chug_kapisi_COZULEN_dP_yi_derecelendiriyor(h1):
@@ -171,8 +192,20 @@ def test_ON01_chug_kapisi_COZULEN_dP_yi_derecelendiriyor(h1):
         inj['pressure_drop'] / ORNEK_H1['chamber_pressure'], rel=1e-3)
     assert kunye['ratio'] > kunye['band'][1], (
         'ΔP/Pc bandın üstünde olmalıydı (ölçüldü: 1,5272 ⟷ tavan 0,35)')
-    assert 'warn.validation.dp_pc_high' in _kodlar(h1), (
+    # V301/PANEL (C-5) — ÇEVRİLDİ, gerekçeli (main f77564ee5'te de
+    # kırmızıydı): tavan aşımının KODU artık besleme tipine göre doğrulayıcıda
+    # kurulur (H-PANEL NK-8a uçta yeniden adlandırıyordu; "pompa işi"
+    # cümlesi hibrite ait değildi). Bu motor kendinden basınçlı N2O'dur
+    # (feed_pressure_source = n2o_saturation_at_tank_temperature): kayıt
+    # bilgi notu olarak GÖRÜNÜR durur. Bekçinin niyeti (bandın 4 katı
+    # dışındaki enjektör sessiz geçmez) aynen sınanır.
+    from hrma.validation.validation_system import DP_PC_HIGH_CODE_BY_FEED
+    besleme = kunye['feed_system']
+    assert besleme == 'self_pressurised'
+    assert DP_PC_HIGH_CODE_BY_FEED[besleme][0] in _kodlar(h1), (
         'bandın 4 katı dışındaki bir enjektör hâlâ sessizce geçiyor')
+    assert 'warn.validation.dp_pc_high' not in _kodlar(h1), (
+        'pompasız hibrite "pompa işi" cümlesi basılıyor')
 
 
 # ===========================================================================

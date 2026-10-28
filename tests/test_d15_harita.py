@@ -259,6 +259,12 @@ class TestH3KatiRefakatDegerleri:
                 continue
             deger = alan.default or (list(alan.options)[0]
                                      if alan.options else None)
+            # V3.0.5 T-ÇAPA-C1 (altyapı): seçenekleri Jinja döngüsüyle basılan
+            # seçici (K-C2 5633a8448: katı yakıt seçici) statik şablonda
+            # '{{ o.key }}' yer tutucusu taşır — bu bir değer DEĞİL; tarayıcı
+            # o alanı işlenmiş sayfadan okur. Yer tutucu gövdeye konmaz.
+            if isinstance(deger, str) and '{{' in deger:
+                continue
             if deger not in (None, ''):
                 taban[ad] = deger
         return wm, taban

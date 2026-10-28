@@ -360,6 +360,18 @@ class TestKunyeEkranda:
     def test_panelin_kendi_hukumleri_yerinde(self, tmp_path, eksik_yanit):
         """Künye eklendi diye panelin geri kalanı düşmemeli (regresyon)."""
         out = kos_panel(tmp_path, eksik_yanit)
-        for parca in ('OVERALL RISK', 'Individual Risks', 'Risk Matrix',
-                      'Pressure Vessel Summary'):
+        # V301/T-ÇAPA-D: FİZİK-2 kalem 8b (ce7d13e1b) tesis ekseni ayrılınca
+        # yanıt ``facility_hazard`` taşıyorsa motor rozeti 'MOTOR DESIGN RISK'
+        # adını alır ve tesis rozeti ayrıca basılır; taşımıyorsa 'OVERALL
+        # RISK' kalır (safety_panel.js). Bölüm aynı rozettir, adı yanıttan.
+        risk = ((eksik_yanit.get('safety_analysis') or {})
+                .get('risk_assessment') or {})
+        if risk.get('facility_hazard'):
+            rozet = ('MOTOR DESIGN RISK',)
+            if (risk['facility_hazard'] or {}).get('risk_level'):
+                rozet += ('FACILITY / SITING HAZARD',)
+        else:
+            rozet = ('OVERALL RISK',)
+        for parca in rozet + ('Individual Risks', 'Risk Matrix',
+                              'Pressure Vessel Summary'):
             assert parca in out['html'], f'{parca} bölümü kayboldu'

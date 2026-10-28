@@ -424,7 +424,16 @@ def test_dv3602_uyari_kutusu_TR_satir_satir(hibrit, tmp):
     assert 'Solver warnings' not in tr and 'WARNING:' not in tr, tr
     satirlar = tr.split('<br>')
     assert satirlar[0].startswith('<b>Bu enjektör için çözücü uyarıları (')
-    beklenen = ['- UYARI: ' + m for m in r['tr']['server']]
+    # V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ: kutu her satırın DÜZEYİNİ
+    # çözücünün kaydından basar; örnek hibritte doymuş N2O girişi (K_c = 0)
+    # artık 'INFO' düzeyindedir (beklenen hâl, uyarı değil). Düzey sözcüğü
+    # EN kutunun kendi satırından okunur, TR karşılığı sözlükte.
+    en_satirlar = kutu[0].split('<br>')[1:]
+    duzey_tr = {'WARNING': 'UYARI', 'INFO': 'BİLGİ'}
+    duzeyler = [re.match(r'- ([A-Z]+): ', x).group(1) for x in en_satirlar]
+    assert set(duzeyler) <= set(duzey_tr), duzeyler
+    beklenen = ['- %s: %s' % (duzey_tr[d], m)
+                for d, m in zip(duzeyler, r['tr']['server'])]
     assert satirlar[1:] == beklenen, (satirlar[1:], beklenen)
     # sayılar ekranda TR virgül (serverText kanonu)
     assert not re.search(r'\d\.\d', re.sub(r'<[^>]*>', '', tr)), tr
@@ -625,7 +634,14 @@ def test_dvmixed_istemci_eslemesi_TR(koken, tmp):
 # ===========================================================================
 @pytest.fixture(scope='module')
 def sivi(istemci):
-    durum, bos = uc_yaniti(istemci, '/calculate_liquid')
+    # V301/T-ÇAPA-D: örnek sıvı (ÖRNEK 5fa435893) artık max_burn_duration =
+    # 30 s taşıyor; 'sure_yok' vakası kullanıcının süre GİRMEDİĞİ hâldir,
+    # süre gövdeden açıkça çıkarılır.
+    govde_suresiz = {k: v for k, v in ornek_govdesi('/calculate_liquid').items()
+                     if k != 'max_burn_duration'}
+    r = istemci.post('/calculate_liquid', json=govde_suresiz,
+                     headers=UC_BASLIGI)
+    durum, bos = r.status_code, r.get_json()
     assert durum == 200
     durum2, dolu = uc_yaniti(istemci, '/calculate_liquid', max_burn_duration=60)
     assert durum2 == 200

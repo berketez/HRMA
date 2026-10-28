@@ -318,6 +318,23 @@ baslik "5/10  Tam test takımı"
 # ama ARTIK CI kontrolünü atlamaz.
 if [ "${TAKIMI_ATLA:-${HIZLI:-0}}" = "1" ]; then
     atlandi "tam takım atlandı (CI yeşil olduğu için); atlamayı kapatmak: TAKIMI_ATLA=0"
+    # 28 Eki (v3.0.5): ``kabul_ui`` tarayıcı düğümleri yerel Mac Chromium'una
+    # bağlıdır ve Linux CI'da SEÇİLMEZ (tests.yml ``-m "not kabul_ui"``) —
+    # CI yeşili onları KAPSAMAZ. Takım atlansa da burada koşarlar.
+    echo "  (kabul_ui tarayıcı düğümleri — CI'da seçilmez, burada koşar)"
+    # Geçici bayt kodu öneki: `git worktree move` ile taşınmış ağaçta
+    # pytest'in yeniden yazma önbelleği ESKİ yolu taşır (co_filename) ve
+    # kanıt kapısının "modül ithali mi" yoklaması yanılır — docs'suz ağaçta
+    # modül düzeyi atlama toplama HATASINA döner (ölçüldü 28 Eki, paket
+    # worktree'si eski adıyla 3.0.0-paket).
+    if PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/hrma-gate-pyc-$$" \
+            "$PY" -m pytest -q --no-header -p no:cacheprovider -m kabul_ui tests/ \
+            > /tmp/hrma_gate_kabul_ui.log 2>&1; then
+        basarili "kabul_ui: $(tail -1 /tmp/hrma_gate_kabul_ui.log)"
+    else
+        basarisiz "kabul_ui tarayıcı düğümleri kırmızı — /tmp/hrma_gate_kabul_ui.log"
+        grep -E '^FAILED|^ERROR' /tmp/hrma_gate_kabul_ui.log | head -20
+    fi
 else
     echo "  (tam takım ~15 dk sürer; alt küme koşturmak bu kapıyı GEÇMİŞ SAYMAZ)"
     if "$PY" -m pytest -q --no-header -p no:cacheprovider > /tmp/hrma_gate_pytest.log 2>&1; then
@@ -440,7 +457,12 @@ else
     YUK_HIBRIT='{"motor_name":"kapi","thrust":5000,"chamber_pressure":25,
                  "of_ratio":7.0,"burn_time":10,"fuel_type":"htpb",
                  "oxidizer_type":"n2o","expansion_ratio":8.0,"l_star":1.0}'
-    YUK_KATI='{"motor_name":"kapi","motor_type":"solid","chamber_diameter":100,
+    # 28 Eki (v3.0.5): kasa iç çapı GÖNDERİLMEZ — HRMA onu tane çapından
+    # (+ 2·(astar + yalıtım)) türetir, örnek proje de böyle. Eski gövde
+    # 'chamber_diameter 100' gönderiyordu; K-A (a7ee84f3e, kasa ≥ tane +
+    # 2·astar) ile 100 mm tane için 104 mm gerekir ve uç haklı olarak 422
+    # veriyordu (yani doğru davranış kapıyı yine kilitliyordu).
+    YUK_KATI='{"motor_name":"kapi","motor_type":"solid",
                "outer_diameter":100,"core_diameter":30,"grain_length":500,
                "grain_count":3,"propellant_type":"apcp","chamber_pressure":40}'
     YUK_SIVI='{"motor_name":"kapi","motor_type":"liquid","thrust":10000,

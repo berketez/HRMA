@@ -78,7 +78,15 @@ KOD_MARS = 'warn.liquid.station_march_not_run'
 def al_varyanti(istemci):
     # Ölçülen vaka (5. tur §8.3 d): Al 6061 örnekte cidar 50 mm, ince-cidar
     # zarfı marşı reddediyor; önce CRITICAL tepe sıcaklığı hükmü vardı.
-    return _sivi_form(istemci, chamber_material='aluminum_6061')
+    # V3.0.5 T-ÇAPA-C1 — VAKA AÇIKÇA KURULDU (V301/L-KABUK 6f8240043):
+    # rejeneratif cidar iki katman; marşın ısıl cidarı ASTARDIR ve astar
+    # kalınlığı chamber_wall_thickness (boşsa 1 mm). Eskiden 50 mm yapısal
+    # cidar ölçüldüğü için Al 6061 tek başına zarfı aşıyordu; artık aynı
+    # vaka 50 mm astarla AÇIKÇA kurulur. ÖLÇÜLDÜ (e038d626f): marş koşmuyor,
+    # 'wall_thickness (50.0 mm) is outside the thin-wall envelope …', uyarı
+    # kanalında tek kayıt.
+    return _sivi_form(istemci, chamber_material='aluminum_6061',
+                      chamber_wall_thickness=50)
 
 
 @pytest.fixture(scope='module')
@@ -327,15 +335,40 @@ def test_lh2_yanit_derinligi_marsin_derinligi(istemci):
     """Uç: yayımlanan derinlik ve hız aynı marştan (sıvı yoğunluklu sonda
     kararı yayımlanmaz). Örnek gövdenin fuel_density'si 810 kg/m³ (RP-1
     örneği) — eski kodda sonda 11,4 m/s deyip derinliği 2 mm bırakıyordu,
-    yayımlanan hız 168,9 m/s idi."""
+    yayımlanan hız 168,9 m/s idi.
+
+    V301/CI-FİZİK (28 Eki): sözleşme kardeş birim testiyle
+    (``test_lh2_yayimlanan_hiz_hedefi_tutuyor_ya_da_tavanda``) AYNI —
+    hedef tutar YA DA derinlik tavanındadır ve bu adıyla beyan edilir.
+    Eski beklenti koşulsuz "hedef tutar" idi; V301/ÖRNEK (5fa435893,
+    27 Eki) örneği yeniden üretince (Pc 70→50, gaz jeneratörü) bu
+    varyantta derinlik 1 adımda 10 mm tavanına çıktı, yayımlanan hız
+    42,15 m/s (hedef 40 m/s, kabul 40,4). Ürün bunu channel_count_source
+    künyesinde söylüyor; 40 m/s HRMA'nın yumuşak tasarım hedefi, sert
+    sınır (COOLANT_VELOCITY_LIMIT_MS, uyarı) aşılmıyor."""
+    import re as _re
     from hrma.engines import liquid_rocket_engine as L
     j = _sivi_form(istemci, fuel_type='lh2')
     cs = j['cooling_system']
     assert cs['wall_temperature_source'].startswith('solved (1D supercritical')
-    assert cs['coolant_velocity'] <= (L.COOLANT_CHANNEL_TARGET_VELOCITY_MS
-                                      * (1.0 + L.REGEN_MARCH_SIZING_REL_TOL))
+    v = cs['coolant_velocity']
+    kaynak = cs['channel_count_source']
+    hedef_tuttu = v <= (L.COOLANT_CHANNEL_TARGET_VELOCITY_MS
+                        * (1.0 + L.REGEN_MARCH_SIZING_REL_TOL))
+    tavanda = (cs['channel_height_mm']
+               >= L.COOLING_CHANNEL_HEIGHT_MAX_M * 1e3 - 1e-9)
+    assert hedef_tuttu or tavanda, (v, cs['channel_height_mm'])
+    if not hedef_tuttu:
+        # Hedef tutmadıysa adıyla beyan: tavana varıldı, hedef tutmadı.
+        assert 'depth ceiling was reached before the target was met' \
+            in kaynak, kaynak
+    assert v < L.COOLANT_VELOCITY_LIMIT_MS
     assert cs['channel_height_auto_sized'] is True
-    assert 'SAME density basis' in cs['channel_count_source']
+    assert 'SAME density basis' in kaynak
+    # Künyedeki son tepe hız yayımlanan hızın KENDİSİ (aynı marş).
+    son = _re.search(r'final peak channel velocity ([0-9.]+) m/s', kaynak)
+    assert son is not None, kaynak
+    assert float(son.group(1)) == pytest.approx(v, abs=0.05)
     assert not [w for w in j['input_warnings']
                 if w.get('code') == 'warn.liquid.coolant_velocity_above_limit']
 

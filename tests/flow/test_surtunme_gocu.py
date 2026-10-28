@@ -55,6 +55,7 @@ import pytest
 from hrma.analysis.nozzle_flow_1d import NozzleFlow1D
 from hrma.constants import NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT as ESKI_SABIT
 from tests.support import shake
+from tests.support import form_defaults
 
 #: Göç öncesi varsayılan — manifesto boyunca "eski" sütunu budur.
 #: (Sabitin KENDİSİ değişmedi; yalnız rolü "varsayılan"dan "yedek"e indi.)
@@ -535,10 +536,17 @@ HIBRIT_GOVDE = {
 # çevrildi; ``outer_diameter`` da ucun okuduğu ada getirildi (uç
 # zaten aynı 100 mm'yi tohumluyordu). ÖLÇÜLDÜ: yanıt tasarım noktası
 # bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148, 186.659 bayt).
+# V3.0.5 T-ÇAPA-C1 — ÇEKİRDEK 35 -> 40 mm. Port ⟷ boğaz kapısı (V301/K-A
+# 1b71ef5a3, K-D dd329b831) bu gövdeyi 422 ile reddediyor: çekirdek
+# 35 mm'de ilk port alanı 962,1 mm² < boğaz 1040,0 mm² (oran 0,925) —
+# akış lülede değil portta boğulur; bu bir tasarım DEĞİLDİR. Uç
+# 'en az 36,6 mm' diyor. ÖLÇÜLDÜ (e038d626f): 40 mm -> 200, ort. itki
+# 4516,64 N, t_b 1,829 s, kritik uyarı yok. Test motorun sayısını
+# kilitlemiyor; geçerli bir katı tasarım istiyor.
 KATI_GOVDE = {
     'motor_name': 'surtunme_gocu', 'chamber_pressure': 40,
     'grain_type': 'bates', 'chamber_diameter': 100,
-    'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+    'core_diameter': 40, 'grain_length': 300, 'segments': 1,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35, 'chamber_temperature': 3000,
     'c_star': 1550, 'propellant_density': 1800, 'propellant_type': 'apcp',
 }
@@ -550,6 +558,12 @@ SIVI_GOVDE = {
     'chamber_wall_thickness': 5, 'cooling_type': 'regenerative',
     'injector_type': 'impinging', 'engine_cycle': 'pressure_fed',
     'safety_factor': 2.5,
+    # V3.0.5 T-ÇAPA-C1: basınç beslemede ``feed_pressure`` yoksa uç 422
+    # ``pressure_fed_feed_pressure_not_supplied`` (V301/L-A a6cf9790b, SV-03:
+    # çözücü tank basıncı varsaymaz); sayfanın gönderdiği şablon varsayılanı
+    # (tek kaynak, kopyalanmaz — T-ÇAPA-B'nin test_d32_ihracat_a1 deseni).
+    'feed_pressure': form_defaults.sayisal_varsayilanlar('liquid')[
+        'feed_pressure'],
 }
 UC_MOTOR = (('hybrid', '/calculate', HIBRIT_GOVDE),
             ('solid', '/calculate_solid', KATI_GOVDE),

@@ -1,0 +1,41 @@
+{
+ "_kunye": {
+  "kaynak": "docs/scofield/raw/OH/V301/ayberk1/port-kamara/once.json",
+  "kaynak_md5": "af568dccfa580b9c3c5fe7faf225a267",
+  "cikarilan": "tasarimlar.A_varsayilan_1kN.ozet (AYNEN; tests/test_v301_port_kamara_zarf.py yalnız bunu okur)",
+  "neden": "T-ÇAPA-C2 27 Eki: kaynak 2,26 MB kanıt docs dışında (yayın dalı/CI) yok; bekçinin okuduğu alt küme fikstür"
+ },
+ "tasarimlar": {
+  "A_varsayilan_1kN": {
+   "ozet": {
+    "D_kamara_mm": 80.64315952491529,
+    "D_port_ilk_mm": 38.269223660113106,
+    "D_port_son_mm": 53.76210634994353,
+    "L_grain_mm": 1532.2311450178647,
+    "L_kamara_mm": 1596.7456726377968,
+    "L_post_mm": 24.1929478574745,
+    "L_pre_mm": 40.321579762457645,
+    "artik_yakit_kg": 4.00004206828854,
+    "burn_time_clipped": false,
+    "burn_time_s": 10.0,
+    "chamber_length_source": "grain_limited",
+    "design_status": "ESTIMATED_WITH_DEFAULTS",
+    "fuel_sliver_fraction": 0.7170289262297247,
+    "grain_L_over_D": 19.000137817572373,
+    "grain_outer_diameter_mm": 80.64315952491529,
+    "grain_sizing_rule": null,
+    "isp_s": 180.923115972294,
+    "l_star_achieved_m": 7.654233377395511,
+    "mdot_total_kg_s": 0.5636185334847342,
+    "oxidizer_mass_kg": 4.025846667748102,
+    "residual_web_mm": null,
+    "throat_diameter_m": 0.021878875746483128,
+    "thrust_N": 1000.0,
+    "total_impulse_Ns": 10000.498386942156,
+    "total_impulse_delivered_Ns": 10000.498386942156,
+    "yanan_yakit_kg": 1.5785921010768813,
+    "yuklenen_yakit_kg": 5.578634169365421
+   }
+  }
+ }
+}

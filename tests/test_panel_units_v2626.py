@@ -781,14 +781,24 @@ def test_guvenlik_paneli_itergac_kutlesi_gercek(panel_suggestions,
 
 @pytest.mark.parametrize('motor_type', MOTOR_TYPES)
 def test_guvenlik_paneli_itki_gercek(panel_suggestions, si_geometry,
-                                     motor_type):
+                                     solver_results, motor_type):
     """Katı motor düz sözlükte 'thrust' üretmiyor (ortalama/tepe ayrı)."""
     rec = _sug(panel_suggestions, motor_type, 'safety')
     value = rec['suggestions'].get('thrust')
     assert value is not None, (
         f'{motor_type}: thrust önerilmiyor — alan '
         f'{rec["fields"]["thrust"]} N varsayılanıyla gider')
-    assert value == pytest.approx(si_geometry[motor_type]['thrust'], rel=1e-6)
+    # V301/PANEL — KATI KÂHİNİ ÇEVRİLDİ (gerekçeli): güvenlik modülünde
+    # tek 'thrust' bağlama kuvvetini (itki × SF, bir YÜK) kurar ve TEPE
+    # itkidir (V301/K-C1 karar 4; PDF güvenlik bölümü max_thrust gönderir).
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/panel/guvenlik_once.json, örnek
+    # KNDX): sekme ortalama 1298,54 N, PDF tepe 1498,19 N basıyordu — aynı
+    # motor için iki bağlama kuvveti. Bekçinin niyeti (öneri gerçek bir
+    # çözücü itkisidir, 1000 N varsayılanı değil) aynen korunur.
+    beklenen = (solver_results['solid']['max_thrust']
+                if motor_type == 'solid'
+                else si_geometry[motor_type]['thrust'])
+    assert value == pytest.approx(beklenen, rel=1e-6)
 
 
 def test_sogutma_paneli_hibrit_yakit_debisi(panel_suggestions,
@@ -804,14 +814,25 @@ def test_sogutma_paneli_hibrit_yakit_debisi(panel_suggestions,
 
 
 def test_akis_paneli_sivi_of_orani(panel_suggestions, solver_results):
-    """Sıvı çözücü O/F'i 'mixture_ratio' adıyla döndürüyor."""
+    """Sıvı motorda kinetik üçlü (O/F, yakıt, oksitleyici) HİÇ GÖNDERİLMEZ.
+
+    V301/ÖRNEK-PANEL (ÇEVRİLEN BEKÇİ). Eski iddia "O/F 'mixture_ratio'dan
+    tohumlanmalı, panel varsayılanıyla gitmemeli" idi. ÖLÇÜLDÜ
+    (docs/scofield/raw/OH/V301/ornek-panel/olcum/once_liquid.json): o O/F
+    gövdeye seçicilerin hibrit varsayılanlarıyla (``fuel_type: htpb``,
+    ``oxidizer_type: N2O``) gidiyordu; kinetik zincir (CombustionAnalyzer)
+    yalnız hibrit yakıtlarını tanır (``SUPPORTED_HYBRID_FUEL_KEYS``), yani
+    LOX/RP-1 motoru için hibrit kimyasının kinetik kaybı hesaplanıyordu.
+    Eski iddianın özü ("varsayılan gitmesin") daha güçlü biçimde korunur:
+    sıvıda kinetik alan yoktur, hiçbir kinetik değer gitmez.
+    """
     rec = _sug(panel_suggestions, 'liquid', 'flow')
-    value = rec['suggestions'].get('of_ratio')
-    assert value is not None, (
-        'sıvı: of_ratio önerilmiyor — alan '
-        f'{rec["fields"]["of_ratio"]} varsayılanıyla gider')
-    assert value == pytest.approx(solver_results['liquid']['mixture_ratio'],
-                                  rel=1e-6)
+    assert solver_results['liquid'].get('mixture_ratio') is not None
+    for ad in ('of_ratio', 'fuel_type', 'oxidizer_type', 'kinetic_fidelity'):
+        assert ad not in rec['fields'], (
+            f'sıvı akış panelinde {ad} alanı var — kinetik zincir sıvı '
+            'kimyasını tanımıyor, değer hibrit varsayılanıyla gider')
+        assert ad not in rec['suggestions'], ad
 
 
 # ---------------------------------------------------------------------------
@@ -840,6 +861,28 @@ def _deep(obj, path):
     return obj
 
 
+def _sivi_astar(results, panel_id, motor_type, alan):
+    """V3.0.5 SIVI-CIDAR kalem 2 — BEKLENTİ DEĞİŞTİ (termal panel, sıvı).
+
+    İki katmanlı rejeneratif sıvı cidarda ısı akısını taşıyan sıcak gaz
+    cidarı ASTARDIR (``chamber_structure.wall_layers[0]``); termal panel
+    malzemeyi ve kalınlığı oradan alır. Eski beklenti ``material_key``
+    (= dış kabuk, inconel_718) ve yığın kalınlığıydı (5,5 mm): panel CuCrZr
+    1,0 mm astarın marş çiftini Inconel 718 sınırlarıyla (977 / 1533 K)
+    değerlendiriyordu (ÖLÇÜLDÜ, docs/scofield/raw/OH/V301/sivi-cidar/olcum/
+    k2_once.json ⟷ k2_sonra.json). Yapısal ve güvenlik panelleri DEĞİŞMEDİ.
+    Döner: astar alanının değeri ya da (iki katman değilse) None.
+    """
+    if panel_id != 'thermal' or motor_type != 'liquid':
+        return None
+    cs = (results.get('structural_analysis') or {}).get(
+        'chamber_structure') or {}
+    if cs.get('wall_model') != 'two_layer_regenerative':
+        return None
+    astar = [k for k in cs.get('wall_layers') or [] if k.get('role') == 'liner']
+    return astar[0][alan] if astar else None
+
+
 @pytest.mark.parametrize('motor_type', MOTOR_TYPES)
 @pytest.mark.parametrize('panel_id', ['thermal', 'structural', 'safety'])
 def test_malzeme_kullanicinin_secimi(panel_suggestions, solver_results,
@@ -855,7 +898,10 @@ def test_malzeme_kullanicinin_secimi(panel_suggestions, solver_results,
     assert value, (
         f'{panel_id} ({motor_type}): material önerilmiyor — panel '
         f'{rec["fields"].get("material")} varsayılanıyla hesaplar')
-    expected = _deep(solver_results[motor_type], MALZEME_YOLU[motor_type])
+    expected = _sivi_astar(solver_results[motor_type], panel_id, motor_type,
+                           'material_key')
+    if expected is None:
+        expected = _deep(solver_results[motor_type], MALZEME_YOLU[motor_type])
     assert value == expected, (
         f'{panel_id} ({motor_type}): material = {value}, çözücü {expected}')
 
@@ -890,7 +936,10 @@ def test_cidar_kalinligi_metre_ve_gercek(panel_suggestions, solver_results,
     assert value is not None, (
         f'{panel_id} ({motor_type}): wall_thickness önerilmiyor — alan '
         f'{rec["fields"]["wall_thickness"]} m varsayılanıyla gider')
-    expected_mm = _deep(solver_results[motor_type], CIDAR_YOLU[motor_type])
+    expected_mm = _sivi_astar(solver_results[motor_type], panel_id,
+                              motor_type, 'thickness_mm')
+    if expected_mm is None:
+        expected_mm = _deep(solver_results[motor_type], CIDAR_YOLU[motor_type])
     assert value == pytest.approx(expected_mm / 1000.0, rel=1e-9), (
         f'{panel_id} ({motor_type}): wall_thickness = {value} m, '
         f'çözücü {expected_mm} mm')

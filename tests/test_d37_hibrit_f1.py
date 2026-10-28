@@ -90,7 +90,33 @@ ORNEK_H1 = {
     'injector_material': 'stainless_steel', 'chamber_material': 'steel_304',
     'wall_thickness': 5.0, 'safety_factor': 4.0,
     'pressure_drop': 4.0,
+    # V3.0.5 T-ÇAPA-C1 — c* VERİMİ AÇIKÇA İDEAL (%100). V301/H-PANEL
+    # (74b55500a, 26 Eki; Berke onaylı yayımlanan sayı değişimi) hibrit
+    # formuna 'combustion_efficiency' girdisi ve N2O/HTPB için kaynaklı
+    # 0,89 varsayılanı getirdi; bu dosyanın kenar vakaları (H20/H22/H24
+    # yakınlık penceresi, I50 e3/e4 kırpılmış plan, f10/t9 çapaları) ideal
+    # c* motorunun debisiyle KURULMUŞ enjektör sınırlarıdır ve η=0,89 ile
+    # pencereden çıkıyordu (ölçüldü, e038d626f: H24 delik 0,5743 → 0,6087
+    # mm, f10 SF 2,1245 → 2,2506). Vakaların konusu enjektör mantığıdır,
+    # verim değil; η=%100 gönderildiğinde dosyanın 168 düğümünden 167'si
+    # H-PANEL öncesi çapalarıyla BİREBİR yeşil (kalan 1: Lean bağı, ayrı
+    # kök). Verimin kendisi tests/test_v301_hibrit_panel.py'de kilitli.
+    'combustion_efficiency': 100.0,
 }
+
+#: V301/E2 (Ayberk tur 1) — ÇARPIŞMALI EKRAN BLOĞU ARTIK DEVREYİ TÜKETİR.
+#: ``/calculate`` çarpışmalı yolda plaka bloğu eskiden kendi tek fazlı (SPI)
+#: alanıyla çift planı kurup bandına kırpıyordu; devre (Dyer NHNE) başka bir
+#: plan yayımlıyordu (ölçüldü: docs/scofield/raw/OH/V301/ayberk1/
+#: enjektor-genel/once.json — 2 çift × Ø1,541 mm ⟷ 3 delik × Ø2,111 mm).
+#: Artık plan devrenindir (``design_like_doublet``). Bu dosyanın ölçtüğü
+#: plaka KIRPMA yolu yalnız ΔP AÇIK ezmesinde koşar (ALAN ve ΔP AYRILMAZ);
+#: o yolu ESKİ sayılarla ölçmek için ezme devrenin kendi ΔP'siyle yapılır
+#: (Ornek-H1: P_sat(293,15 K) − Pc = 30,5433585 bar, aşağıdaki çapa testiyle
+#: aynı sayı). Beklentiler değişmedi; değişen yalnız yolun seçimidir.
+H1_DEVRE_DP_BAR = 30.5433585
+KANON_DISI_DP = {'pressure_drop': H1_DEVRE_DP_BAR,
+                 'pressure_drop_source': 'user'}
 
 #: Ornek-H1 kanon planının toplam orifis alanı [m²] (yanıt: 10,5053 mm²;
 #: elle 3·π·2,1115²/4 = 10,5049 mm²). Bant testi bu alanla ürünün KENDİ
@@ -454,7 +480,24 @@ def test_f10_t5_utils_yolu_h1_planina_bant_disi_demiyor(h1):
     assert kunye['hole_diameter_max'] == ORIFICE_D_BAND_MM[1]
 
 
-def test_f10_sayi_degismedi_capasi(h1):
+@pytest.fixture(scope='module')
+def h1_plakali():
+    """Ornek-H1 + açık plaka kalınlığı 3,0 mm (V3.0.5, 28 Eki).
+
+    HİBRİT-DIŞA kalem 4: plaka kalınlığı verilmezse plaka denetimi kazanılmamış
+    3,0 mm ile KOŞMAZ. F-10 çapası plaka SF'sini de kilitlediği için kalınlık
+    açıkça verilir (eski örtük değerle aynı → sayılar bit-aynı); öbür vakalar
+    plakasız h1 ile koşmaya devam eder.
+    """
+    from hrma.app import app
+    app.config['TESTING'] = True
+    with app.test_client() as ist:
+        cevap = ist.post('/calculate', json=dict(ORNEK_H1, plate_thickness=3.0))
+    assert cevap.status_code == 200, cevap.get_json()
+    return cevap.get_json()
+
+
+def test_f10_sayi_degismedi_capasi(h1_plakali):
     """Berke önce/sonra tablosu: Ornek-H1 KANON duş başlığı yolunda
     YAYIMLANAN SAYI DEĞİŞMEZ (denetçi Ş1: bu hüküm yalnız kanon yol
     içindir; çarpışmalı ve kanon-dışı duş başlığı yolunda F-10 sayıyı
@@ -463,18 +506,25 @@ def test_f10_sayi_degismedi_capasi(h1):
     D35 çapası (3 × Ø2,1115 mm, ΔP 30,5434 bar, SF 0,55, η 0,9489)
     yenilenmedi; değişen yalnız bir uyarı metni ve iki künye sayısı.
     """
-    idd = h1['motor']['injector_design']
+    idd = h1_plakali['motor']['injector_design']
     assert idd['number_of_orifices'] == 3
     # 8. tur (14 Eki): çapa B16'lı tabana yenilendi — kâhin main 3edc78b9
     # bağımsız ölçümü (rapor '8. tur', sart8/kahin/); ΔP aynı.
-    assert idd['orifice_diameter_mm'] == pytest.approx(2.1227152269499054, rel=1e-9)
+    # v3.0.1 port kulvarı (20 Eki): grain dış çapı = son port (eski 1,5·D_son);
+    # kamara küçüldü -> gerçekleşen L* ↓ -> kinetik verim ↓ -> Isp −%0,17 -> ṁ ↑
+    # -> delik çapı +%0,08. Pencere/bant hükmü DEĞİŞMEDİ, yalnız ölçüm çapası.
+    assert idd['orifice_diameter_mm'] == pytest.approx(2.124505645947217, rel=1e-9)
     assert idd['injection_pressure_drop_bar'] == pytest.approx(30.5433585, rel=1e-7)
-    inj = h1['injector']
+    inj = h1_plakali['injector']
     assert (inj['n_holes'], inj['hole_diameter']) == (
-        3, pytest.approx(2.1227152269499054, rel=1e-9))
+        3, pytest.approx(2.124505645947217, rel=1e-9))
     ps = inj['plate_structural']
-    assert (ps['safety_factor'], ps['ligament_efficiency']) == (0.545, 0.9488)
-    assert ps['bending_stress_MPa'] == pytest.approx(440.114, abs=1e-3)
+    # v3.0.1 port kulvarı (20 Eki): plaka çapı = kamara iç çapı 80,68 -> 54,04 mm
+    # (grain dış çapı artık son port). Eğilme gerilmesi ~D²/η ile ölçeklenir:
+    # 440,114·(54,04/80,68)²·(0,9488/0,9232) ≈ 202,9 MPa (ölçülen 201,292;
+    # fark yuvarlanmış çaplardan). Eski çapa (0,545, 0,9488, 440,114 MPa).
+    assert (ps['safety_factor'], ps['ligament_efficiency']) == (1.192, 0.9232)
+    assert ps['bending_stress_MPa'] == pytest.approx(201.292, abs=1e-3)
 
 
 # ===========================================================================
@@ -609,7 +659,10 @@ def test_f10_t9_carpismali_cift_secimi_bandin_ust_kenarindan(carpismali):
 
 @app_yamasi_bekleniyor
 def test_f10_t9_carpismali_tek_cift_istegi_bantta_karsilanir(carpismali):
-    """1 kN + ``element_pairs = 1``: çap ≈ 2,19 mm banttadır → istek KARŞILANIR.
+    """1 kN + ``element_pairs = 1``: istek KARŞILANIR (1 çift / 2 delik).
+
+    v3.0.1: çap artık iki fazlı kanon alandan, ≈ 2,60 mm, bandın üstünde;
+    istek karşılanır ve bant hükmü yayımlanır (sessiz değil).
 
     Yama öncesi (üst kenar 2,0) çap 2,0'a kırpılıp 4 × 2,0 mm'ye yeniden
     çözülüyordu ("re-solved to 2"); N8'de (üst kenar 0,5) yine kırpılır.
@@ -623,10 +676,18 @@ def test_f10_t9_carpismali_tek_cift_istegi_bantta_karsilanir(carpismali):
     d = inj['hole_diameter']
     assert d == pytest.approx(_cift_capi_mm(inj['injection_area'], 1),
                               rel=1e-9)
-    assert alt <= d <= ust
-    # 10. tur (HB9 devir 45; dört koşul): 2,1905 plaka 293,00 K iken ölçüldü;
-    # kâhin d = √(4A/(2π)), A = ṁ/(C_d·√(2ρΔP)), ρ = CoolProp(293,15 K) → 2,19125.
-    assert d == pytest.approx(2.1913, abs=5e-4)    # Ş-B ölçüm çapası (10. tur: T_tank 293,15 K)
+    # v3.0.1 E2 (20 Eki): ekran bloğu artık devrenin KANON akış alanını
+    # tüketiyor. Bu alan kendinden basınçlı N₂O için Dyer NHNE ile çözülür.
+    # Eski 2,19 mm tek fazlı SPI alanından geliyordu ve iki fazlı akışta
+    # hedef debinin ~%71'ini veriyordu (E2 raporu). Doğru alanla tek çift
+    # Ø2,602 mm ister; bu, kaynaklı bandın (0,5-2,5 mm) ÜSTÜNDEDİR. İstek
+    # olduğu gibi karşılanır (1 çift) ve bant hükmü kullanıcıya iner
+    # (devre uyarısı ekran bloğuna taşınır; ana model, çapraz kırılma).
+    assert d > ust
+    assert d == pytest.approx(2.6020, abs=5e-4)
+    kodlar = [w.get('code') for w in inj['warnings'] if isinstance(w, dict)]
+    assert 'warn.injector.fixed_n_outside_manufacturing_band' in kodlar, (
+        'bant dışı tek çift planı sessiz yayımlanıyor: %r' % inj['warnings'])
     assert not any('re-solved' in u for u in inj['warnings']), inj['warnings']
 
 
@@ -770,7 +831,8 @@ def test_f10_t10_calculate_50N_kirpmasi_yanitta_adiyla():
     app.config['TESTING'] = True
     with app.test_client() as ist:
         cevap = ist.post('/calculate', json=dict(
-            ORNEK_H1, thrust=50.0, injector_type='impingement'))
+            ORNEK_H1, thrust=50.0, injector_type='impingement',
+            **KANON_DISI_DP))
     assert cevap.status_code == 200, cevap.get_json()
     inj = cevap.get_json()['injector']
     assert (inj['n_pairs'], inj['n_holes']) == (2, 4)
@@ -1412,7 +1474,7 @@ def test_s5_s5_calculate_istenen_cift_vakalari(itki, cift, teslim, capa):
     with app.test_client() as ist:
         cevap = ist.post('/calculate', json=dict(
             ORNEK_H1, thrust=itki, injector_type='impingement',
-            element_pairs=cift))
+            element_pairs=cift, **KANON_DISI_DP))
     assert cevap.status_code == 200, cevap.get_json()
     inj = cevap.get_json()['injector']
     assert inj['n_pairs'] == teslim
@@ -1498,9 +1560,9 @@ _YOL_SIVI_YAKIT = ('injection_system', 'injector_design_detail',
 #: çağrısı). (ad, uç, yük, devre yolu, n, ölçülen d [mm], 'yakın' uyarısı?)
 S6_YAKINLIK_ARAMA = (
     ('H20', '/calculate', dict(ORNEK_H1, thrust=20.0), _YOL_CALCULATE_OX,
-     1, 0.5240, True),
+     1, 0.5243, True),  # v3.0.1 port kulvarı: 0,5240 -> 0,5243
     ('H24', '/calculate', dict(ORNEK_H1, thrust=24.0), _YOL_CALCULATE_OX,
-     1, 0.5740, False),
+     1, 0.5743, False),  # v3.0.1 port kulvarı: 0,5740 -> 0,5743
     ('api_0.005', '/api/injector-design', dict(_API_HIBRIT_DUS, mdot_ox=0.005),
      _YOL_API_OX, 1, 0.5198, True),
     ('api_0.00557', '/api/injector-design',
@@ -1599,8 +1661,8 @@ def _yakinlik_farklari(o, n_bek, d_bek, yakin_mi):
                          ids=[v[0] for v in S6_YAKINLIK_ARAMA])
 def test_s6_s51_yayimlanan_yakinlik_penceresi_arama_yolu(ad, uc, yuk, yol, n,
                                                          d, yakin_mi):
-    """Ş5-1: H20 (1 × 0,5240) ve api ṁ 0,005 (1 × 0,5198) 'yakın' uyarısı
-    ALIR, H24 (1 × 0,5740) ALMAZ; kenar çifti pencerenin üst kenarını
+    """Ş5-1: H20 (1 × 0,5243) ve api ṁ 0,005 (1 × 0,5198) 'yakın' uyarısı
+    ALIR, H24 (1 × 0,5743) ALMAZ; kenar çifti pencerenin üst kenarını
     0,5486-0,5510 mm arasına sabitler."""
     o = _yakinlik_olc(uc, yuk, yol)
     assert not _yakinlik_farklari(o, n, d, yakin_mi), (ad, o)
@@ -1809,17 +1871,29 @@ def test_s7_m1_dogrulama_ozeti_gecti_hukmunu_geri_ceker():
 S7_CALCULATE_KARSILANMIYOR = (
     # 10. tur (HB9 devir 45; dört koşul): 2,055 / 3,422 plaka 293,00 K iken;
     # kâhin ṁ(ΔP)/ṁ_hedef, ρ = CoolProp(293,15 K) → 2,053965 / 3,419515.
-    (50.0, 3, 2.054), (50.0, 4, 2.054), (30.0, 0, 3.42),
+    # v3.0.1 port kulvarı: 2,054 -> 2,051 ve 3,42 -> 3,415 (ṁ +%0,17).
+    (50.0, 3, 2.051), (50.0, 4, 2.051), (30.0, 0, 3.415),
 )
 #: Kırpılıp hedefi tolerans içinde tutan (Sunum oranı 1,04×) — bit-aynı.
 S7_CALCULATE_KARSILANIYOR = ((200.0, 8), (100.0, 0))
 
 
-def _calculate_carpismali(itki, cift):
+#: Ornek-H1 devresinin ΔP'si [bar] (P_sat(293,15 K) − Pc; f10 çapası).
+ORNEK_H1_DEVRE_DP_BAR = 30.5433585
+
+
+def _calculate_carpismali(itki, cift, dp_ezme=False):
     from hrma.app import app
     yuk = dict(ORNEK_H1, thrust=itki, injector_type='impingement')
     if cift:
         yuk['element_pairs'] = cift
+    if dp_ezme:
+        # v3.0.1 E2: kanon yolunda (çözücü ΔP) ekran bloğu devrenin planını
+        # TÜKETİR, kırpma olmaz. Kırpılmış plan sözleşmesi ΔP AÇIK ezmesi
+        # yolunda yaşar (ekran bloğu kendi planlar). ΔP devrenin kendi
+        # değeridir, yani oranlar kanon yoldaki eski ölçümle aynı kalır.
+        yuk['pressure_drop_source'] = 'user'
+        yuk['pressure_drop'] = ORNEK_H1_DEVRE_DP_BAR
     app.config['TESTING'] = True
     with app.test_client() as ist:
         cevap = ist.post('/calculate', json=yuk)
@@ -1833,7 +1907,7 @@ def test_s7_m1_calculate_kirpilmis_plan_gecti_almaz(itki, cift, oran):
     """Ornek-H1 çarpışmalı I50 e3/e4 ve I30 otomatik: doğrulama özeti
     ``validation_passed`` False, durum ``status.critical``, kritik kayıt
     tek ve oranı yanıtın ``target_flow_check``iyle aynı."""
-    j = _calculate_carpismali(itki, cift)
+    j = _calculate_carpismali(itki, cift, dp_ezme=True)
     tfc = j['injector'].get('target_flow_check')
     val = j['validation']
     kritik = [w for w in val['critical_warnings'] if w.get('code') == _HEDEF_KODU]
@@ -1884,7 +1958,7 @@ def test_s7_m2_uyari_metni_iki_dilde_esigi_beyan_eder():
 #: Ş6-3 kenar vakaları: ölçülen plan ve Sunum 2 satırındaki 4 ondalıklı çap.
 S7_KENAR = (
     ('H22', '/calculate', dict(ORNEK_H1, thrust=22.0), _YOL_CALCULATE_OX,
-     0.5496),
+     0.5499),  # v3.0.1 port kulvarı: 0,5496 -> 0,5499 (pencere içinde kalır)
     ('api_0.00557', '/api/injector-design',
      dict(_API_HIBRIT_DUS, mdot_ox=0.00557), _YOL_API_OX, 0.5486),
 )
@@ -2028,9 +2102,18 @@ def _sablon_islevi(metin, ad):
     raise AssertionError('işlev kapanmıyor: %s' % ad)
 
 
-_TANK_UI_ISLEVLERI = ('tankPressureIsSaturationDriven', 'setTankPressureNote',
+#: v3.0.1 (kulvar T): kip yardımcıları ``tankPressureMode`` ve
+#: ``updateTankPressureSourceOption`` eklendi; ``applyTankPressureMode`` ve
+#: ``showTankPressureFeedFromResults`` onları çağırır.
+_TANK_UI_ISLEVLERI = ('tankPressureMode', 'tankPressureIsSaturationDriven',
+                      'updateTankPressureSourceOption', 'setTankPressureNote',
                       'applyTankPressureMode', 'clearTankPressureFeed',
                       'showTankPressureFeedFromResults', 'validateFormData')
+#: Şablondaki üç besleme kaynağı sabiti (v3.0.1: tasarım ΔP ve kullanıcı
+#: kaynağı eklendi); düzenek hepsini şablondan okur.
+_TANK_UI_SABITLERI = ('TANK_PRESSURE_N2O_FEED_SOURCE',
+                      'TANK_PRESSURE_DESIGN_DP_FEED_SOURCE',
+                      'TANK_PRESSURE_USER_FEED_SOURCE')
 
 _TANK_UI_JS = r"""
 'use strict';
@@ -2092,11 +2175,10 @@ def _tank_ui_kos():
         pytest.skip('node kurulu değil')
     metin = _oku(ADV_HTML)
     kaynak = '\n'.join(_sablon_islevi(metin, ad) for ad in _TANK_UI_ISLEVLERI)
-    sabit = re.search(r"^\s*const TANK_PRESSURE_N2O_FEED_SOURCE = '([^']+)';",
-                      metin, re.M)
-    assert sabit, 'TANK_PRESSURE_N2O_FEED_SOURCE yok'
-    kaynak = ("const TANK_PRESSURE_N2O_FEED_SOURCE = '%s';\n" % sabit.group(1)
-              + kaynak)
+    for ad in reversed(_TANK_UI_SABITLERI):
+        sabit = re.search(r"^\s*const %s = '([^']+)';" % ad, metin, re.M)
+        assert sabit, '%s yok' % ad
+        kaynak = "const %s = '%s';\n" % (ad, sabit.group(1)) + kaynak
     girdi = ('const JOB = %s;\n' % json.dumps(
         {'kaynak': kaynak, 'kaynak_kodu': _N2O_DOYMA})) + _TANK_UI_JS
     p = subprocess.run([node], input=girdi, capture_output=True, text=True,
@@ -2129,13 +2211,24 @@ def test_s7_yb04_form_alani_n2o_kipinde_salt_okur_ve_sunucu_degerini_gosterir():
     assert json.loads(o['B']['notParams']) == {'p': 50.54}
     assert (o['C']['value'], o['C']['not'], o['C']['readOnly']) == (
         '', n2o_not, True)
-    assert o['E'] == {'readOnly': False, 'value': '55', 'held': None,
-                      'ph': 'adv.ph.serverDefaultApplies', 'aria': 'false',
-                      'not': None, 'notParams': None}, o['E']
+    # v3.0.1 (kulvar T) — BEKLENTİ ÇEVRİLDİ. Eski beklenti LOX'a geçince
+    # alanın açılıp 55 bar'ın GÖNDERİLMESİNİ kilitliyordu; ölçüldü (kulvar T
+    # once.json A_lox_tank50 ⟷ B_lox_user30/40): LOX devresi P₁ = P_c·1,2
+    # alıyordu ve 30/40/50 bar enjektör çözümünü bit-aynı bırakıyordu — yani
+    # alan kullanılmadığı hâlde düzenlenebilir görünüyordu (Ayberk'in
+    # maddesinin kökü). Artık LOX'un varsayılan kipi (tasarım ΔP oranı) da
+    # salt-okurdur; kullanıcı tank basıncı 'user' kipinde girilir
+    # (tests/test_v301_tank_basinci.py o kipi sınar).
+    assert o['E'] == {'readOnly': True, 'value': '', 'held': '55',
+                      'ph': 'adv.ph.tankPressureDesignDp', 'aria': 'true',
+                      'not': 'adv.js.tankPressureDesignDpNote',
+                      'notParams': None}, o['E']
     assert (o['F']['value'], o['F']['not'], o['F']['readOnly']) == (
         '', 'adv.js.tankPressureFeedNotPublished', True)
     assert not any('tank_pressure' in h for h in o['formN2O']), o['formN2O']
-    assert [h for h in o['formLOX'] if 'tank_pressure' in h], o['formLOX']
+    # v3.0.1 (kulvar T): LOX'un varsayılan kipinde de tank basıncı bir girdi
+    # değildir — zorunlu sayılmaz (zorunluluk 'user' kipine taşındı).
+    assert not any('tank_pressure' in h for h in o['formLOX']), o['formLOX']
     # Yedek metinler EN sözlüğüyle birebir (EN = TR anahtar çifti var).
     for anahtar in ('adv.ph.tankPressureN2oSat', 'adv.js.tankPressureN2oNote',
                     'adv.js.tankPressureFeedUsed',
@@ -2159,8 +2252,16 @@ def test_s7_yb04_form_n2o_kipinde_tank_basincini_gondermez():
         pytest.skip('node kurulu değil')
     n2o = _govde(deger={'oxidizer_type': 'n2o', 'tank_pressure': 80})
     assert 'tank_pressure' not in n2o, n2o.get('tank_pressure')
+    # v3.0.1 (kulvar T) — BEKLENTİ ÇEVRİLDİ (gerekçe yukarıdaki E durumu):
+    # LOX'un varsayılan kipinde sayı devreye girmediği için GÖNDERİLMEZ;
+    # kullanıcı tank basıncı kipinde ('user') kaynak beyanıyla birlikte gider.
     lox = _govde(deger={'oxidizer_type': 'lox', 'tank_pressure': 80})
-    assert lox.get('tank_pressure') == 80, lox.get('tank_pressure')
+    assert 'tank_pressure' not in lox, lox.get('tank_pressure')
+    assert 'tank_pressure_source' not in lox
+    lox_u = _govde(deger={'oxidizer_type': 'lox', 'tank_pressure': 80,
+                          'tank_pressure_source': 'user'})
+    assert lox_u.get('tank_pressure') == 80, lox_u.get('tank_pressure')
+    assert lox_u.get('tank_pressure_source') == 'user'
 
 
 # ===========================================================================
@@ -2440,7 +2541,7 @@ def test_t9_d37_sabit_carpismali_capta_kirpma_metni_var(itki, d_mm, cift):
     cp = pytest.importorskip('CoolProp.CoolProp')
     j = _t9_calculate(f'od_{itki}_{d_mm}_{cift}', thrust=itki,
                       injector_type='impingement', orifice_diameter=d_mm,
-                      element_pairs=cift)
+                      element_pairs=cift, **KANON_DISI_DP)
     inj = j['injector']
     metin = [u for u in inj['warnings'] if 'Hole diameter fixed by the request'
              in str(u)]
@@ -2471,7 +2572,7 @@ def test_t9_yeni_metinler_TR_desenle_cevrilir_EN_aynen():
     _, s4 = _t9_dus_kirpma(4)
     j = _t9_calculate('od_50.0_1.0_None', thrust=50.0,
                       injector_type='impingement', orifice_diameter=1.0,
-                      element_pairs=None)
+                      element_pairs=None, **KANON_DISI_DP)
     msgs = ([u for u in s4['warnings'] if 'clamped to manufacturing' in str(u)]
             + [u for u in j['injector']['warnings']
                if 'Hole diameter fixed by the request' in str(u)])
@@ -2674,7 +2775,7 @@ def test_t10_d47_carpismali_kirpma_govdeleri_TR_desenle():
     msgs = []
     for anahtar, ep in (('t10_ep3', 3), ('t10_ep0', None)):
         j = _t9_calculate(anahtar, thrust=50.0, injector_type='impingement',
-                          element_pairs=ep)
+                          element_pairs=ep, **KANON_DISI_DP)
         msgs += [u for u in j['injector']['warnings']
                  if 'doublet pairs would need' in str(u)]
     assert len(msgs) == 2, msgs
@@ -2761,7 +2862,14 @@ def test_t10_malzeme_sabiti_karar_degeri_ve_sablonun_secili_secenegi():
     secili = [v for v, oz in secenekler if re.search(r'\bselected\b', oz)]
     assert secili == [HYBRID_CHAMBER_MATERIAL_DEFAULT], secenekler
     sablon = _oku(KOK / 'hrma' / 'templates' / 'advanced.html')
-    assert 'hybrid_chamber_material_default ==' in sablon
+    # v3.0.1 kulvar M: seçenekler sunucu kaydından makroyla basılır; seçili
+    # seçenek yine AYNI sabitten (şablonda elle yazılmış seçenek yok — bu
+    # eski '{% if hybrid_chamber_material_default == ... %}' satırlarından
+    # daha sıkı: ikinci varsayılanın yazılabileceği bir <option> kalmadı).
+    assert ('malzeme_secenekleri(hybrid_materials.chamber_material, '
+            'hybrid_chamber_material_default)') in sablon
+    secici = sablon[sablon.index('<select id="chamber_material"'):]
+    assert '<option' not in secici[:secici.index('</select>')]
 
 
 def test_t10_malzeme_api_yolu_varsayilani_beyanli_ve_form_yoluyla_bit_ayni():
@@ -2812,13 +2920,26 @@ def test_t10_malzeme_kardes_uclarda_da_beyanli(uc):
 
 
 def test_t10_bilinmeyen_malzeme_ayni_sabite_duser():
-    """Tanınmayan ad da TEK sabite düşer (uyarı korunur; ikinci yedek yok)."""
+    """Tanınmayan ad da TEK sabite düşer (uyarı korunur; ikinci yedek yok).
+
+    v3.0.1 kulvar M: ``/calculate`` tanınmayan adı artık ADLI 422 ile
+    reddeder (eskiden bu yolla ss_304 sayıları yayımlanıyordu — once.json
+    S4); düşüş yalnız motorun DOĞRUDAN kullanımında kalır ve o yol hâlâ TEK
+    sabite düşer. İki iddia ayrı ayrı sınanır."""
+    from hrma.app import app
     from hrma.data.materials_db import get_material_safe
-    from hrma.engines.hybrid_rocket_engine import HYBRID_CHAMBER_MATERIAL_DEFAULT
-    j = _t9_calculate('t10_peynir', chamber_material='peynir')
-    assert j['motor']['chamber_material'] == get_material_safe(
+    from hrma.engines.hybrid_rocket_engine import (
+        HybridRocketEngine, HYBRID_CHAMBER_MATERIAL_DEFAULT)
+    app.config['TESTING'] = True
+    with app.test_client() as ist:
+        r = ist.post('/calculate', json=dict(ORNEK_H1, chamber_material='peynir'))
+    assert r.status_code == 422
+    assert r.get_json()['invalid_fields'][0]['field'] == 'chamber_material'
+    e = HybridRocketEngine.__new__(HybridRocketEngine)
+    e.design_warnings = []
+    assert e._resolve_chamber_material('peynir') == get_material_safe(
         HYBRID_CHAMBER_MATERIAL_DEFAULT)[1]
-    uyari = [w for w in j['motor'].get('design_warnings') or []
+    uyari = [w for w in e.design_warnings
              if w.get('code') == 'warn.hybrid.chamber_material_unknown']
     assert uyari and uyari[0]['params']['used'] == HYBRID_CHAMBER_MATERIAL_DEFAULT
 
@@ -2848,7 +2969,7 @@ def test_t10_d45_api_yolunda_plaka_ve_devre_ayni_sicaklikta():
                                                    TANK_TEMPERATURE_DEFAULT_K)
     j = _t9_calculate('t10_sicakliksiz_I50od1', thrust=50.0,
                       injector_type='impingement', orifice_diameter=1.0,
-                      oxidizer_temp=None)
+                      oxidizer_temp=None, **KANON_DISI_DP)
     kayit = _t10_kayit(j, 'oxidizer_temp')
     assert kayit is not None and kayit['value'] == TANK_TEMPERATURE_DEFAULT_K
     assert j['motor']['oxidizer_inlet_state']['temperature_K'] == (

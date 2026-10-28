@@ -450,14 +450,32 @@ class TestOHD3214SwirlAciZarfi:
         hesaplıyordu.
         """
         alt, ust = self._zarf()
-        v = float(self._oz()['value'])
+        v = self._on_dolgu_ya_da_cozucu_varsayilani()
         assert alt <= v <= ust, (
             'ön-dolgu %s° zarfın (%s-%s°) dışında: alana dokunmayan '
             'kullanıcı kırpılmış hedefle hesaplar' % (v, alt, ust))
 
+    @classmethod
+    def _on_dolgu_ya_da_cozucu_varsayilani(cls):
+        """V301/E2: alan artık ÖN-DOLU DEĞİL (boş = devrenin hedefi, beyanlı;
+        ``defaults_applied`` ``swirl_angle`` künyesi). Alana dokunmayan
+        kullanıcının hesapladığı açı devrenin varsayılan hedefidir; iddia
+        (zarfın ve bandın içinde) o sayıya uygulanır — gevşetilmedi."""
+        oz = cls._oz()
+        if oz.get('value') not in (None, ''):
+            return float(oz['value'])
+        import inspect
+        from hrma.engines import injector_design as eid
+        kaynak = inspect.getsource(eid.design_injector)
+        m = re.search(r"theta_t = sw_in\.get\('theta_target_deg', ([0-9.]+)\)",
+                      kaynak)
+        assert m, 'devrenin varsayılan hedef açısı bulunamadı'
+        return float(m.group(1))
+
     def test_on_dolgu_kendi_bandinin_icinde(self):
         oz = self._oz()
-        assert float(oz['min']) <= float(oz['value']) <= float(oz['max']), (
+        v = self._on_dolgu_ya_da_cozucu_varsayilani()
+        assert float(oz['min']) <= v <= float(oz['max']), (
             'ön-dolgu kendi min/max bandının dışında — sayfa açılır açılmaz '
             'alan geçersiz')
 

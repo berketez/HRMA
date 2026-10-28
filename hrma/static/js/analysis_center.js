@@ -499,10 +499,18 @@
     function fieldHtml(row, f) {
         const fid = f[0], label = f[1], defVal = f[2], step = f[3], labelKey = f[4];
         const id = fieldDomId(row, fid);
-        const lab = '<label for="' + id + '"' + i18nAttr(labelKey) + ' style="display:block;'
+        // v3.0.1 N-girdi-2: güvertedeki alanla AYNI ipucu (alan tanımının 6.
+        // elemanı, N-girdi-1) ortak bileşenden; etiket metni iç <span>'da
+        // çevrilir (label data-i18n ipucunu silerdi). Anahtar yoksa basılmaz.
+        const helpKey = f[5];
+        const yardim = (helpKey && typeof window !== 'undefined' && window.HRMAHelp
+            && typeof window.HRMAHelp.html === 'function')
+            ? window.HRMAHelp.html(helpKey, T(helpKey, '')) : '';
+        const lab = '<label for="' + id + '" style="display:block;'
             + ' font-size:0.68rem; letter-spacing:0.06em; text-transform:uppercase;'
             + ' color:var(--hd-ink-dim, #7d97a5); font-family:var(--hd-mono, monospace);">'
-            + esc(T(labelKey, label)) + '</label>';
+            + '<span' + i18nAttr(labelKey) + '>' + esc(T(labelKey, label)) + '</span>'
+            + yardim + '</label>';
         if (Array.isArray(step)) {
             const opts = step.map(function (o) {
                 return '<option value="' + esc(o[0]) + '"'

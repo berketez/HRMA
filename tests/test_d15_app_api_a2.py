@@ -19,6 +19,8 @@ import warnings
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 warnings.filterwarnings('ignore')
 
 
@@ -53,8 +55,11 @@ SIVI = {'thrust': 10000.0, 'chamber_pressure': 100.0, 'mixture_ratio': 2.5,
         'fuel_type': 'rp1', 'oxidizer_type': 'lox'}
 
 #: ``/calculate_solid`` geometri kipi (``B2-repro-14.py`` gövdesi birebir).
+# v3.0.1 T-ÇAPA-B: eski çekirdek 30 mm @ 40 bar port boğulan motordu
+# (A_p/A_t 0,947); K-A kapısından beri 422. Konu port değil: geometri
+# tek tanım SOLID_DEFAULT_GEOMETRY_MM'den (kopyalanmaz).
 KATI = {'chamber_pressure': 40, 'propellant_type': 'apcp',
-        'chamber_diameter': 100, 'grain_length': 500, 'core_diameter': 30}
+        **SOLID_DEFAULT_GEOMETRY_MM}
 
 
 # ===========================================================================
@@ -183,9 +188,13 @@ class TestP7B209TankBasinci:
             'ret, çözücünün KENDİ tank basıncını ayrı bir büyüklük olarak '
             f'anmıyor: {alanlar[0]!r}')
         # Sağlıklı değer basınç beslemeli çevrimde GEÇER (kapsam daralmadı).
+        # V301/L-A (SV-03): çözücü basınç beslemede tankı feed_pressure'dan
+        # okur; yalnız tank_pressure gönderen gövde 3 bar yedek tankla
+        # tasarım yayımlıyordu ve artık 422 alıyor. Sağlıklı vaka aynı
+        # basıncı iki alanda da verir (ölçüldü: 200, marj 76,25 bar).
         kod2, _ = gonder(client, '/calculate_liquid',
                          dict(SIVI, engine_cycle='pressure_fed',
-                              tank_pressure=200))
+                              tank_pressure=200, feed_pressure=200))
         assert kod2 == 200, f'sağlıklı basınç beslemeli vaka; HTTP {kod2}'
 
     def test_gonderilmediginde_beyan_YOK(self, client):

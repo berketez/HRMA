@@ -72,6 +72,15 @@ D29F_SIVI_1KN = {
     'motor_name': 'OHD2802', 'thrust': 1000.0, 'burn_time': 30.0,
     'chamber_pressure': 10.0, 'mixture_ratio': 2.2, 'fuel_type': 'rp1',
     'oxidizer_type': 'lox', 'expansion_ratio': 4.0,
+    # V3.0.5 T-ÇAPA-C1 — SOĞUTMA TİPİ AÇIKÇA 'radiative' (tek katmanlı
+    # cidar). V301/L-KABUK (6f8240043) rejeneratif yolda köprüye çizilen
+    # YIĞINI (astar + kanal + dış kabuk) veriyor: bu istek varsayılan
+    # rejeneratifle cidarı 2,0 → 5,0 mm yaptı ve çapalar (once_d2802.json /
+    # once_d2903.json, 2,0 mm cidarda ölçüldü) geometri değiştiği için
+    # tutmadı. ÖLÇÜLDÜ (e038d626f): 'radiative' ile köprü cidarı 0,002 m ve
+    # kontur (68 nokta, toplam 3,7933785254) sabah tabanı ad0737bd4'ün
+    # varsayılan isteğiyle BİREBİR — yani ölçüm fikstürünün geometrisi.
+    'cooling_type': 'radiative',
 }
 D29F_HIBRIT = {
     'motor_name': 'OHD2802H', 'thrust': 2000.0, 'chamber_pressure': 30.0,

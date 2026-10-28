@@ -163,19 +163,19 @@ FREE_JET_LD = 6.0              # impingement mesafesi 5-7·d_j ortası
 ELEMENT_SPACING_D = 3.0        # eleman merkez aralığı ≥ 3·d
 MR_BAND = (0.7, 1.3)           # doublet momentum oranı / Rupe pratik bandı
 C_IMP_SMD = 2.6                # impinging SMD sabiti (band 2-4; Ingebo TN 3265 eğilimi)
-PINTLE_BF_BAND = (0.3, 0.74)   # TRW mirası (Dressler & Bauer AIAA 2000-3871)
-# Hedef tıkama katsayısı (blockage factor) varsayılanı — bandın ortasına yakın.
-# v2.6.27 (B3): bu değer 0.58 literali olarak İKİ pintle dalında ayrı ayrı
-# yazılıydı; arayüz (injector_panel.js `num('inj_bf', 0.58)`) da aynı sayıyı
-# üçüncü kez taşıyor. Tek yerde tanımlanır ki dallar ayrışamasın.
+PINTLE_BF_BAND = (0.3, 0.74)   # BF bandı — kaynağı DOĞRULANMADI (V301/E1)
+# Hedef tıkama katsayısı (BF) varsayılanı; tek yerde (v2.6.27 B3: üç kopya
+# vardı). V301/E1 KÜNYE: BF bandı/hedefi, L_s/D_p, %50 pay ve t/D_p kuralı
+# Dressler & Bauer AIAA 2000-3871'de YOK (tam metin s. 2-4 tarandı; makale
+# tasarım değişkenlerini sayar, sayı vermez) → HRMA seçimi (PINTLE_RULE_BASIS).
 PINTLE_BF_TARGET_DEFAULT = 0.58
-PINTLE_SKIP_LS_DP = 1.0        # skip distance kuralı L_s/D_p ≈ 1
+PINTLE_SKIP_LS_DP = 1.0        # L_s/D_p varsayılanı — HRMA seçimi (kaynaksız)
 # Hibrit (tek akışkan, ox-merkezli) pintle: oksitleyici alanının radyal
-# deliklere giden payı; kalanı anülüsten eksenel tabaka olarak akar.
+# deliklere giden payı (HRMA seçimi); kalanı anülüsten eksenel tabaka akar.
 # 0.5 → radyal/anüler momentum oranı 1 (aynı akışkan, aynı ΔP) → θ ≈ 60°.
 PINTLE_HYBRID_RADIAL_FRACTION = 0.5
-PINTLE_ANNULUS_T_OVER_DP = 0.05  # D_p verilmezse anülüs boşluk/çap kuralı
-ANNULUS_GAP_MIN_MM = 0.3       # imalat alt sınırı
+PINTLE_ANNULUS_T_OVER_DP = 0.05  # D_p verilmezse t = k·D_p — HRMA seçimi
+ANNULUS_GAP_MIN_MM = 0.3       # imalat alt sınırı — HRMA seçimi (kaynaksız)
 RHO_GAS_DEFAULT = 5.0          # kg/m³ — T_c/MW verilmezse varsayılan oda gazı
 # ÖH D37 A2 hibrit · F-10 (= CW-A5) — DELİK ÇAPI BANDI TEK KAYNAKTAN.
 # Eskiden burada İKİ bant vardı: ``ORIFICE_D_PREF_MM = (0.5, 2.5)`` ("tercih
@@ -1108,15 +1108,15 @@ def pintle_tip_geometry(a_radial_m2, a_annulus_m2, d_pintle_m=None,
         a_radial_m2  : radyal deliklere ayrılan toplam akış alanı [m²]
         a_annulus_m2 : pintle gövdesi çevresindeki anülüs alanı [m²]
         d_pintle_m   : pintle mili çapı [m]; None ise anülüs boşluk/çap
-                       kuralından (t ≈ 0.05·D_p) kendinden tutarlı çözülür
+                       kuralından (t = 0.05·D_p, HRMA seçimi) çözülür
         bf_target    : hedef tıkama katsayısı (blockage factor)
 
-    Bağıntılar (Dressler & Bauer, AIAA 2000-3871; Casiano/Hulka/Yang,
-    JPP 26(5) 2010):
+    Bağıntılar — geometrik tanımlar; sayısal kurallar HRMA seçimi (V301/E1:
+    Dressler & Bauer AIAA 2000-3871 bu sayıları VERMEZ, bkz. PINTLE_RULE_BASIS):
         BF = n·d/(π·D_p)  ve  A_rad = n·(π/4)·d²  → d ve n birlikte çözülür
         A_ann = π·(D_p+t)·t  → t = (√(D_p² + 4·A_ann/π) − D_p)/2  (TAM ifade,
         ince-anülüs yaklaşımı değil)
-        L_s/D_p ≈ 1 (skip distance kuralı)
+        L_s/D_p = 1 (varsayılan skip distance; tanımı Dressler & Bauer s. 4)
 
     Döner: ``pintle_geometry`` sözleşmesinin geometrik alanları.
     """
@@ -1712,13 +1712,23 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
             f"Pc={pc_bar:.1f} bar): feed pressure must exceed chamber pressure")
     dp_pa = dp_bar * PA_PER_BAR
 
+    # v3.0.1 (kulvar T) — NHNE ALAN DENETİMİ. Dyer (AIAA 2007-5702) karışım
+    # parametresi κ = √((P₁−P₂)/(P_v−P₂)) YALNIZ P₂ < P_v iken tanımlıdır.
+    # ÖLÇÜLDÜ (rapor, kulvar T): T = 260 K (P_v = 21,93 bar), P_c = 30 bar,
+    # P₁ = 50 bar → ``nhne_mass_flow`` debiyi doğru biçimde tek fazlı SPI
+    # dalından çözüyordu (karekök hesaplanmıyor), ama devre ``flow_model``
+    # 'NHNE' ve κ = inf yayımlıyordu: etiket hesabı söylemiyordu. Kendinden
+    # basınçlı kipte bu alan ERİŞİLMEZ (P₁ = P_v ve ΔP > 0 ⇒ P₂ < P_v); yalnız
+    # aşırı soğutulmuş (takviyeli) girişte P₂ ≥ P_v olabilir.
+    nhne_alani = (not is_n2o) or (pc_bar < p_sat_bar)
+
     def _size(cd_value):
         """Verilen Cd ile toplam alan + delik planı (n, d) döndürür."""
         if is_n2o:
             probe = nhne_mass_flow(cd_value, 1.0, p1_bar, pc_bar, p_sat_bar,
                                    T_K, rho)
             g_unit = probe['mdot_kg_s']   # kg/s, birim alan başına (Cd dahil)
-            model = 'NHNE'
+            model = 'NHNE' if nhne_alani else 'SPI'
         else:
             g_unit = spi_mass_flow(cd_value, 1.0, rho, dp_pa)
             model = 'SPI'
@@ -1833,6 +1843,18 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
                       'choked': full['choked'],
                       'flow_station_pressure_bar':
                           full['flow_station_pressure_bar']}
+        if not nhne_alani:
+            # κ tanımsız: sonsuz sayı yayımlanmaz (JSON'da sayı değildir),
+            # alanın neden boş olduğu adıyla söylenir.
+            nhne_block['kappa'] = None
+            nhne_block['domain'] = (
+                f'not applicable: the back pressure P_2 = P_c = '
+                f'{float(pc_bar):.4g} bar is at or above the vapour pressure '
+                f'P_v = {float(p_sat_bar):.4g} bar, so no flashing occurs in '
+                'the orifice and the Dyer NHNE mixing parameter '
+                'kappa = sqrt((P_1-P_2)/(P_v-P_2)) is undefined; the flow is '
+                'single-phase incompressible (SPI) with the inlet liquid '
+                'density (Dyer et al., AIAA 2007-5702)')
 
     # Nurick kavitasyon sayısı: K_c = (P₁ − P_v)/(P₁ − P₂)
     if is_n2o:
@@ -1929,6 +1951,23 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
         'manifold': _manifold(mdot, rho, v_inj, a_total),
         '_rho': float(rho),  # iç kullanım (tip geometrisi); çıktıda kalır, zararsız
     }
+
+
+def n2o_vapor_pressure_bar(T_K):
+    """Devrenin KULLANDIĞI N₂O buhar (doyma) basıncı P_v(T) [bar].
+
+    v3.0.1 (Ayberk tur 1 · kulvar T): kendinden basınçlı kipte devre
+    P₁ = P_v alır; kullanıcı tank basıncı kipinde ise P₁ = P_tank verilir ve
+    doyma şartı (P_tank ≥ P_v) motor/uç kapısında denetlenir. Kapının
+    karşılaştırdığı sayı bu devrenin NHNE'ye verdiği P_v ile BİREBİR aynı
+    olmalıdır — aynı ``_SAT`` tablosu (tabloyla deterministik yol), ikinci
+    bir doyma kaynağı açılmaz. Sıcaklık doyma zarfının dışındaysa
+    ``N2OSaturation`` ValueError yükseltir (sayı uydurulmaz).
+
+    Konum: ``_solve_circuit``ten SONRA — yukarıdaki satırlar
+    ``formal/registry.json`` Lean çapasıdır (``_plan_orifices``, :1399).
+    """
+    return float(_SAT.psat(float(T_K)) / PA_PER_BAR)
 
 
 # ---------------------------------------------------------------------------
@@ -2271,7 +2310,7 @@ def design_injector(spec):
         # Pintle hibritte MEŞRUDUR: oksitleyici-merkezli tek akışkan düzen
         # (merkez pintle gövdesi + anülüs ox akışı). Yakıt grain'den geldiği
         # için TMR/mdot_fuel gerekmez — BF, anülüs boşluğu ve skip distance
-        # yine raporlanır (Dressler & Bauer AIAA 2000-3871 geometri pratiği).
+        # yine raporlanır (sayısal kurallar HRMA seçimi — PINTLE_RULE_BASIS).
         if inj_type in ('impinging_doublet', 'impinging_triplet', 'coax_swirl'):
             raise ValueError(
                 f"'{inj_type}' is not supported for a hybrid (single liquid "
@@ -2513,15 +2552,13 @@ def design_injector(spec):
     elif inj_type in ('impinging_doublet', 'impinging_triplet', 'like_impinging'):
         smd_ox = smd_impinging(d_ox_m, v_ox, rho_ox_l, sigma_ox)
         correlation = 'impinging-We13'
-        half = IMPINGE_HALF_ANGLE_DEG
+        # V301/E2: açı istekten gelebilir (``spec['impingement']``); verilmezse
+        # varsayılan ve künye metni eskisiyle bit-aynı (modül sonu).
+        half, half_basis = _impingement_half_angle(spec)
         impingement = {
             'half_angle_deg': half,
             # v2.6.26 beyan: açı bir TASARIM SEÇİMİdir, akıştan çözülmez.
-            'half_angle_deg_basis': (
-                f'2*theta = {2 * IMPINGE_HALF_ANGLE_DEG:.0f} deg impinging '
-                'doublet design choice; the half angle is a fixed element '
-                'geometry choice (NASA SP-8089), NOT solved from the jet '
-                'momentum or the spray field'),
+            'half_angle_deg_basis': half_basis,
             'free_jet_length_mm': float(FREE_JET_LD * d_ox_m * 1e3),
             'element_spacing_mm': float(ELEMENT_SPACING_D
                                         * max(d_ox_m, 1e-9) * 1e3),
@@ -2607,6 +2644,20 @@ def design_injector(spec):
                 warnings.append(_w(
                     'warn.injector.triplet_tmr_out_of_band', 'warning',
                     tmr=float(tmr)))
+        elif fuel is not None:  # like_impinging, SIVI: iki devre (V301/L-C)
+            # Her devre KENDİ benzer-akışkan çiftlerini kurar (yakıt-yakıt,
+            # oksitleyici-oksitleyici). Çift sayısı devre başına delik/2'dir;
+            # çift sayıda delik ``design_like_doublet`` planından gelir.
+            d_f_m = fuel['orifice_d_mm'] * 1e-3
+            smd_fuel_um = smd_impinging(d_f_m, fuel['velocity_m_s'],
+                                        fuel['_rho'], sigma_f) * 1e6
+            p_ox = max(1, ox['n_orifices'] // 2)
+            p_f = max(1, fuel['n_orifices'] // 2)
+            n_elements = p_ox + p_f
+            desc = (f"{p_ox} oxidizer + {p_f} fuel like-doublets (same-fluid "
+                    f"pairs), 2θ={2*half:.0f}° — no blowapart risk")
+            assumptions.append(_w(
+                'warn.injector.like_impinging_no_mr', 'info'))
         else:  # like_impinging (kendi içinde çarpışan çiftler)
             n_elements = max(1, ox['n_orifices'] // 2)
             desc = (f"{n_elements} like-doublets (same-fluid pairs), "
@@ -2617,64 +2668,69 @@ def design_injector(spec):
     elif inj_type == 'pintle' and fuel is None:
         # Hibrit (tek akışkan) pintle: yakıt grain'den geldiği için pintle
         # YALNIZ oksitleyiciyi taşır. Oksitleyici alanı ikiye bölünür:
-        #   - radyal delikler (pintle ucunda, çevresel dizi) → BF
-        #   - anülüs (pintle gövdesi çevresinde eksenel tabaka)
-        # Sprey açısı, iki ox akımının momentum oranından (Cheng 2017
-        # bağıntısı) gelir; aynı akışkan + aynı ΔP olduğu için hız eşittir,
-        # dolayısıyla TMR = f/(1−f) (f = radyal pay).
+        #   - radyal (ya da teğet) delikler — pintle ucunda tek çevresel sıra
+        #   - anülüs (pintle mili çevresinde eksenel tabaka)
+        # V301/E1: geometri TEK çözücüden gelir (``resolve_pintle_geometry``,
+        # modül sonu). Kullanıcının sabitlediği ölçüler (``spec['pintle']``:
+        # D_p, t, n, d, L_s, gövde dış çapı, ikincil delik kipi, teğet açı)
+        # BURADA tutarlılık çözücüsünden geçer; ekran bloğu, tablo, 2B kesit
+        # ve motor özeti bu sözlüğü TÜKETİR. Ölçü verilmeyen varsayılan yol
+        # eski ``pintle_tip_geometry`` çağrısıyla BİT-AYNI sayı verir.
         pin = spec.get('pintle') or {}
-        bf_target = pin.get('bf_target', PINTLE_BF_TARGET_DEFAULT)
-        f_rad = float(pin.get('radial_fraction', PINTLE_HYBRID_RADIAL_FRACTION))
-        f_rad = float(np.clip(f_rad, 0.1, 0.9))
-
         a_total = ox['total_area_mm2'] * 1e-6
-        a_rad = f_rad * a_total          # radyal delikler
-        a_ann = a_total - a_rad          # anülüs
-
-        # Uç geometrisi TEK kaynaktan (bkz. pintle_tip_geometry): aynı sentez
-        # utils/injector_design.py'nin pintle dalında da kullanılır.
-        tip = pintle_tip_geometry(a_rad, a_ann,
-                                  d_pintle_m=(pin['d_pintle_mm'] * 1e-3
-                                              if pin.get('d_pintle_mm')
-                                              is not None else None),
-                                  bf_target=bf_target)
-        d_p_m = tip['d_pintle_mm'] * 1e-3
-        d_hole = tip['radial_hole_d_mm'] * 1e-3
-        n_holes = tip['n_radial_holes']
-        bf = tip['bf']
-        t_ann = tip['annulus_gap_mm'] * 1e-3
+        pintle_geometry = resolve_pintle_geometry(a_total, pin,
+                                                  mdot_target_kg_s=mdot_ox)
+        secim = pintle_geometry['secondary_holes']
+        f_rad = pintle_geometry['radial_flow_fraction']
+        d_p_m = pintle_geometry['d_pintle_mm'] * 1e-3
+        d_hole = pintle_geometry['radial_hole_d_mm'] * 1e-3
+        n_holes = pintle_geometry['n_radial_holes']
+        bf = pintle_geometry['bf']
+        t_ann = pintle_geometry['annulus_gap_mm'] * 1e-3
         if t_ann * 1e3 < ANNULUS_GAP_MIN_MM:
             warnings.append(_w(
                 'warn.injector.pintle_annulus_below_min', 'warning',
                 gap_mm=float(t_ann * 1e3), min_mm=ANNULUS_GAP_MIN_MM))
-        tmr = f_rad / max(1.0 - f_rad, 1e-9)
-        theta = pintle_spray_angle(tmr)
-        momentum = {'momentum_ratio': None, 'rupe_factor': None,
-                    'tmr': float(tmr), 'target': pin.get('tmr_target', 1.0),
-                    'ok': bool(0.5 <= tmr <= 2.0),
-                    'target_basis': (
-                        'pintle total-momentum-ratio design target (TMR = 1 '
-                        'unless the caller supplies tmr_target); the achieved '
-                        'value is reported separately as tmr and it sets the '
-                        'spray cone angle')}
-        pintle_geometry = dict(tip)
-        pintle_geometry['radial_flow_fraction'] = f_rad
-        pintle_geometry['single_fluid'] = True
-        if not (PINTLE_BF_BAND[0] <= bf <= PINTLE_BF_BAND[1]):
-            warnings.append(_w(
-                'warn.injector.pintle_bf_out_of_band', 'warning',
-                bf=float(bf), lo=PINTLE_BF_BAND[0], hi=PINTLE_BF_BAND[1]))
+        if secim == 'none':
+            # Uçta delik yok: eleman düz bir anüler enjektördür. TMR, sprey
+            # konisi bağıntısı ve jet SMD korelasyonu UYGULANMAZ — sayı
+            # uydurulmaz (beyan ``pintle_geometry.tmr_basis``te).
+            momentum = None
+            spray_half = None
+            smd_ox = None
+            correlation = 'not_modelled'
+        else:
+            tmr = pintle_geometry['tmr']
+            theta = pintle_geometry['spray_half_angle_deg']
+            momentum = {'momentum_ratio': None, 'rupe_factor': None,
+                        'tmr': float(tmr), 'target': pin.get('tmr_target', 1.0),
+                        'ok': bool(0.5 <= tmr <= 2.0),
+                        'target_basis': (
+                            'pintle total-momentum-ratio design target (TMR = 1 '
+                            'unless the caller supplies tmr_target); the achieved '
+                            'value is reported separately as tmr and it sets the '
+                            'spray cone angle')}
+            if not (PINTLE_BF_BAND[0] <= bf <= PINTLE_BF_BAND[1]):
+                warnings.append(_w(
+                    'warn.injector.pintle_bf_out_of_band', 'warning',
+                    bf=float(bf), lo=PINTLE_BF_BAND[0], hi=PINTLE_BF_BAND[1]))
+            smd_ox = smd_impinging(d_hole, v_ox, rho_ox_l, sigma_ox)
+            correlation = 'impinging-We13'
+            spray_half = theta
         assumptions.append(_w(
             'warn.injector.hybrid_pintle_single_fluid', 'info',
             radial_pct=float(f_rad * 100.0)))
-        smd_ox = smd_impinging(d_hole, v_ox, rho_ox_l, sigma_ox)
-        correlation = 'impinging-We13'
-        spray_half = theta
         n_elements = 1
-        desc = (f"Oxidizer-centred hybrid pintle: D_p={d_p_m*1e3:.1f} mm, "
-                f"{n_holes}×{d_hole*1e3:.2f} mm radial holes, annulus "
-                f"{t_ann*1e3:.2f} mm, TMR={tmr:.2f} → θ={theta:.0f}°")
-
+        if secim == 'none':
+            desc = (f"Oxidizer-centred hybrid pintle without tip holes "
+                    f"(annular element): D_p={d_p_m*1e3:.1f} mm, annulus "
+                    f"{t_ann*1e3:.2f} mm")
+        else:
+            desc = (f"Oxidizer-centred hybrid pintle: D_p={d_p_m*1e3:.1f} mm, "
+                    f"{n_holes}×{d_hole*1e3:.2f} mm "
+                    f"{'tangential' if secim == 'tangential' else 'radial'} "
+                    f"holes, annulus {t_ann*1e3:.2f} mm, TMR={tmr:.2f} → "
+                    f"θ={theta:.0f}°")
     elif inj_type == 'pintle':
         # Yakıt merkezli TRW/Merlin düzeni: radyal iç jetler = yakıt,
         # anülüs dış akış = oksitleyici
@@ -2687,11 +2743,11 @@ def design_injector(spec):
         a_rad = fuel['total_area_mm2'] * 1e-6    # radyal delikler = yakıt
 
         # Uç geometrisi TEK kaynaktan (hibrit dalıyla aynı fonksiyon).
-        tip = pintle_tip_geometry(a_rad, a_ann,
-                                  d_pintle_m=(pin['d_pintle_mm'] * 1e-3
-                                              if pin.get('d_pintle_mm')
-                                              is not None else None),
-                                  bf_target=bf_target)
+        # V301/L-C: kullanıcı ölçüleri (D_p, t, n, d, L_s) iki akışkanlı
+        # çözücüden geçer (modül sonu); ölçü verilmeyen yol ve yalnız D_p
+        # verilen yol eski ``pintle_tip_geometry`` çağrısıyla BİT-AYNI.
+        tip = resolve_liquid_pintle_geometry(a_rad, a_ann, pin,
+                                             bf_target=bf_target)
         d_p_m = tip['d_pintle_mm'] * 1e-3
         d_hole = tip['radial_hole_d_mm'] * 1e-3
         n_holes = tip['n_radial_holes']
@@ -2728,7 +2784,10 @@ def design_injector(spec):
     else:  # swirl / coax_swirl
         K, sw = swirl_geom
         r_o = d_ox_m / 2.0
-        r_s = 2.5 * r_o                     # tipik swirl odası oranı
+        # V301/E2: girdap odası çapı ve teğet giriş sayısı istekten gelebilir
+        # (``spec['swirl']``); verilmezse 2,5·r_o ve 3 (eski sayılar, modül
+        # sonundaki ``SWIRL_CHAMBER_D_OVER_DO`` / ``..._INLETS_DEFAULT``).
+        r_s, n_inlets, d_s_kaynak = _swirl_element_overrides(spec, r_o)
         # Teğet giriş toplam alanı (ELEMAN BAŞINA): atomizör sabitinin
         # tanımından K = A_p/(D_s·d_o) = A_p/(4·r_s·r_o) → A_p = 4·K·r_s·r_o.
         #
@@ -2737,7 +2796,6 @@ def design_injector(spec):
         # Kaynak: Lefebvre & McDonell, Atomization and Sprays 2. baskı Böl. 6
         # (simplex atomizör sabiti tanımı).
         a_p = 4.0 * K * r_s * r_o
-        n_inlets = 3
         d_inlet = np.sqrt(4.0 * a_p / (np.pi * n_inlets))
         swirl_geometry = {
             'K': float(K), 'X_air_core': sw['X'], 'cd_swirl': sw['cd'],
@@ -2755,6 +2813,10 @@ def design_injector(spec):
             # ÖH KU (KC-11 / RUS R2): ideal teori beyanı (yeni alan).
             'model_basis': SWIRL_IDEAL_THEORY_BASIS,
         }
+        # V301/E2: istek girdap odası çapını verdiyse kaynağı adıyla durur
+        # (verilmediyse anahtar konmaz: varsayılan yol bit-aynı).
+        if d_s_kaynak is not None:
+            swirl_geometry['swirl_chamber_d_source'] = d_s_kaynak
         spray_half = sw['theta_deg']
         # Lefebvre basınç-swirl korelasyonu TEK atomizöre kalibre edilmiştir:
         # ṁ_L = eleman başına sıvı debisi (v2.6.2 F013 düzeltmesi — eskiden
@@ -2765,8 +2827,10 @@ def design_injector(spec):
         smd_ox = smd_lefebvre_swirl(sigma_ox, mu_ox, mdot_ox_per_element,
                                     ox['delta_p_bar'] * PA_PER_BAR, rho_gas)
         correlation = 'Lefebvre-swirl'
-        assumptions.append(_w(
-            'warn.injector.swirl_chamber_radius_assumed', 'info'))
+        if d_s_kaynak is None:
+            # Oda çapı istekten gelmediyse 2,5·r_o bir VARSAYIMDIR.
+            assumptions.append(_w(
+                'warn.injector.swirl_chamber_radius_assumed', 'info'))
         desc = (f"{'Coaxial ' if inj_type == 'coax_swirl' else ''}pressure-swirl: "
                 f"K={K:.3f}, 2θ={2*sw['theta_deg']:.0f}°, "
                 f"film {sw['film_t_ratio']*r_o*1e3:.2f} mm")
@@ -2838,7 +2902,10 @@ def design_injector(spec):
             'impingement': impingement,
         },
         'atomization': {
-            'smd_ox_um': float(smd_ox * 1e6),
+            # V301/E1: deliksiz (anüler) pintle'da jet SMD korelasyonu
+            # uygulanmaz → None (diğer tiplerde smd_ox her zaman sayıdır).
+            'smd_ox_um': (float(smd_ox * 1e6) if smd_ox is not None
+                          else None),
             'smd_fuel_um': (float(smd_fuel_um) if smd_fuel_um is not None
                             else None),
             'correlation': correlation,
@@ -2913,3 +2980,1718 @@ def _caller_band_gate(n, d, d_min, d_max, n_max, warnings, start):
     warnings.append(_w('warn.injector.orifice_d_outside_caller_band',
                        'warning', n=int(n), n_max=int(n_max), d_mm=d_g,
                        d_min_mm=lo_g, d_max_mm=hi_g))
+
+
+# ---------------------------------------------------------------------------
+# V301 / E1 (Ayberk tur 1) — PINTLE GEOMETRİSİNİN TEK ÇÖZÜCÜSÜ.
+# Bu blok BİLEREK modül sonundadır: satır 1399 ``formal/registry.json`` Lean
+# çapasıdır, yukarıdaki satır sayısı bu kulvarda DEĞİŞMEDİ.
+#
+# Ayberk: "pintle için outer diameter istiyor ama nerenin outer diameteri
+# yazmıyor", "secondary holes girsek dahi ek input istemiyor", "Enjektör
+# kısmı full hatalı". ÖLÇÜLDÜ (``docs/scofield/raw/OH/V301/ayberk1/
+# enjektor-pintle/once.json``, 1 kN / Pc 20 bar / N2O-HTPB): aynı /calculate
+# yanıtında İKİ pintle vardı — ekran bloğu sunucunun motordan bağımsız
+# 25 mm yedeğiyle 437 × Ø0,104 mm delik ve 0,047 mm anülüs çiziyor, devre
+# çözücüsü D_p 5,639 mm ile 16 × Ø0,646 mm ve 0,282 mm yayımlıyordu.
+#
+# Karar (ana model, Astra danışmalı): devre çözücüsünün geometrisi KANONDUR.
+# Kullanıcının sabitlediği ölçüler BURAYA girer; ekran bloğu, tablo, 2B
+# kesit ve motor özeti bu sözlüğü TÜKETİR, yeniden türetmez.
+# ---------------------------------------------------------------------------
+#: İkincil (uç) delik kipleri — arayüz seçimiyle aynı sözcükler.
+PINTLE_SECONDARY_HOLE_MODES = ('none', 'radial', 'tangential')
+PINTLE_SECONDARY_HOLES_DEFAULT = 'radial'
+#: Teğet delik açısı = delik ekseni ile yerel yarıçap arasındaki açı. 0° saf
+#: radyal, 90° saf teğettir; ikisi de "teğetsel delik" değildir → AÇIK
+#: aralık (geometrik tanım; sayı seçimi değil).
+PINTLE_TANGENTIAL_ANGLE_OPEN_RANGE_DEG = (0.0, 90.0)
+#: Aşırı belirlenmiş geometrinin debi uyuşmazlığı toleransı. TEK KAYNAK:
+#: kırpılmış plan toleransının KENDİSİ (kimlik takma adı, sayı kopyalanmaz).
+PINTLE_FLOW_MATCH_REL_TOL = CLAMPED_PLAN_TARGET_FLOW_REL_TOL
+PINTLE_FLOW_MATCH_TOL_BASIS = (
+    f'HRMA choice (no literature value): a pintle geometry fixed by the '
+    f'request is accepted only if its total flow area delivers the oxidizer '
+    f'flow within {PINTLE_FLOW_MATCH_REL_TOL:.0%} at the design pressure '
+    f'drop (same constant as the clamped-plan target-flow check). The design '
+    f'pressure drop is NOT re-solved for the fixed geometry.')
+
+#: İstek alanı adları (``/calculate``) ⟷ ``spec['pintle']`` anahtarları.
+#: Uç bu tabloyla çevirir; ad ikinci kez yazılmaz.
+PINTLE_REQUEST_FIELDS = {
+    'secondary_holes': 'secondary_holes',
+    'd_pintle_mm': 'pintle_diameter',
+    'annulus_gap_mm': 'annular_gap',
+    'n_radial_holes': 'pintle_radial_hole_count',
+    'radial_hole_d_mm': 'pintle_radial_hole_diameter',
+    'skip_distance_mm': 'skip_distance',
+    'housing_outer_diameter_mm': 'outer_diameter',
+    'tangential_angle_deg': 'pintle_tangential_angle',
+}
+#: Uzunluk girdileri (mm) — hepsi sonlu ve pozitif olmak zorunda.
+_PINTLE_MM_KEYS = ('d_pintle_mm', 'annulus_gap_mm', 'radial_hole_d_mm',
+                   'skip_distance_mm', 'housing_outer_diameter_mm')
+
+#: Sayısal tasarım kurallarının künyesi (V301/E1 künye düzeltmesi). Dressler
+#: & Bauer, "TRW Pintle Engine Heritage and Performance Characteristics",
+#: AIAA 2000-3871 tam metni tarandı (s. 2-4 "Pintle Injector Design
+#: Concept"): skip distance'ı TANIMLAR, pintle çapı / akım kalınlıkları /
+#: hızlar / momentum oranlarını tasarım değişkeni olarak SAYAR, ama ne
+#: t/D_p, ne BF, ne L_s/D_p, ne de radyal pay için sayı verir; "blockage"
+#: sözcüğü metinde hiç geçmez. Sayılar DEĞİŞMEDİ, yalnız atıf düzeltildi.
+PINTLE_RULE_BASIS = {
+    'annulus_t_over_dp': (
+        f'HRMA choice (no literature value): when neither the pintle '
+        f'diameter nor the annular gap is given, D_p is sized from the '
+        f'annulus flow area with t = {PINTLE_ANNULUS_T_OVER_DP:g}*D_p. '
+        f'Dressler & Bauer (AIAA 2000-3871, pp. 2-4) list stream thickness '
+        f'and pintle diameter as design variables but give no numerical '
+        f'rule.'),
+    'blockage_factor_target': (
+        f'HRMA choice (no literature value): BF = n*d/(pi*D_p) = '
+        f'{PINTLE_BF_TARGET_DEFAULT:g} sets the hole count when neither the '
+        f'hole count nor the hole diameter is given.'),
+    'blockage_factor_band': (
+        f'BF band {PINTLE_BF_BAND[0]:g}-{PINTLE_BF_BAND[1]:g}: source NOT '
+        f'verified. Its former attribution to Dressler & Bauer (AIAA '
+        f'2000-3871) is withdrawn - that paper defines no blockage factor '
+        f'and gives no band.'),
+    'radial_flow_fraction': (
+        f'HRMA choice (no literature value): {PINTLE_HYBRID_RADIAL_FRACTION:g}'
+        f' of the oxidizer flow area goes to the tip holes unless the '
+        f'request fixes the hole or annulus geometry.'),
+    'skip_distance': (
+        f'Definition: Dressler & Bauer (AIAA 2000-3871, p. 4) - distance '
+        f'from the outer propellant\'s annular entrance into the chamber to '
+        f'the point of contact with the central stream; here the axial '
+        f'distance from the annulus exit (body face) to the axis of the '
+        f'tip-hole row. Default L_s = {PINTLE_SKIP_LS_DP:g}*D_p is an HRMA '
+        f'choice (no literature value). L_s enters no model: geometry and '
+        f'drawing only.'),
+    'annulus_gap_min': (
+        f'HRMA manufacturing floor {ANNULUS_GAP_MIN_MM:g} mm for the annulus '
+        f'gap (no literature value); a gap below it is reported, not '
+        f'resized.'),
+}
+
+PINTLE_FLOW_SPLIT_BASIS = (
+    'The tip holes and the annulus are fed from the same manifold state at '
+    'the same design pressure drop and use the circuit\'s single discharge '
+    'coefficient and its own mass-flux model (SPI, or Dyer NHNE for '
+    'self-pressurised N2O): mdot_branch = Cd*A_branch*G, so the radial flow '
+    'fraction is f_r = A_r/(A_r + A_a) and A_r + A_a must equal the circuit '
+    'area that delivers the oxidizer flow. Separate branch discharge '
+    'coefficients and internal branch losses are NOT modelled.')
+PINTLE_SPRAY_ANGLE_BASIS = (
+    'Cheng et al., "On the prediction of spray angle of liquid-liquid '
+    'pintle injectors", Acta Astronautica 2017 (doi:10.1016/'
+    'j.actaastro.2017.05.037), Eq. 16: cos(theta) = 1/(1+TMR), TMR = radial/'
+    'axial momentum (incompressible, inviscid). Both streams of this '
+    'single-fluid hybrid pintle share one velocity, so TMR = f_r/(1-f_r). '
+    'Applying it to an oxidizer-only element and to flashing N2O is an '
+    'inference, NOT a validated hybrid result.')
+PINTLE_NONE_TMR_BASIS = (
+    'NOT_APPLICABLE: no secondary holes, so there is no radial jet and the '
+    'radial-to-annular momentum ratio is undefined. The injector '
+    'degenerates to a plain annular element; the spray cone is set by the '
+    'annular sheet, not by a pintle jet.')
+PINTLE_TANGENTIAL_BASIS = (
+    'NOT_MODELLED: the holes are drilled at an angle to the radius, so part '
+    'of the jet momentum goes into swirl. Hole count, hole diameter and '
+    'total area are solved as in the radial case (same area, same pressure '
+    'drop), but the swirl component and the wider spray cone it produces '
+    'are NOT modelled. The reported spray half-angle is the RADIAL-injection '
+    'value and is therefore a lower bound. The tangential angle is a '
+    'geometry/CAD input only.')
+PINTLE_HOUSING_NOT_SIZED_BASIS = (
+    'not sized: the injector body (housing) outer diameter needs structural '
+    'and packaging inputs - housing material and allowable stress, the '
+    'pressure across the housing wall (not the injector pressure drop) and '
+    'the attachment details. For a thin wall t ~ dp*D_i/(2*sigma_allow); '
+    'thick sections need thick-cylinder analysis (Philpot & Thomas, '
+    'Mechanics of Materials 5th ed., Secs. 14.3, 14.5). There is no '
+    'universal minimum pintle wall, so none is invented: only the annulus '
+    'bore D_p + 2t is published and drawn.')
+PINTLE_HOUSING_GIVEN_BASIS = (
+    'request value. The housing wall is the geometric (OD - bore)/2 and is '
+    'checked to be positive; a structural check of the housing is NOT '
+    'performed (it needs housing material, allowable stress and the '
+    'pressure across the wall).')
+#: Motor özet bloğundaki (``injector_design``) delik sayısı/çapının pintle'da
+#: ne olduğu — ÖLÇÜLDÜ (once.json): 1 kN varsayılanında ``number_of_orifices``
+#: 3 yazıyor, pintle'ın kendisi 16 delik + anülüs; kullanıcı üç sayı görüyordu.
+PINTLE_EQUIVALENT_ORIFICE_PLAN_BASIS = (
+    'pintle: number_of_orifices / orifice_diameter_mm are the injector '
+    'circuit\'s EQUIVALENT straight-orifice plan - it fixes the discharge '
+    'coefficient (inlet + L/D table) and the total flow area that delivers '
+    'the oxidizer flow. The pintle is NOT drilled this way: its tip holes, '
+    'annulus, bore and skip distance are in pintle_geometry (the single '
+    'canonical pintle geometry of this answer).')
+PINTLE_NO_SKIP_BASIS = (
+    'NOT_APPLICABLE: with no tip holes there is no central stream to meet, '
+    'so the skip distance is undefined.')
+
+
+class PintleGeometryInputError(ValueError):
+    """Pintle girdisi geçersiz ya da sabitlenen geometri akışla tutarsız.
+
+    ``invalid_fields`` uç sözleşmesinin (HTTP 422) alan listesidir; her
+    kayıt ``field`` (istek alanı adı), ``spec_key``, ``reason`` ve
+    ``message`` taşır.
+    """
+
+    def __init__(self, message, invalid_fields):
+        super().__init__(message)
+        self.invalid_fields = list(invalid_fields)
+
+
+def _pintle_kaydi(anahtar, reason, message, **ek):
+    kayit = {'field': PINTLE_REQUEST_FIELDS.get(anahtar, anahtar),
+             'spec_key': f'pintle.{anahtar}', 'reason': reason,
+             'message': message}
+    kayit.update(ek)
+    return kayit
+
+
+def _pintle_sayi(value):
+    """(sayı, None) ya da (None, neden). bool ve dize sayı DEĞİLDİR."""
+    from hrma.utils.input_guard import is_bool
+    if is_bool(value) or isinstance(value, str) or not isinstance(
+            value, (int, float, np.integer, np.floating)):
+        return None, 'not_a_number'
+    v = float(value)
+    if not np.isfinite(v):
+        return None, 'not_finite'
+    return v, None
+
+
+def pintle_clean_inputs(pin):
+    """``spec['pintle']`` kullanıcı ölçülerinin tel/aralık/çelişki kapısı.
+
+    Döner: ``(temiz, hatalar)``. ``temiz`` yalnız VERİLEN alanları (mm,
+    adet, derece) ve ``secondary_holes`` kipini taşır; ``hatalar`` 422
+    kayıtlarıdır. Uç (``/calculate``) bu işlevi motoru çalıştırmadan ÖNCE
+    çağırır; çözücü de doğrudan çağıranlar için aynı kapıdan geçer.
+    """
+    temiz, hatalar = {}, []
+    if pin is None:
+        pin = {}
+    if not isinstance(pin, dict):
+        return temiz, [_pintle_kaydi(
+            'pintle', 'not_an_object',
+            "the pintle specification must be an object of named fields")]
+    ham = pin.get('secondary_holes')
+    if ham is None or ham == '':
+        secim = PINTLE_SECONDARY_HOLES_DEFAULT
+        temiz['secondary_holes_supplied'] = False
+    elif isinstance(ham, str) and ham.strip().lower() in \
+            PINTLE_SECONDARY_HOLE_MODES:
+        secim = ham.strip().lower()
+        temiz['secondary_holes_supplied'] = True
+    else:
+        secim = None
+        hatalar.append(_pintle_kaydi(
+            'secondary_holes', 'invalid_choice',
+            "'secondary_holes' must be one of: "
+            + ', '.join(PINTLE_SECONDARY_HOLE_MODES)
+            + '. The value was NOT mapped to a default.',
+            submitted=str(ham)[:40],
+            accepted=list(PINTLE_SECONDARY_HOLE_MODES)))
+    temiz['secondary_holes'] = secim
+
+    for anahtar in _PINTLE_MM_KEYS:
+        v = pin.get(anahtar)
+        if v is None or v == '':
+            continue
+        sayi, neden = _pintle_sayi(v)
+        if sayi is not None and not sayi > 0.0:
+            neden = 'not_positive'
+        if neden:
+            hatalar.append(_pintle_kaydi(
+                anahtar, neden,
+                f"'{PINTLE_REQUEST_FIELDS[anahtar]}' is a length in mm and "
+                f'must be a finite positive JSON number.',
+                submitted=str(v)[:40], unit='mm'))
+            continue
+        temiz[anahtar] = sayi
+
+    v = pin.get('n_radial_holes')
+    if v is not None and v != '':
+        sayi, neden = _pintle_sayi(v)
+        if sayi is not None and (sayi != int(sayi) or sayi < 1):
+            neden = 'not_a_positive_whole_number'
+        if neden:
+            hatalar.append(_pintle_kaydi(
+                'n_radial_holes', neden,
+                "'pintle_radial_hole_count' is a count of holes and must be "
+                'a whole number >= 1.', submitted=str(v)[:40],
+                unit='count'))
+        else:
+            temiz['n_radial_holes'] = int(sayi)
+
+    v = pin.get('tangential_angle_deg')
+    if v is not None and v != '':
+        lo, hi = PINTLE_TANGENTIAL_ANGLE_OPEN_RANGE_DEG
+        sayi, neden = _pintle_sayi(v)
+        if sayi is not None and not (lo < sayi < hi):
+            neden = 'out_of_range'
+        if neden:
+            hatalar.append(_pintle_kaydi(
+                'tangential_angle_deg', neden,
+                "'pintle_tangential_angle' is the angle between each hole "
+                'axis and the local radius; it must lie strictly between '
+                f'{lo:g} deg (radial) and {hi:g} deg (tangent).',
+                submitted=str(v)[:40], accepted_range=[lo, hi],
+                unit='deg'))
+        else:
+            temiz['tangential_angle_deg'] = sayi
+
+    if secim == 'none':
+        for anahtar in ('n_radial_holes', 'radial_hole_d_mm',
+                        'skip_distance_mm'):
+            if anahtar in temiz:
+                hatalar.append(_pintle_kaydi(
+                    anahtar, 'conflicts_with_secondary_holes_none',
+                    f"'{PINTLE_REQUEST_FIELDS[anahtar]}' describes the tip "
+                    "holes, but 'secondary_holes' is 'none' (no tip holes). "
+                    'Choose radial/tangential holes or drop the field.',
+                    submitted=temiz[anahtar]))
+    if 'tangential_angle_deg' in temiz and secim != 'tangential':
+        hatalar.append(_pintle_kaydi(
+            'tangential_angle_deg', 'applies_only_to_tangential_holes',
+            "'pintle_tangential_angle' applies only when 'secondary_holes' "
+            "is 'tangential'.", submitted=temiz['tangential_angle_deg']))
+    return temiz, hatalar
+
+
+def _pintle_hata(hatalar):
+    return PintleGeometryInputError(
+        'Pintle geometry rejected: ' + '; '.join(
+            f"{h['field']} ({h['reason']})" for h in hatalar), hatalar)
+
+
+def resolve_pintle_geometry(a_total_m2, pin=None, mdot_target_kg_s=None):
+    """Hibrit (tek akışkan) pintle geometrisinin TEK çözücüsü (V301/E1).
+
+    Sayısal taşma koruması (güvenlik + kararlılık ilkesi): kullanıcı ölçüsü
+    float aralığını zorlarsa (ör. D_p = 1e300 mm) hesap ham OverflowError ile
+    çökmez; sabitlenen alanlar ``not_computable`` nedeniyle 422 olur. Sonuçta
+    sonlu olmayan bir sayı yayımlanmaz. Ayrıntılı kurallar:
+    ``_resolve_pintle_geometry_core``.
+    """
+    pin = pin if isinstance(pin, dict) else {}
+    try:
+        with np.errstate(over='raise', invalid='raise', divide='raise'):
+            geo = _resolve_pintle_geometry_core(a_total_m2, pin,
+                                                mdot_target_kg_s)
+    except (OverflowError, FloatingPointError, ZeroDivisionError) as exc:
+        temiz, _ = pintle_clean_inputs(pin)
+        sabit = [a for a in PINTLE_REQUEST_FIELDS
+                 if a in temiz and a != 'secondary_holes']
+        if not sabit:
+            raise ValueError(f'pintle geometry not computable: {exc}')
+        raise _pintle_hata([_pintle_kaydi(
+            a, 'not_computable',
+            'The fixed pintle dimensions push the geometry outside the '
+            'floating-point range; no geometry is published.',
+            submitted=temiz[a]) for a in sabit])
+    sayilar = [v for v in geo.values()
+               if isinstance(v, float) and not isinstance(v, bool)]
+    pozitif = [geo['d_pintle_mm'], geo['annulus_gap_mm']] + (
+        [geo['radial_hole_d_mm']] if geo['n_radial_holes'] else [])
+    if not (all(np.isfinite(v) for v in sayilar)
+            and all(v > 0.0 for v in pozitif)):
+        temiz, _ = pintle_clean_inputs(pin)
+        sabit = [a for a in PINTLE_REQUEST_FIELDS
+                 if a in temiz and a != 'secondary_holes']
+        if not sabit:
+            raise ValueError('pintle geometry produced a non-finite or '
+                             'non-positive dimension')
+        raise _pintle_hata([_pintle_kaydi(
+            a, 'not_computable',
+            'The fixed pintle dimensions leave a zero or non-finite pintle '
+            'diameter, annular gap or hole diameter (floating-point range '
+            'exhausted); no geometry is published.',
+            submitted=temiz[a]) for a in sabit])
+    return geo
+
+
+def _resolve_pintle_geometry_core(a_total_m2, pin, mdot_target_kg_s):
+    """``resolve_pintle_geometry``nin hesap gövdesi.
+
+    Girdi:
+        a_total_m2       : devrenin oksitleyici debisini tasarım ΔP'sinde
+                           teslim eden TOPLAM akış alanı [m²] (Cd ve akış
+                           modeli — SPI ya da NHNE — devreninkidir)
+        pin              : ``spec['pintle']`` — isteğe bağlı kullanıcı
+                           ölçüleri (``PINTLE_REQUEST_FIELDS`` anahtarları)
+                           + ``bf_target`` / ``radial_fraction``
+        mdot_target_kg_s : hedef oksitleyici debisi (uyuşmazlık kaydı için)
+
+    Kurallar (boş alan = çözücü boyutlandırır, beyanlı):
+      * Akış payı: f_r = A_r/(A_r + A_a) ve A_r + A_a = A_toplam
+        (``PINTLE_FLOW_SPLIT_BASIS``). Delik geometrisi verilmezse
+        A_r = f·A_toplam (f HRMA seçimi).
+      * n ve d birlikte → A_r sabit; yalnız d → n = round(A_r/a_delik) ve A_r
+        yeniden çözülür; yalnız n → d = √(4A_r/(πn)); ikisi de yoksa BF hedefi
+        (``pintle_tip_geometry``).
+      * D_p ve t birlikte → A_a sabit; yalnız D_p → t TAM ifadeden; yalnız t →
+        D_p = A_a/(πt) − t; ikisi de yoksa t = k·D_p kuralı (HRMA seçimi).
+      * Aşırı belirlenmiş geometri toplam alanı tutmuyorsa (tolerans
+        ``PINTLE_FLOW_MATCH_REL_TOL``) ya da delik/anülüs alanı tek başına
+        toplamı aşıyorsa, delikler çevreye sığmıyorsa (BF ≥ 1) ya da gövde
+        kılıf deliğini sarmıyorsa ``PintleGeometryInputError`` (422).
+      * Gövde dış çapı verilmezse BOYUTLANDIRILMAZ (``housing_sized`` False).
+
+    Varsayılan yol (hiç ölçü verilmemiş) ``pintle_tip_geometry``nin eski
+    çağrısıyla BİT-AYNI sayıları verir.
+    """
+    pin = pin if isinstance(pin, dict) else {}
+    temiz, hatalar = pintle_clean_inputs(pin)
+    if hatalar:
+        raise _pintle_hata(hatalar)
+    a_total = float(a_total_m2)
+    if not (np.isfinite(a_total) and a_total > 0.0):
+        raise ValueError('pintle total flow area must be finite and positive')
+    secim = temiz['secondary_holes']
+    bf_target = pin.get('bf_target', PINTLE_BF_TARGET_DEFAULT)
+    f_def = float(np.clip(float(pin.get('radial_fraction',
+                                        PINTLE_HYBRID_RADIAL_FRACTION)),
+                          0.1, 0.9))
+    k = PINTLE_ANNULUS_T_OVER_DP
+    mm = 1e-3
+    dp_u = temiz.get('d_pintle_mm')
+    t_u = temiz.get('annulus_gap_mm')
+    n_u = temiz.get('n_radial_holes')
+    d_u = temiz.get('radial_hole_d_mm')
+    ls_u = temiz.get('skip_distance_mm')
+    od_u = temiz.get('housing_outer_diameter_mm')
+    ang_u = temiz.get('tangential_angle_deg')
+    kaynak = {}
+    hatalar = []
+
+    a_ann_sabit = None
+    if dp_u is not None and t_u is not None:
+        a_ann_sabit = float(np.pi * (dp_u * mm + t_u * mm) * (t_u * mm))
+
+    # --- 1) Akış alanı paylaşımı ---------------------------------------
+    n = 0
+    d = 0.0
+    if secim == 'none':
+        a_rad = 0.0
+        a_ann = a_ann_sabit if a_ann_sabit is not None else a_total
+        kaynak['n_radial_holes'] = 'not_applicable_no_tip_holes'
+        kaynak['radial_hole_d_mm'] = 'not_applicable_no_tip_holes'
+    else:
+        if n_u is not None and d_u is not None:
+            a_rad = float(n_u * np.pi / 4.0 * (d_u * mm) ** 2)
+        elif a_ann_sabit is not None:
+            a_rad = a_total - a_ann_sabit
+        else:
+            a_rad = f_def * a_total
+        if a_rad <= 0.0:
+            hatalar.extend(_pintle_kaydi(
+                a, 'annulus_alone_exceeds_flow_area',
+                'The fixed pintle diameter and annular gap give an annulus '
+                f'area of {a_ann_sabit * 1e6:.4g} mm2, at least the whole '
+                f'{a_total * 1e6:.4g} mm2 that delivers the oxidizer flow at '
+                'the design pressure drop, so no area is left for the tip '
+                'holes.', annulus_area_mm2=a_ann_sabit * 1e6,
+                flow_area_mm2=a_total * 1e6)
+                for a in ('d_pintle_mm', 'annulus_gap_mm'))
+            raise _pintle_hata(hatalar)
+        if d_u is not None and n_u is None:
+            a_delik = float(np.pi / 4.0 * (d_u * mm) ** 2)
+            n = max(1, int(round(a_rad / a_delik)))
+            a_rad = float(n * a_delik)
+            kaynak['n_radial_holes'] = 'radial_area_and_hole_diameter'
+            kaynak['radial_hole_d_mm'] = 'request'
+        elif n_u is not None and d_u is None:
+            n = int(n_u)
+            d = float(np.sqrt(4.0 * a_rad / (np.pi * n)))
+            kaynak['n_radial_holes'] = 'request'
+            kaynak['radial_hole_d_mm'] = 'radial_area_and_hole_count'
+        elif n_u is not None:
+            n = int(n_u)
+            kaynak['n_radial_holes'] = 'request'
+            kaynak['radial_hole_d_mm'] = 'request'
+        else:
+            kaynak['n_radial_holes'] = 'blockage_factor_target'
+            kaynak['radial_hole_d_mm'] = 'blockage_factor_target'
+        if d_u is not None:
+            d = float(d_u * mm)
+        if a_ann_sabit is not None:
+            a_ann = a_ann_sabit
+        else:
+            a_ann = a_total - a_rad
+            if a_ann <= 0.0:
+                sabit = [a for a in ('n_radial_holes', 'radial_hole_d_mm')
+                         if a in temiz]
+                hatalar.extend(_pintle_kaydi(
+                    a, 'tip_holes_exceed_flow_area',
+                    f'The fixed tip holes have {a_rad * 1e6:.4g} mm2 of flow '
+                    f'area, at least the whole {a_total * 1e6:.4g} mm2 that '
+                    'delivers the oxidizer flow at the design pressure '
+                    'drop, so no area is left for the annulus.',
+                    hole_area_mm2=a_rad * 1e6, flow_area_mm2=a_total * 1e6)
+                    for a in sabit)
+                raise _pintle_hata(hatalar)
+
+    # --- 2) Anülüs: D_p ve t -------------------------------------------
+    d_p = None
+    t = None
+    if a_ann_sabit is not None:
+        d_p, t = dp_u * mm, t_u * mm
+        kaynak['d_pintle_mm'] = kaynak['annulus_gap_mm'] = 'request'
+    elif dp_u is not None:
+        d_p = dp_u * mm
+        kaynak['d_pintle_mm'] = 'request'
+        kaynak['annulus_gap_mm'] = 'annulus_area_and_pintle_diameter'
+    elif t_u is not None:
+        t = t_u * mm
+        d_p = a_ann / (np.pi * t) - t
+        if not d_p > 0.0:
+            raise _pintle_hata([_pintle_kaydi(
+                'annulus_gap_mm', 'gap_too_large_for_annulus_area',
+                f'An annulus of gap {t_u:g} mm needs at least '
+                f'{np.pi * t * t * 1e6:.4g} mm2 even around a zero-diameter '
+                f'post, but only {a_ann * 1e6:.4g} mm2 of flow area is left '
+                'for the annulus at the design pressure drop.',
+                submitted=t_u, unit='mm')])
+        d_p = float(d_p)
+        kaynak['annulus_gap_mm'] = 'request'
+        kaynak['d_pintle_mm'] = 'annulus_area_and_gap'
+    else:
+        kaynak['d_pintle_mm'] = 'flow_sized_annulus_rule'
+        kaynak['annulus_gap_mm'] = 'flow_sized_annulus_rule'
+
+    if secim != 'none' and n_u is None and d_u is None:
+        # Eski çağrının AYNISI (varsayılan yolda bit-aynı sayılar).
+        tip = pintle_tip_geometry(a_rad, a_ann, d_pintle_m=d_p,
+                                  bf_target=bf_target)
+        d_p_tip = tip['d_pintle_mm'] * 1e-3
+        n = tip['n_radial_holes']
+        d = tip['radial_hole_d_mm'] * 1e-3
+        bf = tip['bf']
+        d_pintle_mm = tip['d_pintle_mm']
+        gap_mm = (t_u if t_u is not None else tip['annulus_gap_mm'])
+        if d_p is None:
+            d_p = d_p_tip
+    else:
+        if d_p is None:
+            d_p = float(np.sqrt(a_ann / (np.pi * k * (1.0 + k))))
+        if t is None:
+            t = float((np.sqrt(d_p ** 2 + 4.0 * a_ann / np.pi) - d_p) / 2.0)
+        bf = float(n * d / (np.pi * d_p)) if secim != 'none' else 0.0
+        d_pintle_mm = float(d_p * 1e3)
+        gap_mm = float(t_u if t_u is not None else t * 1e3)
+    if dp_u is not None:
+        d_pintle_mm = float(dp_u)
+    t_mm = float(gap_mm)
+
+    if secim != 'none' and not bf < 1.0:
+        sabit = [a for a in ('n_radial_holes', 'radial_hole_d_mm',
+                             'd_pintle_mm') if a in temiz] or ['d_pintle_mm']
+        raise _pintle_hata([_pintle_kaydi(
+            a, 'tip_holes_do_not_fit_circumference',
+            f'{n} holes of {d * 1e3:.4g} mm need {n * d * 1e3:.4g} mm of '
+            f'circumference, but the pintle tip (D_p {d_p * 1e3:.4g} mm) has '
+            f'only {np.pi * d_p * 1e3:.4g} mm (blockage factor '
+            f'{bf:.3f} >= 1). Use fewer/smaller holes or a larger pintle '
+            'diameter.', blockage_factor=bf) for a in sabit])
+
+    # --- 3) Debi tutarlılığı (aşırı belirlenmiş geometri) ---------------
+    a_toplam_geo = a_rad + a_ann
+    oran = a_toplam_geo / a_total
+    uyusmazlik = oran - 1.0
+    asiri = (a_ann_sabit is not None and (
+        secim == 'none' or d_u is not None)) or False
+    debi = (float(mdot_target_kg_s) if mdot_target_kg_s is not None
+            else None)
+    if abs(uyusmazlik) > PINTLE_FLOW_MATCH_REL_TOL:
+        sabit = [a for a in ('d_pintle_mm', 'annulus_gap_mm',
+                             'n_radial_holes', 'radial_hole_d_mm')
+                 if a in temiz]
+        raise _pintle_hata([_pintle_kaydi(
+            a, 'geometry_does_not_deliver_target_flow',
+            'The fixed pintle dimensions are over-determined and their total '
+            f'flow area ({a_toplam_geo * 1e6:.4g} mm2) differs by '
+            f'{uyusmazlik:+.1%} from the {a_total * 1e6:.4g} mm2 that '
+            'delivers the oxidizer flow at the design pressure drop. Leave '
+            'one of them empty so the solver can close the flow balance.',
+            requested_mdot_kg_s=debi,
+            predicted_mdot_kg_s=(debi * oran if debi is not None else None),
+            mismatch_rel=uyusmazlik,
+            tolerance_rel=PINTLE_FLOW_MATCH_REL_TOL,
+            tolerance_basis=PINTLE_FLOW_MATCH_TOL_BASIS) for a in sabit])
+
+    # --- 4) L_s, kılıf deliği, gövde ------------------------------------
+    d_p_m = d_pintle_mm * 1e-3
+    if secim == 'none':
+        ls_mm = None
+        ls_dp = None
+        kaynak['skip_distance_mm'] = 'not_applicable_no_tip_holes'
+    elif ls_u is not None:
+        ls_mm = float(ls_u)
+        ls_dp = float(ls_u / d_pintle_mm)
+        kaynak['skip_distance_mm'] = 'request'
+    else:
+        ls_mm = float(PINTLE_SKIP_LS_DP * d_p_m * 1e3)
+        ls_dp = float(PINTLE_SKIP_LS_DP)
+        kaynak['skip_distance_mm'] = 'ls_over_dp_default'
+    bore_mm = float(d_pintle_mm + 2.0 * t_mm)
+    if od_u is not None:
+        if not od_u > bore_mm:
+            raise _pintle_hata([_pintle_kaydi(
+                'housing_outer_diameter_mm', 'housing_does_not_enclose_bore',
+                f'The injector body outer diameter ({od_u:g} mm) does not '
+                f'enclose the annulus bore D_p + 2t = {bore_mm:.4g} mm; the '
+                'body wall would be zero or negative.',
+                submitted=od_u, bore_diameter_mm=bore_mm, unit='mm')])
+        govde_cidar = float((od_u - bore_mm) / 2.0)
+        kaynak['housing_outer_diameter_mm'] = 'request'
+    else:
+        govde_cidar = None
+        kaynak['housing_outer_diameter_mm'] = 'not_sized'
+
+    # --- 5) Momentum ve sprey -------------------------------------------
+    if secim == 'none':
+        f_rad = 0.0
+        tmr = None
+        theta = None
+    else:
+        pay_geometriden = d_u is not None or a_ann_sabit is not None
+        f_rad = (float(a_rad / a_toplam_geo) if pay_geometriden else f_def)
+        tmr = f_rad / max(1.0 - f_rad, 1e-9)
+        theta = pintle_spray_angle(tmr)
+    kaynak['radial_flow_fraction'] = (
+        'not_applicable_no_tip_holes' if secim == 'none' else
+        ('geometry' if (d_u is not None or a_ann_sabit is not None)
+         else 'design_default'))
+
+    # Akıştan boyutlandırılmış karşılaştırma (hiç ölçü verilmeseydi).
+    if secim == 'none':
+        fs_dp = float(np.sqrt(a_total / (np.pi * k * (1.0 + k))) * 1e3)
+        fs_n, fs_d = 0, 0.0
+    else:
+        fs = pintle_tip_geometry(f_def * a_total, a_total - f_def * a_total,
+                                 d_pintle_m=None, bf_target=bf_target)
+        fs_dp, fs_n, fs_d = (fs['d_pintle_mm'], fs['n_radial_holes'],
+                             fs['radial_hole_d_mm'])
+
+    kaynak_metni = {
+        'request': 'user input (pintle_diameter)',
+        'annulus_area_and_gap': ('solved from the annulus flow area and the '
+                                 'requested annular gap'),
+        'flow_sized_annulus_rule': (
+            'flow-sized by the injector circuit (annulus rule t = '
+            f'{k:g}*D_p, HRMA choice)'),
+    }[kaynak['d_pintle_mm']]
+
+    geo = {
+        'd_pintle_mm': float(d_pintle_mm),
+        'skip_distance_mm': ls_mm,
+        'ls_over_dp': ls_dp,
+        'bf': float(bf),
+        'annulus_gap_mm': t_mm,
+        'n_radial_holes': int(n),
+        'radial_hole_d_mm': float(d * 1e3),
+        'radial_flow_fraction': float(f_rad),
+        'single_fluid': True,
+        'secondary_holes': secim,
+        'radial_hole_area_mm2': float(a_rad * 1e6),
+        'annulus_area_mm2': float(a_ann * 1e6),
+        'total_flow_area_mm2': float(a_toplam_geo * 1e6),
+        'annulus_bore_diameter_mm': bore_mm,
+        'housing_outer_diameter_mm': (float(od_u) if od_u is not None
+                                      else None),
+        'housing_wall_mm': govde_cidar,
+        'housing_sized': od_u is not None,
+        'housing_basis': (PINTLE_HOUSING_GIVEN_BASIS if od_u is not None
+                          else PINTLE_HOUSING_NOT_SIZED_BASIS),
+        'tmr': (float(tmr) if tmr is not None else None),
+        'spray_half_angle_deg': (float(theta) if theta is not None
+                                 else None),
+        'spray_angle_basis': (PINTLE_SPRAY_ANGLE_BASIS if theta is not None
+                              else PINTLE_NONE_TMR_BASIS),
+        'flow_split_basis': PINTLE_FLOW_SPLIT_BASIS,
+        'flow_match': {
+            'over_determined': bool(asiri),
+            'area_ratio': float(oran),
+            'mismatch_rel': float(uyusmazlik),
+            'requested_mdot_kg_s': debi,
+            'predicted_mdot_kg_s': (debi * oran if debi is not None
+                                    else None),
+            'tolerance_rel': PINTLE_FLOW_MATCH_REL_TOL,
+            'tolerance_basis': PINTLE_FLOW_MATCH_TOL_BASIS,
+        },
+        'sizing_sources': kaynak,
+        'user_inputs': {PINTLE_REQUEST_FIELDS[a]: temiz[a]
+                        for a in PINTLE_REQUEST_FIELDS
+                        if a in temiz and a != 'secondary_holes'},
+        'd_pintle_source': kaynak_metni,
+        'flow_sized_d_pintle_mm': float(fs_dp),
+        'flow_sized_n_radial_holes': int(fs_n),
+        'flow_sized_radial_hole_d_mm': float(fs_d),
+        'flow_sizing_basis': (
+            'what the injector circuit sizes when no pintle dimension is '
+            'given: ' + PINTLE_RULE_BASIS['annulus_t_over_dp'] + ' '
+            + PINTLE_RULE_BASIS['blockage_factor_target']),
+        'design_rule_basis': dict(PINTLE_RULE_BASIS),
+    }
+    if secim == 'none':
+        geo['tmr_basis'] = PINTLE_NONE_TMR_BASIS
+        geo['skip_distance_basis'] = PINTLE_NO_SKIP_BASIS
+        geo['radial_hole_d_band_class'] = None
+    else:
+        geo['skip_distance_basis'] = PINTLE_RULE_BASIS['skip_distance']
+        geo['radial_hole_d_band_class'] = classify_orifice_d(
+            d * 1e3, ORIFICE_D_BAND_MM[0], ORIFICE_D_BAND_MM[1])
+        geo['radial_hole_d_band_mm'] = list(ORIFICE_D_BAND_MM)
+        geo['radial_hole_d_band_source'] = ORIFICE_D_BAND_SOURCE
+    if secim == 'tangential':
+        geo['tangential_angle_deg'] = ang_u
+        geo['tangential_momentum_modelled'] = False
+        geo['tangential_basis'] = PINTLE_TANGENTIAL_BASIS
+    return geo
+
+
+# ---------------------------------------------------------------------------
+# V301/E2 (Ayberk tur 1) — PİNTLE DIŞI ELEMAN GİRDİLERİ KANON DEVREYE GİRER.
+# Bu blok BİLEREK modül sonundadır: yukarıdaki satır numaraları
+# ``formal/registry.json`` Lean çapalarıdır (orificeCount, satır 1399).
+#
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/ayberk1/enjektor-genel/once.json, 1 kN,
+# Pc 20 bar, N₂O/HTPB): aynı /calculate yanıtında iki enjektör vardı.
+#   * çarpışmalı: ekran bloğu 2 çift × Ø1,541 mm (A 7,456 mm², tek fazlı SPI),
+#     devre 3 delik × Ø2,111 mm (A 10,495 mm², Dyer NHNE) — tek sayıda delik
+#     benzer-akışkan çifti OLAMAZ ve ekranın alanı devrenin iki-fazlı kütle
+#     akısında hedef debinin ~%71'ini teslim eder;
+#   * swirl: ekran tek eleman d_o 5,40 mm, devre 7 eleman × d_o 2,42 mm;
+#     form varsayılanında ekran K 0,052 / θ 64,4°, devre K 0,326 / θ 45°.
+# Kullanıcının eleman girdileri (çift sayısı, delik çapı, çarpışma açısı,
+# hedef sprey yarı açısı, girdap odası çapı, teğet giriş sayısı) yalnız ekran
+# bloğuna gidiyordu; devre çözücüsü onları hiç görmüyordu. Artık TEK çözücü
+# devredir (E1 pintle deseni): girdiler ``spec['impingement']`` /
+# ``spec['swirl']`` ile devreye girer, ekran bloğu devrenin geometrisini
+# TÜKETİR.
+# ---------------------------------------------------------------------------
+
+#: Çarpışma TAM açısı 2θ için geometrik açık aralık [derece]: 0° paralel
+#: jetler (çarpışma yok), 180° karşı karşıya jetler. Sınırlar tanım
+#: gereğidir; tasarım bandı DEĞİLDİR (bant uyarısı ekran bloğundadır).
+IMPINGEMENT_FULL_ANGLE_OPEN_RANGE_DEG = (0.0, 180.0)
+#: Benzer-akışkan çift planının hedef debi toleransı — kardeş kapıların
+#: (kırpılmış plan, pintle aşırı belirlenmiş geometri) KİMLİK takma adı;
+#: HRMA seçimi, literatür değeri yok (künye ``CLAMPED_PLAN_TARGET_FLOW_
+#: TOL_BASIS``).
+LIKE_DOUBLET_PLAN_REL_TOL = CLAMPED_PLAN_TARGET_FLOW_REL_TOL
+#: Girdap odası çapı / çıkış orifis çapı varsayılan oranı (D_s = 2,5·d_o).
+#: Kaynak: Lefebvre & McDonell, Atomization and Sprays 2. bs. Böl. 6 (tipik
+#: simplex oranı). Swirl dalındaki ``r_s = 2.5 * r_o`` ile AYNI sayı; utils
+#: ekran bloğu (``SWIRL_CHAMBER_D_RATIO``) buradan okur.
+SWIRL_CHAMBER_D_OVER_DO = 2.5
+#: Swirl dalının teğet giriş sayısı varsayılanı (eleman başına). Swirl
+#: dalındaki ``n_inlets = 3`` ile AYNI sayı; HRMA seçimi (literatür değeri
+#: yok). Hibrit /calculate yolu kendi beyanlı varsayılanını (``n_slots``)
+#: AÇIKÇA gönderir.
+SWIRL_TANGENTIAL_INLETS_DEFAULT = 3
+#: Bir devredeki delik/giriş sayısı üst sınırı — planlayıcının kendi sınırı
+#: (``DEFAULT_CONSTRAINTS['n_max']``); eleman girdileri için de aynı kapı.
+ELEMENT_COUNT_MAX = int(DEFAULT_CONSTRAINTS['n_max'])
+
+#: İstek alanı adları (/calculate) ⟷ ``spec['impingement']`` / ``spec['swirl']``
+#: anahtarları. Uç bu tabloyla çevirir; ad ikinci kez yazılmaz.
+ELEMENT_REQUEST_FIELDS = {
+    # Duş başlığı: delik sayısı ve imalat bandı artık DEVRE planlayıcısına
+    # gider (``n_orifices_ox`` / ``orifice_constraints``). ÖLÇÜLDÜ (V301/E2,
+    # 1 kN N₂O): ``n_holes = 8`` ekran bloğunda 8 × Ø1,292 mm, devrede
+    # 3 × Ø2,111 mm basıyordu; bant [1,0; 1,5] mm devreye hiç girmiyordu
+    # (ekran yalnız "bant dışı" uyarısı basıyordu).
+    'showerhead': {
+        'n_holes': 'n_holes',
+        'd_min_mm': 'hole_diameter_min',
+        'd_max_mm': 'hole_diameter_max',
+    },
+    'impingement': {
+        'pairs': 'element_pairs',
+        'hole_d_mm': 'orifice_diameter',
+        'full_angle_deg': 'impingement_angle',
+    },
+    'swirl': {
+        'theta_target_deg': 'swirl_angle',
+        'chamber_d_mm': 'swirl_chamber_diameter',
+        'n_inlets': 'n_slots',
+        'slot_w_mm': 'slot_width',
+        'slot_h_mm': 'slot_height',
+    },
+}
+
+LIKE_DOUBLET_PLAN_BASIS = (
+    'Like-on-like doublet (single liquid stream): the holes come in '
+    'same-fluid pairs, so the hole count is EVEN. The total flow area is the '
+    'injector circuit\'s (discharge coefficient and mass-flux model - SPI, '
+    'or Dyer NHNE for self-pressurised N2O - at the circuit pressure drop); '
+    'with a fixed pair count the hole diameter is solved from that area.')
+LIKE_DOUBLET_LIQUID_PLAN_BASIS = (
+    'Like-on-like doublets, liquid (two circuits): every fuel hole impinges '
+    'on another fuel hole and every oxidizer hole on another oxidizer hole, '
+    'so EACH circuit has an even hole count (pairs = holes/2); fuel and '
+    'oxidizer mix only after the two fans form. Each circuit\'s flow area is '
+    'its own injector circuit solution (discharge coefficient and mass-flux '
+    'model at the circuit pressure drop); a pair count from the request is '
+    'applied to both circuits. There is no fuel-oxidizer momentum ratio for '
+    'this element (Rupe criterion not applicable).')
+LIKE_DOUBLET_AUTO_EVEN_BASIS = (
+    'auto plan: the circuit planner returned an odd hole count, which cannot '
+    'form like-doublets; the plan uses the next even count and re-solves the '
+    'diameter from the same flow area')
+
+
+class ElementPlanInputError(ValueError):
+    """Pintle dışı eleman girdisi geçersiz/tutarsız (uçta HTTP 422).
+
+    ``invalid_fields`` E1 ``PintleGeometryInputError`` ile aynı biçimdedir:
+    ``{field, reason, message, ...}`` (``field`` İSTEK alanı adıdır).
+    """
+
+    def __init__(self, message, invalid_fields):
+        super().__init__(message)
+        self.invalid_fields = list(invalid_fields)
+
+
+def _eleman_kaydi(alan, reason, message, **ek):
+    kayit = {'field': alan, 'reason': reason, 'message': message}
+    kayit.update(ek)
+    return kayit
+
+
+def element_clean_inputs(kind, raw):
+    """Eleman girdilerinin tel/aralık kapısı (``kind``: impingement | swirl).
+
+    ``raw`` ``spec[kind]`` sözlüğüdür. Döner ``(temiz, hatalar)``; ``temiz``
+    yalnız VERİLEN alanları taşır. ``None`` / ``''`` verilmedi demektir;
+    ``0`` da bu alanlar için uçların BELGELİ "verilmedi, çözücü türetir"
+    sentinelidir (``_CALCULATE_UC_VARSAYILANLARI``: ``element_pairs`` /
+    ``swirl_*`` 0 → ``not_supplied_solver_derives``). Dize, ``bool``, NaN,
+    sonsuz, negatif, kesirli adet ve aralık dışı açı adıyla reddedilir; sayı
+    kırpılmaz, yerine varsayılan konmaz.
+    """
+    temiz, hatalar = {}, []
+    adlar = ELEMENT_REQUEST_FIELDS.get(kind)
+    if adlar is None:
+        raise ValueError(f'unknown element kind: {kind!r}')
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        return temiz, [_eleman_kaydi(
+            kind, 'not_an_object',
+            f"the '{kind}' specification must be an object of named fields")]
+    bilinen = set(adlar)
+    for anahtar in raw:
+        if anahtar not in bilinen:
+            hatalar.append(_eleman_kaydi(
+                str(anahtar)[:40], 'unknown_field',
+                f"'{kind}' accepts only: " + ', '.join(sorted(bilinen))
+                + '. The field was not mapped to anything.'))
+    for anahtar, alan in adlar.items():
+        v = raw.get(anahtar)
+        if v is None or v == '':
+            continue
+        sayi, neden = _pintle_sayi(v)
+        if sayi is not None and sayi == 0.0:
+            continue                       # belgeli "verilmedi" sentineli
+        if neden is None and anahtar in ('pairs', 'n_inlets', 'n_holes'):
+            if sayi != int(sayi) or sayi < 1:
+                neden = 'not_a_positive_whole_number'
+            else:
+                ust = (ELEMENT_COUNT_MAX // 2 if anahtar == 'pairs'
+                       else ELEMENT_COUNT_MAX)
+                if sayi > ust:
+                    neden = 'out_of_range'
+        elif neden is None and anahtar in ('hole_d_mm', 'chamber_d_mm',
+                                           'slot_w_mm', 'slot_h_mm',
+                                           'd_min_mm', 'd_max_mm'):
+            if not sayi > 0.0:
+                neden = 'not_positive'
+        elif neden is None and anahtar == 'full_angle_deg':
+            lo, hi = IMPINGEMENT_FULL_ANGLE_OPEN_RANGE_DEG
+            if not (lo < sayi < hi):
+                neden = 'out_of_range'
+        elif neden is None and anahtar == 'theta_target_deg':
+            if not (_SWIRL_THETA_MIN_DEG <= sayi <= _SWIRL_THETA_MAX_DEG):
+                neden = 'out_of_range'
+        if neden:
+            ek = {'submitted': str(v)[:40]}
+            if anahtar == 'pairs':
+                ek.update(unit='count',
+                          accepted_range=[1, ELEMENT_COUNT_MAX // 2])
+                metin = (f"'{alan}' is the number of like-doublet pairs (two "
+                         f'holes each); it must be a whole number between 1 '
+                         f'and {ELEMENT_COUNT_MAX // 2} (the circuit planner '
+                         f'limit of {ELEMENT_COUNT_MAX} holes).')
+            elif anahtar == 'n_holes':
+                ek.update(unit='count', accepted_range=[1, ELEMENT_COUNT_MAX])
+                metin = (f"'{alan}' is the number of showerhead orifices; it "
+                         f'must be a whole number between 1 and '
+                         f'{ELEMENT_COUNT_MAX} (the circuit planner limit).')
+            elif anahtar == 'n_inlets':
+                ek.update(unit='count', accepted_range=[1, ELEMENT_COUNT_MAX])
+                metin = (f"'{alan}' is the number of tangential inlet slots "
+                         f'per swirl element; it must be a whole number '
+                         f'between 1 and {ELEMENT_COUNT_MAX}.')
+            elif anahtar in ('hole_d_mm', 'chamber_d_mm', 'slot_w_mm',
+                             'slot_h_mm', 'd_min_mm', 'd_max_mm'):
+                ek.update(unit='mm')
+                metin = (f"'{alan}' is a length in mm and must be a finite "
+                         'positive JSON number.')
+            elif anahtar == 'full_angle_deg':
+                lo, hi = IMPINGEMENT_FULL_ANGLE_OPEN_RANGE_DEG
+                ek.update(unit='deg', accepted_range=[lo, hi])
+                metin = (f"'{alan}' is the FULL angle 2θ between the two "
+                         f'jets of a doublet; it must lie strictly between '
+                         f'{lo:g} deg (parallel jets, no impingement) and '
+                         f'{hi:g} deg (head-on jets).')
+            else:
+                ek.update(unit='deg', accepted_range=[_SWIRL_THETA_MIN_DEG,
+                                                      _SWIRL_THETA_MAX_DEG])
+                metin = (f"'{alan}' is the TARGET spray half-angle; outside "
+                         f'[{_SWIRL_THETA_MIN_DEG:.1f}, '
+                         f'{_SWIRL_THETA_MAX_DEG:.1f}] deg the '
+                         'Giffen-Muraszew solver cannot find a swirl geometry '
+                         'that produces it, and it is NOT clamped.')
+            hatalar.append(_eleman_kaydi(alan, neden, metin, **ek))
+            continue
+        temiz[anahtar] = (int(sayi) if anahtar in ('pairs', 'n_inlets',
+                                                    'n_holes')
+                          else float(sayi))
+    if kind == 'showerhead':
+        d_lo = temiz.get('d_min_mm', DEFAULT_CONSTRAINTS['d_min_mm'])
+        d_hi = temiz.get('d_max_mm', DEFAULT_CONSTRAINTS['d_max_mm'])
+        if ('d_min_mm' in temiz or 'd_max_mm' in temiz) and not d_lo < d_hi:
+            hatalar.append(_eleman_kaydi(
+                'hole_diameter_max' if 'd_max_mm' in temiz
+                else 'hole_diameter_min', 'band_inverted',
+                f'the hole diameter band must have min < max (got '
+                f'{d_lo:g}-{d_hi:g} mm; a value left empty takes the '
+                f'{DEFAULT_CONSTRAINTS["d_min_mm"]:g}-'
+                f'{DEFAULT_CONSTRAINTS["d_max_mm"]:g} mm default).',
+                submitted={'hole_diameter_min': temiz.get('d_min_mm'),
+                           'hole_diameter_max': temiz.get('d_max_mm')},
+                unit='mm'))
+    return temiz, hatalar
+
+
+def _impingement_half_angle(spec):
+    """Çarpışma yarı açısı ve künyesi (``spec['impingement']``'tan).
+
+    Alan verilmezse varsayılan ``IMPINGE_HALF_ANGLE_DEG`` ve künye metni
+    swirl/çift dallarının eski metniyle BİT-AYNI (sıvı ve panel yolları
+    değişmez).
+    """
+    imp = spec.get('impingement') if isinstance(spec, dict) else None
+    tam = None
+    if imp is not None:
+        temiz, hatalar = element_clean_inputs('impingement', imp)
+        plan = [a for a in ('pairs', 'hole_d_mm') if a in temiz]
+        if plan:
+            hatalar = hatalar + [_eleman_kaydi(
+                ELEMENT_REQUEST_FIELDS['impingement'][a],
+                'not_read_by_this_solver',
+                'the pair count / hole diameter plan of a like-doublet is '
+                'resolved by design_like_doublet (hybrid like-on-like '
+                'doublet); design_injector does not read it and does not '
+                'ignore it silently') for a in plan]
+        if hatalar:
+            raise ElementPlanInputError(
+                'Impingement element inputs rejected: ' + '; '.join(
+                    f"{h['field']} ({h['reason']})" for h in hatalar),
+                hatalar)
+        tam = temiz.get('full_angle_deg')
+    if tam is None:
+        return IMPINGE_HALF_ANGLE_DEG, (
+            f'2*theta = {2 * IMPINGE_HALF_ANGLE_DEG:.0f} deg impinging '
+            'doublet design choice; the half angle is a fixed element '
+            'geometry choice (NASA SP-8089), NOT solved from the jet '
+            'momentum or the spray field')
+    tam = float(tam)
+    return tam / 2.0, (
+        f'2*theta = {tam:g} deg from the request (impingement_angle); an '
+        'element geometry choice, NOT solved from the jet momentum or the '
+        'spray field')
+
+
+def _swirl_element_overrides(spec, r_o):
+    """Swirl dalının girdap odası yarıçapı ve teğet giriş sayısı.
+
+    Verilmezse ``r_s = SWIRL_CHAMBER_D_OVER_DO/2 · d_o`` ve
+    ``SWIRL_TANGENTIAL_INLETS_DEFAULT`` (eski sayılarla bit-aynı).
+    Döner ``(r_s [m], n_inlets, chamber_source)``; oda çapı istekten
+    gelmediyse ``chamber_source`` ``None``dır (2,5·d_o varsayımı, dalın
+    ``swirl_chamber_radius_assumed`` künyesi).
+    """
+    sw = spec.get('swirl') if isinstance(spec, dict) else None
+    sw = sw if isinstance(sw, dict) else {}
+    d_s = sw.get('chamber_d_mm')
+    n_in = sw.get('n_inlets')
+    if d_s not in (None, '', 0):
+        r_s = float(d_s) * 0.5e-3
+        kaynak = 'request (swirl_chamber_diameter)'
+    else:
+        r_s = SWIRL_CHAMBER_D_OVER_DO * r_o
+        kaynak = None
+    n_inlets = (int(n_in) if n_in not in (None, '', 0)
+                else SWIRL_TANGENTIAL_INLETS_DEFAULT)
+    return r_s, n_inlets, kaynak
+
+
+def design_like_doublet(spec):
+    """Hibrit benzer-akışkan çift planı: ÇİFT sayıda delik, kanon alan.
+
+    ``spec['impingement']`` isteğe bağlı ``pairs`` (çift sayısı),
+    ``hole_d_mm`` (delik çapı) ve ``full_angle_deg`` taşır (kapı
+    ``element_clean_inputs``). Kurallar:
+
+    * hiçbiri: devrenin otomatik planı; delik sayısı tekse bir sonraki çift
+      sayıya geçilir ve çap AYNI akış alanından yeniden çözülür;
+    * yalnız çift sayısı: n = 2·çift sabit, çap akış alanından;
+    * çap (çift sayısı verilmiş ya da verilmemiş): çift sayısı en yakın tam
+      sayıdır (ya da verilendir); 2·çift·(π d²/4) devrenin akış alanından
+      ``LIKE_DOUBLET_PLAN_REL_TOL``'dan fazla saparsa ``ElementPlanInputError``
+      (422, en yakın planlarla). Tolerans içindeyse yayımlanan çap o delik
+      sayısında hedef debiyi TAM teslim eden çaptır; istenen çap ve sapma
+      ``element_plan`` künyesinde durur.
+
+    Döner: ``design_injector`` sözlüğü + ``element_plan`` künyesi.
+    """
+    if not isinstance(spec, dict):
+        raise ValueError('spec must be a dictionary')
+    imp = spec.get('impingement')
+    temiz, hatalar = element_clean_inputs('impingement', imp)
+    if hatalar:
+        raise ElementPlanInputError(
+            'Impingement element inputs rejected: ' + '; '.join(
+                f"{h['field']} ({h['reason']})" for h in hatalar), hatalar)
+    taban = {k: v for k, v in spec.items()
+             if k not in ('n_orifices_ox', 'n_orifices_fuel')}
+    taban['injector_type'] = 'like_impinging'
+    # V301/L-C: sıvıda (iki devre) yakıt devresi de KENDİ benzer-akışkan
+    # çiftlerini kurar; çift sayısı kuralı iki devreye ayrı ayrı uygulanır.
+    iki_devre = (spec.get('motor_type') == 'liquid'
+                 and spec.get('mdot_fuel') is not None)
+    if iki_devre and 'hole_d_mm' in temiz:
+        raise ElementPlanInputError(
+            'Impingement element inputs rejected: orifice_diameter '
+            '(not_applicable_to_liquid_like_doublet)', [_eleman_kaydi(
+                ELEMENT_REQUEST_FIELDS['impingement']['hole_d_mm'],
+                'not_applicable_to_liquid_like_doublet',
+                'a liquid like-on-like doublet has two circuits (fuel pairs '
+                'and oxidizer pairs) with different hole diameters; a single '
+                'hole diameter cannot fix both. Give the pair count, or '
+                'leave it empty to let each circuit size its holes.',
+                submitted=temiz['hole_d_mm'], unit='mm')])
+    # Devre girdisi yalnız açıyı taşır; çift sayısı/çap planı burada kurulur.
+    taban['impingement'] = ({'full_angle_deg': temiz['full_angle_deg']}
+                            if 'full_angle_deg' in temiz else None)
+    if taban['impingement'] is None:
+        taban.pop('impingement')
+    cift = temiz.get('pairs')
+    cap = temiz.get('hole_d_mm')
+
+    def _tasarla(n_delik, n_yakit=None):
+        s = dict(taban)
+        if n_delik is not None:
+            s['n_orifices_ox'] = int(n_delik)
+        if n_yakit is not None:
+            s['n_orifices_fuel'] = int(n_yakit)
+        return design_injector(s)
+
+    plan = {'basis': LIKE_DOUBLET_PLAN_BASIS,
+            'requested_pairs': cift, 'requested_hole_d_mm': cap}
+    if iki_devre:
+        # Sıvı: çift sayısı verildiyse İKİ devrede de o sayıda çift (devre
+        # başına 2·çift delik); verilmediyse her devrenin otomatik planı,
+        # tek sayıda delik bir sonraki çift sayıya yuvarlanır ve çap AYNI
+        # akış alanından yeniden çözülür (hibrit kuralının iki devreye
+        # uygulanışı).
+        if cift is not None:
+            det = _tasarla(2 * cift, 2 * cift)
+            plan['pair_count_source'] = 'request (element_pairs)'
+            plan['fuel_pair_count_source'] = 'request (element_pairs)'
+        else:
+            det = _tasarla(None, None)
+            if det.get('status') == 'success':
+                n0 = int(det['ox_circuit']['n_orifices'])
+                nf0 = int(det['fuel_circuit']['n_orifices'])
+                if n0 % 2 or nf0 % 2:
+                    det = _tasarla(n0 + (n0 % 2), nf0 + (nf0 % 2))
+                for onek, n_ham in (('', n0), ('fuel_', nf0)):
+                    if n_ham % 2:
+                        plan[onek + 'pair_count_source'] = \
+                            LIKE_DOUBLET_AUTO_EVEN_BASIS
+                        plan[onek + 'auto_plan_odd_hole_count'] = n_ham
+                    else:
+                        plan[onek + 'pair_count_source'] = (
+                            'auto plan (the circuit planner count is even)')
+    elif cap is None:
+        if cift is not None:
+            det = _tasarla(2 * cift)
+            plan['pair_count_source'] = 'request (element_pairs)'
+        else:
+            det = _tasarla(None)
+            if det.get('status') == 'success':
+                n0 = int(det['ox_circuit']['n_orifices'])
+                if n0 % 2:
+                    det = _tasarla(n0 + 1)
+                    plan['pair_count_source'] = LIKE_DOUBLET_AUTO_EVEN_BASIS
+                    plan['auto_plan_odd_hole_count'] = n0
+                else:
+                    plan['pair_count_source'] = ('auto plan (the circuit '
+                                                 'planner count is even)')
+    else:
+        det0 = _tasarla(2 * cift if cift is not None else None)
+        if det0.get('status') != 'success':
+            return det0
+        a_akis = float(det0['ox_circuit']['total_area_mm2'])
+        a_delik = np.pi * cap ** 2 / 4.0
+        p = cift if cift is not None else max(1, int(round(
+            a_akis / (2.0 * a_delik))))
+        oran = 2.0 * p * a_delik / a_akis
+        if abs(oran - 1.0) > LIKE_DOUBLET_PLAN_REL_TOL:
+            p_alt = max(1, int(np.floor(a_akis / (2.0 * a_delik))))
+            p_ust = p_alt + 1
+            yakin = [{'pairs': q,
+                      'flow_area_ratio': float(2.0 * q * a_delik / a_akis),
+                      'hole_d_mm_for_exact_flow': float(np.sqrt(
+                          4.0 * a_akis / (np.pi * 2.0 * q)))}
+                     for q in sorted({p_alt, p_ust, p})]
+            alan = ('orifice_diameter' if cift is None else 'element_pairs')
+            raise ElementPlanInputError(
+                'Impingement plan does not deliver the target flow', [
+                    _eleman_kaydi(
+                        alan, 'flow_mismatch',
+                        f'{p} pair(s) of {cap:g} mm holes give a flow area '
+                        f'{oran:.3f} times the area the injector circuit '
+                        f'needs for the target oxidizer flow at its '
+                        f'pressure drop ({a_akis:.4g} mm^2); the tolerance '
+                        f'is {LIKE_DOUBLET_PLAN_REL_TOL * 100:g}%. Choose '
+                        'one of the listed plans, or leave the hole '
+                        'diameter empty to let the circuit size it.',
+                        submitted={'element_pairs': cift,
+                                   'orifice_diameter': cap},
+                        flow_area_ratio=float(oran),
+                        required_flow_area_mm2=a_akis,
+                        nearest_plans=yakin,
+                        tolerance_rel=LIKE_DOUBLET_PLAN_REL_TOL,
+                        tolerance_basis=CLAMPED_PLAN_TARGET_FLOW_TOL_BASIS)])
+        det = _tasarla(2 * p)
+        plan['pair_count_source'] = (
+            'request (element_pairs)' if cift is not None else
+            'nearest whole pair count for the requested hole diameter')
+        plan['requested_flow_area_ratio'] = float(oran)
+        plan['hole_d_basis'] = (
+            'the published hole diameter delivers the target flow exactly '
+            'with this hole count; the requested diameter gives the flow '
+            'area ratio above (within the tolerance)')
+    if det.get('status') == 'success':
+        n = int(det['ox_circuit']['n_orifices'])
+        plan['pairs'] = n // 2
+        plan['hole_count'] = n
+        plan['hole_d_mm'] = float(det['ox_circuit']['orifice_d_mm'])
+        if cap is not None:
+            plan['hole_d_deviation_rel'] = float(plan['hole_d_mm'] / cap - 1.0)
+        if iki_devre and det.get('fuel_circuit'):
+            nf = int(det['fuel_circuit']['n_orifices'])
+            plan['fuel_pairs'] = nf // 2
+            plan['fuel_hole_count'] = nf
+            plan['fuel_hole_d_mm'] = float(
+                det['fuel_circuit']['orifice_d_mm'])
+            plan['basis'] = LIKE_DOUBLET_LIQUID_PLAN_BASIS
+        plan['tolerance_rel'] = LIKE_DOUBLET_PLAN_REL_TOL
+        det['element_plan'] = plan
+        # Desen açıklaması çift sayısını devrenin planından yazar (eski
+        # ``n // 2`` tek sayıda delikte bir deliği açıkta bırakıyordu).
+    return det
+
+
+#: Swirl yuva (slot) modunda K = A_p/(D_s·d_o(K)) ikiye bölmeyle çözülür.
+#: Yineleme sayısı ve yayın denetimi toleransı SAYISAL çözüm ayarıdır
+#: (fizik değil): 200 bölme K aralığını makine duyarlığına indirir; yayımlanan
+#: giriş alanı istenen yuva alanından 1e-6'dan fazla saparsa sonuç
+#: yayımlanmaz.
+SWIRL_SLOT_BISECTION_ITER = 200
+SWIRL_SLOT_AREA_CHECK_TOL = 1e-6
+
+SWIRL_ELEMENT_PLAN_BASIS = (
+    'Pressure-swirl elements: the injector circuit plans the element count '
+    'and the exit orifice diameter from the oxidizer flow area (its mass-flux '
+    'model - SPI, or Dyer NHNE for self-pressurised N2O - with the swirl '
+    'discharge coefficient Cd(K)); the tangential inlet area of each element '
+    'is A_p = K*D_s*d_o (Lefebvre & McDonell, Atomization and Sprays 2nd ed. '
+    'Ch. 6).')
+
+
+def _swirl_hata(hatalar):
+    return ElementPlanInputError(
+        'Swirl element inputs rejected: ' + '; '.join(
+            f"{h['field']} ({h['reason']})" for h in hatalar), hatalar)
+
+
+def design_swirl_element(spec):
+    """Hibrit basınç-swirl elemanı — tek kanon (V301/E2).
+
+    ``spec['swirl']`` isteğe bağlı: ``theta_target_deg`` (hedef sprey yarı
+    açısı), ``chamber_d_mm`` (girdap odası çapı D_s), ``n_inlets`` (eleman
+    başına teğet yuva sayısı), ``slot_w_mm`` / ``slot_h_mm`` (yuva genişliği /
+    yüksekliği; İKİSİ BİRLİKTE). Kapı ``element_clean_inputs``.
+
+    * Yuva ölçüsü yoksa: K hedef açıdan (verilmezse devrenin 45°'si) —
+      ``design_injector`` ile birebir aynı çağrı.
+    * Yuva ölçüsü varsa: K yuva alanından çözülür. Eleman sayısı devrenin
+      planından alınır ve SABİTLENİR; sonra K = A_p/(D_s·d_o(K)) sabit-nokta
+      denklemi ikiye bölmeyle çözülür (A_p = n_yuva·w·h eleman başına; D_s
+      verilmezse ``SWIRL_CHAMBER_D_OVER_DO``·d_o). Çözüm Giffen-Muraszew
+      zarfının (K ∈ [0.02, 20]) dışına düşerse ``ElementPlanInputError``
+      (422) — K kırpılmaz. Yuvalar ile hedef açı
+      birlikte verilirse K iki kez belirlenmiş olur: 422.
+
+    Döner: ``design_injector`` sözlüğü + ``element_plan`` künyesi.
+    """
+    if not isinstance(spec, dict):
+        raise ValueError('spec must be a dictionary')
+    sw = spec.get('swirl')
+    sw = dict(sw) if isinstance(sw, dict) else ({} if sw is None else sw)
+    k_istek = sw.pop('K', None) if isinstance(sw, dict) else None
+    temiz, hatalar = element_clean_inputs('swirl', sw)
+    w = temiz.get('slot_w_mm')
+    h = temiz.get('slot_h_mm')
+    if (w is None) != (h is None):
+        eksik = 'slot_height' if h is None else 'slot_width'
+        hatalar.append(_eleman_kaydi(
+            eksik, 'incomplete_pair',
+            "the slot width and the slot height fix the tangential inlet "
+            "area only together; give both or leave both empty (the circuit "
+            "then sizes the slots from the target spray angle)"))
+    if w is not None and h is not None and 'theta_target_deg' in temiz:
+        hatalar.append(_eleman_kaydi(
+            'swirl_angle', 'conflicts_with_slot_geometry',
+            'the slot geometry already fixes the atomizer constant K and '
+            'with it the spray angle; a target spray half-angle cannot also '
+            'be imposed. Leave one of them empty.',
+            submitted=temiz['theta_target_deg']))
+    if k_istek is not None and (w is not None or 'theta_target_deg' in temiz):
+        hatalar.append(_eleman_kaydi(
+            'K', 'conflicts_with_swirl_inputs',
+            'K, the slot geometry and the target spray half-angle each fix '
+            'the atomizer constant; give only one of them.'))
+    if hatalar:
+        raise _swirl_hata(hatalar)
+    devre_sw = {a: temiz[a] for a in ('theta_target_deg', 'chamber_d_mm',
+                                      'n_inlets') if a in temiz}
+    if k_istek is not None:
+        devre_sw['K'] = k_istek
+    taban = {k: v for k, v in spec.items() if k != 'swirl'}
+    taban['injector_type'] = 'swirl'
+
+    def _tasarla(ek_sw, n_delik=None):
+        s = dict(taban)
+        birlesik = dict(devre_sw)
+        birlesik.update(ek_sw or {})
+        if birlesik:
+            s['swirl'] = birlesik
+        if n_delik is not None:
+            s['n_orifices_ox'] = int(n_delik)
+        return design_injector(s)
+
+    plan = {'basis': SWIRL_ELEMENT_PLAN_BASIS}
+    if w is None:
+        det = _tasarla(None)
+        plan['k_source'] = ('request (K)' if k_istek is not None else
+                            'target spray half-angle (request swirl_angle)'
+                            if 'theta_target_deg' in temiz else
+                            'circuit default target spray half-angle')
+    else:
+        det = _tasarla(None)
+        if det.get('status') != 'success':
+            return det
+        oxc0 = det['ox_circuit']
+        n_el = int(oxc0['n_orifices'])
+        n_yuva = int(temiz.get('n_inlets') or SWIRL_TANGENTIAL_INLETS_DEFAULT)
+        a_p = n_yuva * w * h * 1e-6                     # m², eleman başına
+        # Devrenin kütle akısı G = ṁ/(Cd·A): SPI'de √(2ρΔP), NHNE'de
+        # iki-fazlı akı; ikisinde de ṁ Cd·A ile DOĞRUSALDIR (nhne_mass_flow),
+        # yani G Cd'den bağımsızdır. Eleman sayısı sabitken çıkış orifis
+        # çapı d_o(K) = √(4ṁ/(π·n·Cd(K)·G)) olur ve A_p(K) = K·D_s·d_o
+        # K'da monoton artar (eski ekran bloğu çözücüsünün aynı gerekçesi),
+        # bu yüzden ikiye bölme yeterlidir.
+        mdot = float(spec.get('mdot_ox'))
+        g_akisi = mdot / (float(oxc0['cd'])
+                          * float(oxc0['total_area_mm2']) * 1e-6)
+
+        def _d_o(k_):
+            return float(np.sqrt(4.0 * mdot / (
+                np.pi * n_el * swirl_solve(k_)['cd'] * g_akisi)))
+
+        def _a_p(k_):
+            d_o_ = _d_o(k_)
+            d_s_ = (temiz['chamber_d_mm'] * 1e-3 if 'chamber_d_mm' in temiz
+                    else SWIRL_CHAMBER_D_OVER_DO * d_o_)
+            return k_ * d_s_ * d_o_
+
+        a_lo, a_hi = _a_p(_SWIRL_K_MIN), _a_p(_SWIRL_K_MAX)
+        if not (a_lo <= a_p <= a_hi):
+            raise _swirl_hata([_eleman_kaydi(
+                'slot_width', 'outside_swirl_envelope',
+                f'{n_yuva} slot(s) of {w:g} x {h:g} mm per element '
+                f'({a_p * 1e6:.4g} mm^2) are outside what the Giffen-Muraszew '
+                f'solution can produce with the {n_el}-element plan: the '
+                f'atomizer constant K must lie in [{_SWIRL_K_MIN:g}, '
+                f'{_SWIRL_K_MAX:g}], i.e. a tangential inlet area of '
+                f'{a_lo * 1e6:.4g}-{a_hi * 1e6:.4g} mm^2 per element. K was '
+                'NOT clamped. Change the slot size or count, or leave the '
+                'slots empty to size them from the target spray angle.',
+                submitted={'slot_width': w, 'slot_height': h,
+                           'n_slots': n_yuva},
+                accepted_inlet_area_mm2_per_element=[a_lo * 1e6,
+                                                     a_hi * 1e6])])
+        lo_k, hi_k = _SWIRL_K_MIN, _SWIRL_K_MAX
+        for _ in range(SWIRL_SLOT_BISECTION_ITER):
+            orta = 0.5 * (lo_k + hi_k)
+            if _a_p(orta) < a_p:
+                lo_k = orta
+            else:
+                hi_k = orta
+        k = 0.5 * (lo_k + hi_k)
+        det = _tasarla({'K': k}, n_delik=n_el)
+        if det.get('status') != 'success':
+            return det
+        a_p_yayin = float((det.get('swirl_geometry') or {}).get(
+            'tangential_inlet_area_mm2', float('nan'))) * 1e-6
+        if not (abs(a_p_yayin / a_p - 1.0) <= SWIRL_SLOT_AREA_CHECK_TOL):
+            raise _swirl_hata([_eleman_kaydi(
+                'slot_width', 'not_solvable',
+                'the slot geometry did not reproduce itself through the '
+                f'circuit solution (published inlet area {a_p_yayin * 1e6:.6g}'
+                f' mm^2 against {a_p * 1e6:.6g} mm^2); no geometry was '
+                'published', submitted={'slot_width': w, 'slot_height': h})])
+        plan['k_source'] = ('slot geometry (request slot_width x '
+                            'slot_height x n_slots), K = A_p/(D_s*d_o) '
+                            'solved with the element count held at the '
+                            'circuit plan')
+        plan['slot_w_mm'] = float(w)
+        plan['slot_h_mm'] = float(h)
+    if det.get('status') == 'success':
+        g = det.get('swirl_geometry') or {}
+        plan['elements'] = int(det['ox_circuit']['n_orifices'])
+        plan['exit_orifice_d_mm'] = float(det['ox_circuit']['orifice_d_mm'])
+        plan['atomizer_constant_K'] = g.get('K')
+        plan['tangential_inlets_per_element'] = g.get('tangential_inlets')
+        plan['tangential_inlet_area_mm2_per_element'] = g.get(
+            'tangential_inlet_area_mm2')
+        plan['swirl_chamber_d_mm'] = g.get('swirl_chamber_d_mm')
+        det['element_plan'] = plan
+    return det
+
+
+#: V301/E2 (E1 devri madde 5) — hibrit pintle radyal akış payının kabul
+#: bandı. ``_resolve_pintle_geometry_core`` payı bu banda ``np.clip`` ile
+#: kırpar (E1 bölgesi, değiştirilmedi); ``/api/injector-design`` ucu bandın
+#: dışını artık 422 ile adıyla reddeder, yani kırpma ürün yolunda sessizce
+#: çalışmaz. Sayılar o kırpmanın sayılarıdır (bekçi
+#: ``tests/test_v301_enjektor_genel_panel.py`` ikisini eşitler); HRMA
+#: seçimi, literatür değeri yok (``PINTLE_RULE_BASIS['radial_flow_fraction']``).
+PINTLE_RADIAL_FRACTION_BAND = (0.1, 0.9)
+
+
+# ---------------------------------------------------------------------------
+# v3.0.1 (V301/H2) — HİBRİT TEK AKIŞKANLI KOAKSİYEL ELEMAN (devre kanonu)
+#
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/bilinen/hibrit/once.json, taban
+# 6369bf037; E2 KARAR-7): devre modelinde tek akışkanlı koaksiyel eleman
+# yoktu. Hibrit 'coaxial' isteği ``design_injector``da "Invalid
+# injector_type" ile düşüyor, motor bloğu ``not_analyzed`` kalıyordu; plaka
+# (ekran) bloğu kendi ΔP'siyle boyutlanıyordu (istekteki 4 bar = %20 P_c,
+# kaynak "user override"). Kendinden basınçlı N₂O'da besleme gerçeği
+# P_sat − P_c = 30,54 bar'dır; plaka P₁ = 24 bar < P_v = 50,54 bar ile var
+# olmayan bir orifis için K_c = −6,64 basıyordu.
+#
+# Eleman artık devrenin kendisidir: TEK akışkan (oksitleyici), diğer
+# tiplerle AYNI besleme (P_sat, kullanıcı tank basıncı ya da tasarım ΔP
+# oranı), AYNI Cd tablosu ve AYNI kütle akısı modeli (SPI; kendinden
+# basınçlı N₂O'da Dyer NHNE). İç jet ve dış anülüs aynı manifolddan, aynı
+# ΔP ve aynı Cd ile beslenir: ṁ_dal = Cd·A_dal·G ve G dal başına aynıdır
+# (``nhne_mass_flow`` delik geometrisi almaz) — toplam ölçüm alanı iç jete
+# f, anülüse 1 − f oranında bölünür (pintle akış payıyla aynı gerekçe,
+# ``PINTLE_FLOW_SPLIT_BASIS``). Dal başına ayrı Cd ve iç kayıplar
+# MODELLENMEZ (beyan ``flow_split_basis``).
+#
+# Sabitler TEK yerde (bu modül); ekran bloğu (hrma/utils/injector_design.py)
+# ve uç (app.py) bu adların KİMLİK takma adlarını okur (E2'nin
+# ``SWIRL_CHAMBER_D_RATIO`` deseni). Sayılar DEĞİŞMEDİ.
+# ---------------------------------------------------------------------------
+#: Devrenin tek akışkanlı koaksiyel eleman sözcüğü (``model_injector_type``).
+#: Sıvı motorun iki akışkanlı ``coax_swirl`` elemanından AYRI bir addır;
+#: ``_VALID_TYPES`` listesine girmez (sıvı yolu ve onun hata metinleri
+#: bit-aynı kalır), çağrı ``design_coaxial_element``ten geçer.
+COAXIAL_SINGLE_FLUID_TYPE = 'coaxial_single_fluid'
+#: İç jet debi payı varsayılanı ve kabul bandı — HRMA seçimi, literatür
+#: değeri yok (V301/E2: bant dışı KIRPILMAZ, uçta 422).
+COAX_INNER_FLOW_FRACTION = 0.6      # iç jet debi payı (kalan: dış anülüs)
+COAX_INNER_FLOW_FRACTION_BAND = (0.1, 0.9)
+COAX_INNER_FLOW_FRACTION_BASIS = (
+    'HRMA choice (no literature value): default inner-jet share 0.6 of the '
+    'oxidizer flow, accepted band 0.1-0.9; the single-fluid coaxial element '
+    'splits ONE metering area between the inner jet and the outer annulus '
+    'with the same discharge coefficient')
+#: İç jet girintisi ≈ 1·d_iç ve iç boru et kalınlığı max(0,5 mm, 0,1·d_iç):
+#: HRMA plaka modeli kuralları, literatür değeri yok (sayılar ekran
+#: bloğunun v2.6.x değerleri; V301/H2'de yalnız TEK yere taşındı).
+COAX_RECESS_LD = 1.0                # iç jet girintisi ≈ 1·d_inner
+COAX_WALL_MIN_MM = 0.5              # iç boru et kalınlığı alt sınırı
+COAX_WALL_T_OVER_D = 0.1            # iç boru et kalınlığı / d_inner
+COAX_WALL_BASIS = (
+    'HRMA plate-model rule (no literature value): inner post wall = '
+    'max(0.5 mm, 0.1 x inner jet diameter)')
+COAX_RECESS_BASIS = (
+    'computed: recess = 1 x inner jet diameter (HRMA plate-model rule, no '
+    'literature value)')
+COAX_ELEMENT_COUNT_BASIS = (
+    'ONE coaxial element carries the whole oxidizer flow (the plate model of '
+    'v2.6.x, unchanged); multi-element coaxial arrays are not modelled')
+COAXIAL_ELEMENT_PLAN_BASIS = (
+    'Single-fluid coaxial element (hybrid: inner jet + outer annulus, both '
+    'oxidizer). The total metering area is the injector circuit\'s (its '
+    'discharge coefficient and mass-flux model - SPI, or Dyer NHNE for '
+    'self-pressurised N2O - at the circuit pressure drop); the inner jet '
+    'takes the share f of it, the annulus the rest.')
+COAXIAL_FLOW_SPLIT_BASIS = (
+    'both branches are fed from the same manifold at the same pressure drop '
+    'with the circuit\'s single discharge coefficient and mass flux G, so '
+    'mdot_branch = Cd*A_branch*G and the flow share equals the area share '
+    '(the same basis as the pintle flow split); separate branch discharge '
+    'coefficients and internal losses are NOT modelled')
+COAXIAL_ATOMIZATION_BASIS = (
+    'NOT MODELLED: no atomization correlation for a single-fluid coaxial '
+    '(round jet + annular sheet) element is implemented, and the plain-'
+    'orifice Elkotb correlation does not describe the annular sheet; no SMD '
+    'or spray angle is published')
+#: Motor özetindeki ``number_of_orifices`` / ``orifice_diameter_mm``
+#: koaksiyelde devrenin EŞDEĞER düz orifis planıdır (Cd'nin L/D'si ve toplam
+#: alan onunla çözülür) — pintle'ın ``PINTLE_EQUIVALENT_ORIFICE_PLAN_BASIS``
+#: deseni.
+COAXIAL_EQUIVALENT_ORIFICE_PLAN_BASIS = (
+    'number_of_orifices / orifice_diameter_mm are the circuit\'s EQUIVALENT '
+    'straight-orifice plan of the coaxial element (the total metering area '
+    'and the discharge coefficient are solved with it); the element itself '
+    'is ONE inner jet + annulus - see coaxial_geometry')
+
+
+def coaxial_element_geometry(a_total_m2, f_inner, wall_thickness_m=None):
+    """Tek akışkanlı koaksiyel elemanın geometrisi — TEK işlev.
+
+    Devre (``design_coaxial_element``) ve ΔP açık ezmesindeki ekran bloğu
+    aynı işlevi çağırır. Toplam ölçüm alanı A [m²] iç jete ``f_inner``,
+    anülüse ``1 − f_inner`` oranında bölünür; iç boru et kalınlığı
+    verilmezse max(``COAX_WALL_MIN_MM``, ``COAX_WALL_T_OVER_D``·d_iç).
+    Anülüs iç çapı D_i = d_iç + 2t, dış çapı alanından çözülür:
+    D_o = √(D_i² + 4·A_anülüs/π). Girinti ``COAX_RECESS_LD``·d_iç.
+    Döner (SI, m / m²): ``d_inner, t_wall, D_i, gap, D_o, recess,
+    A_inner, A_annulus``.
+    """
+    A_inner = f_inner * a_total_m2
+    d_inner = 2 * np.sqrt(A_inner / np.pi)
+    if wall_thickness_m is not None and wall_thickness_m > 0:
+        t_wall = wall_thickness_m
+    else:
+        t_wall = max(COAX_WALL_MIN_MM / 1000, COAX_WALL_T_OVER_D * d_inner)
+    A_ann = a_total_m2 - A_inner
+    D_i = d_inner + 2 * t_wall
+    gap = (np.sqrt(D_i ** 2 + 4 * A_ann / np.pi) - D_i) / 2
+    D_o = D_i + 2 * gap
+    recess = COAX_RECESS_LD * d_inner
+    return {'d_inner': d_inner, 't_wall': t_wall, 'D_i': D_i, 'gap': gap,
+            'D_o': D_o, 'recess': recess, 'A_inner': A_inner,
+            'A_annulus': A_ann}
+
+
+def coaxial_inner_fraction(raw):
+    """İç jet debi payının değer kapısı → (f, None) ya da (None, kayıt).
+
+    JSON sayısı (``bool``/dize sayı değildir), sonlu ve
+    ``COAX_INNER_FLOW_FRACTION_BAND`` içinde olmalı; KIRPILMAZ.
+    """
+    from hrma.utils.input_guard import finite_number, is_bool
+    lo, hi = COAX_INNER_FLOW_FRACTION_BAND
+    f = None if (is_bool(raw) or isinstance(raw, str)) \
+        else finite_number(raw)
+    if f is None:
+        return None, _eleman_kaydi(
+            'coaxial_inner_flow_fraction', 'not_a_number',
+            'the inner-jet share of the oxidizer flow must be a finite JSON '
+            'number', submitted=str(raw)[:40])
+    if not (lo <= f <= hi):
+        return None, _eleman_kaydi(
+            'coaxial_inner_flow_fraction', 'out_of_range',
+            f'the inner-jet share of the oxidizer flow is {f:.4g}; it must '
+            f'lie in [{lo:g}, {hi:g}] and it is NOT clamped',
+            submitted=float(f), accepted_range=[lo, hi],
+            unit='dimensionless', basis=COAX_INNER_FLOW_FRACTION_BASIS)
+    return float(f), None
+
+
+def design_coaxial_element(spec):
+    """Hibrit tek akışkanlı koaksiyel eleman — tek kanon (V301/H2).
+
+    ``spec['coaxial']`` isteğe bağlı: ``inner_flow_fraction`` (iç jet debi
+    payı) ve ``inner_flow_fraction_source`` (künye). Verilmezse
+    ``COAX_INNER_FLOW_FRACTION`` (beyanlı HRMA seçimi).
+
+    Devre çözümü diğer tiplerle AYNI çağrıdır (``design_injector``, eşdeğer
+    düz orifis planı): ΔP besleme gerçeğinden, Cd tablodan (plaka kalınlığı
+    verildiyse L/D yinelemesi), kütle akısı SPI ya da Dyer NHNE. Toplam
+    ölçüm alanı ``coaxial_element_geometry`` ile iç jet + anülüse bölünür.
+    Atomizasyon korelasyonu yoktur (beyan; sayı yayımlanmaz).
+
+    Döner: ``design_injector`` sözlüğü; ``injector_type`` =
+    ``COAXIAL_SINGLE_FLUID_TYPE``, ``coaxial_geometry`` kanon sözlüğü,
+    ``pattern`` ve ``atomization`` koaksiyelin kendisi.
+    """
+    if not isinstance(spec, dict):
+        raise ValueError('spec must be a dictionary')
+    if spec.get('motor_type') != 'hybrid':
+        raise ValueError(
+            "the single-fluid coaxial element applies to a hybrid (one "
+            "liquid stream: the oxidizer); a liquid engine uses the "
+            "two-fluid 'coax_swirl' element")
+    koaks = spec.get('coaxial')
+    koaks = koaks if isinstance(koaks, dict) else {}
+    if koaks.get('inner_flow_fraction') is None:
+        f = COAX_INNER_FLOW_FRACTION
+        f_kaynak = 'module default ' + COAX_INNER_FLOW_FRACTION_BASIS
+    else:
+        f, hata = coaxial_inner_fraction(koaks['inner_flow_fraction'])
+        if hata:
+            raise ElementPlanInputError(
+                'Coaxial element input rejected: '
+                f"{hata['field']} ({hata['reason']})", [hata])
+        f_kaynak = (koaks.get('inner_flow_fraction_source')
+                    or 'caller-supplied inner_flow_fraction')
+    taban = {k: v for k, v in spec.items() if k != 'coaxial'}
+    taban['injector_type'] = 'showerhead'
+    det = design_injector(taban)
+    if det.get('status') != 'success':
+        return det
+    oxc = det['ox_circuit']
+    a_total = float(oxc['total_area_mm2']) * 1e-6
+    g = coaxial_element_geometry(a_total, f)
+    det['injector_type'] = COAXIAL_SINGLE_FLUID_TYPE
+    det['coaxial_geometry'] = {
+        'element_count': 1,
+        'element_count_basis': COAX_ELEMENT_COUNT_BASIS,
+        'total_flow_area_mm2': float(oxc['total_area_mm2']),
+        'inner_flow_fraction': float(f),
+        'inner_flow_fraction_source': f_kaynak,
+        'inner_jet_diameter_mm': float(g['d_inner'] * 1e3),
+        'inner_jet_area_mm2': float(g['A_inner'] * 1e6),
+        'post_wall_thickness_mm': float(g['t_wall'] * 1e3),
+        'post_wall_thickness_basis': COAX_WALL_BASIS,
+        'annulus_inner_diameter_mm': float(g['D_i'] * 1e3),
+        'annulus_outer_diameter_mm': float(g['D_o'] * 1e3),
+        'annulus_gap_mm': float(g['gap'] * 1e3),
+        'annulus_area_mm2': float(g['A_annulus'] * 1e6),
+        'recess_length_mm': float(g['recess'] * 1e3),
+        'recess_length_basis': COAX_RECESS_BASIS,
+        'mean_injection_velocity_m_s': float(oxc['velocity_m_s']),
+        'discharge_coefficient': float(oxc['cd']),
+        'flow_model': oxc.get('flow_model'),
+        'pressure_drop_bar': float(oxc['delta_p_bar']),
+        'flow_split_basis': COAXIAL_FLOW_SPLIT_BASIS,
+        'basis': COAXIAL_ELEMENT_PLAN_BASIS,
+    }
+    det['pattern'] = {
+        'description': (
+            f'Single-fluid coaxial element (hybrid oxidizer): inner jet '
+            f'{g["d_inner"] * 1e3:.2f} mm + annulus gap '
+            f'{g["gap"] * 1e3:.3f} mm (share {f:.2f} / {1.0 - f:.2f})'),
+        'n_elements': 1,
+        'impingement': None,
+    }
+    det['atomization'] = {
+        'smd_ox_um': None, 'smd_fuel_um': None,
+        'correlation': 'not_modelled',
+        'spray_cone_half_angle_deg': None,
+        'basis': COAXIAL_ATOMIZATION_BASIS,
+    }
+    return det
+
+
+# ---------------------------------------------------------------------------
+# V301/L-C — SIVI (İKİ AKIŞKANLI, YAKIT MERKEZLİ) PINTLE: TEK ÇÖZÜCÜ
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/kati-sivi/denetim/A-sivi/v_pintle.json,
+# SV-07): sıvı pintle'da kullanıcının ölçü girdisi YOKTU (hibritte D_p, n, d,
+# t, L_s var). İki akışkanlı düzende iki akış alanı devrelerden SABİT gelir:
+# radyal uç delikleri = yakıt devresinin alanı (A_rad), anülüs =
+# oksitleyici devresinin alanı (A_ann). Kullanıcı ölçüleri yalnız serbest
+# değişkenleri sabitler; aşırı belirleme tutmuyorsa 422 (E1 kuralı).
+#: Sıvı (yakıt merkezli) pintle'da anlamı OLMAYAN hibrit pintle alanları.
+LIQUID_PINTLE_NOT_APPLICABLE_KEYS = ('housing_outer_diameter_mm',
+                                     'tangential_angle_deg')
+LIQUID_PINTLE_GEOMETRY_BASIS = (
+    'Fuel-centred liquid pintle: the radial tip holes carry the FUEL and '
+    'their total area n*pi*d^2/4 is the fuel circuit flow area; the annulus '
+    'pi*(D_p + t)*t around the post carries the OXIDIZER and is the oxidizer '
+    'circuit flow area. Request dimensions fix only the free variables: D_p '
+    'or t (the other follows from the annulus area), n or d (the other '
+    'follows from the hole area), L_s. A dimension pair that over-determines '
+    'an area is accepted only within the flow-match tolerance; the published '
+    'value is the one that delivers the circuit area exactly.')
+
+
+def _sivi_pintle_uyusmazlik(alan, mesaj, **ek):
+    return _pintle_kaydi(alan, 'flow_mismatch', mesaj,
+                         tolerance_rel=PINTLE_FLOW_MATCH_REL_TOL,
+                         tolerance_basis=PINTLE_FLOW_MATCH_TOL_BASIS, **ek)
+
+
+def resolve_liquid_pintle_geometry(a_radial_m2, a_annulus_m2, pin=None,
+                                   bf_target=PINTLE_BF_TARGET_DEFAULT):
+    """Yakıt merkezli sıvı pintle geometrisi (TEK çözücü, V301/L-C).
+
+    ``pin`` isteğe bağlı ``d_pintle_mm``, ``annulus_gap_mm``,
+    ``n_radial_holes``, ``radial_hole_d_mm``, ``skip_distance_mm`` taşır
+    (kapı ``pintle_clean_inputs``). Kurallar:
+
+    * hiçbiri ya da yalnız D_p: ``pintle_tip_geometry`` (eski yol, BİT-AYNI);
+    * t (D_p verilmeden): D_p = A_ann/(π·t) − t (> 0 olmalı);
+    * D_p + t: π(D_p+t)t alanı A_ann'dan ``PINTLE_FLOW_MATCH_REL_TOL``'dan
+      fazla saparsa 422; tutuyorsa yayımlanan t alanı TAM teslim eden t;
+    * n: d = √(4·A_rad/(π·n)); d: n en yakın tam sayı, d o n'de alanı TAM
+      teslim eden çap (sapma > tolerans → 422); n + d: aynı tolerans;
+    * L_s: verilirse o, yoksa ``PINTLE_SKIP_LS_DP``·D_p.
+    BF = n·d/(π·D_p) çıktıdır (bant uyarısı ``design_injector``da).
+    """
+    pin = pin if isinstance(pin, dict) else {}
+    temiz, hatalar = pintle_clean_inputs(pin)
+    secim = temiz.get('secondary_holes')
+    if temiz.get('secondary_holes_supplied') and secim != 'radial':
+        hatalar.append(_pintle_kaydi(
+            'secondary_holes', 'not_applicable_to_liquid_pintle',
+            "a fuel-centred liquid pintle injects the fuel through RADIAL "
+            "tip holes by definition; 'none' and 'tangential' tip holes are "
+            'hybrid (single-fluid) pintle options.',
+            submitted=secim))
+    for anahtar in LIQUID_PINTLE_NOT_APPLICABLE_KEYS:
+        if anahtar in temiz:
+            hatalar.append(_pintle_kaydi(
+                anahtar, 'not_applicable_to_liquid_pintle',
+                f"'{PINTLE_REQUEST_FIELDS[anahtar]}' belongs to the hybrid "
+                'pintle model; the liquid pintle model does not read it.',
+                submitted=temiz[anahtar]))
+    if hatalar:
+        raise _pintle_hata(hatalar)
+    a_rad = max(float(a_radial_m2), 0.0)
+    a_ann = max(float(a_annulus_m2), 0.0)
+    d_p_in = temiz.get('d_pintle_mm')
+    t_in = temiz.get('annulus_gap_mm')
+    n_in = temiz.get('n_radial_holes')
+    d_in = temiz.get('radial_hole_d_mm')
+    ls_in = temiz.get('skip_distance_mm')
+    if t_in is None and n_in is None and d_in is None and ls_in is None:
+        # Eski yol (bit-aynı): ölçü yok ya da yalnız D_p.
+        return pintle_tip_geometry(
+            a_rad, a_ann,
+            d_pintle_m=(d_p_in * 1e-3 if d_p_in is not None else None),
+            bf_target=bf_target)
+    tol = PINTLE_FLOW_MATCH_REL_TOL
+    # --- Anülüs: D_p ⟷ t ----------------------------------------------
+    if t_in is not None:
+        t_m = t_in * 1e-3
+        if d_p_in is None:
+            d_p_m = a_ann / (np.pi * t_m) - t_m
+            if not d_p_m > 0.0:
+                raise _pintle_hata([_sivi_pintle_uyusmazlik(
+                    'annulus_gap_mm',
+                    f'an annular gap of {t_in:g} mm cannot carry the '
+                    f'oxidizer circuit area {a_ann * 1e6:.4g} mm^2 around '
+                    'any post (D_p = A/(pi*t) - t is not positive); choose '
+                    'a smaller gap or leave it empty.',
+                    submitted=t_in,
+                    required_annulus_area_mm2=float(a_ann * 1e6))])
+        else:
+            d_p_m = d_p_in * 1e-3
+            oran = np.pi * (d_p_m + t_m) * t_m / max(a_ann, 1e-30)
+            if abs(oran - 1.0) > tol:
+                raise _pintle_hata([_sivi_pintle_uyusmazlik(
+                    'annulus_gap_mm',
+                    f'D_p {d_p_in:g} mm with an annular gap of {t_in:g} mm '
+                    f'gives an annulus area {oran:.3f} times the oxidizer '
+                    f'circuit area {a_ann * 1e6:.4g} mm^2; leave one of the '
+                    'two empty to let the circuit solve it.',
+                    submitted={'pintle_diameter': d_p_in,
+                               'annular_gap': t_in},
+                    flow_area_ratio=float(oran),
+                    required_annulus_area_mm2=float(a_ann * 1e6))])
+    else:
+        d_p_m = (d_p_in * 1e-3 if d_p_in is not None else float(np.sqrt(
+            a_ann / (np.pi * PINTLE_ANNULUS_T_OVER_DP
+                     * (1.0 + PINTLE_ANNULUS_T_OVER_DP)))))
+    t_ann = float((np.sqrt(d_p_m ** 2 + 4.0 * a_ann / np.pi) - d_p_m) / 2.0)
+    # --- Radyal delikler: n ⟷ d ----------------------------------------
+    if n_in is None and d_in is None:
+        d_hole = (4.0 * a_rad / np.pi) / max(bf_target * np.pi * d_p_m, 1e-9)
+        n_holes = max(4, int(round(bf_target * np.pi * d_p_m
+                                   / max(d_hole, 1e-9))))
+        n_kaynak = 'blockage-factor target (no hole count or diameter given)'
+    elif d_in is None:
+        n_holes = int(n_in)
+        n_kaynak = 'request (pintle_radial_hole_count)'
+    else:
+        a_delik = np.pi * (d_in * 1e-3) ** 2 / 4.0
+        n_holes = int(n_in) if n_in is not None else max(
+            1, int(round(a_rad / a_delik)))
+        oran = n_holes * a_delik / max(a_rad, 1e-30)
+        if abs(oran - 1.0) > tol:
+            n_alt = max(1, int(np.floor(a_rad / a_delik)))
+            yakin = [{'n_radial_holes': q,
+                      'flow_area_ratio': float(q * a_delik / a_rad),
+                      'radial_hole_d_mm_for_exact_flow': float(np.sqrt(
+                          4.0 * a_rad / (np.pi * q)) * 1e3)}
+                     for q in sorted({n_alt, n_alt + 1, n_holes})]
+            raise _pintle_hata([_sivi_pintle_uyusmazlik(
+                'radial_hole_d_mm',
+                f'{n_holes} radial holes of {d_in:g} mm give a flow area '
+                f'{oran:.3f} times the fuel circuit area '
+                f'{a_rad * 1e6:.4g} mm^2; choose one of the listed plans or '
+                'leave the hole diameter empty.',
+                submitted={'pintle_radial_hole_count': n_in,
+                           'pintle_radial_hole_diameter': d_in},
+                flow_area_ratio=float(oran),
+                required_hole_area_mm2=float(a_rad * 1e6),
+                nearest_plans=yakin)])
+        n_kaynak = ('request (pintle_radial_hole_count)' if n_in is not None
+                    else 'nearest whole hole count for the requested '
+                         'diameter')
+    d_hole = float(np.sqrt(4.0 * a_rad / (np.pi * n_holes)))
+    bf = n_holes * d_hole / (np.pi * d_p_m)
+    ls_mm = (float(ls_in) if ls_in is not None
+             else float(PINTLE_SKIP_LS_DP * d_p_m * 1e3))
+    sonuc = {
+        'd_pintle_mm': float(d_p_m * 1e3),
+        'skip_distance_mm': ls_mm,
+        'ls_over_dp': float(ls_mm / (d_p_m * 1e3)),
+        'bf': float(bf),
+        'annulus_gap_mm': float(t_ann * 1e3),
+        'n_radial_holes': int(n_holes),
+        'radial_hole_d_mm': float(d_hole * 1e3),
+        'annulus_bore_diameter_mm': float((d_p_m + 2.0 * t_ann) * 1e3),
+        'geometry_basis': LIQUID_PINTLE_GEOMETRY_BASIS,
+        'n_radial_holes_source': n_kaynak,
+        'requested': {PINTLE_REQUEST_FIELDS[k]: temiz[k] for k in (
+            'd_pintle_mm', 'annulus_gap_mm', 'n_radial_holes',
+            'radial_hole_d_mm', 'skip_distance_mm') if k in temiz},
+        'skip_distance_source': ('request (skip_distance)' if ls_in is not None
+                                 else 'L_s = D_p (HRMA choice, no literature '
+                                      'value)'),
+    }
+    return sonuc

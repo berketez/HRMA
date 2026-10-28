@@ -125,6 +125,31 @@
 
     // motor.not_modelled → [{key, text}] (sıra sunucunun yayım sırası).
     // Beyan metni SONUÇTAN okunur; bu dosyada beyan metni sabiti YOKTUR.
+    //: V301/DİL (NK-16): beyan anahtarının TR özet cümlesi (anahtarlar literal;
+    //: tanınmayan anahtar için '' — özet uydurulmaz).
+    function declOzet(key) {
+        // Beyan anahtarı panele SABİT yazılmaz (test_blowdown_panel bekçisi):
+        // yanıttaki anahtar deve hörgücü biçimine çevrilip sözlük anahtarıyla
+        // eşlenir; tanınmayan anahtar için özet yok.
+        const kamel = String(key || '').replace(/_([a-z])/g,
+            function (_m, c) { return c.toUpperCase(); });
+        switch (kamel) {
+        case 'feedSystem': return T('blowdown.decl.feedSystem',
+            'The oxidizer feed system is not modelled as plumbing (valves, regulator, line routing and sizing, instrumentation).');
+        case 'ignitionStartupTransient': return T('blowdown.decl.ignitionStartupTransient',
+            'There is no igniter model and no start-up ramp.');
+        case 'shutdownTransient': return T('blowdown.decl.shutdownTransient',
+            'There is no commanded shutdown (oxidizer valve closing) model.');
+        case 'hybridBoundaryLayerInstability': return T('blowdown.decl.hybridBoundaryLayerInstability',
+            'The combustion response function of the fuel boundary layer is not solved: no growth rate or oscillation amplitude is reported for the hybrid low-frequency instability.');
+        case 'oxidizerTankStructuralMass': return T('blowdown.decl.oxidizerTankStructuralMass',
+            'The oxidizer tank structural mass and mounting hardware are not computed, and no tank material is selected.');
+        case 'throttleResponseRestart': return T('blowdown.decl.throttleResponseRestart',
+            'There is no throttle response model and no restart capability model.');
+        default: return '';
+        }
+    }
+
     function buildDeclarations(motor) {
         const nm = motor && motor.not_modelled;
         if (!nm || typeof nm !== 'object' || Array.isArray(nm)) return null;
@@ -325,6 +350,12 @@
         base.end_event = bd.end_event || null;
         base.burn_duration_s = (typeof bd.burn_duration_s === 'number')
             ? bd.burn_duration_s : null;
+        // v3.0.1 (V301/N-grafik G3): tasarım yanma süresi (motorun kendi
+        // `burn_time` alanı) — grafiklerin zaman ekseni onu kapsar. Alan
+        // yoksa null: t_b çizgisi çizilmez, sayı uydurulmaz.
+        base.design_burn_time_s = (typeof motor.burn_time === 'number'
+                                   && isFinite(motor.burn_time) && motor.burn_time > 0)
+            ? motor.burn_time : null;
         base.total_impulse_Ns = (typeof bd.total_impulse_Ns === 'number')
             ? bd.total_impulse_Ns : null;
         base.thrust_decay_fraction = (typeof bd.thrust_decay_fraction === 'number'
@@ -643,12 +674,17 @@
         // rozet, ucun MAKİNE ALAN ADINI ve değerini aynen basar (aynı kalıp
         // `thrust_decay_fraction` negatif dalında da kullanılıyor). 'vapor'
         // = sıvı tükendi, kuyruk ideal-gaz tahminidir: renk `warn`.
+        // V301/DİL (NK-13): aşağıdaki MAKİNE rozetleri (alan adı + değer;
+        // ölçüldü: TR ekranda 9 ham rozet) kapalı "teknik ayrıntı"
+        // bölümüne toplanır. Rozet metinleri ve renkleri aynıdır; aynı
+        // durumu kullanıcıya anlatan cümleler (vm.warnings) görünür kalır.
+        let teknik = '';
         if (vm.tank_phase_final) {
-            html += badge('tank_phase_final ' + esc(vm.tank_phase_final),
+            teknik += badge('tank_phase_final ' + esc(vm.tank_phase_final),
                 vm.tank_phase_final === 'vapor' ? 'warn' : 'info');
         }
         if (vm.vapor_onset_s !== null && vm.vapor_onset_s !== undefined) {
-            html += badge('vapor_onset_s '
+            teknik += badge('vapor_onset_s '
                 + sayiEkran(vm.vapor_onset_s, 2) + ' s', 'warn');
         }
         // Seri: kaç örnek hangi fazda? (uydurma yok — sayım seriden gelir)
@@ -660,7 +696,7 @@
             const dokum = Object.keys(sayim).sort().map(function (f) {
                 return f + ' ' + sayim[f];
             }).join(' / ');
-            html += badge('tank_phase ' + esc(dokum), 'info');
+            teknik += badge('tank_phase ' + esc(dokum), 'info');
         }
         // ÖH D29 · OH-D28-03 — DÜRÜSTLÜK BAYRAKLARI ve KESME PAYI.
         // Rozet ucun MAKİNE ALAN ADINI ve değerini aynen basar (aynı
@@ -669,17 +705,26 @@
         // Ad ile değer AYNI rozetin içindedir — "ad+değer" süpürme
         // ölçütü (D28 bekci a1) bunu şart koşar.
         (vm.bayraklar || []).forEach(function (b) {
-            html += badge(b.field + ' ' + (b.value ? 'true' : 'false'),
+            teknik += badge(b.field + ' ' + (b.value ? 'true' : 'false'),
                 (b.value === b.limitsAt) ? 'warn' : 'info');
         });
         (vm.kesme || []).forEach(function (k) {
+            let html = '';
             html += badge(k.field + ' ' + k.value.toFixed(k.digits) + k.unit,
                 (k.value > 0) ? 'warn' : 'info');
+            teknik += html;
         });
         // Blok içi serbest-metin uyarıları: kararsızlık olanlar kırmızı vurgulu
         (vm.warnings || []).forEach(function (w) {
             html += badge(esc(SRV(w)), isInstabilityText(w) ? 'err' : 'warn');
         });
+        if (teknik) {
+            html += '<details class="hd-teknik-ayrinti" style="margin-top:6px;">'
+                + '<summary style="cursor:pointer; font-size:0.72rem;'
+                + ' color:var(--hd-ink-dim, #7d97a5);">'
+                + esc(T('common.techDetail', 'Technical detail (machine fields)'))
+                + '</summary>' + teknik + '</details>';
+        }
         el.innerHTML = html;
     }
 
@@ -701,9 +746,37 @@
         el.innerHTML = html;
     }
 
+    // v3.0.1 (V301/N-grafik G3) — ZAMAN EKSENİ TASARIM YANMA SÜRESİNİ KAPSAR.
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V301/grafik/RAPOR.md, G2 önce, hibrit
+    // örneği): üç grafiğin x ekseni 0,05 s ile 9,15 s arasıydı — tasarımın 10 s'lik
+    // yanmasına göre ne kadar erken bittiği görünmüyordu (geçici panelle
+    // aynı kusur, Berke 26 Eki). Düzen geçici paneldeki TEK uygulamadan
+    // (`TransientPanel.zamanEkseniDuzeni`) gelir; panel yüklü değilse eski
+    // çizim aynen kalır (işaret uydurulmaz).
+    function zamanEkseni(vm) {
+        const TP = (typeof window !== 'undefined') ? window.TransientPanel : null;
+        if (!TP || typeof TP.zamanEkseniDuzeni !== 'function') return null;
+        return TP.zamanEkseniDuzeni(
+            { time: vm.series.time_s, end_event: vm.end_event },
+            { burn_time: vm.design_burn_time_s },
+            { bitisY: 0.02, bitisYanchor: 'bottom' });
+    }
+
+    function zamanXEkseni(baslik, zd) {
+        const ax = { title: baslik };
+        if (zd && zd.xMax) { ax.range = [0, zd.xMax]; ax.autorange = false; }
+        return ax;
+    }
+
+    // Her grafik kendi kopyasını alır (Plotly düzen nesnesini yerinde işler).
+    function isaretler(zd, ad) {
+        return zd ? JSON.parse(JSON.stringify(zd[ad])) : [];
+    }
+
     function renderCharts(els, vm) {
         const s = vm.series;
         const timeTitle = T('common.axis.timeS2', 'Time [s]');
+        const zd = zamanEkseni(vm);
         // Tank + kamara basıncı AYNI eksende: aradaki fark enjektör ΔP'sidir,
         // iki eğri ayrı eksene konursa bu fark okunamaz.
         Plotly.react(els.pressure, [
@@ -716,13 +789,15 @@
         ], {
             title: T('blowdown.chartPressure',
                      'Tank vs Chamber Pressure (same axis — the gap is the injector ΔP)'),
-            xaxis: { title: timeTitle },
+            xaxis: zamanXEkseni(timeTitle, zd),
             yaxis: { title: 'P [bar]', rangemode: 'tozero' },
             // ÖH D34 · OH-P-07 (piksel turu, 21 Eyl 2026): kap .plot-container
             // (min-height 500 + 2x20 dolgu = 540 px) iken 360/300 px'lik çizimler
             // altında 150-240 px boşluk bırakıyordu (hibrit-01-r21/r22). Kap kadar.
             height: 500,
             legend: { orientation: 'h', y: 1.14 },
+            shapes: isaretler(zd, 'shapes'),
+            annotations: isaretler(zd, 'annotations'),
         }, { responsive: true, displaylogo: false });
 
         Plotly.react(els.mdot, [
@@ -731,10 +806,12 @@
               mode: 'lines', line: { width: 3 } },
         ], {
             title: T('blowdown.chartMdot', 'Oxidizer Mass Flow Decay'),
-            xaxis: { title: timeTitle },
+            xaxis: zamanXEkseni(timeTitle, zd),
             yaxis: { title: 'ṁ_ox [kg/s]', rangemode: 'tozero' },
             height: 500,  // OH-P-07
             legend: { orientation: 'h', y: 1.16 },
+            shapes: isaretler(zd, 'shapes'),
+            annotations: isaretler(zd, 'annotations'),
         }, { responsive: true, displaylogo: false });
 
         Plotly.react(els.thrust, [
@@ -743,10 +820,12 @@
               mode: 'lines', line: { width: 3 } },
         ], {
             title: T('blowdown.chartThrust', 'Thrust Decay During Blowdown'),
-            xaxis: { title: timeTitle },
+            xaxis: zamanXEkseni(timeTitle, zd),
             yaxis: { title: 'F [N]', rangemode: 'tozero' },
             height: 500,  // OH-P-07
             legend: { orientation: 'h', y: 1.16 },
+            shapes: isaretler(zd, 'shapes'),
+            annotations: isaretler(zd, 'annotations'),
         }, { responsive: true, displaylogo: false });
     }
 
@@ -760,8 +839,21 @@
             el.style.display = 'none';
             return;
         }
+        // V301/DİL (NK-16): TR arayüzde altı beyan İngilizce kalıyordu.
+        // Çevrilmemiş beyanın başına (anahtarı tanınıyorsa) Türkçe ÖZET
+        // cümlesi gelir; çözücünün tam İngilizce cümlesi kapalı "teknik
+        // ayrıntı" bölümünde AYNEN durur (yarım çeviri yok). Anahtar
+        // tanınmıyorsa ya da metin çevrildiyse eski davranış.
+        const dilTr = !!(window.I18N && window.I18N.lang === 'tr');
         const items = decls.map(function (d) {
-            return `<li style="margin:6px 0;">${esc(SRV(d.text))}</li>`;
+            const metin = SRV(d.text);
+            const ozet = (dilTr && metin === d.text) ? declOzet(d.key) : '';
+            if (!ozet) return `<li style="margin:6px 0;">${esc(metin)}</li>`;
+            return `<li style="margin:6px 0;" data-decl-key="${esc(d.key)}">`
+                + `<span style="font-family:var(--hd-sans, inherit); color:var(--hd-ink, #cfe8f2);">${esc(ozet)}</span>`
+                + `<details style="margin-top:2px;"><summary style="cursor:pointer;">${
+                    esc(T('common.techDetailSrv', 'Technical detail (solver statement, untranslated)'))}</summary>`
+                + `${esc(metin)}</details></li>`;
         }).join('');
         const basisNote = vm.declBasis
             ? `<p style="font-size:0.7rem; color:var(--hd-ink-dim, #7d97a5);

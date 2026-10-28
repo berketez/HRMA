@@ -29,16 +29,25 @@ from hrma.utils.input_guard import finite_positive
 from hrma.analysis.acoustic_modes import (
     CHUG_DP_RATIO_MINIMUM,
     CHUG_DP_RATIO_RECOMMENDED,
+    CHUG_THRESHOLD_CITATION,
 )
 
 #: ΔP/Pc üst sınırı — kararlılık değil, besleme sistemi maliyeti ölçütü.
-#: (Sutton & Biblarz 9. baskı Böl. 8.5 / NASA SP-8089: tipik enjektör ΔP
-#: bandının üst ucu; bunun ötesinde tank/pompa işi artar, kararlılık kazancı
-#: yoktur.) Chug eşiğiyle AYNI ŞEY DEĞİLDİR, bu yüzden ayrı adı vardır.
+#: (Sutton & Biblarz 9. baskı Böl. 8.5: tipik enjektör ΔP bandının üst ucu;
+#: bunun ötesinde tank/pompa işi artar, kararlılık kazancı yoktur.) Chug
+#: eşiğiyle AYNI ŞEY DEĞİLDİR, bu yüzden ayrı adı vardır. v3.0.1 (21 Eki):
+#: eski "/ NASA SP-8089" atfı kaldırıldı — bant o belgede sayfa sayfa
+#: doğrulanmadı (gerekçe: acoustic_modes.CHUG_THRESHOLD_SOURCE).
 INJECTOR_DP_PC_CEILING = 0.35
 
 #: ``comprehensive_validation`` raporunda ölçülemeyen eksenin künyesi.
 DP_RATIO_AXIS = 'pressure_drop_ratio'
+
+#: v3.0.1 — son port zarfı ⟷ kamara iç çapı karşılaştırmasının kayan nokta
+#: toleransı (bağıl). Fizik eşiği DEĞİLDİR: motor zarfı aynı formülle
+#: (k(N)·D_son + 2·t_artık) kurduğu için eşitlik tasarım gereğidir; tolerans
+#: yalnız yeniden hesaplamadaki yuvarlama farkını yutar.
+PORT_ENVELOPE_COMPARE_REL_TOL = 1e-9
 
 
 def _finite_positive(value) -> Optional[float]:
@@ -53,6 +62,27 @@ def _finite_positive(value) -> Optional[float]:
     ``numpy.bool_``u eleyemiyordu (merkez eler).
     """
     return finite_positive(value)
+
+
+# ---------------------------------------------------------------------------
+# V301/PANEL (C-5, H-PANEL DEVİR 5) — ΔP/Pc TAVANI AŞIMININ CÜMLESİ KÖKTE,
+# BESLEME TİPİNE GÖRE. Tavan (``injector_limits['pressure_drop_ratio']``,
+# Sutton & Biblarz Böl. 8.5) besleme basıncı maliyetinin ölçütüdür; bedelin
+# NE olduğu besleme tipine bağlıdır. ÖLÇÜLDÜ (H-PANEL, örnek hibrit): bu
+# kural her motora "pompa işi artar" diyordu, uç hibritte sonradan yeniden
+# adlandırıyordu. Artık cümle burada kurulur:
+#   pump_fed          → pompa işi ve besleme basıncı (warning);
+#   pressure_fed      → tank basıncı / tank cidarı kütlesi, pompa yok (warning);
+#   self_pressurised  → kendinden basınçlı N2O: ΔP = P_sat(T_tank) − Pc bir
+#                       seçim değildir, bilgi düzeyi (info);
+#   bilinmiyor        → bedel adlandırılmaz (pompa ya da tank iddiası yok).
+DP_PC_HIGH_CODE_BY_FEED = {
+    'pump_fed': ('warn.validation.dp_pc_high', 'warning'),
+    'pressure_fed': ('warn.validation.dp_pc_high_pressure_fed', 'warning'),
+    'self_pressurised': ('warn.validation.dp_pc_self_pressurised', 'info'),
+}
+DP_PC_HIGH_FEED_NOT_STATED = ('warn.validation.dp_pc_high_feed_not_stated',
+                              'warning')
 
 
 def _w(code: str, severity: str = "warning", **params) -> Dict:
@@ -130,7 +160,7 @@ class ValidationSystem:
             'pressure_drop_ratio': (
                 f'lower bound = hrma.analysis.acoustic_modes.'
                 f'CHUG_DP_RATIO_MINIMUM ({CHUG_DP_RATIO_MINIMUM:.2f}, chug '
-                f'stability, NASA SP-8089; recommended '
+                f'stability, {CHUG_THRESHOLD_CITATION}; recommended '
                 f'{CHUG_DP_RATIO_RECOMMENDED:.2f}); upper bound = '
                 f'INJECTOR_DP_PC_CEILING ({INJECTOR_DP_PC_CEILING:.2f}, feed '
                 f'system cost, not a stability criterion)'),
@@ -213,8 +243,17 @@ class ValidationSystem:
     
     def validate_injector_data(self, data: Dict,
                                chamber_pressure: Optional[float] = None,
-                               assessment: Optional[Dict] = None) -> List[str]:
+                               assessment: Optional[Dict] = None,
+                               feed_system: Optional[str] = None,
+                               feed_pressure_source: Optional[str] = None
+                               ) -> List[str]:
         """İnjektör verilerini doğrula.
+
+        ``feed_system`` (V301/PANEL, C-5): ``'pump_fed'`` | ``'pressure_fed'``
+        | ``'self_pressurised'`` | ``None``. ΔP/Pc tavanı aşıldığında cümle ve
+        önem buradan kurulur (``DP_PC_HIGH_CODE_BY_FEED``); bilinmiyorsa
+        bedel adlandırılmaz. ``feed_pressure_source`` çağıranın künyesidir
+        ve kayda aynen yazılır.
 
         ``chamber_pressure`` [bar] ΔP/Pc ölçütünün paydasıdır ve ÇAĞIRANDAN
         gelir; enjektör sözlüğünde de bulunabilir. ``assessment`` verilirse
@@ -295,8 +334,18 @@ class ValidationSystem:
                     warnings_list.append(_w("warn.validation.dp_pc_low", "critical",
                                             ratio=round(float(drop_ratio), 2), min=drop_limits[0]))
                 else:
-                    warnings_list.append(_w("warn.validation.dp_pc_high", "warning",
-                                            ratio=round(float(drop_ratio), 2), max=drop_limits[1]))
+                    kod, onem = DP_PC_HIGH_CODE_BY_FEED.get(
+                        feed_system, DP_PC_HIGH_FEED_NOT_STATED)
+                    kayit = _w(kod, onem, ratio=round(float(drop_ratio), 2),
+                               max=drop_limits[1])
+                    kayit['feed_system'] = (feed_system
+                                            if feed_system in DP_PC_HIGH_CODE_BY_FEED
+                                            else None)
+                    kayit['feed_pressure_source'] = feed_pressure_source
+                    warnings_list.append(kayit)
+            kunye['feed_system'] = (feed_system
+                                    if feed_system in DP_PC_HIGH_CODE_BY_FEED
+                                    else None)
         if assessment is not None:
             assessment[DP_RATIO_AXIS] = kunye
 
@@ -341,8 +390,28 @@ class ValidationSystem:
                                         ratio=round(float(growth_ratio), 2)))
 
         # Chamber vs Port Diameter
+        # v3.0.1 (Ayberk tur 1, port kulvarının çapraz kırılması): eski kural
+        # ``d_port_final > 0.8 * d_chamber`` kaynaksızdı. Motordan sökülen
+        # 0,8·D_ch kırpmasının ikinci kopyasıydı. Grain dış çapı artık yanma
+        # sonu portlarından boyutlanıyor: artık et 0 iken D_son = D_kamara ve
+        # bu tasarım gereği. O yüzden eski kural HER varsayılan hibrit
+        # tasarımda yanlış 'kritik' basıyordu (ölçüldü: 1 kN, O/F 6).
+        # Hüküm artık motorun KENDİ geometrik zarfından gelir: son portların
+        # zarfı k(N)·D_son + 2·t_artık kamara iç çapını AŞARSA delinme var.
+        # Tolerans yalnız kayan nokta karşılaştırması içindir, fizik eşiği
+        # değildir.
         if d_chamber > 0 and d_port_final > 0:
-            if d_port_final > d_chamber * 0.8:
+            from hrma.engines.hybrid_rocket_engine import (
+                grain_port_layout_factor)
+            try:
+                n_port = int(data.get('port_count') or 1)
+            except (TypeError, ValueError):
+                n_port = 1
+            n_port = max(n_port, 1)
+            t_artik_mm = _finite_positive(data.get('residual_web_mm')) or 0.0
+            zarf_mm = (grain_port_layout_factor(n_port) * d_port_final
+                       + 2.0 * t_artik_mm)
+            if zarf_mm > d_chamber * (1.0 + PORT_ENVELOPE_COMPARE_REL_TOL):
                 warnings_list.append(_w("warn.validation.port_exceeds_chamber", "critical"))
 
         # --- Genleşme oranı: hüküm FİZİKTEN, sabit banttan DEĞİL --------
@@ -489,8 +558,11 @@ class ValidationSystem:
 
         return warnings_list
     
-    def comprehensive_validation(self, motor_data: Dict, injector_data: Dict, 
-                               propellant_combo: str = 'n2o_htpb') -> Dict:
+    def comprehensive_validation(self, motor_data: Dict, injector_data: Dict,
+                               propellant_combo: str = 'n2o_htpb',
+                               feed_system: Optional[str] = None,
+                               feed_pressure_source: Optional[str] = None
+                               ) -> Dict:
         """Kapsamlı validasyon.
 
         ÖH Z5S / P10-A: ΔP/Pc ölçütünün paydası (kamara basıncı [bar]) artık
@@ -511,7 +583,9 @@ class ValidationSystem:
         # Tüm validasyonları çalıştır
         all_warnings.extend(self.validate_performance_data(motor_data, propellant_combo))
         all_warnings.extend(self.validate_injector_data(
-            injector_data, chamber_pressure=pc, assessment=assessment))
+            injector_data, chamber_pressure=pc, assessment=assessment,
+            feed_system=feed_system,
+            feed_pressure_source=feed_pressure_source))
         all_warnings.extend(self.validate_geometry_data(
             motor_data, assessment=assessment))
         all_warnings.extend(self.check_sutton_biblarz_criteria(motor_data))
@@ -519,7 +593,14 @@ class ValidationSystem:
         # Kritik/uyarı ayrımı — ARTIK severity alanından (dil-bağımsız), eskiden
         # metin içindeki 'KRITIK'/'UYARI' string'inden parse ediliyordu.
         critical_warnings = [w for w in all_warnings if w.get('severity') == 'critical']
-        regular_warnings = [w for w in all_warnings if w.get('severity') == 'warning']
+        # V301/PANEL (C-5): bilgi düzeyli kayıt (kendinden basınçlı N2O'nun
+        # ΔP/Pc notu) uyarı listesinde GÖRÜNÜR kalır (uç yeniden adlandırırken
+        # de oradaydı), ama genel durumu "uyarı"ya çekmez: bir bilgi notu
+        # uyarı değildir.
+        regular_warnings = [w for w in all_warnings
+                            if w.get('severity') in ('warning', 'info')]
+        uyari_var = any(w.get('severity') == 'warning'
+                        for w in regular_warnings)
 
         # ÖLÇÜLMEYEN EKSEN 'NORMAL' BASAMAZ (fail-closed / sahte gösterge
         # yasağı): girdisi olmadığı için hüküm verilemeyen bir eksen varken
@@ -534,7 +615,7 @@ class ValidationSystem:
         # Genel değerlendirme — status da i18n kodu ({code}); frontend TF ile çevirir.
         if critical_warnings:
             overall_status = _w("status.critical", "critical")
-        elif regular_warnings or withheld:
+        elif uyari_var or withheld:
             overall_status = _w("status.warnings", "warning")
         else:
             overall_status = _w("status.normal", "info")

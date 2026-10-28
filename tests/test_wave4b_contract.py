@@ -294,13 +294,27 @@ class TestRegenCoolingContract:
             max(regen['velocity_m_s']), rel=1e-9)
 
     def test_rp1_coking_flag(self, regen):
-        """RP-1 sıcak cidarda koklaşma bayrağı + 561 K eşiği (Huzel & Huang)."""
+        """RP-1 kok eşiği İKİ KADEME.
+
+        V3.0.5 T-ÇAPA-C1 — BEKLENTİ DEĞİŞTİ (V301/L-KABUK 823e59841):
+        ``coking_threshold_K`` = 728 K NASA SP-8087 hüküm ölçütü
+        (``coking``), ``coking_warning_threshold_K`` = 561 K birikim riski
+        uyarısı (``coking_risk``). Eski tek eşik 561 K'yi hüküm sayıyordu.
+        """
+        from hrma.analysis.regen_cooling import (
+            RP1_COKING_LIMIT_TEMP_K, RP1_COKING_TEMP_K)
         sm = regen['summary']
         assert sm['coolant'] == 'rp1'
-        assert sm['coking_threshold_K'] == pytest.approx(561.0)
-        # Bu senaryo koklaşmayı tetikler (cold-wall > 561 K)
-        assert sm['coking'] is True
-        assert sm['max_wall_cold_K'] > 561.0
+        assert sm['coking_threshold_K'] == pytest.approx(RP1_COKING_LIMIT_TEMP_K)
+        assert RP1_COKING_LIMIT_TEMP_K == pytest.approx(728.0)
+        assert sm['coking_warning_threshold_K'] == pytest.approx(RP1_COKING_TEMP_K)
+        assert RP1_COKING_TEMP_K == pytest.approx(561.0)
+        # Bayraklar soğutucu tarafı tepe sıcaklığının iki kademeye göre
+        # yerinden türer (senaryonun sayısı kilitlenmez, kural kilitlenir).
+        t = sm['max_wall_cold_K']
+        assert sm['coking'] is (t > RP1_COKING_LIMIT_TEMP_K)
+        assert sm['coking_risk'] is (t > RP1_COKING_TEMP_K)
+        assert sm['coking_risk'] is True        # senaryo uyarı kademesini aşar
 
     def test_missing_required_400(self, client):
         r = client.post('/api/regen-cooling', json={})
@@ -942,6 +956,25 @@ TERS_MUAFIYET = {
         'T_recovery_K': 'ham istasyon dizisi — panel `q_MW_m2` yükünü çiziyor',
         'h_gas_W_m2K': 'ham istasyon dizisi — bkz. `T_recovery_K`',
         'h_coolant_W_m2K': 'ham istasyon dizisi — bkz. `T_recovery_K`',
+        # V301/L-REJ (26 Eki): kanat modeli ve Sieder-Tate su/RP-1 yolunda
+        # da uygulanıyor; iki istasyon dizisi `h_coolant_W_m2K`nin
+        # çarpanlarıdır (künyeleri model_note'ta, tepe değeri summary'de).
+        'fin_area_ratio': 'ham istasyon dizisi — `h_coolant_W_m2K`nin kanat '
+                          'alan oranı çarpanı; tepe değeri summary.'
+                          'fin_area_ratio_max',
+        'sieder_tate_factor': 'ham istasyon dizisi — `h_coolant_W_m2K`ye '
+                              'giren Sieder-Tate çarpanı; künyesi '
+                              'model_note',
+        # V301/L-KARBON (26 Eki): LOX/RP-1 karbon birikimi beyanı. Bağımsız
+        # API çağrısında itici bağlamı yok -> durum 'not_evaluated' (4
+        # çocuk: status/applied/reason/basis); ürün yolunda aynı blok
+        # station_march.carbon_deposit olarak sıvı motor yanıtına çıkar ve
+        # kullanıcıya görünen kısa not marş `warnings` kanalından (panelin
+        # bastığı kanal) EN+TR yayımlanır. Panel baskısı kulvar dışı.
+        'carbon_deposit': 'karbon birikimi beyanı — kullanıcı notu marş '
+                          '`warnings` kanalında (CARBON DEPOSIT: ...), '
+                          'künyesi model_note; blok makine tüketicisi '
+                          'içindir',
         # ÖH D16 (bekci-cevirisi/a1, OH-B4-07): gerekçe ARTIK MAKİNEYLE
         # SINANIYOR. Ölçüt panelin OKUMA envanteri DEĞİL panel KAYNAĞIDIR:
         # bu iki ad cooling_panel.js'de yanıt alanı olarak değil FORM ALANI
@@ -1006,6 +1039,11 @@ TERS_MUAFIYET = {
         'storage_pressure': 'girdi yankısı — depolama basıncı',
         'collapse_factor': 'çökme faktörü — adyabatik/izotermal ikilisinin '
                            'ara büyüklüğü',
+        # V301/PANEL-SAYI (28 Eki): panel bu adı ``sug.tank_pressure =
+        # Number(m.chamber_pressure…)`` satırında OKUYOR sayılıyordu — o satır
+        # tank basıncına Pc yazan S1 kusurunun kendisiydi ve söküldü. Yanıttaki
+        # alan girdinin yankısıdır; değer formdaki alanda görünür.
+        'tank_pressure': 'girdi yankısı — tank basıncı (formdaki alan)',
     }),
     'feed/press_bd': (('panels/feed_panel.js',), {
         # NOT: blowdown kipi `gamma` yayımlamıyor (politropik `n` var);
@@ -1040,6 +1078,11 @@ TERS_MUAFIYET = {
                   'zaten gösteriyor',
         'flow_velocity_m_s': 'girdi yankısı — akış hızı',
         'valve_closure_time_ms': 'girdi yankısı — vana kapanma süresi',
+        # V301/PANEL-SAYI (28 Eki): ``sug.working_pressure_bar = Number(
+        # m.chamber_pressure…)`` (hat basıncına Pc yazan S1 kusuru) söküldü;
+        # yanıttaki alan girdinin yankısıdır, değer formdaki alanda görünür.
+        'working_pressure_bar': 'girdi yankısı — hat çalışma basıncı '
+                                '(formdaki alan)',
         'delta_v_m_s': 'hız değişimi — Joukowsky girdisinin kendisi',
         'critical_closure_time_s': 'kritik kapanma süresi (2L/a) — panel '
                                    'dalga hızını ve tepe basıncı basıyor',
@@ -1475,6 +1518,9 @@ class TestTersYonBorcEnvanteri:
         # v3 fea-yuk (OH-DK-04): `load_model` künyesinin 10 çocuğu
         # (ölçüldü 14 Eki 2026); gerekçe TERS_MUAFIYET['fea/structural'].
         'fea/structural': {'consumed_paths': 4, 'load_model': 10},
+        # V301/L-KARBON: `/api/regen-cooling` karbon birikimi beyanı (itici
+        # bağlamsız çağrıda 4 çocuk); gerekçe TERS_MUAFIYET['cooling/ust'].
+        'cooling/ust': {'carbon_deposit': 4},
         # ÖH D28 / arayuz a1 (OH-D27-16): `thermal_fea/wall_profile`
         # satırı DÜŞTÜ — panel hem `contour_basis`i hem `column_basis`i
         # adıyla okuyup künye bölümünde basıyor, dolayısıyla ikisi de

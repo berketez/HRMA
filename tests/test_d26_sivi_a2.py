@@ -60,6 +60,15 @@ class TestP7B209KapiCeliskisi:
     ``feed_pressure = 130``      HTTP 200    HTTP 200
     ===========================  ==========  ==========
 
+    V301/L-A (SV-10) — ÇEVRİM EKSENİ: ``SIVI`` gövdesi çevrim yazmaz ve uç
+    turbopompalı varsayılana düşer; o çevrimde ``feed_pressure`` enjektörü
+    BESLEMEZ ve çözücü onu OKUMAZ (A-sivi SV-10; L-A once.json gg_fp_yok ⟷
+    v_gg: yalnız yankı yaprağı değişiyor). Kapı orada sağlıklı tasarımı
+    engelliyordu; artık YALNIZ basınç beslemede ısırır, turbopompalıda alan
+    ``inputs_not_used`` ile beyan edilir. Ret iddiaları bu yüzden
+    ``engine_cycle = 'pressure_fed'`` gövdesinde ölçülür; sayılar ve
+    hükümler (400) DEĞİŞMEDİ.
+
     ÖNCE, 3 bar besleme ile 30 bar hazne 10.000 N itki yayımlıyordu ve tek
     bir uyarı bile yoktu (``uyari_sayisi = 0``); ``feed_pressure_input_bar``
     yanıtta 3,0 olarak yankılanıyordu, yani sayı ÇÖZÜCÜYE ULAŞIYORDU.
@@ -70,7 +79,8 @@ class TestP7B209KapiCeliskisi:
 
     @pytest.mark.parametrize('feed', [3.0, 10.0, 29.0])
     def test_hazneden_dusuk_besleme_basinci_reddedilir(self, client, feed):
-        kod, govde = gonder(client, dict(SIVI, feed_pressure=feed))
+        kod, govde = gonder(client, dict(SIVI, engine_cycle='pressure_fed',
+                                         feed_pressure=feed))
         assert kod == 400, (
             f'feed_pressure={feed} bar, chamber_pressure=30 bar — enjektör '
             f'AKAMAZ ama uç HTTP {kod} verdi')
@@ -79,7 +89,8 @@ class TestP7B209KapiCeliskisi:
 
     def test_ret_fail_closed_tasarim_uretmez(self, client):
         """Ret gövdesinde tasarım yaprağı bulunmamalı (sayı uydurulmaz)."""
-        _, govde = gonder(client, dict(SIVI, feed_pressure=3.0))
+        _, govde = gonder(client, dict(SIVI, engine_cycle='pressure_fed',
+                                       feed_pressure=3.0))
         for anahtar in ('motor_geometry', 'performance', 'plots',
                         'detailed_feed_system'):
             assert anahtar not in govde, (
@@ -127,11 +138,18 @@ class TestP7B209KapiCeliskisi:
             f'-> HTTP {kod_feed}. Tek fizik, iki hüküm (P7B2-09).')
 
         # (b) İKİ BÜYÜKLÜK: turbopompalı çevrimde tank okunmayan alandır.
+        # V301/L-A (SV-10) — BEKLENTİ DEĞİŞTİ: turbopompalı çevrimde
+        # ``feed_pressure`` da çözücünün OKUMADIĞI bir alandır (enjektörü
+        # pompa besler; ölçüm sınıf notunda). Eski 400 sağlıklı tasarımı
+        # engelliyordu; artık 200 + ``inputs_not_used`` beyanı.
         kod_tank_t, govde_t = gonder(client, dict(SIVI, tank_pressure=29))
-        kod_feed_t, _ = gonder(client, dict(SIVI, feed_pressure=29))
-        assert kod_feed_t == 400, (
-            f'turbopompalı çevrimde de enjektörü besleyen basınç haznenin '
-            f'altında kalamaz; HTTP {kod_feed_t}')
+        kod_feed_t, govde_f = gonder(client, dict(SIVI, feed_pressure=29))
+        assert kod_feed_t == 200, (
+            f'turbopompalı çevrimde feed_pressure okunmuyor, tasarımı '
+            f'engellememeliydi; HTTP {kod_feed_t}')
+        beyan = [b for b in govde_f.get('inputs_not_used') or []
+                 if b.get('field') == 'feed_pressure']
+        assert beyan and beyan[0]['reason'] == 'not_read_in_turbopump_cycle'
         assert kod_tank_t == 422, (
             f'turbopompalı çevrimde tank_pressure bu ucun okumadığı bir '
             f'alandır ve adıyla reddedilmeliydi; HTTP {kod_tank_t}')
@@ -149,16 +167,25 @@ class TestP7B209KapiCeliskisi:
         pc = SIVI['chamber_pressure']
         ust = pc * (1.0 + CHUG_DP_RATIO_MINIMUM) * 1.02
         alt = pc * (1.0 + CHUG_DP_RATIO_MINIMUM) * 0.98
-        kod_ust, _ = gonder(client, dict(SIVI, feed_pressure=ust))
-        kod_alt, _ = gonder(client, dict(SIVI, feed_pressure=alt))
+        # V301/L-A: kapı yalnız basınç beslemede koşar (SV-10). Orada tank
+        # ayrıca besleme zincirinin gereksinimini (Pc + ΔP_enj + ceket +
+        # hat) karşılamalıdır (SV-03); varsayılan ΔP_enj (%22) ile eşiğin
+        # hemen üstü 38,48 bar'lık gereksinimin altında kalıp 422 alırdı
+        # (ölçüldü). Chug eşiğini ölçmek için enjektör ΔP'si 2 bar seçilir:
+        # ust -> 200 (marj 1,32 bar), alt -> chug 400 (ölçüldü).
+        pf = dict(SIVI, engine_cycle='pressure_fed', injector_pressure_drop=2)
+        kod_ust, _ = gonder(client, dict(pf, feed_pressure=ust))
+        kod_alt, _ = gonder(client, dict(pf, feed_pressure=alt))
         assert kod_ust == 200, f'eşiğin üstü reddedildi; HTTP {kod_ust}'
         assert kod_alt == 400, f'eşiğin altı geçti; HTTP {kod_alt}'
 
     def test_sayiya_cevrilemeyen_deger_TIP_HATASI_URETMEZ(self, client):
         """P16B2-08'in tank tarafında ısırdığı ``TypeError`` burada doğmaz.
 
-        Metin/sonsuz değer motorun KENDİ beyan yolundan geçer (davranış
-        değişmedi); kapı yalnız sonlu sayıyı karşılaştırır.
+        V301/L-A (SV-02): metin/sonsuz değer artık motorun beyan yolundan
+        GEÇMEZ; tek sıvı bant kapısı onu 422 ``input_not_accepted`` ile adıyla
+        reddeder. Bu testin iddiası (500 yok, çıplak Python tip hatası yok)
+        aynen geçerlidir.
         """
         for ham in ('NaN', 'Infinity', 'abc'):
             kod, govde = gonder(client, dict(SIVI, feed_pressure=ham))

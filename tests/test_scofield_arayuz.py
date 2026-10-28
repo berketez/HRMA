@@ -328,21 +328,52 @@ def test_cidar_sicakligi_alanlari_istege_bagli_ve_bos_varsayilanli(panel_out):
             '"verilmedi" değeri olurdu.')
 
 
+#: T-ÇAPA-C2 (27 Eki) — BU İKİ BEKÇİNİN DAYANAĞI YENİDEN KURULDU.
+#: V301/H-termal (065b391dc) hibrit kamara cidarını üç bölgeye ayırdı: bütün
+#: bölgeler korunduğunda (örnek hibrit böyle) yapı zinciri ısı modülünün
+#: çıplak cidar sayısını DEĞİL, yakıt bloğu koruma modelinin BEYANLI kasa
+#: sıcaklığını kullanır ve kaynağı ``hybrid_chamber_zone_protection`` yazar.
+#: V301/H-PANEL (4e16c916e, H-termal DEVİR 2) bu kaynağı bilerek "çözülmüş
+#: sayılmayan" listeye aldı (``analysis_dock.WALL_TEMP_SOURCE_NOT_SOLVED`` =
+#: ``safety_analysis.WALL_TEMP_SOURCES_NOT_SOLVED``): beyanlı sıcaklık panele
+#: "çözüldü" diye tohumlanmaz. Eski bekçi örnek hibritte
+#: ``heat_transfer_module`` bekliyordu. Bekçinin iddiası (çözülmüş cidar
+#: sayısı panele BİT-AYNI taşınır ve uç onunla koşar) korunur; ölçüldüğü
+#: ürün yolu adıyla seçilir: ısı modülünün cidarı çözdüğü yol, H-termal'in
+#: kendi bekçisindeki gibi astar boyutlandırması koşmadığında görülür
+#: (``tests/support/hibrit_termal.astar_boyutlandirmasi_kosmaz``; geri kalan
+#: her şey ürün kodu). Örnek hibritin beyanlı yolu için ayrı bekçi aşağıda.
+@pytest.fixture(scope='module')
+def hibrit_cozulmus(client):
+    """Isı modülünün cidarı ÇÖZDÜĞÜ hibrit yanıtı + panel önerisi."""
+    from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
+    project = json.loads(
+        (EXAMPLES_DIR / (NAMES['hybrid'] + '.hrma')).read_text(
+            encoding='utf-8'))
+    payload = _calculate_payload('hybrid', project['inputs']['fields'])
+    with astar_boyutlandirmasi_kosmaz():
+        resp = client.post(ENDPOINTS['hybrid'], json=payload,
+                           headers=HEADERS)
+    assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
+    sonuc = resp.get_json()
+    return sonuc, _run_harness(sonuc, 'hybrid')
+
+
 @needs_node
 def test_hibritte_panel_motorun_cozdugu_cidar_sicakligini_tasiyor(
-        solver_results, panel_out):
+        hibrit_cozulmus):
     """Panelin önerisi motorun ısı zincirinin çözdüğü sayıyla BİT-AYNI olmalı.
 
     Ölçülen kusur: panel hiç göndermiyordu ve uç 729,9 K'lik tahmine
     düşüyordu (motorun kendi sayısı 3369,276 K).
     """
-    m = solver_results['hybrid']['motor']
-    th = m['structural_analysis']['thermal_analysis']
+    sonuc, cikti = hibrit_cozulmus
+    th = sonuc['motor']['structural_analysis']['thermal_analysis']
     assert th['wall_temperature_source'] == 'heat_transfer_module', (
-        'hibrit örnek motorda ısı zinciri artık cidar sıcaklığı çözmüyor — '
+        'astarsız hibrit yolda ısı zinciri cidar sıcaklığı çözmüyor — '
         'bu bekçinin dayanağı kaybolmuş, ölçüm yenilenmeli')
 
-    sug = panel_out['hybrid']['panels']['structural']['suggestions']
+    sug = cikti['panels']['structural']['suggestions']
     assert sug.get('wall_temperature_hot') == pytest.approx(
         th['wall_temperature_inner_K'], rel=0, abs=0), (
         'Panel ısı zincirinin çözdüğü SICAK yüz sıcaklığını taşımıyor: '
@@ -357,14 +388,15 @@ def test_hibritte_panel_motorun_cozdugu_cidar_sicakligini_tasiyor(
 
 @needs_node
 def test_panelin_kurdugu_govde_ucta_cozulmus_cidarla_kosuyor(
-        client, solver_results, panel_out):
+        client, hibrit_cozulmus):
     """CANLI kanıt: panelin gövdesi uca gidince uç ÇÖZÜLMÜŞ cidarı kullanır.
 
     Kusurun kendi senaryosu: panel cidar sıcaklığını göndermezse uç
     ``wall_temperature_source: 'chamber_temperature_estimate'`` döner ve
     T_iç 729,9 K'ye oturur. Bu bekçi tam o dönüşü kırmızıya çevirir.
     """
-    sug = panel_out['hybrid']['panels']['structural']['suggestions']
+    sonuc, cikti = hibrit_cozulmus
+    sug = cikti['panels']['structural']['suggestions']
     govde = {k: v for k, v in sug.items() if v is not None}
     resp = client.post('/analyze_structural_safety', json=govde,
                        headers=HEADERS)
@@ -374,13 +406,29 @@ def test_panelin_kurdugu_govde_ucta_cozulmus_cidarla_kosuyor(
         'Uç güverte gövdesiyle TAHMİN yoluna düştü '
         f"(kaynak: {th_uc['wall_temperature_source']}); panel cidar "
         'sıcaklığını göndermiyor demektir.')
-    th_motor = (solver_results['hybrid']['motor']['structural_analysis']
-                ['thermal_analysis'])
+    th_motor = sonuc['motor']['structural_analysis']['thermal_analysis']
     assert th_uc['wall_temperature_inner_K'] == pytest.approx(
         th_motor['wall_temperature_inner_K'], rel=0, abs=0), (
         'Güverte ile motor aynı motor için FARKLI cidar sıcaklığı veriyor: '
         f"güverte {th_uc['wall_temperature_inner_K']} / "
         f"motor {th_motor['wall_temperature_inner_K']}")
+
+
+@needs_node
+def test_hibrit_beyanli_kasa_sicakligi_panele_cozulmus_diye_tohumlanmaz(
+        solver_results, panel_out):
+    """Örnek hibrit (bütün bölgeler korunuyor): BEYANLI sıcaklık geri beslenmez.
+
+    V301/H-PANEL sözleşmesi: ``hybrid_chamber_zone_protection`` kaynağı
+    yakıt bloğu koruma modelinin beyanıdır, çözüm değildir; iki alan boş
+    kalır (uç kendi beyanlı yoluna girer, panel bunu söyler).
+    """
+    th = (solver_results['hybrid']['motor']['structural_analysis']
+          ['thermal_analysis'])
+    assert th['wall_temperature_source'] == 'hybrid_chamber_zone_protection'
+    sug = panel_out['hybrid']['panels']['structural']['suggestions']
+    assert sug.get('wall_temperature_hot') is None, sug
+    assert sug.get('wall_temperature_cold') is None, sug
 
 
 @needs_node
@@ -399,9 +447,33 @@ def test_beyani_cozulmus_demeyen_cidar_sicakligi_geri_beslenmez(
     m = r.get('motor') or r
     if motor_type == 'liquid':
         kaynak = (m.get('cooling_system') or {}).get('wall_temperature_source')
-        assert isinstance(kaynak, str) and kaynak.lower().startswith('assumed'), (
-            'sıvı örnek motorun cidar sıcaklığı artık VARSAYIM değil '
-            f'({kaynak!r}) — bu bekçinin dayanağı değişmiş, ölçüm yenilenmeli')
+        # V301/T-ÇAPA-D: ÖRNEK kulvarı (5fa435893) örnek sıvıya sayfanın
+        # max_wall_temp = 800 K alanını yazdı; kaynak artık 'user input (max
+        # wall temperature)'. L-B (SV-05) sözleşmesi: kullanıcının cidar
+        # sıcaklığı bir GEREKSİNİMDİR (hedef), çözüm değildir — varsayım gibi
+        # o da çözülmüş diye geri beslenmez. Dayanak "çözülmemiş sıcaklık":
+        # varsayım YA DA kullanıcı hedefi.
+        assert isinstance(kaynak, str) and kaynak.lower().startswith(
+            ('assumed', 'user input (max wall temperature)')), (
+            'sıvı örnek motorun cidar sıcaklığı artık ne VARSAYIM ne kullanıcı '
+            f'hedefi ({kaynak!r}) — bu bekçinin dayanağı değişmiş, ölçüm '
+            'yenilenmeli')
+        # L-B (v3.0.1, SV-05): panel artık toplu zincirin VARSAYIM cidarını
+        # (wall_temperature_hot/cold, 800/350 K) değil, ÇÖZÜCÜNÜN ÇÖZDÜĞÜ
+        # değeri (cooling_system.wall_temperature_solved_*) taşır. Örnek
+        # motorda RP-1 istasyon marşı koşuyor (ölçüldü: 2876,6 / 969,7 K);
+        # çözüm varsa panel TAM o sayıları önermeli, VARSAYIMI asla.
+        cs = m.get('cooling_system') or {}
+        sug = panel_out[motor_type]['panels']['structural']['suggestions']
+        if cs.get('wall_temperature_solved_K') is not None:
+            assert sug.get('wall_temperature_hot') == pytest.approx(
+                cs['wall_temperature_solved_K'], rel=1e-12)
+            assert sug.get('wall_temperature_cold') == pytest.approx(
+                cs['wall_temperature_solved_cold_K'], rel=1e-12)
+            assert sug.get('wall_temperature_hot') != pytest.approx(
+                cs['wall_temperature_hot'], rel=1e-6), (
+                'panel yine toplu zincirin varsayım cidarını öneriyor')
+            return
     else:
         th = (m.get('structural_analysis') or {}).get('thermal_analysis')
         assert not isinstance(th, dict) or not th.get('wall_temperature_source'), (

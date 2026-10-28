@@ -304,10 +304,19 @@ def test_out_of_range_input_warns_instead_of_silent_fallback():
 
 def test_unwired_inputs_are_declared():
     """Bağlanmayan alanlar açıkça listelenmeli (UI orada devre dışı bırakır)."""
-    _, result = run_engine(dict(FORM_DEFAULTS))
+    # V301/L-D (SV-09) — BEKLENTİ DEĞİŞTİ: gövde varken beyan yalnız
+    # GÖNDERİLEN alanları adlandırır (form çözücünün okumadığı alanları
+    # artık göndermiyor). Gönderilen geçici rejim alanı beyan edilir,
+    # gönderilmeyen edilmez; gövdesiz katalog tam listedir.
+    _, result = run_engine(dict(FORM_DEFAULTS, engine_start_time=2.0,
+                                throat_diameter=50))
     unwired = result['unwired_inputs']
     assert 'throat_diameter' in unwired['reported_for_comparison']
     assert 'engine_start_time' in unwired['transient_not_modelled']
+    assert 'engine_shutdown_time' not in unwired['transient_not_modelled']
+    from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
+    assert 'engine_shutdown_time' in LiquidRocketEngine.unwired_inputs(
+        None)['transient_not_modelled']
     # Bağlanan bir alan listede kalmamalı
     flat = {name for group in unwired.values() for name in group}
     for wired in ('characteristic_length', 'cooling_channels',

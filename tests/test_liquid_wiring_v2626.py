@@ -535,8 +535,12 @@ def test_liquid_page_sends_the_film_cooling_input():
     assert 'film_cooling_percent:' in body.group(0), \
         'alan var ama toplayıcı göndermiyor'
     # Sıfır MEŞRU bir değerdir; `|| 0` kalıbı onu yedek değere düşürürdü.
-    assert re.search(r"film_cooling_percent:\s*isFinite\(", body.group(0)), \
-        'sıfır güvenli okuma kalıbı yok'
+    # V301/L-D (SV-04) — BEKLENTİ DEĞİŞTİ: okuyucu artık liqOptNum (sıfırı
+    # 0 olarak gönderir, BOŞ alanı hiç göndermez); eski isFinite kalıbı boş
+    # alanı gizli 0 diye gönderiyordu ve çözücü onu 'user input' diye
+    # künyeliyordu.
+    assert re.search(r"film_cooling_percent:\s*liqOptNum\('film_cooling_percent'\)",
+                     body.group(0)), 'sıfır güvenli (boşsa gönderme) okuma kalıbı yok'
     assert "document.getElementById('film_cooling_percent').value = '0'" in html, \
         'formu sıfırlama alanı unutmuş'
 

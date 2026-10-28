@@ -38,6 +38,8 @@ import math
 
 import pytest
 
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM
+
 pytestmark = pytest.mark.filterwarnings('ignore::RuntimeWarning')
 
 
@@ -92,9 +94,17 @@ def kati_yaniti(client):
     # yayımlanıyordu (yani hedef hiç etkili olmadı). Zarf kapısı fail-closed
     # olduğundan gövde ZATEN ÖLÇÜLEN geometri kipine çevrildi; yanıt tasarım
     # noktası bloğu dışında BİT-AYNI (sha16 b5ea1bd5a9d3b148).
+    # v3.0.1 T-ÇAPA-B: eski çekirdek 35 mm (Ø100, boy 300 mm @ 40 bar,
+    # a = 0,005 / n = 0,35) A_p/A_t 0,925 ile port boğulan motordu; K-A
+    # kapısından beri 422 ``port_smaller_than_throat``. Konu port boğulması
+    # değil: çekirdek tek tanım ``SOLID_DEFAULT_GEOMETRY_MM``den (48 mm,
+    # kopyalanmaz); hazne/boy bu gövdenin kendi değerleri. Ölçüldü: boğaz
+    # 37,54 mm, A_p/A_t 1,64. (Ø100/boy 500 tam varsayılan bu yanma hızı
+    # katsayılarıyla yine boğuluyor: A_p/A_t 0,958.)
     yuk = {'motor_name': 'geo-s', 'chamber_pressure': 40,
-           'grain_type': 'bates', 'chamber_diameter': 100,
-           'core_diameter': 35, 'grain_length': 300, 'segments': 1,
+           'grain_type': 'bates', 'chamber_diameter': 100, 'grain_length': 300,
+           'core_diameter': SOLID_DEFAULT_GEOMETRY_MM['core_diameter'],
+           'segments': 1,
            'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
            'chamber_temperature': 3000, 'c_star': 1550,
            'propellant_density': 1800, 'propellant_type': 'apcp'}

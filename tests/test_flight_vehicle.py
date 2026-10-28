@@ -685,10 +685,19 @@ class TestSchemaAndErrors:
 #: sekiz alanın SEKİZİ DE ``_recompute_solid``in varsayılanıyla aynı
 #: (flight_vehicle.py:366-376), yani belge BOŞ bir belgeden ayırt edilemez —
 #: bekçinin tek başına "proje gerçekten okundu" diyememesinin sebebi budur.
+#: V301/T-ÇAPA-A: çekirdek 30 -> 76 mm. 30 mm + a = 0,005 portu boğulan
+#: motordur (A_p/A_t 0,396 -> K-A KT-23 422); 76 mm ölçülen A_p/A_t 2,218
+#: (tests/test_faz4_motor_kapilari.KATI_TABAN ile aynı ölçüm). Artık sekiz
+#: alanın YEDİSİ ``_recompute_solid`` varsayılanıyla aynı; çekirdek farklı.
+#: ``_recompute_solid``in kendi 30 mm varsayılanı ürün kusuru: T-ÇAPA-A
+#: RAPOR DEVİR 1 (boş/eksik proje düğümleri o yüzden kırmızı kalır).
+#: V301/UÇUŞ C-1 (DEVİR 1 KAPANDI): ``_recompute_*`` ve modül yedekleri
+#: SÖKÜLDÜ; recompute sayfa ucunu koşar, eksik zorunlu alan ucun adlı reddi
+#: olur (``fv.ProjectCalculationRejected``, ``ValueError`` alt sınıfı).
 SOLID_PROJE_ALANLARI = {
     'grain_type': 'bates', 'propellant_type': 'apcp',
     'chamber_diameter': 100, 'grain_length': 500,
-    'core_diameter': 30, 'chamber_pressure': 40,
+    'core_diameter': 76, 'chamber_pressure': 40,
     'burn_rate_a': 0.005, 'burn_rate_n': 0.35,
 }
 
@@ -696,17 +705,31 @@ SOLID_PROJE_ALANLARI = {
 #: ÖH KİTAP p1b (B11, §28-36 Ş-3): itki 6739,133989599616 ve motor boyu
 #: 0,773479676663654 m APCP kaydının geri çözülmüş dörtlüsündendi; CEA denge
 #: dörtlüsüyle ölçülen yeni taban (ε denge γ_s ile büyüdü → lüle uzadı).
+#: V301/T-ÇAPA-A — YENİDEN ÖLÇÜLDÜ (26 Eki, 76 mm çekirdek; aynı yol
+#: recompute_from_project -> normalize, iki koşu bit-aynı). Eski -> yeni:
+#: itki 6787,4256 -> 10301,9063 N; süre 2,18631 -> 0,68653 s; yakıt
+#: 6,46815 -> 3,00236 kg (geometri + a = 0,005); atıl 6,00140 -> 6,45346 kg
+#: (K-A KT-03 astar radyal, K-A RAPOR §5'teki 6,0014 -> 6,4535 ile aynı);
+#: dış çap 0,1048 -> 0,13396 m (KT-02: kasa iç + 2·cidar, bu itkinin
+#: cidarıyla); boy 0,78599 -> 0,79716 m; termokimya N-CEA-2 (CEA, Pc'de).
+#: Aşağıdaki tarihçe yorumları eski sayılara aittir.
 SOLID_PROJE_OLCUM = {
-    'thrust': 6787.425591856073,
-    'burn_time': 2.1863052375251684,
-    'propellant_mass': 6.468146574659687,
+    'thrust': 10301.90633210043,
+    'burn_time': 0.6865322362722804,
+    'propellant_mass': 3.002357267182695,
     # ÖH D18 (P2B4-04): liner halkası kuru kütleye EKLENDİ (daha önce
     # 0 kg giriyordu — atalet kütlesi eksikti, kütle kesri iyimserdi ve bu
     # çapa o eksik sayıyı kilitliyordu). Ölçülen yeni değer aynı gövdeyle
     # 6,001397012523196 kg; fark 0,4614 kg = varsayılan 2 mm liner halkası.
-    'engine_inert_mass': 6.001397012523196,
-    'engine_od_m': 0.10480000000000002,
-    'engine_length_m': 0.7859858739115702,
+    'engine_inert_mass': 6.4534577390220145,
+    # V301/FİZİK-2 (kalem 6, KABUL 13-14) — YENİDEN ÖLÇÜLDÜ, gerekçeli: eski
+    # 0,13396 m lüle çıkışının İÇ çapıydı (key_dimensions.nozzle_exit_mm
+    # 133,959); araç zarfı artık ÇİZİLEN dış zarftır — STEP/STL lüle
+    # katısının profili (iç + et): 0,144165 m. Eski boy 0,79716 m kapaksız
+    # ve çözücü lüle boyuyla kuruluydu; araç boyu artık CAD-2'nin tek tanımı
+    # (kasa + çizilen lüle 798,443 mm + çizilen ön kapak 12,654 mm).
+    'engine_od_m': 0.14416492252724383,
+    'engine_length_m': 0.8110972111275743,
 }
 
 
@@ -724,6 +747,16 @@ class TestRecomputeProjectSolid:
                'inputs': {'fields': dict(SOLID_PROJE_ALANLARI)}}
         motor_type, results = fv.recompute_from_project(doc)
         assert motor_type == 'solid'
+        # V301/UÇUŞ C-1: recompute sayfanın hesap ucunun GÖVDESİNİ koşar;
+        # sonuç, aynı yükle ``/calculate_solid``in yanıtıyla BİT-AYNI olmalı
+        # (eskiden ``_recompute_solid`` motoru kendisi kuruyordu). Aşağıdaki
+        # altı çapa bu belgede DEĞİŞMEDİ (ölçüldü: eski kurulum ile uç bu
+        # sekiz alanda aynı sayıyı veriyor; ayrışma örnek projelerin uç
+        # argümanlarındaydı — tests/test_v301_ucus_proje_kaynagi.py).
+        durum, uc_govdesi = fv.run_page_calculation(
+            'solid', fv.page_payload('solid', SOLID_PROJE_ALANLARI))
+        assert durum == 200
+        assert results == uc_govdesi
         v = fv.normalize(motor_type, results, source='project')
 
         assert v['source'] == 'project'

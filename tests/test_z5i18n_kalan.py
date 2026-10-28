@@ -506,18 +506,20 @@ def ekran(yanitlar):
 #: Hangi vakada hangi anahtarın ekranda olması BEKLENİYOR (ölçüldü —
 #: raw/OH/Z5S/i18nkalan/sonra/olcum.txt). Beklenti vakaya özgüdür:
 #: ``runMotorSolve`` YALNIZ motor koşumu olmayan dalda basılır.
+#: V301/FİZİK-2 (kalem 9, S1) — GEREKÇELİ: motor sonucu olan üç vakada
+#: ``wallNotApplied`` artık beklenmez. Panel HRMA'nın boyutlandırdığı cidarı
+#: 0 nöbetçisi yerine GERÇEK değeriyle (künyeli) gönderiyor; "gönderdiğiniz
+#: cidar uygulanmadı" durumu oluşmuyor (ölçüm: fizik-2/k9_yapisal_sonra.json).
+#: Motorsuz vaka (nöbetçi yolu) aynen kalır.
 Z5K_BEKLENEN = {
     'size_motorlu': ('panel.structural.sfMinEarned',
                      'panel.structural.sfTargetReadback',
-                     'panel.structural.wallNotApplied',
                      'panel.structural.scopeIncomplete'),
     'ince_motorlu': ('panel.structural.sfMinEarned',
                      'panel.structural.sfTargetReadback',
-                     'panel.structural.wallNotApplied',
                      'panel.structural.scopeIncomplete'),
     'kalin_motorlu': ('panel.structural.sfMinEarned',
                       'panel.structural.sfTargetReadback',
-                      'panel.structural.wallNotApplied',
                       'panel.structural.scopeIncomplete'),
     'kalin_motorsuz': ('panel.structural.sfMinEarned',
                        'panel.structural.sfTargetReadback',
@@ -602,7 +604,31 @@ def test_turkce_kipte_sunucu_gerekcesi_ingilizce_kalmiyor(ekran, vaka):
         '%s: Türkçe karşılık basılmıyor (desen ıskaladı mı?)' % vaka)
 
 
-def test_appjs_hukum_seridi_ekranda_turkcelesiyor(ekran, yanitlar):
+@pytest.fixture(scope='module')
+def serit_astarsiz():
+    """Hüküm şeridi, geçerlilik DIŞI hibritte (fail-closed termal yol).
+
+    T-ÇAPA-C2 (27 Eki): V301/H-termal (065b391dc) sonrası ``Z5K_HIBRIT``
+    korunan yolda koşar (kasa ortam sıcaklığında, model geçerlilik içinde);
+    şeridin (C) gerekçesini üreten "geçerlilik dışı hibrit" vakası artık
+    yalnız astar boyutlandırması koşmadığında görülür
+    (``tests.support.hibrit_termal``; geri kalan her şey ürün kodu — aynı
+    desen ``test_v301_paket_kapisi.hibrit_md_astarsiz``). Öteki ekran
+    bekçileri korunan yol motorunu kullanmaya devam eder.
+    """
+    if not NODE:
+        pytest.skip('node bulunamadı')
+    from hrma.app import app
+    from tests.support.hibrit_termal import astar_boyutlandirmasi_kosmaz
+    app.config['TESTING'] = True
+    with app.test_client() as c, astar_boyutlandirmasi_kosmaz():
+        r = _sessiz(c.post, '/calculate', json=Z5K_HIBRIT)
+    assert r.status_code == 200, r.get_data(as_text=True)[:300]
+    motor = r.get_json()
+    return motor, _node_ciz(STATIK, {'motor': motor, 'vakalar': []})['serit']
+
+
+def test_appjs_hukum_seridi_ekranda_turkcelesiyor(serit_astarsiz):
     """app.js hüküm şeridi de aynı kapıdan geçiyor.
 
     V3 yapi-sf 3. tur Ş2-2 — ÇEVİRİ (karar §28-37 seçenek (a); karar §28-24
@@ -623,10 +649,11 @@ def test_appjs_hukum_seridi_ekranda_turkcelesiyor(ekran, yanitlar):
     gerekce_en = Z5K_BASIS_EN + (c_en,)
     gerekce_tr = Z5K_BASIS_TR + (c_tr,)
 
-    en, tr = ekran['serit']['en'], ekran['serit']['tr']
+    motor, serit = serit_astarsiz
+    en, tr = serit['en'], serit['tr']
     assert en.strip(), 'hüküm şeridi hiç basılmıyor — bekçi boşa koşuyor'
     assert malzeme_kaydina_gore_gecerlilik_disi(
-        yanitlar['motor']['motor']['structural_analysis']) is True
+        motor['motor']['structural_analysis']) is True
     assert c_en in en, (
         'geçerlilik dışı hibritte şerit (C) gerekçesini basmıyor')
     kalan = [c for c in gerekce_en if c in tr]

@@ -248,7 +248,7 @@ ROZET_IMZALARI = {
     # turdan geçiyordu, çünkü imza listesi hüküm rozetlerini hiç aramıyordu.
     # Aşağıdaki üç imza HER koşumda basılan hüküm ailelerini bağlar: panel
     # bu rozetlerin ya hükümlü ya "yayımlanmadı" hâlini KOŞULSUZ basar
-    # (fea_panel.js:694-704, thermal_fea_panel.js:669-698, grain :1540-1552),
+    # (fea_panel.js:694-704, thermal_fea_panel.js:1214-1244, grain :1540-1552),
     # o yüzden beklenen-imza olmaları yanlış alarm üretmez. Hangi hâlin
     # çıktığı tasarım noktasının fiziğidir ve bu imzaların hükmüne girmez;
     # içerik/renk çaprazı ayrı denetimdedir (fea_yuk_caprazi_denetimi).
@@ -262,17 +262,30 @@ ROZET_IMZALARI = {
                     'silinirse kullanıcı emniyet hükmünü hiç görmez '
                     '(P17B1-20: silme mutasyonu 0/22 yakalanıyordu).'),
     },
+    # V305/G3 (28 Eki): ürün zinciri ALTI hâllidir (thermal_fea_panel.js
+    # renderBadges :1214-1244). Altıncı hâl — olumlu hüküm geri çekildi
+    # (ml.verdict_withheld === true, :1228-1229 → withheldBadge :1162-1168,
+    # anahtar feaT.badgeVerdictWithheld) — sınır bilgisini KÜÇÜK harfle
+    # taşır ("the allowable 3300 K for information only" / "izin sınırı
+    # 3300 K ile yalnız bilgi için"); büyük/küçük harf duyarlı eşleşme
+    # 'ALLOWABLE'/'İZİN SINIRI' çekirdeklerini orada bulamıyordu. Rozetin
+    # BAŞLIĞI ('NO SAFETY VERDICT' / 'GÜVENLİK HÜKMÜ YOK') çekirdek olarak
+    # eklendi; sınır sayısının yükle tutması yük çaprazında sınanır.
     'termal_sinir_hukmu': {
         'varyantlar': ('MELTING POINT', 'ALLOWABLE',
                        'MATERIAL LIMITS NOT PUBLISHED',
+                       'NO SAFETY VERDICT',
                        'ERİME NOKTASI', 'İZİN SINIRI',
-                       'MALZEME SINIRLARI YAYIMLANMAMIŞ'),
+                       'MALZEME SINIRLARI YAYIMLANMAMIŞ',
+                       'GÜVENLİK HÜKMÜ YOK'),
         'sozluk_anahtarlari': ('feaT.badgeOverMelting', 'feaT.badgeOverAllowable',
+                               'feaT.badgeVerdictWithheld',
                                'feaT.badgeWithinLimits', 'feaT.badgeAllowMissing',
                                'feaT.badgeLimitsMissing'),
         'kaynak_dosyalar': ('hrma/static/js/thermal_fea_panel.js',),
-        'gerekce': ('Malzeme sınırı hükmü beş hâlin TAM BİRİNDE basılır '
-                    '(thermal_fea_panel.js:669-698); ailenin ekranda hiç '
+        'gerekce': ('Malzeme sınırı hükmü altı hâlin TAM BİRİNDE basılır '
+                    '(thermal_fea_panel.js:1214-1244; geri çekilmiş hüküm '
+                    'withheldBadge :1162-1168); ailenin ekranda hiç '
                     'olmaması "erime beyanı DOM\'a girmiyor" sınıfıdır '
                     '(P17B1-01 kardeşi).'),
     },

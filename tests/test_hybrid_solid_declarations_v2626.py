@@ -49,6 +49,14 @@ if str(_ROOT / 'tools') not in sys.path:
     sys.path.insert(0, str(_ROOT / 'tools'))
 from sabit_siniflandirma import siniflandir  # noqa: E402
 
+# V301/T-ÇAPA-A: katı örnek motor geometrisi tek tanımdan (çekirdek
+# 30 -> 48 mm). Eski Ø100/500/30 @ 40 bar BATES portu boğuluyordu
+# (A_p/A_t 0,947) ve K-A port kapısından 422 alıyor; bu dosyadaki
+# düğümlerin konusu boğulan port değil (K-A RAPOR §6, kural 1).
+from hrma.engines.solid_rocket_engine import SOLID_DEFAULT_GEOMETRY_MM  # noqa: E402
+_CEKIRDEK_MM = SOLID_DEFAULT_GEOMETRY_MM['core_diameter']
+
+
 
 # ---------------------------------------------------------------------------
 # Ortak yardımcılar
@@ -64,7 +72,7 @@ def hybrid():
 @pytest.fixture(scope='module')
 def solid():
     return SolidRocketEngine(
-        chamber_diameter=100, grain_length=500, core_diameter=30,
+        chamber_diameter=100, grain_length=500, core_diameter=_CEKIRDEK_MM,
         chamber_pressure=40).calculate_performance()
 
 
@@ -338,7 +346,7 @@ class TestKatiBeyanlariDogru:
                 ['erosive_burning_effects'])
         assert blok['erosive_threshold_kg_m2s'] == EROSIVE_THRESHOLD_KG_M2S
         motor = SolidRocketEngine(chamber_diameter=100, grain_length=500,
-                                  core_diameter=30, chamber_pressure=40)
+                                  core_diameter=_CEKIRDEK_MM, chamber_pressure=40)
         motor.erosive_burning_coeff = 0.05
         assert motor._erosive_factor(EROSIVE_THRESHOLD_KG_M2S) == 1.0
         assert motor._erosive_factor(EROSIVE_THRESHOLD_KG_M2S - 1.0) == 1.0
@@ -372,11 +380,11 @@ class TestKatiBeyanlariDogru:
     def test_grain_mekanik_kaydi_yakita_gore_degisir(self):
         """Kayıt yakıttan gelir: şeker grain, HTPB kompozitle aynı olamaz."""
         apcp = SolidRocketEngine(chamber_diameter=100, grain_length=500,
-                                 core_diameter=30, chamber_pressure=40,
+                                 core_diameter=_CEKIRDEK_MM, chamber_pressure=40,
                                  propellant_type='apcp'
                                  ).calculate_performance()
         knsu = SolidRocketEngine(chamber_diameter=100, grain_length=500,
-                                 core_diameter=30, chamber_pressure=40,
+                                 core_diameter=_CEKIRDEK_MM, chamber_pressure=40,
                                  propellant_type='knsu'
                                  ).calculate_performance()
         a = apcp['structural_analysis']['grain_structural']

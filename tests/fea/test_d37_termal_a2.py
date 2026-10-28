@@ -243,10 +243,23 @@ class TestF03WallProfile:
     def test_motor_gazi_profili_degistirir_ve_motorun_kendi_dengesiyle_ortusur(
             self, client, motorlar):
         """Bartz eşleştirme hükmü: motorun γ/MW/c* geçince profil, motorun
-        kendi gas_side_analysis dengesiyle ÖRTÜŞÜR (ölçüldü: T7 3368,476 K)."""
+        kendi gas_side_analysis dengesiyle ÖRTÜŞÜR (ölçüldü: T7 3368,476 K).
+
+        v3.0.5 (28 Eki, V305/B ek tur): ``motor_results`` kurucusu malzemeyi
+        artık köprünün AĞ malzemesiyle aynı yoldan okur (önce lüle bloğu;
+        bu kayıtlı hibritte graphite). Motorun gas_side_analysis dengesi ise
+        KAMARA malzemesiyle (steel_4130) kurulu; karşılaştırma aynı cidarla
+        yapılsın diye kamara malzemesi açıkça verilir (açık düz alan
+        önceliklidir). Ölçüldü (ae1dae910 + onarım): kamara malzemesiyle
+        1881,95881466436 K, sapma 0; malzemesiz (graphite) 1881,94664 K,
+        göreli 6,5e-6. Bekçinin özü (motorun gazı → motorun dengesi) ve
+        tolerans aynı."""
+        from hrma.fea.bridge import extract_structural_inputs
         m = motorlar['hibrit']
+        kamara = extract_structural_inputs(m, include_chamber=False)[
+            'material_key']
         r = _q(client.post, '/api/analysis/wall-profile',
-               json={'motor_results': m}, headers=H)
+               json={'motor_results': m, 'material': kamara}, headers=H)
         wp = r.get_json()['wall_profile']
         i = wp['throat_index']
         eq = m['heat_transfer_analysis']['gas_side_analysis']['estimated_wall_temperature']
@@ -269,14 +282,39 @@ class TestF03WallProfile:
 # ---------------------------------------------------------------------------
 # F-02 / F-01 / B2-CP — /api/fea/thermal ve /api/fea/structural
 # ---------------------------------------------------------------------------
+def _lule_kamara_ayni(motor):
+    """v3.0.5 (28 Eki, V305/B): kayıtlı hibrit motorun lüle malzemesini
+    kamaranınkine eşitler (kopya üzerinde; test_d15fix2 fikstürüyle aynı yol).
+
+    Kök: fe72e04b5 (FİZİK-2 birleşmesi, NK-12, 27 Eki) — termal ağ artık
+    motorun LÜLE malzemesiyle çözülür (bilinçli). Kayıtlı kanıt profili
+    (once/wall_profile_panel.json) NK-12 öncesi panelle kamara malzemesiyle
+    (steel_4130) kurulmuştu; kayıtlı motorun lülesi graphite. Uç bu çifti
+    adlı 422 ``axial_profile_material_mismatch`` ile reddeder (D19 P7B3-30
+    fail-closed sözleşmesi, doğru davranış). Bu sınıfın iddiası ucun
+    MEKANİĞİ (uzamsal merdiven, yayımlanan ağ, OH-DK-10 tavanı, uzlaştırma
+    ve tüketilen yollar) — malzemeden bağımsız; kanıt zinciri (kayıtlı motor
+    + kayıtlı profil) korunur, ağ profilin malzemesiyle kurulur. Ölçüldü
+    (ae1dae910): tepe 1787,720936924122 K, p 1,9947, GCI %0,01946, 64×16 —
+    sonra/ozet.json çapasıyla AYNI; 4 seviye istenince 4 seviye, 128 eksenel.
+    """
+    import copy
+    from hrma.fea.bridge import extract_structural_inputs
+    m = copy.deepcopy(motor)
+    kamara = extract_structural_inputs(m, include_chamber=False)['material_key']
+    m.setdefault('nozzle_material_analysis', {})['material'] = kamara
+    return m
+
+
 @pytest.fixture(scope='module')
 def hibrit_fea(client, motorlar):
     if not _app_yamali():
         pytest.skip('app yaması uygulanmamış')
     wp = _kanit_json(kanit_gerekli(ONCE / 'wall_profile_panel.json'))['wall_profile']
     r = _q(client.post, '/api/fea/thermal',
-           json={'motor_results': motorlar['hibrit'], 'axial_profile': wp,
-                 'ambient_temperature_K': 293.15}, headers=H)
+           json={'motor_results': _lule_kamara_ayni(motorlar['hibrit']),
+                 'axial_profile': wp, 'ambient_temperature_K': 293.15},
+           headers=H)
     assert r.status_code == 200, r.get_data(as_text=True)[:300]
     return r.get_json()['fea']
 
@@ -315,8 +353,10 @@ class TestFeaThermalUc:
     def test_dort_seviye_istenebilir(self, client, motorlar):
         wp = _kanit_json(kanit_gerekli(ONCE / 'wall_profile_panel.json'))['wall_profile']
         r = _q(client.post, '/api/fea/thermal',
-               json={'motor_results': motorlar['hibrit'], 'axial_profile': wp,
-                     'ambient_temperature_K': 293.15, 'spatial_levels': 4}, headers=H)
+               json={'motor_results': _lule_kamara_ayni(motorlar['hibrit']),
+                     'axial_profile': wp, 'ambient_temperature_K': 293.15,
+                     'spatial_levels': 4}, headers=H)
+        assert r.status_code == 200, r.get_data(as_text=True)[:300]
         f = r.get_json()['fea']
         assert len(f['spatial_convergence']['levels']) == 4
         assert f['mesh']['n_axial'] == 128 and f['limits']['spatial_levels'] == 4
@@ -771,10 +811,42 @@ KATI_GOVDE = {
 }
 
 
+#: v3.0.5 (28 Eki, V305/B) — SV-03 SÖZLEŞMESİ. L-A kulvarı (a6cf9790b,
+#: main'e c775e59b5 birleşmesiyle, 26 Eki) basınç beslemeli çevrimde
+#: ``feed_pressure`` gönderilmezse sıvı ucunu 422
+#: ``pressure_fed_feed_pressure_not_supplied`` ile reddettirir: tank basıncı
+#: enjektör besleme basıncıdır ve çözücü artık onu VARSAYMAZ (bilinçli ürün
+#: kararı; app.py SV-03 bloğu). Buradaki
+#: gövdeler basınç beslemelidir; besleme basıncı elle seçilmez, ÜRÜNÜN KENDİ
+#: 422 yanıtındaki önerisi okunur: gerekli tank basıncı + beyanlı marj
+#: (``recommended_tank_pressure_with_margin_bar``). Ölçüldü (bu gövdeler,
+#: ae1dae910): gerekli 124,2635 bar (bağlayan taraf oksitleyici) + beyanlı
+#: marj 8 bar = 132,2635 bar. Termal hüküm besleme basıncından BAĞIMSIZ:
+#: thermal_protection bloğunun md5'i L-A öncesinde (84af545cd, feed_pressure
+#: yok) ve sonrasında (feed_pressure 124,27 / 130 / 132,26 / 150 / 200 bar)
+#: dört gövdede (ablatif ve radyatif steel_304, ablatif copper_c101,
+#: ablatif inconel_718) BİT-AYNI. Bekçilerin özü (yayımlanan sınır İZİN
+#: basamağı) ve ölçülen sayılar değişmedi.
+def _sivi_kos(client, govde):
+    """Basınç beslemeli sıvı gövdesini ürünün önerdiği besleme basıncıyla
+    koşar; önce SV-03 kapısının adlı reddini de doğrular."""
+    r0 = _q(client.post, '/calculate_liquid', json=govde, headers=H)
+    assert r0.status_code == 422, r0.get_data(as_text=True)[:300]
+    j0 = r0.get_json()
+    assert j0['error'] == 'pressure_fed_feed_pressure_not_supplied', j0
+    alan = j0['invalid_fields'][0]
+    assert alan['field'] == 'feed_pressure' and alan['reason'] == 'not_supplied'
+    besleme = alan['recommended_tank_pressure_with_margin_bar']
+    assert besleme == pytest.approx(alan['required_tank_pressure_bar']
+                                    + alan['declared_margin_bar'])
+    return _q(client.post, '/calculate_liquid',
+              json=dict(govde, feed_pressure=besleme), headers=H)
+
+
 @pytest.fixture(scope='module')
 def sivi_steel_304_ablatif(client):
     """Tek koşu, iki bekçi: künye (motor yaması) + ısı-yutucu (dal kodu)."""
-    r = _q(client.post, '/calculate_liquid', json=SIVI_ABLATIF_STEEL_304, headers=H)
+    r = _sivi_kos(client, SIVI_ABLATIF_STEEL_304)
     assert r.status_code == 200, r.get_data(as_text=True)[:300]
     g = r.get_json()
     assert 'warn.liquid.option_not_recognised' not in json.dumps(g), \
@@ -804,7 +876,7 @@ class TestM2MotorSatirlari:
                  'characteristic_length': 1.2, 'chamber_wall_thickness': 5,
                  'cooling_type': 'ablative', 'injector_type': 'impinging',
                  'engine_cycle': 'pressure_fed', 'safety_factor': 2.5}
-        r = _q(client.post, '/calculate_liquid', json=govde, headers=H)
+        r = _sivi_kos(client, govde)    # SV-03: _sivi_kos notu
         assert r.status_code == 200
         g = r.get_json()
         m = g.get('motor') if isinstance(g.get('motor'), dict) else g
@@ -1054,7 +1126,7 @@ class TestM2BasamakVeHamAlanAyrimi:
         ısı-yutucu satırı copper'da NOT_MODELLED (iki ağaçta)."""
         rec, tl = self._merdiven('copper', (723.0, 723.0, 1358.0, 1358.0))
         govde = dict(SIVI_ABLATIF_STEEL_304, chamber_material='copper_c101')
-        r = _q(client.post, '/calculate_liquid', json=govde, headers=H)
+        r = _sivi_kos(client, govde)    # SV-03: _sivi_kos notu
         assert r.status_code == 200, r.get_data(as_text=True)[:300]
         g = r.get_json()
         assert 'warn.liquid.option_not_recognised' not in json.dumps(g)
@@ -1089,7 +1161,7 @@ SIVI_RADYATIF_STEEL_304_SINIRA_SURE_S = 0.078666
 @pytest.fixture(scope='module')
 def sivi_steel_304_radyatif(client):
     govde = dict(SIVI_ABLATIF_STEEL_304, cooling_type='radiative')
-    r = _q(client.post, '/calculate_liquid', json=govde, headers=H)
+    r = _sivi_kos(client, govde)        # SV-03: _sivi_kos notu
     assert r.status_code == 200, r.get_data(as_text=True)[:300]
     g = r.get_json()
     assert 'warn.liquid.option_not_recognised' not in json.dumps(g), \
@@ -1153,8 +1225,28 @@ HIBRIT_A2_GOVDE = {'motor_type': 'hybrid', 'thrust': 5000,
 #: cidar 1063,77 K — pencerenin ALTINDA. Çapa birleşik ağaçta yeniden
 #: ölçüldü (sart9/olcum/s9_S.json hib steel_304:22): T_iç 1089,68 K
 #: (kenarlara 16,68 / 53,32 K), sınıra süre 21,2604 s; rel 1e-3 AYNEN.
-HIBRIT_PENCERE_YANMA_S = 22
-HIBRIT_STEEL_304_PENCERE_SINIRA_SURE_S = 21.2604
+#: v3.0.1 (21 Eki): iki değişiklik cidarı ısıttı ve 22 s vakası pencereden
+#: çıktı (a367de3d2'de T_iç 22 s'de pencerenin üstündeydi; B7 sonrası
+#: 1602,97 K): (1) tane zarfı kamara çapını son port çapına indirdi (eski
+#: 1,5 × D_son), (2) B7 — bu gövde O/F 2,5, dengeye katı karbon C(gr) girdi,
+#: T_c 1834 → 2037 K. Pencere birleşik main'de yanma süresi taranarak
+#: yeniden ölçüldü (4 s 1030,70 K; 4,5 s 1064,35 K; 5 s 1095,99 K; 5,5 s
+#: 1125,80 K; 6 s 1153,93 K): 5 s'de T_iç 1095,99 K (kenarlara 22,99 /
+#: 47,01 K), sınıra süre 4,7084 s; rel 1e-3 AYNEN. Bekçinin özü
+#: (yayımlanan sınır İZİN 1073, servis 1143 DEĞİL) değişmedi.
+#: v3.0.5 (28 Eki, V305/B): çapa 4,7084 → 4,7222 s (+%0,29). Kök çatalla
+#: bulundu (git bisect --first-parent aa07b4bf2..fe72e04b5^): ilk değişen
+#: commit 74b55500a (H-PANEL birleşmesi, 26 Eki) — hibrit c* verimi artık
+#: uygulanıyor (N2O/HTPB kaynaklı varsayılan η_c* 0,89; bilinçli, yayımlanan
+#: sayı). Bu gövdede c* 1370,82 → 1220,03 m/s, ṁ 2,6894 → 3,0216 kg/s,
+#: tane zarfıyla kamara çapı 92,56 → 97,60 mm; ısı modülünün kamara
+#: akısından geri çözülen h_eff 2049,53 → 2044,94 W/m²K, iç cidar 1095,99 →
+#: 1094,87 K. 41733c22f'de 4,708361 s, 74b55500a'da ve ae1dae910'da
+#: 4,722201 s ölçüldü (FİZİK-2 bu sayıyı değiştirmedi: fe72e04b5^ ve
+#: fe72e04b5 aynı). Vaka pencerede kalıyor (kenarlara 21,87 / 48,13 K);
+#: süre, tolerans ve bekçinin özü aynı.
+HIBRIT_PENCERE_YANMA_S = 5
+HIBRIT_STEEL_304_PENCERE_SINIRA_SURE_S = 4.7222
 #: /api/thermal-protection ısı-yutucu çapası (denetim-6 Ş1 a) ve ss_304
 #: 13 s vakasının ölçülen sınıra süresi [s].
 KORUMA_ISI_YUTUCU_CAPA = {'mode': 'heat_sink', 'h_gas_W_m2K': 500,
@@ -1178,7 +1270,10 @@ class TestIsiYutucuSinirPenceresi:
 
     def test_hibrit_steel_304_20s_hukum_doner(self, hibrit_steel_304_pencere):
         """max_service_temp_K == İZİN 1073 (servis 1143 DEĞİL); iç cidar
-        pencerede; exceeds_limit True ve sınıra süre ≈ 19,5116 s."""
+        pencerede; exceeds_limit True ve sınıra süre ≈ 4,7222 s (v3.0.1
+        geometrisi ve C(gr) dengesiyle 5 s vakası, 21 Eki; v3.0.5 c* verimi
+        0,89 ile yeniden ölçüldü, HIBRIT_STEEL_304_PENCERE_SINIRA_SURE_S
+        notu)."""
         merd = SIVI_STEEL_304_MERDIVEN_K
         w = hibrit_steel_304_pencere['thermal_protection'][
             'wall_temperature_history']
@@ -1297,6 +1392,39 @@ GAZ_ALANLARI = ('gamma', 'molecular_weight', 'c_star')
 #: Tepe İZİN ALTINDA kalan gerçek vaka: a2 hibrit gövdesi, yanma 0,5 s
 #: (sart7/olcum 'fea' hib05 ⟷ hib05_mh0; tepe ≈ 783 / 780 K < 811 K).
 KAPI_YANMA_S = 0.5
+#: v3.0.5 (28 Eki, V305/B) — KAPI VAKASININ MALZEMESİ. Kapı bekçileri
+#: kamara ve lüle malzemesi AYNI hibritle koşar (iki alan da arayüz
+#: seçeneği; kamara ve lüle listelerinin ortak tek elemanı 'cucrzr'). İki
+#: bilinçli ürün değişikliği eski vakayı (varsayılan malzemeler: kamara
+#: steel_304, lüle graphite) kapı bekçisi olmaktan çıkardı; kökler çatalla
+#: ölçüldü (ölçüm: a2 panel gövdesi, motorun gazı, 0,5 s):
+#:   (1) 74b55500a (H-PANEL, 26 Eki): hibrit c* verimi 0,89 uygulanıyor →
+#:       panelin c*'ı ve h(z) değişti; ss_304 ağında tepe 1008,05 →
+#:       1052,10 K ve uzamsal merdiven 16×4 1036,34 → 32×8 1046,80 →
+#:       64×16 1052,10 K, gözlenen mertebe 0,980 < p_min 1 → 'not_converged'
+#:       (ölçüt kilitli K1 kuralı, değişmedi; 41733c22f'de 'converged').
+#:   (2) fe72e04b5 (FİZİK-2 / NK-12, 27 Eki): termal ağ lülenin KENDİ
+#:       malzemesiyle (graphite) çözülür; motorun boğaz h_g çapası kamara
+#:       malzemesiyle kurulu olduğundan h(z) makullük kapısı lüle bölgesinde
+#:       ADIYLA çalıştırılamaz ve olumlu hüküm geri çekilir
+#:       (``hg_cross_check_not_run_anchor_material``; aşım korunur).
+#:       Varsayılan malzemeli motorda olumlu hüküm bu yüzden HİÇ üretilmez;
+#:       bu meşru, adlı bir 'yapılamadı' beyanıdır, bilgi kaybı değil; bekçisi
+#:       tests/test_v301_fizik2_fea_capa.py
+#:       (test_olumlu_hukum_geri_cekilir_asim_kalir,
+#:       test_sahte_dusuk_profil_olumlu_hukum_almaz). Graphite ağda jenerik
+#:       gazlı merdiven de salınımlı: 972,19 → 976,28 → 976,23 K
+#:       ('oscillatory' → 'not_converged', K1 kuralı).
+#: Bu sınıfların iddiası kapının MEKANİĞİ (yakınsama, gaz künyesi, olumlu
+#: hükmün yalnız bütün koşullarla verilmesi) — çapa kapısı ÇALIŞAN bir
+#: motor ister (FİZİK-2'nin test_d15fix2 fikstüründe kullandığı yol).
+#: Ölçüldü (ae1dae910, cucrzr/cucrzr 0,5 s): h(z) kapısı 'gecti'; motor gazı
+#: tepe 651,44 K < izin 773 K, merdiven p 4,44 / GCI %0,003 'converged',
+#: zaman adımı yakınsadı → olumlu hüküm; max_halvings 0 → 649,69 K, zaman
+#: adımı yakınsamadı → yalnız numerical_convergence_not_achieved; jenerik
+#: gaz 644,52 K 'converged' → yalnız gas_properties_assumed. Neden listeleri
+#: eski hâliyle TEK nedenli kaldı; tolerans ve ölçüt değişmedi.
+KAPI_MALZEMESI = 'cucrzr'
 
 
 class TestOlumluHukumKapisiBirim:
@@ -1425,10 +1553,20 @@ def _zincir(client, motor, govde, **ek):
 
 @pytest.fixture(scope='module')
 def kapi_motoru(client):
+    """Kamara = lüle malzemesi (KAPI_MALZEMESI notu): çapa kapısı koşar."""
+    from hrma.fea.bridge import extract_structural_inputs
     r = _q(client.post, '/calculate',
-           json=dict(HIBRIT_A2_GOVDE, burn_time=KAPI_YANMA_S), headers=H)
+           json=dict(HIBRIT_A2_GOVDE, burn_time=KAPI_YANMA_S,
+                     chamber_material=KAPI_MALZEMESI,
+                     nozzle_material=KAPI_MALZEMESI), headers=H)
     assert r.status_code == 200
-    return r.get_json()['motor']
+    g = r.get_json()
+    assert 'option_not_recognised' not in json.dumps(g)
+    motor = g['motor']
+    kamara = extract_structural_inputs(motor, include_chamber=False)[
+        'material_key']
+    assert motor['nozzle_material_analysis']['material'] == kamara
+    return motor
 
 
 @app_yamasi
@@ -1444,6 +1582,10 @@ class TestOlumluHukumKapisiUc:
         assert f['spatial_convergence']['verdict'] == 'converged'
         assert f['time_step']['converged'] is True
         assert ml['exceeds_allowable'] is False and ml['verdict_withheld'] is False
+        # v3.0.5 (FİZİK-2 / NK-12): olumlu hüküm h(z) makullük kapısı
+        # ÇALIŞIP geçtikten sonra verilir (KAPI_MALZEMESI notu).
+        assert f['meta']['girdiler']['h_profili']['makulluk_kapisi'][
+            'durum'] == 'gecti'
 
     def test_zaman_yakinsamadi_olumlu_hukum_yok_ve_panel_etiketi(
             self, client, kapi_motoru, tmp_path):
@@ -1563,7 +1705,8 @@ def _fea_profilden(client, motor, wp):
 @needs_node
 class TestGazKunyesiYokUc:
     """Ş1 (a): denetçinin sondası (probe_d7.py 'fea_jenerik_beyan_silinmis')
-    — hibrit 0,5 s, gazsız gövdeden wall-profile (jenerik γ / MW / c*),
+    — hibrit 0,5 s (v3.0.5'ten beri kamara = lüle = cucrzr; KAPI_MALZEMESI
+    notu), gazsız gövdeden wall-profile (jenerik γ / MW / c*),
     profilin gaz künyesi silinerek /api/fea/thermal. ÖNCE: tepe 807,09 K <
     izin 811 K → exceeds_allowable false ("İZİN SINIRI İÇİNDE"). SONRA:
     verdict_withheld True, exceeds_* null, neden ADIYLA."""

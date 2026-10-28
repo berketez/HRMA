@@ -1,0 +1,36 @@
+{
+ "_aciklama": "Paketle dağıtılmış örnek proje sürümlerinin sha256 karmaları (dosya adı → liste). hrma/utils/projects.py::refresh_seeded_examples, kullanıcı dizinindeki örnek kopyası bu listeden biriyle BAYT BAYT aynıysa (kullanıcı değiştirmemiş) onu güncel sürümle değiştirir; değiştirilmiş kopyaya dokunmaz. İlk liste 26 Eki 2026 git geçmişinden (git log --all -- examples/*.hrma) üretildi; examples/generate_examples.py her üretimde yeni sürümün karmasını ekler.",
+ "hashes": {
+  "Example Hybrid N2O-HTPB 3kN.hrma": [
+   "0689fb022ba4f826a41c320d96e8ab65846d374ad94a5974a7b96f593516cc57",
+   "0b2cd42726b5b2d03b74c6e9aeeca7b4aec69d0fed311f47bbf4fe4ce7b40d9c",
+   "765a23a94f3d402300519cb34d8d9cc94e4828c012602e5ca789589d45bfa8b4",
+   "80596a142c11f3afc29d8ff558d8550a59c2b87deefeaa8d1cb68d402f9c943c",
+   "98e52dff4ae3901a1159719225ed0d044a3421e0c8aa025d823d43d43d5b99ea",
+   "9e6f27204f4366304c805e41d41e9915deca44b35d017847bd25a0423037eb21",
+   "af5a8a73f3b76eed569c0cfdf52d5c11808bacec586c6cd44c23811a0cc9e768",
+   "bccaf1fcfad08571c3c3361ed88b2bd08c740186816a6bcf44f04110390b152c",
+   "c819eae42c7ed7ff1d53818dec60d5d92b454f6ddcf8c9301ed79006e143870a",
+   "f2a44fcf6f0b9720683c4a7e7e37e9888a3bacb69b3ac329cbd4ed9e2d80068a"
+  ],
+  "Example Liquid LOX-RP1 25kN.hrma": [
+   "0e7c5c5e10d2a1347fd41b23a412c79fe4b8c2457fab14ddb05f1f0d218c59dd",
+   "2c8b55163650cf0460e1bac96628974b659192d7dc23315f046774476e264913",
+   "66e3811328e370fbabf33ee7ab7535ef13f870a32631118c0506cf692915b282",
+   "a288afe2f1f82bdbf8d69032b321758510f4ebc17f82edcfbdbf3fca28ca4ed6",
+   "e3ab05b1a9cb4187f9e0a4384f9cb531d3f50ddab3f7656b450af508280836fa",
+   "e8564c9aa01f0b3d750c1da13ca8a22ec65ef24a56bad1c3fa5daf0e22814798"
+  ],
+  "Example Solid KNDX BATES 75mm.hrma": [
+   "1b7cf9546bba46d1bd5ad738b8d3693c3818612f5a935078b707223e71ae5ac4",
+   "21308c6ead456c5d37a5e2541d3c52e1289365f182a6b3826f7f68395c461629",
+   "386d6226921cbf79f5f67f2d26e47c3d3df5bc89893c4eb43cc2ce9370989efb",
+   "4ff72c618f8f4b772d776383b448a3c295289d49c6c8d77598f1f29023e94e68",
+   "8c230dfd87ec9037ecbaf2e4ac2d127275dbfbdcdca2246b9fe3e246cb623d1b",
+   "a66941441ed9f3778465d16627857e82b272d30f4719c481641a413bba05d19a",
+   "e2e5c1c3d5efba17707940d7d6194f252224d33d957ce59bb598779376a9ae80",
+   "e6a8b0dabf9a5777be9ac0b76e786a658e7cf991a67a1bdd86ecdca2bf77d61b",
+   "ebd3e96112a364cf922246f722c59112a506901c8184e6e32510660d69bc9391"
+  ]
+ }
+}

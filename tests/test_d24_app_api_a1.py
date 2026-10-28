@@ -430,29 +430,35 @@ class TestP16B206KasaCidariTekKapi:
     Bu bekçi künyenin ``user_supplied``a geri dönmesini kırmızı yapar.
     """
 
+    # V301/K-A (KT-06/KT-13; ana model kararı 3) — TERS KAPIYA ÇEVRİLDİ.
+    # Okunamayan / bant dışı cidar eskiden 200 ile "kullanılmadı" künyesi ve
+    # geri çekilen hükümle YAYIMLANIYORDU (cidarı HRMA boyutluyordu). Artık
+    # tasarım hiç yayımlanmaz: 422 input_not_accepted, alan + gerekçe kodu
+    # ADIYLA. Asıl iddia (kullanılmayan değer kullanıcının cidarı diye
+    # sunulmaz) daha güçlü biçimde korunur: hiçbir cidar sunulmaz.
     @pytest.mark.parametrize('deger,beklenen_durum', [
         (float('nan'), 'not_finite'),
         (float('inf'), 'not_finite'),
-        ([1, 2], 'unreadable'),
-        ({'a': 1}, 'unreadable'),
-        (True, 'unreadable'),
-        ('abc', 'unreadable'),
-        (0.05, 'ok'),
+        ([1, 2], 'not_a_number'),
+        ({'a': 1}, 'not_a_number'),
+        (True, 'boolean_is_not_a_number'),
+        ('abc', 'not_a_number'),
+        (0.05, 'out_of_accepted_range'),
     ])
     def test_okunamayan_cidar_user_supplied_kunyesi_almaz(
             self, istemci, deger, beklenen_durum):
         y = istemci.post('/calculate_solid',
                          json=dict(KATI_TEMEL, case_thickness=deger))
-        assert y.status_code == 200
-        press = _kap_blogu(y.get_json())
-        assert press['wall_thickness_source'] == 'user_value_not_applied', (
-            f'{deger!r} için künye {press["wall_thickness_source"]!r} — '
-            'kullanılmayan değer kullanıcının cidarı diye sunulmuş')
-        assert press['wall_thickness_input_status'] == beklenen_durum, (
+        assert y.status_code == 422, y.get_data(as_text=True)[:300]
+        g = y.get_json()
+        assert g['error_code'] == 'input_not_accepted'
+        assert 'structural_analysis' not in g and 'safety_analysis' not in g
+        kayit = [k for k in g['invalid_fields']
+                 if k['field'] == 'case_thickness']
+        assert kayit, g['invalid_fields']
+        assert kayit[0]['reason'] == beklenen_durum, (
             'girdi durumu ADIYLA ayrışmıyor — iki farklı ret aynı '
             'künyeye çökmüş')
-        assert press['vessel_status'] == 'NOT_EVALUATED'
-        assert press['vessel_status_is_tautological'] is True
 
     def test_gecerli_cidar_hala_dogrulaniyor(self, istemci):
         y = istemci.post('/calculate_solid',

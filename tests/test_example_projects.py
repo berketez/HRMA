@@ -19,9 +19,23 @@ Uydurma-veri-yasağı bekçisi: dosyadaki results_summary, aynı girdilerle
 yapılan TAZE hesapla karşılaştırılır — örnek dosyaya elle "güzel" sayı
 yazılamaz.
 
+TEK YOL (v3.0.5, V301/ÖRNEK): hesaplar sayfanın Hesapla'da GERÇEKTEN
+gönderdiği gövdeyle yapılır (``tests/support/kabul_sayfa_yukleri.py``;
+examples/generate_examples.py örneği gerçek sayfada açıp yazar, aynı gövdeyi
+oraya kaydeder). Eskiden iki ayna vardı — API yolu (``calculate_payload``,
+yalnız dosyanın alanları) ve FORM yolu (``form_defaults.form_yuku``, şablon
+varsayılanları); 27 Eki ölçümünde ikisi de sayfanın gövdesinden sapıyordu
+(katı 16, sıvı 7, hibrit 28 alan) ve özet bekçisi kullanıcının gördüğü
+sayıyı ölçmüyordu (hibrit Isp 236,0 ⟷ Hesapla 210,1 s). Hasadın bugünkü
+sayfayla aynılığını ``tests/test_v301_kabul_ui.py::test_u1_*``, bu dosyayla
+aynılığını ``test_hasat_ornek_dosyasindan`` bekler.
+
 Örnekler examples/generate_examples.py ile üretilir; o betik buradaki
-NAMES / ENDPOINTS / calculate_payload tanımlarını import eder (tek doğruluk
-kaynağı bu dosyadır).
+NAMES / ENDPOINTS / ozet_referansi adlarını import eder. NAMES'in tek
+doğruluk kaynağı bu dosyadır; ENDPOINTS ve calculate_payload V301/UÇUŞ C-1'den
+beri ÜRÜNDEN yeniden dışa aktarılır (``hrma/analysis/flight_vehicle.py``:
+``CALCULATION_ENDPOINTS``, ``page_payload``) — Fırlatma Sahası kayıtlı projeyi
+aynı eşlemeyle hesaplar.
 """
 
 import json
@@ -45,38 +59,19 @@ NAMES = {
     'liquid': 'Example Liquid LOX-RP1 25kN',
 }
 
-#: motor_type -> hesap ucu
-ENDPOINTS = {
-    'hybrid': '/calculate',
-    'solid': '/calculate_solid',
-    'liquid': '/calculate_liquid',
-}
+#: motor_type -> hesap ucu. V301/UÇUŞ C-1: tanım ÜRÜNE taşındı
+#: (``hrma/analysis/flight_vehicle.CALCULATION_ENDPOINTS``); bu ad yeniden
+#: dışa aktarımdır (examples/generate_examples.py ve testler içe aktarır).
+from hrma.analysis.flight_vehicle import (  # noqa: E402
+    CALCULATION_ENDPOINTS as ENDPOINTS)
 
-
-def calculate_payload(motor_type, fields):
-    """inputs.fields (form alan kimlikleri) -> hesap ucu yükü.
-
-    Katı ve sıvı sayfalarında toplayıcı (collectAllParameters) alan
-    kimliğini payload anahtarı olarak birebir kullanır. Hibrit toplayıcı
-    (advanced.html::getFormData) üç istisna taşır ve burada aynen
-    yansıtılır:
-
-      * single_pressure -> atmospheric_pressure (tek irtifa modu),
-      * total_impulse = thrust * burn_time (thrust/time modu aktifken),
-      * calculate_trajectory: sayfada bu kimlikte checkbox yok, toplayıcı
-        her koşuda false gönderir; contraction_ratio / mass_flux_chamber
-        alan boşsa 0 gönderilir.
-    """
-    data = dict(fields)
-    if motor_type == 'hybrid':
-        if 'single_pressure' in data:
-            data['atmospheric_pressure'] = data.pop('single_pressure')
-        if 'thrust' in data and 'burn_time' in data:
-            data['total_impulse'] = data['thrust'] * data['burn_time']
-        data.setdefault('contraction_ratio', 0)
-        data.setdefault('mass_flux_chamber', 0)
-        data.setdefault('calculate_trajectory', False)
-    return data
+#: inputs.fields (form alan kimlikleri) -> hesap ucu yükü. V301/UÇUŞ C-1:
+#: eşleme ürüne taşındı (``hrma.analysis.flight_vehicle.page_payload`` —
+#: Fırlatma Sahası kayıtlı projeyi AYNI eşlemeyle hesaplar); bu ad yeniden
+#: dışa aktarımdır ve içe aktarılabilir KALIR (KABUL kulvarı, örnek üretici,
+#: ~20 test dosyası ``calculate_payload`` adını kullanıyor).
+from hrma.analysis.flight_vehicle import (  # noqa: E402
+    page_payload as calculate_payload)
 
 
 def load_example_doc(motor_type):
@@ -94,12 +89,22 @@ def client():
 
 
 @pytest.fixture()
-def store_env(monkeypatch):
-    """Proje deposunu examples/ dizinine yönlendir (salt okunur kullanım)."""
-    monkeypatch.setenv('HRMA_PROJECTS_DIR', str(EXAMPLES_DIR))
+def store_env(monkeypatch, tmp_path):
+    """Proje deposu = örneklerin KOPYASI (izlenen examples/ dizinine yazılmaz).
+
+    V301/KABUL (ölçüldü 27 Eki): depo examples/'a yönlendirilince ürün oraya
+    tazeleme damgası (``.examples_refresh.json``) yazabiliyor; kopya dizin
+    ``git status examples/``i temiz tutar.
+    """
+    depo = tmp_path / 'projeler'
+    depo.mkdir()
+    for ad in NAMES.values():
+        kaynak = EXAMPLES_DIR / (ad + '.hrma')
+        (depo / kaynak.name).write_bytes(kaynak.read_bytes())
+    monkeypatch.setenv('HRMA_PROJECTS_DIR', str(depo))
 
 
-# Hesap sonuçları pahalı (sıvı ~5-10 s) — motor tipi ve YOL başına BİR kez
+# Hesap sonuçları pahalı (sıvı ~5-10 s) — motor tipi başına BİR kez
 _RESULTS = {}
 
 
@@ -113,30 +118,25 @@ def _kos(client, motor_type, payload):
     return body
 
 
-def _fresh_results(client, motor_type):
-    """API YOLU: yalnız ``.hrma``nın taşıdığı alanlarla hesap."""
+def sayfa_govdesi(motor_type):
+    """Örnek sayfada açılıp Hesapla'ya basılınca GERÇEK sayfanın gönderdiği
+    gövde (hasat; examples/generate_examples.py yazar)."""
+    import copy
+    from tests.support.kabul_sayfa_yukleri import SAYFA_YUKLERI
+    return copy.deepcopy(SAYFA_YUKLERI[motor_type])
+
+
+def _sayfa_sonucu(client, motor_type):
+    """KULLANICININ gördüğü hesap: sayfanın gerçek gövdesiyle (tek yol)."""
     if motor_type not in _RESULTS:
-        doc = load_example_doc(motor_type)
-        payload = calculate_payload(motor_type, doc['inputs']['fields'])
-        _RESULTS[motor_type] = _kos(client, motor_type, payload)
+        _RESULTS[motor_type] = _kos(client, motor_type,
+                                    sayfa_govdesi(motor_type))
     return _RESULTS[motor_type]
 
 
-def _form_results(client, motor_type):
-    """FORM YOLU: KULLANICININ gördüğü hesap (ÖH D35 · OH-ON-03).
-
-    Örnek arayüze yüklendiğinde dosyada OLMAYAN alanlar şablonun kendi
-    ``value=`` varsayılanıyla kalır ve Hesapla'ya basılınca toplayıcı onları
-    da gönderir. Bu yüzden ürünün kullanıcıya GÖSTERDİĞİ sayı bu yolun
-    sayısıdır; özet bekçisi artık bunu ölçer.
-    """
-    anahtar = motor_type + '::form'
-    if anahtar not in _RESULTS:
-        from tests.support.form_defaults import form_yuku
-        doc = load_example_doc(motor_type)
-        _RESULTS[anahtar] = _kos(client, motor_type,
-                                 form_yuku(motor_type, doc['inputs']['fields']))
-    return _RESULTS[anahtar]
+#: Eski adlar (bu dosyanın içi): iki ayna kalktı, ikisi de TEK yola gider.
+_fresh_results = _sayfa_sonucu
+_form_results = _sayfa_sonucu
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +172,64 @@ def test_example_loads_through_http_api(store_env, client, motor_type):
 # ---------------------------------------------------------------------------
 # 2. Alan kimlikleri şablonda gerçekten var (örnek çürümesi bekçisi)
 # ---------------------------------------------------------------------------
+def _sayfa_betigi_kuruyor(motor_type, alan):
+    """Şablonda olmayan alanı sayfanın KENDİ betiklerinden biri kuruyor mu?
+
+    v3.0.5 (V301/ÖRNEK): örnek dosya proje şeridinin belgesidir; şerit
+    belgedeki ``input[id]/select[id]/textarea[id]`` öğelerinin HEPSİNİ yazar
+    (``project_bar.js::serializeFields``) — sayfa şablonunun yanında ortak
+    bileşenlerin kurduklarını da (ölçüldü: ``hrma_ai_goal`` ai_assistant.js
+    "proje ile kaydedilir", ``fea_show_mesh``/``fea_metric``/
+    ``grainfea_show_mesh`` fea_panel.js, ``fea_t_ambient``/``fea_t_show_mesh``
+    thermal_fea_panel.js). Böyle bir alan ancak sayfanın şablonda yüklediği
+    bir betik onu adıyla kuruyorsa kabul edilir; dönen (betik adı, kaynak) ya
+    da None.
+    """
+    from tests.support import kabul
+    for ad in kabul.sayfa_scriptleri(motor_type):
+        yol = REPO_ROOT / 'hrma' / 'static' / 'js' / ad
+        if not yol.is_file():
+            continue
+        kaynak = yol.read_text(encoding='utf-8')
+        if f'id="{alan}"' in kaynak or f"'{alan}'" in kaynak:
+            return ad, kaynak
+    return None
+
+
+_ISLENMIS_SAYFA = {}
+
+
+def _islenmis_secenekler(motor_type, alan):
+    """Seçenekleri şablonda Jinja döngüsüyle basılan seçici (ham metinde
+    ``{{ o.key }}``): seçenekler sunucunun İŞLEDİĞİ sayfadan okunur.
+
+    Ölçüldü (27 Eki, V301/ÖRNEK): katı ``propellant_type`` seçicisi
+    (``solid_propellants.options``, K-C2) için ``tests/support/inventory.py``
+    çözücü taşımıyor; ham şablon ``['{{ o.key }}', '']`` veriyor.
+    """
+    import re
+    from tests.test_v301_kabul_ui import KABUL_SAYFA_ISLEVI
+    if motor_type not in _ISLENMIS_SAYFA:
+        from hrma.app import app
+        sayfa = KABUL_SAYFA_ISLEVI[motor_type][0]
+        # Sayfa yolları literal: bekçi taraması (test_d18_bekci_cevirisi_a1)
+        # çağrılan rotayı çözebilsin; KABUL tablosuyla eşliği ayrıca sınanır.
+        if sayfa == '/solid':
+            r = app.test_client().get('/solid', headers=HEADERS)
+        elif sayfa == '/liquid':
+            r = app.test_client().get('/liquid', headers=HEADERS)
+        else:
+            assert sayfa == '/hybrid', sayfa
+            r = app.test_client().get('/hybrid', headers=HEADERS)
+        assert r.status_code == 200, r.status_code
+        _ISLENMIS_SAYFA[motor_type] = r.get_data(as_text=True)
+    m = re.search(r'<select[^>]*\bid="%s"[^>]*>(.*?)</select>' % re.escape(alan),
+                  _ISLENMIS_SAYFA[motor_type], re.S)
+    if not m:
+        return None
+    return re.findall(r'<option[^>]*\bvalue="([^"]*)"', m.group(1))
+
+
 @pytest.mark.parametrize('motor_type', sorted(NAMES))
 def test_example_fields_exist_on_the_page(motor_type):
     doc = load_example_doc(motor_type)
@@ -180,9 +238,18 @@ def test_example_fields_exist_on_the_page(motor_type):
     for field_id, value in doc['inputs']['fields'].items():
         spec = specs.get(field_id)
         if spec is None:
-            unknown.append(field_id)
+            bulunan = _sayfa_betigi_kuruyor(motor_type, field_id)
+            if bulunan is None:
+                unknown.append(field_id)
+            elif (f'<select id="{field_id}"' in bulunan[1]
+                  and f'value="{value}"' not in bulunan[1]):
+                bad_options.append(f'{field_id}={value!r} ({bulunan[0]} '
+                                   'seçeneklerinde yok)')
             continue
-        if spec.tag == 'select' and str(value) not in (spec.options or []):
+        secenekler = spec.options or []
+        if spec.tag == 'select' and any('{{' in s for s in secenekler):
+            secenekler = _islenmis_secenekler(motor_type, field_id) or secenekler
+        if spec.tag == 'select' and str(value) not in secenekler:
             bad_options.append(f'{field_id}={value!r} '
                                f'(seçenekler: {spec.options})')
     assert not unknown, (
@@ -204,7 +271,13 @@ def test_hybrid_example_calculates_sensibly(client):
     # N2O/HTPB fiziksel bantları (Sutton & Biblarz; hibrit literatürü):
     # deniz seviyesi Isp ~200-260 s, c* ~1500-1700 m/s, Tc ~3100-3500 K
     assert 190 <= motor['isp'] <= 300, motor['isp']
-    assert 1450 <= motor['c_star'] <= 1800, motor['c_star']
+    # V301/H-PANEL (NK-15): manşet c* artık TESLİM c*'tır (η_c* · kuramsal;
+    # N2O/HTPB kaynaklı varsayılan 0,89). Literatür c* bandı KURAMSAL denge
+    # c*'ına aittir; teslim değeri η ile ondan türer.
+    verim = motor['c_star_efficiency']
+    assert 1450 <= verim['c_star_theoretical_m_s'] <= 1800, verim
+    assert motor['c_star'] == pytest.approx(
+        verim['eta_c_star'] * verim['c_star_theoretical_m_s'], rel=1e-12)
     assert 3000 <= motor['chamber_temperature'] <= 3700, \
         motor['chamber_temperature']
 
@@ -239,31 +312,58 @@ def test_liquid_example_calculates_sensibly(client):
 # ---------------------------------------------------------------------------
 # 4. results_summary uydurma değil: taze hesapla tutarlı
 # ---------------------------------------------------------------------------
-def _summary_reference(motor_type, body):
-    """Özet anahtarı -> taze hesaptaki karşılığı (project_bar.js eşlemesi)."""
+def _sonlu_sayi(v):
+    """project_bar.js ``put``: yalnız sonlu sayı (bool değil) özetlenir."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool) \
+            and math.isfinite(v):
+        return v
+    return None
+
+
+def ozet_referansi(motor_type, body):
+    """Özet anahtarı -> taze hesaptaki karşılığı.
+
+    ``hrma/static/js/project_bar.js::serializeResultsSummary``'nin birebiri
+    (v3.0.5, V301/ÖRNEK): örnek dosyanın ``results_summary``'si artık o
+    işlevin KENDİ çıktısıdır (examples/generate_examples.py proje şeridinin
+    belgesini kaydeder). Katıda tepe itki ``max(thrust_curve.thrust)``,
+    sıvıda toplam itki ``openrocket.motor_summary.total_impulse`` (şerit de
+    oradan okur; yanma süresi yoksa yayımlanmaz). Karşılığı olmayan anahtar
+    ``None`` döner.
+    """
     if motor_type == 'hybrid':
-        motor = body['motor']
+        motor = body.get('motor') or {}
         return {
-            'thrust_N': motor.get('thrust'),
-            'isp_s': motor.get('isp'),
-            'burn_time_s': motor.get('burn_time'),
-            'chamber_pressure_bar': motor.get('chamber_pressure'),
-            'total_impulse_Ns': motor.get('total_impulse'),
+            'thrust_N': _sonlu_sayi(motor.get('thrust')),
+            'isp_s': _sonlu_sayi(motor.get('isp')),
+            'burn_time_s': _sonlu_sayi(motor.get('burn_time')),
+            'chamber_pressure_bar': _sonlu_sayi(motor.get('chamber_pressure')),
+            'total_impulse_Ns': _sonlu_sayi(motor.get('total_impulse')),
         }
     if motor_type == 'solid':
+        egri = (body.get('thrust_curve') or {}).get('thrust')
+        tepe = None
+        if isinstance(egri, list) and egri:
+            tepe = _sonlu_sayi(max(egri))
         return {
-            'total_impulse_Ns': body.get('total_impulse'),
-            'burn_time_s': body.get('burn_time'),
-            'chamber_pressure_bar': body.get('chamber_pressure'),
-            'isp_s': body.get('isp_sea_level'),
-            'peak_thrust_N': body.get('max_thrust'),
+            'total_impulse_Ns': _sonlu_sayi(body.get('total_impulse')),
+            'burn_time_s': _sonlu_sayi(body.get('burn_time')),
+            'chamber_pressure_bar': _sonlu_sayi(body.get('chamber_pressure')),
+            'isp_s': _sonlu_sayi(body.get('isp_sea_level')),
+            'peak_thrust_N': tepe,
         }
+    ors = (body.get('openrocket') or {}).get('motor_summary') or {}
     return {
-        'thrust_N': body.get('thrust'),
-        'isp_s': body.get('isp_sea_level'),
-        'isp_vacuum_s': body.get('isp_vacuum'),
-        'chamber_pressure_bar': body.get('chamber_pressure'),
+        'thrust_N': _sonlu_sayi(body.get('thrust')),
+        'isp_s': _sonlu_sayi(body.get('isp_sea_level')),
+        'isp_vacuum_s': _sonlu_sayi(body.get('isp_vacuum')),
+        'chamber_pressure_bar': _sonlu_sayi(body.get('chamber_pressure')),
+        'total_impulse_Ns': _sonlu_sayi(ors.get('total_impulse')),
     }
+
+
+#: Eski ad (bu dosyanın içi); tek tanım ``ozet_referansi``.
+_summary_reference = ozet_referansi
 
 
 #: Özet ⟷ taze hesap bağıl toleransı. ÖH D35 · OH-ON-03'te %25'ten
@@ -291,12 +391,22 @@ def test_results_summary_is_not_fabricated(client, motor_type):
 
     Artık ölçülen yol FORM yoludur ve tolerans %25'ten %0,5'e indirilmiştir
     (özet, örneği üreten koşumun çıktısıdır; eşitlik beklenir).
+
+    v3.0.5 (V301/ÖRNEK): FORM yolu da bir aynaydı ve sayfadan sapıyordu
+    (hibrit özet Isp 236,034 ⟷ Hesapla 210,063 s). Ölçülen yol artık
+    sayfanın GERÇEK gövdesidir (``sayfa_govdesi``); özet proje şeridinin kendi
+    çıktısıdır, şeridin yazacağı her anahtar özette bulunmalıdır (eksik
+    anahtar = bayat özet; ör. sıvıda yanma süresiyle gelen toplam itki).
     """
     doc = load_example_doc(motor_type)
     summary = doc.get('results_summary')
     assert summary, 'örnekte results_summary olmalı (liste kartları için)'
-    reference = _summary_reference(motor_type, _form_results(client,
-                                                             motor_type))
+    reference = ozet_referansi(motor_type, _sayfa_sonucu(client, motor_type))
+    eksik = sorted(k for k, v in reference.items()
+                   if v is not None and k not in summary)
+    assert not eksik, (
+        f'{motor_type}: proje şeridinin yazacağı özet anahtarları örnekte '
+        f'yok: {eksik} — örneği yeniden üretin (examples/generate_examples.py)')
     checked = 0
     for key, saved in summary.items():
         if key == 'computed_with_version' or key not in reference:
@@ -306,11 +416,106 @@ def test_results_summary_is_not_fabricated(client, motor_type):
             f'{motor_type}.{key}: taze hesapta karşılık yok')
         assert math.isclose(saved, fresh, rel_tol=OZET_BAGIL_TOLERANS,
                             abs_tol=1e-9), (
-            f'{motor_type}.{key}: kayıtlı {saved} / FORM yolu {fresh} — '
+            f'{motor_type}.{key}: kayıtlı {saved} / sayfa yolu {fresh} — '
             'örneğin özeti kullanıcının gördüğü sayıyla ayrışıyor; örneği '
             'yeniden üretin (examples/generate_examples.py)')
         checked += 1
     assert checked >= 3, 'özet en az üç sayısal büyüklük taşımalı'
+
+
+#: Hasat ⟷ örnek dosyası karşılaştırmasının BEYANLI istisnaları (ÖLÇÜLDÜ
+#: 27 Eki 2026, V301/ÖRNEK; ``docs/scofield/raw/OH/V301/ornek/RAPOR.md``).
+#: Sayfanın toplayıcısı bu gövde anahtarlarını alanlardan TÜRETİR ya da
+#: başka adla gönderir — dosyada aynı adlı alan yoktur ya da farklı anlamdadır:
+HASAT_TURETILEN_ANAHTARLAR = {
+    # advanced.html toplayıcısı: atmospheric_pressure = tek irtifa basıncı
+    # (single_pressure); design_config_* = tasarım paneli köken künyesi;
+    # vehicle_* = yörünge alanlarından (final_mass, reference_area mm² → m²);
+    # total_impulse = itki × süre (thrust_time sekmesi; aynı adlı form alanı
+    # öteki sekmenin, toplam impuls tasarımının girdisidir).
+    'hybrid': frozenset({
+        'atmospheric_pressure', 'design_config_fields', 'design_config_opened',
+        'design_config_source', 'vehicle_length', 'vehicle_mass_dry',
+        'vehicle_reference_area_m2', 'total_impulse'}),
+    # solid.html: salt okunur ε alanı geri yüklemede ``updateExpansionRatio``
+    # ile kayıtlı (2 haneli) çaplardan yeniden türetilir; çözücü tasarım
+    # kipinde ε'yu kendisi çözer (ölçüldü: gövde 6,75 ⟷ alan 6,89, sonuç
+    # aynı).
+    'solid': frozenset({'expansion_ratio'}),
+    'liquid': frozenset(),
+}
+
+
+@pytest.mark.parametrize('motor_type', sorted(NAMES))
+def test_hasat_ornek_dosyasindan(motor_type):
+    """Hasat edilen gövde BU örnek dosyanın gövdesidir: gövdedeki her anahtar
+    dosyada aynı değerle durur (boş alan → ``null``), türetilen anahtarlar
+    beyanlı listededir. Örnek elle değiştirilip yeniden üretilmezse (ya da
+    hasat yenilenmezse) bu düğüm kırmızıdır — testler bayat gövdeyle koşmaz.
+    """
+    alanlar = load_example_doc(motor_type)['inputs']['fields']
+    govde = sayfa_govdesi(motor_type)
+    istisna = HASAT_TURETILEN_ANAHTARLAR[motor_type]
+    farklar = []
+    for anahtar, deger in sorted(govde.items()):
+        if anahtar in istisna:
+            continue
+        if anahtar not in alanlar:
+            farklar.append(f'{anahtar}: gövdede var, dosyada alan yok')
+            continue
+        dosyada = alanlar[anahtar]
+        if dosyada == '' and deger is None:
+            continue
+        if dosyada != deger:
+            farklar.append(f'{anahtar}: dosya {dosyada!r} ⟷ gövde {deger!r}')
+    assert not farklar, (
+        f'{motor_type}: hasat (tests/support/kabul_sayfa_yukleri.py) bu örnek '
+        'dosyanın gövdesi değil — örneği examples/generate_examples.py ile '
+        'yeniden üretin:\n  ' + '\n  '.join(farklar))
+
+
+@pytest.mark.parametrize('motor_type', sorted(NAMES))
+def test_aciklama_girdilerden_uretilmis(motor_type):
+    """Açıklama (EN + TR) dosyanın GİRDİLERİNDEN üretilmiştir.
+
+    v3.0.5 (Berke 27 Eki): "Örnek tasarım / Example design" (HRMA ön tasarım
+    ve analiz aracıdır, "eğitim amaçlı" değil) ve açıklamadaki her sayı
+    örneğin kendi girdisinden gelir. Ölçülen kusur: sıvı örneğin açıklaması
+    girdiler değiştikten sonra da "70 bar, O/F 2.3" diyordu.
+
+    İki iddia: (1) açıklama = ``aciklama_kur(motor_type, inputs.fields)``
+    (hibritte ``motor_description`` alanı da); (2) metinden girdilerin
+    biçimlenmiş değerleri ve adlar çıkarılınca TEK rakam kalmaz (elle
+    yazılmış sayı yok).
+    """
+    import re
+    from examples import generate_examples as ge
+    doc = load_example_doc(motor_type)
+    alanlar = doc['inputs']['fields']
+    beklenen = ge.aciklama_kur(motor_type, alanlar)
+    assert doc['description'] == beklenen, (
+        f'{motor_type}: açıklama girdilerden üretilen metinle aynı değil — '
+        'examples/generate_examples.py ile yeniden üretin')
+    if 'motor_description' in alanlar:
+        assert alanlar['motor_description'] == beklenen
+    assert 'Educational' not in beklenen and 'Öğretici' not in beklenen
+    assert beklenen.startswith('Örnek tasarım: ') and ' / Example design: ' in beklenen
+    parcalar = set()
+    if isinstance(alanlar.get('propellant_name'), str):
+        parcalar.add(alanlar['propellant_name'])
+    for adlar in ge._ACIKLAMA_ADLARI.values():
+        for tr, en in adlar.values():
+            parcalar.update((tr, en))
+    for alan, deger in alanlar.items():
+        if isinstance(deger, (int, float)) and not isinstance(deger, bool):
+            for dil in ('tr', 'en'):
+                for bolen in (1.0, 1000.0):
+                    parcalar.add(ge._sayi(alanlar, alan, dil, bolen))
+    kalan = beklenen
+    for parca in sorted(parcalar, key=len, reverse=True):
+        kalan = kalan.replace(parca, ' ')
+    assert not re.search(r'\d', kalan), (
+        f'{motor_type}: açıklamada girdiden gelmeyen rakam var: {kalan!r}')
 
 
 @pytest.mark.parametrize('motor_type', sorted(NAMES))
@@ -349,7 +554,8 @@ def test_ozet_BU_SURUMLE_hesaplanmis(motor_type):
 README_ALANLARI = {
     'hybrid': ('isp_s', 'total_impulse_Ns'),
     'solid': ('peak_thrust_N', 'burn_time_s', 'total_impulse_Ns', 'isp_s'),
-    'liquid': ('isp_s', 'isp_vacuum_s'),
+    # v3.0.5: sıvı örnek yanma süresi taşıdığı için toplam itki de yayımlanır.
+    'liquid': ('isp_s', 'isp_vacuum_s', 'total_impulse_Ns'),
 }
 
 
