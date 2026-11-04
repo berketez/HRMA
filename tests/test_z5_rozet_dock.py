@@ -831,6 +831,13 @@ URUN_KATLI_ALANLARI = [
     # kutusunda) ve SIVI-CIDAR termal paneli makine alanları (KILAVUZ P4;
     # üç kapalı "Teknik ayrıntı" kutusu). Hepsi varsayılan KAPALI.
     ("safety_panel.js", 1, ('style',)),
+    # V306/GÜVENLİK (NR-4, 2 Kas): Basınçlı Kap Özeti künyeleri, uyum
+    # beyan kodu ve risk künyesi kapalı "Teknik ayrıntı" kutusunda
+    # (safety_panel.js addBasisRow / complianceBadges /
+    # partialRiskBlock). Varsayılan KAPALI.
+    ("safety_panel.js", 2, ('style',)),
+    ("safety_panel.js", 3, ('data-safety-field', 'style')),
+    ("safety_panel.js", 4, ('data-safety-basis', 'style')),
     ("thermal_panel.js", 1, ('class', 'style')),
     ("thermal_panel.js", 2, ('class', 'style')),
     ("thermal_panel.js", 3, ('class', 'style')),

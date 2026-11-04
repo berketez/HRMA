@@ -354,7 +354,7 @@
         };
         if (motorSizedWallM !== null) {
             wallSuggestion.reason = T('panel.structural.wallFromMotorSized',
-                'Wall thickness taken from the motor result, where HRMA sized it; it is not a wall you supplied, and the verdict shown is the motor\'s own structural verdict.')
+                'Wall thickness taken from the motor result, where HRMA sized it; it is not a wall you supplied.')
                 + WALL_REASON_DETAIL_SEP
                 + 'wall_thickness from ' + yol + ' (design_mode: '
                 + String(wp.designMode) + ' · wall_thickness_source: '
@@ -555,6 +555,168 @@
                 || String(ca.wall_thickness_source || '') === 'sized_by_hrma'),
             identity: designIdentity(sa),
         };
+    }
+
+    // ------------------------------------------------------------------
+    // V306/GÜVERTE-HATA (kalem 1, K2-P5) — MOTORUN KENDİ CİDAR DENETİMİ
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/guverte/yapisal_once.json, örnek
+    // katı): motor kasa denetimi SF 2,94 (çember 85,0 MPa = oda basıncı ×
+    // r/t, akma 250 MPa), sekme aynı cidarda SF 1,03 (127,5 MPa = 1,5 ×
+    // oda basıncı, akma 134 MPa / 729,9 K) basıyor ve hangisinin neden
+    // farklı olduğu ekranda yazmıyordu ("tek büyüklük, tek sayı"). Sıcaklık
+    // tanımı artık motorunkiyle aynıdır (fromResults: gaz sıcaklığı
+    // tahmini yok); yük tanımı farklıdır (sekme tasarım basıncında
+    // değerlendirir) ve bu fark motorun sayısının YANINDA adıyla yazılır.
+    // Hibritte motorun kendi asgari SF satırı zaten var (readMotorSolve);
+    // bu okuma katı kasa (case_analysis) ve sıvı hazne (chamber_structure)
+    // bloklarıdır. Yalnız motorun YAYIMLADIĞI alanlar okunur; blok ya da
+    // SF yoksa null (kıyas satırı basılmaz, sayı uydurulmaz).
+    let motorWallCheck = null;
+
+    function readMotorWallCheck(r) {
+        const wp = U.readWallThicknessProvenance(r);
+        if (!wp || !wp.blockPath) return null;
+        const parts = String(wp.blockPath).split('.');
+        const ad = parts[parts.length - 1];
+        const m = U.motorDict(r) || {};
+        let blk = m;
+        parts.forEach(function (p) {
+            blk = (blk && typeof blk === 'object') ? blk[p] : undefined;
+        });
+        if (!blk || typeof blk !== 'object') return null;
+        const sayi = function (x) { return isNum(x) ? x : null; };
+        if (ad === 'case_analysis') {
+            if (!isNum(blk.safety_factor)) return null;
+            return {
+                path: 'motor.' + wp.blockPath + '.safety_factor',
+                sf: blk.safety_factor,
+                hoopMPa: sayi(blk.hoop_stress_mpa),
+                yieldMPa: sayi(blk.yield_strength_mpa),
+                wallMm: sayi(blk.wall_thickness_mm),
+                // Katı kasa çemberi oda basıncında (MEOP) hesaplanır
+                // (solid_rocket_engine._calculate_structural_analysis:
+                // P_c · r / t); basınç motorun yayımladığı oda basıncıdır.
+                pressureBar: sayi(m.chamber_pressure),
+                twoLayer: false,
+            };
+        }
+        if (ad === 'chamber_structure') {
+            const iki = blk.wall_model === 'two_layer_regenerative';
+            const sf = iki ? blk.wall_stack_safety_factor
+                           : blk.hoop_safety_factor;
+            if (!isNum(sf)) return null;
+            return {
+                path: 'motor.' + wp.blockPath + '.'
+                    + (iki ? 'wall_stack_safety_factor' : 'hoop_safety_factor'),
+                sf: sf,
+                hoopMPa: sayi(blk.hoop_stress),
+                yieldMPa: sayi(blk.yield_strength_at_wall_temp),
+                wallMm: sayi(iki ? blk.wall_stack_thickness_mm
+                                 : blk.wall_thickness),
+                // İki katmanlı cidarda çemberi taşıyan katman dış kabuktur ve
+                // yükü ceketteki soğutucu basıncıdır (motor künyesi); tek
+                // katmanda oda iç basıncı.
+                pressureBar: iki ? null : sayi(blk.internal_pressure),
+                twoLayer: iki,
+                governingLayer: iki ? (blk.wall_stack_governing_layer || null)
+                                    : null,
+                wallTempK: sayi(blk.wall_temperature),
+            };
+        }
+        return null;
+    }
+
+    // Sekmenin sayısı ile motorun sayısı arasındaki farkı ADLANDIRIR: yük
+    // (basınç tanımı), dayanım (sıcaklık), cidar. Fark yoksa boş liste.
+    function motorWallDifferences(mw, ca, dp, th) {
+        const out = [];
+        const ayni = function (a, b) {
+            return isNum(a) && isNum(b)
+                && Math.abs(a - b) <= 1e-6 * Math.max(Math.abs(a), Math.abs(b), 1e-12);
+        };
+        const pd = dp && dp.design_pressure;
+        const f = dp && dp.design_pressure_factor;
+        if (mw.twoLayer) {
+            const KATMAN = {
+                closeout: T('panel.structural.layerCloseout', 'closeout'),
+                liner: T('panel.structural.layerLiner', 'liner'),
+            };
+            out.push(U.tf('panel.structural.motorWallLoadTwoLayer',
+                { layer: KATMAN[mw.governingLayer] || String(mw.governingLayer || '—'),
+                  t: numL(mw.wallMm, 2), pd: numL(pd, 1), f: numL(f, 2) },
+                'Load: the motor checks a two-layer wall, where the {layer} '
+                + 'carries the coolant pressure; this tab evaluates the whole '
+                + '{t} mm stack as one wall under the design pressure {pd} bar '
+                + '({f} × chamber pressure).'));
+        } else if (isNum(mw.pressureBar) && isNum(pd) && !ayni(mw.pressureBar, pd)) {
+            out.push(U.tf('panel.structural.motorWallLoad',
+                { p: numL(mw.pressureBar, 1), pd: numL(pd, 1), f: numL(f, 2) },
+                'Load: the motor result takes the hoop stress at the chamber '
+                + 'pressure {p} bar; this tab takes it at the design pressure '
+                + '{pd} bar ({f} × chamber pressure).'));
+        }
+        const yTab = ca && ca.yield_strength_used_MPa;
+        if (isNum(mw.yieldMPa) && isNum(yTab) && !ayni(mw.yieldMPa, yTab)) {
+            let tSekme = '—';
+            if (th && isNum(th.wall_temperature_inner_K)) {
+                tSekme = numL(th.wall_temperature_inner_K, 1) + ' K';
+            } else if (th && isNum(th.strength_reference_temperature_K)) {
+                tSekme = numL(th.strength_reference_temperature_K, 2) + ' K';
+            }
+            out.push(U.tf('panel.structural.motorWallStrength',
+                { ym: numL(mw.yieldMPa, 1), tm: isNum(mw.wallTempK)
+                      ? numL(mw.wallTempK, 1) + ' K' : '—',
+                  yt: numL(yTab, 1), tt: tSekme },
+                'Strength: motor yield {ym} MPa (wall temperature {tm}); '
+                + 'this tab {yt} MPa (wall temperature {tt}).'));
+        }
+        const tTab = ca && ca.wall_thickness_used_mm;
+        if (isNum(mw.wallMm) && isNum(tTab) && !ayni(mw.wallMm, tTab)) {
+            out.push(U.tf('panel.structural.motorWallThickness',
+                { tm: numL(mw.wallMm, 3), tt: numL(tTab, 3) },
+                'Wall: motor {tm} mm; this tab {tt} mm.'));
+        }
+        return out;
+    }
+
+    function motorWallBlock(ca, dp, th) {
+        if (!motorWallCheck) return '';
+        const mw = motorWallCheck;
+        const sfTab = U.pick(ca, ['safety_factor_pressure', 'SF_pressure',
+                                  'sf_pressure']) || ca.hoop_safety_factor;
+        const gerilme = function (sf, s, y) {
+            let x = `<span style="font-family:var(--hd-mono);">${numL(sf, 2)}</span>`;
+            const ek = [];
+            if (isNum(s)) ek.push('σ_hoop ' + numL(s, 1) + ' MPa');
+            if (isNum(y)) ek.push('σ_y ' + numL(y, 1) + ' MPa');
+            if (ek.length) {
+                x += ` <span style="color:var(--hd-ink-dim, #7d97a5);
+                     font-size:0.75rem;">· ${ek.join(' · ')}</span>`;
+            }
+            return x;
+        };
+        const mep = motorEndpointName();
+        const satir = [
+            [T('panel.structural.motorWallMotorRow', 'Motor result — hoop SF')
+                + (mep ? ` <span style="color:var(--hd-ink-dim, #7d97a5);
+                     font-family:var(--hd-mono); font-size:0.72rem;"
+                     title="${U.esc(mw.path)}">${mep}</span>` : ''),
+             gerilme(mw.sf, mw.hoopMPa, mw.yieldMPa)],
+            [T('panel.structural.motorWallTabRow', 'This tab — hoop SF (pressure only)'),
+             gerilme(sfTab, ca.pressure_hoop_stress, ca.yield_strength_used_MPa)],
+        ];
+        let html = U.sectionTitle(T('panel.structural.secMotorWall',
+                                    'Same wall in the motor result'));
+        html += U.kvTable(satir);
+        const farklar = motorWallDifferences(mw, ca, dp, th);
+        html += farklar.length
+            ? U.listBlock(T('panel.structural.motorWallWhy',
+                            'Why the two numbers differ'), farklar, 'info')
+            : `<p style="font-size:0.78rem; color:${U.kindColor('info')};">${
+                T('panel.structural.motorWallSame',
+                  'Same load, strength and wall as the motor result.')}</p>`;
+        return html;
     }
 
     // ------------------------------------------------------------------
@@ -1132,15 +1294,54 @@
             + '</div>';
         // Z5-C1: panelin cidar önerisini GERİ ÇEKTİĞİ durumda gerekçe
         // ekranda, makine adlarıyla. Öneri hiç yapılmadıysa satır basılmaz.
+        // V306/GÜVERTE-HATA (kalem 2, K2-P2): satır cidarın GERÇEK kaynağını
+        // söyler. ÖLÇÜLDÜ (kilavuz-2/olcum/k2ek_solid_tr.json): kullanıcı
+        // alana kendi cidarını (3 mm) yazınca öneri UYGULANMAMIŞTI (data-dirty
+        // kapısı), ama satır "applied · bu cidarı HRMA boyutlandırdı … hüküm
+        // motorun kendi yapısal hükmü" diyordu; aynı ekranda "CİDAR: SİZİN
+        // VERDİĞİNİZ". Durum artık ucun yankıladığı GÖNDERİLEN cidardan
+        // (design_basis.submitted_wall_thickness_mm) okunur: öneriyle aynı
+        // değilse öneri kullanılmamıştır. "Hüküm motorun kendi hükmü" cümlesi
+        // yalnız uç hükmü motor kaydından GERÇEKTEN benimsediyse eklenir
+        // (safety_analysis.verdict_source).
         if (wallSuggestion) {
+            // Geri çekilmiş öneri zaten uygulanmamıştır (satır onu söyler);
+            // "kullanılmadı" yalnız UYGULANAN önerinin yerine kullanıcının
+            // kendi cidarı gittiğinde.
+            const gonderilen = db.submitted_wall_thickness_mm;
+            const oneri = wallSuggestion.valueMm;
+            const kullanilmadi = !wallSuggestion.withheld
+                && isNum(gonderilen) && gonderilen > 0
+                && !(isNum(oneri) && Math.abs(gonderilen - oneri)
+                     <= 1e-6 * Math.max(Math.abs(gonderilen), Math.abs(oneri)));
+            // Görünen metin HER dalda U.esc içinden (SG-05 kaçış sözleşmesi).
+            let durum, renk, gorunenHtml;
+            if (kullanilmadi) {
+                durum = 'not_used';
+                renk = 'info';
+                gorunenHtml = U.esc(U.tf('panel.structural.wallSuggestionNotUsed',
+                    { sub: numL(gonderilen, 3),
+                      mot: isNum(wallSuggestion.valueMm)
+                          ? numL(wallSuggestion.valueMm, 3) : '—' },
+                    'Not used in this run: the wall evaluated ({sub} mm) is '
+                    + 'the value entered in this panel, not the motor '
+                    + 'result\'s wall ({mot} mm).'));
+            } else {
+                durum = wallSuggestion.withheld ? 'withheld' : 'applied';
+                renk = wallSuggestion.withheld ? 'warn' : 'info';
+                const motorHukmu = !wallSuggestion.withheld
+                    && wallSuggestion.sizedByMotor
+                    && String(safety.verdict_source || '') === 'motor_structural_chain';
+                gorunenHtml = `${U.esc(reasonVisible(wallSuggestion.reason))}${
+                    motorHukmu ? ' ' + U.esc(T('panel.structural.verdictFromMotor',
+                        'The verdict shown is the motor\'s own structural verdict.')) : ''}`;
+            }
             html += U.kvTable([[
                 'wall_thickness_suggestion',
-                `<span style="color:${U.kindColor(
-                    wallSuggestion.withheld ? 'warn' : 'info')};
-                 font-family:var(--hd-mono); font-size:0.75rem;">${
-                    wallSuggestion.withheld ? 'withheld' : 'applied'}</span>
+                `<span style="color:${U.kindColor(renk)};
+                 font-family:var(--hd-mono); font-size:0.75rem;">${durum}</span>
                  <span style="color:var(--hd-ink-dim, #7d97a5);
-                  font-size:0.72rem;" title="${U.esc(reasonTitle(wallSuggestion.reason))}"> · ${U.esc(reasonVisible(wallSuggestion.reason))}</span>${
+                  font-size:0.72rem;" title="${U.esc(reasonTitle(wallSuggestion.reason))}"> · ${gorunenHtml}</span>${
                     wallSuggestion.withheld
                         ? `<br><span style="color:${U.kindColor('warn')};
                             font-size:0.75rem;">${T(
@@ -1375,6 +1576,9 @@
         heat_transfer_module: 'ok',
         chamber_temperature_estimate: 'warn',
         not_evaluated: 'warn',
+        // V306/HİBRİT-MODEL (M-HIBRIT-38): hibrit motorun kendi kasa
+        // sıcaklığı (bölge koruma modeli, beyanlı) — motorla aynı taban.
+        hybrid_chamber_zone_protection: 'info',
     };
 
     function wallTemperatureBlock(th) {
@@ -1389,6 +1593,10 @@
                 'WALL TEMPERATURE: ESTIMATED FROM GAS TEMPERATURE'),
             not_evaluated: T('panel.structural.wallTempNotEvaluated',
                 'WALL TEMPERATURE: NOT EVALUATED (thermal path did not run)'),
+            hybrid_chamber_zone_protection: T(
+                'panel.structural.wallTempMotorCase',
+                "WALL TEMPERATURE: THE MOTOR'S OWN CASE TEMPERATURE (chamber "
+                + 'zone protection, same basis the motor sized the wall at)'),
         };
         let html = U.sectionTitle(T('panel.structural.secWallTemperature',
                                     'Wall temperature behind the thermal terms'));
@@ -1434,8 +1642,28 @@
             html += `<p style="font-size:0.78rem; color:${U.kindColor(
                 ran ? 'info' : 'warn')};">${SRV(note)}</p>`;
         }
+        // V306/GÜVERTE-HATA (kalem 1): termal yol koşmadıysa dayanımın
+        // okunduğu sıcaklık (ucun beyanı) ve — motor sonucu varken — gaz
+        // sıcaklığının neden doldurulmadığı.
+        if (!ran && th.strength_reference_temperature_basis) {
+            html += `<p style="font-size:0.78rem; color:${U.kindColor('info')};">${
+                SRV(th.strength_reference_temperature_basis)}</p>`;
+        }
+        if (!ran && motorGasTempWithheld) {
+            html += `<p style="font-size:0.78rem; color:${U.kindColor('info')};">${
+                T('panel.structural.gasTempNotSeeded',
+                  'The motor result publishes no solved temperature for this '
+                  + 'wall, so the gas temperature field was left empty: the '
+                  + 'wall temperature is not estimated from the gas '
+                  + 'temperature, because such an estimate would not be the '
+                  + 'motor\'s wall.')}</p>`;
+        }
         return html;
     }
+
+    //: V306/GÜVERTE-HATA (kalem 1): fromResults gaz sıcaklığını motorun
+    //: çözülmüş cidar çifti olmadığı için BİLEREK doldurmadıysa true.
+    let motorGasTempWithheld = false;
 
     function render(data, root) {
         const sa = data.structural_analysis || {};
@@ -1650,6 +1878,9 @@
                 ? ' · ' + T('panel.structural.diagnosticOnly', 'diagnostic only')
                 : ''));
         html += safetyFactorTable(ca, sf, required, sa, data.design_basis);
+        // V306/GÜVERTE-HATA (kalem 1, K2-P5): motorun kendi cidar denetimi
+        // yan yana, fark adıyla.
+        html += motorWallBlock(ca, dp, sa.thermal_analysis);
 
         // ---- Cidar kalınlığı ----
         // ÖH D15 / P11B4-31 — ANALİZİ SÜREN CİDAR EKRANDA YOKTU.
@@ -1994,6 +2225,24 @@
             // kez karışmaz. Kusur yalnız sıcaklıksız gönderimde (katı, sıvı).
             motorValidity = (isNum(wt.hot) && isNum(wt.cold))
                 ? null : readMotorValidity(r);
+            // V306/GÜVERTE-HATA (kalem 1): motorun kendi cidar denetimi
+            // (katı kasa / sıvı hazne) — sekmenin sayısının yanına basılır.
+            motorWallCheck = readMotorWallCheck(r);
+            // V306/GÜVERTE-HATA (kalem 1, CI-SÜREÇ DEVİR 1 + K2-P5) — GAZ
+            // SICAKLIĞI YALNIZ ÇÖZÜLMÜŞ CİDAR ÇİFTİYLE TOHUMLANIR.
+            // ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/guverte/yapisal_once.json):
+            // motor cidar sıcaklığı yayımlamıyorken (katı; sıvıda çözüm
+            // yokken; hibritte bağlam taşımayan akışta) gaz sıcaklığı
+            // tohumlanıyor, uç da cidarı ondan TAHMİN ediyordu (servis
+            // sınırının 0,9 katı): örnek katı A36 kasa 729,9 K, akma
+            // 250 → 134 MPa, SF 1,03, "STRUCTURE: UNSAFE" — aynı ekranda motor
+            // kasa SF 2,94. Tahmin motorun cidarı DEĞİLDİR. Çözülmüş çift
+            // varsa gaz sıcaklığı etkisizdir (uç çifti önce okur) ve motorla
+            // aynı sayı görünsün diye tohumlanır; yoksa alan boş kalır, termal
+            // yol koşmaz ve uç bunu adıyla yazar (wall_temperature_source
+            // 'not_evaluated', strength_reference_temperature_basis).
+            const ciftCozuldu = isNum(wt.hot) && isNum(wt.cold);
+            motorGasTempWithheld = !ciftCozuldu && isNum(m.chamber_temperature);
             // Z5-C1: cidar önerisi + künyesi (aşağıdaki `wallSuggestion`).
             const wallM = wallThicknessSuggestion(r);
             // BİRİM (2026-07-30 ölçümü): bu üç uzunluk HAM okunuyordu ve
@@ -2007,7 +2256,7 @@
                 chamber_length: U.readLengthM(r, 'chamber_length'),
                 throat_diameter: U.readLengthM(r, 'throat_diameter'),
                 burn_time: U.readBurnTime(r),
-                chamber_temperature: m.chamber_temperature,
+                chamber_temperature: ciftCozuldu ? m.chamber_temperature : null,
                 // MALZEME hiç döndürülmüyordu: alan varsayılanı steel_4130,
                 // arayüz varsayılanı ise steel_304. Aynı oda için ölçüm:
                 // steel_4130 SF 4,512 / cidar 2,33 mm  <- panelin gösterdiği
@@ -2070,6 +2319,26 @@
                 ctx.motor_type = motorType;
                 ctx.motor_result = blok;
                 ctx.motor_verdict_inputs = girdiler;
+                // V306/HİBRİT-MODEL (M-HIBRIT-38) — TEK SICAKLIK TABANI:
+                // hibrit motor kasayı bölge koruma modelinin kasa
+                // sıcaklığında boyutlandırıyor; sekme aynı sıcaklıkta
+                // değerlendirsin diye o çift bağlam olarak gider (form
+                // alanına "çözüldü" diye TOHUMLANMAZ — beyanlı bir
+                // sıcaklıktır). Uç yalnız tohumlar eşleşirse benimser.
+                if (motorType === 'hybrid') {
+                    const th = (m.structural_analysis || {}).thermal_analysis
+                        || {};
+                    if (th.wall_temperature_source
+                            === 'hybrid_chamber_zone_protection'
+                            && isNum(th.wall_temperature_inner_K)
+                            && isNum(th.wall_temperature_outer_K)) {
+                        ctx.motor_wall_temperature = {
+                            hot: th.wall_temperature_inner_K,
+                            cold: th.wall_temperature_outer_K,
+                            source: th.wall_temperature_source,
+                        };
+                    }
+                }
             }
             if (motorSizedWallM !== null) ctx.motor_wall_source = 'sized_by_hrma';
             return Object.keys(ctx).length ? ctx : null;

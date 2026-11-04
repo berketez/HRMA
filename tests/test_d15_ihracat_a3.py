@@ -232,7 +232,12 @@ class TestB326CozucuBeyanlari:
         assert 'l star note' in hibrit_pdf_metni.lower()
 
     def test_pdf_olculmus_sapma_uyarisini_basiyor(self, hibrit_pdf_metni):
-        assert 'htpb_coeff_bias' in hibrit_pdf_metni
+        # V306/RAPOR-HATA (kalem 6a) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: ölçülmüş
+        # sapma uyarısı belgede durur, ama ham kodla değil ekranın
+        # sözlüğündeki cümlesiyle (ham anahtar belgeye basılmaz).
+        duz = ' '.join(hibrit_pdf_metni.split())
+        assert 'regression coefficients are biased' in duz
+        assert 'htpb_coeff_bias' not in duz
 
 
 # =====================================================================

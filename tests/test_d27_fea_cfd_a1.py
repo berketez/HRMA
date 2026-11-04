@@ -134,10 +134,12 @@ def motorlar():
     for ad, (yol, yuk) in istek.items():
         veri = _sessiz(c.post, yol, json=yuk).get_json() or {}
         md = veri.get('motor', veri)
+        # V306/KATI-MODEL (M-KATI-10): katıda ürün akışı artık kasa silindirini ağa koyar; bu çapa yalnız-lüle konturunda ölçülmüştü, o geometri köprünün beyanlı kipiyle (include_chamber=False) korunur. Kasa silindirli ürün yolunun bekçisi: tests/test_v306_kati_model.py::TestMKati10YapisalAg.
+        _ek = {'include_chamber': False} if ad == 'kati' else {}
         cikti[ad] = {
             'motor': md,
-            'girdi': _sessiz(bridge.extract_structural_inputs, md),
-            'kopru': _sessiz(bridge.run_structural_from_motor, md),
+            'girdi': _sessiz(bridge.extract_structural_inputs, md, **_ek),
+            'kopru': _sessiz(bridge.run_structural_from_motor, md, **_ek),
         }
     return cikti
 

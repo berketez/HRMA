@@ -210,6 +210,16 @@ LANDING_WITHHELD_NO_PARACHUTE = (
 # uçuşa iki farklı "kalktı/kalkmadı" cevabı vermek demektir.
 LIFTOFF_ALTITUDE_EPS_M = 1e-6
 
+#: Yükseliş açısı (ufuktan) VERİLMEDİĞİNDE kullanılan değer [°] —
+#: V306/UÇUŞ-2 (M-KATI-26). Sayı v3.0.5'e kadar ``calculate_trajectory``
+#: içinde gizli bir yedekti (``launch_params.get('launch_angle', 85)``) ve
+#: katı/sıvı yörünge panelleri alanı göndermiyordu: panel "dikey tırmanış"
+#: diyor, çözücü 85°'yle uçuyordu (L2'de apojede 1,24 km yatay menzil).
+#: Değer DEĞİŞMEDİ (yayımlanan apojeler aynı kalır); HRMA seçimidir, kaynaklı
+#: bir standart değildir. Artık tek yerde durur ve kullanıldığında sonuçta
+#: ``flight_model.launch_angle_source = 'default'`` diye yayımlanır.
+DEFAULT_LAUNCH_ANGLE_DEG = 85.0
+
 # --- MENZİL EKSENİ GÖRÜNÜMÜ (V301/NK-25, 28 Eki) ---------------------------
 # Dikey atışta yatay menzil kayan nokta gürültüsüdür (ölçüldü: ~1e-16 km).
 # Plotly kendiliğinden bu aralığa yakınlaşıp tikleri SI önekiyle basıyordu
@@ -268,6 +278,69 @@ def _finite_or_none(value) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return f if np.isfinite(f) else None
+
+
+def thrust_altitude_compensation_block(nozzle_exit_area, reference_pressure_pa,
+                                       site_pressure_pa=None) -> Dict:
+    """İtkinin irtifa düzeltmesi künyesi — İKİ ÇÖZÜCÜNÜN TEK TANIMI.
+
+    V306/UÇUŞ-2 (M-SIVI-18, M-HIBRIT-34): düzlemsel çözücü bu bloğu
+    yayımlıyordu, 6-DOF ise yalnız bir uyarı kodu üretiyor ve uç o kodu
+    ekrana hiç taşımıyordu. İki çözücü aynı fiziği (aynı formül, aynı
+    referans basınç kuralı) kullanır ve aynı künyeyi bu işlevden alır.
+
+    Fizik (Sutton & Biblarz, Rocket Propulsion Elements, Böl. 3:
+    F = ṁ·v_e + (p_e − p_a)·A_e): ṁ ve p_e ortam basıncından bağımsız
+    olduğundan, p_ref ortamında ölçülen/hesaplanan F_ref için
+        F(h) = F_ref + (p_ref − p_a(h))·A_e  =  F_vak − p_a(h)·A_e,
+    F_vak = F_ref + p_ref·A_e. Uç noktalar: p_a = p_ref → F = F_ref
+    (terim tam sıfır), p_a = 0 → F = F_vak.
+
+    Geçerlilik: tam akan (ayrılmamış) lüle. Uçuş referans irtifasından
+    yukarı çıktıkça p_a ≤ p_ref olur, aşırı genleşme azalır ve yeni bir
+    ayrılma doğmaz. Saha basıncı p_ref'ten BÜYÜKSE (saha, motorun tasarım
+    irtifasının altında) ilk metrelerde lüle daha aşırı genleşmiş çalışır;
+    ayrılma olursa formül itkiyi olduğundan DÜŞÜK verir. Bu durum
+    ``site_pressure_above_reference`` bayrağıyla adıyla söylenir.
+
+    ``nozzle_exit_area`` None ise blok ``modelled = False`` döner (eski
+    sözleşme bit-aynı; yeni anahtarlar yalnız modellenen kolda eklenir).
+    """
+    if nozzle_exit_area is None:
+        return {
+            'modelled': False,
+            'nozzle_exit_area_m2': None,
+            'reference_pressure_pa': None,
+            'basis': (
+                'NOT_MODELLED: nozzle_exit_area was not supplied, so the '
+                'thrust is held at its reference value for the whole '
+                'burn. A_e is a design quantity and is NOT derived from '
+                'thrust and burn time; supply motor_data'
+                '["nozzle_exit_area"] to model the compensation.'),
+        }
+    blok = {
+        'modelled': True,
+        'nozzle_exit_area_m2': nozzle_exit_area,
+        'reference_pressure_pa': reference_pressure_pa,
+        'basis': (
+            'F(h) = F_ref + (P_ref - P_amb(h)) * A_e (Sutton & '
+            'Biblarz, Rocket Propulsion Elements, Ch. 3)'),
+        # F_vak − F_ref = p_ref·A_e: vakum itkisinin referans itkiden farkı
+        # (eğri boyunca SABİT bir ek terim).
+        'vacuum_thrust_increment_n': float(reference_pressure_pa)
+        * float(nozzle_exit_area),
+        'validity': (
+            'full-flowing nozzle. Above the reference altitude the ambient '
+            'pressure only falls, so no new flow separation appears. Below '
+            'it (site pressure above the reference) the nozzle runs more '
+            'over-expanded; if it separates, this formula under-predicts '
+            'the thrust there.'),
+    }
+    if site_pressure_pa is not None:
+        blok['site_pressure_pa'] = float(site_pressure_pa)
+        blok['site_pressure_above_reference'] = bool(
+            float(site_pressure_pa) > float(reference_pressure_pa))
+    return blok
 
 
 def _as_list(values) -> list:
@@ -1012,7 +1085,10 @@ class TrajectoryAnalyzer:
 
         # Extract launch parameters
         # launch_angle = YÜKSELİŞ AÇISI (ufuktan), 90° = dikey yukarı.
-        launch_angle = np.radians(launch_params.get('launch_angle', 85))  # degrees to radians
+        _aci_verildi = launch_params.get('launch_angle') is not None
+        launch_angle_deg = (float(launch_params['launch_angle']) if _aci_verildi
+                            else DEFAULT_LAUNCH_ANGLE_DEG)
+        launch_angle = np.radians(launch_angle_deg)  # degrees to radians
         launch_altitude = launch_params.get('launch_altitude', 0)  # m
         if site and site.get('elevation_m') is not None and \
                 launch_params.get('launch_altitude') is None:
@@ -1201,24 +1277,35 @@ class TrajectoryAnalyzer:
             # itkinin irtifayla sabit tutulduğunu söyleyen TEK bir alan ya da
             # uyarı yoktu; kardeş 6-DOF ise aynı varsayımı her koşumda
             # ``warn.sixdof.thrust_not_altitude_compensated`` ile söylüyordu.
-            'thrust_altitude_compensation': {
-                'modelled': self.nozzle_exit_area is not None,
-                'nozzle_exit_area_m2': self.nozzle_exit_area,
-                'reference_pressure_pa': (
-                    self.thrust_reference_pressure
-                    if self.nozzle_exit_area is None else
-                    float(self._atm_full(launch_altitude)[1])
-                    if self.thrust_reference_pressure is None
-                    else self.thrust_reference_pressure),
+            # V306/UÇUŞ-2: blok kardeş 6-DOF ile AYNI işlevden kurulur
+            # (thrust_altitude_compensation_block — tek tanım).
+            'thrust_altitude_compensation': (
+                thrust_altitude_compensation_block(
+                    self.nozzle_exit_area,
+                    (float(self._atm_full(launch_altitude)[1])
+                     if self.thrust_reference_pressure is None
+                     else self.thrust_reference_pressure),
+                    float(self._atm_full(launch_altitude)[1]))
+                if self.nozzle_exit_area is not None else
+                dict(thrust_altitude_compensation_block(None, None),
+                     reference_pressure_pa=self.thrust_reference_pressure)),
+            # V306/UÇUŞ-2 (M-KATI-26 / brif kalem 6): modelin kendisi ve
+            # atış açısı adıyla — panel "dikey tırmanış" demiyor, bunu basıyor.
+            'flight_model': {
+                'model': 'planar_point_mass',
+                'launch_angle_deg': launch_angle_deg,
+                'launch_angle_source': ('supplied' if _aci_verildi
+                                        else 'default'),
                 'basis': (
-                    'F(h) = F_ref + (P_ref - P_amb(h)) * A_e (Sutton & '
-                    'Biblarz, Rocket Propulsion Elements, Ch. 3)'
-                    if self.nozzle_exit_area is not None else
-                    'NOT_MODELLED: nozzle_exit_area was not supplied, so the '
-                    'thrust is held at its reference value for the whole '
-                    'burn. A_e is a design quantity and is NOT derived from '
-                    'thrust and burn time; supply motor_data'
-                    '["nozzle_exit_area"] to model the compensation.'),
+                    'planar (2-D) point-mass model: the flight is integrated '
+                    'in the vertical plane of the launch azimuth (x = range, '
+                    'z = altitude) with no attitude dynamics. Thrust acts '
+                    'along the launch attitude for the whole burn when no '
+                    'launch rail is given (see launch_rail), and along the '
+                    'velocity after a modelled rail. A launch angle that was '
+                    'not supplied '
+                    'is DEFAULT_LAUNCH_ANGLE_DEG (an HRMA choice, not a '
+                    'sourced standard).'),
             },
             'trajectory': trajectory_data,
             'performance': performance_metrics,
@@ -1627,6 +1714,11 @@ class TrajectoryAnalyzer:
         t_end = burn_time + POWERED_PHASE_MARGIN_S
         t_span = (0, t_end)
         t_eval = np.linspace(0, t_end, max(int(t_end * 50), 10))
+        # V306/UÇUŞ-2 (M-KATI-28): yanma sonu anı örneklenir — tepe yük
+        # çarpanı (en hafif kütlede tam itki) o andadır; eşit aralıklı
+        # ızgara onu ~1/50 s ıskalıyordu. Entegrasyon adımlarını DEĞİŞTİRMEZ
+        # (t_eval yalnız çıktı noktalarıdır).
+        t_eval = np.union1d(t_eval, [float(burn_time)])
 
         # B3 — YER TEMASI SONLANDIRMA OLAYI.
         # Araç t=0'da tam olarak yer düzlemindedir; olay ilk anlarda
@@ -1684,11 +1776,22 @@ class TrajectoryAnalyzer:
                                 ('vx', sol.y[2]), ('vz', sol.y[3]),
                                 ('mass', sol.y[4]))}
 
+        # V306/UÇUŞ-2 (M-KATI-28): örneklerdeki ivme modelin dinamik
+        # işlevinden (yan etkisiz; entegrasyonun kullandığı ifadenin aynısı).
+        if sol.t.size:
+            _ivme = np.array([powered_flight_dynamics(float(tk), sol.y[:, k])
+                              [2:4] for k, tk in enumerate(sol.t)],
+                             dtype=float)
+        else:
+            _ivme = np.zeros((0, 2))
+
         return {
             'time': sol.t,
             'position_x': sol.y[0],
             'position_z': sol.y[1],
             'velocity_x': sol.y[2],
+            'accel_x': _ivme[:, 0],
+            'accel_z': _ivme[:, 1],
             'velocity_z': sol.y[3],
             'mass': sol.y[4],
             'final_state': [sol.y[0][-1], sol.y[1][-1], sol.y[2][-1], sol.y[3][-1], sol.y[4][-1]],
@@ -2104,8 +2207,33 @@ class TrajectoryAnalyzer:
         # eski skaler d|v|/dt dönüşlerde ivmeyi eksik gösterir.
         _ax = np.gradient(complete_vx, complete_time)
         _az = np.gradient(complete_vz, complete_time)
+        # V306/UÇUŞ-2: GÜÇLÜ FAZDA ivme modelin KENDİSİNDEN (dinamik
+        # işlevinin örneklerde değerlendirilmesi), sayısal türevden değil.
+        # Merkezi fark yanma sonunu (itki süreksizliği, tepe ivmenin olduğu
+        # an) itkisiz örnekle ortalıyordu. ÖLÇÜLDÜ (kapali_bicim.json K3,
+        # sürüklemesiz dikey uçuş): tepe yük çarpanı F/(m_f·g0)'dan −%0,21.
+        # Süzülme ve iniş fazlarında itki yoktur; türev orada kalır.
+        _n_guc = len(powered['time'])
+        if ('accel_x' in powered and 'accel_z' in powered
+                and len(powered['accel_x']) == _n_guc):
+            _ax = _ax.copy()
+            _az = _az.copy()
+            _ax[:_n_guc] = powered['accel_x']
+            _az[:_n_guc] = powered['accel_z']
         complete_acceleration = np.sqrt(_ax ** 2 + _az ** 2)
         complete_altitude = complete_z
+        # V306/UÇUŞ-2 (M-KATI-28) — YÜK ÇARPANI ALGILANAN İVMEDİR.
+        # ``complete_acceleration`` KİNEMATİK ivmedir (|dv/dt|); yerçekimi
+        # onun içindedir. Gövdenin (ve ivmeölçerin) hissettiği ivme, yerçekimi
+        # DIŞINDAKİ kuvvetlerin (itki + aerodinamik + ray tepkisi) kütleye
+        # oranıdır: a_alg = a − g⃗ = (a_x, a_z + g(z)). Yük çarpanı
+        # n = |a_alg| / g0 (havacılık konvansiyonu, standart g0). ÖLÇÜLDÜ
+        # (tur L5, T/W ≈ 1): yayımlanan "yük çarpanı" 0,99 g, algılanan ivme
+        # 1,96 g — yapısal yük ~2 kat eksik okunuyordu. g(z) dinamikle AYNI
+        # kaynaktan (_get_atmospheric_properties) okunur.
+        _g_z = np.array([self._get_atmospheric_properties(float(z))[1]
+                         for z in complete_z])
+        complete_sensed = np.sqrt(_ax ** 2 + (_az + _g_z) ** 2)
 
         return {
             'time': complete_time,
@@ -2116,6 +2244,8 @@ class TrajectoryAnalyzer:
             'velocity_z': complete_vz,
             'velocity_magnitude': complete_velocity,
             'acceleration': complete_acceleration,
+            # V306/UÇUŞ-2: algılanan ivme [m/s²] (yerçekimi hariç kuvvetler/m)
+            'sensed_acceleration': complete_sensed,
             'phases': {
                 'powered': powered,
                 'coasting': coasting,
@@ -2224,6 +2354,8 @@ class TrajectoryAnalyzer:
         # tavana çarpsa bile bu iki sayı GERÇEKTİR, bu yüzden korunur.
         max_velocity = np.max(trajectory['velocity_magnitude'])
         max_acceleration = np.max(trajectory['acceleration'])
+        # V306/UÇUŞ-2 (M-KATI-28): yük çarpanı algılanan ivmeden.
+        max_sensed_acceleration = np.max(trajectory['sensed_acceleration'])
         total_flight_time = None if landing_unknown else trajectory['time'][-1]
         range_distance = None if landing_unknown else trajectory['position_x'][-1]
 
@@ -2266,7 +2398,10 @@ class TrajectoryAnalyzer:
         landing_velocity = None if landing_unknown else descent['landing_velocity']
         # Yük faktörü (g cinsinden ivme) STANDART g0 ile ifade edilir —
         # havacılık konvansiyonu; saha yerçekimiyle ölçeklenmez.
-        max_g_force = max_acceleration / self.g0
+        # V306/UÇUŞ-2 (M-KATI-28): ``max_g_force`` panelde "gövdeye gelen yük
+        # çarpanı" diye okunuyor; artık ALGILANAN ivmedir. Kinematik ivme
+        # ayrı ve adıyla (``max_kinematic_acceleration_g``) yayımlanır.
+        max_g_force = max_sensed_acceleration / self.g0
 
         return {
             'trajectory_metrics': {
@@ -2287,6 +2422,15 @@ class TrajectoryAnalyzer:
                 'max_velocity': max_velocity,
                 'max_acceleration': max_acceleration,
                 'max_g_force': max_g_force,
+                'max_load_factor_g': max_g_force,
+                'max_kinematic_acceleration_g': max_acceleration / self.g0,
+                'load_factor_basis': (
+                    'load factor n = |a - g| / g0: the SENSED acceleration '
+                    '(thrust + aerodynamic + rail reaction forces over mass, '
+                    'gravity excluded), i.e. what the airframe and an '
+                    'accelerometer feel. max_acceleration / max_kinematic_'
+                    'acceleration_g is the kinematic |dv/dt| and includes '
+                    'gravity; it is not the structural load.'),
                 'total_flight_time': total_flight_time,
                 'range_distance': range_distance,
                 'landing_velocity': landing_velocity,
@@ -2529,7 +2673,7 @@ class TrajectoryAnalyzer:
             # zaten yazar — künye her hâlükârda gereksizdi.
             subplot_titles=(
                 'Trajectory Profile', 'Altitude vs Time',
-                'Velocity Profile', 'Acceleration Profile',
+                'Velocity Profile', 'Load Factor Profile',
                 'Flight Phases', ''
             ),
             specs=[
@@ -2681,14 +2825,27 @@ class TrajectoryAnalyzer:
         )
 
         # 4. Acceleration profile
+        # V306/UÇUŞ-2 (M-KATI-28): ana eğri YÜK ÇARPANI (algılanan ivme,
+        # yerçekimi hariç); kinematik |dv/dt| ayrı, kesikli ve adıyla.
         fig.add_trace(
             go.Scatter(
                 x=_as_list(trajectory['time'][1:]),  # Skip first point for gradient
-                y=_as_list(trajectory['acceleration'][1:] / self.g0),  # Convert to g's
+                y=_as_list(trajectory['sensed_acceleration'][1:] / self.g0),
                 mode='lines',
-                name='Acceleration',
+                name='Load factor (sensed)',
                 line=dict(color='purple', width=3),
-                hovertemplate='Time: %{x:.1f} s<br>Acceleration: %{y:.1f} g'
+                hovertemplate='Time: %{x:.1f} s<br>Load factor: %{y:.2f} g'
+            ),
+            row=2, col=2
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=_as_list(trajectory['time'][1:]),
+                y=_as_list(trajectory['acceleration'][1:] / self.g0),
+                mode='lines',
+                name='Kinematic |dv/dt|',
+                line=dict(color='gray', width=1, dash='dash'),
+                hovertemplate='Time: %{x:.1f} s<br>|dv/dt|: %{y:.2f} g'
             ),
             row=2, col=2
         )
@@ -2852,7 +3009,7 @@ class TrajectoryAnalyzer:
         fig.update_xaxes(title_text="Time (s)", row=2, col=1)
         fig.update_yaxes(title_text="Velocity (m/s)", row=2, col=1)
         fig.update_xaxes(title_text="Time (s)", row=2, col=2)
-        fig.update_yaxes(title_text="Acceleration (g)", row=2, col=2)
+        fig.update_yaxes(title_text="Load factor (g)", row=2, col=2)
         fig.update_xaxes(title_text="Time (s)", row=3, col=1)
         fig.update_yaxes(title_text="Altitude (km)", row=3, col=1)
 

@@ -19,6 +19,10 @@
     'use strict';
 
     let lastResult = null;
+    // V306/UÇUŞ-3 (BAYAT DEVİR 2 panel ayağı + UÇUŞ-2 DEVİR 2a): ekrandaki
+    // sonucun hangi motor hesabına (window.currentResults nesnesi) ait
+    // olduğu. Yeni motor hesabı yeni nesne yaratır; eski sonuç temizlenir.
+    let lastResultSonuc = null;
 
     // i18n köprüsü — i18n.js yoksa İngilizce yedek metin döner
     function T(key, fallback) {
@@ -303,6 +307,138 @@
         return ham === '' ? bos : parseFloat(ham);
     }
 
+    // V306/UÇUŞ-3 (M-HIBRIT-17) — TANK SICAKLIĞI MOTORUN GİRDİSİNDEN.
+    // ÖLÇÜLDÜ (4 Kas, ekran/tarayici_once_tr_YTE.json T; tur: Hansen 2012):
+    // motor formunda Oksitleyici Sıcaklık 281,75 K iken panelin "Tank
+    // Sıcaklığı (K)" alanı 293,15'te kalıyordu; aynı istek gövdesi
+    // ``oxidizer_temp: 281.75`` ve ``tank_temperature: 293.15`` taşıyordu —
+    // motor 38,7 bar (P_sat 281,75 K) tankla tasarlanmış, panel 50,4 bar
+    // tankla boşaltıyordu. Motor N₂O tankının sıcaklığını ana isteğin
+    // ``oxidizer_temp``ından alır (hrma/app.py /calculate: tank_temperature
+    // = oxidizer_temp, verilmezse motorun TANK_TEMPERATURE_DEFAULT_K'sı =
+    // BOS_TANK_SICAKLIGI_K). Panel aynı kaynaktan tohumlanır; kullanıcı
+    // panelde başka bir sıcaklık yazarsa değeri korunur ve fark adıyla yazar.
+    function motorTankSicakligi() {
+        const ana = (typeof window !== 'undefined') ? window.currentRequest : null;
+        let t = (ana && typeof ana === 'object' && !Array.isArray(ana))
+            ? Number(ana.oxidizer_temp) : NaN;
+        if (!(isFinite(t) && t > 0)) {
+            const el = document.getElementById('oxidizer_temp');
+            t = el ? parseFloat(el.value) : NaN;
+        }
+        return (isFinite(t) && t > 0) ? t : BOS_TANK_SICAKLIGI_K;
+    }
+    function tankSicakligiNotunuYaz() {
+        const el = document.getElementById('tp_tank_temp');
+        if (!el) return;
+        let not = document.getElementById('tp_tank_temp_note');
+        const motorT = motorTankSicakligi();
+        const simdi = parseFloat(el.value);
+        const farkli = el.dataset && el.dataset.userOverride === 'true'
+            && isFinite(simdi) && Math.abs(simdi - motorT) > 0.005;
+        if (!farkli) { if (not) not.remove(); return; }
+        if (!not) {
+            not = document.createElement('small');
+            not.id = 'tp_tank_temp_note';
+            not.style.cssText = 'display:block; font-size:12px; line-height:1.4;'
+                + ' margin-top:4px; color:var(--hd-orange, #ff8c33); white-space:normal;';
+            el.insertAdjacentElement('afterend', not);
+        }
+        not.textContent = TF('transient.tankTempDiffers',
+            { panel: ekranSayisi(simdi, 2), motor: ekranSayisi(motorT, 2) },
+            'You entered {panel} K here; the engine was designed with an oxidizer (tank) temperature of {motor} K. This run belongs to a different tank state than the engine result.');
+    }
+    function tankSicakligiTohumla() {
+        const el = document.getElementById('tp_tank_temp');
+        if (!el) return;
+        if (!(el.dataset && el.dataset.userOverride === 'true')) {
+            el.value = String(Math.round(motorTankSicakligi() * 100) / 100);
+        }
+        tankSicakligiNotunuYaz();
+    }
+
+    // V306/UÇUŞ-3: yeni motor hesabında eski koşu ekrandan kalkar ve neden
+    // yazılır (FEA panelleri / 6-DOF deseni, BAYAT NR-9).
+    function eskiKosuyuTemizle(anahtar) {
+        lastResult = null;
+        lastResultSonuc = null;
+        if (window.TransientPanel) window.TransientPanel.lastResult = null;
+        const badges = document.getElementById('tp_badges');
+        if (badges) badges.innerHTML = '';
+        ['tp_plot', 'tp_tank_plot'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (window.Plotly && Plotly.purge) { try { Plotly.purge(el); } catch (e) { /* yok */ } }
+            el.innerHTML = '';
+            el.style.display = 'none';
+        });
+        const expBtn = document.getElementById('tp_export');
+        if (expBtn) expBtn.disabled = true;
+        const status = document.getElementById('tp_status');
+        if (status) {
+            status.textContent = (anahtar === 'during')
+                ? T('transient.staleDuringRun',
+                    'The engine was recalculated while this run was solving; its result belongs to the earlier design and was not shown. Run it again.')
+                : T('transient.staleRun',
+                    'The engine was recalculated; the previous time-resolved result belonged to the earlier design and was cleared. Run it again.');
+        }
+    }
+
+    // V306/UÇUŞ-3 — PROJE DOSYASI ZAMAN ÇÖZÜMLÜ AYARLARINI TAŞIR (M-HIBRIT-35).
+    function projeDurumu() {
+        const sel = document.getElementById('tp_feed_mode');
+        const tt = document.getElementById('tp_tank_temp');
+        const fl = document.getElementById('tp_fill');
+        if (!sel) return null;
+        return {
+            format: 1,
+            feed_mode: String(sel.value),
+            feed_mode_user_chosen: !!(sel.dataset && sel.dataset.kullaniciSecti === '1'),
+            tank_temp: tt ? String(tt.value) : '',
+            tank_temp_user_typed: !!(tt && tt.dataset && tt.dataset.userOverride === 'true'),
+            fill: fl ? String(fl.value) : '',
+            fill_user_typed: !!(fl && fl.dataset && fl.dataset.userOverride === 'true'),
+        };
+    }
+    function projeDurumunuKur(st) {
+        lastResult = null;
+        lastResultSonuc = null;
+        if (window.TransientPanel) window.TransientPanel.lastResult = null;
+        const sel = document.getElementById('tp_feed_mode');
+        const tt = document.getElementById('tp_tank_temp');
+        const fl = document.getElementById('tp_fill');
+        const status = document.getElementById('tp_status');
+        if (!sel) return false;
+        if (!st || typeof st !== 'object') {
+            if (status) status.textContent = T('transient.projectNoSetup',
+                'This project file does not store the time-resolved settings (saved before 3.0.6): the feed mode follows the engine design and the tank temperature is filled from the engine oxidizer temperature after a calculation.');
+            return false;
+        }
+        if (typeof st.feed_mode === 'string'
+                && Array.prototype.some.call(sel.options || [], function (o) {
+                    return o.value === st.feed_mode && !o.disabled; })) {
+            sel.value = st.feed_mode;
+            try { sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { /* eski */ }
+        }
+        if (sel.dataset) {
+            if (st.feed_mode_user_chosen) sel.dataset.kullaniciSecti = '1';
+            else delete sel.dataset.kullaniciSecti;
+        }
+        [[tt, st.tank_temp, st.tank_temp_user_typed], [fl, st.fill, st.fill_user_typed]]
+            .forEach(function (k) {
+                const el = k[0];
+                if (!el || typeof k[1] !== 'string') return;
+                el.value = k[1];
+                if (el.dataset) {
+                    if (k[2]) el.dataset.userOverride = 'true';
+                    else delete el.dataset.userOverride;
+                }
+            });
+        if (status) status.textContent = '';
+        tankSicakligiNotunuYaz();
+        return true;
+    }
+
     function ipucuHtml(id) {
         return '<span class="tooltip"><span class="tooltip-icon">?</span>'
             + '<span class="tooltip-text" id="' + id + '"></span></span>';
@@ -336,8 +472,12 @@
            + 'saturation table, so it drives the flow. In Regulated mode the '
            + 'oxidizer flow is prescribed, so it does not drive the feed; it is '
            + 'still passed to the engine as the N2O inlet temperature, which '
-           + 'shifts the curves only slightly. Empty: {t0} K is sent (the '
-           + 'solver\'s default tank temperature). Accepted (blowdown): '
+           + 'shifts the curves only slightly. After each engine calculation it '
+           + 'is filled with the engine Oxidizer Temperature (the tank temperature '
+           + 'the engine was designed with); a value you type is kept and, if it '
+           + 'differs from the engine value, the difference is shown below the '
+           + 'field. Empty: the engine oxidizer temperature is sent, or {t0} K (the '
+           + 'solver\'s default tank temperature) if the engine has none. Accepted (blowdown): '
            + '{tmin}–{tmax} K (saturation table band); a temperature outside '
            + 'the N2O liquid range is rejected in both modes with the reason.'));
         yaz('tp_fill_tip', TF('transient.fillFractionTip', {
@@ -492,9 +632,11 @@
         badges.innerHTML = '';
 
         beslemeKipiniEsle();
+        // V306/UÇUŞ-3: koşunun ait olduğu motor hesabı (başlangıç anında).
+        const kosuSonucu = (typeof window !== 'undefined') ? (window.currentResults || null) : null;
         const payload = collectMotorParams();
         payload.feed_mode = document.getElementById('tp_feed_mode').value;
-        payload.tank_temperature = tankGirdisi('tp_tank_temp', BOS_TANK_SICAKLIGI_K);
+        payload.tank_temperature = tankGirdisi('tp_tank_temp', motorTankSicakligi());
         payload.liquid_fill_fraction = tankGirdisi('tp_fill', BOS_DOLULUK_ORANI);
 
         try {
@@ -507,7 +649,15 @@
             if (!resp.ok || data.status !== 'success') {
                 throw new Error(data.error || `HTTP ${resp.status}`);
             }
+            // V306/UÇUŞ-3 (UÇUŞ-2 DEVİR 2a): koşu sürerken motor yeniden
+            // hesaplandıysa bu sonuç ESKİ tasarımındır — yeni sonuca
+            // iliştirilmez ve gösterilmez (6-DOF onu "bu hesap" sanmasın).
+            if (kosuSonucu !== (window.currentResults || null)) {
+                eskiKosuyuTemizle('during');
+                return;
+            }
             lastResult = data;
+            lastResultSonuc = kosuSonucu;
             window.TransientPanel.lastResult = data;
             render(data);
             const expBtn = document.getElementById('tp_export');
@@ -525,6 +675,7 @@
                 try { MotorViz3D.setTransient(data.transient); } catch (e) { /* eski sürüm */ }
             }
             status.textContent = '';
+            tankSicakligiNotunuYaz();
         } catch (err) {
             status.textContent = TF('common.errorPrefix', { message: err.message },
                                     'ERROR: {message}');
@@ -929,6 +1080,31 @@
         document.getElementById('tp_run').addEventListener('click', run);
         const expBtn = document.getElementById('tp_export');
         if (expBtn) expBtn.addEventListener('click', exportCurves);
+        // V306/UÇUŞ-3: yalnız gerçek yazma "elle yazıldı" damgası bırakır.
+        ['tp_tank_temp', 'tp_fill'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', function (e) {
+                if (e && e.isTrusted && el.dataset) el.dataset.userOverride = 'true';
+                if (id === 'tp_tank_temp') tankSicakligiNotunuYaz();
+            });
+        });
+        // Hesap köprüsü (FEA panelleri deseni): yeni motor hesabında eski
+        // eğri temizlenir ve tank sıcaklığı motorun girdisinden tohumlanır.
+        (function () {
+            const ozgun = window.displayCalculationResults;
+            if (typeof ozgun !== 'function') return;
+            window.displayCalculationResults = function (results) {
+                const out = ozgun.apply(this, arguments);
+                try {
+                    if (lastResult && lastResultSonuc && results !== lastResultSonuc) {
+                        eskiKosuyuTemizle('new');
+                    }
+                    tankSicakligiTohumla();
+                } catch (e) { /* panel hatası hesabı engellemez */ }
+                return out;
+            };
+        })();
         document.getElementById('tp_feed_mode').addEventListener('change', function () {
             this.dataset.kullaniciSecti = '1';
             const bd = this.value === 'blowdown';
@@ -1044,6 +1220,10 @@
     }
 
     window.TransientPanel = { init, run, lastResult: null,
+        // V306/UÇUŞ-3: proje şeridinin kayıt/açılış kancaları.
+        projeDurumu: projeDurumu,
+        projeDurumunuKur: projeDurumunuKur,
+        _motorTankSicakligi: motorTankSicakligi,
         // Test / hata ayıklama: saf dışa aktarım tablosu (DOM'suz).
         // injector_panel._renderHtml ile aynı desen.
         _buildExportTable: buildExportTable,

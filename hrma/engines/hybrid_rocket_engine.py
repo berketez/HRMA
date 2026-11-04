@@ -191,10 +191,10 @@ ETA_C_STAR_PHYSICAL_BAND = (0.5, 1.05)
 # 26 ölçümün ORTANCASI 0,89 (aralık 0,77-0,99). Bekçi
 # (tests/test_v301_hibrit_panel.py) sayının kayıtlardan yeniden
 # hesaplandığında aynı çıktığını sınar; kayıt eklenirse kırmızıya döner.
-# Ölçülmüş verimi olan BAŞKA itici çifti yok (veritabanındaki parafin
-# kayıtları GOX'ludur ve hibrit sayfasında GOX seçeneği yoktur): o çiftlerde
-# varsayılan 1,00'dır (kuramsal c*) ve sonuçta "ideal c* — verim
-# uygulanmadı" diye AÇIKÇA beyan edilir; kaynaksız bir "tipik" verim
+# V306/HİBRİT-MODEL (M-HIBRIT-25): eski "başka çiftte ideal c* (1,00)"
+# kolu KALDIRILDI — LOX/HTPB ve oksijen/parafin çiftleri kendi ölçülmüş
+# kayıtlarından, ölçümü olmayan çiftler BEYANLI genel varsayılandan
+# (``HYBRID_ETA_C_STAR_GENERAL``) alır; kaynaksız bir "tipik" verim yine
 # uygulanmaz.
 HYBRID_ETA_C_STAR_MEASURED = {
     ('n2o', 'htpb'): {
@@ -208,6 +208,10 @@ HYBRID_ETA_C_STAR_MEASURED = {
         # kurar; eski σ 0,03 gözlenen saçılımın yarısıydı. Bekçi sayıyı
         # kayıtlardan yeniden hesaplar (test_v301_panel_eta_bandi.py).
         'sample_stdev': 0.0574,
+        # V306/HİBRİT-MODEL (M-HIBRIT-25, 4 Kas): aynı geçerli kayıtların
+        # aritmetik ortalaması, 4 basamak — yanıtta ortancanın YANINDA
+        # yayımlanır (varsayılan ortancadır). Bekçi yeniden hesaplar.
+        'mean': 0.8885,
         'record_prefixes': ('hyb-heydari2017-htpb-n2o-',
                             'hyb-carmicino2013-htpb-n2ogas-'),
         'sources': (
@@ -218,7 +222,271 @@ HYBRID_ETA_C_STAR_MEASURED = {
             'Tables A1/A2 (p. 15): 16 gaseous-N2O / pure-HTPB firings, '
             'eta_c* 0.79-0.99'),
     },
+    # V306/HİBRİT-MODEL (M-HIBRIT-25, 3 Kas): kural BÜTÜN çiftlerde aynı —
+    # çiftin doğrulama kayıtlarındaki ÖLÇÜLMÜŞ η_c*'ların ortancası.
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-model/olcum/hibrit_once.json):
+    # LOX/HTPB ve parafin çiftlerinde η = 1,00 (ideal) uygulanıyordu; aynı
+    # depoda o çiftlerin ölçülmüş verimleri vardı (HPDP 0,787-0,976, Sims
+    # 1,00; Karabeyoğlu/Battista parafin-GOX 0,77-0,94). Oksijenin iki fazı
+    # (GOX/LOX) N2O/HTPB'deki sıvı/gaz birleşimiyle AYNI kuralla tek çifttir
+    # (oksitleyici kimyası aynı; faz beyanda yazılır). Seçim kuralı N2O/HTPB
+    # ile aynı: önekteki ve ölçülmüş c* verimi taşıyan her kayıt (yüzde
+    # alanı ``c_star_efficiency_percent`` ise /100). Bekçi sayıları
+    # kayıtlardan yeniden hesaplar (tests/test_v306_hibrit_model.py).
+    # 4 Kas — ÖLÇÜM PENCERESİ KURALI (``HYBRID_ETA_C_STAR_WINDOW_DECISIONS``)
+    # uygulandıktan sonraki GEÇERLİ kayıtlar: HPDP M1T1 ve M2T2 dışlandı
+    # (kararlı pencere belirlenemedi). Eski (pencere kuralı yok): 0,935,
+    # n 5, aralık 0,787-1,00, σ 0,0893.
+    ('lox', 'htpb'): {
+        'eta_c_star': 0.976,
+        'statistic': 'median',
+        'n_tests': 3,
+        'measured_band': (0.849, 1.0),
+        'sample_stdev': 0.0811,
+        'mean': 0.9417,
+        'record_prefixes': ('hyb-hpdp2003-htpb-lox-',
+                            'hyb-sims1998-htpb-lox-'),
+        'sources': (
+            'Story, Zoladz, Arves et al., Hybrid Propulsion Demonstration '
+            'Program 250K Hybrid Motor, AIAA 2003-5198 (NTRS 20030068416), '
+            'Table 2: 4 LOX/HTPB firings, c* efficiency 78.7-97.6 %',
+            'Sims & Coleman, Results of a 24-inch Hybrid Motor Performance '
+            'Uncertainty Analysis, AIAA-98-4021 (NTRS 19980236002): 1 '
+            'LOX/HTPB firing, c* efficiency 100.0 %'),
+    },
+    # 4 Kas — pencere kuralından sonra: Karabeyoğlu 4L-06, 4L-07, 4L-11 ve
+    # ST dışlandı; 4F-1A/4F-4/4F-5 (lüle erozyonu, kaynak Ek Denk. A7 ORTALAMA
+    # lüle alanıyla düzeltir) ve 4L-12 (tutarsızlık yalnız başlangıç port
+    # çapında, c* hesabına girmez) GİRER. Eski: 0,85, n 26, σ 0,0486.
+    ('lox', 'paraffin'): {
+        'eta_c_star': 0.85,
+        'statistic': 'median',
+        'n_tests': 22,
+        'measured_band': (0.77, 0.94),
+        'sample_stdev': 0.0465,
+        'mean': 0.8527,
+        'record_prefixes': ('hyb-karabeyoglu2003-paraffin-gox-',
+                            'hyb-battista2019-paraffin-gox-'),
+        'oxidizer_phase_pooled': (
+            'gaseous-oxygen firings: same oxidizer chemistry as LOX, phases '
+            'pooled by the same rule as the N2O/HTPB record (liquid and '
+            'gaseous N2O firings in one median)'),
+        'sources': (
+            'Karabeyoglu, Zilliac, Castellucci et al., Scale-up Tests of '
+            'High Regression Rate Liquefying Hybrid Rocket Fuels, AIAA '
+            '2003-1162: 21 valid paraffin/GOX firings, eta_c* 0.77-0.91',
+            'Battista, Cardillo, Fragiacomo et al., Design and Testing of a '
+            'Paraffin-Based 1000 N HRE Breadboard, Aerospace 6(8):89, 2019: '
+            '1 paraffin/GOX firing with a measured eta_c* (0.94)'),
+    },
 }
+
+#: V306/HİBRİT-MODEL (M-HIBRIT-25) — ÖLÇÜLMÜŞ verimi olmayan çiftlerin
+#: BEYANLI GENEL varsayılanı: HRMA doğrulama veritabanındaki BÜTÜN hibrit
+#: ateşlemelerinin (her çift, her faz) ölçülmüş c* verimlerinin ortancası.
+#: İdeal c* (η = 1) artık yalnız kullanıcı açıkça 100 girerse uygulanır.
+#: Bekçi sayıyı kayıtlardan yeniden hesaplar; kayıt eklenirse kırmızıya
+#: döner.
+#: 4 Kas — pencere kuralı bütün çiftlerde aynı uygulandıktan sonra 60
+#: geçerli kayıt (6 dışlandı). Eski: 0,87, n 66, σ 0,0588.
+HYBRID_ETA_C_STAR_GENERAL = {
+    'eta_c_star': 0.88,
+    'statistic': 'median',
+    'n_tests': 60,
+    'measured_band': (0.77, 1.0),
+    'sample_stdev': 0.0558,
+    'mean': 0.8791,
+    'record_dir': 'hrma/data/validation_records/hybrid',
+    'sources': (
+        'all hybrid firings in HRMA\'s validation records that carry a '
+        'measured c* efficiency (N2O/HTPB and additive-loaded HTPB: '
+        'Heydari 2017, Carmicino 2013; LOX/HTPB: HPDP 2003, Sims 1998; '
+        'paraffin/GOX: Karabeyoglu 2003, Battista 2019)',),
+}
+
+# ---------------------------------------------------------------------------
+# V306/HİBRİT-MODEL (M-HIBRIT-25, 4 Kas — ana model kararı, bağımsız
+# danışman görüşüyle inceltilmiş) — ÖLÇÜM PENCERESİ KURALI
+# ---------------------------------------------------------------------------
+# Varsayılan η_c* türetiminde bir kaydı dışlayan ölçüt olay türü DEĞİL,
+# kaydın η_c* ÖLÇÜM PENCERESİNİN (c*'ın ortalandığı aralık) geçerliliğidir:
+#   * anomali pencerenin DIŞINDA kaldıysa ya da pencerede ölçümü bozmayacak
+#     biçimde düzeltilmişse kayıt GİRER;
+#   * anomali pencereyi bozduysa (pencerede sert ateşleme, düzeltilmemiş
+#     boğaz aşınması, yanmamış yakıt kütlesi, kısa yanma/veri arızası)
+#     kayıt GİRMEZ;
+#   * kaynağın ve kaydın notu pencereyi ayırt etmeye yetmiyorsa kayıt
+#     GİRMEZ, gerekçe "pencere belirlenemedi";
+#   * düşük ama doğru ölçülmüş verim "anomali" denerek dışlanmaz.
+# Ölçülmüş c* verimi ve anomali notu taşıyan HER kaydın kararı aşağıdadır
+# (bekçi: tests/test_v306_hibrit_model.py — kararı yazılmamış yeni bir
+# anomali kaydı varsayılana giremez, kırmızıya döner). Kural bütün çiftlerde
+# ve genel varsayılanda aynıdır. Kayıt kayıt gerekçe ve önce/sonra:
+# docs/scofield/raw/OH/V306/hibrit-model/RAPOR.md §2.
+# ``window_valid``: kayıt girer mi; ``reason_code``: kısa gerekçe kodu
+# (manşet bunu dile çevirir); ``reason``: kaynağa dayalı gerekçe (EN).
+HYBRID_ETA_C_STAR_WINDOW_DECISIONS = {
+    'hyb-hpdp2003-htpb-lox-250k-m1t1': {
+        'label': 'HPDP 2003 250K M1T1', 'window_valid': False,
+        'reason_code': 'window_not_determinable',
+        'reason': ('unstable combustion and an external TEA/TEB fire, test '
+                   'terminated early; the c* efficiency is a burn average '
+                   '(average Pc) and neither the record nor the source '
+                   'table separates a stable window from the unstable '
+                   'period')},
+    'hyb-hpdp2003-htpb-lox-250k-m2t2': {
+        'label': 'HPDP 2003 250K M2T2', 'window_valid': False,
+        'reason_code': 'window_not_determinable',
+        'reason': ('large-amplitude pressure oscillation reported; the c* '
+                   'efficiency is a burn average (average Pc) and the '
+                   'timing of the oscillation relative to that window is '
+                   'not given')},
+    'hyb-karabeyoglu2003-paraffin-gox-t4l-06': {
+        'label': 'Karabeyoglu 2003 4L-06', 'window_valid': False,
+        'reason_code': 'unburned_fuel_mass_in_window',
+        'reason': ('fuel port structural failure during the burn: the '
+                   'source attributes the excessive fuel mass generation '
+                   'to port disintegration and cites the low efficiency as '
+                   'evidence (p. 5-6); the fuel mass in Eq. A7 then '
+                   'includes unburned fuel')},
+    'hyb-karabeyoglu2003-paraffin-gox-t4l-07': {
+        'label': 'Karabeyoglu 2003 4L-07', 'window_valid': False,
+        'reason_code': 'unburned_fuel_mass_in_window',
+        'reason': ('fuel port structural failure during the burn (same '
+                   'source statement as 4L-06, p. 5-6)')},
+    'hyb-karabeyoglu2003-paraffin-gox-t4l-11': {
+        'label': 'Karabeyoglu 2003 4L-11', 'window_valid': False,
+        'reason_code': 'burn_too_short_for_data_reduction',
+        'reason': ('control system terminated the GOX flow prematurely; '
+                   'the source states the burn time is not adequate for '
+                   'accurate data reduction (p. 6)')},
+    'hyb-karabeyoglu2003-paraffin-gox-tst': {
+        'label': 'Karabeyoglu 2003 ST', 'window_valid': False,
+        'reason_code': 'window_not_determinable',
+        'reason': ('cracked fuel grain (source Table 2); whether the crack '
+                   'shed unburned fuel inside the measurement window is '
+                   'not stated')},
+    'hyb-karabeyoglu2003-paraffin-gox-t4f-1a': {
+        'label': 'Karabeyoglu 2003 4F-1A', 'window_valid': True,
+        'reason_code': 'erosion_corrected_in_window',
+        'reason': ('nozzle erosion, "Good test" in the source; the c* '
+                   'efficiency (Appendix Eq. A7) divides by the AVERAGE '
+                   'nozzle area, so the throat growth is accounted for')},
+    'hyb-karabeyoglu2003-paraffin-gox-t4f-4': {
+        'label': 'Karabeyoglu 2003 4F-4', 'window_valid': True,
+        'reason_code': 'erosion_corrected_in_window',
+        'reason': ('nozzle erosion, "Good test" in the source; Eq. A7 uses '
+                   'the average nozzle area')},
+    'hyb-karabeyoglu2003-paraffin-gox-t4f-5': {
+        'label': 'Karabeyoglu 2003 4F-5', 'window_valid': True,
+        'reason_code': 'erosion_corrected_in_window',
+        'reason': ('nozzle erosion, "Good test" in the source; Eq. A7 uses '
+                   'the average nozzle area')},
+    'hyb-karabeyoglu2003-paraffin-gox-t4l-12': {
+        'label': 'Karabeyoglu 2003 4L-12', 'window_valid': True,
+        'reason_code': 'anomaly_outside_c_star_terms',
+        'reason': ('"Successful Test" in the source; the inconsistency '
+                   'HRMA found is in the initial port diameter only, which '
+                   'is not a term of the c* efficiency (Eq. A6/A7: '
+                   'pressure integral, oxidizer and fuel masses, average '
+                   'nozzle area)')},
+}
+
+#: Varsayılanın kurulması için gereken en az GEÇERLİ kayıt sayısı. HRMA
+#: SEÇİMİ, PRATİK KAPI — istatistiksel yeterlilik ölçütü DEĞİLDİR: tek
+#: kaydın "ortancası" o kaydın kendisidir, varsayılan değil. Altında kalan
+#: çiftte varsayılan kurulmaz, kullanıcıdan η_c* istenir (adlı ret); ideal
+#: c*'a (η = 1) DÜŞÜLMEZ.
+HYBRID_ETA_C_STAR_MIN_VALID_RECORDS = 2
+HYBRID_ETA_C_STAR_MIN_VALID_RECORDS_BASIS = (
+    'HRMA practical gate, not a statistical sufficiency criterion: the '
+    'median of a single firing is that firing, not a default')
+
+
+class HybridCStarDefaultUnavailable(input_guard.InputError):
+    """Çiftin geçerli kayıt sayısı pratik kapının altında: varsayılan yok,
+    kullanıcıdan η_c* istenir (adlı ret)."""
+
+    reason_code = 'too_few_valid_measured_firings'
+
+
+def _eta_pencere_kararlari(record_prefixes=None):
+    """Çiftin (ya da ``None`` ile bütün hibrit kayıtlarının) pencere
+    kararları: (dışlananlar, anomaliye rağmen girenler)."""
+    disla, gir = [], []
+    for tid in sorted(HYBRID_ETA_C_STAR_WINDOW_DECISIONS):
+        if record_prefixes is not None and not any(
+                tid.startswith(p) for p in record_prefixes):
+            continue
+        k = HYBRID_ETA_C_STAR_WINDOW_DECISIONS[tid]
+        kayit = {'test_id': tid, 'label': k['label'],
+                 'reason_code': k['reason_code'], 'reason': k['reason']}
+        (gir if k['window_valid'] else disla).append(kayit)
+    return disla, gir
+
+
+def _eta_varsayilan_cozumu(kayit, kapsam, ox, fu, disla, gir, alt, ust):
+    """Kaynaklı varsayılanın TEK biçimi (çift ya da genel)."""
+    n = int(kayit['n_tests'])
+    cift = f"{ox.upper() or '?'}/{fu.upper() or '?'}"
+    if n < HYBRID_ETA_C_STAR_MIN_VALID_RECORDS:
+        raise HybridCStarDefaultUnavailable(
+            f"No sourced c* efficiency default for {cift}: after excluding "
+            f"{len(disla)} firing(s) whose measurement window is not valid, "
+            f"{n} valid measured firing(s) remain (HRMA requires at least "
+            f"{HYBRID_ETA_C_STAR_MIN_VALID_RECORDS}; practical gate, not a "
+            f"statistical criterion). Enter the c* efficiency (%) of this "
+            f"motor.")
+    eta = float(kayit['eta_c_star'])
+    lo, hi = kayit['measured_band']
+    disla_metin = (
+        f"; {len(disla)} firing(s) excluded because their measurement "
+        f"window is not valid: "
+        + '; '.join(f"{d['label']} ({d['reason']})" for d in disla)
+        if disla else '')
+    gir_metin = (
+        f"; {len(gir)} firing(s) with an anomaly note kept because the "
+        f"anomaly does not invalidate the measurement window: "
+        + '; '.join(f"{d['label']} ({d['reason']})" for d in gir)
+        if gir else '')
+    faz = kayit.get('oxidizer_phase_pooled')
+    if kapsam == 'propellant_pair':
+        bas = (f"not supplied: {kayit['statistic']} of {n} valid measured "
+               f"c* efficiencies for {cift} in HRMA's validation records")
+    else:
+        bas = (f"not supplied, and HRMA's validation records hold no "
+               f"measured c* efficiency for {cift}: the general hybrid "
+               f"default is applied - {kayit['statistic']} of all {n} "
+               f"valid measured hybrid c* efficiencies in those records, "
+               f"every propellant pair")
+    cozum = {
+        'eta_c_star': eta, 'percent': eta * 100.0, 'eta_engine': eta,
+        'source': 'sourced_default',
+        'scope': kapsam,
+        'statistic': kayit['statistic'],
+        'n_tests': n,
+        'mean': float(kayit['mean']),
+        'measured_band': list(kayit['measured_band']),
+        'sample_stdev': kayit['sample_stdev'],
+        'sources': list(kayit['sources']),
+        'basis': (
+            bas + f" (mean {kayit['mean']:.4f}, measured range "
+            f"{lo:.3f}-{hi:.3f}"
+            + (f"; {faz}" if faz else '') + ')'
+            + disla_metin + gir_metin
+            + "; delivered c* = eta_c* x theoretical equilibrium c*."
+            + (" Enter 100 % to use the ideal (theoretical) c*."
+               if kapsam == 'all_hybrid_pairs' else '')),
+        'accepted_band_percent': [alt, ust],
+    }
+    # Dışlanan kayıtlar yalnız VARSA yayımlanır (boş liste her koşuda aynı
+    # sabit yaprak olurdu: tests/test_field_wiring_layer_b.py).
+    if disla:
+        cozum['excluded_records'] = [
+            {k: d[k] for k in ('test_id', 'label', 'reason_code')}
+            for d in disla]
+    return cozum
+
 
 #: Form alanının adı ve birimi (yüzde). Sıvı sayfasıyla aynı ad
 #: (``combustion_efficiency``); kabul bandı ``ETA_C_STAR_PHYSICAL_BAND``.
@@ -230,13 +498,24 @@ def resolve_hybrid_c_star_efficiency(oxidizer_type, fuel_type,
     """Hibrit c* veriminin TEK çözümleyicisi (uç, geçici analiz, belirsizlik).
 
     Döner: ``{'eta_c_star', 'percent', 'source', 'basis', ...}``.
-    ``source``: ``'user_input'`` | ``'sourced_default'`` | ``'ideal_no_source'``.
-    ``eta_engine``: motora geçecek değer (kaynaksız çiftte ``None`` — motorun
-    kuramsal c* yolu, sayılar bit-aynı).
+    ``source``: ``'user_input'`` | ``'sourced_default'``.
+    ``scope`` (yalnız kaynaklı varsayılanda): ``'propellant_pair'`` (çiftin
+    kendi ölçümleri, ``HYBRID_ETA_C_STAR_MEASURED``) ya da
+    ``'all_hybrid_pairs'`` (çiftin ölçümü yok: ``HYBRID_ETA_C_STAR_GENERAL``).
+    ``eta_engine``: motora geçecek değer.
+
+    V306/HİBRİT-MODEL (M-HIBRIT-25): eski üçüncü kol ("kaynaksız çiftte ideal
+    c*, verim uygulanmadı") kalktı; aynı varsayım bütün çiftlerde aynı
+    kuralla uygulanır. İdeal c* yalnız kullanıcı 100 % girerse uygulanır.
+    4 Kas: varsayılan, ÖLÇÜM PENCERESİ geçerli kayıtların ortancasıdır
+    (``HYBRID_ETA_C_STAR_WINDOW_DECISIONS``); yanıtta ortalama, aralık,
+    kayıt sayısı ve dışlanan kayıtlar (ad + gerekçe kodu) yanında durur.
 
     Raises:
         input_guard.InputError: verilen değer sayı değil, sonlu değil ya da
             ``ETA_C_STAR_PHYSICAL_BAND`` (yüzde olarak) dışında.
+        HybridCStarDefaultUnavailable: değer verilmedi ve çiftin geçerli
+            kayıt sayısı ``HYBRID_ETA_C_STAR_MIN_VALID_RECORDS``'un altında.
     """
     alt = ETA_C_STAR_PHYSICAL_BAND[0] * 100.0
     ust = ETA_C_STAR_PHYSICAL_BAND[1] * 100.0
@@ -262,35 +541,92 @@ def resolve_hybrid_c_star_efficiency(oxidizer_type, fuel_type,
         }
     kayit = HYBRID_ETA_C_STAR_MEASURED.get((ox, fu))
     if kayit is not None:
-        eta = float(kayit['eta_c_star'])
-        return {
-            'eta_c_star': eta, 'percent': eta * 100.0, 'eta_engine': eta,
-            'source': 'sourced_default',
-            'statistic': kayit['statistic'],
-            'n_tests': kayit['n_tests'],
-            'measured_band': list(kayit['measured_band']),
-            'sample_stdev': kayit['sample_stdev'],
-            'sources': list(kayit['sources']),
-            'basis': (
-                f"not supplied: {kayit['statistic']} of {kayit['n_tests']} "
-                f"measured c* efficiencies for {ox.upper()}/{fu.upper()} in "
-                f"HRMA's validation records (measured range "
-                f"{kayit['measured_band'][0]:.2f}-"
-                f"{kayit['measured_band'][1]:.2f}); delivered c* = "
-                f"eta_c* x theoretical equilibrium c*."),
-            'accepted_band_percent': [alt, ust],
-        }
-    return {
-        'eta_c_star': 1.0, 'percent': 100.0, 'eta_engine': None,
-        'source': 'ideal_no_source',
-        'basis': (
-            f'not supplied, and HRMA holds no measured c* efficiency for '
-            f'{ox.upper() or "?"}/{fu.upper() or "?"}: the IDEAL '
-            f'(theoretical equilibrium) c* is used and NO efficiency is '
-            f'applied. A real motor delivers less; enter a measured value '
-            f'to apply one.'),
-        'accepted_band_percent': [alt, ust],
-    }
+        disla, gir = _eta_pencere_kararlari(kayit['record_prefixes'])
+        return _eta_varsayilan_cozumu(kayit, 'propellant_pair', ox, fu,
+                                      disla, gir, alt, ust)
+    disla, gir = _eta_pencere_kararlari(None)
+    return _eta_varsayilan_cozumu(HYBRID_ETA_C_STAR_GENERAL,
+                                  'all_hybrid_pairs', ox, fu, disla, gir,
+                                  alt, ust)
+
+
+def hybrid_c_star_efficiency_band(oxidizer_type, fuel_type):
+    """V306/HİBRİT-SAYI (M-HIBRIT-12) — çiftin ÖLÇÜLMÜŞ η_c* bandı.
+
+    Kaynaklı varsayılanla AYNI kayıt (``HYBRID_ETA_C_STAR_MEASURED``; çiftin
+    ölçümü yoksa ``HYBRID_ETA_C_STAR_GENERAL``): ölçüm penceresi geçerli
+    ateşlemelerin aralığı. Doğrulayıcının c* uyarısı bu bandı kullanır —
+    kullanıcının η_c*'ı HRMA'nın kendi ölçülmüş aralığındaysa uyarı yoktur.
+    Döner: ``{'band': (lo, hi), 'scope', 'n_tests', 'median'}``.
+    """
+    ox = str(oxidizer_type or '').strip().lower()
+    fu = str(fuel_type or '').strip().lower()
+    kayit = HYBRID_ETA_C_STAR_MEASURED.get((ox, fu))
+    kapsam = 'propellant_pair'
+    if kayit is None:
+        kayit, kapsam = HYBRID_ETA_C_STAR_GENERAL, 'all_hybrid_pairs'
+    lo, hi = kayit['measured_band']
+    return {'band': (float(lo), float(hi)), 'scope': kapsam,
+            'n_tests': int(kayit['n_tests']),
+            'median': float(kayit['eta_c_star'])}
+
+
+# ---------------------------------------------------------------------------
+# V306/HİBRİT-SAYI (M-HIBRIT-23) — O/F BANDININ TEK KAYNAĞI
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-sayi/olcum/sayi_once.json, L3
+# LOX/parafin @30 bar): "Optimumu Bul" O/F 2,48 buldu, Hesapla aynı O/F'ye
+# "kullanılabilir 4-12 aralığının dışında" dedi. İki kök:
+#   (1) doğrulayıcı tablosunda olmayan çift SESSİZCE 'n2o_htpb'ye düşüyordu
+#       (app.py: ``combo = 'n2o_htpb'``) — LOX/parafin N2O'nun bandını aldı;
+#   (2) optimum (1-10, gerekirse stokiyometriğe genişler) ve uyarı (çift
+#       tablosu, yoksa 0,5-8) iki AYRI aralık tanımıydı.
+# Artık tek tanım: çiftin kaynaklı kullanılabilir bandı varsa optimum O
+# BANDDA aranır ve uyarı aynı bandı kullanır; yoksa optimum varsayılan
+# arama bandında aranır ve uyarı, koşunun kendi ``optimum_analysis.
+# of_range_searched`` bandını (stokiyometriğe genişlemiş hâli dahil) okur.
+# Tarama bandın dışını aramadığı için optimum oraya DÜŞEMEZ.
+#
+# N2O bandı (4,0-12,0) — ÖH D33-3 / OH-D33-11 Berke kararı (16 Eyl 2026),
+# literatür: N2O'nun Isp'si O/F 7-8'de tepe yapar, ~4-12'de yüksek/düz
+# kalır (EUCASS 2019-0488; kanıt docs/scofield/raw/OH/D33-3/
+# OH-D33-11_kanit_taslagi.md). Sayılar validation_system'den TAŞINDI
+# (değişmedi).
+HYBRID_OF_USABLE_BAND = {
+    ('n2o', 'htpb'): (4.0, 12.0),
+    ('n2o', 'paraffin'): (4.0, 12.0),
+}
+HYBRID_OF_USABLE_BAND_SOURCE = (
+    'N2O Isp peaks at O/F 7-8 and stays high/flat over about 4-12 '
+    '(EUCASS 2019-0488; HRMA decision OH-D33-11, '
+    'docs/scofield/raw/OH/D33-3/OH-D33-11_kanit_taslagi.md)')
+#: Kaynaklı bandı olmayan çiftlerde optimumun arama bandı —
+#: ``CombustionAnalyzer.find_optimum_of_ratio`` varsayılanıyla AYNI (HRMA
+#: seçimi; Isp tepesi stokiyometriğin altında kalır, sınırda kalırsa bant
+#: stokiyometriğe genişler: Sutton & Biblarz 9. bs. Böl. 5).
+HYBRID_OF_SEARCH_BAND_DEFAULT = (1.0, 10.0)
+
+
+def hybrid_of_band(oxidizer_type, fuel_type):
+    """Çiftin O/F bandı (optimum araması + doğrulayıcı uyarısı, TEK kaynak).
+
+    Döner: ``{'band': (lo, hi), 'kind': 'usable' | 'search', 'basis'}``.
+    ``kind='usable'``: kaynaklı kullanılabilir bant; ``'search'``: çiftin
+    kaynaklı bandı yok, optimumun arandığı varsayılan bant.
+    """
+    ox = str(oxidizer_type or '').strip().lower()
+    fu = str(fuel_type or '').strip().lower()
+    bant = HYBRID_OF_USABLE_BAND.get((ox, fu))
+    if bant is not None:
+        return {'band': (float(bant[0]), float(bant[1])), 'kind': 'usable',
+                'basis': HYBRID_OF_USABLE_BAND_SOURCE}
+    lo, hi = HYBRID_OF_SEARCH_BAND_DEFAULT
+    return {'band': (float(lo), float(hi)), 'kind': 'search',
+            'basis': ('no sourced usable O/F band is held for this '
+                      'propellant pair; this is the band in which HRMA '
+                      'searches the Isp-optimal O/F (widened to the '
+                      'stoichiometric ratio if the maximum sits on its '
+                      'upper edge)')}
 
 # --- O/F -> performans ızgarası (v2.6.27, yol haritası A9) ------------------
 # Hibritte yakıt regresyonu r = a·G_ox^n olduğundan port büyüdükçe akı düşer,
@@ -375,6 +711,33 @@ FEED_PRESSURE_SOURCE_N2O_SAT = 'n2o_saturation_at_tank_temperature'
 # 1 K'lik tank sıcaklığı farkının basınç karşılığıdır (rapor 7. tur YB-04).
 TANK_PRESSURE_PSAT_REL_TOL = 0.02
 
+#: V306/HİBRİT-MODEL (M-HIBRIT-10) — GAZ FAZLI BESLEME: ne modellenir, ne
+#: modellenmez. Faz seçimi yanmaya giren reaktan entalpisini değiştirir
+#: (B16; modellenir) ve tank basıncı kapısı gaz için doğru denetimi yapar.
+#: Besleme zinciri ise SIVI besleme modelidir: enjektör devresi delikleri
+#: sıkıştırılamaz / iki fazlı sıvı bağıntılarıyla (SPI, Dyer NHNE, sıvı
+#: yoğunluğu) boyutlar; tank blokları sıvı dolu bir tankı boyutlar. Gaz
+#: besleme sıkıştırılabilir (boğulmalı) orifis modeli ve besleme deposunun
+#: hâlini ister; hibritte ikisi de yok. Bu yüzden gaz fazda delik planı,
+#: tank hacmi, çalkantı, tank kabı ve boşalma geçmişi YAYIMLANMAZ (sıvı
+#: modelinin sayısı gaz için yanlış olurdu); adlı gerekçe bu metin.
+GAS_PHASE_FEED_NOT_MODELLED = (
+    'gaseous oxidizer feed (oxidizer_phase = gas): the hybrid feed chain is '
+    'a LIQUID-feed model - the injector circuit sizes its orifices with '
+    'incompressible / two-phase liquid relations (SPI, Dyer NHNE, liquid '
+    'density) and the oxidizer tank blocks size a liquid-filled tank. A '
+    'gaseous feed needs a compressible (choked) orifice model and the '
+    'storage state of the supply, which HRMA does not model for the '
+    'hybrid, so no orifice plan, tank volume, slosh, tank vessel or '
+    'blowdown history is published for this feed. The combustion uses the '
+    'gaseous oxidizer inlet enthalpy and the performance, grain, chamber '
+    'and nozzle results are published.')
+
+
+class GasPhaseFeedNotModelled(ValueError):
+    """Gaz fazlı beslemede sıvı besleme modelinin sayı üretmesini durdurur
+    (``GAS_PHASE_FEED_NOT_MODELLED``; enjektör devresi 'not_analyzed')."""
+
 # --- A2/A5 modül bağlama sabitleri (v2.6.27, yol haritası) ------------------
 # Oksitleyici tankı boy/çap oranı. Sıvı motordaki TANK_LD_RATIO ile AYNI
 # değerdir; çapraz import bilinçli olarak yapılmaz (bkz. yukarıdaki durum
@@ -396,6 +759,206 @@ LINER_MATERIAL_DEFAULT = 'silica_phenolic'
 # Cidar sıcaklık geçmişi örnekleme tavanı: port_history'deki ~200 nokta
 # deseniyle aynı gerekçe (yanıt boyutu sınırlanır, son nokta korunur).
 WALL_HISTORY_MAX_POINTS = 200
+
+# ---------------------------------------------------------------------------
+# V306/HİBRİT-MODEL (M-HIBRIT-11, 3 Kas) — ASTAR KALINLIĞI = GERİLEME PAYI +
+# İLETİM PAYI (TEK kural, iki rejimde aynı).
+#
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-model/olcum/hibrit_once.json,
+# Carmicino t01 kıyas koşusu, Pc 8,52 bar): Seviye-1 Q* modeli "NET ISINMA
+# YOK" (yüzey ablasyon sıcaklığında yeniden ışıma > engellenmemiş taşınım)
+# deyip kalınlık yayımlamıyordu; bölge kararı astarı "boyutlandırılmadı"
+# sayıp ÇIPLAK CİDAR 2713 K KRİTİK, yapı UNSAFE veriyordu. Aynı motor 20
+# bar'da (daha sıcak) "ASTAR GEREKİR" ile korunmuş sayılıyordu: ısı yükü
+# azaldıkça hüküm KÖTÜLEŞİYORDU. Kök: astar yalnız gerilemeyle
+# boyutlanıyordu; gerileme sıfırken bile astarın asıl işi olan YALITIM
+# (iletim) hiç hesaplanmıyordu (modülün kendi notu: "sıfır gerilemede
+# astar kasa/bağ hattı sıcaklık sınırıyla boyutlanır, geçici iletim —
+# NASA SP-8093 uygulaması — bu modül modellemez").
+#
+# Kural (iki rejimde aynı): kalınlık = gerileme × tasarım payı (Q*) +
+# iletim payı. İletim payı: arka yüzü yalıtılmış (adyabatik, kasa ısı
+# yutucusu yok sayılır — muhafazakâr) düzlem levhanın sıcak yüzü yanma
+# boyunca SABİT yüzey sıcaklığında tutulduğunda arka yüz sıcaklık
+# artışının yüzey-başlangıç farkının ``LINER_BACK_FACE_RISE_FRACTION``
+# kesrini aşmadığı en küçük kalınlık. Kesin çözüm (görüntü serisi; Carslaw
+# & Jaeger, Conduction of Heat in Solids, 2. bs. §3.3; Incropera & DeWitt
+# 6. bs. §5.5 düzlem cidar):
+#     θ_arka(Fo) = 2·Σ_{n≥0} (−1)^n·erfc((2n+1)/(2·√Fo)),  Fo = α·t/L²
+# θ_arka(Fo*) = kesir → L = √(α·t_yanma / Fo*). Yüzey sıcaklığı sabit
+# varsayımı iki rejimde de üst sınırdır (taşınım/ışıma direnci ve ablasyon
+# soğutması yok sayılır); kesir göreli olduğundan kalınlık yüzey
+# sıcaklığına bağlı değildir, arka yüz artışının ÜST SINIRI yanıtta
+# yayımlanır. Malzeme ısıl özellikleri (k, c_p) astar malzemesinin merkezi
+# materials_db kaydından (silika-fenolik → 'ablative'), yoğunluk Q*
+# modelinin kullandığı aynı yoğunluk.
+#: Arka yüz artışı / (yüzey − başlangıç) üst sınırı. HRMA SEÇİMİ (kaynaklı
+#: bir bağ hattı sınırı depoda yok): %1 — ısıl nüfuz derinliğinin olağan
+#: tanımı (sıcaklık artışının yüzey artışının %1'ine düştüğü derinlik);
+#: yapısal zincirin açık bölgelerde kasayı BAŞLANGIÇ sıcaklığında alma
+#: varsayımını (``OPEN_ZONE_LINER_ASSUMPTION``) bu sınır içinde doğru kılar.
+LINER_BACK_FACE_RISE_FRACTION = 0.01
+LINER_BACK_FACE_RISE_FRACTION_BASIS = (
+    'HRMA choice (no sourced bond-line limit is held in this repository): '
+    'the liner back face may rise by at most 1 % of the surface-to-initial '
+    'temperature difference by the end of the burn - the usual thermal '
+    'penetration-depth convention. Within this bound the structural chain '
+    'takes the case under the liner at the initial temperature.')
+
+
+def _slab_back_face_rise(fourier):
+    """Sabit yüzey sıcaklıklı, arka yüzü yalıtılmış levhada arka yüzün
+    boyutsuz sıcaklık artışı θ = (T_arka − T_0)/(T_s − T_0).
+
+    Görüntü serisi (Carslaw & Jaeger §3.3): kesin; Fo küçükken birkaç terim
+    yeter, terimler mutlak değerce azalır ve işaret değiştirir.
+    """
+    import math
+    fo = float(fourier)
+    if not fo > 0.0:
+        return 0.0
+    kok = 2.0 * math.sqrt(fo)
+    toplam = 0.0
+    for n in range(0, 200):
+        terim = math.erfc((2 * n + 1) / kok)
+        toplam += terim if n % 2 == 0 else -terim
+        if terim < 1e-17:
+            break
+    return 2.0 * toplam
+
+
+def _slab_fourier_for_back_face_rise(kesir):
+    """θ_arka(Fo*) = kesir sağlayan Fo* (θ, Fo ile kesin monoton artar)."""
+    return float(brentq(lambda fo: _slab_back_face_rise(fo) - kesir,
+                        1e-6, 50.0, xtol=1e-15, rtol=1e-14, maxiter=500))
+
+
+#: ``LINER_BACK_FACE_RISE_FRACTION``ı sağlayan Fourier sayısı (tek hesap).
+LINER_CONDUCTION_FOURIER = _slab_fourier_for_back_face_rise(
+    LINER_BACK_FACE_RISE_FRACTION)
+LINER_CONDUCTION_BASIS = (
+    'conduction allowance: smallest liner thickness whose insulated back '
+    'face rises by at most LINER_BACK_FACE_RISE_FRACTION of the surface-to-'
+    'initial temperature difference when the hot face is held at a constant '
+    'temperature for the burn time - exact slab solution, theta_back(Fo) = '
+    '2*sum((-1)^n*erfc((2n+1)/(2*sqrt(Fo)))), L = sqrt(alpha*t_burn/Fo*) '
+    '(Carslaw & Jaeger, Conduction of Heat in Solids, 2nd ed., Sec. 3.3; '
+    'Incropera & DeWitt 6th ed. Sec. 5.5). Conservative: constant surface '
+    'temperature, no gas-side resistance, no re-radiation, no ablation '
+    'cooling, no case heat sink. Thermal conductivity and specific heat '
+    'from the central materials_db record of the liner material, density '
+    'the one the Q* model used.')
+
+
+def hybrid_liner_sizing(analyzer, *, q_net_W_m2, burn_time_s, material,
+                        T_initial_K=None, **ablative_kwargs):
+    """Hibrit kamara/lüle girişi astarının TEK boyutlandırması (M-HIBRIT-11).
+
+    ``ThermalProtectionAnalyzer.ablative_thickness`` (Seviye-1 Q*) aynen
+    çağrılır; sonucuna iletim payı eklenir. Hibrit motor
+    (``_thermal_protection_block``) ve termal güverte ucunun ablatif astar
+    yolu (``heat_transfer_analysis._apply_chamber_liner``) bu işlevi çağırır
+    — iki ayrı astar kalınlığı doğmaz.
+
+    Q* modelinin zarf kapısı (geometri / gerileme hızı tavanı) bir
+    kalınlığı kestiyse sonuç AYNEN döner (NOT_MODELLED, sayı uydurulmaz).
+    "NET ISINMA YOK" dalında gerileme sıfırdır ve kalınlık yalnız iletim
+    payıdır (astar yalıtır; "kalınlık yayımlanmadı" ≠ "astarsız").
+    """
+    sizing = analyzer.ablative_thickness(
+        q_net_W_m2=q_net_W_m2, burn_time_s=burn_time_s, material=material,
+        **ablative_kwargs)
+    out = dict(sizing)
+    q_star_kalinlik_mm = sizing.get('required_thickness_mm')
+    rejim = sizing.get('recession_regime')
+    not_ = sizing.get('validity_note') or ''
+    net_isinma_yok = (rejim == 'no_net_heating'
+                      and q_star_kalinlik_mm is None
+                      and not_.startswith('NO NET HEATING'))
+    if q_star_kalinlik_mm is None and not net_isinma_yok:
+        # Zarf kapısı (geometri / gerileme hızı tavanı): aynen.
+        out['conduction_allowance_mm'] = None
+        return out
+    from hrma.analysis.thermal_protection import (
+        ABLATIVE_MATERIALS, _resolve_ablative)
+    from hrma.data.materials_db import get_material
+    kayit_adi = ABLATIVE_MATERIALS[_resolve_ablative(material)].get(
+        'db_record')
+    alpha = None
+    if kayit_adi is not None:
+        mat = get_material(kayit_adi)
+        try:
+            alpha = (float(mat['thermal_conductivity'])
+                     / (float(sizing['density_kg_m3'])
+                        * float(mat['specific_heat'])))
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            alpha = None
+    if not (alpha is not None and np.isfinite(alpha) and alpha > 0.0):
+        out.update(
+            required_thickness_m=None, required_thickness_mm=None,
+            thickness_status='NOT_MODELLED', model_valid=False,
+            conduction_allowance_mm=None,
+            validity_note=(
+                'the conduction allowance of the liner needs the thermal '
+                'conductivity and specific heat of the liner material in '
+                'the central materials database; the record '
+                f'{kayit_adi!r} does not carry them, so no thickness is '
+                'published' + (f' ({not_})' if not_ else '')))
+        return out
+    t_b = float(sizing['burn_time_s'])
+    iletim_m = float(np.sqrt(alpha * t_b / LINER_CONDUCTION_FOURIER))
+    gerileme_m = (0.0 if net_isinma_yok
+                  else float(sizing['required_thickness_m']))
+    toplam_m = gerileme_m + iletim_m
+    T_s = sizing.get('T_surface_K')
+    T_r = sizing.get('T_recovery_K')
+    if T_s is not None and T_r is not None:
+        T_ust = min(float(T_s), float(T_r))
+    else:
+        T_ust = None if T_s is None else float(T_s)
+    artis_ust = (None if (T_ust is None or T_initial_K is None)
+                 else LINER_BACK_FACE_RISE_FRACTION
+                 * max(T_ust - float(T_initial_K), 0.0))
+    out.update({
+        'q_star_thickness_mm': q_star_kalinlik_mm,
+        'q_star_validity_note': sizing.get('validity_note'),
+        'recession_allowance_mm': gerileme_m * 1e3,
+        'conduction_allowance_mm': iletim_m * 1e3,
+        'thermal_diffusivity_m2_s': alpha,
+        'conduction_fourier_number': LINER_CONDUCTION_FOURIER,
+        'back_face_rise_fraction': LINER_BACK_FACE_RISE_FRACTION,
+        'back_face_rise_fraction_basis': LINER_BACK_FACE_RISE_FRACTION_BASIS,
+        'surface_temperature_bound_K': T_ust,
+        'back_face_rise_bound_K': artis_ust,
+        'initial_temperature_K': (None if T_initial_K is None
+                                  else float(T_initial_K)),
+        'conduction_basis': LINER_CONDUCTION_BASIS,
+        'thickness_rule': ('recession x design margin (Level-1 Q*) + '
+                           'conduction allowance'),
+    })
+    r_ist = sizing.get('station_radius_m')
+    if r_ist is not None and toplam_m >= float(r_ist):
+        out.update(
+            required_thickness_m=None, required_thickness_mm=None,
+            thickness_status='NOT_MODELLED', model_valid=False,
+            validity_note=(
+                f'MODEL OUT OF ENVELOPE: the liner thickness '
+                f'{toplam_m * 1e3:.2f} mm (recession allowance '
+                f'{gerileme_m * 1e3:.2f} mm + conduction allowance '
+                f'{iletim_m * 1e3:.2f} mm) reaches the station radius '
+                f'{float(r_ist) * 1e3:.2f} mm: the liner would close the '
+                f'passage it lines. No thickness is published.'))
+        return out
+    out.update(required_thickness_m=toplam_m,
+               required_thickness_mm=toplam_m * 1e3,
+               thickness_status='sized', model_valid=True,
+               validity_note=None)
+    if net_isinma_yok:
+        out['no_net_heating_note'] = (
+            'NO NET HEATING at the steady ablation temperature: the '
+            'recession is zero, so the liner thickness is the conduction '
+            'allowance alone - the liner still insulates the case.')
+    return out
 
 # ---------------------------------------------------------------------------
 # v3.0.1 (V301/H-termal, Berke onaylı ÖNEMLİ fizik, 26 Eki) — KAMARA CİDARI
@@ -456,10 +1019,13 @@ GRAIN_PROTECTION_SOURCE = (
     'grains "provide thermal insulation".')
 #: Açık bölgelerde astarın kasayı ortam sıcaklığında tuttuğu VARSAYIMI.
 OPEN_ZONE_LINER_ASSUMPTION = (
-    'ASSUMPTION: the insulation liner HRMA sized for the pre/post-combustion '
-    'chambers (thermal_protection.chamber_liner, Level-1 Q*) keeps the case '
-    'at the initial (ambient) temperature. The Level-1 Q* model has no liner '
-    'back-face (bond-line) temperature, so this is not a computed result.')
+    'BOUNDED: the insulation liner HRMA sized for the pre/post-combustion '
+    'chambers (thermal_protection.chamber_liner: Level-1 Q* recession '
+    'allowance + conduction allowance) keeps its insulated back face within '
+    '1 % of the surface-to-initial temperature difference by the end of the '
+    'burn (conservative constant-surface-temperature slab solution; the '
+    'bound in kelvin is chamber_liner.back_face_rise_bound_K), so the case '
+    'is taken at the initial (ambient) temperature within that bound.')
 
 # --- A3 bağlama sabiti (v2.6.27 Dalga 6): oksitleyici tankı malzemesi ------
 # Sıvı motorun tank boyutlandırmasındaki varsayılan tank malzemesiyle AYNI
@@ -1272,6 +1838,32 @@ SAFETY_FACTOR_MAX = 10.0
 #: "Copper (Regeneratively Cooled)" olduğu için bakır rejeneratif soğutmalı
 #: kabul edilir; grafit/tungsten/C-C soğutmasız (ısı emici + ışıma) çalışır.
 #: Bu bir modelleme kararı değil, arayüzün beyanının okunmasıdır.
+#: V306/HİBRİT-MODEL (M-HIBRIT-22) — BASINÇ KABUĞU OLMAYAN lüle
+#: malzemeleri: lüle = bu malzemeden EK + kamara malzemesinden YAPISAL
+#: GÖVDE. Ölçüt malzeme kaydının KENDİ beyanı (materials_db 'graphite':
+#: "brittle, not a pressure-shell material", etiket 'insert') ve bir erozyon
+#: bandının varlığı (``ThroatErosionModel``); C-C (100 MPa yapısal
+#: kompozit, erozyon bandı yok) ve metaller listede değildir.
+NOZZLE_INSERT_ONLY_MATERIALS = ('graphite',)
+NOZZLE_CONSTRUCTION_INSERT_HOUSING = 'insert_plus_structural_housing'
+#: Yapısal gövde kalınlığının boyutlandırma kuralının (``nozzle_throat_wall_
+#: sizing``) üstüne YUKARI yuvarlanma payı (bağıl). SAYISAL KORUMA, fizik
+#: değil: boyutlandırılan gövde yapısal denetimde YENİDEN değerlendirilir
+#: (``_analyze_nozzle_structure`` doğrulama kipi, mm ⟷ m gidiş-dönüşü);
+#: tam hedefte boyutlanan kalınlık orada kayan noktada 1 ulp ALTINA
+#: düşebiliyor. ÖLÇÜLDÜ (4 Kas, tur L5, LOX/HTPB, SF 2): gövde SF'si
+#: 1,9999999999999998 → merdivende 2,0'ın altı → motor yapı hükmü
+#: UNSAFE/HIGH (taban MARGINAL/MEDIUM, SF tam 2,0). 1e-9 bağıl pay
+#: (metre ölçeğinde nanometre altı; ekranda görünmez) yeniden
+#: değerlendirmenin hedefi alttan değil üstten okumasını sağlar.
+NOZZLE_HOUSING_SIZING_ROUND_UP_REL = 1e-9
+NOZZLE_INSERT_HOUSING_BASIS = (
+    'the selected nozzle material is a throat INSERT material, not a '
+    'pressure shell (its materials_db record: brittle, not a pressure-shell '
+    'material); the nozzle is an insert sized by the throat erosion '
+    'allowance seated in a structural housing of the chamber material that '
+    'carries the pressure (Sutton & Biblarz 9th ed. Ch. 15, nozzle '
+    'components). The drawn wall is insert + housing.')
 NOZZLE_MATERIAL_COOLING = {
     'graphite': 'natural',
     'tungsten': 'natural',
@@ -1721,6 +2313,10 @@ class HybridRocketEngine:
         # yayımlayan (l_star_achieved / l_star_note) dürüst kanalı bozar.
         self.L_star = self._resolve_l_star(l_star)  # m
         self.epsilon = expansion_ratio if expansion_ratio > 0 else None
+        # V306/HİBRİT-SAYI (M-HIBRIT-5): kullanıcının ε'su — calculate()
+        # ε'yi eşleşik lüleden doldurmadan ÖNCE. Optimum O/F'nin tanımı buna
+        # bağlıdır (sabit lüle ⟷ her O/F'de P_e = P_a).
+        self._epsilon_user = self.epsilon
         self.nozzle_type = nozzle_type
         self.CF = thrust_coefficient if thrust_coefficient > 0 else None
         # D15/P1B1-02: λ (diverjans verimi) lülenin GEOMETRİK özelliğidir ve
@@ -1816,6 +2412,12 @@ class HybridRocketEngine:
                     'assumed in its place: the oxidizer saturation state '
                     'that feeds the injector is read at this temperature.')
             self.tank_temperature = _T_tank
+        # V306/HİBRİT-MODEL (M-HIBRIT-10): giriş fazı tank basıncı kapısından
+        # ÖNCE çözülür — kapı faza göre farklı denetim yapar (gaz N₂O doyma
+        # basıncının ALTINDA olmak zorundadır, sıvı ÜSTÜNDE).
+        from hrma.engines.oxidizer_inlet import normalize_inlet_phase
+        self._oxidizer_phase_given = oxidizer_phase is not None
+        self.oxidizer_phase = normalize_inlet_phase(oxidizer_phase)
         _tank_basinci_kaynagini_kur(self, tank_pressure_source, tank_pressure)
         # Kitap uyum B16 (Ö-1, §28) — OKSİTLEYİCİ GİRİŞ FAZI GİRDİ OLDU.
         # N₂O'nun HP dengesine giren reaktan entalpisi giriş durumuna
@@ -1827,9 +2429,7 @@ class HybridRocketEngine:
         # çağrısında uygulanır (``_sync_oxidizer_inlet_state``). Alan
         # yalnız N₂O'da hesaba girer; diğer oksitleyiciler sabit referans
         # hâliyle yakılır ve yanıttaki ``oxidizer_inlet_state`` bunu söyler.
-        from hrma.engines.oxidizer_inlet import normalize_inlet_phase
-        self._oxidizer_phase_given = oxidizer_phase is not None
-        self.oxidizer_phase = normalize_inlet_phase(oxidizer_phase)
+        # (Faz çözümü V306'da tank basıncı kapısının önüne taşındı.)
 
         # --- Port sayısı N (v2.6.2 fizik denetimi, bulgu F046) ---
         # Eskiden model TÜM grain'leri tek dairesel port varsayıyordu; port
@@ -2747,6 +3347,127 @@ class HybridRocketEngine:
             'note': res['model_note'],
         }
 
+    def _apply_nozzle_insert_housing(self, nozzle_results):
+        """V306/HİBRİT-MODEL (M-HIBRIT-22) — grafit lüle: EK + YAPISAL GÖVDE.
+
+        ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-model/olcum/
+        hibrit_once.json, L3 N2O/parafin 10 kN, Pc 30 bar): grafit lüle
+        cidarı basınç kabuğu kuralıyla (t = SCF·p·r_t·SF/σ, grafit σ = 25
+        MPa) 39,5 mm boyutlanıyor, yakınsak girişte kamara çapına dışa
+        ekleniyor ve motor zarfı kasa dış çapından %27 geniş çıkıyordu
+        (318,6 ⟷ 250,9 mm); 6-DOF bu zarfla gövdeyi reddediyordu. Grafitin
+        kendi malzeme kaydı "gevrek, basınç kabuğu malzemesi değil, boğaz
+        eki" der; katı/hibrit motorlarda grafit boğaz eki basıncı taşıyan
+        yapısal bir gövdeye oturur (Sutton & Biblarz 9. bs. Böl. 15, lüle
+        bileşenleri). Kural:
+
+        * EK (seçilen lüle malzemesi): kalınlık = yanma boyunca toplam radyal
+          boğaz gerilemesi (``ThroatErosionModel``, ölçülmüş bandın ÜST ucu:
+          Thakre & Yang 2008 / Geisler 1978), imalat tabanı
+          ``NozzleDesigner._MIN_WALL_THICKNESS_M``.
+        * GÖVDE (kamaranın yapısal malzemesi — HRMA seçimi, beyanlı):
+          ``nozzle_throat_wall_sizing`` (aynı boğaz kuralı, aynı tasarım
+          basıncı ve SF) gövdenin İÇ yarıçapında (r_t + ek); taban aynı.
+        * Çizilen cidar = ek + gövde (zarf, STEP/STL profili); kütle iki
+          malzemenin yoğunluğuyla (``drawn_nozzle_insert_housing_mass_kg``).
+
+        Modellenmeyenler adıyla: ekin ısıl gerilmesi ve ek-gövde arası
+        yalıtım; gövdenin ek arkasındaki sıcaklığı (lüle yapısal denetimi
+        oda sıcaklığı dayanımıyla — mevcut boğaz denetimiyle aynı taban).
+        Erozyon modeli olmayan malzemede (yalnız grafit listede) yol
+        çalışmaz; eski tek parça cidar aynen kalır.
+        """
+        mal = getattr(self, 'nozzle_material', None)
+        geo = nozzle_results.get('geometry') if isinstance(
+            nozzle_results, dict) else None
+        if mal not in NOZZLE_INSERT_ONLY_MATERIALS or not isinstance(
+                geo, dict):
+            return
+        if not (self.P_c is not None and float(self.P_c) > 0.0):
+            return
+        from hrma.analysis.structural_analysis import (
+            STRUCTURAL_DESIGN_PRESSURE_FACTOR, nozzle_throat_wall_sizing)
+        from hrma.analysis.transient_ballistics import ThroatErosionModel
+        from hrma.data.materials_db import get_material
+        t_yanma = float(getattr(self, 't_burn_effective', 0.0)
+                        or getattr(self, 't_b', 0.0) or 0.0)
+        if not t_yanma > 0.0:
+            return
+        model = ThroatErosionModel.for_material(mal)
+        hiz_mm_s = float(model.rate_mm_s(float(self.P_c)))
+        gerileme_m = hiz_mm_s * t_yanma / 1000.0
+        taban_m = float(NozzleDesigner._MIN_WALL_THICKNESS_M)
+        t_ek = max(taban_m, gerileme_m)
+        r_t = float(self.d_t) / 2.0
+        r_gov = r_t + t_ek
+        gov_mal = self.chamber_material
+        gov_kayit = get_material(gov_mal)
+        sf = (float(self.design_safety_factor) if self.design_safety_factor
+              else float(gov_kayit.get('safety_factor', 4.0)))
+        p_tasarim_pa = (float(self.P_c) * 1e5
+                        * STRUCTURAL_DESIGN_PRESSURE_FACTOR)
+        boyut = nozzle_throat_wall_sizing(
+            p_tasarim_pa, r_gov, float(gov_kayit['yield_strength']), sf,
+            self.nozzle_type)
+        t_gov = max(taban_m, float(boyut['required_throat_thickness_m'])
+                    * (1.0 + NOZZLE_HOUSING_SIZING_ROUND_UP_REL))
+        ek_kayit = get_material(mal)
+        eski_mm = geo.get('wall_thickness')
+        geo['nozzle_construction'] = {
+            'type': NOZZLE_CONSTRUCTION_INSERT_HOUSING,
+            'basis': NOZZLE_INSERT_HOUSING_BASIS,
+            'insert': {
+                'material_key': mal,
+                'material': ek_kayit.get('name', mal),
+                'density_kg_m3': float(ek_kayit['density']),
+                'thickness_mm': t_ek * 1000.0,
+                'erosion_rate_mm_s': hiz_mm_s,
+                'erosion_recession_mm': gerileme_m * 1000.0,
+                'burn_time_s': t_yanma,
+                'thickness_basis': (
+                    'total radial throat recession over the burn at the TOP '
+                    'of the measured erosion band (ThroatErosionModel: '
+                    + str(model.describe().get('band_source') or '')
+                    + '), floored at the nozzle manufacturing minimum '
+                    f'{taban_m * 1000.0:g} mm; thermal stress of the insert '
+                    'and the insulation between insert and housing are NOT '
+                    'modelled'),
+            },
+            'housing': {
+                'material_key': gov_mal,
+                'material': gov_kayit.get('name', gov_mal),
+                'density_kg_m3': float(gov_kayit['density']),
+                'thickness_mm': t_gov * 1000.0,
+                'inner_radius_mm': r_gov * 1000.0,
+                'design_pressure_bar': p_tasarim_pa / 1e5,
+                'safety_factor_target': sf,
+                'stress_concentration_factor':
+                    boyut['stress_concentration_factor'],
+                'thickness_basis': (
+                    'structural_analysis.nozzle_throat_wall_sizing at the '
+                    'housing inner radius (throat radius + insert): t = SCF '
+                    'x p_design x r x SF / sigma_y, the chamber material '
+                    '(HRMA choice: the housing is the aft structural '
+                    'continuation of the case), room-temperature yield as '
+                    'the nozzle structural check uses'),
+            },
+            'single_wall_rule_thickness_mm': eski_mm,
+        }
+        geo['wall_thickness'] = (t_ek + t_gov) * 1000.0
+        geo['wall_thickness_basis'] = NOZZLE_CONSTRUCTION_INSERT_HOUSING
+        # Tek parça kuralın künye alanları bu çizilen ete AİT DEĞİL: gövde
+        # bloğu kendi künyesini taşır; frustum kütlesi tek malzemeyle
+        # kurulmuştu, iki parçalı lülede yayımlanmaz.
+        geo['wall_sizing_rule'] = (
+            'insert (erosion allowance) + structural housing '
+            '(structural_analysis.nozzle_throat_wall_sizing at the housing '
+            'inner radius); see nozzle_construction')
+        geo['wall_safety_factor'] = sf
+        geo['estimated_mass'] = None
+        geo['estimated_mass_basis'] = (
+            'not computed by the nozzle designer for an insert + housing '
+            'nozzle; the drawn two-material mass replaces it')
+
     def _analyze_nozzle_material(self, heat_transfer_results=None):
         """Seçilen lüle/boğaz malzemesinin termal ve erozyon değerlendirmesi.
 
@@ -3495,6 +4216,9 @@ class HybridRocketEngine:
             nozzle_results['performance']['kinetic'] = kin_diag
         except (KeyError, TypeError):
             pass
+        # V306/HİBRİT-MODEL (M-HIBRIT-22): basınç kabuğu olmayan lüle
+        # malzemesinde (grafit) lüle = EK (ısıl/erozyon) + YAPISAL GÖVDE.
+        self._apply_nozzle_insert_housing(nozzle_results)
 
         # --- ÖH D20 / B1-12 · AYNI LÜLENİN İKİ C_F'İ: ARTIK TEK KAYIP KÜMESİ
         # D15 kalemin ilk yarısını (iki BAĞIMSIZ ayrılma modeli) çürütmüştü:
@@ -3660,6 +4384,14 @@ class HybridRocketEngine:
                     # 0 km'de manşetin 1000 N'u yerine ideal 1033,02 N
                     # yazıyordu (%3,45; Isp'de 192,04 s ↔ manşet 185,90 s).
                     'thrust_sea_level': self.F,
+                    # V306/HİBRİT-MODEL kalem 6 (UÇUŞ-2 devri): TEK çıkış
+                    # alanı — lülenin geometrisi (A_e = ε·A_t, yanıttaki
+                    # ``exit_area``); çapa teslim itkisinin ait olduğu
+                    # TASARIM ortam basıncı (``atmospheric_pressure``),
+                    # 101 325 Pa değil. Böylece F_vak = F + p_tasarım·A_e
+                    # ve ``nozzle_loss_model.exit_area_m2`` = ``exit_area``.
+                    'exit_area_m2': float(self.Ae),
+                    'thrust_reference_pressure_pa': float(self.P_a) * 1e5,
                 },
                 altitudes
             )
@@ -3689,9 +4421,16 @@ class HybridRocketEngine:
             # önbelleği geçici boşaltan yalıtım bağlamı eşzamanlı isteklerde
             # yarışa açıktı ve kaldırıldı.
             self._sync_oxidizer_inlet_state()
+            # V306/HİBRİT-SAYI (M-HIBRIT-5 + M-HIBRIT-23): optimumun TEK
+            # tanımı (``combustion_analysis.OPTIMUM_OF_DEFINITION_BASIS``) —
+            # tasarım ortamındaki ideal Isp, kullanıcının ε'su (yoksa her
+            # O/F'de P_e = P_a); arama bandı çiftin tek O/F bandı
+            # (``hybrid_of_band``). "Optimumu Bul" ucu aynı çağrıyı yapar.
             optimum_of = self.combustion_analyzer.find_optimum_of_ratio(
                 fuel_composition, ox, self.P_c,
-                expansion_ratio=self.epsilon
+                of_range=hybrid_of_band(ox, self.fuel_type)['band'],
+                expansion_ratio=self._epsilon_user,
+                ambient_pressure=float(self.P_a),
             )
 
         # Total impulse to thrust at altitudes — uq_mode'da atlanır (danışma)
@@ -3708,6 +4447,10 @@ class HybridRocketEngine:
                     # (eski türetme 0,5312 kg/s veriyordu, çözücününki
                     # 0,548540 kg/s — aynı motor için iki farklı kütle akışı).
                     'mdot_total': self.mdot_total,
+                    # V306/HİBRİT-MODEL kalem 6: kardeş tabloyla aynı alan
+                    # ve aynı çapa (tek tanım).
+                    'exit_area_m2': float(self.Ae),
+                    'thrust_reference_pressure_pa': float(self.P_a) * 1e5,
                 }, altitudes_thrust
             )
         
@@ -3898,7 +4641,25 @@ class HybridRocketEngine:
             _lule_et_mm = float(nozzle_results['geometry']['wall_thickness'])
         except (KeyError, TypeError, ValueError):
             _lule_et_mm = float('nan')
-        if np.isfinite(_lule_et_mm) and _lule_et_mm > 0:
+        _yapim = (nozzle_results.get('geometry') or {}).get(
+            'nozzle_construction')
+        if isinstance(_yapim, dict) and _yapim.get('type') == \
+                NOZZLE_CONSTRUCTION_INSERT_HOUSING:
+            # V306/HİBRİT-MODEL (M-HIBRIT-22): basıncı GÖVDE taşır; yapısal
+            # analiz gövdeyi kendi malzemesi, kalınlığı ve iç yarıçapıyla
+            # doğrular (grafit ek basınç kabuğu olarak değerlendirilmez).
+            _gov = _yapim['housing']
+            _luleyi_dogrula = {
+                'actual_throat_thickness': _gov['thickness_mm'] / 1000.0,
+                'actual_throat_thickness_source': (
+                    'nozzle_geometry.nozzle_construction.housing.thickness_mm '
+                    '(the pressure-bearing structural housing outside the '
+                    'graphite insert; the insert is not a pressure shell)'),
+                'nozzle_material': _gov['material_key'],
+                'nozzle_shell_inner_radius': (
+                    _gov['inner_radius_mm'] / 1000.0),
+            }
+        elif np.isfinite(_lule_et_mm) and _lule_et_mm > 0:
             _luleyi_dogrula = {
                 'actual_throat_thickness': _lule_et_mm / 1000.0,
                 'actual_throat_thickness_source': (
@@ -5653,6 +6414,12 @@ class HybridRocketEngine:
                            'as the optimum-O/F search and altitude tables); '
                            'run the nominal design for the blowdown curve.'),
             }
+        if getattr(self, 'oxidizer_phase', None) == 'gas':
+            # V306/HİBRİT-MODEL (M-HIBRIT-10): sıvı çekişli iki fazlı tank
+            # modeli gaz beslemeye uygulanmaz.
+            return {'status': 'NOT_MODELLED', 'basis': basis,
+                    'reason': GAS_PHASE_FEED_NOT_MODELLED,
+                    'reason_code': 'gas_phase_feed_not_modelled'}
         ox = (getattr(self, 'oxidizer_type', None) or '').lower()
         if ox != 'n2o':
             return {
@@ -6405,6 +7172,12 @@ class HybridRocketEngine:
         cp_gaz = _pozitif(((heat_transfer_results or {})
                            .get('heat_transfer_coefficients') or {})
                           .get('gas_cp'))
+        # V306/HİBRİT-MODEL (M-HIBRIT-11): iletim payının arka yüz artış
+        # sınırı, ısı analizinin KULLANDIĞI başlangıç (ortam) sıcaklığına
+        # göre yayımlanır (bölge kararının T0'ı ile aynı alan).
+        T_baslangic = _pozitif(((heat_transfer_results or {})
+                                .get('design_parameters') or {})
+                               .get('ambient_temperature'))
 
         def _liner(station, function, q_W_m2, station_note,
                    h_gas, h_gas_source, radius_m, radius_source):
@@ -6424,10 +7197,14 @@ class HybridRocketEngine:
             if radius_m is not None:
                 ek['station_radius_m'] = radius_m
             try:
-                sizing = analyzer.ablative_thickness(
+                # V306/HİBRİT-MODEL (M-HIBRIT-11): TEK astar kuralı —
+                # gerileme × pay (Q*) + iletim payı (``hybrid_liner_sizing``).
+                sizing = hybrid_liner_sizing(
+                    analyzer,
                     q_net_W_m2=q_W_m2,
                     burn_time_s=t_burn,
                     material=LINER_MATERIAL_DEFAULT,
+                    T_initial_K=T_baslangic,
                     **ek)
             except Exception as exc:
                 return {
@@ -6458,10 +7235,20 @@ class HybridRocketEngine:
                     f'analysis of this run), burn time {t_burn:.2f} s, '
                     f'{yaricap_ifadesi}. ' + station_note)
             else:
+                _iletim = sizing.get('conduction_allowance_mm')
+                _gerileme = sizing.get('recession_allowance_mm')
                 liner_basis = (
-                    f"Level-1 Q* ablation sizing at the {station}: required "
-                    f"thickness = total recession x design margin "
-                    f"{sizing['design_margin']:g}. "
+                    f"Liner sizing at the {station}: required thickness = "
+                    f"recession allowance {_gerileme:.2f} mm (Level-1 Q* "
+                    f"ablation: total recession x design margin "
+                    f"{sizing['design_margin']:g}) + conduction allowance "
+                    f"{_iletim:.2f} mm (insulated back face rises by at most "
+                    f"{100 * LINER_BACK_FACE_RISE_FRACTION:g} % of the "
+                    f"surface-to-initial temperature difference over "
+                    f"{t_burn:.2f} s; exact slab solution, Carslaw & Jaeger "
+                    f"Sec. 3.3). "
+                    + (sizing.get('no_net_heating_note', '') + ' '
+                       if sizing.get('no_net_heating_note') else '')
                     + ((
                         f'The net surface flux is SOLVED here from an energy '
                         f'balance at the {sizing["T_surface_K"]:.0f} K steady '
@@ -6525,6 +7312,21 @@ class HybridRocketEngine:
                                           else radius_source),
                 'model_valid': bool(sizing['model_valid']),
                 'validity_note': sizing['validity_note'],
+                # V306/HİBRİT-MODEL (M-HIBRIT-11): kalınlığın iki payı ve
+                # iletim payının dayanağı (``hybrid_liner_sizing``).
+                'thickness_rule': sizing.get('thickness_rule'),
+                'recession_allowance_mm': sizing.get(
+                    'recession_allowance_mm'),
+                'conduction_allowance_mm': sizing.get(
+                    'conduction_allowance_mm'),
+                # Girdiye tepki vermeyen sabitler (kesir, malzemenin ısıl
+                # yayınımı) /calculate yanıtında yaprak olarak YAYIMLANMAZ
+                # (tests/test_field_wiring_layer_b.py sabit çıktı bekçisi);
+                # dayanakları conduction_basis metninde, sayıları tek tanım
+                # yerinde (LINER_BACK_FACE_RISE_FRACTION, materials_db).
+                'back_face_rise_bound_K': sizing.get('back_face_rise_bound_K'),
+                'conduction_basis': sizing.get('conduction_basis'),
+                'q_star_validity_note': sizing.get('q_star_validity_note'),
                 'basis': liner_basis,
                 'model_note': sizing['model_note'],
                 'source': sizing['source'],
@@ -6836,7 +7638,12 @@ class HybridRocketEngine:
                     liner_thickness_mm=astar_mm,
                     liner_material=astar.get('material'),
                     liner_source=('thermal_protection.chamber_liner - sized '
-                                  'by HRMA (Level-1 Q* ablation)'),
+                                  'by HRMA (Level-1 Q* recession allowance '
+                                  '+ conduction allowance)'),
+                    # V306/HİBRİT-MODEL (M-HIBRIT-11): kasa sıcaklığı
+                    # varsayımının SINIRI adıyla (K).
+                    liner_back_face_rise_bound_K=astar.get(
+                        'back_face_rise_bound_K'),
                     casing_temperature_K=T0,
                     casing_temperature_source=OPEN_ZONE_LINER_ASSUMPTION)
             else:
@@ -7285,6 +8092,12 @@ class HybridRocketEngine:
                 'reason': ('skipped in uq_mode (advisory block, same policy '
                            'as the blowdown and altitude tables).'),
             }
+        if getattr(self, 'oxidizer_phase', None) == 'gas':
+            # V306/HİBRİT-MODEL (M-HIBRIT-10): gaz beslemede serbest sıvı
+            # yüzeyi ve tank hacmi bu modelle tanımlı değil.
+            return {'status': 'NOT_MODELLED', '_basis': basis,
+                    'reason': GAS_PHASE_FEED_NOT_MODELLED,
+                    'reason_code': 'gas_phase_feed_not_modelled'}
         m_ox = getattr(self, 'm_ox', None)
         if not (m_ox and np.isfinite(float(m_ox)) and float(m_ox) > 0):
             return {
@@ -7453,6 +8266,12 @@ class HybridRocketEngine:
             'thickness — there is no as-built wall here to verify.')
         blowdown = blowdown_block or {}
         slosh = slosh_block or {}
+        if getattr(self, 'oxidizer_phase', None) == 'gas':
+            # V306/HİBRİT-MODEL (M-HIBRIT-10): gaz beslemenin deposu
+            # (hacim, işletme hâli) modellenmiyor.
+            return {'status': 'NOT_MODELLED', '_basis': basis,
+                    'reason': GAS_PHASE_FEED_NOT_MODELLED,
+                    'reason_code': 'gas_phase_feed_not_modelled'}
         # v3.0.1 (V301/H1): kullanıcı tank basıncı kipinde MEOP = P_tank
         # (basınçla beslenen tankın tanım gereği işletme basıncı) ve cidar
         # tasarım sıcaklığı tankın kendi hâlinden; kap AYNI analizörden,
@@ -9897,6 +10716,11 @@ class HybridRocketEngine:
         delta_P_inj = self._inj_delta_P  # bar (stored from _design_fuel_grain)
         rho_ox = self._inj_rho_ox        # kg/m³
         try:
+            if getattr(self, 'oxidizer_phase', None) == 'gas':
+                # V306/HİBRİT-MODEL (M-HIBRIT-10): devre sıvı besleme
+                # modelidir; gaz için delik planı üretilmez (aşağıdaki
+                # 'not_analyzed' yolu, adlı gerekçe).
+                raise GasPhaseFeedNotModelled(GAS_PHASE_FEED_NOT_MODELLED)
             from hrma.engines.injector_design import (
                 design_injector, PINTLE_EQUIVALENT_ORIFICE_PLAN_BASIS,
                 COAXIAL_EQUIVALENT_ORIFICE_PLAN_BASIS)
@@ -10111,10 +10935,14 @@ class HybridRocketEngine:
             if isinstance(_inj_err, ElementPlanInputError):
                 self.injector_element_error = _inj_err
             self._fallback_used.append('injector_design_detail')
-            self.design_warnings.append(_w(
-                'warn.hybrid.injector_detail_unavailable', 'warning',
-                injector_type=self.injector_type,
-                reason=str(_inj_err)[:200]))
+            if isinstance(_inj_err, GasPhaseFeedNotModelled):
+                self.design_warnings.append(_w(
+                    'warn.hybrid.gas_phase_feed_not_modelled', 'warning'))
+            else:
+                self.design_warnings.append(_w(
+                    'warn.hybrid.injector_detail_unavailable', 'warning',
+                    injector_type=self.injector_type,
+                    reason=str(_inj_err)[:200]))
             basic_results['injector_design'] = {
                 'status': 'not_analyzed',
                 'injector_type': self.injector_type,
@@ -10743,8 +11571,22 @@ class HybridRocketEngine:
                     and isinstance(_yap.get('weight_analysis'), dict)):
                 _rho = float(get_material(str(_mal))['density'])
                 _pts, _meta = sample_nozzle_inner_contour(basic_results)
-                _m_lule = drawn_nozzle_shell_mass_kg(
-                    _pts, _et_mm / 1000.0, _rho)
+                _yapim_k = _ng.get('nozzle_construction')
+                _iki_parca = (isinstance(_yapim_k, dict) and _yapim_k.get(
+                    'type') == NOZZLE_CONSTRUCTION_INSERT_HOUSING)
+                if _iki_parca:
+                    # V306/HİBRİT-MODEL (M-HIBRIT-22): iki malzemeli lüle
+                    # (ek + gövde) — CAD kütle dökümüyle AYNI işlev.
+                    from hrma.analysis.structural_analysis import (
+                        DRAWN_NOZZLE_INSERT_HOUSING_MASS_BASIS,
+                        drawn_nozzle_insert_housing_mass_kg)
+                    _m_lule = drawn_nozzle_insert_housing_mass_kg(
+                        _pts, _yapim_k)
+                    if _m_lule is None:
+                        raise ValueError('insert/housing mass unresolved')
+                else:
+                    _m_lule = drawn_nozzle_shell_mass_kg(
+                        _pts, _et_mm / 1000.0, _rho)
                 if np.isfinite(_m_lule) and _m_lule > 0:
                     _yeni_w = self.structural_analyzer.apply_drawn_nozzle_mass(
                         _yap['weight_analysis'], _m_lule,
@@ -10763,8 +11605,12 @@ class HybridRocketEngine:
                         'kuru_taban': (
                             DRY_MASS_BASIS_DRAWN_NOZZLE_OUTSIDE_VALIDITY
                             if _gecersiz else DRY_MASS_BASIS_DRAWN_NOZZLE),
-                        'frustum_taban': FRUSTUM_APPROXIMATION_MASS_BASIS,
-                        'lule_taban': DRAWN_NOZZLE_MASS_BASIS,
+                        'frustum_taban': (
+                            _ng.get('estimated_mass_basis') if _iki_parca
+                            else FRUSTUM_APPROXIMATION_MASS_BASIS),
+                        'lule_taban': (
+                            DRAWN_NOZZLE_INSERT_HOUSING_MASS_BASIS
+                            if _iki_parca else DRAWN_NOZZLE_MASS_BASIS),
                     }
         except Exception:
             # Fail-closed: yeniden tartım kurulamazsa eski beyanlı döküm
@@ -10797,6 +11643,32 @@ class HybridRocketEngine:
         if isinstance(_kd, dict) and isinstance(_w_son, dict):
             _kd['dry_mass_model_validity_limit_exceeded'] = bool(
                 _w_son.get('model_validity_limit_exceeded'))
+
+        # --- V306/HİBRİT-MODEL (M-HIBRIT-22): MOTOR ZARFI ANA SAYFADA ------
+        # Zarf (kasa dış çapı ile çizilen lüle dış profilinin büyüğü) yalnız
+        # 6-DOF reddinin metninde görünüyordu. Sayı uçuş aracının KULLANDIĞI
+        # tek tanımdan okunur (``flight_vehicle.normalize`` →
+        # ``engine_od_m``; ikinci bir zarf kuralı yazılmaz). uq_mode'da
+        # atlanır (danışma; örnek başına profil örneklemesi).
+        if isinstance(_kd, dict) and not self.uq_mode:
+            try:
+                from hrma.analysis.flight_vehicle import normalize as _fv_n
+                _arac = _fv_n('hybrid', basic_results)
+                _zarf_m = _arac.get('engine_od_m')
+                if (_zarf_m is not None and np.isfinite(float(_zarf_m))
+                        and float(_zarf_m) > 0):
+                    _kd['motor_envelope_diameter_mm'] = float(_zarf_m) * 1e3
+                    _kd['motor_envelope_basis'] = (
+                        'largest outer diameter of the motor: the case/'
+                        'chamber outer diameter or the drawn nozzle outer '
+                        'profile, whichever is larger - the same number the '
+                        'flight vehicle and the 6-DOF airframe check use '
+                        '(flight_vehicle engine_od_m; source: '
+                        + str(_arac.get('engine_od_unit_source') or '')
+                        + ')')
+            except Exception:
+                # Zarf kurulamazsa yayımlanmaz (sayı uydurulmaz).
+                pass
 
         # --- v2.6.27 (B2): enjektör delik deseni — yalnız GERÇEK çözümden --
         # motor_viz3d.js readInjectorPattern sözleşmesi: {n_holes,
@@ -11269,7 +12141,8 @@ def resolve_tank_pressure_source(source, oxidizer_type):
 
 
 def user_tank_pressure_state(tank_pressure, chamber_pressure_bar,
-                             oxidizer_type, tank_temperature):
+                             oxidizer_type, tank_temperature,
+                             oxidizer_phase=None):
     """Kullanıcı tank basıncı kipinin besleme durumu ve fizik kapıları.
 
     Döner: ``(durum, ret_kayitlari)``. Ret listesi boş değilse durum
@@ -11296,6 +12169,14 @@ def user_tank_pressure_state(tank_pressure, chamber_pressure_bar,
     ``tank_temperature``: motor kurucusunun aldığı HAM değer (``None`` →
     ``TANK_TEMPERATURE_DEFAULT_K``, devrenin ve blowdown bloğunun kullandığı
     aynı varsayılan).
+
+    V306/HİBRİT-MODEL (M-HIBRIT-10): ``oxidizer_phase = 'gas'`` iken N₂O
+    doyma kapısı GAZ fazın denetimini yapar. ÖLÇÜLDÜ (Carmicino 2013 t01,
+    gaz N₂O, 16 bar besleme): sıvı-denge kapısı "P_tank < P_sat(293 K) =
+    50,37 bar" diye reddediyordu; oysa gaz N₂O TAM OLARAK doyma basıncının
+    altında vardır. Gaz için koşul ters yöndedir: P_tank >
+    P_sat(T_tank)·(1 + pay) ise o sıcaklıkta gaz yoğuşur ve besleme gaz
+    olamaz → ret (aynı pay ``TANK_PRESSURE_PSAT_REL_TOL``).
     """
     alan = 'tank_pressure'
     if tank_pressure is None or (isinstance(tank_pressure, str)
@@ -11363,7 +12244,35 @@ def user_tank_pressure_state(tank_pressure, chamber_pressure_bar,
                 p_sat = n2o_vapor_pressure_bar(T)
             except (ValueError, TypeError):
                 p_sat = None
-        if p_sat is not None and np.isfinite(p_sat):
+        gaz = (str(oxidizer_phase or '').strip().lower() == 'gas')
+        if p_sat is not None and np.isfinite(p_sat) and gaz:
+            p_max = p_sat * (1.0 + TANK_PRESSURE_PSAT_REL_TOL)
+            durum.update({
+                'tank_temperature_K': float(T),
+                'tank_temperature_source': T_kaynak,
+                'saturation_pressure_bar': p_sat,
+                'oxidizer_phase': 'gas',
+                'superheat_pressure_margin_bar': p_sat - p1,
+            })
+            if p_tank > p_max:
+                ret.append({
+                    'field': alan,
+                    'reason': 'above_n2o_saturation_pressure_gas_phase',
+                    'submitted': p_tank, 'unit': 'bar',
+                    'saturation_pressure_bar': p_sat,
+                    'tank_temperature_K': float(T),
+                    'relative_tolerance': TANK_PRESSURE_PSAT_REL_TOL,
+                    'maximum_bar': p_max,
+                    'message': (
+                        f'Gaseous N2O feed at {p_tank:g} bar is above the '
+                        f'N2O saturation pressure at the tank temperature, '
+                        f'P_sat({float(T):g} K) = {p_sat:.4g} bar (HRMA '
+                        f'tolerance {TANK_PRESSURE_PSAT_REL_TOL * 100:g} %): '
+                        f'at that temperature N2O condenses above P_sat, so '
+                        f'the feed cannot be gaseous. Lower the supply '
+                        f'pressure to at most {p_max:.4g} bar, raise the '
+                        f'temperature, or select the liquid phase.')})
+        elif p_sat is not None and np.isfinite(p_sat):
             p_min = p_sat * (1.0 - TANK_PRESSURE_PSAT_REL_TOL)
             durum.update({
                 'tank_temperature_K': float(T),
@@ -11404,6 +12313,8 @@ def user_tank_pressure_error(ret_kayitlari):
                  f"({ilk.get('reason')}); no design was published.")
     return TankPressureSourceError(
         {'below_n2o_saturation_pressure': 'tank_pressure_below_saturation',
+         'above_n2o_saturation_pressure_gas_phase':
+             'tank_pressure_above_saturation_gas_phase',
          'injector_pressure_drop_not_positive':
              'tank_pressure_not_above_chamber_pressure',
          'required_for_user_tank_pressure_source': 'tank_pressure_required',
@@ -11544,7 +12455,8 @@ def _tank_basinci_kaynagini_kur(motor, tank_pressure_source, tank_pressure):
     if kip == TANK_PRESSURE_SOURCE_USER:
         durum, retler = user_tank_pressure_state(
             tank_pressure, motor.P_c, motor.oxidizer_type,
-            motor.tank_temperature)
+            motor.tank_temperature,
+            oxidizer_phase=getattr(motor, 'oxidizer_phase', None))
         if retler:
             raise user_tank_pressure_error(retler)
         motor._user_tank_feed = durum

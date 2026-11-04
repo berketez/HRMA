@@ -135,7 +135,14 @@ def test_varsayilan_dp_akistan_boyutlandirilir(varsayilan):
     f = PINTLE_HYBRID_RADIAL_FRACTION
     beklenen = pintle_tip_geometry(f * a, a - f * a)
     for alan, deger in beklenen.items():
-        assert devre[alan] == deger, alan        # eski çağrıyla BİT-AYNI
+        # V306/SAYI: ``a`` yayımlanan mm² alanından YENİDEN kurulur (m² →
+        # mm² → m² gidiş-dönüşü IEEE'de 1 ULP kayabilir; ölçüldü:
+        # 0,66844028660009 ⟷ 0,6684402866000899 — N₂O doyma kaynağı EOS'a
+        # geçince alan değeri değişti ve gidiş-dönüş artık tam değil).
+        # Ürünün eski çağrıyla aynı fonksiyondan geçtiği hâlâ sınanır; pay
+        # yalnız testin kendi girdisinin yuvarlaması kadardır (4 ulp).
+        assert devre[alan] == pytest.approx(deger, rel=4 * 2.220446049250313e-16,
+                                            abs=0.0), alan
     assert ekran['d_pintle_mm'] == beklenen['d_pintle_mm']
     assert ekran['sizing_sources']['d_pintle_mm'] == 'flow_sized_annulus_rule'
     k = _kunye(varsayilan)['pintle_diameter']

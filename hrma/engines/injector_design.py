@@ -27,6 +27,7 @@ import numpy as np
 from hrma.constants import (R_UNIVERSAL, PA_PER_BAR, ORIFICE_D_BAND_MM,
                             ORIFICE_D_BAND_SOURCE)
 from hrma.analysis.tank_blowdown import N2OSaturation, N2O_T_CRIT
+from hrma.analysis import tank_blowdown as _tank_blowdown
 # Chug ΔP/Pc eşiği: TEK SAYISAL TANIM acoustic_modes'tadır (künye hükmü
 # CHUG_THRESHOLD_SOURCE içinde). Bu modül sayıyı TEKRAR YAZMAZ, ithal eder.
 from hrma.analysis.acoustic_modes import (
@@ -506,7 +507,25 @@ _N2O_ENTROPY_TABLE = np.array([
     (306.0, 1021.7, 1332.0),
 ])
 
-_SAT = N2OSaturation(use_coolprop=False)  # tabloyla deterministik (test tekrarlanabilirliği)
+# V306/SAYI (PANEL-SAYI DEVİR 1) — N₂O DOYMA ÖZELLİKLERİ TEK KAYNAKTAN.
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/sayi/olcum/k4_once.json, örnek hibrit,
+# T_tank 293,15 K): aynı koşuda tank blowdown P_sat = 50,52509 bar
+# (``N2OSaturation()``, CoolProp — Lemmon & Span 2006 hâl denklemi) ⟷
+# enjektör devresi P₁ = 50,54336 bar (bu satır ``use_coolprop=False`` idi:
+# aynı EOS'tan 3 K adımla üretilmiş tablonun doğrusal ara değeri, fark
+# %0,036). Devre artık tank modeliyle AYNI kuralı kullanır: CoolProp kuruluysa
+# hâl denklemi, değilse aynı EOS'tan üretilmiş tablo — iki yol bir koşuda
+# karışmaz (paket CoolProp'u taşır ve duman testinde şart koşar:
+# packaging/test_bundle_mac.sh). Eski "tabloyla deterministik" gerekçesi:
+# CoolProp da belirlenimcidir (aynı girdi, aynı sayı).
+_SAT = N2OSaturation()
+#: Devrenin yayımladığı buhar basıncı künyesi (kaynak tek kuraldan).
+N2O_SATURATION_BASIS = (
+    'N2O saturation curve: CoolProp equation of state (Lemmon & Span 2006), '
+    'the same source as the tank blowdown model'
+    if _SAT.use_coolprop else
+    'N2O saturation table generated from the CoolProp equation of state '
+    '(Lemmon & Span 2006), the same source as the tank blowdown model')
 
 # T47 (2026-08-03): bu künyelerin niteleyicileri Türkçeydi ('9. baskı',
 # 'Böl.', '(manifold pratiği)' …) ve panel listeyi dilden bağımsız olarak
@@ -540,14 +559,24 @@ def spi_mass_flow(cd, area_m2, rho, dp_pa):
     return float(cd * area_m2 * np.sqrt(2.0 * rho * dp_pa))
 
 
-def _n2o_s_l(T):
+def _n2o_s_doyma(T, kalite):
+    """Doymuş sıvı (0) / buhar (1) entropisi [J/(kg·K)] — ``_SAT`` ile AYNI
+    kaynak (V306/SAYI): CoolProp varsa hâl denklemi, yoksa entropi tablosu.
+    Tablo yolu eski davranışın bit-aynısıdır (240-306 K'ye kenetleme)."""
+    if _SAT.use_coolprop:
+        return float(_tank_blowdown.PropsSI(
+            'S', 'T', N2OSaturation._check_state(T), 'Q', kalite, 'N2O'))
     T = float(np.clip(T, _N2O_ENTROPY_TABLE[0, 0], _N2O_ENTROPY_TABLE[-1, 0]))
-    return float(np.interp(T, _N2O_ENTROPY_TABLE[:, 0], _N2O_ENTROPY_TABLE[:, 1]))
+    return float(np.interp(T, _N2O_ENTROPY_TABLE[:, 0],
+                           _N2O_ENTROPY_TABLE[:, 1 + int(kalite)]))
+
+
+def _n2o_s_l(T):
+    return _n2o_s_doyma(T, 0)
 
 
 def _n2o_s_v(T):
-    T = float(np.clip(T, _N2O_ENTROPY_TABLE[0, 0], _N2O_ENTROPY_TABLE[-1, 0]))
-    return float(np.interp(T, _N2O_ENTROPY_TABLE[:, 0], _N2O_ENTROPY_TABLE[:, 2]))
+    return _n2o_s_doyma(T, 1)
 
 
 def _n2o_tsat_grid():
@@ -1859,7 +1888,7 @@ def _solve_circuit(circuit, mdot, rho, pc_bar, dp_ratio, p_feed_bar, fluid,
     # Nurick kavitasyon sayısı: K_c = (P₁ − P_v)/(P₁ − P₂)
     if is_n2o:
         p_v_bar = p_sat_bar
-        p_v_basis = 'n2o saturation table'
+        p_v_basis = N2O_SATURATION_BASIS
     else:
         p_v_bar, p_v_basis = liquid_vapor_pressure(fluid, T_K)
         # NOT: uyarı metninin parametre kümesi DEĞİŞTİRİLMEDİ (i18n sözlüğü

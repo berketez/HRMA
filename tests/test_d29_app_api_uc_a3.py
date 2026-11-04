@@ -713,9 +713,15 @@ class TestP7B311MolekulAgirligiTipi:
 # ===========================================================================
 # P7B3-33 — /api/fea/planar-grain üst basınç kapısı
 # ===========================================================================
+# V306/TANE NR-16: uç artık analitik blokla aynı yük kümesini taşır;
+# yerleşim verilmezse gövdeye yapıştırılmış tanenin kürleme/soğuma ısıl
+# yükü eklenir. Bu bekçilerin konusu basınç bandı kapısıdır ve sayıları
+# basınç-yalnız yükle ölçülmüştü: basınç-yalnız yük kümesi kartuş yüklü
+# tanenin kümesidir (sonuç bit-aynı).
 GRAIN = {'grain_type': 'bates', 'propellant_type': 'apcp',
          'outer_diameter_mm': 100.0, 'core_diameter_mm': 30.0,
-         'chamber_pressure_bar': 40.0, 'max_rounds': 0}
+         'chamber_pressure_bar': 40.0, 'max_rounds': 0,
+         'grain_support': 'cartridge_loaded'}
 
 
 class TestP7B333UstBasincKapisi:

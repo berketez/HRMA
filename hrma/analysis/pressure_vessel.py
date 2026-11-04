@@ -99,7 +99,7 @@ from hrma.data.materials_db import get_material
 # ---------------------------------------------------------------------------
 # Modül sabitleri (literatür referanslı — docstring'deki kaynaklara bakınız)
 # ---------------------------------------------------------------------------
-CODE_MODES = ('aiaa_s080', 'asme_viii')
+CODE_MODES = ('aiaa_s080', 'asme_viii', 'nasa_std_5012c')
 
 # Tablo UW-12 (ASME VIII Div 1) kaynak birleşim verimleri:
 # 1.00 tam radyografi, 0.85 nokta radyografi, 0.70 radyografisiz.
@@ -110,6 +110,58 @@ HEAD_TYPES = ('ellipsoidal_2_1', 'torispherical', 'hemispherical')
 # AIAA S-080A-2018 tasarım faktörleri (metalik basınçlı kap, analiz+test):
 AIAA_PROOF_FACTOR = 1.5     # proof = 1.5 × MEOP
 AIAA_BURST_FACTOR = 2.0     # burst = 2.0 × MEOP
+
+# --- V306/SIVI-KÜTLE (kalem 5, ana model 4 Kas) — SIVI MOTOR DONANIMI -----
+# Sıvı motorun kamara katmanlarına (tek cidar, iç cidar/astar, dış kabuk)
+# AIAA S-080A (basınçlı kap) uygulanıyordu. Sıvı yakıtlı motor donanımının
+# standardı NASA-STD-5012C'dir (Approved 2025-12-31, "Strength and Life
+# Assessment Requirements for Liquid Fueled Space Propulsion System
+# Engines"), Tablo 1 "Minimum Analysis FOS and Strength Test Factors"
+# (s. 19). Metalik yapı ve bileşenler — "Ultimate-pressure or rotation,
+# test configuration" (MDC basınç, net kesit kopma): analiz FOS 1,50,
+# kalifikasyon test faktörü 1,50, kabul/proof test faktörü 1,20 (not 7:
+# test basıncı = MDP × test faktörü × ECF ≥ 1,05 × MDP). Mekanik yalnız
+# yük için akma FOS 1,10 (basınç yükünde uygulanmaz; satır künyede).
+# Ablatifler: analiz 1,70, kalifikasyon 1,40, kabul 1,20 (not 10: ömür
+# sonunda). "Pressure Vessels and Pressurized Systems" (yalnız basınç)
+# satırı SSCMAN 91-710 + AIAA S-080A / S-081B'ye gönderir: itici tankları,
+# basınçlandırma tüpleri ve ≤ 2" hatlar (not 4) S-080A'da KALIR.
+# Metin: ana modelin kaynak kopyası; kanıt dizininde kaynak notu.
+NASA_5012C_ULTIMATE_PRESSURE_FOS = 1.50     # analiz FOS, MDC basınç, kopma
+NASA_5012C_QUALIFICATION_FACTOR = 1.50      # kalifikasyon testi × MDP
+NASA_5012C_PROOF_FACTOR = 1.20              # kabul / proof testi × MDP
+NASA_5012C_MIN_TEST_PRESSURE_RATIO = 1.05   # not 7: test ≥ 1,05 × MDP
+NASA_5012C_YIELD_MECHANICAL_FOS = 1.10      # yalnız mekanik yük, akma
+NASA_5012C_ABLATIVE_FACTORS = {'analysis_fos': 1.70,
+                               'qualification': 1.40, 'proof': 1.20}
+NASA_5012C_BASIS = (
+    'NASA-STD-5012C (approved 2025-12-31), Strength and Life Assessment '
+    'Requirements for Liquid Fueled Space Propulsion System Engines, Table 1 '
+    '"Minimum Analysis FOS and Strength Test Factors", p. 19 - metallic '
+    'structures and components, ultimate - pressure, test configuration '
+    '(MDC pressure, net section ultimate): analysis FOS 1.50, qualification '
+    'test factor 1.50, acceptance/proof test factor 1.20 (note 7: test '
+    'pressure = MDP x test factor x ECF >= 1.05 x MDP). The pressure test '
+    'levels are given at the operating temperature (ECF = 1): a test at room '
+    'temperature multiplies them by ECF = strength at the test condition / '
+    'strength at the MDC temperature.')
+NASA_5012C_SCOPE_BASIS = (
+    'Liquid engine hardware (chamber wall, liner, closeout) follows '
+    'NASA-STD-5012C; propellant tanks, pressurant bottles and lines '
+    '(Table 1 "Pressure Vessels and Pressurized Systems", note 4) follow '
+    'AIAA S-080A-2018. Hybrid and solid motor cases are not covered by '
+    'NASA-STD-5012C and keep AIAA S-080A in this release.')
+#: Kod modu -> (proof, gerekli kopma) çarpanları: TEK tablo (GÜVENLİK ve
+#: sıvı motorun ``design_requirements`` alanı buradan okur).
+CODE_PRESSURE_FACTORS = {
+    'aiaa_s080': {'proof': AIAA_PROOF_FACTOR, 'burst': AIAA_BURST_FACTOR,
+                  'qualification': None},
+    'nasa_std_5012c': {'proof': NASA_5012C_PROOF_FACTOR,
+                       'burst': NASA_5012C_ULTIMATE_PRESSURE_FOS,
+                       'qualification': NASA_5012C_QUALIFICATION_FACTOR},
+}
+#: Sıvı motor donanımının kod modu (kamara katmanları).
+LIQUID_ENGINE_HARDWARE_CODE = 'nasa_std_5012c'
 
 # ASME Section II-D (1999+) izin verilen gerilme kriteri payları:
 ASME_UTS_MARGIN = 3.5       # S ≤ σ_u / 3.5
@@ -518,7 +570,9 @@ class PressureVesselAnalyzer:
             temperature_K: Tasarım (cidar) sıcaklığı [K] — dayanım derating'i.
             weld_efficiency: Kaynak birleşim verimi E ∈ {0.70, 0.85, 1.00}.
             head_type: 'ellipsoidal_2_1' | 'torispherical' | 'hemispherical'.
-            code_mode: 'aiaa_s080' (varsayılan) | 'asme_viii'. None → sınıf
+            code_mode: 'aiaa_s080' (varsayılan) | 'asme_viii' |
+                'nasa_std_5012c' (sıvı motor donanımı, V306/SIVI-KÜTLE kalem
+                5: kopma FOS 1,50, proof 1,20, kalifikasyon 1,50). None → sınıf
                 kurucusundaki mod.
 
         Returns:
@@ -781,6 +835,22 @@ class PressureVesselAnalyzer:
             t_req = P * R / denom                          # UG-27(c)(1)
             S_head = S_design
             E_head = E
+        elif mode == 'nasa_std_5012c':
+            # V306/SIVI-KÜTLE (kalem 5): NASA-STD-5012C Tablo 1 — basınç
+            # yükü için tek analiz kriteri kopmaya karşı FOS 1,50 (net kesit,
+            # MDC basınç); ortalama yarıçap membran formu (S-080 dalıyla aynı
+            # biçim, F149): 1,5·P·(R + t/2)/t <= σ_u.
+            fos = NASA_5012C_ULTIMATE_PRESSURE_FOS
+            denom_u = su_w - 0.5 * fos * P
+            if denom_u <= 0:
+                raise ValueError(
+                    "Design pressure too high for this material: the "
+                    "mean-radius membrane equation has no positive solution "
+                    "(the ultimate design pressure reaches the derated "
+                    "strength). Choose a stronger material or lower MDP.")
+            t_req = fos * P * R / denom_u
+            S_head = su / fos
+            E_head = E
         else:  # aiaa_s080
             # v2.6.2 fizik denetimi, bulgu F149 — ORTALAMA yarıçap membran
             # formu. Eskiden σ = P·r_iç/t kullanılıyor ve docstring bunu
@@ -822,6 +892,8 @@ class PressureVesselAnalyzer:
             # kalınlık actual_burst_pressure()'ın sayısal kökünden geliyor.
             if mode == 'aiaa_s080':
                 p_burst_req = AIAA_BURST_FACTOR * P
+            elif mode == 'nasa_std_5012c':
+                p_burst_req = NASA_5012C_ULTIMATE_PRESSURE_FOS * P
             else:
                 p_burst_req = ASME_UTS_MARGIN * P
             target_burst = MARGINAL_BURST_MARGIN * p_burst_req
@@ -864,6 +936,9 @@ class PressureVesselAnalyzer:
         # --- MAWP (mevcut kalınlıkla geri hesap) ---
         if mode == 'asme_viii':
             mawp = S_design * E * t / (R + 0.6 * t)        # UG-27 geri formu
+        elif mode == 'nasa_std_5012c':
+            mawp = su_w * t / (NASA_5012C_ULTIMATE_PRESSURE_FOS
+                               * (R + t / 2.0))
         else:
             # S-080: hem proof-akma hem burst-kopma kriterini sağlayan MEOP.
             # F149: t_req ile TAM TERSİNİR olması için burada da ortalama
@@ -887,11 +962,31 @@ class PressureVesselAnalyzer:
         # Sayı SİLİNMEZ, alan da silinmez (tüketiciler onu okuyor) —
         # ``None``a çekilir ve nedeni ``proof_pressure_basis`` ile ADIYLA
         # yazılır, testin hangi alanda durduğu söylenir.
-        proof_pressure = (AIAA_PROOF_FACTOR * P           # S-080 proof
-                          if mode == 'aiaa_s080' else None)
-        hydro_test = ASME_HYDRO_FACTOR * mawp * (S_test / S_design)  # UG-99(b)
-        if mode == 'aiaa_s080':
-            required_burst = AIAA_BURST_FACTOR * P
+        if mode in CODE_PRESSURE_FACTORS:
+            proof_pressure = CODE_PRESSURE_FACTORS[mode]['proof'] * P
+        else:
+            proof_pressure = None
+        qual = (CODE_PRESSURE_FACTORS.get(mode) or {}).get('qualification')
+        qualification_pressure = None if qual is None else qual * P
+        # V306/HİBRİT-SAYI (M-HIBRIT-3 + M-HIBRIT-33) — İKİ SEKME, TEK
+        # MERDİVEN. ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-sayi/olcum/
+        # sayi_once.json, tur L4, MEOP 35 bar): bu kip S-080 merdiveninin
+        # içine ASME'nin UG-99(b) testini koyuyordu — deneme 52,5 /
+        # "hidrostatik (UG-99b)" 54,6 / patlama 70,0 bar; GÜVENLİK sekmesi
+        # aynı kamaraya deneme = hidrostatik = 1,5 × MEOP diyordu (V306/
+        # GÜVENLİK NR-19: kabul (proof) testi hidrostatik basınç testidir).
+        # P5B1-20'nin ilkesi (başka standardın sayısı bu kipte yayımlanmaz)
+        # ters yönde de geçerlidir: kod tablosundaki kiplerde (S-080 ve
+        # V306/SIVI-KÜTLE kalem 5'in NASA-STD-5012C'si; 5012C Tablo 1
+        # acceptance/proof) hidrostatik test basıncı kabul (proof) test
+        # basıncıdır; UG-99(b) yalnız ASME kipinin testidir. Böylece
+        # hidrostatik test patlama hedefini aşamaz.
+        if mode in CODE_PRESSURE_FACTORS:
+            hydro_test = proof_pressure
+        else:
+            hydro_test = ASME_HYDRO_FACTOR * mawp * (S_test / S_design)  # UG-99(b)
+        if mode in CODE_PRESSURE_FACTORS:
+            required_burst = CODE_PRESSURE_FACTORS[mode]['burst'] * P
         else:
             # Div 1 tasarım marjının (σ_u/3.5) kopma gereksinimi olarak
             # yorumu — approximate (docstring'e bakınız).
@@ -1043,7 +1138,11 @@ class PressureVesselAnalyzer:
             'proof_pressure_bar': (None if proof_pressure is None
                                    else proof_pressure / 1e5),
             # ÖH D22 / P5B1-20: sayının hangi STANDARDA ait olduğu adıyla.
+            'qualification_test_pressure_bar': (
+                None if qualification_pressure is None
+                else qualification_pressure / 1e5),
             'proof_pressure_basis': (
+                NASA_5012C_BASIS if mode == 'nasa_std_5012c' else
                 'AIAA S-080 proof pressure = %.2f x MEOP.'
                 % AIAA_PROOF_FACTOR
                 if proof_pressure is not None else
@@ -1052,6 +1151,14 @@ class PressureVesselAnalyzer:
                 'this mode is the UG-99(b) hydrostatic test, reported in '
                 'hydrostatic_test_pressure_bar.'),
             'hydrostatic_test_pressure_bar': hydro_test / 1e5,
+            'hydrostatic_test_pressure_basis': (
+                'AIAA S-080: the acceptance (proof) test is the hydrostatic '
+                'pressure test, so the hydrostatic test pressure is the proof '
+                'pressure (%.2f x MEOP); no separate, higher test pressure is '
+                'defined (the same ladder as the safety analysis).'
+                % AIAA_PROOF_FACTOR
+                if mode == 'aiaa_s080' else
+                'ASME BPVC VIII-1 UG-99(b): 1.3 x MAWP x (S_test / S_design).'),
             'required_burst_pressure_bar': required_burst / 1e5,
             'burst_faupel_bar': burst_faupel / 1e5,
             'burst_thin_wall_bar': burst_thin / 1e5,
@@ -1068,10 +1175,7 @@ class PressureVesselAnalyzer:
                 'membrane plastic limit, both evaluated with the material '
                 "database's room-temperature strengths after the derating "
                 'curve. No hydrostatic burst test was performed and no '
-                'batch-specific coupon data were used. The field name '
-                "'actual_burst_pressure_bar' is historical and is kept so "
-                'existing consumers keep working; the same number is also '
-                "published as 'predicted_burst_pressure_bar'. The two "
+                'batch-specific coupon data were used. The two '
                 'contributors are published separately as burst_faupel_bar '
                 'and burst_thin_wall_bar.'),
             'burst_margin': burst_margin,

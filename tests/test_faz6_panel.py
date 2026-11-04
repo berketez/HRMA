@@ -401,15 +401,16 @@ def test_t12_seeding_is_one_way_and_happens_once():
         assert not re.search(r"\$\('%s'\)\s*\.\s*value\s*=" % kaynak, panel), \
             '6-DOF paneli #%s alanına geri yazıyor (çevrim riski)' % kaynak
 
-    init_body = cut_function(panel, 'init')
-    assert init_body.count('seedFromPageVehicle()') == 1, \
-        'tohumlama init içinde tam bir kez çağrılmalı'
-    # Tanım satırı (`function seedFromPageVehicle()`) sayımdan düşülür:
-    # geriye yalnız ÇAĞRI yerleri kalır.
-    cagri = panel.count('seedFromPageVehicle()') - panel.count(
-        'function seedFromPageVehicle()')
-    assert cagri == 1, \
-        'tohumlama %d yerden çağrılıyor — elle girilen değer ezilebilir' % cagri
+    # V306/UÇUŞ-3 (M-HIBRIT-2): "yalnız init'te bir kez" kuralı tohum notunu
+    # BAYAT bırakıyordu (Yörünge alanı 25 → 4,3 kg değişti, 6-DOF ve not
+    # 25 kg'da kaldı). Bağ artık CANLI ama yine TEK YÖNLÜ (yukarıdaki geri
+    # yazma yasağı) ve elle girilen 6-DOF değerini EZMEZ: tohumlayıcı alanın
+    # "elle yazıldı" damgasını (isTrusted) yazmadan ÖNCE denetler.
+    seed = cut_function(panel, 'seedFromPageVehicle')
+    damga = seed.find("el.dataset.userOverride === 'true'")
+    yazma = seed.find('el.value = value.toFixed(digits)')
+    assert 0 <= damga < yazma, \
+        'tohumlayıcı elle girilen 6-DOF değerini ezebilir (damga denetimi yok)'
 
 
 def test_t12_seed_note_is_hidden_when_nothing_was_seeded():
@@ -419,8 +420,11 @@ def test_t12_seed_note_is_hidden_when_nothing_was_seeded():
     (2026-08-03): not satırı display:none, alanlar 8 / 4 / 0,1 / 0,45.
     """
     seed = cut_function(strip_js_comments(read(SIXDOF_JS)), 'seedFromPageVehicle')
-    assert "parts.length ? '' : 'none'" in seed.replace('\n', ' ').replace(
-        '  ', ' ') or "parts.length ? '' : 'none'" in seed, \
+    # V306/UÇUŞ-3: not satır yuvalarından kurulur (notuYaz); tohum yoksa
+    # yuvası boşalır, hiçbir satır yoksa not gizlenir.
+    assert "notSatirlari.tohum = ''" in seed, 'tohum yokken eski tohum satırı kalıyor'
+    yaz = cut_function(strip_js_comments(read(SIXDOF_JS)), 'notuYaz')
+    assert "satirlar.length ? '' : 'none'" in yaz, \
         'not satırı boşken gizlenmiyor'
     assert 'if (!api || typeof api.read' in seed, \
         'sayfa araç tanımı yayımlamazsa panel yine de tohumlamaya çalışıyor'
@@ -509,9 +513,13 @@ def test_t74_example_vehicle_name_is_a_translated_placeholder():
     araçta bulunur.
     """
     src = read(LAUNCH_SITE_HTML)
-    match = re.search(r"name_key:\s*'([\w.]+)'", src)
-    assert match, 'örnek aracın adı hâlâ sabit İngilizce veri'
-    key = match.group(1)
+    # V306/UÇUŞ NR-12: örnek aracın TEK tanımı artık sunucuda
+    # (flight_vehicle.EXAMPLE_VEHICLE, motor + gövde) ve sayfaya Jinja ile
+    # gömülür; name_key oradadır. Şablonda ikinci bir araç tablosu yok.
+    from hrma.analysis.flight_vehicle import EXAMPLE_VEHICLE
+    key = EXAMPLE_VEHICLE.get('name_key')
+    assert key, 'örnek aracın adı hâlâ sabit İngilizce veri'
+    assert 'id="ls-example-vehicle">{{ example_vehicle | tojson }}' in src
 
     en = dict_pairs(SITE_DICT_JS, 'en')
     tr = dict_pairs(SITE_DICT_JS, 'tr')
@@ -520,7 +528,9 @@ def test_t74_example_vehicle_name_is_a_translated_placeholder():
 
     render = cut_function(src, 'renderVehicleText')
     assert 'name_key' in render, 'rozet name_key\'i kullanmıyor'
-    assert src.count("name_key:") == 1, \
+    fv_src = read(pathlib.Path(__file__).resolve().parents[1]
+                  / 'hrma' / 'analysis' / 'flight_vehicle.py')
+    assert fv_src.count("'name_key':") == 1 and "name_key:" not in src, \
         'name_key birden çok araca konmuş — kullanıcı motor adları çevrilmemeli'
 
 

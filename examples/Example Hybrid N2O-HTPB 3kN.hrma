@@ -51,8 +51,6 @@
    "plate_thickness": 3,
    "chamber_material": "steel_304",
    "param_type": "of_ratio",
-   "param_start": 1.5,
-   "param_end": 4,
    "param_steps": 10,
    "calculate_trajectory": true,
    "traj_alt_start": 0,

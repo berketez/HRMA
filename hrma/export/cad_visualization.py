@@ -3600,9 +3600,24 @@ def manufacturing_safety_refusals(motor_data):
             and nozzle_analysis.get('safety_factor') is not None):
         # Yapısal lüle analizi SF'yi BOĞAZ cidarında yayımlar; çizilen lüle
         # tek tip ofset etle kurulduğu için boğaz cidarı çizilen ettir.
+        # V306/HİBRİT-MODEL (M-HIBRIT-22): ek + yapısal gövde lülesinde SF
+        # GÖVDENİNDİR; çizilen gövde eti = çizilen yığın − ek (ek basınç
+        # kabuğu değildir, SF'ye girmez).
+        _sf_ait_mm = drawn_noz_mm
+        _ng = md.get('nozzle_geometry') if isinstance(
+            md.get('nozzle_geometry'), dict) else {}
+        _yapim = _ng.get('nozzle_construction')
+        if (isinstance(_yapim, dict) and _yapim.get('type')
+                == 'insert_plus_structural_housing'):
+            _ek_mm = _strict_number((_yapim.get('insert') or {}).get(
+                'thickness_mm'))
+            # Ek kalınlığı okunamazsa yığın kalır: uyuşmazlık kapısı
+            # reddeder (fail-closed).
+            _sf_ait_mm = (drawn_noz_mm - _ek_mm if _ek_mm is not None
+                          else drawn_noz_mm)
         out += _sf_check(
             'nozzle', 'structural_analysis.nozzle_analysis.safety_factor',
-            nozzle_analysis.get('safety_factor'), drawn_noz_mm,
+            nozzle_analysis.get('safety_factor'), _sf_ait_mm,
             _strict_number(nozzle_analysis.get('throat_thickness_used_mm')),
             'structural_analysis.nozzle_analysis.throat_thickness_used_mm')
     return out
@@ -6681,6 +6696,17 @@ class MotorCADDesigner:
                 # ihmal edilebilir ama cidar kalınlaşınca büyür (oran
                 # 1 + t/(2r)): ölçülen koşuda t=7,79 mm ile kütle 0,694 kg
                 # çıkıyordu, çizilen katı 0,751 kg idi (%7,7 eksik).
+                # V306/HİBRİT-MODEL (M-HIBRIT-22): ek + yapısal gövde lülesi
+                # (hibrit grafit) iki malzemeyle tartılır — motorun kuru
+                # kütlesiyle AYNI işlev (tek tanım).
+                _yapim = noz_geo.get('nozzle_construction')
+                if (isinstance(_yapim, dict) and _yapim.get('type')
+                        == 'insert_plus_structural_housing'):
+                    from hrma.analysis.structural_analysis import (
+                        drawn_nozzle_insert_housing_mass_kg)
+                    _m2 = drawn_nozzle_insert_housing_mass_kg(pts_mm, _yapim)
+                    if _m2 is not None and _m2 > 0:
+                        return _m2
                 _iki = _noz_profile.get('two_layer')
                 if _iki is not None:
                     # V301 CAD-2 kalem 8: ceketli lüle iki malzemeyle,

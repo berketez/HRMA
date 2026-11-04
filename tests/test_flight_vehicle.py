@@ -331,17 +331,41 @@ class TestNormalizeHybrid:
             f"{v['engine_inert_mass'] / (oran * v['propellant_mass']):.2f}× "
             'yalan künye')
 
-    def test_thrust_curve_from_transient(self):
+    # V306/UÇUŞ-2 (M-HIBRIT-1/-17): Zaman Çözümlü panelinin motor sonucuna
+    # iliştirdiği ``motor.transient`` uçuşa GİZLİCE girmez (önceki iki bekçi
+    # tam bu gizli durumu kilitliyordu: aynı motor, panel koşuldu mu
+    # koşulmadı mı ona göre iki apoje). Uçan eğri motorun kendi eğrisidir.
+    def test_transient_eki_ucusa_girmez(self):
         v = fv.normalize('hybrid', hybrid_results())
-        assert v['thrust_curve'] is not None
-        assert v['thrust_curve']['time'] == [0.0, 1.0, 2.0, 3.0, 4.0]
-        assert v['thrust_curve']['thrust'][2] == 300.0
-
-    def test_no_transient_yields_null_curve(self):
-        doc = hybrid_results()
-        doc['motor'].pop('transient')
-        v = fv.normalize('hybrid', doc)
         assert v['thrust_curve'] is None
+        assert v['flight_thrust']['curve_source'] == 'motor_constant'
+        assert v['flight_thrust']['total_impulse_ns'] == 5000.0 * 8.0
+
+    def test_motorun_regule_egrisi_ucar(self):
+        doc = hybrid_results(motor={
+            'thrust_curve': {'time': [0.0, 4.0, 8.0],
+                             'thrust': [5000.0, 5000.0, 4000.0]},
+            'total_impulse': 38000.0})
+        v = fv.normalize('hybrid', doc)
+        assert v['thrust_curve'] == {'time': [0.0, 4.0, 8.0],
+                                     'thrust': [5000.0, 5000.0, 4000.0]}
+        assert v['flight_thrust']['curve_source'] == 'motor_regulated'
+        assert v['flight_thrust']['propellant_consumed_kg'] == 12.0
+
+    def test_kendinden_basincli_tankta_bosalma_egrisi_ucar(self):
+        doc = hybrid_results(motor={
+            'thrust_curve': {'time': [0.0, 8.0], 'thrust': [5000.0, 5000.0]},
+            'tank_blowdown': {'status': 'modelled', 'feed_mode': 'blowdown',
+                              'time_s': [0.02, 4.0, 8.5],
+                              'thrust_N': [5000.0, 4200.0, 3500.0],
+                              'total_impulse_Ns': 35000.0,
+                              'propellant_consumed_kg': 11.2}})
+        u = fv.normalize('hybrid', doc)['flight_thrust']
+        assert u['curve_source'] == 'motor_blowdown'
+        assert u['thrust_curve']['time'] == [0.02, 4.0, 8.5]
+        # Tankta kalan itici (12,0 − 11,2) araçla uçar: harcanan ⟷ yüklenen.
+        assert u['propellant_consumed_kg'] == 11.2
+        assert u['propellant_loaded_kg'] == 12.0
 
     def test_unwrapped_motor_dict_also_accepted(self):
         """Sarmalı olan ve olmayan girdi AYNI aracı vermeli.
@@ -523,12 +547,20 @@ class TestNormalizeLiquid:
             f'({OLCULEN_SIVI_TANK_KG / OLCULEN_SIVI_MOTOR_KURU_KG:.2f}×) ve '
             f'künye {v["engine_inert_mass_note"]!r}')
 
-    def test_inert_falls_back_to_feed_system_when_no_engine_mass(self):
+    def test_no_feed_system_fallback_when_no_engine_mass(self):
+        # V306/UÇUŞ-3 (SIVI-SOĞUTMA DEVİR): eski bekçi ``feed_system.
+        # total_mass`` (yalnız besleme hattı + turbopompa, tam kuru kütlenin
+        # ALT KÜMESİ) yedeğini kilitliyordu — araç eksik kütleyle uçabiliyordu.
+        # Motor kütlesi yoksa atıl kütle yoktur; araç kurulmaz
+        # (vehicle_build_refusal).
         r = liquid_results()
         r['design_summary']['masses'].pop('engine_mass_kg')
         r.pop('engine_mass_estimate')
         v = fv.normalize('liquid', r)
-        assert v['engine_inert_mass'] == 18.0  # son çare: feed_system.total_mass
+        assert v['engine_inert_mass'] is None
+        assert v['engine_inert_mass_note']
+        assert fv.vehicle_build_refusal('liquid', r, v)['error'] == \
+            'engine_mass_not_published'
 
     def test_propellant_falls_back_to_mdot_times_burn(self):
         r = liquid_results()
@@ -721,7 +753,11 @@ SOLID_PROJE_OLCUM = {
     # 0 kg giriyordu — atalet kütlesi eksikti, kütle kesri iyimserdi ve bu
     # çapa o eksik sayıyı kilitliyordu). Ölçülen yeni değer aynı gövdeyle
     # 6,001397012523196 kg; fark 0,4614 kg = varsayılan 2 mm liner halkası.
-    'engine_inert_mass': 6.4534577390220145,
+    # V306/KATI-MODEL (M-KATI-19, 4 Kas): lüle kütlesi kasa yapısal
+    # kütlesinin %15'i değil, çizilen lülenin kontur integrali (CAD ile
+    # bit-aynı). Aynı gövdeyle yeniden ölçüldü: 6,4534577390220145 ->
+    # 6,2434631293282346 kg (lüle 0,7490 -> 0,5390 kg).
+    'engine_inert_mass': 6.2434631293282346,
     # V301/FİZİK-2 (kalem 6, KABUL 13-14) — YENİDEN ÖLÇÜLDÜ, gerekçeli: eski
     # 0,13396 m lüle çıkışının İÇ çapıydı (key_dimensions.nozzle_exit_mm
     # 133,959); araç zarfı artık ÇİZİLEN dış zarftır — STEP/STL lüle

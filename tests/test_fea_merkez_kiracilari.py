@@ -773,7 +773,10 @@ class TestHukum:
         kaynak = PANEL_JS.read_text(encoding='utf-8')
         assert kaynak.count('function strainMarginKind(') == 1
         # Rozet de hüküm de AYNI sınıflayıcıdan geçer
-        assert kaynak.count('strainMarginKind(') == 3, (
+        # V306/TANE NR-16: analitik yolun yan yana rozeti de AYNI
+        # sınıflayıcıdan geçer (tanım + standalone rozet + Merkez hükmü +
+        # analitik rozet = 4); ikinci bir eşik yazımı yine yasak.
+        assert kaynak.count('strainMarginKind(') == 4, (
             'pay sınıflaması ikinci bir yerde yeniden yazılmış olabilir')
 
 

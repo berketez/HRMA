@@ -640,7 +640,12 @@ class TestTermalEksenCanli:
             pytest.skip('bu koşumda uç termal puanı yayımladı')
         metin = r['text']
         assert 'Thermal' in metin, 'termal ekseni ekranda hiç yok'
-        i = r['html'].find('Thermal')
+        # V306/GÜVENLİK (NR-3 b): üst şeritteki kısmilik cümlesi de eksen
+        # adlarını sayıyor ("not evaluated: Structural, Thermal. The worst
+        # evaluated axis scores 2.00 / 5"); bekçinin baktığı yer TERMAL EKSEN
+        # SATIRIDIR, bu yüzden arama bireysel risk tablosundan başlar.
+        j = r['html'].find('Individual Risks')
+        i = r['html'].find('Thermal', max(j, 0))
         pencere = r['html'][i:i + 900]
         assert not re.search(r'\d+\.\d+\s*/\s*5', pencere), (
             'uç termal hükmü geri çektiği hâlde ekranda puan basılıyor: %r'

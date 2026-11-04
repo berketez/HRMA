@@ -474,9 +474,17 @@ def client():
 
 
 def uc_kos(client, **govde):
+    # V306/TANE NR-16: uç artık analitik blokla aynı yük kümesini taşır ve
+    # yerleşim verilmezse motorun varsayılanı (gövdeye yapıştırılmış →
+    # kürleme/soğuma ısıl yükü) uygulanır. Bu yardımcıyı paylaşan uç
+    # sözleşmesi bekçileri (alanlar, marj = kapasite / gerinim, yakınsama,
+    # kiracı hükmü) basınç-yalnız yükle yazılmıştı; basınç-yalnız yük kümesi
+    # kartuş yüklü tanenin kümesidir ve bugünkü sayıları bit-aynı verir.
+    # Gövdeye yapıştırılmış yük kümesi TestNR16IsilYuk'te ayrıca kilitli.
     yuk = {'grain_type': 'bates', 'propellant_type': 'apcp',
            'outer_diameter_mm': 100.0, 'core_diameter_mm': 30.0,
-           'chamber_pressure_bar': 40.0, 'max_rounds': 2}
+           'chamber_pressure_bar': 40.0, 'max_rounds': 2,
+           'grain_support': 'cartridge_loaded'}
     yuk.update(govde)
     resp = _quiet(client.post, PLANAR_ENDPOINT, json=yuk)
     return resp.status_code, resp.get_json()

@@ -568,6 +568,16 @@ DRAWN_NOZZLE_MASS_BASIS = (
     'cad_design.performance_summary.mass_breakdown.nozzle_mass and '
     'nozzle_geometry.estimated_mass. The former 30%-of-chamber rule of thumb '
     'is no longer used.')
+#: V306/HİBRİT-MODEL (M-HIBRIT-22) — ek + yapısal gövde lülesinin çizilen
+#: kütle künyesi (SABİT metin; EN = TR karşılığı i18n_charts.js'te).
+DRAWN_NOZZLE_INSERT_HOUSING_MASS_BASIS = (
+    'DRAWN SOLID (single source), insert + structural housing nozzle: inner '
+    'contour from nozzle_design.sample_nozzle_inner_contour, the insert '
+    'thickness added outward with the density of the selected nozzle '
+    'material (nozzle_material), then the housing thickness with the density '
+    'of the chamber material (nozzle_geometry.nozzle_construction). The same '
+    'number is cad_design.performance_summary.mass_breakdown.nozzle_mass and '
+    'nozzle_geometry.estimated_mass.')
 #: Kesik koni yaklaşımının (lüle tasarımcısının kendi geometrisi) künyesi.
 FRUSTUM_APPROXIMATION_MASS_BASIS = (
     "conical frustum annulus over the nozzle designer's OWN convergent cone "
@@ -612,6 +622,33 @@ def drawn_nozzle_shell_mass_kg(points_mm, wall_m, density_kg_m3):
         r_mid = (r0 + r1) / 2000.0
         volume += np.pi * ((r_mid + wall_m) ** 2 - r_mid ** 2) * abs(dz)
     return volume * density_kg_m3
+
+
+def drawn_nozzle_insert_housing_mass_kg(points_mm, construction):
+    """V306/HİBRİT-MODEL (M-HIBRIT-22) — ek + yapısal gövde lülesinin
+    çizilen kütlesi [kg] (TEK tanım: hibrit motor ve CAD kütle dökümü).
+
+    Ek iç kontura dışa ``insert.thickness_mm``, gövde onun dışına
+    ``housing.thickness_mm`` eklenir; halka hacmi kesin olduğundan
+    m = V(t_ek)·ρ_ek + [V(t_ek + t_gövde) − V(t_ek)]·ρ_gövde,
+    V = ``drawn_nozzle_shell_mass_kg`` (ρ = 1). Eksik alan → ``None``
+    (kütle uydurulmaz).
+    """
+    try:
+        ek = construction['insert']
+        gov = construction['housing']
+        t_ek = float(ek['thickness_mm']) / 1000.0
+        t_gov = float(gov['thickness_mm']) / 1000.0
+        rho_ek = float(ek['density_kg_m3'])
+        rho_gov = float(gov['density_kg_m3'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(np.isfinite(v) and v > 0 for v in (t_ek, t_gov, rho_ek,
+                                                   rho_gov)):
+        return None
+    v_ek = drawn_nozzle_shell_mass_kg(points_mm, t_ek, 1.0)
+    v_top = drawn_nozzle_shell_mass_kg(points_mm, t_ek + t_gov, 1.0)
+    return v_ek * rho_ek + (v_top - v_ek) * rho_gov
 
 
 def published_material_record(mat_props):
@@ -1476,10 +1513,16 @@ class StructuralAnalyzer:
                          actual_throat_thickness: Optional[float] = None,
                          actual_end_cap_thickness: Optional[float] = None,
                          nozzle_material: Optional[str] = None,
-                         actual_throat_thickness_source: Optional[str] = None
+                         actual_throat_thickness_source: Optional[str] = None,
+                         nozzle_shell_inner_radius: Optional[float] = None,
                          ) -> Dict:
         """
         Complete structural analysis
+
+        V306/HİBRİT-MODEL (M-HIBRIT-22): ``nozzle_shell_inner_radius`` [m]
+        verilirse lülenin BASINÇ TAŞIYAN kabuğu boğaz yarıçapında değil bu
+        yarıçapta (ör. grafit ekin dışındaki yapısal gövdenin iç yarıçapı)
+        değerlendirilir; verilmezse eski yol bit-aynıdır.
 
         Args:
             motor_data: Motor performance and geometry data
@@ -1780,7 +1823,8 @@ class StructuralAnalyzer:
         nozzle_analysis = self._analyze_nozzle_structure(
             design_pressure, throat_diameter, chamber_diameter, noz_props,
             nozzle_type, design_safety_factor=design_safety_factor,
-            actual_throat_thickness=actual_throat_thickness
+            actual_throat_thickness=actual_throat_thickness,
+            shell_inner_radius=nozzle_shell_inner_radius,
         )
         if nozzle_material is not None or actual_throat_thickness_source:
             # Künye yalnız yeni yol kullanıldığında yazılır: eski çağıranların
@@ -2701,8 +2745,14 @@ class StructuralAnalyzer:
                                 chamber_diameter: float, mat_props: Dict, nozzle_type: str,
                                 derating: Optional[Dict] = None,
                                 design_safety_factor: Optional[float] = None,
-                                actual_throat_thickness: Optional[float] = None) -> Dict:
+                                actual_throat_thickness: Optional[float] = None,
+                                shell_inner_radius: Optional[float] = None,
+                                ) -> Dict:
         """Boğaz bölgesi yapısal kontrolü (boyutlandır / doğrula).
+
+        V306/HİBRİT-MODEL (M-HIBRIT-22): ``shell_inner_radius`` [m] verilirse
+        çember gerilmesi o yarıçapta (basınç taşıyan gövdenin iç yarıçapı)
+        hesaplanır; verilmezse boğaz yarıçapı (eski yol, bit-aynı).
 
         FİZİK DENETİMİ F027 (2026-07-25) — İKİ KUSUR GİDERİLDİ:
         (1) TAUTOLOJİ: effective_stress = SCF*P*r_t/(min_t*SCF) = allowable
@@ -2725,6 +2775,14 @@ class StructuralAnalyzer:
         """
 
         throat_radius = throat_diameter / 2
+        if shell_inner_radius is not None:
+            _r_kabuk = float(shell_inner_radius)
+            if not (np.isfinite(_r_kabuk) and _r_kabuk >= throat_radius):
+                raise ValueError(
+                    f'shell_inner_radius must be a finite radius at or above '
+                    f'the throat radius ({throat_radius:g} m), got '
+                    f'{shell_inner_radius!r}')
+            throat_radius = _r_kabuk
         chamber_radius = chamber_diameter / 2
         yield_strength = mat_props['yield_strength']
         safety_factor = (float(design_safety_factor)
@@ -2812,7 +2870,9 @@ class StructuralAnalyzer:
                 and effective_stress > 0
                 and (yield_for_design / effective_stress)
                 >= safety_factor * (1.0 - 1e-9)),
-            'nozzle_type': nozzle_type
+            'nozzle_type': nozzle_type,
+            **({'shell_inner_radius_mm': throat_radius * 1000.0}
+               if shell_inner_radius is not None else {}),
         }
     
     def _analyze_end_caps(self, pressure: float, diameter: float, mat_props: Dict,

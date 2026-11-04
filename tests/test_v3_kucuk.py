@@ -1722,17 +1722,40 @@ class TestKk3GuvenlikCidarNedeni:
         assert uc['safety_analysis']['thermal_safety'][
             'thermal_verdict'] == 'withheld'
         metin = _duz(out['html'])
-        assert 'data-safety-wall-unphysical' in out['html']
-        assert 'wall_temperature_unphysical = true' in metin
-        assert 'Termal eksen değerlendirilmedi' in metin
-        # Isı modülünün KENDİ uyarısı (kâhin: motor yanıtındaki kayıt).
         gsa = ornek_motorlar['hybrid']['motor']['heat_transfer_analysis'][
             'gas_side_analysis']
         kod = [w for w in gsa['warnings'] if isinstance(w, dict)
                and w.get('code') == 'warn.thermal.wall_exceeds_melting'][0]
-        assert ('%d K' % kod['params']['T_wall']) in metin
+        # V306/GÜVENLİK (NR-3 a): örnek hibrit kendi cidar bölge sonucunu
+        # yayımlıyor (yakıt bloğu altı korunur, ön/son odaya astar) ve
+        # ısı modülünün çıplak cidar kaydını `superseded_by =
+        # chamber_wall_zones` ile geçersiz kılıyor. Termal eksenin gerekçesi
+        # artık o bölge kaydıdır; çıplak cidar uyarısı ("erime noktasını
+        # aşıyor") bu sekmede ayrı bir hüküm olarak BASILMAZ.
+        assert kod.get('superseded_by') == 'chamber_wall_zones'
+        assert 'data-safety-zone-thermal' in out['html']
+        assert 'data-safety-wall-unphysical' not in out['html']
+        assert ('%d K' % kod['params']['T_wall']) not in metin
+        assert 'Termal eksen: motorun kendi yanma odası cidarı' in metin
         en = _duz(self._kos(client, ornek_motorlar['hybrid'], 'en')[2]['html'])
-        assert 'Thermal axis not evaluated' in en
+        assert "Thermal axis: the motor's own chamber-wall result" in en
+
+    def test_bolge_modeli_yokken_ciplak_cidar_nedeni_adiyla(
+            self, client, ornek_motorlar):
+        """V306/GÜVENLİK (NR-3 a): motor bölge sonucu YAYIMLAMIYORSA panel
+        çifti neden göndermediğini ısı modülünün kendi uyarısıyla söyler
+        (V3 KK 3. tur davranışı bu dalda aynen)."""
+        import copy
+        r = copy.deepcopy(ornek_motorlar['hybrid'])
+        r['motor'].pop('chamber_wall_zones', None)
+        r.pop('chamber_wall_zones', None)
+        govde, uc, out = self._kos(client, r)
+        assert 'wall_temperature_hot' not in govde
+        metin = _duz(out['html'])
+        assert 'data-safety-zone-thermal' not in out['html']
+        assert 'data-safety-wall-unphysical' in out['html']
+        assert 'wall_temperature_unphysical = true' in metin
+        assert 'Termal eksen değerlendirilmedi' in metin
 
     def test_bayraksiz_motorda_not_yok(self, client, ornek_motorlar):
         """Panel çifti GERİ TUTMADIYSA, uç termal ekseni başka nedenle geri

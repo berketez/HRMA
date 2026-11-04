@@ -418,9 +418,12 @@ def test_olculen_sayilar_capasi():
     # V301/K-A (22 Eki, KT-03): astar artık radyal yer kaplar (kasa iç çapı = tane + 2·(astar + yalıtım)); kasa 2·t_astar büyüdü, çapa yeniden ölçüldü (tolerans aynı).
     # 6,001397012523196 -> 6,4534577390220145 kg; küçük motor
     # 0,0945908415254658 -> 0,12844615192502312 kg.
-    assert dokum['total_kg'] == pytest.approx(6.4534577390220145, rel=1e-9)
+    # V306/KATI-MODEL (M-KATI-19, 4 Kas): lüle kütlesi kasa yapısal kütlesinin %15'i değil, çizilen lülenin kontur integrali (CAD ile bit-aynı); çapa yeniden ölçüldü (tolerans aynı).
+    # 6,4534577390220145 -> 5,891083551005131 kg; küçük motor
+    # 0,12844615192502312 -> 0,11537275158817248 kg.
+    assert dokum['total_kg'] == pytest.approx(5.891083551005131, rel=1e-9)
     assert dokum['liner_kg'] == pytest.approx(0.4614371289592694, rel=1e-6)
     kucuk = _motor(chamber_diameter=10.0, grain_length=10.0,
                    core_diameter=3.0)
     assert float(_sessiz(kucuk._calculate_dry_mass)) == pytest.approx(
-        0.12844615192502312, rel=1e-9)
+        0.11537275158817248, rel=1e-9)

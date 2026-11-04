@@ -59,6 +59,9 @@
         en: {            '(reference cooled wall)': '(reference cooled wall)',
             // V3.0.5 T-ÇAPA-C1: regen_cooling.RP1_COKING_BASIS (soğutma paneli rozet ipucu).
             'RP-1 coolant-side wall temperature, two tiers: 728 K is the design criterion of NASA SP-8087 (1972) sec. 3.1.1.5.4 p. 62 ("do not operate with liquid-wall temperatures above 850 F (728 K) for RP-1") - above it the design does not meet that criterion; 561 K is a deposit-risk WARNING level of this software, based on experimental findings (NASA CR-168277: deposits in copper tubes at 560-750 K) that must be validated for the application conditions; it does not by itself make the design unsafe. Staying below 728 K does NOT mean the wall stays free of deposits or is safe.': 'RP-1 coolant-side wall temperature, two tiers: 728 K is the design criterion of NASA SP-8087 (1972) sec. 3.1.1.5.4 p. 62 ("do not operate with liquid-wall temperatures above 850 F (728 K) for RP-1") - above it the design does not meet that criterion; 561 K is a deposit-risk WARNING level of this software, based on experimental findings (NASA CR-168277: deposits in copper tubes at 560-750 K) that must be validated for the application conditions; it does not by itself make the design unsafe. Staying below 728 K does NOT mean the wall stays free of deposits or is safe.',
+            // V306/GÜVERTE-HATA: /analyze_structural_safety termal yol koşmadığında (Yapısal sekme).
+            'No wall or gas temperature was supplied, so the thermal path did not run and no wall temperature is assumed: the material strength is read at 293.15 K, the ambient reference of the heat-transfer chain (no thermal derating).': 'No wall or gas temperature was supplied, so the thermal path did not run and no wall temperature is assumed: the material strength is read at 293.15 K, the ambient reference of the heat-transfer chain (no thermal derating).',
+            'Thermal path not run: no gas or wall temperature supplied.': 'Thermal path not run: no gas or wall temperature supplied.',
             '3D Hybrid Rocket Motor Visualization': '3D Hybrid Rocket Motor Visualization',
             '3D Motor Assembly': '3D Motor Assembly',
             '3D Motor Visualization': '3D Motor Visualization',
@@ -70,6 +73,10 @@
             'Acceleration': 'Acceleration',
             'Acceleration (g)': 'Acceleration (g)',
             'Acceleration Profile': 'Acceleration Profile',
+            'Load Factor Profile': 'Load Factor Profile',
+            'Load factor (g)': 'Load factor (g)',
+            'Load factor (sensed)': 'Load factor (sensed)',
+            'Kinematic |dv/dt|': 'Kinematic |dv/dt|',
             'Advanced Performance — 3D Surface, Mach Contour, Heat Flux': 'Advanced Performance — 3D Surface, Mach Contour, Heat Flux',
             'Altitude': 'Altitude',
             'Altitude & Mach vs Time (launch → apogee)': 'Altitude & Mach vs Time (launch → apogee)',
@@ -135,7 +142,7 @@
             'Circuit': 'Circuit',
             'Circular': 'Circular',
             'Cold-wall T (coolant side)': 'Cold-wall T (coolant side)',
-            'Combustion / Kinetic Efficiency': 'Combustion / Kinetic Efficiency',
+            'Combustion (c*) Efficiency': 'Combustion (c*) Efficiency',
             'Combustion Analysis Dashboard': 'Combustion Analysis Dashboard',
             'Combustion Efficiency': 'Combustion Efficiency',
             'Combustion Efficiency (%)': 'Combustion Efficiency (%)',
@@ -700,6 +707,7 @@
             'DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: the chamber wall thickness behind these masses comes from a structural evaluation outside the validity limit of the structural model (chamber_analysis.model_validity_limit_exceeded).': 'DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: the chamber wall thickness behind these masses comes from a structural evaluation outside the validity limit of the structural model (chamber_analysis.model_validity_limit_exceeded).',
             'No acceptance and no numeric design verdict is issued: the chamber was evaluated outside the validity limit of the structural model (see chamber_analysis.model_validity_limit_exceeded). The safety factors in this response are diagnostic numbers. A remaining MARGINAL or UNSAFE status is a warning from the CURRENT model and is never suppressed, but it is not a statement that a real motor of this design is impossible.': 'No acceptance and no numeric design verdict is issued: the chamber was evaluated outside the validity limit of the structural model (see chamber_analysis.model_validity_limit_exceeded). The safety factors in this response are diagnostic numbers. A remaining MARGINAL or UNSAFE status is a warning from the CURRENT model and is never suppressed, but it is not a statement that a real motor of this design is impossible.',
             'DRAWN SOLID (single source): the nozzle shell drawn by the CAD export - inner contour from nozzle_design.sample_nozzle_inner_contour, wall nozzle_geometry.wall_thickness added outward, density of the selected nozzle material (nozzle_material). The same number is cad_design.performance_summary.mass_breakdown.nozzle_mass and nozzle_geometry.estimated_mass. The former 30%-of-chamber rule of thumb is no longer used.': 'DRAWN SOLID (single source): the nozzle shell drawn by the CAD export - inner contour from nozzle_design.sample_nozzle_inner_contour, wall nozzle_geometry.wall_thickness added outward, density of the selected nozzle material (nozzle_material). The same number is cad_design.performance_summary.mass_breakdown.nozzle_mass and nozzle_geometry.estimated_mass. The former 30%-of-chamber rule of thumb is no longer used.',
+            'DRAWN SOLID (single source), insert + structural housing nozzle: inner contour from nozzle_design.sample_nozzle_inner_contour, the insert thickness added outward with the density of the selected nozzle material (nozzle_material), then the housing thickness with the density of the chamber material (nozzle_geometry.nozzle_construction). The same number is cad_design.performance_summary.mass_breakdown.nozzle_mass and nozzle_geometry.estimated_mass.': 'DRAWN SOLID (single source), insert + structural housing nozzle: inner contour from nozzle_design.sample_nozzle_inner_contour, the insert thickness added outward with the density of the selected nozzle material (nozzle_material), then the housing thickness with the density of the chamber material (nozzle_geometry.nozzle_construction). The same number is cad_design.performance_summary.mass_breakdown.nozzle_mass and nozzle_geometry.estimated_mass.',
             'conical frustum annulus over the nozzle designer\'s OWN convergent cone (its own chamber radius, not this motor\'s chamber) and divergent section - a different geometry from the drawn nozzle, kept only for traceability': 'conical frustum annulus over the nozzle designer\'s OWN convergent cone (its own chamber radius, not this motor\'s chamber) and divergent section - a different geometry from the drawn nozzle, kept only for traceability',
             'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + the DRAWN nozzle (same number as cad_design.performance_summary.mass_breakdown.nozzle_mass). SCOPE LIMIT: the injector is NOT included; the CAD mass breakdown total (cad_design.performance_summary.mass_breakdown.total_dry_mass) includes the injector but omits the closures, so the two totals differ by exactly those two items. DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: the chamber wall thickness behind this mass comes from a structural evaluation outside the validity limit of the structural model (structural_analysis.chamber_analysis.model_validity_limit_exceeded); the flight-chain numbers derived from it carry the same limit.': 'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + the DRAWN nozzle (same number as cad_design.performance_summary.mass_breakdown.nozzle_mass). SCOPE LIMIT: the injector is NOT included; the CAD mass breakdown total (cad_design.performance_summary.mass_breakdown.total_dry_mass) includes the injector but omits the closures, so the two totals differ by exactly those two items. DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: the chamber wall thickness behind this mass comes from a structural evaluation outside the validity limit of the structural model (structural_analysis.chamber_analysis.model_validity_limit_exceeded); the flight-chain numbers derived from it carry the same limit.',
             'The through-wall temperature difference was computed on the wall named in thermal_reference_wall_thickness_mm. In size mode it is scaled to the evaluated wall by the thickness ratio (fixed heat flux, planar conduction drop q*t/k), so the sized wall and its published thermal stress come from the same model (equal values mean the same wall). With no reference wall the difference is held at the supplied value. In verify mode the difference belongs to the supplied wall and is not scaled.': 'The through-wall temperature difference was computed on the wall named in thermal_reference_wall_thickness_mm. In size mode it is scaled to the evaluated wall by the thickness ratio (fixed heat flux, planar conduction drop q*t/k), so the sized wall and its published thermal stress come from the same model (equal values mean the same wall). With no reference wall the difference is held at the supplied value. In verify mode the difference belongs to the supplied wall and is not scaled.',
@@ -765,6 +773,9 @@
         tr: {            '(reference cooled wall)': '(referans soğutulmuş cidar)',
             // V3.0.5 T-ÇAPA-C1: regen_cooling.RP1_COKING_BASIS (soğutma paneli rozet ipucu).
             'RP-1 coolant-side wall temperature, two tiers: 728 K is the design criterion of NASA SP-8087 (1972) sec. 3.1.1.5.4 p. 62 ("do not operate with liquid-wall temperatures above 850 F (728 K) for RP-1") - above it the design does not meet that criterion; 561 K is a deposit-risk WARNING level of this software, based on experimental findings (NASA CR-168277: deposits in copper tubes at 560-750 K) that must be validated for the application conditions; it does not by itself make the design unsafe. Staying below 728 K does NOT mean the wall stays free of deposits or is safe.': 'RP-1 soğutucu tarafı cidar sıcaklığı, iki kademe: 728 K, NASA SP-8087 (1972) bölüm 3.1.1.5.4 s. 62 tasarım ölçütüdür ("RP-1 için sıvı tarafı cidar sıcaklığı 850 F (728 K) üstünde çalıştırmayın") — bunun üstünde tasarım o ölçütü karşılamaz; 561 K bu yazılımın deneysel bulgulara (NASA CR-168277: bakır tüplerde 560-750 K arasında birikim) dayanan birikim riski UYARI düzeyidir ve uygulama koşulları için doğrulanmalıdır; tek başına tasarımı güvensiz yapmaz. 728 K altında kalmak cidarın birikimsiz ya da güvenli kaldığı anlamına GELMEZ.',
+            // V306/GÜVERTE-HATA: /analyze_structural_safety termal yol koşmadığında (Yapısal sekme).
+            'No wall or gas temperature was supplied, so the thermal path did not run and no wall temperature is assumed: the material strength is read at 293.15 K, the ambient reference of the heat-transfer chain (no thermal derating).': 'Cidar ya da gaz sıcaklığı verilmedi; termal yol koşmadı ve cidar sıcaklığı varsayılmadı: malzeme dayanımı, ısı zincirinin ortam referansı olan 293,15 K sıcaklıkta okunur (ısıl düşürme yok).',
+            'Thermal path not run: no gas or wall temperature supplied.': 'Termal yol koşmadı: gaz ya da cidar sıcaklığı verilmedi.',
             '3D Hybrid Rocket Motor Visualization': 'Hibrit Roket Motoru 3B Görselleştirme',
             '3D Motor Assembly': '3B Motor Montajı',
             '3D Motor Visualization': '3B Motor Görselleştirmesi',
@@ -776,6 +787,10 @@
             'Acceleration': 'İvme',
             'Acceleration (g)': 'İvme (g)',
             'Acceleration Profile': 'İvme Profili',
+            'Load Factor Profile': 'Yük Çarpanı Profili',
+            'Load factor (g)': 'Yük çarpanı (g)',
+            'Load factor (sensed)': 'Yük çarpanı (algılanan)',
+            'Kinematic |dv/dt|': 'Kinematik |dv/dt|',
             'Advanced Performance — 3D Surface, Mach Contour, Heat Flux': 'Gelişmiş Performans — 3B Yüzey, Mach Konturu, Isı Akısı',
             'Altitude': 'İrtifa',
             'Altitude & Mach vs Time (launch → apogee)': 'İrtifa ve Mach Sayısı - Zaman (kalkış → apoje)',
@@ -837,7 +852,7 @@
             'Circuit': 'Devre',
             'Circular': 'Dairesel',
             'Cold-wall T (coolant side)': 'Soğuk cidar sıcaklığı (soğutucu tarafı)',
-            'Combustion / Kinetic Efficiency': 'Yanma / Kinetik Verim',
+            'Combustion (c*) Efficiency': 'Yanma (c*) Verimi',
             'Combustion Analysis Dashboard': 'Yanma Analizi Panosu',
             'Combustion Efficiency': 'Yanma verimi',
             'Combustion Efficiency (%)': 'Yanma verimi (%)',
@@ -1373,6 +1388,7 @@
             'DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: the chamber wall thickness behind these masses comes from a structural evaluation outside the validity limit of the structural model (chamber_analysis.model_validity_limit_exceeded).': 'YALNIZ TANI AMAÇLI, GEÇERLİ TASARIM ÇIKTISI DEĞİL: bu kütlelerin arkasındaki kamara cidar kalınlığı, yapısal modelin geçerlilik sınırı dışındaki bir yapısal değerlendirmeden geliyor (chamber_analysis.model_validity_limit_exceeded).',
             'No acceptance and no numeric design verdict is issued: the chamber was evaluated outside the validity limit of the structural model (see chamber_analysis.model_validity_limit_exceeded). The safety factors in this response are diagnostic numbers. A remaining MARGINAL or UNSAFE status is a warning from the CURRENT model and is never suppressed, but it is not a statement that a real motor of this design is impossible.': 'Ne onay ne de sayısal tasarım hükmü verildi: hazne, yapısal modelin geçerlilik sınırı dışında değerlendirildi (bkz. chamber_analysis.model_validity_limit_exceeded). Bu yanıttaki emniyet katsayıları tanı amaçlı sayılardır. Kalan bir MARGINAL ya da UNSAFE durumu MEVCUT modelin uyarısıdır ve asla bastırılmaz; ama bu tasarımda gerçek bir motorun olanaksız olduğu anlamına gelmez.',
             'DRAWN SOLID (single source): the nozzle shell drawn by the CAD export - inner contour from nozzle_design.sample_nozzle_inner_contour, wall nozzle_geometry.wall_thickness added outward, density of the selected nozzle material (nozzle_material). The same number is cad_design.performance_summary.mass_breakdown.nozzle_mass and nozzle_geometry.estimated_mass. The former 30%-of-chamber rule of thumb is no longer used.': 'ÇİZİLEN KATI (tek kaynak): CAD dışa aktarımının çizdiği nozul kabuğu - iç kontur nozzle_design.sample_nozzle_inner_contour\'dan gelir, nozzle_geometry.wall_thickness cidarı dışa doğru eklenir, yoğunluk seçilen nozul malzemesinindir (nozzle_material). Aynı sayı cad_design.performance_summary.mass_breakdown.nozzle_mass ve nozzle_geometry.estimated_mass alanlarındadır. Eski "kamara kütlesinin %30\'u" başparmak kuralı artık kullanılmıyor.',
+            'DRAWN SOLID (single source), insert + structural housing nozzle: inner contour from nozzle_design.sample_nozzle_inner_contour, the insert thickness added outward with the density of the selected nozzle material (nozzle_material), then the housing thickness with the density of the chamber material (nozzle_geometry.nozzle_construction). The same number is cad_design.performance_summary.mass_breakdown.nozzle_mass and nozzle_geometry.estimated_mass.': 'ÇİZİLEN KATI (tek kaynak), ek + yapısal gövdeli nozul: iç kontur nozzle_design.sample_nozzle_inner_contour\'dan gelir, önce ek kalınlığı seçilen nozul malzemesinin yoğunluğuyla (nozzle_material), sonra gövde kalınlığı yanma odası malzemesinin yoğunluğuyla dışa doğru eklenir (nozzle_geometry.nozzle_construction). Aynı sayı cad_design.performance_summary.mass_breakdown.nozzle_mass ve nozzle_geometry.estimated_mass alanlarındadır.',
             'conical frustum annulus over the nozzle designer\'s OWN convergent cone (its own chamber radius, not this motor\'s chamber) and divergent section - a different geometry from the drawn nozzle, kept only for traceability': 'nozul tasarımcısının KENDİ yakınsak konisi (kendi kamara yarıçapı, bu motorun kamarası değil) ve ıraksak kesimi üzerinde kesik koni halkası - çizilen nozuldan farklı bir geometri, yalnız izlenebilirlik için tutuluyor',
             'AUTHORITATIVE dry mass for the flight chain (.eng, trajectory, T/W): structural_analysis.weight_analysis.total_weight = chamber shell (real wall thickness x material density) + end closures + the DRAWN nozzle (same number as cad_design.performance_summary.mass_breakdown.nozzle_mass). SCOPE LIMIT: the injector is NOT included; the CAD mass breakdown total (cad_design.performance_summary.mass_breakdown.total_dry_mass) includes the injector but omits the closures, so the two totals differ by exactly those two items. DIAGNOSTIC ONLY, NOT A VALID DESIGN OUTPUT: the chamber wall thickness behind this mass comes from a structural evaluation outside the validity limit of the structural model (structural_analysis.chamber_analysis.model_validity_limit_exceeded); the flight-chain numbers derived from it carry the same limit.': 'Uçuş zinciri (.eng, yörünge, T/W) için YETKİLİ kuru kütle: yapısal analizin toplam ağırlığı = kamara kabuğu (gerçek cidar kalınlığı x malzeme yoğunluğu) + uç kapakları + ÇİZİLEN nozul (CAD kütle dökümündeki nozul kütlesiyle aynı sayı). KAPSAM SINIRI: enjektör DAHİL DEĞİLDİR; CAD kütle dökümünün kuru toplamı enjektörü içerir ama uç kapaklarını dışarıda bırakır, bu yüzden iki toplam tam olarak bu iki kalem kadar farklıdır. YALNIZ TANI AMAÇLI, GEÇERLİ TASARIM ÇIKTISI DEĞİL: bu kütlenin arkasındaki kamara cidar kalınlığı, yapısal modelin geçerlilik sınırı dışındaki bir yapısal değerlendirmeden geliyor (kamara analizinin model geçerlilik sınırı aşıldı bayrağı); ondan türeyen uçuş zinciri sayıları da aynı sınırı taşır.',
             'The through-wall temperature difference was computed on the wall named in thermal_reference_wall_thickness_mm. In size mode it is scaled to the evaluated wall by the thickness ratio (fixed heat flux, planar conduction drop q*t/k), so the sized wall and its published thermal stress come from the same model (equal values mean the same wall). With no reference wall the difference is held at the supplied value. In verify mode the difference belongs to the supplied wall and is not scaled.': 'Cidar boyunca sıcaklık farkı thermal_reference_wall_thickness_mm alanında adı geçen cidarda hesaplandı. Boyutlandırma kipinde bu fark kalınlık oranıyla değerlendirilen cidara ölçeklenir (sabit ısı akısı, düzlem iletim düşüşü q*t/k); böylece boyutlandırılan cidar ve yayımlanan ısıl gerilmesi aynı modelden gelir (eşit değerler aynı cidar demektir). Referans cidar yoksa fark verilen değerde tutulur. Doğrulama kipinde fark verilen cidara aittir ve ölçeklenmez.',
@@ -1716,6 +1732,19 @@
              return 'uçan atıl kütle = ' + out.join(' + ')
                  + '; nominal yanan itici ayrıca raporlanır (çift sayım yok)';
          }],
+        /* V306/SIVI-KÜTLE (M-SIVI-1) — sıvı uçan atıl kütle künyesinin araç
+           kalemi eki (hrma/analysis/flight_vehicle.py
+           VEHICLE_ITEMS_NOT_IN_ENGINE_NOTE): kumanda / aviyonik motor kuru
+           kütlesinde değil. Gövde bu sözlüğün kendi çekirdeğinden geçer;
+           çevrilemezse cümlenin TAMAMI İngilizce kalır (fail-closed). */
+        [/^([\s\S]+); not in the engine dry mass: controls \/ avionics \(controller box, harness, sensors\), a vehicle item HRMA does not estimate - include it in the airframe dry mass$/,
+         function (_t, govde) {
+             var g = sunucuCevir(govde, currentLang());
+             if (g === null || g === govde) return _t;
+             return g + '; motor kuru kütlesinde yok: kumanda / aviyonik'
+                 + ' (denetleyici kutusu, kablo demeti, sensörler), HRMA\'nın'
+                 + ' tahmin etmediği bir araç kalemi; gövde kuru kütlesine ekleyin';
+         }],
         /* V3 KK 2. tur (CFDS devri) — CFD ucunun ``runtime_basis`` cümlesi
            (hrma/app.py api_cfd_nozzle; panelde RUNTIME rozetinin ipucu,
            cfd_panel.js SRV). İki biçim: bugünkü main cümlesi ve V3
@@ -2038,6 +2067,30 @@
                  + 'kararlı sıvı modellenmez). Tank basıncını en az '
                  + I18N_SAYI(pmin) + ' bar yapın ya da tank sıcaklığını '
                  + 'düşürün.';
+         }],
+        /* V306/HİBRİT-MODEL (M-HIBRIT-10): gaz faz N2O besleme reddi
+           (hybrid_rocket_engine.user_tank_pressure_state). */
+        [/^Gaseous N2O feed at (\S+) bar is above the N2O saturation pressure at the tank temperature, P_sat\((\S+) K\) = (\S+) bar \(HRMA tolerance (\S+) %\): at that temperature N2O condenses above P_sat, so the feed cannot be gaseous\. Lower the supply pressure to at most (\S+) bar, raise the temperature, or select the liquid phase\.$/,
+         function (_t, pt, T, psat, tol, pmax) {
+             return 'Gaz N2O beslemesi ' + I18N_SAYI(pt) + ' bar, tank '
+                 + 'sıcaklığındaki N2O doyma basıncının üstünde: P_sat('
+                 + I18N_SAYI(T) + ' K) = ' + I18N_SAYI(psat) + ' bar (HRMA '
+                 + 'toleransı %' + I18N_SAYI(tol) + '). Bu sıcaklıkta N2O '
+                 + 'doyma basıncının üstünde yoğuşur, besleme gaz olamaz. '
+                 + 'Besleme basıncını en çok ' + I18N_SAYI(pmax)
+                 + ' bar yapın, sıcaklığı yükseltin ya da sıvı fazı seçin.';
+         }],
+        /* V306/HİBRİT-MODEL (M-HIBRIT-25, 4 Kas): çiftin ölçüm penceresi
+           geçerli kayıt sayısı pratik kapının altında — varsayılan yok
+           (hybrid_rocket_engine._eta_varsayilan_cozumu). */
+        [/^No sourced c\* efficiency default for (\S+): after excluding (\d+) firing\(s\) whose measurement window is not valid, (\d+) valid measured firing\(s\) remain \(HRMA requires at least (\d+); practical gate, not a statistical criterion\)\. Enter the c\* efficiency \(%\) of this motor\.$/,
+         function (_t, cift, k, n, m) {
+             return cift + ' için kaynaklı c* verimi varsayılanı kurulamadı: '
+                 + 'ölçüm penceresi geçerli olmayan ' + k + ' ateşleme '
+                 + 'dışlandıktan sonra ' + n + ' geçerli ölçülmüş ateşleme '
+                 + 'kalıyor (HRMA en az ' + m + ' ister; pratik kapı, '
+                 + 'istatistiksel ölçüt değil). Bu motorun c* verimini (%) '
+                 + 'girin.';
          }],
         /* v3.0.1 (22 Eki, V301/K-A) — KATI TASARIM REDDİ 422 CÜMLELERİ.
            Üreticiler: hrma/engines/solid_rocket_engine.py
@@ -2758,20 +2811,47 @@
         /* DV36-21 · G-1 tarama işaretinin not satırları — visualization.py
            _combustion dashboard (notlar '- ' ile başlar; tire kuralı
            translateSegment içinde ayrılır ve gövde buradan geçer). */
-        [/^Sweep maximum O\/F (\S+) is a grid node of a (\d+)-point sea-level-exit sweep; the canonical optimum O\/F is the solver value \(motor\.optimum_of_ratio\), searched continuously at the design expansion ratio, so the two differ\.$/,
+        [/^Sweep maximum O\/F (\S+) is a grid node of a (\d+)-point sea-level-exit sweep; the canonical optimum O\/F is the solver's own value, searched continuously at the design expansion ratio, so the two differ\.$/,
          'Tarama azamisi O/F $1, $2 noktalı deniz seviyesi çıkışlı bir taramanın ızgara düğümüdür; kanonik optimum O/F çözücünün kendi değeridir ve tasarım genişleme oranında sürekli aranır; bu yüzden ikisi farklıdır.'],
         [/^This run O\/F (\S+) is OUTSIDE the swept band (\S+)-(\S+); the curve does not cover the operating point\.$/,
          'Bu koşumun O/F değeri $1, taranan $2-$3 bandının DIŞINDA; eğri çalışma noktasını kapsamıyor.'],
         [/^Sweep maximum sits on the END of the swept band \(O\/F (\S+)\); it is the largest value IN THIS BAND, not a proven optimum - the true peak may lie outside\.$/,
          'Tarama azamisi taranan bandın UCUNDA duruyor (O/F $1); BU BANTTAKİ en büyük değerdir, kanıtlanmış bir optimum değildir - gerçek tepe bandın dışında olabilir.'],
         /* ÖH D37 · A1c panel-dil (K5 d) — A1b-3 panel-js OH-D37-G2 koşu
-           noktası notu (visualization.py, panel-js dalı; raporundan birebir).
-           Çıkış künyesi kodu MAKİNEDİR, aynen taşınır. Künyesiz üçüncü hâl
-           sözlükte (DICT). */
-        [/^This run point: the run O\/F solved with the exit anchored to ISA sea level and no nozzle expansion ratio \(exit basis (\S+)\) - the same exit anchor as the sweep curve; it is not the motor's delivered Isp at its nozzle expansion ratio\.$/,
-         'Bu koşum noktası: koşumun O/F değeri, çıkışı ISA deniz seviyesine bağlanarak ve nozul genişleme oranı olmadan çözüldü (çıkış künyesi $1) - tarama eğrisiyle aynı çıkış çapası; motorun kendi nozul genişleme oranındaki teslim Isp değeri değildir.'],
-        [/^This run point: the run O\/F solved with the exit at the supplied nozzle expansion ratio \(exit basis (\S+)\); the sweep curve is anchored to ISA sea level with no expansion ratio - a different thermochemistry path, so the point need not lie on the curve\.$/,
-         'Bu koşum noktası: koşumun O/F değeri, çıkış verilen nozul genişleme oranında alınarak çözüldü (çıkış künyesi $1); tarama eğrisi genişleme oranı olmadan ISA deniz seviyesine bağlıdır - farklı bir termokimya yolu, bu yüzden noktanın eğrinin üzerinde olması gerekmez.'],
+           noktası notu (visualization.py). V306/SAYI (NR-1): çıkış künyesi
+           KODU kullanıcı notundan çıktı (izin meta alanında kalır). Künyesiz
+           üçüncü hâl sözlükte (DICT). */
+        [/^This run point: the run O\/F solved with the exit anchored to ISA sea level and no nozzle expansion ratio - the same exit anchor as the sweep curve; it is not the motor's delivered Isp at its nozzle expansion ratio\.$/,
+         'Bu koşum noktası: koşumun O/F değeri, çıkışı ISA deniz seviyesine bağlanarak ve nozul genişleme oranı olmadan çözüldü - tarama eğrisiyle aynı çıkış çapası; motorun kendi nozul genişleme oranındaki teslim Isp değeri değildir.'],
+        [/^This run point: the run O\/F solved with the exit at the supplied nozzle expansion ratio; the sweep curve is anchored to ISA sea level with no expansion ratio - a different thermochemistry path, so the point need not lie on the curve\.$/,
+         'Bu koşum noktası: koşumun O/F değeri, çıkış verilen nozul genişleme oranında alınarak çözüldü; tarama eğrisi genişleme oranı olmadan ISA deniz seviyesine bağlıdır - farklı bir termokimya yolu, bu yüzden noktanın eğrinin üzerinde olması gerekmez.'],
+
+        /* V306/SAYI (NR-1) — yanma panosunun c* verimi ve kinetik verim
+           satırları (visualization._combustion_efficiency_breakdown).
+           Gösterge motorun manşete uyguladığı η_c* değerini okur; η_kin
+           ayrı satırdır. Sayılar sunucudan; yalnız ondalık kanonundan geçer. */
+        [/^c\* efficiency η_c\* = (\S+)%, applied to this run's headline \(delivered c\* = η_c\* × theoretical equilibrium c\*\); source: not entered; sourced default \(median of the measured firings in HRMA's validation records\)\.$/,
+         'c* verimi η_c* = %$1; bu koşumun ana sonucuna uygulandı (teslim c* = η_c* × kuramsal denge c*). Kaynak: girilmedi; kaynaklı varsayılan (HRMA doğrulama kayıtlarındaki ölçülmüş ateşlemelerin ortancası).'],
+        [/^c\* efficiency η_c\* = (\S+)%, applied to this run's headline \(delivered c\* = η_c\* × theoretical equilibrium c\*\); source: your input\.$/,
+         'c* verimi η_c* = %$1; bu koşumun ana sonucuna uygulandı (teslim c* = η_c* × kuramsal denge c*). Kaynak: sizin girdiniz.'],
+        [/^c\* efficiency: none applied - HRMA holds no measured value for this propellant pair and none was entered, so the headline uses the ideal \(theoretical equilibrium\) c\*\.$/,
+         'c* verimi: uygulanmadı - HRMA bu itici çifti için ölçülmüş bir değer tutmuyor ve değer girilmedi; ana sonuç ideal (kuramsal denge) c* değerini kullanır.'],
+        [/^Kinetic efficiency: not resolved for this run; no finite-rate nozzle loss is applied\.$/,
+         'Kinetik verim: bu koşumda çözülmedi; sonlu hızlı kimya nozul kaybı uygulanmadı.'],
+        [/^Kinetic efficiency η_kin = (\S+)% \(finite-rate nozzle loss\): not applied - this run uses the thrust coefficient you entered as given\.$/,
+         'Kinetik verim η_kin = %$1 (sonlu hızlı kimya nozul kaybı): uygulanmadı - bu koşum girdiğiniz itki katsayısını olduğu gibi kullanır.'],
+        [/^Kinetic efficiency η_kin = (\S+)% \(finite-rate nozzle loss\): applied to this run's headline thrust coefficient, not to c\*\.$/,
+         'Kinetik verim η_kin = %$1 (sonlu hızlı kimya nozul kaybı): bu koşumun ana sonucundaki itki katsayısına uygulandı, c* değerine değil.'],
+        [/^Kinetic efficiency η_kin = (\S+)% \(finite-rate nozzle loss\): this run does not state whether its headline thrust coefficient applies it\.$/,
+         'Kinetik verim η_kin = %$1 (sonlu hızlı kimya nozul kaybı): bu koşum, ana sonucundaki itki katsayısının bunu uygulayıp uygulamadığını belirtmiyor.'],
+        [/^c\* efficiency η_c\* = 100\.00%: no c\* efficiency was supplied to this analysis, so delivered c\* equals the theoretical equilibrium c\*\.$/,
+         'c* verimi η_c* = %100,00: bu analize c* verimi verilmedi; teslim c* kuramsal denge c* değerine eşittir.'],
+        [/^c\* efficiency η_c\* = (\S+)% = delivered c\* \/ theoretical equilibrium c\* of this analysis\.$/,
+         'c* verimi η_c* = %$1 = bu analizin teslim c* / kuramsal denge c* oranı.'],
+        [/^Kinetic efficiency η_kin = (\S+)% \(finite-rate correlation estimate for this analysis\): not applied to any motor result\.$/,
+         'Kinetik verim η_kin = %$1 (bu analiz için sonlu hızlı kimya bağıntısı kestirimi): hiçbir motor sonucuna uygulanmadı.'],
+        [/^Kinetic efficiency: not available for this analysis\.$/,
+         'Kinetik verim: bu analiz için kullanılamıyor.'],
 
         /* DV36-22 · tasarım raporu L* notu — hybrid_rocket_engine.py
            l_star_note (iki dal). Ekrana inmesi için app.js'in notu
@@ -2934,18 +3014,9 @@
     var UNIT_WORDS = [
         [/(\d)\s+deg\b/g, '$1 derece'],
         [/(\d)\s+holes\b/g, '$1 delik'],
-        /* 2026-08-03: sayı/sembol ağırlıklı olduğu için bütün hâlde
-           sözlüğe de desene de girmeyen metinlerin İÇİNDEKİ sabit
-           parçalar. Örnek (ölçüldü, /calculate yanıtı):
-             '- eta_c* = 100.00% (theoretical equilibrium; no measured c*
-              efficiency supplied) | eta_kin = 98.93% (engineering
-              finite-rate correlation)'
-           Burada çevrilecek olan yalnız parantez içleri; sayılar,
-           semboller ve ayırıcılar olduğu gibi kalır. */
-        [/\(theoretical equilibrium; no measured c\* efficiency supplied\)/g,
-         '(kuramsal denge; ölçülmüş c* verimi verilmedi)'],
-        [/\(engineering finite-rate correlation\)/g,
-         '(mühendislik sonlu-hız bağıntısı)'],
+        /* V306/SAYI (NR-1): yanma panosunun eski eta_c* / eta_kin satırının
+           parantez parçaları buradaydı; satır tam cümleye döndü
+           (MSG_PATTERNS, NR-1 bloğu). */
         [/\bmole fraction\b/g, 'mol kesri']
     ];
 

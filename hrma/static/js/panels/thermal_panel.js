@@ -616,6 +616,28 @@
         return '';
     }
 
+    // V306/SIVI-SOĞUTMA (M-SIVI-30): güvertenin bağlı olduğu motorun soğutma
+    // tipi (yalnız sıvı motor yanıtı; yoksa undefined).
+    function motorCoolingType() {
+        try {
+            const mt = (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function')
+                ? window.AnalysisDock.getMotorType() : null;
+            if (mt !== 'liquid') return undefined;
+            return ilkMetin(U.motorDict(window.currentResults), SOGUTMA_YOLLARI);
+        } catch (e) {
+            return undefined;
+        }
+    }
+    function coolingTypeName(v) {
+        const ad = {
+            ablative: ['Ablative Liner', 'panel.thermal.motorCooling.ablative'],
+            radiative: ['Radiation Cooling', 'panel.thermal.motorCooling.radiative'],
+            film_cooling: ['Film Cooling', 'panel.thermal.motorCooling.film_cooling'],
+            dump_cooling: ['Dump Cooling', 'panel.thermal.motorCooling.dump_cooling'],
+        }[v];
+        return ad ? T(ad[1], ad[0]) : String(v);
+    }
+
     function render(data, root) {
         const ta = data.thermal_analysis || {};
         const htc = ta.heat_transfer_coefficients || {};
@@ -634,6 +656,21 @@
             badges += U.badge(T('panel.thermal.badgeRisk', 'THERMAL RISK') + ': ' + safe.risk_level,
                               riskKind(safe.risk_level),
                               typeof safe.risk_level_basis === 'string' ? safe.risk_level_basis : '');
+        }
+        /* V306/SIVI-SOĞUTMA (M-SIVI-30): motorun soğutma tipi bu güvertenin
+           seçeneklerinde (doğal / zorlanmış / rejeneratif) yoksa ve korunan
+           cidar da uygulanmadıysa, hüküm motorun cidarına ait değildir —
+           başlıkta adıyla söylenir (motorun tipi kendi sözlük adıyla). */
+        const motorSog = motorCoolingType();
+        if (motorSog && !COOLING.some(function (o) { return o[0] === motorSog; })
+                && !superseded) {
+            badges += U.badge(U.tf('panel.thermal.badgeMotorCoolingNotModelled',
+                { type: coolingTypeName(motorSog) },
+                'MOTOR COOLING ({type}) NOT MODELLED HERE — verdict is for a bare wall'),
+                'warn', T('panel.thermal.motorCoolingNotModelledTip',
+                  'This deck models natural, forced and regenerative cooling only. '
+                  + 'The verdict below is the bare-wall check and is not the '
+                  + 'motor\'s own cooling result; the motor result page carries that.'));
         }
         badges += U.badge(T('panel.thermal.badgeCooling', 'COOLING') + ': '
             + String(dpp.cooling_type || '—').toUpperCase(), 'info',
@@ -1056,6 +1093,20 @@
                 if (Number.isFinite(cift.hot) && Number.isFinite(cift.cold)) {
                     ek.wall_temperature_hot = cift.hot;
                     ek.wall_temperature_cold = cift.cold;
+                }
+                /* V306/SIVI-SOĞUTMA (M-SIVI-30) — GÜVENLİK NR-3 (a) ilkesi:
+                   güverte motorun KENDİ ısıl koruma kararını okur. Ablatif
+                   astarlı sıvı motorun pasif koruması motorda Level-1 Q*
+                   ile boyutlanmıştır (thermal_protection.
+                   passive_thermal_protection, status 'modelled'); güverte
+                   aynı modelle astarı boyutlandırır (hibritle aynı yol).
+                   ÖLÇÜLDÜ (L1, olcum/m30_termal_guverte.json): ön dolum
+                   'doğal, çıplak cidar' iken TERMAL RİSK HIGH; korunan
+                   cidarla MEDIUM (astar gerekli), çıplak cidar sınırı
+                   bare_wall_risk_level'de kalır. */
+                const pasif = yolOku(m, 'thermal_protection.passive_thermal_protection') || {};
+                if (sogutma === 'ablative' && pasif.status === 'modelled') {
+                    ek.wall_protection = 'ablative_liner';
                 }
             } else if (mt === 'hybrid') {
                 const zones = yolOku(m, 'chamber_wall_zones') || {};

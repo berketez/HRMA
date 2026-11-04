@@ -282,9 +282,15 @@ class TestPressureVesselContract:
         assert proof == pytest.approx(1.5 * meop, rel=1e-9)
         assert vessel['required_burst_pressure_bar'] == pytest.approx(
             2.0 * meop, rel=1e-9)
-        # Hidrostatik test UG-99(b): oda sıcaklığında 1.3×MAWP
+        # V306/HİBRİT-SAYI (M-HIBRIT-3/-33): S-080 kipinde hidrostatik test
+        # = deneme (proof) basıncı (kabul testi hidrostatik testtir; GÜVENLİK
+        # sekmesiyle tek tanım). Eski beklenti (1.3×MAWP, UG-99(b)) ASME'nin
+        # testini S-080 merdivenine sokuyordu; UG-99(b) ASME kipinde
+        # test_pressure_vessel.py ile kilitli kalır.
         assert vessel['hydrostatic_test_pressure_bar'] == pytest.approx(
-            1.3 * mawp, rel=1e-6)
+            proof, rel=1e-12)
+        assert vessel['hydrostatic_test_pressure_bar'] < vessel[
+            'required_burst_pressure_bar']
         # Kopma = min(Faupel, ince-cidar plastik limit) özdeşliği
         assert burst == pytest.approx(
             min(vessel['burst_faupel_bar'], vessel['burst_thin_wall_bar']),

@@ -438,6 +438,11 @@ CASE_DIAMETER_SOURCE_LABELS = {
     'chamber_plus_wall': 'casing outer diameter = chamber inner diameter + 2 x wall thickness',
     'chamber': ('chamber inner diameter (wall thickness not available - '
                 'outer diameter is slightly larger)'),
+    # V306/RAPOR-HATA (SIVI-SOĞUTMA DEVİR d): cidar motor modelince
+    # yayımlanmadı — dış çap bilinmiyor ("biraz büyük" denemez).
+    'chamber_wall_withheld': ('chamber inner diameter (the wall thickness is '
+                              'not published by the motor model - the '
+                              'casing outer diameter is unknown)'),
     'exit': ('nozzle exit diameter used as casing placeholder - chamber '
              'diameter NOT available; check the diameter in OpenRocket'),
     'throat': ('WARNING: casing diameter NOT available; throat diameter '
@@ -1665,9 +1670,50 @@ class OpenRocketExporter:
         _t, source = OpenRocketExporter._drawn_wall(motor_data)
         return source or OpenRocketExporter._WALL_FALLBACK_LADDER_LABEL
 
+    #: V306/RAPOR-HATA (SIVI-SOĞUTMA DEVİR d) — cidar yayımlanmadığında
+    #: .eng yorumuna düşen satır (tek tanım yeri).
+    WALL_WITHHELD_LINE = (
+        '; wall thickness NOT published: the regenerative cooling circuit of '
+        'this design was not solved, so the motor model withholds the outer '
+        '(closeout) shell and every wall and mass sized from it; the casing '
+        'outer diameter is therefore not known and the diameter field is the '
+        'chamber inner diameter')
+
+    @staticmethod
+    def _wall_withheld(motor_data: Dict) -> bool:
+        """Motor modeli cidarı YAYIMLAMADI mı (soğutma devresi çözülmedi)?
+
+        V306/RAPOR-HATA (SIVI-SOĞUTMA DEVİR d, S1). ÖLÇÜLDÜ (F-1, mühendis
+        turu L5 'f1-b', taban 686c34b98, ``rapor/once/sivi_F1_tr.eng``):
+        devre çözülemeyip dış kabuk hükmü geri çekildiğinde (``chamber_
+        structure.cooling_circuit_status = 'not_solved'``, kabuk katmanı
+        ``verdict = 'withheld'``) .eng yorum satırı "wall used in the
+        diameter field = 161.00 mm" ve "it does resolve a case wall
+        thickness of 161.00 mm" diyor, RASP çap alanı 1856,2 + 2 × 161 =
+        2178,2 mm yazıyordu. Yayımlanmayan sayı dışa aktarımda da yoktur:
+        kabuk (ve onu içeren toplam cidar) bilinmiyor sayılır.
+        """
+        cs = _nested(motor_data or {}, 'structural_analysis',
+                     'chamber_structure')
+        if not isinstance(cs, dict):
+            return False
+        if cs.get('cooling_circuit_status') == 'not_solved':
+            return True
+        # Yalnız DIŞ KABUK (closeout) geri çekildiyse: astar katmanının
+        # 'withheld' hükmü (çözülmüş devrede de görülür; ölçüldü:
+        # test_unit_contract sıvı fikstürü, liner withheld + closeout pass)
+        # kalınlığın yayımlanmadığı anlamına GELMEZ.
+        return any(isinstance(k, dict) and k.get('role') == 'closeout'
+                   and k.get('verdict') == 'withheld'
+                   for k in (cs.get('wall_layers') or []))
+
     @staticmethod
     def _wall_thickness_m(motor_data: Dict) -> Optional[float]:
         """Kasa cidar kalınlığını [m] gerçek analizlerden çeker.
+
+        V306/RAPOR-HATA: motor modeli cidarı yayımlamadıysa
+        (:meth:`_wall_withheld`) None — yayımlanmayan kalınlık çapa da
+        yoruma da girmez.
 
         ÖH Z2 (defter P17S1-01, yüksek). Bu aday listesi ÇİZİLEN cidarı
         (``wall_thickness_used_mm``) hiç tanımıyordu; hibritte doğrudan
@@ -1684,6 +1730,8 @@ class OpenRocketExporter:
         ve kütle dökümü aynı sayıyı oradan okur). O sayı yoksa aşağıdaki
         eski merdiven yedek kalır.
         """
+        if OpenRocketExporter._wall_withheld(motor_data):
+            return None
         drawn, _source = OpenRocketExporter._drawn_wall(motor_data)
         if drawn is not None:
             return drawn
@@ -1784,6 +1832,8 @@ class OpenRocketExporter:
             wall = self._wall_thickness_m(md)
             if wall is not None:
                 case_d, case_src = chamber_d + 2.0 * wall, 'chamber_plus_wall'
+            elif self._wall_withheld(md):
+                case_d, case_src = chamber_d, 'chamber_wall_withheld'
             else:
                 case_d, case_src = chamber_d, 'chamber'
         if case_d is None and exit_d is not None:
@@ -2231,6 +2281,8 @@ class OpenRocketExporter:
                 lines.append(f"; wall used in the diameter field = "
                              f"{wall_m * 1000.0:.2f} mm; "
                              f"{self._wall_thickness_source(motor_data)}")
+        elif geometry.get('case_diameter_source') == 'chamber_wall_withheld':
+            lines.append(self.WALL_WITHHELD_LINE)
         if geometry.get('chamber_length') is None:
             lines.append("; length field = exporter placeholder; chamber length "
                          "NOT available in this export - correct it in OpenRocket")

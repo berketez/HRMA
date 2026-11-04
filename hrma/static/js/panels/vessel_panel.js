@@ -52,6 +52,8 @@
     var CODE_MODES = [
         ['aiaa_s080', 'AIAA S-080 (flight hardware)', 'vessel.codeAiaa'],
         ['asme_viii', 'ASME VIII Div 1 (ground/test)', 'vessel.codeAsme'],
+        // V306/SIVI-KÜTLE (kalem 5): sıvı motor donanımı (kamara katmanları).
+        ['nasa_std_5012c', 'NASA-STD-5012C (liquid engine hardware)', 'vessel.code5012'],
     ];
 
     var WELD_EFF = [
@@ -169,24 +171,64 @@
         // ---- Basınç merdiveni ----
         var mid = document.createElement('div');
         var html = U.sectionTitle(T('panel.vessel.secLadder', 'Pressure Ladder'));
+        // V306/HİBRİT-SAYI (M-HIBRIT-3 + M-HIBRIT-33): S-080 kipinde uç
+        // kabul (proof) testini hidrostatik test sayar ve ikisine AYNI sayıyı
+        // yazar — GÜVENLİK sekmesinin "Basınçlı Kap Özeti" ile tek tanım. Aynı
+        // sayı iki satırda basılmaz; satır GÜVENLİK'in AYNI anahtarlarıyla
+        // adlanır (iki sekme aynı cümleyi söyler). UG-99(b) satırı yalnız
+        // ASME kipinde.
+        var tekTest = d.code_mode !== 'asme_viii'
+            && Number.isFinite(d.proof_pressure_bar)
+            && d.hydrostatic_test_pressure_bar === d.proof_pressure_bar;
+        var testSatirlari;
+        if (tekTest && d.code_mode === 'nasa_std_5012c') {
+            // V306/SIVI-KÜTLE (kalem 5) + HİBRİT-SAYI: NASA-STD-5012C kipinde
+            // kabul (proof) testi hidrostatik testtir — tek satır, 5012C etiketi.
+            testSatirlari = [[T('panel.vessel.proofPressure5012', 'Acceptance (proof) test (1.20 × MDP)'),
+                U.fmt(d.proof_pressure_bar, 1) + ' bar',
+                T('panel.vessel.hydroTip5012', 'the acceptance (proof) test is the hydrostatic test (NASA-STD-5012C)')]];
+        } else if (tekTest) {
+            testSatirlari = [[T('panel.safety.pProofHydro', 'Proof test (hydrostatic)'),
+                U.fmt(d.proof_pressure_bar, 1) + ' bar',
+                T('panel.safety.pProofHydroTip',
+                  'Acceptance (proof) pressure test = 1.5 × operating '
+                  + 'pressure (AIAA S-080A); it is the hydrostatic test, '
+                  + 'no separate higher test pressure is defined')]];
+        } else {
+            testSatirlari = [[d.code_mode === 'nasa_std_5012c'
+                    ? T('panel.vessel.proofPressure5012', 'Acceptance (proof) test (1.20 × MDP)')
+                    : T('panel.vessel.proofPressure', 'Proof pressure (1.5 × MEOP)'),
+                (d.proof_pressure_bar === null
+                 || d.proof_pressure_bar === undefined)
+                    ? `<span style="color:var(--hd-ink-dim, #7d97a5);">—</span>`
+                    : U.fmt(d.proof_pressure_bar, 1) + ' bar',
+                d.code_mode === 'nasa_std_5012c'
+                    ? T('panel.vessel.proofTip5012', 'NASA-STD-5012C Table 1 acceptance/proof test factor (liquid engine hardware)')
+                    : (d.proof_pressure_basis
+                       || T('panel.vessel.proofTip', 'AIAA S-080 proof factor'))],
+               [T('panel.vessel.hydroTest', 'Hydrostatic test (UG-99b)'),
+                U.fmt(d.hydrostatic_test_pressure_bar, 1) + ' bar',
+                d.hydrostatic_test_pressure_basis
+                    || '1.3 × MAWP × (S_test / S_design)']];
+        }
+        // V306/SIVI-KÜTLE (kalem 5): 5012C kipinde kalifikasyon testi.
+        if (Number.isFinite(d.qualification_test_pressure_bar)) {
+            testSatirlari = testSatirlari.concat([
+                [T('panel.vessel.qualTest5012', 'Qualification test (1.50 × MDP)'),
+                 U.fmt(d.qualification_test_pressure_bar, 1) + ' bar',
+                 T('panel.vessel.qualTip5012', 'NASA-STD-5012C Table 1 qualification test factor (liquid engine hardware)')]]);
+        }
         html += U.kvTable([
             [T('panel.vessel.meopInput', 'MEOP (input)'), U.fmt(inputs.meop_bar, 1) + ' bar'],
-            [T('panel.vessel.proofPressure', 'Proof pressure (1.5 × MEOP)'),
-             (d.proof_pressure_bar === null
-              || d.proof_pressure_bar === undefined)
-                 ? `<span style="color:var(--hd-ink-dim, #7d97a5);">—</span>`
-                 : U.fmt(d.proof_pressure_bar, 1) + ' bar',
-             d.proof_pressure_basis
-                 || T('panel.vessel.proofTip', 'AIAA S-080 proof factor')],
-            [T('panel.vessel.hydroTest', 'Hydrostatic test (UG-99b)'),
-             U.fmt(d.hydrostatic_test_pressure_bar, 1) + ' bar',
-             '1.3 × MAWP × (S_test / S_design)'],
+        ].concat(testSatirlari).concat([
             [T('panel.vessel.requiredBurst', 'Required burst'),
              U.fmt(d.required_burst_pressure_bar, 1) + ' bar',
              d.code_mode === 'asme_viii'
                  ? T('panel.vessel.burstFactorAsme',
                      '3.5 × MEOP (Div 1 UTS margin interpretation — approximate)')
-                 : T('panel.vessel.burstFactorAiaa', '2.0 × MEOP (AIAA S-080 burst factor)')],
+                 : (d.code_mode === 'nasa_std_5012c'
+                    ? T('panel.vessel.burstFactor5012', '1.50 × MDP (NASA-STD-5012C ultimate-pressure analysis factor of safety)')
+                    : T('panel.vessel.burstFactorAiaa', '2.0 × MEOP (AIAA S-080 burst factor)'))],
             [T('panel.vessel.burstFaupel', 'Burst — Faupel thick-wall'),
              U.fmt(d.burst_faupel_bar, 1) + ' bar', 'Faupel (1956), Trans. ASME Vol. 78'],
             [T('panel.vessel.burstThin', 'Burst — thin-wall plastic limit'),
@@ -204,7 +246,7 @@
             [T('panel.vessel.allowableStress', 'Allowable stress S'),
              U.fmt(d.allowable_stress_MPa, 1) + ' MPa',
              T('panel.vessel.allowableTip', 'min(UTS/3.5, YS/1.5) — ASME Section II-D criteria')],
-        ]);
+        ]));
 
         // ---- Başlık (head) kalınlıkları ----
         html += U.sectionTitle(T('panel.vessel.secHeads', 'Head Thicknesses (ASME UG-32 geometry)'));
@@ -293,6 +335,12 @@
             // MEOP = hazne basıncı (bar) — plan Dalga 3 fromResults eşlemesi
             if (Number.isFinite(m.chamber_pressure)) {
                 out.meop_bar = m.chamber_pressure;
+            }
+            // V306/SIVI-KÜTLE (kalem 5): sıvı motorun kamarası motor
+            // donanımıdır — standart NASA-STD-5012C (GÜVENLİK sekmesiyle aynı).
+            if (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function'
+                    && window.AnalysisDock.getMotorType() === 'liquid') {
+                out.code_mode = 'nasa_std_5012c';
             }
             // BİRİM (2026-07-30 ölçümü): buradaki koşulsuz `* 1000` YALNIZ
             // hibritte doğruydu. Katı motorda chamber_diameter 75,0 ve sıvıda

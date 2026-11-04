@@ -533,6 +533,12 @@ SOLID_CASE_DESIGN = {
 # (0.30 ve 1.15) yazılıydı ve aynı kasa iki farklı kütleyle fiyatlanıyordu.
 SOLID_CASE_CLOSURE_MASS_FRACTION = 0.30
 
+# Ateşleyici + montaj/bağlantı kalemlerinin kasa yapısal kütlesine (kabuk +
+# kapaklar) oranı — TEK tanım noktası (V306/KATI-MODEL, M-KATI-19). Değer
+# v2.6.x'ten beri iki yerde çıplak 0.05 olarak duruyordu; HRMA seçimidir
+# (kaynaklı bir ateşleyici kütle modeli yok) ve dökümün künyesinde beyanlıdır.
+SOLID_IGNITER_MISC_MASS_FRACTION = 0.05
+
 # Ön + arka kapak takımının grain yığınına EKLEDİĞİ eksenel boy [m] —
 # TEK tanım noktası (ÖH D21 a1, P2B1-08).
 #
@@ -920,6 +926,13 @@ SOLID_GRAIN_MECHANICS_DEFAULT = _HTPB_GRAIN_MECHANICS
 # rather in a mold outside the case ... Frequently they are left free-
 # standing, i.e., bonded only at the ends" ve §2.5.3 "gas pressures can be
 # exerted between the case and the grain".
+def _tane_kucuk_gerinim_esigi():
+    """Doğrusal tane çözümünün küçük-gerinim HÜKÜM eşiği (tek kaynak:
+    ``hrma.fea.planar_grain.SMALL_STRAIN_LIMIT``; NR-16 beyanı için)."""
+    from hrma.fea.planar_grain import SMALL_STRAIN_LIMIT
+    return float(SMALL_STRAIN_LIMIT)
+
+
 GRAIN_SUPPORT_CASE_BONDED = 'case_bonded'
 GRAIN_SUPPORT_CARTRIDGE = 'cartridge_loaded'
 GRAIN_SUPPORT_OPTIONS = (GRAIN_SUPPORT_CASE_BONDED, GRAIN_SUPPORT_CARTRIDGE)
@@ -2745,18 +2758,22 @@ class SolidRocketEngine:
             # v2.6.0'da kuru kütle "itergaç kütlesinin %25'i" başparmak
             # kuralından yapısal hesaba taşınmıştı; kullanıcının elle girdiği
             # kütleyi kabul etmek o zinciri geri bozardı.
-            #
-            # 'avionics_mass' bu gerekçeye UYMAZ (V305/C1, 28 Eki): yapısal
-            # analiz onu hesaplamaz, motorun kalemi değildir; araç kalemi
-            # olarak sayfanın kütle uzlaştırma tablosu formdaki kuru kütle
-            # toplamına ekler (solid.html renderInertReconcile /
-            # updateTotalMasses). Motor çözücüsü okumaz; listede kalması
-            # "çözücü okumaz" beyanı içindir (kategori adı tarihseldir).
             'structural_output': [
                 'case_mass', 'nozzle_mass', 'closure_mass',
-                'insulation_mass', 'avionics_mass',
+                'insulation_mass',
                 # V301/K-B (NK-30): astar kütlesi satırı (çıktı).
                 'liner_mass',
+            ],
+            # V306/TANE C1-K4: 'avionics_mass' yukarıdaki listede "yapısal
+            # analizin çıktısı" gerekçesiyle duruyordu; yapısal analiz onu
+            # hesaplamaz ve motorun kalemi değildir. Gerçek tüketicisi
+            # sayfanın kütle uzlaştırma tablosudur: araç kalemi olarak ayrı
+            # satırda gösterilir, motor kuru kütlesine (çözücünün
+            # dry_mass_kg tanımı ve formun Total Dry Mass alanı) KATILMAZ
+            # (solid.html renderInertReconcile / updateTotalMasses). Motor
+            # çözücüsü okumaz.
+            'vehicle_item_not_motor': [
+                'avionics_mass',
             ],
             # Statik ateş test DÜZENEĞİ parametreleri: ölçüm zincirini
             # tanımlarlar, motorun kendisini değil. Motor performansına
@@ -5098,7 +5115,50 @@ class SolidRocketEngine:
         cf_ideal = self._cf_momentum_term(pe_ratio) + epsilon * pe_ratio
         return float(cf_ideal * self._total_nozzle_efficiency())
 
-    def _thrust_coefficient_state(self, P_c_bar):
+    def _design_ambient_report(self, isp_design_ambient, isp_sea_level,
+                               total_impulse_sea_level, sea_level_separated):
+        """Tasarım/test ortamı künyesi — M-KATI-20 (V306/KATI-MODEL).
+
+        Formdaki 'Atmosfer Basıncı' alanı test irtifası verildiğinde devre
+        dışı kalıp 101,325 kPa göstermeye devam ediyordu; çözücü ise
+        irtifanın ISA basıncını kullanıyordu (L3: 47,18 kPa). Hangi basıncın
+        geçerli olduğu yanıtta tek yerde, kaynağıyla yazılır; arayüz bu
+        sayıyı basar.
+        """
+        p_bar = float(getattr(self, 'ambient_pressure_bar',
+                              SEA_LEVEL_PRESSURE_BAR))
+        irtifa = self._override_val('test_altitude', 0.0, 30000.0)
+        atm = self._override_val('atm_pressure', 1.0, 200.0)
+        if atm is not None:
+            kaynak = 'atm_pressure'
+        elif irtifa is not None and irtifa > 0:
+            kaynak = 'test_altitude_isa'
+        else:
+            kaynak = 'sea_level_default'
+        return {
+            'pressure_bar': p_bar,
+            'pressure_kpa': p_bar * 100.0,
+            'altitude_m': (float(irtifa) if kaynak == 'test_altitude_isa'
+                           else None),
+            'source': kaynak,
+            'is_sea_level': bool(p_bar == float(SEA_LEVEL_PRESSURE_BAR)),
+            'isp_design_ambient_s': float(isp_design_ambient),
+            'isp_sea_level_s': float(isp_sea_level),
+            'total_impulse_sea_level_ns': float(total_impulse_sea_level),
+            'sea_level_flow_separated': bool(sea_level_separated),
+            'basis': (
+                'The thrust curve, specific_impulse and isp_design_ambient '
+                'are solved at this ambient pressure (test_altitude_isa: ISA '
+                '/ US Std Atm 1976 pressure of the entered test altitude; '
+                'atm_pressure: the entered pressure; sea_level_default: '
+                '101.325 kPa). isp_sea_level is THIS nozzle (same expansion '
+                'ratio, same Pc(t) and A_t(t)) evaluated at 101.325 kPa with '
+                'the same thrust-coefficient and flow-separation model '
+                '(truncated-nozzle Summerfield criterion); for a sea-level '
+                'ambient the two numbers are the same value.'),
+        }
+
+    def _thrust_coefficient_state(self, P_c_bar, p_amb_bar=None):
         """CF(P_c) ve akış AYRILMASI durumu — TEK hesap, tek tanım noktası.
 
         AYRILMA ARTIK SIFIRA KIRPILMIYOR (v2.6.27, A1-2)
@@ -5147,10 +5207,16 @@ class SolidRocketEngine:
 
         Dönüş alanları: cf, cf_ideal, cf_attached_ideal, separated,
         separation_area_ratio, pe_bar, pe_over_pa, choked, status, criterion.
+
+        ``p_amb_bar`` (V306/KATI-MODEL, M-KATI-20): verilirse AYNI lüle bu
+        ortam basıncında değerlendirilir (deniz seviyesi Isp'si için); None
+        ise motorun tasarım/test ortamı (``ambient_pressure_bar``) — bugünkü
+        bütün çağıranlar, bit-aynı.
         """
         gamma = float(self._nozzle_gamma())
         p_amb = float(getattr(self, 'ambient_pressure_bar',
-                              SEA_LEVEL_PRESSURE_BAR))
+                              SEA_LEVEL_PRESSURE_BAR)
+                      if p_amb_bar is None else p_amb_bar)
         durum = {
             'cf': 0.0, 'cf_ideal': 0.0, 'cf_attached_ideal': 0.0,
             'separated': False, 'separation_area_ratio': None,
@@ -10679,8 +10745,11 @@ class SolidRocketEngine:
         usd_case = (p['case_materials'][cost_family]
                     if cost_family else None)
 
-        d_t = self._estimate_throat_diameter()
-        m_nozzle = min(max(0.8 * (d_t / 0.05) ** 2, 0.2), 60.0)
+        # V306/KATI-MODEL (M-KATI-19): lüle kütlesi kuru kütle dökümüyle
+        # TEK kaynaktan (çizilen lülenin kontur integrali). Eski satır
+        # üçüncü bir lüle kütlesi uyduruyordu: 0,8 x (d_boğaz/0,05)^2,
+        # 0,2-60 kg'a kırpılmış. Lüle çizilemediyse kalem fiyatlanmaz.
+        m_nozzle = self._nozzle_drawn_mass()[0]
         # ÖH D16/kati (P2B3-05): yalıtım kütlesi de kuru-kütle zincirinin
         # TEK kaynağından okunur. Eski satır kalınlığı 3 mm'ye, yoğunluğu
         # 1200 kg/m3'e ÇIPLAK sabitliyordu; kullanıcının
@@ -10701,9 +10770,10 @@ class SolidRocketEngine:
                     if prop_family else None)
 
         mat = {
-            'nozzle': m_nozzle * p['nozzle_usd_per_kg'],
             'insulation': m_insul * p['insulation_usd_per_kg'],
         }
+        if m_nozzle is not None:
+            mat['nozzle'] = m_nozzle * p['nozzle_usd_per_kg']
         if usd_prop is not None:
             mat['propellant'] = m_prop * usd_prop
         if usd_case is not None:
@@ -10721,6 +10791,10 @@ class SolidRocketEngine:
             # malzemeye düşmek yerine kalem fiyatlanmaz.
             mat['case_materials'] = None
             eksik_kalem.append('case_materials')
+        if m_nozzle is None:
+            # V306/KATI-MODEL: lüle çizilemedi -> kütlesi yok -> fiyatı yok.
+            mat['nozzle'] = None
+            eksik_kalem.append('nozzle')
         if eksik_kalem:
             # Eksik kalem varken toplam "eksik toplam" olarak yayımlanmaz.
             mat['total_materials'] = None
@@ -13439,6 +13513,62 @@ class SolidRocketEngine:
         div = float(div) if div else SOLID_NOZZLE_REFERENCE_HALF_ANGLE_DEG
         return conv, div
 
+    def _nozzle_angles_block(self, d_throat, d_exit, epsilon):
+        """Lüle açı/boy sözlüğü (``nozzle_angles``) — TEK kurulum noktası.
+
+        V306/KATI-MODEL (M-KATI-19): sözlük eskiden yalnız
+        ``calculate_performance`` içinde satır içi kuruluyordu. Kütle
+        dökümünün çizilen-lüle integrali (``_nozzle_drawn_mass``) CAD'in
+        okuduğu AYNI sözlüğe ihtiyaç duyar; iki yerde yazılırsa çizilen lüle
+        ile tartılan lüle ayrışır. Gövde satır satır taşındı (sayılar
+        bit-aynı). Dönüş: ``(nozzle_angles, L_yakınsak, L_ıraksak, L_toplam)``
+        (boylar metre; yakınsak/toplam boy boğaz kasadan büyükse None).
+        """
+        epsilon_sea_level = epsilon
+        nozzle_conv_half, nozzle_div_half = self._nozzle_half_angles()
+        # ÖH D18 (P2B3-13): AYNI kısıt burada da geçerlidir ve ihraç zinciri
+        # (export/motor_geometry.py:511) ÖNCE bu alanı okur — kapı yalnız
+        # cad_design.nozzle_design'a konsaydı negatif boy STEP/STL yoluna
+        # buradan sızmaya devam ederdi.
+        _throat_exceeds_case = self._throat_exceeds_case(d_throat)
+        nozzle_conv_length = (
+            None if _throat_exceeds_case else
+            (self.D_chamber - d_throat) / (2 * np.tan(np.radians(nozzle_conv_half))))
+        nozzle_div_length  = (d_exit - d_throat) / (2 * np.tan(np.radians(nozzle_div_half)))
+        nozzle_total_length = (
+            None if nozzle_conv_length is None
+            else max(nozzle_conv_length + nozzle_div_length, 0.01))
+
+        nozzle_angles = {
+            'convergent_half_angle_deg': nozzle_conv_half,
+            'divergent_half_angle_deg': nozzle_div_half,
+            'angles_source': (
+                'user_input' if (self.convergent_half_angle_deg is not None
+                                 or self.divergent_half_angle_deg is not None)
+                else 'conical_default_30_15'),
+            'nozzle_type': 'conical',
+            'throat_diameter_mm': d_throat * 1000,
+            'exit_diameter_mm': d_exit * 1000,
+            'nozzle_length_mm': (None if nozzle_total_length is None
+                                 else nozzle_total_length * 1000),
+            'convergent_length_mm': (None if nozzle_conv_length is None
+                                     else nozzle_conv_length * 1000),
+            'divergent_length_mm': nozzle_div_length * 1000,
+            'throat_exceeds_case': _throat_exceeds_case,
+            'convergent_length_status': (
+                'not_physical' if _throat_exceeds_case else 'computed'),
+            'convergent_length_basis': (
+                ('throat %.3f mm is not smaller than the grain outer diameter '
+                 '%.3f mm: there is no converging section, so no length (and '
+                 'no total contour length) is published'
+                 % (d_throat * 1000, self.D_chamber * 1000))
+                if _throat_exceeds_case else
+                '(D_case - d_throat)/(2 tan(convergent half-angle))'),
+            'expansion_ratio': epsilon_sea_level,
+        }
+        return (nozzle_angles, nozzle_conv_length, nozzle_div_length,
+                nozzle_total_length)
+
     def _calculate_nozzle_length(self, d_throat=None, d_exit=None):
         """Calculate total nozzle length for conical nozzle.
 
@@ -13472,6 +13602,99 @@ class SolidRocketEngine:
         """
         return self._design_exit_diameter()
 
+    def _nozzle_cad_geometry(self):
+        """CAD'in lüleyi çizdiği geometri sözlüğü (METRE) — M-KATI-19.
+
+        ``export.motor_geometry.solid_results_to_motor_geometry`` lüle için
+        şu alanları okur: kasa İÇ çapı (``cad_design.case_design.
+        inner_diameter``), geometrik boğaz ve çıkış çapı, ``nozzle_angles``
+        sözlüğü. Aynı kaynakların TA KENDİSİ buradan verilir (kasa iç çapı
+        ``_case_inner_diameter``, boğaz ``_estimate_throat_diameter``,
+        çıkış ``_design_exit_diameter``, açılar ``_nozzle_angles_block``);
+        lüle malzemesi kullanıcının seçimidir (``_nozzle_material_key``).
+        Bekçi: tests/test_v306_kati_model.py (motor ⟷ CAD lüle kütlesi).
+        """
+        from hrma.export.motor_geometry import _put_nozzle_lengths, _real_mm
+        d_t = float(self._estimate_throat_diameter())
+        d_e = float(self._design_exit_diameter())
+        angles, _lc, _ld, _lt = self._nozzle_angles_block(
+            d_t, d_e, self._estimate_expansion_ratio())
+        md = {
+            'chamber_diameter': float(self._case_inner_diameter()),
+            'throat_diameter': d_t,
+            'exit_diameter': d_e,
+            'nozzle_angles': angles,
+            'nozzle_material': self._nozzle_material_key(),
+            'length_units': 'm',
+        }
+        # İhraç sözlüğünün lüle boyları (``solid_results_to_motor_geometry``
+        # ile AYNI yardımcılar: ilk sonlu-pozitif mm değeri -> metre).
+        _put_nozzle_lengths(md, _real_mm(angles.get('convergent_length_mm')),
+                            _real_mm(angles.get('divergent_length_mm')))
+        return md
+
+    def _nozzle_drawn_mass(self):
+        """Lüle kütlesi [kg] + künye — ÇİZİLEN lülenin kontur integrali.
+
+        V306/KATI-MODEL (M-KATI-19, S1). Kuru kütle dökümü lüleyi kasa
+        yapısal kütlesinin sabit %15'i (kapaklar dahil kasa kabuğunun
+        %19,5'i) sayıyordu. ÖLÇÜLDÜ (``docs/scofield/raw/OH/V306/
+        kati-model/once.json``, mühendis turu L3): nozula hiç dokunmadan
+        kasayı 4130 çelikten kompozite çevirmek lüleyi 11,45 → 3,58 kg
+        yaptı; test irtifası 6000 m'de çıkış 250,6 → 298,8 mm büyürken lüle
+        kütlesi DEĞİŞMEDİ. Aynı yanıtın STEP README'si ise "HRMA'nın beyan
+        ettiği lüle kütlesi aynı kontur, cidar ve malzeme üzerinden integre
+        edilir" diyordu (CAD bu motorda 2,73 kg buluyordu).
+
+        Kütle artık CAD'in KENDİ işlevinden gelir: ``cad_visualization.
+        MotorCADDesigner._estimate_component_mass('nozzle', ...)`` —
+        ``nozzle_wall_profile`` iç konturu + et kuralı, kesik koni halka
+        hacmi V = pi(2 t r_ort + t^2) L, seçilen lüle malzemesinin
+        yoğunluğu (``materials_db``). Geometri ``_nozzle_cad_geometry``
+        ile CAD'in okuduğu kaynaklardır; ikinci bir formül yazılmaz.
+
+        Kontur kurulamıyorsa (boğaz kasadan büyük: yakınsak kesit yok) lüle
+        çizilemez ve TARTILAMAZ: kütle ``None`` döner, künye nedenini
+        adıyla söyler; çağıran kuru kütleyi lülesiz toplar ve bunu beyan
+        eder (sayı uydurulmaz).
+        """
+        try:
+            from hrma.export.cad_visualization import (
+                MotorCADDesigner, nozzle_wall_profile, _nozzle_density_resolved)
+            md = self._nozzle_cad_geometry()
+            if md['nozzle_angles'].get('throat_exceeds_case'):
+                raise ValueError(
+                    'the throat is not smaller than the grain outer diameter, '
+                    'so there is no converging section to draw')
+            profil = nozzle_wall_profile(md, unit='mm')
+            rho, rho_kaynak = _nozzle_density_resolved(md)
+            kutle = float(MotorCADDesigner()._estimate_component_mass(
+                'nozzle', md))
+            if not (np.isfinite(kutle) and kutle > 0.0):
+                raise ValueError('the contour integral is not a positive '
+                                 'finite mass')
+        except Exception as hata:  # noqa: BLE001 — künyeye adıyla yazılır
+            return None, {
+                'status': 'not_computed',
+                'basis': ('nozzle mass NOT computed: the drawn nozzle '
+                          f'could not be built ({type(hata).__name__}: '
+                          f'{hata}); the dry mass excludes it')[:400],
+            }
+        return kutle, {
+            'status': 'computed',
+            'basis': (
+                'drawn nozzle: frustum-annulus volume V = pi(2*t*r_mid + '
+                't^2)*L integrated over the same contour points, wall and '
+                'material the STEP/STL nozzle uses '
+                '(cad_visualization._estimate_component_mass), times the '
+                'density of the selected nozzle material'),
+            'wall_thickness_mm': float(profil['wall']),
+            'wall_thickness_source': profil['wall_design']['source'],
+            'density_kg_m3': float(rho),
+            'density_source': rho_kaynak,
+            'material_key': md['nozzle_material'],
+        }
+
     def _dry_mass_breakdown(self):
         """Kuru kütlenin BİLEŞEN DÖKÜMÜ [kg] — T03 (2026-08-03).
 
@@ -13494,21 +13717,26 @@ class SolidRocketEngine:
         case_shell_mass = np.pi * d_case * L_case * t_wall * rho_case
         closure_mass = case_shell_mass * SOLID_CASE_CLOSURE_MASS_FRACTION
         structural_mass = case_shell_mass + closure_mass
-        # Lüle ve ateşleyici/montaj kalemleri YAPISAL kütlenin oranıdır
-        # (aşağıdaki toplamla birebir aynı çarpanlar).
-        nozzle_mass = structural_mass * 0.15
-        igniter_misc_mass = structural_mass * 0.05
+        # V306/KATI-MODEL (M-KATI-19): lüle ÇİZİLEN katının kontur
+        # integralidir (_nozzle_drawn_mass), kasa kütlesinin oranı DEĞİL.
+        # Ateşleyici/montaj kalemi yapısal kütlenin oranı olarak kalır
+        # (aşağıdaki toplamla birebir aynı çarpan; künyede beyanlı).
+        nozzle_mass, nozzle_kunye = self._nozzle_drawn_mass()
+        igniter_misc_mass = structural_mass * SOLID_IGNITER_MISC_MASS_FRACTION
 
         # ÖH D18 (P2B4-04): yalıtım VE liner halkası TEK yerde
         # (_insulation_liner_masses); kuru kütle toplamı da aynı yerden okur,
         # böylece iki yol ayrışamaz.
         insulation_mass, liner_mass = self._insulation_liner_masses()
 
-        total = (structural_mass * 1.20) + insulation_mass + liner_mass
+        total = (structural_mass * (1.0 + SOLID_IGNITER_MISC_MASS_FRACTION)
+                 + (nozzle_mass or 0.0) + insulation_mass + liner_mass)
         return {
             'case_kg': float(case_shell_mass),
             'closure_kg': float(closure_mass),
-            'nozzle_kg': float(nozzle_mass),
+            'nozzle_kg': (None if nozzle_mass is None
+                          else float(nozzle_mass)),
+            'nozzle_basis': nozzle_kunye,
             'insulation_kg': float(insulation_mass),
             # ÖH D18 (P2B4-04, ikinci ayak): liner KALINLIĞI kuru kütleye HİÇ
             # girmiyordu. ÖLÇÜLDÜ (once.json): liner_thickness 0,1 -> 5,0 ->
@@ -13524,7 +13752,9 @@ class SolidRocketEngine:
             'basis': (
                 'case shell from the hoop-stress wall thickness and the case '
                 'material density; closures as a fixed fraction of the shell; '
-                'nozzle and igniter/misc as fractions of the structural mass; '
+                'nozzle from the drawn nozzle contour, wall and material '
+                '(nozzle_basis); igniter/misc as a fraction of the structural '
+                'mass; '
                 'insulation and liner as annular rings from the entered '
                 'thicknesses and the single insulation/liner density record '
                 '(_insulation_density). Avionics are NOT part of the motor '
@@ -13608,8 +13838,8 @@ class SolidRocketEngine:
         - Case: cylindrical shell, AISI 4130 steel (rho=7800 kg/m3)
           wall thickness from hoop stress: t = P_c * r / (sigma_y / SF)
         - Forward + aft closures: ~30% of case mass
-        - Nozzle: ~15% of total dry mass
-        - Igniter + misc: ~5% of total dry mass
+        - Nozzle: the drawn nozzle (contour integral, _nozzle_drawn_mass)
+        - Igniter + misc: ~5% of the structural mass
 
         Bileşen dökümü ``_dry_mass_breakdown`` ile AYNI formüllerden gelir
         (T03); bu metodun döndürdüğü toplam orada da ``total_kg`` olarak
@@ -13637,13 +13867,16 @@ class SolidRocketEngine:
         # Subtotal structural mass
         structural_mass = case_shell_mass + closure_mass
 
-        # Nozzle mass: ~15% additional
-        nozzle_factor = 0.15
+        # V306/KATI-MODEL (M-KATI-19): lüle artık yapısal kütlenin %15'i
+        # DEĞİL; çizilen lülenin kontur integrali (_nozzle_drawn_mass, döküm
+        # ile aynı tek kaynak). Çizilemiyorsa kuru kütle lülesiz toplanır ve
+        # döküm künyesi (nozzle_basis) bunu adıyla söyler.
+        nozzle_mass, _nozzle_kunye = self._nozzle_drawn_mass()
         # Igniter + misc: ~5% additional. (Eski yorum bu %5'in yalıtımı da
         # kapsadığını söylüyordu; yalıtım artık kullanıcının KENDİ
         # kalınlığından açıkça hesaplanır, %5 götürüsü ateşleyici/montaj
         # kalemlerine kalır. insulation_thickness=0 iken katkı sıfırdır.)
-        misc_factor = 0.05
+        misc_factor = SOLID_IGNITER_MISC_MASS_FRACTION
 
         # ÖH D18 (P2B4-04): yalıtım + liner halkaları TEK kaynaktan
         # (_insulation_liner_masses) — burada tablo sabiti okunuyordu ve
@@ -13651,8 +13884,8 @@ class SolidRocketEngine:
         # docstring'inde).
         insulation_mass, liner_mass = self._insulation_liner_masses()
 
-        dry_mass = (structural_mass * (1.0 + nozzle_factor + misc_factor)
-                    + insulation_mass + liner_mass)
+        dry_mass = (structural_mass * (1.0 + misc_factor)
+                    + (nozzle_mass or 0.0) + insulation_mass + liner_mass)
 
         # ÖH D18 (P2B4-07) — BEYANSIZ 100 g TABANI SÖKÜLDÜ.
         # Burada ``dry_mass = max(dry_mass, 0.1)`` duruyordu ("Sanity check
@@ -13815,26 +14048,52 @@ class SolidRocketEngine:
         # 186,09 bar). Sayı yayımlandığı için tutarsızlık bir sonraki sefer
         # yanıtın kendisinden görülür, yalnız testten değil.
         burst_yield_pa = None
-        try:
-            from hrma.analysis.pressure_vessel import PressureVesselAnalyzer
-            pv = PressureVesselAnalyzer().analyze(
-                meop_bar=max(max_pressure, 1e-6),
-                inner_diameter_mm=self._case_inner_diameter() * 1000.0,
-                material=material,
-                wall_thickness_mm=t_wall * 1000.0,
-            )
-            burst_pressure_bar = float(pv['actual_burst_pressure_bar'])
-            burst_source = ('Faupel thick-wall / thin-wall plastic limit '
-                            '(hrma.analysis.pressure_vessel)')
-            vessel_status = pv['status']
-            vessel_warnings = list(pv.get('warnings', []))
-            derating = pv.get('derating') or {}
-            if derating.get('room_temp_yield_strength_Pa') is not None:
-                burst_yield_pa = float(
-                    derating['room_temp_yield_strength_Pa'])
-        except Exception as exc:
-            vessel_warnings.append(
-                f'Burst pressure fell back to the thin-wall yield estimate: {exc}')
+        # V306/KATI-MODEL (M-KATI-21, S2): JENERİK KOMPOZİT KASA. Ölçüldü
+        # (mühendis turu L3): kap modülü malzeme veritabanında 'composite'
+        # kaydı bulamıyor, ham Python hatası ("Unknown material 'composite'.
+        # Available: [...]") kullanıcıya basılıyor ve patlama basıncı
+        # ince-cidar AKMA tahminine düşüp tasarım basıncına eşit (175 bar)
+        # yayımlanıyordu. Kapın patlama modeli (Faupel kalın cidar + ince
+        # cidar plastik limit) METAL bir modeldir; jenerik kompozit kaydı
+        # (SOLID_CASE_MATERIAL_EXTRA) yalnız bir izin verilen gerilme ve
+        # yoğunluk taşır, kopma dayanımı/elastik özellikleri yoktur. HRMA bu
+        # kasanın patlama basıncını BİLMEZ: sayı yayımlanmaz, neden adıyla
+        # ve kod olarak (arayüz çevirir) yazılır; kap hükmü verilmez.
+        burst_status = None
+        if str(material).lower() in SOLID_CASE_MATERIAL_EXTRA:
+            burst_pressure_bar = None
+            burst_status = 'not_evaluated_generic_composite'
+            burst_source = (
+                'NOT EVALUATED: the generic filament-wound composite case '
+                'record (SOLID_CASE_MATERIAL_EXTRA) carries only an '
+                'allowable stress and a density, no ultimate strength or '
+                'elastic properties, and the burst model of the pressure-'
+                'vessel module (Faupel thick-wall / thin-wall plastic limit) '
+                'is a metal model. No burst pressure is published and no '
+                'vessel verdict is issued; the hoop sizing and the design '
+                'pressure above use the generic allowable.')
+            vessel_status = 'NOT_EVALUATED'
+        else:
+            try:
+                from hrma.analysis.pressure_vessel import PressureVesselAnalyzer
+                pv = PressureVesselAnalyzer().analyze(
+                    meop_bar=max(max_pressure, 1e-6),
+                    inner_diameter_mm=self._case_inner_diameter() * 1000.0,
+                    material=material,
+                    wall_thickness_mm=t_wall * 1000.0,
+                )
+                burst_pressure_bar = float(pv['actual_burst_pressure_bar'])
+                burst_source = ('Faupel thick-wall / thin-wall plastic limit '
+                                '(hrma.analysis.pressure_vessel)')
+                vessel_status = pv['status']
+                vessel_warnings = list(pv.get('warnings', []))
+                derating = pv.get('derating') or {}
+                if derating.get('room_temp_yield_strength_Pa') is not None:
+                    burst_yield_pa = float(
+                        derating['room_temp_yield_strength_Pa'])
+            except Exception as exc:
+                vessel_warnings.append(
+                    f'Burst pressure fell back to the thin-wall yield estimate: {exc}')
         if burst_yield_pa is None:
             # Yedek yolda kopma AYNI sigma_y'den türetildi (yield_pressure_bar).
             burst_yield_pa = float(sigma_y)
@@ -13889,6 +14148,58 @@ class SolidRocketEngine:
                 or _kasa_sicaklik_cozulmedi)
                 and str(vessel_status or '').upper() in kap_onay_hukumleri):
             vessel_status = STRUCTURAL_VERDICT_NOT_EVALUATED
+        # --- V306/KATI-MODEL (M-KATI-2, S1): KULLANICININ TASARIM KATSAYISI
+        # HÜKME BAĞLANIR. ÖLÇÜLDÜ (mühendis turu L1, 6061-T6 kasa 1,65 mm,
+        # Pc 68,95 bar, FoS 2,5; bu taban 277e53c10'da yeniden üretildi:
+        # ``docs/scofield/raw/OH/V306/kati-model/once.json``): ekran
+        # "Tasarım Basıncı 172 bar · Patlama Basıncı 165 bar · MARGINAL —
+        # acceptable but thin" diyordu. Tasarım basıncı bu bloğun kendi
+        # tanımıyla MEOP x kullanıcının tasarım katsayısıdır (akmaya karşı;
+        # cidar t = P r/(sigma_y/SF) ile boyutlanır). Girilen cidarın akma
+        # basıncı 150,7 bar < 172,4 bar: kasa kullanıcının istediği
+        # katsayıyı SAĞLAMIYOR (akma emniyeti 2,19 < 2,50; çember gerilmesi
+        # 1,887 mm istiyor), patlama basıncı tasarım basıncının da altında.
+        # Kap modülünün MARGINAL'i yalnız AIAA S-080A patlama katsayısına
+        # (2,0 x MEOP) karşı bir marjdır; kullanıcının ölçütünü görmez.
+        # Kural: kullanıcı cidarı verdiyse ve akma basıncı tasarım
+        # basıncının altındaysa hüküm FAIL'dir (kap modülünün kendi
+        # "verilen cidar gereken cidardan ince -> FAIL" kuralıyla aynı yön);
+        # ölçüt ve sayıları ``design_factor_check`` künyesinde.
+        design_factor_check = None
+        if vessel_user_wall:
+            _karsilaniyor = bool(yield_pressure_bar
+                                 >= design_pressure_bar * (1.0 - 1e-9))
+            design_factor_check = {
+                'met': _karsilaniyor,
+                'design_safety_factor': float(SF_design),
+                'yield_safety_factor': float(pressure_safety_factor),
+                'design_pressure_bar': float(design_pressure_bar),
+                'yield_pressure_bar': float(yield_pressure_bar),
+                'burst_pressure_bar': (None if burst_pressure_bar is None
+                                       else float(burst_pressure_bar)),
+                'wall_thickness_mm': float(t_wall * 1000.0),
+                'hoop_required_mm': vessel_prov['hoop_required_mm'],
+                'basis': (
+                    'The design pressure is MEOP x the design safety factor '
+                    'you set (against yield; the hoop sizing rule is '
+                    't = P*r/(sigma_y/SF)). The entered wall meets it when '
+                    'its yield pressure sigma_y*t/r_inner is at least the '
+                    'design pressure. When it does not, the vessel status is '
+                    'FAIL whatever the burst margin against the code burst '
+                    'factor says.'),
+            }
+            if not _karsilaniyor:
+                vessel_status = 'FAIL'
+                # Kap modülünün MARGINAL cümlesi ("... acceptable but thin")
+                # FAIL hükmüyle aynı listede çelişir (ekranda ölçüldü, L1).
+                # Cümle SİLİNMEZ: künyeye taşınır, listede yerini bu hükmün
+                # nedeni alır (güvenlik sekmesi onu çevrilmiş satırla basar).
+                _yerine = [u for u in vessel_warnings
+                           if 'acceptable but thin' in str(u)]
+                if _yerine:
+                    vessel_warnings = [u for u in vessel_warnings
+                                       if u not in _yerine]
+                    design_factor_check['superseded_vessel_warnings'] = _yerine
         # Z2 (P2B2-01): kullanıcının cidarı artık kırpılmadığı için kapın
         # sınadığı cidar GERÇEKTEN onun cidarıdır. İmalat tabanının altındaki
         # bir cidar reddedilmez — analiz edilir ve BEYAN edilir; kap hükmü de
@@ -13961,6 +14272,10 @@ class SolidRocketEngine:
                 + " Supply 'case_thickness' (mm) to obtain one."
                 + _uyari_cumlesi)
 
+        if burst_status is not None:
+            # V306/KATI-MODEL (M-KATI-21): jenerik kompozitte kap hükmü
+            # verilmez; dayanak bunu söyler (kullanıcı cidarında bile).
+            vessel_status_basis = burst_source + _uyari_cumlesi
         relief_setting_bar = (design_pressure_bar
                               * SOLID_CASE_DESIGN['relief_fraction_of_design'])
 
@@ -13969,7 +14284,11 @@ class SolidRocketEngine:
                 'max_operating_pressure_bar': max_pressure,
                 'design_pressure_bar': float(design_pressure_bar),
                 'safety_factor': float(pressure_safety_factor),
-                'burst_pressure_bar': float(burst_pressure_bar),
+                'burst_pressure_bar': (None if burst_pressure_bar is None
+                                       else float(burst_pressure_bar)),
+                # V306/KATI-MODEL (M-KATI-21): patlama basıncı hesaplanmadıysa
+                # nedeninin KODU (arayüz çevirir); hesaplandıysa None.
+                'burst_pressure_status': burst_status,
                 'relief_valve_setting_bar': float(relief_setting_bar),
                 # ÖH D17 / P5B2-09 (kalan yarı). Bu üretici ``burst_margin``i
                 # kopma/MEOP olarak yayımlıyor; KARDEŞ üretici
@@ -13979,11 +14298,13 @@ class SolidRocketEngine:
                 # TAM 2 KAT, çünkü kopma katsayısı 2,0. SAYI DEĞİŞMEDİ;
                 # yanına oranın hangi tanım olduğunu ADIYLA söyleyen
                 # kardeşler kondu (doktrin 4: iki üretici aynı dili konuşur).
-                'burst_margin': (float(burst_pressure_bar / max_pressure)
-                                 if max_pressure > 0 else float('inf')),
-                'burst_margin_vs_meop': (
+                'burst_margin': (None if burst_pressure_bar is None else (
                     float(burst_pressure_bar / max_pressure)
-                    if max_pressure > 0 else float('inf')),
+                    if max_pressure > 0 else float('inf'))),
+                'burst_margin_vs_meop': (None if burst_pressure_bar is None
+                                         else (
+                    float(burst_pressure_bar / max_pressure)
+                    if max_pressure > 0 else float('inf'))),
                 'burst_margin_definition': (
                     'burst_margin = burst_pressure_bar / '
                     'max_operating_pressure_bar (i.e. against MEOP, not '
@@ -14005,6 +14326,10 @@ class SolidRocketEngine:
                     ' vessel capability'),
                 'vessel_status': vessel_status,
                 'vessel_warnings': vessel_warnings,
+                # V306/KATI-MODEL (M-KATI-2): kullanıcının tasarım
+                # katsayısının sağlanıp sağlanmadığı (yalnız cidar
+                # kullanıcıdan geldiyse; HRMA boyutlandırdıysa totolojidir).
+                'design_factor_check': design_factor_check,
                 # B2-4: hükmün KAZANILIP kazanılmadığı adıyla yazılır.
                 'wall_thickness_source': vessel_prov['source'],
                 'vessel_status_is_tautological': vessel_tautological,
@@ -14604,6 +14929,51 @@ class SolidRocketEngine:
                 kayit['accepted_values'] = list(GRAIN_SUPPORT_OPTIONS)
         return GRAIN_SUPPORT_DEFAULT, 'default (submitted value rejected)'
 
+    def _grain_thermal_load(self):
+        """V306/TANE NR-16 — tane ısıl yükünün TEK kaynağı.
+
+        Analitik gerinim bloğu (``_calculate_grain_structural``) ve tane
+        kesiti FEA köprüsü (``hrma.fea.bridge.run_planar_grain_fea``) aynı
+        yük kümesini buradan okur; iki yol ayrı ayrı türetirse aynı tane
+        için zıt hüküm çıkar (ÖLÇÜLDÜ, BULGULAR_RC NR-16: örnek KNDX BATES
+        gövdeye yapıştırılmış, 60 bar: analitik %2,364 ⟷ FEA %0,41 — FEA
+        kürleme/soğuma büzülmesini taşımıyordu).
+
+        Gövdeye yapıştırılmış tanede ΔT = T_depolama − T_kürleme (soğuma,
+        negatif); kartuş yüklü tanede gövde büzülmeyi kısıtlamaz, serbest
+        cisimde üniform sıcaklık değişimi gerilme/gerinim üretmez → ΔT = 0
+        (NASA SP-8073 §1; V301/S1-6). Malzeme sabitleri
+        SOLID_GRAIN_MECHANICS kaydından (``_grain_mechanics``), depolama
+        sıcaklığı ``ambient_temp`` girdisinden ya da SOLID_THERMAL
+        varsayılanından gelir.
+        """
+        mech = self._grain_mechanics()
+        alpha = float(mech['thermal_expansion_1k'])
+        T_cure = float(mech['cure_temperature_k'])
+        T_store = float(getattr(self, 'ambient_temperature',
+                                SOLID_THERMAL['ambient_temperature_k']))
+        dT = T_store - T_cure                     # kürlemeden soğuma (negatif)
+        support, support_source = self._grain_support()
+        if support == GRAIN_SUPPORT_CARTRIDGE:
+            dT = 0.0
+        return {
+            'grain_support': support,
+            'grain_support_source': support_source,
+            'thermal_expansion_1k': alpha,
+            'cure_temperature_k': T_cure,
+            'storage_temperature_k': T_store,
+            'delta_t_k': dT,
+            # Serbest (kısıtsız) ısıl gerinim α·ΔT — iki yolun ortak girdisi.
+            'free_thermal_strain': alpha * dT,
+            'basis': (
+                'free thermal strain alpha x (storage temperature - cure '
+                'temperature) for a case-bonded grain (the case restrains '
+                'the cure/cool-down shrinkage); 0 for a cartridge-loaded '
+                'grain (NASA SP-8073 section 1). alpha and the cure '
+                'temperature come from the propellant record in '
+                'SOLID_GRAIN_MECHANICS.'),
+        }
+
     def _tane_gerinim_uyarisi(self, grain):
         """V301/FİZİK-2 (kalem 10) — tane gerinimi kapasiteyi aşıyorsa adlı uyarı.
 
@@ -14665,9 +15035,11 @@ class SolidRocketEngine:
         mech = self._grain_mechanics()
         E = float(mech['elastic_modulus_pa'])
         nu = float(mech['poisson_ratio'])
-        alpha = float(mech['thermal_expansion_1k'])
-        T_cure = float(mech['cure_temperature_k'])
         strain_capability = float(mech['strain_capability'])
+        # NR-16: ısıl yük kümesi TEK kaynaktan (FEA köprüsü de bunu okur).
+        isil = self._grain_thermal_load()
+        alpha = isil['thermal_expansion_1k']
+        T_cure = isil['cure_temperature_k']
 
         a = max(self.D_core / 2.0, 1e-6)          # port yarıçapı
         b = max(self.D_chamber / 2.0, a * 1.001)  # kasa iç yarıçapı
@@ -14678,15 +15050,14 @@ class SolidRocketEngine:
             a = max(b / 1000.0, 1e-6)
 
         P = self.P_c * 1e5                        # Pa
-        T_store = float(getattr(self, 'ambient_temperature',
-                                SOLID_THERMAL['ambient_temperature_k']))
-        dT = T_store - T_cure                     # kürlemeden soğuma (negatif)
+        T_store = isil['storage_temperature_k']
         # V301/S1-6: kartuş yüklü tanede gövde büzülmeyi kısıtlamaz; serbest
         # cisimde üniform sıcaklık değişimi gerilme/gerinim üretmez (T0 = 0).
         # Basınç yükü aynı sınır koşuluyla (u(b) = u_kasa, sıkı geçme) çözülür.
-        support, support_source = self._grain_support()
-        if support == GRAIN_SUPPORT_CARTRIDGE:
-            dT = 0.0
+        # Kural ``_grain_thermal_load`` içinde (NR-16: tek kaynak).
+        dT = isil['delta_t_k']
+        support = isil['grain_support']
+        support_source = isil['grain_support_source']
 
         one_m_2nu = 1.0 - 2.0 * nu
         K = E / ((1.0 + nu) * one_m_2nu)
@@ -14747,11 +15118,57 @@ class SolidRocketEngine:
         else:
             thermal_compat = 'Poor'
 
+        # NR-16: basınç payı (gövde esnemesi dahil) — çözüm (P, T0)'da
+        # doğrusal olduğu için toplam − ısıl tam olarak basınç payıdır
+        # (ikisi de Kt'siz; yayımlanan toplam Kt ile çarpılır).
+        pressure_bore_strain = bore_strain - thermal_bore_strain
+
         return {
             'max_grain_stress_mpa': float(max_stress_pa / 1e6),
             'bore_hoop_stress_mpa': float(sigma_t_bore * kt / 1e6),
             'bore_radial_stress_mpa': float(sigma_r_bore * kt / 1e6),
             'thermal_only_bore_strain_percent': float(thermal_bore_strain * 100),
+            # NR-16: iki yolun yük kümesi ekranda yan yana yazılabilsin diye
+            # bileşenler ve kümenin kendisi yayımlanır (sayı türetilmez:
+            # yukarıdaki çözümün parçalarıdır).
+            'pressure_only_bore_strain_percent': float(
+                pressure_bore_strain * 100),
+            # V306/KATI-MODEL (M-KATI-16): bu çözümün dış sınır koşulu
+            # u(b) = u_kasa — kasanın basınç altındaki radyal genişlemesi
+            # (ince cidar hoop: P b^2/(E_kasa t)). Tane kesiti FEA'sı AYNI
+            # sayıyı dış yüzeyde uygular (tek kaynak; eskiden FEA kasayı
+            # rijit tutuyordu: tur L2 kartuşta %0,819 ⟷ %0,36).
+            'case_radial_expansion_mm': float(u_case * 1000.0),
+            'case_radial_expansion_basis': (
+                'u_case = P*b^2/(E_case*t_case): thin-wall hoop expansion of '
+                'the case under chamber pressure at the grain outer radius b '
+                '(case material elastic modulus from materials_db, case wall '
+                'from the case design); the outer boundary condition of '
+                'this bore-strain solution and of the grain-section FEA'),
+            'free_thermal_strain': float(isil['free_thermal_strain']),
+            # NR-16: bu blok da doğrusal küçük-gerinim çözümüdür; tane kesiti
+            # FEA'sının hüküm eşiği (planar_grain.SMALL_STRAIN_LIMIT, TEK
+            # kaynak) aşıldıysa beyan edilir (sayılar değişmez). FEA bu
+            # eşiğin üstünde marj SAYISINI geri çeker; iki yol yan yana
+            # okunurken aynı geçerlilik sınırı görünür.
+            'small_strain_limit': _tane_kucuk_gerinim_esigi(),
+            'small_strain_limit_exceeded': bool(
+                abs(bore_strain_kt) > _tane_kucuk_gerinim_esigi()),
+            'load_set': {
+                'bore_pressure': True,
+                'case_expansion_under_pressure': True,
+                'cure_cooldown_shrinkage': bool(dT != 0.0),
+                'section_shape': 'nominal stress-concentration factor',
+                'stress_concentration_factor': kt,
+                '_basis': (
+                    'analytic plane-strain hollow cylinder: bore pressure, '
+                    'the case radial expansion under that pressure (thin '
+                    'case, its material and wall), and for a case-bonded '
+                    'grain the case-restrained cure/cool-down shrinkage; '
+                    'the port shape enters only through the nominal '
+                    'stress-concentration factor. bore_strain_percent = '
+                    '(pressure_only + thermal_only) x factor.'),
+            },
             'bore_strain_percent': float(bore_strain_kt * 100),
             'strain_capability_percent': float(strain_capability * 100),
             'strain_safety_factor': float(strain_margin_kt),
@@ -16662,8 +17079,44 @@ class SolidRocketEngine:
                     'error_i18n': _w('warn.solid.propellant_mass_not_positive',
                                      'critical')}
 
-        # Sea level specific impulse
-        isp_sea_level = total_impulse / (propellant_mass * self.g0)
+        # V306/KATI-MODEL (M-KATI-20, S1): İKİ AYRI BÜYÜKLÜK.
+        # İtki eğrisi motorun tasarım/test ortamında (ambient_pressure_bar:
+        # test_altitude'un ISA basıncı ya da atm_pressure) çözülür; eğrinin
+        # Isp'si o ortamın Isp'sidir (isp_design_ambient = specific_impulse).
+        # Eskiden AYNI sayı 'isp_sea_level' adıyla yayımlanıyordu. ÖLÇÜLDÜ
+        # (mühendis turu L3, 6000 m lülesi ε 18,61): 'deniz seviyesi Isp'
+        # 244,55 s gösteriyordu, oysa 6000 m'ye göre genişletilmiş lüle deniz
+        # seviyesinde aşırı genişler ve 0 m lülesinden (229,29 s) DÜŞÜK
+        # olmalıdır. Deniz seviyesi Isp'si artık AYNI lülenin (aynı ε, aynı
+        # Pc(t), aynı A_t(t)) deniz seviyesi basıncındaki itki katsayısıyla
+        # (aynı kesilmiş-lüle ayrılma modeli, _thrust_coefficient_state)
+        # aynı eğri üzerinden integre edilir. Ortam deniz seviyesiyse iki
+        # sayı AYNI işlemle aynıdır (bit-aynı yol).
+        isp_design_ambient = total_impulse / (propellant_mass * self.g0)
+        p_amb_tasarim = float(getattr(self, 'ambient_pressure_bar',
+                                      SEA_LEVEL_PRESSURE_BAR))
+        if p_amb_tasarim == float(SEA_LEVEL_PRESSURE_BAR):
+            total_impulse_sea_level = float(total_impulse)
+            isp_sea_level = isp_design_ambient
+            sea_level_separated = bool(np.any(
+                curve.get('separated', np.zeros(0, dtype=bool))))
+        else:
+            _p_dizi = np.asarray(curve['pressure'], dtype=float)
+            _at_dizi = np.asarray(curve['throat_area_series'], dtype=float)
+            _durumlar = [self._thrust_coefficient_state(
+                float(_p), SEA_LEVEL_PRESSURE_BAR) for _p in _p_dizi]
+            _sl_itki = np.array([
+                _d['cf'] * float(_p) * 1e5 * float(_a)
+                for _d, _p, _a in zip(_durumlar, _p_dizi, _at_dizi)])
+            total_impulse_sea_level = float(_trapezoid(_sl_itki,
+                                                       curve['time']))
+            isp_sea_level = total_impulse_sea_level / (propellant_mass
+                                                       * self.g0)
+            sea_level_separated = any(bool(_d['separated'])
+                                      for _d in _durumlar)
+        design_ambient = self._design_ambient_report(
+            isp_design_ambient, isp_sea_level, total_impulse_sea_level,
+            sea_level_separated)
         
         # Vakum özgül itkisi — YANITIN KENDİ CF ZİNCİRİNDEN (v2.6.27, F2-2).
         #
@@ -16698,9 +17151,9 @@ class SolidRocketEngine:
         # Değer doğrulama — eskiden yalnız stdout'a basılıyordu (kullanıcı
         # arayüzde GÖREMİYORDU). Artık uyarı listesine giriyor: hem görünür
         # hem iki dilli. Eşikler ve koşullar birebir aynı.
-        if isp_sea_level < 50 or isp_sea_level > 500:
+        if isp_design_ambient < 50 or isp_design_ambient > 500:
             run_warnings.append(_w('warn.solid.isp_out_of_range', 'warning',
-                                   isp_s=round(isp_sea_level, 1)))
+                                   isp_s=round(isp_design_ambient, 1)))
         if total_impulse < 100 or total_impulse > 1e8:
             run_warnings.append(_w('warn.solid.total_impulse_out_of_range',
                                    'warning',
@@ -16802,13 +17255,24 @@ class SolidRocketEngine:
         # GÖRELİDİR; oran ve iki çap birlikte bildirilir. Bu bir ret değil
         # bir zarf bildirimidir: irtifa lülesi gövdeden geniş olabilir, ama
         # gövde borusunun bunu kaldırdığı KULLANICININ kararıdır.
-        if (np.isfinite(d_exit) and float(self.D_chamber) > 0
-                and d_exit > float(self.D_chamber)):
+        #
+        # V306/KATI-MODEL (M-KATI-11): kıyas KASA DIŞ ÇAPIYLA yapılır. Eski
+        # kıyas ``self.D_chamber``ı (TANE dış çapı) "motor kasası" diye
+        # basıyordu. ÖLÇÜLDÜ (mühendis turu L2): "125,9 mm, 98 mm gövdeden
+        # geniş (1,28 kat)" — 98 mm yakıt bloğu çapıdır, kasa dış çapı
+        # 104,0 + 2 x 3,31 = 110,6 mm (cad_design.case_design.outer_diameter),
+        # doğru oran 1,14; L2-a'da çıkış (107,96 mm) kasanın İÇİNDE kalırken
+        # de uyarı ateşleniyordu. Kasa dış çapı cad_design ile TEK kaynaktan:
+        # kasa iç çapı (_case_inner_diameter) + 2 x cidar (_case_design).
+        _kasa_dis_m = (float(self._case_inner_diameter())
+                       + 2.0 * float(self._case_design()[3]))
+        if (np.isfinite(d_exit) and _kasa_dis_m > 0
+                and d_exit > _kasa_dis_m):
             run_warnings.append(_w(
                 'warn.solid.exit_cone_exceeds_case', 'warning',
                 exit_diameter_mm=round(d_exit * 1000, 1),
-                case_diameter_mm=round(float(self.D_chamber) * 1000, 1),
-                ratio=round(d_exit / float(self.D_chamber), 2)))
+                case_diameter_mm=round(_kasa_dis_m * 1000, 1),
+                ratio=round(d_exit / _kasa_dis_m, 2)))
 
         # Altitude performance analysis
         altitudes = [0, 1000, 5000, 10000, 20000, 50000, 80000, 100000]  # m
@@ -16831,47 +17295,11 @@ class SolidRocketEngine:
         # (d_throat already computed above from max mass flow).
         # Yarı açılar KULLANICI GİRDİSİNDEN gelir (_nozzle_half_angles);
         # raporlanan açı ile uzunluğu üreten açı aynı olmak ZORUNDA.
-        nozzle_conv_half, nozzle_div_half = self._nozzle_half_angles()
-        # ÖH D18 (P2B3-13): AYNI kısıt burada da geçerlidir ve ihraç zinciri
-        # (export/motor_geometry.py:511) ÖNCE bu alanı okur — kapı yalnız
-        # cad_design.nozzle_design'a konsaydı negatif boy STEP/STL yoluna
-        # buradan sızmaya devam ederdi.
-        _throat_exceeds_case = self._throat_exceeds_case(d_throat)
-        nozzle_conv_length = (
-            None if _throat_exceeds_case else
-            (self.D_chamber - d_throat) / (2 * np.tan(np.radians(nozzle_conv_half))))
-        nozzle_div_length  = (d_exit - d_throat) / (2 * np.tan(np.radians(nozzle_div_half)))
-        nozzle_total_length = (
-            None if nozzle_conv_length is None
-            else max(nozzle_conv_length + nozzle_div_length, 0.01))
-
-        nozzle_angles = {
-            'convergent_half_angle_deg': nozzle_conv_half,
-            'divergent_half_angle_deg': nozzle_div_half,
-            'angles_source': (
-                'user_input' if (self.convergent_half_angle_deg is not None
-                                 or self.divergent_half_angle_deg is not None)
-                else 'conical_default_30_15'),
-            'nozzle_type': 'conical',
-            'throat_diameter_mm': d_throat * 1000,
-            'exit_diameter_mm': d_exit * 1000,
-            'nozzle_length_mm': (None if nozzle_total_length is None
-                                 else nozzle_total_length * 1000),
-            'convergent_length_mm': (None if nozzle_conv_length is None
-                                     else nozzle_conv_length * 1000),
-            'divergent_length_mm': nozzle_div_length * 1000,
-            'throat_exceeds_case': _throat_exceeds_case,
-            'convergent_length_status': (
-                'not_physical' if _throat_exceeds_case else 'computed'),
-            'convergent_length_basis': (
-                ('throat %.3f mm is not smaller than the grain outer diameter '
-                 '%.3f mm: there is no converging section, so no length (and '
-                 'no total contour length) is published'
-                 % (d_throat * 1000, self.D_chamber * 1000))
-                if _throat_exceeds_case else
-                '(D_case - d_throat)/(2 tan(convergent half-angle))'),
-            'expansion_ratio': epsilon_sea_level,
-        }
+        # V306/KATI-MODEL (M-KATI-19): blok TEK yerde kurulur; kütle
+        # dökümünün çizilen-lüle integrali de AYNI sözlüğü okur.
+        (nozzle_angles, nozzle_conv_length, nozzle_div_length,
+         nozzle_total_length) = self._nozzle_angles_block(
+            d_throat, d_exit, epsilon_sea_level)
 
         # --- Grain Design ---
         # ÖH D15 a2 (P2B4-02): en ince kesit TEK kaynaktan ve grain tipine
@@ -17337,7 +17765,7 @@ class SolidRocketEngine:
                     'profile) understates the maximum acceleration by this '
                     'factor; the resolved thrust_curve is published in the '
                     'same response and should be preferred.'),
-                'specific_impulse_s': isp_sea_level,
+                'specific_impulse_s': isp_design_ambient,
                 'specific_impulse_vacuum_s': isp_vacuum,
                 'burn_time_s': burn_time,
                 'total_impulse_Ns': total_impulse,
@@ -17480,8 +17908,12 @@ class SolidRocketEngine:
             'average_thrust': avg_thrust,
             'max_thrust': max_thrust,
             'total_impulse': total_impulse,
-            'specific_impulse': isp_sea_level,
+            'specific_impulse': isp_design_ambient,
             'isp_sea_level': isp_sea_level,
+            # V306/KATI-MODEL (M-KATI-20): eğrinin ortamındaki Isp ADIYLA
+            # ve o ortamın kendisi (basınç, irtifa, kaynak).
+            'isp_design_ambient': isp_design_ambient,
+            'design_ambient': design_ambient,
             'isp_vacuum': isp_vacuum,
             # F2-2: vakum Isp'sinin türetildiği zincir adıyla yayımlanır.
             'isp_vacuum_basis': isp_vacuum_basis,

@@ -6,10 +6,18 @@
    (sentetik "doğrulama veritabanı" vitrine çıkmaz — ARGE kararı,
    docs/ANALIZ_PLATFORM_PLANI.md).
 
-   Tahmin eğrisi kaynağı (öncelik sırası):
-     1. TransientPanel.result.transient  → gerçek Pc(t)/F(t) yürüyüşü
-     2. currentResults.motor.transient   → saklanmış transient eğrisi
-     3. currentResults.motor.thrust + burn_time → sabit itki dikdörtgeni
+   Tahmin eğrisi kaynağı (V306/RAPOR-HATA, M-KATI-1): MOTORUN YAYIMLADIĞI
+   itki eğrisi — uçuş panelleriyle AYNI tek kural
+   (flight_vehicle.motor_flight_thrust; aynı hesabın normalize aracındaki
+   ``flight_thrust`` bloğu, FlightHandoff.vehicleFor/vehicleReady):
+     katı  → motorun ``thrust_curve``'ü,
+     hibrit→ N₂O tank boşalması modellendiyse boşalma eğrisi, yoksa regüle
+             ``thrust_curve``,
+     sıvı  → kararlı rejim modeli eğri YAYIMLAMAZ: sabit deniz seviyesi
+             itkisi × yanma süresi (dikdörtgen) ve bunun NEDENİ yazılır.
+   Zaman Çözümlü panelinin eğrisi buraya GİRMEZ (UÇUŞ-2 kuralı: o ayrı,
+   açık seçimle koşulan bir kiptir; eskiden başka bir motor için koşulmuş
+   olsa bile önceliği alıyordu).
 
    Güverte formu sayısal alan + select üretir; CSV metni için özel blok
    (textarea + dosya seçici) panel montajından sonra bölüme enjekte edilir,
@@ -59,42 +67,78 @@
     };
 
     // ------------------------------------------------------------------
-    // Tahmin eğrisi sağlayıcısı (transient > saklanmış transient > sabit)
+    // Tahmin eğrisi sağlayıcısı — MOTORUN KENDİ İTKİ EĞRİSİ (tek kural)
     // ------------------------------------------------------------------
-    function predictedCurve() {
-        try {
-            const tr = window.TransientPanel && window.TransientPanel.result;
-            if (tr && tr.transient && Array.isArray(tr.transient.time)
-                && tr.transient.time.length > 3) {
-                return { kind: 'transient',
-                         time: tr.transient.time, thrust: tr.transient.thrust,
-                         source: T('panel.validation.srcTransient', 'transient analysis F(t)') };
-            }
-        } catch (e) { /* transient paneli yoksa sıradaki kaynak */ }
-        // Eski kod yalnız `currentResults.motor` altına bakıyordu; katı ve
-        // sıvı yanıtları DÜZ olduğu için o iki motor tipinde tahmin kaynağı
-        // hiçbir zaman bulunamıyor, panel "kaynak yok" diyordu.
+    // V306/RAPOR-HATA (M-KATI-1, S1). ÖLÇÜLDÜ (mühendis turu L1, KSB-002
+    // kopyası; docs/scofield/raw/OH/V306/rapor/once/tarayici_tr.json): katı
+    // motorun yanıtında 2 000+ noktalı ``thrust_curve`` VARDI, ama eski
+    // sağlayıcı yalnız Zaman Çözümlü/``transient`` anahtarlarına bakıyordu;
+    // katıda her zaman iki noktalı dikdörtgene düşüp (1 139,86 N × 1,86 s)
+    // "Geçici rejim F(t) yoktu" diyordu. Tepe itki bu panelde 1 140 N,
+    // Performans Özeti'nde 1 258 N; RMSE/NRMSE ve 'POOR' notu dikdörtgen
+    // yüzünden şişiyordu. Artık eğri, uçuş panellerinin okuduğu TEK
+    // kuraldan (flight_vehicle.motor_flight_thrust → araç ``flight_thrust``)
+    // gelir: tepe itki motorun yayımladığı eğrinin tepesidir.
+    // ``vehicle`` verilmezse aynı hesabın yayımlanmış aracı okunur
+    // (FlightHandoff.vehicleFor); araç henüz yoksa null döner — çağıran
+    // motorVehicle() ile bekler.
+    function predictedCurve(vehicle) {
         const results = window.currentResults;
-        const m = results ? U.motorDict(results) : null;
-        if (m && m.transient && Array.isArray(m.transient.time)
-            && m.transient.time.length > 3) {
-            return { kind: 'transient',
-                     time: m.transient.time, thrust: m.transient.thrust,
-                     source: T('panel.validation.srcStored', 'stored transient F(t)') };
+        if (!results) return null;
+        const FH = window.FlightHandoff;
+        const arac = vehicle || ((FH && typeof FH.vehicleFor === 'function')
+            ? FH.vehicleFor(results) : null);
+        const u = arac && arac.flight_thrust;
+        if (!u || typeof u !== 'object') return null;
+        const tc = u.thrust_curve;
+        if (tc && Array.isArray(tc.time) && Array.isArray(tc.thrust)
+            && tc.time.length > 3 && tc.time.length === tc.thrust.length) {
+            const etiketler = {
+                motor_thrust_curve: T('panel.validation.srcMotorCurve',
+                    'motor thrust curve F(t) of this calculation'),
+                motor_regulated: T('panel.validation.srcMotorRegulated',
+                    'motor thrust curve F(t) of this calculation (regulated feed)'),
+                motor_blowdown: T('panel.validation.srcMotorBlowdown',
+                    'motor thrust curve F(t) of this calculation (N2O tank blowdown)'),
+            };
+            return { kind: 'motor_curve', curveSource: u.curve_source || null,
+                     time: tc.time, thrust: tc.thrust,
+                     source: etiketler[u.curve_source]
+                         || T('panel.validation.srcMotorCurve',
+                              'motor thrust curve F(t) of this calculation') };
         }
-        // Katı motor düz sözlükte 'thrust' üretmiyor (ortalama/tepe ayrı);
-        // merkezi okuyucu motor tipine göre doğru anahtarı seçer.
-        const thrust = results ? U.readThrust(results) : undefined;
-        const burnTime = results ? U.readBurnTime(results) : undefined;
-        if (Number.isFinite(thrust) && Number.isFinite(burnTime) && burnTime > 0) {
+        const thrust = Number(u.thrust);
+        const burnTime = Number(u.burn_time);
+        if (Number.isFinite(thrust) && thrust > 0
+            && Number.isFinite(burnTime) && burnTime > 0) {
             // ÖH D27 / P11B4-23 — BU EĞRİ ÖLÇÜM DEĞİL, İKİ NOKTALI
             // TASARIM NOKTASIDIR. `kind` makine künyesidir: lejant ve
-            // sonuç bloğu bunu okuyup kullanıcıya SÖYLER (aşağıya bakınız).
-            return { kind: 'design_point',
+            // sonuç bloğu bunu okuyup kullanıcıya NEDENİYLE söyler
+            // (sıvı: kararlı rejim modeli eğri yayımlamaz).
+            const sivi = String(arac.motor_type || '').toLowerCase() === 'liquid';
+            return { kind: 'design_point', steadyState: sivi,
+                     curveSource: u.curve_source || null,
                      time: [0, burnTime], thrust: [thrust, thrust],
                      source: T('panel.validation.srcDesign', 'design point (constant thrust)') };
         }
         return null;
+    }
+
+    // Aynı hesabın aracı (uçuş panelleriyle tek kaynak). Araç yayımı hesaptan
+    // sonra arka planda yapılır; koşu ondan önce gelirse FlightHandoff aynı
+    // sonucu yayımlayıp bekler. Alınamazsa null (çağıran nedeni yazar).
+    async function motorVehicle() {
+        const results = window.currentResults;
+        const FH = window.FlightHandoff;
+        if (!results || !FH) return null;
+        try {
+            if (typeof FH.vehicleReady === 'function') {
+                return await FH.vehicleReady(results);
+            }
+            return (typeof FH.vehicleFor === 'function') ? FH.vehicleFor(results) : null;
+        } catch (e) {
+            return null;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -142,15 +186,42 @@
         </div>`;
     }
 
-    function refreshPredictionSourceLabel() {
+    // ÖH D26 / P11B2-10 (3.0.6, ana model): kıyas eğrisinin kaynağının hükmü
+    // (hesaplandı / varsayıldı / modellenmedi) ortak sınıflandırıcıdan gelir;
+    // panel kendi damgasını basmaz. Beyan, motorun yayımladığı eğri
+    // kaynağının (`curve_source`) kullanıcı dilindeki adıdır. Eğri yoksa
+    // (`pred` null) çip de yoktur.
+    function predSourceChip(pred) {
+        if (!pred || !(U.source && U.source.of && U.source.chip)) return '';
+        const nokta = Array.isArray(pred.thrust) ? pred.thrust.length : null;
+        return U.source.chip(U.source.of({ basis: pred.source || null }, null,
+                                         { value: nokta }));
+    }
+
+    function refreshPredictionSourceLabel(vehicle) {
         const el = document.getElementById('vp_pred_source');
         if (!el) return;
-        const pred = predictedCurve();
-        el.textContent = pred
-            ? U.tf('panel.validation.predSource', { source: pred.source },
-                   'Prediction source: {source}')
-            : T('panel.validation.noPrediction',
+        const pred = predictedCurve(vehicle);
+        if (pred) {
+            el.textContent = U.tf('panel.validation.predSource', { source: pred.source },
+                                  'Prediction source: {source}');
+        } else if (window.currentResults) {
+            // Hesap var ama aracı henüz yayımlanmadı: etiket araç gelince
+            // ('hrma:flight-vehicle' olayı) tazelenir; o ana dek sayı ya da
+            // kaynak iddia edilmez.
+            el.textContent = '';
+        } else {
+            el.textContent = T('panel.validation.noPrediction',
                 'No HRMA prediction yet — run a motor calculation first (parse-only mode).');
+        }
+    }
+    if (typeof document !== 'undefined' && document.addEventListener) {
+        document.addEventListener('hrma:flight-vehicle', function (ev) {
+            const d = ev && ev.detail;
+            if (d && d.results === window.currentResults) {
+                refreshPredictionSourceLabel(d.vehicle);
+            }
+        });
     }
 
     function augmentSection() {
@@ -240,11 +311,12 @@
                 'Paste CSV data or choose a file first.');
             return;
         }
-        refreshPredictionSourceLabel();
-        const pred = predictedCurve();
         btn.disabled = true;
         root.style.display = 'none';
         status.textContent = T('panel.validation.comparing', 'COMPARING…');
+        const vehicle = await motorVehicle();
+        refreshPredictionSourceLabel(vehicle);
+        const pred = predictedCurve(vehicle);
         try {
             const body = { csv_text: csv };
             if (pred) body.predicted_curve = { time: pred.time, thrust: pred.thrust };
@@ -375,8 +447,9 @@
                 'Motor file import module is not loaded on this page.');
             return;
         }
-        refreshPredictionSourceLabel();
-        const pred = predictedCurve();
+        const vehicle = await motorVehicle();
+        refreshPredictionSourceLabel(vehicle);
+        const pred = predictedCurve(vehicle);
         if (status) status.textContent = T('panel.validation.importing',
             'IMPORTING MOTOR FILE…');
         try {
@@ -425,8 +498,9 @@
         const status = document.getElementById('ad_status_' + PANEL_ID);
         const motor = motorImport.motors[motorImport.selected]
             || motorImport.motors[0];
-        refreshPredictionSourceLabel();
-        const pred = predictedCurve();
+        const vehicle = await motorVehicle();
+        refreshPredictionSourceLabel(vehicle);
+        const pred = predictedCurve(vehicle);
         if (status) status.textContent = T('panel.validation.comparing', 'COMPARING…');
         // V3 KK 2. tur (UPL devri): seçili motorun eğrisi de aynı upload-csv
         // gövdesiyle gider; runValidation ile AYNI ortak denetimden geçer
@@ -648,17 +722,32 @@
                         color:var(--hd-ink-dim, #7d97a5); margin:4px 0;">${
                         U.esc(U.tf('panel.validation.predSource',
                                    { source: pred.source },
-                                   'Prediction source: {source}'))}</p>` : '')
+                                   'Prediction source: {source}'))}${
+                        predSourceChip(pred)}</p>` : '')
+                // V306/RAPOR-HATA (M-KATI-1): neden DOĞRU yazılır. Eski
+                // metin her durumda "Geçici rejim F(t) yoktu … geçici rejim
+                // çözümlemesini koşun" diyordu — katı motorun eğrisi VARDI
+                // (panel okumuyordu), sıvının ise Zaman Çözümlü paneli yok.
                 + (pred && pred.kind === 'design_point'
                     ? U.listBlock(T('panel.validation.designPointHead',
-                        'The reference curve is a design point, not a computed transient'),
-                        [T('panel.validation.designPointNote',
-                           'No transient F(t) was available, so the comparison '
-                           + 'runs against a two-point rectangle built from the '
-                           + 'design thrust and burn time. A low grade here can '
-                           + 'mean the motor simply does not burn at constant '
-                           + 'thrust — run the transient analysis before reading '
-                           + 'it as a test-data or model problem.')], 'warn')
+                        'The reference curve is a design point (constant thrust), not a thrust curve'),
+                        [pred.steadyState
+                            ? T('panel.validation.designPointNoteLiquid',
+                                'The liquid engine model is a steady-state design-point '
+                                + 'model: it publishes a constant sea-level thrust and a '
+                                + 'burn time, not a thrust curve F(t). The comparison '
+                                + 'therefore runs against a two-point rectangle built from '
+                                + 'that thrust and burn time; the start-up and shut-down '
+                                + 'of your test are not part of the prediction, so a low '
+                                + 'grade here is not by itself a verdict on the test data '
+                                + 'or on the model.')
+                            : T('panel.validation.designPointNote',
+                                'This motor result carries no thrust curve F(t), only a '
+                                + 'thrust and a burn time, so the comparison runs against '
+                                + 'a two-point rectangle built from them. A low grade here '
+                                + 'can mean the motor simply does not burn at constant '
+                                + 'thrust; it is not by itself a verdict on the test data '
+                                + 'or on the model.')], 'warn')
                     : '')
                 + metricCards(comparison.metrics || {}, bands,
                               comparison.scored_metrics)
@@ -667,8 +756,8 @@
         } else {
             html += `<p style="font-size:0.8rem; color:var(--hd-ink-dim, #7d97a5);
                 margin:8px 0;">${T('panel.validation.parseOnly',
-                'Parse-only mode: run a motor calculation (or the transient analysis) '
-                + 'first, then compare again to get the quantitative agreement metrics.')}</p>`;
+                'Parse-only mode: run a motor calculation first, then compare again '
+                + 'to get the quantitative agreement metrics.')}</p>`;
         }
         head.innerHTML = html;
         root.appendChild(head);
@@ -706,6 +795,7 @@
     window.ValidationPanel = {
         _render: render,
         _predictedCurve: predictedCurve,
+        _motorVehicle: motorVehicle,
         _metricCards: metricCards,
         _augmentSection: augmentSection,
         _importMotorFile: importMotorFile,

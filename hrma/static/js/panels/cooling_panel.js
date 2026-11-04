@@ -403,22 +403,36 @@
         // V3.0.5 T-ÇAPA-C1: ucun iki kademe künyesi (sm.coking_basis — bir
         // dürüstlük alanı) iki rozetin ipucuna eklenir; çeviri kanalından
         // (I18N.serverText), tanınmazsa AYNEN.
-        const cokingBasis = (typeof sm.coking_basis === 'string' && sm.coking_basis)
+        // V306/GÜVERTE-HATA (CI-SÜREÇ DEVİR 2, d26 P11B2-10): künye artık
+        // ORTAK değer-kaynağı sınıflandırıcısından geçer (öteki paneller
+        // gibi; panel kendi damgasını basmaz). Hükmün kıyasladığı sayı ucun
+        // çözdüğü soğutucu tarafı tepe cidar sıcaklığıdır (regen_cooling:
+        // coking ⟺ max_wall_cold_K > eşik); sınıf o değerden ve künyeden
+        // gelir, değer yoksa 'missing' olur (fail-closed). Çip koklaşma
+        // rozetinin hemen ardında; ipucu künyenin kendisidir.
+        const cokingInfo = (typeof sm.coking_basis === 'string' && sm.coking_basis
+                && U.source && typeof U.source.of === 'function')
+            ? U.source.of({ basis: sm.coking_basis }, null,
+                          { value: sm.max_wall_cold_K })
+            : null;
+        const cokingBasis = (cokingInfo && cokingInfo.basis)
             ? ' ' + ((window.I18N && typeof window.I18N.serverText === 'function')
-                ? window.I18N.serverText(sm.coking_basis) : sm.coking_basis)
+                ? window.I18N.serverText(cokingInfo.basis) : cokingInfo.basis)
             : '';
+        const cokingChip = (cokingInfo && typeof U.source.chip === 'function')
+            ? U.source.chip(cokingInfo) : '';
         if (sm.coking) {
             badges += U.badge(T('panel.regen.coking', 'RP-1 COKING LIMIT'), 'err',
                 T('panel.regen.cokingTip',
                   'Coolant-side wall temperature exceeds the 728 K NASA SP-8087 '
                   + 'design criterion for RP-1 liquid-wall temperature: the design '
-                  + 'does not meet this criterion.') + cokingBasis);
+                  + 'does not meet this criterion.') + cokingBasis) + cokingChip;
         } else if (sm.coking_risk) {
             badges += U.badge(T('panel.regen.cokingRisk', 'RP-1 DEPOSIT RISK'), 'warn',
                 T('panel.regen.cokingRiskTip',
                   'Coolant-side wall temperature exceeds the 561 K deposit-risk '
                   + 'warning level (software warning based on NASA CR-168277; '
-                  + 'validate for your conditions).') + cokingBasis);
+                  + 'validate for your conditions).') + cokingBasis) + cokingChip;
         }
 
         // ---- Sayısal kartlar ----
@@ -647,6 +661,29 @@
             }
             const mdotFuel = U.readFuelFlow(r);
             if (Number.isFinite(mdotFuel) && mdotFuel > 0) sug.coolant_mdot = mdotFuel;
+            // V306/GÜVERTE-HATA (kalem 4, K2-P21): ASTAR MALZEMESİ motorun
+            // kendi katmanından. ÖLÇÜLDÜ (kilavuz-2/olcum/arayuz_ornek_tr_*,
+            // örnek sıvı): seçici alan varsayılanında (Bakır OFHC) kalıyordu;
+            // motorun astarı CuCrZr (C18150), dış kabuğu Inconel 718 — marş
+            // başka bir malzemenin iletkenliğiyle koşuyordu. Kaynak Termal
+            // Güvenlik paneliyle aynı: iki katmanlı rejeneratif cidarın
+            // 'liner' rollü katmanı (structural_analysis.chamber_structure.
+            // wall_layers). Katman yoksa öneri yok (kabuğa düşülmez); seçicide
+            // olmayan ad güvertenin kapısına düşer (koşum durur, gerekçe
+            // ekranda).
+            const yapi = (m.structural_analysis && typeof m.structural_analysis === 'object')
+                ? m.structural_analysis : {};
+            const odaYapisi = (yapi.chamber_structure && typeof yapi.chamber_structure === 'object')
+                ? yapi.chamber_structure : {};
+            if (odaYapisi.wall_model === 'two_layer_regenerative'
+                    && Array.isArray(odaYapisi.wall_layers)) {
+                const astar = odaYapisi.wall_layers.filter(function (k) {
+                    return k && k.role === 'liner';
+                })[0];
+                if (astar && typeof astar.material_key === 'string' && astar.material_key) {
+                    sug.wall_material = astar.material_key;
+                }
+            }
             return sug;
         },
         render: render,

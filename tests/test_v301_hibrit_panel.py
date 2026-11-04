@@ -138,12 +138,22 @@ def test_bant_disi_verim_adiyla_reddedilir(deger):
 
 
 def test_kaynaksiz_ciftte_ideal_c_yildiz_beyanli(yanitlar):
+    # V306/HİBRİT-MODEL (M-HIBRIT-25, 3 Kas) — SÖZLEŞME DEĞİŞTİ. Eski
+    # beklenti (ölçümü olmayan çiftte ideal c*, η = 1,00) mühendis turunun
+    # S1 bulgusuydu: aynı yakıt oksitleyici/yakıt değişince Isp %12 ideal'e
+    # sıçrıyordu. Artık ölçümü olmayan çift (N2O/parafin) BEYANLI genel
+    # hibrit varsayılanını alır; ideal c* yalnız kullanıcı 100 girerse.
+    from hrma.engines.hybrid_rocket_engine import HYBRID_ETA_C_STAR_GENERAL
     m = yanitlar['parafin']['motor']
     blok = m['c_star_efficiency']
-    assert blok['source'] == 'ideal_no_source'
-    assert blok['applied'] is False and blok['eta_c_star'] == 1.0
-    assert m['c_star'] == blok['c_star_theoretical_m_s']
-    assert 'IDEAL' in blok['basis']
+    assert blok['source'] == 'sourced_default'
+    assert blok['scope'] == 'all_hybrid_pairs'
+    assert blok['applied'] is True
+    assert blok['eta_c_star'] == pytest.approx(
+        HYBRID_ETA_C_STAR_GENERAL['eta_c_star'])
+    assert m['c_star'] == pytest.approx(
+        blok['eta_c_star'] * blok['c_star_theoretical_m_s'], rel=1e-12)
+    assert 'general hybrid default' in blok['basis']
 
 
 def test_cea_karsilastirmasi_kuramsal_kalir(yanitlar):
@@ -167,10 +177,16 @@ def test_belirsizlik_nominali_ayni_eta():
     e = uqa.center_hybrid_eta_distribution(
         d, _ornek_govde(combustion_efficiency=95))['eta_c_star']
     assert e.nominal_value() == pytest.approx(0.95) and e.mean == 0.95
-    # Kaynaksız çift: dağılım dokunulmaz (beyanlı ideal c*).
+    # V306/HİBRİT-MODEL (M-HIBRIT-25): ölçümü olmayan çift (N2O/parafin)
+    # artık ideal c* değil, beyanlı GENEL hibrit varsayılanı alır; dağılım
+    # o kayıtların σ'sı ve aralığıyla, aynı nominale ortalanır.
+    from hrma.engines.hybrid_rocket_engine import HYBRID_ETA_C_STAR_GENERAL
+    g = HYBRID_ETA_C_STAR_GENERAL
     p = uqa.center_hybrid_eta_distribution(
         d, _ornek_govde(fuel_type='paraffin'))['eta_c_star']
-    assert p == d['eta_c_star']
+    assert p.mean == p.nominal_value() == pytest.approx(g['eta_c_star'])
+    assert p.sigma == g['sample_stdev']
+    assert (p.low, p.high) == tuple(g['measured_band'])
 
 
 # ---------------------------------------------------------------------------
@@ -342,10 +358,15 @@ def test_manset_verim_ve_blowdown_satiri(tmp_path, yanitlar):
 
 @node_gerekli
 def test_manset_ideal_c_yildiz_beyani(tmp_path, yanitlar):
+    # V306/HİBRİT-MODEL (M-HIBRIT-25): ölçümü olmayan çiftte manşet artık
+    # ideal c* değil GENEL hibrit varsayılanını adıyla söyler.
     m = yanitlar['parafin']['motor']
     html = _manset(tmp_path, {'c_star_efficiency': m['c_star_efficiency']})
-    assert 'data-headline-basis="ideal-cstar"' in html
-    assert 'IDEAL c*' in html
+    assert 'data-headline-basis="ideal-cstar"' not in html
+    assert 'data-headline-basis="cstar-eff"' in html
+    assert 'general hybrid default' in html
+    assert 'median of all %d measured hybrid firings' % (
+        m['c_star_efficiency']['n_tests']) in html
 
 
 # ---------------------------------------------------------------------------

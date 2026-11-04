@@ -275,14 +275,21 @@ class TestOHD1611CalculateItkiEgrisi:
         traj = yanit['trajectory']
         ki = traj['thrust_input']
         assert ki['source'] == 'thrust_curve'
-        assert ki['points'] == 201
+        # V306/UÇUŞ-2 (3 Kas, M-HIBRIT-1/-24): uçan eğri motorun UÇUŞ
+        # eğrisidir (flight_vehicle.motor_flight_thrust). Bu gövde N₂O
+        # kendinden basınçlı (varsayılan) ve motor boşalma çözümünü
+        # yayımlıyor: uçuş O eğriyle uçar (eskiden regüle 201 noktalı eğri).
+        # Seri t = 0,05 s'de başladığından örtük ateşleme kuralı başa
+        # (0, F[0]) ekler: 203 + 1 = 204 nokta (ölçüldü,
+        # docs/scofield/raw/OH/V306/ucus2/olcum_calculate_capa.json).
+        egri = self._ucan_egri(yanit)
+        assert ki['points'] == len(egri['time'])
         assert 'thrust-time curve' in ki['basis'], (
             f"künye eğriden entegrasyonu söylemiyor: {ki['basis'][:200]!r}")
         assert ki['peak_to_average_ratio'] > 1.0
         # Tepe ≠ ortalama: tek bir ortalama itkiye düşülmedi.
         assert ki['peak_thrust_N'] > ki['average_thrust_N']
         # Toplam impuls EĞRİNİN KENDİ integrali (bağımsız yamuk kuralı).
-        egri = yanit['motor']['thrust_curve']
         t, f = egri['time'], egri['thrust']
         yamuk = sum(0.5 * (f[i] + f[i + 1]) * (t[i + 1] - t[i])
                     for i in range(len(t) - 1))
@@ -296,8 +303,20 @@ class TestOHD1611CalculateItkiEgrisi:
         # profile dönüşü yakalayan gerçek çapa yukarıdaki yamuk
         # integralidir: eğri düzleştirilirse integral değişir.
 
+    @staticmethod
+    def _ucan_egri(yanit):
+        """Motorun yayımladığı UÇUŞ eğrisi, bağımsız okunur: N₂O kendinden
+        basınçlı tankta boşalma serisi (``tank_blowdown``), örtük ateşleme
+        noktası (t[0] > 0 ise başa (0, F[0])) eklenmiş hâliyle."""
+        tb = yanit['motor']['tank_blowdown']
+        assert tb['status'] == 'modelled' and tb['feed_mode'] == 'blowdown'
+        t, f = list(tb['time_s']), list(tb['thrust_N'])
+        if t[0] > 0.0:
+            t, f = [0.0] + t, [f[0]] + f
+        return {'time': t, 'thrust': f}
+
     def test_egri_motorun_kendi_egrisidir(self, yanit):
-        egri = yanit['motor']['thrust_curve']
+        egri = self._ucan_egri(yanit)
         ki = yanit['trajectory']['thrust_input']
         assert ki['points'] == len(egri['time'])
         assert ki['peak_thrust_N'] == pytest.approx(max(egri['thrust']),
@@ -397,7 +416,24 @@ class TestOHD1611CalculateItkiEgrisi:
         # 16832 / 18304 m, tekdüze. Ölçümler: docs/scofield/raw/OH/V305/ci/C2/.
         # Süit içinde aynı düğüm 15184,913366 m da verebiliyor (çağrı geçmişi,
         # bağıl 3,4e-8 < 1e-6); tolerans DEĞİŞMEDİ, bekçinin sorusu değişmedi.
-        assert apoje == pytest.approx(15184.913880753711,
+        # V306/UÇUŞ-2 (3 Kas) — ÇAPA ÖLÇÜMLE YENİLENDİ: 15184,913880753711
+        # -> 15988,416252059005 m (+%5,29). Uçuş itkisi tek kurala geçti
+        # (flight_vehicle.motor_flight_thrust; Yörünge, 6-DOF ve Fırlatma
+        # Sahası aynı eğriyle uçar). Ayrıştırma ürün kodunda, her adımda tek
+        # girdi değiştirilerek ölçüldü (docs/scofield/raw/OH/V306/ucus2/
+        # olcum_calculate_capa.json, betik/olcum_calculate_capa.py):
+        #   V0 eski kural (regüle eğri + geometrik exit_area) 15184,913880753711
+        #      — eski çapayla BİT-AYNI (çözücünün başka değişikliği etkisiz);
+        #   V1 + kayıp modeli A_e (0,001415 -> 0,001558 m²; motorun
+        #      thrust_vacuum_n'ini tutan alan)            15247,758 (+62,8 m);
+        #   V2 + boşalma eğrisi (N₂O kendinden basınçlı: impuls 9974,76 ->
+        #      8977,44 N·s, harcanan 4,662 kg)            14520,770 (−727,0 m);
+        #   V3 + tankta kalan 0,459 kg kuru kütleye       15988,416 (+1467,6 m)
+        #      (araçla uçan itici; bu 57 mm'lik araçta sürükleme baskın,
+        #      ağır araç yükseğe çıkar — V305/C2 notu).
+        # Bekçinin sorusu (dikdörtgen profil apojesi yayımlanmıyor) DEĞİŞMEDİ;
+        # tolerans aynı.
+        assert apoje == pytest.approx(15988.416252059005,
                                       rel=capa_rel(1e-6, 1e-5))
         assert apoje != pytest.approx(5656.753349589398, rel=1e-6)
 
@@ -542,7 +578,13 @@ class TestP4B313KalkmayanArac:
         assert r['lifted_off'] is True
         assert r['stable'] is True
         assert 'apogee_withheld_because' not in r
-        assert r['apogee'] == pytest.approx(4863.34220545963, rel=1e-6)
+        # V306/UÇUŞ-2 (3 Kas): 6-DOF entegrasyonu yanma sonunda ikiye
+        # bölündü (itki süreksizliği adımın içine düşmez). ÖLÇÜLDÜ
+        # (docs/scofield/raw/OH/V306/ucus2/olcum_kirilma.json):
+        # 4863,34220545963 -> 4863,2182717207115 m (−2,5e-5; referans
+        # rtol 1e-10 ile 4863,720 m — fark bu çözücünün rtol 1e-5'inden).
+        # Sorulan (kalkan araçta hüküm ve apoje yayımlanır) değişmedi.
+        assert r['apogee'] == pytest.approx(4863.2182717207115, rel=1e-6)
 
     def test_kalkis_esigi_tek_kaynaktan(self):
         """İki modül aynı eşiği kullanır (ikinci sayı tanımlanmaz)."""

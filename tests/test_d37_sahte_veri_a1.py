@@ -706,6 +706,13 @@ class TestDKesirSayimi:
     ODENEN_DEVIRLER = {
         'pintle_boyu_25pR_12injT': 'c8734a5ad (V301/CAD-2 kalem 2-3-4: '
                                    'pintle 3B sahne kanonik geometriden)',
+        # V306 (3 Kas, ana model): 258cb5725 bu deseni sökmüştü ama devir
+        # buraya adıyla yazılmamıştı (v3.0.5'ten beri kırmızı). Ölçüldü:
+        # `git log -S'0.22 * Dch' -- motor_viz3d.js` → 258cb5725; desen
+        # bugün 0 kez.
+        'pintle_capi_022D': '258cb5725 (V301/T-ÇAPA-C2: 0,22·D_kamara '
+                            'uydurma yedekli ölü pintleR söküldü; pintle '
+                            'yalnız kanonik pintleCad\'den çizilir)',
         'lule_eti_kirpma_25_025dt6': 'c6acfb89b (V301/CAD-2, KABUL K4: '
                                      'lüle eti tek kuraldan)',
     }

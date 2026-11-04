@@ -223,11 +223,17 @@ def test_d_govde_toplam_isiyi_artirir_bogazi_degistirmez():
 # (e) süperkritik yol bit-aynı; hibrit/katı L-REJ işlevlerine uğramaz
 # ---------------------------------------------------------------------------
 #: Taban a95ed4b60'ta (L-REJ öncesi) ÖLÇÜLDÜ — docs/.../L-REJ/RAPOR.md §md5.
+#: V306/SIVI-DEFTER kalem 8 (4 Kas): ``_PSEUDOCRITICAL_CACHE`` kovasının
+#: değeri artık kova MERKEZİ basıncında (eskiden kovaya ilk düşen basınçta)
+#: — metan ve raptor çapaları temiz alt süreçte YENİDEN ÖLÇÜLDÜ (bağıl en
+#: çok 1,5e-6: methane max_wall_hot 1057,2783006 -> 1057,2799280 K;
+#: docs/scofield/raw/OH/V306/sivi-defter/RAPOR.md kalem 8). Hidrojen
+#: çapası değişmedi (bit-aynı). Tolerans aynı (rel 1e-12).
 SC_CAPALAR = {
-    'methane': (1057.2783005946026, 1344815.3430798522, 174.05437600718602,
-                9.135178496834431, 2.115637615786378),
-    'raptor': (1081.2408889085796, 53875677.794251345, 255.21958515463328,
-               294.38551151855023, 1.5162788260806828),
+    'methane': (1057.279927956588, 1344815.1959537899, 174.0543695571664,
+                9.135178386998046, 2.115637615006593),
+    'raptor': (1081.241106237127, 53875679.227851324, 255.21958842949655,
+               294.38551373739057, 1.516279106152827),
     'hydrogen': (1196.226485195169, 1233324.1874353616, 191.51127439563462,
                  1.934790740256682, 2.3462329648497326),
 }

@@ -265,10 +265,20 @@ def test_no_overrides_keeps_the_reference_chain():
          susardı; özdeşlik ayağı susmaz.
     """
     _, plain = run_engine(None)
-    assert plain['isp_sea_level'] == pytest.approx(
+    # V306/SIVI-DEFTER (K5): override'sız motor varsayılan gaz jeneratörü
+    # çevrimindedir; açık çevrim defteri bağlandığından başlık Isp'si MOTOR
+    # Isp'sidir (türbin egzozu dahil, F/(ṁ_toplam·g0)). Bu bekçinin kilitlediği
+    # REFERANS ZİNCİR ana itki odası + lüle zinciridir ve sayıları DEĞİŞMEDİ
+    # (ölçüldü: bit-aynı); defter bloğunda yayımlanır.
+    defter = plain['mass_flow_ledger']
+    assert defter['status'] == 'open_cycle_closed'
+    assert defter['main_chamber_isp_sea_level_s'] == pytest.approx(
         298.3633726256625, rel=_ZINCIR_BAGIL_TOL)
-    assert plain['isp_vacuum'] == pytest.approx(
+    assert defter['main_chamber_isp_vacuum_s'] == pytest.approx(
         323.59539379053996, rel=_ZINCIR_BAGIL_TOL)
+    assert plain['isp_sea_level'] == pytest.approx(
+        plain['thrust'] / (plain['total_mass_flow'] * 9.80665), rel=1e-12)
+    assert plain['isp_sea_level'] < defter['main_chamber_isp_sea_level_s']
     assert plain['c_star'] == pytest.approx(
         1808.8846648268513, rel=_ZINCIR_BAGIL_TOL)
     # ÖH D36 / LU-1 (Berke onaylı, ÇEVRİLEN BEKÇİ): override'sız motor
@@ -283,7 +293,7 @@ def test_no_overrides_keeps_the_reference_chain():
     assert kimlik['status'] == 'CLOSED', kimlik
     beklenen = (kimlik['thrust_coefficient_sea_level'] * plain['c_star']
                 / (9.80665 * kimlik['throat_discharge_coefficient']))
-    assert plain['isp_sea_level'] == pytest.approx(
+    assert defter['main_chamber_isp_sea_level_s'] == pytest.approx(
         beklenen, rel=_ZINCIR_BAGIL_TOL)
 
 
@@ -384,9 +394,16 @@ def test_optimisation_map_matches_the_reported_design_point():
         _, result = run_engine(dict(FORM_DEFAULTS), fuel_type=fuel)
         maps = result['performance_maps']['mixture_ratio_optimization']
         peak = max(v for v in maps['isp_vs_mr'] if v is not None)
-        assert peak == pytest.approx(result['isp_vacuum'], rel=0.05), (
+        # V306/SIVI-DEFTER (K5): harita ANA İTKİ ODASI + lülenin O/F
+        # taramasıdır; kıyas sayfanın ana oda Isp'siyle (açık çevrimde başlık
+        # motor Isp'si türbin egzozu kadar düşüktür ve ayrı kartta durur).
+        defter = result.get('mass_flow_ledger') or {}
+        isp_vac = (defter['main_chamber_isp_vacuum_s']
+                   if defter.get('status') == 'open_cycle_closed'
+                   else result['isp_vacuum'])
+        assert peak == pytest.approx(isp_vac, rel=0.05), (
             f"{fuel}: harita tepesi {peak:.1f} s ile raporlanan vakum Isp "
-            f"{result['isp_vacuum']:.1f} s celisiyor")
+            f"{isp_vac:.1f} s celisiyor")
 
 
 def test_chamber_pressure_map_is_a_real_scan():

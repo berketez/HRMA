@@ -62,6 +62,25 @@ def _kural_metni():
 def _satirlar(metin):
     return '\n'.join(x.strip() for x in metin.splitlines())
 
+
+#: Mühürlü bir kuralın BİLİNÇLİ ARDILI. ÖH D34 · OH-P-02 (08b10c528, 21 Eyl
+#: 2026) ``#designReport .report-table td { overflow-wrap: anywhere }``
+#: kuralını DEĞER hücresine (``td:last-child``) daralttı: bütün hücrelere
+#: uygulanınca etiketler harf harf kırılıyordu ("Oda / Uzunluğ / u").
+#: ``tests/test_d34_piksel_a1.py`` eski kuralın geri gelmesini YASAKLIYOR,
+#: bu dosyanın mührü ise onu ŞART koşuyordu — iki bekçi aynı anda hiç
+#: yeşil olamazdı (v3.0.5 süpürmesinde kırmızı). Kayıtlı ölçüm onarımdan
+#: önceki kurala aittir ve DEĞİŞTİRİLMEDİ; mühür, eski kural yoksa yalnız
+#: adıyla beyan edilmiş ardılı yerindeyse sağlanır (ardılın kendi bekçisi
+#: d34'tedir; OH-F0-01'in yatay taşma onarımı değer hücresinde korunur).
+#: V306 CI-SÜREÇ, 4 Kas 2026.
+MUHUR_ARDILLARI = {
+    'rapor_hucresi_uzun_soz_kirilir': (
+        '#designReport .report-table td:last-child {\n'
+        'overflow-wrap: anywhere;\n'
+        '}'),
+}
+
 #: OH-F0-01'in gövdesi: enjektör tablosunun satır etiketleri. Kalem
 #: metninde ölçülen çiftler tam bunlardı ('80.0 mm' ⟂ 'L/D Ratio', …).
 ENJEKTOR_ETIKETLERI = (
@@ -211,9 +230,13 @@ class TestOHF001VeP17B119Yerlesim:
         assert muhur, 'sonra ölçümünde kural mührü yok'
         for ad, kural in muhur.items():
             assert kural is not None, 'mühür ölçüm anında da yoktu: %s' % ad
-            assert _satirlar(kural) in metin, (
+            if _satirlar(kural) in metin:
+                continue
+            ardil = MUHUR_ARDILLARI.get(ad)
+            assert ardil is not None and ardil in metin, (
                 'ölçümü üreten kural %s bugünkü advanced.html içinde YOK — '
-                'kayıtlı sayı artık bu dosyayı temsil etmiyor' % ad)
+                'kayıtlı sayı artık bu dosyayı temsil etmiyor (beyanlı ardılı '
+                'da yok: %r)' % (ad, ardil))
 
     def test_once_muhru_onarim_oncesini_gosteriyor(self, once):
         """Önce ölçümü, kuralların HİÇBİRİ yokken alınmıştı."""

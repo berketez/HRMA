@@ -296,13 +296,24 @@ class TestP4B322IrtifaTelafisiUrunYolunda:
             'oxidizer_type': 'n2o'})
         assert r.status_code == 200
         j = r.get_json()
-        ae = j['motor']['exit_area']
+        # V306/UÇUŞ-2 (M-HIBRIT-34): hibrit motor İKİ çıkış alanı yayımlıyor —
+        # geometrik ``exit_area`` ve vakum itkisini deniz seviyesi itkisine
+        # bağlayan ``altitude_performance.nozzle_loss_model.exit_area_m2``
+        # (ölçüldü tur L3: 0,01727 ⟷ 0,01901 m²; DEVİR HİBRİT-MODEL). Uçuş,
+        # uç noktaları motorun yayımladığı itkilerle tutan alanı kullanır:
+        # F_ref + p_ref·A_e = motorun ``thrust_vacuum_n``i (tasarım ortamı
+        # 1 atm iken; bu gövde ortamı vermiyor, uç noktası bekçisi
+        # tests/test_v306_ucus2.py'de 1 atm ile).
+        nlm = j['motor']['altitude_performance']['nozzle_loss_model']
+        ae = nlm['exit_area_m2']
         assert ae > 0.0
         tac = j['trajectory']['thrust_altitude_compensation']
         assert tac['modelled'] is True, 'ürün yolu telafiyi taşımıyor'
         assert tac['nozzle_exit_area_m2'] == pytest.approx(ae, rel=1e-12), (
             'yörünge motorunkinden BAŞKA bir çıkış alanı kullanıyor')
-        assert tac['reference_pressure_pa'] > 0.0
+        assert tac['reference_pressure_pa'] == pytest.approx(
+            j['motor']['nozzle_design']['performance']['ambient_pressure']
+            * 1e5, rel=1e-12)
 
 
 # ===================================================================== #

@@ -1160,17 +1160,66 @@
        karakterinde mesh + ambient rozetlerini arar (spatialBadge ile aynı
        gerekçe). */
     function withheldBadge(ml) {
-        return badge(TF('feaT.badgeVerdictWithheld',
-            { reasons: esc(withheldReasonText(ml)),
-              allow: fmt(ml.allowable_temperature_K, 0) },
-            'NO SAFETY VERDICT — {reasons}; the peak is shown against '
-            + 'the allowable {allow} K for information only'), 'warn');
+        // V306/GÜVENLİK (G3-N1): izin verilen sıcaklık yayımlanmadıysa
+        // cümle onu ANMAZ (eskiden "the allowable — K" basıyordu). Yalnız
+        // erime sıcaklığı varsa tepe ona karşı, ADIYLA ve bilgi amaçlı
+        // gösterilir; ikisi de yoksa yalnız gerekçe kalır.
+        const nedenler = esc(withheldReasonText(ml));
+        if (isNum(ml.allowable_temperature_K)) {
+            return badge(TF('feaT.badgeVerdictWithheld',
+                { reasons: nedenler,
+                  allow: fmt(ml.allowable_temperature_K, 0) },
+                'NO SAFETY VERDICT — {reasons}; the peak is shown against '
+                + 'the allowable {allow} K for information only'), 'warn');
+        }
+        if (isNum(ml.melting_point_K)) {
+            return badge(TF('feaT.badgeVerdictWithheldMelt',
+                { reasons: nedenler, melt: fmt(ml.melting_point_K, 0) },
+                'NO SAFETY VERDICT — {reasons}; no allowable temperature is '
+                + 'published for this material, so the peak is shown against '
+                + 'the melting point {melt} K for information only'), 'warn');
+        }
+        return badge(TF('feaT.badgeVerdictWithheldNoLimit',
+            { reasons: nedenler },
+            'NO SAFETY VERDICT — {reasons}; no allowable temperature and no '
+            + 'melting point are published for this material'), 'warn');
     }
 
     /* F-01 (CW-B3) — iki yol tek rozette: denge ⟷ geçici tepe. Sayılar
        sunucunun uzlaştırma bloğundan; blok/sayı yoksa rozet yok. */
     function reconciliationBadge(rc) {
         if (!rc || !isNum(rc.equilibrium_K) || !isNum(rc.fea_peak_K)) return '';
+        // V306/HİBRİT-SAYI (M-HIBRIT-21): ÖLÇÜLDÜ (tur L2) "denge 3297 K ⟷
+        // geçici tepe 3317 K, fark −20 K" — iki sayı iki AYRI istasyondu
+        // (boğaz ⟷ konverjan giriş) ve rozet bunu söylemiyordu. Sunucu
+        // istasyonları ve tepenin kendi istasyonundaki üst sınırı (gazın
+        // geri kazanım sıcaklığı) yayımlıyorsa rozet onları basar; geçici
+        // tepe boğaz dengesini aşıyorsa nedeni yazılır. Alanlar yoksa eski
+        // rozet (sayı uydurulmaz).
+        if (isNum(rc.fea_peak_x_mm) && isNum(rc.equilibrium_station_x_mm)
+                && isNum(rc.fea_peak_local_recovery_K)) {
+            let metin = TF('feaT.badgeReconciliationStations',
+                { eq: fmt(rc.equilibrium_K, 0), zt: fmt(rc.equilibrium_station_x_mm, 1),
+                  fe: fmt(rc.fea_peak_K, 0), t: fmt(rc.fea_time_s, 1),
+                  zp: fmt(rc.fea_peak_x_mm, 1), trec: fmt(rc.fea_peak_local_recovery_K, 0),
+                  gap: fmt(rc.gap_K, 0) },
+                'TWO THERMAL PATHS: throat equilibrium (t→∞, z = {zt} mm) {eq} K '
+                + 'vs transient peak {fe} K at t = {t} s, z = {zp} mm; the gas '
+                + 'recovery temperature at that station is {trec} K and bounds '
+                + 'the transient there — gap {gap} K');
+            let tur = 'info';
+            if (rc.fea_peak_within_local_recovery === false) {
+                metin += ' — ' + T('feaT.badgeReconciliationAboveLocal',
+                    'the transient peak is ABOVE the recovery temperature of its own station');
+                tur = 'warn';
+            } else if (rc.fea_peak_K > rc.equilibrium_K) {
+                metin += ' — ' + T('feaT.badgeReconciliationHotterStation',
+                    'the transient peak is above the throat equilibrium because its '
+                    + 'station has a higher recovery temperature (lower Mach number) '
+                    + 'than the throat; it does not exceed its own equilibrium');
+            }
+            return badge(metin, tur);
+        }
         return badge(TF('feaT.badgeReconciliation',
             { eq: fmt(rc.equilibrium_K, 0), fe: fmt(rc.fea_peak_K, 0),
               t: fmt(rc.fea_time_s, 1), gap: fmt(rc.gap_K, 0) },
@@ -2072,6 +2121,8 @@
         // sınanır (AnalysisDock yokken yedek yol koşar).
         _buildWallProfileBody: buildWallProfileBodyMeta,
         _fallbackLengthM: fallbackLengthM,
+        // V306/GÜVENLİK (G3-N1) bekçisi: geri çekilmiş hüküm rozeti.
+        _withheldBadge: withheldBadge,
         get payload() { return lastPayload; },
     };
 })();

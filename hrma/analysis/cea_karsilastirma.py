@@ -1421,10 +1421,19 @@ def build_liquid_cea_comparison(engine, results: Dict) -> Dict[str, Any]:
             'mw': _sonlu(getattr(engine, 'mw', None)),
             'gamma': _sonlu(getattr(engine, 'gamma_chamber_cea', None)),
         }
+        # V306/SIVI-DEFTER (K5): açık çevrim defteri kapandıysa başlık Isp'si
+        # MOTOR Isp'sidir (türbin egzozu dahil, toplam itici tüketimine
+        # göre); CEA'nın karşılığı ana itki odası + lüledir. Kıyas o yüzden
+        # ana oda Isp'siyle (ana akış debisine göre) yapılır ve künyede
+        # söylenir; kapalı / basınç beslemeli çevrimde iki sayı aynıdır.
+        _defter = results.get('mass_flow_ledger') or {}
+        _ana_oda = _defter.get('status') == 'open_cycle_closed'
         yayim = {
             'c_star': _sonlu(results.get('c_star')),
-            'isp_vac': _sonlu(results.get('isp_vacuum')),
-            'isp_sl': _sonlu(results.get('isp_sea_level')),
+            'isp_vac': _sonlu(_defter.get('main_chamber_isp_vacuum_s')
+                              if _ana_oda else results.get('isp_vacuum')),
+            'isp_sl': _sonlu(_defter.get('main_chamber_isp_sea_level_s')
+                             if _ana_oda else results.get('isp_sea_level')),
             'tc': _sonlu(results.get('chamber_temperature')),
             'mw': _sonlu(results.get('molecular_weight')),
             'gamma': _sonlu(results.get('gamma')),
@@ -1459,11 +1468,19 @@ def build_liquid_cea_comparison(engine, results: Dict) -> Dict[str, Any]:
              'efficiency)', 'CEA c* (the theoretical value HRMA uses)',
              eta_c, 'combustion_efficiency (eta_c*)')
         ekle('isp_vacuum', 's', 'isp_vac',
-             'published isp_vacuum: delivered', 'CEA Isp_vac at the design '
+             ('main thrust chamber + nozzle vacuum Isp per main-chamber flow '
+              '(mass_flow_ledger.main_chamber_isp_vacuum_s): delivered; the '
+              'engine Isp per total propellant (isp_vacuum) is lower by the '
+              'turbine exhaust' if _ana_oda
+              else 'published isp_vacuum: delivered'),
+             'CEA Isp_vac at the design '
              'expansion ratio', teslim,
              'efficiency_breakdown.applied_delivery_efficiency_pct / 100')
         ekle('isp_sea_level', 's', 'isp_sl',
-             'published isp_sea_level: delivered',
+             ('main thrust chamber + nozzle sea-level Isp per main-chamber '
+              'flow (mass_flow_ledger.main_chamber_isp_sea_level_s): '
+              'delivered' if _ana_oda
+              else 'published isp_sea_level: delivered'),
              'RocketCEA ambient Isp at the design expansion ratio '
              '(1.01325 bar; Kalt-Badal estimate if the nozzle separates)')
         ekle('chamber_temperature', 'K', 'tc',
@@ -1495,6 +1512,9 @@ def build_liquid_cea_comparison(engine, results: Dict) -> Dict[str, Any]:
             'delta_definition': DELTA_DEFINITION,
             'rows': satirlar,
             'rows_omitted': [],
+            # V306/SIVI-DEFTER: Isp satırları ana itki odası + lüle (yalnız
+            # açık çevrim defteri kapandığında yayımlanır).
+            **({'isp_rows_basis': 'main_thrust_chamber'} if _ana_oda else {}),
         }
     if kaynak == 'static_table':
         satir = LIQUID_PROPELLANT_REFERENCE_TABLE.get((yakit, oks))

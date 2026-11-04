@@ -970,7 +970,18 @@ _KATI_ERIME_USTU = {'case_material': 'aluminum_6061',
 #: soğutmanın beyanlı varsayılanını (WALL_TEMP_DEFAULT_K['radiative'] =
 #: 1800 K) ölçer. Önceki örnek dosyası alanı taşımıyordu; alan açıkça
 #: çıkarılır (``None`` = alan gövdede yok, ``_sivi_kati_yanit``).
-_SIVI_RADYATIF = {'cooling_type': 'radiative', 'max_wall_temp': None}
+#: V306/GÜVERTE-HATA: aynı ÖRNEK değişikliği (5fa435893) örnek sıvıya
+#: 1 mm CuCrZr kullanıcı cidarı da yazdı (eskiden Inconel 718, cidar boş →
+#: motor boyutlandırıyordu). 1 mm CuCrZr 75 bar tasarım basıncında oda
+#: sıcaklığında da GERÇEKTEN taşımaz (çember 501,9 MPa ⟷ akma 310 MPa, SF
+#: 0,62): dock bekçisinin ön koşulu ("uç bu koşumda onay yayımlıyor") hiçbir
+#: ürün düzeltmesiyle sağlanamaz, bekçi boş koşardı. Ölçüm koşulu açıkça
+#: sabitlenir (``_ORNEK_SIVI_GECERLILIK_ICI`` ile aynı 8 mm, aynı gerekçe;
+#: beklentiler değişmedi): radyatif 1800 K varsayılanı motor bloğunu yine
+#: geçerlilik DIŞINA alır (CuCrZr erime 1356 K), 300 K koşumu onay basar.
+#: Ölçüm: docs/scofield/raw/OH/V306/guverte/RAPOR.md (kalem 1).
+_SIVI_RADYATIF = {'cooling_type': 'radiative', 'max_wall_temp': None,
+                  'chamber_wall_thickness': 8.0}
 #: L-B (v3.0.1, SV-05): yapı hükmü artık ÇÖZÜLMÜŞ cidar sıcaklığında
 #: verilir. Örnek sıvı projenin 2 mm cidarında RP-1 istasyon marşı tepe
 #: sıcak cidarı 2876,6 K çözüyor (erime üstü; ölçüm docs/scofield/raw/OH/
@@ -1250,6 +1261,9 @@ _KATI_SOKUM = ('numTxt', 'fmtNum', 'ortakMetin', 'fmtField', 'fmtTextField',
                'escapeNoticeText', 'solidWallSourceText',
                'solidVesselWallSourceLabel', 'kasaHukumGeriCekildi',
                'solidCaseModelValidityHTML', 'vesselVerdictHTML',
+               # V306/KATI-MODEL (M-KATI-2): güvenlik sekmesinin tasarım
+               # katsayısı satırı.
+               'designFactorCheckRowHTML',
                'generateStructuralAnalysisHTML', 'generateSafetyAnalysisHTML')
 
 
@@ -2292,7 +2306,15 @@ class TestHibritMotorCiktisi:
 
 
 #: KAB devri (i) vakası (docs/kabul/kanit_2026-10-14 gd_sivi_radyatif).
-_KAB_SIVI_RADYATIF_1800 = {'cooling_type': 'radiative', 'max_wall_temp': 1800.0}
+#: V306/GÜVERTE-HATA: KAB ölçümü (14 Eki) örnek sıvının o günkü hazne
+#: malzemesiyle (Inconel 718) alındı; ÖRNEK kulvarı (5fa435893, 27 Eki)
+#: örneği CuCrZr'ye çevirdi. CuCrZr 1800 K'de erime (1356 K) üstündedir ve
+#: ucun yorulma hükmü geri çekme kapalıyken de CRITICAL'dır — ön koşul
+#: ("eski davranışta Fatigue Status SAFE ekranda") örtük malzeme
+#: değişikliğiyle bayatladı. Ölçüm koşulu AÇIKÇA sabitlenir
+#: (``_KAB_FORM_CIDARI_MM`` ile aynı ilke; beklentiler değişmedi).
+_KAB_SIVI_RADYATIF_1800 = {'cooling_type': 'radiative', 'max_wall_temp': 1800.0,
+                           'chamber_material': 'inconel_718'}
 #: L-B (v3.0.1, SV-05): dock paneli artık yalnız ÇÖZÜLMÜŞ cidar sıcaklığını
 #: tohumlar (cooling_system.wall_temperature_solved_*); radyatif 1800 K
 #: kullanıcının HEDEFİdir, çözülmez ve panele gitmez (eski davranış onu
@@ -2410,7 +2432,18 @@ class TestSiviKartiSfAdlari:
             ch['yield_strength_used_MPa']
             / (ch['pressure_hoop_stress'] + ch['thermal_hoop_stress']),
             rel=1e-12)
-        assert ch['thermal_hoop_stress'] > 0.0
+        # V306/GÜVERTE-HATA (kalem 1, CI-SÜREÇ DEVİR 1): bu satır eskiden
+        # ``thermal_hoop_stress > 0`` istiyordu — o terim panelin gaz
+        # sıcaklığından TAHMİN ettiği cidardan geliyordu (film soğutmada
+        # motorun cidar çözücüsü yok: cooling_system.wall_temperature_
+        # solved_K = None, kart 800 K HEDEFTE). Tahmin motorun cidarı
+        # değildir; panel artık onu tohumlamaz, termal yol adıyla koşmaz.
+        # Kâhin aynı kalır (SF_total = σ_y / (basınç + ısıl)); ısıl terim
+        # doğru olarak sıfırdır ve nedeni yanıtta yazılıdır.
+        assert ch['thermal_hoop_stress'] == 0.0
+        assert motor['cooling_system']['wall_temperature_solved_K'] is None
+        assert uc['thermal_analysis']['wall_temperature_source'] == (
+            'not_evaluated')
         assert dp['design_pressure_factor'] != 1.0
         # Kartın 'Safety Factor' satırı tasarım hedefinin geri okunması.
         assert cs['safety_factor'] != cs['hoop_safety_factor']

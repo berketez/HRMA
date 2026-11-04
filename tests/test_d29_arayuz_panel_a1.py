@@ -134,7 +134,10 @@ def test_ohd2804_birim_etiketi_milimetre():
     """
     metin = _oku('hrma/static/js/panels/safety_panel.js')
     for alan in ('inner_diameter_mm', 'wall_thickness_mm'):
-        kalip = (r"addRow\(rows,\s*'" + alan + r"',\s*press\." + alan
+        # V306/GÜVENLİK (NR-4): satır kullanıcı etiketli yardımcıyla
+        # (addUserRow: makine yolu + sözlük etiketi + değer + birim).
+        kalip = (r"add(?:User)?Row\(rows,\s*'" + alan
+                 + r"',\s*(?:T\([^)]*\),\s*)?press\." + alan
                  + r"[^)]*'mm'\)")
         assert re.search(kalip, metin), (
             f'{alan} satırı `mm` birim etiketiyle basılmıyor')

@@ -104,9 +104,12 @@ def test_lule_kutlesi_hacim_x_yogunluk(sivi):
 
 def test_toplam_ozet_uc_ve_ucus_ayni_sayi(client, sivi):
     cm = sivi['component_sizing']['component_masses']
+    # V306/SIVI-KÜTLE (M-SIVI-1): kumanda / aviyonik motor kuru kütlesinde
+    # DEĞİL (eski sabit 15 kg kaynaksızdı); toplam beş bileşenin toplamıdır.
+    assert 'controls_avionics' not in cm
     parca = sum(cm[k] for k in ('combustion_chamber', 'nozzle_assembly',
                                 'injector_assembly', 'turbopump_assembly',
-                                'feed_system', 'controls_avionics'))
+                                'feed_system'))
     assert cm['total_dry_mass'] == pytest.approx(parca, rel=1e-12)
     assert sivi['design_summary']['masses']['engine_mass_kg'] == \
         cm['total_dry_mass']

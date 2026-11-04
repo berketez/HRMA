@@ -805,10 +805,10 @@
                 </div>
                 <div class="form-group">
                     <label for="thrust">
-                        <span data-i18n="liq.ui.target_thrust">Target Thrust</span> <span class="unit">(N)</span>
+                        <span data-i18n="liq.ui.target_thrust">Target Engine Thrust (sea level)</span> <span class="unit">(N)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="liq.ui.target_thrust_level_for_the_liquid">Target thrust level for the liquid engine. Small thrusters: 100-1000N, Medium engines: 1-100kN, Large boosters: 100kN-2MN (F-1). Accepted range: 100 N - 10 MN. Determines engine size, mass flow, and cooling requirements. This field is a required design point: left blank, the request is refused by name.</span>
+                            <span class="tooltip-text" data-i18n="liq.ui.target_thrust_level_for_the_liquid">Engine thrust at the sea-level design point, in N: ambient pressure 1.01325 bar (ISA sea level). For an open cycle (gas generator, tap-off) it is the ENGINE thrust = main chamber + turbine exhaust; the propellant flow, the throat and the tanks are sized from it. A vacuum thrust cannot be entered as the target: the vacuum thrust is computed from this design point and published separately. Accepted range: 100 N - 10 MN. This field is a required design point: left blank, the request is refused by name.</span>
                         </div>
                     </label>
                     <input type="number" id="thrust" placeholder="required: blank = 422 refusal"
@@ -1956,7 +1956,7 @@
                                 <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.initial_mass_kg">Initial Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.initial_mass_kg_help">Vehicle mass at lift-off, in kg. After an engine calculation (and again when the trajectory is computed), unless you typed in this field, it is filled from the flown vehicle: the engine flying inert mass (engine dry + propellant tank structure + reserve propellant, the same number the Launch Site flies) + the propellant mass. If the engine publishes no propellant mass (no Maximum Burn Duration entered) the field is emptied and the trajectory asks for it by name; no mass is assumed. Initial minus final mass is the propellant burned; the burn time is that mass divided by the engine mass flow. Must be greater than the final mass, otherwise no trajectory is computed.</span></span></span>
                                     <input type="number" id="traj_initial_mass" value="5000" step="100" style="margin-top:4px;">
                                 </label>
-                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.final_dry_mass_kg">Final (Dry) Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.final_dry_mass_kg_help">Vehicle mass after burnout, in kg. After an engine calculation (and again when the trajectory is computed), unless you typed in this field, it is filled with the engine flying inert mass (engine dry + propellant tank structure + reserve propellant; the same number the Launch Site and the 6-DOF panel use). Add airframe and payload to both masses to fly a real vehicle; a value you type is kept. Empty: the trajectory asks for it by name (no mass is assumed). Must be smaller than the initial mass.</span></span></span>
+                                <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.final_dry_mass_kg">Final (Dry) Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.final_dry_mass_kg_help">Vehicle mass after burnout, in kg. After an engine calculation (and again when the trajectory is computed), unless you typed in this field, it is filled with the engine flying inert mass (engine dry + propellant tank structure + reserve propellant; the same number the Launch Site and the 6-DOF panel use). Add airframe and payload to both masses to fly a real vehicle; a value you type is kept. Avionics, wiring and the recovery system belong in this mass: the engine dry (flying inert) mass does not contain them. Empty: the trajectory asks for it by name (no mass is assumed). Must be smaller than the initial mass.</span></span></span>
                                     <input type="number" id="traj_final_mass" value="2000" step="100" style="margin-top:4px;">
                                 </label>
                                 <label style="display:flex; flex-direction:column; font-size:13px; color:#cfe8f2;"><span><span data-i18n="liq.ui.drag_coefficient">Drag Coefficient</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="liq.ui.drag_coefficient_help">Vehicle drag coefficient (dimensionless) on the reference area, sent as drag_coefficient; it scales the aerodynamic drag over the whole flight. Not filled from the engine calculation. Empty or not a number: the field is not sent and the trajectory endpoint refuses the run, naming the field (no value is assumed).</span></span></span>
@@ -2187,6 +2187,8 @@
             bant.id = 'hdEskiSonucBandi';
             bant.className = 'hd-eski-sonuc-bandi';
             bant.setAttribute('role', 'status');
+            // V306/BAYAT: dil değişiminde şerit de çevrilir (I18N.apply).
+            bant.setAttribute('data-i18n', 'common.staleResults');
             bant.textContent = ortakMetin('common.staleResults',
                 'OLD RESULT: the last calculation failed; the results below belong to the previous successful calculation and do not reflect the current inputs.');
             kap.insertBefore(bant, kap.firstChild);
@@ -3300,9 +3302,18 @@
             // Performans metrikleri — hd-metric HUD kartları
             // (app.js displayPerformanceMetrics deseni; HRMAHud yoksa düz metin)
             const metricsDiv = document.getElementById('performanceMetrics');
+            // V306/SIVI-DEFTER (K5): başlık Isp'si MOTOR Isp'sidir (toplam
+            // itici tüketimine göre); açık çevrim defteri kapandıysa ana itki
+            // odası + lüle Isp'si (ana akış debisine göre) ayrı kartta.
+            const _defter = results.mass_flow_ledger || null;
+            const _defterKapali = !!(_defter && _defter.status === 'open_cycle_closed');
             const metrics = [
-                { label: T('liq.msg.sea_level_isp', 'Sea Level Isp'), value: results.isp_sea_level, decimals: 1, unit: 's' },
-                { label: T('liq.msg.vacuum_isp', 'Vacuum Isp'), value: results.isp_vacuum, decimals: 1, unit: 's' },
+                { label: T('liq.msg.engine_isp_sl', 'Engine Isp — per total propellant consumption (sea level)'), value: results.isp_sea_level, decimals: 1, unit: 's' },
+                { label: T('liq.msg.engine_isp_vac', 'Engine Isp — per total propellant consumption (vacuum)'), value: results.isp_vacuum, decimals: 1, unit: 's' },
+                ...(_defterKapali ? [
+                    { label: T('liq.msg.tca_isp_sl', 'Main thrust chamber + nozzle Isp — per main-chamber flow (sea level)'), value: _defter.main_chamber_isp_sea_level_s, decimals: 1, unit: 's' },
+                    { label: T('liq.msg.tca_isp_vac', 'Main thrust chamber + nozzle Isp — per main-chamber flow (vacuum)'), value: _defter.main_chamber_isp_vacuum_s, decimals: 1, unit: 's' }
+                ] : []),
                 { label: T('liq.msg.space_optimized_isp', 'Space Optimized Isp'), value: results.isp_vacuum_optimized, decimals: 1, unit: 's' },
                 { label: T('liq.msg.vacuum_thrust', 'Vacuum Thrust'), value: results.thrust_vacuum / 1000, decimals: 1, unit: 'kN' }
             ];
@@ -3666,6 +3677,12 @@
                 molecular_weight: T('liq.cea.q_molecular_weight', 'Molecular weight'),
                 gamma: T('liq.cea.q_gamma', 'γ')
             };
+            // V306/SIVI-DEFTER (K5): açık çevrimde CEA'nın karşılığı ana itki
+            // odası + lüledir; satırlar o Isp'yi taşır ve adı onu söyler.
+            if (cc.isp_rows_basis === 'main_thrust_chamber') {
+                ad.isp_vacuum = T('liq.msg.tca_isp_vac', 'Main thrust chamber + nozzle Isp — per main-chamber flow (vacuum)');
+                ad.isp_sea_level = T('liq.msg.tca_isp_sl', 'Main thrust chamber + nozzle Isp — per main-chamber flow (sea level)');
+            }
             var basamak = { c_star: 1, isp_vacuum: 2, isp_sea_level: 2,
                 chamber_temperature: 1, molecular_weight: 3, gamma: 4 };
             var carpanAdi = {
@@ -4524,64 +4541,131 @@
             note.innerHTML = html;
         }
 
+        // V306/SIVI-DEFTER (M-SIVI-2) — KAYIP GÖRSELLERİ.
+        // Ölçülen kusur (mühendis turu L1): pastanın başlığı "Genel Verim
+        // %78,6" diyordu; başlık Isp'sine UYGULANAN teslim verimi ise %90,9.
+        // Başlık görseli artık UYGULANAN zinciri gösterir (çarpanlar ve
+        // çarpımı = teslim verimi, efficiency_breakdown.applied_delivery_chain).
+        // Altı kayıplı model AYRI kartta ve "boyutlandırmada uygulanmıyor"
+        // etiketiyle; verimler çarpımsaldır, kayıp yüzdeleri TOPLANMAZ (pasta
+        // yok). Zincir tek çarpansa ayrıştırma yapılmaz.
+        function _chainLabel(k) {
+            if (k === 'eta_c_star') return T('liq.msg.chain_eta_c_star', 'η_c* (combustion)');
+            if (k === 'lambda_divergence') return T('liq.msg.chain_lambda', 'λ (divergence)');
+            if (k === 'eta_friction') return T('liq.msg.chain_friction', 'η_f (friction)');
+            if (k === 'eta_kinetic') return T('liq.msg.chain_kinetic', 'η_kin (kinetics)');
+            return String(k);
+        }
+
+        function _mechLabel(k) {
+            if (k === 'divergence_loss') return T('liq.msg.mech_divergence', 'Divergence');
+            if (k === 'boundary_layer_loss') return T('liq.msg.mech_boundary_layer', 'Boundary layer');
+            if (k === 'heat_transfer_loss') return T('liq.msg.mech_heat_transfer', 'Wall heat transfer');
+            if (k === 'combustion_incomplete') return T('liq.msg.mech_combustion', 'Combustion');
+            if (k === 'mixing_loss') return T('liq.msg.mech_mixing', 'Mixing');
+            if (k === 'kinetic_loss') return T('liq.msg.mech_kinetic', 'Kinetics');
+            if (k === 'nozzle_length_loss') return T('liq.msg.mech_nozzle_length', 'Nozzle length (design comparison)');
+            return _lossLabel(k);
+        }
+
         function createEfficiencyBreakdownChart(effData) {
             const chartDiv = document.getElementById('efficiencyChart') || createChartDiv('efficiencyChart', T('liq.msg.efficiency_distribution', 'Efficiency Distribution'));
-
             if (!chartDiv) return;
 
+            // 1) UYGULANAN zincir (başlık görseli)
+            const zincir = effData && effData.applied_delivery_chain;
+            const carpanlar = (zincir && Array.isArray(zincir.factors)) ? zincir.factors : [];
+            const carpim = Number(zincir && zincir.product_pct);
+            if (carpanlar.length && isFinite(carpim)) {
+                const x = carpanlar.map(function (f) { return _chainLabel(f.key); });
+                const y = carpanlar.map(function (f) { return Number(f.efficiency_pct); });
+                if (!zincir.single_factor) {
+                    x.push(T('liq.msg.chain_product', 'Product = applied delivery efficiency'));
+                    y.push(carpim);
+                }
+                const trace = {
+                    x: x, y: y, type: 'bar',
+                    text: y.map(function (v) { return numTxt(v, 2) + ' %'; }),
+                    textposition: 'outside', cliponaxis: false,
+                    marker: { color: y.map(function (_v, idx) {
+                        return (!zincir.single_factor && idx === y.length - 1) ? '#ff8c33' : '#00e5ff'; }) }
+                };
+                const ymin = Math.min.apply(null, y);
+                const layout = {
+                    title: zincir.single_factor
+                        ? TF('liq.msg.applied_chain_single_title', { value: numTxt(carpim, 2) },
+                            'Applied delivery chain: a single factor ({value}%), no decomposition')
+                        : TF('liq.msg.applied_chain_title', { value: numTxt(carpim, 2) },
+                            'Applied delivery chain (product = delivered efficiency {value}%)'),
+                    xaxis: { title: T('liq.msg.applied_chain_axis', 'Applied factor') },
+                    yaxis: { title: T('liq.msg.efficiency', 'Efficiency (%)'),
+                             range: [Math.max(0, Math.floor(ymin - 5)), 103] },
+                    showlegend: false, margin: { t: 70 }
+                };
+                liquidPlot(chartDiv, [trace], layout);
+                _liquidPlotNote(chartDiv, 'efficiencyChartNote',
+                    T('liq.msg.applied_chain_note', 'These factors are the ones applied to the theoretical (NASA CEA) Isp; their product is the delivered efficiency of the thrust chamber. For an open-cycle engine the engine Isp is further lowered by the turbine exhaust (see the mass-flow ledger).'));
+            } else {
+                // Zincir yayımlanmadıysa görsel ÇİZİLMEZ (uydurma yok).
+                _liquidPlotNote(chartDiv, 'efficiencyChartNote',
+                    T('liq.msg.applied_chain_missing', 'The applied delivery chain is not published for this run, so no chart is drawn.'));
+            }
+
+            // 2) KARŞILAŞTIRMA kayıp modeli (uygulanmıyor) — ayrı kart, çubuk
+            const cmpDiv = document.getElementById('efficiencyComparisonChart') || createChartDiv('efficiencyComparisonChart', T('liq.msg.comparison_loss_model', 'Comparison loss model — not applied in sizing'));
+            if (!cmpDiv || !effData || !effData.loss_breakdown) return;
             const split = _effBudgetSplit(effData);
+            const eff = effData.efficiency_breakdown || {};
             const shown = split.verified ? split.budget : Object.keys(effData.loss_breakdown);
-
-            const trace = {
-                labels: shown.map(_lossLabel),
-                values: shown.map(function (k) { return effData.loss_breakdown[k]; }),
-                type: 'pie',
-                hole: 0.4,
-                textinfo: 'label+percent',
-                textposition: 'outside'
+            const cx = shown.map(_mechLabel);
+            const cy = shown.map(function (k) { return Number(eff[k]); });
+            const toplam = Number(effData.overall_efficiency);
+            if (split.verified && isFinite(toplam)) {
+                cx.push(T('liq.msg.comparison_product', 'Product of the items above'));
+                cy.push(toplam);
+            }
+            const cTrace = {
+                x: cx, y: cy, type: 'bar',
+                text: cy.map(function (v) { return isFinite(v) ? numTxt(v, 2) + ' %' : ''; }),
+                textposition: 'outside', cliponaxis: false,
+                marker: { color: cy.map(function (_v, idx) {
+                    return (split.verified && idx === cy.length - 1) ? '#c792ea' : '#7d97a5'; }) }
             };
-
-            // Başlıktaki verim iddiası ANCAK dilimlerle o verim aynı
-            // bütçeye aitse kurulur; doğrulanamadıysa nötr başlık basılır.
-            const layout = {
+            const cvals = cy.filter(function (v) { return isFinite(v); });
+            const cmin = cvals.length ? Math.min.apply(null, cvals) : 0;
+            const cLayout = {
                 title: split.verified
-                    ? TF('liq.msg.performance_losses_title',
-                        { value: numTxt(effData.overall_efficiency, 1) },
-                        'Performance Losses (Overall Efficiency: {value}%)')
+                    ? TF('liq.msg.comparison_model_title', { value: numTxt(toplam, 1) },
+                        'Comparison loss model — not applied in sizing (product {value}%)')
                     : T('liq.msg.performance_losses_unreconciled',
                         'Performance Losses (loss items could not be reconciled '
                         + 'with the reported overall efficiency)'),
-                showlegend: true,
-                // Pasta grafikte 'x unified' anlamsız
-                hovermode: 'closest'
+                xaxis: { title: T('liq.msg.comparison_axis', 'Loss mechanism (efficiency)') },
+                yaxis: { title: T('liq.msg.efficiency', 'Efficiency (%)'),
+                         range: [Math.max(0, Math.floor(cmin - 5)), 103] },
+                showlegend: false, margin: { t: 70 }
             };
+            liquidPlot(cmpDiv, [cTrace], cLayout);
 
-            liquidPlot(chartDiv, [trace], layout);
-
-            // Bütçe dışı kalemler SİLİNMEZ; pastanın altında sayısıyla ve
-            // çözücünün kendi gerekçesiyle listelenir (bilgi kaybı yok).
-            const sources = effData.loss_sources || {};
-            let noteHtml = '';
+            let noteHtml = T('liq.msg.comparison_model_note', 'Efficiencies combine multiplicatively; their loss percentages are not added. This model is not applied to any published Isp, thrust or mass flow.');
             if (split.verified && split.outside.length) {
-                noteHtml = '<strong>'
-                    + T('liq.msg.losses_outside_budget',
-                        'Not part of the overall efficiency product '
-                        + '(design comparison only, excluded from the pie):')
+                noteHtml += '<br><strong>'
+                    + T('liq.msg.losses_outside_product',
+                        'Not part of the product above (design comparison only):')
                     + '</strong><br>'
                     + split.outside.map(function (k) {
-                        const v = Number(effData.loss_breakdown[k]);
-                        return _lossLabel(k) + ' = '
-                            + (isFinite(v) ? numTxt(v, 2) : 'n/a') + ' pt — '
-                            + String(sources[k] || '');
+                        const v = Number(eff[k]);
+                        return _mechLabel(k) + ' = '
+                            + (isFinite(v) ? numTxt(v, 2) + ' %' : '—');
                     }).join('<br>');
             } else if (!split.verified) {
-                noteHtml = T('liq.msg.losses_not_reconciled',
+                noteHtml += '<br>' + T('liq.msg.losses_not_reconciled',
                     'The product of the individual efficiencies does not match '
                     + 'the reported overall efficiency, so no item is claimed to '
                     + 'be inside or outside the efficiency budget. All items are '
                     + 'shown as returned by the solver.');
             }
-            _liquidPlotNote(chartDiv, 'efficiencyChartNote', noteHtml);
+            _liquidPlotNote(cmpDiv, 'efficiencyComparisonChartNote', noteHtml);
         }
         
         function updateManufacturingTab(manufacturingData) {
@@ -4676,6 +4760,20 @@
                 + ' color:var(--hd-ink-dim, #7d97a5);">' + _tankEsc(alan)
                 + ': ' + _tankEsc(deger) + '</div>';
         }
+        // V306/SIVI-KÜTLE (M-SIVI-4): tank basınç sınıfı önerilen paylı tank
+        // basıncının altındaysa satırın altında adıyla (sayılar ucun:
+        // `pressure_rating_check`, `pressure_rating_recommended_bar`,
+        // `pressure_rating_required_bar`). Karşılaştırma yoksa satır yok.
+        function tankSinifNotu(st) {
+            if (!st || st.pressure_rating_check !== 'below_recommended') return '';
+            return '<div data-liq-field="pressure_rating_check" style="font-size:0.74rem;'
+                + ' line-height:1.45; margin-top:2px; color:var(--hd-orange, #ff8c33);">'
+                + _tankEsc(TF('liq.js.rating_below_recommended', {
+                    rec: numTxt(st.pressure_rating_recommended_bar, 1),
+                    req: numTxt(st.pressure_rating_required_bar, 1) },
+                    'below the recommended tank pressure {rec} bar (required {req} bar + declared margin): the design works, with a smaller feed margin'))
+                + '</div>';
+        }
         // Kriyojenik uygunluk hükmü: uç `verdict` + `basis` yayımlar.
         // Hüküm 'fail'/'unresolved' ise satır UYARI rengiyle basılır —
         // renk sunucunun kendi dizesinden türer, burada eşik hesaplanmaz.
@@ -4747,7 +4845,7 @@
                     <tr><td>${T('liq.js.wall_thickness', 'Wall Thickness:')}</td><td>${numTxt(tankData.oxidizer_tank.dimensions.wall_thickness, 1)} mm</td></tr>
                     <tr><td>${T('liq.js.propellant_mass', 'Propellant Mass:')}</td><td>${numTxt(tankData.oxidizer_tank.propellant_data.mass, 0)} kg</td></tr>
                     <tr><td>${T('liq.js.tank_mass', 'Tank Mass:')}</td><td>${numTxt(tankData.oxidizer_tank.structural.tank_mass, 0)} kg</td></tr>
-                    <tr><td>${T('liq.js.pressure_rating', 'Pressure Rating:')}</td><td>${numTxt(tankData.oxidizer_tank.structural.pressure_rating, 1)} bar${tankKunye('pressure_rating_source', tankData.oxidizer_tank.structural.pressure_rating_source)}${tankKunye('safety_factor_source', tankData.oxidizer_tank.structural.safety_factor_source)}</td></tr>
+                    <tr><td>${T('liq.js.pressure_rating', 'Pressure Rating:')}</td><td>${numTxt(tankData.oxidizer_tank.structural.pressure_rating, 1)} bar${tankSinifNotu(tankData.oxidizer_tank.structural)}${tankKunye('pressure_rating_source', tankData.oxidizer_tank.structural.pressure_rating_source)}${tankKunye('safety_factor_source', tankData.oxidizer_tank.structural.safety_factor_source)}</td></tr>
                     <tr><td>${T('liq.js.material', 'Material:')}</td><td>${tankMalzemeHucresi(tankData.oxidizer_tank.structural)}</td></tr>
                 </table>
             `;
@@ -4765,7 +4863,7 @@
                     <tr><td>${T('liq.js.wall_thickness', 'Wall Thickness:')}</td><td>${numTxt(tankData.fuel_tank.dimensions.wall_thickness, 1)} mm</td></tr>
                     <tr><td>${T('liq.js.propellant_mass', 'Propellant Mass:')}</td><td>${numTxt(tankData.fuel_tank.propellant_data.mass, 0)} kg</td></tr>
                     <tr><td>${T('liq.js.tank_mass', 'Tank Mass:')}</td><td>${numTxt(tankData.fuel_tank.structural.tank_mass, 0)} kg</td></tr>
-                    <tr><td>${T('liq.js.pressure_rating', 'Pressure Rating:')}</td><td>${numTxt(tankData.fuel_tank.structural.pressure_rating, 1)} bar${tankKunye('pressure_rating_source', tankData.fuel_tank.structural.pressure_rating_source)}${tankKunye('safety_factor_source', tankData.fuel_tank.structural.safety_factor_source)}</td></tr>
+                    <tr><td>${T('liq.js.pressure_rating', 'Pressure Rating:')}</td><td>${numTxt(tankData.fuel_tank.structural.pressure_rating, 1)} bar${tankSinifNotu(tankData.fuel_tank.structural)}${tankKunye('pressure_rating_source', tankData.fuel_tank.structural.pressure_rating_source)}${tankKunye('safety_factor_source', tankData.fuel_tank.structural.safety_factor_source)}</td></tr>
                     <tr><td>${T('liq.js.material', 'Material:')}</td><td>${tankMalzemeHucresi(tankData.fuel_tank.structural)}</td></tr>
                     ${tankData.fuel_tank.structural.insulation !== 'None' ? 
                         `<tr><td>${T('liq.js.insulation', 'Insulation:')}</td><td>${_tankEsc(tankData.fuel_tank.structural.insulation)}</td></tr>` : ''}
@@ -6402,6 +6500,22 @@
 
             const anchorNote = _altAnchorNote(results, ap);
             if (anchorNote) note = note ? (note + '<br>' + anchorNote) : anchorNote;
+            // V306/SIVI-DEFTER (K5): açık çevrimde itki ve Isp MOTOR
+            // değerleridir; ana oda ve türbin egzozu payı satırda ayrı.
+            const _dk = results && results.mass_flow_ledger;
+            const _r0 = ap[0] || {};
+            if (_dk && _dk.status === 'open_cycle_closed'
+                    && isFinite(Number(_r0.thrust_main_chamber))
+                    && isFinite(Number(_r0.thrust_turbine_exhaust))) {
+                const engNote = TF('liq.msg.alt_engine_thrust_note',
+                    { main: numTxt(Number(_r0.thrust_main_chamber) / 1000, 3),
+                      exh: numTxt(Number(_r0.thrust_turbine_exhaust) / 1000, 3) },
+                    'Open cycle: thrust and Isp are ENGINE values (main chamber '
+                    + '+ turbine exhaust, per total propellant). At sea level '
+                    + 'the main chamber gives {main} kN and the turbine exhaust '
+                    + '{exh} kN. C_F is the main chamber nozzle coefficient.');
+                note = note ? (note + '<br>' + engNote) : engNote;
+            }
             return { traces: traces, layout: layout, note: note };
         }
 
@@ -6437,7 +6551,7 @@
             const km = ap.map(p => (p.altitude || 0) / 1000);
             const cfTrace = {
                 x: km, y: ap.map(p => p.thrust_coefficient),
-                type: 'scatter', mode: 'lines+markers', name: T('liq.msg.thrust_coefficient_cf', 'Thrust Coefficient (Cf)'),
+                type: 'scatter', mode: 'lines+markers', name: T('liq.msg.thrust_coefficient_main', 'Thrust coefficient C_F (main chamber nozzle: F_main / (Pc·A_t))'),
                 line: { color: '#00e5ff', width: 3 }, yaxis: 'y'
             };
             const effTrace = {
@@ -6610,30 +6724,45 @@
         // 0,435 s yanıyordu. Araç gelmeden (yayım isteği sürerken) alanlar
         // BOŞALTILIR — motora ait olmayan sayı ekranda durmaz; araç gelince
         // (hrma:flight-vehicle) tohumlanır. Kullanıcının yazdığı ezilmez.
+        // V306/UÇUŞ NR-13 / NR-10 — KÖK: örnek proje açılınca yörünge kütle
+        // alanları "elle yazıldı" damgası alıyordu (proje geri yüklemesinin
+        // YAPAY input olayı; ölçüldü V306/ucus/olcum_paneller_liquid_once.json)
+        // ve araç tohumu onları hiç ezmiyordu: yörünge 156,313 kg (örnek
+        // dosyanın eski sayısı) ⟷ 6-DOF ve Fırlatma Sahası 158,191 kg. Artık
+        // yalnız gerçek yazma damgalar (FlightHandoff.isUserEdit) ve alan
+        // ortak yardımcıdan dolar (FlightHandoff.seedField): kullanıcının
+        // yazdığı korunur ama tasarım değeri farklıysa alanın altında yazar.
+        // İlk kütle = alanda kalan kuru kütle + itici (bütçe her durumda
+        // tutar); kalem satırı motorun uçan atıl kütlesini kalemleriyle basar.
+        // Yeni hesapta eski yörünge grafiği TEMİZLENİR (NR-10 deseni).
+        let _liqYorungeCizimSonucu = null;
         function liquidTrajectorySeed(cr) {
             const poz = v => (typeof v === 'number' && isFinite(v) && v > 0);
-            const yaz = (id, deger) => {
-                const el = document.getElementById(id);
-                if (!el || el.dataset.userOverride === 'true') return;
-                el.value = (deger === null) ? '' : deger.toFixed(3);
-            };
             if (cr && (!window.ucusHesapFormu || window.ucusHesapFormu.results !== cr)
                     && typeof collectAllParameters === 'function') {
                 try { window.ucusHesapFormu = { results: cr, form: collectAllParameters() }; }
                 catch (e) { window.ucusHesapFormu = null; }
             }
-            const arac = (cr && window.FlightHandoff && FlightHandoff.vehicleFor)
-                ? FlightHandoff.vehicleFor(cr) : null;
-            if (!arac) {
-                yaz('traj_final_mass', null);
-                yaz('traj_initial_mass', null);
-                return;
+            const cizim = document.getElementById('trajectory_plots');
+            if (cizim && _liqYorungeCizimSonucu && cr && _liqYorungeCizimSonucu !== cr) {
+                _liqYorungeCizimSonucu = null;
+                if (window.Plotly && Plotly.purge) { try { Plotly.purge(cizim); } catch (e) { /* yok */ } }
+                cizim.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">'
+                    + ortakMetin('flight.staleTrajectory', 'The engine was recalculated; the previous '
+                        + 'trajectory belonged to the earlier design and was cleared. Press '
+                        + 'Calculate Trajectory again.') + '</p>';
             }
-            const kuru = poz(arac.engine_inert_mass) ? arac.engine_inert_mass : null;
-            yaz('traj_final_mass', kuru);
-            yaz('traj_initial_mass', (kuru !== null && poz(arac.propellant_mass))
-                ? kuru + arac.propellant_mass : null);
-            liquidSixDofSeed(cr, arac);
+            const FH = window.FlightHandoff;
+            const arac = (cr && FH && FH.vehicleFor) ? FlightHandoff.vehicleFor(cr) : null;
+            const sonEl = document.getElementById('traj_final_mass');
+            const ilkEl = document.getElementById('traj_initial_mass');
+            if (!FH || !FH.seedField) return;
+            const kuruAlan = FH.seedField(sonEl,
+                (arac && poz(arac.engine_inert_mass)) ? arac.engine_inert_mass : null, 3, 'kg');
+            FH.seedField(ilkEl, (arac && poz(kuruAlan) && poz(arac.propellant_mass))
+                ? kuruAlan + arac.propellant_mass : null, 3, 'kg');
+            FH.renderInertLedger(sonEl, arac);
+            if (arac) liquidSixDofSeed(cr, arac);
         }
 
         // V301/UÇUŞ NK-14 (sıvı) — 6-DOF AYNI MOTORLA. Panelin itici ve kuru
@@ -6671,18 +6800,30 @@
                 liquidTrajectorySeed(d.results);
             }
         });
+        // V306/UÇUŞ NR-13: YALNIZ GERÇEK YAZMA damgalar (proje geri
+        // yüklemesinin yapay olayı değil — FlightHandoff.isUserEdit).
         ['sd_prop_m', 'sd_dry_m', 'sd_body_d'].forEach(function (id) {
             document.addEventListener('input', function (e) {
-                if (e.target && e.target.id === id) e.target.dataset.userOverride = 'true';
+                if (e.target && e.target.id === id && window.FlightHandoff
+                        && FlightHandoff.isUserEdit(e)) {
+                    e.target.dataset.userOverride = 'true';
+                }
             });
         });
 
         // V301/K-C1 (NK-71): kullanıcı kütle alanına yazınca tohumlama onu
         // bir daha ezmez (katı sayfasının data-user-override deseni).
+        // V306/UÇUŞ NR-13: yalnız gerçek yazma (isUserEdit); kalem satırı
+        // alanın yeni değeriyle tazelenir.
         document.addEventListener('input', function (e) {
             const t = e.target;
             if (t && (t.id === 'traj_initial_mass' || t.id === 'traj_final_mass')) {
-                t.dataset.userOverride = 'true';
+                if (window.FlightHandoff && FlightHandoff.isUserEdit(e)) {
+                    t.dataset.userOverride = 'true';
+                }
+                if (t.id === 'traj_final_mass' && window.FlightHandoff && window.currentResults) {
+                    FlightHandoff.renderInertLedger(t, FlightHandoff.vehicleFor(window.currentResults));
+                }
             }
         });
 
@@ -6773,6 +6914,19 @@
                     return;
                 }
             }
+            // V306/UÇUŞ-3 (SIVI-SOĞUTMA DEVİR): motor kütlesi yayımlanmadıysa
+            // araç kurulmaz; yörünge koşmaz, nedeni yazılır.
+            if (window.FlightHandoff && FlightHandoff.vehicleReady) {
+                try { await FlightHandoff.vehicleReady(cr, { motor_type: 'liquid' }); } catch (e) { /* ret aşağıda */ }
+            }
+            const _ucusReddi = (window.FlightHandoff && FlightHandoff.vehicleRefusalText)
+                ? FlightHandoff.vehicleRefusalText(cr) : null;
+            if (_ucusReddi) {
+                div.innerHTML = '<p style="text-align:center;color:#ff7a85;padding:40px;">'
+                    + (globalThis.escapeNoticeText || String)(_ucusReddi) + '</p>';
+                if (FlightHandoff.renderTrajectoryNotes) FlightHandoff.renderTrajectoryNotes(div, null);
+                return;
+            }
             // V301/UÇUŞ (K-C1 AÇIK 6): tohumlama artık displayResults'ta da
             // koşar; burada aynı işlev (tek kural) yeniden çağrılır.
             liquidTrajectorySeed(cr);
@@ -6833,6 +6987,9 @@
                 if (_pozitif(_pAmbBar)) body.thrust_reference_pressure = _pAmbBar * 1e5;
             }
             div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">' + T('liq.js.computing_trajectory', 'Computing trajectory…') + '</p>';
+            if (window.FlightHandoff && FlightHandoff.renderTrajectoryNotes) {
+                FlightHandoff.renderTrajectoryNotes(div, null);   // eski künye kalmaz
+            }
             try {
                 const resp = await fetch('/api/trajectory-analysis', {
                     method: 'POST',
@@ -6849,18 +7006,55 @@
                     // metni; bütçe reddinde iki kütle ve fark sözlükten.
                     const govde = Object.assign({}, d);
                     if (d.error === 'inconsistent_propellant_budget' && d.message_params) {
-                        govde.message = TF('liq.js.trajectory_propellant_budget_mismatch',
-                            d.message_params, d.message || d.error);
+                        // V306/UÇUŞ NR-10: sayılar ekran basamağıyla (kütle 3,
+                        // Isp 1, yüzde 2 ondalık); alan adları sayfanın
+                        // alan kimliğine çevrilir ki ileti ETİKETİ yazsın
+                        // ('isp' formda alan değil — cümle zaten anıyor).
+                        const p = d.message_params;
+                        govde.message = TF('liq.js.trajectory_propellant_budget_mismatch', {
+                            mass_budget_kg: numTxt(p.mass_budget_kg, 3),
+                            implied_kg: numTxt(p.implied_kg, 3),
+                            isp_s: numTxt(p.isp_s, 1),
+                            disagreement_pct: numTxt(p.disagreement_pct, 2),
+                            accepted_pct: numTxt(p.accepted_pct, 0)
+                        }, d.message || d.error);
+                    }
+                    if (Array.isArray(d.invalid_fields)) {
+                        govde.invalid_fields = d.invalid_fields
+                            .filter(f => f && YORUNGE_ALAN_KIMLIGI[f.field])
+                            .map(f => Object.assign({}, f, { field: YORUNGE_ALAN_KIMLIGI[f.field] }));
+                    }
+                    if (Array.isArray(d.missing_fields)) {
+                        govde.missing_fields = d.missing_fields
+                            .map(f => (typeof f === 'string' && YORUNGE_ALAN_KIMLIGI[f]) || f);
                     }
                     throw new Error(globalThis.HRMAReject
                         ? HRMAReject.metni(govde, resp.status)
                         : (govde.message || d.error || ('HTTP ' + resp.status)));
+                }
+                // V306/UÇUŞ-2: künye (uçan itki, irtifa düzeltmesi, yük
+                // çarpanı, düzlemsel model + atış açısı); kalkış yoksa grafik
+                // yerine hüküm (M-KATI-29).
+                // V306/UÇUŞ-3 (M-SIVI-3): uçan itici motorunkinden farklıysa
+                // künyenin başında adıyla (hangi değer uçtu, kaç s yandı).
+                const _butceSatiri = (window.FlightHandoff && FlightHandoff.propellantBudgetLine)
+                    ? FlightHandoff.propellantBudgetLine(mItici, _liquidMotorItici(cr), trMdot) : null;
+                const _kunye = (window.FlightHandoff && FlightHandoff.renderTrajectoryNotes)
+                    ? FlightHandoff.renderTrajectoryNotes(div, d, 'motor_constant', null,
+                        _butceSatiri ? [_butceSatiri] : null) : { draw: true };
+                if (d.status === 'success' && !_kunye.draw) {
+                    if (window.Plotly && Plotly.purge) { try { Plotly.purge(div); } catch (e) { /* yok */ } }
+                    div.innerHTML = '<p style="text-align:center;color:#ff7a85;padding:40px;">'
+                        + (globalThis.escapeNoticeText || String)(_kunye.message) + '</p>';
+                    _liqYorungeCizimSonucu = cr;
+                    return;
                 }
                 if (d.status !== 'success' || !d.plot_data) {
                     throw new Error(d.error || T('liq.msg.trajectory_data_could_not_be_retrieved', 'Trajectory data could not be retrieved'));
                 }
                 const fig = JSON.parse(d.plot_data);
                 liquidPlot(div, fig.data, fig.layout);
+                _liqYorungeCizimSonucu = cr;
             } catch (e) {
                 div.innerHTML = '<p style="text-align:center;color:#ff7a85;padding:40px;">'
                     + (globalThis.escapeNoticeText || String)(TF('liq.js.trajectory_could_not_be_computed',
@@ -6890,6 +7084,33 @@
             if (sa) {
                 const csr = sa.chamber_structure || {};
                 const dr = sa.design_requirements || {};
+                // V306/SIVI-KÜTLE (kalem 4-5): deneme/patlama gereksinimi
+                // basınç taşıyan katmanın MDP'sinden ve hangi standarda göre
+                // olduğu etikette (sıvı motor donanımı: NASA-STD-5012C
+                // Tablo 1). Eski sonuçta (kod alanı yok) eski etiketler.
+                const drSatirlari = function (d) {
+                    if (d.code !== 'nasa_std_5012c') {
+                        return row(T('liq.msg.burst_pressure', 'Burst Pressure'), hrmaFmt(d.burst_pressure, 1, 'bar'))
+                            + row(T('liq.msg.proof_pressure', 'Proof Pressure'), hrmaFmt(d.proof_pressure, 1, 'bar'));
+                    }
+                    const mdpEtiket = d.pressure_bearing_layer === 'closeout'
+                        ? T('liq.msg.mdp_closeout', 'Maximum design pressure (MDP), closeout: highest jacket coolant pressure')
+                        : T('liq.msg.mdp_chamber_wall', 'Maximum design pressure (MDP), chamber wall: chamber pressure');
+                    let h = row(mdpEtiket, hrmaFmt(d.mdp_bar, 1, 'bar'));
+                    const astar = (Array.isArray(d.layers) ? d.layers : []).filter(function (k) {
+                        return k && k.role === 'liner';
+                    })[0];
+                    if (astar) {
+                        h += row(T('liq.msg.mdp_liner', 'MDP of the liner (largest coolant − gas pressure difference)'), hrmaFmt(astar.mdp_bar, 1, 'bar'));
+                        if (Number.isFinite(astar.reverse_difference_bar)) {
+                            h += row(T('liq.msg.mdp_liner_reverse', 'Liner reverse difference (gas pressure above coolant pressure)'), hrmaFmt(astar.reverse_difference_bar, 1, 'bar'));
+                        }
+                    }
+                    return h
+                        + row(T('liq.msg.burst_pressure_5012c', 'Required Burst Pressure (NASA-STD-5012C, 1.50 × MDP)'), hrmaFmt(d.burst_pressure, 1, 'bar'))
+                        + row(T('liq.msg.qual_pressure_5012c', 'Qualification Test Pressure (NASA-STD-5012C, 1.50 × MDP)'), hrmaFmt(d.qualification_test_pressure, 1, 'bar'))
+                        + row(T('liq.msg.proof_pressure_5012c', 'Acceptance (Proof) Test Pressure (NASA-STD-5012C, 1.20 × MDP)'), hrmaFmt(d.proof_pressure, 1, 'bar'));
+                };
                 // V3 yapi-sf 3. tur B (karar §28-37 Ş2-3 (a)) — MODEL
                 // GEÇERLİLİK DALI. Uç `chamber_structure.model_validity_limit_
                 // exceeded` TRUE derse SF satırı sayı yerine geri çekilen
@@ -6942,8 +7163,7 @@
                     row(T('liq.msg.hoop_sf_operating', 'Hoop SF on the drawn wall (operating pressure, pressure load only, yield at the hot-wall temperature)'), mvDisi
                         ? mvEsc(ortakMetin('panel.structural.verdictWithheld', 'VERDICT WITHHELD'))
                         : hrmaFmt(csr.hoop_safety_factor, 2)) +
-                    row(T('liq.msg.burst_pressure', 'Burst Pressure'), hrmaFmt(dr.burst_pressure, 1, 'bar')) +
-                    row(T('liq.msg.proof_pressure', 'Proof Pressure'), hrmaFmt(dr.proof_pressure, 1, 'bar')) +
+                    drSatirlari(dr) +
                     row(T('liq.msg.thermal_cycles', 'Thermal Cycles'), hrmaFmt(dr.thermal_cycles, 0)) +
                     mvSatir);
             }
@@ -7091,14 +7311,32 @@
             const cs = results.component_sizing;
             if (cs && cs.component_masses) {
                 const cm = cs.component_masses;
+                // V306/SIVI-KÜTLE (M-SIVI-1): kumanda / aviyonik motor kuru
+                // kütlesinde DEĞİL — çözücü onu `not_in_engine_dry_mass`
+                // listesinde adıyla, kütlesiz yayımlar (eski sabit 15 kg
+                // kaynaksızdı). Satır ADIYLA kalır; sayı basılmaz. Eski
+                // sonuçta (kalem kütleli) sayı olduğu gibi gösterilir.
+                const disari = (Array.isArray(cs.not_in_engine_dry_mass)
+                    ? cs.not_in_engine_dry_mass : []).some(function (k) {
+                        return k && k.key === 'controls_avionics';
+                    });
+                const kumandaSatiri = disari
+                    ? '<tr><td colspan="2" data-liq-field="controls_avionics" style="white-space:normal;line-height:1.45;color:#9fb6c2;">'
+                        + T('liq.msg.controls_avionics', 'Controls / Avionics') + ': '
+                        + T('liq.msg.controls_avionics_not_in_engine',
+                            'not in the engine dry mass. The controller box, harness and sensors are a vehicle item whose mass HRMA does not estimate; include it in the vehicle dry mass (Trajectory, 6-DOF, Launch Site). Valve and actuator mass is in the feed system.')
+                        + '</td></tr>'
+                    : (Number.isFinite(cm.controls_avionics)
+                        ? row(T('liq.msg.controls_avionics', 'Controls / Avionics'), hrmaFmt(cm.controls_avionics, 1, 'kg'))
+                        : '');
                 addCard(T('liq.msg.component_masses', 'Component Masses'),
                     row(T('liq.js.combustion_chamber', 'Combustion Chamber'), hrmaFmt(cm.combustion_chamber, 1, 'kg')) +
                     row(T('liq.msg.injector_assembly', 'Injector Assembly'), hrmaFmt(cm.injector_assembly, 1, 'kg')) +
                     row(T('liq.msg.nozzle_assembly', 'Nozzle Assembly'), hrmaFmt(cm.nozzle_assembly, 1, 'kg')) +
                     row(T('liq.msg.turbopump_assembly', 'Turbopump Assembly'), hrmaFmt(cm.turbopump_assembly, 1, 'kg')) +
                     row(T('liq.js.feed_system', 'Feed System'), hrmaFmt(cm.feed_system, 1, 'kg')) +
-                    row(T('liq.msg.controls_avionics', 'Controls / Avionics'), hrmaFmt(cm.controls_avionics, 1, 'kg')) +
-                    row(T('liq.msg.total_dry_mass', 'Total Dry Mass'), hrmaFmt(cm.total_dry_mass, 1, 'kg')));
+                    row(T('liq.msg.total_dry_mass', 'Total Dry Mass'), hrmaFmt(cm.total_dry_mass, 1, 'kg')) +
+                    kumandaSatiri);
             }
 
             // Tasarım Özeti
@@ -8707,7 +8945,26 @@
         // kütlesi ile motorun debisinden gelir. Gerekli sayılar yoksa null
         // dönülür ve panel kendi form değerlerine düşer (uydurma yok).
         // Saf çekirdek (DOM'a bakmaz) — bekçi testi bunu doğrudan ölçer.
-        function _liquidSixDofDriveFrom(cr, mProp) {
+        // V306/UÇUŞ-3 (M-SIVI-26) — YANMA SÜRESİ MOTORUNKİYLE DENETLENİR.
+        // ÖLÇÜLDÜ (4 Kas, ekran/tarayici_once_tr.json L; tur: "yanma süresi
+        // 1 024 503 s"): 6-DOF İtici Kütlesi alanına motorun taşımadığı bir
+        // kütle yazılınca (ya da önceki projeden kalınca) yanma süresi
+        // 376 938 kg / 9,915 kg/s = 38 016,9 s türetiliyor ve çözücüye
+        // gidiyordu; motorun yanma süresi 30 s'ydi. Motorun itici kütlesi
+        // (mEngine, aynı hesabın aracı) biliniyorsa ondan FAZLA itici bu
+        // motorla uçamaz (tanklar onu taşımaz): sonuç adlı RET'tir
+        // (``reject``), koşu başlamaz. Azı meşrudur (kısmen dolu motor) ve
+        // not bunu iki yanma süresiyle yazar. Motor itici yayımlamıyorsa
+        // (yanma süresi girilmedi) denetim yoktur — not bunu zaten söyler.
+        // Eşik TEK yerde: FlightHandoff.MASS_FIELD_TOL_KG (kütle alanlarının
+        // 3 ondalık çözünürlüğünün yarısı; tohum ve kalem satırıyla aynı
+        // ölçüt). Köprü yüklenmemişse eşik 0 alınır (daha sıkı, gevşek değil).
+        function _liqKutleToleransi() {
+            const t = Number((typeof window !== 'undefined' && window.FlightHandoff)
+                ? window.FlightHandoff.MASS_FIELD_TOL_KG : NaN);
+            return isFinite(t) && t >= 0 ? t : 0;
+        }
+        function _liquidSixDofDriveFrom(cr, mProp, mEngine) {
             if (!cr) return null;
             const F = Number(cr.thrust);
             const mdot = Number(cr.total_mass_flow);
@@ -8715,15 +8972,40 @@
             if (!isFinite(F) || F <= 0 || !isFinite(mdot) || mdot <= 0
                 || !isFinite(mp) || mp <= 0) return null;
             const burn = mp / mdot;
-            return { thrust: F, burn_time: burn, mdot: mdot, m_prop: mp,
-                     total_impulse: F * burn,
-                     implied_isp: (F * burn) / (mp * LIQUID_G0) };
+            const me = Number(mEngine);
+            const motorItici = (isFinite(me) && me > 0) ? me : null;
+            const sonuc = { thrust: F, burn_time: burn, mdot: mdot, m_prop: mp,
+                            total_impulse: F * burn,
+                            implied_isp: (F * burn) / (mp * LIQUID_G0),
+                            m_engine: motorItici,
+                            engine_burn_time: motorItici !== null ? motorItici / mdot : null };
+            if (motorItici !== null && mp > motorItici + _liqKutleToleransi()) {
+                sonuc.reject = 'prop_exceeds_engine';
+            }
+            return sonuc;
+        }
+
+        function _liquidMotorItici(cr) {
+            const arac = (cr && window.FlightHandoff && FlightHandoff.vehicleFor)
+                ? FlightHandoff.vehicleFor(cr) : null;
+            const v = arac ? Number(arac.propellant_mass)
+                : Number((((cr || {}).design_summary || {}).masses || {}).propellant_mass_kg);
+            return (isFinite(v) && v > 0) ? v : null;
         }
 
         function _liquidSixDofDrive() {
             const propEl = document.getElementById('sd_prop_m');
-            return _liquidSixDofDriveFrom(window.currentResults,
-                propEl ? parseFloat(propEl.value) : NaN);
+            const cr = window.currentResults;
+            return _liquidSixDofDriveFrom(cr,
+                propEl ? parseFloat(propEl.value) : NaN, _liquidMotorItici(cr));
+        }
+
+        function _liquidSixDofRetMetni(drive) {
+            return TF('liq.msg.sixdof_prop_exceeds_engine',
+                { mprop: numTxt(drive.m_prop, 3), meng: numTxt(drive.m_engine, 3),
+                  mdot: numTxt(drive.mdot, 4), burn: numTxt(drive.burn_time, 2),
+                  tbe: numTxt(drive.engine_burn_time, 2) },
+                'The 6-DOF Propellant Mass ({mprop} kg) is more than this engine carries ({meng} kg): with the engine mass flow {mdot} kg/s it would burn {burn} s, longer than the engine burn time {tbe} s. The run is not started. Enter at most {meng} kg, or recalculate the engine for a longer burn.');
         }
 
         // Panelin içine "hangi sayılarla koşuyor" notunu basar/günceller.
@@ -8750,7 +9032,11 @@
             const lines = [];
             const drive = _liquidSixDofDrive();
             const useCurve = document.getElementById('sd_use_curve');
-            if (drive && (!useCurve || useCurve.checked)) {
+            if (drive && drive.reject && (!useCurve || useCurve.checked)) {
+                lines.push('<span style="color:var(--hd-warn, #ff8c33);">'
+                    + (globalThis.escapeNoticeText || String)(_liquidSixDofRetMetni(drive))
+                    + '</span>');
+            } else if (drive && (!useCurve || useCurve.checked)) {
                 lines.push(TF('liq.msg.sixdof_engine_coupled',
                     { thrust: numTxt(drive.thrust, 1),
                       mprop: numTxt(drive.m_prop, 3),
@@ -8764,6 +9050,11 @@
                     + 'The burn time is derived here, not read from the Burn '
                     + 'Time field above: pairing the engine thrust with an '
                     + 'unrelated burn time violates the rocket equation.'));
+                if (drive.m_engine !== null && drive.m_prop < drive.m_engine - _liqKutleToleransi()) {
+                    lines.push(TF('liq.msg.sixdof_prop_below_engine',
+                        { meng: numTxt(drive.m_engine, 3), tbe: numTxt(drive.engine_burn_time, 2) },
+                        'This is less than the engine propellant {meng} kg (engine burn time {tbe} s): the run flies a partly filled engine.'));
+                }
             } else if (window.currentResults) {
                 lines.push(T('liq.msg.sixdof_form_values',
                     'Running with the Thrust / Burn Time fields of this panel '
@@ -8862,7 +9153,7 @@
         // -> bolt_count / bolt_circle_diameter_m). Birim anahtarın son ekinde
         // zaten yazılı olduğu için etikete ikinci kez eklenmez.
         const GIMBAL_FIELD_LABELS = {
-            thrust_N: function () { return T('liq.ui.target_thrust', 'Target Thrust'); },
+            thrust_N: function () { return T('liq.ui.target_thrust', 'Target Engine Thrust (sea level)'); },
             gimbal_angle_deg: function () { return T('liq.ui.gimbal_range', 'Gimbal Range'); },
             actuator_arm_m: function () { return T('liq.ui.gimbal_actuator_arm', 'Gimbal Actuator Arm'); },
             bolt_count: function () { return T('liq.ui.mount_bolt_count', 'Mount Bolt Count'); },
@@ -9215,7 +9506,12 @@
                     const drive = _liquidSixDofDrive();
                     updateSixDofEngineNote();
                     if (!drive) return null;   // panel kendi form değerlerine düşer
-                    return { thrust: drive.thrust, burn_time: drive.burn_time };
+                    // V306/UÇUŞ-3: motorun taşımadığı itici adıyla reddedilir.
+                    if (drive.reject) return { reject: _liquidSixDofRetMetni(drive) };
+                    // V306/UÇUŞ-2: rozet kaynağın adını ve uçan impulsu yazar.
+                    return { thrust: drive.thrust, burn_time: drive.burn_time,
+                             curve_source: 'motor_constant',
+                             total_impulse_ns: drive.thrust * drive.burn_time };
                 },
             });
             // Not, koşudan ÖNCE de doğru olsun diye ilgili girdiler

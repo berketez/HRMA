@@ -4222,16 +4222,22 @@ def _apply_chamber_liner(result, motor_data):
     yaricap = yaricap / 2.0
     # Astar malzemesi hibrit zincirinin BEYANLI seçimidir (tek kaynak); geç
     # içe aktarma: motor modülü bu modülü içe aktarıyor (döngü yok).
-    from hrma.engines.hybrid_rocket_engine import LINER_MATERIAL_DEFAULT
+    from hrma.engines.hybrid_rocket_engine import (
+        LINER_MATERIAL_DEFAULT, hybrid_liner_sizing)
     from hrma.analysis.thermal_protection import ThermalProtectionAnalyzer
     ek = {'h_gas_W_m2K': h_kamara, 'T_recovery_K': t_aw,
           'station_radius_m': yaricap}
     if cp_gaz is not None:
         ek['gas_cp_J_kgK'] = cp_gaz
     try:
-        sizing = ThermalProtectionAnalyzer().ablative_thickness(
+        # V306/HİBRİT-MODEL (M-HIBRIT-11): hibrit zincirinin TEK astar
+        # kuralı (gerileme × pay + iletim payı) — motorla aynı kalınlık.
+        sizing = hybrid_liner_sizing(
+            ThermalProtectionAnalyzer(),
             q_net_W_m2=q_kamara, burn_time_s=t_yanma,
-            material=LINER_MATERIAL_DEFAULT, **ek)
+            material=LINER_MATERIAL_DEFAULT,
+            T_initial_K=(result.get('design_parameters') or {}).get(
+                'ambient_temperature'), **ek)
     except Exception as exc:  # çekirdek kapısı: sayı uydurulmaz
         return _sizing_yok(f'ablative sizing failed: {exc}')
     kalinlik_mm = sizing.get('required_thickness_mm')
@@ -4285,10 +4291,10 @@ def _apply_chamber_liner(result, motor_data):
         },
         'sizing': sizing,
         'scope': CHAMBER_LINER_SCOPE,
-        'source': ('Level-1 Q* ablation sizing (hrma.analysis.thermal_protection.'
-                   'ThermalProtectionAnalyzer.ablative_thickness), the same '
-                   'call and inputs as the hybrid chain\'s chamber liner '
-                   '(hybrid_rocket_engine._thermal_protection_block)'),
+        'source': ('Level-1 Q* recession allowance + conduction allowance '
+                   '(hrma.engines.hybrid_rocket_engine.hybrid_liner_sizing), '
+                   'the same call and inputs as the hybrid chain\'s chamber '
+                   'liner (hybrid_rocket_engine._thermal_protection_block)'),
     }
     result['chamber_liner_check'] = blok
     return blok

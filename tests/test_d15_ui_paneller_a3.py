@@ -538,8 +538,12 @@ class TestSixDofBuyuklukKapisi:
     def test_hiz_ekranda_ve_kirmizi(self):
         e = self._ekran('sixdof_absurd')
         s = govde('sixdof_absurd')['summary']
-        i = e['badges'].find('max_speed')
-        assert i >= 0, 'max_speed hâlâ ekranda değil'
+        # V306/UÇUŞ (dil): rozet ham alan adı 'max_speed' yerine etiketle
+        # basılır (sixdof.badgeMaxSpeed; sözlüksüz koşumda EN yedek
+        # 'MAX SPEED'). Bekçinin kilitlediği şey hızın ekranda ve kırmızı
+        # olmasıdır, etiket metni değil.
+        i = e['badges'].find('MAX SPEED')
+        assert i >= 0, 'azami hız hâlâ ekranda değil'
         assert ('%.1f' % s['max_speed']) in duz(e['badges'])
         assert renk_geri(e['badges'], i) == 'kirmizi'
 
@@ -560,7 +564,7 @@ class TestSixDofBuyuklukKapisi:
         s = govde('sixdof_normal')['summary']
         assert s['max_speed'] < self.C_LIGHT
         assert renk_geri(e['badges'], e['badges'].find('MAX MACH')) == 'mavi'
-        assert renk_geri(e['badges'], e['badges'].find('max_speed')) == 'mavi'
+        assert renk_geri(e['badges'], e['badges'].find('MAX SPEED')) == 'mavi'
         assert 'launch to apogee' in str(e['title'])
 
 

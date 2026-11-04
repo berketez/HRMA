@@ -1,0 +1,249 @@
+{
+ "sema": "hrma-olcut-vaka/1",
+ "kimlik": "sivi_L2",
+ "sistem": "sivi",
+ "seviye": "L2",
+ "gorev": {
+  "hedef_apoje_m": 10000,
+  "faydali_yuk_kg": 15.0,
+  "varsayimlar": "Amatör araştırma roketi: Ø0,15 m gövde (referans alan 0,01767 m², Cd 0,5), gövde+aviyonik+kurtarma+faydalı yük 15 kg (motor atılına eklenir), LOX/Metan basınç beslemeli 2 kN, Pc 35 bar (tank 55 bar), ε 6, çan %80, eş eksenli girdaplı enjektör, ablatif (metan rejeneratif Pc 20-25 bar'da çözülemedi, 35 bar'da astar erime sıcaklığını aştı). 6-DOF: boy 3,5 m, burun 0,6 m, 4 kanat (0,30/0,15/0,15 m, ok 0,12 m), ray 8 m, rüzgâr 5 m/s."
+ },
+ "kaynak": {
+  "dosya": "docs/scofield/raw/OH/V306/muhendis-turu/sivi/vakalar/L2.json",
+  "tur": "V306 mühendis turu (2 Kas 2026)",
+  "tur_surumu": "3.0.5",
+  "tur_commit": "0a138ff6a",
+  "tur_tarihi": "2026-11-02",
+  "tur_durumu": "hedefe_ulasti",
+  "vaka_dosyasi_tarihi": "2026-11-04"
+ },
+ "gercek_motor": false,
+ "adimlar": [
+  {
+   "ad": "motor",
+   "uc": "/calculate_liquid",
+   "govde": {
+    "fuel_type": "methane",
+    "oxidizer_type": "lox",
+    "fuel_density": 422.352,
+    "oxidizer_density": 1141.16,
+    "fuel_viscosity": 0.0001169,
+    "oxidizer_viscosity": 0.0001947,
+    "mixture_ratio": 3,
+    "of_min": 2,
+    "of_max": 3.2,
+    "combustion_efficiency": 97,
+    "engine_cycle": "pressure_fed",
+    "thrust": 2000,
+    "chamber_pressure": 35,
+    "feed_pressure": 55,
+    "injector_type": "coaxial",
+    "injector_pressure_drop": 7,
+    "discharge_coefficient": 0.7,
+    "injector_elements": 18,
+    "characteristic_length": 1.2,
+    "contraction_ratio": 4,
+    "chamber_material": "steel_316",
+    "chamber_roughness": 3.2,
+    "cooling_type": "ablative",
+    "nozzle_expansion_ratio": 6,
+    "nozzle_type": "bell_80",
+    "coolant_flow_percent": 100,
+    "film_cooling_percent": 0,
+    "coolant_inlet_temp": 300,
+    "max_wall_temp": 800,
+    "min_throttle": 40,
+    "max_burn_duration": 18,
+    "safety_factor": 2.5,
+    "engine_life_cycles": 10
+   },
+   "kaynak_istek_sirasi": 1,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "motor adımı: tur gövdesi aynen",
+   "izlenen": [
+    {
+     "ad": "itki_N",
+     "yol": "thrust",
+     "birim": "N"
+    },
+    {
+     "ad": "itki_vak_N",
+     "yol": "thrust_vacuum",
+     "birim": "N"
+    },
+    {
+     "ad": "isp_ds_s",
+     "yol": "isp_sea_level",
+     "birim": "s"
+    },
+    {
+     "ad": "isp_vak_s",
+     "yol": "isp_vacuum",
+     "birim": "s"
+    },
+    {
+     "ad": "c_yildiz_mps",
+     "yol": "c_star",
+     "birim": "m/s"
+    },
+    {
+     "ad": "oda_sicakligi_K",
+     "yol": "chamber_temperature",
+     "birim": "K"
+    },
+    {
+     "ad": "yanma_suresi_s",
+     "yol": "burn_time",
+     "birim": "s"
+    },
+    {
+     "ad": "toplam_impuls_Ns",
+     "yol": "total_impulse",
+     "birim": "N·s"
+    },
+    {
+     "ad": "toplam_debi_kgps",
+     "yol": "total_mass_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "oksitleyici_debi_kgps",
+     "yol": "oxidizer_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "yakit_debi_kgps",
+     "yol": "fuel_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "bogaz_capi_mm",
+     "yol": "throat_diameter_mm",
+     "birim": "mm"
+    },
+    {
+     "ad": "cikis_capi_mm",
+     "yol": "exit_diameter_mm",
+     "birim": "mm"
+    },
+    {
+     "ad": "motor_kuru_kg",
+     "yol": "design_summary.masses.engine_mass_kg",
+     "birim": "kg"
+    }
+   ]
+  },
+  {
+   "ad": "yorunge",
+   "uc": "/api/trajectory-analysis",
+   "govde": {
+    "initial_mass": 55.283,
+    "final_mass": 41.349,
+    "drag_coefficient": 0.5,
+    "reference_area": 0.01767,
+    "burn_time": 17.99901603993107,
+    "thrust": 2000,
+    "isp": 263.44033979571543,
+    "nozzle_exit_area": 0.002512205196363821,
+    "thrust_reference_pressure": 101325
+   },
+   "kaynak_istek_sirasi": 3,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "araç adımı: tur gövdesi aynen (motor çıktısından türetilmiş araç girdileri 3.0.5 turundaki değerlerinde dondurulmuş; adım yörünge/6-DOF çözücüsünü izler, motor değişimini İZLEMEZ)",
+   "izlenen": [
+    {
+     "ad": "yorunge_apoje_m",
+     "yol": "trajectory_data.performance.trajectory_metrics.max_altitude",
+     "birim": "m"
+    },
+    {
+     "ad": "yorunge_azami_hiz_mps",
+     "yol": "trajectory_data.performance.trajectory_metrics.max_velocity",
+     "birim": "m/s"
+    }
+   ]
+  },
+  {
+   "ad": "alti_serbestlik",
+   "uc": "/api/six-dof-analysis",
+   "govde": {
+    "body_diameter": 0.15,
+    "body_length": 3.5,
+    "nose_length": 0.6,
+    "nose_type": "ogive",
+    "fin_count": 4,
+    "fin_root_chord": 0.3,
+    "fin_tip_chord": 0.15,
+    "fin_span": 0.15,
+    "fin_sweep": 0.12,
+    "fin_position": 3.18,
+    "cd0": 0.45,
+    "wind_speed": 5,
+    "wind_direction_deg": 0,
+    "launch_elevation_deg": 90,
+    "launch_azimuth_deg": 0,
+    "rail_length": 8,
+    "dry_mass": 41.349,
+    "propellant_mass": 13.935,
+    "thrust": 2000,
+    "burn_time": 18.000307773535194,
+    "engine_od_m": 0.06255651156586288,
+    "engine_length_m": 0.36589016381291845
+   },
+   "kaynak_istek_sirasi": 4,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "araç adımı: tur gövdesi aynen (motor çıktısından türetilmiş araç girdileri 3.0.5 turundaki değerlerinde dondurulmuş; adım yörünge/6-DOF çözücüsünü izler, motor değişimini İZLEMEZ)",
+   "izlenen": [
+    {
+     "ad": "apoje_6dof_m",
+     "yol": "summary.apogee",
+     "birim": "m"
+    },
+    {
+     "ad": "azami_mach_6dof",
+     "yol": "summary.max_mach",
+     "birim": "-"
+    },
+    {
+     "ad": "statik_marj_dolu_kalibre",
+     "yol": "summary.static_margin_full",
+     "birim": "-"
+    },
+    {
+     "ad": "kararli_6dof",
+     "yol": "summary.stable",
+     "birim": "-"
+    },
+    {
+     "ad": "bitis_nedeni_6dof",
+     "yol": "summary.end_reason",
+     "birim": "-"
+    }
+   ]
+  }
+ ],
+ "kayit_kiyasi": [],
+ "disarida_birakilan": [
+  {
+   "sira": 2,
+   "uc": "/api/flight-vehicle"
+  },
+  {
+   "sira": 5,
+   "uc": "/api/fea/structural"
+  },
+  {
+   "sira": 6,
+   "uc": "/api/export-pdf/technical"
+  }
+ ]
+}

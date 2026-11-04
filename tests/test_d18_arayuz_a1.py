@@ -462,11 +462,16 @@ def _fea_kos(tmp_path, yuk):
 
 
 #: Panelin ``grainParamsFromResults`` deseniyle kurulan tane uç gövdesi.
+# V306/TANE NR-16: bekçinin zemini basınç-yalnız yükle ölçülmüştü (marj
+# yeşil + kabul ölçütü yakınsamıyor). Uç artık yerleşim verilmezse gövdeye
+# yapıştırılmış tanenin ısıl yükünü de taşır; basınç-yalnız yük kümesi
+# kartuş yüklü tanenin kümesidir (sonuç bit-aynı, zemin korunur).
 GRAIN_GOVDESI = {
     'grain_type': 'star', 'propellant_type': 'apcp',
     'outer_diameter_mm': 98.0, 'core_diameter_mm': 32.0,
     'chamber_pressure_bar': 45.0, 'grain_length_mm': 420.0,
     'star_points': 6, 'star_radius': 12.5,
+    'grain_support': 'cartridge_loaded',
 }
 
 

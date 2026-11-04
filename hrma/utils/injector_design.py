@@ -297,7 +297,11 @@ def _sat_n2o():
     global _SAT_N2O_ONBELLEK
     if _SAT_N2O_ONBELLEK is None:
         from hrma.analysis.tank_blowdown import N2OSaturation as _Doyma
-        _SAT_N2O_ONBELLEK = _Doyma(use_coolprop=False)
+        # V306/SAYI (PANEL-SAYI DEVİR 1): tank modeli ve enjektör devresiyle
+        # AYNI kaynak kuralı (CoolProp varsa hâl denklemi, yoksa aynı EOS'tan
+        # üretilmiş tablo). ``use_coolprop=False`` aynı koşuda ikinci bir
+        # doyma basıncı (50,5434 ⟷ 50,5251 bar) yayımlatıyordu.
+        _SAT_N2O_ONBELLEK = _Doyma()
     return _SAT_N2O_ONBELLEK
 
 class InjectorDesign:

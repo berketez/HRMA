@@ -931,14 +931,16 @@ class TestK5EkranOndaligi:
         }
         console.log(JSON.stringify({tr: kos(yukle([]).window), yok: kos(null)}));
         """ % json.dumps(ozet))
+        # V306/UÇUŞ (dil): azami hız rozeti ham 'max_speed' yerine etiketle
+        # (sixdof.badgeMaxSpeed); bekçinin konusu ondalık ayırıcıdır.
         for parca in ('MAX MACH 0,27', 'MARGIN 4,84 / 5,84 cal',
-                      'max_speed 93,4 m/s', 'CNα 11,11 · CP 1,584 m',
+                      'MAX SPEED 93,4 m/s', 'CNα 11,11 · CP 1,584 m',
                       'MAX alpha 0,0 deg'):
             assert parca in o['tr'], (parca, o['tr'])
         assert not re.search(r'\d\.\d', o['tr']), (
             'TR rozet metninde noktalı ondalık kaldı:\n' + o['tr'])
         for parca in ('MAX MACH 0.27', 'MARGIN 4.84 / 5.84 cal',
-                      'max_speed 93.4 m/s'):
+                      'MAX SPEED 93.4 m/s'):
             assert parca in o['yok'], (parca, o['yok'])
 
     def test_sd_thrust_src_sabit_280_px_ile_kesilmez(self):
@@ -1042,7 +1044,9 @@ class TestK6KosuNoktasiKunyesi:
         assert k['y'][0] == cd['performance']['isp']           # sayı aynı
         assert k['meta']['exit_basis'] == taban
         assert k['meta']['same_exit_anchor_as_curve'] is deniz
-        assert f'(exit basis {taban})' in notlar
+        # V306/SAYI (NR-1): künye KODU kullanıcı notunda yok (ham anahtar);
+        # makine alanı olarak izin meta'sında (yukarıda) kalır.
+        assert taban not in notlar and 'exit basis' not in notlar
         if deniz:
             assert 'Exit: ISA sea level, no nozzle ε' in k['hovertemplate']
             assert 'the same exit anchor as the sweep curve' in notlar

@@ -201,6 +201,8 @@
            nötr griden çıkar. Renk TEK kanal değildir — alan adı
            ('load_warnings: ') metnin içinde de duruyor. */
         .ls-hint.ls-note-warn { color: var(--hd-orange, #ff8c33); }
+        /* V306/UÇUŞ NR-12: önceki araçtan kalan (kullanıcının yazdığı) gövde alanı */
+        .ls-field input.ls-onceki-kaynak { border-color: var(--hd-orange, #ff8c33); }
         /* V301/UÇUŞ C-25: uçuşu durduran boş/eksik alan işareti (renk tek
            kanal değildir — durum satırı alanı ADIYLA söyler). */
         .ls-input-invalid { outline: 2px solid var(--hd-orange, #ff8c33); outline-offset: 1px; }
@@ -374,7 +376,7 @@
             </div>
             <div class="ls-row">
                 <div class="ls-field">
-                    <label><span data-i18n="site.airframeDryMass">Airframe dry (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.dryMass">Airframe dry mass (kg), EXCLUDING the flying inert mass shown above; the page adds the two and sends the sum as dry_mass. Empty or not a number: the flight is refused by name (no mass is assumed).</span></span></label>
+                    <label><span data-i18n="site.airframeDryMass">Airframe dry (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.dryMass">Airframe dry mass (kg), EXCLUDING the flying inert mass shown above; the page adds the two as the vehicle dry mass of the flight. Avionics, wiring and the recovery system belong in this mass: the engine dry (flying inert) mass does not contain them. The example vehicle and a saved project with an airframe fill it; for an engine without an airframe it is left empty (no airframe mass can be derived from the engine) and must be entered. A value you type is kept and marked when the vehicle changes. Must be 0 or greater. Empty or not a number: the flight is refused by name (no mass is assumed).</span></span></label>
                     <input id="ls-a-drymass" type="number" step="0.1" value="18">
                 </div>
                 <div class="ls-field">
@@ -424,6 +426,10 @@
                 </div>
             </div>
             <div class="ls-hint" data-i18n="site.airframeHint">Airframe dry mass EXCLUDES the flying inert mass shown above — the solver adds them together.</div>
+            <!-- V306/UÇUŞ NR-12: gövde alanlarının HANGİ kaynaktan geldiği
+                 (aracın tanımı / kayıtlı proje / motordan türetme kuralı) ve
+                 önceki araçtan kalan (kullanıcının yazdığı) alanlar. -->
+            <div class="ls-hint" id="ls-airframe-note" style="margin-top:4px"></div>
 
             <div class="ls-field" style="margin-top:10px">
                 <label><span data-i18n="site.presets">Shortcuts (not a limit — any point is selectable)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.presets">Shortcut list of known sites: choosing one writes its latitude and longitude into the fields and moves the globe there. Not a limit — any point can be picked on the globe.</span></span></label>
@@ -672,6 +678,9 @@
    ``node --check`` ile ayrıştırıyor). ``tojson`` `<`, `>`, `&`, `'`
    karakterlerini kaçırdığı için script etiketi içinde güvenlidir. #}
 <script type="application/json" id="ls-presets-data">{{ launch_site_presets | tojson }}</script>
+{# V306/UÇUŞ NR-12 — "Örnek araç" TEK TANIMDAN (flight_vehicle.EXAMPLE_VEHICLE:
+   motor + gövde, HRMA seçimi diye beyanlı). #}
+<script type="application/json" id="ls-example-vehicle">{{ example_vehicle | tojson }}</script>
 <script>
 (function () {
     'use strict';
@@ -872,12 +881,18 @@
     // TUTUCUDUR; TR modda 'Example vehicle (örnek, hesaplanmış değil)' diye
     // yarı Türkçe görünüyordu. name_key yalnız bu araca konur: adı olan
     // gerçek motorlar aynen basılır, yer tutucu ad sözlükten gelir.
-    var EXAMPLE_VEHICLE = {
-        motor_name: 'Example vehicle', name_key: 'site.srcExample',
-        thrust: 6500, burn_time: 7.5,
-        propellant_mass: 18, engine_inert_mass: 7, engine_od_m: 0.15,
-        engine_length_m: 2.0, thrust_curve: null, source: 'example'
-    };
+    // V306/UÇUŞ NR-12 — örnek aracın tanımı artık sunucudaki TEK kaynaktan
+    // (flight_vehicle.EXAMPLE_VEHICLE) gelir ve KENDİ GÖVDESİNİ taşır
+    // (airframe_resolved). ÖLÇÜLDÜ (28 Eki NR-12): eski tanımda gövde yoktu;
+    // örnek araç önceki kaynaktan kalan Ø0,246 m gövdeyle KARARSIZ uçuyordu.
+    // Tanım okunamazsa örnek araç YOKTUR (uydurulmaz); seçilince ad ile ret.
+    var EXAMPLE_VEHICLE = (function () {
+        try {
+            var d = document.getElementById('ls-example-vehicle');
+            var v = d ? JSON.parse(d.textContent) : null;
+            return (v && typeof v === 'object') ? v : null;
+        } catch (e) { return null; }
+    })();
     var currentVehicle = null;
     // Araç metinlerini dil değişiminde YENİDEN basabilmek için son not
     // saklanır (aşağıdaki renderVehicleText'e bak).
@@ -973,7 +988,7 @@
                     return typeof w === 'string' && w.trim();
                 }) : [];
             if (yuklemeUyarilari.length) {
-                msg += (msg ? ' ' : '') + 'load_warnings: '
+                msg += (msg ? ' ' : '') + t('site.loadWarningsLabel', 'Project load warnings:') + ' '
                     + yuklemeUyarilari.map(yuklemeUyarisiMetni).join(' · ');
             }
             note.textContent = msg;
@@ -994,6 +1009,103 @@
         }
     }
 
+    // V306/UÇUŞ NR-12 — GÖVDE SEÇİLEN KAYNAKTAN. ÖLÇÜLDÜ (28 Eki NR-12 +
+    // V306/ucus/olcum_saha_once.json): dört kaynakta da gövde 0,246 m ·
+    // 3,0 m · 18 kg kaldı; bu blok gövdeyi motordan yalnız BÜYÜTÜYORDU
+    // (zarftan küçükse) ve hiç küçültmüyordu — önceki sıvı motorun çapı 75 mm
+    // KNDX motoruna ve örnek araca kaldı. Şimdi gövde alanları kaynağın
+    // gövdesinden (airframe_resolved: örnek araç tanımı / kayıtlı projenin
+    // gövdesi / motordan türetme kuralı — kural sunucuda tek yerde,
+    // flight_vehicle.derive_airframe) dolar. Kaynakta karşılığı olmayan alan
+    // (türetilen gövdenin kuru kütlesi) BOŞALIR: uçuş onu adıyla ister.
+    // Kullanıcının bu sayfada yazdığı alan EZİLMEZ; araç değişince "önceki
+    // araçtan kaldı" diye işaretlenir ve notta adıyla yazılır. Gövde
+    // çapının motor zarfından küçük olması artık sessizce büyütülmez: uç
+    // uçuşu adıyla reddeder (airframe_fit_conflicts).
+    var GOVDE_ALANLARI = [
+        { id: 'ls-a-bodydia', anahtar: 'body_diameter_m', basamak: 3 },
+        { id: 'ls-a-bodylen', anahtar: 'body_length_m', basamak: 2 },
+        { id: 'ls-a-drymass', anahtar: 'airframe_dry_mass_kg', basamak: 2 }
+    ];
+    var govdeNotu = null;   // dil değişiminde yeniden basılır
+    function alanEtiketi(id) {
+        var e = el(id);
+        var kutu = e && e.closest ? e.closest('.ls-field') : null;
+        var lab = kutu ? kutu.querySelector('label [data-i18n]') : null;
+        return lab ? lab.textContent.trim() : null;
+    }
+    function govdeyiKaynaktanKur(v) {
+        var g = (v && v.airframe_resolved && typeof v.airframe_resolved === 'object')
+            ? v.airframe_resolved : null;
+        var kalan = [];
+        GOVDE_ALANLARI.forEach(function (a) {
+            var e = el(a.id);
+            if (!e) return;
+            var deger = g ? num_(g[a.anahtar]) : null;
+            if (a.anahtar === 'body_length_m' && deger === null && g
+                    && num_(g.length_behind_nose_m) !== null) {
+                deger = LS_FIXED_AIRFRAME.nose_length + num_(g.length_behind_nose_m);
+            }
+            if (e.dataset.elle === '1') {
+                // Kullanıcının yazdığı korunur; araç değiştiyse işaretlenir.
+                if (v) { e.classList.add('ls-onceki-kaynak'); kalan.push(a.id); }
+                return;
+            }
+            e.classList.remove('ls-onceki-kaynak');
+            e.value = (deger === null) ? '' : deger.toFixed(a.basamak);
+        });
+        var od = v && num_(v.engine_od_m);
+        if (od) el('ls-a-bodydia').min = od.toFixed(3);
+        govdeNotu = v ? { kaynak: g ? g.source : null, govde: g, kalan: kalan } : null;
+        renderAirframeNote();
+    }
+    function renderAirframeNote() {
+        var n = el('ls-airframe-note');
+        if (!n) return;
+        var g = govdeNotu;
+        if (!g) { n.textContent = ''; n.classList.remove('ls-note-warn'); return; }
+        var p = [];
+        if (g.kaynak === 'example') {
+            p.push(t('site.airframeFromExample',
+                'Airframe: the example vehicle\'s own definition (HRMA choice; a demonstration vehicle, not a real rocket).'));
+        } else if (g.kaynak === 'project') {
+            p.push(t('site.airframeFromProject', 'Airframe: from the saved project.'));
+        } else if (g.kaynak === 'derived') {
+            var d = num_(g.govde && g.govde.body_diameter_m);
+            var lb = num_(g.govde && g.govde.length_behind_nose_m);
+            p.push(tf('site.airframeDerived', {
+                d: d === null ? '—' : fmtNum_(d, 3),
+                l: lb === null ? '—' : fmtNum_(LS_FIXED_AIRFRAME.nose_length + lb, 2) },
+                'Airframe derived from the engine (HRMA choice, not a sourced rule): outer diameter {d} m = the larger of the engine envelope and the widest propellant tank; length {l} m = nose + engine + propellant tanks in line. The airframe dry mass is not derived: enter it.'));
+        } else {
+            p.push(t('site.airframeNoSource',
+                'The selected vehicle carries no airframe and none can be derived: enter the body fields.'));
+        }
+        if (g.kalan.length) {
+            p.push(tf('site.airframeKeptFromPrevious', {
+                fields: g.kalan.map(function (id) { return alanEtiketi(id) || id; }).join(', ') },
+                'Kept from the previous vehicle because you typed them: {fields} — check them for this vehicle.'));
+        }
+        n.textContent = p.join(' ');
+        n.classList.toggle('ls-note-warn', g.kalan.length > 0);
+    }
+    GOVDE_ALANLARI.forEach(function (a) {
+        var e = el(a.id);
+        if (!e) return;
+        e.addEventListener('input', function (ev) {
+            // YALNIZ gerçek yazma (yapay olay değil).
+            if (!ev || !ev.isTrusted) return;
+            e.dataset.elle = '1';
+            if (e.classList.contains('ls-onceki-kaynak')) {
+                e.classList.remove('ls-onceki-kaynak');
+                if (govdeNotu) {
+                    govdeNotu.kalan = govdeNotu.kalan.filter(function (id) { return id !== a.id; });
+                    renderAirframeNote();
+                }
+            }
+        });
+    });
+
     function applyVehicle(v, noteKey, noteFallback) {
         currentVehicle = v || null;
         currentVehicleNote = noteKey ? { key: noteKey, fallback: noteFallback } : null;
@@ -1001,16 +1113,7 @@
         setRO('ls-v-burntime', v && v.burn_time, 2);
         setRO('ls-v-propmass', v && v.propellant_mass, 2);
         setRO('ls-v-inertmass', v && v.engine_inert_mass, 2);
-        // Gövde çapı motor çapından küçük olamaz — ön-doldur ve alt sınır koy.
-        var od = v && num_(v.engine_od_m);
-        if (od) {
-            var bd = el('ls-a-bodydia');
-            bd.min = od.toFixed(3);
-            if (!num_(bd.value) || num_(bd.value) < od) bd.value = od.toFixed(3);
-            var bl = el('ls-a-bodylen');
-            var minLen = Math.max(2.0, (num_(v.engine_length_m) || 0) + 1.0);
-            if (!num_(bl.value) || num_(bl.value) < minLen) bl.value = minLen.toFixed(2);
-        }
+        govdeyiKaynaktanKur(v);
         renderVehicleText();
     }
 
@@ -1035,6 +1138,18 @@
         if (durum.status === 'empty') {
             if (!quiet) applyVehicle(null, 'site.noSessionVehicle',
                 'No motor calculated in this session yet — no vehicle is selected. Calculate a motor on a motor page, or choose a saved project or the example vehicle.');
+            return false;
+        }
+        // V306/UÇUŞ-3 (SIVI-SOĞUTMA DEVİR): son hesabın aracı motor kütlesi
+        // yayımlanmadığı için kurulmadı — eski araç uçurulmaz, nedeni yazılır.
+        if (durum.status === 'refused') {
+            if (durum.refusal && durum.refusal.cause === 'cooling_circuit_not_solved') {
+                applyVehicle(null, 'flight.refusedCooling',
+                    'No flight: the engine mass is not published for this calculation because the regenerative cooling circuit was not solved, so no vehicle is built and nothing is flown. Fix the cooling design and calculate again.');
+            } else {
+                applyVehicle(null, 'flight.refusedEngineMass',
+                    'No flight: this engine calculation does not publish the engine mass, so no vehicle is built and nothing is flown.');
+            }
             return false;
         }
         var v = doc && (doc.vehicle || doc);
@@ -1083,13 +1198,17 @@
     // (aynı kalıp: solid.html 'efficiency_analysis.divergence_losses: ').
     // Örnek araca düşüş yerinde kalır: bu davranış zaten künyeli ("showing
     // the example vehicle") ve uçuş denetimleri seçim anında kapatılıyor.
+    // V306/UÇUŞ (dil): ekranda uç adı ve HTTP kodu YOK (ORTAK: "HTTP
+    // 400/422 kullanıcıya gösterilmez"); ucun gerekçesi etkin dile çevrilir,
+    // proje adı yazılır. Makine izi (uç + HTTP) durum satırının ipucunda.
     function projeHataNedeni(durum, d, ad) {
-        var p = ['/api/flight-vehicle'];
-        p.push(durum ? ('HTTP ' + durum) : 'no HTTP response');
-        var e = d && (d.error || d.message);
-        if (typeof e === 'string' && e.trim()) p.push(e.trim());
-        else if (d === null) p.push('(no JSON body)');
-        p.push('project=' + String(ad));
+        var p = [tf('site.projectNamed', { name: String(ad) }, 'Project: {name}')];
+        var e = d && (d.message || d.error);
+        if (typeof e === 'string' && e.trim()) p.push(srv(e.trim()));
+        else p.push(t('site.noServerReason', 'the server gave no reason'));
+        var durumEl = el('ls-status');
+        if (durumEl) durumEl.title = '/api/flight-vehicle · '
+            + (durum ? ('HTTP ' + durum) : 'no HTTP response');
         return p.join(' · ');
     }
 
@@ -1455,6 +1574,12 @@
             return t('site.airframeDryMassEmpty',
                 'Airframe dry mass is empty — enter the airframe dry mass in kg (without the engine). Nothing was flown.');
         }
+        // V306/UÇUŞ: ipucunun söylediği kabul aralığı (0 ya da büyük) kodda.
+        if (parseFloat(kuruEl.value) < 0) {
+            alanIsaretle('ls-a-drymass');
+            return t('site.airframeDryMassNegative',
+                'Airframe dry mass cannot be negative. Nothing was flown.');
+        }
         return null;
     }
     // Sunucunun 6-DOF ucu boş bırakılan gövde/çevre alanına kendi beyanlı
@@ -1466,7 +1591,12 @@
             return k && typeof k.field === 'string';
         }).map(function (k) {
             var deger = (typeof k.value === 'number') ? fmtNum_(k.value, 3) : String(k.value);
-            return k.field + ' = ' + deger + (k.unit && k.unit !== 'dimensionless' ? ' ' + k.unit : '');
+            // Formda alanı olmayan tek beyan: saha rakımı (çözümden gelir).
+            var ad = (UC_ALAN_KIMLIGI[k.field] && alanEtiketi(UC_ALAN_KIMLIGI[k.field]))
+                || (k.field === 'launch_altitude'
+                    ? t('site.defaultField.launch_altitude', 'Launch site elevation')
+                    : k.field);
+            return ad + ' = ' + deger + (k.unit && k.unit !== 'dimensionless' ? ' ' + k.unit : '');
         });
         if (!parcalar.length) return '';
         return tf('site.serverDefaultsApplied', { list: parcalar.join(', ') },
@@ -1474,14 +1604,33 @@
     }
     // Ucun adlı reddi: alan adları ve gerekçe metni (EN sunucu cümlesi
     // srv() ile aktif dile çevrilir; eşleşme yoksa aynen kalır).
+    // V306/UÇUŞ (dil): ÖLÇÜLDÜ — ret satırı "HTTP 422 · airframe_cannot_
+    // carry_engine · … · fields: body_diameter" diyordu: TR ekranda HTTP
+    // kodu, makine kodu ve ham alan adı. Ekranda ucun cümlesi (etkin dile
+    // çevrilmiş) ve alanın ETİKETİ kalır; makine izi (HTTP + kod + ham
+    // adlar) durum satırının ipucuna iner.
+    var UC_ALAN_KIMLIGI = {
+        body_diameter: 'ls-a-bodydia', body_length: 'ls-a-bodylen',
+        dry_mass: 'ls-a-drymass', cd0: 'ls-a-cd0', fin_count: 'ls-a-fincount',
+        fin_span: 'ls-a-finspan', wind_speed: 'ls-a-windspeed',
+        wind_direction_deg: 'ls-a-winddir', launch_elevation_deg: 'ls-a-elev',
+        launch_azimuth_deg: 'ls-a-azim'
+    };
     function ucRetMetni(d, durum) {
         var p = [t('site.solveError', 'The flight solver returned an error.')];
-        if (durum) p.push('HTTP ' + durum);
-        if (d && typeof d.error === 'string' && d.error) p.push(d.error);
         if (d && typeof d.message === 'string' && d.message) p.push(srv(d.message));
-        var alanlar = (d && Array.isArray(d.invalid_fields)) ? d.invalid_fields.map(function (f) {
+        else if (d && typeof d.error === 'string' && d.error) p.push(srv(d.error));
+        var hamAdlar = (d && Array.isArray(d.invalid_fields)) ? d.invalid_fields.map(function (f) {
             return f && f.field; }).filter(Boolean) : [];
-        if (alanlar.length) p.push('fields: ' + alanlar.join(', '));
+        var etiketler = hamAdlar.map(function (ad) {
+            return UC_ALAN_KIMLIGI[ad] ? alanEtiketi(UC_ALAN_KIMLIGI[ad]) : null;
+        }).filter(Boolean);
+        if (etiketler.length) {
+            p.push(tf('site.rejectFields', { fields: etiketler.join(', ') }, 'Field: {fields}'));
+        }
+        var durumEl = el('ls-status');
+        if (durumEl) durumEl.title = [durum ? ('HTTP ' + durum) : '',
+            (d && d.error) || '', hamAdlar.join(', ')].filter(Boolean).join(' · ');
         return p.join(' · ');
     }
 
@@ -1505,7 +1654,19 @@
         }
         el('ls-fly').disabled = true;
         setStatus(t('site.launching', 'Solving flight…'));
-        var dryTotal = fieldNum('ls-a-drymass') + num_(veh.engine_inert_mass);
+        // V306/UÇUŞ-2 — UÇAN İTKİ TEK KURALDAN (flight_vehicle.
+        // motor_flight_thrust; motor sayfalarının Yörünge ve 6-DOF panelleri
+        // de bunu uçurur). N₂O kendinden basınçlı tankta boşalma eğrisi uçar;
+        // tankta kalan itici araçla birlikte uçtuğu için kuru kütleye eklenir.
+        // A_e + p_ref itkinin irtifa düzeltmesini açar. Eski kayıtlı araçta
+        // (flight_thrust yok) davranış değişmez; uç düzeltmenin yokluğunu
+        // kendisi söyler.
+        var ucusItki = (veh && veh.flight_thrust && typeof veh.flight_thrust === 'object')
+            ? veh.flight_thrust : null;
+        var tanktaKalan = (ucusItki && ucusItki.curve_source === 'motor_blowdown'
+            && ucusItki.propellant_loaded_kg > ucusItki.propellant_consumed_kg)
+            ? ucusItki.propellant_loaded_kg - ucusItki.propellant_consumed_kg : 0;
+        var dryTotal = fieldNum('ls-a-drymass') + num_(veh.engine_inert_mass) + tanktaKalan;
 
         var body = {
             body_diameter: fieldNum('ls-a-bodydia'),
@@ -1513,7 +1674,10 @@
             nose_length: LS_FIXED_AIRFRAME.nose_length,
             nose_type: LS_FIXED_AIRFRAME.nose_type,
             dry_mass: dryTotal,
-            propellant_mass: num_(veh.propellant_mass),
+            propellant_mass: (ucusItki && ucusItki.propellant_consumed_kg > 0)
+                ? ucusItki.propellant_consumed_kg : num_(veh.propellant_mass),
+            nozzle_exit_area: ucusItki ? num_(ucusItki.nozzle_exit_area_m2) : null,
+            thrust_reference_pressure: ucusItki ? num_(ucusItki.thrust_reference_pressure_pa) : null,
             thrust: num_(veh.thrust),
             burn_time: num_(veh.burn_time),
             cd0: fieldNum('ls-a-cd0'),
@@ -1535,7 +1699,11 @@
             // (flight_vehicle.airframe_fit_conflicts); motor sayfalarının
             // 6-DOF paneli de aynı alanları gönderir.
             engine_od_m: num_(veh.engine_od_m),
-            engine_length_m: num_(veh.engine_length_m)
+            engine_length_m: num_(veh.engine_length_m),
+            // V306/UÇUŞ NR-12: motor kasası dışındaki itici tank hacmi —
+            // "itici gövdeye sığıyor mu" hükmü uçta TEK işlevle verilir
+            // (flight_vehicle.airframe_volume_conflicts).
+            propellant_volume_m3: num_(veh.propellant_volume_m3)
         };
         // Boş alan (null) GÖNDERİLMEZ: uç kendi beyanlı varsayılanını adıyla
         // uygular (defaults_applied) — sayfada gizli sayı yok.
@@ -1607,6 +1775,21 @@
             // V301/UÇUŞ C-25: sunucunun boş alana uyguladığı beyanlı
             // varsayılanlar (defaults_applied) durum satırına EKLENİR —
             // kararsızlık iletisini silmez.
+            // V306/UÇUŞ NR-12: itici tankları gövdeye sığmıyorsa AÇIK uyarı
+            // (uçuş çözüldü ama araç bu hâliyle kurulamaz).
+            var sigmaz = Array.isArray(d.airframe_volume_conflicts)
+                ? d.airframe_volume_conflicts : [];
+            if (sigmaz.length) {
+                alanIsaretle('ls-a-bodylen');
+                alanIsaretle('ls-a-bodydia');
+                var c0 = sigmaz[0] || {};
+                var sigmazMetni = tf('site.propellantDoesNotFit', {
+                    need: fmtNum_(num_(c0.propellant_volume_m3) || 0, 3),
+                    have: fmtNum_(num_(c0.body_volume_available_m3) || 0, 3) },
+                    'The propellant tanks need {need} m³ but this body holds at most {have} m³ behind the nose and in front of the engine: the propellant does not fit. Lengthen or widen the body.');
+                var dEl = el('ls-status');
+                dEl.textContent = dEl.textContent ? dEl.textContent + ' ' + sigmazMetni : sigmazMetni;
+            }
             var varsayilanNotu = sunucuVarsayilanMetni(d);
             if (varsayilanNotu) {
                 var durumEl = el('ls-status');
@@ -1858,6 +2041,7 @@
         // dolayısıyla I18N.apply onlara da erişemez.
         I18N.apply(document.body); renderEvents(); relabelPresets();
         renderVehicleText(); renderTileUsage(); renderFixedAirframeNote();
+        renderAirframeNote();   // V306/UÇUŞ NR-12
         renderMapNotes(true);
         texMagSig = '';
         // ÖH D20 / P12aB3-07: oynat/duraklat düğmesinin erişilebilir adı

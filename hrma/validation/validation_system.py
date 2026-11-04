@@ -108,38 +108,26 @@ class ValidationSystem:
                 'lox_htpb': (220, 280),
             },
             'chamber_pressure': (5, 100),   # bar
-            # ÖH D33-3 · OH-D33-11 (Berke kararı, 16 Eylül 2026) — BANT
-            # DÜZELTİLDİ, GEVŞETİLMEDİ. ÖLÇÜLDÜ (kılavuz ekran turu,
-            # docs/scofield/raw/OH/KILAVUZ/ekran/kayit.json): sayfanın
-            # varsayılan O/F'si 7,5 (advanced.html:1728; kaynağı
-            # ``optimum_of_ratio`` referans tablosu, aynı sayı) eski üst uç
-            # 6,0'ın DIŞINDA kalıyordu, yani programı açıp hiçbir şeyi
-            # değiştirmeden hesap yapan HER kullanıcı "kullanılabilir
-            # aralığın dışında" uyarısı alıyordu. Karşı ölçüm: O/F 2,5'te bu
-            # uyarı susuyor ama c* 1331 m/s ⟷ (1350, 1650) bandı deliniyor;
-            # eski bantla İKİ bandı birden sağlayan O/F YOKTU.
+            # V306/HİBRİT-SAYI (M-HIBRIT-23 + M-HIBRIT-12) — 'of_ratio' ve
+            # 'c_star' BANTLARI BURADAN KALKTI (tek kaynağa taşındı).
             #
-            # LİTERATÜR (kanıt: docs/scofield/raw/OH/D33-3/
-            # OH-D33-11_kanit_taslagi.md): N2O'nun özgül impulsu O/F 7-8'de
-            # TEPE yapar ve yaklaşık 4-12 bandında yüksek/düz kalır — itkinin
-            # ~2/3'ü N2O'nun ekzotermik ayrışmasından, ~1/3'ü yakıttaki
-            # oksijenle yanmadan gelir; bu yüzden depolanabilir oksitleyiciler
-            # (N2O, H2O2) YÜKSEK O/F'de optimize olur (LOX ~2).
+            # O/F: ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-sayi/olcum/
+            # sayi_once.json, L3 LOX/parafin): tabloda olmayan çift uçta
+            # 'n2o_htpb'ye düşüyor ve N2O'nun 4-12 bandını alıyordu;
+            # programın kendi optimumu (2,48) "kullanılabilir aralık dışında"
+            # uyarısı aldı. Bant artık ``hybrid_rocket_engine.hybrid_of_band``
+            # (N2O çiftlerinin 4-12'si ÖH D33-3 / OH-D33-11 kararıyla —
+            # literatür künyesi orada — aynen oraya taşındı) ve koşunun
+            # kendi ``optimum_analysis.of_range_searched``ından okunur:
+            # optimum hangi bantta arandıysa uyarı o banttır.
             #
-            # YÖN: bu bir tolerans büyütmesi DEĞİLDİR. Üst uç 6,0 → 12,0
-            # optimumu banda alır; ALT uç 0,5 → 4,0 ise bandı DARALTIR ve
-            # O/F 2,5 gibi aşırı yakıt-zengin tasarımlar ARTIK uyarı alır
-            # (eskiden sessizdi). Sayı teste gömülmez; tek kaynak burasıdır.
-            'of_ratio': {
-                'n2o_htpb': (4.0, 12.0),
-                # n2o_paraffin: tablo optimumu 8,0 tam ÜST KENARDA duruyordu;
-                # aynı literatür ailesi (depolanabilir oksitleyici platosu).
-                'n2o_paraffin': (4.0, 12.0),
-            },
-            'c_star': {
-                'n2o_htpb': (1350, 1650),  # m/s
-                'n2o_paraffin': (1400, 1700),
-            },
+            # c*: ÖLÇÜLDÜ (aynı dosya, CARM_t01): kullanıcının ölçülmüş
+            # η_c* 0,79'u (HRMA'nın kendi ölçülmüş aralığı 0,77-0,99) c*
+            # 1215 m/s ile kaynaksız 1350-1650 bandının altında kaldı ve
+            # KRİTİK aldı. Beklenen c* artık koşunun KENDİ kuramsal c*'ı ×
+            # çiftin ölçülmüş η_c* bandı
+            # (``hybrid_rocket_engine.hybrid_c_star_efficiency_band``,
+            # kaynaklı varsayılanla aynı kayıt).
             'gamma': (1.10, 1.35),
             'gas_constant': (200, 500),     # J/kg·K
             'temperature': (2500, 3500),    # K
@@ -214,14 +202,31 @@ class ValidationSystem:
                                     isp=round(float(isp), 1),
                                     lo=isp_limits[0], hi=isp_limits[1]))
 
-        # C-star
-        c_star = data.get('c_star', 0)
-        c_star_limits = self.performance_limits['c_star'].get(propellant_combo, (1200, 1800))
-        if not (c_star_limits[0] <= c_star <= c_star_limits[1]):
-            sev = "critical" if c_star < c_star_limits[0] * 0.9 else "warning"
-            warnings_list.append(_w("warn.validation.cstar_out_of_range", sev,
-                                    cstar=round(float(c_star), 0),
-                                    lo=c_star_limits[0], hi=c_star_limits[1]))
+        ox, _, yakit = str(propellant_combo or '').partition('_')
+
+        # C-star — V306/HİBRİT-SAYI (M-HIBRIT-12): beklenen teslim c*
+        # aralığı = koşunun kuramsal c*'ı × çiftin ÖLÇÜLMÜŞ η_c* bandı
+        # (kaynaklı varsayılanla aynı kayıt). Kullanıcının η_c*'ı HRMA'nın
+        # kendi ölçülmüş aralığındaysa uyarı YOK; dışındaysa 'warning'
+        # (ölçülmüş bir verim KRİTİK değildir). Kuramsal c* ya da η
+        # yayımlanmamışsa bu eksende hüküm verilmez (sayı uydurulmaz).
+        c_star = _finite_positive(data.get('c_star'))
+        c_th = _finite_positive(data.get('c_star_theoretical'))
+        _cs = data.get('c_star_efficiency')
+        eta = _finite_positive(_cs.get('eta_c_star')) if isinstance(
+            _cs, dict) else None
+        if c_star is not None and c_th is not None and eta is not None:
+            from hrma.engines.hybrid_rocket_engine import (
+                hybrid_c_star_efficiency_band)
+            eb = hybrid_c_star_efficiency_band(ox, yakit)
+            e_lo, e_hi = eb['band']
+            if not (e_lo <= eta <= e_hi):
+                warnings_list.append(_w(
+                    "warn.validation.cstar_outside_eta_band", "warning",
+                    cstar=round(float(c_star), 0),
+                    lo=round(e_lo * c_th, 0), hi=round(e_hi * c_th, 0),
+                    eta=round(float(eta), 3), eta_lo=e_lo, eta_hi=e_hi,
+                    n=eb['n_tests']))
 
         # Gamma
         gamma = data.get('gamma', 0)
@@ -231,13 +236,31 @@ class ValidationSystem:
                                     gamma=round(float(gamma), 3),
                                     lo=gamma_limits[0], hi=gamma_limits[1]))
 
-        # O/F Ratio
+        # O/F Ratio — V306/HİBRİT-SAYI (M-HIBRIT-23): bant TEK kaynaktan.
+        # Koşunun optimumu hangi bantta arandıysa (``optimum_analysis.
+        # of_range_searched``; stokiyometriğe genişlemiş hâli dahil) uyarı
+        # o banttır — programın kendi optimumu kendi uyarısını alamaz. Arama
+        # yapılmamışsa (ör. belirsizlik örneği) aynı tablo
+        # (``hybrid_of_band``) okunur. Kaynaklı kullanılabilir bandı olan
+        # çift (N2O) 'of_out_of_range', olmayan çift
+        # 'of_outside_search_band' alır (iki ayrı cümle, aynı bant kaynağı).
         of_ratio = data.get('of_ratio', 0)
-        of_limits = self.performance_limits['of_ratio'].get(propellant_combo, (0.5, 8.0))
+        from hrma.engines.hybrid_rocket_engine import hybrid_of_band
+        _ob = hybrid_of_band(ox, yakit)
+        of_limits = _ob['band']
+        _oa = data.get('optimum_analysis')
+        _ar = _oa.get('of_range_searched') if isinstance(_oa, dict) else None
+        if (isinstance(_ar, (list, tuple)) and len(_ar) == 2
+                and all(_finite_positive(v) is not None for v in _ar)):
+            of_limits = (float(_ar[0]), float(_ar[1]))
         if not (of_limits[0] <= of_ratio <= of_limits[1]):
-            warnings_list.append(_w("warn.validation.of_out_of_range", "warning",
+            _kod = ("warn.validation.of_out_of_range"
+                    if _ob['kind'] == 'usable'
+                    else "warn.validation.of_outside_search_band")
+            warnings_list.append(_w(_kod, "warning",
                                     of=round(float(of_ratio), 2),
-                                    lo=of_limits[0], hi=of_limits[1]))
+                                    lo=round(of_limits[0], 2),
+                                    hi=round(of_limits[1], 2)))
 
         return warnings_list
     

@@ -399,7 +399,8 @@
 
     function scoreCell(score) {
         const c = U.kindColor(bandKind(scoreBand(score)));
-        return `<span style="color:${c}; font-family:var(--hd-mono);">${U.fmt(score, 1)} / 5</span>`;
+        // V306/GÜVENLİK (NR-4): skor da kullanıcı ondalığıyla (TR virgül).
+        return `<span style="color:${c}; font-family:var(--hd-mono);">${U.num(score, 1)} / 5</span>`;
     }
 
     // ------------------------------------------------------------------
@@ -544,103 +545,301 @@
         return html + '</tbody></table>';
     }
 
+    // Sayı ya da '—' (kullanıcı dilinde ondalık; U.num boş dize döndürür).
+    function nb(v, d) {
+        return isNum(v) ? U.num(v, d) : '—';
+    }
+
+    // V306/GÜVENLİK (NR-19) — DEĞERLENDİRİLEN KATMAN. Uç
+    // `pressure_safety.evaluated_layer` ile patlama basıncının hangi
+    // katmanda (tek cidar ya da iki katmanlı sıvı cidarın dış kabuğu) ve o
+    // katmanın işletmede hangi basıncı taşıdığını yayımlar. Sayılar ucun;
+    // burada yalnız biçimlenir.
+    // V306/SIVI-KÜTLE (kalem 3): motor dış kabuğu YAYIMLAMADIYSA uç katmanı
+    // `withheld` imiyle döner; satır nedenini adıyla söyler, sayı basılmaz.
+    const LAYER_WITHHELD_TEXT = {
+        cooling_circuit_not_solved: ['panel.safety.layerWithheld.cooling_circuit_not_solved',
+            'closeout (outer shell) of the two-layer regenerative wall — NOT evaluated: the regenerative cooling circuit of this design is not solved and the closeout is sized from that circuit, so the motor does not publish this layer. No burst pressure, burst margin or vessel verdict is computed for it, and the drawn wall (liner + channels + closeout) is not evaluated as a solid wall in its place.'],
+        closeout_verdict_withheld: ['panel.safety.layerWithheld.closeout_verdict_withheld',
+            'closeout (outer shell) of the two-layer regenerative wall — NOT evaluated: the motor withheld its closeout verdict (see the motor\'s structural result). No burst pressure, burst margin or vessel verdict is computed for it, and the drawn wall is not evaluated as a solid wall in its place.'],
+        closeout_not_evaluated: ['panel.safety.layerWithheld.closeout_not_evaluated',
+            'closeout (outer shell) of the two-layer regenerative wall — NOT evaluated: the motor did not size or evaluate the closeout. No burst pressure, burst margin or vessel verdict is computed for it, and the drawn wall is not evaluated as a solid wall in its place.'],
+    };
+    function evaluatedLayerRow(rows, el, pc) {
+        if (!el || typeof el !== 'object' || !el.role) return;
+        let metin;
+        if (el.withheld === true) {
+            const k = LAYER_WITHHELD_TEXT[el.withheld_code];
+            if (!k) return;
+            metin = T(k[0], k[1]);
+        } else if (el.role === 'closeout') {
+            metin = U.tf('panel.safety.layerCloseout', {
+                material: String(el.material || el.material_key || '—'),
+                t: nb(el.thickness_mm, 2), d: nb(el.inner_diameter_mm, 1),
+                T: nb(el.temperature_K, 1), p: nb(el.load_pressure_bar, 1),
+                pc: nb(pc, 1), s: nb(el.motor_hoop_stress_MPa, 1),
+                m: nb(el.burst_margin_vs_load_pressure, 2),
+                stack: nb(el.stack_thickness_mm, 2),
+                dc: nb(el.chamber_diameter_mm, 1) },
+                'closeout (outer shell) of the two-layer regenerative wall — '
+                + '{material}, {t} mm, inner diameter {d} mm, at {T} K (the '
+                + 'temperature the motor solved for it). In operation this '
+                + 'layer carries the coolant pressure {p} bar (chamber '
+                + 'pressure {pc} bar); the motor\'s hoop stress {s} MPa is '
+                + 'this layer at that pressure. Predicted burst pressure / '
+                + 'coolant pressure = {m}. The drawn wall {stack} mm at the '
+                + 'chamber diameter {dc} mm is liner + channels + closeout, '
+                + 'not a solid wall, and is not used.');
+        } else {
+            metin = U.tf('panel.safety.layerSingle', {
+                material: String(el.material || el.material_key || '—'),
+                t: nb(el.thickness_mm, 2), d: nb(el.inner_diameter_mm, 1),
+                p: nb(el.load_pressure_bar, 1) },
+                'chamber wall (single wall, as entered) — {material}, {t} '
+                + 'mm, inner diameter {d} mm; load: chamber pressure {p} bar');
+        }
+        rows.push([fieldLabelUser('evaluated_layer',
+            T('panel.safety.layerLabel', 'Evaluated layer')),
+            '<span data-safety-layer="' + esc(String(el.role)) + '"'
+            + ' style="font-size:0.74rem; line-height:1.45;">' + esc(metin)
+            + '</span>']);
+    }
+
+    // Kullanıcı etiketi; makine yolu yalnız `data-safety-field` niteliğinde
+    // (ekran süpürmesi ad+değer bağını oradan kurar), görünür metinde değil.
+    function fieldLabelUser(path, label) {
+        return '<span data-safety-field="' + esc(path) + '">' + esc(label)
+            + '</span>';
+    }
+
+    // V306/GÜVENLİK (NR-4) — Basınçlı Kap Özeti kullanıcı dilinde.
+    // Sözcük tabloları ucun yayımladığı sabit değerlerin karşılığıdır
+    // (safety_analysis._analyze_pressure_vessel_safety); tanınmayan değer
+    // AYNEN basılır (uydurma çeviri yok). Anahtarlar literal.
+    function vesselClassWord(v) {
+        switch (String(v)) {
+        case 'LOW_PRESSURE': return T('panel.safety.vesselClassWord.LOW_PRESSURE', 'LOW PRESSURE');
+        case 'MEDIUM_PRESSURE': return T('panel.safety.vesselClassWord.MEDIUM_PRESSURE', 'MEDIUM PRESSURE');
+        case 'HIGH_PRESSURE': return T('panel.safety.vesselClassWord.HIGH_PRESSURE', 'HIGH PRESSURE');
+        default: return String(v).replace(/_/g, ' ');
+        }
+    }
+    function inspectionText(v) {
+        switch (String(v)) {
+        case 'Annual visual, 5-year hydrostatic':
+            return T('panel.safety.inspect.annual5', 'Annual visual, 5-year hydrostatic');
+        case '2-year visual, 10-year hydrostatic':
+            return T('panel.safety.inspect.y2y10', '2-year visual, 10-year hydrostatic');
+        case '5-year visual, 15-year hydrostatic':
+            return T('panel.safety.inspect.y5y15', '5-year visual, 15-year hydrostatic');
+        default: return String(v);
+        }
+    }
+    function severityWord(v) {
+        switch (String(v).toLowerCase()) {
+        case 'info': return T('panel.safety.sev.info', 'info');
+        case 'warning': return T('panel.safety.sev.warning', 'warning');
+        case 'critical': return T('panel.safety.sev.critical', 'critical');
+        default: return String(v);
+        }
+    }
+    function vesselStatusWord(v) {
+        switch (String(v)) {
+        case 'PASS': return T('panel.safety.vesselStatus.PASS', 'PASS');
+        case 'MARGINAL': return T('panel.safety.vesselStatus.MARGINAL', 'MARGINAL');
+        case 'FAIL': return T('panel.safety.vesselStatus.FAIL', 'FAIL');
+        case 'NOT_EVALUATED': return T('panel.safety.vesselStatus.NOT_EVALUATED', 'NOT EVALUATED');
+        default: return String(v);
+        }
+    }
+
+    // Kullanıcı etiketli sayı satırı (değer yoksa satır KONMAZ).
+    function addUserRow(rows, path, label, value, digits, unit) {
+        if (!isNum(value)) return;
+        rows.push([fieldLabelUser(path, label),
+            monoCell(esc(U.num(value, digits)) + (unit ? ' ' + esc(unit) : ''))]);
+    }
+
+    // Uç künyesi: görünür satır kullanıcı cümlesidir; ucun ham cümlesi
+    // kapalı "Teknik ayrıntı" altında AYNEN durur (akış paneli / DİL-2
+    // deseni). Kullanıcı cümlesi yoksa ham cümle yalnız ayrıntıda kalır.
+    function addBasisRow(rows, path, label, ham, kullanici) {
+        if (typeof ham !== 'string' || !ham.trim()) return;
+        rows.push([fieldLabelUser(path, label),
+            '<span style="font-size:0.74rem; line-height:1.45;">'
+            + (kullanici ? esc(kullanici) : '')
+            + '<details style="margin-top:2px; font-size:0.72rem;'
+            + ' color:var(--hd-ink-dim, #7d97a5);"><summary style="cursor:pointer;">'
+            + esc(T('common.techDetailSrv',
+                    'Technical detail (solver statement, untranslated)'))
+            + '</summary>' + esc(ham) + '</details></span>']);
+    }
+
     function pressureVesselBlock(press) {
         if (!press || !Object.keys(press).length) return '';
         let html = U.sectionTitle(T('panel.safety.secVessel', 'Pressure Vessel Summary'));
+        // V306/GÜVENLİK (NR-19): uç kabul (proof) testini hidrostatik test
+        // sayar ve ikisine AYNI sayıyı yazar (AIAA S-080A, tek tanım). Aynı
+        // sayı iki kutuda basılmaz; tek kutu ikisini birden adlar.
+        const tekTest = isNum(press.proof_pressure_bar)
+            && press.hydrostatic_test_pressure_bar === press.proof_pressure_bar;
+        // V306/SIVI-KÜTLE (kalem 4-5): sıvı motor donanımında gereksinim
+        // değerlendirilen katmanın MDP'sinden ve NASA-STD-5012C Tablo 1
+        // katsayılarıyla; kutu ipuçları hangi standart olduğunu söyler.
+        const k5012 = press.code_mode === 'nasa_std_5012c';
         html += `<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">`
             + U.statCard(T('panel.safety.pOperating', 'Operating'),
-                U.fmt(press.operating_pressure_bar, 1), 'bar')
+                nb(press.operating_pressure_bar, 1), 'bar')
             + U.statCard(T('panel.safety.pDesign', 'Design'),
-                U.fmt(press.design_pressure_bar, 1), 'bar')
-            + U.statCard(T('panel.safety.pProof', 'Proof test'),
-                U.fmt(press.proof_pressure_bar, 1), 'bar')
-            + U.statCard(T('panel.safety.pHydro', 'Hydrostatic test'),
-                U.fmt(press.hydrostatic_test_pressure_bar, 1), 'bar')
+                nb(press.design_pressure_bar, 1), 'bar')
+            + (tekTest
+                ? U.statCard(T('panel.safety.pProofHydro',
+                               'Proof test (hydrostatic)'),
+                    nb(press.proof_pressure_bar, 1), 'bar', null,
+                    k5012
+                        ? T('panel.safety.pProofHydroTip5012',
+                            'Acceptance (proof) pressure test = 1.20 × MDP '
+                            + '(NASA-STD-5012C Table 1, liquid engine hardware); '
+                            + 'it is the hydrostatic test, no separate higher '
+                            + 'acceptance test pressure is defined')
+                        : T('panel.safety.pProofHydroTip',
+                      'Acceptance (proof) pressure test = 1.5 × operating '
+                      + 'pressure (AIAA S-080A); it is the hydrostatic test, '
+                      + 'no separate higher test pressure is defined'))
+                : U.statCard(T('panel.safety.pProof', 'Proof test'),
+                    nb(press.proof_pressure_bar, 1), 'bar')
+                  + U.statCard(T('panel.safety.pHydro', 'Hydrostatic test'),
+                    nb(press.hydrostatic_test_pressure_bar, 1), 'bar'))
+            + (k5012 && isNum(press.qualification_test_pressure_bar)
+                ? U.statCard(T('panel.safety.pQual', 'Qualification test'),
+                    nb(press.qualification_test_pressure_bar, 1), 'bar', null,
+                    T('panel.safety.pQualTip',
+                      'Qualification pressure test = 1.50 × MDP '
+                      + '(NASA-STD-5012C Table 1, liquid engine hardware)'))
+                : '')
             + U.statCard(T('panel.safety.pBurst', 'Burst target'),
-                U.fmt(press.required_burst_pressure_bar, 1), 'bar', 'warn',
-                T('panel.safety.pBurstTip', 'Minimum required burst pressure'))
+                nb(press.required_burst_pressure_bar, 1), 'bar', 'warn',
+                k5012
+                    ? T('panel.safety.pBurstTip5012',
+                        'Minimum required burst pressure = 1.50 × MDP '
+                        + '(NASA-STD-5012C Table 1, liquid engine hardware: '
+                        + 'ultimate-pressure analysis factor of safety)')
+                    : T('panel.safety.pBurstTip',
+                  'Minimum required burst pressure = 2.0 × operating '
+                  + 'pressure (AIAA S-080A)'))
             + '</div>';
         const rows = [];
+        // NR-19: patlama basıncının HANGİ katmanda, HANGİ yükle
+        // değerlendirildiği — tablonun ilk satırı.
+        evaluatedLayerRow(rows, press.evaluated_layer,
+                          press.operating_pressure_bar);
+        // V306/SIVI-KÜTLE (kalem 4): gereksinimin kurulduğu basınç —
+        // değerlendirilen katmanın MDP'si (tek cidarda oda basıncı).
+        addUserRow(rows, 'mdp_bar',
+            T('panel.safety.pMdp', 'MDP (evaluated layer)'),
+            press.mdp_bar, 1, 'bar');
+        addBasisRow(rows, 'mdp_basis',
+            T('panel.safety.basisLabel', 'Basis'), press.mdp_basis,
+            T('panel.safety.pMdpTip',
+              'Maximum design pressure of the evaluated layer: the largest pressure difference it carries (closeout of a two-layer wall: the highest jacket coolant pressure). The test and burst requirements are built from it.'));
+        // V306/GÜVENLİK (NR-4): satır etiketleri KULLANICI DİLİNDE; makine
+        // yolu yalnız `data-safety-field` niteliğinde kalır (ekran
+        // süpürmesi ad+değer bağını oradan kurar). Sayılar kullanıcı
+        // ondalığıyla (TR virgül). Uç künyeleri (İngilizce, makine adlı)
+        // kapalı "Teknik ayrıntı" altında AYNEN; görünür satır kısa
+        // kullanıcı cümlesidir.
         if (press.vessel_classification) {
-            rows.push([T('panel.safety.vesselClass', 'Vessel classification'),
-                U.badge(String(press.vessel_classification).replace(/_/g, ' '), 'info')]);
+            rows.push([fieldLabelUser('vessel_classification',
+                T('panel.safety.vesselClass', 'Vessel classification')),
+                U.badge(esc(vesselClassWord(press.vessel_classification)),
+                        'info')]);
         }
         if (press.inspection_requirements) {
-            rows.push([T('panel.safety.inspection', 'Inspection'), press.inspection_requirements]);
+            rows.push([fieldLabelUser('inspection_requirements',
+                T('panel.safety.inspection', 'Inspection')),
+                esc(inspectionText(press.inspection_requirements))]);
         }
+        // V306/SIVI-KÜTLE (kalem 5): deneme/patlama gereksiniminin standardı.
+        addBasisRow(rows, 'code_basis',
+            T('panel.safety.codeLabel', 'Test and burst requirement standard'),
+            (typeof press.code_basis === 'string' && press.code_mode)
+                ? String(press.code_mode) + ': ' + press.code_basis
+                : press.code_basis,
+            k5012
+                ? T('panel.safety.code5012',
+                    'NASA-STD-5012C (2025-12-31), Table 1: liquid engine hardware (chamber layers). Propellant tanks and lines follow AIAA S-080A.')
+                : T('panel.safety.codeS080',
+                    'AIAA S-080A-2018: metallic pressure vessels'));
         if (press.applicable_codes && press.applicable_codes.length) {
-            rows.push([T('panel.safety.codes', 'Applicable codes'),
-                       press.applicable_codes.join(' · ')]);
+            rows.push([fieldLabelUser('applicable_codes',
+                T('panel.safety.codes', 'Applicable codes')),
+                esc(press.applicable_codes.join(' · '))]);
         }
         if (press.safety_devices_required && press.safety_devices_required.length) {
-            // D-track: backend {code,params,severity} döndürür; ham join()
-            // "[object Object] · [object Object]" basardı (v2.6.2 regresyonu).
-            // ÖH D15 / P11B4-11 kalıntısı: üç aygıt tek satırda birleşiyor ve
-            // ucun `severity` beyanı DÜŞÜYORDU — hangi aygıtın bilgi, hangisinin
-            // uyarı olduğu ekranda okunamıyordu. Aygıt başına satır + ucun kendi
-            // ağırlık beyanı basılır.
+            // D-track: backend {code,params,severity} döndürür; aygıt başına
+            // satır + ucun kendi ağırlık beyanı (ÖH D15 / P11B4-11).
             press.safety_devices_required.forEach(function (dev, i) {
                 const sev = (dev && dev.severity) ? String(dev.severity) : null;
-                rows.push([machineLabel('safety_devices_required[' + i + ']'),
+                rows.push([fieldLabelUser('safety_devices_required[' + i + ']',
+                    U.tf('panel.safety.deviceN', { n: i + 1 },
+                         'Safety device {n}')),
                     U.warnText(dev)
-                    + (sev ? ' ' + U.badge(sev, severityKind(sev)) : '')]);
+                    + (sev ? ' ' + U.badge(esc(severityWord(sev)),
+                                           severityKind(sev)) : '')]);
             });
         }
-        // ---- Ucun patlama basıncı hükmü (ÖH D15 / P11B4-11 kalıntısı) ----
-        // ÖLÇÜLDÜ (b4_11_alan_ONCE.json): ekranda yalnız HEDEF patlama basıncı
-        // (`required_burst_pressure_bar` = 80,0 bar) duruyordu; tasarımın
-        // GERÇEKTEN hesaplanan patlama basıncı (693,5 bar), marjı (8,67) ve
-        // hangi modelden geldiği (Faupel kalın cidar) hiç inmiyordu. Kullanıcı
-        // "hedef 80 bar" görüp kabın 80 barda patladığını sanabiliyor, gerçek
-        // marjını okuyamıyordu. Satırlar MAKİNE YOLUYLA basılır: yeni çeviri
-        // anahtarı gerekmez, kullanıcı hangi yanıt alanını okuduğunu görür.
-        // ---- ÖH D29 · OH-D28-04 — KABIN GEOMETRİSİ ----------------------
-        // ÖLÇÜLDÜ (`docs/scofield/raw/OH/D29/arayuz-panel/a1/once.json`,
-        // OH-D28-04): panel yukarıdaki BEŞ basıncı basıyor ama basıncı
-        // taşıyan kabın İKİ boyutunu — iç çap ve cidar kalınlığı — hiç
-        // indirmiyordu (`inner_diameter_mm` 0, `wall_thickness_mm` 0
-        // geçiş). Yani kullanıcı "693,5 bar patlama basıncı" görüyor,
-        // hangi çap/kalınlık için hesaplandığını göremiyordu; hükmün
-        // GİRDİSİ ekranda yoktu. Bu iki yaprak
-        // `tests/test_d15_ui_paneller_a1.py::GUVENLIK_YAPRAK_BORCU`da
-        // ADIYLA borç olarak duruyordu (D28 / OH-D27-17 ölçümü) ve
-        // gerekçesi "panel bağlaması ARAYUZ kulvarının işidir" diyordu.
-        //
-        // BİRİM DÖNÜŞÜMÜ PANELDE YAPILMAZ: uç `pressure_safety` bloğunu
-        // MİLİMETRE yayımlar (giriş formundaki `wall_thickness` alanı
-        // METRE'dir; iki büyüklük karıştırılırsa 5 mm ile 5 m aynı
-        // görünürdü). Satır MAKİNE YOLUYLA basılır — alan adı `_mm`
-        // sonekini taşır ve birim etiketi 'mm' olarak yazılır, yani ad
-        // ile değer AYNI satırdadır (ad+değer süpürme ölçütü).
-        addRow(rows, 'inner_diameter_mm', press.inner_diameter_mm, 1, 'mm');
-        addRow(rows, 'wall_thickness_mm', press.wall_thickness_mm, 2, 'mm');
-        addRow(rows, 'actual_burst_pressure_bar',
-               press.actual_burst_pressure_bar, 1, 'bar');
-        // ÖH D31 / OH-D30-13 — 'actual' ÖLÇÜLMÜŞ DEMEK DEĞİLDİR.
-        // Bu satır alan adını EKRANA BASIYOR; ad tek başına okununca
-        // "ölçülmüş kopma dayanımı" anlaşılıyor. Oysa sayı min(Faupel
-        // 1956 kalın cidar, Harvey ince cidar membran limiti) kestirimi.
-        // Künye, kardeşleri (burst_margin_definition, design_pressure_basis)
-        // ile AYNI makine yoluyla iner — panelde metin İCAT EDİLMEZ, ucun
-        // kendi cümlesi basılır.
-        addRow(rows, 'actual_burst_pressure_basis',
-               press.actual_burst_pressure_basis);
-        addRow(rows, 'burst_margin', press.burst_margin, 2);
-        // ÖH D15 birleşmesi (1 Eyl 2026) — İKİ MARJIN AYRIMI (P5B2-09).
-        // Uç aynı kap için İKİ ayrı oran yayımlıyor: `burst_margin` kod
-        // GEREĞİ patlama basıncına, `burst_margin_vs_meop` işletme
-        // basıncına karşı. İkisi patlama çarpanı kadar (bu koşumda TAM 2
-        // kat) ayrışıyor ve aynı eşiklerle karşılaştırılamaz. Ekranda
-        // yalnız biri duruyordu; hangisi olduğu da yazılı değildi.
-        // Tanım ve tasarım basıncı künyeleri de aynı sebeple iner.
-        addRow(rows, 'burst_margin_vs_meop', press.burst_margin_vs_meop, 2);
-        addRow(rows, 'burst_margin_definition', press.burst_margin_definition);
-        addRow(rows, 'design_pressure_basis', press.design_pressure_basis);
-        addRow(rows, 'burst_pressure_source', press.burst_pressure_source);
+        // Kabın geometrisi ve tahmini patlama basıncı (ÖH D29 · OH-D28-04,
+        // ÖH D15 / P11B4-11). Uç `pressure_safety`yi MİLİMETRE yayımlar.
+        addUserRow(rows, 'inner_diameter_mm',
+            T('panel.safety.innerDiameter', 'Inner diameter'),
+            press.inner_diameter_mm, 1, 'mm');
+        addUserRow(rows, 'wall_thickness_mm',
+            T('panel.safety.wallThickness', 'Wall thickness'),
+            press.wall_thickness_mm, 2, 'mm');
+        addUserRow(rows, 'actual_burst_pressure_bar',
+            T('panel.safety.predictedBurst', 'Predicted burst pressure'),
+            press.actual_burst_pressure_bar, 1, 'bar');
+        addBasisRow(rows, 'actual_burst_pressure_basis',
+            T('panel.safety.basisLabel', 'Basis'),
+            press.actual_burst_pressure_basis,
+            T('panel.safety.burstBasisText',
+              'model prediction, not a measured strength: the smaller of the '
+              + 'Faupel (1956) thick-wall and Harvey thin-wall bursting '
+              + 'relations; no burst test and no batch coupon data'));
+        addUserRow(rows, 'burst_margin',
+            T('panel.safety.burstMarginReq',
+              'Burst margin (vs required burst pressure)'),
+            press.burst_margin, 2, '');
+        addUserRow(rows, 'burst_margin_vs_meop',
+            T('panel.safety.burstMarginMeop',
+              'Burst margin (vs operating pressure)'),
+            press.burst_margin_vs_meop, 2, '');
+        addBasisRow(rows, 'burst_margin_definition',
+            T('panel.safety.marginDefLabel', 'Margin definitions'),
+            press.burst_margin_definition,
+            T('panel.safety.burstMarginDefText',
+              'the first margin is against the required burst pressure, the '
+              + 'second against the operating pressure; they differ by the '
+              + 'burst factor and are not compared to the same thresholds'));
+        addBasisRow(rows, 'design_pressure_basis',
+            T('panel.safety.designBasisLabel', 'Design pressure'),
+            press.design_pressure_basis,
+            isNum(press.design_pressure_factor)
+                ? U.tf('panel.safety.designBasisText',
+                       { f: U.num(press.design_pressure_factor, 2) },
+                       'operating pressure × {f} (HRMA safety margin)')
+                : null);
+        addBasisRow(rows, 'burst_pressure_source',
+            T('panel.safety.burstModelLabel', 'Burst pressure model'),
+            press.burst_pressure_source,
+            T('panel.safety.burstModelText',
+              'Faupel thick-wall / thin-wall plastic limit'));
         if (press.vessel_status) {
             const st = String(press.vessel_status);
-            rows.push([machineLabel('vessel_status'),
-                U.badge(st, st === 'PASS' ? 'ok' : 'err')]);
+            rows.push([fieldLabelUser('vessel_status',
+                T('panel.safety.vesselStatus', 'Vessel status')),
+                U.badge(esc(vesselStatusWord(st)), st === 'PASS' ? 'ok'
+                    : (st === 'NOT_EVALUATED' ? 'warn' : 'err'))]);
         }
         if (rows.length) html += U.kvTable(rows);
         return html;
@@ -668,9 +867,16 @@
         // (`compliance.disclaimer_code`) ekranda hiç görünmüyordu — aşağıdaki
         // cümlenin güvertenin kendi metni mi yoksa UCUN beyanı mı olduğu
         // okunamıyordu. Kod makine yoluyla basılır (yeni çeviri anahtarı yok).
+        // V306/GÜVENLİK (NR-4): ucun beyan kodu görünür etiket değildir;
+        // kapalı "Teknik ayrıntı" altında, cümlenin ucun beyanı olduğunu
+        // gösteren tek iz olarak durur.
         const kod = comp.disclaimer_code
-            ? U.kvTable([[machineLabel('compliance.disclaimer_code'),
-                          monoCell(esc(String(comp.disclaimer_code)))]])
+            ? '<details data-safety-field="compliance.disclaimer_code"'
+              + ' style="font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);">'
+              + '<summary style="cursor:pointer;">'
+              + esc(T('common.techDetailSrv',
+                      'Technical detail (solver statement, untranslated)'))
+              + '</summary>' + esc(String(comp.disclaimer_code)) + '</details>'
             : '';
         return U.sectionTitle(T('panel.safety.secCompliance', 'Regulatory compliance'))
             + `<div style="border:1px solid ${U.kindColor('warn')}; border-radius:8px;
@@ -1240,7 +1446,11 @@
                       'recommended_minimum_standoff_m',
                       b.recommended_minimum_standoff_m, 2, 'm', bt);
         addListRow(rows, 'thermal_not_evaluated', b.thermal_not_evaluated);
-        return wallWithheldNote(b.thermal_verdict === 'withheld')
+        // V306/GÜVENLİK (NR-3 a): motorun bölge sonucu varken çıplak cidar
+        // uyarısı termal eksenin gerekçesi olarak BASILMAZ (bölge notu
+        // bireysel risk tablosunun altında, tek yerde).
+        return (motorZoneThermalNote(b)
+                ? '' : wallWithheldNote(b.thermal_verdict === 'withheld'))
             + blockSection('thermal_safety', rows);
     }
 
@@ -1664,8 +1874,178 @@
                risk.acceptability_withheld_because);
         addRow(rows, 'aggregation_basis', risk.aggregation_basis);
         if (!rows.length) return '';
-        const path = 'risk_assessment (basis)';
-        return U.sectionTitle(path) + U.kvTable(rows);
+        // V306/GÜVENLİK (NR-4): ham risk künyesi (makine alanları) kapalı
+        // "Teknik ayrıntı" altında; kısmilik kullanıcıya üst şeritteki
+        // cümleyle söylenir (NR-3).
+        return '<details data-safety-basis="risk_assessment"'
+            + ' style="font-size:0.75rem; margin:6px 0;"><summary'
+            + ' style="cursor:pointer;">'
+            + esc(T('panel.safety.riskBasisDetail',
+                    'Risk assessment basis (technical detail, untranslated)'))
+            + '</summary>' + U.kvTable(rows) + '</details>';
+    }
+
+    // ==================================================================
+    // V306/GÜVENLİK (NR-3) — TEK HÜKÜM, AÇIK KISMİLİK, MOTORUN CİDAR SONUCU
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/guvenlik/olcum/guvenlik_once.json,
+    // üç örnek motor, panelin kendi gövdesi + gerçek uç + panelin render'ı):
+    // (b) yapısal (hibritte termal de) eksen değerlendirilmemişken üst
+    //     şeritte yeşil "MOTOR TASARIM RİSKİ: LOW" ve yeşil "SKOR 2.00 / 5";
+    //     kısmilik yalnız aşağıdaki İngilizce ham alanda;
+    // (a) hibritte termal eksenin gerekçesi ısı modülünün ÇIPLAK CİDAR
+    //     uyarısıydı ("3257 K, erime 1673 K aşılıyor") — motorun kendi
+    //     sonucu (yakıt bloğu altı korunur, ön/son odaya astar) o kaydı
+    //     `superseded_by = chamber_wall_zones` ile geçersiz kılmışken.
+    // ==================================================================
+    const NOT_EVALUATED_WORD = 'NOT_EVALUATED';
+    const RISK_WORDS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+    // Kabul sözcükleri: safety_analysis._risk_band çıktıları (+ geri çekme).
+    const ACCEPTABILITY_KEYS = {
+        ACCEPTABLE: ['panel.safety.accWord.ACCEPTABLE', 'ACCEPTABLE'],
+        ACCEPTABLE_WITH_CONTROLS: ['panel.safety.accWord.ACCEPTABLE_WITH_CONTROLS',
+                                   'ACCEPTABLE WITH CONTROLS'],
+        REQUIRES_MITIGATION: ['panel.safety.accWord.REQUIRES_MITIGATION',
+                              'REQUIRES MITIGATION'],
+        UNACCEPTABLE: ['panel.safety.accWord.UNACCEPTABLE', 'UNACCEPTABLE'],
+    };
+
+    // Hüküm sözcüğü kullanıcı dilinde; tanınmayan sözcük AYNEN kalır.
+    function riskWord(level) {
+        const t = String(level == null ? '' : level).toUpperCase();
+        if (t === NOT_EVALUATED_WORD) {
+            return T('app.state.notEvaluated', 'NOT EVALUATED');
+        }
+        if (RISK_WORDS.indexOf(t) !== -1) return T('panel.safety.accBand.' + t, t);
+        return String(level);
+    }
+
+    function acceptabilityWord(acc) {
+        const t = String(acc == null ? '' : acc);
+        if (t === NOT_EVALUATED_WORD) {
+            return T('panel.safety.accWord.NOT_EVALUATED',
+                     'ACCEPTABILITY: NOT EVALUATED');
+        }
+        const k = ACCEPTABILITY_KEYS[t];
+        return k ? T(k[0], k[1]) : t.replace(/_/g, ' ');
+    }
+
+    // Geri çekilmiş hüküm kırmızı DEĞİL, kehribardır (Performans Özeti
+    // "HÜKÜM GERİ ÇEKİLDİ" rozetiyle aynı ton).
+    function verdictKind(level) {
+        return String(level || '').toUpperCase() === NOT_EVALUATED_WORD
+            ? 'warn' : riskLevelKind(level);
+    }
+
+    // Motor eksenlerinden en az biri değerlendirilmediyse
+    // {evaluated, missing, total}; değilse (ya da eski yanıt) null.
+    function motorAxesPartial(risk) {
+        const ev = risk && risk.motor_axes_evaluated;
+        const yok = risk && risk.motor_axes_not_evaluated;
+        if (!Array.isArray(ev) || !Array.isArray(yok) || !yok.length) return null;
+        return { evaluated: ev.map(String), missing: yok.map(String),
+                 total: ev.length + yok.length };
+    }
+
+    function motorPartialNote(kismi, risk) {
+        if (!kismi) return '';
+        const LBL = areaLabels();
+        const adlar = function (liste) {
+            return liste.map(function (a) { return LBL[a] || a; }).join(', ');
+        };
+        const skor = (typeof risk.overall_risk_score === 'number'
+                      && Number.isFinite(risk.overall_risk_score))
+            ? risk.overall_risk_score : null;
+        const metin = (kismi.evaluated.length && skor !== null)
+            ? U.tf('panel.safety.partialMotorNote', {
+                done: kismi.evaluated.length, total: kismi.total,
+                evaluated: adlar(kismi.evaluated),
+                missing: adlar(kismi.missing), score: U.num(skor, 2) },
+                'Partial assessment: {done} of {total} motor-design axes '
+                + 'were evaluated ({evaluated}); not evaluated: {missing}. '
+                + 'The worst evaluated axis scores {score} / 5, which is only '
+                + 'a lower bound, so no low-risk verdict is given. A missing '
+                + 'evaluation is not a low risk.')
+            : U.tf('panel.safety.partialMotorNoteNone', {
+                total: kismi.total, missing: adlar(kismi.missing) },
+                'None of the {total} motor-design axes could be evaluated '
+                + '({missing}), so no motor design risk is given.');
+        return '<p data-safety-partial="1" style="font-size:0.75rem;'
+            + ' color:' + U.kindColor('warn') + '; margin:2px 0 8px;">'
+            + esc(metin) + '</p>';
+    }
+
+    // NR-3 (a): hibritte cidarın ısıl sonucu motorun BÖLGE modelidir
+    // (Performans Özeti "YANMA ODASI CİDARI: ÜÇ BÖLGE" kartıyla aynı kayıt;
+    // uç onu `thermal_safety.motor_wall_zones` ile geri yansıtır). Ad ve
+    // hüküm sözcükleri o kartın sözlük anahtarlarıdır (aynı dil); sayılar
+    // kaydın kendi alanlarıdır, burada eşik hesaplanmaz.
+    const ZONE_NAME_KEYS = {
+        grain_section: ['app.zones.grain', 'Under the fuel grain'],
+        pre_chamber: ['app.zones.pre', 'Pre-combustion chamber'],
+        post_chamber: ['app.zones.post', 'Post-combustion chamber'],
+    };
+    const ZONE_VERDICT_KEYS = {
+        PROTECTED_DURING_BURN: ['app.zones.vProtected', 'PROTECTED DURING BURN'],
+        NOT_PROTECTED: ['app.zones.vNotProtected', 'NOT PROTECTED'],
+        LINER_REQUIRED: ['app.zones.vLinerRequired', 'LINER REQUIRED'],
+        BARE_WALL_CRITICAL: ['app.zones.vBareCritical', 'BARE WALL: CRITICAL'],
+        BARE_WALL_WITHIN_LIMIT: ['app.zones.vBareOk', 'BARE WALL WITHIN LIMIT'],
+        NOT_PRESENT: ['app.zones.vAbsent', 'NOT PRESENT'],
+    };
+
+    function motorZoneThermalNote(th) {
+        const bolge = th && th.motor_wall_zones;
+        if (!bolge || !Array.isArray(bolge.zones) || !bolge.zones.length) {
+            return '';
+        }
+        const satirlar = bolge.zones.map(function (z) {
+            const ad = ZONE_NAME_KEYS[z.zone];
+            const hk = ZONE_VERDICT_KEYS[z.verdict];
+            const ayrinti = [];
+            if (z.verdict === 'PROTECTED_DURING_BURN'
+                    && isNum(z.casing_temperature_K)) {
+                ayrinti.push(U.tf('app.zones.grainDetail',
+                    { T: U.num(z.casing_temperature_K, 2) },
+                    'the fuel grain covers the case for the whole burn; case '
+                    + 'temperature {T} K (declared, not computed)'));
+            }
+            if (z.verdict === 'LINER_REQUIRED' && isNum(z.liner_thickness_mm)) {
+                ayrinti.push(U.tf('app.zones.linerDetail',
+                    { mm: U.num(z.liner_thickness_mm, 2) },
+                    'this zone needs a {mm} mm insulation liner (HRMA sized it)'));
+            }
+            if (z.verdict === 'BARE_WALL_CRITICAL') {
+                ayrinti.push(T('app.zones.noLiner',
+                    'no liner sizing in this run: the critical bare-wall '
+                    + 'verdict stands'));
+            }
+            return '<li data-safety-zone="' + esc(String(z.zone)) + '">'
+                + '<strong>' + esc(ad ? T(ad[0], ad[1]) : String(z.zone))
+                + '</strong>: ' + esc(hk ? T(hk[0], hk[1]) : String(z.verdict))
+                + (ayrinti.length ? ' — ' + esc(ayrinti.join(' · ')) : '')
+                + '</li>';
+        }).join('');
+        const sonuc = bolge.all_zones_protected
+            ? T('panel.safety.zoneThermalDeclared',
+                'The case temperature in this model is declared, not '
+                + 'computed, so no thermal risk score is given and the '
+                + 'thermal axis is shown as not evaluated. The heat '
+                + 'module\'s bare-wall equilibrium (a wall with no fuel '
+                + 'grain and no liner) is not this motor\'s wall and is not '
+                + 'used for this verdict.')
+            : T('panel.safety.zoneThermalNotAll',
+                'Not every zone is protected in the motor\'s own model (see '
+                + 'the zone verdicts). No thermal risk score is computed '
+                + 'from a separate model.');
+        return '<div data-safety-zone-thermal="1" style="font-size:0.75rem;'
+            + ' margin:6px 0; padding:6px 8px; border:1px solid '
+            + U.kindColor('dim') + '; border-radius:6px;">'
+            + '<strong>' + esc(T('panel.safety.zoneThermalTitle',
+                'Thermal axis: the motor\'s own chamber-wall result (the '
+                + 'same record as the Performance Summary card)'))
+            + '</strong><ul style="margin:4px 0 4px 16px; padding:0;">'
+            + satirlar + '</ul>' + esc(sonuc) + '</div>';
     }
 
     function render(data, root) {
@@ -1691,28 +2071,54 @@
                             + (notEvaluatedAxes.join(', ') || '-'))
             : '';
         let badges = '';
+        // V306/GÜVENLİK (NR-3 b): motor eksenlerinin kısmiliği (uç
+        // `motor_axes_evaluated` / `motor_axes_not_evaluated` yayımlar).
+        const kismi = motorAxesPartial(risk);
         if (risk.risk_level) {
             // V301/FİZİK-2 (kalem 8b): risk_level motorun KENDİ eksenlerinden
             // (yapısal, basınçlı kap, termal); tesis ekseni ayrı rozette.
+            // V306/GÜVENLİK (NR-3 b): değerlendirilmeyen motor ekseni varken
+            // uç LOW / MEDIUM sınıfını geri çeker (NOT_EVALUATED); rozet o
+            // sözcüğü kullanıcı dilinde basar ve kaç eksenin
+            // değerlendirildiğini rozetin İÇİNDE söyler. Yeşil yalnız
+            // bütün motor eksenleri değerlendirilip LOW çıktığında yanar.
             const etiket = risk.facility_hazard
                 ? T('panel.safety.motorDesignRisk', 'MOTOR DESIGN RISK')
                 : T('panel.safety.overallRisk', 'OVERALL RISK');
-            badges += U.badge(etiket + ': ' + risk.risk_level,
-                riskLevelKind(risk.risk_level),
-                U.tf('panel.safety.overallScoreTip', { value: U.fmt(risk.overall_risk_score, 2) },
-                     'Weighted overall score {value} / 5'))
+            badges += '<span data-safety-motor-risk="'
+                + esc(String(risk.risk_level)) + '">'
+                + U.badge(etiket + ': ' + riskWord(risk.risk_level)
+                    + (kismi ? ' · ' + U.tf('panel.safety.axesEvaluated',
+                        { done: kismi.evaluated.length, total: kismi.total },
+                        '{done} OF {total} AXES EVALUATED') : ''),
+                    kismi ? 'warn' : verdictKind(risk.risk_level),
+                    U.tf('panel.safety.overallScoreTip',
+                         { value: U.num(risk.overall_risk_score, 2) },
+                         'Worst evaluated axis score {value} / 5'))
+                + '</span>'
                 + (risk.risk_level_is_partial ? partialChip : '');
         }
         if (risk.acceptability) {
             const acc = String(risk.acceptability);
-            badges += U.badge(acc.replace(/_/g, ' '),
-                acc === 'ACCEPTABLE' ? 'ok'
-                    : acc === 'ACCEPTABLE_WITH_CONTROLS' ? 'warn' : 'err');
+            // Geri çekilmiş kabul sözcüğü, aynı nedenle geri çekilmiş risk
+            // rozetini ikinci kez söylemez (tek hüküm, tek rozet).
+            if (!(acc === NOT_EVALUATED_WORD
+                  && String(risk.risk_level) === NOT_EVALUATED_WORD)) {
+                badges += U.badge(acceptabilityWord(acc),
+                    acc === 'ACCEPTABLE' ? 'ok'
+                        : acc === 'ACCEPTABLE_WITH_CONTROLS' ? 'warn'
+                            : acc === NOT_EVALUATED_WORD ? 'warn' : 'err');
+            }
         }
         if (risk.overall_risk_score != null) {
-            badges += U.badge(T('panel.safety.scoreBadge', 'SCORE') + ': '
-                + U.fmt(risk.overall_risk_score, 2) + ' / 5',
-                bandKind(scoreBand(risk.overall_risk_score)))
+            // Kısmi sepette skor yalnız değerlendirilen eksenlerin en
+            // kötüsüdür (alt sınır): etiket bunu söyler, renk nötrdür.
+            badges += U.badge((kismi
+                    ? T('panel.safety.scoreBadgePartial',
+                        'SCORE OF EVALUATED AXES')
+                    : T('panel.safety.scoreBadge', 'SCORE')) + ': '
+                + U.num(risk.overall_risk_score, 2) + ' / 5',
+                kismi ? 'dim' : bandKind(scoreBand(risk.overall_risk_score)))
                 + (risk.overall_risk_score_is_partial ? partialChip : '');
         }
         // V301/FİZİK-2 (kalem 8b): tesis / yerleşim tehlikesi motor
@@ -1721,11 +2127,11 @@
         const fh = risk.facility_hazard;
         if (fh && fh.risk_level) {
             badges += U.badge(T('panel.safety.facilityHazard',
-                'FACILITY / SITING HAZARD') + ': ' + fh.risk_level,
-                riskLevelKind(fh.risk_level),
+                'FACILITY / SITING HAZARD') + ': ' + riskWord(fh.risk_level),
+                verdictKind(fh.risk_level),
                 U.tf('panel.safety.overallScoreTip',
-                     { value: U.fmt(fh.score, 2) },
-                     'Weighted overall score {value} / 5'));
+                     { value: U.num(fh.score, 2) },
+                     'Worst evaluated axis score {value} / 5'));
             if (fh.requirement) {
                 badges += U.badge(T('panel.safety.facilityRequirement',
                     'SAFETY DISTANCE / FACILITY MEASURES REQUIRED — a '
@@ -1734,6 +2140,10 @@
             }
         }
         let html = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">${badges}</div>`;
+        // V306/GÜVENLİK (NR-3 b): kısmilik cümlesi rozetin HEMEN altında,
+        // kullanıcı dilinde (ham `risk_level_is_partial` alanı aşağıda
+        // künye olarak kalır).
+        html += motorPartialNote(kismi, risk);
         // V301/CI-ÜRÜN (28 Eki): tesis rozetinin DAYANAĞI ekranda. Uç
         // ``risk_assessment.facility_hazard.basis`` cümlesini yayımlıyor
         // ama panel yalnız rozeti basıyordu (CI d15 süpürmesi: 1/309 sağır
@@ -1771,7 +2181,12 @@
             }));
         // V3 KK 3. tur: termal eksen değerlendirilmediyse nedeni tablonun
         // hemen altında da ADIYLA (yalnız 'girdi yok' çipi yetmez).
-        html += wallWithheldNote(notEvaluatedAxes.indexOf('thermal') !== -1);
+        // V306/GÜVENLİK (NR-3 a): motor kendi cidar bölge sonucunu
+        // yayımladıysa termal eksenin gerekçesi O sonuçtur (tek kaynak);
+        // ısı modülünün çıplak cidar uyarısı ancak motorun bölge modeli
+        // yokken basılır.
+        html += motorZoneThermalNote(s.thermal_safety)
+            || wallWithheldNote(notEvaluatedAxes.indexOf('thermal') !== -1);
 
         // ---- Azaltım öncelikleri ----
         const pt = priorityTable(risk);

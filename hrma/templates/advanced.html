@@ -6,6 +6,9 @@
     <!-- Yükleme bayt tavanları (app.py inject_upload_limits; import_ui.js okur;
          V3 güvenlik 5. tur): sayı JS'e kopyalanmaz. -->
     <meta name="hrma-upload-limits" content='{{ upload_limits|tojson }}'>
+    <!-- V306/HİBRİT-SAYI (kalem 7): formun kabul bantları = sunucunun bandı
+         (app.py _hibrit_form_bantlari ← CANONICAL_LIMITS); sayı JS'e kopyalanmaz. -->
+    <meta name="hrma-hybrid-input-limits" content='{{ hybrid_input_limits|tojson }}'>
     <!-- i18n katmanı: <html lang> + data-i18n uygulaması (dil seçici Ana Sayfa'da) -->
     <script src="/static/js/i18n.js"></script>
     <!-- Hibrit sayfasının EN/TR sözlüğü (i18n.js'ten SONRA yüklenir) -->
@@ -1070,22 +1073,80 @@
                         if (isFinite(m.burn_time)) ek.burn_time_design = m.burn_time;
                         ek.source = 'page_calculation';
                     }
-                    const tr = TransientPanel.result;
-                    if (tr && tr.transient && tr.transient.time.length > 3) {
-                        return Object.assign({ thrust_curve: { time: tr.transient.time,
-                                                 thrust: tr.transient.thrust },
-                                               curve_source: 'transient_panel' }, ek);
+                    // V306/UÇUŞ-2 (M-HIBRIT-1/-17/-24) — UÇAN İTKİ TEK KURALDAN:
+                    // aynı hesabın aracındaki ``flight_thrust``
+                    // (flight_vehicle.motor_flight_thrust; Yörünge paneli de
+                    // bunu uçurur). Zaman Çözümlü eğrisi burada ÖNCELİKLENMEZ
+                    // (eskiden koşulmuşsa — başka bir motor için bile — o
+                    // uçuyordu); yalnız transientProvider ile, açık seçimle.
+                    const arac = (window.FlightHandoff && window.currentResults)
+                        ? FlightHandoff.vehicleFor(window.currentResults) : null;
+                    const u = arac && arac.flight_thrust;
+                    if (!u) return null;
+                    const kalan = (u.curve_source === 'motor_blowdown'
+                                   && u.propellant_loaded_kg > u.propellant_consumed_kg)
+                        ? u.propellant_loaded_kg - u.propellant_consumed_kg : 0;
+                    const ortak = Object.assign({}, ek, {
+                        curve_source: u.curve_source,
+                        total_impulse_ns: u.total_impulse_ns,
+                        motor_published_impulse_ns: u.motor_published_impulse_ns,
+                        propellant_mass: u.propellant_consumed_kg,
+                        propellant_residual_kg: kalan,
+                    });
+                    const tc = u.thrust_curve;
+                    if (tc && Array.isArray(tc.time) && tc.time.length > 3
+                            && Array.isArray(tc.thrust) && tc.time.length === tc.thrust.length) {
+                        const tSon = tc.time[tc.time.length - 1];
+                        return Object.assign(ortak, {
+                            thrust_curve: { time: tc.time, thrust: tc.thrust },
+                            thrust: (tSon > 0 && u.total_impulse_ns > 0) ? u.total_impulse_ns / tSon : undefined,
+                            burn_time: tSon });
                     }
-                    const tc = m && m.thrust_curve;
-                    if (tc && Array.isArray(tc.time) && Array.isArray(tc.thrust)
-                            && tc.time.length > 3 && tc.time.length === tc.thrust.length) {
-                        return Object.assign({ thrust_curve: { time: tc.time, thrust: tc.thrust },
-                                               curve_source: 'motor_thrust_curve' }, ek);
-                    }
-                    if (m) {
-                        return Object.assign({ thrust: m.thrust, burn_time: m.burn_time }, ek);
+                    if (u.thrust > 0 && u.burn_time > 0) {
+                        return Object.assign(ortak, { thrust: u.thrust, burn_time: u.burn_time });
                     }
                     return null;
+                },
+                // V306/UÇUŞ-2 + ana model notu (BAYAT): Zaman Çözümlü eğrisi
+                // yalnız AYNI motor koşusuna aitse. Koşu kimliği: panel,
+                // eğrisini koştuğu andaki sonuç nesnesine iliştirir
+                // (transient_panel.js: currentResults.motor.transient); yeni
+                // bir motor hesabı yeni bir sonuç nesnesi yaratır ve eki
+                // taşımaz. Panelin son sonucu (TransientPanel.result) ancak
+                // dizisi bu ekle AYNI nesneyse kullanılır — eski motorun
+                // eğrisi yeni motorun kütlesiyle uçmaz.
+                transientProvider: function () {
+                    const cr = window.currentResults;
+                    const m = cr && cr.motor;
+                    const ek = m && m.transient;
+                    const tr = window.TransientPanel && TransientPanel.result;
+                    const tt = tr && tr.transient;
+                    if (!ek || !tt || !Array.isArray(tt.time) || tt.time.length <= 3
+                            || ek.time !== tt.time || ek.thrust !== tt.thrust) {
+                        return null;
+                    }
+                    let impuls = 0, harcanan = 0;
+                    const mo = tt.mdot_ox, mf = tt.mdot_fuel;
+                    const debiVar = Array.isArray(mo) && Array.isArray(mf)
+                        && mo.length === tt.time.length && mf.length === tt.time.length;
+                    for (let i = 1; i < tt.time.length; i++) {
+                        const dt = tt.time[i] - tt.time[i - 1];
+                        impuls += 0.5 * (tt.thrust[i] + tt.thrust[i - 1]) * dt;
+                        if (debiVar) harcanan += 0.5 * (mo[i] + mf[i] + mo[i - 1] + mf[i - 1]) * dt;
+                    }
+                    if (!(impuls > 0) || !(harcanan > 0)) return null;
+                    const yuklu = m.propellant_mass_total;
+                    const tSon = tt.time[tt.time.length - 1];
+                    return {
+                        thrust_curve: { time: tt.time, thrust: tt.thrust },
+                        curve_source: 'transient',
+                        total_impulse_ns: impuls,
+                        thrust: impuls / tSon,
+                        burn_time: tSon,
+                        propellant_mass: harcanan,
+                        propellant_residual_kg: (isFinite(yuklu) && yuklu > harcanan) ? yuklu - harcanan : 0,
+                        source: 'page_calculation',
+                    };
                 },
             });
             // V301/E2 (Ayberk tur 1) — AYRI ENJEKTÖR PANELİ ANA TASARIMLA EŞLENİR.
@@ -1311,10 +1372,10 @@
                             <span data-i18n="adv.label.thrustN">Thrust (N)</span> <span class="unit" data-i18n="adv.unit.newton">Newton</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.thrustN">Design-point thrust of the motor, in N. With the burn time it fixes the total impulse (I = F·t_b) and, through Isp, the mass flow and propellant masses. Required: if it is left empty the run is rejected by name; no thrust is assumed. Accepted range 10-100000 N (form 1-100000, server 10-1000000).</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.thrustN">Design-point thrust of the motor, in N. With the burn time it fixes the total impulse (I = F·t_b) and, through Isp, the mass flow and propellant masses. Required: if it is left empty the run is rejected by name; no thrust is assumed. Accepted range 10-1000000 N.</span>
                             </div>
                         </label>
-                        <input type="number" id="thrust" value="1000" step="0.1" min="1">
+                        <input type="number" id="thrust" value="1000" step="0.1" min="{{ hybrid_input_limits.thrust[0] }}" max="{{ hybrid_input_limits.thrust[1] }}">
                         <div class="help-text" data-i18n="adv.help.targetThrustLevelMotor">Target thrust level for the motor</div>
                     </div>
                     <div class="form-group">
@@ -1325,7 +1386,7 @@
                                 <span class="tooltip-text" data-i18n="adv.tip.burnTimeS">Design burn time, in s. With the thrust it fixes the total impulse (I = F·t_b) and so the propellant masses and the fuel grain. Required: if it is left empty the run is rejected by name; no burn time is assumed. Accepted range 0.1-300 s.</span>
                             </div>
                         </label>
-                        <input type="number" id="burn_time" value="10" step="0.1" min="0.1">
+                        <input type="number" id="burn_time" value="10" step="0.1" min="{{ hybrid_input_limits.burn_time[0] }}" max="{{ hybrid_input_limits.burn_time[1] }}">
                         <div class="help-text" data-i18n="adv.help.totalMotorBurnDuration">Total motor burn duration</div>
                     </div>
                 </div>
@@ -1350,10 +1411,10 @@
                         <label for="thrust_impulse"><span data-i18n="adv.label.thrustN">Thrust (N)</span> <span class="unit" data-i18n="adv.unit.optionalLeaveEmptyAuto">thrust or burn time required</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.thrustImpulse">Design-point thrust, in N. In total-impulse mode give this OR the burn time: the other is solved from I = F·t_b. If both are empty the run is rejected by name; HRMA does not pick an 'optimal' thrust. Form range 100-100000 N.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.thrustImpulse">Design-point thrust, in N. In total-impulse mode give this OR the burn time: the other is solved from I = F·t_b. If both are empty the run is rejected by name; HRMA does not pick an 'optimal' thrust. Accepted range 10-1000000 N.</span>
                             </div>
                         </label>
-                        <input type="number" id="thrust_impulse" placeholder="solved from I = F·t_b" min="100" max="100000" step="10" data-i18n-placeholder="adv.ph.autoCalculated">
+                        <input type="number" id="thrust_impulse" placeholder="solved from I = F·t_b" min="{{ hybrid_input_limits.thrust[0] }}" max="{{ hybrid_input_limits.thrust[1] }}" step="10" data-i18n-placeholder="adv.ph.autoCalculated">
                         <div class="help-text" data-i18n="adv.help.leaveEmptyAutoCalculate">Give thrust or burn time; the other is solved from I = F·t_b. No 'optimal' thrust is computed: if both are empty the run is rejected by name.</div>
                     </div>
                     <div class="form-group">
@@ -1382,7 +1443,7 @@
                             <span class="tooltip-text" data-i18n="adv.tip.chamberPressureBar">The combustion chamber pressure in bar. Higher pressures generally increase specific impulse but require stronger structures. Typical values: 10-50 bar for amateur motors, 100+ bar for commercial motors.</span>
                         </div>
                     </label>
-                    <input type="number" id="chamber_pressure" value="20" step="0.1" min="1" onchange="validatePressures()">
+                    <input type="number" id="chamber_pressure" value="20" step="0.1" min="{{ hybrid_input_limits.chamber_pressure[0] }}" max="{{ hybrid_input_limits.chamber_pressure[1] }}" onchange="validatePressures()">
                 </div>
                 <!-- v3.0.1 (Ayberk tur 1 · kulvar T): TANK BASINCI KAYNAĞI.
                      'default' = oksitleyicinin bugünkü kipi (N₂O: P_sat(T_tank);
@@ -1530,7 +1591,7 @@
                         <span data-i18n="adv.label.combustionEfficiency">Combustion (c*) Efficiency</span> <span class="unit">(%)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.combustionEfficiency">Delivered c* as a percentage of the theoretical equilibrium c* (eta_c*). It scales c* and with it Isp, mass flow, propellant masses, grain length and the transient / tank blowdown curves; the throat area is set by thrust, chamber pressure and C_F and does not change. Left empty: N2O/HTPB uses the median of 26 measured firings in HRMA's validation records, 89 % (range 77-99 %; Heydari 2017, Scaramuzzino/Carmicino 2013); other propellant pairs have no measured value in HRMA, so the ideal c* is used (no efficiency applied) and the result says so. Accepted range 50-105 %; a value outside it is rejected, not clipped.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.combustionEfficiency">Delivered c* as a percentage of the theoretical equilibrium c* (eta_c*). It scales c* and with it Isp, mass flow, propellant masses, grain length and the transient / tank blowdown curves; the throat area is set by thrust, chamber pressure and C_F and does not change. Left empty: the median of the measured firings of the same propellant pair in HRMA's validation records is used, counting only firings whose measurement window is valid (a firing is left out when an anomaly falls inside the window over which its c* was averaged, or when its records cannot show that window; the headline names every firing left out and why) — N2O/HTPB 89 % (26 firings, range 77-99 %; Heydari 2017, Scaramuzzino/Carmicino 2013), LOX/HTPB 97.6 % (3 firings, range 84.9-100 %; HPDP 2003, Sims 1998), LOX/paraffin 85 % (22 gaseous-oxygen firings, range 77-94 %; Karabeyoglu 2003, Battista 2019). A pair with no measured firing gets the general hybrid default, the median of all 60 valid measured hybrid firings, 88 % (range 77-100 %). A pair with fewer than 2 valid firings gets no default and the value must be entered (HRMA practical gate, not a statistical criterion). The headline states which one was applied, with the mean and range next to the median. Enter 100 to use the ideal (theoretical) c*. Accepted range 50-105 %; a value outside it is rejected, not clipped.</span>
                         </div>
                     </label>
                     <input type="number" id="combustion_efficiency" min="50" max="105" step="0.1" placeholder="auto (sourced)" data-i18n-placeholder="adv.ph.cstarEffAuto">
@@ -1777,7 +1838,7 @@
                         <span data-i18n="adv.label.phase">Phase</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.phase">Physical state of oxidizer during injection. Liquid: higher density, requires pressurization. Gas: lower density, simpler feed system. Phase affects injection system design and motor performance.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.phase">Physical state of the oxidizer at the injector (N2O). It sets the reactant enthalpy the combustion equilibrium is solved with: liquid = saturated liquid at the oxidizer temperature, gas = gaseous N2O at the 298.15 K standard state. With a user-supplied tank pressure the check follows the phase: a liquid feed must be at or above the N2O saturation pressure at the oxidizer temperature, a gaseous feed at or below it (2 % tolerance); otherwise the request is rejected by name. The injector circuit and oxidizer tank are liquid-feed models, so with Gas the orifice plan, tank volume, slosh, tank vessel and blowdown history are not reported (a compressible orifice model is not available for the hybrid). Liquid is the default when left unchanged.</span>
                         </div>
                     </label>
                     <select id="oxidizer_phase">
@@ -1939,7 +2000,7 @@
                              başka bir çift seçilince aşağıdaki uyarı görünür ve
                              gerçek optimum yalnız "Find Optimum" ile (sunucu
                              hesabı) belirlenir. -->
-                        <input type="number" id="of_ratio" value="7.5" step="0.1" min="0.1" style="flex: 1;"
+                        <input type="number" id="of_ratio" value="7.5" step="0.1" min="{{ hybrid_input_limits.of_ratio[0] }}" max="{{ hybrid_input_limits.of_ratio[1] }}" style="flex: 1;"
                                data-default-pair="n2o+htpb">
                         <button class="btn btn-small" onclick="findOptimumOF()" style="background: #28a745; color: white;" data-i18n="adv.btn.findOptimum">
                             Find Optimum
@@ -2097,7 +2158,10 @@
                             <option value="of_ratio" data-i18n="adv.label.oFRatio">O/F Ratio</option>
                             <option value="chamber_pressure" data-i18n="adv.opt.chamberPressure">Chamber Pressure</option>
                             <option value="expansion_ratio" data-i18n="adv.opt.expansionRatio">Expansion Ratio</option>
-                            <option value="altitude" data-i18n="adv.opt.altitude">Altitude</option>
+                            <!-- V306/BAYAT: "Altitude" seçeneği söküldü — tarama ucu
+                                 irtifayı motora bağlamaz ve bu adı ADIYLA reddeder
+                                 (app.py PARAMETRIC_WIRED_PARAMS, ÖH D15 P7B2-01);
+                                 her seçimde başarısız olan bir seçenek sunulmaz. -->
                         </select>
                     </div>
                     <div class="form-group">
@@ -2263,7 +2327,7 @@
                             <span data-i18n="adv.label.finalMassKg">Final Mass (kg)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.finalMassKg">Vehicle mass after propellant consumption (dry mass + payload).</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.finalMassKg">Vehicle mass after propellant consumption (dry mass + payload). Avionics, wiring and the recovery system belong in this mass: the engine dry (flying inert) mass does not contain them.</span>
                             </div>
                         </label>
                         <input type="number" id="final_mass" value="25" min="1" max="10000" step="0.1">
@@ -2371,7 +2435,7 @@
                             <span data-i18n="adv.label.parachuteAreaM2">Parachute Area (m2)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.parachuteAreaM2">Projected (canopy) area of the recovery parachute. Descent velocity scales as 1/sqrt(area). Leave empty to keep the solver assumption, which is reported as an assumption in the results.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteAreaM2">Projected (canopy) area of the recovery parachute (m²). Descent velocity scales as 1/sqrt(area). When given, the descent under the parachute is solved and the landing speed is reported. Leave empty for no parachute: the descent is not solved and the results say so (no area is assumed). Must be greater than 0; otherwise it is rejected with the reason.</span>
                             </div>
                         </label>
                         <input type="number" id="parachute_area" min="0" step="0.1" placeholder="—">
@@ -2381,7 +2445,7 @@
                             <span data-i18n="adv.label.parachuteCd">Parachute Cd</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.parachuteCd">Drag coefficient of the parachute referenced to its projected area (1.4 is the classic flat-circular value). Leave empty to keep the solver assumption.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteCd">Drag coefficient of the parachute referenced to its projected area (1.4 is the classic flat-circular value). Read only when a parachute area is given. Leave empty to keep the solver assumption (reported as an assumption). Must be greater than 0.</span>
                             </div>
                         </label>
                         <input type="number" id="parachute_cd" min="0" step="0.05" placeholder="—">
@@ -2391,7 +2455,7 @@
                             <span data-i18n="adv.label.parachuteDeployDelayS">Deploy Delay after Apogee (s)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.parachuteDeployDelayS">Time between apogee and canopy inflation. The vehicle falls ballistically during this delay. Leave empty to keep the solver assumption.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteDeployDelayS">Time between apogee and canopy inflation (s). The vehicle falls ballistically during this delay. Read only when a parachute area is given. Leave empty to keep the solver assumption. Must not be negative.</span>
                             </div>
                         </label>
                         <input type="number" id="parachute_deploy_delay" min="0" step="0.5" placeholder="—">
@@ -2697,7 +2761,17 @@
                                 <i class="fas fa-cog"></i> <span data-i18n="adv.txt.configureDesign">Configure Design</span>
                             </button>
                             <button class="btn btn-primary" onclick="generateCAD()" id="generateCADBtn" disabled>
-                                <i class="fas fa-cube"></i> <span data-i18n="adv.txt.generate3dModel">Generate 3D Model</span>
+                                <i class="fas fa-cube"></i> <span data-i18n="adv.txt.generate3dModel">Generate 3D Model (STEP)</span>
+                            </button>
+                            <!-- V306/BAYAT NR-8: teknik çizim ve DXF eskiden yalnız
+                                 about:blank özet penceresindeydi; ana sayfada kendi
+                                 düğmeleri (sıvı sayfasının "Tasarım Dışa Aktarımları"
+                                 satırıyla aynı uçlar). -->
+                            <button class="btn btn-secondary" onclick="exportDrawingsPDF()">
+                                <i class="fas fa-file-pdf"></i> <span data-i18n="adv.txt.drawingsPdf">Technical Drawings (PDF)</span>
+                            </button>
+                            <button class="btn btn-secondary" onclick="exportDXF()">
+                                <i class="fas fa-drafting-compass"></i> <span data-i18n="adv.txt.dxfDrawing">DXF Drawing</span>
                             </button>
                         </div>
                         <div id="cadStatus" class="status-message"></div>
@@ -5882,21 +5956,41 @@
                 }
             }
             
-            // Check for invalid values
-            if (data.of_ratio && (data.of_ratio < 0.1 || data.of_ratio > 20)) {
-                errors.push(i18nText('adv.js.ofRange', 'O/F Ratio must be between 0.1 and 20'));
+            // V306/HİBRİT-SAYI (kalem 7): bantlar SUNUCUNUN bandıdır
+            // (app.py ``_hibrit_form_bantlari`` ← CANONICAL_LIMITS); burada
+            // sayı yazılmaz. ÖLÇÜLDÜ (tur K-9): form itkiyi 100 000 N'de,
+            // oda basıncını 100 bar'da kesiyordu; sunucu 1 000 000 N ve
+            // 500 bar kabul ediyordu.
+            // Bant yoksa (şablon dışı koşum) istemci denetimi yapılmaz;
+            // tek kapı sunucudur ve bant dışını adıyla reddeder.
+            const BANT = (function () {
+                try {
+                    const m = (typeof document !== 'undefined' && document.querySelector)
+                        ? document.querySelector('meta[name="hrma-hybrid-input-limits"]') : null;
+                    return m ? JSON.parse(m.getAttribute('content')) : null;
+                } catch (e) { return null; }
+            })();
+            const bantDisi = (v, ad) => (BANT !== null && v !== null && v !== undefined && v !== ''
+                && isFinite(v) && (v < BANT[ad][0] || v > BANT[ad][1]));
+            const bantMetni = (ad) => ({ lo: i18nNumber(BANT[ad][0]), hi: i18nNumber(BANT[ad][1]) });
+            if (bantDisi(data.of_ratio, 'of_ratio')) {
+                errors.push(i18nFmt('adv.js.ofRange', bantMetni('of_ratio'),
+                    'O/F Ratio must be between {lo} and {hi}'));
             }
             
-            if (data.chamber_pressure && (data.chamber_pressure < 1 || data.chamber_pressure > 100)) {
-                errors.push(i18nText('adv.js.pcRange', 'Chamber Pressure must be between 1 and 100 bar'));
+            if (bantDisi(data.chamber_pressure, 'chamber_pressure')) {
+                errors.push(i18nFmt('adv.js.pcRange', bantMetni('chamber_pressure'),
+                    'Chamber Pressure must be between {lo} and {hi} bar'));
             }
             
-            if (data.thrust && (data.thrust < 1 || data.thrust > 100000)) {
-                errors.push(i18nText('adv.js.thrustRange', 'Thrust must be between 1 and 100000 N'));
+            if (bantDisi(data.thrust, 'thrust')) {
+                errors.push(i18nFmt('adv.js.thrustRange', bantMetni('thrust'),
+                    'Thrust must be between {lo} and {hi} N'));
             }
             
-            if (data.burn_time && (data.burn_time < 0.1 || data.burn_time > 300)) {
-                errors.push(i18nText('adv.js.burnTimeRange', 'Burn Time must be between 0.1 and 300 seconds'));
+            if (bantDisi(data.burn_time, 'burn_time')) {
+                errors.push(i18nFmt('adv.js.burnTimeRange', bantMetni('burn_time'),
+                    'Burn Time must be between {lo} and {hi} seconds'));
             }
             
             // Skip motor name pattern check - backend handles validation
@@ -5925,10 +6019,17 @@
             const basSahip = bas.dataset.paramType;
             const bitSahip = bit.dataset.paramType;
             if (basSahip === secili && bitSahip === secili) return null;
-            return 'param_start[data-param-type=' + (basSahip || '?')
-                 + '] / param_end[data-param-type=' + (bitSahip || '?')
-                 + '] vs param_type=' + secili
-                 + ' — enter the sweep range for the selected parameter';
+            // V306/BAYAT (kalem 5): ileti ham öznitelik sözdizimiyle
+            // (alan[öznitelik=değer] vs tür=değer) değil, seçicinin
+            // EKRANDAKİ adlarıyla, sözlükten kurulur.
+            const ad = function (deger) {
+                const o = Array.prototype.find.call(tip.options || [], function (x) {
+                    return x.value === deger; });
+                return o ? o.textContent.trim() : (deger || '?');
+            };
+            return i18nFmt('adv.js.parametricRangeOwner',
+                { owner: ad(basSahip === secili ? bitSahip : basSahip), param: ad(secili) },
+                'the start/end values were entered for {owner}, not for {param}. Enter the sweep range for {param}.');
         }
 
         // Aralık elle güncellendiğinde sahiplik SEÇİLİ parametreye geçer
@@ -6073,6 +6174,13 @@
                     assertParametricMatchesRequest(
                         results, data.param_type,
                         data.param_start, data.param_end);
+                    // V306/BAYAT NR-7: süre bütçesiyle kesilen tarama AYNI
+                    // eksende kendiliğinden sürdürülür (yanıt, birleşik
+                    // sonuçla yerinde güncellenir). Aşağıdaki kollar
+                    // birleşik sonucu okur; `kesik` yalnız sürdürme de
+                    // tamamlayamadıysa kalır.
+                    await parametrikSurdur(results, data);
+                    _parametrikTaban = _parametrikMotorFormu(baseParams);
                     // v2.6.27 (ÖH D15 · P12bB3-12): sunucu BEŞ dürüstlük alanı
                     // yayımlıyor (points_requested / points_succeeded /
                     // points_failed / failed_points / warning); şablon bunların
@@ -6116,43 +6224,57 @@
                         && typeof results.truncated_by_time_budget === 'object')
                         ? results.truncated_by_time_budget : null;
                     if (kutu) {
+                        // V306/BAYAT NR-7 + kalem 5: ÖLÇÜLDÜ (28 Eki turu,
+                        // ekran 12) TR ekranda bu kutu İngilizce sunucu
+                        // cümlesi + ham anahtarlar basıyordu ("The sweep was
+                        // cut short … — truncated_by_time_budget: reason:
+                        // time_budget_exhausted, elapsed_s: …"); düşen
+                        // noktanın değeri de hiç çıkmıyordu (alan adı
+                        // `sweep_value`, okunan `value`/`x`). Cümle artık
+                        // sözlükten, sayılar ucun alanlarından; makine
+                        // ayrıntısı (çözücünün ham gerekçesi) kutunun
+                        // ipucunda kalır, ekrana inmez.
                         const satirlar = [];
+                        const ipucu = [];
+                        const degerMetni = function (liste) {
+                            return liste.map(function (v) {
+                                return isFiniteNum(v) ? parametrikSayi(v) : '?';
+                            }).join('; ');
+                        };
                         if (dusen > 0) {
-                            const gerekce = (results.failed_points || [])
-                                .map(function (fp) {
-                                    const deger = (fp && fp.value !== undefined)
-                                        ? fp.value : (fp && fp.x);
-                                    return (deger !== undefined ? deger + ': ' : '')
-                                        + ((fp && (fp.reason || fp.error)) || 'unknown');
-                                });
-                            satirlar.push((dusen + ' of ' + istenen
-                                    + ' sweep points could not be computed')
-                                + (gerekce.length ? ' — ' + gerekce.join('; ') : ''));
-                        }
-                        if (kesik) {
-                            const alan = [];
-                            ['reason', 'elapsed_s', 'budget_s', 'points_started',
-                             'points_not_attempted', 'measured_seconds_per_point',
-                             'projected_seconds_for_full_sweep',
-                             'points_that_fit_budget'].forEach(function (k) {
-                                if (kesik[k] !== undefined && kesik[k] !== null) {
-                                    alan.push(k + ': ' + kesik[k]);
+                            const fp = (results.failed_points || []);
+                            satirlar.push(i18nFmt('adv.js.parametricFailedPoints',
+                                { failed: dusen, n: istenen,
+                                  values: degerMetni(fp.map(function (f) {
+                                      return f && f.sweep_value; })) },
+                                '{failed} of {n} sweep points could not be computed ({values}); they are gaps in the chart.'));
+                            fp.forEach(function (f) {
+                                if (f && (f.reason || f.error)) {
+                                    ipucu.push((isFiniteNum(f.sweep_value) ? f.sweep_value + ': ' : '')
+                                        + (f.reason || f.error));
                                 }
                             });
-                            // Cümleyi SUNUCU yazar (results.warning); alan
-                            // adresleri yanına makine adıyla eklenir.
-                            satirlar.push((results.warning
-                                || 'truncated_by_time_budget')
-                                + (alan.length
-                                    ? ' — truncated_by_time_budget: '
-                                      + alan.join(', ')
-                                    : ''));
+                        }
+                        if (kesik) {
+                            const sv = Array.isArray(results.sweep_values) ? results.sweep_values : [];
+                            const kalanSira = Array.isArray(kesik.not_attempted_indices)
+                                ? kesik.not_attempted_indices : [];
+                            satirlar.push(i18nFmt('adv.js.parametricIncomplete',
+                                { missing: sayac(kesik.points_not_attempted), n: istenen,
+                                  values: degerMetni(kalanSira.map(function (i) { return sv[i]; })) },
+                                '{missing} of {n} points were not computed ({values}): the sweep could not be continued. They are gaps in the chart; run the sweep again to complete it.'));
                         }
                         if (satirlar.length) {
-                            kutu.textContent = satirlar.join(' | ');
+                            // Ucun kendi cümlesi (results.warning, EN) makine
+                            // ayrıntısıdır: ipucunda durur (HRMAReject.ipucu
+                            // deseni), ekranda sözlük cümlesi.
+                            if (results.warning) ipucu.unshift(results.warning);
+                            kutu.textContent = satirlar.join(' ');
+                            kutu.title = ipucu.join(' | ');
                             kutu.style.display = 'block';
                         } else {
                             kutu.textContent = '';
+                            kutu.title = '';
                             kutu.style.display = 'none';
                         }
                     }
@@ -6217,8 +6339,14 @@
                     // V301/H-PANEL (NK-56): ucun gerekçe CÜMLESİ (message)
                     // makine kodundan (error) önce gelir; ret düğmenin
                     // yanında KALICI yazılır.
-                    const _gerekce = (results && (results.message || results.error))
-                        || ('HTTP ' + response.status);
+                    // V306/BAYAT (kalem 5): ret cümlesi ortak çözücüden
+                    // (sözlük çevirisi + alanların ekran adı); çözücü yoksa
+                    // ucun cümlesi aynen.
+                    const _gerekce = (globalThis.HRMAReject && typeof HRMAReject.metni === 'function'
+                                      && results && typeof results === 'object')
+                        ? HRMAReject.metni(results, response.status)
+                        : ((results && (results.message || results.error))
+                           || ('HTTP ' + response.status));
                     showMessage(i18nText('adv.msg.parametricAnalysisFailed', 'Parametric analysis failed: ') + _gerekce, 'error');
                     parametrikDurum(i18nText('adv.msg.parametricAnalysisFailed',
                         'Parametric analysis failed: ') + _gerekce, 'error');
@@ -6241,6 +6369,165 @@
                 : (tur === 'warning' ? 'var(--hd-orange, #ff8c33)'
                                       : 'var(--hd-ink-dim, #7d97a5)');
         }
+
+        // V306/BAYAT: tarama ekseni değeri ekranda 4 anlamlı basamakla,
+        // etkin dilin ondalık ayracıyla (TR virgül).
+        function parametrikSayi(v) {
+            const x = Number(Number(v).toPrecision(4));
+            const d = (String(x).split('.')[1] || '').length;
+            return (window.I18N && typeof window.I18N.number === 'function')
+                ? window.I18N.number(x, d) : x.toFixed(d);
+        }
+
+        // V306/BAYAT NR-7 — KESİLEN TARAMA AYNI EKSENDE SÜRDÜRÜLÜR.
+        // ÖLÇÜLDÜ (28 Eki son kullanıcı turu, ekran 12): LOX/HTPB, O/F 1,5 →
+        // 4,0, 10 adım — 30 s'lik bütçe 9. noktada doldu; 3,72 hiç
+        // hesaplanmadı ve çizgi 3,44 → 4,0 düz birleşti. Sonuç makineye
+        // bağlıydı (aynı girdi, farklı eğri). Bütçe tek isteğin donma
+        // korumasıdır ve KALIR; uç hiç denenmeyen sıraları yayımlar
+        // (`not_attempted_indices`) ve burada AYNI eksen (`param_indices`)
+        // üstünde kalanlar istenir; her istek en az bir nokta ilerler.
+        // Nokta değeri sıradan çözülür: aynı girdi her makinede aynı eğriyi
+        // verir, yavaş makine yalnız daha çok istek atar (ölçüm:
+        // V306/bayat/olcum_nr7_*.json). Birleşik yanıt yalnız uçtan gelen
+        // sayılardan kurulur; sürdürme tamamlanamazsa kalan sıralar `kesik`
+        // kolunda beyanlı kalır ve grafikte BOŞLUKTUR.
+        async function parametrikSurdur(results, data) {
+            const kesikMi = function (r) {
+                const k = r && r.truncated_by_time_budget;
+                return (k && typeof k === 'object' && Array.isArray(k.not_attempted_indices)
+                        && k.not_attempted_indices.length) ? k : null;
+            };
+            const ilkKesik = kesikMi(results);
+            const sv = Array.isArray(results.sweep_values) ? results.sweep_values : null;
+            const seri = Array.isArray(results.plot_series) ? results.plot_series : null;
+            if (!ilkKesik || !sv || !seri) return results;
+            const noktalar = {};
+            const ekle = function (liste) {
+                (liste || []).forEach(function (p) {
+                    if (p && isFiniteNum(p.sweep_index)) noktalar[p.sweep_index] = p;
+                });
+            };
+            ekle(results.results);
+            const dusenler = (results.failed_points || []).slice();
+            let kalan = ilkKesik.not_attempted_indices.slice();
+            let sonKesik = ilkKesik;
+            const toplam = isFiniteNum(results.points_requested) ? results.points_requested : '?';
+            while (kalan.length) {
+                parametrikDurum(i18nFmt('adv.js.parametricContinuing',
+                    { done: Object.keys(noktalar).length + dusenler.length, n: toplam },
+                    '{done} of {n} points computed — continuing the sweep on the same axis…'), 'info');
+                let y = null;
+                try {
+                    const r = await fetch('/parametric-analysis', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(Object.assign({}, data, { param_indices: kalan }))
+                    });
+                    y = await r.json();
+                    // Bu parçadaki sıraların HEPSİ çözülemediyse uç 422 +
+                    // failed_points döner: o sıralar hesaplanmamış değil,
+                    // DÜŞMÜŞTÜR (kutuda "hesaplanamadı" diye sayılır).
+                    const hepsiDustu = !!(y && y.status === 'error'
+                        && Array.isArray(y.failed_points) && y.failed_points.length);
+                    if (!y || !(y.status === 'success' || hepsiDustu)) {
+                        y = null;
+                    } else if (y.status === 'success') {
+                        assertParametricMatchesRequest(y, data.param_type,
+                            data.param_start, data.param_end);
+                    }
+                } catch (e) {
+                    y = null;
+                }
+                if (!y) break;
+                ekle(y.results);
+                (y.failed_points || []).forEach(function (f) { dusenler.push(f); });
+                const yeniKesik = kesikMi(y);
+                const yeniKalan = yeniKesik ? yeniKesik.not_attempted_indices.slice() : [];
+                const ilerleme = yeniKalan.length < kalan.length;
+                kalan = yeniKalan;
+                if (yeniKesik) sonKesik = yeniKesik;
+                if (!ilerleme) break;
+            }
+            const siralar = Object.keys(noktalar).map(Number).sort(function (a, b) { return a - b; });
+            results.results = siralar.map(function (i) { return noktalar[i]; });
+            results.points_succeeded = siralar.length;
+            dusenler.sort(function (a, b) { return (a.sweep_index || 0) - (b.sweep_index || 0); });
+            results.failed_points = dusenler;
+            results.points_failed = dusenler.length;
+            if (kalan.length) {
+                results.truncated_by_time_budget = Object.assign({}, sonKesik, {
+                    points_started: siralar.length + dusenler.length,
+                    points_not_attempted: kalan.length,
+                    not_attempted_indices: kalan });
+            } else {
+                delete results.truncated_by_time_budget;
+                // İlk yanıtın "kesildi" cümlesi artık doğru değil.
+                delete results.warning;
+            }
+            // Çizim: ilk yanıtın figürü (izler, eksenler, başlıklar) şablon;
+            // izler bütün eksende birleşik noktalarla, eksik sıra null
+            // (Plotly çizgiyi orada keser — iki nokta düz birleşmez).
+            if (results.plot) {
+                try {
+                    const fig = JSON.parse(results.plot);
+                    seri.forEach(function (s, t) {
+                        const iz = fig.data && fig.data[t];
+                        if (!iz || !s || typeof s.key !== 'string') return;
+                        const bolen = isFiniteNum(s.divisor) && s.divisor !== 0 ? s.divisor : 1;
+                        iz.x = sv.slice();
+                        iz.y = sv.map(function (_, i) {
+                            const v = noktalar[i] ? noktalar[i][s.key] : undefined;
+                            return isFiniteNum(v) ? (bolen === 1 ? v : v / bolen) : null;
+                        });
+                    });
+                    results.plot = JSON.stringify(fig);
+                    results.plot_data = results.plot;
+                } catch (e) { /* figür okunamadı: ilk yanıtın figürü kalır */ }
+            }
+            return results;
+        }
+
+        // V306/BAYAT NR-9 ailesi — HİBRİT TÜREV PANELİ: PARAMETRİK TARAMA.
+        // ÖLÇÜLDÜ (V306/bayat/olcum_nr9_once.json, hibrit): 3000 N motorun
+        // O/F taraması çizildikten sonra itki 2500 N yapılıp hesaplandı;
+        // Parametrik sekmesi 3000 N'lik eğriyi İŞARETSİZ göstermeye devam
+        // etti. Tarama, koştuğu formun tasarımına aittir (taban formu,
+        // param_* hariç). Yeni motor hesabı başka bir tasarımı hesapladıysa
+        // (motor alanları farklı; araç/yörünge alanları ve ad motoru
+        // değiştirmez — app.js yorungeIcinDegisenMotorAlanlari, aynı kural)
+        // tarama TEMİZLENİR ve nedeni yazılır (yörüngenin
+        // flight.staleTrajectory deseni). Çağıran: app.js calculate().
+        let _parametrikTaban = null;
+        function _parametrikMotorFormu(form) {
+            const o = {};
+            Object.keys(form || {}).forEach(function (k) {
+                if (k.indexOf('param_') !== 0 && k !== 'time_budget_s') o[k] = form[k];
+            });
+            return o;
+        }
+        window.parametrikTasarimDenetle = function (hesapFormu) {
+            if (!_parametrikTaban || typeof yorungeIcinDegisenMotorAlanlari !== 'function') return false;
+            const degisen = yorungeIcinDegisenMotorAlanlari(_parametrikTaban,
+                _parametrikMotorFormu(hesapFormu)) || [];
+            if (!degisen.length) return false;
+            _parametrikTaban = null;
+            const cizim = document.getElementById('parametric_plot');
+            if (cizim) {
+                if (window.Plotly && Plotly.purge) { try { Plotly.purge(cizim); } catch (e) { /* yok */ } }
+                cizim.style.height = '';
+                cizim.innerHTML = '<p data-onceki-tasarim="1" data-i18n="adv.msg.parametricStaleDesign" style="text-align:center; '
+                    + 'color:var(--hd-orange, #ff8c33); padding:40px;"></p>';
+                cizim.firstChild.textContent = i18nText('adv.msg.parametricStaleDesign',
+                    'The motor was recalculated with a different design; the previous sweep '
+                    + 'belonged to the earlier design and was cleared. Run the parametric '
+                    + 'analysis again.');
+            }
+            const kutu = document.getElementById('parametric_honesty');
+            if (kutu) { kutu.textContent = ''; kutu.title = ''; kutu.style.display = 'none'; }
+            parametrikDurum('', 'info');
+            return true;
+        };
 
         // Toggle trajectory parameters visibility
         function toggleTrajectoryParams() {
@@ -6404,9 +6691,48 @@
             return { govde_capi_mm: govde_capi_mm, oran: oran };
         }
 
+        // V306/UÇUŞ NR-13 — KURU KÜTLE, MOTORUN UÇAN ATIL KÜTLESİYLE
+        // KALEMLİ. ÖLÇÜLDÜ (V306/ucus/olcum_paneller_hybrid_once.json, örnek
+        // hibrit): yörünge ve 6-DOF kuru kütlesi 25 kg (aracın kuru kütlesi:
+        // motor + gövde + faydalı yük), Fırlatma Sahası'nda motorun uçan
+        // atıl kütlesi 13,284 kg; aradaki 11,716 kg'ın ne olduğu hiçbir
+        // yerde yazmıyordu. Alanın altındaki satır motorun atıl kütlesini
+        // AYNI araçtan (FlightHandoff.vehicleFor) kalemiyle ve farkı
+        // "motordan gelmeyen" diye yazar; alan atıl kütleden küçükse uyarır.
+        function trajKuruKutleKalemi() {
+            var mf = document.getElementById('final_mass');
+            if (!mf || !window.FlightHandoff || !FlightHandoff.renderInertLedger) { return; }
+            var cr = window.currentResults;
+            FlightHandoff.renderInertLedger(mf, cr ? FlightHandoff.vehicleFor(cr) : null);
+        }
+        document.addEventListener('hrma:flight-vehicle', function (e) {
+            var d = e && e.detail;
+            if (d && d.results && d.results === window.currentResults) {
+                try { trajKuruKutleKalemi(); } catch (err) { /* yok say */ }
+            }
+        });
+
+        // V306/UÇUŞ NR-10 (hibrit ayağı) — yeni motor hesabında eski yörünge
+        // grafiği TEMİZLENİR; grafik hangi hesaba ait olduğunu bilir.
+        var _hibYorungeCizimSonucu = null;
+        function trajBayatCizimiTemizle() {
+            var cizim = document.getElementById('trajectory_plot');
+            var cr = window.currentResults;
+            if (!cizim || !_hibYorungeCizimSonucu || !cr || _hibYorungeCizimSonucu === cr) { return; }
+            _hibYorungeCizimSonucu = null;
+            if (window.Plotly && Plotly.purge) { try { Plotly.purge(cizim); } catch (e) { /* yok */ } }
+            // Anahtar kabuk sözlüğündedir (i18n_shell.js; üç motor sayfası
+            // ortak) — sayfa sözlüğü i18n_advanced.js değil. 'common.badJson'
+            // deseni: I18N doğrudan okunur, yoksa İngilizce yedek.
+            const _bayatYedek = 'The engine was recalculated; the previous trajectory belonged to the earlier design and was cleared. Press Calculate Trajectory again.';
+            cizim.textContent = (typeof window.I18N !== 'undefined' && window.I18N.t)
+                ? window.I18N.t('flight.staleTrajectory', _bayatYedek) : _bayatYedek;
+        }
+
         function trajAraciEsitle() {
             trajKalkisKutlesiniEsitle();
             trajReferansAlaniDenetle();
+            trajKuruKutleKalemi();
         }
 
         // Hesap bittiğinde eşitle. `displayCalculationResults` app.js'te
@@ -6420,6 +6746,7 @@
             window.displayCalculationResults = function (results) {
                 var cikti = ozgun.apply(this, arguments);
                 try {
+                    trajBayatCizimiTemizle();
                     trajAraciEsitle();
                 } catch (e) {
                     console.error('Trajectory vehicle sync failed:', e);
@@ -6441,7 +6768,16 @@
                 } catch (e) {
                     console.error('Trajectory vehicle sync failed:', e);
                 }
-                return ozgun.apply(this, arguments);
+                var hesap = window.currentResults;
+                var sonuc = ozgun.apply(this, arguments);
+                // Grafik çizildiyse hangi hesaba ait olduğu not edilir.
+                Promise.resolve(sonuc).then(function () {
+                    var cizim = document.getElementById('trajectory_plot');
+                    if (cizim && cizim.data && hesap === window.currentResults) {
+                        _hibYorungeCizimSonucu = hesap;
+                    }
+                });
+                return sonuc;
             };
         })();
 
@@ -6450,6 +6786,7 @@
             if (mf) {
                 mf.addEventListener('input', function () {
                     try { trajKalkisKutlesiniEsitle(); } catch (e) { /* yok say */ }
+                    try { trajKuruKutleKalemi(); } catch (e) { /* yok say */ }
                 });
             }
             var ra = document.getElementById('reference_area');
@@ -7059,16 +7396,31 @@
                     return;
                 }
 
+                // V306/HİBRİT-SAYI (M-HIBRIT-5): uç, Hesapla'nın kullandığı
+                // AYNI tasarım girdileriyle (ε, ortam basıncı, oksitleyici
+                // giriş durumu) arar — çözücünün optimumuyla tek tanım. Değerler
+                // getFormData'dan (Hesapla'nın kendi toplayıcısı) okunur.
+                const optGovde = {
+                    motor_type: 'hybrid',
+                    oxidizer: oxidizerType,
+                    fuel: fuelType,
+                    chamber_pressure: chamberPressure
+                };
+                try {
+                    const fd = getFormData();
+                    ['expansion_ratio', 'atmospheric_pressure', 'oxidizer_temp',
+                     'oxidizer_phase'].forEach(function (k) {
+                        if (fd && fd[k] !== null && fd[k] !== undefined && fd[k] !== '') {
+                            optGovde[k] = fd[k];
+                        }
+                    });
+                } catch (e) { /* form okunamazsa uç kendi beyanlı varsayılanını yazar */ }
+
                 // Call the API endpoint for real optimization
                 const response = await fetch('/api/find-optimum-of', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        motor_type: 'hybrid',
-                        oxidizer: oxidizerType,
-                        fuel: fuelType,
-                        chamber_pressure: chamberPressure
-                    })
+                    body: JSON.stringify(optGovde)
                 });
 
                 const result = await response.json();
@@ -7235,7 +7587,24 @@
             event.target.classList.add('active');
         }
 
-        async function generateCAD() {
+        // V306/BAYAT NR-8 — DÜĞME ADININ SÖYLEDİĞİNİ YAPAR.
+        // ÖLÇÜLDÜ (28 Eki son kullanıcı turu, ekran 13): "3B Model Üret"
+        // 3B model üretmiyordu: sayfada zaten duran 3B sahneyi yeniden kurup
+        // about:blank adresli bir "Motor Tasarım Özeti" penceresi açıyordu
+        // (6 performans kartı — Performans Özeti'nin tekrarı — ve indirme
+        // düğmeleri). O pencere kaydedilemez/yenilenemez bir belgeydi.
+        // KARAR: düğme 3B modeli ÜRETİR: sahnedeki modeli gösterir ve
+        // hesaplanan motorun parametrik katı modelini (STEP paketi: oda,
+        // lüle konturu, enjektör plakası + montaj) DOSYA olarak indirir.
+        // Özet penceresi söküldü; içindeki indirmelerin her biri ana sayfada
+        // kendi düğmesindedir (STL "Motor Dışa Aktarımı", teknik çizim ve
+        // DXF bu bölümde, tam paket "Tüm Dosyaları Üret"). Katı ("Motor CAD
+        // Dışa Aktarımı" = STEP+STL ZIP) ve sıvı ("Tasarım Dışa
+        // Aktarımları") sayfalarında açılır pencere yok; ad işi söylüyor.
+        // `secenek.indir === false`: yalnız sahne (tam paket akışı STEP'i
+        // zaten ZIP'in içinde indirir; ikinci kez indirilmez).
+        async function generateCAD(secenek) {
+            const indir = !(secenek && secenek.indir === false);
             if (!currentResults || !currentResults.motor) {
                 showMessage(i18nText('adv.msg.pleaseRunAnalysisFirst', 'Please run analysis first by clicking the "Calculate" button in the main interface'), 'error');
                 // Scroll to the calculate button to help user find it
@@ -7247,9 +7616,9 @@
                 }
                 return false;   // P12bB3-08: sonuç bildirilir (sessiz dönüş yok)
             }
-            
-            showMessage(i18nText('adv.msg.generatingCompleteMotorDesign', 'Generating complete motor design package...'), 'info');
-            document.getElementById('cadStatus').textContent = i18nText('adv.js.cadGenerating', 'Generating full motor design...');
+
+            const durum = document.getElementById('cadStatus');
+            if (durum) durum.textContent = i18nText('adv.js.cadGenerating', 'Generating full motor design...');
 
             try {
                 // 3D simülasyon: geometri zaten currentResults.motor içinde,
@@ -7282,143 +7651,32 @@
                     }
                 }
 
-                // Tasarım özeti popup'ı — yalnız gerçek hesap sonuçlarıyla kurulur
-                // (imalat çıktıları için Export STEP / DXF / Drawings PDF akışı)
-                displayCompleteDesignPackage();
-
-                document.getElementById('cadStatus').textContent = i18nText('adv.js.cadDone', 'Complete motor design generated successfully!');
-                document.getElementById('exportSTLBtn').disabled = false;
-                showMessage(i18nText('adv.msg.completeMotorDesignPackage', 'Complete motor design package generated!'), 'success');
-                return true;    // P12bB3-08
+                const sahnePaneli = document.getElementById('cad3DPanel');
+                if (sahnePaneli && sahnePaneli.style.display !== 'none'
+                        && typeof sahnePaneli.scrollIntoView === 'function') {
+                    sahnePaneli.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+                const stlBtn = document.getElementById('exportSTLBtn');
+                if (stlBtn) stlBtn.disabled = false;
+                if (!indir) {
+                    if (durum) durum.textContent = i18nText('adv.js.cadDoneScene',
+                        '3D model shown in the Motor Simulation panel.');
+                    return true;    // P12bB3-08
+                }
+                // STEP paketi: _downloadExport kendi iletisini basar (indirildi
+                // ya da adlı ret); burada üstüne ikinci bir ileti yazılmaz.
+                const stepOk = (await exportSTEP()) === true;
+                if (durum) {
+                    durum.textContent = stepOk
+                        ? i18nText('adv.js.cadDoneStep', '3D model shown in the Motor Simulation panel; STEP package (parametric solids) downloaded.')
+                        : i18nText('adv.js.cadFailed', 'Design generation failed');
+                }
+                return stepOk;      // P12bB3-08
             } catch (error) {
-                document.getElementById('cadStatus').textContent = i18nText('adv.js.cadFailed', 'Design generation failed');
+                if (durum) durum.textContent = i18nText('adv.js.cadFailed', 'Design generation failed');
                 showMessage(i18nText('adv.msg.errorGeneratingDesign', 'Error generating design: ') + error.message, 'error');
                 return false;   // P12bB3-08
             }
-        }
-
-        function displayCompleteDesignPackage() {
-            // Yalnız GERÇEK hesap sonuçları gösterilir: eksik değer 'not computed'
-            // olarak yazılır, uydurma sabit fallback yok. İmalat çıktıları
-            // (STEP/DXF/PDF) gerçek export akışlarından indirilir.
-            const m = (currentResults && currentResults.motor) || {};
-            const fmtVal = (v, d, unit) =>
-                (typeof v === 'number' && isFinite(v))
-                    ? (i18nNumber(v, d) + (unit ? ' ' + unit : ''))
-                    : i18nText('adv.pop.notComputed', 'not computed');
-            const totalImpulse =
-                (typeof m.total_impulse === 'number' && isFinite(m.total_impulse))
-                    ? m.total_impulse
-                    : ((typeof m.thrust === 'number' && isFinite(m.thrust)
-                        && typeof m.burn_time === 'number' && isFinite(m.burn_time))
-                        ? m.thrust * m.burn_time : undefined);
-            const throatDiaMm =
-                (typeof m.throat_diameter === 'number' && isFinite(m.throat_diameter))
-                    ? m.throat_diameter * 1000 : undefined;
-
-            const designWindow = window.open('', '_blank', 'width=1400,height=900');
-            if (!designWindow) {
-                // Popup engellendi — 3D akışı başarısız sayılmasın
-                showMessage(i18nText('adv.msg.designSummaryPopupWas', 'Design summary popup was blocked by the browser'), 'warning');
-                return;
-            }
-            designWindow.document.write(`<!DOCTYPE html>
-<html>
-<head>
-    <title>${i18nText('adv.pop.title', 'HRMA - Motor Design Summary')}</title>
-    <!-- Koyu doküman teması: hd_doc.css (theme.css'in popup çekirdeği) -->
-    <link rel="stylesheet" href="${window.location.origin}/static/css/hd_doc.css">
-</head>
-<body>
-    <div class="header">
-        <h1>${i18nText('adv.pop.heading', 'HRMA - Hybrid Motor Design Summary')}</h1>
-        <p>${i18nText('adv.pop.subtitle', 'Performance summary from the latest calculation results')}</p>
-    </div>
-
-    <div class="section">
-        <h2>${i18nText('adv.pop.specsHeading', 'Motor Performance Specifications')}</h2>
-        <div class="specs-grid">
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.thrust', 'Thrust')}</div>
-                <div>${fmtVal(m.thrust, 0, 'N')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.isp', 'Isp (design point, at design-altitude ambient)')}</div>
-                <div>${fmtVal(m.isp, 1, 's')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.burnTime', 'Burn Time')}</div>
-                <div>${fmtVal(m.burn_time, 1, 's')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.chamberPressure', 'Chamber Pressure')}</div>
-                <div>${fmtVal(m.chamber_pressure, 1, 'bar')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.totalImpulse', 'Total Impulse')}</div>
-                <div>${fmtVal(totalImpulse, 0, 'N·s')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.throatDiameter', 'Throat Diameter')}</div>
-                <div>${fmtVal(throatDiaMm, 1, 'mm')}</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="section">
-        <h2>${i18nText('adv.pop.manufacturingHeading', 'Manufacturing Outputs')}</h2>
-        <p>${i18nText('adv.pop.manufacturingBody', 'Material selection and technical drawings are not part of this summary. Real manufacturing outputs are produced by the export pipeline: use the buttons below (or the Export STEP / Export DXF / Drawings PDF buttons on the main page) to download geometry generated from the calculated motor design.')}</p>
-    </div>
-
-    <div class="section">
-        <h2>${i18nText('adv.pop.downloadHeading', 'Download Package')}</h2>
-        <button class="download-btn" onclick="downloadSTL()">${i18nText('adv.pop.downloadStl', 'Download 3D Models (STL)')}</button>
-        <button class="download-btn" onclick="downloadCAD()">${i18nText('adv.pop.downloadStep', 'Download CAD Files (STEP)')}</button>
-        <button class="download-btn" onclick="downloadDrawings()">${i18nText('adv.pop.downloadDrawings', 'Download Technical Drawings (PDF)')}</button>
-        <button class="download-btn" onclick="downloadSpecs()">${i18nText('adv.pop.downloadSpecs', 'Download Full Specifications (PDF)')}</button>
-        <div id="popupNotices"></div>
-    </div>
-
-    <div class="warning">
-        <strong>${i18nText('adv.pop.safetyLabel', 'Safety Notice:')}</strong> ${i18nText('adv.pop.safetyBody', 'This motor design is a preliminary-design and analysis result. Professional testing and certification are required before use.')}
-    </div>
-
-    <scr` + `ipt>
-        var OPENER_CLOSED_MSG = ${JSON.stringify(i18nText('adv.js.openerClosed', 'The main HRMA window is closed'))};
-        var NOTICE_CLOSE_LABEL = ${JSON.stringify(i18nText('adv.pop.noticeClose', 'Close'))};
-        // ÖH D37 A1a · CW-U6: ana pencere kapalıysa yerli pencere kutusu
-        // DEĞİL, bu pencerenin içinde kendiliğinden kaybolmayan, klavyeyle
-        // kapatılabilen bildirim (role=alert, odak bildirime taşınır).
-        function popupNotice(text) {
-            var kap = document.getElementById('popupNotices');
-            if (!kap) return;
-            var kutu = document.createElement('div');
-            kutu.className = 'warning hrma-notice';
-            kutu.setAttribute('role', 'alert');
-            kutu.setAttribute('tabindex', '-1');
-            var kapat = document.createElement('button');
-            kapat.type = 'button';
-            kapat.className = 'hrma-notice-close';
-            kapat.textContent = NOTICE_CLOSE_LABEL;
-            kapat.setAttribute('aria-label', NOTICE_CLOSE_LABEL);
-            kapat.addEventListener('click', function () { kutu.remove(); });
-            kutu.addEventListener('keydown', function (e) { if (e.key === 'Escape') kutu.remove(); });
-            var govde = document.createElement('span');
-            govde.textContent = text;
-            kutu.appendChild(kapat);
-            kutu.appendChild(govde);
-            kap.innerHTML = '';
-            kap.appendChild(kutu);
-            kutu.focus();
-        }
-        function downloadSTL() { window.opener && window.opener.exportSTLZip ? window.opener.exportSTLZip() : popupNotice(OPENER_CLOSED_MSG); }
-        function downloadCAD() { window.opener && window.opener.exportSTEP ? window.opener.exportSTEP() : popupNotice(OPENER_CLOSED_MSG); }
-        function downloadDrawings() { window.opener && window.opener.exportDrawingsPDF ? window.opener.exportDrawingsPDF() : popupNotice(OPENER_CLOSED_MSG); }
-        function downloadSpecs() { window.opener && window.opener.exportCompleteZip ? window.opener.exportCompleteZip() : popupNotice(OPENER_CLOSED_MSG); }
-    </scr` + `ipt>
-</body>
-</html>
-`);
         }
 
         // ===== 3D Motor Simülasyonu kontrolleri (MotorViz3D) =====
@@ -8130,8 +8388,17 @@
                 const response = await fetch(`/api/export-pdf/${reportType}`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
+                    // V306/RAPOR-HATA (M-HIBRIT-8): hibrit sonucu motor adını
+                    // ve türünü düz alan olarak yayımlamıyor; rapor künyesi
+                    // "Unnamed Motor / not supplied" basıyordu. Ad sayfanın
+                    // TEK ad çözücüsünden (disaAktarimMotorAdi), tür bu
+                    // sayfanın kendisinden (katı/sıvı sayfalarıyla aynı
+                    // sözleşme: motor_data.motor_type).
                     body: JSON.stringify({
-                        motor_data: currentResults.motor,
+                        motor_data: Object.assign({}, currentResults.motor, {
+                            motor_name: disaAktarimMotorAdi(),
+                            motor_type: 'hybrid'
+                        }),
                         analysis_results: currentResults
                     }),
                     // ÖH D23 / P17B4-07 — TEK KAYNAK (doktrin 4): 180000 üç
@@ -8517,8 +8784,9 @@
             if (durumEl) durumEl.textContent = '';
             showMessage(i18nText('adv.msg.generatingCompletePackage', 'Generating complete package...'), 'info');
 
-            // Rapor popup'ı + GERÇEK indirilebilir ZIP (STL+DXF+PDF+STEP+.eng)
-            const cadOk = (await generateCAD()) === true;
+            // V306/BAYAT NR-8: 3B sahne + GERÇEK indirilebilir ZIP
+            // (STL+DXF+PDF+STEP+.eng); STEP ZIP'in içinde, ayrıca indirilmez.
+            const cadOk = (await generateCAD({ indir: false })) === true;
             const zipOk = (await exportCompleteZip()) === true;
 
             if (cadOk && zipOk) {

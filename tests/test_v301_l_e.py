@@ -87,11 +87,21 @@ def _irtifa_kart_esitligi(j):
     # 100 km'de ortam 2,3e-7 bar: vakum kartından sapma < 1e-6 bağıl.
     assert ap[-1]['specific_impulse'] == pytest.approx(j['isp_vacuum'], rel=1e-6)
     # Ara satırlar aynı lüle özdeşliği: Isp(h) doğrusal p_a(h)'ye göre.
+    # V306/SIVI-DEFTER (K5): açık çevrim defteri kapandıysa satırın Isp'si
+    # MOTOR değeridir (ana oda + türbin egzozu; egzozun ortam yasası ayrı);
+    # lüle özdeşliği ANA ODA sütununda, defterin ana oda kartlarıyla kurulur.
+    defter = j.get('mass_flow_ledger') or {}
+    acik = defter.get('status') == 'open_cycle_closed'
+    i_sl = (defter['main_chamber_isp_sea_level_s'] if acik
+            else j['isp_sea_level'])
+    i_vac = (defter['main_chamber_isp_vacuum_s'] if acik
+             else j['isp_vacuum'])
     pa_sl = j['nozzle_design']['performance']['ambient_pressure']
     for s in ap:
-        beklenen = (j['isp_vacuum'] - (j['isp_vacuum'] - j['isp_sea_level'])
-                    * s['pressure'] / pa_sl)
-        assert s['specific_impulse'] == pytest.approx(beklenen, rel=1e-12), s
+        beklenen = i_vac - (i_vac - i_sl) * s['pressure'] / pa_sl
+        satir = (s['specific_impulse_main_chamber'] if acik
+                 else s['specific_impulse'])
+        assert satir == pytest.approx(beklenen, rel=1e-12), s
         assert 'same-nozzle identity' in s['isp_anchor_basis']
         assert 'sea-level design point' in s['isp_anchor_basis']
 

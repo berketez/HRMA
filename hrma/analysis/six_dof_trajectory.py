@@ -59,6 +59,8 @@ Sınırlar (dürüst beyan):
     yalnızca eğilim/kararlılık göstergesi olarak yorumlanmalı
 """
 
+from types import SimpleNamespace
+
 import numpy as np
 from scipy.integrate import solve_ivp
 
@@ -69,7 +71,8 @@ from hrma.constants import (  # merkezi USSA 1976 tablosu
 # soruya iki modülde iki farklı cevap üreten ikinci kopya yazılmaz.
 # (Bağımlılık tek yönlüdür: ``trajectory_analysis`` bu modülü ithal etmez.)
 from hrma.analysis.trajectory_analysis import (  # noqa: E402
-    LIFTOFF_ALTITUDE_EPS_M, normalize_thrust_curve)
+    LIFTOFF_ALTITUDE_EPS_M, normalize_thrust_curve,
+    thrust_altitude_compensation_block)
 
 #: Atış rayı boyu VERİLMEDİĞİNDE kullanılan varsayılan [m] — ÖH D21 /
 #: OH-D19-24. Sayı v2.6.27'ye kadar İKİ yerde yazılıydı: bu modülün
@@ -219,6 +222,24 @@ _CD_SUPERSONIC_TAU = 2.0      # platoya yaklaşma zaman sabiti [Mach]
 # ---------------------------------------------------------------------------
 ALPHA_VALID_MIN_TIME_S = 1.0      # rampa/ateşleme geçicisi bu süre boyunca atılır
 ALPHA_VALID_SPEED_FRACTION = 0.10  # hız tepe hızın bu kesrinin altındaysa q≈0
+# V306/UÇUŞ-2 (M-KATI-25, M-HIBRIT-30) — DİNAMİK BASINÇ KOŞULU.
+# Hız kesri q'nun yalnız SABİT YOĞUNLUKTAKİ vekilidir: 85 km'de araç hâlâ
+# 1500 m/s ile (tepe hızın %10'undan hızlı) giderken q = ½ρv² ≈ 10 Pa'dır
+# ve oradaki α büyümesi (havasız bölgede aerodinamik geri getirme yoktur)
+# kararsızlık değildir. Ölçüldü (M-KATI-25): atmosferde α ≤ 0,03°, 85 km
+# üstünde 14-41° — "KARARSIZ" hükmü bu bölgeden geliyordu.
+# Eşik HRMA SEÇİMİDİR ve yeni bir sayı değildir: hız kesrinin dinamik basınç
+# karşılığıdır (aynı yoğunlukta v > 0,10·v_max ⇔ q > 0,10²·q_max), yani
+# pencere hız koşulunun niyetini (q ≈ 0 bölgesini dışlamak) yoğunluk
+# değişse de korur. Kaynaklı bir literatür eşiği yoktur; seçim yanıtta
+# ``alpha_window`` künyesiyle yayımlanır. Panel grafiği aynı pencereyi
+# yayımlanan ``dynamic_pressure`` serisinden uygular.
+ALPHA_VALID_Q_FRACTION = ALPHA_VALID_SPEED_FRACTION ** 2
+# Barrowman küçük-α doğrusal aerodinamiğinin beyanlı sınırı [°] (modül
+# docstring'i "α ≲ 10-15°"; sixdof_panel.js ALPHA_LINEAR_LIMIT_DEG ve
+# panel metni sixdof.intro aynı sayıyı taşır). Kararlılık hükmü q
+# penceresinde bu sınırı aşan α'yı adıyla söyler.
+ALPHA_LINEAR_LIMIT_DEG = 15.0
 
 
 def _drag_coefficient_mach(mach, cd0):
@@ -704,6 +725,26 @@ def _alpha_deg_series(q, v, wind):
 def _mk_warning(code, severity='warning', **params):
     """Uyarı sözleşmesi: ``{code, params, severity}`` (bkz. safety_analysis)."""
     return {'code': code, 'params': params, 'severity': severity}
+
+
+def stability_verdict_code(stable, sm_full, sm_empty, max_alpha_deg):
+    """``stable`` hükmünün ADLI karşılığı (V306/UÇUŞ-2, tek kural).
+
+    ``stable`` None ise hüküm verilmemiştir ('not_evaluated'); aksi hâlde
+    hangi koşulun hükmü belirlediği söylenir: statik marj (dolu ya da boş)
+    1 kalibrenin altında/eşit, ya da q penceresindeki α doğrusal model
+    sınırını (ALPHA_LINEAR_LIMIT_DEG) aşmış. ``stable`` ile aynı koşullardan
+    türetilir; uç hükmü geri çektiğinde (aero bandı, beyanlı geometri) aynı
+    işlevle yeniden çağrılır.
+    """
+    if stable is None:
+        return 'not_evaluated'
+    if not (sm_full > 1.0 and sm_empty > 1.0):
+        return 'static_margin_at_or_below_1_cal'
+    if not (max_alpha_deg is not None
+            and max_alpha_deg < ALPHA_LINEAR_LIMIT_DEG):
+        return 'alpha_above_linear_limit'
+    return 'stable'
 
 
 def _require_finite(**values):
@@ -1380,10 +1421,37 @@ class SixDOFTrajectory:
         tumble_event.terminal = True
         tumble_event.direction = -1
 
-        sol = solve_ivp(self._derivatives, (0.0, t_max), y0,
-                        method='RK45', max_step=max_step,
-                        events=[hit_ground, apogee_event, tumble_event],
-                        dense_output=False, rtol=1e-5, atol=1e-7)
+        # V306/UÇUŞ-2 — YANMA SONU BİR ENTEGRASYON KIRILMA NOKTASIDIR.
+        # İtki t_burn'de süreksizdir (F → 0). Tek parça RK45 adımı bu anı
+        # içine alınca aşamalarının bir kısmı itkili, bir kısmı itkisiz düşer
+        # ve adım hata tahmini (RMS normu, 13 durum) süreksizliği yakalamaz.
+        # ÖLÇÜLDÜ (kapali_bicim.json K2: vakumda dikey uçuş, 3000 N / 6 s,
+        # kuru 20 + itici 10 kg, sürüklemesiz): yanma sonu hızı bağımsız
+        # ODE'den 1,1 m/s eksik, apoje −%0,30 (düzlemsel çözücü fazları ayrı
+        # entegre ettiği için −4·10⁻⁷). Çözüm: entegrasyon [0, t_burn] ve
+        # [t_burn, t_max] diye iki parçada yapılır; ikinci parça ilkinin son
+        # durumundan başlar. Denklemler (``_derivatives``), olaylar ve
+        # toleranslar DEĞİŞMEDİ; yalnız süreksizlik bir adımın içine düşmez.
+        olaylar = [hit_ground, apogee_event, tumble_event]
+
+        def _parca(t0, t1, y_bas):
+            return solve_ivp(self._derivatives, (t0, t1), y_bas,
+                             method='RK45', max_step=max_step,
+                             events=olaylar, dense_output=False,
+                             rtol=1e-5, atol=1e-7)
+
+        t_kirilma = float(self.t_burn)
+        sol = _parca(0.0, min(t_kirilma, t_max), y0)
+        if sol.status == 0 and t_kirilma < t_max:
+            # Birinci parça terminal olaysız yanma sonuna ulaştı: süzülme.
+            sol2 = _parca(t_kirilma, t_max, sol.y[:, -1])
+            sol = SimpleNamespace(
+                t=np.concatenate([sol.t, sol2.t[1:]]),
+                y=np.concatenate([sol.y, sol2.y[:, 1:]], axis=1),
+                t_events=[np.concatenate([a, b]) for a, b in
+                          zip(sol.t_events, sol2.t_events)],
+                success=bool(sol2.success), status=sol2.status,
+                message=sol2.message)
         # B5 — ÇÖZÜCÜ BAŞARISI DENETLENİR (v2.6.26). Eski kod ``sol.success``
         # ve ``sol.message`` alanlarını HİÇ okumuyordu: adım küçültmede
         # tıkanan (``status = −1``) bir entegrasyonda ``sol.y`` yine de
@@ -1420,14 +1488,19 @@ class SixDOFTrajectory:
         # ``converged`` bloğu) geçerli sonuç gibi verilmez.
         i_apogee = int(np.argmax(alt)) if alt.size else 0
         mach_hist = []
+        q_hist = []
         for k in range(len(t)):
             u_i = v[:, k] - self._wind_i     # ikisi de (E,N,U); bkz. _derivatives
             um = np.linalg.norm(u_i)
             # P4B3-01: Mach da MUTLAK irtifanın ses hızıyla ölçülür —
             # _derivatives ile AYNI atmosfer, aksi hâlde aynı koşuda iki
             # farklı atmosfer olurdu.
-            _, a_snd = _atmosphere(self.launch_altitude + max(alt[k], 0.0))
+            rho_k, a_snd = _atmosphere(self.launch_altitude + max(alt[k], 0.0))
             mach_hist.append(um / a_snd)
+            # V306/UÇUŞ-2: dinamik basınç q = ½·ρ·|u|² — _derivatives'in
+            # aerodinamik kuvvette kullandığı (qbar) tanımın AYNISI.
+            q_hist.append(0.5 * rho_k * um ** 2)
+        q_arr = np.array(q_hist)
 
         sm_full = self.aero.static_margin(self.x_cg_full)
         sm_empty = self.aero.static_margin(self.x_cg_empty)
@@ -1460,7 +1533,18 @@ class SixDOFTrajectory:
         burn_mask = (t > ALPHA_VALID_MIN_TIME_S) & (speed > _v_floor)
         if i_apogee > 0:
             burn_mask &= (t < t[i_apogee])
+        # V306/UÇUŞ-2 (M-KATI-25 / M-HIBRIT-30): hız koşulunu geçen ama
+        # dinamik basıncı q_max'ın ALPHA_VALID_Q_FRACTION'ından küçük olan
+        # örnekler (havasız bölge) hükümden AYRILIR; oradaki α bilgi amaçlı
+        # ayrı yayımlanır (``max_alpha_low_q_deg``), silinmez.
+        _q_floor = (ALPHA_VALID_Q_FRACTION * float(q_arr.max())
+                    if q_arr.size else 0.0)
+        q_mask = q_arr > _q_floor
+        low_q_mask = burn_mask & ~q_mask
+        burn_mask &= q_mask
         max_alpha = float(alpha_arr[burn_mask].max()) if burn_mask.any() else 0.0
+        max_alpha_low_q = (float(alpha_arr[low_q_mask].max())
+                           if low_q_mask.any() else None)
 
         # --- ÇIKTI ÇERÇEVESİ: (E,N,U) → (N,E,U) ---------------------------
         # Dış sözleşme (modül docstring'i, app.py 'north'/'east' eşlemesi,
@@ -1500,6 +1584,9 @@ class SixDOFTrajectory:
             'speed': speed,
             'mach': np.array(mach_hist),
             'alpha_deg': alpha_arr,
+            # V306/UÇUŞ-2: α penceresinin q koşulu bu seriden okunur
+            # (panel grafiği de aynı seriden aynı pencereyi uygular).
+            'dynamic_pressure': q_arr,
             'apogee': float(alt[i_apogee]) if alt.size else None,
             # ÖH D18 / termo-ucus a1 (P4B3-21) — DATUM ADIYLA. ``alt`` bu
             # çözücüde SAHA ÜSTÜ (AGL) irtifadır; kardeş düzlemsel çözücü
@@ -1514,6 +1601,28 @@ class SixDOFTrajectory:
             'max_speed': float(speed.max()) if speed.size else None,
             'max_mach': float(np.max(mach_hist)) if mach_hist else None,
             'max_alpha_deg': max_alpha,
+            # V306/UÇUŞ-2: q penceresinin DIŞINDA kalan (havasız bölge) en
+            # büyük α — hükme girmez, bilgi amaçlıdır; örnek yoksa None.
+            'max_alpha_low_q_deg': max_alpha_low_q,
+            'alpha_window': {
+                'min_time_s': ALPHA_VALID_MIN_TIME_S,
+                'speed_fraction': ALPHA_VALID_SPEED_FRACTION,
+                'dynamic_pressure_fraction': ALPHA_VALID_Q_FRACTION,
+                'dynamic_pressure_floor_pa': _q_floor,
+                'linear_limit_deg': ALPHA_LINEAR_LIMIT_DEG,
+                'basis': (
+                    'max_alpha_deg is measured only where the vehicle has '
+                    'aerodynamic authority: t > min_time_s, speed > '
+                    'speed_fraction * v_max, dynamic pressure > '
+                    'dynamic_pressure_fraction * q_max and before apogee. '
+                    'The dynamic-pressure fraction is an HRMA choice: it is '
+                    'the square of the speed fraction (at constant density '
+                    'v > 0.10 v_max is q > 0.01 q_max), so the window keeps '
+                    'excluding the q ~ 0 region when the air thins out. '
+                    'Angles of attack outside that window (max_alpha_low_q_'
+                    'deg) carry no aerodynamic stability meaning and are '
+                    'reported for information only.'),
+            },
             'end_reason': end_reason,
             # Yatay sapmanın normu satır sırasından bağımsızdır (permütasyon
             # ortonormal) ama tutarlılık için çıktı dizisinden okunur.
@@ -1536,7 +1645,7 @@ class SixDOFTrajectory:
             'x_cg_source': self.x_cg_source,
             'x_cg_is_estimate': bool(self.x_cg_is_estimate),
             'stable': bool(sm_full > 1.0 and sm_empty > 1.0 and
-                           max_alpha < 15.0),
+                           max_alpha < ALPHA_LINEAR_LIMIT_DEG),
             'cn_alpha': float(self.aero.cn_alpha),
             'x_cp': float(self.aero.x_cp),
             # B5: çözücü hükmü sonucun bir parçasıdır, çağıran okuyabilsin.
@@ -1554,6 +1663,14 @@ class SixDOFTrajectory:
             # 'default' -> DEFAULT_RAIL_LENGTH_M kullanıldı (bir ölçü
             # değil, depo varsayılanı).
             'rail_length_source': self.rail_length_source,
+            # V306/UÇUŞ-2 (M-SIVI-18, M-HIBRIT-34): itkinin irtifa
+            # düzeltmesi künyesi kardeş düzlemsel çözücüyle AYNI işlevden.
+            'thrust_altitude_compensation': thrust_altitude_compensation_block(
+                self.nozzle_exit_area,
+                (self.thrust_reference_pressure
+                 if self.nozzle_exit_area is not None else None),
+                (_pressure_at(self.launch_altitude)
+                 if self.nozzle_exit_area is not None else None)),
         }
         if not converged:
             # Entegrasyon çökmüş: apoje, tepe hız/Mach, maksimum α ve
@@ -1672,6 +1789,51 @@ class SixDOFTrajectory:
                         twr=_twr, rail=self.rail_length)
             out['apogee_withheld_because'] = _ortak + _neden
             out['thrust_to_weight_at_ignition'] = _twr
+
+        # --- V306/UÇUŞ-2 (M-SIVI-25) — UÇUŞUN NASIL BİTTİĞİ HÜKMÜN KENDİSİDİR
+        # ÖLÇÜLDÜ (mühendis turu L5, tek F-1): araç 2,27 km'ye çıkıp yanma
+        # SÜRERKEN (t = 81,9 s < t_b = 150 s) Mach 1,5'le yere çarptı;
+        # ``end_reason = 'ground'`` iken ``stable = True`` yayımlanıyor, panel
+        # "KARARLI" diyordu. Uçuş yere çarparak bittiyse kararlılık hükmü
+        # kazanılmamıştır. Sayılar SİLİNMEZ (tepe irtifası, hız, α ölçümdür);
+        # yayımlanmayan HÜKÜMDÜR, yerine uçuşun bitiş nedeni adıyla gelir.
+        # Bu çözücüde 'ground' olayı yalnız apoje olayından ÖNCE tetiklenir
+        # (apoje olayı yanma bitince ilk dikey hız sıfırında entegrasyonu
+        # keser), yani 'ground' + kalkış = apojeye varmadan yere çarpma.
+        _t_end = float(t[-1]) if t.size else None
+        if not converged:
+            _ucus = 'solver_failed'
+        elif not out['lifted_off']:
+            _ucus = 'no_liftoff'
+        elif end_reason == 'ground':
+            _ucus = ('ground_impact_under_power'
+                     if (_t_end is not None and _t_end < self.t_burn)
+                     else 'ground_impact_before_apogee')
+            out['stable'] = None
+        elif end_reason == 'tumble_detected':
+            _ucus = 'tumble'
+        elif end_reason == 'time_limit':
+            _ucus = 'time_limit'
+        else:
+            _ucus = 'apogee'
+        out['flight_verdict'] = {
+            'flight': _ucus,
+            'stability': stability_verdict_code(
+                out['stable'], sm_full, sm_empty, max_alpha),
+            't_end_s': _t_end,
+            'burn_time_s': float(self.t_burn),
+            'speed_at_end_m_s': (float(speed[-1]) if speed.size else None),
+            'basis': (
+                "'flight' names how the integration ended (apogee reached, "
+                'no liftoff, ground impact before apogee - under power when '
+                'the motor was still burning -, tumble, time limit or solver '
+                "failure). 'stability' is given only for a flight that "
+                'reached apogee: static margin above 1 calibre full and '
+                'empty, and max_alpha_deg (inside alpha_window) below the '
+                'linear-aerodynamics limit. A flight that ends in the ground '
+                'gets no stability verdict: how the flight ended is the '
+                'verdict.'),
+        }
         out['warnings'] = solve_warnings
         return out
 

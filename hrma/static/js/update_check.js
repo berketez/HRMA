@@ -406,7 +406,16 @@
         function startInstall(st) {
             progressText.textContent = T('update.installing',
                 'Downloaded — preparing the installation…');
-            fetch('/api/update/install', { method: 'POST' })
+            // V306/GÜNCELLEME kalem 5: arayüz dili güncelleme bildirimlerine ve
+            // "güncelleme sürüyor" penceresine aktarılır. Dil bilinmiyorsa
+            // gövde boş gider; sunucu metinleri EN + TR birlikte gösterir.
+            var dil = (window.I18N && window.I18N.lang) || null;
+            var govde = (dil === 'tr' || dil === 'en') ? { lang: dil } : {};
+            fetch('/api/update/install', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(govde)
+            })
                 .then(function (r) { return r.json(); })
                 .then(function (res) {
                     if (res.started && res.mode === 'auto') {

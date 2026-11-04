@@ -193,7 +193,7 @@ markers is machine-generated; the rest of this document remains hand-written.
 *This block is auto-generated from the real-experiment correlation run; do not edit it by hand. Regenerate with `python3 -m hrma.validation.status_report`.*
 
 - Generated: 2026-10-27 (runner v1, adapter v1)
-- Experiment DB content hash: `19cf1d9587eae349d4950f8b85f74fd2403a579e47d6c0563badfb6a9c4ecb63`
+- Experiment DB content hash: `13c3f1073a0f1337d055c5c5498d1e94e019b123ecfdbd082c6dba9d375985a1`
 - Records: 212 total, adapter ok 98 (with at least one scored quantity: 92), insufficient inputs 107, not supported (v1) 7, runner errors 0
 - Signed error convention: (predicted - measured) / measured x 100. Outliers (modified z-score |0.6745*(error - median)/MAD| > 3.5) are flagged, never dropped; records excluded from the headline are aggregated in their own layer and the reason is kept distinct: `anomaly` means the EXPERIMENT is suspect (data quality), `out_of_scope` means HRMA's own declared model does not cover the configuration. An `out_of_scope` row is 'measured and withheld', not 'not measured'. Cells marked 'single observation' report the signed error only (with n=1 the scatter columns would repeat that one number). Dependence column: 'in-sample' entries are scored against the fit's own source data (an implementation check, not an independent validation); 'weak-evidence' entries carry a curator caveat; u_meas is the median reported measurement uncertainty.
 

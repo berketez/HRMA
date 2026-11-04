@@ -846,7 +846,7 @@
                             <span data-i18n="solid.ui.fillet_radius">Fillet Radius</span> <span class="unit">(mm)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="solid.ui.radius_of_fillets_at_star_valleys">Radius of the fillets at the star valleys (in a real grain it reduces stress concentration). Not modelled in this version: no calculation reads it - the burn-back offset already rounds the valley corners, so the solver lists the field under unwired_inputs "geometry_not_modelled" (measured: 1, 5 and 10 mm give bit-identical results).</span>
+                                <span class="tooltip-text" data-i18n="solid.ui.radius_of_fillets_at_star_valleys">Fillet radius at the star valleys (mm); in a real grain it lowers the stress concentration at the valley. Not modelled in this version: no calculation reads it (measured: 1, 5 and 10 mm give bit-identical results). The burn-back already rounds the valley corners after ignition, and the grain stress results use a nominal stress-concentration factor for star ports. The box is kept so that the value is saved with your project. Blank: nothing is used. The box accepts 0.1-30 mm.</span>
                             </div>
                         </label>
                         <input type="number" id="star_fillet" value="2" step="0.1" min="0.1" max="30">
@@ -873,20 +873,20 @@
                             <span data-i18n="solid.ui.fin_width">Fin Width</span> <span class="unit">(mm)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="solid.ui.thickness_of_each_fin_slot_affects">Thickness of each fin slot. Affects burning surface area and grain structural integrity.</span>
+                                <span class="tooltip-text" data-i18n="solid.ui.thickness_of_each_fin_slot_affects">Circumferential width of each fin slot (mm). It sets the burning area of the finned section and the web left between fins. Blank: the solver uses its default width, limited to π × port diameter / (2 × fin count), and names the value it used in the result. When you switch the grain type, this box is cleared unless you typed in it. Accepted 0.5-60 mm and not above that limit; a larger value is rejected by name.</span>
                             </div>
                         </label>
-                        <input type="number" id="fin_width" value="8" step="0.1">
+                        <input type="number" id="fin_width" value="8" step="0.1" placeholder="auto (solver default)" data-i18n-placeholder="solid.attr.solver_default_auto">
                     </div>
                     <div class="form-group">
                         <label for="fin_length">
                             <span data-i18n="solid.ui.fin_length">Fin Length</span> <span class="unit">(mm)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="solid.ui.radial_length_of_fin_slots_from">Radial length of fin slots from core to outer diameter. Determines progressive burning characteristics.</span>
+                                <span class="tooltip-text" data-i18n="solid.ui.radial_length_of_fin_slots_from">Radial depth of each fin slot, measured from the port wall (mm). It sets how progressive the burn is in the finned section. Blank: the solver uses its default depth, limited to 0.85 × (grain outer radius − port radius), and names the value it used in the result. When you switch the grain type, this box is cleared unless you typed in it. Accepted 1-200 mm and not above that limit; a larger value is rejected by name.</span>
                             </div>
                         </label>
-                        <input type="number" id="fin_length" value="20" step="0.1" min="1" max="200">
+                        <input type="number" id="fin_length" value="20" step="0.1" min="1" max="200" placeholder="auto (solver default)" data-i18n-placeholder="solid.attr.solver_default_auto">
                     </div>
                     <!-- V301/K-B (KT-09): çözücünün okuduğu ama sayfada alanı
                          olmayan kanatlı boy oranı (FINOCYL_GRAIN fraction_range
@@ -970,24 +970,24 @@
                             <span data-i18n="solid.ui.slot_width">Slot Width</span> <span class="unit">(mm)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="solid.ui.slot_width_tooltip">Circumferential thickness of each slot. Wider slots burn out sooner and shift the curve towards regressive.</span>
+                                <span class="tooltip-text" data-i18n="solid.ui.slot_width_tooltip">Circumferential width of each slot (mm). Wider slots burn out sooner and shift the curve towards regressive. Blank: the solver uses its default width, limited to π × port diameter / (2 × slot count), and names the value it used in the result. When you switch the grain type, this box is cleared unless you typed in it. Accepted 0.5-60 mm and not above that limit; a larger value is rejected by name.</span>
                             </div>
                         </label>
-                        <input type="number" id="slot_width" value="4" step="0.1" min="0.5">
+                        <input type="number" id="slot_width" value="4" step="0.1" min="0.5" placeholder="auto (solver default)" data-i18n-placeholder="solid.attr.solver_default_auto">
                     </div>
                     <div class="form-group">
                         <label for="slot_depth">
                             <span data-i18n="solid.ui.slot_depth">Slot Depth</span> <span class="unit">(mm)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="solid.ui.slot_depth_tooltip">Radial depth measured from the port wall. Deep slots reach the case early and make the curve regressive; shallow slots stay progressive. Must remain inside the available web.</span>
+                                <span class="tooltip-text" data-i18n="solid.ui.slot_depth_tooltip">Radial depth of each slot, measured from the port wall (mm). Deep slots reach the case early and make the curve regressive; shallow slots stay progressive. Blank: the solver uses its default depth, limited to 0.85 × (grain outer radius − port radius), and names the value it used in the result. When you switch the grain type, this box is cleared unless you typed in it. Accepted 1-200 mm and not above that limit; a larger value is rejected by name.</span>
                             </div>
                         </label>
                         <!-- V301/K-B (K-A DEVİR 8): 25 mm, varsayılan tanede (çekirdek 48 mm)
                              0,85·web = 22,1 mm sınırını aşıyor ve eskiden SESSİZCE 22,1'e
                              kırpılıyordu; kırpma artık 422. Açılış değeri 20 mm (HRMA
                              seçimi, sınırın içinde). -->
-                        <input type="number" id="slot_depth" value="20" step="0.1" min="1">
+                        <input type="number" id="slot_depth" value="20" step="0.1" min="1" placeholder="auto (solver default)" data-i18n-placeholder="solid.attr.solver_default_auto">
                     </div>
                 </div>
             </div>
@@ -1303,30 +1303,30 @@
                         <span data-i18n="solid.ui.throat_diameter_dt">Throat Diameter Dt</span> <span class="unit">(mm)</span> <span class="unit" data-i18n="solid.ui.auto_filled_after_calculate" style="color:#4facfe;">(auto-filled after calculate)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.nozzle_throat_diameter_critical_parameter_that">Nozzle throat diameter, computed by the solver (not an input; filled in after Calculate): the effective throat area follows from the grain mass flow at the design chamber pressure, A_t = rho_p·A_b·r(Pc)·c*/Pc, and the drawn (geometric) throat is A_t/Cd. A value typed here is not read - the solver lists the field under unwired_inputs "computed_by_solver".</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.nozzle_throat_diameter_critical_parameter_that">Nozzle throat diameter (mm), computed by the solver; the box is read-only and is filled after Calculate. The effective throat area follows from the grain mass flow at the design chamber pressure, A_t = rho_p·A_b·r(Pc)·c*/Pc, and the drawn (geometric) throat is A_t/Cd. This version does not take the throat as an input: to change it, change the chamber pressure or the grain.</span>
                         </div>
                     </label>
-                    <input type="number" id="throat_diameter" value="15" step="0.1" readonly min="1" max="500">
+                    <input type="number" id="throat_diameter" value="" step="0.1" readonly min="1" max="500" placeholder="after Calculate" data-i18n-placeholder="solid.attr.after_calculate">
                 </div>
                 <div class="form-group">
                     <label for="exit_diameter">
                         <span data-i18n="solid.ui.exit_diameter_de">Exit Diameter De</span> <span class="unit">(mm)</span> <span class="unit" data-i18n="solid.ui.auto_filled_after_calculate" style="color:#4facfe;">(auto-filled after calculate)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.nozzle_exit_diameter_larger_exit_provides">Nozzle exit diameter, computed by the solver (not an input; filled in after Calculate): A_e = ε·A_t, with ε the optimum expansion ratio at the design ambient pressure (isentropic, exit pressure = ambient). A value typed here is not read - the solver lists the field under unwired_inputs "computed_by_solver".</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.nozzle_exit_diameter_larger_exit_provides">Nozzle exit diameter (mm), computed by the solver; the box is read-only and is filled after Calculate: A_e = ε·A_t, with ε the optimum expansion ratio at the design ambient pressure (isentropic, exit pressure = ambient). This version does not take the exit diameter as an input.</span>
                         </div>
                     </label>
-                    <input type="number" id="exit_diameter" value="35" step="0.1" readonly min="1.5" max="2500">
+                    <input type="number" id="exit_diameter" value="" step="0.1" readonly min="1.5" max="2500" placeholder="after Calculate" data-i18n-placeholder="solid.attr.after_calculate">
                 </div>
                 <div class="form-group">
                     <label for="expansion_ratio">
                         <span data-i18n="solid.ui.expansion_ratio">Expansion Ratio ε</span> <span class="unit" data-i18n="solid.ui.auto_filled_after_calculate" style="color:#4facfe;">(auto-filled after calculate)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.ratio_of_exit_area_to_throat">Ratio of exit area to throat area (Ae/At). Automatically calculated from diameters. Higher ratios provide better performance at altitude but risk flow separation at sea level.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.ratio_of_exit_area_to_throat">Ratio of exit area to throat area (Ae/At), computed by the solver; the box is read-only and is filled after Calculate. Higher ratios give more thrust at altitude but risk flow separation at sea level. This version does not take the ratio as an input.</span>
                         </div>
                     </label>
-                    <input type="number" id="expansion_ratio" value="5.44" step="0.1" readonly min="1" max="25">
+                    <input type="number" id="expansion_ratio" value="" step="0.1" readonly min="1" max="25" placeholder="after Calculate" data-i18n-placeholder="solid.attr.after_calculate">
                 </div>
                 <div class="form-group">
                     <label for="convergent_angle">
@@ -1533,7 +1533,7 @@
                         <span data-i18n="solid.ui.ignition_delay">Ignition Delay</span> <span class="unit">(ms)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.delay_time_from_ignition_signal_to">Delay time from ignition signal to significant pressure rise (igniter response and flame spreading; typically 20-100 ms). Informational only: no calculation reads it in this version - the start-up transient is not modelled and the solver lists the field under unwired_inputs "informational".</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.delay_time_from_ignition_signal_to">Ignition delay (ms): time from the ignition signal to a significant pressure rise (igniter response and flame spreading). Reference only: no calculation reads it in this version, because the start-up transient is not modelled; the box is kept so that the value is saved with your project. Blank: nothing is used. The box accepts 1-1000 ms.</span>
                         </div>
                     </label>
                     <input type="number" id="ignition_delay" value="50" step="0.1" min="1" max="1000">
@@ -1558,17 +1558,20 @@
                         <span data-i18n="solid.ui.atmospheric_pressure">Atmospheric Pressure</span> <span class="unit">(kPa)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.ambient_pressure_at_test_flight_conditions">Ambient pressure at test/flight conditions. Sea level: 101.325 kPa. Lower pressure at altitude increases nozzle performance but reduces air-breathing stage performance.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.ambient_pressure_at_test_flight_conditions">Ambient pressure in kPa for which the nozzle expansion ratio is sized (exit pressure = ambient pressure at the design chamber pressure) and at which the thrust curve, specific impulse and the Isp at test ambient are solved. The Sea Level Isp card is always this nozzle at 101.325 kPa. Disabled while Test Altitude is above 0: the ISA pressure of that altitude is used instead and is shown under this field after Calculate. Blank: 101.325 kPa. Accepted range 1-200 kPa.</span>
                         </div>
                     </label>
                     <input type="number" id="atm_pressure" value="101.325" step="0.1" min="1" max="200">
+                    <!-- V306/KATI-MODEL (M-KATI-20): çözücünün GERÇEKTEN kullandığı
+                         ortam basıncı (design_ambient), hesaptan sonra. -->
+                    <small id="atm_pressure_solver_note" style="display:none; color: var(--hd-ink-dim, #7d97a5); font-size: 12px;"></small>
                 </div>
                 <div class="form-group">
                     <label for="test_altitude">
                         <span data-i18n="solid.ui.test_altitude">Test Altitude</span> <span class="unit">(m)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.altitude_above_sea_level_for_test">Altitude above sea level for test or flight conditions. Affects atmospheric pressure and nozzle performance. 0 = sea level conditions.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.altitude_above_sea_level_for_test">Test or design altitude in m. Above 0 it sets the ambient pressure from the ISA (US Standard Atmosphere 1976): the nozzle expansion ratio is sized for that pressure and the thrust curve, specific impulse and the Isp at test ambient are solved there; the pressure used is shown under Atmospheric Pressure after Calculate. The Sea Level Isp card is always this nozzle at 101.325 kPa. 0 or blank: the Atmospheric Pressure field is used. Accepted range 0-30000 m.</span>
                         </div>
                     </label>
                     <input type="number" id="test_altitude" value="0" step="1" min="0" max="30000">
@@ -1636,7 +1639,7 @@
                         <span data-i18n="solid.ui.nozzle_mass">Nozzle Mass</span> <span class="unit">(kg)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.mass_of_nozzle_assembly_including_throat">Mass of nozzle assembly including throat insert, exit cone, and mounting hardware. Varies with nozzle material and size.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.mass_of_nozzle_assembly_including_throat">Nozzle mass in kg, filled by the solver after Calculate: the drawn nozzle (converging section, throat and exit cone) with the same contour, wall thickness and material as the nozzle in the CAD (STEP/STL) package, integrated as frustum-annulus volume times the density of the selected Nozzle Material. It changes with the nozzle size and material, not with the case material. Mounting hardware is not included. Output only: the solver does not read this field; an edited value appears as a difference in the mass reconciliation table.</span>
                         </div>
                     </label>
                     <input type="number" id="nozzle_mass" value="0.5" step="0.001" min="0.001" max="10000">
@@ -1669,7 +1672,7 @@
                         <span data-i18n="solid.ui.avionics_mass">Avionics Mass</span> <span class="unit">(kg)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.mass_of_electronic_systems_including_flight">Mass of electronic systems including flight computer, sensors, telemetry, and recovery systems. Not part of motor but affects overall vehicle performance.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.mass_of_electronic_systems_including_flight">Mass of the vehicle electronics (flight computer, sensors, telemetry, recovery) in kg. It is a vehicle item, not part of the motor: the motor solver does not read it and it is not added to the motor dry mass; the page shows it as its own row in the mass reconciliation table. Blank: the row shows no value. The box accepts 0-500 kg.</span>
                         </div>
                     </label>
                     <input type="number" id="avionics_mass" value="0.2" step="0.001" min="0" max="500">
@@ -1731,14 +1734,14 @@
 
         <!-- 8. Measurement / Test Equipment -->
         <div class="panel">
-            <h2 data-i18n="solid.ui.8_measurement_test_equipment">8. Measurement / Test Equipment</h2>
+            <h2 data-i18n="solid.ui.8_measurement_test_equipment">8. Test Stand Planning (not used in the motor calculation)</h2>
             <div class="form-grid">
                 <div class="form-group">
                     <label for="pressure_sensor_range">
                         <span data-i18n="solid.ui.pressure_sensor_range">Pressure Sensor Range</span> <span class="unit">(MPa)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.maximum_pressure_measurement_range_of_pressure">Static-test bench record only (no motor calculation reads it; the solver lists it under unwired_inputs "test_bench_only"). Maximum pressure measurement range of pressure transducer. Should be 1.5-2x expected maximum pressure for accuracy and safety. Typical range: 5-15 MPa for amateur motors.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.maximum_pressure_measurement_range_of_pressure">Full-scale range of the pressure transducer on your static-test stand (MPa). Test-stand planning only: no motor calculation reads it and no result changes. Blank: nothing is used. The box accepts 0.1-100 MPa.</span>
                         </div>
                     </label>
                     <input type="number" id="pressure_sensor_range" value="10" step="0.1" min="0.1" max="100">
@@ -1748,7 +1751,7 @@
                         <span data-i18n="solid.ui.sampling_frequency">Sampling Frequency</span> <span class="unit">(Hz)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.data_acquisition_sampling_rate_higher_rates">Static-test bench record only (no motor calculation reads it; the solver lists it under unwired_inputs "test_bench_only"). Data acquisition sampling rate. Higher rates capture more detail but generate larger data files. 500-2000 Hz typical for motor testing. Must be &gt;2x highest frequency of interest.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.data_acquisition_sampling_rate_higher_rates">Data-acquisition sampling rate of your static-test stand (Hz); by the sampling theorem it must be more than twice the highest frequency you want to record. Test-stand planning only: no motor calculation reads it and no result changes. Blank: nothing is used. The box accepts 1-100000 Hz.</span>
                         </div>
                     </label>
                     <input type="number" id="sampling_freq" value="1000" step="1" min="1" max="100000">
@@ -1758,7 +1761,7 @@
                         <span data-i18n="solid.ui.load_cell_capacity">Load Cell Capacity</span> <span class="unit">(N)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.maximum_thrust_measurement_capacity_of_load">Static-test bench record only (no motor calculation reads it; the solver lists it under unwired_inputs "test_bench_only"). Maximum thrust measurement capacity of load cell. Should be 1.5-2x expected maximum thrust for accuracy. Includes safety margin for unexpected over-pressure events.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.maximum_thrust_measurement_capacity_of_load">Full-scale capacity of the thrust load cell on your static-test stand (N). Test-stand planning only: no motor calculation reads it and no result changes. Blank: nothing is used. The box accepts 1-20000000 N.</span>
                         </div>
                     </label>
                     <input type="number" id="load_cell_capacity" value="5000" step="1" min="1" max="20000000">
@@ -1768,7 +1771,7 @@
                         <span data-i18n="solid.ui.calibration_factor">Calibration Factor</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.sensor_calibration_coefficient_to_convert_raw">Static-test bench record only (no motor calculation reads it; the solver lists it under unwired_inputs "test_bench_only"). Sensor calibration coefficient to convert raw readings to engineering units. Determined through calibration with known weights/pressures. Should be verified before each test.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.sensor_calibration_coefficient_to_convert_raw">Calibration coefficient (dimensionless) that converts the raw sensor reading of your static-test stand to engineering units; it is found by calibrating with known loads or pressures. Test-stand planning only: no motor calculation reads it and no result changes. Blank: nothing is used. The box accepts 0.1-10.</span>
                         </div>
                     </label>
                     <input type="number" id="calibration_factor" value="1.0" step="0.0001" min="0.1" max="10">
@@ -1778,7 +1781,7 @@
                         <span data-i18n="solid.ui.data_collection_time">Data Collection Time</span> <span class="unit">(s)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.total_recording_duration_including_pre_ignition">Static-test bench record only (no motor calculation reads it; the solver lists it under unwired_inputs "test_bench_only"). Total recording duration including pre-ignition baseline and post-burnout data. Should be longer than expected burn time to capture complete motor operation.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.total_recording_duration_including_pre_ignition">Total recording time of your static-test stand (s), including the baseline before ignition and the tail after burnout. Test-stand planning only: no motor calculation reads it and no result changes. Blank: nothing is used. The box accepts 0.1-3600 s.</span>
                         </div>
                     </label>
                     <input type="number" id="data_collection_time" value="10" step="0.1" min="0.1" max="3600">
@@ -1788,7 +1791,7 @@
                         <span data-i18n="solid.ui.filter_cutoff_frequency">Filter Cutoff Frequency</span> <span class="unit">(Hz)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.low_pass_filter_cutoff_frequency_for">Static-test bench record only (no motor calculation reads it; the solver lists it under unwired_inputs "test_bench_only"). Low-pass filter cutoff frequency for noise reduction. Should be high enough to preserve real data but low enough to remove noise. Typically 50-200 Hz for motor testing.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.low_pass_filter_cutoff_frequency_for">Cut-off frequency of the low-pass filter applied to your static-test stand signals (Hz). Test-stand planning only: no motor calculation reads it and no result changes. Blank: nothing is used. The box accepts 1-50000 Hz.</span>
                         </div>
                     </label>
                     <input type="number" id="filter_cutoff" value="100" step="1" min="1" max="50000">
@@ -1798,7 +1801,7 @@
                         <span data-i18n="solid.ui.uncertainty_level">Uncertainty Level</span> <span class="unit">(%)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="solid.ui.overall_measurement_uncertainty_for_monte_carlo">Static-test bench record only: the stated measurement uncertainty of your test setup (%). No calculation reads it - the solver lists it under unwired_inputs "test_bench_only" and the Monte Carlo analysis uses its own fixed input tolerances (measured: changing it changes no result). Blank: nothing is sent.</span>
+                            <span class="tooltip-text" data-i18n="solid.ui.overall_measurement_uncertainty_for_monte_carlo">Stated measurement uncertainty of your static-test stand (%). Test-stand planning only: no calculation reads it, and the Monte Carlo analysis uses its own input tolerances (measured: changing it changes no result). Blank: nothing is used. The box accepts 0-100 %.</span>
                         </div>
                     </label>
                     <input type="number" id="uncertainty_level" value="2" step="0.1" min="0" max="100">
@@ -1881,6 +1884,9 @@
                 <div style="text-align: center; margin-bottom: 15px;">
                     <button type="button" id="mc_run_btn" class="btn btn-primary" onclick="runSolidMonteCarlo()" data-i18n="solid.ui.run_analysis">Run Analysis</button>
                 </div>
+                <!-- V306/BAYAT NR-9: MC yalnız ekrandaki hesabın formuyla koşar;
+                     koşmadığında nedeni burada (sonuç kutusu silinmez). -->
+                <p id="mc_note" role="alert" style="display: none; color: #ff7a85; font-size: 13px; margin: 0 0 10px 0;"></p>
                 <div id="mc_results" style="display: none;"></div>
             </div>
 
@@ -2027,7 +2033,7 @@
                     <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.initial_wet_mass_kg">Initial (Wet) Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.initial_wet_mass_kg_help">Vehicle mass at lift-off (kg), sent as initial_mass to /api/trajectory-analysis. After a motor calculation it is filled with the solver's total mass (design_summary.masses.total_mass_kg) unless you typed a value. Initial − final mass must match the propellant the motor burns (within the endpoint tolerance), otherwise no trajectory is computed and both masses are named. Empty or not a number: the field is not sent and the trajectory endpoint refuses the run, naming the field (no value is assumed).</span></span></span>
                         <input type="number" id="traj_initial_mass" value="12" step="0.1" style="margin-top:auto;">
                     </label>
-                    <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.final_dry_mass_kg">Final (Dry) Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.final_dry_mass_kg_help">Vehicle mass after burnout (kg), sent as final_mass. After a motor calculation it is filled with the solver's dry mass (design_summary.masses.dry_mass_kg) unless you typed a value; add airframe and payload to both masses to fly a real vehicle. Empty or not a number: the field is not sent and the trajectory endpoint refuses the run, naming the field (no value is assumed).</span></span></span>
+                    <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.final_dry_mass_kg">Final (Dry) Mass (kg)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.final_dry_mass_kg_help">Vehicle mass after burnout (kg). After a motor calculation it is filled with the motor dry mass unless you typed a value; add airframe and payload to both masses to fly a real vehicle. Avionics, wiring and the recovery system belong in this mass: the engine dry (flying inert) mass does not contain them. Empty or not a number: the field is not sent and the trajectory refuses the run, naming the field (no value is assumed).</span></span></span>
                         <input type="number" id="traj_final_mass" value="5" step="0.1" style="margin-top:auto;">
                     </label>
                     <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.drag_coefficient">Drag Coefficient</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.drag_coefficient_help">Vehicle drag coefficient (dimensionless) on the reference area, sent as drag_coefficient; it scales the aerodynamic drag over the whole flight. Not filled from the motor calculation. Empty or not a number: the field is not sent and the trajectory endpoint refuses the run, naming the field (no value is assumed).</span></span></span>
@@ -2057,13 +2063,13 @@
                          KONMAZ, böylece çözücü "verilmedi" ile "null geldi"
                          ayrımını yapıp varsayım damgasını basabiliyor
                          (trajectory_analysis.py:476-526). -->
-                    <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.parachute_area_m2">Parachute Area (m2)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_area_m2_help">Projected (canopy) area of the recovery parachute (m²), sent as parachute_area; descent speed scales as 1/√area. Empty: not sent — the solver uses its assumption of 2.0 m² and marks it as assumed in the results.</span></span></span>
+                    <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.parachute_area_m2">Parachute Area (m2)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_area_m2_help">Projected (canopy) area of the recovery parachute (m²); descent speed scales as 1/√area. When given, the descent under the parachute is solved and the landing speed is reported. Empty: no parachute — the descent is not solved and the results say so (no area is assumed). Accepted: greater than 0; 0 or a negative area is rejected with the reason.</span></span></span>
                         <input type="number" id="parachute_area" step="0.1" min="0" placeholder="—" style="margin-top:auto;">
                     </label>
-                    <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.parachute_cd">Parachute Cd</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_cd_help">Parachute drag coefficient referenced to its projected area (dimensionless), sent as parachute_cd. Empty: not sent — the solver uses 1.4 (Hoerner, hemispherical canopy) and marks it as assumed.</span></span></span>
+                    <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.parachute_cd">Parachute Cd</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_cd_help">Parachute drag coefficient referenced to its projected area (dimensionless). Read only when a parachute area is given. Empty: the solver uses 1.4 (Hoerner, hemispherical canopy) and marks it as assumed. Accepted: greater than 0; otherwise it is rejected with the reason.</span></span></span>
                         <input type="number" id="parachute_cd" step="0.05" min="0" placeholder="—" style="margin-top:auto;">
                     </label>
-                    <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.parachute_deploy_delay_s">Deploy Delay after Apogee (s)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_deploy_delay_s_help">Time from apogee to canopy inflation (s), sent as parachute_deploy_delay; the vehicle falls ballistically during this delay. Empty: not sent — the solver uses 2.0 s and marks it as assumed.</span></span></span>
+                    <label style="display:flex; flex-direction:column; gap:4px; font-size:13px;"><span><span data-i18n="solid.ui.parachute_deploy_delay_s">Deploy Delay after Apogee (s)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="solid.ui.parachute_deploy_delay_s_help">Time from apogee to canopy inflation (s); the vehicle falls ballistically during this delay. Read only when a parachute area is given. Empty: the solver uses 2.0 s and marks it as assumed. Accepted: 0 or more; a negative delay is rejected with the reason.</span></span></span>
                         <input type="number" id="parachute_deploy_delay" step="0.5" min="0" placeholder="—" style="margin-top:auto;">
                     </label>
                 </div>
@@ -3600,8 +3606,10 @@
             //  * itki = ana tasarımın itki eğrisi {time, thrust} (ortalama
             //    itkiyle dikdörtgen profil YOK; wagon_wheel'de tepe ivme
             //    üç kat eksik çıkıyordu);
-            //  * Isp = isp_sea_level — eğrinin hesaplandığı ortam basıncındaki
-            //    Isp (= total_impulse / (m_p·g0), çözücü özdeşliği);
+            //  * Isp = specific_impulse — eğrinin hesaplandığı ortam basıncındaki
+            //    Isp (= total_impulse / (m_p·g0), çözücü özdeşliği). V306/
+            //    KATI-MODEL (M-KATI-20): isp_sea_level artık AYNI lülenin deniz
+            //    seviyesi Isp'sidir; test irtifası verilince eğriyle tutmaz;
             //  * lüle çıkış alanı + eğrinin ortam basıncı → uç itkiyi
             //    irtifayla telafi eder (P4B3-22 sözleşmesi).
             // Yanma süresi eğriden gelir; skaler itki/süre gönderilmez.
@@ -3610,8 +3618,8 @@
                              && cr.thrust_curve.time.length >= 2
                              && cr.thrust_curve.time.length === cr.thrust_curve.thrust.length)
                 ? { time: cr.thrust_curve.time, thrust: cr.thrust_curve.thrust } : null;
-            const trIsp = (typeof cr.isp_sea_level === 'number' && isFinite(cr.isp_sea_level)
-                           && cr.isp_sea_level > 0) ? cr.isp_sea_level : null;
+            const trIsp = (typeof cr.specific_impulse === 'number' && isFinite(cr.specific_impulse)
+                           && cr.specific_impulse > 0) ? cr.specific_impulse : null;
             // V301/UÇUŞ NK-14/NK-24: motor formu son hesaptan sonra
             // değiştiyse yörünge ESKİ motorla koşmaz; değişen alanlar adıyla.
             const _anlik = window.ucusHesapFormu;
@@ -3701,6 +3709,9 @@
             const recDiv = document.getElementById('trajectory_recovery');
             if (recDiv) recDiv.innerHTML = '';
             div.innerHTML = '<p style="text-align:center; color:#7d97a5; padding:40px;">' + T('solid.js.computing_trajectory', 'Computing trajectory...') + '</p>';
+            if (window.FlightHandoff && FlightHandoff.renderTrajectoryNotes) {
+                FlightHandoff.renderTrajectoryNotes(div, null);   // eski künye kalmaz
+            }
             try {
                 const resp = await fetch('/api/trajectory-analysis', {
                     method: 'POST',
@@ -3724,12 +3735,48 @@
                     // kütle ve fark sözlükten (EN + TR), sayılar gövdeden.
                     const govde = Object.assign({}, d);
                     if (d.error === 'inconsistent_propellant_budget' && d.message_params) {
-                        govde.message = TF('solid.msg.trajectory_propellant_budget_mismatch',
-                            d.message_params, d.message || d.error);
+                        // V306/UÇUŞ NR-10: ÖLÇÜLDÜ (28 Eki) ileti "2,35463 kg",
+                        // "%2,17562" ve "Alan: isp, initial_mass, final_mass"
+                        // diyordu. Sayılar ekran basamağıyla (kütle 3, Isp 1,
+                        // yüzde 2 ondalık); alan adları sayfanın alan
+                        // kimliğine çevrilir ki ileti ETİKETİ yazsın ('isp'
+                        // formda alan değil — cümle onu zaten anıyor).
+                        const p = d.message_params;
+                        govde.message = TF('solid.msg.trajectory_propellant_budget_mismatch', {
+                            mass_budget_kg: numTxt(p.mass_budget_kg, 3),
+                            implied_kg: numTxt(p.implied_kg, 3),
+                            isp_s: numTxt(p.isp_s, 1),
+                            disagreement_pct: numTxt(p.disagreement_pct, 2),
+                            accepted_pct: numTxt(p.accepted_pct, 0)
+                        }, d.message || d.error);
+                    }
+                    if (Array.isArray(d.invalid_fields)) {
+                        govde.invalid_fields = d.invalid_fields
+                            .filter(function (f) { return f && YORUNGE_ALAN_KIMLIGI[f.field]; })
+                            .map(function (f) {
+                                return Object.assign({}, f, { field: YORUNGE_ALAN_KIMLIGI[f.field] });
+                            });
+                    }
+                    if (Array.isArray(d.missing_fields)) {
+                        govde.missing_fields = d.missing_fields.map(function (f) {
+                            return (typeof f === 'string' && YORUNGE_ALAN_KIMLIGI[f]) || f;
+                        });
                     }
                     throw new Error(globalThis.HRMAReject
                         ? HRMAReject.metni(govde, resp.status)
                         : (govde.message || d.error || ('HTTP ' + resp.status)));
+                }
+                // V306/UÇUŞ-2: künye (uçan itki, irtifa düzeltmesi, yük
+                // çarpanı, düzlemsel model + atış açısı); kalkış yoksa grafik
+                // yerine hüküm (M-KATI-29: araç zemin altına çiziliyordu).
+                const _kunye = (window.FlightHandoff && FlightHandoff.renderTrajectoryNotes)
+                    ? FlightHandoff.renderTrajectoryNotes(div, d, 'motor_thrust_curve') : { draw: true };
+                if (d.status === 'success' && !_kunye.draw) {
+                    if (window.Plotly && Plotly.purge) { try { Plotly.purge(div); } catch (e) { /* yok */ } }
+                    div.innerHTML = '<p style="text-align:center;color:#ff7a85;padding:40px;">'
+                        + (globalThis.escapeNoticeText || String)(_kunye.message) + '</p>';
+                    _solidYorungeCizimSonucu = cr;
+                    return;
                 }
                 if (d.status !== 'success' || !d.plot_data) {
                     throw new Error(d.error || T('solid.msg.trajectory_data_could_not_be_retrieved', 'Trajectory data could not be retrieved'));
@@ -3745,6 +3792,7 @@
                 // "çalışıyor" diyordu.
                 div.innerHTML = '';
                 Plotly.newPlot(div, fig.data, hrmaFigureLayout(fig.layout), HRMA_PLOT_CONFIG);
+                _solidYorungeCizimSonucu = cr;   // V306/UÇUŞ NR-10
                 // İniş fazının hangi modelle çözüldüğü grafiğin altında
                 // yazıyla da beyan edilir (FAZ 6, T68).
                 renderRecoverySummary((d.trajectory_data || {}).recovery, chute);
@@ -3839,6 +3887,20 @@
         }
 
         // Yörünge girdilerini mevcut tasarımdan ön-doldur (kullanıcı düzenleyebilir).
+        //
+        // V306/UÇUŞ NR-10 — ÖLÇÜLDÜ (V306/ucus/olcum_nr10_once.json; son
+        // kullanıcı turu 28 Eki ekran 16): KNDX örneği → yakıt APCP →
+        // hesap: yanma süresi 2,611 s'ye güncellendi, kütleler 6,141 /
+        // 3,734 kg'da (KNDX) KALDI ve yörünge "itici kütlesi tutmuyor"
+        // dedi; eski 3,11 km grafiği ekranda durdu. Kök: örnek proje açılınca
+        // proje geri yüklemesinin YAPAY input olayı alanları "elle yazıldı"
+        // damgalıyordu; tohum onları hiç ezmiyordu. Şimdi: (1) yalnız gerçek
+        // yazma damgalar (FlightHandoff.isUserEdit); (2) kütleler ortak
+        // yardımcıdan dolar (FlightHandoff.seedField) — kullanıcının yazdığı
+        // korunur, tasarım değeri farklıysa alanın altında yazılır; (3) ilk
+        // kütle = alanda kalan kuru kütle + motorun itici kütlesi (bütçe
+        // her durumda tutar); (4) yeni hesapta eski grafik temizlenir.
+        let _solidYorungeCizimSonucu = null;
         function prefillTrajectoryInputs(results) {
             if (!results) return;
             const setIfEmptyOrAuto = function (id, val, digits) {
@@ -3847,6 +3909,17 @@
                 if (el.dataset.userOverride === 'true') return;
                 el.value = val.toFixed(digits);
             };
+            const cizim = document.getElementById('trajectory_plots');
+            if (cizim && _solidYorungeCizimSonucu && _solidYorungeCizimSonucu !== results) {
+                _solidYorungeCizimSonucu = null;
+                if (window.Plotly && Plotly.purge) { try { Plotly.purge(cizim); } catch (e) { /* yok */ } }
+                cizim.innerHTML = '<p style="text-align:center; color:#7d97a5; padding:40px;">'
+                    + ortakMetin('flight.staleTrajectory', 'The engine was recalculated; the previous '
+                        + 'trajectory belonged to the earlier design and was cleared. Press '
+                        + 'Calculate Trajectory again.') + '</p>';
+                const kurtarma = document.getElementById('trajectory_recovery');
+                if (kurtarma) kurtarma.innerHTML = '';
+            }
             // FAZ 6 (T05, 3 Ağustos 2026): kütleler ÇÖZÜCÜDEN gelir, form
             // alanlarından değil. Form kütle bloğu kullanıcının beyan ettiği
             // bileşen kütlelerinin toplamıdır (varsayılanda 4,300 kg kuru) ve
@@ -3856,8 +3929,19 @@
             // sayfanın aynı koşuda ilan ettiği Isp ise 199,1 s idi. Çözücünün
             // kütleleriyle fark tam propellant_mass kadar olur.
             const masses = (results.design_summary || {}).masses || {};
-            setIfEmptyOrAuto('traj_initial_mass', masses.total_mass_kg, 3);
-            setIfEmptyOrAuto('traj_final_mass', masses.dry_mass_kg, 3);
+            const FH = window.FlightHandoff;
+            if (FH && FH.seedField) {
+                const poz = function (v) { return typeof v === 'number' && isFinite(v) && v > 0; };
+                const sonEl = document.getElementById('traj_final_mass');
+                const kuruAlan = FH.seedField(sonEl, masses.dry_mass_kg, 3, 'kg');
+                FH.seedField(document.getElementById('traj_initial_mass'),
+                    (poz(kuruAlan) && poz(results.propellant_mass))
+                        ? kuruAlan + results.propellant_mass : null, 3, 'kg');
+                FH.renderInertLedger(sonEl, FH.vehicleFor ? FH.vehicleFor(results) : null);
+            } else {
+                setIfEmptyOrAuto('traj_initial_mass', masses.total_mass_kg, 3);
+                setIfEmptyOrAuto('traj_final_mass', masses.dry_mass_kg, 3);
+            }
             // V301/K-C1: kilitli alan — eğrinin son zaman noktası (gösterim).
             const _tc = results.thrust_curve || {};
             const _tbEgri = (Array.isArray(_tc.time) && _tc.time.length)
@@ -3878,6 +3962,16 @@
                 setIfEmptyOrAuto('traj_ref_area', area, 5);
             }
         }
+
+        // V306/UÇUŞ NR-13: araç (sunucu normalize) yayımdan SONRA gelir;
+        // kuru kütlenin kalem satırı o anda basılır (tek kaynak: aynı araç).
+        document.addEventListener('hrma:flight-vehicle', function (e) {
+            const d = e && e.detail;
+            if (d && d.results && d.results === window.currentResults && window.FlightHandoff) {
+                FlightHandoff.renderInertLedger(document.getElementById('traj_final_mass'),
+                    d.vehicle);
+            }
+        });
 
         // 6-DOF paneli girdilerini son hesaptan ön-doldur (FAZ 6, T23).
         // Analiz rıhtımının başlığı "Inputs are pre-filled from the latest
@@ -4364,6 +4458,11 @@
                 return T('solid.msg.unwired_structural_output',
                     'Output of the structural analysis; your value is not used');
             },
+            // V306/TANE C1-K4: aviyonik araç kalemidir (yapısal çıktı değil).
+            vehicle_item_not_motor: function () {
+                return T('solid.msg.unwired_vehicle_item_not_motor',
+                    'Vehicle item, not part of the motor: the motor solver does not read it; it appears only in the mass reconciliation table');
+            },
             test_bench_only: function () {
                 return T('solid.msg.unwired_test_bench_only',
                     'Test-bench parameter: describes the measurement chain, not the motor');
@@ -4486,8 +4585,15 @@
             //     kullanıcının yazdığı sayıyla HESAPLANMADI.
             var gd = results.grain_design || {};
             var kirpilan = gd.clipped_inputs;
+            // V306/TANE C1-K5: değer VERİLMEMİŞ alanın varsayılanı geometrik
+            // sınıra indirildiyse "girdiğiniz değer kullanılmadı" denmez
+            // (kullanıcı değer girmedi); aşağıdaki varsayılan rozeti kuralı
+            // adıyla söyler.
+            var varsayilanListe = Array.isArray(gd.assumed_defaults)
+                ? gd.assumed_defaults : [];
             if (Array.isArray(kirpilan)) {
                 kirpilan.forEach(function (id) {
+                    if (varsayilanListe.indexOf(id) !== -1) return;
                     var el = document.getElementById(id);
                     var grup = el ? el.closest('.form-group') : null;
                     if (!grup) {
@@ -4511,8 +4617,12 @@
                         solidDeclaredFieldsNotOnPage.push(id);
                         return;
                     }
-                    grup.appendChild(solidBadgeNode(
-                        T('solid.msg.assumed_default',
+                    var sinirli = Array.isArray(kirpilan)
+                        && kirpilan.indexOf(id) !== -1;
+                    grup.appendChild(solidBadgeNode(sinirli
+                        ? T('solid.msg.assumed_default_limited',
+                            'No value supplied: the solver used its default, limited to the geometric maximum of this grain; the value used is listed at the top of the results')
+                        : T('solid.msg.assumed_default',
                           'No value supplied: the solver assumed its own default'),
                         AMBER, 'grain_design.assumed_defaults/' + id));
                 });
@@ -4621,8 +4731,11 @@
         }
 
         function updateExpansionRatio() {
-            const throatDiameter = parseFloat(document.getElementById('throat_diameter').value) || 15;
-            const exitDiameter = parseFloat(document.getElementById('exit_diameter').value) || 35;
+            // V306/TANE C1-K1: boş kutuda 15 / 35 mm yedeği uydurulmaz
+            // (oran 5,44 diye basılıyordu); iki çap da sayı değilse oran
+            // yazılmaz.
+            const throatDiameter = parseFloat(document.getElementById('throat_diameter').value);
+            const exitDiameter = parseFloat(document.getElementById('exit_diameter').value);
             
             if (throatDiameter > 0 && exitDiameter > 0) {
                 const expansionRatio = Math.pow(exitDiameter / throatDiameter, 2);
@@ -4857,8 +4970,31 @@
             } else if (grainType === 'finocyl' || grainType === 'slotted') {
                 const isFin = (grainType === 'finocyl');
                 const nRaw = grainPreviewNum(isFin ? 'fin_count' : 'slot_count');
-                const wRaw = grainPreviewNum(isFin ? 'fin_width' : 'slot_width');
-                const dRaw = grainPreviewNum(isFin ? 'fin_length' : 'slot_depth');
+                let wRaw = grainPreviewNum(isFin ? 'fin_width' : 'slot_width');
+                let dRaw = grainPreviewNum(isFin ? 'fin_length' : 'slot_depth');
+                // V306/TANE C1-K5: genişlik/derinlik boşsa çözücü kendi
+                // varsayılanını geometrik sınırla kullanır. Önizleme o sınırı
+                // YENİDEN HESAPLAMAZ: aynı tipin son sonucu varsa çözücünün
+                // KULLANDIĞI değerle çizer (grain_design), yoksa çizmez ve
+                // nedenini söyler.
+                if (wRaw === null || dRaw === null) {
+                    const sonGd = (window.currentResults
+                                   && window.currentResults.grain_design) || null;
+                    if (sonGd && sonGd.grain_type === grainType) {
+                        const gW = sonGd[isFin ? 'fin_width_mm' : 'slot_width_mm'];
+                        const gD = sonGd[isFin ? 'fin_depth_mm' : 'slot_depth_mm'];
+                        if (wRaw === null && typeof gW === 'number' && isFinite(gW)) wRaw = gW;
+                        if (dRaw === null && typeof gD === 'number' && isFinite(gD)) dRaw = gD;
+                        note = T('solid.ui.preview_slot_from_solver',
+                                 'Blank width or depth drawn with the value the solver used in the last result');
+                    }
+                    if (nRaw !== null && (wRaw === null || dRaw === null)) {
+                        preview.innerHTML = grainPreviewUnavailable(
+                            T('solid.ui.preview_slot_params_blank',
+                              'Width or depth is blank: the solver will use its default, limited to this grain geometry; the section is drawn after Calculate'));
+                        return;
+                    }
+                }
                 if (nRaw === null || wRaw === null || dRaw === null) {
                     preview.innerHTML = grainPreviewUnavailable(
                         T('solid.ui.preview_needs_slot_params',
@@ -4971,7 +5107,42 @@
         function syncAmbientPressureInterlock() {
             const p = document.getElementById('atm_pressure');
             if (!p) return;
-            p.disabled = (solidAmbientAltitudeM() !== null);
+            const kilitli = (solidAmbientAltitudeM() !== null);
+            // V306/KATI-MODEL (M-KATI-20): devre dışı alan eskiden 101,325
+            // kPa göstermeye devam ediyordu; çözücü ise irtifanın ISA
+            // basıncını kullanıyordu (tur L3: 47,18 kPa). Kilitliyken alan
+            // sayı göstermez (kullanıcının değeri saklanır, kilit kalkınca
+            // geri gelir); kullanılan basınç hesaptan sonra altında yazılır.
+            // Saklanan değer işlevin kendi üstünde durur (dış değişken yok).
+            const sakla = syncAmbientPressureInterlock;
+            if (kilitli && !p.disabled) {
+                sakla.kullaniciDegeri = p.value;
+                p.value = '';
+                p.placeholder = (typeof T === 'function')
+                    ? T('solid.ui.atm_from_altitude', 'from Test Altitude (ISA)') : '';
+            } else if (!kilitli && p.disabled) {
+                if (typeof sakla.kullaniciDegeri === 'string') p.value = sakla.kullaniciDegeri;
+                p.placeholder = '';
+            }
+            p.disabled = kilitli;
+        }
+
+        // V306/KATI-MODEL (M-KATI-20): çözücünün kullandığı ortam basıncı
+        // (design_ambient) alanın altında; yoksa not basılmaz.
+        function renderSolverAmbientNote(results) {
+            const el = document.getElementById('atm_pressure_solver_note');
+            if (!el) return;
+            const da = (results && results.design_ambient) || null;
+            if (!da || typeof da.pressure_kpa !== 'number' || !isFinite(da.pressure_kpa)) {
+                el.style.display = 'none'; el.textContent = ''; return;
+            }
+            const p = numTxt(da.pressure_kpa, 3);
+            el.textContent = (da.source === 'test_altitude_isa' && typeof da.altitude_m === 'number')
+                ? TF('solid.msg.solver_ambient_altitude', { p: p, h: numTxt(da.altitude_m, 0) },
+                     'Pressure used by the solver: {p} kPa (ISA at {h} m)')
+                : TF('solid.msg.solver_ambient_pressure', { p: p },
+                     'Pressure used by the solver: {p} kPa');
+            el.style.display = 'block';
         }
 
         // ÖH D31 · arayuz-panel a3 — ÖK-21 FORM KATMANI (P12bS1-05, P12bB2-03).
@@ -5613,16 +5784,35 @@
                 if (typeof _retAlanlariniIsaretle === 'function') _retAlanlariniIsaretle(null);
                 if (typeof _eskiSonucBandi === 'function') _eskiSonucBandi(false);
                 currentResults = results;
+                // V306/BAYAT NR-9: motor koşusunun TEK kaydı (sonuç + bu
+                // sonucu üreten İSTEK formu). Yörünge/6-DOF aynı kaydı okur
+                // (ucusHesapFormunuKaydet aynı sonuç için kaydı ezmez); kayıt
+                // isteğin formundan alınır, hesap sürerken yazılan değer
+                // bu koşuya karışmaz.
+                window.ucusHesapFormu = { results: results, form: data };
                 // A1 — uçuş köprüsü (bkz. app.js'teki eş çağrı).
                 if (window.FlightHandoff) {
                     window.FlightHandoff.publish(results, { motor_type: 'solid' });
                 }
                 displayResults(results);
+                // NR-9: türev panel (Monte Carlo) bu koşuya ait değilse temizlenir.
+                if (typeof _solidMcKosuyuDenetle === 'function') {
+                    _solidMcKosuyuDenetle(window.ucusHesapFormu);
+                }
                 // Analysis Dock önerilerini en güncel sonuçla tazele
                 // (kullanıcının elle değiştirdiği alanlar ezilmez)
                 if (window.AnalysisDock) AnalysisDock.refreshSuggestions();
                 
             } catch (error) {
+                // V306/BAYAT NR-15: hesap hatası bildirimi TEKTİR — yeni hata
+                // öncekinin yerini alır (ölçüldü: V306/bayat/olcum_nr15_once.json,
+                // katı: ikinci hatalı denemede iki bildirim üst üste; sıvıdaki
+                // _liquidHesapHatalariniTemizle deseni).
+                if (typeof document.querySelectorAll === 'function') {
+                    Array.prototype.forEach.call(
+                        document.querySelectorAll('#toast-stack [data-solid-calc-error]'),
+                        function (el) { if (el.parentNode) el.parentNode.removeChild(el); });
+                }
                 showError(T('solid.js.error_prefix', 'Error') + ': ' + (globalThis.escapeNoticeText || String)(error.message));
                 const _yigin = (typeof document.getElementById === 'function')
                     ? document.getElementById('toast-stack') : null;
@@ -5678,6 +5868,8 @@
             bant.id = 'hdEskiSonucBandi';
             bant.className = 'hd-eski-sonuc-bandi';
             bant.setAttribute('role', 'status');
+            // V306/BAYAT: dil değişiminde şerit de çevrilir (I18N.apply).
+            bant.setAttribute('data-i18n', 'common.staleResults');
             bant.textContent = ortakMetin('common.staleResults',
                 'OLD RESULT: the last calculation failed; the results below belong to the previous successful calculation and do not reflect the current inputs.');
             kap.insertBefore(bant, kap.firstChild);
@@ -6355,12 +6547,107 @@
 
         // ---- Monte Carlo (Üretim Toleransları) — /api/solid-monte-carlo ----
         // İstek gövdesi: collectAllParameters() + {n_samples: 300}.
+        //
+        // V306/BAYAT NR-9 — MONTE CARLO HANGİ MOTOR KOŞUSUNA AİT?
+        // ÖLÇÜLDÜ (V306/bayat/olcum_nr9_once.json; 28 Eki turu ekran 15):
+        // KNDX → hesap → MC ("%51,3 Başarı Oranı (300 koşu)", itki anma
+        // 1299 N, Isp 125,3 s) → yakıt APCP → hesap: Performans Özeti yeni
+        // motoru (Isp 216,8 s, 1917 N) gösterirken MC paneli KNDX koşusunu
+        // İŞARETSİZ gösteriyordu. Kimlik TEK: motor koşusunun kaydı
+        // `window.ucusHesapFormu` = {results, form} (yörünge, 6-DOF ve
+        // FlightHandoff.vehicleFor aynı kaydı kullanır; ikinci desen yok).
+        //  * MC yalnız ekrandaki hesabın formuyla koşar; form son hesaptan
+        //    sonra değiştiyse koşmaz, değişen alanlar etiketiyle yazılır
+        //    (solid.msg.trajectory_stale_motor deseni).
+        //  * Yeni motor hesabı MC'nin koşusundan farklı bir motoru
+        //    hesapladıysa eski MC TEMİZLENİR ve nedeni yazılır (yörüngenin
+        //    flight.staleTrajectory deseni). Motor alanları aynıysa (aynı
+        //    motorun yeniden hesabı) sonuç yeni kayda bağlanır.
+        //  * MC koşarken motor yeniden hesaplanırsa gelen yanıt çizilmez.
+        let _solidMcKosusu = null;    // ekrandaki MC'nin ait olduğu koşu kaydı
+        let _solidMcSonVeri = null;   // dil değişiminde yeniden çizim için
+        function _solidMcDegisenAlanlar(kayit, form) {
+            if (!kayit || !form || !window.FlightHandoff
+                    || typeof FlightHandoff.changedMotorFields !== 'function') return null;
+            return FlightHandoff.changedMotorFields(kayit.form, form, kayit.results) || [];
+        }
+        function _solidMcEtiket(ad) {
+            return (window.HRMAReject && typeof HRMAReject.etiket === 'function'
+                    && HRMAReject.etiket(ad)) || ad;
+        }
+        function _solidMcKutuMetni(metin, hata) {
+            const box = document.getElementById('mc_results');
+            if (!box) return;
+            ['mc_hist_thrust', 'mc_hist_isp'].forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el && window.Plotly && Plotly.purge) { try { Plotly.purge(el); } catch (e) { /* yok */ } }
+            });
+            box.innerHTML = '<p data-onceki-tasarim="1" style="color:'
+                + (hata ? '#ff7a85' : 'var(--hd-orange, #ff8c33)')
+                + '; font-size:13px; margin:8px 0;"></p>';
+            box.firstChild.setAttribute('role', hata ? 'alert' : 'status');
+            box.firstChild.textContent = metin;
+            box.style.display = 'block';
+        }
+        // Başarılı motor hesabından hemen sonra çağrılır (calculateSolid).
+        function _solidMcKosuyuDenetle(kayit) {
+            if (!_solidMcKosusu || !kayit || _solidMcKosusu === kayit) return;
+            const degisen = _solidMcDegisenAlanlar(_solidMcKosusu, kayit.form);
+            if (degisen !== null && !degisen.length) { _solidMcKosusu = kayit; return; }
+            _solidMcKosusu = null;
+            _solidMcSonVeri = null;
+            _solidMcKutuMetni(T('solid.msg.mc_stale_design',
+                'The motor was recalculated; the previous Monte Carlo result belonged to the '
+                + 'earlier design and was cleared. Run the analysis again.'), false);
+        }
+        function _solidMcNotu(metin) {
+            const not = document.getElementById('mc_note');
+            if (!not) return;
+            not.textContent = metin || '';
+            not.style.display = metin ? 'block' : 'none';
+        }
+        // V306/BAYAT (kalem 5): dil değişince MC paneli de yeni dilde çizilir
+        // (saklanan yanıtla; yeni istek yok). Temizlenmiş panelin notu da.
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!window.I18N || typeof window.I18N.onChange !== 'function') return;
+            window.I18N.onChange(function () {
+                const box = document.getElementById('mc_results');
+                if (_solidMcSonVeri && _solidMcKosusu) {
+                    try { renderSolidMonteCarlo(_solidMcSonVeri); } catch (e) { /* çizim yok */ }
+                } else if (box && box.querySelector('[data-onceki-tasarim]')) {
+                    box.firstChild.textContent = T('solid.msg.mc_stale_design',
+                        'The motor was recalculated; the previous Monte Carlo result belonged to the '
+                        + 'earlier design and was cleared. Run the analysis again.');
+                }
+                _solidMcNotu('');
+            });
+        });
         async function runSolidMonteCarlo() {
             const btn = document.getElementById('mc_run_btn');
             const origText = btn ? btn.textContent : '';
+            _solidMcNotu('');
+            // NR-9: MC ekrandaki hesabın formuyla koşar (yukarıdaki künye).
+            const kimlik = window.ucusHesapFormu || null;
+            const formSimdi = collectAllParameters();
+            if (!window.currentResults || !kimlik || kimlik.results !== window.currentResults) {
+                _solidMcNotu(T('solid.msg.mc_needs_calc',
+                    'Run a motor calculation first: Monte Carlo samples the manufacturing '
+                    + 'tolerances around the calculated motor.'));
+                return;
+            }
+            const degisen = _solidMcDegisenAlanlar(kimlik, formSimdi);
+            if (degisen && degisen.length) {
+                _solidMcNotu(TF('solid.msg.mc_stale_motor',
+                    { fields: degisen.map(_solidMcEtiket).join(', ') },
+                    'The motor form has changed since the last calculation ({fields}); Monte '
+                    + 'Carlo samples the calculated motor, so the result would belong to a '
+                    + 'different motor than the one in the Performance Summary. Press Calculate '
+                    + 'first, then run the analysis.'));
+                return;
+            }
             if (btn) { btn.disabled = true; btn.textContent = T('solid.js.computing', 'Computing...'); }
             try {
-                const data = collectAllParameters();
+                const data = formSimdi;
                 data.n_samples = 300;
                 const response = await fetch('/api/solid-monte-carlo', {
                     method: 'POST',
@@ -6375,8 +6662,11 @@
                     const govde = Object.assign({}, mc);
                     if (mc.error === 'solid_monte_carlo_missing_inputs'
                             && Array.isArray(mc.missing_fields)) {
+                        // V306/BAYAT (kalem 5): eksik alanlar ham adla değil
+                        // formdaki etiketiyle (etiket yoksa ad aynen kalır).
                         govde.message = TF('solid.msg.monte_carlo_missing_inputs',
-                            { fields: mc.missing_fields.join(', ') }, mc.message || mc.error);
+                            { fields: mc.missing_fields.map(_solidMcEtiket).join(', ') },
+                            mc.message || mc.error);
                         delete govde.missing_fields;
                     }
                     throw new Error(globalThis.HRMAReject
@@ -6384,8 +6674,26 @@
                         : (govde.message || mc.error
                            || T('solid.msg.monte_carlo_analysis_failed', 'Monte Carlo analysis failed')));
                 }
+                // NR-9: koşarken motor yeniden hesaplandıysa ve motor
+                // alanları değiştiyse bu dağılım ekrandaki motora ait değil.
+                const simdiki = window.ucusHesapFormu || null;
+                if (simdiki !== kimlik) {
+                    const fark = _solidMcDegisenAlanlar(kimlik, simdiki && simdiki.form);
+                    if (fark === null || fark.length) {
+                        _solidMcKosusu = null;
+                        _solidMcSonVeri = null;
+                        _solidMcKutuMetni(T('solid.msg.mc_stale_design',
+                            'The motor was recalculated; the previous Monte Carlo result belonged to the '
+                            + 'earlier design and was cleared. Run the analysis again.'), false);
+                        return;
+                    }
+                }
                 renderSolidMonteCarlo(mc);
+                _solidMcKosusu = simdiki;
+                _solidMcSonVeri = mc;
             } catch (error) {
+                _solidMcKosusu = null;
+                _solidMcSonVeri = null;
                 // V301/K-C1 (NK-53): hata panelin KENDİ kutusuna yazılır ve
                 // bir öncekinin yerini alır; her denemede yeni bir köşe
                 // bildirimi açılıp üst üste yığılmaz.
@@ -6473,8 +6781,43 @@
                   + '</p>'
                 : '';
 
-            const criteriaText = mc.criteria
-                ? '<p style="margin-top:10px; font-size:12px; color:#7d97a5;">' + mc.criteria + '</p>'
+            // V306/BAYAT (kalem 5): kabul ölçütü cümlesi çözücüde YALNIZ
+            // Türkçe ve noktalı ondalıkla kuruluyordu (EN ekranda Türkçe
+            // cümle; TR ekranda "n ±0.005"). Sayılar ucun makine alanından
+            // (criteria_detail — kabul testiyle aynı sayılar), cümle
+            // sözlükten, ondalık etkin dilden. Ayrıntı yoksa ucun cümlesi
+            // aynen (metin olarak) kalır.
+            const kd = (mc.criteria_detail && typeof mc.criteria_detail === 'object')
+                ? mc.criteria_detail : null;
+            const sayiK = function (v) {
+                const x = Number(Number(v).toPrecision(6));
+                return numTxt(x, (String(x).split('.')[1] || '').length);
+            };
+            const yuzde = function (v) { return sayiK(v * 100); };
+            let kriterMetni = '';
+            if (kd && ['thrust_band_rel', 'isp_band_rel', 'max_pressure_factor',
+                       'burn_rate_a_rel_sigma', 'burn_rate_n_abs_sigma',
+                       'density_rel_sigma', 'c_star_rel_sigma'].every(function (k) {
+                           return typeof kd[k] === 'number' && isFinite(kd[k]); })) {
+                kriterMetni = TF('solid.msg.mc_criteria', {
+                    thrust: yuzde(kd.thrust_band_rel), isp: yuzde(kd.isp_band_rel),
+                    pmax: sayiK(kd.max_pressure_factor), a: yuzde(kd.burn_rate_a_rel_sigma),
+                    n: sayiK(kd.burn_rate_n_abs_sigma), rho: yuzde(kd.density_rel_sigma),
+                    cstar: yuzde(kd.c_star_rel_sigma),
+                    law: kd.burn_rate_law
+                        ? TF('solid.msg.mc_criteria_law', { law: String(kd.burn_rate_law) },
+                             " (applied as an identical factor on the base rate of the piecewise '{law}' law)")
+                        : ''
+                }, 'Acceptance: thrust ±{thrust}%, Isp ±{isp}%, peak pressure ≤ nominal × {pmax}; 1σ: a ±{a}%, n ±{n}{law}, density ±{rho}%, C* ±{cstar}%');
+            } else if (mc.criteria) {
+                kriterMetni = String(mc.criteria);
+            }
+            const kriterKac = (globalThis.escapeNoticeText || function (v) {
+                return String(v).replace(/[&<>"']/g, function (c) {
+                    return ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]; });
+            });
+            const criteriaText = kriterMetni
+                ? '<p style="margin-top:10px; font-size:12px; color:#7d97a5;">' + kriterKac(kriterMetni) + '</p>'
                 : '';
 
             box.innerHTML = successCard + statsGrid + histGrid + failWarn + criteriaText;
@@ -6551,6 +6894,14 @@
             const metricsDiv = document.getElementById('performanceMetrics');
             const metrics = [
                 { label: T('solid.msg.sea_level_isp', 'Sea Level Isp'), value: results.isp_sea_level, decimals: 1, unit: 's' },
+                // V306/KATI-MODEL (M-KATI-20): eğrinin çözüldüğü ortam deniz
+                // seviyesi değilse o ortamın Isp'si AYRI kartta, ortamıyla.
+                // Ortamın kendisi (irtifa, basınç) atmosfer alanının altında
+                // tek yerde yazılır (renderSolverAmbientNote).
+                ...((results.design_ambient && results.design_ambient.is_sea_level === false)
+                    ? [{ label: T('solid.msg.isp_test_ambient', 'Isp at test ambient'),
+                         value: results.isp_design_ambient, decimals: 1, unit: 's' }]
+                    : []),
                 { label: T('solid.msg.vacuum_isp', 'Vacuum Isp'), value: results.isp_vacuum, decimals: 1, unit: 's' },
                 { label: T('solid.msg.average_thrust', 'Average Thrust'), value: results.average_thrust, decimals: 0, unit: 'N' },
                 // V301/K-C1 (NK-28): katı motorun en kritik iki sayısı. Tepe
@@ -6563,7 +6914,10 @@
                 { label: T('solid.msg.peak_thrust', 'Peak Thrust'), value: results.max_thrust, decimals: 0, unit: 'N' },
                 { label: T('solid.msg.peak_chamber_pressure', 'Peak Chamber Pressure'), value: (results.throat_sizing || {}).peak_chamber_pressure_bar, decimals: 1, unit: 'bar' },
                 { label: T('solid.msg.burn_time', 'Burn Time'), value: results.burn_time, decimals: 2, unit: 's' },
-                { label: T('solid.msg.total_impulse', 'Total Impulse'), value: results.total_impulse / 1000, decimals: 1, unit: 'kN·s' },
+                // V306/RAPOR-HATA (M-KATI-18 / kalem 6b): manşet 'kN·s' ve 1 ondalıkla
+                // İKİ anlamlı basamağa iniyordu (L1 2 125,6 N·s ve KDX-002 2 087,0 N·s
+                // ikisi de '2,1 kN·s'); itki kartlarının kuralıyla (N, tam sayı) basılır.
+                { label: T('solid.msg.total_impulse', 'Total Impulse'), value: results.total_impulse, decimals: 0, unit: 'N·s' },
                 { label: T('solid.msg.c_efficiency', 'C* Efficiency'), value: results.detailed_analysis?.performance_metrics?.c_star_efficiency_percent, decimals: 1, unit: '%' },
                 { label: T('solid.msg.thrust_coefficient', 'Thrust Coefficient'), value: results.detailed_analysis?.performance_metrics?.average_thrust_coefficient, decimals: 2, unit: '' },
                 { label: T('solid.ui.propellant_mass', 'Propellant Mass'), value: results.propellant_mass, decimals: 2, unit: 'kg' }
@@ -6655,6 +7009,7 @@
             // Atıl kütle dökümü (FAZ 6, T03 kalan yarı): bileşen alanları
             // çözücünün sayılarıyla dolar, uzlaştırma tablosu tazelenir.
             applyInertBreakdown(results);
+            renderSolverAmbientNote(results);
             updateWebThickness(results);
             // ÖH D28 · P12bB2-04 / -11 / -12: çözücünün beyanları
             // (unwired_inputs, clipped_inputs, assumed_defaults) ve
@@ -7810,6 +8165,30 @@
             return html + '</div>';
         }
 
+        // V306/KATI-MODEL (M-KATI-2): girilen cidar kullanıcının tasarım
+        // katsayısını sağlıyor mu (tasarım basıncı = MEOP x katsayı, akmaya
+        // karşı). Künye yoksa (cidarı HRMA boyutlandırdı) satır basılmaz.
+        function designFactorCheckRowHTML(ps) {
+            const c = ps && ps.design_factor_check;
+            if (!c || typeof c !== 'object' || typeof c.met !== 'boolean') return '';
+            const hucre = 'padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));';
+            const metin = c.met
+                ? TF('solid.safety.designFactorMet',
+                     { sf: numTxt(c.yield_safety_factor, 2), hedef: numTxt(c.design_safety_factor, 2) },
+                     'met: yield safety factor {sf} ≥ design safety factor {hedef}')
+                : TF('solid.safety.designFactorNotMet',
+                     { sf: numTxt(c.yield_safety_factor, 2), hedef: numTxt(c.design_safety_factor, 2),
+                       py: numTxt(c.yield_pressure_bar, 1), pd: numTxt(c.design_pressure_bar, 1),
+                       t: numTxt(c.wall_thickness_mm, 3), treq: numTxt(c.hoop_required_mm, 3) },
+                     'NOT MET: yield safety factor {sf} < design safety factor {hedef} (yield pressure {py} bar < design pressure {pd} bar); the hoop stress needs a {treq} mm wall, the entered wall is {t} mm');
+            const renk = c.met ? '' : ' style="color:#ff7a85;"';
+            return '<tr><td style="' + hucre + '"><strong>'
+                + T('solid.safety.designFactorCheck', 'Design safety factor:')
+                + '</strong></td><td style="' + hucre + '"' + ' data-field="design_factor_check"'
+                + ' title="' + String(c.basis || '').replace(/"/g, '&quot;') + '"><span' + renk + '>'
+                + metin + '</span></td></tr>';
+        }
+
         function generateSafetyAnalysisHTML(results) {
             const safety = results.safety_analysis || {};
             const pressureSafety = safety.pressure_safety || {};
@@ -7822,9 +8201,10 @@
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.maximum_operating_pressure', 'Maximum Operating Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(pressureSafety, 'max_operating_pressure_bar', 1, 'bar')}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.design_pressure', 'Design Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(pressureSafety, 'design_pressure_bar', 0, 'bar')}</td></tr>
-                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.burst_pressure', 'Burst Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtField(pressureSafety, 'burst_pressure_bar', 0, 'bar')}</td></tr>
+                            <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.burst_pressure', 'Burst Pressure:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${(pressureSafety.burst_pressure_status === 'not_evaluated_generic_composite') ? T('solid.safety.compositeBurstNotModelled', 'not computed: the generic filament-wound composite record carries only an allowable stress and a density (no ultimate strength), and the burst model is a metal model; no vessel verdict is issued') : fmtField(pressureSafety, 'burst_pressure_bar', 0, 'bar')}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.js.safety_factor', 'Safety Factor:')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${pressureSafety.model_validity_limit_exceeded === true ? kasaHukumGeriCekildi() : fmtField(pressureSafety, 'safety_factor', 1)}</td></tr>
                             <tr><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('solid.ui.source', 'Source')}</strong></td><td style="padding: 6px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${fmtTextField(pressureSafety, 'wall_thickness_source', solidVesselWallSourceLabel)}</td></tr>
+                            ${designFactorCheckRowHTML(pressureSafety)}
                         </table>
                         ${vesselVerdictHTML(pressureSafety)}
                     </div>
@@ -8920,6 +9300,52 @@
 
         // Initialize page
         document.addEventListener('DOMContentLoaded', function() {
+            // V306/TANE C1-K5 — TANE TİPİ DEĞİŞİNCE GEOMETRİYE BAĞLI KUTULAR.
+            // ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/tane/k5_once.json): örnek
+            // katı (Ø75 / port 32) yüklüyken finocyl ya da slotted seçilince
+            // dosyadaki fin_length / slot_depth 20 mm, kabul aralığı
+            // [1; 18,275] mm dışında kalıyor ve hesap adlı 422 ile duruyordu.
+            // KURAL (tek yer: motorun _radial_slot_params'ı): kutu BOŞ ise
+            // çözücü kendi varsayılanını tanenin geometrik sınırına
+            // (derinlik 0,85 × web, genişlik port çevresi payının yarısı)
+            // indirerek kullanır ve sonuçta adıyla beyan eder. Sayfa bu
+            // sınırı YENİDEN HESAPLAMAZ: kullanıcı tane tipini değiştirdiğinde
+            // yeni tipin genişlik/derinlik kutuları, bu oturumda kullanıcı
+            // ELLE yazmadıysa boşaltılır. Proje geri yüklemesinin yapay
+            // olayları (isTrusted = false) ne "elle yazıldı" sayılır ne de
+            // kutuları boşaltır (FlightHandoff.isUserEdit ile aynı ölçüt).
+            const GEOMETRIYE_BAGLI_KUTULAR = {
+                finocyl: ['fin_width', 'fin_length'],
+                slotted: ['slot_width', 'slot_depth']
+            };
+            Object.keys(GEOMETRIYE_BAGLI_KUTULAR).forEach(function (tip) {
+                GEOMETRIYE_BAGLI_KUTULAR[tip].forEach(function (id) {
+                    const el = document.getElementById(id);
+                    if (el) el.addEventListener('input', function (e) {
+                        if (e && e.isTrusted) el.dataset.userTyped = 'true';
+                    });
+                });
+            });
+            // Yeni proje yüklenince kutular dosyanın değerini taşır: önceki
+            // oturumun "elle yazıldı" imleri silinir.
+            document.addEventListener('hrma:project-applied', function () {
+                Object.keys(GEOMETRIYE_BAGLI_KUTULAR).forEach(function (tip) {
+                    GEOMETRIYE_BAGLI_KUTULAR[tip].forEach(function (id) {
+                        const el = document.getElementById(id);
+                        if (el) delete el.dataset.userTyped;
+                    });
+                });
+            });
+            const grainTypeSel = document.getElementById('grain_type');
+            if (grainTypeSel) grainTypeSel.addEventListener('change', function (e) {
+                if (!(e && e.isTrusted)) return;
+                (GEOMETRIYE_BAGLI_KUTULAR[grainTypeSel.value] || []).forEach(function (id) {
+                    const el = document.getElementById(id);
+                    if (el && el.dataset.userTyped !== 'true') el.value = '';
+                });
+                updateGrainPreview();
+            });
+
             // Set up auto-calculations
             const throatInput = document.getElementById('throat_diameter');
             const exitInput = document.getElementById('exit_diameter');
@@ -8976,12 +9402,21 @@
                 });
             })();
             
-            // Yörünge girdileri: kullanıcı elle yazarsa ön-doldurma ezmez
+            // Yörünge girdileri: kullanıcı elle yazarsa ön-doldurma ezmez.
+            // V306/UÇUŞ NR-10: YALNIZ GERÇEK YAZMA (proje geri yüklemesinin
+            // yapay olayı değil — FlightHandoff.isUserEdit); kuru kütlenin
+            // kalem satırı yazıldıkça tazelenir.
             ['traj_initial_mass', 'traj_final_mass', 'traj_drag_coeff',
              'traj_ref_area', 'traj_burn_time'].forEach(function (id) {
                 const el = document.getElementById(id);
-                if (el) el.addEventListener('input', function () {
-                    el.dataset.userOverride = 'true';
+                if (el) el.addEventListener('input', function (e) {
+                    if (window.FlightHandoff && FlightHandoff.isUserEdit(e)) {
+                        el.dataset.userOverride = 'true';
+                    }
+                    if (id === 'traj_final_mass' && window.FlightHandoff && window.currentResults) {
+                        FlightHandoff.renderInertLedger(el,
+                            FlightHandoff.vehicleFor(window.currentResults));
+                    }
                 });
             });
 
@@ -9229,9 +9664,22 @@
                     if (window.currentResults && currentResults.thrust_curve &&
                         currentResults.thrust_curve.time &&
                         currentResults.thrust_curve.time.length > 3) {
-                        return { thrust_curve: {
-                            time: currentResults.thrust_curve.time,
-                            thrust: currentResults.thrust_curve.thrust } };
+                        // V306/UÇUŞ NK-14: koşu EĞRİYİ uçurur; kilitli İtki /
+                        // Yanma Süresi / İtici alanları motorun yayımladığı
+                        // değerleri gösterir (ölçüldü: KNDX→APCP sonrası
+                        // alanlar KNDX'in 1298,5 N / 2,277 s'sinde kalıyordu).
+                        const cr = currentResults;
+                        const poz = function (v) { return typeof v === 'number' && isFinite(v) && v > 0; };
+                        const p = { thrust_curve: {
+                            time: cr.thrust_curve.time,
+                            thrust: cr.thrust_curve.thrust } };
+                        if (poz(cr.average_thrust)) p.thrust = cr.average_thrust;
+                        if (poz(cr.burn_time)) p.burn_time = cr.burn_time;
+                        if (poz(cr.propellant_mass)) p.propellant_mass = cr.propellant_mass;
+                        // V306/UÇUŞ-2: rozet kaynağın adını ve uçan impulsu yazar.
+                        p.curve_source = 'motor_thrust_curve';
+                        if (poz(cr.total_impulse)) p.total_impulse_ns = cr.total_impulse;
+                        return p;
                     }
                     return null;
                 },
@@ -9239,10 +9687,14 @@
             // FAZ 6 (T23): kullanıcı bu alanları elle yazarsa hesap sonrası
             // ön-doldurma onları ezmez (yörünge girdileriyle aynı sözleşme).
             // Ön-doldurmanın kendi yazması bayrakla ayırt edilir.
+            // V306/UÇUŞ-3: yalnız GERÇEK yazma damgalar (isTrusted —
+            // FlightHandoff.isUserEdit); proje geri yüklemesinin yapay olayı
+            // damgalamaz. Damga projeye kaydedilir ve açılışta dosyadan kurulur.
             ['sd_thrust', 'sd_burn', 'sd_dry_m', 'sd_prop_m'].forEach(function (id) {
                 const el = document.getElementById(id);
-                if (el) el.addEventListener('input', function () {
-                    if (!_sixDofAutoWrite) el.dataset.userOverride = 'true';
+                if (el) el.addEventListener('input', function (e) {
+                    if (!_sixDofAutoWrite && window.FlightHandoff
+                            && FlightHandoff.isUserEdit(e)) el.dataset.userOverride = 'true';
                 });
             });
             // Panel DOM'u bu noktada kuruldu: sonuç zaten varsa (dil değişimi,
@@ -9290,6 +9742,17 @@
                     p.slot_width = gd.slot_width_mm;
                     p.slot_depth = gd.slot_depth_mm;
                 }
+                // V306/TANE NR-16 — ısıl yük girdileri analitik bloğun
+                // KULLANDIĞI değerlerden: yerleşim yalnız kullanıcı verdiyse,
+                // depolama sıcaklığı her zaman.
+                const sa = (r.structural_analysis && typeof r.structural_analysis === 'object')
+                    ? r.structural_analysis : {};
+                const gs = (sa.grain_structural && typeof sa.grain_structural === 'object')
+                    ? sa.grain_structural : {};
+                if (gs.grain_support_source === 'user input') {
+                    p.grain_support = gs.grain_support;
+                }
+                p.ambient_temp = gs.storage_temperature_k;
                 Object.keys(p).forEach(function (k) {
                     if (p[k] === null || p[k] === undefined || p[k] === '') {
                         delete p[k];
@@ -9301,6 +9764,15 @@
                 anchorId: 'trajectoryPanel',
                 hookName: 'displayResults',
                 paramsProvider: grainFeaParams,
+                // NR-16: analitik tane bloğu (Uyarılar / Yapısal Analiz) FEA
+                // rozetlerinin yanında basılır.
+                analyticProvider: function () {
+                    const r = window.currentResults;
+                    const sa = (r && typeof r === 'object') ? r.structural_analysis : null;
+                    return (sa && typeof sa === 'object' && sa.grain_structural
+                            && typeof sa.grain_structural === 'object')
+                        ? sa.grain_structural : null;
+                },
                 labelsProvider: function () {
                     return {
                         title: T('solid.fea.title', 'Grain Section FEA — Plane-Strain Stress and Bore Strain'),
@@ -9334,7 +9806,7 @@
                         // manşetin yanında durur (manşet Gauss noktalarından gelir).
                         badgeVmNodal: T('solid.fea.badge_vm_nodal', 'MAP PEAK von MISES {v} MPa (nodal / SPR — this is the value the contour map and the convergence chart are drawn from)'),
                         // ÖH D26 · P11B3-23 — asal çekme gerilmesinin tepe değeri.
-                        badgeMaxPrincipal: T('solid.fea.badge_max_principal', 'PEAK MAX PRINCIPAL {v} MPa (nodal maximum of fields.max_principal_pa — the tensile quantity the grain fracture criterion is written in)'),
+                        badgeMaxPrincipal: T('solid.fea.badge_max_principal', 'PEAK MAX PRINCIPAL {v} MPa (largest value of the nodal field — the tensile quantity the grain fracture criterion is written in)'),
                         // ÖH D26 · P11B3-19 — koşumu durdurma.
                         cancel: T('solid.fea.cancel', 'Cancel run'),
                         cancelled: T('solid.fea.cancelled', 'You stopped the grain FEA run after {s} s. Nothing was computed and no result was changed.'),
@@ -9344,6 +9816,23 @@
                         badgeStrain: T('solid.fea.badge_strain', 'MAX BORE STRAIN {v}% of {cap}% capability'),
                         badgeMargin: T('solid.fea.badge_margin', 'STRAIN MARGIN {v} (capability / peak strain)'),
                         badgeMarginMissing: T('solid.fea.badge_margin_missing', 'STRAIN MARGIN NOT PUBLISHED (no strain capability record)'),
+                        // V306/TANE NR-16 — yük kümesi, yük payları, kapasite hükmü, analitik yol.
+                        badgeLoadsBonded: T('solid.fea.badge_loads_bonded', 'LOADS: bore pressure {p} bar + cure/cool-down shrinkage restrained by the case (case-bonded; free thermal {kind} {eps}%, {tc} K → {ts} K); case held rigid'),
+                        thermalShrinkage: T('solid.fea.thermal_shrinkage', 'shrinkage'),
+                        thermalExpansion: T('solid.fea.thermal_expansion', 'expansion'),
+                        badgeLoadsCartridge: T('solid.fea.badge_loads_cartridge', 'LOADS: bore pressure {p} bar only (cartridge-loaded: the case does not restrain the shrinkage, so no thermal strain); case held rigid'),
+                        // V306/KATI-MODEL (M-KATI-16): kasa esnemesi uygulanmış hâller.
+                        badgeLoadsBondedCase: T('solid.fea.badge_loads_bonded_case', 'LOADS: bore pressure {p} bar + cure/cool-down shrinkage restrained by the case (case-bonded; free thermal {kind} {eps}%, {tc} K → {ts} K); case expanding {u} mm under pressure (the analytic path\'s own outer condition)'),
+                        badgeLoadsCartridgeCase: T('solid.fea.badge_loads_cartridge_case', 'LOADS: bore pressure {p} bar only (cartridge-loaded: the case does not restrain the shrinkage, so no thermal strain); case expanding {u} mm under pressure (the analytic path\'s own outer condition)'),
+                        badgeStrainParts: T('solid.fea.badge_strain_parts', 'STRAIN PARTS at the governing station: pressure {p}% + thermal {t}% (separate solves on the same mesh)'),
+                        badgeCapabilityExceeded: T('solid.fea.badge_capability_exceeded', 'STRAIN CAPABILITY EXCEEDED — the bore reaches the {cap}% capability at {f}% of the load, where the strain is still inside the {lim}% small-strain range; no margin number is printed because the full-load strain {s}% is beyond that range'),
+                        badgeCapabilityUndetermined: T('solid.fea.badge_capability_undetermined', 'NO STRAIN VERDICT — the peak bore strain {s}% is beyond the {lim}% small-strain range of this linear solve and the capability is not reached inside it; a large-deformation solve is needed'),
+                        badgeMarginWithheld: T('solid.fea.badge_margin_withheld', 'STRAIN MARGIN WITHHELD — the peak bore strain {s}% is beyond the {lim}% small-strain range of this linear solve'),
+                        badgeAnalytic: T('solid.fea.badge_analytic', 'ANALYTIC PATH (Warnings and Structural Analysis): bore strain {tot}% = (pressure with case expansion {p}% + thermal {t}%) × stress-concentration factor {kt}; strain safety factor {sf}'),
+                        badgeAnalyticSmallStrain: T('solid.fea.badge_analytic_small_strain', 'ANALYTIC PATH beyond the {lim}% small-strain range of its linear solution: read its safety factor as a class, not as a number'),
+                        badgeAnalyticDiff: T('solid.fea.badge_analytic_diff', 'WHY THE TWO PATHS DIFFER: both carry the same pressure and thermal loads; the analytic path also includes the case expanding under pressure (this FEA holds the case rigid) and represents the port shape by the nominal factor {kt} (this FEA resolves the shape with the mesh)'),
+                        badgeAnalyticDiffCase: T('solid.fea.badge_analytic_diff_case', 'WHY THE TWO PATHS DIFFER: both carry the same pressure, case expansion and thermal loads; the analytic path represents the port shape by the nominal factor {kt} (this FEA resolves the shape with the mesh) and treats the section as a thick-walled cylinder'),
+                        capOffScale: T('solid.fea.cap_off_scale', 'Strain capability {cap}% is off this scale (peak strain / capability = {r})'),
                         badgeConverged: T('solid.fea.badge_converged', 'CONVERGED in {n} rounds to {pct}%'),
                         badgeNotConverged: T('solid.fea.badge_not_converged', 'NOT CONVERGED after {n} rounds (last change {pct}%)'),
                         badgeDistortion: T('solid.fea.badge_distortion', 'MESH DISTORTION (scaled Jacobian < {sjMin}): {bad}/{total} flagged'),

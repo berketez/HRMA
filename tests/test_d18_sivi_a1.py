@@ -436,8 +436,16 @@ class TestP3B212IspOzdesligi:
         assert abs(ident['residual_pct']) < 1e-6
 
     def test_ozdeslik_yayimlanan_uc_sayiyla_kurulabilir(self, taban):
-        """Kullanıcı yalnız yayımlanan yapraklarla özdeşliği kurabilmeli."""
-        isp = taban['isp_sea_level']
+        """Kullanıcı yalnız yayımlanan yapraklarla özdeşliği kurabilmeli.
+
+        V306/SIVI-DEFTER (K5): özdeşlik boğazdan geçen ANA ODA akışınındır.
+        Açık çevrim defteri kapandıysa başlık isp_sea_level MOTOR Isp'sidir
+        (türbin egzozu dahil); ana oda Isp'si mass_flow_ledger'da yayımlıdır.
+        """
+        defter = taban.get('mass_flow_ledger') or {}
+        isp = (defter['main_chamber_isp_sea_level_s']
+               if defter.get('status') == 'open_cycle_closed'
+               else taban['isp_sea_level'])
         cstar = taban['c_star']
         cf = None
         for row in taban['altitude_performance']:

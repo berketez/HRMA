@@ -359,8 +359,18 @@ def test_sivi_yorunge_kutleleri_hesaptan_hemen_sonra_tohumlanir():
     assert 'liquidTrajectorySeed(results);' in _islev_metin(
         LIQUID_HTML, 'displayResults')
     tohum = _islev_metin(LIQUID_HTML, 'liquidTrajectorySeed')
-    assert "el.dataset.userOverride === 'true'" in tohum
-    assert ": null);" in tohum and "el.value = (deger === null) ? ''" in tohum
+    # V306/UÇUŞ NR-13: kural ortak yardımcıya taşındı (FlightHandoff.
+    # seedField: katı + sıvı aynı işlev). Davranış aynı: kullanıcının
+    # yazdığı ezilmez; motora ait sayı yoksa alan BOŞALIR. Bekçi işlevin
+    # kendisini ve sıvı tohumunun onu kullandığını sınar.
+    assert 'FH.seedField(sonEl,' in tohum and 'FH.seedField(ilkEl,' in tohum
+    assert ': null, 3,' in tohum
+    yardimci = (KOK / 'hrma' / 'static' / 'js' / 'flight_handoff.js').read_text(
+        encoding='utf-8')
+    tohumlayici = yardimci[yardimci.index('function seedField'):]
+    tohumlayici = tohumlayici[:tohumlayici.index('function inertLedgerText')]
+    assert "el.dataset.userOverride !== 'true'" in tohumlayici
+    assert "el.value = (deger === null) ? ''" in tohumlayici
 
 
 @pytest.fixture(scope='module')

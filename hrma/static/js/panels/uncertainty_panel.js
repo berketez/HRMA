@@ -410,9 +410,39 @@
     }
 
     /* Dejenere çıktı kartı: tek değer + ucun kendi σ'sı. Band, medyan
-       yorumu ve yüzdelik köşeli parantezi YOKTUR. */
+       yorumu ve yüzdelik köşeli parantezi YOKTUR.
+
+       V306/SAYI (NR-5): σ = 0'ın NEDENİ ucun kendi beyanından okunur.
+       ``zero_spread_reason = 'design_target'`` → çıktı (itki) tasarım
+       hedefidir; ``sampled === false`` → çıktı bu seviyede örneklenmedi
+       (hibrit toplam impuls; uç nominali manşetle aynı tanımla verir) ve
+       kartın sayısı o NOMİNALDİR (P50 yoktur, uydurulmaz). Tanınmayan
+       gerekçe genel "dağılım yok" cümlesine düşer. */
+    function degenerateNote(o) {
+        if (o.sampled === false
+                && o.not_sampled_reason === 'time_march_off_at_this_level') {
+            return T('panel.uncertainty.notSampledMarch',
+                'not sampled at this level: the headline total impulse is the '
+                + 'integral of the time-marched thrust curve (it carries the '
+                + 'O/F shift); this level does not march each sample, so no '
+                + 'distribution is drawn. The nominal is the headline value; '
+                + 'the Extended level samples it.');
+        }
+        if (o.zero_spread_reason === 'design_target') {
+            return T('panel.uncertainty.zeroSpreadDesignTarget',
+                'no distribution: thrust is a design target - the motor sizes '
+                + 'its mass flow to deliver it, so the sampled parameters change '
+                + 'the mass flow and Isp, not the thrust (std = 0)');
+        }
+        return T('panel.uncertainty.noDistribution',
+            'no distribution in this run — every sample returned the '
+            + 'same value (std = 0); this output is not sensitive to '
+            + 'any of the sampled parameters');
+    }
+
     function degenerateCard(key, o) {
         const name = escapeHtml(labelFor(key));
+        const ornekDisi = (o.sampled === false);
         return `<div data-uq-degenerate="1"
                 style="border:1px dashed var(--hd-line, rgba(0,229,255,0.14));
                 border-radius:var(--hd-radius-sm, 8px); padding:10px 14px;
@@ -423,16 +453,14 @@
                  letter-spacing:0.08em;">${name}</div>
             <div style="font-size:1.2rem; font-family:var(--hd-mono);
                  color:var(--hd-ink-dim, #7d97a5); margin-top:2px;">
-                ${fmtVal(o.p50)}</div>
+                ${fmtVal(ornekDisi ? o.nominal : o.p50)}</div>
             <div style="font-family:var(--hd-mono); font-size:0.72rem;
                  color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">
-                ${T('panel.uncertainty.noDistribution',
-                    'no distribution in this run — every sample returned the '
-                    + 'same value (std = 0); this output is not sensitive to '
-                    + 'any of the sampled parameters')}</div>
+                ${escapeHtml(degenerateNote(o))}</div>
             <div style="font-family:var(--hd-mono); font-size:0.7rem;
                  color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">
-                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(o.nominal)} · σ ${fmtVal(o.std)}</div>
+                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(o.nominal)}${
+                    ornekDisi ? '' : ' · σ ' + fmtVal(o.std)}</div>
         </div>`;
     }
 

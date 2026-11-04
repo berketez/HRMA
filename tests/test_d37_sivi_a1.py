@@ -315,10 +315,12 @@ def _yalniz_butcede_ariza(monkeypatch):
     from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
     asil = LiquidRocketEngine._calculate_feed_system_pressure_drops
 
-    def sarmal(self):
+    # V306/SIVI-DEFTER: yöntem isteğe bağlı ``include_jacket`` aldı
+    # (çevrimin hat düşümü çağrısı ceketsiz); sarmal argümanları geçirir.
+    def sarmal(self, *a, **kw):
         self.calculate_injector_design = _patlat
         try:
-            return asil(self)
+            return asil(self, *a, **kw)
         finally:
             del self.calculate_injector_design
     monkeypatch.setattr(LiquidRocketEngine,
@@ -482,8 +484,22 @@ def test_d1_d2_motor_cidari_marsin_kurdugu_regen_cidari(istemci, monkeypatch,
     d = _sivi(istemci, fuel_type=yakit, mixture_ratio=mr,
               chamber_wall_thickness=cidar_mm)
     fit = d['cooling_system']['channel_count_fit']
-    assert len(casus.kurulan) == 1, casus.denenen_cidar
-    rc = casus.kurulan[0]
+    # V306/SIVI-DEFTER (K5): açık çevrim defterinde ceket ΔP'si yakıt pompa
+    # çıkışına seri girdiği için metan marşı (soğutmada çözülen) sabit
+    # noktanın parçasıdır; boğaz her değiştiğinde bir kez daha çözülür
+    # (iç geçişler çözmez). Sayı defterin kendi beyanıdır; YAYIMLANAN marş
+    # SONUNCUDUR ve yayımlanan boğazda kurulmuştur. Cidar her kurulumda
+    # aynıdır (sessiz cidar denemesi yok). RP-1'de soğutma toplu zincirdir,
+    # istasyon marşı ısıl korumada TEK kez kurulur.
+    defter = d.get('mass_flow_ledger') or {}
+    if yakit == 'methane' and defter.get('status') == 'open_cycle_closed':
+        assert len(casus.kurulan) == defter['fixed_point']['jacket_solves']
+        assert len(set(casus.denenen_cidar)) == 1, casus.denenen_cidar
+    else:
+        assert len(casus.kurulan) == 1, casus.denenen_cidar
+    rc = casus.kurulan[-1]
+    assert rc.throat_diameter == pytest.approx(float(d['throat_diameter']),
+                                               rel=1e-12)
     assert rc.wall_thickness * 1e3 == pytest.approx(
         fit['hot_wall_thickness_mm'], rel=0, abs=1e-12)
     # Aynı geometri: marşın kendi sığma hükmü motorun sınırıyla bire bir.

@@ -90,7 +90,14 @@ def test_kullanilamayan_karsilastirma_sayi_basmaz(pintle_yaniti):
     metin = _pdf_metni(yanit)
     assert 'NASA CEA Comparison' in metin
     assert 'RocketCEA could not be imported' in metin
-    assert 'Characteristic velocity c*' not in metin
+    # V306/RAPOR-HATA (kalem 6a) — BEKLENTİ DARALDI, İDDİA AYNI: bekçi CEA
+    # karşılaştırma SATIRININ basılmadığını kilitler. Uyarılar artık ham kod
+    # yerine ekranın cümlesiyle basıldığı için aynı belgenin Solver Warnings
+    # bölümünde "Characteristic velocity c* 1220 m/s is outside …" doğrulama
+    # uyarısı (başka bir büyüklük: bant denetimi) görünür; arama CEA
+    # bölümüyle sınırlanır.
+    cea = metin.split('NASA CEA Comparison', 1)[1].split('Solver Warnings', 1)[0]
+    assert 'Characteristic velocity c*' not in cea
 
 
 def test_blok_yoksa_bolum_yok(pintle_yaniti):
