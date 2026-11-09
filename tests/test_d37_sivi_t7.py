@@ -66,11 +66,23 @@ def _sivi(istemci, **degisiklik):
     return r.get_json()
 
 
+#: V306/ONARIM-SIVI (rc.1 CI): örnek gövdenin ε 12'si (Pc 50 bar, O/F 2) RP-1'de
+#: ayrılmıyor ama LH2'de deniz seviyesinde AYRILIYOR (Summerfield 0,40·P_a;
+#: ayrılmayan en büyük ε 10,49) ve uç SIVI-CEKET-B kalem 5'ten beri o tasarımı
+#: adlı retle (422 fixed_nozzle_separated_at_design_ambient) yayımlamıyor. Bu
+#: dosyanın konusu lüle değil, panel ön dolgusu: LH2 koşusu ayrılmayan ε 10 ile
+#: kurulur. Sınamalar motorun yayımladığı sayıyı panelin önerisiyle
+#: karşılaştırır, sabit sayı çapası yoktur (eski kod ε 12 ⟷ yeni kod ε 10:
+#: ikisi de 200, regen_supercritical dolu, ceket kapısı 'solved').
+LH2_AYRILMAYAN_EPS = 10
+
+
 @pytest.fixture(scope='module')
 def sonuclar(istemci):
     return {
         'rp1': _sivi(istemci),
-        'lh2': _sivi(istemci, fuel_type='lh2'),
+        'lh2': _sivi(istemci, fuel_type='lh2',
+                     nozzle_expansion_ratio=LH2_AYRILMAYAN_EPS),
         'ablatif': _sivi(istemci, cooling_type='ablative'),
     }
 

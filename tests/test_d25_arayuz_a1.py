@@ -330,14 +330,27 @@ class TestPanelFailClosed:
             'kullanmıyor')
 
     def test_belirsizlik_isi_sahte_ilerleme_basmiyor(self):
-        """SAHTE İLERLEME YASAĞI: uç oran vermezse yüzde yazılmaz."""
+        """SAHTE İLERLEME YASAĞI: uç sayı vermezse ilerleme yazılmaz.
+
+        V306/HIZ (M-SIVI-19): panel artık her seviyeyi iş kuyruğunda koşar
+        ve ilerlemeyi ucun GERÇEK sayacından (``samples_done`` /
+        ``samples_total``) okur; kalan süre yalnız ucun ölçtüğü örnek
+        süresinden (``per_sample_s``). Eski kesir yolu (``job.progress``)
+        söküldü; ilke aynı, kilit yeni yola taşındı. Davranış bekçisi:
+        tests/test_v306_hiz.py (node ile gerçek akış).
+        """
         src = oku('panels/uncertainty_panel.js')
         assert 'job.progress || 0' not in src, (
             "iş ilerlemesi yine '0%' uyduruyor")
-        assert 'Number.isFinite(job.progress)' in src
-        assert 'panel.uncertainty.jobProgressNoPct' in src, (
-            'yüzdesiz durum metni yok — ilerleme bildirilmediğinde ne '
-            'yazılacağı tanımsız')
+        for alan in ('samples_done', 'samples_total', 'per_sample_s',
+                     'eta_s'):
+            assert not re.search(r'st\.' + alan + r'\s*(\|\||\?\?)\s*0',
+                                 src), f'{alan} için beyansız sıfır yedeği'
+        # çubuk ve kalan süre yalnız ölçülmüş sayılarla
+        assert 'Number.isFinite(done) && Number.isFinite(total)' in src
+        assert 'Number.isFinite(st.per_sample_s)' in src
+        assert 'panel.uncertainty.progressNoEta' in src, (
+            'ölçülmüş örnek süresi yokken yazılacak metin tanımsız')
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +358,9 @@ class TestPanelFailClosed:
 # ---------------------------------------------------------------------------
 class TestI18nAnahtarlari:
 
-    ANAHTARLAR = ('common.notComputed', 'panel.uncertainty.jobProgressNoPct')
+    # V306/HIZ: ölçülmüş örnek süresi yokken basılan metin (kesir yolunun
+    # 'jobProgressNoPct' anahtarı yoklama yoluyla birlikte söküldü).
+    ANAHTARLAR = ('common.notComputed', 'panel.uncertainty.progressNoEta')
 
     @pytest.mark.parametrize('anahtar', ANAHTARLAR)
     def test_anahtar_en_ve_tr_bloklarinda(self, anahtar):

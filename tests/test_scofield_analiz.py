@@ -243,7 +243,7 @@ class TestF44CalkalanmaGirdiKapisi:
         model = CylindricalTankSlosh(radius=0.5, fill_height=1.0,
                                      fluid_density=1000.0)
         omega, f1 = model.natural_frequency(mode=1)
-        # SP-106 Eq. 2.4 el hesabı: omega^2 = (lam*g/R)*tanh(lam*h/R)
+        # Dodge 2000, Eq. (1.40) el hesabı: omega^2 = (lam*g/R)*tanh(lam*h/R)
         lam = 1.8412
         beklenen = math.sqrt((lam * G_0 / 0.5) * math.tanh(lam * 1.0 / 0.5))
         assert omega == pytest.approx(beklenen, rel=1e-12)

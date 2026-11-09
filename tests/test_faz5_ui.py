@@ -104,6 +104,9 @@ El.prototype.setAttribute = function (k, v) { this._attrs[k] = String(v); };
 El.prototype.getAttribute = function (k) {
     return Object.prototype.hasOwnProperty.call(this._attrs, k) ? this._attrs[k] : null;
 };
+// Gerçek DOM yöntemi: güverte yaması (1d5f11da5) başarılı koşudan sonra
+// 'data-onceki-tasarim' işaretini kaldırıyor; sahte DOM'da eksikti.
+El.prototype.removeAttribute = function (k) { delete this._attrs[k]; };
 El.prototype.addEventListener = function (t, fn) {
     (this._listeners[t] = this._listeners[t] || []).push(fn);
 };

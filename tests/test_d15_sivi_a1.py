@@ -15,6 +15,7 @@ import math
 
 import pytest
 
+from hrma.constants import G_0
 from hrma.engines.liquid_rocket_engine import (
     BURN_TIME_DEFAULT_S, LIQUID_HYPERGOLIC_PAIRS, LiquidRocketEngine)
 
@@ -374,17 +375,41 @@ def test_p3b2_04_isp_irtifayla_artar(taban_kosu):
 
 
 def test_p3b2_04_beyan_ile_sayi_uyusur(taban_kosu):
-    """Satırın künyesi Isp = (isp_sl/CF_sl)*CF(h) diyor; sayı bunu vermeli."""
+    """Satırın künyesi Isp = (isp_sl/CF_sl)*CF(h) diyor; sayı bunu vermeli.
+
+    V306/SIVI-ONARIM kalem 3: V306/SIVI-DEFTER (K5) açık çevrimde satırın
+    ``specific_impulse``unu MOTOR Isp'si yaptı (ana oda + türbin egzozu,
+    ``thrust_basis``); demir formülü ana oda Isp'sini verir. Künye artık
+    formülün ait olduğu sayıyı adıyla söyler; bekçi formülü O sayıda,
+    motor Isp'sini de kendi özdeşliğinde (F/(ṁ_toplam·g0), F = ana oda +
+    egzoz) sınar. Ölçüldü (sivi-onarim/kalem3_once.json): ana oda sapması
+    0, motor Isp'si formülden 1000 m'de +9,9e-5 … 100 km'de +1,7e-3 bağıl.
+    """
     _e, r = taban_kosu
     sat = [x for x in r['altitude_performance']
            if x['specific_impulse'] is not None]
     yer = sat[0]
-    oran = float(yer['specific_impulse']) / float(yer['thrust_coefficient'])
+    defter = 'specific_impulse_main_chamber' in yer
+    alan = 'specific_impulse_main_chamber' if defter else 'specific_impulse'
+    oran = float(yer[alan]) / float(yer['thrust_coefficient'])
+    mdot = float(r['mass_flow_ledger']['total_propellant_mass_flow_kg_s']) \
+        if defter else None
     for x in sat:
+        if defter:
+            assert x['isp_anchor_basis'].startswith(
+                'main chamber Isp (specific_impulse_main_chamber): '), (
+                x['isp_anchor_basis'])
+            assert 'engine value' in x['isp_anchor_basis']
+            f = float(x['thrust_main_chamber']) + float(
+                x['thrust_turbine_exhaust'])
+            assert float(x['thrust']) == pytest.approx(f, rel=1e-12)
+            assert float(x['specific_impulse']) == pytest.approx(
+                f / (mdot * G_0), rel=1e-9)
         beklenen = oran * float(x['thrust_coefficient'])
-        assert float(x['specific_impulse']) == pytest.approx(
+        assert float(x[alan]) == pytest.approx(
             beklenen, rel=1e-6), (
             f"{x['altitude']} m satırı künyesindeki formülü vermiyor")
+    assert defter, 'taban koşusu açık çevrim değil: defter ayağı sınanmadı'
 
 
 # ---------------------------------------------------------------------------

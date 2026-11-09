@@ -359,8 +359,18 @@ def test_sivi_yorunge_kutleleri_hesaptan_hemen_sonra_tohumlanir():
     assert 'liquidTrajectorySeed(results);' in _islev_metin(
         LIQUID_HTML, 'displayResults')
     tohum = _islev_metin(LIQUID_HTML, 'liquidTrajectorySeed')
-    assert "el.dataset.userOverride === 'true'" in tohum
-    assert ": null);" in tohum and "el.value = (deger === null) ? ''" in tohum
+    # V306/UÇUŞ NR-13: kural ortak yardımcıya taşındı (FlightHandoff.
+    # seedField: katı + sıvı aynı işlev). Davranış aynı: kullanıcının
+    # yazdığı ezilmez; motora ait sayı yoksa alan BOŞALIR. Bekçi işlevin
+    # kendisini ve sıvı tohumunun onu kullandığını sınar.
+    assert 'FH.seedField(sonEl,' in tohum and 'FH.seedField(ilkEl,' in tohum
+    assert ': null, 3,' in tohum
+    yardimci = (KOK / 'hrma' / 'static' / 'js' / 'flight_handoff.js').read_text(
+        encoding='utf-8')
+    tohumlayici = yardimci[yardimci.index('function seedField'):]
+    tohumlayici = tohumlayici[:tohumlayici.index('function inertLedgerText')]
+    assert "el.dataset.userOverride !== 'true'" in tohumlayici
+    assert "el.value = (deger === null) ? ''" in tohumlayici
 
 
 @pytest.fixture(scope='module')
@@ -471,8 +481,15 @@ def test_sivi_kutleleri_ucus_aracindan_tek_kaynak():
     assert 'mas.engine_mass_kg' not in tohum, 'eski motor-yalnız kuralı kaldı'
     alti = _islev_metin(LIQUID_HTML, 'liquidSixDofSeed')
     for parca in ("yaz('sd_prop_m', arac.propellant_mass, 3);",
-                  "yaz('sd_dry_m', arac.engine_inert_mass, 3);",
-                  'arac.engine_od_m'):
+                  "yaz('sd_dry_m', arac.engine_inert_mass, 3);"):
         assert parca in alti, parca
+    # V306/UÇUŞ-KÜTLE (kalem 6): gövde çapının motor zarfı kuralı TEK yerde
+    # (sixdof_panel.js govdeyiMotordanTohumla, aynı 'hrma:flight-vehicle'
+    # olayında, aynı aracın engine_od_m'i); sıvı sayfasındaki satır içi
+    # kopya kaldırıldı, katı sayfası da aynı kuralı alır.
+    panel = (KOK / 'hrma' / 'static' / 'js' / 'sixdof_panel.js').read_text(
+        encoding='utf-8')
+    assert 'arac.engine_od_m' in panel
+    assert 'govdeyiMotordanTohumla(d.vehicle)' in panel
     assert "addEventListener('hrma:flight-vehicle'" in LIQUID_HTML
     assert "new CustomEvent('hrma:flight-vehicle'" in HANDOFF_JS

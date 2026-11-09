@@ -446,7 +446,16 @@ def test_p3b2_12_isp_ozdesligi_yayimlanir_ve_kapali(taban):
     # Özdeşliği KENDİM kuruyorum (yayımlanan üç sayı + C_D).
     cf = float(taban['altitude_performance'][0]['thrust_coefficient'])
     c_star = float(taban['c_star'])
-    isp = float(taban['isp_sea_level'])
+    # V306/SIVI-DEFTER (K5): özdeşlik boğazdan geçen ANA ODA akışınındır;
+    # açık çevrim defteri kapandıysa başlık isp_sea_level MOTOR Isp'sidir
+    # (türbin egzozu dahil) ve ana oda Isp'si defter bloğunda yayımlıdır.
+    defter = taban.get('mass_flow_ledger') or {}
+    if defter.get('status') == 'open_cycle_closed':
+        isp = float(defter['main_chamber_isp_sea_level_s'])
+        assert isp == float(kimlik['isp_sea_level_s'])
+        assert float(taban['isp_sea_level']) < isp
+    else:
+        isp = float(taban['isp_sea_level'])
     assert isp == pytest.approx(cf * c_star / (G_0 * cd), rel=1e-9), (
         f'Isp {isp} ⟷ C_F·c*/(g0·C_D) {cf * c_star / (G_0 * cd)}')
     # C_D terimi OLMADAN tam 1/C_D kadar ıskalar — okuyucunun gördüğü fark.

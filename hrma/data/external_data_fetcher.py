@@ -228,7 +228,7 @@ def n2o_saturated_liquid_density(temperature: float) -> Tuple[float, str]:
             f'N2O has no saturated liquid at {T:.2f} K: the valid band is '
             f'[{N2O_T_TRIPLE:.2f}, {N2O_T_CRIT:.2f}) K (triple point to '
             'critical point, NIST WebBook). Above the critical temperature a '
-            '"liquid density" does not exist and none is invented.')
+            '"liquid density" does not exist, so none is published.')
     props = N2OSaturation()
     rho = float(props.rho_l(T))
     if props.clamped:

@@ -377,9 +377,33 @@ class TestVeriKaynaklari:
         assert y['density']['value_kg_m3'] == 920.0
         assert y['density']['equals_catalogue'] is True
         g = y['regression']
-        assert g['equals_catalogue'] is True
-        assert g['citation'].startswith('Doran')
-        assert g['independent_fit'] is True
+        # V306/HİBRİT-ÇAPRAZ-2: DAYANAĞI DÜŞEN FİKSTÜR gerçek girdiye
+        # çapalandı. Örnek hibrit HİBRİT-NOZUL kalem 5'ten (8d63f958d) beri
+        # katalog çiftini değil Carmicino 2013 uyarlamasını gönderir
+        # (a = 6,399e-05, n = 0,554; sayfa yükü tests/support/
+        # kabul_sayfa_yukleri.py). Künye KULLANILAN çiftin kaynağıdır:
+        # istek çifti katalogdan farklıyken katalog künyesi ``citation``
+        # olarak basılmaz (ölçülen kusur: taban 78dbb287e 'Doran et al.'
+        # basıyordu — olcum/k5_once.json ornek_sayfa).
+        assert g['origin'] == 'request'
+        assert g['a_si'] == pytest.approx(6.399e-05, rel=1e-12)
+        assert g['n'] == pytest.approx(0.554, rel=1e-12)
+        assert g['equals_catalogue'] is False
+        assert g['citation'] is None
+        assert g['independent_fit'] is None and g['basis'] is None
+        assert g['catalogue_citation'].startswith('Doran')
+        assert g['catalogue_independent_fit'] is True
+        assert 'source of the pair THIS run used' in g['citation_basis']
+        # Katalog çifti kullanıldığında künye o çiftin kaynağıdır.
+        motor_ns = SimpleNamespace(fuel_type='htpb', rho_f=920.0, a=3.68e-5,
+                                   n=0.555, oxidizer_type='n2o',
+                                   combustion_analyzer=None)
+        kat = ck.build_hybrid_data_sources({}, motor_ns, yanit['motor'],
+                                           {})['fuel']['regression']
+        assert kat['equals_catalogue'] is True
+        assert kat['citation'].startswith('Doran')
+        assert kat['citation'] == kat['catalogue_citation']
+        assert kat['independent_fit'] is True
         t = ds['thermochemistry']
         assert t['solver'] == 'cantera_equilibrium'
         assert t['mechanism'] == yanit['motor']['combustion_analysis'][

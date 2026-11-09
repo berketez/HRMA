@@ -328,8 +328,13 @@ class TestOrnekHibrit:
 
     def test_kuru_kutle_dokumden(self, ornek_hibrit):
         w = ornek_hibrit['motor']['structural_analysis']['weight_analysis']
+        # V306/HİBRİT-KÜTLE (kalem 6): kuru kütle enjektör plakasını da
+        # içerir (CAD injector_mass ile aynı sayı; motorla uçar). Toplam yine
+        # dökümün kendi kalemlerinden, aynı işlem sırasıyla kurulur.
+        assert w['injector_weight'] > 0.0
         assert w['total_weight'] == (w['chamber_weight'] + w['nozzle_weight']
-                                     + w['end_caps_weight'])
+                                     + w['end_caps_weight']
+                                     + w['injector_weight'])
         kd = ornek_hibrit['design_summary']['key_dimensions']
         assert kd['dry_mass_estimate_kg'] == w['total_weight']
 
@@ -970,7 +975,18 @@ _KATI_ERIME_USTU = {'case_material': 'aluminum_6061',
 #: soğutmanın beyanlı varsayılanını (WALL_TEMP_DEFAULT_K['radiative'] =
 #: 1800 K) ölçer. Önceki örnek dosyası alanı taşımıyordu; alan açıkça
 #: çıkarılır (``None`` = alan gövdede yok, ``_sivi_kati_yanit``).
-_SIVI_RADYATIF = {'cooling_type': 'radiative', 'max_wall_temp': None}
+#: V306/GÜVERTE-HATA: aynı ÖRNEK değişikliği (5fa435893) örnek sıvıya
+#: 1 mm CuCrZr kullanıcı cidarı da yazdı (eskiden Inconel 718, cidar boş →
+#: motor boyutlandırıyordu). 1 mm CuCrZr 75 bar tasarım basıncında oda
+#: sıcaklığında da GERÇEKTEN taşımaz (çember 501,9 MPa ⟷ akma 310 MPa, SF
+#: 0,62): dock bekçisinin ön koşulu ("uç bu koşumda onay yayımlıyor") hiçbir
+#: ürün düzeltmesiyle sağlanamaz, bekçi boş koşardı. Ölçüm koşulu açıkça
+#: sabitlenir (``_ORNEK_SIVI_GECERLILIK_ICI`` ile aynı 8 mm, aynı gerekçe;
+#: beklentiler değişmedi): radyatif 1800 K varsayılanı motor bloğunu yine
+#: geçerlilik DIŞINA alır (CuCrZr erime 1356 K), 300 K koşumu onay basar.
+#: Ölçüm: docs/scofield/raw/OH/V306/guverte/RAPOR.md (kalem 1).
+_SIVI_RADYATIF = {'cooling_type': 'radiative', 'max_wall_temp': None,
+                  'chamber_wall_thickness': 8.0}
 #: L-B (v3.0.1, SV-05): yapı hükmü artık ÇÖZÜLMÜŞ cidar sıcaklığında
 #: verilir. Örnek sıvı projenin 2 mm cidarında RP-1 istasyon marşı tepe
 #: sıcak cidarı 2876,6 K çözüyor (erime üstü; ölçüm docs/scofield/raw/OH/
@@ -1067,8 +1083,16 @@ class TestSiviKatiGecerlilik:
             STRUCTURAL_MODEL_VALIDITY_WITHHELD_REASON]
         assert cs['safety_factor_basis'] == (
             LIQUID_MODEL_VALIDITY_SAFETY_FACTOR_BASIS)
+        # V306/SIVI-MODEL kalem 5: ışınımsal cidar artık ÇÖZÜLÜR (ışınım
+        # dengesi, Sutton & Biblarz Böl. 8.6); geçerlilik künyesi çözülmüş
+        # cidarınkidir (önce: tip varsayılanı 1800 K, künye "the
+        # cooling-type default or your maximum wall temperature input";
+        # sonra: çözülen ~2697 K, yine erime üstü → hüküm yine geri çekili).
+        from hrma.engines.liquid_rocket_engine import (
+            LIQUID_SOLVED_WALL_VALIDITY_BASIS)
         assert cs['model_validity_limit_exceeded_basis'] == (
-            LIQUID_MODEL_VALIDITY_BASIS)
+            LIQUID_SOLVED_WALL_VALIDITY_BASIS)
+        assert LIQUID_MODEL_VALIDITY_BASIS != LIQUID_SOLVED_WALL_VALIDITY_BASIS
         ev = cs['model_validity_evaluations']['chamber_hot_wall']
         assert ev['wall_temperature_K'] == T
         assert ev['melting_point_K'] == erime
@@ -1244,12 +1268,26 @@ if (P.tur === 'liquid') {
 console.log(JSON.stringify(out));
 """
 
+# 3.0.6 ana model (9 Kas): söküm listeleri bugünkü sayfa yardımcılarıyla
+# tamamlandı (kusur ÜRÜNDE değil SÖKÜMDE; tarayıcıda hepsi aynı küresel
+# kapsamda): sıvı kartı V306/SIVI-CEKET-A yayım kapısının yardımcılarını
+# (liqJacketGate → liqJacketGateScope / liqGateReasonText /
+# liqGateFieldText), katı Güvenlik şeridi V306/DİL-KATI'nın kap rozeti
+# metnini (kapHukumMetni) ve ateşleme sistemi adını (ateslemeSistemiAdi)
+# çağırıyor.
 _SIVI_SOKUM = ('numTxt', 'unitTxt', 'pctTxt', 'ortakMetin', 'hrmaFmt',
+               'liqJacketGate', 'liqJacketGateScope', 'liqGateReasonText',
+               'liqGateFieldText',
                'liquidOverallLengthMm', 'displayEngineeringCards')
 _KATI_SOKUM = ('numTxt', 'fmtNum', 'ortakMetin', 'fmtField', 'fmtTextField',
                'escapeNoticeText', 'solidWallSourceText',
                'solidVesselWallSourceLabel', 'kasaHukumGeriCekildi',
-               'solidCaseModelValidityHTML', 'vesselVerdictHTML',
+               'solidCaseModelValidityHTML', 'kapHukumMetni',
+               'ateslemeSistemiAdi',
+               'vesselVerdictHTML',
+               # V306/KATI-MODEL (M-KATI-2): güvenlik sekmesinin tasarım
+               # katsayısı satırı.
+               'designFactorCheckRowHTML',
                'generateStructuralAnalysisHTML', 'generateSafetyAnalysisHTML')
 
 
@@ -1335,7 +1373,13 @@ class TestSiviKatiPanelDali:
         for parca in ('kasa', 'guvenlik'):
             assert sz['panel.structural.verdictWithheld'] in out[parca]
         assert '>PASS</span>' not in out['serit']   # onay rozeti yok
-        assert '>NOT_EVALUATED</span>' in out['serit']
+        # V306/DİL-KATI (9 Kas) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: kap rozeti ham
+        # 'NOT_EVALUATED' kodunu değil güvertenin sözlük karşılığını basar
+        # (kapHukumMetni → panel.safety.vesselStatus.*; EN 'NOT EVALUATED',
+        # TR 'DEĞERLENDİRİLMEDİ'). Ham kod ekrana çıkmaz.
+        assert '>%s</span>' % sz['panel.safety.vesselStatus.NOT_EVALUATED'] \
+            in out['serit']
+        assert '>NOT_EVALUATED</span>' not in out['serit']
         assert '#1b7f4b' not in out['serit']   # onay yeşili yok
 
     def test_kati_gecerlilik_ici_degismez(self, sivi_kati, tmp_path):
@@ -1542,8 +1586,13 @@ class TestKapakHukmu:
         # Kapak dayanımı haznenin AYNI sıcaklığından düşürülür (aynı bayrak).
         assert (ec['model_validity_evaluations']['chamber_hot_wall'][
             'wall_temperature_K'] == cs['wall_temperature'])
+        # V306/SIVI-MODEL kalem 5: ışınımsal cidar çözülür → çözülmüş cidar
+        # künyesi (kapak haznenin AYNI sıcaklığından düşürülür).
+        from hrma.engines.liquid_rocket_engine import (
+            LIQUID_SOLVED_WALL_VALIDITY_BASIS)
+        assert LIQUID_MODEL_VALIDITY_BASIS != LIQUID_SOLVED_WALL_VALIDITY_BASIS
         assert ec['model_validity_limit_exceeded_basis'] == (
-            LIQUID_MODEL_VALIDITY_BASIS)
+            LIQUID_SOLVED_WALL_VALIDITY_BASIS)
         assert ec['verdict_withheld'] is True
         assert ec['verdict_withheld_reasons'] == [
             STRUCTURAL_MODEL_VALIDITY_WITHHELD_REASON]
@@ -1707,13 +1756,28 @@ class TestDockPaneliGecerlilik:
         assert blok['model_validity_limit_exceeded'] is True
         d = dock_paneli[ad]
         # Ön koşul: uç bu koşumda onay yayımlıyor (panel onu basmamalı).
-        assert _uc_onay_sayisi(d['uc']) >= 1, ad
+        # V306/SIVI-MODEL kalem 5: ışınımsal sıvıda uç artık ÇÖZÜLEN ışınım
+        # dengesinde (erime üstü) değerlendirir ve kendisi onay basmaz —
+        # kusur kaynağında kapandı; panel denetimleri aşağıda aynen sürer.
+        if ad == 'sivi_radyatif':
+            assert _uc_onay_sayisi(d['uc']) == 0, ad
+        else:
+            assert _uc_onay_sayisi(d['uc']) >= 1, ad
         for desen in _DOCK_ONAY_IDDIASI:
             assert not re.search(desen, d['html']), (ad, desen)
         assert 'withheld' in d['metin']
         assert 'VERDICT WITHHELD' in d['metin']
-        assert ('model_validity_limit_exceeded true · motor.structural_'
-                'analysis.' + _DOCK_KUNYE_BLOGU[tur]) in d['metin']
+        if ad == 'sivi_radyatif':
+            # V306/SIVI-MODEL kalem 5: çözülen cidar çifti uca gider; uç
+            # ölçütü o sıcaklıkta KENDİSİ uygular, panel motor künye satırını
+            # basmaz (hibritle aynı tasarım, structural_panel.js
+            # readMotorValidity çağrısı). Ucun kendi bayrağı ekranda.
+            assert d['uc']['structural_analysis']['safety_analysis'][
+                'model_validity_limit_exceeded'] is True
+            assert 'OUTSIDE MODEL VALIDITY' in d['metin']
+        else:
+            assert ('model_validity_limit_exceeded true · motor.structural_'
+                    'analysis.' + _DOCK_KUNYE_BLOGU[tur]) in d['metin']
         assert 'diagnostic only' in d['metin']
         for kod in blok['model_validity_reasons']:
             assert kod in d['metin'], kod
@@ -2292,7 +2356,15 @@ class TestHibritMotorCiktisi:
 
 
 #: KAB devri (i) vakası (docs/kabul/kanit_2026-10-14 gd_sivi_radyatif).
-_KAB_SIVI_RADYATIF_1800 = {'cooling_type': 'radiative', 'max_wall_temp': 1800.0}
+#: V306/GÜVERTE-HATA: KAB ölçümü (14 Eki) örnek sıvının o günkü hazne
+#: malzemesiyle (Inconel 718) alındı; ÖRNEK kulvarı (5fa435893, 27 Eki)
+#: örneği CuCrZr'ye çevirdi. CuCrZr 1800 K'de erime (1356 K) üstündedir ve
+#: ucun yorulma hükmü geri çekme kapalıyken de CRITICAL'dır — ön koşul
+#: ("eski davranışta Fatigue Status SAFE ekranda") örtük malzeme
+#: değişikliğiyle bayatladı. Ölçüm koşulu AÇIKÇA sabitlenir
+#: (``_KAB_FORM_CIDARI_MM`` ile aynı ilke; beklentiler değişmedi).
+_KAB_SIVI_RADYATIF_1800 = {'cooling_type': 'radiative', 'max_wall_temp': 1800.0,
+                           'chamber_material': 'inconel_718'}
 #: L-B (v3.0.1, SV-05): dock paneli artık yalnız ÇÖZÜLMÜŞ cidar sıcaklığını
 #: tohumlar (cooling_system.wall_temperature_solved_*); radyatif 1800 K
 #: kullanıcının HEDEFİdir, çözülmez ve panele gitmez (eski davranış onu
@@ -2345,8 +2417,12 @@ def kab_sivi_1800(tmp_path_factory):
     os.environ.setdefault('HRMA_PROJECTS_DIR',
                           str(tmp_path_factory.mktemp('hrma_projeler_t7')))
     motor = _form_sivi(_KAB_SIVI_RADYATIF_1800)
-    # Ürün: radyatif tipte çözüm YOK, hedef tohumlanmaz (SV-05).
-    assert motor['cooling_system']['wall_temperature_solved_K'] is None
+    # V306/SIVI-MODEL kalem 5: ürün ışınımsal cidarı artık ÇÖZER (ışınım
+    # dengesi; önce None). Hedef yine tohumlanmaz; bu bekçinin girdisi KAB
+    # ölçümünün 1800 / 1800 K koşulu olduğu için çözülmüş alan TEST İÇİNDE
+    # yanıtın kendi wall_temperature_hot/cold değerleriyle tohumlanır.
+    assert 'radiation equilibrium' in motor['cooling_system'][
+        'wall_temperature_solved_source']
     motor = _kab_cozulmus_tohum(motor)
     yeni = _dock_akisi('liquid', motor)
     with _geri_cekme_kapali():
@@ -2410,7 +2486,18 @@ class TestSiviKartiSfAdlari:
             ch['yield_strength_used_MPa']
             / (ch['pressure_hoop_stress'] + ch['thermal_hoop_stress']),
             rel=1e-12)
-        assert ch['thermal_hoop_stress'] > 0.0
+        # V306/GÜVERTE-HATA (kalem 1, CI-SÜREÇ DEVİR 1): bu satır eskiden
+        # ``thermal_hoop_stress > 0`` istiyordu — o terim panelin gaz
+        # sıcaklığından TAHMİN ettiği cidardan geliyordu (film soğutmada
+        # motorun cidar çözücüsü yok: cooling_system.wall_temperature_
+        # solved_K = None, kart 800 K HEDEFTE). Tahmin motorun cidarı
+        # değildir; panel artık onu tohumlamaz, termal yol adıyla koşmaz.
+        # Kâhin aynı kalır (SF_total = σ_y / (basınç + ısıl)); ısıl terim
+        # doğru olarak sıfırdır ve nedeni yanıtta yazılıdır.
+        assert ch['thermal_hoop_stress'] == 0.0
+        assert motor['cooling_system']['wall_temperature_solved_K'] is None
+        assert uc['thermal_analysis']['wall_temperature_source'] == (
+            'not_evaluated')
         assert dp['design_pressure_factor'] != 1.0
         # Kartın 'Safety Factor' satırı tasarım hedefinin geri okunması.
         assert cs['safety_factor'] != cs['hoop_safety_factor']

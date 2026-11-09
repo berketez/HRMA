@@ -231,7 +231,12 @@ class TestP3B2GerekenBasincCeketiGoruyor:
         """
         _, regen = basincli
         _, abl = basincli_ablatif
-        r_dp = float(regen['cooling_system']['cooling_pressure_drop'])
+        # V306/SIVI-CEKET (K5_KARAR EK4): ceket ΔP'si TEK sayıdır — besleme
+        # bütçesinin ceket kalemi (RP-1'de istasyon marşı). Toplu Bartz
+        # kestirimi (cooling_system.cooling_pressure_drop) tanı değeridir,
+        # talebe girmez.
+        r_dp = float(regen['feed_system']['pressure_drops']['fuel_line'][
+            'regen_jacket'])
         a_dp = float(abl['cooling_system']['cooling_pressure_drop'])
         assert r_dp > 0.0 and a_dp == 0.0, (
             f'düzenek bozuldu: rejeneratif ΔP={r_dp}, ablatif ΔP={a_dp}')

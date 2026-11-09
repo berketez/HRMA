@@ -261,6 +261,28 @@
          true],
     ];
 
+    //: V306/DİL-HİBRİT — teknik rozetlerin sözlük etiketleri ([anahtar, EN
+    //: yedek]); Zaman Çözümlü paneliyle AYNI anahtarlar (tek büyüklük, tek
+    //: etiket). Anahtar burada harfi harfine yazılır (ölü-çeviri bekçisi).
+    const BD_ETIKET = {
+        tank_saturation_band_clamped: ['adv.js.bdSatBandClamped',
+            'TANK STATE CLAMPED TO THE SATURATION BAND: {v}'],
+        vapor_model_valid: ['adv.js.bdVaporModelValid', 'VAPOR MODEL VALID: {v}'],
+        vapor_phase_integrated: ['adv.js.tpVaporIntegrated',
+            'VAPOR PHASE INTEGRATED: {v}'],
+        vapor_tail_off_leaves_model_envelope: ['adv.js.tpTailOffOutside',
+            'VAPOR TAIL-OFF OUTSIDE THE MODEL ENVELOPE: {v}'],
+        residual_oxidizer_kg: ['adv.js.tpResidualOx', 'OXIDIZER LEFT IN TANK {v} kg'],
+        residual_impulse_at_cutoff_rate_Ns: ['adv.js.tpResidualImpulse',
+            'IMPULSE CUT OFF (at the cut-off rate) {v} N·s'],
+        residual_impulse_fraction_at_cutoff_rate: ['adv.js.tpResidualFraction',
+            'CUT-OFF IMPULSE FRACTION {v}'],
+    };
+    const BD_TANK_FAZI = {
+        two_phase: ['adv.js.tpPhaseTwoPhase', 'two-phase'],
+        vapor: ['adv.js.tpPhaseVapor', 'vapor'],
+    };
+
     //: Kesilen kuyruğun BOYU — [alan, okuyucu, ondalık, birim].
     const CUTOFF_FIELDS = [
         ['residual_oxidizer_kg',
@@ -614,14 +636,18 @@
         // örneklemde "eğri" adı kazanılmamıştır ve bu SÖYLENİR.
         if (typeof vm.sample_count === 'number') {
             const az = vm.sample_count <= MIN_POLYLINE_SAMPLES;
-            html += badge('SAMPLES ' + vm.sample_count,
+            // V306/DİL-HİBRİT: TR ekranda "SAMPLES 211" İngilizce kalıyordu
+            // (ölçüldü, olcum/ekran_once_tr.json); rozet ve ipucu sözlükten.
+            html += badge(TF('adv.js.bdSamples', { n: vm.sample_count },
+                             'SAMPLES {n}'),
                 az ? 'warn' : 'info',
-                az ? ('The blowdown series has only ' + vm.sample_count
-                      + ' sample(s) — the polyline minimum. No intermediate '
-                      + 'point of the decay is resolved: what is drawn is a '
-                      + 'straight line between the end points, not a decay '
-                      + 'curve.')
-                   : (vm.sample_count + ' solver samples were drawn.'));
+                az ? TF('adv.js.bdSamplesFew', { n: vm.sample_count },
+                        'The blowdown series has only {n} sample(s) — the '
+                        + 'polyline minimum. No intermediate point of the '
+                        + 'decay is resolved: what is drawn is a straight '
+                        + 'line between the end points, not a decay curve.')
+                   : TF('adv.js.bdSamplesDrawn', { n: vm.sample_count },
+                        '{n} solver samples were drawn.'));
         }
         if (vm.burn_duration_s !== null && vm.burn_duration_s !== undefined) {
             html += badge(TF('blowdown.badgeBurn',
@@ -678,14 +704,33 @@
         // ölçüldü: TR ekranda 9 ham rozet) kapalı "teknik ayrıntı"
         // bölümüne toplanır. Rozet metinleri ve renkleri aynıdır; aynı
         // durumu kullanıcıya anlatan cümleler (vm.warnings) görünür kalır.
+        // V306/DİL-HİBRİT: bu rozetler de KULLANICI DİLİYLE basılır — Zaman
+        // Çözümlü panelinin (transient_panel.js) aynı büyüklükler için
+        // kullandığı AYNI sözlük etiketleriyle (tek büyüklük, tek etiket).
+        // Makine alan adı rozeti saran `data-bd-field` niteliğinde kalır
+        // (ad+değer bağı); değer ekran kanalından (TR virgül). Tanınmayan
+        // faz kodu ham + "(?)" basılır (sessiz yedek yok).
         let teknik = '';
+        const sar = function (alan, ic) {
+            return '<span data-bd-field="' + alan + '">' + ic + '</span>';
+        };
+        const evetHayir = function (v) {
+            return v ? T('common.yes', 'yes') : T('common.no', 'no');
+        };
+        const fazAdi = function (f) {
+            const tablo = BD_TANK_FAZI;
+            return Object.prototype.hasOwnProperty.call(tablo, f)
+                ? T(tablo[f][0], tablo[f][1]) : esc(f) + ' (?)';
+        };
         if (vm.tank_phase_final) {
-            teknik += badge('tank_phase_final ' + esc(vm.tank_phase_final),
-                vm.tank_phase_final === 'vapor' ? 'warn' : 'info');
+            teknik += sar('tank_phase_final', badge(TF('adv.js.tpTankPhaseFinal',
+                { phase: fazAdi(vm.tank_phase_final) }, 'TANK PHASE AT END: {phase}'),
+                vm.tank_phase_final === 'vapor' ? 'warn' : 'info'));
         }
         if (vm.vapor_onset_s !== null && vm.vapor_onset_s !== undefined) {
-            teknik += badge('vapor_onset_s '
-                + sayiEkran(vm.vapor_onset_s, 2) + ' s', 'warn');
+            teknik += sar('vapor_onset_s', badge(TF('adv.js.tpVaporOnset',
+                { s: sayiEkran(vm.vapor_onset_s, 2) }, 'VAPOR PHASE ONSET {s} s'),
+                'warn'));
         }
         // Seri: kaç örnek hangi fazda? (uydurma yok — sayım seriden gelir)
         if (vm.tank_phase) {
@@ -694,25 +739,27 @@
                 sayim[f] = (sayim[f] || 0) + 1;
             });
             const dokum = Object.keys(sayim).sort().map(function (f) {
-                return f + ' ' + sayim[f];
+                return fazAdi(f) + ' ' + sayim[f];
             }).join(' / ');
-            teknik += badge('tank_phase ' + esc(dokum), 'info');
+            teknik += sar('tank_phase', badge(TF('adv.js.tpTankPhaseSteps',
+                { list: dokum }, 'TANK PHASE (solver steps): {list}'), 'info'));
         }
-        // ÖH D29 · OH-D28-03 — DÜRÜSTLÜK BAYRAKLARI ve KESME PAYI.
-        // Rozet ucun MAKİNE ALAN ADINI ve değerini aynen basar (aynı
-        // kalıp `tank_phase_final` ve negatif `thrust_decay_fraction`
-        // dallarında da kullanılıyor); yeni çeviri anahtarı açılmaz.
-        // Ad ile değer AYNI rozetin içindedir — "ad+değer" süpürme
-        // ölçütü (D28 bekci a1) bunu şart koşar.
+        // ÖH D29 · OH-D28-03 — DÜRÜSTLÜK BAYRAKLARI ve KESME PAYI. Ad ile
+        // değer AYNI rozetin içindedir ("ad+değer" süpürme ölçütü, D28 bekci
+        // a1): ad `data-bd-field` niteliğinde, değer etiketli metinde.
         (vm.bayraklar || []).forEach(function (b) {
-            teknik += badge(b.field + ' ' + (b.value ? 'true' : 'false'),
-                (b.value === b.limitsAt) ? 'warn' : 'info');
+            const e = BD_ETIKET[b.field];
+            const metin = e ? TF(e[0], { v: evetHayir(b.value) }, e[1])
+                : esc(b.field) + ' ' + evetHayir(b.value);
+            teknik += sar(b.field, badge(metin,
+                (b.value === b.limitsAt) ? 'warn' : 'info'));
         });
         (vm.kesme || []).forEach(function (k) {
-            let html = '';
-            html += badge(k.field + ' ' + k.value.toFixed(k.digits) + k.unit,
-                (k.value > 0) ? 'warn' : 'info');
-            teknik += html;
+            const e = BD_ETIKET[k.field];
+            const deger = sayiEkran(k.value, k.digits);
+            const metin = e ? TF(e[0], { v: deger }, e[1])
+                : esc(k.field) + ' ' + deger + k.unit;
+            teknik += sar(k.field, badge(metin, (k.value > 0) ? 'warn' : 'info'));
         });
         // Blok içi serbest-metin uyarıları: kararsızlık olanlar kırmızı vurgulu
         (vm.warnings || []).forEach(function (w) {
@@ -722,8 +769,12 @@
             html += '<details class="hd-teknik-ayrinti" style="margin-top:6px;">'
                 + '<summary style="cursor:pointer; font-size:0.72rem;'
                 + ' color:var(--hd-ink-dim, #7d97a5);">'
-                + esc(T('common.techDetail', 'Technical detail (machine fields)'))
-                + '</summary>' + teknik + '</details>';
+                + esc(T('adv.js.bdTankDetail', 'Tank phase and cut-off detail'))
+                // V306/DİL-HİBRİT: rozetler üstteki şerit gibi esnek sarılır;
+                // satır içi akışta uzun rozet satır sonunda ikiye bölünüyordu
+                // (ölçüldü: tarayici/son_tr_1440_blowdown_rozet.png).
+                + '</summary><div style="display:flex; flex-wrap:wrap; gap:8px;'
+                + ' margin-top:6px;">' + teknik + '</div></details>';
         }
         el.innerHTML = html;
     }

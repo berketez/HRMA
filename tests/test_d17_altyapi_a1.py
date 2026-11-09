@@ -252,6 +252,19 @@ def _sahte_paket(kok, bayt=0):
         (kok / f).write_bytes(dolgu)
     for n in range(len(list((DEPO / 'examples').glob('*.hrma')))):
         (kok / 'app/examples' / f'o{n}.hrma').write_bytes(dolgu)
+    # 3.0.6 (V306/CI-SÜREÇ kalem 1, S1 lisans): manifest artık GPL metnini,
+    # üçüncü taraf bildirimini ve dağıtım listesini de İÇERİĞİYLE ister.
+    # Sıfır baytlık sahte pakette bunlar da 0 bayttır (yine KALIR); dolu
+    # pakette gerçek LICENSE metni ve RocketCEA beyanlı bildirim taşınır.
+    (kok / 'app/licenses').mkdir(parents=True, exist_ok=True)
+    if bayt:
+        (kok / 'app/LICENSE').write_bytes((DEPO / 'LICENSE').read_bytes())
+        (kok / 'app/licenses/THIRD_PARTY_NOTICES.txt').write_bytes(
+            b'Distribution: rocketcea\n' + dolgu)
+    else:
+        (kok / 'app/LICENSE').write_bytes(dolgu)
+        (kok / 'app/licenses/THIRD_PARTY_NOTICES.txt').write_bytes(dolgu)
+    (kok / 'app/licenses/PYTHON_PACKAGES.txt').write_bytes(dolgu)
     return kok
 
 
@@ -294,12 +307,16 @@ class TestPaketIcerikManifesti:
         yok, 526->383 MB bytecode) ikisi de NİCELİK kaybıydı.
         """
         hata, cik = _manifesti_kos(_sahte_paket(tmp_path / 'sahte'))
-        # ALTI sınamanın ALTISI da kalmalı: tek bir sınama `-f`/`-d` biçimine
-        # geri dönerse bu bekçi kırmızı verir (ters mutasyonla ölçüldü).
-        assert hata == 6, (
-            f'0 baytlık / boş data`lı sahte paket yalnız {hata}/6 sınamada '
+        # SEKİZ sınamanın SEKİZİ de kalmalı: tek bir sınama `-f`/`-d`
+        # biçimine geri dönerse bu bekçi kırmızı verir (ters mutasyonla
+        # ölçüldü). 3.0.6 (V306/CI-SÜREÇ): 6 -> 8 — manifeste iki lisans
+        # sınaması eklendi (app/LICENSE GPLv3 metni; app/licenses/ bildirim +
+        # dağıtım listesi); ikisi de varlığa değil İÇERİĞE bakar.
+        assert hata == 8, (
+            f'0 baytlık / boş data`lı sahte paket yalnız {hata}/8 sınamada '
             f'kaldı — en az bir sınama hâlâ VARLIĞA bakıyor:\n{cik}')
-        for beklenen in ('data/', 'launcher.py', 'ön-derleme'):
+        for beklenen in ('data/', 'launcher.py', 'ön-derleme', 'LICENSE',
+                         'app/licenses/'):
             assert beklenen in cik, f'{beklenen!r} sınaması çıktıda yok:\n{cik}'
 
     def test_bos_data_dizini_tek_basina_KALIR(self, tmp_path):

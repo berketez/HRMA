@@ -104,14 +104,14 @@
             + 'Typical 0.15-0.30; below 0.15 chug instability is likely '
             + '(Sutton & Biblarz 9th ed. Ch. 8; NASA SP-194 Ch. 5-6).'],
         inj_mdot_ox: ['inj.helpMdotOx',
-            'Oxidizer mass flow rate through the injector. Typical '
-            + 'amateur/university range 0.1-5 kg/s.'],
+            'Oxidizer mass flow rate through the injector, kg/s; must be > 0. '
+            + 'After a calculation it is filled from the motor result.'],
         inj_mdot_fuel: ['inj.helpMdotFuel',
             'Fuel mass flow rate (liquid engines only). Set by the '
-            + 'mixture ratio: mdot_fuel = mdot_ox / (O/F).'],
+            + 'mixture ratio: ṁ_fuel = ṁ_ox / (O/F).'],
         inj_pc: ['inj.helpPc',
-            'Chamber pressure at the design point. Hybrids typically '
-            + '15-40 bar, liquids 30-150 bar.'],
+            'Chamber pressure at the design point, bar. After a calculation '
+            + 'it is filled from the motor result.'],
         inj_rho_ox: ['inj.helpRhoOx',
             'Liquid oxidizer density at injection temperature. N2O at '
             + '293 K is about 745-790 kg/m3; LOX about 1141 kg/m3.'],
@@ -816,14 +816,48 @@
                         ['liq.ui.ph_ls_equals_dp', 'L_s = D_p if empty']);
     }
 
+    // V306/DİL-ORTAK (KILAVUZ K-P9): MOTORDAN DOLDURULAN ALANIN GÖSTERİMİ.
+    // ÖLÇÜLDÜ (KILAVUZ K-P9): alanlar yuvarlanmadan basılıyordu (sıvı
+    // "6,53169304510620", hibrit "1,25021646166"). Güvertenin sözleşmesi
+    // (analysis_dock.js tamOnDolumDegeri, V306/GÜVERTE-HATA): kutuda
+    // güvertenin anlamlı basamak sayısı (AnalysisDock.ui.SIGFIG, tek kaynak),
+    // GÖNDERİLEN değer önceki tam değer — kullanıcı alanı değiştirmedikçe.
+    // Böylece gönderilen sayı (ve tasarım sonucu) bit-aynı kalır. Güverte
+    // yüklü değilse gösterim değişmez (yedek basamak uydurulmaz).
+    function _ekranBasamagi() {
+        const U = window.AnalysisDock && window.AnalysisDock.ui;
+        const n = U && U.SIGFIG;
+        return (typeof n === 'number' && n > 0) ? n : null;
+    }
+    function _alanaYaz(el, x, tamMetin) {
+        if (!el) return;
+        delete el.dataset.fullValue; delete el.dataset.shownValue;
+        if (!sayiMi(x)) { el.value = ''; return; }
+        const n = _ekranBasamagi();
+        const gorunen = n ? String(Number(x.toPrecision(n))) : tamMetin;
+        el.value = gorunen;
+        if (gorunen !== tamMetin) {
+            el.dataset.fullValue = tamMetin;
+            el.dataset.shownValue = gorunen;
+        }
+    }
+    function _alandanOku(el) {
+        const raw = String(el.value == null ? '' : el.value).trim();
+        if (raw === '') return null;
+        const d = el.dataset || {};
+        if (d.fullValue !== undefined && d.shownValue === raw) {
+            return parseFloat(d.fullValue);
+        }
+        return parseFloat(raw);
+    }
+
     function readLiquidValues() {
         const v = { motor_type: 'liquid',
                     injector_type: document.getElementById('inj_type').value };
         LIQUID_VALUE_FIELDS.forEach(function (f) {
             const el = document.getElementById(f[0]);
             if (!el) return;
-            const raw = String(el.value == null ? '' : el.value).trim();
-            v[f[1]] = raw === '' ? null : parseFloat(raw);
+            v[f[1]] = _alandanOku(el);
         });
         const inl = document.getElementById('inj_inlet');
         v.inlet = inl ? inl.value : 'sharp';
@@ -844,7 +878,7 @@
             const el = document.getElementById(f[0]);
             if (!el) return;
             const x = v[f[1]];
-            el.value = sayiMi(x) ? String(x) : '';
+            _alanaYaz(el, x, sayiMi(x) ? String(x) : '');
         });
         const inl = document.getElementById('inj_inlet');
         if (inl) inl.value = 'sharp';
@@ -1249,8 +1283,7 @@
         HYBRID_VALUE_FIELDS.forEach(function (f) {
             const el = document.getElementById(f[0]);
             if (!el) return;
-            const raw = String(el.value == null ? '' : el.value).trim();
-            v[f[1]] = raw === '' ? null : parseFloat(raw);
+            v[f[1]] = _alandanOku(el);
         });
         const n2oEl = document.getElementById('inj_n2o');
         v.n2o = !!(n2oEl && n2oEl.checked);
@@ -1276,7 +1309,7 @@
             const el = document.getElementById(f[0]);
             if (!el) return;
             const x = v[f[1]];
-            el.value = sayiMi(x) ? String(Number(x.toPrecision(12))) : '';
+            _alanaYaz(el, x, sayiMi(x) ? String(Number(x.toPrecision(12))) : '');
         });
         const n2oEl = document.getElementById('inj_n2o');
         if (n2oEl) n2oEl.checked = !!v.n2o;
@@ -1333,7 +1366,7 @@
                 // yalnız makine kodu basılıyordu.
                 throw new Error((window.HRMAReject && window.HRMAReject.metni)
                     ? window.HRMAReject.metni(data, resp.status)
-                    : (data.error || `HTTP ${resp.status}`));
+                    : (data.error || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status))));
             }
             const dz = data.design || {};
             if (dz.status === 'error') throw new Error(dz.error || 'design error');

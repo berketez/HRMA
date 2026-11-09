@@ -559,12 +559,17 @@ class TestSiviAtilKutle:
         assert v['engine_inert_mass'] == pytest.approx(43.5, rel=1e-12)
 
     def test_besleme_alt_kumesi_atil_kutle_degildir(self):
-        """Son çare ``feed_system.total_mass`` yalnız motor kütlesi YOKKEN."""
+        """``feed_system.total_mass`` (besleme hattı + turbopompa) atıl kütle
+        DEĞİLDİR. V306/UÇUŞ-3 (SIVI-SOĞUTMA DEVİR): eski bekçi bu alt kümeyi
+        motor kütlesi yokken "son çare" atıl kütle diye kilitliyordu — araç
+        eksik kütleyle uçabiliyordu. Motor kütlesi yoksa atıl kütle yoktur ve
+        araç kurulmaz (``vehicle_build_refusal``)."""
         r = _sivi()
         r['design_summary']['masses'].pop('engine_mass_kg')
         r.pop('engine_mass_estimate')
         v = fv.normalize('liquid', r)
-        assert v['engine_inert_mass'] == pytest.approx(18.0, rel=1e-12)
+        assert v['engine_inert_mass'] is None
+        assert fv.vehicle_build_refusal('liquid', r, v) is not None
 
     def test_rezerv_negatifse_eklenmez(self):
         """Nominal > yüklenen (tutarsız yanıt) → uydurma negatif kütle YOK."""

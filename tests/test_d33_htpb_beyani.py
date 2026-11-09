@@ -168,7 +168,12 @@ def kayitlar():
     assert lox is not None, '%s lox koşusunda ateşlenmedi' % KOD
     sogutmali = _uyari(_kos(cooling_type='radial'),
                        'warn.hybrid.cooling_channels_assumed')
-    return {'n2o': n2o, 'lox': lox, 'kanal': sogutmali}
+    # V306/HİBRİT-ÇAPRAZ-2 ek tur (DEVİR 4): akı kapanışı gerekçesi yalnız
+    # TOPLAM akı kipindeki koşuda doğar (ürün varsayılanı G_ox).
+    n2o_total = _uyari(_kos(flux_mode='total'), KOD)
+    assert n2o_total is not None, '%s total kipinde ateşlenmedi' % KOD
+    return {'n2o': n2o, 'lox': lox, 'kanal': sogutmali,
+            'n2o_total': n2o_total}
 
 
 @pytest.fixture(scope='module')
@@ -215,7 +220,7 @@ KUNYE_DESENI = re.compile(r'\S+\.(?:md|py|js|html|json)\b')
 
 
 @node_gerekli
-@pytest.mark.parametrize('kosu', ['n2o', 'lox'])
+@pytest.mark.parametrize('kosu', ['n2o', 'lox', 'n2o_total'])
 def test_turkce_cikti_tamamen_turkce(metinler, kosu):
     tr = metinler['tr'][kosu]
     kalan = [p for p in TR_DE_OLMAMASI_GEREKEN if p in tr]
@@ -226,7 +231,7 @@ def test_turkce_cikti_tamamen_turkce(metinler, kosu):
 
 
 @node_gerekli
-@pytest.mark.parametrize('kosu', ['n2o', 'lox'])
+@pytest.mark.parametrize('kosu', ['n2o', 'lox', 'n2o_total'])
 def test_turkce_ciktida_ham_ikili_yok(metinler, kosu):
     """``true`` / ``false`` hiçbir dilde kullanıcı metni değildir."""
     tr = metinler['tr'][kosu]
@@ -240,7 +245,7 @@ def test_turkce_ciktida_ham_ikili_yok(metinler, kosu):
 
 
 @node_gerekli
-@pytest.mark.parametrize('kosu', ['n2o', 'lox'])
+@pytest.mark.parametrize('kosu', ['n2o', 'lox', 'n2o_total'])
 def test_turkce_ciktida_ham_json_yok(metinler, kosu):
     tr = metinler['tr'][kosu]
     for im in ('{"', '":', 'medape_pct', 'bias_pct', 'oxidizer\u0022'):
@@ -250,7 +255,7 @@ def test_turkce_ciktida_ham_json_yok(metinler, kosu):
 
 
 @node_gerekli
-@pytest.mark.parametrize('kosu', ['n2o', 'lox'])
+@pytest.mark.parametrize('kosu', ['n2o', 'lox', 'n2o_total'])
 def test_turkce_ciktida_noktali_ondalik_yok(metinler, kosu):
     """TR cümlesinde ondalık ayracı VİRGÜLdür; künye dizeleri hariç."""
     tr = KUNYE_DESENI.sub(' ', metinler['tr'][kosu])
@@ -268,11 +273,15 @@ def test_turkce_ciktida_gerekceler_ve_kampanyalar_okunuyor(metinler):
     """Onarım metni SUSTURMADI: her iki gerekçe ve üç kampanya da orada."""
     tr = metinler['tr']['n2o']
     for parca in ('iki kayıt havuzu aynı küme değil',
-                  'G_total akı kapanışı',
                   'Rezaei 2018', 'Carmicino 2013', 'Heydari 2017',
                   'medyan mutlak hata bildirilmedi'):
         assert parca in tr, ('Türkçe beyandan parça düşmüş: %r\n%s'
                              % (parca, tr))
+    # V306/HİBRİT-ÇAPRAZ-2 ek tur (DEVİR 4): G_ox kipindeki (varsayılan)
+    # koşuda akı kapanışı iddiası YOK; toplam akı kipinde VAR.
+    assert 'G_total akı kapanışı' not in tr, tr
+    assert 'G_total akı kapanışı' in metinler['tr']['n2o_total'], (
+        metinler['tr']['n2o_total'])
 
 
 @node_gerekli
@@ -305,12 +314,17 @@ def test_ingilizce_cikti_anlamini_koruyor(metinler):
                   'Rezaei 2018', 'Carmicino 2013', 'Heydari 2017',
                   'were NOT reconciled',
                   'the two record pools are not the same set',
-                  'G_total flux closure',
-                  '10-18%',
                   'deliberately NOT retuned',
                   'docs/arastirma/fizik/A3-hibrit-regresyon.md'):
         assert parca in en, ('İngilizce beyandan parça düşmüş: %r\n%s'
                              % (parca, en))
+    # V306/HİBRİT-ÇAPRAZ-2 ek tur (DEVİR 4): akı kapanışı gerekçesi yalnız
+    # toplam akı kipinde (ölçüldü: ürün yolu regression_flux_mode = 'ox').
+    assert 'G_total flux closure' not in en and '10-18%' not in en, en
+    en_total = metinler['en']['n2o_total']
+    for parca in ('G_total flux closure', '10-18%',
+                  'total-flux regression mode'):
+        assert parca in en_total, (parca, en_total)
 
 
 @node_gerekli
@@ -378,8 +392,12 @@ def test_kampanya_satirlarinin_makine_alanlari_yerinde(kayitlar):
 
 def test_uzlasmama_gerekceleri_kayit_oldu(kayitlar):
     """Gerekçeler nesir değil ``{code, params}`` kaydı; sayıları ADIYLA taşır."""
-    gerekceler = kayitlar['n2o']['params']['unreconciled_reasons']
-    assert len(gerekceler) >= 2, gerekceler
+    # V306/HİBRİT-ÇAPRAZ-2 ek tur (DEVİR 4): varsayılan koşu G_ox kipinde
+    # (``regression_flux_mode``); akı kapanışı gerekçesi yalnız 'total'da.
+    p = kayitlar['n2o']['params']
+    assert [g['code'] for g in p['unreconciled_reasons']] == [
+        'warn.hybrid.htpb_bias_unreconciled_pools']
+    gerekceler = kayitlar['n2o_total']['params']['unreconciled_reasons']
     kodlar = [g['code'] for g in gerekceler]
     assert kodlar == ['warn.hybrid.htpb_bias_unreconciled_pools',
                       'warn.hybrid.htpb_bias_unreconciled_flux_closure'], kodlar

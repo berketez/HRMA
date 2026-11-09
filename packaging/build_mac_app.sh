@@ -384,6 +384,17 @@ print('      BUILD_INFO.json: sha=%s tree_dirty=%s'
       % (kayit['sha'][:8] if kayit['sha'] else 'YOK', kayit['tree_dirty']))
 PY
 [ -f "$RES/app/BUILD_INFO.json" ] || { echo "HATA: BUILD_INFO.json yazılamadı"; exit 1; }
+
+# --- Lisans + üçüncü taraf bildirimleri (3.0.6, S1 lisans) ------------------
+# Ölçüldü: v3.0.5 paketinde Resources/app altında LICENSE YOKTU; paket
+# RocketCEA (GPLv3) ve lisans dosyası taşımayan Open CASCADE (LGPL-2.1)
+# kütüphaneleri taşıyordu. Kaynak 3.0.6'dan itibaren GPL-3.0-or-later; GPL
+# programla birlikte lisansın da verilmesini şart koşar. Betik libs/ ve app/
+# HAZIR olduktan sonra koşar (dist-info'ları tarar) ve FAIL-CLOSED'dur:
+# RocketCEA lisansı yoksa ya da bildirimsiz copyleft dağıtım varsa derleme
+# DURUR (set -e). Ayrıntı: packaging/lisans_paketle.py
+python3 "$B/lisans_paketle.py" --kaynak "$SRC" --app "$RES/app" --libs "$RES/libs"
+[ -s "$RES/app/LICENSE" ] || { echo "HATA: LICENSE pakete girmedi"; exit 1; }
 # v2.5.4 kök temizliği: icon.icns artık packaging/ altında
 # v2.6.25: iki ayrı simge varlığı — icon.icns TAM TAŞMA (Tahoe kendi karo
 # maskesini uygular), icon_runtime.png önceden yuvarlatılmış (launcher

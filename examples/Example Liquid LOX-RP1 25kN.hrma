@@ -78,26 +78,93 @@
    "gimbal_bolt_count": "",
    "engine_life_cycles": 10,
    "hrma_ai_goal": "",
-   "traj_initial_mass": 453.764,
-   "traj_final_mass": 156.313,
+   "traj_initial_mass": 443.515,
+   "traj_final_mass": 143.346,
    "traj_drag_coeff": 0.5,
    "traj_ref_area": 0.05,
    "traj_burn_time": "",
    "fea_show_mesh": true,
    "fea_metric": "aspect_ratio"
+  },
+  "dynamic": {
+   "flight": {
+    "format": 1,
+    "sixdof": {
+     "format": 1,
+     "fields": {
+      "sd_body_d": "0.242",
+      "sd_body_l": "2",
+      "sd_nose_l": "0.4",
+      "sd_nose_type": "ogive",
+      "sd_fin_count": "4",
+      "sd_fin_root": "0.2",
+      "sd_fin_tip": "0.1",
+      "sd_fin_span": "0.11",
+      "sd_fin_sweep": "0.08",
+      "sd_fin_pos": "1.8",
+      "sd_dry_m": "143.346",
+      "sd_prop_m": "300.168",
+      "sd_cd0": "0.45",
+      "sd_wind": "5",
+      "sd_wind_dir": "0",
+      "sd_elev": "90",
+      "sd_azimuth": "0",
+      "sd_rail": "5",
+      "sd_thrust": "25000.0",
+      "sd_burn": "30.00"
+     },
+     "user_typed": [],
+     "mass_mode": "simple",
+     "components": [
+      {
+       "name": "Nose cone",
+       "mass": 0.5,
+       "x": 0.2,
+       "propellant": false
+      },
+      {
+       "name": "Body tube",
+       "mass": 3,
+       "x": 1.2,
+       "propellant": false
+      },
+      {
+       "name": "Fins",
+       "mass": 0.5,
+       "x": 1.9,
+       "propellant": false
+      },
+      {
+       "name": "Motor (dry)",
+       "mass": 4,
+       "x": 1.7,
+       "propellant": false
+      },
+      {
+       "name": "Oxidizer/Fuel",
+       "mass": 4,
+       "x": 1.55,
+       "propellant": true
+      }
+     ],
+     "thrust_source": "auto",
+     "use_curve": true
+    },
+    "trajectory_user_typed": []
+   }
   }
  },
  "description": "Örnek tasarım: LOX/RP-1 sıvı motor, 25 kN itki, 50 bar oda basıncı, O/F 2,0, gaz jeneratörü çevrimi, rejeneratif soğutma; iki katmanlı cidar: 1,0 mm CuCrZr astar + HRMA'nın boyutlandırdığı dış kabuk (varsayılan malzeme). Yanma süresi 30 s bir örnek girdisidir (HRMA seçimi); itici kütlesi, toplam itki ve tanklar bundan hesaplanır. Bu cidar için bu O/F ve oda basıncı geçerli noktadır ve dökülme payı dardır: O/F yükseltilirse dökülen birikimin altındaki yerel cidar sıcaklığı erime sınırını aşar (kritik). / Example design: LOX/RP-1 liquid engine, 25 kN thrust, 50 bar chamber pressure, O/F 2.0, gas-generator cycle, regenerative cooling; two-layer wall: 1.0 mm CuCrZr liner + a closeout shell sized by HRMA (default material). The burn time of 30 s is an example input (HRMA choice); propellant mass, total impulse and tanks are computed from it. This O/F and chamber pressure are the valid point for this wall and the spallation margin is narrow: at a higher O/F the local wall temperature under a spalled deposit exceeds the melting limit (critical).",
  "results_summary": {
   "thrust_N": 25000,
-  "isp_s": 257.1140587482419,
+  "isp_s": 254.78596002680555,
   "isp_basis": "sea_level",
-  "isp_vacuum_s": 301.09922942629714,
+  "isp_vacuum_s": 299.32006978644336,
   "chamber_pressure_bar": 50,
   "total_impulse_Ns": 750000,
-  "computed_with_version": "3.0.5"
+  "computed_with_version": "3.0.6"
  },
- "app_version": "3.0.5",
+ "app_version": "3.0.6",
  "created_at": "2026-07-31T19:25:34",
- "updated_at": "2026-10-27T14:18:50"
+ "updated_at": "2026-11-09T16:28:26"
 }

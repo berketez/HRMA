@@ -73,8 +73,19 @@ def test_kullanici_etasinda_beyanli_sigma_kalir():
 
 
 def test_kaynaksiz_ciftte_dagilim_degismez():
-    from hrma.analysis import uq_adapters as uqa
-    once = uqa.build_distributions('hybrid', None)['eta_c_star']
-    d = _eta({'oxidizer_type': 'lox', 'fuel_type': 'paraffin'})
-    assert (d.mean, d.sigma, d.low, d.high, d.nominal_override) == (
-        once.mean, once.sigma, once.low, once.high, once.nominal_override)
+    # V306/HİBRİT-MODEL (M-HIBRIT-25, 3 Kas) — SÖZLEŞME DEĞİŞTİ. Eski
+    # beklenti "LOX/parafinde kaynak yok, dağılım dokunulmaz (ideal c*)"
+    # idi; depoda oksijen/parafin ölçümleri vardı (Karabeyoğlu 2003,
+    # Battista 2019). Artık çiftin kendi kayıtlarının σ'sı ve aralığı
+    # kullanılır, ölçümü olmayan çift genel hibrit kaydını alır.
+    from hrma.engines.hybrid_rocket_engine import (
+        HYBRID_ETA_C_STAR_GENERAL, HYBRID_ETA_C_STAR_MEASURED)
+    for govde, k in (
+            ({'oxidizer_type': 'lox', 'fuel_type': 'paraffin'},
+             HYBRID_ETA_C_STAR_MEASURED[('lox', 'paraffin')]),
+            ({'oxidizer_type': 'n2o', 'fuel_type': 'paraffin'},
+             HYBRID_ETA_C_STAR_GENERAL)):
+        d = _eta(govde)
+        assert d.mean == d.nominal_override == pytest.approx(k['eta_c_star'])
+        assert d.sigma == k['sample_stdev']
+        assert (d.low, d.high) == tuple(k['measured_band'])

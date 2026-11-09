@@ -257,13 +257,42 @@ def _kos(client, **ek):
     return j.get('results', j)
 
 
+#: V306/ONARIM-SIVI (rc.1 CI) — SIVI-CEKET-A K5 EK7: F-1 sınıfı (6770 kN /
+#: 70 bar) ve H-1 sınıfı (947 kN / 48 bar) RP-1 rejeneratif motorlarda ceket
+#: istasyon marşı model sınırında (jacket_model_limit); açık çevrim defteri
+#: boğazı boyutladığı için ('design' kapsamı) soğutma/besleme blokları adlı
+#: nedenle bekletilir ve dört düğüm None üstünde TypeError ile düşüyordu. Bu
+#: sınamaların konusu kapı değil (daralma oranı ve L* bantları, SP-8107 tank
+#: basıncı): o noktalar kapıya girmeyen RD-180 ile kurulur. Değerler depodaki
+#: doğrulama kaydından, elle seçilmedi:
+#: hrma/data/validation_records/liquid/liq-rd180-atlas-spec.json (deniz
+#: seviyesi itki 3830 kN, Pc 256,6 bar, O/F 2,72, oksitleyici-zengin kademeli
+#: yanma; kaynak güveni 'medium'). Kapının kendisi TestUctanUcaF3'te
+#: (F-1 ve H-1) adlı nedenle sınanır.
+RD180 = dict(thrust=3830000.0, chamber_pressure=256.6, mixture_ratio=2.72)
+
+
+def _kapida(res):
+    """K5 EK7: ceket model sınırı adlı nedenle; ceket bağımlı bloklar boş."""
+    ccp = res['cooling_circuit_publication']
+    assert ccp['status'] == 'not_solved'
+    assert ccp['code'] == 'jacket_model_limit'
+    assert ccp['withheld_reason_code'] == 'jacket_model_limit'
+    assert isinstance(ccp['reason'], str) and ccp['reason']
+    assert res.get('cooling_system') is None
+    assert res.get('detailed_feed_system') is None
+
+
 class TestUctanUcaF2:
 
     @pytest.mark.parametrize('thrust,pc,yakit,oks,ratio', [
         (5000.0, 30.0, 'rp1', 'lox', 2.2),
         (100000.0, 60.0, 'rp1', 'lox', 2.4),
         (500000.0, 70.0, 'rp1', 'lox', 2.3),
-        (947000.0, 48.0, 'rp1', 'lox', 2.23),
+        # V306/ONARIM-SIVI: H-1 sınıfı (947000, 48, 2.23) EK7 kapısında →
+        # RD-180 (RD180 notu).
+        (RD180['thrust'], RD180['chamber_pressure'], 'rp1', 'lox',
+         RD180['mixture_ratio']),
         (100000.0, 50.0, 'lh2', 'lox', 5.5),
         (50000.0, 40.0, 'mmh', 'n2o4', 2.0),
     ])
@@ -284,7 +313,10 @@ class TestUctanUcaF2:
     @pytest.mark.parametrize('thrust,pc,yakit,oks,ratio,band', [
         (5000.0, 30.0, 'rp1', 'lox', 2.2, (1.02, 1.27)),
         (500000.0, 70.0, 'rp1', 'lox', 2.3, (1.02, 1.27)),
-        (6770000.0, 70.0, 'rp1', 'lox', 2.27, (1.02, 1.27)),
+        # V306/ONARIM-SIVI: F-1 sınıfı (6770000, 70, 2.27) EK7 kapısında →
+        # RD-180 (RD180 notu).
+        (RD180['thrust'], RD180['chamber_pressure'], 'rp1', 'lox',
+         RD180['mixture_ratio'], (1.02, 1.27)),
         (100000.0, 50.0, 'lh2', 'lox', 5.5, (0.76, 1.02)),
         (50000.0, 40.0, 'mmh', 'n2o4', 2.0, (0.76, 0.89)),
     ])
@@ -435,15 +467,28 @@ class TestUctanUcaF3:
             or 'velocity head' in p['npsh_velocity_head_basis'].lower()
 
     def test_F1_sinifi_artik_400_dondurmuyor(self, client):
-        """Yan bulgu: float(None) çarpması bütün isteği 400'e düşürüyordu."""
+        """Yan bulgu: float(None) çarpması bütün isteği 400'e düşürüyordu.
+
+        V306/ONARIM-SIVI: tank basıncı hesabı koşar (yanıt 200; ``_kos``
+        bunu ister) ama F-1 sınıfında K5 EK7 kapısı ceket bağımlı blokları
+        adlı nedenle bekletir: ``detailed_feed_system`` artık yayımlanmaz.
+        """
         res = _kos(client, thrust=6770000.0, chamber_pressure=70.0,
                    mixture_ratio=2.27, expansion_ratio=16.0)
-        assert res['detailed_feed_system']['tank_pressure_bar'] > 0.0
+        _kapida(res)
 
-    def test_H1_sinifi_SP8107_bandinda(self, client):
-        """Literatür çapası: H-1 sınıfı tank basıncı Table II bandında."""
+    def test_H1_sinifi_kapida_adli_nedenle(self, client):
+        """K5 EK7: H-1 sınıfı (947 kN / 48 bar) ceket model sınırında."""
         res = _kos(client, thrust=947000.0, chamber_pressure=48.0,
                    mixture_ratio=2.23, expansion_ratio=8.0)
+        _kapida(res)
+
+    def test_RD180_SP8107_bandinda(self, client):
+        """Literatür çapası: büyük turbopompalı motorun tank basıncı Table II
+        bandında. V306/ONARIM-SIVI: H-1 sınıfı EK7 kapısında (yukarıda);
+        çapa kapı dışı RD-180'de, kaydın kendi çevrimiyle (RD180 notu)."""
+        res = _kos(client, engine_cycle='staged_combustion', **RD180)
+        assert res['cooling_circuit_publication']['status'] == 'solved'
         blok = res['detailed_feed_system']['npsh_tank_sizing']
         assert blok['sp8107_band_status'] == 'in_band'
         alt, ust = L.SP8107_INLET_PRESSURE_BAND_BAR

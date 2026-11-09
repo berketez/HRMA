@@ -247,7 +247,20 @@ class TestSivi:
         assert c['explained_by']['value'] == pytest.approx(
             sivi_yanit['injector_design']['combustion_efficiency'], abs=0)
         iv = s['isp_vacuum']
-        assert iv['hrma'] == sivi_yanit['isp_vacuum']
+        # V306/SIVI-ONARIM ek kalem 9: SIVI-DEFTER (K5, 964ce24b1) açık
+        # çevrimde başlık isp_vacuum'u MOTOR Isp'si yaptı (türbin egzozu
+        # dahil, toplam itici debisine göre); CEA'nın karşılığı ana itki
+        # odası + lüledir ve kıyas onunla, künyesinde adıyla yapılır.
+        # Ölçüldü (örnek gövde, GG): satır 301,0992 s = mass_flow_ledger.
+        # main_chamber_isp_vacuum_s; isp_vacuum 299,3201 s. Kapalı / basınç
+        # beslemeli çevrimde iki sayı aynıdır.
+        defter = sivi_yanit.get('mass_flow_ledger') or {}
+        if defter.get('status') == 'open_cycle_closed':
+            assert iv['hrma'] == defter['main_chamber_isp_vacuum_s']
+            assert 'main_chamber_isp_vacuum_s' in iv['hrma_basis'], iv
+            assert iv['hrma'] > sivi_yanit['isp_vacuum']
+        else:
+            assert iv['hrma'] == sivi_yanit['isp_vacuum']
         assert iv['explained_by']['exact'] is True
         assert iv['explained_by']['value'] * 100.0 == pytest.approx(
             sivi_yanit['efficiency_breakdown']['applied_delivery_efficiency_pct'],

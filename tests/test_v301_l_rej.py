@@ -146,8 +146,19 @@ def test_b_mars_motor_kanal_geometrisi_ayni(urun, ad):
     j, kurulan = urun[ad]
     cs = j['cooling_system']
     fit = cs['channel_count_fit']
-    assert len(kurulan) == 1          # tek RP-1 marşı
-    rc = kurulan[0]
+    # V306/SIVI-CEKET (K5_KARAR EK4): bütçenin ceket kalemi de marştan
+    # geldiği için marş birden çok kez kurulur (toplu-kestirim girişinde
+    # bir kez + yayımlanan girişte; açık çevrim defteri her ceket
+    # çözümünde). Hepsi RP-1 marşıdır; geometri denetimi YAYIMLANAN marş
+    # (girişi station_march.coolant_inlet_pressure_bar) üzerindedir.
+    assert kurulan and all(k.coolant == 'rp1' for k in kurulan)
+    p_yay = j['thermal_protection']['station_march'][
+        'coolant_inlet_pressure_bar']
+    yayimlanan = [k for k in kurulan
+                  if k.coolant_inlet_pressure / 1e5 == pytest.approx(
+                      p_yay, rel=1e-12)]
+    assert yayimlanan
+    rc = yayimlanan[-1]
     assert rc.coolant == 'rp1'
     assert rc.n_channels == cs['cooling_channels'] == fit['n_used']
     assert rc.channel_width * 1e3 == pytest.approx(cs['channel_width_mm'],
@@ -200,7 +211,9 @@ def test_c_sieder_tate_superkritik_yolda_yok():
 def test_d_kamara_boyu_ceket_uzunluguna_girer(urun):
     j, kurulan = urun['ornek']
     cs = j['cooling_system']
-    md = kurulan[0].motor_data
+    # V306/SIVI-CEKET: yayımlanan marş (son kurulum) — öncekiler açık çevrim
+    # defterinin ara boğazlarındadır.
+    md = kurulan[-1].motor_data
     assert md['chamber_length'] * 1e3 == pytest.approx(cs['chamber_length'],
                                                        rel=1e-12)
     not_ = j['thermal_protection']['station_march']['model_note']
@@ -223,11 +236,17 @@ def test_d_govde_toplam_isiyi_artirir_bogazi_degistirmez():
 # (e) süperkritik yol bit-aynı; hibrit/katı L-REJ işlevlerine uğramaz
 # ---------------------------------------------------------------------------
 #: Taban a95ed4b60'ta (L-REJ öncesi) ÖLÇÜLDÜ — docs/.../L-REJ/RAPOR.md §md5.
+#: V306/SIVI-DEFTER kalem 8 (4 Kas): ``_PSEUDOCRITICAL_CACHE`` kovasının
+#: değeri artık kova MERKEZİ basıncında (eskiden kovaya ilk düşen basınçta)
+#: — metan ve raptor çapaları temiz alt süreçte YENİDEN ÖLÇÜLDÜ (bağıl en
+#: çok 1,5e-6: methane max_wall_hot 1057,2783006 -> 1057,2799280 K;
+#: docs/scofield/raw/OH/V306/sivi-defter/RAPOR.md kalem 8). Hidrojen
+#: çapası değişmedi (bit-aynı). Tolerans aynı (rel 1e-12).
 SC_CAPALAR = {
-    'methane': (1057.2783005946026, 1344815.3430798522, 174.05437600718602,
-                9.135178496834431, 2.115637615786378),
-    'raptor': (1081.2408889085796, 53875677.794251345, 255.21958515463328,
-               294.38551151855023, 1.5162788260806828),
+    'methane': (1057.279927956588, 1344815.1959537899, 174.0543695571664,
+                9.135178386998046, 2.115637615006593),
+    'raptor': (1081.241106237127, 53875679.227851324, 255.21958842949655,
+               294.38551373739057, 1.516279106152827),
     'hydrogen': (1196.226485195169, 1233324.1874353616, 191.51127439563462,
                  1.934790740256682, 2.3462329648497326),
 }
@@ -307,7 +326,12 @@ def test_f_butce_ceket_kalemi_tek_sayi_ve_toplamda(urun):
     cs = j['cooling_system']
     assert dr['regen_jacket_drop_status'] == 'computed'
     ceket = dr['fuel_line']['regen_jacket']
-    assert ceket == cs['cooling_pressure_drop']
+    # V306/SIVI-CEKET (K5_KARAR EK4): RP-1 ceketinde kalem istasyon marşının
+    # ΔP'sidir (tek sayı); toplu Bartz kestirimi cooling_system'de tanı
+    # değeri olarak kalır ve bütçeye girmez.
+    assert ceket == j['thermal_protection']['station_march'][
+        'coolant_pressure_drop_bar']
+    assert ceket != cs['cooling_pressure_drop']
     assert 'regen_jacket' not in dr['oxidizer_line']
     kalemler = ('tank_outlet', 'main_valve', 'filters', 'feed_lines',
                 'injector', 'regen_jacket')

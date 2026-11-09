@@ -337,8 +337,21 @@ def test_ohd1605_bant_ikinci_kez_yazilmamis(istemci):
 # P6B4-01 — chug çevrimi ÇİZİLEN L*'ı tüketir
 # ÖLÇÜLDÜ: τ_c 25 kN / 250 kN / 1 MN üç koşuda bit-aynı 0,001596822 s;
 # çizilen L* 1,200 / 3,472 / 5,743 m (+%189, +%379).
+# V306/ONARIM-SIVI (rc.1 CI): 1 MN (Pc 60 bar, O/F 2,2, RP-1 rejeneratif)
+# SIVI-CEKET-A K5 EK7 kapısında — istasyon marşı jacket_model_limit,
+# 'design' kapsamı, chug çevrimi dahil adlı nedenle bekletiliyor (τ_c None).
+# Ölçüldü (betik ~/HRMA-calisma/2026-11-09/ONARIM-SIVI/betik/d17_tarama.py,
+# b9cf2a27f): 25/100/250/300/350 kN 'solved', 400/500/700 kN ve 1 MN kapıda.
+# Bu bekçilerin konusu τ_c ⟷ çizilen L*, kapı değil: üçüncü nokta kapıdan
+# payı olan 100 kN (aynı Pc ve O/F). 25/100/250 kN'de çizilen L* 1,145 m,
+# τ_c 0,0015236339509326093 s üçünde bit-aynı (eski kod 522ca890c, EK7
+# öncesi, 100 kN'de aynı). Kapının kendisi
+# test_p6b401_1MN_kapida_adli_nedenle ile sınanır.
+P6B401_ITKILER = (25000.0, 100000.0, 250000.0)
+#: EK7 kapısına giren eski üçüncü nokta (1 MN).
+P6B401_KAPIDAKI_ITKI = 1000000.0
 # =====================================================================
-@pytest.mark.parametrize('itki', [25000.0, 250000.0, 1000000.0])
+@pytest.mark.parametrize('itki', P6B401_ITKILER)
 def test_p6b401_chug_cizilen_l_stari_tuketir(istemci, itki):
     st, j = _cagir(istemci, '/calculate_liquid',
                    dict(TABAN_YUK, thrust=itki))
@@ -353,6 +366,23 @@ def test_p6b401_chug_cizilen_l_stari_tuketir(istemci, itki):
     assert float(kullanilan) == pytest.approx(float(cizilen), rel=1e-9), (
         f'{itki:g} N: chug τ_c {kullanilan} m L* ile kuruldu, hazne '
         f'{cizilen} m çiziyor')
+
+
+def test_p6b401_1MN_kapida_adli_nedenle(istemci):
+    """K5 EK7: 1 MN / 60 bar ceket marşı model sınırında; chug çevrimi
+    SESSİZCE değil adlı nedenle bekletilir."""
+    st, j = _cagir(istemci, '/calculate_liquid',
+                   dict(TABAN_YUK, thrust=P6B401_KAPIDAKI_ITKI))
+    assert st == 200
+    r = j.get('results') or j
+    ccp = r['cooling_circuit_publication']
+    assert ccp['status'] == 'not_solved'
+    assert ccp['code'] == 'jacket_model_limit'
+    assert ccp['scope'] == 'design'
+    assert isinstance(ccp['reason'], str) and ccp['reason']
+    assert _iz(r, 'combustion_analysis', 'stability_analysis',
+               'chug_loop') is None
+    assert r.get('cooling_system') is None
 
 
 def test_p6b401_tau_c_itkiyle_degisir(istemci):
@@ -376,7 +406,7 @@ def test_p6b401_tau_c_itkiyle_degisir(istemci):
     L* AÇIKÇA değiştirilerek sınanıyor.
     """
     sabit = []
-    for itki in (25000.0, 250000.0, 1000000.0):
+    for itki in P6B401_ITKILER:
         _, j = _cagir(istemci, '/calculate_liquid',
                       dict(TABAN_YUK, thrust=itki))
         r = j.get('results') or j

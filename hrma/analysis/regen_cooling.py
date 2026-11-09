@@ -179,6 +179,39 @@ except Exception:  # pragma: no cover
     _CP_PropsSI = None
     _HAS_COOLPROP = False
 
+# V306/SIVI-CEKET-B (kalem 2, S2): CH4/LH2 marşının süresinin ~%85'i PropsSI
+# çağrısıydı (ölçüldü, sayfa GG metan: 375 280 çağrı, 12,0 / 14,1 s). Her
+# PropsSI çağrısı akışkan adını çözer, bir AbstractState kurar ve (T, P)
+# flaşını baştan yapar; aynı durumun beş özelliği beş ayrı flaştı.
+# Hızlı yol: örnek başına bir HEOS AbstractState, (T,P) ve (P,Hmass)
+# girdileri, son durum yeniden kullanılır. ÖLÇÜLDÜ (CoolProp 6.8.0;
+# sivi-ceket-b/betik/coolprop_as_kiyas.py): Methane, Hydrogen ve
+# ParaHydrogen'de 4 000 rastgele (T,P) ve 2 000 (P,Hmass) noktada beş
+# özellik PropsSI ile BİT-AYNI; çağrı başına 23,7 → 1,4 µs. Hızlı yol
+# başarısızsa ya da girdi çifti başka ise eski PropsSI yolu AYNEN koşar
+# (hata sınıfı ve metni değişmez).
+try:  # pragma: no cover - ortam bağımlı
+    import CoolProp.CoolProp as _CP_MOD
+    _CP_AS_GIRDI = {('T', 'P'): _CP_MOD.PT_INPUTS,
+                    ('P', 'Hmass'): _CP_MOD.HmassP_INPUTS}
+except Exception:  # pragma: no cover
+    _CP_MOD = None
+    _CP_AS_GIRDI = {}
+#: PropsSI çıktı adı -> AbstractState okuyucusu (yalnız bu altı çıktı).
+_CP_AS_CIKTI = {'D': 'rhomass', 'C': 'cpmass', 'L': 'conductivity',
+                'V': 'viscosity', 'Hmass': 'hmass', 'T': 'T'}
+#: Akışkan sabitleri (Pcrit, Tcrit, Tmin, Tmax, pmax) süreç içi önbelleği:
+#: sabittir, PropsSI'nin döndürdüğü sayının kendisi saklanır (bit-aynı).
+_CP_SABIT = {}
+
+
+def _cp_sabit(ad, akiskan):
+    """Akışkan sabiti (``PropsSI(ad, akışkan)``), süreç içi önbellekli."""
+    anahtar = (ad, akiskan)
+    if anahtar not in _CP_SABIT:
+        _CP_SABIT[anahtar] = float(_CP_PropsSI(ad, akiskan))
+    return _CP_SABIT[anahtar]
+
 __all__ = [
     'RegenCooling',
     'dittus_boelter_nu',
@@ -491,7 +524,14 @@ WALL_CURVATURE_WARN_REL = 0.02
 WALL_CURVATURE_MAX_REL = 0.10
 
 # Pseudo-kritik sıcaklık önbelleği: (akışkan, 0.5 bar kovalı basınç) -> T_pc.
+# V306/SIVI-DEFTER kalem 8 (CI-SÜREÇ DEVİR 3): kovanın DEĞERİ kova MERKEZİ
+# basıncında hesaplanır (kovaya ilk düşen basınçta değil) — aynı girdi,
+# süreçte önce hangi istek koşmuş olursa olsun bit-aynı sonucu verir.
 _PSEUDOCRITICAL_CACHE: Dict = {}
+#: Önbellek kovasının genişliği [Pa] (0,5 bar; HRMA seçimi — T_pc'nin
+#: golden-section çözünürlüğü ~0,05 K, kova içi dT_pc/dP·0,25 bar ile aynı
+#: mertebe).
+PSEUDOCRITICAL_CACHE_BIN_PA = 5.0e4
 
 # ---------------------------------------------------------------------------
 # Soğutucu özellik tabloları (sıcaklığa bağlı, doğrusal interpolasyon)
@@ -1017,21 +1057,36 @@ def pseudocritical_temperature(fluid: str, pressure: float) -> float:
     form — a bounded, documented behaviour. Results are cached per (fluid,
     0.5-bar pressure bin). Raises for P <= P_crit (pseudo-critical
     temperature is undefined there; use T_sat) and without CoolProp.
+
+    The cached value of a bin is T_pc at the bin CENTRE pressure (V306/
+    SIVI-DEFTER kalem 8): the result depends only on the bin, never on which
+    pressure happened to enter the bin first in this process (measured
+    before the fix: T_pc(CH4, 60.00 bar) returned 199.722 K after a
+    60.24 bar query, 199.584 K when computed clean). A bin whose centre lies
+    at or below P_crit is solved at the exact pressure and not cached.
     """
     if not _HAS_COOLPROP:
         raise RuntimeError("CoolProp is required for "
                            "pseudocritical_temperature().")
-    p_crit = float(_CP_PropsSI('Pcrit', fluid))
+    p_crit = _cp_sabit('Pcrit', fluid)
     if pressure <= p_crit:
         raise ValueError(
             f"Pseudo-critical temperature is defined only above the critical "
             f"pressure ({p_crit / 1e5:.2f} bar for {fluid}); "
             f"got {pressure / 1e5:.2f} bar.")
-    key = (fluid, int(round(pressure / 5.0e4)))  # 0.5 bar kova
-    if key in _PSEUDOCRITICAL_CACHE:
-        return _PSEUDOCRITICAL_CACHE[key]
-    t_crit = float(_CP_PropsSI('Tcrit', fluid))
-    t_max = float(_CP_PropsSI('Tmax', fluid))
+    kova = int(round(pressure / PSEUDOCRITICAL_CACHE_BIN_PA))  # 0.5 bar kova
+    p_merkez = kova * PSEUDOCRITICAL_CACHE_BIN_PA
+    if p_merkez > p_crit:
+        key = (fluid, kova)
+        if key in _PSEUDOCRITICAL_CACHE:
+            return _PSEUDOCRITICAL_CACHE[key]
+        pressure = p_merkez
+    else:
+        # Kova merkezi kritik basıncın altında: tam basınçla çözülür,
+        # önbelleğe yazılmaz (sıra bağımsızlığı korunur).
+        key = None
+    t_crit = _cp_sabit('Tcrit', fluid)
+    t_max = _cp_sabit('Tmax', fluid)
     lo = t_crit
     hi = min(2.0 * t_crit, t_max)
 
@@ -1045,7 +1100,8 @@ def pseudocritical_temperature(fluid: str, pressure: float) -> float:
     if i_max == 0 or i_max == len(grid) - 1:
         # İç maksimum yok — pseudo-kritik çizgi bu basınçta silinmiş.
         t_pc = float(grid[i_max])
-        _PSEUDOCRITICAL_CACHE[key] = t_pc
+        if key is not None:
+            _PSEUDOCRITICAL_CACHE[key] = t_pc
         return t_pc
     a = float(grid[i_max - 1])
     b = float(grid[i_max + 1])
@@ -1065,8 +1121,43 @@ def pseudocritical_temperature(fluid: str, pressure: float) -> float:
             d = a + invphi * (b - a)
             fd = _cp(d)
     t_pc = 0.5 * (a + b)
-    _PSEUDOCRITICAL_CACHE[key] = t_pc
+    if key is not None:
+        _PSEUDOCRITICAL_CACHE[key] = t_pc
     return t_pc
+
+
+# ===========================================================================
+# V306/SIVI-SOĞUTMA (M-SIVI-24/11/21) — ADLI MARŞ ÇÖKÜŞÜ
+# ===========================================================================
+#: Devrenin KENDİSİNDEN gelen çözülemezlik nedenleri (girdi doğrulaması ya
+#: da model zarfı DEĞİL): soğutucu basıncının marş boyunca tükenmesi,
+#: soğutucu durumunun gerçek-akışkan denkleminin ya da tek fazlı modelin
+#: dışına düşmesi, mutlak sıcaklık ölçeğinden çıkış. Motor modülü bu
+#: kodlarla uyarı yayımlar (ham İngilizce metin ekrana çıkmaz) ve soğutmaya
+#: bağlı büyüklükleri yayımlamaz.
+CIRCUIT_FAIL_PRESSURE_EXHAUSTED = 'coolant_pressure_exhausted'
+CIRCUIT_FAIL_SUBCRITICAL_SATURATION = 'coolant_reaches_saturation'
+CIRCUIT_FAIL_OUTSIDE_EOS = 'coolant_state_outside_eos'
+CIRCUIT_FAIL_TEMPERATURE_NONPHYSICAL = 'coolant_temperature_nonphysical'
+#: V306/SIVI-CEKET (K5_KARAR EK4): ceket girişi ⟷ ceket ΔP'si sabit noktası
+#: (giriş = bütçenin ceket girişi, ΔP marştan) tur sınırında kapanmadı.
+#: Arabirim kodu; döngü motor modülündedir (liquid_rocket_engine).
+CIRCUIT_FAIL_INLET_NOT_CONVERGED = 'jacket_inlet_not_converged'
+
+
+class CoolantCircuitNotSolved(ValueError):
+    """Soğutma devresi bu geometri/debi/basınçla ÇÖZÜLEMEDİ (adlı neden).
+
+    ``ValueError`` alt sınıfıdır: eski yakalayıcılar (``except ValueError``)
+    aynen çalışır, metin değişmez. ``code`` yukarıdaki beş addan biri,
+    ``params`` nedenin sayıları (SI; Pa, K) — kullanıcı metni bunlardan
+    kurulur, ham CoolProp iletisi kullanıcıya gösterilmez.
+    """
+
+    def __init__(self, message: str, code: str, **params):
+        super().__init__(message)
+        self.code = code
+        self.params = dict(params)
 
 
 # ===========================================================================
@@ -1373,11 +1464,11 @@ class RegenCooling:
         # --- süperkritik-yetenekli soğutucu: EOS sınırları + giriş durumu ---
         self._cp_fluid = SUPERCRITICAL_COOLANT_FLUIDS.get(self.coolant)
         if self._cp_fluid is not None:
-            self.coolant_pcrit = float(_CP_PropsSI('Pcrit', self._cp_fluid))
-            self.coolant_tcrit = float(_CP_PropsSI('Tcrit', self._cp_fluid))
-            self._fluid_tmin = float(_CP_PropsSI('Tmin', self._cp_fluid))
-            self._fluid_tmax = float(_CP_PropsSI('Tmax', self._cp_fluid))
-            self._fluid_pmax = float(_CP_PropsSI('pmax', self._cp_fluid))
+            self.coolant_pcrit = _cp_sabit('Pcrit', self._cp_fluid)
+            self.coolant_tcrit = _cp_sabit('Tcrit', self._cp_fluid)
+            self._fluid_tmin = _cp_sabit('Tmin', self._cp_fluid)
+            self._fluid_tmax = _cp_sabit('Tmax', self._cp_fluid)
+            self._fluid_pmax = _cp_sabit('pmax', self._cp_fluid)
             if not (self._fluid_tmin <= self.coolant_inlet_temp
                     <= self._fluid_tmax):
                 raise ValueError(
@@ -1479,6 +1570,35 @@ class RegenCooling:
     # ------------------------------------------------------------------
     # Soğutucu özellik çözümü (CoolProp veya tablo)
     # ------------------------------------------------------------------
+    def _cp_as_deger(self, output, name1, value1, name2, value2):
+        """AbstractState hızlı yolu (V306/SIVI-CEKET-B kalem 2) ya da None.
+
+        Yalnız (T,P) / (P,Hmass) girdileri ve ``_CP_AS_CIKTI`` çıktıları;
+        örnek başına tek HEOS durumu, son güncelleme yeniden kullanılır.
+        Her başarısızlıkta None (çağıran eski PropsSI yolunu koşar; hata
+        sınıfı ve metni değişmez). PropsSI ile bit-aynı (modül notu).
+        """
+        cift = _CP_AS_GIRDI.get((name1, name2))
+        okuyucu = _CP_AS_CIKTI.get(output)
+        if cift is None or okuyucu is None or self._cp_fluid is None:
+            return None
+        try:
+            durum = getattr(self, '_cp_as', None)
+            if durum is None:
+                durum = self._cp_as = _CP_MOD.AbstractState(
+                    'HEOS', self._cp_fluid)
+                self._cp_as_son = None
+            # PT_INPUTS (p, T) ve HmassP_INPUTS (h, p): ikinci ad önce.
+            anahtar = (cift, float(value2), float(value1))
+            if self._cp_as_son != anahtar:
+                self._cp_as_son = None
+                durum.update(cift, anahtar[1], anahtar[2])
+                self._cp_as_son = anahtar
+            return float(getattr(durum, okuyucu)())
+        except Exception:  # noqa: BLE001 — eski yol hatayı adıyla kurar
+            self._cp_as_son = None
+            return None
+
     def _cp_call(self, output: str, name1: str, value1: float,
                  name2: str, value2: float) -> float:
         """CoolProp PropsSI wrapper for the supercritical coolant fluid.
@@ -1486,15 +1606,33 @@ class RegenCooling:
         Raises an EXPLICIT ValueError on any failure or non-finite result —
         no silent fallback to constants (fabricated-value guard policy).
         """
+        val = self._cp_as_deger(output, name1, value1, name2, value2)
         try:
-            val = float(_CP_PropsSI(output, name1, value1, name2, value2,
-                                    self._cp_fluid))
+            if val is None:
+                val = float(_CP_PropsSI(output, name1, value1, name2, value2,
+                                        self._cp_fluid))
         except Exception as exc:
-            raise ValueError(
+            # V306/SIVI-SOĞUTMA (M-SIVI-11): neden ADLANDIRILIR. Basınç
+            # kritik basıncın altındaysa soğutucu doyma eğrisine ulaşmıştır
+            # (kaynama: tek fazlı marş bu bölgeyi çözmez); değilse durum
+            # denklemin geçerlilik aralığının dışındadır. Metin aynen kalır.
+            girdiler = {name1: value1, name2: value2}
+            p_pa = girdiler.get('P')
+            pcrit = getattr(self, 'coolant_pcrit', None)
+            kod = (CIRCUIT_FAIL_SUBCRITICAL_SATURATION
+                   if (p_pa is not None and pcrit is not None
+                       and float(p_pa) < float(pcrit))
+                   else CIRCUIT_FAIL_OUTSIDE_EOS)
+            raise CoolantCircuitNotSolved(
                 f"CoolProp evaluation failed for {self._cp_fluid} "
                 f"({output} at {name1}={value1:.6g}, {name2}={value2:.6g}): "
                 f"{exc}. Coolant state is outside the EOS range — the model "
-                "does not substitute constant values.") from exc
+                "does not substitute constant values.", kod,
+                pressure_Pa=(float(p_pa) if p_pa is not None else None),
+                temperature_K=(float(girdiler['T']) if 'T' in girdiler
+                               else None),
+                critical_pressure_Pa=(float(pcrit) if pcrit is not None
+                                      else None)) from exc
         if not math.isfinite(val):
             raise ValueError(
                 f"CoolProp returned a non-finite {output} for "
@@ -2304,19 +2442,35 @@ class RegenCooling:
                         h_next = h_bulk + dh
                         p_tmp = p_c - dP
                         if p_tmp <= 0.0:
-                            raise ValueError(
+                            raise CoolantCircuitNotSolved(
                                 "Coolant pressure fell to zero during the march "
-                                "(friction) — channel geometry/mdot infeasible.")
+                                "(friction) — channel geometry/mdot infeasible.",
+                                CIRCUIT_FAIL_PRESSURE_EXHAUSTED,
+                                mechanism='friction', station=int(nxt),
+                                march_step=int(step + 1),
+                                march_steps=int(len(order) - 1),
+                                inlet_pressure_Pa=float(
+                                    self.coolant_inlet_pressure),
+                                pressure_drop_to_station_Pa=float(
+                                    self.coolant_inlet_pressure - p_tmp))
                         # İvmelenme (momentum) terimi: yoğunluk değişimi.
                         rho_next = self._cp_call('D', 'P', p_tmp, 'Hmass', h_next)
                         g_flux = self.mdot_per_channel / self.channel_area
                         dP_acc = acceleration_dp(g_flux, rho, rho_next)
                         p_next = p_tmp - dP_acc
                         if p_next <= 0.0:
-                            raise ValueError(
+                            raise CoolantCircuitNotSolved(
                                 "Coolant pressure fell to zero during the march "
                                 "(acceleration) — channel geometry/mdot "
-                                "infeasible.")
+                                "infeasible.",
+                                CIRCUIT_FAIL_PRESSURE_EXHAUSTED,
+                                mechanism='acceleration', station=int(nxt),
+                                march_step=int(step + 1),
+                                march_steps=int(len(order) - 1),
+                                inlet_pressure_Pa=float(
+                                    self.coolant_inlet_pressure),
+                                pressure_drop_to_station_Pa=float(
+                                    self.coolant_inlet_pressure - p_next))
                         t_next = self._cp_call('T', 'P', p_next, 'Hmass', h_next)
                         dp_friction_total += dP
                         dp_accel_total += dP_acc
@@ -2345,7 +2499,7 @@ class RegenCooling:
                     # (``thermal_protection``: zarf dışında sayı üretmek
                     # yerine 'MODEL OUT OF ENVELOPE' + NOT_MODELLED).
                     if not (math.isfinite(t_c) and t_c > 0.0):
-                        raise ValueError(
+                        raise CoolantCircuitNotSolved(
                             "Coolant bulk temperature left the absolute "
                             f"temperature scale during the march (T = {t_c!r} "
                             f"K at station {nxt}). A regenerative circuit "
@@ -2353,12 +2507,23 @@ class RegenCooling:
                             "so no station values are published. Check "
                             "coolant_mdot, the channel count and the channel "
                             "cross-section: an almost-zero flow rate makes "
-                            "dT = dQ/(mdot*cp) diverge.")
+                            "dT = dQ/(mdot*cp) diverge.",
+                            CIRCUIT_FAIL_TEMPERATURE_NONPHYSICAL,
+                            station=int(nxt))
                     if not (math.isfinite(p_c) and p_c > 0.0):
-                        raise ValueError(
+                        raise CoolantCircuitNotSolved(
                             "Coolant pressure fell to zero or below during "
                             f"the march (P = {p_c!r} Pa at station {nxt}) — "
-                            "channel geometry/mdot infeasible.")
+                            "channel geometry/mdot infeasible.",
+                            CIRCUIT_FAIL_PRESSURE_EXHAUSTED,
+                            mechanism='friction', station=int(nxt),
+                            march_step=int(step + 1),
+                            march_steps=int(len(order) - 1),
+                            inlet_pressure_Pa=float(
+                                self.coolant_inlet_pressure),
+                            pressure_drop_to_station_Pa=(
+                                float(self.coolant_inlet_pressure - p_c)
+                                if math.isfinite(p_c) else None))
 
             # Sabit nokta ölçütü: yayımlanan toplam ısıdaki bağıl değişim.
             if toplam_onceki is not None and total_heat_W > 0.0:
@@ -2374,7 +2539,14 @@ class RegenCooling:
         t_in = self.coolant_inlet_temp
         dT_total = t_out - t_in
         cp_mean = enthalpy_rise / dT_total if abs(dT_total) > 1e-12 else 0.0
-        total_dP = self.coolant_inlet_pressure - p_c
+        # V306/SIVI-CEKET (K5_KARAR EK4, giriş basıncı arabirimi): toplam
+        # düşüm segment düşümlerinin TOPLAMIDIR (sürtünme + ivmelenme), giriş
+        # basıncından çıkarma ile değil. Basınca bağlı olmayan soğutucuda
+        # (RP-1, su) sayı böylece giriş basıncından bit düzeyinde bağımsızdır:
+        # bütçenin ceket kalemi (bir girişte çözülen marş) ile yayımlanan marş
+        # (bütçenin girişinde) aynı sayıdır. Fark (giriş − çıkış) yuvarlama
+        # mertebesindedir (ölçüldü: 1e-14 bar).
+        total_dP = dp_friction_total + dp_accel_total
         p_out = p_c
 
         max_wall_hot = float(np.max(t_wall_hot))

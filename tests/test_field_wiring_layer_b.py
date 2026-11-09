@@ -579,6 +579,44 @@ LEGITIMATE_CONSTANTS = (
     'of_shift_performance.sampling.points_computed',
     'of_shift_performance.sampling.points_published',
     'trajectory.thrust_input.points',
+    # V306/HİBRİT-MODEL (4 Kas, kalem 3 M-HIBRIT-11) — KORUNAN KASANIN
+    # ÖZDEŞLİK YAPRAKLARI. Kalem 3'ten sonra sarsımın HER hibrit vakasında
+    # açık bölgelere astar boyutlanıyor (eskiden düşük ısı akılı varyant
+    # "NET ISINMA YOK" dalında astarsız kalıp çıplak cidar sıcaklığına
+    # düşüyor, bu yapraklar o yüzden kıpırdıyordu). Bütün bölgeler
+    # korununca yapısal zincir BEYANLI izotermal kasayı kullanır
+    # (``structural_casing_temperature_source =
+    # 'hybrid_chamber_zone_protection'``, iç = dış = ortam sıcaklığı):
+    # cidar boyunca ΔT = T_iç − T_dış = 0, ısıl çember gerilmesi ∝ ΔT = 0
+    # (iki senaryoda da), dayanım tutma katsayısı oda sıcaklığı bandında
+    # malzeme eğrisinin düz ucu = 1. Uydurma sayı değil, beyanlı modelin
+    # tanım gereği özdeşliği; CANLI KARDEŞLER: ``thermal_analysis.
+    # wall_temperature_inner_K`` / ``_outer_K`` ve ``chamber_wall_zones.
+    # structural_casing_temperature_K`` ortam sıcaklığı girdisini izler,
+    # ``thermal_protection.chamber_liner.back_face_rise_bound_K`` girdiyle
+    # oynar. Özdeşlik ayrıca kilitli: tests/test_v306_hibrit_model.py::
+    # test_korunan_kasada_isil_yapraklar_ozdeslik_ve_kardes_canli (bölge
+    # modeli kalkarsa ya da kasa ısınırsa kırmızı). TAM yol im — başka
+    # yaprağı yutmaz. Ölçüm: im öncesi bu bekçi bu 11 yaprakla kırmızı
+    # (docs/scofield/raw/OH/V306/hibrit-model/RAPOR.md §8).
+    '.motor.structural_analysis.chamber_analysis.thermal_hoop_stress',
+    '.motor.structural_analysis.chamber_analysis.thermal_scenarios.'
+    'cooled_gradient.delta_T_K',
+    '.motor.structural_analysis.chamber_analysis.thermal_scenarios.'
+    'cooled_gradient.delta_T_at_evaluated_wall_K',
+    '.motor.structural_analysis.chamber_analysis.thermal_scenarios.'
+    'hot_soak.delta_T_K',
+    '.motor.structural_analysis.chamber_analysis.thermal_scenarios.'
+    'hot_soak.delta_T_at_evaluated_wall_K',
+    '.motor.structural_analysis.chamber_analysis.'
+    'wall_delta_T_at_evaluated_wall_K',
+    '.motor.structural_analysis.fatigue_analysis.strength_retention_factor',
+    '.motor.structural_analysis.thermal_analysis.strength_derating.'
+    'strength_retention_factor',
+    '.motor.structural_analysis.thermal_analysis.thermal_hoop_stress_MPa',
+    '.motor.structural_analysis.thermal_analysis.wall_delta_T_K',
+    '.motor.structural_analysis.thermal_analysis.'
+    'wall_delta_T_at_evaluated_wall_K',
 ) + tuple(
     # İtki-irtifa TARAMA IZGARASI ve standart atmosfer sütunları:
     # altitudes_thrust = [0, 1000, 5000, 10000, 15000, 20000] m SABİT

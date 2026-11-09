@@ -326,13 +326,25 @@ def test_t67_gosterge_kendi_basligini_hala_tasir(yorunge_fig):
 
 
 def test_t67_diger_bes_kunye_yerinde(yorunge_fig):
-    """Yalnız altıncı künye boşaltıldı; diğerleri aynen duruyor."""
+    """Yalnız altıncı künye boşaltıldı; diğerleri aynen duruyor.
+
+    V306/UÇUŞ-FEA (kalem 2): dördüncü hücrenin künyesi 'Acceleration
+    Profile' -> 'Load Factor Profile' (V306/UÇUŞ-2, M-KATI-28). Ürün doğru,
+    test bayattı: hücrenin ana eğrisi yük çarpanıdır (algılanan ivme / g0,
+    yerçekimi hariç; ``trajectory['sensed_acceleration']``), ekseni
+    'Load factor (g)', kinematik |dv/dt| yalnız kesikli yardımcı eğri.
+    'Acceleration Profile' bu hücreyi yanlış adlandırırdı; eski künyenin
+    geri gelmemesi de burada kilitlenir.
+    """
     metinler = [a.get('text') for a
                 in (yorunge_fig['layout'].get('annotations') or [])]
     for beklenen in ('Trajectory Profile', 'Altitude vs Time',
-                     'Velocity Profile', 'Acceleration Profile',
+                     'Velocity Profile', 'Load Factor Profile',
                      'Flight Phases'):
         assert beklenen in metinler, '%s künyesi kayboldu' % beklenen
+    assert 'Acceleration Profile' not in metinler, (
+        'yük çarpanı hücresi yeniden "Acceleration Profile" diye '
+        'adlandırılmış (çizilen büyüklük algılanan ivme / g0)')
 
 
 # ===========================================================================

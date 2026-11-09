@@ -523,11 +523,22 @@ class TestZ101N2OYogunlukOgretisi:
 
     @pytest.mark.parametrize('goreli', METIN_DOSYALARI)
     def test_dogru_20C_sayisi_ipucunda_var(self, goreli):
-        """Her ipucu satırı 20 °C doymuş sıvı sayısını KENDİSİ taşımalı."""
+        """Yoğunluk ipucu SAYI basmaz; değerin KAYNAĞINI söyler.
+
+        V306/DİL-HİBRİT K13 (61d283a4f, KILAVUZ P9 + DİL-ORTAK kuralı:
+        ipucunda kaynaksız "tipik değer" yok): eski metin "~785 / ~743 /
+        ~1141" sayılarını basıyordu; alan seçilen oksitleyici ve sıcaklık
+        için HRMA'nın referans kaynağından (N₂O: CoolProp/REFPROP) KENDİSİ
+        dolar. D16'nın asıl iddiası (1220 depolama değeri diye sunulmaz)
+        yukarıdaki düğümde aynen durur; bu düğüm ipucunun sayı yerine
+        kaynağı söylediğini ve hiçbir yoğunluk sayısı basmadığını sınar."""
+        import re as _re
         for satir in self._ipucu_satirlari(goreli):
-            assert '785' in satir, (
-                f'{goreli}: bir yoğunluk ipucu satırı 20 °C doymuş sıvı '
-                'N₂O yoğunluğunu (785 kg/m³) yazmıyor.')
+            assert 'CoolProp/REFPROP' in satir, (
+                f'{goreli}: yoğunluk ipucu değerin kaynağını söylemiyor.')
+            assert not _re.search(r'\b(7\d{2}|1\d{3})\b', satir), (
+                f'{goreli}: yoğunluk ipucu kaynaksız bir yoğunluk sayısı '
+                'basıyor (değer alana kaynaktan dolar).')
 
     def test_urun_zinciri_1220_uretmiyor(self):
         """Tek kaynak, hiçbir referans sıcaklıkta 1220'ye yakın dönemez."""

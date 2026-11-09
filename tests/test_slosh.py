@@ -1,6 +1,6 @@
 """Validation tests for the cylindrical-tank slosh model.
 
-Hand-computed anchors (NASA SP-106 / Dodge 2000):
+Hand-computed anchors (Dodge 2000 Eq. (1.40), Table 3.2; SP-8009 Table I):
 
 Reference case R=0.5 m, h=1.0 m, g_eff=9.81 m/s^2, lambda_1=1.8412:
     lambda_1*h/R = 3.6824,  tanh(3.6824) = 0.998733
@@ -31,7 +31,7 @@ class TestFundamentalRelations:
     def test_natural_frequency_hand_calc(self):
         m = CylindricalTankSlosh(**REF)
         omega, f = m.natural_frequency(1)
-        # KÜNYE (yerel): SP-106 Denk. 2.4 / Dodge 2000 — omega_1^2 =
+        # KÜNYE (yerel): Dodge 2000 Denk. (1.40) / SP-8009 Tablo I — omega_1^2 =
         # (lambda_1*g/R)*tanh(lambda_1*h/R) = (1,8412*9,81/0,5)*0,998733
         # = 36,0786 -> omega_1 = 6,00655 rad/s. Modül docstring'indeki
         # elle hesabın aynısı; ürün tanımı slosh_analysis.py:20 (Denk. 1).
@@ -48,7 +48,7 @@ class TestFundamentalRelations:
 
     def test_slosh_mass_ratio_hand_calc(self):
         m = CylindricalTankSlosh(**REF)
-        # KÜNYE (yerel): SP-106 eşdeğer mekanik model, Dodge 2000 Denk. 1.20
+        # KÜNYE (yerel): Dodge 2000 Tablo 3.2 (d = 2R) / SP-8009 Tablo I
         # (ürün: slosh_analysis.py:26-30, Denk. 2) — m1/m_liq =
         # (2R/(lambda_1*h*(lambda_1^2-1)))*tanh(lambda_1*h/R)
         # = (2*0,5/(1,8412*1,0*(1,8412^2-1)))*0,998733 = 0,226959.
@@ -86,7 +86,8 @@ class TestAsymptotes:
         assert m.slosh_mass_ratio() == pytest.approx(expected, rel=1e-3)
         # KÜNYE (yerel): sığ limit kapalı formu — tanh(x)->x için oran
         # 2/(lambda_1^2-1) = 2/(1,8412^2-1) = 0,836814. lambda_1 = 1,8412
-        # J1'(x)=0'ın ilk kökü (SP-106 Tablo 2.1; slosh_analysis.py:71).
+        # J1'(x)=0'ın ilk kökü (Dodge 2000 Denk. (1.41); slosh_analysis.py
+        # LAMBDA_1).
         assert expected == pytest.approx(0.836814, rel=1e-4)
 
     def test_deep_limit_mass_ratio_goes_to_zero(self):

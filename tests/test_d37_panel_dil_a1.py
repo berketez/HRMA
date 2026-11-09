@@ -39,6 +39,10 @@ Denetçi şartları 2. tur (28 Eyl):
   Ş1  ``test_g2_ipucu_ve_not_TR`` künye kodu (makine) her künyeli notta —
       verilen-ε notu 'supplied_expansion_ratio_equilibrium' dahil — sunucu
       çıktısında ve grafik notunda '(çıkış künyesi <kod>)' kalıbında AYNEN.
+      V306/SAYI (NR-1, 2 Kas): Ş1 TERSİNE döndü — brif ham anahtarı
+      (sea_level_default_equilibrium) kullanıcı notundan çıkarttı; kod
+      yalnız izin meta'sında (exit_basis). Bekçi artık kodun notta
+      OLMADIĞINI sınar.
   Ş2  ``test_cad_beyani_tam_cumle``: CAD beyanı TR cümlesi üreticinin
       demetlerinden bekçinin kendi TR tablosuyla kurulan cümleye BİREBİR.
   Ş4  panel-js 4bbbd32f G2 metinleri (2. turdaki 'p_e not published' dahil);
@@ -668,15 +672,16 @@ G2_IPUCU_TR = {
     'Exit basis not published': 'Çıkış künyesi yayımlanmadı',
     'Exit: supplied nozzle ε, p_e not published': 'Çıkış: verilen nozul ε, p_e yayımlanmadı',
 }
-#: Koşu noktası notunun üç hâli; ``{kunye}`` üreticinin çıkış künyesi kodu
-#: (``conditions.exit.basis``; makine kodudur, TR'de AYNEN kalır).
+#: Koşu noktası notunun üç hâli. V306/SAYI (NR-1): çıkış künyesi KODU
+#: (``conditions.exit.basis``) kullanıcı notundan çıktı; şablonlarda
+#: ``{kunye}`` yok (``format(kunye=…)`` çağrıları zararsız kalır).
 G2_NOT_SABLONLARI = (
     'This run point: the run O/F solved with the exit anchored to ISA sea '
-    'level and no nozzle expansion ratio (exit basis {kunye}) - the same exit '
+    'level and no nozzle expansion ratio - the same exit '
     "anchor as the sweep curve; it is not the motor's delivered Isp at its "
     'nozzle expansion ratio.',
     'This run point: the run O/F solved with the exit at the supplied nozzle '
-    'expansion ratio (exit basis {kunye}); the sweep curve is anchored to ISA '
+    'expansion ratio; the sweep curve is anchored to ISA '
     'sea level with no expansion ratio - a different thermochemistry path, so '
     'the point need not lie on the curve.',
     'This run point: the solver result does not publish its exit basis, so '
@@ -691,11 +696,11 @@ G2_NOT_SABLONLARI = (
 #: (nozul → başka sözcük) yakalamıyordu (denetçi E3, E3b, E10).
 G2_NOT_SABLONLARI_TR = (
     'Bu koşum noktası: koşumun O/F değeri, çıkışı ISA deniz seviyesine '
-    'bağlanarak ve nozul genişleme oranı olmadan çözüldü (çıkış künyesi '
-    '{kunye}) - tarama eğrisiyle aynı çıkış çapası; motorun kendi nozul '
+    'bağlanarak ve nozul genişleme oranı olmadan çözüldü'
+    ' - tarama eğrisiyle aynı çıkış çapası; motorun kendi nozul '
     'genişleme oranındaki teslim Isp değeri değildir.',
     'Bu koşum noktası: koşumun O/F değeri, çıkış verilen nozul genişleme '
-    'oranında alınarak çözüldü (çıkış künyesi {kunye}); tarama eğrisi '
+    'oranında alınarak çözüldü; tarama eğrisi '
     'genişleme oranı olmadan ISA deniz seviyesine bağlıdır - farklı bir '
     'termokimya yolu, bu yüzden noktanın eğrinin üzerinde olması gerekmez.',
     'Bu koşum noktası: çözücü çıktısı çıkış künyesini yayımlamıyor; bu yüzden '
@@ -1064,16 +1069,12 @@ class TestK5BeyanCumleleri:
             assert t_srv == t_bek, (kunye, t_srv, t_bek)
             assert t_graf == '- ' + t_bek, (kunye, t_graf, t_bek)
             assert t_srv.startswith('Bu koşum noktası: '), t_srv
+            # V306/SAYI (NR-1): künye KODU hiçbir notta yok (ham anahtar).
+            assert '(çıkış künyesi ' not in t_srv, t_srv
             if kunye is None:
                 assert 'çıkış künyesini yayımlamıyor' in t_srv, t_srv
-                assert '(çıkış künyesi ' not in t_srv, t_srv
             else:
-                assert t_srv.count('(çıkış künyesi %s)' % kunye) == 1, (kunye, t_srv)
-        # Denetçi Ş1 (D10): verilen-ε notunun künyesi sunucu çıktısında ve
-        # grafik notunda AYNEN.
-        assert '(çıkış künyesi supplied_expansion_ratio_equilibrium)' in r['tr']['server'][1]
-        assert '(çıkış künyesi supplied_expansion_ratio_equilibrium)' in tr_not_grafik[1]
-        assert 'sea_level_default_equilibrium' in r['tr']['server'][0]
+                assert kunye not in t_srv and kunye not in t_graf, (kunye, t_srv)
 
 
 # ===========================================================================
@@ -1271,8 +1272,10 @@ class TestG2Uretici:
             assert tr_g2[0] == beklenen, (ad, tr_g2[0], beklenen)
             for ing in G2_INGILIZCE:
                 assert ing not in tr_g2[0] and ing not in tr_cikis, (ad, ing, tr_g2[0], tr_cikis)
+            # V306/SAYI (NR-1): künye kodu kullanıcı notunda yok.
             if v['kunye'] is not None:
-                assert tr_g2[0].count('(çıkış künyesi %s)' % v['kunye']) == 1, (ad, tr_g2[0])
+                assert v['kunye'] not in tr_g2[0], (ad, tr_g2[0])
+                assert v['kunye'] not in g2_satir[ad], (ad, g2_satir[ad])
             assert not re.search('[Ll]üle', tr_g2[0] + tr_cikis), (ad, tr_g2[0], tr_cikis)
         # gerçek künyeler: deniz seviyesi ve ε yolu ikisi de koşuldu
         assert vakalar['deniz']['kunye'].startswith('sea_level_default')

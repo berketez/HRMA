@@ -27,6 +27,15 @@ from typing import Dict, Optional, List
 # ve davranış testlerle korunmaktadır (VALIDATION_STATUS.md). G_ox-bazlı
 # birebir karşılaştırma gerekirse flux_mode='ox' kullanın; G_total'e özgü
 # yeniden fit gelecek iş olarak işaretlidir.
+#
+# DÜZELTME (V306/HİBRİT-ÇAPRAZ-2 ek tur, 9 Kas 2026 — not BAYATTI): bulgu
+# F018'den beri ``regression_analysis.DEFAULT_FLUX_MODE = 'ox'``; ürün yolu
+# (/calculate, motor varsayılanı) G_OX kullanır. ÖLÇÜLDÜ
+# (``docs/scofield/raw/OH/V306/hibrit-capraz-2/olcum/kp2_aki_tabani.json``):
+# örnek hibrit ``regression_flux_mode = 'ox'``. Aşağıdaki +%10-18 bandı
+# YALNIZ kullanıcı toplam akı kipini (flux_mode='total') seçtiğinde geçerlidir;
+# motorun yanlılık uyarısı akı kapanışı gerekçesini yalnız o kipte basar
+# (``hybrid_rocket_engine.htpb_bias_unreconciled_reasons``).
 # ---------------------------------------------------------------------------
 
 #: G_ox-fit katsayının G_total kapanışıyla koşturulmasının regresyona
@@ -336,7 +345,7 @@ SOLVER_SUPPORTED_NOT_CATALOGUED: Dict[str, Dict[str, str]] = {
             "'density' value, and a gas has no single density (it follows "
             'pressure and temperature). Borrowing the liquid sibling '
             "value (lox, 1141 kg/m3 at 90 K) would be plainly wrong, so the "
-            'gap is declared instead of invented. Use an equation-of-state '
+            'gap is declared instead of filled. Use an equation-of-state '
             'call for gas-phase properties.'),
         'supported_in': (
             'hrma/engines/combustion_analysis.py (elemental oxidizer '

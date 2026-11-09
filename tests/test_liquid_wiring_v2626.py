@@ -549,20 +549,23 @@ def test_liquid_page_sends_the_film_cooling_input():
 # 6) Beyan dürüstlüğü: ölçeklenmeyen kalem 'ölçekleniyor' diye yazılmamalı
 # ---------------------------------------------------------------------------
 def test_controls_mass_is_declared_as_a_fixed_allowance(base, big):
-    """Kontrol/aviyonik kütlesi sabit; beyanı da öyle demeli.
+    """Kontrol/aviyonik kalemi motor kuru kütlesinde DEĞİL; beyanı adıyla.
 
     Eski 'mass_method' bu kalemi besleme hattıyla birlikte "empirical scaling
     with mass flow" diye bildiriyordu, oysa değer hiçbir girdiyle değişmiyor.
-    Sayının sabit olması sorun değil; SABİT olduğu hâlde 'ölçekleniyor'
-    demek beyan çürümesidir.
+    V306/SIVI-KÜTLE (M-SIVI-1): sabit 15 kg kaynaksızdı ve 800 N'luk motorun
+    kuru kütlesinin %89'uydu; kaynaklı ölçekleme bağıntısı yok. Kalem motor
+    kuru kütlesinden ÇIKTI ve ``not_in_engine_dry_mass`` listesinde adıyla,
+    kütlesiz durur (araç kalemi). Besleme hattı ölçeklenmeye devam eder.
     """
     method = _leaf(base, 'component_sizing.mass_method')
     assert 'feed_and_controls' not in method, 'iki kalem hâlâ tek satırda'
-    assert 'FIXED allowance' in method['controls_avionics']
-    assert 'NOT scaled' in method['controls_avionics']
+    assert 'NOT part of the engine dry mass' in method['controls_avionics']
     assert 'scaling with mass flow' in method['feed_system']
-    # Beyan gerçeği yansıtmalı: kontrol sabit, besleme hattı ölçekleniyor.
     path = 'component_sizing.component_masses'
-    assert _leaf(base, path + '.controls_avionics') == \
-        _leaf(big, path + '.controls_avionics')
+    for r in (base, big):
+        assert 'controls_avionics' not in _leaf(r, path)
+        disari = _leaf(r, 'component_sizing.not_in_engine_dry_mass')
+        assert [k['key'] for k in disari] == ['controls_avionics']
+        assert disari[0]['mass_kg'] is None
     _assert_moved(base, big, path + '.feed_system')

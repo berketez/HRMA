@@ -186,6 +186,26 @@ LD_NOT_ISSUED_WARNING = (
     "to obtain the 3-5 band verdict.")
 
 
+#: V306/HİBRİT-NOZUL (kalem 2) — duş başlığı delik sayısı aramasının aralığı
+#: (kazanılmış plakalı amaç işlevinin sınırları; plakasız yolda üst sınır
+#: ``_plan_orifices``in ``n_max``ı). Sayılar DEĞİŞMEDİ (eski
+#: ``bounds=(4, 200)``), tek yere alındı. HRMA seçimi, kaynaksız.
+SHOWERHEAD_HOLE_COUNT_SEARCH = (4, 200)
+
+#: Delik sayısının nasıl seçildiği (yanıtta ``hole_count_basis``).
+HOLE_COUNT_BASIS_SUPPLIED = (
+    'hole count supplied to the plate module (the user input, or the '
+    'injector circuit plan - see orifice_plan_source)')
+HOLE_COUNT_BASIS_EARNED_PLATE = (
+    'chosen by the plate module: manufacturing diameter band plus the L/D '
+    '3-5 heuristic band evaluated with the supplied plate thickness')
+HOLE_COUNT_BASIS_NO_PLATE = (
+    'chosen by the plate module without a plate thickness: the fewest holes '
+    'whose diameter fits the manufacturing band (the injector circuit '
+    "solver's rule, hrma.engines.injector_design._plan_orifices); L/D is "
+    'not computed and takes no part in the choice')
+
+
 def _yayin_plaka_mm(params, kazanildi):
     """Yayımlanan plaka kalınlığı [mm]: yalnız KAZANILMIŞSA sayı, değilse None."""
     return params['t_plate'] * 1000 if kazanildi else None
@@ -297,7 +317,11 @@ def _sat_n2o():
     global _SAT_N2O_ONBELLEK
     if _SAT_N2O_ONBELLEK is None:
         from hrma.analysis.tank_blowdown import N2OSaturation as _Doyma
-        _SAT_N2O_ONBELLEK = _Doyma(use_coolprop=False)
+        # V306/SAYI (PANEL-SAYI DEVİR 1): tank modeli ve enjektör devresiyle
+        # AYNI kaynak kuralı (CoolProp varsa hâl denklemi, yoksa aynı EOS'tan
+        # üretilmiş tablo). ``use_coolprop=False`` aynı koşuda ikinci bir
+        # doyma basıncı (50,5434 ⟷ 50,5251 bar) yayımlatıyordu.
+        _SAT_N2O_ONBELLEK = _Doyma()
     return _SAT_N2O_ONBELLEK
 
 class InjectorDesign:
@@ -423,7 +447,7 @@ class InjectorDesign:
             raise OxidizerStateError(
                 f"Cannot resolve an oxidizer density for "
                 f"'{self.oxidizer_type}' at {float(oxidizer_temp):.2f} K: "
-                f"{msg} No substitute value is invented (the previous "
+                f"{msg} No substitute value is used (the previous "
                 f"behaviour fell back to 1220 kg/m3, the normal-boiling-point "
                 f"density of N2O, regardless of the fluid). Supply the "
                 f"'oxidizer_density' field in kg/m3, or correct "
@@ -992,6 +1016,7 @@ class InjectorDesign:
         if params['n_holes'] == 0:
             n_holes, d_h = self._optimize_showerhead_holes(A_inj_required, params)
         else:
+            self._hole_count_basis = HOLE_COUNT_BASIS_SUPPLIED
             n_holes = params['n_holes']
             d_h = 2 * np.sqrt(A_inj_required / (n_holes * np.pi))
 
@@ -1130,6 +1155,12 @@ class InjectorDesign:
                 if kanon_plan else
                 'incompressible orifice equation A = mdot/(Cd*sqrt(2*rho*dP))'),
             'orifice_plan_is_canon': bool(kanon_plan),
+            # V306/HİBRİT-NOZUL (kalem 2): delik sayısının seçim dayanağı.
+            'hole_count_basis': (
+                self._hole_count_basis
+                + ('; the diameter was then clamped to the manufacturing '
+                   'band and the count re-solved (see warnings)'
+                   if kirpildi else '')),
             'warnings': warn_list
         }
         result.update(self._common_outputs(
@@ -1947,7 +1978,39 @@ class InjectorDesign:
         return result
 
     def _optimize_showerhead_holes(self, A_required, params):
-        """Optimize number of holes for showerhead injector"""
+        """Duş başlığı delik sayısı (çağıran sayı vermediğinde).
+
+        V306/HİBRİT-NOZUL (kalem 2, HİBRİT-DIŞA DEVİR 2): amaç işlevinin
+        L/D ceza terimi plaka kalınlığını ``params['t_plate']``ten okuyordu;
+        çağıran plaka vermediğinde o sayı modül varsayılanıydı (3,0 mm,
+        ``PLATE_THICKNESS_DEFAULT_MM``, KAZANILMAMIŞ). ÖLÇÜLDÜ (docs/scofield/
+        raw/OH/V306/hibrit-nozul/olcum/once.json ``K2_ornek_dpuser_
+        plakasiz``): örnek hibrit, kullanıcı ΔP'si 8 bar, plakasız → 125 ×
+        Ø0,679 mm; aynı gövde 6 mm plakayla 21 × Ø1,656 mm. Yayımlanan delik
+        planını kimsenin seçmediği bir plaka belirliyordu (L/D'nin kendisi
+        HİBRİT-DIŞA'dan beri yayımlanmıyordu; seçimi hâlâ sürüyordu).
+
+        Kural (tek tanım, uydurma plaka yok):
+          * plaka KAZANILMIŞSA (çağıranın plaka kalınlığı): eski amaç işlevi
+            AYNEN — imalat bandı + o plakayla L/D 3-5 buluşsal bandı;
+          * plaka yoksa L/D hesaplanamaz ve seçime girmez: delik sayısı
+            devre çözücüsünün kuralıyla — çapı imalat bandına oturan EN AZ
+            delik (``hrma.engines.injector_design._plan_orifices``; aynı
+            modülün çarpışmalı yolu da bandı tutan en az çift kuralını
+            kullanır). Seçimin dayanağı ``self._hole_count_basis``e yazılır.
+        """
+        if not params.get('t_plate_earned'):
+            from hrma.engines.injector_design import _plan_orifices
+            n_plan, d_plan = _plan_orifices(
+                A_required,
+                {'d_min_mm': params['d_min'] * 1000.0,
+                 'd_max_mm': params['d_max'] * 1000.0,
+                 'n_max': SHOWERHEAD_HOLE_COUNT_SEARCH[1]},
+                [])
+            self._hole_count_basis = HOLE_COUNT_BASIS_NO_PLATE
+            return int(n_plan), float(d_plan)
+        self._hole_count_basis = HOLE_COUNT_BASIS_EARNED_PLATE
+
         def objective(N):
             N = int(N)
             if N < 4:
@@ -1981,7 +2044,8 @@ class InjectorDesign:
             return penalty
 
         # Optimize
-        result = minimize_scalar(objective, bounds=(4, 200), method='bounded')
+        result = minimize_scalar(objective, bounds=SHOWERHEAD_HOLE_COUNT_SEARCH,
+                                 method='bounded')
         N_optimal = int(result.x)
         d_h_optimal = 2 * np.sqrt(A_required / (N_optimal * np.pi))
 

@@ -1,7 +1,7 @@
 # HRMA - Rocket Motor Analysis Suite
 
 [![tests](https://github.com/berketez/HRMA/actions/workflows/tests.yml/badge.svg)](https://github.com/berketez/HRMA/actions/workflows/tests.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![license: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D model of your motor built live from the solver output.
 
@@ -427,7 +427,15 @@ window with automatic updates.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+HRMA is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version (`GPL-3.0-or-later`). See [LICENSE](LICENSE).
+
+Releases up to and including v3.0.5 were published under the MIT License and
+remain available under it. The macOS and Windows packages bundle RocketCEA
+(GPLv3), which HRMA imports in-process for the NASA CEA comparison; the
+package as a whole is therefore distributed under the GPL.
 
 ## Tests
 

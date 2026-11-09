@@ -315,27 +315,51 @@ PROPELLANTS: Dict[str, Dict] = {
         'family': 'composite',
         'oxidizer': 'Ammonium perchlorate (NH4ClO4), ~70%',
         'fuel': 'Aluminum ~16% + PBAN binder ~14%',
-        'density': 1790.0,
-        'burn_rate_a': mm_mpa_to_m_bar(4.0, 0.32),
-        'burn_rate_n': 0.32,
-        'burn_rate_ref': ("a' = 4.0 mm/s at 1 MPa, n = 0.32 "
-                          "(r = a'*P[MPa]^n); typical, indicative only."),
-        'c_star': 1457.0,
+        # V306/KATI-MODEL (M-KATI-30, S1): kayıt kendi sınıfının kaynağıyla
+        # ÇELİŞİYORDU. ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/kati-model/
+        # RAPOR.md): eski dörtlü (T_c 3100 K, c* 1457 = 0,97 x Eş. 3-32
+        # idealinin kendisi, γ 1,18, M 27,5) 1000 -> 14,7 psia ideal
+        # genleşmede Isp 238,9 s veriyordu; Sutton & Biblarz 9. baskı Tablo
+        # 13-1 (s. 496) PBAN/AP/Al için Isp 260-263 s, alev sıcaklığı 3500 K,
+        # SG 1,78, n 0,33 yazar (HTPB/AP/Al: 260-265 s, 3440 K). 3100 K
+        # 'propellant_database.py' kopyasından geliyordu ve kaynaksızdı.
+        # Mühendis turu L5'te aynı ailenin iki iticisi arasında %12 Isp
+        # farkı buradan çıkıyordu. Düzeltme: T_c, yoğunluk ve n Sutton
+        # Tablo 13-1'den; c* aynı dörtlünün Eş. 3-32 idealidir (CEA
+        # kayıtlarıyla aynı tanım: iki-faz kaybı motorun kendi modelinde,
+        # kayıtta ikinci kez çarpılmaz). Denetim: bu c* ile 1000 -> 14,7
+        # psia ideal Isp 261,68 s, Sutton'ın 260-263 s bandının içinde.
+        # γ (1,18) ve M (27,5) Sutton'da yok, kaydın eski değerleridir;
+        # M, T = 3500 K ile Sutton Isp'sini %0,2 içinde yeniden üretir.
+        'density': 1780.0,
+        'burn_rate_a': mm_mpa_to_m_bar(4.0, 0.33),
+        'burn_rate_n': 0.33,
+        'burn_rate_ref': ("a' = 4.0 mm/s at 1 MPa, n = 0.33 "
+                          "(r = a'*P[MPa]^n): n from Sutton & Biblarz 9th ed. "
+                          "Table 13-1; a' gives 0.30 in/s at 1000 psia, inside "
+                          "that table's 0.25-1.0 in/s band; indicative only."),
+        'c_star': 1595.8,
         'gamma': 1.18,
-        'flame_temperature': 3100.0,
+        'flame_temperature': 3500.0,
         'molecular_weight': 27.5,
-        'source': ('Density / flame temperature / exponent carried over from '
-                   "hrma/data/propellant_database.py entry 'pban' "
-                   '(NASA Space Shuttle SRB class); c* = 0.97 x the Eq. 3-32 '
-                   'ideal value for that thermochemistry.'),
-        'notes': ('Typical values. c* is deliberately held below the ideal '
-                  'single-phase Eq. 3-32 result because condensed Al2O3 '
-                  'does not expand with the gas. Published SRB c* figures '
-                  'near 1590 m/s go with a higher flame temperature '
-                  '(~3370 K) than the value carried in this repository, so '
-                  'treat this entry as indicative.'),
+        'source': ('Sutton & Biblarz, Rocket Propulsion Elements 9th ed., '
+                   'Table 13-1 (p. 496), PBAN/AP/Al: flame temperature '
+                   '3500 K, specific gravity 1.78, pressure exponent 0.33, '
+                   'Isp 260-263 s (1000 -> 14.7 psia, ideal); formulation '
+                   'Table 13-3 (AP 70, Al 16, PBAN 11.78, epoxy curative '
+                   '2.22 wt%). c* = Eq. 3-32 ideal value of this quartet '
+                   '(1595.8 m/s); check: ideal Isp at 1000 -> 14.7 psia with '
+                   'gamma 1.18 is 261.7 s, inside the table band. gamma and '
+                   'M are not in the table: carried over, with M consistent '
+                   'with the table Isp and temperature to 0.2 %.'),
+        'notes': ('Class values from the Sutton & Biblarz table, not a NASA '
+                  'CEA solution: HRMA has no sourced closed formula or '
+                  'formation enthalpy for the PBAN binder, so the solver '
+                  'uses this quartet at a single pressure and says so. The '
+                  'condensed-phase (two-phase) loss is applied by the motor '
+                  'model, not folded into this c*.'),
         'engine_key': None,
-        'c_star_basis': 'typical',
+        'c_star_basis': 'eq3-32',
         'validated': False,
     },
 

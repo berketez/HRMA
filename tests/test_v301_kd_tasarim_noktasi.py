@@ -506,7 +506,13 @@ class TestKasaSicakligiSessizYedekYok:
             'PASS', 'SAFE', 'ACCEPTABLE', 'OK'), kap['vessel_status']
 
     def test_ayni_govde_kap_onayi_normalde_verilir(self, client):
-        """Ters bekçi: geri çekme yalnız çözülmeyen sıcaklıkta olur."""
-        kod, g = _post(client, self.GOVDE)
+        """Ters bekçi: geri çekme yalnız çözülmeyen sıcaklıkta olur.
+
+        V306/KATI-MODEL (M-KATI-2): 2,4 mm cidar beyanlı tasarım katsayısını
+        (3,0) sağlamıyor (akma emniyeti 2,88; çember gerilmesi 2,496 mm
+        istiyor) ve kap hükmü artık bunu FAIL ile söylüyor. Bu bekçinin
+        niyeti (sıcaklık çözülünce ONAY verilir) katsayıyı sağlayan cidarla
+        korunur: 2,6 mm."""
+        kod, g = _post(client, dict(self.GOVDE, case_thickness=2.6))
         kap = g['safety_analysis']['pressure_safety']
         assert str(kap['vessel_status']).upper() == 'PASS', kap

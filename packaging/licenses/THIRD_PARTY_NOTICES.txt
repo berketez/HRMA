@@ -1,0 +1,86 @@
+HRMA — LICENSE AND THIRD-PARTY NOTICES
+======================================
+
+HRMA (author: Berke Tezgöçen) is free software: you can redistribute it
+and/or modify it under the terms of the GNU General Public License as
+published by the Free Software Foundation, either version 3 of the License,
+or (at your option) any later version (GPL-3.0-or-later). The full licence
+text is in the file LICENSE next to this folder (app/LICENSE).
+Source code: https://github.com/berketez/HRMA (the release tag matching the
+version shown in the application).
+
+This installation bundles a Python runtime and third-party components. The
+components below are distributed under copyleft licences, or their licence
+text is not shipped by the component itself; their licences and source
+locations are listed here. Every other bundled Python distribution, its
+declared licence and the location of its licence file(s) inside this
+installation are listed in licenses/PYTHON_PACKAGES.txt (generated when the
+package is built). The Python runtime's own licence is in
+python/lib/python3.12/LICENSE.txt (macOS) or python/LICENSE.txt (Windows).
+
+Türkçe özet: HRMA, GNU Genel Kamu Lisansı sürüm 3 ya da (seçiminize göre)
+daha sonraki bir sürümüyle (GPL-3.0-or-later) dağıtılan özgür yazılımdır;
+lisansın tam metni app/LICENSE dosyasındadır. Paketin taşıdığı üçüncü taraf
+bileşenlerin lisansları ve kaynak kodlarının yeri aşağıda ve
+licenses/PYTHON_PACKAGES.txt dosyasında listelenir.
+
+
+== RocketCEA ==
+Distribution: rocketcea
+Licence: GNU General Public License v3 (GPLv3)
+Copyright: Charlie Taylor (RocketCEA), NASA CEA Fortran code by NASA
+Use in HRMA: imported in-process for the NASA CEA comparison; for this
+  reason the package as a whole is distributed under the GPL.
+Licence text: LICENSE (same GPLv3 text) and the component's own copy in
+  libs/rocketcea-<version>.dist-info/LICENSE.txt
+Source: https://pypi.org/project/rocketcea/ (sdist of the bundled version),
+  https://github.com/sonofeft/RocketCEA
+
+== certifi ==
+Distribution: certifi
+Licence: Mozilla Public License 2.0 (MPL-2.0)
+Licence text: libs/certifi-<version>.dist-info/licenses/LICENSE
+Source: https://pypi.org/project/certifi/ , https://github.com/certifi/python-certifi
+
+== Open CASCADE Technology (OCCT) ==
+Bundled inside: cadquery-ocp-novtk (OCP/.dylibs on macOS; the OCP native
+  libraries on Windows). The OCP wheel itself is Apache-2.0 and ships no
+  licence file for the native libraries it carries.
+Licence: GNU Lesser General Public License v2.1 with the Open CASCADE
+  exception (version 1.0)
+Licence text: licenses/LGPL-2.1.txt, licenses/OCCT_LGPL_EXCEPTION-1.0.txt
+Notice required by the exception: HRMA's CAD and STEP export functions make
+  use of facilities provided by the Open CASCADE Technology software.
+Source: https://github.com/Open-Cascade-SAS/OCCT (version 7.9.x),
+  https://pypi.org/project/cadquery-ocp-novtk/
+
+== FreeImage ==
+Bundled inside: cadquery-ocp-novtk native libraries (libfreeimage 3.18.0)
+Licence: dual — GNU General Public License v2 or v3, or the FreeImage Public
+  License 1.0, at the recipient's choice
+Licence text: LICENSE (GPLv3), licenses/GPL-2.0.txt,
+  licenses/FreeImage-FIPL-1.0.txt
+Source: https://freeimage.sourceforge.io
+
+== LibRaw ==
+Bundled inside: cadquery-ocp-novtk native libraries (libraw)
+Licence: GNU Lesser General Public License v2.1 or Common Development and
+  Distribution License 1.0, at the recipient's choice
+Licence text: licenses/LGPL-2.1.txt, licenses/CDDL-1.0.txt
+Source: https://www.libraw.org
+
+== FreeType ==
+Bundled inside: cadquery-ocp-novtk and Pillow native libraries (libfreetype)
+Licence: The FreeType License (FTL) or GNU General Public License v2 or
+  later, at the recipient's choice
+Licence text: licenses/FreeType-FTL.txt, licenses/GPL-2.0.txt
+  Portions of this software are copyright (C) The FreeType Project
+  (https://freetype.org). All rights reserved.
+Source: https://freetype.org
+
+== Other native libraries carried by Python wheels ==
+NumPy and SciPy carry libgfortran, libgcc_s (GPLv3 with the GCC Runtime
+Library Exception) and libquadmath (LGPL-2.1); Shapely carries GEOS
+(LGPL-2.1); Pillow carries its image codecs. Each wheel ships these notices
+and licence texts in its own dist-info directory (see
+licenses/PYTHON_PACKAGES.txt).
