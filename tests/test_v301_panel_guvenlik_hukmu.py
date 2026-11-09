@@ -221,7 +221,15 @@ def test_ana_hesap_kritiksizken_sekme_ilerleme_demez(sekme, ad):
         assert th['thermal_verdict'] == 'issued'
         assert th['wall_temperature_source'] == \
             'motor_data wall_temperature_hot/cold contract'
-    assert s['risk_assessment']['risk_level'] in ('LOW', 'MEDIUM')
+    # V306/GÜVENLİK (NR-3 b): yapısal eksen (hibritte termal de)
+    # değerlendirilmediği için sepet KISMİDİR; ölçülen eksenlerin sınıfı
+    # (LOW/MEDIUM) yalnız alt sınırdır ve 'risk_level' olarak yayımlanmaz.
+    # Bekçinin asıl iddiası (çıplak cidar tahmini kritik hüküm üretmez)
+    # ölçülen eksenlerin sınıfı üzerinden aynen korunur.
+    ra = s['risk_assessment']
+    assert ra['risk_level'] == 'NOT_EVALUATED'
+    assert ra['risk_level_of_evaluated_axes'] in ('LOW', 'MEDIUM')
+    assert 'structural' in ra['motor_axes_not_evaluated']
 
 
 @needs_node

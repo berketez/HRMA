@@ -265,10 +265,20 @@ def test_no_overrides_keeps_the_reference_chain():
          susardı; özdeşlik ayağı susmaz.
     """
     _, plain = run_engine(None)
-    assert plain['isp_sea_level'] == pytest.approx(
+    # V306/SIVI-DEFTER (K5): override'sız motor varsayılan gaz jeneratörü
+    # çevrimindedir; açık çevrim defteri bağlandığından başlık Isp'si MOTOR
+    # Isp'sidir (türbin egzozu dahil, F/(ṁ_toplam·g0)). Bu bekçinin kilitlediği
+    # REFERANS ZİNCİR ana itki odası + lüle zinciridir ve sayıları DEĞİŞMEDİ
+    # (ölçüldü: bit-aynı); defter bloğunda yayımlanır.
+    defter = plain['mass_flow_ledger']
+    assert defter['status'] == 'open_cycle_closed'
+    assert defter['main_chamber_isp_sea_level_s'] == pytest.approx(
         298.3633726256625, rel=_ZINCIR_BAGIL_TOL)
-    assert plain['isp_vacuum'] == pytest.approx(
+    assert defter['main_chamber_isp_vacuum_s'] == pytest.approx(
         323.59539379053996, rel=_ZINCIR_BAGIL_TOL)
+    assert plain['isp_sea_level'] == pytest.approx(
+        plain['thrust'] / (plain['total_mass_flow'] * 9.80665), rel=1e-12)
+    assert plain['isp_sea_level'] < defter['main_chamber_isp_sea_level_s']
     assert plain['c_star'] == pytest.approx(
         1808.8846648268513, rel=_ZINCIR_BAGIL_TOL)
     # ÖH D36 / LU-1 (Berke onaylı, ÇEVRİLEN BEKÇİ): override'sız motor
@@ -283,7 +293,7 @@ def test_no_overrides_keeps_the_reference_chain():
     assert kimlik['status'] == 'CLOSED', kimlik
     beklenen = (kimlik['thrust_coefficient_sea_level'] * plain['c_star']
                 / (9.80665 * kimlik['throat_discharge_coefficient']))
-    assert plain['isp_sea_level'] == pytest.approx(
+    assert defter['main_chamber_isp_sea_level_s'] == pytest.approx(
         beklenen, rel=_ZINCIR_BAGIL_TOL)
 
 
@@ -384,9 +394,16 @@ def test_optimisation_map_matches_the_reported_design_point():
         _, result = run_engine(dict(FORM_DEFAULTS), fuel_type=fuel)
         maps = result['performance_maps']['mixture_ratio_optimization']
         peak = max(v for v in maps['isp_vs_mr'] if v is not None)
-        assert peak == pytest.approx(result['isp_vacuum'], rel=0.05), (
+        # V306/SIVI-DEFTER (K5): harita ANA İTKİ ODASI + lülenin O/F
+        # taramasıdır; kıyas sayfanın ana oda Isp'siyle (açık çevrimde başlık
+        # motor Isp'si türbin egzozu kadar düşüktür ve ayrı kartta durur).
+        defter = result.get('mass_flow_ledger') or {}
+        isp_vac = (defter['main_chamber_isp_vacuum_s']
+                   if defter.get('status') == 'open_cycle_closed'
+                   else result['isp_vacuum'])
+        assert peak == pytest.approx(isp_vac, rel=0.05), (
             f"{fuel}: harita tepesi {peak:.1f} s ile raporlanan vakum Isp "
-            f"{result['isp_vacuum']:.1f} s celisiyor")
+            f"{isp_vac:.1f} s celisiyor")
 
 
 def test_chamber_pressure_map_is_a_real_scan():
@@ -531,8 +548,18 @@ def test_safety_factor_input_reaches_the_wall():
 # ---------------------------------------------------------------------------
 
 def test_engine_mass_comes_from_geometry_not_a_50_kg_floor():
+    # V306/SIVI-ONARIM kalem 2: büyük motor 200 kN -> 100 kN. 200 kN gövdesi
+    # (ε = 50, 100 bar) V306/SIVI-CEKET K4'ten beri frezeli kanal ceket
+    # modelinin SINIRI DIŞINDA: soğutma devresi çözülmüyor
+    # (cooling_circuit_publication.code = 'jacket_model_limit') ve devreye
+    # dayanan kütleler yayımlanmıyor (None) — testin TypeError'ı bu None'du.
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/sivi-onarim/kalem2_once.json,
+    # FORM_DEFAULTS): 2 / 10 / 25 / 50 / 100 kN çözüldü (16,29 / 47,32 /
+    # 109,42 / 220,16 / 529,67 kg), 150 ve 200 kN model sınırı. Bekçinin
+    # niyeti (kütle geometriden büyür, 50 kg taban yok) model içinde kalan
+    # en büyük ölçülmüş itkide sınanır; sınır dışı ayak aşağıdaki testte.
     _, small = run_engine(dict(FORM_DEFAULTS), thrust=2000)
-    _, big = run_engine(dict(FORM_DEFAULTS), thrust=200000)
+    _, big = run_engine(dict(FORM_DEFAULTS), thrust=100000)
     m_small = small['design_summary']['masses']['engine_mass_kg']
     m_big = big['design_summary']['masses']['engine_mass_kg']
     assert m_small != 50
@@ -540,6 +567,35 @@ def test_engine_mass_comes_from_geometry_not_a_50_kg_floor():
     # Tek kaynak: bileşen dökümüyle birebir aynı olmalı
     assert m_small == pytest.approx(
         small['component_sizing']['component_masses']['total_dry_mass'])
+    assert m_big == pytest.approx(
+        big['component_sizing']['component_masses']['total_dry_mass'])
+
+
+def test_engine_mass_beyond_the_jacket_model_is_withheld_by_name():
+    """Model sınırı dışındaki motorda kütle SAYI UYDURMAZ: None + adlı neden.
+
+    V306/SIVI-ONARIM kalem 2 sözleşmesi: 200 kN gövdesinde motor kuru
+    kütlesi ve T/W yayımlanmaz (None); neden yanıtta adıyla
+    (cooling_circuit_publication + kritik uyarı kodu) durur ve ekran
+    'hrmaFmt' ile '—' basar (sıfır değil).
+    """
+    _, big = run_engine(dict(FORM_DEFAULTS), thrust=200000)
+    m = big['design_summary']['masses']
+    assert m['engine_mass_kg'] is None and m['thrust_to_weight'] is None
+    pub = big['cooling_circuit_publication']
+    # V306/SIVI-CEKET-A (K5_KARAR EK7): boğazı açık çevrim defteri türbin
+    # payından boyutladıysa ('design' kapsamı) bileşen dökümü bloğu
+    # bütünüyle bekletilir; aksi hâlde blok durur, kuru kütle alanı None.
+    if pub.get('scope') == 'design':
+        assert big['component_sizing'] is None
+    else:
+        assert big['component_sizing']['component_masses'][
+            'total_dry_mass'] is None
+    assert pub['status'] == 'not_solved' and pub['code'] == 'jacket_model_limit'
+    assert 'withheld' in pub['reason']
+    kodlar = {w['code'] for w in (big.get('input_warnings') or [])}
+    assert kodlar & {'warn.liquid.jacket_model_limit',
+                     'warn.liquid.jacket_model_limit_exhausted'}, kodlar
 
 
 def test_propellant_mass_uses_the_entered_burn_time():
@@ -580,7 +636,13 @@ def test_missing_burn_time_is_labelled_as_an_assumption():
 def test_feed_line_drops_are_computed_from_the_flow():
     """Hat kayıpları debi/çap/yoğunlukla değişmeli (eski hali sabitti)."""
     _, small = run_engine(dict(FORM_DEFAULTS), thrust=5000)
-    _, big = run_engine(dict(FORM_DEFAULTS), thrust=250000)
+    # V306/SIVI-CEKET-A (K5_KARAR EK7): 250 kN bu gövdede frezeli kanal
+    # ceket modelinin SINIRI DIŞINDA; besleme bütçesi ceket ΔP'sine seri
+    # bağlı olduğu için (GG, 'design' kapsamı) yayımlanmıyor. Ölçek bekçisi
+    # model içindeki en büyük ölçülmüş itkide (100 kN, SIVI-ONARIM kalem 2)
+    # sınanır.
+    _, big = run_engine(dict(FORM_DEFAULTS), thrust=100000)
+    assert big['cooling_circuit_publication'] == {'status': 'solved'}
     a = small['feed_system']['pressure_drops']
     b = big['feed_system']['pressure_drops']
     assert a['feed_lines'] != b['feed_lines']
@@ -600,7 +662,11 @@ def test_feed_injector_drop_matches_the_injector_design():
 def test_turbopump_curves_scale_with_the_engine():
     """Pompa devri/uç hızı motor boyutuyla değişmeli (25000 rpm sabiti gitti)."""
     _, small = run_engine(dict(FORM_DEFAULTS), thrust=5000)
-    _, big = run_engine(dict(FORM_DEFAULTS), thrust=500000)
+    # V306/SIVI-CEKET-A (EK7): 500 kN ceket modeli sınırı dışında
+    # (turbopompa analizi ceket ΔP'sine bağlı, bekletiliyor); model içindeki
+    # en büyük ölçülmüş itki 100 kN.
+    _, big = run_engine(dict(FORM_DEFAULTS), thrust=100000)
+    assert big['cooling_circuit_publication'] == {'status': 'solved'}
     a = small['detailed_feed_system']['turbopump_analysis']
     b = big['detailed_feed_system']['turbopump_analysis']
     assert a['oxidizer_pump']['impeller_tip_speed'] != \

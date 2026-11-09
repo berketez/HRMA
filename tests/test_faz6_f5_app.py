@@ -250,8 +250,12 @@ def _vehicle_sema_anahtarlari():
                 son = j
                 break
     assert son > i, 'flight_vehicle şema bloğu kapanmadı'
-    anahtarlar = set(re.findall(r"^\s*'([a-z_]+)'\s*:", belge[i:son],
-                                re.M))
+    # V306/UÇUŞ-2 (3 Kas): anahtar adında RAKAM olabilir
+    # (``propellant_volume_m3`` — V306/UÇUŞ NR-12 şemaya yazdı). Eski desen
+    # ``[a-z_]+`` rakamlı anahtarı şemadan düşürüyor, uç onu yayımlayınca
+    # "şema dışı sızma" diye kırmızı veriyordu; şema docstring'de idi.
+    anahtarlar = set(re.findall(r"^\s*'([a-z_][a-z0-9_]*)'\s*:",
+                                belge[i:son], re.M))
     assert len(anahtarlar) >= 12, (
         'şema ayrıştırması çöktü (%d anahtar) — docstring biçimi değişmiş '
         'olabilir; bekçi sessizce boş kümeye düşmemeli.' % len(anahtarlar))

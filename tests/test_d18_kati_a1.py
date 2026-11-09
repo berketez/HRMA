@@ -144,7 +144,15 @@ class TestBogazGovdeyiAsinca:
         # V301/T-ÇAPA-A: N-CEA-2 (katı termokimya motorun Pc'sinde NASA CEA'dan) sonrası yeniden
         # ölçüldü: 59,901521132815716 -> 59,94333101222664 mm (CEA kapalı aynı
         # motor eski sayıyı verir).
-        assert nz['convergent_length'] == pytest.approx(59.94333101222664,
+        # V306/KATI-KALAN kalem 2 (9 Kas, c3385eba3) — ÇAPA ÖLÇÜMLE YENİLENDİ
+        # (ana model): 59,94333101222664 -> 63,40743262736441 mm. Yakınsak
+        # giriş tane dış yarıçapından değil KASA İÇ yarıçapından başlıyor
+        # (STEP/CAD/FEA ile tek kontur); aynı yarı açıyla giriş yarıçapı
+        # büyüyünce yakınsak boy uzar. Ölçüm: kalem 2 öncesi (7097743f6)
+        # 59,94333101222664, sonrası (c3385eba3) 63,40743262736441 — betik
+        # docs/scofield/raw/OH/V306/ana-model/olcum/kati_kalan_capa/. Bekçinin
+        # sorusu (normal geometride boy hesaplanır, 'computed') DEĞİŞMEDİ.
+        assert nz['convergent_length'] == pytest.approx(63.40743262736441,
                                                         rel=1e-9)
         assert nz['convergent_length_status'] == 'computed'
 
@@ -418,9 +426,18 @@ def test_olculen_sayilar_capasi():
     # V301/K-A (22 Eki, KT-03): astar artık radyal yer kaplar (kasa iç çapı = tane + 2·(astar + yalıtım)); kasa 2·t_astar büyüdü, çapa yeniden ölçüldü (tolerans aynı).
     # 6,001397012523196 -> 6,4534577390220145 kg; küçük motor
     # 0,0945908415254658 -> 0,12844615192502312 kg.
-    assert dokum['total_kg'] == pytest.approx(6.4534577390220145, rel=1e-9)
+    # V306/KATI-MODEL (M-KATI-19, 4 Kas): lüle kütlesi kasa yapısal kütlesinin %15'i değil, çizilen lülenin kontur integrali (CAD ile bit-aynı); çapa yeniden ölçüldü (tolerans aynı).
+    # 6,4534577390220145 -> 5,891083551005131 kg; küçük motor
+    # 0,12844615192502312 -> 0,11537275158817248 kg.
+    # V306/KATI-KALAN (kalem 2, 9 Kas): lülenin yakınsak girişi kasa iç
+    # çapında (tek kontur; yakınsak boy tane dış çapından kuruluyordu, CAD
+    # aynı boyu kasa çapından başlatıyordu); çizilen lüle uzadı, çapa
+    # yeniden ölçüldü (tolerans aynı).
+    # 5,891083551005131 -> 5,895587320354508 kg; küçük motor
+    # 0,11537275158817248 -> 0,1160001707418952 kg.
+    assert dokum['total_kg'] == pytest.approx(5.895587320354508, rel=1e-9)
     assert dokum['liner_kg'] == pytest.approx(0.4614371289592694, rel=1e-6)
     kucuk = _motor(chamber_diameter=10.0, grain_length=10.0,
                    core_diameter=3.0)
     assert float(_sessiz(kucuk._calculate_dry_mass)) == pytest.approx(
-        0.12844615192502312, rel=1e-9)
+        0.1160001707418952, rel=1e-9)

@@ -302,7 +302,12 @@ class TestKalem2YanmaSuresiBeyani:
         """Ölçülen kusur: 20 s gönderildi, 15 s kullanıldı, uyarı yoktu."""
         sonuc = _calculate(client, thrust=500, burn_time=20,
                            total_impulse=7500)
-        assert sonuc['motor']['burn_time'] == pytest.approx(15.0), \
+        # V306/HİBRİT-ÇAPRAZ-2: çözücünün ÇÖZDÜĞÜ tasarım süresi
+        # ``burn_time_requested_s``tir (I/F = 15 s). N₂O kendinden basınçlı
+        # tankta ``burn_time`` TESLİM süresidir (HİBRİT-ÇAPRAZ kalem 1,
+        # boşalma çözümü; ölçüldü 15,173 s) — dayanak tasarım alanından okunur
+        # (``olcum/k5_once.json`` uc_IF_cakisma).
+        assert sonuc['motor']['burn_time_requested_s'] == pytest.approx(15.0), \
             'ölçüm dayanağı düştü: çözücü artık süreyi kırpmıyor olabilir'
         beyanlar = sonuc.get('inputs_not_used') or []
         alanlar = {b['field']: b for b in beyanlar}
@@ -316,7 +321,12 @@ class TestKalem2YanmaSuresiBeyani:
     def test_cakisma_yokken_beyan_uretilmiyor(self, client):
         """Beyan VARSAYIMLA değil ÖLÇÜMLE üretilir: süre kullanıldıysa sus."""
         sonuc = _calculate(client, thrust=500, burn_time=20)
-        assert sonuc['motor']['burn_time'] == pytest.approx(20.0)
+        # V306/HİBRİT-ÇAPRAZ-2: girdi tasarımı boyutlar (istenen süre = 20 s);
+        # teslim süresi boşalma çözümündendir (ölçüldü 20,226 s) ve "girdi
+        # kullanılmadı" beyanı DOĞURMAZ (ölçülen kusur: taban 78dbb287e her
+        # N₂O koşusunda burn_time'ı "çözülen" diye beyan ediyordu).
+        assert sonuc['motor']['burn_time_requested_s'] == pytest.approx(20.0)
+        assert sonuc['motor']['delivered_source'] == 'tank_blowdown'
         alanlar = {b['field'] for b in (sonuc.get('inputs_not_used') or [])}
         assert 'burn_time' not in alanlar, (
             'Gerçekten kullanılan girdi "kullanılmadı" diye beyan ediliyor')

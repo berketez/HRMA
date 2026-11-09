@@ -764,7 +764,9 @@ class TestHukum:
         """Kabul ölçütü GERİNİMDİR (SP-8073), tepe von Mises değil."""
         v = out['adimlar'][3]['sonuc']
         pay = tane_fea['bore']['strain_margin']
-        beklenen = 'err' if pay < 1 else ('warn' if pay < 2 else 'ok')
+        # V306/KATI-TANE (K1): sınıf kaynaklı ölçütle — NASA SP-8073 Denk.
+        # (46) MS = pay − 1 < 0 → 'err'; kaynaksız 2,0 bandı ('warn') kalktı.
+        beklenen = 'err' if pay < 1 else 'ok'
         assert v['key'] == 'panel.grain.verdictMargin'
         assert v['kind'] == beklenen
         assert float(v['params']['v']) == pytest.approx(pay, abs=5e-3)
@@ -773,6 +775,11 @@ class TestHukum:
         kaynak = PANEL_JS.read_text(encoding='utf-8')
         assert kaynak.count('function strainMarginKind(') == 1
         # Rozet de hüküm de AYNI sınıflayıcıdan geçer
+        # V306/TANE NR-16 analitik rozeti de buradan geçiriyordu (4).
+        # V306/KATI-TANE (K1): analitik rozetin rengi artık motorun KENDİ
+        # sınıf kodundan (küçük-gerinim kuralı dahil) okunur, sayıdan yeniden
+        # türetilmez: tanım + standalone rozet + Merkez hükmü = 3; ikinci bir
+        # eşik yazımı yine yasak.
         assert kaynak.count('strainMarginKind(') == 3, (
             'pay sınıflaması ikinci bir yerde yeniden yazılmış olabilir')
 
@@ -886,6 +893,15 @@ process.stdout.write(JSON.stringify(out));
             {'grain_type': 'bates', 'propellant_type': 'apcp',
              'chamber_diameter': 100.0, 'core_diameter': 30.0,
              'chamber_pressure': 40.0},
+            # V306/KATI-TANE: analitik bloğu (yerleşim, depolama sıcaklığı,
+            # kasa genişlemesi) taşıyan sonuç — ikizin bu alanları da aynı
+            # kurala göre taşıdığı ölçülür (eski fikstür bunları içermediği
+            # için kasa genişlemesi ayrışması görünmüyordu).
+            dict(SOLID_SONUC, structural_analysis={'grain_structural': {
+                'grain_support': 'cartridge_loaded',
+                'grain_support_source': 'user input',
+                'storage_temperature_k': 298.0,
+                'case_radial_expansion_mm': 0.0123}}),
             {'propellant_type': 'apcp'},          # tip yok -> null
         ]
         script = tmp_path / 'ikiz.js'

@@ -226,7 +226,19 @@ def test_oksitleyici_satiri_uc_kunyesinden(node_cikti):
 def test_yakit_satiri_kosum_kunyesinden(node_cikti):
     o, yanit, _ = node_cikti
     ds = yanit['data_sources']
-    assert ds['fuel']['regression']['citation'] in o['yakit_sonra']
+    # V306/HİBRİT-ÇAPRAZ-2: DAYANAĞI DÜŞEN FİKSTÜR gerçek girdiye çapalandı.
+    # Örnek hibrit HİBRİT-NOZUL kalem 5'ten (8d63f958d) beri Carmicino 2013
+    # uyarlamasını gönderir (katalogdan farklı çift); satır kullanılan
+    # çiftin kaynağını söyler: "sayfa değerleri, katalog çiftinden farklı".
+    # Katalog künyesi ('Doran et al.') bu satırda KULLANILAN çiftin kaynağı
+    # gibi basılmaz; yanıtta da ``citation`` None, katalogunki
+    # ``catalogue_citation``dadır (ölçülen kusur: taban 78dbb287e,
+    # olcum/k5_once.json ornek_sayfa).
+    reg = ds['fuel']['regression']
+    assert reg['equals_catalogue'] is False and reg['citation'] is None
+    assert 'page values that differ from the HRMA catalogue pair' in \
+        o['yakit_sonra']
+    assert reg['catalogue_citation'] not in o['yakit_sonra']
     assert 'Cantera ' + ds['thermochemistry']['cantera_version'] in \
         o['yakit_sonra']
     assert o['yakit_data_i18n_kaldi'] is False

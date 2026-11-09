@@ -88,7 +88,21 @@ def test_arac_zarfi_cizilen_dis_zarf(client, sonuclar, mt):
     v = _arac(client, mt, s)
     lule = _cizilen_lule_dis_cap_mm(_motor(mt, s))
     assert v['engine_od_m'] * 1000.0 >= lule * (1.0 - 1e-12)
-    # Bu üç örnekte en geniş çizilen parça lüledir (STEP ölçümü:
+    if mt == 'hybrid':
+        # V306/HİBRİT-MODEL (M-HIBRIT-22, 3 Kas) — ÖNCÜL DEĞİŞTİ. Örnek
+        # hibritte en geniş çizilen parça grafit lüleydi, çünkü grafit
+        # basınç kabuğu gibi 21,6 mm boyutlanıp kamara çapına dışa
+        # ekleniyordu (zarf 116,7 mm ⟷ kasa 81,3 mm). Lüle artık grafit ek
+        # (erozyon) + yapısal gövde (kamara malzemesi) olarak boyutlanıyor
+        # ve kasanın dışına taşmıyor: zarf = kasa dış çapı (iddia aynı —
+        # araç zarfı en geniş çizilen parçadır).
+        m = _motor(mt, s)
+        ca = m['structural_analysis']['chamber_analysis']
+        kasa = ca['diameter'] + 2.0 * ca['wall_thickness_used_mm']
+        assert v['engine_od_m'] * 1000.0 == pytest.approx(
+            max(kasa, lule), rel=1e-12)
+        return
+    # Bu iki örnekte en geniş çizilen parça lüledir (STEP ölçümü:
     # k6_olcu_sonra.json) — araç zarfı onun çapıdır.
     assert v['engine_od_m'] * 1000.0 == pytest.approx(lule, rel=1e-12)
     assert v['engine_od_unit_source'].startswith(

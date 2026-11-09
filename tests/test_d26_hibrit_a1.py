@@ -353,7 +353,11 @@ class TestOHB404FazKanali:
         if blok['end_event'] == 'oxidizer_depleted':
             assert blok['tank_phase_final'] == 'vapor'
             assert blok['vapor_onset_s'] is not None
-            assert blok['vapor_onset_s'] > blok['time_s'][-1]
+            # V306/HİBRİT-ÇAPRAZ: son örnek sıvının bittiği andır (son adım
+            # tank envanteriyle kısaltıldı); geçiş anı yanma sonuna EŞİT.
+            # Eski beklenti (geçiş > son örnek) çözücünün bir adım kayık
+            # kayıt etiketini kilitliyordu (yanma sonundan Δt sonra).
+            assert blok['vapor_onset_s'] == blok['time_s'][-1]
         else:
             assert blok['vapor_onset_s'] is None
 

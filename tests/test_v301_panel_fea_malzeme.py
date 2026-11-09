@@ -142,9 +142,28 @@ def test_lule_malzemesi_yoksa_kamara_malzemesi_kalir(motor):
     m.pop('nozzle_material_analysis', None)
     m.pop('nozzle_design', None)
     assert _lule_malzemesi(m) is None
-    out = _sessiz(extract_thermal_inputs, m, axial_profile=_profil(motor))
+    # V306/UÇUŞ-FEA (kalem 3): profil AYNI motordan (m) istenir — panel de
+    # öyle yapar (buildWallProfileBody, ayna ``profil_govdesi``): lüle
+    # malzemesi yayımlanmamışsa gövdeye kamara malzemesi girer. Eski satır
+    # ``_profil(motor)`` ile GRAFİT lülenin profilini ss_304 ağına
+    # veriyordu; V306/GÜVERTE (cdb000951, §5 B-N1) bu çifti köprüde,
+    # çözücüden önce adıyla reddediyor (``axial_profile_material_mismatch``)
+    # ve ret ``material_key`` taşımaz (KeyError, CI rc.0). Ürün doğru, test
+    # iki ayrı cidarı birbirine bağlıyordu.
+    prof = _profil(m)
+    assert prof.get('material') == 'ss_304'
+    out = _sessiz(extract_thermal_inputs, m, axial_profile=prof)
+    assert out['status'] == 'ok', out.get('reason')
     assert out['material_key'] == 'ss_304'
     assert out['thermal_material_source'].startswith('kamara malzemesi')
+    # Tek malzemeli ağın sözleşmesi iki yönde tek kaynakta: grafit lülenin
+    # profili kamara malzemeli ağa verilirse adlı ret, malzeme ikamesi yok.
+    red = _sessiz(extract_thermal_inputs, m, axial_profile=_profil(motor))
+    assert red['status'] != 'ok'
+    assert red['reason_code'] == 'axial_profile_material_mismatch'
+    assert (red['profile_material'], red['expected_material']) == \
+        ('graphite', 'ss_304')
+    assert 'material_key' not in red
 
 
 def test_rozet_anahtari_iki_dilde():

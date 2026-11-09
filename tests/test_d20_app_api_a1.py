@@ -379,7 +379,15 @@ class TestP15B1_02PlakaKalinligi:
         # 1,5·D_son); kamara küçüldü -> gerçekleşen L* ↓ -> Isp ↓ -> ṁ ↑ ->
         # delik çapı ↑ -> L/D = t/d ↓ (−%0,037). Ölçüldü (birleşik main):
         #   L/D 1,4412796945529898 -> 1,4407513659900986
-        assert inj['L_D_ratio'] == pytest.approx(1.4407513659900986,
+        # V306/SIVI-ONARIM kalem 4 (kayma commit'i ÖLÇÜLDÜ: cb11df981,
+        # V306/SAYI kalem 4 — aynı koşuda TEK N₂O doyma basıncı; enjektör
+        # devresi tablo ara değeri 50,543358 bar yerine tank modelinin
+        # CoolProp EOS'u (Lemmon & Span 2006) 50,525093 bar): P₁ ↓ -> ΔP ↓ ->
+        # delik çapı 2,0822469 -> 2,0826966 mm (+%0,0216), ṁ_ox/Isp/c*
+        # bit-aynı. Ölçüm: docs/scofield/raw/OH/V306/sivi-onarim/
+        # kalem4_ld.json (cb11df981^ ⟷ cb11df981). Tolerans DEĞİŞMEDİ.
+        #   L/D 1,4407513659900986 -> 1,440440220781379
+        assert inj['L_D_ratio'] == pytest.approx(1.440440220781379,
                                                  rel=1e-9)
         # Çapa TEK sayı değil: L/D = plaka / delik çapı özdeşliği de
         # kilitlenir, yoksa iki sayı sessizce ayrışabilir.
@@ -387,7 +395,9 @@ class TestP15B1_02PlakaKalinligi:
         # 2,08148356723394 mm (ṁ arttı; kâhin yukarıda).
         # v3.0.1 port kulvarı (20 Eki): 2,08148356723394 -> 2,0822468545350783
         # mm (+%0,037; L/D ile aynı oran, özdeşlik aşağıda kilitli).
-        assert inj['hole_diameter'] == pytest.approx(2.0822468545350783,
+        # V306/SIVI-ONARIM kalem 4 (cb11df981, tek N₂O doyma basıncı; L/D
+        # çapasıyla aynı ölçüm): 2,0822468545350783 -> 2,0826966344862443 mm.
+        assert inj['hole_diameter'] == pytest.approx(2.0826966344862443,
                                                      rel=1e-9)
         assert inj['L_D_ratio'] == pytest.approx(
             inj['plate_thickness'] / inj['hole_diameter'], rel=1e-12)

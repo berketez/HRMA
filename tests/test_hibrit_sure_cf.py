@@ -143,11 +143,50 @@ class TestImpulsGirdiCozumu:
 # KALEM 1B — gerçek süre ve teslim edilen impuls MANŞETE bağlı
 # ---------------------------------------------------------------------------
 
+def regule(sonuc):
+    """Sabit oksitleyici debili (regüle) tasarım bütçesinin görünümü.
+
+    V306/HİBRİT-ÇAPRAZ kalem 1 (ana model kararı): N₂O kendinden basınçlı
+    tankta (``TEMEL`` bu kipte) motorun TESLİM büyüklükleri boşalma
+    çözümünden gelir (``delivered_source == 'tank_blowdown'``); bu sınıfın
+    kilitlediği sözleşme — süre kırpılmaz, eğrinin impulsu, oksitleyici
+    bütçesi — regüle tasarım yürüyüşünündür ve o kipte
+    ``constant_oxidizer_flow_budget``ta adıyla durur. Regüle kipte görünüm
+    manşetin kendisidir (bit-aynı).
+    """
+    if sonuc.get('delivered_source') != 'tank_blowdown':
+        return {'burn_time': sonuc['burn_time'],
+                'burn_time_effective_s': sonuc['burn_time_effective_s'],
+                'total_impulse': sonuc['total_impulse'],
+                'thrust_curve': sonuc['thrust_curve'],
+                'oxidizer_mass_consumed_kg': sonuc['oxidizer_mass_consumed_kg'],
+                'oxidizer_mass_residual_kg': sonuc['oxidizer_mass_residual_kg']}
+    b = sonuc['constant_oxidizer_flow_budget']
+    return {'burn_time': b['burn_time_s'],
+            'burn_time_effective_s': b['burn_time_s'],
+            'total_impulse': b['total_impulse_Ns'],
+            'thrust_curve': b['thrust_curve'],
+            'oxidizer_mass_consumed_kg': b['oxidizer_consumed_kg'],
+            'oxidizer_mass_residual_kg':
+                sonuc['oxidizer_mass'] - b['oxidizer_consumed_kg']}
+
+
 class TestGercekSureMansete:
+
+    def test_bosalma_kipinde_teslim_eden_cozum_adiyla(self, varsayilan):
+        """Teslim büyüklükleri boşalma çözümünden; eğri ⟷ impuls TEK sayı."""
+        _, sonuc = varsayilan
+        assert sonuc['delivered_source'] == 'tank_blowdown'
+        tb = sonuc['tank_blowdown']
+        egri = sonuc['thrust_curve']
+        assert egri['time'] == tb['time_s'] and egri['time'][0] == 0.0
+        assert sonuc['total_impulse'] == float(
+            trapezoid(egri['thrust'], egri['time']))
+        assert sonuc['burn_time'] == tb['burn_duration_s']
 
     def test_kirpilmayan_kosuda_hicbir_sayi_degismez(self, varsayilan):
         motor, sonuc = varsayilan
-        assert sonuc['burn_time'] == pytest.approx(motor.t_b)
+        assert regule(sonuc)['burn_time'] == pytest.approx(motor.t_b)
         # ÖH D15/P1B2-03 — BEKÇİ ÇEVRİLDİ (ÖK-05).
         # Eski satır ``sonuc['total_impulse'] == approx(motor.I_total)``
         # idi ve KUSURU SÖZLEŞMEYE ÇEVİRİYORDU: ``motor.I_total`` İSTENEN
@@ -163,18 +202,20 @@ class TestGercekSureMansete:
         assert 'DELIVERED impulse of this run in EVERY case' in \
             sonuc['total_impulse_basis']
         assert sonuc['burn_time_clipped'] is False
-        assert sonuc['burn_time_effective_s'] == pytest.approx(motor.t_b)
+        assert regule(sonuc)['burn_time_effective_s'] == pytest.approx(
+            motor.t_b)
 
     def test_kirpilan_kosuda_manset_teslim_edileni_gosterir(self, kirpilan):
         # v3.0.1: aynı girdi artık kırpılmıyor; manşet = teslim = istenen.
         motor, sonuc = kirpilan
         t_etkin = float(motor.t_burn_effective)
+        r = regule(sonuc)
         assert sonuc['burn_time_clipped'] is False
-        assert sonuc['burn_time'] == pytest.approx(t_etkin)
-        assert sonuc['burn_time'] == sonuc['burn_time_requested_s']
+        assert r['burn_time'] == pytest.approx(t_etkin)
+        assert r['burn_time'] == sonuc['burn_time_requested_s']
         # İstenen değer KAYBOLMAZ, yanında durur.
         assert sonuc['burn_time_requested_s'] == pytest.approx(motor.t_b)
-        assert sonuc['burn_time_effective_s'] == pytest.approx(t_etkin)
+        assert r['burn_time_effective_s'] == pytest.approx(t_etkin)
 
     def test_kirpma_yolu_kapandi_sigmayan_zarf_adiyla_reddedilir(self):
         """v3.0.1 kulvar P: zarfı aşan istek KIRPILMAZ, adıyla reddedilir.
@@ -197,6 +238,12 @@ class TestGercekSureMansete:
         assert sonuc['total_impulse'] == pytest.approx(beklenen, rel=1e-9)
         assert sonuc['total_impulse_delivered_Ns'] == pytest.approx(beklenen,
                                                                    rel=1e-9)
+        # Regüle tasarım bütçesi: kendi eğrisinin impulsu.
+        r = regule(sonuc)
+        assert r['total_impulse'] == pytest.approx(float(trapezoid(
+            r['thrust_curve']['thrust'], r['thrust_curve']['time'])),
+            rel=1e-9)
+        sonuc = dict(sonuc, total_impulse=r['total_impulse'])
         # v3.0.1: kırpma yok — teslim edilen istenenden yalnız O/F kayması
         # kadar sapar (eskiden %25 eksikti: 111 756 ⟷ 150 000 Ns).
         # V301/B7 (21 Eki, ÖNEMLİ, Berke onaylı): O/F 2,5 N2O/HTPB'de dengeye
@@ -209,21 +256,38 @@ class TestGercekSureMansete:
     def test_manset_ile_of_shift_ayni_sureyi_soyler(self, kirpilan):
         """İki blok aynı koşuda İKİ FARKLI süre söyleyemez."""
         _, sonuc = kirpilan
-        assert sonuc['burn_time_effective_s'] == pytest.approx(
+        assert regule(sonuc)['burn_time_effective_s'] == pytest.approx(
             sonuc['of_shift']['regulated']['burn_time_effective_s'])
 
     def test_oksitleyici_butcesi_kapanir(self, kirpilan):
         motor, sonuc = kirpilan
         yuklenen = sonuc['oxidizer_mass']
-        harcanan = sonuc['oxidizer_mass_consumed_kg']
-        artik = sonuc['oxidizer_mass_residual_kg']
+        harcanan = regule(sonuc)['oxidizer_mass_consumed_kg']
+        artik = regule(sonuc)['oxidizer_mass_residual_kg']
         assert yuklenen == pytest.approx(harcanan + artik, rel=1e-9)
         # Tank İSTENEN süreye göre yüklenir (donanım kararı). v3.0.1: yanma
         # artık kırpılmadığı için harcanan = yüklenen, artık oksitleyici 0.
         assert harcanan == pytest.approx(
             motor.mdot_ox * motor.t_burn_effective, rel=1e-9)
-        assert artik == pytest.approx(0.0, abs=1e-12)
-        assert 'LOADED mass' in sonuc['oxidizer_mass_basis']
+        # V306/HİBRİT-ÇAPRAZ-2 — BAYAT ÇAPA, ölçümle yenilendi
+        # (``docs/scofield/raw/OH/V306/hibrit-capraz-2/olcum/
+        # sure_cf_ox_butcesi.json``). HİBRİT-KÜTLE kalem 4'ten (6 Kas,
+        # kasıtlı) beri kendinden basınçlı N₂O tankında YÜKLENEN oksitleyici
+        # = sıvı + ullage buharı. Regüle bütçe sıvının TAMAMINI harcar (sıvı −
+        # harcanan = 0, ölçüldü −7e-15 kg); buhar yakılmaz, tankta kalır:
+        # regüle artık = ullage buharı (ölçüldü 2,040498 kg, tabandaki
+        # "2,0405 ⟷ 0" farkının tamamı). Teslim (boşalma) bütçesi de ayrıca
+        # kapanır: yüklenen = harcanan + artık (fark 0), artık = tankın son
+        # envanteri (Δt/4 sınırında). Aynı büyüklüğe iki sayı YOK: regüle
+        # artık ekranda/yanıtta yayımlanmaz, yalnız bu görünümde türetilir.
+        assert sonuc['oxidizer_liquid_loaded_kg'] == pytest.approx(
+            harcanan, rel=1e-12)
+        assert artik == pytest.approx(sonuc['oxidizer_ullage_vapour_kg'],
+                                      rel=1e-9)
+        assert sonuc['oxidizer_mass'] == pytest.approx(
+            sonuc['oxidizer_mass_consumed_kg']
+            + sonuc['oxidizer_mass_residual_kg'], rel=1e-12)
+        assert 'LOADED' in sonuc['oxidizer_mass_basis']
 
     def test_kirpilma_uyariyla_beyan_edilir(self, kirpilan):
         # v3.0.1: kırpma yolu kapandı; erken web tükenmesi uyarısı da
@@ -770,7 +834,16 @@ class TestSeriSuresi:
         itki = sonuc['thrust_curve']['time']
         port = sonuc['port_history']['time']
         assert itki[-1] == pytest.approx(port[-1], rel=1e-12)
-        assert itki[-1] == pytest.approx(motor.t_burn_effective, rel=1e-12)
+        # V306/HİBRİT-ÇAPRAZ: teslim serileri teslim süresinde biter;
+        # regüle tasarım serileri tasarım yürüyüşünün süresinde.
+        assert itki[-1] == pytest.approx(sonuc['burn_time'], rel=1e-12)
+        r = regule(sonuc)
+        assert r['thrust_curve']['time'][-1] == pytest.approx(
+            motor.t_burn_effective, rel=1e-12)
+        if sonuc.get('delivered_source') == 'tank_blowdown':
+            b = sonuc['constant_oxidizer_flow_budget']
+            assert b['port_history']['time'][-1] == pytest.approx(
+                motor.t_burn_effective, rel=1e-12)
 
     def test_seriler_sifirdan_baslar_ve_esit_uzunluktadir(self, varsayilan):
         _, sonuc = varsayilan
@@ -784,7 +857,9 @@ class TestSeriSuresi:
         itki = sonuc['thrust_curve']['time']
         port = sonuc['port_history']['time']
         assert itki[-1] == pytest.approx(port[-1], rel=1e-12)
-        assert itki[-1] == pytest.approx(motor.t_burn_effective, rel=1e-12)
+        assert itki[-1] == pytest.approx(sonuc['burn_time'], rel=1e-12)
+        assert regule(sonuc)['thrust_curve']['time'][-1] == pytest.approx(
+            motor.t_burn_effective, rel=1e-12)
 
     def test_impuls_ozdesligi_trapez_altinda_da_kapanir(self, varsayilan):
         """I = Isp_ort · m_harcanan · g0 — integratör değişti, özdeşlik duruyor."""
@@ -796,7 +871,8 @@ class TestSeriSuresi:
 
     def test_of_shift_impulsu_yayimlanan_egriden_hesaplanir(self, varsayilan):
         _, sonuc = varsayilan
-        egri = sonuc['thrust_curve']
+        # Regüle O/F kayması, regüle tasarım eğrisinden (V306/HİBRİT-ÇAPRAZ).
+        egri = regule(sonuc)['thrust_curve']
         assert sonuc['of_shift']['regulated']['total_impulse_Ns'] == (
             pytest.approx(float(trapezoid(egri['thrust'], egri['time'])),
                           rel=1e-9))

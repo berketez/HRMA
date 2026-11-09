@@ -294,6 +294,16 @@ def test_manifest_eksik_ornekte_kapiyi_kapatir(tmp_path):
         b'x' * 128)
     (kok / 'libs' / 'flask' / '__pycache__' / 'app.cpython-312.pyc').write_bytes(
         b'x' * 128)
+    # 3.0.6 (CI-SÜREÇ kalem 1, S1 lisans): manifest artık GPL metnini ve
+    # üçüncü taraf bildirimini de ister (v3.0.5 paketinde app/LICENSE yoktu).
+    # Eksiksiz paket örneği o dosyaları taşır; İDDİA DEĞİŞMEDİ.
+    (kok / 'app' / 'LICENSE').write_text(
+        (KOK / 'LICENSE').read_text(encoding='utf-8'), encoding='utf-8')
+    (kok / 'app' / 'licenses').mkdir()
+    (kok / 'app' / 'licenses' / 'THIRD_PARTY_NOTICES.txt').write_text(
+        '== RocketCEA ==\nDistribution: rocketcea\n' + ORNEK_DOLGU, encoding='utf-8')
+    (kok / 'app' / 'licenses' / 'PYTHON_PACKAGES.txt').write_text(
+        ORNEK_DOLGU, encoding='utf-8')
     ortam = ['REPO_ORNEK=3', 'REPO_DATA=4']
 
     tam = _kapi_bash(govde, 'manifest_denetle "%s" "sahte paket"' % kok, ortam)
@@ -519,7 +529,10 @@ def _agac_manifesti(kok, ad):
         eksik.append('examples/*.hrma sayısı %d, depoda %d'
                      % (_ornek_sayisi(kok / 'app' / 'examples'), depo_ornek))
     for yol in ('app/launcher.py', 'app/hrma/app.py',
-                'app/examples/generate_examples.py', 'app/BUILD_INFO.json'):
+                'app/examples/generate_examples.py', 'app/BUILD_INFO.json',
+                # 3.0.6 S1 lisans: packaging/lisans_paketle.py koyar
+                'app/LICENSE', 'app/licenses/THIRD_PARTY_NOTICES.txt',
+                'app/licenses/PYTHON_PACKAGES.txt'):
         if not (kok / yol).exists():
             eksik.append('%s yok' % yol)
     if not (kok / 'app' / 'data').is_dir():

@@ -676,7 +676,7 @@ def size_igniter(*,
                 'torch_heat_release_J_kg is required for a torch igniter: '
                 'the torch propellant heat release [J/kg] sets the flow '
                 'needed to deliver the ignition energy. No default is '
-                'assumed (no invented value).')
+                'assumed.')
         mdot_torch = torch_propellant_flow(
             required_energy_J=energy['energy_J'],
             ignition_window_s=ignition_window_s,
@@ -747,7 +747,7 @@ def size_igniter(*,
                     + ', '.join(missing) + ' was not supplied. The charge '
                     'gas properties and condensed-phase fraction are '
                     'inputs: this module does not carry a charge '
-                    'catalogue and will not invent one.'),
+                    'catalogue and assumes none.'),
             }
             validity.append({
                 'field': 'pyrotechnic.charge_mass_kg',
@@ -802,8 +802,8 @@ def size_igniter(*,
                     'scales as 1/T, so this substitution sizes the charge '
                     'on the LOW - i.e. unsafe - side. Supply '
                     'charge_gas_temperature_K to govern it: this module '
-                    'models neither the heat loss nor the mixing and will '
-                    'not invent a reduction factor.')
+                    'models neither the heat loss nor the mixing and '
+                    'applies no reduction factor.')
             pyro = pyrotechnic_charge_mass(
                 ignition_pressure_Pa=p_ign,
                 free_volume_m3=v_free,

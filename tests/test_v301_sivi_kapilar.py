@@ -57,6 +57,10 @@ def _form():
     d = {k: v for k, v in json.loads(yol.read_text(encoding='utf-8')).items()
          if v is not None}
     d.update({'thrust': 10000, 'chamber_pressure': 100, 'mixture_ratio': 2.5})
+    # V306/SIVI-CEKET-B kalem 5: fikstürün ε 50'si (eski form ön dolgusu)
+    # 100 bar'da deniz seviyesinde ayrılıyor; uç o tasarımı adlı retle
+    # yayımlamıyor. Kapı bekçileri ayrılmayan ε 20 ile kurulur.
+    d['nozzle_expansion_ratio'] = 20
     return d
 
 

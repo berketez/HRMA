@@ -538,13 +538,38 @@ def _json_satirlari(mt, s, v):
         ]
     m = s.get('motor') or {}
     wa = (m.get('structural_analysis') or {}).get('weight_analysis') or {}
+    # V306/HİBRİT-ÇAPRAZ (kalem 4): ``motor.isp`` TASARIM ortamındaki
+    # (sayfanın atmosfer basıncı alanı, örnek yükte 1,013 bar) Isp'dir;
+    # ``sea_level_isp`` ISA deniz seviyesindeki (1,01325 bar) satırdır.
+    # V306/HİBRİT-MODEL kalem 6 (70077af19) itkiyi doğru biçimde TASARIM
+    # ortamına çapaladı (F_vak = F + p_tasarım·A_e, Sutton & Biblarz 2-14/
+    # 3-29); iki ortam 25 Pa farklı olduğundan iki sayı 0,0062 s farklıdır
+    # (ölçüldü: 209,75491 ⟷ 209,74870 s). Eski satır iki FARKLI ortamın
+    # Isp'sini aynı büyüklük sayıyordu. Doğru soru: deniz seviyesi satırı,
+    # motorun kendi alanlarından aynı bağıntıyla kapanıyor mu?
+    #   Isp_ISA = Isp_tasarım − (p_ISA − p_tasarım)·A_e / (ṁ·g0)
+    from hrma.constants import G_0, P_SEA_LEVEL_PA
+    _p_tas = ((m.get('nozzle_design') or {}).get('performance') or {}).get(
+        'ambient_pressure')
+    try:
+        _isp_isa = (float(m['isp']) - (P_SEA_LEVEL_PA - float(_p_tas) * 1e5)
+                    * float(m['exit_area'])
+                    / (float(m['mdot_total']) * G_0))
+    except (KeyError, TypeError, ValueError):
+        _isp_isa = None
     return [
         S('itki [N]', 'motor.thrust', m.get('thrust')),
         S('itki [N]', 'uçuş_aracı.thrust', v.get('thrust')),
         S('yanma süresi [s]', 'motor.burn_time', m.get('burn_time')),
         S('yanma süresi [s]', 'uçuş_aracı.burn_time', v.get('burn_time')),
-        S('Isp [s]', 'motor.isp', m.get('isp')),
-        S('Isp [s]', 'motor.sea_level_isp', m.get('sea_level_isp')),
+        S('Isp tasarım ortamı [s]', 'motor.isp', m.get('isp')),
+        S('Isp tasarım ortamı [s]', 'motor.c_star×cf/g0',
+          (m.get('c_star') or 0) * (m.get('cf') or 0) / G_0),
+        S('Isp ISA deniz seviyesi [s]', 'motor.sea_level_isp',
+          m.get('sea_level_isp')),
+        S('Isp ISA deniz seviyesi [s]',
+          'motor.isp − (p_ISA − p_tasarım)·exit_area/(mdot_total·g0)',
+          _isp_isa),
         S('boğaz çapı [mm]', 'motor.throat_diameter×1000', (m.get('throat_diameter') or 0) * 1000),
         S('boğaz çapı [mm]', 'design_summary.key_dimensions.nozzle_throat_diameter_mm', kd.get('nozzle_throat_diameter_mm')),
         S('çıkış çapı [mm]', 'motor.exit_diameter×1000', (m.get('exit_diameter') or 0) * 1000),
@@ -626,7 +651,7 @@ def test_k3_rapor_pdf_ayni_sayi(client, mt):
                     pdf('yanma süresi [s]', 'Burn Time'),
                     S('toplam impuls [N·s]', 'ana.total_impulse', s.get('total_impulse')),
                     pdf('toplam impuls [N·s]', 'Total Impulse'),
-                    pdf('toplam impuls [N·s]', None, r'total impulse ns:\s*([0-9.]+)'),
+                    pdf('toplam impuls [N·s]', None, r'Total impulse \(N·s\):\s*([0-9.]+)'),
                     S('boğaz çapı [mm]', 'ana.throat_diameter', s.get('throat_diameter')),
                     pdf('boğaz çapı [mm]', 'Throat Diameter'),
                     S('itici kütlesi [kg]', 'ana.propellant_mass', s.get('propellant_mass')),
@@ -649,7 +674,7 @@ def test_k3_rapor_pdf_ayni_sayi(client, mt):
                     pdf('Pc [bar]', 'Chamber Pressure'),
                     S('toplam impuls [N·s]', 'motor.total_impulse', m.get('total_impulse')),
                     pdf('toplam impuls [N·s]', 'Total Impulse'),
-                    pdf('toplam impuls [N·s]', None, r'total impulse ns:\s*([0-9.]+)'),
+                    pdf('toplam impuls [N·s]', None, r'Total impulse \(N·s\):\s*([0-9.]+)'),
                     S('boğaz çapı [mm]', 'motor.throat_diameter×1000', (m.get('throat_diameter') or 0) * 1000),
                     pdf('boğaz çapı [mm]', 'Throat Diameter'),
                     S('çıkış çapı [mm]', 'motor.exit_diameter×1000', (m.get('exit_diameter') or 0) * 1000),

@@ -117,11 +117,39 @@ def _yayin_tezgahi(tmp_path, kapi_cikis=0):
     gh = bin_dizin / "gh"
     gh.write_text(
         "#!/bin/bash\n"
+        # 3.0.6 (YAYIN-1): betik yayından hemen önce `gh api ...` ile uzaktaki
+        # etiketi ölçer. O salt-okuma çağrısı "yayın denendi" SAYILMAZ; vekil
+        # boş yanıt verir (= etiket henüz yok) ve kayıt yalnız `release`
+        # alt komutunda yazılır — dosyanın VARLIĞI yine "yayın denendi" demek.
+        '[ "$1" = "release" ] || exit 0\n'
         f'printf "%s\\n" "$@" > "{kayit}/gh.txt"\n'
         "exit 0\n", encoding="utf-8")
     gh.chmod(0o755)
 
+    # 3.0.6 (YAYIN-1): betik etiketi YAYINLANAN SHA'ya açar (`--target`) ve
+    # SHA'yı `git rev-parse HEAD` ile okur; okuyamazsa yayın yapmaz. Sahte
+    # depo bu yüzden gerçek bir git deposudur (tek commit). Testlerin
+    # iddiaları değişmedi: yalnız fikstür, betiğin yeni girdisini taşıyor.
+    _sahte_git_deposu(kok)
+
     return kok, kayit, bin_dizin
+
+
+def _sahte_git_deposu(kok):
+    """``kok``u tek commit'li bir git deposuna çevirir; HEAD SHA'sını döndürür.
+
+    Küresel kancalar/imza ayarları testi etkilemesin diye kapatılır.
+    """
+    git = ["git", "-C", str(kok), "-c", "core.hooksPath=/dev/null",
+           "-c", "commit.gpgsign=false", "-c", "user.name=sahte",
+           "-c", "user.email=sahte@ornek.invalid"]
+    subprocess.run(git + ["init", "-q"], check=True, timeout=60)
+    subprocess.run(git + ["add", "-A"], check=True, timeout=60)
+    subprocess.run(git + ["commit", "-q", "-m", "sahte depo"], check=True,
+                   timeout=60)
+    return subprocess.run(git + ["rev-parse", "HEAD"], check=True,
+                          capture_output=True, text=True,
+                          timeout=60).stdout.strip()
 
 
 def _kostur(kok, bin_dizin, **cevre):

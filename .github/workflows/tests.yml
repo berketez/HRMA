@@ -278,7 +278,22 @@ jobs:
       #   ---
       #   75   + 1  bu paketin eklediği bekçi (build123d KURULU ama üretim
       #             yolu KAPALI durumunu sınayan yeni test; build123d yokken
-      #             atlanır)  =  BUTCE 76
+      #             atlanır)  =  76 (27 Ağustos 2026 bütçesi)
+      #
+      # 9 KASIM 2026 (3.0.6) — ÖLÇÜLDÜ, BUTCE 96: v3.0.5'in kendi CI'ı (koşu
+      # 42611425301, 0a138ff6a) 71 atlama verdi; 3.0.6 rc.2 CI'ı (koşu
+      # 42649775093) 96. Ölçüm komutu: iki koşunun "pytest (birleşik rapor +
+      # tam atlama bütçesi)" işindeki ATLANDI dökümü düğüm adıyla farklandı —
+      # yeni 25, kaybolan 0. Yeni 25'in TAMAMI:
+      #   20  tests/test_v306_guncelleme_kilidi.py — yalnız macOS: hdiutil +
+      #       ditto uçtan uca güncelleme senaryoları, macOS kilidi, macOS ps
+      #       biçimi (yerel tam süpürmede ve yayın kapısında koşar)
+      #    4  tests/test_v306_ucus3.py — sayfayı tarayıcıyla sürer, bu işte
+      #       playwright kurulu değil (yerel tam süpürmede koşar)
+      #    1  tests/test_d19_arayuz_a1.py — V306/KATI-MODEL (M-KATI-10): hüküm
+      #       geri çekilince köprü katsayısı basılmaz, akma niteliği dalı
+      #       gerekçeli atlanır
+      #   Pay eklenmedi: tek bir yeni atlama kapıyı kapatır.
       #
       # P13 §6.5'in önerdiği sayı `<= 26` idi ve kendi dürüstlük notunda
       # yazdığı gibi YALNIZ `skipif` işaretlerini görüyordu; ölçüm gösterdi ki

@@ -1064,7 +1064,7 @@ def parse_ork(data):
                               if _eksik else '')
                     warnings.append(f"finset '{name}': incomplete geometry"
                                     f'{_detay}; skipped. No substitute '
-                                    'dimension is invented.')
+                                    'dimension is used.')
                     skipped.append(f"trapezoidfinset '{name}': incomplete "
                                    f'geometry{_detay}')
                     continue

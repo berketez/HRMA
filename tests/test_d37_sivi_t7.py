@@ -66,11 +66,23 @@ def _sivi(istemci, **degisiklik):
     return r.get_json()
 
 
+#: V306/ONARIM-SIVI (rc.1 CI): örnek gövdenin ε 12'si (Pc 50 bar, O/F 2) RP-1'de
+#: ayrılmıyor ama LH2'de deniz seviyesinde AYRILIYOR (Summerfield 0,40·P_a;
+#: ayrılmayan en büyük ε 10,49) ve uç SIVI-CEKET-B kalem 5'ten beri o tasarımı
+#: adlı retle (422 fixed_nozzle_separated_at_design_ambient) yayımlamıyor. Bu
+#: dosyanın konusu lüle değil, panel ön dolgusu: LH2 koşusu ayrılmayan ε 10 ile
+#: kurulur. Sınamalar motorun yayımladığı sayıyı panelin önerisiyle
+#: karşılaştırır, sabit sayı çapası yoktur (eski kod ε 12 ⟷ yeni kod ε 10:
+#: ikisi de 200, regen_supercritical dolu, ceket kapısı 'solved').
+LH2_AYRILMAYAN_EPS = 10
+
+
 @pytest.fixture(scope='module')
 def sonuclar(istemci):
     return {
         'rp1': _sivi(istemci),
-        'lh2': _sivi(istemci, fuel_type='lh2'),
+        'lh2': _sivi(istemci, fuel_type='lh2',
+                     nozzle_expansion_ratio=LH2_AYRILMAYAN_EPS),
         'ablatif': _sivi(istemci, cooling_type='ablative'),
     }
 
@@ -270,6 +282,31 @@ class TestKaynaksizOnDolgu:
         assert cs.get('regen_supercritical') is None
         sm = r['thermal_protection']['station_march']
         assert sug['coolant_inlet_pressure'] == sm['coolant_inlet_pressure_bar']
+
+    def test_giris_basinci_onerisi_yayimlanan_bar_platformdan_bagimsiz(self, sonuclar):
+        """3.0.6 rc.2 Linux CI: öneri marş girdisinin Pa'sından × 1e-5 ile
+        türüyordu; motor bar'ı yayımlıyor ve Pa'yı ondan (bar × 1e5)
+        türetiyor. Geri dönüş son bitte kayabildiği için Linux'ta öneri
+        77,22311086408675, yayımlanan 77,22311086408673 çıktı (macOS'ta o
+        değer tesadüfen bit-aynıydı, bekçi ısırmıyordu). Bu düğüm geri
+        dönüşün KAYDIĞI bir bar değerini bilerek seçer: öneri yayımlanan
+        bar'ın KENDİSİ olmalı (her platformda)."""
+        import copy
+        import math
+        from tests.test_panel_units_v2626 import _run_harness
+        r = copy.deepcopy(sonuclar['rp1'])
+        sm = r['thermal_protection']['station_march']
+        mi = sm['march_inputs']
+        x = sm['coolant_inlet_pressure_bar']
+        for _ in range(100000):
+            if (x * 1e5) * 1e-5 != x:
+                break
+            x = math.nextafter(x, math.inf)
+        assert (x * 1e5) * 1e-5 != x, 'geri dönüşü kayan değer bulunamadı'
+        sm['coolant_inlet_pressure_bar'] = x
+        mi['coolant_inlet_pressure'] = x * 1e5      # motorun türetme yolu
+        sug = _run_harness(r, 'liquid')['panels']['cooling']['suggestions']
+        assert sug['coolant_inlet_pressure'] == x
 
     def test_lh2_giris_basinci_suprkritik_marstan(self, sonuclar):
         from tests.test_panel_units_v2626 import _run_harness

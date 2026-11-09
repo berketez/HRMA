@@ -98,16 +98,24 @@ bash packaging/build_dmg.sh           # -> dist/HRMA-Setup-X.Y.Z-macOS.dmg
 bash packaging/build_win_payload.sh   # embedded Python + win_amd64 wheels
 makensis -DVERSION=X.Y.Z packaging/hrma.nsi   # -> HRMA-Setup-X.Y.Z.exe
 
-# 4) Publish the GitHub Release
+# 4) Publish the GitHub Release — order since 3.0.6 (packaging/README.md):
+#    the release commit is on the candidate branch (aday/vX.Y.Z-rc.N) with
+#    `tests` green on that SHA; the package tree tracks that branch (gate 2/10
+#    HEAD == @{u}); main is moved AFTER the release.
 bash packaging/publish_release.sh "Release notes..."
+# 5) Only now: git push origin yayin/X.Y.Z:main
 ```
 
 `publish_release.sh`:
 
 - reads the version from `hrma/__init__.py` and verifies both assets exist
   in `dist/`,
-- creates the GitHub Release `vX.Y.Z` with both assets
-  (`gh release create`),
+- reads the HEAD SHA BEFORE the release gate and creates the GitHub Release
+  `vX.Y.Z` with both assets via `gh release create --target <SHA>`, so the tag
+  points at exactly the commit the gate and CI verified (since 3.0.6, YAYIN-1;
+  v3.0.5 was tagged without `--target`). If a remote tag with the same name
+  already points at another commit, nothing is published (gh would silently
+  ignore `--target`); if the SHA cannot be read, nothing is published,
 - rewrites the direct download links in `README.md` to the new version
   (commit that change afterwards).
 

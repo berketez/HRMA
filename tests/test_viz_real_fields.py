@@ -80,17 +80,30 @@ HEAT_INPUT = {'burn_time': 30, 'chamber_length': 0.5, 'nozzle_length': 0.1,
 # ---------------------------------------------------------------------------
 
 def test_yanma_verimi_gostergesi_of_ile_degisir(analyzer):
-    values = []
+    """Gösterge gerçek veriden beslenir, sabit bir %95 değildir.
+
+    V306/SAYI (NR-1): gösterge artık yalnız c* verimini (η_c* = teslim c* /
+    kuramsal c*) okur — eskiden η_c*·η_kin çarpımıydı ve η_c* panoya hiç
+    ulaşmıyordu (manşet %89 iken pano %99,58). Bekçinin özü korunur: sayı
+    çözümün kendisinden gelir (verilen η_c* ile birebir) ve O/F'e duyarlı
+    kinetik kestirim ayrı not satırında O/F ile değişir."""
+    values, kin = [], []
     for of in (3.0, 6.0, 9.0):
-        res = analyzer.analyze_combustion({'htpb': 100.0}, 'N2O', of, 20.0)
+        res = analyzer.analyze_combustion({'htpb': 100.0}, 'N2O', of, 20.0,
+                                          eta_c_star=0.9)
         fig = _fig(create_combustion_analysis_plots(res))
         gauges = _traces(fig, type='indicator')
         assert gauges, 'verim göstergesi paneli kaldırılmış olamaz'
         values.append(gauges[0]['value'])
-    assert len(set(round(v, 6) for v in values)) == len(values), (
-        f'Yanma verimi göstergesi O/F ile degismiyor: {values} '
-        '(eski surum her kosuda %95 gosteriyordu)')
-    assert all(0.0 < v <= 100.0 for v in values), values
+        notlar = ' '.join(str(a.get('text', ''))
+                          for a in fig['layout'].get('annotations', []))
+        import re as _re
+        m = _re.search(r'\u03b7_kin = (\d+\.\d+)%', notlar.replace('<br>  ', ' '))
+        assert m, notlar
+        kin.append(float(m.group(1)))
+    assert values == [pytest.approx(90.0)] * 3, values
+    assert len(set(kin)) == len(kin), (
+        f'kinetik kestirim O/F ile degismiyor: {kin}')
     # Eski sabit deger geri gelmemeli
     assert not all(abs(v - 95.0) < 1e-9 for v in values)
 

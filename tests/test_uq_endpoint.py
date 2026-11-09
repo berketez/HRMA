@@ -60,6 +60,11 @@ LIQUID_INPUTS = {
 
 HYBRID_OUTPUT_KEYS = {'isp', 'thrust', 'chamber_pressure', 'c_star',
                       'total_impulse', 'regression_rate_avg'}
+#: V306/SAYI (NR-5): hızlı/mühendislik seviyesinde ÖRNEKLENEN hibrit çıktıları.
+#: total_impulse'un manşet tanımı (itki eğrisi integrali) zaman yürüyüşü
+#: ister; yürüyüş bu seviyelerde kapalı olduğu için çıktı örneklenmez,
+#: nominali manşetle aynı tanımla yayımlanır (``sampled: false``).
+HYBRID_SAMPLED_KEYS = HYBRID_OUTPUT_KEYS - {'total_impulse'}
 SOLID_OUTPUT_KEYS = {'isp', 'c_star', 'max_pressure', 'total_impulse'}
 LIQUID_OUTPUT_KEYS = {'isp', 'thrust', 'c_star', 'mdot_total'}
 
@@ -160,6 +165,13 @@ class TestHybridFastContract:
         for key, block in outputs.items():
             for field in STAT_FIELDS:
                 assert field in block, (key, field)
+            if key not in HYBRID_SAMPLED_KEYS:
+                # V306/SAYI (NR-5): örneklenmeyen çıktı istatistik UYDURMAZ.
+                assert block['sampled'] is False, key
+                assert block['nominal'] > 0, key
+                assert all(block[f] is None for f in STAT_FIELDS
+                           if f != 'nominal'), (key, block)
+                continue
             hist = block['histogram']
             assert len(hist['edges']) == 21, key
             assert len(hist['counts']) == 20, key
@@ -178,7 +190,7 @@ class TestHybridFastContract:
 
     def test_sensitivity_contract(self, hybrid_fast):
         sens = hybrid_fast['sensitivity']
-        assert set(sens) == HYBRID_OUTPUT_KEYS
+        assert set(sens) == HYBRID_SAMPLED_KEYS
         for key, rows in sens.items():
             params = [row['param'] for row in rows]
             # cd_injector haritalanamaz, fuel_density sözleşme çıktılarını
@@ -223,7 +235,7 @@ class TestHybridFastContract:
         from hrma.analysis.uncertainty import DEFAULT_UQ_MODELS
 
         shift = hybrid_fast['mean_shift_percent']
-        assert set(shift) == HYBRID_OUTPUT_KEYS
+        assert set(shift) == HYBRID_SAMPLED_KEYS
 
         # Çekirdek modelin F029 sabitlemesi (nominal 1,0 / ortalama 0,93)
         # yürürlükte; ama uç yolunda (V301/H-PANEL, NK-20) dağılım
@@ -262,13 +274,16 @@ class TestHybridFastContract:
             assert shift[key] == pytest.approx(expected, abs=0.5), key
         # eta'dan etkilenmeyen çıktıda kayma zaten saf Jensen boşluğudur.
         assert abs(shift['regression_rate_avg']) < 5.0
-        # F girdi olduğundan itki/toplam impuls dağılmaz -> kayma tam sıfır.
+        # F girdi olduğundan itki dağılmaz -> kayma tam sıfır. (V306/SAYI
+        # NR-5: toplam impuls bu seviyede örneklenmez; eski "kayma 0" iddiası
+        # F × t_b'yi — manşetin teslim impulsu DEĞİL — kilitliyordu.)
         assert shift['thrust'] == pytest.approx(0.0, abs=1e-9)
-        assert shift['total_impulse'] == pytest.approx(0.0, abs=1e-9)
 
         # Nominal ASLA MC ortalamasıyla değiştirilmez: raporlanan kayma her
         # blokta (mean, nominal) çiftinden birebir türetilebilmeli.
         for key, block in hybrid_fast['outputs'].items():
+            if key not in HYBRID_SAMPLED_KEYS:
+                continue
             assert shift[key] == pytest.approx(
                 (block['mean'] - block['nominal']) / abs(block['nominal'])
                 * 100.0, rel=1e-9), key

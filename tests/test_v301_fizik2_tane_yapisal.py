@@ -44,10 +44,13 @@ def kati():
 def test_uc_satir_dayanakli(kati):
     g = kati['structural_analysis']['grain_structural']
     assert g['strain_safety_factor'] < 1.0
-    assert g['crack_propagation_risk'] == 'High'
+    # V306/KATI-TANE (K1): sınıf kenarları kaynaklı ölçüt (NASA SP-8073
+    # Denk. 46 / 57); 'unsourced HRMA choice' bantları kalktı.
+    assert g['crack_propagation_risk'] == 'capability_exceeded'
     for alan in ('crack_propagation_risk_basis',
                  'thermal_expansion_compatibility_basis'):
-        assert 'unsourced HRMA choice' in g[alan], alan
+        assert 'SP-8073' in g[alan], alan
+        assert 'unsourced' not in g[alan], alan
     assert 'not an efficiency of the structure' in \
         g['structural_efficiency_basis']
     assert g['thermal_bore_strain_ratio'] == pytest.approx(

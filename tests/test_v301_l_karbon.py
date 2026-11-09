@@ -70,8 +70,16 @@ def _ornek_yuk(**ek):
 L_KARBON_VAKALARI = {
     'cucrzr_pc70': dict(chamber_material='cucrzr', chamber_wall_thickness=1.0,
                         chamber_pressure=70, mixture_ratio=2.3),
+    # V306/ONARIM-SIVI (rc.1 CI): örnek gövdenin ε 12'si Pc 30 bar'da deniz
+    # seviyesinde ayrılıyor (Summerfield 0,40·P_a; ayrılmayan en büyük ε
+    # 10,27) ve uç SIVI-CEKET-B kalem 5'ten beri o tasarımı adlı retle
+    # (422 fixed_nozzle_separated_at_design_ambient) yayımlamıyor. Vakanın
+    # konusu karbon birikimi zarfı (Pc 30 bar zarfın dışında), lüle değil:
+    # ayrılmayan ε 10 ile kurulur. Sınanan yalnız zarf durumu ve uyarı
+    # metnidir; sabit sayı çapası yok.
     'cucrzr_pc30': dict(chamber_material='cucrzr', chamber_wall_thickness=1.0,
-                        chamber_pressure=30, mixture_ratio=2.3),
+                        chamber_pressure=30, mixture_ratio=2.3,
+                        nozzle_expansion_ratio=10),
 }
 
 

@@ -50,6 +50,16 @@ ONCE = os.path.join(KANIT, 'once.json')
 FAZ = os.path.join(KANIT, 'faz_duyarliligi.json')
 Z519 = os.path.join(KANIT, 'oh_z5_19_olcum.json')
 Z519E = os.path.join(KANIT, 'oh_z5_19_etki.json')
+#: izo vakasının GÜNCEL ölçümü. D37 A3a cfd-kok-a (F-05 TRRS duvar akısı,
+#: Berke Sunum 3a onayı 24 Eyl, 10b641579) izo çıpalarını (şema kalıntısı,
+#: enerji/kütle kapanışı) yeniden ölçüp +%0,13 taşıdı ama D15 ``once.json``
+#: o değişiklikten ÖNCEKİ ölçümde kaldı; bağ iki kez yazılmış tek kaynağı
+#: karşılaştırıyordu (eski ölçüm ⟷ yeni çıpa) ve süpürmede KIRMIZIYDI.
+#: V306 CI-SÜREÇ (4 Kas, 277e53c10) aynı vakayı ürün sürücüsüyle yeniden
+#: ölçtü (betik aynı dizinde: d15_izo_olcum.py). Ayrılmalı / kapı
+#: çıpaları F-05'ten etkilenmedi, onlar D15 ölçümüne bağlı kalır.
+IZO_GUNCEL = os.path.join(REPO, 'docs', 'scofield', 'raw', 'OH', 'V306',
+                          'ci-surec', 'd15_izo_olcum_277e.json')
 
 
 def _oku(yol):
@@ -153,7 +163,7 @@ class TestCipaOlcumeBagli:
         from tests.cfd.test_wall_output import (VLULE_MDOT,
                                                 VLULE_TAVAN_ITER,
                                                 VLULE_TAVAN_SEMA_KALINTI)
-        o = _oku(kanit_gerekli(ONCE))['izo']
+        o = _oku(kanit_gerekli(IZO_GUNCEL))['izo']
         assert o['iterations'] == VLULE_TAVAN_ITER
         assert o['cipa']['mass_flow_in_kg_s'] == pytest.approx(
             VLULE_MDOT, rel=1e-6)
@@ -168,7 +178,7 @@ class TestCipaOlcumeBagli:
         from tests.cfd.test_korunum import (VISKOZ_TAVAN_ENERJI_KAPANIS,
                                             VISKOZ_TAVAN_KUTLE_KAPANIS,
                                             VISKOZ_TAVAN_KAPANIS_REL)
-        b = _oku(kanit_gerekli(ONCE))['izo']['butce']
+        b = _oku(kanit_gerekli(IZO_GUNCEL))['izo']['butce']
         assert b['enerji_kapanis'] == pytest.approx(
             VISKOZ_TAVAN_ENERJI_KAPANIS, rel=VISKOZ_TAVAN_KAPANIS_REL)
         assert b['kutle_kapanis'] == pytest.approx(

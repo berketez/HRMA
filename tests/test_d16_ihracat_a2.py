@@ -495,7 +495,7 @@ class TestP9B512YedekYogunluk:
         d = NistWebBookAPI()._get_fallback_properties('ZZZ', 293.15)
         assert d.get('density') is None
         assert d.get('viscosity') is None
-        assert 'no generic substitute is invented' in d['error']
+        assert 'no generic substitute is used' in d['error']
 
 
 # ===========================================================================

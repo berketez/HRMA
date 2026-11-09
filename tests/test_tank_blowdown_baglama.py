@@ -129,10 +129,24 @@ def test_zarf_uyarilari_bloga_ulasir(blok):
 
 
 def test_manset_sayilar_yeniden_derecelendirilmez(n2o_kosu):
-    """Blok danışmadır: manşet itki/süre tasarım noktası kalır."""
+    """Tasarım noktası (itki) yeniden derecelendirilmez; TESLİM süresi bloktan.
+
+    V306/HİBRİT-ÇAPRAZ kalem 1 (ana model kararı, 4 Kas): kendinden basınçlı
+    N₂O'da teslim büyüklükleri (impuls, yanma süresi, ortalama Isp, harcanan
+    itici) boşalma çözümünden gelir; uçuş o eğriyle uçar. Manşet itkisi
+    ateşleme anının (eğrinin t = 0 değeri) tasarım noktasıdır ve değişmez;
+    istenen süre ``burn_time_requested_s``te durur. Eski beklenti (burn_time
+    = 10 s) sabit oksitleyici debili bütçenin süresini kilitliyordu; o sayı
+    artık ``constant_oxidizer_flow_budget.burn_time_s``.
+    """
     _, sonuc = n2o_kosu
     assert sonuc['thrust'] == pytest.approx(1000.0)
-    assert sonuc['burn_time'] == pytest.approx(10.0)
+    blok = sonuc['tank_blowdown']
+    assert blok['thrust_N'][0] == pytest.approx(sonuc['thrust'])
+    assert sonuc['burn_time_requested_s'] == pytest.approx(10.0)
+    assert sonuc['burn_time'] == blok['burn_duration_s']
+    assert sonuc['constant_oxidizer_flow_budget']['burn_time_s'] == \
+        pytest.approx(10.0)
 
 
 def test_blok_json_serilestirilebilir(blok):

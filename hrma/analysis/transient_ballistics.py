@@ -863,7 +863,7 @@ class TransientBallistics:
             "The engine publishes no divergence efficiency: neither "
             "'lambda_eff' nor 'lambda_divergence' holds a finite value in "
             "(0, 1]. The transient thrust coefficient is not built on an "
-            "invented catalogue constant; size the engine first "
+            "assumed catalogue constant; size the engine first "
             "(HybridRocketEngine.calculate) so that lambda_eff is resolved.")
 
     @staticmethod
@@ -1501,7 +1501,7 @@ class TransientBallistics:
                     'The solve recorded no time steps, so there is no final '
                     'throat state to report. The initial diameter above is '
                     'the design value the solver started from; no eroded '
-                    'geometry is invented.'),
+                    'geometry is reported.'),
                 'model': (self.erosion.describe()
                           if hasattr(self.erosion, 'describe') else None),
             },

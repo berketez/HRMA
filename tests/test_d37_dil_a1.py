@@ -255,13 +255,18 @@ class TestUcRedMetniTR:
         assert 'chamber_pressure' in m and 'wall_thickness (non_positive)' in m, m
         assert 'Not supplied' not in m and 'Not usable' not in m, m
         t = self._vaka(red, 'tr', 'taninmayan')
-        assert 'xlsx_budget_exceeded' in t and '400' in t, t
+        # V306/DİL-ORTAK (NR-14, ORTAK kural): HTTP durum kodu kullanıcı
+        # metninde YOK; tanınmayan kod yine aynen basılır.
+        assert 'xlsx_budget_exceeded' in t and '400' not in t, t
         assert 'does not recognise' not in t, t
         # Uç kendi gerekçesini yazdıysa (alan adı yok) yutulmaz — uç metni
         # İngilizcedir ve ÇEVRİLMEZ (uydurma çeviri yok).
         assert 'The workbook exceeds the budget.' in t, t
         k = self._vaka(red, 'tr', 'kodsuz')
-        assert '500' in k and 'HTTP' in k, k
+        # V306/DİL-ORTAK (NR-14): kodsuz yanıt dile çevrilmiş tek cümle;
+        # HTTP durum kodu kullanıcı metninde yok.
+        assert '500' not in k and 'HTTP' not in k, k
+        assert 'gerekçe kodu' in k, k
 
 
 # ===========================================================================
