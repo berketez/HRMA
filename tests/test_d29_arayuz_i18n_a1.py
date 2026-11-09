@@ -205,10 +205,12 @@ def test_oh_z3_04_izin_verilen_sicaklik_adlandirildi():
     degerler = re.findall(
         r"'liq\.msg\.material_allowable_temperature': '([^']*)'", sozluk)
     assert len(degerler) == 2 and degerler[0] != degerler[1], degerler
+    # V306/DİL-SIVI (9 Kas ek 2) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: künye
+    # (çözücü alan adı) KORUNUR ama ekranda değil, satırın data-liq-source
+    # özniteliğinde (ORTAK: ham alan adı kullanıcı metninde yok).
+    assert 'data-liq-source="station_march.material_allowable_K"' in sablon
     for d in degerler:
-        # Künye (çözücü alan adı) iki dilde de duruyor — sayının nereden
-        # geldiği çeviriyle kaybolmaz.
-        assert 'station_march.material_allowable_K' in d, d
+        assert 'station_march.material_allowable_K' not in d, d
         assert '{value}' in d, d
 
 

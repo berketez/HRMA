@@ -23,7 +23,8 @@
  * FAIL-CLOSED: modül metin UYDURMAZ. Gövdedeki her parça sunucunun kendi
  * yayımıdır (`status` kodu, `message`/`error` cümlesi, `invalid_fields`
  * ve `missing_fields` alan adları). Gövde okunamazsa geriye yalnız
- * `HTTP <durum>` kalır — sahte bir gerekçe yazılmaz.
+ * `HTTP <durum>` kalır — sahte bir gerekçe yazılmaz (ekranda: dile çevrilmiş
+ * "okunabilir gerekçe yok" cümlesi, kod ipucunda; V306/DİL-ORTAK).
  */
 (function (kok) {
     'use strict';
@@ -178,16 +179,62 @@
         var t = I.serverText('[' + kod + '] ' + nobet);
         var m = (typeof t === 'string')
             ? /^\[([^\]]+)\]\s+\u2060$/.exec(t) : null;
-        return m ? m[1] : kod;
+        // V306/DİL-ORTAK: çeviri kodu değiştirmediyse (EN ekran ya da sözlükte
+        // olmayan kod) ekranda alt çizgili ham anahtar değil okunur biçim
+        // ("validation_error" → "validation error"); ham kod ipucunda kalır
+        // (makineEki).
+        var cikti = m ? m[1] : kod;
+        return (cikti === kod) ? String(kod).replace(/_/g, ' ') : cikti;
+    }
+
+    /** ``failed_generators[].reason`` → etkin dilde gerekçe listesi.
+     *
+     * Sunucu cümlesi ``I18N.serverText`` ile çevrilir (sözlükte kalıbı
+     * olan ret cümleleri TR'ye iner; yoksa sunucunun EN cümlesi kalır,
+     * uydurma çeviri yok). Aynı gerekçe iki üreticiden gelirse bir kez
+     * basılır. Gerekçesi olmayan kayıt atlanır.
+     */
+    function _ureticiGerekceleri(govde) {
+        if (!govde || !Array.isArray(govde.failed_generators)) return [];
+        var I = kok.I18N;
+        var gorulen = {};
+        var cikti = [];
+        govde.failed_generators.forEach(function (g) {
+            if (!g || typeof g !== 'object') return;
+            var ham = (typeof g.reason === 'string') ? g.reason.trim() : '';
+            if (!ham || gorulen[ham]) return;
+            gorulen[ham] = true;
+            var t = (I && typeof I.serverText === 'function')
+                ? I.serverText(ham) : ham;
+            cikti.push((typeof t === 'string' && t) ? t : ham);
+        });
+        return cikti;
     }
 
     /** Sunucu ret gövdesi → tek satır kullanıcı metni.
      *
-     * Sıra: [makine kodu] cümle · geçersiz alanlar · eksik alanlar.
-     * Hiçbiri yoksa `HTTP <durum>` (gövde okunamadı demektir).
+     * Sıra: [makine kodu] cümle · üretici gerekçeleri · geçersiz alanlar ·
+     * eksik alanlar.
+     * Hiçbiri yoksa `_gerekcesiz` (gövde okunamadı demektir).
      */
+    /** V306/DİL-ORTAK (NR-14 + M-SIVI-23): gövdede hiçbir gerekçe yoksa
+     *  ekran metni HTTP kodu DEĞİL, dile çevrilmiş tek cümledir; durum kodu
+     *  (ve okunabildiyse ham gövde özeti) makine izi olarak bildirimin
+     *  ipucuna iner. Ekran kipi dışında (düğüm/test) eski `HTTP <durum>`
+     *  kalır. Gerekçe UYDURULMAZ: cümle yalnız "okunabilir gerekçe yok"
+     *  der. */
+    function _gerekcesiz(durum, ham) {
+        var iz = 'HTTP ' + durum + (ham ? ': ' + ham : '');
+        if (!_ekranKipi()) return iz;
+        var t = _ceviri('common.reject.noReason', null,
+            'The server returned no readable reason; the technical trace is in the tooltip.');
+        API.sonMakineEki = iz;
+        API.sonMetin = t;
+        return t;
+    }
+
     function metni(govde, durum) {
-        if (!govde || typeof govde !== 'object') return 'HTTP ' + durum;
+        if (!govde || typeof govde !== 'object') return _gerekcesiz(durum, '');
         var parcalar = [];
         var kod = (typeof govde.status === 'string'
                    && govde.status !== 'error') ? govde.status : '';
@@ -208,6 +255,14 @@
         if (gerekceler !== null && gerekceler.length) {
             parcalar.push(gerekceler.join(' '));
         }
+        // V306 ana model (HİBRİT-KÜTLE DEVİR 2b): paket uçlarının
+        // ``no_exportable_artifacts`` gövdesi NEDENİ yalnız
+        // ``failed_generators[].reason``'da taşır (ör. kamara boyu
+        // çizilebilir bandın dışında, sayılarıyla). Bu alan basılmıyordu;
+        // kullanıcı yalnız "üretici reddetti" cümlesini görüyor, hangi
+        // sayıyı düzelteceğini okuyamıyordu.
+        var uretici = _ureticiGerekceleri(govde);
+        if (uretici.length) parcalar.push(uretici.join(' · '));
         // Gerekçe satırları alan adlarını zaten taşır; `invalid_fields`
         // listesi ikinci kez basılmaz.
         var ekran = _ekranKipi();
@@ -250,7 +305,8 @@
                 .filter(function (d) { return typeof d === 'string' && d; })
                 .join(' · '));
         }
-        var sonuc = parcalar.length ? parcalar.join(' ') : ('HTTP ' + durum);
+        if (!parcalar.length) return _gerekcesiz(durum, '');
+        var sonuc = parcalar.join(' ');
         if (ekran) API.sonMetin = sonuc;
         return sonuc;
     }
@@ -277,9 +333,9 @@
             try { j = JSON.parse(ham); } catch (e) { j = null; }
             if (j && typeof j === 'object') return metni(j, durum);
             var kisa = String(ham || '').trim().slice(0, 300);
-            return kisa ? ('HTTP ' + durum + ': ' + kisa) : ('HTTP ' + durum);
+            return _gerekcesiz(durum, kisa);
         }, function () {
-            return 'HTTP ' + durum;
+            return _gerekcesiz(durum, '');
         });
     }
 
@@ -290,6 +346,9 @@
 
     var API = { metni: metni, oku: oku, hata: hata, makineEki: makineEki,
                 etiket: _etiket,
+                // V306/DİL-ORTAK: gövdesinde `error` olmayan yanıtın panel
+                // yedeği (eski `'HTTP ' + resp.status`); kod ipucunda.
+                yedek: function (durum) { return _gerekcesiz(durum, ''); },
                 ipucu: ipucu, sonMetin: '', sonMakineEki: '' };
     kok.HRMAReject = API;
     if (typeof module !== 'undefined' && module.exports) {

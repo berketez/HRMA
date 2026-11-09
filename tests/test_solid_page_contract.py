@@ -562,7 +562,10 @@ def test_units_are_millimetres_for_small_lengths(html):
                  'grain_length', 'grain_gap', 'insulation_thickness',
                  'chamber_diameter', 'liner_thickness', 'case_thickness',
                  'throat_diameter', 'exit_diameter', 'star_radius',
-                 'star_fillet', 'fin_width', 'fin_length')
+                 # V306/KATI-KALAN (kalem 5): 'star_fillet' kutusu kalktı
+                 # (hiçbir hesap okumuyordu); yokluğunun bekçisi
+                 # tests/test_v306_kati_kalan.py.
+                 'fin_width', 'fin_length')
     for field in mm_fields:
         block = _alan_etiketi(html, field)
         assert block is not None, f'{field} etiketi bulunamadı'

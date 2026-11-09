@@ -149,8 +149,12 @@ class TestOHD3305IkiFazDurumuPdfte:
 # ===========================================================================
 class TestOHD3209TauSecimiPdfte:
 
-    DORT_ALAN = ('is_tau_sensitive', 'frequency_hz_span',
-                 'growth_is_tau_sensitive', 'growth_rate_1_s_span')
+    # V306/RAPOR-HATA (kalem 6a) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: dört alan
+    # belgede ham anahtar adıyla değil okunur ETİKETİYLE durur
+    # (PDFReportGenerator.TAU_CHOICE_LABELS); sayılar ve üç durumlu bayrak
+    # sözleşmesi aynı.
+    DORT_ALAN = ('verdict sensitive to the tau choice', 'frequency spread',
+                 'growth rate sensitive to the tau choice', 'growth-rate spread')
 
     def test_sivi_satiri_dort_alani_ve_cozucu_sayisini_tasir(self, yanitlar):
         blok = (yanitlar['liquid']['combustion_analysis']
@@ -165,7 +169,10 @@ class TestOHD3209TauSecimiPdfte:
         f = blok['frequency_hz_span']
         assert G._param_scalar(f['min_hz']) in satir[0]
         assert G._param_scalar(f['max_hz']) in satir[0]
-        assert str(blok['is_tau_sensitive']) in satir[0]
+        assert ('verdict sensitive to the tau choice: %s'
+                % {True: 'yes', False: 'no'}.get(blok['is_tau_sensitive'],
+                                                 blok['is_tau_sensitive'])
+                ) in satir[0]
 
     def test_hibritte_olcmedi_beyani_duyarsiz_diye_okunmaz(self, yanitlar):
         satir = [s for s in _satirlar('hybrid', yanitlar['hybrid'])
@@ -173,6 +180,7 @@ class TestOHD3209TauSecimiPdfte:
         assert len(satir) == 1, satir
         assert 'NOT measured' in satir[0]
         assert 'is_tau_sensitive = False' not in satir[0]
+        assert 'tau choice: no;' not in satir[0]
 
     def test_kaynak_yoksa_satir_yok(self, yanitlar):
         assert not any('tau-choice' in s
@@ -189,9 +197,10 @@ class TestOHD3209TauSecimiPdfte:
         blok['growth_is_tau_sensitive'] = None
         satir = G._tau_choice_qualifier_line(kaynak)
         assert satir is not None
-        assert 'is_tau_sensitive = not measured (null)' in satir, satir[:400]
-        assert 'growth_is_tau_sensitive = not measured (null)' in satir
-        assert 'is_tau_sensitive = False' not in satir
+        assert ('verdict sensitive to the tau choice: not measured'
+                in satir), satir[:400]
+        assert 'growth rate sensitive to the tau choice: not measured' in satir
+        assert 'tau choice: no;' not in satir
 
 
 # ===========================================================================

@@ -95,6 +95,16 @@ class TestOHD2601DenizSeviyesiTekKaynak:
     @pytest.mark.parametrize('rel', SUPURULEN)
     def test_merkezden_ithal_ediyor(self, rel):
         metin = (KOK / rel).read_text(encoding='utf-8')
+        if rel == 'hrma/analysis/six_dof_trajectory.py':
+            # V306/UÇUŞ-FEA (kalem 4): 6-DOF atmosferinde deniz seviyesi
+            # basıncının TEK kullanımı katman döngüsünün tohumuydu. Döngü
+            # kalktı (her katmanı H'ye uzatıp T < 0'da NaN üretiyordu);
+            # katman merkezî seçiciden (constants._isa_layer) gelir ve
+            # 0 m basıncı tablonun kendi satırından okunur
+            # (test_ISA_tohumu_TABLODAN_okunuyor aynen yeşil). Literal yok,
+            # merkezden okuma var: bekçinin sorusu değişmedi.
+            assert 'from hrma.constants import _isa_layer' in metin
+            return
         assert 'P_SEA_LEVEL_PA' in metin, (
             '%s literali kaldırmış ama merkezî adı KULLANMIYOR' % rel)
 

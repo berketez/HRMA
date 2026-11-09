@@ -55,6 +55,7 @@ from hrma.engines.liquid_rocket_engine import (
     FEED_LINE_MAX_PARALLEL,
     FEED_LINE_MAX_VELOCITY_MS,
     FEED_LINE_MIN_VELOCITY_MS,
+    FEED_LINE_STANDARD_SIZES_M,
     LiquidRocketEngine,
     UnsupportedInjectorTypeError,
 )
@@ -104,12 +105,48 @@ def taban(istemci):
     return j
 
 
+#: F-1 sınıfı (6770 kN / 70 bar / O/F 2,27) — tek hat modelinin çöktüğü
+#: ölçek (OH-D18-03'ün ölçüldüğü nokta).
+F1_SINIFI_YUK = dict(TABAN_YUK, thrust=6770000.0, chamber_pressure=70.0,
+                     mixture_ratio=2.27, feed_system_type='pump_fed')
+
+#: V306/ONARIM-SIVI (rc.1 CI) — kapıya girmeyen büyük motor: RD-180
+#: (Atlas V; NPO Energomash). Değerler depodaki doğrulama kaydından, elle
+#: seçilmedi: hrma/data/validation_records/liquid/liq-rd180-atlas-spec.json
+#: (deniz seviyesi itki 3830 kN, Pc 256,6 bar, O/F 2,72, oksitleyici-zengin
+#: kademeli yanma, LOX/RP-1; kaynak güveni 'medium', ikincil derlemeler).
+#: F-1 sınıfı SIVI-CEKET-A K5 EK7'den beri yayım kapısında: RP-1 istasyon
+#: marşı jacket_model_limit verir, açık çevrim defteri boğazı boyutladığı
+#: için besleme bloğu adlı nedenle bekletilir (feed_system None; dört düğüm
+#: n=None / KeyError ile düşüyordu). Ölçüldü (betik ~/HRMA-calisma/
+#: 2026-11-09/ONARIM-SIVI/betik/buyuk_tarama.py, b9cf2a27f): F-1 (6770/70),
+#: H-1 (947/48), RS-27A sınıfı (1054/48), 2 MN/70 ve RD-171M sınıfı (7400/245)
+#: kapıda; RD-180, NK-33 (1510/145), Merlin 1D sınıfı (845/97) kapı dışı.
+#: Kapı dışı olanlardan iki tarafı da tek hatta sığmayan RP-1 motoru yok;
+#: RD-180'de oksitleyici 2 kol, yakıt 1 kol (bandın kendisinden). Kapının
+#: kendisi test_f1_olceginde_besleme_adli_nedenle_bekletilir ile sınanır.
+RD180_YUK = dict(TABAN_YUK, motor_name='RD-180', thrust=3830000.0,
+                 chamber_pressure=256.6, mixture_ratio=2.72,
+                 engine_cycle='staged_combustion', feed_system_type='pump_fed')
+
+
+@pytest.fixture(scope='module')
+def buyuk_olcek(istemci):
+    """RD-180 (3830 kN) — oksitleyici tarafı tek hatta sığmayan ölçek."""
+    st, j = _cagir(istemci, dict(RD180_YUK))
+    assert st == 200, f'RD-180 koşusu HTTP {st}'
+    assert (j.get('cooling_circuit_publication') or {}).get(
+        'status') == 'solved', (
+        'büyük ölçek EK7 yayım kapısına girdi; kol sınamaları kapının '
+        'boşalttığı besleme bloğunu ölçemez: %r'
+        % (j.get('cooling_circuit_publication'),))
+    return j
+
+
 @pytest.fixture(scope='module')
 def f1_olcegi(istemci):
-    """F-1 sınıfı (6770 kN) — tek hat modelinin çöktüğü ölçek."""
-    st, j = _cagir(istemci, dict(TABAN_YUK, thrust=6770000.0,
-                                 chamber_pressure=70.0, mixture_ratio=2.27,
-                                 feed_system_type='pump_fed'))
+    """F-1 sınıfı (6770 kN) — EK7 yayım kapısının ölçeği."""
+    st, j = _cagir(istemci, dict(F1_SINIFI_YUK))
     assert st == 200, f'F-1 ölçeği koşusu HTTP {st}'
     return j
 
@@ -307,33 +344,73 @@ class TestOHD1715:
 
 # ============================================================== OH-D18-03
 class TestOHD1803:
-    """Besleme hattı: çoklu kol bir tasarım ÇIKTISIDIR."""
+    """Besleme hattı: çoklu kol bir tasarım ÇIKTISIDIR.
 
-    def test_f1_olceginde_kol_sayisi_cozulur(self, f1_olcegi):
-        pd = _iz(f1_olcegi, 'feed_system', 'pressure_drops') or {}
+    V306/ONARIM-SIVI: ölçek F-1 sınıfından RD-180'e taşındı (RD180_YUK
+    notu). İddia daraltılmadı, keskinleşti: her tarafta n ≥ 2 ANCAK VE ANCAK
+    merdivenin en büyük borusu tek kolda banda yetmiyorsa; RD-180'de
+    oksitleyici tarafı bu durumda (sınama boş geçmesin diye ayrıca istenir).
+    """
+
+    @staticmethod
+    def _tek_kol_hizi(hat):
+        """Toplam debi merdivenin en büyük borusundan TEK kolda geçseydi hız.
+
+        Yoğunluk yanıtın kendi kol sayılarından geri çözülür (ikinci bir
+        yoğunluk modeli kurulmaz): ρ = ṁ_kol / (v · π/4 · D²).
+        """
+        d = float(hat['line_diameter_mm']) / 1000.0
+        rho = (float(hat['per_line_mass_flow_kg_s'])
+               / (float(hat['line_velocity_m_s']) * math.pi / 4.0 * d * d))
+        d_max = max(FEED_LINE_STANDARD_SIZES_M)
+        return (float(hat['total_mass_flow_kg_s'])
+                / (rho * math.pi / 4.0 * d_max * d_max))
+
+    def test_buyuk_olcekte_kol_sayisi_cozulur(self, buyuk_olcek):
+        pd = _iz(buyuk_olcek, 'feed_system', 'pressure_drops') or {}
+        cok_kollu = []
         for taraf in ('fuel_line', 'oxidizer_line'):
             hat = pd.get(taraf) or {}
             n = hat.get('n_parallel_lines')
-            assert isinstance(n, int) and n >= 2, (
-                f'{taraf}: tek kol modeli hâlâ yürürlükte (n={n!r})')
-            assert n <= FEED_LINE_MAX_PARALLEL
+            assert isinstance(n, int) and 1 <= n <= FEED_LINE_MAX_PARALLEL, (
+                f'{taraf}: kol sayısı çözülmedi (n={n!r})')
+            tek_kol_hiz = self._tek_kol_hizi(hat)
+            assert (n >= 2) == (tek_kol_hiz > FEED_LINE_MAX_VELOCITY_MS), (
+                f'{taraf}: n={n} ama tek kol en büyük boruda '
+                f'{tek_kol_hiz:.2f} m/s — kol sayısı banttan gelmiyor')
+            if n >= 2:
+                cok_kollu.append(taraf)
+        assert 'oxidizer_line' in cok_kollu, (
+            'RD-180 oksitleyici tarafı tek hatta sığmıyor; çoklu kol modeli '
+            f'yürürlükte değil (çok kollu: {cok_kollu})')
 
-    def test_f1_olceginde_hiz_banda_girer(self, f1_olcegi):
-        pd = _iz(f1_olcegi, 'feed_system', 'pressure_drops') or {}
+    def test_buyuk_olcekte_hiz_banda_girer(self, buyuk_olcek):
+        pd = _iz(buyuk_olcek, 'feed_system', 'pressure_drops') or {}
         for taraf in ('fuel_line', 'oxidizer_line'):
             hat = pd.get(taraf) or {}
             assert hat.get('line_velocity_band_status') == 'within', (
-                f"{taraf}: {hat.get('line_velocity_m_s')} m/s hâlâ band dışı")
+                f"{taraf}: {hat.get('line_velocity_m_s')} m/s band dışı")
             v = float(hat['line_velocity_m_s'])
             assert FEED_LINE_MIN_VELOCITY_MS <= v <= FEED_LINE_MAX_VELOCITY_MS
 
-    def test_kol_basina_debi_toplamla_kapanir(self, f1_olcegi):
-        pd = _iz(f1_olcegi, 'feed_system', 'pressure_drops') or {}
+    def test_kol_basina_debi_toplamla_kapanir(self, buyuk_olcek):
+        pd = _iz(buyuk_olcek, 'feed_system', 'pressure_drops') or {}
         for taraf in ('fuel_line', 'oxidizer_line'):
             hat = pd.get(taraf) or {}
             assert (float(hat['per_line_mass_flow_kg_s'])
                     * int(hat['n_parallel_lines'])) == pytest.approx(
                         float(hat['total_mass_flow_kg_s']), rel=1e-12)
+
+    def test_f1_olceginde_besleme_adli_nedenle_bekletilir(self, f1_olcegi):
+        """K5 EK7: F-1 sınıfında ceket marşı model sınırında; besleme bloğu
+        SESSİZCE değil adlı nedenle bekletilir (kapının kendisi)."""
+        ccp = f1_olcegi['cooling_circuit_publication']
+        assert ccp['status'] == 'not_solved'
+        assert ccp['code'] == 'jacket_model_limit'
+        assert ccp['withheld_reason_code'] == 'jacket_model_limit'
+        assert isinstance(ccp['reason'], str) and ccp['reason']
+        assert f1_olcegi.get('feed_system') is None
+        assert f1_olcegi.get('detailed_feed_system') is None
 
     def test_kol_eklemek_yavas_hatti_daha_da_yavaslatmaz(self):
         """Bandın ALTINDAKİ akışta kol eklemek durumu kötüleştirir: n=1.
@@ -350,10 +427,10 @@ class TestOHD1803:
         assert secim['n_parallel_lines'] == 1, (
             'bandın altındaki akışa paralel kol eklenmiş')
 
-    def test_ana_hat_bloklari_kol_sayisini_soyler(self, f1_olcegi):
+    def test_ana_hat_bloklari_kol_sayisini_soyler(self, buyuk_olcek):
         """`feed_lines.*_main.diameter` KOL BAŞINADIR; kol sayısı yanında."""
-        fl = _iz(f1_olcegi, 'feed_system', 'feed_lines') or {}
-        pd = _iz(f1_olcegi, 'feed_system', 'pressure_drops') or {}
+        fl = _iz(buyuk_olcek, 'feed_system', 'feed_lines') or {}
+        pd = _iz(buyuk_olcek, 'feed_system', 'pressure_drops') or {}
         for hat, dusum in (('oxidizer_main', 'oxidizer_line'),
                            ('fuel_main', 'fuel_line')):
             blok = fl.get(hat) or {}

@@ -89,6 +89,9 @@
     const registry = [];          // kayıt sırası korunur
     const registeredIds = {};
     const lastData = {};          // panel id -> son başarılı yanıt (dil değişiminde yeniden çizilir)
+    // V306/BAYAT NR-9 ailesi: panel id -> son başarılı koşunun GÖVDESİ
+    // (JSON). Ekrandaki sonucun hangi girdilere ait olduğunun kimliği.
+    const lastPayload = {};
     // ÖH D24 / P17B2-08 — ÇÖZÜLEMEYEN MALZEME KOŞUMU DURDURUR.
     // panel id -> { alan: {solver, sent} }. Çözücünün verdiği malzeme
     // güvertenin seçenek listesinde (alias çözümünden SONRA da) yoksa
@@ -118,8 +121,17 @@
         return KIND_COLORS[kind] || KIND_COLORS.info;
     }
 
+    // V306/DİL-ORTAK (FEA-SIVI DEVİR 4): güverte sayı biçimi arayüz dilinin
+    // ondalık ayracıyla. ÖLÇÜLDÜ (FEA-SIVI RAPOR §7): TR ekranda Basınçlı
+    // Kap kartları "258.7 bar", "2.26 ×" basıyordu (toFixed noktası; bütün
+    // güverte panelleri, ~280 çağrı). Ayraç TEK kaynaktan (i18n.js
+    // I18N.decimalText): basamak sayısı çağıranın, yuvarlama aynı; yalnız
+    // ayraç değişir. Sözlük yoksa nokta kalır.
     function fmt(x, d) {
-        return (x == null || !Number.isFinite(x)) ? '—' : x.toFixed(d == null ? 2 : d);
+        if (x == null || !Number.isFinite(x)) return '—';
+        const t = x.toFixed(d == null ? 2 : d);
+        const I = (typeof window !== 'undefined') ? window.I18N : null;
+        return (I && typeof I.decimalText === 'function') ? I.decimalText(t) : t;
     }
 
     // İlk anlamlı (sonlu sayı veya boş olmayan string) değeri döndürür.
@@ -264,10 +276,26 @@
         return T(DURUM_KODU_ANAHTARLARI[v], v);
     }
 
+    // V306/DİL-ORTAK (SIVI-ONARIM ürün gözlemi): parametre ADINA bağlı
+    // değer tablosu — TR uyarı 'turbopump-fed bandının', 'floor sınırında'
+    // basıyordu. Değerler sunucunun yayımladığı kapalı kümedir
+    // (liquid_rocket_engine.py: family, _kirp edge); tabloda olmayan değer
+    // AYNEN döner (uydurma çeviri yok).
+    const PARAMETRE_DEGER_ANAHTARLARI = {
+        family: { 'pressure-fed': 'common.code.pressure_fed',
+                  'turbopump-fed': 'common.code.turbopump_fed' },
+        edge: { floor: 'common.code.edge_floor',
+                ceiling: 'common.code.edge_ceiling' },
+    };
+
     function warnParamText(k, v) {
         if (typeof v !== 'string' || !v) return v;
         if (Object.prototype.hasOwnProperty.call(DURUM_KODU_ANAHTARLARI, v)) {
             return durumKoduMetni(v);
+        }
+        if (Object.prototype.hasOwnProperty.call(PARAMETRE_DEGER_ANAHTARLARI, k)
+                && Object.prototype.hasOwnProperty.call(PARAMETRE_DEGER_ANAHTARLARI[k], v)) {
+            return T(PARAMETRE_DEGER_ANAHTARLARI[k][v], v);
         }
         // V301/DİL-2 (kök 7): `field` parametresi formdaki ETİKETLE (ölçüldü:
         // TR uyarıda "'expansion_ratio' alanı"); etiket yoksa ad AYNEN.
@@ -276,6 +304,29 @@
             var etk = _ret.etiket(v);
             if (etk) return etk;
             return v;
+        }
+        // V306/DİL-ORTAK (HİBRİT-NOZUL DEVİR): yakıt ANAHTARI ('htpb')
+        // sayfanın kendi yakıt seçicisinin etiketiyle (kullanıcının seçtiği
+        // ad, etkin dilde); seçici ya da seçenek yoksa AYNEN.
+        if (k === 'fuel' && typeof document !== 'undefined'
+                && document.getElementById) {
+            var fs = document.getElementById('fuel_type');
+            if (fs && fs.options) {
+                for (var fi = 0; fi < fs.options.length; fi++) {
+                    var fo = fs.options[fi];
+                    if (fo.value === v && (fo.textContent || '').trim()) {
+                        return fo.textContent.trim();
+                    }
+                }
+            }
+        }
+        // V306/DİL-ORTAK: `source` bir form alanının adıysa (ölçüldü: sıvı
+        // oda çapı uyarısı 'kaynak: chamber_diameter') alanın etiketi;
+        // etiketi olmayan kaynak metni AYNEN kalır.
+        if (k === 'source' && _ret && typeof _ret.etiket === 'function'
+                && /^[a-z][a-z0-9_]*$/.test(v)) {
+            var etkK = _ret.etiket(v);
+            if (etkK) return etkK;
         }
         if (k === 'material') {
             for (var i = 0; i < registry.length; i++) {
@@ -2126,6 +2177,14 @@
     // anlamında kayıpsız. Alan artık okunabilir ve "ekranda görünen değer =
     // gönderilen değer" sözleşmesi de bozulmaz (görüntü-yalnız yuvarlama
     // bunu bozardı: 3707,04 gösterip 3707,0404366159974 göndermek olurdu).
+    //
+    // V306/GÜVERTE-HATA (kalem 3/5, 4 Kas): SÖZLEŞME DEĞİŞTİ — gösterim 6
+    // anlamlı basamak, GÖNDERİLEN motorun TAM sayısı (`tamOnDolumDegeri`;
+    // kullanıcı alana dokunursa kutudaki sayı). Ölçülen kusur: yuvarlanmış
+    // ön dolum panellerin kendi çapraz denetimlerini (göreli 1e-6) bozuyordu
+    // (Termal Koruma h_gas 11798,4 ⟷ motor 11798,436…: "verdict is not
+    // earned") — aynı büyüklük iki sayı. Çıktı sapması zaten ölçülmüştü
+    // (6 basamakta ≤ 5e-6); tam değer bu sapmayı da sıfırlar.
     // ==================================================================
     const DOCK_SIGFIG = 6;
 
@@ -2185,6 +2244,7 @@
             if (el.dataset.suggested !== '1') return;
             resetFieldToDefinition(el, f);
             delete el.dataset.suggested;
+            delete el.dataset.fullValue; delete el.dataset.shownValue;
             onceki[f[0]] = true;
         });
         // Çözücü malzemesi engeli (P17B2-08) de ŞİMDİKİ sonuçtan yeniden
@@ -2339,6 +2399,19 @@
             // Anlamlı basamak: ham float değil (T66 + T45, gerekçe yukarıda)
             if (typeof v === 'number' && Number.isFinite(v)) {
                 el.value = dockSigFig(v);
+                // V306/GÜVERTE-HATA (kalem 3 K2-P3, kalem 5 K2-P22): GÖSTERİM
+                // yuvarlanır, HESABA giden değer motorun TAM sayısıdır.
+                // ÖLÇÜLDÜ (kilavuz-2/olcum/k2_hybrid_tr.json): Termal Koruma
+                // h_gas'ı 11798,4 (6 anlamlı basamak) gönderiyordu, motorun
+                // sayısı 11798,436…; panelin kendi çapraz denetimi (göreli
+                // 1e-6) iki sayıyı farklı bulup "this verdict is not earned"
+                // diyordu — aynı büyüklük iki sayı. Tam değer alanın veri
+                // imine yazılır; kutudaki metin yazdığımız gösterimle AYNI
+                // kaldıkça (kullanıcı dokunmadı) gövdeye tam değer gider
+                // (buildPayload). Kullanıcı yazarsa (data-dirty) ya da öneri
+                // temizlenirse im düşer ve kutudaki sayı gider.
+                el.dataset.fullValue = String(v);
+                el.dataset.shownValue = String(el.value);
                 // OH-D37-S4: öneriyle yazıldı — sonraki sonuç bu alana öneri
                 // vermezse alan tanım varsayılanına döner (bayat kalmaz).
                 written[k] = true;
@@ -2551,6 +2624,20 @@
     }
 
     // {payload, missing} döner. `missing` boş değilse istek gönderilmemelidir.
+    // V306/GÜVERTE-HATA (kalem 3/5): öneriyle yazılmış ve kullanıcının
+    // dokunmadığı alanın TAM değeri (applySuggestions); aksi hâlde kutudaki
+    // sayı. Kutudaki metin yazdığımız gösterimden farklıysa (elle değişti,
+    // dirty imi kaçtı) tam değer KULLANILMAZ — görünen sayı gider.
+    function tamOnDolumDegeri(el, kutudaki) {
+        const d = el && el.dataset;
+        if (!d || d.dirty === '1' || d.suggested !== '1') return kutudaki;
+        if (d.fullValue === undefined || d.shownValue !== String(el.value)) {
+            return kutudaki;
+        }
+        const tam = Number(d.fullValue);
+        return Number.isFinite(tam) ? tam : kutudaki;
+    }
+
     function buildPayload(spec) {
         applySuggestions(spec);
         // OH-GT-31: öneri bir seçiciyi değiştirmiş olabilir — ipucu seçimle
@@ -2575,7 +2662,7 @@
             }
             const v = parseFloat(el.value);
             if (Number.isFinite(v)) {
-                payload[key] = v;
+                payload[key] = tamOnDolumDegeri(el, v);
                 return;
             }
             // Boş / sayı olmayan alan: isteğe bağlıysa gönderilmez (uç kendi
@@ -2610,9 +2697,9 @@
                     + resp.status + '):', text);
             }
             throw new Error(TF('common.badJson', { status: resp.status },
-                'Server replied HTTP {status} but the body is not valid JSON '
-                + '(Infinity/NaN are not JSON values). Nothing was drawn; the '
-                + 'raw body is in the browser console.'));
+                'The server reply is not valid JSON (Infinity and NaN are not '
+                + 'JSON values). Nothing was drawn; the raw body is in the '
+                + 'browser console.'));
         }
     }
 
@@ -2693,8 +2780,7 @@
 
         if (!kod) {
             parcalar.push(TF('dock.err.noCode', { status: http },
-                'The endpoint refused the request (HTTP {status}) without '
-                + 'naming a reason. Nothing was computed.'));
+                'The analysis returned no reason code. Nothing was computed.'));
         } else if (HATA_ANAHTARI[kod]) {
             parcalar.push(T(HATA_ANAHTARI[kod], HATA_YEDEGI[kod]));
         } else if (Object.prototype.hasOwnProperty.call(ekKodlar, kod)
@@ -2703,9 +2789,9 @@
         } else {
             // Tanınmayan kod: HAM + İŞARETLİ (sessiz "ok" ya da tahmin yok).
             parcalar.push(TF('dock.err.unknown', { code: kod, status: http },
-                'The endpoint refused the request with a reason code this '
-                + 'deck does not recognise, printed unchanged: "{code}" '
-                + '(HTTP {status}). Nothing was computed.'));
+                'The analysis refused the request with a reason code this '
+                + 'deck does not recognise, printed unchanged: "{code}". '
+                + 'Nothing was computed.'));
         }
 
         const eksik = Array.isArray(govde.missing_fields)
@@ -2763,17 +2849,29 @@
         const engelliAlanlar = Object.keys(engel);
         if (engelliAlanlar.length) {
             root.style.display = 'none';
+            // V306/KATI-MODEL (M-KATI-21): alan parçası da kullanıcı
+            // dilinde (eskiden TR metnin içinde 'solver="composite", the
+            // form would send "steel"' İngilizce kalıyordu); jenerik
+            // kompozit kasa için kaydın NEDEN eşlenemediği ayrıca yazılır.
+            const _kompozit = engelliAlanlar.some(function (k) {
+                return String(engel[k].solver).toLowerCase() === 'composite';
+            });
             status.textContent = TF('dock.materialNotInList',
                 { fields: engelliAlanlar.map(function (k) {
-                    return k + ' (solver="' + engel[k].solver
-                        + '", the form would send "' + engel[k].sent + '")';
+                    return TF('dock.materialNotInListField',
+                        { field: k, solver: engel[k].solver, sent: engel[k].sent },
+                        '{field} (solver="{solver}", the form would send "{sent}")');
                 }).join('; ') },
                 'The solver value for {fields} is not in this deck\'s option '
                 + 'list and could not be matched through the materials '
                 + 'catalogue. The request was NOT sent: a safety verdict may '
                 + 'not be computed on a different material than the motor. '
                 + 'Pick the matching entry yourself, or re-run the motor '
-                + 'calculation with a material this deck offers.');
+                + 'calculation with a material this deck offers.')
+                + (_kompozit ? ' ' + T('dock.materialCompositeNoRecord',
+                    'The generic filament-wound composite case has no thermal '
+                    + 'or elastic property record (only an allowable stress '
+                    + 'and a density), so this deck cannot analyse it.') : '');
             return;
         }
 
@@ -2851,6 +2949,8 @@
             purgePlots(root);           // eski grafiklerin resize dinleyicileri sızmasın
             root.innerHTML = '';
             lastData[spec.id] = data;          // dil değişiminde yeniden çizmek için sakla
+            lastPayload[spec.id] = JSON.stringify(built.payload);
+            status.removeAttribute('data-onceki-tasarim');
             spec.render(data, root);
             if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
             root.style.display = 'block';
@@ -2946,11 +3046,13 @@
             el.addEventListener('input', function () {
                 el.dataset.dirty = '1';
                 delete el.dataset.suggested; delete el.dataset.cleared; // S4
+                delete el.dataset.fullValue; delete el.dataset.shownValue;
                 repaintFieldSource(spec, fid);      // çip anında 'user'a döner
             });
             el.addEventListener('change', function () {
                 el.dataset.dirty = '1';
                 delete el.dataset.suggested; delete el.dataset.cleared; // S4
+                delete el.dataset.fullValue; delete el.dataset.shownValue;
                 repaintFieldSource(spec, fid);
                 secimIpucu(el);                       // OH-GT-31
             });
@@ -3089,6 +3191,35 @@
     function refreshSuggestions() {
         if (!inited) return;
         registry.filter(panelApplies).forEach(applySuggestions);
+        // V306/BAYAT NR-9 ailesi — BAYAT PANEL SONUCU EKRANDA KALMAZ.
+        // ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/bayat/olcum_nr9_once.json): üç
+        // sayfada motor yeniden hesaplanınca öneriler yeni motora göre
+        // tazeleniyor ama panelin ekrandaki sonucu (ör. Basınçlı Kap
+        // "DURUM: PASS … 96.0 bar") eski girdilerle İŞARETSİZ duruyordu.
+        // Kimlik: panelin son başarılı koşusunun gövdesi. Tazelenen
+        // girdilerle kurulan gövde ondan farklıysa sonuç temizlenir ve
+        // nedeni durum satırına yazılır (yörüngenin flight.staleTrajectory
+        // deseni). Gövde aynıysa sonuç hâlâ ekrandaki girdilere aittir.
+        registry.forEach(function (spec) {
+            if (!lastData[spec.id]) return;
+            const root = document.getElementById('ad_root_' + spec.id);
+            const status = document.getElementById('ad_status_' + spec.id);
+            if (!root || root.style.display === 'none') return;
+            let simdi = null;
+            try { simdi = JSON.stringify(buildPayload(spec).payload); } catch (e) { simdi = null; }
+            if (simdi !== null && simdi === lastPayload[spec.id]) return;
+            purgePlots(root);
+            root.innerHTML = '';
+            root.style.display = 'none';
+            delete lastData[spec.id];
+            delete lastPayload[spec.id];
+            if (status) {
+                status.textContent = T('dock.staleDesign',
+                    'The motor was recalculated; this panel\'s previous result belonged to '
+                    + 'the earlier inputs and was cleared. Run it again.');
+                status.setAttribute('data-onceki-tasarim', '1');
+            }
+        });
         if (typeof cfg.resultsProvider === 'function') {
             try { noteResults(cfg.resultsProvider()); } catch (e) { /* sonuç yok */ }
         }
@@ -3165,6 +3296,9 @@
             esc: escAttr,
             warnText: warnText,
             durumKoduMetni: durumKoduMetni,
+            // V306/DİL-ORTAK: malzeme anahtarı → etkin dilde ad (uyarı
+            // parametresiyle AYNI kural; ısıl FEA rozeti kullanır).
+            malzemeAdi: function (v) { return warnParamText('material', v); },
             // V3 KK 3. tur: ret gövdesinin okunur cümlesi (OH-GT-14 ile aynı
             // kural) — kendi POST'unu yapan paneller (belirsizlik) de
             // makine kodu yerine bunu basar. İkinci bir okuyucu yazılmaz.

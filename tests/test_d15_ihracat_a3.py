@@ -229,10 +229,20 @@ class TestB326CozucuBeyanlari:
 
     def test_pdf_basis_metinlerini_basiyor(self, hibrit_pdf_metni):
         assert 'burn time basis' in hibrit_pdf_metni.lower()
-        assert 'l star note' in hibrit_pdf_metni.lower()
+        # V306/RAPOR-DİL kalem 6 (c3616474e) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI:
+        # beyan etiketleri makine adından türetilmiyor, rapor sözlüğünden
+        # okunuyor ('report.field.l_star_note' = 'L* note' / 'L* notu').
+        # Eski 'l star note' alt çizgisi boşluğa çevrilmiş anahtardı.
+        assert 'l* note' in hibrit_pdf_metni.lower()
+        assert 'l star note' not in hibrit_pdf_metni.lower()
 
     def test_pdf_olculmus_sapma_uyarisini_basiyor(self, hibrit_pdf_metni):
-        assert 'htpb_coeff_bias' in hibrit_pdf_metni
+        # V306/RAPOR-HATA (kalem 6a) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: ölçülmüş
+        # sapma uyarısı belgede durur, ama ham kodla değil ekranın
+        # sözlüğündeki cümlesiyle (ham anahtar belgeye basılmaz).
+        duz = ' '.join(hibrit_pdf_metni.split())
+        assert 'regression coefficients are biased' in duz
+        assert 'htpb_coeff_bias' not in duz
 
 
 # =====================================================================

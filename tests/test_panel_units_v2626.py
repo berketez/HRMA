@@ -675,13 +675,21 @@ MM_ALANLARI = [
 @pytest.mark.parametrize('panel_id,field,geo_key', MM_ALANLARI)
 class TestMilimetreAlanlari:
     def test_bagimsiz_oracle_ile_ayni(self, panel_suggestions, si_geometry,
-                                      motor_type, panel_id, field, geo_key):
+                                      solver_results, motor_type, panel_id,
+                                      field, geo_key):
         rec = _sug(panel_suggestions, motor_type, panel_id)
         value = rec['suggestions'].get(field)
         assert value is not None, (
             f'{panel_id}.{field} ({motor_type}) önerilmiyor — alan panel '
             f'varsayılanı {rec["fields"].get(field)} mm ile gider')
         expected_mm = si_geometry[motor_type][geo_key] * 1000.0
+        # V306/FEA-SIVI (kalem 4): iki katmanlı rejeneratif sıvı cidarda
+        # Basınçlı Kap paneli basıncı taşıyan dış kabuğu değerlendirir; onun
+        # çapı motorun katman kaydındaki dış kabuk iç çapıdır (gerekçe
+        # test_paneller_ayni_hazne_capinda_anlasiyor).
+        katman = _basinc_katmani_ic_capi_m(solver_results[motor_type])
+        if panel_id == 'vessel' and katman is not None:
+            expected_mm = katman * 1000.0
         assert value == pytest.approx(expected_mm, rel=1e-6), (
             f'{panel_id}.{field} ({motor_type}) = {value} mm, '
             f'bağımsız SI oracle = {expected_mm} mm')
@@ -699,12 +707,35 @@ class TestMilimetreAlanlari:
 # ---------------------------------------------------------------------------
 # 3. Paneller BİRBİRİYLE tutarlı olmalı (asıl kusur buydu)
 # ---------------------------------------------------------------------------
+def _basinc_katmani_ic_capi_m(r):
+    """İki katmanlı rejeneratif sıvı cidarda dış kabuğun iç çapı [m] (motorun
+    katman kaydı), tek cidarda None."""
+    cs = ((r.get('structural_analysis') or {}).get('chamber_structure')
+          or {})
+    if cs.get('wall_model') != 'two_layer_regenerative':
+        return None
+    for k in cs.get('wall_layers') or []:
+        if isinstance(k, dict) and k.get('role') == 'closeout':
+            return 2.0 * k['inner_radius_mm'] / 1000.0
+    return None
+
+
 @pytest.mark.parametrize('motor_type', MOTOR_TYPES)
-def test_paneller_ayni_hazne_capinda_anlasiyor(panel_suggestions, motor_type):
+def test_paneller_ayni_hazne_capinda_anlasiyor(panel_suggestions,
+                                              solver_results, motor_type):
     """Aynı motorun hazne çapı her panelde AYNI fiziksel uzunluk olmalı.
 
     Kusurun özü buydu: termal panel 1000'e bölerken vessel/joint 1000 ile
     çarpıyordu; ikisi de aynı `chamber_diameter` alanını okuyordu.
+
+    V306/FEA-SIVI (kalem 4, SIVI-KÜTLE DEVİR 1) — kural doğru tanıma
+    göre: her panel DEĞERLENDİRDİĞİ katmanın iç çapını alır. Tek cidarda
+    bu bütün panellerde hazne çapıdır. İki katmanlı rejeneratif sıvı
+    cidarda Basınçlı Kap paneli soğutucu basıncını taşıyan dış kabuğu
+    değerlendirir (MDP'si, malzemesi, sıcaklığı, kalınlığı motorun kabuk
+    kaydından); onun çapı dış kabuğun iç çapıdır ve motorun kendi katman
+    kaydıyla AYNI olmalıdır. Öteki paneller hazne çapında anlaşmaya devam
+    eder.
     """
     metre = {}
     for panel_id, field in (('thermal', 'chamber_diameter'),
@@ -714,12 +745,19 @@ def test_paneller_ayni_hazne_capinda_anlasiyor(panel_suggestions, motor_type):
         v = rec['suggestions'].get(field)
         if v is not None:
             metre[panel_id] = v
+    katman_capi = _basinc_katmani_ic_capi_m(solver_results[motor_type])
     for panel_id, field in (('vessel', 'inner_diameter_mm'),
                             ('joint', 'seal_diameter_mm')):
         rec = _sug(panel_suggestions, motor_type, panel_id)
         v = rec['suggestions'].get(field)
-        if v is not None:
-            metre[panel_id] = v / 1000.0
+        if v is None:
+            continue
+        if panel_id == 'vessel' and katman_capi is not None:
+            assert v / 1000.0 == pytest.approx(katman_capi, rel=1e-12), (
+                f'{motor_type}: Basınçlı Kap paneli dış kabuğun iç çapını '
+                f'almıyor -> {v} mm ⟷ {katman_capi * 1000.0} mm')
+            continue
+        metre[panel_id] = v / 1000.0
 
     assert len(metre) >= 4, f'çok az panel değer üretti: {metre}'
     ref = min(metre.values())

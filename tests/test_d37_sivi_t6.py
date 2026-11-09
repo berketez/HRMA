@@ -348,7 +348,10 @@ def test_lh2_yanit_derinligi_marsin_derinligi(istemci):
     sınır (COOLANT_VELOCITY_LIMIT_MS, uyarı) aşılmıyor."""
     import re as _re
     from hrma.engines import liquid_rocket_engine as L
-    j = _sivi_form(istemci, fuel_type='lh2')
+    # V306/SIVI-CEKET-B kalem 5: örneğin ε 12'si LH2/LOX gazında 50 bar'da
+    # deniz seviyesinde ayrılıyor (ayrılmayan en büyük ε 9,27; uç adlı ret);
+    # varyant ayrılmayan ε 9 ile kurulur (ceket ε'su zaten ≤ 6).
+    j = _sivi_form(istemci, fuel_type='lh2', nozzle_expansion_ratio=9)
     cs = j['cooling_system']
     assert cs['wall_temperature_source'].startswith('solved (1D supercritical')
     v = cs['coolant_velocity']

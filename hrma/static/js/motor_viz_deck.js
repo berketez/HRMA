@@ -786,6 +786,22 @@
             var gas = ht.gas_side_analysis || {};
             var seen = Object.create(null);
             var texts = [];
+            /* V306/HİBRİT-ÇAPRAZ (kalem 3): kamara bölgeleri koruyorsa
+               (v3.0.1 H-termal) ısı modülünün çıplak cidar kritikleri
+               SİLİNMEZ, `severity: info` + `superseded_by` +
+               `bare_wall_severity: 'critical'` ile gelir. ÖLÇÜLDÜ (taban
+               700a67586, varsayılan hibrit): efsane bu kayıtları okumuyor,
+               yalnız bayrağı görüp "KRİTİK wall_temperature_unphysical =
+               true" diye HAM ALAN ADI basıyordu. Kayıtlar artık ayrı
+               başlıkla (çıplak cidar, korumasız) ve hükmü taşıyan bölge
+               bloğunun adıyla basılır; kritik öneki yalnız gerçek kritikte. */
+            var superseded = [];
+            function metin(w) {
+                var params = w.params || {};
+                return (window.I18N && window.I18N.tf)
+                    ? window.I18N.tf(w.code, params, w.fallback || w.code)
+                    : (w.fallback || w.code);
+            }
             [gas.warnings, (ht.safety_analysis || {}).warnings,
              (ht.wall_analysis || {}).warnings].forEach(function (list) {
                 (Array.isArray(list) ? list : []).forEach(function (w) {
@@ -796,20 +812,23 @@
                         texts.push(w.trim());
                         return;
                     }
-                    if (!w || String(w.severity || '').toLowerCase() !== 'critical') return;
+                    var sev = String((w && w.severity) || '').toLowerCase();
+                    var ust = !!(w && w.superseded_by
+                        && String(w.bare_wall_severity || '').toLowerCase()
+                           === 'critical');
+                    if (!w || (sev !== 'critical' && !ust)) return;
                     var params = w.params || {};
                     var id = w.code + '|' + Object.keys(params).sort()
                         .map(function (k) { return k + '=' + String(params[k]); }).join(',');
                     if (seen[id]) return;
                     seen[id] = true;
-                    texts.push((window.I18N && window.I18N.tf)
-                        ? window.I18N.tf(w.code, params, w.fallback || w.code)
-                        : (w.fallback || w.code));
+                    (sev === 'critical' ? texts : superseded).push(metin(w));
                 });
             });
             return {
                 unphysical: gas.wall_temperature_unphysical === true,
-                texts: texts
+                texts: texts,
+                superseded: superseded
             };
         }
 
@@ -873,9 +892,25 @@
             var box = el(p + '_hl_verdict');
             if (!box) return;
             var vd = heatVerdict();
-            if (!vd.unphysical && !vd.texts.length) {
+            if (!vd.unphysical && !vd.texts.length && !vd.superseded.length) {
                 box.innerHTML = '';
                 box.style.display = 'none';
+                return;
+            }
+            if (!vd.texts.length && vd.superseded.length) {
+                // Çıplak cidar hükmü bölgelere geçti: sayı ve gerekçe kalır,
+                // kritik öneki ve ham alan adı basılmaz.
+                box.innerHTML = '<b>' + escText(T('viz.heat.bareWallSuperseded',
+                    'BARE WALL (no protection):')) + '</b> '
+                    + vd.superseded.map(escText).join('<br>') + '<br>'
+                    + escText(T('viz.heat.bareWallSupersededBy',
+                        'The design verdict is given by the chamber wall zones: the grain covers the case during the burn and the open zones get the liner HRMA sized.'));
+                box.style.color = 'var(--hd-amber-source, #ffb347)';
+                box.style.whiteSpace = 'normal';
+                box.style.lineHeight = '1.35';
+                box.style.marginTop = '4px';
+                box.style.maxWidth = '280px';
+                box.style.display = 'block';
                 return;
             }
             var body = vd.texts.length

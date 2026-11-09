@@ -1293,11 +1293,12 @@ PERF_MIN_SERIES = 3       # bir zaman serisinin panel çizmeye yetmesi için min
 # eşik çizgisi P8B3-09 ile KALDIRILDI (gerekçe + ölçüm: _perf_gauge_panel).
 PERF_GAUGE_FULL_SCALE = 100.0   # m/s
 PERF_GAUGE_ROUND = 50.0         # skala taşarsa yuvarlanacağı adım
-# Yanma verimi göstergesi (P8B3-10). Eşikler MUTLAK yüzdedir ve okunan değerle
-# KAYMAZ (P8B3-09'un tersi hüküm); skalanın yalnız ALT ucu, iğne dışarı
-# düşmesin diye aşağı iner. Tek kaynak: gösterge bu adları okur.
+# Yanma (c*) verimi göstergesi (P8B3-10). Skalanın yalnız ALT ucu, iğne
+# dışarı düşmesin diye aşağı iner. Tek kaynak: gösterge bu adları okur.
+# V306/SAYI (NR-1): eski ETA_GAUGE_STEP_EDGES_PCT (95/98 tehlike|uyarı|
+# güvenli) kaynaksızdı ve kaldırıldı (gerekçe: create_combustion_analysis_
+# plots, P8B3-09 emsali).
 ETA_GAUGE_LO_PCT = 90.0          # varsayılan skala tabanı
-ETA_GAUGE_STEP_EDGES_PCT = (95.0, 98.0)   # tehlike|uyarı|güvenli sınırları
 ETA_GAUGE_LO_QUANTUM_PCT = 10.0  # taban bu adıma yuvarlanarak indirilir
 ETA_GAUGE_HI_QUANTUM_PCT = 5.0   # %100'ü aşan verimde tavanın yuvarlama adımı
 
@@ -1307,7 +1308,7 @@ ETA_GAUGE_HI_QUANTUM_PCT = 5.0   # %100'ü aşan verimde tavanın yuvarlama adı
 # ``P8B3-20``): gerçek koşuda etkinlik %30 çıkıyor ve ÜÇ ÇUBUĞUN ÜÇÜ DE
 # kırmızı oluyor; kullanıcı "kırmızı" görüyor ama neyin kırmızı olduğunu
 # (hangi eşiğe göre) öğrenemiyor. İki onarım: (1) eşik TEK KAYNAK olarak
-# burada tanımlanır (ETA_GAUGE_STEP_EDGES_PCT emsali), (2) figür bantları
+# burada tanımlanır (o günkü ETA_GAUGE_STEP_EDGES_PCT emsali), (2) figür bantları
 # ADIYLA beyan eder. Bantlar ÇİZİM SÖZLEŞMESİDİR, çözücünün bir sınırı
 # değildir — nota bu da yazılır, çünkü sayısal bir kabul/ret eşiği gibi
 # okunması uydurma olurdu.
@@ -2727,7 +2728,7 @@ def create_heat_transfer_plots(heat_data):
             f'limit in the material record (field {limit_alan}){atlanan}.')
     elif profile or istasyonlar:
         notes.append('No allowable wall temperature is drawn: the material '
-                     'record carries none, and a limit is not invented.')
+                     'record carries none, and no substitute limit is assumed.')
 
     # ---------------- (1,2) cidar gerilmesi ------------------------------
     if stress_map:
@@ -2801,7 +2802,7 @@ def create_heat_transfer_plots(heat_data):
             'Cooling effectiveness not available for this run: the caller '
             'passed no per-zone effectiveness series. A single '
             'class-level cooling_efficiency is NOT copied across zones '
-            '(that invented a zone resolution the model does not solve).')
+            '(that would imply a zone resolution the model does not solve).')
     fig.update_xaxes(title_text='Zone', row=2, col=1)
     fig.update_yaxes(title_text='Effectiveness (%)', row=2, col=1)
 
@@ -2911,31 +2912,136 @@ def _combustion_station_temperatures(combustion_data):
     return labels, temps
 
 
-def _combustion_efficiency_breakdown(combustion_data, propellant=None):
-    """Yanma/kinetik verimini GERÇEKTEN hesaplar.
+#: V306/SAYI (NR-1) — motor sonucundaki c* verimi kaynak kodlarının yanma
+#: panosu not cümlesi. Kodlar ``resolve_hybrid_c_star_efficiency``nin
+#: ``source`` alanıdır (tek çözümleyici); burada yalnız ekrandaki cümle var.
+COMBUSTION_PANEL_ETA_SOURCE_NOTE = {
+    'sourced_default': ("not entered; sourced default (median of the "
+                        "measured firings in HRMA's validation records)"),
+    'user_input': 'your input',
+}
 
-    Döner: (yuzde | None, kaynak_notu)
 
-    Bileşenler:
-      eta_c*   : performance['c_star_delivered'] / performance['c_star'].
-                 eta_c_star çağırana verilmediyse teorik denge = teslim
-                 kabulüdür (1.000) ve not satırında BÖYLE yazılır.
-      eta_kin  : sonlu-hız (kinetik) lüle verimi — KineticEfficiency
-                 mühendislik korelasyonu, isp_predicted / isp_shifting.
-                 O/F, Pc ve gaz hâline gerçekten duyarlıdır.
+def combustion_panel_applied_efficiency(motor_results):
+    """V306/SAYI (NR-1) — yanma panosunun okuyacağı, MOTORUN bu koşuda
+    UYGULADIĞI verimler (tek kaynak: motor sonucu).
 
-    Eski sürüm hiç üretilmeyen 'combustion_efficiency' anahtarını okuyup
-    varsayılan 0.95'e düşüyordu; gösterge HER koşuda %95 gösteriyordu.
+    ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/sayi/olcum/k1_once.json, örnek hibrit):
+    manşet η_c* = 0,89 (kaynaklı varsayılan) ve 0,95 (girdi) iken pano
+    "eta_c* = 100,00% (… verilmedi)" yazıyordu; gösterge η_c*·η_kin = %99,58
+    idi. Kök: ``/calculate`` panoyu motordan BAĞIMSIZ, η'sız ikinci bir
+    ``analyze_combustion`` çağrısıyla kuruyor; motorun uyguladığı η_c* panoya
+    hiç ulaşmıyordu. Pano kendi η_kin'ini de (boğaz çapı ve L* verilmeden)
+    yeniden çözüyordu: %99,58 ⟷ motorun C_F'e uyguladığı %99,84
+    (``nozzle_design.performance.kinetic_efficiency``) — aynı büyüklüğün
+    iki sayısı.
+
+    Döner: sözlük ya da ``None`` (motor c* verimi bloğu yayımlamadıysa —
+    o durumda pano verimi motordan okumaz).
     """
+    if not isinstance(motor_results, dict):
+        return None
+    blok = motor_results.get('c_star_efficiency')
+    if not isinstance(blok, dict):
+        return None
+    yuzde = _perf_num(blok.get('percent'))
+    if yuzde is None or blok.get('source') not in (
+            'sourced_default', 'user_input', 'ideal_no_source'):
+        return None
+    noz = ((motor_results.get('nozzle_design') or {}).get('performance')
+           or {})
+    kin = _perf_num(noz.get('kinetic_efficiency'))
+    kin_diag = noz.get('kinetic')
+    kin_model = kin_diag.get('model') if isinstance(kin_diag, dict) else None
+    cf_src = (motor_results.get('nozzle_angles') or {}).get(
+        'thrust_coefficient_source')
+    return {
+        'percent': float(yuzde),
+        'source': blok['source'],
+        'applied': bool(blok.get('applied')),
+        'kinetic_efficiency': kin,
+        'kinetic_resolved': (kin is not None and kin_model != 'not_modelled'),
+        # 'computed_isentropic' = manşet C_F kayıp kümesini (η_kin dahil)
+        # uygular; 'user_supplied' = kullanıcının C_F'i olduğu gibi.
+        'kinetic_applied_to_cf': (None if cf_src is None
+                                  else cf_src == 'computed_isentropic'),
+    }
+
+
+def _combustion_efficiency_breakdown(combustion_data, propellant=None,
+                                     applied=None):
+    """Yanma panosunun c* verimi göstergesi ve not satırları.
+
+    Döner: (eta_c*_yuzde | None, not_satirlari [str, …])
+
+    V306/SAYI (NR-1) — GÖSTERGE YALNIZ η_c*'TIR, MOTORUN UYGULADIĞI DEĞER.
+      * ``applied`` (``combustion_panel_applied_efficiency``) verildiyse
+        gösterge ve not motorun bu koşuda manşete uyguladığı η_c*'ı ve
+        kaynağını (kaynaklı varsayılan / girdiniz / ideal) okur. η_kin
+        ayrı, adlı satırdır ve motorun C_F'e uyguladığı sayıdır (ikinci
+        kez çözülmez); büyük göstergeye girmez.
+      * ``applied`` yoksa (``/api/advanced-analysis``: motor koşusu yok)
+        η_c* = performance['c_star_delivered'] / performance['c_star'];
+        η_kin bu analizin kendi korelasyon kestirimidir ve hiçbir motor
+        sonucuna uygulanmadığı yazılır.
+
+    Eski sürüm göstergeye η_c*·η_kin çarpımını basıyordu ve η_c*'ı panonun
+    η'sız ikinci çözümünden okuyordu (manşet %89 iken pano %99,58).
+    Ham anahtar (eta_c*, eta_kin) ekrana yazılmaz.
+    """
+    satirlar = []
+    eta_pct = None
+    if applied is not None:
+        eta_pct = float(applied['percent'])
+        if applied['source'] == 'ideal_no_source':
+            satirlar.append(
+                'c* efficiency: none applied - HRMA holds no measured value '
+                'for this propellant pair and none was entered, so the '
+                'headline uses the ideal (theoretical equilibrium) c*.')
+        else:
+            satirlar.append(
+                f"c* efficiency η_c* = {eta_pct:.2f}%, applied to this "
+                "run's headline (delivered c* = η_c* × theoretical "
+                "equilibrium c*); source: "
+                f"{COMBUSTION_PANEL_ETA_SOURCE_NOTE[applied['source']]}.")
+        kin = applied.get('kinetic_efficiency')
+        if not applied.get('kinetic_resolved'):
+            satirlar.append(
+                'Kinetic efficiency: not resolved for this run; no '
+                'finite-rate nozzle loss is applied.')
+        elif applied.get('kinetic_applied_to_cf') is False:
+            satirlar.append(
+                f"Kinetic efficiency η_kin = {kin * 100:.2f}% "
+                "(finite-rate nozzle loss): not applied - this run uses the "
+                "thrust coefficient you entered as given.")
+        elif applied.get('kinetic_applied_to_cf') is True:
+            satirlar.append(
+                f"Kinetic efficiency η_kin = {kin * 100:.2f}% "
+                "(finite-rate nozzle loss): applied to this run's headline "
+                "thrust coefficient, not to c*.")
+        else:
+            satirlar.append(
+                f"Kinetic efficiency η_kin = {kin * 100:.2f}% "
+                "(finite-rate nozzle loss): this run does not state whether "
+                "its headline thrust coefficient applies it.")
+        return eta_pct, satirlar
+
     perf = ((combustion_data or {}).get('performance') or {})
     c_star = _perf_num(perf.get('c_star'))
     c_star_del = _perf_num(perf.get('c_star_delivered'))
-    eta_c = None
     if c_star and c_star > 0 and c_star_del is not None:
-        eta_c = c_star_del / c_star
-    eta_c_supplied = _perf_num(perf.get('eta_c_star')) is not None
+        eta_pct = c_star_del / c_star * 100.0
+        if _perf_num(perf.get('eta_c_star')) is None and c_star_del == c_star:
+            satirlar.append(
+                'c* efficiency η_c* = 100.00%: no c* efficiency was '
+                'supplied to this analysis, so delivered c* equals the '
+                'theoretical equilibrium c*.')
+        else:
+            satirlar.append(
+                f"c* efficiency η_c* = {eta_pct:.2f}% = delivered c* / "
+                "theoretical equilibrium c* of this analysis.")
 
-    eta_kin, kin_note = None, None
+    kin_satir = None
     try:
         from hrma.analysis.kinetic_efficiency import KineticEfficiency
         pc_bar = _perf_num(((combustion_data.get('conditions') or {})
@@ -2950,30 +3056,19 @@ def _combustion_efficiency_breakdown(combustion_data, propellant=None):
         isp_sh = _perf_num(kin.get('isp_shifting'))
         isp_pr = _perf_num(kin.get('isp_predicted'))
         if isp_sh and isp_sh > 0 and isp_pr is not None:
-            eta_kin = isp_pr / isp_sh
-            kin_note = (f"eta_kin = {eta_kin * 100:.2f}% "
-                        f"({kin.get('fidelity_used', 'engineering')} "
-                        f"finite-rate correlation)")
-    except Exception as exc:                     # kinetik yol yoksa sessiz düşme YOK
-        kin_note = f"eta_kin not available ({type(exc).__name__})"
+            kin_satir = (
+                f"Kinetic efficiency η_kin = {isp_pr / isp_sh * 100:.2f}% "
+                "(finite-rate correlation estimate for this analysis): not "
+                "applied to any motor result.")
+    except Exception:                  # kinetik yol yoksa satır bunu SÖYLER
+        kin_satir = None
 
-    if eta_c is None and eta_kin is None:
-        return None, 'Not available for this run: solver reported no c* or Isp data.'
-
-    total = 1.0
-    parts = []
-    if eta_c is not None:
-        total *= eta_c
-        parts.append(
-            f"eta_c* = {eta_c * 100:.2f}%"
-            + ('' if eta_c_supplied
-               else ' (theoretical equilibrium; no measured c* efficiency supplied)')
-        )
-    if eta_kin is not None:
-        total *= eta_kin
-    if kin_note:
-        parts.append(kin_note)
-    return total * 100.0, ' | '.join(parts)
+    if eta_pct is None and kin_satir is None:
+        return None, ['Not available for this run: solver reported no c* '
+                      'or Isp data.']
+    satirlar.append(kin_satir or
+                    'Kinetic efficiency: not available for this analysis.')
+    return eta_pct, satirlar
 
 
 def _of_sweep_solve(fuel, ox, pc, lo, hi, n_points, analyzer=None):
@@ -3080,7 +3175,8 @@ def _propellant_from_combustion_data(combustion_data):
     return out
 
 
-def create_combustion_analysis_plots(combustion_data, propellant=None):
+def create_combustion_analysis_plots(combustion_data, propellant=None,
+                                     applied_efficiency=None):
     """Combustion dashboard fed by the equilibrium solver (no placeholders).
 
     Parameters
@@ -3093,6 +3189,10 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
         (the sweep re-solves equilibrium at each point). Absent -> that
         quadrant states it is unavailable instead of drawing a shape
         function.
+    applied_efficiency : dict, optional
+        ``combustion_panel_applied_efficiency(motor_results)``: the c* and
+        kinetic efficiencies the motor applied in this run. Given -> the
+        gauge and its note show the motor's own numbers (V306/SAYI NR-1).
     """
     from plotly.subplots import make_subplots
 
@@ -3106,7 +3206,7 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
         rows=2, cols=2,
         subplot_titles=('Chamber Equilibrium Composition (solver)',
                         'Temperature by Station (solver)',
-                        'Combustion / Kinetic Efficiency',
+                        'Combustion (c*) Efficiency',
                         'Isp vs O/F (equilibrium sweep)'),
         specs=[[{'type': 'bar'}, {'type': 'scatter'}],
                [{'type': 'indicator'}, {'type': 'scatter'}]]
@@ -3149,16 +3249,23 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
     else:
         notes.append('Station temperatures not available for this run.')
 
-    # --- (2,1) Verim göstergesi: HESAPLANMIŞ ---------------------------
-    eff_pct, eff_note = _combustion_efficiency_breakdown(
-        combustion_data, propellant)
+    # --- (2,1) c* verimi göstergesi: MOTORUN UYGULADIĞI η_c* -------------
+    # V306/SAYI (NR-1): gösterge yalnız η_c*'tır (manşetle aynı sayı);
+    # η_kin ayrı, adlı not satırıdır (bkz. _combustion_efficiency_breakdown).
+    eff_pct, eff_notes = _combustion_efficiency_breakdown(
+        combustion_data, propellant, applied=applied_efficiency)
     if eff_pct is not None:
         # P8B3-10 (ÖH D22 / fea-cfd a2, 4 Eylül 2026) — SKALA İĞNEYİ İÇİNE
         # ALIR. Skala [90, 100]'e çivilenmişti; ÖLÇÜLDÜ (once_p8b3.json):
         # eta_c* = %85 ve %70 koşularında iğne skalanın DIŞINA düşüyordu
         # (2/4 vaka), yani hibritler için tipik olan verimlerde gösterge
-        # okunamaz hâle geliyordu. Taban yalnız gerektiği kadar iner;
-        # 95/98 eşikleri MUTLAK kalır (değere göre kaymaz).
+        # okunamaz hâle geliyordu. Taban yalnız gerektiği kadar iner.
+        # V306/SAYI (NR-1): tehlike/uyarı/güvenli bantları (95/98) KALKTI.
+        # Gösterge artık motorun uyguladığı η_c*'ı okur; örnek hibritin
+        # kaynaklı varsayılanı (ölçülmüş 26 ateşlemenin ortancası, 0,89)
+        # kaynaksız bir eşikle "tehlike" kırmızısına boyanıyordu. Bantların
+        # kaynağı hiç yoktu — P8B3-09 (_perf_gauge_panel) emsali: gösterge
+        # yalnız büyüklüğü okutur, hüküm iddia etmez.
         eta_lo = ETA_GAUGE_LO_PCT
         if eff_pct < eta_lo:
             eta_lo = math.floor(eff_pct / ETA_GAUGE_LO_QUANTUM_PCT) \
@@ -3168,32 +3275,27 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
         if eff_pct > eta_hi:
             eta_hi = math.ceil(eff_pct / ETA_GAUGE_HI_QUANTUM_PCT) \
                 * ETA_GAUGE_HI_QUANTUM_PCT
-        eta_e1, eta_e2 = ETA_GAUGE_STEP_EDGES_PCT
-        eta_steps = [
-            {'range': [eta_lo, eta_e1], 'color': STEP_DANGER},
-            {'range': [eta_e1, eta_e2], 'color': STEP_WARN},
-            {'range': [eta_e2, eta_hi], 'color': STEP_SAFE},
-        ]
         fig.add_trace(
             go.Indicator(
                 mode="gauge+number+delta",
                 value=eff_pct,
                 domain={'x': [0, 1], 'y': [0, 1]},
-                # Başlık BİLEREK yok: subplot_titles'tan gelen "Combustion /
-                # Kinetic Efficiency" annotation'ı ile aynı noktaya basılıp
-                # üst üste biniyordu (saha fotoğrafı 2026-07-20). Formül
-                # (eta_c* x eta_kinetic) altta hover/nota değil sayının
-                # yüzde soneki yeterli — _perf_gauge_panel emsali.
+                # Başlık BİLEREK yok: subplot_titles'tan gelen panel
+                # başlığı annotation'ı ile aynı noktaya basılıp üst üste
+                # biniyordu (saha fotoğrafı 2026-07-20). Kaynak ve η_kin
+                # not satırlarında; sayının yüzde soneki yeterli —
+                # _perf_gauge_panel emsali.
                 number={'suffix': ' %', 'valueformat': '.2f'},
-                # Referans = ideal kayan-denge (kayıpsız) hâl
+                # Referans = ideal (kuramsal denge) c*, η_c* = 1
                 delta={'reference': 100.0, 'valueformat': '.2f'},
                 gauge={
                     'axis': {'range': [eta_lo, eta_hi]},
-                    'bar': {'color': COL_SAFE},
-                    'steps': eta_steps,
+                    'bar': {'color': PALETTE[6]},
+                    # NR-1: 'steps' BİLEREK boş — kaynaksız hüküm bandı yok.
+                    'steps': [],
                 }),
             row=2, col=1)
-    notes.append(eff_note)
+    notes.extend(eff_notes)
 
     # --- (2,2) Gerçek O/F taraması ------------------------------------
     sweep = _combustion_of_sweep(propellant)
@@ -3245,12 +3347,13 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
                            f'step {(_sw_adim if _sw_adim is not None else float("nan")):.3f}'
                            '<extra></extra>')),
             row=2, col=2)
+        # V306/SAYI (NR-1): ham alan adı (motor.optimum_of_ratio) not
+        # metninden çıktı; künye izin meta'sında ('canonical') kalır.
         notes.append(
             f'Sweep maximum O/F {of_vals[k]:.2f} is a grid node of a '
             f'{len(of_vals)}-point sea-level-exit sweep; the canonical '
-            'optimum O/F is the solver value (motor.optimum_of_ratio), '
-            'searched continuously at the design expansion ratio, so the '
-            'two differ.')
+            "optimum O/F is the solver's own value, searched continuously "
+            'at the design expansion ratio, so the two differ.')
         # --- P8B3-06 (ÖH D15 / fea-viz a2) -----------------------------
         # (a) Bu koşunun KENDİ çalışma noktası çizilir: taramanın bandı
         #     artık O/F'i kapsıyor (PERF_SWEEP_OF_BRACKET), kullanıcı
@@ -3332,21 +3435,24 @@ def create_combustion_analysis_plots(combustion_data, propellant=None):
                                f'<br>{_run_cikis_metni}'
                                '<extra></extra>')),
                 row=2, col=2)
+            # V306/SAYI (NR-1): çıkış künyesi KODU (ör.
+            # sea_level_default_equilibrium) kullanıcı notundan çıktı; kod
+            # izin meta'sında (exit_basis) makine alanı olarak kalır, cümle
+            # aynı yolu sözcükle söyler.
             if _run_deniz is True:
                 notes.append(
                     'This run point: the run O/F solved with the exit '
-                    'anchored to ISA sea level and no nozzle expansion ratio '
-                    f'(exit basis {_run_taban}) - the same exit anchor as '
-                    "the sweep curve; it is not the motor's delivered Isp "
-                    'at its nozzle expansion ratio.')
+                    'anchored to ISA sea level and no nozzle expansion '
+                    "ratio - the same exit anchor as the sweep curve; it is "
+                    "not the motor's delivered Isp at its nozzle expansion "
+                    'ratio.')
             elif _run_deniz is False:
                 notes.append(
                     'This run point: the run O/F solved with the exit at the '
-                    'supplied nozzle expansion ratio (exit basis '
-                    f'{_run_taban}); the sweep curve is anchored to ISA sea '
-                    'level with no expansion ratio - a different '
-                    'thermochemistry path, so the point need not lie on the '
-                    'curve.')
+                    'supplied nozzle expansion ratio; the sweep curve is '
+                    'anchored to ISA sea level with no expansion ratio - a '
+                    'different thermochemistry path, so the point need not '
+                    'lie on the curve.')
             else:
                 notes.append(
                     'This run point: the solver result does not publish its '
@@ -3650,8 +3756,8 @@ def create_structural_analysis_plots(structural_data):
                 'the figure.')
         else:
             notes.append('No safety-factor threshold line is drawn: this '
-                         'solution reports no design target, and a target '
-                         'is not invented.')
+                         'solution reports no design target, and no substitute '
+                         'target is assumed.')
         if safety.get('verdict_withheld'):
             gerekce = safety.get('verdict_withheld_reasons')
             notes.append(
@@ -6485,6 +6591,15 @@ def _cross_section_final_port(motor_data, r_pf_mm, r_go_mm):
 CROSS_SECTION_TOTAL_LABEL_AT = 0.25
 
 
+def _olcu_mm_metni(deger_mm):
+    """Kesit ölçüsünü girilen basamakla yazar (en çok 2 ondalık).
+
+    364.0 -> '364', 3.5 -> '3.5', 120.25 -> '120.25'. Sayı değişmez; yalnız
+    gösterim (V306/DİL-SUNUCU, DİL-KATI DEVİR D9).
+    """
+    return f'{float(deger_mm):.2f}'.rstrip('0').rstrip('.')
+
+
 def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
     """Çözücü geometrisinden mühendislik eksenel kesit çizimi.
 
@@ -6819,13 +6934,20 @@ def create_improved_motor_cross_section(motor_data, motor_type='hybrid'):
         # Ölçü çizgisi yığının TAMAMINI kapsar; boşluk varsa etiket bunu
         # açıkça söyler, yoksa "500 mm" yazıp 504 mm'lik bir aralığı
         # göstermiş olurduk (T70).
+        # V306/DİL-SUNUCU (DİL-KATI DEVİR D9, M-KATI-7): parça ve boşluk
+        # tam sayıya yuvarlanıyordu (girilen 3,5 mm boşluk '4' basılıyor,
+        # 3 x 120 + 2 x 4 = 368 ⟷ etiketteki 367 çelişiyordu). Ölçüler
+        # girilen basamakla (en çok 2 ondalık, sondaki sıfırlar atılır).
         if grain_n_seg > 1 and grain_gap_mm > 0:
-            _grain_lbl = (f'Grain stack = {L_stack:.0f} mm '
-                          f'({grain_n_seg} x {grain_seg_mm:.0f} + '
-                          f'{grain_n_seg - 1} x {grain_gap_mm:.0f} gap)')
+            _grain_lbl = (f'Grain stack = {_olcu_mm_metni(L_stack)} mm '
+                          f'({grain_n_seg} x '
+                          f'{_olcu_mm_metni(grain_seg_mm)} + '
+                          f'{grain_n_seg - 1} x '
+                          f'{_olcu_mm_metni(grain_gap_mm)} gap)')
         elif grain_n_seg > 1:
-            _grain_lbl = (f'Grain = {L_g:.0f} mm '
-                          f'({grain_n_seg} x {grain_seg_mm:.0f} mm)')
+            _grain_lbl = (f'Grain = {_olcu_mm_metni(L_g)} mm '
+                          f'({grain_n_seg} x '
+                          f'{_olcu_mm_metni(grain_seg_mm)} mm)')
         else:
             _grain_lbl = f'Grain = {L_g:.0f} mm'
         dim_h(zg0, zg1, r_out + 42, _grain_lbl)
@@ -7492,7 +7614,7 @@ def _pintle_tip_cross_section(injector_data):
             "so the body would have zero or negative wall thickness. "
             "Check outer_diameter / pintle_diameter / gap against the "
             "injector solver output; no substitute dimension is "
-            "invented here.")
+            "used here.")
     outer_diameter = _d_out if outer_is_real else (
         bore if govde_yok else 50.0)
     sema_var = not (pintle_is_real and gap_is_real)
@@ -7880,7 +8002,7 @@ def _concentric_cross_section_legacy(injector_data):
                 "so the body would have zero or negative wall thickness. "
                 "Check outer_diameter / pintle_diameter / gap against the "
                 "injector solver output; no substitute dimension is "
-                "invented here.")
+                "used here.")
 
     # Anüler akış alanı ancak İKİ gerçek boyuttan türetilebilir.
     area_is_real = pintle_is_real and gap_is_real

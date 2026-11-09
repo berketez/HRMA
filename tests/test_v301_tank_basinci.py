@@ -490,7 +490,14 @@ def test_n2o_acik_self_pressurised_beyansiz_istekle_bit_ayni():
     assert _md5(j0) == _md5(j1) == _md5(j2)
     idd = j0['motor']['injector_design']
     assert idd['feed_pressure_source'] == 'n2o_saturation_at_tank_temperature'
-    assert idd['feed_pressure_bar'] == pytest.approx(50.5433585, rel=1e-7)
+    # V306/SAYI (PANEL-SAYI DEVİR 1): devre artık tank modeliyle AYNI doyma
+    # kaynağını okur (önce tablo ara değeri 50,5433585 ⟷ blowdown 50,52509);
+    # beklenti tek kaynağın kendisi, bit-aynı.
+    from hrma.analysis.tank_blowdown import N2OSaturation
+    assert idd['feed_pressure_bar'] == N2OSaturation().psat(
+        j0['motor']['oxidizer_inlet_state']['temperature_K']) / 1e5
+    assert idd['feed_pressure_bar'] == \
+        j0['motor']['tank_blowdown']['initial_pressure_bar']
     for alan in ('tank_pressure_source', 'inlet_state',
                  'feed_line_loss_included'):
         assert alan not in idd, alan

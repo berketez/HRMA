@@ -181,8 +181,8 @@ At release time also bump `version`/`date-released` in `CITATION.cff`.
 
 ## 6. Ground rules
 
-- MIT licensed (see `LICENSE`); contributions are accepted under the same
-  licence.
+- Licensed GPL-3.0-or-later (see `LICENSE`); contributions are accepted under
+  the same licence.
 - Do not commit secrets, tokens, or personal data. Do not commit build outputs
   (`dist/`, `packaging/mac/`, `packaging/win/`) — they are gitignored and
   measured in gigabytes.

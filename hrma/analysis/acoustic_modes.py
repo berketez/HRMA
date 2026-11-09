@@ -1024,7 +1024,7 @@ def analyze_from_engine_result(engine_result: Dict,
         cavity_basis = (
             'NOMINAL chamber diameter — the solver did not report a free gas '
             'volume (chamber_volume_actual_m3), so no volume-preserving '
-            'equivalent cavity could be built and none is invented. If the '
+            'equivalent cavity could be built and no substitute cavity is assumed. If the '
             'real gas cavity is smaller than pi/4*D^2*L, the transverse '
             'frequencies reported here are LOWER than the physical ones.')
         cavity_source = 'nominal_chamber_diameter'

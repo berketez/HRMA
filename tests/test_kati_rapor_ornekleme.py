@@ -199,7 +199,7 @@ def test_belirlenemeyen_sinif_arayuze_ingilizce_sozcuk_gondermiyor():
         solid_mod.SOLID_THRUST_SHAPE_UNDETERMINED
     # missingReason'ın okuduğu ad: '<key>_basis'
     assert blok['thrust_curve_type_basis']
-    assert 'no class is invented' in blok['thrust_curve_type_basis']
+    assert 'no class is assigned' in blok['thrust_curve_type_basis']
 
 
 def test_rapor_sinifi_gerekcesiyle_yayimliyor(egriler):

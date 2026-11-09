@@ -217,9 +217,10 @@ class TestOHD1502KapiIkiBuyukluk:
         j = r.get_json() or {}
         from tests.fea.yuk_modeli_araci import (ARAC_BIRINCIL_KIP, gamma_suz,
                                                 geri_donus_yukte)
+        # V306/KATI-MODEL (M-KATI-10): katıda ürün akışı artık kasa silindirini ağa koyar; bu araç yalnız-lüle konturunda ölçülmüştü, o geometri köprünün beyanlı kipiyle (include_chamber=False) korunur. Kasa silindirli ürün yolunun bekçisi: tests/test_v306_kati_model.py::TestMKati10YapisalAg.
         s = _sessiz(bridge.run_structural_from_motor,
                     gamma_suz(j.get('motor', j)),
-                    axial_fix=ARAC_BIRINCIL_KIP)
+                    axial_fix=ARAC_BIRINCIL_KIP, include_chamber=False)
         geri_donus_yukte(s)
         kd = s['meta']['kisit_duyarliligi']
         assert kd['yayimlanan_kip'] != kd['birincil_kip'], (

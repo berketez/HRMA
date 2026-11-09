@@ -29,7 +29,6 @@
    "grain_length": 360,
    "star_points": 6,
    "star_radius": 15,
-   "star_fillet": 2,
    "fin_count": 4,
    "fin_width": 8,
    "fin_length": 20,
@@ -87,13 +86,13 @@
    "wind_speed": 0,
    "propellant_mass": 2.407,
    "case_mass": 1.945,
-   "nozzle_mass": 0.379,
+   "nozzle_mass": 0.065,
    "insulation_mass": 0.43,
    "liner_mass": 0.269,
    "avionics_mass": 0.2,
    "closure_mass": 0.71,
-   "dry_mass": 3.733,
-   "wet_mass": 6.14,
+   "dry_mass": 3.42,
+   "wet_mass": 5.826,
    "pressure_sensor_range": 10,
    "sampling_freq": 1000,
    "load_cell_capacity": 5000,
@@ -102,15 +101,83 @@
    "filter_cutoff": 100,
    "uncertainty_level": 2,
    "hrma_ai_goal": "",
+   "mc_n_samples": 300,
    "grainfea_show_mesh": true,
-   "traj_initial_mass": 6.141,
-   "traj_final_mass": 3.734,
+   "traj_initial_mass": 5.826,
+   "traj_final_mass": 3.42,
    "traj_drag_coeff": 0.5,
    "traj_ref_area": 0.00622,
    "traj_burn_time": 2.277,
    "parachute_area": "",
    "parachute_cd": "",
    "parachute_deploy_delay": ""
+  },
+  "dynamic": {
+   "flight": {
+    "format": 1,
+    "sixdof": {
+     "format": 1,
+     "fields": {
+      "sd_body_d": "0.1",
+      "sd_body_l": "2",
+      "sd_nose_l": "0.4",
+      "sd_nose_type": "ogive",
+      "sd_fin_count": "4",
+      "sd_fin_root": "0.2",
+      "sd_fin_tip": "0.1",
+      "sd_fin_span": "0.11",
+      "sd_fin_sweep": "0.08",
+      "sd_fin_pos": "1.8",
+      "sd_dry_m": "3.420",
+      "sd_prop_m": "2.407",
+      "sd_cd0": "0.45",
+      "sd_wind": "5",
+      "sd_wind_dir": "0",
+      "sd_elev": "90",
+      "sd_azimuth": "0",
+      "sd_rail": "5",
+      "sd_thrust": "1298.5",
+      "sd_burn": "2.28"
+     },
+     "user_typed": [],
+     "mass_mode": "simple",
+     "components": [
+      {
+       "name": "Nose cone",
+       "mass": 0.5,
+       "x": 0.2,
+       "propellant": false
+      },
+      {
+       "name": "Body tube",
+       "mass": 3,
+       "x": 1.2,
+       "propellant": false
+      },
+      {
+       "name": "Fins",
+       "mass": 0.5,
+       "x": 1.9,
+       "propellant": false
+      },
+      {
+       "name": "Motor (dry)",
+       "mass": 4,
+       "x": 1.7,
+       "propellant": false
+      },
+      {
+       "name": "Oxidizer/Fuel",
+       "mass": 4,
+       "x": 1.55,
+       "propellant": true
+      }
+     ],
+     "thrust_source": "auto",
+     "use_curve": true
+    },
+    "trajectory_user_typed": []
+   }
   }
  },
  "description": "Örnek tasarım: KNDX - Potassium Nitrate/Dextrose 65/35 katı motor, 75 mm yakıt bloğu, 3 BATES segmenti (kartuş yüklü, gövdeye takılan), 40 bar tasarım basıncı. Kasa iç çapını HRMA tane çapından türetir ve sonuçta beyan eder. Termokimya ve yanma hızı uygulamanın merkezi kataloglarındandır (propellants_db, burn_rate_db rejim fitleri). / Example design: KNDX - Potassium Nitrate/Dextrose 65/35 solid motor, 75 mm grain, 3 BATES segments (cartridge-loaded, inserted into the case), 40 bar design pressure. HRMA derives the case inner diameter from the grain diameter and declares it in the results. Thermochemistry and burn rate come from the application catalogues (propellants_db, burn_rate_db regime fits).",
@@ -121,9 +188,9 @@
   "isp_s": 125.2844504611557,
   "isp_basis": "sea_level",
   "peak_thrust_N": 1498.1941000586567,
-  "computed_with_version": "3.0.5"
+  "computed_with_version": "3.0.6"
  },
- "app_version": "3.0.5",
+ "app_version": "3.0.6",
  "created_at": "2026-07-30T17:01:45",
- "updated_at": "2026-10-28T08:21:02"
+ "updated_at": "2026-11-09T16:28:16"
 }

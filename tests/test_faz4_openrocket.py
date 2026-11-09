@@ -259,8 +259,18 @@ class TestSifirCapliMotorUretilemez:
         alanlar = _motor_satiri(eng)
         assert float(alanlar[1]) > 0.0 and float(alanlar[2]) > 0.0
         # .eng motor satırı kütleyi 3 ondalıkla yazar (RASP biçimi).
+        # V306/UÇUŞ-KÜTLE (kalem 2): RASP itici alanı yanma boyunca HARCANAN
+        # kütledir (uçuşun harcadığıyla aynı sayı); tankta kalan N₂O ve
+        # yanmayan tane yüklü kütlededir (= motorun kalkış kütlesi). Eski
+        # beklenti ``propellant_mass_total`` (yüklü ox + yanan yakıt) tankta
+        # kalan oksitleyiciyi itici sayıyordu.
+        from hrma.analysis.flight_vehicle import motor_flight_thrust
+        ucus = motor_flight_thrust('hybrid', gercek_hibrit)
         assert float(alanlar[4]) == pytest.approx(
-            gercek_hibrit['propellant_mass_total'], abs=1e-3)
+            ucus['propellant_consumed_kg'], abs=1e-3)
+        assert float(alanlar[5]) == pytest.approx(
+            gercek_hibrit['design_summary']['key_dimensions']['total_mass_kg'],
+            abs=1e-3)
 
     def test_designation_sinif_harfini_uydurmuyor(self, exporter):
         """``M0-...`` dizesinin "M"si 10000 N·s varsayılanından geliyordu."""

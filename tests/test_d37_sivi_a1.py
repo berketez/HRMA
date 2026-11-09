@@ -315,10 +315,16 @@ def _yalniz_butcede_ariza(monkeypatch):
     from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
     asil = LiquidRocketEngine._calculate_feed_system_pressure_drops
 
-    def sarmal(self):
+    # V306/SIVI-DEFTER: yöntem isteğe bağlı ``include_jacket`` aldı
+    # (çevrimin hat düşümü çağrısı ceketsiz); sarmal argümanları geçirir.
+    def sarmal(self, *a, **kw):
+        # V306/SIVI-CEKET: bütçenin ceket kalemi (marşın ceketsiz zinciri)
+        # bütçeyi iç içe çağırır; arıza düzeneği yeniden girişe dayanıklı.
+        if 'calculate_injector_design' in self.__dict__:
+            return asil(self, *a, **kw)
         self.calculate_injector_design = _patlat
         try:
-            return asil(self)
+            return asil(self, *a, **kw)
         finally:
             del self.calculate_injector_design
     monkeypatch.setattr(LiquidRocketEngine,
@@ -341,15 +347,23 @@ def test_f20_uc_arizada_200_ve_tuketiciler_sayi_uretmez(istemci,
 
 def test_f20_cevrim_basma_basinci_verirse_pompa_zinciri_ondan(istemci,
                                                               monkeypatch):
-    """Turbopompalı çevrimde basma basıncı çevrim çözümünden gelir; bütçenin
-    enjektör kalemi olmadan da o zincir kendi sayısıyla sürer."""
+    """Bütçenin enjektör kalemi düşünce pompa zinciri sayı UYDURMAZ.
+
+    V306 ana model (9 Kas, K5_KARAR EK7 — SIVI-CEKET-A yayım kapısı): eski
+    iddia ("zincir çevrim çözümünden kendi sayısıyla sürer") kapıdan önceydi.
+    Ölçüldü (bakim c50933032): bütçenin enjektör kalemi olmadan ceket
+    marşının giriş basıncı (``jacket_source_node`` = pompa çıkışı) kurulamaz,
+    marşın model sınırı sınaması değerlendirilemez; pompa çıkış gereksinimi
+    ceket düşümünü içerdiği için besleme ve çevrim sayıları adlı nedenle
+    bekletilir (``feed_system`` / ``detailed_feed_system`` = None). Arızanın
+    sessiz son tura ya da varsayılana dönmediği sınanır."""
     _yalniz_butcede_ariza(monkeypatch)
     d = _sivi(istemci, engine_cycle='gas_generator')
-    assert d['feed_system']['pressure_drops']['total_ox'] is None
-    dfs = d['detailed_feed_system']
-    cyc = dfs['engine_cycle_solution']
-    assert cyc['status'] == 'converged'
-    assert dfs['required_pump_discharge_bar'] is not None
+    kapi = d['cooling_circuit_publication']
+    assert kapi['code'].startswith('jacket_') and 'not_evaluated' in kapi['code'], kapi
+    assert kapi['reason'], kapi
+    assert d['feed_system'] is None
+    assert d['detailed_feed_system'] is None
 
 
 # =========================================================================
@@ -482,8 +496,27 @@ def test_d1_d2_motor_cidari_marsin_kurdugu_regen_cidari(istemci, monkeypatch,
     d = _sivi(istemci, fuel_type=yakit, mixture_ratio=mr,
               chamber_wall_thickness=cidar_mm)
     fit = d['cooling_system']['channel_count_fit']
-    assert len(casus.kurulan) == 1, casus.denenen_cidar
-    rc = casus.kurulan[0]
+    # V306/SIVI-DEFTER (K5): açık çevrim defterinde ceket ΔP'si yakıt pompa
+    # çıkışına seri girdiği için metan marşı (soğutmada çözülen) sabit
+    # noktanın parçasıdır; boğaz her değiştiğinde bir kez daha çözülür
+    # (iç geçişler çözmez). Sayı defterin kendi beyanıdır; YAYIMLANAN marş
+    # SONUNCUDUR ve yayımlanan boğazda kurulmuştur. Cidar her kurulumda
+    # aynıdır (sessiz cidar denemesi yok). RP-1'de soğutma toplu zincirdir,
+    # istasyon marşı ısıl korumada TEK kez kurulur.
+    # V306/SIVI-CEKET (K5_KARAR EK4): bütçenin ceket kalemi marşın ΔP'si
+    # olduğu için RP-1 marşı bütçe girişinde de kurulur (her ceket
+    # çözümünde bir + yayımlanan girişte bir); metan marşı her ceket
+    # çözümünde giriş ⟷ ΔP sabit noktası turları kadar kurulur. Sayı artık
+    # bir kurulum-sayısı sözleşmesi değil: denetim, bütün kurulumların AYNI
+    # cidarla yapıldığı ve yayımlananın (sonuncu) yayımlanan boğazda olduğu.
+    defter = d.get('mass_flow_ledger') or {}
+    if defter.get('status') == 'open_cycle_closed':
+        assert len(casus.kurulan) >= defter['fixed_point']['jacket_solves']
+    assert len(casus.kurulan) >= 1
+    assert len(set(casus.denenen_cidar)) == 1, casus.denenen_cidar
+    rc = casus.kurulan[-1]
+    assert rc.throat_diameter == pytest.approx(float(d['throat_diameter']),
+                                               rel=1e-12)
     assert rc.wall_thickness * 1e3 == pytest.approx(
         fit['hot_wall_thickness_mm'], rel=0, abs=1e-12)
     # Aynı geometri: marşın kendi sığma hükmü motorun sınırıyla bire bir.
@@ -908,13 +941,22 @@ def test_s2_ornek_fea_zinciri_min_sf_en_az_1(istemci, ornek):
     # kapısı aynen), gaz basıncıyla yüklenen homojen yığın değil. Tek
     # katmanlı yolda beklenti (izantropik P(x)) DEĞİŞMEDİ. Ölçüm:
     # docs/scofield/raw/OH/V301/sivi-cidar/olcum/k3_sonra.json.
+    #
+    # V306/FEA-SIVI kalem 1 — BEKLENTİ YENİDEN DEĞİŞTİ (yalnız iki
+    # katmanlı rejeneratif cidar): FEA artık astar + kanal katmanı + dış
+    # kabuk yığınını iki malzemeyle çözer; gaz iç basıncı astarın iç
+    # yüzüne izantropik P(x) olarak (tek katmanlı yolla AYNI yük modeli),
+    # ceket soğutucu basıncı kanal tabanı/tavanına çift olarak etkir.
+    # Kuvvet dengesi kapısı gaz yükü için aynen koşar. Ölçüm:
+    # docs/scofield/raw/OH/V306/fea-sivi/olcum/sonra.json.
     iki_katman = (ornek['structural_analysis']['chamber_structure']
                   .get('wall_model') == 'two_layer_regenerative')
-    beklenen = ('coolant_uniform_closeout' if iki_katman
-                else 'isentropic_1d')
-    assert lm.get('distribution') == beklenen, (
+    assert lm.get('distribution') == 'isentropic_1d', (
         'FEA iç yüzey yükü beklenen fiziksel yük modeli değil',
-        lm.get('distribution'), beklenen)
+        lm.get('distribution'))
+    if iki_katman:
+        assert f['two_layer']['solved'] is True
+        assert lm.get('coolant_channel_pressure_pa') > 0.0
     assert (lm.get('force_balance') or {}).get('holds') is True
     assert f['scalars']['min_safety_factor'] >= 1.0
 

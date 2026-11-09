@@ -270,14 +270,21 @@ class TestGrainStressIsRealElasticity:
         res = solid()['structural_analysis']['grain_structural']
         assert res['strain_capability_percent'] > 0
         assert res['strain_safety_factor'] > 0
-        expected = ('Low' if res['strain_safety_factor'] >= 2.0
-                    else 'Medium' if res['strain_safety_factor'] >= 1.0 else 'High')
+        # V306/KATI-TANE (K1): NASA SP-8073 Denk. (46) MS = SF − 1; kaynaksız
+        # 2 / 1 bantları kalktı (küçük-gerinim aralığında).
+        assert abs(res['bore_strain_percent']) <= 100 * res['small_strain_limit']
+        expected = ('capability_exceeded' if res['strain_safety_factor'] < 1.0
+                    else 'capability_not_exceeded')
         assert res['crack_propagation_risk'] == expected
 
     def test_star_grain_reports_its_stress_concentration_assumption(self):
         star = solid(grain_type='star')['structural_analysis']['grain_structural']
-        assert star['stress_concentration_factor'] > 1.0
+        # V306/KATI-TANE (K2): kaynaksız nominal 2,0 kalktı; keskin köşeli
+        # portun yığılması çözülmez ve sayı konmaz (beyanlı).
+        assert star['stress_concentration_factor'] is None
+        assert star['stress_concentration_status'] == 'not_resolved'
         assert 'stress-concentration' in star['model_note']
+        assert star['allowable_concentration_factor'] > 0
 
     def test_second_grain_stress_source_agrees(self):
         """İkinci (eski) grain gerilme fonksiyonu artık aynı kaynağa bağlı."""

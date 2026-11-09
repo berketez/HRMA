@@ -15,8 +15,28 @@ Varsayımlar (hepsi sonuç meta'sında beyan edilir):
     (NASA SP-8073); bu kip zaman/oran bağımlılığı olmayan bir ÖN
     BOYUTLANDIRMA aracıdır, kabul analizi değildir.
   * Birim kalınlık (1 m) — düzlemsel kesit başına sonuç.
-  * Termal büzülme/genleşme MODELLENMEZ (motorun analitik
-    _calculate_grain_structural bloğu kürleme soğumasını ayrıca verir).
+  * ISIL YÜK (V306/TANE NR-16): üniform serbest ısıl gerinim α·ΔT
+    (``thermal_strain``) ilk gerinim olarak taşınır. Gövdeye yapıştırılmış
+    tanede kürleme sıcaklığından depolama/işletme sıcaklığına soğuma,
+    dış yüzeyi gövdeyle tutulu tanede port yüzeyinde ÇEKME gerinimi
+    üretir; motorun analitik _calculate_grain_structural bloğu aynı yükü
+    aynı kaynaktan (SOLID_GRAIN_MECHANICS + tane yerleşimi) taşır.
+    Varsayılan 0 → yalnız basınç yükü (bugünkü sonuç bit-aynı).
+
+Isıl yük formülasyonu (düzlem şekil değiştirme, ε_z = 0)
+--------------------------------------------------------
+Serbest ısıl gerinim ε_T = α·ΔT her yönde eşittir. ε_z = 0 kısıtı altında
+düzlem içi etkin ilk gerinim ε₀ = (1+ν)·α·ΔT·[1, 1, 0] olur ve
+
+    σ = D (ε − ε₀),   σ_z = ν(σ_x + σ_y) − E·α·ΔT,
+    F_T = Σ_e ∫ B̄ᵀ D ε₀ dA   (eşdeğer ısıl düğüm kuvvetleri).
+
+D ε₀ = E·α·ΔT/(1−2ν)·[1, 1, 0] analitik bloktaki T0 terimidir
+(Timoshenko & Goodier, kalın cidarlı silindirde üniform sıcaklık;
+ilk gerinim yükünün eleman formülasyonu Cook ve ark.'ndaki standart
+biçimdir — bölüm numarası burada iddia edilmez). Port lif gerinimi yer
+değiştirmeden ölçüldüğü için TOPLAM gerinimdir (u_θ/r) — analitik
+bloğun ``bore_strain = u(a)/a`` tanımıyla aynı büyüklük.
 
 Formülasyon
 -----------
@@ -280,6 +300,7 @@ def _assemble_stiffness_planar(mesh: PlanarSectionMesh, D: np.ndarray):
     M = mesh.n_elems
     Ke = np.zeros((M, 8, 8))
     Bbar_gauss = np.zeros((M, 4, 3, 8))
+    detJ_gauss = np.zeros((M, 4))
 
     B_cent, _detJ_c = _point_B_planar(X, 0.0, 0.0)
     b_dil_cent = B_cent[:, 0, :] + B_cent[:, 1, :]
@@ -293,6 +314,7 @@ def _assemble_stiffness_planar(mesh: PlanarSectionMesh, D: np.ndarray):
         # Gauss ağırlığı 1; birim kalınlık t = 1 m.
         Ke += detJ[:, None, None] * np.einsum('esi,st,etj->eij', Bb, D, Bb)
         Bbar_gauss[:, g] = Bb
+        detJ_gauss[:, g] = detJ
 
     edof = _element_dof_map(mesh.elems)
     rows = np.repeat(edof, 8, axis=1).ravel()
@@ -300,8 +322,35 @@ def _assemble_stiffness_planar(mesh: PlanarSectionMesh, D: np.ndarray):
     ndof = 2 * mesh.n_nodes
     K = sp.coo_matrix((Ke.ravel(), (rows, cols)), shape=(ndof, ndof)).tocsr()
     cache = {"Bbar_gauss": Bbar_gauss, "B_cent": B_cent,
-             "cent_xy": cent_xy, "edof": edof}
+             "cent_xy": cent_xy, "edof": edof, "detJ_gauss": detJ_gauss}
     return K, cache
+
+
+def thermal_initial_strain_plane_strain(thermal_strain: float,
+                                        nu: float) -> np.ndarray:
+    """Düzlem şekil değiştirmede üniform ısıl ilk gerinim ε₀ (3,).
+
+    ``thermal_strain`` = α·ΔT serbest (kısıtsız) ısıl gerinimdir. ε_z = 0
+    kısıtı düzlem dışı genleşmeyi düzlem içine aktarır: ε₀ = (1+ν)·α·ΔT
+    her iki normal bileşende, kaymada 0. D·ε₀ = E·α·ΔT/(1−2ν)·[1, 1, 0]
+    — analitik bloğun T0 terimi.
+    """
+    e0 = (1.0 + nu) * float(thermal_strain)
+    return np.array([e0, e0, 0.0])
+
+
+def _add_thermal_load(F: np.ndarray, cache: dict, D: np.ndarray,
+                      eps0: np.ndarray) -> None:
+    """Eşdeğer ısıl düğüm kuvvetleri F_T = Σ ∫ B̄ᵀ D ε₀ dA (birim kalınlık).
+
+    Rijitlikle AYNI B̄ ve AYNI Gauss noktaları kullanılır (tutarlı yük):
+    sabit ε₀'da B̄ = B olduğundan serbest cisimde üniform ısıl gerinim
+    gerilmesiz çözülür (yama testi).
+    """
+    sig0 = D @ eps0                                         # (3,)
+    fe = np.einsum('egsj,s,eg->ej', cache["Bbar_gauss"], sig0,
+                   cache["detJ_gauss"])                     # (M, 8)
+    np.add.at(F, cache["edof"].ravel(), fe.ravel())
 
 
 def _add_bore_pressure(F: np.ndarray, nodes: np.ndarray, edges: np.ndarray,
@@ -490,7 +539,7 @@ def _bore_fiber_strain(mesh: PlanarSectionMesh, u: np.ndarray):
     return eps_edge, eps_node
 
 
-def _result_meta_planar(outer_bc: str) -> dict:
+def _result_meta_planar(outer_bc: str, thermal_strain: float = 0.0) -> dict:
     """Varsayım/NOT_MODELLED beyanı (sahte veri yasağı gereği)."""
     if outer_bc == "bonded_rigid":
         dis_beyan = (
@@ -516,6 +565,11 @@ def _result_meta_planar(outer_bc: str) -> dict:
             "bağımsız); kabul ölçütü NASA SP-8073 gereği GERİNİMDİR"),
         "sinir_kosullari": {
             "port": "sabit oda basıncı P_c (tutarlı kenar kuvvetleri)",
+            "isil_yuk": (
+                f"üniform serbest ısıl gerinim α·ΔT = {thermal_strain:.6g} "
+                "ilk gerinim olarak (ε₀ = (1+ν)·α·ΔT düzlem içi, ε_z = 0)"
+                if thermal_strain != 0.0 else
+                "yok (α·ΔT = 0: yalnız port basıncı)"),
             "dis_yuzey": dis_beyan,
             "simetri": ("dilim kenarlarında kayar mesnet (ayna simetrisi; "
                         "eğik düzlemde RᵀKR dönüşümüyle)"),
@@ -526,8 +580,10 @@ def _result_meta_planar(outer_bc: str) -> dict:
             "VİSKOELASTİSİTE — katı yakıt gerçekte viskoelastiktir (NASA "
             "SP-8073); bu kip lineer elastik ÖN BOYUTLANDIRMADIR, kabul "
             "analizi değildir",
-            "termal büzülme/genleşme (kürleme soğuması) — motorun analitik "
-            "grain_structural bloğu ayrıca verir",
+            # NR-16: ısıl yük artık çözücüde; modellenmeyen kısım ısıl
+            # GRADYAN ve kasanın kendi ısıl büzülmesidir.
+            ("sıcaklık gradyanı (tane içinde üniform sıcaklık varsayılır) ve "
+             "gövdenin kendi ısıl büzülmesi (gövde ısıl gerinimsiz tutulur)"),
             "kasa esnemesi (dış yüzey rijit tutulur)" if
             outer_bc == "bonded_rigid" else
             "kasa desteği (dış yüzey serbest bırakıldı — doğrulama kipi)",
@@ -559,7 +615,9 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
                                material: Material,
                                bore_pressure_pa: float,
                                outer_bc: str = "bonded_rigid",
-                               strain_capability: Optional[float] = None
+                               strain_capability: Optional[float] = None,
+                               thermal_strain: float = 0.0,
+                               outer_radial_displacement: float = 0.0
                                ) -> PlanarGrainResult:
     """Tane kesiti için düzlem şekil değiştirme çözümü.
 
@@ -572,6 +630,14 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
     outer_bc : "bonded_rigid" (varsayılan) | "free" — modül docstring'i.
     strain_capability : yakıtın kopma uzaması (birim, 0-1) — verilirse
         gerinim emniyet katsayısı hesaplanır, verilmezse None beyan edilir.
+    thermal_strain : üniform serbest ısıl gerinim α·ΔT (birim; soğumada
+        negatif). 0 → ısıl yük yok ve sonuç bugünkü basınç-yalnız çözümle
+        BİT-AYNI (ısıl dal hiç koşmaz). Modül docstring'i: formülasyon.
+    outer_radial_displacement : V306/KATI-MODEL (M-KATI-16) — "bonded_rigid"
+        dış yüzeyde uygulanan RADYAL yer değiştirme [m] (kasanın basınç
+        altındaki genişlemesi, motorun analitik bloğunun dış sınır koşuluyla
+        AYNI sayı). 0 → bugünkü rijit kasa çözümüyle BİT-AYNI (dal koşmaz).
+        Yalnız "bonded_rigid" ile geçerlidir.
     """
     if outer_bc not in OUTER_BC_MODES:
         raise ValueError(f"outer_bc {OUTER_BC_MODES} içinden olmalı.")
@@ -583,6 +649,13 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
         if not np.isfinite(strain_capability) or strain_capability <= 0.0:
             raise ValueError("strain_capability verilirse sonlu ve > 0 "
                              "olmalı.")
+    eps_T = float(thermal_strain)
+    if not np.isfinite(eps_T):
+        raise ValueError("thermal_strain sonlu olmalı.")
+    if abs(eps_T) >= 1.0:
+        raise ValueError(
+            "thermal_strain birim gerinimdir (α·ΔT); |α·ΔT| >= 1 fiziksel "
+            "değil — birim (yüzde?) hatası.")
     _check_well_posed(mesh, outer_bc)
 
     D = elasticity_matrix_plane_strain(material.E, material.nu)
@@ -591,6 +664,12 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
     ndof = 2 * mesh.n_nodes
     F = np.zeros(ndof)
     _add_bore_pressure(F, mesh.nodes, mesh.inner_edges, p)
+    # NR-16: ısıl ilk gerinim yükü. 0'da dal koşmaz → basınç-yalnız çözüm
+    # bit-aynı kalır (kartuş yüklü tane ve doğrudan çağıranlar).
+    eps0 = None
+    if eps_T != 0.0:
+        eps0 = thermal_initial_strain_plane_strain(eps_T, material.nu)
+        _add_thermal_load(F, cache, D, eps0)
 
     # Eğik simetri kısıtı: yerel (ê_r, ê_t) çerçevesine dönüş.
     R, sym_fixed_local = _symmetry_rotation(mesh)
@@ -609,6 +688,26 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
 
     free = ~fixed
     u_hat = np.zeros(ndof)
+    # V306/KATI-MODEL (M-KATI-16): kasa esnemesi — dış düğümlerde
+    # ÖNGÖRÜLEN radyal yer değiştirme (global x, y bileşenleri; simetri
+    # kenarındaki düğümde yerel çerçeveye R^T ile döner — radyal yön ayna
+    # düzlemindedir, düzleme dik yerel bileşeni sıfırdır). 0'da dal koşmaz.
+    u_r_dis = float(outer_radial_displacement)
+    if not np.isfinite(u_r_dis):
+        raise ValueError("outer_radial_displacement sonlu olmalı.")
+    if u_r_dis != 0.0:
+        if outer_bc != "bonded_rigid":
+            raise ValueError("outer_radial_displacement yalnız "
+                             "'bonded_rigid' dış sınır koşuluyla verilir.")
+        dis = np.asarray(mesh.outer_nodes, dtype=int)
+        xy = mesh.nodes[dis]
+        rr = np.hypot(xy[:, 0], xy[:, 1])
+        u_p = np.zeros(ndof)
+        u_p[2 * dis] = u_r_dis * xy[:, 0] / rr
+        u_p[2 * dis + 1] = u_r_dis * xy[:, 1] / rr
+        u_p_hat = np.asarray(R.T @ u_p)
+        u_hat[fixed] = u_p_hat[fixed]
+        F_hat = F_hat - np.asarray(K_hat @ u_hat)
     K_ff = K_hat[free][:, free]
     u_free = spsolve(K_ff.tocsc(), F_hat[free])
     if not np.all(np.isfinite(u_free)):
@@ -619,14 +718,21 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
     u = np.asarray(R @ u_hat)
 
     # Gerilmeler: σ̄ = D ε̄ (B-bar alanı); σ_z = ν(σ_x + σ_y).
+    # Isıl yükte: σ̄ = D (ε̄ − ε₀), σ_z = ν(σ_x + σ_y) − E·α·ΔT.
     ue = u[cache["edof"]]                                  # (M, 8)
     eps_g = np.einsum('egsj,ej->egs', cache["Bbar_gauss"], ue)
     sig3_g = np.einsum('st,egt->egs', D, eps_g)            # (M, 4gp, 3)
     eps_c = np.einsum('esj,ej->es', cache["B_cent"], ue)
     sig3_c = eps_c @ D.T                                   # (M, 3)
+    if eps0 is not None:
+        sig0 = D @ eps0
+        sig3_g = sig3_g - sig0
+        sig3_c = sig3_c - sig0
 
     def _dort_bilesen(sig3):
         sz = material.nu * (sig3[..., 0] + sig3[..., 1])
+        if eps0 is not None:
+            sz = sz - material.E * eps_T
         return np.stack([sig3[..., 0], sig3[..., 1], sz, sig3[..., 2]],
                         axis=-1)
 
@@ -692,11 +798,21 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
     else:                                    # tam sıfır çekme
         margin = float("inf")
 
-    meta = _result_meta_planar(outer_bc)
+    meta = _result_meta_planar(outer_bc, eps_T)
+    if u_r_dis != 0.0:
+        # V306/KATI-MODEL (M-KATI-16): dış yüzey artık rijit DEĞİL.
+        meta["sinir_kosullari"]["dis_yuzey"] = (
+            f"u_r = {u_r_dis:.6g} m @ dış yüzey — kasaya oturan tane, kasa "
+            "basınç altında bu kadar genişler (motorun analitik bloğunun "
+            "dış sınır koşuluyla AYNI sayı: P·b²/(E_kasa·t)).")
+        meta["not_modelled"] = [
+            k for k in meta["not_modelled"]
+            if not k.startswith("kasa esnemesi")]
+        meta["outer_radial_displacement_m"] = u_r_dis
     meta["stress_nodal_kaynagi"] = yontem
     meta["malzeme"] = {"E_Pa": material.E, "nu": material.nu,
                        "ad": material.name}
-    meta["yukler"] = {"bore_pressure_Pa": p}
+    meta["yukler"] = {"bore_pressure_Pa": p, "thermal_strain": eps_T}
     meta["simetri"] = mesh.meta.get("simetri")
     # P8B2-08: gerinim uçları AYRI AYRI yayımlanır — payın hangi sayıdan
     # geldiği ve hangi işaretin baskın olduğu figüre değil ALANA yazılır.
@@ -759,6 +875,38 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
             "params": {"strain_pct": round(100.0 * eps_abs, 4),
                        "limit_pct": round(100.0 * SMALL_STRAIN_LIMIT, 4)}})
         margin = None
+        # --- V306/TANE NR-16: KAPASİTE HÜKMÜ GEÇERLİLİK ARALIĞINDA -------
+        # Pay SAYISI yukarıda geri çekildi (doğru: cap/ε oranı geçerlilik
+        # dışındaki bir gerinime bölünür). Ama hüküm sorusu ("kapasite
+        # aşılıyor mu") bundan bağımsız cevaplanabilir: lineer çözümde
+        # gerinim alanı yükle orantılıdır (basınç ve ısıl yük birlikte
+        # λ ile ölçeklenir). Kopma uzamasına λ_c = cap / ε_çekme yük
+        # oranında ulaşılır; o anda en büyük |ε| = λ_c · |ε|_maks'tır. Bu
+        # değer küçük-gerinim hüküm eşiğinin altındaysa kapasiteye LİNEER
+        # ÇÖZÜMÜN GEÇERLİ OLDUĞU aralıkta, tam yükten önce ulaşılır →
+        # "kapasite aşılıyor" hükmü bu çözümden kurulur (pay sayısı yine
+        # yayımlanmaz). Aksi hâlde hüküm de belirlenemez ve adıyla söylenir.
+        # ÖLÇÜLDÜ (nr16_sonra.json): örnek KNDX star/finocyl/slotted tane
+        # gövdeye yapıştırılmışken FEA port gerinimi %6,1-11,6; kopma
+        # uzaması %2 → λ_c 0,17-0,33, o anda |ε| %2 < %5.
+        if (strain_capability is not None and max_bore_tensile is not None
+                and max_bore_tensile > 0.0):
+            lam_c = strain_capability / max_bore_tensile
+            eps_at_cap = lam_c * eps_abs
+            asiliyor = bool(lam_c < 1.0 and eps_at_cap <= SMALL_STRAIN_LIMIT)
+            meta["kapasite_hukmu"] = {
+                "durum": "asiliyor" if asiliyor else "belirlenemedi",
+                "yuk_orani_kapasitede": float(lam_c),
+                "kapasitedeki_maks_gerinim": float(eps_at_cap),
+                "hukum_esigi": SMALL_STRAIN_LIMIT,
+                "_basis": (
+                    "lineer çözümde gerinim yükle orantılıdır; kopma "
+                    "uzamasına yükün yuk_orani_kapasitede katında ulaşılır "
+                    "ve o anda en büyük port gerinimi küçük-gerinim hüküm "
+                    "eşiğinin altındaysa (geçerlilik aralığı) kapasite tam "
+                    "yükten önce aşılır. Pay sayısı yayımlanmaz; yalnız "
+                    "aşılıyor/belirlenemedi hükmü."),
+            }
     elif eps_abs > SMALL_STRAIN_WARN:
         meta["kucuk_gerinim_durumu"] = "uyari_bandi"
         uyarilar.append({
@@ -799,7 +947,9 @@ def solve_grain_with_refinement(r_inner: Union[float, Callable],
                                 tol: float = DEFAULT_REFINE_TOL,
                                 n_theta0: int = DEFAULT_N_THETA0,
                                 n_radial0: int = DEFAULT_ELEMS_THROUGH_WALL,
-                                max_rounds: int = DEFAULT_MAX_REFINE_ROUNDS
+                                max_rounds: int = DEFAULT_MAX_REFINE_ROUNDS,
+                                thermal_strain: float = 0.0,
+                                outer_radial_displacement: float = 0.0
                                 ) -> GrainRefinementResult:
     """Ardışık inceltme sürücüsü (structural_axisym.solve_with_refinement
     deseni): her turda çevresel ve radyal bölüm REFINE_FACTOR ile çarpılır,
@@ -853,7 +1003,9 @@ def solve_grain_with_refinement(r_inner: Union[float, Callable],
                                         theta_start=theta_start)
         result = solve_plane_strain_section(
             mesh, material, bore_pressure_pa, outer_bc=outer_bc,
-            strain_capability=strain_capability)
+            strain_capability=strain_capability,
+            thermal_strain=thermal_strain,
+            outer_radial_displacement=outer_radial_displacement)
         vm = result.max_von_mises_nodal        # hedef: SPR düğüm maksimumu
         if prev_vm is not None:
             scale = max(abs(vm), abs(prev_vm), 1e-300)

@@ -100,58 +100,59 @@ class ValidationSystem:
     """Gerçek zamanlı validasyon ve uyarı sistemi"""
     
     def __init__(self):
-        # Sutton & Biblarz, NASA SP-8089, ve AIAA standartları
         self.performance_limits = {
-            'specific_impulse': {
-                'n2o_htpb': (180, 250),    # s
-                'n2o_paraffin': (190, 260),
-                'lox_htpb': (220, 280),
-            },
-            'chamber_pressure': (5, 100),   # bar
-            # ÖH D33-3 · OH-D33-11 (Berke kararı, 16 Eylül 2026) — BANT
-            # DÜZELTİLDİ, GEVŞETİLMEDİ. ÖLÇÜLDÜ (kılavuz ekran turu,
-            # docs/scofield/raw/OH/KILAVUZ/ekran/kayit.json): sayfanın
-            # varsayılan O/F'si 7,5 (advanced.html:1728; kaynağı
-            # ``optimum_of_ratio`` referans tablosu, aynı sayı) eski üst uç
-            # 6,0'ın DIŞINDA kalıyordu, yani programı açıp hiçbir şeyi
-            # değiştirmeden hesap yapan HER kullanıcı "kullanılabilir
-            # aralığın dışında" uyarısı alıyordu. Karşı ölçüm: O/F 2,5'te bu
-            # uyarı susuyor ama c* 1331 m/s ⟷ (1350, 1650) bandı deliniyor;
-            # eski bantla İKİ bandı birden sağlayan O/F YOKTU.
+            # V306 (6 Kas, ana model — HİBRİT-SAYI AÇIK KALANLAR + ÖLÇÜT DEVİR):
+            # KAYNAKSIZ HÜKÜM BANTLARI KALDIRILDI. 'Sutton & Biblarz, NASA SP-8089,
+            # AIAA' genel atfı sayfa/tablo taşımıyordu. Sabit Isp bandı
+            # (n2o_htpb 180-250 s, varsayılan 150-300) ölçek ve verime bağlı bir
+            # büyüklüğe sabit hüküm veriyordu: GERÇEK ölçülmüş Carmicino t01
+            # motoru (147,4 s) 'beklenen aralık dışında' uyarısı alıyordu
+            # (SAYI emsali ``test_kaynaksiz_hukum_bandi_YOK``). Isp'nin
+            # tutarlılığı kaynaklı iki ölçütle zaten denetleniyor: c* (koşunun
+            # kuramsal c*'ı × çiftin ÖLÇÜLMÜŞ η_c* bandı, aşağıda) ve nozulun
+            # kendi CF modeli. γ (1,10-1,35) bandı da kaynaksızdı; γ'nın
+            # tanım aralığı tek kaynakta (heat_transfer_analysis.GAMMA_BAND_MIN/
+            # MAX, Bartz bağıntılarının tanım aralığı) ve dışında modeller
+            # hata verir. 'chamber_pressure', 'gas_constant', 'temperature'
+            # hiçbir yerde okunmuyordu (ölü ayar).
+            # V306/HİBRİT-SAYI (M-HIBRIT-23 + M-HIBRIT-12) — 'of_ratio' ve
+            # 'c_star' BANTLARI BURADAN KALKTI (tek kaynağa taşındı).
             #
-            # LİTERATÜR (kanıt: docs/scofield/raw/OH/D33-3/
-            # OH-D33-11_kanit_taslagi.md): N2O'nun özgül impulsu O/F 7-8'de
-            # TEPE yapar ve yaklaşık 4-12 bandında yüksek/düz kalır — itkinin
-            # ~2/3'ü N2O'nun ekzotermik ayrışmasından, ~1/3'ü yakıttaki
-            # oksijenle yanmadan gelir; bu yüzden depolanabilir oksitleyiciler
-            # (N2O, H2O2) YÜKSEK O/F'de optimize olur (LOX ~2).
+            # O/F: ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-sayi/olcum/
+            # sayi_once.json, L3 LOX/parafin): tabloda olmayan çift uçta
+            # 'n2o_htpb'ye düşüyor ve N2O'nun 4-12 bandını alıyordu;
+            # programın kendi optimumu (2,48) "kullanılabilir aralık dışında"
+            # uyarısı aldı. Bant artık ``hybrid_rocket_engine.hybrid_of_band``
+            # (N2O çiftlerinin 4-12'si ÖH D33-3 / OH-D33-11 kararıyla —
+            # literatür künyesi orada — aynen oraya taşındı) ve koşunun
+            # kendi ``optimum_analysis.of_range_searched``ından okunur:
+            # optimum hangi bantta arandıysa uyarı o banttır.
             #
-            # YÖN: bu bir tolerans büyütmesi DEĞİLDİR. Üst uç 6,0 → 12,0
-            # optimumu banda alır; ALT uç 0,5 → 4,0 ise bandı DARALTIR ve
-            # O/F 2,5 gibi aşırı yakıt-zengin tasarımlar ARTIK uyarı alır
-            # (eskiden sessizdi). Sayı teste gömülmez; tek kaynak burasıdır.
-            'of_ratio': {
-                'n2o_htpb': (4.0, 12.0),
-                # n2o_paraffin: tablo optimumu 8,0 tam ÜST KENARDA duruyordu;
-                # aynı literatür ailesi (depolanabilir oksitleyici platosu).
-                'n2o_paraffin': (4.0, 12.0),
-            },
-            'c_star': {
-                'n2o_htpb': (1350, 1650),  # m/s
-                'n2o_paraffin': (1400, 1700),
-            },
-            'gamma': (1.10, 1.35),
-            'gas_constant': (200, 500),     # J/kg·K
-            'temperature': (2500, 3500),    # K
+            # c*: ÖLÇÜLDÜ (aynı dosya, CARM_t01): kullanıcının ölçülmüş
+            # η_c* 0,79'u (HRMA'nın kendi ölçülmüş aralığı 0,77-0,99) c*
+            # 1215 m/s ile kaynaksız 1350-1650 bandının altında kaldı ve
+            # KRİTİK aldı. Beklenen c* artık koşunun KENDİ kuramsal c*'ı ×
+            # çiftin ölçülmüş η_c* bandı
+            # (``hybrid_rocket_engine.hybrid_c_star_efficiency_band``,
+            # kaynaklı varsayılanla aynı kayıt).
         }
         
         self.injector_limits = {
-            'reynolds_number': (1000, 200000),
+            # V306 (6 Kas, ana model): 'reynolds_number' (1000-200000) ve
+            # 'exit_velocity' (10-100 m/s) KALDIRILDI. Reynolds metni ekranda
+            # "kullanılan bağıntı aralığının üst sınırı" diyordu, oysa HRMA'nın
+            # Cd'si Re'ye bağlı bir bağıntı değil (injector_design.CD_TABLE:
+            # giriş biçimi + L/D) — iddia kaynaksızdı ve N2O enjektörlerinde
+            # (Re ~1e5-1e6) her tasarımda yanıyordu (tur L1-L5'in beşi). Laminer
+            # eşiği de iki sayıydı (burada 1000 KRİTİK, enjektör modülünde
+            # 4000 not). Çıkış hızı bandı enjektör modülündeki BEYANLI HRMA
+            # buluşsalının (INJECTION_VELOCITY_HEURISTIC_BAND_M_S, 20-50) ikinci,
+            # farklı sayılı ve "Nozul çıkış hızı" diye yanlış adlı kopyasıydı.
+            # Tek kaynak enjektör modülünün kendi notlarıdır.
             # ΔP/Pc — alt sınır acoustic_modes'un TEK tanımından ithal;
             # üst sınır ayrı gerekçeli (yukarıdaki modül başlığına bakınız).
             'pressure_drop_ratio': (CHUG_DP_RATIO_MINIMUM,
                                     INJECTOR_DP_PC_CEILING),
-            'exit_velocity': (10, 100),           # m/s
             # ÖH D37 A2 hibrit · YB-03 (F-10 temizliği): ölü 'hole_diameter' (0,2/5,0) bandı KALDIRILDI — hiçbir yerde okunmuyordu, künyesi yoktu; delik çapı bandının tek kaynağı hrma.constants.ORIFICE_D_BAND_MM.
         }
         #: Bandın nereden geldiği — rapor bunu künye olarak taşır ki
@@ -196,48 +197,72 @@ class ValidationSystem:
             # yakınsak-ıraksak bir lülede ses-üstü çıkış için A_e/A_t > 1
             # olmak zorundadır (aynı izentropik bağıntı M = 1'de ε = 1 verir).
             'expansion_ratio_supersonic_floor': 1.0,
-            'port_diameter_initial': (5, 100),    # mm
-            'port_diameter_final': (10, 200),     # mm
-            'chamber_length': (50, 2000),         # mm
+            # V306 (6 Kas, ana model): port 5-100 / 10-200 mm ve oda boyu
+            # 50-2000 mm bantları kaynaksızdı ve ölçeğe bağlıydı (100 kN
+            # hibritte ilk port 100,3 mm 'beklenen 5-100' uyarısı aldı); son
+            # port ve oda boyu bantları hiç okunmuyordu. Kalan geometri
+            # hükümleri fizikseldir: port zarfı > oda (aşağıda) ve ε tabanı.
         }
     
     def validate_performance_data(self, data: Dict, propellant_combo: str) -> List[str]:
         """Performans verilerini doğrula"""
         warnings_list = []
         
-        # Specific Impulse
-        isp = data.get('isp', 0)
-        isp_limits = self.performance_limits['specific_impulse'].get(propellant_combo, (150, 300))
-        if not (isp_limits[0] <= isp <= isp_limits[1]):
-            sev = "critical" if isp < isp_limits[0] * 0.8 or isp > isp_limits[1] * 1.2 else "warning"
-            warnings_list.append(_w("warn.validation.isp_out_of_range", sev,
-                                    isp=round(float(isp), 1),
-                                    lo=isp_limits[0], hi=isp_limits[1]))
+        # V306 (6 Kas): kaynaksız Isp bandı hükmü kalktı (künye: __init__).
 
-        # C-star
-        c_star = data.get('c_star', 0)
-        c_star_limits = self.performance_limits['c_star'].get(propellant_combo, (1200, 1800))
-        if not (c_star_limits[0] <= c_star <= c_star_limits[1]):
-            sev = "critical" if c_star < c_star_limits[0] * 0.9 else "warning"
-            warnings_list.append(_w("warn.validation.cstar_out_of_range", sev,
-                                    cstar=round(float(c_star), 0),
-                                    lo=c_star_limits[0], hi=c_star_limits[1]))
+        ox, _, yakit = str(propellant_combo or '').partition('_')
 
-        # Gamma
-        gamma = data.get('gamma', 0)
-        gamma_limits = self.performance_limits['gamma']
-        if not (gamma_limits[0] <= gamma <= gamma_limits[1]):
-            warnings_list.append(_w("warn.validation.gamma_out_of_range", "warning",
-                                    gamma=round(float(gamma), 3),
-                                    lo=gamma_limits[0], hi=gamma_limits[1]))
+        # C-star — V306/HİBRİT-SAYI (M-HIBRIT-12): beklenen teslim c*
+        # aralığı = koşunun kuramsal c*'ı × çiftin ÖLÇÜLMÜŞ η_c* bandı
+        # (kaynaklı varsayılanla aynı kayıt). Kullanıcının η_c*'ı HRMA'nın
+        # kendi ölçülmüş aralığındaysa uyarı YOK; dışındaysa 'warning'
+        # (ölçülmüş bir verim KRİTİK değildir). Kuramsal c* ya da η
+        # yayımlanmamışsa bu eksende hüküm verilmez (sayı uydurulmaz).
+        c_star = _finite_positive(data.get('c_star'))
+        c_th = _finite_positive(data.get('c_star_theoretical'))
+        _cs = data.get('c_star_efficiency')
+        eta = _finite_positive(_cs.get('eta_c_star')) if isinstance(
+            _cs, dict) else None
+        if c_star is not None and c_th is not None and eta is not None:
+            from hrma.engines.hybrid_rocket_engine import (
+                hybrid_c_star_efficiency_band)
+            eb = hybrid_c_star_efficiency_band(ox, yakit)
+            e_lo, e_hi = eb['band']
+            if not (e_lo <= eta <= e_hi):
+                warnings_list.append(_w(
+                    "warn.validation.cstar_outside_eta_band", "warning",
+                    cstar=round(float(c_star), 0),
+                    lo=round(e_lo * c_th, 0), hi=round(e_hi * c_th, 0),
+                    eta=round(float(eta), 3), eta_lo=e_lo, eta_hi=e_hi,
+                    n=eb['n_tests']))
 
-        # O/F Ratio
+        # V306 (6 Kas): kaynaksız γ bandı hükmü kalktı (künye: __init__).
+
+        # O/F Ratio — V306/HİBRİT-SAYI (M-HIBRIT-23): bant TEK kaynaktan.
+        # Koşunun optimumu hangi bantta arandıysa (``optimum_analysis.
+        # of_range_searched``; stokiyometriğe genişlemiş hâli dahil) uyarı
+        # o banttır — programın kendi optimumu kendi uyarısını alamaz. Arama
+        # yapılmamışsa (ör. belirsizlik örneği) aynı tablo
+        # (``hybrid_of_band``) okunur. Kaynaklı kullanılabilir bandı olan
+        # çift (N2O) 'of_out_of_range', olmayan çift
+        # 'of_outside_search_band' alır (iki ayrı cümle, aynı bant kaynağı).
         of_ratio = data.get('of_ratio', 0)
-        of_limits = self.performance_limits['of_ratio'].get(propellant_combo, (0.5, 8.0))
+        from hrma.engines.hybrid_rocket_engine import hybrid_of_band
+        _ob = hybrid_of_band(ox, yakit)
+        of_limits = _ob['band']
+        _oa = data.get('optimum_analysis')
+        _ar = _oa.get('of_range_searched') if isinstance(_oa, dict) else None
+        if (isinstance(_ar, (list, tuple)) and len(_ar) == 2
+                and all(_finite_positive(v) is not None for v in _ar)):
+            of_limits = (float(_ar[0]), float(_ar[1]))
         if not (of_limits[0] <= of_ratio <= of_limits[1]):
-            warnings_list.append(_w("warn.validation.of_out_of_range", "warning",
+            _kod = ("warn.validation.of_out_of_range"
+                    if _ob['kind'] == 'usable'
+                    else "warn.validation.of_outside_search_band")
+            warnings_list.append(_w(_kod, "warning",
                                     of=round(float(of_ratio), 2),
-                                    lo=of_limits[0], hi=of_limits[1]))
+                                    lo=round(of_limits[0], 2),
+                                    hi=round(of_limits[1], 2)))
 
         return warnings_list
     
@@ -283,16 +308,7 @@ class ValidationSystem:
             pc = _finite_positive(data.get('chamber_pressure'))
             pc_source = 'injector record' if pc is not None else None
 
-        # Reynolds Number
-        reynolds = data.get('reynolds_number', 0)
-        re_limits = self.injector_limits['reynolds_number']
-        if not (re_limits[0] <= reynolds <= re_limits[1]):
-            if reynolds < re_limits[0]:
-                warnings_list.append(_w("warn.validation.reynolds_laminar", "critical",
-                                        re=round(float(reynolds), 0), min=re_limits[0]))
-            else:
-                warnings_list.append(_w("warn.validation.reynolds_high", "warning",
-                                        re=round(float(reynolds), 0), max=re_limits[1]))
+        # V306 (6 Kas): Reynolds hükmü kalktı (künye: __init__ injector_limits).
         
         # Pressure Drop — ΔP/Pc chug ölçütü (payda UYDURULMAZ)
         drop_limits = self.injector_limits['pressure_drop_ratio']
@@ -349,13 +365,7 @@ class ValidationSystem:
         if assessment is not None:
             assessment[DP_RATIO_AXIS] = kunye
 
-        # Exit Velocity
-        exit_velocity = data.get('exit_velocity', 0)
-        vel_limits = self.injector_limits['exit_velocity']
-        if not (vel_limits[0] <= exit_velocity <= vel_limits[1]):
-            warnings_list.append(_w("warn.validation.exit_velocity_out_of_range", "warning",
-                                    v=round(float(exit_velocity), 1),
-                                    lo=vel_limits[0], hi=vel_limits[1]))
+        # V306 (6 Kas): çıkış hızı hükmü kalktı (künye: __init__ injector_limits).
 
         return warnings_list
     
@@ -368,26 +378,11 @@ class ValidationSystem:
         """
         warnings_list = []
         
-        # Port Diameters
-        d_port_initial = data.get('port_diameter_initial', 0) * 1000  # m to mm
-        d_port_final = data.get('port_diameter_final', 0) * 1000
+        # V306 (6 Kas, ana model): ilk port 5-100 mm bandı ve büyüme oranı
+        # 1,2 / 3,0 eşikleri kaynaksızdı (künye: __init__ geometry_limits).
+        # Port zarfı > oda iç çapı fiziksel imkânsızlık hükmü aşağıda kalır.
+        d_port_final = data.get('port_diameter_final', 0) * 1000  # m to mm
         d_chamber = data.get('chamber_diameter', 0) * 1000
-        
-        port_limits = self.geometry_limits['port_diameter_initial']
-        if d_port_initial > 0 and not (port_limits[0] <= d_port_initial <= port_limits[1]):
-            warnings_list.append(_w("warn.validation.port_initial_out_of_range", "warning",
-                                    d=round(float(d_port_initial), 1),
-                                    lo=port_limits[0], hi=port_limits[1]))
-
-        # Port Growth Check
-        if d_port_initial > 0 and d_port_final > 0:
-            growth_ratio = d_port_final / d_port_initial
-            if growth_ratio < 1.2:
-                warnings_list.append(_w("warn.validation.port_growth_low", "warning",
-                                        ratio=round(float(growth_ratio), 2)))
-            elif growth_ratio > 3.0:
-                warnings_list.append(_w("warn.validation.port_growth_high", "critical",
-                                        ratio=round(float(growth_ratio), 2)))
 
         # Chamber vs Port Diameter
         # v3.0.1 (Ayberk tur 1, port kulvarının çapraz kırılması): eski kural
@@ -521,40 +516,31 @@ class ValidationSystem:
         # CF≈1.5 için Pc > ~13 bar olan her normal motoru hatalı biçimde KRITIK
         # işaretliyordu. Bunun yerine ima edilen itki katsayısı
         # CF_ima = (F/At)/Pc hesaplanır ve teorik sınırlarla karşılaştırılır.
-        # Üst sınır: gamma=1.2 için sonsuz genleşmeli vakum CF limiti ≈ 2.246
-        # (Sutton & Biblarz 9. baskı, Denk. 3-30 limiti / Şekil 3-6).
+        # (Eski üst sınır: yalnız gamma=1.2 için sonsuz genleşmeli vakum CF ≈ 2.246;
+        # Sutton & Biblarz 9. baskı, Denk. 3-30 / Şekil 3-6 — V306 notu aşağıda.)
         thrust = data.get('thrust', 0)
         throat_area = data.get('throat_area', 0)
         chamber_pressure_bar = data.get('chamber_pressure', 0)  # bar
         if thrust > 0 and throat_area > 0 and chamber_pressure_bar > 0:
             throat_loading = thrust / (throat_area * 1e6)  # N/mm² (= MPa)
             implied_cf = throat_loading / (chamber_pressure_bar * 0.1)  # Pc: bar → MPa
-            if implied_cf > 2.25:
-                warnings_list.append(_w("warn.validation.cf_too_high", "critical",
-                                        cf=round(float(implied_cf), 2), limit=2.25))
-            elif implied_cf < 0.8:
-                warnings_list.append(_w("warn.validation.cf_too_low", "warning",
-                                        cf=round(float(implied_cf), 2), limit=0.8))
-
-        # L* kontrolü (Karakteristik uzunluk)
-        l_star = data.get('l_star', 0)
-        if l_star > 0:
-            if l_star < 0.5:
-                warnings_list.append(_w("warn.validation.lstar_low", "critical",
-                                        lstar=round(float(l_star), 2)))
-            elif l_star > 2.0:
-                warnings_list.append(_w("warn.validation.lstar_high", "warning",
-                                        lstar=round(float(l_star), 2)))
-
-        # Regresyon hızı kontrolü
-        regression_rate = data.get('regression_rate', 0) * 1000  # m/s to mm/s
-        if regression_rate > 0:
-            if regression_rate < 0.5:
-                warnings_list.append(_w("warn.validation.regression_low", "warning",
-                                        rate=round(float(regression_rate), 2)))
-            elif regression_rate > 5.0:
-                warnings_list.append(_w("warn.validation.regression_high", "critical",
-                                        rate=round(float(regression_rate), 2)))
+            # V306 (6 Kas, ana model): üst sınır koşunun KENDİ γ'sıyla
+            # (sonsuz genleşmeli vakum CF'si, Denk. 3-30, p_e = p_a = 0; tek
+            # kaynak ``nozzle_flow_1d.ideal_thrust_coefficient``). Sabit 2,25
+            # yalnız γ = 1,2 içindi: γ = 1,15'te sınır ~2,50, γ = 1,25'te ~2,08.
+            # γ okunamıyorsa bu eksende hüküm verilmez (sabit γ varsayılmaz).
+            # Alt eşik (CF < 0,8), L* (0,5 / 2,0 m) ve regresyon (0,5 / 5 mm/s)
+            # bantları kaynaksızdı ve kalktı: aşırı genleşme Summerfield
+            # ekranında, regresyon yasasının geçerlilik aralığı kendi künyesinde.
+            gamma = _finite_positive(data.get('gamma'))
+            if gamma is not None and gamma > 1.0:
+                from hrma.analysis.nozzle_flow_1d import ideal_thrust_coefficient
+                cf_limit = ideal_thrust_coefficient(gamma, 0.0, 0.0, 1.0)
+                if implied_cf > cf_limit:
+                    warnings_list.append(_w("warn.validation.cf_too_high", "critical",
+                                            cf=round(float(implied_cf), 2),
+                                            limit=round(float(cf_limit), 3),
+                                            gamma=round(float(gamma), 3)))
 
         return warnings_list
     

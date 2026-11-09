@@ -1276,6 +1276,30 @@ def _motor_sinif_kodlari():
     yol = REPO_ROOT / 'hrma' / 'engines' / 'solid_rocket_engine.py'
     agac = ast.parse(yol.read_text(encoding='utf-8'))
     out = {'crack_risk': set(), 'thermal_compat': set(), 'rating': set()}
+    # V306/KATI-TANE (K1): tane sınıfları modül sabitleriyle atanır
+    # (GRAIN_CRACK_* / GRAIN_THERMAL_* / GRAIN_CLASS_NOT_DETERMINED_*);
+    # kâhin sabitin değerini çözer.
+    sabit = {}
+    for n in agac.body:
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name)
+                and n.targets[0].id.startswith('GRAIN_')
+                and isinstance(n.value, ast.Constant)
+                and isinstance(n.value.value, str)):
+            sabit[n.targets[0].id] = n.value.value
+    for n in ast.walk(agac):
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name)
+                and n.targets[0].id in ('crack_risk', 'thermal_compat')
+                and isinstance(n.value, ast.Name) and n.value.id in sabit):
+            out[n.targets[0].id].add(sabit[n.value.id])
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name)
+                and n.targets[0].id in ('crack_risk', 'thermal_compat')
+                and isinstance(n.value, ast.IfExp)):
+            for dal in (n.value.body, n.value.orelse):
+                if isinstance(dal, ast.Name) and dal.id in sabit:
+                    out[n.targets[0].id].add(sabit[dal.id])
     for n in ast.walk(agac):
         if (isinstance(n, ast.Assign) and len(n.targets) == 1
                 and isinstance(n.targets[0], ast.Name)
@@ -1301,16 +1325,24 @@ class TestKk3KatiSinifVeYuzde:
 
     def test_motorun_her_sinif_kodu_tr_de_cevrilir(self):
         aileler = _motor_sinif_kodlari()
-        # Kâhin dolu: üç aile (ölçülen 3 + 3 + 4 kod; 'Marginal' ortak).
+        # Kâhin dolu: üç aile. V306/KATI-TANE (K1): çatlak 4 kod (aşılıyor,
+        # aşılmıyor, iki 'belirlenmedi'), ısıl 4 kod (aşıyor, içinde, iki
+        # 'belirlenmedi'; ikisi çatlakla ortak), koruma 4 kod.
         assert [len(aileler[a]) for a in ('crack_risk', 'thermal_compat',
-                                          'rating')] == [3, 3, 4], aileler
+                                          'rating')] == [4, 4, 4], aileler
         kodlar = sorted(set().union(*aileler.values()))
         tr = self._kos('tr', kodlar)
         en = self._kos('en', kodlar)
         for k in kodlar:
-            assert en[k] == k, (k, en[k])
+            if '_' in k:
+                # V306/KATI-TANE: makine kodu (alt çizgili) EN ekranda da
+                # ham basılmaz; okunur metne çevrilir.
+                assert en[k] != k and '_' not in en[k], (k, en[k])
+            else:
+                assert en[k] == k, (k, en[k])
             assert tr[k] != k and tr[k].strip(), (k, tr[k])
-        assert tr['High'] == 'Yüksek' and tr['Poor'] == 'Zayıf'
+        assert tr['capability_exceeded'] == 'Gerinim kapasitesi aşılıyor'
+        assert en['capability_exceeded'] == 'Strain capability exceeded'
 
     def test_taninmayan_kod_ham_ve_kacisli(self):
         tr = self._kos('tr', ['<b>Yeni</b>'])
@@ -1531,7 +1563,10 @@ class TestKk3GuverteOndalik:
         assert isinstance(db.get('submitted_wall_thickness_mm'), (int, float))
         metin = _panel_tr('structural', _STRUCT_JS, akis['uc'])
         beklenen = ('%.3f' % db['submitted_wall_thickness_mm']).replace('.', ',')
-        assert 'submitted_wall_thickness_mm ' + beklenen in metin
+        # V306/DİL-ORTAK (DİL-KATI D1): satır başlığı ham alan adı değil TR
+        # etiket (makine adı ipucunda); ölçülen şey aynı: TR virgüllü sayı.
+        assert 'Gönderilen cidar kalınlığı (mm) ' + beklenen in metin
+        assert 'submitted_wall_thickness_mm ' + beklenen not in metin
         assert 'bu analizde kullanılmadı' in metin
         assert 'not consumed by this analysis' not in metin
         assert 'burn_time is validated' not in metin
@@ -1722,17 +1757,40 @@ class TestKk3GuvenlikCidarNedeni:
         assert uc['safety_analysis']['thermal_safety'][
             'thermal_verdict'] == 'withheld'
         metin = _duz(out['html'])
-        assert 'data-safety-wall-unphysical' in out['html']
-        assert 'wall_temperature_unphysical = true' in metin
-        assert 'Termal eksen değerlendirilmedi' in metin
-        # Isı modülünün KENDİ uyarısı (kâhin: motor yanıtındaki kayıt).
         gsa = ornek_motorlar['hybrid']['motor']['heat_transfer_analysis'][
             'gas_side_analysis']
         kod = [w for w in gsa['warnings'] if isinstance(w, dict)
                and w.get('code') == 'warn.thermal.wall_exceeds_melting'][0]
-        assert ('%d K' % kod['params']['T_wall']) in metin
+        # V306/GÜVENLİK (NR-3 a): örnek hibrit kendi cidar bölge sonucunu
+        # yayımlıyor (yakıt bloğu altı korunur, ön/son odaya astar) ve
+        # ısı modülünün çıplak cidar kaydını `superseded_by =
+        # chamber_wall_zones` ile geçersiz kılıyor. Termal eksenin gerekçesi
+        # artık o bölge kaydıdır; çıplak cidar uyarısı ("erime noktasını
+        # aşıyor") bu sekmede ayrı bir hüküm olarak BASILMAZ.
+        assert kod.get('superseded_by') == 'chamber_wall_zones'
+        assert 'data-safety-zone-thermal' in out['html']
+        assert 'data-safety-wall-unphysical' not in out['html']
+        assert ('%d K' % kod['params']['T_wall']) not in metin
+        assert 'Termal eksen: motorun kendi yanma odası cidarı' in metin
         en = _duz(self._kos(client, ornek_motorlar['hybrid'], 'en')[2]['html'])
-        assert 'Thermal axis not evaluated' in en
+        assert "Thermal axis: the motor's own chamber-wall result" in en
+
+    def test_bolge_modeli_yokken_ciplak_cidar_nedeni_adiyla(
+            self, client, ornek_motorlar):
+        """V306/GÜVENLİK (NR-3 a): motor bölge sonucu YAYIMLAMIYORSA panel
+        çifti neden göndermediğini ısı modülünün kendi uyarısıyla söyler
+        (V3 KK 3. tur davranışı bu dalda aynen)."""
+        import copy
+        r = copy.deepcopy(ornek_motorlar['hybrid'])
+        r['motor'].pop('chamber_wall_zones', None)
+        r.pop('chamber_wall_zones', None)
+        govde, uc, out = self._kos(client, r)
+        assert 'wall_temperature_hot' not in govde
+        metin = _duz(out['html'])
+        assert 'data-safety-zone-thermal' not in out['html']
+        assert 'data-safety-wall-unphysical' in out['html']
+        assert 'wall_temperature_unphysical = true' in metin
+        assert 'Termal eksen değerlendirilmedi' in metin
 
     def test_bayraksiz_motorda_not_yok(self, client, ornek_motorlar):
         """Panel çifti GERİ TUTMADIYSA, uç termal ekseni başka nedenle geri

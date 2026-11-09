@@ -282,7 +282,7 @@ class TestP8B304IsiPanosuBeyanEdiyor:
         mut['material_properties'].pop('max_service_temp', None)
         f = _fig(create_heat_transfer_plots(mut))
         assert 'Allowable' not in json.dumps(f, ensure_ascii=False)
-        assert any('not invented' in n for n in _notlar(f))
+        assert any('no substitute limit is assumed' in n for n in _notlar(f))
 
 
 # =========================================================== P8B3-05

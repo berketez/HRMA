@@ -203,6 +203,39 @@ BRIDGE_STATUS_INPUTS_READY = "INPUTS_READY"      # D2 modülü var ama beklenen
                                           # çağırıp dönen şeyi "termal sonuç"
                                           # diye yayımlamak yasak)
 
+# V306/DİL-SUNUCU (K2) — köprünün ``meta`` beyan dili TEK yerde. Hüküm
+# beyanının geri çekme biçimi ve ``meta.not_modelled`` kalemlerinin önekleri
+# ile ``app.py``'nin (fiziksel mesnet kapısı, iki katmanlı termo-elastik yol)
+# yerine koyduğu kalemler buradadır; app.py bu adları içe aktarır, metni
+# kopyalamaz (app.py dizgileri EN sözleşmesi: tests/test_app_hata_dili.py).
+# Metinler bayt bayt eskisiyle aynıdır (yanıt değişmez).
+HUKUM_GERI_CEKILDI_ONEKI = "HÜKÜM GERİ ÇEKİLDİ"
+
+
+def hukum_geri_cekme_beyani(gerekceler):
+    """``meta.hukum.beyan`` geri çekme biçimi: 'HÜKÜM GERİ ÇEKİLDİ (a, b).'"""
+    return HUKUM_GERI_CEKILDI_ONEKI + " (" + ", ".join(gerekceler) + ")."
+
+
+NOT_MODELLED_TERMAL_GERILME_ONEKI = "termal gerilme"
+NOT_MODELLED_ISIL_YUK_ONEKI = "ısıl yük"
+NOT_MODELLED_MESNET_ONEKI = "gerçek eksenel mesnet/flanş rijitliği"
+#: Fiziksel mesnet kapısı (app.py, V306/FEA-SIVI kalem 3) sonrası kalem.
+NOT_MODELLED_MESNET_FIZIKSEL = (
+    NOT_MODELLED_MESNET_ONEKI + " — yayımlanan çözüm "
+    "motor türünün fiziksel itki bağlantısıyla (ön gövde) "
+    "mesnetlidir; itkinin gövdenin öteki ucundan alındığı çözümle "
+    "ayrışma ve lüle çıkışı mesnetli karşılaştırma "
+    "meta.kisit_duyarliligi.kapi alanında; bağlantının kendi "
+    "rijitliği modellenmez")
+#: İki katmanlı termo-elastik çözüm (app.py, V306/FEA-SIVI kalem 1) kalemi.
+NOT_MODELLED_IKI_KATMAN = (
+    "astarın kaburgalar arasındaki eğilmesi ve kaburga kökü "
+    "yığılması (3B; motorun katman modeli SP-125 Eş. 4-27), "
+    "E/ν/α'nın sıcaklığa bağlılığı, sünme, düşük çevrimli yorulma "
+    "(elastik uyum sınırını aşan ısıl gerilme yayımlanır, ömrü "
+    "değerlendirilmez)")
+
 ENGINE_LAYOUTS = ("hybrid", "liquid", "solid")
 
 #: ``axial_fix`` rijit-cisim kısıtı yerinin KARŞITI. Kısıt, eksenel simetrik
@@ -216,6 +249,21 @@ ENGINE_LAYOUTS = ("hybrid", "liquid", "solid")
 #: KÖTÜMSER olanı yayımlar; seçim ve iki sayı birlikte beyan edilir.
 AXIAL_FIX_KARSITI = {"z_min": "z_max", "z_max": "z_min",
                      "both_ends": "z_min"}
+
+#: V306/KATI-MODEL (M-KATI-10) — katı kasa silindirinin ağdaki boyu, Saint-
+#: Venant sönüm boyu d_SV = SAINT_VENANT_KAT·sqrt(R·t) cinsinden: ağa
+#: min(L_kasa, KATI_KASA_SILINDIRI_SV_KATI·d_SV) girer. HRMA SEÇİMİ, ölçümle:
+#: ince cidarlı silindirde birleşim/uç bozuklukları ~d_SV içinde söner
+#: (Timoshenko & Woinowsky-Krieger, Theory of Plates and Shells 2. baskı
+#: §15); bandın dışındaki silindir aynı zar (membran) gerilme durumundadır,
+#: dolayısıyla hüküm ağdaki silindirden TÜM silindire geçerlidir. Tam boy
+#: (L2: 1315 mm ⟷ 192 mm lüle) istasyonları silindire yığıp boğaz
+#: çözünürlüğünü düşürüyor, ağ geometri kapısından geçemiyordu (ölçüldü,
+#: L2: tam boyda 'geometri_ornekleme_tabani_ihlali' + 'not_converged';
+#: 4·d_SV ve 8·d_SV'de min SF 1,2198 ⟷ 1,2205, tepe 1,0863 ⟷ 1,0873 — boy
+#: bandın dışında sonucu değiştirmiyor). Kanıt:
+#: docs/scofield/raw/OH/V306/kati-model/RAPOR.md.
+KATI_KASA_SILINDIRI_SV_KATI = 6.0
 
 # --- OH-D27-06: KANONİK "HÜKÜM KAZANILAN VAKA" KAYDI ---------------------
 # Köprünün POZİTİF yakasını sınayan bekçi (``tests/test_z5guard_urun_tur.py``
@@ -415,6 +463,25 @@ MOTOR_THROAT_FLUX_FIELDS = (
       "throat_heat_flux_MW_m2"), 1.0e6),
 )
 
+#: V306/HİBRİT-NOZUL (FİZİK-2 DEVİR 1) — motorun LÜLE malzemesiyle kurduğu
+#: boğaz gaz-tarafı katsayısının yolları. Hibrit motor bunu lüle eksenel
+#: profilinin boğaz istasyonundan, motorun kendi gazıyla yayımlar
+#: (``hybrid_rocket_engine._analyze_nozzle_material``): katsayı, malzemesi,
+#: Bartz σ'nın referans cidarı (kamara zinciriyle AYNI ad ve birim, K) ve
+#: gaz özelliklerinin kökeni. Ağ bu malzemeyle çözülüyorsa h(z) makullük
+#: kapısı çapasını buradan alır; yoksa lüle bölgesi kapının dışında kalır
+#: (``HG_GATE_NOT_RUN_ANCHOR_MATERIAL``, değişmedi).
+MOTOR_NOZZLE_THROAT_HG_ANCHOR = {
+    "h_g_W_m2K": ("nozzle_material_analysis", "throat_thermal",
+                  "throat_h_g_W_m2K"),
+    "material": ("nozzle_material_analysis", "throat_thermal",
+                 "h_g_material"),
+    "reference_wall_K": ("nozzle_material_analysis", "throat_thermal",
+                         "gas_side_reference_wall_temperature"),
+    "gas_properties_basis": ("nozzle_material_analysis", "throat_thermal",
+                             "gas_properties_basis"),
+}
+
 
 def _nested_get(d, yol):
     """İç içe sözlükten yol boyunca değer; ara düğüm sözlük değilse None."""
@@ -558,6 +625,12 @@ KUVVET_DENGESI_TOL = 1.0e-3
 WARN_INPUTS_MISSING = "warn.fea.bridge_inputs_missing"
 WARN_THERMAL_PROFILE_MISSING = "warn.fea.bridge_thermal_profile_missing"
 WARN_THERMAL_SOLVER_UNAVAILABLE = "warn.fea.bridge_thermal_solver_unavailable"
+#: V306/GÜVERTE-HATA (kalem 6, §5 B-N1): profil ⟷ ağ malzemesi uyuşmazlığı.
+WARN_THERMAL_PROFILE_MATERIAL_MISMATCH = (
+    "warn.fea.bridge_thermal_profile_material_mismatch")
+#: Aynı reddin makine adı (``/api/fea/thermal`` 422 gövdesinin ``error``
+#: alanı; uç bu adı köprüden okur, kendi denetimini yazmaz).
+BRIDGE_REASON_PROFILE_MATERIAL_MISMATCH = "axial_profile_material_mismatch"
 WARN_THERMAL_WALL_OVER_ALLOWABLE = "warn.fea.thermal_wall_over_allowable"
 WARN_CHAMBER_EXTENSION_IMPLAUSIBLE = "warn.fea.chamber_extension_implausible"
 WARN_PLANAR_GRAIN_UNSUPPORTED = "warn.fea.planar_grain_unsupported_type"
@@ -1146,8 +1219,10 @@ def _yuk_modeli_kur(motor_results: dict, contour, nozzle_pts,
         "r0_m": r0,
         "formula": "F_uc = P_c * pi * r0^2",
         "applied_at": ("FEA alanının z_min uç yüzü (hibrit/sıvı: hazne "
-                       "silindirinin enjektör ucu; katı: lüle giriş kesiti), "
-                       "−z yönünde, kesite düzgün yayılı eksenel çekiş"),
+                       "silindirinin enjektör ucu; katı: kasa silindirinin "
+                       "ön ucu — ön kapak; motor_geometry yoksa lüle giriş "
+                       "kesiti), −z yönünde, kesite düzgün yayılı eksenel "
+                       "çekiş"),
         "support_modes": (
             "z_min kipinde (ön uç mesnetli; itki bağlantısı enjektör "
             "ucunda) kuvvet kısıtlı düğümlere uygulanır ve DOĞRUDAN mesnede "
@@ -1352,6 +1427,63 @@ def _kuvvet_dengesi_hukmu(kunye: dict, cozucu_meta: dict, mesh=None) -> dict:
 # ---------------------------------------------------------------------------
 # Toplayıcı: motor sonucu → yapısal FEA girdi paketi
 # ---------------------------------------------------------------------------
+def _kati_kasa_ve_lule(motor_results: dict):
+    """Katı motorun KASA silindiri + CAD lülesi (V306/KATI-MODEL, M-KATI-10).
+
+    Dönüş: ``(lule_noktalari_m | None, kasa_boyu_m | None, beyan)``.
+
+    ÖLÇÜLDÜ (mühendis turu L2, taban 277e53c10'da yeniden üretildi:
+    ``docs/scofield/raw/OH/V306/kati-model/once.json``): Analiz Merkezi
+    "Kamara + nozul cidarı" satırının ağı z 0-0,192 m, yani YALNIZ lüleydi;
+    1315 mm'lik kasa silindiri ağda yoktu, çünkü katı üst düzey sonuçta kasa
+    boyu yayımlamıyor diye uzantı yapılmıyordu. Oysa katı yanıt kasayı
+    ``motor_geometry`` sözlüğünde METRE ile yayımlar (STEP/STL'in çizdiği
+    geometri: ``chamber_diameter`` = kasa İÇ çapı, ``chamber_length`` = kasa
+    iç boyu, ``export.motor_geometry.solid_results_to_motor_geometry``).
+
+    Katının yayımlanan ``nozzle_contour``u yakınsak girişi TANE dış
+    yarıçapından başlatır (L2: 49 mm), kasa iç yarıçapı ise 52 mm'dir
+    (astar + yalıtım arada); silindir konturun ilk noktasına eklenemez
+    (cidar 3 mm'lik basamak yapardı). FEA bu yüzden CAD'in çizdiği lüleyi
+    kullanır: AYNI örnekleyici (``sample_nozzle_inner_contour``) AYNI
+    ``motor_geometry`` sözlüğüyle, yakınsak giriş kasa iç yarıçapında —
+    STEP'teki kasa + lüle zinciri. Ön kapak kapalı uç eşdeğer eksenel
+    kuvvetiyle temsil edilir (hibrit/sıvıyla aynı yük modeli); arka kapak
+    yakınsak bölümün kendisidir. Alan eksikse uzantı yapılmaz ve neden
+    ADIYLA yazılır (uydurma boy yok).
+    """
+    md = motor_results.get("motor_geometry")
+    if not isinstance(md, dict):
+        return None, None, ("katı sonuçta motor_geometry sözlüğü yok — kasa "
+                            "silindiri eklenmedi")
+    L = _finite_positive(md.get("chamber_length"))
+    D = _finite_positive(md.get("chamber_diameter"))
+    if L is None or D is None:
+        return None, None, ("motor_geometry.chamber_length / chamber_diameter "
+                            "(kasa iç boyu / iç çapı, m) yok — kasa silindiri "
+                            "eklenmedi")
+    try:
+        from hrma.engines.nozzle_design import sample_nozzle_inner_contour
+        pts_mm, _meta = sample_nozzle_inner_contour(md)
+        pts = np.asarray(pts_mm, dtype=float) / 1000.0
+    except Exception as hata:  # noqa: BLE001 — künyeye adıyla yazılır
+        return None, None, (f"CAD lülesi örneklenemedi ({type(hata).__name__}: "
+                            f"{hata}) — kasa silindiri eklenmedi")
+    if (pts.ndim != 2 or pts.shape[0] < 2 or not np.all(np.isfinite(pts))
+            or abs(float(pts[0, 0])) > 1e-12
+            or abs(float(pts[0, 1]) - D / 2.0) > 1e-9 * max(D, 1.0)):
+        return None, None, ("CAD lülesinin yakınsak girişi kasa iç "
+                            "yarıçapında ve z=0'da değil — kasa silindiri "
+                            "eklenmedi")
+    return pts, L, (
+        "motor_geometry.chamber_length [m] (kasa iç boyu, STEP/STL kasası); "
+        "kasa iç yarıçapı motor_geometry.chamber_diameter/2; lüle CAD'in "
+        "örneklediği kontur (sample_nozzle_inner_contour(motor_geometry), "
+        "yakınsak giriş kasa iç yarıçapında); ön kapak kapalı uç eşdeğer "
+        "eksenel kuvveti, arka kapak yakınsak bölüm")
+
+
+
 def extract_structural_inputs(motor_results: dict,
                               include_chamber: bool = True) -> dict:
     """Motor sonuç sözlüğünden D1 çözücü girdilerini çıkarır.
@@ -1423,7 +1555,43 @@ def extract_structural_inputs(motor_results: dict,
     ext_m = None
     ext_makullik = None
     if include_chamber:
-        ext_m, ext_beyan = _chamber_length_m(motor_results, layout)
+        if layout == "solid":
+            # V306/KATI-MODEL (M-KATI-10): kasa silindiri + CAD lülesi.
+            _kati_pts, ext_m, ext_beyan = _kati_kasa_ve_lule(motor_results)
+        else:
+            _kati_pts = None
+            ext_m, ext_beyan = _chamber_length_m(motor_results, layout)
+        if _kati_pts is not None:
+            # Silindirin ağdaki boyu Saint-Venant bandına göre (sabitin
+            # gerekçesi KATI_KASA_SILINDIRI_SV_KATI'de); kasanın gerçek boyu
+            # künyede ayrıca durur.
+            _r_kasa = float(_kati_pts[0, 1])
+            _d_sv = float(SAINT_VENANT_KAT) * float(
+                np.sqrt(_r_kasa * float(thickness)))
+            _kasa_boyu = float(ext_m)
+            ext_m = min(_kasa_boyu, KATI_KASA_SILINDIRI_SV_KATI * _d_sv)
+            ext_beyan = (ext_beyan + f"; kasa iç boyu {_kasa_boyu:.4f} m, "
+                         f"ağdaki silindir {ext_m:.4f} m = min(L_kasa, "
+                         f"{KATI_KASA_SILINDIRI_SV_KATI:g}·d_SV), d_SV = "
+                         f"{float(SAINT_VENANT_KAT):g}·sqrt(R·t) = "
+                         f"{_d_sv:.4f} m; bandın dışındaki silindir aynı zar "
+                         "gerilme durumundadır, hüküm tüm kasa silindirine "
+                         "geçerlidir")
+            pts = _kati_pts
+            kontur_beyan = dict(kontur_beyan) if isinstance(
+                kontur_beyan, dict) else {}
+            kontur_beyan.update({
+                "kaynak": ("sample_nozzle_inner_contour(results"
+                           "['motor_geometry']) — CAD'in çizdiği lüle "
+                           "(metre, [z, r])"),
+                "nokta_sayisi": int(pts.shape[0]),
+                "katı_notu": (
+                    "katının yayımlanan nozzle_contour'u yakınsak girişi "
+                    "tane dış yarıçapından başlatır; kasa silindirine "
+                    "bağlanan lüle CAD'in kasa iç yarıçapından başlayan "
+                    "konturudur (aynı örnekleyici, aynı sözlük)"),
+            })
+            contour = pts
         # --- P8B2-12: UZANTI UZUNLUĞUNA MAKULLÜK KAPISI ------------------
         # ``chamber_length`` alan ADI üç motorda AYNI, BİRİMİ farklıdır
         # (hibrit m, sıvı mm) ve birim, yapısal blok İMZASINDAN seçilir.
@@ -1565,7 +1733,19 @@ def extract_structural_inputs(motor_results: dict,
          "applied": bool(yuk_kunyesi.get("distribution")
                          == YUK_DAGILIMI_IZANTROPIK)},
     ]
-    if include_chamber:
+    if include_chamber and layout == "solid":
+        consumed_paths[0] = {
+            "path": "motor_geometry", "purpose": "case inner diameter, "
+            "case inner length and the CAD nozzle contour "
+            "(sample_nozzle_inner_contour)", "unit": "m",
+            "consumer": "mesh (build_wall_mesh): case cylinder + nozzle",
+            "applied": bool(ext_m is not None)}
+        if ext_m is None:
+            consumed_paths.insert(0, {
+                "path": "nozzle_contour.points",
+                "purpose": "inner contour [z, r]", "unit": "m",
+                "consumer": "mesh (build_wall_mesh)"})
+    elif include_chamber:
         consumed_paths.append({
             "path": "chamber_length", "purpose": "chamber cylinder extension",
             "unit": "m (hybrid) / mm (liquid)", "consumer": "mesh contour "
@@ -1675,8 +1855,13 @@ def _hukum_kapsami(mesh, inputs: dict, motor_results: dict) -> dict:
         "kamara_uzantisi_eklendi": bool(ext_m),
         "kamara_uzantisi_m": ext_m,
         "kapsanan": (
-            "lüle + (varsa) kamara uzantısı cidarı — motorun yayımladığı "
-            "nozzle_contour üstünde kurulan eksenel simetrik cidar"),
+            ("kasa silindiri + lüle cidarı — CAD'in çizdiği kasa (iç çap ve "
+             "iç boy motor_geometry'den) ve lüle konturu üstünde kurulan "
+             "eksenel simetrik cidar; ön kapak kapalı uç eşdeğer kuvveti, "
+             "arka kapak yakınsak bölüm" if (ext_m and inputs.get(
+                 "engine_layout") == "solid") else
+             "lüle + (varsa) kamara uzantısı cidarı — motorun yayımladığı "
+             "nozzle_contour üstünde kurulan eksenel simetrik cidar")),
         "kapsanmayan": kapsanmayan,
         "tane": tane_notu,
         "_basis": (
@@ -2727,7 +2912,8 @@ def run_structural_from_motor(motor_results: dict,
             "Yakınsamış çözüm: mesh inceltmesi tolerans altında durdu; "
             "aşağıdaki emniyet katsayısı bu çözümün hükmüdür."
             if not hukum_gerekceleri else
-            "HÜKÜM GERİ ÇEKİLDİ (" + ", ".join(hukum_gerekceleri) + "). "
+            HUKUM_GERI_CEKILDI_ONEKI + " (" + ", ".join(hukum_gerekceleri)
+            + "). "
             "Sayılar çözücünün gerçek çıktısıdır ve silinmez, ancak "
             "yakınsamamış bir çözümden 'bu tasarım güvenlidir/değildir' "
             "hükmü çıkarılamaz: mesh inceltmesi hâlâ "
@@ -2735,7 +2921,7 @@ def run_structural_from_motor(motor_results: dict,
             f"(tolerans %{ref.tol * 100.0:.2f}). Tur sayısını artırın ya da "
             "geometriyi/mesh'i gözden geçirin."
             if not ref.converged else
-            "HÜKÜM GERİ ÇEKİLDİ (" + ", ".join(hukum_gerekceleri) + ")."),
+            hukum_geri_cekme_beyani(hukum_gerekceleri)),
     }
 
     # --- P8B2-11: motorun SF'siyle KIYAS, sessiz çelişki değil ------------
@@ -2870,7 +3056,8 @@ def run_structural_from_motor(motor_results: dict,
         "kisit_duyarliligi": kisit_duyarliligi,
         "motor_sf_karsilastirmasi": karsilastirma,
         "not_modelled": [
-            "termal gerilme (sıcaklık farkından doğan gerilme alanı; D2 "
+            NOT_MODELLED_TERMAL_GERILME_ONEKI
+            + " (sıcaklık farkından doğan gerilme alanı; D2 "
             "termal köprüsüyle eşleşme sonraki kalem). DAYANIM DERATİNGİ "
             + ("ise BU KOŞUMDA modellenmemiş değildir: motorun cidar "
                "sıcaklığına derate ettiği akma kullanıldı (P8B2-05, kaynağı "
@@ -2890,7 +3077,8 @@ def run_structural_from_motor(motor_results: dict,
              "P(x) basınç dağılımı: γ ya da kontur eksik/geçersiz olduğu "
              "için SABİT P_c geri dönüşü uygulandı (nedeni load_model."
              "fallback_reason)"),
-            ("ısıl yük ve sıcaklığa bağlı dayanım — sonuç YALNIZ basınç "
+            (NOT_MODELLED_ISIL_YUK_ONEKI
+             + " ve sıcaklığa bağlı dayanım — sonuç YALNIZ basınç "
              "yüklemesidir (load_model.scope)"),
             "dış ortam basıncı (dış yüzey yüksüz; iç basınç mutlak)",
             "lüle için ayrı malzeme/kalınlık (motorlar tek kamara cidarı "
@@ -2898,7 +3086,7 @@ def run_structural_from_motor(motor_results: dict,
             "burkulma ve itki dışı eksenel yükler (D1 lineer elastik "
             "model; kapalı uç eşdeğer eksenel kuvveti ve basıncın eksenel "
             "bileşeni MODELLENİR — OH-DK-04)",
-            ("gerçek eksenel mesnet/flanş rijitliği — rijit-cisim kısıtı "
+            (NOT_MODELLED_MESNET_ONEKI + " — rijit-cisim kısıtı "
              "iki uç seçeneğiyle de çözülüp KÖTÜMSERİ yayımlanır "
              "(meta.kisit_duyarliligi), ama gerçek montaj rijitliği "
              "modellenmez"),
@@ -3173,6 +3361,35 @@ def extract_thermal_inputs(motor_results: dict,
             "argümanıyla verilmelidir; boğaz skalerinden profil uydurulmaz "
             "(sahte veri yasağı).")
 
+    # --- V306/GÜVERTE-HATA (kalem 6, §5 B-N1) · PROFİL ⟷ AĞ MALZEMESİ ----
+    # Gaz tarafı h(z) profilin BEYAN ETTİĞİ malzemenin referans soğutulmuş
+    # cidar sıcaklığında hesaplanır; ağ başka malzemeyle çözülürse zincirin
+    # iki ucu iki ayrı cidarı anlatır (P7B3-30 ölçümü: aynı motorda tepe
+    # q 6,122 ⟷ 25,251 MW/m², oran 4,125). Denetim yalnız
+    # ``/api/fea/thermal`` ucundaydı ve ÇÖZÜCÜ KOŞTUKTAN SONRA yapılıyordu:
+    # köprüyü doğrudan çağıran (ölçüldü: ``run_thermal_from_motor``)
+    # uyuşmazlığı reddetmiyor, sıcaklık alanı ve erime hükmü üretiyordu.
+    # Kural artık TEK YERDE, çözücüden önce; uç bu reddi okur. Profil
+    # malzeme beyan etmiyorsa (``material`` yok) davranış değişmez.
+    _profil_malzeme = axial_profile.get("material")
+    if (isinstance(_profil_malzeme, str) and _profil_malzeme.strip()
+            and _profil_malzeme.strip() != malzeme_anahtari):
+        red = _red(
+            ["axial_profile.material"],
+            f"axial_profile '{_profil_malzeme.strip()}' malzemesini beyan "
+            f"ediyor, ağ ise '{malzeme_anahtari}' ({malzeme_kaynagi}) ile "
+            "çözülecekti: h(z) profilin malzemesinin referans soğutulmuş "
+            "cidar sıcaklığında hesaplanır, iki uç iki ayrı cidarı anlatırdı. "
+            "Ağ, sıcaklık alanı ve erime hükmü ÜRETİLMEDİ; malzeme ikame "
+            "edilmedi. Profili ağın malzemesiyle yeniden hesaplayın.",
+            code=WARN_THERMAL_PROFILE_MATERIAL_MISMATCH,
+            profile_material=_profil_malzeme.strip(),
+            mesh_material=malzeme_anahtari)
+        red["reason_code"] = BRIDGE_REASON_PROFILE_MATERIAL_MISMATCH
+        red["profile_material"] = _profil_malzeme.strip()
+        red["expected_material"] = malzeme_anahtari
+        return red
+
     eksik_alan = [k for k in ("x_mm", "h_g", "T_recovery")
                   if axial_profile.get(k) is None]
     if eksik_alan:
@@ -3390,7 +3607,68 @@ def extract_thermal_inputs(motor_results: dict,
     i_bogaz_profil = int(np.argmin(np.abs(x_m - z_bogaz_kontur)))
     hg_profil_tepe = float(h_g[i_bogaz_profil])
     hg_capalari = bogaz_adaylari["h_g_W_m2K"]
-    if hg_capalari and malzeme_anahtari != capa_malzemesi:
+    # --- V306/HİBRİT-NOZUL (FİZİK-2 DEVİR 1) · LÜLE ÇAPASI -----------------
+    # Motor lüle malzemesiyle kurulmuş boğaz katsayısını yayımlıyorsa
+    # (``MOTOR_NOZZLE_THROAT_HG_ANCHOR``) ve ağ AYNI malzemeyle çözülüyorsa
+    # kapı lüle bölgesinde KOŞAR: aynı tolerans (gevşetilmedi), aynı ret.
+    # ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-nozul/olcum/): örnek ve tur
+    # L1-L3'te panelin profili ile motorun lüle katsayısı bağıl 0 sapıyor
+    # (iki uç aynı gazla, aynı malzemeyle kurulur). Alan yoksa (ör. bu
+    # sürümden önce kaydedilmiş sonuç) ya da malzemesi ağınkinden farklıysa
+    # aşağıdaki 'calistirilamadi' yolu AYNEN çalışır.
+    _lule_capa = _finite_positive(_nested_get(
+        motor_results, MOTOR_NOZZLE_THROAT_HG_ANCHOR["h_g_W_m2K"]))
+    _lule_capa_malzeme = _nested_get(
+        motor_results, MOTOR_NOZZLE_THROAT_HG_ANCHOR["material"])
+    if (_lule_capa is not None and malzeme_anahtari != capa_malzemesi
+            and isinstance(_lule_capa_malzeme, str)
+            and _lule_capa_malzeme == malzeme_anahtari):
+        _lule_alan = ".".join(MOTOR_NOZZLE_THROAT_HG_ANCHOR["h_g_W_m2K"])
+        _lule_gaz = _nested_get(
+            motor_results, MOTOR_NOZZLE_THROAT_HG_ANCHOR["gas_properties_basis"])
+        hg_sapma = abs(hg_profil_tepe - _lule_capa) / _lule_capa
+        hg_kapi = {
+            "durum": ("gecti" if hg_sapma <= THERMAL_HG_CROSS_CHECK_TOL
+                      else "reddedildi"),
+            "profil_tepe_h_g_W_m2K": hg_profil_tepe,
+            "en_yakin_motor_alani": _lule_alan,
+            "en_yakin_motor_degeri_W_m2K": _lule_capa,
+            "bagil_sapma": hg_sapma,
+            "tolerans": THERMAL_HG_CROSS_CHECK_TOL,
+            "tum_sapmalar": {_lule_alan: hg_sapma},
+            "capa_malzemesi": _lule_capa_malzeme,
+            "ag_malzemesi": malzeme_anahtari,
+            "capa_referans_cidar_K": _finite_positive(_nested_get(
+                motor_results,
+                MOTOR_NOZZLE_THROAT_HG_ANCHOR["reference_wall_K"])),
+            "capa_gaz_varsayilan_alanlari": (
+                list(_lule_gaz.get("assumed_fields") or [])
+                if isinstance(_lule_gaz, dict) else None),
+            "kamara_capa_alanlari_W_m2K": dict(hg_capalari),
+            "beyan": (
+                f"çapa motorun LÜLE malzemesiyle ('{_lule_capa_malzeme}') "
+                f"kurduğu boğaz katsayısıdır ({_lule_alan}); ağ da aynı "
+                "malzemeyle çözülür. Kamara malzemesiyle kurulmuş katsayılar "
+                f"('{capa_malzemesi}': "
+                + "; ".join(sorted(hg_capalari) or ["yok"])
+                + ") başka cidarındır, karşılaştırmaya girmez. Tolerans "
+                "gevşetilmedi."),
+        }
+        if hg_sapma > THERMAL_HG_CROSS_CHECK_TOL:
+            return _red(
+                ["axial_profile.h_g (motorun lüle boğaz katsayısıyla "
+                 "uyuşmuyor)"],
+                "axial_profile.h_g makullük kapısından geçmedi: profilin "
+                f"boğaz değeri {hg_profil_tepe:.4g} W/m²K, motorun lüle "
+                f"malzemesiyle ('{_lule_capa_malzeme}') yayımladığı boğaz "
+                f"katsayısı ({_lule_alan}) {_lule_capa:.4g} W/m²K — bağıl "
+                f"sapma %{100.0 * hg_sapma:.4g} > tolerans "
+                f"%{100.0 * THERMAL_HG_CROSS_CHECK_TOL:g}. Bu mertebede bir "
+                "sapma profilin bu motorun fiziğinden gelmediğini gösterir; "
+                "böyle bir h(z) ile hesaplanan cidar sıcaklığından erime / "
+                "sınır aşımı HÜKMÜ ÇIKARILAMAZ. Sıcaklık alanı ÜRETİLMEDİ — "
+                "uydurma hüküm yayımlanmaz.")
+    elif hg_capalari and malzeme_anahtari != capa_malzemesi:
         hg_kapi = {
             "durum": "calistirilamadi",
             "neden": HG_GATE_NOT_RUN_ANCHOR_MATERIAL,
@@ -3798,6 +4076,61 @@ def _olumlu_hukum_kapisi(sinir: dict, uzamsal: dict,
             if sinir.get(bayrak) is False:
                 guncel[bayrak] = None
     return guncel
+
+
+#: V306/HİBRİT-SAYI (M-HIBRIT-21) — uzlaştırma bloğunun İSTASYON alanları.
+#: ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-sayi/olcum/termal_once.json, tur
+#: L2): "denge (t→∞) 3297 K ⟷ geçici tepe 3317 K, fark −20 K" — geçici tepe
+#: dengeyi aşıyor gibi okunuyordu. Kök SAYISAL DEĞİL, FİZİKSEL ve İSTASYON
+#: farkı: denge zinciri BOĞAZ cidarıdır (z = 52,4 mm, dış yüz doğal taşınım),
+#: FEA tepesi iç yüzeyin en sıcak noktasıdır ve konverjan girişte (z = 0,
+#: M 0,07) durur; orada gazın geri kazanım sıcaklığı 3316,8 K, boğazdakinden
+#: yüksektir (T_aw M → 0'da durma sıcaklığına yaklaşır). Adyabatik dış yüzlü
+#: geçici çözüm kendi istasyonunun geri kazanım sıcaklığını AŞMIYOR (3316,6 <
+#: 3316,8 K). Blok artık iki sayının hangi istasyona ait olduğunu ve
+#: tepenin kendi istasyonundaki üst sınırını yayımlar; panel nedeni yazar.
+THERMAL_PATHS_STATION_BASIS = (
+    'equilibrium_K is the THROAT wall of the motor equilibrium chain; '
+    'fea_peak_K is the hottest inner-surface node of the transient FEA, at '
+    'fea_peak_x_mm on the same axis (convergent inlet = 0). With an '
+    'adiabatic outer surface the transient wall approaches the local gas '
+    'recovery temperature from below, so fea_peak_local_recovery_K bounds '
+    'the transient peak at its own station; a transient peak above the '
+    'throat equilibrium means the peak sits at a station whose recovery '
+    'temperature is higher than at the throat (lower Mach number), not '
+    'that the transient overshoots its own equilibrium.')
+
+
+def _uzlastirma_istasyonlari(inputs: dict, inner_surface: dict) -> dict:
+    """Uzlaştırma bloğunun istasyon künyesi (FEA yarısı; tek yer).
+
+    Sayılar köprünün KENDİ girdilerinden: profil ekseni ``h_x_m``, geri
+    kazanım sıcaklığı ``t_recovery_K`` (çözücüye giden sınır koşulu), kontur
+    (boğaz = en küçük yarıçap) ve yayımlanan iç yüzey tepesi. Tepe profilin
+    dışında kalırsa (kamara silindiri dahil ağ) yerel sınır ``None``.
+    """
+    out = {"equilibrium_station": "throat",
+           "equilibrium_station_x_mm": None,
+           "fea_peak_x_mm": None,
+           "fea_peak_local_recovery_K": None,
+           "fea_peak_within_local_recovery": None,
+           "station_basis": THERMAL_PATHS_STATION_BASIS}
+    try:
+        x_m = np.asarray(inputs["h_x_m"], dtype=float)
+        t_rec = np.asarray(inputs["t_recovery_K"], dtype=float)
+        kontur = np.asarray(inputs["contour"], dtype=float)
+        z_tepe = float(inner_surface["peak_z_m"])
+        T_tepe = float(inner_surface["peak_T_K"])
+    except (KeyError, TypeError, ValueError):
+        return out
+    out["equilibrium_station_x_mm"] = 1000.0 * float(
+        kontur[int(np.argmin(kontur[:, 1])), 0])
+    out["fea_peak_x_mm"] = 1000.0 * z_tepe
+    if x_m.size >= 2 and float(x_m[0]) <= z_tepe <= float(x_m[-1]):
+        yerel = float(np.interp(z_tepe, x_m, t_rec))
+        out["fea_peak_local_recovery_K"] = yerel
+        out["fea_peak_within_local_recovery"] = bool(T_tepe <= yerel)
+    return out
 
 
 def run_thermal_from_motor(motor_results: dict,
@@ -4234,6 +4567,7 @@ def run_thermal_from_motor(motor_results: dict,
         {k: (tm.get("temperature_limits") or {}).get(k)
          for k in ("allowable_K", "service_K", "melting_K")}
         if tm.get("temperature_limits") else None)
+    reconciliation.update(_uzlastirma_istasyonlari(inputs, inner_surface))
     if _eq_kaynak:
         out_consumed_eq = [{"path": _eq_kaynak, "purpose": "equilibrium wall "
                             "temperature (reconciliation only)", "unit": "K",
@@ -4309,6 +4643,44 @@ PLANAR_GRAIN_GEOMETRY_KEYS = (
 )
 
 
+#: NR-16 (V306/TANE): tane ısıl yükünü belirleyen motor girdileri — motor
+#: arayüzünün KENDİ override anahtarları (çeviri katmanı yok). Değerleri
+#: motorun kendi okuyucusu doğrular (``_grain_support`` /
+#: ``_override_val('ambient_temp', ...)``); reddedilen değer sessizce
+#: varsayılana düşmez, ``PlanarGrainInputRejected`` ile uca 422 olarak çıkar.
+PLANAR_GRAIN_LOAD_KEYS = ("grain_support", "ambient_temp")
+
+
+class PlanarGrainInputRejected(ValueError):
+    """Motorun reddettiği yük girdisi (NR-16) — ``kayitlar`` motorun
+    ``rejected_inputs`` biçimindedir; uç bunu /calculate_solid ile aynı
+    adlı 422 gövdesine çevirir."""
+
+    def __init__(self, kayitlar):
+        self.kayitlar = list(kayitlar)
+        alanlar = ", ".join(str(k.get("field")) for k in self.kayitlar)
+        super().__init__(f"planar grain load input rejected: {alanlar}")
+
+
+def _kapasite_hukmu_en(kayit):
+    """Çözücünün ``kapasite_hukmu`` kaydı → uç sözleşmesi (İngilizce alan)."""
+    if not isinstance(kayit, dict):
+        return None
+    return {
+        "status": ("exceeded" if kayit.get("durum") == "asiliyor"
+                   else "undetermined"),
+        "load_fraction_at_capability": kayit.get("yuk_orani_kapasitede"),
+        "peak_strain_at_capability": kayit.get("kapasitedeki_maks_gerinim"),
+        "small_strain_limit": kayit.get("hukum_esigi"),
+        "_basis": (
+            "the strain margin number is withheld above the small-strain "
+            "limit; the verdict is still drawn when the linear solution "
+            "reaches the strain capability at a load fraction where the "
+            "peak bore strain is within the small-strain limit (strain is "
+            "proportional to load in a linear solve)."),
+    }
+
+
 def _planar_grain_reject(grain_type, reason, code, **params):
     """Beyanlı red — uydurma alan içermeyen NOT_MODELLED paketi."""
     return {
@@ -4331,8 +4703,17 @@ def run_planar_grain_fea(grain_type,
                          tol=DEFAULT_REFINE_TOL,
                          n_theta0=None,
                          n_radial0=DEFAULT_ELEMS_THROUGH_WALL,
-                         max_rounds=DEFAULT_MAX_REFINE_ROUNDS) -> dict:
+                         max_rounds=DEFAULT_MAX_REFINE_ROUNDS,
+                         grain_support=None,
+                         ambient_temp=None,
+                         case_radial_expansion_mm=None) -> dict:
     """Tane kesiti için uçtan uca 2B düzlemsel FEA koşusu (V2.7 Aşama C).
+
+    ``case_radial_expansion_mm`` (V306/KATI-MODEL, M-KATI-16): kasanın oda
+    basıncı altındaki radyal genişlemesi [mm]; verilirse "bonded_rigid" dış
+    yüzeye ÖNGÖRÜLEN radyal yer değiştirme olarak uygulanır (motorun
+    analitik bloğunun ``case_radial_expansion_mm`` sınır koşuluyla AYNI
+    sayı). Verilmezse kasa rijit tutulur ve ``loads`` bunu söyler.
 
     Zincir: SolidRocketEngine kurulumu (kesit parametre çözümü + kırpma +
     varsayılan beyanı MOTORUN KENDİ koduyla) → port kesiti (motor poligon
@@ -4356,12 +4737,20 @@ def run_planar_grain_fea(grain_type,
         reddedip design_warnings ile beyan eder.
     outer_bc / tol / n_theta0 / n_radial0 / max_rounds : planar_grain
         çözücüsüne aynen geçer (merkezî varsayılanlar; sayı tekrarlanmaz).
+    grain_support / ambient_temp : NR-16 — tane yerleşimi
+        ('case_bonded' | 'cartridge_loaded') ve depolama/işletme sıcaklığı
+        [K]. Motorun kendi girdileridir; ısıl yük
+        ``engine._grain_thermal_load()`` ile analitik blokla AYNI kaynaktan
+        kurulur. Verilmezse motorun varsayılanı (gövdeye yapıştırılmış,
+        SOLID_THERMAL ortam sıcaklığı) kullanılır ve beyan edilir —
+        /calculate_solid ile aynı.
 
     Dönüş: status='ok' paketi (mesh + alanlar + port gerinimi + yakınsama +
     beyan zinciri) ya da beyanlı NOT_MODELLED. Geçersiz sayısal girdi
     (negatif web, port >= dış çap, geçersiz basınç) ValueError fırlatır.
     """
     from hrma.engines.solid_rocket_engine import (
+        GRAIN_PORT_SHAPE_UNRESOLVED,
         SHAPELY_AVAILABLE,
         SUPPORTED_GRAIN_TYPES,
         SolidRocketEngine,
@@ -4421,6 +4810,11 @@ def run_planar_grain_fea(grain_type,
 
     overrides = {k: v for k, v in dict(geometry_overrides or {}).items()
                  if k in PLANAR_GRAIN_GEOMETRY_KEYS and v not in (None, "")}
+    # NR-16: yük girdileri motorun kendi override anahtarlarıyla geçer.
+    for _k, _v in (("grain_support", grain_support),
+                   ("ambient_temp", ambient_temp)):
+        if _v is not None and _v != "":
+            overrides[_k] = _v
     l_mm = _finite_positive(grain_length_mm)
     ctor = dict(grain_type=grain_type, propellant_type=str(propellant_type),
                 chamber_diameter=d_out, core_diameter=d_core,
@@ -4428,6 +4822,14 @@ def run_planar_grain_fea(grain_type,
     if l_mm is not None:
         ctor["grain_length"] = l_mm
     engine = SolidRocketEngine(**ctor)
+
+    # --- NR-16: ısıl yük — analitik blokla TEK kaynak ---------------------
+    isil = engine._grain_thermal_load()
+    _yuk_reddi = [k for k in (getattr(engine, "rejected_inputs", None) or [])
+                  if isinstance(k, dict)
+                  and k.get("field") in PLANAR_GRAIN_LOAD_KEYS]
+    if _yuk_reddi:
+        raise PlanarGrainInputRejected(_yuk_reddi)
 
     # --- Kesit geometrisi: motorun KENDİ fonksiyonlarından ----------------
     r_outer = engine.D_chamber / 2.0
@@ -4460,7 +4862,8 @@ def run_planar_grain_fea(grain_type,
             _probe_ctor = dict(ctor)
             _probe_ctor["overrides"] = {
                 k: v for k, v in overrides.items()
-                if k not in ("star_points", "star_radius")}
+                if k not in ("star_points", "star_radius")
+                and k not in PLANAR_GRAIN_LOAD_KEYS}
             _probe = SolidRocketEngine(**_probe_ctor)
             n_def, depth_def = _probe._star_params()
             istenen_vs_kullanilan = {}
@@ -4552,6 +4955,14 @@ def run_planar_grain_fea(grain_type,
                         name=str(propellant_type))
     strain_capability = float(mech["strain_capability"])
 
+    eps_T = float(isil["free_thermal_strain"])
+    # V306/KATI-MODEL (M-KATI-16): kasa esnemesi (m). Rijit kasa (0) eski
+    # yolla bit-aynı.
+    u_kasa_m = (0.0 if case_radial_expansion_mm is None
+                else float(case_radial_expansion_mm) / 1000.0)
+    if u_kasa_m != 0.0 and outer_bc != "bonded_rigid":
+        raise ValueError("case_radial_expansion_mm yalnız 'bonded_rigid' "
+                         "dış sınır koşuluyla verilir")
     ref = solve_grain_with_refinement(
         r_inner, r_outer, material,
         bore_pressure_pa=p_bar * PA_PER_BAR,
@@ -4562,8 +4973,123 @@ def run_planar_grain_fea(grain_type,
         n_theta0=DEFAULT_N_THETA0 if n_theta0 is None else int(n_theta0),
         n_radial0=int(n_radial0),
         max_rounds=int(max_rounds),
+        thermal_strain=eps_T,
+        outer_radial_displacement=u_kasa_m,
     )
     res = ref.result
+
+    # --- V306/KATI-KALAN (kalem 3, KATI-TANE DEVİR): OTURMAMIŞ KABUL
+    # BÜYÜKLÜĞÜNDEN PAY SAYISI YAYIMLANMAZ ----------------------------------
+    # ÖLÇÜLDÜ (kanıt kati-kalan/once.json, taban 78dbb287e; örnek KNDX
+    # kartuş Ø75/32, 60 bar): star / finocyl (8 mm) / slotted (8 mm) port
+    # gerinimi son inceltmede %35,7 / %27,1 / %24,5 değişiyor
+    # (``convergence.acceptance.converged = false``, tolerans %1) ve uç yine
+    # de pay SAYISINI yayımlıyordu (1,93 / 0,976 / 1,057; panel sarı, Merkez
+    # "NOT EARNED"). Kök fiziksel: motorun port poligonu KESKİN köşelidir,
+    # keskin iç köşede doğrusal elastik gerinimin sonlu değeri yoktur (köşe
+    # tekilliği); tepe değer her turda büyür, yani son turun sayısı ağın
+    # sayısıdır, tanenin değil. Gerçek değer köşe yuvarlatmasına bağlıdır
+    # ve HRMA kesiti yuvarlatma taşımaz. Kural: kabul büyüklüğü oturmadıysa
+    # pay sayısı null + adlı neden; aynı büyüklükten kurulan kapasite
+    # hükmü de "aşılıyor" diyemez (belirlenemedi + aynı neden). Alanlar
+    # (gerilme, gerinim haritası, yakınsama geçmişi) çözücünün gerçek
+    # çıktısıdır ve SİLİNMEZ. Dairesel port (oturan kabul) BİT-AYNI.
+    _kabul = ref.acceptance if isinstance(ref.acceptance, dict) else {}
+    pay_geri_cekme = None
+    if _kabul.get("converged") is not True:
+        _kose = grain_type in GRAIN_PORT_SHAPE_UNRESOLVED
+        pay_geri_cekme = {
+            "reason_code": ("acceptance_not_converged_sharp_corner" if _kose
+                            else "acceptance_not_converged"),
+            "acceptance_quantity": _kabul.get("quantity"),
+            "acceptance_rel_change": _kabul.get("rel_change"),
+            "acceptance_tol": _kabul.get("tol"),
+            "_basis": (
+                ("the acceptance quantity (peak bore fibre strain, NASA "
+                 "SP-8073) does not converge with the mesh: the port polygon "
+                 "has sharp inner corners, where the linear-elastic strain "
+                 "has no finite value (corner singularity), so the peak "
+                 "grows with every refinement; the real value depends on "
+                 "the corner fillet, which the HRMA section does not carry. "
+                 "No strain margin and no capability verdict is drawn from "
+                 "it; the fields and the convergence history are the "
+                 "solver's actual output.") if _kose else
+                ("the acceptance quantity (peak bore fibre strain, NASA "
+                 "SP-8073) did not converge with the mesh within the "
+                 "refinement rounds, so the last round's value is a mesh "
+                 "value; no strain margin and no capability verdict is "
+                 "drawn from it.")),
+        }
+    pay = None if pay_geri_cekme is not None else res.strain_margin
+    kapasite = _kapasite_hukmu_en(res.meta.get("kapasite_hukmu"))
+    if pay_geri_cekme is not None and kapasite is not None:
+        # Kapasitedeki yük oranı ve gerinim de oturmamış tepe değerden
+        # türer (λ_c = kapasite / tepe): sayı olarak yayımlanmaz.
+        kapasite = dict(kapasite, status="undetermined",
+                        load_fraction_at_capability=None,
+                        peak_strain_at_capability=None,
+                        withheld_reason_code=pay_geri_cekme["reason_code"])
+
+    # --- NR-16: yük bileşenleri (aynı son ağ, ayrı çözümler) --------------
+    # Toplam (yayımlanan kabul büyüklüğü) birleşik yükün çözümüdür. Basınç
+    # ve ısıl paylar aynı son ağda AYRI çözülür; lif gerinimi yer
+    # değiştirmenin uzunluk ölçüsü olduğundan (ikinci mertebe terim) iki
+    # payın toplamı birleşik çözümden ε² mertebesinde ayrılabilir — fark
+    # alan olarak yayımlanır, ölçeklenmez. Isıl yük yoksa ek çözüm koşmaz.
+    eps_nod = np.asarray(res.bore_strain_nodal, dtype=float)
+    i_yon = int(np.argmax(eps_nod))
+    if eps_T != 0.0:
+        from hrma.fea.planar_grain import solve_plane_strain_section
+        _r_p = solve_plane_strain_section(
+            ref.mesh, material, p_bar * PA_PER_BAR, outer_bc=outer_bc,
+            strain_capability=strain_capability, thermal_strain=0.0,
+            outer_radial_displacement=u_kasa_m)
+        _r_t = solve_plane_strain_section(
+            ref.mesh, material, 0.0, outer_bc=outer_bc,
+            strain_capability=strain_capability, thermal_strain=eps_T)
+        e_p = np.asarray(_r_p.bore_strain_nodal, dtype=float)
+        e_t = np.asarray(_r_t.bore_strain_nodal, dtype=float)
+    else:
+        e_p = eps_nod
+        e_t = np.zeros_like(eps_nod)
+    yuk_bilesenleri = {
+        "governing_station_index": i_yon,
+        "total_at_governing_station": float(eps_nod[i_yon]),
+        "pressure_at_governing_station": float(e_p[i_yon]),
+        "thermal_at_governing_station": float(e_t[i_yon]),
+        "superposition_residual": float(
+            eps_nod[i_yon] - e_p[i_yon] - e_t[i_yon]),
+        "_basis": (
+            "total = combined pressure + thermal solve (the published "
+            "acceptance quantity); pressure and thermal parts are separate "
+            "solves on the same final mesh at the station of the peak "
+            "tensile bore strain. The fibre strain is a length measure of "
+            "the displacement, so the parts add up to the total only to "
+            "first order; the residual is published, nothing is rescaled."),
+    }
+    yuk_kumesi = {
+        "bore_pressure": True,
+        # V306/KATI-MODEL (M-KATI-16): kasa esnemesi verildiyse uygulanır.
+        "case_expansion_under_pressure": bool(u_kasa_m != 0.0),
+        "case_radial_expansion_mm": (None if case_radial_expansion_mm is None
+                                     else float(case_radial_expansion_mm)),
+        "cure_cooldown_shrinkage": bool(eps_T != 0.0),
+        "section_shape": "resolved by the mesh",
+        "grain_support": isil["grain_support"],
+        "grain_support_source": isil["grain_support_source"],
+        "storage_temperature_k": isil["storage_temperature_k"],
+        "cure_temperature_k": isil["cure_temperature_k"],
+        "thermal_expansion_1k": isil["thermal_expansion_1k"],
+        "delta_t_k": isil["delta_t_k"],
+        "free_thermal_strain": eps_T,
+        "outer_surface": (
+            ("case expanding under pressure (u_r = %.6g mm, the analytic "
+             "path's own outer condition)" % (u_kasa_m * 1000.0))
+            if (outer_bc == "bonded_rigid" and u_kasa_m != 0.0) else
+            "rigid case (u = 0)" if outer_bc == "bonded_rigid"
+            else "free (validation mode)"),
+        "_basis": isil["basis"],
+    }
 
     basis = {
         "_source": "hrma.fea.bridge.run_planar_grain_fea",
@@ -4597,14 +5123,40 @@ def run_planar_grain_fea(grain_type,
             "Pc_Pa": p_bar * PA_PER_BAR,
             "dagilim": ("port yüzeyine SABİT Pc — kesit düzleminde basınç "
                         "değişimi modellenmez"),
+            # NR-16: ısıl yük analitik blokla AYNI kaynaktan.
+            "isil": ("engine._grain_thermal_load() — tane yerleşimi "
+                     f"{isil['grain_support']} ({isil['grain_support_source']}), "
+                     f"α·ΔT = {eps_T:.6g} (α {isil['thermal_expansion_1k']:g} "
+                     f"1/K, depolama {isil['storage_temperature_k']:g} K, "
+                     f"kürleme {isil['cure_temperature_k']:g} K)"),
         },
+        # V306/KATI-KALAN (kalem 4, KATI-TANE DEVİR): eski cümlenin iki
+        # yanlışı düzeltildi — "bu kip gövdeyi rijit tutar" M-KATI-16'dan beri
+        # yanlıştı (case_radial_expansion_mm verilince dış yüzey gövdenin
+        # esnemesiyle çözülür; aşağıda bu koşunun gerçek durumu yazılır),
+        # "kesit şeklini nominal Kt ile temsil eder" V306/KATI-TANE'den beri
+        # yanlıştı (nominal Kt kalktı; köşeli portta yığılmış gerinim
+        # yayımlanmaz). Cümle koşunun kendi yük kümesinden kurulur.
         "analitik_blok_iliskisi": (
-            "Motor sonucundaki grain_structural bloğu (Timoshenko silindir + "
-            "nominal Kt) KALIR ve bu kiple ÇELİŞMEZ: analitik blok kasa "
-            "esnemesi + kürleme soğumasını içerir ama kesit şeklini Kt "
-            "katsayısıyla temsil eder; bu kip kesit şeklinin gerilme "
-            "yoğunlaşmasını mesh ile çözer ama viskoelastisite/termal "
-            "büzülme/kasa esnemesi modellemez. İkisi birlikte okunmalıdır."),
+            "Motor sonucundaki grain_structural bloğu (kalın cidarlı silindir, "
+            "Timoshenko) ile bu kip aynı yük kümesini taşır: port basıncı ve "
+            "gövdeye yapıştırılmış tanede gövdenin kısıtladığı kürleme/"
+            "soğuma büzülmesi (aynı α, kürleme ve depolama sıcaklığı, aynı "
+            "yerleşim kuralı). Gövdenin basınç altındaki radyal esnemesi: "
+            + (("analitik blok onu içerir; bu koşuda dış yüzeye aynı esneme "
+                "uygulandı (u_r = %.6g mm)" % (u_kasa_m * 1000.0))
+               if (outer_bc == "bonded_rigid" and u_kasa_m != 0.0) else
+               ("analitik blok onu içerir; bu koşuda esneme verilmedi "
+                "(case_radial_expansion_mm yok), dış yüzey rijit gövdeye "
+                "bağlı (u = 0)") if outer_bc == "bonded_rigid" else
+               ("bu koşu doğrulama kipinde, dış yüzey serbest; gövde "
+                "modellenmez"))
+            + ". Kalan fark kesit şeklidir: analitik blok dairesel portu "
+            "kapalı biçimle çözer; köşeli portta (yıldız, finocyl, yivli, "
+            "tekerlek) köşe yığılmasını çözmez ve yığılmış gerinim "
+            "yayımlamaz (dairesel port gerinimini ve izin verilen en büyük "
+            "yığılma katsayısını yayımlar). Bu kip kesit şeklini ağ ile "
+            "çözer."),
     }
     if mech.get("inherited_from"):
         basis["malzeme"]["devralma_beyani"] = (
@@ -4631,6 +5183,7 @@ def run_planar_grain_fea(grain_type,
         "propellant_type": str(propellant_type),
         "symmetry_fraction": int(n_sym),
         "inputs": basis,
+        "loads": yuk_kumesi,
         "von_mises_nodal": res.von_mises_nodal,
         "von_mises_gauss_max": res.max_von_mises,
         "max_principal_nodal": res.max_principal_nodal,
@@ -4642,7 +5195,9 @@ def run_planar_grain_fea(grain_type,
             "strain_edges": res.bore_strain_edges,
             "max_strain": res.max_bore_strain,
             "strain_capability": strain_capability,
-            "strain_margin": res.strain_margin,
+            # V306/KATI-KALAN (kalem 3): kabul oturmadıysa null + neden.
+            "strain_margin": pay,
+            "strain_margin_withheld": pay_geri_cekme,
             "_basis": res.meta.get("bore_strain_kaynagi"),
             # P8B2-07: küçük gerinim / geometrik lineerlik sınırı ürün
             # yüzeyine taşınır — payın neden geri çekildiği (ya da hangi
@@ -4651,6 +5206,10 @@ def run_planar_grain_fea(grain_type,
             "kucuk_gerinim_durumu": res.meta.get("kucuk_gerinim_durumu"),
             "strain_margin_geri_cekme": res.meta.get(
                 "strain_margin_geri_cekme"),
+            "load_components": yuk_bilesenleri,
+            # NR-16: pay geri çekildiğinde kapasite hükmü (solver meta).
+            # V306/KATI-KALAN (kalem 3): kabul oturmadıysa 'undetermined'.
+            "capability_verdict": kapasite,
         },
         "mesh": {
             "nodes": ref.mesh.nodes,

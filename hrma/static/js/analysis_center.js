@@ -603,9 +603,9 @@
                         + resp.status + '):', text);
                 }
                 throw new Error(TF('ac.run.badJson', { status: resp.status },
-                    'Server replied HTTP {status} but the body is not valid JSON '
-                    + '(Infinity/NaN are not JSON values). Nothing was drawn; the '
-                    + 'raw body is in the browser console.'));
+                    'The server reply is not valid JSON (Infinity and NaN are not '
+                    + 'JSON values). Nothing was drawn; the raw body is in the '
+                    + 'browser console.'));
             }
         });
     }

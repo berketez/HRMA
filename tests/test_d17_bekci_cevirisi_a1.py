@@ -511,11 +511,25 @@ class TestOHZ515TabloBosalmadi:
         anlatmakta serbesttir (aksi hâlde bekçi kendi gerekçesini yasaklar).
         """
         import ast
-        import inspect
-        from tests.test_z5s_ham_500 import TestYoklukIleAcikNullAyni
-        kaynak = inspect.getsource(
-            TestYoklukIleAcikNullAyni.test_dusus_sessiz_degil)
-        agac = ast.parse(inspect.cleandoc(kaynak))
+        import pathlib
+
+        import tests.test_z5s_ham_500 as hedef
+        # V306 CI-SÜREÇ (4 Kas): kaynak modülün GERÇEK yolundan
+        # (``__file__``) okunur, ``inspect.getsource`` ile DEĞİL. getsource
+        # kod nesnesinin ``co_filename``ine bakar; `git worktree move`
+        # sonrası pytest'in yeniden yazma önbelleği ESKİ yolu taşır ve
+        # bekçi "could not get source code" ile KIRMIZI düşüyordu (v3.0.5
+        # geliştirme ağacı, 28 Eki) — iddiayla ilgisiz bir ortam kırmızısı.
+        # Denetim aynı: hedef yöntemin YÜRÜTÜLEN gövdesindeki çağrılar.
+        modul = ast.parse(pathlib.Path(hedef.__file__).read_text(
+            encoding='utf-8'))
+        sinif = next((d for d in modul.body if isinstance(d, ast.ClassDef)
+                      and d.name == 'TestYoklukIleAcikNullAyni'), None)
+        assert sinif is not None, 'TestYoklukIleAcikNullAyni sınıfı yok'
+        agac = next((d for d in sinif.body
+                     if isinstance(d, ast.FunctionDef)
+                     and d.name == 'test_dusus_sessiz_degil'), None)
+        assert agac is not None, 'test_dusus_sessiz_degil bekçisi yok'
         cagrilar = {
             ast.unparse(dugum.func)
             for dugum in ast.walk(agac)

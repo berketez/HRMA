@@ -138,6 +138,11 @@ def test_trajectory_zaman_panelleri_eslesir_menzil_haric():
             'velocity_magnitude': np.linspace(0.0, 300.0, n),
             'velocity_z': np.linspace(0.0, 250.0, n),
             'acceleration': np.linspace(50.0, 0.0, n),
+            # V306/UÇUŞ-FEA (kalem 1): UÇUŞ-2 (M-KATI-28) yük çarpanı
+            # hücresini algılanan ivmeden çiziyor; birleşik yörüngenin TEK
+            # üreticisi (_combine_flight_phases) bu diziyi her zaman yazar.
+            # Elle kurulan sözlük eski sözleşmedeydi (KeyError, CI rc.0).
+            'sensed_acceleration': np.linspace(60.0, 0.0, n),
             'phases': {
                 'powered': {
                     'position_x': np.array([0.0, 500.0]),
@@ -147,7 +152,10 @@ def test_trajectory_zaman_panelleri_eslesir_menzil_haric():
                 'coasting': {
                     'position_x': np.array([500.0, 1500.0]),
                     'position_z': np.array([2000.0, 5000.0]),
-                    'apogee_time': 12.0,
+                    # V306/UÇUŞ-FEA (kalem 5): fazın kendi saatindeki
+                    # apoje anı; ``apogee_time`` adı yanıtta yalnız
+                    # ateşlemeden ölçülen süredir.
+                    'apogee_time_from_phase_start': 12.0,
                 },
             },
         },

@@ -543,7 +543,11 @@ class TestPanel:
         fea = _kanit_json(kanit_gerekli(SART3_SONRA / 't7_fea_jenerik_gaz.json'))['fea']
         out = self._kos(tmp_path, {'fea': fea}, dil='tr')
         html = out['els']['fea_t_badges']['html']
-        assert 'MESH YAKINSAMADI' in html
+        # V306/ONARIM-SIVI: DİL-KATI 2. tur D7 (5e61b6cd2, ana model kararı)
+        # TR ekranda FEA terimini 'MESH' → 'AĞ' yaptı; ham 'MESH' TR rozette
+        # artık OLMAMALI (yalnız yerelde koşar: kanıt kapısı CI'da atlar).
+        assert 'AĞ YAKINSAMADI' in html
+        assert 'MESH' not in html
         assert 'gözlenen mertebe p = 0,450 &lt; 1,0' in html
         assert 'p_dusuk' not in html and 'observed order' not in html
         kunye = out['els']['fea_t_basis_text']['html']
@@ -641,8 +645,24 @@ class TestPanel:
         monkeypatch.setattr(ta, '_uzamsal_yakinsama', sahte_merdiven)
         m = _kanit_json(kanit_gerekli(ONCE / 'hibrit_motor.json'))
         wp = _kanit_json(kanit_gerekli(ONCE / 'wall_profile_panel.json'))['wall_profile']
+        # V306/UÇUŞ-FEA (kalem 3): bu kanıt çifti İKİ AYRI cidarı anlatıyor.
+        # Profil (25 Eyl paneli) kamara malzemesi steel_4130 ile hesaplandı;
+        # motor kaydı ise lüle malzemesi grafit yayımlıyor ve köprü lüle
+        # alanını V301/PANEL'den beri lülenin malzemesiyle çözüyor.
+        # V306/GÜVERTE (cdb000951, §5 B-N1) bu çifti çözücüden ÖNCE adıyla
+        # reddediyor (``axial_profile_material_mismatch``; ret
+        # ``spatial_convergence`` taşımaz -> KeyError, CI rc.0). Ürün doğru.
+        # Bu bekçinin konusu malzemeden bağımsızdır (merdiven tepeleri
+        # sentetik): kopyadan yalnız lüle malzemesi kaydı düşülür, ağ
+        # köprünün belgelediği yedek yoldan (kamara malzemesi) profilin
+        # kendi malzemesiyle (steel_4130) kurulur — iki uç aynı cidar.
+        m = json.loads(json.dumps(m))
+        (m.get('nozzle_material_analysis') or {}).pop('material', None)
+        assert bridge._lule_malzemesi(m) is None
+        assert wp.get('material') == 'steel_4130'
         o = bridge.run_thermal_from_motor(m, axial_profile=wp,
                                           ambient_temperature_K=293.15)
+        assert 'spatial_convergence' in o, o.get('reason')
         sc = json.loads(json.dumps(o['spatial_convergence'], default=float))
         fea = _kanit_json(kanit_gerekli(SONRA / 'fea_thermal_varsayilan.json'))['fea']
         fea['spatial_convergence'] = sc
@@ -790,10 +810,19 @@ motor_yamasi = pytest.mark.skipif(
 #: 'steel_304'; ölçüldü sart5/olcum_*.json 'arayuz'). Arayüz anahtarı
 #: gönderilir: materials_db adı (ss_304) motor tarafından REDDEDİLİR ve
 #: inconel_718'e düşer (4. tur Ş1-a).
+#: V306/ONARIM-SIVI (rc.1 CI): eski form ön dolgusu ε 50 (kaynaksız; UÇUŞ-KÜTLE
+#: formdan kaldırdı) 100 bar'da deniz seviyesinde ayrılıyor (Summerfield
+#: 0,40·P_a; ayrılmayan en büyük ε 26,86) ve uç SIVI-CEKET-B kalem 5'ten beri o
+#: tasarımı adlı retle (422 fixed_nozzle_separated_at_design_ambient)
+#: yayımlamıyor. Bu dosyanın konusu lüle değil, ısıl künye: gövde ayrılmayan
+#: bölgedeki 20 ile kurulur (SIVI-CEKET-B df262b5c4'ün kardeş gövdeleriyle
+#: aynı sayı). Künye ve merdiven sayıları ε'dan bağımsız (ölçüldü, aşağıda);
+#: ε'a bağlı tek çapa radyatif ısı-yutucunun sınıra süresidir.
+SIVI_AYRILMAYAN_EPS = 20
 SIVI_ABLATIF_STEEL_304 = {
     'fuel_type': 'rp1', 'oxidizer_type': 'lox', 'thrust': 10000,
     'chamber_pressure': 100, 'mixture_ratio': 2.5,
-    'nozzle_expansion_ratio': 50, 'max_burn_duration': 400,
+    'nozzle_expansion_ratio': SIVI_AYRILMAYAN_EPS, 'max_burn_duration': 400,
     'combustion_efficiency': 97, 'contraction_ratio': 4,
     'characteristic_length': 1.2, 'chamber_wall_thickness': 5,
     'cooling_type': 'ablative', 'injector_type': 'impinging',
@@ -827,6 +856,12 @@ KATI_GOVDE = {
 #: dört gövdede (ablatif ve radyatif steel_304, ablatif copper_c101,
 #: ablatif inconel_718) BİT-AYNI. Bekçilerin özü (yayımlanan sınır İZİN
 #: basamağı) ve ölçülen sayılar değişmedi.
+#: V306/ONARIM-SIVI (9 Kas): gövdeler ε 50 → 20 (SIVI_AYRILMAYAN_EPS notu).
+#: Önerilen besleme 132,2635 → 131,6751 bar. Kâhin iki yönlü (betik
+#: ~/HRMA-calisma/2026-11-09/ONARIM-SIVI/betik/termal_govde.py): eski kod
+#: (38a98719f, kalem 5 öncesi) + ε 20 ile yeni kod (b9cf2a27f) + ε 20
+#: thermal_protection md5'i dört gövdede BİT-AYNI; künye/merdiven sayıları
+#: (1073/1143/1673, 723/723/1358, 977/977/1533) ε 50 ile aynı.
 def _sivi_kos(client, govde):
     """Basınç beslemeli sıvı gövdesini ürünün önerdiği besleme basıncıyla
     koşar; önce SV-03 kapısının adlı reddini de doğrular."""
@@ -871,7 +906,8 @@ class TestM2MotorSatirlari:
         assert once['material_service_limit_K'][0][1] == 1533
         govde = {'fuel_type': 'rp1', 'oxidizer_type': 'lox', 'thrust': 10000,
                  'chamber_pressure': 100, 'mixture_ratio': 2.5,
-                 'nozzle_expansion_ratio': 50, 'max_burn_duration': 400,
+                 'nozzle_expansion_ratio': SIVI_AYRILMAYAN_EPS,
+                 'max_burn_duration': 400,
                  'combustion_efficiency': 97, 'contraction_ratio': 4,
                  'characteristic_length': 1.2, 'chamber_wall_thickness': 5,
                  'cooling_type': 'ablative', 'injector_type': 'impinging',
@@ -1004,14 +1040,20 @@ class TestIsiYutucuIzinBasamagi:
         ablatif steel_304 çıplak cidar sınırı 1143 (servis) → 1073 K (izin),
         sınıra süre 0,08345 → 0,06722 s. Ölçüldü: sart5/olcum_once.json
         (main c7774a33) 1143 K / 0,083449 s ⟷ olcum_yamasiz.json ve
-        olcum_sonra.json 1073 K / 0,067225 s (yamaya bağlı DEĞİL)."""
+        olcum_sonra.json 1073 K / 0,067225 s (yamaya bağlı DEĞİL).
+
+        V306/ONARIM-SIVI (9 Kas): gövde ε 50 → 20 (SIVI_AYRILMAYAN_EPS
+        notu); sınıra süre 0,067225 → 0,065226 s (−%2,97; rel 1e-3 AYNEN,
+        eski çapa yeni gövdede kırmızı). Kâhin iki yönlü: eski kod
+        38a98719f + ε 20 → 0,0652256 s; yeni kod b9cf2a27f + ε 20 →
+        0,0652256 s (bit-aynı); eski kod + ε 50 → 0,0672249 s (eski çapa)."""
         wth = sivi_steel_304_ablatif['thermal_protection'][
             'passive_thermal_protection']['wall_temperature_history']
         assert wth['status'] == 'modelled'
         assert wth['wall_material'] == 'ss_304'
         assert wth['max_service_temp_K'] == 1073.0
         assert wth['melting_point_K'] == 1673.0
-        assert wth['time_to_limit_s'] == pytest.approx(0.067225, rel=1e-3)
+        assert wth['time_to_limit_s'] == pytest.approx(0.065226, rel=1e-3)
         assert wth['time_to_limit_s'] < wth['time_to_melting_s']
 
 
@@ -1155,7 +1197,13 @@ class TestM2BasamakVeHamAlanAyrimi:
 SIVI_STEEL_304_MERDIVEN_K = {'allowable_K': 1073.0, 'service_K': 1143.0,
                              'melting_K': 1673.0}
 #: Radyatif ısı-yutucu sınıra süre (ölçüldü, birleşik ağaç; yamadan bağımsız).
-SIVI_RADYATIF_STEEL_304_SINIRA_SURE_S = 0.078666
+#: V306/ONARIM-SIVI (9 Kas): gövde ε 50 → 20 (SIVI_AYRILMAYAN_EPS notu) ile
+#: 0,078666 → 0,076328 s (−%2,97; tolerans rel 1e-3 AYNEN, eski çapa yeni
+#: gövdede kırmızı). Kâhin iki yönlü: eski kod 38a98719f + ε 20 →
+#: 0,0763276 s; yeni kod b9cf2a27f + ε 20 → 0,0763276 s (bit-aynı); eski kod
+#: + ε 50 → 0,0786659 s (eski çapa). Fark yalnız gövdeden; sınır yine İZİN
+#: 1073 K.
+SIVI_RADYATIF_STEEL_304_SINIRA_SURE_S = 0.076328
 
 
 @pytest.fixture(scope='module')
@@ -1188,7 +1236,8 @@ class TestSiviRadyatifIzinBasamagi:
 
     def test_sivi_radyatif_isi_yutucu_izin_basamagi(self, sivi_steel_304_radyatif):
         """Radyatif çıplak cidar (ısı-yutucu) sınırı == İZİN basamağı 1073 K
-        (servis 1143 DEĞİL), sınıra süre 0,078666 s (ÖNCE 0,097649 s)."""
+        (servis 1143 DEĞİL), sınıra süre 0,076328 s (ε 20 gövdesi; ε 50
+        gövdesinde 0,078666 s, ÖNCE 0,097649 s)."""
         merd = SIVI_STEEL_304_MERDIVEN_K
         wth = sivi_steel_304_radyatif['thermal_protection'][
             'passive_thermal_protection']['wall_temperature_history']

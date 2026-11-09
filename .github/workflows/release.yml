@@ -678,6 +678,21 @@ jobs:
           if [ "$ORNEK_PAKET" != "$ORNEK_DEPO" ]; then
               echo "KALDI  örnek proje sayısı tutmuyor"; HATA=1
           fi
+          # Lisans (3.0.6, S1): v3.0.5 DMG'sinde app/LICENSE YOKTU (ölçüldü).
+          # Aynı ölçüt release_gate.sh 8/10 manifest_denetle'de; gerçek paket
+          # burada, etiketlenen ağaçtan doğduğu koşuda denetlenir.
+          LIS_APP="$MNT/HRMA.app/Contents/Resources/app"
+          LIS_BAS="$(head -c 400 "$LIS_APP/LICENSE" 2>/dev/null || true)"
+          case "$LIS_BAS" in
+              *'GNU GENERAL PUBLIC LICENSE'*'Version 3'*) echo "GEÇTİ  app/LICENSE (GNU GPL v3) DMG içinde" ;;
+              *) echo "KALDI  DMG içinde app/LICENSE yok ya da GNU GPL v3 metni değil"; HATA=1 ;;
+          esac
+          if grep -q '^Distribution: rocketcea' "$LIS_APP/licenses/THIRD_PARTY_NOTICES.txt" 2>/dev/null \
+             && [ -s "$LIS_APP/licenses/PYTHON_PACKAGES.txt" ]; then
+              echo "GEÇTİ  üçüncü taraf lisans bildirimi + dağıtım listesi DMG içinde"
+          else
+              echo "KALDI  DMG içinde app/licenses/ eksik (THIRD_PARTY_NOTICES.txt + PYTHON_PACKAGES.txt)"; HATA=1
+          fi
 
           exit "$HATA"
 
@@ -824,6 +839,19 @@ jobs:
           echo "exe boyutu     : $(du -h "$EXE" | cut -f1)"
           echo "payload boyutu : $(du -sh packaging/win/payload | cut -f1)"
           echo "örnek proje    : depo=$(find examples -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ') payload=$(find packaging/win/payload/app/examples -maxdepth 1 -name '*.hrma' | wc -l | tr -d ' ')"
+          # Lisans (3.0.6, S1): kurucu payload/app ağacını $INSTDIR\app'e
+          # açar; LICENSE + licenses/ orada olmalı (release_gate.sh 8/10 ile
+          # aynı ölçüt).
+          LIS_APP="packaging/win/payload/app"
+          LIS_BAS="$(head -c 400 "$LIS_APP/LICENSE" 2>/dev/null || true)"
+          case "$LIS_BAS" in
+              *'GNU GENERAL PUBLIC LICENSE'*'Version 3'*) echo "GEÇTİ  app/LICENSE (GNU GPL v3) payload içinde" ;;
+              *) echo "KALDI  payload içinde app/LICENSE yok ya da GNU GPL v3 metni değil"; exit 1 ;;
+          esac
+          grep -q '^Distribution: rocketcea' "$LIS_APP/licenses/THIRD_PARTY_NOTICES.txt" \
+              && [ -s "$LIS_APP/licenses/PYTHON_PACKAGES.txt" ] \
+              || { echo "KALDI  payload içinde app/licenses/ eksik"; exit 1; }
+          echo "GEÇTİ  üçüncü taraf lisans bildirimi + dağıtım listesi payload içinde"
 
       - name: EXE'yi artefakt olarak yükle
         uses: actions/upload-artifact@v4

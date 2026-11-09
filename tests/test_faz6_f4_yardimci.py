@@ -274,8 +274,14 @@ class TestT08UcusGovdesi:
         bildirimler = re.findall(
             r'^\s*(function (?:num_?|fieldNum|fmtNum)\(.*\}\s*)$', js, re.M)
         assert len(bildirimler) >= 3, bildirimler
-        dry = re.search(r'^\s*(var dryTotal = .*;)\s*$', js, re.M)
-        assert dry, 'dryTotal satırı bulunamadı'
+        # V306 (6 Kas, ana model): UÇUŞ-2 (659bd9270) kuru kütleye tankta
+        # kalan iticiyi ekledi (`ucusItki` → `tanktaKalan` → `dryTotal`).
+        # İkiz üç bildirimi birlikte ŞABLONDAN söker; yalnız `dryTotal`
+        # satırı ReferenceError veriyordu (ürün sağlam: sayfada tanımlı).
+        dry = re.search(
+            r'^\s*(var ucusItki = [\s\S]*?var dryTotal = [^\n]*;)\s*$',
+            js, re.M)
+        assert dry, 'ucusItki … dryTotal bloğu bulunamadı'
         # ÖH D33-KOLAY · P12bB4-05: uçuş yükü artık beş gövde sabitini
         # ŞABLONDAKİ TEK NESNEDEN (`LS_FIXED_AIRFRAME`) okuyor. Koşum ikizi
         # nesneyi de sökmeli; yoksa `ReferenceError` ile patlar. Nesne

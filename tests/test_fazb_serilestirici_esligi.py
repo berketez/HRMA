@@ -832,7 +832,18 @@ def test_s2_bayrak_ic_nesnede_var_ve_blokta_yayimlaniyor():
     # ``docs/scofield/raw/OH/D28/hibrit/a1/`` ölçümüne ve
     # ``tests/test_d28_hibrit_a1.py`` bekçisine bağlıdır. Sayı bir ÇAPADIR:
     # bloğa beyansız alan eklenirse bu satır kırmızı verir.
-    assert len(blok) == 48, f'blowdown bloğu şekli değişmiş: {len(blok)}'
+    # V306/HİBRİT-ÇAPRAZ (4 Kas, kalem 1; 1102aef68/425c9dc21): 48 -> 52 —
+    # blok TESLİM büyüklüklerinin kaynağı oldu ve dört alan yayımlar:
+    # ``oxidizer_consumed_kg``, ``fuel_consumed_kg`` (harcanan itici
+    # ayrımı), ``oxidizer_inventory`` (tank ⟷ yayımlanan mutabakatı),
+    # ``port_diameter_m`` (3B zaman çizgisi teslim eğrisiyle). Dördü de
+    # ``tests/test_wave3_contract.py`` muafiyet tablosunda gerekçeli ve
+    # ``tests/test_d24_hibrit_a1.py`` bekçilerine bağlı. Yeniden ölçüldü
+    # (V306/HİBRİT-ÇAPRAZ-2, taban 78dbb287e): 52; fark tam bu dört ad.
+    for ad in ('oxidizer_consumed_kg', 'fuel_consumed_kg',
+               'oxidizer_inventory', 'port_diameter_m'):
+        assert ad in blok, ad
+    assert len(blok) == 52, f'blowdown bloğu şekli değişmiş: {len(blok)}'
     assert 'vapor_model_valid' in blok, (
         'blowdown bloğu bayrağı yeniden yutuyor: P13B4-04 geri açılmış — '
         'zarf bilgisi tekrar yalnız uyarı metnine gömüldü')

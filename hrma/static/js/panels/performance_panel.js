@@ -223,7 +223,7 @@
             let data = null;
             try { data = await resp.json(); } catch (e) { data = null; }
             if (!resp.ok || !data || data.status === 'error') {
-                throw new Error((data && data.error) || ('HTTP ' + resp.status));
+                throw new Error((data && data.error) || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status)));
             }
             drawResponse(block, data);
         } catch (err) {

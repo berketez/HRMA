@@ -37,6 +37,21 @@ makensis -DVERSION=X.Y.Z hrma.nsi  # HRMA-Setup-X.Y.Z.exe
 bash publish_release.sh "Sürüm notları..."
 ```
 
+### Yayın sırası (3.0.6'dan itibaren: etiket yayınlanan commit'e açılır)
+
+1. Yayın commit'i aday dalına push edilir; `tests` iş akışı o SHA'da yeşil biter.
+2. Paket ağacının üst akışı o aday dalıdır (kapı 2/10 `HEAD == @{u}` ister).
+3. `publish_release.sh` kapıyı koşturur, HEAD SHA'sını kapıdan önce okur ve
+   `gh release create --target <SHA>` ile etiketi TAM O commit'e açar. Uzakta
+   aynı adlı etiket başka bir commit'i gösteriyorsa yayın yapılmaz (gh o durumda
+   `--target`'ı yok sayardı).
+4. `main` yayından SONRA taşınır. main push'u `tests`'i aynı SHA için yeniden
+   tetiklerse kapı 4/10 o süren kopyayı beklemez (yeşil kopya varsa BİLGİ satırı);
+   iptal edilmiş/başarısız koşu yine KALDI.
+
+v3.0.5'te (28 Eki) etiket `--target`'sız açıldığı için main yayından önce push
+edildi ve kapı aynı commit'in ikinci `tests` koşusunu ~57 dk bekledi.
+
 ## Kritik kararlar (değiştirmeden önce oku)
 
 - **numpy==1.26.4 pini zorunlu** (repo requirements.txt notu). `build123d` ve
@@ -50,8 +65,13 @@ bash publish_release.sh "Sürüm notları..."
   başlatıcısındaki runner dosyası bu yüzden .command'dir (2026-07-13 tespiti).
 - **Windows kurulumu per-user** ($LOCALAPPDATA\HRMA): yönetici istemez,
   uygulama dizini yazılabilir (data/ sqlite + cache oraya yazıyor).
-- Çıktılar (cad_exports) her iki platformda **Belgeler/HRMA** altına gider
-  (launcher.py cwd'yi oraya alır).
+- Kullanıcının dışa aktardığı rapor, CAD ve çizim dosyaları kaydetme
+  penceresiyle kaydedilir; pencere **İndirilenler** klasöründe açılır
+  (pywebview 6.2.1: macOS `NSDownloadsDirectory`, Windows İndirilenler
+  bilinen klasörü). **Belgeler/HRMA** (menü: Open Output Folder;
+  launcher.py cwd'yi oraya alır) proje dosyalarını (`projects/`) ve
+  Windows'ta günlüğü (`hrma_log.txt`) tutar; CAD üreticileri artık
+  her istekte kendi geçici dizinine yazar, `cad_exports/` boş kalır.
 - launcher.py: port 8080-8090 tarar, HRMA zaten çalışıyorsa ikinci kopya
   açmaz; HRMA_PORT env ile port zorlanabilir (destek senaryosu).
 

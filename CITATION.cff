@@ -19,7 +19,7 @@ authors:
     email: "btezgocen97@gmail.com"
 repository-code: "https://github.com/berketez/HRMA"
 url: "https://github.com/berketez/HRMA"
-license: MIT
+license: GPL-3.0-or-later
 keywords:
   - rocket propulsion
   - hybrid rocket motor
@@ -34,5 +34,5 @@ keywords:
 # packaging/release_notes_v*.md file (see CONTRIBUTING.md §5). Do not put an
 # unreleased version here: a citation must point at something a reader can
 # actually download.
-version: 3.0.0
-date-released: "2026-10-15"
+version: 3.0.5
+date-released: "2026-10-28"

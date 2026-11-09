@@ -309,6 +309,9 @@ _CEA_OX = {'lox': 'LOX'}
 _VALID_CYCLES = ('pressure_fed', 'gas_generator', 'tap_off',
                  'staged_combustion', 'full_flow_staged_combustion',
                  'expander')
+#: V306/SIVI-DEFTER: türbin gazı ana lüleden GEÇMEYEN (dışarı atılan) açık
+#: çevrimler — tek tanım; sıvı motorun debi defteri bu kümeyi okur.
+OPEN_CYCLE_TYPES = ('gas_generator', 'tap_off')
 
 _FUEL_SYNONYMS = {'rp1': 'rp1', 'rp-1': 'rp1', 'kerosene': 'rp1',
                   'methane': 'methane', 'ch4': 'methane', 'lch4': 'methane',
@@ -578,6 +581,21 @@ def _pump_power_w(mdot: float, dp_bar: float, rho: float, eta: float) -> float:
     """
     return mdot * max(dp_bar, 0.0) * PA_PER_BAR / (max(rho, 1e-9)
                                                    * max(eta, 1e-3))
+
+
+def exhaust_isp_at_ambient(turbine: Dict, p_amb_bar: float) -> float:
+    """Açık çevrim türbin egzozunun ``p_amb_bar`` ortamındaki Isp'si [s].
+
+    V306/SIVI-DEFTER (K5 irtifa tablosu): çözücünün deniz seviyesi ve vakum
+    motor Isp'sinde kullandığı modelin KENDİSİ (``_exhaust_isp_s``), aynı
+    türbin çıkış durumuyla (``exit_temp_K``, ``exit_pressure_bar``, ``gas``
+    — ``_turbine_dict``) başka bir ortam basıncında değerlendirilir. Model:
+    türbin çıkışından ortama ideal (ayarlı) genişleme; sabit çıkış alanlı
+    egzoz lülesi ve egzozun ana lüleye verildiği düzen MODELLENMEZ.
+    """
+    return _exhaust_isp_s(turbine['gas'], float(turbine['exit_temp_K']),
+                          float(turbine['exit_pressure_bar']),
+                          float(p_amb_bar))
 
 
 def _exhaust_isp_s(gas: Dict, t_exit_K: float, p_exit_bar: float,
@@ -940,7 +958,7 @@ def solve_cycle(cycle_type: str,
     # ------------------------------------------------------------------
     # GAZ JENERATÖRÜ ve TAP-OFF — açık çevrimler.
     # ------------------------------------------------------------------
-    if cycle_type in ('gas_generator', 'tap_off'):
+    if cycle_type in OPEN_CYCLE_TYPES:
         tit = float(tit_K if tit_K is not None else TIT_DEFAULT_K[cycle_type])
         if tit > TIT_UNCOOLED_LIMIT_K:
             sol.warnings.append(_w('warn.cycle.tit_exceeds_uncooled', 'warning',

@@ -95,6 +95,30 @@ def _blowdown(e, m_ox_kat=1.0):
         n_steps=TANK_BLOWDOWN_N_STEPS).solve()
 
 
+def _blowdown_yayimlanan(e):
+    """Danışma bloğunun AYNI çözümü, AYNI yayımlama kuralıyla.
+
+    V306/HİBRİT-ÇAPRAZ-2 — BAYAT ÇAPA, ölçümle yenilendi. HİBRİT-ÇAPRAZ
+    kalem 1'den (4 Kas, kasıtlı) beri blok çözücünün ham integralini değil
+    YAYIMLANAN seriyi (t = 0 ateşleme durumu + adım ortaları + tank
+    envanteriyle kısaltılan son adım; ``blowdown_published_series``)
+    integre eder. Ölçüldü (taban 78dbb287e): ham 8940,866 ⟷ blok 8962,504
+    N·s (O/F 2,5), 8942,390 ⟷ 8969,605 (O/F 7,5) — fark yayımlama
+    kuralıdır, çözüm aynıdır. "Aynı ayarlar → aynı çözüm" sorusu bu yüzden
+    aynı kuralla (``publish_blowdown_solution``, Zaman Çözümlü paneliyle
+    ortak işlev) yayımlanmış çözümde sorulur.
+    """
+    from hrma.engines.hybrid_rocket_engine import publish_blowdown_solution
+    tb = TransientBallistics(
+        e, feed_mode='blowdown', tank_temperature=TANK_TEMPERATURE_DEFAULT_K,
+        liquid_fill_fraction=TANK_FILL_FRACTION_DEFAULT,
+        n_steps=TANK_BLOWDOWN_N_STEPS)
+    m0 = float(tb.tank.liquid_mass) + float(tb.tank.vapor_mass)
+    sol = tb.solve()
+    m_son = float(tb.tank.liquid_mass) + float(tb.tank.vapor_mass)
+    return sol, publish_blowdown_solution(sol, tb.dt, m0, m_son)
+
+
 # --------------------------------------------------------------- tanım ----
 
 class TestSinirTanimi:
@@ -208,11 +232,14 @@ class TestDanismaBlowdown:
     @pytest.mark.parametrize('ad', ['n1_of25', 'n1_of75'])
     def test_port_son_portu_asmaz(self, ad, request):
         e, sonuc = request.getfixturevalue(ad)
-        sol = _blowdown(e)
-        # Aynı ayarlar -> danışma bloğuyla aynı çözüm.
+        sol, yayin = _blowdown_yayimlanan(e)
+        # Aynı ayarlar -> danışma bloğuyla aynı çözüm (aynı yayımlama
+        # kuralıyla; ``_blowdown_yayimlanan`` künyesi).
         assert sol['end_event'] == sonuc['tank_blowdown']['end_event']
-        assert sol['total_impulse'] == pytest.approx(
+        assert yayin['total_impulse'] == pytest.approx(
             sonuc['tank_blowdown']['total_impulse_Ns'], rel=1e-12)
+        assert yayin['burn_duration'] == pytest.approx(
+            sonuc['tank_blowdown']['burn_duration_s'], rel=1e-12)
         assert float(np.max(sol['port_diameter'])) <= (
             e.D_port_final * (1 + 1e-9))
 
