@@ -623,15 +623,19 @@ class TestK3TransientKesme:
         # değil — tests/test_d28_bekci_cevirisi_a1.py OH-D27-17 sınıf C;
         # denetçi 3. tur süpürmesinde eski döngü o bekçinin listesine
         # ekleniyordu). Her alanın rozeti tam olarak beklenen metindir.
+        # V306/DİL-HİBRİT (NR-2): rozet METNİ artık sözlük etiketi (koşum
+        # sözlüksüz → İngilizce yedek, TR ondalık); makine alan adı
+        # `data-tp-cutoff-field` niteliğinde — ad+değer bağı orada okunur.
+        # Ham alan adı rozet metninde YASAK (kullanıcıya görünen dil kuralı).
         assert self._rozet_metni(o['html']) == {
-            'residual_oxidizer_kg': 'residual_oxidizer_kg 2,421 kg',
+            'residual_oxidizer_kg': 'OXIDIZER LEFT IN TANK 2,421 kg',
             'residual_impulse_at_cutoff_rate_Ns':
-                'residual_impulse_at_cutoff_rate_Ns 6449,6 N·s',
+                'IMPULSE CUT OFF (at the cut-off rate) 6449,6 N·s',
             'residual_impulse_fraction_at_cutoff_rate':
-                'residual_impulse_fraction_at_cutoff_rate 0,2650',
-            'vapor_phase_integrated': 'vapor_phase_integrated false',
+                'CUT-OFF IMPULSE FRACTION 0,2650',
+            'vapor_phase_integrated': 'VAPOR PHASE INTEGRATED: no',
             'vapor_tail_off_leaves_model_envelope':
-                'vapor_tail_off_leaves_model_envelope true',
+                'VAPOR TAIL-OFF OUTSIDE THE MODEL ENVELOPE: yes',
         }
 
     def test_reguleli_kipte_null_alan_basilmaz(self):
@@ -643,6 +647,7 @@ class TestK3TransientKesme:
             vapor_tail_off_leaves_model_envelope=None))
         assert o['alan'] == ['vapor_phase_integrated'], o['alan']
         assert 'residual_oxidizer_kg' not in o['html']
+        assert 'OXIDIZER LEFT IN TANK' not in o['html']
         assert ' 0 kg' not in o['html'] and 'null' not in o['html']
         # Denetçi 2. tur Ş5 (kör nokta D6): regüleli kipte tank yok →
         # `vapor_phase_integrated false` sınırlanan bir kuyruk bildirmez,
@@ -677,10 +682,12 @@ class TestK3TransientKesme:
         assert {a: renk[a] for a in beklenen} == beklenen, renk
         # değer yine AYNEN basılır (alan adıyla okunur)
         metin = self._rozet_metni(o['html'])
+        evet_hayir = {True: 'yes', False: 'no'}
         assert metin['vapor_phase_integrated'] == (
-            f'vapor_phase_integrated {str(buhar).lower()}'), metin
+            f'VAPOR PHASE INTEGRATED: {evet_hayir[buhar]}'), metin
         assert metin['vapor_tail_off_leaves_model_envelope'] == (
-            f'vapor_tail_off_leaves_model_envelope {str(zarf).lower()}'), metin
+            'VAPOR TAIL-OFF OUTSIDE THE MODEL ENVELOPE: '
+            f'{evet_hayir[zarf]}'), metin
 
     # Denetçi 4. tur Ş4(i) (kör nokta W5): sayısal kesme rozetinin rengi de
     # DEĞERE bağlıdır (transient_panel.js ``k[1] > 0 ? 'warn' : 'info'``).
@@ -691,15 +698,15 @@ class TestK3TransientKesme:
     # almaz. Değer yine AYNEN basılır (sıfır "yok" sayılmaz).
     @pytest.mark.parametrize('kg, ns, pay, renk, metin', [
         pytest.param(0.0, 0.0, 0.0, 'info',
-                     ('residual_oxidizer_kg 0,000 kg',
-                      'residual_impulse_at_cutoff_rate_Ns 0,0 N·s',
-                      'residual_impulse_fraction_at_cutoff_rate 0,0000'),
+                     ('OXIDIZER LEFT IN TANK 0,000 kg',
+                      'IMPULSE CUT OFF (at the cut-off rate) 0,0 N·s',
+                      'CUT-OFF IMPULSE FRACTION 0,0000'),
                      id='sifir_artik_info'),
         pytest.param(2.4206156589045116, 6449.577218595157,
                      0.2650086602951435, 'warn',
-                     ('residual_oxidizer_kg 2,421 kg',
-                      'residual_impulse_at_cutoff_rate_Ns 6449,6 N·s',
-                      'residual_impulse_fraction_at_cutoff_rate 0,2650'),
+                     ('OXIDIZER LEFT IN TANK 2,421 kg',
+                      'IMPULSE CUT OFF (at the cut-off rate) 6449,6 N·s',
+                      'CUT-OFF IMPULSE FRACTION 0,2650'),
                      id='pozitif_artik_warn'),
     ])
     def test_sayisal_kesme_rengi_degere_bagli(self, kg, ns, pay, renk,
@@ -878,11 +885,10 @@ class TestK5EkranOndaligi:
         s = tofixed_siniflari(
             'hrma/static/js/blowdown_panel.js',
             yardimcilar=(r'function\s+sayiEkran\s*\(',))
-        # DEVİR (rapor.md): tests/test_d29_arayuz_panel_a1.py bu dizgeyi
-        # LİTERAL arıyor; kartta adı yok → dokunulmadı.
-        assert [m for _n, m in s['ekran']] == [
-            "html += badge(k.field + ' ' + k.value.toFixed(k.digits) + k.unit,"
-        ], s['ekran']
+        # V306/DİL-HİBRİT — DEVİR ÖDENDİ: kesme rozeti artık sözlük etiketi +
+        # ekran kanalı (`sayiEkran`) ile basılıyor (test_d29 kilidi aynı
+        # dalda güncellendi); blowdown panelinde çıplak ekran .toFixed( 0.
+        assert [m for _n, m in s['ekran']] == [], s['ekran']
         assert len(s['yardimci']) == 1
 
     @gerek_node
@@ -931,14 +937,16 @@ class TestK5EkranOndaligi:
         }
         console.log(JSON.stringify({tr: kos(yukle([]).window), yok: kos(null)}));
         """ % json.dumps(ozet))
+        # V306/UÇUŞ (dil): azami hız rozeti ham 'max_speed' yerine etiketle
+        # (sixdof.badgeMaxSpeed); bekçinin konusu ondalık ayırıcıdır.
         for parca in ('MAX MACH 0,27', 'MARGIN 4,84 / 5,84 cal',
-                      'max_speed 93,4 m/s', 'CNα 11,11 · CP 1,584 m',
+                      'MAX SPEED 93,4 m/s', 'CNα 11,11 · CP 1,584 m',
                       'MAX alpha 0,0 deg'):
             assert parca in o['tr'], (parca, o['tr'])
         assert not re.search(r'\d\.\d', o['tr']), (
             'TR rozet metninde noktalı ondalık kaldı:\n' + o['tr'])
         for parca in ('MAX MACH 0.27', 'MARGIN 4.84 / 5.84 cal',
-                      'max_speed 93.4 m/s'):
+                      'MAX SPEED 93.4 m/s'):
             assert parca in o['yok'], (parca, o['yok'])
 
     def test_sd_thrust_src_sabit_280_px_ile_kesilmez(self):
@@ -1042,7 +1050,9 @@ class TestK6KosuNoktasiKunyesi:
         assert k['y'][0] == cd['performance']['isp']           # sayı aynı
         assert k['meta']['exit_basis'] == taban
         assert k['meta']['same_exit_anchor_as_curve'] is deniz
-        assert f'(exit basis {taban})' in notlar
+        # V306/SAYI (NR-1): künye KODU kullanıcı notunda yok (ham anahtar);
+        # makine alanı olarak izin meta'sında (yukarıda) kalır.
+        assert taban not in notlar and 'exit basis' not in notlar
         if deniz:
             assert 'Exit: ISA sea level, no nozzle ε' in k['hovertemplate']
             assert 'the same exit anchor as the sweep curve' in notlar

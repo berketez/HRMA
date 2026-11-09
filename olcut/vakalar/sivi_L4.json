@@ -1,0 +1,371 @@
+{
+ "sema": "hrma-olcut-vaka/1",
+ "kimlik": "sivi_L4",
+ "sistem": "sivi",
+ "seviye": "L4",
+ "gorev": {
+  "hedef_apoje_m": 100000,
+  "faydali_yuk_kg": 150.0,
+  "varsayimlar": "Uzaya çıkan sonda roketi (tek kademe): Ø0,45 m gövde (referans alan 0,159 m², Cd 0,5), gövde+aviyonik+kurtarma+faydalı yük 150 kg (motor atılına eklenir), LOX/RP-1 gaz jeneratörlü turbopompa 25 kN, Pc 50 bar, O/F 2,4, ε 12 çan %80, 120 çarpışmalı eleman, RP-1 rejeneratif CuCrZr astar. 6-DOF: boy 8 m, burun 1,5 m, 4 kanat (0,80/0,35/0,40 m, ok 0,35 m), ray 15 m, rüzgâr 5 m/s. İstek listesinin 5. kalemi RL10 kayıt kıyası koşusudur (ayrı motor)."
+ },
+ "kaynak": {
+  "dosya": "docs/scofield/raw/OH/V306/muhendis-turu/sivi/vakalar/L4.json",
+  "tur": "V306 mühendis turu (2 Kas 2026)",
+  "tur_surumu": "3.0.5",
+  "tur_commit": "0a138ff6a",
+  "tur_tarihi": "2026-11-02",
+  "tur_durumu": "hedefe_ulasti",
+  "vaka_dosyasi_tarihi": "2026-11-04"
+ },
+ "gercek_motor": true,
+ "adimlar": [
+  {
+   "ad": "motor",
+   "uc": "/calculate_liquid",
+   "govde": {
+    "fuel_type": "rp1",
+    "oxidizer_type": "lox",
+    "oxidizer_density": 1141.16,
+    "oxidizer_viscosity": 0.0001947,
+    "mixture_ratio": 2.4,
+    "of_min": 2,
+    "of_max": 3.2,
+    "combustion_efficiency": 97,
+    "engine_cycle": "gas_generator",
+    "thrust": 25000,
+    "chamber_pressure": 50,
+    "turbopump_efficiency": 75,
+    "generator_gas_temp": 1000,
+    "turbine_inlet_pressure": 150,
+    "turbine_expansion_ratio": 4,
+    "injector_type": "unlike_impinging",
+    "injector_pressure_drop": 10,
+    "discharge_coefficient": 0.7,
+    "injector_elements": 120,
+    "characteristic_length": 1.2,
+    "contraction_ratio": 4,
+    "chamber_material": "cucrzr",
+    "chamber_roughness": 3.2,
+    "cooling_type": "regenerative",
+    "nozzle_expansion_ratio": 12,
+    "nozzle_type": "bell_80",
+    "coolant_flow_percent": 100,
+    "film_cooling_percent": 0,
+    "coolant_inlet_temp": 300,
+    "max_wall_temp": 800,
+    "min_throttle": 40,
+    "max_burn_duration": 41,
+    "safety_factor": 2.5,
+    "engine_life_cycles": 10
+   },
+   "kaynak_istek_sirasi": 1,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "motor adımı: tur gövdesi aynen",
+   "izlenen": [
+    {
+     "ad": "itki_N",
+     "yol": "thrust",
+     "birim": "N"
+    },
+    {
+     "ad": "itki_vak_N",
+     "yol": "thrust_vacuum",
+     "birim": "N"
+    },
+    {
+     "ad": "isp_ds_s",
+     "yol": "isp_sea_level",
+     "birim": "s"
+    },
+    {
+     "ad": "isp_vak_s",
+     "yol": "isp_vacuum",
+     "birim": "s"
+    },
+    {
+     "ad": "c_yildiz_mps",
+     "yol": "c_star",
+     "birim": "m/s"
+    },
+    {
+     "ad": "oda_sicakligi_K",
+     "yol": "chamber_temperature",
+     "birim": "K"
+    },
+    {
+     "ad": "yanma_suresi_s",
+     "yol": "burn_time",
+     "birim": "s"
+    },
+    {
+     "ad": "toplam_impuls_Ns",
+     "yol": "total_impulse",
+     "birim": "N·s"
+    },
+    {
+     "ad": "toplam_debi_kgps",
+     "yol": "total_mass_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "oksitleyici_debi_kgps",
+     "yol": "oxidizer_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "yakit_debi_kgps",
+     "yol": "fuel_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "bogaz_capi_mm",
+     "yol": "throat_diameter_mm",
+     "birim": "mm"
+    },
+    {
+     "ad": "cikis_capi_mm",
+     "yol": "exit_diameter_mm",
+     "birim": "mm"
+    },
+    {
+     "ad": "motor_kuru_kg",
+     "yol": "design_summary.masses.engine_mass_kg",
+     "birim": "kg"
+    }
+   ]
+  },
+  {
+   "ad": "yorunge",
+   "uc": "/api/trajectory-analysis",
+   "govde": {
+    "initial_mass": 718.616,
+    "final_mass": 324.167,
+    "drag_coefficient": 0.5,
+    "reference_area": 0.159,
+    "burn_time": 41.00004921646797,
+    "thrust": 25000,
+    "isp": 264.9798511273028,
+    "nozzle_exit_area": 0.041170228732535,
+    "thrust_reference_pressure": 101325
+   },
+   "kaynak_istek_sirasi": 3,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "araç adımı: tur gövdesi aynen (motor çıktısından türetilmiş araç girdileri 3.0.5 turundaki değerlerinde dondurulmuş; adım yörünge/6-DOF çözücüsünü izler, motor değişimini İZLEMEZ)",
+   "izlenen": [
+    {
+     "ad": "yorunge_apoje_m",
+     "yol": "trajectory_data.performance.trajectory_metrics.max_altitude",
+     "birim": "m"
+    },
+    {
+     "ad": "yorunge_azami_hiz_mps",
+     "yol": "trajectory_data.performance.trajectory_metrics.max_velocity",
+     "birim": "m/s"
+    }
+   ]
+  },
+  {
+   "ad": "alti_serbestlik",
+   "uc": "/api/six-dof-analysis",
+   "govde": {
+    "body_diameter": 0.45,
+    "body_length": 8,
+    "nose_length": 1.5,
+    "nose_type": "ogive",
+    "fin_count": 4,
+    "fin_root_chord": 0.8,
+    "fin_tip_chord": 0.35,
+    "fin_span": 0.4,
+    "fin_sweep": 0.35,
+    "fin_position": 7.15,
+    "cd0": 0.45,
+    "wind_speed": 5,
+    "wind_direction_deg": 0,
+    "launch_elevation_deg": 90,
+    "launch_azimuth_deg": 0,
+    "rail_length": 15,
+    "dry_mass": 324.167,
+    "propellant_mass": 394.449,
+    "thrust": 25000,
+    "burn_time": 41.00004921646797,
+    "engine_od_m": 0.23895319016789301,
+    "engine_length_m": 0.5963253580808174
+   },
+   "kaynak_istek_sirasi": 4,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "araç adımı: tur gövdesi aynen (motor çıktısından türetilmiş araç girdileri 3.0.5 turundaki değerlerinde dondurulmuş; adım yörünge/6-DOF çözücüsünü izler, motor değişimini İZLEMEZ)",
+   "izlenen": [
+    {
+     "ad": "apoje_6dof_m",
+     "yol": "summary.apogee",
+     "birim": "m"
+    },
+    {
+     "ad": "azami_mach_6dof",
+     "yol": "summary.max_mach",
+     "birim": "-"
+    },
+    {
+     "ad": "statik_marj_dolu_kalibre",
+     "yol": "summary.static_margin_full",
+     "birim": "-"
+    },
+    {
+     "ad": "kararli_6dof",
+     "yol": "summary.stable",
+     "birim": "-"
+    },
+    {
+     "ad": "bitis_nedeni_6dof",
+     "yol": "summary.end_reason",
+     "birim": "-"
+    }
+   ]
+  },
+  {
+   "ad": "rl10_kiyas_motoru",
+   "uc": "/calculate_liquid",
+   "govde": {
+    "fuel_type": "lh2",
+    "oxidizer_type": "lox",
+    "fuel_density": 70.9495,
+    "oxidizer_density": 1141.16,
+    "fuel_viscosity": 1.359e-05,
+    "oxidizer_viscosity": 0.0001947,
+    "mixture_ratio": 5,
+    "of_min": 2,
+    "of_max": 3.2,
+    "combustion_efficiency": 97,
+    "engine_cycle": "expander",
+    "thrust": 51719,
+    "chamber_pressure": 32.75,
+    "turbopump_efficiency": 75,
+    "generator_gas_temp": 1000,
+    "turbine_inlet_pressure": 150,
+    "turbine_expansion_ratio": 4,
+    "injector_type": "coaxial",
+    "injector_pressure_drop": 6,
+    "discharge_coefficient": 0.7,
+    "injector_elements": 216,
+    "characteristic_length": 1.2,
+    "contraction_ratio": 4,
+    "chamber_material": "cucrzr",
+    "chamber_roughness": 3.2,
+    "cooling_type": "regenerative",
+    "nozzle_expansion_ratio": 61,
+    "nozzle_type": "bell_80",
+    "coolant_flow_percent": 100,
+    "film_cooling_percent": 0,
+    "coolant_inlet_temp": 300,
+    "max_wall_temp": 800,
+    "min_throttle": 40,
+    "max_burn_duration": 700,
+    "safety_factor": 2.5,
+    "engine_life_cycles": 10
+   },
+   "kaynak_istek_sirasi": 5,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 422,
+    "gecersiz_alan": {
+     "field": "nozzle_expansion_ratio",
+     "reason": "fixed_nozzle_separated_at_design_ambient"
+    }
+   },
+   "girdi_notu": "motor adımı: tur gövdesi aynen. 3.0.6 (V306/SIVI-CEKET-B kalem 5, ana model kararı 9 Kas): sıvı sayfasının tasarım ortamı deniz seviyesi; ε 61 sabit nozul deniz seviyesinde ayrılır (Summerfield 0,40·P_a), tasarım yayımlanmaz, adlı ret beklenir (ayrılmayan en büyük ε 10,07). Vakum/irtifa tasarım ortamı girdisi yeni özellik: sonraki sürüm listesi. RL10 kaydı kayıt yolundan (resmî korelasyon koşucusu, motor API) kıyaslanmaya devam eder.",
+   "izlenen": [
+    {
+     "ad": "itki_N",
+     "yol": "thrust",
+     "birim": "N"
+    },
+    {
+     "ad": "itki_vak_N",
+     "yol": "thrust_vacuum",
+     "birim": "N"
+    },
+    {
+     "ad": "isp_ds_s",
+     "yol": "isp_sea_level",
+     "birim": "s"
+    },
+    {
+     "ad": "isp_vak_s",
+     "yol": "isp_vacuum",
+     "birim": "s"
+    },
+    {
+     "ad": "c_yildiz_mps",
+     "yol": "c_star",
+     "birim": "m/s"
+    },
+    {
+     "ad": "oda_sicakligi_K",
+     "yol": "chamber_temperature",
+     "birim": "K"
+    },
+    {
+     "ad": "yanma_suresi_s",
+     "yol": "burn_time",
+     "birim": "s"
+    },
+    {
+     "ad": "toplam_impuls_Ns",
+     "yol": "total_impulse",
+     "birim": "N·s"
+    },
+    {
+     "ad": "toplam_debi_kgps",
+     "yol": "total_mass_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "oksitleyici_debi_kgps",
+     "yol": "oxidizer_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "yakit_debi_kgps",
+     "yol": "fuel_flow",
+     "birim": "kg/s"
+    },
+    {
+     "ad": "bogaz_capi_mm",
+     "yol": "throat_diameter_mm",
+     "birim": "mm"
+    },
+    {
+     "ad": "cikis_capi_mm",
+     "yol": "exit_diameter_mm",
+     "birim": "mm"
+    },
+    {
+     "ad": "motor_kuru_kg",
+     "yol": "design_summary.masses.engine_mass_kg",
+     "birim": "kg"
+    }
+   ]
+  }
+ ],
+ "kayit_kiyasi": [
+  {
+   "kayit": "liq-rl10a33a-nominal-spec",
+   "kayit_yolu": true
+  }
+ ],
+ "disarida_birakilan": [
+  {
+   "sira": 2,
+   "uc": "/api/flight-vehicle"
+  }
+ ]
+}

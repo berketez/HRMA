@@ -135,6 +135,21 @@ _BAND_LOWER_LIMIT = {
     # olabilir; listede YOKTUR.
 }
 
+
+class SamplingStopped(Exception):
+    """``progress_callback``'in koşuyu DURDURMA sinyali (iptal ya da bütçe).
+
+    V306/HIZ (M-SIVI-19). ÖLÇÜLDÜ (kod okundu, taban 700a67586): döngü
+    ilerleme geri çağrısının attığı HER istisnayı ``except Exception: pass``
+    ile yutuyordu; iş kuyruğunun işbirlikçi iptali (``JobCancelled``) tam bu
+    geri çağrıdan atıldığı için kapsamlı koşu İPTAL EDİLEMİYORDU — iptal
+    isteği kaydediliyor, örnekleme sonuna kadar sürüyordu. Bu sınıftan
+    türeyen istisna yutulmaz, çağırana taşınır; kısmi sonuç DÖNMEZ (yarım
+    çekilmiş bir LHS tasarımı tabakaları dengesiz bir örnektir, dağılım
+    değildir). Başka istisnalar eskisi gibi hesabı düşürmez.
+    """
+
+
 @dataclass(frozen=True)
 class UncertainInput:
     """Tek bir belirsiz girdinin dagilim tanimi.
@@ -719,7 +734,7 @@ def _sensitivity_block(X_ok, collected, output_keys, names, n_used,
             f'{noise_floor:.3f}, so the ranking would not be distinguishable '
             f'from sampling noise (requires n >= {SENSITIVITY_MIN_SAMPLES} '
             f'and noise floor < {SENSITIVITY_MAX_NOISE_FLOOR:g}). No values '
-            'are invented for this block.')
+            'are published for this block.')
         block['basis'] = block['reason']
         return block
 
@@ -870,7 +885,11 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
             None -> nominal sonucun ust seviye sonlu sayisal anahtarlari.
         sampler: 'lhs' | 'mc'.
         progress_callback: opsiyonel callable(done, total) — job_runner
-            ilerleme enjeksiyonu icin (~%2 adimlarla cagrilir).
+            ilerleme enjeksiyonu icin. V306/HIZ: HER degerlendirmeden sonra
+            cagrilir (done = tamamlanan degerlendirme, nominal prob dahil;
+            total = n + 1). Geri cagri ``SamplingStopped`` atarsa kosu
+            durur ve istisna cagirana TASINIR (kismi sonuc yok); baska
+            istisnalar hesabi dusurmez.
 
     Returns:
         Sozluk; basari yolunda status='success', ornek #0 nominalden saparsa
@@ -930,7 +949,12 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
     collected = {key: [] for key in output_keys}
     kept_rows = []
     failed = []
-    progress_step = max(1, n_eval // 50)
+    # V306/HIZ (M-SIVI-19): ilerleme HER degerlendirmeden sonra bildirilir.
+    # Eski adim (n_eval // 50) sivi motorda 4 ornekte bir rapor demekti; bir
+    # sivi ornegi yuk altinda dakikalar surebildigi icin hem ilerleme hem
+    # iptal denetimi (ayni geri cagri) o kadar gecikiyordu. Geri cagri ucuz
+    # (kilit + float); hesap maliyetine gore ihmal edilebilir.
+    progress_step = 1
     loop_t0 = time.perf_counter()
 
     for i in range(n_eval):
@@ -946,6 +970,15 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
                     f'ornek #0 (nominal vektor) hesabi patladi: {exc}',
                     seed, sampler, n, output_keys, nominal_outputs)
             failed.append({'index': i, 'error': str(exc)})
+            # V306/HIZ: basarisiz ornek de TAMAMLANMIS degerlendirmedir;
+            # sayac ve durdurma denetimi onu da gorur.
+            if progress_callback is not None:
+                try:
+                    progress_callback(i + 1, n_eval)
+                except SamplingStopped:
+                    raise
+                except Exception:
+                    pass
             continue
 
         if i == 0:
@@ -967,6 +1000,8 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
             if progress_callback is not None:
                 try:
                     progress_callback(1, n_eval)
+                except SamplingStopped:
+                    raise
                 except Exception:
                     pass
             continue
@@ -978,6 +1013,8 @@ def run_uncertainty(engine_factory, distributions, n_samples=FAST, seed=42,
         if progress_callback is not None and (i + 1) % progress_step == 0:
             try:
                 progress_callback(i + 1, n_eval)
+            except SamplingStopped:
+                raise  # V306/HIZ: iptal / butce durdurmasi YUTULMAZ
             except Exception:
                 pass  # ilerleme raporu hesabi dusurmesin
 

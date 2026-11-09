@@ -449,7 +449,10 @@ class TestH2LuleEti:
         assert 'nozzle_geometry.wall_thicknesspublishedbythisrun' in ad, ad
         # V301 CAD-2 / K4: lüle eti yapısal boğaz kuralından (eskiden
         # 'thin_wall_hoop'); künye çözücünün yeni dayanağını taşır.
-        assert 'structural_throat_rule' in ad
+        # V306/HİBRİT-MODEL (M-HIBRIT-22): grafit lüle ek + yapısal gövde
+        # olarak boyutlanır; künye bu dayanağı söyler (gövde aynı boğaz
+        # kuralıyla, ek erozyon payıyla).
+        assert 'insert_plus_structural_housing' in ad
         assert 'NOTfromastructuralorthermalanalysis' not in ad, (
             'yayımlanan et çizilirken künye hâlâ "analiz yok" diyor')
 
@@ -786,7 +789,11 @@ class TestH5Uclar:
             sa['chamber_analysis']['wall_thickness_used_mm'], abs=1e-6)
         lule = _nozzle_wall_design(md)
         assert lule['published'] is True
-        assert lule['thickness_m'] * 1000.0 == pytest.approx(
+        # V306/HİBRİT-MODEL (M-HIBRIT-22): grafit lüle = ek + yapısal gövde;
+        # SF gövdenindir — çizilen yığın − ek = SF'nin ait olduğu et.
+        _ek = hibrit_md['nozzle_geometry']['nozzle_construction']['insert'][
+            'thickness_mm']
+        assert lule['thickness_m'] * 1000.0 - _ek == pytest.approx(
             sa['nozzle_analysis']['throat_thickness_used_mm'], abs=1e-9)
         assert sa['nozzle_analysis']['design_mode'] == 'verify'
 
@@ -806,9 +813,13 @@ class TestH5Uclar:
         # True). Testin öncülü "geçerlilik içinde yayımlasaydı" olduğu için
         # o bayrak da False'a çekilir; iddia (STEP iner) aynen durur.
         ca['model_validity_limit_exceeded'] = False
+        # V306/HİBRİT-MODEL (M-HIBRIT-22): SF'nin ait olduğu lüle eti yapısal
+        # GÖVDEDİR (çizilen yığın − grafit ek); öncül "lüle tutarlı" aynen.
         md['structural_analysis']['nozzle_analysis'][
-            'throat_thickness_used_mm'] = md['nozzle_geometry'][
-                'wall_thickness']
+            'throat_thickness_used_mm'] = (
+                md['nozzle_geometry']['wall_thickness']
+                - md['nozzle_geometry']['nozzle_construction']['insert'][
+                    'thickness_mm'])
         r = _post(client, '/api/export-step', md)
         assert r.status_code == 200, r.get_data(as_text=True)[:600]
         assert r.headers['content-type'].startswith('application/zip')

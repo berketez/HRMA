@@ -342,6 +342,43 @@
     // ------------------------------------------------------------------
     const WALL_PROFILE_ENDPOINT = '/api/analysis/wall-profile';
 
+    /* V306/TERMAL-KONTUR (KILAVUZ K-P4, S1) — MOTORUN NOZULU.
+       ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/termal-kontur/olcum/once_ornek.json,
+       taban 085d9adf7): üç örnekte de /analyze_thermal_safety gövdesinde
+       hiçbir nozul geometrisi yoktu; ıslak alan integrali her koşuda
+       örnekleyicinin JENERİK çıkış çapı ve lüle tipiyle alınıyordu (sıvı:
+       sıcak gaz yüzeyi 0,153 m², ısı gücü 2042,6 kW). Motor sonucu konturu
+       YAYIMLIYOR (ölçülen yollar olcum/motor_yollari.json: üç tipte üst
+       düzey `nozzle_contour.points`, metre; `expansion_ratio`;
+       `nozzle_angles.nozzle_type`). Bu alanlar formda kutu değildir; gövdeye
+       güvertenin form dışı bağlam kanalıyla (`contextFromResults`) ve eksenel
+       profil isteğine buradan girer.
+       Kullanıcı hazne ya da boğaz çapını ELLE değiştirdiyse motorun konturu o
+       hazneye/boğaza ait değildir (uç da çelişkiyi adıyla reddeder): kontur
+       gönderilmez, konturu motorun genleşme oranı ve lüle tipi yeni boğazdan
+       örnekler (künye bunu ayrıca söyler). Yol yoksa alan gönderilmez; uç
+       bugünkü beyanlı jenerik yola düşer. */
+    function kutuKirli(alan) {
+        const el = document.getElementById('ad_f_thermal_' + alan);
+        return !!(el && el.dataset && el.dataset.dirty === '1');
+    }
+    function nozulGeometrisi(r) {
+        const m = U.motorDict(r);
+        const out = {};
+        const tip = ilkMetin(m, ['nozzle_angles.nozzle_type', 'nozzle_type',
+                                 'nozzle_contour.divergent.type']);
+        if (tip) out.nozzle_type = tip;
+        const pts = yolOku(m, 'nozzle_contour.points');
+        if (Array.isArray(pts) && pts.length >= 3
+                && !kutuKirli('chamber_diameter') && !kutuKirli('throat_diameter')) {
+            out.nozzle_contour = { points: pts };
+            return out;
+        }
+        const eps = ilkSayi(m, ['expansion_ratio', 'motor_geometry.expansion_ratio']);
+        if (eps !== undefined && eps > 1) out.expansion_ratio = eps;
+        return out;
+    }
+
     // Dock buildPayload aynası: gövde formdan okunur; termal formda
     // olmayan nozul geometrisi son hesap sonucundan tamamlanır.
     function readAxialPayload() {
@@ -360,7 +397,6 @@
         }
         try {
             const results = window.currentResults;
-            const m = U.motorDict(results);
             // BİRİM: /api/analysis/wall-profile boğaz çapını METRE bekliyor
             // (app.py). Burada değer HAM okunuyordu; katı motorda çözücü
             // 17,96 (mm) döndürdüğü için eksenel profil 17,96 m boğazla
@@ -371,9 +407,12 @@
             if (payload.throat_diameter == null && Number.isFinite(dtM)) {
                 payload.throat_diameter = dtM;
             }
-            if (payload.expansion_ratio == null && Number.isFinite(m.expansion_ratio)) {
-                payload.expansion_ratio = m.expansion_ratio;
-            }
+            // V306/TERMAL-KONTUR: ıslak alanla AYNI geometri (tek kaynak):
+            // motorun konturu, yoksa genleşme oranı + lüle tipi.
+            const geo = nozulGeometrisi(results);
+            Object.keys(geo).forEach(function (k) {
+                if (payload[k] == null) payload[k] = geo[k];
+            });
         } catch (e) { /* sonuç yoksa backend varsayılanları kullanılır */ }
         return payload;
     }
@@ -553,7 +592,9 @@
                 let data = null;
                 try { data = await resp.json(); } catch (e) { data = null; }
                 if (!resp.ok || !data || data.status === 'error') {
-                    throw new Error((data && data.error) || ('HTTP ' + resp.status));
+                    // V306/DİL-KATI 2. tur (TERMAL-KONTUR DEVİR): kullanıcı metninde HTTP
+                    // kodu yok — ret gövdesi gerekçesizse ortak ret yedeği (HRMAReject).
+                    throw new Error((data && data.error) || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status)));
                 }
                 // Diziler backend'de data.wall_profile altında (test_client ile
                 // doğrulandı, 2026-07-14); kök ve data.profile da tolere edilir
@@ -616,6 +657,28 @@
         return '';
     }
 
+    // V306/SIVI-SOĞUTMA (M-SIVI-30): güvertenin bağlı olduğu motorun soğutma
+    // tipi (yalnız sıvı motor yanıtı; yoksa undefined).
+    function motorCoolingType() {
+        try {
+            const mt = (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function')
+                ? window.AnalysisDock.getMotorType() : null;
+            if (mt !== 'liquid') return undefined;
+            return ilkMetin(U.motorDict(window.currentResults), SOGUTMA_YOLLARI);
+        } catch (e) {
+            return undefined;
+        }
+    }
+    function coolingTypeName(v) {
+        const ad = {
+            ablative: ['Ablative Liner', 'panel.thermal.motorCooling.ablative'],
+            radiative: ['Radiation Cooling', 'panel.thermal.motorCooling.radiative'],
+            film_cooling: ['Film Cooling', 'panel.thermal.motorCooling.film_cooling'],
+            dump_cooling: ['Dump Cooling', 'panel.thermal.motorCooling.dump_cooling'],
+        }[v];
+        return ad ? T(ad[1], ad[0]) : String(v);
+    }
+
     function render(data, root) {
         const ta = data.thermal_analysis || {};
         const htc = ta.heat_transfer_coefficients || {};
@@ -634,6 +697,21 @@
             badges += U.badge(T('panel.thermal.badgeRisk', 'THERMAL RISK') + ': ' + safe.risk_level,
                               riskKind(safe.risk_level),
                               typeof safe.risk_level_basis === 'string' ? safe.risk_level_basis : '');
+        }
+        /* V306/SIVI-SOĞUTMA (M-SIVI-30): motorun soğutma tipi bu güvertenin
+           seçeneklerinde (doğal / zorlanmış / rejeneratif) yoksa ve korunan
+           cidar da uygulanmadıysa, hüküm motorun cidarına ait değildir —
+           başlıkta adıyla söylenir (motorun tipi kendi sözlük adıyla). */
+        const motorSog = motorCoolingType();
+        if (motorSog && !COOLING.some(function (o) { return o[0] === motorSog; })
+                && !superseded) {
+            badges += U.badge(U.tf('panel.thermal.badgeMotorCoolingNotModelled',
+                { type: coolingTypeName(motorSog) },
+                'MOTOR COOLING ({type}) NOT MODELLED HERE — verdict is for a bare wall'),
+                'warn', T('panel.thermal.motorCoolingNotModelledTip',
+                  'This deck models natural, forced and regenerative cooling only. '
+                  + 'The verdict below is the bare-wall check and is not the '
+                  + 'motor\'s own cooling result; the motor result page carries that.'));
         }
         badges += U.badge(T('panel.thermal.badgeCooling', 'COOLING') + ': '
             + String(dpp.cooling_type || '—').toUpperCase(), 'info',
@@ -867,6 +945,29 @@
                + ' color:var(--hd-orange, #ff8c33);"> · '
                + U.esc(genelOkunur) + ' ' + teknikGenel() + '</span>')
             : '';
+        // V306/TERMAL-KONTUR (K-P4): jenerik değilse künye KAYNAĞI söyler.
+        // Köken ucun makine alanından okunur (`wetted_integral_contour_basis
+        // .origin`, cümle eşleştirmesi yok); alan yoksa hiçbir şey iddia
+        // edilmez (fail-closed). Yayımlanmış kontur = motorun nozulu; canlı
+        // örnekleme jenerik alan olmadan = gönderilen genleşme oranı / çıkış
+        // çapı ve lüle tipiyle (ör. boğaz kutusu elle değiştirildiğinde).
+        const konturKaynakOkunur = (wib && !wibNote)
+            ? (wib.origin === 'motor_published_contour'
+                ? U.tf('panel.thermal.contourFromMotor',
+                       { n: Number.isFinite(wib.contour_points) ? wib.contour_points : '—' },
+                       "motor's nozzle (published contour, {n} points)")
+                : (wib.origin === 'sampled_from_geometry_fields'
+                    && Array.isArray(generics) && !generics.length)
+                    ? T('panel.thermal.contourSampledSupplied',
+                        'nozzle contour drawn from the supplied nozzle size and type')
+                    : '')
+            : '';
+        const konturKaynakMark = konturKaynakOkunur
+            ? ('<span data-thermal-contour-origin="' + U.esc(String(wib.origin)) + '"'
+               + ' style="font-size:0.68rem;'
+               + ' color:var(--hd-ink-dim, #7d97a5);"> · '
+               + U.esc(konturKaynakOkunur) + '</span>')
+            : '';
         thtml += U.kvTable([
             [T('panel.thermal.totalHeatRate', 'Total heat rate'),
              numL(cool.peak_heat_rate, 1) + ' kW' + derivedMark, derivedNote],
@@ -894,8 +995,9 @@
                   + ' font-size:0.64rem;"> '
                   + U.esc(SRV(String(wib.exit_diameter_source))) + '</span>'
                   + '</details></span>'
-                : ''),
-             derivedNote],
+                : '')
+             + konturKaynakMark,
+             derivedNote || konturKaynakOkunur],
         ]);
 
         thtml += U.sectionTitle(T('panel.thermal.secSafety', 'Thermal Safety Factors')
@@ -1057,6 +1159,20 @@
                     ek.wall_temperature_hot = cift.hot;
                     ek.wall_temperature_cold = cift.cold;
                 }
+                /* V306/SIVI-SOĞUTMA (M-SIVI-30) — GÜVENLİK NR-3 (a) ilkesi:
+                   güverte motorun KENDİ ısıl koruma kararını okur. Ablatif
+                   astarlı sıvı motorun pasif koruması motorda Level-1 Q*
+                   ile boyutlanmıştır (thermal_protection.
+                   passive_thermal_protection, status 'modelled'); güverte
+                   aynı modelle astarı boyutlandırır (hibritle aynı yol).
+                   ÖLÇÜLDÜ (L1, olcum/m30_termal_guverte.json): ön dolum
+                   'doğal, çıplak cidar' iken TERMAL RİSK HIGH; korunan
+                   cidarla MEDIUM (astar gerekli), çıplak cidar sınırı
+                   bare_wall_risk_level'de kalır. */
+                const pasif = yolOku(m, 'thermal_protection.passive_thermal_protection') || {};
+                if (sogutma === 'ablative' && pasif.status === 'modelled') {
+                    ek.wall_protection = 'ablative_liner';
+                }
             } else if (mt === 'hybrid') {
                 const zones = yolOku(m, 'chamber_wall_zones') || {};
                 if (zones.status === 'modelled' && zones.all_zones_protected === true) {
@@ -1092,6 +1208,12 @@
                 wall_thickness: (astar ? astar.thicknessM
                                  : U.readWallThicknessM(r)),
             });
+        },
+        // V306/TERMAL-KONTUR (K-P4): `fromResults` yalnız form kutularını
+        // doldurur (güverte kutusu olmayan anahtarı yutar); motorun nozul
+        // geometrisi form dışı bağlamdır. Gerekçe ve yollar: nozulGeometrisi.
+        contextFromResults: function (r) {
+            return nozulGeometrisi(r);
         },
         render: render,
     });

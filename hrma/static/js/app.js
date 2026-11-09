@@ -73,27 +73,46 @@ function tasarimOneriNotu() {
     return T('app.design.suggestionNote',
         'The values shown are suggestions. A field reaches the solver only after you change it (or a project file supplies it); untouched fields are not sent, so HRMA sizes the wall and solves the injector pressure drop itself and declares that in the results.');
 }
-// G-1: "Optimumu Bul" sonucunun künye satırları. Sayı uydurulmaz: bant ve
-// basınç uç yanıtından, kanon son hesabın motor.optimum_of_ratio alanından.
+// G-1 + V306/HİBRİT-SAYI (M-HIBRIT-5): "Optimumu Bul" sonucunun künyesi.
+// ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-sayi/olcum/sayi_once.json): kutu
+// iki optimum basıyordu (uç 7,06 / 229,5 s ⟷ "çözücü kanonu" 6,30 / 232,3 s;
+// iki ayrı tanım). Artık uç çözücüyle AYNI tanımla arar: kutu TEK optimumu
+// ve tanımını basar (sayılar uç yanıtının ``optimum_definition`` bloğundan;
+// yoksa satır konmaz). Son hesabın optimumu bu sonuçtan ayrışıyorsa ikinci
+// sayı BASILMAZ, son hesabın farklı girdilerle yapıldığı söylenir.
 function optimumKunyeSatirlari(result, motor) {
     const satirlar = [];
     const aralik = (result && Array.isArray(result.sweep_range)) ? result.sweep_range : null;
-    if (aralik && aralik.length === 2 && typeof result.chamber_pressure === 'number') {
+    const tanim = (result && result.optimum_definition && typeof result.optimum_definition === 'object')
+        ? result.optimum_definition : null;
+    if (aralik && aralik.length === 2 && tanim
+            && typeof tanim.chamber_pressure_bar === 'number'
+            && typeof tanim.ambient_pressure_bar === 'number') {
+        const lule = (typeof tanim.expansion_ratio === 'number' && isFinite(tanim.expansion_ratio))
+            ? TF('app.optimum.nozzleFixed', { eps: numTxt(tanim.expansion_ratio, 2) },
+                 'design nozzle with expansion ratio {eps} (pressure thrust included)')
+            : T('app.optimum.nozzleMatched',
+                'nozzle exit pressure equal to the ambient at every O/F (Calculate sizes the expansion ratio the same way)');
         satirlar.push(TF('app.optimum.basis', {
             lo: numTxt(aralik[0], 2), hi: numTxt(aralik[1], 2),
-            pc: numTxt(result.chamber_pressure, 1)
-        }, 'Found by a sea-level-exit equilibrium search (no nozzle expansion ratio), O/F band {lo} to {hi}, Pc {pc} bar.'));
+            pc: numTxt(tanim.chamber_pressure_bar, 1),
+            pa: numTxt(tanim.ambient_pressure_bar, 3),
+            nozzle: lule
+        }, 'Definition: the O/F of the highest ideal Isp (equilibrium, no c* efficiency, no nozzle losses) at the design ambient pressure {pa} bar, chamber pressure {pc} bar, {nozzle}; searched over O/F {lo} to {hi}.'));
     }
     const kanonOF = motor ? motor.optimum_of_ratio : null;
-    const kanonIsp = motor ? motor.maximum_isp : null;
-    if (typeof kanonOF === 'number' && isFinite(kanonOF)) {
-        satirlar.push(TF('app.optimum.canon', {
-            of: numTxt(kanonOF, 2),
-            isp: (typeof kanonIsp === 'number' && isFinite(kanonIsp)) ? numTxt(kanonIsp, 1) : '-'
-        }, 'Solver canon (design nozzle, last calculation): O/F {of}, Isp {isp} s.'));
+    const bulunan = result ? result.optimum_of_ratio : null;
+    // 3.0.6 ana model (D35 tavanı 5 > 4): iki optimum ekranda basılan
+    // biçimiyle karşılaştırılır (numTxt, 2 basamak) — kullanıcının gördüğü
+    // iki sayı aynıysa "bayat hesap" denmez; ham toFixed kullanılmaz.
+    if (typeof kanonOF === 'number' && isFinite(kanonOF)
+            && typeof bulunan === 'number' && isFinite(bulunan)
+            && numTxt(kanonOF, 2) !== numTxt(bulunan, 2)) {
+        satirlar.push(T('app.optimum.staleCalc',
+            'The last calculation was run with different inputs; its optimum updates to this value when you calculate again with these inputs.'));
     } else {
-        satirlar.push(T('app.optimum.canonNone',
-            'Solver canon: not available until you run Calculate (the solver searches at the design nozzle).'));
+        satirlar.push(T('app.optimum.sameAsSolver',
+            'Calculate uses the same definition: with these inputs it publishes this same optimum.'));
     }
     return satirlar;
 }
@@ -102,7 +121,7 @@ function optimumEgriAltYazisi(pcv) {
     return TF('app.optimum.curveBasis', {
         lo: numTxt(pcv.sweep_range[0], 2), hi: numTxt(pcv.sweep_range[1], 2),
         step: numTxt(pcv.step, 3), n: String(pcv.n_points)
-    }, 'Display grid {lo} to {hi}, step {step}, {n} points, sea-level exit; not the solver canon.');
+    }, 'Display grid {lo} to {hi}, step {step}, {n} points; same ideal Isp definition as the optimum.');
 }
 
 function numTxt(v, d) {
@@ -239,7 +258,12 @@ async function calculate() {
             sayfaHatalari = [];   // doğrulayıcı patlarsa hesap engellenmez
         }
         if (Array.isArray(sayfaHatalari) && sayfaHatalari.length) {
-            showError(sayfaHatalari.join(' \u2022 '));
+            // V306/BAYAT NR-15: sunucu reddiyle aynı akış — eski sonuç
+            // şeridi + tek hesap hatası kutusu (ölçüm: olcum_nr15_once.json).
+            invalidateStaleResults();
+            hesapHatasiGoster(function () {
+                showError(sayfaHatalari.join(' \u2022 '));
+            });
             return;
         }
     }
@@ -294,7 +318,14 @@ async function calculate() {
             window.FlightHandoff.publish(results, { motor_type: 'hybrid' });
         }
         displayCalculationResults(results);
-        
+        // V306/BAYAT NR-9 ailesi — TÜREV PANEL GEÇERSİZLEME (hibrit): bu
+        // hesap başka bir tasarımı hesapladıysa parametrik tarama (koştuğu
+        // formun tasarımına aittir) temizlenir ve nedeni yazılır. İşlev
+        // advanced.html parametrik bölümünde; kimlik bu isteğin formu.
+        if (typeof window.parametrikTasarimDenetle === 'function') {
+            try { window.parametrikTasarimDenetle(data); } catch (e) { /* panel yok */ }
+        }
+
         // Enable export buttons
         setExportResultsEnabled(true);
         
@@ -325,29 +356,80 @@ async function calculate() {
         // Emsal aynı depoda: analysis_center.js saklı sonucu `stale`
         // beyanıyla basar, analysis_dock.js koşumdan önce kabı gizler.
         invalidateStaleResults();
-        handleError(error, 'Main Calculation Function');
+        hesapHatasiGoster(function () {
+            handleError(error, 'Main Calculation Function');
+        });
     } finally {
         showLoading(false);
     }
 }
 
+// V306/BAYAT NR-15 (+NK-21/22 kalanı) — HESAP HATASI KUTUSU TEKTİR.
+// Yeni hesap hatası bir öncekinin YERİNİ alır (katı/sıvı sayfalarının
+// `data-solid-calc-error` / `data-liquid-calc-error` deseni); başka
+// kaynaklı bildirimlere (yörünge, dışa aktarım …) dokunulmaz. Başarılı
+// hesapta bütün hata bildirimleri zaten kalkar (clearErrorNotices).
+const HESAP_HATASI_IMI = 'data-calc-error';
+function hesapHatasiGoster(goster) {
+    const kap = (typeof document !== 'undefined' && document.getElementById)
+        ? document.getElementById('hrmaNotices') : null;
+    if (kap && typeof kap.querySelectorAll === 'function') {
+        Array.prototype.forEach.call(kap.querySelectorAll('[' + HESAP_HATASI_IMI + ']'),
+            function (eski) { if (eski.parentNode) eski.parentNode.removeChild(eski); });
+    }
+    goster();
+    const son = kap && kap.lastElementChild;
+    if (son && typeof son.setAttribute === 'function'
+            && son.getAttribute('data-notice-type') === 'error') {
+        son.setAttribute(HESAP_HATASI_IMI, '1');
+    }
+}
+
+// V306/BAYAT NR-15 — ESKİ SONUÇ ŞERİDİ (katı/sıvı sayfalarıyla AYNI
+// bileşen: `hdEskiSonucBandi` kimliği, `hd-eski-sonuc-bandi` sınıfı,
+// `common.staleResults` metni). Başarısız hesaptan sonra sonuç paneli
+// AÇIKSA (bir önceki başarılı hesap ekrandaysa) panelin başına konur;
+// başarılı hesap kaldırır. Sonuç silinmez, hangi girdiye ait olmadığı
+// yazılır; dışa aktarım ve sonucu okuyan tüketiciler (currentResults)
+// yine kapalıdır (invalidateStaleResults).
+function eskiSonucBandi(goster) {
+    if (typeof document === 'undefined' || !document.getElementById) return null;
+    const eski = document.getElementById('hdEskiSonucBandi');
+    if (eski && eski.parentNode) eski.parentNode.removeChild(eski);
+    const kap = document.getElementById('resultsPanel');
+    if (!goster || !kap || kap.style.display !== 'block') return null;
+    const bant = document.createElement('div');
+    bant.id = 'hdEskiSonucBandi';
+    bant.className = 'hd-eski-sonuc-bandi';
+    bant.setAttribute('role', 'status');
+    bant.setAttribute('data-i18n', 'common.staleResults');   // dil değişiminde çevrilir
+    bant.textContent = T('common.staleResults',
+        'OLD RESULT: the last calculation failed; the results below belong to the previous successful calculation and do not reflect the current inputs.');
+    kap.insertBefore(bant, kap.firstChild);
+    return bant;
+}
+
 // ÖH D15 / P11B2-07 — başarısız koşumdan sonra ekranı kazanılmamış hâle
-// getirir: sonuç kabı gizlenir, dışa aktarım düğmeleri kapanır, saklı
-// sonuç düşürülür. Sayı SİLİNMEZ, GÖSTERİLMEZ: ekranda kalan bir sayı
-// hangi girdiye ait olduğu bilinmeden okunamaz.
+// getirir: dışa aktarım düğmeleri kapanır, saklı sonuç düşürülür (sonucu
+// okuyan tüketiciler — yörünge, güverte önerileri, dışa aktarım — onu
+// güncel sanamaz). Ekranda kalan bir sayı hangi girdiye ait olduğu
+// bilinmeden okunamaz.
+// V306/BAYAT NR-15: sonuç paneli artık GİZLENMEZ, katı ve sıvı sayfalarıyla
+// aynı "ESKİ SONUÇ" şeridiyle işaretlenir (brif: üç sayfada aynı bileşen;
+// kullanıcı neyle kıyasladığını görür, sayının yeni girdiye ait olmadığı
+// panelin başında yazar). Uyarı paneli sonucun parçasıdır, şeridin altında
+// kalır.
 function invalidateStaleResults() {
     currentResults = null;
     if (typeof window !== 'undefined') window.currentRequest = null;
-    const panel = document.getElementById('resultsPanel');
-    if (panel) panel.style.display = 'none';
     ['exportResultsBtn', 'exportSTLBtn', 'downloadEngBtn'].forEach(function (id) {
         const btn = document.getElementById(id);
         if (btn) btn.disabled = true;
     });
     // OH-GT-09: kapanan düğme nedenini yeniden söyler.
     setExportResultsEnabled(false);
-    const warningsPanel = document.getElementById('warningsPanel');
-    if (warningsPanel) warningsPanel.style.display = 'none';
+    // Sonuç paneli (resultsPanel) açıksa başına eski sonuç şeridi.
+    eskiSonucBandi(true);
 }
 
 // ---------------------------------------------------------------------
@@ -597,8 +679,11 @@ function validateInputs(data) {
         if (typeof invalidateStaleResults === 'function') {
             try { invalidateStaleResults(); } catch (e) { /* panel yoksa */ }
         }
-        showError(T('app.val.failed', 'Input validation failed:') + '\n• '
-            + errors.join('\n• '));
+        // V306/BAYAT NR-15: tek hesap hatası kutusu (öncekinin yerini alır).
+        hesapHatasiGoster(function () {
+            showError(T('app.val.failed', 'Input validation failed:') + '\n• '
+                + errors.join('\n• '));
+        });
         return false;
     }
 
@@ -635,6 +720,8 @@ function clearErrorNotices() {
 
 function displayCalculationResults(results) {
     try { clearErrorNotices(); } catch (e) { /* bildirim kabı yoksa */ }
+    // V306/BAYAT NR-15: başarılı hesap eski sonuç şeridini kaldırır.
+    try { eskiSonucBandi(false); } catch (e) { /* panel yoksa */ }
     const resultsPanel = document.getElementById('resultsPanel');
     resultsPanel.style.display = 'block';
     resultsPanel.classList.add('fade-in');
@@ -1171,6 +1258,13 @@ function defaultsAppliedBlock(results) {
                     aciklama = TF('app.defaultsApplied.notUsedN2oSat',
                         { used: kullanilan },
                         'listed as this server\'s default but NOT used in this run: the model used P_sat(T_tank) = {used} from the N₂O saturation table');
+                } else if (kullanilan && kayit.used_by_model_source
+                        === 'chamber_pressure_plus_design_pressure_drop') {
+                    // V306/SAYI (NR-6): LOX / H₂O₂ tasarım ΔP kipi — devre
+                    // tank basıncını okumaz; motorun beyanı (kaynak kodu).
+                    aciklama = TF('app.defaultsApplied.notUsedDesignDp',
+                        { used: kullanilan },
+                        'listed as this server\'s default but NOT used in this run: the injector circuit used the feed pressure from the design pressure-drop ratio, P_c·(1 + ΔP/P_c) = {used}');
                 } else if (kullanilan) {
                     aciklama = TF('app.defaultsApplied.notUsedValue',
                         { used: kullanilan },
@@ -1547,26 +1641,87 @@ function headlineBasisBlock(motorData) {
             if (cs.source === 'user_input') {
                 kaynak = T('app.headline.cstarEffUser', 'your input');
             } else if (cs.source === 'sourced_default'
+                       && Array.isArray(cs.measured_band)
+                       && cs.scope === 'all_hybrid_pairs') {
+                // V306/HİBRİT-MODEL (M-HIBRIT-25): çiftin ölçümü yok; genel
+                // hibrit varsayılanı olduğu manşette AÇIKÇA yazılır.
+                kaynak = TF('app.headline.cstarEffSourcedGeneral', {
+                    n: cs.n_tests,
+                    mean: num(cs.mean, 3) === null ? '—' : num(cs.mean, 3),
+                    lo: num(cs.measured_band[0], 3),
+                    hi: num(cs.measured_band[1], 3) },
+                    'general hybrid default: no measured value for this propellant pair, median of all {n} measured hybrid firings with a valid measurement window (mean {mean}), range {lo}-{hi}');
+            } else if (cs.source === 'sourced_default'
                        && Array.isArray(cs.measured_band)) {
                 kaynak = TF('app.headline.cstarEffSourced', {
-                    n: cs.n_tests, lo: num(cs.measured_band[0], 2),
-                    hi: num(cs.measured_band[1], 2) },
-                    'sourced default: median of {n} measured firings, range {lo}-{hi}');
+                    n: cs.n_tests,
+                    mean: num(cs.mean, 3) === null ? '—' : num(cs.mean, 3),
+                    lo: num(cs.measured_band[0], 3),
+                    hi: num(cs.measured_band[1], 3) },
+                    'sourced default: median of {n} measured firings with a valid measurement window (mean {mean}), range {lo}-{hi}');
             } else {
                 kaynak = String(cs.source || '');
+            }
+            // V306/HİBRİT-MODEL (M-HIBRIT-25, 4 Kas): ölçüm penceresi
+            // geçersiz diye dışlanan kayıtlar ADI ve gerekçesiyle (yanıtta
+            // yoksa satır eklenmez).
+            if (cs.source === 'sourced_default'
+                && Array.isArray(cs.excluded_records)
+                && cs.excluded_records.length) {
+                const gerekce = {
+                    window_not_determinable: T('app.headline.cstarExclWindowUnknown', 'stable window not determinable'),
+                    unburned_fuel_mass_in_window: T('app.headline.cstarExclUnburnedFuel', 'unburned fuel mass in the window'),
+                    burn_too_short_for_data_reduction: T('app.headline.cstarExclShortBurn', 'burn too short for data reduction'),
+                };
+                const liste = cs.excluded_records.map(d => String(d.label || d.test_id)
+                    + (gerekce[d.reason_code] ? ' (' + gerekce[d.reason_code] + ')' : ''));
+                kaynak += '; ' + TF('app.headline.cstarEffExcluded', {
+                    k: cs.excluded_records.length, list: liste.join(', ') },
+                    '{k} firings excluded, measurement window not valid: {list}');
             }
             const ci = num(cs.c_star_theoretical_m_s, 0);
             const cd = num(cs.c_star_delivered_m_s, 0);
             satirlar.push({ warn: false, kod: 'cstar-eff', html: esc(TF(
                 'app.headline.cstarEff', {
-                    eta: num(cs.eta_c_star, 2), src: kaynak,
+                    // 3 basamak: varsayılanlar 0,976 / 0,849 gibi üç
+                    // basamaklıdır; 2'ye yuvarlamak "?" ipucundaki %97,6 ile
+                    // ayrı sayı gösterirdi (tek büyüklük, tek sayı).
+                    eta: num(cs.eta_c_star, 3), src: kaynak,
                     cd: cd === null ? '—' : cd, ci: ci === null ? '—' : ci },
                 'c* efficiency η_c* = {eta} ({src}): delivered c* {cd} m/s = η_c* × theoretical {ci} m/s; Isp, mass flow and propellant masses use the delivered value.')),
                 title: (Array.isArray(cs.sources) ? cs.sources.join(' · ') : '') });
         }
     }
     const tb = motorData.tank_blowdown;
+    const bitis = (tb && typeof tb === 'object')
+        ? ((window.TransientPanel
+            && typeof window.TransientPanel._endEventLabel === 'function')
+           ? window.TransientPanel._endEventLabel(tb.end_event)
+           : String(tb.end_event || '')) : '';
+    // V306/HİBRİT-ÇAPRAZ (kalem 1): N₂O kendinden basınçlı tankta TESLİM
+    // büyüklükleri (impuls, yanma süresi, ortalama Isp) boşalma çözümünden
+    // yayımlanır (motor.delivered_source); sabit oksitleyici debili bütçe
+    // adıyla ve farkın nedeniyle yan yana. Sayılar yanıttan; alan yoksa
+    // satır basılmaz.
     if (tb && typeof tb === 'object' && tb.status === 'modelled'
+        && motorData.delivered_source === 'tank_blowdown'
+        && typeof tb.total_impulse_Ns === 'number') {
+        const isp = num(motorData.isp_delivered_avg_s, 1);
+        let html = esc(TF('app.headline.blowdownDelivered', {
+            I: num(tb.total_impulse_Ns, 0), t: num(tb.burn_duration_s, 2),
+            isp: isp === null ? '—' : isp, ev: bitis },
+            'Delivered impulse, burn time and average Isp come from the self-pressurised N2O tank blowdown: {I} N·s, {t} s, {isp} s (end: {ev}). Thrust, Isp and chamber pressure above are the design point at ignition.'));
+        const reg = motorData.constant_oxidizer_flow_budget;
+        if (reg && typeof reg.total_impulse_Ns === 'number'
+            && typeof reg.burn_time_s === 'number') {
+            html += ' ' + esc(TF('app.headline.constantOxBudget', {
+                I: num(reg.total_impulse_Ns, 0), t: num(reg.burn_time_s, 2) },
+                'With a constant oxidizer flow (regulated feed) the same design would deliver {I} N·s in {t} s; the tank pressure falls during the burn, so the oxidizer flow and the thrust fall with it.'));
+        }
+        satirlar.push({ warn: false, kod: 'regulated-vs-blowdown', html: html
+            + ' <a href="#blowdownPanel" class="hd-headline-link">'
+            + esc(T('app.headline.blowdownLink', 'Tank Blowdown panel ↓')) + '</a>' });
+    } else if (tb && typeof tb === 'object' && tb.status === 'modelled'
         && typeof tb.total_impulse_Ns === 'number') {
         const Ih = motorData.total_impulse;
         const oran = (typeof Ih === 'number' && Ih > 0)
@@ -1575,10 +1730,7 @@ function headlineBasisBlock(motorData) {
             'app.headline.blowdown', {
                 I: num(tb.total_impulse_Ns, 0), t: num(tb.burn_duration_s, 2),
                 p: oran === null ? '—' : oran,
-                ev: (window.TransientPanel
-                     && typeof window.TransientPanel._endEventLabel === 'function')
-                    ? window.TransientPanel._endEventLabel(tb.end_event)
-                    : String(tb.end_event || '') },
+                ev: bitis },
             'The headline is the REGULATED design point (constant oxidizer flow). The self-pressurised N2O tank you selected blows down: impulse {I} N·s ({p} % of the headline), burn time {t} s, end: {ev}.'))
             + ' <a href="#blowdownPanel" class="hd-headline-link">'
             + esc(T('app.headline.blowdownLink', 'Tank Blowdown panel ↓')) + '</a>' });
@@ -1647,7 +1799,9 @@ function displayPerformanceMetrics(motorData, results) {
         const kunye = [];
         // Hangi koşum? (Bu işlev YALNIZ /calculate yanıtıyla çağrılır:
         // displayCalculationResults tek çağıranı ve o da /calculate fetch'i.)
-        kunye.push('/calculate');
+        // V306/DİL-HİBRİT (BAYAT DEVİR 5): künye koşumu kullanıcı diliyle
+        // adlar; uç adı ("/calculate") ekranda basılmaz.
+        kunye.push(T('adv.js.sfCardRunMotor', 'RUN: MOTOR CALCULATION'));
         // Cidar nereden geldi? Sunucunun kendi kapı sınıfı — üç değerin
         // ikisinin sözlükte karşılığı var, üçüncüsü makine adıyla basılır.
         const dbasis = (results && results.structural_design_basis) || null;
@@ -2217,8 +2371,17 @@ function isFiniteNum(x) {
 function loadedMassRows(motorData) {
     if (!motorData || typeof motorData !== 'object') return '';
     const rows = [];
+    // V306/HİBRİT-SAYI (M-HIBRIT-16) — ÖLÇÜLDÜ (tur L2, sayi_once.json):
+    // aynı "Yakıt Kütlesi" etiketiyle iki sayı (2,24 yanan ⟷ 2,70 yüklenen).
+    // Satırlar adıyla ayrılır; yanmayan pay (artık et, kg) arada durur ve
+    // yanan + yanmayan = yüklenen toplamı ekranda okunur.
+    if (isFiniteNum(motorData.fuel_mass_residual_kg)) {
+        rows.push(`<tr><td>${T('app.rep.fuelMassUnburned', 'Unburned fuel mass (residual web)')}`
+            + fieldTag('fuel_mass_residual_kg')
+            + `</td><td>${numTxt(motorData.fuel_mass_residual_kg, 2)} kg</td></tr>`);
+    }
     if (isFiniteNum(motorData.fuel_mass_loaded)) {
-        rows.push(`<tr><td>${T('app.rep.fuelMass', 'Fuel Mass')}`
+        rows.push(`<tr><td>${T('app.rep.fuelMassLoaded', 'Loaded fuel mass (burned + unburned)')}`
             + fieldTag('fuel_mass_loaded')
             + `</td><td>${numTxt(motorData.fuel_mass_loaded, 2)} kg</td></tr>`);
     }
@@ -2526,6 +2689,33 @@ function reportLabel(value, selectId) {
     return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+// V306/DİL-HİBRİT (KILAVUZ K-P5): çözücünün Tasarım Raporu / Özeti'ne
+// yazdığı KOD değerleri formdaki bir seçiciden gelmiyor; TR ekranda
+// "Cylindrical bore", "Outer surface", "ESTIMATED WITH DEFAULTS" İngilizce
+// kalıyordu (ölçüldü: olcum/ekran_once_tr.json). Kod → sözlük etiketi tek
+// tabloda; EN yedeği eski görüntünün AYNISI. Tablo dışı kod `reportLabel`
+// biçimine düşer (görünür kalır, sessizce yutulmaz). Kod kümesi:
+// hybrid_rocket_engine.py `grain_design` ('cylindrical_bore',
+// 'outer_surface') ve DESIGN_STATUS_* (altı durum).
+const RAPOR_KOD_ETIKETI = {
+    cylindrical_bore: ['adv.js.repGrainCylindricalBore', 'Cylindrical bore'],
+    outer_surface: ['adv.js.repInhibitorOuterSurface', 'Outer surface'],
+    OPTIMIZED: ['adv.js.repStatusOptimized', 'OPTIMIZED'],
+    CALCULATED: ['adv.js.repStatusCalculated', 'CALCULATED'],
+    ESTIMATED_WITH_DEFAULTS: ['adv.js.repStatusEstimatedDefaults', 'ESTIMATED WITH DEFAULTS'],
+    TARGET_NOT_MET: ['adv.js.repStatusTargetNotMet', 'TARGET NOT MET'],
+    UNVALIDATED_ESTIMATE: ['adv.js.repStatusUnvalidated', 'UNVALIDATED ESTIMATE'],
+    NOT_CONVERGED: ['adv.js.repStatusNotConverged', 'NOT CONVERGED'],
+};
+function raporKodEtiketi(value) {
+    if (typeof value === 'string'
+        && Object.prototype.hasOwnProperty.call(RAPOR_KOD_ETIKETI, value)) {
+        const k = RAPOR_KOD_ETIKETI[value];
+        return T(k[0], k[1]);
+    }
+    return reportLabel(value);
+}
+
 // [etiket, değer, birim] satırlarından rapor tablosu üretir.
 function reportSection(title, rows) {
     const body = rows.map(function (row) {
@@ -2569,7 +2759,7 @@ function grainDesignSection(grainDesign) {
     if (!grainDesign || typeof grainDesign !== 'object') return '';
 
     const rows = [
-        [T('app.rep.grainType', 'Grain Type'), reportLabel(grainDesign.grain_type), ''],
+        [T('app.rep.grainType', 'Grain Type'), raporKodEtiketi(grainDesign.grain_type), ''],
         [T('app.rep.grainLength', 'Grain Length'), reportNum(grainDesign.grain_length_mm, 1), 'mm'],
         [T('app.rep.grainOd', 'Grain Outer Diameter'),
          reportNum(grainDesign.grain_outer_diameter_mm, 1), 'mm'],
@@ -2580,7 +2770,7 @@ function grainDesignSection(grainDesign) {
         [T('app.rep.webThickness', 'Web Thickness'), reportNum(grainDesign.web_thickness_mm, 1), 'mm'],
         [T('app.rep.grainLd', 'Grain L/D'), reportNum(grainDesign.L_over_D, 2), ''],
         [T('app.rep.segments', 'Number of Segments'), reportNum(grainDesign.number_of_segments, 0), ''],
-        [T('app.rep.inhibitor', 'Inhibitor'), reportLabel(grainDesign.inhibitor), '']
+        [T('app.rep.inhibitor', 'Inhibitor'), raporKodEtiketi(grainDesign.inhibitor), '']
     ];
     return reportSection(T('app.rep.secGrain', 'Grain Design'), rows);
 }
@@ -2596,7 +2786,7 @@ function designSummarySection(designSummary) {
     const nozzle = designSummary.nozzle || {};
 
     const rows = [
-        [T('common.status', 'Status'), reportLabel(designSummary.status), ''],
+        [T('common.status', 'Status'), raporKodEtiketi(designSummary.status), ''],
         // V301/H-PANEL (NK-6 ek): "Toplam uzunluk" hangi tanımla? Çözücü iki
         // ayrı ad yayımlıyor (key_dimensions.total_motor_length_basis):
         // oda + lüle (ön kapak HARİÇ) ve ön kapak dahil. Etiket tanımı söyler;
@@ -2613,6 +2803,14 @@ function designSummarySection(designSummary) {
         [T('app.rep.chamberLen', 'Chamber Length'), reportNum(dims.chamber_length_mm, 1), 'mm'],
         [T('app.rep.throatDia', 'Throat Diameter'), reportNum(dims.nozzle_throat_diameter_mm, 1), 'mm'],
         [T('app.rep.exitDia', 'Exit Diameter'), reportNum(dims.nozzle_exit_diameter_mm, 1), 'mm'],
+    ]).concat((typeof dims.motor_envelope_diameter_mm === 'number'
+              && isFinite(dims.motor_envelope_diameter_mm)) ? [
+        // V306/HİBRİT-MODEL (M-HIBRIT-22): motor zarfı (kasa dış çapı ya da
+        // çizilen lüle dış profili, hangisi büyükse) — 6-DOF ve uçuş aracının
+        // gövde denetiminde kullandığı AYNI sayı; yayımlanmadıysa satır yok.
+        [T('app.rep.motorEnvelopeDia', 'Motor Envelope Diameter (largest outer diameter: case or drawn nozzle)'),
+         reportNum(dims.motor_envelope_diameter_mm, 1), 'mm'],
+    ] : []).concat([
         [T('app.rep.convLength', 'Convergent Section Length'),
          reportNum(nozzle.convergent_length_mm, 1), 'mm'],
         [T('app.rep.divLength', 'Divergent Section Length'),
@@ -2724,9 +2922,9 @@ function displayDesignReport(motorData, injectorData) {
                     <tr><td>${T('app.rep.mdotTotal', 'Total Mass Flow Rate')}</td><td>${numTxt(motorData.mdot_total, 3)} kg/s</td></tr>
                     <tr><td>${T('app.rep.mdotOx', 'Oxidizer Mass Flow Rate')}</td><td>${numTxt(motorData.mdot_ox, 3)} kg/s</td></tr>
                     <tr><td>${T('app.rep.mdotFuel', 'Fuel Mass Flow Rate')}</td><td>${numTxt(motorData.mdot_f, 3)} kg/s</td></tr>
-                    <tr><td>${T('app.rep.propMassTotal', 'Total Propellant Mass')}${fieldTag('propellant_mass_total')}</td><td>${numTxt(motorData.propellant_mass_total, 2)} kg</td></tr>
+                    <tr><td>${T('app.rep.propMassTotalLoaded', 'Total Propellant Mass (loaded)')}${fieldTag('propellant_mass_loaded_kg')}</td><td>${numTxt(motorData.propellant_mass_loaded_kg, 2)} kg</td></tr>
                     <tr><td>${T('app.rep.oxMass', 'Oxidizer Mass')}${fieldTag('oxidizer_mass')}</td><td>${numTxt(motorData.oxidizer_mass, 2)} kg</td></tr>
-                    <tr><td>${T('app.rep.fuelMass', 'Fuel Mass')}${fieldTag('fuel_mass')}</td><td>${numTxt(motorData.fuel_mass, 2)} kg</td></tr>
+                    <tr><td>${T('app.rep.fuelMassBurned', 'Burned fuel mass')}${fieldTag('fuel_mass')}</td><td>${numTxt(motorData.fuel_mass, 2)} kg</td></tr>
 ${loadedMassRows(motorData)}
                 </tbody>
             </table>
@@ -3142,6 +3340,7 @@ async function exportReport() {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
+                lang: (typeof window !== 'undefined' && window.I18N) ? window.I18N.lang : undefined,  // V306/RAPOR-DİL: belgenin dili
                 motor_data: motor,
                 analysis_results: currentResults
             })
@@ -3414,6 +3613,29 @@ function sunucuHataMetni(status, contentType, govde) {
     return `HTTP ${status}` + (ozet ? ': ' + ozet : '');
 }
 
+// V306/DİL-ORTAK (M-SIVI-10 ailesi): tarih/saat ARAYÜZ DİLİYLE biçimlenir.
+// ÖLÇÜLDÜ (olcum/sonra_ret_k1.json, EN arayüz): hata kutusunun "Time"
+// satırı argümansız `toLocaleString()` ile tarayıcı yerelinden basılıyordu
+// (EN ekranda "09.11.2026 14:33:30"). Yerel arayüz dilinden seçilir; ay adı
+// yazılı orta biçim gün/ay sırası belirsizliğini kaldırır.
+function arayuzYereli() {
+    return (window.I18N && window.I18N.lang === 'tr') ? 'tr-TR' : 'en-US';
+}
+function arayuzTarihSaati(d) {
+    try {
+        return d.toLocaleString(arayuzYereli(), { dateStyle: 'medium', timeStyle: 'medium' });
+    } catch (e) {
+        return d.toISOString();
+    }
+}
+function arayuzSaati(d) {
+    try {
+        return d.toLocaleTimeString(arayuzYereli(), { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+        return d.toISOString().slice(11, 16);
+    }
+}
+
 function handleError(error, context = 'Unknown') {
     console.group('ERROR DETAILS');
     console.error('Context:', context);
@@ -3428,8 +3650,10 @@ function handleError(error, context = 'Unknown') {
     if (error && error.hrmaReject) {
         // V301/E2: sunucunun ADLI reddi bir iletişim arızası DEĞİLDİR;
         // gerekçe cümlesi olduğu gibi (kesilmeden) mesaj satırına iner.
-        errorSource = TF('app.err.srcRejected', { status: error.hrmaReject.status },
-                         'Input rejected by the server (HTTP {status})');
+        // V306/DİL-ORTAK (UÇUŞ-KÜTLE DEVİR 3, NR-14): ret öneki HTTP kodu
+        // taşımaz (sıvı sayfasının `liq.js.server_rejected` deseni); alanlar
+        // iletide adıyla, makine izi bildirimin ipucunda (HRMAReject.ipucu).
+        errorSource = T('app.err.srcRejected', 'Input rejected by the server');
         userMessage = error.message;
     } else if (error.message.includes('pattern')) {
         errorSource = T('app.err.srcForm', 'Form Validation');
@@ -3486,7 +3710,7 @@ ${T('app.err.message', 'Message')}: ${userMessage}
 
 ${T('app.err.technical', 'Technical Details')}:
 - ${T('common.type', 'Type')}: ${error.constructor.name}${ozgunSatiri}
-- ${T('app.err.time', 'Time')}: ${new Date().toLocaleString()}
+- ${T('app.err.time', 'Time')}: ${arayuzTarihSaati(new Date())}
 
 ${T('app.err.console', 'Check browser console for full stack trace.')}
     `;
@@ -3656,6 +3880,17 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (e) { /* rapor yoksa */ }
             try { displayMotorTable(r.motor); } catch (e) { /* tablo yoksa */ }
             try { if (r.injector) displayInjectorTable(r.injector); } catch (e) { /* tablo yoksa */ }
+            // V306/DİL-ORTAK · NR-17 — İTKİ EĞRİSİ GRAFİĞİ DİLLE YENİDEN ÇİZİLİR.
+            // ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/dil-ortak/olcum/
+            // once_grafik_hybrid_tr.json): TR → EN geçişte 14 grafikten
+            // yalnız `#hybrid_thrust_plot` Türkçe kaldı ("Zamana Göre İtki
+            // ve Oda Basıncı · …", "İtki (N)", "Oda Basıncı (bar)"). KÖK:
+            // başlık ve eksenler T() ile ÇİZİMDEN ÖNCE çevriliyor; grafik
+            // sarmalayıcısının (plotly_dark.js) dil yeniden çizimi saklanan
+            // kaynaktan çevirir, kaynak burada Türkçe metnin kendisi olduğu
+            // için İngilizceye dönemiyordu. Aynı sonuçtan yeniden çizilir
+            // (yeni hesap yok; veri dizileri aynı).
+            try { renderHybridThrustCurve(); } catch (e) { /* panel yoksa */ }
             // P14M3-04: burada `r.injector && r.injector.warnings` vardı —
             // motor uyarıları dil değişiminde ekrandan siliniyordu (ölçüldü:
             // hibrit varsayılan koşumda 5 kayıt, 4'ü kritik -> 0). Hesap
@@ -4309,9 +4544,9 @@ function stlPencereMetni(cad) {
     return ' ' + TF('app.msg.stlWindow',
         { count: cad.stl_files.length,
           minutes: dakika,
-          at: bitis.toLocaleTimeString() },
+          at: arayuzSaati(bitis) },
         'The {count} STL download links stay alive for {minutes} min (until '
-        + '{at}); after that they return 410 and the package must be '
+        + '{at}); after that the links expire and the package must be '
         + 'generated again.');
 }
 
@@ -4431,10 +4666,34 @@ async function calculateTrajectory() {
                 'The motor form has changed since the last calculation ({fields}); the initial mass comes from that calculation, so thrust and propellant mass would belong to two different motors. Press Calculate first, then run the trajectory.'));
         }
         
+        // V306/UÇUŞ-2 (M-HIBRIT-1/-24, M-HIBRIT-34) — İTKİ MOTORUN UÇUŞ
+        // İTKİSİNDEN (flight_vehicle.motor_flight_thrust, TEK KURAL). Eskiden
+        // gövde formun tasarım noktasını (thrust × burn_time, ör. L3
+        // 10 500 N × 27 s = 283 500 N·s) taşıyordu; motorun kendi çözümü
+        // 270 330 N·s idi ve 6-DOF başka bir eğri uçuruyordu. Şimdi üç uçuş
+        // (bu panel, 6-DOF, Fırlatma Sahası) aynı eğriyi, aynı impulsu ve
+        // aynı irtifa düzeltmesini (A_e, p_ref) kullanır. N₂O kendinden
+        // basınçlı tankta motorun boşalma çözümü uçar; tankta kalan itici
+        // araçla birlikte uçtuğu için bitiş kütlesine eklenir (kalkış
+        // kütlesi = kuru + yüklenen itici, değişmez).
+        const ucusAraci = (window.FlightHandoff && FlightHandoff.vehicleReady)
+            ? await FlightHandoff.vehicleReady(window.currentResults) : null;
+        const ucus = ucusAraci && ucusAraci.flight_thrust;
+        if (!ucus || !(ucus.thrust_curve || (ucus.thrust > 0 && ucus.burn_time > 0))) {
+            throw new Error(T('app.msg.trajNoFlightThrust',
+                'The flight thrust of the calculated motor could not be read, so no trajectory was computed. Press Calculate again.'));
+        }
+        // V306/UÇUŞ-KÜTLE (kalem 1): yanma sonunda araçla uçan itici (yüklü −
+        // harcanan: yanmayan tane şeridi + tankta kalan) HER itki kaynağında
+        // bitiş kütlesine eklenir; eski kayıtta alan yoksa eski kural.
+        const tanktaKalan = (typeof ucus.propellant_residual_kg === 'number')
+            ? ucus.propellant_residual_kg
+            : ((ucus.curve_source === 'motor_blowdown'
+                && ucus.propellant_loaded_kg > 0 && ucus.propellant_consumed_kg > 0)
+                ? ucus.propellant_loaded_kg - ucus.propellant_consumed_kg : 0);
         const requestData = {
-            ...baseData,
             initial_mass: initialMass,
-            final_mass: finalMass,
+            final_mass: finalMass + tanktaKalan,
             drag_coefficient: dragCoeff,
             reference_area: refArea,
             trajectory_start_altitude: trajAltStart,
@@ -4443,7 +4702,27 @@ async function calculateTrajectory() {
             launch_angle: launchAngle,
             wind_speed: windSpeed
         };
-        
+        // Formdaki atış/kurtarma koşulları (varsa) aynen gider; motorun
+        // tasarım noktası alanları (thrust, burn_time, total_impulse, isp)
+        // GİTMEZ — uçan itki yukarıdaki tek kaynaktır.
+        ['wind_direction', 'launch_latitude', 'launch_longitude', 'parachute_area',
+         'parachute_cd', 'parachute_deploy_delay', 'launch_rail_length'].forEach(function (k) {
+            const v = baseData[k];
+            if (v !== undefined && v !== null && v !== '') requestData[k] = v;
+        });
+        if (ucus.thrust_curve) {
+            requestData.thrust_curve = ucus.thrust_curve;
+        } else {
+            requestData.thrust = ucus.thrust;
+            requestData.burn_time = ucus.burn_time;
+        }
+        if (ucus.nozzle_exit_area_m2 > 0) {
+            requestData.nozzle_exit_area = ucus.nozzle_exit_area_m2;
+            if (ucus.thrust_reference_pressure_pa > 0) {
+                requestData.thrust_reference_pressure = ucus.thrust_reference_pressure_pa;
+            }
+        }
+
         // Call trajectory analysis API
         const response = await fetch('/api/trajectory-analysis', {
             method: 'POST',
@@ -4462,6 +4741,16 @@ async function calculateTrajectory() {
         
         if (result.status === 'error' || result.error) {
             throw new Error(result.error || T('app.msg.trajFailed', 'Trajectory analysis failed'));
+        }
+
+        // V306/UÇUŞ-2: künye (uçan itki, irtifa düzeltmesi, yük çarpanı,
+        // düzlemsel model + atış açısı); kalkış yoksa grafik yerine hüküm.
+        const _cizimEl = document.getElementById('trajectory_plot');
+        const _kunye = (window.FlightHandoff && FlightHandoff.renderTrajectoryNotes && _cizimEl)
+            ? FlightHandoff.renderTrajectoryNotes(_cizimEl, result, ucus.curve_source, ucus) : { draw: true };
+        if (!_kunye.draw) {
+            if (window.Plotly && Plotly.purge && _cizimEl) { try { Plotly.purge(_cizimEl); } catch (e) { /* yok */ } }
+            throw new Error(_kunye.message);
         }
         
         // Display trajectory plot
@@ -4822,9 +5111,12 @@ function displayInjectorTable(injectorData, yalnizSatirlar) {
     }
     // P11B2-23: uç boşaltma katsayısının DAYANAĞINI da yayımlıyor
     // (`discharge_coefficient_basis`); tabloda okunmuyordu.
+    // 3.0.6 (9 Kas): dayanak cümlesi TR ekranda İngilizce kalıyordu —
+    // 'Pressure Drop Basis' satırı gibi sunucu çeviri kanalından (SRV;
+    // tanınmazsa AYNEN).
     if (injectorData.discharge_coefficient_basis) {
         injectorRows.push([T('app.rep.cdBasis', 'Discharge Coefficient Basis'),
-                           String(injectorData.discharge_coefficient_basis), '-']);
+                           SRV(String(injectorData.discharge_coefficient_basis)), '-']);
     }
     
     if (yalnizSatirlar) {

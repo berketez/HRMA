@@ -470,7 +470,17 @@ class TestP5B219UQBandKapisi:
 #: LIQUID_TNT_LOX_RP1_LAUNCH_BREAK_LB 500000); 1e-300 tabanı ve yerel
 #: KG_PER_LB literali main 64c2713fd'de kalktı. GÖVDE mandalı DEĞİŞMEDİ
 #: (gövde içinde 50 farklı değer, küme aynı).
-P5B218_DEGISMEZ_TAVANI = 258
+#: V306 (3.0.6, ana model 9 Kas): 258 / 71 -> 266 / 71. ÖLÇÜLDÜ
+#: (docs/scofield/raw/OH/V306/ana-model/olcum/safety_mandal/; v3.0.5 ⟷ bugün
+#: satır satır fark). Yeni FARKLI değer YOK. Gelen on değişmez: adlı
+#: ``PRESSURE_LAYER_TEXT_CHARS_MAX`` (600), üç cebirsel işaret denetimi
+#: (> 0 / <= 0), basınç katmanında çap = 2 × yarıçap (×3), m -> mm ``1e3``
+#: (net ×3); giden: elle yazılmış merdiven çarpanları 1,25 / 1,5 / 2,0
+#: (GÜVENLİK NR-19 / SIVI-KÜTLE: S-080A / 5012C tablosu). Kaynağında
+#: kaldırılan iki adsız sayı: ``anahtar[:60]`` (katalogda doğrulanmış
+#: anahtar) ve ölü ``max(mdp, 1e-6)`` taban kırpması. GÖVDE mandalı
+#: DEĞİŞMEDİ (küme aynı).
+P5B218_DEGISMEZ_TAVANI = 266
 P5B218_FARKLI_DEGER_TAVANI = 71
 
 #: FONKSİYON GÖVDESİNDEKİ farklı sayısal değer mandalı (ÖH D27 fix-26a).
@@ -522,7 +532,13 @@ P5B218_GOVDE_FARKLI_DEGERLER = frozenset({
 #: pozitif mi; ce7d13e1b) ve ``kayit_degeri > 0`` (motorun impuls kaydı
 #: pozitif mi; 537bf587b). Kalibrasyon literali (0/1 dışı) sayısı
 #: DEĞİŞMEDİ: 0.
-P5B218_ESIK_TAVANI = 23
+#: V306 (3.0.6, ana model 9 Kas): 23 -> 26. ÖLÇÜLDÜ — gelen ÜÇ literalin
+#: üçü de ``0`` ve üçü de basınç taşıyan katmanın cebirsel işaret
+#: denetimi: ``if mdp is not None and mdp > 0`` (katman MDP'si pozitifse
+#: yazılır), ``if _f is not None and _f > 0`` ve katman sayılarının
+#: ``<= 0`` reddi (fail-closed: katman kurulmaz). Kalibrasyon literali
+#: (0/1 dışı) sayısı DEĞİŞMEDİ: 0.
+P5B218_ESIK_TAVANI = 26
 
 
 def _safety_analysis_agaci():

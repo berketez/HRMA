@@ -54,14 +54,24 @@
     const ENDPOINT = '/api/uncertainty-analysis';
     const PANEL_ID = 'uncertainty';
 
+    // V306/HIZ (M-SIVI-19) — SEVİYE ETİKETİNDE KAYNAKSIZ SÜRE VAADİ YOK.
+    // ÖLÇÜLDÜ (mühendis turu L3, sıvı 5 kN): "Hızlı Tarama (~10-30 s)" 38 dk'da
+    // bitmedi; taban 700a67586'da sıvı örneği boş makinede 5-13 s
+    // (docs/scofield/raw/OH/V306/hiz/olcum_uq_ornek_once_n5.json). Süre motor
+    // tipine, tasarıma ve makine yüküne bağlıdır; etiket artık yalnız seviyenin
+    // ÖRNEK SAYISINI söyler (çözücünün LEVEL_BUDGETS tablosu; bekçi
+    // tests/test_v306_hiz.py sayıları o tabloya kilitler). Süre koşu sırasında
+    // ÖLÇÜLÜR ve gösterilir.
     const LEVELS = [
-        ['fast', 'Fast Screening (~10-30 s)', 'uq.levelFast'],
-        ['engineering', 'Engineering (~1-3 min)', 'uq.levelEng'],
-        ['high_fidelity', 'High-Fidelity (~10-15 min)', 'uq.levelHigh'],
+        ['fast', 'Fast Screening (200 samples)', 'uq.levelFast'],
+        ['engineering', 'Engineering (1000 samples)', 'uq.levelEng'],
+        ['high_fidelity', 'Extended (3000 samples)', 'uq.levelHigh'],
     ];
 
-    const POLL_INTERVAL_MS = 2000;
-    const POLL_MAX_TRIES = 900;        // 2 s x 900 = 30 dk emniyet tavanı
+    // Yoklama aralığı (yerel sunucu; yoklama yalnız sayaç okur, hesap yapmaz).
+    // İstemci tarafında süre tavanı YOK: koşunun süre bütçesi sunucudadır ve
+    // aşıldığında iş adıyla durur (stopped.reason = time_budget_exceeded).
+    const POLL_INTERVAL_MS = 1000;
 
     // İnsan-okunur çıktı adları (sözleşmedeki anahtar kümesi; bilinmeyen
     // anahtar ad dönüşümüyle gösterilir — uydurma birim YOK)
@@ -90,6 +100,11 @@
 
     let pollTimer = null;
     let lastData = null;
+    // V306/HIZ: koşan iş {jobId, gonderilen (girdi anlık görüntüsü), ...} ve
+    // ekrandaki sonucun ait olduğu girdiler (bayat sonuç denetimi, NR-9).
+    let aktifIs = null;
+    let gosterilenGirdi = null;
+    let gosterilenOkunmayan = [];
 
     function escapeHtml(s) {
         return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -166,7 +181,14 @@
                         data-i18n="panel.uncertainty.btnRun">${
                         T('panel.uncertainty.btnRun', 'Run Uncertainty Analysis')}</button>
                 </div>
+                <div class="form-group">
+                    <button class="btn" type="button" id="uq_cancel" style="display:none;"
+                        data-i18n="panel.uncertainty.btnCancel">${
+                        T('panel.uncertainty.btnCancel', 'Cancel Analysis')}</button>
+                </div>
             </div>
+            <progress id="uq_progress" max="1" value="0"
+                style="display:none; width:100%; height:8px; margin:8px 0 0;"></progress>
             <p style="font-family:var(--hd-mono, monospace); font-size:0.7rem;
                 color:var(--hd-ink-dim, #7d97a5); margin:6px 0 0;"
                 data-i18n="panel.uncertainty.intro">${T('panel.uncertainty.intro',
@@ -191,6 +213,8 @@
         const status = document.getElementById('ad_status_' + PANEL_ID);
         sec.insertBefore(holder.firstElementChild, status);
         document.getElementById('uq_run').addEventListener('click', run);
+        const iptalBtn = document.getElementById('uq_cancel');
+        if (iptalBtn) iptalBtn.addEventListener('click', cancelRun);
         return true;
     }
 
@@ -213,12 +237,25 @@
     // ------------------------------------------------------------------
     // Durum satırı yardımcıları
     // ------------------------------------------------------------------
+    // V306/HIZ: durma / bayat iletisi dil değişiminde yeni dilde yeniden
+    // kurulur (sayılar saklanan uç yanıtından; yeni istek yok).
+    let sonDurum = null;
     function setStatus(text, kind) {
+        sonDurum = null;
         const status = document.getElementById('ad_status_' + PANEL_ID);
         if (!status) return;
         status.textContent = text;
         status.style.color = kind === 'err'
             ? 'var(--hd-red, #ff5d73)' : 'var(--hd-ink-dim, #7d97a5)';
+    }
+    function durumYaz(uret, kind) {
+        setStatus(uret(), kind);
+        sonDurum = { uret: uret, kind: kind };
+    }
+    if (window.I18N && typeof window.I18N.onChange === 'function') {
+        window.I18N.onChange(function () {
+            if (sonDurum) durumYaz(sonDurum.uret, sonDurum.kind);
+        });
     }
 
     function stopPolling() {
@@ -229,8 +266,128 @@
     }
 
     // ------------------------------------------------------------------
-    // Çalıştırma — fast/engineering senkron, high_fidelity iş kuyruğu
+    // Çalıştırma — V306/HIZ (M-SIVI-19): HER seviye iş kuyruğunda
     // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (mühendis turu L3): "Hızlı Tarama" eşzamanlı bir istekti;
+    // 38 dakika boyunca panel yalnız "ÇALIŞIYOR…" dedi — ilerleme, iptal ve
+    // süre sınırı yoktu; motor formu L3 → L4 → RL10 → F-1 değişirken panel
+    // L3 koşusunu "çalışıyor" göstermeye devam etti. Artık:
+    //  * istek `async: true` ile gider; uç 202 + iş kimliği + örnek sayısı
+    //    döner; panel GERÇEK sayacı yoklar (tamamlanan örnek / toplam);
+    //    kalan süre yalnız ucun ÖLÇTÜĞÜ örnek süresinden gösterilir (ilk
+    //    örnek bitmeden süre tahmini yazılmaz);
+    //  * "Analizi İptal Et" koşuyu bir sonraki örnek sınırında durdurur;
+    //  * süre bütçesi aşılırsa iş ADIYLA durur ve kaç örneğin tamamlandığı
+    //    yazılır; yarım örnek kümesi dağılım olmadığı için sonuç verilmez;
+    //  * koşu sırasında motor formu değişirse gelen sonuç ÇİZİLMEZ (eski
+    //    girdilere aittir), nedeni yazılır (BAYAT NR-9 deseni).
+    function okunmayanAlanlar(liste) {
+        const haric = {};
+        (Array.isArray(liste) ? liste : []).forEach(function (f) {
+            const ad = (typeof f === 'string') ? f : (f && f.field);
+            if (ad) haric[ad] = true;
+        });
+        return haric;
+    }
+
+    // Gönderilen girdi anlık görüntüsü ile formdaki girdiler arasında değişen
+    // motor alanları (çözücünün okumadığını beyan ettiği alanlar hariç).
+    function degisenAlanlar(gonderilen, simdi, okunmayan) {
+        if (!gonderilen || typeof gonderilen !== 'object') return null;
+        const haric = okunmayanAlanlar(okunmayan);
+        const s2 = simdi || {};
+        return Object.keys(Object.assign({}, gonderilen, s2)).filter(function (k) {
+            return !haric[k] && JSON.stringify(gonderilen[k]) !== JSON.stringify(s2[k]);
+        }).sort();
+    }
+
+    function alanEtiketi(ad) {
+        return (window.HRMAReject && typeof window.HRMAReject.etiket === 'function'
+                && window.HRMAReject.etiket(ad)) || ad;
+    }
+
+    // Süre metni (saniye → "12 sn" / "3 dk 05 sn" / "1 sa 02 dk"); sayı
+    // biçimi ve birimler etkin dilden.
+    function sureMetni(sn) {
+        if (typeof sn !== 'number' || !isFinite(sn) || sn < 0) return '—';
+        if (sn < 60) {
+            // Saniyenin altı iki ondalıkla (ör. ölçülen örnek süresi 0,09 sn).
+            return U.tf('panel.uncertainty.durSec',
+                { s: U.num(sn, sn < 1 ? 2 : (sn < 10 ? 1 : 0)) }, '{s} s');
+        }
+        const top = Math.round(sn);
+        if (top < 3600) {
+            return U.tf('panel.uncertainty.durMin',
+                { m: Math.floor(top / 60), s: String(top % 60).padStart(2, '0') },
+                '{m} min {s} s');
+        }
+        return U.tf('panel.uncertainty.durHour',
+            { h: Math.floor(top / 3600),
+              m: String(Math.floor((top % 3600) / 60)).padStart(2, '0') },
+            '{h} h {m} min');
+    }
+
+    function kontrolleriAyarla(kosuyor) {
+        const btn = document.getElementById('uq_run');
+        const iptal = document.getElementById('uq_cancel');
+        const cubuk = document.getElementById('uq_progress');
+        if (btn) btn.disabled = !!kosuyor;
+        if (iptal) {
+            iptal.style.display = kosuyor ? '' : 'none';
+            iptal.disabled = false;
+        }
+        if (cubuk && !kosuyor) cubuk.style.display = 'none';
+    }
+
+    // İlerleme çubuğu YALNIZ ucun sayacından beslenir (sahte ilerleme yok).
+    function cubuguGuncelle(done, total) {
+        const cubuk = document.getElementById('uq_progress');
+        if (!cubuk) return;
+        if (!(Number.isFinite(done) && Number.isFinite(total) && total > 0)) {
+            cubuk.style.display = 'none';
+            return;
+        }
+        cubuk.max = total;
+        cubuk.value = Math.min(done, total);
+        cubuk.style.display = 'block';
+    }
+
+    // Yoklama gövdesinden durum satırı (gerçek sayaç + ölçülmüş süre).
+    function ilerlemeMetni(st, formDegisti) {
+        const done = st.samples_done, total = st.samples_total;
+        let metin;
+        if (st.state === 'queued') {
+            metin = U.tf('panel.uncertainty.queued', { total: total },
+                'Queued — {total} samples; waiting for a free worker');
+        } else if (Number.isFinite(done) && Number.isFinite(total)
+                   && total > 0 && done >= total) {
+            metin = U.tf('panel.uncertainty.statsRunning', { done: done, total: total },
+                '{done} of {total} samples complete — computing the statistics…');
+        } else if (Number.isFinite(st.per_sample_s) && Number.isFinite(st.eta_s)) {
+            metin = U.tf('panel.uncertainty.progressEta',
+                { done: done, total: total, elapsed: sureMetni(st.elapsed_s),
+                  per: sureMetni(st.per_sample_s), eta: sureMetni(st.eta_s) },
+                '{done} of {total} samples · elapsed {elapsed} · measured {per} per sample · about {eta} remaining');
+        } else {
+            metin = U.tf('panel.uncertainty.progressNoEta',
+                { done: done, total: total, elapsed: sureMetni(st.elapsed_s) },
+                '{done} of {total} samples · elapsed {elapsed} · the remaining time is shown once a sample has been timed');
+        }
+        if (formDegisti) {
+            metin += ' — ' + T('panel.uncertainty.formChangedRunning',
+                'the motor form changed after this run started: its result will belong '
+                + 'to the earlier inputs and will be discarded');
+        }
+        return metin;
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            clearTimeout(pollTimer);
+            pollTimer = null;
+        }
+    }
+
     async function run() {
         const root = document.getElementById('ad_root_' + PANEL_ID);
         const btn = document.getElementById('uq_run');
@@ -247,19 +404,28 @@
         const level = levelEl.value;
         const seed = seedEl ? parseInt(seedEl.value, 10) : 42;
 
+        // Önceki koşu hâlâ sürüyorsa önce o durdurulur (iki iş üst üste
+        // kuyruğu doldurmasın; eski işin sonucu zaten çizilmeyecek).
+        if (aktifIs) iptalIstegi(aktifIs.jobId);
         stopPolling();
-        btn.disabled = true;
+        aktifIs = null;
+        kontrolleriAyarla(true);
+        const iptalBtn = document.getElementById('uq_cancel');
+        if (iptalBtn) iptalBtn.disabled = true;     // iş kimliği gelene dek
         root.style.display = 'none';
-        setStatus(level === 'high_fidelity'
-            ? T('panel.uncertainty.submitting', 'SUBMITTING HIGH-FIDELITY JOB…')
-            : T('panel.uncertainty.sampling', 'RUNNING MONTE CARLO SAMPLING…'));
+        cubuguGuncelle(null, null);
+        const durumEl = document.getElementById('ad_status_' + PANEL_ID);
+        if (durumEl && durumEl.removeAttribute) durumEl.removeAttribute('data-onceki-tasarim');
+        setStatus(T('panel.uncertainty.submitting', 'SUBMITTING THE UNCERTAINTY RUN…'));
 
         const payload = {
             motor_type: window.AnalysisDock.getMotorType(),
             level: level,
             seed: Number.isFinite(seed) ? seed : 42,
             inputs: inputs,
+            async: true,
         };
+        const gonderilen = JSON.parse(JSON.stringify(inputs));
 
         try {
             const resp = await fetch(ENDPOINT, {
@@ -293,70 +459,186 @@
                     }));
                 }
                 // Hata mesajı (örnek-#0 tutarlılık dahil) OLDUĞU GİBİ gösterilir
-                throw new Error((data && data.error) || ('HTTP ' + resp.status));
+                throw new Error((data && data.error) || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status)));
             }
             if (data.status === 'queued' && data.job_id) {
-                pollJob(data.job_id, 0, btn, root);
+                aktifIs = {
+                    jobId: data.job_id,
+                    gonderilen: gonderilen,
+                    okunmayan: data.inputs_not_read || [],
+                };
+                if (iptalBtn) iptalBtn.disabled = false;
+                cubuguGuncelle(0, data.samples_total);
+                setStatus(ilerlemeMetni({ state: 'queued', samples_done: 0,
+                                          samples_total: data.samples_total }, false));
+                pollJob(aktifIs, root);
                 return;
             }
-            finish(data, btn, root);
+            // Eşzamanlı gövde (async'i tanımayan uç): doğrudan çiz.
+            sonucuGoster(data, root, gonderilen, data.inputs_not_read);
         } catch (err) {
+            kontrolleriAyarla(false);
             setStatus(U.tf('common.errorPrefix', { message: err.message },
                            'ERROR: {message}'), 'err');
-            btn.disabled = false;
         }
     }
 
-    function pollJob(jobId, tries, btn, root) {
-        if (tries >= POLL_MAX_TRIES) {
-            setStatus(U.tf('panel.uncertainty.jobTimeout', { id: jobId },
-                'ERROR: high-fidelity job timed out (still running server-side, job id {id}).'),
-                'err');
-            btn.disabled = false;
-            return;
-        }
+    function iptalIstegi(jobId) {
+        // Rota literal yazılır (uç envanteri bekçisi ürün yüzünü literalden
+        // okur: tests/test_d18_bekci_cevirisi_a1.py).
+        const kimlik = encodeURIComponent(jobId);
+        try {
+            return fetch(`/api/uncertainty-analysis/jobs/${kimlik}/cancel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            }).catch(function () { return null; });
+        } catch (e) { return Promise.resolve(null); }
+    }
+
+    function cancelRun() {
+        if (!aktifIs) return;
+        const iptal = document.getElementById('uq_cancel');
+        if (iptal) iptal.disabled = true;
+        setStatus(T('panel.uncertainty.cancelling',
+            'Cancelling — the run stops after the sample in progress…'));
+        iptalIstegi(aktifIs.jobId);
+        // Yoklama sürer: işin GERÇEKTEN durduğu (state = cancelled) ve kaç
+        // örneğin tamamlandığı uçtan okunur.
+    }
+
+    function pollJob(is, root) {
         pollTimer = setTimeout(async function () {
+            if (aktifIs !== is) return;            // yerine yeni koşu geldi
             try {
-                const resp = await fetch('/api/jobs/' + encodeURIComponent(jobId));
-                let data = null;
-                try { data = await resp.json(); } catch (e) { data = null; }
-                if (!resp.ok || !data || data.status !== 'success' || !data.job) {
-                    throw new Error((data && data.error) || ('HTTP ' + resp.status));
+                const kimlik = encodeURIComponent(is.jobId);
+                const resp = await fetch(`/api/uncertainty-analysis/jobs/${kimlik}`);
+                let st = null;
+                try { st = await resp.json(); } catch (e) { st = null; }
+                if (aktifIs !== is) return;
+                if (st && st.error === 'unknown_uncertainty_job') {
+                    throw new Error(T('panel.uncertainty.jobUnknown',
+                        'the server no longer knows this run (it was restarted or the '
+                        + 'record expired); run the analysis again'));
                 }
-                const job = data.job;
-                if (job.state === 'done') {
-                    finish(job.result, btn, root);
+                if (!st || (!resp.ok && !st.stopped)) {
+                    throw new Error((st && (st.message || st.error)) || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status)));
+                }
+                cubuguGuncelle(st.samples_done, st.samples_total);
+                if (st.stopped || st.state === 'cancelled') {
+                    // Kuyrukta beklerken iptal edilen iş hiç örnek çekmedi:
+                    // sayaç ucun kendi kaydından (0 / toplam).
+                    aktifIs = null;
+                    kontrolleriAyarla(false);
+                    const durma = st.stopped || {
+                        reason: 'cancelled', samples_done: st.samples_done,
+                        samples_total: st.samples_total };
+                    durumYaz(function () { return durmaMetni(durma); }, 'err');
                     return;
                 }
-                if (job.state === 'error') {
-                    throw new Error(job.error || 'job failed');
+                if (st.state === 'done') {
+                    aktifIs = null;
+                    kontrolleriAyarla(false);
+                    sonucuGoster(st.result, root, is.gonderilen,
+                                 (st.result && st.result.inputs_not_read) || is.okunmayan);
+                    return;
                 }
-                // ÖH D25 / P11B2-12 — SAHTE İLERLEME YASAĞI: `|| 0`
-                // yedeği, uç `progress` alanını yayımlamadığında ekrana
-                // "— 0%" yazıyordu. Yüzde yalnız uç gerçekten bir oran
-                // bildirdiğinde basılır; bildirmezse durum yüzdesiz
-                // söylenir (ilerleme UYDURULMAZ).
-                if (Number.isFinite(job.progress)) {
-                    setStatus(U.tf('panel.uncertainty.jobProgress',
-                        { state: job.state.toUpperCase(),
-                          pct: Math.round(100 * job.progress) },
-                        'HIGH-FIDELITY JOB {state} — {pct}%'));
-                } else {
-                    setStatus(U.tf('panel.uncertainty.jobProgressNoPct',
-                        { state: job.state.toUpperCase() },
-                        'HIGH-FIDELITY JOB {state} — progress not reported'));
+                if (st.state === 'error') {
+                    aktifIs = null;
+                    kontrolleriAyarla(false);
+                    setStatus(U.tf('common.errorPrefix',
+                        { message: st.message || st.error || st.state },
+                        'ERROR: {message}'), 'err');
+                    return;
                 }
-                pollJob(jobId, tries + 1, btn, root);
+                const fark = degisenAlanlar(is.gonderilen, collectInputs(), is.okunmayan);
+                const iptalBekliyor = (document.getElementById('uq_cancel') || {}).disabled;
+                if (!iptalBekliyor) setStatus(ilerlemeMetni(st, !!(fark && fark.length)));
+                pollJob(is, root);
             } catch (err) {
+                if (aktifIs !== is) return;
+                aktifIs = null;
+                kontrolleriAyarla(false);
                 setStatus(U.tf('common.errorPrefix', { message: err.message },
                                'ERROR: {message}'), 'err');
-                btn.disabled = false;
             }
         }, POLL_INTERVAL_MS);
     }
 
+    // Adlı durma raporu (iptal / süre bütçesi) — sayılar ucun sayacından.
+    function durmaMetni(d) {
+        if (d && d.reason === 'time_budget_exceeded') {
+            return U.tf('panel.uncertainty.stoppedBudget',
+                { done: d.samples_done, total: d.samples_total,
+                  budget: sureMetni(d.time_budget_s) },
+                'The uncertainty run exceeded its {budget} time budget and stopped after '
+                + '{done} of {total} samples. No statistics were published: a partly drawn '
+                + 'sample set is not a distribution. Choose a level with fewer samples.');
+        }
+        return U.tf('panel.uncertainty.stoppedCancelled',
+            { done: (d && d.samples_done), total: (d && d.samples_total) },
+            'The uncertainty run was cancelled after {done} of {total} samples. No '
+            + 'statistics were published: a partly drawn sample set is not a distribution.');
+    }
+
+    // Ekrandaki sonucu temizler ve nedenini yazar (data-onceki-tasarim).
+    function bayatTemizle(uret) {
+        const root = document.getElementById('ad_root_' + PANEL_ID);
+        if (root) {
+            U.purgePlots(root);
+            root.innerHTML = '';
+            root.style.display = 'none';
+        }
+        lastData = null;
+        gosterilenGirdi = null;
+        gosterilenOkunmayan = [];
+        durumYaz(uret);
+        const status = document.getElementById('ad_status_' + PANEL_ID);
+        if (status) status.setAttribute('data-onceki-tasarim', '1');
+    }
+
+    function sonucuGoster(data, root, gonderilen, okunmayan) {
+        // NR-9: koşu sırasında form değiştiyse sonuç ekrandaki motora ait
+        // değildir — çizilmez, nedeni alanlarıyla yazılır.
+        const fark = degisenAlanlar(gonderilen, collectInputs(), okunmayan);
+        if (fark && fark.length) {
+            bayatTemizle(function () {
+                return U.tf('panel.uncertainty.staleDuringRun',
+                    { fields: fark.map(alanEtiketi).join(', ') },
+                    'The motor form changed while the analysis was running ({fields}); its '
+                    + 'result belonged to the earlier inputs and was discarded. Run the '
+                    + 'analysis again.');
+            });
+            return;
+        }
+        finish(data, document.getElementById('uq_run'), root);
+        if (lastData === data) {
+            gosterilenGirdi = gonderilen;
+            gosterilenOkunmayan = okunmayan || [];
+            const status = document.getElementById('ad_status_' + PANEL_ID);
+            if (status) status.removeAttribute('data-onceki-tasarim');
+        }
+    }
+
+    // Ekrandaki sonuç hâlâ formdaki girdilere mi ait? Motor yeniden
+    // hesaplandığında (güverte kancası) ve proje açıldığında denetlenir.
+    function gosterilenSonucuDenetle() {
+        if (!gosterilenGirdi || !lastData) return;
+        const fark = degisenAlanlar(gosterilenGirdi, collectInputs(), gosterilenOkunmayan);
+        if (!fark || !fark.length) return;
+        bayatTemizle(function () {
+            return T('panel.uncertainty.staleDesign',
+                'The motor form changed; the previous uncertainty result belonged to the '
+                + 'earlier inputs and was cleared. Run the analysis again.');
+        });
+    }
+    document.addEventListener('hrma:project-applied', function () {
+        // Olay geri yükleme sürerken yayılır; alanlar yerleşince denetlenir.
+        setTimeout(gosterilenSonucuDenetle, 0);
+    });
+
     function finish(data, btn, root) {
-        btn.disabled = false;
+        if (btn) btn.disabled = false;
         if (!data || data.status !== 'ok' || !data.outputs) {
             setStatus(U.tf('common.errorPrefix',
                 { message: (data && data.error)
@@ -410,9 +692,39 @@
     }
 
     /* Dejenere çıktı kartı: tek değer + ucun kendi σ'sı. Band, medyan
-       yorumu ve yüzdelik köşeli parantezi YOKTUR. */
+       yorumu ve yüzdelik köşeli parantezi YOKTUR.
+
+       V306/SAYI (NR-5): σ = 0'ın NEDENİ ucun kendi beyanından okunur.
+       ``zero_spread_reason = 'design_target'`` → çıktı (itki) tasarım
+       hedefidir; ``sampled === false`` → çıktı bu seviyede örneklenmedi
+       (hibrit toplam impuls; uç nominali manşetle aynı tanımla verir) ve
+       kartın sayısı o NOMİNALDİR (P50 yoktur, uydurulmaz). Tanınmayan
+       gerekçe genel "dağılım yok" cümlesine düşer. */
+    function degenerateNote(o) {
+        if (o.sampled === false
+                && o.not_sampled_reason === 'time_march_off_at_this_level') {
+            return T('panel.uncertainty.notSampledMarch',
+                'not sampled at this level: the headline total impulse is the '
+                + 'integral of the time-marched thrust curve (it carries the '
+                + 'O/F shift); this level does not march each sample, so no '
+                + 'distribution is drawn. The nominal is the headline value; '
+                + 'the Extended level samples it.');
+        }
+        if (o.zero_spread_reason === 'design_target') {
+            return T('panel.uncertainty.zeroSpreadDesignTarget',
+                'no distribution: thrust is a design target - the motor sizes '
+                + 'its mass flow to deliver it, so the sampled parameters change '
+                + 'the mass flow and Isp, not the thrust (std = 0)');
+        }
+        return T('panel.uncertainty.noDistribution',
+            'no distribution in this run — every sample returned the '
+            + 'same value (std = 0); this output is not sensitive to '
+            + 'any of the sampled parameters');
+    }
+
     function degenerateCard(key, o) {
         const name = escapeHtml(labelFor(key));
+        const ornekDisi = (o.sampled === false);
         return `<div data-uq-degenerate="1"
                 style="border:1px dashed var(--hd-line, rgba(0,229,255,0.14));
                 border-radius:var(--hd-radius-sm, 8px); padding:10px 14px;
@@ -423,16 +735,14 @@
                  letter-spacing:0.08em;">${name}</div>
             <div style="font-size:1.2rem; font-family:var(--hd-mono);
                  color:var(--hd-ink-dim, #7d97a5); margin-top:2px;">
-                ${fmtVal(o.p50)}</div>
+                ${fmtVal(ornekDisi ? o.nominal : o.p50)}</div>
             <div style="font-family:var(--hd-mono); font-size:0.72rem;
                  color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">
-                ${T('panel.uncertainty.noDistribution',
-                    'no distribution in this run — every sample returned the '
-                    + 'same value (std = 0); this output is not sensitive to '
-                    + 'any of the sampled parameters')}</div>
+                ${escapeHtml(degenerateNote(o))}</div>
             <div style="font-family:var(--hd-mono); font-size:0.7rem;
                  color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">
-                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(o.nominal)} · σ ${fmtVal(o.std)}</div>
+                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(o.nominal)}${
+                    ornekDisi ? '' : ' · σ ' + fmtVal(o.std)}</div>
         </div>`;
     }
 
@@ -461,10 +771,22 @@
         </div>`;
     }
 
+    // V306/HIZ: seviye kartı ham anahtarı ('fast') değil seçicideki etiketi
+    // basar (aynı sözlük anahtarı; parantezdeki örnek sayısı ÖRNEK kartında
+    // zaten var, kartta atılır); tanınmayan seviye adıyla kalır.
+    function seviyeEtiketi(level) {
+        for (let i = 0; i < LEVELS.length; i++) {
+            if (LEVELS[i][0] === level) {
+                return T(LEVELS[i][2], LEVELS[i][1]).replace(/\s*\([^)]*\)\s*$/, '');
+            }
+        }
+        return String(level == null ? '—' : level);
+    }
+
     function summaryCards(data) {
         return '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
             + U.statCard(T('panel.uncertainty.cardLevel', 'LEVEL'),
-                escapeHtml(String(data.level || '—')), '',
+                escapeHtml(seviyeEtiketi(data.level)), '',
                 'info', T('panel.uncertainty.cardLevelTip', 'Requested analysis level'))
             + U.statCard(T('panel.uncertainty.cardSamples', 'SAMPLES'), String(data.n_samples != null
                 ? data.n_samples : '—'), '', 'info',
@@ -1061,6 +1383,11 @@
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [],
         render: render,
+        // V306/HIZ (NR-9): güverte her motor hesabından sonra panellerin
+        // `fromResults`ını çağırır — bu panelin alanı yoktur; kanca yalnız
+        // ekrandaki sonucun hâlâ formdaki girdilere ait olduğunu denetler
+        // (değilse temizler + nedeni yazar) ve öneri döndürmez.
+        fromResults: function () { gosterilenSonucuDenetle(); return null; },
     });
 
     // Test / hata ayıklama: saf yardımcılar (comparative_panel deseni)
@@ -1081,5 +1408,14 @@
         _themeHex: { green: GREEN_HEX, red: RED_HEX, dim: INK_DIM_HEX },
         get lastData() { return lastData; },
         run: run,
+        // V306/HIZ: saf yardımcılar (bekçiler)
+        _ilerlemeMetni: ilerlemeMetni,
+        _durmaMetni: durmaMetni,
+        _degisenAlanlar: degisenAlanlar,
+        _sureMetni: sureMetni,
+        _levels: LEVELS,
+        get aktifIs() { return aktifIs; },
+        cancelRun: cancelRun,
+        _gosterilenSonucuDenetle: gosterilenSonucuDenetle,
     };
 })();

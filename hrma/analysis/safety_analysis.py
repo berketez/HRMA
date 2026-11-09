@@ -82,7 +82,7 @@ def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
 #      çiğnemez, gövdeye gömülü ADSIZ sayı çiğner. Aynı P5B2-05
 #      değişikliğinde bu sayı 55 -> 50 DÜŞTÜ (el tablosu gövdeden çıktı).
 #
-# BUGÜNKÜ ÖLÇÜM (aynı betik, bu ağaç): blok dışında 258 sayısal değişmez,
+# BUGÜNKÜ ÖLÇÜM (aynı betik, bu ağaç): blok dışında 266 sayısal değişmez,
 # 71 farklı değer; gövde içinde 50 farklı değer. (Eşiklerin taşınmasıyla
 # 246 -> 212 ve 58 -> 55 düşmüştü;
 # ÖH D26 / P5B2-05 patlama modelini elle yazılmış Z tablosundan Kinney-Graham
@@ -127,6 +127,17 @@ def _mk_warning(code: str, severity: str = 'info', **params) -> Dict:
 # ``LIQUID_TNT_*`` tablosunun adlı satırları ve iki cebirsel işaret
 # denetimi (``m > 0``, ``kayit_degeri > 0``). Gövde içindeki farklı değer
 # sayısı (50) DEĞİŞMEDİ.
+# V306 (3.0.6; GÜVENLİK NR-19 2294313df, SIVI-KÜTLE kalem 4-5 cc161a932,
+# KATI-KALAN kalem 1) 258 -> 266, farklı değer 71'de KALDI (ana model ölçümü
+# 9 Kas, docs/scofield/raw/OH/V306/ana-model/olcum/safety_mandal/). Gelenler:
+# basınç taşıyan katmanın adlı metin tavanı ``PRESSURE_LAYER_TEXT_CHARS_MAX``
+# (600), üç cebirsel işaret denetimi (``mdp > 0``, ``_f > 0``, katman
+# sayıları ``<= 0`` reddi), katman iç çapı = 2 × yarıçap (üç yer) ve m -> mm
+# çevrimi (``* 1e3``, net üç). Gidenler: eski elle yazılmış basınç merdiveni
+# çarpanları (1,25 / 1,5 / 2,0 — merdiven artık S-080A / NASA-STD-5012C
+# tablosundan) ve ana modelin 9 Kas'ta kaynağında kaldırdığı iki adsız sayı
+# (doğrulanmış malzeme anahtarında ``[:60]`` kırpması, ölü ``max(mdp,
+# 1e-6)`` taban kırpması). Gövde içindeki farklı değer sayısı (50) DEĞİŞMEDİ.
 # Sayı düşerse ya da yükselirse künye BAYATLAR, bu yüzden
 # ``tests/test_d20_yapisal_sistem_a1.py::TestP5B218KunyeOlcumleSenkron``
 # künyeyi ölçümle karşılaştırır.)
@@ -310,6 +321,28 @@ UNRESTRAINED_THRUST_FIELDS = (
     'burnout_velocity_ms',
     'kinetic_energy_j',
     'required_restraint_force_n',
+)
+#: V306 ana model (NK3-S-10, 9 Kas, rc.1 son kullanıcı turu): serbest kalan
+#: motorun ortalama uçuş kütlesi "kasa + itici/2" katı motor bağıntısıdır;
+#: itici motorun KENDİ kasasındadır. Sıvı motorda itici aracın tanklarındadır
+#: ve kopan motorun kütlesi motor kuru kütlesi + bağlı kalan besleme
+#: donanımıdır; bu model onu çözmez. ÖLÇÜLDÜ (örnek sıvı proje): kamara
+#: kabuğu 6,716 kg + tank iticisinin yarısı 150,08 kg = 156,8 kg → "yanma
+#: sonu hızı 4783 m/s, kinetik enerji 1,79 GJ" yayımlanıyordu (motorun 63 kg
+#: kuru kütlesi hesaba girmiyordu). Bu üç sayı sıvıda adıyla geri çekilir;
+#: toplam impuls ve bağlama kuvveti (itki × yapısal SF) motor tipinden
+#: bağımsızdır, kalır.
+LIQUID_PROJECTILE_MASS_NOT_MODELLED_REASON = (
+    'liquid engine: the propellant is in the vehicle tanks, not in the '
+    'engine, so the loose-engine mass is the engine dry mass plus whatever '
+    'feed hardware stays attached, which this model does not resolve; the '
+    'mean flight mass, burnout velocity and kinetic energy were not '
+    'evaluated (the solid-motor relation case + propellant/2 does not apply). '
+    'The required restraint force and the total impulse are published.')
+UNRESTRAINED_LIQUID_FIELDS = (
+    'mean_flight_mass_kg',
+    'burnout_velocity_ms',
+    'kinetic_energy_j',
 )
 
 
@@ -639,6 +672,11 @@ def motor_structural_verdict(motor_type, results) -> Optional[Dict]:
             'safety_factor': (None if withheld else
                               _sonlu_sayi(blok.get('safety_factor'))),
             'basis': blok.get('vessel_status_basis'),
+            # V306/KATI-KALAN (kalem 1): motorun tasarım emniyet katsayısı
+            # (kullanıcı girdisi; akma ölçütü). Güvenlik sekmesinin tasarım
+            # basıncı bu katsayıyla kurulur (hüküm değil, tanım).
+            'design_safety_factor': _sonlu_sayi(
+                blok.get('design_safety_factor')),
         })
     else:   # liquid
         nedenler = [str(n) for n in (blok.get('verdict_withheld_reasons')
@@ -653,6 +691,9 @@ def motor_structural_verdict(motor_type, results) -> Optional[Dict]:
             'basis': (blok.get('safety_factor_basis')
                       or blok.get('model_validity_limit_exceeded_basis')),
         })
+        katman = motor_pressure_bearing_layer(blok)
+        if katman is not None:
+            kayit['pressure_layer'] = katman
     if kayit['status'] not in STRUCTURAL_VERDICT_STATUSES:
         kayit['reasons'] = list(kayit['reasons']) + [
             'unrecognised_status:%s' % kayit['status']]
@@ -661,6 +702,145 @@ def motor_structural_verdict(motor_type, results) -> Optional[Dict]:
     if bolge is not None:
         kayit['wall_zones'] = bolge
     return kayit
+
+
+# ---------------------------------------------------------------------------
+# V306/GÜVENLİK (NR-19) — BASINÇ TAŞIYAN KATMAN MOTORUN KAYDINDAN
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/guvenlik/RAPOR.md NR-19, örnek sıvı
+# LOX/RP-1, P_c 50 bar): Alt Sistemler/Yapısal "çevresel gerilme 370,5 MPa"
+# iki katmanlı rejeneratif cidarın DIŞ KABUĞUNUN (Inconel 718, 2,50 mm, iç
+# yarıçap 118,9 mm = en büyük ceket yarıçapı) SOĞUTUCU basıncı 76,3 bar
+# altındaki çember gerilmesidir (Barlow, dış yarıçap: 7,629 MPa × 121,41 mm /
+# 2,5 mm = 370,5 MPa). GÜVENLİK/Basınçlı Kap ise 5,50 mm'lik YIĞINI (astar
+# 1 mm CuCrZr + 2 mm kanal + 2,5 mm kabuk) oda çapında (133,8 mm) TEK PARÇA
+# Inconel 718 sayıp 1006,5 bar patlama basıncı tahmin ediyordu: gerilme ile
+# patlama basıncı iki ayrı (biri hayali) katmana aitti. Motorun kendi modeli
+# basıncı dış kabuğun taşıdığını söylüyor (NASA SP-8087 s. 26); güvenlik
+# sekmesi aynı katmanı, aynı sıcaklıktaki dayanımla değerlendirir.
+#: Basınç taşıyan katmanın motor sonucundaki rolü.
+PRESSURE_LAYER_ROLE = 'closeout'
+#: Bu katmanın okunduğu cidar modeli (sıvı rejeneratif, V301/L-KABUK).
+PRESSURE_LAYER_WALL_MODEL = 'two_layer_regenerative'
+#: Katman kaydından taşınan sayılar (çözücünün kendi alanları).
+PRESSURE_LAYER_NUMBER_FIELDS = (
+    'thickness_mm', 'inner_radius_mm', 'outer_radius_mm', 'max_temperature_K',
+    'coolant_pressure_bar', 'stress_MPa', 'allowable_MPa', 'safety_factor',
+    'yield_at_temperature_MPa')
+#: Yansıtılan metinlerin kırpma boyu (yanıt boyunu sınırlar; sayı üretmez).
+PRESSURE_LAYER_TEXT_CHARS_MAX = 600
+#: V306/SIVI-KÜTLE (kalem 3, SIVI-SOĞUTMA DEVİR a) — motorun dış kabuğu
+#: YAYIMLAMADIĞI durumlar. ÖLÇÜLDÜ (L2 metan rejeneratif, Pc 20 / besleme
+#: 32 bar; marş doyma eğrisine düşer, devre çözülmez): motor dış kabuk
+#: hükmünü geri çekiyor (``verdict = 'withheld'``,
+#: ``cooling_circuit_status = 'not_solved'``), güvenlik sekmesi ise aynı
+#: 2,0 mm kabuğu kalınlığıyla değerlendirip "PASS, patlama payı 11,43"
+#: basıyordu. GÜVENLİK NR-3 (a) ilkesi: güverte motorun kendi sonucunu
+#: okur. Kod -> hangi motor kararının okunduğu.
+PRESSURE_LAYER_WITHHELD_COOLING = 'cooling_circuit_not_solved'
+PRESSURE_LAYER_WITHHELD_VERDICT = 'closeout_verdict_withheld'
+PRESSURE_LAYER_WITHHELD_NOT_EVALUATED = 'closeout_not_evaluated'
+PRESSURE_LAYER_WITHHELD_BASIS = (
+    'The motor did not publish the pressure-bearing layer of its two-layer '
+    'regenerative wall (closeout): {why}. The safety assessment reads the '
+    "motor's own publication decision, so no burst pressure, burst margin or "
+    'vessel verdict is computed for that layer, and the single wall of the '
+    'request (the drawn stack: liner + channels + closeout) is not '
+    'evaluated in its place.')
+PRESSURE_LAYER_WITHHELD_WHY = {
+    PRESSURE_LAYER_WITHHELD_COOLING: (
+        'the regenerative cooling circuit of this design is not solved '
+        '(structural_analysis.chamber_structure.cooling_circuit_status), and '
+        'the closeout is sized from that circuit'),
+    PRESSURE_LAYER_WITHHELD_VERDICT: (
+        'the motor withheld the closeout verdict (wall_layers[closeout].'
+        'verdict = withheld)'),
+    PRESSURE_LAYER_WITHHELD_NOT_EVALUATED: (
+        'the motor did not size or evaluate the closeout '
+        '(wall_layers[closeout].verdict = not_evaluated)'),
+}
+
+
+def _closeout_withheld(blok, k) -> Optional[Dict]:
+    """Motor dış kabuğu yayımlamadıysa geri çekme kaydı, yoksa ``None``.
+
+    Kaynak motorun KENDİ kararıdır (sayı üretilmez): bloğun
+    ``cooling_circuit_status`` alanı ve kabuk satırının ``verdict`` alanı.
+    """
+    if blok.get('cooling_circuit_status') == 'not_solved':
+        kod = PRESSURE_LAYER_WITHHELD_COOLING
+    elif k.get('verdict') == 'withheld':
+        kod = PRESSURE_LAYER_WITHHELD_VERDICT
+    elif k.get('verdict') == 'not_evaluated':
+        kod = PRESSURE_LAYER_WITHHELD_NOT_EVALUATED
+    else:
+        return None
+    neden = k.get('withheld_reason') or k.get('not_evaluated_reason')
+    kayit = {'role': PRESSURE_LAYER_ROLE, 'withheld': True,
+             'withheld_code': kod,
+             'withheld_basis': PRESSURE_LAYER_WITHHELD_BASIS.format(
+                 why=PRESSURE_LAYER_WITHHELD_WHY[kod])}
+    if isinstance(neden, str) and neden:
+        kayit['motor_reason'] = neden[:PRESSURE_LAYER_TEXT_CHARS_MAX]
+    return kayit
+
+
+def motor_pressure_bearing_layer(blok) -> Optional[Dict]:
+    """İki katmanlı sıvı cidarın basınç taşıyan katmanı ya da ``None``.
+
+    Kayıt çözücünün ``chamber_structure.wall_layers`` içindeki ``closeout``
+    satırıdır; burada sayı ÜRETİLMEZ. Alanlardan biri eksik / sonlu değil /
+    pozitif değilse ``None`` döner ve güvenlik sekmesi istekteki tek cidarı
+    değerlendirmeye devam eder (katman uydurulmaz). Saldırgan girdiye karşı
+    metinler kırpılır, malzeme anahtarı ``materials_db``de aranır.
+
+    V306/SIVI-KÜTLE (kalem 3): motor kabuğu YAYIMLAMADIYSA (soğutma devresi
+    çözülmedi ya da kabuk hükmü geri çekildi / değerlendirilmedi) dönüş
+    ``{'role': 'closeout', 'withheld': True, 'withheld_code', ...}``
+    kaydıdır: güvenlik sekmesi o katmanın hükmünü basmaz, nedenini adıyla
+    söyler (``_closeout_withheld``).
+    """
+    if not isinstance(blok, dict) or \
+            blok.get('wall_model') != PRESSURE_LAYER_WALL_MODEL:
+        return None
+    katmanlar = blok.get('wall_layers')
+    if not isinstance(katmanlar, list):
+        return None
+    for k in katmanlar:
+        if not isinstance(k, dict) or k.get('role') != PRESSURE_LAYER_ROLE:
+            continue
+        geri = _closeout_withheld(blok, k)
+        if geri is not None:
+            return geri
+        sayilar = {ad: _sonlu_sayi(k.get(ad))
+                   for ad in PRESSURE_LAYER_NUMBER_FIELDS}
+        if any(sayilar[ad] is None or sayilar[ad] <= 0 for ad in (
+                'thickness_mm', 'inner_radius_mm', 'max_temperature_K',
+                'coolant_pressure_bar', 'stress_MPa')):
+            return None
+        anahtar = k.get('material_key')
+        if not isinstance(anahtar, str):
+            return None
+        try:
+            from hrma.data.materials_db import get_material
+            get_material(anahtar)
+        except Exception:
+            return None
+        # 3.0.6 ana model (9 Kas): anahtar yukarıda malzeme kataloğunda
+        # doğrulandı; eski ``[:60]`` kırpması adsız ve gereksiz bir sayıydı.
+        kayit = {'role': PRESSURE_LAYER_ROLE, 'material_key': anahtar}
+        kayit.update({ad: v for ad, v in sayilar.items() if v is not None})
+        # V306/SIVI-KÜTLE (kalem 4): katmanın MDP'si (motorun kaydı; yoksa
+        # aynı kavram olan soğutucu basıncı kullanılır).
+        mdp = _sonlu_sayi(k.get('mdp_bar'))
+        if mdp is not None and mdp > 0:
+            kayit['mdp_bar'] = mdp
+        for ad in ('material', 'basis', 'coolant_pressure_basis',
+                   'radius_basis', 'temperature_basis', 'mdp_basis'):
+            if isinstance(k.get(ad), str):
+                kayit[ad] = k[ad][:PRESSURE_LAYER_TEXT_CHARS_MAX]
+        return kayit
+    return None
 
 
 #: Çözülmüş SAYILMAYAN cidar sıcaklığı kaynakları — güvertenin
@@ -745,7 +925,11 @@ def motor_wall_zone_summary(motor_type, results) -> Optional[Dict]:
             kayit = {'zone': str(z.get('zone'))[:60],
                      'verdict': str(z.get('verdict'))[:60],
                      'severity': str(z.get('severity'))[:20]}
-            for ad in ('length_mm', 'liner_thickness_mm'):
+            # V306/GÜVENLİK (NR-3 a): kasa sıcaklığı da taşınır — güvenlik
+            # sekmesi bölge satırını Performans Özeti kartıyla aynı sayıyla
+            # basar (çözücünün kendi alanı; yeni sayı yok).
+            for ad in ('length_mm', 'liner_thickness_mm',
+                       'casing_temperature_K'):
                 v = _sonlu_sayi(z.get(ad))
                 if v is not None:
                     kayit[ad] = v
@@ -1067,6 +1251,25 @@ EXPLOSIVE_NOT_MODELLED_REASONS = {
 #: için bu üç alan ve onlardan türeyen patlama tahliyesi YAYIMLANMAZ.
 GURNEY_FRAGMENT_FIELDS = ('fragment_velocity_ms', 'maximum_range_m',
                           'lethal_fragment_range_m')
+
+#: V306/HİBRİT-KÜTLE (kalem 7): patlayıcı sınıfı BEYANSIZ kazanılmadığında
+#: Gurney alanlarının durumu ve gerekçesi (yanıt, ekran ve PDF aynı kural;
+#: metin PDF'in ``PDFReportGenerator.FRAGMENT_WITHHELD_REASON``iyle aynı
+#: anlam, çeviri anahtarı ``report.safe.fragment_withheld``).
+FRAGMENT_THROW_WITHHELD_STATUS = 'withheld'
+FRAGMENT_THROW_WITHHELD_REASON = (
+    'not published: the fragment velocity, the lethal fragment range and '
+    'the maximum fragment range come from the Gurney relation, which '
+    'treats the propellant mass as the explosive charge; the explosive '
+    'verdict for this propellant is withheld (see "explosive verdict '
+    'withheld because" above), so no explosive charge is established and '
+    'these three numbers are not earned')
+
+EVACUATION_WITHHELD_REASON = (
+    'not published: the explosion evacuation distance is the larger of the '
+    'blast injury distance and the Gurney lethal fragment range; the '
+    'explosive verdict for this propellant is withheld (see "explosive '
+    'verdict withheld because"), so neither input is established')
 
 #: Patlama tahliyesinin geri çekildiği alanın yolu (geri çekme kaydında
 #: ve acil durum bloğunda aynı ad).
@@ -1442,7 +1645,8 @@ class SafetyMargins:
     pressure_safety_factor: float = 1.5
     temperature_safety_factor: float = 1.3
     flow_safety_margin: float = 0.2
-    minimum_burst_pressure_ratio: float = 2.0
+    # V306/GÜVENLİK (NR-19): ``minimum_burst_pressure_ratio`` (2,0) KALDIRILDI;
+    # patlama çarpanının tek yeri pressure_vessel.AIAA_BURST_FACTOR.
 
 @dataclass
 class HazardDistance:
@@ -1622,11 +1826,43 @@ class SafetyAnalyzer:
 
         # Pressure vessel safety — gerçek cidar/malzeme ile (kopma basıncı
         # PressureVesselAnalyzer'dan, sabit çarpanlardan değil).
+        # V306/GÜVENLİK (NR-19): motorun basınç taşıyan katmanı (iki
+        # katmanlı sıvı cidarda dış kabuk) yalnız yapısal hükmün benimsendiği
+        # koşulda (istek motorun tohumladığı girdilerle eşleşiyor) kullanılır.
+        katman = (motor_verdict or {}).get('pressure_layer')
+        katman_reddi = None
+        if isinstance(katman, dict):
+            ayrisan = self._motor_input_mismatch(motor_verdict, motor_data)
+            if ayrisan:
+                katman_reddi = {
+                    'reason': 'structural_inputs_differ_from_motor_result',
+                    'fields': ayrisan}
+                katman = None
+        else:
+            katman = None
+        # V306/SIVI-KÜTLE (kalem 5): sıvı motorun kamarası motor donanımıdır
+        # (NASA-STD-5012C); hibrit/katı kasası bu sürümde S-080A'da kalır.
+        from hrma.analysis.pressure_vessel import LIQUID_ENGINE_HARDWARE_CODE
+        # V306/KATI-KALAN (kalem 1, S1): katı motorda TASARIM BASINCI motorun
+        # tanımıdır (MEOP × motor sayfasındaki tasarım emniyet katsayısı,
+        # akma ölçütü). ÖLÇÜLDÜ (once.json, örnek KNDX 40 bar): motor
+        # sekmesi 100 bar (2,5×), bu sekme 60 bar (1,5× HRMA payı) basıyordu
+        # — aynı motora iki tasarım basıncı. Motor sonucu verilmediyse
+        # (bağımsız istek) HRMA payı kalır ve künyesi bunu adıyla söyler.
+        _katsayi_motor = None
+        if str(motor_type or '').lower() == 'solid':
+            _katsayi_motor = (motor_verdict or {}).get('design_safety_factor')
         pressure_safety = self._analyze_pressure_vessel_safety(
             chamber_pressure, motor_data.get('chamber_diameter', 0.1),
             wall_thickness=motor_data.get('wall_thickness', 0.005),
-            material=material,
+            material=material, layer=katman,
+            code_mode=(LIQUID_ENGINE_HARDWARE_CODE
+                       if str(motor_type or '').lower() == 'liquid'
+                       else 'aiaa_s080'),
+            motor_design_factor=_katsayi_motor,
         )
+        if katman_reddi is not None:
+            pressure_safety['pressure_layer_not_adopted'] = katman_reddi
 
         # Thermal safety analysis — cidar sıcaklığı ısı transferi modülünden,
         # termal gerilme seçilen malzemenin gerçek E/alfa/nu değerlerinden.
@@ -1902,6 +2138,25 @@ class SafetyAnalyzer:
             structural_safety['governing_safety_factor'] = float(
                 structural_safety.get('yield_safety_factor'))
 
+    @staticmethod
+    def _motor_input_mismatch(motor_verdict: Dict, motor_data: Dict) -> List:
+        """İstekteki yapısal girdiler motor kaydının ``inputs``inden ayrışıyor
+        mu? Ayrışan alanların listesi (boş = eşleşiyor). Benimseme kuralının
+        TEK yeri (yapısal hüküm ve NR-19 basınç katmanı aynı kuralı kullanır).
+        """
+        girdiler = (motor_verdict or {}).get('inputs') or {}
+        ayrisan = []
+        for ad in MOTOR_VERDICT_INPUT_FIELDS:
+            beklenen = _sonlu_sayi(girdiler.get(ad))
+            gelen = _sonlu_sayi(motor_data.get(ad))
+            if beklenen is None:
+                continue
+            if gelen is None or abs(gelen - beklenen) > (
+                    MOTOR_VERDICT_INPUT_REL_TOL * abs(beklenen)):
+                ayrisan.append({'field': ad, 'request': gelen,
+                                'motor_result': beklenen})
+        return ayrisan
+
     def _adopt_motor_structural_verdict(self, structural_safety: Dict,
                                         motor_verdict: Optional[Dict],
                                         motor_data: Dict) -> None:
@@ -1920,17 +2175,7 @@ class SafetyAnalyzer:
             structural_safety['verdict_source'] = \
                 STRUCTURAL_VERDICT_SOURCE_MODULE
             return
-        girdiler = motor_verdict.get('inputs') or {}
-        ayrisan = []
-        for ad in MOTOR_VERDICT_INPUT_FIELDS:
-            beklenen = _sonlu_sayi(girdiler.get(ad))
-            gelen = _sonlu_sayi(motor_data.get(ad))
-            if beklenen is None:
-                continue
-            if gelen is None or abs(gelen - beklenen) > (
-                    MOTOR_VERDICT_INPUT_REL_TOL * abs(beklenen)):
-                ayrisan.append({'field': ad, 'request': gelen,
-                                'motor_result': beklenen})
+        ayrisan = self._motor_input_mismatch(motor_verdict, motor_data)
         if ayrisan:
             structural_safety['verdict_source'] = \
                 STRUCTURAL_VERDICT_SOURCE_MODULE
@@ -2009,7 +2254,11 @@ class SafetyAnalyzer:
 
     def _analyze_pressure_vessel_safety(self, chamber_pressure: float, diameter: float,
                                         wall_thickness: float = 0.005,
-                                        material: str = 'steel_4130') -> Dict:
+                                        material: str = 'steel_4130',
+                                        layer: Optional[Dict] = None,
+                                        code_mode: str = 'aiaa_s080',
+                                        motor_design_factor: Optional[float] = None
+                                        ) -> Dict:
         """Analyze pressure vessel safety requirements.
 
         DENETİM DÜZELTMESİ (2026-07-19): eskiden yalnız MEOP × sabit çarpanlar
@@ -2020,15 +2269,72 @@ class SafetyAnalyzer:
         aynı kaynak.
         """
 
+        from hrma.analysis.pressure_vessel import (
+            CODE_PRESSURE_FACTORS, NASA_5012C_BASIS, NASA_5012C_SCOPE_BASIS)
+        if code_mode not in CODE_PRESSURE_FACTORS:
+            code_mode = 'aiaa_s080'
+        carpan = CODE_PRESSURE_FACTORS[code_mode]
         # Design pressure with safety factor
-        design_pressure = chamber_pressure * self.safety_margins.pressure_safety_factor
+        # V306/KATI-KALAN (kalem 1): katı motor sonucu verildiyse katsayı
+        # motorun tasarım emniyet katsayısıdır (motor sekmesiyle tek sayı).
+        _f = _sonlu_sayi(motor_design_factor)
+        if _f is not None and _f > 0:
+            tasarim_katsayisi = float(_f)
+            tasarim_kaynagi = 'motor_design_safety_factor'
+            tasarim_kunyesi = (
+                'design_pressure_bar = MEOP x %g, the design safety factor '
+                'of the solid motor result (against yield: the case wall is '
+                'sized and checked with it); the same design pressure as '
+                "the motor's safety tab. It is not a test or burst "
+                'pressure.' % tasarim_katsayisi)
+        else:
+            tasarim_katsayisi = self.safety_margins.pressure_safety_factor
+            tasarim_kaynagi = 'hrma_safety_margin'
+            tasarim_kunyesi = (
+                'design_pressure_bar = MEOP x '
+                f'{tasarim_katsayisi:g}, the HRMA '
+                'safety margin on the operating pressure '
+                '(SafetyMargins.pressure_safety_factor).')
+        design_pressure = chamber_pressure * tasarim_katsayisi
+        if layer is not None and layer.get('withheld') is True:
+            # V306/SIVI-KÜTLE (kalem 3): motor basınç taşıyan katmanı
+            # yayımlamadı -> o katmanın hükmü basılmaz (adıyla).
+            return self._withheld_layer_pressure_safety(
+                chamber_pressure, design_pressure, layer)
 
-        # Burst pressure requirement
-        required_burst_pressure = chamber_pressure * self.safety_margins.minimum_burst_pressure_ratio
-
-        # Pressure test requirements
-        hydrostatic_test_pressure = design_pressure * 1.5
-        proof_pressure = design_pressure * 1.25
+        # V306/GÜVENLİK (NR-19) — DENEME VE PATLAMA TEK TANIMDAN.
+        # ÖLÇÜLDÜ (örnek sıvı, P_c 50 bar): bu blok proof = 1,25 × tasarım
+        # (= 1,875 × MEOP → 93,8 bar) ve hidrostatik = 1,5 × tasarım
+        # (= 2,25 × MEOP → 112,5 bar, gereken patlama basıncının ÜSTÜNDE)
+        # basıyordu; aynı kamaranın Alt Sistemler kartı deneme 75,0 / patlama
+        # 125,0 bar diyordu. İki çarpan da kaynaksızdı. Tek tanım deponun
+        # kaynaklı çarpanlarıdır (AIAA S-080A-2018, metalik basınçlı kap;
+        # ``pressure_vessel.AIAA_PROOF_FACTOR`` / ``AIAA_BURST_FACTOR``) ve sıvı
+        # motorun ``design_requirements`` alanı da artık onları okur. Kabul
+        # (proof) testi hidrostatik basınç testidir: ayrı, daha yüksek bir
+        # hidrostatik test basıncı tanımlanmaz (alan aynı sayıyı taşır).
+        # V306/SIVI-KÜTLE (kalem 4): gereksinim DEĞERLENDİRİLEN KATMANIN
+        # MDP'sinden. Tek cidarda oda basıncı (MEOP = MDP); iki katmanlı
+        # sıvı cidarda dış kabuğun MDP'si ceketteki en yüksek soğutucu
+        # basıncıdır (motorun kaydı: ``coolant_pressure_bar`` = ``mdp_bar``;
+        # çember gerilmesi de bu basınçla). ÖLÇÜLDÜ (örnek sıvı, taban):
+        # gereksinim 2,0 × 50 bar oda basıncından kuruluyordu, kabuğun yükü
+        # 76,29 bar'dı.
+        mdp = float(chamber_pressure)
+        mdp_basis = ('single wall: the chamber wall carries the chamber '
+                     'pressure, used as the maximum design pressure')
+        if layer is not None:
+            mdp = float(layer.get('mdp_bar') or layer['coolant_pressure_bar'])
+            mdp_basis = (layer.get('mdp_basis')
+                         or layer.get('coolant_pressure_basis'))
+        # V306/SIVI-KÜTLE (kalem 5): çarpanlar TEK tablodan, kod moduna göre
+        # (sıvı motor donanımı NASA-STD-5012C; hibrit/katı S-080A).
+        required_burst_pressure = mdp * carpan['burst']
+        proof_pressure = mdp * carpan['proof']
+        qualification_test_pressure = (
+            None if carpan['qualification'] is None
+            else mdp * carpan['qualification'])
+        hydrostatic_test_pressure = proof_pressure
 
         # --- GERÇEK kopma basıncı (malzeme + cidar kalınlığı + çap) ---
         actual_burst_pressure = None
@@ -2041,12 +2347,31 @@ class SafetyAnalyzer:
         vessel_warnings: List[str] = []
         try:
             from hrma.analysis.pressure_vessel import PressureVesselAnalyzer
-            pv = PressureVesselAnalyzer().analyze(
-                meop_bar=max(float(chamber_pressure), 1e-6),
-                inner_diameter_mm=max(float(diameter), 1e-6) * 1e3,
-                material=material,
-                wall_thickness_mm=max(float(wall_thickness), 1e-9) * 1e3,
-            )
+            if layer is not None:
+                # NR-19: motorun basınç taşıyan katmanı — kendi kalınlığı,
+                # iç çapı, malzemesi ve motorun çözdüğü sıcaklıktaki
+                # dayanımı (yapısal kartın 370,5 MPa'sıyla AYNI katman).
+                # Kalem 4: kabın MEOP'u o katmanın MDP'si.
+                # 3.0.6 ana model (9 Kas): eski ``max(mdp, 1e-6)`` sessiz
+                # bir taban kırpmasıydı ve ölü koddu — katman kurucu
+                # soğutucu basıncı > 0 değilse katmanı hiç kurmaz, MDP de
+                # yalnız > 0 iken yazılır; mdp burada her zaman pozitif.
+                pv = PressureVesselAnalyzer().analyze(
+                    meop_bar=mdp,
+                    inner_diameter_mm=2.0 * float(layer['inner_radius_mm']),
+                    material=layer['material_key'],
+                    wall_thickness_mm=float(layer['thickness_mm']),
+                    temperature_K=float(layer['max_temperature_K']),
+                    code_mode=code_mode,
+                )
+            else:
+                pv = PressureVesselAnalyzer().analyze(
+                    meop_bar=max(float(chamber_pressure), 1e-6),
+                    inner_diameter_mm=max(float(diameter), 1e-6) * 1e3,
+                    material=material,
+                    wall_thickness_mm=max(float(wall_thickness), 1e-9) * 1e3,
+                    code_mode=code_mode,
+                )
             actual_burst_pressure = pv['actual_burst_pressure_bar']
             burst_margin = pv['burst_margin']
             # ÖH D31 / OH-D30-13: 'actual' ÖLÇÜLMÜŞ demek değildir; künye
@@ -2078,6 +2403,9 @@ class SafetyAnalyzer:
         
         result = {
             'operating_pressure_bar': chamber_pressure,
+            # V306/SIVI-KÜTLE (kalem 4): gereksinimin kurulduğu basınç.
+            'mdp_bar': mdp,
+            'mdp_basis': mdp_basis,
             'design_pressure_bar': design_pressure,
             'required_burst_pressure_bar': required_burst_pressure,
             'hydrostatic_test_pressure_bar': hydrostatic_test_pressure,
@@ -2087,9 +2415,52 @@ class SafetyAnalyzer:
             'applicable_codes': ['ASME BPVC Section VIII', 'EN 13445', 'AS 1210'],
             'safety_devices_required': self._determine_pressure_safety_devices(chamber_pressure),
             # Gerçek kap kapasitesi (malzeme + cidar kalınlığı + çap)
-            'material': material,
-            'wall_thickness_mm': float(wall_thickness) * 1e3,
-            'inner_diameter_mm': float(diameter) * 1e3,
+            # NR-19: katman benimsendiyse bu üç alan O KATMANINDIR (patlama
+            # basıncının hesaplandığı geometri); istekteki yığın kalınlığı
+            # ``evaluated_layer.stack_thickness_mm`` alanında kalır.
+            'material': (layer['material_key'] if layer is not None
+                         else material),
+            'wall_thickness_mm': (float(layer['thickness_mm'])
+                                  if layer is not None
+                                  else float(wall_thickness) * 1e3),
+            'inner_diameter_mm': (2.0 * float(layer['inner_radius_mm'])
+                                  if layer is not None
+                                  else float(diameter) * 1e3),
+            'evaluated_layer': self._evaluated_layer_record(
+                chamber_pressure, diameter, wall_thickness, material, layer,
+                actual_burst_pressure),
+            # V306/SIVI-KÜTLE (kalem 5): hangi standart, adıyla.
+            'code_mode': code_mode,
+            'code_basis': (NASA_5012C_BASIS if code_mode == 'nasa_std_5012c'
+                           else 'AIAA S-080A-2018, metallic pressure vessels: '
+                                'proof 1.5 x MEOP, design burst 2.0 x MEOP'),
+            'code_scope_basis': NASA_5012C_SCOPE_BASIS,
+            'qualification_test_pressure_bar': qualification_test_pressure,
+            'proof_pressure_basis': (
+                ('proof_pressure_bar = MDP x %g, the NASA-STD-5012C Table 1 '
+                 'acceptance/proof test factor for liquid engine hardware; '
+                 'the same factor sets the proof pressure of the liquid '
+                 'chamber (structural_analysis.design_requirements).'
+                 % carpan['proof']) if code_mode == 'nasa_std_5012c' else
+                ('proof_pressure_bar = MEOP x %g, the AIAA S-080A-2018 proof '
+                 'factor for metallic pressure vessels '
+                 '(hrma.analysis.pressure_vessel.AIAA_PROOF_FACTOR).'
+                 % carpan['proof'])),
+            'hydrostatic_test_pressure_basis': (
+                'The acceptance (proof) test is the hydrostatic pressure '
+                'test, so the hydrostatic test pressure is the proof '
+                'pressure; no separate, higher test pressure is defined.'),
+            'required_burst_pressure_basis': (
+                ('required_burst_pressure_bar = MDP x %g, the NASA-STD-5012C '
+                 'Table 1 ultimate-pressure analysis FOS for liquid engine '
+                 'hardware (net section ultimate); the same factor sets the '
+                 'burst pressure requirement of the liquid chamber '
+                 '(structural_analysis.design_requirements).'
+                 % carpan['burst']) if code_mode == 'nasa_std_5012c' else
+                ('required_burst_pressure_bar = MEOP x %g, the AIAA '
+                 'S-080A-2018 design burst factor '
+                 '(hrma.analysis.pressure_vessel.AIAA_BURST_FACTOR).'
+                 % carpan['burst'])),
             'actual_burst_pressure_bar': actual_burst_pressure,
             # OH-D30-13: aynı sayı, dürüst adıyla + künyesiyle.
             'predicted_burst_pressure_bar': actual_burst_pressure,
@@ -2100,13 +2471,13 @@ class SafetyAnalyzer:
             'burst_margin_vs_required_burst': burst_margin,
             'burst_margin_vs_meop': burst_margin_vs_meop,
             'burst_margin_definition': burst_margin_definition,
-            'design_pressure_basis': (
-                'design_pressure_bar = MEOP x '
-                f'{self.safety_margins.pressure_safety_factor:g} '
-                '(SafetyMargins.pressure_safety_factor). The solid-motor '
-                'result publishes a design pressure built on a DIFFERENT '
-                'multiplier under the same key name, so the multiplier is '
-                'named here.'),
+            # V306/GÜVENLİK (NR-4): künye kullanıcıya okunur; geliştirici
+            # notu ("same key name", "existing consumers") ekrandan kalktı.
+            # V306/KATI-KALAN (kalem 1): katsayı ve künye yukarıdaki tek
+            # karardan (katı motor sonucu varsa motorun katsayısı).
+            'design_pressure_factor': tasarim_katsayisi,
+            'design_pressure_source': tasarim_kaynagi,
+            'design_pressure_basis': tasarim_kunyesi,
             'vessel_status': vessel_status,
             'vessel_warnings': vessel_warnings,
             'burst_pressure_source': (
@@ -2114,6 +2485,121 @@ class SafetyAnalyzer:
                 '(hrma.analysis.pressure_vessel)'),
         }
         return result
+
+    def _withheld_layer_pressure_safety(self, chamber_pressure,
+                                        design_pressure, layer) -> Dict:
+        """Motor dış kabuğu yayımlamadığında basınçlı kap özeti (kalem 3).
+
+        Oda basıncına bağlı sınıf, muayene ve emniyet aygıtı satırları
+        kalır; KATMANA bağlı her sayı (deneme / patlama hedefi, tahmini
+        patlama, paylar, kap hükmü) ``None`` ya da ``NOT_EVALUATED`` olur ve
+        neden ``pressure_layer_withheld`` alanında adıyla durur. Basınç
+        ekseni bu yüzden değerlendirilmeyen eksen sayılır (kısmi sepet).
+        """
+        p = float(chamber_pressure)
+        if p > SAFETY_MODEL['vessel_high_pressure_bar']:
+            sinif, muayene = ('HIGH_PRESSURE',
+                              'Annual visual, 5-year hydrostatic')
+        elif p > SAFETY_MODEL['vessel_medium_pressure_bar']:
+            sinif, muayene = ('MEDIUM_PRESSURE',
+                              '2-year visual, 10-year hydrostatic')
+        else:
+            sinif, muayene = ('LOW_PRESSURE',
+                              '5-year visual, 15-year hydrostatic')
+        geri = {k: layer[k] for k in ('role', 'withheld_code',
+                                      'withheld_basis', 'motor_reason')
+                if k in layer}
+        return {
+            'operating_pressure_bar': p,
+            'design_pressure_bar': design_pressure,
+            'required_burst_pressure_bar': None,
+            'hydrostatic_test_pressure_bar': None,
+            'proof_pressure_bar': None,
+            'vessel_classification': sinif,
+            'inspection_requirements': muayene,
+            'applicable_codes': ['ASME BPVC Section VIII', 'EN 13445',
+                                 'AS 1210'],
+            'safety_devices_required':
+                self._determine_pressure_safety_devices(p),
+            'material': None, 'wall_thickness_mm': None,
+            'inner_diameter_mm': None,
+            'evaluated_layer': {'role': PRESSURE_LAYER_ROLE,
+                                'withheld': True,
+                                'withheld_code': layer.get('withheld_code')},
+            'pressure_layer_withheld': geri,
+            'actual_burst_pressure_bar': None,
+            'predicted_burst_pressure_bar': None,
+            'actual_burst_pressure_basis': None,
+            'burst_margin': None,
+            'burst_margin_vs_required_burst': None,
+            'burst_margin_vs_meop': None,
+            'burst_margin_definition': None,
+            'design_pressure_factor':
+                self.safety_margins.pressure_safety_factor,
+            'design_pressure_basis': (
+                'design_pressure_bar = MEOP x '
+                f'{self.safety_margins.pressure_safety_factor:g}, the HRMA '
+                'safety margin on the operating pressure '
+                '(SafetyMargins.pressure_safety_factor).'),
+            'vessel_status': 'NOT_EVALUATED',
+            'vessel_warnings': [geri.get('withheld_basis', '')],
+            'burst_pressure_source': None,
+        }
+
+    @staticmethod
+    def _evaluated_layer_record(chamber_pressure, diameter, wall_thickness,
+                                material, layer, actual_burst) -> Dict:
+        """Patlama basıncının HANGİ katmanda, HANGİ basınçla değerlendirildiği.
+
+        V306/GÜVENLİK (NR-19). Tek cidarda katman istekteki cidardır ve
+        yükü oda basıncıdır (MEOP). İki katmanlı sıvı cidarda katman motorun
+        dış kabuğudur; o katmanın işletmedeki yükü motorun kaydındaki
+        soğutucu basıncıdır ve çember gerilmesi (yapısal kartın sayısı) bu
+        basınçla hesaplanmıştır. Patlama basıncının o yüke oranı da yazılır;
+        sayı üretilmez, yalnız iki mevcut sayı oranlanır.
+        """
+        if layer is None:
+            # Tek cidar: istekteki cidar, yükü oda basıncı (MEOP).
+            try:
+                from hrma.data.materials_db import get_material
+                ad = get_material(material).get('name')
+            except Exception:
+                ad = None
+            return {
+                'role': 'chamber_wall',
+                'material_key': material,
+                'material': ad,
+                'thickness_mm': float(wall_thickness) * 1e3,
+                'inner_diameter_mm': float(diameter) * 1e3,
+                'load_pressure_bar': float(chamber_pressure),
+            }
+        yuk = float(layer['coolant_pressure_bar'])
+        kayit = {
+            'role': PRESSURE_LAYER_ROLE,
+            'material_key': layer['material_key'],
+            'material': layer.get('material'),
+            'thickness_mm': float(layer['thickness_mm']),
+            'inner_diameter_mm': 2.0 * float(layer['inner_radius_mm']),
+            'temperature_K': float(layer['max_temperature_K']),
+            'stack_thickness_mm': float(wall_thickness) * 1e3,
+            'chamber_diameter_mm': float(diameter) * 1e3,
+            'load_pressure_bar': yuk,
+            'load_pressure_basis': layer.get('coolant_pressure_basis'),
+            'motor_hoop_stress_MPa': float(layer['stress_MPa']),
+            'motor_hoop_stress_basis': layer.get('basis'),
+            'burst_margin_vs_load_pressure': (
+                None if actual_burst is None else float(actual_burst) / yuk),
+            'basis': (
+                'Two-layer regenerative wall: the closeout carries the '
+                'pressure (NASA SP-8087 p. 26). The burst pressure is '
+                'predicted for that layer with its own thickness, diameter '
+                'and the strength at the temperature the motor solved for '
+                'it - the same layer and strength as the hoop stress of the '
+                'structural result. The drawn stack thickness '
+                '(stack_thickness_mm = liner + channel depth + closeout) is not '
+                'a solid wall and is not used.'),
+        }
+        return kayit
 
     def _analyze_thermal_safety(self, motor_data: Dict,
                                 material: str = 'steel_4130') -> Dict:
@@ -2567,7 +3053,8 @@ class SafetyAnalyzer:
         # eksen sözleşmesi uyarınca geri çekilmez (ÖH Z5S eksen-bazlı geri
         # çekme: kazanılmayan EKSEN adıyla çekilir, kazanılan yayımlanır).
         fragment_hazards = self._calculate_fragment_hazards(
-            propellant_mass, thrust, burn_time, motor_data, material)
+            propellant_mass, thrust, burn_time, motor_data, material,
+            motor_type=motor_type)
 
         # --- ÖH D35 / OH-ON-06 · KAZANILMAYAN PATLAYICI EKSENİ -----------
         # Sınıf çözülemediyse TNT eşdeğeri, patlama mesafeleri, QD şartları,
@@ -2587,19 +3074,31 @@ class SafetyAnalyzer:
             # "eşiğin altında" diye SESSİZCE geçilemez.
             beyan = self._explosive_not_modelled(propellant_type,
                                                  motor_type)
+            # ÖH D37 A1b panel-js 5. tur: Gurney bağıntısı itici kütlesini
+            # PATLAYICI ŞARJ sayar (C). Patlayıcı sınıfı kazanılmadıysa
+            # parça hızı, menzil ve onlardan türeyen tahliye de
+            # kazanılmamıştır; anahtarlar SİLİNMEZ (tüketiciler anahtar
+            # arar), değer None + durum + gerekçe. Kasa kütlesi ve serbest
+            # kalan motor (impuls/itki) şarjdan bağımsızdır, AYNEN kalır.
+            # V306/HİBRİT-KÜTLE (kalem 7, RAPOR-HATA M-HIBRIT-31 DEVİR 1):
+            # kural yalnız 'modellenmedi' BEYANINDA uygulanıyordu; sınıf
+            # beyansız kazanılmadığında (ör. hibrit ``oxidizer_type='lox'``:
+            # türetimi olan bir hibrit oksitleyiciye çözülmüyor) yanıt
+            # Gurney sayılarını yayımlamaya devam ediyordu (ölçüldü: L4
+            # gövdesi parça hızı 3439,71 m/s, öldürücü 1600 m, azami 2000 m)
+            # — PDF onları basmıyordu, API basıyordu. Kural motor türünden
+            # bağımsızdır: hüküm geri çekildiyse türev sayılar da çekilir.
+            fragment_hazards = dict(fragment_hazards)
+            for alan in GURNEY_FRAGMENT_FIELDS:
+                fragment_hazards[alan] = None
             if beyan is not None:
-                # ÖH D37 A1b panel-js 5. tur: Gurney bağıntısı itici
-                # kütlesini PATLAYICI ŞARJ sayar (C). Patlayıcı modeli
-                # olmayan iticide parça hızı, menzil ve onlardan türeyen
-                # tahliye de kazanılmamıştır; anahtarlar SİLİNMEZ
-                # (tüketiciler anahtar arar), değer None + durum + gerekçe.
-                # Kasa kütlesi ve serbest kalan motor (impuls/itki) şarjdan
-                # bağımsızdır, AYNEN kalır.
-                fragment_hazards = dict(fragment_hazards)
-                for alan in GURNEY_FRAGMENT_FIELDS:
-                    fragment_hazards[alan] = None
                 fragment_hazards['fragment_throw_status'] = beyan['status']
                 fragment_hazards['fragment_throw_reason'] = beyan['reason']
+            else:
+                fragment_hazards['fragment_throw_status'] = \
+                    FRAGMENT_THROW_WITHHELD_STATUS
+                fragment_hazards['fragment_throw_reason'] = \
+                    FRAGMENT_THROW_WITHHELD_REASON
             geri_cekme = {
                 'propellant_mass_kg': propellant_mass,
                 'explosive_class': None,
@@ -3100,7 +3599,8 @@ class SafetyAnalyzer:
                                     thrust: Optional[float],
                                     burn_time: Optional[float] = None,
                                     motor_data: Optional[Dict] = None,
-                                    material: str = 'steel_4130') -> Dict:
+                                    material: str = 'steel_4130',
+                                    motor_type: Optional[str] = None) -> Dict:
         """Calculate fragment throw distances and hazards.
 
         DENETİM DÜZELTMESİ (2026-07-19): kasa kütlesi artık gerçek kabuk
@@ -3252,6 +3752,24 @@ class SafetyAnalyzer:
                 'not_evaluated': list(UNRESTRAINED_BURN_TIME_FIELDS),
             })
 
+        _mt = str(motor_type or (motor_data or {}).get('motor_type')
+                  or '').strip().lower()
+        if _mt == 'liquid':
+            for _ad in UNRESTRAINED_LIQUID_FIELDS:
+                serbest_motor[_ad] = None
+            if 'status' not in serbest_motor:
+                serbest_motor.update({
+                    'status': BURN_TIME_NOT_EVALUATED,
+                    'reason': LIQUID_PROJECTILE_MASS_NOT_MODELLED_REASON,
+                    'not_evaluated': list(UNRESTRAINED_LIQUID_FIELDS),
+                })
+            else:
+                serbest_motor['not_evaluated'] = list(dict.fromkeys(
+                    list(serbest_motor.get('not_evaluated') or [])
+                    + list(UNRESTRAINED_LIQUID_FIELDS)))
+                serbest_motor['liquid_reason'] = (
+                    LIQUID_PROJECTILE_MASS_NOT_MODELLED_REASON)
+
         return {
             'estimated_case_mass_kg': case_mass,
             'case_mass_basis': case_mass_basis,
@@ -3377,6 +3895,13 @@ class SafetyAnalyzer:
         # ``max(.., 100)`` iki girdi de yokken 100 m'lik UYDURMA bir mesafe
         # basardı; beyanlı kolda değer None + durum + gerekçe yayımlanır.
         beyan = explosive_hazards.get('explosive_not_modelled')
+        # V306/HİBRİT-KÜTLE (kalem 7): sınıf BEYANSIZ kazanılmadığında da
+        # (``explosive_verdict_withheld_because``) iki girdi geri çekilmiştir
+        # (patlama mesafesi yok, Gurney menzili None); tahliye kazanılmaz.
+        if not beyan and explosive_hazards.get(
+                'explosive_verdict_withheld_because'):
+            beyan = {'status': FRAGMENT_THROW_WITHHELD_STATUS,
+                     'reason': EVACUATION_WITHHELD_REASON}
         if beyan:
             patlama_tahliyesi = None
         else:
@@ -3563,6 +4088,12 @@ class SafetyAnalyzer:
             'mitigation_priority': self._determine_mitigation_priority(
                 **eksenler),
             'mitigation_priority_not_evaluated': degerlendirilmeyen,
+            # V306/GÜVENLİK (NR-3 b): motor hükmünün hangi eksenlerden
+            # kurulduğu ve hangilerinin koşmadığı ADIYLA (ekran rozeti
+            # "3 eksenden N'i" bilgisini buradan okur; sayı uydurmaz).
+            'motor_axes_evaluated': [ad for ad in MOTOR_DESIGN_RISK_AXES
+                                     if eksenler[ad] is not None],
+            'motor_axes_not_evaluated': list(motor_olculmeyen),
         }
 
         if motor_olculmeyen:
@@ -3582,6 +4113,21 @@ class SafetyAnalyzer:
             if acceptability in ('ACCEPTABLE', 'ACCEPTABLE_WITH_CONTROLS'):
                 sonuc['acceptability'] = THERMAL_VERDICT_NOT_EVALUATED
                 sonuc['acceptability_withheld_because'] = (
+                    sonuc['partial_assessment_basis'])
+            # V306/GÜVENLİK (NR-3 b) — KISMİ DEĞERLENDİRME 'LOW' DEĞİLDİR.
+            # ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/guvenlik/olcum/
+            # guvenlik_once.json): üç örnek motorun üçünde de yapısal eksen
+            # (hibritte termal de) değerlendirilmemişken ``risk_level`` 'LOW'
+            # kalıyordu ve ekran büyük yeşil "MOTOR TASARIM RİSKİ: LOW"
+            # basıyordu (PDF de "Motor design risk level: LOW"). Ölçülen
+            # eksenlerin en kötüsü yalnız ALT SINIRDIR. Kural, aynı
+            # işlevdeki tesis ekseni kuralının aynısı: kısmi sepette LOW /
+            # MEDIUM sınıfı geri çekilir (ölçülen eksenlerin sınıfı ayrı
+            # alanda kalır); HIGH / CRITICAL gerçek bir UYARIDIR ve kalır.
+            if risk_level in ('LOW', 'MEDIUM'):
+                sonuc['risk_level_of_evaluated_axes'] = risk_level
+                sonuc['risk_level'] = THERMAL_VERDICT_NOT_EVALUATED
+                sonuc['risk_level_withheld_because'] = (
                     sonuc['partial_assessment_basis'])
         if tesis_olculmeyen:
             facility_hazard['is_partial'] = True

@@ -54,7 +54,17 @@ HIBRIT_YUK = {
 #: 2,0 -> 2,43 kayar (ÖLÇÜLDÜ, ``of_shift.regulated``). Elle yasa yok, sayı
 #: uydurulmadı. Ölçülen ayrışma %-2,1352 (Isp 170,008 ⟷ teslim 173,718 s),
 #: kapı bandının iki katından fazla.
-AYRISAN_YUK = dict(HIBRIT_YUK, fuel_type='paraffin', of_ratio=2.0)
+#:
+#: V306/HİBRİT-ÇAPRAZ (4 Kas): N₂O kendinden basınçlı tankta (bu yükün
+#: varsayılan beslemesi) teslim büyüklükleri artık BOŞALMA çözümünden gelir
+#: ve uçuş Isp'yi o çözümden türetir (yerine koyma yolu koşmaz); ölçülen
+#: ayrışma o kipte %0,236'ya iner (``olcum_sonra.json``). Bekçinin sorusu
+#: (manşet ⟷ teslim edilen ayrışınca uçuş teslim edileni uçurur) REGÜLE
+#: bütçenin sorusudur: kol kullanıcı tank basıncıyla (60 bar > P_sat(293 K)
+#: 50,5 bar; boşalma bloğu tanım gereği NOT_MODELLED, besleme regüleli)
+#: kurulur; parafin yasası ve O/F aynı, regüle bütçe bit-aynı.
+AYRISAN_YUK = dict(HIBRIT_YUK, fuel_type='paraffin', of_ratio=2.0,
+                   tank_pressure_source='user', tank_pressure=60.0)
 
 
 @pytest.fixture(scope='module')
@@ -113,7 +123,11 @@ class TestOHD2318TeslimEdilenIsp:
         "iki tarif" der. Bu yüzden yaklaşıklık DEĞİL, eşitlik sınanır.
         """
         i_teslim = hibrit_motor['total_impulse_delivered_Ns']
-        m_p = hibrit_motor['propellant_mass_total']
+        # V306/HİBRİT-ÇAPRAZ: boşalma kipinde özdeşliğin kütlesi O çözümün
+        # harcadığı itici; regüle kipte yayımlanan tasarım bütçesi.
+        m_p = (hibrit_motor['propellant_mass_consumed_kg']
+               if hibrit_motor['delivered_source'] == 'tank_blowdown'
+               else hibrit_motor['propellant_mass_total'])
         assert hibrit_motor['isp_delivered_avg_s'] == i_teslim / (m_p * G_0)
 
     def test_mansetteki_isp_TASARIM_NOKTASI_olarak_kaliyor(self, hibrit_motor):
@@ -176,6 +190,57 @@ class TestOHD2318TeslimEdilenIsp:
         tr = hibrit_yanit['trajectory']
         assert tr['flown_isp_s'] == hibrit_motor['isp_delivered_avg_s']
         assert 'isp_delivered_avg_s' in tr['flown_isp_basis']
+
+    def test_bosalma_kipinde_teslim_buyuklukleri_UCANLA_ayni(
+            self, hibrit_yanit, hibrit_motor):
+        """V306/HİBRİT-ÇAPRAZ kalem 1: tek büyüklük, tek sayı.
+
+        ÖNCE (taban 700a67586): uçan Isp 142,776 ⟷ motor 145,093 s; motor
+        ``total_impulse`` 9 925,44 (sabit debili bütçe) ⟷ uçan 9 033,42 ⟷
+        boşalma bloğu 8 983,42 N·s (seri t = 0,05 s'de başlıyordu).
+        """
+        from hrma.analysis.flight_vehicle import motor_flight_thrust
+        tb = hibrit_motor['tank_blowdown']
+        assert hibrit_motor['delivered_source'] == 'tank_blowdown'
+        assert tb['time_s'][0] == 0.0, 'seri ateşleme anından başlamıyor'
+        assert tb['thrust_N'][0] == tb['thrust_initial_N']
+        u = motor_flight_thrust('hybrid', hibrit_yanit)
+        assert u['curve_source'] == 'motor_blowdown'
+        # Uçan impuls (eğrinin integrali) = motorun yayımladığı = blok.
+        assert u['total_impulse_ns'] == hibrit_motor['total_impulse']
+        assert u['total_impulse_ns'] == u['motor_published_impulse_ns']
+        assert hibrit_motor['total_impulse_delivered_Ns'] == \
+            tb['total_impulse_Ns']
+        assert hibrit_motor['burn_time'] == tb['burn_duration_s'] == \
+            u['burn_time']
+        assert hibrit_motor['propellant_mass_consumed_kg'] == \
+            tb['propellant_consumed_kg'] == u['propellant_consumed_kg']
+        perf = hibrit_motor['design_summary']['performance']
+        assert perf['total_impulse_Ns'] == hibrit_motor['total_impulse']
+        assert perf['burn_time_s'] == hibrit_motor['burn_time']
+        # Sabit debili bütçe silinmedi: adıyla ve gerekçesiyle yan yana.
+        reg = hibrit_motor['constant_oxidizer_flow_budget']
+        assert reg['total_impulse_Ns'] > hibrit_motor['total_impulse']
+        assert 'constant' in reg['basis'].lower()
+        # Uçuş aynı sayıyı uçurur ve söyler.
+        tr = hibrit_yanit['trajectory']
+        assert tr['flown_isp_s'] == hibrit_motor['isp_delivered_avg_s']
+        assert 'propellant_mass_consumed_kg' in tr['flown_isp_basis']
+
+    def test_bosalma_oksitleyicisi_tank_envanteriyle_kapanir(
+            self, hibrit_motor):
+        """Harcanan oksitleyici ⟷ tankın kendi envanteri (sıvı + ullage)."""
+        inv = hibrit_motor['tank_blowdown']['oxidizer_inventory']
+        assert inv['tank_delivered_kg'] == pytest.approx(
+            inv['tank_initial_kg'] - inv['tank_final_kg'], rel=1e-15)
+        assert 0.0 < inv['last_step_fraction'] <= 1.0
+        # Kalan fark kısalan son aralığın yamuk gösterimidir; sınırı
+        # Δt/4 · |ṁ_son − ṁ_önceki| (künye). Δt = 2·t[1] (orta nokta düzeni).
+        tb = hibrit_motor['tank_blowdown']
+        dt = 2.0 * tb['time_s'][1]
+        mox = tb['mdot_ox_kg_s']
+        sinir = 0.25 * dt * abs(mox[-1] - mox[-3]) + 1e-12
+        assert abs(inv['difference_kg']) <= sinir, (inv, sinir)
 
     def test_yanki_kanonik_motorla_BIT_AYNI_kalir(self, hibrit_yanit,
                                                   hibrit_motor):

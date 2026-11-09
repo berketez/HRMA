@@ -225,6 +225,13 @@ def _uyari_kodlari(eng):
                    if isinstance(w, dict)})
 
 
+
+def _kasa_dis_m(eng):
+    """Kasa DIŞ çapı [m] — cad_design.case_design.outer_diameter tanımı."""
+    return (float(eng._case_inner_diameter())
+            + 2.0 * float(eng._case_design()[3]))
+
+
 class TestOHD2507ZarfKapisi:
 
     # V301/K-A (22 Eki): eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu; üç gövdenin
@@ -253,7 +260,9 @@ class TestOHD2507ZarfKapisi:
         eng = _motor(**dict(ov))
         d_exit = float(eng._design_exit_diameter())
         # Kuralın kendisi bağımsız kurulur: çıkış > gövde ise uyarı olmalı.
-        assert d_exit > float(eng.D_chamber), 'gövde seçimi kusuru göstermiyor'
+        # V306/KATI-MODEL (M-KATI-11): gövde = KASA DIŞ çapı (tane çapı
+        # değil; tur L2 '98 mm gövde' yanlış referansı).
+        assert d_exit > _kasa_dis_m(eng), 'gövde seçimi kusuru göstermiyor'
         # ... ve MUTLAK kapı bu gövdelerde ateşlenmiyor (kusurun sebebi).
         assert d_exit <= SOLID_EXIT_DIAMETER_ABSOLUTE_LIMIT_M
         assert 'warn.solid.exit_cone_exceeds_case' in _uyari_kodlari(eng)
@@ -262,7 +271,7 @@ class TestOHD2507ZarfKapisi:
         # V301/K-A: eski çapa A_p/A_t = 0,947'lik boğulan portlu varsayılan motoru kilitliyordu.
         eng = _motor(chamber_diameter=100, grain_length=500,
                      core_diameter=48, chamber_pressure=40)
-        assert float(eng._design_exit_diameter()) < float(eng.D_chamber)
+        assert float(eng._design_exit_diameter()) < _kasa_dis_m(eng)
         assert 'warn.solid.exit_cone_exceeds_case' not in _uyari_kodlari(eng)
 
     def test_uyari_iki_capi_ve_orani_tasir(self):
@@ -276,7 +285,8 @@ class TestOHD2507ZarfKapisi:
         assert len(kayit) == 1
         par = kayit[0]['params']
         d_exit_mm = float(eng._design_exit_diameter()) * 1000.0
-        d_case_mm = float(eng.D_chamber) * 1000.0
+        # V306/KATI-MODEL (M-KATI-11): kasa DIŞ çapı (cad_design ile aynı).
+        d_case_mm = _kasa_dis_m(eng) * 1000.0
         assert par['exit_diameter_mm'] == pytest.approx(d_exit_mm, abs=0.05)
         assert par['case_diameter_mm'] == pytest.approx(d_case_mm, abs=0.05)
         assert par['ratio'] == pytest.approx(d_exit_mm / d_case_mm, abs=0.005)

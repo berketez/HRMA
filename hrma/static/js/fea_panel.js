@@ -754,6 +754,258 @@
         };
     }
 
+    // V306/FEA-SIVI (kalem 1) — İKİ KATMANLI CİDARIN KATMANLARI. Uç
+    // `fea.two_layer` yayımlar: astar, kanal kaburgaları (yayılı, hükümsüz)
+    // ve dış kabuk; her katmanın kendi akmasıyla birincil emniyet katsayısı
+    // ve basınç + ısıl (ikincil) gerilme aralığının 2 x akma sınırına oranı.
+    function ikiKatmanGorunumu(fea) {
+        const t = fea && fea.two_layer;
+        if (!t || typeof t !== 'object') return null;
+        if (t.solved !== true) {
+            return { solved: false,
+                     missing: Array.isArray(t.missing) ? t.missing : [] };
+        }
+        const sayi = function (v, bol) {
+            return isNum(v) ? v / (bol || 1) : null;
+        };
+        const katmanlar = (Array.isArray(t.layers) ? t.layers : []).map(
+            function (k) {
+                const p = k.primary || {};
+                const q = k.primary_plus_secondary || {};
+                return {
+                    role: String(k.role || ''),
+                    material: (typeof k.material === 'string') ? k.material : '',
+                    judged: k.judged === true,
+                    sf: sayi(p.safety_factor),
+                    yield_mpa: sayi(k.yield_pa, PA_PER_MPA),
+                    pq_mpa: sayi(q.P_L_Pb_Q_max_pa, PA_PER_MPA),
+                    sps_mpa: sayi(q.S_PS_pa, PA_PER_MPA),
+                    shakedown: sayi(q.shakedown_factor),
+                    engine_sf: sayi(k.engine_safety_factor),
+                    proof: sayi(k.proof_factor_target),
+                };
+            });
+        return { solved: true, layers: katmanlar,
+                 governing: (typeof t.governing_layer === 'string')
+                     ? t.governing_layer : null };
+    }
+
+    function katmanAdi(rol) {
+        switch (rol) {
+        case 'liner': return T('fea.layerLiner', 'LINER');
+        case 'channels': return T('fea.layerRibs', 'CHANNEL RIBS (smeared)');
+        case 'closeout': return T('fea.layerCloseout', 'CLOSEOUT');
+        default: return String(rol);
+        }
+    }
+
+    function katmanRozetleri(k) {
+        const ad = katmanAdi(k.role);
+        if (!k.judged) {
+            return badge(esc(TF('fea.badgeLayerRibs',
+                { layer: ad, pq: fmt(k.pq_mpa, 0), y: fmt(k.yield_mpa, 0) },
+                '{layer}: rib stress under pressure + thermal {pq} MPa '
+                + '(yield {y} MPa) — information only: the smeared model '
+                + 'averages the ribs and does not resolve the land-root '
+                + 'concentration')),
+                (k.shakedown !== null && k.shakedown < 1.0) ? 'warn' : 'info');
+        }
+        let metin = TF('fea.badgeLayerPrimary',
+            { layer: ad, mat: k.material, sf: fmt(k.sf, 2),
+              y: fmt(k.yield_mpa, 0), proof: fmt(k.proof, 2) },
+            '{layer} ({mat}): SAFETY FACTOR {sf} under the pressure loads '
+            + '(ASME P_L+P_b, at its own yield {y} MPa); proof factor {proof} '
+            + '(NASA-STD-5012C)');
+        metin += ' ' + ((k.sf !== null && k.proof !== null && k.sf >= k.proof)
+            ? T('fea.proofMet', 'met') : T('fea.proofNotMet', 'NOT met'));
+        if (k.engine_sf !== null) {
+            metin += ' — ' + TF('fea.layerEngineSf', { v: fmt(k.engine_sf, 2) },
+                'the engine\u2019s own layer check gives {v}');
+        }
+        let html = badge(esc(metin), sfRozetTuru(k.sf));
+        if (k.shakedown !== null) {
+            const p = { layer: ad, pq: fmt(k.pq_mpa, 0), sps: fmt(k.sps_mpa, 0),
+                        f: fmt(k.shakedown, 2) };
+            // Anahtarlar LİTERAL (ölü-çeviri bekçisi birleştirilmiş anahtarı
+            // görmez).
+            html += (k.shakedown >= 1.0)
+                ? badge(esc(TF('fea.badgeLayerShakedownOk', p,
+                    '{layer}: pressure + thermal stress range {pq} MPa within '
+                    + '2 x yield {sps} MPa (shakedown factor {f})')), 'ok')
+                : badge(esc(TF('fea.badgeLayerShakedownNot', p,
+                    '{layer}: pressure + thermal stress range {pq} MPa '
+                    + 'exceeds 2 x yield {sps} MPa (factor {f}) — shakedown '
+                    + 'NOT demonstrated: the layer yields in every firing; '
+                    + 'its low-cycle fatigue life is not assessed')), 'warn');
+        }
+        return html;
+    }
+
+    // V306/FEA-SIVI (kalem 3) — MESNET: yayımlanan çözüm fiziksel itki
+    // bağlantısıyla (ön gövde); ayrışma ve lüle çıkışı kıyası hükmün
+    // makine-okur alanından (meta.hukum.kisit_yeri_duyarliligi).
+    function mesnetGorunumu(fea) {
+        const hk = fea && fea.meta && fea.meta.hukum;
+        const k = hk && hk.kisit_yeri_duyarliligi;
+        if (!k || typeof k !== 'object' || k.birincil_kip !== 'on_govde') {
+            return null;
+        }
+        const kars = (k.karsilastirma && typeof k.karsilastirma === 'object')
+            ? k.karsilastirma : {};
+        let kSf = isNum(kars.min_safety_factor) ? kars.min_safety_factor : null;
+        if (kSf === null && Array.isArray(kars.katman_sf_p)) {
+            const tl = fea.two_layer && Array.isArray(fea.two_layer.layers)
+                ? fea.two_layer.layers : [];
+            const v = kars.katman_sf_p.filter(function (x, i) {
+                return isNum(x) && tl[i] && tl[i].judged === true;
+            });
+            kSf = v.length ? Math.min.apply(null, v) : null;
+        }
+        return {
+            olculdu: k.olculdu === true,
+            asildi: k.asildi === true,
+            fark_pct: isNum(k.bagil_fark) ? 100 * k.bagil_fark : null,
+            esik_pct: isNum(k.esik) ? 100 * k.esik : null,
+            nozzle_exit_sf: kSf,
+        };
+    }
+
+    function mesnetRozetleri(m) {
+        let html = '';
+        if (m.olculdu) {
+            html += badge(esc(TF('fea.badgeSupport',
+                { d: fmt(m.fark_pct, 1), lim: fmt(m.esik_pct, 1) },
+                'SUPPORT: forward end of the pressure body, where the thrust '
+                + 'is taken out; with the thrust taken at the aft end of the '
+                + 'body the verdict changes {d}% (limit {lim}%)')),
+                m.asildi ? 'warn' : 'info');
+        }
+        if (m.nozzle_exit_sf !== null) {
+            html += badge(esc(TF('fea.badgeSupportNozzleExit',
+                { sf: fmt(m.nozzle_exit_sf, 2) },
+                'comparison only: supported at the nozzle exit (not a thrust '
+                + 'attachment, not part of the verdict) the safety factor '
+                + 'would be {sf}')), 'dim');
+        }
+        return html;
+    }
+
+    // V306/FEA-SIVI (kalem 2, M-SIVI-15) — NOZUL CİDARI: ağ kamara cidarını
+    // lüle boyunca taşır; CAD lüleyi başka kalınlıkta çiziyorsa ikisi ve
+    // kaynağı yan yana yazılır.
+    function luleCidariGorunumu(fea) {
+        const n = fea && fea.nozzle_wall;
+        if (!n || typeof n !== 'object' || n.resolved !== true
+                || n.same === true || !isNum(n.fea_thickness_m)
+                || !isNum(n.cad_thickness_m)) {
+            return null;
+        }
+        return { fea_mm: 1000 * n.fea_thickness_m,
+                 cad_mm: 1000 * n.cad_thickness_m,
+                 source: String(n.cad_source || ''),
+                 rule_min_mm: isNum(n.rule_min_mm) ? n.rule_min_mm : null,
+                 rule_frac: isNum(n.rule_throat_fraction)
+                     ? n.rule_throat_fraction : null };
+    }
+
+    function luleCidariRozeti(n) {
+        const p = { fea: fmt(n.fea_mm, 2), cad: fmt(n.cad_mm, 2),
+                    min: fmt(n.rule_min_mm, 1), frac: fmt(n.rule_frac, 2) };
+        const metin = (n.source === 'published')
+            ? TF('fea.badgeNozzleWallPublished', p,
+                'NOZZLE WALL: this mesh carries the chamber wall {fea} mm along '
+                + 'the nozzle; this run publishes a nozzle wall of {cad} mm '
+                + '(the CAD draws it), which this mesh does not use')
+            : TF('fea.badgeNozzleWallRule', p,
+                'NOZZLE WALL: this mesh carries the chamber wall {fea} mm along '
+                + 'the nozzle (the engine publishes no nozzle wall thickness); '
+                + 'the CAD nozzle is drawn {cad} mm by the drawing rule '
+                + 'max({min} mm; {frac} x throat diameter), not from an '
+                + 'analysis');
+        return badge(esc(metin), 'warn');
+    }
+
+    // V306/GÜVENLİK (NR-18) — MOTORUN EMNİYET KATSAYISI HANGİ İSTASYONUN?
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/guvenlik/olcum/fea_once.json, örnek
+    // hibrit): rozet "MOTORUN KENDİ EMNİYET KATSAYISI 4,80" basıyordu (kamara
+    // silindiri çember kesiti, HRMA'nın boyutlandırdığı cidar); aynı motorun
+    // Performans Özeti "kazanılmış asgari 4,00" basıyor (lüle ve uç kapak).
+    // Sayılar tutarlı, istasyonlar farklı; rozet hangisi olduğunu
+    // söylemiyordu. Uç artık `fea.motor_station_comparison` yayımlar; rozet
+    // istasyonu ADIYLA basar, manşet sayısı ve istasyonları yanında yazar.
+    // Blok gelmezse null (eski rozet aynen).
+    function istasyonKiyasi(fea) {
+        const k = fea && fea.motor_station_comparison;
+        if (!k || typeof k !== 'object' || !isNum(k.motor_min_safety_factor)) {
+            return null;
+        }
+        const liste = function (v) {
+            return Array.isArray(v) ? v.filter(function (x) {
+                return typeof x === 'string';
+            }) : [];
+        };
+        return {
+            motor_min: k.motor_min_safety_factor,
+            governing: liste(k.governing_stations),
+            compared: liste(k.stations_compared),
+            reads_back: k.governing_reads_back_target === true,
+            fea_min: isNum(k.fea_min_safety_factor)
+                ? k.fea_min_safety_factor : null,
+            ratio: isNum(k.ratio_fea_over_motor) ? k.ratio_fea_over_motor : null,
+            headline: isNum(k.motor_headline_min_safety_factor)
+                ? k.motor_headline_min_safety_factor : null,
+            headline_stations: liste(k.motor_headline_governing_stations),
+            headline_same: k.headline_is_same_station_set === true,
+            outside_reasons: (k.stations_outside_reasons
+                              && typeof k.stations_outside_reasons === 'object')
+                ? k.stations_outside_reasons : {},
+        };
+    }
+
+    // İstasyon adları Performans Özeti'nin sözlüğünden (aynı dil);
+    // tanınmayan ad AYNEN kalır. Anahtarlar literal (ölü anahtar bekçisi).
+    function istasyonAdi(k) {
+        switch (k) {
+        case 'nozzle': return T('app.sfst.nozzle', 'nozzle');
+        case 'end_cap': return T('app.sfst.endCap', 'end cap');
+        case 'chamber_hoop': return T('app.sfst.chamberHoop', 'chamber hoop stress');
+        case 'chamber_von_mises': return T('app.sfst.chamberVonMises',
+                                           'chamber von Mises stress');
+        case 'buckling_axial': return T('app.sfst.bucklingAxial', 'axial buckling');
+        default: return String(k);
+        }
+    }
+
+    function disaridaNedeni(kod) {
+        switch (kod) {
+        case 'separate_nozzle_part':
+            return T('fea.outside.separateNozzlePart',
+                'separate nozzle part with its own thickness and strength; '
+                + 'this mesh carries the chamber wall along the nozzle');
+        case 'not_meshed_closed_end_force':
+            return T('fea.outside.endCapNotMeshed',
+                'not in this mesh (applied as a closed-end force)');
+        case 'not_modelled_linear_static':
+            return T('fea.outside.bucklingNotModelled',
+                'not modelled by this linear static run');
+        default:
+            return T('fea.outside.notInMesh', 'not in this mesh');
+        }
+    }
+
+    // Manşet kaynağı (uçun makine etiketi) kullanıcı dilinde.
+    function kaynakAdi(kaynak) {
+        if (kaynak === 'nodal/SPR field') {
+            return T('fea.headlineSourceNodalSpr', 'nodal/SPR field');
+        }
+        // V306/KATI-MODEL (M-KATI-10): asgari emniyet katsayısı ASME
+        // P_L+P_b lineerleştirmesidir (scalars._basis), düğüm alanı değil.
+        if (kaynak === 'asme_linearised') {
+            return T('fea.sfSourceLinearised', 'ASME P_L+P_b, linearised');
+        }
+        return String(kaynak);
+    }
+
     /* ÖH D26 · P11B3-20 — NOT_MODELLED DALINDA SUSTURULMUŞ İKİ ALAN.
 
        ÖLÇÜLDÜ (a3/once.json, taban 7751531):
@@ -857,6 +1109,17 @@
                 headline_source: scalars.headline_source || null,
                 min_safety_factor: isNum(scalars.min_safety_factor)
                     ? scalars.min_safety_factor : null,
+                // V306/KATI-MODEL (M-KATI-10): tepe (düğüm) katsayısı ve
+                // köprünün dayanım hükmü (verildi / geri çekme gerekçeleri)
+                // rozet satırına taşınır.
+                peak_safety_factor: isNum(scalars.peak_safety_factor)
+                    ? scalars.peak_safety_factor : null,
+                hukum_verildi: (fea.meta && fea.meta.hukum
+                                && typeof fea.meta.hukum.verildi === 'boolean')
+                    ? fea.meta.hukum.verildi : null,
+                hukum_gerekceleri: (fea.meta && fea.meta.hukum
+                                    && Array.isArray(fea.meta.hukum.geri_cekme_gerekceleri))
+                    ? fea.meta.hukum.geri_cekme_gerekceleri : [],
                 yield_mpa: isNum(scalars.yield_strength_pa)
                     ? scalars.yield_strength_pa / PA_PER_MPA : null,
                 material_key: scalars.material_key || null,
@@ -875,6 +1138,14 @@
             // okumuyordu ve bu yüzden motorun UNSAFE hükmünün üstüne
             // yeşil rozet basıyordu. Uydurma yok: blok gelmezse null.
             motor_karsilastirma: motorKarsilastirmasi(fea),
+            // V306/GÜVENLİK (NR-18): aynı cidar istasyonları + manşet.
+            istasyon_kiyasi: istasyonKiyasi(fea),
+            // V306/FEA-SIVI: iki katmanlı termo-elastik katmanlar (kalem 1),
+            // fiziksel mesnet ve ayrışma (kalem 3), nozul cidarı beyanı
+            // (kalem 2). Alan gelmezse null (uydurma yok).
+            two_layer: ikiKatmanGorunumu(fea),
+            support: mesnetGorunumu(fea),
+            nozzle_wall: luleCidariGorunumu(fea),
             limits: fea.limits || null,
             not_modelled: (fea.meta && Array.isArray(fea.meta.not_modelled))
                 ? fea.meta.not_modelled : [],
@@ -1096,6 +1367,8 @@
             <div id="fea_chip" style="margin:8px 0;"></div>
             <div id="fea_plot_vm" class="plot-container" style="min-height:340px; display:none;"></div>
             <div id="fea_plot_sf" class="plot-container" style="min-height:340px; display:none;"></div>
+            <div id="fea_sf_note" style="font-family:var(--hd-mono); font-size:0.75rem;
+                color:var(--hd-ink-dim, #7d97a5); margin:6px 0;"></div>
             <div id="fea_plot_quality" class="plot-container" style="min-height:340px; display:none;"></div>
             <div id="fea_quality_note" style="font-family:var(--hd-mono); font-size:0.72rem;
                 color:var(--hd-ink-dim, #7d97a5); margin:6px 0;"></div>
@@ -1366,14 +1639,65 @@
 
     function kaynakliRozet(metin, kaynak) {
         const govde = String(metin).replace(/\s*\([^()]*\)\s*$/, '');
-        return kaynak ? govde + ' (' + kaynak + ')' : govde;
+        // V306/GÜVENLİK (NR-18): kaynak etiketi kullanıcı dilinde.
+        return kaynak ? govde + ' (' + kaynakAdi(kaynak) + ')' : govde;
+    }
+
+    // V306/GÜVENLİK (NR-18): motorun aynı cidardaki katsayısı istasyon
+    // ADIYLA + (ayrıysa) Performans Özeti asgarisi ve istasyonları.
+    function istasyonRozetleri(ik, mk) {
+        const adlar = function (l) { return l.map(istasyonAdi).join(', '); };
+        let metin = TF('fea.badgeEngineSfStation', {
+            v: fmt(ik.motor_min, 2), station: adlar(ik.governing),
+            set: adlar(ik.compared),
+            fea: (ik.fea_min !== null) ? fmt(ik.fea_min, 2) : '?',
+            ratio: (ik.ratio !== null) ? fmt(ik.ratio, 2) : '?' },
+            'ENGINE’S OWN SAFETY FACTOR {v} — station: {station} (the '
+            + 'same wall as this mesh; stations compared: {set}). This run’s '
+            + 'minimum {fea} is {ratio}x that; the lower number governs the '
+            + 'design');
+        // Totoloji beyanı: motorun keskin tanımı (istasyon hedefi geri
+        // okuyor) YA DA köprünün beyanı (çember kesiti HRMA'nın
+        // boyutlandırdığı cidar) — uç söylüyorsa gizlenmez.
+        const kopruTotoloji = !!(mk && mk.motor_sf_totolojik === true
+            && ik.governing.indexOf('chamber_hoop') !== -1);
+        if (ik.reads_back || kopruTotoloji) {
+            metin += ' — ' + T('fea.badgeEngineSfTautological',
+                'the engine SIZED the wall with the same stress model it '
+                + 'evaluates, so this number is not an independent '
+                + 'verification either');
+        }
+        let html = badge(esc(metin), sfRozetTuru(ik.motor_min));
+        if (ik.headline !== null && !ik.headline_same
+                && ik.headline_stations.length) {
+            const nedenler = ik.headline_stations.map(function (st) {
+                const kod = ik.outside_reasons[st];
+                return istasyonAdi(st) + (kod ? ': ' + disaridaNedeni(kod) : '');
+            }).join('; ');
+            html += badge(esc(TF('fea.badgeHeadlineStations', {
+                v: fmt(ik.headline, 2), reasons: nedenler },
+                'PERFORMANCE SUMMARY MINIMUM {v} belongs to other stations — '
+                + '{reasons}; it is not compared with this run')), 'info');
+        }
+        return html;
     }
 
     function renderBadges(el, vm) {
         let html = '';
         if (vm.engine_layout) {
+            // V306/FEA-SIVI: motor türü kullanıcı dilinde (TR ekranda ham
+            // 'LIQUID' basılıyordu). Anahtarlar literal.
+            const turAdi = {
+                liquid: T('motor.liquid', 'Liquid'),
+                hybrid: T('motor.hybrid', 'Hybrid'),
+                solid: T('motor.solid', 'Solid'),
+            }[vm.engine_layout] || String(vm.engine_layout);
+            // V306 ana model (DİL-KATI2 DEVİR): büyük harf dile duyarlı —
+            // TR'de toUpperCase() 'Hibrit' → 'HIBRIT' basıyordu ('HİBRİT').
+            const _rozetYerel = (typeof window !== 'undefined' && window.I18N
+                && window.I18N.lang === 'tr') ? 'tr-TR' : 'en-US';
             html += badge(T('fea.badgeEngine', 'ENGINE') + ': '
-                + esc(String(vm.engine_layout).toUpperCase()), 'info');
+                + esc(String(turAdi).toLocaleUpperCase(_rozetYerel)), 'info');
         }
         html += badge(TF('fea.badgeMesh',
             { elems: vm.mesh_info.n_elems, nodes: vm.mesh_info.n_nodes },
@@ -1398,7 +1722,8 @@
             { v: fmt(vm.scalars.von_mises_max_mpa, 1) },
             'PEAK von MISES {v} MPa (Gauss points)'),
             vm.scalars.headline_source), 'info');
-        if (vm.scalars.min_safety_factor !== null) {
+        const _sfGeriCekildi = (vm.scalars.hukum_verildi === false);
+        if (vm.scalars.min_safety_factor !== null || _sfGeriCekildi) {
             // Eşikler kontur skalasıyla TEK KAYNAKTAN (P11B3-04): rozetin
             // "yeşil" dediği yer ile haritanın yeşil boyadığı yer aynıdır.
             // ÖH D19 · P11B3-01 — HÜKÜM RENGİ KÖTÜMSERDİR.
@@ -1409,8 +1734,12 @@
             // için "emniyet katsayısı 34" görüyordu. Sayılar birbirinin
             // yerine GEÇMEZ (ikisi ayrı ayrı basılır), ama RENK — yani
             // tehlike hükmü — yayımlanan en kötü sayıdan verilir.
-            const motorSf = vm.motor_karsilastirma
-                ? vm.motor_karsilastirma.motor_safety_factor : null;
+            // V306/GÜVENLİK (NR-18): aynı cidar istasyonlarının en küçüğü
+            // (uç yayımladıysa); yoksa köprünün kıyas sayısı.
+            const ik = vm.istasyon_kiyasi;
+            const motorSf = ik ? ik.motor_min
+                : (vm.motor_karsilastirma
+                    ? vm.motor_karsilastirma.motor_safety_factor : null);
             const hukumSf = (motorSf !== null)
                 ? Math.min(vm.scalars.min_safety_factor, motorSf)
                 : vm.scalars.min_safety_factor;
@@ -1421,10 +1750,14 @@
             // gerekmemelidir. Uç bir şey söylemediyse İDDİA EDİLMEZ.
             const derate = vm.motor_karsilastirma
                 ? vm.motor_karsilastirma.akma_derate_edildi : null;
+            // V306/KATI-MODEL (M-KATI-10): kaynak etiketi ASME P_L+P_b
+            // lineerleştirmesi (eskiden tepe gerilmenin 'düğüm/SPR alanı'
+            // etiketi basılıyordu; aynı satırdaki tepe gerilme akmanın
+            // üstündeyken iki 'düğüm/SPR' sayısı birbirini tutmuyordu).
             let sfMetni = kaynakliRozet(TF('fea.badgeSf',
                 { v: fmt(vm.scalars.min_safety_factor, 2) },
                 'MIN SAFETY FACTOR {v} (Gauss points)'),
-                vm.scalars.headline_source);
+                'asme_linearised');
             if (derate === false) {
                 sfMetni += ' — ' + T('fea.badgeSfRoomTempYield',
                     'room-temperature yield, NOT derated for wall temperature');
@@ -1432,17 +1765,91 @@
                 sfMetni += ' — ' + T('fea.badgeSfDeratedYield',
                     'yield derated to the wall temperature reported by the engine');
             }
-            html += badge(sfMetni, kind);
+            if (_sfGeriCekildi) {
+                // V306/KATI-MODEL (M-KATI-10, S1): ÇÖZÜCÜ HÜKMÜ GERİ ÇEKTİYSE
+                // EMNİYET KATSAYISI MANŞETTE BASILMAZ. Ölçüldü (tur L2): uç
+                // `meta.hukum.beyan = "HÜKÜM GERİ ÇEKİLDİ (kisit_yeri_
+                // duyarliligi_yuksek)"` derken rozet "EN KÜÇÜK EMNİYET
+                // KATSAYISI 1,37" basıyordu; ekranda hiçbir yerde "geri
+                // çekildi" yoktu. Gerekçeler satır hükmüyle AYNI anahtarlardan.
+                const ad = vm.scalars.hukum_gerekceleri.map(function (k) {
+                    return T('panel.fea.withheld.' + k, k);
+                }).join('; ');
+                html += badge(TF('fea.badgeSfWithheld', { reasons: ad },
+                    'NO SAFETY FACTOR PUBLISHED — the solver WITHHELD the strength '
+                    + 'verdict: {reasons}'), 'warn');
+            } else {
+                html += badge(sfMetni, kind);
+            }
+            // V306/KATI-MODEL (M-KATI-10): tepe (düğüm) gerilmesi akmanın
+            // üstündeyse bu, asgari katsayının yanında ADIYLA söylenir:
+            // tepe gerilme (ASME 'F') plastik çöküş hükmüne girmez.
+            // V306/FEA-SIVI: iki katmanlı termo-elastik çözümde düğüm
+            // alanının akma üstü bölgesi ısıl (ikincil) gerilmedir; katman
+            // rozetleri onu P+Q ⟷ 2 x akma ile adıyla söyler (ASME 'F'
+            // tepe cümlesi orada yanlış olurdu).
+            if (!_sfGeriCekildi && vm.scalars.peak_safety_factor !== null
+                    && vm.scalars.peak_safety_factor < 1.0
+                    && !(vm.two_layer && vm.two_layer.solved)) {
+                html += badge(TF('fea.badgePeakAboveYield',
+                    { sf: fmt(vm.scalars.peak_safety_factor, 2),
+                      min: fmt(vm.scalars.min_safety_factor, 2) },
+                    'PEAK (nodal) STRESS ABOVE YIELD: nodal safety factor {sf} '
+                    + '— a local peak stress (ASME "F"), which the plastic-'
+                    + 'collapse check excludes; the verdict {min} is the '
+                    + 'linearised P_L+P_b stress'), 'warn');
+            }
             // Motorun kendi sayısı AYRI rozette, kendi rengiyle.
-            if (motorSf !== null) {
+            if (_sfGeriCekildi && motorSf !== null) {
+                // V306/KATI-MODEL (M-KATI-10): köprü hükmü geri çekildiyse
+                // motorun kendi sayısı basılır ama köprünün sayısına göre
+                // oranı/kıyası basılmaz (geri çekilen sayı dolaylı yoldan
+                // manşete dönmesin).
+                let mMetni = TF('fea.badgeEngineSfWithheld', { v: fmt(motorSf, 2) },
+                    'ENGINE\u2019S OWN SAFETY FACTOR {v} (the structural run '
+                    + 'published no safety factor: its verdict was withheld)');
+                const mk = vm.motor_karsilastirma;
+                if ((mk && mk.motor_sf_totolojik === true)
+                        || (ik && ik.reads_back === true)) {
+                    mMetni += ' — ' + T('fea.badgeEngineSfTautological',
+                        'the engine SIZED the wall with the same stress model '
+                        + 'it evaluates, so this number is not an independent '
+                        + 'verification either');
+                }
+                html += badge(mMetni, sfRozetTuru(motorSf));
+            } else if (ik) {
+                html += istasyonRozetleri(ik, vm.motor_karsilastirma);
+            } else if (vm.two_layer && vm.two_layer.solved) {
+                // V306/FEA-SIVI: iki katmanda motorun sayıları katman
+                // rozetlerinde, kendi katmanının yanında (aşağıda).
+            } else if (motorSf !== null) {
                 const oran = vm.motor_karsilastirma.oran_kopru_bolu_motor;
-                let motorMetni = TF('fea.badgeEngineSf',
+                // V306/KATI-MODEL (M-KATI-10): oran 1'in altındaysa metin
+                // 'yüksek' DEMEZ (tur L2: 0,55 kat '0,5 kat yüksek' diye
+                // basılıyordu); düşük durumda ayrı cümle.
+                let motorMetni = (oran !== null && oran < 1.0)
+                    ? TF('fea.badgeEngineSfLower',
+                         { v: fmt(motorSf, 2), ratio: fmt(oran, 2) },
+                         'ENGINE\u2019S OWN SAFETY FACTOR {v} — the structural '
+                         + 'run finds {ratio}x that (lower); the lower number '
+                         + 'governs the design')
+                    : TF('fea.badgeEngineSf',
                     { v: fmt(motorSf, 2),
-                      ratio: (oran !== null) ? fmt(oran, 1) : '?' },
+                      ratio: (oran !== null) ? fmt(oran, 2) : '?',
+                      // V306/FEA-SIVI (M-SIVI-15): farkın nedeni TEK tanımdan —
+                      // dayanım düşürme bayrağı (yukarıdaki SF rozetiyle aynı
+                      // alan); termal gerilme bu koşumda modellenmez.
+                      why: (derate === true)
+                          ? T('fea.engineWhyNoThermal',
+                              'this run models no thermal stress (pressure '
+                              + 'loads only); the yield is derated to the wall '
+                              + 'temperature in both numbers')
+                          : T('fea.engineWhyNoThermalNoDerate',
+                              'this run models no thermal stress and uses the '
+                              + 'room-temperature yield') },
                     'ENGINE\u2019S OWN SAFETY FACTOR {v} — the structural run '
-                    + 'reports {ratio}x higher because thermal stress and '
-                    + 'strength derating are not modelled here; the lower '
-                    + 'number governs the design');
+                    + 'finds {ratio}x that (higher): {why}; the lower number '
+                    + 'governs the design');
                 if (vm.motor_karsilastirma.motor_sf_totolojik === true) {
                     motorMetni += ' — ' + T('fea.badgeEngineSfTautological',
                         'the engine SIZED the wall with the same stress model '
@@ -1456,6 +1863,20 @@
                 'SAFETY FACTOR NOT PUBLISHED (no yield strength in the material record)'),
                 'dim');
         }
+        if (vm.two_layer && vm.two_layer.solved) {
+            vm.two_layer.layers.forEach(function (k) {
+                html += katmanRozetleri(k);
+            });
+        } else if (vm.two_layer && vm.two_layer.solved === false) {
+            // Eksik alan adları API yanıtında (two_layer.missing) kalır;
+            // ekranda ham alan adı basılmaz.
+            html += badge(esc(T('fea.badgeTwoLayerNotSolved',
+                'TWO-LAYER WALL NOT SOLVED as two layers: the engine did not '
+                + 'publish all layer data; the closeout-only solution is '
+                + 'shown')), 'warn');
+        }
+        if (vm.support) html += mesnetRozetleri(vm.support);
+        if (vm.nozzle_wall) html += luleCidariRozeti(vm.nozzle_wall);
         const conv = vm.convergence;
         if (conv) {
             html += badge(conv.converged
@@ -1930,11 +2351,19 @@
             // renk çubuğunun kendi başlığında yazar — kullanıcı kırmızının
             // "en düşük" değil "akma aşıldı" demek olduğunu okumadan
             // haritaya bakmasın.
-            const cbar = TF('fea.cbarSfAnchored',
-                { err: fmt(SF_ERR_MAX, 1), ok: fmt(SF_OK_MIN, 1),
-                  max: fmt(SF_SCALE_MAX, 1) },
-                'Safety factor [-] — absolute scale: red below {err}, '
-                + 'green from {ok}, saturated at {max}');
+            // V306/FEA-SIVI (kalem 5, V305 CI G2-N2): uzun dikey renk
+            // çubuğu başlığı çizimin altından taşıyor, alt taşma düzeltici
+            // margin.b'yi 163 px şişirip çizim alanını eziyordu. Çubukta
+            // kısa etiket + birim; mutlak ölçek açıklaması grafiğin altındaki
+            // notta (aynı anahtar, aynı metin).
+            const cbar = T('fea.cbarSf', 'Safety factor [-]');
+            if (els.sfNote) {
+                els.sfNote.textContent = TF('fea.cbarSfAnchored',
+                    { err: fmt(SF_ERR_MAX, 1), ok: fmt(SF_OK_MIN, 1),
+                      max: fmt(SF_SCALE_MAX, 1) },
+                    'Safety factor [-] — absolute scale: red below {err}, '
+                    + 'green from {ok}, saturated at {max}');
+            }
             try {
                 drawFigure(els.sf, sfFieldFigure(vm, vm.safety_factor, title,
                                                  cbar, 'feaCarpetSf'));
@@ -1946,6 +2375,7 @@
             }
         } else {
             els.sf.style.display = 'none';
+            if (els.sfNote) els.sfNote.textContent = '';
         }
 
         // Eleman kalite haritası
@@ -2076,6 +2506,7 @@
             cancel: document.getElementById('fea_cancel'),
             vm: document.getElementById('fea_plot_vm'),
             sf: document.getElementById('fea_plot_sf'),
+            sfNote: document.getElementById('fea_sf_note'),
             quality: document.getElementById('fea_plot_quality'),
             qualityNote: document.getElementById('fea_quality_note'),
             conv: document.getElementById('fea_plot_conv'),
@@ -2344,12 +2775,15 @@
         });
     }
 
-    // Port gerinim payı sınıflaması — motorun KENDİ risk sınıflamasıyla
-    // aynı eşikler (solid_rocket_engine._calculate_grain_structural:
-    // >=2 Low, >=1 Medium, <1 High). TEK tanım yeri: hem standalone rozet
-    // hem Merkez kiracısının hükmü buradan geçer (parti 34).
+    // Port gerinim payı sınıflaması — motorun KENDİ çatlak sınıfıyla aynı
+    // ölçüt (solid_rocket_engine._calculate_grain_structural). TEK tanım
+    // yeri: hem standalone rozet hem Merkez kiracısının hükmü buradan geçer
+    // (parti 34). V306/KATI-TANE (K1): kaynaksız 2,0 bandı ('warn' 1-2)
+    // kalktı; ölçüt NASA SP-8073 §2.5.5 Denk. (46) emniyet payıdır,
+    // MS = marj − 1: MS < 0 kapasite aşılır ('err'), MS >= 0 aşılmaz.
+    // Oturmamış kabul ölçütünde yeşil verilmez (çağıran yerler düşürür).
     function strainMarginKind(margin) {
-        return margin < 1 ? 'err' : (margin < 2 ? 'warn' : 'ok');
+        return margin < 1 ? 'err' : 'ok';
     }
 
     // ------------------------------------------------------------------
@@ -2395,12 +2829,42 @@
             p.slot_width = gd.slot_width_mm;
             p.slot_depth = gd.slot_depth_mm;
         }
+        // V306/TANE NR-16 — ısıl yük girdileri analitik bloğun KULLANDIĞI
+        // değerlerden: yerleşim yalnız kullanıcı verdiyse (aksi hâlde uç da
+        // aynı varsayılanı aynı beyanla uygular), depolama sıcaklığı her zaman.
+        const sa = (r.structural_analysis && typeof r.structural_analysis === 'object')
+            ? r.structural_analysis : {};
+        const gs = (sa.grain_structural && typeof sa.grain_structural === 'object')
+            ? sa.grain_structural : {};
+        if (gs.grain_support_source === 'user input') {
+            p.grain_support = gs.grain_support;
+        }
+        p.ambient_temp = gs.storage_temperature_k;
+        // V306/KATI-MODEL (M-KATI-16): kasanın basınç altındaki genişlemesi
+        // analitik bloğun KENDİ dış sınır koşulundan (tek kaynak). Eskiden
+        // FEA kasayı rijit tutuyordu (tur L2 kartuşta %0,36 ⟷ %0,819).
+        p.case_radial_expansion_mm = gs.case_radial_expansion_mm;
         Object.keys(p).forEach(function (k) {
             if (p[k] === null || p[k] === undefined || p[k] === '') {
                 delete p[k];
             }
         });
         return p;
+    }
+
+    // V306/TANE NR-16 — tane paneli sayıları TR'de virgüllü yazılır. Ortak
+    // `fmt` yapısal panelle paylaşılır (GÜVENLİK kulvarının bölgesi), bu
+    // yüzden tane kesiti kendi yerelleştirilmiş biçimleyicisini kullanır;
+    // ayraç kararı I18N.number'da TEK yerdedir.
+    function gNum(v, digits) {
+        if (!isNum(v)) return '—';
+        return (window.I18N && typeof window.I18N.number === 'function')
+            ? window.I18N.number(v, digits) : v.toFixed(digits);
+    }
+    function gSig(v, digits) {
+        const t = fmtSig(v, digits);
+        return (window.I18N && typeof window.I18N.decimalText === 'function')
+            ? window.I18N.decimalText(t) : t;
     }
 
     // ------------------------------------------------------------------
@@ -2420,7 +2884,7 @@
         return (m === null) ? null : m / PA_PER_MPA;
     }
 
-    function buildGrainViewModel(fea, errorText) {
+    function buildGrainViewModel(fea, errorText, analytic) {
         if (errorText) return { mode: 'error', error: String(errorText) };
         if (!fea || typeof fea !== 'object') return { mode: 'idle' };
         if (fea.status !== 'ok') {
@@ -2511,6 +2975,28 @@
                     ? bore.strain_margin : null,
             },
             warnings: Array.isArray(fea.warnings) ? fea.warnings : [],
+            // V306/TANE NR-16 — yük kümesi, yük payları, küçük-gerinim durumu
+            // ve kapasite hükmü uçtan AYNEN; analitik yol sayfa sonucundan.
+            loads: (fea.loads && typeof fea.loads === 'object') ? fea.loads : null,
+            load_components: (bore.load_components
+                              && typeof bore.load_components === 'object')
+                ? bore.load_components : null,
+            small_strain_status: (typeof bore.small_strain_status === 'string')
+                ? bore.small_strain_status : null,
+            small_strain_limit: (bore.small_strain_limits
+                                 && isNum(bore.small_strain_limits.hukum_esigi))
+                ? bore.small_strain_limits.hukum_esigi : null,
+            capability_verdict: (bore.capability_verdict
+                                 && typeof bore.capability_verdict === 'object')
+                ? bore.capability_verdict : null,
+            // V306/KATI-KALAN (kalem 3): kabul büyüklüğü oturmadığı için pay
+            // sayısı yayımlanmadıysa ucun neden kaydı (yoksa null).
+            margin_withheld: (bore.strain_margin_withheld
+                              && typeof bore.strain_margin_withheld === 'object')
+                ? bore.strain_margin_withheld : null,
+            bore_pressure_bar: isNum(scalars.bore_pressure_pa)
+                ? scalars.bore_pressure_pa / 1e5 : null,
+            analytic: grainAnalyticFor(analytic, fea.loads),
             limits: fea.limits || null,
             not_modelled: (fea.meta && Array.isArray(fea.meta.not_modelled))
                 ? fea.meta.not_modelled : [],
@@ -2531,6 +3017,47 @@
         };
         vm.grid_consistent = (grid.ni * grid.nj === mesh.n_nodes);
         return vm;
+    }
+    // V306/TANE NR-16 — analitik yolun (Uyarılar / Yapısal Analiz) sayıları
+    // FEA ile YAN YANA basılır; yalnız aynı yerleşim ve aynı depolama
+    // sıcaklığıyla kurulmuşsa (bayat ya da başka koşunun bloğu basılmaz).
+    function grainAnalyticFor(gs, loads) {
+        if (!gs || typeof gs !== 'object' || !loads) return null;
+        // V306/KATI-TANE (K2): köşe yığılması çözülmeyen portta (star,
+        // finocyl, slotted) analitik yol yığılmış port gerinimi YAYIMLAMAZ;
+        // dairesel port gerinimini, izin verilen en büyük yığılma katsayısını
+        // ve sınıf kodunu yayımlar. İki yol yine yan yana basılır.
+        const cozulmedi = gs.stress_concentration_status === 'not_resolved'
+            && isNum(gs.circular_port_bore_strain_percent);
+        if (!isNum(gs.bore_strain_percent) && !cozulmedi) return null;
+        if (gs.grain_support !== loads.grain_support) return null;
+        if (isNum(gs.storage_temperature_k) && isNum(loads.storage_temperature_k)
+                && Math.abs(gs.storage_temperature_k
+                            - loads.storage_temperature_k) > 1e-9) return null;
+        if (cozulmedi) {
+            return {
+                unresolved: true,
+                circular_pct: gs.circular_port_bore_strain_percent,
+                allowable_kt: isNum(gs.allowable_concentration_factor)
+                    ? gs.allowable_concentration_factor : null,
+                exceeded: gs.crack_propagation_risk === 'capability_exceeded',
+            };
+        }
+        return {
+            total_pct: gs.bore_strain_percent,
+            pressure_pct: isNum(gs.pressure_only_bore_strain_percent)
+                ? gs.pressure_only_bore_strain_percent : null,
+            thermal_pct: isNum(gs.thermal_only_bore_strain_percent)
+                ? gs.thermal_only_bore_strain_percent : null,
+            kt: isNum(gs.stress_concentration_factor)
+                ? gs.stress_concentration_factor : null,
+            sf: isNum(gs.strain_safety_factor) ? gs.strain_safety_factor : null,
+            crack: (typeof gs.crack_propagation_risk === 'string')
+                ? gs.crack_propagation_risk : null,
+            beyond_small_strain: gs.small_strain_limit_exceeded === true,
+            small_strain_limit: isNum(gs.small_strain_limit)
+                ? gs.small_strain_limit : null,
+        };
     }
     // <<< GRAIN_FEA_VIEWMODEL_END
     // ------------------------------------------------------------------
@@ -2698,15 +3225,22 @@
         };
         if (boreRange) {
             layout.yaxis.range = boreRange.range;
+            // NR-16: ham anahtar ("strain_capability_pct = 2 % — off
+            // scale") kullanıcı diline; sayılar yerel ayraçla.
             layout.annotations = [{
                 xref: 'paper', yref: 'paper', x: 0, y: 1.0,
                 xanchor: 'left', yanchor: 'bottom', showarrow: false,
-                font: { size: 10, color: BAD_COLOR },
-                text: 'strain_capability_pct = ' + cap
-                    + ' % — off scale (peak/capability = '
-                    + boreRange.kapasiteOlcekDisi.toFixed(4) + ')',
+                font: { size: 12, color: BAD_COLOR },
+                text: esc(gFmtTpl(GL('capOffScale',
+                    'Strain capability {cap}% is off this scale (peak strain '
+                    + '/ capability = {r})'),
+                    { cap: gNum(cap, 1),
+                      r: gNum(boreRange.kapasiteOlcekDisi, 3) })),
             }];
         }
+        // NR-16: tik etiketleri en çok 3 anlamlı basamak (TR'de virgül
+        // ayracı sayfanın Plotly ayraç ayarından gelir).
+        layout.yaxis.tickformat = '.3~g';
         return { traces: traces, layout: layout };
     }
 
@@ -2714,19 +3248,27 @@
     //: BORE_EKSEN_PAYI katından uzaktaysa eksen banda oturtulur ve
     //: kapasitenin ölçek dışı kaldığı oranıyla birlikte döner; aksi hâlde
     //: null döner (bugünkü otomatik eksen korunur).
+    //: V306/TANE NR-16 — DÜZ DAĞILIM: dairesel portta gerinim istasyondan
+    //: istasyona yalnız yuvarlama kadar (1e-12) değişir; bant o kadar dar
+    //: alınınca eksen "0,412311138431 / …432 / …433" basıyordu. Eksen bandı
+    //: tepe gerinim büyüklüğünün BORE_EKSEN_MIN_BANT katından dar olmaz
+    //: (görünürlük kararı, fizik değil; veri değişmez).
     const BORE_EKSEN_PAYI = 3.0;
+    const BORE_EKSEN_MIN_BANT = 0.1;
     function boreEksenAraligi(strain, cap) {
         if (!Array.isArray(strain) || !strain.length || !isNum(cap)) return null;
         const sonlu = strain.filter(isNum);
         if (!sonlu.length) return null;
         const dusuk = Math.min.apply(null, sonlu);
         const yuksek = Math.max.apply(null, sonlu);
-        const bant = yuksek - dusuk;
+        const bant = Math.max(yuksek - dusuk, BORE_EKSEN_MIN_BANT
+            * Math.max(Math.abs(yuksek), Math.abs(dusuk)));
         if (!(bant > 0)) return null;
         if (Math.abs(cap - yuksek) <= BORE_EKSEN_PAYI * bant) return null;
-        const pay = 0.12 * bant;
+        const orta = 0.5 * (yuksek + dusuk);
+        const yari = 0.5 * bant + 0.12 * bant;
         return {
-            range: [dusuk - pay, yuksek + pay],
+            range: [orta - yari, orta + yari],
             kapasiteOlcekDisi: yuksek / cap,
         };
     }
@@ -2749,8 +3291,10 @@
             layout: {
                 title: GL('chartConv',
                     'Mesh convergence — peak von Mises vs element count'),
+                // NR-16 görsel tur: log eksenin ara (2…9) etiketleri 9 px
+                // basılıyordu (tik ≥ 12 px kuralı); yalnız on'un kuvvetleri.
                 xaxis: { title: GL('axisElems', 'Elements in mesh [-]'),
-                         type: 'log' },
+                         type: 'log', dtick: 1 },
                 yaxis: { title: GL('axisVmConv',
                     'Peak von Mises (SPR nodal) [MPa]') },
                 height: 300,
@@ -2759,11 +3303,229 @@
         };
     }
 
+    // NR-16 — önceden biçimlenmiş saf sayı metni ('10.05') yerel ayraçla.
+    function gSayiMetni(t) {
+        return (window.I18N && typeof window.I18N.decimalText === 'function')
+            ? window.I18N.decimalText(t) : t;
+    }
+
+    // NR-16 — '0.01641%' gibi önceden biçimlenmiş yüzde metninin sayı
+    // kısmı yerel ayraca çevrilir (sözcük metni dokunulmadan döner).
+    function gYuzdeMetni(t) {
+        const m = /^([+-]?\d+(?:\.\d+)?)%$/.exec(String(t));
+        if (!m) return t;
+        const sayi = (window.I18N && typeof window.I18N.decimalText === 'function')
+            ? window.I18N.decimalText(m[1]) : m[1];
+        // TDK: yüzde işareti TR'de sayıdan önce (I18N.percent ile aynı kural).
+        return (window.I18N && window.I18N.lang === 'tr') ? ('%' + sayi) : (sayi + '%');
+    }
+
+    // NR-16 — YÜK KÜMESİ rozeti: gövdeye yapıştırılmış tanede port basıncı
+    // + gövdenin kısıtladığı kürleme/soğuma büzülmesi; kartuş yüklüde
+    // yalnız basınç. Uç `loads` yayımlamadıysa rozet basılmaz.
+    function grainLoadsBadge(vm) {
+        const L = vm.loads;
+        if (!L || !isNum(vm.bore_pressure_bar)) return '';
+        // Yerleşimden seçilir (ısıl gerinim 0 olan gövdeye yapıştırılmış
+        // tane, ör. depolama = kürleme sıcaklığı, kartuş diye yazılmaz).
+        // V306/KATI-MODEL (M-KATI-16): kasa esnemesi uygulandıysa rozet
+        // "gövde rijit" DEMEZ; uygulanan genişleme mm ile yazılır.
+        const kasaEsner = (L.case_expansion_under_pressure === true
+                           && isNum(L.case_radial_expansion_mm));
+        if (L.grain_support !== 'cartridge_loaded' && isNum(L.free_thermal_strain)) {
+            // Serbest ısıl gerinimin BÜYÜKLÜĞÜ yazılır, yönü sözcükle
+            // (soğumada büzülme, ısınmada genleşme): "%-0,800" basılmaz.
+            const buzulme = L.free_thermal_strain <= 0;
+            if (kasaEsner) {
+                return badge(gFmtTpl(GL('badgeLoadsBondedCase',
+                    'LOADS: bore pressure {p} bar + cure/cool-down shrinkage '
+                    + 'restrained by the case (case-bonded; free thermal {kind} '
+                    + '{eps}%, {tc} K → {ts} K); case expanding {u} mm under '
+                    + 'pressure (the analytic path\'s own outer condition)'),
+                    { p: gNum(vm.bore_pressure_bar, 1),
+                      kind: buzulme ? GL('thermalShrinkage', 'shrinkage')
+                                    : GL('thermalExpansion', 'expansion'),
+                      eps: gNum(Math.abs(100 * L.free_thermal_strain), 3),
+                      tc: gNum(L.cure_temperature_k, 0),
+                      ts: gNum(L.storage_temperature_k, 0),
+                      u: gNum(L.case_radial_expansion_mm, 4) }), 'info');
+            }
+            return badge(gFmtTpl(GL('badgeLoadsBonded',
+                'LOADS: bore pressure {p} bar + cure/cool-down shrinkage '
+                + 'restrained by the case (case-bonded; free thermal {kind} '
+                + '{eps}%, {tc} K → {ts} K); case held rigid'),
+                { p: gNum(vm.bore_pressure_bar, 1),
+                  kind: buzulme ? GL('thermalShrinkage', 'shrinkage')
+                                : GL('thermalExpansion', 'expansion'),
+                  eps: gNum(Math.abs(100 * L.free_thermal_strain), 3),
+                  tc: gNum(L.cure_temperature_k, 0),
+                  ts: gNum(L.storage_temperature_k, 0) }), 'info');
+        }
+        if (kasaEsner) {
+            return badge(gFmtTpl(GL('badgeLoadsCartridgeCase',
+                'LOADS: bore pressure {p} bar only (cartridge-loaded: the case '
+                + 'does not restrain the shrinkage, so no thermal strain); case '
+                + 'expanding {u} mm under pressure (the analytic path\'s own '
+                + 'outer condition)'),
+                { p: gNum(vm.bore_pressure_bar, 1),
+                  u: gNum(L.case_radial_expansion_mm, 4) }), 'info');
+        }
+        return badge(gFmtTpl(GL('badgeLoadsCartridge',
+            'LOADS: bore pressure {p} bar only (cartridge-loaded: the case '
+            + 'does not restrain the shrinkage, so no thermal strain); case '
+            + 'held rigid'),
+            { p: gNum(vm.bore_pressure_bar, 1) }), 'info');
+    }
+
+    // NR-16 — marj yoksa NEDENİ adıyla: küçük-gerinim aralığı aşıldıysa
+    // kapasite hükmü (aşılıyor / belirlenemedi), kopma uzaması yoksa eski
+    // rozet. "Kapasite kaydı yok" yalnız gerçekten kayıt yokken basılır.
+    // V306/KATI-KALAN (kalem 3): pay sayısı, kabul büyüklüğü ağla
+    // oturmadığı için yayımlanmadı — nedeni (keskin köşe tekilliği ya da
+    // genel yakınsamama) ucun kodundan; yoksa null.
+    function grainMarginWithheldText(w, labels) {
+        if (!w || typeof w !== 'object') return null;
+        if (w.reason_code === 'acceptance_not_converged_sharp_corner') {
+            return labels.corner;
+        }
+        if (w.reason_code === 'acceptance_not_converged') {
+            return labels.generic;
+        }
+        return null;
+    }
+
+    function grainMarginMissingBadge(vm) {
+        const s = vm.scalars;
+        const lim = isNum(vm.small_strain_limit) ? 100 * vm.small_strain_limit : null;
+        const cv = vm.capability_verdict;
+        const geri = grainMarginWithheldText(vm.margin_withheld, {
+            corner: GL('badgeMarginUnconvergedCorner',
+                'STRAIN MARGIN NOT PUBLISHED — the acceptance quantity (bore '
+                + 'strain) does not converge with the mesh: sharp inner-corner '
+                + 'singularity; the HRMA section carries no corner fillet'),
+            generic: GL('badgeMarginUnconverged',
+                'STRAIN MARGIN NOT PUBLISHED — the acceptance quantity (bore '
+                + 'strain) did not converge with the mesh'),
+        });
+        if (geri) return badge(geri, 'warn');
+        if (vm.small_strain_status === 'asildi' && isNum(s.max_bore_strain_pct)) {
+            if (cv && cv.status === 'exceeded'
+                    && isNum(cv.load_fraction_at_capability)) {
+                return badge(gFmtTpl(GL('badgeCapabilityExceeded',
+                    'STRAIN CAPABILITY EXCEEDED — the bore reaches the {cap}% '
+                    + 'capability at {f}% of the load, where the strain is '
+                    + 'still inside the {lim}% small-strain range; no margin '
+                    + 'number is printed because the full-load strain {s}% '
+                    + 'is beyond that range'),
+                    { cap: gNum(s.strain_capability_pct, 1),
+                      f: gNum(100 * cv.load_fraction_at_capability, 0),
+                      lim: gNum(lim, 0), s: gNum(s.max_bore_strain_pct, 2) }),
+                    'err');
+            }
+            if (cv && cv.status === 'undetermined') {
+                return badge(gFmtTpl(GL('badgeCapabilityUndetermined',
+                    'NO STRAIN VERDICT — the peak bore strain {s}% is beyond '
+                    + 'the {lim}% small-strain range of this linear solve and '
+                    + 'the capability is not reached inside it; a '
+                    + 'large-deformation solve is needed'),
+                    { lim: gNum(lim, 0), s: gNum(s.max_bore_strain_pct, 2) }),
+                    'warn');
+            }
+            return badge(gFmtTpl(GL('badgeMarginWithheld',
+                'STRAIN MARGIN WITHHELD — the peak bore strain {s}% is beyond '
+                + 'the {lim}% small-strain range of this linear solve'),
+                { lim: gNum(lim, 0), s: gNum(s.max_bore_strain_pct, 2) }),
+                'warn');
+        }
+        return badge(GL('badgeMarginMissing',
+            'STRAIN MARGIN NOT PUBLISHED (no strain capability record)'),
+            'dim');
+    }
+
+    // NR-16 — analitik yol ile FEA YAN YANA: hangi yükleri taşıdıkları ve
+    // farkın nedeni. Analitik blok yoksa (ya da başka koşunun) basılmaz.
+    function grainAnalyticBadges(vm) {
+        const a = vm.analytic;
+        if (!a) return '';
+        // V306/KATI-TANE (K2): köşe yığılması çözülmeyen port — analitik yol
+        // dairesel port gerinimini ve izin verilen en büyük yığılmayı
+        // basar; FEA keskin köşeyi ağla çözmeye çalışır ve oturmaz.
+        if (a.unresolved) {
+            let h = badge(gFmtTpl(GL('badgeAnalyticUnresolved',
+                'ANALYTIC PATH (Warnings and Structural Analysis): port '
+                + 'corner concentration not resolved; circular-port bore '
+                + 'strain {c}% (same radius and loads, no corners); the '
+                + 'corners may raise it at most {k} times before the '
+                + 'capability is reached'),
+                { c: gNum(a.circular_pct, 3), k: gNum(a.allowable_kt, 2) }),
+                a.exceeded ? 'err' : 'warn');
+            h += badge(GL('badgeAnalyticDiffUnresolved',
+                'WHY THE TWO PATHS DIFFER: both carry the same loads; this '
+                + 'FEA meshes the sharp corners of the port, where the '
+                + 'elastic strain has no finite value, so its peak keeps '
+                + 'growing with every refinement (see the acceptance metric); '
+                + 'the real value depends on the corner fillet, which the '
+                + 'HRMA section does not carry'), 'info');
+            return h;
+        }
+        // Sınıf rengi motorun KENDİ sınıf kodundan (küçük-gerinim kuralı
+        // dahil); yalnız sayıdan yeniden türetilmez.
+        const _sinifTuru = a.crack === 'capability_exceeded' ? 'err'
+            : (a.crack === 'capability_not_exceeded' ? 'ok'
+               : (isNum(a.sf) ? 'warn' : 'info'));
+        let html = badge(gFmtTpl(GL('badgeAnalytic',
+            'ANALYTIC PATH (Warnings and Structural Analysis): bore strain '
+            + '{tot}% = pressure with case expansion {p}% + thermal {t}% '
+            + '(circular port, closed form); strain safety factor {sf}'),
+            { tot: gNum(a.total_pct, 3), p: gNum(a.pressure_pct, 3),
+              t: gNum(a.thermal_pct, 3), sf: gNum(a.sf, 3) }),
+            _sinifTuru);
+        const _kasaEsner = !!(vm.loads && vm.loads.case_expansion_under_pressure === true);
+        html += _kasaEsner ? badge(GL('badgeAnalyticDiffCase',
+            'WHY THE TWO PATHS DIFFER: both carry the same pressure, case '
+            + 'expansion and thermal loads on the same circular port; the '
+            + 'analytic path is the closed-form thick-walled cylinder, this '
+            + 'FEA meshes the section, so the two differ only by the mesh '
+            + 'discretisation'), 'info') : badge(GL('badgeAnalyticDiff',
+            'WHY THE TWO PATHS DIFFER: both carry the same pressure and '
+            + 'thermal loads on the same circular port; the analytic path '
+            + 'also includes the case expanding under pressure (this FEA '
+            + 'holds the case rigid)'), 'info');
+        // NR-16: analitik yol da doğrusal küçük-gerinim çözümüdür; eşiğin
+        // üstündeyse aynı geçerlilik sınırı analitik sayının yanında yazılır.
+        if (a.beyond_small_strain && isNum(a.small_strain_limit)) {
+            html += badge(gFmtTpl(GL('badgeAnalyticSmallStrain',
+                'ANALYTIC PATH beyond the {lim}% small-strain range of its '
+                + 'linear solution: its safety factor is not a verdict; the '
+                + 'class follows the same small-strain rule as this FEA'),
+                { lim: gNum(100 * a.small_strain_limit, 0) }), 'warn');
+        }
+        return html;
+    }
+
     function grainRenderBadges(el, vm) {
         let html = '';
         if (vm.grain_type) {
+            // V306/DİL-ORTAK (DİL-KATI D6): ham tane tipi ('STAR') yerine
+            // sayfanın KENDİ tane tipi seçicisinin etiketi (kullanıcının
+            // seçtiği adın aynısı, etkin dilde); seçici yoksa ham tip.
+            const _tip = String(vm.grain_type);
+            let _tipAdi = _tip;
+            const _sec = (typeof document !== 'undefined' && document.getElementById)
+                ? document.getElementById('grain_type') : null;
+            if (_sec && _sec.options) {
+                for (let i = 0; i < _sec.options.length; i++) {
+                    const o = _sec.options[i];
+                    if (o.value === _tip && (o.textContent || '').trim()) {
+                        _tipAdi = o.textContent.trim();
+                        break;
+                    }
+                }
+            }
+            const _yerel = (typeof window !== 'undefined' && window.I18N
+                && window.I18N.lang === 'tr') ? 'tr-TR' : 'en-US';
             let etiket = GL('badgeType', 'SECTION') + ': '
-                + esc(String(vm.grain_type).toUpperCase());
+                + esc(_tipAdi.toLocaleUpperCase(_yerel));
             if (vm.symmetry_fraction) {
                 etiket += ' · ' + gFmtTpl(GL('badgeSlice', '1/{n} slice'),
                                           { n: vm.symmetry_fraction });
@@ -2774,9 +3536,11 @@
             'MESH {elems} elements / {nodes} nodes'),
             { elems: vm.mesh_info.n_elems, nodes: vm.mesh_info.n_nodes }),
             'info');
+        // V306/TANE NR-16 — bu koşunun TAŞIDIĞI YÜKLER adıyla (uç `loads`).
+        html += grainLoadsBadge(vm);
         html += badge(gFmtTpl(GL('badgeVm',
             'PEAK von MISES {v} MPa (Gauss points)'),
-            { v: fmt(vm.scalars.von_mises_gauss_max_mpa, 3) }), 'info');
+            { v: gNum(vm.scalars.von_mises_gauss_max_mpa, 3) }), 'info');
         // ÖH D25 · P11B3-12 — MANŞET ile HARİTA AYNI EKRANDA.
         // ÖLÇÜLDÜ (a3/once.json, taban cdf2106): rozet
         // `von_mises_gauss_max_pa` = 164.679,3 Pa'dan 0,165 MPa basıyordu;
@@ -2794,32 +3558,48 @@
             html += badge(gFmtTpl(GL('badgeVmNodal',
                 'MAP PEAK von MISES {v} MPa (nodal / SPR — this is the value '
                 + 'the contour map and the convergence chart are drawn from)'),
-                { v: fmt(vm.scalars.von_mises_nodal_max_mpa, 3) }), 'info');
+                { v: gNum(vm.scalars.von_mises_nodal_max_mpa, 3) }), 'info');
         }
         if (vm.scalars.max_principal_max_mpa !== null) {
             html += badge(gFmtTpl(GL('badgeMaxPrincipal',
-                'PEAK MAX PRINCIPAL {v} MPa (nodal maximum of '
-                + 'fields.max_principal_pa — the tensile quantity the grain '
-                + 'fracture criterion is written in)'),
-                { v: fmt(vm.scalars.max_principal_max_mpa, 3) }), 'info');
+                'PEAK MAX PRINCIPAL {v} MPa (largest value of the nodal '
+                + 'field — the tensile quantity the grain fracture criterion '
+                + 'is written in)'),
+                { v: gNum(vm.scalars.max_principal_max_mpa, 3) }), 'info');
         }
         html += badge(gFmtTpl(GL('badgeStrain',
             'MAX BORE STRAIN {v}% of {cap}% capability'),
-            { v: fmt(vm.scalars.max_bore_strain_pct, 2),
-              cap: fmt(vm.scalars.strain_capability_pct, 1) }), 'info');
+            { v: gNum(vm.scalars.max_bore_strain_pct, 2),
+              cap: gNum(vm.scalars.strain_capability_pct, 1) }), 'info');
+        // NR-16: basınç ve ısıl paylar (yalnız ısıl yük varken; ayrı çözüm).
+        const lc = vm.load_components;
+        if (lc && vm.loads && vm.loads.cure_cooldown_shrinkage === true
+                && isNum(lc.pressure_at_governing_station)
+                && isNum(lc.thermal_at_governing_station)) {
+            html += badge(gFmtTpl(GL('badgeStrainParts',
+                'STRAIN PARTS at the governing station: pressure {p}% + '
+                + 'thermal {t}% (separate solves on the same mesh)'),
+                { p: gNum(100 * lc.pressure_at_governing_station, 2),
+                  t: gNum(100 * lc.thermal_at_governing_station, 2) }), 'info');
+        }
         if (vm.scalars.strain_margin !== null) {
             // Eşikler motorun kendi risk sınıflamasıyla aynı; sınıflama
             // TEK yerde (strainMarginKind) — Merkez hükmü de oradan.
             const m = vm.scalars.strain_margin;
-            const kind = strainMarginKind(m);
+            // V306/KATI-TANE (K1): oturmamış kabul ölçütünde YEŞİL yok
+            // (Merkez hükmüyle aynı kural, P11B3-02); kırmızı yumuşatılmaz.
+            const _acc = vm.convergence && vm.convergence.acceptance;
+            const _kind0 = strainMarginKind(m);
+            const kind = (_acc && _acc.converged !== true && _kind0 === 'ok')
+                ? 'warn' : _kind0;
             html += badge(gFmtTpl(GL('badgeMargin',
                 'STRAIN MARGIN {v} (capability / peak strain)'),
-                { v: fmt(m, 2) }), kind);
+                { v: gNum(m, 2) }), kind);
         } else {
-            html += badge(GL('badgeMarginMissing',
-                'STRAIN MARGIN NOT PUBLISHED (no strain capability record)'),
-                'dim');
+            html += grainMarginMissingBadge(vm);
         }
+        // NR-16: analitik yol (Uyarılar / Yapısal Analiz) yan yana + fark.
+        html += grainAnalyticBadges(vm);
         const conv = vm.convergence;
         if (conv) {
             const acc = conv.acceptance;
@@ -2841,8 +3621,8 @@
                     : GL('badgeAcceptanceNotConverged',
                          'ACCEPTANCE METRIC ({q}) NOT CONVERGED — last change '
                          + '{pct} (tolerance {tol}%)'),
-                    { q: esc(qEtiket), pct: esc(accPct),
-                      tol: fmtSig(acc.tol_pct, 4) }),
+                    { q: esc(qEtiket), pct: esc(gYuzdeMetni(accPct)),
+                      tol: gSig(acc.tol_pct, 4) }),
                     acc.converged ? 'ok' : 'warn');
                 // vM AYRI ve NÖTR: hâlâ inceliyor olması bir alarm değildir,
                 // çünkü kabul dayanağı o değil.
@@ -2853,7 +3633,7 @@
                     : GL('badgeVmRefining',
                          'PEAK vM still refining {pct}% — not the acceptance '
                          + 'basis'),
-                    { pct: fmtSig(conv.final_rel_change_pct, 4) }), 'info');
+                    { pct: gSig(conv.final_rel_change_pct, 4) }), 'info');
             } else {
                 // GERİYE UYUM: sunucu kabul bloğunu yayımlamıyorsa (bugünkü
                 // uç) davranış birebir eskisi gibidir.
@@ -2870,7 +3650,17 @@
             // Cidar paneliyle AYNI ayrışma (alarm = yalnız ölçekli Jacobian,
             // uzama nötr bilgi); metinler sayfanın solid.fea.* etiketlerinden
             // gelir ve kesit geometrisini anlatır (cidar cümlesi değil).
-            html += qualityBadges(vm.flags, function (ad, p) {
+            html += qualityBadges(vm.flags, function (ad, p0) {
+                // NR-16: ortak politika sayıları noktayla biçimler; tane
+                // kesitinin metni yerel ayraçla yazılır (politika aynı).
+                const p = {};
+                Object.keys(p0 || {}).forEach(function (k) {
+                    const v = p0[k];
+                    p[k] = (typeof v === 'string') ? gSayiMetni(v)
+                        : (isNum(v) && window.I18N
+                           && typeof window.I18N.number === 'function')
+                            ? window.I18N.number(v) : v;
+                });
                 if (ad === 'badgeDistortion') {
                     return gFmtTpl(GL('badgeDistortion',
                         'MESH DISTORTION (scaled Jacobian < {sjMin}): '
@@ -2914,7 +3704,14 @@
         if (g.geometri && g.geometri.kaynak) parts.push(SRV(g.geometri.kaynak));
         if (g.geometri && g.geometri.kesit) parts.push(SRV(g.geometri.kesit));
         if (g.malzeme && g.malzeme.kaynak) parts.push(SRV(g.malzeme.kaynak));
-        if (g.analitik_blok_iliskisi) parts.push(SRV(g.analitik_blok_iliskisi));
+        // V306/KATI-TANE (K2): köprünün `analitik_blok_iliskisi` cümlesi
+        // ("analitik blok gövdenin esnemesini içerir, bu kip gövdeyi rijit
+        // tutar; kesit şeklini nominal Kt ile temsil eder") artık yanlıştır
+        // (M-KATI-16 kasa esnemesini FEA'ya taşıdı; nominal Kt kalktı) ve
+        // basılmaz. İki yolun ilişkisi bu panelin analitik rozetlerinde,
+        // motorun yayımladığı alanlardan yazılır. (V306/KATI-KALAN kalem 4:
+        // köprü metni düzeltildi ve koşunun yük kümesinden kurulur; API
+        // künyesinde kalır, panel aynı ilişkiyi rozetlerinde söyler.)
         if (vm.basis.bore) parts.push(SRV(vm.basis.bore));
         if (vm.basis.quality) parts.push(SRV(vm.basis.quality));
         // ÖH D31 · P11B3-27: ölçüm kodunun kimliği (uç `quality._source`).
@@ -3087,7 +3884,13 @@
             els.conv.style.display = 'none';
         }
         if (els.convNote && conv && conv.beyan) {
-            els.convNote.innerHTML = esc(SRV(conv.beyan));
+            // NR-16 görsel tur: çözücünün beyan cümlesindeki ondalıklar TR
+            // ekranda virgüllü (yalnız sayı içi nokta; metin dokunulmaz).
+            let beyan = SRV(conv.beyan);
+            if (window.I18N && window.I18N.lang === 'tr') {
+                beyan = String(beyan).replace(/(\d)\.(\d)/g, '$1,$2');
+            }
+            els.convNote.innerHTML = esc(beyan);
         }
     }
 
@@ -3105,6 +3908,13 @@
             basis: document.getElementById('grainfea_basis'),
             basisText: document.getElementById('grainfea_basis_text'),
         };
+    }
+
+    // NR-16 — analitik tane bloğu sayfanın sağlayıcısından (solid.html:
+    // son hesap sonucunun structural_analysis.grain_structural bloğu).
+    function grainAnalyticBlock() {
+        if (typeof gCfg.analyticProvider !== 'function') return null;
+        try { return gCfg.analyticProvider() || null; } catch (e) { return null; }
     }
 
     // Etiket sağlayıcısı sayfanın kendi sözlüğünü verir (solid.fea.*);
@@ -3160,7 +3970,8 @@
     function grainRender() {
         grainRefreshLabels();
         grainApplyStaticLabels();
-        paintGrain(grainEls(), buildGrainViewModel(gLastPayload, gLastError),
+        paintGrain(grainEls(), buildGrainViewModel(gLastPayload, gLastError,
+                                                   grainAnalyticBlock()),
                    gBusy);
     }
 
@@ -3599,7 +4410,14 @@
                 : Math.min(hukumSf, yigin.stack_min_safety_factor);
         }
         const sfTur = sfRozetTuru(hukumSf);
-        if (hukumSf !== null && sfTur !== 'ok') {
+        // V306/KATI-MODEL (M-KATI-10): köprü hükmü GERİ ÇEKTİYSE satır SF
+        // sayısını manşet yapmaz — aşağıdaki geri çekme dalı ÖNCE gelir
+        // (eskiden SF < eşikte 'en kötü EMNİYET KATSAYISI 1,37' basılıyor,
+        // geri çekme hiç görünmüyordu).
+        const _hkOnce = (fea.meta && typeof fea.meta.hukum === 'object'
+                         && fea.meta.hukum) ? fea.meta.hukum : null;
+        const _geriCekildi = !!(_hkOnce && _hkOnce.verildi === false);
+        if (hukumSf !== null && sfTur !== 'ok' && !_geriCekildi) {
             return { kind: sfTur,
                      key: conv.converged
                          ? 'panel.fea.verdictConvergedUnsafe'
@@ -3671,6 +4489,25 @@
                                    + 'change {pct}%) — but the solver '
                                    + 'WITHHELD the strength verdict: '
                                    + '{reasons}' };
+            }
+            // V306/FEA-SIVI (kalem 1): iki katmanlı cidarda bir katmanın
+            // basınç + ısıl gerilme aralığı 2 x akmayı aşıyorsa satır yeşil
+            // olmaz — birincil hüküm verildi ama elastik uyum gösterilemedi.
+            const ik2 = ikiKatmanGorunumu(fea);
+            const asan = (ik2 && ik2.solved) ? ik2.layers.filter(function (k) {
+                return k.judged && k.shakedown !== null && k.shakedown < 1.0;
+            }) : [];
+            if (asan.length) {
+                return { kind: 'warn', key: 'panel.fea.verdictShakedownNot',
+                         params: { n: conv.rounds,
+                                   pct: fmt(conv.final_rel_change_pct, 2),
+                                   layers: asan.map(function (k) {
+                                       return katmanAdi(k.role);
+                                   }).join(', ') },
+                         fallback: 'MESH CONVERGED in {n} rounds (last change '
+                                   + '{pct}%) — pressure + thermal stress '
+                                   + 'exceeds the shakedown limit (2 x yield) '
+                                   + 'in: {layers}' };
             }
             return { kind: 'ok', key: 'panel.fea.verdictConverged',
                      params: params,
@@ -3823,6 +4660,41 @@
                                + 'in the view' };
         }
         const bore = fea.bore || {};
+        // V306/KATI-KALAN (kalem 3): kabul büyüklüğü oturmadı → pay sayısı
+        // yok, hüküm yok; satır nedeni söyler (SARI, sayı yok).
+        if (!isNum(bore.strain_margin) && bore.strain_margin_withheld
+                && typeof bore.strain_margin_withheld === 'object') {
+            const kod = bore.strain_margin_withheld.reason_code;
+            if (kod === 'acceptance_not_converged_sharp_corner') {
+                return { kind: 'warn',
+                         key: 'panel.grain.verdictMarginUnconvergedCorner',
+                         fallback: 'STRAIN MARGIN NOT PUBLISHED — the '
+                                   + 'acceptance quantity (bore strain) does '
+                                   + 'not converge with the mesh: sharp '
+                                   + 'inner-corner singularity; the HRMA '
+                                   + 'section carries no corner fillet' };
+            }
+            if (kod === 'acceptance_not_converged') {
+                return { kind: 'warn',
+                         key: 'panel.grain.verdictMarginUnconverged',
+                         fallback: 'STRAIN MARGIN NOT PUBLISHED — the '
+                                   + 'acceptance quantity (bore strain) did '
+                                   + 'not converge with the mesh' };
+            }
+        }
+        // V306/TANE NR-16: marj sayısı küçük-gerinim aralığı dışında geri
+        // çekildi ama kapasite hükmü geçerlilik aralığında kuruldu (uç
+        // `capability_verdict`): KIRMIZI hüküm satıra yazılır, sayı değil.
+        const cv = bore.capability_verdict;
+        if (!isNum(bore.strain_margin) && cv && cv.status === 'exceeded'
+                && isNum(cv.load_fraction_at_capability)) {
+            return { kind: 'err',
+                     key: 'panel.grain.verdictCapabilityExceeded',
+                     params: { f: gNum(100 * cv.load_fraction_at_capability, 0) },
+                     fallback: 'STRAIN CAPABILITY EXCEEDED — reached at {f}% '
+                               + 'of the load (no margin number above the '
+                               + 'small-strain range)' };
+        }
         if (!isNum(bore.strain_margin)) return null;   // hüküm beyan edilmez
         const kind = strainMarginKind(bore.strain_margin);
         // ÖH D18 · P11B3-02 [kritik] — OTURMAMIŞ ÖLÇÜTE YEŞİL HÜKÜM YOK.
@@ -3914,7 +4786,7 @@
             vm: el('vm'), bore: el('bore'),
             conv: el('conv'), convNote: el('cnote'),
             basis: el('basis'), basisText: el('btext'),
-        }, buildGrainViewModel(fea, null), false);
+        }, buildGrainViewModel(fea, null, grainAnalyticBlock()), false);
 
         const box = el('mesh');
         if (box && box.addEventListener) {

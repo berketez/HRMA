@@ -106,7 +106,7 @@ HYBRID_FUEL_REJECTION_REASONS = {
         'No peer-reviewed r = a*G^n regression correlation was found for '
         'carbon/graphite hybrid grains, and pure carbon does not pyrolyse '
         'the way polymeric fuels do, so the applicability of that '
-        'correlation family is itself open. No coefficients are invented '
+        'correlation family is itself open. No coefficients are assumed '
         'here.'),
     'mixture': (
         'no_request_contract',
@@ -235,6 +235,40 @@ _OPERATING_POINT_BASIS = {
         'the O/F ratio passed to analyze_combustion by the caller; the '
         'caller did not declare which role this operating point plays.'),
 }
+
+#: V306/HİBRİT-SAYI (M-HIBRIT-5) — OPTİMUM O/F'NİN TEK TANIMI.
+#: ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-sayi/olcum/sayi_once.json):
+#: "Optimumu Bul" kutusu iki optimum basıyordu — uç ε'suz arıyordu (çıkış
+#: ISA deniz seviyesine çapalı; L1 O/F 7,05 / 229,5 s), çözücü sabit ε'da
+#: yalnız momentum Isp'siyle (basınç terimi yok; L1 6,31 / 232,2 s, L3
+#: 2,35 / 288,1 s). Tanım artık TEK: tasarım ortam basıncında, tasarım
+#: lülesiyle (kullanıcı ε'su ya da ε yoksa P_e = P_a eşleşik lüle) ideal
+#: Isp'nin azamisi; uç ve çözücü aynı işlevi aynı girdilerle çağırır.
+OPTIMUM_OF_DEFINITION_BASIS = (
+    'O/F of the highest IDEAL specific impulse (equilibrium thermochemistry, '
+    'no c* efficiency, no nozzle losses) at the design ambient pressure: '
+    'with a fixed design expansion ratio the pressure-thrust term '
+    '(p_e - p_a)*A_e is included; with no expansion ratio the exit pressure '
+    'is matched to the ambient at every O/F (the same rule the solver uses '
+    'to size the nozzle). Find Optimum and Calculate use this one '
+    'definition with the same inputs.')
+
+
+def optimum_definition(chamber_pressure, expansion_ratio, ambient_pressure):
+    """Optimum O/F tanımının makine-okur künyesi (tek kaynak)."""
+    eps = (None if expansion_ratio is None
+           else (float(expansion_ratio) if float(expansion_ratio) > 1.0
+                 else None))
+    return {
+        'objective': 'ideal_isp_at_design_ambient',
+        'nozzle': ('fixed_expansion_ratio' if eps is not None
+                   else 'exit_pressure_matched_to_ambient'),
+        'expansion_ratio': eps,
+        'ambient_pressure_bar': float(ambient_pressure),
+        'chamber_pressure_bar': float(chamber_pressure),
+        'basis': OPTIMUM_OF_DEFINITION_BASIS,
+    }
+
 
 #: ``compositions`` tarafının birimleri — denge çözücüsünün HAM SI çıktısı.
 #: İstasyon tablosuyla aynı büyüklükleri taşır ama 1000 kat farklı tabanda;
@@ -917,7 +951,8 @@ class CombustionAnalyzer:
                           eta_c_star: Optional[float] = None,
                           expansion_ratio: Optional[float] = None,
                           operating_point: Optional[str] = None,
-                          *, c_star_only: bool = False) -> Dict:
+                          *, c_star_only: bool = False,
+                          exit_pressure_bar: Optional[float] = None) -> Dict:
         """
         Comprehensive combustion analysis
 
@@ -953,6 +988,11 @@ class CombustionAnalyzer:
                 conditions['exit']['basis'] = 'sea_level_default' olarak
                 işaretlenir. (v2.6.2 öncesi bu değer SABİT 1.0 bar idi ve
                 motorun gerçek ε'sını hiç görmüyordu — bulgu F034.)
+            exit_pressure_bar: V306/HİBRİT-SAYI (M-HIBRIT-5) — yalnız ε
+                VERİLMEDİĞİNDE okunur: çıkış istasyonu ISA deniz seviyesi
+                yerine bu basınca (bar, > 0) çapalanır (``P_e = P_a`` eşleşik
+                lüle, tasarım ortam basıncı). Basis
+                ``'ambient_pressure_matched'``. ``None`` -> eski yol bit-aynı.
 
         Returns:
             Complete combustion analysis results
@@ -1096,6 +1136,10 @@ class CombustionAnalyzer:
                     _op_nokta,
                     # Kısmi (yalnız c*) sonuç tam isteğe dönmesin.
                     bool(c_star_only),
+                    # V306/HİBRİT-SAYI: ε'sız çıkış çapası (P_e = P_a) çıkış
+                    # istasyonunu değiştirir; anahtara GİRMELİDİR.
+                    None if exit_pressure_bar is None
+                    else float(exit_pressure_bar),
                 )
             except (TypeError, ValueError):
                 cache_key = None  # anahtarlanamayan girdi: önbelleksiz devam
@@ -1266,6 +1310,16 @@ class CombustionAnalyzer:
             exit_pressure = self._exit_pressure_from_expansion(
                 float(expansion_ratio), gamma_chamber, chamber_pressure)
             exit_pressure_basis = 'expansion_ratio'
+        elif exit_pressure_bar is not None:
+            # V306/HİBRİT-SAYI (M-HIBRIT-5): ε verilmedi, çıkış basıncı
+            # çağıranın ortam basıncına eşlenir (P_e = P_a; eşleşik lüle).
+            exit_pressure = float(exit_pressure_bar)
+            if not (np.isfinite(exit_pressure) and exit_pressure > 0.0):
+                raise ValueError(
+                    f"'exit_pressure_bar' must be a finite pressure > 0 bar "
+                    f"(the matched-nozzle exit is anchored to it); got "
+                    f"{exit_pressure_bar!r}.")
+            exit_pressure_basis = 'ambient_pressure_matched'
         else:
             exit_pressure = isa_pressure(0.0) * BAR_PER_PA  # 1.01325 bar (ISA)
             exit_pressure_basis = 'sea_level_default'
@@ -1292,7 +1346,9 @@ class CombustionAnalyzer:
                 'expansion_ratio_equilibrium'
                 if station_basis == 'shifting_equilibrium'
                 and expansion_ratio is not None and float(expansion_ratio) > 1.0
-                else 'sea_level_default_equilibrium')
+                else ('ambient_pressure_matched_equilibrium'
+                      if exit_pressure_basis == 'ambient_pressure_matched'
+                      else 'sea_level_default_equilibrium'))
         exit_composition = self._calculate_equilibrium_composition(
             elements, exit_pressure, exit_temperature, 'exit'
         )
@@ -3722,11 +3778,56 @@ class CombustionAnalyzer:
             'thermodynamic_properties': thermo_props
         }
     
+    def ideal_isp_at_ambient(self, fuel_composition: Dict, oxidizer_type: str,
+                             of_ratio: float, chamber_pressure: float,
+                             expansion_ratio: Optional[float] = None,
+                             ambient_pressure: float = None) -> float:
+        """V306/HİBRİT-SAYI (M-HIBRIT-5) — optimum O/F'nin AMAÇ FONKSİYONU.
+
+        Tasarım ortam basıncı ``ambient_pressure`` (bar) altında ideal
+        (η_c* = 1, lüle kaybı yok) özgül itki [s]:
+
+        * ε verilmişse (sabit lüle): Isp = v_e/g0 + (p_e − p_a)·A_e/(ṁ·g0);
+          A_e/ṁ = ε·A_t/ṁ = ε·c*/P_c olduğundan basınç terimi
+          (p_e − p_a)/P_c · ε · c*/g0 (Sutton & Biblarz 9. bs. Denk. 2-14,
+          3-29). Momentum terimi tek başına AŞIRI GENLEŞMİŞ lülede (p_e < p_a)
+          Isp'yi olduğundan büyük gösterir: eski kanon bu yüzden düşük O/F'ye
+          kayıyordu (L3: 288,1 s "azami" Isp ölçüldü, lüle 0,71 bar'a
+          genleşiyordu).
+        * ε verilmemişse: çıkış basıncı ortama eşlenir (P_e = P_a; çözücünün
+          kendi ε seçimi ``_calculate_expansion_ratio`` ile aynı ilke), basınç
+          terimi tanım gereği sıfır.
+        """
+        pa = float(ambient_pressure)
+        eps = (None if expansion_ratio is None
+               else (float(expansion_ratio) if float(expansion_ratio) > 1.0
+                     else None))
+        sonuc = self.analyze_combustion(
+            fuel_composition, oxidizer_type, float(of_ratio),
+            chamber_pressure, expansion_ratio=eps,
+            exit_pressure_bar=(pa if eps is None else None))
+        perf = sonuc['performance']
+        isp = float(perf['isp'])
+        if eps is None:
+            return isp
+        p_e = float(sonuc['conditions']['exit']['P'])
+        return isp + ((p_e - pa) / float(chamber_pressure)) * eps * float(
+            perf['c_star']) / G_0
+
     def find_optimum_of_ratio(self, fuel_composition: Dict, oxidizer_type: str,
                              chamber_pressure: float,
                              of_range: Tuple[float, float] = (1.0, 10.0),
-                             expansion_ratio: Optional[float] = None) -> Dict:
+                             expansion_ratio: Optional[float] = None,
+                             ambient_pressure: Optional[float] = None) -> Dict:
         """Find O/F ratio for maximum specific impulse.
+
+        ambient_pressure (bar): V306/HİBRİT-SAYI (M-HIBRIT-5) — verilirse
+            amaç fonksiyonu motorun TASARIM ORTAMINDAKİ ideal Isp'sidir
+            (``ideal_isp_at_ambient``): sabit ε'da basınç itkisi terimi
+            dahil, ε yoksa çıkış basıncı ortama eşlenik (P_e = P_a). Tek
+            tanım: "Optimumu Bul" ucu ve hibrit çözücünün kanonu bu kolu
+            AYNI girdilerle çağırır. ``None`` -> eski amaç (momentum Isp'si,
+            ε yoksa deniz seviyesi çapası) bit-aynı.
 
         Desteklenmeyen yakit/oksitleyici anahtarinda _calculate_elemental_
         composition ValueError firlatir; tarama noktalari cezalandirilsa bile
@@ -3768,6 +3869,9 @@ class CombustionAnalyzer:
                 # imza anahtarda yoksa farklı giriş durumlu iki istek aynı
                 # girdiyi paylaşır (gerekçe: ``optimum_of_inlet_signature``).
                 self.optimum_of_inlet_signature(oxidizer_type),
+                # V306/HİBRİT-SAYI: amaç fonksiyonunun ortam basıncı.
+                None if ambient_pressure is None
+                else float(ambient_pressure),
             )
         except (TypeError, ValueError, AttributeError, IndexError):
             cache_key = None
@@ -3778,8 +3882,22 @@ class CombustionAnalyzer:
                else (float(expansion_ratio) if float(expansion_ratio) > 1.0
                      else None))
 
+        if ambient_pressure is not None:
+            pa = float(ambient_pressure)
+            if not np.isfinite(pa) or pa < 0.0 or (eps is None and pa <= 0.0):
+                raise ValueError(
+                    f"'ambient_pressure' must be a finite pressure >= 0 bar "
+                    f"(> 0 when no expansion ratio is given: the matched "
+                    f"nozzle solves P_e = P_a, unbounded at zero ambient); "
+                    f"got {ambient_pressure!r}.")
+
         def negative_isp(of_ratio):
             try:
+                if ambient_pressure is not None:
+                    return -self.ideal_isp_at_ambient(
+                        fuel_composition, oxidizer_type, of_ratio,
+                        chamber_pressure, expansion_ratio=eps,
+                        ambient_pressure=ambient_pressure)
                 results = self.analyze_combustion(
                     fuel_composition, oxidizer_type, of_ratio, chamber_pressure,
                     expansion_ratio=eps)
@@ -3864,7 +3982,10 @@ class CombustionAnalyzer:
         optimum_analysis = self.analyze_combustion(
             fuel_composition, oxidizer_type, optimum_of, chamber_pressure,
             expansion_ratio=eps,
-            operating_point=OPERATING_POINT_OPTIMUM_SEARCH)
+            operating_point=OPERATING_POINT_OPTIMUM_SEARCH,
+            exit_pressure_bar=(float(ambient_pressure)
+                               if ambient_pressure is not None and eps is None
+                               else None))
 
         out = {
             'optimum_of_ratio': optimum_of,
@@ -3873,6 +3994,9 @@ class CombustionAnalyzer:
             'of_range_basis': of_range_basis,
             'analysis': optimum_analysis
         }
+        if ambient_pressure is not None:
+            out['optimum_definition'] = optimum_definition(
+                chamber_pressure, eps, ambient_pressure)
         if cache_key is not None:
             # Kopya sakla: çağıran sonucu değiştirse bile önbellek bozulmaz
             if len(_OPTIMUM_OF_CACHE) >= _OPTIMUM_OF_CACHE_MAX:
@@ -3884,7 +4008,10 @@ class CombustionAnalyzer:
     def _fixed_nozzle_altitude_sweep(mdot: float, v_exit: float, P_e_bar: float,
                                      T_e: float, R_e: float,
                                      altitudes: List[float],
-                                     thrust_sea_level: Optional[float] = None
+                                     thrust_sea_level: Optional[float] = None,
+                                     exit_area_m2: Optional[float] = None,
+                                     anchor_ambient_pressure_pa: Optional[
+                                         float] = None,
                                      ) -> Tuple[List[Dict], Dict]:
         """Sabit geometrili lülede irtifa taraması — TEK TANIM NOKTASI.
 
@@ -3914,6 +4041,20 @@ class CombustionAnalyzer:
         ve bu durum ``velocity_efficiency_basis`` ile açıkça bildirilir —
         sessizce ideal sayı yayımlanmaz.
 
+        V306/HİBRİT-MODEL (kalem 6, UÇUŞ-2 devri) — TEK ÇIKIŞ ALANI, TASARIM
+        ORTAMINDA ÇAPA. ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-model/
+        olcum/hibrit_once.json): A_e süreklilikten İDEAL çıkış istasyonuyla
+        (ṁ·R_e·T_e/(P_e·v_e)) kuruluyordu; teslim c*'ı (η_c* < 1) taşıyan
+        motorun GERÇEK lülesi (A_e = ε·A_t) bundan %10 küçük (L3: 0,01727 ⟷
+        0,01901 m²; örnek: 0,003557 ⟷ 0,003917 m²). Çapa da tasarım ortamı
+        yerine ISA deniz seviyesindeydi (101 325 Pa): tasarım ortamı 1 atm
+        değilken F_vak motorun kendi itkisiyle tutarsızdı. Çağıran
+        ``exit_area_m2`` (lülenin geometrisi) ve ``anchor_ambient_pressure_pa``
+        (teslim itkisinin ait olduğu ortam basıncı) verirse ikisi kullanılır:
+        sabit geometride dF/dp_a = −A_e (Sutton & Biblarz 9. bs. Denk. 2-14 /
+        3-29), dolayısıyla F(p_a) = F_tasarım + (p_tasarım − p_a)·A_e ve
+        F_vak = F_tasarım + p_tasarım·A_e. Verilmezse eski yol bit-aynıdır.
+
         Dönüş: (satırlar, meta).
         """
         mdot = float(mdot)
@@ -3924,8 +4065,33 @@ class CombustionAnalyzer:
             A_e = mdot * float(R_e) * float(T_e) / (P_e_pa * v_exit)   # m²
         else:
             A_e = 0.0
+        A_e_kaynak = ('continuity at the ideal equilibrium exit station: '
+                      'A_e = mdot*R_e*T_e/(P_e*v_e)')
+        if exit_area_m2 is not None:
+            _ae = float(exit_area_m2)
+            if not (np.isfinite(_ae) and _ae > 0.0):
+                raise ValueError(
+                    f'exit_area_m2 must be a positive finite area, got '
+                    f'{exit_area_m2!r}; the altitude sweep does not fall '
+                    f'back to the continuity area silently.')
+            A_e = _ae
+            A_e_kaynak = ('geometric exit area of this nozzle supplied by the '
+                          'caller (A_e = expansion ratio x throat area), the '
+                          'same area the motor publishes as exit_area')
 
         P_sl_pa = isa_pressure(0.0)                                    # Pa
+        if anchor_ambient_pressure_pa is not None:
+            _pa = float(anchor_ambient_pressure_pa)
+            if not (np.isfinite(_pa) and _pa >= 0.0):
+                raise ValueError(
+                    f'anchor_ambient_pressure_pa must be a finite pressure '
+                    f'>= 0 Pa, got {anchor_ambient_pressure_pa!r}.')
+            P_cap_pa = _pa
+            capa_kaynak = ('design ambient pressure of the motor (the '
+                           'ambient its delivered thrust belongs to)')
+        else:
+            P_cap_pa = P_sl_pa
+            capa_kaynak = 'ISA sea level (no design ambient supplied)'
         eta_v = 1.0
         eta_raw = None
         if thrust_sea_level is not None and mdot > 0.0 and v_exit > 0.0:
@@ -3934,7 +4100,7 @@ class CombustionAnalyzer:
             except (TypeError, ValueError):
                 f_sl = float('nan')
             if np.isfinite(f_sl) and f_sl > 0.0:
-                eta_raw = ((f_sl - (P_e_pa - P_sl_pa) * A_e)
+                eta_raw = ((f_sl - (P_e_pa - P_cap_pa) * A_e)
                            / (mdot * v_exit))
         if eta_raw is not None and 0.5 <= eta_raw <= 1.0:
             eta_v = float(eta_raw)
@@ -3982,6 +4148,13 @@ class CombustionAnalyzer:
                                                  and 0.5 <= eta_raw <= 1.0),
             'thrust_vacuum_n': thrust_vacuum,
         }
+        if exit_area_m2 is not None or anchor_ambient_pressure_pa is not None:
+            # V306/HİBRİT-MODEL kalem 6: alanın ve çapanın kaynağı adıyla
+            # (eski çağıranların yanıtı bit-aynı kalsın diye yalnız yeni
+            # yolda yazılır).
+            meta['exit_area_source'] = A_e_kaynak
+            meta['anchor_ambient_pressure_pa'] = P_cap_pa
+            meta['anchor_ambient_pressure_source'] = capa_kaynak
         return rows, meta
 
     def calculate_altitude_performance(self, motor_data: Dict, altitudes: List[float]) -> Dict:
@@ -4015,7 +4188,10 @@ class CombustionAnalyzer:
 
         rows, meta = self._fixed_nozzle_altitude_sweep(
             mdot, v_exit, P_e_bar, T_e, R_e, altitudes,
-            thrust_sea_level=motor_data.get('thrust_sea_level'))
+            thrust_sea_level=motor_data.get('thrust_sea_level'),
+            exit_area_m2=motor_data.get('exit_area_m2'),
+            anchor_ambient_pressure_pa=motor_data.get(
+                'thrust_reference_pressure_pa'))
 
         for row in rows:
             # CF = F/(Pc*At); At = c_star*mdot/Pc -> CF = F/(mdot*c_star).
@@ -4503,7 +4679,10 @@ class CombustionAnalyzer:
 
         rows, meta = self._fixed_nozzle_altitude_sweep(
             base_mdot, v_exit, P_e_bar, T_e, R_e, altitudes,
-            thrust_sea_level=base_thrust)
+            thrust_sea_level=base_thrust,
+            exit_area_m2=motor_data.get('exit_area_m2'),
+            anchor_ambient_pressure_pa=motor_data.get(
+                'thrust_reference_pressure_pa'))
         meta['mass_flow_basis'] = mass_flow_basis
 
         # Vakum impulsü — irtifa veriminin PAYDASI (T32)

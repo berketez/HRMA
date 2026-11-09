@@ -610,7 +610,7 @@ ROZET_IMZALARI = {
     # cevap veremez.
     # ==================================================================
     'yapisal_mesh_boyutu': {
-        'varyantlar': ('MESH',),
+        'varyantlar': ('MESH', 'AĞ'),
         'sozluk_anahtarlari': ('fea.badgeMesh',),
         'kaynak_dosyalar': ('hrma/static/js/fea_panel.js',),
         'atesleme_kosulu': {
@@ -624,7 +624,8 @@ ROZET_IMZALARI = {
         'gerekce': ('MAKİNE beyanı: koşumun büyüklüğü. Koşulsuz olduğu '
                     'ölçüldü, yani başarılı her yapısal koşumda BEKLENİR; '
                     'yokluğu rozet şeridinin hiç boyanmadığını gösterir. '
-                    'Terim "MESH" iki dilde de aynı kalır.'),
+                    'Terim EN "MESH", TR "AĞ" (V306/DİL-KATI 2. tur, ana '
+                    'model kararı D7; eskiden iki dilde "MESH").'),
     },
     'yapisal_tepe_von_mises': {
         'varyantlar': ('von MISES',),
@@ -891,10 +892,15 @@ TARAYICI_YERELI = 'en-US'
 FEA_SF_ERR_ESIGI = 1.0
 FEA_SF_WARN_ESIGI = 1.5
 
-#: Tane gerinim marjı renk eşikleri (fea_panel.js:1199-1201 strainMarginKind:
-#: <1 → err, <2 → warn, değilse ok).
+#: Tane gerinim marjı renk eşikleri — ürünün TEK kuralı fea_panel.js
+#: ``strainMarginKind``: marj < 1 → err, değilse ok. V306/KATI-TANE K1
+#: (16fbf9c1c): kaynaksız 2,0 bandı ('warn' 1-2) kalktı; ölçüt NASA SP-8073
+#: §2.5.5 Denk. (46) emniyet payı (MS = marj − 1). Ayna eski bandı
+#: tutuyordu: 3.0.6 kapı kuru koşusunda 'STRAIN MARGIN 1.05' rozeti ürünün
+#: kuralıyla 'ok' iken tur 'warn' bekleyip KALDI dedi (ana model, 9 Kas).
+#: Uyarı bandı YOK: iki eşik eşit (marj < 1 → err, değilse ok).
 TANE_MARJ_ERR_ESIGI = 1.0
-TANE_MARJ_WARN_ESIGI = 2.0
+TANE_MARJ_WARN_ESIGI = 1.0
 
 #: Sayı çaprazında ondalık basamağa göre mutlak tolerans: rozet metni
 #: fmt(v, n) ile yuvarlanmış basılır; beklenen değerle fark yarım son

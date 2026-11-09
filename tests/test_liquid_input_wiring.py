@@ -82,7 +82,11 @@ BASE_PAYLOAD = {
     # ile birebir aynı" iddiası iki alanda YANLIŞTI ve testler farkında olmadan
     # yedek yolu sınıyordu.
     'chamber_material': 'inconel_718', 'chamber_roughness': 3.2,
-    'cooling_type': 'regenerative', 'nozzle_expansion_ratio': 50,
+    # V306/SIVI-CEKET-B kalem 5: eski form ön dolgusu ε 50 (kaynaksız; UÇUŞ-KÜTLE
+    # formdan kaldırdı) 100 bar'da deniz seviyesinde ayrılıyor (Summerfield;
+    # ayrılmayan en büyük ε 26,86) ve uç artık o tasarımı adlı retle
+    # yayımlamıyor. Gövde ayrılmayan bölgedeki 20 ile kurulur.
+    'cooling_type': 'regenerative', 'nozzle_expansion_ratio': 20,
     # 'bell' liquid.html'de yok; seçenekler bell_80 / bell_60 (bkz. yukarıdaki not)
     'nozzle_type': 'bell_80', 'throat_diameter': 50,
     'cooling_channels': 80, 'coolant_flow_percent': 100,
@@ -103,7 +107,10 @@ SHAKES = {
     'oxidizer_type': ('n2o4', {}),
     'fuel_density': (1000.0, {}),
     'oxidizer_density': (1300.0, {}),
-    'fuel_boiling_point': (800.0, {}),
+    # V306/SIVI-CEKET-B kalem 5: taban ε 50 -> 20 (ayrılmayan lüle) ile
+    # soğutucu çıkışı 444,6 K'ye indi (ölçüldü); 500 -> 800 K sarsması
+    # uyarıyı iki tarafta da kapalı bırakıyordu. Sarsma çıkışın altına.
+    'fuel_boiling_point': (400.0, {}),
     'fuel_viscosity': (0.004, {}),
     'oxidizer_viscosity': (0.0009, {}),
     'fuel_heat_capacity': (3500.0, {}),
@@ -160,7 +167,9 @@ SHAKES = {
     'annular_gap': (0.8, {'injector_type': 'pintle'}),
     'pintle_radial_hole_count': (30.0, {'injector_type': 'pintle'}),
     'pintle_radial_hole_diameter': (1.2, {'injector_type': 'pintle'}),
-    'skip_distance': (24.0, {'injector_type': 'pintle'}),
+    # V306/SIVI-CEKET-B kalem 5: taban ε 20 ile pintle hazne boyu 23,995 mm
+    # (ölçüldü); 24 mm sarsma hazneye sığmayıp adlı ret alıyordu.
+    'skip_distance': (20.0, {'injector_type': 'pintle'}),
     'injector_elements': (600.0, {}),
     'fuel_injection_velocity': (90.0, {}),
     'oxidizer_injection_velocity': (120.0, {}),
@@ -441,7 +450,10 @@ def test_throat_diameter_stays_an_output(client):
     payload = copy.deepcopy(BASE_PAYLOAD)
     payload['throat_diameter'] = 95.0
     result = _calculate(client, payload)
-    assert result['throat_diameter'] * 1000.0 == pytest.approx(30.7, abs=1.0)
+    # V306/SIVI-CEKET-B kalem 5: taban ε 50 (deniz seviyesinde ayrılan
+    # lüle, artık adlı ret) -> 20; kütle dengesinin boğazı 30,7 -> 28,28 mm
+    # (ölçüldü: ayrılmış lülenin düşük Isp'si debiyi büyütüyordu).
+    assert result['throat_diameter'] * 1000.0 == pytest.approx(28.28, abs=1.0)
 
     # Ve kullanıcı bunu ÖĞRENMELİ: alan hem beyan edilir hem uyarı üretir.
     assert 'throat_diameter' in result['unwired_inputs'][

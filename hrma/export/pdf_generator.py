@@ -5,6 +5,7 @@ Professional motor analysis reports with charts and data
 
 import math
 import os
+import re
 import io
 import base64
 from datetime import datetime
@@ -16,7 +17,13 @@ from hrma.utils.input_guard import finite_number
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Spacer, TableStyle, Image, PageBreak
+from reportlab.platypus import Paragraph as _RLParagraph, Table as _RLTable
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.fonts import addMapping
+
+from hrma.export import rapor_sozluk
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.graphics.shapes import Drawing
@@ -33,6 +40,210 @@ def _hrma_version() -> str:
         return __version__
     except Exception:
         return 'unknown'
+# --------------------------------------------------------------------------
+# V306/RAPOR-DİL — RAPORUN YAZI TİPİ (tek tanım noktası).
+#
+# ÖLÇÜLEN KUSUR: belge ReportLab'ın yerleşik Helvetica'sıyla (WinAnsi
+# kodlaması) basılıyordu; bu yazı tipi ğ ş ı İ Ğ Ş harflerini TAŞIMAZ
+# (Türkçe metin kara kutu / boşluk olarak çıkar), ayrıca belgede zaten geçen
+# '⋅', '→', '≥', 'θ', 'Ø' gibi işaretlerin de glifi yoktur.
+#
+# Seçim: matplotlib'in paketle gelen DejaVu Sans ailesi (normal, kalın, eğik,
+# kalın-eğik). Yeni dosya ve yeni lisans eklemez: matplotlib zaten ürünün
+# bağımlılığıdır (requirements_bundle.txt) ve iki paket betiği de onu pip
+# tekerleğiyle ``mpl-data/fonts/ttf`` diziniyle birlikte kurar (ölçüldü:
+# build_mac_app.sh / build_win_payload.sh ``--target libs``; yazı tipi
+# dizinini silen adım yok). İki dilde AYNI yazı tipi kullanılır.
+#
+# FAIL-CLOSED: yazı tipi bulunamazsa sessizce Helvetica'ya düşülmez —
+# :class:`RaporYaziTipiYok` adlı hatayla belge üretimi durur (Türkçe harfleri
+# basamayan bir belge indirmek, belge indirmemekten kötüdür).
+# --------------------------------------------------------------------------
+RAPOR_YAZI_TIPI = 'DejaVuSans'
+RAPOR_YAZI_TIPI_KALIN = 'DejaVuSans-Bold'
+RAPOR_YAZI_TIPI_EGIK = 'DejaVuSans-Oblique'
+RAPOR_YAZI_TIPI_KALIN_EGIK = 'DejaVuSans-BoldOblique'
+RAPOR_YAZI_TIPI_DOSYALARI = (
+    (RAPOR_YAZI_TIPI, 'DejaVuSans.ttf'),
+    (RAPOR_YAZI_TIPI_KALIN, 'DejaVuSans-Bold.ttf'),
+    (RAPOR_YAZI_TIPI_EGIK, 'DejaVuSans-Oblique.ttf'),
+    (RAPOR_YAZI_TIPI_KALIN_EGIK, 'DejaVuSans-BoldOblique.ttf'),
+)
+#: ReportLab yerleşik yazı tipi -> rapor yazı tipi (örnek stil sayfasının
+#: ve tablo varsayılanının adları).
+_YERLESIK_YAZI_ESLEMESI = {
+    'Helvetica': RAPOR_YAZI_TIPI,
+    'Helvetica-Bold': RAPOR_YAZI_TIPI_KALIN,
+    'Helvetica-Oblique': RAPOR_YAZI_TIPI_EGIK,
+    'Helvetica-BoldOblique': RAPOR_YAZI_TIPI_KALIN_EGIK,
+    'Times-Roman': RAPOR_YAZI_TIPI,
+    'Times-Bold': RAPOR_YAZI_TIPI_KALIN,
+    'Times-Italic': RAPOR_YAZI_TIPI_EGIK,
+    'Times-BoldItalic': RAPOR_YAZI_TIPI_KALIN_EGIK,
+}
+
+
+class RaporYaziTipiYok(RuntimeError):
+    """Raporun Türkçe harfleri taşıyan yazı tipi bulunamadı (adlı hata)."""
+
+
+def rapor_yazi_tipi_dizini() -> str:
+    """DejaVu TTF dosyalarının dizini (matplotlib ``mpl-data/fonts/ttf``)."""
+    import matplotlib
+    return os.path.join(matplotlib.get_data_path(), 'fonts', 'ttf')
+
+
+_YAZI_TIPI_KAYITLI = []
+
+
+def rapor_yazi_tiplerini_kaydet() -> None:
+    """DejaVu Sans ailesini ReportLab'a bir kez kaydeder.
+
+    Dosyalardan biri yoksa :class:`RaporYaziTipiYok` (hangi dosyanın hangi
+    dizinde arandığı adıyla).
+    """
+    if _YAZI_TIPI_KAYITLI:
+        return
+    dizin = rapor_yazi_tipi_dizini()
+    for ad, dosya in RAPOR_YAZI_TIPI_DOSYALARI:
+        yol = os.path.join(dizin, dosya)
+        if not os.path.isfile(yol):
+            raise RaporYaziTipiYok(
+                'PDF report font not found: %s (searched in %s). The report '
+                'is not produced with a substitute font that cannot print '
+                'Turkish characters.' % (dosya, dizin))
+        pdfmetrics.registerFont(TTFont(ad, yol))
+    for kalin, egik, ad in ((0, 0, RAPOR_YAZI_TIPI),
+                            (1, 0, RAPOR_YAZI_TIPI_KALIN),
+                            (0, 1, RAPOR_YAZI_TIPI_EGIK),
+                            (1, 1, RAPOR_YAZI_TIPI_KALIN_EGIK)):
+        addMapping(RAPOR_YAZI_TIPI, kalin, egik, ad)
+    _YAZI_TIPI_KAYITLI.append(True)
+
+
+class Paragraph(_RLParagraph):
+    """Rapor paragrafı: metni etkin dile çevrilmiş ReportLab paragrafı.
+
+    V306/RAPOR-DİL: üretici İngilizce kaynak metni basar; çeviri belge
+    kurulurken TEK boğazdan yapılır (``rapor_sozluk.cevir_isaretli``).
+    Dil 'en' ise metne dokunulmaz.
+    """
+
+    def __init__(self, text, style=None, *args, **kwargs):
+        super().__init__(rapor_sozluk.cevir_isaretli(text), style,
+                         *args, **kwargs)
+
+
+class Table(_RLTable):
+    """Rapor tablosu: düz metin hücreleri etkin dilde, yazı tipi DejaVu.
+
+    Bölünen tablonun parçaları (ReportLab ``_splitRows``) hücre stilleriyle
+    ve hazır veriyle yeniden kurulur; onlara dokunulmaz.
+    """
+
+    def __init__(self, data, *args, **kwargs):
+        parca = kwargs.get('cellStyles') is not None
+        if not parca and rapor_sozluk.etkin_dil() != 'en':
+            data = [[rapor_sozluk.cevir(h) if isinstance(h, str) else h
+                     for h in satir] for satir in data]
+        super().__init__(data, *args, **kwargs)
+        if not parca:
+            self.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), RAPOR_YAZI_TIPI)]))
+        self._tasma_sarildi = parca
+
+    def wrap(self, availWidth, availHeight):
+        """Sütuna SIĞMAYAN düz metin hücresi sarılır (taşma/üst üste binme yok).
+
+        V306/RAPOR-DİL: DejaVu Sans Helvetica'dan ~%15 geniş ve Türkçe
+        etiketler İngilizceden uzun; sabit sütun genişlikli tablolarda tek
+        satırlık hücre komşu sütunun üstüne taşıyordu (ölçüldü: sıvı L1 TR
+        yapısal tablo 'Çevresel Emniyet Katsayısı (çizilen cidar üzerinde
+        hesaplandı)', enjektör tipi hücresi). Hücre, kendi yazı tipi, boyutu ve
+        hizasıyla paragrafa çevrilir; sığan hücreye dokunulmaz.
+        """
+        if not self._tasma_sarildi:
+            self._tasma_sarildi = True
+            self._tasan_hucreleri_sar()
+        return super().wrap(availWidth, availHeight)
+
+    def _tasan_hucreleri_sar(self):
+        genislikler = getattr(self, '_colWidths', None) or []
+        if not genislikler or any(not isinstance(g, (int, float))
+                                  for g in genislikler):
+            return
+        hiza = {'LEFT': TA_LEFT, 'CENTER': TA_CENTER, 'CENTRE': TA_CENTER,
+                'RIGHT': TA_RIGHT}
+        for r, satir in enumerate(self._cellvalues):
+            for c, hucre in enumerate(satir):
+                if not isinstance(hucre, str) or not hucre.strip() \
+                        or c >= len(genislikler):
+                    continue
+                stil = self._cellStyles[r][c]
+                bos = genislikler[c] - stil.leftPadding - stil.rightPadding
+                if pdfmetrics.stringWidth(hucre, stil.fontname,
+                                          stil.fontsize) <= bos:
+                    continue
+                pstil = ParagraphStyle(
+                    'RaporHucre', fontName=stil.fontname,
+                    fontSize=stil.fontsize, leading=stil.fontsize * 1.2,
+                    textColor=stil.color,
+                    alignment=hiza.get(str(stil.alignment).upper(), TA_LEFT))
+                self._cellvalues[r][c] = _RLParagraph(escape(hucre), pstil)
+
+
+#: V306/DİL-SUNUCU (SIVI-CEKET-A AÇIK 2) — EKSİK HÜCRENİN METNİ TEK YERDE.
+#: Genel hücre biçimleyicisi (``_fmt`` / ``_fmt_unit``) çözülmemiş sayıya
+#: 'N/A' basar. Ceket yayım kapısı tetiklenmiş bir raporda tablolardaki boş
+#: hücreler kapının BEKLETTİĞİ sayılardır; 'N/A' bunu 'değer yok' diye
+#: okutuyordu. O raporda hücre 'not published' der (ekran sözlüğünün
+#: 'app.wallT.clsUnpublished' metni; TR belgede çeviri boğazından
+#: 'yayımlanmadı'); nedeni raporun başındaki kapı bölümünde adıyla durur.
+#: Kapısız rapor bit-aynı ('N/A').
+EKSIK_HUCRE_NA = 'N/A'
+EKSIK_HUCRE_BEKLETILDI = 'not published'
+import contextvars as _contextvars  # noqa: E402
+_EKSIK_HUCRE = _contextvars.ContextVar('_EKSIK_HUCRE', default=EKSIK_HUCRE_NA)
+
+
+def _ceket_kapisi_etkin(analysis_results) -> bool:
+    """Sıvı ceket yayım kapısı bu sonuçta sayı bekletiyor mu (tek kural)."""
+    c = (analysis_results or {}).get('cooling_circuit_publication') \
+        if isinstance(analysis_results, dict) else None
+    return bool(isinstance(c, dict) and c.get('status') == 'not_solved'
+                and c.get('withheld_reason_code'))
+
+
+def _bekletme_hucresi(yontem):
+    """Rapor yöntemini eksik hücre metninin bağlamında koşturur."""
+    import functools
+
+    @functools.wraps(yontem)
+    def _sarili(self, *args, **kwargs):
+        ar = kwargs.get('analysis_results',
+                        args[1] if len(args) > 1 else None)
+        jeton = _EKSIK_HUCRE.set(EKSIK_HUCRE_BEKLETILDI
+                                 if _ceket_kapisi_etkin(ar)
+                                 else EKSIK_HUCRE_NA)
+        try:
+            return yontem(self, *args, **kwargs)
+        finally:
+            _EKSIK_HUCRE.reset(jeton)
+    return _sarili
+
+
+def _dilde(yontem):
+    """Belge üreten yöntemi raporun dil bağlamında koşturur."""
+    import functools
+
+    @functools.wraps(yontem)
+    def _sarili(self, *args, **kwargs):
+        with rapor_sozluk.dil_baglami(getattr(self, 'lang',
+                                              rapor_sozluk.VARSAYILAN_DIL)):
+            return yontem(self, *args, **kwargs)
+    return _sarili
+
+
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.charts.piecharts import Pie
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -226,10 +437,24 @@ def resolve_chamber_pressure_bar(value):
 # Arama yolları: ``motor_data`` (kullanıcı girdisi HER ZAMAN öncelikli) ->
 # ``analysis_results`` üst düzeyi -> ``analysis_results['inputs']`` (ÖH D15 /
 # P12aB3-01'de eklenen koşum kimliği bloğu).
+#
+# V306/RAPOR-HATA (M-HIBRIT-8). ÖLÇÜLDÜ (mühendis turu L1 + taban 686c34b98,
+# ``docs/scofield/raw/OH/V306/rapor/once/hibrit_L1_technical_tr.txt``): hibrit
+# teknik PDF "Motor Designation: Unnamed Motor", "Motor Type: not supplied",
+# "Oxidizer N/A" basıyordu. Kök iki yerdeydi: (1) hibrit sayfası
+# ``motor_data`` olarak ``currentResults.motor``u gönderiyor ve bu sözlükte
+# ``motor_name`` / ``motor_type`` YOK (katı/sıvı sayfaları ikisini kendisi
+# koyuyor); (2) hibrit çözücü tür ve oksitleyiciyi İÇ İÇE yayımlıyor
+# (``injector_design_detail.motor_type = 'hybrid'``,
+# ``combustion_analysis.inputs.oxidizer_type``) ve bu tablo yalnız düz
+# adlara bakıyordu. Noktalı ad iç içe yoldur; aynı yollar güvenlik
+# besleyicisinin (``pdf_safety.SAFETY_INPUT_SOURCES``) ölçülmüş yollarıdır.
 SOLVER_IDENTITY_ALIASES = {
-    'motor_type': ('motor_type', 'engine_type'),
+    'motor_type': ('motor_type', 'engine_type',
+                   'injector_design_detail.motor_type'),
     'propellant_type': ('propellant_type', 'propellant', 'propellant_name'),
-    'oxidizer_type': ('oxidizer_type', 'oxidizer'),
+    'oxidizer_type': ('oxidizer_type', 'oxidizer',
+                      'combustion_analysis.inputs.oxidizer_type'),
     'fuel_type': ('fuel_type', 'fuel'),
     'grain_type': ('grain_type', 'grain_geometry'),
 }
@@ -262,19 +487,42 @@ def resolve_report_identity(motor_data, analysis_results=None):
     md = motor_data if isinstance(motor_data, dict) else {}
     ar = analysis_results if isinstance(analysis_results, dict) else {}
     inputs = ar.get('inputs') if isinstance(ar.get('inputs'), dict) else {}
+    # Hibrit sayfası çözücü sonucunu ``analysis_results['motor']`` altında
+    # da taşır (V306/RAPOR-HATA, M-HIBRIT-8).
+    motor = ar.get('motor') if isinstance(ar.get('motor'), dict) else {}
     kaynaklar = (('motor_data', md), ('analysis_results', ar),
-                 ('analysis_results.inputs', inputs))
+                 ('analysis_results.inputs', inputs),
+                 ('analysis_results.motor', motor))
+
+    def _oku(blok, ad):
+        deger = blok
+        for parca in ad.split('.'):
+            if not isinstance(deger, dict):
+                return None
+            deger = deger.get(parca)
+        return deger
+
     cozum = {}
     for hedef, adlar in SOLVER_IDENTITY_ALIASES.items():
         for etiket, blok in kaynaklar:
             bulundu = None
             for ad in adlar:
-                bulundu = _identity_text(blok.get(ad))
+                bulundu = _identity_text(_oku(blok, ad))
                 if bulundu is not None:
                     cozum[hedef] = (bulundu, f'{etiket}.{ad}')
                     break
             if bulundu is not None:
                 break
+    # Hibritte "itici" ayrı bir ad değil, oksitleyici + yakıt ÇİFTİDİR;
+    # ikisi de çözüldüyse çift yazılır (yeni ad üretilmez, iki çözülmüş
+    # kimlik yan yana konur).
+    if ('propellant_type' not in cozum
+            and (cozum.get('motor_type') or ('',))[0].lower() == 'hybrid'
+            and 'oxidizer_type' in cozum and 'fuel_type' in cozum):
+        cozum['propellant_type'] = (
+            '%s / %s (oxidizer / fuel)' % (cozum['oxidizer_type'][0],
+                                           cozum['fuel_type'][0]),
+            'oxidizer_type + fuel_type')
     return cozum
 
 # --------------------------------------------------------------------------
@@ -398,8 +646,17 @@ def _is_dark(color) -> bool:
 class PDFReportGenerator:
     """Generate professional PDF reports for rocket motor analysis"""
     
-    def __init__(self):
+    def __init__(self, lang: str = rapor_sozluk.VARSAYILAN_DIL):
+        # V306/RAPOR-DİL: belgenin dili ({en, tr}; uç kapısı doğrular).
+        if lang not in rapor_sozluk.DILLER:
+            raise ValueError('unsupported report language: %r' % (lang,))
+        self.lang = lang
+        rapor_yazi_tiplerini_kaydet()
         self.styles = getSampleStyleSheet()
+        for _stil in self.styles.byName.values():
+            _ad = getattr(_stil, 'fontName', None)
+            if _ad in _YERLESIK_YAZI_ESLEMESI:
+                _stil.fontName = _YERLESIK_YAZI_ESLEMESI[_ad]
         self.setup_custom_styles()
         
     def setup_custom_styles(self):
@@ -430,24 +687,31 @@ class PDFReportGenerator:
             parent=self.styles['Normal'],
             fontSize=10,
             leftIndent=20,
-            fontName='Helvetica'
+            fontName=RAPOR_YAZI_TIPI
         ))
 
     @staticmethod
-    def _fmt(value, pattern: str = '{:.1f}', missing: str = 'N/A') -> str:
+    def _fmt(value, pattern: str = '{:.1f}',
+             missing: Optional[str] = None) -> str:
         """Sayısal değeri güvenli biçimlendirir; eksik/geçersizse 'N/A'.
 
         Rapor katmanı sabit/uydurma değer basmaz (Dalga 2): analiz sonucu
         yoksa alan 'N/A' görünür — eski sabit SF 4.0 tarzı dolgu YOK.
+        Ceket yayım kapısı sayı bekletiyorsa eksik hücre 'not published'
+        der (``_EKSIK_HUCRE``; açık ``missing`` verilirse o kullanılır).
         """
+        if missing is None:
+            missing = _EKSIK_HUCRE.get()
         number = finite_number(value)
         if number is None:
             return missing
-        return pattern.format(number)
+        # V306/RAPOR-DİL: TR belgede virgüllü ondalık ('%' sayının önünde);
+        # sayının kendisi ve basamağı DEĞİŞMEZ, yalnız gösterim.
+        return rapor_sozluk.bicimli_sayi(pattern.format(number))
 
     @classmethod
     def _fmt_unit(cls, value, unit: str, pattern: str = '{:.1f}',
-                  missing: str = 'N/A') -> str:
+                  missing: Optional[str] = None) -> str:
         """Sayı ÇÖZÜLDÜYSE birimiyle, çözülemediyse birimsiz 'N/A' basar.
 
         P9B3-25: eski kod ``self._fmt(...) + ' kg/m3'`` yazıyordu; ``_fmt``
@@ -456,6 +720,8 @@ class PDFReportGenerator:
         ölçüm: ``olcum_once.json``, katı raporunda 2 hücre). Birim bir
         SAYININ birimidir: sayı yoksa birim de yazılmaz.
         """
+        if missing is None:
+            missing = _EKSIK_HUCRE.get()
         text = cls._fmt(value, pattern, missing)
         return text if text == missing else f'{text} {unit}'
 
@@ -574,15 +840,14 @@ class PDFReportGenerator:
 
         Artık her alan ``motor_geometry.resolve_length_m`` ile ayrı ayrı
         çözülür (öncelik: normalize ``motor_geometry`` bloğu → ``length_units``
-        beyanı → büyüklük çıkarımı). Çözülemeyen alan 'N/A' basar.
+        beyanı → büyüklük çıkarımı). Çözülemeyen alan 'N/A' basar (ceket
+        yayım kapısı sayı bekletiyorsa 'not published'; ``_EKSIK_HUCRE``).
         """
         from hrma.export.motor_geometry import resolve_length_m
 
         value_m, source = resolve_length_m(motor_data or {}, key)
         if value_m is None:
-            if source == 'missing' and key not in (motor_data or {}):
-                return 'N/A'
-            return 'N/A'
+            return _EKSIK_HUCRE.get()
         return pattern.format(value_m * 1000.0) + ' mm'
 
     #: Birim çözümü TÜM alanlarda aynıysa basılan tek satırlık beyan.
@@ -629,6 +894,8 @@ class PDFReportGenerator:
             for key, src in resolved)
         return 'mm (input resolved per field: ' + detail + ')'
 
+    @_dilde
+    @_bekletme_hucresi
     def generate_motor_analysis_report(self, motor_data: Dict, analysis_results: Dict,
                                      charts: List[str], report_type: str = 'complete') -> bytes:
         """
@@ -655,6 +922,15 @@ class PDFReportGenerator:
         story.extend(self._create_title_page(motor_data, report_type,
                                              analysis_results))
         story.append(PageBreak())
+
+        # V306/SIVI-CEKET-A (K5_KARAR EK7): ceket yayım kapısı tetiklendiyse
+        # rapor bekletilen sayıların NEDENİNİ en başta, adıyla söyler
+        # (tablolardaki "—" "denetlendi" diye okunmaz).
+        _kapi_bolumu = self._create_liquid_jacket_gate_section(
+            analysis_results)
+        if _kapi_bolumu:
+            story.extend(_kapi_bolumu)
+            story.append(PageBreak())
         
         # Executive Summary
         if report_type in ['complete', 'summary']:
@@ -795,7 +1071,7 @@ class PDFReportGenerator:
             ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, -1), RAPOR_YAZI_TIPI),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
             ('BACKGROUND', (1, 0), (1, -1), colors.beige),
@@ -901,19 +1177,27 @@ class PDFReportGenerator:
             burn_source_line = (f'Burn time source (solver declaration): '
                                 f'{escape(burn_source)}')
 
-        summary_text = f"""
-        This report presents an analysis of the rocket motor performance
-        and characteristics. Key performance metrics include:
+        # V306/RAPOR-HATA (M-SIVI-14): sıvıda Isp'nin EKRANDAKİ adı.
+        _isp_adi = self._screen_isp_name(motor_data, analysis_results)
+        _isp_adi_ozet = (' (%s)' % escape(_isp_adi)
+                         if _isp_adi and isp is not None else '')
 
-        • Maximum Thrust: {self._fmt_unit(thrust, 'N')}
-        • Specific Impulse: {self._fmt_unit(isp, 's')}
-        • Burn Time: {burn_line}
-        • Total Impulse: {impulse_line}
-
-        {burn_source_line}
-
-        {methodology_line}
-        """
+        # V306/RAPOR-DİL: paragraf PARÇALARI ayrı ayrı belge diline çevrilip
+        # birleşir (madde imleri ve ardından gelen cümleler tek bir metin
+        # parçası olduğundan Paragraph boğazında cümle sınırı bulunamıyordu).
+        # Dil 'en' ise ``cevir`` kimliktir: metin (boşluk dışında) aynıdır.
+        _c = rapor_sozluk.cevir
+        summary_text = '\n'.join((
+            _c('This report presents an analysis of the rocket motor '
+               'performance and characteristics.') + ' '
+            + _c('Key performance metrics include:'),
+            '• ' + _c('Maximum Thrust: ' + self._fmt_unit(thrust, 'N')),
+            '• ' + _c('Specific Impulse: ' + self._fmt_unit(isp, 's'))
+            + _c(_isp_adi_ozet),
+            '• ' + _c('Burn Time: ' + burn_line),
+            '• ' + _c('Total Impulse: ' + impulse_line),
+            _c(burn_source_line),
+            _c(methodology_line)))
 
         story.append(Paragraph(summary_text, self.styles['Normal']))
         story.append(Spacer(1, 0.3*inch))
@@ -945,13 +1229,13 @@ class PDFReportGenerator:
             etiket = ('Motor design risk level' if tesis is not None
                       else 'Overall risk level')
             if risk_level:
-                lines.append(f'{etiket}: {risk_level}<br/>')
+                lines.append(f'{etiket}: {self._enum_text(risk_level)}<br/>')
             if acceptability:
                 lines.append('Model risk acceptability: '
                              f"{str(acceptability).replace('_', ' ')}<br/>")
             if tesis is not None and tesis.get('risk_level'):
                 lines.append('Facility / siting hazard of the propellant '
-                             f"inventory: {tesis['risk_level']}")
+                             f"inventory: {self._enum_text(tesis['risk_level'])}")
                 if tesis.get('requirement'):
                     lines.append(' — safety distance / facility measures '
                                  'required (a facility requirement, not a '
@@ -1040,7 +1324,64 @@ class PDFReportGenerator:
             return str(value)
         kisa = float('%.*g' % (cls.REPORT_SIGFIG, value))
         metin = repr(kisa)
-        return metin[:-2] if metin.endswith('.0') else metin
+        metin = metin[:-2] if metin.endswith('.0') else metin
+        return rapor_sozluk.ondalik_metni(metin)
+
+    @staticmethod
+    def _enum_text(value) -> str:
+        """BÜYÜK_HARF makine değeri ('NOT_EVALUATED') okunur yazılır.
+
+        V306/RAPOR-HATA (kalem 6a): alt çizgili hüküm sabitleri belgeye ham
+        basılıyordu; yalnız alt çizgi boşluk olur (anlam ve büyük harf aynı).
+        """
+        metin = str(value)
+        if re.fullmatch(r'[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+', metin):
+            return metin.replace('_', ' ')
+        return metin
+
+    #: V306/RAPOR-DİL (kalem 6) — tehlike bloğu ALAN ETİKETLERİ ve küçük harf
+    #: SINIF ADLARI. ÖLÇÜLDÜ (RAPOR-HATA §9, ``olcum_ham_anahtar.json``):
+    #: blok alan adının alt çizgisiz hâlini ('estimated case mass kg',
+    #: 'lethal velocity threshold ms') ve çözücünün küçük harf sınıf adlarını
+    #: ('hybrid_n2o', 'class_inventory_undetermined') İKİ DİLDE de ham
+    #: basıyordu. Ekranın güvenlik paneli bu alanları makine yolu olarak
+    #: gösterir (``safety_panel.js machineLabel``; ``panel.safety.*``
+    #: etiketi yok — DEVİR DİL-ARAYÜZ); belge etiketi rapor sözlüğünden
+    #: (``report.safety.field.<ad>`` / ``report.safety.value.<ad>``) okur.
+    #: Sözlükte olmayan yeni bir alan (üretici sonra eklerse) birim ekiyle
+    #: okunur biçime çevrilir (ad uydurulmaz, alan sessizce düşmez).
+    _ALAN_BIRIM_EKLERI = (
+        ('_m_per_kg13', ' (m/kg^(1/3))'), ('_kg_m2', ' (kg/m²)'),
+        ('_kpa', ' (kPa)'), ('_kg', ' (kg)'), ('_ms', ' (m/s)'),
+        ('_ns', ' (N·s)'), ('_n', ' (N)'), ('_j', ' (J)'), ('_m', ' (m)'),
+    )
+
+    @classmethod
+    def _field_label(cls, ad) -> str:
+        """Tehlike bloğu alanının okunur İngilizce etiketi (belge dilinde
+        çeviri Paragraph boğazında yapılır)."""
+        ad = str(ad)
+        etiket = rapor_sozluk.okunur_ad(ad)
+        if etiket:
+            return etiket
+        govde, ek = ad, ''
+        for son, birim in cls._ALAN_BIRIM_EKLERI:
+            if govde.endswith(son) and len(govde) > len(son):
+                govde, ek = govde[:-len(son)], birim
+                break
+        metin = govde.replace('_', ' ').strip()
+        return (metin[:1].upper() + metin[1:] + ek) if metin else ad
+
+    @classmethod
+    def _class_name_text(cls, value: str) -> Optional[str]:
+        """Küçük harf sınıf/aday adının okunur İngilizce karşılığı; yoksa
+        None (alan adıysa alan etiketi)."""
+        metin = rapor_sozluk.okunur_ad(value)
+        if metin:
+            return metin
+        if '_' in value:
+            return value.replace('_', ' ')
+        return None
 
     @classmethod
     def _hazard_scalar(cls, value) -> str:
@@ -1048,9 +1389,46 @@ class PDFReportGenerator:
         sayi = cls._hazard_number(value)
         if sayi is not None:
             return sayi
+        if isinstance(value, bool):
+            return 'yes' if value else 'no'
+        if isinstance(value, str) and re.fullmatch(
+                r'[a-z][a-z0-9]*(?:_[a-z0-9]+)*', value):
+            ad = cls._class_name_text(value)
+            if ad is not None:
+                return escape(ad)
+        if isinstance(value, str) and not value.startswith('warn.') \
+                and re.fullmatch(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+',
+                                 value):
+            # Güvenlik yükünün alan YOLU ('emergency_procedures.
+            # explosion_response.evacuation_distance'): etiket zinciri.
+            return escape(' › '.join(cls._field_label(p)
+                                      for p in value.split('.')))
         if isinstance(value, (list, tuple)):
-            return ', '.join(cls._hazard_scalar(v)
-                             for v in value if v is not None)
+            # Sözlük öğeli liste (ör. toksik 'release_scenarios') öğe öğe
+            # okunur yazılır, ' / ' ile ayrılır (ham Python temsili yok).
+            ayrac = ' / ' if any(isinstance(v, dict) for v in value) else ', '
+            return ayrac.join(cls._hazard_scalar(v)
+                              for v in value if v is not None)
+        if isinstance(value, dict):
+            # V306/RAPOR-DİL: üçüncü düzey sözlük Python temsili ('{'x': 1}')
+            # olarak basılıyordu (ölçüldü: hibrit L1 toksik bloğu, iki dilde);
+            # artık 'Etiket: değer; …' (etiket sözlükten).
+            return '; '.join(
+                '%s: %s' % (escape(cls._field_label(k)), cls._hazard_scalar(v))
+                for k, v in sorted(value.items())
+                if v is not None and v != '' and v != [] and v != {})
+        # V306/RAPOR-HATA (kalem 6a): değer bir uyarı/beyan KODUYSA
+        # ('disclaimer code — warn.safety.guidance_not_authoritative') ham kod
+        # basılmaz; ekranın sözlüğündeki cümlesi basılır. Sözlükte yoksa kod
+        # kalır (cümle uydurulmaz) ve AÇIK KALANLAR ölçümüne girer.
+        if isinstance(value, str) and re.fullmatch(
+                r'[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+', value):
+            return cls._enum_text(value)
+        if isinstance(value, str) and re.fullmatch(r'warn\.[a-z0-9_.]+', value):
+            from hrma.export.rapor_sozluk import metin as _sozluk_metni
+            cumle = _sozluk_metni(value, rapor_sozluk.etkin_dil())
+            if cumle and '{' not in cumle:
+                return escape(cumle)
         # ÖH D35 / OH-ON-07: değer ReportLab'ın PARAGRAF BİÇİMLEME diline
         # giriyor. Gerçek yükte çıplak ``&`` VAR (ölçüldü: tek güvenlik
         # yükünde 6 adet — ``Kinney & Graham``, ``Dyer, Stevens &
@@ -1107,7 +1485,7 @@ class PDFReportGenerator:
             deger = block[ad]
             if deger is None or deger == [] or deger == {} or deger == '':
                 continue
-            etiket = escape(str(ad).replace('_', ' '))
+            etiket = escape(cls._field_label(ad))
             try:
                 if ad in cls._BASIS_FIELDS and isinstance(deger, str):
                     if deger not in dayanaklar:
@@ -1119,13 +1497,13 @@ class PDFReportGenerator:
                     for k, v in sorted(kalan.items()):
                         if v is None or v == [] or v == {} or v == '':
                             continue
-                        alt_etiket = escape(str(k).replace('_', ' '))
+                        alt_etiket = escape(cls._field_label(k))
                         if isinstance(v, dict):
                             # İkinci düzey: aynı kural, tek satırda noktalı
                             # virgülle (üçüncü düzey depoda ölçülmedi).
                             ic = _dayanak_topla(v)
                             parca = '; '.join(
-                                '%s: %s' % (escape(str(k2).replace('_', ' ')),
+                                '%s: %s' % (escape(cls._field_label(k2)),
                                             cls._hazard_scalar(v2))
                                 for k2, v2 in sorted(ic.items())
                                 if v2 is not None and v2 != '' and v2 != []
@@ -1191,10 +1569,14 @@ class PDFReportGenerator:
                     'motor data (single run).</i>']
         cozulen = kunye.get('inputs_resolved')
         if isinstance(cozulen, dict) and cozulen:
+            # V306/RAPOR-HATA (kalem 6a): ham yanıt yolları ('md:chamber_
+            # wall_policy.wall_thickness_m') basılmaz; yalnız hangi girdilerin
+            # bu raporun kendi motor verisinden çözüldüğü yazılır.
             satirlar.append(
-                '<br/><i>Inputs resolved from: %s</i>' % '; '.join(
-                    '%s = %s' % (str(k).replace('_', ' '), v)
-                    for k, v in sorted(cozulen.items())))
+                '<br/><i>Inputs resolved from this report\u2019s own motor '
+                'data: %s.</i>' % ', '.join(
+                    escape(str(k).replace('_', ' '))
+                    for k in sorted(cozulen)))
         varsayilan = kunye.get('defaults_applied')
         if isinstance(varsayilan, dict) and varsayilan:
             satirlar.append(
@@ -1230,6 +1612,113 @@ class PDFReportGenerator:
                     'motor data: %s' % hata)
         return ''
 
+    #: V306/RAPOR-HATA (M-SIVI-14) — sıvı motorun başlık Isp'sinin EKRAN
+    #: anahtarı. PDF'in Isp adı bu anahtarın metnidir (rapor_sozluk): ekranda
+    #: ad değişirse belge de değişir (tek yer). V306/SIVI-DEFTER (K5):
+    #: başlık Isp kartı "Motor Isp — toplam itici tüketimine göre (deniz
+    #: seviyesi)" oldu; anahtar ``liq.msg.engine_isp_sl``.
+    LIQUID_HEADLINE_ISP_KEY = 'liq.msg.engine_isp_sl'
+
+    @classmethod
+    def _screen_isp_name(cls, motor_data, analysis_results) -> Optional[str]:
+        """Sıvı motorda yayımlanan Isp'nin ekrandaki adı (EN); yoksa None."""
+        kimlik = resolve_report_identity(motor_data or {}, analysis_results)
+        tip = (kimlik.get('motor_type') or ('',))[0].strip().lower()
+        if tip != 'liquid':
+            return None
+        from hrma.export.rapor_sozluk import metin
+        return metin(cls.LIQUID_HEADLINE_ISP_KEY, rapor_sozluk.etkin_dil())
+
+    #: Çözücünün KAYIPSIZ (izentropik) çıkış hızını yayımladığı yollar —
+    #: (yol, açıklama). Sıvı: deniz seviyesi irtifa satırı ve aynı satırın
+    #: ``nozzle_design.performance`` kopyası (``exit_velocity_basis``:
+    #: "v_e = Me * sqrt(gamma * R_gas * T_exit_static) ... isentropic").
+    IDEAL_EXIT_VELOCITY_PATHS = (
+        ('altitude_performance', 0, 'exit_velocity'),
+        ('nozzle_design', 'performance', 'exit_velocity'),
+    )
+
+    @classmethod
+    def _exit_velocity_label(cls, deger, analysis_results, motor_data):
+        """Çıkış hızı satırının ADI ve (gerekiyorsa) altındaki not.
+
+        V306/RAPOR-HATA (M-SIVI-14, S1 küçük). ÖLÇÜLDÜ (mühendis turu L2,
+        taban 686c34b98, ``rapor/once/sivi_L2_technical_tr.txt``): tablo
+        teslim Isp 263,4 s'nin iki satır altında niteliksiz "Exit Velocity
+        2821.7 m/s" basıyordu; sayı kayıpsız izentropik değerdir, teslim
+        itkiyle tutarlı çıkış hızı ~2 593 m/s (%8,8 düşük). Satır artık
+        NE OLDUĞUNU söyler: sayı çözücünün kayıpsız yollarından birinin
+        AYNISIYSA "ideal (isentropic, loss-free)"; temeli yayımlanmamışsa
+        bunu söyler. Sayı yoksa ad değişmez (N/A).
+        """
+        if deger is None:
+            return 'Exit Velocity', None
+        for kaynak in (analysis_results, motor_data):
+            for yol in cls.IDEAL_EXIT_VELOCITY_PATHS:
+                v = kaynak
+                for parca in yol:
+                    if isinstance(parca, int):
+                        v = v[parca] if isinstance(v, list) and len(v) > parca \
+                            else None
+                    else:
+                        v = v.get(parca) if isinstance(v, dict) else None
+                v = finite_number(v)
+                if v is not None and math.isclose(v, deger, rel_tol=1e-12):
+                    return ('Exit Velocity — ideal (isentropic, loss-free)',
+                            'The exit velocity above is the ideal, loss-free '
+                            'isentropic value at the nozzle exit. The specific '
+                            'impulse above is the delivered value, which '
+                            'includes the efficiency losses, so the two are '
+                            'not the same quantity (Isp × g0 is not this exit '
+                            'velocity).')
+        return 'Exit Velocity (basis not published by the solver)', None
+
+    #: V306/RAPOR-HATA (M-HIBRIT-31) — patlayıcı hükmü geri çekildiğinde
+    #: basılmayan parça alanlarının gerekçesi (tek tanım yeri).
+    FRAGMENT_WITHHELD_REASON = (
+        'not published: the fragment velocity, the lethal fragment range and '
+        'the maximum fragment range come from the Gurney relation, which '
+        'treats the propellant mass as the explosive charge; the explosive '
+        'verdict for this propellant is withheld (see "explosive verdict '
+        'withheld because" above), so no explosive charge is established and '
+        'these three numbers are not earned')
+
+    @classmethod
+    def _explosive_block_for_print(cls, blok):
+        """Patlayıcı bloğu — hüküm geri çekildiyse TÜREV sayılar basılmaz.
+
+        V306/RAPOR-HATA (M-HIBRIT-31, S1). ÖLÇÜLDÜ (mühendis turu L4 LOX/HTPB,
+        taban 686c34b98, ``docs/scofield/raw/OH/V306/rapor/once/
+        hibrit_L4_summary_tr.txt``): "explosive verdict withheld because —
+        oxidizer_type 'lox' names no hybrid oxidiser with a derived TNT
+        equivalence" satırının hemen altında "fragment velocity ms: 3439.71",
+        "lethal fragment range m: 1600", "maximum range m: 2000" basılıyordu.
+        Gurney bağıntısı itici kütlesini PATLAYICI ŞARJ sayar
+        (safety_analysis._calculate_fragment_hazards); şarj kazanılmadıysa bu
+        üç sayı da kazanılmamıştır. Ekran kuralı (safety_panel.js
+        ``gurneyRow``) aynı üç alanı ``fragment_throw_status`` varken '—' +
+        gerekçeyle basar; belge artık hüküm geri çekildiğinde de aynı alanları
+        basmaz ve nedenini yazar. Alan listesi üreticinin kendi demetidir
+        (``GURNEY_FRAGMENT_FIELDS``; ikinci liste tutulmaz). Kasa kütlesi ve
+        serbest kalan motor (impuls/itki) şarjdan bağımsızdır, aynen kalır.
+        """
+        if not isinstance(blok, dict):
+            return blok
+        neden = blok.get('explosive_verdict_withheld_because')
+        parca = blok.get('fragment_hazards')
+        if not (isinstance(neden, str) and neden.strip()) \
+                or not isinstance(parca, dict):
+            return blok
+        from hrma.analysis.safety_analysis import GURNEY_FRAGMENT_FIELDS
+        parca = dict(parca)
+        for alan in GURNEY_FRAGMENT_FIELDS:
+            parca[alan] = None
+        if not (isinstance(parca.get('fragment_throw_status'), str)
+                and parca['fragment_throw_status'].strip()):
+            parca['fragment_throw_status'] = 'withheld'
+            parca['fragment_throw_reason'] = cls.FRAGMENT_WITHHELD_REASON
+        return dict(blok, fragment_hazards=parca)
+
     def _create_hazard_blocks(self, safety: Dict) -> List:
         """Güvenlik analizinin tehlike bloklarını rapora basar.
 
@@ -1256,7 +1745,10 @@ class PDFReportGenerator:
         story = []
         basildi = False
         for anahtar, baslik in self.HAZARD_BLOCKS:
-            satirlar = self._hazard_lines(blok_kaynagi.get(anahtar))
+            blok = blok_kaynagi.get(anahtar)
+            if anahtar == 'explosive_hazards':
+                blok = self._explosive_block_for_print(blok)
+            satirlar = self._hazard_lines(blok)
             if not satirlar:
                 continue
             if not basildi:
@@ -1357,7 +1849,7 @@ class PDFReportGenerator:
             ('BACKGROUND', (0, 0), (0, -1), colors.lightblue),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, -1), RAPOR_YAZI_TIPI),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
@@ -1448,6 +1940,111 @@ class PDFReportGenerator:
              'hoop_safety_factor', '{:.2f}', '-'),
         ),
     }
+
+    #: V306/RAPOR-HATA (M-HIBRIT-9) — gerilme modelinin okunur adı
+    #: (``structural_analysis`` ``pressure_hoop_model`` değerleri).
+    _HOOP_MODEL_TEXT = {
+        'thin_wall': 'thin-wall hoop stress P·r/t',
+        'lame_thick_wall': 'thick-wall (Lamé) peak hoop stress',
+    }
+    #: Değerlendirilen cidarın kaynağı (``wall_thickness_source``).
+    _WALL_SOURCE_TEXT = {
+        'sized_by_hrma': 'sized by HRMA to the design safety factor target',
+        'user_supplied': 'the wall thickness you entered',
+    }
+
+    @classmethod
+    def _stress_basis(cls, structural_raw: Dict) -> Tuple[List, Optional[str]]:
+        """Hibrit kamara gerilmelerinin TABANI: satırlar + tek cümle.
+
+        V306/RAPOR-HATA (M-HIBRIT-9, S1 şüpheli). ÖLÇÜLDÜ (mühendis turu L1,
+        taban 686c34b98, ``rapor/once/hibrit_L1_technical_tr.txt``): rapor
+        "Safety Factor (pressure only) 4.80 · Von Mises Stress 38.79 MPa ·
+        Hoop Stress (total) 44.79 MPa" basıyor, hangi basınçla ve hangi
+        kalınlıkla hesaplandığını söylemiyordu. Mühendis P·r/t'yi oda
+        basıncıyla (2,0 MPa × 14,93 / 1,00 = 29,9 MPa) kurup gerilmeyi %50
+        yüksek sandı: çözücü TASARIM basıncını kullanıyor (oda basıncı ×
+        tasarım basıncı katsayısı 1,5 = 30 bar; ``design_parameters``).
+        Ekrandaki YAPISAL sekmesi aynı tabanı "Tasarım basıncı {p} bar
+        (katsayı {f})" ve "çember gerilmesi modeli" olarak yazıyor; belge
+        artık aynı tabanı satır ve cümle olarak, çözücünün kendi alanlarından
+        basar. Alan yoksa satır yoktur (sayı türetilmez).
+        """
+        raw = structural_raw if isinstance(structural_raw, dict) else {}
+        ca = raw.get('chamber_analysis') if isinstance(
+            raw.get('chamber_analysis'), dict) else {}
+        dp = raw.get('design_parameters') if isinstance(
+            raw.get('design_parameters'), dict) else {}
+        if not ca:
+            return [], None
+        rows: List = []
+        p_tas = finite_number(dp.get('design_pressure'))
+        katsayi = finite_number(dp.get('design_pressure_factor'))
+        t_mm = finite_number(ca.get('wall_thickness_used_mm'))
+        d_mm = finite_number(ca.get('diameter'))
+        p_hoop = finite_number(ca.get('pressure_hoop_stress'))
+        t_hoop = finite_number(ca.get('thermal_hoop_stress'))
+        akma = finite_number(ca.get('yield_strength_used_MPa'))
+        if p_hoop is not None:
+            rows.append(['Hoop Stress (pressure, at design pressure)',
+                         cls._fmt(p_hoop, '{:.2f}'), 'MPa'])
+        if t_hoop is not None:
+            rows.append(['Hoop Stress (thermal)', cls._fmt(t_hoop, '{:.2f}'),
+                         'MPa'])
+        if p_tas is not None:
+            rows.append(['Design Pressure (stress basis)',
+                         cls._fmt(p_tas, '{:.1f}'), 'bar'])
+        if t_mm is not None:
+            rows.append(['Evaluated Chamber Wall Thickness',
+                         cls._fmt(t_mm, '{:.3f}'), 'mm'])
+        # V306/RAPOR-DİL: cümle PARÇALARDAN kurulur; her parça rapor
+        # sözlüğünün anahtarlı parçasıdır (report.part.stress.*): İngilizce
+        # metin bit-aynı, TR'de parçaların Türkçesi aynı sırayla birleşir.
+        _p = rapor_sozluk.parca
+        parcalar = []
+        malzeme = (raw.get('material_properties') or {}).get('name') \
+            if isinstance(raw.get('material_properties'), dict) else None
+        if isinstance(malzeme, str) and malzeme.strip():
+            parcalar.append(_p('report.part.stress.on_wall_mat',
+                               p1=escape(rapor_sozluk.cevir(
+                                   malzeme.strip()))))
+        else:
+            parcalar.append(_p('report.part.stress.on_wall'))
+        model = cls._HOOP_MODEL_TEXT.get(ca.get('pressure_hoop_model'))
+        if model:
+            parcalar.append(_p('report.part.stress.with_model',
+                               p1=rapor_sozluk.cevir(model)))
+        if p_tas is not None:
+            if katsayi is not None:
+                parcalar.append(_p('report.part.stress.design_p_factor',
+                                   p1=cls._fmt(p_tas, '{:.1f}'),
+                                   p2=cls._fmt(katsayi, '{:g}')))
+            else:
+                parcalar.append(_p('report.part.stress.design_p',
+                                   p1=cls._fmt(p_tas, '{:.1f}')))
+        if t_mm is not None:
+            kaynak = cls._WALL_SOURCE_TEXT.get(ca.get('wall_thickness_source'))
+            if kaynak:
+                parcalar.append(_p('report.part.stress.wall_t_src',
+                                   p1=cls._fmt(t_mm, '{:.3f}'),
+                                   p2=rapor_sozluk.cevir(kaynak)))
+            else:
+                parcalar.append(_p('report.part.stress.wall_t',
+                                   p1=cls._fmt(t_mm, '{:.3f}')))
+        if d_mm is not None:
+            parcalar.append(_p('report.part.stress.inner_d',
+                               p1=cls._fmt(d_mm, '{:.2f}')))
+        not_ = '<b>Stress basis:</b> ' + ', '.join(parcalar) + '.'
+        if p_hoop is not None and t_hoop is not None:
+            not_ += (' Hoop Stress (total) = pressure hoop %s MPa + thermal '
+                     'hoop %s MPa.' % (cls._fmt(p_hoop, '{:.2f}'),
+                                       cls._fmt(t_hoop, '{:.2f}')))
+        if akma is not None:
+            not_ += (' The chamber wall hoop and von Mises safety factors are '
+                     'the yield strength used, %s MPa (at the evaluated wall '
+                     'temperature), divided by these stresses.'
+                     % cls._fmt(akma, '{:.0f}'))
+        return rows, not_
 
     @classmethod
     def _structural_direct_rows(cls, structural_raw: Dict) -> Tuple[List, List]:
@@ -1732,12 +2329,21 @@ class PDFReportGenerator:
         _pc_perf, _pc_perf_red = resolve_chamber_pressure_bar(
             self._resolve_performance('chamber_pressure', performance,
                                       motor_data))
+        # V306/RAPOR-HATA (M-SIVI-14): Isp satırı ekranın başlık adını
+        # taşır (sıvı); çıkış hızı satırı NE OLDUĞUNU söyler.
+        _isp_adi = self._screen_isp_name(motor_data, analysis_results)
+        _ev_etiketi, _ev_notu = self._exit_velocity_label(
+            self._resolve_performance('exit_velocity', performance,
+                                      motor_data),
+            analysis_results, motor_data)
         perf_data = [
             ['Parameter', 'Value', 'Unit'],
             ['Maximum Thrust', _perf('thrust'), 'N'],
             ['Specific Impulse', _perf('specific_impulse'), 's'],
             ['Chamber Pressure', self._fmt(_pc_perf, '{:.1f}'), 'bar'],
-            ['Exit Velocity', _perf('exit_velocity'), 'm/s'],
+            [Paragraph(_ev_etiketi, self.styles['Normal'])
+             if _ev_etiketi != 'Exit Velocity' else _ev_etiketi,
+             _perf('exit_velocity'), 'm/s'],
             ['Mass Flow Rate', _perf('mass_flow_rate', '{:.3f}'), 'kg/s'],
             ['Burn Time', _perf('burn_time'), 's'],
             ['Total Impulse', _perf('total_impulse'), 'N⋅s']
@@ -1761,8 +2367,8 @@ class PDFReportGenerator:
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, 0), RAPOR_YAZI_TIPI_KALIN),
+            ('FONTNAME', (0, 1), (-1, -1), RAPOR_YAZI_TIPI),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
@@ -1770,6 +2376,18 @@ class PDFReportGenerator:
         ]))
         
         story.append(perf_table)
+        # Sıvıda Isp satırının ekrandaki ADI tablonun hemen altında (tablo
+        # etiketi sözleşmedir: özet ⟷ tablo ve kabul bekçileri onu okur).
+        if _isp_adi and self._resolve_performance(
+                'specific_impulse', performance, motor_data) is not None:
+            story.append(Spacer(1, 0.05 * inch))
+            story.append(Paragraph(
+                'Specific Impulse above is the engine\u2019s \u201c%s\u201d: '
+                'the same quantity and the same number as on the results '
+                'screen.' % escape(_isp_adi), self.styles['Normal']))
+        if _ev_notu:
+            story.append(Spacer(1, 0.05 * inch))
+            story.append(Paragraph(_ev_notu, self.styles['Normal']))
         if _burn_missing_note is not None:
             story.append(Spacer(1, 0.05 * inch))
             story.append(_burn_missing_note)
@@ -1823,7 +2441,7 @@ class PDFReportGenerator:
                 ('BACKGROUND', (0, 0), (-1, 0), colors.red),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 0), (-1, 0), RAPOR_YAZI_TIPI_KALIN),
                 ('FONTSIZE', (0, 0), (-1, -1), 10),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black)
             ]))
@@ -1910,8 +2528,8 @@ class PDFReportGenerator:
                         '<b>Design basis:</b> %s sized to the design safety '
                         'factor target%s, so their safety factor is the design '
                         'input read back and is EXCLUDED from the minimum above '
-                        '(structural_analysis: safety_factor_is_tautological = '
-                        'true). Supply the as-built thickness of those stations '
+                        '(the solver marks it as the design target read back, '
+                        'not a verification). Supply the as-built thickness of those stations '
                         'to obtain a verified value.'
                         % (' and '.join(basis['sized']),
                            '' if basis['target'] is None
@@ -1940,8 +2558,8 @@ class PDFReportGenerator:
                         '<b>Design basis: SIZING mode — no verified safety '
                         'margin.</b> %s was SIZED to the design safety factor '
                         'target, so the factor it reports is that target read '
-                        'back (structural_analysis: '
-                        'safety_factor_is_tautological = true), not a '
+                        'back (the solver marks it as the design target read '
+                        'back, not a measurement), not a '
                         'verification of a wall you built. Supply the as-built '
                         'thickness to obtain a verified safety factor.'
                         % ' and '.join(basis['sized']))
@@ -1952,8 +2570,8 @@ class PDFReportGenerator:
                         '<b>Design basis: SIZING mode — no verified safety margin.</b> '
                         'Wall, throat and head thicknesses were SIZED to the design '
                         'safety factor target%s. Every station therefore returns that '
-                        'target back (structural_analysis: '
-                        'safety_factor_is_tautological = true), so no independent '
+                        'target back (the solver marks each one as the design '
+                        'target read back), so no independent '
                         'minimum safety factor is reported here; the factors above '
                         'are design inputs read back, not verifications. Enter the '
                         'as-built wall / throat / head thicknesses to obtain verified '
@@ -1961,26 +2579,42 @@ class PDFReportGenerator:
 
             _add_structural_row('Von Mises Stress', 'von_mises_stress_MPa', unit='MPa')
             _add_structural_row('Hoop Stress (total)', 'hoop_stress_MPa', unit='MPa')
+            # V306/RAPOR-HATA (M-HIBRIT-9): gerilmelerin TABANI satır olarak
+            # (katman, basınç, kalınlık) — ekrandaki YAPISAL sekmesiyle aynı
+            # tanım; sayılar çözücünün kendi alanlarıdır.
+            stress_basis_rows, stress_basis_note = self._stress_basis(
+                structural_raw) if structural else ([], None)
+            structural_data.extend(stress_basis_rows)
             if structural.get('status'):
                 structural_data.append(['Structural Status', str(structural['status']), '-'])
             if structural.get('risk_level'):
                 structural_data.append(['Risk Level', str(structural['risk_level']), '-'])
 
             if len(structural_data) > 1:
+                # V306/RAPOR-DİL: ad sütunu 2,5 → 3,75 inç (toplam 6,0 inç,
+                # sayfa içi 6,27). Ölçüldü (10 pt): 'Hoop Safety Factor
+                # (computed on the drawn wall)' Helvetica'da 3,06 inç, DejaVu'da
+                # 3,47 inç — eski 2,5 inçlik sütundan değer sütununa TAŞIYORDU
+                # (EN'de de); TR etiketleri daha uzun ve sarılır.
                 structural_table = Table(structural_data,
-                                         colWidths=[2.5*inch, 1.5*inch, 0.75*inch])
+                                         colWidths=[3.75*inch, 1.5*inch, 0.75*inch])
                 structural_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTNAME', (0, 0), (-1, 0), RAPOR_YAZI_TIPI_KALIN),
+                    ('FONTNAME', (0, 1), (-1, -1), RAPOR_YAZI_TIPI),
                     ('FONTSIZE', (0, 0), (-1, -1), 10),
                     ('GRID', (0, 0), (-1, -1), 1, colors.black),
                     ('ROWBACKGROUNDS', (0, 1), (-1, -1),
                      [colors.white, colors.lightgrey])
                 ]))
                 story.append(structural_table)
+
+            if stress_basis_note:
+                story.append(Spacer(1, 0.1 * inch))
+                story.append(Paragraph(stress_basis_note,
+                                       self.styles['Normal']))
 
             # OH-D33-15: düşürülen satırların beyanı, tablodan HEMEN sonra
             # (eksik satırı açıklayan cümle, açıkladığı tablonun yanında).
@@ -2090,17 +2724,33 @@ class PDFReportGenerator:
                     return cls._tau_choice_text(blok, yol_adi)
                 olcmedi = dongu.get('tau_choice_not_measured')
                 if isinstance(olcmedi, dict) and olcmedi.get('reason'):
+                    # V306/RAPOR-HATA (kalem 6a): ham yanıt yolu
+                    # ('[...tau_choice_not_measured]') basılmaz.
                     return ('<b>Chug tau-choice sensitivity:</b> NOT measured '
-                            '- %s <i>[%s.tau_choice_not_measured]</i>' % (
-                                escape(str(olcmedi['reason'])),
-                                escape(yol_adi)))
+                            '- %s' % escape(str(olcmedi['reason'])))
         return None
+
+    #: V306/RAPOR-HATA (kalem 6a) — chug tau bloğunun alan ETİKETLERİ
+    #: (ham anahtar 'is_tau_sensitive = …' belgeye basılmaz).
+    TAU_CHOICE_LABELS = {
+        'is_tau_sensitive': 'verdict sensitive to the tau choice',
+        'frequency_hz_span': 'frequency spread',
+        'growth_is_tau_sensitive': 'growth rate sensitive to the tau choice',
+        'growth_rate_1_s_span': 'growth-rate spread',
+        'ratio': 'max/min ratio',
+        'span_1_s': 'span',
+    }
 
     @classmethod
     def _tau_choice_text(cls, blok, yol_adi) -> str:
+        L = cls.TAU_CHOICE_LABELS
+
         def _bayrak(v):
             # Üç durumlu: None "ölçülmedi" demektir, False'a TERFİ ETMEZ.
-            return 'not measured (null)' if v is None else escape(str(v))
+            if v is None:
+                return 'not measured'
+            return 'yes' if v is True else ('no' if v is False
+                                            else escape(str(v)))
 
         def _bant(bant, alt, ust, birim, ek_alanlar, gerekce):
             if not isinstance(bant, dict):
@@ -2113,17 +2763,18 @@ class PDFReportGenerator:
                 escape(str(bant.get('max_candidate'))))
             for ad in ek_alanlar:
                 if ad in bant:
-                    parca += '; %s = %s' % (escape(ad),
-                                            cls._param_scalar(bant.get(ad)))
+                    parca += '; %s %s' % (escape(L.get(ad, ad)),
+                                          cls._param_scalar(bant.get(ad)))
             return parca
 
         return (
-            '<b>Chug tau-choice sensitivity:</b> is_tau_sensitive = %s; '
-            'frequency_hz_span = %s; growth_is_tau_sensitive = %s; '
-            'growth_rate_1_s_span = %s. The verdict, frequency_hz and '
-            'growth_rate_1_s published for this run use ONE time scale; this '
-            'block is the solver\'s measured spread across the candidate '
-            'scales. <i>[%s.tau_choice_sensitivity]</i>' % (
+            '<b>Chug tau-choice sensitivity:</b> ' + L['is_tau_sensitive']
+            + ': %s; ' + L['frequency_hz_span'] + ': %s; '
+            + L['growth_is_tau_sensitive'] + ': %s; '
+            + L['growth_rate_1_s_span'] + ': %s. The verdict, the chug '
+            'frequency and the growth rate published for this run use ONE '
+            'time scale; this block is the solver\'s measured spread across '
+            'the candidate scales.') % (
                 _bayrak(blok.get('is_tau_sensitive')),
                 _bant(blok.get('frequency_hz_span'), 'min_hz', 'max_hz',
                       'Hz', ('ratio',),
@@ -2131,8 +2782,7 @@ class PDFReportGenerator:
                 _bayrak(blok.get('growth_is_tau_sensitive')),
                 _bant(blok.get('growth_rate_1_s_span'), 'min_1_s', 'max_1_s',
                       '1/s', ('span_1_s', 'ratio'),
-                      blok.get('growth_span_not_resolved_reason')),
-                escape(yol_adi)))
+                      blok.get('growth_span_not_resolved_reason')))
 
     @classmethod
     def _uq_conditionality_line(cls, analysis_results) -> Optional[str]:
@@ -2176,9 +2826,88 @@ class PDFReportGenerator:
         satirlar = [
             cls._two_phase_qualifier_line(ar, md),
             cls._uq_conditionality_line(ar),
+            cls._chug_verdict_line(ar, md),
             cls._tau_choice_qualifier_line(ar, md),
         ]
         return [s for s in satirlar if s]
+
+    #: V306/SIVI-MODEL (M-SIVI-28) — chug hüküm sözcükleri (ham enum basılmaz).
+    CHUG_LOOP_VERDICT_WORDS = {'stable': 'STABLE', 'marginal': 'MARGINAL',
+                               'unstable': 'UNSTABLE'}
+    CHUG_RULE_WORDS = {'chug_margin_ok': 'met',
+                       'chug_margin_marginal': 'marginal',
+                       'chug_risk': 'not met'}
+
+    @classmethod
+    def _chug_verdict_line(cls, *kaynaklar) -> Optional[str]:
+        """V306/SIVI-MODEL (M-SIVI-28, S1) — chug: oran kuralı ⟷ çevrim modeli.
+
+        ÖLÇÜLEN KUSUR (``docs/scofield/raw/OH/V306/sivi-model/
+        k1_pdf_once.json``, mühendis turu L1): PDF chug hükmünü HİÇ basmıyor,
+        yalnız τ duyarlılık satırı "The verdict ... use ONE time scale"
+        diyordu; ekran ise kısma tablosunda yalnız oran kuralının "marj
+        yeterli" hükmünü basıyordu. Satır tasarım noktasının İKİ hükmünü
+        (çevrim modeli + oran kuralı) ve kısma haritasında kuralın sağlanıp
+        çevrimin kararlı demediği noktaları adıyla basar. Çevrim bloğu
+        yoksa satır YOK.
+        """
+        for kaynak in kaynaklar:
+            for yol in CHUG_LOOP_PATHS:
+                dongu = cls._nested_get(kaynak, yol)
+                if not (isinstance(dongu, dict)
+                        and dongu.get('verdict') in cls.CHUG_LOOP_VERDICT_WORDS):
+                    continue
+                rvl = dongu.get('rule_vs_loop')
+                rvl = rvl if isinstance(rvl, dict) else {}
+                parca = ('<b>Chug (design point):</b> feed-coupled chug loop '
+                         'model %s' % cls.CHUG_LOOP_VERDICT_WORDS[
+                             dongu['verdict']])
+                ek = []
+                if isinstance(dongu.get('growth_rate_1_s'), (int, float)):
+                    ek.append('growth rate %s 1/s' % cls._param_scalar(
+                        dongu['growth_rate_1_s']))
+                if isinstance(dongu.get('frequency_hz'), (int, float)):
+                    ek.append('%s Hz' % cls._param_scalar(
+                        dongu['frequency_hz']))
+                if ek:
+                    parca += ' (' + ', '.join(ek) + ')'
+                kural = rvl.get('ratio_rule_rating')
+                j = cls._nested_get(dongu, ('inputs', 'dp_ratio_j'))
+                if kural in cls.CHUG_RULE_WORDS:
+                    parca += '; classical ratio rule %s%s' % (
+                        cls.CHUG_RULE_WORDS[kural],
+                        (' at dP_inj/Pc = %s' % cls._param_scalar(j))
+                        if isinstance(j, (int, float)) else '')
+                if rvl.get('agreement') == 'disagree':
+                    parca += ('. The two disagree: the rule tests only the '
+                              'injector gain dP_inj/Pc, the loop also uses '
+                              'the sensitive time lag and the chamber time '
+                              'constant')
+                tm = None
+                for k in kaynaklar:
+                    if isinstance(k, dict) and isinstance(
+                            k.get('throttle_map'), dict):
+                        tm = k['throttle_map']
+                        break
+                tl = (tm or {}).get('chug_loop_across_throttle')
+                tl = tl if isinstance(tl, dict) else {}
+                listeler = (
+                    ('rule_safe_but_loop_not_stable_fractions',
+                     'Throttle map: ratio rule met but the loop model does '
+                     'not say stable at %s (not counted as stable)'),
+                    ('atomisation_scale_sensitive_fractions',
+                     'pintle atomisation scales disagree (MARGINAL) at %s'),
+                    ('atomisation_scale_rejected_fractions',
+                     'loop rejected a pintle atomisation scale at %s'),
+                )
+                for alan, kalip in listeler:
+                    oranlar = tl.get(alan)
+                    if isinstance(oranlar, list) and oranlar:
+                        parca += '. ' + kalip % ', '.join(
+                            '%g %%' % round(100.0 * float(f), 1)
+                            for f in oranlar)
+                return parca + '.'
+        return None
 
     # ------------------------------------------------------------------
     # Çözücü uyarıları (ÖH Z5-A / OH-Z2-05)
@@ -2307,7 +3036,8 @@ class PDFReportGenerator:
 
     @classmethod
     def _collect_solver_warnings(
-            cls, *payloads) -> List[Tuple[str, str, str, str, str]]:
+            cls, *payloads, kayitlarla: bool = False
+    ) -> List[Tuple[str, str, str, str, str]]:
         """Uyarı kayıtları -> (kaynak, önem, kod, parametreler, cümle).
 
         ÖLÇÜLEN KUSUR (OH-Z2-05): 1 mm cidarlı sıvı koşumunda çözücü
@@ -2338,6 +3068,7 @@ class PDFReportGenerator:
                 if not isinstance(records, list):
                     continue
                 for record in records:
+                    kayit = record
                     if isinstance(record, dict):
                         code = str(record.get('code') or record.get('message')
                                    or record.get('text') or '').strip()
@@ -2384,8 +3115,47 @@ class PDFReportGenerator:
                     if fingerprint in seen:
                         continue
                     seen.add(fingerprint)
-                    rows.append((label, severity, code, detail, fallback))
+                    if kayitlarla:
+                        rows.append((label, severity, code, detail, fallback,
+                                     kayit))
+                    else:
+                        rows.append((label, severity, code, detail, fallback))
         return rows
+
+    #: V306/RAPOR-HATA (kalem 6a) — uyarı kanalının OKUNUR adı (ham anahtar
+    #: 'input_warnings' / 'validation.critical_warnings' belgeye basılmaz).
+    WARNING_SOURCE_LABELS = {
+        'validation.critical_warnings': 'Input validation (critical)',
+        'validation.regular_warnings': 'Input validation',
+        'warnings': 'Solver',
+        'design_warnings': 'Design check',
+        'input_warnings': 'Input check',
+    }
+
+    #: Sözlükte de kaydın kendisinde de cümlesi olmayan uyarının satırı
+    #: (ham kod basılmaz; cümle UYDURULMAZ — eksikliği adıyla söylenir).
+    WARNING_WITHOUT_WORDING = ('The solver raised a warning for which this '
+                               'version publishes no wording.')
+
+    @classmethod
+    def _warning_sentence(cls, kayit) -> str:
+        """Uyarı kaydının belgeye basılan cümlesi (ekranın sözlüğünden).
+
+        V306/RAPOR-HATA (M-KATI-3 / M-SIVI-13, kalem 6a). ÖLÇÜLDÜ (taban
+        686c34b98, ``rapor/once/*.txt``): bölüm ``warn.solid.initial_mass_
+        flux_high (mass_flux_kg_m2s=2455; threshold_kg_m2s=1400)`` gibi HAM
+        kod + parametre dökümü basıyordu; ``fallback`` cümleleri yer
+        tutucuları DOLDURULMADAN iniyordu ("n = {exponent}"). Cümle artık
+        ekranın ``warnToText``ıyla aynı sırayla kurulur (hrma/export/
+        rapor_sozluk.uyari_cumlesi): sözlükteki kod metni, yoksa kaydın
+        kendi cümlesi; ikisi de parametrelerle doldurulur. Ölçülen sayılar
+        cümlenin içindedir.
+        """
+        from hrma.export.rapor_sozluk import uyari_cumlesi
+        if isinstance(kayit, str):
+            return escape(kayit.strip())
+        cumle = uyari_cumlesi(kayit, rapor_sozluk.etkin_dil())
+        return escape(cumle) if cumle else cls.WARNING_WITHOUT_WORDING
 
     # ------------------------------------------------------------------
     # v3.0.1 (Ayberk tur 1) — yanıtta olup PDF'e girmeyen iki blok.
@@ -2425,8 +3195,8 @@ class PDFReportGenerator:
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, 0), RAPOR_YAZI_TIPI_KALIN),
+            ('FONTNAME', (0, 1), (-1, -1), RAPOR_YAZI_TIPI),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
@@ -2556,7 +3326,7 @@ class PDFReportGenerator:
             cea_bas = 'NASA CEA' if tablo_turu else 'NASA CEA (theoretical)'
         hucre = ParagraphStyle('CeaHucre', parent=self.styles['Normal'],
                                fontSize=8, leading=10)
-        bas = ParagraphStyle('CeaBas', parent=hucre, fontName='Helvetica-Bold',
+        bas = ParagraphStyle('CeaBas', parent=hucre, fontName=RAPOR_YAZI_TIPI_KALIN,
                              textColor=colors.whitesmoke)
 
         def p(metin, stil=hucre):
@@ -2595,7 +3365,12 @@ class PDFReportGenerator:
                 satir.append(p(neden))
             satirlar.append(satir)
         if len(satirlar) > 1:
-            genislik = ([1.75, 0.55, 0.95, 0.95, 0.65, 1.45] if aciklamali
+            # V306/RAPOR-DİL: DejaVu Sans (Türkçe harfler) Helvetica'dan ~%15
+            # geniş; başlık sözcükleri ('(theoretical)' 56,6 pt, TR
+            # '(yayımlanan,' 58,5 pt) 0,95 inç sütuna (56,4 pt) SIĞMIYOR ve
+            # sözcük ortasından kırılıyordu. 0,1 inç ad sütunundan alınır
+            # (toplam genişlik aynı, 6,3 inç).
+            genislik = ([1.65, 0.55, 1.0, 1.0, 0.65, 1.45] if aciklamali
                         else [2.25, 0.6, 1.3, 1.0, 0.8])
             story.append(Spacer(1, 0.08 * inch))
             story.append(self._simple_table(
@@ -2915,7 +3690,9 @@ class PDFReportGenerator:
     #: Sıvı termal tablo satırları: (blok, yol, etiket, birim, biçim).
     #: blok: 'cs' = cooling_system, 'tp' = thermal_protection,
     #: 'sm' = thermal_protection.station_march,
-    #: 'st' = structural_analysis.chamber_structure.
+    #: 'st' = structural_analysis.chamber_structure,
+    #: 'pd' = feed_system.pressure_drops,
+    #: 'rc' = thermal_protection.channel_circuit_reconciliation.
     LIQUID_THERMAL_ROWS = (
         ('tp', 'cooling_type', 'Cooling type', '-', None),
         ('cs', 'wall_temperature_solved_K',
@@ -2934,10 +3711,16 @@ class PDFReportGenerator:
          '{:.1f}'),
         ('cs', 'coolant_exit_temperature_bulk_estimate_K',
          'Coolant exit, bulk Bartz estimate (diagnostic)', 'K', '{:.1f}'),
-        ('cs', 'cooling_pressure_drop',
-         'Jacket pressure drop, bulk Bartz chain', 'bar', '{:.3f}'),
-        ('sm', 'coolant_pressure_drop_bar',
-         'Jacket pressure drop, station march', 'bar', '{:.3f}'),
+        # V306/SIVI-CEKET (K5_KARAR EK4): ceket ΔP'si TEK sayı — besleme
+        # bütçesinin ceket kalemi (çevrim, tank basıncı ve soğutma panelleri
+        # aynı sayıyı okur). Toplu Bartz kestirimi yalnız RP-1 marşının
+        # mutabakat bloğunda, tanı satırı olarak ve adıyla.
+        ('pd', 'fuel_line.regen_jacket',
+         'Jacket pressure drop (single value: feed budget, cycle, cooling)',
+         'bar', '{:.3f}'),
+        ('rc', 'bulk_chain.pressure_drop_bar',
+         'Jacket pressure drop, bulk Bartz estimate (diagnostic, not used '
+         'by the feed budget)', 'bar', '{:.3f}'),
         ('tp', 'heat_flux', 'Throat heat flux at the design wall (Bartz)',
          'MW/m2', '{:.2f}'),
         ('st', 'wall_temperature', 'Structural verdict wall temperature', 'K',
@@ -3041,7 +3824,12 @@ class PDFReportGenerator:
             if sayi is None:
                 return 'not published'
             return bicim.format(sayi)
-        return str(deger)
+        # V306/RAPOR-DİL (kalem 6): makine değeri ('unlike_impinging',
+        # 'two_layer_regenerative') okunur adıyla (rapor sözlüğü).
+        metin = str(deger)
+        if re.fullmatch(r'[a-z][a-z0-9]*(?:_[a-z0-9]+)+', metin):
+            return rapor_sozluk.okunur_ad(metin) or metin.replace('_', ' ')
+        return metin
 
     @staticmethod
     def _liquid_mu(analysis_results: Dict, motor_data: Optional[Dict]) -> bool:
@@ -3051,6 +3839,54 @@ class PDFReportGenerator:
             return False
         return isinstance((analysis_results or {}).get('cooling_system'),
                           dict)
+
+    def _create_liquid_jacket_gate_section(self, analysis_results: Dict
+                                           ) -> List:
+        """V306/SIVI-CEKET-A — ceket yayım kapısının rapor bölümü.
+
+        Metinler ekranın sözlüğünden (``liq.gate.*``; tek kaynak). Kapı
+        tetiklenmediyse boş liste (rapor bit-aynı). ``design`` kapsamında
+        itki odası Isp'si kendi tanımıyla basılır; motor Isp'si bekletilir.
+        """
+        ar = analysis_results or {}
+        c = ar.get('cooling_circuit_publication')
+        if not _ceket_kapisi_etkin(ar):
+            return []
+        dil = rapor_sozluk.etkin_dil()
+        neden = rapor_sozluk.metin(
+            'liq.gate.withheld_model_limit'
+            if c.get('withheld_reason_code') == 'jacket_model_limit'
+            else 'liq.gate.withheld_not_evaluated', dil,
+            yedek=c.get('withheld_reason'))
+        tasarim = c.get('scope') == 'design'
+        kapsam = rapor_sozluk.metin(
+            'liq.gate.scope_design' if tasarim else 'liq.gate.scope_circuit',
+            dil, yedek=c.get('scope_basis'))
+        yedeksiz = rapor_sozluk.metin('liq.gate.no_substitute', dil,
+                                      yedek='')
+        story = [Paragraph(neden, self.styles['SectionHeader']),
+                 Paragraph(kapsam, self.styles['Normal'])]
+        if yedeksiz:
+            story.append(Paragraph(yedeksiz, self.styles['Normal']))
+        tca = ar.get('thrust_chamber_isp')
+        if tasarim and isinstance(tca, dict):
+            satirlar = []
+            for anahtar, alan in (('liq.gate.tca_isp_sl', 'sea_level_s'),
+                                  ('liq.gate.tca_isp_vac', 'vacuum_s')):
+                v = tca.get(alan)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    satirlar.append([rapor_sozluk.metin(anahtar, dil,
+                                                        yedek=anahtar),
+                                     rapor_sozluk.ondalik_metni(
+                                         f'{float(v):.1f}', dil) + ' s'])
+            if satirlar:
+                story.append(Spacer(1, 0.15 * inch))
+                story.append(Table(satirlar))
+                tanim = rapor_sozluk.metin('liq.gate.tca_isp_def', dil,
+                                           yedek=tca.get('definition'))
+                if tanim:
+                    story.append(Paragraph(tanim, self.styles['Normal']))
+        return story
 
     def _create_liquid_thermal_section(self, analysis_results: Dict,
                                        motor_data: Optional[Dict] = None
@@ -3066,7 +3902,12 @@ class PDFReportGenerator:
         sm = sm if isinstance(sm, dict) else {}
         st = self._yol_oku(ar, 'structural_analysis.chamber_structure')
         st = st if isinstance(st, dict) else {}
-        bloklar = {'cs': cs, 'tp': tp, 'sm': sm, 'st': st}
+        pd = self._yol_oku(ar, 'feed_system.pressure_drops')
+        pd = pd if isinstance(pd, dict) else {}
+        rc = tp.get('channel_circuit_reconciliation')
+        rc = rc if isinstance(rc, dict) else {}
+        bloklar = {'cs': cs, 'tp': tp, 'sm': sm, 'st': st, 'pd': pd,
+                   'rc': rc}
         story = [Paragraph('Thermal Protection and Cooling',
                            self.styles['SectionHeader'])]
         story.append(Paragraph(escape(
@@ -3119,7 +3960,9 @@ class PDFReportGenerator:
                 ('Wall model', st.get('wall_model_basis')
                  if katmanlar else None),
                 ('Not modelled for the wall layers', ', '.join(
-                    str(x) for x in st.get('wall_layers_not_modelled'))
+                    self._field_label(x)[:1].lower() + self._field_label(x)[1:]
+                    if re.fullmatch(r'[a-z][a-z0-9_]*', str(x)) else str(x)
+                    for x in st.get('wall_layers_not_modelled'))
                  if katmanlar and isinstance(
                      st.get('wall_layers_not_modelled'), list) else None),
                 ('Station march', tp.get('station_march_status'))):
@@ -3238,7 +4081,8 @@ class PDFReportGenerator:
         uyarıyı taşımayan bir yük arasındaki farkı siler; bölüm yalnız
         gerçekten kayıt varken açılır (fail-closed).
         """
-        rows = self._collect_solver_warnings(analysis_results, motor_data)
+        rows = self._collect_solver_warnings(analysis_results, motor_data,
+                                             kayitlarla=True)
         if not rows:
             return []
 
@@ -3251,39 +4095,30 @@ class PDFReportGenerator:
         critical_count = sum(1 for r in rows if r[1].lower() == 'critical')
         story.append(Paragraph(
             f'{len(rows)} warning record(s) were raised by the solver for this '
-            f'design, {critical_count} of them at CRITICAL severity. The '
-            f'identifier below is the canonical warning code; the wording is '
-            f'rendered by the user interface dictionary, so the report prints '
-            f'the code and its measured parameters verbatim rather than a '
-            f'restated sentence.',
+            f'design, {critical_count} of them at CRITICAL severity. Each row '
+            f'gives the warning in the same words as the results screen, with '
+            f'the values the solver measured.',
             self.styles['Normal']))
         story.append(Spacer(1, 0.15 * inch))
 
-        table_data = [['Severity', 'Source', 'Warning code / parameters']]
-        for source, severity, code, detail, fallback in rows:
-            if not detail:
-                text = code
-            elif '<br/>' in detail:
-                # ÖH D36 / dil2-i18n-pdf a1: alt satırlı parametre bloğu
-                # (kap taşıyan parametreler) — parantez tek satır içindir.
-                text = f'{code}<br/>{detail}'
-            else:
-                text = f'{code}<br/>({detail})'
-            # Kaydın kendi cümlesi VARSA koda EK olarak basılır (OH-D17-01);
-            # kod kanonik kimlik olarak satırda kalır.
-            if fallback:
-                text = f'{text}<br/>{escape(fallback)}'
+        # V306/RAPOR-HATA (kalem 6a): ham kod, ham parametre dökümü ve
+        # doldurulmamış şablon basılmaz; cümle ekranın sözlüğünden.
+        table_data = [['Severity', 'Source', 'Warning']]
+        for source, severity, code, detail, fallback, kayit in rows:
+            text = self._warning_sentence(kayit)
             table_data.append([
                 (severity or 'unspecified').upper(),
-                source,
+                Paragraph(escape(self.WARNING_SOURCE_LABELS.get(source,
+                                                                source)),
+                          self.styles['Normal']),
                 Paragraph(text, self.styles['Normal']),
             ])
         table = Table(table_data, colWidths=[0.9 * inch, 1.5 * inch, 4.1 * inch])
         style = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkred),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, 0), RAPOR_YAZI_TIPI_KALIN),
+            ('FONTNAME', (0, 1), (-1, -1), RAPOR_YAZI_TIPI),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
@@ -3294,7 +4129,7 @@ class PDFReportGenerator:
             if row[1].lower() == 'critical':
                 style.append(('TEXTCOLOR', (0, index), (0, index), colors.red))
                 style.append(('FONTNAME', (0, index), (0, index),
-                              'Helvetica-Bold'))
+                              RAPOR_YAZI_TIPI_KALIN))
         table.setStyle(TableStyle(style))
         story.append(table)
         return story
@@ -3402,6 +4237,58 @@ class PDFReportGenerator:
             pass
         return f'Chart {index}'
 
+    @staticmethod
+    def _chart_texts_in_report_language(payload: Dict) -> Dict:
+        """V306/RAPOR-DİL (kalem 6) — gömülen grafiğin metinleri belge dilinde.
+
+        Ekran figürü Plotly'ye verilmeden ÖNCE ``plotly_dark.js
+        translateFigure`` ile çevirir (başlık, eksen, lejant, not, iz adı)
+        ve TR'de ondalık ayracını ',' yapar (``layout.separators``). Grafik
+        ekrandan çevrilmiş gelirse bu adım ona dokunmaz (Türkçe metin
+        sözlükte İngilizce karşılık bulmaz); İngilizce gelirse (ör. sayfa
+        dili sonradan değişti, grafik eski çizimden) aynı sözlük ve desenle
+        çevrilir. Dil 'en' ise figüre HİÇ dokunulmaz.
+        """
+        dil = rapor_sozluk.etkin_dil()
+        if dil == 'en' or not isinstance(payload, dict):
+            return payload
+        import copy
+        fig = copy.deepcopy(payload)
+        cev = rapor_sozluk.cevir_isaretli
+
+        def _baslik(nesne):
+            if not isinstance(nesne, dict):
+                return
+            baslik = nesne.get('title')
+            if isinstance(baslik, dict) and isinstance(baslik.get('text'), str):
+                baslik['text'] = cev(baslik['text'])
+            elif isinstance(baslik, str):
+                nesne['title'] = cev(baslik)
+
+        yerlesim = fig.get('layout')
+        if isinstance(yerlesim, dict):
+            _baslik(yerlesim)
+            for ad, deger in list(yerlesim.items()):
+                if re.fullmatch(r'[xyz]axis\d*', str(ad)):
+                    _baslik(deger)
+                elif re.fullmatch(r'(scene|polar)\d*', str(ad)) \
+                        and isinstance(deger, dict):
+                    for eksen in ('xaxis', 'yaxis', 'zaxis', 'radialaxis',
+                                  'angularaxis'):
+                        _baslik(deger.get(eksen))
+            _baslik(yerlesim.get('legend'))
+            for not_ in yerlesim.get('annotations') or []:
+                if isinstance(not_, dict) and isinstance(not_.get('text'), str):
+                    not_['text'] = cev(not_['text'])
+            # Ekranın TR ayracı (plotly_dark.js ayraclariKur): ondalık ','
+            # ve binlik ayracı YOK (ekranın I18N.number kuralı).
+            if yerlesim.get('separators') in (None, '.,', ',.'):
+                yerlesim['separators'] = ',.'
+        for iz in fig.get('data') or []:
+            if isinstance(iz, dict) and isinstance(iz.get('name'), str):
+                iz['name'] = cev(iz['name'])
+        return fig
+
     def _chart_to_png_bytes(self, chart_data) -> Optional[bytes]:
         """Grafik girdisini PNG baytlarına çevirir; başarısızsa None.
 
@@ -3418,6 +4305,7 @@ class PDFReportGenerator:
         if payload is not None:
             try:
                 from hrma.export.chart_render import figure_png
+                payload = self._chart_texts_in_report_language(payload)
                 fig = go.Figure(payload)
                 self._apply_print_theme(fig)
                 return figure_png(
@@ -3640,19 +4528,10 @@ class PDFReportGenerator:
             mesaj = uyari.get('message') or uyari.get('text') or ''
             etiket = 'CRITICAL' if siddet == 'critical' else (
                 siddet.upper() or 'NOTE')
-            govde = f'<b>{etiket} — {kod}</b>' if kod else f'<b>{etiket}</b>'
-            if mesaj:
-                govde += f': {mesaj}'
-            params = uyari.get('params')
-            if isinstance(params, dict) and params:
-                # ÖH D36 / dil2-i18n-pdf a1: değer ``_param_scalar`` kuralıyla
-                # (repr yok, basamak kuralı, kaçırma) — Solver Warnings
-                # bölümüyle aynı biçim; bkz. ``_solver_declaration_lines``.
-                govde += ' (' + ', '.join(
-                    '%s = %s' % (escape(str(k)),
-                                 PDFReportGenerator._param_scalar(v))
-                    for k, v in sorted(params.items())) + ')'
-            satirlar.append(govde)
+            # V306/RAPOR-HATA (kalem 6a): ham kod + 'ad = değer' dökümü
+            # yerine ekranın sözlüğündeki cümle (Solver Warnings ile aynı).
+            satirlar.append('<b>%s</b>: %s' % (
+                etiket, PDFReportGenerator._warning_sentence(uyari)))
         return satirlar
 
     @staticmethod
@@ -3674,7 +4553,10 @@ class PDFReportGenerator:
             satirlar.append(
                 '<b>Declared as NOT modelled by the solver ('
                 f'{len(nm)} item(s)):</b> '
-                + ', '.join(str(x).replace('_', ' ') for x in nm)
+                + ', '.join(PDFReportGenerator._field_label(x)[:1].lower()
+                            + PDFReportGenerator._field_label(x)[1:]
+                            if re.fullmatch(r'[a-z][a-z0-9_]*', str(x))
+                            else str(x) for x in nm)
                 + '. These physical effects are outside the model that '
                   'produced the numbers in this report.')
         for anahtar, baslik in (('warnings', 'Solver warning'),
@@ -3682,36 +4564,16 @@ class PDFReportGenerator:
             for uyari in (declarations.get(anahtar) or ()):
                 if not isinstance(uyari, dict):
                     continue
-                kod = uyari.get('code') or ''
-                mesaj = uyari.get('message') or uyari.get('text') or ''
                 siddet = str(uyari.get('severity') or '').upper()
                 govde = f'<b>{baslik}'
                 govde += f' [{siddet}]' if siddet else ''
-                govde += f' — {kod}</b>' if kod else '</b>'
-                if mesaj:
-                    govde += f': {mesaj}'
-                params = uyari.get('params')
-                if isinstance(params, dict) and params:
-                    # ÖH D36 / dil2-i18n-pdf a1 — İKİNCİ DÖKÜM YERİ.
-                    # ÖLÇÜLDÜ (``D36/dil2-i18n-pdf/a1/once.json`` K2,
-                    # gerçek hibrit koşumunun ``complete`` belgesi): Solver
-                    # Warnings bölümü onarıldıktan sonra da belgede ``{'``
-                    # imzası 20 kez kalıyordu — teknik ekin "Declarations
-                    # Made By This Analysis" listesi aynı
-                    # ``warn.hybrid.htpb_coeff_bias`` kaydını (hem
-                    # ``warnings`` hem ``design_warnings``) ``f'{k} = {v}'``
-                    # ile, yani iç içe kapların Python ``repr``iyle
-                    # basıyordu. Değer artık ``_param_scalar`` kuralından
-                    # geçer (sözlük ``(a: b; ...)``, liste ``[...]``, uzun
-                    # ondalık REPORT_SIGFIG, metin kaçırılır).
-                    govde += ' (' + ', '.join(
-                        '%s = %s' % (escape(str(k)),
-                                     PDFReportGenerator._param_scalar(v))
-                        for k, v in sorted(params.items())) + ')'
+                # V306/RAPOR-HATA (kalem 6a): ham kod ve 'ad = değer'
+                # dökümü basılmaz; cümle ekranın sözlüğünden.
+                govde += '</b>: ' + PDFReportGenerator._warning_sentence(uyari)
                 satirlar.append(govde)
         for ad, metin in sorted(
                 (declarations.get('basis_notes') or {}).items()):
-            etiket = str(ad).replace('_', ' ')
+            etiket = PDFReportGenerator._field_label(ad)
             satirlar.append(f'<b>{etiket}:</b> {metin}')
         return satirlar
 
@@ -3749,6 +4611,7 @@ class PDFReportGenerator:
             motor_data, analysis_results, [], 'summary'
         )
 
+    @_dilde
     def generate_chart_only_report(self, chart_image, chart_title: str,
                                    motor_name: str = None) -> bytes:
         """TEK GRAFİK belgesi — motor analiz raporu DEĞİL.
@@ -3789,7 +4652,7 @@ class PDFReportGenerator:
             satirlar.insert(1, ['Motor Designation:', ad])
         tablo = Table(satirlar, colWidths=[2.2 * inch, 3.4 * inch])
         tablo.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (0, -1), RAPOR_YAZI_TIPI_KALIN),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),

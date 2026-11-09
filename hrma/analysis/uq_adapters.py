@@ -65,6 +65,37 @@ CONTRACT_OUTPUTS = {
     "liquid": ("isp", "thrust", "c_star", "mdot_total"),
 }
 
+#: V306/SAYI (NR-5) — TASARIM HEDEFİ olan çıktılar: motor bu büyüklüğü
+#: girdiden alır ve debiyi ona göre boyutlandırır (hibrit
+#: ``mdot_total = F / (g0·Isp)``, hybrid_rocket_engine.py; sıvı
+#: ``mdot_total = F / (Isp_sl·g0)``, liquid_rocket_engine.py
+#: calculate_nozzle_geometry). Örneklenen parametreler (regresyon, yoğunluk,
+#: Pc, η_c*, O/F) Isp'yi ve debiyi değiştirir, itkiyi DEĞİŞTİRMEZ: σ = 0
+#: ölçülmüş bir dayanıklılık değil, tanımın sonucudur ve uç bunu çıktının
+#: yanında ADIYLA yayımlar (``zero_spread_reason``).
+DESIGN_TARGET_OUTPUTS = {
+    "hybrid": ("thrust",),
+    "solid": (),
+    "liquid": ("thrust",),
+}
+ZERO_SPREAD_REASON_DESIGN_TARGET = "design_target"
+
+#: V306/SAYI (NR-5) — YALNIZ ZAMAN YÜRÜYÜŞÜYLE TANIMLI hibrit çıktısı.
+#: ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/sayi/olcum/k2_once.json, k2_sure_n32
+#: .json; örnek hibrit, tohum 42): manşet toplam impuls = itki eğrisinin
+#: integrali trapz(F(t), t) = 29955,63 N·s (O/F kayması dahil); belirsizlik
+#: "nominal"i hızlı/mühendislik seviyesinde F × t_b = 30000,0 N·s, σ 0 —
+#: aynı ad, iki tanım. Zaman yürüyüşü (``track_performance``) açılınca
+#: nominal manşetle BİT-AYNI (29955,627649576716) ve σ 32,7 N·s, ama örnek
+#: başına maliyet 0,21 s -> 0,99 s (×4,7; mühendislik seviyesi 1000 örnekte
+#: ~17 dk). Bu yüzden: yürüyüşün kapalı olduğu seviyede bu çıktı ÖRNEKLENMEZ
+#: (yanlış tanımla dağılım üretilmez); nominali manşetle aynı tanımla BİR
+#: yürüyüşlü nominal koşudan yayımlanır ve örneklenmediği nedeniyle yazılır.
+#: Yürüyüşün açık olduğu seviyede (high_fidelity) örnekler aynı tanımla
+#: dağılır.
+HYBRID_MARCH_ONLY_OUTPUTS = ("total_impulse",)
+NOT_SAMPLED_REASON_MARCH_OFF = "time_march_off_at_this_level"
+
 # Motor kurucusuna eşlenemeyen dağılım parametreleri: dağılımdan çıkarılır
 # (sensitivity'de sahte 0 göstermek yerine hiç raporlanmaz — spec kararı).
 UNMAPPED_PARAMS = {
@@ -467,6 +498,9 @@ def make_hybrid_factory(inputs, track_performance=False):
     # kendi ``oxidizer_type`` kapısı tanımadığı adı zaten reddeder.
     if data.get('oxidizer_type') not in (None, ''):
         ctor['oxidizer_type'] = data.get('oxidizer_type')
+    # V306/HİBRİT-NOZUL: başlangıç akısı /calculate kuralıyla (0/boş = yok).
+    if data.get('mass_flux_chamber'):
+        ctor['initial_gox'] = data.get('mass_flux_chamber')
     # --- Kitap uyum B16, 2. tur (denetçi şartı Ş-4) · GİRİŞ DURUMU ------
     # ÖLÇÜLDÜ (p1a denetimi, 6 Eki): bu sözlükte tank sıcaklığı ve faz
     # YOKTU; varsayılan, oxidizer_temp/tank_temperature = 273,15 K ve
@@ -505,10 +539,15 @@ def make_hybrid_factory(inputs, track_performance=False):
     # (aşağıdaki geniş ``except`` onu yutmasın diye ``try`` DIŞINDA).
     probe._sync_oxidizer_inlet_state()
     try:
+        # V306/HİBRİT-SAYI (M-HIBRIT-5): /calculate ile AYNI optimum tanımı
+        # (tasarım ortamında ideal Isp, kullanıcının ε'su, çiftin O/F bandı).
+        from hrma.engines.hybrid_rocket_engine import hybrid_of_band
+        _uq_ox = getattr(probe, 'oxidizer_type', None) or 'N2O'
         optimum_of = analyzer.find_optimum_of_ratio(
-            {ctor['fuel_type']: 100.0},
-            getattr(probe, 'oxidizer_type', None) or 'N2O',
-            pc_nom)
+            {ctor['fuel_type']: 100.0}, _uq_ox, pc_nom,
+            of_range=hybrid_of_band(_uq_ox, ctor['fuel_type'])['band'],
+            expansion_ratio=probe._epsilon_user,
+            ambient_pressure=float(probe.P_a))
     except Exception:
         optimum_of = None
 
@@ -518,7 +557,7 @@ def make_hybrid_factory(inputs, track_performance=False):
     # (``hybrid_eta_c_star_nominal`` + app.py ``_run_uq_analysis``).
     eta_det = hybrid_eta_c_star_nominal(data)['eta_engine']
 
-    def factory(sample):
+    def _motor(sample, izle):
         kwargs = dict(ctor)
         kwargs['regression_a'] = a_nom * float(
             sample.get('regression_lambda', 1.0))
@@ -530,18 +569,57 @@ def make_hybrid_factory(inputs, track_performance=False):
         kwargs['chamber_pressure'] = pc_nom * float(
             sample.get('chamber_pressure', 1.0))
         eta = sample.get('eta_c_star', eta_det)
-        engine = HybridRocketEngine(
+        return HybridRocketEngine(
             uq_mode=True,
-            track_performance=track_performance,
+            track_performance=izle,
             combustion_analyzer=analyzer,
             eta_c_star=None if eta is None else float(eta),
             precomputed_optimum_of=optimum_of,
             **kwargs)
+
+    def factory(sample):
+        engine = _motor(sample, track_performance)
         result = engine.calculate()
         _defteri_kaydet(factory, engine)
-        return _pick_outputs('hybrid', result)
+        out = _pick_outputs('hybrid', result)
+        if not track_performance:
+            # V306/SAYI (NR-5): yürüyüşsüz motorun total_impulse'u F × t_b'dir
+            # (istenen), manşetinki itki eğrisinin integrali (teslim) —
+            # aynı adla örneklenmez (bkz. HYBRID_MARCH_ONLY_OUTPUTS).
+            for ad in HYBRID_MARCH_ONLY_OUTPUTS:
+                out.pop(ad, None)
+        return out
+
+    def not_sampled_outputs():
+        """Yürüyüş kapalıyken örneklenmeyen çıktıların NOMİNALİ: nominal
+        girdilerle tek bir yürüyüşlü koşu (manşetle aynı tanım)."""
+        if track_performance:
+            return {}
+        result = _motor({}, True).calculate()
+        out = {}
+        for ad in HYBRID_MARCH_ONLY_OUTPUTS:
+            deger = _finite_float(result.get(ad))
+            if deger is None:
+                continue
+            out[ad] = {
+                'nominal': deger,
+                'sampled': False,
+                'not_sampled_reason': NOT_SAMPLED_REASON_MARCH_OFF,
+                'basis': (
+                    'The headline total impulse is the integral of the '
+                    'time-marched thrust curve, trapz(F(t), t), which carries '
+                    'the O/F shift of the burn. This analysis level does not '
+                    'march the burn per sample (track_performance off), and '
+                    'without the march the motor returns thrust x burn time - '
+                    'the design target, not the delivered impulse. The output '
+                    'is therefore not sampled here; its nominal is the '
+                    'headline value from one marched nominal run. The '
+                    'Extended analysis level marches every sample.'),
+            }
+        return out
 
     factory.nominal_design_warnings = None
+    factory.not_sampled_outputs = not_sampled_outputs
     return factory
 
 
@@ -714,9 +792,22 @@ def make_liquid_factory(inputs, track_performance=False):
     Propellant verisi fabrika kurulumunda BİR KEZ çekilir (G1 tembel kurucu:
     property erişimi çevrimdışı-öncelikli zinciri çalıştırır) ve tüm örnek
     kurucularına ``propellant_data`` olarak enjekte edilir — örnek başına ağ
-    erişimi yapısal olarak imkansızdır. eta_c_star çıktı tarafında uygulanır
-    (modül docstring'i madde 4). ``track_performance`` sıvı motorda
+    erişimi yapısal olarak imkansızdır. ``track_performance`` sıvı motorda
     kullanılmaz; imza tutarlılığı için kabul edilir.
+
+    V306/SAYI (NR-5) — KURULUM /calculate_liquid İLE AYNI. ÖLÇÜLDÜ
+    (docs/scofield/raw/OH/V306/sayi/olcum/k2_once.json, örnek sıvı LOX/RP-1
+    25 kN, tohum 42): fabrika motoru yalnız 7 kurucu argümanıyla kuruyordu;
+    formun ``overrides`` sözlüğü (c* verimi %97, genişleme oranı 12, gaz
+    jeneratörü çevrimi …) hiç gitmiyordu. Belirsizlik nominali BAŞKA bir
+    motordu: Isp 272,36 ⟷ manşet 257,11 s, c* 1792,06 ⟷ 1738,30 m/s, ṁ
+    9,360 ⟷ 9,915 kg/s. Motor artık ``overrides=data`` ile kurulur (uç
+    ``LiquidRocketEngine(..., overrides=data)`` ile aynı). η_c* örneği ÇIKTI
+    TARAFINDA çarpılmaz (eski ``isp·η``, ``c*·η``, ``ṁ/η``): örneğin η'sı
+    motora ``combustion_efficiency`` olarak verilir ve teslim zincirini motor
+    kendisi kurar — nominal örnek formun kendi değerini AYNEN taşır, yani
+    manşetle bit-aynıdır. Dağılım formun η'sına oturtulur
+    (``center_liquid_eta_distribution``).
     """
     from hrma.engines.liquid_rocket_engine import LiquidRocketEngine
 
@@ -730,11 +821,15 @@ def make_liquid_factory(inputs, track_performance=False):
         cooling_type=data.get('cooling_type', 'regenerative'),
         injector_type=data.get('injector_type', 'impinging'),
     )
-    probe = LiquidRocketEngine(**ctor)
+    probe = LiquidRocketEngine(overrides=data, **ctor)
     # BİR KEZ: canlı -> taze cache -> bayat cache -> çevrimdışı depo zinciri.
     shared_propellant_data = dict(probe.web_propellant_data)
     mr_nom = float(ctor['mixture_ratio'])
     pc_nom = float(ctor['chamber_pressure'])
+    # Formun η_c*'ı motorun KENDİ çözümünden (bant ve birim kuralı motorda).
+    eta_nom = float(probe.eta_c_star)
+    eta_formdan = str(getattr(probe, 'eta_c_star_source', '')).startswith(
+        'user input')
 
     def factory(sample):
         kwargs = dict(ctor)
@@ -742,26 +837,73 @@ def make_liquid_factory(inputs, track_performance=False):
             sample.get('mixture_ratio', 1.0))
         kwargs['chamber_pressure'] = pc_nom * float(
             sample.get('chamber_pressure', 1.0))
+        overrides = data
+        eta = sample.get('eta_c_star')
+        if eta is not None and float(eta) != eta_nom:
+            overrides = dict(data)
+            overrides['combustion_efficiency'] = float(eta) * 100.0
         engine = LiquidRocketEngine(propellant_data=shared_propellant_data,
-                                    **kwargs)
+                                    overrides=overrides, **kwargs)
+        # V306/HIZ (M-SIVI-19) — PERFORMANS HARİTALARI ÖRNEKTE ATLANIR.
+        # ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hiz/profil_*_once.txt, cProfile
+        # tek örnek): örnek süresinin %66'sı (L3 5 kN ablatif) ve %91'i
+        # (örnek 25 kN GG) ``_generate_performance_optimization_maps``ti —
+        # her örnekte 24 tarama motoru, her biri kendi O/F optimum CEA
+        # taramasıyla; örneğin Pc ve O/F'si bozulduğu için önbellek hep
+        # ıskalıyor. Harita O/F-Pc tasarım haritasıdır (Parametrik Analiz
+        # sekmesi); fabrikanın yayımladığı dört çıktının (isp, thrust,
+        # c_star, mdot_total) hiçbiri onu okumaz. Atlama motorun KENDİ
+        # beyanlı kipiyle yapılır (``_skip_optimization_maps``; tarama
+        # motorlarında aynı bayrak, dal ``{'status': 'skipped'}`` döner) —
+        # motor dosyası değişmedi. BİT-AYNILIK ölçüldü
+        # (docs/scofield/raw/OH/V306/hiz/bitayni_uq_sivi_K6.json: iki vaka ×
+        # 7 satır, dört çıktı == ve md5 aynı, motor hüküm defteri aynı);
+        # örnek başına süre örnek motorda 7,51 → 0,38 s, L3'te 17,06 → 2,40 s.
+        engine._skip_optimization_maps = True
         result = engine.calculate_performance()
         _defteri_kaydet(factory, engine)
-        eta = sample.get('eta_c_star')
-        eta = 1.0 if eta is None else float(eta)
-        isp = _finite_float(result.get('isp_sea_level'))
-        c_star = _finite_float(result.get('c_star'))
-        mdot = _finite_float(result.get('total_mass_flow'))
         resolved = {
-            'isp': None if isp is None else isp * eta,
+            'isp': result.get('isp_sea_level'),
             'thrust': result.get('thrust'),
-            'c_star': None if c_star is None else c_star * eta,
-            # F sabit sözleşmesi: mdot = F/(g0*eta*Isp_ref) = mdot_ref/eta
-            'mdot_total': None if mdot is None else mdot / eta,
+            'c_star': result.get('c_star'),
+            'mdot_total': result.get('total_mass_flow'),
         }
         return _pick_outputs('liquid', resolved)
 
     factory.nominal_design_warnings = None
+    factory.eta_c_star_nominal = (eta_nom, eta_formdan)
     return factory
+
+
+def center_liquid_eta_distribution(distributions, eta_nominal):
+    """V306/SAYI (NR-5) — sıvı η_c* dağılımını formun η'sına oturtur.
+
+    ``eta_nominal``: fabrikanın ``eta_c_star_nominal`` çifti (η, formdan mı).
+    Form η vermediyse motor 1,0 kullanır (ideal; ek varsayım yok) ve dağılım
+    DEĞİŞMEZ (nominal 1,0 ⟷ ortalama 0,96, ``mean_shift_percent`` ile
+    görünür — hibrit kaynaksız çiftle aynı kural). Form η verdiyse nominal =
+    ortalama = η; σ ve kesme bandı beyanlı değerlerdir (kullanıcı η'sının
+    ölçülmüş saçılımı yoktur), bant η'yı kapsayacak kadar genişler.
+    """
+    import dataclasses
+    d = distributions.get('eta_c_star') if distributions else None
+    if d is None or not eta_nominal:
+        return distributions
+    eta, formdan = eta_nominal
+    if not formdan:
+        return distributions
+    eta = float(eta)
+    low = d.low if d.low is None else min(float(d.low), eta)
+    high = d.high if d.high is None else max(float(d.high), eta)
+    distributions = dict(distributions)
+    distributions['eta_c_star'] = dataclasses.replace(
+        d, mean=eta, nominal_override=eta, low=low, high=high,
+        source_note=(
+            f"Centred on the c* efficiency entered in the form (eta_c* = "
+            f"{eta:g}) so that the UQ nominal and mean equal the "
+            f"/calculate_liquid design point; sigma and clip band as "
+            f"declared: {d.source_note}"))
+    return distributions
 
 
 #: ÖH D27 a4 / P7B4-19 — her fabrikanın ``inputs`` sözlüğünden GERÇEKTEN
@@ -779,17 +921,29 @@ def make_liquid_factory(inputs, track_performance=False):
 #: ile sözlüğün TAMAMINI motora geçirir, yani "okunmayan ad" kümesi bu
 #: katmandan kapalı biçimde bilinemez. Bilinmeyeni "okunmadı" diye ilan
 #: etmek, künyeyi ikinci kez yalancı yapardı.
+#:
+#: ``liquid`` da V306/SAYI'dan (NR-5) beri YOK: sıvı fabrika
+#: ``LiquidRocketEngine(overrides=data)`` ile formun tamamını motora geçirir
+#: (``/calculate_liquid`` ile aynı kurulum); eski 7 alanlık kapalı küme
+#: formun c* verimini, genişleme oranını ve çevrimini "okunmadı" diye
+#: listeliyor ve nominali başka bir motordan üretiyordu.
+#:
+#: V306/HİBRİT-ÇAPRAZ-2: ``mass_flux_chamber`` HİBRİT-NOZUL'dan beri
+#: fabrikada okunuyor (``initial_gox``) ama bu kümeye yazılmamıştı. ÖLÇÜLDÜ
+#: (taban 78dbb287e, ``docs/scofield/raw/OH/V306/hibrit-capraz-2/olcum/
+#: k5_once.json`` uq_akili): akı gönderen UQ isteği hem o akıyla koşuyor
+#: hem de ``inputs_not_read`` ile "okunmadı" diyordu (yanlış beyan).
+#: Küme ``tests/test_d27_app_api_a4.py`` AST bekçisinin ölçtüğü
+#: ``data.get`` kümesiyle aynıdır.
 FACTORY_INPUT_FIELDS = {
     'hybrid': (
         'atmospheric_pressure', 'burn_time', 'chamber_diameter_input',
         'chamber_pressure', 'chamber_temperature', 'combustion_type',
         'expansion_ratio', 'fuel_density', 'fuel_type', 'gamma',
-        'gas_constant', 'l_star', 'motor_description', 'motor_name',
-        'nozzle_type', 'of_ratio', 'oxidizer_type', 'regression_a',
-        'regression_n', 'thrust', 'thrust_coefficient', 'total_impulse'),
-    'liquid': (
-        'chamber_pressure', 'cooling_type', 'fuel_type', 'injector_type',
-        'mixture_ratio', 'oxidizer_type', 'thrust'),
+        'gas_constant', 'l_star', 'mass_flux_chamber', 'motor_description',
+        'motor_name', 'nozzle_type', 'of_ratio', 'oxidizer_type',
+        'regression_a', 'regression_n', 'thrust', 'thrust_coefficient',
+        'total_impulse'),
 }
 
 

@@ -210,20 +210,24 @@ class TestP8B310VerimSkalasi:
         lo, hi = tr['gauge']['axis']['range']
         assert lo <= tr['value'] <= hi, (eta, lo, tr['value'], hi)
 
-    def test_esikler_MUTLAK_kalir_deger_ile_KAYMAZ(self):
-        """P8B3-09'un tersi hüküm: 95/98 sınırları sabittir."""
-        for eta in (0.70, 0.85, 0.99):
-            kenarlar = [s['range'][1]
-                        for s in self._gauge(eta)['gauge']['steps']]
-            assert kenarlar[0] == pytest.approx(95.0), (eta, kenarlar)
-            assert kenarlar[1] == pytest.approx(98.0), (eta, kenarlar)
+    def test_kaynaksiz_hukum_bandi_YOK(self):
+        """V306/SAYI (NR-1) — eski bekçi 95/98 tehlike|uyarı|güvenli
+        bantlarını kilitliyordu. Bantların kaynağı hiç yoktu; gösterge artık
+        motorun manşete uyguladığı η_c*'ı okuyor ve örnek hibritin kaynaklı
+        varsayılanı (ölçülmüş 26 ateşlemenin ortancası 0,89) "tehlike"
+        kırmızısına boyanıyordu. P8B3-09 emsali: gösterge yalnız okutur."""
+        for eta in (0.70, 0.85, 0.89, 0.99):
+            g = self._gauge(eta)['gauge']
+            assert not g.get('steps'), (eta, g.get('steps'))
+            assert 'threshold' not in g, (eta, g)
 
     def test_taban_gereginden_fazla_INMEZ(self):
         assert self._gauge(0.99)['gauge']['axis']['range'][0] == \
             pytest.approx(V.ETA_GAUGE_LO_PCT)
 
-    def test_esikler_TEK_KAYNAKTAN(self):
-        assert V.ETA_GAUGE_STEP_EDGES_PCT == (95.0, 98.0)
+    def test_esik_sabiti_kalkti(self):
+        """Kaynaksız eşik sabiti modülde yaşamaz (yeniden eklenirse KIRMIZI)."""
+        assert not hasattr(V, 'ETA_GAUGE_STEP_EDGES_PCT')
 
 
 # ---------------------------------------------------------------------------

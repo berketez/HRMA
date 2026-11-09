@@ -490,6 +490,8 @@ class TestP12bB3_11TaramaAraligiKapisi:
             param_end: { dataset: { paramType: 'of_ratio' } }
         };
         const document = { getElementById: (id) => alan[id] || null };
+        function i18nFmt(k, p, fb) { return String(fb).replace(/\{(\w+)\}/g,
+            function (b, a) { return (p && a in p) ? String(p[a]) : b; }); }
         """ + govde + """
         const uyusmaz = paramRangeGate();
         alan.param_start.dataset.paramType = 'chamber_pressure';
@@ -499,7 +501,13 @@ class TestP12bB3_11TaramaAraligiKapisi:
         """)
         r = node_kos(kaynak)
         assert r['uyusmaz'], 'parametre degisse de kapi aciyor'
-        assert 'param_type=chamber_pressure' in r['uyusmaz']
+        # V306/BAYAT (kalem 5): ileti ham öznitelik sözdizimi
+        # ('param_type=chamber_pressure') yerine seçicinin EKRAN adını
+        # söyler; bu düzenekte seçici seçeneksiz olduğu için ad değerin
+        # kendisine düşer. İddia aynı: seçili parametre ve aralığın sahibi
+        # iletide adıyla geçer.
+        assert 'chamber_pressure' in r['uyusmaz'] and 'of_ratio' in r['uyusmaz']
+        assert 'data-param-type' not in r['uyusmaz']
         assert r['uyusur'] is None, 'uyusan aralikta kapi kapaniyor'
 
     def test_kapi_hata_dalina_dusuyor(self, advanced):
@@ -649,21 +657,51 @@ class TestP12bB4_15ProjeYuklemeGerekcesi:
             'her iki hata dalinda da gerekce yazilmiyor')
 
     def test_gerekce_ucun_kendi_alanlarindan(self, launch_site):
+        """V306/UÇUŞ-2 (3 Kas) — BEKÇİ ÇEVİRİSİ. Sözleşme V306/UÇUŞ'ta
+        (824ba17f6) bilerek değişti: kullanıcı metni ekranın dilinde proje adı
+        + ucun KENDİ gerekçesi (sunucu cümlesi ``srv`` ile çevrilir); HTTP
+        kodu ve uç adı kullanıcı metninden çıktı (ORTAK kural: "HTTP 400/422"
+        ve uç adı kullanıcıya gösterilmez) ve durum satırının ``title``ına
+        (teknik ayrıntı) taşındı. Eski iddia ('HTTP 500', '/api/flight-
+        vehicle', 'project=eski' METİNDE) artık yasak olanı şart koşuyordu;
+        node düzeneği de sayfanın ``t/tf/srv/el`` yardımcılarını tanımlamadığı
+        için 'tf is not defined' ile düşüyordu. Bekçi aynı soruyu (gerekçe
+        ucun kendi alanlarından mı, gövdesiz ve ağsız durum ayırt ediliyor
+        mu) yeni sözleşmede sorar; yardımcılar sayfanın KENDİ tanımlarıdır."""
+        yardimci = ''.join(islev_govdesi(launch_site, ad) + '\n'
+                           for ad in ('t', 'tf', 'el', 'srv'))
         govde = islev_govdesi(launch_site, 'projeHataNedeni')
-        kaynak = govde + """
+        kaynak = """
+        var I18N = undefined;
+        var durumEl = { title: '' };
+        var document = { getElementById: function (id) {
+            return id === 'ls-status' ? durumEl : null; } };
+        """ + yardimci + govde + """
+        function kos(durum, d) {
+            durumEl.title = '';
+            var metin = projeHataNedeni(durum, d, 'eski');
+            return { metin: metin, baslik: durumEl.title };
+        }
         const cikti = {
-            besyuz: projeHataNedeni(500, { error: 'project file not found' }, 'eski'),
-            govdesiz: projeHataNedeni(500, null, 'eski'),
-            agsiz: projeHataNedeni(0, null, 'eski')
+            besyuz: kos(500, { error: 'project file not found' }),
+            govdesiz: kos(500, null),
+            agsiz: kos(0, null)
         };
         console.log(JSON.stringify(cikti));
         """
         r = node_kos(kaynak)
-        assert 'HTTP 500' in r['besyuz'] and 'project file not found' in r['besyuz']
-        assert 'project=eski' in r['besyuz']
-        assert 'HTTP 500' in r['govdesiz'] and '(no JSON body)' in r['govdesiz']
-        assert 'no HTTP response' in r['agsiz']
-        assert '/api/flight-vehicle' in r['agsiz']
+        # Kullanıcı metni: proje adı + ucun kendi gerekçesi; teknik iz YOK.
+        assert 'project file not found' in r['besyuz']['metin']
+        for k in ('besyuz', 'govdesiz', 'agsiz'):
+            assert 'Project: eski' in r[k]['metin'], r[k]
+            assert 'HTTP' not in r[k]['metin'] and '/api/' not in r[k]['metin'], r[k]
+        assert 'the server gave no reason' in r['govdesiz']['metin']
+        assert 'the server gave no reason' in r['agsiz']['metin']
+        # Teknik ayrıntı durum satırının başlığında: uç + HTTP kodu ya da
+        # yanıtın hiç gelmediği.
+        assert r['besyuz']['baslik'] == '/api/flight-vehicle · HTTP 500'
+        assert r['govdesiz']['baslik'] == '/api/flight-vehicle · HTTP 500'
+        assert r['agsiz']['baslik'] == '/api/flight-vehicle · no HTTP response'
 
     def test_ornek_arac_kunyesi_duruyor(self, launch_site):
         govde = islev_govdesi(launch_site, 'loadProjectVehicle')

@@ -471,7 +471,15 @@ class TestKutleButcesi:
     def test_yanan_satirlar_hala_basiliyor(self, rapor_olcumu):
         """Gerileme koruması: eski satırlar kaybolmadı."""
         out = rapor_olcumu
-        for alan in ('propellant_mass_total', 'fuel_mass_yanan',
+        # V306/HİBRİT-KÜTLE (kalem 4, HİBRİT-SAYI AÇIK KALANLAR): "Total
+        # Propellant Mass" satırı KARIŞIK tabanlıydı (YÜKLENEN oksitleyici +
+        # YANAN yakıt = ``propellant_mass_total``). Kural: toplam tek tabanda
+        # olur, adı tabanını söyler — satır artık "Total Propellant Mass
+        # (loaded)" = ``propellant_mass_loaded_kg`` (yüklü + yüklü) basar;
+        # bu donmuş D15 yanıtında o alan yok (satır '—'). Karışık toplamın
+        # ekranda KALMASI artık kusurdur; gerileme listesinden çıkarıldı.
+        # Yeni satırın bekçisi: tests/test_v306_hibrit_kutle.py.
+        for alan in ('fuel_mass_yanan',
                      'oxidizer_mass', 'total_mass_kg'):
             assert out['ekranda'][alan] is True, (
                 '%s satırı rapordan kayboldu' % alan)
@@ -640,7 +648,12 @@ class TestTermalEksenCanli:
             pytest.skip('bu koşumda uç termal puanı yayımladı')
         metin = r['text']
         assert 'Thermal' in metin, 'termal ekseni ekranda hiç yok'
-        i = r['html'].find('Thermal')
+        # V306/GÜVENLİK (NR-3 b): üst şeritteki kısmilik cümlesi de eksen
+        # adlarını sayıyor ("not evaluated: Structural, Thermal. The worst
+        # evaluated axis scores 2.00 / 5"); bekçinin baktığı yer TERMAL EKSEN
+        # SATIRIDIR, bu yüzden arama bireysel risk tablosundan başlar.
+        j = r['html'].find('Individual Risks')
+        i = r['html'].find('Thermal', max(j, 0))
         pencere = r['html'][i:i + 900]
         assert not re.search(r'\d+\.\d+\s*/\s*5', pencere), (
             'uç termal hükmü geri çektiği hâlde ekranda puan basılıyor: %r'

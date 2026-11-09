@@ -659,6 +659,11 @@ KAYITLAR: Dict[str, UcKaydi] = {
         kaynak='tests/test_wave4b_contract.py (canli kayit)',
         yuk=_YUKLER['/api/slosh-analysis'],
     ),
+    # V306/HIZ (M-KATI-35): yükün n_samples'ı 8 → 20. Motor bandı
+    # (SOLID_MC_SAMPLE_BAND = 20..2000) 8'i SESSİZCE 20'ye çıkarıyordu; uç
+    # artık bant dışını 422 ile reddediyor. 20, eski yükün fiilen koşulan
+    # örnek sayısıdır (yanıtın n_samples alanı 20'ydi) — ölçülen davranış
+    # değişmedi, yalnız istek gerçeğe çekildi.
     '/api/solid-monte-carlo': UcKaydi(
         yol='/api/solid-monte-carlo',
         sinif='olculebilir',
@@ -693,6 +698,13 @@ KAYITLAR: Dict[str, UcKaydi] = {
         sinif='olculebilir',
         kaynak='tests/test_d15_yapisal_sistem_a1.py:239 (AST hasadi)',
         yuk=_YUKLER['/api/uncertainty-analysis'],
+    ),
+    '/api/uncertainty-analysis/jobs/<job_id>/cancel': UcKaydi(
+        yol='/api/uncertainty-analysis/jobs/<job_id>/cancel',
+        sinif='govdesiz',
+        gerekce=('V306/HIZ: govde yok, is kimligi yolda; yalniz async '
+                 'belirsizlik kosusu kuyrugundaki bir isi iptal eder - '
+                 'sarsilacak alan yok, kimliksiz cagri 404'),
     ),
     '/api/update/download': UcKaydi(
         yol='/api/update/download',

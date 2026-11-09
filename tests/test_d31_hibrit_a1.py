@@ -320,7 +320,14 @@ class TestOhB105YanlilikGovdesi:
             'ölçümü yaz (hangi havuz, hangi akı kapanışı) ve '
             'tests/test_hibrit_sure_cf.py içindeki xfail borç imini AYNI '
             'commit\'te kaldır.')
-        assert len(p['unreconciled_reasons']) >= 2
+        # V306/HİBRİT-ÇAPRAZ-2 ek tur (DEVİR 4): bu fikstür ürün varsayılanı
+        # G_ox akı kipinde koşuyor (ölçüldü: regression_flux_mode = 'ox');
+        # "G_ox katsayısı G_total kapanışında" gerekçesi bu koşu için yanlış
+        # olduğundan basılmaz (``htpb_bias_unreconciled_reasons``). Kalan
+        # gerekçe kayıt havuzlarının farkıdır; reconciled yine False.
+        kodlar = [g['code'] for g in p['unreconciled_reasons']]
+        assert kodlar == ['warn.hybrid.htpb_bias_unreconciled_pools'], kodlar
+        assert sonuc['regression_flux_mode'] == 'ox'
 
     def test_ASTRA_yayimlanan_her_kampanya_N2O_dur(self, htpb):
         """Zilliac & Karabeyoglu Tablo 2 OKSİJEN'dir; beyana sızamaz.

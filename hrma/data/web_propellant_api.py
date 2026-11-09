@@ -1346,7 +1346,7 @@ end
                     'the network, the disk cache and the offline store are all '
                     'empty, RocketCEA is not available and this propellant pair '
                     'has no generated anchor entry. No substitute numbers are '
-                    'invented.'),
+                    'used.'),
                 'fetched_at': datetime.now().isoformat(),
             }
             return self._damgala(data, DATA_STATE_OFFLINE)

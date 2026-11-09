@@ -41,6 +41,54 @@ def _num(value):
     return finite_number(value)
 
 
+#: V306/DİL-SUNUCU (9 Kas, DİL EK 1) — EMNİYET DENETİMİ UYARI KODLARI.
+#: ``_perform_safety_checks`` serbest İngilizce metin üretiyordu; ``app.py``
+#: onu ``status.warnings`` / ``status.critical`` koduyla sarıyor, sözlük o
+#: kodlara yalnız 'uyarı var' / 'warnings present' diyordu: cümlenin kendisi
+#: hiçbir dilde ekrana çıkmıyordu, TR karşılığı da yoktu. Artık her denetimin
+#: kendi kodu ve sayısal parametreleri var (TR/EN şablon sözlükte); EN metin
+#: kayıtta ``fallback`` olarak durur (birimden önce boşluk: '60000.0 N').
+#: Kod -> (EN şablon, önem). Şablon yer tutucuları = kaydın parametreleri.
+SAFETY_CHECK_TEMPLATES = {
+    'warn.validator.burst_pressure_extreme': (
+        'CRITICAL: Burst pressure ({burst_bar} bar) requires specialized '
+        'high-pressure equipment', 'critical'),
+    'warn.validator.thrust_professional_stand': (
+        'High thrust ({thrust_N} N) requires professional test stand and '
+        'safety equipment', 'warning'),
+    'warn.validator.thrust_reinforced_stand': (
+        'Moderate thrust ({thrust_N} N) requires reinforced test stand and '
+        'remote operations', 'warning'),
+    'warn.validator.chamber_temperature_extreme': (
+        'Extreme temperature ({temperature_K} K) requires advanced cooling '
+        'and thermal protection', 'warning'),
+    'warn.validator.burn_time_long': (
+        'Long burn time ({burn_time_s} s) requires thermal management and '
+        'structural analysis', 'warning'),
+}
+
+
+class SafetyCheckMessage(str):
+    """Emniyet denetiminin metni + kodu + parametreleri.
+
+    ``str`` olarak eskisiyle AYNI metindir (günlük, 'CRITICAL' öneki,
+    mevcut tüketiciler değişmez); ``code`` / ``params`` / ``severity``
+    öznitelikleri ``app.py``'nin uyarı kaydına kod olarak taşınır.
+    """
+
+    def __new__(cls, code, params):
+        sablon, onem = SAFETY_CHECK_TEMPLATES[code]
+        nesne = super().__new__(cls, sablon.format(**params))
+        nesne.code = code
+        nesne.params = dict(params)
+        nesne.severity = onem
+        return nesne
+
+
+def _emniyet_uyarisi(code, **params):
+    return SafetyCheckMessage(code, params)
+
+
 #: ÜRÜN ALAN ADI -> KANONİK BANT ADI (ÖH Z5S / S3, P16B1-37 + P16B1-36).
 #:
 #: ÖLÇÜLDÜ (28 Ağustos 2026, ``docs/scofield/raw/OH/Z5S/s3/once_supurme.json``):
@@ -1171,31 +1219,33 @@ class MotorDataValidator:
         if chamber_p:
             burst_p = chamber_p * self.safety_factors['pressure_vessel']
             if burst_p > 2000:  # Extreme pressure warning
-                warnings.append(f"CRITICAL: Burst pressure ({burst_p} bar) requires "
-                              "specialized high-pressure equipment")
+                warnings.append(_emniyet_uyarisi(
+                    'warn.validator.burst_pressure_extreme', burst_bar=burst_p))
 
         # Thrust level safety
         thrust = _num(motor_data.get('thrust'))
         if thrust:
             if thrust > 50000:  # 50 kN
-                warnings.append(f"High thrust ({thrust}N) requires professional "
-                              "test stand and safety equipment")
+                warnings.append(_emniyet_uyarisi(
+                    'warn.validator.thrust_professional_stand',
+                    thrust_N=thrust))
             elif thrust > 10000:  # 10 kN
-                warnings.append(f"Moderate thrust ({thrust}N) requires reinforced "
-                              "test stand and remote operations")
+                warnings.append(_emniyet_uyarisi(
+                    'warn.validator.thrust_reinforced_stand', thrust_N=thrust))
 
         # Temperature warnings
         temperature = _num(motor_data.get('chamber_temperature',
                                           motor_data.get('temperature')))
         if temperature and temperature > 3500:
-            warnings.append(f"Extreme temperature ({temperature}K) requires "
-                          "advanced cooling and thermal protection")
+            warnings.append(_emniyet_uyarisi(
+                'warn.validator.chamber_temperature_extreme',
+                temperature_K=temperature))
 
         # Burn time warnings
         burn_time = _num(motor_data.get('burn_time'))
         if burn_time and burn_time > 60:
-            warnings.append(f"Long burn time ({burn_time}s) requires thermal "
-                          "management and structural analysis")
+            warnings.append(_emniyet_uyarisi(
+                'warn.validator.burn_time_long', burn_time_s=burn_time))
     
     def sanitize_export_data(self, data: Dict) -> Dict:
         """Dışa aktarım verisini güvenli hale getirir.

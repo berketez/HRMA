@@ -32,12 +32,25 @@ _YUKLER = {
         'chamber_pressure': 30.0, 'mixture_ratio': 2.2,
         'fuel_type': 'rp1', 'oxidizer_type': 'lox',
         'expansion_ratio': 12.0},
-    'S2_buyuk_250kN': {
-        'motor_name': 'OLCUM-250kN', 'thrust': 250000.0, 'burn_time': 120.0,
+    # V306/ONARIM-SIVI (rc.1 CI): büyük ölçek 250 → 200 kN. 250 kN / 60 bar
+    # RP-1 rejeneratif motorun istasyon marşı F-1 sınıfı model sınırında
+    # (jacket_model_limit); SIVI-CEKET-A K5 EK7'den beri açık çevrim defteri
+    # boğazı boyutladığı için ('design' kapsamı) chug çevrimi dahil motor
+    # sayıları adlı nedenle bekletiliyor ve beş düğüm 'chug_loop yok' ile
+    # düşüyordu. Bu dosyanın konusu τ duyarlılığı, kapı değil: büyük ölçek
+    # kapıya girmeyen 200 kN (aynı Pc, O/F, süre). Bekçinin dayandığı olgu
+    # (seçilmeyen karışma ölçeği DAHA BÜYÜK) 200 kN'de de ölçülür. Kapının
+    # kendisi test_ohd3108_eski_buyuk_olcek_kapida_adli_nedenle ile sınanır.
+    'S2_buyuk_200kN': {
+        'motor_name': 'OLCUM-200kN', 'thrust': 200000.0, 'burn_time': 120.0,
         'chamber_pressure': 60.0, 'mixture_ratio': 2.4,
         'fuel_type': 'rp1', 'oxidizer_type': 'lox',
         'expansion_ratio': 16.0},
 }
+
+#: EK7 kapısına giren eski büyük ölçek (250 kN / 60 bar; a1 ölçümünün S2'si).
+KAPIDAKI_BUYUK_YUK = dict(_YUKLER['S2_buyuk_200kN'],
+                          motor_name='OLCUM-250kN', thrust=250000.0)
 
 _ONBELLEK = {}
 
@@ -140,22 +153,26 @@ def test_ohd3108_aday_yayimlanan_degerin_kendisi(ad):
 
 # ---------------------------------------------------------------------------
 # OH-D31-08 · (3) "KONSERVATİF" ARTIK ÖLÇÜLÜR — 250 kN'de İDDİA YANLIŞTI
+# (V306/ONARIM-SIVI: büyük ölçek artık 200 kN; _YUKLER notu)
 # ---------------------------------------------------------------------------
 def test_ohd3108_buyuk_motorda_secilen_tau_en_konservatif_degil():
-    """250 kN koşusunda seçilmeyen ölçek DAHA BÜYÜK; künye bunu söylemeli.
+    """Büyük motorda seçilmeyen ölçek DAHA BÜYÜK; künye bunu söylemeli.
 
     Ölçüldü (sonra.json, S2_buyuk_250kN): τ_seçili = 8,362 ms ⟷
-    τ_karışma = 10,057 ms. Monotonluk gereği (hüküm τ_nötr ile
+    τ_karışma = 10,057 ms. V306/ONARIM-SIVI (9 Kas): 250 kN EK7 kapısında;
+    büyük ölçek 200 kN'de yeniden ölçüldü (betik ~/HRMA-calisma/2026-11-09/
+    ONARIM-SIVI/betik/chug_tarama.py): τ_seçili 7,460 ms ⟷ τ_karışma
+    9,771 ms (eski kod 522ca890c, EK7 öncesi, ve yeni kod b9cf2a27f aynı). Monotonluk gereği (hüküm τ_nötr ile
     karşılaştırmadan gelir, τ_nötr τ'dan bağımsızdır) BÜYÜK τ daha kararsız
     hükmü verir; yani ürünün seçtiği τ bu koşuda yayımlanan ölçeklerin EN
     KONSERVATİFİ DEĞİLDİR. Taban ağacında bu olgu HİÇBİR yerde görünmüyordu
     ve künye koşulsuz "CONSERVATIVE choice" diyordu.
     """
-    loop = _cevrim('S2_buyuk_250kN')
+    loop = _cevrim('S2_buyuk_200kN')
     ts = loop['tau_choice_sensitivity']
     adaylar = ts['candidates']
     assert adaylar['mixing_residence_time']['tau_s'] > adaylar['selected']['tau_s'], (
-        'ölçüm değişmiş: 250 kN koşusunda karışma kalış süresi artık '
+        'ölçüm değişmiş: 200 kN koşusunda karışma kalış süresi artık '
         'atomizasyon süresinden büyük değil — bekçinin dayandığı olgu '
         'kaybolmuş, kalem yeniden ölçülmeli.'
     )
@@ -180,11 +197,31 @@ def test_ohd3108_en_konservatif_en_buyuk_tau_urun_yolunda(ad):
 # ---------------------------------------------------------------------------
 def test_ohd3108_kunye_konservatifligi_kosulsuz_iddia_etmez():
     """``tau_source`` ölçülen alana YÖNLENDİRMELİ, koşulsuz iddia etmemeli."""
-    kunye = _cevrim('S2_buyuk_250kN').get('tau_source') or ''
+    kunye = _cevrim('S2_buyuk_200kN').get('tau_source') or ''
     assert 'tau_choice_sensitivity' in kunye, (
         'künye, konservatifliğin ölçüldüğü alana yönlendirmiyor; '
-        '"CONSERVATIVE choice" cümlesi 250 kN koşusunda ölçümle çelişiyor.')
+        '"CONSERVATIVE choice" cümlesi büyük motor koşusunda ölçümle '
+        'çelişiyor.')
     assert 'conservative' in kunye.lower()
+
+
+def test_ohd3108_eski_buyuk_olcek_kapida_adli_nedenle():
+    """K5 EK7: 250 kN / 60 bar ceket marşı F-1 sınıfı model sınırında; açık
+    çevrim defteri boğazı boyutladığı için ('design' kapsamı) chug çevrimi de
+    SESSİZCE değil adlı nedenle bekletilir; büyük ölçek (200 kN) kapı dışıdır."""
+    from hrma.app import app
+    app.config['TESTING'] = True
+    r = app.test_client().post('/calculate_liquid', json=KAPIDAKI_BUYUK_YUK)
+    assert r.status_code == 200
+    j = r.get_json()
+    ccp = j['cooling_circuit_publication']
+    assert ccp['status'] == 'not_solved'
+    assert ccp['code'] == 'jacket_model_limit'
+    assert ccp['scope'] == 'design'
+    assert isinstance(ccp['reason'], str) and ccp['reason']
+    assert _bul(j, 'chug_loop') is None
+    assert (_govde('S2_buyuk_200kN')['cooling_circuit_publication']['status']
+            == 'solved')
 
 
 # ---------------------------------------------------------------------------

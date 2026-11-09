@@ -2023,7 +2023,7 @@ class HeatTransferAnalyzer:
     N_STATIONS_MAX = 400
 
     def analyze_axial_profile(self, motor_data: Dict, n_stations: int = 40,
-                              material: str = 'steel',
+                              material: Optional[str] = None,
                               wall_thickness: float = 0.005,
                               ambient_temp: float = 293.15,
                               cooling_type: str = 'natural') -> Dict:
@@ -2070,6 +2070,39 @@ class HeatTransferAnalyzer:
         chamber_temperature = motor_data.get('chamber_temperature', 3000)  # K
         mdot_total = motor_data.get('mdot_total', 1.0)  # kg/s
 
+        # V306/HİBRİT-KÜTLE (kalem 2, S1) — BÖLGEYE GÖRE MALZEME. Profil
+        # yalnız LÜLE konturunu (hazne çıkışı → boğaz → çıkış) kapsar.
+        # Çağıran malzeme vermediğinde imza sessizce 'steel' alıyordu; hibrit
+        # motor ise lülesini kendi malzemesiyle (ör. grafit) yayımlıyor ve
+        # FEA köprüsü ağı O malzemeyle kurduğu için profil ⟷ ağ uyuşmazlığıyla
+        # (``axial_profile_material_mismatch``) reddediyordu. ÖLÇÜLDÜ (taban
+        # bab5ba0b9, ``docs/scofield/raw/OH/V306/hibrit-kutle/
+        # olcum_once.json``): 9 hibrit vakanın 9'unda profil 'steel', ağ
+        # 'graphite' → NOT_MODELLED. Artık hibrit sonuç sözlüğünde lüle
+        # bölgesinin malzemesi köprünün ağ malzemesini okuduğu AYNI yoldan
+        # (``_wall_profile_material_paths`` → ``NOZZLE_MATERIAL_PATHS``)
+        # alınır ve kaynağı ``material_source``ta yazılır. Açıkça verilen
+        # malzeme her zaman üstündür; katı/sıvı ve yolu bulunamayan hibrit
+        # eski 'steel' davranışında kalır (bit-aynı).
+        material_source = None
+        if material is None:
+            material = 'steel'
+            try:
+                from hrma.fea.bridge import (     # tembel: döngü yok
+                    detect_engine_layout, NOZZLE_MATERIAL_PATHS)
+                if detect_engine_layout(motor_data) == 'hybrid':
+                    for yol in NOZZLE_MATERIAL_PATHS:
+                        v = _yol_oku(motor_data, tuple(yol.split('.')))
+                        if isinstance(v, str) and v.strip():
+                            material = v.strip()
+                            material_source = (
+                                'nozzle region of a hybrid motor: the '
+                                f'motor\'s nozzle material ({yol}), the '
+                                'same field the thermal FEA bridge builds '
+                                'its mesh from')
+                            break
+            except ImportError:
+                material_source = None
         # ÖH Z5S / S4: kardeş yolla AYNI çözümleyici — sessiz A36 yedeği
         # burada da kalktı (ölçüldü: ``/api/analysis/wall-profile``
         # ``material='inconel718'`` A36 profili basıyordu).
@@ -2247,6 +2280,8 @@ class HeatTransferAnalyzer:
             'material': material,
             **({'material_requested': material_requested}
                if str(material_requested) != material else {}),
+            **({'material_source': material_source}
+               if material_source is not None else {}),
             'cooling_type': cooling_type,
             # P12bB4-06: eksenel dengeye giren soğutucu-tarafı katsayısı ve
             # KÖKENİ. Eskiden bu sayı hiç yayımlanmıyordu; tüketici cidar
@@ -2651,6 +2686,15 @@ class HeatTransferAnalyzer:
             'warnings': warnings_list,
         }
 
+    #: V306/TERMAL-KONTUR (K-P4) — ıslak alan konturunun KÖKENİ
+    #: (``wetted_integral_contour_basis.origin``). İki değer, iki yol:
+    #: motorun yayımladığı iç kontur (``nozzle_contour.points``; 2D/3D/CAD
+    #: ve FEA köprüsüyle aynı dizi) ya da geometri alanlarından canlı
+    #: örnekleme (çıkış çapı / genleşme oranı / lüle tipi; verilmeyen alan
+    #: ``generic_defaults_used``ta adıyla).
+    WETTED_CONTOUR_ORIGIN_PUBLISHED = 'motor_published_contour'
+    WETTED_CONTOUR_ORIGIN_SAMPLED = 'sampled_from_geometry_fields'
+
     def _apply_wetted_heat_load(self, gas_side: Dict, motor_data: Dict,
                                 material: str, wall_thickness: float,
                                 ambient_temp: float, cooling_type: str,
@@ -2771,6 +2815,15 @@ class HeatTransferAnalyzer:
             # düzeltilmeli) ama kaynağı ADIYLA yanına yazılır.
             kontur_kunye = profile.get('contour_basis') or {}
             gas_side['wetted_integral_contour_basis'] = {
+                # V306/TERMAL-KONTUR (K-P4): konturun KÖKENİ makine-okur —
+                # güverte künyesi "motorun nozulu" ile "jenerik nozul"u
+                # buradan ayırır (cümle eşleştirmesi yok). Kaynak TEK:
+                # ``_axial_contour``; ``throat_station`` anahtarını yalnız
+                # onun yayımlanmış-kontur dalı yazar (boğaz o dizinin
+                # üstünde bulunur), canlı örnekleme dalı yazmaz.
+                'origin': (self.WETTED_CONTOUR_ORIGIN_PUBLISHED
+                           if 'throat_station' in kontur_kunye
+                           else self.WETTED_CONTOUR_ORIGIN_SAMPLED),
                 'source': kontur_kunye.get('source'),
                 'exit_diameter_source': kontur_kunye.get(
                     'exit_diameter_source'),
@@ -2778,6 +2831,14 @@ class HeatTransferAnalyzer:
                 'generic_defaults_used': list(
                     kontur_kunye.get('generic_defaults_used') or []),
             }
+            # Yayımlanan dizinin nokta sayısı YALNIZ o dizi okunduğunda
+            # yazılır (motorun konturunun TAMAMININ integrale girdiğinin
+            # izi). Canlı örneklemede sayı örnekleyicinin sabit ızgarasıdır
+            # (konik 42, çan 67) — motor verisi değil; yayımlanmaz
+            # (tests/test_field_wiring_layer_b.py sabit yaprak bekçisi).
+            if 'throat_station' in kontur_kunye:
+                gas_side['wetted_integral_contour_basis'][
+                    'contour_points'] = kontur_kunye.get('contour_points')
         except Exception as exc:  # geometri/kontur yoksa dürüst yedek
             gas_side['wetted_integral_available'] = False
             gas_side['wetted_integral_error'] = str(exc)
@@ -3282,7 +3343,7 @@ class HeatTransferAnalyzer:
             stress_basis = (
                 'THERMAL GRADIENT ONLY: the pressure hoop term sigma = p*r/t '
                 'could not be formed because %s was not supplied, so it is '
-                'NOT invented. This factor therefore covers only the '
+                'NOT included. This factor therefore covers only the '
                 'through-wall thermal gradient and is OPTIMISTIC for the '
                 'same wall under pressure — read it together with the '
                 'structural analysis hoop safety factor.'
@@ -4222,16 +4283,22 @@ def _apply_chamber_liner(result, motor_data):
     yaricap = yaricap / 2.0
     # Astar malzemesi hibrit zincirinin BEYANLI seçimidir (tek kaynak); geç
     # içe aktarma: motor modülü bu modülü içe aktarıyor (döngü yok).
-    from hrma.engines.hybrid_rocket_engine import LINER_MATERIAL_DEFAULT
+    from hrma.engines.hybrid_rocket_engine import (
+        LINER_MATERIAL_DEFAULT, hybrid_liner_sizing)
     from hrma.analysis.thermal_protection import ThermalProtectionAnalyzer
     ek = {'h_gas_W_m2K': h_kamara, 'T_recovery_K': t_aw,
           'station_radius_m': yaricap}
     if cp_gaz is not None:
         ek['gas_cp_J_kgK'] = cp_gaz
     try:
-        sizing = ThermalProtectionAnalyzer().ablative_thickness(
+        # V306/HİBRİT-MODEL (M-HIBRIT-11): hibrit zincirinin TEK astar
+        # kuralı (gerileme × pay + iletim payı) — motorla aynı kalınlık.
+        sizing = hybrid_liner_sizing(
+            ThermalProtectionAnalyzer(),
             q_net_W_m2=q_kamara, burn_time_s=t_yanma,
-            material=LINER_MATERIAL_DEFAULT, **ek)
+            material=LINER_MATERIAL_DEFAULT,
+            T_initial_K=(result.get('design_parameters') or {}).get(
+                'ambient_temperature'), **ek)
     except Exception as exc:  # çekirdek kapısı: sayı uydurulmaz
         return _sizing_yok(f'ablative sizing failed: {exc}')
     kalinlik_mm = sizing.get('required_thickness_mm')
@@ -4285,10 +4352,10 @@ def _apply_chamber_liner(result, motor_data):
         },
         'sizing': sizing,
         'scope': CHAMBER_LINER_SCOPE,
-        'source': ('Level-1 Q* ablation sizing (hrma.analysis.thermal_protection.'
-                   'ThermalProtectionAnalyzer.ablative_thickness), the same '
-                   'call and inputs as the hybrid chain\'s chamber liner '
-                   '(hybrid_rocket_engine._thermal_protection_block)'),
+        'source': ('Level-1 Q* recession allowance + conduction allowance '
+                   '(hrma.engines.hybrid_rocket_engine.hybrid_liner_sizing), '
+                   'the same call and inputs as the hybrid chain\'s chamber '
+                   'liner (hybrid_rocket_engine._thermal_protection_block)'),
     }
     result['chamber_liner_check'] = blok
     return blok

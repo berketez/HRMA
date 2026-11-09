@@ -619,7 +619,7 @@
             if (!resp.ok || !data || data.status === 'error') {
                 // 400 gövdesi net mesaj taşır — panelde okunur gösterilir
                 throw new Error(budgetMessage(data)
-                    || (data && data.error) || ('HTTP ' + resp.status));
+                    || (data && data.error) || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status)));
             }
             U.purgePlots(root);   // eski grafiğin resize dinleyicisi sızmasın
             root.innerHTML = '';

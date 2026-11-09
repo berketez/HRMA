@@ -664,7 +664,8 @@ def test_sayfa_sozlugundeki_etiketler_tanimli(anahtar):
 @pytest.mark.parametrize('anahtar,parca', [
     # Hibrit sayfa sözlüğü: tasarım noktası Isp'si, O/F taraması Isp'si ve
     # referans-cidar akı lejantı tanımlı adlarını korumalı.
-    ('adv.pop.isp', 'design point'),
+    # V306/BAYAT NR-8: 'adv.pop.isp' özet penceresiyle birlikte söküldü; aynı
+    # tanımlı ad Performans Özeti'nde 'app.metric.ispDesign' (i18n_common).
     ('adv.js.ispAxis', 'O/F scan'),
     ('adv.txt.ispImplied', 'implied'),
     ('adv.txt.wallHeatFluxBartz', 'reference cooled wall'),
