@@ -109,7 +109,11 @@ KATI_GOVDE = {
 }
 SIVI_TABAN = {
     'oxidizer_type': 'lox', 'thrust': 10000, 'chamber_pressure': 100,
-    'mixture_ratio': 2.5, 'nozzle_expansion_ratio': 50,
+    # V306/SIVI-CEKET-B kalem 5: eski form ön dolgusu ε 50 (kaynaksız; UÇUŞ-KÜTLE
+    # formdan kaldırdı) 100 bar'da deniz seviyesinde ayrılıyor (Summerfield;
+    # ayrılmayan en büyük ε 26,86) ve uç artık o tasarımı adlı retle
+    # yayımlamıyor. Gövde ayrılmayan bölgedeki 20 ile kurulur.
+    'mixture_ratio': 2.5, 'nozzle_expansion_ratio': 20,
     'max_burn_duration': 400, 'combustion_efficiency': 97,
     'contraction_ratio': 4, 'characteristic_length': 1.2,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
@@ -831,6 +835,13 @@ URUN_KATLI_ALANLARI = [
     # kutusunda) ve SIVI-CIDAR termal paneli makine alanları (KILAVUZ P4;
     # üç kapalı "Teknik ayrıntı" kutusu). Hepsi varsayılan KAPALI.
     ("safety_panel.js", 1, ('style',)),
+    # V306/GÜVENLİK (NR-4, 2 Kas): Basınçlı Kap Özeti künyeleri, uyum
+    # beyan kodu ve risk künyesi kapalı "Teknik ayrıntı" kutusunda
+    # (safety_panel.js addBasisRow / complianceBadges /
+    # partialRiskBlock). Varsayılan KAPALI.
+    ("safety_panel.js", 2, ('style',)),
+    ("safety_panel.js", 3, ('data-safety-field', 'style')),
+    ("safety_panel.js", 4, ('data-safety-basis', 'style')),
     ("thermal_panel.js", 1, ('class', 'style')),
     ("thermal_panel.js", 2, ('class', 'style')),
     ("thermal_panel.js", 3, ('class', 'style')),

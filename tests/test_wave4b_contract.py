@@ -344,7 +344,7 @@ class TestSloshContract:
                 f"fill_sweep {key} dizi uzunluğu uyuşmuyor")
 
     def test_frequency_hand_calc(self, slosh):
-        """omega1² = (λ1·g/R)·tanh(λ1·h/R); f1 = omega1/2π (SP-106 Eq. 2.4)."""
+        """omega1² = (λ1·g/R)·tanh(λ1·h/R); f1 = omega1/2π (Dodge 2000, Eq. (1.40))."""
         lam, R, h, g = (SLOSH_LAMBDA1, SLOSH_INPUT['radius'],
                         SLOSH_INPUT['fill_height'], SLOSH_INPUT['g_eff'])
         omega2 = (lam * g / R) * math.tanh(lam * h / R)

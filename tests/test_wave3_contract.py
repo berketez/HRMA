@@ -72,7 +72,10 @@ PANEL_SCRIPT_ORDER = (
 )
 
 SCOPE_NOTE_ID = 'ad-scope-note'
-SCOPE_NOTE_TEXT = 'use FEA (ANSYS)'
+# V306/DİL-HİBRİT (M-HIBRIT-14): hibrit sayfası artık başka bir yazılım
+# (ANSYS) önermiyor — kılavuz üslubu; çapa, notun KAPSAM SINIRINI söyleyen
+# ortak ifadesi (üç motor sayfasında da var).
+SCOPE_NOTE_TEXT = 't/r > 0.2'
 
 # Basınçlı kap sözleşme girdisi — bariz PASS durumu (60 bar, 4130 çelik,
 # 6 mm cidar; ince-cidar bandında t/r = 0.08).
@@ -282,9 +285,15 @@ class TestPressureVesselContract:
         assert proof == pytest.approx(1.5 * meop, rel=1e-9)
         assert vessel['required_burst_pressure_bar'] == pytest.approx(
             2.0 * meop, rel=1e-9)
-        # Hidrostatik test UG-99(b): oda sıcaklığında 1.3×MAWP
+        # V306/HİBRİT-SAYI (M-HIBRIT-3/-33): S-080 kipinde hidrostatik test
+        # = deneme (proof) basıncı (kabul testi hidrostatik testtir; GÜVENLİK
+        # sekmesiyle tek tanım). Eski beklenti (1.3×MAWP, UG-99(b)) ASME'nin
+        # testini S-080 merdivenine sokuyordu; UG-99(b) ASME kipinde
+        # test_pressure_vessel.py ile kilitli kalır.
         assert vessel['hydrostatic_test_pressure_bar'] == pytest.approx(
-            1.3 * mawp, rel=1e-6)
+            proof, rel=1e-12)
+        assert vessel['hydrostatic_test_pressure_bar'] < vessel[
+            'required_burst_pressure_bar']
         # Kopma = min(Faupel, ince-cidar plastik limit) özdeşliği
         assert burst == pytest.approx(
             min(vessel['burst_faupel_bar'], vessel['burst_thin_wall_bar']),
@@ -1288,6 +1297,19 @@ TERS_MUAFIYET = {
         'mdot_fuel_kg_s': 'ham dizi — panel ṁ_ox eğrisini çiziyor',
         'propellant_consumed_kg': 'özet skaleri — panel toplam impulsu '
                                   '(`total_impulse_Ns`) basıyor',
+        # V306/HİBRİT-ÇAPRAZ (kalem 1): teslim büyüklüklerinin kaynağı bu
+        # bloktur; aşağıdakiler motor düzeyinde AYNI sayıyla yayımlanır ve
+        # orada basılır (manşet dayanağı satırı, Tasarım Raporu, 3B zaman
+        # çizgisi) — panel bloğun kendi eğrilerini çizer.
+        'oxidizer_consumed_kg': 'özet skaleri — motor.oxidizer_mass_'
+                                'consumed_kg olarak AYNI sayı yayımlanır',
+        'fuel_consumed_kg': 'özet skaleri — motor.fuel_mass_consumed_kg '
+                            'olarak AYNI sayı yayımlanır',
+        'oxidizer_inventory': 'mutabakat bloğu (tank envanteri ⟷ '
+                              'yayımlanan oksitleyici) — kanıt/tüketici '
+                              'alanı, ekran sayısı değil',
+        'port_diameter_m': 'ham dizi — motor.port_history (3B yanma zaman '
+                           'çizgisi) bu diziden kurulur',
         'thrust_initial_N': 'özet skaleri — panel itki EĞRİSİNİ ve '
                             '`thrust_decay_fraction` bozulmasını basıyor',
         'thrust_final_N': 'özet skaleri — bkz. `thrust_initial_N`',

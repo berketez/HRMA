@@ -502,7 +502,10 @@ def test_p11b317_ezilme_node_ile_olculur(fea):
     g = _yorumsuz_js(fea)
     govde = _blok(g, 'function boreEksenAraligi(')
     pay = re.search(r'const BORE_EKSEN_PAYI = ([\d.]+);', g).group(1)
-    betik = ("const BORE_EKSEN_PAYI = " + pay + ";\nfunction isNum(v) "
+    # V306/TANE NR-16: düz dağılımda en dar eksen bandı sabiti de betiğe.
+    min_bant = re.search(r'const BORE_EKSEN_MIN_BANT = ([\d.]+);', g).group(1)
+    betik = ("const BORE_EKSEN_PAYI = " + pay + ";\nconst BORE_EKSEN_MIN_BANT = "
+             + min_bant + ";\nfunction isNum(v) "
              "{ return typeof v === 'number' && isFinite(v); }\n" + govde + r"""
 var strain = [-0.1393, 0.2, 0.5, 0.8414];
 var uzak = boreEksenAraligi(strain, 35.0);
@@ -529,8 +532,12 @@ def test_p11b317_olcek_disi_beyani_grafikte(fea):
     assert re.search(r'if \(boreRange\) \{\s*layout\.yaxis\.range = '
                      r'boreRange\.range;', figur), \
         'eksen aralığı ölü dala alınmış'
-    assert 'strain_capability_pct = ' in figur
-    assert 'off scale' in figur
+    # V306/TANE NR-16: ölçek dışı beyanı kullanıcı dilinde (ham anahtar
+    # 'strain_capability_pct = … — off scale' ekrandan kalktı); değer ve
+    # oran yine yazılır, sayılar yerel ayraçla.
+    assert 'strain_capability_pct = ' not in figur
+    assert "GL('capOffScale'" in figur
+    assert 'is off this scale' in figur
     assert 'kapasiteOlcekDisi' in figur
 
 

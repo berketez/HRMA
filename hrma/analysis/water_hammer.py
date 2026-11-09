@@ -479,7 +479,7 @@ FLUID_PROPERTIES: Dict[str, Dict] = {
                    'PRESSURE is published for this record: the handbook page '
                    'is OCR-damaged in the scanned copy and no other primary '
                    'source was obtained, so the column-separation and NPSH '
-                   'gates stay fail-closed rather than invent a number.'),
+                   'gates stay fail-closed and no vapour pressure is assumed.'),
         # 'vapor_pressure_Pa' BİLEREK YOK (rp1'in 'critical_pressure_Pa'
         # yokluğuyla aynı desen): kaynak kazanılamadı, sayı uydurulmaz.
     },

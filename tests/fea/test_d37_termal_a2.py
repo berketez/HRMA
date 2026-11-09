@@ -641,8 +641,24 @@ class TestPanel:
         monkeypatch.setattr(ta, '_uzamsal_yakinsama', sahte_merdiven)
         m = _kanit_json(kanit_gerekli(ONCE / 'hibrit_motor.json'))
         wp = _kanit_json(kanit_gerekli(ONCE / 'wall_profile_panel.json'))['wall_profile']
+        # V306/UÇUŞ-FEA (kalem 3): bu kanıt çifti İKİ AYRI cidarı anlatıyor.
+        # Profil (25 Eyl paneli) kamara malzemesi steel_4130 ile hesaplandı;
+        # motor kaydı ise lüle malzemesi grafit yayımlıyor ve köprü lüle
+        # alanını V301/PANEL'den beri lülenin malzemesiyle çözüyor.
+        # V306/GÜVERTE (cdb000951, §5 B-N1) bu çifti çözücüden ÖNCE adıyla
+        # reddediyor (``axial_profile_material_mismatch``; ret
+        # ``spatial_convergence`` taşımaz -> KeyError, CI rc.0). Ürün doğru.
+        # Bu bekçinin konusu malzemeden bağımsızdır (merdiven tepeleri
+        # sentetik): kopyadan yalnız lüle malzemesi kaydı düşülür, ağ
+        # köprünün belgelediği yedek yoldan (kamara malzemesi) profilin
+        # kendi malzemesiyle (steel_4130) kurulur — iki uç aynı cidar.
+        m = json.loads(json.dumps(m))
+        (m.get('nozzle_material_analysis') or {}).pop('material', None)
+        assert bridge._lule_malzemesi(m) is None
+        assert wp.get('material') == 'steel_4130'
         o = bridge.run_thermal_from_motor(m, axial_profile=wp,
                                           ambient_temperature_K=293.15)
+        assert 'spatial_convergence' in o, o.get('reason')
         sc = json.loads(json.dumps(o['spatial_convergence'], default=float))
         fea = _kanit_json(kanit_gerekli(SONRA / 'fea_thermal_varsayilan.json'))['fea']
         fea['spatial_convergence'] = sc

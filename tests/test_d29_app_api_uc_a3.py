@@ -216,12 +216,18 @@ class TestP7B123CivataCifti:
     def test_hicbiri_verilmezse_davranis_korunur(self, istemci):
         """Kullanicinin hic sormadigi cıvata zinciri icin bir sey duşmez:
         yanit TABAN AGACIYLA bayt-ayni (``a3/once.json`` K2
-        ``bcd_yok_bolt_yok``: sha256 344aa7d215bafceb, 6732 bayt)."""
+        ``bcd_yok_bolt_yok``: sha256 344aa7d215bafceb, 6732 bayt).
+
+        V306/DİL-SUNUCU (K1) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: ivme notundaki
+        '(no value is invented).' üslup onarımıyla '(no substitute value is
+        used).' oldu (+7 bayt). Ölçüldü: yeni yanıtta bu ifade eskisine
+        geri çevrilince 6732 bayt / 344aa7d215bafceb (taban) çıkıyor; yani
+        tek fark bu metin, cıvata zinciri yine hiçbir şey düşürmüyor."""
         kod, j, ham = gonder(istemci, '/api/gimbal-mount', dict(GIMBAL))
         assert kod == 200, kod
         assert j.get('bolts') is None
-        assert len(ham) == 6732
-        assert hashlib.sha256(ham).hexdigest()[:16] == '344aa7d215bafceb'
+        assert len(ham) == 6739
+        assert hashlib.sha256(ham).hexdigest()[:16] == '3d1e0ae7aafccd9e'
 
     def test_kunye_kosulu_soyluyor(self):
         from hrma.app import app
@@ -713,9 +719,15 @@ class TestP7B311MolekulAgirligiTipi:
 # ===========================================================================
 # P7B3-33 — /api/fea/planar-grain üst basınç kapısı
 # ===========================================================================
+# V306/TANE NR-16: uç artık analitik blokla aynı yük kümesini taşır;
+# yerleşim verilmezse gövdeye yapıştırılmış tanenin kürleme/soğuma ısıl
+# yükü eklenir. Bu bekçilerin konusu basınç bandı kapısıdır ve sayıları
+# basınç-yalnız yükle ölçülmüştü: basınç-yalnız yük kümesi kartuş yüklü
+# tanenin kümesidir (sonuç bit-aynı).
 GRAIN = {'grain_type': 'bates', 'propellant_type': 'apcp',
          'outer_diameter_mm': 100.0, 'core_diameter_mm': 30.0,
-         'chamber_pressure_bar': 40.0, 'max_rounds': 0}
+         'chamber_pressure_bar': 40.0, 'max_rounds': 0,
+         'grain_support': 'cartridge_loaded'}
 
 
 class TestP7B333UstBasincKapisi:

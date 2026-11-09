@@ -320,13 +320,15 @@ SUPURME_ADSIZ_METIN_YERLERI = {
         'ÖH D28 / OH-D27-17 taraması — aranan şey İNSAN ETİKETİ; üstelik '
         'hüküm etiketin VARLIĞI üstünedir, bir yaprağın değeri üstünde '
         'değil.',
-    ('tests/test_d37_hibrit_a1.py',
-     'test_cwu6_acilir_pencere_ana_pencere_yokken_bildirim'):
-        'ÖH V3 taban-b (14 Eki 2026; yer D37 hibrit a1\'de doğdu) — '
-        'aranan şey SABİT bir cümle '
-        '(\'The main HRMA window is closed\'), döngü değeri değil; '
-        'sol işlenen AST\'de dizge sabiti. Tarayıcı döngü adı ``s``yi '
-        'sabitin içinde ALT DİZE olarak buldu. Sayı aranmıyor.',
+    # ('tests/test_d37_hibrit_a1.py', 'test_cwu6_acilir_pencere_ana_pencere_yokken_bildirim')
+    # kaydı 6 Kas'ta (ana model) KALDIRILDI: işlev V306/BAYAT NR-8
+    # (5e9b2fe50, 3 Kas) ile testten çıktı; tarama onu artık bulmuyor.
+    ('tests/test_v306_rapor_dil.py', 'test_rapor_sozlugu_ekranla_cakismaz'):
+        'V306/RAPOR-DİL (4 Kas; kayıt ana model 6 Kas) — aranan şey '
+        'İNGİLİZCE METİN: rapor sözlüğünün normalize + casefold edilmiş '
+        'İngilizce değeri, ekran sözlüklerinin İngilizce → Türkçe '
+        'kümesinde (``e in ekran``). Hüküm "aynı İngilizceye iki Türkçe '
+        'yok" kuralıdır; bir yaprağın SAYISI aranmıyor.',
 }
 
 _DESEN_SUPURME = ('yapraklar', '_leaves', 'leaves', 'sayisal', 'alanlar',
@@ -453,6 +455,8 @@ class TestDesenBaskaSupurmelerdeYok:
         """Muafiyetin her satırı KAYNAK dalgayı yazar (anonim af yok)."""
         kayit = dict(JETON_YUVARLAMA_MESRU)
         kayit.update(SUPURME_ADSIZ_METIN_YERLERI)
+        # V306 (6 Kas, ana model): v3'ten beri dalgalar V3xx diye adlanır
+        # (ör. V306/RAPOR-DİL); kural aynı — kaynak dalga ADIYLA yazılır.
         anonim = [y for y, neden in kayit.items()
-                  if not re.search(r'\bD\d{1,2}\b', str(neden))]
+                  if not re.search(r'\b(?:D\d{1,2}|V3\d{2})\b', str(neden))]
         assert not anonim, anonim

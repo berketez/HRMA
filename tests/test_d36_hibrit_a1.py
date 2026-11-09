@@ -334,7 +334,11 @@ class TestG1Kunye:
         assert 'not the solver optimum' in isaret[0]['hovertemplate']
         notlar = ' '.join(str(a.get('text', ''))
                           for a in fig['layout'].get('annotations', []))
-        assert 'canonical optimum O/F is the solver value' in notlar
+        # V306/SAYI (NR-1): ham alan adı (motor.optimum_of_ratio) not
+        # metninden çıktı; künye meta'da ('canonical') kalır.
+        assert "canonical optimum O/F is the solver's own value" in notlar
+        assert 'motor.optimum_of_ratio' not in notlar
+        assert 'motor.optimum_of_ratio' in meta['canonical']
 
     def test_3b_yuzey_izgara_azamisi_kunyeli(self):
         from hrma.visualization.visualization import (
@@ -350,15 +354,23 @@ class TestG1Kunye:
             assert (t.get('meta') or {}).get('optimum_kind') == 'surface_refined_ceiling'
 
     def test_optimumu_bul_ucu_kunye_verir(self, istemci):
+        # V306/HİBRİT-SAYI (M-HIBRIT-5): eski beklenti ("sea level" modeli,
+        # ε yok, 1-10 bandı) kutudaki İKİ optimumdan birini kilitliyordu.
+        # Künye sözleşmesi aynı (model, bant, basınç, ε alanı, kanon notu);
+        # içerik artık çözücüyle tek tanım: ε gönderilmezse eşleşik lüle
+        # (P_e = P_a), bant çiftin tek O/F bandı (N2O: hybrid_of_band).
+        from hrma.engines.hybrid_rocket_engine import hybrid_of_band
         r = istemci.post('/api/find-optimum-of', json={
             'motor_type': 'hybrid', 'oxidizer': 'n2o', 'fuel': 'htpb',
             'chamber_pressure': 30})
         assert r.status_code == 200
         j = r.get_json()
-        assert j['model'] and 'sea level' in j['model']
-        assert j['sweep_range'] == [1.0, 10.0]
+        assert j['model'] and 'design ambient' in j['model']
+        assert j['sweep_range'] == list(hybrid_of_band('n2o', 'htpb')['band'])
         assert j['chamber_pressure'] == 30.0
         assert 'expansion_ratio' in j and j['expansion_ratio'] is None
+        assert j['optimum_definition']['nozzle'] == \
+            'exit_pressure_matched_to_ambient'
         assert 'motor.optimum_of_ratio' in j['canonical_note']
         pc = j['performance_curve']
         assert pc['n_points'] == len(pc['of_ratios'])
@@ -377,20 +389,30 @@ class TestG1Kunye:
         a = _oku(APP_JS)
         kod = '\n'.join(_islev(a, f'function {ad}(') for ad in (
             'T', 'TF', 'numTxt', 'optimumKunyeSatirlari'))
+        # V306/HİBRİT-SAYI (M-HIBRIT-5): kutu TEK optimum basar. Eski
+        # beklenti ("çözücü kanonu" satırında ikinci O/F ve Isp) iki
+        # optimumu kilitliyordu; son hesabın optimumu ayrışırsa ikinci SAYI
+        # basılmaz, son hesabın farklı girdilerle yapıldığı söylenir.
+        sonuc = ('{sweep_range:[4,12], chamber_pressure:30, optimum_of_ratio:'
+                 ' 7.2, optimum_definition:{chamber_pressure_bar:30,'
+                 ' ambient_pressure_bar:1.01325, expansion_ratio:null}}')
         betik = ('global.window = {};' + kod + ';process.stdout.write(JSON.stringify(['
-                 'optimumKunyeSatirlari({sweep_range:[1,10], chamber_pressure:30},'
+                 f'optimumKunyeSatirlari({sonuc},'
                  ' {optimum_of_ratio: 6.4206, maximum_isp: 247.63}),'
-                 'optimumKunyeSatirlari({sweep_range:[1,10], chamber_pressure:30}, null)]))')
+                 f'optimumKunyeSatirlari({sonuc}, null)]))')
         r = subprocess.run([NODE], input=betik, capture_output=True,
                            text=True, timeout=60)
         assert r.returncode == 0, r.stderr[-800:]
         kanonlu, kanonsuz = json.loads(r.stdout)
-        assert any('6.42' in x and '247.6' in x for x in kanonlu), kanonlu
-        assert any('not available until you run Calculate' in x for x in kanonsuz)
-        assert all('1.00 to 10.00' in x for x in kanonlu[:1])
+        assert not any('6.42' in x or '247.6' in x for x in kanonlu), kanonlu
+        assert any('different inputs' in x for x in kanonlu), kanonlu
+        assert any('same definition' in x for x in kanonsuz), kanonsuz
+        assert all('4.00 to 12.00' in x and '30.0 bar' in x
+                   for x in kanonlu[:1]), kanonlu
         d = _oku(I18N_COMMON)
         tr = d[d.index('        tr: {'):]
-        for k in ('basis', 'canon', 'canonNone', 'curveBasis'):
+        for k in ('basis', 'nozzleFixed', 'nozzleMatched', 'sameAsSolver',
+                  'staleCalc', 'curveBasis'):
             assert f"'app.optimum.{k}'" in d[:d.index('        tr: {')]
             assert f"'app.optimum.{k}'" in tr
 

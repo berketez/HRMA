@@ -159,7 +159,11 @@ KATI_GOVDE = {
 }
 SIVI_GOVDE = {
     'fuel_type': 'rp1', 'oxidizer_type': 'lox', 'thrust': 10000,
-    'chamber_pressure': 100, 'mixture_ratio': 2.5, 'nozzle_expansion_ratio': 50,
+    # V306/SIVI-CEKET-B kalem 5: eski form ön dolgusu ε 50 (kaynaksız; UÇUŞ-KÜTLE
+    # formdan kaldırdı) 100 bar'da deniz seviyesinde ayrılıyor (Summerfield;
+    # ayrılmayan en büyük ε 26,86) ve uç artık o tasarımı adlı retle
+    # yayımlamıyor. Gövde ayrılmayan bölgedeki 20 ile kurulur.
+    'chamber_pressure': 100, 'mixture_ratio': 2.5, 'nozzle_expansion_ratio': 20,
     'max_burn_duration': 400, 'combustion_efficiency': 97,
     'contraction_ratio': 4, 'characteristic_length': 1.2,
     'chamber_wall_thickness': 5, 'cooling_type': 'regenerative',

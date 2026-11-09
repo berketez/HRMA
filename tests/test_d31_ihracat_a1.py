@@ -31,8 +31,11 @@ def istemci():
 
 def _pdf_metni(bayt):
     from pypdf import PdfReader
-    return '\n'.join((p.extract_text() or '')
-                     for p in PdfReader(io.BytesIO(bayt)).pages)
+    # V306/RAPOR-DİL: rapor yazı tipi DejaVu Sans (Türkçe harfler) Helvetica'dan
+    # geniş; satır kırılma YERİ değişti. Arama yerleşimden bağımsız: boşluklar
+    # teke indirilir (iddia aynı, satır sonu iddianın parçası değil).
+    return ' '.join('\n'.join((p.extract_text() or '')
+                     for p in PdfReader(io.BytesIO(bayt)).pages).split())
 
 
 # ==========================================================================

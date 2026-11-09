@@ -146,6 +146,17 @@ print('      BUILD_INFO.json: sha=%s tree_dirty=%s'
 PY
 [ -f "$W/app/BUILD_INFO.json" ] || { echo "HATA: BUILD_INFO.json yazılamadı"; exit 1; }
 
+# --- Lisans + üçüncü taraf bildirimleri (3.0.6, S1 lisans) ------------------
+# Ölçüldü: v3.0.5 paketlerinde app/ altında LICENSE YOKTU; paket
+# RocketCEA (GPLv3) ve lisans dosyası taşımayan Open CASCADE (LGPL-2.1)
+# kütüphaneleri taşıyordu. Kaynak 3.0.6'dan itibaren GPL-3.0-or-later; GPL
+# programla birlikte lisansın da verilmesini şart koşar. Betik libs/ ve app/
+# HAZIR olduktan sonra koşar (dist-info'ları tarar) ve FAIL-CLOSED'dur:
+# RocketCEA lisansı yoksa ya da bildirimsiz copyleft dağıtım varsa derleme
+# DURUR (set -e). Ayrıntı: packaging/lisans_paketle.py
+python3 "$B/lisans_paketle.py" --kaynak "$SRC" --app "$W/app" --libs "$W/libs"
+[ -s "$W/app/LICENSE" ] || { echo "HATA: LICENSE pakete girmedi"; exit 1; }
+
 echo "[5/6] Bytecode ön-derleme (ilk açılışı hızlandırır)..."
 # .pyc formatı platformdan bağımsızdır; sürüm eşleşmesi yeter (3.12 ↔ 3.12).
 # __pycache__ artık SİLİNMİYOR — ilk açılışta derleme bedeli kalkıyor.

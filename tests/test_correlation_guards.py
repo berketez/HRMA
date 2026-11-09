@@ -80,8 +80,20 @@ from hrma.validation.correlation_runner import run_correlation
 # (docs/scofield/raw/OH/D23/app-api/a1/{once,sonra}_p10b2_06.json):
 # aşağıdaki BASELINE hücrelerinin n / bias / medAPE değerleri BİT AYNI kaldı;
 # değişen tek şey dışlamanın GEREKÇESİ ve GÖRÜNÜRLÜĞÜ.
+# Hash güncellemesi (2026-11-04, V306/ÖLÇÜT kalem 4 — RL10 kayıt düzeltmesi):
+# 212 kayıt aynı; altı ``liq-rl10a33a-*`` kaydında ``geometry`` alanı
+# ``throat_diameter_in`` -> ``throat_radius_in`` (nominal-spec'te ayrıca
+# ``chamber_diameter_in`` -> ``chamber_radius_in``) adlandırıldı ve künyeye
+# erratum yazıldı; SAYILAR (2.47 / 5.13 in) kaynakta basıldığı gibi. Kaynak:
+# NASA TM-107318 Ek E Şekil E1 ekseni 'Radius of Chamber/Nozzle Inner Wall';
+# Tablo 2.5.1'in 'Diameter' etiketi kaydın kendi F/Pc'siyle C_F,vak = 7,25
+# veriyordu (bekçi: tests/test_v306_olcut_rl10_kayit.py). Sıvı adaptörü
+# geometride yalnız genişleme oranı ve çevrimi okur. ÖLÇÜLDÜ
+# (docs/scofield/raw/OH/V306/olcut/rl10/{once,sonra}_korelasyon.json): db
+# hash dışındaki deterministic_view sha256 BİT AYNI (74c76f7b…), yani
+# aşağıdaki BASELINE hücreleri ve her kayıt sonucu değişmedi.
 EXPECTED_DB_HASH = (
-    "19cf1d9587eae349d4950f8b85f74fd2403a579e47d6c0563badfb6a9c4ecb63")
+    "13c3f1073a0f1337d055c5c5498d1e94e019b123ecfdbd082c6dba9d375985a1")
 
 # (motor, quantity) -> (bias_pct, median_ape_pct, n)
 BASELINE = {

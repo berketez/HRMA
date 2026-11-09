@@ -66,6 +66,22 @@ def _kos(**degisiklik):
     return motor, sonuc
 
 
+def _regule_seri(sonuc):
+    """REGÜLE (sabit ṁ_ox) O/F, c*, Isp serileri.
+
+    V306/HİBRİT-ÇAPRAZ-2: N₂O kendinden basınçlı tankta (bu dosyanın
+    varsayılanı) ``of_shift_performance`` TESLİM eğrisinin (boşalma çözümü)
+    ekseninde yayımlanır — 3B HUD itkiyle aynı t'de aynı fiziği okusun diye;
+    ölçüm ``docs/scofield/raw/OH/V306/hibrit-capraz-2/olcum/k1_*.json``. Bu
+    dosyanın kilitlediği regüle kayma fiziği (O/F ∝ D^(2n−1), regüle özet)
+    o kipte ``constant_oxidizer_flow_budget.of_shift_performance``tadır.
+    Regüle kipte görünüm ``of_shift_performance``ın kendisidir.
+    """
+    if sonuc.get('delivered_source') == 'tank_blowdown':
+        return sonuc['constant_oxidizer_flow_budget']['of_shift_performance']
+    return sonuc['of_shift_performance']
+
+
 @pytest.fixture(scope='module')
 def varsayilan():
     """HTPB varsayılanı: n = 0,555 > 0,5, yani O/F yanma boyunca ARTAR."""
@@ -105,8 +121,11 @@ def test_tasarim_noktasi_cozucunun_kendi_degerleri(varsayilan):
     assert tasarim['of_ratio'] == pytest.approx(motor.OF)
     assert tasarim['isp_s'] == pytest.approx(sonuc['isp'])
     assert tasarim['c_star_m_s'] == pytest.approx(sonuc['c_star'])
+    # V306/HİBRİT-ÇAPRAZ: tasarım noktası impulsu tasarım itkisi × İSTENEN
+    # tasarım süresidir; N₂O kendinden basınçlı tankta manşet ``burn_time``
+    # artık boşalma çözümünün TESLİM süresidir (farklı büyüklük).
     assert tasarim['total_impulse_Ns'] == pytest.approx(
-        sonuc['thrust'] * sonuc['burn_time'])
+        sonuc['thrust'] * sonuc['burn_time_requested_s'])
 
 
 def test_seriler_zaman_adimli_cozumun_kendisi(varsayilan):
@@ -140,7 +159,7 @@ def test_of_kaymasi_yonu_regresyon_ussuyle_tutarli(fixture_adi, request):
     katsayısı ya da yakıt değişse bile bekçi doğru kalır.
     """
     motor, sonuc = request.getfixturevalue(fixture_adi)
-    of = np.asarray(sonuc['of_shift_performance']['of_ratio'], dtype=float)
+    of = np.asarray(_regule_seri(sonuc)['of_ratio'], dtype=float)
     fark = np.diff(of)
     beklenen_isaret = np.sign(2.0 * motor.n - 1.0)
     assert beklenen_isaret != 0, 'bu bekçi n = 0,5 için ayrım yapamaz'
@@ -353,7 +372,7 @@ def test_ortalama_isp_tasarim_ispsinden_beklenen_yonde_farkli(varsayilan):
     assert np.sign(reg['c_star_delta_vs_design_pct']) == beklenen
     # Ortalama, anlık serinin bandı içinde kalmalı (dışına taşarsa ortalama
     # başka bir şeyden hesaplanıyordur)
-    isp_seri = sonuc['of_shift_performance']['isp']
+    isp_seri = _regule_seri(sonuc)['isp']
     assert min(isp_seri) <= reg['isp_time_avg_s'] <= max(isp_seri)
 
 
@@ -370,7 +389,14 @@ def test_buyuk_kaymada_fark_buyuyor(varsayilan, ussu_yuksek):
 def test_eski_blok_geriye_uyumlu_ve_farklari_tasiyor(varsayilan):
     """motor_viz3d.js of_shift_performance okuyor: diziler yerinde kalmalı."""
     _, sonuc = varsayilan
-    perf = sonuc['of_shift_performance']
+    # V306/HİBRİT-ÇAPRAZ-2: HUD'un okuduğu blok teslim serisidir (boşalma
+    # kipinde kendi özeti ``of_shift.blowdown``dan); regüle özet regüle
+    # seride (``_regule_seri``) aynen durur.
+    hud = sonuc['of_shift_performance']
+    for alan in ('time', 'of_ratio', 'c_star', 'isp'):
+        assert isinstance(hud[alan], list) and hud[alan]
+    assert hud['time'] == sonuc['thrust_curve']['time']
+    perf = _regule_seri(sonuc)
     for alan in ('time', 'of_ratio', 'c_star', 'isp'):
         assert isinstance(perf[alan], list) and perf[alan]
     assert perf['summary_block'] == 'of_shift'

@@ -441,7 +441,7 @@ def slew_angular_acceleration(*,
             'slew_acceleration_deg_s2, or both slew_rate_deg_s and '
             'slew_reversal_time_s. A slew rate ALONE does not determine an '
             'acceleration, so no inertia moment is added to the budget '
-            '(no value is invented).'),
+            '(no substitute value is used).'),
     }
 
 

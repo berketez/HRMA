@@ -268,6 +268,100 @@
         return U.badge(prefix + ': ' + metin, kayit ? kayit[0] : 'dim');
     }
 
+    /* V306/SIVI-CEKET (K5_KARAR EK4) — CEKET ΔP'Sİ: MOTOR ÇÖZÜMÜ ⟷ BU KOŞU.
+
+       Motorun ceket basınç düşümü TEK sayıdır: besleme bütçesinin ceket
+       kalemi (feed_system.pressure_drops.fuel_line.regen_jacket; istasyon
+       marşı), çevrim, tank basıncı, Isıl Koruma kartı ve PDF aynı sayıyı
+       okur. Bu güverte aynı marşı DAHA AZ motor bağlamıyla çözer (ölçüldü,
+       örnek 25 kN GG: 3,96 ⟷ 6,13 bar): kamara silindirik gövdesi, kanal
+       pürüzlülüğü, karbon birikimi ve CEA gaz özellik kümesi bu uçtan
+       geçmez. İki sayı farklı tanımdır; motor sayısı, farkı ve nedeni yan
+       yana yazılır. Motor sonucu ya da kalem yoksa bölüm konmaz (uydurma yok). */
+    /* V306/SIVI-CEKET-B (kalem 3) — motor marşının RegenCooling girdileri
+       (SI). Süperkritik marşta cooling_system.regen_supercritical, RP-1
+       marşında thermal_protection.station_march. Yayım kapısı bunları
+       bekletebilir (null) — o zaman yok sayılır. */
+    function motorMarsGirdileri(r) {
+        const m = (r && r.motor) || r || {};
+        const cs = (m.cooling_system && typeof m.cooling_system === 'object') ? m.cooling_system : {};
+        const sc = (cs.regen_supercritical && typeof cs.regen_supercritical === 'object')
+            ? cs.regen_supercritical : {};
+        const tp = (m.thermal_protection && typeof m.thermal_protection === 'object')
+            ? m.thermal_protection : {};
+        const smr = (tp.station_march && typeof tp.station_march === 'object') ? tp.station_march : {};
+        const mi = sc.march_inputs || smr.march_inputs;
+        return (mi && typeof mi === 'object' && !Array.isArray(mi)) ? mi : null;
+    }
+
+    function jacketDpSection(data, root) {
+        if (!root) return null;
+        const sm = ((data && data.cooling) || {}).summary || {};
+        let motorDp = null;
+        try {
+            const r = (typeof window.currentResults === 'object')
+                ? window.currentResults : null;
+            const m = (r && r.motor) || r || {};
+            const pd = ((m.feed_system || {}).pressure_drops) || {};
+            const fl = pd.fuel_line || {};
+            if (pd.regen_jacket_drop_status === 'computed'
+                    && typeof fl.regen_jacket === 'number'
+                    && Number.isFinite(fl.regen_jacket)) {
+                motorDp = fl.regen_jacket;
+            }
+        } catch (e) { motorDp = null; }
+        if (motorDp === null) return null;
+        const buKosu = (typeof sm.total_pressure_drop_bar === 'number'
+                        && Number.isFinite(sm.total_pressure_drop_bar))
+            ? sm.total_pressure_drop_bar : null;
+        const kutu = document.createElement('div');
+        kutu.className = 'regen-jacket-dp-compare';
+        let html = U.sectionTitle(T('panel.regen.jdpTitle',
+            'Jacket pressure drop: engine solution and this deck run'));
+        html += '<p style="margin:4px 0; white-space:normal;">'
+            + U.tf('panel.regen.jdpEngine', { x: U.fmt(motorDp, 2) },
+                   'ENGINE SOLUTION (feed budget, cycle, Thermal Protection, PDF): {x} bar')
+            + '</p>';
+        if (buKosu !== null) {
+            html += '<p style="margin:4px 0; white-space:normal;">'
+                + U.tf('panel.regen.jdpPanel',
+                       { x: U.fmt(buKosu, 2), d: U.fmt(buKosu - motorDp, 2) },
+                       'THIS DECK RUN: {x} bar (difference {d} bar)')
+                + '</p>';
+        }
+        // V306/SIVI-CEKET-B (kalem 3): güverte motorun marş girdilerini
+        // (march_inputs) taşıdıysa uç karşılaştırmayı döner: girdiler aynıysa
+        // sonuç motorunkidir; değiştirilen girdi ADIYLA yazılır. Girdiler
+        // gelmediyse (eski sonuç, kapı) eski açıklama kalır.
+        const kars = (data && data.engine_march_comparison
+                      && typeof data.engine_march_comparison === 'object')
+            ? data.engine_march_comparison : null;
+        let not;
+        if (kars && kars.status === 'same_inputs') {
+            not = T('panel.regen.jdpSame',
+                'This deck run used the station march inputs of the engine (chamber barrel, channel roughness, carbon deposit context and CEA gas property set included) and none of them was changed, so it is the engine solution.');
+        } else if (kars && kars.status === 'inputs_changed'
+                   && Array.isArray(kars.changed_fields)) {
+            const adlar = kars.changed_fields.map(function (k) {
+                const alan = String((k && k.field) || '');
+                const el = document.getElementById('ad_f_cooling_' + alan);
+                const grup = el && el.closest ? el.closest('.form-group') : null;
+                const etiket = grup ? grup.querySelector('label') : null;
+                return (etiket && etiket.textContent.trim()) || alan;
+            });
+            not = U.tf('panel.regen.jdpChanged', { fields: adlar.join(', ') },
+                'Inputs you changed from the engine station march: {fields}. The difference comes from these inputs; the engine solution is the value the feed budget, the cycle and the report use.');
+        } else {
+            not = T('panel.regen.jdpNote',
+                'This deck solves the same station march with less engine context: the cylindrical chamber barrel, the channel roughness, the carbon deposit and the CEA gas property set are not passed to it. The engine solution is the value the feed budget, the cycle and the report use.');
+        }
+        html += '<p class="regen-jdp-note" style="margin:4px 0; color:var(--hd-ink-dim, #7d97a5);'
+            + ' font-size:0.8rem; white-space:normal;">' + U.esc(not) + '</p>';
+        kutu.innerHTML = html;
+        root.appendChild(kutu);
+        return kutu;
+    }
+
     function carbonDepositSection(data, root) {
         if (!root) return null;
         const cooling = (data && data.cooling) || {};
@@ -403,22 +497,36 @@
         // V3.0.5 T-ÇAPA-C1: ucun iki kademe künyesi (sm.coking_basis — bir
         // dürüstlük alanı) iki rozetin ipucuna eklenir; çeviri kanalından
         // (I18N.serverText), tanınmazsa AYNEN.
-        const cokingBasis = (typeof sm.coking_basis === 'string' && sm.coking_basis)
+        // V306/GÜVERTE-HATA (CI-SÜREÇ DEVİR 2, d26 P11B2-10): künye artık
+        // ORTAK değer-kaynağı sınıflandırıcısından geçer (öteki paneller
+        // gibi; panel kendi damgasını basmaz). Hükmün kıyasladığı sayı ucun
+        // çözdüğü soğutucu tarafı tepe cidar sıcaklığıdır (regen_cooling:
+        // coking ⟺ max_wall_cold_K > eşik); sınıf o değerden ve künyeden
+        // gelir, değer yoksa 'missing' olur (fail-closed). Çip koklaşma
+        // rozetinin hemen ardında; ipucu künyenin kendisidir.
+        const cokingInfo = (typeof sm.coking_basis === 'string' && sm.coking_basis
+                && U.source && typeof U.source.of === 'function')
+            ? U.source.of({ basis: sm.coking_basis }, null,
+                          { value: sm.max_wall_cold_K })
+            : null;
+        const cokingBasis = (cokingInfo && cokingInfo.basis)
             ? ' ' + ((window.I18N && typeof window.I18N.serverText === 'function')
-                ? window.I18N.serverText(sm.coking_basis) : sm.coking_basis)
+                ? window.I18N.serverText(cokingInfo.basis) : cokingInfo.basis)
             : '';
+        const cokingChip = (cokingInfo && typeof U.source.chip === 'function')
+            ? U.source.chip(cokingInfo) : '';
         if (sm.coking) {
             badges += U.badge(T('panel.regen.coking', 'RP-1 COKING LIMIT'), 'err',
                 T('panel.regen.cokingTip',
                   'Coolant-side wall temperature exceeds the 728 K NASA SP-8087 '
                   + 'design criterion for RP-1 liquid-wall temperature: the design '
-                  + 'does not meet this criterion.') + cokingBasis);
+                  + 'does not meet this criterion.') + cokingBasis) + cokingChip;
         } else if (sm.coking_risk) {
             badges += U.badge(T('panel.regen.cokingRisk', 'RP-1 DEPOSIT RISK'), 'warn',
                 T('panel.regen.cokingRiskTip',
                   'Coolant-side wall temperature exceeds the 561 K deposit-risk '
                   + 'warning level (software warning based on NASA CR-168277; '
-                  + 'validate for your conditions).') + cokingBasis);
+                  + 'validate for your conditions).') + cokingBasis) + cokingChip;
         }
 
         // ---- Sayısal kartlar ----
@@ -456,6 +564,8 @@
         // ---- Grafikler ----
         temperaturePlot(root, cooling);
         fluxPressurePlot(root, cooling);
+        // V306/SIVI-CEKET: motorun tek ceket ΔP'si ⟷ bu koşu, fark + neden.
+        jacketDpSection(data, root);
         // V301/L-E (L-KARBON DEVİR 3): karbon birikimi bandı — ayrı bölüm.
         carbonDepositSection(data, root);
 
@@ -647,7 +757,68 @@
             }
             const mdotFuel = U.readFuelFlow(r);
             if (Number.isFinite(mdotFuel) && mdotFuel > 0) sug.coolant_mdot = mdotFuel;
+            // V306/GÜVERTE-HATA (kalem 4, K2-P21): ASTAR MALZEMESİ motorun
+            // kendi katmanından. ÖLÇÜLDÜ (kilavuz-2/olcum/arayuz_ornek_tr_*,
+            // örnek sıvı): seçici alan varsayılanında (Bakır OFHC) kalıyordu;
+            // motorun astarı CuCrZr (C18150), dış kabuğu Inconel 718 — marş
+            // başka bir malzemenin iletkenliğiyle koşuyordu. Kaynak Termal
+            // Güvenlik paneliyle aynı: iki katmanlı rejeneratif cidarın
+            // 'liner' rollü katmanı (structural_analysis.chamber_structure.
+            // wall_layers). Katman yoksa öneri yok (kabuğa düşülmez); seçicide
+            // olmayan ad güvertenin kapısına düşer (koşum durur, gerekçe
+            // ekranda).
+            const yapi = (m.structural_analysis && typeof m.structural_analysis === 'object')
+                ? m.structural_analysis : {};
+            const odaYapisi = (yapi.chamber_structure && typeof yapi.chamber_structure === 'object')
+                ? yapi.chamber_structure : {};
+            if (odaYapisi.wall_model === 'two_layer_regenerative'
+                    && Array.isArray(odaYapisi.wall_layers)) {
+                const astar = odaYapisi.wall_layers.filter(function (k) {
+                    return k && k.role === 'liner';
+                })[0];
+                if (astar && typeof astar.material_key === 'string' && astar.material_key) {
+                    sug.wall_material = astar.material_key;
+                }
+            }
+            // V306/SIVI-CEKET-B (kalem 3): motorun marş girdileri (SI,
+            // march_inputs) varsa öneriler onların TAM değeridir; uç aynı
+            // girdileri engine_march olarak alır ve aynı marşı kurar.
+            const mi = motorMarsGirdileri(r);
+            if (mi) {
+                const sayi = function (v) {
+                    return (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+                };
+                const ata = function (alan, v) { if (v !== null) sug[alan] = v; };
+                const carp = function (v, k) { return v === null ? null : v * k; };
+                ata('chamber_pressure', carp(sayi(mi.chamber_pressure), 1e-5));
+                ata('chamber_temperature', sayi(mi.chamber_temperature));
+                ata('throat_diameter', sayi(mi.throat_diameter));
+                const eps = sayi(mi.expansion_ratio);
+                const de = sayi(mi.exit_diameter);
+                const dt = sayi(mi.throat_diameter);
+                if (eps !== null) ata('expansion_ratio', eps);
+                else if (de !== null && dt !== null && dt > 0) ata('expansion_ratio', (de / dt) * (de / dt));
+                ata('gamma', sayi(mi.gamma));
+                ata('molecular_weight', sayi(mi.molecular_weight));
+                ata('coolant_mdot', sayi(mi.coolant_mdot));
+                ata('coolant_inlet_temp', sayi(mi.coolant_inlet_temp));
+                ata('coolant_inlet_pressure', carp(sayi(mi.coolant_inlet_pressure), 1e-5));
+                if (Number.isInteger(mi.n_channels) && mi.n_channels >= 1) sug.n_channels = mi.n_channels;
+                ata('channel_width', carp(sayi(mi.channel_width), 1e3));
+                ata('channel_height', carp(sayi(mi.channel_height), 1e3));
+                ata('wall_thickness', carp(sayi(mi.wall_thickness), 1e3));
+                if (typeof mi.wall_material === 'string' && mi.wall_material) {
+                    sug.wall_material = mi.wall_material;
+                }
+            }
             return sug;
+        },
+        // V306/SIVI-CEKET-B (kalem 3): form dışı bağlam — motor marşının
+        // girdileri (kamara gövdesi, pürüzlülük, karbon birikimi bağlamı,
+        // CEA gaz özellik kümesi dahil). Yoksa bağlam gönderilmez.
+        contextFromResults: function (r) {
+            const mi = motorMarsGirdileri(r);
+            return mi ? { engine_march: mi } : null;
         },
         render: render,
     });

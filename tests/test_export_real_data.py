@@ -142,7 +142,17 @@ class TestEngThrustCurve:
         eng = exporter.export_motor_file(dict(motor))
         motor_line = [l for l in eng.splitlines() if not l.startswith(';')][0]
         prop_mass, loaded_mass = (float(x) for x in motor_line.split()[4:6])
-        assert loaded_mass - prop_mass == pytest.approx(expected, abs=1e-3)
+        # V306/UÇUŞ-KÜTLE kalem 2 (9 Kas) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI (ana
+        # model): RASP itici alanı yanma boyunca HARCANAN kütledir
+        # (``propellant_mass_consumed_kg``); yanmadan kalan itici (bu
+        # hibritte tane şeridi) yüklü kütlede kalır. Yani yüklü − itici =
+        # yapısal atıl kütle + yanma sonu kalıntısı (ölçüldü: 4,3513 + 1,0750
+        # = 5,4262 ⟷ .eng 5,426). Atıl kütle hâlâ yapısal analizden gelir,
+        # sabit +0,5 kg değildir.
+        kalinti = (motor['propellant_mass_loaded_kg']
+                   - motor['propellant_mass_consumed_kg'])
+        assert loaded_mass - prop_mass == pytest.approx(expected + kalinti,
+                                                        abs=1e-3)
         assert loaded_mass - prop_mass != pytest.approx(0.5, abs=1e-3)
 
     def test_missing_inert_mass_is_declared_not_invented(self):

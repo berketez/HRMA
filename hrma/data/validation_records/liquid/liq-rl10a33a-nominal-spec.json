@@ -9,7 +9,7 @@
     "access": "public_domain",
     "confidence": "high",
     "date_checked": "2026-07-17",
-    "erratum": "NASA TM-107318 metninde c* degeri '7824 in/sec' birimiyle basili; ft/s olmali (7824 ft/s = 2385 m/s, LOX/LH2 icin tutarli) — baski hatasi gorunumlu. HRMA kiyasinda ft/s varsayilip not dusulmeli (arge Acik risk 3).",
+    "erratum": "NASA TM-107318 metninde c* degeri '7824 in/sec' birimiyle basili; ft/s olmali (7824 ft/s = 2385 m/s, LOX/LH2 icin tutarli) — baski hatasi gorunumlu. HRMA kiyasinda ft/s varsayilip not dusulmeli (arge Acik risk 3). | Geometri düzeltmesi (V306/ÖLÇÜT, 4 Kasım 2026; NASA TM-107318 sayfa görüntüsünden yeniden okundu): Tablo 2.5.1 (s. 6) 2.47 in ve 5.13 in değerlerini 'Throat Diameter' ve 'Chamber Diameter' satırlarında basar, ama aynı raporun Ek E Şekil E1'i (s. 141, dikey eksen 'Radius of Chamber/Nozzle Inner Wall (inches)') oda düzlüğünü ~5,1 in, boğazı ~2,5 in YARIÇAPTA çizer. Tablo 2.5.1'in kendi model noktası da yarıçapı doğrular: A_t = ṁ·c*/Pc = 37,36 lbm/s × 7824 ft/s / 482 psia = 18,85 in² → D_t = 4,90 in (Ek E.2 C_d 0,975 ile geometrik alan 19,33 in²; π·2,47² = 19,17 in²); ε 61 ile çıkış yarıçapı 2,47·√61 = 19,3 in (Şekil E1 lüle çıkışı); Tablo E1 oda alan oranı 4,27 ≈ (5,13/2,47)² = 4,31. 2.47 in çap olsaydı kaydın kendi itki ve basıncıyla vakum itki katsayısı F/(Pc·A_t) = 16500/(475·4,79) = 7,2 çıkardı (ideal üst sınır ~2'nin çok üstünde). Sayılar kaynakta basıldığı gibi tutulur; alan adları throat_radius_in / chamber_radius_in (çap = 2 × yarıçap = 4,94 / 10,26 in).",
     "data_extraction": "text",
     "extraction_note": "Sayilar CR-190786 ve TM-107318 PDF'lerinden dogrudan okundu (docs/arge-guven-2026-07/arge_kati_sivi_veri.md, Bolum 2.1 ve 2.3)."
   },
@@ -21,8 +21,8 @@
   },
   "geometry": {
     "expansion_ratio": 61.0,
-    "throat_diameter_in": 2.47,
-    "chamber_diameter_in": 5.13,
+    "throat_radius_in": 2.47,
+    "chamber_radius_in": 5.13,
     "cycle": "expander",
     "injector_elements": 216,
     "fuel_pump_stages": 2,

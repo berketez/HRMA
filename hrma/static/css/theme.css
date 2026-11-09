@@ -432,6 +432,37 @@ button:not([class]) {
 
 .js-plotly-plot .main-svg { background: transparent !important; }
 
+/* V306/DİL-ORTAK · G2-N1 — GRAFİK KABIN İÇ ALANINA SIĞAR.
+   ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/dil-ortak/olcum/once_grafik_hybrid_tr.json,
+   /hybrid hesap sonrası, TR/EN × 1440/1280): 14 grafiğin 12-13'ünde SVG
+   kabın İÇ genişliğinden 43 px geniş (1440: kap içi 1324, SVG 1366 px;
+   optimum O/F kutusu da aynı kök). KÖK: Plotly 1.58.5 `plotAutoSize`
+   genişliği ve yüksekliği `getComputedStyle(gd).width/height`ten okur;
+   kap `box-sizing: border-box` iken bu değer dolgu + çerçeveyi İÇERİR,
+   SVG dolgunun içinden başlayıp kabın sağ (ve alt) kenarını o kadar aşar.
+   Onarım TEK yerde: Plotly'nin çizdiği kap (`.js-plotly-plot` sınıfını
+   Plotly ilk çizimde ekler) içerik kutusuyla ölçülür, genişliği kabın
+   akışından gelir (`width: auto`: sayfa kuralındaki `width: 100%` +
+   dolgu ebeveyni taşırırdı). Plotly'nin kendi iç `div.plot-container`
+   düğümü `.js-plotly-plot` taşımaz, etkilenmez. Yalnız ölçü değişir;
+   veri ve çizim aynıdır. */
+/* `!important`: hibrit sayfasının `.js-plotly-plot { width: 100% !important }`
+   kuralı (advanced.html) içerik kutusunda dolguyu %100'ün ÜSTÜNE ekler, kap
+   panelden 42 px taşardı (ölçüldü: #hybrid_thrust_plot sağı 1271 ⟷ panel içi
+   1227, 1280 px). Daha belirgin seçici + !important onu yener. */
+.plot-container.js-plotly-plot {
+    box-sizing: content-box;
+    width: auto !important;
+}
+/* Plotly'nin İÇ düğümü (`div.plot-container.plotly`) sınıf adı çakışmasıyla
+   yukarıdaki dış kap çerçevesini de alıyordu: SVG 1 px sağa itilip kabı
+   1 px taşırıyordu (aynı ölçüm, onarım sonrası kalan 1 px; tek grafikte
+   advanced.html #designReportRegressionChart için yerel olarak sıfırlanmıştı). */
+.js-plotly-plot > .plot-container.plotly {
+    border: 0;
+    padding: 0;
+}
+
 /* Henüz veri basılmamış grafik kutuları: 500px boş çerçeve yerine
    kompakt "veri yok" yer tutucusu (analiz koşulunca Plotly doldurur,
    :empty eşleşmez ve normal görünüme döner) */

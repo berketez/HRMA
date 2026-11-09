@@ -421,6 +421,7 @@
     LaunchSiteGlobe.prototype._init = function () {
         var THREE = global.THREE;
         if (!THREE || !THREE.WebGLRenderer) {
+            this._kurulamadi = true;
             if (this._onError) this._onError('three_missing');
             return;
         }
@@ -431,6 +432,7 @@
         try {
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         } catch (e) {
+            this._kurulamadi = true;
             if (this._onError) this._onError('webgl_failed');
             return;
         }
@@ -1912,6 +1914,27 @@
                 this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
         }
     };
+
+    // V306/UÇUŞ — KÜRE KURULAMAZSA SAYFA ÖLMEZ. ÖLÇÜLDÜ (2 Kas, headless
+    // Chromium --disable-3d-apis): WebGL bağlamı açılamayınca _init erken
+    // dönüyor ve onError('webgl_failed') durum satırına "3B küre
+    // başlatılamadı" yazıyordu; ama sayfa betiği hemen ardından
+    // selectSite()/viewGlobe() çağırıyor, kamera olmadığı için TypeError
+    // ("reading 'position'") atılıyor ve sayfa betiğinin GERİ KALANI
+    // (araç kaynağı seçici, gövde alanları, "Bu sahadan uçur") hiç
+    // kurulmuyordu: Kaynak = Kayıtlı proje seçilince proje listesi bile
+    // gelmiyordu. Küreden bağımsız uçuş çözümü WebGL'siz makinede de
+    // çalışmalı. Kurulamamış kürede her açık yöntem iş yapmadan null döner;
+    // sayfanın okuyucuları null'ı zaten "küre yok" diye ele alıyor
+    // (getScaleInfo/getSkyInfo/getTileInfo çağrı yerleri).
+    Object.keys(LaunchSiteGlobe.prototype).forEach(function (ad) {
+        var ozgun = LaunchSiteGlobe.prototype[ad];
+        if (typeof ozgun !== 'function' || ad.charAt(0) === '_') return;
+        LaunchSiteGlobe.prototype[ad] = function () {
+            if (this._kurulamadi) return null;
+            return ozgun.apply(this, arguments);
+        };
+    });
 
     // Dışa aç
     LaunchSiteGlobe.latLonToVec3 = latLonToVec3;

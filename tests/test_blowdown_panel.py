@@ -463,9 +463,19 @@ def test_yeni_anahtarlar_blowdown_onekli():
     src = kaynak()
     anahtarlar = set(re.findall(r"\bTF?\(\s*'([^']+)'", src))
     assert anahtarlar, 'panel hiç i18n anahtarı kullanmıyor'
+    # V306/DİL-HİBRİT: panel yalnız hibrit sayfasında yüklenir; o sayfanın
+    # kendi sözlüğü (i18n_advanced.js, `adv.js.bd*`) de geçerli alandır —
+    # `blowdown.*` ortak sözlükte (başka kulvarın dosyası) durur.
     for anahtar in anahtarlar:
-        assert anahtar.split('.')[0] in ('blowdown', 'common', 'transient'), \
+        assert anahtar.split('.')[0] in ('blowdown', 'common', 'transient',
+                                         'adv'), \
             'beklenmeyen anahtar alanı: %s' % anahtar
+        if anahtar.startswith('adv.'):
+            # adv.js.bd* panele özgü; adv.js.tp* Zaman Çözümlü paneliyle
+            # AYNI büyüklüğün ortak etiketi (tek büyüklük, tek etiket).
+            assert anahtar.startswith(('adv.js.bd', 'adv.js.tp')), (
+                'hibrit sözlüğündeki blowdown anahtarı adv.js.bd* / '
+                'adv.js.tp* önekli olmalı: %s' % anahtar)
 
 
 def test_cip_rengi_viz3d_missing_kalibiyla_ayni():

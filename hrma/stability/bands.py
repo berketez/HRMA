@@ -288,8 +288,8 @@ QSHOD_BAND_RECORDS = {
             'Caltech thesis, Nakka experimental-rocketry pages, open web '
             'search (DTIC under maintenance during the session). Amateur '
             'sugar propellants are simply not represented in the T-burner '
-            'literature that was reachable. No band is fabricated: an '
-            'invented band is worse than an empty row.'),
+            'literature that was reachable. No band is published for this '
+            'propellant; the row stays empty.'),
     ),
     'knsu': MissingBandRecord(
         record_id='knsu',
@@ -300,8 +300,8 @@ QSHOD_BAND_RECORDS = {
             'NATO AG-AVT-039 full text (664 pp., searched), Perry 1970 '
             'Caltech thesis, Nakka succhem.html (ballistics and combustion '
             'temperature only — no response data), open web search (DTIC '
-            'under maintenance during the session). No band is fabricated: '
-            'an invented band is worse than an empty row.'),
+            'under maintenance during the session). No band is published '
+            'for this propellant; the row stays empty.'),
     ),
 }
 

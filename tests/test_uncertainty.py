@@ -574,6 +574,27 @@ def test_hybrid_fast_budget_end_to_end():
     output_keys = ['isp', 'c_star', 'mdot_total', 'port_diameter_final',
                    'fuel_mass', 'chamber_temperature']
 
+    # V306 CI-SÜREÇ (4 Kas 2026) — PAYLAŞIMLI KOŞUCU YALNIZ CI DEĞİLDİR.
+    # Yukarıdaki CI çarpanının gerekçesi ("paylaşımlı koşucuda koşucu
+    # değişkenliğini kırmızıya çevirmez; algoritma gerilemesini çözüm SAYISI
+    # yakalar") yüklü bir yerel makinede de AYNEN geçerli. ÖLÇÜLDÜ
+    # (277e53c10, 14 çekirdek, 1 dk yük 7,8; 7 kulvar ajanı koşuyordu):
+    # aynı commit 52,2 s duvar / 256,6 ms/örnek ile 250 ms tavanında KIRMIZI,
+    # bir önceki koşuda 58,0 s; yük 5,05'te 250 ms'nin altında geçti (eşik
+    # bölgesi). Makine yükü koşudan ÖNCE ölçülür: 1 dakikalık yük çekirdek
+    # sayısının dörtte birine ulaştıysa (14 çekirdekte 3,5; M4 Max'te 4 verim
+    # çekirdeği var ve iş parçacığı oraya düşebiliyor) koşucu paylaşımlıdır
+    # ve CI ile AYNI 2× pay kullanılır (tek kural, iki ortam). Adanmış yerel makinede
+    # 60 s / 250 ms tavanı DEĞİŞMEDİ; algoritma bekçisi (çözüm/örnek) her
+    # ortamda aynı ve belirlenimcidir. Hangi kuralın uygulandığı iddia
+    # metnine yazılır.
+    yuk_1dk = os.getloadavg()[0] if hasattr(os, 'getloadavg') else 0.0
+    cekirdek = os.cpu_count() or 1
+    ci = os.environ.get('GITHUB_ACTIONS') == 'true'
+    paylasimli = ci or yuk_1dk >= cekirdek / 4.0
+    kosucu = ('CI' if ci else 'yüklü yerel (1 dk yük %.1f / %d çekirdek)'
+              % (yuk_1dk, cekirdek) if paylasimli else 'adanmış yerel')
+
     t0 = time.perf_counter()
     res = run_uncertainty(factory, dists, n_samples=FAST, seed=42,
                           output_keys=output_keys)
@@ -583,17 +604,18 @@ def test_hybrid_fast_budget_end_to_end():
     assert res['consistency']['nominal_check'] == 'passed'
     assert res['n_samples'] == FAST
     assert res['failed_samples'] <= 5
-    limit_s = 120.0 if os.environ.get('GITHUB_ACTIONS') == 'true' else 60.0
-    assert wall < limit_s, f'FAST butcesi {wall:.1f} s (limit {limit_s:.0f} s)'
+    limit_s = 120.0 if paylasimli else 60.0
+    assert wall < limit_s, (f'FAST butcesi {wall:.1f} s (limit {limit_s:.0f} s,'
+                            f' koşucu: {kosucu})')
     # uq_mode örnek süresi hedefi (spec: <= 250 ms/örnek, M4). v3.0.0 (15 Eki):
     # CI'da duvar sınırı 2× iken örnek tavanı 250 ms kalmıştı — iki sınır
     # birbiriyle tutarsızdı: ilk tam Linux koşumu (38770162288) 101 s duvar
     # (sınır 120 s, GEÇTİ) ve 501 ms/örnek (tavan 250, KALDI) ölçtü. CI'da
     # tavan duvar sınırından türetilir; algoritma gerilemesini makineden
     # bağımsız olarak aşağıdaki çözüm SAYISI bekçisi yakalar.
-    ornek_tavani_ms = (limit_s * 1000.0 / FAST
-                       if os.environ.get('GITHUB_ACTIONS') == 'true' else 250.0)
-    assert res['timing']['per_sample_ms'] <= ornek_tavani_ms, res['timing']
+    ornek_tavani_ms = limit_s * 1000.0 / FAST if paylasimli else 250.0
+    assert res['timing']['per_sample_ms'] <= ornek_tavani_ms, (
+        res['timing'], ornek_tavani_ms, kosucu)
 
     # OH-D20-12: algoritma maliyeti — saat DEĞİL, SAYI.
     #

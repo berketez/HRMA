@@ -148,7 +148,9 @@ def kati_hukum_gamma_suz(kati_motor):
     """
     from hrma.fea import bridge
     from tests.fea.yuk_modeli_araci import gamma_suz, geri_donus_yukte
-    s = _sessiz(bridge.run_structural_from_motor, gamma_suz(kati_motor))
+    # V306/KATI-MODEL (M-KATI-10): katıda ürün akışı artık kasa silindirini ağa koyar; bu araç yalnız-lüle konturunda ölçülmüştü, o geometri köprünün beyanlı kipiyle (include_chamber=False) korunur. Kasa silindirli ürün yolunun bekçisi: tests/test_v306_kati_model.py::TestMKati10YapisalAg.
+    s = _sessiz(bridge.run_structural_from_motor, gamma_suz(kati_motor),
+                include_chamber=False)
     geri_donus_yukte(s)
     return s
 
@@ -431,7 +433,9 @@ class TestP8B209KisitYeriDuyarliligi:
         from hrma.fea import structural_axisym as SA
         from hrma.fea.bridge import extract_structural_inputs
         from tests.fea.yuk_modeli_araci import gamma_suz
-        g = _sessiz(extract_structural_inputs, gamma_suz(kati_motor))
+        # V306/KATI-MODEL (M-KATI-10): fikstürle aynı yalnız-lüle kipi.
+        g = _sessiz(extract_structural_inputs, gamma_suz(kati_motor),
+                    include_chamber=False)
         msh = kati_hukum_gamma_suz['mesh']
         m = _sessiz(MA.build_wall_mesh, g['contour'], g['thickness_m'],
                     n_axial=int(msh['n_axial']),

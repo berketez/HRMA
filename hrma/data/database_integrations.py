@@ -193,7 +193,7 @@ class NistWebBookAPI:
         if key is None:
             return {'error': (f'No oxidizer reference data for formula '
                               f'{formula!r}; no generic substitute is '
-                              f'invented.')}
+                              f'used.')}
 
         out = dict(self._STATIC_FALLBACK[key])
         try:

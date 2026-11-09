@@ -746,10 +746,21 @@ class TestInputGuardCagriEnvanteri:
     # ``resolve_hybrid_c_star_efficiency`` içindeki ``input_guard.num`` —
     # V301/H-PANEL (74b55500a) c* verimi girdisi bant dışı / sayı olmayan
     # değeri adıyla reddediyor (kırpma yok).
-    TABAN_DEGER = 52
+    # V306/GÜNCELLEME kalem 5 (2 Kas): taban 52 -> 53 (``app.py`` 38 -> 39).
+    # Sınıfın KENDİ yönergesi: kapsam büyüdü, ölçülen değere çekildi.
+    # EKLENEN TEK ÇAĞRI ÖLÇÜLDÜ (AST envanteri; taban b890da443'te 52):
+    # ``hrma/app.py`` ``update_install`` içindeki ``input_guard.choice`` —
+    # ``/api/update/install`` gövdesindeki arayüz dili ('lang') yalnız
+    # en/tr; liste dışı değer adıyla 400 (kurulum başlamaz).
+    # V306/RAPOR-DİL (4 Kas): EKLENEN TEK ÇAĞRI ÖLÇÜLDÜ (AST envanteri;
+    # taban 700a67586'da 53): ``hrma/app.py`` ``export_pdf_report`` içindeki
+    # ``input_guard.choice`` — ``/api/export-pdf/<tür>`` gövdesindeki belge
+    # dili ('lang') yalnız en/tr; liste dışı değer adıyla 422 (belge
+    # üretilmez), alan yoksa beyanlı varsayılan 'en'.
+    TABAN_DEGER = 54
     TABAN_DEGER_DOSYA = {'hrma/engines/hybrid_rocket_engine.py': 7,
                          'hrma/utils/common_fixes.py': 7,
-                         'hrma/app.py': 38}
+                         'hrma/app.py': 40}
     TABAN_AD = 23
     TABAN_AD_DOSYALARI = {'hrma/app.py',
                           'hrma/export/step_export.py',

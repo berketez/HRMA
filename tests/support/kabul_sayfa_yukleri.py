@@ -18,7 +18,10 @@ alanı, ``oxidizer_density`` 1141 ⟷ 1141.16, ``oxidizer_viscosity``; hibrit:
 ``vehicle_*`` ve aynanın gönderip sayfanın göndermediği 21 alan. API
 düğümleri kullanıcının yükünü değil başka bir yükü ölçüyordu.
 
-Hasat tarihi: 2026-10-28 · kaynak: örnek .hrma dosyaları (examples/).
+Hasat tarihi: 2026-11-09 · kaynak: örnek .hrma dosyaları (examples/).
+V306/KATI-KALAN (9 Kas): katı gövdeden ``star_fillet`` çıkarıldı — sayfa
+artık o kutuyu taşımıyor ve göndermiyor (hasadın bu alandaki karşılığı;
+başka alan değişmedi).
 """
 
 SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.013,
@@ -28,6 +31,7 @@ SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.013,
             'chamber_material': 'steel_304',
             'chamber_pressure': 30,
             'combustion_type': 'infinite',
+            'contraction_ratio': 0,
             'design_config_fields': [{'field': 'chamber_material', 'source': 'project_file'}],
             'design_config_opened': True,
             'design_config_source': 'project_file',
@@ -39,12 +43,19 @@ SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.013,
             'l_star': 1,
             'launch_altitude': 0,
             'launch_angle': 90,
-            'mass_flux_chamber': 0,
+            'mass_flux_chamber': 250,
             'motor_description': 'Örnek tasarım: N2O/HTPB hibrit motor, 3 kN itki, 10 s yanma, 30 '
-                                 'bar oda basıncı, O/F 6,0. Regresyon katsayıları sayfanın '
-                                 'HTPB/N2O varsayılanıdır. / Example design: N2O/HTPB hybrid '
-                                 'motor, 3 kN thrust, 10 s burn, 30 bar chamber pressure, O/F 6.0. '
-                                 'Regression coefficients are the page defaults for HTPB/N2O.',
+                                 'bar oda basıncı, O/F 6,0. Regresyon a = 6,399e-05, n = 0,554: '
+                                 'Carmicino ve ark. saf HTPB/N2O ateşlemelerine (HRMA doğrulama '
+                                 'kayıtları) log-log uyarlama; deneylerde N2O gaz, bu örnekte sıvı '
+                                 'enjekte edilir. Başlangıç oksitleyici akısı 250 kg/m²·s, '
+                                 'uyarlamanın ölçüm aralığının içinde. / Example design: N2O/HTPB '
+                                 'hybrid motor, 3 kN thrust, 10 s burn, 30 bar chamber pressure, '
+                                 'O/F 6.0. Regression a = 6.399e-05, n = 0.554: log-log fit to the '
+                                 'Carmicino et al. pure HTPB/N2O firings (HRMA validation '
+                                 'records); the tests injected gaseous N2O, this example injects '
+                                 'liquid N2O. Initial oxidizer flux 250 kg/m²·s, inside the '
+                                 'measured range of the fit.',
             'motor_name': 'Example Hybrid N2O-HTPB 3kN',
             'nozzle_type': 'conical',
             'of_ratio': 6,
@@ -54,8 +65,8 @@ SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.013,
             'oxidizer_type': 'n2o',
             'oxidizer_viscosity': 6.817e-05,
             'plate_thickness': 3,
-            'regression_a': 3.68e-05,
-            'regression_n': 0.555,
+            'regression_a': 6.399e-05,
+            'regression_n': 0.554,
             'target_velocity': 30,
             'thrust': 3000,
             'total_impulse': 30000,
@@ -121,7 +132,7 @@ SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.013,
            'density': 1850,
            'discharge_coeff': 0.98,
            'divergent_angle': 15,
-           'dry_mass': 3.733,
+           'dry_mass': 3.42,
            'erosive_m': 0.8,
            'exit_diameter': 47.82,
            'expansion_ratio': 6.89,
@@ -149,7 +160,7 @@ SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.013,
            'liner_thickness': 2,
            'load_cell_capacity': 5000,
            'nozzle_efficiency': 0.95,
-           'nozzle_mass': 0.379,
+           'nozzle_mass': 0.065,
            'nozzle_material': 'graphite',
            'outer_diameter': 75,
            'overall_efficiency': 0.92,
@@ -162,12 +173,11 @@ SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.013,
            'slot_count': 6,
            'slot_depth': 20,
            'slot_width': 4,
-           'star_fillet': 2,
            'star_points': 6,
            'star_radius': 15,
            'throat_diameter': 18.4,
            'uncertainty_level': 2,
            'web_thickness': 21.5,
-           'wet_mass': 6.14,
+           'wet_mass': 5.826,
            'wind_speed': 0,
            'yield_strength_source': 'material'}}

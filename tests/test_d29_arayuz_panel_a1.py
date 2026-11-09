@@ -94,10 +94,17 @@ def test_ohd2803_bayraklar_ad_ve_degerle_ayni_rozette():
     basılmazsa kullanıcı hangi alanı okuduğunu bilemez.
     """
     metin = _oku('hrma/static/js/blowdown_panel.js')
-    assert "badge(b.field + ' ' + (b.value ? 'true' : 'false')" in metin, (
-        'bayrak rozeti alan adını ve değerini aynı dizgede basmıyor')
-    assert "badge(k.field + ' ' + k.value.toFixed(k.digits)" in metin, (
-        'kesme payı rozeti alan adını ve değerini aynı dizgede basmıyor')
+    # V306/DİL-HİBRİT: rozet METNİ kullanıcı dilinde (sözlük etiketi +
+    # değer); makine ADI rozeti saran `data-bd-field` niteliğinde — ad ile
+    # değer yine AYNI düğümde (ham alan adı ekran metninde yasak).
+    assert "teknik += sar(b.field, badge(metin," in metin, (
+        'bayrak rozeti alan adını (nitelik) ve değerini aynı düğümde basmıyor')
+    assert "teknik += sar(k.field, badge(metin," in metin, (
+        'kesme payı rozeti alan adını (nitelik) ve değerini aynı düğümde basmıyor')
+    assert "'<span data-bd-field=\"' + alan + '\">'" in metin
+    assert "TF(e[0], { v: evetHayir(b.value) }, e[1])" in metin
+    assert "const deger = sayiEkran(k.value, k.digits);" in metin, (
+        'kesme değeri ekran kanalından (TR virgül) geçmiyor')
 
 
 def test_ohd2803_bayrak_ve_kesme_tablolari_uydurma_deger_basmaz():
@@ -134,7 +141,10 @@ def test_ohd2804_birim_etiketi_milimetre():
     """
     metin = _oku('hrma/static/js/panels/safety_panel.js')
     for alan in ('inner_diameter_mm', 'wall_thickness_mm'):
-        kalip = (r"addRow\(rows,\s*'" + alan + r"',\s*press\." + alan
+        # V306/GÜVENLİK (NR-4): satır kullanıcı etiketli yardımcıyla
+        # (addUserRow: makine yolu + sözlük etiketi + değer + birim).
+        kalip = (r"add(?:User)?Row\(rows,\s*'" + alan
+                 + r"',\s*(?:T\([^)]*\),\s*)?press\." + alan
                  + r"[^)]*'mm'\)")
         assert re.search(kalip, metin), (
             f'{alan} satırı `mm` birim etiketiyle basılmıyor')

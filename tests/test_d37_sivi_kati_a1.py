@@ -962,14 +962,17 @@ process.stdout.write(JSON.stringify({ L: r.layout, izler: r.data.length }));
         # Çizilen bölüm boyları = yayımlanan (tek toplama/çıkarma yuvarlaması).
         assert h[1]['z'] - h[0]['z'] == pytest.approx(lc, rel=1e-12)
         assert h[2]['z'] - h[1]['z'] == pytest.approx(ld, rel=1e-12)
-        # Yarıçaplar: tek çevrim (çap / 2), bit-aynı.
-        assert h[0]['r'] == cd['grain_outer_diameter'] / 2
+        # Yarıçaplar: tek çevrim (çap / 2), bit-aynı. V306/KATI-KALAN
+        # (kalem 2): yakınsak giriş KASA İÇ çapında (tek kontur; çözücünün
+        # boy formülü de kasa iç çapına taşındı).
+        assert h[0]['r'] == cd['inner_diameter'] / 2
         assert h[1]['r'] == nd['throat_diameter'] / 2
         assert h[2]['r'] == nd['exit_diameter'] / 2
         assert all(q['y'] == 0 for q in h)
         # Ölçüm önermesi: çizilen koni yarı açıları = yayımlanan açılar.
-        # (Giriş için grain dış çapı seçiminin dayanağı; çözücü formülü
-        # değişirse burası kırmızı olur ve alan yeniden ölçülür.)
+        # (Giriş çapı seçiminin dayanağı; çözücü formülü değişirse burası
+        # kırmızı olur ve alan yeniden ölçülür. V306/KATI-KALAN: kasa iç
+        # çapı.)
         yak = math.degrees(math.atan((h[0]['r'] - h[1]['r']) / lc))
         ira = math.degrees(math.atan((h[2]['r'] - h[1]['r']) / ld))
         assert yak == pytest.approx(nd['convergent_angle'], abs=1e-9)
@@ -978,19 +981,28 @@ process.stdout.write(JSON.stringify({ L: r.layout, izler: r.data.length }));
         assert h[0]['r'] > h[1]['r'] < h[2]['r']
 
     @node_gerekli
-    def test_giris_capi_kasa_ic_capi_degil_cozucunun_kullandigi_grain_dis_capi(self, kati_cad):
-        """Ayırt edici gövde: kasa iç çapı ≠ grain dış çapı. Çözücünün
-        yakınsak boyu grain dış çapından hesaplanır; kasa iç çapıyla
-        çizilseydi yarı açı yayımlanandan 8° sapardı."""
+    def test_giris_capi_kasa_ic_capi_tek_kontur(self, kati_cad):
+        """Ayırt edici gövde: kasa iç çapı ≠ grain dış çapı.
+
+        V306/KATI-KALAN (kalem 2) — BEKLENTİ DEĞİŞTİ: eski bekçi "giriş =
+        grain dış çapı" kuralını kilitliyordu, çünkü çözücünün yakınsak boyu
+        grain çapından kuruluyordu; oysa STEP/CAD ve yapısal FEA aynı boyu
+        KASA iç çapından başlatıyordu (aynı motora iki kontur, L2 49 ⟷ 52
+        mm). Tek kontur: çözücünün boyu kasa iç çapından; çizim kasa iç
+        çapıyla ve yarı açı yayımlananla aynı. Grain dış çapıyla çizilseydi
+        yarı açı sapardı."""
         cad = kati_cad['tasarim_noktasi_kipi']
         cd, nd = cad['case_design'], cad['nozzle_design']
         assert cd['inner_diameter'] - cd['grain_outer_diameter'] > 1.0, cd
         h = _kesit_kos(cad)['halkalar']
-        assert h[0]['r'] == cd['grain_outer_diameter'] / 2
-        assert h[0]['r'] != cd['inner_diameter'] / 2
+        assert h[0]['r'] == cd['inner_diameter'] / 2
+        assert h[0]['r'] != cd['grain_outer_diameter'] / 2
         kasa_ile = math.degrees(math.atan(
             (cd['inner_diameter'] / 2 - nd['throat_diameter'] / 2) / nd['convergent_length']))
-        assert abs(kasa_ile - nd['convergent_angle']) > 1.0
+        assert kasa_ile == pytest.approx(nd['convergent_angle'], abs=1e-9)
+        tane_ile = math.degrees(math.atan(
+            (cd['grain_outer_diameter'] / 2 - nd['throat_diameter'] / 2) / nd['convergent_length']))
+        assert abs(tane_ile - nd['convergent_angle']) > 1.0
 
     @node_gerekli
     @pytest.mark.parametrize('blok,alan,deger,beklenen', [
@@ -998,7 +1010,11 @@ process.stdout.write(JSON.stringify({ L: r.layout, izler: r.data.length }));
         ('nozzle_design', 'convergent_length', -48.97, 'yok'),
         ('nozzle_design', 'divergent_length', None, 'yakinsak'),
         ('nozzle_design', 'divergent_length', 0, 'yakinsak'),
-        ('case_design', 'grain_outer_diameter', None, 'iraksak'),
+        # V306/KATI-KALAN (kalem 2): yakınsak giriş kasa iç çapındadır; bu
+        # alan çizimin genel kapısında zorunludur (yoksa ya da sonlu değilse
+        # hiçbir şey çizilmez), pozitif olmayan değer yalnız lüle girişini
+        # adıyla düşürür.
+        ('case_design', 'inner_diameter', 0, 'iraksak'),
     ])
     def test_olcu_yoksa_parca_cizilmez_ve_kesitte_beyan(self, kati_cad, blok, alan,
                                                          deger, beklenen):
@@ -1017,7 +1033,7 @@ process.stdout.write(JSON.stringify({ L: r.layout, izler: r.data.length }));
             assert len(o['izler']) == 3 and h == []
         elif beklenen == 'yakinsak':
             assert [(q['z'], q['r']) for q in h] == [
-                (z0, cd['grain_outer_diameter'] / 2), (z0 + lc, nd['throat_diameter'] / 2)]
+                (z0, cd['inner_diameter'] / 2), (z0 + lc, nd['throat_diameter'] / 2)]
         else:
             assert [(q['z'], q['r']) for q in h] == [
                 (z0 + lc, nd['throat_diameter'] / 2),
@@ -1181,7 +1197,10 @@ class TestSartSiviKati:
     @pytest.mark.parametrize('blok,alan,beklenen', [
         ('nozzle_design', 'convergent_length', 'yok'),
         ('nozzle_design', 'divergent_length', 'yakinsak'),
-        ('case_design', 'grain_outer_diameter', 'iraksak'),
+        # V306/KATI-KALAN (kalem 2): giriş çapı artık case_design.
+        # inner_diameter; sonlu olmayan değeri çizimin genel kapısı (zorunlu
+        # ölçü listesi) yakalar, lüle kapısına ulaşmaz — 'iraksak' durumu
+        # bu yoldan oluşmaz (pozitif olmayan değer üstteki bekçide).
     ])
     def test_m1f_sonlu_olmayan_olcu_cizilmez_ve_beyan(self, kati_cad, blok, alan,
                                                        beklenen, deger):
@@ -1204,7 +1223,7 @@ class TestSartSiviKati:
             assert len(o['izler']) == 3 and h == []
         elif beklenen == 'yakinsak':
             assert [(q['z'], q['r']) for q in h] == [
-                (z0, cd['grain_outer_diameter'] / 2), (z0 + lc, nd['throat_diameter'] / 2)]
+                (z0, cd['inner_diameter'] / 2), (z0 + lc, nd['throat_diameter'] / 2)]
         else:
             assert [(q['z'], q['r']) for q in h] == [
                 (z0 + lc, nd['throat_diameter'] / 2),

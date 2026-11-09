@@ -34,6 +34,7 @@ yörüngesi) Flask test istemcisiyle ölçülür.
 """
 
 import io
+import copy
 import json
 import math
 import pathlib
@@ -69,7 +70,11 @@ SIXDOF_FORM_BURN_TIME_S = 6.0     # panelin sd_burn varsayılanı
 LIQUID_FORM = {
     'fuel_type': 'rp1', 'oxidizer_type': 'lox',
     'thrust': 10000, 'chamber_pressure': 100, 'mixture_ratio': 2.5,
-    'nozzle_expansion_ratio': 50, 'max_burn_duration': 400,
+    # V306/SIVI-CEKET-B kalem 5: eski form ön dolgusu ε 50 (kaynaksız; UÇUŞ-KÜTLE
+    # formdan kaldırdı) 100 bar'da deniz seviyesinde ayrılıyor (Summerfield;
+    # ayrılmayan en büyük ε 26,86) ve uç artık o tasarımı adlı retle
+    # yayımlamıyor. Gövde ayrılmayan bölgedeki 20 ile kurulur.
+    'nozzle_expansion_ratio': 20, 'max_burn_duration': 400,
     'combustion_efficiency': 97, 'contraction_ratio': 4,
     'characteristic_length': 1.2, 'chamber_wall_thickness': 5,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
@@ -551,11 +556,26 @@ def test_t15_orantisiz_seride_iki_egri_korunur(tmp_path):
 # ===========================================================================
 
 def test_t42_iki_isp_farki_cozucunun_gerekcesiyle_yaziliyor(tmp_path, cr):
+    """V306/SIVI-CEKET-B kalem 5 ÇEVİRİSİ. İki Isp yalnız deniz seviyesinde
+    AYRILAN sabit lülede ayrışıyordu (deniz seviyesi demiri geçersiz → vakum
+    demiri); gövdenin eski ε 50'si tam o durumdu. Ayrılan sabit lüle artık
+    adlı retle döner, yayımlanan her tasarımda iki Isp çakışır (ölçüldü: ε 20
+    temel, film %10, kademeli, basınç beslemeli → fark 0). Gerçek yanıtta not
+    basılmaz; ayrışma durumunda notun ÇÖZÜCÜNÜN gerekçesini bastığı, aynı
+    yanıtın ilk satırı motorun kendi vakum-demiri künyesiyle kaydırılarak
+    sınanır (test girdisi; ürün sayısı değil)."""
     ap0 = cr['altitude_performance'][0]
-    fark = abs(ap0['specific_impulse'] - cr['isp_sea_level'])
-    assert fark / cr['isp_sea_level'] > 0.005, (
-        'bu tasarım noktasında iki Isp çakışıyor — kalem yeniden üretilemiyor')
+    assert ap0['specific_impulse'] == pytest.approx(cr['isp_sea_level'],
+                                                    rel=1e-12)
+    assert run_js(tmp_path, {'senaryo': 'demir', 'cr': cr})['not'] == ''
 
+    cr = copy.deepcopy(cr)
+    ap0 = cr['altitude_performance'][0]
+    ap0['specific_impulse'] = cr['isp_sea_level'] * 1.05
+    ap0['isp_anchor_basis'] = (
+        'delivered Isp anchored at the vacuum reference; the sea-level anchor '
+        'is invalid because this nozzle is separated at sea level '
+        '(Summerfield criterion, Pe < 0.40 * Pa)')
     out = run_js(tmp_path, {'senaryo': 'demir', 'cr': cr})
     not_metni = out['not']
     assert not_metni, 'fark açıklanmıyor'

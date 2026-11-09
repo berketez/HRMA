@@ -268,7 +268,8 @@ def test_yanma_panosunda_gosterge_baslik_bandinin_altinda_kalir():
     """Aynı sözleşme yanma panosunun verim göstergesi için.
 
     Ölçülen kusur: "94" / "96" skala etiketleri "Combustion / Kinetic
-    Efficiency" başlığıyla 7 px örtüşüyordu.
+    Efficiency" başlığıyla 7 px örtüşüyordu. V306/SAYI (NR-1): gösterge
+    yalnız c* verimini okur, başlık "Combustion (c*) Efficiency".
     """
     from hrma.visualization.visualization import create_combustion_analysis_plots
 
@@ -282,7 +283,7 @@ def test_yanma_panosunda_gosterge_baslik_bandinin_altinda_kalir():
     gostergeler = _indicators(fig)
     assert gostergeler, "verim göstergesi kurulmalıydı (c* verildi)"
 
-    baslik = _annotation(fig, "Combustion / Kinetic Efficiency")
+    baslik = _annotation(fig, "Combustion (c*) Efficiency")
     assert baslik is not None
     assert gostergeler[0]["domain"]["y"][1] < baslik["y"]
 

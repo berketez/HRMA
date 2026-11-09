@@ -253,6 +253,16 @@ YALNIZ_TESTIN_CAGIRDIGI_ROTALAR = frozenset({
     # tests/test_v301_kaynak_baglanti.py yazıyor. Gerçek çözüm: tüketicisi
     # yoksa v3.1'de emekliye ayırmak.
     '/api/database-status',
+    # V306/HIZ (M-SIVI-19; 4 Kas 2026) — BORÇ KAYDI, AF DEĞİL. Ürün yüzündeki
+    # TEK çağıran belirsizlik paneliydi (kapsamlı seviyenin yoklaması). Panel
+    # artık her seviyeyi ``/api/uncertainty-analysis/jobs/<job_id>`` ucundan
+    # yokluyor (gerçek örnek sayacı, ölçülmüş örnek süresi, iptal, adlı
+    # durma; genel uç yalnız 0..1 kesir taşıyordu). Genel uç API'de kalır:
+    # kinetik verim ``async`` yanıtının ve belirsizlik ucunun ``async``'siz
+    # kapsamlı yanıtının ``poll_url``'i oraya işaret ediyor; sözleşmesini
+    # tests/test_d27_app_api_a4.py, test_uq_endpoint.py ve
+    # test_wave4a_contract.py yazıyor.
+    '/api/jobs/<job_id>',
     # fix-8: 8 rota (advanced-performance-analysis, analysis/wall-profile,
     # comparative-analysis, correlation-report, flow-analysis,
     # kinetic-efficiency, uncertainty-analysis, validation/upload-csv)

@@ -846,7 +846,7 @@ I.applyTo(root);
 check('applyTo.rootItself', root.textContent === 'Formül Referansı', root.textContent);
 check('applyTo.child', child.textContent === 'Fırlatma Sahası (3B Dünya)', child.textContent);
 check('applyTo.placeholder',
-    input.getAttribute('placeholder') === 'Profesyonel Roket İtki Tasarım Aracı',
+    input.getAttribute('placeholder') === 'Roket İtki Ön Tasarım ve Analiz Aracı',
     input.getAttribute('placeholder'));
 check('applyTo.title', titled.getAttribute('title') && titled.getAttribute('title').length > 0,
     titled.getAttribute('title'));

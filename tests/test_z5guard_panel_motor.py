@@ -656,19 +656,37 @@ def test_b1_efsane_dort_kritigi_iki_dilde_basiyor(hibrit_sonuc, tmp_path, lang):
     görünüyordu. Metin efsanede ÜRETİLMEZ; sözlükten gelir, o yüzden iki
     dilde de sınanır.
     """
+    # V306/HİBRİT-ÇAPRAZ kalem 3 — FİKSTÜR DAYANAĞI YENİDEN ÖLÇÜLDÜ.
+    # Taban 700a67586: varsayılan hibritte dört kod HÂLÂ üretiliyor, ama
+    # v3.0.1 H-termal'den beri kamara bölgeleri (yakıt bloğu + HRMA'nın
+    # boyutlandırdığı astar) kasayı koruduğu için çıplak cidar kayıtları
+    # ``severity: info`` + ``superseded_by: chamber_wall_zones`` +
+    # ``bare_wall_severity: critical`` ile yayımlanıyor — fiziksel olarak
+    # DOĞRU (hüküm bölgelere geçti, sayı kalır). Kopan efsaneydi: bu
+    # kayıtları okumuyor, "KRİTİK wall_temperature_unphysical = true" diye
+    # HAM ALAN ADI basıyordu (ölçüldü, iki dilde). Ürün onarıldı
+    # (motor_viz_deck.js); bekçi iki yolu da sınar:
+    #   (a) gerçek koşum (bölgeler korur): çıplak cidar başlığı + dört
+    #       hüküm metni + bölge cümlesi; KRİTİK öneki ve ham ad YOK;
+    #   (b) aynı kayıtlar koruma olmadan (kritik): KRİTİK öneki + dört metin.
     motor = hibrit_sonuc['motor']
     ht = motor.get('heat_transfer_analysis') or {}
     gas = ht.get('gas_side_analysis') or {}
     assert gas.get('wall_temperature_unphysical') is True, (
         'fikstür dayanağı düştü: varsayılan hibrit koşumu artık fizik-dışı '
         'cidar sıcaklığı üretmiyor — bu bekçi yeniden ölçülmeli')
+    assert (motor.get('chamber_wall_zones') or {}).get(
+        'all_zones_protected') is True
     kodlar = set()
     for blok in ('gas_side_analysis', 'safety_analysis', 'wall_analysis'):
         for w in (ht.get(blok) or {}).get('warnings') or []:
-            if isinstance(w, dict) and str(w.get('severity', '')).lower() == 'critical':
+            if (isinstance(w, dict) and w.get('superseded_by')
+                    == 'chamber_wall_zones'
+                    and w.get('bare_wall_severity') == 'critical'
+                    and str(w.get('severity', '')).lower() == 'info'):
                 kodlar.add(w.get('code'))
     assert set(KRITIK_TERMAL_KODLAR) <= kodlar, (
-        'fikstür dayanağı düştü: dört kritik koddan bazıları artık '
+        'fikstür dayanağı düştü: dört çıplak cidar kodundan bazıları artık '
         'üretilmiyor (%r)' % sorted(kodlar))
 
     sozluk = _i18n_sozlugu(lang)
@@ -676,10 +694,32 @@ def test_b1_efsane_dort_kritigi_iki_dilde_basiyor(hibrit_sonuc, tmp_path, lang):
     assert out['created'], 'güverte kurulmadı'
     assert out['clicked'], 'ısı haritası düğmesi kablolanmamış'
     assert out['verdictDisplay'] == 'block', (
-        'kritik hüküm varken hüküm satırı gizli: %r' % out['verdictDisplay'])
+        'çıplak cidar hükmü varken satır gizli: %r' % out['verdictDisplay'])
     basilan = _metin(out['verdictHtml'])
+    assert sozluk['viz.heat.bareWallSuperseded'] in basilan, basilan
+    assert sozluk['viz.heat.bareWallSupersededBy'] in basilan, basilan
+    assert sozluk['app.warn.critical'] not in basilan, (
+        'bölgelerin koruduğu kasada KRİTİK öneki basılıyor: %s' % basilan)
+    assert 'wall_temperature_unphysical' not in basilan, (
+        'efsane HAM ALAN ADI basıyor: %s' % basilan)
+    _dort_hukum_basildi(sozluk, basilan, lang)
+
+    # (b) Koruma yok: aynı gerçek kayıtlar kritik önemle.
+    kritik = json.loads(json.dumps(motor))
+    for blok in ('gas_side_analysis', 'safety_analysis', 'wall_analysis'):
+        for w in ((kritik['heat_transfer_analysis'].get(blok) or {})
+                  .get('warnings') or []):
+            if isinstance(w, dict) and w.pop('superseded_by', None):
+                w['severity'] = w.pop('bare_wall_severity')
+    out = _guverte_kos(tmp_path, kritik, i18n=sozluk, ad='b1k_' + lang)
+    basilan = _metin(out['verdictHtml'])
+    assert out['verdictDisplay'] == 'block'
     assert sozluk['app.warn.critical'] in basilan, (
         '%s efsanesi KRİTİK önekini basmıyor: %s' % (lang, basilan))
+    _dort_hukum_basildi(sozluk, basilan, lang)
+
+
+def _dort_hukum_basildi(sozluk, basilan, lang):
     for kod in KRITIK_TERMAL_KODLAR:
         sablon = sozluk.get(kod)
         assert sablon, 'i18n_common.js %s bloğunda %s yok' % (lang, kod)
@@ -861,9 +901,14 @@ def liquid_kaynak():
     # geçerlilik rozetini ortak sözlük yardımcısı ``ortakMetin`` (ÖH D37 A1b,
     # liquid.html) ile yazıyor; söküm listesi bayattı → node
     # ``ortakMetin is not defined``. Kusur ÜRÜNDE değil SÖKÜMDE.
+    # 3.0.6 ana model (9 Kas) — DÖRDÜNCÜ KEZ: V306/SIVI-MODEL kart
+    # üreticisinin enjektör satırını ``liquidWarnText`` ile çevirdi
+    # (liquid.html, Excel ile aynı çevirici); söküm listesi bayattı → node
+    # ``liquidWarnText is not defined`` (9 Kas tam süpürmesi c2/c3).
     return '\n'.join([_sablon_fonksiyonu(html, 'numTxt'),
                       _sablon_fonksiyonu(html, 'hrmaFmt'),
                       _sablon_fonksiyonu(html, 'ortakMetin'),
+                      _sablon_fonksiyonu(html, 'liquidWarnText'),
                       _sablon_fonksiyonu(html, 'liquidOverallLengthMm'),
                       _sablon_fonksiyonu(html, 'displayEngineeringCards')])
 
@@ -918,19 +963,35 @@ def test_c1_kart_cozucunun_sicakligini_basiyor_kullanicinin_hedefini_degil(
         'HEDEFİN EKOSU GERİ DÖNDÜ: "Wall Temperature" satırı çözücünün '
         '%s K değerini basmıyor, ekranda %r var' % (round(cozulmus), cidar))
 
+    # V306/DİL-SIVI (9 Kas ek 2) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: kaynak
+    # kullanıcıya İNSAN adıyla basılır ("1D regenerative station march");
+    # çözücü alanının makine adı (künye) ekranda değil, satırın
+    # ``data-liq-source`` özniteliğinde durur (ORTAK: ham alan adı
+    # kullanıcı metninde yok). Kaynak yine adlandırılır ve izlenebilir.
     kaynak_satiri = _metin(kart)
-    assert 'thermal_protection.station_march' in kaynak_satiri, (
+    duz = _duzle(kart)
+    assert '1D regenerative station march' in kaynak_satiri, (
         'çözülmüş sıcaklığın KAYNAĞI basılmıyor: %s' % kaynak_satiri[:400])
+    assert 'data-liq-source="thermal_protection.station_march"' in duz, (
+        'kaynağın künyesi (çözücü alanı) satırda yok')
+    assert 'thermal_protection.station_march' not in kaynak_satiri, (
+        'ham alan adı ekranda: %s' % kaynak_satiri[:400])
     if isinstance(march.get('material_allowable_K'), (int, float)):
-        assert 'station_march.material_allowable_K' in kaynak_satiri, (
-            'malzeme sınırı alan adıyla basılmıyor')
+        assert 'material allowable temperature = %d K' % round(
+            march['material_allowable_K']) in kaynak_satiri, (
+            'malzeme sınırı adıyla basılmıyor')
+        assert 'data-liq-source="station_march.material_allowable_K"' in duz
+        assert 'station_march.material_allowable_K' not in kaynak_satiri
 
     kullanici = _satir(kart, 'Maximum Wall Temperature')
     assert kullanici == '%d K' % round(hedef), (
         'kullanıcının hedefi kendi satırında basılmıyor: %r' % kullanici)
-    assert tp.get('wall_temperature_source') in kaynak_satiri, (
-        'kullanıcının hedefinin kaynağı (%r) basılmıyor'
+    assert 'data-liq-source="%s"' % tp.get('wall_temperature_source') in duz, (
+        'kullanıcının hedefinin kaynağı (%r) künyede yok'
         % tp.get('wall_temperature_source'))
+    if tp.get('wall_temperature_source') == 'user input (max wall temperature)':
+        assert 'your input (Maximum Wall Temperature)' in kaynak_satiri, (
+            'kullanıcının hedefinin kaynağı form alanının adıyla basılmıyor')
 
 
 @node_gerekli
@@ -956,15 +1017,58 @@ def test_c2_kritik_hukum_karta_iniyor(sivi_sonuc_kritik, liquid_kaynak,
     kart = _kart_kos(tmp_path, liquid_kaynak, sivi_sonuc, 'c2')
     duz_kart = _duzle(kart)
     goruntu = _metin(kart)
+    # V306/SIVI-MODEL kalem 6 (4 Kas) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI (ana
+    # model 9 Kas): çözücü kritik hükümleri ``station_march
+    # .promoted_warnings`` içinde KODLU uyarıya yükseltiyor ({text, code,
+    # params}); kart o hükmü uyarı listesiyle aynı kodlu cümleyle
+    # (``liquidWarnText`` → sözlük, EN + TR, sayılar params'tan) basıyor.
+    # Node düzeneğinde sözlük yüklü değil: kodlu hüküm kartta KODUYLA
+    # görünür. Bekçi iki şeyi kilitler: (1) her kodlu hüküm kartta, ciddiyet
+    # imiyle; (2) kodun iki dilde sözlük karşılığı var ve params'ın bütün
+    # adlarını taşıyor (tarayıcıda cümle sayılarıyla iner). Kodsuz hükümler
+    # eskisi gibi AYNEN iner. Bu dosyadaki ReferenceError (liquidWarnText
+    # sökümü) 4 Kas'tan 9 Kas'a kadar bu iddiayı gizliyordu.
+    kodlu = {str(k.get('text')).strip(): k
+             for k in (march.get('promoted_warnings') or [])
+             if isinstance(k, dict) and k.get('code') and k.get('text')}
+    sozluk = (REPO_ROOT / 'hrma/static/js/i18n_common.js').read_text(
+        encoding='utf-8')
     for w in uyarilar:
+        es = kodlu.get(w)
+        if es is not None:
+            assert es['code'] in duz_kart, (
+                'kodlu hüküm karta inmiyor: %s (%r)' % (es['code'], w))
+            tanimlar = re.findall(
+                r"'%s':\s*'((?:[^'\\]|\\.)*)'" % re.escape(es['code']), sozluk)
+            assert len(tanimlar) == 2, (
+                'kodun EN + TR sözlük karşılığı yok: %s (%d tanım)'
+                % (es['code'], len(tanimlar)))
+            for metin in tanimlar:
+                for ad in re.findall(r'\{(\w+)\}', metin):
+                    assert ad in (es.get('params') or {}), (
+                        'sözlük cümlesi {%s} istiyor, hüküm taşımıyor: %s'
+                        % (ad, es['code']))
+            continue
         # ÖH D15 birleştirme (1 Eyl 2026): karşılaştırma YALNIZ ``&``i geri
         # çeviriyordu. Kardeş kulvarın eklediği model-zarfı notu metninde
         # ``t_w << r_wall`` geçiyor; kart onu doğru biçimde ``&lt;&lt;``
         # diye kaçışlıyor ve bekçi "karta inmiyor" sanıyordu — ölçüldü:
         # ``html.escape(w) in kart`` True. Kusur ÜRÜNDE değil bu
         # karşılaştırmadaydı. Artık kaçışın tamamı çözülüyor.
-        assert (html_mod.escape(w, quote=False) in duz_kart
-                or w in html_mod.unescape(goruntu)), (
+        # V306/DİL-SIVI (9 Kas ek 2, "KRİTİK KRİTİK:") — BEKLENTİ DEĞİŞTİ,
+        # İDDİA AYNI: hükmün kendi ciddiyet öneki ("CRITICAL:") etikete
+        # taşınır, cümle öneksiz devam eder (önek iki kez basılmaz). Cümlenin
+        # geri kalanı AYNEN iner, etiket önekin kendisini taşır.
+        onek = re.match(r'^\s*(CRITICAL|UNSAFE)\s*:\s*', w, re.I)
+        if onek:
+            govde = w[onek.end():]
+            assert ('<span class="warning-tag">%s</span>' % onek.group(1)) in duz_kart, (
+                'ciddiyet öneki etikette değil: %r' % w)
+            assert ('%s %s' % (onek.group(1), onek.group(1))) not in html_mod.unescape(goruntu)
+        else:
+            govde = w
+        assert (html_mod.escape(govde, quote=False) in duz_kart
+                or govde in html_mod.unescape(goruntu)), (
             'çözücünün hükmü karta inmiyor: %r' % w)
     assert 'warning-tag' in duz_kart, (
         'kritik hüküm ciddiyet imi olmadan basılıyor')
@@ -988,6 +1092,17 @@ def test_c3_cozulmus_sicaklik_yoksa_sayi_uydurulmuyor(sivi_sonuc,
     if isinstance(cs, dict):
         cs.pop('wall_temperature_source', None)
         cs.pop('wall_temperature_hot', None)
+        # V306/SIVI-MODEL kalem 5 (4 Kas) — KIRPMA ÜRÜNÜN GERÇEK "marş
+        # koşmadı" hâline getirildi (ana model 9 Kas): çözücü artık marşın
+        # tepe sıcaklığını ``cooling_system.wall_temperature_solved_K``
+        # aynasında da yayımlıyor; marş yoksa o alanı None, kaynağını None,
+        # durumunu NOT_EVALUATED yazar (liquid_rocket_engine.py
+        # ``wall_temperature_solved_*``). Eski kırpma aynayı bırakıyordu ve
+        # kart oradan 615 K basıyordu: kusur ÜRÜNDE değil fikstürdeydi.
+        cs['wall_temperature_solved_K'] = None
+        cs['wall_temperature_solved_cold_K'] = None
+        cs['wall_temperature_solved_source'] = None
+        cs['wall_temperature_solved_status'] = 'NOT_EVALUATED'
 
     kart = _kart_kos(tmp_path, liquid_kaynak, kirpik, 'c3')
     assert kart, 'Termal Koruma kartı hiç basılmıyor'
@@ -1358,37 +1473,53 @@ def test_e1_iki_alan_ayri_yayimlaniyor_ve_kunye_keskin_olcutu_adlandiriyor(
         'kapsamda yeşil sayılmasın' % gorulen)
 
 
-def test_e2_bayrak_acik_ama_sayi_hedefi_geri_okumuyor(hibrit_sonuc):
+def test_e2_bayrak_acik_ama_sayi_hedefi_geri_okumuyor(client, hibrit_sonuc):
     """P14H1-C4 — tanım ÇÜRÜTÜLEBİLİR ve gerçek koşumda çürümüyor.
 
-    Künye "bayrak True iken sayı hedefin altına düşebilir" diyor. Bu bir
-    süsleme değilse gerçek bir koşumda görünmelidir: varsayılan hibritte
-    ``design_mode='size'`` (cidarı HRMA seçti) iken yayımlanan katsayı
-    hedefin ALTINDA — çünkü boyutlandırma yalnız BASINÇ hoop gerilmesini
-    hedefe oturtuyor, termal terim sayıyı aşağı çekiyor. Bu koşumda
-    ``..._is_tautological`` ile ``..._reads_back_target`` AYRIŞMALIDIR.
+    Künye "bayrak True iken sayı hedefi geri okumayabilir" diyor; bu bir
+    süsleme değilse gerçek bir koşumda iki alan AYRIŞMALIDIR.
+
+    V306/HİBRİT-ÇAPRAZ (kalem 2) — FİKSTÜR YENİDEN ÖLÇÜLDÜ. Eski dayanak
+    (varsayılan hibritte boyutlanan KAMARA katsayısı termal terimle hedefin
+    altına düşer, 1,7173 ⟷ 4,0) v3.0.1 H-termal'den beri yok: bölgeler kasayı
+    koruduğu için kasa sıcaklığı beyanlıdır ve katsayı hedef × imalat payı
+    (taban 700a67586: 4,8 ⟷ 4,0). Ayrışan gerçek koşum artık lüle gövdesidir:
+    HRMA boyutlandırır (bayrak True), SF 2'de gerilme kuralı 0,666 mm ister
+    ama 1 mm imalat tabanı yönetir; kazanılmış katsayı hedefin ÜSTÜNDE ve
+    hedefle ölçeklenmez — geri okuma DEĞİL (keskin ölçüt False).
     """
     ca = (((hibrit_sonuc.get('motor') or {}).get('structural_analysis') or {})
           .get('chamber_analysis') or {})
-    assert ca.get('design_mode') == 'size', (
-        'fikstür dayanağı düştü: varsayılan hibrit artık cidarı kendi '
-        'boyutlandırmıyor (%r)' % ca.get('design_mode'))
-    assert ca.get('safety_factor_is_tautological') is True, (
-        'boyutlandırılan kesitte bayrak açık değil: %r'
-        % ca.get('safety_factor_is_tautological'))
-    hedef = float(ca['design_safety_factor_target'])
-    sayi = float(ca['hoop_safety_factor'])
-    assert sayi < hedef, (
-        'fikstür dayanağı düştü: boyutlandırılan kesitin katsayısı artık '
-        'hedefin altına düşmüyor (%s ⟷ %s) — künyenin çürütülebilirliği '
-        'başka bir koşumla ölçülmeli' % (sayi, hedef))
-    assert ca.get('safety_factor_reads_back_target') is False, (
-        'KÜNYE İLE GERÇEK AYRIŞTI: sayı (%s) hedefin (%s) ALTINDA ama '
-        'reads_back_target True' % (sayi, hedef))
-    assert (ca['safety_factor_is_tautological']
-            is not ca['safety_factor_reads_back_target']), (
-        'iki alan bu koşumda ayrışmalıydı; künyenin tanımı ölçülemez hâle '
-        'geldi')
+    assert ca.get('design_mode') == 'size'
+    assert ca.get('safety_factor_is_tautological') is True
+    # Kamara: gerilme kuralı yönetir, sayı hedef × pay (geri okuma).
+    assert ca.get('governing_condition') == 'stress'
+    assert float(ca['hoop_safety_factor']) >= float(
+        ca['design_safety_factor_target'])
+    assert ca.get('safety_factor_reads_back_target') is True
+
+    r = client.post('/calculate', json=dict(HIBRIT_YUKU, safety_factor=2.0),
+                    headers=HEADERS)
+    assert r.status_code == 200, r.get_data(as_text=True)[:400]
+    sa = r.get_json()['motor']['structural_analysis']
+    na = sa['nozzle_analysis']
+    assert na.get('safety_factor_is_tautological') is True, (
+        'HRMA\'nın boyutlandırdığı lüle gövdesi kullanıcı doğrulaması sayılıyor')
+    assert na.get('governing_condition') == 'minimum_thickness', (
+        'fikstür dayanağı düştü: SF 2\'de lüle gövdesi artık imalat tabanına '
+        'takılmıyor (%r)' % na.get('governing_condition'))
+    hedef = float(na['design_safety_factor_target'])
+    sayi = float(na['earned_safety_factor'])
+    assert hedef == 2.0 and sayi > hedef * 1.2, (sayi, hedef)
+    assert na.get('safety_factor_reads_back_target') is False, (
+        'KÜNYE İLE GERÇEK AYRIŞTI: taban yönetiyor ama reads_back_target True')
+    assert (na['safety_factor_is_tautological']
+            is not na['safety_factor_reads_back_target'])
+    # Hüküm havuzu: ne geri okuma ne kullanıcı ölçümü — ayrı kovada, adıyla.
+    sfa = sa['safety_analysis']
+    assert 'nozzle' in sfa['stations_governed_by_minimum_thickness']
+    assert 'nozzle' not in sfa['stations_reading_back_target']
+    assert 'nozzle' not in sfa['verdict_scope']
 
 
 def test_e3_keskin_olcut_bayragin_takma_adi_degil(client, hibrit_sonuc):

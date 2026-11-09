@@ -507,8 +507,8 @@ def normalise_export_geometry(motor_results):
                             'neither the metre nor the millimetre reading '
                             'falls inside the validated band ')
                         + (f'[{band[0]:g}; {band[1]:g}] m' if band else '')
-                        + '. Declare length_units to resolve it; no value is '
-                          'invented.')
+                        + '. Declare length_units to resolve it; no substitute '
+                          'value is used.')
             continue
         fields[key] = source
         if source in ('mm', 'declared:mm'):

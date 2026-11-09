@@ -462,11 +462,16 @@ def _fea_kos(tmp_path, yuk):
 
 
 #: Panelin ``grainParamsFromResults`` deseniyle kurulan tane uç gövdesi.
+# V306/TANE NR-16: bekçinin zemini basınç-yalnız yükle ölçülmüştü (marj
+# yeşil + kabul ölçütü yakınsamıyor). Uç artık yerleşim verilmezse gövdeye
+# yapıştırılmış tanenin ısıl yükünü de taşır; basınç-yalnız yük kümesi
+# kartuş yüklü tanenin kümesidir (sonuç bit-aynı, zemin korunur).
 GRAIN_GOVDESI = {
     'grain_type': 'star', 'propellant_type': 'apcp',
     'outer_diameter_mm': 98.0, 'core_diameter_mm': 32.0,
     'chamber_pressure_bar': 45.0, 'grain_length_mm': 420.0,
     'star_points': 6, 'star_radius': 12.5,
+    'grain_support': 'cartridge_loaded',
 }
 
 
@@ -484,8 +489,12 @@ class TestP11B3_02OturmamisOlcuteYesilYok:
 
     def test_zemin_kabul_olcutu_hala_yakinsamiyor(self, grain_yaniti):
         """Bekçinin ZEMİNİ: uç bu kesitte kabul ölçütünü YAKINSAMAMIŞ
-        ilan ediyor ve marj YEŞİL eşiğin üstünde. İkisi birden doğru
-        değilse kalemin ölçümü bayat."""
+        ilan ediyor.
+
+        V306/KATI-KALAN (kalem 3) — BEKLENTİ DEĞİŞTİ: oturmamış kabul
+        büyüklüğünden pay SAYISI artık yayımlanmıyor (null + adlı neden;
+        keskin iç köşe tekilliği). Eski zemin "marj yeşil eşikte bir sayı"
+        idi; kural o sayının kendisini kaldırdı."""
         fea = grain_yaniti['fea']
         acc = (fea.get('convergence') or {}).get('acceptance')
         assert isinstance(acc, dict), (
@@ -494,30 +503,46 @@ class TestP11B3_02OturmamisOlcuteYesilYok:
             f'kabul ölçütü artık yakınsıyor ({acc!r}) — ölçüm bayat')
         assert acc['rel_change'] > acc['tol'], (
             'değişim tolerans içinde — kusurun zemini kalktı')
-        marj = (fea.get('bore') or {}).get('strain_margin')
-        assert isinstance(marj, float) and marj >= 2.0, (
-            f'marj {marj!r} artık yeşil eşikte değil — ölçüm bayat')
+        bore = fea.get('bore') or {}
+        assert bore.get('strain_margin') is None, (
+            'oturmamış kabul büyüklüğünden pay sayısı yayımlanıyor')
+        assert (bore.get('strain_margin_withheld') or {}).get(
+            'reason_code') == 'acceptance_not_converged_sharp_corner'
 
     @node_gerekli
     def test_merkez_satiri_yesil_basmaz(self, tmp_path, grain_yaniti):
         """ÖLÇÜLEN KUSUR (once_p11b3_02.json): kabul ölçütü toleransın
         34,49 KATI oynarken Merkez satır hükmü {kind:'ok'} YEŞİL
         "STRAIN MARGIN 41.60" basıyor, yakınsamama satırda TEK KELİMEYLE
-        geçmiyordu."""
+        geçmiyordu.
+
+        V306/KATI-KALAN (kalem 3): satır artık sayı da basmaz; SARI satır
+        payın neden yayımlanmadığını adıyla söyler."""
         r = _fea_kos(tmp_path, {'grainYanit': grain_yaniti})
         v = r['grainVerdict']
         assert v is not None, 'hüküm hiç üretilmiyor — bekçi boşa dönerdi'
-        assert r['strainMarginKind'] == 'ok', (
-            'marj tek başına artık yeşil değil — kusurun zemini kalktı')
-        assert v['kind'] != 'ok', (
-            f"kabul ölçütü yakınsamadığı hâlde Merkez satırı {v['kind']!r} "
-            '(YEŞİL) hüküm basıyor')
+        assert v['kind'] == 'warn', (
+            f"kabul ölçütü yakınsamadığı hâlde Merkez satırı {v['kind']!r}")
+        assert v['key'] == 'panel.grain.verdictMarginUnconvergedCorner'
+        assert not (v.get('params') or {}).get('v'), (
+            'oturmamış ölçütten pay sayısı satıra yazılıyor')
+
+    @node_gerekli
+    def test_eski_govde_sayi_tasirsa_satir_kazanilmadi_der(
+            self, tmp_path, grain_yaniti):
+        """Geriye uyum (V306/KATI-KALAN öncesi yanıt biçimi): pay sayısı
+        gelirse ve ölçüt oturmadıysa satır YEŞİL basmaz, ölçütü adıyla
+        söyler (P11B3-02 kuralı)."""
+        eski = copy.deepcopy(grain_yaniti)
+        eski['fea']['bore']['strain_margin'] = 41.6
+        eski['fea']['bore'].pop('strain_margin_withheld', None)
+        r = _fea_kos(tmp_path, {'grainYanit': eski})
+        v = r['grainVerdict']
+        assert v['kind'] == 'warn'
         acc = grain_yaniti['fea']['convergence']['acceptance']
         p = v.get('params') or {}
-        assert p.get('q') == acc['quantity'], (
-            'hüküm hangi ölçütün oturmadığını adıyla söylemiyor')
-        assert p.get('pct') == '%.2f%%' % (100 * acc['rel_change']), (
-            f"hükümdeki değişim {p.get('pct')!r} ucun sayısından türemiyor")
+        assert p.get('q') == acc['quantity']
+        assert p.get('pct') == '%.2f%%' % (100 * acc['rel_change'])
         assert p.get('tol') == '%.2f%%' % (100 * acc['tol'])
 
     @node_gerekli
@@ -536,6 +561,10 @@ class TestP11B3_02OturmamisOlcuteYesilYok:
         ve eski türüyle basılır."""
         oturmus = copy.deepcopy(grain_yaniti)
         oturmus['fea']['convergence']['acceptance']['converged'] = True
+        # V306/KATI-KALAN (kalem 3): oturan ölçütte uç pay sayısını
+        # yayımlar ve geri çekme kaydı taşımaz (sözleşme alanları).
+        oturmus['fea']['bore']['strain_margin'] = 41.6
+        oturmus['fea']['bore']['strain_margin_withheld'] = None
         r = _fea_kos(tmp_path, {'grainYanit': oturmus})
         v = r['grainVerdict']
         assert v['kind'] == 'ok'

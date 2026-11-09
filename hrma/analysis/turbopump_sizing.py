@@ -1179,6 +1179,6 @@ def size_turbopump(*,
         result['turbine_basis'] = (
             'NOT_SIZED: no turbine inputs supplied (need '
             'turbine_ideal_specific_work_J_kg, or turbine_power_W + '
-            'turbine_mass_flow_kg_s + turbine_efficiency). Nothing is '
-            'invented in its place.')
+            'turbine_mass_flow_kg_s + turbine_efficiency). No substitute '
+            'value is used.')
     return result

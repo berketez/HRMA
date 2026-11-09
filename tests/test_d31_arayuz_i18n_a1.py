@@ -150,6 +150,18 @@ class TestOHD3010DinamikOnekAilesi:
             'araç kaynağına uydurma yedek geri geldi (C-25: araç yoksa köken '
             'yazılmaz)')
         sayfa = set(re.findall(r"\bsource:\s*'(\w+)'", html))
+        # V306/UÇUŞ-2 (3 Kas) — BEKÇİ ÇEVİRİSİ. V306/UÇUŞ NR-12 (824ba17f6)
+        # örnek aracı sayfadaki literal nesneden TEK TANIMA taşıdı
+        # (``flight_vehicle.EXAMPLE_VEHICLE``; şablon onu
+        # ``<script id="ls-example-vehicle">{{ example_vehicle | tojson }}``
+        # ile gömer). Sayfanın kurduğu kaynak değeri artık o tanımın
+        # ``source`` alanıdır; literal ``source: 'example'`` aranırsa koşulan
+        # değer görülmez. Değer tanımdan okunur, gömülme ayrıca denetlenir.
+        assert re.search(r'id="ls-example-vehicle">\{\{\s*example_vehicle'
+                         r'\s*\|\s*tojson\s*\}\}', html), (
+            'launch_site.html örnek aracı tek tanımdan gömmüyor')
+        from hrma.analysis.flight_vehicle import EXAMPLE_VEHICLE
+        sayfa.add(EXAMPLE_VEHICLE['source'])
         assert 'example' in sayfa, (
             'launch_site.html örnek aracı source alanıyla kurulmuyor')
         kosulan = sunucu | sayfa

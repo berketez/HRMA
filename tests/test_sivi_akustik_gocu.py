@@ -356,23 +356,78 @@ D18_L_STAR_CR_KAYMASI = {
         'jet diameter is proportional to d_t'),
 }
 
-#: D18 fizik-a2 SONRASI (bugünkü) çapalar — ürün kodunun çıktısından alındı.
+# ===========================================================================
+# SEKİZİNCİ SINIF (4 Kas 2026, V306/SIVI-DEFTER K5) — AÇIK ÇEVRİM DEBİ
+# DEFTERİ: BOĞAZ ANA ODA DEBİSİYLE.
+#
+# Üç vaka da çevrim vermeden kurulur, yani varsayılan gaz jeneratörü
+# çevrimiyle koşar. K5 defteri bağlandı (ana-model/K5_KARAR.md): itki MOTOR
+# itkisi, boğaz yalnız ANA ODA debisini geçirir (türbin debisi düşülür;
+# ölçülen ana oda payı: ch4 0,98685, rp1 çarpışmalı 0,98236, rp1 pintle
+# 0,99367). Kayan TEK yukarı akış büyüklüğü boğaz debisidir; a, γ, T_c, c*,
+# ρ_gaz, v_jet BİT-AYNI (aşağıdaki kimlik testleri bunu aynı koşumun
+# sayılarıyla gösterir: f_1L = a/(2L), f_1T = j'·a/(πD), τ ∝ d_jet ∝ d_t).
+# Önceki çapalar (taban dcf589ea9, D18 + L-C sonrası):
+#   1L  ch4 2310,006598968707 · rp1 3261,268399925099 · pintle 3044,572244560753
+#   1T  ch4 6133,659133031688 · rp1 10850,956992051631 · pintle 9599,291680802364
+#   τ   ch4 18,29333191757428 · rp1 3,176203003874207 · pintle(L-C) 3,191689424252705
+# Yeni çapalar ürün kodunun çıktısından ölçüldü (iki koşum bit-aynı).
+# Pintle'ın D18 (L-C öncesi) tarihsel τ'su yalnız L-C oranı kimliğinde
+# kullanılır; aynı K5 boğaz kayması onu da taşır: 9,250394780734892 ×
+# (3,188261967061101 / 3,191689424252705) — iki ölçülmüş sayının oranı.
+# ===========================================================================
+
+#: K5 boğaz kaymasının TAMSAYI yan etkisi: ch4 eş eksenli enjektörde
+#: boğaz −%0,24 küçülünce sığan eleman sayısı 108 -> 107 oldu (ölçüldü:
+#: jet çapı oranı / boğaz oranı = sqrt(108/107) bağıl 1e-9 içinde). Öteki
+#: iki vakada eleman sayısı değişmedi; jet çapı yine d_t ile orantılı.
+K5_ENJEKTOR_ELEMAN_SAYISI = {'ch4_lox_coaxial': (108, 107)}
+
+# ===========================================================================
+# DOKUZUNCU SINIF (9 Kas 2026, V306/SIVI-CEKET-B kalem 4; kayma SIVI-CEKET
+# birleşmesinde, 2bc09c130 — K5_KARAR EK4: ceket ΔP'si TEK sayı).
+#
+# Rejeneratif iki vakada (rp1 çarpışmalı, ch4 eş eksenli) besleme
+# bütçesinin ceket kalemi toplu Bartz kestiriminden istasyon marşının
+# ΔP'sine geçti (rp1 1,498040678808484 -> 1,6363042962497465 bar; ch4
+# 3,187328960073609 -> 3,2754141008701665 bar, süperkritik sabit nokta).
+# Gaz jeneratörü çevriminde pompa gücü, dolayısıyla türbin debisi büyüdü;
+# K5 defteri (sekizinci sınıf) boğazı ANA ODA debisiyle boyutladığı için
+# ana oda payı düştü (rp1 0,9823580178770115 -> 0,9823505176479095; ch4
+# 0,9868509868930117 -> 0,9868432683268816) ve boğaz küçüldü (d_t rp1
+# 28,236244807 -> 28,236199746 mm; ch4 59,915831467 -> 59,915743408 mm).
+# ATIF ÖLÇÜLDÜ (sivi-ceket-b RAPOR kalem 4; docs'suz arşiv ağaçları, aynı
+# kurucu): e61afb798 (SIVI-CEKET öncesi) eski çapalarla BİT-ÖZDEŞ,
+# 2bc09c130 ve bugünkü ağaç aşağıdaki yeni çapalarla bit-özdeş. Ses hızı
+# a, γ, T_c ve c* iki ağaçta BİT-AYNI: kayan tek yukarı akış büyüklüğü
+# boğaz debisidir; 1L = a/(2L), 1T = j'·a/(πD), τ ∝ d_jet ∝ d_t kimlikleri
+# aynı koşumun sayılarıyla aşağıda sınanır. Ablatif pintle vakası ceketsiz
+# olduğu için bu sınıfın DIŞINDADIR (çapaları değişmedi).
+# Eski (sekizinci sınıf) çapalar, tarihsel:
+#   1L  ch4 2312,1754814011465 · rp1 3266,602318969789
+#   1T  ch4 6145,737076285359 · rp1 10881,834435233583
+#   τ   ch4 18,33315003329112 · rp1 3,164468830994622
+# ===========================================================================
+
+#: D18 fizik-a2 + V306/SIVI-DEFTER K5 + SIVI-CEKET EK4 SONRASI (bugünkü)
+#: çapalar — ürün kodunun çıktısından alındı.
 YENI_1L = {
-    'ch4_lox_coaxial': 2310.006598968707,
-    'rp1_lox_impinging': 3261.268399925099,
-    'rp1_lox_pintle': 3044.572244560753,
+    'ch4_lox_coaxial': 2312.176769343345,
+    'rp1_lox_impinging': 3266.6046213656446,
+    'rp1_lox_pintle': 3045.9761731310505,
 }
 
-#: 1T ve tepki süresinin D18 sonrası çapaları (aynı koşum).
+#: 1T ve tepki süresinin D18 + K5 + EK4 sonrası çapaları (aynı koşum).
 YENI_1T = {
-    'ch4_lox_coaxial': 6133.659133031688,
-    'rp1_lox_impinging': 10850.956992051631,
-    'rp1_lox_pintle': 9599.291680802364,
+    'ch4_lox_coaxial': 6145.744249505407,
+    'rp1_lox_impinging': 10881.847766406603,
+    'rp1_lox_pintle': 9607.267228563604,
 }
 YENI_TAU = {
-    'ch4_lox_coaxial': 18.29333191757428,
-    'rp1_lox_impinging': 3.176203003874207,
-    'rp1_lox_pintle': 9.250394780734892,
+    'ch4_lox_coaxial': 18.33312308892145,
+    'rp1_lox_impinging': 3.1644637809990432,
+    'rp1_lox_pintle': (9.250394780734892
+                       * (3.188261967061101 / 3.191689424252705)),
 }
 
 # ===========================================================================
@@ -417,7 +472,8 @@ LC_PINTLE_VAKALARI = ('rp1_lox_pintle',)
 #: L-C SONRASI pintle çapası (ölçüldü: 8ee59c845, 49f6a86eb ve ae1dae910'da
 #: bit-aynı; ürün kodunun çıktısından alındı).
 YENI_TAU_LC = {
-    'rp1_lox_pintle': 3.191689424252705,
+    # V306/SIVI-DEFTER K5 (sekizinci sınıf): 3,191689424252705 -> ölçülen
+    'rp1_lox_pintle': 3.188261967061101,
 }
 
 #: Yaprakları üreten ara büyüklükler (aynı koşum, türetme için).
@@ -529,7 +585,11 @@ def ara_buyuklukler(kosular):
             'gas_constant': float(geo['gas_constant']),
             'chamber_temperature': t_c,
             'c_star': float(eng.c_star),
-            'mdot_total': float(eng.mdot_total),
+            # V306/SIVI-DEFTER (K5): boğazı boyutlayan debi ANA ODA
+            # debisidir (açık çevrimde türbin debisi düşülür; kapalı
+            # çevrimde toplamla aynı sayı). A_t = ṁ·c*/(P_c·C_D) kimliği
+            # bu debiyle kurulur.
+            'mdot_total': float(eng.mdot_main_chamber),
             'jet_diameter_mm': float(ox['orifice_d_mm']),
             # YEDİNCİ SINIF (L-C SV-07): τ'nun uzunluk ölçeği. Pintle'da
             # kanon geometrinin anülüs boşluğu t, diğer tiplerde jet çapı.
@@ -851,7 +911,9 @@ def test_cea_eps_kaymasi_yapraklari_donduruldu(yeni_merkez, ara_buyuklukler,
         f'τ oranı {tau_orani!r}, d_jet/v_jet/sqrt(ρ_gaz) çarpanlarından '
         f'türeyen {beklenen_tau_orani!r} ile tutmuyor — süre artık '
         'atomizasyon çözümünün bu üç çarpanından gelmiyor')
-    assert jet_orani == pytest.approx(bogaz_orani, rel=1e-9), (
+    n_once, n_simdi = K5_ENJEKTOR_ELEMAN_SAYISI.get(ad, (1, 1))
+    assert jet_orani == pytest.approx(
+        bogaz_orani * math.sqrt(n_once / n_simdi), rel=1e-9), (
         f'jet çapı oranı {jet_orani!r}, boğaz çapı oranı {bogaz_orani!r} ile '
         'tutmuyor — enjektör jet çapı artık d_t ile orantılı değil, yani '
         'zincir B3-07\'den başka bir sebep de taşıyor')
