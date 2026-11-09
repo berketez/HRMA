@@ -40,8 +40,14 @@ def test_manuel_kurulum_yaniti_acilmadigini_soyler(monkeypatch, tmp_path):
     """start_install manuel dalı: başsız kipte opened=False, open_reason='headless'; started (teslim) True."""
     sahte = tmp_path / "HRMA-Setup-sahte.dmg"
     sahte.write_bytes(b"x" * 64)
-    with uc._download_lock:
-        uc._download.update(state="done", pct=100, path=str(sahte), error="")
+    # 3.0.6 ana model (9 Kas): indirme durumu modül genelidir. Eskiden
+    # ``uc._download.update(...)`` ile "done" yapılıp GERİ ALINMIYORDU; aynı
+    # süreçteki sonraki testler (test_v306_guncelleme_kilidi
+    # ::test_install_ucu_dili_alir ×5) sahte bir kurucu indirilmiş sanıp
+    # 'started' True alıyordu (tam süpürme 9 Kas, dilim 2; tek başına yeşil).
+    # monkeypatch test bitince modülün kendi sözlüğünü geri koyar.
+    monkeypatch.setattr(uc, "_download", {"state": "done", "pct": 100,
+                                          "path": str(sahte), "error": ""})
     from hrma.utils import self_install
     monkeypatch.setattr(self_install, "plan_install",
                         lambda path, installer_size=0: {"mode": "manual", "reason": "test"})

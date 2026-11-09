@@ -610,7 +610,19 @@ _SAYFA_ISLEVLERI = (
     'function displayDetailedAnalysis(results)', 'function displayPropellantTanks(tankData)',
     'function liquidTankMassFractionPct(tankData)', 'function _tankEsc(v)',
     'function tankKunye(alan, deger)', 'function tankKriyoSatiri(cs)',
-    'function tankMalzemeHucresi(st)', 'function _liquidExportStatus(text)',
+    'function tankMalzemeHucresi(st)',
+    # V306/SIVI-ONARIM kalem 1: V306/SIVI-KÜTLE (M-SIVI-4) tank kartının
+    # basınç sınıfı satırına bu yardımcıyı ekledi; ikiz onu almazsa
+    # displayPropellantTanks 'tankSinifNotu is not defined' der. Gerçek
+    # sayfada aynı <script> bloğunda üst düzeyde tanımlı (tarayıcı ölçümü:
+    # docs/scofield/raw/OH/V306/sivi-onarim/kalem1_tarayici.json).
+    'function tankSinifNotu(st)',
+    # V306/DİL-SIVI: SIVI-CEKET-A (3a502327a) displayResults'a ceket yayım
+    # kapısı yardımcılarını ekledi; ikiz onları almayınca 'liqGateFieldText
+    # is not defined' diyordu (tabanda kırmızı). Kapısız sonuçta '' döner.
+    'function liqJacketGate(results)', 'function liqJacketGateScope(results)',
+    'function liqGateReasonText(results)', 'function liqGateFieldText(results, yol)',
+    'function _liquidExportStatus(text)',
     'function liquidEngGateStatus(results)',
     # v3.0.1 K kulvarı (kaynak-cea, 5e6a70514): displayResults veri kaynağı
     # satırını bu yardımcıyla kurar; ikiz onu almazsa 'not defined' der

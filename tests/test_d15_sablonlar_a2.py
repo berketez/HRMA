@@ -247,9 +247,14 @@ def test_b2_07_kazanilmamis_onay_yesil_basilmaz(solid_src):
     # çeviri kanalı ekledi (``window.I18N.serverText``; tanınmazsa AYNEN). Sayfa
     # ikizi tarayıcıda her zaman var olan ``window`` nesnesini tanımlamıyordu;
     # boş bir pencere verilir — I18N yoksa cümle aynen basılır (ürünün yolu).
+    # V306 ana model (rc.1 CI dilim 8/10): DİL-KATI kap hükmünü sözlük
+    # karşılığıyla basar (``kapHukumMetni`` → ``ortakMetin``); ikiz bu iki
+    # yardımcıyı da taşır. İddia aynı: PASS taut iken yeşil basılmaz.
     parcalar = [
         "const T = (k, d) => d;",
         "const window = {};",
+        _fonksiyon_kaynagi(solid_src, 'ortakMetin'),
+        _fonksiyon_kaynagi(solid_src, 'kapHukumMetni'),
         _fonksiyon_kaynagi(solid_src, 'vesselVerdictHTML'),
     ]
     govde = """

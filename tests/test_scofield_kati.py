@@ -331,8 +331,13 @@ class TestF4_2YapisalHukum:
         assert sa['status'] == STRUCTURAL_VERDICT_NOT_EVALUATED
         assert sa['verdict_withheld'] is True
         dta = sa['design_target_assessment']
-        assert dta['status'] == 'UNSAFE'
-        assert dta['risk_level'] == 'HIGH'
+        # V306/HİBRİT-ÇAPRAZ: hedef 2,0 merdivende (STRUCTURAL_RISK_LADDER:
+        # < 2,0 UNSAFE, [2, 3) MARGINAL) MARGINAL'dir. Eski beklenti (UNSAFE/
+        # HIGH) geri okunan değerin kayan nokta artığını (1,999…98) kilitliyordu
+        # — HİBRİT-HATA'nın L5 gövdesinde onardığı yanlış hüküm sınıfı. Uyarı
+        # yine SUSTURULMAZ: MARGINAL/MEDIUM bir uyarıdır ve bu kanalda durur.
+        assert dta['status'] == 'MARGINAL'
+        assert dta['risk_level'] == 'MEDIUM'
         assert dta['design_safety_factor_target'] == pytest.approx(2.0)
         assert dta['target_derived_minimum_safety_factor'] == pytest.approx(2.0)
 

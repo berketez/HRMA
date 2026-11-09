@@ -487,7 +487,7 @@ OLU_GIRDI_ENVANTERI = {
 #       diye zaten okuyor; uç ölçümü okumuyordu. Beyan STATİK DEĞİL, her
 #       koşumda yanıttan okunur. Beyanlı ama bu uçta CANLI alan kırmızıdır
 #       (beyan çürümesi). Beyan yalnız ``URUN_BEYANI_OKUNAN_UCLAR``da okunur.
-#   (2) BAŞKA TÜKETİCİ (14 alan, ``BASKA_TUKETICI_BEYANI``) — ürünün beyan
+#   (2) BAŞKA TÜKETİCİ (15 alan; V306 +mc_n_samples, ``BASKA_TUKETICI_BEYANI``) — ürünün beyan
 #       etmediği alanlar bu uçta değil başka yerde tüketilir; tüketici ADIYLA
 #       yazılır ve ``test_baska_tuketici_beyani_olculuyor`` onu ÖLÇER (tane
 #       tipine bağlı alanlar o tipte, yörünge alanları yörünge ucunda canlı).
@@ -506,6 +506,15 @@ BASKA_TUKETICI_BEYANI = {
         'traj_final_mass': ('/api/trajectory-analysis', 'final_mass'),
         'traj_drag_coeff': ('/api/trajectory-analysis', 'drag_coefficient'),
         'traj_ref_area': ('/api/trajectory-analysis', 'reference_area'),
+        # V306/HIZ kalem 2 (b94e913e0, M-KATI-35): Monte Carlo panelinin
+        # 'Örnek Sayısı' alanı. solid.html runSolidMonteCarlo() onu
+        # getElementById('mc_n_samples') ile okur ve YALNIZ
+        # /api/solid-monte-carlo gövdesine n_samples adıyla koyar;
+        # collectAllParameters() (Hesapla gövdesi) onu TAŞIMAZ. Bu uçta
+        # görünmesinin tek nedeni taban yükün örnek PROJE dosyası olması:
+        # project_bar.js serializeFields() id'li her alanı kaydeder (proje
+        # açılınca kullanıcının örnek sayısı geri gelir — davranış korunur).
+        'mc_n_samples': ('/api/solid-monte-carlo', 'n_samples'),
         # Devre dışı gösterge (solid.html: disabled, data-derived-from=
         # "thrust_curve"): kullanıcı GİREMEZ, itki eğrisinden doldurulur;
         # yörünge gövdesi de onu göndermez. Yutulan kullanıcı değeri yok.
@@ -667,6 +676,22 @@ class TestP15B310SarsimKapsami:
         if isinstance(baglam, dict):
             taban = dict(uc_katalogu.taban_yuk(yol), **baglam)
             anahtar = alan
+        elif tuketici == '/api/solid-monte-carlo':
+            # runSolidMonteCarlo(): alan okunur, n_samples adıyla YALNIZ
+            # Monte Carlo isteğine konur; Hesapla gövdesi onu taşımaz.
+            mc = sayfa[sayfa.index('async function runSolidMonteCarlo('):]
+            mc = mc[:mc.index("fetch('/api/solid-monte-carlo'")]
+            assert "getElementById('%s')" % alan in mc, (
+                'Monte Carlo akışı %s alanını okumuyor' % alan)
+            assert 'data.%s = ' % baglam in mc, (
+                'Monte Carlo isteği %s anahtarını taşımıyor' % baglam)
+            hesap = sayfa[sayfa.index('function collectAllParameters('):]
+            hesap = hesap[:hesap.index('async function calculateSolid(')]
+            assert alan not in hesap, (
+                'Hesapla gövdesi %s alanını taşıyor — artık bu uçta '
+                'beyan edilemez' % alan)
+            taban = uc_katalogu.taban_yuk(tuketici)
+            anahtar = baglam
         else:
             # computeTrajectory() YORUNGE_ALAN_KIMLIGI eşlemesi.
             assert "%s: '%s'" % (baglam, alan) in sayfa, (
@@ -681,6 +706,8 @@ class TestP15B310SarsimKapsami:
                     contextlib.redirect_stderr(io.StringIO()):
                 if tuketici == '/api/trajectory-analysis':
                     r = istemci.post('/api/trajectory-analysis', json=govde)
+                elif tuketici == '/api/solid-monte-carlo':
+                    r = istemci.post('/api/solid-monte-carlo', json=govde)
                 else:
                     assert tuketici == '/calculate_solid', tuketici
                     r = istemci.post('/calculate_solid', json=govde)
@@ -690,8 +717,10 @@ class TestP15B310SarsimKapsami:
         once = _post(taban)
         sarsik = dict(taban)
         deger = taban[anahtar]
-        sarsik[anahtar] = (deger + 1 if anahtar.endswith(('_count', 'points'))
-                           else deger * 1.1)
+        # Sayaçlar (+1): tam sayı bekleyen alan ×1,1 ile 422 olurdu
+        # (n_samples bandı tam sayı ister, 20 → 21).
+        sarsik[anahtar] = (deger + 1 if anahtar.endswith(
+            ('_count', 'points', 'n_samples')) else deger * 1.1)
         assert _post(sarsik) != once, (
             '%s: beyan edilen tüketici %s alanı (%s) tüketmiyor'
             % (alan, tuketici, anahtar))
@@ -699,7 +728,10 @@ class TestP15B310SarsimKapsami:
     def test_baska_tuketici_beyani_buyumez(self):
         """Beyan bir borç kaydı değil ama SINIRLI: büyümesi kırmızıdır."""
         toplam = sum(len(v) for v in BASKA_TUKETICI_BEYANI.values())
-        assert toplam <= 14, 'başka tüketici beyanı büyüdü: %d' % toplam
+        # 14 -> 15 (V306/ONARIM-ALTYAPI kalem 1): mc_n_samples ADIYLA ve
+        # ölçülen tüketiciyle (test_baska_tuketici_beyani_olculuyor) girdi;
+        # tavan sayıyla eşit tutulur, sonraki her ekleme yine KIRMIZI.
+        assert toplam <= 15, 'başka tüketici beyanı büyüdü: %d' % toplam
 
     def test_olu_girdi_envanteri_bayat_uc_tasimaz(self):
         from tests.support import uc_katalogu

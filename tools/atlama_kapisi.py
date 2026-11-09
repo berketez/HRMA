@@ -22,7 +22,7 @@ aynı davranışı çağırır ve davranış yerelde de koşturulabilir (bekçi
 Kullanım
 --------
     python3 tools/atlama_kapisi.py pytest-report.xml
-    python3 tools/atlama_kapisi.py pytest-report.xml --butce 76
+    python3 tools/atlama_kapisi.py pytest-report.xml --butce 96
     python3 tools/atlama_kapisi.py pytest-report.xml --tests-dizini tests
 
 Çıkış kodu 0 = kapı açık; 1 = kapı kapalı (gerekçe stderr'e yazılır).
@@ -57,11 +57,18 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-#: TEK KAYNAK — 27 Ağustos 2026 ölçümü (tam süit, CI benzetimi, HEAD baa9d9e:
-#: 9341 passed · 75 skipped · 81 xfailed; + bu paketin eklediği 1 bekçi = 76).
+#: TEK KAYNAK — ölçüm geçmişi:
+#:   27 Ağustos 2026 (tam süit, CI benzetimi, HEAD baa9d9e: 9341 passed ·
+#:     75 skipped · 81 xfailed; + o paketin eklediği 1 bekçi) = 76.
+#:   9 Kasım 2026 (3.0.6): v3.0.5'in kendi CI'ı (koşu 42611425301, 0a138ff6a)
+#:     71 atlama; 3.0.6 rc.2 CI'ı (koşu 42649775093) 96. Düğüm adıyla fark:
+#:     yeni 25, kaybolan 0 — 20 yalnız-macOS güncelleme testi
+#:     (test_v306_guncelleme_kilidi), 4 tarayıcı testi (test_v306_ucus3),
+#:     1 gerekçeli koşullu dal (test_d19_arayuz_a1, V306/KATI-MODEL
+#:     M-KATI-10) = 96. Pay eklenmedi: tek yeni atlama kapıyı kapatır.
 #: Dökümün tamamı `.github/workflows/tests.yml` içindeki gerekçe bloğundadır.
 #: Değiştirirken ölçüm komutunu, tarihi ve dökümü BİRLİKTE güncelleyin.
-ATLAMA_BUTCESI = 76
+ATLAMA_BUTCESI = 96
 
 #: Toplama çöktüğünde "0 test, 0 atlama" ile yeşil kalmayı engelleyen taban.
 #: Ölçülen toplama 9497; taban %94,8'ine kondu.

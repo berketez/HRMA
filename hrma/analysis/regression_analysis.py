@@ -535,8 +535,8 @@ class GrainLengthGovernsInTotalMode(MissingRegressionInput):
             'G_total = G_ox + G_fuel, and G_fuel = rho_f*pi*D_port*'
             'L_grain*r_dot / A_port, so the grain length GOVERNS the '
             'published regression rate. Neither grain_length nor '
-            'chamber_length was supplied, and no length was invented: a '
-            f'fabricated {CHAMBER_LENGTH_FALLBACK_M:g} m x '
+            'chamber_length was supplied, and no length is assumed: an '
+            f'assumed {CHAMBER_LENGTH_FALLBACK_M:g} m x '
             f'{GRAIN_TO_CHAMBER_LENGTH_RATIO:g} = '
             f'{CHAMBER_LENGTH_FALLBACK_M * GRAIN_TO_CHAMBER_LENGTH_RATIO:g}'
             " m would scale the whole curve. Supply grain_length (or "

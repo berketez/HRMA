@@ -140,6 +140,102 @@ def n2o_doyma_basinci_bar(sicaklik_k):
 
 
 # ---------------------------------------------------------------------------
+# V306/HİBRİT-NOZUL kalem 5 — örnek hibritin regresyon çifti KAYNAKLI
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/hibrit-nozul/olcum/k5_tarama_*.json):
+# katalog HTPB/N2O çiftiyle (a 3,68e-5, n 0,555) ve motorun varsayılan
+# başlangıç akısıyla (350 kg/m²·s) örnek tek portlu bir boru çiziyordu: tane
+# L/D 13,4, kamara L/D 14,2 > 10 — örnek kendi narinlik uyarısını
+# (warn.hybrid.grain_slenderness_high) ve katsayı yanlılığı uyarısını
+# (warn.hybrid.htpb_coeff_bias: depo DB'sine karşı ~−%40) üretiyordu.
+# Eşik kaynaksız ama kaynaklı daha yüksek bir sınır yok; çok portlu tane CAD'de
+# çizilmiyor (port_count_not_one), tek portta akı/artık et ile L/D < 10 ancak
+# 4,5 mm et ya da %60 artık yakıtla oluyor. Örnek artık regresyon çiftini
+# HRMA'nın doğrulama kayıtlarındaki Carmicino 2013 saf HTPB/N2O
+# ateşlemelerinden alır (``hyb-carmicino2013-htpb-*``: Scaramuzzino,
+# Carmicino, Festa, Viviani, Russo Sorge, 5. EUCASS 2013, Ek Tablo A1/A2;
+# makale bir güç yasası katsayısı yayımlamıyor — depodaki kayıt ve araştırma
+# notlarında yok): ṙ = a·G_ox^n'in ölçülen (G_ox, ṙ) çiftlerine log-log en
+# küçük kareler uyarlaması (16 test, G_ox 73-259 kg/m²·s, medyan mutlak hata
+# %8,8; docs/arastirma/fizik/A3-hibrit-regresyon.md kampanya tablosuyla
+# aynı). Geçerlilik notu: deneyler GAZ N2O ile, örnek SIVI N2O enjeksiyonlu.
+# Katalog çifti DEĞİŞMEDİ (fizik kararı; ürün varsayılanı aynı).
+CARMICINO2013_HTPB_DESENI = 'hyb-carmicino2013-htpb-*.json'
+#: Başlangıç oksitleyici akısı: uyarlamanın ölçüm bandının üst ucunu aşmayan
+#: en büyük 50 kg/m²·s katı (HRMA seçimi; motorun varsayılan tasarım akısı
+#: 350 kg/m²·s bandın dışındadır). Yanma boyunca akı düşer, bant içinde kalır.
+BASLANGIC_AKISI_ADIMI = 50.0
+
+
+def carmicino2013_htpb_uyarlamasi():
+    """Carmicino 2013 saf HTPB/N2O kayıtlarına ṙ[m/s] = a·G_ox^n uyarlaması.
+
+    Dönüş: ``a_SI``, ``n``, ``G_bandi`` (kg/m²·s), ``medAPE``, ``kayitlar``
+    (test kimlikleri), ``oksitleyici_fazi``. Sayı elle yazılmaz: depodaki
+    kayıtların ``measured.gox_kgpm2s`` ve ``measured.regression_rate_avg_mmps``
+    alanlarından hesaplanır.
+    """
+    import math
+    kok = REPO_ROOT / 'hrma' / 'data' / 'validation_records' / 'hybrid'
+    nok = []
+    for yol in sorted(kok.glob(CARMICINO2013_HTPB_DESENI)):
+        r = json.loads(yol.read_text(encoding='utf-8'))
+        m = r.get('measured') or {}
+        g, rd = m.get('gox_kgpm2s'), m.get('regression_rate_avg_mmps')
+        if g and rd:
+            nok.append((r['test_id'], float(g), float(rd) * 1e-3,
+                        r['propellants'].get('oxidizer_phase')))
+    x = [math.log(g) for _, g, _, _ in nok]
+    y = [math.log(rd) for _, _, rd, _ in nok]
+    xm, ym = sum(x) / len(x), sum(y) / len(y)
+    n = (sum((a - xm) * (b - ym) for a, b in zip(x, y))
+         / sum((a - xm) ** 2 for a in x))
+    a = math.exp(ym - n * xm)
+    hata = sorted(abs(a * g ** n - rd) / rd for _, g, rd, _ in nok)
+    k = len(hata)
+    return {'a_SI': a, 'n': n,
+            'G_bandi': (min(g for _, g, _, _ in nok),
+                        max(g for _, g, _, _ in nok)),
+            'medAPE': (hata[k // 2] if k % 2
+                       else 0.5 * (hata[k // 2 - 1] + hata[k // 2])),
+            'kayitlar': [t for t, _, _, _ in nok],
+            'oksitleyici_fazi': sorted({f for *_, f in nok})}
+
+
+def ornek_hibrit_regresyonu():
+    """Örneğin tohum alanları: regression_a (4 anlamlı hane: sayfa da üstel
+    gösterimde 4 hane tutar), regression_n (3 ondalık), mass_flux_chamber."""
+    import math
+    u = carmicino2013_htpb_uyarlamasi()
+    return {'regression_a': float('%.4g' % u['a_SI']),
+            'regression_n': round(u['n'], 3),
+            'mass_flux_chamber': BASLANGIC_AKISI_ADIMI * math.floor(
+                u['G_bandi'][1] / BASLANGIC_AKISI_ADIMI)}
+
+
+#: V306/HİBRİT-NOZUL kalem 4 — kayıttan düşen alanlar. Proje şeridi sayfanın
+#: BÜTÜN alanlarını kaydeder; hibrit itki/süre kipinde ``total_impulse`` öteki
+#: sekmenin (Toplam İmpuls) girdisidir ve şablon varsayılanını (10000 N·s)
+#: taşır. Dosyada kalırsa sayfa dışından (API) koşan kullanıcıya itki 3000 N +
+#: süre 10 s + impuls 10000 N·s çelişen üçlüsü gider ve motorun I = F·t_b
+#: önceliği yanma süresini 3,33 s yapar (ölçüldü, olcum/once.json
+#: ``ornek_dosya``). Sayfa bu kipte I = F·t gönderir; dosya alanı gereksizdir.
+#: ``param_start`` / ``param_end``: V306/HİBRİT-SAYI kalem 8 (BAYAT DEVİR 4) —
+#: dosyada durursa yükleme ``change`` olayıyla "kullanıcı girdisi" sayılır ve
+#: NK-57'nin tasarım-merkezli parametrik aralığı devreye girmez; örnek bu iki
+#: alanı taşımaz (sayfa aralığı tasarım O/F'sinden kurar).
+KAYITTAN_DUSEN_ALANLAR = {'hybrid': ('total_impulse', 'param_start',
+                                     'param_end')}
+
+#: Kayıttan düşen ``inputs`` bölümleri. ``dynamic`` (uçuş/6-DOF ve geçici
+#: analiz panellerinin durumu: kuru kütle, itici, itki, yanma süresi …) bu
+#: örnekte kullanıcı girdisi DEĞİL (``user_typed`` boş), sonuçtan türetilen
+#: değerlerdir; dosyada dondurulursa motor değiştiğinde bayat kalır. Sayfa
+#: bunları sonuçtan yeniden kurar (katı/sıvı örnekler de taşımıyor).
+KAYITTAN_DUSEN_BOLUMLER = {'hybrid': ('dynamic',)}
+
+
+# ---------------------------------------------------------------------------
 # Açıklamalar (EN + TR) — GİRDİLERDEN üretilir
 # ---------------------------------------------------------------------------
 # v3.0.5 (Berke 27 Eki): HRMA eğitim aracı değil, ön tasarım ve analiz
@@ -193,15 +289,27 @@ def aciklama_kur(motor_type, alanlar):
         tr = (f"Örnek tasarım: {a('oxidizer_type', 'tr')}/{a('fuel_type', 'tr')} "
               f"hibrit motor, {s('thrust', 'tr', 1000.0)} kN itki, "
               f"{s('burn_time', 'tr')} s yanma, {s('chamber_pressure', 'tr')} bar "
-              f"oda basıncı, O/F {s('of_ratio', 'tr')}. Regresyon katsayıları "
-              f"sayfanın {a('fuel_type', 'tr')}/{a('oxidizer_type', 'tr')} "
-              "varsayılanıdır.")
+              f"oda basıncı, O/F {s('of_ratio', 'tr')}. Regresyon a = "
+              f"{s('regression_a', 'tr')}, n = {s('regression_n', 'tr')}: "
+              f"Carmicino ve ark. saf {a('fuel_type', 'tr')}/"
+              f"{a('oxidizer_type', 'tr')} ateşlemelerine (HRMA doğrulama "
+              "kayıtları) log-log uyarlama; deneylerde "
+              f"{a('oxidizer_type', 'tr')} gaz, bu örnekte sıvı enjekte "
+              "edilir. Başlangıç "
+              f"oksitleyici akısı {s('mass_flux_chamber', 'tr')} kg/m²·s, "
+              "uyarlamanın ölçüm aralığının içinde.")
         en = (f"Example design: {a('oxidizer_type', 'en')}/{a('fuel_type', 'en')} "
               f"hybrid motor, {s('thrust', 'en', 1000.0)} kN thrust, "
               f"{s('burn_time', 'en')} s burn, {s('chamber_pressure', 'en')} bar "
-              f"chamber pressure, O/F {s('of_ratio', 'en')}. Regression "
-              f"coefficients are the page defaults for "
-              f"{a('fuel_type', 'en')}/{a('oxidizer_type', 'en')}.")
+              f"chamber pressure, O/F {s('of_ratio', 'en')}. Regression a = "
+              f"{s('regression_a', 'en')}, n = {s('regression_n', 'en')}: "
+              f"log-log fit to the Carmicino et al. pure "
+              f"{a('fuel_type', 'en')}/{a('oxidizer_type', 'en')} firings "
+              "(HRMA validation records); the tests injected gaseous "
+              f"{a('oxidizer_type', 'en')}, this example injects liquid "
+              f"{a('oxidizer_type', 'en')}. Initial oxidizer flux "
+              f"{s('mass_flux_chamber', 'en')} kg/m²·s, inside the measured "
+              "range of the fit.")
     elif motor_type == 'solid':
         ad = alanlar['propellant_name']
         tr = (f"Örnek tasarım: {ad} katı motor, {s('outer_diameter', 'tr')} mm "
@@ -316,11 +424,12 @@ def build_examples(client):
         'nozzle_type': 'conical',
         'combustion_type': 'infinite',
         'chamber_diameter_input': 0,
-        # Yakıt (advanced.html HTPB varsayılanları; a-n: Doran et al.)
+        # Yakıt: HTPB (yoğunluk sayfa varsayılanı). Regresyon çifti ve
+        # başlangıç akısı V306/HİBRİT-NOZUL kalem 5: Carmicino 2013
+        # uyarlaması (``ornek_hibrit_regresyonu``; künye yukarıda).
         'fuel_type': 'htpb',
         'fuel_density': 920,
-        'regression_a': 3.68e-05,
-        'regression_n': 0.555,
+        **ornek_hibrit_regresyonu(),
         # Oksitleyici (yoğunluk/viskozite: uygulamanın N2O kataloğu @T_tank)
         'oxidizer_type': 'n2o',
         'oxidizer_phase': 'liquid',
@@ -330,8 +439,11 @@ def build_examples(client):
         # Enjektör (sayfa varsayılanları)
         'injector_type': 'showerhead',
         'target_velocity': 30,
-        'hole_diameter_min': 0.3,
-        'hole_diameter_max': 2.0,
+        # V306/HİBRİT-NOZUL: delik çapı bandı TOHUMDA YOK — alan boş kalır ve
+        # sunucunun tek kaynaklı bandı (hrma.constants.ORIFICE_D_BAND_MM,
+        # 0,5-2,5 mm) uygulanır; 27 Eki'de üretilen dosya da boştu. Eski
+        # 0,3/2,0 kaynaksızdı (ÖH D37 A2 F-10) ve bugünkü sayfayla dosyaya
+        # yazılıp kanon planı (8 × Ø2,44 mm) 'bant dışı' gösterirdi.
         'plate_thickness': 3.0,
         # Kamara malzemesi: formun seçili seçeneği = ucun TEK varsayılanı
         # (10. tur). Örnek alanı AÇIKÇA taşır → yüklenince proje dosyası
@@ -729,6 +841,20 @@ def main(secilen=None):
                                  'belgesinden farklı')
         _ozeti_denetle(client, motor_type, name, govde,
                        diskte['results_summary'])
+        dusen = [k for k in KAYITTAN_DUSEN_ALANLAR.get(motor_type, ())
+                 if k in diskte['inputs']['fields']]
+        dusen_bolum = [k for k in KAYITTAN_DUSEN_BOLUMLER.get(motor_type, ())
+                       if k in diskte['inputs']]
+        if dusen or dusen_bolum:
+            for k in dusen:
+                diskte['inputs']['fields'].pop(k)
+            for k in dusen_bolum:
+                diskte['inputs'].pop(k)
+                dusen.append('inputs.' + k)
+            # Ürünün kayıt biçimi (hrma/utils/projects.py save_project).
+            dosya.write_text(json.dumps(diskte, ensure_ascii=False, indent=1,
+                                        allow_nan=False), encoding='utf-8')
+            print(f'  kayıttan düşen alan(lar): {dusen}')
         shutil.copyfile(dosya, EXAMPLES_DIR / dosya.name)
         _dagitilmis_karmaya_ekle(name + store.FILE_EXT)
         govdeler[motor_type] = govde

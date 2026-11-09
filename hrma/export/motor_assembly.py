@@ -169,7 +169,7 @@ ASSUMED_RULES = {
         'text': ('assumed: injector plate seated on the closure-head inner '
                  'face (CAD single rule cad_visualization.'
                  'injector_plate_axial_span_mm); no solver places the plate '
-                 'axially or sizes a plenum, so no gap is invented'),
+                 'axially or sizes a plenum, so no gap is assumed'),
         'parts': ('H03', 'L01'),
         'replaced_by': 'F-CAD-7',
     },
@@ -949,7 +949,7 @@ def build_plan(motor_data, motor_type, injector=None, extra_groups=None):
         k.cizilmez(manifold_id, 'new_calc_required',
                    'manifold dome / plenum is not sized; the plate seats on '
                    'the closure-head inner face (CAD single rule '
-                   'injector_plate_axial_span_mm), no plenum gap is invented '
+                   'injector_plate_axial_span_mm), no plenum gap is assumed '
                    'and no dome solid is drawn',
                    replaced_by='F-CAD-7')
 
@@ -992,7 +992,7 @@ def _enjektor_plakasi(md, k, motor_type, rc, kurallar):
     if not devreler:
         k.cizilmez(pid, 'not_modelled',
                    'injector orifice count / diameter could not be resolved '
-                   f'from {blok_adi}; no orifice plan is invented',
+                   f'from {blok_adi}; no orifice plan is assumed',
                    fields=[f'{blok_adi}.number_of_orifices',
                            f'{blok_adi}.orifice_diameter_mm'])
         return None

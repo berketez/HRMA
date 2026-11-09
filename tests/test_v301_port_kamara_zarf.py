@@ -55,6 +55,30 @@ def _kos(**kw):
         return motor, motor.calculate()
 
 
+def _regule(sonuc):
+    """Sabit oksitleyici debili (regüle) tasarım bütçesi: süre ve impuls.
+
+    V306/HİBRİT-ÇAPRAZ-2 — BAYAT ÇAPA, ölçümle yenilendi. HİBRİT-ÇAPRAZ
+    kalem 1'den (4 Kas, kasıtlı, ana model kararı) beri N₂O kendinden
+    basınçlı tankta (``TEMEL`` bu kipte) motorun TESLİM süresi ve impulsu
+    boşalma çözümündendir (ölçüldü, taban 78dbb287e: varsayılan 10,1206 s /
+    8962,50 N·s; dört port 10,1157 s). Bu dosyanın sorusu — port/kamara zarf
+    kuralı itkiyi, istenen süreyi ve kırpmasızlığı bozmasın; impuls grain
+    dış çapından bağımsız kalsın — tane/kamara boyutlandırmasının, yani
+    REGÜLE tasarım yürüyüşünün sorusudur; o kipte bütçe
+    ``constant_oxidizer_flow_budget``ta adıyla durur (``tests/
+    test_hibrit_sure_cf.py::regule`` deseni). Regüle kipte görünüm manşetin
+    kendisidir.
+    """
+    if sonuc.get('delivered_source') != 'tank_blowdown':
+        return {'burn_time': sonuc['burn_time'],
+                'total_impulse': sonuc['total_impulse']}
+    b = sonuc['constant_oxidizer_flow_budget']
+    assert sonuc['burn_time_requested_s'] == b['burn_time_s']
+    return {'burn_time': b['burn_time_s'],
+            'total_impulse': b['total_impulse_Ns']}
+
+
 @pytest.fixture(scope='module')
 def varsayilan():
     return _kos(thrust=1000, burn_time=10)
@@ -201,7 +225,7 @@ def test_kutle_denkligi(ad, request):
 def test_itki_ve_sure_degismez(ad, request):
     _motor, sonuc = request.getfixturevalue(ad)
     assert sonuc['thrust'] == 1000.0
-    assert sonuc['burn_time'] == 10.0
+    assert _regule(sonuc)['burn_time'] == 10.0
     assert sonuc['burn_time_clipped'] is False
     # Teslim edilen impuls eğrinin kendi integralidir; O/F kayması dışında
     # F·t_b'den sapmaz (ölçüm: önce 10000,4984, sonra 10000,4981 Ns).
@@ -216,7 +240,7 @@ def test_itki_ve_sure_degismez(ad, request):
     # konusu (port/kamara değişikliği itkiyi/süreyi bozmasın) yukarıdaki
     # birebir itki/süre eşitlikleriyle ve aşağıdaki önce-ölçümü testiyle
     # korunur. Kanıt: docs/scofield/raw/OH/V301/makale1/B7/hibrit_capa.json
-    assert sonuc['total_impulse'] == pytest.approx(1e4, rel=5e-3)
+    assert _regule(sonuc)['total_impulse'] == pytest.approx(1e4, rel=5e-3)
 
 
 def test_once_olcumune_karsi_impuls_ve_debi_sapmasi_kucuk(varsayilan):
@@ -241,7 +265,7 @@ def test_once_olcumune_karsi_impuls_ve_debi_sapmasi_kucuk(varsayilan):
     # 1e-6 içinde aynıdır, yani çarpan yalnız B7 etkisini taşır.
     b7_impuls = 9976.037043860768 / 10000.49813672308
     b7_isp = 189.97017865866127 / 180.8526872785283
-    assert sonuc['total_impulse'] == pytest.approx(
+    assert _regule(sonuc)['total_impulse'] == pytest.approx(
         o['total_impulse_Ns'] * b7_impuls, rel=1e-6)
     assert sonuc['isp'] == pytest.approx(o['isp_s'] * b7_isp, rel=1e-3)
     b7_mdot = 0.5367769931985777 / 0.5638380210560432
@@ -290,7 +314,7 @@ def test_eski_sekiz_onda_kirpmasi_geri_donmez():
     motor, sonuc = _kos(thrust=1000, burn_time=10, port_count=4,
                         chamber_diameter_input=80)
     assert motor.D_port_final > 0.8 * 0.080 / 2.0
-    assert sonuc['burn_time'] == 10.0
+    assert _regule(sonuc)['burn_time'] == 10.0
     assert sonuc['burn_time_clipped'] is False
     assert sonuc['design_summary']['status'] != 'TARGET_NOT_MET'
 

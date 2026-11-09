@@ -113,9 +113,21 @@ def test_ornek_pintle_olcege_duyarli(pintle_duyarli):
     assert loop['verdict'] == 'marginal'
     assert loop['nominal_verdict'] == 'unstable'
     assert loop['atomisation_scale_check']['verdicts_agree'] is False
-    # FİZİK-2 ölçümüyle bit-aynı nominal (k5_kararlilik_sonra.json).
+    # FİZİK-2 ölçümüyle bit-aynı nominal (k5_kararlilik_sonra.json) idi:
+    # 0,002549909132311208 s. ÇAPA YENİLENDİ — V306/SIVI-ONARIM kalem 4;
+    # iki kasıtlı, kaynaklı birleşme (ölçüm: docs/scofield/raw/OH/V306/
+    # sivi-onarim/kalem4_tau.json, git archive kopyalarında aynı gövde):
+    #   964ce24b1 (SIVI-DEFTER K5 debi defteri): enjektör ana oda debisini
+    #     taşır (türbin debisi GG'de enjektörden geçmez) -> pintle geometrisi
+    #     ve hızı -> τ = T*·L/v·√(ρ_l/ρ_g): 0,002549909132311208 ->
+    #     0,0025312836311887567 s (rc.0'ın ölçtüğü sayı);
+    #   2bc09c130 (SIVI-CEKET K2 ceket ΔP'si tek sayı): GG pompa çıkışı ->
+    #     türbin debisi -> defter: 0,0025312836311887567 ->
+    #     0,0025312315623620286 s.
+    # Hükümler (marginal / nominal unstable / ölçekler ayrışır) DEĞİŞMEDİ.
+    # Tolerans DEĞİŞMEDİ.
     assert loop['inputs']['tau_s'] == pytest.approx(
-        0.002549909132311208, rel=1e-12)
+        0.0025312315623620286, rel=1e-12)
 
 
 def _notr_tau_orani(j):
@@ -256,10 +268,14 @@ def test_bozuk_olcek_baglami_adli_422(client, pintle, bozuk, alan):
 
 
 def test_kisma_haritasi_olcegi_beyan_eder(pintle, unlike):
+    # V306/SIVI-MODEL kalem 2 (FİZİK-2 AÇIK kapandı): harita iki ölçek
+    # denetimini artık HER NOKTADA koşar; beyan 'design point only' değil.
     tm = pintle['throttle_map']['chug_loop_across_throttle']
     assert tm['atomisation_scale_used'] == PINTLE_CHUG_NOMINAL_SCALE
-    assert tm['atomisation_scale_check_applied'] is False
-    assert 'design point only' in tm['atomisation_scale_basis']
+    assert tm['atomisation_scale_check_applied'] is True
+    assert 'every throttle point' in tm['atomisation_scale_basis']
+    for p in pintle['throttle_map']['points']:
+        assert p['atomisation_scale_check']['status'] == 'modelled'
     tu = unlike['throttle_map']['chug_loop_across_throttle']
     assert 'atomisation_scale_basis' not in tu
 

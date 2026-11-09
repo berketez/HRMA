@@ -467,11 +467,32 @@ def test_b1_10_ipucu_bandi_uc_bandiyla_ayni(liquid_src):
     t_alt, t_ust, _ = bant['thrust']
     p_alt, p_ust, _ = bant['chamber_pressure']
 
-    ip_t = re.search(r'Target thrust level for the liquid engine\.([^<]*)',
-                     liquid_src)
+    # V306/SIVI-ONARIM kalem 7: V306/SIVI-DEFTER (M-SIVI-20, b915bc5cf)
+    # itki ipucunu koddan gelen tanımla yeniden yazdı (1,01325 bar ISA, açık
+    # çevrimde motor itkisi, vakum hedefi girilemez, boş = adlı ret) ve
+    # kaynaksız 'Small thrusters: 10-1000N' tipik değerlerini çıkardı; bant
+    # artık 'Accepted range: 100 N - 10 MN' cümlesinde. Bekçi ipucunu
+    # i18n anahtarıyla bulur ve İKİ UCU da FORM_LIMITS'ten kurar (EN şablon,
+    # EN ve TR sözlük aynı bandı söyler).
+    def _n(v):
+        v = float(v)
+        for bol, birim in ((1e6, 'MN'), (1e3, 'kN')):
+            if v >= bol:
+                return '%g %s' % (v / bol, birim)
+        return '%g N' % v
+    bant_metni = '%s - %s' % (_n(t_alt), _n(t_ust))
+    ip_t = re.search(r'data-i18n="liq\.ui\.target_thrust_level_for_the_liquid"'
+                     r'>([^<]*)<', liquid_src)
     assert ip_t, 'itki ipucu bulunamadı'
-    assert 'Small thrusters: %d-' % t_alt in ip_t.group(1), \
-        'ipucu bandın altındaki bir alt ucu reklam ediyor: %s' % ip_t.group(1)
+    assert 'Accepted range: %s.' % bant_metni in ip_t.group(1), \
+        'ipucunun reklam ettiği bant uçla aynı değil: %s' % ip_t.group(1)
+    sozluk = (JSDIR / 'i18n_pages.js').read_text(
+        encoding='utf-8')
+    deger = re.findall(r"'liq\.ui\.target_thrust_level_for_the_liquid': "
+                       r"'((?:[^'\\]|\\.)*)'", sozluk)
+    assert len(deger) == 2, deger
+    assert 'Accepted range: %s.' % bant_metni in deger[0], deger[0]
+    assert 'Kabul aralığı: %s.' % bant_metni in deger[1], deger[1]
 
     ip_p = re.search(r'Combustion chamber operating pressure\.([^<]*)',
                      liquid_src)
@@ -529,7 +550,15 @@ HAYALET_TABAN = {
     # ÖH D30 · P12bB1-16: liquid.html'deki `motor_name` hayaleti SÖKÜLDÜ
     # (PDF künyesi artık tek çözücü `_liquidMotorName()` üzerinden geliyor),
     # envanter 9 -> 8 DÜŞTÜ. Mandal adıyla güncellenir; sayı YÜKSELTİLMEZ.
-    'liquid': 8,       # 6 grafik kabı + sd_body_d + sd_prop_m
+    # V306/SIVI-ONARIM kalem 7: 8 -> 2 (SIKILAŞTIRMA). V306/SIVI-DEFTER
+    # (M-SIVI-2) 'Karşılaştırma kayıp modeli' grafiğini aynı desenle ekledi
+    # (`getElementById('efficiencyComparisonChart') ||
+    # createChartDiv('efficiencyComparisonChart', …)`) ve envanter 9'a
+    # çıktı. Ölçüldü: yedi grafik kabının yedisi de çalışma anında
+    # `createChartDiv` ile ÜRETİLİYOR (`chartDiv.id = id`) — bekçinin kendi
+    # tanımına göre hayalet DEĞİL; ölçüm o yardımcıyı göremiyordu.
+    # `_calisma_aninda_uretilen` onu görür; taban yükseltilmedi, 9 değil 2.
+    'liquid': 2,       # sd_body_d + sd_prop_m
     'solid': 1,        # motor_name (ÖK-21: `|| SABİT` sökümü bu dalgada YASAK)
     'index': 0, 'launch_site': 0, 'formulas': 0,
 }
@@ -553,6 +582,22 @@ def _okunan_idler(src):
     return out
 
 
+def _calisma_aninda_uretilen(src):
+    """Sayfanın grafik kabı yardımcısıyla çalışma anında ürettiği id'ler.
+
+    Desen: ``getElementById('X') || createChartDiv('X', …)`` — öğe yoksa
+    yardımcı onu kurar ve ``chartDiv.id = id`` ile adını verir. Yalnız
+    sayfa ``createChartDiv`` işlevini GERÇEKTEN o atamayla tanımlıyorsa
+    sayılır (yardımcı değişir ya da silinirse kaplar yeniden hayalet olur).
+    """
+    m = re.search(r'function createChartDiv\(id\b[^)]*\)\s*\{', src)
+    if not m or not re.search(r'\.id\s*=\s*id\s*;', src[m.end():m.end() + 1500]):
+        return set()
+    return set(re.findall(
+        r"getElementById\(\s*'([A-Za-z0-9_\-]+)'\s*\)\s*\|\|\s*"
+        r"createChartDiv\(\s*'\1'", src))
+
+
 def _hayaletler():
     paylasilan = ''
     for f in sorted(JSDIR.iterdir()):
@@ -563,7 +608,8 @@ def _hayaletler():
     for p in SAYFALAR:
         src = (SABLONLAR / (p + '.html')).read_text(encoding='utf-8')
         out[p] = sorted(_okunan_idler(src)
-                        - (_tanimli_idler(src) | paylasilan_ids))
+                        - (_tanimli_idler(src) | paylasilan_ids
+                           | _calisma_aninda_uretilen(src)))
     return out
 
 

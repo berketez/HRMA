@@ -6,11 +6,11 @@ Bu dizinde, uygulamayı ilk kez açan kullanıcının boş formla uğraşmadan
 değerleri uygulamanın kendi kataloglarından gelir, hiçbir sayı uydurma
 değildir.
 
-| Dosya | Motor tipi | Tasarım | `results_summary` (v3.0.5 ile, sayfanın GERÇEK Hesapla gövdesiyle ölçüldü) |
+| Dosya | Motor tipi | Tasarım | `results_summary` (v3.0.6 ile, sayfanın GERÇEK Hesapla gövdesiyle ölçüldü) |
 |---|---|---|---|
-| `Example Hybrid N2O-HTPB 3kN.hrma` | Hibrit | N2O/HTPB, 3 kN, 10 s, 30 bar, O/F 6 | Isp 209,755 s, toplam impuls 29955,628 N·s |
+| `Example Hybrid N2O-HTPB 3kN.hrma` | Hibrit | N2O/HTPB, 3 kN, 10 s, 30 bar, O/F 6 | Isp 209,734 s, toplam impuls 26838,605 N·s |
 | `Example Solid KNDX BATES 75mm.hrma` | Katı | KNDX (KNO3/dekstroz 65/35), 3xBATES, 75 mm, 40 bar | tepe itki 1498,194 N, yanma 2,277 s, toplam impuls 2956,883 N·s, Isp 125,284 s |
-| `Example Liquid LOX-RP1 25kN.hrma` | Sıvı | LOX/RP-1, 25 kN, 50 bar, O/F 2.0, gaz jeneratörü çevrimi, 1,0 mm CuCrZr astar + dış kabuk, 30 s yanma (örnek girdisi) | Isp(deniz) 257,114 s, Isp(vakum) 301,099 s, toplam impuls 750000,000 N·s |
+| `Example Liquid LOX-RP1 25kN.hrma` | Sıvı | LOX/RP-1, 25 kN, 50 bar, O/F 2.0, gaz jeneratörü çevrimi, 1,0 mm CuCrZr astar + dış kabuk, 30 s yanma (örnek girdisi) | Isp(deniz) 254,786 s, Isp(vakum) 299,320 s, toplam impuls 750000,000 N·s |
 
 Bu tablo **elle yazılmaz**: sayılar üç `.hrma` dosyasının `results_summary`
 alanından birebir alınmıştır (üç ondalığa yuvarlanmış). O alan proje

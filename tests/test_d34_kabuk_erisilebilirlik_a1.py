@@ -335,8 +335,14 @@ class TestGT14HamKodBasilmiyor:
             'tanınmayan kod, TANINMIŞ gibi basılıyor (işaret yok)')
 
     def test_KODSUZ_ret_de_sessiz_gecmiyor(self, dock_red_metni):
+        # V306/DİL-ORTAK (NR-14, 9 Kas): kullanıcı metninde HTTP kodu yok.
+        # Eski iddia sessiz geçmemeyi '500' sayısıyla ölçüyordu; ölçü artık
+        # metnin kendisi: ret ne olduğunu söyler ("Nothing was computed") ve
+        # ham durum kodunu basmaz (kod ipucunda/yanıtta kalır).
         v = dock_red_metni['vakalar']['kodsuz ret (fail-closed)']
-        assert '500' in v['metin'] and len(v['metin'].split()) >= 6
+        assert len(v['metin'].split()) >= 6, v['metin']
+        assert 'Nothing was computed' in v['metin'], v['metin']
+        assert not re.search(r'\b(HTTP|500)\b', v['metin']), v['metin']
 
     def test_uc_gerekcesi_alan_adi_yokken_YUTULMUYOR(self, dock_red_metni):
         v = dock_red_metni['vakalar']['TANINMAYAN kod (fail-closed)']

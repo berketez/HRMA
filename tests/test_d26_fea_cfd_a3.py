@@ -428,7 +428,8 @@ def _kati_yapisal():
             "expansion_ratio": 8.0})
         md = r.get_json() or {}
         md = md.get("motor", md)
-        return bridge.run_structural_from_motor(md), md
+        # V306/KATI-MODEL (M-KATI-10): katıda ürün akışı artık kasa silindirini ağa koyar; bu kapsam bekçisi yalnız-lüle konturunda ölçülmüştü, o geometri köprünün beyanlı kipiyle (include_chamber=False) korunur. Kasa silindirli ürün yolunun bekçisi: tests/test_v306_kati_model.py::TestMKati10YapisalAg.
+        return bridge.run_structural_from_motor(md, include_chamber=False), md
 
 
 class TestP8B214HukumKapsami:

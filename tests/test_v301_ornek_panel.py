@@ -390,12 +390,30 @@ def test_astar_secimi_ciplak_cidar_kritiksizse_hukmu_degistirmez(client):
 
 
 def test_katida_astar_secimi_q_yildiz_disi_kalirsa_kritik_kalir(client):
-    """Katı gazında T_aw ablasyon yüzey sıcaklığının altında: Q* modeli astar
-    boyutlandıramaz (NOT_SIZED) ve çıplak cidar kritikleri AYNEN kalır."""
+    """Katı gazında T_aw ablasyon yüzey sıcaklığının altında.
+
+    V306/HİBRİT-MODEL (M-HIBRIT-11, 3 Kas) — SÖZLEŞME DEĞİŞTİ. Eski
+    beklenti "Q* modeli astar boyutlandıramaz (NOT_SIZED), çıplak cidar
+    kritikleri AYNEN kalır" idi: ısı yükü AZALINCA hüküm KÖTÜLEŞİYORDU
+    (mühendis turu S1). Net ısınma yokken gerileme sıfırdır ama astar yine
+    yalıtır; kalınlık iletim payıyla boyutlanır (hibrit zincirinin TEK
+    astar kuralı ``hybrid_liner_sizing``), çıplak cidar kayıtları astar
+    hükmüne devredilir."""
+    from hrma.engines.hybrid_rocket_engine import LINER_CONDUCTION_FOURIER
+    from hrma.data.materials_db import get_material
     durum, j = _isil(client, dict(_KATI, wall_protection='ablative_liner'))
     assert durum == 200
-    assert j['thermal_analysis']['chamber_liner_check']['verdict'] == 'NOT_SIZED'
-    assert kritikler(j)
+    blok = j['thermal_analysis']['chamber_liner_check']
+    assert blok['verdict'] == 'LINER_REQUIRED'
+    sz = blok['sizing']
+    assert sz['recession_regime'] == 'no_net_heating'
+    m = get_material('ablative')
+    alfa = m['thermal_conductivity'] / (sz['density_kg_m3']
+                                        * m['specific_heat'])
+    assert blok['required_thickness_mm'] == pytest.approx(
+        (alfa * _KATI['burn_time'] / LINER_CONDUCTION_FOURIER) ** 0.5 * 1e3,
+        rel=1e-9)
+    assert not kritikler(j)
 
 
 # ---------------------------------------------------------------------------

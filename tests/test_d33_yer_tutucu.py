@@ -166,6 +166,20 @@ ALAN_GENISLIGI = {
     ('solid.html', 'wagon_hole_count'): 386,
     ('solid.html', 'wagon_hole_diameter'): 386,
     ('solid.html', 'wagon_pitch_diameter'): 386,
+    # V306 (6 Kas, ana model): V306/TANE C1-K5 (yıldız/yarık alanları, 'auto
+    # (solver default)') ve C1-K1 (boğaz/çıkış/genleşme, 'after Calculate')
+    # yeni yer tutucuları — Python Playwright (chromium 1208 headless, WebGL
+    # kapalı), 1440x900, en + tr; fin_* 'finocyl', slot_* 'slotted' seçilerek;
+    # iç genişlik = clientWidth − yatay dolgu. Kalibrasyon: chamber_diameter
+    # aynı yöntemle tablodaki 286'yı verdi; 1280x800'de 241/336/248. Ölçüm:
+    # docs/scofield/raw/OH/V306/ana-model/olcum/kati_yer_tutucu_genislik.{py,json}.
+    ('solid.html', 'fin_width'): 278,
+    ('solid.html', 'fin_length'): 278,
+    ('solid.html', 'slot_width'): 386,
+    ('solid.html', 'slot_depth'): 386,
+    ('solid.html', 'throat_diameter'): 286,
+    ('solid.html', 'exit_diameter'): 286,
+    ('solid.html', 'expansion_ratio'): 286,
 }
 
 #: Çeviri anahtarı ARANMAYAN yer tutucular ve GEREKÇESİ.

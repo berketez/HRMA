@@ -813,7 +813,7 @@ def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, 
             if _sayi_mi(ag.get('n_nodes')):
                 spek.append((ag['n_nodes'], 'tam'))
             if spek:
-                ekle('ağ boyu', ('MESH ',), 'info', sayi=spek,
+                ekle('ağ boyu', ('MESH ', 'AĞ '), 'info', sayi=spek,
                      haric=('DISTORTION', 'BOZULMASI'))
 
     def _kalite_beklentileri():
@@ -839,14 +839,14 @@ def _capraz_beklentileri(panel_adi: str, yuk: Dict[str, Any]) -> List[Dict[str, 
             if _sayi_mi(toplam):
                 spek.append((toplam, 'tam'))
             ekle('ağ bozulması sayacı',
-                 ('MESH DISTORTION', 'MESH BOZULMASI'),
+                 ('MESH DISTORTION', 'AĞ BOZULMASI'),
                  'warn' if sayimlar.get('jacobian') else 'ok',
                  sayi=spek or None,
                  haric=('NOT PUBLISHED', 'YAYIMLANMADI'))
         elif 'jacobian' in olculen:
             ekle('ağ bozulması yayımlanmadı beyanı',
                  ('MESH DISTORTION NOT PUBLISHED',
-                  'MESH BOZULMASI YAYIMLANMADI'), 'dim')
+                  'AĞ BOZULMASI YAYIMLANMADI'), 'dim')
         if olculen.get('aspect'):
             spek = []
             if _sayi_mi(esik_blok.get('aspect_ratio_max')):

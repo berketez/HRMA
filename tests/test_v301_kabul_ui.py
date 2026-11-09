@@ -416,7 +416,17 @@ ORNEK_TASARIM_FARKI = {
     'liquid': frozenset({
         'chamber_material', 'chamber_pressure', 'chamber_wall_thickness',
         'fuel_density', 'max_burn_duration', 'mixture_ratio'}),
-    'hybrid': frozenset({'motor_description', 'of_ratio'}),
+    'hybrid': frozenset({
+        'motor_description', 'of_ratio',
+        # V306/HİBRİT-NOZUL kalem 5 (8d63f958d): örnek Carmicino 2013
+        # uyarlamasıyla (a 6,399e-5, n 0,554) ve başlangıç akısı
+        # 250 kg/m²·s ile üreticiden yeniden üretildi; delik çapı bandı
+        # tohumdan çıktı. Gövde farkı ölçüldü (9 Kas, 3.0.6 ağacı):
+        # docs/scofield/raw/OH/V306/ana-model/k7/k7_govde_farki.json —
+        # contraction_ratio v3.0.0 '<yok>' ⟷ örnek 0 ('not_supplied_
+        # solver_derives', alan yokken de uç 0 kullanır: sonuç etkisiz).
+        'regression_a', 'regression_n', 'mass_flux_chamber',
+        'hole_diameter_min', 'hole_diameter_max', 'contraction_ratio'}),
 }
 
 
@@ -494,7 +504,9 @@ def _k8_beklenen(mt, s):
                 ('kart', 'Peak Chamber Pressure',
                  (s.get('throat_sizing') or {}).get('peak_chamber_pressure_bar'), 1),
                 ('kart', 'Burn Time', s.get('burn_time'), 2),
-                ('kart', 'Total Impulse', (s.get('total_impulse') or 0) / 1000, 1),
+                # V306/RAPOR kalem 6 (f94ed18b3, M-KATI-3/18): katı manşet
+                # impulsu N·s, tam sayı (kN·s'ye bölünüp iki basamağa inmez).
+                ('kart', 'Total Impulse', s.get('total_impulse'), 0),
                 ('kart', 'Propellant Mass', s.get('propellant_mass'), 2),
                 ('tablo', 'Throat Diameter (machined)', s.get('throat_diameter'), 2),
                 ('tablo', 'Exit Diameter', s.get('exit_diameter'), 2),
@@ -503,8 +515,12 @@ def _k8_beklenen(mt, s):
                 ('tablo', 'Total Motor Length', kd.get('total_length_mm'), 1),
                 ('tablo', 'C*', s.get('c_star'), 0)]
     if mt == 'liquid':
-        return [('kart', 'Sea Level Isp', s.get('isp_sea_level'), 1),
-                ('kart', 'Vacuum Isp', s.get('isp_vacuum'), 1),
+        # V306/SIVI-DEFTER kalem 4-6 (b915bc5cf): başlık Isp adları motor
+        # Isp'si — toplam itici tüketimine göre (deniz seviyesi / vakum).
+        return [('kart', 'Engine Isp — per total propellant consumption (sea level)',
+                 s.get('isp_sea_level'), 1),
+                ('kart', 'Engine Isp — per total propellant consumption (vacuum)',
+                 s.get('isp_vacuum'), 1),
                 ('kart', 'Space Optimized Isp', s.get('isp_vacuum_optimized'), 1),
                 ('kart', 'Vacuum Thrust', (s.get('thrust_vacuum') or 0) / 1000, 1),
                 ('tablo', 'Throat Diameter', s.get('throat_diameter_mm'), 2),

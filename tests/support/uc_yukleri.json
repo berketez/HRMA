@@ -634,7 +634,7 @@
   "grain_length": 500.0,
   "core_diameter": 30.0,
   "expansion_ratio": 8.0,
-  "n_samples": 8
+  "n_samples": 20
  },
  "/api/thermal-protection": {
   "mode": "ablative",

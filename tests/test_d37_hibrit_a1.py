@@ -534,27 +534,17 @@ def test_cwu6_ag_kopmasi_bildirimi_veri_tipi_demez():
         assert 'Network/Connection' in s['metin'], s
 
 
-def _popup_betigi() -> str:
+def test_cwu6_acilir_pencere_sokuldu():
+    """V306/BAYAT NR-8: "3B Model Üret" düğmesinin açtığı about:blank özet
+    penceresi SÖKÜLDÜ (kaydedilemez/yenilenemez belgeydi; içindeki dört
+    indirme ana sayfadaki kendi düğmelerinde). Eski bekçi pencerenin
+    betiğini node'da koşturup ana pencere kapalıyken alert() yerine sayfa
+    içi bildirim bastığını ölçüyordu; pencere olmadığı için iddia,
+    pencerenin GERİ GELMEDİĞİDİR (alert yasağı test_cwu6_alert_cagrisi_sifir
+    bekçisinde sürer). Ayrıntı: tests/test_v306_bayat.py NR-8."""
     src = _oku(SABLON)
-    m = re.search(r"<scr` \+ `ipt>(.*?)</scr` \+ `ipt>", src, re.S)
-    assert m, 'açılır pencere betiği bulunamadı'
-    betik = m.group(1)
-
-    def yedek(mm):
-        return json.dumps(mm.group(2).replace("\\'", "'"))
-    betik = re.sub(r"\$\{JSON\.stringify\(i18nText\('([^']+)',\s*'((?:[^'\\]|\\.)*)'\)\)\}",
-                   yedek, betik)
-    assert '${' not in betik, 'çözülmemiş şablon yeri kaldı: %r' % betik[:200]
-    return betik
-
-
-@node_gerekli
-def test_cwu6_acilir_pencere_ana_pencere_yokken_bildirim():
-    out = _node({'sozluk': False, 'popup_betik': _popup_betigi()})['popup']
-    assert out['alert'] == [], 'açılır pencere alert() açıyor: %r' % out['alert']
-    for ad, s in out['sonuc'].items():
-        assert s['sayi'] == 1 and s['rol'] == 'alert', (ad, s)
-        assert 'The main HRMA window is closed' in s['metin'], (ad, s)
+    assert 'window.open(' not in src
+    assert "<scr` + `ipt>" not in src
 
 
 # ---------------------------------------------------------------------------

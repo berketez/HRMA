@@ -481,9 +481,11 @@ class TestP10B416AracOtomasyonu:
 # "built-in propellant table"dan geldiğini söylüyor; bu iddia ölçülerek
 # DOĞRU bulundu (hrma/app.py::oxidizer_reference_density `source` künyesi
 # yayımlıyor), o yüzden metin korunur ve kayıt borç mandalı olarak durur.
-KILITLI_IDDIALAR = {
-    ('hrma/static/js/i18n_advanced.js', 'builtin_table_claim', 'f74526f0e7de'),
-}
+# V306/DİL-HİBRİT (f2493f731): ipucu 'built-in propellant table' yerine
+# "HRMA's propellant table" diyor (kaynak zinciri aynı); iddia_lint artık
+# üç hedefte HİÇ isabet vermiyor (ölçüldü, V306/ONARIM-ALTYAPI kalem 8).
+# Borç kapandı, mandal boş kümeye sıkıldı: yeni her isabet KIRMIZI.
+KILITLI_IDDIALAR = frozenset()
 
 IDDIA_HEDEFLERI = ('hrma/templates/index.html', 'hrma/static/js/i18n.js',
                    'hrma/static/js/i18n_advanced.js')

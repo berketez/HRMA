@@ -1589,3 +1589,102 @@ def build_wall_mesh(contour,
         n_radial=int(n_radial),
         meta=meta,
     )
+
+
+# ---------------------------------------------------------------------------
+# V306/FEA-SIVI (kalem 1) — KATMANLI CİDAR AĞI (yalnız ekleme; yukarıdaki
+# genel API değişmez)
+# ---------------------------------------------------------------------------
+def build_layered_wall_mesh(contour,
+                            layer_thicknesses,
+                            n_axial: int,
+                            n_radial_layers,
+                            offset_mode: str = "normal") -> AxisymMesh:
+    """Katman sınırları eleman sınırına oturan yapısal quad ağ.
+
+    İki katmanlı rejeneratif cidar gibi iç konturdan dışa doğru üst üste
+    duran katmanlar için. Ağ ``build_wall_mesh`` ile TOPLAM kalınlıkta
+    kurulur (aynı istasyon yerleşimi, aynı normal öteleme, aynı dış yüzey
+    eğrilik tabanı); sonra her istasyonun cidar boyu doğrusu boyunca düğümler
+    katman sınırları MUTLAK uzaklıkta kalacak biçimde yeniden dizilir:
+    katman k'nın iç yüzü iç konturdan sum(t_0..t_{k-1}) uzaklıktadır. Son
+    (en dış) katman doğrunun kalanını alır; dış yüzey eğrilik tabanı bir
+    istasyonda cidarı kalınlaştırdıysa kalınlaşma YALNIZ dış katmana düşer
+    (iç katmanlar istenen kalınlıkta kalır) ve ``meta`` ölçer.
+
+    Parametreler
+    ------------
+    contour : (n, 2) — iç yüzey [(z, r)], metre (``build_wall_mesh`` ile aynı).
+    layer_thicknesses : dizi — içten dışa katman kalınlıkları [m], hepsi > 0.
+    n_axial : int — eksenel eleman sayısı.
+    n_radial_layers : dizi — katman başına cidar boyu eleman sayısı (>= 1).
+
+    Bağlantı (``elems``), ızgara (``node_index_grid``) ve yüzey kümeleri
+    ``build_wall_mesh``inkiyle AYNI düzendedir; katman sınırları
+    ``meta['katmanlar']`` içinde ızgara sütunu (j) olarak yayımlanır.
+    """
+    t_k = np.asarray(layer_thicknesses, dtype=float).ravel()
+    n_k = np.asarray(n_radial_layers, dtype=int).ravel()
+    if t_k.size < 1 or t_k.size != n_k.size:
+        raise ValueError("Katman kalınlıkları ve eleman sayıları aynı "
+                         "uzunlukta, en az bir katman olmalı.")
+    if not np.all(np.isfinite(t_k)) or np.any(t_k <= 0.0):
+        raise ValueError("Katman kalınlıkları sonlu ve pozitif olmalı.")
+    if np.any(n_k < 1):
+        raise ValueError("Katman başına en az bir eleman gerekli.")
+    toplam = float(t_k.sum())
+    n_rad = int(n_k.sum())
+    taban = build_wall_mesh(contour, toplam, int(n_axial),
+                            n_radial=n_rad, offset_mode=offset_mode)
+    if int(taban.n_radial) != n_rad:
+        # build_wall_mesh alt sınıra çektiyse katman sütunları kayar:
+        # sessizce devam edilmez.
+        raise ValueError(
+            f"Ağ üreticisi cidar boyu eleman sayısını {n_rad} -> "
+            f"{taban.n_radial} değiştirdi; katman sınırları kurulamaz.")
+    grid = np.asarray(taban.node_index_grid, dtype=int)
+    nodes = np.asarray(taban.nodes, dtype=float).copy()
+    ic = nodes[grid[:, 0]]
+    dis = nodes[grid[:, -1]]
+    vek = dis - ic
+    boy = np.hypot(vek[:, 0], vek[:, 1])                  # (n_axial+1,)
+    ic_sinir = np.concatenate([[0.0], np.cumsum(t_k[:-1])])
+    if np.any(boy <= ic_sinir[-1] + 1e-12 * toplam):
+        raise ValueError("Dış katmana yer kalmadı (cidar doğrusu iç "
+                         "katmanların toplamından kısa).")
+    uzaklik = np.empty((boy.size, n_rad + 1))
+    j = 0
+    katmanlar = []
+    for k in range(t_k.size):
+        bas = np.full(boy.size, ic_sinir[k])
+        son = (np.full(boy.size, ic_sinir[k] + t_k[k])
+               if k < t_k.size - 1 else boy)
+        for m in range(int(n_k[k]) + (1 if k == t_k.size - 1 else 0)):
+            uzaklik[:, j + m] = bas + (son - bas) * m / float(n_k[k])
+        katmanlar.append({"j0": int(j), "j1": int(j + n_k[k]),
+                          "kalinlik_m": float(t_k[k])})
+        j += int(n_k[k])
+    birim = vek / boy[:, None]
+    yeni = ic[:, None, :] + uzaklik[:, :, None] * birim[:, None, :]
+    nodes[grid.ravel()] = yeni.reshape(-1, 2)
+    _corner_jacobian_check(nodes, taban.elems)
+    dis_kalin = boy - ic_sinir[-1]
+    meta = dict(taban.meta)
+    meta.update({
+        "_source": "hrma.fea.mesh_axisym.build_layered_wall_mesh",
+        "katmanlar": katmanlar,
+        "katman_kalinliklari_istenen_m": [float(v) for v in t_k],
+        "dis_katman_kalinligi_min_m": float(dis_kalin.min()),
+        "dis_katman_kalinligi_maks_m": float(dis_kalin.max()),
+        "katman_beyani": (
+            "katman sınırları istasyon başına cidar boyu doğrusunda iç "
+            "konturdan MUTLAK uzaklıkta; dış yüzey eğrilik tabanının "
+            "kalınlaştırdığı istasyonlarda fazlalık yalnız dış katmanda "
+            "(dis_katman_kalinligi_maks_m)"),
+    })
+    return AxisymMesh(
+        nodes=nodes, elems=taban.elems, node_index_grid=grid,
+        inner_edges=taban.inner_edges, outer_edges=taban.outer_edges,
+        inner_nodes=taban.inner_nodes, outer_nodes=taban.outer_nodes,
+        z_min_nodes=taban.z_min_nodes, z_max_nodes=taban.z_max_nodes,
+        n_axial=taban.n_axial, n_radial=taban.n_radial, meta=meta)

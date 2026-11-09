@@ -262,11 +262,15 @@ class TestP12aB3_01BeyanHerGerekceyleEkranda:
 # ---------------------------------------------------------------------------
 # OH-D16-10 — /api/solid-monte-carlo TEK RET ADI
 # ---------------------------------------------------------------------------
+# V306/HIZ (M-KATI-35): n_samples 8 → 20. Motor bandı (SOLID_MC_SAMPLE_BAND
+# = 20..2000) 8'i sessizce 20'ye çıkarıyordu (yanıtın n_samples'ı 20'ydi);
+# uç artık bant dışını 422 ile reddediyor. Geçerli gövde fiilen koşulan
+# sayıyı ister; ret vakaları aynı (kapılar örnek sayısından önce konuşur).
 _MC_TABAN = {'motor_name': 'MC', 'propellant_type': 'apcp',
              'grain_type': 'bates', 'chamber_pressure': 40.0,
              'thrust': 5000.0, 'burn_time': 3.0,
              'chamber_diameter': 100.0, 'grain_length': 500.0,
-             'core_diameter': 30.0, 'expansion_ratio': 8.0, 'n_samples': 8}
+             'core_diameter': 30.0, 'expansion_ratio': 8.0, 'n_samples': 20}
 
 
 class TestOHD16_10TekRetAdi:

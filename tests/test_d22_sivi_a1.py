@@ -81,11 +81,15 @@ def test_p6b402_kalinti_iki_adli_terime_TAM_ayrisir(sivi_sonuc):
 
 
 def test_p6b402_debi_bogulmus_bogaz_ozdesliginden_GELIYOR(sivi_sonuc):
-    """Eski gerekçenin çürütüldüğü ÖLÇÜM: ṁ = Pc·A_t·C_D/c* (birebir)."""
+    """Eski gerekçenin çürütüldüğü ÖLÇÜM: ṁ = Pc·A_t·C_D/c* (birebir).
+
+    V306/SIVI-DEFTER (K5): boğazdan geçen debi ANA ODA debisidir; açık
+    çevrimde toplam pompalanan debi bundan türbin debisi kadar büyüktür.
+    """
     motor, _ = sivi_sonuc
     mdot_bogaz = (float(motor.P_c) * 1e5 * float(motor.A_t)
                   / float(motor.c_star))
-    assert float(motor.mdot_total) == pytest.approx(
+    assert float(motor.mdot_main_chamber) == pytest.approx(
         mdot_bogaz * float(motor.CD_throat), rel=1e-9), (
         'debi boğulmuş-boğaz özdeşliğinden gelmiyor; P6B4-02 ölçümü '
         'geçersizleşti, gerekçe metni yeniden ölçülmeli')

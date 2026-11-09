@@ -528,6 +528,18 @@ def matplotlib_png(fig_dict, width_px, height_px):
         ax.tick_params(colors='#111111')
         if ax2 is not None:
             ax2.tick_params(colors='#111111')
+        # V306/RAPOR-DİL: figürün ondalık ayracı (``layout.separators``;
+        # TR'de ekran ve rapor ',.' koyar) emniyet çizicisinde de geçerli —
+        # yalnız gösterim, sayı değişmez. Log eksenine dokunulmaz.
+        if str(layout.get('separators') or '').startswith(','):
+            from matplotlib.ticker import FuncFormatter, ScalarFormatter
+            for eksen_ax in (ax, ax2):
+                if eksen_ax is None:
+                    continue
+                for eksen in (eksen_ax.xaxis, eksen_ax.yaxis):
+                    if isinstance(eksen.get_major_formatter(), ScalarFormatter):
+                        eksen.set_major_formatter(FuncFormatter(
+                            lambda v, _p: ('%g' % v).replace('.', ',')))
         # Açıklamalar ve dikey/yatay işaretler artık DÜŞMÜYOR
         # (ÖH D15 / P9B3-13: ölçülen kayıp 60/60 açıklamaydı).
         _draw_shapes(ax, layout)

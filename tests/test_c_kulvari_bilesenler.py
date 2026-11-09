@@ -1077,7 +1077,7 @@ class TestDurustluk:
             propellant_specific_heat_J_kg_K=2000.0,
             propellant_ignition_temperature_K=700.0)
         assert out['pyrotechnic']['status'] == 'not_modelled'
-        assert 'will not invent one' in out['pyrotechnic']['reason']
+        assert 'assumes none' in out['pyrotechnic']['reason']
         assert 'charge_mass_kg' not in out['pyrotechnic']
 
     def test_torc_isi_salimi_zorunlu(self):

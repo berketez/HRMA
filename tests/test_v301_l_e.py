@@ -87,11 +87,21 @@ def _irtifa_kart_esitligi(j):
     # 100 km'de ortam 2,3e-7 bar: vakum kartından sapma < 1e-6 bağıl.
     assert ap[-1]['specific_impulse'] == pytest.approx(j['isp_vacuum'], rel=1e-6)
     # Ara satırlar aynı lüle özdeşliği: Isp(h) doğrusal p_a(h)'ye göre.
+    # V306/SIVI-DEFTER (K5): açık çevrim defteri kapandıysa satırın Isp'si
+    # MOTOR değeridir (ana oda + türbin egzozu; egzozun ortam yasası ayrı);
+    # lüle özdeşliği ANA ODA sütununda, defterin ana oda kartlarıyla kurulur.
+    defter = j.get('mass_flow_ledger') or {}
+    acik = defter.get('status') == 'open_cycle_closed'
+    i_sl = (defter['main_chamber_isp_sea_level_s'] if acik
+            else j['isp_sea_level'])
+    i_vac = (defter['main_chamber_isp_vacuum_s'] if acik
+             else j['isp_vacuum'])
     pa_sl = j['nozzle_design']['performance']['ambient_pressure']
     for s in ap:
-        beklenen = (j['isp_vacuum'] - (j['isp_vacuum'] - j['isp_sea_level'])
-                    * s['pressure'] / pa_sl)
-        assert s['specific_impulse'] == pytest.approx(beklenen, rel=1e-12), s
+        beklenen = i_vac - (i_vac - i_sl) * s['pressure'] / pa_sl
+        satir = (s['specific_impulse_main_chamber'] if acik
+                 else s['specific_impulse'])
+        assert satir == pytest.approx(beklenen, rel=1e-12), s
         assert 'same-nozzle identity' in s['isp_anchor_basis']
         assert 'sea-level design point' in s['isp_anchor_basis']
 
@@ -143,14 +153,31 @@ def test_nk66_kisma_ayrilmasi_tasarim_noktasi_anahtarini_kullanmaz(ornek_23):
 
 
 def test_nk66_tasarim_noktasi_ayriksa_hukum_tasarim_degeriyle(istemci):
+    """V306/SIVI-CEKET-B kalem 5 ÇEVİRİSİ: tasarım noktasında ayrılan sabit
+    ε artık uyarıyla yayımlanmaz — adlı ret (UÇUŞ-KÜTLE DEVİR 2, ana model
+    kararı 9 Kas). Hüküm yine TASARIM noktasının çıkış basıncıyla verilir
+    (kısma noktasınınkiyle değil) ve ret, ayrılmayan en büyük ε'yu söyler;
+    o değerle aynı motor yayımlanır ve tasarım noktası ayrılmaz."""
     kod, j = _post(istemci, _ornek(nozzle_expansion_ratio=30))
-    assert kod == 200
-    t = _uyari(j, 'warn.liquid.flow_separation')
-    assert len(t) == 1
-    # Basılan değer TASARIM noktasının çıkış basıncı (kısma noktasının değil).
-    assert t[0]['params']['pe_bar'] == round(
-        j['nozzle_angles']['exit_pressure_bar'], 3)
-    assert not _uyari(j, 'warn.liquid.throttle_flow_separation')
+    assert kod == 422
+    assert j['error_code'] == 'fixed_nozzle_separated_at_design_ambient'
+    p = j['message_params']
+    kayit = j['nozzle_separation']
+    assert p['eps'] == 30.0
+    assert p['pe_bar'] == round(kayit['exit_pressure_bar'], 3)
+    assert kayit['exit_pressure_bar'] < kayit['separation_pressure_bar']
+    assert kayit['separation_pressure_bar'] == pytest.approx(
+        0.40 * kayit['ambient_pressure_bar'], rel=1e-12)
+    eps_max = kayit['max_attached_expansion_ratio_2dp']
+    assert 1.0 < eps_max < 30.0
+    assert j['message_key'] == 'err.liquid.fixed_nozzle_separated'
+    # Sınır: ayrılmayan en büyük ε ile motor yayımlanır, tasarım noktası
+    # ayrılma uyarısı yok (kısma noktası ayrılabilir; o ayrı hüküm).
+    kod2, j2 = _post(istemci, _ornek(nozzle_expansion_ratio=eps_max))
+    assert kod2 == 200
+    assert not _uyari(j2, 'warn.liquid.flow_separation')
+    assert j2['nozzle_angles']['exit_pressure_bar'] >= \
+        kayit['separation_pressure_bar']
 
 
 # ---------------------------------------------------------------------------

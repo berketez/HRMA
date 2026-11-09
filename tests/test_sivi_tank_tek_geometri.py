@@ -384,7 +384,18 @@ class TestTankBasinciTekKaynak:
         _, regen = basincli
         _, abl = basincli_ablatif
         r_inj, a_inj = regen['injection_system'], abl['injection_system']
-        r_dp = float(regen['cooling_system']['cooling_pressure_drop'])
+        # V306/SIVI-CEKET-B kalem 4: ceketin YAYIMLADIĞI ΔP K5_KARAR EK4'ten
+        # (SIVI-CEKET, 2bc09c130) beri TEK sayıdır — besleme bütçesinin ceket
+        # kalemi (istasyon marşının ΔP'si); gereken tank basıncı, çevrim ve
+        # Isıl Koruma kartı onu okur. ``cooling_system.cooling_pressure_drop``
+        # toplu Bartz kestirimidir (tanı amaçlı, bütçeye girmez). Bu bekçi o
+        # birleşmeden beri bugünkü çıktıyı değil eski toplu sayıyı kilitliyordu
+        # (ölçüldü: talep farkı 4,8865 bar = marş ΔP'si, toplu kestirim
+        # 4,3494 bar). Ablatif kardeşte ceket kalemi yoktur (0 bar).
+        r_dp = float(regen['feed_system']['pressure_drops']['fuel_line']
+                     ['regen_jacket'])
+        assert 'regen_jacket' not in (abl['feed_system']['pressure_drops']
+                                      ['fuel_line'])
         a_dp = float(abl['cooling_system']['cooling_pressure_drop'])
 
         # Kontrol: düzenek gerçekten YALNIZ ceket ΔP'sinde ayrışıyor.
