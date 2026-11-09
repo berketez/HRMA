@@ -305,9 +305,13 @@ class TestKokIkiKademe:
                        for c, _s in kodlar)
 
     def test_728_ustu_kritik(self, client):
+        # V306/SIVI-CEKET-B kalem 5: örneğin ε 12'si 30 bar'da deniz
+        # seviyesinde ayrılıyor (ayrılmayan en büyük ε 9,27; uç adlı ret);
+        # vaka ayrılmayan ε 9 ile kurulur.
         b = _govde(client, {'chamber_material': 'cucrzr',
                             'chamber_wall_thickness': 1.0,
-                            'chamber_pressure': 30, 'feed_pressure': 45})
+                            'chamber_pressure': 30, 'feed_pressure': 45,
+                            'nozzle_expansion_ratio': 9})
         sm = b['thermal_protection']['station_march']
         assert sm['peak_coolant_side_wall_temperature_K'] > 728.0
         assert sm['coking'] is True
@@ -526,12 +530,19 @@ class TestArayuz:
         assert js.count("'%s':" % anahtar) == 2
 
     def test_sogutma_paneli_rp1_giris_basincini_tohumlar(self, gecerli):
+        # V306/SIVI-SOĞUTMA (M-SIVI-24): marşın giriş basıncı artık katman
+        # denetimiyle AYNI besleme bütçesi alanıdır (eskiden P_c + 10 bar;
+        # aynı yanıtta iki ayrı ceket giriş basıncı vardı). Panel bu tek
+        # sayıyı tohumlar.
         sm = gecerli['thermal_protection']['station_march']
-        from hrma.engines.liquid_rocket_engine import (
-            RP1_MARCH_INLET_MARGIN_BAR)
+        p_butce = (gecerli['feed_system']['pressure_drops']
+                   ['pump_discharge_pressure_fuel'])
         assert sm['coolant_inlet_pressure_bar'] == pytest.approx(
-            GECERLI_NOKTA['chamber_pressure'] + RP1_MARCH_INLET_MARGIN_BAR,
-            rel=1e-12)
+            p_butce, rel=1e-12)
+        for katman in (gecerli['structural_analysis']['chamber_structure']
+                       ['wall_layers']):
+            assert katman['coolant_pressure_bar'] == pytest.approx(
+                sm['coolant_inlet_pressure_bar'], rel=1e-12)
         js = (KOK / 'hrma' / 'static' / 'js' / 'panels' /
               'cooling_panel.js').read_text(encoding='utf-8')
         assert 'smr.coolant_inlet_pressure_bar' in js

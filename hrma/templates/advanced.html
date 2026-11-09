@@ -6,6 +6,9 @@
     <!-- Yükleme bayt tavanları (app.py inject_upload_limits; import_ui.js okur;
          V3 güvenlik 5. tur): sayı JS'e kopyalanmaz. -->
     <meta name="hrma-upload-limits" content='{{ upload_limits|tojson }}'>
+    <!-- V306/HİBRİT-SAYI (kalem 7): formun kabul bantları = sunucunun bandı
+         (app.py _hibrit_form_bantlari ← CANONICAL_LIMITS); sayı JS'e kopyalanmaz. -->
+    <meta name="hrma-hybrid-input-limits" content='{{ hybrid_input_limits|tojson }}'>
     <!-- i18n katmanı: <html lang> + data-i18n uygulaması (dil seçici Ana Sayfa'da) -->
     <script src="/static/js/i18n.js"></script>
     <!-- Hibrit sayfasının EN/TR sözlüğü (i18n.js'ten SONRA yüklenir) -->
@@ -1070,22 +1073,87 @@
                         if (isFinite(m.burn_time)) ek.burn_time_design = m.burn_time;
                         ek.source = 'page_calculation';
                     }
-                    const tr = TransientPanel.result;
-                    if (tr && tr.transient && tr.transient.time.length > 3) {
-                        return Object.assign({ thrust_curve: { time: tr.transient.time,
-                                                 thrust: tr.transient.thrust },
-                                               curve_source: 'transient_panel' }, ek);
+                    // V306/UÇUŞ-2 (M-HIBRIT-1/-17/-24) — UÇAN İTKİ TEK KURALDAN:
+                    // aynı hesabın aracındaki ``flight_thrust``
+                    // (flight_vehicle.motor_flight_thrust; Yörünge paneli de
+                    // bunu uçurur). Zaman Çözümlü eğrisi burada ÖNCELİKLENMEZ
+                    // (eskiden koşulmuşsa — başka bir motor için bile — o
+                    // uçuyordu); yalnız transientProvider ile, açık seçimle.
+                    const arac = (window.FlightHandoff && window.currentResults)
+                        ? FlightHandoff.vehicleFor(window.currentResults) : null;
+                    const u = arac && arac.flight_thrust;
+                    if (!u) return null;
+                    // V306/UÇUŞ-KÜTLE (kalem 1): yüklü − harcanan (yanmayan
+                    // tane şeridi + tankta kalan) her itki kaynağında.
+                    const kalan = (typeof u.propellant_residual_kg === 'number')
+                        ? u.propellant_residual_kg
+                        : ((u.curve_source === 'motor_blowdown'
+                            && u.propellant_loaded_kg > u.propellant_consumed_kg)
+                            ? u.propellant_loaded_kg - u.propellant_consumed_kg : 0);
+                    const ortak = Object.assign({}, ek, {
+                        curve_source: u.curve_source,
+                        total_impulse_ns: u.total_impulse_ns,
+                        motor_published_impulse_ns: u.motor_published_impulse_ns,
+                        propellant_mass: u.propellant_consumed_kg,
+                        propellant_residual_kg: kalan,
+                    });
+                    const tc = u.thrust_curve;
+                    if (tc && Array.isArray(tc.time) && tc.time.length > 3
+                            && Array.isArray(tc.thrust) && tc.time.length === tc.thrust.length) {
+                        const tSon = tc.time[tc.time.length - 1];
+                        return Object.assign(ortak, {
+                            thrust_curve: { time: tc.time, thrust: tc.thrust },
+                            thrust: (tSon > 0 && u.total_impulse_ns > 0) ? u.total_impulse_ns / tSon : undefined,
+                            burn_time: tSon });
                     }
-                    const tc = m && m.thrust_curve;
-                    if (tc && Array.isArray(tc.time) && Array.isArray(tc.thrust)
-                            && tc.time.length > 3 && tc.time.length === tc.thrust.length) {
-                        return Object.assign({ thrust_curve: { time: tc.time, thrust: tc.thrust },
-                                               curve_source: 'motor_thrust_curve' }, ek);
-                    }
-                    if (m) {
-                        return Object.assign({ thrust: m.thrust, burn_time: m.burn_time }, ek);
+                    if (u.thrust > 0 && u.burn_time > 0) {
+                        return Object.assign(ortak, { thrust: u.thrust, burn_time: u.burn_time });
                     }
                     return null;
+                },
+                // V306/UÇUŞ-2 + ana model notu (BAYAT): Zaman Çözümlü eğrisi
+                // yalnız AYNI motor koşusuna aitse. Koşu kimliği: panel,
+                // eğrisini koştuğu andaki sonuç nesnesine iliştirir
+                // (transient_panel.js: currentResults.motor.transient); yeni
+                // bir motor hesabı yeni bir sonuç nesnesi yaratır ve eki
+                // taşımaz. Panelin son sonucu (TransientPanel.result) ancak
+                // dizisi bu ekle AYNI nesneyse kullanılır — eski motorun
+                // eğrisi yeni motorun kütlesiyle uçmaz.
+                transientProvider: function () {
+                    const cr = window.currentResults;
+                    const m = cr && cr.motor;
+                    const ek = m && m.transient;
+                    const tr = window.TransientPanel && TransientPanel.result;
+                    const tt = tr && tr.transient;
+                    if (!ek || !tt || !Array.isArray(tt.time) || tt.time.length <= 3
+                            || ek.time !== tt.time || ek.thrust !== tt.thrust) {
+                        return null;
+                    }
+                    let impuls = 0, harcanan = 0;
+                    const mo = tt.mdot_ox, mf = tt.mdot_fuel;
+                    const debiVar = Array.isArray(mo) && Array.isArray(mf)
+                        && mo.length === tt.time.length && mf.length === tt.time.length;
+                    for (let i = 1; i < tt.time.length; i++) {
+                        const dt = tt.time[i] - tt.time[i - 1];
+                        impuls += 0.5 * (tt.thrust[i] + tt.thrust[i - 1]) * dt;
+                        if (debiVar) harcanan += 0.5 * (mo[i] + mf[i] + mo[i - 1] + mf[i - 1]) * dt;
+                    }
+                    if (!(impuls > 0) || !(harcanan > 0)) return null;
+                    // V306/UÇUŞ-KÜTLE (kalem 1): yüklü itici yanmayan şeridi
+                    // de taşır (motorun propellant_mass_loaded_kg'ı).
+                    const yuklu = isFinite(m.propellant_mass_loaded_kg)
+                        ? m.propellant_mass_loaded_kg : m.propellant_mass_total;
+                    const tSon = tt.time[tt.time.length - 1];
+                    return {
+                        thrust_curve: { time: tt.time, thrust: tt.thrust },
+                        curve_source: 'transient',
+                        total_impulse_ns: impuls,
+                        thrust: impuls / tSon,
+                        burn_time: tSon,
+                        propellant_mass: harcanan,
+                        propellant_residual_kg: (isFinite(yuklu) && yuklu > harcanan) ? yuklu - harcanan : 0,
+                        source: 'page_calculation',
+                    };
                 },
             });
             // V301/E2 (Ayberk tur 1) — AYRI ENJEKTÖR PANELİ ANA TASARIMLA EŞLENİR.
@@ -1155,9 +1223,11 @@
                 adNote.style.cssText = 'font-family:var(--hd-mono); font-size:0.72rem;'
                     + ' color:var(--hd-ink-dim, #7d97a5); margin:12px 2px 0;';
                 adNote.setAttribute('data-i18n', 'adv.js.dockScopeNote');
+                // V306/DİL-HİBRİT (M-HIBRIT-14): ürün başka bir yazılım
+                // önermez (kılavuz üslubu); kapsam sınırı adıyla söylenir.
                 adNote.textContent = 'Hand-calculation scope: axisymmetric monocoque cases,'
-                    + ' first-mode estimates. For discontinuity stresses, t/r > 0.2,'
-                    + ' multi-mode slosh → use FEA (ANSYS).';
+                    + ' first-mode estimates. Discontinuity stresses, t/r > 0.2 and'
+                    + ' multi-mode slosh are outside it and need a finite-element analysis.';
                 if (typeof window.I18N !== 'undefined' && I18N.applyTo) I18N.applyTo(adNote);
                 adDockEl.appendChild(adNote);
             }
@@ -1233,11 +1303,11 @@
                             <span data-i18n="adv.label.altitudeM">Altitude (m)</span> <span class="unit" data-i18n="adv.unit.aboveSeaLevel">above sea level</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.altitudeM">Flight altitude above sea level in meters. Affects ambient pressure and nozzle performance. Sea level: 0m, Commercial aviation: 10000m, Space edge: 100000m. Higher altitude reduces ambient pressure, improving vacuum performance.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.altitudeM">Altitude of the design point above sea level (m). It fills the ambient pressure field below with the ISA 1976 pressure of that altitude; that pressure is the nozzle back pressure, so it changes thrust, C_F and Isp (a lower ambient pressure gives a higher Isp). Form range 0-50000 m.</span>
                             </div>
                         </label>
                         <input type="number" id="single_altitude" value="0" min="0" max="50000" onchange="updateSinglePressure()">
-                        <div class="help-text" data-i18n="adv.help.seaLevel0mTypical">Sea level = 0m, typical rocket: 0-10000m</div>
+                        <div class="help-text" data-i18n="adv.help.seaLevel0mTypical">Sea level = 0 m; the ambient pressure comes from the ISA 1976 standard atmosphere</div>
                     </div>
                     <div class="form-group">
                         <label for="single_pressure">
@@ -1262,7 +1332,7 @@
                                 <span data-i18n="adv.label.initialAltitudeM">Initial Altitude (m)</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.initialAltitudeM">Starting altitude for trajectory analysis. Usually ground level (0m) for vertical launches or current altitude for air-launched systems. Analysis will calculate performance changes during ascent.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.initialAltitudeM">Start altitude of the altitude profile (m). The calculation runs at this altitude: its ISA 1976 ambient pressure is the nozzle back pressure, as in the single-altitude mode. Empty: 0 m. Form range 0-50000 m.</span>
                                 </div>
                             </label>
                             <input type="number" id="alt_start" value="0" min="0" max="50000">
@@ -1272,7 +1342,7 @@
                                 <span data-i18n="adv.label.finalAltitudeM">Final Altitude (m)</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.finalAltitudeM">Maximum altitude for trajectory analysis. Should represent apogee or desired analysis ceiling. Performance will be calculated at various altitudes between initial and final values.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.finalAltitudeM">End altitude of the altitude profile (m). Only the Preview Profile chart uses it (ISA 1976 ambient pressure from the start to the end altitude); the calculation does not read it. Form range 0-50000 m.</span>
                                 </div>
                             </label>
                             <input type="number" id="alt_end" value="10000" min="0" max="50000">
@@ -1282,7 +1352,7 @@
                                 <span data-i18n="adv.label.numberPoints">Number of Points</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.numberPoints">Number of calculation points between initial and final altitude. More points provide smoother performance curves but require more computation time. 10-20 points typically sufficient for most analyses.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.numberPoints">Number of points of the Preview Profile curve between the start and end altitude. The calculation does not read it. Form range 3-100.</span>
                                 </div>
                             </label>
                             <input type="number" id="alt_points" value="10" min="3" max="100">
@@ -1311,10 +1381,10 @@
                             <span data-i18n="adv.label.thrustN">Thrust (N)</span> <span class="unit" data-i18n="adv.unit.newton">Newton</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.thrustN">Design-point thrust of the motor, in N. With the burn time it fixes the total impulse (I = F·t_b) and, through Isp, the mass flow and propellant masses. Required: if it is left empty the run is rejected by name; no thrust is assumed. Accepted range 10-100000 N (form 1-100000, server 10-1000000).</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.thrustN">Design-point thrust of the motor, in N. With the burn time it fixes the total impulse (total impulse = thrust × burn time) and, through Isp, the mass flow and propellant masses. Required: if it is left empty the run is rejected by name; no thrust is assumed. Accepted range 10-1000000 N.</span>
                             </div>
                         </label>
-                        <input type="number" id="thrust" value="1000" step="0.1" min="1">
+                        <input type="number" id="thrust" value="1000" step="0.1" min="{{ hybrid_input_limits.thrust[0] }}" max="{{ hybrid_input_limits.thrust[1] }}">
                         <div class="help-text" data-i18n="adv.help.targetThrustLevelMotor">Target thrust level for the motor</div>
                     </div>
                     <div class="form-group">
@@ -1322,10 +1392,10 @@
                             <span data-i18n="adv.label.burnTimeS">Burn Time (s)</span> <span class="unit" data-i18n="adv.unit.seconds">seconds</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.burnTimeS">Design burn time, in s. With the thrust it fixes the total impulse (I = F·t_b) and so the propellant masses and the fuel grain. Required: if it is left empty the run is rejected by name; no burn time is assumed. Accepted range 0.1-300 s.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.burnTimeS">Design burn time, in s. With the thrust it fixes the total impulse (total impulse = thrust × burn time) and so the propellant masses and the fuel grain. Required: if it is left empty the run is rejected by name; no burn time is assumed. Accepted range 0.1-300 s.</span>
                             </div>
                         </label>
-                        <input type="number" id="burn_time" value="10" step="0.1" min="0.1">
+                        <input type="number" id="burn_time" value="10" step="0.1" min="{{ hybrid_input_limits.burn_time[0] }}" max="{{ hybrid_input_limits.burn_time[1] }}">
                         <div class="help-text" data-i18n="adv.help.totalMotorBurnDuration">Total motor burn duration</div>
                     </div>
                 </div>
@@ -1340,7 +1410,7 @@
                         <label for="total_impulse"><span data-i18n="adv.label.totalImpulseNS">Total Impulse (N⋅s)</span> <span class="unit" data-i18n="adv.unit.newtonSeconds">Newton⋅seconds</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.totalImpulse">Total impulse the motor must deliver, in N·s (I = F·t_b at the design point). It fixes the propellant masses through Isp. With thrust given, the burn time is solved; with burn time given, the thrust is solved. Required in this mode. Form range 1000-1000000 N·s; a solved thrust or burn time outside its own band is rejected by name.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.totalImpulse">Total impulse the motor must deliver, in N·s (thrust × burn time at the design point). It fixes the propellant masses through Isp. With thrust given, the burn time is solved; with burn time given, the thrust is solved. Required in this mode. Form range 1000-1000000 N·s; a solved thrust or burn time outside its own band is rejected by name.</span>
                             </div>
                         </label>
                         <input type="number" id="total_impulse" value="10000" min="1000" max="1000000" step="100">
@@ -1350,25 +1420,25 @@
                         <label for="thrust_impulse"><span data-i18n="adv.label.thrustN">Thrust (N)</span> <span class="unit" data-i18n="adv.unit.optionalLeaveEmptyAuto">thrust or burn time required</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.thrustImpulse">Design-point thrust, in N. In total-impulse mode give this OR the burn time: the other is solved from I = F·t_b. If both are empty the run is rejected by name; HRMA does not pick an 'optimal' thrust. Form range 100-100000 N.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.thrustImpulse">Design-point thrust, in N. In total-impulse mode give this OR the burn time: the other is solved from total impulse = thrust × burn time. If both are empty the run is rejected by name; HRMA does not pick an 'optimal' thrust. Accepted range 10-1000000 N.</span>
                             </div>
                         </label>
-                        <input type="number" id="thrust_impulse" placeholder="solved from I = F·t_b" min="100" max="100000" step="10" data-i18n-placeholder="adv.ph.autoCalculated">
-                        <div class="help-text" data-i18n="adv.help.leaveEmptyAutoCalculate">Give thrust or burn time; the other is solved from I = F·t_b. No 'optimal' thrust is computed: if both are empty the run is rejected by name.</div>
+                        <input type="number" id="thrust_impulse" placeholder="solved from I = F × burn time" min="{{ hybrid_input_limits.thrust[0] }}" max="{{ hybrid_input_limits.thrust[1] }}" step="10" data-i18n-placeholder="adv.ph.autoCalculated">
+                        <div class="help-text" data-i18n="adv.help.leaveEmptyAutoCalculate">Give thrust or burn time; the other is solved from total impulse = thrust × burn time. No 'optimal' thrust is computed: if both are empty the run is rejected by name.</div>
                     </div>
                     <div class="form-group">
                         <label for="burn_time_impulse"><span data-i18n="adv.label.burnTimeS">Burn Time (s)</span> <span class="unit" data-i18n="adv.unit.optionalLeaveEmptyAuto">thrust or burn time required</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.burnTimeImpulse">Design burn time, in s. In total-impulse mode give this OR the thrust: the other is solved from I = F·t_b. If both are empty the run is rejected by name. Form range 1-300 s.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.burnTimeImpulse">Design burn time, in s. In total-impulse mode give this OR the thrust: the other is solved from total impulse = thrust × burn time. If both are empty the run is rejected by name. Form range 1-300 s.</span>
                             </div>
                         </label>
-                        <input type="number" id="burn_time_impulse" placeholder="solved from I = F·t_b" min="1" max="300" step="0.1" data-i18n-placeholder="adv.ph.autoCalculated">
-                        <div class="help-text" data-i18n="adv.help.leaveEmptyAutoCalculate2">Give burn time or thrust; the other is solved from I = F·t_b.</div>
+                        <input type="number" id="burn_time_impulse" placeholder="solved from I = F × burn time" min="1" max="300" step="0.1" data-i18n-placeholder="adv.ph.autoCalculated">
+                        <div class="help-text" data-i18n="adv.help.leaveEmptyAutoCalculate2">Give burn time or thrust; the other is solved from total impulse = thrust × burn time.</div>
                     </div>
                 </div>
                 <div class="help-text" style="margin-top: 10px; background: rgba(255, 140, 51, 0.10); padding: 10px; border-radius: 4px;">
-                    <strong data-i18n="adv.txt.mode">Mode:</strong> <span data-i18n="adv.txt.specifyTotalImpulseNS">Specify the total impulse (N·s) and thrust OR burn time; the missing one is solved from I = F·t_b. Total impulse alone is rejected: HRMA does not choose a thrust for you.</span>
+                    <strong data-i18n="adv.txt.mode">Mode:</strong> <span data-i18n="adv.txt.specifyTotalImpulseNS">Specify the total impulse (N·s) and thrust OR burn time; the missing one is solved from total impulse = thrust × burn time. Total impulse alone is rejected: HRMA does not choose a thrust for you.</span>
                 </div>
             </div>
                 <!-- v2.6.27 (A6, Ayberk madde 1): O/F Ratio alanı BURADAYDI.
@@ -1379,10 +1449,10 @@
                         <span data-i18n="adv.label.chamberPressureBar">Chamber Pressure (bar)</span> <span class="unit" data-i18n="adv.unit.absolute">absolute</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.chamberPressureBar">The combustion chamber pressure in bar. Higher pressures generally increase specific impulse but require stronger structures. Typical values: 10-50 bar for amateur motors, 100+ bar for commercial motors.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.chamberPressureBar">Design chamber pressure, in bar. It sets the nozzle expansion and C_F, the throat area for the requested thrust, the equilibrium combustion (c*, flame temperature) and the wall and closure sizing. Required: if it is left empty the calculation is not sent and the field is named. Accepted range 1-500 bar.</span>
                         </div>
                     </label>
-                    <input type="number" id="chamber_pressure" value="20" step="0.1" min="1" onchange="validatePressures()">
+                    <input type="number" id="chamber_pressure" value="20" step="0.1" min="{{ hybrid_input_limits.chamber_pressure[0] }}" max="{{ hybrid_input_limits.chamber_pressure[1] }}" onchange="validatePressures()">
                 </div>
                 <!-- v3.0.1 (Ayberk tur 1 · kulvar T): TANK BASINCI KAYNAĞI.
                      'default' = oksitleyicinin bugünkü kipi (N₂O: P_sat(T_tank);
@@ -1435,7 +1505,7 @@
                         <span data-i18n="adv.label.lValueM">L* Value (m)</span> <span class="unit" data-i18n="adv.unit.characteristicLength">characteristic length</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.lValueM">Characteristic length - ratio of combustion chamber volume to throat area. Determines residence time for complete combustion. HTPB typically requires 0.8-1.5m. Higher values ensure complete combustion but increase motor weight.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.lValueM">Characteristic length L* = V_c / A_t, in m. The chamber volume is V_c = L*·A_t, so it sets the chamber length (and with it the chamber and case mass) unless you give a chamber length override. Empty: 1.0 m is used and declared in the results as a default (HRMA placeholder, not a fuel-specific value). Zero or a negative value is rejected by name.</span>
                         </div>
                     </label>
                     <input type="number" id="l_star" step="0.1" min="0.1" data-i18n-placeholder="adv.ph.serverDefaultApplies" placeholder="server default applies (declared)">
@@ -1479,7 +1549,7 @@
                         <span data-i18n="adv.label.aeRatio">Ae/At Ratio</span> <span class="unit" data-i18n="adv.unit.expansionRatio0Auto">expansion ratio, 0=auto</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.aeRatio">Nozzle exit area to throat area ratio. Higher ratios provide better performance at altitude but increase nozzle size. Sea level: 4-8, High altitude: 15-25. Set to 0 for automatic optimization.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.aeRatio">Nozzle expansion ratio ε = A_e/A_t (exit area over throat area). It sets the exit pressure and so C_F, Isp and thrust at the ambient pressure of the design point, and the nozzle exit diameter and length. Empty or 0: the solver computes the pressure-matched ratio (exit pressure = ambient pressure of the design point) and the result reports the ratio used; at zero ambient pressure no such ratio exists and the run is rejected by name, so give a value for a vacuum design.</span>
                         </div>
                     </label>
                     <input type="number" id="expansion_ratio" step="0.1" min="0" data-i18n-placeholder="adv.ph.serverDefaultApplies" placeholder="server default applies (declared)">
@@ -1489,7 +1559,7 @@
                         <span data-i18n="adv.label.nozzleType">Nozzle Type</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.nozzleType">Nozzle geometry type. Conical: simple to manufacture, 15° half-angle typical, 1-2% Isp penalty. Bell: optimized contour, maximum performance, more complex manufacturing. Bell nozzles provide higher efficiency.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.nozzleType">Nozzle contour: conical, bell or parabolic. It sets the divergence efficiency λ on the momentum term of C_F (and so Isp and the propellant masses), the drawn contour and the nozzle length. Conical: λ = (1 + cos α)/2 with α the divergent half-angle (0.983 at 15°; Sutton and Biblarz 9th ed. Eq. 3-34). Bell and parabolic: λ comes from the exit angle of the solved contour and depends on the expansion ratio. Default: conical.</span>
                         </div>
                     </label>
                     <!-- v2.6.26: "Nozzle Contour" adlı İKİNCİ bir seçici daha
@@ -1530,7 +1600,7 @@
                         <span data-i18n="adv.label.combustionEfficiency">Combustion (c*) Efficiency</span> <span class="unit">(%)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.combustionEfficiency">Delivered c* as a percentage of the theoretical equilibrium c* (eta_c*). It scales c* and with it Isp, mass flow, propellant masses, grain length and the transient / tank blowdown curves; the throat area is set by thrust, chamber pressure and C_F and does not change. Left empty: N2O/HTPB uses the median of 26 measured firings in HRMA's validation records, 89 % (range 77-99 %; Heydari 2017, Scaramuzzino/Carmicino 2013); other propellant pairs have no measured value in HRMA, so the ideal c* is used (no efficiency applied) and the result says so. Accepted range 50-105 %; a value outside it is rejected, not clipped.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.combustionEfficiency">Delivered c* as a percentage of the theoretical equilibrium c* (η_c*). It scales c* and with it Isp, mass flow, propellant masses, grain length and the transient / tank blowdown curves; the throat area is set by thrust, chamber pressure and C_F and does not change. Left empty: the median of the measured firings of the same propellant pair in HRMA's validation records is used, counting only firings whose measurement window is valid (a firing is left out when an anomaly falls inside the window over which its c* was averaged, or when its records cannot show that window; the headline names every firing left out and why) — N2O/HTPB 89 % (26 firings, range 77-99 %; Heydari 2017, Scaramuzzino/Carmicino 2013), LOX/HTPB 97.6 % (3 firings, range 84.9-100 %; HPDP 2003, Sims 1998), LOX/paraffin 85 % (22 gaseous-oxygen firings, range 77-94 %; Karabeyoglu 2003, Battista 2019). A pair with no measured firing gets the general hybrid default, the median of all 60 valid measured hybrid firings, 88 % (range 77-100 %). A pair with fewer than 2 valid firings gets no default and the value must be entered (HRMA practical gate, not a statistical criterion). The headline states which one was applied, with the mean and range next to the median. Enter 100 to use the ideal (theoretical) c*. Accepted range 50-105 %; a value outside it is rejected, not clipped.</span>
                         </div>
                     </label>
                     <input type="number" id="combustion_efficiency" min="50" max="105" step="0.1" placeholder="auto (sourced)" data-i18n-placeholder="adv.ph.cstarEffAuto">
@@ -1575,7 +1645,7 @@
                             <span data-i18n="adv.label.contractionRatio">Contraction Ratio</span> <span class="unit" data-i18n="adv.unit.ac">Ac/At</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.contractionRatio">Ratio of combustion chamber cross-sectional area to throat area. Higher ratios reduce oxidizer velocity in chamber, affecting mixing and combustion efficiency. Typical values: 2-8. Set to 0 for automatic calculation.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.contractionRatio">Contraction ratio A_c/A_t (chamber cross-section over throat area). A value above 1 is used as given; empty or 0 (any value up to 1): it is derived from the chamber geometry, (D_ch/d_t)². It sets the convergent cone length of the nozzle and, with the finite-area combustion type, the chamber Mach number and the injector-face to nozzle stagnation pressure ratio (isentropic area relation, Sutton and Biblarz Ch. 3). Below 2 a warning is raised. Form range 0-10; a value above 0 here clears and disables the mass flux.</span>
                             </div>
                         </label>
                         <input type="number" id="contraction_ratio" step="0.1" min="0" max="10" 
@@ -1584,10 +1654,10 @@
                     </div>
                     <div class="form-group">
                         <label for="mass_flux_chamber">
-                            <span data-i18n="adv.label.massFluxKgM">Mass Flux (kg/m²⋅s)</span> <span class="unit" data-i18n="adv.unit.goxChamber">Gox in chamber</span>
+                            <span data-i18n="adv.label.massFluxKgM">Mass Flux (kg/m²⋅s)</span> <span class="unit" data-i18n="adv.unit.goxChamber">initial port G_ox</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.massFluxKgM">Oxidizer mass flow rate per unit area in the combustion chamber. Affects fuel regression rate and combustion efficiency. Higher flux increases regression but may cause incomplete combustion. Typical: 50-500 kg/m²⋅s.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.massFluxKgM">Initial oxidizer mass flux in the fuel port, G_ox = ṁ_ox / A_port, in kg/m²·s. When no initial port diameter is given it sizes the port: A_port = ṁ_ox / G_ox (total over all ports); through the regression law ṙ = a·G_ox^n (the solver uses the oxidizer flux) it also sets the grain length. Empty or 0: 350 kg/m²·s is used (HRMA choice, not a measured value) and the result reports the design flux. If you give an initial port diameter this field is not used and the flux is derived from the port. Above 600 kg/m²·s a port flooding warning is raised (HRMA threshold). Form range 0-1000; a value above 0 here clears and disables the contraction ratio.</span>
                             </div>
                         </label>
                         <input type="number" id="mass_flux_chamber" value="0" step="10" min="0" max="1000"
@@ -1616,7 +1686,7 @@
                         <span data-i18n="adv.label.fuelType">Fuel Type</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.fuelType">Solid fuel material for hybrid rocket. HTPB: industry-standard binder with well-characterised regression data. Paraffin: high regression rate, good for small motors. PMMA/Plastics: readily available, moderate performance. Aluminum: metal additive for increased thrust.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.fuelType">Solid fuel of the grain. The choice sets the fuel's catalogue density and regression coefficients a and n (filled into the fields below, which you can change) and the fuel side of the combustion equilibrium (c*, flame temperature, optimum O/F). Greyed-out entries are not modelled. Default: HTPB.</span>
                         </div>
                     </label>
                     <!-- P12bB3-03 -> P12bB3-02 (ÖH D15/a2): SEÇİLEBİLİR OLAN,
@@ -1668,7 +1738,7 @@
                         <span data-i18n="adv.label.fuelDensityKgM">Fuel Density (kg/m³)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.fuelDensityKgM">Mass density of solid fuel. Affects regression rate and motor mass. HTPB: ~920 kg/m³, PMMA: ~1180 kg/m³, Paraffin: ~900 kg/m³. Higher density usually means more total impulse per unit volume.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.fuelDensityKgM">Density of the solid fuel, in kg/m³. It converts the regressed volume into fuel mass flow (ṁ_f = ρ_f · ṙ · burning port surface), so it sets the grain length and the fuel and total masses. When you pick a fuel it is filled with the HRMA catalogue density of that fuel; empty: the catalogue value is used. Form minimum 100 kg/m³.</span>
                         </div>
                     </label>
                     <input type="number" id="fuel_density" value="920" step="1" min="100">
@@ -1678,11 +1748,11 @@
                         <span data-i18n="adv.label.regressionRateCoefficient">Regression Rate Coefficient (a)</span> <span class="unit" data-i18n="adv.unit.mSKgM">m/s/(kg/m²·s)ⁿ</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.regressionRateCoefficient">Coefficient a of the regression law r = a·G^n (SI: r in m/s, G in kg/m²·s). HRMA's hybrid solver uses the TOTAL mass flux G_total = (ṁ_ox + ṁ_f)/A_port by default, not the oxidizer flux G_ox. A literature a fitted against G_ox therefore predicts about 10-18 % higher regression here (HRMA propellant database note). Empty: the selected fuel's tabulated value is used.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.regressionRateCoefficient">Coefficient a of the regression law r = a·G_ox^n (SI: r in m/s, G_ox in kg/m²·s). HRMA's hybrid solver uses the OXIDIZER mass flux G_ox = ṁ_ox/A_port, the same basis the HRMA catalogue pairs are fitted on, so enter a pair fitted against G_ox. It sets the fuel regression rate and through it the fuel flow, grain length and port growth. Empty: the selected fuel's catalogue value is used. Field range 0.000001-0.01.</span>
                         </div>
                     </label>
                     <input type="number" id="regression_a" value="0.0000368" step="any" min="0.000001" max="0.01">
-                    <div class="help-text" data-i18n="adv.help.empiricalCoefficientRG">Empirical coefficient for r = a × G^n (SI). Literature values: HTPB 3.68e-5 (Doran), paraffin 1.17e-4 (Karabeyoglu)</div>
+                    <div class="help-text" data-i18n="adv.help.empiricalCoefficientRG">Empirical coefficient for r = a × G_ox^n (SI). Literature values: HTPB 3.68e-5 (Doran), paraffin 1.17e-4 (Karabeyoglu)</div>
                 </div>
                 <div class="form-group">
                     <label for="regression_n">
@@ -1693,7 +1763,7 @@
                         </div>
                     </label>
                     <input type="number" id="regression_n" value="0.555" step="any" min="0.1" max="1.0">
-                    <div class="help-text" data-i18n="adv.help.typicalValuesHtpb0">Typical values: HTPB=0.555, PE=0.498, PMMA=0.615, paraffin=0.62</div>
+                    <div class="help-text" data-i18n="adv.help.typicalValuesHtpb0">Catalogue values of n: HTPB 0.555 (Doran), PE 0.498 and PMMA 0.615 (Zilliac and Karabeyoglu), paraffin 0.62 (Karabeyoglu)</div>
                 </div>
             </div>
             
@@ -1738,7 +1808,7 @@
                         <span data-i18n="adv.label.oxidizerType">Oxidizer Type</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.oxidizerType">Oxidizing agent for combustion. N2O: self-pressurizing, safe handling, moderate performance. LOX: highest performance, cryogenic storage. H2O2: green propellant, good performance. Air: simple but lowest performance.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.oxidizerType">Oxidizer of the motor. The choice sets the oxidizer side of the combustion equilibrium (c*, flame temperature, optimum O/F), the reference density and viscosity filled below and the feed model: N2O is self-pressurising (stored as a saturated liquid; the injector flow is solved two-phase with the Dyer NHNE model and the tank blowdown history is computed); LOX is cryogenic. Greyed-out entries are not modelled. Default: N2O.</span>
                         </div>
                     </label>
                     <!-- ÖH D20 / defter P9B5-07 (2. yarı) — SUNULAN SEÇENEK
@@ -1777,7 +1847,7 @@
                         <span data-i18n="adv.label.phase">Phase</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.phase">Physical state of oxidizer during injection. Liquid: higher density, requires pressurization. Gas: lower density, simpler feed system. Phase affects injection system design and motor performance.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.phase">Physical state of the oxidizer at the injector (N2O). It sets the reactant enthalpy the combustion equilibrium is solved with: liquid = saturated liquid at the oxidizer temperature, gas = gaseous N2O at the 298.15 K standard state. With a user-supplied tank pressure the check follows the phase: a liquid feed must be at or above the N2O saturation pressure at the oxidizer temperature, a gaseous feed at or below it (2 % tolerance); otherwise the request is rejected by name. The injector circuit and oxidizer tank are liquid-feed models, so with Gas the orifice plan, tank volume, slosh, tank vessel and blowdown history are not reported (a compressible orifice model is not available for the hybrid). Liquid is the default when left unchanged.</span>
                         </div>
                     </label>
                     <select id="oxidizer_phase">
@@ -1790,7 +1860,7 @@
                         <span data-i18n="adv.label.densityKgM">Density (kg/m³)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.densityKgM">Mass density of oxidizer at storage conditions. Affects tank sizing, injection system design, and mixture ratio calculations. N2O is stored as a SATURATED liquid, so its density follows the tank temperature: ~785 kg/m³ at 20 °C and ~743 kg/m³ at 25 °C (the ~1220 kg/m³ figure is the normal-boiling-point value at −88 °C, not a storage value). LOX: ~1141 kg/m³ at 90.19 K. Auto-filled from HRMA’s reference-density source (CoolProp/REFPROP EOS for N2O, the built-in propellant table otherwise).</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.densityKgM">Density of the oxidizer at the injector inlet, kg/m³. Filled automatically for the selected oxidizer and temperature from HRMA's reference source (CoolProp/REFPROP equation of state for N2O, HRMA's propellant table otherwise); N2O is stored as a saturated liquid, so the value follows the tank temperature. When the injector circuit solves its own inlet state (the default), that state's density is used and a typed value is listed as not used; when you set the injector pressure drop yourself, the injector plate uses this value.</span>
                         </div>
                     </label>
                     <!-- ÖH D31 / OH-D17-13 — STATİK VARSAYILAN SÖKÜLDÜ (ÖK-21).
@@ -1939,7 +2009,7 @@
                              başka bir çift seçilince aşağıdaki uyarı görünür ve
                              gerçek optimum yalnız "Find Optimum" ile (sunucu
                              hesabı) belirlenir. -->
-                        <input type="number" id="of_ratio" value="7.5" step="0.1" min="0.1" style="flex: 1;"
+                        <input type="number" id="of_ratio" value="7.5" step="0.1" min="{{ hybrid_input_limits.of_ratio[0] }}" max="{{ hybrid_input_limits.of_ratio[1] }}" style="flex: 1;"
                                data-default-pair="n2o+htpb">
                         <button class="btn btn-small" onclick="findOptimumOF()" style="background: #28a745; color: white;" data-i18n="adv.btn.findOptimum">
                             Find Optimum
@@ -2097,7 +2167,10 @@
                             <option value="of_ratio" data-i18n="adv.label.oFRatio">O/F Ratio</option>
                             <option value="chamber_pressure" data-i18n="adv.opt.chamberPressure">Chamber Pressure</option>
                             <option value="expansion_ratio" data-i18n="adv.opt.expansionRatio">Expansion Ratio</option>
-                            <option value="altitude" data-i18n="adv.opt.altitude">Altitude</option>
+                            <!-- V306/BAYAT: "Altitude" seçeneği söküldü — tarama ucu
+                                 irtifayı motora bağlamaz ve bu adı ADIYLA reddeder
+                                 (app.py PARAMETRIC_WIRED_PARAMS, ÖH D15 P7B2-01);
+                                 her seçimde başarısız olan bir seçenek sunulmaz. -->
                         </select>
                     </div>
                     <div class="form-group">
@@ -2135,7 +2208,7 @@
                             <span data-i18n="adv.label.numberSteps">Number of Steps</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.numberSteps">Number of calculation points between start and end values. More steps provide smoother curves but require more computation time. 10-20 steps typically sufficient for most analyses.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.numberSteps">Number of sweep points between the start and end values; each point is a full motor calculation, so the run time grows with it and the sweep stops when its time budget is used up (the result says how many points were computed). Empty: 20 points (server default, declared). Accepted by the server: 2-100; form range 3-50.</span>
                             </div>
                         </label>
                         <input type="number" id="param_steps" value="10" min="3" max="50">
@@ -2211,7 +2284,7 @@
                              varsayılan True, atlama künyesi calculate_trajectory_false). -->
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.calculateTrajectory">Whether Calculate also flies the trajectory (sent as calculate_trajectory). Checked: after the motor is solved, the flight is integrated with the motor result and the vehicle and launch inputs on this tab. Unchecked: the result carries no trajectory; it is reported as a skipped step with no flight numbers. Default: checked (the server default is also true). Accepted: true or false; any other value is refused by name.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.calculateTrajectory">Whether Calculate also flies the trajectory. Checked: after the motor is solved, the flight is integrated with the motor result and the vehicle and launch inputs on this tab. Unchecked: the result carries no trajectory; it is reported as a skipped step with no flight numbers. Default: checked (the server default is also on). A value other than on or off (for example from an edited project file) is refused by name.</span>
                         </div>
                     </label>
                     <div class="help-text" data-i18n="adv.help.calculateTrajectory">When unchecked, the solver returns the motor result without the flight trajectory.</div>
@@ -2223,7 +2296,7 @@
                             <span data-i18n="adv.label.initialAltitudeM">Initial Altitude (m)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.initialAltitudeM2">Starting altitude of the trajectory (m), sent as trajectory_start_altitude; the trajectory endpoint accepts the ISA table range and starts the flight there. Usually ground level (0 m). Empty or not a number: the trajectory is not computed and the field is named (no altitude is assumed).</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.initialAltitudeM2">Starting altitude of the trajectory (m); the flight starts there and the value is accepted within the range of the ISA atmosphere table. Empty or not a number: the trajectory is not computed and the field is named (no altitude is assumed).</span>
                             </div>
                         </label>
                         <input type="number" id="traj_alt_start" value="0" min="0" max="50000">
@@ -2233,7 +2306,7 @@
                             <span data-i18n="adv.label.finalAltitudeM">Final Altitude (m)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.finalAltitudeM2">Upper altitude of the analysis (m). Informational: /api/trajectory-analysis does NOT read it (measured: the result is identical with or without it; the endpoint names it under inputs_not_read). The flight is integrated through apogee to landing. Empty: not sent.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.finalAltitudeM2">Upper altitude of the analysis (m). Informational: the trajectory calculation does not read it (measured: the result is the same with or without it, and the result lists it among the inputs not read). The flight is integrated through apogee to landing. Empty: not sent.</span>
                             </div>
                         </label>
                         <input type="number" id="traj_alt_end" value="10000" min="0" max="100000">
@@ -2243,7 +2316,7 @@
                             <span data-i18n="adv.label.analysisPoints">Analysis Points</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.analysisPoints">Number of output points along the trajectory. Informational: /api/trajectory-analysis does NOT read it (measured: the result is identical with or without it; the endpoint names it under inputs_not_read); the solver uses its own step. Empty: not sent.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.analysisPoints">Number of output points along the trajectory. Informational: the trajectory calculation does not read it (measured: the result is the same with or without it, and the result lists it among the inputs not read); the solver uses its own time step. Empty: not sent.</span>
                             </div>
                         </label>
                         <input type="number" id="traj_points" value="20" min="5" max="100">
@@ -2263,7 +2336,7 @@
                             <span data-i18n="adv.label.finalMassKg">Final Mass (kg)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.finalMassKg">Vehicle mass after propellant consumption (dry mass + payload).</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.finalMassKg">Vehicle mass after propellant consumption (dry mass + payload). Avionics, wiring and the recovery system belong in this mass: the engine dry (flying inert) mass does not contain them.</span>
                             </div>
                         </label>
                         <input type="number" id="final_mass" value="25" min="1" max="10000" step="0.1">
@@ -2273,7 +2346,7 @@
                             <span data-i18n="adv.label.dragCoefficient">Drag Coefficient</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.dragCoefficient">Aerodynamic drag coefficient. Typical values: 0.3-0.5 for streamlined rockets, 0.5-0.8 for basic shapes.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.dragCoefficient">Drag coefficient C_D of the vehicle (dimensionless), referred to the reference area below; the trajectory drag is D = ½·ρ·v²·C_D·A_ref. Must be greater than 0. Empty: Calculate Trajectory refuses and names the field; Calculate does not send it and the trajectory solver keeps its own coefficient. Form range 0.1-2.0.</span>
                             </div>
                         </label>
                         <input type="number" id="drag_coefficient" value="0.5" min="0.1" max="2.0" step="0.1">
@@ -2283,7 +2356,7 @@
                             <span data-i18n="adv.label.referenceAreaMm">Reference Area (mm²)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.referenceAreaMm">Cross-sectional area used for drag calculations. Usually the maximum cross-sectional area of the vehicle. Entered in square millimetres and converted to square metres before it is sent to the solver.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.referenceAreaMm">Reference area A_ref of the drag D = ½·ρ·v²·C_D·A_ref; it must be the area your drag coefficient is referred to (for a rocket, the body cross-section). Entered in square millimetres and converted to square metres before it is sent to the solver. Empty: Calculate Trajectory refuses and names the field. Form range 100-10000000 mm².</span>
                             </div>
                         </label>
                         <!-- Birim (v2.5.2): m² yerine mm². Eski alan step=0.001 m²
@@ -2309,7 +2382,7 @@
                             <span data-i18n="adv.label.launchAngleDegrees">Launch Angle (degrees)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.launchAngleDegrees">Launch angle from the horizontal (degrees), sent as launch_angle: 90° = vertical launch, 45° = maximum-range trajectory; the endpoint accepts 0–90. Empty or not a number: the trajectory is not computed and the field is named (no angle is assumed).</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.launchAngleDegrees">Launch angle from the horizontal (degrees): 90° = vertical launch; accepted 0-90. Empty or not a number: the trajectory is not computed and the field is named (no angle is assumed).</span>
                             </div>
                         </label>
                         <input type="number" id="launch_angle" value="90" min="0" max="90" step="1">
@@ -2319,7 +2392,7 @@
                             <span data-i18n="adv.label.windSpeedMS">Wind Speed (m/s)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.windSpeedMS">Horizontal wind speed affecting the trajectory (m/s), sent as wind_speed; must be ≥ 0 and below the ISA sea-level speed of sound. Empty or not a number: the trajectory is not computed and the field is named (no wind is assumed).</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.windSpeedMS">Horizontal wind speed affecting the trajectory (m/s); must be ≥ 0 and below the ISA sea-level speed of sound. Empty or not a number: the trajectory is not computed and the field is named (no wind is assumed).</span>
                             </div>
                         </label>
                         <input type="number" id="wind_speed" value="0" min="0" max="50" step="0.1">
@@ -2371,7 +2444,7 @@
                             <span data-i18n="adv.label.parachuteAreaM2">Parachute Area (m2)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.parachuteAreaM2">Projected (canopy) area of the recovery parachute. Descent velocity scales as 1/sqrt(area). Leave empty to keep the solver assumption, which is reported as an assumption in the results.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteAreaM2">Projected (canopy) area of the recovery parachute (m²). Descent velocity scales as 1/sqrt(area). When given, the descent under the parachute is solved and the landing speed is reported. Leave empty for no parachute: the descent is not solved and the results say so (no area is assumed). Must be greater than 0; otherwise it is rejected with the reason.</span>
                             </div>
                         </label>
                         <input type="number" id="parachute_area" min="0" step="0.1" placeholder="—">
@@ -2381,7 +2454,7 @@
                             <span data-i18n="adv.label.parachuteCd">Parachute Cd</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.parachuteCd">Drag coefficient of the parachute referenced to its projected area (1.4 is the classic flat-circular value). Leave empty to keep the solver assumption.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteCd">Drag coefficient of the parachute referenced to its projected area (1.4 is the classic flat-circular value). Read only when a parachute area is given. Leave empty to keep the solver assumption (reported as an assumption). Must be greater than 0.</span>
                             </div>
                         </label>
                         <input type="number" id="parachute_cd" min="0" step="0.05" placeholder="—">
@@ -2391,7 +2464,7 @@
                             <span data-i18n="adv.label.parachuteDeployDelayS">Deploy Delay after Apogee (s)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.parachuteDeployDelayS">Time between apogee and canopy inflation. The vehicle falls ballistically during this delay. Leave empty to keep the solver assumption.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.parachuteDeployDelayS">Time between apogee and canopy inflation (s). The vehicle falls ballistically during this delay. Read only when a parachute area is given. Leave empty to keep the solver assumption. Must not be negative.</span>
                             </div>
                         </label>
                         <input type="number" id="parachute_deploy_delay" min="0" step="0.5" placeholder="—">
@@ -2409,9 +2482,8 @@
                         <li><strong data-i18n="adv.txt.trajPanelPath">Trajectory Profile:</strong> <span data-i18n="adv.txt.trajPanelPathBody">flight path, altitude (km) against horizontal range (km), with the motor burnout and apogee points marked</span></li>
                         <li><strong data-i18n="adv.txt.trajPanelAlt">Altitude vs Time:</strong> <span data-i18n="adv.txt.trajPanelAltBody">altitude (km) against time (s) from ignition</span></li>
                         <li><strong data-i18n="adv.txt.trajPanelVel">Velocity Profile:</strong> <span data-i18n="adv.txt.trajPanelVelBody">total speed and vertical velocity (m/s) against time</span></li>
-                        <li><strong data-i18n="adv.txt.trajPanelAcc">Acceleration Profile:</strong> <span data-i18n="adv.txt.trajPanelAccBody">acceleration in g against time</span></li>
+                        <li><strong data-i18n="adv.txt.trajPanelAcc">Load Factor Profile:</strong> <span data-i18n="adv.txt.trajPanelAccBody">load factor (sensed acceleration, gravity excluded) in g against time; the dashed curve is the kinematic acceleration |dv/dt|</span></li>
                         <li><strong data-i18n="adv.txt.trajPanelPhases">Flight Phases:</strong> <span data-i18n="adv.txt.trajPanelPhasesBody">altitude (km) at launch, burnout, apogee and landing (or flight end) against time; the last cell reads the maximum altitude</span></li>
-                        <li><strong data-i18n="adv.txt.applications">Applications:</strong> <span data-i18n="adv.txt.flightTrajectoryOptimizationStagingAnalysis">Flight trajectory optimization and staging analysis</span></li>
                     </ul>
                 </div>
                 <div id="trajectory_plot" class="plot-container"></div>
@@ -2559,10 +2631,13 @@
                     <h2 data-i18n="adv.sec.thrustCurve">Thrust and Chamber Pressure vs Time</h2>
                     <div class="chart-explanation">
                         <p><strong data-i18n="adv.txt.whatThisShows">What this shows:</strong>
-                        <span data-i18n="adv.txt.thrustCurveExplain">Instantaneous thrust and chamber
-                        pressure through the burn, taken from the time-marching solution. In a hybrid the
-                        oxidiser flow is constant while the fuel flow follows the regressing port, so the
-                        shape of this curve is the O/F shift made visible.</span></p>
+                        <span data-i18n="adv.txt.thrustCurveExplain">Instantaneous thrust, chamber
+                        pressure and total mass flow through the burn, taken from this run's time-marching
+                        solution. With a self-pressurised N2O tank the curve is the tank blowdown solution:
+                        the tank pressure falls, so the oxidiser flow and the thrust fall with it. With a
+                        regulated feed the oxidiser flow is constant and the fuel flow follows the regressing
+                        port, so the shape of the curve is the O/F shift made visible. The basis line under
+                        the chart names the case of this run.</span></p>
                     </div>
                     <div id="hybrid_thrust_plot" class="plot-container" style="min-height: 420px;"></div>
                 </div>
@@ -2697,7 +2772,17 @@
                                 <i class="fas fa-cog"></i> <span data-i18n="adv.txt.configureDesign">Configure Design</span>
                             </button>
                             <button class="btn btn-primary" onclick="generateCAD()" id="generateCADBtn" disabled>
-                                <i class="fas fa-cube"></i> <span data-i18n="adv.txt.generate3dModel">Generate 3D Model</span>
+                                <i class="fas fa-cube"></i> <span data-i18n="adv.txt.generate3dModel">Generate 3D Model (STEP)</span>
+                            </button>
+                            <!-- V306/BAYAT NR-8: teknik çizim ve DXF eskiden yalnız
+                                 about:blank özet penceresindeydi; ana sayfada kendi
+                                 düğmeleri (sıvı sayfasının "Tasarım Dışa Aktarımları"
+                                 satırıyla aynı uçlar). -->
+                            <button class="btn btn-secondary" onclick="exportDrawingsPDF()">
+                                <i class="fas fa-file-pdf"></i> <span data-i18n="adv.txt.drawingsPdf">Technical Drawings (PDF)</span>
+                            </button>
+                            <button class="btn btn-secondary" onclick="exportDXF()">
+                                <i class="fas fa-drafting-compass"></i> <span data-i18n="adv.txt.dxfDrawing">DXF Drawing</span>
                             </button>
                         </div>
                         <div id="cadStatus" class="status-message"></div>
@@ -2823,7 +2908,7 @@
                                 <span data-i18n="adv.label.safetyFactor">Safety Factor</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.safetyFactor">Factor of safety for structural design. Ratio of ultimate strength to maximum expected stress. Amateur rockets: 4-6, Commercial: 2-4. Higher values increase safety but add weight.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.safetyFactor">Design safety-factor target of the structural sizing (dimensionless): the wall, closure and nozzle sections are sized so that their safety factor reaches this target. Applied only when you change it (or it comes from a project file); otherwise the target of the selected material record is used and declared. A higher value gives thicker walls and more mass. Accepted by the server 1.05-10; form range 2-6.</span>
                                 </div>
                             </label>
                             <input type="number" id="safety_factor" class="form-control" value="4.0" min="2" max="6" step="0.5">
@@ -2842,7 +2927,7 @@
                                 <span data-i18n="adv.label.chamberLengthOverrideMm">Chamber Length Override (mm)</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.chamberLengthOverrideMm">Chamber length you set (mm), sent as chamber_length_override and converted to m. It replaces the chamber length the solver derives from L*; the post-combustion chamber takes the remaining length (override minus grain minus pre-combustion chamber). Empty or 0: the length is derived from L* (automatic). Accepted: above 0 and at most 20000 mm (20 m); a larger value is not applied and a warning names it. It must be at least grain length plus pre-combustion chamber length; a shorter value is not applied, the automatic length is used and the warning gives the minimum.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.chamberLengthOverrideMm">Chamber length you set (mm; converted to m for the solver). It replaces the chamber length the solver derives from L*; the post-combustion chamber takes the remaining length (override minus grain minus pre-combustion chamber). Empty or 0: the length is derived from L* (automatic). Accepted: above 0 and at most 20000 mm (20 m); a larger value is not applied and a warning names it. It must be at least grain length plus pre-combustion chamber length; a shorter value is not applied, the automatic length is used and the warning gives the minimum.</span>
                                 </div>
                             </label>
                             <input type="number" id="chamber_length_override" class="form-control" placeholder="Auto-calculated" step="10" data-i18n-placeholder="adv.ph.autoCalculated2" data-unit="mm">
@@ -2890,7 +2975,7 @@
                                 <span data-i18n="adv.label.pressureDropOverride">Pressure Drop Override (%)</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.pressureDropOverride">Percentage of chamber pressure lost across injector. Typical values: 15-30%. Higher drops improve atomization but require higher tank pressures. Critical for injection system sizing.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.pressureDropOverride">Injector pressure drop as a percentage of chamber pressure. Applied only when you enter a value yourself: the injector plan then uses ΔP = (value / 100) · Pc. Otherwise the injector circuit solver's ΔP is used, which comes from the feed (for self-pressurised N2O: saturation pressure minus chamber pressure). Form range 10-50 %.</span>
                                 </div>
                             </label>
                             <input type="number" id="pressure_drop_percent" class="form-control" value="20" min="10" max="50" step="5">
@@ -3015,17 +3100,17 @@
                 </div>
                 <div class="viz-design" id="viz_design_panel" style="display: none;">
                     <div class="viz-dctrl">
-                        <div class="dk"><span><span id="viz_dl_dch" data-i18n="adv.txt.chamber">Chamber Ø</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="adv.tip.vizDesignDch">Design-mode chamber diameter (mm), range 0.6–1.4 × the computed chamber diameter. Moving it recomputes the geometry with /api/quick-geometry after a short pause, writes the value into the form's chamber diameter field and updates the 3D preview; run CALCULATE for the full analysis.</span></span></span><b id="viz_dv_dch">—</b></div>
+                        <div class="dk"><span><span id="viz_dl_dch" data-i18n="adv.txt.chamber">Chamber Ø</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="adv.tip.vizDesignDch">Design-mode chamber diameter (mm), range 0.6–1.4 × the computed chamber diameter. Moving it recomputes the geometry with the quick geometry calculation after a short pause, writes the value into the form's chamber diameter field and updates the 3D preview; run CALCULATE for the full analysis.</span></span></span><b id="viz_dv_dch">—</b></div>
                         <input type="range" id="viz_ds_dch" aria-labelledby="viz_dl_dch" min="0" max="1000" value="500"
                                oninput="vizDesignInput()">
                     </div>
                     <div class="viz-dctrl">
-                        <div class="dk"><span><span id="viz_dl_lstar" data-i18n="adv.txt.lCharacteristicLength">L* (characteristic length)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="adv.tip.vizDesignLstar">Design-mode characteristic length L* (m), range 0.4–3.0, starting from the form's L*. Moving it recomputes the geometry with /api/quick-geometry, writes the value into the form's L* field and updates the 3D preview.</span></span></span><b id="viz_dv_lstar">—</b></div>
+                        <div class="dk"><span><span id="viz_dl_lstar" data-i18n="adv.txt.lCharacteristicLength">L* (characteristic length)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="adv.tip.vizDesignLstar">Design-mode characteristic length L* (m), range 0.4–3.0, starting from the form's L*. Moving it recomputes the geometry with the quick geometry calculation, writes the value into the form's L* field and updates the 3D preview.</span></span></span><b id="viz_dv_lstar">—</b></div>
                         <input type="range" id="viz_ds_lstar" aria-labelledby="viz_dl_lstar" min="0" max="1000" value="500"
                                oninput="vizDesignInput()">
                     </div>
                     <div class="viz-dctrl">
-                        <div class="dk"><span><span id="viz_dl_eps" data-i18n="adv.txt.expansionRatio">Expansion Ratio ε</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="adv.tip.vizDesignEps">Design-mode nozzle expansion ratio ε (exit area / throat area), range 2–30, starting from the computed ε. Moving it recomputes the geometry with /api/quick-geometry, writes the value into the form's expansion ratio field and updates the 3D preview.</span></span></span><b id="viz_dv_eps">—</b></div>
+                        <div class="dk"><span><span id="viz_dl_eps" data-i18n="adv.txt.expansionRatio">Expansion Ratio ε</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="adv.tip.vizDesignEps">Design-mode nozzle expansion ratio ε (exit area / throat area), range 2–30, starting from the computed ε. Moving it recomputes the geometry with the quick geometry calculation, writes the value into the form's expansion ratio field and updates the 3D preview.</span></span></span><b id="viz_dv_eps">—</b></div>
                         <input type="range" id="viz_ds_eps" aria-labelledby="viz_dl_eps" min="0" max="1000" value="500"
                                oninput="vizDesignInput()">
                     </div>
@@ -3154,10 +3239,11 @@
             } catch (parseError) {
                 console.error('Invalid JSON body (HTTP ' + response.status + '):', raw);
                 const key = 'common.badJson';
-                const fallback = 'The server replied HTTP ' + response.status
-                    + ' but the body is not valid JSON (Infinity and NaN are '
-                    + 'not JSON values). Nothing was drawn; the raw body is in '
-                    + 'the browser console.';
+                // V306/DİL-HİBRİT (DİL-ORTAK DEVİR 5): yedek metin de HTTP kodu
+                // taşımaz (sözlük metniyle aynı; kod konsol satırında kalır).
+                const fallback = 'The server reply is not valid JSON (Infinity '
+                    + 'and NaN are not JSON values). Nothing was drawn; the raw '
+                    + 'body is in the browser console.';
                 const text = (typeof window.I18N !== 'undefined' && window.I18N.tf)
                     ? window.I18N.tf(key, { status: response.status }, fallback)
                     : fallback;
@@ -3212,7 +3298,7 @@
 
             // V301/H-PANEL (NK-72): "Toplam İmpuls" kipine geçilince alan,
             // kullanıcı ona dokunmadıysa sayfanın sabit 10000'i yerine itki/süre
-            // kipindeki KENDİ değerlerinden (I = F·t_b) dolar — örnek projede
+            // kipindeki KENDİ değerlerinden (total impulse = thrust × burn time) dolar — örnek projede
             // 3000 N × 10 s = 30000 N·s. Değer kullanıcının girdisinden türer;
             // alanlardan biri boşsa dokunulmaz.
             if (tabName === 'total_impulse') {
@@ -4816,19 +4902,19 @@
                         <label for="n_slots"><span data-i18n="adv.inj.numberTangentialSlots">Tangential Slots per Element</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.inj.tipSlotsPerElement">Number of tangential inlet slots in each swirl element; together they carry the element inlet area A_p = K·D_s·d_o. The element count and the exit orifice come from the injector circuit. Empty: 6 (server default, declared).</span>
+                                <span class="tooltip-text" data-i18n="adv.inj.tipSlotsPerElement">Number of tangential inlet slots in each swirl element; together they carry the element inlet area Aₚ = K·Dₛ·dₒ. The element count and the exit orifice come from the injector circuit. Empty: 6 (server default, declared).</span>
                             </div>
                         </label>
                         <input type="number" id="n_slots" min="1" max="120" step="1" data-i18n-placeholder="adv.ph.serverDefaultApplies" placeholder="server default applies (declared)">
                     </div>
                     <div class="form-group">
-                        <label for="swirl_chamber_diameter"><span data-i18n="adv.inj.swirlChamberDiameterMm">Swirl Chamber Diameter D_s (mm)</span>
+                        <label for="swirl_chamber_diameter"><span data-i18n="adv.inj.swirlChamberDiameterMm">Swirl Chamber Diameter Dₛ (mm)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.inj.tipSwirlChamberDiameter">Diameter of the swirl (spin) chamber of each element. With the exit orifice diameter d_o it fixes the inlet area that gives the atomizer constant K. Empty: D_s = 2.5·d_o (Lefebvre &amp; McDonell, typical simplex proportion; declared). Below 1.25·d_o the Giffen-Muraszew geometry assumption breaks down and a warning is shown.</span>
+                                <span class="tooltip-text" data-i18n="adv.inj.tipSwirlChamberDiameter">Diameter of the swirl (spin) chamber of each element. With the exit orifice diameter dₒ it fixes the inlet area that gives the atomizer constant K. Empty: Dₛ = 2.5·dₒ (simplex atomizer proportion, Lefebvre and McDonell; declared). Below 1.25·dₒ the Giffen-Muraszew geometry assumption breaks down and a warning is shown.</span>
                             </div>
                         </label>
-                        <input type="number" id="swirl_chamber_diameter" min="0" step="any" data-i18n-placeholder="adv.ph.swirlChamberDefault" placeholder="2.5·d_o if empty (declared)">
+                        <input type="number" id="swirl_chamber_diameter" min="0" step="any" data-i18n-placeholder="adv.ph.swirlChamberDefault" placeholder="2.5·dₒ if empty (declared)">
                     </div>
                     <div class="form-group">
                         <label for="swirl_angle"><span data-i18n="adv.inj.tangentialEntryAngleDegrees">Target Spray Half-Angle θ (deg)</span>
@@ -5882,21 +5968,41 @@
                 }
             }
             
-            // Check for invalid values
-            if (data.of_ratio && (data.of_ratio < 0.1 || data.of_ratio > 20)) {
-                errors.push(i18nText('adv.js.ofRange', 'O/F Ratio must be between 0.1 and 20'));
+            // V306/HİBRİT-SAYI (kalem 7): bantlar SUNUCUNUN bandıdır
+            // (app.py ``_hibrit_form_bantlari`` ← CANONICAL_LIMITS); burada
+            // sayı yazılmaz. ÖLÇÜLDÜ (tur K-9): form itkiyi 100 000 N'de,
+            // oda basıncını 100 bar'da kesiyordu; sunucu 1 000 000 N ve
+            // 500 bar kabul ediyordu.
+            // Bant yoksa (şablon dışı koşum) istemci denetimi yapılmaz;
+            // tek kapı sunucudur ve bant dışını adıyla reddeder.
+            const BANT = (function () {
+                try {
+                    const m = (typeof document !== 'undefined' && document.querySelector)
+                        ? document.querySelector('meta[name="hrma-hybrid-input-limits"]') : null;
+                    return m ? JSON.parse(m.getAttribute('content')) : null;
+                } catch (e) { return null; }
+            })();
+            const bantDisi = (v, ad) => (BANT !== null && v !== null && v !== undefined && v !== ''
+                && isFinite(v) && (v < BANT[ad][0] || v > BANT[ad][1]));
+            const bantMetni = (ad) => ({ lo: i18nNumber(BANT[ad][0]), hi: i18nNumber(BANT[ad][1]) });
+            if (bantDisi(data.of_ratio, 'of_ratio')) {
+                errors.push(i18nFmt('adv.js.ofRange', bantMetni('of_ratio'),
+                    'O/F Ratio must be between {lo} and {hi}'));
             }
             
-            if (data.chamber_pressure && (data.chamber_pressure < 1 || data.chamber_pressure > 100)) {
-                errors.push(i18nText('adv.js.pcRange', 'Chamber Pressure must be between 1 and 100 bar'));
+            if (bantDisi(data.chamber_pressure, 'chamber_pressure')) {
+                errors.push(i18nFmt('adv.js.pcRange', bantMetni('chamber_pressure'),
+                    'Chamber Pressure must be between {lo} and {hi} bar'));
             }
             
-            if (data.thrust && (data.thrust < 1 || data.thrust > 100000)) {
-                errors.push(i18nText('adv.js.thrustRange', 'Thrust must be between 1 and 100000 N'));
+            if (bantDisi(data.thrust, 'thrust')) {
+                errors.push(i18nFmt('adv.js.thrustRange', bantMetni('thrust'),
+                    'Thrust must be between {lo} and {hi} N'));
             }
             
-            if (data.burn_time && (data.burn_time < 0.1 || data.burn_time > 300)) {
-                errors.push(i18nText('adv.js.burnTimeRange', 'Burn Time must be between 0.1 and 300 seconds'));
+            if (bantDisi(data.burn_time, 'burn_time')) {
+                errors.push(i18nFmt('adv.js.burnTimeRange', bantMetni('burn_time'),
+                    'Burn Time must be between {lo} and {hi} seconds'));
             }
             
             // Skip motor name pattern check - backend handles validation
@@ -5925,10 +6031,17 @@
             const basSahip = bas.dataset.paramType;
             const bitSahip = bit.dataset.paramType;
             if (basSahip === secili && bitSahip === secili) return null;
-            return 'param_start[data-param-type=' + (basSahip || '?')
-                 + '] / param_end[data-param-type=' + (bitSahip || '?')
-                 + '] vs param_type=' + secili
-                 + ' — enter the sweep range for the selected parameter';
+            // V306/BAYAT (kalem 5): ileti ham öznitelik sözdizimiyle
+            // (alan[öznitelik=değer] vs tür=değer) değil, seçicinin
+            // EKRANDAKİ adlarıyla, sözlükten kurulur.
+            const ad = function (deger) {
+                const o = Array.prototype.find.call(tip.options || [], function (x) {
+                    return x.value === deger; });
+                return o ? o.textContent.trim() : (deger || '?');
+            };
+            return i18nFmt('adv.js.parametricRangeOwner',
+                { owner: ad(basSahip === secili ? bitSahip : basSahip), param: ad(secili) },
+                'the start/end values were entered for {owner}, not for {param}. Enter the sweep range for {param}.');
         }
 
         // Aralık elle güncellendiğinde sahiplik SEÇİLİ parametreye geçer
@@ -6073,6 +6186,13 @@
                     assertParametricMatchesRequest(
                         results, data.param_type,
                         data.param_start, data.param_end);
+                    // V306/BAYAT NR-7: süre bütçesiyle kesilen tarama AYNI
+                    // eksende kendiliğinden sürdürülür (yanıt, birleşik
+                    // sonuçla yerinde güncellenir). Aşağıdaki kollar
+                    // birleşik sonucu okur; `kesik` yalnız sürdürme de
+                    // tamamlayamadıysa kalır.
+                    await parametrikSurdur(results, data);
+                    _parametrikTaban = _parametrikMotorFormu(baseParams);
                     // v2.6.27 (ÖH D15 · P12bB3-12): sunucu BEŞ dürüstlük alanı
                     // yayımlıyor (points_requested / points_succeeded /
                     // points_failed / failed_points / warning); şablon bunların
@@ -6116,43 +6236,57 @@
                         && typeof results.truncated_by_time_budget === 'object')
                         ? results.truncated_by_time_budget : null;
                     if (kutu) {
+                        // V306/BAYAT NR-7 + kalem 5: ÖLÇÜLDÜ (28 Eki turu,
+                        // ekran 12) TR ekranda bu kutu İngilizce sunucu
+                        // cümlesi + ham anahtarlar basıyordu ("The sweep was
+                        // cut short … — truncated_by_time_budget: reason:
+                        // time_budget_exhausted, elapsed_s: …"); düşen
+                        // noktanın değeri de hiç çıkmıyordu (alan adı
+                        // `sweep_value`, okunan `value`/`x`). Cümle artık
+                        // sözlükten, sayılar ucun alanlarından; makine
+                        // ayrıntısı (çözücünün ham gerekçesi) kutunun
+                        // ipucunda kalır, ekrana inmez.
                         const satirlar = [];
+                        const ipucu = [];
+                        const degerMetni = function (liste) {
+                            return liste.map(function (v) {
+                                return isFiniteNum(v) ? parametrikSayi(v) : '?';
+                            }).join('; ');
+                        };
                         if (dusen > 0) {
-                            const gerekce = (results.failed_points || [])
-                                .map(function (fp) {
-                                    const deger = (fp && fp.value !== undefined)
-                                        ? fp.value : (fp && fp.x);
-                                    return (deger !== undefined ? deger + ': ' : '')
-                                        + ((fp && (fp.reason || fp.error)) || 'unknown');
-                                });
-                            satirlar.push((dusen + ' of ' + istenen
-                                    + ' sweep points could not be computed')
-                                + (gerekce.length ? ' — ' + gerekce.join('; ') : ''));
-                        }
-                        if (kesik) {
-                            const alan = [];
-                            ['reason', 'elapsed_s', 'budget_s', 'points_started',
-                             'points_not_attempted', 'measured_seconds_per_point',
-                             'projected_seconds_for_full_sweep',
-                             'points_that_fit_budget'].forEach(function (k) {
-                                if (kesik[k] !== undefined && kesik[k] !== null) {
-                                    alan.push(k + ': ' + kesik[k]);
+                            const fp = (results.failed_points || []);
+                            satirlar.push(i18nFmt('adv.js.parametricFailedPoints',
+                                { failed: dusen, n: istenen,
+                                  values: degerMetni(fp.map(function (f) {
+                                      return f && f.sweep_value; })) },
+                                '{failed} of {n} sweep points could not be computed ({values}); they are gaps in the chart.'));
+                            fp.forEach(function (f) {
+                                if (f && (f.reason || f.error)) {
+                                    ipucu.push((isFiniteNum(f.sweep_value) ? f.sweep_value + ': ' : '')
+                                        + (f.reason || f.error));
                                 }
                             });
-                            // Cümleyi SUNUCU yazar (results.warning); alan
-                            // adresleri yanına makine adıyla eklenir.
-                            satirlar.push((results.warning
-                                || 'truncated_by_time_budget')
-                                + (alan.length
-                                    ? ' — truncated_by_time_budget: '
-                                      + alan.join(', ')
-                                    : ''));
+                        }
+                        if (kesik) {
+                            const sv = Array.isArray(results.sweep_values) ? results.sweep_values : [];
+                            const kalanSira = Array.isArray(kesik.not_attempted_indices)
+                                ? kesik.not_attempted_indices : [];
+                            satirlar.push(i18nFmt('adv.js.parametricIncomplete',
+                                { missing: sayac(kesik.points_not_attempted), n: istenen,
+                                  values: degerMetni(kalanSira.map(function (i) { return sv[i]; })) },
+                                '{missing} of {n} points were not computed ({values}): the sweep could not be continued. They are gaps in the chart; run the sweep again to complete it.'));
                         }
                         if (satirlar.length) {
-                            kutu.textContent = satirlar.join(' | ');
+                            // Ucun kendi cümlesi (results.warning, EN) makine
+                            // ayrıntısıdır: ipucunda durur (HRMAReject.ipucu
+                            // deseni), ekranda sözlük cümlesi.
+                            if (results.warning) ipucu.unshift(results.warning);
+                            kutu.textContent = satirlar.join(' ');
+                            kutu.title = ipucu.join(' | ');
                             kutu.style.display = 'block';
                         } else {
                             kutu.textContent = '';
+                            kutu.title = '';
                             kutu.style.display = 'none';
                         }
                     }
@@ -6217,8 +6351,14 @@
                     // V301/H-PANEL (NK-56): ucun gerekçe CÜMLESİ (message)
                     // makine kodundan (error) önce gelir; ret düğmenin
                     // yanında KALICI yazılır.
-                    const _gerekce = (results && (results.message || results.error))
-                        || ('HTTP ' + response.status);
+                    // V306/BAYAT (kalem 5): ret cümlesi ortak çözücüden
+                    // (sözlük çevirisi + alanların ekran adı); çözücü yoksa
+                    // ucun cümlesi aynen.
+                    const _gerekce = (globalThis.HRMAReject && typeof HRMAReject.metni === 'function'
+                                      && results && typeof results === 'object')
+                        ? HRMAReject.metni(results, response.status)
+                        : ((results && (results.message || results.error))
+                           || ('HTTP ' + response.status));
                     showMessage(i18nText('adv.msg.parametricAnalysisFailed', 'Parametric analysis failed: ') + _gerekce, 'error');
                     parametrikDurum(i18nText('adv.msg.parametricAnalysisFailed',
                         'Parametric analysis failed: ') + _gerekce, 'error');
@@ -6241,6 +6381,166 @@
                 : (tur === 'warning' ? 'var(--hd-orange, #ff8c33)'
                                       : 'var(--hd-ink-dim, #7d97a5)');
         }
+
+        // V306/BAYAT: tarama ekseni değeri ekranda 4 anlamlı basamakla,
+        // etkin dilin ondalık ayracıyla (TR virgül).
+        function parametrikSayi(v) {
+            const x = Number(Number(v).toPrecision(4));
+            const d = (String(x).split('.')[1] || '').length;
+            // 3.0.6 ana model (D35 tavanı 12 > 11): sayfanın kanon yardımcısı;
+            // sözlük yoksa String(x) — d zaten String(x)'in basamağı.
+            return i18nNumber(x, d);
+        }
+
+        // V306/BAYAT NR-7 — KESİLEN TARAMA AYNI EKSENDE SÜRDÜRÜLÜR.
+        // ÖLÇÜLDÜ (28 Eki son kullanıcı turu, ekran 12): LOX/HTPB, O/F 1,5 →
+        // 4,0, 10 adım — 30 s'lik bütçe 9. noktada doldu; 3,72 hiç
+        // hesaplanmadı ve çizgi 3,44 → 4,0 düz birleşti. Sonuç makineye
+        // bağlıydı (aynı girdi, farklı eğri). Bütçe tek isteğin donma
+        // korumasıdır ve KALIR; uç hiç denenmeyen sıraları yayımlar
+        // (`not_attempted_indices`) ve burada AYNI eksen (`param_indices`)
+        // üstünde kalanlar istenir; her istek en az bir nokta ilerler.
+        // Nokta değeri sıradan çözülür: aynı girdi her makinede aynı eğriyi
+        // verir, yavaş makine yalnız daha çok istek atar (ölçüm:
+        // V306/bayat/olcum_nr7_*.json). Birleşik yanıt yalnız uçtan gelen
+        // sayılardan kurulur; sürdürme tamamlanamazsa kalan sıralar `kesik`
+        // kolunda beyanlı kalır ve grafikte BOŞLUKTUR.
+        async function parametrikSurdur(results, data) {
+            const kesikMi = function (r) {
+                const k = r && r.truncated_by_time_budget;
+                return (k && typeof k === 'object' && Array.isArray(k.not_attempted_indices)
+                        && k.not_attempted_indices.length) ? k : null;
+            };
+            const ilkKesik = kesikMi(results);
+            const sv = Array.isArray(results.sweep_values) ? results.sweep_values : null;
+            const seri = Array.isArray(results.plot_series) ? results.plot_series : null;
+            if (!ilkKesik || !sv || !seri) return results;
+            const noktalar = {};
+            const ekle = function (liste) {
+                (liste || []).forEach(function (p) {
+                    if (p && isFiniteNum(p.sweep_index)) noktalar[p.sweep_index] = p;
+                });
+            };
+            ekle(results.results);
+            const dusenler = (results.failed_points || []).slice();
+            let kalan = ilkKesik.not_attempted_indices.slice();
+            let sonKesik = ilkKesik;
+            const toplam = isFiniteNum(results.points_requested) ? results.points_requested : '?';
+            while (kalan.length) {
+                parametrikDurum(i18nFmt('adv.js.parametricContinuing',
+                    { done: Object.keys(noktalar).length + dusenler.length, n: toplam },
+                    '{done} of {n} points computed — continuing the sweep on the same axis…'), 'info');
+                let y = null;
+                try {
+                    const r = await fetch('/parametric-analysis', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(Object.assign({}, data, { param_indices: kalan }))
+                    });
+                    y = await r.json();
+                    // Bu parçadaki sıraların HEPSİ çözülemediyse uç 422 +
+                    // failed_points döner: o sıralar hesaplanmamış değil,
+                    // DÜŞMÜŞTÜR (kutuda "hesaplanamadı" diye sayılır).
+                    const hepsiDustu = !!(y && y.status === 'error'
+                        && Array.isArray(y.failed_points) && y.failed_points.length);
+                    if (!y || !(y.status === 'success' || hepsiDustu)) {
+                        y = null;
+                    } else if (y.status === 'success') {
+                        assertParametricMatchesRequest(y, data.param_type,
+                            data.param_start, data.param_end);
+                    }
+                } catch (e) {
+                    y = null;
+                }
+                if (!y) break;
+                ekle(y.results);
+                (y.failed_points || []).forEach(function (f) { dusenler.push(f); });
+                const yeniKesik = kesikMi(y);
+                const yeniKalan = yeniKesik ? yeniKesik.not_attempted_indices.slice() : [];
+                const ilerleme = yeniKalan.length < kalan.length;
+                kalan = yeniKalan;
+                if (yeniKesik) sonKesik = yeniKesik;
+                if (!ilerleme) break;
+            }
+            const siralar = Object.keys(noktalar).map(Number).sort(function (a, b) { return a - b; });
+            results.results = siralar.map(function (i) { return noktalar[i]; });
+            results.points_succeeded = siralar.length;
+            dusenler.sort(function (a, b) { return (a.sweep_index || 0) - (b.sweep_index || 0); });
+            results.failed_points = dusenler;
+            results.points_failed = dusenler.length;
+            if (kalan.length) {
+                results.truncated_by_time_budget = Object.assign({}, sonKesik, {
+                    points_started: siralar.length + dusenler.length,
+                    points_not_attempted: kalan.length,
+                    not_attempted_indices: kalan });
+            } else {
+                delete results.truncated_by_time_budget;
+                // İlk yanıtın "kesildi" cümlesi artık doğru değil.
+                delete results.warning;
+            }
+            // Çizim: ilk yanıtın figürü (izler, eksenler, başlıklar) şablon;
+            // izler bütün eksende birleşik noktalarla, eksik sıra null
+            // (Plotly çizgiyi orada keser — iki nokta düz birleşmez).
+            if (results.plot) {
+                try {
+                    const fig = JSON.parse(results.plot);
+                    seri.forEach(function (s, t) {
+                        const iz = fig.data && fig.data[t];
+                        if (!iz || !s || typeof s.key !== 'string') return;
+                        const bolen = isFiniteNum(s.divisor) && s.divisor !== 0 ? s.divisor : 1;
+                        iz.x = sv.slice();
+                        iz.y = sv.map(function (_, i) {
+                            const v = noktalar[i] ? noktalar[i][s.key] : undefined;
+                            return isFiniteNum(v) ? (bolen === 1 ? v : v / bolen) : null;
+                        });
+                    });
+                    results.plot = JSON.stringify(fig);
+                    results.plot_data = results.plot;
+                } catch (e) { /* figür okunamadı: ilk yanıtın figürü kalır */ }
+            }
+            return results;
+        }
+
+        // V306/BAYAT NR-9 ailesi — HİBRİT TÜREV PANELİ: PARAMETRİK TARAMA.
+        // ÖLÇÜLDÜ (V306/bayat/olcum_nr9_once.json, hibrit): 3000 N motorun
+        // O/F taraması çizildikten sonra itki 2500 N yapılıp hesaplandı;
+        // Parametrik sekmesi 3000 N'lik eğriyi İŞARETSİZ göstermeye devam
+        // etti. Tarama, koştuğu formun tasarımına aittir (taban formu,
+        // param_* hariç). Yeni motor hesabı başka bir tasarımı hesapladıysa
+        // (motor alanları farklı; araç/yörünge alanları ve ad motoru
+        // değiştirmez — app.js yorungeIcinDegisenMotorAlanlari, aynı kural)
+        // tarama TEMİZLENİR ve nedeni yazılır (yörüngenin
+        // flight.staleTrajectory deseni). Çağıran: app.js calculate().
+        let _parametrikTaban = null;
+        function _parametrikMotorFormu(form) {
+            const o = {};
+            Object.keys(form || {}).forEach(function (k) {
+                if (k.indexOf('param_') !== 0 && k !== 'time_budget_s') o[k] = form[k];
+            });
+            return o;
+        }
+        window.parametrikTasarimDenetle = function (hesapFormu) {
+            if (!_parametrikTaban || typeof yorungeIcinDegisenMotorAlanlari !== 'function') return false;
+            const degisen = yorungeIcinDegisenMotorAlanlari(_parametrikTaban,
+                _parametrikMotorFormu(hesapFormu)) || [];
+            if (!degisen.length) return false;
+            _parametrikTaban = null;
+            const cizim = document.getElementById('parametric_plot');
+            if (cizim) {
+                if (window.Plotly && Plotly.purge) { try { Plotly.purge(cizim); } catch (e) { /* yok */ } }
+                cizim.style.height = '';
+                cizim.innerHTML = '<p data-onceki-tasarim="1" data-i18n="adv.msg.parametricStaleDesign" style="text-align:center; '
+                    + 'color:var(--hd-orange, #ff8c33); padding:40px;"></p>';
+                cizim.firstChild.textContent = i18nText('adv.msg.parametricStaleDesign',
+                    'The motor was recalculated with a different design; the previous sweep '
+                    + 'belonged to the earlier design and was cleared. Run the parametric '
+                    + 'analysis again.');
+            }
+            const kutu = document.getElementById('parametric_honesty');
+            if (kutu) { kutu.textContent = ''; kutu.title = ''; kutu.style.display = 'none'; }
+            parametrikDurum('', 'info');
+            return true;
+        };
 
         // Toggle trajectory parameters visibility
         function toggleTrajectoryParams() {
@@ -6302,8 +6602,15 @@
             if (typeof itici !== 'number' || !isFinite(itici) || itici <= 0) {
                 return null;
             }
+            // V306/UÇUŞ-KÜTLE (kalem 1): kalkış kütlesi YÜKLÜ iticiyi taşır
+            // (yanmayan tane şeridi dahil; motorun total_mass_kg'ı = kuru +
+            // propellant_mass_loaded_kg). İma edilen Isp satırı eskisi gibi
+            // propellant_mass_total'dan.
+            var yuklu = m.propellant_mass_loaded_kg;
             return {
-                itici_kg: itici,
+                itici_kg: (typeof yuklu === 'number' && isFinite(yuklu) && yuklu > 0)
+                    ? yuklu : itici,
+                ima_itici_kg: itici,
                 thrust_N: m.thrust,
                 burn_time_s: m.burn_time,
                 isp_s: (typeof m.isp_actual === 'number') ? m.isp_actual : m.isp,
@@ -6351,7 +6658,7 @@
             if (isFinite(ozet.thrust_N) && isFinite(ozet.burn_time_s)
                 && ozet.burn_time_s > 0) {
                 ima_isp = ozet.thrust_N
-                    / ((ozet.itici_kg / ozet.burn_time_s) * TRAJ_G0);
+                    / ((ozet.ima_itici_kg / ozet.burn_time_s) * TRAJ_G0);
             }
             if (not) {
                 // Künye:  m_kuru + m_itici = m_0 kg · Isp (implied) x s
@@ -6404,9 +6711,48 @@
             return { govde_capi_mm: govde_capi_mm, oran: oran };
         }
 
+        // V306/UÇUŞ NR-13 — KURU KÜTLE, MOTORUN UÇAN ATIL KÜTLESİYLE
+        // KALEMLİ. ÖLÇÜLDÜ (V306/ucus/olcum_paneller_hybrid_once.json, örnek
+        // hibrit): yörünge ve 6-DOF kuru kütlesi 25 kg (aracın kuru kütlesi:
+        // motor + gövde + faydalı yük), Fırlatma Sahası'nda motorun uçan
+        // atıl kütlesi 13,284 kg; aradaki 11,716 kg'ın ne olduğu hiçbir
+        // yerde yazmıyordu. Alanın altındaki satır motorun atıl kütlesini
+        // AYNI araçtan (FlightHandoff.vehicleFor) kalemiyle ve farkı
+        // "motordan gelmeyen" diye yazar; alan atıl kütleden küçükse uyarır.
+        function trajKuruKutleKalemi() {
+            var mf = document.getElementById('final_mass');
+            if (!mf || !window.FlightHandoff || !FlightHandoff.renderInertLedger) { return; }
+            var cr = window.currentResults;
+            FlightHandoff.renderInertLedger(mf, cr ? FlightHandoff.vehicleFor(cr) : null);
+        }
+        document.addEventListener('hrma:flight-vehicle', function (e) {
+            var d = e && e.detail;
+            if (d && d.results && d.results === window.currentResults) {
+                try { trajKuruKutleKalemi(); } catch (err) { /* yok say */ }
+            }
+        });
+
+        // V306/UÇUŞ NR-10 (hibrit ayağı) — yeni motor hesabında eski yörünge
+        // grafiği TEMİZLENİR; grafik hangi hesaba ait olduğunu bilir.
+        var _hibYorungeCizimSonucu = null;
+        function trajBayatCizimiTemizle() {
+            var cizim = document.getElementById('trajectory_plot');
+            var cr = window.currentResults;
+            if (!cizim || !_hibYorungeCizimSonucu || !cr || _hibYorungeCizimSonucu === cr) { return; }
+            _hibYorungeCizimSonucu = null;
+            if (window.Plotly && Plotly.purge) { try { Plotly.purge(cizim); } catch (e) { /* yok */ } }
+            // Anahtar kabuk sözlüğündedir (i18n_shell.js; üç motor sayfası
+            // ortak) — sayfa sözlüğü i18n_advanced.js değil. 'common.badJson'
+            // deseni: I18N doğrudan okunur, yoksa İngilizce yedek.
+            const _bayatYedek = 'The engine was recalculated; the previous trajectory belonged to the earlier design and was cleared. Press Calculate Trajectory again.';
+            cizim.textContent = (typeof window.I18N !== 'undefined' && window.I18N.t)
+                ? window.I18N.t('flight.staleTrajectory', _bayatYedek) : _bayatYedek;
+        }
+
         function trajAraciEsitle() {
             trajKalkisKutlesiniEsitle();
             trajReferansAlaniDenetle();
+            trajKuruKutleKalemi();
         }
 
         // Hesap bittiğinde eşitle. `displayCalculationResults` app.js'te
@@ -6420,6 +6766,7 @@
             window.displayCalculationResults = function (results) {
                 var cikti = ozgun.apply(this, arguments);
                 try {
+                    trajBayatCizimiTemizle();
                     trajAraciEsitle();
                 } catch (e) {
                     console.error('Trajectory vehicle sync failed:', e);
@@ -6441,7 +6788,16 @@
                 } catch (e) {
                     console.error('Trajectory vehicle sync failed:', e);
                 }
-                return ozgun.apply(this, arguments);
+                var hesap = window.currentResults;
+                var sonuc = ozgun.apply(this, arguments);
+                // Grafik çizildiyse hangi hesaba ait olduğu not edilir.
+                Promise.resolve(sonuc).then(function () {
+                    var cizim = document.getElementById('trajectory_plot');
+                    if (cizim && cizim.data && hesap === window.currentResults) {
+                        _hibYorungeCizimSonucu = hesap;
+                    }
+                });
+                return sonuc;
             };
         })();
 
@@ -6450,6 +6806,7 @@
             if (mf) {
                 mf.addEventListener('input', function () {
                     try { trajKalkisKutlesiniEsitle(); } catch (e) { /* yok say */ }
+                    try { trajKuruKutleKalemi(); } catch (e) { /* yok say */ }
                 });
             }
             var ra = document.getElementById('reference_area');
@@ -6693,7 +7050,7 @@
             if (g.equals_catalogue === true && atif) {
                 parcalar.push(i18nFmt('adv.ds.regressionCatalogue',
                     { a: cift.a, n: cift.n, citation: atif },
-                    'Regression r = a·G^n: a = {a}, n = {n} — the HRMA catalogue pair: {citation}.'));
+                    'Regression r = a·G_ox^n: a = {a}, n = {n} — the HRMA catalogue pair: {citation}.'));
                 if (g.independent_fit === false) {
                     parcalar.push(i18nText('adv.ds.regressionBorrowed',
                         'This pair is not an independent fit for this fuel (borrowed from another fuel).'));
@@ -6701,15 +7058,15 @@
             } else if (g.equals_catalogue === true) {
                 parcalar.push(i18nFmt('adv.ds.regressionUnverified',
                     { a: cift.a, n: cift.n },
-                    'Regression r = a·G^n: a = {a}, n = {n} — the HRMA catalogue pair; no peer-reviewed correlation is carried for this fuel (unverified).'));
+                    'Regression r = a·G_ox^n: a = {a}, n = {n} — the HRMA catalogue pair; no peer-reviewed correlation is carried for this fuel (unverified).'));
             } else if (g.equals_catalogue === false) {
                 parcalar.push(i18nFmt('adv.ds.regressionDiffers',
                     { a: cift.a, n: cift.n },
-                    'Regression r = a·G^n: a = {a}, n = {n} — page values that differ from the HRMA catalogue pair; the run used the page values.'));
+                    'Regression r = a·G_ox^n: a = {a}, n = {n} — page values that differ from the HRMA catalogue pair; the run used the page values.'));
             } else {
                 parcalar.push(i18nFmt('adv.ds.regressionNoCatalogue',
                     { a: cift.a, n: cift.n },
-                    'Regression r = a·G^n: a = {a}, n = {n} — the HRMA catalogue has no pair for this fuel.'));
+                    'Regression r = a·G_ox^n: a = {a}, n = {n} — the HRMA catalogue has no pair for this fuel.'));
             }
             // Termokimya
             if (t.solver === 'cantera_equilibrium') {
@@ -7039,6 +7396,87 @@
         }
 
         // Find optimum O/F ratio
+        // V306/DİL-HİBRİT — OPTİMUM O/F EĞRİSİ: tek çizim yeri (ilk çizim ve
+        // dil değişiminde yeniden çizim aynı işlevden; sayı aynı yanıttan).
+        let sonOptimumOfYaniti = null;
+        function optimumOfEgrisiniCiz(result) {
+            if (!result || !result.performance_curve) return;
+            const trace = {
+                x: result.performance_curve.of_ratios,
+                y: result.performance_curve.isp_values,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: i18nText('adv.js.ispVsOf', 'ISP vs O/F Ratio'),
+                line: { color: 'blue', width: 2 },
+                marker: { size: 4 }
+            };
+            
+            // Sabit width KALDIRILDI: konteyner genişliğine uyar
+            // (dar ekranda taşıyor, geniş ekranda yarım kalıyordu).
+            const layout = {
+                title: i18nText('adv.js.ofOptimization', 'O/F Ratio Optimization'),
+                xaxis: { title: i18nText('adv.js.ofAxis', 'O/F Ratio') },
+                yaxis: { title: i18nText('adv.js.ispAxis', 'Isp (theoretical, O/F scan) (s)') },
+                autosize: true,
+                height: 300
+            };
+            // ÖH D36 · G-1: eğrinin künyesi uç yanıtından (bant,
+            // adım, nokta sayısı); yoksa alt yazı konmaz.
+            const altYazi = optimumEgriAltYazisi(result.performance_curve);
+            if (altYazi) {
+                layout.height = 330;
+                layout.margin = { b: 80 };
+                layout.annotations = [{
+                    xref: 'paper', yref: 'paper', x: 0, y: -0.32,
+                    xanchor: 'left', showarrow: false, font: { size: 10 },
+                    text: altYazi
+                }];
+            }
+            
+            // ÖH D28 · P12bB3-06 — EĞRİ ARTIK EKRANA GİRİYOR.
+            // ÖLÇÜLDÜ (a3/once_taban.json): uç 15 noktalık
+            // `performance_curve` döndürüyor, şablon onu
+            // `document.createElement('div')` ile SERBEST bir
+            // düğüme çiziyor ve o düğümü hiçbir yere eklemiyordu
+            // ('of-optimization-plot' kimliği dosyada 1 kez
+            // geçiyor, appendChild/insertBefore 0). Sunucu O/F
+            // taramasını gerçekten koşuyor, tek sayı alana
+            // yazılıyor, eğrinin tamamı çöpe gidiyordu:
+            // kullanıcı optimumun keskin mi yayvan mı olduğunu
+            // — yani hükmün ne kadar hassas olduğunu —
+            // göremiyordu.
+            let plotDiv = document.getElementById('of-optimization-plot');
+            if (!plotDiv) {
+                plotDiv = document.createElement('div');
+                plotDiv.id = 'of-optimization-plot';
+                plotDiv.className = 'plot-container';
+                plotDiv.style.marginTop = '12px';
+                // Kap: optimum O/F sonucunun basıldığı kutu;
+                // yoksa O/F alanının kendi form grubu. İkisi de
+                // yoksa çizim YAPILMAZ (serbest düğüme çizip
+                // atmaktansa hiç çizmemek dürüsttür).
+                const kap = document.getElementById('optimum_of_result');
+                if (kap && kap.parentNode) {
+                    kap.parentNode.insertBefore(plotDiv, kap.nextSibling);
+                }
+            }
+            if (plotDiv.parentNode) {
+                // responsive: pencere daralınca grafik de daralır (DİL-ORTAK
+                // DEVİR 6: 1440 → 1280'de 160 px taşıyordu).
+                Plotly.newPlot(plotDiv, [trace], layout, { responsive: true });
+            }
+        }
+        if (window.I18N && typeof window.I18N.onChange === 'function') {
+            window.I18N.onChange(function () {
+                try {
+                    if (sonOptimumOfYaniti
+                        && document.getElementById('of-optimization-plot')) {
+                        optimumOfEgrisiniCiz(sonOptimumOfYaniti);
+                    }
+                } catch (e) { /* grafik yoksa */ }
+            });
+        }
+
         async function findOptimumOF() {
             showMessage(i18nText('adv.msg.findingOptimumOF', 'Finding optimum O/F ratio for maximum Isp...'), 'info');
             
@@ -7059,16 +7497,31 @@
                     return;
                 }
 
+                // V306/HİBRİT-SAYI (M-HIBRIT-5): uç, Hesapla'nın kullandığı
+                // AYNI tasarım girdileriyle (ε, ortam basıncı, oksitleyici
+                // giriş durumu) arar — çözücünün optimumuyla tek tanım. Değerler
+                // getFormData'dan (Hesapla'nın kendi toplayıcısı) okunur.
+                const optGovde = {
+                    motor_type: 'hybrid',
+                    oxidizer: oxidizerType,
+                    fuel: fuelType,
+                    chamber_pressure: chamberPressure
+                };
+                try {
+                    const fd = getFormData();
+                    ['expansion_ratio', 'atmospheric_pressure', 'oxidizer_temp',
+                     'oxidizer_phase'].forEach(function (k) {
+                        if (fd && fd[k] !== null && fd[k] !== undefined && fd[k] !== '') {
+                            optGovde[k] = fd[k];
+                        }
+                    });
+                } catch (e) { /* form okunamazsa uç kendi beyanlı varsayılanını yazar */ }
+
                 // Call the API endpoint for real optimization
                 const response = await fetch('/api/find-optimum-of', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        motor_type: 'hybrid',
-                        oxidizer: oxidizerType,
-                        fuel: fuelType,
-                        chamber_pressure: chamberPressure
-                    })
+                    body: JSON.stringify(optGovde)
                 });
 
                 const result = await response.json();
@@ -7107,75 +7560,23 @@
 
                     // Show recommendation if available
                     if (result.recommendation) {
-                        showMessage(result.recommendation, 'success');
+                        // V306/DİL-HİBRİT (M-HIBRIT-4): sunucu cümlesi çeviri
+                        // kanalından geçer (eşleşme yoksa metin aynen kalır).
+                        showMessage((typeof SRV === 'function')
+                            ? SRV(result.recommendation) : result.recommendation,
+                            'success');
                     } else {
                         showMessage(i18nFmt('adv.msg.optimumOFRatio', { optimumOF: i18nNumber(optimumOF, 2), oxidizerType: oxidizerType.toUpperCase(), fuelType: fuelType.toUpperCase() }, 'Optimum O/F ratio found: {optimumOF} for {oxidizerType}/{fuelType}'), 'success');
                     }
                     
                     // Create and display performance curve if available
+                    // V306/DİL-HİBRİT (DİL-ORTAK DEVİR 1+6): çizim ayrı işlevde;
+                    // son yanıt saklanır ve dil değişiminde AYNI yanıttan
+                    // yeniden çizilir (başlık/eksen T() ile çizimden önce
+                    // çevriliyordu, TR → EN geçişte Türkçe kalıyordu).
                     if (result.performance_curve) {
-                        const trace = {
-                            x: result.performance_curve.of_ratios,
-                            y: result.performance_curve.isp_values,
-                            type: 'scatter',
-                            mode: 'lines+markers',
-                            name: i18nText('adv.js.ispVsOf', 'ISP vs O/F Ratio'),
-                            line: { color: 'blue', width: 2 },
-                            marker: { size: 4 }
-                        };
-                        
-                        // Sabit width KALDIRILDI: konteyner genişliğine uyar
-                        // (dar ekranda taşıyor, geniş ekranda yarım kalıyordu).
-                        const layout = {
-                            title: i18nText('adv.js.ofOptimization', 'O/F Ratio Optimization'),
-                            xaxis: { title: i18nText('adv.js.ofAxis', 'O/F Ratio') },
-                            yaxis: { title: i18nText('adv.js.ispAxis', 'Isp (theoretical, O/F scan) (s)') },
-                            autosize: true,
-                            height: 300
-                        };
-                        // ÖH D36 · G-1: eğrinin künyesi uç yanıtından (bant,
-                        // adım, nokta sayısı); yoksa alt yazı konmaz.
-                        const altYazi = optimumEgriAltYazisi(result.performance_curve);
-                        if (altYazi) {
-                            layout.height = 330;
-                            layout.margin = { b: 80 };
-                            layout.annotations = [{
-                                xref: 'paper', yref: 'paper', x: 0, y: -0.32,
-                                xanchor: 'left', showarrow: false, font: { size: 10 },
-                                text: altYazi
-                            }];
-                        }
-                        
-                        // ÖH D28 · P12bB3-06 — EĞRİ ARTIK EKRANA GİRİYOR.
-                        // ÖLÇÜLDÜ (a3/once_taban.json): uç 15 noktalık
-                        // `performance_curve` döndürüyor, şablon onu
-                        // `document.createElement('div')` ile SERBEST bir
-                        // düğüme çiziyor ve o düğümü hiçbir yere eklemiyordu
-                        // ('of-optimization-plot' kimliği dosyada 1 kez
-                        // geçiyor, appendChild/insertBefore 0). Sunucu O/F
-                        // taramasını gerçekten koşuyor, tek sayı alana
-                        // yazılıyor, eğrinin tamamı çöpe gidiyordu:
-                        // kullanıcı optimumun keskin mi yayvan mı olduğunu
-                        // — yani hükmün ne kadar hassas olduğunu —
-                        // göremiyordu.
-                        let plotDiv = document.getElementById('of-optimization-plot');
-                        if (!plotDiv) {
-                            plotDiv = document.createElement('div');
-                            plotDiv.id = 'of-optimization-plot';
-                            plotDiv.className = 'plot-container';
-                            plotDiv.style.marginTop = '12px';
-                            // Kap: optimum O/F sonucunun basıldığı kutu;
-                            // yoksa O/F alanının kendi form grubu. İkisi de
-                            // yoksa çizim YAPILMAZ (serbest düğüme çizip
-                            // atmaktansa hiç çizmemek dürüsttür).
-                            const kap = document.getElementById('optimum_of_result');
-                            if (kap && kap.parentNode) {
-                                kap.parentNode.insertBefore(plotDiv, kap.nextSibling);
-                            }
-                        }
-                        if (plotDiv.parentNode) {
-                            Plotly.newPlot(plotDiv, [trace], layout);
-                        }
+                        sonOptimumOfYaniti = result;
+                        optimumOfEgrisiniCiz(result);
                     }
                     
                 } else {
@@ -7235,7 +7636,24 @@
             event.target.classList.add('active');
         }
 
-        async function generateCAD() {
+        // V306/BAYAT NR-8 — DÜĞME ADININ SÖYLEDİĞİNİ YAPAR.
+        // ÖLÇÜLDÜ (28 Eki son kullanıcı turu, ekran 13): "3B Model Üret"
+        // 3B model üretmiyordu: sayfada zaten duran 3B sahneyi yeniden kurup
+        // about:blank adresli bir "Motor Tasarım Özeti" penceresi açıyordu
+        // (6 performans kartı — Performans Özeti'nin tekrarı — ve indirme
+        // düğmeleri). O pencere kaydedilemez/yenilenemez bir belgeydi.
+        // KARAR: düğme 3B modeli ÜRETİR: sahnedeki modeli gösterir ve
+        // hesaplanan motorun parametrik katı modelini (STEP paketi: oda,
+        // lüle konturu, enjektör plakası + montaj) DOSYA olarak indirir.
+        // Özet penceresi söküldü; içindeki indirmelerin her biri ana sayfada
+        // kendi düğmesindedir (STL "Motor Dışa Aktarımı", teknik çizim ve
+        // DXF bu bölümde, tam paket "Tüm Dosyaları Üret"). Katı ("Motor CAD
+        // Dışa Aktarımı" = STEP+STL ZIP) ve sıvı ("Tasarım Dışa
+        // Aktarımları") sayfalarında açılır pencere yok; ad işi söylüyor.
+        // `secenek.indir === false`: yalnız sahne (tam paket akışı STEP'i
+        // zaten ZIP'in içinde indirir; ikinci kez indirilmez).
+        async function generateCAD(secenek) {
+            const indir = !(secenek && secenek.indir === false);
             if (!currentResults || !currentResults.motor) {
                 showMessage(i18nText('adv.msg.pleaseRunAnalysisFirst', 'Please run analysis first by clicking the "Calculate" button in the main interface'), 'error');
                 // Scroll to the calculate button to help user find it
@@ -7247,9 +7665,9 @@
                 }
                 return false;   // P12bB3-08: sonuç bildirilir (sessiz dönüş yok)
             }
-            
-            showMessage(i18nText('adv.msg.generatingCompleteMotorDesign', 'Generating complete motor design package...'), 'info');
-            document.getElementById('cadStatus').textContent = i18nText('adv.js.cadGenerating', 'Generating full motor design...');
+
+            const durum = document.getElementById('cadStatus');
+            if (durum) durum.textContent = i18nText('adv.js.cadGenerating', 'Generating full motor design...');
 
             try {
                 // 3D simülasyon: geometri zaten currentResults.motor içinde,
@@ -7282,143 +7700,32 @@
                     }
                 }
 
-                // Tasarım özeti popup'ı — yalnız gerçek hesap sonuçlarıyla kurulur
-                // (imalat çıktıları için Export STEP / DXF / Drawings PDF akışı)
-                displayCompleteDesignPackage();
-
-                document.getElementById('cadStatus').textContent = i18nText('adv.js.cadDone', 'Complete motor design generated successfully!');
-                document.getElementById('exportSTLBtn').disabled = false;
-                showMessage(i18nText('adv.msg.completeMotorDesignPackage', 'Complete motor design package generated!'), 'success');
-                return true;    // P12bB3-08
+                const sahnePaneli = document.getElementById('cad3DPanel');
+                if (sahnePaneli && sahnePaneli.style.display !== 'none'
+                        && typeof sahnePaneli.scrollIntoView === 'function') {
+                    sahnePaneli.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+                const stlBtn = document.getElementById('exportSTLBtn');
+                if (stlBtn) stlBtn.disabled = false;
+                if (!indir) {
+                    if (durum) durum.textContent = i18nText('adv.js.cadDoneScene',
+                        '3D model shown in the Motor Simulation panel.');
+                    return true;    // P12bB3-08
+                }
+                // STEP paketi: _downloadExport kendi iletisini basar (indirildi
+                // ya da adlı ret); burada üstüne ikinci bir ileti yazılmaz.
+                const stepOk = (await exportSTEP()) === true;
+                if (durum) {
+                    durum.textContent = stepOk
+                        ? i18nText('adv.js.cadDoneStep', '3D model shown in the Motor Simulation panel; STEP package (parametric solids) downloaded.')
+                        : i18nText('adv.js.cadFailed', 'Design generation failed');
+                }
+                return stepOk;      // P12bB3-08
             } catch (error) {
-                document.getElementById('cadStatus').textContent = i18nText('adv.js.cadFailed', 'Design generation failed');
+                if (durum) durum.textContent = i18nText('adv.js.cadFailed', 'Design generation failed');
                 showMessage(i18nText('adv.msg.errorGeneratingDesign', 'Error generating design: ') + error.message, 'error');
                 return false;   // P12bB3-08
             }
-        }
-
-        function displayCompleteDesignPackage() {
-            // Yalnız GERÇEK hesap sonuçları gösterilir: eksik değer 'not computed'
-            // olarak yazılır, uydurma sabit fallback yok. İmalat çıktıları
-            // (STEP/DXF/PDF) gerçek export akışlarından indirilir.
-            const m = (currentResults && currentResults.motor) || {};
-            const fmtVal = (v, d, unit) =>
-                (typeof v === 'number' && isFinite(v))
-                    ? (i18nNumber(v, d) + (unit ? ' ' + unit : ''))
-                    : i18nText('adv.pop.notComputed', 'not computed');
-            const totalImpulse =
-                (typeof m.total_impulse === 'number' && isFinite(m.total_impulse))
-                    ? m.total_impulse
-                    : ((typeof m.thrust === 'number' && isFinite(m.thrust)
-                        && typeof m.burn_time === 'number' && isFinite(m.burn_time))
-                        ? m.thrust * m.burn_time : undefined);
-            const throatDiaMm =
-                (typeof m.throat_diameter === 'number' && isFinite(m.throat_diameter))
-                    ? m.throat_diameter * 1000 : undefined;
-
-            const designWindow = window.open('', '_blank', 'width=1400,height=900');
-            if (!designWindow) {
-                // Popup engellendi — 3D akışı başarısız sayılmasın
-                showMessage(i18nText('adv.msg.designSummaryPopupWas', 'Design summary popup was blocked by the browser'), 'warning');
-                return;
-            }
-            designWindow.document.write(`<!DOCTYPE html>
-<html>
-<head>
-    <title>${i18nText('adv.pop.title', 'HRMA - Motor Design Summary')}</title>
-    <!-- Koyu doküman teması: hd_doc.css (theme.css'in popup çekirdeği) -->
-    <link rel="stylesheet" href="${window.location.origin}/static/css/hd_doc.css">
-</head>
-<body>
-    <div class="header">
-        <h1>${i18nText('adv.pop.heading', 'HRMA - Hybrid Motor Design Summary')}</h1>
-        <p>${i18nText('adv.pop.subtitle', 'Performance summary from the latest calculation results')}</p>
-    </div>
-
-    <div class="section">
-        <h2>${i18nText('adv.pop.specsHeading', 'Motor Performance Specifications')}</h2>
-        <div class="specs-grid">
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.thrust', 'Thrust')}</div>
-                <div>${fmtVal(m.thrust, 0, 'N')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.isp', 'Isp (design point, at design-altitude ambient)')}</div>
-                <div>${fmtVal(m.isp, 1, 's')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.burnTime', 'Burn Time')}</div>
-                <div>${fmtVal(m.burn_time, 1, 's')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.chamberPressure', 'Chamber Pressure')}</div>
-                <div>${fmtVal(m.chamber_pressure, 1, 'bar')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.totalImpulse', 'Total Impulse')}</div>
-                <div>${fmtVal(totalImpulse, 0, 'N·s')}</div>
-            </div>
-            <div class="spec-item">
-                <div class="spec-label">${i18nText('adv.pop.throatDiameter', 'Throat Diameter')}</div>
-                <div>${fmtVal(throatDiaMm, 1, 'mm')}</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="section">
-        <h2>${i18nText('adv.pop.manufacturingHeading', 'Manufacturing Outputs')}</h2>
-        <p>${i18nText('adv.pop.manufacturingBody', 'Material selection and technical drawings are not part of this summary. Real manufacturing outputs are produced by the export pipeline: use the buttons below (or the Export STEP / Export DXF / Drawings PDF buttons on the main page) to download geometry generated from the calculated motor design.')}</p>
-    </div>
-
-    <div class="section">
-        <h2>${i18nText('adv.pop.downloadHeading', 'Download Package')}</h2>
-        <button class="download-btn" onclick="downloadSTL()">${i18nText('adv.pop.downloadStl', 'Download 3D Models (STL)')}</button>
-        <button class="download-btn" onclick="downloadCAD()">${i18nText('adv.pop.downloadStep', 'Download CAD Files (STEP)')}</button>
-        <button class="download-btn" onclick="downloadDrawings()">${i18nText('adv.pop.downloadDrawings', 'Download Technical Drawings (PDF)')}</button>
-        <button class="download-btn" onclick="downloadSpecs()">${i18nText('adv.pop.downloadSpecs', 'Download Full Specifications (PDF)')}</button>
-        <div id="popupNotices"></div>
-    </div>
-
-    <div class="warning">
-        <strong>${i18nText('adv.pop.safetyLabel', 'Safety Notice:')}</strong> ${i18nText('adv.pop.safetyBody', 'This motor design is a preliminary-design and analysis result. Professional testing and certification are required before use.')}
-    </div>
-
-    <scr` + `ipt>
-        var OPENER_CLOSED_MSG = ${JSON.stringify(i18nText('adv.js.openerClosed', 'The main HRMA window is closed'))};
-        var NOTICE_CLOSE_LABEL = ${JSON.stringify(i18nText('adv.pop.noticeClose', 'Close'))};
-        // ÖH D37 A1a · CW-U6: ana pencere kapalıysa yerli pencere kutusu
-        // DEĞİL, bu pencerenin içinde kendiliğinden kaybolmayan, klavyeyle
-        // kapatılabilen bildirim (role=alert, odak bildirime taşınır).
-        function popupNotice(text) {
-            var kap = document.getElementById('popupNotices');
-            if (!kap) return;
-            var kutu = document.createElement('div');
-            kutu.className = 'warning hrma-notice';
-            kutu.setAttribute('role', 'alert');
-            kutu.setAttribute('tabindex', '-1');
-            var kapat = document.createElement('button');
-            kapat.type = 'button';
-            kapat.className = 'hrma-notice-close';
-            kapat.textContent = NOTICE_CLOSE_LABEL;
-            kapat.setAttribute('aria-label', NOTICE_CLOSE_LABEL);
-            kapat.addEventListener('click', function () { kutu.remove(); });
-            kutu.addEventListener('keydown', function (e) { if (e.key === 'Escape') kutu.remove(); });
-            var govde = document.createElement('span');
-            govde.textContent = text;
-            kutu.appendChild(kapat);
-            kutu.appendChild(govde);
-            kap.innerHTML = '';
-            kap.appendChild(kutu);
-            kutu.focus();
-        }
-        function downloadSTL() { window.opener && window.opener.exportSTLZip ? window.opener.exportSTLZip() : popupNotice(OPENER_CLOSED_MSG); }
-        function downloadCAD() { window.opener && window.opener.exportSTEP ? window.opener.exportSTEP() : popupNotice(OPENER_CLOSED_MSG); }
-        function downloadDrawings() { window.opener && window.opener.exportDrawingsPDF ? window.opener.exportDrawingsPDF() : popupNotice(OPENER_CLOSED_MSG); }
-        function downloadSpecs() { window.opener && window.opener.exportCompleteZip ? window.opener.exportCompleteZip() : popupNotice(OPENER_CLOSED_MSG); }
-    </scr` + `ipt>
-</body>
-</html>
-`);
         }
 
         // ===== 3D Motor Simülasyonu kontrolleri (MotorViz3D) =====
@@ -8130,8 +8437,18 @@
                 const response = await fetch(`/api/export-pdf/${reportType}`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
+                    // V306/RAPOR-HATA (M-HIBRIT-8): hibrit sonucu motor adını
+                    // ve türünü düz alan olarak yayımlamıyor; rapor künyesi
+                    // "Unnamed Motor / not supplied" basıyordu. Ad sayfanın
+                    // TEK ad çözücüsünden (disaAktarimMotorAdi), tür bu
+                    // sayfanın kendisinden (katı/sıvı sayfalarıyla aynı
+                    // sözleşme: motor_data.motor_type).
                     body: JSON.stringify({
-                        motor_data: currentResults.motor,
+                        lang: (typeof window !== 'undefined' && window.I18N) ? window.I18N.lang : undefined,  // V306/RAPOR-DİL: belgenin dili
+                        motor_data: Object.assign({}, currentResults.motor, {
+                            motor_name: disaAktarimMotorAdi(),
+                            motor_type: 'hybrid'
+                        }),
                         analysis_results: currentResults
                     }),
                     // ÖH D23 / P17B4-07 — TEK KAYNAK (doktrin 4): 180000 üç
@@ -8517,8 +8834,9 @@
             if (durumEl) durumEl.textContent = '';
             showMessage(i18nText('adv.msg.generatingCompletePackage', 'Generating complete package...'), 'info');
 
-            // Rapor popup'ı + GERÇEK indirilebilir ZIP (STL+DXF+PDF+STEP+.eng)
-            const cadOk = (await generateCAD()) === true;
+            // V306/BAYAT NR-8: 3B sahne + GERÇEK indirilebilir ZIP
+            // (STL+DXF+PDF+STEP+.eng); STEP ZIP'in içinde, ayrıca indirilmez.
+            const cadOk = (await generateCAD({ indir: false })) === true;
             const zipOk = (await exportCompleteZip()) === true;
 
             if (cadOk && zipOk) {

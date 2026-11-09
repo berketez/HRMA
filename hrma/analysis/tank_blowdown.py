@@ -174,7 +174,7 @@ class N2OSaturation:
             raise ValueError(
                 f'{T:.2f} K is at or above the N2O critical temperature '
                 f'({N2O_T_CRIT:.2f} K, NIST WebBook): there is no saturated '
-                'liquid/vapour split above it and no value is invented.')
+                'liquid/vapour split above it, so no value is published.')
         if T < N2O_T_TRIPLE:
             raise ValueError(
                 f'{T:.2f} K is below the N2O triple point '

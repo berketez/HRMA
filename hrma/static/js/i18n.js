@@ -105,7 +105,7 @@
 
             'card.hybrid.title': 'Hybrid Motors',
             'card.hybrid.code': 'LIQUID OX / SOLID FUEL',
-            'card.hybrid.desc': 'Design and analyze hybrid rocket motors with regression-rate coupled ballistics, injector optimization and live 3D burn simulation.',
+            'card.hybrid.desc': 'Design and analyze hybrid rocket motors with regression-rate coupled ballistics, injector optimization and a 3D motor model.',
             'card.hybrid.f1': 'HTPB, Paraffin, ABS fuels',
             'card.hybrid.f2': 'N2O, LOX, H2O2 oxidizers',
             'card.hybrid.f3': 'Injector design optimization',
@@ -133,7 +133,7 @@
 
             'footer.developedBy': 'Developed by:',
             'footer.ideaTesting': 'Idea & Testing:',
-            'footer.tool': 'Professional Rocket Propulsion Design Tool'
+            'footer.tool': 'Rocket Propulsion Preliminary Design and Analysis Tool'
 
             /* ÖH D29 / P12aB2-10 — 'nav.home' / 'nav.hybrid' / 'nav.solid' /
                'nav.liquid' BURADAN SÖKÜLDÜ (EN+TR, 8 satır). ÖLÇÜLDÜ
@@ -167,7 +167,7 @@
 
             'card.hybrid.title': 'Hibrit Motorlar',
             'card.hybrid.code': 'SIVI OKSİTLEYİCİ / KATI YAKIT',
-            'card.hybrid.desc': 'Regresyon hızı bağlaşık balistik, enjektör optimizasyonu ve canlı 3B yanma simülasyonu ile hibrit roket motorları tasarlayın ve analiz edin.',
+            'card.hybrid.desc': 'Regresyon hızı bağlaşık balistik, enjektör optimizasyonu ve 3B motor modeliyle hibrit roket motorları tasarlayın ve analiz edin.',
             'card.hybrid.f1': 'HTPB, parafin, ABS yakıtları',
             'card.hybrid.f2': 'N2O, LOX, H2O2 oksitleyicileri',
             'card.hybrid.f3': 'Enjektör tasarımı optimizasyonu',
@@ -195,7 +195,7 @@
 
             'footer.developedBy': 'Geliştiren:',
             'footer.ideaTesting': 'Fikir ve Test:',
-            'footer.tool': 'Profesyonel Roket İtki Tasarım Aracı'
+            'footer.tool': 'Roket İtki Ön Tasarım ve Analiz Aracı'
             /* ÖH D29 / P12aB2-10 — EN bloğundaki kardeş notu gör. */
         }
     };

@@ -200,7 +200,38 @@
                anahtar, kabuk sözlüğüne yazıldı (D17 electron a1'in
                `chartCap.injectorFace` emsali). register() bütün parçaları
                tek tabloda birleştirir. */
-            'proj.descLabel': 'Description (optional)'
+            'proj.descLabel': 'Description (optional)',
+            /* V306/UÇUŞ (NR-13 / NR-10 / NK-14): motordan uçuşa aktarım
+               satırları — flight_handoff.js ortak yardımcıları üç motor
+               sayfasında ve Fırlatma Sahası sayfasında bu kabuk sözlüğünden okur
+               (dört sayfada da yüklü tek sözlük budur). */
+            'flight.inertLedger': 'Engine flying inert mass: {items} = {total} kg',
+            'flight.inertLedgerSingle': 'Engine flying inert mass: {item}',
+            'flight.inertItem.engine_dry': 'engine dry {m} kg',
+            'flight.inertItem.engine_dry_estimate': 'engine dry (estimate) {m} kg',
+            'flight.inertItem.tank_structure': 'propellant tank structure {m} kg',
+            'flight.inertItem.reserve_propellant': 'reserve (unburned) propellant {m} kg',
+            /* V306/SIVI-KÜTLE (M-SIVI-1): motor kuru kütlesinde OLMAYAN araç
+               kalemi (flight_vehicle.vehicle_items_not_in_engine). */
+            'flight.notInEngine': 'Not in the engine mass: {items}, a vehicle item HRMA does not estimate; include it in the dry mass you enter.',
+            'flight.vehicleItem.controls_avionics': 'controls / avionics (controller box, harness, sensors)',
+            'flight.inertLedgerAbove': 'This field {value} kg = engine {total} kg + {diff} kg not from the engine (airframe, payload — your input).',
+            'flight.inertLedgerBelow': 'This field {value} kg is {diff} kg BELOW the engine flying inert mass: a vehicle cannot weigh less than its engine.',
+            'flight.manualDiffers': 'You typed this value, so it is kept. The current design gives {value} {unit}.',
+            'flight.useDesignValue': 'Use the design value',
+            'flight.refusedCooling': 'No flight: the engine mass is not published for this calculation because the regenerative cooling circuit was not solved, so no vehicle is built and nothing is flown. Fix the cooling design and calculate again.',
+            'flight.refusedEngineMass': 'No flight: this engine calculation does not publish the engine mass, so no vehicle is built and nothing is flown.',
+            'flight.traj.noLiftoff': 'NO LIFTOFF — thrust-to-weight at ignition is {tw} (it must be above 1): the vehicle does not leave the pad, so there is no trajectory to draw.',
+            'flight.traj.thrust': 'Thrust flown: {src}, total impulse {imp} N·s; the 6-DOF panel flies the same thrust when its thrust source is the page calculation.',
+            'flight.traj.impulseMotorDiff': 'the engine publishes {m} N·s: its curve starts at t = {t0} s and the flight holds the first thrust value from ignition (t = 0)',
+            'flight.traj.altComp': 'Thrust corrected for altitude: F(h) = F_ref + (p_ref − p_a)·A_e, A_e = {ae} cm², p_ref = {p} Pa.',
+            'flight.traj.altCompOff': 'Thrust NOT corrected for altitude: no nozzle exit area, so it stays at its reference value.',
+            'flight.traj.propBudgetDiffers': 'Propellant flown = Initial − Final Mass = {flown} kg, but the engine carries {engine} kg: this trajectory burns {tb} s, not the engine burn time {tbe} s. The masses you typed are kept; correct them (airframe and payload go into both masses) or use the design values.',
+            'flight.traj.loadFactor': 'Peak load factor (sensed acceleration, gravity excluded) {n} g; peak kinematic acceleration |dv/dt| {k} g.',
+            'flight.traj.model': 'Planar (2-D) point-mass model: flight in the vertical plane, no attitude dynamics; launch angle {a}° from horizontal ({src}).',
+            'flight.traj.angleSupplied': 'entered on this panel',
+            'flight.traj.angleDefault': 'not entered — HRMA default',
+            'flight.traj.modelDiff': 'With the same thrust the 6-DOF panel adds attitude dynamics (the vehicle turns into the wind) and uses its own drag coefficient, body diameter, launch angle, rail and wind; its apogee differs from this planar model for those reasons.'
         },
         tr: {
             'link.releaseNotes': 'Sürüm Notları',
@@ -353,7 +384,32 @@
             'warn.bugreport.geo_withheld': 'Coğrafi koordinat alanları kayıttan geri tutuldu ({count} alan).',
             'warn.bugreport.title_truncated': 'Başlık, GitHub\'ın {limit} karakterlik sınırına kısaltıldı.',
             'warn.bugreport.preview_required': 'Kayıt yalnızca önizlendikten sonra açılabilir.',
-            'proj.descLabel': 'Açıklama (isteğe bağlı)'
+            'proj.descLabel': 'Açıklama (isteğe bağlı)',
+            'flight.inertLedger': 'Motorun uçan atıl kütlesi: {items} = {total} kg',
+            'flight.inertLedgerSingle': 'Motorun uçan atıl kütlesi: {item}',
+            'flight.inertItem.engine_dry': 'motor kuru {m} kg',
+            'flight.inertItem.engine_dry_estimate': 'motor kuru (tahmin) {m} kg',
+            'flight.inertItem.tank_structure': 'itici tankı yapısı {m} kg',
+            'flight.inertItem.reserve_propellant': 'yedek (yanmayan) itici {m} kg',
+            'flight.notInEngine': 'Motor kütlesinde yok: {items}; HRMA\'nın tahmin etmediği bir araç kalemi, girdiğiniz kuru kütleye ekleyin.',
+            'flight.vehicleItem.controls_avionics': 'kumanda / aviyonik (denetleyici kutusu, kablo demeti, sensörler)',
+            'flight.inertLedgerAbove': 'Bu alan {value} kg = motor {total} kg + motordan gelmeyen {diff} kg (gövde, faydalı yük — sizin girdiniz).',
+            'flight.inertLedgerBelow': 'Bu alan {value} kg, motorun uçan atıl kütlesinden {diff} kg KÜÇÜK: araç motorundan hafif olamaz.',
+            'flight.manualDiffers': 'Bu değeri siz girdiniz, korunuyor. Güncel tasarımın değeri {value} {unit}.',
+            'flight.useDesignValue': 'Tasarım değerini kullan',
+            'flight.refusedCooling': 'Uçuş yok: rejeneratif soğutma devresi çözülemediği için bu hesapta motor kütlesi yayımlanmadı; araç kurulmadı ve hiçbir şey uçurulmadı. Soğutma tasarımını düzeltip yeniden hesaplayın.',
+            'flight.refusedEngineMass': 'Uçuş yok: bu motor hesabı motor kütlesini yayımlamıyor; araç kurulmadı ve hiçbir şey uçurulmadı.',
+            'flight.traj.noLiftoff': 'KALKIŞ YOK — ateşlemedeki itki/ağırlık oranı {tw} (1\'in üstünde olmalı): araç rampadan ayrılmıyor; çizilecek yörünge yok.',
+            'flight.traj.thrust': 'Uçan itki: {src}, toplam impuls {imp} N·s; 6-DOF paneli itki kaynağı sayfa hesabıyken aynı itkiyi uçurur.',
+            'flight.traj.impulseMotorDiff': 'motorun yayımladığı {m} N·s: eğrisi t = {t0} s anında başlıyor; uçuş ilk itki değerini ateşlemeden (t = 0) itibaren uygular',
+            'flight.traj.altComp': 'İtki irtifaya göre düzeltildi: F(h) = F_ref + (p_ref − p_a)·A_e, A_e = {ae} cm², p_ref = {p} Pa.',
+            'flight.traj.altCompOff': 'İtki irtifaya göre DÜZELTİLMEDİ: nozul çıkış alanı yok; itki referans değerinde kalır.',
+            'flight.traj.propBudgetDiffers': 'Uçan itici = İlk Kütle − Son Kütle = {flown} kg, motor ise {engine} kg itici taşıyor: bu yörünge motorun yanma süresi {tbe} s değil, {tb} s yanar. Yazdığınız kütleler korunuyor; düzeltin (gövde ve faydalı yük iki kütleye de eklenir) ya da tasarım değerlerini kullanın.',
+            'flight.traj.loadFactor': 'Tepe yük çarpanı (algılanan ivme, yerçekimi hariç) {n} g; tepe kinematik ivme |dv/dt| {k} g.',
+            'flight.traj.model': 'Düzlemsel (2B) nokta-kütle modeli: uçuş düşey düzlemde, tutum dinamiği yok; atış açısı yataydan {a}° ({src}).',
+            'flight.traj.angleSupplied': 'bu panelde girildi',
+            'flight.traj.angleDefault': 'girilmedi — HRMA varsayılanı',
+            'flight.traj.modelDiff': 'Aynı itkiyle 6-DOF paneli tutum dinamiğini ekler (araç rüzgâra döner) ve kendi sürükleme katsayısını, gövde çapını, atış açısını, rayını ve rüzgârını kullanır; apojesi bu düzlemsel modelden bu nedenlerle farklıdır.'
         }
     };
     if (global.I18N && global.I18N.register) {

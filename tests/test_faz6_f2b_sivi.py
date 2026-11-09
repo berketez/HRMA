@@ -58,7 +58,11 @@ NODE = shutil.which('node')
 LIQUID_FORM = {
     'fuel_type': 'rp1', 'oxidizer_type': 'lox',
     'thrust': 10000, 'chamber_pressure': 100, 'mixture_ratio': 2.5,
-    'nozzle_expansion_ratio': 50, 'max_burn_duration': 400,
+    # V306/SIVI-CEKET-B kalem 5: eski form ön dolgusu ε 50 (kaynaksız; UÇUŞ-KÜTLE
+    # formdan kaldırdı) 100 bar'da deniz seviyesinde ayrılıyor (Summerfield;
+    # ayrılmayan en büyük ε 26,86) ve uç artık o tasarımı adlı retle
+    # yayımlamıyor. Gövde ayrılmayan bölgedeki 20 ile kurulur.
+    'nozzle_expansion_ratio': 20, 'max_burn_duration': 400,
     'combustion_efficiency': 97, 'contraction_ratio': 4,
     'characteristic_length': 1.2, 'chamber_wall_thickness': 5,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
@@ -340,6 +344,12 @@ JS_CONSTS = ['LIQUID_SIGFIG_DENSITY', 'LIQUID_SIGFIG_TRANSPORT',
              'LIQUID_DEEP_WARNING_PATHS']
 
 JS_FUNCS = ['liquidSigFig', 'hrmaFmt', 'liquidWarnText',
+            # V306/SIVI-CEKET-A (K5_KARAR EK7): Excel teslimatı ve alt
+            # sistem kartları bekletilen alanı ADLI nedenle yazar; bu dört
+            # yardımcı koşumda yoksa node 'liqGateFieldText is not defined'
+            # ile düşer (koşum eksikliği; T44/T45 iddiaları aynen duruyor).
+            'liqJacketGate', 'liqJacketGateScope', 'liqGateReasonText',
+            'liqGateFieldText',
             # liquidCollectWarnings ikisini de ÇAĞIRIR: ondan ÖNCE gelmeli.
             'liquidDeepWarnings', 'liquidDeepIsCritical',
             'liquidCollectWarnings',
@@ -680,7 +690,10 @@ def test_t45_kunye_yuvarlanmis_deger_basar(tmp_path, cr):
     assert not uzun, 'künyede ham float: %s' % uzun[:5]
     # Değer kaybolmadı, yalnız yuvarlandı
     assert '3707 K' in html
-    assert '(Optimal: 2.807)' in html
+    # V306/SIVI-CEKET-B kalem 5: gövde ε 50 -> 20 (ayrılmayan lüle); CEA
+    # optimum O/F'si bu lülede 2,806883 -> 2,676550 (ölçüldü). İddia aynı:
+    # 16 basamaklı değer 3 ondalığa yuvarlanmış basılır.
+    assert '(Optimal: 2.677)' in html
 
 
 def test_t45_altsistem_kartlarinda_ham_float_kalmadi(tmp_path, cr):

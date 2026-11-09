@@ -1,0 +1,414 @@
+{
+ "sema": "hrma-olcut-vaka/1",
+ "kimlik": "hibrit_L2",
+ "sistem": "hibrit",
+ "seviye": "L2",
+ "gorev": {
+  "hedef_apoje_m": 10000,
+  "faydali_yuk_kg": 4.0,
+  "varsayimlar": "Ø152 mm (6 in) amatör araştırma roketi, boy 3,5 m, burun 0,7 m ojiv, 4 kanatçık (kök 0,25 / uç 0,10 / açıklık 0,11 m); gövde+kurtarma+aviyonik 14 kg, faydalı yük 4 kg, N2O tankı+vana+tesisat 7,8 kg (mühendis tahmini; HRMA tank yapısal kütlesini NOT_MODELLED beyan ediyor), motor kuru 5,02 kg (HRMA), yanmayan 2 mm artık et 0,46 kg → yanma sonu 31,3 kg; Cd 0,45; ray 6 m; rüzgâr 5 m/s. Kendinden basınçlı N2O 293 K, HTPB, Pc 25 bar, O/F 7,24 (Optimumu Bul @25 bar), oda/enjektör AISI 4130, plaka 6 mm."
+ },
+ "kaynak": {
+  "dosya": "docs/scofield/raw/OH/V306/muhendis-turu/hibrit/vakalar/L2.json",
+  "tur": "V306 mühendis turu (2 Kas 2026)",
+  "tur_surumu": "3.0.5",
+  "tur_commit": "0a138ff6a",
+  "tur_tarihi": "2026-11-02",
+  "tur_durumu": "hedefe_ulasti",
+  "vaka_dosyasi_tarihi": "2026-11-04"
+ },
+ "gercek_motor": false,
+ "adimlar": [
+  {
+   "ad": "optimum",
+   "uc": "/api/find-optimum-of",
+   "govde": {
+    "motor_type": "hybrid",
+    "oxidizer": "n2o",
+    "fuel": "htpb",
+    "chamber_pressure": 25
+   },
+   "kaynak_istek_sirasi": 1,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "motor adımı: tur gövdesi aynen",
+   "izlenen": [
+    {
+     "ad": "optimum_of",
+     "yol": "optimum_of_ratio",
+     "birim": "-"
+    },
+    {
+     "ad": "azami_isp_s",
+     "yol": "max_isp",
+     "birim": "s"
+    }
+   ]
+  },
+  {
+   "ad": "motor",
+   "uc": "/calculate",
+   "govde": {
+    "motor_name": "MUH-HIB-L2",
+    "motor_description": "",
+    "atmospheric_pressure": 1.01325,
+    "of_ratio": 7.24,
+    "chamber_pressure": 25,
+    "thrust": 2600,
+    "burn_time": 14.5,
+    "total_impulse": 37700,
+    "calculate_trajectory": true,
+    "vehicle_mass_dry": 30.65,
+    "vehicle_reference_area_m2": 0.018146,
+    "drag_coefficient": 0.45,
+    "vehicle_length": null,
+    "launch_angle": 90,
+    "launch_altitude": 0,
+    "wind_speed": 0,
+    "wind_direction": 0,
+    "nozzle_type": "conical",
+    "combustion_type": "infinite",
+    "mass_flux_chamber": 0,
+    "fuel_type": "htpb",
+    "fuel_density": 920,
+    "regression_a": 3.68e-05,
+    "regression_n": 0.555,
+    "oxidizer_type": "n2o",
+    "oxidizer_phase": "liquid",
+    "oxidizer_density": 786.3,
+    "oxidizer_viscosity": 6.83415e-05,
+    "oxidizer_temp": 293,
+    "injector_type": "showerhead",
+    "chamber_material": "steel_4130",
+    "injector_material": "steel_4130",
+    "design_config_opened": true,
+    "design_config_source": "user",
+    "design_config_fields": [
+     {
+      "field": "chamber_material",
+      "source": "user"
+     },
+     {
+      "field": "injector_material",
+      "source": "user"
+     }
+    ],
+    "plate_thickness": 6,
+    "residual_web_thickness": 2
+   },
+   "kaynak_istek_sirasi": 2,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "motor adımı: tur gövdesi aynen",
+   "izlenen": [
+    {
+     "ad": "itki_N",
+     "yol": "motor.thrust",
+     "birim": "N"
+    },
+    {
+     "ad": "isp_s",
+     "yol": "motor.isp",
+     "birim": "s"
+    },
+    {
+     "ad": "isp_vak_s",
+     "yol": "motor.vacuum_isp",
+     "birim": "s"
+    },
+    {
+     "ad": "c_yildiz_mps",
+     "yol": "motor.c_star",
+     "birim": "m/s"
+    },
+    {
+     "ad": "yanma_suresi_s",
+     "yol": "motor.burn_time",
+     "birim": "s"
+    },
+    {
+     "ad": "toplam_impuls_Ns",
+     "yol": "motor.total_impulse",
+     "birim": "N·s"
+    },
+    {
+     "ad": "oksitleyici_kg",
+     "yol": "motor.oxidizer_mass",
+     "birim": "kg"
+    },
+    {
+     "ad": "yakit_kg",
+     "yol": "motor.fuel_mass",
+     "birim": "kg"
+    },
+    {
+     "ad": "itici_kg",
+     "yol": "motor.propellant_mass_total",
+     "birim": "kg"
+    },
+    {
+     "ad": "bogaz_capi_m",
+     "yol": "motor.throat_diameter",
+     "birim": "m"
+    },
+    {
+     "ad": "cikis_capi_m",
+     "yol": "motor.exit_diameter",
+     "birim": "m"
+    },
+    {
+     "ad": "oda_capi_m",
+     "yol": "motor.chamber_diameter",
+     "birim": "m"
+    },
+    {
+     "ad": "tane_boyu_m",
+     "yol": "motor.grain_length",
+     "birim": "m"
+    },
+    {
+     "ad": "ort_regresyon_mps",
+     "yol": "motor.regression_rate_avg",
+     "birim": "m/s"
+    },
+    {
+     "ad": "motor_kuru_kg",
+     "yol": "design_summary.key_dimensions.dry_mass_estimate_kg",
+     "birim": "kg"
+    }
+   ]
+  },
+  {
+   "ad": "yorunge",
+   "uc": "/api/trajectory-analysis",
+   "govde": {
+    "motor_name": "MUH-HIB-L2",
+    "motor_description": "",
+    "atmospheric_pressure": 1.01325,
+    "of_ratio": 7.24,
+    "chamber_pressure": 25,
+    "thrust": 2600,
+    "burn_time": 14.5,
+    "total_impulse": 37700,
+    "calculate_trajectory": true,
+    "vehicle_mass_dry": 31.3,
+    "vehicle_reference_area_m2": 0.018146,
+    "drag_coefficient": 0.45,
+    "vehicle_length": null,
+    "launch_angle": 90,
+    "launch_altitude": 0,
+    "wind_speed": 0,
+    "wind_direction": 0,
+    "nozzle_type": "conical",
+    "combustion_type": "infinite",
+    "mass_flux_chamber": 0,
+    "fuel_type": "htpb",
+    "fuel_density": 920,
+    "regression_a": 3.68e-05,
+    "regression_n": 0.555,
+    "oxidizer_type": "n2o",
+    "oxidizer_phase": "liquid",
+    "oxidizer_density": 786.3,
+    "oxidizer_viscosity": 6.83415e-05,
+    "oxidizer_temp": 293,
+    "injector_type": "showerhead",
+    "chamber_material": "steel_4130",
+    "injector_material": "steel_4130",
+    "design_config_opened": true,
+    "design_config_source": "user",
+    "design_config_fields": [
+     {
+      "field": "chamber_material",
+      "source": "user"
+     },
+     {
+      "field": "injector_material",
+      "source": "user"
+     }
+    ],
+    "plate_thickness": 6,
+    "residual_web_thickness": 2,
+    "initial_mass": 50.054,
+    "final_mass": 31.3,
+    "reference_area": 0.018146,
+    "trajectory_start_altitude": 0,
+    "trajectory_end_altitude": 10000,
+    "trajectory_points": 20
+   },
+   "kaynak_istek_sirasi": 5,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "araç adımı: tur gövdesi aynen (motor çıktısından türetilmiş araç girdileri 3.0.5 turundaki değerlerinde dondurulmuş; adım yörünge/6-DOF çözücüsünü izler, motor değişimini İZLEMEZ)",
+   "izlenen": [
+    {
+     "ad": "yorunge_apoje_m",
+     "yol": "trajectory_data.performance.trajectory_metrics.max_altitude",
+     "birim": "m"
+    },
+    {
+     "ad": "yorunge_azami_hiz_mps",
+     "yol": "trajectory_data.performance.trajectory_metrics.max_velocity",
+     "birim": "m/s"
+    }
+   ]
+  },
+  {
+   "ad": "gecici",
+   "uc": "/api/transient-analysis",
+   "govde": {
+    "motor_name": "MUH-HIB-L2",
+    "motor_description": "",
+    "atmospheric_pressure": 1.01325,
+    "of_ratio": 7.24,
+    "chamber_pressure": 25,
+    "thrust": 2600,
+    "burn_time": 14.5,
+    "total_impulse": 37700,
+    "calculate_trajectory": true,
+    "vehicle_mass_dry": 30.65,
+    "vehicle_reference_area_m2": 0.018146,
+    "drag_coefficient": 0.45,
+    "vehicle_length": null,
+    "launch_angle": 90,
+    "launch_altitude": 0,
+    "wind_speed": 0,
+    "wind_direction": 0,
+    "nozzle_type": "conical",
+    "combustion_type": "infinite",
+    "mass_flux_chamber": 0,
+    "fuel_type": "htpb",
+    "fuel_density": 920,
+    "regression_a": 3.68e-05,
+    "regression_n": 0.555,
+    "oxidizer_type": "n2o",
+    "oxidizer_phase": "liquid",
+    "oxidizer_density": 786.3,
+    "oxidizer_viscosity": 6.83415e-05,
+    "oxidizer_temp": 293,
+    "injector_type": "showerhead",
+    "chamber_material": "steel_4130",
+    "injector_material": "steel_4130",
+    "design_config_opened": true,
+    "design_config_source": "user",
+    "design_config_fields": [
+     {
+      "field": "chamber_material",
+      "source": "user"
+     },
+     {
+      "field": "injector_material",
+      "source": "user"
+     }
+    ],
+    "plate_thickness": 6,
+    "residual_web_thickness": 2,
+    "feed_mode": "blowdown",
+    "tank_temperature": 293.15,
+    "liquid_fill_fraction": 0.85
+   },
+   "kaynak_istek_sirasi": 6,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "motor adımı: tur gövdesi aynen",
+   "izlenen": [
+    {
+     "ad": "gecici_toplam_impuls_Ns",
+     "yol": "transient.total_impulse",
+     "birim": "N·s"
+    },
+    {
+     "ad": "gecici_ort_itki_N",
+     "yol": "transient.average_thrust",
+     "birim": "N"
+    },
+    {
+     "ad": "gecici_yanma_s",
+     "yol": "transient.burn_duration",
+     "birim": "s"
+    }
+   ]
+  },
+  {
+   "ad": "alti_serbestlik",
+   "uc": "/api/six-dof-analysis",
+   "govde": {
+    "body_diameter": 0.152,
+    "body_length": 3.5,
+    "nose_length": 0.7,
+    "nose_type": "ogive",
+    "fin_count": 4,
+    "fin_root_chord": 0.25,
+    "fin_tip_chord": 0.1,
+    "fin_span": 0.11,
+    "fin_sweep": 0.12,
+    "fin_position": 3.23,
+    "cd0": 0.45,
+    "wind_speed": 5,
+    "wind_direction_deg": 0,
+    "launch_elevation_deg": 90,
+    "launch_azimuth_deg": 0,
+    "rail_length": 6,
+    "dry_mass": 31.3,
+    "propellant_mass": 18.754,
+    "thrust_curve": {
+     "time": [0.0725, 0.145, 0.21749999999999997, 0.29, 0.3625, 0.435, 0.5075, 0.58, 0.6525, 0.725, 0.7975, 0.87, 0.9425, 1.015, 1.0875, 1.16, 1.2325, 1.305, 1.3775, 1.45, 1.5225, 1.595, 1.6675, 1.74, 1.8125, 1.885, 1.9575, 2.03, 2.1024999999999996, 2.1749999999999994, 2.247499999999999, 2.319999999999999, 2.3924999999999987, 2.4649999999999985, 2.5374999999999983, 2.609999999999998, 2.682499999999998, 2.7549999999999977, 2.8274999999999975, 2.8999999999999972, 2.972499999999997, 3.044999999999997, 3.1174999999999966, 3.1899999999999964, 3.262499999999996, 3.334999999999996, 3.4074999999999958, 3.4799999999999955, 3.5524999999999953, 3.624999999999995, 3.697499999999995, 3.7699999999999947, 3.8424999999999945, 3.9149999999999943, 3.987499999999994, 4.059999999999994, 4.132499999999994, 4.204999999999994, 4.277499999999994, 4.349999999999993, 4.422499999999993, 4.494999999999993, 4.567499999999993, 4.639999999999993, 4.712499999999992, 4.784999999999992, 4.857499999999992, 4.929999999999992, 5.0024999999999915, 5.074999999999991, 5.147499999999991, 5.219999999999991, 5.292499999999991, 5.36499999999999, 5.43749999999999, 5.50999999999999, 5.58249999999999, 5.65499999999999, 5.727499999999989, 5.799999999999989, 5.872499999999989, 5.944999999999989, 6.0174999999999885, 6.089999999999988, 6.162499999999988, 6.234999999999988, 6.307499999999988, 6.3799999999999875, 6.452499999999987, 6.524999999999987, 6.597499999999987, 6.669999999999987, 6.742499999999986, 6.814999999999986, 6.887499999999986, 6.959999999999986, 7.0324999999999855, 7.104999999999985, 7.177499999999985, 7.249999999999985, 7.322499999999985, 7.3949999999999845, 7.467499999999984, 7.539999999999984, 7.612499999999984, 7.684999999999984, 7.757499999999983, 7.829999999999983, 7.902499999999983, 7.974999999999983, 8.047499999999983, 8.119999999999983, 8.192499999999983, 8.264999999999983, 8.337499999999983, 8.409999999999982, 8.482499999999982, 8.554999999999982, 8.627499999999982, 8.699999999999982, 8.772499999999981, 8.844999999999981, 8.91749999999998, 8.98999999999998, 9.06249999999998, 9.13499999999998, 9.20749999999998, 9.27999999999998, 9.35249999999998, 9.42499999999998, 9.49749999999998, 9.569999999999979, 9.642499999999979, 9.714999999999979, 9.787499999999978, 9.859999999999978, 9.932499999999978, 10.004999999999978, 10.077499999999977, 10.149999999999977, 10.222499999999977, 10.294999999999977, 10.367499999999977, 10.439999999999976, 10.512499999999976, 10.584999999999976, 10.657499999999976, 10.729999999999976, 10.802499999999975, 10.874999999999975, 10.947499999999975, 11.019999999999975, 11.092499999999974, 11.164999999999974, 11.237499999999974, 11.309999999999974, 11.382499999999974, 11.454999999999973, 11.527499999999973, 11.599999999999973, 11.672499999999973, 11.744999999999973, 11.817499999999972, 11.889999999999972, 11.962499999999972, 12.034999999999972, 12.107499999999972, 12.179999999999971, 12.252499999999971, 12.32499999999997, 12.39749999999997, 12.46999999999997, 12.54249999999997, 12.61499999999997, 12.68749999999997, 12.75999999999997, 12.83249999999997, 12.90499999999997, 12.977499999999969, 13.049999999999969, 13.122499999999969, 13.194999999999968, 13.267499999999968, 13.339999999999968, 13.412499999999968, 13.484999999999967, 13.557499999999967, 13.629999999999967, 13.702499999999967, 13.774999999999967, 13.847499999999966, 13.919999999999966, 13.992499999999966, 14.064999999999966, 14.137499999999966, 14.209999999999965, 14.282499999999965, 14.354999999999965, 14.427499999999965, 14.499999999999964, 14.572499999999964, 14.644999999999964, 14.717499999999964, 14.789999999999964, 14.862499999999963, 14.934999999999963],
+     "thrust": [2600.0005865822104, 2597.0076574150685, 2594.012132093269, 2591.0142931288406, 2588.0145089847756, 2585.011421575361, 2582.0054413901494, 2578.9969658419577, 2575.9863796125856, 2572.97234344382, 2569.9569939594485, 2566.938967719486, 2563.9169569372484, 2560.893123502985, 2557.8661335486577, 2554.836414178071, 2551.804378411357, 2548.770425575097, 2545.7332391563154, 2542.694960669528, 2539.652547845686, 2536.608163493937, 2533.5616834510593, 2530.5121512326923, 2527.4601842806546, 2524.4045112756253, 2521.347302798313, 2518.2872592186727, 2515.224827792519, 2512.15875081128, 2509.0912017357946, 2506.020893733579, 2502.9482813975637, 2499.8721195619923, 2496.7945828284037, 2493.714396167341, 2490.630340824843, 2487.544608247055, 2484.4559481505476, 2481.364840809479, 2478.2700762003433, 2475.1738420704273, 2472.0748963859255, 2468.9720531798143, 2465.8674533700464, 2462.758708512684, 2459.6475449834084, 2456.5327816851072, 2453.416613830426, 2450.296167416698, 2447.173668898079, 2444.049595684653, 2440.921100025968, 2437.790418275734, 2434.658042162782, 2431.5227968148743, 2428.3835626752507, 2425.240918061551, 2422.0970620835647, 2418.9491777463018, 2415.7978546997765, 2412.6436602976064, 2409.487140338328, 2406.328819754074, 2403.1658863599905, 2399.999018560742, 2396.828574388639, 2393.655320355848, 2390.4781952732737, 2387.299434310093, 2384.1163150130296, 2380.931096932148, 2377.7427088291156, 2374.550132968375, 2371.3556255313993, 2368.1565153251, 2364.9550802048884, 2361.750287107571, 2358.541155579426, 2355.329956122357, 2352.114063406495, 2348.895767277294, 2345.674044613854, 2342.4487907981265, 2339.219336319129, 2335.985226124097, 2332.748757786797, 2329.508958597995, 2326.2649071737387, 2323.0188873107786, 2319.7683510328575, 2316.5140246902874, 2313.2566048304343, 2309.9951910395253, 2306.73049779395, 2303.461646621062, 2300.189368347323, 2296.912804985721, 2293.6327022534383, 2290.3481751160775, 2287.0586728509356, 2283.764250315233, 2280.466158939407, 2277.1635938079676, 2273.8573381262495, 2270.548141846045, 2267.2336494975907, 2263.914698654914, 2260.5920911739263, 2257.263536885596, 2253.9329733668164, 2250.598049865205, 2247.2565416128723, 2243.9124176076994, 2240.563388081854, 2237.2102193978026, 2233.8488572949527, 2230.4852065572204, 2227.117001657995, 2223.742101466134, 2220.3644852111674, 2216.9819416027553, 2213.592382258155, 2210.1998041154884, 2206.8020451297207, 2203.400037178447, 2199.991703807201, 2196.5780479955715, 2193.160027804264, 2189.7356010481635, 2186.308060908045, 2182.8714505809994, 2179.4313924729236, 2175.985851402068, 2172.5329107658126, 2169.0766011276924, 2165.614920779525, 2162.1459858460253, 2158.670924257298, 2155.190812077042, 2151.703788849145, 2148.2138681195206, 2144.7162264717113, 2141.21203333021, 2137.7015938303325, 2134.1856519208304, 2130.660728496844, 2127.1309628159383, 2123.5945928327415, 2120.052800044092, 2116.503882792872, 2112.9490680674976, 2109.386710014972, 2105.818076669013, 2102.2415738002564, 2098.661301407994, 2095.07274853761, 2091.4762369360465, 2087.871984585694, 2084.257773875556, 2080.6378426241636, 2077.010676051163, 2073.374861411301, 2069.7345747564354, 2066.085541237059, 2062.429217816325, 2058.764263806962, 2055.0921523182346, 2051.4115711370073, 2047.7238992349526, 2044.025781083645, 2040.3206909113808, 2036.6075706396305, 2032.8825703997936, 2029.1527852211825, 2025.4142280682095, 2021.6658317320332, 2017.9092647092084, 2014.1434653472738, 2010.370093659248, 2006.5854567784536, 2002.790590859774, 1998.9855061168794, 1995.1690969928054, 1991.343225087618, 1987.509655049351, 1983.6648790588117, 1979.8107991681018, 1975.9440669218043, 1972.0692754945374, 1968.18306303527, 1964.2874135269492, 1960.3785979493657, 1956.4587836055591, 1952.5277197705343, 1948.5874543280204, 1944.6348890063964, 1940.6721761166714, 1936.6963463546113, 1932.7096448505952, 1928.7092205007577, 1924.6974006774756, 1920.6713321391712, 1916.63136572153, 1912.5804703629747, 1908.5173518711297]
+    },
+    "engine_od_m": 0.12839540880535288,
+    "engine_length_m": 1.0903806251841002
+   },
+   "kaynak_istek_sirasi": 7,
+   "turetilmis": false,
+   "beklenen": {
+    "http_durum": 200
+   },
+   "girdi_notu": "araç adımı: tur gövdesi aynen (motor çıktısından türetilmiş araç girdileri 3.0.5 turundaki değerlerinde dondurulmuş; adım yörünge/6-DOF çözücüsünü izler, motor değişimini İZLEMEZ)",
+   "izlenen": [
+    {
+     "ad": "apoje_6dof_m",
+     "yol": "summary.apogee",
+     "birim": "m"
+    },
+    {
+     "ad": "azami_mach_6dof",
+     "yol": "summary.max_mach",
+     "birim": "-"
+    },
+    {
+     "ad": "statik_marj_dolu_kalibre",
+     "yol": "summary.static_margin_full",
+     "birim": "-"
+    },
+    {
+     "ad": "kararli_6dof",
+     "yol": "summary.stable",
+     "birim": "-"
+    },
+    {
+     "ad": "bitis_nedeni_6dof",
+     "yol": "summary.end_reason",
+     "birim": "-"
+    }
+   ]
+  }
+ ],
+ "kayit_kiyasi": [],
+ "disarida_birakilan": [
+  {
+   "sira": 3,
+   "uc": "/api/flight-vehicle"
+  },
+  {
+   "sira": 4,
+   "uc": "/api/injector-design"
+  }
+ ]
+}

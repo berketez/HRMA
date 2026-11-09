@@ -62,9 +62,10 @@ DURUMLAR: Dict[str, Tuple[str, str]] = {
     'macos paket imzası': (
         'kostu', 'koştu (`--deep`; DMG içeriği için `--deep --strict`)'),
     'paket içerik manifesti': (
-        'kismen', 'KISMEN — DMG boyutu, Resources kökü ve örnek proje sayısı '
-                  '(depo ⟷ paket) ölçüldü; kapının boyut SAPMASI eşiği bu iş '
-                  'akışında koşmadı'),
+        'kismen', 'KISMEN — DMG boyutu, Resources kökü, örnek proje sayısı '
+                  '(depo ⟷ paket) ve lisans (app/LICENSE GPLv3 + '
+                  'app/licenses/ bildirimi; DMG ve Windows payload) ölçüldü; '
+                  'kapının boyut SAPMASI eşiği bu iş akışında koşmadı'),
     'görsel tur': (
         'kosmadi', '**koşmadı** — tarayıcı denetim turu yayın iş akışında '
                    'ayağa kaldırılmıyor; yerel kapıda koşar'),

@@ -80,7 +80,17 @@ B_TAVANI = 66
 #: ÖLÇÜLDÜ: envanterin 14 çapası metinle bulunamıyor (kardeş kulvarlar
 #: satırı düzenlemiş ya da test yeniden yazılmış). Bu sayı BÜYÜYEMEZ:
 #: büyümesi, ölçümün körleşerek "iyileşiyor" görünmesi demektir.
-TASINMIS_TAVANI = 14
+#:
+#: V306 CI-SÜREÇ (4 Kas 2026, taban 277e53c10): ölçüm 19'a çıkmıştı (yeni 5:
+#: V301/K-A 22 Eki varsayılan katı motor çekirdeği 30 -> 48 mm yeniden
+#: çapalaması). Envanter TAZELENDİ (5e9cac219 deseni; betik
+#: docs/scofield/raw/OH/V306/ci-surec/p13_capa_tazele.py): aynı test
+#: işlevinde aynı sol tarafla TEK aday olan 6 çapa güncel satırına bağlandı
+#: (solid_design_point ×2, solid_safety_real ×1, kinetic_efficiency ×2,
+#: cfd/izgara_gerdirme ×1). Sökülen iki çapa (solid_safety_real a = 0,005
+#: kolu, KT-23 ters kapıya döndü) ve belirsizler dokunulmadan kaldı.
+#: Ölçülen 13; tavan ölçülen sayıya ÇEKİLDİ (gevşetme değil, sıkılaştırma).
+TASINMIS_TAVANI = 13
 
 #: D22 dersi: tavanla ölçülen sayı arasındaki yastık 11 birime çıkmıştı ve
 #: kimse görmedi. Yastık artık ölçülüyor; 3 birimi aşarsa bir sonraki

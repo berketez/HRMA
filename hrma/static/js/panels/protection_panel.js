@@ -142,12 +142,18 @@
             h_gas: 'cad_design.insulation_system.aft_insulation.h_gas_W_m2K',
             t_recovery: 'cad_design.insulation_system.aft_insulation.T_recovery_K',
         },
+        // V306/GÜVERTE-HATA (kalem 3, K2-P3): sıvı zincir boğaz istasyonunun
+        // çiftini ARTIK yayımlıyor (heat_transfer_analysis.gas_side_analysis:
+        // T_recovery_K + gas_side_coefficient_throat; ölçüldü, örnek sıvı
+        // 3328,4 K / 2102,0 W/m²K, q = h·(T_r − T_w) = peak_heat_flux).
+        // Eski eşleme h_gas'ı ham Bartz katsayısından (bartz_coefficient
+        // 10689 W/m²K; karbon birikimi direnci HARİÇ, akıyla aynı çift
+        // DEĞİL) alıyor, T_r'yi hiç okumuyordu: panel "kendi varsayılanları,
+        // ölçülmüş çift yok" diyordu. Üçü de aynı istasyondan (boğaz).
         liquid: {
             q_kw_m2: 'cooling_system.peak_heat_flux',
-            h_gas: 'cooling_system.bartz_coefficient',
-            // Sıvı zincir bir toparlanma sıcaklığı YAYIMLAMIYOR (ölçüldü):
-            // alan boş bırakılır, uydurulmaz.
-            t_recovery: null,
+            h_gas: 'heat_transfer_analysis.gas_side_analysis.gas_side_coefficient_throat',
+            t_recovery: 'heat_transfer_analysis.gas_side_analysis.T_recovery_K',
         },
     };
 

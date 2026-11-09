@@ -111,14 +111,9 @@ MUAF_PARCALAR = {
 MUAF_KALIPLAR = [
     (re.compile(r'^v\d+\.\d+\.\d+$'), None,
      'sürüm etiketi (noktalı sürüm anahtar değil)'),
-    # D37 · A1c denetçi Ş1 (D10) kararı: yanma panosu koşu noktası notunda
-    # çıkış künyesi kodu MAKİNE kimliği olarak AYNEN; kilit:
-    # tests/test_d37_panel_dil_a1.py (G2). Kök 7 ile çelişkisi ana modele
-    # DEVİR (V301/DİL-2 RAPOR §DEVİR).
-    (re.compile(r'^(?:sea_level_default(?:_equilibrium)?|'
-                r'(?:supplied_)?expansion_ratio(?:_equilibrium)?)$'),
-     re.compile(r'çıkış künyesi|tarama eğrisiyle aynı çıkış çapası'),
-     'çıkış künyesi kodu (D10 denetçi kararı, test_d37_panel_dil_a1 kilidi)'),
+    # V306/SAYI (NR-1, 2 Kas): yanma panosu koşu noktası notundaki çıkış
+    # künyesi kodu muafiyeti KALKTI — kod kullanıcı notundan çıktı (yalnız
+    # izin meta'sında); ekranda yeniden görünürse bulgudur.
 ]
 
 

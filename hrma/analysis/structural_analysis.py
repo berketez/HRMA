@@ -528,6 +528,75 @@ STRUCTURAL_RISK_LADDER = (
 STRUCTURAL_RISK_TOP = ('SAFE', 'VERY LOW')
 
 
+# ---------------------------------------------------------------------------
+# V306/HİBRİT-ÇAPRAZ (kalem 2) — HEDEF ⟷ KAZANILMIŞ EMNİYET KATSAYISI
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (taban 700a67586, hybrid_wiring HYBRID_BASE, hedef SF 2,0): grafit
+# lülenin yapısal gövdesi 1 mm imalat tabanına takılıyor (gerilme kuralı
+# 0,665 mm isterdi) ve ``nozzle_analysis.safety_factor`` 3,0066 (kazanılmış)
+# yayımlıyordu; bekçiler ve alanın tanımı "kullanıcının tasarım SF'si" diyordu.
+# Ayrıca HRMA'nın boyutlandırdığı gövde "kullanıcı doğrulaması" sayılıyordu
+# (doğrulama kipine HRMA'nın kendi kalınlığı veriliyor): /calculate'in
+# ``minimum_earned_safety_factor``ı gövdenin 4,000000004'ünde çakılı kaldı,
+# kullanıcının kamara cidarına sağırdı (3/8/15 mm → hep 4,0).
+#
+# Karar (ana model): iki büyüklük, iki alan, iki etiket. Her yapısal bileşen
+# (kamara, lüle, kapak, cıvata) aynı tanımı yayımlar:
+#   design_safety_factor_target  — kullanıcının tasarım SF'si (hedef);
+#   earned_safety_factor         — seçilen/boyutlanan kalınlığın gerçek SF'si;
+#   governing_condition          — kalınlığı ne belirledi;
+#   safety_factor_verdict        — kazanılmış < hedef ise FAIL (GEÇMEDİ).
+SF_GOVERNING_STRESS = 'stress'
+SF_GOVERNING_MINIMUM_THICKNESS = 'minimum_thickness'
+SF_GOVERNING_USER_WALL = 'user_wall'
+SF_GOVERNING_STANDARD_SIZE = 'standard_size'
+SF_VERDICT_PASS = 'PASS'
+SF_VERDICT_FAIL = 'FAIL'
+#: Kazanılmış ⟷ hedef kıyasının kayan nokta payı (fizik değil).
+SF_VERDICT_REL_TOL = 1e-9
+SF_TARGET_EARNED_BASIS = (
+    'design_safety_factor_target is the design safety factor you entered '
+    '(the target). earned_safety_factor is the safety factor the selected or '
+    'sized thickness actually has. governing_condition names what set that '
+    'thickness: "stress" - sized by the stress rule to the target, so the '
+    'earned factor equals the target (times any declared allowance) and the '
+    'thickness scales with the target; "minimum_thickness" - a '
+    'manufacturing floor is thicker than the stress rule needs, so the '
+    'earned factor is above the target and does not scale with it; '
+    '"user_wall" - your thickness, verified; "standard_size" - the bolt '
+    'diameter is rounded up to the next ISO 261 size. safety_factor_verdict '
+    'is FAIL when the earned factor is below the target.')
+#: Lüle gövdesi imalat tabanının künyesi (``NozzleDesigner.
+#: _MIN_WALL_THICKNESS_M``; kaynak gösterilmemişti — HRMA seçimi, beyanlı).
+NOZZLE_MINIMUM_WALL_BASIS = (
+    'HRMA choice: manufacturability floor for a machined nozzle shell '
+    '(nozzle_design.NozzleDesigner._MIN_WALL_THICKNESS_M); not taken from a '
+    'standard. Where the stress rule asks for less, this floor sets the '
+    'thickness.')
+
+
+def safety_factor_target_earned(target, earned, governing,
+                                governing_basis=None):
+    """Bir bileşenin hedef / kazanılmış SF alanlarını kurar (tek tanım)."""
+    hedef = float(target) if target is not None else None
+    kaz = float(earned) if earned is not None else None
+    if hedef is None or kaz is None or not np.isfinite(hedef):
+        hukum = None
+    else:
+        hukum = (SF_VERDICT_PASS if kaz >= hedef * (1.0 - SF_VERDICT_REL_TOL)
+                 else SF_VERDICT_FAIL)
+    out = {
+        'design_safety_factor_target': hedef,
+        'earned_safety_factor': kaz,
+        'governing_condition': governing,
+        'safety_factor_verdict': hukum,
+        'safety_factor_definition_basis': SF_TARGET_EARNED_BASIS,
+    }
+    if governing_basis:
+        out['governing_condition_basis'] = governing_basis
+    return out
+
+
 def classify_safety_factor(safety_factor):
     """Emniyet katsayısını (durum, risk) çiftine çevirir.
 
@@ -568,6 +637,16 @@ DRAWN_NOZZLE_MASS_BASIS = (
     'cad_design.performance_summary.mass_breakdown.nozzle_mass and '
     'nozzle_geometry.estimated_mass. The former 30%-of-chamber rule of thumb '
     'is no longer used.')
+#: V306/HİBRİT-MODEL (M-HIBRIT-22) — ek + yapısal gövde lülesinin çizilen
+#: kütle künyesi (SABİT metin; EN = TR karşılığı i18n_charts.js'te).
+DRAWN_NOZZLE_INSERT_HOUSING_MASS_BASIS = (
+    'DRAWN SOLID (single source), insert + structural housing nozzle: inner '
+    'contour from nozzle_design.sample_nozzle_inner_contour, the insert '
+    'thickness added outward with the density of the selected nozzle '
+    'material (nozzle_material), then the housing thickness with the density '
+    'of the chamber material (nozzle_geometry.nozzle_construction). The same '
+    'number is cad_design.performance_summary.mass_breakdown.nozzle_mass and '
+    'nozzle_geometry.estimated_mass.')
 #: Kesik koni yaklaşımının (lüle tasarımcısının kendi geometrisi) künyesi.
 FRUSTUM_APPROXIMATION_MASS_BASIS = (
     "conical frustum annulus over the nozzle designer's OWN convergent cone "
@@ -612,6 +691,33 @@ def drawn_nozzle_shell_mass_kg(points_mm, wall_m, density_kg_m3):
         r_mid = (r0 + r1) / 2000.0
         volume += np.pi * ((r_mid + wall_m) ** 2 - r_mid ** 2) * abs(dz)
     return volume * density_kg_m3
+
+
+def drawn_nozzle_insert_housing_mass_kg(points_mm, construction):
+    """V306/HİBRİT-MODEL (M-HIBRIT-22) — ek + yapısal gövde lülesinin
+    çizilen kütlesi [kg] (TEK tanım: hibrit motor ve CAD kütle dökümü).
+
+    Ek iç kontura dışa ``insert.thickness_mm``, gövde onun dışına
+    ``housing.thickness_mm`` eklenir; halka hacmi kesin olduğundan
+    m = V(t_ek)·ρ_ek + [V(t_ek + t_gövde) − V(t_ek)]·ρ_gövde,
+    V = ``drawn_nozzle_shell_mass_kg`` (ρ = 1). Eksik alan → ``None``
+    (kütle uydurulmaz).
+    """
+    try:
+        ek = construction['insert']
+        gov = construction['housing']
+        t_ek = float(ek['thickness_mm']) / 1000.0
+        t_gov = float(gov['thickness_mm']) / 1000.0
+        rho_ek = float(ek['density_kg_m3'])
+        rho_gov = float(gov['density_kg_m3'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(np.isfinite(v) and v > 0 for v in (t_ek, t_gov, rho_ek,
+                                                   rho_gov)):
+        return None
+    v_ek = drawn_nozzle_shell_mass_kg(points_mm, t_ek, 1.0)
+    v_top = drawn_nozzle_shell_mass_kg(points_mm, t_ek + t_gov, 1.0)
+    return v_ek * rho_ek + (v_top - v_ek) * rho_gov
 
 
 def published_material_record(mat_props):
@@ -1330,7 +1436,7 @@ class StructuralAnalyzer:
                 'not evaluated: no external-pressure load case was declared. '
                 'Pass external_pressure (applied ambient pressure, Pa) and '
                 'internal_pressure_min (lowest internal pressure in that '
-                'case, Pa) to obtain a verdict. This module does not invent '
+                'case, Pa) to obtain a verdict. This module does not assume '
                 'a load case; the ground reference pressure is published as '
                 'ground_reference_external_pressure_bar for the caller to '
                 'use deliberately.')
@@ -1476,10 +1582,25 @@ class StructuralAnalyzer:
                          actual_throat_thickness: Optional[float] = None,
                          actual_end_cap_thickness: Optional[float] = None,
                          nozzle_material: Optional[str] = None,
-                         actual_throat_thickness_source: Optional[str] = None
+                         actual_throat_thickness_source: Optional[str] = None,
+                         nozzle_shell_inner_radius: Optional[float] = None,
+                         nozzle_thickness_sized_by_hrma: bool = False,
+                         nozzle_minimum_thickness: Optional[float] = None,
                          ) -> Dict:
         """
         Complete structural analysis
+
+        V306/HİBRİT-ÇAPRAZ (kalem 2): ``nozzle_thickness_sized_by_hrma``
+        True ise ``actual_throat_thickness`` HRMA'nın kendi boyutlandırdığı
+        kalınlıktır (ör. grafit ekin yapısal gövdesi): denetim o kalınlığın
+        GERÇEK SF'sini hesaplar ama istasyon kullanıcı doğrulaması sayılmaz.
+        ``nozzle_minimum_thickness`` [m] o boyutlandırmanın imalat tabanıdır
+        (yöneten koşulun belirlenmesi için).
+
+        V306/HİBRİT-MODEL (M-HIBRIT-22): ``nozzle_shell_inner_radius`` [m]
+        verilirse lülenin BASINÇ TAŞIYAN kabuğu boğaz yarıçapında değil bu
+        yarıçapta (ör. grafit ekin dışındaki yapısal gövdenin iç yarıçapı)
+        değerlendirilir; verilmezse eski yol bit-aynıdır.
 
         Args:
             motor_data: Motor performance and geometry data
@@ -1780,7 +1901,10 @@ class StructuralAnalyzer:
         nozzle_analysis = self._analyze_nozzle_structure(
             design_pressure, throat_diameter, chamber_diameter, noz_props,
             nozzle_type, design_safety_factor=design_safety_factor,
-            actual_throat_thickness=actual_throat_thickness
+            actual_throat_thickness=actual_throat_thickness,
+            shell_inner_radius=nozzle_shell_inner_radius,
+            thickness_sized_by_hrma=nozzle_thickness_sized_by_hrma,
+            minimum_thickness=nozzle_minimum_thickness,
         )
         if nozzle_material is not None or actual_throat_thickness_source:
             # Künye yalnız yeni yol kullanıldığında yazılır: eski çağıranların
@@ -2556,7 +2680,16 @@ class StructuralAnalyzer:
         shakedown_ratio = (hoop_stress / (ASME_SHAKEDOWN_MULTIPLIER * Sm)
                            if Sm > 0 else float('inf'))
 
+        # V306/HİBRİT-ÇAPRAZ (kalem 2): hedef ⟷ kazanılmış (tek tanım). Kasa
+        # çember katsayısı (basınç + ısıl) değerlendirilen cidarda; HRMA
+        # boyutlandırdıysa gerilme kuralı (imalat payıyla) yönetir.
+        tanim = safety_factor_target_earned(
+            safety_factor, hoop_safety_factor,
+            SF_GOVERNING_STRESS if design_mode == 'size'
+            else SF_GOVERNING_USER_WALL)
+
         return {
+            **tanim,
             'minimum_thickness': min_thickness * 1000,  # mm
             'recommended_thickness': recommended_thickness * 1000,  # mm
             # F003: hangi modda çalışıldı ve gerilme hangi kalınlıktan çıktı
@@ -2701,8 +2834,16 @@ class StructuralAnalyzer:
                                 chamber_diameter: float, mat_props: Dict, nozzle_type: str,
                                 derating: Optional[Dict] = None,
                                 design_safety_factor: Optional[float] = None,
-                                actual_throat_thickness: Optional[float] = None) -> Dict:
+                                actual_throat_thickness: Optional[float] = None,
+                                shell_inner_radius: Optional[float] = None,
+                                thickness_sized_by_hrma: bool = False,
+                                minimum_thickness: Optional[float] = None,
+                                ) -> Dict:
         """Boğaz bölgesi yapısal kontrolü (boyutlandır / doğrula).
+
+        V306/HİBRİT-MODEL (M-HIBRIT-22): ``shell_inner_radius`` [m] verilirse
+        çember gerilmesi o yarıçapta (basınç taşıyan gövdenin iç yarıçapı)
+        hesaplanır; verilmezse boğaz yarıçapı (eski yol, bit-aynı).
 
         FİZİK DENETİMİ F027 (2026-07-25) — İKİ KUSUR GİDERİLDİ:
         (1) TAUTOLOJİ: effective_stress = SCF*P*r_t/(min_t*SCF) = allowable
@@ -2725,6 +2866,14 @@ class StructuralAnalyzer:
         """
 
         throat_radius = throat_diameter / 2
+        if shell_inner_radius is not None:
+            _r_kabuk = float(shell_inner_radius)
+            if not (np.isfinite(_r_kabuk) and _r_kabuk >= throat_radius):
+                raise ValueError(
+                    f'shell_inner_radius must be a finite radius at or above '
+                    f'the throat radius ({throat_radius:g} m), got '
+                    f'{shell_inner_radius!r}')
+            throat_radius = _r_kabuk
         chamber_radius = chamber_diameter / 2
         yield_strength = mat_props['yield_strength']
         safety_factor = (float(design_safety_factor)
@@ -2790,7 +2939,31 @@ class StructuralAnalyzer:
         # Nozzle wall thickness variation
         chamber_thickness = pressure * chamber_radius / allowable_stress
 
+        # V306/HİBRİT-ÇAPRAZ (kalem 2): kalınlığın SAHİBİ ve yöneten koşul.
+        # HRMA'nın kendi boyutlandırdığı kalınlık (grafit ekin gövdesi)
+        # doğrulama kipinde değerlendirilse bile kullanıcı doğrulaması
+        # DEĞİLDİR; imalat tabanı gerilme kuralından kalınsa SF hedefin
+        # üstüne çıkar ve hedefle ölçeklenmez (yöneten koşul: taban).
+        hrma_boyutladi = bool(design_mode == 'size' or thickness_sized_by_hrma)
+        sf_kazanilan = (yield_for_design / effective_stress
+                        if effective_stress > 0 else float('inf'))
+        if not hrma_boyutladi:
+            yonetici, yonetici_kunye = SF_GOVERNING_USER_WALL, None
+        elif (minimum_thickness is not None and design_mode == 'verify'
+              and evaluated_thickness <= float(minimum_thickness)
+              * (1.0 + SF_VERDICT_REL_TOL)
+              and required_throat_thickness < evaluated_thickness
+              * (1.0 - 1e-6)):
+            yonetici = SF_GOVERNING_MINIMUM_THICKNESS
+            yonetici_kunye = NOZZLE_MINIMUM_WALL_BASIS
+        else:
+            yonetici, yonetici_kunye = SF_GOVERNING_STRESS, None
+        tanim = safety_factor_target_earned(safety_factor, sf_kazanilan,
+                                            yonetici, yonetici_kunye)
+
         return {
+            **tanim,
+            'thickness_sized_by_hrma': hrma_boyutladi,
             'throat_diameter': throat_diameter * 1000,  # mm
             'min_throat_thickness': min_throat_thickness * 1000,  # mm
             'required_throat_thickness': required_throat_thickness * 1000,  # mm
@@ -2805,14 +2978,20 @@ class StructuralAnalyzer:
             'safety_factor': (yield_for_design / effective_stress
                               if effective_stress > 0 else float('inf')),
             'yield_strength_used_MPa': yield_for_design / 1e6,
-            'safety_factor_is_tautological': bool(design_mode == 'size'),
-            # P14H1-C4: bayrağın kesin ölçütü (hazne bloğuyla AYNI tanım).
+            # V306/HİBRİT-ÇAPRAZ: "cidarı HRMA mı seçti?" — HRMA'nın kendi
+            # boyutlandırdığı kalınlığın doğrulama kipi de dahil.
+            'safety_factor_is_tautological': hrma_boyutladi,
+            # P14H1-C4: bayrağın kesin ölçütü (hazne bloğuyla AYNI tanım);
+            # imalat tabanının yönettiği kesit hedefi geri OKUMAZ.
             'safety_factor_reads_back_target': bool(
-                design_mode == 'size'
+                hrma_boyutladi
+                and yonetici == SF_GOVERNING_STRESS
                 and effective_stress > 0
                 and (yield_for_design / effective_stress)
                 >= safety_factor * (1.0 - 1e-9)),
-            'nozzle_type': nozzle_type
+            'nozzle_type': nozzle_type,
+            **({'shell_inner_radius_mm': throat_radius * 1000.0}
+               if shell_inner_radius is not None else {}),
         }
     
     def _analyze_end_caps(self, pressure: float, diameter: float, mat_props: Dict,
@@ -2990,7 +3169,14 @@ class StructuralAnalyzer:
                        if _dished_stress > 0 else float('inf')),
         }
 
+        # V306/HİBRİT-ÇAPRAZ (kalem 2): hedef ⟷ kazanılmış (tek tanım).
+        tanim = safety_factor_target_earned(
+            safety_factor, head_safety_factor,
+            SF_GOVERNING_STRESS if design_mode == 'size'
+            else SF_GOVERNING_USER_WALL)
+
         return {
+            **tanim,
             'flat_head_thickness': flat_head_thickness * 1000,  # mm
             'dished_head_thickness': dished_head_thickness * 1000,  # mm
             'asme_ug34_flat_head_thickness': ug34_flat_thickness * 1000,  # mm
@@ -3276,6 +3462,27 @@ class StructuralAnalyzer:
             recommended_bolt_size = max(standard_sizes)
             # Add warning about custom bolt requirement
 
+        # V306/HİBRİT-ÇAPRAZ (kalem 2): SEÇİLEN cıvatanın kazanılmış
+        # katsayısı. Gerilme kuralı çapı hedef SF'de çözer, ürün bir üst
+        # ISO 261 boyunu seçer: kazanılmış = S_p(d_seçilen)·A_t(d_seçilen) /
+        # gerçek dış yük. Standart boy yetmezse (özel cıvata) kazanılmış
+        # hedefin altına düşer ve hüküm FAIL olur (sessiz kabul yok).
+        _sp_secilen = float(_bolt_class_props(
+            bolt_class, recommended_bolt_size * 1000.0)['S_p'])
+        # Daire alanı π·d²/4 — 4 GEOMETRİK sabittir (tamsayı), emniyet
+        # katsayısı değil (test_d17_yapisal_sistem_a1 (1,0; 4,0] float bandı).
+        _at_secilen = (THREAD_STRESS_AREA_RATIO * np.pi
+                       * recommended_bolt_size ** 2 / 4)
+        bolt_sf_earned = (_sp_secilen * _at_secilen / force_per_bolt
+                          if force_per_bolt > 0 else float('inf'))
+        bolt_sf_tanim = safety_factor_target_earned(
+            bolt_safety_factor, bolt_sf_earned, SF_GOVERNING_STANDARD_SIZE,
+            'the stress rule solves the bolt diameter at the target '
+            '(F_design = SF * P/n over the thread stress area, ISO 898-1 '
+            'proof stress); the product takes the next ISO 261 coarse-thread '
+            'size, so the earned factor of the selected bolt is at or above '
+            'the target unless no standard size is large enough.')
+
         # Warning if custom bolt needed
         bolt_warning = None
         if not suitable_sizes:
@@ -3366,6 +3573,7 @@ class StructuralAnalyzer:
                     'verdict is published.')
 
         return {
+            **bolt_sf_tanim,
             'total_force': total_force / 1000,  # kN
             'num_bolts': num_bolts,
             # F072: artık GERÇEK cıvata başına dış yük (eski değer 4x fazlaydı)
@@ -3977,8 +4185,20 @@ class StructuralAnalyzer:
                 hedef_sf = None
         except (TypeError, ValueError):
             hedef_sf = None
-        readback, deficient = {}, {}
+        readback, deficient, taban_yonetir = {}, {}, {}
+        # V306/HİBRİT-ÇAPRAZ (kalem 2): imalat tabanının yönettiği HRMA
+        # kesiti hedefi geri OKUMAZ (sayı hedefin üstünde, hedefle
+        # ölçeklenmez) ve kullanıcı donanımının ölçümü de DEĞİLDİR: ayrı
+        # kovada, adıyla yayımlanır; hüküm havuzuna girmez.
+        _taban_bloklari = {'nozzle': nozzle_analysis,
+                           'end_cap': end_cap_analysis,
+                           'chamber_hoop': chamber_analysis,
+                           'chamber_von_mises': chamber_analysis}
         for ad, deger in target_derived.items():
+            if ((_taban_bloklari.get(ad) or {}).get('governing_condition')
+                    == SF_GOVERNING_MINIMUM_THICKNESS):
+                taban_yonetir[ad] = deger
+                continue
             # Hedef bilinmiyorsa sayı geri okuma SAYILMAZ (fail-closed:
             # bilinmeyen bir sayıyı susturmak yerine hükme sokarız; onay
             # zaten kazanılmış katsayı ister).
@@ -4035,7 +4255,15 @@ class StructuralAnalyzer:
         # sağlayacak şekilde çizildiği için sayı hedefin ta kendisidir;
         # merdiven burada TASARIM HEDEFİNİ notlandırır, donanımı değil.
         min_readback = min(readback.values()) if readback else None
-        target_status, target_risk = classify_safety_factor(min_readback)
+        # V306/HİBRİT-ÇAPRAZ: geri okunan sayı TANIM GEREĞİ hedeftir (× pay);
+        # hedefin 1e-9 bağıl komşuluğundaki kayan nokta artığı (ör. kapak
+        # 1,9999999999999998 ⟷ hedef 2,0) merdiven eşiğini aşağı atlatmaz:
+        # not o hâlde hedefin kendisinden. Yayımlanan sayı değişmez.
+        _notlanan = min_readback
+        if (min_readback is not None and hedef_sf is not None
+                and abs(min_readback - hedef_sf) <= SF_VERDICT_REL_TOL * hedef_sf):
+            _notlanan = hedef_sf
+        target_status, target_risk = classify_safety_factor(_notlanan)
         design_target_assessment = {
             'design_safety_factor_target': hedef_sf,
             'target_derived_minimum_safety_factor': min_readback,
@@ -4062,6 +4290,20 @@ class StructuralAnalyzer:
                 'fatigue_analysis': fatigue_analysis,
                 'buckling_analysis': buckling_analysis,
             }) if model_validity_exceeded else [])
+        # V306/HİBRİT-ÇAPRAZ (kalem 2): "kazanılmış ≥ hedef" de bir ONAYDIR;
+        # geçerlilik sınırı aşıldıysa PASS geri çekilir (FAIL, uyarı olarak
+        # kalır — §28-44 ilkesi). Sayılar silinmez.
+        if model_validity_exceeded:
+            for _blok in (chamber_analysis, nozzle_analysis,
+                          end_cap_analysis):
+                if (isinstance(_blok, dict)
+                        and _blok.get('safety_factor_verdict')
+                        == SF_VERDICT_PASS):
+                    _blok['safety_factor_verdict'] = (
+                        STRUCTURAL_VERDICT_NOT_EVALUATED)
+                    _blok['safety_factor_verdict'
+                          + MODEL_VALIDITY_WITHHELD_SUFFIX] = (
+                        STRUCTURAL_MODEL_VALIDITY_WITHHELD_REASON)
 
         # SICAKLIK MARJI (v2.5.2): gerilme emniyet faktoru tek basina
         # yeterli degil. Sogutmasiz ince metal cidar kesit boyunca neredeyse
@@ -4350,6 +4592,10 @@ class StructuralAnalyzer:
             'verified_stations': verified_stations,
             'stations_not_verified': stations_not_verified,
             'stations_reading_back_target': stations_reading_back_target,
+            # V306/HİBRİT-ÇAPRAZ: HRMA'nın boyutlandırdığı ve imalat tabanının
+            # yönettiği istasyonlar (sayı hedefin üstünde; ne geri okuma ne
+            # kullanıcı doğrulaması — governing_condition, ilgili blokta).
+            'stations_governed_by_minimum_thickness': sorted(taban_yonetir),
             'verdict_withheld_reasons': verdict_withheld_reasons,
             # Kısmi kapsamın kendi notu: ÖLÇÜLMÜŞ istasyonlar için ne
             # çıktığı. Manşet DEĞİLDİR (kapsamadığı istasyon var). Ad

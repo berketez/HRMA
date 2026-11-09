@@ -235,7 +235,10 @@ class TestK2SolverWarningsRepr:
                 for hucre in satir:
                     hucreler.append(getattr(hucre, 'text', hucre))
         metin = ' '.join(str(h) for h in hucreler)
-        assert 'warn.hybrid.htpb_coeff_bias' in metin
+        # V306/RAPOR-HATA (kalem 6a) — BEKLENTİ DEĞİŞTİ: ham kod yerine
+        # ekranın sözlüğündeki cümle; iç içe kampanya kaydı kendi cümlesiyle.
+        assert 'warn.hybrid.htpb_coeff_bias' not in metin
+        assert 'regression coefficients are biased' in metin
         assert "{'" not in metin, metin
         assert 'Rezaei 2018' in metin
 
@@ -258,11 +261,14 @@ class TestK2bTeknikEkRepr:
         satirlar = PDFReportGenerator._solver_declaration_lines(
             {'warnings': [HIBRIT_KAYIT], 'design_warnings': [HIBRIT_KAYIT]})
         metin = ' '.join(satirlar)
-        assert metin.count('warn.hybrid.htpb_coeff_bias') == 2
+        # V306/RAPOR-HATA (kalem 6a) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI (repr
+        # yok): ham kod ve 'ad = değer' dökümü yerine ekranın sözlüğündeki
+        # cümle; iç içe kampanya kayıtları kendi cümleleriyle. Şablonda yeri
+        # olmayan parametre (ör. 'uzun') ekranda olduğu gibi belgede de yok.
+        assert metin.count('warn.hybrid.htpb_coeff_bias') == 0
+        assert metin.count('regression coefficients are biased') == 2
         assert "{'" not in metin and "': " not in metin, metin
-        for ad in ('independent_campaigns = [(', 'Rezaei 2018', 'Heydari 2017',
-                   'campaign_scope_reason = None', 'uzun = 4.91441',
-                   'material = Graphite &amp; &lt;isostatic&gt;'):
+        for ad in ('Rezaei 2018', 'Heydari 2017'):
             assert ad in metin, '%r beyan satırında yok:\n%s' % (ad, metin)
 
     def test_isil_hukum_satirlari_repr_TASIMAZ(self):
@@ -272,8 +278,11 @@ class TestK2bTeknikEkRepr:
                                       'T_wall': 3323}}]})
         metin = ' '.join(satirlar)
         assert "{'" not in metin, metin
-        assert 'nested = (a: 1.23457; b: [1, 2])' in metin, metin
-        assert 'T_wall = 3323' in metin
+        # V306/RAPOR-HATA (kalem 6a) — BEKLENTİ DEĞİŞTİ: sözlükte de kayıtta
+        # da cümlesi olmayan kod ham basılmaz, eksikliği adıyla söylenir.
+        assert 'warn.thermal.x' not in metin
+        assert PDFReportGenerator.WARNING_WITHOUT_WORDING in metin
+        assert metin.startswith('<b>CRITICAL</b>')
 
     def test_complete_belgesinde_repr_imzasi_SIFIR(self, istemci):
         """Uçtan uca ``complete``: özet bölümü + teknik ek birlikte 0.

@@ -333,7 +333,9 @@ def test_ipucu_uc_girdinin_yaninda_ve_iki_dilde():
                 or "TF('%s'" % anahtar in kaynak), anahtar
     for yer_tutucu in ('{t0}', '{tmin}', '{tmax}', '{f0}', '{fmin}', '{fmax}'):
         assert metin.count(yer_tutucu) >= 2, yer_tutucu
-    assert 'Boş bırakılırsa {t0} K gönderilir' in metin
+    # V306/UÇUŞ-3 (M-HIBRIT-17): alan her hesapta motorun oksitleyici
+    # sıcaklığıyla dolar; boş alan motorunkini, motorda yoksa {t0}'ı gönderir.
+    assert 'Boş bırakılırsa motorun oksitleyici sıcaklığı, motorda yoksa {t0} K gönderilir' in metin
     assert 'tasarım yanma süresi t_b = {s} s' in metin
 
 

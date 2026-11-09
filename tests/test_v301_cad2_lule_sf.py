@@ -103,6 +103,17 @@ def test_ornek_hibrit_bes_disa_aktarim_200(client, yanitlar, vaka, uc):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize('vaka', ['of7', 'of6'])
 def test_cizilen_et_yapisal_sf_nin_eti(yanitlar, vaka):
+    """V306/HİBRİT-MODEL (M-HIBRIT-22, 3 Kas) — GEREKÇELİ GÜNCELLEME.
+
+    Eski öncül: grafit lüle basınç kabuğudur, çizilen et = grafitin boğaz
+    kuralı eti, yapısal analiz grafiti doğrular. Grafitin kendi malzeme
+    kaydı "gevrek, basınç kabuğu malzemesi değil, boğaz eki" der; mühendis
+    turunda bu kural 39,5 mm et ve kasadan %27 geniş zarf üretti. Yeni
+    sözleşme: çizilen et = grafit EK (erozyon payı) + yapısal GÖVDE (kamara
+    malzemesi); SF GÖVDENİNDİR ve gövde AYNI tek kuraldan
+    (``nozzle_throat_wall_sizing``) gövdenin iç yarıçapında boyutlanır;
+    yapısal analiz gövdeyi kendi malzemesi/eti/yarıçapıyla doğrular.
+    """
     from hrma.analysis.structural_analysis import (
         STRUCTURAL_DESIGN_PRESSURE_FACTOR, StructuralAnalyzer,
         nozzle_throat_wall_sizing)
@@ -110,32 +121,43 @@ def test_cizilen_et_yapisal_sf_nin_eti(yanitlar, vaka):
     ng = m['nozzle_geometry']
     na = m['structural_analysis']['nozzle_analysis']
     et = ng['wall_thickness']
+    yap = ng['nozzle_construction']
+    ek, gov = yap['insert'], yap['housing']
+    assert ng['wall_thickness_basis'] == 'insert_plus_structural_housing'
+    assert et == pytest.approx(ek['thickness_mm'] + gov['thickness_mm'],
+                               rel=1e-12)
+    assert ek['material_key'] == m['nozzle_material'] == 'graphite'
     assert na['design_mode'] == 'verify'
-    assert na['throat_thickness_used_mm'] == et
-    assert 'nozzle_geometry.wall_thickness' in na['throat_thickness_source']
-    # Aynı malzeme: lülenin kendi malzemesi (kamara malzemesi DEĞİL)
-    assert na['material_key'] == m['nozzle_material'] == ng['wall_material']
-    kayit = StructuralAnalyzer().materials[m['nozzle_material']]
+    # SF'nin ait olduğu et = gövde eti; malzeme gövdenin (kamara) malzemesi.
+    assert na['throat_thickness_used_mm'] == gov['thickness_mm']
+    assert 'housing' in na['throat_thickness_source']
+    assert na['material_key'] == gov['material_key'] == m['chamber_material']
+    kayit = StructuralAnalyzer().materials[gov['material_key']]
     assert na['yield_strength_used_MPa'] == pytest.approx(
         kayit['yield_strength'] / 1e6, rel=1e-12)
-    assert ng['wall_yield_strength'] == kayit['yield_strength']
-    # Tek kural: çizilen et yapısal boğaz kuralının sonucu
-    assert ng['wall_thickness_basis'] == 'structural_throat_rule'
+    # Tek kural: gövde eti yapısal boğaz kuralının sonucu (iç yarıçapında)
     beklenen = nozzle_throat_wall_sizing(
         m['chamber_pressure'] * 1e5 * STRUCTURAL_DESIGN_PRESSURE_FACTOR,
-        ng['throat_radius'] / 1000.0, ng['wall_yield_strength'],
-        ng['wall_safety_factor'], m['nozzle_type'])
-    assert et == pytest.approx(
-        beklenen['required_throat_thickness_m'] * 1000.0, rel=1e-12)
-    assert ng['wall_stress_concentration_factor'] == \
+        gov['inner_radius_mm'] / 1000.0, kayit['yield_strength'],
+        gov['safety_factor_target'], m['nozzle_type'])
+    # V306/HİBRİT-MODEL (4 Kas): gövde kuralın üstüne beyanlı sayısal pay
+    # kadar yukarı yuvarlanır (yeniden değerlendirme hedefi alttan okumasın).
+    from hrma.engines.hybrid_rocket_engine import (
+        NOZZLE_HOUSING_SIZING_ROUND_UP_REL)
+    assert gov['thickness_mm'] == pytest.approx(
+        max(1.0, beklenen['required_throat_thickness_m'] * 1000.0
+            * (1.0 + NOZZLE_HOUSING_SIZING_ROUND_UP_REL)),
+        rel=1e-12)
+    assert gov['stress_concentration_factor'] == \
         beklenen['stress_concentration_factor']
-    assert ng['wall_design_pressure_factor'] == \
-        STRUCTURAL_DESIGN_PRESSURE_FACTOR
-    # Yapısal doğrulama, hedefle boyutlanan eti hedefte bulur (aynı model)
-    assert na['safety_factor'] == pytest.approx(ng['wall_safety_factor'],
-                                                rel=1e-9)
-    # Künye: iki HRMA seçimi adlarıyla
-    assert 'HRMA choice' in ng['wall_sizing_rule']
+    assert gov['design_pressure_bar'] == pytest.approx(
+        m['chamber_pressure'] * STRUCTURAL_DESIGN_PRESSURE_FACTOR, rel=1e-12)
+    # Yapısal doğrulama gövdeyi en az hedefinde bulur (taban kalınlığı
+    # hedefin üstünde tutabilir). Toleranssız: 1 ulp altı merdivende
+    # bir basamak aşağı (SF 2'de UNSAFE) demektir.
+    assert na['safety_factor'] >= gov['safety_factor_target']
+    assert na['shell_inner_radius_mm'] == pytest.approx(
+        gov['inner_radius_mm'], rel=1e-12)
 
 
 def test_kati_ve_sivi_yapisal_cagrisi_eski_yol(client):
@@ -206,9 +228,12 @@ def test_ayni_et_her_tuketicide(yanitlar, vaka):
     y = yanitlar[vaka]
     m = y['motor']
     et = m['nozzle_geometry']['wall_thickness']
-    # Yapısal + kütle dökümü
+    # Yapısal + kütle dökümü (V306/HİBRİT-MODEL M-HIBRIT-22: yapısal
+    # analiz çizilen yığının GÖVDE katmanını doğrular: yığın − ek)
+    _ek = m['nozzle_geometry']['nozzle_construction']['insert'][
+        'thickness_mm']
     assert m['structural_analysis']['nozzle_analysis'][
-        'throat_thickness_used_mm'] == et
+        'throat_thickness_used_mm'] == pytest.approx(et - _ek, rel=1e-12)
     gs = y['cad_design']['performance_summary']['geometry_summary']
     assert gs['nozzle_wall_thickness_mm'] == pytest.approx(et, rel=1e-12)
     # STEP/STL/DXF/kütle/plan ortak profili
@@ -245,9 +270,16 @@ def test_kural_degisince_cizilen_et_ve_dogrulama_birlikte(client, yanitlar,
 
     monkeypatch.setattr(sa, 'nozzle_throat_wall_sizing', kalin)
     m = _hibrit(client)['motor']
-    et0 = yanitlar['of7']['motor']['nozzle_geometry']['wall_thickness']
-    et1 = m['nozzle_geometry']['wall_thickness']
-    assert et1 == pytest.approx(et0 * 1.1, rel=1e-9)
+    # V306/HİBRİT-MODEL (M-HIBRIT-22): kural yapısal GÖVDEYİ boyutlar;
+    # grafit ek (erozyon payı) kuraldan bağımsızdır.
+    g0 = yanitlar['of7']['motor']['nozzle_geometry']['nozzle_construction']
+    g1 = m['nozzle_geometry']['nozzle_construction']
+    assert g1['insert']['thickness_mm'] == g0['insert']['thickness_mm']
+    assert g1['housing']['thickness_mm'] == pytest.approx(
+        g0['housing']['thickness_mm'] * 1.1, rel=1e-9)
+    assert m['nozzle_geometry']['wall_thickness'] == pytest.approx(
+        g1['insert']['thickness_mm'] + g1['housing']['thickness_mm'],
+        rel=1e-12)
     na = m['structural_analysis']['nozzle_analysis']
-    assert na['throat_thickness_used_mm'] == et1
+    assert na['throat_thickness_used_mm'] == g1['housing']['thickness_mm']
     assert not math.isclose(na['safety_factor'], 4.0, rel_tol=1e-6)

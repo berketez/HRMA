@@ -796,6 +796,28 @@ def _run_liquid(record: Dict[str, Any]) -> Dict[str, Any]:
     )
     res = engine.calculate_performance()
 
+    # V306/SIVI-CEKET-A (K5_KARAR EK7): ceketin geçerli çözümü yoksa motor
+    # Isp'si ve itkisi YAYIMLANMAZ (None + neden kodu). Kıyas yalnız ceketten
+    # bağımsız c* ile yapılır; bekletilen nicelik adıyla not edilir, sayı
+    # üretilmez (kapı olmasa float(None) TypeError ile kayıt çökerdi).
+    _kapi = res.get("cooling_circuit_publication") or {}
+    if (_kapi.get("status") == "not_solved"
+            and _kapi.get("withheld_reason_code")
+            and res.get("isp_sea_level") is None):
+        result["adapter_notes"].append(
+            "Motor Isp/itki tahmini YAYIMLANMADI ("
+            + str(_kapi.get("withheld_reason")) + ", "
+            + str(_kapi.get("code")) + "): soğutma ceketinin geçerli "
+            "çözümü yok; yalnız c* kıyaslanır.")
+        result["withheld_predictions"] = {
+            "quantities": ["isp_sl", "isp", "isp_vac"]
+                          + (["thrust_vac"] if thrust_known else []),
+            "reason_code": _kapi.get("withheld_reason_code"),
+            "reason": _kapi.get("withheld_reason"),
+        }
+        result["predictions"] = {"c_star": float(res["c_star"])}
+        return result
+
     predictions = {
         "c_star": float(res["c_star"]),            # m/s
         "isp_sl": float(res["isp_sea_level"]),     # s

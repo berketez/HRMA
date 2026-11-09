@@ -522,8 +522,13 @@ def test_t24_tooltip_declares_a_derived_output(html):
     assert alan, 'web ipucu bulunamadı'
     metin = alan.group(1)
     assert 'Derived output' in metin, 'türetilen çıktı olduğu yazılmamış'
-    assert 'web_burnout_mm' in metin, 'tükenen web alanına yönlendirme yok'
+    # V306/DİL-KATI: eski beklenti ham alan adına ('see web_burnout_mm')
+    # yönlendirmeyi kilitliyordu; kullanıcı metninde API alan adı yasak
+    # (3.0.6 ORTAK kural). Kilitlenen fizik aynı: dış yüzey de yanınca et
+    # iki cepheden tükenir, yanan kalınlık yarısıdır.
+    assert 'web_burnout_mm' not in metin, 'ipucunda ham alan adı'
     assert 'both faces' in metin, 'iki cepheden tükenme anlatılmamış'
+    assert 'half of it' in metin, 'yanan kalınlığın yarı olduğu yazılmamış'
     assert '15-50mm' not in metin, 'eski girdi üslubu (tipik bant) geri gelmiş'
 
 
@@ -555,7 +560,8 @@ formuKur();
 // m_i − m_f'yi kıyaslıyor; eski çift varsayılan tasarımda 422 veriyordu).
 window.currentResults = { thrust_curve: { time: [0, 0.5, 1.024],
                                           thrust: [12000, 13000, 12602.1] },
-                          isp_sea_level: 199.1 };
+                          // V306/KATI-MODEL (M-KATI-20): eğrinin Isp'si
+                          specific_impulse: 199.1 };
 computeTrajectory().then(() => {
     const g = GONDERILEN[0];
     ok(!('parachute_area' in g), 'boş alan gönderildi: parachute_area');
@@ -563,7 +569,7 @@ computeTrajectory().then(() => {
     ok(!('parachute_deploy_delay' in g), 'boş alan gönderildi: parachute_deploy_delay');
     ok(g.thrust_curve && g.thrust_curve.thrust[2] === 12602.1, 'itki eğrisi gönderilmedi');
     ok(!('thrust' in g), 'ortalama itki gönderildi (eğriyle dikdörtgen çelişkisi)');
-    ok(g.isp === 199.1, 'deniz seviyesi Isp gönderilmedi');
+    ok(g.isp === 199.1, 'eğrinin Isp\'si (specific_impulse) gönderilmedi');
 
     // Şimdi doldur: üçü de gitmeli
     ELS['parachute_area'].value = '9';

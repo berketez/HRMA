@@ -63,6 +63,8 @@ HATA_SAYISI=0
 basarili() { printf "${YESIL}  GEÇTİ${SIFIR}  %s\n" "$1"; }
 basarisiz() { printf "${KIRMIZI}  KALDI${SIFIR}  %s\n" "$1"; HATA_SAYISI=$((HATA_SAYISI + 1)); }
 atlandi()  { printf "${SARI}  ATLANDI${SIFIR} %s\n" "$1"; }
+# Hüküm değil, ölçülmüş durum bildirimi: kapıyı ne açar ne kapatır.
+bilgi()    { printf "  BİLGİ   %s\n" "$1"; }
 baslik()   { printf "\n=== %s ===\n" "$1"; }
 
 PY="${PYTHON:-python3}"
@@ -269,6 +271,68 @@ baslik "4/10  GitHub Actions (bu commit)"
 #   - biri bile tamamlanmamışsa -> KALDI (yayın CI'ı beklemez hatası)
 #   - biri bile başarısızsa     -> KALDI
 #   - 'tests' iş akışı yoksa    -> KALDI (asıl kanıt koşmamış)
+#
+# 3.0.6 EKİ — YAYIN-2: aynı SHA'nın SÜREN 'tests' KOPYASI (v3.0.5, 28 Eki).
+# Aday dalında (workflow_dispatch) 'tests' bu SHA için yeşil bitmişken main'e
+# push aynı SHA için 'tests'i YENİDEN tetikledi; kapı bu ikinci koşuyu
+# "tamamlanmamış" sayıp bekledi (ölçülen: 18:39-19:34 aday koşusu yeşil,
+# 19:36-20:33 aynı commit'in push koşusu; ~57 dk boş bekleme). Kural:
+#   - BU SHA'da tamamlanmış YEŞİL 'tests' koşusu varsa, aynı SHA'nın SÜREN
+#     'tests' koşusu (kopya) beklenmez; BİLGİ satırı basılır, kapı kapanmaz.
+#     İkisi aynı ağacı, aynı iş akışı tanımıyla koşar: yeşil kopya kanıttır.
+#   - İptal edilmiş, başarısız ya da zaman aşımına uğramış koşu yine KALDI:
+#     kopya kuralı yalnız SÜREN koşuya uygulanır, bitip düşmüş koşuya değil.
+#   - 'tests' DIŞINDAKİ süren iş akışı (ör. release) yine KALDI; kural
+#     yalnız aynı iş akışının kopyası içindir.
+#   - Yeşil 'tests' yoksa süren 'tests' koşusu eskisi gibi KALDI (bekler).
+#
+# Karar işlevin İÇİNDE: `tests/test_v306_yayin_sureci.py` onu betikten
+# ÇIKARIP `gh run list` çıktısını taklit eden fikstürlerle koşturur.
+ci_kosulari_degerlendir() {   # $1 = yayınlanacak SHA, $2 = TSV (akış, durum, sonuç, sha)
+    local YEREL="$1" KOSU_TSV="$2"
+    local AKIS DURUM SONUC SHA BEKLEYEN=0 DUSEN=0 TESTS_YESIL=0 TOPLAM=0 KOPYA=0
+    # 1. geçiş: bu SHA'nın tamamlanmış yeşil 'tests' koşusu var mı?
+    while IFS=$'\t' read -r AKIS DURUM SONUC SHA; do
+        [ -n "$AKIS" ] || continue
+        if [ "$AKIS" = "tests" ] && [ "$DURUM" = "completed" ] \
+           && [ "$SONUC" = "success" ] && { [ -z "$SHA" ] || [ "$SHA" = "$YEREL" ]; }; then
+            TESTS_YESIL=1
+        fi
+    done <<< "$KOSU_TSV"
+    # 2. geçiş: her koşunun hükmü.
+    while IFS=$'\t' read -r AKIS DURUM SONUC SHA; do
+        [ -n "$AKIS" ] || continue
+        TOPLAM=$((TOPLAM + 1))
+        # Savunma: gh commit'e göre süzse de SHA'yı burada da doğruluyoruz;
+        # yayınlanacak ikili TAM OLARAK bu ağacı temsil etmeli.
+        if [ -n "$SHA" ] && [ "$SHA" != "$YEREL" ]; then
+            basarisiz "CI koşusu farklı SHA'ya ait: $AKIS (${SHA:0:8} != ${YEREL:0:8})"
+            continue
+        fi
+        if [ "$DURUM" != "completed" ] && { [ "$AKIS" != "tests" ] || [ "$TESTS_YESIL" -eq 0 ]; }; then
+            basarisiz "CI hâlâ koşuyor: $AKIS ($DURUM) — yayın CI'ı BEKLER"
+            BEKLEYEN=$((BEKLEYEN + 1))
+            continue
+        fi
+        if [ "$DURUM" != "completed" ]; then
+            bilgi "aynı SHA'nın 'tests' kopyası sürüyor ($DURUM) — bu SHA'nın yeşil 'tests' koşusu var, kopya beklenmiyor"
+            KOPYA=$((KOPYA + 1))
+            continue
+        fi
+        case "$SONUC" in
+            success) ;;
+            skipped) ;;  # koşulu sağlanmadığı için atlanan iş akışı hata değil
+            *) basarisiz "CI koşusu başarısız: $AKIS ($SONUC)"; DUSEN=$((DUSEN + 1)) ;;
+        esac
+    done <<< "$KOSU_TSV"
+
+    if [ "$TESTS_YESIL" -eq 1 ]; then
+        basarili "CI 'tests' iş akışı bu SHA'da yeşil (${YEREL:0:8}, $TOPLAM koşu incelendi, $KOPYA süren kopya beklenmedi)"
+    elif [ "$BEKLEYEN" -eq 0 ] && [ "$DUSEN" -eq 0 ]; then
+        basarisiz "'tests' iş akışının bu SHA'da yeşil koşusu YOK — asıl kanıt eksik"
+    fi
+}
+
 if ! command -v gh >/dev/null 2>&1; then
     basarisiz "gh CLI yok — CI durumu doğrulanamıyor"
 else
@@ -279,33 +343,7 @@ else
     if [ -z "$KOSULAR" ]; then
         basarisiz "bu commit (${YEREL:0:8}) için CI koşusu yok — push edilip başlaması beklenmeli"
     else
-        BEKLEYEN=0; DUSEN=0; TESTS_YESIL=0; TOPLAM=0
-        while IFS=$'\t' read -r AKIS DURUM SONUC SHA; do
-            [ -n "$AKIS" ] || continue
-            TOPLAM=$((TOPLAM + 1))
-            # Savunma: gh commit'e göre süzse de SHA'yı burada da doğruluyoruz;
-            # yayınlanacak ikili TAM OLARAK bu ağacı temsil etmeli.
-            if [ -n "$SHA" ] && [ "$SHA" != "$YEREL" ]; then
-                basarisiz "CI koşusu farklı SHA'ya ait: $AKIS (${SHA:0:8} != ${YEREL:0:8})"
-                continue
-            fi
-            if [ "$DURUM" != "completed" ]; then
-                basarisiz "CI hâlâ koşuyor: $AKIS ($DURUM) — yayın CI'ı BEKLER"
-                BEKLEYEN=$((BEKLEYEN + 1))
-                continue
-            fi
-            case "$SONUC" in
-                success) [ "$AKIS" = "tests" ] && TESTS_YESIL=1 ;;
-                skipped) ;;  # koşulu sağlanmadığı için atlanan iş akışı hata değil
-                *) basarisiz "CI koşusu başarısız: $AKIS ($SONUC)"; DUSEN=$((DUSEN + 1)) ;;
-            esac
-        done <<< "$KOSULAR"
-
-        if [ "$TESTS_YESIL" -eq 1 ]; then
-            basarili "CI 'tests' iş akışı bu SHA'da yeşil (${YEREL:0:8}, $TOPLAM koşu incelendi)"
-        elif [ "$BEKLEYEN" -eq 0 ] && [ "$DUSEN" -eq 0 ]; then
-            basarisiz "'tests' iş akışının bu SHA'da yeşil koşusu YOK — asıl kanıt eksik"
-        fi
+        ci_kosulari_degerlendir "$YEREL" "$KOSULAR"
     fi
 fi
 
@@ -738,6 +776,29 @@ manifest_denetle() {   # $1 = app kökü (Resources ya da payload), $2 = ad
     dolu_dosya "$kok/app/launcher.py" \
         && basarili "$ad: launcher.py yerinde ($(dosya_bayt "$kok/app/launcher.py") B)" \
         || basarisiz "$ad: launcher.py YOK ya da boş ($(dosya_bayt "$kok/app/launcher.py") B) — paket açılamaz"
+    # Lisans (3.0.6, S1): v3.0.5 paketinde app/LICENSE YOKTU (ölçüldü) ve
+    # paket RocketCEA (GPLv3) taşıyordu. GPL metni + üçüncü taraf bildirimi
+    # + derlemede üretilen dağıtım listesi pakette olmalı (packaging/
+    # lisans_paketle.py koyar). Varlık değil İÇERİK: GPLv3 başlığı aranır.
+    # Boru (head | grep -q) KULLANILMAZ: pipefail altında grep erken çıkınca
+    # head SIGPIPE alabilir ve doğru dosya "yok" sayılırdı.
+    local lisans_basi
+    lisans_basi="$(head -c 400 "$kok/app/LICENSE" 2>/dev/null || true)"
+    case "$lisans_basi" in
+        *'GNU GENERAL PUBLIC LICENSE'*'Version 3'*)
+            dolu_dosya "$kok/app/LICENSE" \
+                && basarili "$ad: LICENSE (GNU GPL v3 metni) pakette" \
+                || basarisiz "$ad: LICENSE kısa/boş — paket lisanssız dağıtılamaz" ;;
+        *)
+            basarisiz "$ad: LICENSE yok, boş ya da GNU GPL v3 metni değil — paket lisanssız dağıtılamaz" ;;
+    esac
+    if dolu_dosya "$kok/app/licenses/THIRD_PARTY_NOTICES.txt" \
+       && grep -q '^Distribution: rocketcea' "$kok/app/licenses/THIRD_PARTY_NOTICES.txt" \
+       && dolu_dosya "$kok/app/licenses/PYTHON_PACKAGES.txt"; then
+        basarili "$ad: üçüncü taraf lisans bildirimi + dağıtım listesi pakette"
+    else
+        basarisiz "$ad: app/licenses/ eksik (THIRD_PARTY_NOTICES.txt RocketCEA beyanıyla + PYTHON_PACKAGES.txt) — packaging/lisans_paketle.py koşmamış"
+    fi
     dolu_dosya "$kok/app/hrma/app.py" \
         && basarili "$ad: hrma/ paketi yerinde (app.py $(dosya_bayt "$kok/app/hrma/app.py") B)" \
         || basarisiz "$ad: hrma/ yok ya da eksik (app.py $(dosya_bayt "$kok/app/hrma/app.py") B)"

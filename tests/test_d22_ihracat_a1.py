@@ -334,7 +334,11 @@ class TestP9B322GrafikBelgesi:
     def _pdf_metni(self, pdf_bytes):
         from pypdf import PdfReader
         r = PdfReader(io.BytesIO(pdf_bytes))
-        return '\n'.join((p.extract_text() or '') for p in r.pages)
+        # V306/RAPOR-DİL: rapor yazı tipi DejaVu Sans (Türkçe harfler) Helvetica'dan
+        # geniş; satır kırılma YERİ değişti. Arama yerleşimden bağımsız: boşluklar
+        # teke indirilir (iddia aynı, satır sonu iddianın parçası değil).
+        return ' '.join('\n'.join((p.extract_text() or '')
+                                   for p in r.pages).split())
 
     def _grafik(self):
         import plotly.graph_objects as go
@@ -386,14 +390,19 @@ class TestP9B321TehlikeBloklari:
         pdf = _sessiz(PDFReportGenerator().generate_motor_analysis_report,
                       {'motor_name': 'BEKCI', 'motor_type': 'liquid'},
                       analiz, None, 'complete')
-        return '\n'.join((p.extract_text() or '')
-                         for p in PdfReader(io.BytesIO(pdf)).pages)
+        # V306/RAPOR-DİL: yazı tipi değişti, satır kırılması yerleşimden
+        # bağımsız olsun diye boşluklar teke indirilir (iddia aynı).
+        return ' '.join('\n'.join((p.extract_text() or '')
+                        for p in PdfReader(io.BytesIO(pdf)).pages).split())
 
     def test_bloklar_dusmuyor(self):
         metin = self._metin({'safety': self.GUVENLIK})
         # ÖLÇÜLEN KUSUR: 6 bloğun yalnız 1'i (risk seviyesi) basılıyordu.
+        # V306/RAPOR-DİL (kalem 6): tehlike bloğu etiketi artık alan adının alt
+        # çizgisiz hâli değil, rapor sözlüğünün okunur etiketi (iki dilde);
+        # iddia aynı, aranan etiket yeni.
         for parca in ('SCBA', 'Nomex', 'N2O4', 'Evacuate 300 m',
-                      'tnt equivalent kg', 'minimum safe distance'):
+                      'TNT equivalent (kg)', 'Minimum safe distance (m)'):
             assert parca in metin, 'düşen blok içeriği: %r' % parca
 
     def test_verilmeyen_blok_uydurulmaz(self):

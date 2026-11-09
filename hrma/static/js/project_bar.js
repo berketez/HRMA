@@ -412,10 +412,58 @@
         return out;
     }
 
+    /* V306/UÇUŞ-3 (M-SIVI-26, M-HIBRIT-35, M-HIBRIT-2) — UÇUŞ KURULUMU.
+     * ÖLÇÜLDÜ (4 Kas, docs/scofield/raw/OH/V306/ucus3/ekran/
+     * tarayici_once_tr.json H): kullanıcının 6-DOF aracı (kuru kütle 30 kg,
+     * Ø0,12 m, ray 8 m …) ve Zaman Çözümlü ayarları (N2O boşalma, tank
+     * 285 K) .hrma'ya hiç girmiyordu — paneller DYNAMIC_ROOTS ile kayıttan
+     * dışlanıyordu; proje yeniden açılınca 25 kg / Ø0,150 m araç uçuyordu.
+     * Şema: ``inputs.dynamic.flight`` (sunucunun ``dynamic`` ağacı; ek
+     * anahtar gerekmez, eski sürüm dosyayı okur):
+     *   { format: 1,
+     *     sixdof:    SixDofPanel.projeDurumu()   (alanlar + elle yazılanlar +
+     *                kütle kipi + bileşen tablosu + itki kaynağı),
+     *     transient: TransientPanel.projeDurumu() (besleme kipi, tank
+     *                sıcaklığı, doluluk + elle yazıldı damgaları),
+     *     trajectory_user_typed: Yörünge panelinde ELLE yazılan alanlar }
+     * "Elle yazıldı" damgası saklanır ki açılıştan sonraki motor hesabı
+     * kullanıcının yazdığı kütleyi tasarım tohumuyla ezmesin; damgasız alan
+     * hesaptan yeniden tohumlanır. */
+    var UCUS_KURULUMU_SURUMU = 1;
+    function serializeFlightSetup() {
+        var out = { format: UCUS_KURULUMU_SURUMU };
+        try {
+            if (window.SixDofPanel && typeof window.SixDofPanel.projeDurumu === 'function') {
+                var sd = window.SixDofPanel.projeDurumu();
+                if (sd) out.sixdof = sd;
+            }
+        } catch (e) { /* panel yok */ }
+        try {
+            if (window.TransientPanel && typeof window.TransientPanel.projeDurumu === 'function') {
+                var tp = window.TransientPanel.projeDurumu();
+                if (tp) out.transient = tp;
+            }
+        } catch (e) { /* panel yok */ }
+        var elle = [];
+        var nodes = document.querySelectorAll('input[id^="traj_"]');
+        for (var i = 0; i < nodes.length; i++) {
+            if (nodes[i].closest && nodes[i].closest(DYNAMIC_ROOTS)) continue;
+            if (nodes[i].dataset && nodes[i].dataset.userOverride === 'true') elle.push(nodes[i].id);
+        }
+        out.trajectory_user_typed = elle;
+        return out;
+    }
+
     function buildPayload(name) {
         var inputs = { fields: serializeFields() };
         var rows = serializeCompositionRows();
         if (rows) inputs.dynamic = { composition_rows: rows };
+        var ucus = null;
+        try { ucus = serializeFlightSetup(); } catch (e) { ucus = null; }
+        if (ucus) {
+            inputs.dynamic = inputs.dynamic || {};
+            inputs.dynamic.flight = ucus;
+        }
         var ui = serializeUiState();
         if (ui) inputs.ui_state = ui;
         var dock = serializeDockOverrides();
@@ -618,8 +666,38 @@
         }, 250);
     }
 
+    /* V306/UÇUŞ-3: açılan projenin uçuş kurulumu. Dosyada yoksa (3.0.6
+     * öncesi kayıt) paneller sayfa varsayılanında kalır ve bunu kendi
+     * notlarında ADIYLA söyler; proje şeridi de bir kez bildirir. Dönüş:
+     * kurulum dosyada var mıydı. */
+    function restoreFlightSetup(ucus) {
+        var var_ = !!(ucus && typeof ucus === 'object');
+        var elle = (var_ && Array.isArray(ucus.trajectory_user_typed))
+            ? ucus.trajectory_user_typed : [];
+        var nodes = document.querySelectorAll('input[id^="traj_"]');
+        for (var i = 0; i < nodes.length; i++) {
+            var el = nodes[i];
+            if (el.closest && el.closest(DYNAMIC_ROOTS)) continue;
+            if (!el.dataset) continue;
+            if (elle.indexOf(el.id) !== -1) el.dataset.userOverride = 'true';
+            else delete el.dataset.userOverride;
+        }
+        try {
+            if (window.SixDofPanel && typeof window.SixDofPanel.projeDurumunuKur === 'function') {
+                window.SixDofPanel.projeDurumunuKur(var_ ? (ucus.sixdof || null) : null);
+            }
+        } catch (e) { console.error('HRMA project: 6-DOF setup restore failed:', e); }
+        try {
+            if (window.TransientPanel && typeof window.TransientPanel.projeDurumunuKur === 'function') {
+                window.TransientPanel.projeDurumunuKur(var_ ? (ucus.transient || null) : null);
+            }
+        } catch (e) { console.error('HRMA project: time-resolved setup restore failed:', e); }
+        return var_;
+    }
+
     function applyProject(doc) {
         state.restoring = true;
+        var ucusKurulumuVar = true;
         try {
             var inputs = doc.inputs || {};
             // P12aB4-24: açıklama geri yüklenir — yoksa bir sonraki kayıtta
@@ -633,6 +711,9 @@
                 restoreCompositionRows(inputs.dynamic.composition_rows);
             }
             restoreDockOverrides(inputs.dock_overrides);
+            try {
+                ucusKurulumuVar = restoreFlightSetup(inputs.dynamic && inputs.dynamic.flight);
+            } catch (e) { console.error('HRMA project: flight setup restore failed:', e); }
             // V301/K-C2 (NK-70, K-B AÇIK 3): sayfa, dosyanın HANGİ alanları
             // taşıdığını bilmeden eski kayıtların göçünü yapamaz (kayıtta
             // olmayan kip seçicisi varsayılana döner, değer sessizce düşerdi).
@@ -647,6 +728,11 @@
             if (skipped > 0) {
                 toast(TF('proj.loadedWithSkips', { n: skipped },
                     '{n} saved field(s) have no matching input on this page and were skipped.'),
+                    'warn');
+            }
+            if (!ucusKurulumuVar && document.getElementById('sixDofPanel')) {
+                toast(T('proj.flightSetupMissing',
+                    'This project file does not store the flight setup (saved before 3.0.6): the 6-DOF vehicle and the time-resolved settings start from the page defaults, and the trajectory masses are filled from the engine calculation. Enter them again and save to keep them.'),
                     'warn');
             }
         } finally {
@@ -669,7 +755,7 @@
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
         if (!resp.ok || !data || !Array.isArray(data.projects)) {
-            throw new Error((data && data.error) || ('HTTP ' + resp.status));
+            throw new Error((data && data.error) || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status)));
         }
         return data.projects;
     }
@@ -684,7 +770,7 @@
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
         if (!resp.ok) {
-            var err = new Error((data && data.error) || ('HTTP ' + resp.status));
+            var err = new Error((data && data.error) || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status)));
             err.status = resp.status;
             throw err;
         }
@@ -696,7 +782,7 @@
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
         if (!resp.ok || !data || !data.project) {
-            throw new Error((data && data.error) || ('HTTP ' + resp.status));
+            throw new Error((data && data.error) || ((window.HRMAReject && window.HRMAReject.yedek) ? window.HRMAReject.yedek(resp.status) : ('HTTP ' + resp.status)));
         }
         return data;
     }
@@ -1206,14 +1292,22 @@
             row.addEventListener('click', function () {
                 closeModal();
                 function go() {
-                    if (p.motor_type && p.motor_type !== motorType
-                        && TYPE_PATH[p.motor_type]) {
-                        state.dirty = false;   // onay alındı; tarayıcı uyarısı yinelenmesin
-                        location.href = TYPE_PATH[p.motor_type]
-                            + '?project=' + encodeURIComponent(p.name);
-                    } else {
-                        loadIntoPage(p.name);
-                    }
+                    // V306/UÇUŞ-3 (M-HIBRIT-36 + BAYAT AÇIK) — PROJE AÇMAK
+                    // SAYFAYI PROJEDEN KURAR. ÖLÇÜLDÜ (4 Kas, ekran/
+                    // tarayici_once_tr.json H): aynı tipte proje sayfa
+                    // yenilenmeden açılıyordu (applyProject); dosyada olmayan
+                    // her ayar ÖNCEKİ projeden kalıyordu — U3-A'nın emniyet
+                    // katsayısı 2,5 U3-B açılıp hesaplanınca isteğe gidiyordu
+                    // (B'nin dosyasında anahtar yok), sonuç alanı da önceki
+                    // projenin hesabını gösteriyordu. Artık her proje açılışı
+                    // tip farkı gözetmeden temiz sayfadan (?project=) yapılır:
+                    // dosyada olmayan ayar sayfa varsayılanıdır, önceki
+                    // projeninki değil; sonuç alanı boştur (yükleme hesap
+                    // yapmaz, kullanıcı Hesapla'ya basar).
+                    var hedefYol = (p.motor_type && TYPE_PATH[p.motor_type])
+                        ? TYPE_PATH[p.motor_type] : location.pathname;
+                    state.dirty = false;   // onay alındı; tarayıcı uyarısı yinelenmesin
+                    location.href = hedefYol + '?project=' + encodeURIComponent(p.name);
                 }
                 if (state.dirty) {
                     // ÖH D20 / P12aB4-11 — bkz. onNew(): yıkıcı onay adlandırılır.
@@ -1373,8 +1467,12 @@
             if (t.closest('#analysisDock')) {
                 // Güvertede yalnız ad_f_* alanları projeye girer
                 if (!/^ad_f_/.test(t.id || '')) return;
-            } else if (t.closest('#sixDofPanel, #injectorPanel, #transientPanel')) {
-                return;                     // dinamik panel alanları proje dışı
+            } else if (t.closest('#injectorPanel')) {
+                return;                     // enjektör paneli proje dışı
+            } else if (t.closest('#sixDofPanel, #transientPanel')) {
+                // V306/UÇUŞ-3: uçuş kurulumu projeye girer; yalnız gerçek
+                // düzenleme (isTrusted) kirli sayılır, dosya girdisi değil.
+                if (!ev.isTrusted || (t.type || '').toLowerCase() === 'file') return;
             }
             if (!state.dirty) {
                 state.dirty = true;

@@ -94,7 +94,17 @@
     const TESLIM_YOLLARI = {
         hybrid: { thrust: ['thrust'], mdot: ['mdot_total'], cstar: ['c_star'],
                   cf: ['cf'] },
-        liquid: { thrust: ['thrust'], mdot: ['total_mass_flow'], cstar: ['c_star'],
+        /* V306/SIVI-MODEL kalem 7 (PANEL-SAYI DEVİR): sıvıda bu lüleden
+           geçen ANA ODA akışı. Açık çevrimde (SIVI-DEFTER debi defteri)
+           başlık itkisi = ana oda + türbin egzozu, başlık debisi = ana oda +
+           türbin; türbin egzozu bu lüleden geçmez. Panel artık boğaz
+           debisini (mass_flow_ledger.throat_mass_flow_kg_s) ve ana oda
+           itkisini (altitude_performance[0].thrust_main_chamber, deniz
+           seviyesi) gösterir; defter yoksa (basınç beslemeli / kapalı
+           çevrim) boğaz = toplam ve itki = motor itkisi (ilk yol yok). */
+        liquid: { thrust: ['altitude_performance.0.thrust_main_chamber', 'thrust'],
+                  mdot: ['mass_flow_ledger.throat_mass_flow_kg_s', 'total_mass_flow'],
+                  cstar: ['c_star'],
                   cf: ['isp_identity.thrust_coefficient_sea_level'] },
         solid: { thrust: ['design_summary.performance.peak_thrust_N'], mdot: [],
                  cstar: ['c_star'], cf: ['nozzle_design.performance.thrust_coefficient'] },
@@ -147,16 +157,21 @@
                 + 'so the delivered numbers of the motor are not shown beside it.')) + '</p>';
         }
         const kartlar = [];
+        const anaOda = (tip === 'liquid') && ilkSayi(m,
+            ['mass_flow_ledger.throat_mass_flow_kg_s']) !== undefined;
         const itki = ilkSayi(m, yollar.thrust);
         if (itki !== undefined) {
             kartlar.push(U.statCard(tip === 'solid'
                 ? T('panel.nzl.delThrustPeak', 'THRUST AT THIS Pc (MOTOR, PEAK)')
-                : T('panel.nzl.delThrust', 'THRUST (MOTOR)'),
+                : (anaOda ? T('panel.nzl.delThrustMain', 'THRUST (MOTOR, MAIN CHAMBER)')
+                          : T('panel.nzl.delThrust', 'THRUST (MOTOR)')),
                 fmtL(itki, 0), 'N', 'info', yollar.thrust[0]));
         }
         const md = ilkSayi(m, yollar.mdot);
         if (md !== undefined) {
-            kartlar.push(U.statCard(T('panel.nzl.delMassFlow', 'MASS FLOW (MOTOR)'),
+            kartlar.push(U.statCard(anaOda
+                ? T('panel.nzl.delThroatMassFlow', 'THROAT MASS FLOW (MOTOR)')
+                : T('panel.nzl.delMassFlow', 'MASS FLOW (MOTOR)'),
                 fmtL(md, 3), 'kg/s', 'info', yollar.mdot[0]));
         }
         const cs = ilkSayi(m, yollar.cstar);
@@ -183,8 +198,56 @@
             not += ' ' + T('panel.nzl.delNoMassFlowSolid',
                 'The solid motor publishes no design-point mass flow as a headline number, so none is shown.');
         }
+        // V306/SIVI-MODEL kalem 7: FARK ADIYLA. Her büyüklükte çözüm ⟷
+        // motor oranı ve nedeni (sıvı: η_c*, boğaz C_D, lüle kayıpları,
+        // açık çevrimde türbin egzozu). Sayılar yanıttan; oran türetilir,
+        // uydurulmaz. Yalnız sıvıda (öteki motorların kendi tanımları
+        // PANEL-SAYI notunda).
+        let fark = '';
+        if (tip === 'liquid') {
+            const perf = (flow && flow.performance) || {};
+            const satir = [];
+            const oran = function (a, b) {
+                return (Number.isFinite(a) && Number.isFinite(b) && b !== 0)
+                    ? fmtL(100 * (a / b - 1), 2) : null;
+            };
+            const etaCs = ilkSayi(m, ['injection_system.combustion_efficiency']);
+            const cd = ilkSayi(m, ['isp_identity.throat_discharge_coefficient']);
+            const oC = oran(cs, perf.c_star_m_s);
+            if (oC !== null) {
+                satir.push(U.tf('panel.nzl.diffCstar', { pct: oC,
+                    eta: Number.isFinite(etaCs) ? fmtL(etaCs, 3) : '—' },
+                    'c*: motor {pct} % against the ideal card. Cause: the motor delivers c* with its c* efficiency η_c* = {eta} and its own equilibrium thermochemistry; the ideal card is a calorically perfect gas with η_c* = 1.'));
+            }
+            const oM = oran(md, perf.mass_flow_kg_s);
+            if (oM !== null) {
+                satir.push(U.tf('panel.nzl.diffMassFlow', { pct: oM,
+                    cd: Number.isFinite(cd) ? fmtL(cd, 2) : '—' },
+                    'Throat mass flow: motor {pct} % against the ideal card. Cause: the motor throat passes ṁ = C_D·Pc·A_t/c* with the discharge coefficient C_D = {cd} and its delivered c*; the ideal card uses C_D = 1 and the ideal c*.'));
+            }
+            const oF = oran(itki, perf.thrust_N);
+            if (oF !== null) {
+                satir.push(U.tf('panel.nzl.diffThrust', { pct: oF },
+                    'Thrust and C_F: motor {pct} % against the ideal card. Cause: the motor thrust is F = C_F·Pc·A_t with its delivered nozzle coefficient (divergence, friction and kinetic losses of its own nozzle model); the ideal card is the loss-free 1D solution of this chamber state.'));
+            }
+            const fMotor = ilkSayi(m, ['thrust']);
+            const fTurb = ilkSayi(m, ['altitude_performance.0.thrust_turbine_exhaust']);
+            if (anaOda && Number.isFinite(fMotor) && Number.isFinite(fTurb)) {
+                satir.push(U.tf('panel.nzl.diffOpenCycle', {
+                    engine: fmtL(fMotor, 0), main: fmtL(itki, 0), turb: fmtL(fTurb, 0),
+                    mtot: fmtL(ilkSayi(m, ['total_mass_flow']), 3) },
+                    'Open cycle: engine thrust {engine} N = main chamber {main} N + turbine exhaust {turb} N, and the pumped total {mtot} kg/s includes the turbine flow; the turbine exhaust does not flow through this nozzle, so the main-chamber numbers are compared here.'));
+            }
+            if (satir.length) {
+                fark = U.sectionTitle(T('panel.nzl.secDiff', 'Difference from the ideal cards and its cause'))
+                    + '<ul data-nzl-diff="1" style="' + notStil + ' padding-left:18px;">'
+                    + satir.map(function (x) { return '<li>' + U.esc(x) + '</li>'; }).join('')
+                    + '</ul>';
+            }
+        }
         return baslik + '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
-            + kartlar.join('') + '</div><p style="' + notStil + '">' + U.esc(not) + '</p>';
+            + kartlar.join('') + '</div><p style="' + notStil + '">' + U.esc(not) + '</p>'
+            + fark;
     }
 
     // ------------------------------------------------------------------

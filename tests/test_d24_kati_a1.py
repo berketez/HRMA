@@ -146,7 +146,16 @@ class TestOHD2310KatmanSirasi:
         dokum = _sessiz(e._dry_mass_breakdown)
         # V301/K-A (22 Eki, KT-03): astar artık radyal yer kaplar (kasa iç çapı = tane + 2·(astar + yalıtım)); kasa 2·t_astar büyüdü, çapa yeniden ölçüldü (tolerans aynı).
         # 17,926904842 -> 19,533493209 kg (halka kütleleri DEĞİŞMEDİ).
-        assert dokum['total_kg'] == pytest.approx(19.533493208595875,
+        # V306/KATI-MODEL (M-KATI-19, 4 Kas): lüle kütlesi kasa yapısal kütlesinin %15'i değil, çizilen lülenin kontur integrali (CAD ile bit-aynı); çapa yeniden ölçüldü (tolerans aynı).
+        # 19,533493208595875 -> 18,169046025692754 kg.
+        # V306/KATI-KALAN kalem 2 (9 Kas, 7097743f6 + c3385eba3) — ÇAPA
+        # ÖLÇÜMLE YENİLENDİ (ana model): 18,169046025692754 -> 18,23950106889589
+        # kg. Yakınsak giriş kasa iç yarıçapından başlıyor (STEP/CAD ile tek
+        # kontur); çizilen lülenin kütlesi 0,193666534349234 ->
+        # 0,2641215775523688 kg ve toplam fark lüle farkına eşit (+0,070455 kg);
+        # halka kütleleri DEĞİŞMEDİ. Ölçüm (kalem öncesi 99fefbab7 / sonrası):
+        # docs/scofield/raw/OH/V306/ana-model/olcum/kati_kalan_capa/.
+        assert dokum['total_kg'] == pytest.approx(18.23950106889589,
                                                   rel=1e-9)
 
     def test_dokum_kalemleri_olculen_sayilarda(self):
@@ -200,7 +209,14 @@ class TestOHD2310KatmanSirasi:
         assert dokum['insulation_kg'] == 0.0
         # V301/K-A (22 Eki, KT-03): astar artık radyal yer kaplar (kasa iç çapı = tane + 2·(astar + yalıtım)); kasa 2·t_astar büyüdü, çapa yeniden ölçüldü (tolerans aynı).
         # 6,001397012523196 -> 6,4534577390220145 kg.
-        assert dokum['total_kg'] == pytest.approx(6.4534577390220145,
+        # V306/KATI-MODEL (M-KATI-19, 4 Kas): lüle kütlesi kasa yapısal kütlesinin %15'i değil, çizilen lülenin kontur integrali (CAD ile bit-aynı); çapa yeniden ölçüldü (tolerans aynı).
+        # 6,4534577390220145 -> 5,874121891716625 kg.
+        # V306/KATI-KALAN kalem 2 (9 Kas) — ÇAPA ÖLÇÜMLE YENİLENDİ (ana model):
+        # 5,874121891716625 -> 5,8783713558214234 kg; çizilen lüle
+        # 0,16966672895245316 -> 0,17391619305725184 kg (yakınsak giriş kasa
+        # iç yarıçapında), fark lüle farkına eşit; astar ve yalıtım
+        # DEĞİŞMEDİ. Bekçinin sorusu (iki sıra aynı sonucu verir) değişmedi.
+        assert dokum['total_kg'] == pytest.approx(5.8783713558214234,
                                                   rel=1e-12)
 
 

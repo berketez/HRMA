@@ -163,6 +163,18 @@ def _js_blok(kaynak: str, capa: str) -> str:
     raise AssertionError(f'blok kapanmadı: {capa!r}')
 
 
+def _kati_uyari_kaynagi(kaynak: str) -> str:
+    """``displaySolidWarnings`` + parametre çevirisinin kullandığı sayfa
+    yardımcıları (V306/DİL-KATI: malzeme ve yakıt kaydı adı). Hepsi şablonun
+    KENDİ kodudur; ürün sayfasında aynı script kapsamında tanımlıdırlar."""
+    return '\n'.join([
+        _js_blok(kaynak, 'const YAKIT_PARAMETRELERI = {') + ';',
+        _js_blok(kaynak, 'function yakitAdi(kod)'),
+        _js_blok(kaynak, 'function malzemeAdi(kod)'),
+        _js_blok(kaynak, 'function displaySolidWarnings(results)'),
+    ])
+
+
 def _node(betik: str, *argv, girdi=None) -> dict:
     """node'u geçici dizinde koşturur, JSON çıktısını döndürür."""
     if not NODE:
@@ -494,7 +506,7 @@ class TestP16S1_07TeslimKanali:
         Bekçi o fonksiyonun kendisini çalıştırır (kopyasını değil).
         """
         kaynak = (SABLON / 'solid.html').read_text(encoding='utf-8')
-        fn = _js_blok(kaynak, 'function displaySolidWarnings(results)')
+        fn = _kati_uyari_kaynagi(kaynak)
         kodlar = sorted(set(kati_kritik_termal['warnings']))
         assert kodlar, 'katı kanalı boş — bu ölçüm boşa dönerdi'
         olcum = _node(SOLID_UYARI_HARNESS,
@@ -514,7 +526,7 @@ class TestP16S1_07TeslimKanali:
     def test_kati_hukum_silinirse_panel_kritigi_dusuyor(
             self, kati, kati_kritik_termal):
         kaynak = (SABLON / 'solid.html').read_text(encoding='utf-8')
-        fn = _js_blok(kaynak, 'function displaySolidWarnings(results)')
+        fn = _kati_uyari_kaynagi(kaynak)
         kodlar = sorted(set(kati_kritik_termal['warnings']))
         assert kodlar, 'katı kanalı boş — mutasyon ölçümü anlamsız olurdu'
         olcum = _node(SOLID_UYARI_HARNESS,
@@ -1062,6 +1074,13 @@ sb.numTxt = function (v, d) {
     return (typeof v === 'number' && isFinite(v))
         ? (d === undefined ? String(v) : v.toFixed(d)) : String(v); };
 
+// V306/SIVI-ONARIM ek kalem 10: kartın kullandığı sayfa düzeyi
+// yardımcılar (ör. SIVI-MODEL kalem 6'nın liquidWarnText'i) ürünün
+// KENDİ gövdesiyle önce yüklenir; gerçek sayfada aynı <script> bloğunda
+// üst düzeyde tanımlıdır.
+if (P.yardimcilar) {
+    vm.runInContext(P.yardimcilar, sb,
+                    { filename: 'liquid.html#kart_yardimcilari' }); }
 const KOD = 'function __kart(results, T, addCard, row, hrmaFmt) {\n'
     + P.blok + '\n}';
 vm.runInContext(KOD, sb, { filename: 'liquid.html#thermal_protection' });
@@ -1099,6 +1118,14 @@ if (m.thermal_protection) {
         delete m.thermal_protection.cooling_system; }
 }
 if (m.cooling_system) { delete m.cooling_system.wall_temperature_source; }
+// V306/SIVI-ONARIM ek kalem 10: SIVI-MODEL kalem 5'ten beri çözülmüş cidar
+// sıcaklığının ÜÇÜNCÜ beyanlı kaynağı cooling_system.wall_temperature_solved_K
+// (+ _source); RP-1 marşında AYNI tepe sayısını taşır (ölçüldü: 1124,833 K
+// = station_march.peak_wall_temperature_K). 'Çözücü susarsa' mutasyonu onu
+// da siler, yoksa kart doğru biçimde o kaynaktan basar.
+if (m.cooling_system) {
+    delete m.cooling_system.wall_temperature_solved_K;
+    delete m.cooling_system.wall_temperature_solved_source; }
 const dom2 = ciz(m);
 O.sonra = {
     kritikRozet: (dom2.match(/>CRITICAL</g) || []).length,
@@ -1110,6 +1137,18 @@ O.sonra = {
 };
 process.stdout.write(JSON.stringify(O));
 """
+
+
+#: Isıl Koruma kartı bloğunun sayfa düzeyinden çağırdığı yardımcılar.
+#: V306/SIVI-ONARIM ek kalem 10: SIVI-MODEL kalem 6 (0e197772e) kartın
+#: hüküm satırlarını ``liquidWarnText`` ile kurdu; düzenek onu almayınca
+#: 'liquidWarnText is not defined' ile çöküyordu (ürün sağlam: tarayıcı
+#: ölçümü docs/scofield/raw/OH/V306/sivi-onarim/kalem10_tarayici.json).
+LIQUID_KART_YARDIMCILARI = ('function liquidWarnText(w)',)
+
+
+def _kart_yardimcilari(kaynak):
+    return '\n'.join(_js_blok(kaynak, b) for b in LIQUID_KART_YARDIMCILARI)
 
 
 @pytest.fixture(scope='module')
@@ -1162,6 +1201,7 @@ class TestP17B2_02SiviLinerHukmu:
         hukumler = [str(h)[:40] for h in (sivi_marsi.get('warnings') or [])]
         olcum = _node(LIQUID_KART_HARNESS, girdi={
             'res': sivi, 'blok': blok,
+            'yardimcilar': _kart_yardimcilari(kaynak),
             'cozucuK': f'{tepe:.0f}', 'hedefK': f'{hedef:.0f}',
             'hukumler': hukumler})
         once = olcum['once']
@@ -1189,6 +1229,7 @@ class TestP17B2_02SiviLinerHukmu:
         hedef = (sivi.get('thermal_protection') or {}).get('wall_temperature')
         olcum = _node(LIQUID_KART_HARNESS, girdi={
             'res': sivi, 'blok': blok,
+            'yardimcilar': _kart_yardimcilari(kaynak),
             'cozucuK': f'{tepe:.0f}', 'hedefK': f'{hedef:.0f}',
             'hukumler': []})
         sonra = olcum['sonra']

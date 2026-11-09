@@ -14,6 +14,15 @@ Karar (ana model): çapa ağın malzemesiyle tutarlı olmalı. Motor lüle
 malzemesiyle boğaz katsayısı yayımlamadığından lüle bölgesi kapının DIŞINDA
 kalır ve ADIYLA beyan edilir; tolerans gevşetilmez; olumlu hüküm geri
 çekilir, aşım kalır (k1_fea_sonra.json).
+
+V306/HİBRİT-NOZUL (FİZİK-2 DEVİR 1, kararın birinci dalı): motor artık lüle
+malzemesiyle, kendi gazıyla kurduğu boğaz katsayısını yayımlıyor
+(``nozzle_material_analysis.throat_thermal.throat_h_g_W_m2K`` + malzeme,
+referans cidar, gaz künyesi). Ağ o malzemeyle çözülünce kapı lüle bölgesinde
+KOŞAR (ölçüldü: panel profili ⟷ motor katsayısı bağıl 0; docs/scofield/raw/
+OH/V306/hibrit-nozul/olcum/). Çapa alanı yoksa (eski sonuç) ya da malzemesi
+ağınkinden farklıysa bugünkü 'calistirilamadi' yolu AYNEN durur; bu yol
+aşağıda çapası silinmiş motor sözlüğüyle kilitli.
 """
 import contextlib
 import copy
@@ -69,7 +78,14 @@ def _hibrit_motor(client, **degisen):
 @pytest.fixture(scope='module')
 def motor(client):
     m = _hibrit_motor(client)
-    assert m['burn_time'] == pytest.approx(10.0)
+    # V306/UÇUŞ-FEA (ek kalem 7): fikstürün sorusu "gövde sayfanın itki/süre
+    # kipinde mi (10 s), ham impuls kipinde mi (3,33 s)". V306/HİBRİT-ÇAPRAZ
+    # (1102aef68, 4 Kas) manşet ``burn_time``ı N₂O kendinden basınçlı tankın
+    # TESLİM süresine çevirdi (boşalma çözümü, bu örnekte 10,414 s); sayfanın
+    # istediği süre artık ``burn_time_requested_s``. Eski satır manşeti
+    # okuyordu → 9 ERROR (fikstür kurulumu). Soru aynı, alan doğru alan.
+    assert m['burn_time_requested_s'] == pytest.approx(10.0)
+    assert m['burn_time'] >= m['burn_time_requested_s']
     return m
 
 
@@ -107,9 +123,57 @@ def test_tolerans_gevsemedi():
     assert bridge.THERMAL_HG_CROSS_CHECK_TOL == 0.25
 
 
-def test_ornekte_capa_kamara_ag_lule(motor, profil):
+def _capasiz(motor):
+    """Lüle çapası olmayan motor sözlüğü (V306 öncesi kaydedilmiş sonuç)."""
+    m = copy.deepcopy(motor)
+    m['nozzle_material_analysis']['throat_thermal'].pop('throat_h_g_W_m2K')
+    return m
+
+
+def test_ornekte_lule_capasi_ile_kapi_kosar(motor, profil):
+    """V306/HİBRİT-NOZUL: çapa motorun LÜLE katsayısı, kapı lülede koşar."""
     assert profil['material'] == 'graphite'
+    tt = motor['nozzle_material_analysis']['throat_thermal']
+    assert tt['h_g_material'] == 'graphite'
+    assert tt['gas_properties_basis']['assumed_fields'] == []
     out = _sessiz(bridge.extract_thermal_inputs, motor, axial_profile=profil)
+    assert out['status'] == bridge.BRIDGE_STATUS_OK, out.get('reason')
+    assert out['material_key'] == 'graphite'
+    kapi = out['_basis']['h_profili']['makulluk_kapisi']
+    assert kapi['durum'] == 'gecti'
+    assert 'neden' not in kapi
+    assert kapi['en_yakin_motor_alani'] == '.'.join(
+        bridge.MOTOR_NOZZLE_THROAT_HG_ANCHOR['h_g_W_m2K'])
+    assert kapi['en_yakin_motor_degeri_W_m2K'] == tt['throat_h_g_W_m2K']
+    assert kapi['capa_malzemesi'] == kapi['ag_malzemesi'] == 'graphite'
+    assert kapi['capa_referans_cidar_K'] == pytest.approx(
+        tt['gas_side_reference_wall_temperature'])
+    assert kapi['capa_gaz_varsayilan_alanlari'] == []
+    # Panel profili ile motor aynı gazla, aynı malzemeyle kurulur.
+    assert kapi['bagil_sapma'] == pytest.approx(0.0, abs=1e-9)
+    assert kapi['tolerans'] == bridge.THERMAL_HG_CROSS_CHECK_TOL
+    # Kamara katsayıları beyanda adıyla durur ama kıyasa girmez.
+    assert set(kapi['kamara_capa_alanlari_W_m2K']) == {
+        'heat_transfer_analysis.heat_transfer_coefficients.gas_side',
+        'thermal_protection.nozzle_entry_liner.h_gas_W_m2K'}
+    assert 'ss_304' in kapi['beyan']
+
+
+def test_lule_capasi_malzemesi_farkliysa_eski_yol(motor, profil):
+    """Çapanın malzemesi ağınkinden farklıysa kapı lüleye taşınmaz."""
+    m = copy.deepcopy(motor)
+    m['nozzle_material_analysis']['throat_thermal']['h_g_material'] = 'ss_304'
+    out = _sessiz(bridge.extract_thermal_inputs, m, axial_profile=profil)
+    kapi = out['_basis']['h_profili']['makulluk_kapisi']
+    assert kapi['durum'] == 'calistirilamadi'
+    assert kapi['neden'] == bridge.HG_GATE_NOT_RUN_ANCHOR_MATERIAL
+
+
+def test_ornekte_capasiz_sonucta_kamara_ag_lule(motor, profil):
+    """Çapası olmayan (eski) sonuç: V301/FİZİK-2 yolu AYNEN."""
+    assert profil['material'] == 'graphite'
+    out = _sessiz(bridge.extract_thermal_inputs, _capasiz(motor),
+                  axial_profile=profil)
     assert out['status'] == bridge.BRIDGE_STATUS_OK, out.get('reason')
     assert out['material_key'] == 'graphite'
     kapi = out['_basis']['h_profili']['makulluk_kapisi']
@@ -155,39 +219,88 @@ def _capa_disi_beyani(fea):
     return ml
 
 
+def _lule_capali(fea):
+    """V306: kapı lülede koştu — çapa-dışı geri çekme nedeni YOK."""
+    ml = fea['material_limits']
+    assert fea['scalars']['material_key'] == 'graphite'
+    assert bridge.VERDICT_WITHHELD_HG_ANCHOR_MATERIAL not in \
+        ml['verdict_withheld_reasons']
+    assert 'hg_anchor_material' not in ml
+    assert fea['meta']['girdiler']['h_profili']['makulluk_kapisi'][
+        'durum'] == 'gecti'
+    return ml
+
+
 def test_olumlu_hukum_geri_cekilir_asim_kalir(fea_asim, motor_asim):
     """Aşım vakası (O/F 7,0): ana zincirle aynı hüküm — grafit izin
     sınırını aşıyor (aşım gizlenmez); erime (3900 K) için olumlu hüküm
     verilmez. V3.0.5 A1: vaka eskiden örneğin kendisiydi; örnek tasarımı
     O/F 6,0'a geçince (sayfa gövdesiyle) tepe izin altına indi, bu yüzden
-    aşım yarısı önceki örnek tasarım noktasında sınanır."""
-    ml = _capa_disi_beyani(fea_asim)
+    aşım yarısı önceki örnek tasarım noktasında sınanır.
+
+    V306/HİBRİT-NOZUL: kapı lülede koştu; erime hükmünü bu küçük koşuda
+    yalnız sayısal yakınsama bekletir (çapa-dışı neden yok). Ana zincir
+    motorun gazıyla 3313,37 K (FİZİK-2 DEVİR 1 ölçümüyle aynı)."""
+    ml = _lule_capali(fea_asim)
     assert ml['peak_wall_T_K'] > ml['allowable_temperature_K']
     assert ml['exceeds_allowable'] is True
     assert ml['exceeds_melting'] is None
+    assert ml['verdict_withheld_reasons'] == [
+        bridge.VERDICT_WITHHELD_NUMERICAL]
     tt = motor_asim['nozzle_material_analysis']['throat_thermal']
     assert tt['verdict'] == 'EXCEEDS_ALLOWABLE'
+    assert tt['throat_wall_temperature_K'] == pytest.approx(3313.37, abs=0.05)
 
 
 def test_ornekte_olumlu_hukum_geri_cekilir(fea_ornek, motor):
     """Bugünkü örnek (O/F 6,0): FEA tepesi izin sınırının ALTINDA, yani
     çözüm 'izin içinde' derdi; h(z) mertebe denetimi lüle bölgesinde
     çalışmadığından bu olumlu hüküm geri çekilir (null), sayılar silinmez.
-    Ana zincir de aşım görmüyor (gizlenen bir aşım yok)."""
-    ml = _capa_disi_beyani(fea_ornek)
+    Ana zincir de aşım görmüyor (gizlenen bir aşım yok).
+
+    V306/HİBRİT-NOZUL: kapı lülede koştu; olumlu hüküm bu küçük koşuda
+    YALNIZ sayısal yakınsama yüzünden bekler (çapa-dışı neden kalktı)."""
+    ml = _lule_capali(fea_ornek)
     assert ml['peak_wall_T_K'] < ml['allowable_temperature_K']
     assert ml['exceeds_allowable'] is None
     assert ml['exceeds_melting'] is None
+    assert ml['verdict_withheld_reasons'] == [
+        bridge.VERDICT_WITHHELD_NUMERICAL]
     tt = motor['nozzle_material_analysis']['throat_thermal']
     assert tt['verdict'] == 'SAFE'
 
 
-def test_sahte_dusuk_profil_olumlu_hukum_almaz(client, motor, profil):
-    """P8B2-01 saldırısı lüle bölgesinde: Bartz'ın 1/50'si 'izin içinde'
-    hükmü KAZANMAZ (kapı koşmasa da olumlu hüküm geri çekilir)."""
+def test_capasiz_sonucta_olumlu_hukum_geri_cekilir(client, motor, profil):
+    """Eski (çapasız) sonuçta V301/FİZİK-2 geri çekmesi AYNEN."""
+    kod, j = _fea(client, _capasiz(motor), profil)
+    assert kod == 200, str(j)[:300]
+    ml = _capa_disi_beyani(j['fea'])
+    assert ml['exceeds_allowable'] is None
+    assert ml['exceeds_melting'] is None
+
+
+def test_sahte_dusuk_profil_lulede_adiyla_reddedilir(client, motor, profil):
+    """V306/HİBRİT-NOZUL: P8B2-01 saldırısı (Bartz'ın 1/50'si) lüle
+    bölgesinde artık KAPIDAN döner — sıcaklık alanı üretilmez, neden
+    adıyla (eskiden alan üretiliyor, yalnız olumlu hüküm çekiliyordu)."""
     p = copy.deepcopy(profil)
     p['h_g'] = [v / 50.0 for v in profil['h_g']]
     kod, j = _fea(client, motor, p)
+    assert kod == 422, str(j)[:300]
+    fea = j['fea']
+    assert fea['status'] == bridge.BRIDGE_STATUS_NOT_MODELLED
+    assert any('lüle boğaz katsayısıyla' in m for m in fea['missing'])
+    for alan in ('material_limits', 'scalars', 'fields'):
+        assert alan not in fea, alan
+
+
+def test_sahte_dusuk_profil_capasiz_olumlu_hukum_almaz(client, motor,
+                                                       profil):
+    """Eski (çapasız) sonuçta: Bartz'ın 1/50'si 'izin içinde' hükmü
+    KAZANMAZ (kapı koşmasa da olumlu hüküm geri çekilir)."""
+    p = copy.deepcopy(profil)
+    p['h_g'] = [v / 50.0 for v in profil['h_g']]
+    kod, j = _fea(client, _capasiz(motor), p)
     assert kod == 200, str(j)[:300]
     ml = j['fea']['material_limits']
     assert ml['exceeds_allowable'] is None

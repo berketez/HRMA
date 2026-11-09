@@ -347,7 +347,7 @@ class KineticEfficiency:
             f"({diagnostics['isp_reference_basis'] or 'unstated basis'}), but "
             f"the nozzle profile you supplied expands to {p_prof_pa:.1f} Pa. "
             "They describe DIFFERENT expansions, so no Isp is published for "
-            "your nozzle at this fidelity level and none is invented. Use "
+            "your nozzle at this fidelity level and no substitute is used. Use "
             "fidelity='high_fidelity' (which solves the pair at the profile "
             "exit state), or supply combustion_results whose "
             "conditions.exit.P matches your nozzle.")

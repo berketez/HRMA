@@ -167,6 +167,33 @@ _QUAD_SIGNS = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
 
 AXIAL_FIX_MODES = ("both_ends", "z_min", "z_max")
 
+# --- V306/FEA-SIVI (kalem 3): FİZİKSEL MESNET KİPLERİ ---------------------
+# ``AXIAL_FIX_MODES`` rijit-cisim kısıtının YAPAY kipleridir (köprünün iki-kip
+# zarfı onları eşler; tuple bu yüzden genişletilmez). Aşağıdaki iki kip
+# itkinin motordan araca FİZİKSEL olarak aktarıldığı yerdir:
+#   * ``on_govde``  — basınç gövdesinin ön ucu (ağın z_min kesiti): sıvıda
+#     enjektör kafasındaki itki bağlantısı, hibritte ön kapak/gövde, katıda
+#     kasa ön eteği. Düğüm kümesi z_min ile AYNIDIR; adı, kipin fiziksel
+#     bir bağlantı olduğunu ve köprünün yapay iki-kip zarfına girmediğini
+#     söyler.
+#   * ``arka_govde`` — ön uçtaki DÜZGÜN silindirin arka ucu (silindir ⟷
+#     kapak/yakınsak birleşimi): katıda kasa arka eteği. Kesitin bütün
+#     düğümlerinde u_z = 0 (``arka_govde_istasyonu``).
+# Lüle çıkış dudağı (z_max) hiçbir motorda itki bağlantısı değildir: lüle
+# gövdeye bağlı bir konsoldur, çıkışı serbesttir (Sutton & Biblarz, Rocket
+# Propulsion Elements 9. baskı, Böl. 15 "motor case": kasa araca ön/arka
+# eteklerle bağlanır; Huzel & Huang, Modern Engineering for Design of
+# Liquid-Propellant Rocket Engines (AIAA 1992) Böl. 9: itki bağlantısı
+# enjektör kafasındadır).
+MESNET_ON_GOVDE = "on_govde"
+MESNET_ARKA_GOVDE = "arka_govde"
+FIZIKSEL_MESNET_KIPLERI = (MESNET_ON_GOVDE, MESNET_ARKA_GOVDE)
+#: Arka gövde istasyonu: ön uçtaki düzgün silindirin iç yarıçapının z_min
+#: kesitindeki değerden bu BAĞIL farkı aşmayan son istasyonu (HRMA sayısal
+#: seçimi: istasyon örneklemesinin yuvarlama payı; silindir ⟷ yakınsak
+#: birleşiminde yarıçap dönüş yayıyla değişir).
+ARKA_GOVDE_YARICAP_TOL = 1.0e-6
+
 # --- OH-D16-01 / P8B2-09 / OH-D15-03: SAINT-VENANT HÜKÜM BANDI -------------
 # Rijit-cisim kısıtı (u_z = 0 bir uç kesitte) FİZİKSEL bir mesnet değildir:
 # eksenel simetrik modeli tekil kılmamak için konan YAPAY bir sınır
@@ -1253,20 +1280,18 @@ def saint_venant_hukum_maskesi(mesh: AxisymMesh, axial_fix: str,
         maske tümü-True'ya düşürülür (fail-closed: hüküm ham tepeye
         döner, köprü hükmü geri çeker).
     """
-    if axial_fix not in AXIAL_FIX_MODES:
+    if axial_fix not in AXIAL_FIX_MODES + FIZIKSEL_MESNET_KIPLERI:
         raise ValueError(
-            f"axial_fix {AXIAL_FIX_MODES} içinden olmalı; verilen: "
-            f"{axial_fix!r}")
+            f"axial_fix {AXIAL_FIX_MODES + FIZIKSEL_MESNET_KIPLERI} içinden "
+            f"olmalı; verilen: {axial_fix!r}")
     if not (kat > 0.0):
         raise ValueError("Saint-Venant katsayısı pozitif olmalı.")
 
-    node_sets = {
-        "z_min": [mesh.z_min_nodes],
-        "z_max": [mesh.z_max_nodes],
-        "both_ends": [mesh.z_min_nodes, mesh.z_max_nodes],
-    }[axial_fix]
+    node_sets = _mesnet_dugum_kumeleri(mesh, axial_fix)
     kisitli_adlar = {"z_min": ("z_min",), "z_max": ("z_max",),
-                     "both_ends": ("z_min", "z_max")}[axial_fix]
+                     "both_ends": ("z_min", "z_max"),
+                     MESNET_ON_GOVDE: ("z_min",),
+                     MESNET_ARKA_GOVDE: ()}[axial_fix]
     nedenler = ["kisit"] * len(node_sets)
     for uc_adi in yuklu_uclar or ():
         if uc_adi not in ("z_min", "z_max"):
@@ -1529,17 +1554,48 @@ def scl_lineerlestirme(mesh: AxisymMesh, stress_nodal: np.ndarray,
     })
     return P_m, P_LPb, beyan
 
-def _axial_fix_dirichlet(mesh: AxisymMesh, axial_fix: str):
-    """axial_fix kipini u_z = 0 Dirichlet listesine çevirir."""
-    if axial_fix not in AXIAL_FIX_MODES:
+def arka_govde_istasyonu(mesh: AxisymMesh) -> int:
+    """Ön uçtaki düzgün silindirin son istasyonu (``arka_govde`` kipi).
+
+    z_min kesitinden başlayarak iç yarıçapı z_min'deki değerden
+    ``ARKA_GOVDE_YARICAP_TOL`` bağıl farkı aşmayan ARDIŞIK istasyonların
+    sonuncusu. Ağın önünde düzgün bir silindir yoksa (ilk istasyondan
+    sonra yarıçap hemen değişiyorsa) kip tanımsızdır: ValueError
+    (fail-closed; uydurma konum yok).
+    """
+    grid = np.asarray(mesh.node_index_grid, dtype=int)
+    r_ic = np.asarray(mesh.nodes, dtype=float)[grid[:, 0], 1]
+    sapma = np.abs(r_ic - r_ic[0]) / r_ic[0]
+    disari = np.nonzero(sapma > ARKA_GOVDE_YARICAP_TOL)[0]
+    son = int(disari[0] - 1) if disari.size else int(r_ic.size - 1)
+    if son < 1 or son >= r_ic.size - 1:
         raise ValueError(
-            f"axial_fix {AXIAL_FIX_MODES} içinden olmalı (rijit cisim "
-            "kısıtı şart); verilen: {!r}".format(axial_fix))
-    node_sets = {
+            "arka_govde kipi tanımsız: ağın önünde düzgün bir silindir yok "
+            "ya da silindir ağın tamamı (birleşim istasyonu bulunamadı).")
+    return son
+
+
+def _mesnet_dugum_kumeleri(mesh: AxisymMesh, axial_fix: str):
+    """Kipin u_z = 0 uygulanan düğüm kümeleri (liste)."""
+    if axial_fix == MESNET_ARKA_GOVDE:
+        i = arka_govde_istasyonu(mesh)
+        return [np.asarray(mesh.node_index_grid, dtype=int)[i, :]]
+    return {
         "z_min": [mesh.z_min_nodes],
         "z_max": [mesh.z_max_nodes],
         "both_ends": [mesh.z_min_nodes, mesh.z_max_nodes],
+        MESNET_ON_GOVDE: [mesh.z_min_nodes],
     }[axial_fix]
+
+
+def _axial_fix_dirichlet(mesh: AxisymMesh, axial_fix: str):
+    """axial_fix kipini u_z = 0 Dirichlet listesine çevirir."""
+    if axial_fix not in AXIAL_FIX_MODES + FIZIKSEL_MESNET_KIPLERI:
+        raise ValueError(
+            f"axial_fix {AXIAL_FIX_MODES + FIZIKSEL_MESNET_KIPLERI} içinden "
+            "olmalı (rijit cisim kısıtı şart); verilen: {!r}".format(
+                axial_fix))
+    node_sets = _mesnet_dugum_kumeleri(mesh, axial_fix)
     dirichlet = []
     for ns in node_sets:
         dirichlet.extend((int(n), 0, 0.0) for n in ns)
@@ -1570,7 +1626,8 @@ def solve_pressure(mesh: AxisymMesh,
     # taşınır (kapalı uçlu basınçlı kap). Köprü iki kipi de çözer.
     result.meta["kuvvet_dengesi"]["mesnet"] = axial_fix
     result.meta["kuvvet_dengesi"]["uc_kuvveti_cidari_yukler"] = bool(
-        axial_fix == "z_max" and isinstance(inner_pressure, InnerPressureLoad)
+        axial_fix in ("z_max", MESNET_ARKA_GOVDE)
+        and isinstance(inner_pressure, InnerPressureLoad)
         and inner_pressure.end_force_n > 0.0)
 
     # --- OH-D16-01: HÜKÜM YAPAY KISIT TEKİLLİĞİNDEN ALINMAZ --------------
@@ -2277,3 +2334,710 @@ def solve_with_refinement(contour,
         tol=tol,
         meta=meta,
     )
+
+
+# ===========================================================================
+# V306/FEA-SIVI (kalem 3) — MOTOR TÜRÜ BAŞINA MESNET KİPİ POLİTİKASI (TEK YER)
+# ---------------------------------------------------------------------------
+# P8B2-09 (köprü) kısıt yerini "rijit-cisim tekilliğini kaldıran SERBEST
+# bir modelleme seçimi" sayıp iki uç kipinin (z_min ön uç / z_max lüle
+# çıkışı) kötümserini yayımlıyordu. Bu öncül basınç yükü KENDİ İÇİNDE
+# DENGELİ olduğunda doğrudur; motor cidarında değildir: iç basıncın ve
+# kapalı uç kuvvetinin bileşkesi basınç itkisidir ve mesnet onu taşır. Kısıt
+# yeri bu yüzden YÜK YOLUNU belirler: z_max kipinde ön kapak kuvvetinin
+# tamamı lüle cidarından çıkış dudağına akar. ÖLÇÜLDÜ (V306/KATI-MODEL, katı
+# L2): iki kip asgari SF'de %46 ayrışıyor ve hüküm geri çekiliyordu; fark
+# mesh'ten değil yük yolundan gelir (n_radial 4 → 8: %0,05).
+#
+# Politika: her motor türünde yayımlanan çözüm FİZİKSEL bağlantıdan, ön
+# gövde mesnedinden (``on_govde``) gelir. Ayrışma ölçüsü: aynı son ağda
+# itkinin gövdenin ÖTEKİ ucundan (``arka_govde``: ön silindirin arka ucu)
+# alındığı çözüm; iki çözüm, İKİ mesnedin de Saint-Venant bandının dışında
+# kalan ORTAK bölgede kıyaslanır ve eşik P8B2-09'un kenar sönüm eşiğidir
+# (``kisit_yeri_duyarlilik_esigi``, tek kaynak). Eşik aşılırsa hüküm geri
+# çekilir. Lüle çıkış dudağı (z_max) mesnetli çözüm yalnız BEYANLI
+# KARŞILAŞTIRMA olarak yayımlanır, hükme girmez.
+MESNET_KIPI_POLITIKASI = {
+    "solid": {
+        "birincil": MESNET_ON_GOVDE,
+        "ayrisma": MESNET_ARKA_GOVDE,
+        "karsilastirma": "z_max",
+        "_basis": (
+            "solid motor: the case is attached to the vehicle by its forward "
+            "and aft skirts and the thrust leaves the motor through them "
+            "(Sutton & Biblarz, Rocket Propulsion Elements 9th ed., Ch. 15, "
+            "motor case); the nozzle is cantilevered from the aft closure "
+            "and its exit is free. Published solution: forward skirt "
+            "(on_govde, the forward end of the case cylinder in the mesh). "
+            "Divergence measure: aft skirt (arka_govde, the cylinder / aft "
+            "closure junction). Nozzle-exit support (z_max) is a declared "
+            "comparison only."),
+    },
+    "liquid": {
+        "birincil": MESNET_ON_GOVDE,
+        "ayrisma": MESNET_ARKA_GOVDE,
+        "karsilastirma": "z_max",
+        "_basis": (
+            "liquid engine: the thrust mount sits on the injector head and "
+            "the gimbal/thrust structure takes the load there (Huzel & "
+            "Huang, Modern Engineering for Design of Liquid-Propellant "
+            "Rocket Engines, AIAA 1992, Ch. 9); the nozzle exit is free. "
+            "Published solution: forward end of the chamber (on_govde). "
+            "Divergence measure: the thrust reacted at the other end of "
+            "the chamber barrel (arka_govde, barrel / convergent junction). "
+            "Nozzle-exit support (z_max) is a declared comparison only."),
+    },
+    "hybrid": {
+        "birincil": MESNET_ON_GOVDE,
+        "ayrisma": MESNET_ARKA_GOVDE,
+        "karsilastirma": "z_max",
+        "_basis": (
+            "hybrid motor: the combustion chamber case carries the thrust "
+            "to the vehicle from its forward closure / case attachment "
+            "(Sutton & Biblarz 9th ed., Ch. 16 and Ch. 15 case practice); "
+            "the nozzle exit is free. Published solution: forward end of "
+            "the case (on_govde). Divergence measure: arka_govde. Nozzle-"
+            "exit support (z_max) is a declared comparison only."),
+    },
+}
+
+
+def mesnet_kipi_politikasi(layout: str) -> dict:
+    """Motor türünün mesnet kipi politikası (kopya). Bilinmeyen tür: ValueError."""
+    if layout not in MESNET_KIPI_POLITIKASI:
+        raise ValueError(f"Mesnet politikası tanımsız motor türü: {layout!r}")
+    return dict(MESNET_KIPI_POLITIKASI[layout])
+
+
+def _ortak_bolge_hukum_sf(mesh: AxisymMesh, sonuc: "StructuralResult",
+                          ortak: np.ndarray, akma_pa) -> Optional[float]:
+    """Verilen ORTAK hüküm bölgesinde ASME lineerleştirmeli emniyet katsayısı."""
+    if akma_pa is None or not np.any(ortak):
+        return None
+    _pm, _plpb, beyan = scl_lineerlestirme(mesh, sonuc.stress_nodal, ortak)
+    if not beyan.get("gecerli"):
+        return None
+    payda = max(ASME_MEMBRAN_KATI * beyan["P_m_maks_pa"],
+                beyan["P_L_Pb_maks_pa"])
+    return float(akma_pa / payda) if payda > 0.0 else None
+
+
+def mesnet_ayrisma_olcusu(mesh: AxisymMesh, material: Material,
+                          inner_pressure, sonuc_birincil: "StructuralResult",
+                          politika: dict) -> dict:
+    """Yayımlanan (birincil) mesnet çözümü ⟷ ayrışma mesnedi, AYNI ağda.
+
+    Döner: makine-okur kapı sözlüğü (``asildi``, ``olculdu``, ``bagil_fark``,
+    ``esik`` …) + beyanlı karşılaştırma (lüle çıkışı mesnetli çözümün asgari
+    SF'si). Ayrışma çözülemezse ``olculdu = False`` (fail-closed: çağıran
+    hükmü geri çeker).
+    """
+    birincil = politika["birincil"]
+    ayrisma = politika.get("ayrisma")
+    karsi = politika.get("karsilastirma")
+    akma = getattr(material, "yield_strength", None)
+    kapi = {
+        "uygulanir": True,
+        "olculdu": False,
+        "birincil_kip": birincil,
+        "ayrisma_kipi": ayrisma,
+        "_basis": (
+            "V306/FEA-SIVI: the published solution is the physical support "
+            "(mesnet_kipi_politikasi); the divergence measure is the same "
+            "mesh with the thrust reacted at the other end of the pressure "
+            "body, compared in the region outside BOTH supports' Saint-"
+            "Venant bands (ASME linearised P_L+P_b). Threshold: the edge-"
+            "decay limit of P8B2-09 (kisit_yeri_duyarlilik_esigi, "
+            "Timoshenko & Woinowsky-Krieger 2nd ed. §15). Above it the "
+            "verdict is withheld (kisit_yeri_duyarliligi_yuksek)."),
+    }
+    try:
+        res_a = solve_pressure(mesh, material, inner_pressure,
+                               axial_fix=ayrisma)
+        m1, _ = saint_venant_hukum_maskesi(
+            mesh, birincil, yuklu_uclar=_yuklu_uc_kumesi(inner_pressure))
+        m2, _ = saint_venant_hukum_maskesi(
+            mesh, ayrisma, yuklu_uclar=_yuklu_uc_kumesi(inner_pressure))
+        ortak = np.asarray(m1, dtype=bool) & np.asarray(m2, dtype=bool)
+        sf1 = _ortak_bolge_hukum_sf(mesh, sonuc_birincil, ortak, akma)
+        sf2 = _ortak_bolge_hukum_sf(mesh, res_a, ortak, akma)
+    except (ValueError, RuntimeError) as exc:
+        kapi["beyan"] = (f"divergence solve not possible "
+                         f"({type(exc).__name__}: {exc})")
+        return kapi
+    kapi["birincil_ortak_bolge_sf"] = sf1
+    kapi["ayrisma_ortak_bolge_sf"] = sf2
+    kapi["ayrisma_min_safety_factor"] = res_a.min_safety_factor
+    kapi["ortak_bolge_dugum_orani"] = float(np.mean(ortak))
+    if sf1 and sf2:
+        fark = max(sf1, sf2) / min(sf1, sf2) - 1.0
+        esik = kisit_yeri_duyarlilik_esigi(float(material.nu))
+        kapi.update(olculdu=True, bagil_fark=float(fark), esik=float(esik),
+                    asildi=bool(fark > esik), pay=float(esik - fark),
+                    nu=float(material.nu),
+                    saint_venant_kat=float(SAINT_VENANT_KAT))
+    if karsi:
+        try:
+            res_k = solve_pressure(mesh, material, inner_pressure,
+                                   axial_fix=karsi)
+            kapi["karsilastirma"] = {
+                "kip": karsi,
+                "min_safety_factor": res_k.min_safety_factor,
+                "yayimlanan_cozumle_orani": (
+                    None if not (res_k.min_safety_factor
+                                 and sonuc_birincil.min_safety_factor)
+                    else float(res_k.min_safety_factor
+                               / sonuc_birincil.min_safety_factor)),
+                "_basis": (
+                    "nozzle-exit support (z_max): not a thrust attachment "
+                    "(the nozzle exit is free); published as a declared "
+                    "comparison, it does not enter the verdict"),
+            }
+        except (ValueError, RuntimeError) as exc:
+            kapi["karsilastirma"] = {"kip": karsi, "min_safety_factor": None,
+                                     "beyan": f"{type(exc).__name__}: {exc}"}
+    return kapi
+
+
+def _yuklu_uc_kumesi(inner_pressure) -> tuple:
+    """Uç kuvveti taşıyan uç (solve_pressure'ın bantlama kuralıyla aynı)."""
+    return (("z_min",) if (isinstance(inner_pressure, InnerPressureLoad)
+                           and inner_pressure.end_force_n > 0.0) else ())
+
+
+# ===========================================================================
+# V306/FEA-SIVI (kalem 1) — KATMANLI TERMO-ELASTİK ÇÖZÜCÜ (iki katmanlı
+# rejeneratif cidar: astar + kanal/kaburga katmanı + dış kabuk)
+# ---------------------------------------------------------------------------
+# Tek malzemeli ``solve_linear`` yolu DEĞİŞMEDİ. Bu yol eleman başına
+# malzeme (D matrisi) ve ısıl gerinim taşır:
+#     K = Σ_e ∫ Bᵀ D_e B dV,   f_th = Σ_e ∫ Bᵀ D_e ε_th dV,
+#     σ = D_e (B u − ε_th),     ε_th = α (T − T_ref) [1, 1, 1, 0]
+# (Zienkiewicz & Taylor 5. baskı Cilt 1, Böl. 5 — eksenel simetrik ısıl
+# gerinim; başlangıç gerinimi tutarlı yük vektörü). Katman sınırı eleman
+# sınırıdır; gerilme geri kazanımı (SPR) her katmanda AYRI kurulur — arayüzde
+# σ_θ ve σ_z süreksizdir, katmanlar arası yama bunu yayardı.
+#
+# Kanal/kaburga katmanı (astar ile dış kabuk arası, derinlik h): kanallar
+# çevre boyunca sürekliliği kestiği için katman eksenel simetrik bir katı
+# DEĞİLDİR. Yayılı (smeared) kaburga modeli — HRMA SEÇİMİ, karışım kuralının
+# (Voigt) kaburgaya paralel yönlere uygulanışı: kaburga r–z düzleminde
+# düzlem gerilme altındadır (σ_θ = 0, kanal tarafı serbest), r ve z
+# yönündeki rijitliği kaburga oranı φ = w_kaburga / (w_kaburga + w_kanal)
+# ile ölçeklenir, θ yönünde rijitlik yoktur:
+#     D_kaburga = φ · E/(1−ν²) · [[1, ν, 0, 0], [ν, 1, 0, 0], [0, 0, 0, 0],
+#                                 [0, 0, 0, (1−ν)/2]]
+# Soğutucu basıncı kanalların tabanına (astar dış yüzü, içe) ve tavanına
+# (dış kabuk iç yüzü, dışa) kanal genişliği oranı (1 − φ) ile etkir; ikisi
+# kaburgalar üstünden birbirini dengeler. Gerçek kaburga gerilmesi yayılı
+# gerilmenin 1/φ katıdır (kaburga kökündeki yerel yığılma çözülmez).
+KABURGA_KATMANI = "channels"
+#: Katmanlı hükmün geri çekme gerekçe kodları (tek yer; panel
+#: ``panel.fea.withheld.<kod>`` ile çevirir).
+KATMAN_HUKMU_KURULAMADI = "katman_hukmu_kurulamadi"
+
+
+@dataclass(frozen=True)
+class CidarKatmani:
+    """Katmanlı cidarın bir katmanı (içten dışa sırayla verilir).
+
+    ad : "liner" | "channels" | "closeout" (makine adı).
+    material : E, ν ve katmanın KENDİ sıcaklığındaki akma dayanımı.
+    alpha : ısıl genleşme katsayısı [1/K] (> 0).
+    kalinlik_m : katman kalınlığı [m].
+    n_radial0 : başlangıç ağında cidar boyu eleman sayısı (>= 2: katman
+        başına ASME lineerleştirmesi en az iki eleman ister).
+    T_ic_K / T_dis_K : katmanın iç ve dış yüzündeki sıcaklık [K]; katman
+        içinde doğrusal.
+    kaburga_orani : None → izotropik katı; (0, 1] → yayılı kaburga katmanı
+        (``KABURGA_KATMANI`` düzeni), sabit oran.
+    kanal_sayisi / kanal_genisligi_m : verilirse kaburga oranı yarıçapa
+        bağlıdır: sabit genişlikte n kanal için çevrede kanalın payı
+        n·w/(2πr), kaburganın payı φ(r) = 1 − n·w/(2πr) (kanal sayısı ve
+        genişliği motorun ``cooling_channels`` kaydından).
+    """
+    ad: str
+    material: Material
+    alpha: float
+    kalinlik_m: float
+    n_radial0: int
+    T_ic_K: float
+    T_dis_K: float
+    kaburga_orani: Optional[float] = None
+    kanal_sayisi: Optional[int] = None
+    kanal_genisligi_m: Optional[float] = None
+    #: False → katmana hüküm verilmez (yayılı kaburga katmanı: gerilmesi
+    #: ortalamadır, kaburga kökü yığılması çözülmez); sayıları bilgi olarak
+    #: yayımlanır ve yakınsama ölçütüne girmez.
+    hukum: bool = True
+
+    @property
+    def kaburga(self) -> bool:
+        return (self.kaburga_orani is not None
+                or self.kanal_sayisi is not None)
+
+    def phi(self, r) -> np.ndarray:
+        """Kaburga oranı φ(r) (izotropik katmanda 1)."""
+        r = np.asarray(r, dtype=float)
+        if self.kanal_sayisi is not None:
+            v = 1.0 - (float(self.kanal_sayisi) * float(self.kanal_genisligi_m)
+                       / (2.0 * np.pi * r))
+            if np.any(v <= 0.0) or not np.all(np.isfinite(v)):
+                raise ValueError(
+                    f"{self.ad}: kanallar çevreye sığmıyor "
+                    "(n·w >= 2πr): kaburga oranı <= 0.")
+            return v
+        if self.kaburga_orani is not None:
+            return np.full(r.shape, float(self.kaburga_orani))
+        return np.ones(r.shape)
+
+    def __post_init__(self):
+        if not (np.isfinite(self.alpha) and self.alpha > 0.0):
+            raise ValueError(f"{self.ad}: alpha sonlu ve pozitif olmalı.")
+        if not (np.isfinite(self.kalinlik_m) and self.kalinlik_m > 0.0):
+            raise ValueError(f"{self.ad}: kalınlık pozitif olmalı.")
+        if int(self.n_radial0) < SCL_MIN_ELEMAN:
+            raise ValueError(f"{self.ad}: n_radial0 >= {SCL_MIN_ELEMAN}.")
+        for T in (self.T_ic_K, self.T_dis_K):
+            if not (np.isfinite(T) and T > 0.0):
+                raise ValueError(f"{self.ad}: sıcaklık sonlu ve > 0 K.")
+        if self.kaburga_orani is not None and not (
+                0.0 < self.kaburga_orani <= 1.0):
+            raise ValueError(f"{self.ad}: kaburga oranı (0, 1] olmalı.")
+        if (self.kanal_sayisi is None) != (self.kanal_genisligi_m is None):
+            raise ValueError(f"{self.ad}: kanal sayısı ve genişliği "
+                             "birlikte verilmeli.")
+        if self.kanal_sayisi is not None and not (
+                int(self.kanal_sayisi) >= 1
+                and np.isfinite(self.kanal_genisligi_m)
+                and self.kanal_genisligi_m > 0.0):
+            raise ValueError(f"{self.ad}: kanal sayısı >= 1 ve genişlik > 0.")
+
+
+def _katman_D(k: CidarKatmani) -> np.ndarray:
+    """Katmanın D matrisi; kaburga katmanında φ = 1 için (eleman başına
+    φ(r) çarpanı ``_katmanli_coz``da uygulanır)."""
+    E, nu = float(k.material.E), float(k.material.nu)
+    if not k.kaburga:
+        return elasticity_matrix(E, nu)
+    c = E / (1.0 - nu ** 2)
+    return c * np.array([[1.0, nu, 0.0, 0.0],
+                         [nu, 1.0, 0.0, 0.0],
+                         [0.0, 0.0, 0.0, 0.0],
+                         [0.0, 0.0, 0.0, (1.0 - nu) / 2.0]])
+
+
+def _satir_kenarlari(mesh: AxisymMesh, j: int) -> np.ndarray:
+    g = np.asarray(mesh.node_index_grid, dtype=int)
+    return np.stack([g[:-1, j], g[1:, j]], axis=1).astype(np.int64)
+
+
+def _katman_alt_agi(mesh: AxisymMesh, j0: int, j1: int):
+    """Katmanın yapısal alt ağı (SPR ve SCL için; düğüm numaraları küresel)."""
+    from types import SimpleNamespace
+    g = np.asarray(mesh.node_index_grid, dtype=int)[:, j0:j1 + 1]
+    n_sub = j1 - j0
+    n_rad = int(mesh.n_radial)
+    i = np.repeat(np.arange(mesh.n_axial), n_sub)
+    jj = np.tile(np.arange(n_sub), mesh.n_axial)
+    e_glob = i * n_rad + j0 + jj
+    alt = SimpleNamespace(
+        nodes=mesh.nodes, node_index_grid=g, n_axial=int(mesh.n_axial),
+        n_radial=int(n_sub), n_nodes=int(mesh.n_nodes),
+        elems=np.asarray(mesh.elems)[e_glob])
+    return alt, e_glob
+
+
+def _katmanli_coz(mesh: AxisymMesh, katmanlar, sinirlar, axial_fix: str,
+                  gaz_yuku, p_sogutucu_pa: float, T_ref_K: float,
+                  termal: bool) -> dict:
+    """Katmanlı ağda tek doğrusal çözüm (basınç ± ısıl gerinim)."""
+    X = mesh.nodes[mesh.elems]
+    M = mesh.n_elems
+    n_rad = int(mesh.n_radial)
+    j_el = np.arange(M) % n_rad
+    k_el = np.empty(M, dtype=int)
+    for k, (j0, j1) in enumerate(sinirlar):
+        k_el[(j_el >= j0) & (j_el < j1)] = k
+    D_k = np.stack([_katman_D(k) for k in katmanlar])        # (L, 4, 4)
+    D_e = D_k[k_el].copy()                                     # (M, 4, 4)
+    r_merkez = X[:, :, 1].mean(axis=1)
+    for k, kt in enumerate(katmanlar):
+        if kt.kaburga:
+            sec = k_el == k
+            D_e[sec] *= kt.phi(r_merkez[sec])[:, None, None]
+    j0_e = np.asarray([sinirlar[k][0] for k in k_el])
+    n_e = np.asarray([sinirlar[k][1] - sinirlar[k][0] for k in k_el])
+    T_in = np.asarray([katmanlar[k].T_ic_K for k in k_el])
+    T_out = np.asarray([katmanlar[k].T_dis_K for k in k_el])
+    a_e = np.asarray([katmanlar[k].alpha for k in k_el])
+
+    def _eps_th(eta):
+        if not termal:
+            return np.zeros((M, 4))
+        frac = (j_el - j0_e + 0.5 * (1.0 + eta)) / n_e
+        dT = T_in + frac * (T_out - T_in) - float(T_ref_K)
+        e = (a_e * dT)[:, None] * np.array([1.0, 1.0, 1.0, 0.0])[None, :]
+        return e
+
+    Ke = np.zeros((M, 8, 8))
+    fe = np.zeros((M, 8))
+    B_gauss = np.zeros((M, 4, 4, 8))
+    eps_g = np.zeros((M, 4, 4))
+    for g, (sx, sy) in enumerate(_QUAD_SIGNS):
+        xi, eta = _GAUSS_COORD * sx, _GAUSS_COORD * sy
+        B, detJ, xy = _point_B_matrix(X, xi, eta)
+        w = 2.0 * np.pi * detJ * xy[:, 1]
+        Ke += w[:, None, None] * np.einsum('esi,est,etj->eij', B, D_e, B)
+        et = _eps_th(eta)
+        fe += w[:, None] * np.einsum('esi,est,et->ei', B, D_e, et)
+        B_gauss[:, g] = B
+        eps_g[:, g] = et
+    B_cent, _, cent_xy = _point_B_matrix(X, 0.0, 0.0)
+    eps_c = _eps_th(0.0)
+    edof = _element_dof_map(mesh.elems)
+    ndof = 2 * mesh.n_nodes
+    K = sp.coo_matrix((Ke.ravel(), (np.repeat(edof, 8, axis=1).ravel(),
+                                    np.tile(edof, (1, 8)).ravel())),
+                      shape=(ndof, ndof)).tocsr()
+    F = np.zeros(ndof)
+    np.add.at(F, edof.ravel(), fe.ravel())
+    F_mek = np.zeros(ndof)
+    yuk_ozeti = _ic_basinc_yukunu_kur(F_mek, mesh, gaz_yuku)
+    F_sog = np.zeros(ndof)
+    # Soğutucu çifti: kanal tabanı (astar dış yüzü, içe) + kanal tavanı (dış
+    # kabuk iç yüzü, dışa), kanal genişliği oranıyla.
+    # Kanal payı 1 − φ(r) = n·w/(2πr): taban ve tavandaki radyal bileşke
+    # birim boyda p·n·w, yani çift tam dengelidir.
+    kab = [k for k, kt in enumerate(katmanlar) if kt.kaburga]
+    if p_sogutucu_pa and kab:
+        kt_k = katmanlar[kab[0]]
+        j_a, j_b = sinirlar[kab[0]]
+
+        def _kanal_basinci(zz, rr, _k=kt_k):
+            return float(p_sogutucu_pa) * (1.0 - _k.phi(rr))
+        _add_edge_pressure_gauss(F_sog, mesh.nodes,
+                                 _satir_kenarlari(mesh, j_a),
+                                 _kanal_basinci, -1.0)
+        _add_edge_pressure_gauss(F_sog, mesh.nodes,
+                                 _satir_kenarlari(mesh, j_b),
+                                 _kanal_basinci, +1.0)
+    F_mek += F_sog
+    F += F_mek
+    dirichlet = _axial_fix_dirichlet(mesh, axial_fix)
+    fixed = np.asarray([2 * n + c for n, c, _v in dirichlet], dtype=int)
+    free = np.setdiff1d(np.arange(ndof), fixed)
+    u = np.zeros(ndof)
+    u[free] = spsolve(K[free][:, free].tocsc(), F[free])
+    if not np.all(np.isfinite(u)):
+        raise RuntimeError("Katmanlı çözüm sonlu değil (tekil sistem).")
+    R = K @ u - F
+    ue = u[edof]
+    sig_c = np.einsum('est,es->et', D_e,
+                      np.einsum('esj,ej->es', B_cent, ue) - eps_c)
+    sig_g = np.einsum('est,egs->egt', D_e,
+                      np.einsum('egsj,ej->egs', B_gauss, ue) - eps_g)
+    return {"u": u.reshape(-1, 2), "sig_cent": sig_c, "sig_gauss": sig_g,
+            "cent_xy": cent_xy, "k_el": k_el,
+            "mesnet_eksenel_tepkisi_n": float(R[fixed].sum()),
+            # Gaz yükünün (iç basınç + kapalı uç) karşılığı olan tepki: ısıl
+            # yük kendi içinde dengelidir (Σ f_th,z = 0), soğutucu çiftinin
+            # küçük eksenel artığı çıkarılır (köprünün kuvvet dengesi
+            # kapısıyla aynı kıyas: OH-DK-04).
+            "gaz_mesnet_tepkisi_n": float(R[fixed].sum()
+                                          + F_sog[0::2].sum()),
+            "sogutucu_eksenel_n": float(F_sog[0::2].sum()),
+            "yuk_ozeti": yuk_ozeti}
+
+
+def _katman_hukmu(mesh, katman: CidarKatmani, j0: int, j1: int, cozum: dict,
+                  maske) -> dict:
+    """Katmanın düğüm gerilmesi (SPR, katman içi) + ASME lineerleştirmesi."""
+    alt, e_glob = _katman_alt_agi(mesh, j0, j1)
+    sig_c = cozum["sig_cent"][e_glob]
+    S = _nodal_stress_spr(alt, sig_c, cozum["cent_xy"][e_glob])
+    if S is None:
+        S = _nodal_stress_extrapolation(alt, cozum["sig_gauss"][e_glob])
+    dug = np.unique(np.asarray(alt.node_index_grid).ravel())
+    if katman.kaburga:
+        # yayılı → kaburganın kendi gerilmesi (σ/φ)
+        S = S.copy()
+        S[dug] = S[dug] / katman.phi(mesh.nodes[dug, 1])[:, None]
+    vm = np.full(mesh.n_nodes, np.nan)
+    vm[dug] = von_mises(S[dug])
+    _pm, _plpb, beyan = scl_lineerlestirme(alt, S, maske)
+    out = {"stress_nodal": S, "dugumler": dug, "vm_nodal": vm,
+           "scl": beyan}
+    if beyan.get("gecerli"):
+        out["P_m_maks_pa"] = float(beyan["P_m_maks_pa"])
+        out["P_L_Pb_maks_pa"] = float(beyan["P_L_Pb_maks_pa"])
+        out["hukum_paydasi_pa"] = float(max(
+            ASME_MEMBRAN_KATI * beyan["P_m_maks_pa"],
+            beyan["P_L_Pb_maks_pa"]))
+    return out
+
+
+def kalin_iki_katmanli_silindir_isil(a, b, c, E1, nu1, al1, dT1,
+                                     E2, nu2, al2, dT2):
+    """İki katmanlı (bağlı) kalın cidarlı silindir, katman başına DÜZGÜN ΔT,
+    uçları serbest (genelleştirilmiş düzlem şekil değiştirme: ε_z sabit, net
+    eksenel kuvvet sıfır) — KAPALI BİÇİM (doğrulama çapası).
+
+    Her katmanda Lamé çözümü u = A r + B/r, σ_r = 2(λ+μ)A − 2μB/r² + λ ε_z
+    − (3λ+2μ) α ΔT, σ_θ = 2(λ+μ)A + 2μB/r² + λ ε_z − (3λ+2μ) α ΔT,
+    σ_z = 2λA + (λ+2μ) ε_z − (3λ+2μ) α ΔT (Timoshenko & Goodier, Theory of
+    Elasticity 3. baskı, §150-151, uzun silindirde ısıl gerilme). Beş
+    bilinmeyen (A1, B1, A2, B2, ε_z): σ_r(a) = 0, σ_r(c) = 0, σ_r ve u
+    arayüzde (r = b) sürekli, ∫σ_z dA = 0.
+
+    Döner: r → (σ_r, σ_θ, σ_z) değerlendiren işlev ve katsayılar.
+    """
+    def lame(E, nu):
+        lam = E * nu / ((1 + nu) * (1 - 2 * nu))
+        mu = E / (2 * (1 + nu))
+        return lam, mu
+    l1, m1 = lame(E1, nu1)
+    l2, m2 = lame(E2, nu2)
+    t1 = (3 * l1 + 2 * m1) * al1 * dT1
+    t2 = (3 * l2 + 2 * m2) * al2 * dT2
+    Mx = np.zeros((5, 5))
+    rhs = np.zeros(5)
+    # x = [A1, B1, A2, B2, ez]
+    Mx[0] = [2 * (l1 + m1), -2 * m1 / a ** 2, 0, 0, l1]; rhs[0] = t1
+    Mx[1] = [0, 0, 2 * (l2 + m2), -2 * m2 / c ** 2, l2]; rhs[1] = t2
+    Mx[2] = [2 * (l1 + m1), -2 * m1 / b ** 2, -2 * (l2 + m2), 2 * m2 / b ** 2,
+             l1 - l2]; rhs[2] = t1 - t2
+    Mx[3] = [b, 1 / b, -b, -1 / b, 0]; rhs[3] = 0.0
+    A1 = np.pi * (b ** 2 - a ** 2)
+    A2 = np.pi * (c ** 2 - b ** 2)
+    Mx[4] = [2 * l1 * A1, 0, 2 * l2 * A2, 0,
+             (l1 + 2 * m1) * A1 + (l2 + 2 * m2) * A2]
+    rhs[4] = t1 * A1 + t2 * A2
+    A1_, B1_, A2_, B2_, ez = np.linalg.solve(Mx, rhs)
+
+    def gerilme(r):
+        r = np.asarray(r, dtype=float)
+        ic = r <= b
+        A = np.where(ic, A1_, A2_)
+        Bc = np.where(ic, B1_, B2_)
+        lam = np.where(ic, l1, l2)
+        mu = np.where(ic, m1, m2)
+        tt = np.where(ic, t1, t2)
+        sr = 2 * (lam + mu) * A - 2 * mu * Bc / r ** 2 + lam * ez - tt
+        st = 2 * (lam + mu) * A + 2 * mu * Bc / r ** 2 + lam * ez - tt
+        sz = 2 * lam * A + (lam + 2 * mu) * ez - tt
+        return sr, st, sz
+    return gerilme, {"A1": A1_, "B1": B1_, "A2": A2_, "B2": B2_, "ez": ez}
+
+
+#: Katmanlı cidarda Saint-Venant bandı İKİ uçta da uygulanır (kısıtlı uca
+#: ek olarak): z_min'e kapalı uç kuvveti biner, z_max ceketin çıkış
+#: manifoldudur ve modellenmez. ÖLÇÜLDÜ (örnek sıvı, P+Q, ortak katlama
+#: 16→256): dış kabuğun tepesi z_max'ta (0,3019 m) ve SF_PQ 4,94 → 2,73
+#: AZALARAK gidiyor — bağlı iki malzemenin serbest ucundaki ısıl kenar
+#: tekilliği (yakınsamaz).
+KATMANLI_BANTLI_UCLAR = ("z_min", "z_max")
+#: Katmanlı modelin başlangıç eksenel eleman sayısı (alt sınır; HRMA sayısal
+#: seçimi, ölçümle). ÖLÇÜLDÜ (örnek sıvı, kamara + lüle 569 mm): katman
+#: sayıları çözünürlüğe eksenel yönde bağlı; 16 eksenel elemanla başlayan
+#: merdivende astar SF_PQ %2,4 / %0,95 / %1,45 / %0,55 salınıyor (dört tur),
+#: 64'ten başlayınca %1,44 → %0,55 tekdüze iniyor.
+KATMANLI_N_AXIAL0 = 64
+
+#: ASME BPVC VIII-2 5.5.6.1(d): birincil + ikincil gerilme aralığı sınırı
+#: S_PS = 2·S_y (sıcak ve soğuk uçtaki akmaların ortalaması; burada SICAK
+#: uçtaki akma iki uca da uygulanır — oda sıcaklığı akması daha yüksek
+#: olduğundan muhafazakâr). Isıl gerilme İKİNCİL gerilmedir (kendi kendini
+#: sınırlar); plastik çöküş (birincil) hükmüne girmez, sarsıntısızlık
+#: (shakedown) ölçütüne girer.
+ASME_PS_AKMA_KATI = 2.0
+
+
+def solve_layered_wall(contour, katmanlar, gaz_yuku, p_sogutucu_pa: float,
+                       T_ref_K: float, politika: dict,
+                       n_axial0: int = None, max_rounds: int = 0,
+                       tol: float = DEFAULT_REFINE_TOL,
+                       max_elems: Optional[int] = None,
+                       offset_mode: str = "normal") -> dict:
+    """Katmanlı cidarın termo-elastik FEA'sı + katman başına hüküm.
+
+    Her ağda iki çözüm: (P) yalnız basınç (gaz iç basıncı + kapalı uç
+    kuvveti + kanal soğutucu basıncı) ve (P+Q) aynı basınç + ısıl gerinim.
+    Katman hükmü: birincil SF_P = akma / max(1,5·P_m, P_L+P_b) (P çözümü,
+    ASME VIII-2 5.2.2.4, OH-D24-01 ile aynı tanım); ikincil
+    SF_PQ = 2·akma / (P_L+P_b+Q) (P+Q çözümü, ASME VIII-2 5.5.6). Mesnet:
+    ``politika['birincil']`` (fiziksel); ayrışma ölçüsü son ağda
+    ``politika['ayrisma']`` ile (P çözümü, iki bandın dışındaki ortak
+    bölge). Ağ inceltmesi ortak katlamadır (eksenel ve her katmanın cidar
+    boyu eleman sayısı birlikte ×2); yakınsama ölçütü bütün katmanların
+    SF_P ve SF_PQ bağıl değişimlerinin en büyüğüdür.
+    """
+    from hrma.fea.mesh_axisym import build_layered_wall_mesh
+    n_axial0 = max(int(n_axial0 or DEFAULT_N_AXIAL0), KATMANLI_N_AXIAL0)
+    ardisik = 0
+    kip = politika["birincil"]
+    t_k = [k.kalinlik_m for k in katmanlar]
+    gecmis = []
+    son = None
+    onceki = None
+    onceki_bilgi = None
+    rel = None
+    for tur in range(int(max_rounds) + 1):
+        f = REFINE_FACTOR ** tur
+        n_ax = n_axial0 * f
+        n_k = [int(k.n_radial0) * f for k in katmanlar]
+        if max_elems is not None and tur > 0 and n_ax * sum(n_k) > max_elems:
+            break
+        mesh = build_layered_wall_mesh(contour, t_k, n_ax, n_k,
+                                       offset_mode=offset_mode)
+        sinirlar = [(d["j0"], d["j1"]) for d in mesh.meta["katmanlar"]]
+        # İki uç da bantlanır: z_min kapalı uç kuvveti, z_max ceketin çıkış
+        # manifoldu (modellenmez; bağlı iki malzemenin serbest ucu ısıl
+        # uyumsuzlukta tekil kenar gerilmesi verir ve inceltmeyle büyür).
+        maske, sv = saint_venant_hukum_maskesi(
+            mesh, kip, yuklu_uclar=KATMANLI_BANTLI_UCLAR)
+        cz_p = _katmanli_coz(mesh, katmanlar, sinirlar, kip, gaz_yuku,
+                             p_sogutucu_pa, T_ref_K, termal=False)
+        cz_pq = _katmanli_coz(mesh, katmanlar, sinirlar, kip, gaz_yuku,
+                              p_sogutucu_pa, T_ref_K, termal=True)
+        sonuc_k = []
+        for kt, (j0, j1) in zip(katmanlar, sinirlar):
+            hp = _katman_hukmu(mesh, kt, j0, j1, cz_p, maske)
+            hq = _katman_hukmu(mesh, kt, j0, j1, cz_pq, maske)
+            akma = kt.material.yield_strength
+            sf_p = (akma / hp["hukum_paydasi_pa"]
+                    if (akma and hp.get("hukum_paydasi_pa")) else None)
+            sf_pq = (ASME_PS_AKMA_KATI * akma / hq["P_L_Pb_maks_pa"]
+                     if (akma and hq.get("P_L_Pb_maks_pa")) else None)
+            sonuc_k.append({"hp": hp, "hq": hq, "sf_p": sf_p,
+                            "sf_pq": sf_pq})
+        olcu = [v for kt, s in zip(katmanlar, sonuc_k) if kt.hukum
+                for v in (s["sf_p"], s["sf_pq"])]
+        bilgi = [v for kt, s in zip(katmanlar, sonuc_k) if not kt.hukum
+                 for v in (s["sf_p"], s["sf_pq"])]
+        bilgi_rel = None
+        if onceki is not None and all(v is not None for v in olcu + onceki):
+            rel = float(max(abs(a - b) / abs(b) for a, b in
+                            zip(olcu, onceki)))
+        if (onceki_bilgi is not None and bilgi
+                and all(v is not None for v in bilgi + onceki_bilgi)):
+            bilgi_rel = float(max(abs(a - b) / abs(b) for a, b in
+                                  zip(bilgi, onceki_bilgi)))
+        gecmis.append({"n_axial": int(n_ax), "n_radial_katman": n_k,
+                       "n_elems": int(mesh.n_elems),
+                       "sf_p": [s["sf_p"] for s in sonuc_k],
+                       "sf_pq": [s["sf_pq"] for s in sonuc_k],
+                       "rel_change": rel,
+                       "rel_change_unjudged_layers": bilgi_rel})
+        son = (mesh, sinirlar, maske, sv, cz_p, cz_pq, sonuc_k)
+        onceki = olcu
+        onceki_bilgi = bilgi
+        # Kabul: tolerans altında ARDIŞIK REFINE_ONAY_ARDISIK_TUR tur
+        # (``solve_with_refinement`` ile aynı kural).
+        ardisik = ardisik + 1 if (rel is not None and rel < tol) else 0
+        if ardisik >= REFINE_ONAY_ARDISIK_TUR:
+            break
+    mesh, sinirlar, maske, sv, cz_p, cz_pq, sonuc_k = son
+    yakinsadi = bool(ardisik >= REFINE_ONAY_ARDISIK_TUR)
+
+    # Görüntü alanları: işletme hâli (P+Q) von Mises; arayüz düğümünde iki
+    # katmanın KÖTÜSÜ (emniyet katsayısı küçük olan).
+    vm = np.full(mesh.n_nodes, -np.inf)
+    sf = np.full(mesh.n_nodes, np.inf)
+    for kt, s in zip(katmanlar, sonuc_k):
+        v = s["hq"]["vm_nodal"]
+        d = s["hq"]["dugumler"]
+        vm[d] = np.maximum(vm[d], v[d])
+        if kt.material.yield_strength:
+            sf[d] = np.minimum(sf[d], kt.material.yield_strength
+                               / np.maximum(v[d], 1e-300))
+    katman_ozet = []
+    for kt, (j0, j1), s in zip(katmanlar, sinirlar, sonuc_k):
+        katman_ozet.append({
+            "role": kt.ad, "material": kt.material.name,
+            "judged": bool(kt.hukum),
+            "E_pa": float(kt.material.E), "nu": float(kt.material.nu),
+            "alpha_per_K": float(kt.alpha),
+            "thickness_m": float(kt.kalinlik_m),
+            "T_inner_K": float(kt.T_ic_K), "T_outer_K": float(kt.T_dis_K),
+            "yield_pa": kt.material.yield_strength,
+            "rib_fraction_range": (
+                None if not kt.kaburga else
+                [float(np.min(kt.phi(mesh.nodes[s["hp"]["dugumler"], 1]))),
+                 float(np.max(kt.phi(mesh.nodes[s["hp"]["dugumler"], 1])))]),
+            "j0": int(j0), "j1": int(j1),
+            "primary": {
+                "safety_factor": s["sf_p"],
+                "P_m_max_pa": s["hp"].get("P_m_maks_pa"),
+                "P_L_Pb_max_pa": s["hp"].get("P_L_Pb_maks_pa"),
+                "scl": s["hp"]["scl"]},
+            "primary_plus_secondary": {
+                "shakedown_factor": s["sf_pq"],
+                "P_L_Pb_Q_max_pa": s["hq"].get("P_L_Pb_maks_pa"),
+                "S_PS_pa": (ASME_PS_AKMA_KATI * kt.material.yield_strength
+                            if kt.material.yield_strength else None),
+                "scl": s["hq"]["scl"]},
+            "peak_von_mises_operating_pa": float(np.nanmax(
+                s["hq"]["vm_nodal"][s["hq"]["dugumler"]])),
+        })
+    # Ayrışma (P çözümü): birincil ⟷ ayrışma kipi, ortak bölge, katman
+    # başına SF_P; ölçü katmanların en büyük bağıl farkıdır.
+    ayrisma = {"uygulanir": True, "olculdu": False, "birincil_kip": kip,
+               "ayrisma_kipi": politika.get("ayrisma")}
+    try:
+        m2, _ = saint_venant_hukum_maskesi(
+            mesh, politika["ayrisma"],
+            yuklu_uclar=KATMANLI_BANTLI_UCLAR)
+        ortak = np.asarray(maske, bool) & np.asarray(m2, bool)
+        cz_a = _katmanli_coz(mesh, katmanlar, sinirlar, politika["ayrisma"],
+                             gaz_yuku, p_sogutucu_pa, T_ref_K, termal=False)
+        farklar = []
+        for kt, (j0, j1), s in zip(katmanlar, sinirlar, sonuc_k):
+            h1 = _katman_hukmu(mesh, kt, j0, j1, cz_p, ortak)
+            h2 = _katman_hukmu(mesh, kt, j0, j1, cz_a, ortak)
+            p1, p2 = h1.get("hukum_paydasi_pa"), h2.get("hukum_paydasi_pa")
+            if p1 and p2:
+                farklar.append(max(p1, p2) / min(p1, p2) - 1.0)
+        nu_min = min(float(k.material.nu) for k in katmanlar)
+        if farklar and len(farklar) == len(katmanlar):
+            fark = float(max(farklar))
+            esik = kisit_yeri_duyarlilik_esigi(nu_min)
+            ayrisma.update(olculdu=True, bagil_fark=fark, esik=float(esik),
+                           asildi=bool(fark > esik), nu=nu_min,
+                           katman_farklari=[float(v) for v in farklar])
+    except (ValueError, RuntimeError) as exc:
+        ayrisma["beyan"] = f"{type(exc).__name__}: {exc}"
+    try:
+        cz_k = _katmanli_coz(mesh, katmanlar, sinirlar,
+                             politika.get("karsilastirma") or "z_max",
+                             gaz_yuku, p_sogutucu_pa, T_ref_K, termal=False)
+        mk, _ = saint_venant_hukum_maskesi(
+            mesh, politika.get("karsilastirma") or "z_max",
+            yuklu_uclar=KATMANLI_BANTLI_UCLAR)
+        kars = []
+        for kt, (j0, j1) in zip(katmanlar, sinirlar):
+            h = _katman_hukmu(mesh, kt, j0, j1, cz_k, mk)
+            kars.append(None if not (kt.material.yield_strength
+                                     and h.get("hukum_paydasi_pa"))
+                        else float(kt.material.yield_strength
+                                   / h["hukum_paydasi_pa"]))
+        ayrisma["karsilastirma"] = {
+            "kip": politika.get("karsilastirma") or "z_max",
+            "katman_sf_p": kars,
+            "_basis": ("nozzle-exit support: not a thrust attachment; "
+                       "declared comparison, not part of the verdict")}
+    except (ValueError, RuntimeError) as exc:
+        ayrisma["karsilastirma"] = {"beyan": f"{type(exc).__name__}: {exc}"}
+    return {
+        "mesh": mesh, "sinirlar": sinirlar, "katmanlar": katman_ozet,
+        "von_mises_nodal": vm, "safety_factor_nodal": sf,
+        "saint_venant": sv, "ayrisma": ayrisma,
+        "converged": yakinsadi, "final_rel_change": rel, "tol": float(tol),
+        "history": gecmis,
+        "displacement_operating": cz_pq["u"],
+        "yuk_ozeti": cz_p["yuk_ozeti"],
+        "mesnet_eksenel_tepkisi_p_n": cz_p["mesnet_eksenel_tepkisi_n"],
+        "gaz_mesnet_tepkisi_p_n": cz_p["gaz_mesnet_tepkisi_n"],
+        "sogutucu_eksenel_p_n": cz_p["sogutucu_eksenel_n"],
+        "T_ref_K": float(T_ref_K),
+    }

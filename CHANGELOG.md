@@ -11,6 +11,172 @@ listesini taşır.
 
 ---
 
+## 3.0.6 — English
+
+*Released 2026-11-09.*
+
+HRMA 3.0.6 is a corrections release. It fixes what an engineering review of the solid, liquid and hybrid pages found after 3.0.5 (2 November), what the full regression sweeps and the release-candidate CI found while the fixes were merged, and the language and readability findings of the 3.0.5 user test. It adds no new analysis modules. The rule of this release: one quantity has one number on every panel, and a number that the model did not solve is not published.
+
+### One quantity, one number
+
+- **Hybrid impulse.** A self-pressurised N2O motor publishes its delivered impulse, burn time and average Isp from the tank blowdown solution, the curve that is flown (example: 29 948 → 26 839 N·s, burn time 10.00 → 10.41 s, average Isp 209.8 → 205.7 s). The constant-flow budget is shown alongside by name.
+- **Hybrid consumed propellant.** The curve integral and the delivery budget were two "consumed" masses; there is one now (the delivery budget, example 13.306 kg), and the flown Isp uses the same definition.
+- **Thermal exposure time.** The hybrid thermal chain (liner, wall heat load, erosion) uses the solved burn time, the same one the curve and the flight use (this change alone moves the example liner 7.404 → 7.582 mm; the Thermal panel shows the same value).
+- **Solid nozzle contour.** The convergent section starts at the case inner diameter in the response, the 3D view, STEP, CAD and FEA alike (example convergent length 28.30 → 33.30 mm).
+- **Test pressures.** Each vessel has one test pressure ladder (AIAA S-080A: MEOP → proof 1.5× → burst 2.0×; liquid chamber NASA-STD-5012C); the solid Safety tab and the deck show the same design pressure, and the safety factor is stated with the pressure it was computed at.
+- **Liquid jacket pressure drop.** One jacket pressure drop from the station march; the feed budget and the march no longer publish two values (example feed budget 5.29 → 6.13 bar, the march value).
+- **Thermal Safety panel.** Heat power, heat energy and hot-gas area are computed on the motor's own nozzle contour instead of a generic nozzle (this change alone, examples: liquid hot-gas area 0.153 → 0.280 m² and heat power 2042.6 → 2723.5 kW, hybrid 1125.7 → 1100.9 kW; risk verdicts unchanged). The hybrid motor's own thermal chain uses the same contour.
+
+### Hybrid
+
+- **Example:** sourced regression law (Carmicino et al. 2013; a 6.399e-5, n 0.554; flux 250); fuel grain 1125.0 → 662.7 mm, L/D 13.37 → 6.42, chamber diameter 84.1 → 103.2 mm. The regression citation names the pair actually used (the catalogue pair is shown separately).
+- **Mass budget:** the loaded oxidiser includes the ullage vapour (example 12.50 → 12.95 kg, of which 0.444 kg vapour), the dry mass includes the injector plate, and a "Total Propellant Mass (loaded)" row is published.
+- **Graphite nozzle:** not sized as a pressure shell; an insert in a structural housing (example wall 21.59 → 1.58 + 2.77 mm).
+- **Liner and vacuum Isp:** the liner is sized from recession and conduction allowances, also at low heat flux (example 1.28 → 7.58 mm); altitude performance uses one exit area anchored at the design ambient (example vacuum Isp 237.48 → 234.92 s).
+- **c\* efficiency:** for every propellant pair the median of the records with a valid measurement window is the declared default.
+- **Optimum O/F:** one definition (button and solver); N2O sweep range 4–12; form limits equal the server's.
+- **Validator:** 13 unsourced verdict bands removed; the C_F upper limit uses the run's own γ. The HTPB bias reason ("G_total closure") is printed only for a run that actually uses total-flux closure.
+- **O/F and Isp over time (3D view):** follow the delivered blowdown curve instead of the constant-flow axis (example: over the burn O/F falls 6.0 → 5.36 and Isp 209.7 → 199.5 s; 3.0.5 showed O/F rising to 6.17).
+- **Burn-time declaration:** the false "burn time is not read from the form" notice on every N2O hybrid is gone.
+
+### Liquid
+
+- **Motor Isp:** based on the total propellant consumption and shown next to the main thrust chamber Isp (example sea level / vacuum: engine 254.8 / 299.3 s, thrust chamber 257.1 / 301.1 s; 3.0.5 showed 257.1 / 301.1 s as the engine Isp); total flow 9.915 → 10.006 kg/s.
+- **Unsolved cooling circuit:** when the regenerative jacket has no valid solution (an F-1 class engine at the jacket model limit), the feed, cycle, pump, turbine, motor thrust, motor Isp and mass numbers that depend on it are withheld with their reason (F-1 class engine: pump discharge pressure, pump power, motor Isp and engine mass are no longer published); the thrust-chamber Isp is published with its definition.
+- **Combustion chamber standard:** NASA-STD-5012C (acceptance 1.20 × MDP, qualification and burst 1.50 × MDP; MDP from the outer shell layer); AIAA S-080 stays for tanks and lines (example: MDP 77.2 bar from the closeout layer, acceptance 92.7 bar, qualification and burst 115.8 bar; 3.0.5 based these on the 50 bar chamber pressure).
+- **Motor mass:** the fixed 15 kg "Control / Avionics" item is removed (a vehicle item), the injector mass counts only when the plate is sized (example 78.6 → 63.0 kg, T/W 32.4 → 40.4).
+- **Throttle map:** the ratio rule and the chug cycle model are separate columns (example 40–70 % UNSTABLE, as in the Analysis Centre).
+- **Default form:** the unsourced expansion-ratio pre-fill (ε = 50, separated at sea level) is removed; the solver matches the nozzle to the ambient; an empty required field is asked for by name.
+- **Excel delivery:** the "Feed system" sheet lists each line with its own items and total.
+- **Jacket and cycle:** in fuel-rich and full-flow staged combustion and in expander cycles the jacket inlet is the fuel pump discharge of the cycle (one coupled solution, one pump discharge pressure on screen); the cooling deck uses the motor's own march inputs (example: deck 3.96 ⟷ motor 6.13 bar → 6.13 bar on both); CH4 and LH2 designs compute several times faster.
+- **Separated nozzle:** a fixed nozzle that separates at sea level (Summerfield criterion) is refused by name with the largest expansion ratio that stays attached, instead of a design sized on a separated nozzle (this change alone: ε 50 at 30 bar had been sized to Isp 22 s and a 597 kg engine).
+
+### Solid
+
+- **Grain stress:** at sharp port corners (star, finocyl, slotted) where the acceptance quantity does not converge with the mesh, no strain margin is published (reason shown); the case strain verdict replaces the unsourced crack-risk classes (NASA SP-8073).
+- **Nozzle mass:** from the drawn contour, as in CAD (example nozzle 379 → 65 g, motor dry mass 3.734 → 3.420 kg); the sea-level Isp is the same nozzle at 101.325 kPa.
+- **Removed field:** "Star fillet radius" was read by no calculation and is removed; old projects open with a named warning.
+- **Validation panel:** compares with the motor's own thrust curve; the TOTAL IMPULSE card is not rounded to two digits (3.0 kN·s → 2957 N·s).
+- **Number of slots:** the box accepts 2–16, the same range as the solver.
+- **Saved projects:** solver-filled component masses no longer load as "your edits"; Calculate refreshes them (an opened 3.0.5 example showed a total dry mass of 3.733 kg against the solver's 3.420 kg).
+
+### Safety, structure and thermal
+
+- **Comprehensive Safety:** an incomplete motor assessment is NOT EVALUATED (with the number of axes evaluated) instead of a green LOW.
+- **Structural FEA:** the two-layer liquid wall is analysed layer by layer (this change alone: example lowest SF 1.93 → 2.59, liner governs); the support is at the forward body.
+- **Solid case:** no burst pressure for a composite case (reason shown); no safety factor printed under a withdrawn verdict.
+
+### Flight, trajectory and exports
+
+- **Hybrid flight mass:** the unburned grain strip and the propellant left in the tank fly with the vehicle; the lift-off mass equals the motor's total mass (this change alone, on a test motor of the engineering review: apogee 162 449 → 99 721 m, T/W 2.686 → 2.371).
+- **OpenRocket .eng:** the propellant mass is the mass burned during the firing; the rest stays in the loaded mass (example propellant 14.556 → 13.306 kg, 1.694 kg stays in the loaded mass).
+- **Load factor:** the sensed acceleration (≈ +1 g on the pad); 6-DOF thrust corrected for altitude; trajectory captions describe the plotted cells.
+- **6-DOF default body:** never narrower than the motor envelope (solid example Ø100 → 116 mm).
+- **Parametric sweep:** a sweep point gives the same apogee as Calculate for the same motor and vehicle.
+- **No flight for an unsolved engine:** the reason is shown ("the cooling circuit was not solved") instead of a generic refusal.
+- **Complete package:** when the CAD generator refuses a geometry the manifest says FAILED with the reason, and the STL refusal shows its reason and range on screen.
+- **Projects:** a saved project keeps its flight setup; an opened project does not carry the previous project's state.
+
+### Interface language and readability
+
+- No HTTP codes, raw keys or endpoint names in user texts; help notes no longer quote API field names or unsourced "typical values" (several hundred notes on four pages).
+- Charts no longer overflow their panels; titles follow a live language switch.
+- Turkish screens: remaining English solver sentences, material keys and status codes translated; one Turkish term per English term ("nozul", "Yarıklı", "AĞ").
+- Turkish PDF reports in the interface language with Turkish fonts and decimal commas.
+- Hybrid page: Time-Resolved badges show named quantities instead of field names; the optimum O/F chart redraws on a live language switch.
+- Liquid page: result cards no longer break words letter by letter; small engines show masses and volumes with at least three significant digits.
+- Server messages: the motor validator's safety warnings are shown in full in both languages; a value withheld by the cooling-circuit gate is printed as "not published" in the PDF; FEA badges use language-aware capitals ("HİBRİT").
+
+### Updates, licence and guide
+
+- **macOS update:** the old version is not opened while an update is installing; a real progress window; notifications in the interface language.
+- **Licence:** HRMA is distributed under GPL-3.0-or-later (it ships the GPLv3-licensed RocketCEA library); licence text and third-party notices are in the package.
+- **User guide:** TR and EN updated for 3.0.6, with a "Changes in 3.0.6" section and new screenshots.
+- **Known limitations:** a number box follows the operating system's decimal separator (the value is read correctly); the station march is not extended to thick walls (the declared lumped estimate is used); the liquid page designs at sea level, so an upper-stage nozzle that separates at sea level (for example ε 61) is refused by name; a vacuum or altitude design ambient is planned.
+
+## 3.0.6 — Türkçe
+
+*Yayın tarihi: 2026-11-09.*
+
+HRMA 3.0.6 bir düzeltme sürümüdür. 3.0.5'ten sonra katı, sıvı ve hibrit sayfaların mühendislik incelemesinin (2 Kasım) bulduklarını, düzeltmeler birleştirilirken tam regresyon süpürmelerinin ve yayın adayı CI'ının bulduklarını, 3.0.5 kullanıcı testinin dil ve okunabilirlik bulgularını düzeltir. Yeni analiz modülü eklemez. Bu sürümün kuralı: bir büyüklüğün her panelde tek sayısı vardır ve modelin çözmediği sayı yayımlanmaz.
+
+### Tek büyüklük, tek sayı
+
+- **Hibrit impuls.** Kendinden basınçlı N2O motoru teslim impulsunu, yanma süresini ve ortalama Isp'yi tank boşalma çözümünden, yani uçulan eğriden yayımlar (örnek: 29 948 → 26 839 N·s, yanma süresi 10,00 → 10,41 s, ortalama Isp 209,8 → 205,7 s). Sabit debili bütçe adıyla yanında gösterilir.
+- **Hibrit harcanan itici.** Eğri integrali ile teslim bütçesi iki ayrı "harcanan" kütleydi; artık tek sayı var (teslim bütçesi, örnek 13,306 kg) ve uçan Isp aynı tanımı kullanır.
+- **Isıl maruziyet süresi.** Hibrit ısıl zinciri (astar, cidar ısı yükü, erozyon) çözülmüş yanma süresini kullanır; eğri ve uçuşla aynı süre (yalnız bu değişiklik örnek astarı 7,404 → 7,582 mm yapar; Isıl panel aynı değeri gösterir).
+- **Katı nozul konturu.** Yakınsak bölüm yanıtta, 3B görünümde, STEP'te, CAD'de ve FEA'da aynı biçimde kasa iç çapından başlar (örnek yakınsak boy 28,30 → 33,30 mm).
+- **Test basınçları.** Her kabın tek test basıncı merdiveni var (AIAA S-080A: MEOP → deneme 1,5× → patlama 2,0×; sıvı yanma odası NASA-STD-5012C). Katı Güvenlik sekmesi ile güverte aynı tasarım basıncını gösterir; emniyet katsayısı hesaplandığı basınçla birlikte yazılır.
+- **Sıvı ceket basınç düşümü.** İstasyon marşından tek ceket basınç düşümü; besleme bütçesi ile marş artık iki değer yayımlamaz (örnek besleme bütçesi 5,29 → 6,13 bar, marşın değeri).
+- **Termal Güvenlik paneli.** Isı gücü, ısı enerjisi ve sıcak gaz yüzeyi jenerik bir nozul yerine motorun kendi nozul konturunda hesaplanır (yalnız bu değişiklik, örnekler: sıvıda sıcak gaz yüzeyi 0,153 → 0,280 m² ve ısı gücü 2042,6 → 2723,5 kW, hibritte 1125,7 → 1100,9 kW; risk hükümleri değişmedi). Hibrit motorun kendi ısıl zinciri de aynı konturu kullanır.
+
+### Hibrit
+
+- **Örnek:** kaynaklı regresyon bağıntısı (Carmicino ve ark. 2013; a 6,399e-5, n 0,554; akı 250); yakıt bloğu 1125,0 → 662,7 mm, L/D 13,37 → 6,42, oda çapı 84,1 → 103,2 mm. Regresyon künyesi gerçekten kullanılan çiftin kaynağını söyler (katalog çifti ayrıca gösterilir).
+- **Kütle bütçesi:** yüklü oksitleyici ullage buharını (örnek 12,50 → 12,95 kg, 0,444 kg'ı buhar), kuru kütle enjektör plakasını içerir; "Toplam İtici Kütlesi (yüklü)" satırı yayımlanır.
+- **Grafit nozul:** basınç kabuğu gibi boyutlanmaz; yapısal bir gövdeye oturan ek parça (örnek cidar 21,59 → 1,58 + 2,77 mm).
+- **Astar ve vakum Isp'si:** astar aşınma ve iletim paylarından boyutlanır, düşük ısı akısında da (örnek 1,28 → 7,58 mm); irtifa performansı tasarım ortamına sabitlenmiş tek çıkış alanını kullanır (örnek vakum Isp 237,48 → 234,92 s).
+- **c\* verimi:** her itici çiftinde geçerli ölçüm penceresi olan kayıtların ortancası beyanlı varsayılandır.
+- **Optimum O/F:** tek tanım (düğme ve çözücü); N2O tarama aralığı 4–12; form sınırları sunucuyla aynı.
+- **Doğrulayıcı:** kaynaksız 13 hüküm bandı kalktı; C_F üst sınırı koşunun kendi γ'sıyla. HTPB yanlılık gerekçesi ("G_total kapanışı") yalnız gerçekten toplam akı kapanışı kullanan koşuda basılır.
+- **Zamanla O/F ve Isp (3B görünüm):** sabit debi ekseni yerine teslim edilen boşalma eğrisini izler (örnek: yanma boyunca O/F 6,0 → 5,36, Isp 209,7 → 199,5 s düşer; 3.0.5'te O/F 6,17'ye yükseliyordu).
+- **Yanma süresi beyanı:** her N2O hibritte çıkan yanlış "yanma süresi formdan okunmaz" uyarısı kalktı.
+
+### Sıvı
+
+- **Motor Isp'si:** toplam itici tüketimine göredir ve ana itki odası Isp'sinin yanında gösterilir (örnek deniz seviyesi / vakum: motor 254,8 / 299,3 s, itki odası 257,1 / 301,1 s; 3.0.5 motor Isp'si olarak 257,1 / 301,1 s gösteriyordu); toplam debi 9,915 → 10,006 kg/s.
+- **Çözülmeyen soğutma devresi:** rejeneratif ceketin geçerli çözümü yoksa (ceket model sınırındaki F-1 sınıfı motor) ona bağlı besleme, çevrim, pompa, türbin, motor itkisi, motor Isp'si ve kütle sayıları nedenleriyle bekletilir (F-1 sınıfı motor: pompa çıkış basıncı, pompa gücü, motor Isp'si ve motor kütlesi artık yayımlanmaz); itki odası Isp'si tanımıyla yayımlanır.
+- **Yanma odası standardı:** NASA-STD-5012C (kabul 1,20 × MDP, kalifikasyon ve patlama 1,50 × MDP; MDP dış kabuk katmanından); AIAA S-080 tanklar ve hatlar için kalır (örnek: dış kabuk katmanından MDP 77,2 bar, kabul 92,7 bar, kalifikasyon ve patlama 115,8 bar; 3.0.5 bunları 50 bar oda basıncından kuruyordu).
+- **Motor kütlesi:** sabit 15 kg "Kumanda / Aviyonik" kalemi kalktı (araç kalemi); enjektör kütlesi yalnız plaka boyutlandıysa sayılır (örnek 78,6 → 63,0 kg, T/W 32,4 → 40,4).
+- **Kısma haritası:** oran kuralı ve chug çevrim modeli ayrı sütunlar (örnek %40–%70 KARARSIZ; Analiz Merkezi ile aynı).
+- **Varsayılan form:** kaynaksız genleşme oranı ön dolgusu (ε = 50, deniz seviyesinde ayrılıyordu) kalktı; çözücü nozulu ortama eşler; boş zorunlu alan adıyla istenir.
+- **Excel teslimatı:** "Feed system" sayfası her hattı kendi kalemleri ve toplamıyla listeler.
+- **Ceket ve çevrim:** yakıt-zengin ve tam akışlı kademeli yanmalı çevrimlerde ve genleşmeli çevrimde ceket girişi çevrimin yakıt pompası çıkışıdır (tek eşli çözüm, ekranda tek pompa çıkış basıncı); soğutma güvertesi motorun kendi marş girdilerini kullanır (örnek: güverte 3,96 ⟷ motor 6,13 bar → ikisinde 6,13 bar); CH4 ve LH2 tasarımları birkaç kat hızlı hesaplanır.
+- **Ayrılan nozul:** deniz seviyesinde ayrılan sabit nozul (Summerfield ölçütü) ayrılmış nozulla boyutlanmış bir tasarım yerine, akışın yapışık kaldığı en büyük genleşme oranıyla birlikte adıyla reddedilir (yalnız bu değişiklik: 30 bar'da ε 50, Isp 22 s ve 597 kg motorla boyutlanıyordu).
+
+### Katı
+
+- **Tane gerilmesi:** keskin port köşelerinde (yıldız, finocyl, yarıklı) kabul büyüklüğü ağla yakınsamıyorsa gerinim payı yayımlanmaz (nedeni gösterilir); kaynaksız çatlak riski sınıfları yerine gerinim kapasitesi hükmü (NASA SP-8073).
+- **Nozul kütlesi:** CAD'deki gibi çizilen konturdan (örnek nozul 379 → 65 g, motor kuru kütlesi 3,734 → 3,420 kg); deniz seviyesi Isp'si aynı nozulun 101,325 kPa'daki değeridir.
+- **Kaldırılan alan:** "Yıldız köşe yarıçapı" hiçbir hesapta okunmuyordu, kalktı; eski projeler adlı uyarıyla açılır.
+- **DOĞRULAMA paneli:** motorun kendi itki eğrisiyle kıyaslar; TOPLAM İMPULS kartı iki basamağa yuvarlanmaz (3,0 kN·s → 2957 N·s).
+- **Yarık sayısı:** kutu 2–16 kabul eder, çözücüyle aynı aralık.
+- **Kayıtlı projeler:** çözücünün doldurduğu bileşen kütleleri açılışta "sizin değişikliğiniz" sayılmaz; Hesapla onları yeniler (açılan 3.0.5 örneği Toplam Kuru Kütle 3,733 kg gösteriyordu, çözücü 3,420 kg).
+
+### Güvenlik, yapı ve ısıl
+
+- **Kapsamlı Güvenlik:** eksik motor değerlendirmesi yeşil DÜŞÜK yerine DEĞERLENDİRİLMEDİ (kaç eksenin değerlendirildiğiyle).
+- **Yapısal FEA:** iki katmanlı sıvı cidar katman katman çözülür (yalnız bu değişiklik: örnek en küçük EK 1,93 → 2,59, astar yönetir); mesnet ön gövdede.
+- **Katı kasa:** kompozit kasada patlama basıncı yayımlanmaz (nedeni gösterilir); geri çekilmiş hükmün altında emniyet katsayısı basılmaz.
+
+### Uçuş, yörünge ve dışa aktarım
+
+- **Hibrit uçuş kütlesi:** yanmayan tane şeridi ve tankta kalan itici araçla uçar; kalkış kütlesi motorun toplam kütlesine eşittir (yalnız bu değişiklik, mühendislik incelemesinin bir deneme motorunda: apoje 162 449 → 99 721 m, T/W 2,686 → 2,371).
+- **OpenRocket .eng:** itici kütlesi yanma boyunca harcanan kütledir; kalanı yüklü kütlede (örnek itici 14,556 → 13,306 kg, 1,694 kg yüklü kütlede kalır).
+- **Yük çarpanı:** algılanan ivme (rampada yaklaşık +1 g); 6-DOF itkisi irtifaya göre düzeltilir; yörünge açıklamaları çizilen hücreleri anlatır.
+- **6-DOF varsayılan gövdesi:** motor zarfından dar olmaz (katı örnek Ø100 → 116 mm).
+- **Parametrik tarama:** tarama noktası aynı motor ve araç için Hesapla ile aynı apojeyi verir.
+- **Çözülmemiş motorda uçuş yok:** genel bir ret yerine neden gösterilir ("soğutma devresi çözülmedi").
+- **Komple paket:** CAD üreticisi bir geometriyi reddettiğinde manifest nedeniyle birlikte FAILED der; STL reddi nedenini ve aralığını ekranda gösterir.
+- **Projeler:** kaydedilen proje uçuş kurulumunu saklar; açılan proje önceki projenin durumunu taşımaz.
+
+### Arayüz dili ve okunabilirlik
+
+- Kullanıcı metinlerinde HTTP kodu, ham anahtar ya da uç adı yok; ipuçları API alan adı ya da kaynaksız "tipik değer" anmaz (dört sayfada birkaç yüz ipucu).
+- Grafikler panellerinden taşmaz; başlıklar canlı dil geçişini izler.
+- Türkçe ekranlar: kalan İngilizce çözücü cümleleri, malzeme anahtarları ve durum kodları çevrildi; her İngilizce terime tek Türkçe karşılık ("nozul", "Yarıklı", "AĞ").
+- Türkçe PDF raporları arayüz dilinde, Türkçe yazı tipi ve ondalık virgülle.
+- Hibrit sayfası: Zaman Çözümlü rozetleri alan adı yerine adlı büyüklükleri gösterir; optimum O/F grafiği canlı dil geçişinde yeniden çizilir.
+- Sıvı sayfası: sonuç kartlarında sözcükler harf harf bölünmez; küçük motorlarda kütle ve hacim en az üç anlamlı basamakla gösterilir.
+- Sunucu iletileri: motor doğrulayıcısının emniyet uyarıları iki dilde tam metinle gösterilir; soğutma devresi kapısının beklettiği değer PDF'te "yayımlanmadı" diye basılır; FEA rozetlerinde büyük harf dile duyarlıdır ("HİBRİT").
+
+### Güncelleme, lisans ve kılavuz
+
+- **macOS güncellemesi:** kurulum sürerken eski sürüm açılmaz; gerçek ilerleme penceresi; bildirimler arayüz dilinde.
+- **Lisans:** HRMA GPL-3.0-or-later ile dağıtılır (GPLv3 lisanslı RocketCEA kütüphanesini içerir); lisans metni ve üçüncü taraf bildirimleri pakettedir.
+- **Kullanma kılavuzu:** TR ve EN 3.0.6'ya göre güncellendi; "3.0.6 Sürümündeki Değişiklikler" bölümü ve yeni ekran görüntüleriyle.
+- **Bilinen sınırlamalar:** sayı kutusu işletim sisteminin ondalık ayracını izler (değer doğru okunur); istasyon marşı kalın cidara genişletilmedi (beyanlı toplu kestirim kullanılır); sıvı sayfası deniz seviyesinde tasarlar, bu yüzden deniz seviyesinde ayrılan bir üst kademe nozulu (ör. ε 61) adıyla reddedilir; vakum ya da irtifa tasarım ortamı planlandı.
+
 ## 3.0.5 — English
 
 *Released 2026-10-28.*

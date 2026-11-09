@@ -109,7 +109,11 @@ KATI_GOVDE = {
 }
 SIVI_TABAN = {
     'oxidizer_type': 'lox', 'thrust': 10000, 'chamber_pressure': 100,
-    'mixture_ratio': 2.5, 'nozzle_expansion_ratio': 50,
+    # V306/SIVI-CEKET-B kalem 5: eski form ön dolgusu ε 50 (kaynaksız; UÇUŞ-KÜTLE
+    # formdan kaldırdı) 100 bar'da deniz seviyesinde ayrılıyor (Summerfield;
+    # ayrılmayan en büyük ε 26,86) ve uç artık o tasarımı adlı retle
+    # yayımlamıyor. Gövde ayrılmayan bölgedeki 20 ile kurulur.
+    'mixture_ratio': 2.5, 'nozzle_expansion_ratio': 20,
     'max_burn_duration': 400, 'combustion_efficiency': 97,
     'contraction_ratio': 4, 'characteristic_length': 1.2,
     'cooling_type': 'regenerative', 'injector_type': 'impinging',
@@ -831,6 +835,13 @@ URUN_KATLI_ALANLARI = [
     # kutusunda) ve SIVI-CIDAR termal paneli makine alanları (KILAVUZ P4;
     # üç kapalı "Teknik ayrıntı" kutusu). Hepsi varsayılan KAPALI.
     ("safety_panel.js", 1, ('style',)),
+    # V306/GÜVENLİK (NR-4, 2 Kas): Basınçlı Kap Özeti künyeleri, uyum
+    # beyan kodu ve risk künyesi kapalı "Teknik ayrıntı" kutusunda
+    # (safety_panel.js addBasisRow / complianceBadges /
+    # partialRiskBlock). Varsayılan KAPALI.
+    ("safety_panel.js", 2, ('style',)),
+    ("safety_panel.js", 3, ('data-safety-field', 'style')),
+    ("safety_panel.js", 4, ('data-safety-basis', 'style')),
     ("thermal_panel.js", 1, ('class', 'style')),
     ("thermal_panel.js", 2, ('class', 'style')),
     ("thermal_panel.js", 3, ('class', 'style')),
@@ -888,6 +899,13 @@ URUN_KATLI_ALANLARI = [
     # onemli2-sivi a2 turunda eklendi: bekçi main birleşmesinden beri
     # kırmızıydı (kulvar dışı kök, kulvar-taban kıyasında yakalandı).
     ("liquid.html", 1, ()),
+    # V306/DİL-SIVI (9 Kas, M-SIVI-8 + NR-20): TR kartlarda uzun çözücü
+    # dayanak cümleleri (Isıl Koruma kartı, tank künyeleri, kriyojenik
+    # uygunluk hükmü) kapalı <details> içinde; kart dar sütunda harf harf
+    # kırılmıyor. Üçü de varsayılan KAPALI (``open`` yok; ikinci iddia ölçer).
+    ("liquid.html", 2, ()),
+    ("liquid.html", 3, ('data-liq-field', 'style')),
+    ("liquid.html", 4, ('data-liq-field', 'style')),
     ("solid.html", 1, ()),
     ("solid.html", 2, ('style',)),
     ("solid.html", 3, ()),

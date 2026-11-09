@@ -235,8 +235,11 @@ class TestLuleKonturuYayimi:
 
     def test_kati_konturu(self, kati_yaniti):
         # Katı üst düzeyi MM yayımlar; kontur yine METRE olmalı.
+        # V306/KATI-KALAN (kalem 2): yakınsak giriş KASA İÇ çapındadır
+        # (CAD/STEP ile tek kontur); üst düzey 'chamber_diameter' katıda
+        # tane dış çapıdır. Kasa iç çapı motor_geometry'de (METRE).
         _kontur_dogrula(kati_yaniti,
-                        kati_yaniti['chamber_diameter'] / 1000.0,
+                        kati_yaniti['motor_geometry']['chamber_diameter'],
                         kati_yaniti['exit_diameter'] / 1000.0,
                         kati_yaniti['throat_diameter'] / 1000.0)
 

@@ -134,6 +134,17 @@ class TestP11B301MotorunKendiHukmu:
                                                   kars):
         """Hüküm rengi KÖTÜMSER: yayımlanan en kötü sayıdan verilir."""
         e = _ekran(tmp_path, fea_yaniti)
+        # V306/KATI-MODEL (M-KATI-10): köprü hükmü GERİ ÇEKTİYSE köprünün
+        # emniyet katsayısı manşette basılmaz; yerine geri çekme rozeti
+        # (uyarı rengi) durur — yeşil yine basılmaz.
+        if ((fea_yaniti['fea'].get('meta') or {}).get('hukum')
+                or {}).get('verildi') is False:
+            assert e['sf_rozet_turu'] is None
+            assert re.search(r'NO SAFETY FACTOR PUBLISHED|EMNİYET KATSAYISI '
+                             r'YAYIMLANMADI', e['rozet']), e['rozet'][:300]
+            assert e['motor_rozeti_turu'] is not None, (
+                'motorun kendi katsayısı için ayrı rozet basılmıyor')
+            return
         assert e['sf_rozet_turu'] is not None, 'SF rozeti bulunamadı'
         assert e['sf_rozet_turu'] != 'ok', (
             'motorun katsayısı ' + repr(kars['motor_safety_factor'])
@@ -146,6 +157,11 @@ class TestP11B301MotorunKendiHukmu:
         """Derate edilmemiş akma künyeyi açmadan görülmeli."""
         if kars.get('kopru_akma_derate_edildi') is not False:
             pytest.skip('bu koşumda akma derate edilmiş; kalem dışı dal')
+        if ((fea_yaniti['fea'].get('meta') or {}).get('hukum')
+                or {}).get('verildi') is False:
+            # V306/KATI-MODEL (M-KATI-10): hüküm geri çekildiğinde köprünün
+            # katsayısı basılmaz, dolayısıyla onun akma niteliği de yoktur.
+            pytest.skip('köprü hükmü geri çekildi: köprü katsayısı basılmıyor')
         e = _ekran(tmp_path, fea_yaniti)
         assert e['rozette_akma_niteligi'], (
             'rozet satırı akmanın oda sıcaklığı değeri olduğunu '
@@ -168,6 +184,10 @@ class TestP11B301MotorunKendiHukmu:
         import copy
         kopya = copy.deepcopy(fea_yaniti)
         kopya['fea']['meta'].pop('motor_sf_karsilastirmasi', None)
+        # V306/GÜVENLİK (NR-18): uç motorun istasyon kıyasını ayrı blokta
+        # da yayımlar (fea.motor_station_comparison); 'karşılaştırma
+        # gelmezse' senaryosu ikisinin de yokluğudur.
+        kopya['fea'].pop('motor_station_comparison', None)
         e = _ekran(tmp_path, kopya)
         assert e['motor_rozeti_turu'] is None, (
             'karşılaştırma bloğu yokken motor rozeti basılıyor (uydurma)')
