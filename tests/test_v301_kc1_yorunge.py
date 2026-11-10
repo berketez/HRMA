@@ -60,7 +60,10 @@ def _kati_sayfa_govdesi(r):
         drag_coefficient=0.5,
         reference_area=round(math.pi * (d / 2000) ** 2, 5),
         thrust_curve={'time': tc['time'], 'thrust': tc['thrust']},
-        isp=r['isp_sea_level'],
+        # V306/KATI-MODEL (M-KATI-20): eğrinin ortamındaki Isp
+        # (specific_impulse); isp_sea_level artık aynı lülenin deniz
+        # seviyesi Isp'si (test irtifası verilince eğriyle tutmaz).
+        isp=r['specific_impulse'],
         nozzle_exit_area=math.pi * (r['exit_diameter'] / 2000.0) ** 2,
         thrust_reference_pressure=(
             r['nozzle_design']['performance']['ambient_pressure'] * 1e5))
@@ -83,7 +86,9 @@ def test_kati_sayfa_govdesi_vakum_isp_ve_ortalama_itki_gondermez():
     assert 'cr.isp_vacuum' not in govde
     assert 'cr.average_thrust' not in govde
     assert 'thrust_curve: trCurve' in govde
-    assert 'cr.isp_sea_level' in govde
+    # V306/KATI-MODEL (M-KATI-20): eğriyle tutarlı Isp specific_impulse.
+    assert 'cr.specific_impulse' in govde
+    assert 'cr.isp_sea_level' not in govde
     assert 'body.nozzle_exit_area' in govde
     assert 'body.thrust_reference_pressure' in govde
     # Ret cümlesi ortak çözücüden geçer (ham makine kodu değil).
@@ -135,10 +140,13 @@ def test_sivi_sayfa_govdesi_deniz_seviyesi_ciftini_ve_motor_kutlelerini_kullanir
     assert 'liquidTrajectorySeed(cr);' in govde
     tohum = _islev(_oku(LIQUID), 'liquidTrajectorySeed')
     assert 'FlightHandoff.vehicleFor(cr)' in tohum
-    assert "yaz('traj_final_mass', kuru);" in tohum
-    assert ("yaz('traj_initial_mass', (kuru !== null && poz(arac.propellant_mass))\n"
-            "                ? kuru + arac.propellant_mass : null);") in tohum
-    assert "el.dataset.userOverride === 'true'" in tohum
+    # V306/UÇUŞ NR-13/NR-10: yazma ortak yardımcıdan (FlightHandoff.
+    # seedField; kullanıcının yazdığı ezilmez, farkı alanın altında yazar).
+    # Son = araç engine_inert_mass; ilk = ALANDA KALAN kuru + itici (kullanıcı
+    # kuru kütleye gövde eklediyse bütçe yine tutar).
+    assert "FH.seedField(sonEl,\n                (arac && poz(arac.engine_inert_mass)) ? arac.engine_inert_mass : null" in tohum
+    assert ("FH.seedField(ilkEl, (arac && poz(kuruAlan) && poz(arac.propellant_mass))\n"
+            "                ? kuruAlan + arac.propellant_mass : null") in tohum
     assert 'liquidTrajectorySeed(results);' in _islev(_oku(LIQUID), 'displayResults')
     assert 'HRMAReject.metni(govde, resp.status)' in govde
 
@@ -148,8 +156,11 @@ def test_sivi_tutarli_govde_200(istemci):
     form = {k: v for k, v in json.load(open(os.path.join(
         FIKSTUR, 'sivi_yuk_form_en.json'), encoding='utf-8')).items()
         if v is not None}
+    # V306/SIVI-CEKET-B kalem 5: fikstürün ε 50'si (eski form ön dolgusu)
+    # 100 bar'da deniz seviyesinde ayrılıyor; uç o tasarımı adlı retle
+    # yayımlamıyor. Gövde ayrılmayan ε 20 ile kurulur.
     form.update(thrust=10000, chamber_pressure=100, mixture_ratio=2.5,
-                max_burn_duration=30)
+                max_burn_duration=30, nozzle_expansion_ratio=20)
     r = istemci.post('/calculate_liquid', json=form)
     assert r.status_code == 200
     j = r.get_json()

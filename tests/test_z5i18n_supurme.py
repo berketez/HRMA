@@ -39,9 +39,12 @@ if str(pathlib.Path(__file__).resolve().parent) not in sys.path:
 JS = REPO / 'hrma' / 'static' / 'js'
 TPL = REPO / 'hrma' / 'templates'
 
+#: V306/RAPOR-DİL (4 Kas): PDF raporunun sözlüğü ``i18n_report.js`` de
+#: aynı kanona (terimler, aynı İngilizceye tek Türkçe, yüzde öneki) bağlıdır;
+#: ekran sayfaları yüklemez ama kullanıcıya görünen metindir.
 Z5_SOZLUK_YEDILISI = ('i18n_advanced.js', 'i18n_charts.js', 'i18n_common.js',
                     'i18n_formulas.js', 'i18n_launch_site.js',
-                    'i18n_pages.js', 'i18n_shell.js')
+                    'i18n_pages.js', 'i18n_shell.js', 'i18n_report.js')
 
 needs_node = pytest.mark.skipif(shutil.which('node') is None,
                                 reason='node kurulu değil')

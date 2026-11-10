@@ -62,8 +62,17 @@ GEO_TAM = {
 #: (p1a rapor §12). Tolerans DEĞİŞMEDİ.
 #:   O/F 6,839402633580414 -> 7,055120388715818;
 #:   Isp 232,69943859344866 -> 229,5180043954888 s
-OPT_SAGLIKLI_OF = 7.055120388715818
-OPT_SAGLIKLI_ISP = 229.5180043954888
+#: ÇAPA YENİLENDİ — V306/HİBRİT-SAYI kalem 1 (M-HIBRIT-5, optimum O/F tek
+#: tanım): uç artık çözücüyle AYNI tanımla arar — tasarım ortam basıncında
+#: ideal Isp; bu gövde ortam basıncı göndermediği için /calculate ile aynı
+#: varsayılan (1,0 bar, künyeli defaults_applied) geçerli (eski: ISA deniz
+#: seviyesi 1,01325 bar çapası); N2O/HTPB arama bandı tek O/F bandı 4-12
+#: (eski 1-10). Ölçüm docs/scofield/raw/OH/V306/hibrit-sayi/RAPOR.md
+#: (kalem 1). Tolerans DEĞİŞMEDİ.
+#:   O/F 7,055120388715818 -> 7,055728090000841;
+#:   Isp 229,5180043954888 -> 229,9182755533293 s
+OPT_SAGLIKLI_OF = 7.055728090000841
+OPT_SAGLIKLI_ISP = 229.9182755533293
 
 
 @pytest.fixture(scope='module')

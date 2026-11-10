@@ -140,15 +140,39 @@ class TestNozzleWall:
             assert leaf(high, path + '.wall_safety_factor') == pytest.approx(6.0), path
 
     def test_wall_thickness_scales_with_safety_factor(self, calc):
-        """t = SF·p·r/σ olduğundan SF üç katına çıkınca kalınlık üç katına çıkar."""
+        """t = SF·p·r/σ: GERİLME yönetirken basınç taşıyan kalınlık SF ile
+        orantılıdır; imalat tabanı yönetirken orantı beklenmez ve neden
+        yayımlanır.
+
+        V306/HİBRİT-ÇAPRAZ (kalem 2): grafit lüle = ek (erozyon payı, SF'den
+        bağımsız) + yapısal gövde (gerilme kuralı, 1 mm imalat tabanı). Eski
+        beklenti toplam çizilen eti (ek + gövde) SF ile orantılı sayıyordu;
+        ÖLÇÜLDÜ (taban 700a67586, HYBRID_BASE): SF 2'de gövde kuralı
+        0,665 mm ister, taban 1 mm'yi verir (yöneten: asgari kalınlık); SF 4
+        ve 6'da gövde 1,3304 / 1,9956 mm (yöneten: gerilme, oran 1,5).
+        """
         low = calc(safety_factor=2.0)
+        mid = calc()                       # HYBRID_BASE: SF 4,0
         high = calc(safety_factor=6.0)
+        sa = '.motor.structural_analysis.nozzle_analysis'
+        assert leaf(mid, sa + '.governing_condition') == 'stress'
+        assert leaf(high, sa + '.governing_condition') == 'stress'
+        assert leaf(low, sa + '.governing_condition') == 'minimum_thickness'
+        assert 'HRMA choice' in leaf(low, sa + '.governing_condition_basis')
         for path in NOZZLE_GEOMETRY_PATHS:
-            t_low = leaf(low, path + '.wall_thickness')
-            t_high = leaf(high, path + '.wall_thickness')
-            assert t_high == pytest.approx(3.0 * t_low, rel=1e-6), (
-                f'{path}: SF 2->6 kalınlığı {t_low:.4f} -> {t_high:.4f} mm '
-                f'yaptı, 3 kat bekleniyordu')
+            g_mid = leaf(mid, path + '.nozzle_construction.housing.thickness_mm')
+            g_high = leaf(high, path
+                          + '.nozzle_construction.housing.thickness_mm')
+            g_low = leaf(low, path + '.nozzle_construction.housing.thickness_mm')
+            assert g_high == pytest.approx(1.5 * g_mid, rel=1e-6), (
+                f'{path}: gerilme yönetirken SF 4->6 gövdeyi {g_mid:.4f} -> '
+                f'{g_high:.4f} mm yaptı, 1,5 kat bekleniyordu')
+            # Taban yönetirken kalınlık tabandır, SF ile ölçeklenmez.
+            assert g_low == pytest.approx(1.0, rel=1e-12), (path, g_low)
+            # Çizilen et = ek + gövde (ek SF'den bağımsız).
+            ek = leaf(low, path + '.nozzle_construction.insert.thickness_mm')
+            assert leaf(low, path + '.wall_thickness') == pytest.approx(
+                ek + g_low, rel=1e-12)
 
     def test_wall_material_reaches_the_nozzle(self, calc):
         """Lüle malzemesi yoğunluk ve akma dayanımını gerçekten değiştirmeli."""
@@ -258,12 +282,49 @@ class TestStructuralSafetyFactorWiring:
         '.motor.structural_analysis.fastener_analysis.bolt_safety_factor',
     )
 
+    #: V306/HİBRİT-ÇAPRAZ (kalem 2): her bileşen İKİ büyüklük yayımlar —
+    #: hedef (kullanıcının tasarım SF'si) ve kazanılmış (seçilen/boyutlanan
+    #: kalınlığın gerçek SF'si) + yöneten koşul + hüküm.
+    COMPONENT_PATHS = (
+        '.motor.structural_analysis.nozzle_analysis',
+        '.motor.structural_analysis.end_cap_analysis',
+        '.motor.structural_analysis.fastener_analysis',
+        '.motor.structural_analysis.chamber_analysis',
+    )
+
     def test_one_design_safety_factor_for_every_component(self, calc):
+        """Hedef girdiyi izler; kazanılmış ≥ hedef; yöneten koşul yayımlanır.
+
+        Eski beklenti ``nozzle_analysis.safety_factor == hedef`` idi; ÖLÇÜLDÜ
+        (taban 700a67586): SF 2'de grafit lülenin gövdesi 1 mm imalat
+        tabanında ve alan 3,0066 (kazanılmış) taşıyordu — tek alanda iki
+        büyüklük. ``safety_factor`` kazanılmıştır; hedef kendi alanında.
+        """
+        for sf in (2.0, 6.0):
+            sonuc = calc(safety_factor=sf)
+            for path in self.COMPONENT_PATHS:
+                assert leaf(sonuc, path + '.design_safety_factor_target') \
+                    == pytest.approx(sf), path
+                kaz = leaf(sonuc, path + '.earned_safety_factor')
+                assert kaz >= sf * (1.0 - 1e-9), (path, kaz, sf)
+                assert leaf(sonuc, path + '.governing_condition') in (
+                    'stress', 'minimum_thickness', 'user_wall',
+                    'standard_size'), path
+                assert leaf(sonuc, path + '.safety_factor_verdict') == 'PASS'
+            na = '.motor.structural_analysis.nozzle_analysis'
+            assert leaf(sonuc, na + '.safety_factor') == leaf(
+                sonuc, na + '.earned_safety_factor')
+            assert leaf(sonuc, '.motor.structural_analysis.safety_analysis.'
+                        'safety_factors.nozzle') == leaf(
+                sonuc, na + '.earned_safety_factor')
+            # Cıvata katsayısı alanı tasarım GİRDİSİDİR (adıyla).
+            fa = '.motor.structural_analysis.fastener_analysis'
+            assert leaf(sonuc, fa + '.bolt_safety_factor') == pytest.approx(sf)
+            assert leaf(sonuc, fa + '.bolt_safety_factor_is_design_input')
         low = calc(safety_factor=2.0)
-        high = calc(safety_factor=6.0)
-        for path in self.SF_PATHS:
-            assert leaf(low, path) == pytest.approx(2.0), path
-            assert leaf(high, path) == pytest.approx(6.0), path
+        na = '.motor.structural_analysis.nozzle_analysis'
+        assert leaf(low, na + '.governing_condition') == 'minimum_thickness'
+        assert leaf(low, na + '.earned_safety_factor') > 2.0 * 1.4
 
     def test_thrust_reaches_the_buckling_check(self, calc):
         small = calc()

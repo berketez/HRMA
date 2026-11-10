@@ -172,18 +172,32 @@ def test_a5_astar_boyutlari_gercek_akidan(saha_motor):
                     'zarf dışı hüküm gerekçesini ADIYLA basmıyor')
             return
         assert blok['thickness_status'] == 'sized'
-        assert blok['recession_regime'] == 'steady_ablation', (
-            'no_net_heating artık sized olamaz — çekirdek kalınlık '
-            'yayımlamaz (15 Ağu 2026 sözleşmesi)')
         assert 'design choice' in blok['basis'], (
             'astar malzemesi bir tasarım seçimidir ve öyle beyan edilmeli')
-        # Kalınlık = çekilme x tasarım payı özdeşliği (Q* modelinin tanımı)
+        # V306/HİBRİT-MODEL (M-HIBRIT-11, 3 Kas) — SÖZLEŞME GENİŞLEDİ.
+        # Hibrit astar kalınlığı = gerileme × tasarım payı (Q*) + iletim payı
+        # (``hybrid_liner_sizing``). Net ısınma yoksa (hüküm 2'nin çekirdek
+        # tarafı aynen: Q* kalınlık yayımlamaz, gerileme 0, blokaj 1) hibrit
+        # astarı YİNE boyutlanır — yalnız iletim payıyla; eski "NOT_MODELLED"
+        # hükmü düşük ısı yükünde motoru UNSAFE yapıyordu (mühendis turu).
         assert blok['thickness'] == pytest.approx(
-            blok['total_recession_mm'] * blok['design_margin'], rel=1e-9)
+            blok['recession_allowance_mm'] + blok['conduction_allowance_mm'],
+            rel=1e-12)
+        if blok['recession_regime'] == 'no_net_heating':
+            assert blok['recession_allowance_mm'] == 0.0
+            assert blok['total_recession_mm'] == 0.0
+            assert blok['blowing_blockage'] == 1.0
+            assert 'NO NET HEATING' in blok['q_star_validity_note']
+        else:
+            assert blok['recession_regime'] == 'steady_ablation'
+            # Gerileme payı = çekilme x tasarım payı (Q* modelinin tanımı)
+            assert blok['recession_allowance_mm'] == pytest.approx(
+                blok['total_recession_mm'] * blok['design_margin'],
+                rel=1e-9)
+            assert 0 < blok['recession_rate_mm_s'] <= 0.35
         # Fiziksel aralık + kapı sözleşmesi: 'sized' hüküm ancak
         # ölçülmüş geçerlilik tavanının altında verilebilir.
         assert 0.05 < blok['thickness'] < 200.0   # mm
-        assert 0 < blok['recession_rate_mm_s'] <= 0.35
 
     astar = tp['chamber_liner']
     # Karşılaştırma akısı motorun KENDİ kamara akısıdır, kopya/uydurma değil

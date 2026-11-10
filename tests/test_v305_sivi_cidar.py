@@ -600,8 +600,11 @@ def test_astar_hedef_altinda_iken_fea_satiri_yigin_sf_gorur(client):
     hükümleri yığının en küçük tasarım SF'sini ASTARDAN verir ve panel satırı
     bu sayıyı görür (yeşil 'converged' basılmaz)."""
     from hrma.fea import bridge
+    # V306/SIVI-CEKET-B kalem 5 (ana model 9 Kas): 50 bar'da gövdenin ε 20'si
+    # deniz seviyesinde ayrılır (ayrılmayan en büyük ε 15,97), uç adlı retle
+    # döner. Bu düğümün iddiası astar katmanıdır; lüle ayrılmayan ε 12 ile.
     m = _sivi(client, chamber_material='cucrzr', chamber_wall_thickness=5,
-              chamber_pressure=50)
+              chamber_pressure=50, nozzle_expansion_ratio=12)
     astar = _katmanlar(m)[0]
     assert astar['verdict'] == 'fail', astar['verdict']
     fea = _sessiz(bridge.run_structural_from_motor, m)

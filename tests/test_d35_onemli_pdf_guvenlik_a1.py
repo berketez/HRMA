@@ -301,9 +301,12 @@ class TestOHON07BelgeMetni:
     def test_patlama_mesafeleri_HALA_BASILIYOR(self, guvenlik_metni):
         """Fail-closed'ın bedeli alan YUTMAK olamaz: biçim düzeldi diye
         ölçü kaybolmamalı."""
-        assert 'blast distances' in guvenlik_metni
-        assert 'lethal' in guvenlik_metni
-        assert 'distance m' in guvenlik_metni
+        # V306/RAPOR-DİL (kalem 6): tehlike bloğu etiketi artık alan adının alt
+        # çizgisiz hâli değil, rapor sözlüğünün okunur etiketi (iki dilde);
+        # iddia aynı, aranan etiket yeni.
+        assert 'Blast distances' in guvenlik_metni
+        assert 'Lethal' in guvenlik_metni
+        assert 'Distance (m)' in guvenlik_metni
 
 
 class TestOHON07BasamakKurali:
@@ -329,7 +332,10 @@ class TestOHON07BasamakKurali:
         metin = '\n'.join(satirlar)
         assert REPR_IMZASI not in metin, metin
         assert not UZUN_ONDALIK.findall(metin), metin
-        assert 'distance m: 4.91441' in metin, metin
+        # V306/RAPOR-DİL (kalem 6): tehlike bloğu etiketi artık alan adının alt
+        # çizgisiz hâli değil, rapor sözlüğünün okunur etiketi (iki dilde);
+        # iddia aynı, aranan etiket yeni.
+        assert 'Distance (m): 4.91441' in metin, metin
         assert metin.count('Free-air spherical TNT (test)') == 1, metin
 
     def test_NaN_kisaltilmaz_kusur_GORUNUR_kalir(self):
@@ -340,7 +346,10 @@ class TestOHON07BasamakKurali:
 
     def test_bool_sayi_SAYILMAZ(self):
         satirlar = PDFReportGenerator._hazard_lines({'flag': True})
-        assert 'True' in '\n'.join(satirlar)
+        # V306/RAPOR-DİL: mantıksal değer Python 'True' yerine okunur
+        # 'yes' (TR 'evet') basılır; iddia aynı: 1 sayısına dönmez.
+        metin = '\n'.join(satirlar)
+        assert 'yes' in metin and '1' not in metin, metin
 
 
 # ===========================================================================

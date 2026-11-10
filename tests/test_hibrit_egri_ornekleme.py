@@ -30,6 +30,32 @@ modülün KENDİ beyanından daha gevşek bir şey kilitliyordu:
 
 Bugün kırmızı düşen taşımalar ``xfail(strict=True)`` + defter kimliğiyle
 durur (açık borç işareti); onarım dalgası imi kaldırır.
+
+V306/HİBRİT-ÇAPRAZ-2 (9 Kasım 2026) — İKİ BESLEME, İKİ SÖZLEŞME
+---------------------------------------------------------------
+HİBRİT-ÇAPRAZ (4 Kas) N₂O kendinden basınçlı tankta TESLİM eğrisini
+boşalma çözümüne taşıdı: ``thrust_curve`` artık ~200 adımlık boşalma
+serisidir ve seyreltilmez; seyreltilen regüle yürüyüş eğrisi
+``constant_oxidizer_flow_budget.thrust_curve``ta durur. Bu dosyanın 7
+düğümü tabanda (78dbb287e) kırmızıydı. ÖLÇÜLDÜ
+(``docs/scofield/raw/OH/V306/hibrit-capraz-2/olcum/k1_once.json``, uç
+girdi): "trapez ‰102" seyreltme hatası DEĞİLDİ — test tam REGÜLE geçmişi
+(``e._thrust_history``) yayımlanan BOŞALMA eğrisiyle karşılaştırıyordu (iki
+ayrı fizik, −102,15 ‰). Yayımlanan eğrinin yamuk integrali yayımlanan
+impulsa TAM eşit (0 ‰); regüle bütçe eğrisinin seyreltme sapması +0,00686 ‰.
+Gerçek kusur iki serinin zaman ekseniydi: ``of_shift_performance`` regüle
+yürüyüşte kalmıştı (0 → 50,0 s, 398 örnek) ⟷ eğri 0 → 50,986 s (206 örnek);
+3B HUD O/F ve Isp(t)'yi regüleden, itkiyi boşalmadan okuyordu. Onarım
+(motor, ``_blowdown_of_shift_performance``): boşalma kipinde O/F, c*, Isp
+serileri teslim eğrisinin ekseninde; regüle seri sabit debili bütçede.
+
+Uç girdi bu yüzden İKİYE ayrıldı (ikisi de gerçek girdi, ölçüldü):
+  * ``uc_kosu`` — aynı tasarım, kullanıcı tank basınçlı (regüle) besleme:
+    seyreltme ürünün GERÇEKTEN yayımladığı eğride koşar (17 595 → ≤400).
+  * ``uc_kosu_bosalma`` — aynı tasarım, N₂O kendinden basınçlı tank
+    (varsayılan): teslim eğrisi seyreltilmez; ateşleme, yanma sonu ve itki
+    tepesi taşınır, ∫F dt yayımlanan impulstur, regüle bütçe eğrisi ve O/F
+    serisi kendi aralarında aynı eksende kalır.
 """
 
 import pathlib
@@ -46,30 +72,55 @@ from hrma.utils.numeric_compat import trapezoid
 ROOT = Path(__file__).resolve().parent.parent
 
 
-@pytest.fixture(scope='module')
-def uc_kosu():
-    """Uç girdi çözümü (bir kez çözülür, tüm testler paylaşır)."""
+UC_GIRDI = dict(thrust=1000.0, burn_time=50.0, of_ratio=7.0,
+                chamber_pressure=30.0, fuel_type='htpb', oxidizer_type='n2o',
+                initial_port_diameter=0.005)
+NORMAL_GIRDI = dict(thrust=1000.0, burn_time=3.0, of_ratio=7.0,
+                    chamber_pressure=30.0, fuel_type='htpb',
+                    oxidizer_type='n2o')
+#: Regüle (kullanıcı tank basınçlı) besleme: tasarım aynı, teslim eğrisi
+#: regüle yürüyüştür (``tests/test_d24_hibrit_a1.py`` AYRIŞAN kolu deseni).
+REGULE = dict(tank_pressure_source='user', tank_pressure=60.0)
+
+
+def _coz(**kw):
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
-        e = HybridRocketEngine(thrust=1000.0, burn_time=50.0, of_ratio=7.0,
-                               chamber_pressure=30.0, fuel_type='htpb',
-                               oxidizer_type='n2o',
-                               initial_port_diameter=0.005)
+        e = HybridRocketEngine(**kw)
         r = e.calculate()
     return e, r
 
 
 @pytest.fixture(scope='module')
+def uc_kosu():
+    """Uç girdi, REGÜLE besleme: yayımlanan eğri seyreltilen yürüyüştür."""
+    e, r = _coz(**UC_GIRDI, **REGULE)
+    assert r['delivered_source'] == 'regulated_design_curve'
+    return e, r
+
+
+@pytest.fixture(scope='module')
+def uc_kosu_bosalma():
+    """Uç girdi, N₂O kendinden basınçlı tank (varsayılan besleme)."""
+    e, r = _coz(**UC_GIRDI)
+    assert r['delivered_source'] == 'tank_blowdown'
+    return e, r
+
+
+@pytest.fixture(scope='module')
 def normal_kosu():
-    """Kısa yanma: dizi zaten tavanın altında, seyreltme YAPILMAMALI."""
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
-        e = HybridRocketEngine(thrust=1000.0, burn_time=3.0, of_ratio=7.0,
-                               chamber_pressure=30.0, fuel_type='htpb',
-                               oxidizer_type='n2o')
-        r = e.calculate()
+    """Kısa yanma, regüle: dizi zaten tavanın altında, seyreltme YOK."""
+    e, r = _coz(**NORMAL_GIRDI, **REGULE)
+    assert r['delivered_source'] == 'regulated_design_curve'
+    return e, r
+
+
+@pytest.fixture(scope='module')
+def normal_kosu_bosalma():
+    """Kısa yanma, N₂O kendinden basınçlı tank (varsayılan besleme)."""
+    e, r = _coz(**NORMAL_GIRDI)
+    assert r['delivered_source'] == 'tank_blowdown'
     return e, r
 
 
@@ -354,3 +405,117 @@ def test_port_gecmisi_zaten_seyrek():
     hy = (ROOT / 'hrma' / 'engines' / 'hybrid_rocket_engine.py').read_text(
         encoding='utf-8')
     assert re.search(r"stride = max\(1, len\(pt\) // 200\)", hy)
+
+
+# ---------------------------------------------------------------------------
+# V306/HİBRİT-ÇAPRAZ-2 — N₂O kendinden basınçlı tank (teslim = boşalma)
+# ---------------------------------------------------------------------------
+
+def test_bosalma_egrisinin_alani_yayimlanan_impuls(uc_kosu_bosalma):
+    """Ekrandaki eğrinin alanı yayımlanan impulstur (‰ değil, TAM).
+
+    Ölçüldü (olcum/k1_once.json): 0 ‰; tabandaki "‰102" iki ayrı fiziğin
+    (regüle tam geçmiş ⟷ boşalma eğrisi) farkıydı, seyreltme hatası değil.
+    """
+    _, r = uc_kosu_bosalma
+    tc = r['thrust_curve']
+    assert r['total_impulse'] == float(trapezoid(tc['thrust'], tc['time']))
+    assert r['total_impulse'] == r['tank_blowdown']['total_impulse_Ns']
+
+
+def test_regule_butce_egrisi_seyreltmede_permil_icinde(uc_kosu_bosalma):
+    """Seyreltme, boşalma kipinde de regüle bütçe eğrisinde koşar (‰1).
+
+    Ölçüldü: 17 595 → 398 örnek, sapma +0,00686 ‰.
+    """
+    e, r = uc_kosu_bosalma
+    b = r['constant_oxidizer_flow_budget']
+    tc = b['thrust_curve']
+    assert tc['sampling']['decimated'] is True
+    assert tc['sampling']['points_computed'] == len(e._thrust_history) > 5000
+    I_tam = float(trapezoid(np.asarray(e._thrust_history),
+                            np.asarray(e._time_history)))
+    assert b['total_impulse_Ns'] == pytest.approx(I_tam, rel=1e-12)
+    I_yayin = float(trapezoid(tc['thrust'], tc['time']))
+    assert 1000.0 * abs(I_yayin - I_tam) / I_tam <= TRAPEZOID_PERMIL_LIMIT
+
+
+def test_bosalma_kritik_ornekleri_tasinir(uc_kosu_bosalma):
+    """Ateşleme (t = 0), yanma sonu (sıvı tükenişi) ve itki tepesi eğride."""
+    _, r = uc_kosu_bosalma
+    tc = r['thrust_curve']
+    tb = r['tank_blowdown']
+    assert tc['time'][0] == 0.0
+    assert tc['thrust'][0] == tb['thrust_initial_N']
+    assert tc['time'][-1] == tb['burn_duration_s'] == r['burn_time']
+    assert tb['end_event'] == 'oxidizer_depleted'
+    assert tc['time'][-1] == tb['vapor_onset_s']
+    assert max(tc['thrust']) == max(tb['thrust_N'])
+    s = tc['sampling']
+    assert s['decimated'] is False
+    assert len(tc['time']) == s['points_published'] == len(tb['time_s'])
+
+
+def test_bosalma_kipinde_seriler_tek_eksende(uc_kosu_bosalma,
+                                             normal_kosu_bosalma):
+    """O/F, c*, Isp serileri teslim eğrisinin ekseninde; regüle çift kendi
+    ekseninde (B2-4 "tek indeks kümesi" sözleşmesi iki çiftte de)."""
+    for _, r in (uc_kosu_bosalma, normal_kosu_bosalma):
+        tc = r['thrust_curve']
+        ofp = r['of_shift_performance']
+        assert ofp['feed_mode'] == 'blowdown'
+        assert ofp['time'] == tc['time']
+        for alan in ('of_ratio', 'c_star', 'isp'):
+            assert len(ofp[alan]) == len(tc['time']), alan
+        assert ofp['of_ratio'] == r['tank_blowdown']['of_ratio']
+        b = r['constant_oxidizer_flow_budget']
+        assert b['of_shift_performance']['time'] == b['thrust_curve']['time']
+
+
+def test_bosalma_serisi_itki_ve_kapanis_ozdesligi(uc_kosu_bosalma):
+    """Aynı örnekte F = Isp·ṁ·g0 ve ṁ = C_D·Pc·A_t/c* (HUD çipleri tek
+    sayı söyler). Ölçüldü: kalıntı 2,2e-16 / 4,4e-16."""
+    from hrma.engines.hybrid_rocket_engine import (
+        THROAT_DISCHARGE_COEFFICIENT)
+    e, r = uc_kosu_bosalma
+    tc = r['thrust_curve']
+    ofp = r['of_shift_performance']
+    At = float(r['throat_area'])
+    for F, m, p, isp, cs in zip(tc['thrust'], tc['mass_flow'],
+                                tc['pressure'], ofp['isp'], ofp['c_star']):
+        assert isp * m * e.g0 == pytest.approx(F, rel=1e-12)
+        assert m == pytest.approx(
+            THROAT_DISCHARGE_COEFFICIENT * p * 1e5 * At / cs, rel=1e-12)
+
+
+def test_bosalma_ozeti_kendi_blogundan(uc_kosu_bosalma):
+    """Teslim serisinin özeti of_shift.blowdown'dan; regüle özet regüle
+    seride (sayı başka bloğa yapışmaz)."""
+    _, r = uc_kosu_bosalma
+    ofp = r['of_shift_performance']
+    bd = r['of_shift']['blowdown']
+    assert ofp['summary_block'] == 'of_shift.blowdown'
+    assert ofp['isp_mass_avg'] == bd['isp_delivered_avg_s'] == \
+        r['isp_delivered_avg_s']
+    assert ofp['total_impulse_Ns'] == bd['total_impulse_Ns'] == \
+        r['total_impulse']
+    t = np.asarray(ofp['time'])
+    assert ofp['isp_time_avg'] == pytest.approx(
+        float(trapezoid(ofp['isp'], t)) / t[-1], rel=1e-12)
+    reg_seri = r['constant_oxidizer_flow_budget']['of_shift_performance']
+    reg = r['of_shift']['regulated']
+    assert reg_seri['summary_block'] == 'of_shift'
+    assert reg_seri['total_impulse_Ns'] == reg['total_impulse_Ns']
+    assert 'constant_oxidizer_flow_budget.of_shift_performance' in \
+        r['of_shift']['series_location']
+
+
+def test_normal_bosalma_seyreltilmez(normal_kosu_bosalma):
+    """Kısa yanmada iki eğri de seyreltilmez; beyan bunu söyler."""
+    e, r = normal_kosu_bosalma
+    s = r['thrust_curve']['sampling']
+    assert s['decimated'] is False
+    assert len(r['thrust_curve']['time']) == s['points_computed']
+    rs = r['constant_oxidizer_flow_budget']['thrust_curve']['sampling']
+    assert rs['decimated'] is False
+    assert rs['points_computed'] == len(e._time_history)

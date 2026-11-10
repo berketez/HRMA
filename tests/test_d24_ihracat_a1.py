@@ -644,24 +644,35 @@ class TestOHD1806IndirmePenceresi:
         """
         ham = open(os.path.join(KOK, 'hrma/static/js/app.js'),
                    encoding='utf-8').read()
-        bas = ham.index('function stlPencereMetni(')
-        i = ham.index('{', bas)
-        derinlik, son = 0, i
-        while son < len(ham):
-            if ham[son] == '{':
-                derinlik += 1
-            elif ham[son] == '}':
-                derinlik -= 1
-                if derinlik == 0:
-                    break
-            son += 1
+
+        def _sok(ad):
+            # app.js'ten fonksiyonu GÖVDESİYLE söker (ikiz yazılmaz).
+            bas = ham.index('function %s(' % ad)
+            i = ham.index('{', bas)
+            derinlik, son = 0, i
+            while son < len(ham):
+                if ham[son] == '{':
+                    derinlik += 1
+                elif ham[son] == '}':
+                    derinlik -= 1
+                    if derinlik == 0:
+                        break
+                son += 1
+            return ham[bas:son + 1]
+
+        # V306/DİL-ORTAK (463d4f68e): pencere bitiş saati arayüz dilinde
+        # yazılır — stlPencereMetni artık arayuzSaati(), o da
+        # arayuzYereli() çağırıyor. İkisi de aynı söküm listesine girer
+        # (stub değil, ürünün kendi gövdesi koşar).
         betik = (
             'var window = {};\n'
             'function T(k, f) { return f; }\n'
             'function TF(k, p, f) { return String(f).replace('
             '/\\{(\\w+)\\}/g, function (t, a) {\n'
             '    return (p && a in p) ? String(p[a]) : t; }); }\n'
-            + ham[bas:son + 1] + '\n'
+            + _sok('arayuzYereli') + '\n'
+            + _sok('arayuzSaati') + '\n'
+            + _sok('stlPencereMetni') + '\n'
             'console.log(JSON.stringify({\n'
             '  beyanli: stlPencereMetni({ stl_files: ["a", "b", "c"],'
             ' stl_download_window_s: 3600 }),\n'
@@ -677,8 +688,18 @@ class TestOHD1806IndirmePenceresi:
         out = json.loads(p.stdout)
         # (a) beyan varsa adet ve dakika ekrana çıkar
         assert '3' in out['beyanli'] and '60' in out['beyanli'], out['beyanli']
-        assert '410' in out['beyanli'], (
-            'bağlantının sona erdiğinde ne olacağı söylenmiyor')
+        # V306/DİL-ORTAK (463d4f68e): kullanıcı metninde HTTP kodu yok —
+        # '410 döner' yerine sonuç adıyla söylenir: bağlantıların süresi
+        # dolar ve paket yeniden üretilmelidir. İddia aynı: sona erince ne
+        # olacağı yazılır; ayrıca bitiş saati (arayuzSaati) dizede durur.
+        assert ('expire' in out['beyanli']
+                and 'generated again' in out['beyanli']), (
+            'bağlantının sona erdiğinde ne olacağı söylenmiyor: %r'
+            % out['beyanli'])
+        assert not re.search(r'\b(?:HTTP|410)\b', out['beyanli']), (
+            'kullanıcı metninde HTTP kodu: %r' % out['beyanli'])
+        assert re.search(r'\(until \d{1,2}:\d{2}', out['beyanli']), (
+            'pencere bitiş saati yazılmıyor: %r' % out['beyanli'])
         # (b) beyan yoksa SAYI UYDURULMAZ
         assert 'did not declare' in out['beyansiz'], out['beyansiz']
         assert not re.search(r'\d', out['beyansiz']), (

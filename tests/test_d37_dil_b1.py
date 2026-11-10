@@ -313,9 +313,18 @@ def iki_faz_cumleleri():
 def nesir_cumleleri(hibrit, kati):
     """DV-GT21 / DV36-22 cümleleri gerçek yanıtlardan."""
     m = hibrit['motor']
+    # V306/HİBRİT-ÇAPRAZ-2: N₂O kendinden basınçlı tankta (bu gövde) teslim
+    # eğrisi boşalma çözümüdür ve SEYRELTİLMEZ; ``sampling`` bloğunda
+    # seyreltme cümlesi (``basis``) yoktur (ekranda yalnız sayılar basılır,
+    # eğrinin künyesi ``thrust_curve.basis``). Hibritin seyreltme cümlesi
+    # regüle beslemede ekrana çıkan eğrinindir; aynı yanıtta sabit debili
+    # bütçenin eğrisi onu AYNEN taşır (aynı ``sampling_block`` çağrısı).
+    egri = m['thrust_curve']
+    if 'basis' not in egri['sampling']:
+        egri = m['constant_oxidizer_flow_budget']['thrust_curve']
     return {
         'hibrit_thrust_basis': m['thrust_curve']['basis'],
-        'hibrit_sampling_basis': m['thrust_curve']['sampling']['basis'],
+        'hibrit_sampling_basis': egri['sampling']['basis'],
         'hibrit_port_sampling_basis': (
             (m.get('motor_geometry') or {}).get('port_history') or {}
         ).get('sampling', {}).get('basis'),

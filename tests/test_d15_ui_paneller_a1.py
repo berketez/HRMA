@@ -544,7 +544,12 @@ class TestBayatSonucBeyani:
             'paneli ve dışa aktarım düğmeleri eski koşumdan kalır')
         gövde_i = kaynak.index('function invalidateStaleResults()')
         gövde = kaynak[gövde_i:gövde_i + 900]
-        for kanit in ('currentResults = null', 'resultsPanel',
+        # V306/BAYAT NR-15: sonuç paneli artık GİZLENMEZ; katı ve sıvı
+        # sayfalarıyla aynı "ESKİ SONUÇ" şeridiyle işaretlenir (brif: üç
+        # sayfada aynı bileşen). Kanal kapanmaz, İŞARETLENİR — bekçi
+        # şeridin konduğunu arar; davranış tests/test_v306_bayat.py'de
+        # node ile koşturulur.
+        for kanit in ('currentResults = null', 'eskiSonucBandi(true)',
                       'exportResultsBtn', 'exportSTLBtn', 'downloadEngBtn'):
             assert kanit in gövde, (
                 'bayat sonuç düşürücüsü ' + kanit + ' kanalını kapatmıyor')

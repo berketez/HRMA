@@ -688,8 +688,16 @@ def injector_circuits_from_block(md, inj, detail, motor_type='hybrid',
 #: "aynı paketin STEP ve STL lülesi %3,06 farklı" bulgusunun da kaynağıydı
 #: (STL'in kendi açığı 32 kesitli çokgenin -%0,64'ü). Tavan sayısı aşağıdaki
 #: sabittedir; bekçi örnek lülelerde ölçüp sabitle karşılaştırır.
+#:
+#: V3.0.6 (9 Kas, V306/ONARIM-ALTYAPI kalem 7) — KATI SAYISI BAYATTI,
+#: YENİDEN ÖLÇÜLDÜ: d993542f9 (V306/KATI-KALAN S1, tek nozul konturu —
+#: yakınsak giriş kasa iç çapında) katı örnek lülenin konturunu değiştirdi;
+#: aynı okuyucuyla varsayılan okuma +%1,48 → +%2,311 (rc.1 CI ve yerel aynı;
+#: KATI-KALAN öncesi motor dosyasıyla +%1,48 içinde kalıyor, ölçüldü). Not
+#: kullanıcıya sapmayı EKSİK söylüyordu; sabit +%2,31. Hibrit ve sıvı
+#: değişmedi.
 STEP_NOZZLE_DEFAULT_VOLUME_ERROR_EXAMPLES_PCT = {
-    'hybrid': 2.50, 'solid': 1.48, 'liquid': 0.23}
+    'hybrid': 2.50, 'solid': 2.31, 'liquid': 0.23}
 STEP_NOZZLE_VOLUME_NOTE = (
     'Nozzle volume/mass in CAD tools: the nozzle walls in these STEP files '
     'are smooth B-spline surfaces of revolution. The default volume of '

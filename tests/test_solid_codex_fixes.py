@@ -375,8 +375,8 @@ def test_entered_nozzle_angles_drive_geometry():
 def test_reported_nozzle_angles_match_the_ones_used():
     """Raporlanan açı, uzunluğu üreten açıyla AYNI olmalı."""
     conv_deg, div_deg = 22.0, 18.0
-    res = _engine(convergent_angle=conv_deg,
-                  divergent_angle=div_deg).calculate_performance()
+    motor = _engine(convergent_angle=conv_deg, divergent_angle=div_deg)
+    res = motor.calculate_performance()
     na = res['nozzle_angles']
     assert na['convergent_half_angle_deg'] == pytest.approx(conv_deg)
     assert na['divergent_half_angle_deg'] == pytest.approx(div_deg)
@@ -384,7 +384,9 @@ def test_reported_nozzle_angles_match_the_ones_used():
 
     d_t = na['throat_diameter_mm'] / 1000.0
     d_e = na['exit_diameter_mm'] / 1000.0
-    expected_conv = ((res['chamber_diameter'] / 1000.0 - d_t)
+    # V306/KATI-KALAN (kalem 2): yakınsak giriş KASA İÇ çapında (CAD/STEP
+    # ile tek kontur); üst düzey chamber_diameter katıda tane dış çapıdır.
+    expected_conv = ((motor._case_inner_diameter() - d_t)
                      / (2 * np.tan(np.radians(conv_deg))))
     expected_div = (d_e - d_t) / (2 * np.tan(np.radians(div_deg)))
     assert na['convergent_length_mm'] == pytest.approx(

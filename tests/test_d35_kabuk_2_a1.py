@@ -437,11 +437,21 @@ class TestGT36BitisGeriBildirimi:
         assert parca, 'runPanel bulunamadı'
         betik = """
 'use strict';
+// V306 (6 Kas, ana model): BAYAT DEVİR 1 (1d5f11da5) runPanel'in başarı
+// dalına status.removeAttribute('data-onceki-tasarim') ve modül düzeyindeki
+// lastPayload kaydını ekledi. Sahte düğümde removeAttribute, düzenekte
+// lastPayload yoktu; başarı dalı catch'e düşüyor, kök 'none' kalıyordu
+// (ürün sağlam: gerçek DOM'da var, lastPayload analysis_dock.js:94).
 function dugum(id) {
+    var attrs = {};
     return { id: id, textContent: '', disabled: false, innerHTML: '',
-        style: { display: '' }, querySelectorAll: function () { return []; } };
+        style: { display: '' }, querySelectorAll: function () { return []; },
+        setAttribute: function (k, v) { attrs[k] = String(v); },
+        getAttribute: function (k) { return k in attrs ? attrs[k] : null; },
+        removeAttribute: function (k) { delete attrs[k]; } };
 }
 var _d = { ad_status_t: dugum('s'), ad_root_t: dugum('r'), ad_run_t: dugum('b') };
+var lastPayload = {};
 global.document = { getElementById: function (k) { return _d[k] || null; } };
 global.window = global;
 global.performance = { now: (function () { var t = 0; return function () { t += 1234; return t; }; })() };

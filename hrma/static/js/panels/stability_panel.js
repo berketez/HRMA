@@ -1301,7 +1301,7 @@
                 mode: 'markers', type: 'scatter',
                 marker: { size: 13, symbol: 'x', color: POINT_COLOR },
                 name: T('panel.stab.traceLfi',
-                        'Hybrid LFI frequency (combustion_stability.lfi)'),
+                        'Hybrid LFI frequency'),
             });
         }
         if (hasLoop) {
@@ -1632,8 +1632,8 @@
             const absent = [];
             if (!snap.lfi) {
                 absent.push(T('panel.stab.noLfiMarker',
-                    'no hybrid LFI marker: this result does not publish '
-                    + 'combustion_stability.lfi as modelled'));
+                    'no hybrid LFI marker: this result publishes no modelled '
+                    + 'LFI frequency'));
             }
             if (!(snap.chugLoop && snap.chugLoop.block
                     && isNum(snap.chugLoop.block.frequency_hz)

@@ -64,7 +64,11 @@ Z5_HIBRIT_ISTEK = {
 Z5_SIVI_INCE_CIDAR = {
     'fuel_type': 'rp1', 'oxidizer_type': 'lox', 'thrust': 10000,
     'chamber_pressure': 100, 'mixture_ratio': 2.5,
-    'nozzle_expansion_ratio': 50, 'max_burn_duration': 400,
+    # V306/SIVI-CEKET-B kalem 5: eski form ön dolgusu ε 50 (kaynaksız; UÇUŞ-KÜTLE
+    # formdan kaldırdı) 100 bar'da deniz seviyesinde ayrılıyor (Summerfield;
+    # ayrılmayan en büyük ε 26,86) ve uç artık o tasarımı adlı retle
+    # yayımlamıyor. Gövde ayrılmayan bölgedeki 20 ile kurulur.
+    'nozzle_expansion_ratio': 20, 'max_burn_duration': 400,
     'combustion_efficiency': 97, 'contraction_ratio': 4,
     'characteristic_length': 1.2,
     'chamber_wall_thickness': 1,
@@ -511,14 +515,26 @@ class TestA4GirdiUyarisiTasima:
         metin = '\n'.join(
             (s.extract_text() or '')
             for s in pypdf.PdfReader(BytesIO(r.data)).pages)
-        duz = metin.replace('\n', '').replace(' ', '')
-        assert Z5_CIDAR_UYARI_KODU in duz, (
-            'kritik cidar uyarısı özet PDF metninde yok')
+        duz = ' '.join(metin.split())
+        # V306/RAPOR-HATA (kalem 6a) — BEKLENTİ DEĞİŞTİ, İDDİA AYNI: kritik
+        # cidar uyarısı belgede HAM KOD + parametre dökümü olarak değil,
+        # ekranın sözlüğündeki CÜMLESİYLE durur (ölçülen sayılar cümlenin
+        # içinde). Ham kod, ham kanal adı ve 'ad=değer' dökümü basılmaz.
+        from hrma.export.rapor_sozluk import uyari_cumlesi
+        kayit = [w for w in sivi['input_warnings']
+                 if isinstance(w, dict)
+                 and w.get('code') == Z5_CIDAR_UYARI_KODU][0]
+        cumle = ' '.join(uyari_cumlesi(kayit, 'en').split())
+        assert cumle in duz, ('kritik cidar uyarısı özet PDF metninde yok',
+                              cumle)
         assert 'CRITICAL' in metin, 'PDF uyarı önemini basmıyor'
-        assert 'input_warnings' in duz, 'PDF uyarının KAYNAK kanalını basmıyor'
+        assert 'Input check' in duz, 'PDF uyarının KAYNAK kanalını basmıyor'
         # Parametreler de iner: hangi kalınlık, ne gerekiyordu?
-        assert 't_used_mm=1.0' in duz and 't_required_mm=2.0' in duz, (
+        assert 'thickness 1 mm' in duz and 'required 2 mm' not in duz \
+            and '2 mm required' in duz, (
             'PDF ölçülen parametreleri basmıyor — okuyan sayıyı göremez')
+        assert Z5_CIDAR_UYARI_KODU not in duz
+        assert 't_used_mm' not in duz and 'input_warnings' not in duz
 
     def test_pdf_uyari_yoksa_bolum_hic_basilmaz(self, sivi):
         """FAIL-CLOSED: boş 'Warnings: none' başlığı basılmaz."""

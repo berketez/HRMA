@@ -260,9 +260,21 @@ def test_t33_altitude_tables_match_the_headline(hybrid_result):
     engine, result = hybrid_result
     sea_level = result['altitude_performance']['altitude_performance'][0]
     assert sea_level['altitude'] == 0
-    assert sea_level['thrust'] == pytest.approx(engine.F, rel=1e-9)
-    assert sea_level['isp'] == pytest.approx(engine.Isp, rel=1e-9)
-    assert sea_level['cf'] == pytest.approx(engine.CF, rel=1e-6)
+    # V306/HİBRİT-MODEL kalem 6 (UÇUŞ-2 devri): manşet itkisi TASARIM
+    # ortam basıncına aittir (motor P_a, bu fikstürde varsayılan 1,0 bar);
+    # sabit geometride dF/dp_a = −A_e (Sutton & Biblarz Denk. 2-14/3-29).
+    # Eski bekçi 0 km satırını manşete eşitliyordu — bu yalnız tasarım
+    # ortamı ISA deniz seviyesiyken doğrudur (çapa 101 325 Pa'daydı).
+    # Doğru kilit: 0 km = F + (p_tasarım − p_ISA(0))·A_e; tasarım ortamı
+    # deniz seviyesiyse fark sıfır ve eski eşitlik aynen geri gelir.
+    from hrma.constants import isa_pressure
+    p_tasarim = float(engine.P_a) * 1e5
+    beklenen = engine.F + (p_tasarim - isa_pressure(0.0)) * engine.Ae
+    assert sea_level['thrust'] == pytest.approx(beklenen, rel=1e-9)
+    assert sea_level['isp'] == pytest.approx(
+        engine.Isp * beklenen / engine.F, rel=1e-9)
+    assert sea_level['cf'] == pytest.approx(
+        engine.CF * beklenen / engine.F, rel=1e-6)
 
 
 def test_t33_mass_flow_comes_from_the_solver(hybrid_result):

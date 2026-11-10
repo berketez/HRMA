@@ -305,7 +305,19 @@ class TestP17B3_03LuleGirisiMach:
         mdot = blok['mass_flow_kg_s']
         assert blok['mean_flow_mach_M_N'] == pytest.approx(
             mdot / (rho * a * s_c), rel=1e-9)
-        assert mdot == pytest.approx(taban['total_mass_flow'], rel=1e-6)
+        # ÇAPA YENİLENDİ — V306/SIVI-ONARIM kalem 4: SIVI-DEFTER (23db13bbc,
+        # K5 debi defteri) M_N'i ODAYA giren debiyle kurar (gaz
+        # jeneratöründe türbin debisi odadan geçmez). Ölçüldü (bu yük, GG):
+        # blok 3,918916 kg/s = mass_flow_ledger.main_injector_mass_flow_kg_s;
+        # total_mass_flow 3,938577 kg/s (türbin dahil). Künye (mach_basis)
+        # 'mdot_total' diyordu, 'mdot_chamber' olarak düzeltildi.
+        defter = taban['mass_flow_ledger']
+        assert mdot == pytest.approx(
+            defter['main_injector_mass_flow_kg_s'], rel=1e-12)
+        assert 'mdot_chamber' in blok['mach_basis']
+        if defter['status'] == 'open_cycle_closed' and \
+                defter['turbine_mass_flow_kg_s']:
+            assert mdot < taban['total_mass_flow']
 
     def test_panel_sivi_kaynagini_okur(self):
         js = PANEL.read_text(encoding='utf-8')

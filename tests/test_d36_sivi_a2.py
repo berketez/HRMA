@@ -161,7 +161,16 @@ class TestModulGeriCekme:
         for ad in UNRESTRAINED_BURN_TIME_FIELDS:
             assert um[ad] is None, (ad, um[ad])
         assert um['status'] == BURN_TIME_NOT_EVALUATED
-        assert um['not_evaluated'] == list(UNRESTRAINED_BURN_TIME_FIELDS)
+        # V306 ana model (NK3-S-10): sıvıda serbest motorun kütle tabanı
+        # (kasa + itici/2) geçerli değil; süre geri çekmesinin üstüne kütle,
+        # hız ve enerji de adıyla geri çekilir (sıra: önce süre, sonra sıvı).
+        from hrma.analysis.safety_analysis import (
+            LIQUID_PROJECTILE_MASS_NOT_MODELLED_REASON,
+            UNRESTRAINED_LIQUID_FIELDS)
+        assert um['not_evaluated'] == list(dict.fromkeys(
+            list(UNRESTRAINED_BURN_TIME_FIELDS)
+            + list(UNRESTRAINED_LIQUID_FIELDS)))
+        assert um['liquid_reason'] == LIQUID_PROJECTILE_MASS_NOT_MODELLED_REASON
         beyan = s['burn_time_dependent_not_evaluated']
         assert beyan['status'] == BURN_TIME_NOT_EVALUATED
         assert 'inputs_used.burn_time_s' in beyan['fields']
@@ -192,12 +201,21 @@ class TestModulGeriCekme:
             SAFETY_MODEL['min_hazard_distance_m'])
         assert isinstance(th['thermal_protection_required'], bool)
         um = s['explosive_hazards']['fragment_hazards']['unrestrained_motor']
-        assert 'status' not in um and 'not_evaluated' not in um
+        # Süre verildi: süreye bağlı geri çekme YOK; impuls itki × süre.
         assert um['total_impulse_ns'] == A2_MODUL_MOTORU['thrust'] * SURE_S
-        assert um['burnout_velocity_ms'] == (um['total_impulse_ns']
-                                             / um['mean_flight_mass_kg'])
-        assert um['kinetic_energy_j'] == (0.5 * um['mean_flight_mass_kg']
-                                          * um['burnout_velocity_ms'] ** 2)
+        assert um['required_restraint_force_n'] is not None
+        # V306 ana model (NK3-S-10): bu düzenek SIVI motordur; "kasa +
+        # itici/2" kütle tabanı sıvıda geçerli değil, kütle/hız/enerji
+        # adıyla geri çekilir (katı ve hibritte bağıntı aynen kalır:
+        # tests/test_v306_sivi_serbest_motor.py).
+        from hrma.analysis.safety_analysis import (
+            LIQUID_PROJECTILE_MASS_NOT_MODELLED_REASON,
+            UNRESTRAINED_LIQUID_FIELDS)
+        assert um['status'] == BURN_TIME_NOT_EVALUATED
+        assert um['reason'] == LIQUID_PROJECTILE_MASS_NOT_MODELLED_REASON
+        assert um['not_evaluated'] == list(UNRESTRAINED_LIQUID_FIELDS)
+        for ad in UNRESTRAINED_LIQUID_FIELDS:
+            assert um[ad] is None, (ad, um[ad])
         assert s['inputs_used']['burn_time_s'] == SURE_S
 
 

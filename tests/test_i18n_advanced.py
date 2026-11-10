@@ -39,6 +39,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 PAGE = REPO_ROOT / 'hrma' / 'templates' / 'advanced.html'
 DICT_JS = REPO_ROOT / 'hrma' / 'static' / 'js' / 'i18n_advanced.js'
 CORE_JS = REPO_ROOT / 'hrma' / 'static' / 'js' / 'i18n.js'
+#: Yalnız advanced.html'in yüklediği JS (V306/DİL-HİBRİT; sözlüğün tüketicisi).
+HIBRIT_OZEL_JS = tuple(REPO_ROOT / 'hrma' / 'static' / 'js' / ad
+                       for ad in ('transient_panel.js', 'blowdown_panel.js',
+                                  'app.js'))
 
 NODE = shutil.which('node')
 
@@ -135,6 +139,16 @@ def template_keys():
     keys |= set(re.findall(r"'(adv\.js\.port[A-Za-z]+)'", src))   # PORT_LABEL_KEYS
     # ['anahtar', 'İngilizce yedek'] biçimindeki eşleme tabloları (requiredFields)
     keys |= set(re.findall(r"\['(adv\.[\w.]+)',", src))
+    # V306/DİL-HİBRİT: yalnız hibrit sayfasının yüklediği JS dosyaları da
+    # bu sözlüğün tüketicisidir (advanced.html dışında hiçbir şablon onları
+    # yüklemez; ölçüm: grep templates). Rozet etiketleri orada T/TF ile ya
+    # da [anahtar, yedek] tablosuyla çağrılır. Kapsam GENİŞLER, gevşemez:
+    # yalnız `adv.` önekli anahtarlar sayılır ve tanımsız olan
+    # test_every_template_key_exists_in_dictionary'de kırmızı verir.
+    for js in HIBRIT_OZEL_JS:
+        jsrc = read(js)
+        keys |= set(re.findall(r"\bTF?\(\s*'(adv\.[\w.]+)'", jsrc))
+        keys |= set(re.findall(r"\['(adv\.[\w.]+)',", jsrc))
     # v3.0.1 kulvar M: malzeme seçicilerinin seçenekleri sunucu kaydından
     # Jinja makrosuyla basılır (malzeme_secenekleri); şablonda anahtar yerine
     # TEK bir ifade durur. O ifade, kaydın ürettiği anahtar KÜMESİYLE

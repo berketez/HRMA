@@ -139,10 +139,48 @@ def base():
     return _run()
 
 
+#: V306/ONARIM-SIVI (rc.1 CI) — ölçeğin ikinci noktası. Eski nokta 2 MN
+#: (80 kat itki, Pc 70 bar) SIVI-CEKET-A K5 EK7'den beri yayım kapısında:
+#: RP-1 istasyon marşı ``jacket_model_limit`` (F-1 sınıfı model sınırı) verir,
+#: ceket ΔP'sine bağlı bloklar (``cooling_system``, tanklar, imalat, itki)
+#: adlı nedenle bekletilir; üç ölçek sınaması ``None`` üstünde TypeError ile
+#: düşüyordu. Bu dosyanın konusu ölçek bağımlılığı, kapı değil: ikinci nokta
+#: kapıya girmeyen 1 MN (40 kat itki, aynı Pc ve aynı ezmeler; yalnız ölçek
+#: değişir). Ölçüldü (betik ~/HRMA-calisma/2026-11-09/ONARIM-SIVI/betik/
+#: beyan_buyuk.py, b9cf2a27f): Pc 70 bar'da 0,7 ve 1 MN kapı dışı
+#: ('solved'), 1,5 ve 2 MN kapıda. 1 MN'de kanal derinliği 2,0 → 4,67 mm
+#: (> 2×), oksitleyici tank çapı 1008 → 3441 mm (3,41×), boğaz 54,3 →
+#: 342,2 mm, ISO 2768 toleransı 0,15 → 0,2 mm. Kapının kendisi
+#: ``test_eski_buyuk_nokta_kapida_adli_nedenle`` ile ayrıca sınanır.
+BUYUK_ITKI_N = 1_000_000
+#: EK7 kapısına giren eski ikinci nokta (2 MN, Pc 70 bar).
+KAPIDAKI_ITKI_N = 2_000_000
+
+
 @pytest.fixture(scope='module')
 def buyuk():
-    """80 kat itki: ölçek bağımlılığını ölçmek için ikinci nokta."""
-    return _run(thrust=2_000_000)
+    """40 kat itki: ölçek bağımlılığını ölçmek için ikinci nokta."""
+    r = _run(thrust=BUYUK_ITKI_N)
+    assert (r.get('cooling_circuit_publication') or {}).get(
+        'status') == 'solved', (
+        'ikinci ölçek noktası EK7 yayım kapısına girdi; ölçek sınamaları '
+        'kapının boşalttığı blokları ölçemez: %r'
+        % (r.get('cooling_circuit_publication'),))
+    return r
+
+
+def test_eski_buyuk_nokta_kapida_adli_nedenle():
+    """K5 EK7: 2 MN / 70 bar RP-1 rejeneratif ceket marşı F-1 sınıfı model
+    sınırında; ölçek blokları SESSİZCE değil adlı nedenle bekletilir."""
+    r = _run(thrust=KAPIDAKI_ITKI_N)
+    ccp = r['cooling_circuit_publication']
+    assert ccp['status'] == 'not_solved'
+    assert ccp['code'] == 'jacket_model_limit'
+    assert ccp['withheld_reason_code'] == 'jacket_model_limit'
+    assert isinstance(ccp['reason'], str) and ccp['reason']
+    for blok in ('cooling_system', 'propellant_tanks',
+                 'manufacturing_analysis', 'thrust'):
+        assert r.get(blok) is None, (blok, type(r.get(blok)))
 
 
 @pytest.fixture(scope='module')
@@ -461,7 +499,7 @@ def test_kanal_genisligi_sabit_derinligi_degil(base, buyuk):
     assert w0 == w1 == pytest.approx(COOLING_CHANNEL_WIDTH_DEFAULT_M * 1e3)
     assert h0 == pytest.approx(COOLING_CHANNEL_HEIGHT_DEFAULT_M * 1e3)
     assert h1 > h0 * 2, (
-        f'derinlik 25 kN -> 2 MN arasında büyümedi ({h0} -> {h1} mm); '
+        f'derinlik 25 kN -> 1 MN arasında büyümedi ({h0} -> {h1} mm); '
         'beyan "otomatik boyutlanıyor" diyorsa ölçüm de öyle demeli')
     assert _leaf(base, 'cooling_system.channel_height_auto_sized') is False
     assert _leaf(buyuk, 'cooling_system.channel_height_auto_sized') is True

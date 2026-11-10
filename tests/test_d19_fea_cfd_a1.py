@@ -286,8 +286,9 @@ class TestF4SaintVenantHukumBandi:
         # kopyasıyla kurulur: köprünün beyanlı geri dönüşü (sabit P_c +
         # kapalı uç kuvveti), oran 1,2007 (tests/fea/yuk_modeli_araci.py).
         # İddia aynı: fark eşiği aşınca hüküm ADLI gerekçeyle geri çekilir.
+        # V306/KATI-MODEL (M-KATI-10): katıda ürün akışı artık kasa silindirini ağa koyar; bu araç yalnız-lüle konturunda ölçülmüştü, o geometri köprünün beyanlı kipiyle (include_chamber=False) korunur. Kasa silindirli ürün yolunun bekçisi: tests/test_v306_kati_model.py::TestMKati10YapisalAg.
         s = _sessiz(bridge.run_structural_from_motor,
-                    gamma_suz(kati_motor_sozlugu))
+                    gamma_suz(kati_motor_sozlugu), include_chamber=False)
         assert s.get('status') == 'ok', s.get('reason')
         geri_donus_yukte(s)
         h = s['meta']['hukum']

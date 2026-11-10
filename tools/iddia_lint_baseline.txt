@@ -56,18 +56,13 @@ hrma/app.py | high_fidelity | 9cf03cbce7e4 | MEŞRU: hata mesajında kademe adı
 hrma/app.py | high_fidelity | 89b94c674fec | MEŞRU: kademe yolunun mevcut olup olmadığını anlatan docstring.
 hrma/app.py | high_fidelity | 84cf76d445ba | MEŞRU: panelin fidelity_used alanından kademeyi tespit ettiğini anlatan yorum.
 hrma/app.py | high_fidelity | cf003692dbd5 | MEŞRU: kademe kimliği ('high_fidelity') ile karşılaştırma.
-hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 347463b9e387 | MEŞRU: seçenek kimliği 'high_fidelity' /api/uncertainty-analysis'in 3000 örneklik Monte Carlo KADEMESİNİN ADIDIR (ürün/paket sıfatı değil); ekrandaki etiket i18n_common.js 'uq.levelHigh' anahtarından gelir (28 Eki: 'Extended / Kapsamlı (3000 örnek)').
 hrma/analysis/kinetic_efficiency.py | high_fidelity | 5a15b861d655 | MEŞRU: kademeye ait kayıp bandının tanımı.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | f45191013b5c | MEŞRU: kademenin girdi şeması docstring'i.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | aa9bcf64c6bd | MEŞRU: kademe kullanılamadığında basılan durum mesajı.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | 568c15b8c4c6 | MEŞRU: kademe kullanılamadığında basılan durum mesajı.
 hrma/analysis/kinetic_efficiency.py | high_fidelity | 77a91ae03822 | MEŞRU: "Level 3" kademesinin adı (Cantera sonlu-hızlı).
 hrma/analysis/uncertainty.py | high_fidelity | d8e39a1a995a | MEŞRU: kademenin ölçülmüş koşu süresi notu.
-hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 8d92f0f58c55 | MEŞRU: kademe kimliği + etiket çifti.
 hrma/static/js/panels/uncertainty_panel.js | high_fidelity | f4b0e3924392 | MEŞRU: kademe koşusunun kuyruğa alındığını anlatan yedek metin.
-hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 7016c69864ba | MEŞRU: kademe işi gönderilirken basılan yedek durum.
-hrma/static/js/panels/uncertainty_panel.js | high_fidelity | d9270e6a30ac | MEŞRU: kademe işinin zaman aşımı yedek mesajı.
-hrma/static/js/panels/uncertainty_panel.js | high_fidelity | 2ebe10e67790 | MEŞRU: kademe işinin ilerleme yedek etiketi.
 
 # --- 2 Ağustos 2026, Faz 4B kapanışı ---
 # 10 kayıt AYIKLANDI: karşılık geldikleri satır ağaçta artık yok
@@ -166,8 +161,6 @@ hrma/engines/liquid_rocket_engine.py | builtin_table_claim | df646ea0cba9 | MEŞ
 hrma/engines/liquid_rocket_engine.py | builtin_table_claim | b7fecc3b186d | MEŞRU: künye ataması (oksitleyici) — aynı kapı, aynı bekçi (P3B1-01).
 hrma/engines/liquid_rocket_engine.py | builtin_table_claim | 1f7b1eeee5e1 | MEŞRU: künye metni — 'exact pair' tablo girdisi bulunduğunda basılır; kaynağın gerçekten o tablo olduğu bekçiyle ölçülü (P3B1-01).
 hrma/engines/liquid_rocket_engine.py | builtin_table_claim | 74391b28a60d | MEŞRU: kaynak etiketi — optimal O/F tablo satırından okunduğunda basılır, kullanıcı girdisi 'user input' ile ayrılır (P3B1-04 künyesi).
-hrma/static/js/i18n_advanced.js | builtin_table_claim | f74526f0e7de | MEŞRU: kaynak beyanı (iddia değil) — tooltip ürünün gerçek kaynak zincirini anlatıyor; external_data_fetcher.oxidizer_reference_density:280 aynı 'built-in propellant table' künyesini source alanında yayımlar, N2O CoolProp EOS ile çözülür; hâl P9B5-12 state_reason'la yapısal (FİX-6, D17 arayuz P12aB2-01 metni).
-hrma/templates/advanced.html | builtin_table_claim | f1783947ed8f | MEŞRU: aynı tooltip'in şablon yedeği (data-i18n=adv.tip.densityKgM) — gerekçe yukarıdaki i18n_advanced.js kaydıyla aynı (FİX-6).
 hrma/templates/solid.html | provenance_label | 9cc14caeb739 | MEŞRU: künye OKUNUYOR, yazılmıyor — D36 katı (e02027e4) kabuk/kapak geometrisi satırı sunucunun yayımladığı case_geometry.thickness_source'u karşılaştırıp beyanını seçiyor; 'user_supplied' değerini üreten ve doğrulayan solid_rocket_engine (hüküm-24)
 hrma/fea/structural_axisym.py | safe_verdict_tr | dfd574a06b19 | MEŞRU: yorum satırı — tepe (nodal) von Mises'in HÜKÜM OLMADIĞINI anlatır ('yalnız …güvenlidir/değildir' demek yeterli değildir; hüküm SCL lineerizasyonundan, D19 fea-cfd F4 OH-D16-01); iddia değil, olumsuzlama (fix-12).
 
@@ -182,7 +175,6 @@ hrma/fea/structural_axisym.py | safe_verdict_tr | dfd574a06b19 | MEŞRU: yorum s
 
 # --- AÇIK BORÇ — kazanılmamış doğruluk/doğrulama hükmü, sahibi başka kulvar
 hrma/engines/hybrid_rocket_engine.py | dogrulanmistir_tr | 15aaa1af306a | AÇIK BORÇ: "NASA CEA'ya %0-1.5 içinde doğrulanmıştır" — aynı sınıf doğruluk bandı iddiası, altı yakıt × üç oksitleyici için genelleniyor; depoda bu bandı ölçen bir kod yolu koşmuyor. Sahibi hibrit kulvarıdır.
-hrma/engines/liquid_rocket_engine.py | dogrulanmistir_tr | c73395159330 | AÇIK BORÇ: "14 gerçek motorun TESLİM verisine karşı doğrulanmıştır" — doğrulama KAMPANYASI iddiası; depoda 14 motorluk bir teslim-verisi karşılaştırması koşmuyor. Sahibi sıvı kulvarıdır.
 
 # --- MEŞRU — belge/kayıt doğrulaması ya da süreç beyanı (sayı hükmü değil)
 hrma/analysis/acoustic_modes.py | dogrulanmistir_tr | e41671dc83f4 | MEŞRU: doğrulanan şey bir SAYI değil, ATIF BAŞLIĞI — "bu depoda BELGE olarak doğrulanmıştır (docs/STANDART_ATIFLARI.md)". Kayıt defteri gerçekten var ve wrong-standard kuralları onun üstünde koşuyor.

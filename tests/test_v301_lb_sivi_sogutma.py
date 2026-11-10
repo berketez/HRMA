@@ -24,6 +24,12 @@ FORM = {k: v for k, v in json.loads(
     (FIKSTUR / 'sivi_yuk_form_en.json').read_text(encoding='utf-8')).items()
     if v is not None}
 LB_ZORUNLU_ALANLAR = {'thrust': 10000, 'chamber_pressure': 100, 'mixture_ratio': 2.5}
+#: V306/SIVI-CEKET-B kalem 5: form yükünün ε 50'si eski form ön dolgusuydu
+#: (kaynaksız; UÇUŞ-KÜTLE formdan kaldırdı) ve 100 bar'da deniz seviyesinde
+#: Summerfield ölçütüyle ayrılıyor (ayrılmayan en büyük ε 26,86): uç o
+#: tasarımı artık adlı retle yayımlamıyor. Yük ayrılmayan bölgedeki 20 ile
+#: kurulur (fikstür dosyası docs kaynağıyla md5 aynı kalsın diye burada).
+LB_AYRILMAYAN_LULE = {'nozzle_expansion_ratio': 20}
 LB_FILM_TIP0 = dict(cooling_type='film_cooling', film_cooling_percent=0)
 SIL = object()
 
@@ -49,13 +55,19 @@ LB_VAKALARI = {
 
 #: Rejeneratif varsayılanda performans sayıları DEĞİŞMEMELİ (önce ölçümü,
 #: taban b07272a71: olcum_once.json ``varsayilan``).
-ONCE_VARSAYILAN = {'isp_sea_level': 244.8633520002479,
-                   'total_mass_flow': 4.164429689653583}
+#: V306/SIVI-CEKET-B kalem 5: yük ε 50 (deniz seviyesinde ayrılan lüle,
+#: artık adlı ret) yerine ε 20 ile kurulduğu için çapa YENİDEN ÖLÇÜLDÜ
+#: (bugünkü kod, 9 Kas 2026; ε 50'deki eski çapa 244,8633520002479 s /
+#: 4,164429689653583 kg/s ayrılmış lülenin bağlı akış sayısıydı). Bekçinin
+#: amacı aynı: film/L-B işleri rejeneratif varsayılanın sayısını oynatmaz.
+ONCE_VARSAYILAN = {'isp_sea_level': 284.82019146215697,
+                   'total_mass_flow': 3.580210404828038}
 
 
 def _yuk(ez):
     d = dict(FORM)
     d.update(LB_ZORUNLU_ALANLAR)
+    d.update(LB_AYRILMAYAN_LULE)
     for k, v in ez.items():
         if v is SIL:
             d.pop(k, None)

@@ -8,11 +8,36 @@ set -euo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/hrma/__init__.py")"
 [ -n "$VERSION" ] || { echo "HATA: sürüm okunamadı"; exit 1; }
+# Yayının yapıldığı depo — betikte TEK yerde (etiket ölçümü + sürüm açma).
+GH_DEPO="berketez/HRMA"
 
 DMG="$SRC/dist/HRMA-Setup-${VERSION}-macOS.dmg"
 EXE="$SRC/dist/HRMA-Setup-${VERSION}.exe"
 [ -f "$DMG" ] || { echo "HATA: $DMG yok — önce build_mac_app.sh + build_dmg.sh"; exit 1; }
 [ -f "$EXE" ] || { echo "HATA: $EXE yok — önce build_win_payload.sh + makensis"; exit 1; }
+
+# ---------------------------------------------------------------------------
+# YAYINLANAN SHA — etiket bu commit'e açılır (3.0.6, YAYIN-1).
+#
+# v3.0.5 (28 Eki) ölçülen kusur: `gh release create` --target'sız çağrılıyordu.
+# GitHub etiketi o anda yoksa onu VARSAYILAN DALIN (main) UCUNA açar. Bu yüzden
+# yayından ÖNCE main'e push zorunluydu; o push `tests.yml`'i aynı SHA için
+# yeniden tetikledi ve kapı 4/10 bu süren kopyayı bekledi (aynı commit ikinci
+# kez, ~55 dk). Daha kötüsü: main'in ucu kapının doğruladığı commit değilse
+# etiket (ve güncelleme kontrolünün okuduğu sürüm) BAŞKA bir ağaca bağlanır.
+#
+# Artık etiket kapının doğruladığı commit'e açılır: SHA kapıdan ÖNCE okunur,
+# gh çağrısından hemen önce HEAD'in değişmediği yeniden ölçülür ve
+# `--target` ile verilir. main yayından SONRA taşınır (yayın betiği main'e
+# dokunmaz). FAIL-CLOSED: SHA okunamazsa yayın YOK — boş `--target` GitHub'da
+# yine varsayılan dalın ucuna düşerdi.
+YAYIN_SHA="$(git -C "$SRC" rev-parse --verify HEAD 2>/dev/null || true)"
+if ! printf '%s' "$YAYIN_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+    echo "HATA: yayınlanacak commit (HEAD) okunamadı: '${YAYIN_SHA}'."
+    echo "      Etiket hangi commit'e açılacağı bilinmeden yayın yapılmaz."
+    exit 1
+fi
+echo "Yayınlanacak commit: $YAYIN_SHA"
 
 # ---------------------------------------------------------------------------
 # YAYIN TÜRÜ — taslak mı, herkese açık mı?
@@ -168,13 +193,54 @@ UYARI
     NOT_ARGS=(--notes-file "$GECICI_NOT")
 fi
 
-echo "Yayınlanacak: v${VERSION}"
+echo "Yayınlanacak: v${VERSION} -> ${YAYIN_SHA}"
 ls -lh "$DMG" "$EXE"
+
+# --- YAYIN-1: etiketin açılacağı commit son kez ölçülür -----------------------
+# (1) Kapı ~15 dk sürer; bu arada çalışma ağacında commit atılmışsa kapının
+#     doğruladığı commit ile etiketlenecek commit ayrışır -> yayın YOK.
+SON_SHA="$(git -C "$SRC" rev-parse --verify HEAD 2>/dev/null || true)"
+if [ "$SON_SHA" != "$YAYIN_SHA" ]; then
+    echo "HATA: HEAD kapıdan sonra değişti (${YAYIN_SHA:0:12} -> ${SON_SHA:0:12})."
+    echo "      Kapının doğruladığı commit yayınlanmaz; kapıyı yeniden koşturun."
+    exit 1
+fi
+# (2) `--target` YALNIZ etiket henüz yoksa etkilidir: etiket uzakta zaten
+#     varsa gh onu olduğu gibi kullanır ve --target'ı SESSİZCE yok sayar.
+#     Etiket başka bir commit'teyse yayın o commit'e bağlanırdı -> yayın YOK.
+#     Ölçüm başarısızsa (ağ, yetki) "etiket yok" VARSAYILMAZ.
+if ! ETIKET_KAYDI="$(gh api "repos/${GH_DEPO}/git/matching-refs/tags/v${VERSION}" \
+        --jq ".[] | select(.ref == \"refs/tags/v${VERSION}\") | [.object.type, .object.sha] | @tsv")"; then
+    echo "HATA: uzaktaki v${VERSION} etiketi ölçülemedi (gh api) — yayın YOK."
+    exit 1
+fi
+if [ -n "$ETIKET_KAYDI" ]; then
+    ETIKET_TURU="$(printf '%s' "$ETIKET_KAYDI" | cut -f1)"
+    ETIKET_HEDEF="$(printf '%s' "$ETIKET_KAYDI" | cut -f2)"
+    if [ "$ETIKET_TURU" = "tag" ]; then
+        # Açıklamalı etiket: nesne bir etiket nesnesidir, commit'e soyulur.
+        if ! ETIKET_KAYDI="$(gh api "repos/${GH_DEPO}/git/tags/${ETIKET_HEDEF}" \
+                --jq '[.object.type, .object.sha] | @tsv')"; then
+            echo "HATA: açıklamalı v${VERSION} etiketi soyulamadı (gh api) — yayın YOK."
+            exit 1
+        fi
+        ETIKET_TURU="$(printf '%s' "$ETIKET_KAYDI" | cut -f1)"
+        ETIKET_HEDEF="$(printf '%s' "$ETIKET_KAYDI" | cut -f2)"
+    fi
+    if [ "$ETIKET_TURU" != "commit" ] || [ "$ETIKET_HEDEF" != "$YAYIN_SHA" ]; then
+        echo "HATA: v${VERSION} etiketi uzakta ZATEN VAR ve ${ETIKET_TURU} ${ETIKET_HEDEF:0:12}"
+        echo "      gösteriyor; yayınlanacak commit ${YAYIN_SHA:0:12}. gh bu durumda"
+        echo "      --target'ı yok sayar ve sürümü o etikete bağlardı — yayın YOK."
+        exit 1
+    fi
+    echo "Etiket v${VERSION} uzakta zaten var ve yayınlanan commit'i gösteriyor."
+fi
 
 # NOT: ${dizi[@]+"${dizi[@]}"} biçimi macOS'un bash 3.2'si için zorunlu —
 # orada `set -u` altında BOŞ bir dizinin "${dizi[@]}" açılımı hata verir.
 gh release create "v${VERSION}" "$DMG" "$EXE" \
-    --repo berketez/HRMA \
+    --repo "$GH_DEPO" \
+    --target "$YAYIN_SHA" \
     --title "HRMA v${VERSION}" \
     ${GH_TASLAK[@]+"${GH_TASLAK[@]}"} \
     "${NOT_ARGS[@]}"
@@ -194,7 +260,7 @@ open(p, 'w', encoding='utf-8').write(s)
 print('README indirme linkleri v' + v + ' oldu — commit etmeyi unutma')
 PY
 
-echo "TAMAM: https://github.com/berketez/HRMA/releases/tag/v${VERSION}"
+echo "TAMAM: https://github.com/${GH_DEPO}/releases/tag/v${VERSION} (etiket -> ${YAYIN_SHA:0:12})"
 if [ "$TASLAK" = "1" ]; then
     echo "TASLAK yayınlandı — kullanıcılara GÖRÜNMEZ, güncelleme kontrolü bunu okumaz."
     echo "Yayına çevirmeden önce: bash packaging/release_gate.sh"

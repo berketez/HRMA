@@ -67,8 +67,18 @@ def test_tank_ret_cumleleri_turkcede_cevrilir(tmp_path):
     for kaynak, tr in zip(cumleler, sonuc['tr']):
         assert tr != kaynak and TURKCE_KARAKTER.search(tr), (
             f'çevrilmedi: {kaynak}')
-    # Ondalık kanonu: Türkçede ayraç virgül (P_sat 50.54 -> 50,54).
-    assert '50,54' in sonuc['tr'][2] and '50.54' not in sonuc['tr'][2], (
+    # Ondalık kanonu: Türkçede ayraç virgül (P_sat 50.53 -> 50,53).
+    # V306/SIVI-ONARIM kalem 5: sayı elle yazılmaz, TEK KAYNAKTAN okunur.
+    # V306/SAYI kalem 4 (cb11df981) aynı koşudaki bütün N₂O doyma
+    # alanlarını CoolProp EOS'una (Lemmon & Span 2006) bağladı: 293,15 K'de
+    # 50,543358 (tablo ara değeri) -> 50,525093 bar; ret metni '.4g' ile
+    # 50,54 -> 50,53 yazar. Çapa '50,54' o tablo değerini kilitliyordu.
+    from hrma.engines.hybrid_rocket_engine import TANK_TEMPERATURE_DEFAULT_K
+    from hrma.engines.injector_design import n2o_vapor_pressure_bar
+    en_sayi = '%.4g' % n2o_vapor_pressure_bar(TANK_TEMPERATURE_DEFAULT_K)
+    tr_sayi = en_sayi.replace('.', ',')
+    assert ('P_sat(293.15 K) = %s bar' % en_sayi) in cumleler[2], cumleler[2]
+    assert tr_sayi in sonuc['tr'][2] and en_sayi not in sonuc['tr'][2], (
         sonuc['tr'][2])
     assert '%2' in sonuc['tr'][2], sonuc['tr'][2]
     assert '15 - 20 = -5' in sonuc['tr'][1], sonuc['tr'][1]

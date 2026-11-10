@@ -499,7 +499,7 @@ def _solve_blown_surface_balance(h_gas_W_m2K: float,
                 '(gas_cp_J_kgK) was not supplied, so B-prime cannot be '
                 'formed. psi = 1 is used, i.e. no blockage credit — this '
                 'OVER-predicts the flux and therefore the thickness '
-                '(conservative), and no coefficient is invented.'),
+                '(conservative); no substitute coefficient is used.'),
             'iterations': 0,
         }
 
@@ -1073,10 +1073,11 @@ class ThermalProtectionAnalyzer:
         # time_to_limit_s kısalır; steel_4130'da 811 K bit-aynı).
         _limits = temperature_limits(mat)
         if _limits['allowable_K'] is None:
+            # V306/DİL-SUNUCU: sunucu metni EN (TR karşılığı sözlükte).
             raise ValueError(
-                f"materials_db['{wall_material}'] kaydında izin sıcaklığı "
-                "(allowable_temperature / max_service_temp) yok — sınıra "
-                "süre uydurulmaz")
+                f"the materials_db record '{wall_material}' carries no "
+                "allowable temperature (allowable_temperature / "
+                "max_service_temp), so no time to the limit is computed")
         limit_K = float(_limits['allowable_K'])
         # F078: erime noktası ayrı bir zarf sınırıdır — servis sınırı YAPISAL
         # (sürünme) eşiktir ve erime noktasının altındadır (ör. karbon çelik

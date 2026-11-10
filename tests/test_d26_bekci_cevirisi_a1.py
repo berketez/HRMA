@@ -57,14 +57,18 @@ class TestOHB403SuzgecKorlugu:
 
     #: Ölçülen kapsam. Tek yönlü değil TAM eşitlik: kapsam daralırsa
     #: (süzgeç yeniden kör olursa) da, sessizce büyürse de kırmızı.
-    BEKLENEN = {'fromResults': 13, 'guverte': 11, 'merkez': 2}
+    #: V306 (6 Kas, ana model): 13/11/2 → 14/12/2. V306/HIZ kalem 1
+    #: (800ee1288, M-SIVI-19) belirsizlik panelini (uncertainty_panel.js)
+    #: motor sonucundan tohumlanır yaptı (fromResults); kapsam BÜYÜDÜ,
+    #: daralmadı. Ölçüm: PANEL_BILDIRIMLERI → güverte 12 (+uncertainty).
+    BEKLENEN = {'fromResults': 14, 'guverte': 12, 'merkez': 2}
 
     @pytest.fixture(scope='class')
     def bildirimler(self):
         from tests.test_panel_units_v2626 import PANEL_BILDIRIMLERI
         return PANEL_BILDIRIMLERI
 
-    def test_kapsam_turetmesi_13_11_2(self, bildirimler):
+    def test_kapsam_turetmesi_olculen(self, bildirimler):
         fr = [a for a, (f, _d, _c) in bildirimler.items() if f]
         guv = [a for a, (f, d, _c) in bildirimler.items() if f and d]
         mrk = [a for a, (f, _d, c) in bildirimler.items() if f and c]

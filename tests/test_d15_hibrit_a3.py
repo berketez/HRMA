@@ -446,7 +446,11 @@ class TestB301VakumItkisi:
     def test_vakum_itkisi_KARDES_ALANLA_tutarli(self, urun_kosusu):
         _, sonuc, _, _ = urun_kosusu
         ta = sonuc['thrust_altitude_analysis']
-        beklenen = ta['vacuum_total_impulse'] / sonuc['burn_time']
+        # V306/HİBRİT-ÇAPRAZ: irtifa itki analizi tasarım noktasının sabit
+        # itkisini İSTENEN tasarım süresi boyunca alır; N₂O kendinden
+        # basınçlı tankta manşet süresi artık boşalma çözümünün teslim
+        # süresidir (farklı büyüklük), payda tasarım süresidir.
+        beklenen = ta['vacuum_total_impulse'] / sonuc['burn_time_requested_s']
         assert ta['vacuum_thrust'] == pytest.approx(beklenen, rel=1e-12)
 
     @pytest.mark.parametrize('izgara', [[0, 1000, 5000, 10000],

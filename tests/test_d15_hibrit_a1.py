@@ -219,7 +219,16 @@ class TestP1B201OzetManseteBagli:
         r = _motor().calculate()
         assert r['burn_time_clipped'] is False
         perf = r['design_summary']['performance']
-        assert perf['burn_time_s'] == pytest.approx(10.0)
+        # V306/HİBRİT-ÇAPRAZ kalem 1: N₂O kendinden basınçlı tankta teslim
+        # süresi boşalma çözümünden; özet manşetle AYNI sayı, istenen süre
+        # (10 s) kendi alanında ve sabit debili bütçede.
+        assert perf['burn_time_s'] == r['burn_time']
+        assert perf['burn_time_requested_s'] == pytest.approx(10.0)
+        if r['delivered_source'] == 'tank_blowdown':
+            assert r['constant_oxidizer_flow_budget']['burn_time_s'] == \
+                pytest.approx(10.0)
+        else:
+            assert perf['burn_time_s'] == pytest.approx(10.0)
         assert perf['total_impulse_Ns'] == pytest.approx(
             float(r['total_impulse']), rel=1e-12)
 

@@ -624,7 +624,7 @@ class OpenSourcePropellantAPI:
                         f"CoolProp resolved no property for "
                         f"{fluid_name!r} (mapped to {cp_name!r}): every "
                         f"PropsSI query failed. No source attribution is "
-                        f"issued and no substitute value is invented."),
+                        f"issued and no substitute value is used."),
                     'coolprop_fluid': cp_name,
                 }
             properties['source'] = 'CoolProp (NIST REFPROP-based)'

@@ -255,6 +255,9 @@ class TestP7B419GirdiKapisi:
         # ``solid`` kapalı küme TAŞIMAZ: overrides=data ile tüm sözlük motora
         # geçer, "okunmadı" hükmü bu katmandan kazanılamaz.
         assert 'solid' not in uqa.FACTORY_INPUT_FIELDS
+        # V306/SAYI (NR-5): sıvı fabrika da overrides=data ile formun
+        # tamamını motora geçirir (/calculate_liquid ile aynı kurulum).
+        assert 'liquid' not in uqa.FACTORY_INPUT_FIELDS
 
 
 # ===========================================================================
