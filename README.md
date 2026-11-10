@@ -5,6 +5,12 @@
 
 A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D model of your motor built live from the solver output.
 
+> **Current stable release: v3.0.6 (10 November 2026).** The most stable and
+> most thoroughly verified HRMA to date, recommended for all users.
+> [Download](#just-want-to-use-hrma-download-the-installer) ·
+> [Release notes](https://github.com/berketez/HRMA/releases/tag/v3.0.6) ·
+> [What changed](#whats-new-in-v306)
+
 ![HRMA hybrid motor results](docs/user_guide/img/en-02-results.png)
 
 *Solver output for a hybrid motor: performance, geometry and warnings — every
@@ -34,6 +40,43 @@ Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
 available. All the folders and files below are **source code for developers**;
 you can ignore them entirely.
+
+## What's New in v3.0.6
+
+v3.0.6 is a corrections release: it adds no new analysis and changes no
+workflow. It fixes what an engineering review of the solid, liquid and hybrid
+pages found after v3.0.5, and the language and readability findings of the
+v3.0.5 user test.
+
+- **One quantity, one number.** Where two panels published different values
+  for the same quantity (impulse, consumed propellant, thermal exposure time,
+  test pressure, nozzle contour, jacket pressure drop, optimum O/F), there is
+  now a single value; where two definitions really differ, both are shown with
+  the reason.
+- **Hybrid:** delivered impulse, burn time and average Isp of a
+  self-pressurised N₂O tank come from the tank blowdown solution; the mass
+  budget includes the ullage vapour and the injector plate.
+- **Liquid:** the motor Isp is based on the total propellant consumption and is
+  shown next to the thrust-chamber Isp; when the cooling circuit has no valid
+  solution, the numbers that depend on it are withheld with their reason.
+- **Solid:** one nozzle contour in the response, the 3D view, STEP and FEA;
+  one test-pressure ladder; grain stress results the model cannot resolve are
+  not published.
+- **Flight:** lift-off mass is the motor's total mass; the 6-DOF thrust is
+  corrected for altitude; a parametric sweep point gives the same apogee as
+  Calculate.
+- **Saved projects:** values stored in a project are no longer overwritten by
+  a late property lookup when the project is opened.
+- **Language and readability:** charts stay inside their panels and follow a
+  live language switch; the Turkish PDF uses Turkish fonts and decimal commas.
+
+**How this release was verified.** The published commit passed the full
+regression suite (close to 30 000 automated tests, run on macOS and again on
+Linux CI), and the installers passed the 10-step release gate: version and
+provenance checks, a live computation on a non-default port, package
+signature and content manifest, and a browser tour of the application pages. Projects
+saved with v3.0.5 or earlier open in v3.0.6; some published numbers change —
+see [CHANGELOG.md](CHANGELOG.md) for the list.
 
 ## Features
 
@@ -256,7 +299,7 @@ HRMA/
 - Idea & Testing: Ayberk Cem Aksoy
 - A preliminary-design and analysis tool for rocket propulsion
   (not a flight-qualification tool — see the scope note above)
-- Last Updated: October 2026
+- Last Updated: November 2026
 
 **v3.0.0 publishes every number with its validity limits and withholds a
 verdict the model cannot support, with the reason, instead of showing it as

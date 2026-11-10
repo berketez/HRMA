@@ -204,33 +204,45 @@ class TestConcurrency:
             assert runner.status(jid)['result'] == i * i
 
     def test_thread_safe_concurrent_submission(self):
-        runner = JobRunner(max_workers=4)
+        # 8 gönderici x 5 iş = 40 gönderim. Kuyruk tavanı gönderim sayısına
+        # eşit kurulur: varsayılan tavan (DEFAULT_MAX_QUEUED = 32) 40'tan
+        # küçüktür; 4 işçi 8 işi vaktinde çekemezse kuyruk dolar ve ürün
+        # tasarlandığı gibi JobQueueFullError fırlatır, gönderici thread
+        # ölür, sayım 37'de kalır. Ölçüldü: aday/v3.0.6-rc.6 (42683977428)
+        # ve rc.8 (42789100405) CI dilim 4 — ikisinde de "37 == 40" ve
+        # thread izinde "Job queue is full (32 pending jobs)". Bu test
+        # kapasite sınırını değil eşzamanlı gönderimin tutarlılığını ölçer;
+        # sınırın kendi testleri tests/test_faz4_veri_guvenlik.py'dedir.
+        gonderici, is_basina = 8, 5
+        toplam = gonderici * is_basina
+        runner = JobRunner(max_workers=4, max_queued=toplam)
         all_ids = []
         lock = threading.Lock()
 
         def submitter(base):
-            for k in range(5):
+            for k in range(is_basina):
                 jid = runner.submit(lambda v=base * 10 + k: v)
                 with lock:
                     all_ids.append((jid, base * 10 + k))
 
         threads = [threading.Thread(target=submitter, args=(n,))
-                   for n in range(8)]
+                   for n in range(gonderici)]
         for t in threads:
             t.start()
         # join(timeout) süre dolunca SESSİZCE döner; thread hâlâ koşuyorken
         # aşağıdaki sayım eksik okunur ve hata yanlış yere (JobRunner'a)
-        # işaret eder. Yüklü CI runner'ında ölçüldü: 32003781095 koşusunda
-        # 8 submitter'dan 3 append 5 sn'ye sığmadı -> 37 == 40 kırmızısı.
-        # Pay 6x + is_alive bekçisi: yavaşlık artık adıyla raporlanır.
+        # işaret eder. Pay 6x + is_alive bekçisi: yavaşlık adıyla raporlanır.
+        # (17 Ağu notu 32003781095 koşusundaki "37 == 40"ı join süresine
+        # bağlamıştı; 10 Kas ölçümü kökün kuyruk tavanı olduğunu gösterdi —
+        # yukarıdaki açıklama.)
         for t in threads:
             t.join(POLL_TIMEOUT * 6)
         for t in threads:
             assert not t.is_alive(), (
                 'submitter thread join penceresinde bitmedi — sayım eksik '
                 'okunurdu; JobRunner değil zamanlama yavaş')
-        assert len(all_ids) == 40
-        assert len({jid for jid, _ in all_ids}) == 40  # kimlik çakışması yok
+        assert len(all_ids) == toplam
+        assert len({jid for jid, _ in all_ids}) == toplam  # kimlik çakışması yok
         for jid, expected in all_ids:
             assert runner.wait(jid, timeout=POLL_TIMEOUT)
             assert runner.status(jid)['result'] == expected
